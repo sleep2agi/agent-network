@@ -14,8 +14,7 @@
 | 4 | Agent Teams | Local | Built-in | 1 env var | Low | 90% | Enabled |
 | 5 | MCO | Local | Parallel | npm install | Low | 90% | Available |
 | 6 | oh-my-claudecode | Local | Git worktree | npm install | Medium | 85% | Community |
-| 7 | Commander MCP | Yes | Polling | 1 day dev | Medium | 95% | Designed |
-| 8 | Commander Channel | Yes | Push | 3 day dev | Medium | 99% | Designed |
+| **7** | **Commander MCP (SSE star)** | **Yes** | **Real-time (SSE)** | **1-2 day dev** | **Medium** | **99%** | **Architecture confirmed** |
 
 ### Cost Analysis
 
@@ -103,12 +102,16 @@ mco review  # Multi-model review with aggregated results
 
 ## 3. Cross-Server Solutions
 
-### 3.1 Commander MCP Server (Design Complete)
+### 3.1 Commander MCP Server (Architecture Confirmed 2026-04-01)
 - See `commander-mcp-design.md` (full design document)
-- Plan A: MCP Tool + polling (MVP in 1 day)
-- Plan B: MCP Channel + push (elegant, 3 days)
+- See `architecture-decision.md` (decision record)
+- **MCP SSE star topology** -- single Commander Server, all sessions connect via persistent SSE
+- **Dual interface** -- MCP SSE for Claude Code/Codex + HTTP REST for dashboards
+- **Cross-model** -- Claude Code ↔ Codex communicate via Commander relay
+- **30 sessions = 30 SSE connections** (not N^2 mesh)
+- Tech stack: Bun + TypeScript + @modelcontextprotocol/sdk + bun:sqlite
 
-### 3.2 File Protocol + SSH (Fastest to Deploy)
+### 3.2 File Protocol + SSH (Quick Hack, Not Recommended)
 ```bash
 # Child agent writes status
 echo '{"status":"executing","task":"...","score":95}' > ~/session-status.json
@@ -116,11 +119,7 @@ echo '{"status":"executing","task":"...","score":95}' > ~/session-status.json
 # Hub reads status
 ssh user@host cat ~/session-status.json
 ```
-
-### 3.3 HTTP API Coordination
-- Commander Server exposes REST API
-- Child agents periodically POST status
-- Hub GETs to query
+Fragile, no message queue, no structured communication. Use Commander instead.
 
 ---
 
@@ -128,18 +127,16 @@ ssh user@host cat ~/session-status.json
 
 ### Phase 1: Immediate (Today)
 1. Codex MCP Tool -- local code review/refactoring
-2. Codex Plugin -- /codex:review + /codex:adversarial-review
-3. Agent Teams -- for local parallel tasks
-4. Keep tmux for remote sessions (fallback)
+2. Agent Teams -- for local parallel tasks
 
-### Phase 2: This Week (1-3 days)
-5. Install MCO -- multi-model parallel review aggregation
-6. Evaluate oh-my-claudecode -- Git worktree parallel execution
-7. Commander MCP Server MVP -- cross-server structured communication
+### Phase 2: This Week (1-2 days)
+3. **Commander MCP Server MVP** -- SSE star topology, 9 MCP Tools
+4. All Claude Code sessions add `"commander": { "url": "http://47.77.216.1:9200/sse" }` to settings.json
+5. All Codex sessions add the same URL to config.json
 
 ### Phase 3: Next Week
-8. Commander Channel -- push, no polling
-9. Fully retire tmux send-keys
+6. HTTP REST dashboard for monitoring
+7. Fully retire tmux send-keys for agent communication
 
 ---
 

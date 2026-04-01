@@ -1,7 +1,8 @@
 # Commander MCP Server Design Document
 
-> Version: v0.2.0 (Draft)
+> Version: v0.3.0 (Architecture Confirmed)
 > A cross-server orchestration hub for AI Agent sessions using Model Context Protocol (MCP).
+> Architecture decision: MCP SSE star topology confirmed 2026-04-01.
 
 ---
 
@@ -24,79 +25,89 @@ Build a **Commander MCP Server** -- a standard MCP Server running on a central s
 
 - Child agents **proactively report** status and results via MCP protocol (no more screen scraping)
 - Hub **dispatches commands** to child agents' inbox via MCP protocol (no more send-keys)
-- All communication via HTTP + SSE, structured JSON, natively cross-server
+- All communication via MCP SSE, structured JSON, natively cross-server
+- Both Claude Code and Codex connect to the same Commander Server
 
 **Core idea**: From "hub reads child agent screens" to "child agents proactively report to hub".
 
-### 1.3 Two Plans
+### 1.3 Confirmed Architecture: MCP SSE Star Topology
 
-| | Plan A: MCP Tool + Polling | Plan B: MCP Channel + Push |
-|---|---|---|
-| **Mechanism** | Child agents periodically call MCP Tool to check inbox | Commander as Channel plugin, injects messages directly into conversation via `notifications/claude/channel` |
-| **Latency** | Delayed (depends on polling frequency) | Real-time push, zero delay |
-| **Dev effort** | Small (1-day MVP) | Large (each agent needs a local Channel process) |
-| **Agent changes** | Modify CLAUDE.md + configure .mcp.json | Modify config + add Channel |
-| **Recommended phase** | MVP, get it running first | Mature phase, for optimal experience |
+> Previous v0.2.0 had "Plan A (polling) + Plan B (push)". This is superseded.
+> Decision: go directly with SSE persistent connections. No polling phase.
+
+| Property | Value |
+|----------|-------|
+| **Topology** | Star -- single Commander hub, all sessions connect to it |
+| **Transport** | MCP SSE (persistent connections, real-time push) |
+| **Dual interface** | MCP SSE (`/sse`) for agents + HTTP REST (`/api/...`) for dashboards |
+| **Clients** | Claude Code (`settings.json`) + Codex (`config.json`) |
+| **Cross-model** | Claude ↔ Codex communicate via Commander relay |
+| **Scaling** | 30 sessions = 30 SSE connections (linear, not N^2) |
+
+See [`architecture-decision.md`](architecture-decision.md) for the full decision record.
 
 ---
 
-## 2. Architecture (Plan A)
+## 2. Architecture (MCP SSE Star)
 
 ```
-                         +--------------------------------------+
-                         |       Commander MCP Server           |
-                         |       <YOUR_SERVER_IP>:9200          |
-                         |                                      |
-                         |  +----------+  +------------------+  |
-                         |  |  SQLite   |  |  MCP Transport   |  |
-                         |  |          |  |  (HTTP + SSE)     |  |
-                         |  | sessions |  |                    |  |
-                         |  | inbox    |  |  /mcp  endpoint    |  |
-                         |  | results  |  |                    |  |
-                         |  +----------+  +------------------+  |
-                         +-------+--------------+---------------+
-                                 |              |
-            +--------------------+              +--------------------+
-            |                    |              |                    |
-     +------v------+      +-----v------+ +-----v------+     +------v------+
-     |  Hub Agent   |      | Agent 1    | | Agent 2    |     | Agent N    |
-     |  (central)   |      | project-a  | | project-b  |     | project-n  |
-     |              |      |            | |            |     |            |
-     | get_all_     |      | report_    | | report_    |     | report_    |
-     |   status()   |      |   status() | |   status() |     |   status() |
-     | send_task()  |      | get_inbox()| | get_inbox()|     | get_inbox()|
-     | broadcast()  |      | ack_inbox()| | ack_inbox()|     | ack_inbox()|
-     +--------------+      +------------+ +------------+     +------------+
+                    ┌─────────────────────────────────────┐
+                    │       Commander MCP Server            │
+                    │       47.77.216.1:9200                │
+                    │                                       │
+                    │  ┌───────────┐  ┌─────────────────┐  │
+                    │  │  MCP SSE  │  │   HTTP REST     │  │
+                    │  │  /sse     │  │   /api/status   │  │
+                    │  │           │  │   /api/task     │  │
+                    │  └─────┬─────┘  └────────┬────────┘  │
+                    │        │                 │           │
+                    │  ┌─────▼─────────────────▼────────┐  │
+                    │  │       SQLite (WAL mode)         │  │
+                    │  │  sessions | inbox | completions │  │
+                    │  └────────────────────────────────┘  │
+                    └──────────────────┬───────────────────┘
+                                       │  30 SSE connections
+              ┌──────────┬────────────┬┴────────┬──────────┐
+              │          │            │         │          │
+         ┌────▼────┐ ┌───▼────┐ ┌────▼───┐ ┌──▼─────┐ ┌──▼─────┐
+         │ Claude  │ │ Claude │ │ Claude │ │ Codex  │ │ Codex  │
+         │ Code    │ │ Code   │ │ Code   │ │ CLI    │ │ CLI    │
+         │ Hub     │ │ Mac    │ │ 上海   │ │ 硅谷   │ │ Mac    │
+         │ (Opus)  │ │ (Opus) │ │ (Opus) │ │(GPT5.4)│ │(GPT5.4)│
+         └─────────┘ └────────┘ └────────┘ └────────┘ └────────┘
 ```
+
+All clients connect to the same `/sse` endpoint. The Commander Server maintains per-session state and routes messages between any pair of sessions -- including cross-model (Claude ↔ Codex).
 
 ### Data Flow
 
 ```
-+-----------------------------------------------------------+
-|                    Task Dispatch Flow                       |
-|                                                            |
-|  Hub --send_task(session, task)-->  Commander --write inbox |
-|                                                            |
-|  Agent --get_inbox(session)-->  Commander --return pending  |
-|                                                            |
-|  Agent --ack_inbox(session, msg_id)--> Commander --mark read|
-+-----------------------------------------------------------+
+┌─────────────────────────────────────────────────────────────┐
+│                    Task Dispatch Flow                         │
+│                                                              │
+│  Hub ──send_task(session, task)──▶ Commander writes inbox     │
+│                                                              │
+│  Commander pushes notification via SSE to target session      │
+│                                                              │
+│  Agent receives task via MCP, calls ack_inbox() to confirm   │
+└─────────────────────────────────────────────────────────────┘
 
-+-----------------------------------------------------------+
-|                    Status Report Flow                       |
-|                                                            |
-|  Agent --report_status(session, status, task, ...)--> upsert|
-|                                                            |
-|  Hub --get_all_status()--> Commander --return all status    |
-+-----------------------------------------------------------+
+┌─────────────────────────────────────────────────────────────┐
+│                    Status Report Flow                         │
+│                                                              │
+│  Agent ──report_status(session, status, task, ...)──▶ upsert │
+│                                                              │
+│  Hub ──get_all_status()──▶ Commander returns all sessions    │
+└─────────────────────────────────────────────────────────────┘
 
-+-----------------------------------------------------------+
-|                    Completion Flow                          |
-|                                                            |
-|  Agent --report_completion(session, task, result, ...)--> write|
-|                                                            |
-|  Hub --get_completions(since)--> Commander --return list    |
-+-----------------------------------------------------------+
+┌─────────────────────────────────────────────────────────────┐
+│                    Cross-Model Relay                          │
+│                                                              │
+│  Claude Code #1 ──send_task("codex-review")──▶ Commander    │
+│  Commander ──inbox──▶ Codex #1 (receives via SSE)            │
+│  Codex #1 ──report_completion()──▶ Commander                 │
+│  Commander ──completion──▶ Claude Code #1 (queries results)  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -265,11 +276,11 @@ CREATE TABLE broadcasts (
 
 | Component | Choice | Reason |
 |-----------|--------|--------|
-| Runtime | Bun 1.2+ | Consistent with existing projects |
-| Language | TypeScript | Type safety |
-| MCP SDK | `@modelcontextprotocol/sdk` | Official MCP SDK |
-| HTTP | MCP SDK built-in SSE Transport | No extra framework needed |
-| Database | SQLite (bun:sqlite) | Single file, zero config, Bun native support |
+| Runtime | Bun 1.2+ | Consistent with existing projects, native SQLite |
+| Language | TypeScript | Type safety, MCP SDK compatibility |
+| MCP SDK | `@modelcontextprotocol/sdk` | Official MCP SDK, SSE transport built-in |
+| Transport | MCP SSE + HTTP REST | SSE for agents, REST for dashboards/scripts |
+| Database | SQLite (`bun:sqlite`, WAL mode) | Single file, zero config, sufficient for 30 sessions |
 | Process management | systemd | Auto-start + crash restart |
 
 ### 5.2 Project Structure
@@ -306,37 +317,68 @@ import { registerCommanderTools } from "./tools/commander-tools";
 import { initDB } from "./db/schema";
 
 const PORT = Number(process.env.PORT) || 9200;
-const db = new Database("~/.commander/commander.db");
+const DB_PATH = process.env.COMMANDER_DB || `${process.env.HOME}/.commander/commander.db`;
+const db = new Database(DB_PATH);
+db.exec("PRAGMA journal_mode=WAL");
 initDB(db);
 
 const server = new McpServer({
   name: "commander",
-  version: "0.1.0",
+  version: "0.3.0",
 });
 
 registerAgentTools(server, db);
 registerCommanderTools(server, db);
+
+// Track active SSE connections for monitoring
+const activeConnections = new Map<string, SSEServerTransport>();
 
 Bun.serve({
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
 
+    // --- MCP SSE Interface (for Claude Code / Codex) ---
     if (url.pathname === "/sse") {
-      const transport = new SSEServerTransport("/messages", res);
+      const transport = new SSEServerTransport("/messages", req);
       await server.connect(transport);
       return transport.sseResponse;
     }
 
-    if (url.pathname === "/health") {
-      return Response.json({ ok: true, sessions: getSessionCount(db) });
+    if (url.pathname === "/messages" && req.method === "POST") {
+      // MCP message handling (paired with SSE transport)
+      // Implementation depends on MCP SDK version
     }
 
-    return new Response("Commander MCP Server", { status: 200 });
+    // --- HTTP REST Interface (for dashboards / scripts) ---
+    if (url.pathname === "/api/status") {
+      const sessions = db.query("SELECT * FROM sessions ORDER BY updated_at DESC").all();
+      return Response.json({ ok: true, sessions, connections: activeConnections.size });
+    }
+
+    if (url.pathname === "/api/task" && req.method === "POST") {
+      const body = await req.json();
+      // REST endpoint for sending tasks (mirrors send_task MCP tool)
+      return Response.json({ ok: true, queued: true });
+    }
+
+    if (url.pathname === "/health") {
+      return Response.json({
+        ok: true,
+        version: "0.3.0",
+        sessions: db.query("SELECT COUNT(*) as count FROM sessions").get(),
+        connections: activeConnections.size,
+      });
+    }
+
+    return new Response("Commander MCP Server v0.3.0", { status: 200 });
   },
 });
 
-console.log(`Commander MCP Server running on port ${PORT}`);
+console.log(`Commander MCP Server v0.3.0 running on port ${PORT}`);
+console.log(`MCP SSE: http://0.0.0.0:${PORT}/sse`);
+console.log(`REST API: http://0.0.0.0:${PORT}/api/status`);
+console.log(`Health: http://0.0.0.0:${PORT}/health`);
 ```
 
 ### 5.4 Firewall
@@ -346,29 +388,55 @@ Restrict port access to known agent server IPs only:
 # Only allow known agent servers
 iptables -A INPUT -p tcp --dport 9200 -s <AGENT_SERVER_1_IP> -j ACCEPT
 iptables -A INPUT -p tcp --dport 9200 -s <AGENT_SERVER_2_IP> -j ACCEPT
+iptables -A INPUT -p tcp --dport 9200 -s <AGENT_SERVER_3_IP> -j ACCEPT
 iptables -A INPUT -p tcp --dport 9200 -j DROP
 ```
 
 ---
 
-## 6. Child Agent Integration
+## 6. Client Integration
 
 ### 6.1 Claude Code Configuration
 
-Each child agent configures Commander MCP Server in `.mcp.json`:
+In `~/.claude/settings.json` (recommended for global access):
 
 ```json
 {
   "mcpServers": {
     "commander": {
-      "type": "sse",
-      "url": "http://<YOUR_SERVER_IP>:9200/sse"
+      "url": "http://47.77.216.1:9200/sse"
     }
   }
 }
 ```
 
-### 6.2 Child Agent Usage Rules
+Or per-project `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "commander": {
+      "url": "http://47.77.216.1:9200/sse"
+    }
+  }
+}
+```
+
+### 6.2 Codex Configuration
+
+In `config.json`:
+
+```json
+{
+  "mcpServers": {
+    "commander": {
+      "url": "http://47.77.216.1:9200/sse"
+    }
+  }
+}
+```
+
+### 6.3 Child Agent Usage Rules
 
 Add to each agent's CLAUDE.md:
 
@@ -392,7 +460,7 @@ Add to each agent's CLAUDE.md:
 - Include output links (URLs, file paths) in artifacts
 ```
 
-### 6.3 Heartbeat Mechanism
+### 6.4 Heartbeat Mechanism
 
 Through Claude Code hooks or CLAUDE.md rules, have child agents report periodically:
 - After each significant step (file write, command execution, API call), call `report_status`
@@ -427,173 +495,83 @@ Every 5-minute inspection cycle:
 
 ---
 
-## 8. Plan A vs Plan B Comparison
+## 8. Why SSE Star (Not Polling or Mesh)
 
-| Dimension | Plan A: MCP Tool + Polling | Plan B: MCP Channel + Push |
-|-----------|--------------------------|---------------------------|
-| **Latency** | 1-5 min (polling interval) | Real-time (<1s, SSE push) |
-| **Agent changes** | Modify CLAUDE.md for polling rules | Add local Channel process |
-| **Hub mode** | Timed polling (/loop) | Event-driven (wait for `<channel>` messages) |
-| **Token consumption** | High -- polling even when nothing changed | Low -- only activated on events |
-| **Deploy complexity** | Low -- only central service | Medium -- central service + per-session local process |
-| **Dev effort** | ~1 day | ~3 days (on top of Plan A) |
-| **Reliability** | High -- polling is simple and predictable | Medium -- SSE disconnect needs reconnect logic |
-| **Agent awareness** | Passive -- agent must actively check inbox | Active -- messages appear directly in conversation |
+> This section explains the architectural decision made 2026-04-01.
+> See also: [`architecture-decision.md`](architecture-decision.md)
 
-### Migration Strategy
+### Previous Design (v0.2.0): Two Plans
 
-Progressive, Plan A first then Plan B:
+v0.2.0 proposed a phased approach: Plan A (polling MVP) then Plan B (push). This is **superseded**.
 
-1. **Phase 1 (Plan A MVP)**: Deploy Commander Tool Server, test with 1-2 sessions
-2. **Phase 2 (Plan A full rollout)**: Migrate all sessions, hub switches to Tool polling
-3. **Phase 3 (Plan A+)**: Web UI, auto-assignment, authentication
-4. **Phase 4 (Plan B launch)**: Develop commander-channel, event-driven push
-5. **Phase 5 (mature)**: Plan A as fallback, Plan B as primary channel
+### Current Design (v0.3.0): SSE Star
 
-**Key principle**: Plan B doesn't replace Plan A, it layers on top. Tools remain the reliable fallback (e.g., during Commander restarts, SSE disconnects). Channel is the real-time push layer.
+| Dimension | Old Plan A (Polling) | Old Plan B (Channel Push) | **v0.3.0 (SSE Star)** |
+|-----------|---------------------|--------------------------|----------------------|
+| **Latency** | 1-5 min | <1s | **<1s (SSE)** |
+| **Token waste** | High (empty polls) | Low | **Zero (event-driven)** |
+| **Client config** | CLAUDE.md + .mcp.json | Channel process + config | **One URL in settings.json** |
+| **Cross-model** | Claude only | Claude only | **Claude + Codex** |
+| **Deploy** | Central server | Central + local processes | **Central server only** |
+| **Connections** | On-demand HTTP | Per-session SSE + stdio | **Per-session SSE** |
+
+### Why Skip Polling
+
+1. **Polling burns tokens**: Each empty `get_inbox()` call costs API tokens even when there's nothing new
+2. **Polling adds latency**: 1-5 minute delay depending on poll interval
+3. **SSE is native to MCP SDK**: `SSEServerTransport` is built-in, no extra code needed
+4. **30 connections is trivial**: A single Bun process handles thousands of concurrent SSE connections
+
+### Why Star, Not Mesh
+
+- 30 sessions in a mesh = 870 connections. Star = 30 connections.
+- Single source of truth for all session state
+- One firewall rule per server (not per session pair)
+- Commander as relay enables cross-model communication (Claude ↔ Codex)
 
 ---
 
-## 9. Plan B: MCP Channel Push
+## 9. Future: Channel Push Enhancement
 
-### 9.1 Core Idea
+> The current MCP SSE star architecture (v0.3.0) provides real-time communication via SSE Tool calls.
+> A future enhancement could add Channel protocol push for even tighter integration.
 
-Plan B leverages Claude Code's **Channel protocol** (`notifications/claude/channel`) for true push-based communication:
+### 9.1 Potential Channel Enhancement
 
-- External event --> Channel process --> Injects into Claude Code conversation
-- Claude Code sees a `<channel>` tag message, just like receiving a chat message
-- Child agents **don't need polling**, no `/loop` -- commands appear directly in conversation
+If needed, a local `commander-channel` process could be added per session to inject messages directly into the Claude Code conversation via the Channel protocol (`notifications/claude/channel`). This would make Commander messages appear as `<channel>` tags, similar to Telegram/WeChat messages.
 
-### 9.2 Channel Protocol
-
-```typescript
-// 1. Declare Channel capability
-const server = new Server(
-  { name: "commander-channel", version: "0.1.0" },
-  {
-    capabilities: {
-      experimental: { "claude/channel": {} },
-      tools: {},
-    },
-    instructions: "...",
-  },
-);
-
-// 2. Connect via stdio to Claude Code
-await server.connect(new StdioServerTransport());
-
-// 3. Push message into Claude Code conversation
-await server.notification({
-  method: "notifications/claude/channel",
-  params: {
-    content: "Hub dispatches task: generate monthly paper review",
-    meta: {
-      sender: "hub",
-      sender_id: "commander",
-    },
-  },
-});
-```
-
-Claude Code receives:
-```
-<channel source="commander-channel" sender="hub" sender_id="commander">
-Hub dispatches task: generate monthly paper review
-</channel>
-```
-
-The agent responds naturally. **No polling, no /loop, zero delay.**
-
-### 9.3 commander-channel Implementation
-
-Each session runs a local `commander-channel` process that:
-1. **SSE subscribes** to Commander Server's `/events/:session_name`
-2. **Channel injects** received events into Claude Code via `notifications/claude/channel`
-
-```typescript
-// commander-channel.ts -- Local Channel process per session
-
-const COMMANDER_URL = process.env.COMMANDER_URL || "http://<YOUR_SERVER_IP>:9200";
-const SESSION_NAME = process.env.COMMANDER_SESSION || "unknown";
-
-// SSE subscription + auto-reconnect
-async function subscribeToCommander() {
-  while (true) {
-    try {
-      const res = await fetch(`${COMMANDER_URL}/events/${SESSION_NAME}`);
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        // Parse SSE events and inject via Channel protocol
-      }
-    } catch (err) {
-      // Reconnect after 5 seconds
-    }
-    await new Promise(r => setTimeout(r, 5000));
-  }
-}
-```
-
-### 9.4 Configuration
-
-```json
-{
-  "mcpServers": {
-    "commander": {
-      "type": "sse",
-      "url": "http://<YOUR_SERVER_IP>:9200/sse"
-    },
-    "commander-channel": {
-      "type": "stdio",
-      "command": "bun",
-      "args": ["run", "/path/to/commander-channel.ts"],
-      "env": {
-        "COMMANDER_SESSION": "my-session-name"
-      }
-    }
-  }
-}
-```
-
-Both can coexist: Plan A (remote SSE for active Tool calls) + Plan B (local stdio for push notifications).
+This is **not required for MVP** -- the SSE Tool interface already provides sub-second latency. Channel push would be an optimization for scenarios where agents need to be interrupted mid-task.
 
 ---
 
 ## 10. Development Plan
 
-### Phase 1 -- MVP (1 day)
+### Phase 1 -- MVP (1-2 days)
 - [ ] Create `commander-mcp-server` repository
-- [ ] Implement 4 child agent tools
-- [ ] Implement 3 hub tools
-- [ ] SQLite tables
-- [ ] Deploy to central server
-- [ ] End-to-end test: hub dispatches task -> agent receives -> executes -> reports completion -> hub receives
+- [ ] Implement 4 child agent tools (report_status, report_completion, get_inbox, ack_inbox)
+- [ ] Implement 5 hub tools (get_all_status, get_session_status, send_task, broadcast, get_completions)
+- [ ] SQLite tables with WAL mode
+- [ ] MCP SSE endpoint (`/sse`) + HTTP REST endpoints (`/api/status`, `/api/task`, `/health`)
+- [ ] Deploy to 47.77.216.1:9200 via systemd
+- [ ] End-to-end test: Claude Code session connects via SSE -> reports status -> Hub sends task -> Agent receives -> executes -> reports completion
 
 ### Phase 2 -- Full Rollout (2-3 days)
-- [ ] Implement remaining tools (get_session_status / broadcast)
-- [ ] All sessions' CLAUDE.md updated with Commander rules
-- [ ] Hub inspection loop uses Commander (replaces tmux capture-pane)
-- [ ] Monitoring: offline session alerts
+- [ ] All Claude Code sessions connect via `settings.json` URL config
+- [ ] All Codex sessions connect via `config.json` URL config
+- [ ] Cross-model test: Claude Code sends task -> Codex receives via Commander -> Codex reports completion
+- [ ] All sessions' CLAUDE.md updated with Commander communication rules
+- [ ] Firewall rules: only known server IPs allowed on port 9200
+- [ ] Monitoring: offline session alerts (10-min heartbeat timeout)
 
 ### Phase 3 -- Enhanced (1 week)
-- [ ] Web UI dashboard for all session status
+- [ ] Web dashboard via HTTP REST interface
 - [ ] Automatic task assignment based on session state
 - [ ] Historical statistics (daily/weekly output reports)
-- [ ] API key authentication
+- [ ] Token-based authentication (beyond IP whitelist)
 - [ ] Message expiry cleanup (30-day retention)
+- [ ] SSE reconnect handling with exponential backoff
 
-### Phase 4 -- Channel Push (Plan B)
-- [ ] Develop commander-channel (local Channel process)
-- [ ] Commander Server adds SSE event push
-- [ ] Hub switches from polling to event-driven
-- [ ] Verify bidirectional push
-
-### Phase 5 -- Advanced (Future)
+### Phase 4 -- Advanced (Future)
 - [ ] Task dependencies (Task A completion triggers Task B)
 - [ ] Workflow orchestration (multi-session collaboration flows)
 - [ ] Direct notification integration (Telegram/Slack/etc.)

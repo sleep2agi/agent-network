@@ -8,6 +8,69 @@
 
 A collection of battle-tested patterns for coordinating multiple AI coding agents (Claude Code, Codex, etc.) running across distributed servers. Born from real-world experience managing 15+ concurrent agent sessions on 4 servers.
 
+## Architecture Decision (2026-04-01)
+
+**MCP SSE Star Topology** -- a single Commander MCP Server at the center, all sessions (Claude Code + Codex) connect via persistent SSE.
+
+```
+                    ┌────────────────────────────┐
+                    │   Commander MCP Server      │
+                    │   47.77.216.1:9200          │
+                    │                              │
+                    │   MCP SSE  +  HTTP REST     │
+                    │   (dual interface)           │
+                    └──────────┬───────────────────┘
+                               │
+          ┌────────┬───────┬───┴───┬───────┬────────┐
+          │        │       │       │       │        │
+       Claude   Claude  Claude  Codex   Codex   Claude
+       Code #1  Code #2 Code #N  #1      #2     Code #M
+       (硅谷)   (Mac)   (上海)  (硅谷)  (Mac)   (6002)
+```
+
+### Key Design Decisions
+
+1. **Star topology, not point-to-point** -- 30 sessions = 30 SSE connections to one hub. No N^2 mesh.
+2. **MCP SSE, not polling** -- persistent Server-Sent Events connections, real-time push. No wasted tokens on empty polls.
+3. **Dual interface** -- MCP SSE for Claude Code/Codex native integration + HTTP REST for dashboards, scripts, and external tools.
+4. **Cross-model communication** -- Claude Code ↔ Codex sessions communicate through Commander as relay. No direct wiring needed.
+5. **Single server** -- one Commander process, one SQLite database. Simple to operate, easy to reason about.
+
+### Client Configuration
+
+**Claude Code** (`~/.claude/settings.json`):
+```json
+{
+  "mcpServers": {
+    "commander": {
+      "url": "http://47.77.216.1:9200/sse"
+    }
+  }
+}
+```
+
+**Codex** (`config.json`):
+```json
+{
+  "mcpServers": {
+    "commander": {
+      "url": "http://47.77.216.1:9200/sse"
+    }
+  }
+}
+```
+
+### Tech Stack
+
+| Component | Choice |
+|-----------|--------|
+| Runtime | Bun 1.2+ |
+| Language | TypeScript |
+| MCP SDK | `@modelcontextprotocol/sdk` |
+| Database | SQLite (`bun:sqlite`) |
+| Transport | MCP SSE + HTTP REST |
+| Process mgmt | systemd |
+
 ## Core Problem
 
 When running multiple AI agents in tmux sessions across servers, you face:
@@ -19,7 +82,7 @@ When running multiple AI agents in tmux sessions across servers, you face:
 
 ## Solution Space
 
-This repo documents 8 orchestration approaches, from the simplest to production-grade:
+This repo documents orchestration approaches from the simplest to production-grade:
 
 | # | Approach | Cross-Server | Reliability | Status |
 |---|----------|-------------|-------------|--------|
@@ -29,33 +92,34 @@ This repo documents 8 orchestration approaches, from the simplest to production-
 | 4 | Agent Teams | Local only | 90% | Enabled |
 | 5 | MCO (Multi-CLI Orchestrator) | Local only | 90% | Available |
 | 6 | oh-my-claudecode | Local only | 85% | Community |
-| 7 | Commander MCP (polling) | Yes | 95% | Design complete |
-| 8 | Commander Channel (push) | Yes | 99% | Design complete |
+| **7** | **Commander MCP (SSE star)** | **Yes** | **99%** | **Confirmed architecture** |
 
 ## Key Insight
 
 **MCP Tool calls are 10x more efficient than tmux-based orchestration.** A single `mcp__codex__codex()` call returns structured results in 30 seconds. The tmux approach takes 3-5 minutes of SSH, window detection, send-keys, capture-pane, and ANSI parsing -- and often fails.
 
+**MCP SSE is the endgame for cross-server.** Persistent connections, real-time push, structured JSON, no polling overhead. One Commander Server handles 30+ sessions with 30 SSE connections.
+
 ## Documentation
 
-- [`docs/orchestration-guide.md`](docs/orchestration-guide.md) -- Full comparison of all 8 approaches with cost analysis and migration path
-- [`docs/commander-mcp-design.md`](docs/commander-mcp-design.md) -- Detailed design for the cross-server Commander MCP Server (Plan A: polling + Plan B: push via Channel protocol)
+- [`docs/architecture-decision.md`](docs/architecture-decision.md) -- Architecture decision record: MCP SSE star topology (2026-04-01)
+- [`docs/orchestration-guide.md`](docs/orchestration-guide.md) -- Full comparison of all approaches with cost analysis and migration path
+- [`docs/commander-mcp-design.md`](docs/commander-mcp-design.md) -- Detailed design for the Commander MCP Server (SSE + REST dual interface)
 - [`docs/experience.md`](docs/experience.md) -- 48-hour field report: managing 15+ agent sessions, lessons learned, and operational principles
 
-## Recommended Adoption Path
+## Adoption Path
 
-### Phase 1: Immediate (Day 1)
+### Phase 1: Immediate (Today)
 1. Codex MCP Tool for local code review/refactoring
-2. Codex Plugin for `/codex:review` + `/codex:adversarial-review`
-3. Agent Teams for local parallel tasks
+2. Agent Teams for local parallel tasks
 
-### Phase 2: This Week (1-3 days)
-4. Install MCO for multi-model parallel review
-5. Commander MCP Server MVP for cross-server structured communication
+### Phase 2: This Week
+3. **Commander MCP Server MVP** -- SSE star topology, 9 MCP Tools, SQLite state
+4. All sessions connect via `settings.json` / `config.json`
 
 ### Phase 3: Next Week
-6. Commander Channel for push-based event-driven orchestration
-7. Fully retire tmux send-keys for agent communication
+5. HTTP REST dashboard for monitoring
+6. Fully retire tmux send-keys for agent communication
 
 ## Community Projects Referenced
 
