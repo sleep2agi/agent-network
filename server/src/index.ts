@@ -1,52 +1,40 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { registerTools } from "./tools.js";
 import { db } from "./db.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 
-// ── MCP Server ──────────────────────────────────────
-const mcpServer = new McpServer({
-  name: "commander",
-  version: "0.1.0",
-});
-registerTools(mcpServer);
+// ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
+// 所有实例共享同一个 db，解决 "Already connected" 问题
+function createServer(): McpServer {
+  const server = new McpServer({
+    name: "commander",
+    version: "0.2.0",
+  });
+  registerTools(server);
+  return server;
+}
 
-// ── Track SSE connections ───────────────────────────
-const transports = new Map<string, SSEServerTransport>();
+// ── HTTP Server (Bun native) ────────────────────────
+let connectionCount = 0;
 
-// ── HTTP Server (Bun) ───────────────────────────────
 Bun.serve({
   port: PORT,
-  idleTimeout: 0, // keep SSE connections alive
 
   async fetch(req) {
     const url = new URL(req.url);
 
-    // ── MCP SSE endpoint ──
-    // Claude Code / Codex connect here via settings.json: { "url": "http://host:9200/sse" }
-    if (url.pathname === "/sse") {
-      const id = crypto.randomUUID();
-      const transport = new SSEServerTransport("/messages", req);
-      transports.set(id, transport);
-
-      transport.onclose = () => {
-        transports.delete(id);
-      };
-
-      await mcpServer.connect(transport);
-      return transport.sseResponse;
-    }
-
-    // ── MCP message endpoint (paired with SSE) ──
-    if (url.pathname === "/messages" && req.method === "POST") {
-      const sessionId = url.searchParams.get("sessionId");
-      if (sessionId && transports.has(sessionId)) {
-        const transport = transports.get(sessionId)!;
-        await transport.handlePostMessage(req);
-        return new Response("ok", { status: 200 });
-      }
-      return new Response("session not found", { status: 404 });
+    // ── MCP Streamable HTTP endpoint ──
+    // Claude Code 连这里: { "url": "http://host:9200/mcp" }
+    if (url.pathname === "/mcp") {
+      const transport = new WebStandardStreamableHTTPServerTransport({
+        sessionIdGenerator: undefined, // stateless: 每个请求独立
+      });
+      const server = createServer();
+      await server.connect(transport);
+      const response = await transport.handleRequest(req);
+      return response;
     }
 
     // ── REST: health ──
@@ -54,17 +42,20 @@ Bun.serve({
       const count = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM sessions").get();
       return Response.json({
         ok: true,
-        version: "0.1.0",
+        version: "0.2.0",
+        transport: "streamable-http",
         sessions: count?.cnt ?? 0,
-        connections: transports.size,
         uptime: process.uptime(),
       });
     }
 
     // ── REST: all sessions status ──
     if (url.pathname === "/api/status") {
+      // Auto-offline: 10 分钟无心跳
+      const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
+      db.run("UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'", [cutoff]);
       const sessions = db.query("SELECT * FROM sessions ORDER BY updated_at DESC").all();
-      return Response.json({ ok: true, sessions, connections: transports.size });
+      return Response.json({ ok: true, sessions });
     }
 
     // ── REST: send task (for scripts/curl) ──
@@ -86,19 +77,31 @@ Bun.serve({
       return Response.json({ ok: true, completions: rows });
     }
 
-    return new Response("Commander MCP Server v0.1.0\n\nEndpoints:\n  GET  /sse          - MCP SSE (for Claude Code / Codex)\n  GET  /health       - Health check\n  GET  /api/status   - All sessions\n  POST /api/task     - Send task via REST\n  GET  /api/completions - Recent completions\n", {
-      status: 200,
-      headers: { "Content-Type": "text/plain" },
-    });
+    return new Response(
+      `Commander MCP Server v0.2.0 (Streamable HTTP)
+
+Endpoints:
+  POST /mcp            - MCP Streamable HTTP (for Claude Code / Codex)
+  GET  /health         - Health check
+  GET  /api/status     - All sessions
+  POST /api/task       - Send task via REST
+  GET  /api/completions - Recent completions
+
+Client config (.mcp.json):
+  { "mcpServers": { "commander": { "url": "http://YOUR_IP:${PORT}/mcp" } } }
+`,
+      { status: 200, headers: { "Content-Type": "text/plain" } }
+    );
   },
 });
 
 console.log(`
-╔══════════════════════════════════════════╗
-║   Commander MCP Server v0.1.0            ║
-║                                          ║
-║   MCP SSE:  http://0.0.0.0:${PORT}/sse     ║
-║   REST API: http://0.0.0.0:${PORT}/api     ║
-║   Health:   http://0.0.0.0:${PORT}/health   ║
-╚══════════════════════════════════════════╝
+╔══════════════════════════════════════════════╗
+║   Commander MCP Server v0.2.0                ║
+║   Transport: Streamable HTTP (Bun native)    ║
+║                                              ║
+║   MCP:    http://0.0.0.0:${PORT}/mcp            ║
+║   REST:   http://0.0.0.0:${PORT}/api            ║
+║   Health: http://0.0.0.0:${PORT}/health          ║
+╚══════════════════════════════════════════════╝
 `);

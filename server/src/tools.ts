@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { db, uuidv4 } from "./db.js";
 
 export function registerTools(server: McpServer) {
