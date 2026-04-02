@@ -317,7 +317,7 @@ import { registerCommHubTools } from "./tools/commhub-tools";
 import { initDB } from "./db/schema";
 
 const PORT = Number(process.env.PORT) || 9200;
-const DB_PATH = process.env.COMMANDER_DB || `${process.env.HOME}/.commhub/commhub.db`;
+const DB_PATH = process.env.COMMHUB_DB || `${process.env.HOME}/.commhub/commhub.db`;
 const db = new Database(DB_PATH);
 db.exec("PRAGMA journal_mode=WAL");
 initDB(db);

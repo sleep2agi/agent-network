@@ -12,7 +12,7 @@ const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
 function createServer(clientIP?: string): McpServer {
   const server = new McpServer({
     name: "commhub",
-    version: "0.4.0",
+    version: "0.4.1",
   });
   registerTools(server, clientIP);
   return server;
@@ -105,7 +105,7 @@ Bun.serve({
       const sse = getSSEStats();
       return withCors(req, Response.json({
         ok: true,
-        version: "0.4.0",
+        version: "0.4.1",
         transport: "streamable-http",
         sessions: count?.cnt ?? 0,
         sse_connections: sse.total,
@@ -194,7 +194,7 @@ Bun.serve({
     }
 
     return withCors(req, new Response(
-      `CommHub MCP Server v0.4.0 (Streamable HTTP + SSE Push)
+      `CommHub MCP Server v0.4.1 (Streamable HTTP + SSE Push)
 
 Endpoints:
   POST /mcp               - MCP Streamable HTTP (for Claude Code / Codex)
@@ -222,7 +222,7 @@ process.on("SIGINT", shutdown);
 
 console.log(`
 ╔══════════════════════════════════════════════════╗
-║   CommHub MCP Server v0.4.0                     ║
+║   CommHub MCP Server v0.4.1                     ║
 ║   Transport: Streamable HTTP (Bun native)         ║
 ║   Auth: ${AUTH_TOKEN ? "ENABLED (Bearer token)" : "DISABLED (set COMMHUB_AUTH_TOKEN)"}${"".padEnd(AUTH_TOKEN ? 5 : 0)}║
 ║                                                   ║

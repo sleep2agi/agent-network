@@ -2,7 +2,7 @@
 
 > 开源的多 AI Agent Session 跨服务器编排方案。
 > 源自 48+ 小时、4 台服务器、15+ 并发 Agent Session 的实战经验。
-> **v0.4.0**: Streamable HTTP + SSE Push + Channel 插件 + REST API
+> **v0.4.1**: CommHub Channel (stdio) + SSE Push + 项目路径 .env 自动配置
 
 ---
 
@@ -23,21 +23,111 @@ cd server && bun install && bun run start
 { "mcpServers": { "commhub": { "url": "http://YOUR_IP:9200/mcp" } } }
 ```
 
-### 方式 B：Channel 插件接入（实时推送）
+### 方式 B：Channel 插件接入（实时推送，推荐）
 
 ```bash
 # 1. 安装 Channel 插件
 cd channel && bun install
 
-# 2. 启动 Claude Code 并加载 Channel
-COMMANDER_URL=http://YOUR_IP:9200 COMMANDER_SESSION=my-agent \
-  claude --dangerously-skip-permissions \
-         --dangerously-load-development-channels server:commhub
+# 2. 配置共享 .env（COMMHUB_URL 和 TOKEN 写在这里）
+mkdir -p ~/.claude/channels/commhub
+echo 'COMMHUB_URL=http://YOUR_IP:9200' > ~/.claude/channels/commhub/.env
+
+# 3. 配置 .mcp.json（项目目录或 ~/.claude/.mcp.json）
+cat > .mcp.json << 'EOF'
+{
+  "mcpServers": {
+    "commhub": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["run", "/path/to/agent-orchestra/channel/commhub-channel.ts"]
+    }
+  }
+}
+EOF
+
+# 4. 启动 Claude Code 并加载 Channel
+claude --dangerously-skip-permissions \
+       --dangerously-load-development-channels server:commhub
 ```
 
 Channel 模式下，CommHub 通过 SSE 实时推送任务到 Agent 对话中，无需轮询。
 
-详见 [`docs/quickstart.md`](docs/quickstart.md)，30 分钟完成全部部署。
+详见 [`docs/quickstart.md`](docs/quickstart.md)，新电脑 5 步配完。
+
+## 关键发现
+
+> 这些是踩坑后总结的核心知识点，写在最前面防止重复踩坑。
+
+### 1. `server:{name}` 查的是 .mcp.json 里的 MCP 条目
+
+`--dangerously-load-development-channels server:commhub` 的含义是：从当前项目的 `.mcp.json`（或 `~/.claude/.mcp.json`）中找到名为 `commhub` 的 MCP Server 定义，然后以 Channel 模式启动它。
+
+### 2. Channel 必须用 stdio 类型
+
+Channel 本质是 Claude Code 启动的一个子进程，通过 stdin/stdout 双向通信。所以 MCP 配置**必须**是 `"type": "stdio"` + `"command"` + `"args"`：
+
+```json
+{
+  "commhub": {
+    "type": "stdio",
+    "command": "bun",
+    "args": ["run", "/path/to/channel/commhub-channel.ts"]
+  }
+}
+```
+
+**不能用 `"url": "http://..."` 的 http 类型**——http 类型不启动子进程，Channel 无法工作。
+
+### 3. alias 从项目路径 .env 自动获取
+
+Channel 插件的 alias（即 CommHub 中的 session 名称）按优先级解析：
+
+| 优先级 | 来源 | 说明 |
+|--------|------|------|
+| 1 | `COMMHUB_ALIAS` 环境变量 | 手动指定，最高优先 |
+| 2 | 项目路径 `.env` 文件 | `~/.claude/channels/commhub/{project-path}/.env` |
+| 3 | tmux session 名称 | 自动检测 |
+| 4 | hostname | 兜底 |
+
+项目路径 `.env` 的位置规则：将项目绝对路径的 `/` 替换为 `-`。例如项目在 `/home/vansin/my-project`，对应的 `.env` 文件是：
+```
+~/.claude/channels/commhub/-home-vansin-my-project/.env
+```
+
+### 4. 同项目目录多 session 用 COMMHUB_ALIAS 区分
+
+如果在同一个项目目录下开多个 Claude Code session，它们会解析出相同的 alias。用 `COMMHUB_ALIAS` 环境变量区分：
+
+```bash
+# Session 1
+COMMHUB_ALIAS=dev-1 claude --dangerously-load-development-channels server:commhub
+
+# Session 2
+COMMHUB_ALIAS=dev-2 claude --dangerously-load-development-channels server:commhub
+```
+
+### 5. 共享配置和项目配置分离
+
+```
+~/.claude/channels/commhub/
+├── .env                              # 共享配置（COMMHUB_URL, COMMHUB_TOKEN）
+├── -home-vansin-project-a/
+│   └── .env                          # 项目 A 的 alias 等
+└── -home-vansin-project-b/
+    └── .env                          # 项目 B 的 alias 等
+```
+
+共享 `.env` 示例：
+```bash
+COMMHUB_URL=http://YOUR_IP:9200
+COMMHUB_TOKEN=your-secret-token
+```
+
+项目 `.env` 示例：
+```bash
+COMMHUB_ALIAS=my-agent-name
+```
 
 ## 架构
 
@@ -45,12 +135,12 @@ Channel 模式下，CommHub 通过 SSE 实时推送任务到 Agent 对话中，�
 
 ```
                     ┌─────────────────────────────────┐
-                    │   CommHub Server v0.4.0    │
-                    │   your-server:9200               │
-                    │                                   │
-                    │   POST /mcp    → Streamable HTTP  │
-                    │   GET  /events → SSE Push         │
-                    │   GET  /api    → REST              │
+                    │     CommHub Server v0.4.1        │
+                    │     your-server:9200             │
+                    │                                  │
+                    │   POST /mcp    → Streamable HTTP │
+                    │   GET  /events → SSE Push        │
+                    │   GET  /api    → REST            │
                     └──────────┬────────────────────────┘
                                │
           ┌────────┬───────┬───┴───┬───────┬────────┐
@@ -63,17 +153,17 @@ Channel 模式下，CommHub 通过 SSE 实时推送任务到 Agent 对话中，�
 
 ### 两种接入方式
 
-| 方式 | 接口 | 延迟 | 适用场景 |
-|------|------|------|---------|
-| **MCP Tool** | `POST /mcp` | Agent 主动调用 | 简单部署，轮询 inbox |
-| **Channel 插件** | `GET /events/:session` | 实时推送 <1s | 任务秒达，注入对话 |
+| 方式 | 接口 | 配置类型 | 延迟 | 适用场景 |
+|------|------|---------|------|---------|
+| **MCP Tool** | `POST /mcp` | `"url": "http://..."` | Agent 主动调用 | Codex、简单部署 |
+| **Channel 插件** | `GET /events/:session` | `"type": "stdio"` | 实时推送 <1s | Claude Code 推荐 |
 
 ### 核心设计决策
 
 1. **星型拓扑** -- 30 个 Session = 30 条连接，不是 N^2 网状
 2. **Streamable HTTP + SSE Push** -- MCP 用 Streamable HTTP，推送用 SSE 持久连接
 3. **三接口** -- MCP Streamable HTTP + SSE Push + HTTP REST，各司其职
-4. **跨模型通信** -- Claude Code ↔ Codex 通过 CommHub 中转，无需直连
+4. **跨模型通信** -- Claude Code <-> Codex 通过 CommHub 中转，无需直连
 5. **单服务器** -- 一个进程、一个 SQLite 数据库，运维简单
 
 ### 技术栈
@@ -106,7 +196,7 @@ Channel 模式下，CommHub 通过 SSE 实时推送任务到 Agent 对话中，�
 | 4 | Agent Teams | 仅本地 | 90% | 已启用 |
 | 5 | MCO (Multi-CLI Orchestrator) | 仅本地 | 90% | 可用 |
 | 6 | oh-my-claudecode | 仅本地 | 85% | 社区 |
-| **7** | **CommHub MCP (Streamable HTTP + SSE Push)** | **支持** | **99%** | **v0.4.0 已上线** |
+| **7** | **CommHub MCP (Streamable HTTP + SSE Push)** | **支持** | **99%** | **v0.4.1 已上线** |
 
 ## 核心发现
 
@@ -134,6 +224,17 @@ Channel 模式下，CommHub 通过 SSE 实时推送任务到 Agent 对话中，�
 | `send_task` | 带优先级下发任务 |
 | `broadcast` | 群发消息（可按服务器/状态过滤） |
 | `get_completions` | 获取已完成任务结果 |
+
+## Channel 插件工具（2 个）
+
+Channel 模式下 Agent 额外获得：
+
+| 工具 | 用途 |
+|------|------|
+| `commhub_reply` | 回复 CommHub 任务（完成/进行中/阻塞/错误） |
+| `commhub_report_status` | 更新 Session 状态（working/idle/blocked/error） |
+
+> 注：Channel 模式下也可以通过 MCP Tool 模式的 `send_task` 向其他 Session 发任务（如果同时配了 MCP Tool 连接）。
 
 ## 工作流程
 
@@ -163,7 +264,7 @@ Hub (指挥室)                  CommHub              Agent (MCP Tool)
      │  ◀── [修 Bug 完成, 结果]    │                        │
 ```
 
-### Channel 插件模式（SSE 实时推送，v0.4.0 新增）
+### Channel 插件模式（SSE 实时推送）
 
 ```
 Hub (指挥室)                  CommHub              Agent (Channel)
@@ -177,7 +278,7 @@ Hub (指挥室)                  CommHub              Agent (Channel)
      │                            │                        │
      │                            │  (Agent 自动执行...)    │
      │                            │                        │
-     │                            │  commhub_reply()     │
+     │                            │  commhub_reply()       │
      │                            │◀───────────────────────│  Channel Tool 回报
      │                            │                        │
      │  get_completions()         │                        │
@@ -189,11 +290,12 @@ Channel 模式优势：**任务从 Hub 发出到 Agent 看到 < 1 秒**，无需
 
 ## 文档
 
-- [`docs/quickstart.md`](docs/quickstart.md) -- **从这里开始**：部署 CommHub + 连接 30 个 Session，30 分钟搞定
+- [`docs/quickstart.md`](docs/quickstart.md) -- **新电脑 5 步配完**
+- [`docs/commhub-limitations.md`](docs/commhub-limitations.md) -- 已知限制和注意事项
 - [`docs/protocol-decision.md`](docs/protocol-decision.md) -- 协议选型：为什么用 MCP（不用 A2A、不用 ACP）
 - [`docs/architecture-decision.md`](docs/architecture-decision.md) -- 架构决策记录：MCP Streamable HTTP 星型拓扑
-- [`docs/orchestration-guide.md`](docs/orchestration-guide.md) -- 全方案对比 + 成本分析
 - [`docs/commhub-mcp-design.md`](docs/commhub-mcp-design.md) -- CommHub Server 详细设计
+- [`docs/orchestration-guide.md`](docs/orchestration-guide.md) -- 全方案对比 + 成本分析
 - [`docs/experience.md`](docs/experience.md) -- 48 小时实战报告：教训和原则
 
 ## CommHub Channel 插件
@@ -202,9 +304,8 @@ Channel 插件让 CommHub 任务直接注入 Claude Code 对话——无需轮�
 
 ```
 channel/
-├── commhub-channel.ts   # Channel 插件主代码
-├── package.json
-└── .mcp.json              # 本地开发配置
+├── commhub-channel.ts     # Channel 插件主代码（stdio 类型）
+└── package.json
 ```
 
 ### 安装
@@ -213,33 +314,40 @@ channel/
 cd channel && bun install
 ```
 
+### 配置
+
+在项目目录或 `~/.claude/` 下创建 `.mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "commhub": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["run", "/absolute/path/to/agent-orchestra/channel/commhub-channel.ts"],
+      "env": {
+        "COMMHUB_URL": "http://YOUR_IP:9200"
+      }
+    }
+  }
+}
+```
+
 ### 启动
 
 ```bash
-# 方式 1：使用 Claude Code 开发模式加载
-COMMANDER_URL=http://YOUR_IP:9200 \
-COMMANDER_SESSION=my-agent \
-  claude --dangerously-skip-permissions \
-         --dangerously-load-development-channels server:commhub
-
-# 方式 2：使用 .mcp.json 配置
-cp channel/.mcp.json ~/.claude/.mcp.json  # 编辑 URL 和 SESSION
+claude --dangerously-skip-permissions \
+       --dangerously-load-development-channels server:commhub
 ```
 
 ### 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `COMMANDER_URL` | `http://127.0.0.1:9200` | CommHub Server 地址 |
-| `COMMANDER_SESSION` | hostname | 本 Session 名称 |
-| `COMMANDER_TOKEN` | (空) | 认证 Token（匹配服务端 `COMMANDER_AUTH_TOKEN`） |
-
-### Channel Tools（2 个）
-
-| 工具 | 用途 |
-|------|------|
-| `commhub_reply` | 回复 CommHub 任务（完成/进行中/阻塞/错误） |
-| `commhub_report_status` | 更新 Session 状态（working/idle/blocked/error） |
+| `COMMHUB_URL` | `http://127.0.0.1:9200` | CommHub Server 地址 |
+| `COMMHUB_ALIAS` | (自动解析) | 手动指定 Session 名称 |
+| `COMMHUB_TOKEN` | (空) | 认证 Token（匹配服务端 `COMMHUB_AUTH_TOKEN`） |
+| `COMMHUB_TMUX` | (自动检测) | 手动指定 tmux session 名称 |
 
 ## 落地路径
 
@@ -248,14 +356,15 @@ cp channel/.mcp.json ~/.claude/.mcp.json  # 编辑 URL 和 SESSION
 2. ~~Agent Teams 做本地并行任务~~
 
 ### Phase 2：本周（已完成）
-3. ~~**部署 CommHub Server**~~ -- v0.4.0 上线
+3. ~~**部署 CommHub Server**~~ -- v0.4.1 上线
 4. ~~所有 Session 配上 MCP URL~~
 5. ~~**CommHub Channel 插件**~~ -- SSE 实时推送已验证
+6. ~~**Channel stdio 模式确认**~~ -- server:commhub + .mcp.json 配置已验证
 
 ### Phase 3：进行中
-6. Dashboard 监控面板（`/admin/commhub`）
-7. 完全退役 tmux send-keys
-8. 跨服务器 Channel 连接验证
+7. Dashboard 监控面板（`/admin/commhub`）
+8. 完全退役 tmux send-keys
+9. 跨服务器 Channel 连接验证
 
 ## 社区项目参考
 
