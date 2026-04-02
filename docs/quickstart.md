@@ -1,6 +1,7 @@
 # 快速开始：今天就跑起来
 
 > 从零到 30 个 Session 全部连上 Commander，30 分钟搞定。
+> 两种接入方式：**MCP Tool**（简单）或 **Channel 插件**（实时推送）。
 
 ---
 
@@ -18,13 +19,14 @@ bun install
 
 # 启动
 bun run start
-# 输出：Commander MCP Server v0.3.0 running on port 9200
+# 输出：Commander MCP Server v0.4.0
+#        Transport: Streamable HTTP (Bun native)
 ```
 
 验证：
 ```bash
 curl http://localhost:9200/health
-# {"ok":true,"version":"0.1.0","sessions":0,"connections":0}
+# {"ok":true,"version":"0.4.0","transport":"streamable-http","sessions":0,"sse_connections":0}
 ```
 
 ### 用 systemd 持久化（可选）
@@ -108,6 +110,45 @@ Codex 的 MCP 配置方式相同。在 `config.json` 中加入：
 
 ---
 
+## 第三步 B：Channel 插件接入（可选，实时推送）
+
+> Channel 模式下，Commander 任务通过 SSE 实时注入 Claude Code 对话，无需 Agent 轮询 inbox。
+
+```bash
+# 安装 Channel 依赖
+cd agent-orchestra/channel
+bun install
+
+# 启动 Claude Code + Channel
+COMMANDER_URL=http://YOUR_COMMANDER_IP:9200 \
+COMMANDER_SESSION=my-agent \
+COMMANDER_TOKEN=your-secret-token \
+  claude --dangerously-skip-permissions \
+         --dangerously-load-development-channels server:commander
+```
+
+验证：
+```bash
+# 在另一个终端通过 REST 发送任务
+curl -X POST http://YOUR_COMMANDER_IP:9200/api/task \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-token" \
+  -d '{"session_name":"my-agent","task":"报告当前状态","priority":"normal"}'
+
+# Agent 对话中应该立即收到 <channel source="commander" ...> 消息
+```
+
+### MCP Tool vs Channel 怎么选？
+
+| 维度 | MCP Tool | Channel 插件 |
+|------|----------|-------------|
+| 部署 | 只需配 URL | 需要安装 Channel |
+| 任务接收 | Agent 调 `report_status`→发现→`get_inbox` | SSE 秒推到对话 |
+| 延迟 | 取决于轮询频率 | < 1 秒 |
+| 适用 | 简单场景、Codex | 需要快速响应的 Agent |
+
+---
+
 ## 第四步：写入 CLAUDE.md 通信规则
 
 在每个项目的 CLAUDE.md 中加入：
@@ -162,23 +203,37 @@ get_session_status(session_name="frontend-dev")
 
 ```bash
 # 所有 session 状态
-curl http://YOUR_COMMANDER_IP:9200/api/status | jq
+curl http://YOUR_COMMANDER_IP:9200/api/status \
+  -H "Authorization: Bearer YOUR_TOKEN" | jq
 
 # 通过 REST 派任务（不用 Claude Code，curl 就行）
 curl -X POST http://YOUR_COMMANDER_IP:9200/api/task \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{"session_name":"reviewer","task":"审查最新 PR","priority":"high"}'
 
+# 群发广播
+curl -X POST http://YOUR_COMMANDER_IP:9200/api/broadcast \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"message":"15 分钟后维护，保存工作"}'
+
 # 查看完成记录
-curl http://YOUR_COMMANDER_IP:9200/api/completions | jq
+curl http://YOUR_COMMANDER_IP:9200/api/completions \
+  -H "Authorization: Bearer YOUR_TOKEN" | jq
+
+# 健康检查（无需认证）
+curl http://YOUR_COMMANDER_IP:9200/health | jq
 ```
 
 ---
 
 ## 完整流程示意
 
+### MCP Tool 模式
+
 ```
-Hub (Claude Opus)                Commander              Agent (任意模型)
+Hub (Claude Opus)                Commander              Agent (MCP Tool)
      │                               │                        │
      │  send_task("dev","修 Bug")     │                        │
      │──────────────────────────────▶│  写入 inbox             │
@@ -193,13 +248,27 @@ Hub (Claude Opus)                Commander              Agent (任意模型)
      │                               │  返回 [修 Bug 任务]    │
      │                               │───────────────────────▶│
      │                               │                        │
-     │                               │     ack_inbox()        │
-     │                               │◀───────────────────────│
-     │                               │                        │
-     │                               │  (Agent 执行任务...)    │
-     │                               │                        │
      │                               │  report_completion()   │
      │                               │◀───────────────────────│
+     │                               │                        │
+     │  get_completions()            │                        │
+     │──────────────────────────────▶│                        │
+     │  ◀── [修 Bug 完成, 结果...]    │                        │
+```
+
+### Channel 模式（v0.4.0）
+
+```
+Hub                              Commander              Agent (Channel)
+     │                               │◀── SSE 长连接 ────────│
+     │                               │                        │
+     │  send_task("agent","修 Bug")   │                        │
+     │──────────────────────────────▶│  写入 inbox             │
+     │                               │── SSE push ──────────▶│ 任务秒达！
+     │                               │                        │ 自动注入对话
+     │                               │                        │
+     │                               │  commander_reply()     │
+     │                               │◀───────────────────────│ Channel Tool
      │                               │                        │
      │  get_completions()            │                        │
      │──────────────────────────────▶│                        │
@@ -235,4 +304,10 @@ A: 推荐 Token 认证 + 防火墙双重保护：
 两层都要加，Token 防未授权访问，防火墙防扫描。
 
 **Q: 能监控哪个 Session 连着？**
-A: `curl /health` 返回 `connections` 字段（当前 SSE 连接数）。
+A: `curl /health` 返回 `sse_connections`（当前 SSE Push 连接数）和 `sse_sessions`（各 Session 连接详情）。
+
+**Q: MCP Streamable HTTP 和 SSE Push 有什么区别？**
+A: MCP Streamable HTTP (`POST /mcp`) 是 Agent 调用 Commander 工具的协议通道。SSE Push (`GET /events/:session`) 是 Commander 实时推送任务给 Agent 的通道。两者各司其职。
+
+**Q: Channel 插件断线会丢任务吗？**
+A: 不会。任务写入 SQLite inbox，Channel 重连后通过 `get_inbox` 拉取未确认消息。SSE 只是通知，不是消息本身。

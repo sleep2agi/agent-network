@@ -3,7 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db } from "./db.js";
-import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
+import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const AUTH_TOKEN = process.env.COMMANDER_AUTH_TOKEN;
@@ -36,12 +36,45 @@ const TaskSchema = z.object({
   priority: z.enum(["high", "normal", "low"]).default("normal"),
 });
 
+const BroadcastSchema = z.object({
+  message: z.string().min(1).max(10000),
+  filter_server: z.string().max(200).optional(),
+  filter_status: z.string().max(50).optional(),
+});
+
 // ── HTTP Server (Bun native) ────────────────────────
+const CORS_ORIGINS = ["https://vansin.me", "http://localhost:3000", "http://localhost:3001"];
+
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") || "";
+  const allowed = CORS_ORIGINS.includes(origin) ? origin : "";
+  return {
+    "Access-Control-Allow-Origin": allowed,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Max-Age": "86400",
+  };
+}
+
+function withCors(req: Request, res: Response): Response {
+  const headers = corsHeaders(req);
+  for (const [k, v] of Object.entries(headers)) {
+    res.headers.set(k, v);
+  }
+  return res;
+}
+
 Bun.serve({
   port: PORT,
+  idleTimeout: 255, // max value: keep SSE connections alive (seconds)
 
   async fetch(req) {
     const url = new URL(req.url);
+
+    // ── CORS preflight ──
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(req) });
+    }
 
     // ── MCP Streamable HTTP endpoint ──
     // MCP protocol handles its own auth — skip token check here
@@ -68,7 +101,7 @@ Bun.serve({
     if (url.pathname === "/health") {
       const count = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM sessions").get();
       const sse = getSSEStats();
-      return Response.json({
+      return withCors(req, Response.json({
         ok: true,
         version: "0.4.0",
         transport: "streamable-http",
@@ -77,19 +110,19 @@ Bun.serve({
         sse_sessions: sse.sessions,
         auth: AUTH_TOKEN ? "enabled" : "disabled",
         uptime: process.uptime(),
-      });
+      }));
     }
 
     // ── All REST /api endpoints require auth (if token configured) ──
     const authErr = requireAuth(req);
-    if (authErr) return authErr;
+    if (authErr) return withCors(req, authErr);
 
     // ── REST: all sessions status ──
     if (url.pathname === "/api/status") {
       const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
       db.run("UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'", [cutoff]);
       const sessions = db.query("SELECT * FROM sessions ORDER BY updated_at DESC").all();
-      return Response.json({ ok: true, sessions });
+      return withCors(req, Response.json({ ok: true, sessions }));
     }
 
     // ── REST: send task ──
@@ -98,11 +131,11 @@ Bun.serve({
       try {
         raw = await req.json();
       } catch {
-        return Response.json({ error: "invalid JSON" }, { status: 400 });
+        return withCors(req, Response.json({ error: "invalid JSON" }, { status: 400 }));
       }
       const parsed = TaskSchema.safeParse(raw);
       if (!parsed.success) {
-        return Response.json({ error: "invalid input", details: parsed.error.format() }, { status: 400 });
+        return withCors(req, Response.json({ error: "invalid input", details: parsed.error.format() }, { status: 400 }));
       }
       const body = parsed.data;
       const id = crypto.randomUUID();
@@ -116,17 +149,49 @@ Bun.serve({
         "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
       ).get(body.session_name);
       pushEvent(body.session_name, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority });
-      return Response.json({ ok: true, message_id: id });
+      return withCors(req, Response.json({ ok: true, message_id: id }));
+    }
+
+    // ── REST: broadcast ──
+    if (url.pathname === "/api/broadcast" && req.method === "POST") {
+      let raw: unknown;
+      try {
+        raw = await req.json();
+      } catch {
+        return withCors(req, Response.json({ error: "invalid JSON" }, { status: 400 }));
+      }
+      const parsed = BroadcastSchema.safeParse(raw);
+      if (!parsed.success) {
+        return withCors(req, Response.json({ error: "invalid input", details: parsed.error.format() }, { status: 400 }));
+      }
+      const body = parsed.data;
+      let sql = "SELECT name FROM sessions WHERE 1=1";
+      const params: any[] = [];
+      if (body.filter_server) { sql += " AND server = ?"; params.push(body.filter_server); }
+      if (body.filter_status) { sql += " AND status = ?"; params.push(body.filter_status); }
+      const targets = db.query<{ name: string }, any[]>(sql).all(...params);
+      const ids: string[] = [];
+      for (const t of targets) {
+        const id = crypto.randomUUID();
+        db.run(
+          `INSERT INTO inbox (id, session_name, type, priority, content, from_session)
+           VALUES (?1, ?2, 'broadcast', 'normal', ?3, 'api')`,
+          [id, t.name, body.message]
+        );
+        ids.push(id);
+      }
+      pushBroadcast(targets.map(t => t.name), { type: "broadcast", inbox_count: 1, message: body.message.slice(0, 200) });
+      return withCors(req, Response.json({ ok: true, recipients: targets.length, message_ids: ids }));
     }
 
     // ── REST: recent completions ──
     if (url.pathname === "/api/completions") {
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 86400000).toISOString();
       const rows = db.query("SELECT * FROM completions WHERE completed_at >= ?1 ORDER BY completed_at DESC LIMIT 100").all(since);
-      return Response.json({ ok: true, completions: rows });
+      return withCors(req, Response.json({ ok: true, completions: rows }));
     }
 
-    return new Response(
+    return withCors(req, new Response(
       `Commander MCP Server v0.4.0 (Streamable HTTP + SSE Push)
 
 Endpoints:
@@ -140,7 +205,7 @@ Endpoints:
 Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMANDER_AUTH_TOKEN)" : "disabled (set COMMANDER_AUTH_TOKEN to enable)"}
 `,
       { status: 200, headers: { "Content-Type": "text/plain" } }
-    );
+    ));
   },
 });
 

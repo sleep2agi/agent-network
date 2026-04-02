@@ -2,6 +2,7 @@
 
 > 开源的多 AI Agent Session 跨服务器编排方案。
 > 源自 48+ 小时、4 台服务器、15+ 并发 Agent Session 的实战经验。
+> **v0.4.0**: Streamable HTTP + SSE Push + Channel 插件 + REST API
 
 ---
 
@@ -10,6 +11,8 @@
 一套经过实战验证的模式和工具，用于协调分布在多台服务器上的 AI 编程 Agent（Claude Code、Codex 等）。核心组件是 **Commander MCP Server**——一个基于 MCP Streamable HTTP 星型架构的跨服务器通信中枢。
 
 ## 快速开始
+
+### 方式 A：MCP Tool 接入（最简单）
 
 ```bash
 # 1. 部署 Commander（5 分钟）
@@ -20,6 +23,20 @@ cd server && bun install && bun run start
 { "mcpServers": { "commander": { "url": "http://YOUR_IP:9200/mcp" } } }
 ```
 
+### 方式 B：Channel 插件接入（实时推送）
+
+```bash
+# 1. 安装 Channel 插件
+cd channel && bun install
+
+# 2. 启动 Claude Code 并加载 Channel
+COMMANDER_URL=http://YOUR_IP:9200 COMMANDER_SESSION=my-agent \
+  claude --dangerously-skip-permissions \
+         --dangerously-load-development-channels server:commander
+```
+
+Channel 模式下，Commander 通过 SSE 实时推送任务到 Agent 对话中，无需轮询。
+
 详见 [`docs/quickstart.md`](docs/quickstart.md)，30 分钟完成全部部署。
 
 ## 架构
@@ -27,26 +44,35 @@ cd server && bun install && bun run start
 **MCP Streamable HTTP 星型拓扑**——一个 Commander Server 居中，所有 Session 通过 Streamable HTTP 连接接入。
 
 ```
-                    ┌────────────────────────────┐
-                    │   Commander MCP Server      │
-                    │   your-server:9200          │
-                    │                              │
-                    │   MCP Streamable HTTP + REST     │
-                    │   （双接口）                  │
-                    └──────────┬───────────────────┘
+                    ┌─────────────────────────────────┐
+                    │   Commander MCP Server v0.4.0    │
+                    │   your-server:9200               │
+                    │                                   │
+                    │   POST /mcp    → Streamable HTTP  │
+                    │   GET  /events → SSE Push         │
+                    │   GET  /api    → REST              │
+                    └──────────┬────────────────────────┘
                                │
           ┌────────┬───────┬───┴───┬───────┬────────┐
           │        │       │       │       │        │
        Claude   Claude  Claude  Codex   Codex   Claude
        Code #1  Code #2 Code #N  #1      #2     Code #M
-       (服务器A) (服务器B) (服务器C) (服务器A) (服务器B) (服务器D)
+       (MCP)    (MCP)   (Channel)(MCP)  (MCP)   (Channel)
+       服务器A   服务器B  服务器C  服务器A  服务器B  服务器D
 ```
+
+### 两种接入方式
+
+| 方式 | 接口 | 延迟 | 适用场景 |
+|------|------|------|---------|
+| **MCP Tool** | `POST /mcp` | Agent 主动调用 | 简单部署，轮询 inbox |
+| **Channel 插件** | `GET /events/:session` | 实时推送 <1s | 任务秒达，注入对话 |
 
 ### 核心设计决策
 
-1. **星型拓扑** -- 30 个 Session = 30 条 SSE 连接，不是 N^2 网状
-2. **SSE 而非轮询** -- 持久连接、实时推送、不浪费 Token
-3. **双接口** -- MCP Streamable HTTP 供 Claude Code/Codex 原生接入 + HTTP REST 供监控面板和脚本
+1. **星型拓扑** -- 30 个 Session = 30 条连接，不是 N^2 网状
+2. **Streamable HTTP + SSE Push** -- MCP 用 Streamable HTTP，推送用 SSE 持久连接
+3. **三接口** -- MCP Streamable HTTP + SSE Push + HTTP REST，各司其职
 4. **跨模型通信** -- Claude Code ↔ Codex 通过 Commander 中转，无需直连
 5. **单服务器** -- 一个进程、一个 SQLite 数据库，运维简单
 
@@ -58,7 +84,7 @@ cd server && bun install && bun run start
 | 语言 | TypeScript |
 | MCP SDK | `@modelcontextprotocol/sdk` |
 | 数据库 | SQLite (`bun:sqlite`, WAL 模式) |
-| 传输 | MCP Streamable HTTP + HTTP REST |
+| 传输 | MCP Streamable HTTP + SSE Push + HTTP REST |
 | 进程管理 | systemd |
 
 ## 要解决的核心问题
@@ -80,7 +106,7 @@ cd server && bun install && bun run start
 | 4 | Agent Teams | 仅本地 | 90% | 已启用 |
 | 5 | MCO (Multi-CLI Orchestrator) | 仅本地 | 90% | 可用 |
 | 6 | oh-my-claudecode | 仅本地 | 85% | 社区 |
-| **7** | **Commander MCP (SSE 星型)** | **支持** | **99%** | **已确认架构** |
+| **7** | **Commander MCP (Streamable HTTP + SSE Push)** | **支持** | **99%** | **v0.4.0 已上线** |
 
 ## 核心发现
 
@@ -111,8 +137,10 @@ cd server && bun install && bun run start
 
 ## 工作流程
 
+### MCP Tool 模式（Agent 主动拉取）
+
 ```
-Hub (指挥室)                  Commander              Agent (子 Session)
+Hub (指挥室)                  Commander              Agent (MCP Tool)
      │                            │                        │
      │  send_task("dev","修Bug")   │                        │
      │───────────────────────────▶│  写入 inbox             │
@@ -127,8 +155,6 @@ Hub (指挥室)                  Commander              Agent (子 Session)
      │                            │  返回 [修 Bug 任务]    │
      │                            │───────────────────────▶│
      │                            │                        │
-     │                            │  (Agent 执行任务...)    │
-     │                            │                        │
      │                            │  report_completion()   │
      │                            │◀───────────────────────│
      │                            │                        │
@@ -136,6 +162,30 @@ Hub (指挥室)                  Commander              Agent (子 Session)
      │───────────────────────────▶│                        │
      │  ◀── [修 Bug 完成, 结果]    │                        │
 ```
+
+### Channel 插件模式（SSE 实时推送，v0.4.0 新增）
+
+```
+Hub (指挥室)                  Commander              Agent (Channel)
+     │                            │                        │
+     │                            │◀── SSE /events/agent ──│  长连接建立
+     │                            │                        │
+     │  send_task("agent","修Bug") │                        │
+     │───────────────────────────▶│  写入 inbox             │
+     │                            │── SSE push ──────────▶│  任务秒达！
+     │                            │                        │  注入 Claude Code 对话
+     │                            │                        │
+     │                            │  (Agent 自动执行...)    │
+     │                            │                        │
+     │                            │  commander_reply()     │
+     │                            │◀───────────────────────│  Channel Tool 回报
+     │                            │                        │
+     │  get_completions()         │                        │
+     │───────────────────────────▶│                        │
+     │  ◀── [修 Bug 完成, 结果]    │                        │
+```
+
+Channel 模式优势：**任务从 Hub 发出到 Agent 看到 < 1 秒**，无需 Agent 轮询 inbox。
 
 ## 文档
 
@@ -146,19 +196,66 @@ Hub (指挥室)                  Commander              Agent (子 Session)
 - [`docs/commander-mcp-design.md`](docs/commander-mcp-design.md) -- Commander MCP Server 详细设计
 - [`docs/experience.md`](docs/experience.md) -- 48 小时实战报告：教训和原则
 
+## Commander Channel 插件
+
+Channel 插件让 Commander 任务直接注入 Claude Code 对话——无需轮询，任务秒达。
+
+```
+channel/
+├── commander-channel.ts   # Channel 插件主代码
+├── package.json
+└── .mcp.json              # 本地开发配置
+```
+
+### 安装
+
+```bash
+cd channel && bun install
+```
+
+### 启动
+
+```bash
+# 方式 1：使用 Claude Code 开发模式加载
+COMMANDER_URL=http://YOUR_IP:9200 \
+COMMANDER_SESSION=my-agent \
+  claude --dangerously-skip-permissions \
+         --dangerously-load-development-channels server:commander
+
+# 方式 2：使用 .mcp.json 配置
+cp channel/.mcp.json ~/.claude/.mcp.json  # 编辑 URL 和 SESSION
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `COMMANDER_URL` | `http://127.0.0.1:9200` | Commander Server 地址 |
+| `COMMANDER_SESSION` | hostname | 本 Session 名称 |
+| `COMMANDER_TOKEN` | (空) | 认证 Token（匹配服务端 `COMMANDER_AUTH_TOKEN`） |
+
+### Channel Tools（2 个）
+
+| 工具 | 用途 |
+|------|------|
+| `commander_reply` | 回复 Commander 任务（完成/进行中/阻塞/错误） |
+| `commander_report_status` | 更新 Session 状态（working/idle/blocked/error） |
+
 ## 落地路径
 
-### Phase 1：今天就能做
-1. Codex MCP Tool 做本地代码审查
-2. Agent Teams 做本地并行任务
+### Phase 1：今天就能做（已完成）
+1. ~~Codex MCP Tool 做本地代码审查~~
+2. ~~Agent Teams 做本地并行任务~~
 
-### Phase 2：本周
-3. **部署 Commander MCP Server MVP** -- `cd server && bun install && bun run start`
-4. 所有 Session 在 `settings.json` / `config.json` 配上 URL
+### Phase 2：本周（已完成）
+3. ~~**部署 Commander MCP Server**~~ -- v0.4.0 上线
+4. ~~所有 Session 配上 MCP URL~~
+5. ~~**Commander Channel 插件**~~ -- SSE 实时推送已验证
 
-### Phase 3：下周
-5. HTTP REST 监控面板
-6. 完全退役 tmux send-keys
+### Phase 3：进行中
+6. Dashboard 监控面板（`/admin/commander`）
+7. 完全退役 tmux send-keys
+8. 跨服务器 Channel 连接验证
 
 ## 社区项目参考
 

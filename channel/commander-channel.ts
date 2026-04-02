@@ -24,8 +24,16 @@ const SESSION_NAME = process.env.COMMANDER_SESSION || (await import("os")).hostn
 const AUTH_TOKEN = process.env.COMMANDER_TOKEN || "";
 
 function log(msg: string) {
-  process.stderr.write(`[commander-channel] ${msg}\n`);
+  const ts = new Date().toTimeString().slice(0, 8);
+  process.stderr.write(`[${ts}] [commander-channel] ${msg}\n`);
 }
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// Debug: log env on startup
+log(`ENV: COMMANDER_URL=${COMMANDER_URL} SESSION=${SESSION_NAME} TOKEN=${AUTH_TOKEN ? "set" : "unset"}`);
 
 // ── MCP Server with Channel capability ──────────────
 const mcp = new Server(
@@ -188,7 +196,7 @@ async function connectSSE() {
       const res = await fetch(url, { headers });
       if (!res.ok) {
         log(`SSE error: ${res.status} ${res.statusText}`);
-        await Bun.sleep(5000);
+        await sleep(5000);
         continue;
       }
 
@@ -222,7 +230,7 @@ async function connectSSE() {
       log(`SSE connection error: ${err}`);
     }
 
-    await Bun.sleep(3000);
+    await sleep(3000);
   }
 }
 
@@ -278,20 +286,18 @@ async function main() {
   await mcp.connect(transport);
   log("MCP stdio connected");
 
-  // 2. Report initial status to Commander
-  try {
-    await callCommander("report_status", {
-      session_name: SESSION_NAME,
-      status: "idle",
-      server: (await import("os")).hostname(),
-    });
-    log(`registered as "${SESSION_NAME}"`);
-  } catch (e) {
-    log(`warning: could not register with Commander: ${e}`);
-  }
-
-  // 3. Start SSE listener (background, auto-reconnect)
+  // 2. Start SSE listener FIRST (non-blocking, auto-reconnect)
+  log("starting SSE listener...");
   connectSSE().catch((err) => log(`SSE fatal: ${err}`));
+
+  // 3. Report initial status to Commander (non-blocking, don't block SSE)
+  callCommander("report_status", {
+    session_name: SESSION_NAME,
+    status: "idle",
+    server: (await import("os")).hostname(),
+  })
+    .then(() => log(`registered as "${SESSION_NAME}"`))
+    .catch((e) => log(`warning: could not register with Commander: ${e}`));
 
   log("ready — waiting for Commander events");
 }

@@ -6,7 +6,8 @@ cd server && bun install && bun run start
 ```
 
 ## 架构
-- MCP SSE (`/sse`) — Claude Code / Codex 连接端点
+- MCP Streamable HTTP (`/mcp`) — Claude Code / Codex 连接端点
+- SSE Push (`/events/:session`) — Agent 实时接收任务推送
 - HTTP REST (`/api/*`) — 监控脚本/curl 用
 - SQLite WAL (`~/.commander/commander.db`)
 
