@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "commander": {
+      "command": "bun",
+      "args": ["run", "commander-channel.ts"],
+      "env": {
+        "COMMANDER_URL": "http://127.0.0.1:9200",
+        "COMMANDER_SESSION": "default"
+      }
+    }
+  }
+}
