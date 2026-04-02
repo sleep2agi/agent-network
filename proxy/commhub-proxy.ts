@@ -17,6 +17,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { hostname } from "os";
 import { readFileSync, existsSync } from "fs";
+import { execSync } from "child_process";
 import { join } from "path";
 
 // ── .env loader ─────────────────────────────────────
@@ -41,6 +42,7 @@ const COMMHUB_URL = process.env.COMMHUB_URL || "http://127.0.0.1:9200";
 const ALIAS = process.env.COMMHUB_ALIAS || `codex-${hostname()}`;
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || "";
 const RESUME_ID = process.env.COMMHUB_RESUME_ID || crypto.randomUUID();
+const TMUX_NAME = (() => { try { return execSync("tmux display-message -p '#S'", { encoding: "utf-8", timeout: 2000 }).trim(); } catch { return ""; } })();
 const POLL_MS = 25_000; // 25s per poll round (same as mcp-wechat-server)
 const MAX_WAIT_MS = 7 * 24 * 3600_000; // 7 day max (same as mcp-wechat-server)
 
@@ -324,6 +326,7 @@ async function main() {
     hostname: hostname(),
     agent: "codex",
     project_dir: process.cwd(),
+    tmux_name: TMUX_NAME || undefined,
   }).catch((e) => log(`register warning: ${e}`));
 
   log("ready — Codex can now call get_task to receive tasks");
