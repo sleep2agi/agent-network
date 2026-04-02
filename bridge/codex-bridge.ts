@@ -18,6 +18,7 @@ import { createInterface } from "readline";
 const COMMHUB_URL = process.env.COMMHUB_URL || "http://127.0.0.1:9200";
 const ALIAS = process.env.COMMHUB_ALIAS || `codex-${hostname()}`;
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || "";
+const RESUME_ID = process.env.COMMHUB_RESUME_ID || crypto.randomUUID();
 const WORK_DIR = process.env.CODEX_CWD || process.cwd();
 const SANDBOX = process.env.CODEX_SANDBOX || "read-only";
 
@@ -39,7 +40,7 @@ async function callCommHub(toolName: string, args: Record<string, unknown>): Pro
   };
   if (AUTH_TOKEN) headers.Authorization = `Bearer ${AUTH_TOKEN}`;
 
-  await fetch(`${COMMHUB_URL}/mcp`, {
+  const initRes = await fetch(`${COMMHUB_URL}/mcp`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -53,10 +54,12 @@ async function callCommHub(toolName: string, args: Record<string, unknown>): Pro
       },
     }),
   });
-
+  const initText = await initRes.text();
+  const sessionId = initRes.headers.get("mcp-session-id") || initRes.headers.get("Mcp-Session-Id");
+  const toolHeaders = sessionId ? { ...headers, "Mcp-Session-Id": sessionId } : headers;
   const res = await fetch(`${COMMHUB_URL}/mcp`, {
     method: "POST",
-    headers,
+    headers: toolHeaders,
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 2,
@@ -66,13 +69,38 @@ async function callCommHub(toolName: string, args: Record<string, unknown>): Pro
   });
 
   const text = await res.text();
-  const dataLine = text.split("\n").find((l) => l.startsWith("data: "));
-  if (dataLine) {
-    const json = JSON.parse(dataLine.slice(6));
-    return json?.result?.content?.[0]?.text
-      ? JSON.parse(json.result.content[0].text)
-      : json;
+  if (!res.ok) {
+    throw new Error(`CommHub ${toolName} failed: ${text.slice(0, 200) || initText.slice(0, 200)}`);
   }
+  for (const line of text.split("\n").reverse()) {
+    if (!line.startsWith("data: ")) continue;
+    const json = JSON.parse(line.slice(6));
+    if (json?.error) throw new Error(json.error.message || `CommHub ${toolName} failed`);
+    const payload = json?.result?.content?.[0]?.text;
+    if (payload) {
+      try {
+        return JSON.parse(payload);
+      } catch {
+        if (json?.result?.isError) throw new Error(payload);
+        return { ok: true, raw: payload };
+      }
+    }
+    return json?.result ?? json;
+  }
+  try {
+    const json = JSON.parse(text);
+    if (json?.error) throw new Error(json.error.message || `CommHub ${toolName} failed`);
+    const payload = json?.result?.content?.[0]?.text;
+    if (payload) {
+      try {
+        return JSON.parse(payload);
+      } catch {
+        if (json?.result?.isError) throw new Error(payload);
+        return { ok: true, raw: payload };
+      }
+    }
+    return json?.result ?? json;
+  } catch {}
   return { ok: false, error: "no response" };
 }
 
@@ -352,33 +380,51 @@ async function handleNewTask() {
   await callCommHub("ack_inbox", { alias: ALIAS, message_id: msg.id });
 
   busy = true;
-  await callCommHub("report_status", {
-    alias: ALIAS,
-    status: "working",
-    task: task.slice(0, 200),
-  });
+    await callCommHub("report_status", {
+      resume_id: RESUME_ID,
+      alias: ALIAS,
+      status: "working",
+      task: task.slice(0, 200),
+    });
 
   try {
     const result = await executeTask(task, WORK_DIR);
+    const completionText = result.result || `Codex turn ${result.status}`;
 
     await callCommHub("report_completion", {
       alias: ALIAS,
       task: task.slice(0, 200),
-      result: result.result || `Codex turn ${result.status}`,
+      result: completionText,
       artifacts: result.touchedFiles.length > 0 ? result.touchedFiles : undefined,
     });
+    if (msg.from_session && msg.from_session !== "hub") {
+      await callCommHub("send_task", {
+        alias: msg.from_session,
+        task: completionText,
+        from_session: ALIAS,
+      });
+    }
     log(`→ done: ${result.result.slice(0, 80)}`);
   } catch (err) {
     log(`task error: ${err}`);
     await callCommHub("report_status", {
+      resume_id: RESUME_ID,
       alias: ALIAS,
       status: "error",
       task: `Error: ${err}`,
     });
+    if (msg.from_session && msg.from_session !== "hub") {
+      await callCommHub("send_task", {
+        alias: msg.from_session,
+        task: `Error: ${err}`,
+        from_session: ALIAS,
+        priority: "high",
+      });
+    }
   }
 
   busy = false;
-  await callCommHub("report_status", { alias: ALIAS, status: "idle" });
+  await callCommHub("report_status", { resume_id: RESUME_ID, alias: ALIAS, status: "idle" });
 }
 
 // ── Main ────────────────────────────────────────────
@@ -387,6 +433,7 @@ async function main() {
   log(`ALIAS=${ALIAS} COMMHUB=${COMMHUB_URL} CWD=${WORK_DIR} SANDBOX=${SANDBOX}`);
 
   await callCommHub("report_status", {
+    resume_id: RESUME_ID,
     alias: ALIAS,
     status: "idle",
     server: hostname(),
@@ -396,8 +443,8 @@ async function main() {
   });
   log(`registered as "${ALIAS}"`);
 
-  connectSSE().catch((err) => log(`SSE fatal: ${err}`));
   log("ready — waiting for CommHub tasks");
+  await connectSSE();
 }
 
 main().catch((err) => {

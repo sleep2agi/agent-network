@@ -40,6 +40,7 @@ loadEnvFile(join(HOME, ".claude/channels/commhub/.env"));
 const COMMHUB_URL = process.env.COMMHUB_URL || "http://127.0.0.1:9200";
 const ALIAS = process.env.COMMHUB_ALIAS || `codex-${hostname()}`;
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || "";
+const RESUME_ID = process.env.COMMHUB_RESUME_ID || crypto.randomUUID();
 const POLL_MS = 25_000; // 25s per poll round (same as mcp-wechat-server)
 const MAX_WAIT_MS = 7 * 24 * 3600_000; // 7 day max (same as mcp-wechat-server)
 
@@ -176,6 +177,7 @@ After receiving a task, process it and call report_result with the outcome.`,
 
     // Report status before polling
     await callMcpTool("report_status", {
+      resume_id: RESUME_ID,
       alias: ALIAS,
       status: "idle",
       task: "Waiting for tasks...",
@@ -194,6 +196,7 @@ After receiving a task, process it and call report_result with the outcome.`,
 
     // Update status to working
     await callMcpTool("report_status", {
+      resume_id: RESUME_ID,
       alias: ALIAS,
       status: "working",
       task: (messages[0].content as string).slice(0, 200),
@@ -236,6 +239,7 @@ server.tool(
       });
     } else {
       await callMcpTool("report_status", {
+        resume_id: RESUME_ID,
         alias: ALIAS,
         status: status === "error" ? "error" : "blocked",
         task: input.result.slice(0, 200),
@@ -244,7 +248,7 @@ server.tool(
     }
 
     // Back to idle
-    await callMcpTool("report_status", { alias: ALIAS, status: "idle" });
+    await callMcpTool("report_status", { resume_id: RESUME_ID, alias: ALIAS, status: "idle" });
 
     return {
       content: [{
@@ -304,6 +308,7 @@ async function main() {
 
   // Register with CommHub
   await callMcpTool("report_status", {
+    resume_id: RESUME_ID,
     alias: ALIAS,
     status: "idle",
     server: hostname(),
