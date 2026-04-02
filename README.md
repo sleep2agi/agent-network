@@ -15,7 +15,7 @@ A collection of battle-tested patterns for coordinating multiple AI coding agent
 ```
                     ┌────────────────────────────┐
                     │   Commander MCP Server      │
-                    │   47.77.216.1:9200          │
+                    │   your-server-ip:9200          │
                     │                              │
                     │   MCP SSE  +  HTTP REST     │
                     │   (dual interface)           │
@@ -43,7 +43,7 @@ A collection of battle-tested patterns for coordinating multiple AI coding agent
 {
   "mcpServers": {
     "commander": {
-      "url": "http://47.77.216.1:9200/sse"
+      "url": "http://your-server-ip:9200/sse"
     }
   }
 }
@@ -54,7 +54,7 @@ A collection of battle-tested patterns for coordinating multiple AI coding agent
 {
   "mcpServers": {
     "commander": {
-      "url": "http://47.77.216.1:9200/sse"
+      "url": "http://your-server-ip:9200/sse"
     }
   }
 }

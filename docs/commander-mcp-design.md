@@ -53,7 +53,7 @@ See [`architecture-decision.md`](architecture-decision.md) for the full decision
 ```
                     ┌─────────────────────────────────────┐
                     │       Commander MCP Server            │
-                    │       47.77.216.1:9200                │
+                    │       your-server-ip:9200                │
                     │                                       │
                     │  ┌───────────┐  ┌─────────────────┐  │
                     │  │  MCP SSE  │  │   HTTP REST     │  │
@@ -404,7 +404,7 @@ In `~/.claude/settings.json` (recommended for global access):
 {
   "mcpServers": {
     "commander": {
-      "url": "http://47.77.216.1:9200/sse"
+      "url": "http://your-server-ip:9200/sse"
     }
   }
 }
@@ -416,7 +416,7 @@ Or per-project `.mcp.json`:
 {
   "mcpServers": {
     "commander": {
-      "url": "http://47.77.216.1:9200/sse"
+      "url": "http://your-server-ip:9200/sse"
     }
   }
 }
@@ -430,7 +430,7 @@ In `config.json`:
 {
   "mcpServers": {
     "commander": {
-      "url": "http://47.77.216.1:9200/sse"
+      "url": "http://your-server-ip:9200/sse"
     }
   }
 }
@@ -552,7 +552,7 @@ This is **not required for MVP** -- the SSE Tool interface already provides sub-
 - [ ] Implement 5 hub tools (get_all_status, get_session_status, send_task, broadcast, get_completions)
 - [ ] SQLite tables with WAL mode
 - [ ] MCP SSE endpoint (`/sse`) + HTTP REST endpoints (`/api/status`, `/api/task`, `/health`)
-- [ ] Deploy to 47.77.216.1:9200 via systemd
+- [ ] Deploy to your-server-ip:9200 via systemd
 - [ ] End-to-end test: Claude Code session connects via SSE -> reports status -> Hub sends task -> Agent receives -> executes -> reports completion
 
 ### Phase 2 -- Full Rollout (2-3 days)

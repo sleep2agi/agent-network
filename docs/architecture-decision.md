@@ -24,7 +24,7 @@ After 48 hours of operating 15+ agent sessions across 4 servers, and evaluating 
 ```
                     ┌─────────────────────────────────┐
                     │      Commander MCP Server         │
-                    │      47.77.216.1:9200             │
+                    │      your-server-ip:9200             │
                     │                                   │
                     │  ┌───────────┐  ┌─────────────┐  │
                     │  │  MCP SSE  │  │  HTTP REST   │  │
@@ -127,7 +127,7 @@ In `~/.claude/settings.json` (global) or project `.mcp.json`:
 {
   "mcpServers": {
     "commander": {
-      "url": "http://47.77.216.1:9200/sse"
+      "url": "http://your-server-ip:9200/sse"
     }
   }
 }
@@ -141,7 +141,7 @@ In `config.json`:
 {
   "mcpServers": {
     "commander": {
-      "url": "http://47.77.216.1:9200/sse"
+      "url": "http://your-server-ip:9200/sse"
     }
   }
 }
