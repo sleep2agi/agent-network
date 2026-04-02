@@ -118,7 +118,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "commhub_report_status",
-      description: "Update this session's status in CommHub (working/idle/blocked/error).",
+      description: "Update this session's status in CommHub (working/idle/blocked/error). Returns inbox_count.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -130,6 +130,27 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           progress: { type: "number", description: "Progress 0-100" },
         },
         required: ["status"],
+      },
+    },
+    {
+      name: "commhub_send_task",
+      description: "Send a task to another session via CommHub.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          alias: { type: "string", description: "Target session alias" },
+          task: { type: "string", description: "Task content" },
+          priority: { type: "string", enum: ["high", "normal", "low"], description: "Priority (default: normal)" },
+        },
+        required: ["alias", "task"],
+      },
+    },
+    {
+      name: "commhub_get_all_status",
+      description: "Get status of all sessions from CommHub.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
       },
     },
   ],
@@ -213,6 +234,22 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       task,
       progress,
     });
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  }
+
+  if (name === "commhub_send_task") {
+    const { alias, task, priority } = args as any;
+    const result = await callCommHub("send_task", {
+      alias,
+      task,
+      priority: priority || "normal",
+      from_session: ALIAS,
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  }
+
+  if (name === "commhub_get_all_status") {
+    const result = await callCommHub("get_all_status", {});
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   }
 
