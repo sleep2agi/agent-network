@@ -3,6 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db } from "./db.js";
+import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const AUTH_TOKEN = process.env.COMMANDER_AUTH_TOKEN;
@@ -11,7 +12,7 @@ const AUTH_TOKEN = process.env.COMMANDER_AUTH_TOKEN;
 function createServer(): McpServer {
   const server = new McpServer({
     name: "commander",
-    version: "0.3.0",
+    version: "0.4.0",
   });
   registerTools(server);
   return server;
@@ -53,14 +54,27 @@ Bun.serve({
       return transport.handleRequest(req);
     }
 
+    // ── SSE push: Agent 实时接收任务推送 ──
+    // GET /events/知识哥 → 保持长连接，send_task 时秒推
+    const eventsMatch = url.pathname.match(/^\/events\/(.+)$/);
+    if (eventsMatch && req.method === "GET") {
+      const authErr = requireAuth(req);
+      if (authErr) return authErr;
+      const sessionName = decodeURIComponent(eventsMatch[1]);
+      return createSSEStream(sessionName);
+    }
+
     // ── REST: health (public, no auth) ──
     if (url.pathname === "/health") {
       const count = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM sessions").get();
+      const sse = getSSEStats();
       return Response.json({
         ok: true,
-        version: "0.3.0",
+        version: "0.4.0",
         transport: "streamable-http",
         sessions: count?.cnt ?? 0,
+        sse_connections: sse.total,
+        sse_sessions: sse.sessions,
         auth: AUTH_TOKEN ? "enabled" : "disabled",
         uptime: process.uptime(),
       });
@@ -97,6 +111,11 @@ Bun.serve({
          VALUES (?1, ?2, 'task', ?3, ?4, 'api')`,
         [id, body.session_name, body.priority, body.task]
       );
+      // SSE push: 秒达
+      const pending = db.query<{ cnt: number }, [string]>(
+        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
+      ).get(body.session_name);
+      pushEvent(body.session_name, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority });
       return Response.json({ ok: true, message_id: id });
     }
 
@@ -108,14 +127,15 @@ Bun.serve({
     }
 
     return new Response(
-      `Commander MCP Server v0.3.0 (Streamable HTTP)
+      `Commander MCP Server v0.4.0 (Streamable HTTP + SSE Push)
 
 Endpoints:
-  POST /mcp            - MCP Streamable HTTP (for Claude Code / Codex)
-  GET  /health         - Health check
-  GET  /api/status     - All sessions ${AUTH_TOKEN ? "(auth required)" : ""}
-  POST /api/task       - Send task via REST ${AUTH_TOKEN ? "(auth required)" : ""}
-  GET  /api/completions - Recent completions ${AUTH_TOKEN ? "(auth required)" : ""}
+  POST /mcp               - MCP Streamable HTTP (for Claude Code / Codex)
+  GET  /events/:session   - SSE realtime push (Agent subscribes here)
+  GET  /health            - Health check
+  GET  /api/status        - All sessions ${AUTH_TOKEN ? "(auth required)" : ""}
+  POST /api/task          - Send task via REST ${AUTH_TOKEN ? "(auth required)" : ""}
+  GET  /api/completions   - Recent completions ${AUTH_TOKEN ? "(auth required)" : ""}
 
 Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMANDER_AUTH_TOKEN)" : "disabled (set COMMANDER_AUTH_TOKEN to enable)"}
 `,
@@ -135,7 +155,7 @@ process.on("SIGINT", shutdown);
 
 console.log(`
 ╔══════════════════════════════════════════════════╗
-║   Commander MCP Server v0.3.0                     ║
+║   Commander MCP Server v0.4.0                     ║
 ║   Transport: Streamable HTTP (Bun native)         ║
 ║   Auth: ${AUTH_TOKEN ? "ENABLED (Bearer token)" : "DISABLED (set COMMANDER_AUTH_TOKEN)"}${"".padEnd(AUTH_TOKEN ? 5 : 0)}║
 ║                                                   ║

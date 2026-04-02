@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { db, uuidv4 } from "./db.js";
+import { pushEvent, pushBroadcast } from "./push.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -230,6 +231,12 @@ export function registerTools(server: McpServer) {
 
       const session = db.query<any, [string]>("SELECT status FROM sessions WHERE name = ?1").get(session_name);
 
+      // SSE push: 秒达
+      const pending = db.query<{ cnt: number }, [string]>(
+        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
+      ).get(session_name);
+      pushEvent(session_name, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session });
+
       return {
         content: [
           {
@@ -272,6 +279,9 @@ export function registerTools(server: McpServer) {
         );
         ids.push(id);
       }
+
+      // SSE push: 广播秒达
+      pushBroadcast(targets.map(t => t.name), { type: "broadcast", inbox_count: 1, message: message.slice(0, 200) });
 
       return {
         content: [
