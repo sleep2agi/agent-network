@@ -61,6 +61,20 @@ async function commhubFetch(endpoint: string, body?: any): Promise<any> {
   return res.json();
 }
 
+function parseSSEData(text: string): any {
+  // Extract last data: line from SSE response
+  for (const line of text.split("\n").reverse()) {
+    if (line.startsWith("data: ")) {
+      try {
+        return JSON.parse(line.slice(6));
+      } catch { continue; }
+    }
+  }
+  // Try parsing as plain JSON (non-SSE response)
+  try { return JSON.parse(text); } catch {}
+  return null;
+}
+
 async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<any> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -68,7 +82,8 @@ async function callMcpTool(toolName: string, args: Record<string, unknown>): Pro
   };
   if (AUTH_TOKEN) headers.Authorization = `Bearer ${AUTH_TOKEN}`;
 
-  await fetch(`${COMMHUB_URL}/mcp`, {
+  // Step 1: Initialize and extract session ID
+  const initRes = await fetch(`${COMMHUB_URL}/mcp`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -79,10 +94,17 @@ async function callMcpTool(toolName: string, args: Record<string, unknown>): Pro
       },
     }),
   });
+  const initText = await initRes.text();
+  // Extract Mcp-Session header if present
+  const sessionId = initRes.headers.get("mcp-session-id") || initRes.headers.get("Mcp-Session-Id");
+
+  // Step 2: Call tool with session context
+  const toolHeaders = { ...headers };
+  if (sessionId) toolHeaders["Mcp-Session-Id"] = sessionId;
 
   const res = await fetch(`${COMMHUB_URL}/mcp`, {
     method: "POST",
-    headers,
+    headers: toolHeaders,
     body: JSON.stringify({
       jsonrpc: "2.0", id: 2, method: "tools/call",
       params: { name: toolName, arguments: args },
@@ -90,14 +112,18 @@ async function callMcpTool(toolName: string, args: Record<string, unknown>): Pro
   });
 
   const text = await res.text();
-  const dataLine = text.split("\n").find((l) => l.startsWith("data: "));
-  if (dataLine) {
-    const json = JSON.parse(dataLine.slice(6));
-    return json?.result?.content?.[0]?.text
-      ? JSON.parse(json.result.content[0].text)
-      : json;
+  const parsed = parseSSEData(text);
+  if (!parsed) {
+    log(`callMcpTool(${toolName}) parse failed: ${text.slice(0, 200)}`);
+    return { ok: false, error: "parse failed" };
   }
-  return { ok: false };
+
+  // Extract tool result
+  const toolText = parsed?.result?.content?.[0]?.text;
+  if (toolText) {
+    try { return JSON.parse(toolText); } catch { return { ok: true, raw: toolText }; }
+  }
+  return parsed?.result || parsed;
 }
 
 // ── Long-poll for tasks (mcp-wechat-server pattern) ─
