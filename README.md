@@ -134,29 +134,30 @@ COMMHUB_ALIAS=my-agent-name
 **MCP Streamable HTTP 星型拓扑**——一个 CommHub Server 居中，所有 Session 通过 Streamable HTTP 连接接入。
 
 ```
-                    ┌─────────────────────────────────┐
-                    │     CommHub Server v0.4.1        │
-                    │     your-server:9200             │
-                    │                                  │
-                    │   POST /mcp    → Streamable HTTP │
-                    │   GET  /events → SSE Push        │
-                    │   GET  /api    → REST            │
-                    └──────────┬────────────────────────┘
+                    ┌──────────────────────────────────┐
+                    │     CommHub Server v0.4.1         │
+                    │     your-server:9200              │
+                    │                                   │
+                    │   POST /mcp    → Streamable HTTP  │
+                    │   GET  /events → SSE Push         │
+                    │   GET  /api    → REST             │
+                    └──────────┬─────────────────────────┘
                                │
-          ┌────────┬───────┬───┴───┬───────┬────────┐
-          │        │       │       │       │        │
-       Claude   Claude  Claude  Codex   Codex   Claude
-       Code #1  Code #2 Code #N  #1      #2     Code #M
-       (MCP)    (MCP)   (Channel)(MCP)  (MCP)   (Channel)
-       服务器A   服务器B  服务器C  服务器A  服务器B  服务器D
+          ┌────────┬───────┬───┴───┬────────┬──────────┐
+          │        │       │       │        │          │
+       Claude   Claude  Claude  MiniMax  Codex      Claude
+       Code     Code    Code    M2.7     GPT-5.4    Code
+       (Channel)(Channel)(MCP)  (MCP http)(Proxy)   (Channel)
+       硅谷      Mac     96GB    96GB     硅谷       服务器D
 ```
 
-### 两种接入方式
+### 三种接入方式
 
-| 方式 | 接口 | 配置类型 | 延迟 | 适用场景 |
-|------|------|---------|------|---------|
-| **MCP Tool** | `POST /mcp` | `"url": "http://..."` | Agent 主动调用 | Codex、简单部署 |
-| **Channel 插件** | `GET /events/:session` | `"type": "stdio"` | 实时推送 <1s | Claude Code 推荐 |
+| 方式 | 接口 | 配置 | 延迟 | 适用场景 | 已验证 |
+|------|------|------|------|---------|--------|
+| **Channel 插件** | SSE Push | `"type": "stdio"` .mcp.json | 实时 <1s | Claude Code 推荐 | Claude Code (硅谷/Mac/96GB) |
+| **MCP http** | `POST /mcp` | `"url": "http://..."` settings.json | Agent 主动调用 | 第三方模型 (MiniMax/Qwen) | MiniMax-M2.7 (96GB) |
+| **commhub-proxy** | 长轮询 25s | `codex mcp add` stdio | 0-25s | Codex 推荐 | Codex GPT-5.4 (硅谷) |
 
 ### 核心设计决策
 
@@ -352,22 +353,72 @@ claude --dangerously-skip-permissions \
 | `COMMHUB_TOKEN` | (空) | 认证 Token（匹配服务端 `COMMHUB_AUTH_TOKEN`） |
 | `COMMHUB_TMUX` | (自动检测) | 手动指定 tmux session 名称 |
 
+## CommHub Proxy（Codex 专用）
+
+Codex 不支持 Channel，用 commhub-proxy 代替——一个长轮询 MCP stdio Server，参考 mcp-wechat-server 的阻塞模式。
+
+```
+proxy/
+├── commhub-proxy.ts    # 长轮询 MCP Server（Codex 用）
+└── package.json
+```
+
+### 配置（一行命令）
+
+```bash
+codex mcp add commhub-proxy \
+  --env COMMHUB_URL=http://YOUR_IP:9200 \
+  --env COMMHUB_ALIAS=codex-my-agent \
+  -- bun /path/to/agent-orchestra/proxy/commhub-proxy.ts
+```
+
+### 启动
+
+```bash
+codex --dangerously-bypass-approvals-and-sandbox \
+  "LOOP FOREVER: call commhub-proxy.get_task(wait=true), execute tasks, report_result. NEVER STOP."
+```
+
+### Proxy Tools（4 个）
+
+| 工具 | 用途 |
+|------|------|
+| `get_task` | 长轮询 25s 等 CommHub 任务（阻塞到有任务或超时） |
+| `report_result` | 任务完成回报 |
+| `send_message` | 向其他 session 发消息 |
+| `get_status` | 查看全局状态 |
+
+## 实战验证结果
+
+| Agent | 模型 | 服务器 | 接入方式 | 状态 |
+|-------|------|--------|---------|------|
+| 通信哥 | Claude Opus 4.6 | 硅谷 | Channel (SSE) | 运行中 |
+| codex-硅谷 | GPT-5.4 | 硅谷 | commhub-proxy (长轮询) | 自动轮询中 |
+| minimax-96g | MiniMax-M2.7 | 96GB | MCP http | idle 待命 |
+| 指挥室 | Claude Opus 4.6 | 硅谷 | Channel (SSE) | 调度中 |
+| 知识哥 | Claude Opus 4.6 | Mac | Channel (SSE) | 待命 |
+| 书小生 | Claude Opus 4.6 | Mac | Channel (SSE) | 视频生成中 |
+
+**跨模型通信已验证**: Claude Code <-> Codex GPT-5.4 <-> MiniMax M2.7 全部通过 CommHub 双向通信。
+
 ## 落地路径
 
-### Phase 1：今天就能做（已完成）
+### Phase 1（已完成）
 1. ~~Codex MCP Tool 做本地代码审查~~
 2. ~~Agent Teams 做本地并行任务~~
 
-### Phase 2：本周（已完成）
+### Phase 2（已完成）
 3. ~~**部署 CommHub Server**~~ -- v0.4.1 上线
 4. ~~所有 Session 配上 MCP URL~~
 5. ~~**CommHub Channel 插件**~~ -- SSE 实时推送已验证
 6. ~~**Channel stdio 模式确认**~~ -- server:commhub + .mcp.json 配置已验证
+7. ~~**commhub-proxy for Codex**~~ -- 长轮询 MCP Server 已验证
+8. ~~**跨模型通信**~~ -- Claude <-> Codex <-> MiniMax 全部测通
 
 ### Phase 3：进行中
-7. Dashboard 监控面板（`/admin/commhub`）
-8. 完全退役 tmux send-keys
-9. 跨服务器 Channel 连接验证
+9. Dashboard 监控面板
+10. 完全退役 tmux send-keys
+11. 更多服务器接入
 
 ## 社区项目参考
 
