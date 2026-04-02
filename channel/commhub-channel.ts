@@ -176,6 +176,11 @@ async function callCommHub(toolName: string, args: Record<string, unknown>): Pro
       },
     }),
   });
+  if (!initRes.ok) {
+    const errText = await initRes.text();
+    log(`CommHub init failed: ${initRes.status} ${errText.slice(0, 100)}`);
+    return { ok: false, error: `init failed: ${initRes.status}` };
+  }
   await initRes.text();
 
   const res = await fetch(`${COMMHUB_URL}/mcp`, {
@@ -379,6 +384,17 @@ main().catch((err) => {
   process.exit(1);
 });
 
-process.stdin.on("end", () => process.exit(0));
-process.on("SIGTERM", () => process.exit(0));
-process.on("SIGINT", () => process.exit(0));
+async function gracefulShutdown() {
+  log("shutting down, reporting offline...");
+  await callCommHub("report_status", {
+    resume_id: RESUME_ID,
+    alias: ALIAS,
+    status: "error",
+    task: "session disconnected",
+  }).catch(() => {});
+  process.exit(0);
+}
+
+process.stdin.on("end", () => gracefulShutdown());
+process.on("SIGTERM", () => gracefulShutdown());
+process.on("SIGINT", () => gracefulShutdown());

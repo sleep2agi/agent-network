@@ -34,10 +34,9 @@ export function registerTools(server: McpServer, clientIP?: string) {
       console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
 
-      // If alias is reused with a new resume_id (agent restarted), remove old row
+      // Wrap DELETE + UPSERT in transaction to prevent race conditions
+      db.run("BEGIN IMMEDIATE");
       db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2", [alias, resume_id]);
-
-      // UPSERT on resume_id — COALESCE preserves existing values on heartbeats
       db.run(
         `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, datetime('now'))
@@ -58,6 +57,8 @@ export function registerTools(server: McpServer, clientIP?: string) {
            updated_at = datetime('now')`,
         [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null]
       );
+
+      db.run("COMMIT");
 
       // inbox uses alias for routing
       const row = db.query<{ cnt: number }, [string]>(

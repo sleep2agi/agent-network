@@ -86,7 +86,10 @@ Bun.serve({
       });
       const server = createServer(clientIP);
       await server.connect(transport);
-      return transport.handleRequest(req);
+      const response = await transport.handleRequest(req);
+      // Disconnect after response to prevent McpServer leak
+      setImmediate(() => server.close().catch(() => {}));
+      return response;
     }
 
     // ── SSE push: Agent 实时接收任务推送 ──

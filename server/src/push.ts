@@ -32,13 +32,26 @@ export function createSSEStream(sessionName: string): Response {
 
       // 发送初始心跳
       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "connected", session: sessionName })}\n\n`));
+
+      // Periodic keepalive every 30s to prevent proxy/LB idle timeout
+      const keepalive = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`: keepalive\n\n`));
+        } catch {
+          clearInterval(keepalive);
+        }
+      }, 30_000);
+      (client as any)._keepalive = keepalive;
     },
     cancel() {
       // 断线清理
       const arr = clients.get(sessionName);
       if (arr) {
         const idx = arr.findIndex(c => c.controller === ctrl);
-        if (idx !== -1) arr.splice(idx, 1);
+        if (idx !== -1) {
+          clearInterval((arr[idx] as any)._keepalive);
+          arr.splice(idx, 1);
+        }
         if (arr.length === 0) clients.delete(sessionName);
         console.log(`[${ts()}] SSE ✕ ${sessionName} disconnected (${arr.length} remaining)`);
       }

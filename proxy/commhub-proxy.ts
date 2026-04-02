@@ -130,22 +130,31 @@ async function callMcpTool(toolName: string, args: Record<string, unknown>): Pro
 // ── Long-poll for tasks (mcp-wechat-server pattern) ─
 async function pollForTask(waitMs: number): Promise<any[]> {
   const deadline = Date.now() + waitMs;
+  let backoffMs = POLL_MS;
 
   while (Date.now() < deadline) {
-    const inbox = await callMcpTool("get_inbox", { alias: ALIAS, limit: 5 });
+    try {
+      const inbox = await callMcpTool("get_inbox", { alias: ALIAS, limit: 5 });
 
-    if (inbox?.ok && inbox.messages?.length > 0) {
-      // ACK all messages
-      for (const msg of inbox.messages) {
-        await callMcpTool("ack_inbox", { alias: ALIAS, message_id: msg.id });
+      if (inbox?.ok && inbox.messages?.length > 0) {
+        // ACK all messages
+        for (const msg of inbox.messages) {
+          await callMcpTool("ack_inbox", { alias: ALIAS, message_id: msg.id }).catch(() => {});
+        }
+        return inbox.messages;
       }
-      return inbox.messages;
+
+      backoffMs = POLL_MS; // reset backoff on success
+    } catch (err) {
+      // Exponential backoff on server errors (cap at 60s)
+      log(`poll error: ${err}, backoff ${backoffMs}ms`);
+      backoffMs = Math.min(backoffMs * 2, 60_000);
     }
 
-    // No messages — sleep then retry (like mcp-wechat-server's 25s poll)
+    // Sleep before retry
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    await new Promise((r) => setTimeout(r, Math.min(POLL_MS, remaining)));
+    await new Promise((r) => setTimeout(r, Math.min(backoffMs, remaining)));
   }
 
   return []; // timeout, no tasks
