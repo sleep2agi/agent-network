@@ -291,6 +291,7 @@ Channel 模式优势：**任务从 Hub 发出到 Agent 看到 < 1 秒**，无需
 ## 文档
 
 - [`docs/quickstart.md`](docs/quickstart.md) -- **新电脑 5 步配完**
+- [`docs/commhub-codex-bridge.md`](docs/commhub-codex-bridge.md) -- CommHub-Codex Bridge 协议设计 + 最小实现
 - [`docs/channel-research.md`](docs/channel-research.md) -- Channel 通信方案调研：mcp-wechat-server + codex-plugin-cc 源码分析
 - [`docs/codex-app-server.md`](docs/codex-app-server.md) -- Codex App-Server 调研：协议、能力、混合方案
 - [`docs/commhub-limitations.md`](docs/commhub-limitations.md) -- 已知限制和注意事项
