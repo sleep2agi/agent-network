@@ -100,12 +100,28 @@ This repo documents orchestration approaches from the simplest to production-gra
 
 **MCP SSE is the endgame for cross-server.** Persistent connections, real-time push, structured JSON, no polling overhead. One Commander Server handles 30+ sessions with 30 SSE connections.
 
+## Quick Start
+
+```bash
+cd server && bun install && bun run start
+# Commander MCP Server running on port 9200
+```
+
+Then add to each agent's `~/.claude/settings.json`:
+```json
+{ "mcpServers": { "commander": { "url": "http://YOUR_IP:9200/sse" } } }
+```
+
+See [`docs/quickstart.md`](docs/quickstart.md) for full setup guide.
+
 ## Documentation
 
-- [`docs/architecture-decision.md`](docs/architecture-decision.md) -- Architecture decision record: MCP SSE star topology (2026-04-01)
-- [`docs/orchestration-guide.md`](docs/orchestration-guide.md) -- Full comparison of all approaches with cost analysis and migration path
-- [`docs/commander-mcp-design.md`](docs/commander-mcp-design.md) -- Detailed design for the Commander MCP Server (SSE + REST dual interface)
-- [`docs/experience.md`](docs/experience.md) -- 48-hour field report: managing 15+ agent sessions, lessons learned, and operational principles
+- [`docs/quickstart.md`](docs/quickstart.md) -- **Start here**: deploy Commander + connect 30 sessions in 30 minutes
+- [`docs/protocol-decision.md`](docs/protocol-decision.md) -- Why MCP (not A2A, not ACP)
+- [`docs/architecture-decision.md`](docs/architecture-decision.md) -- Architecture decision record: MCP SSE star topology
+- [`docs/orchestration-guide.md`](docs/orchestration-guide.md) -- Full comparison of all approaches with cost analysis
+- [`docs/commander-mcp-design.md`](docs/commander-mcp-design.md) -- Detailed design for the Commander MCP Server
+- [`docs/experience.md`](docs/experience.md) -- 48-hour field report: lessons learned
 
 ## Adoption Path
 
