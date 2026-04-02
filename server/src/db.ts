@@ -5,6 +5,7 @@ import { dirname } from "path";
 const DB_PATH = process.env.COMMANDER_DB || `${process.env.HOME}/.commander/commander.db`;
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
+console.log(`[commander] database: ${DB_PATH}`);
 export const db = new Database(DB_PATH);
 db.exec("PRAGMA journal_mode=WAL");
 db.exec("PRAGMA busy_timeout=5000");

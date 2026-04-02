@@ -7,7 +7,7 @@
 
 ## 这是什么？
 
-一套经过实战验证的模式和工具，用于协调分布在多台服务器上的 AI 编程 Agent（Claude Code、Codex 等）。核心组件是 **Commander MCP Server**——一个基于 MCP SSE 星型架构的跨服务器通信中枢。
+一套经过实战验证的模式和工具，用于协调分布在多台服务器上的 AI 编程 Agent（Claude Code、Codex 等）。核心组件是 **Commander MCP Server**——一个基于 MCP Streamable HTTP 星型架构的跨服务器通信中枢。
 
 ## 快速开始
 
@@ -17,21 +17,21 @@ cd server && bun install && bun run start
 
 # 2. 每个 Agent 加一行配置即可连上
 # ~/.claude/settings.json
-{ "mcpServers": { "commander": { "url": "http://YOUR_IP:9200/sse" } } }
+{ "mcpServers": { "commander": { "url": "http://YOUR_IP:9200/mcp" } } }
 ```
 
 详见 [`docs/quickstart.md`](docs/quickstart.md)，30 分钟完成全部部署。
 
 ## 架构
 
-**MCP SSE 星型拓扑**——一个 Commander Server 居中，所有 Session 通过持久 SSE 连接接入。
+**MCP Streamable HTTP 星型拓扑**——一个 Commander Server 居中，所有 Session 通过 Streamable HTTP 连接接入。
 
 ```
                     ┌────────────────────────────┐
                     │   Commander MCP Server      │
                     │   your-server:9200          │
                     │                              │
-                    │   MCP SSE  +  HTTP REST     │
+                    │   MCP Streamable HTTP + REST     │
                     │   （双接口）                  │
                     └──────────┬───────────────────┘
                                │
@@ -46,7 +46,7 @@ cd server && bun install && bun run start
 
 1. **星型拓扑** -- 30 个 Session = 30 条 SSE 连接，不是 N^2 网状
 2. **SSE 而非轮询** -- 持久连接、实时推送、不浪费 Token
-3. **双接口** -- MCP SSE 供 Claude Code/Codex 原生接入 + HTTP REST 供监控面板和脚本
+3. **双接口** -- MCP Streamable HTTP 供 Claude Code/Codex 原生接入 + HTTP REST 供监控面板和脚本
 4. **跨模型通信** -- Claude Code ↔ Codex 通过 Commander 中转，无需直连
 5. **单服务器** -- 一个进程、一个 SQLite 数据库，运维简单
 
@@ -58,7 +58,7 @@ cd server && bun install && bun run start
 | 语言 | TypeScript |
 | MCP SDK | `@modelcontextprotocol/sdk` |
 | 数据库 | SQLite (`bun:sqlite`, WAL 模式) |
-| 传输 | MCP SSE + HTTP REST |
+| 传输 | MCP Streamable HTTP + HTTP REST |
 | 进程管理 | systemd |
 
 ## 要解决的核心问题
@@ -141,7 +141,7 @@ Hub (指挥室)                  Commander              Agent (子 Session)
 
 - [`docs/quickstart.md`](docs/quickstart.md) -- **从这里开始**：部署 Commander + 连接 30 个 Session，30 分钟搞定
 - [`docs/protocol-decision.md`](docs/protocol-decision.md) -- 协议选型：为什么用 MCP（不用 A2A、不用 ACP）
-- [`docs/architecture-decision.md`](docs/architecture-decision.md) -- 架构决策记录：MCP SSE 星型拓扑
+- [`docs/architecture-decision.md`](docs/architecture-decision.md) -- 架构决策记录：MCP Streamable HTTP 星型拓扑
 - [`docs/orchestration-guide.md`](docs/orchestration-guide.md) -- 全方案对比 + 成本分析
 - [`docs/commander-mcp-design.md`](docs/commander-mcp-design.md) -- Commander MCP Server 详细设计
 - [`docs/experience.md`](docs/experience.md) -- 48 小时实战报告：教训和原则

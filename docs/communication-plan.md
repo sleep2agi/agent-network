@@ -71,18 +71,18 @@
 │  │ (Claude Opus)│  │  (Web UI)    │  │  (脚本/自动化)     │ │
 │  └──────┬───────┘  └──────┬───────┘  └─────────┬──────────┘ │
 └─────────┼─────────────────┼────────────────────┼────────────┘
-          │ MCP SSE         │ HTTP REST          │ HTTP REST
+          │ MCP Streamable HTTP         │ HTTP REST          │ HTTP REST
           │                 │                    │
      ┌────▼─────────────────▼────────────────────▼────┐
      │           Commander MCP Server                  │
      │           your-server:9200                      │
      │                                                 │
      │  ┌───────────┐  ┌─────────────┐  ┌──────────┐ │
-     │  │  MCP SSE  │  │  HTTP REST  │  │  SQLite  │ │
-     │  │  /sse     │  │  /api/*     │  │  (WAL)   │ │
+     │  │  MCP Streamable HTTP  │  │  HTTP REST  │  │  SQLite  │ │
+     │  │  /mcp     │  │  /api/*     │  │  (WAL)   │ │
      │  └─────┬─────┘  └─────────────┘  └──────────┘ │
      └────────┼───────────────────────────────────────┘
-              │  30 条 SSE 持久连接
+              │  30 条 Streamable HTTP 连接
     ┌─────────┼─────────┬─────────┬─────────┐
     │         │         │         │         │
 ┌───▼───┐ ┌──▼────┐ ┌──▼────┐ ┌──▼────┐ ┌──▼────┐
@@ -99,7 +99,7 @@
 
 | 层 | 用途 | 协议 |
 |----|------|------|
-| **MCP SSE** | Agent ↔ Commander 结构化通信 | MCP over SSE (持久连接) |
+| **MCP Streamable HTTP** | Agent ↔ Commander 结构化通信 | MCP over SSE (持久连接) |
 | **HTTP REST** | Dashboard + 脚本 ↔ Commander | 标准 HTTP JSON |
 | **tmux** | 进程持久化 + 最后手段 fallback | tmux send-keys (仅限紧急) |
 
@@ -107,8 +107,8 @@
 
 | 角色 | 职责 | 通信方式 |
 |------|------|---------|
-| **Hub Session** | 指挥调度（只派活不干活） | MCP SSE 连 Commander |
-| **子 Agent Session** | 执行具体任务 | MCP SSE 连 Commander |
+| **Hub Session** | 指挥调度（只派活不干活） | MCP Streamable HTTP 连 Commander |
+| **子 Agent Session** | 执行具体任务 | MCP Streamable HTTP 连 Commander |
 | **Dashboard** | 可视化状态 + 交互控制 | HTTP REST 查 Commander |
 | **操作员** | 最终决策 + 人工抽检 | 通过 Hub / Dashboard / curl |
 
@@ -180,7 +180,7 @@ A2A 和 ACP 是与 MCP 平行的协议层，解决不同问题。MCP 管"LLM 怎
 ```
 server/
 ├── src/
-│   ├── index.ts              # 入口：Bun HTTP Server + MCP SSE
+│   ├── index.ts              # 入口：Bun HTTP Server + MCP Streamable HTTP
 │   ├── tools.ts              # 9 个 MCP Tool 定义
 │   └── db.ts                 # SQLite Schema + 辅助函数
 ├── package.json
@@ -285,11 +285,11 @@ server/
 
 ### 4.4 HTTP REST API
 
-除 MCP SSE 外，Commander 同时暴露 HTTP REST 接口供 Dashboard 和脚本使用：
+除 MCP 端点外，Commander 同时暴露 HTTP REST 接口供 Dashboard 和脚本使用：
 
 | 端点 | 方法 | 用途 |
 |------|------|------|
-| `/sse` | GET | MCP SSE 连接端点（Claude Code / Codex 用） |
+| `/mcp` | GET | MCP Streamable HTTP 端点（Claude Code / Codex 用） |
 | `/health` | GET | 健康检查（session 数、连接数、运行时长） |
 | `/api/status` | GET | 所有 Session 状态（JSON） |
 | `/api/task` | POST | 通过 REST 下发任务（JSON body: `{session_name, task, priority}`) |
@@ -354,7 +354,7 @@ curl -fsSL https://bun.sh/install | bash
 cd agent-orchestra/server
 bun install
 bun run start
-# 输出：Commander MCP Server v0.1.0 running on port 9200
+# 输出：Commander MCP Server v0.3.0 running on port 9200
 ```
 
 **步骤 3：systemd 持久化**
@@ -541,7 +541,7 @@ tmux **不再用于通信**，仅用于：
 │ │ Claude Code Session                       │   │
 │ │                                           │   │
 │ │ ┌─────────────────────────────────────┐   │   │
-│ │ │ MCP SSE 连接到 Commander            │   │   │
+│ │ │ MCP Streamable HTTP 连接到 Commander            │   │   │
 │ │ │ - report_status (每个重要步骤后)     │   │   │
 │ │ │ - get_inbox (有新任务时)             │   │   │
 │ │ │ - report_completion (任务完成时)      │   │   │
@@ -567,7 +567,7 @@ tmux **不再用于通信**，仅用于：
 │ 核心通信中枢：                                    │
 │ - 接收 30 条 SSE 连接                            │
 │ - 管理 sessions / inbox / completions           │
-│ - MCP SSE 给 Agent 用                            │
+│ - MCP Streamable HTTP 给 Agent 用                            │
 │ - HTTP REST 给 Dashboard 和脚本用                │
 │                                                 │
 │ Commander 是唯一的通信枢纽                        │

@@ -105,8 +105,8 @@ mco review  # Multi-model review with aggregated results
 ### 3.1 Commander MCP Server (Architecture Confirmed 2026-04-01)
 - See `commander-mcp-design.md` (full design document)
 - See `architecture-decision.md` (decision record)
-- **MCP SSE star topology** -- single Commander Server, all sessions connect via persistent SSE
-- **Dual interface** -- MCP SSE for Claude Code/Codex + HTTP REST for dashboards
+- **MCP Streamable HTTP star topology** -- single Commander Server, all sessions connect via persistent SSE
+- **Dual interface** -- MCP Streamable HTTP for Claude Code/Codex + HTTP REST for dashboards
 - **Cross-model** -- Claude Code ↔ Codex communicate via Commander relay
 - **30 sessions = 30 SSE connections** (not N^2 mesh)
 - Tech stack: Bun + TypeScript + @modelcontextprotocol/sdk + bun:sqlite
@@ -131,7 +131,7 @@ Fragile, no message queue, no structured communication. Use Commander instead.
 
 ### Phase 2: This Week (1-2 days)
 3. **Commander MCP Server MVP** -- SSE star topology, 9 MCP Tools
-4. All Claude Code sessions add `"commander": { "url": "http://your-server-ip:9200/sse" }` to settings.json
+4. All Claude Code sessions add `"commander": { "url": "http://your-server-ip:9200/mcp" }` to settings.json
 5. All Codex sessions add the same URL to config.json
 
 ### Phase 3: Next Week

@@ -32,14 +32,14 @@ Build a **Commander MCP Server** -- a standard MCP Server running on a central s
 
 ### 1.3 Confirmed Architecture: MCP SSE Star Topology
 
-> Previous v0.2.0 had "Plan A (polling) + Plan B (push)". This is superseded.
+> Previous v0.3.0 had "Plan A (polling) + Plan B (push)". This is superseded.
 > Decision: go directly with SSE persistent connections. No polling phase.
 
 | Property | Value |
 |----------|-------|
 | **Topology** | Star -- single Commander hub, all sessions connect to it |
 | **Transport** | MCP SSE (persistent connections, real-time push) |
-| **Dual interface** | MCP SSE (`/sse`) for agents + HTTP REST (`/api/...`) for dashboards |
+| **Dual interface** | MCP Streamable HTTP (`/mcp`) for agents + HTTP REST (`/api/...`) for dashboards |
 | **Clients** | Claude Code (`settings.json`) + Codex (`config.json`) |
 | **Cross-model** | Claude ↔ Codex communicate via Commander relay |
 | **Scaling** | 30 sessions = 30 SSE connections (linear, not N^2) |
@@ -57,7 +57,7 @@ See [`architecture-decision.md`](architecture-decision.md) for the full decision
                     │                                       │
                     │  ┌───────────┐  ┌─────────────────┐  │
                     │  │  MCP SSE  │  │   HTTP REST     │  │
-                    │  │  /sse     │  │   /api/status   │  │
+                    │  │  /mcp     │  │   /api/status   │  │
                     │  │           │  │   /api/task     │  │
                     │  └─────┬─────┘  └────────┬────────┘  │
                     │        │                 │           │
@@ -77,7 +77,7 @@ See [`architecture-decision.md`](architecture-decision.md) for the full decision
          └─────────┘ └────────┘ └────────┘ └────────┘ └────────┘
 ```
 
-All clients connect to the same `/sse` endpoint. The Commander Server maintains per-session state and routes messages between any pair of sessions -- including cross-model (Claude ↔ Codex).
+All clients connect to the same `/mcp` endpoint. The Commander Server maintains per-session state and routes messages between any pair of sessions -- including cross-model (Claude ↔ Codex).
 
 ### Data Flow
 
@@ -310,7 +310,7 @@ commander-mcp-server/
 
 ```typescript
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { Database } from "bun:sqlite";
 import { registerAgentTools } from "./tools/agent-tools";
 import { registerCommanderTools } from "./tools/commander-tools";
@@ -331,7 +331,7 @@ registerAgentTools(server, db);
 registerCommanderTools(server, db);
 
 // Track active SSE connections for monitoring
-const activeConnections = new Map<string, SSEServerTransport>();
+const activeConnections = new Map<string, WebStandardStreamableHTTPServerTransport>();
 
 Bun.serve({
   port: PORT,
@@ -339,8 +339,8 @@ Bun.serve({
     const url = new URL(req.url);
 
     // --- MCP SSE Interface (for Claude Code / Codex) ---
-    if (url.pathname === "/sse") {
-      const transport = new SSEServerTransport("/messages", req);
+    if (url.pathname === "/mcp") {
+      const transport = new WebStandardStreamableHTTPServerTransport("/messages", req);
       await server.connect(transport);
       return transport.sseResponse;
     }
@@ -376,7 +376,7 @@ Bun.serve({
 });
 
 console.log(`Commander MCP Server v0.3.0 running on port ${PORT}`);
-console.log(`MCP SSE: http://0.0.0.0:${PORT}/sse`);
+console.log(`MCP: http://0.0.0.0:${PORT}/mcp`);
 console.log(`REST API: http://0.0.0.0:${PORT}/api/status`);
 console.log(`Health: http://0.0.0.0:${PORT}/health`);
 ```
@@ -404,7 +404,7 @@ In `~/.claude/settings.json` (recommended for global access):
 {
   "mcpServers": {
     "commander": {
-      "url": "http://your-server-ip:9200/sse"
+      "url": "http://your-server-ip:9200/mcp"
     }
   }
 }
@@ -416,7 +416,7 @@ Or per-project `.mcp.json`:
 {
   "mcpServers": {
     "commander": {
-      "url": "http://your-server-ip:9200/sse"
+      "url": "http://your-server-ip:9200/mcp"
     }
   }
 }
@@ -430,7 +430,7 @@ In `config.json`:
 {
   "mcpServers": {
     "commander": {
-      "url": "http://your-server-ip:9200/sse"
+      "url": "http://your-server-ip:9200/mcp"
     }
   }
 }
@@ -500,9 +500,9 @@ Every 5-minute inspection cycle:
 > This section explains the architectural decision made 2026-04-01.
 > See also: [`architecture-decision.md`](architecture-decision.md)
 
-### Previous Design (v0.2.0): Two Plans
+### Previous Design (v0.3.0): Two Plans
 
-v0.2.0 proposed a phased approach: Plan A (polling MVP) then Plan B (push). This is **superseded**.
+v0.3.0 proposed a phased approach: Plan A (polling MVP) then Plan B (push). This is **superseded**.
 
 ### Current Design (v0.3.0): SSE Star
 
@@ -519,7 +519,7 @@ v0.2.0 proposed a phased approach: Plan A (polling MVP) then Plan B (push). This
 
 1. **Polling burns tokens**: Each empty `get_inbox()` call costs API tokens even when there's nothing new
 2. **Polling adds latency**: 1-5 minute delay depending on poll interval
-3. **SSE is native to MCP SDK**: `SSEServerTransport` is built-in, no extra code needed
+3. **SSE is native to MCP SDK**: `WebStandardStreamableHTTPServerTransport` is built-in, no extra code needed
 4. **30 connections is trivial**: A single Bun process handles thousands of concurrent SSE connections
 
 ### Why Star, Not Mesh
@@ -551,7 +551,7 @@ This is **not required for MVP** -- the SSE Tool interface already provides sub-
 - [ ] Implement 4 child agent tools (report_status, report_completion, get_inbox, ack_inbox)
 - [ ] Implement 5 hub tools (get_all_status, get_session_status, send_task, broadcast, get_completions)
 - [ ] SQLite tables with WAL mode
-- [ ] MCP SSE endpoint (`/sse`) + HTTP REST endpoints (`/api/status`, `/api/task`, `/health`)
+- [ ] MCP Streamable HTTP endpoint (`/mcp`) + HTTP REST endpoints (`/api/status`, `/api/task`, `/health`)
 - [ ] Deploy to your-server-ip:9200 via systemd
 - [ ] End-to-end test: Claude Code session connects via SSE -> reports status -> Hub sends task -> Agent receives -> executes -> reports completion
 

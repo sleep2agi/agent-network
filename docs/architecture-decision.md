@@ -1,14 +1,14 @@
-# Architecture Decision Record: MCP SSE Star Topology
+# Architecture Decision Record: MCP Streamable HTTP Star Topology
 
 > Date: 2026-04-01
 > Status: Confirmed
-> Supersedes: Commander MCP Design v0.2.0 (Plan A polling + Plan B push)
+> Supersedes: Commander MCP Design v0.3.0 (Plan A polling + Plan B push)
 
 ---
 
 ## Decision
 
-Adopt **MCP SSE star topology** as the sole cross-server communication architecture. All sessions (Claude Code + Codex) connect to a single Commander MCP Server via persistent SSE connections.
+Adopt **MCP Streamable HTTP star topology** as the sole cross-server communication architecture. All sessions (Claude Code + Codex) connect to a single Commander MCP Server via persistent SSE connections.
 
 ## Context
 
@@ -27,8 +27,8 @@ After 48 hours of operating 15+ agent sessions across 4 servers, and evaluating 
                     │      your-server-ip:9200             │
                     │                                   │
                     │  ┌───────────┐  ┌─────────────┐  │
-                    │  │  MCP SSE  │  │  HTTP REST   │  │
-                    │  │  /sse     │  │  /api/...    │  │
+                    │  │  MCP Streamable HTTP  │  │  HTTP REST   │  │
+                    │  │  /mcp     │  │  /api/...    │  │
                     │  └─────┬─────┘  └──────┬──────┘  │
                     │        │               │         │
                     │  ┌─────▼───────────────▼──────┐  │
@@ -50,14 +50,14 @@ After 48 hours of operating 15+ agent sessions across 4 servers, and evaluating 
 
 ### 1. SSE, Not Polling
 
-**Old plan (v0.2.0)**: Plan A was MCP Tool polling (agent calls `get_inbox()` every few minutes), Plan B was push.
+**Old plan (v0.3.0)**: Plan A was MCP Tool polling (agent calls `get_inbox()` every few minutes), Plan B was push.
 
 **New decision**: Skip polling entirely. Go straight to SSE persistent connections.
 
 **Why**:
 - Polling burns tokens on empty checks
 - Polling adds 1-5 min latency
-- SSE is natively supported by MCP SDK (`SSEServerTransport`)
+- SSE is natively supported by MCP SDK (`WebStandardStreamableHTTPServerTransport`)
 - 30 persistent SSE connections are trivial for a single server
 
 ### 2. Single Commander Server
@@ -70,11 +70,11 @@ One process, one database, one endpoint. No federation, no sharding.
 - Operational simplicity >> distributed complexity
 - Can always scale later if needed (but probably never will)
 
-### 3. Dual Interface: MCP SSE + HTTP REST
+### 3. Dual Interface: MCP Streamable HTTP + HTTP REST
 
 | Interface | For | Endpoint |
 |-----------|-----|----------|
-| MCP SSE | Claude Code / Codex native integration | `/sse` |
+| MCP Streamable HTTP | Claude Code / Codex native integration | `/mcp` |
 | HTTP REST | Dashboards, scripts, monitoring, external tools | `/api/...` |
 
 **Why**:
@@ -127,7 +127,7 @@ In `~/.claude/settings.json` (global) or project `.mcp.json`:
 {
   "mcpServers": {
     "commander": {
-      "url": "http://your-server-ip:9200/sse"
+      "url": "http://your-server-ip:9200/mcp"
     }
   }
 }
@@ -141,7 +141,7 @@ In `config.json`:
 {
   "mcpServers": {
     "commander": {
-      "url": "http://your-server-ip:9200/sse"
+      "url": "http://your-server-ip:9200/mcp"
     }
   }
 }

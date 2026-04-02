@@ -18,7 +18,7 @@ bun install
 
 # 启动
 bun run start
-# 输出：Commander MCP Server v0.1.0 running on port 9200
+# 输出：Commander MCP Server v0.3.0 running on port 9200
 ```
 
 验证：
@@ -69,7 +69,7 @@ iptables -A INPUT -p tcp --dport 9200 -j DROP
 {
   "mcpServers": {
     "commander": {
-      "url": "http://YOUR_COMMANDER_IP:9200/sse"
+      "url": "http://YOUR_COMMANDER_IP:9200/mcp"
     }
   }
 }
@@ -100,7 +100,7 @@ Codex 的 MCP 配置方式相同。在 `config.json` 中加入：
 {
   "mcpServers": {
     "commander": {
-      "url": "http://YOUR_COMMANDER_IP:9200/sse"
+      "url": "http://YOUR_COMMANDER_IP:9200/mcp"
     }
   }
 }
@@ -224,7 +224,7 @@ A: 推荐 Token 认证 + 防火墙双重保护：
 {
   "mcpServers": {
     "commander": {
-      "url": "http://YOUR_SERVER:9200/sse?token=your-secret-token"
+      "url": "http://YOUR_SERVER:9200/mcp?token=your-secret-token"
     }
   }
 }
