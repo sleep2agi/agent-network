@@ -6,15 +6,15 @@ import { db } from "./db.js";
 import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
 
 const PORT = Number(process.env.PORT) || 9200;
-const AUTH_TOKEN = process.env.COMMANDER_AUTH_TOKEN;
+const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(): McpServer {
+function createServer(clientIP?: string): McpServer {
   const server = new McpServer({
-    name: "commander",
+    name: "commhub",
     version: "0.4.0",
   });
-  registerTools(server);
+  registerTools(server, clientIP);
   return server;
 }
 
@@ -31,7 +31,7 @@ function requireAuth(req: Request): Response | null {
 
 // ── REST input schema ───────────────────────────────
 const TaskSchema = z.object({
-  session_name: z.string().min(1).max(200),
+  alias: z.string().min(1).max(200),
   task: z.string().min(1).max(10000),
   priority: z.enum(["high", "normal", "low"]).default("normal"),
 });
@@ -79,10 +79,12 @@ Bun.serve({
     // ── MCP Streamable HTTP endpoint ──
     // MCP protocol handles its own auth — skip token check here
     if (url.pathname === "/mcp") {
+      const fwd = req.headers.get("x-forwarded-for");
+      const clientIP = fwd ? fwd.split(",")[0].trim() : (req.headers.get("x-real-ip") ?? "unknown");
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      const server = createServer();
+      const server = createServer(clientIP);
       await server.connect(transport);
       return transport.handleRequest(req);
     }
@@ -142,13 +144,13 @@ Bun.serve({
       db.run(
         `INSERT INTO inbox (id, session_name, type, priority, content, from_session)
          VALUES (?1, ?2, 'task', ?3, ?4, 'api')`,
-        [id, body.session_name, body.priority, body.task]
+        [id, body.alias, body.priority, body.task]
       );
       // SSE push: 秒达
       const pending = db.query<{ cnt: number }, [string]>(
         "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(body.session_name);
-      pushEvent(body.session_name, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority });
+      ).get(body.alias);
+      pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority });
       return withCors(req, Response.json({ ok: true, message_id: id }));
     }
 
@@ -165,22 +167,22 @@ Bun.serve({
         return withCors(req, Response.json({ error: "invalid input", details: parsed.error.format() }, { status: 400 }));
       }
       const body = parsed.data;
-      let sql = "SELECT name FROM sessions WHERE 1=1";
+      let sql = "SELECT alias FROM sessions WHERE alias IS NOT NULL";
       const params: any[] = [];
       if (body.filter_server) { sql += " AND server = ?"; params.push(body.filter_server); }
       if (body.filter_status) { sql += " AND status = ?"; params.push(body.filter_status); }
-      const targets = db.query<{ name: string }, any[]>(sql).all(...params);
+      const targets = db.query<{ alias: string }, any[]>(sql).all(...params);
       const ids: string[] = [];
       for (const t of targets) {
         const id = crypto.randomUUID();
         db.run(
           `INSERT INTO inbox (id, session_name, type, priority, content, from_session)
            VALUES (?1, ?2, 'broadcast', 'normal', ?3, 'api')`,
-          [id, t.name, body.message]
+          [id, t.alias, body.message]
         );
         ids.push(id);
       }
-      pushBroadcast(targets.map(t => t.name), { type: "broadcast", inbox_count: 1, message: body.message.slice(0, 200) });
+      pushBroadcast(targets.map(t => t.alias), { type: "broadcast", inbox_count: 1, message: body.message.slice(0, 200) });
       return withCors(req, Response.json({ ok: true, recipients: targets.length, message_ids: ids }));
     }
 
@@ -192,7 +194,7 @@ Bun.serve({
     }
 
     return withCors(req, new Response(
-      `Commander MCP Server v0.4.0 (Streamable HTTP + SSE Push)
+      `CommHub MCP Server v0.4.0 (Streamable HTTP + SSE Push)
 
 Endpoints:
   POST /mcp               - MCP Streamable HTTP (for Claude Code / Codex)
@@ -202,7 +204,7 @@ Endpoints:
   POST /api/task          - Send task via REST ${AUTH_TOKEN ? "(auth required)" : ""}
   GET  /api/completions   - Recent completions ${AUTH_TOKEN ? "(auth required)" : ""}
 
-Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMANDER_AUTH_TOKEN)" : "disabled (set COMMANDER_AUTH_TOKEN to enable)"}
+Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMHUB_AUTH_TOKEN)" : "disabled (set COMMHUB_AUTH_TOKEN to enable)"}
 `,
       { status: 200, headers: { "Content-Type": "text/plain" } }
     ));
@@ -211,7 +213,7 @@ Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMANDER_AUTH_TOKEN)" : "disabl
 
 // ── Graceful shutdown ───────────────────────────────
 function shutdown() {
-  console.log("[commander] shutting down...");
+  console.log("[commhub] shutting down...");
   db.close();
   process.exit(0);
 }
@@ -220,9 +222,9 @@ process.on("SIGINT", shutdown);
 
 console.log(`
 ╔══════════════════════════════════════════════════╗
-║   Commander MCP Server v0.4.0                     ║
+║   CommHub MCP Server v0.4.0                     ║
 ║   Transport: Streamable HTTP (Bun native)         ║
-║   Auth: ${AUTH_TOKEN ? "ENABLED (Bearer token)" : "DISABLED (set COMMANDER_AUTH_TOKEN)"}${"".padEnd(AUTH_TOKEN ? 5 : 0)}║
+║   Auth: ${AUTH_TOKEN ? "ENABLED (Bearer token)" : "DISABLED (set COMMHUB_AUTH_TOKEN)"}${"".padEnd(AUTH_TOKEN ? 5 : 0)}║
 ║                                                   ║
 ║   MCP:    http://0.0.0.0:${PORT}/mcp                 ║
 ║   REST:   http://0.0.0.0:${PORT}/api                 ║

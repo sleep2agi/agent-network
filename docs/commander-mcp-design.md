@@ -1,4 +1,4 @@
-# Commander MCP Server Design Document
+# CommHub Server Design Document
 
 > Version: v0.3.0 (Architecture Confirmed)
 > A cross-server orchestration hub for AI Agent sessions using Model Context Protocol (MCP).
@@ -21,12 +21,12 @@ When running 15+ AI agent sessions across multiple servers, communication via `t
 
 ### 1.2 Solution
 
-Build a **Commander MCP Server** -- a standard MCP Server running on a central server, acting as communication hub for all agents:
+Build a **CommHub Server** -- a standard MCP Server running on a central server, acting as communication hub for all agents:
 
 - Child agents **proactively report** status and results via MCP protocol (no more screen scraping)
 - Hub **dispatches commands** to child agents' inbox via MCP protocol (no more send-keys)
 - All communication via MCP SSE, structured JSON, natively cross-server
-- Both Claude Code and Codex connect to the same Commander Server
+- Both Claude Code and Codex connect to the same CommHub Server
 
 **Core idea**: From "hub reads child agent screens" to "child agents proactively report to hub".
 
@@ -37,11 +37,11 @@ Build a **Commander MCP Server** -- a standard MCP Server running on a central s
 
 | Property | Value |
 |----------|-------|
-| **Topology** | Star -- single Commander hub, all sessions connect to it |
+| **Topology** | Star -- single CommHub hub, all sessions connect to it |
 | **Transport** | MCP SSE (persistent connections, real-time push) |
 | **Dual interface** | MCP Streamable HTTP (`/mcp`) for agents + HTTP REST (`/api/...`) for dashboards |
 | **Clients** | Claude Code (`settings.json`) + Codex (`config.json`) |
-| **Cross-model** | Claude ↔ Codex communicate via Commander relay |
+| **Cross-model** | Claude ↔ Codex communicate via CommHub relay |
 | **Scaling** | 30 sessions = 30 SSE connections (linear, not N^2) |
 
 See [`architecture-decision.md`](architecture-decision.md) for the full decision record.
@@ -52,7 +52,7 @@ See [`architecture-decision.md`](architecture-decision.md) for the full decision
 
 ```
                     ┌─────────────────────────────────────┐
-                    │       Commander MCP Server            │
+                    │       CommHub Server            │
                     │       your-server-ip:9200                │
                     │                                       │
                     │  ┌───────────┐  ┌─────────────────┐  │
@@ -77,7 +77,7 @@ See [`architecture-decision.md`](architecture-decision.md) for the full decision
          └─────────┘ └────────┘ └────────┘ └────────┘ └────────┘
 ```
 
-All clients connect to the same `/mcp` endpoint. The Commander Server maintains per-session state and routes messages between any pair of sessions -- including cross-model (Claude ↔ Codex).
+All clients connect to the same `/mcp` endpoint. The CommHub Server maintains per-session state and routes messages between any pair of sessions -- including cross-model (Claude ↔ Codex).
 
 ### Data Flow
 
@@ -85,9 +85,9 @@ All clients connect to the same `/mcp` endpoint. The Commander Server maintains 
 ┌─────────────────────────────────────────────────────────────┐
 │                    Task Dispatch Flow                         │
 │                                                              │
-│  Hub ──send_task(session, task)──▶ Commander writes inbox     │
+│  Hub ──send_task(session, task)──▶ CommHub writes inbox     │
 │                                                              │
-│  Commander pushes notification via SSE to target session      │
+│  CommHub pushes notification via SSE to target session      │
 │                                                              │
 │  Agent receives task via MCP, calls ack_inbox() to confirm   │
 └─────────────────────────────────────────────────────────────┘
@@ -97,16 +97,16 @@ All clients connect to the same `/mcp` endpoint. The Commander Server maintains 
 │                                                              │
 │  Agent ──report_status(session, status, task, ...)──▶ upsert │
 │                                                              │
-│  Hub ──get_all_status()──▶ Commander returns all sessions    │
+│  Hub ──get_all_status()──▶ CommHub returns all sessions    │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
 │                    Cross-Model Relay                          │
 │                                                              │
-│  Claude Code #1 ──send_task("codex-review")──▶ Commander    │
-│  Commander ──inbox──▶ Codex #1 (receives via SSE)            │
-│  Codex #1 ──report_completion()──▶ Commander                 │
-│  Commander ──completion──▶ Claude Code #1 (queries results)  │
+│  Claude Code #1 ──send_task("codex-review")──▶ CommHub    │
+│  CommHub ──inbox──▶ Codex #1 (receives via SSE)            │
+│  Codex #1 ──report_completion()──▶ CommHub                 │
+│  CommHub ──completion──▶ Claude Code #1 (queries results)  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -204,7 +204,7 @@ Returns `session_status` and `inbox_depth` to help hub decide if the session is 
 
 ## 4. Data Model
 
-SQLite database at `~/.commander/commander.db`.
+SQLite database at `~/.commhub/commhub.db`.
 
 ### 4.1 sessions table
 ```sql
@@ -286,12 +286,12 @@ CREATE TABLE broadcasts (
 ### 5.2 Project Structure
 
 ```
-commander-mcp-server/
+commhub-mcp-server/
 ├── src/
 │   ├── index.ts              # Entry, starts MCP Server
 │   ├── tools/
 │   │   ├── agent-tools.ts    # 4 child agent tools
-│   │   └── commander-tools.ts # 5 hub tools
+│   │   └── commhub-tools.ts # 5 hub tools
 │   ├── db/
 │   │   ├── schema.ts         # Table creation
 │   │   └── queries.ts        # SQL query wrappers
@@ -299,7 +299,7 @@ commander-mcp-server/
 │       ├── id.ts             # ID generation
 │       └── time.ts           # Time handling
 ├── channel/                   # Plan B: local Channel process
-│   └── commander-channel.ts
+│   └── commhub-channel.ts
 ├── package.json
 ├── tsconfig.json
 ├── CLAUDE.md
@@ -313,22 +313,22 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { Database } from "bun:sqlite";
 import { registerAgentTools } from "./tools/agent-tools";
-import { registerCommanderTools } from "./tools/commander-tools";
+import { registerCommHubTools } from "./tools/commhub-tools";
 import { initDB } from "./db/schema";
 
 const PORT = Number(process.env.PORT) || 9200;
-const DB_PATH = process.env.COMMANDER_DB || `${process.env.HOME}/.commander/commander.db`;
+const DB_PATH = process.env.COMMANDER_DB || `${process.env.HOME}/.commhub/commhub.db`;
 const db = new Database(DB_PATH);
 db.exec("PRAGMA journal_mode=WAL");
 initDB(db);
 
 const server = new McpServer({
-  name: "commander",
+  name: "commhub",
   version: "0.3.0",
 });
 
 registerAgentTools(server, db);
-registerCommanderTools(server, db);
+registerCommHubTools(server, db);
 
 // Track active SSE connections for monitoring
 const activeConnections = new Map<string, WebStandardStreamableHTTPServerTransport>();
@@ -371,11 +371,11 @@ Bun.serve({
       });
     }
 
-    return new Response("Commander MCP Server v0.3.0", { status: 200 });
+    return new Response("CommHub Server v0.3.0", { status: 200 });
   },
 });
 
-console.log(`Commander MCP Server v0.3.0 running on port ${PORT}`);
+console.log(`CommHub Server v0.3.0 running on port ${PORT}`);
 console.log(`MCP: http://0.0.0.0:${PORT}/mcp`);
 console.log(`REST API: http://0.0.0.0:${PORT}/api/status`);
 console.log(`Health: http://0.0.0.0:${PORT}/health`);
@@ -403,7 +403,7 @@ In `~/.claude/settings.json` (recommended for global access):
 ```json
 {
   "mcpServers": {
-    "commander": {
+    "commhub": {
       "url": "http://your-server-ip:9200/mcp"
     }
   }
@@ -415,7 +415,7 @@ Or per-project `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "commander": {
+    "commhub": {
       "url": "http://your-server-ip:9200/mcp"
     }
   }
@@ -429,7 +429,7 @@ In `config.json`:
 ```json
 {
   "mcpServers": {
-    "commander": {
+    "commhub": {
       "url": "http://your-server-ip:9200/mcp"
     }
   }
@@ -441,7 +441,7 @@ In `config.json`:
 Add to each agent's CLAUDE.md:
 
 ```markdown
-## Commander Communication Rules
+## CommHub Communication Rules
 
 ### Status Reporting
 - Call `report_status(status="working", task="...")` when starting a new task
@@ -527,7 +527,7 @@ v0.3.0 proposed a phased approach: Plan A (polling MVP) then Plan B (push). This
 - 30 sessions in a mesh = 870 connections. Star = 30 connections.
 - Single source of truth for all session state
 - One firewall rule per server (not per session pair)
-- Commander as relay enables cross-model communication (Claude ↔ Codex)
+- CommHub as relay enables cross-model communication (Claude ↔ Codex)
 
 ---
 
@@ -538,7 +538,7 @@ v0.3.0 proposed a phased approach: Plan A (polling MVP) then Plan B (push). This
 
 ### 9.1 Potential Channel Enhancement
 
-If needed, a local `commander-channel` process could be added per session to inject messages directly into the Claude Code conversation via the Channel protocol (`notifications/claude/channel`). This would make Commander messages appear as `<channel>` tags, similar to Telegram/WeChat messages.
+If needed, a local `commhub-channel` process could be added per session to inject messages directly into the Claude Code conversation via the Channel protocol (`notifications/claude/channel`). This would make CommHub messages appear as `<channel>` tags, similar to Telegram/WeChat messages.
 
 This is **not required for MVP** -- the SSE Tool interface already provides sub-second latency. Channel push would be an optimization for scenarios where agents need to be interrupted mid-task.
 
@@ -547,7 +547,7 @@ This is **not required for MVP** -- the SSE Tool interface already provides sub-
 ## 10. Development Plan
 
 ### Phase 1 -- MVP (1-2 days)
-- [ ] Create `commander-mcp-server` repository
+- [ ] Create `commhub-mcp-server` repository
 - [ ] Implement 4 child agent tools (report_status, report_completion, get_inbox, ack_inbox)
 - [ ] Implement 5 hub tools (get_all_status, get_session_status, send_task, broadcast, get_completions)
 - [ ] SQLite tables with WAL mode
@@ -558,8 +558,8 @@ This is **not required for MVP** -- the SSE Tool interface already provides sub-
 ### Phase 2 -- Full Rollout (2-3 days)
 - [ ] All Claude Code sessions connect via `settings.json` URL config
 - [ ] All Codex sessions connect via `config.json` URL config
-- [ ] Cross-model test: Claude Code sends task -> Codex receives via Commander -> Codex reports completion
-- [ ] All sessions' CLAUDE.md updated with Commander communication rules
+- [ ] Cross-model test: Claude Code sends task -> Codex receives via CommHub -> Codex reports completion
+- [ ] All sessions' CLAUDE.md updated with CommHub communication rules
 - [ ] Firewall rules: only known server IPs allowed on port 9200
 - [ ] Monitoring: offline session alerts (10-min heartbeat timeout)
 

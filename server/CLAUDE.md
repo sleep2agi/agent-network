@@ -1,4 +1,4 @@
-# Commander MCP Server
+# CommHub Server
 
 ## 启动
 ```bash
@@ -9,7 +9,7 @@ cd server && bun install && bun run start
 - MCP Streamable HTTP (`/mcp`) — Claude Code / Codex 连接端点
 - SSE Push (`/events/:session`) — Agent 实时接收任务推送
 - HTTP REST (`/api/*`) — 监控脚本/curl 用
-- SQLite WAL (`~/.commander/commander.db`)
+- SQLite WAL (`~/.commhub/commhub.db`)
 
 ## MCP Tools (9 个)
 ### 子 Agent (4)

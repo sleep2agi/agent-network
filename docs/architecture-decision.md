@@ -2,13 +2,13 @@
 
 > Date: 2026-04-01
 > Status: Confirmed
-> Supersedes: Commander MCP Design v0.3.0 (Plan A polling + Plan B push)
+> Supersedes: CommHub MCP Design v0.3.0 (Plan A polling + Plan B push)
 
 ---
 
 ## Decision
 
-Adopt **MCP Streamable HTTP star topology** as the sole cross-server communication architecture. All sessions (Claude Code + Codex) connect to a single Commander MCP Server via persistent SSE connections.
+Adopt **MCP Streamable HTTP star topology** as the sole cross-server communication architecture. All sessions (Claude Code + Codex) connect to a single CommHub Server via persistent SSE connections.
 
 ## Context
 
@@ -23,7 +23,7 @@ After 48 hours of operating 15+ agent sessions across 4 servers, and evaluating 
 
 ```
                     ┌─────────────────────────────────┐
-                    │      Commander MCP Server         │
+                    │      CommHub Server         │
                     │      your-server-ip:9200             │
                     │                                   │
                     │  ┌───────────┐  ┌─────────────┐  │
@@ -60,7 +60,7 @@ After 48 hours of operating 15+ agent sessions across 4 servers, and evaluating 
 - SSE is natively supported by MCP SDK (`WebStandardStreamableHTTPServerTransport`)
 - 30 persistent SSE connections are trivial for a single server
 
-### 2. Single Commander Server
+### 2. Single CommHub Server
 
 One process, one database, one endpoint. No federation, no sharding.
 
@@ -82,19 +82,19 @@ One process, one database, one endpoint. No federation, no sharding.
 - Dashboards and scripts need simple HTTP (curl, fetch, browser)
 - Same SQLite backend serves both, no data duplication
 
-### 4. Cross-Model Communication via Commander
+### 4. Cross-Model Communication via CommHub
 
-Claude Code sessions and Codex sessions communicate **through Commander**, not directly.
+Claude Code sessions and Codex sessions communicate **through CommHub**, not directly.
 
 ```
-Claude Code #1 ──send_task()──▶ Commander ──inbox──▶ Codex #1
-Codex #1 ──report_completion()──▶ Commander ──completion──▶ Claude Code #1
+Claude Code #1 ──send_task()──▶ CommHub ──inbox──▶ Codex #1
+Codex #1 ──report_completion()──▶ CommHub ──completion──▶ Claude Code #1
 ```
 
 **Why**:
 - Claude Code and Codex have different MCP capabilities
 - Direct wiring creates fragile coupling
-- Commander as relay provides: message queue, retry, audit log, state tracking
+- CommHub as relay provides: message queue, retry, audit log, state tracking
 - Works even when sender and receiver are on different servers
 
 ### 5. Star, Not Mesh
@@ -105,7 +105,7 @@ Codex #1 ──report_completion()──▶ Commander ──completion──▶ 
 - Linear scaling (add session = add 1 connection)
 - Single point of truth for all state
 - Easy monitoring (one dashboard shows everything)
-- Simple firewall rules (only Commander port needs to be open)
+- Simple firewall rules (only CommHub port needs to be open)
 
 ## Tech Stack
 
@@ -126,7 +126,7 @@ In `~/.claude/settings.json` (global) or project `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "commander": {
+    "commhub": {
       "url": "http://your-server-ip:9200/mcp"
     }
   }
@@ -140,7 +140,7 @@ In `config.json`:
 ```json
 {
   "mcpServers": {
-    "commander": {
+    "commhub": {
       "url": "http://your-server-ip:9200/mcp"
     }
   }
@@ -162,7 +162,7 @@ iptables -A INPUT -p tcp --dport 9200 -j DROP
 | Before | After |
 |--------|-------|
 | tmux send-keys + capture-pane | MCP Tool calls via SSE |
-| SSH nesting for cross-server | Direct SSE to Commander |
+| SSH nesting for cross-server | Direct SSE to CommHub |
 | Screen scraping for status | Structured JSON via `report_status()` |
 | No message queue | SQLite inbox with priority + ACK |
 | Polling for inbox | SSE push (real-time) |
@@ -172,7 +172,7 @@ iptables -A INPUT -p tcp --dport 9200 -j DROP
 
 | Risk | Mitigation |
 |------|-----------|
-| Commander single point of failure | systemd auto-restart + SQLite is crash-safe |
+| CommHub single point of failure | systemd auto-restart + SQLite is crash-safe |
 | SSE connection drops | Auto-reconnect with exponential backoff |
 | Network partition (server offline) | Offline detection (10min heartbeat timeout) + alert |
 | SQLite write contention | WAL mode + serialize writes (throughput is low enough) |

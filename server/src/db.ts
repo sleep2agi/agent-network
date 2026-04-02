@@ -2,10 +2,10 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "fs";
 import { dirname } from "path";
 
-const DB_PATH = process.env.COMMANDER_DB || `${process.env.HOME}/.commander/commander.db`;
+const DB_PATH = process.env.COMMHUB_DB || `${process.env.HOME}/.commhub/commhub.db`;
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
-console.log(`[commander] database: ${DB_PATH}`);
+console.log(`[commhub] database: ${DB_PATH}`);
 export const db = new Database(DB_PATH);
 db.exec("PRAGMA journal_mode=WAL");
 db.exec("PRAGMA busy_timeout=5000");
@@ -13,13 +13,20 @@ db.exec("PRAGMA busy_timeout=5000");
 // Schema
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
-    name        TEXT PRIMARY KEY,
-    server      TEXT DEFAULT 'unknown',
-    status      TEXT DEFAULT 'offline',
-    task        TEXT,
-    output      TEXT,
-    progress    INTEGER DEFAULT 0,
-    score       REAL,
+    resume_id     TEXT PRIMARY KEY,
+    alias         TEXT UNIQUE,
+    tmux_name     TEXT,
+    server        TEXT DEFAULT 'unknown',
+    ip            TEXT,
+    hostname      TEXT,
+    agent         TEXT,
+    project_dir   TEXT,
+    version       TEXT,
+    status        TEXT DEFAULT 'offline',
+    task          TEXT,
+    output        TEXT,
+    progress      INTEGER DEFAULT 0,
+    score         REAL,
     registered_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );

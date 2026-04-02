@@ -7,7 +7,7 @@ function ts(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
-export function registerTools(server: McpServer) {
+export function registerTools(server: McpServer, clientIP?: string) {
   // ═══════════════════════════════════════════
   //  Child Agent Tools (4)
   // ═══════════════════════════════════════════
@@ -16,36 +16,53 @@ export function registerTools(server: McpServer) {
     "report_status",
     "Report agent status. Returns inbox_count so you know if there are pending tasks.",
     {
-      session_name: z.string().min(1).max(200).describe("Your session identifier"),
+      resume_id: z.string().min(1).max(200).describe("Claude Code session UUID (unique per session)"),
+      alias: z.string().min(1).max(200).describe("Human-readable session name for dispatching (e.g. 指挥室/知识哥)"),
       status: z.enum(["working", "idle", "blocked", "error", "waiting_input"]),
       task: z.string().max(10000).optional().describe("Current task description"),
       output: z.string().max(50000).optional().describe("Recent output (max 4000 chars stored)"),
       score: z.number().min(0).max(10).optional().describe("Self-score 1-10"),
       progress: z.number().min(0).max(100).optional().describe("Progress 0-100"),
       server: z.string().max(200).optional().describe("Server identifier"),
+      hostname: z.string().max(200).optional().describe("Agent hostname"),
+      agent: z.string().max(100).optional().describe("Agent type (claude-code / codex / opencode)"),
+      project_dir: z.string().max(1000).optional().describe("Agent working directory"),
+      version: z.string().max(100).optional().describe("Agent version"),
+      tmux_name: z.string().max(200).optional().describe("tmux session name"),
     },
-    async ({ session_name, status, task, output, score, progress, server: srv }) => {
-      console.log(`[${ts()}] ${session_name} → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}`);
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux }) => {
+      console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
 
-      // #10 fix: COALESCE for all optional fields so heartbeats don't erase data
+      // If alias is reused with a new resume_id (agent restarted), remove old row
+      db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2", [alias, resume_id]);
+
+      // UPSERT on resume_id — COALESCE preserves existing values on heartbeats
       db.run(
-        `INSERT INTO sessions (name, server, status, task, output, progress, score, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
-         ON CONFLICT(name) DO UPDATE SET
-           server = COALESCE(?2, sessions.server),
-           status = ?3,
-           task = COALESCE(?4, sessions.task),
-           output = COALESCE(?5, sessions.output),
-           progress = COALESCE(?6, sessions.progress),
-           score = COALESCE(?7, sessions.score),
+        `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, datetime('now'))
+         ON CONFLICT(resume_id) DO UPDATE SET
+           alias = COALESCE(?2, sessions.alias),
+           tmux_name = COALESCE(?3, sessions.tmux_name),
+           server = COALESCE(?4, sessions.server),
+           ip = COALESCE(?5, sessions.ip),
+           hostname = COALESCE(?6, sessions.hostname),
+           agent = COALESCE(?7, sessions.agent),
+           project_dir = COALESCE(?8, sessions.project_dir),
+           version = COALESCE(?9, sessions.version),
+           status = ?10,
+           task = COALESCE(?11, sessions.task),
+           output = COALESCE(?12, sessions.output),
+           progress = COALESCE(?13, sessions.progress),
+           score = COALESCE(?14, sessions.score),
            updated_at = datetime('now')`,
-        [session_name, srv ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null]
+        [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null]
       );
 
+      // inbox uses alias for routing
       const row = db.query<{ cnt: number }, [string]>(
         "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(session_name);
+      ).get(alias);
 
       return {
         content: [
@@ -53,7 +70,8 @@ export function registerTools(server: McpServer) {
             type: "text" as const,
             text: JSON.stringify({
               ok: true,
-              session_name,
+              resume_id,
+              alias,
               inbox_count: row?.cnt ?? 0,
             }),
           },
@@ -66,26 +84,26 @@ export function registerTools(server: McpServer) {
     "report_completion",
     "Report task completion with results and optional artifacts.",
     {
-      session_name: z.string().min(1).max(200),
+      alias: z.string().min(1).max(200).describe("Session alias"),
       task: z.string().min(1).max(10000).describe("Completed task description"),
       result: z.string().min(1).max(50000).describe("Result summary"),
       artifacts: z.array(z.string().max(2000)).max(50).optional().describe("Output URLs or file paths"),
       score: z.number().min(0).max(10).optional(),
       duration_minutes: z.number().min(0).optional(),
     },
-    async ({ session_name, task, result, artifacts, score, duration_minutes }) => {
-      console.log(`[${ts()}] ${session_name} → report_completion: ${task.slice(0, 60)}`);
+    async ({ alias, task, result, artifacts, score, duration_minutes }) => {
+      console.log(`[${ts()}] ${alias} → report_completion: ${task.slice(0, 60)}`);
       const id = uuidv4();
       db.run(
         `INSERT INTO completions (id, session_name, task, result, artifacts, score, duration_minutes)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
-        [id, session_name, task, result, artifacts ? JSON.stringify(artifacts) : null, score ?? null, duration_minutes ?? null]
+        [id, alias, task, result, artifacts ? JSON.stringify(artifacts) : null, score ?? null, duration_minutes ?? null]
       );
 
       db.run(
         `UPDATE sessions SET status = 'idle', task = NULL, progress = 0, updated_at = datetime('now')
-         WHERE name = ?1`,
-        [session_name]
+         WHERE alias = ?1`,
+        [alias]
       );
 
       return {
@@ -98,21 +116,20 @@ export function registerTools(server: McpServer) {
     "get_inbox",
     "Get pending commands for your session.",
     {
-      session_name: z.string().min(1).max(200),
+      alias: z.string().min(1).max(200).describe("Session alias"),
       limit: z.number().min(1).max(100).optional().default(10),
     },
-    async ({ session_name, limit }) => {
+    async ({ alias, limit }) => {
       const rows0 = db.query<{ cnt: number }, [string]>(
         "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(session_name);
-      console.log(`[${ts()}] ${session_name} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
-      // #1 fix: LIMIT via parameterized binding
+      ).get(alias);
+      console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
       const rows = db.query<any, [string, number]>(
         `SELECT id, type, priority, content, context, from_session, created_at
          FROM inbox WHERE session_name = ?1 AND acked = 0
          ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
          LIMIT ?2`
-      ).all(session_name, limit);
+      ).all(alias, limit);
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows }) }],
@@ -124,14 +141,13 @@ export function registerTools(server: McpServer) {
     "ack_inbox",
     "Acknowledge receipt of a command.",
     {
-      session_name: z.string().min(1).max(200),
+      alias: z.string().min(1).max(200).describe("Session alias"),
       message_id: z.string().min(1).max(200),
       response: z.string().max(10000).optional(),
     },
-    async ({ session_name, message_id, response }) => {
-      console.log(`[${ts()}] ${session_name} → ack_inbox: ${message_id.slice(0, 8)}`);
-      // #6 fix: check if update actually affected a row
-      const result = db.run("UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2", [message_id, session_name]);
+    async ({ alias, message_id, response }) => {
+      console.log(`[${ts()}] ${alias} → ack_inbox: ${message_id.slice(0, 8)}`);
+      const result = db.run("UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2", [message_id, alias]);
       if (result.changes === 0) {
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "message not found or not yours" }) }],
@@ -157,7 +173,6 @@ export function registerTools(server: McpServer) {
     async ({ filter_status, filter_server }) => {
       console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${filter_server ? " server=" + filter_server : ""}`);
 
-      // #5 fix: auto-offline first, then read — in one transaction
       const sessions = db.transaction(() => {
         const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
         db.run("UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'", [cutoff]);
@@ -187,17 +202,17 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_session_status",
-    "Get detailed status of a specific session.",
-    { session_name: z.string().min(1).max(200) },
-    async ({ session_name }) => {
-      console.log(`[${ts()}] hub → get_session_status: ${session_name}`);
-      const session = db.query("SELECT * FROM sessions WHERE name = ?1").get(session_name);
+    "Get detailed status of a specific session by alias.",
+    { alias: z.string().min(1).max(200).describe("Session alias") },
+    async ({ alias }) => {
+      console.log(`[${ts()}] hub → get_session_status: ${alias}`);
+      const session = db.query("SELECT * FROM sessions WHERE alias = ?1").get(alias);
       const pending = db.query<{ cnt: number }, [string]>(
         "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(session_name);
+      ).get(alias);
       const recent = db.query(
         "SELECT * FROM completions WHERE session_name = ?1 ORDER BY completed_at DESC LIMIT 5"
-      ).all(session_name);
+      ).all(alias);
 
       return {
         content: [
@@ -212,30 +227,31 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "send_task",
-    "Dispatch a task to a session's inbox.",
+    "Dispatch a task to a session's inbox (by alias).",
     {
-      session_name: z.string().min(1).max(200),
+      alias: z.string().min(1).max(200).describe("Target session alias"),
       task: z.string().min(1).max(10000).describe("Task content"),
       priority: z.enum(["high", "normal", "low"]).optional().default("normal"),
       context: z.string().max(10000).optional(),
       from_session: z.string().max(200).optional().default("hub"),
     },
-    async ({ session_name, task, priority, context, from_session }) => {
-      console.log(`[${ts()}] ${from_session} → send_task → ${session_name}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
+    async ({ alias, task, priority, context, from_session }) => {
+      console.log(`[${ts()}] ${from_session} → send_task → ${alias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
       const id = uuidv4();
+      // inbox.session_name stores alias
       db.run(
         `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session)
          VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6)`,
-        [id, session_name, priority, task, context ?? null, from_session]
+        [id, alias, priority, task, context ?? null, from_session]
       );
 
-      const session = db.query<any, [string]>("SELECT status FROM sessions WHERE name = ?1").get(session_name);
+      const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
 
-      // SSE push: 秒达
+      // SSE push by alias
       const pending = db.query<{ cnt: number }, [string]>(
         "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(session_name);
-      pushEvent(session_name, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session });
+      ).get(alias);
+      pushEvent(alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session });
 
       return {
         content: [
@@ -262,12 +278,12 @@ export function registerTools(server: McpServer) {
     },
     async ({ message, filter_server, filter_status }) => {
       console.log(`[${ts()}] hub → broadcast: ${message.slice(0, 60)}${filter_server ? " [server=" + filter_server + "]" : ""}`);
-      let sql = "SELECT name FROM sessions WHERE 1=1";
+      let sql = "SELECT alias FROM sessions WHERE alias IS NOT NULL";
       const params: any[] = [];
       if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
       if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
 
-      const targets = db.query<{ name: string }, any[]>(sql).all(...params);
+      const targets = db.query<{ alias: string }, any[]>(sql).all(...params);
       const ids: string[] = [];
 
       for (const t of targets) {
@@ -275,13 +291,12 @@ export function registerTools(server: McpServer) {
         db.run(
           `INSERT INTO inbox (id, session_name, type, priority, content, from_session)
            VALUES (?1, ?2, 'broadcast', 'normal', ?3, 'hub')`,
-          [id, t.name, message]
+          [id, t.alias, message]
         );
         ids.push(id);
       }
 
-      // SSE push: 广播秒达
-      pushBroadcast(targets.map(t => t.name), { type: "broadcast", inbox_count: 1, message: message.slice(0, 200) });
+      pushBroadcast(targets.map(t => t.alias), { type: "broadcast", inbox_count: 1, message: message.slice(0, 200) });
 
       return {
         content: [
@@ -299,19 +314,18 @@ export function registerTools(server: McpServer) {
     "Get recent task completions.",
     {
       since: z.string().optional().describe("ISO 8601 datetime, default last 24h"),
-      session_name: z.string().max(200).optional(),
+      alias: z.string().max(200).optional().describe("Filter by session alias"),
       limit: z.number().min(1).max(500).optional().default(50),
     },
-    async ({ since, session_name, limit }) => {
-      console.log(`[${ts()}] hub → get_completions${session_name ? ": " + session_name : ""}`);
+    async ({ since, alias, limit }) => {
+      console.log(`[${ts()}] hub → get_completions${alias ? ": " + alias : ""}`);
       const cutoff = since ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      // #1 fix: LIMIT via parameterized binding (was string concat)
       let sql = "SELECT * FROM completions WHERE completed_at >= ?1";
       const params: any[] = [cutoff];
 
-      if (session_name) {
+      if (alias) {
         sql += " AND session_name = ?2";
-        params.push(session_name);
+        params.push(alias);
       }
 
       const paramIdx = params.length + 1;

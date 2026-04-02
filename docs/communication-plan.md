@@ -11,10 +11,10 @@
 1. [现状分析](#1-现状分析)
 2. [目标架构](#2-目标架构)
 3. [协议选型](#3-协议选型)
-4. [Commander MCP Server 详细设计](#4-commander-mcp-server-详细设计)
+4. [CommHub Server 详细设计](#4-commhub-mcp-server-详细设计)
 5. [Dashboard 设计](#5-dashboard-设计)
 6. [迁移路径](#6-迁移路径)
-7. [tmux + Dashboard + Commander 配合](#7-三者配合)
+7. [tmux + Dashboard + CommHub 配合](#7-三者配合)
 
 ---
 
@@ -53,7 +53,7 @@
 |------|----------|---------|
 | 下发一个代码审查任务 | 3-5 分钟（SSH + 判断窗口状态 + send-keys + 等 + capture-pane + 解析） | 30 秒（一次 MCP Tool 调用） |
 | 查看 Agent 状态 | 1-2 分钟（SSH + capture-pane + 肉眼判断） | 即时（`get_all_status()` 返回 JSON） |
-| 跨服务器派任务 | 5+ 分钟（SSH 嵌套 + 超时重试） | 即时（`send_task()` 通过 Commander 中转） |
+| 跨服务器派任务 | 5+ 分钟（SSH 嵌套 + 超时重试） | 即时（`send_task()` 通过 CommHub 中转） |
 | 批量通知所有 Agent | 不可能（逐个 send-keys） | 1 秒（`broadcast()`） |
 
 ---
@@ -74,7 +74,7 @@
           │ MCP Streamable HTTP         │ HTTP REST          │ HTTP REST
           │                 │                    │
      ┌────▼─────────────────▼────────────────────▼────┐
-     │           Commander MCP Server                  │
+     │           CommHub Server                  │
      │           your-server:9200                      │
      │                                                 │
      │  ┌───────────┐  ┌─────────────┐  ┌──────────┐ │
@@ -99,17 +99,17 @@
 
 | 层 | 用途 | 协议 |
 |----|------|------|
-| **MCP Streamable HTTP** | Agent ↔ Commander 结构化通信 | MCP over SSE (持久连接) |
-| **HTTP REST** | Dashboard + 脚本 ↔ Commander | 标准 HTTP JSON |
+| **MCP Streamable HTTP** | Agent ↔ CommHub 结构化通信 | MCP over SSE (持久连接) |
+| **HTTP REST** | Dashboard + 脚本 ↔ CommHub | 标准 HTTP JSON |
 | **tmux** | 进程持久化 + 最后手段 fallback | tmux send-keys (仅限紧急) |
 
 ### 2.3 角色分工
 
 | 角色 | 职责 | 通信方式 |
 |------|------|---------|
-| **Hub Session** | 指挥调度（只派活不干活） | MCP Streamable HTTP 连 Commander |
-| **子 Agent Session** | 执行具体任务 | MCP Streamable HTTP 连 Commander |
-| **Dashboard** | 可视化状态 + 交互控制 | HTTP REST 查 Commander |
+| **Hub Session** | 指挥调度（只派活不干活） | MCP Streamable HTTP 连 CommHub |
+| **子 Agent Session** | 执行具体任务 | MCP Streamable HTTP 连 CommHub |
+| **Dashboard** | 可视化状态 + 交互控制 | HTTP REST 查 CommHub |
 | **操作员** | 最终决策 + 人工抽检 | 通过 Hub / Dashboard / curl |
 
 ---
@@ -150,7 +150,7 @@
 ### 3.4 协议层次关系
 
 ```
-应用层：Commander 调度逻辑
+应用层：CommHub 调度逻辑
      │
 协议层：MCP（工具调用 + 状态汇报）    ← 我们在这层
      │
@@ -163,7 +163,7 @@ A2A 和 ACP 是与 MCP 平行的协议层，解决不同问题。MCP 管"LLM 怎
 
 ---
 
-## 4. Commander MCP Server 详细设计
+## 4. CommHub Server 详细设计
 
 ### 4.1 技术栈
 
@@ -285,7 +285,7 @@ server/
 
 ### 4.4 HTTP REST API
 
-除 MCP 端点外，Commander 同时暴露 HTTP REST 接口供 Dashboard 和脚本使用：
+除 MCP 端点外，CommHub 同时暴露 HTTP REST 接口供 Dashboard 和脚本使用：
 
 | 端点 | 方法 | 用途 |
 |------|------|------|
@@ -299,7 +299,7 @@ REST API 让 Dashboard 无需 MCP 客户端就能查询和操控。
 
 ### 4.5 数据库 Schema
 
-SQLite 文件位置：`~/.commander/commander.db`（WAL 模式）
+SQLite 文件位置：`~/.commhub/commhub.db`（WAL 模式）
 
 ```sql
 -- Session 状态表（主表）
@@ -349,19 +349,19 @@ CREATE TABLE completions (
 curl -fsSL https://bun.sh/install | bash
 ```
 
-**步骤 2：启动 Commander**
+**步骤 2：启动 CommHub**
 ```bash
 cd agent-orchestra/server
 bun install
 bun run start
-# 输出：Commander MCP Server v0.3.0 running on port 9200
+# 输出：CommHub Server v0.3.0 running on port 9200
 ```
 
 **步骤 3：systemd 持久化**
 ```ini
-# /etc/systemd/system/commander.service
+# /etc/systemd/system/commhub.service
 [Unit]
-Description=Commander MCP Server
+Description=CommHub Server
 After=network.target
 
 [Service]
@@ -378,7 +378,7 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-systemctl enable --now commander
+systemctl enable --now commhub
 ```
 
 **步骤 4：防火墙**
@@ -397,7 +397,7 @@ iptables -A INPUT -p tcp --dport 9200 -j DROP
 
 ### 5.1 定位
 
-Dashboard 是 Commander 的可视化前端，操作员通过它查看全局状态和手动控制 Agent。
+Dashboard 是 CommHub 的可视化前端，操作员通过它查看全局状态和手动控制 Agent。
 
 ### 5.2 技术方案
 
@@ -413,7 +413,7 @@ Dashboard 是 Commander 的可视化前端，操作员通过它查看全局状�
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Commander Dashboard                    连接数: 28/30   │
+│  CommHub Dashboard                    连接数: 28/30   │
 ├─────────────────────────────────────────────────────────┤
 │                                                          │
 │  ┌─ 服务器 A ──────────────────────────────────────────┐ │
@@ -492,16 +492,16 @@ const { sessions } = await res.json();
 
 ### Phase 2：本周（1-2 天）
 
-**目标**：Commander 上线，30 个 Session 全部连上。
+**目标**：CommHub 上线，30 个 Session 全部连上。
 
 | 步骤 | 操作 | 耗时 |
 |------|------|------|
-| 2.1 | 在中心服务器部署 Commander：`cd server && bun install && bun run start` | 5 分钟 |
+| 2.1 | 在中心服务器部署 CommHub：`cd server && bun install && bun run start` | 5 分钟 |
 | 2.2 | 配置 systemd 持久化 | 10 分钟 |
 | 2.3 | 配置防火墙（只允许 4 台服务器的 IP） | 5 分钟 |
-| 2.4 | 服务器 A 的所有 Session `settings.json` 加 Commander URL | 10 分钟 |
+| 2.4 | 服务器 A 的所有 Session `settings.json` 加 CommHub URL | 10 分钟 |
 | 2.5 | 服务器 B/C/D 的所有 Session 同样配置 | 20 分钟 |
-| 2.6 | 每个项目的 CLAUDE.md 加入 Commander 通信规则 | 30 分钟 |
+| 2.6 | 每个项目的 CLAUDE.md 加入 CommHub 通信规则 | 30 分钟 |
 | 2.7 | Hub Session 测试：`get_all_status()` → `send_task()` → `get_completions()` | 15 分钟 |
 | 2.8 | 端到端验证：Hub 派任务 → Agent 接收 → 执行 → 汇报完成 → Hub 查看结果 | 15 分钟 |
 
@@ -514,12 +514,12 @@ const { sessions } = await res.json();
 | 步骤 | 操作 | 耗时 |
 |------|------|------|
 | 3.1 | 开发 Dashboard 静态页（一个 HTML + CSS + JS） | 2 小时 |
-| 3.2 | 部署 Dashboard（Commander 同域或 Nginx 反代） | 30 分钟 |
-| 3.3 | Hub Session 巡查循环改用 Commander 工具（不再 tmux capture-pane） | 1 小时 |
+| 3.2 | 部署 Dashboard（CommHub 同域或 Nginx 反代） | 30 分钟 |
+| 3.3 | Hub Session 巡查循环改用 CommHub 工具（不再 tmux capture-pane） | 1 小时 |
 | 3.4 | 移除所有 CLAUDE.md 中的 tmux send-keys 相关规则 | 30 分钟 |
 | 3.5 | tmux 仅保留为进程持久化基础设施，不再用于通信 | - |
 
-**验收标准**：连续运行 24 小时，零次 tmux send-keys 通信，所有任务通过 Commander 调度。
+**验收标准**：连续运行 24 小时，零次 tmux send-keys 通信，所有任务通过 CommHub 调度。
 
 ---
 
@@ -529,7 +529,7 @@ const { sessions } = await res.json();
 
 tmux **不再用于通信**，仅用于：
 - **进程持久化**：Claude Code 进程跑在 tmux 里，SSH 断开不丢失
-- **紧急 fallback**：Commander 挂了时的最后手段
+- **紧急 fallback**：CommHub 挂了时的最后手段
 - **本地监控**：`tmux attach` 看实时输出
 
 ### 7.2 三者关系
@@ -541,7 +541,7 @@ tmux **不再用于通信**，仅用于：
 │ │ Claude Code Session                       │   │
 │ │                                           │   │
 │ │ ┌─────────────────────────────────────┐   │   │
-│ │ │ MCP Streamable HTTP 连接到 Commander            │   │   │
+│ │ │ MCP Streamable HTTP 连接到 CommHub            │   │   │
 │ │ │ - report_status (每个重要步骤后)     │   │   │
 │ │ │ - get_inbox (有新任务时)             │   │   │
 │ │ │ - report_completion (任务完成时)      │   │   │
@@ -562,7 +562,7 @@ tmux **不再用于通信**，仅用于：
 └────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────┐
-│ Commander MCP Server                            │
+│ CommHub Server                            │
 │                                                 │
 │ 核心通信中枢：                                    │
 │ - 接收 30 条 SSE 连接                            │
@@ -570,7 +570,7 @@ tmux **不再用于通信**，仅用于：
 │ - MCP Streamable HTTP 给 Agent 用                            │
 │ - HTTP REST 给 Dashboard 和脚本用                │
 │                                                 │
-│ Commander 是唯一的通信枢纽                        │
+│ CommHub 是唯一的通信枢纽                        │
 └────────────────────────────────────────────────┘
 ```
 
@@ -594,7 +594,7 @@ tmux **不再用于通信**，仅用于：
 | curl | `curl /api/status \| jq` |
 | tmux (旧方式) | 逐个 `tmux capture-pane`（不推荐，耗时 15+ 分钟） |
 
-**场景 3：Commander 挂了**
+**场景 3：CommHub 挂了**
 
 1. systemd 5 秒后自动重启
 2. 重启期间：Agent 的 SSE 连接断开，MCP 工具暂不可用
@@ -607,7 +607,7 @@ tmux **不再用于通信**，仅用于：
 
 | 风险 | 概率 | 缓解 |
 |------|------|------|
-| Commander 单点故障 | 中 | systemd 自动重启 + SQLite 崩溃安全 |
+| CommHub 单点故障 | 中 | systemd 自动重启 + SQLite 崩溃安全 |
 | SSE 连接断开 | 中 | Agent 侧自动重连（MCP SDK 内置） |
 | SQLite 写竞争 | 低 | WAL 模式 + busy_timeout=5000ms |
 | 网络分区 | 低 | 10 分钟离线检测 + 告警 |

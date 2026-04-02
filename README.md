@@ -8,19 +8,19 @@
 
 ## 这是什么？
 
-一套经过实战验证的模式和工具，用于协调分布在多台服务器上的 AI 编程 Agent（Claude Code、Codex 等）。核心组件是 **Commander MCP Server**——一个基于 MCP Streamable HTTP 星型架构的跨服务器通信中枢。
+一套经过实战验证的模式和工具，用于协调分布在多台服务器上的 AI 编程 Agent（Claude Code、Codex 等）。核心组件是 **CommHub Server**——一个基于 MCP Streamable HTTP 星型架构的跨服务器通信中枢。
 
 ## 快速开始
 
 ### 方式 A：MCP Tool 接入（最简单）
 
 ```bash
-# 1. 部署 Commander（5 分钟）
+# 1. 部署 CommHub（5 分钟）
 cd server && bun install && bun run start
 
 # 2. 每个 Agent 加一行配置即可连上
 # ~/.claude/settings.json
-{ "mcpServers": { "commander": { "url": "http://YOUR_IP:9200/mcp" } } }
+{ "mcpServers": { "commhub": { "url": "http://YOUR_IP:9200/mcp" } } }
 ```
 
 ### 方式 B：Channel 插件接入（实时推送）
@@ -32,20 +32,20 @@ cd channel && bun install
 # 2. 启动 Claude Code 并加载 Channel
 COMMANDER_URL=http://YOUR_IP:9200 COMMANDER_SESSION=my-agent \
   claude --dangerously-skip-permissions \
-         --dangerously-load-development-channels server:commander
+         --dangerously-load-development-channels server:commhub
 ```
 
-Channel 模式下，Commander 通过 SSE 实时推送任务到 Agent 对话中，无需轮询。
+Channel 模式下，CommHub 通过 SSE 实时推送任务到 Agent 对话中，无需轮询。
 
 详见 [`docs/quickstart.md`](docs/quickstart.md)，30 分钟完成全部部署。
 
 ## 架构
 
-**MCP Streamable HTTP 星型拓扑**——一个 Commander Server 居中，所有 Session 通过 Streamable HTTP 连接接入。
+**MCP Streamable HTTP 星型拓扑**——一个 CommHub Server 居中，所有 Session 通过 Streamable HTTP 连接接入。
 
 ```
                     ┌─────────────────────────────────┐
-                    │   Commander MCP Server v0.4.0    │
+                    │   CommHub Server v0.4.0    │
                     │   your-server:9200               │
                     │                                   │
                     │   POST /mcp    → Streamable HTTP  │
@@ -73,7 +73,7 @@ Channel 模式下，Commander 通过 SSE 实时推送任务到 Agent 对话中�
 1. **星型拓扑** -- 30 个 Session = 30 条连接，不是 N^2 网状
 2. **Streamable HTTP + SSE Push** -- MCP 用 Streamable HTTP，推送用 SSE 持久连接
 3. **三接口** -- MCP Streamable HTTP + SSE Push + HTTP REST，各司其职
-4. **跨模型通信** -- Claude Code ↔ Codex 通过 Commander 中转，无需直连
+4. **跨模型通信** -- Claude Code ↔ Codex 通过 CommHub 中转，无需直连
 5. **单服务器** -- 一个进程、一个 SQLite 数据库，运维简单
 
 ### 技术栈
@@ -106,7 +106,7 @@ Channel 模式下，Commander 通过 SSE 实时推送任务到 Agent 对话中�
 | 4 | Agent Teams | 仅本地 | 90% | 已启用 |
 | 5 | MCO (Multi-CLI Orchestrator) | 仅本地 | 90% | 可用 |
 | 6 | oh-my-claudecode | 仅本地 | 85% | 社区 |
-| **7** | **Commander MCP (Streamable HTTP + SSE Push)** | **支持** | **99%** | **v0.4.0 已上线** |
+| **7** | **CommHub MCP (Streamable HTTP + SSE Push)** | **支持** | **99%** | **v0.4.0 已上线** |
 
 ## 核心发现
 
@@ -114,7 +114,7 @@ Channel 模式下，Commander 通过 SSE 实时推送任务到 Agent 对话中�
 
 **协议选型：纯 MCP。** Claude Code 和 Codex 原生支持 MCP，零适配成本。A2A（Google）和 ACP（IBM）解决的是 Agent 发现和编排，但我们的 30 个 Session 都是自己的、地址已知，不需要"发现"机制。详见 [`docs/protocol-decision.md`](docs/protocol-decision.md)。
 
-## Commander MCP 工具（9 个）
+## CommHub MCP 工具（9 个）
 
 ### 子 Agent 工具（4 个）
 
@@ -140,7 +140,7 @@ Channel 模式下，Commander 通过 SSE 实时推送任务到 Agent 对话中�
 ### MCP Tool 模式（Agent 主动拉取）
 
 ```
-Hub (指挥室)                  Commander              Agent (MCP Tool)
+Hub (指挥室)                  CommHub              Agent (MCP Tool)
      │                            │                        │
      │  send_task("dev","修Bug")   │                        │
      │───────────────────────────▶│  写入 inbox             │
@@ -166,7 +166,7 @@ Hub (指挥室)                  Commander              Agent (MCP Tool)
 ### Channel 插件模式（SSE 实时推送，v0.4.0 新增）
 
 ```
-Hub (指挥室)                  Commander              Agent (Channel)
+Hub (指挥室)                  CommHub              Agent (Channel)
      │                            │                        │
      │                            │◀── SSE /events/agent ──│  长连接建立
      │                            │                        │
@@ -177,7 +177,7 @@ Hub (指挥室)                  Commander              Agent (Channel)
      │                            │                        │
      │                            │  (Agent 自动执行...)    │
      │                            │                        │
-     │                            │  commander_reply()     │
+     │                            │  commhub_reply()     │
      │                            │◀───────────────────────│  Channel Tool 回报
      │                            │                        │
      │  get_completions()         │                        │
@@ -189,20 +189,20 @@ Channel 模式优势：**任务从 Hub 发出到 Agent 看到 < 1 秒**，无需
 
 ## 文档
 
-- [`docs/quickstart.md`](docs/quickstart.md) -- **从这里开始**：部署 Commander + 连接 30 个 Session，30 分钟搞定
+- [`docs/quickstart.md`](docs/quickstart.md) -- **从这里开始**：部署 CommHub + 连接 30 个 Session，30 分钟搞定
 - [`docs/protocol-decision.md`](docs/protocol-decision.md) -- 协议选型：为什么用 MCP（不用 A2A、不用 ACP）
 - [`docs/architecture-decision.md`](docs/architecture-decision.md) -- 架构决策记录：MCP Streamable HTTP 星型拓扑
 - [`docs/orchestration-guide.md`](docs/orchestration-guide.md) -- 全方案对比 + 成本分析
-- [`docs/commander-mcp-design.md`](docs/commander-mcp-design.md) -- Commander MCP Server 详细设计
+- [`docs/commhub-mcp-design.md`](docs/commhub-mcp-design.md) -- CommHub Server 详细设计
 - [`docs/experience.md`](docs/experience.md) -- 48 小时实战报告：教训和原则
 
-## Commander Channel 插件
+## CommHub Channel 插件
 
-Channel 插件让 Commander 任务直接注入 Claude Code 对话——无需轮询，任务秒达。
+Channel 插件让 CommHub 任务直接注入 Claude Code 对话——无需轮询，任务秒达。
 
 ```
 channel/
-├── commander-channel.ts   # Channel 插件主代码
+├── commhub-channel.ts   # Channel 插件主代码
 ├── package.json
 └── .mcp.json              # 本地开发配置
 ```
@@ -220,7 +220,7 @@ cd channel && bun install
 COMMANDER_URL=http://YOUR_IP:9200 \
 COMMANDER_SESSION=my-agent \
   claude --dangerously-skip-permissions \
-         --dangerously-load-development-channels server:commander
+         --dangerously-load-development-channels server:commhub
 
 # 方式 2：使用 .mcp.json 配置
 cp channel/.mcp.json ~/.claude/.mcp.json  # 编辑 URL 和 SESSION
@@ -230,7 +230,7 @@ cp channel/.mcp.json ~/.claude/.mcp.json  # 编辑 URL 和 SESSION
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `COMMANDER_URL` | `http://127.0.0.1:9200` | Commander Server 地址 |
+| `COMMANDER_URL` | `http://127.0.0.1:9200` | CommHub Server 地址 |
 | `COMMANDER_SESSION` | hostname | 本 Session 名称 |
 | `COMMANDER_TOKEN` | (空) | 认证 Token（匹配服务端 `COMMANDER_AUTH_TOKEN`） |
 
@@ -238,8 +238,8 @@ cp channel/.mcp.json ~/.claude/.mcp.json  # 编辑 URL 和 SESSION
 
 | 工具 | 用途 |
 |------|------|
-| `commander_reply` | 回复 Commander 任务（完成/进行中/阻塞/错误） |
-| `commander_report_status` | 更新 Session 状态（working/idle/blocked/error） |
+| `commhub_reply` | 回复 CommHub 任务（完成/进行中/阻塞/错误） |
+| `commhub_report_status` | 更新 Session 状态（working/idle/blocked/error） |
 
 ## 落地路径
 
@@ -248,12 +248,12 @@ cp channel/.mcp.json ~/.claude/.mcp.json  # 编辑 URL 和 SESSION
 2. ~~Agent Teams 做本地并行任务~~
 
 ### Phase 2：本周（已完成）
-3. ~~**部署 Commander MCP Server**~~ -- v0.4.0 上线
+3. ~~**部署 CommHub Server**~~ -- v0.4.0 上线
 4. ~~所有 Session 配上 MCP URL~~
-5. ~~**Commander Channel 插件**~~ -- SSE 实时推送已验证
+5. ~~**CommHub Channel 插件**~~ -- SSE 实时推送已验证
 
 ### Phase 3：进行中
-6. Dashboard 监控面板（`/admin/commander`）
+6. Dashboard 监控面板（`/admin/commhub`）
 7. 完全退役 tmux send-keys
 8. 跨服务器 Channel 连接验证
 

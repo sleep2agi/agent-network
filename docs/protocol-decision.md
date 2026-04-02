@@ -9,7 +9,7 @@
 
 **用 MCP。现在就能跑，Claude Code 和 Codex 原生支持，零适配成本。**
 
-A2A 和 ACP 解决的是"Agent 如何发现和协作"的问题，但我们的 30 个 Session 都是自己的、都知道 Commander 地址，不需要"发现"。
+A2A 和 ACP 解决的是"Agent 如何发现和协作"的问题，但我们的 30 个 Session 都是自己的、都知道 CommHub 地址，不需要"发现"。
 
 ---
 
@@ -27,7 +27,7 @@ A2A 的核心价值是 **Agent Card**（`/.well-known/agent.json`）做能力发
 
 但我们的场景：
 - 30 个 Session 都是自己部署的
-- 都连同一个 Commander Server
+- 都连同一个 CommHub Server
 - 地址写死在 `settings.json` 里
 - 不需要"发现"
 
@@ -42,14 +42,14 @@ A2A 的 Task 生命周期（submitted→working→completed）确实比我们自
 
 - 生态太早期（BeeAI 框架内部）
 - 社区比 A2A 小一个数量级
-- 解决的问题和 Commander MCP 高度重叠
+- 解决的问题和 CommHub MCP 高度重叠
 - 无任何现有工具链集成
 
 ## 架构定论
 
 ```
 ┌─────────────────────────────────┐
-│  Commander MCP Server (Bun)     │  ← 我们自己写
+│  CommHub Server (Bun)     │  ← 我们自己写
 │  MCP SSE + HTTP REST            │
 │  SQLite (sessions/inbox/results)│
 └───────────────┬─────────────────┘

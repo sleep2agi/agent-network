@@ -114,12 +114,12 @@ Set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` to enable. One lead agent spawns mu
 
 Anthropic built a 100K-line Rust compiler with 16 Agent Teams. Currently experimental, same-machine only.
 
-### 3.5 Commander MCP Server (Design Complete)
+### 3.5 CommHub Server (Design Complete)
 
 The ultimate cross-server solution. Two plans:
 
 - **Plan A: MCP Tool + Polling**. Child agents periodically call MCP Tool to check inbox, hub dispatches via API. 1-day MVP.
-- **Plan B: MCP Channel + Push**. Commander as Channel plugin injects directly into conversation flow, real-time zero-delay push. 3-day development.
+- **Plan B: MCP Channel + Push**. CommHub as Channel plugin injects directly into conversation flow, real-time zero-delay push. 3-day development.
 
 Core idea: From "hub reads child agent screens" to "child agents proactively report to hub." All communication via HTTP+SSE, structured JSON.
 
@@ -131,8 +131,8 @@ Core idea: From "hub reads child agent screens" to "child agents proactively rep
 | Codex MCP Tool | 4 stars | No | 30 sec sync | Zero | 95% |
 | Codex Plugin | 5 stars | No | Sync | 5 min install | 95% |
 | Agent Teams | 4 stars | No | Built-in | 1 env var | 90% |
-| Commander MCP | 4 stars | Yes | Polling | 1 day dev | 95% |
-| Commander Channel | 5 stars | Yes | Push | 3 day dev | 99% |
+| CommHub MCP | 4 stars | Yes | Polling | 1 day dev | 95% |
+| CommHub Channel | 5 stars | Yes | Push | 3 day dev | 99% |
 
 ---
 
@@ -291,7 +291,7 @@ CJK fonts, punctuation, and layout are disaster zones in cross-platform media pr
 ### Architecture
 1. **Hub dispatches only, never executes.** No code writing, no reviewing, no rendering.
 2. **One project directory per session.** No mixing, no bare runs.
-3. **Communication must be structured.** tmux capture-pane text parsing is a dead end. Migrate to MCP/Commander ASAP.
+3. **Communication must be structured.** tmux capture-pane text parsing is a dead end. Migrate to MCP/CommHub ASAP.
 4. **Local tasks via MCP, cross-server via SSH+tmux as fallback.**
 
 ### Model Selection
@@ -316,10 +316,10 @@ CJK fonts, punctuation, and layout are disaster zones in cross-platform media pr
 
 ## IX. What's Next
 
-1. **Commander MCP Server MVP** (1 day) -- solve cross-server structured communication, retire tmux send-keys
+1. **CommHub Server MVP** (1 day) -- solve cross-server structured communication, retire tmux send-keys
 2. **Install MCO** -- multi-model parallel review aggregation
 3. **Video quality upgrade** -- add ffprobe frame-level checks, CJK font pre-check, black screen detection
-4. **Retire tmux send-keys** -- all communication via MCP protocol after Commander launches
+4. **Retire tmux send-keys** -- all communication via MCP protocol after CommHub launches
 
 ---
 

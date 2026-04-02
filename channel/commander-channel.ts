@@ -1,17 +1,56 @@
 #!/usr/bin/env bun
 /**
- * Commander Channel Plugin for Claude Code
+ * CommHub Channel Plugin for Claude Code
  *
- * Usage:
- *   cd ~/agent-orchestra/channel
- *   claude --dangerously-skip-permissions --dangerously-load-development-channels server:commander
+ * Alias resolution (priority order):
+ *   1. COMMHUB_ALIAS env var
+ *   2. Project .env: ~/.claude/channels/commhub/{project-path}/.env
+ *   3. tmux session name
+ *   4. hostname
  *
- * Env vars:
- *   COMMANDER_URL      - Commander Server URL (default: http://127.0.0.1:9200)
- *   COMMANDER_SESSION  - This session's name (default: hostname)
- *   COMMANDER_TOKEN    - Auth token (optional, matches COMMANDER_AUTH_TOKEN on server)
+ * Shared config from: ~/.claude/channels/commhub/.env
+ *   COMMHUB_URL, COMMHUB_TOKEN
  */
 
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
+import { hostname } from "os";
+import { execSync } from "child_process";
+
+// ── .env loader helper ────────────────────────────────
+function loadEnvFile(path: string): void {
+  if (!existsSync(path)) return;
+  for (const line of readFileSync(path, "utf-8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq < 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    if (!process.env[key]) process.env[key] = val;
+  }
+}
+
+// ── Load shared config ────────────────────────────────
+const HOME = process.env.HOME || "~";
+const COMMHUB_DIR = join(HOME, ".claude/channels/commhub");
+loadEnvFile(join(COMMHUB_DIR, ".env"));
+
+// ── Load project-specific config ──────────────────────
+// /home/vansin/vincent → -home-vansin-vincent
+const projectPath = process.cwd().replace(/\//g, "-");
+loadEnvFile(join(COMMHUB_DIR, projectPath, ".env"));
+
+// ── Get tmux session name ─────────────────────────────
+function getTmuxSessionName(): string {
+  try {
+    return execSync("tmux display-message -p '#S'", { encoding: "utf-8", timeout: 2000 }).trim();
+  } catch {
+    return "";
+  }
+}
+
+// ── Resolve config ────────────────────────────────────
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -19,27 +58,28 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-const COMMANDER_URL = process.env.COMMANDER_URL || "http://127.0.0.1:9200";
-const SESSION_NAME = process.env.COMMANDER_SESSION || (await import("os")).hostname();
-const AUTH_TOKEN = process.env.COMMANDER_TOKEN || "";
+const COMMHUB_URL = process.env.COMMHUB_URL || "http://127.0.0.1:9200";
+const TMUX_NAME = process.env.COMMHUB_TMUX || getTmuxSessionName();
+const ALIAS = process.env.COMMHUB_ALIAS || TMUX_NAME || hostname();
+const RESUME_ID = process.env.COMMHUB_RESUME_ID || process.env.CLAUDE_RESUME_ID || crypto.randomUUID();
+const AUTH_TOKEN = process.env.COMMHUB_TOKEN || "";
 
 function log(msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
-  process.stderr.write(`[${ts}] [commander-channel] ${msg}\n`);
+  process.stderr.write(`[${ts}] [commhub] ${msg}\n`);
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// Debug: log env on startup
-log(`ENV: COMMANDER_URL=${COMMANDER_URL} SESSION=${SESSION_NAME} TOKEN=${AUTH_TOKEN ? "set" : "unset"}`);
+log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}... TMUX=${TMUX_NAME || "none"} CWD=${process.cwd()} PROJECT_ENV=${projectPath}`);
 
 // ── MCP Server with Channel capability ──────────────
 const mcp = new Server(
   {
-    name: "commander-channel",
-    version: "0.1.0",
+    name: "commhub-channel",
+    version: "0.3.0",
   },
   {
     capabilities: {
@@ -47,11 +87,11 @@ const mcp = new Server(
       tools: {},
     },
     instructions: [
-      `Messages from Commander arrive as <channel source="commander" task_id="..." priority="..." from="...">`,
-      `These are tasks dispatched by the hub or other sessions via the Commander MCP Server.`,
-      `Reply using the commander_reply tool to report status or results back.`,
-      `You can also use commander_report_status to update your session status.`,
-      `Session name: ${SESSION_NAME}`,
+      `Messages from CommHub arrive as <channel source="commhub" task_id="..." priority="..." from="...">`,
+      `These are tasks dispatched by the hub or other sessions via the CommHub Server.`,
+      `Reply using the commhub_reply tool to report status or results back.`,
+      `You can also use commhub_report_status to update your session status.`,
+      `Session alias: ${ALIAS}`,
     ].join("\n"),
   }
 );
@@ -60,8 +100,8 @@ const mcp = new Server(
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
-      name: "commander_reply",
-      description: "Reply to a Commander task — report completion or send a message back to the hub.",
+      name: "commhub_reply",
+      description: "Reply to a CommHub task — report completion or send a message back to the hub.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -77,8 +117,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: "commander_report_status",
-      description: "Update this session's status in Commander (working/idle/blocked/error).",
+      name: "commhub_report_status",
+      description: "Update this session's status in CommHub (working/idle/blocked/error).",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -95,10 +135,9 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-// Helper: call Commander MCP endpoint
-async function callCommander(toolName: string, args: Record<string, unknown>): Promise<any> {
-  // Initialize + call tool in one flow (stateless mode)
-  const initRes = await fetch(`${COMMANDER_URL}/mcp`, {
+// Helper: call CommHub MCP endpoint
+async function callCommHub(toolName: string, args: Record<string, unknown>): Promise<any> {
+  const initRes = await fetch(`${COMMHUB_URL}/mcp`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -112,15 +151,13 @@ async function callCommander(toolName: string, args: Record<string, unknown>): P
       params: {
         protocolVersion: "2025-03-26",
         capabilities: {},
-        clientInfo: { name: "commander-channel", version: "0.1.0" },
+        clientInfo: { name: "commhub-channel", version: "0.3.0" },
       },
     }),
   });
-  // Read the SSE response (just need to consume it)
   await initRes.text();
 
-  // Now call the tool
-  const res = await fetch(`${COMMANDER_URL}/mcp`, {
+  const res = await fetch(`${COMMHUB_URL}/mcp`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -136,7 +173,6 @@ async function callCommander(toolName: string, args: Record<string, unknown>): P
   });
 
   const text = await res.text();
-  // Parse SSE event: "event: message\ndata: {...}\n\n"
   const dataLine = text.split("\n").find((l) => l.startsWith("data: "));
   if (dataLine) {
     const json = JSON.parse(dataLine.slice(6));
@@ -148,20 +184,19 @@ async function callCommander(toolName: string, args: Record<string, unknown>): P
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params;
 
-  if (name === "commander_reply") {
+  if (name === "commhub_reply") {
     const { task_id, text, status } = args as any;
-    // Report completion if status is completed
     if (status === "completed") {
-      const result = await callCommander("report_completion", {
-        session_name: SESSION_NAME,
+      const result = await callCommHub("report_completion", {
+        alias: ALIAS,
         task: task_id || "task",
         result: text,
       });
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     }
-    // Otherwise update status
-    const result = await callCommander("report_status", {
-      session_name: SESSION_NAME,
+    const result = await callCommHub("report_status", {
+      resume_id: RESUME_ID,
+      alias: ALIAS,
       status: status === "blocked" ? "blocked" : status === "error" ? "error" : "working",
       task: text.slice(0, 200),
       output: text,
@@ -169,10 +204,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   }
 
-  if (name === "commander_report_status") {
+  if (name === "commhub_report_status") {
     const { status, task, progress } = args as any;
-    const result = await callCommander("report_status", {
-      session_name: SESSION_NAME,
+    const result = await callCommHub("report_status", {
+      resume_id: RESUME_ID,
+      alias: ALIAS,
       status,
       task,
       progress,
@@ -183,9 +219,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   return { content: [{ type: "text", text: JSON.stringify({ error: "unknown tool" }) }] };
 });
 
-// ── SSE Listener: subscribe to /events/:session ─────
+// ── SSE Listener: subscribe to /events/:alias ─────
 async function connectSSE() {
-  const url = `${COMMANDER_URL}/events/${encodeURIComponent(SESSION_NAME)}`;
+  const url = `${COMMHUB_URL}/events/${encodeURIComponent(ALIAS)}`;
   const headers: Record<string, string> = {};
   if (AUTH_TOKEN) headers.Authorization = `Bearer ${AUTH_TOKEN}`;
 
@@ -236,25 +272,23 @@ async function connectSSE() {
 
 async function handleSSEEvent(event: any) {
   if (event.type === "connected") {
-    log(`SSE connected as "${SESSION_NAME}"`);
+    log(`SSE connected as "${ALIAS}"`);
     return;
   }
 
   if (event.type === "new_task" || event.type === "broadcast") {
     log(`← ${event.type}: inbox_count=${event.inbox_count} priority=${event.priority || "normal"}`);
 
-    // Fetch actual task content from inbox
-    const inbox = await callCommander("get_inbox", {
-      session_name: SESSION_NAME,
+    const inbox = await callCommHub("get_inbox", {
+      alias: ALIAS,
       limit: 5,
     });
 
     if (inbox?.ok && inbox.messages?.length > 0) {
       for (const msg of inbox.messages) {
-        // Inject into Claude Code conversation via Channel protocol
         const meta: Record<string, string> = {
           sender: msg.from_session || "hub",
-          sender_id: "commander",
+          sender_id: "commhub",
           task_id: msg.id,
           priority: msg.priority || "normal",
         };
@@ -269,9 +303,8 @@ async function handleSSEEvent(event: any) {
 
         log(`→ injected task ${msg.id.slice(0, 8)} from ${msg.from_session}: ${(msg.content as string).slice(0, 60)}`);
 
-        // Auto-ack
-        await callCommander("ack_inbox", {
-          session_name: SESSION_NAME,
+        await callCommHub("ack_inbox", {
+          alias: ALIAS,
           message_id: msg.id,
         });
       }
@@ -281,25 +314,27 @@ async function handleSSEEvent(event: any) {
 
 // ── Main ────────────────────────────────────────────
 async function main() {
-  // 1. Connect MCP stdio first (Claude Code expects handshake immediately)
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
   log("MCP stdio connected");
 
-  // 2. Start SSE listener FIRST (non-blocking, auto-reconnect)
   log("starting SSE listener...");
   connectSSE().catch((err) => log(`SSE fatal: ${err}`));
 
-  // 3. Report initial status to Commander (non-blocking, don't block SSE)
-  callCommander("report_status", {
-    session_name: SESSION_NAME,
+  callCommHub("report_status", {
+    resume_id: RESUME_ID,
+    alias: ALIAS,
     status: "idle",
-    server: (await import("os")).hostname(),
+    server: hostname(),
+    hostname: hostname(),
+    agent: "claude-code",
+    project_dir: process.cwd(),
+    tmux_name: TMUX_NAME || undefined,
   })
-    .then(() => log(`registered as "${SESSION_NAME}"`))
-    .catch((e) => log(`warning: could not register with Commander: ${e}`));
+    .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
+    .catch((e) => log(`warning: could not register: ${e}`));
 
-  log("ready — waiting for Commander events");
+  log("ready — waiting for events");
 }
 
 main().catch((err) => {
@@ -307,7 +342,6 @@ main().catch((err) => {
   process.exit(1);
 });
 
-// Graceful shutdown
 process.stdin.on("end", () => process.exit(0));
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));

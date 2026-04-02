@@ -14,11 +14,11 @@
 | 4 | Agent Teams | Local | Built-in | 1 env var | Low | 90% | Enabled |
 | 5 | MCO | Local | Parallel | npm install | Low | 90% | Available |
 | 6 | oh-my-claudecode | Local | Git worktree | npm install | Medium | 85% | Community |
-| **7** | **Commander MCP (SSE star)** | **Yes** | **Real-time (SSE)** | **1-2 day dev** | **Medium** | **99%** | **Architecture confirmed** |
+| **7** | **CommHub MCP (SSE star)** | **Yes** | **Real-time (SSE)** | **1-2 day dev** | **Medium** | **99%** | **Architecture confirmed** |
 
 ### Cost Analysis
 
-| Dimension | tmux | MCP Tool | Plugin | Agent Teams | Commander |
+| Dimension | tmux | MCP Tool | Plugin | Agent Teams | CommHub |
 |-----------|------|----------|--------|-------------|-----------|
 | **Setup time** | 0 min | 0 min | 5 min | 1 min | 1 day |
 | **Per-dispatch time** | 3-5 min (SSH+capture+judge+send) | 30 sec | 10 sec (/codex:review) | Built-in auto | 1 sec (API call) |
@@ -102,12 +102,12 @@ mco review  # Multi-model review with aggregated results
 
 ## 3. Cross-Server Solutions
 
-### 3.1 Commander MCP Server (Architecture Confirmed 2026-04-01)
-- See `commander-mcp-design.md` (full design document)
+### 3.1 CommHub Server (Architecture Confirmed 2026-04-01)
+- See `commhub-mcp-design.md` (full design document)
 - See `architecture-decision.md` (decision record)
-- **MCP Streamable HTTP star topology** -- single Commander Server, all sessions connect via persistent SSE
+- **MCP Streamable HTTP star topology** -- single CommHub Server, all sessions connect via persistent SSE
 - **Dual interface** -- MCP Streamable HTTP for Claude Code/Codex + HTTP REST for dashboards
-- **Cross-model** -- Claude Code ↔ Codex communicate via Commander relay
+- **Cross-model** -- Claude Code ↔ Codex communicate via CommHub relay
 - **30 sessions = 30 SSE connections** (not N^2 mesh)
 - Tech stack: Bun + TypeScript + @modelcontextprotocol/sdk + bun:sqlite
 
@@ -119,7 +119,7 @@ echo '{"status":"executing","task":"...","score":95}' > ~/session-status.json
 # Hub reads status
 ssh user@host cat ~/session-status.json
 ```
-Fragile, no message queue, no structured communication. Use Commander instead.
+Fragile, no message queue, no structured communication. Use CommHub instead.
 
 ---
 
@@ -130,8 +130,8 @@ Fragile, no message queue, no structured communication. Use Commander instead.
 2. Agent Teams -- for local parallel tasks
 
 ### Phase 2: This Week (1-2 days)
-3. **Commander MCP Server MVP** -- SSE star topology, 9 MCP Tools
-4. All Claude Code sessions add `"commander": { "url": "http://your-server-ip:9200/mcp" }` to settings.json
+3. **CommHub Server MVP** -- SSE star topology, 9 MCP Tools
+4. All Claude Code sessions add `"commhub": { "url": "http://your-server-ip:9200/mcp" }` to settings.json
 5. All Codex sessions add the same URL to config.json
 
 ### Phase 3: Next Week
@@ -144,7 +144,7 @@ Fragile, no message queue, no structured communication. Use Commander instead.
 
 | Pain Point | Solution | Priority |
 |-----------|----------|----------|
-| tmux can't distinguish shell vs agent | Commander MCP structured communication | P0 |
+| tmux can't distinguish shell vs agent | CommHub MCP structured communication | P0 |
 | Remote sessions often idle, need pushing | /loop self-check + hub patrol | P1 |
 | MiniMax/Qwen don't self-loop | Stronger self-loop prompts + timed pushes | P1 |
 | Tunnel instability | SSH tunnel backup + auto-reconnect | P2 |

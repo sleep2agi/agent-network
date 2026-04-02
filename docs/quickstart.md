@@ -1,11 +1,11 @@
 # 快速开始：今天就跑起来
 
-> 从零到 30 个 Session 全部连上 Commander，30 分钟搞定。
+> 从零到 30 个 Session 全部连上 CommHub，30 分钟搞定。
 > 两种接入方式：**MCP Tool**（简单）或 **Channel 插件**（实时推送）。
 
 ---
 
-## 第一步：部署 Commander Server（5 分钟）
+## 第一步：部署 CommHub Server（5 分钟）
 
 在你的中心服务器上：
 
@@ -19,7 +19,7 @@ bun install
 
 # 启动
 bun run start
-# 输出：Commander MCP Server v0.4.0
+# 输出：CommHub Server v0.4.0
 #        Transport: Streamable HTTP (Bun native)
 ```
 
@@ -32,9 +32,9 @@ curl http://localhost:9200/health
 ### 用 systemd 持久化（可选）
 
 ```bash
-cat > /etc/systemd/system/commander.service << 'EOF'
+cat > /etc/systemd/system/commhub.service << 'EOF'
 [Unit]
-Description=Commander MCP Server
+Description=CommHub Server
 After=network.target
 
 [Service]
@@ -49,7 +49,7 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-systemctl enable --now commander
+systemctl enable --now commhub
 ```
 
 ### 防火墙
@@ -70,14 +70,14 @@ iptables -A INPUT -p tcp --dport 9200 -j DROP
 ```json
 {
   "mcpServers": {
-    "commander": {
+    "commhub": {
       "url": "http://YOUR_COMMANDER_IP:9200/mcp"
     }
   }
 }
 ```
 
-重启 Claude Code Session，Commander 的 9 个 Tool 自动可用。
+重启 Claude Code Session，CommHub 的 9 个 Tool 自动可用。
 
 ### 验证连接
 
@@ -86,7 +86,7 @@ iptables -A INPUT -p tcp --dport 9200 -j DROP
 调用 report_status，session_name 设为 "test"，status 设为 "idle"
 ```
 
-在 Commander 服务器上检查：
+在 CommHub 服务器上检查：
 ```bash
 curl http://localhost:9200/api/status
 # 应该看到 test session
@@ -101,7 +101,7 @@ Codex 的 MCP 配置方式相同。在 `config.json` 中加入：
 ```json
 {
   "mcpServers": {
-    "commander": {
+    "commhub": {
       "url": "http://YOUR_COMMANDER_IP:9200/mcp"
     }
   }
@@ -112,7 +112,7 @@ Codex 的 MCP 配置方式相同。在 `config.json` 中加入：
 
 ## 第三步 B：Channel 插件接入（可选，实时推送）
 
-> Channel 模式下，Commander 任务通过 SSE 实时注入 Claude Code 对话，无需 Agent 轮询 inbox。
+> Channel 模式下，CommHub 任务通过 SSE 实时注入 Claude Code 对话，无需 Agent 轮询 inbox。
 
 ```bash
 # 安装 Channel 依赖
@@ -124,7 +124,7 @@ COMMANDER_URL=http://YOUR_COMMANDER_IP:9200 \
 COMMANDER_SESSION=my-agent \
 COMMANDER_TOKEN=your-secret-token \
   claude --dangerously-skip-permissions \
-         --dangerously-load-development-channels server:commander
+         --dangerously-load-development-channels server:commhub
 ```
 
 验证：
@@ -135,7 +135,7 @@ curl -X POST http://YOUR_COMMANDER_IP:9200/api/task \
   -H "Authorization: Bearer your-secret-token" \
   -d '{"session_name":"my-agent","task":"报告当前状态","priority":"normal"}'
 
-# Agent 对话中应该立即收到 <channel source="commander" ...> 消息
+# Agent 对话中应该立即收到 <channel source="commhub" ...> 消息
 ```
 
 ### MCP Tool vs Channel 怎么选？
@@ -154,9 +154,9 @@ curl -X POST http://YOUR_COMMANDER_IP:9200/api/task \
 在每个项目的 CLAUDE.md 中加入：
 
 ```markdown
-## Commander 通信规则
+## CommHub 通信规则
 
-你已连接到 Commander MCP Server，拥有以下工具：
+你已连接到 CommHub Server，拥有以下工具：
 
 ### 状态汇报
 - 开始任务：`report_status(session_name="你的名字", status="working", task="任务描述")`
@@ -233,7 +233,7 @@ curl http://YOUR_COMMANDER_IP:9200/health | jq
 ### MCP Tool 模式
 
 ```
-Hub (Claude Opus)                Commander              Agent (MCP Tool)
+Hub (Claude Opus)                CommHub              Agent (MCP Tool)
      │                               │                        │
      │  send_task("dev","修 Bug")     │                        │
      │──────────────────────────────▶│  写入 inbox             │
@@ -259,7 +259,7 @@ Hub (Claude Opus)                Commander              Agent (MCP Tool)
 ### Channel 模式（v0.4.0）
 
 ```
-Hub                              Commander              Agent (Channel)
+Hub                              CommHub              Agent (Channel)
      │                               │◀── SSE 长连接 ────────│
      │                               │                        │
      │  send_task("agent","修 Bug")   │                        │
@@ -267,7 +267,7 @@ Hub                              Commander              Agent (Channel)
      │                               │── SSE push ──────────▶│ 任务秒达！
      │                               │                        │ 自动注入对话
      │                               │                        │
-     │                               │  commander_reply()     │
+     │                               │  commhub_reply()     │
      │                               │◀───────────────────────│ Channel Tool
      │                               │                        │
      │  get_completions()            │                        │
@@ -280,7 +280,7 @@ Hub                              Commander              Agent (Channel)
 ## FAQ
 
 **Q: Session 断线了怎么办？**
-A: Commander 10 分钟没收到 report_status 会自动标记 offline。Session 重连后调一次 report_status 即可恢复。
+A: CommHub 10 分钟没收到 report_status 会自动标记 offline。Session 重连后调一次 report_status 即可恢复。
 
 **Q: 多个 Session 同时写 SQLite 会冲突吗？**
 A: WAL 模式 + `busy_timeout=5000ms`，30 个 Session 的写入量完全够用。
@@ -292,7 +292,7 @@ A: 推荐 Token 认证 + 防火墙双重保护：
 ```json
 {
   "mcpServers": {
-    "commander": {
+    "commhub": {
       "url": "http://YOUR_SERVER:9200/mcp?token=your-secret-token"
     }
   }
@@ -307,7 +307,7 @@ A: 推荐 Token 认证 + 防火墙双重保护：
 A: `curl /health` 返回 `sse_connections`（当前 SSE Push 连接数）和 `sse_sessions`（各 Session 连接详情）。
 
 **Q: MCP Streamable HTTP 和 SSE Push 有什么区别？**
-A: MCP Streamable HTTP (`POST /mcp`) 是 Agent 调用 Commander 工具的协议通道。SSE Push (`GET /events/:session`) 是 Commander 实时推送任务给 Agent 的通道。两者各司其职。
+A: MCP Streamable HTTP (`POST /mcp`) 是 Agent 调用 CommHub 工具的协议通道。SSE Push (`GET /events/:session`) 是 CommHub 实时推送任务给 Agent 的通道。两者各司其职。
 
 **Q: Channel 插件断线会丢任务吗？**
 A: 不会。任务写入 SQLite inbox，Channel 重连后通过 `get_inbox` 拉取未确认消息。SSE 只是通知，不是消息本身。
