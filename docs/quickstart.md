@@ -217,7 +217,22 @@ A: Commander 10 分钟没收到 report_status 会自动标记 offline。Session 
 A: WAL 模式 + `busy_timeout=5000ms`，30 个 Session 的写入量完全够用。
 
 **Q: 需要认证吗？**
-A: MVP 阶段用防火墙 IP 白名单。后续可加 Token 认证。
+A: 推荐 Token 认证 + 防火墙双重保护：
+
+1. **Token 认证**：启动时设置 `COMMANDER_AUTH_TOKEN=your-secret-token`，所有请求带 `Authorization: Bearer <token>`。MCP 连接 URL 传 token：
+```json
+{
+  "mcpServers": {
+    "commander": {
+      "url": "http://YOUR_SERVER:9200/sse?token=your-secret-token"
+    }
+  }
+}
+```
+
+2. **防火墙 IP 白名单**：只允许已知服务器 IP 访问 9200 端口
+
+两层都要加，Token 防未授权访问，防火墙防扫描。
 
 **Q: 能监控哪个 Session 连着？**
 A: `curl /health` 返回 `connections` 字段（当前 SSE 连接数）。
