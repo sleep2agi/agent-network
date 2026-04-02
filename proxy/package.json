@@ -1,0 +1,11 @@
+{
+  "name": "commhub-mcp-proxy",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun run commhub-proxy.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}
