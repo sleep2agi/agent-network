@@ -291,6 +291,7 @@ Channel 模式优势：**任务从 Hub 发出到 Agent 看到 < 1 秒**，无需
 ## 文档
 
 - [`docs/quickstart.md`](docs/quickstart.md) -- **新电脑 5 步配完**
+- [`docs/codex-app-server.md`](docs/codex-app-server.md) -- Codex App-Server 调研：协议、能力、混合方案
 - [`docs/commhub-limitations.md`](docs/commhub-limitations.md) -- 已知限制和注意事项
 - [`docs/protocol-decision.md`](docs/protocol-decision.md) -- 协议选型：为什么用 MCP（不用 A2A、不用 ACP）
 - [`docs/architecture-decision.md`](docs/architecture-decision.md) -- 架构决策记录：MCP Streamable HTTP 星型拓扑
