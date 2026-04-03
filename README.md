@@ -1,3 +1,5 @@
+![Agent Comm Hub](assets/banner.png)
+
 # Agent Comm Hub
 
 > 开源的多 AI Agent Session 跨服务器编排方案。
