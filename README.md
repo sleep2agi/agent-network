@@ -1,4 +1,4 @@
-# Agent Orchestra
+# Agent Comm Hub
 
 > 开源的多 AI Agent Session 跨服务器编排方案。
 > 源自 48+ 小时、4 台服务器、15+ 并发 Agent Session 的实战经验。
@@ -427,6 +427,8 @@ codex --dangerously-bypass-approvals-and-sandbox \
 - [Citadel](https://github.com/SethGammon/Citadel) -- 企业级 4 层路由 + `/do` 命令
 - [claude-octopus](https://github.com/nyldn/claude-octopus) -- 8+ 模型提供商协调 + 共识门控
 - [MCO](https://github.com/mco-org/mco) -- Multi-CLI Orchestrator 多模型并行审查
+
+> [sleep2agi](https://github.com/sleep2agi) — 专注 AI Agents 编排、群体智能、视频生成，帮助普通人跨越到 AGI。
 
 ## License
 
