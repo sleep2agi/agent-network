@@ -314,12 +314,96 @@ CJK fonts, punctuation, and layout are disaster zones in cross-platform media pr
 
 ---
 
-## IX. What's Next
+## IX. Day 3: Commander → CommHub Rename & Operational Maturity (2026-04-03)
 
-1. **CommHub Server MVP** (1 day) -- solve cross-server structured communication, retire tmux send-keys
+### 9.1 Commander → CommHub Full Rename
+
+Renamed all references from "Commander" to "CommHub" across the entire codebase:
+- Backend route: `/api/commander` → `/api/commhub` (file `commander.ts` → `commhub.ts`)
+- Frontend: `commhub/page.tsx`, `sessions/page.tsx` API URLs updated
+- Channel plugin: `commhub-channel.ts`, env vars `COMMHUB_*`
+- Proxy: `commhub-proxy.ts`
+- Dashboard: all UI text updated
+
+**Lesson**: Rename SOP must cover 5 layers: DB record, .env file, session restart (SSE re-register), SSE Poller restart, bidirectional communication test. Missing any layer = partial rename that silently breaks messaging. Full SOP documented in `docs/rename-sop.md`.
+
+### 9.2 SSE Poller Deployment Experience
+
+The SSE Poller (`poller/commhub-sse-poller.sh`) replaced the polling daemon as the recommended approach for non-Channel sessions:
+
+| Evolution | Mechanism | Latency | Weakness |
+|-----------|-----------|---------|----------|
+| v1: AI self-poll | AI calls get_inbox | 0-60s | Burns tokens, AI forgets to poll |
+| v2: Poller Daemon | Shell script polls HTTP every 10s | 0-10s | Still polling, 10s delay |
+| v3: **SSE Poller** | Shell script holds SSE long-connection | **< 1s** | Needs curl + python3 |
+
+**Key deployment details**:
+```bash
+# Launch SSE Poller for MiniMax/Codex sessions
+nohup ./poller/commhub-sse-poller.sh \
+  --alias 大猫 --tmux minimax-cc \
+  --url http://COMMHUB_IP:9200 \
+  > /tmp/sse-poller-bigcat.log 2>&1 &
+```
+
+**Pitfalls learned**:
+- SSE Poller must be restarted when alias changes (it connects with the old alias)
+- `pkill -f "commhub-sse-poller.*旧名字"` before starting with new alias
+- Poller checks tmux session existence before pushing — if tmux session is recreated with different name, poller silently fails
+- SSE reconnect delay defaults to 3s — sufficient for server restarts, but if CommHub is down for extended period, logs fill fast
+
+### 9.3 Naming Convention (Animal Emoji System)
+
+Standardized session naming across the fleet:
+
+| Animal | Model Runtime | Emoji |
+|--------|--------------|-------|
+| 马 (Horse) | Claude Code | 🐴 |
+| 牛 (Ox) | Codex | 🐂 |
+| 猫 (Cat) | MiniMax | 🐱 |
+
+**Format**: `站点 + 角色 + 动物`
+- Examples: A站运营马 / B站开发牛 / P站运维牛 / 大猫
+
+**Why this matters**: With 15+ sessions across 4 servers, you need to instantly know what model is behind each alias. The animal suffix makes this scannable on the Dashboard topology view.
+
+### 9.4 MiniMax .mcp.json Requires `type: "http"`
+
+MiniMax's Claude Code integration uses MCP over HTTP (not stdio). The `.mcp.json` config **must** include `"type": "http"`, otherwise the MCP server silently fails to load.
+
+```json
+{
+  "mcpServers": {
+    "commhub": {
+      "type": "http",
+      "url": "http://COMMHUB_IP:9200/mcp"
+    }
+  }
+}
+```
+
+**Lesson**: Claude Code defaults to `type: "stdio"` when unspecified. For remote MCP servers (CommHub, any HTTP-based MCP), always explicitly set `"type": "http"`. This is a silent failure — no error message, the tools just don't appear. Debug by checking if the AI can list its available tools.
+
+### 9.5 New Documentation Index
+
+Documents created/updated on Day 3:
+
+| Document | Content |
+|----------|---------|
+| `docs/rename-sop.md` | Session rename 5-step SOP (DB → ENV → restart → poller → test) |
+| `docs/reliable-messaging.md` | Four messaging approaches comparison (Channel/Proxy/AI-poll/Poller) |
+| `docs/experience.md` | This file — updated with Day 3 learnings |
+| `poller/commhub-sse-poller.sh` | SSE-based zero-latency poller (replaced polling daemon) |
+
+---
+
+## X. What's Next
+
+1. ~~**CommHub Server MVP**~~ ✅ Done — running in production with Channel + SSE Poller
 2. **Install MCO** -- multi-model parallel review aggregation
 3. **Video quality upgrade** -- add ffprobe frame-level checks, CJK font pre-check, black screen detection
-4. **Retire tmux send-keys** -- all communication via MCP protocol after CommHub launches
+4. **Full fleet on CommHub** -- migrate all sessions to Channel or SSE Poller, retire raw tmux send-keys
+5. **Dashboard topology** -- real-time fleet status on #F5F5F7 light background
 
 ---
 
