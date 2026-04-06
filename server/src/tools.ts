@@ -270,6 +270,42 @@ export function registerTools(server: McpServer, clientIP?: string) {
   );
 
   server.tool(
+    "send_message",
+    "Send a message to a session (no task lifecycle, just chat). Use for replies, status updates, or casual communication.",
+    {
+      alias: z.string().min(1).max(200).describe("Target session alias"),
+      message: z.string().min(1).max(10000).describe("Message content"),
+      from_session: z.string().max(200).optional().default("hub"),
+    },
+    async ({ alias, message, from_session }) => {
+      console.log(`[${ts()}] ${from_session} → send_message → ${alias}: ${message.slice(0, 60)}`);
+      const id = uuidv4();
+      db.run(
+        `INSERT INTO inbox (id, session_name, type, priority, content, from_session)
+         VALUES (?1, ?2, 'message', 'normal', ?3, ?4)`,
+        [id, alias, message, from_session]
+      );
+
+      const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
+
+      pushEvent(alias, { type: "new_message", message, from: from_session, message_id: id });
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: true,
+              message_id: id,
+              session_status: session?.status ?? "unknown",
+            }),
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
     "broadcast",
     "Send a message to multiple sessions.",
     {

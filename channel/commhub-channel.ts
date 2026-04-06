@@ -146,6 +146,18 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "commhub_send_message",
+      description: "Send a message to another session (no task lifecycle, just chat). Use for replies and status updates.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          alias: { type: "string", description: "Target session alias" },
+          message: { type: "string", description: "Message content" },
+        },
+        required: ["alias", "message"],
+      },
+    },
+    {
       name: "commhub_get_all_status",
       description: "Get status of all sessions from CommHub.",
       inputSchema: {
@@ -253,6 +265,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   }
 
+  if (name === "commhub_send_message") {
+    const { alias, message } = args as any;
+    const result = await callCommHub("send_message", {
+      alias,
+      message,
+      from_session: ALIAS,
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+  }
+
   if (name === "commhub_get_all_status") {
     const result = await callCommHub("get_all_status", {});
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
@@ -315,6 +337,28 @@ async function connectSSE() {
 async function handleSSEEvent(event: any) {
   if (event.type === "connected") {
     log(`SSE connected as "${ALIAS}"`);
+    return;
+  }
+
+  if (event.type === "new_message") {
+    log(`← message from ${event.from}: ${(event.message as string).slice(0, 60)}`);
+
+    await mcp.notification({
+      method: "notifications/claude/channel",
+      params: {
+        content: event.message,
+        meta: {
+          sender: event.from || "hub",
+          sender_id: "commhub",
+          priority: "normal",
+        },
+      },
+    });
+
+    // Auto-ack the message in inbox
+    if (event.message_id) {
+      await callCommHub("ack_inbox", { alias: ALIAS, message_id: event.message_id });
+    }
     return;
   }
 
