@@ -101,19 +101,23 @@ except:
         connected)
           log "SSE connected as '$ALIAS'"
           ;;
-        new_task)
+        new_task|new_message)
           PRIORITY=$(echo "$DATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('priority','normal'))" 2>/dev/null || echo "normal")
           FROM=$(echo "$DATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('from','hub'))" 2>/dev/null || echo "hub")
           COUNT=$(echo "$DATA" | python3 -c "import sys,json; print(json.load(sys.stdin).get('inbox_count',1))" 2>/dev/null || echo "1")
-          log "← new_task from=$FROM priority=$PRIORITY inbox=$COUNT"
+          log "← $EVENT_TYPE from=$FROM priority=$PRIORITY inbox=$COUNT"
 
-          # 推给 AI
-          tmux send-keys -t "$TMUX_SESSION" "$PUSH_CMD" Enter
+          # 推给 AI：先发文字，等 500ms 让 TUI 渲染，再发 Enter
+          tmux send-keys -t "$TMUX_SESSION" -l "$PUSH_CMD"
+          sleep 0.5
+          tmux send-keys -t "$TMUX_SESSION" Enter
           log "→ pushed to tmux:$TMUX_SESSION"
           ;;
         broadcast)
           log "← broadcast"
-          tmux send-keys -t "$TMUX_SESSION" "$PUSH_CMD" Enter
+          tmux send-keys -t "$TMUX_SESSION" -l "$PUSH_CMD"
+          sleep 0.5
+          tmux send-keys -t "$TMUX_SESSION" Enter
           log "→ pushed to tmux:$TMUX_SESSION"
           ;;
         *)
