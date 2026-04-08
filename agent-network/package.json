@@ -1,0 +1,56 @@
+{
+  "name": "@sleep2agi/agent-network",
+  "version": "0.1.0",
+  "description": "AI Agent Network — Server + Client + Setup in one package. SSE real-time communication for multi-agent orchestration.",
+  "type": "module",
+  "main": "dist/src/client.js",
+  "types": "dist/client.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/src/client.js",
+      "types": "./dist/client.d.ts"
+    },
+    "./server": {
+      "import": "./src/server.ts"
+    }
+  },
+  "bin": {
+    "agent-network": "dist/bin/cli.js"
+  },
+  "files": [
+    "dist",
+    "src/server.ts"
+  ],
+  "scripts": {
+    "build": "bun build src/client.ts bin/cli.ts --outdir dist --target node --minify && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "agent",
+    "network",
+    "ai",
+    "mcp",
+    "sse",
+    "claude",
+    "openai",
+    "minimax",
+    "orchestration",
+    "communication",
+    "hub",
+    "multi-agent"
+  ],
+  "author": "sleep2agi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sleep2agi/agent-comm-hub",
+    "directory": "agent-network"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "^5.0.0"
+  }
+}
