@@ -232,6 +232,7 @@ function initProfile() {
   }
 
   const profile: Profile = {
+    anet_version: "0.0.11",
     ...(opts.name ? { name: opts.name } : {}),
     alias,
     hub,
