@@ -338,23 +338,139 @@ function startCommand() {
 
 // ── list ──
 
-function listCommand() {
+async function listCommand() {
+  const cwd = process.cwd();
+
+  // ── Profiles ──
   const profiles = listProfiles();
-  if (profiles.length === 0) {
-    console.log("No profiles. Create one: anet setup --profile <name> --alias <alias> --hub <url>");
-    return;
+  if (profiles.length > 0) {
+    console.log("\nProfiles (.anet/profiles/):\n");
+    for (const name of profiles) {
+      const p = loadProfile(name);
+      console.log(`  ${name}${p?.name ? `  (${p.name})` : ""}`);
+      console.log(`    alias: ${p?.alias}  channels: ${p?.channels.join(", ")}`);
+      console.log();
+    }
   }
-  console.log("\nProfiles:\n");
-  for (const name of profiles) {
-    const p = loadProfile(name);
-    const channels = p?.channels.join(", ") || "";
-    const envKeys = Object.keys(p?.env || {}).join(", ");
-    console.log(`  ${name}${p?.name ? `  (${p.name})` : ""}`);
-    console.log(`    alias: ${p?.alias}  hub: ${p?.hub}`);
-    console.log(`    channels: ${channels}`);
-    if (envKeys) console.log(`    env: ${envKeys}`);
-    if (p?.resume) console.log(`    resume: ${p.resume}`);
+
+  // ── Local sessions in this directory ──
+  const sessionsDir = join(home, ".claude", "sessions");
+  const localSessions: { pid: number; sessionId: string; cwd: string; kind: string }[] = [];
+
+  if (existsSync(sessionsDir)) {
+    for (const f of readdirSync(sessionsDir).filter(f => f.endsWith(".json"))) {
+      try {
+        const data = JSON.parse(readFileSync(join(sessionsDir, f), "utf-8"));
+        if (data.cwd === cwd) localSessions.push(data);
+      } catch {}
+    }
+  }
+
+  // ── CommHub network status ──
+  const globalConfig = loadGlobalConfig();
+  const hubUrl = globalConfig.hub;
+  let networkSessions: Record<string, any> = {};
+
+  if (hubUrl) {
+    try {
+      const res = await fetch(`${hubUrl}/api/status`);
+      const data = await res.json() as any;
+      if (data.sessions) {
+        for (const s of data.sessions) {
+          networkSessions[s.resume_id] = s;
+        }
+      }
+    } catch {}
+  }
+
+  // ── SSE connections ──
+  let sseSessions: Record<string, number> = {};
+  if (hubUrl) {
+    try {
+      const res = await fetch(`${hubUrl}/health`);
+      const data = await res.json() as any;
+      sseSessions = data.sse_sessions || {};
+    } catch {}
+  }
+
+  // ── Display sessions ──
+  if (localSessions.length > 0) {
+    console.log(`Sessions in ${cwd}:\n`);
+    console.log("  SESSION ID          PID     NETWORK STATUS");
+    console.log("  ─────────────────── ─────── ──────────────────────────");
+
+    for (const s of localSessions) {
+      const shortId = s.sessionId.slice(0, 18);
+
+      // Find in CommHub by resume_id match
+      let networkInfo = "";
+      let found = false;
+      for (const [, ns] of Object.entries(networkSessions)) {
+        if (ns.resume_id?.startsWith(s.sessionId.slice(0, 8))) {
+          const alias = ns.alias || "?";
+          const status = ns.status || "?";
+          const hasSse = sseSessions[alias] ? "SSE" : "";
+          networkInfo = `${alias} ${status} ${hasSse}`;
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        // Check by looking at COMMHUB_ALIAS env for this session's directory
+        const projectKey = cwd.replace(/\//g, "-");
+        const aliasEnvPath = join(home, ".claude", "channels", "commhub", projectKey, ".env");
+        if (existsSync(aliasEnvPath)) {
+          const envContent = readFileSync(aliasEnvPath, "utf-8");
+          const match = envContent.match(/COMMHUB_ALIAS=(.+)/);
+          if (match) {
+            const alias = match[1].trim();
+            const ns = Object.values(networkSessions).find((n: any) => n.alias === alias);
+            if (ns) {
+              const hasSse = sseSessions[alias] ? "SSE" : "";
+              networkInfo = `${alias} ${(ns as any).status} ${hasSse}`;
+              found = true;
+            } else {
+              networkInfo = `${alias} (not registered)`;
+            }
+          }
+        }
+      }
+
+      if (!found) networkInfo = "(not in network)";
+
+      // Check if process is alive
+      let alive = false;
+      try { process.kill(s.pid, 0); alive = true; } catch {}
+
+      const pidStr = alive ? `${s.pid}` : `${s.pid} ✕`;
+      console.log(`  ${shortId}  ${pidStr.padEnd(7)}  ${networkInfo}`);
+    }
     console.log();
+  } else {
+    console.log(`\nNo Claude Code sessions found in ${cwd}\n`);
+  }
+
+  // ── Network overview ──
+  if (hubUrl) {
+    const totalOnline = Object.keys(sseSessions).length;
+    const totalSessions = Object.keys(networkSessions).length;
+    console.log(`Network: ${hubUrl}  (${totalOnline} online / ${totalSessions} total)`);
+
+    if (totalOnline > 0) {
+      console.log("\n  ALIAS              STATUS     SSE");
+      console.log("  ────────────────── ────────── ───");
+      for (const [alias, count] of Object.entries(sseSessions)) {
+        const ns: any = Object.values(networkSessions).find((n: any) => n.alias === alias);
+        const status = ns?.status || "?";
+        console.log(`  ${alias.padEnd(18)} ${status.padEnd(10)} ${count > 0 ? "●" : "○"}`);
+      }
+    }
+    console.log();
+  }
+
+  if (profiles.length === 0 && localSessions.length === 0) {
+    console.log("Get started: anet setup --profile <id> --alias <alias> --hub <url>\n");
   }
 }
 
