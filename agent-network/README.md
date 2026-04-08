@@ -2,82 +2,145 @@
 
 AI Agent 通信网络 — 让 AI Agent 互相发消息、派任务、协作。
 
-Server + Client + CLI，一个包搞定。
-
 ## 安装
 
 ```bash
-# 全局安装（提供 anet 命令）
 npm install -g @sleep2agi/agent-network
-
-# 或作为项目依赖（使用 SDK）
-npm install @sleep2agi/agent-network
 ```
 
-## 快速开始
-
-### 1. 启动 Server（中心节点，需要 Bun）
+## 30 秒上手
 
 ```bash
-# 从源码启动（推荐）
-git clone https://github.com/sleep2agi/agent-comm-hub.git
-cd agent-comm-hub/server && bun install && bun run start
-# CommHub 运行在 http://localhost:9200
+# 1. 配 hub（全局，一次性）
+anet init
+
+# 2. 配项目（下载 channel 插件 + 配 MCP）
+anet init project
+
+# 3. 创建 profile（保存启动参数）
+anet init profile commander --alias 指挥室 --channel server:commhub
+
+# 4. 启动
+anet start commander
+
+# 5. 查看状态
+anet ls
 ```
 
-### 2. 配置 Agent 加入网络
+## 为什么需要 Profile？
+
+Claude Code 启动参数可以非常长：
 
 ```bash
-cd /path/to/your/project
-anet setup --hub http://YOUR_COMMHUB_IP:9200 --alias 我的Agent
+COMMHUB_ALIAS="指挥室" TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent \
+  claude --dangerously-skip-permissions \
+  --channels plugin:telegram@claude-plugins-official \
+  --dangerously-load-development-channels server:commhub \
+  --teammate-mode in-process --resume 98039093-...
 ```
 
-自动完成：
-- 测试连接
-- 写入全局配置 `~/.anet/config.json`（hub URL）
-- 写入项目配置 `.anet/config.json`（alias）
-- 输出对应启动命令
+Profile 把这些参数存到 JSON，以后只需：**`anet start commander`**
 
-### 3. 运行 Agent
-
-```bash
-# 自动从 .anet/config.json 读取配置
-anet run
-
-# 或显式指定
-anet run --alias 我的Agent --hub http://YOUR_COMMHUB_IP:9200
-```
-
-Agent 启动后：自动注册 → SSE 长连接监听 → 收到任务自动回复 → 3 分钟心跳。
+同一目录可以有多个 profile（指挥室、通信龙、SDK马）。
 
 ## CLI 命令
 
-```
-anet setup     配置 Agent 加入网络
-anet run       运行独立 Agent（SSE 实时监听）
-anet server    启动 CommHub Server（需要 Bun + @sleep2agi/commhub-server）
-anet --help    帮助
-```
+### anet init
 
-### anet setup
+三级初始化：
 
 ```bash
-anet setup --hub <url> --alias <name> [--type claude-code|sdk]
+anet init                          # → ~/.anet/config.json（hub URL）
+anet init project                  # → 下载 channel 插件 + 配 MCP + .env
+anet init profile <id> [options]   # → .anet/profiles/<id>.json
 ```
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--hub` | CommHub Server URL | 从 ~/.anet/config.json 读 |
-| `--alias` | Agent 别名 | 必填 |
-| `--type` | claude-code 或 sdk | claude-code |
+配置文件位置：
+
+```
+~/.anet/config.json                  全局（hub URL）
+{workpath}/.anet/profiles/cmd.json   项目 profile
+```
+
+#### anet init
+
+交互式输入 hub URL，测试连接，保存到 `~/.anet/config.json`。
+
+```bash
+anet init
+# CommHub URL: http://YOUR_IP:9200
+# ✅ CommHub v0.4.1 — 26 sessions, 18 SSE
+```
+
+或直接传参：`anet init --hub http://YOUR_IP:9200`
+
+#### anet init project
+
+下载 Channel 插件 + 安装依赖 + 配 `~/.claude.json` + 写 .env。
+
+```bash
+cd ~/my-project
+anet init project
+```
+
+#### anet init profile
+
+```bash
+anet init profile <id> --alias <别名> [options]
+```
+
+| 参数 | 说明 |
+|------|------|
+| `<id>` | Profile ID（英文，作为文件名） |
+| `--alias` | CommHub session 别名 |
+| `--name` | 显示名 |
+| `--channel` | 添加 channel（可重复） |
+| `--env` | 环境变量 K=V（可重复） |
+| `--resume` | Session resume ID |
+| `--teammate-mode` | 如 in-process |
+
+示例：
+```bash
+# 带 Telegram 双 channel
+anet init profile commander --alias 指挥室 \
+  --channel server:commhub \
+  --channel plugin:telegram@claude-plugins-official \
+  --env TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent \
+  --teammate-mode in-process
+
+# 简单 agent
+anet init profile worker --alias 开发马 --channel server:commhub
+```
+
+### anet start
+
+```bash
+anet start commander    # 启动指定 profile
+anet start              # 列出所有 profile
+anet commander          # 快捷方式（等于 anet start commander）
+```
+
+### anet ls
+
+显示当前目录的 sessions + 网络状态：
+
+```
+Profiles:
+  commander (指挥室)  →  指挥室  [server:commhub, plugin:telegram]
+
+Sessions (/home/vansin/agent-orchestra/channel):
+  SESSION              PID     NETWORK
+  ──────────────────── ─────── ─────────────────────
+  fef0eb55-b39c-4abc  64269   通信龙 offline ●
+```
 
 ### anet run
 
-```bash
-anet run [--alias <name>] [--hub <url>] [--handler <script>]
-```
+独立 SSE Agent（不需要 Claude Code）：
 
-参数自动从 `.anet/config.json` 读取，setup 过的项目直接 `anet run` 即可。
+```bash
+anet run --alias SDK马 --hub http://YOUR_IP:9200
+```
 
 ## SDK 代码引用
 
@@ -90,7 +153,6 @@ const hub = new CommHub({
 });
 
 hub.on('task', async (msg) => {
-  console.log(`来自 ${msg.from_session}: ${msg.content}`);
   await hub.send(msg.from_session, '任务完成！');
 });
 ```
@@ -98,8 +160,6 @@ hub.on('task', async (msg) => {
 ```javascript
 // CommonJS
 const { CommHub } = require('@sleep2agi/agent-network');
-const hub = new CommHub({ url: 'http://YOUR_COMMHUB_IP:9200', alias: '我的Agent' });
-hub.on('task', (msg) => console.log(msg));
 ```
 
 ### SDK API
@@ -107,49 +167,35 @@ hub.on('task', (msg) => console.log(msg));
 | 方法 | 说明 |
 |------|------|
 | `hub.send(alias, content, priority?)` | 发任务 |
-| `hub.message(alias, content)` | 发消息（无生命周期） |
+| `hub.message(alias, content)` | 发消息 |
 | `hub.reply(taskId, text, status?)` | 回复任务 |
 | `hub.status(state, extra?)` | 更新状态 |
 | `hub.broadcast(content, filter?)` | 广播 |
 | `hub.disconnect()` | 断开 |
-
-### 事件
 
 | 事件 | 说明 |
 |------|------|
 | `task` | 收到任务（已自动 ACK） |
 | `connected` | SSE 连接成功 |
 | `disconnected` | SSE 断开（自动重连） |
-| `error` | 错误 |
-
-## 配置文件
-
-优先级：环境变量 > 命令行参数 > 项目 `.anet/config.json` > 全局 `~/.anet/config.json`
-
-**全局** `~/.anet/config.json`：
-```json
-{ "hub": "http://YOUR_COMMHUB_IP:9200", "token": "your-token" }
-```
-
-**项目** `.anet/config.json`：
-```json
-{ "alias": "我的Agent", "type": "claude-code" }
-```
 
 ## 运行时要求
 
 | 组件 | 运行时 |
 |------|--------|
-| anet setup / run / SDK | Node.js 18+ 或 Bun |
-| anet server | Bun 1.2+（bun:sqlite） |
+| anet CLI / SDK | Node.js 18+ 或 Bun |
+| CommHub Server | Bun 1.2+（单独部署） |
 
-## 相关包
+## 版本历史
 
-| 包 | 说明 |
-|---|------|
-| @sleep2agi/agent-network | 合并包（推荐） |
-| @sleep2agi/commhub-sdk | 仅客户端 SDK |
-| @sleep2agi/commhub-server | 仅服务端 |
+| 版本 | 变更 |
+|------|------|
+| 0.0.6 | 三级 init（全局/项目/profile），`anet ls` 简化为当前目录 |
+| 0.0.5 | `anet ls` 显示本地 sessions + CommHub 网络状态 |
+| 0.0.4 | CLI 瘦身 580KB→13KB，Node.js 兼容，profile 系统 |
+| 0.0.3 | `anet setup` 一键配置 Channel 插件 |
+| 0.0.2 | CLI shebang 改为 node |
+| 0.0.1 | 首次发布 |
 
 ## License
 

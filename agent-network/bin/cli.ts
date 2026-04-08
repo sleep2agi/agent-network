@@ -2,53 +2,37 @@
 /**
  * anet — AI Agent Network CLI
  *
- * anet setup --profile 指挥室 --alias 指挥室 --hub http://xxx:9200 --channel server:commhub
- * anet start 指挥室
- * anet start          (列出所有 profile)
- * anet run --alias xxx --hub http://xxx:9200
- * anet list
+ * anet init                    配置 hub（全局）
+ * anet init project            配置当前项目
+ * anet init profile commander  创建启动 profile
+ * anet start commander         启动
+ * anet ls                      查看状态
+ * anet run                     独立 SSE Agent
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
-import { join, resolve } from "path";
-import { execSync, spawn } from "child_process";
+import { join } from "path";
+import { spawn } from "child_process";
 
 const args = process.argv.slice(2);
 const command = args[0];
-const home = process.env.HOME || "~";
-
-// ── Arg parsing (supports repeated --channel) ──
-
-function parseArgs(): Record<string, string> & { _channels: string[]; _envs: string[] } {
-  const result: any = { _channels: [], _envs: [] };
-  for (let i = 1; i < args.length; i++) {
-    if (args[i] === "--channel" && i + 1 < args.length) {
-      result._channels.push(args[++i]);
-    } else if (args[i] === "--env" && i + 1 < args.length) {
-      result._envs.push(args[++i]);
-    } else if (args[i].startsWith("--") && i + 1 < args.length && !args[i + 1].startsWith("--")) {
-      result[args[i].replace(/^--/, "")] = args[++i];
-    }
-  }
-  return result;
-}
+const home = process.env.HOME || process.env.USERPROFILE || "~";
 
 // ── Config helpers ──
 
-function profilesDir(): string {
-  return join(process.cwd(), ".anet", "profiles");
-}
+function globalConfigPath() { return join(home, ".anet", "config.json"); }
+function profilesDir() { return join(process.cwd(), ".anet", "profiles"); }
 
-function globalConfigPath(): string {
-  return join(home, ".anet", "config.json");
-}
-
-function loadGlobalConfig(): Record<string, any> {
+function loadGlobal(): Record<string, any> {
   const p = globalConfigPath();
-  if (existsSync(p)) {
-    try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
-  }
+  if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
   return {};
+}
+
+function saveGlobal(data: Record<string, any>) {
+  const dir = join(home, ".anet");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "config.json"), JSON.stringify(data, null, 2) + "\n");
 }
 
 interface Profile {
@@ -61,26 +45,36 @@ interface Profile {
   resume?: string;
 }
 
-function loadProfile(name: string): Profile | null {
-  const p = join(profilesDir(), `${name}.json`);
-  if (existsSync(p)) {
-    try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
-  }
+function loadProfile(id: string): Profile | null {
+  const p = join(profilesDir(), `${id}.json`);
+  if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
   return null;
 }
 
-function saveProfile(name: string, profile: Profile) {
+function saveProfile(id: string, profile: Profile) {
   const dir = profilesDir();
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${name}.json`), JSON.stringify(profile, null, 2) + "\n");
+  writeFileSync(join(dir, `${id}.json`), JSON.stringify(profile, null, 2) + "\n");
 }
 
-function listProfiles(): string[] {
+function listProfileIds(): string[] {
   const dir = profilesDir();
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter(f => f.endsWith(".json"))
-    .map(f => f.replace(/\.json$/, ""));
+  return readdirSync(dir).filter(f => f.endsWith(".json")).map(f => f.replace(/\.json$/, ""));
+}
+
+// ── Parse --key value and repeatable --channel/--env ──
+
+function parseOpts(): Record<string, string> & { _channels: string[]; _envs: string[] } {
+  const r: any = { _channels: [], _envs: [] };
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--channel" && args[i + 1]) { r._channels.push(args[++i]); continue; }
+    if (args[i] === "--env" && args[i + 1]) { r._envs.push(args[++i]); continue; }
+    if (args[i].startsWith("--") && args[i + 1] && !args[i + 1].startsWith("--")) {
+      r[args[i].slice(2)] = args[++i];
+    }
+  }
+  return r;
 }
 
 // ── Help ──
@@ -89,223 +83,206 @@ function printHelp() {
   console.log(`
 anet — AI Agent Network CLI
 
-Commands:
-  setup     Create a profile for a new Agent
-  start     Start Claude Code with a saved profile
-  run       Run standalone SSE agent (no Claude Code)
-  list      List all profiles
-  --help    Show this help
+  anet init                     Configure hub URL (global, once)
+  anet init project             Setup current project (channel plugin + config)
+  anet init profile <id>        Create a launch profile
+  anet start <id>               Start Claude Code with profile
+  anet ls                       Show sessions + network status
+  anet run                      Run standalone SSE agent
+  anet --help                   This help
 
-Setup:
-  anet setup --profile <session-id> --alias <alias> --hub <url> [options]
-    --name <name>     Display name (e.g. 指挥室)
-    --channel <ch>    Add channel (repeatable)
-    --env <K=V>       Add env var (repeatable)
-    --resume <id>     Session resume ID
-    --type <type>     claude-code (default) or sdk
-    --teammate-mode <mode>  Teammate mode (e.g. in-process)
-
-Start:
-  anet start <session-id>   Start Claude with saved profile
-  anet start                List profiles to pick from
-
-Examples:
-  anet setup --profile commander --name 指挥室 --alias 指挥室 \\
-    --hub http://YOUR_IP:9200 \\
-    --channel server:commhub \\
-    --channel plugin:telegram@claude-plugins-official \\
-    --env TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent
-
-  anet start commander
-  anet list
+Quick start:
+  anet init
+  anet init project
+  anet init profile cmd --alias 指挥室 --channel server:commhub
+  anet start cmd
 `);
 }
 
-// ── setup ──
+// ── init (global) ──
 
-async function setupCommand() {
-  const opts = parseArgs();
-  const globalConfig = loadGlobalConfig();
+async function initGlobal() {
+  const opts = parseOpts();
+  let hub = opts.hub;
 
-  const profileName = opts.profile;
-  const name = opts.name;
-  const alias = opts.alias;
-  const hubUrl = opts.hub || globalConfig.hub;
-  const agentType = opts.type || "claude-code";
-  const resume = opts.resume;
-  const teammateMode = opts["teammate-mode"];
+  if (!hub) {
+    // Simple prompt
+    process.stdout.write("CommHub URL (e.g. http://YOUR_IP:9200): ");
+    hub = await new Promise<string>(resolve => {
+      let buf = "";
+      process.stdin.setEncoding("utf-8");
+      process.stdin.once("data", (d) => { resolve(d.toString().trim()); });
+    });
+  }
 
-  if (!profileName || !alias) {
-    console.error("Error: --profile and --alias are required");
-    console.error("Usage: anet setup --profile hub-01 --name 指挥室 --alias 指挥室 --hub http://YOUR_IP:9200 --channel server:commhub");
+  if (!hub) { console.error("Error: hub URL required"); process.exit(1); }
+
+  // Test connection
+  try {
+    const res = await fetch(`${hub}/health`);
+    const data = await res.json() as any;
+    console.log(`✅ CommHub v${data.version} — ${data.sessions} sessions, ${data.sse_connections} SSE`);
+  } catch (e: any) {
+    console.error(`❌ Cannot reach ${hub}: ${e.message}`);
     process.exit(1);
   }
 
-  if (!hubUrl) {
-    console.error("Error: --hub is required (first time) or set in ~/.anet/config.json");
+  const gc = loadGlobal();
+  gc.hub = hub;
+  if (opts.token) gc.token = opts.token;
+  saveGlobal(gc);
+  console.log(`\nSaved to ${globalConfigPath()}`);
+  console.log(`Next: anet init project`);
+}
+
+// ── init project ──
+
+async function initProject() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  if (!hub) {
+    console.error("Run 'anet init' first to configure hub URL");
     process.exit(1);
   }
 
-  // Build env map from --env K=V
+  const channelDir = join(home, ".claude", "channels", "commhub");
+  mkdirSync(channelDir, { recursive: true });
+
+  // 1. Download server.ts
+  const serverTs = join(channelDir, "server.ts");
+  if (!existsSync(serverTs)) {
+    console.log("Downloading Channel plugin...");
+    try {
+      const res = await fetch("https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts");
+      if (res.ok) { writeFileSync(serverTs, await res.text()); console.log(`  ✅ ${serverTs}`); }
+    } catch (e: any) {
+      console.log(`  ❌ Failed: ${e.message}`);
+      console.log(`  Manual: curl -sL https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts -o ${serverTs}`);
+    }
+  } else {
+    console.log(`Channel plugin: exists`);
+  }
+
+  // 2. Download package.json + install
+  const pkgJson = join(channelDir, "package.json");
+  if (!existsSync(pkgJson)) {
+    try {
+      const res = await fetch("https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/package.json");
+      if (res.ok) {
+        writeFileSync(pkgJson, await res.text());
+        try {
+          const { execSync } = await import("child_process");
+          execSync("bun install", { cwd: channelDir, stdio: "pipe" });
+          console.log("Dependencies installed");
+        } catch {
+          console.log("⚠️  Run: cd ~/.claude/channels/commhub && bun install");
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Channel .env
+  const envPath = join(channelDir, ".env");
+  if (!existsSync(envPath)) {
+    writeFileSync(envPath, `COMMHUB_URL=${hub}\n`);
+  }
+  console.log(`CommHub URL: ${hub}`);
+
+  // 4. ~/.claude.json mcpServers
+  const claudeJson = join(home, ".claude.json");
+  let cc: any = {};
+  if (existsSync(claudeJson)) try { cc = JSON.parse(readFileSync(claudeJson, "utf-8")); } catch {}
+  if (!cc.mcpServers?.commhub) {
+    cc.mcpServers = cc.mcpServers || {};
+    cc.mcpServers.commhub = { type: "stdio", command: "bun", args: ["run", serverTs] };
+    writeFileSync(claudeJson, JSON.stringify(cc, null, 2) + "\n");
+    console.log(`MCP config: ${claudeJson}`);
+  } else {
+    console.log("MCP config: already set");
+  }
+
+  console.log(`\n✅ Project ready. Next: anet init profile <id> --alias <名字> --channel server:commhub`);
+}
+
+// ── init profile ──
+
+function initProfile() {
+  const id = args[2];
+  if (!id) {
+    console.error("Usage: anet init profile <id> --alias <名字> [--channel ...] [--env ...]");
+    process.exit(1);
+  }
+
+  const gc = loadGlobal();
+  const opts = parseOpts();
+  const alias = opts.alias || id;
+  const hub = opts.hub || gc.hub;
+
+  if (!hub) {
+    console.error("Run 'anet init' first to configure hub URL");
+    process.exit(1);
+  }
+
+  // Build env map
   const envMap: Record<string, string> = {};
   for (const e of opts._envs) {
     const eq = e.indexOf("=");
     if (eq > 0) envMap[e.slice(0, eq)] = e.slice(eq + 1);
   }
 
-  // Build profile
   const profile: Profile = {
-    ...(name ? { name } : {}),
+    ...(opts.name ? { name: opts.name } : {}),
     alias,
-    hub: hubUrl,
+    hub,
     channels: opts._channels.length > 0 ? opts._channels : ["server:commhub"],
     env: envMap,
     flags: {
       dangerouslySkipPermissions: true,
-      ...(teammateMode ? { teammateMode } : {}),
+      ...(opts["teammate-mode"] ? { teammateMode: opts["teammate-mode"] } : {}),
     },
-    ...(resume ? { resume } : {}),
+    ...(opts.resume ? { resume: opts.resume } : {}),
   };
 
-  // Save global config
-  const gDir = join(home, ".anet");
-  mkdirSync(gDir, { recursive: true });
-  const gc = loadGlobalConfig();
-  gc.hub = hubUrl;
-  writeFileSync(globalConfigPath(), JSON.stringify(gc, null, 2) + "\n");
-
-  // Save profile
-  saveProfile(profileName, profile);
-  console.log(`\n✅ Profile "${profileName}" saved to .anet/profiles/${profileName}.json`);
-
-  // For claude-code type, also setup channel plugin
-  if (agentType === "claude-code") {
-    await setupClaudeCode(hubUrl, alias);
-  }
-
-  // Show the generated command
-  const cmd = buildStartCommand(profile);
-  console.log(`\n启动命令 (anet start ${profileName}):\n  ${cmd}\n`);
-}
-
-async function setupClaudeCode(hubUrl: string, alias: string) {
-  // 1. Channel plugin
-  const channelDir = `${home}/.claude/channels/commhub`;
-  mkdirSync(channelDir, { recursive: true });
-
-  const serverTsPath = `${channelDir}/server.ts`;
-  if (!existsSync(serverTsPath)) {
-    console.log("Downloading Channel plugin...");
-    try {
-      const res = await fetch("https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts");
-      if (res.ok) {
-        writeFileSync(serverTsPath, await res.text());
-        console.log(`  ✅ ${serverTsPath}`);
-      }
-    } catch {}
-
-    // package.json + install
-    try {
-      const res = await fetch("https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/package.json");
-      if (res.ok) {
-        writeFileSync(`${channelDir}/package.json`, await res.text());
-        try { execSync("bun install", { cwd: channelDir, stdio: "pipe" }); } catch {}
-      }
-    } catch {}
-  }
-
-  // 2. Channel .env
-  const envPath = `${channelDir}/.env`;
-  if (!existsSync(envPath)) {
-    writeFileSync(envPath, `COMMHUB_URL=${hubUrl}\n`);
-  }
-
-  // 3. Project alias .env
+  // Write alias .env for channel
+  const channelDir = join(home, ".claude", "channels", "commhub");
   const projectKey = process.cwd().replace(/\//g, "-");
-  const aliasDir = `${channelDir}/${projectKey}`;
+  const aliasDir = join(channelDir, projectKey);
   mkdirSync(aliasDir, { recursive: true });
-  writeFileSync(`${aliasDir}/.env`, `COMMHUB_ALIAS=${alias}\n`);
+  writeFileSync(join(aliasDir, ".env"), `COMMHUB_ALIAS=${alias}\n`);
 
-  // 4. ~/.claude.json
-  const claudeJsonPath = `${home}/.claude.json`;
-  let claudeConfig: any = {};
-  if (existsSync(claudeJsonPath)) {
-    try { claudeConfig = JSON.parse(readFileSync(claudeJsonPath, "utf-8")); } catch {}
-  }
-  if (!claudeConfig.mcpServers?.commhub) {
-    claudeConfig.mcpServers = claudeConfig.mcpServers || {};
-    claudeConfig.mcpServers.commhub = {
-      type: "stdio",
-      command: "bun",
-      args: ["run", serverTsPath],
-    };
-    writeFileSync(claudeJsonPath, JSON.stringify(claudeConfig, null, 2) + "\n");
-  }
+  saveProfile(id, profile);
+  console.log(`\n✅ Profile "${id}" saved`);
+  console.log(`   alias: ${alias}`);
+  console.log(`   channels: ${profile.channels.join(", ")}`);
+  if (Object.keys(envMap).length) console.log(`   env: ${Object.keys(envMap).join(", ")}`);
+  console.log(`\nStart: anet start ${id}`);
 }
 
 // ── start ──
 
-function buildStartCommand(profile: Profile): string {
-  const parts: string[] = [];
-
-  // Env vars
-  parts.push(`COMMHUB_ALIAS="${profile.alias}"`);
-  for (const [k, v] of Object.entries(profile.env)) {
-    parts.push(`${k}=${v}`);
-  }
-
-  parts.push("claude");
-
-  // Flags
-  if (profile.flags.dangerouslySkipPermissions) parts.push("--dangerously-skip-permissions");
-
-  // Channels
-  for (const ch of profile.channels) {
-    if (ch.startsWith("server:")) {
-      parts.push(`--dangerously-load-development-channels ${ch}`);
-    } else {
-      parts.push(`--channels ${ch}`);
-    }
-  }
-
-  // Teammate mode
-  if (profile.flags.teammateMode) parts.push(`--teammate-mode ${profile.flags.teammateMode}`);
-
-  // Resume
-  if (profile.resume) parts.push(`--resume ${profile.resume}`);
-
-  return parts.join(" ");
-}
-
 function startCommand() {
-  const profileName = args[1];
+  const id = args[1];
 
-  if (!profileName) {
-    // List profiles
-    const profiles = listProfiles();
-    if (profiles.length === 0) {
-      console.log("No profiles found. Create one with: anet setup --profile <name> --alias <alias> --hub <url>");
-      process.exit(1);
+  if (!id) {
+    const ids = listProfileIds();
+    if (ids.length === 0) {
+      console.log("No profiles. Run: anet init profile <id> --alias <名字>");
+      return;
     }
-    console.log("\nAvailable profiles:\n");
-    for (const name of profiles) {
+    console.log("\nProfiles:\n");
+    for (const name of ids) {
       const p = loadProfile(name);
-      console.log(`  ${name}  →  alias: ${p?.alias}, channels: ${p?.channels.join(", ")}`);
+      console.log(`  ${name}${p?.name ? ` (${p.name})` : ""}  →  ${p?.alias}  [${p?.channels.join(", ")}]`);
     }
-    console.log(`\nStart with: anet start <profile>\n`);
+    console.log(`\nanet start <id>\n`);
     return;
   }
 
-  const profile = loadProfile(profileName);
+  const profile = loadProfile(id);
   if (!profile) {
-    console.error(`Profile "${profileName}" not found in .anet/profiles/`);
-    console.error(`Available: ${listProfiles().join(", ") || "(none)"}`);
+    console.error(`Profile "${id}" not found. Run: anet ls`);
     process.exit(1);
   }
-
-  const cmd = buildStartCommand(profile);
-  console.log(`[anet] Starting "${profileName}"...`);
-  console.log(`[anet] ${cmd}\n`);
 
   // Build env
   const env = { ...process.env, COMMHUB_ALIAS: profile.alias };
@@ -313,7 +290,7 @@ function startCommand() {
     env[k] = v.replace(/^~/, home);
   }
 
-  // Build args for claude
+  // Build claude args
   const claudeArgs: string[] = [];
   if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
   for (const ch of profile.channels) {
@@ -326,36 +303,33 @@ function startCommand() {
   if (profile.flags.teammateMode) claudeArgs.push("--teammate-mode", profile.flags.teammateMode);
   if (profile.resume) claudeArgs.push("--resume", profile.resume);
 
-  // Spawn claude
-  const child = spawn("claude", claudeArgs, {
-    env,
-    stdio: "inherit",
-    shell: true,
-  });
+  // Use -n to name the session
+  claudeArgs.push("-n", profile.name || profile.alias);
 
+  console.log(`[anet] Starting "${id}" (${profile.alias})...\n`);
+
+  const child = spawn("claude", claudeArgs, { env, stdio: "inherit", shell: true });
   child.on("exit", (code) => process.exit(code || 0));
 }
 
-// ── list ──
+// ── ls ──
 
-async function listCommand() {
-  const cwd = process.cwd();
-
-  // ── Profiles ──
-  const profiles = listProfiles();
-  if (profiles.length > 0) {
-    console.log("\nProfiles (.anet/profiles/):\n");
-    for (const name of profiles) {
-      const p = loadProfile(name);
-      console.log(`  ${name}${p?.name ? `  (${p.name})` : ""}`);
-      console.log(`    alias: ${p?.alias}  channels: ${p?.channels.join(", ")}`);
-      console.log();
+async function lsCommand() {
+  // Profiles
+  const ids = listProfileIds();
+  if (ids.length > 0) {
+    console.log("\nProfiles:\n");
+    for (const id of ids) {
+      const p = loadProfile(id);
+      console.log(`  ${id}${p?.name ? ` (${p.name})` : ""}  →  ${p?.alias}  [${p?.channels.join(", ")}]`);
     }
+    console.log();
   }
 
-  // ── Local sessions in this directory ──
+  // Local sessions
+  const cwd = process.cwd();
   const sessionsDir = join(home, ".claude", "sessions");
-  const localSessions: { pid: number; sessionId: string; cwd: string; kind: string }[] = [];
+  const localSessions: any[] = [];
 
   if (existsSync(sessionsDir)) {
     for (const f of readdirSync(sessionsDir).filter(f => f.endsWith(".json"))) {
@@ -366,160 +340,95 @@ async function listCommand() {
     }
   }
 
-  // ── CommHub network status ──
-  const globalConfig = loadGlobalConfig();
-  const hubUrl = globalConfig.hub;
-  let networkSessions: Record<string, any> = {};
-
-  if (hubUrl) {
-    try {
-      const res = await fetch(`${hubUrl}/api/status`);
-      const data = await res.json() as any;
-      if (data.sessions) {
-        for (const s of data.sessions) {
-          networkSessions[s.resume_id] = s;
-        }
-      }
-    } catch {}
+  if (localSessions.length === 0 && ids.length === 0) {
+    console.log("No sessions or profiles in this directory.");
+    console.log("Get started: anet init\n");
+    return;
   }
 
-  // ── SSE connections ──
+  // CommHub status
+  const gc = loadGlobal();
+  let networkSessions: any[] = [];
   let sseSessions: Record<string, number> = {};
-  if (hubUrl) {
+
+  if (gc.hub) {
     try {
-      const res = await fetch(`${hubUrl}/health`);
-      const data = await res.json() as any;
-      sseSessions = data.sse_sessions || {};
+      const [statusRes, healthRes] = await Promise.all([
+        fetch(`${gc.hub}/api/status`).then(r => r.json() as any),
+        fetch(`${gc.hub}/health`).then(r => r.json() as any),
+      ]);
+      networkSessions = statusRes.sessions || [];
+      sseSessions = healthRes.sse_sessions || {};
     } catch {}
   }
 
-  // ── Display sessions ──
+  // Display sessions
   if (localSessions.length > 0) {
-    console.log(`Sessions in ${cwd}:\n`);
-    console.log("  SESSION ID          PID     NETWORK STATUS");
-    console.log("  ─────────────────── ─────── ──────────────────────────");
+    console.log(`Sessions (${cwd}):\n`);
+    console.log("  SESSION              PID     NETWORK");
+    console.log("  ──────────────────── ─────── ─────────────────────");
 
     for (const s of localSessions) {
       const shortId = s.sessionId.slice(0, 18);
-
-      // Find in CommHub by resume_id match
-      let networkInfo = "";
-      let found = false;
-      for (const [, ns] of Object.entries(networkSessions)) {
-        if (ns.resume_id?.startsWith(s.sessionId.slice(0, 8))) {
-          const alias = ns.alias || "?";
-          const status = ns.status || "?";
-          const hasSse = sseSessions[alias] ? "SSE" : "";
-          networkInfo = `${alias} ${status} ${hasSse}`;
-          found = true;
-          break;
-        }
-      }
-
-      if (!found) {
-        // Check by looking at COMMHUB_ALIAS env for this session's directory
-        const projectKey = cwd.replace(/\//g, "-");
-        const aliasEnvPath = join(home, ".claude", "channels", "commhub", projectKey, ".env");
-        if (existsSync(aliasEnvPath)) {
-          const envContent = readFileSync(aliasEnvPath, "utf-8");
-          const match = envContent.match(/COMMHUB_ALIAS=(.+)/);
-          if (match) {
-            const alias = match[1].trim();
-            const ns = Object.values(networkSessions).find((n: any) => n.alias === alias);
-            if (ns) {
-              const hasSse = sseSessions[alias] ? "SSE" : "";
-              networkInfo = `${alias} ${(ns as any).status} ${hasSse}`;
-              found = true;
-            } else {
-              networkInfo = `${alias} (not registered)`;
-            }
-          }
-        }
-      }
-
-      if (!found) networkInfo = "(not in network)";
-
-      // Check if process is alive
       let alive = false;
       try { process.kill(s.pid, 0); alive = true; } catch {}
 
-      const pidStr = alive ? `${s.pid}` : `${s.pid} ✕`;
-      console.log(`  ${shortId}  ${pidStr.padEnd(7)}  ${networkInfo}`);
-    }
-    console.log();
-  } else {
-    console.log(`\nNo Claude Code sessions found in ${cwd}\n`);
-  }
-
-  // ── Network overview ──
-  if (hubUrl) {
-    const totalOnline = Object.keys(sseSessions).length;
-    const totalSessions = Object.keys(networkSessions).length;
-    console.log(`Network: ${hubUrl}  (${totalOnline} online / ${totalSessions} total)`);
-
-    if (totalOnline > 0) {
-      console.log("\n  ALIAS              STATUS     SSE");
-      console.log("  ────────────────── ────────── ───");
-      for (const [alias, count] of Object.entries(sseSessions)) {
-        const ns: any = Object.values(networkSessions).find((n: any) => n.alias === alias);
-        const status = ns?.status || "?";
-        console.log(`  ${alias.padEnd(18)} ${status.padEnd(10)} ${count > 0 ? "●" : "○"}`);
+      // Find in CommHub
+      let network = "(not in network)";
+      const projectKey = cwd.replace(/\//g, "-");
+      const aliasEnvPath = join(home, ".claude", "channels", "commhub", projectKey, ".env");
+      if (existsSync(aliasEnvPath)) {
+        const content = readFileSync(aliasEnvPath, "utf-8");
+        const match = content.match(/COMMHUB_ALIAS=(.+)/);
+        if (match) {
+          const alias = match[1].trim();
+          const ns: any = networkSessions.find((n: any) => n.alias === alias);
+          const sse = sseSessions[alias] ? "●" : "○";
+          network = ns ? `${alias} ${ns.status} ${sse}` : `${alias} (not registered)`;
+        }
       }
+
+      console.log(`  ${shortId}  ${(alive ? `${s.pid}` : `${s.pid}✕`).padEnd(7)} ${network}`);
     }
     console.log();
-  }
-
-  if (profiles.length === 0 && localSessions.length === 0) {
-    console.log("Get started: anet setup --profile <id> --alias <alias> --hub <url>\n");
   }
 }
 
-// ── run (standalone SSE agent, no claude) ──
+// ── run ──
 
 async function runCommand() {
-  const config = loadGlobalConfig();
-  const opts = parseArgs();
-  const hubUrl = process.env.COMMHUB_URL || opts.hub || config.hub || "http://127.0.0.1:9200";
-  const alias = process.env.COMMHUB_ALIAS || opts.alias || config.alias;
+  const gc = loadGlobal();
+  const opts = parseOpts();
+  const hub = process.env.COMMHUB_URL || opts.hub || gc.hub || "http://127.0.0.1:9200";
+  const alias = process.env.COMMHUB_ALIAS || opts.alias;
 
-  if (!alias) {
-    console.error("Error: --alias required");
-    process.exit(1);
-  }
+  if (!alias) { console.error("Error: --alias required"); process.exit(1); }
 
   const { CommHub } = await import("../src/client.js");
-  const hub = new CommHub({ url: hubUrl, alias });
-
-  hub.on("task", async (msg: any) => {
+  const hub2 = new CommHub({ url: hub, alias });
+  hub2.on("task", async (msg: any) => {
     console.log(`[${alias}] ← ${msg.from_session}: ${msg.content.slice(0, 100)}`);
-    await hub.send(msg.from_session, `[${alias}] 收到: ${msg.content.slice(0, 200)}`);
+    await hub2.send(msg.from_session, `[${alias}] 收到: ${msg.content.slice(0, 200)}`);
   });
-
-  hub.on("connected", () => console.log(`[${alias}] Connected to ${hubUrl}`));
-  hub.on("disconnected", () => console.log(`[${alias}] Disconnected, reconnecting...`));
-
-  process.on("SIGINT", () => hub.disconnect().then(() => process.exit(0)));
-  process.on("SIGTERM", () => hub.disconnect().then(() => process.exit(0)));
-
-  console.log(`[${alias}] Listening on ${hubUrl} (Ctrl+C to quit)`);
+  hub2.on("connected", () => console.log(`[${alias}] Connected`));
+  hub2.on("disconnected", () => console.log(`[${alias}] Reconnecting...`));
+  process.on("SIGINT", () => hub2.disconnect().then(() => process.exit(0)));
+  console.log(`[${alias}] Listening on ${hub}`);
 }
 
 // ── Main ──
 
 switch (command) {
-  case "setup": setupCommand(); break;
+  case "init":
+    if (args[1] === "project") initProject();
+    else if (args[1] === "profile") initProfile();
+    else initGlobal();
+    break;
   case "start": startCommand(); break;
-  case "list": case "ls": listCommand(); break;
+  case "ls": case "list": lsCommand(); break;
   case "run": runCommand(); break;
   case "--help": case "-h": case undefined: printHelp(); break;
   default:
-    // Maybe it's a profile name: anet 指挥室 = anet start 指挥室
-    if (loadProfile(command)) {
-      args.splice(0, 0, "start");
-      startCommand();
-    } else {
-      console.error(`Unknown command: ${command}`);
-      printHelp();
-      process.exit(1);
-    }
+    if (loadProfile(command)) { args.unshift("start"); startCommand(); }
+    else { console.error(`Unknown: ${command}`); printHelp(); process.exit(1); }
 }
