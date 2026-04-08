@@ -1,12 +1,15 @@
 #!/usr/bin/env bun
 /**
- * @sleep2agi/anet CLI
+ * @sleep2agi/agent-network CLI
  *
  * Commands:
  *   anet server --port 9200 --token xxx
  *   anet setup --hub http://xxx:9200 --alias xxx
  *   anet run --alias xxx --hub http://xxx:9200
  */
+
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -22,9 +25,30 @@ function parseArgs(keys: string[]): Record<string, string> {
   return result;
 }
 
+/** Load config: project (.anet/config.json) > global (~/.anet/config.json) > defaults */
+function loadConfig(): Record<string, string> {
+  const home = process.env.HOME || "~";
+  const globalPath = join(home, ".anet", "config.json");
+  const projectPath = join(process.cwd(), ".anet", "config.json");
+
+  let config: Record<string, string> = {};
+
+  // Global first (lower priority)
+  if (existsSync(globalPath)) {
+    try { config = { ...config, ...JSON.parse(readFileSync(globalPath, "utf-8")) }; } catch {}
+  }
+
+  // Project overrides global
+  if (existsSync(projectPath)) {
+    try { config = { ...config, ...JSON.parse(readFileSync(projectPath, "utf-8")) }; } catch {}
+  }
+
+  return config;
+}
+
 function printHelp() {
   console.log(`
-@sleep2agi/anet — AI Agent 通信网络
+@sleep2agi/agent-network — AI Agent 通信网络
 
 Commands:
   server    Start CommHub server
@@ -58,22 +82,25 @@ Examples:
 }
 
 async function serverCommand() {
+  const config = loadConfig();
   const opts = parseArgs(["port", "p", "token", "t", "db", "cors"]);
   process.env.PORT = opts.port || opts.p || "9200";
-  if (opts.token || opts.t) process.env.COMMHUB_AUTH_TOKEN = opts.token || opts.t;
+  if (opts.token || opts.t || config.token) process.env.COMMHUB_AUTH_TOKEN = opts.token || opts.t || config.token;
   if (opts.db) process.env.COMMHUB_DB = opts.db;
   if (opts.cors) process.env.COMMHUB_CORS_ORIGINS = opts.cors;
   await import("../../server/src/index.js");
 }
 
 async function setupCommand() {
+  const { mkdirSync, writeFileSync } = await import("fs");
+  const config = loadConfig();
   const opts = parseArgs(["hub", "alias", "type"]);
-  const hubUrl = opts.hub;
-  const alias = opts.alias;
-  const agentType = opts.type || "claude-code";
+  const hubUrl = opts.hub || config.hub;
+  const alias = opts.alias || config.alias;
+  const agentType = opts.type || config.type || "claude-code";
 
   if (!hubUrl || !alias) {
-    console.error("Error: --hub and --alias are required");
+    console.error("Error: --hub and --alias are required (or set in ~/.anet/config.json)");
     console.error("Usage: anet setup --hub http://YOUR_IP:9200 --alias 我的Agent");
     process.exit(1);
   }
@@ -83,8 +110,22 @@ async function setupCommand() {
   console.log(`Alias: ${alias}`);
   console.log(`Type:  ${agentType}\n`);
 
+  // Write global config ~/.anet/config.json
+  const home = process.env.HOME || "~";
+  const globalDir = join(home, ".anet");
+  mkdirSync(globalDir, { recursive: true });
+  const globalConfig = { hub: hubUrl, ...(opts.token ? { token: opts.token } : {}) };
+  writeFileSync(join(globalDir, "config.json"), JSON.stringify(globalConfig, null, 2) + "\n");
+  console.log(`Global config: ${globalDir}/config.json`);
+
+  // Write project config {cwd}/.anet/config.json
+  const projectDir = join(process.cwd(), ".anet");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(join(projectDir, "config.json"), JSON.stringify({ alias, type: agentType }, null, 2) + "\n");
+  console.log(`Project config: ${projectDir}/config.json`);
+
   // Test connection
-  console.log("Testing connection...");
+  console.log("\nTesting connection...");
   try {
     const res = await fetch(`${hubUrl}/health`);
     const data = await res.json() as any;
@@ -96,8 +137,7 @@ async function setupCommand() {
   }
 
   if (agentType === "claude-code") {
-    const { mkdirSync, writeFileSync, existsSync } = await import("fs");
-    const home = process.env.HOME || "~";
+    const { existsSync } = await import("fs");
 
     // 1. Channel plugin
     const channelDir = `${home}/.claude/channels/commhub`;
@@ -135,7 +175,7 @@ Note: Make sure ~/.claude.json has commhub in mcpServers (stdio type)
     console.log(`
 ✅ SDK Agent setup:
 
-const { CommHub } = require('@sleep2agi/anet');
+const { CommHub } = require('@sleep2agi/agent-network');
 const hub = new CommHub({ url: '${hubUrl}', alias: '${alias}' });
 hub.on('task', async (msg) => {
   console.log('Task:', msg.content);
@@ -160,12 +200,14 @@ hub.on('task', async (msg) => {
 }
 
 async function runCommand() {
+  const config = loadConfig();
   const opts = parseArgs(["hub", "alias", "handler"]);
-  const hubUrl = opts.hub || process.env.COMMHUB_URL || "http://127.0.0.1:9200";
-  const alias = opts.alias || process.env.COMMHUB_ALIAS;
+  // Priority: env > cli > project config > global config > default
+  const hubUrl = process.env.COMMHUB_URL || opts.hub || config.hub || "http://127.0.0.1:9200";
+  const alias = process.env.COMMHUB_ALIAS || opts.alias || config.alias;
 
   if (!alias) {
-    console.error("Error: --alias is required");
+    console.error("Error: --alias is required (or set in .anet/config.json or COMMHUB_ALIAS env)");
     process.exit(1);
   }
 
