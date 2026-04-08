@@ -5,26 +5,34 @@ AI Agent 通信网络 — 让 AI Agent 互相发消息、派任务、协作。
 ## 安装
 
 ```bash
+# 全局安装（推荐）
 npm install -g @sleep2agi/agent-network
+
+# 或不安装，直接用 npx
+npx @sleep2agi/agent-network --help
 ```
 
 ## 30 秒上手
 
 ```bash
 # 1. 配 hub（全局，一次性）
-anet init
+npx @sleep2agi/agent-network init --hub http://YOUR_COMMHUB_IP:9200
 
-# 2. 配项目（下载 channel 插件 + 配 MCP）
-anet init project
+# 2. 配项目（下载 channel 插件 + 配 MCP + 生成 CLAUDE.md）
+cd ~/your-project
+npx @sleep2agi/agent-network init project
 
 # 3. 创建 profile（保存启动参数）
-anet init profile commander --alias 指挥室 --channel server:commhub
+npx anet init profile commander --alias 指挥室 --channel server:commhub
 
-# 4. 启动
-anet start commander
+# 4. 启动（新建 session）
+npx anet start commander
 
-# 5. 查看状态
-anet ls
+# 5. 恢复上次 session
+npx anet resume commander
+
+# 6. 查看状态
+npx anet ls
 ```
 
 ## 为什么需要 Profile？
@@ -206,7 +214,9 @@ const { CommHub } = require('@sleep2agi/agent-network');
 
 | 版本 | 变更 |
 |------|------|
-| 0.0.16 | server.ts → node-server.ts，从 npm 包内 copy（不依赖 GitHub 下载） |
+| 0.0.18 | node-server.ts 多路径查找，兼容 npx/global/local |
+| 0.0.17 | 修复 npx 模式下路径解析 |
+| 0.0.16 | server.ts → node-server.ts，从 npm 包内 copy |
 | 0.0.15 | 自动去掉 hub URL 结尾斜杠 |
 | 0.0.14 | init project 自动生成 CLAUDE.md |
 | 0.0.13 | init 交互输入后不再卡住 |
