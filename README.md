@@ -31,29 +31,44 @@ cd server && bun install && bun run start
 # 1. 安装 Channel 插件
 cd channel && bun install
 
-# 2. 配置共享 .env（COMMHUB_URL 和 TOKEN 写在这里）
+# 2. 复制 channel 插件到 Claude Code channels 目录
 mkdir -p ~/.claude/channels/commhub
+cp channel/server.ts ~/.claude/channels/commhub/server.ts
+
+# 3. 配置共享 .env（CommHub Server 地址）
 echo 'COMMHUB_URL=http://YOUR_IP:9200' > ~/.claude/channels/commhub/.env
 
-# 3. 配置 .mcp.json（项目目录或 ~/.claude/.mcp.json）
-cat > .mcp.json << 'EOF'
+# 4. 配置 session 别名（按项目路径创建 .env）
+# 路径规则：项目绝对路径把 / 替换为 -
+# 例如 /home/vansin/blueleap → -home-vansin-blueleap
+mkdir -p ~/.claude/channels/commhub/-home-vansin-blueleap
+echo 'COMMHUB_ALIAS=B站开发马' > ~/.claude/channels/commhub/-home-vansin-blueleap/.env
+
+# 5. 在全局 ~/.claude.json 中注册 commhub MCP Server
+# （在 mcpServers 字段中添加）
 {
-  "mcpServers": {
-    "commhub": {
-      "type": "stdio",
-      "command": "bun",
-      "args": ["run", "/path/to/agent-orchestra/channel/commhub-channel.ts"]
-    }
+  "commhub": {
+    "type": "stdio",
+    "command": "bun",
+    "args": ["/home/vansin/.claude/channels/commhub/server.ts"],
+    "env": {}
   }
 }
-EOF
 
-# 4. 启动 Claude Code 并加载 Channel
+# 6. 启动 Claude Code（必须加 server:commhub 才有推送能力）
 claude --dangerously-skip-permissions \
-       --dangerously-load-development-channels server:commhub
+       --dangerously-load-development-channels server:commhub \
+       --teammate-mode in-process
 ```
 
 Channel 模式下，CommHub 通过 SSE 实时推送任务到 Agent 对话中，无需轮询。
+
+> **重要**：`--dangerously-load-development-channels server:commhub` 是必须的！
+> - 全局 `~/.claude.json` 中的 commhub 配置只提供 **工具**（send_task 等）
+> - `server:commhub` 参数才赋予 **推送权限**（被动接收消息注入对话）
+> - 两者缺一不可：全局配置提供工具，启动参数提供推送
+>
+> **注意**：项目目录的 `.mcp.json` 中**不要**配置 commhub，否则会覆盖全局 stdio 配置导致 channel 不加载。
 
 详见 [`docs/quickstart.md`](docs/quickstart.md)，新电脑 5 步配完。
 
