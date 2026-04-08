@@ -157,7 +157,9 @@ async function initProject() {
   const serverTs = join(anetDir, "node-server.ts");
   if (!existsSync(serverTs)) {
     // Find node-server.ts bundled in the npm package
-    const bundledPath = join(__dirname, "..", "src", "node-server.ts");
+    // Resolve from the actual script location at runtime
+    const scriptDir = new URL(".", import.meta.url).pathname;
+    const bundledPath = join(scriptDir, "..", "..", "src", "node-server.ts");
     if (existsSync(bundledPath)) {
       const { copyFileSync } = await import("fs");
       copyFileSync(bundledPath, serverTs);
