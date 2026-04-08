@@ -349,7 +349,7 @@ function listCommand() {
     const p = loadProfile(name);
     const channels = p?.channels.join(", ") || "";
     const envKeys = Object.keys(p?.env || {}).join(", ");
-    console.log(`  ${name}`);
+    console.log(`  ${name}${p?.name ? `  (${p.name})` : ""}`);
     console.log(`    alias: ${p?.alias}  hub: ${p?.hub}`);
     console.log(`    channels: ${channels}`);
     if (envKeys) console.log(`    env: ${envKeys}`);
@@ -393,7 +393,7 @@ async function runCommand() {
 switch (command) {
   case "setup": setupCommand(); break;
   case "start": startCommand(); break;
-  case "list": listCommand(); break;
+  case "list": case "ls": listCommand(); break;
   case "run": runCommand(); break;
   case "--help": case "-h": case undefined: printHelp(); break;
   default:
