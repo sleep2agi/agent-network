@@ -294,7 +294,7 @@ function initProfile() {
     env: envMap,
     flags: {
       dangerouslySkipPermissions: true,
-      ...(opts["teammate-mode"] ? { teammateMode: opts["teammate-mode"] } : {}),
+      teammateMode: opts["teammate-mode"] || "in-process",
     },
     ...(opts.resume ? { resume: opts.resume } : {}),
     ...(opts["resume-alias"] ? { resumeAlias: opts["resume-alias"] } : {}),
@@ -342,7 +342,7 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
   const channelsStr = await ask("Channels (comma-separated)", "server:commhub");
   const channels = channelsStr.split(",").map(s => s.trim()).filter(Boolean);
   const envStr = await ask("Extra env (K=V, comma-separated, empty to skip)");
-  const teammateMode = await ask("Teammate mode (empty to skip)");
+  const teammateMode = await ask("Teammate mode", "in-process");
 
   const envMap: Record<string, string> = {};
   if (envStr) {
@@ -366,7 +366,7 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
     env: envMap,
     flags: {
       dangerouslySkipPermissions: true,
-      ...(teammateMode ? { teammateMode } : {}),
+      teammateMode: teammateMode || "in-process",
     },
   };
 
@@ -431,6 +431,11 @@ async function startCommand() {
 async function resumeCommand() {
   const id = args[1];
   if (!id) { showProfiles("resume"); return; }
+  const profile = loadProfile(id);
+  if (!profile) {
+    console.log(`Profile "${id}" not found. Create one first:\n\n  anet start ${id}\n`);
+    process.exit(1);
+  }
   await launchClaude(id, "resume");
 }
 
