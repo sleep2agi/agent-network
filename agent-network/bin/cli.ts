@@ -153,37 +153,93 @@ async function setupCommand() {
   if (agentType === "claude-code") {
     const { existsSync } = await import("fs");
 
-    // 1. Channel plugin
+    // 1. Channel plugin directory + .env
     const channelDir = `${home}/.claude/channels/commhub`;
     mkdirSync(channelDir, { recursive: true });
-    console.log("1. Channel directory: " + channelDir);
-
-    // 2. Shared .env
     const envPath = `${channelDir}/.env`;
     if (!existsSync(envPath)) {
       writeFileSync(envPath, `COMMHUB_URL=${hubUrl}\n`);
-      console.log(`2. Written: ${envPath}`);
+    }
+    console.log(`1. Channel .env: ${envPath}`);
+
+    // 2. Download server.ts (Channel plugin)
+    const serverTsPath = `${channelDir}/server.ts`;
+    if (!existsSync(serverTsPath)) {
+      console.log("2. Downloading Channel plugin (server.ts)...");
+      try {
+        const res = await fetch("https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts");
+        if (res.ok) {
+          writeFileSync(serverTsPath, await res.text());
+          console.log(`   ✅ ${serverTsPath}`);
+        } else {
+          console.log(`   ❌ Download failed (${res.status}). Manual: curl -sL https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts -o ${serverTsPath}`);
+        }
+      } catch (e: any) {
+        console.log(`   ❌ Download failed: ${e.message}`);
+        console.log(`   Manual: curl -sL https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts -o ${serverTsPath}`);
+      }
     } else {
-      console.log(`2. Exists: ${envPath} (skipped)`);
+      console.log(`2. Channel plugin: exists (${serverTsPath})`);
     }
 
-    // 3. Project alias
+    // 3. Install channel dependencies (package.json + bun install)
+    const channelPkgPath = `${channelDir}/package.json`;
+    if (!existsSync(channelPkgPath)) {
+      console.log("3. Downloading package.json for Channel deps...");
+      try {
+        const res = await fetch("https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/package.json");
+        if (res.ok) {
+          writeFileSync(channelPkgPath, await res.text());
+          console.log(`   ✅ ${channelPkgPath}`);
+          console.log("   Installing deps: cd ~/.claude/channels/commhub && bun install");
+          try {
+            const { execSync } = await import("child_process");
+            execSync("bun install", { cwd: channelDir, stdio: "pipe" });
+            console.log("   ✅ Dependencies installed");
+          } catch {
+            console.log("   ⚠️  Run manually: cd ~/.claude/channels/commhub && bun install");
+          }
+        }
+      } catch {
+        console.log("   ⚠️  Download failed. Run manually:");
+        console.log(`   cd ${channelDir} && curl -sL https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/package.json -o package.json && bun install`);
+      }
+    } else {
+      console.log("3. Channel deps: exists");
+    }
+
+    // 4. Configure ~/.claude.json (global MCP)
+    const claudeJsonPath = `${home}/.claude.json`;
+    let claudeConfig: any = {};
+    if (existsSync(claudeJsonPath)) {
+      try { claudeConfig = JSON.parse(readFileSync(claudeJsonPath, "utf-8")); } catch {}
+    }
+    if (!claudeConfig.mcpServers?.commhub) {
+      claudeConfig.mcpServers = claudeConfig.mcpServers || {};
+      claudeConfig.mcpServers.commhub = {
+        type: "stdio",
+        command: "bun",
+        args: ["run", serverTsPath],
+      };
+      writeFileSync(claudeJsonPath, JSON.stringify(claudeConfig, null, 2) + "\n");
+      console.log(`4. MCP config: ${claudeJsonPath} (commhub added)`);
+    } else {
+      console.log(`4. MCP config: already configured`);
+    }
+
+    // 5. Project alias
     const cwd = process.cwd();
     const projectKey = cwd.replace(/\//g, "-");
-    const projectDir = `${channelDir}/${projectKey}`;
-    mkdirSync(projectDir, { recursive: true });
-    writeFileSync(`${projectDir}/.env`, `COMMHUB_ALIAS=${alias}\n`);
-    console.log(`3. Alias: ${alias} → ${projectDir}/.env`);
+    const aliasDir = `${channelDir}/${projectKey}`;
+    mkdirSync(aliasDir, { recursive: true });
+    writeFileSync(`${aliasDir}/.env`, `COMMHUB_ALIAS=${alias}\n`);
+    console.log(`5. Alias: ${alias}`);
 
     console.log(`
-✅ Setup complete!
+✅ Setup complete! 启动命令:
 
-Start command:
   COMMHUB_ALIAS="${alias}" claude --dangerously-skip-permissions \\
     --dangerously-load-development-channels server:commhub
-
-Note: Make sure ~/.claude.json has commhub in mcpServers (stdio type)
-      and ~/.claude/channels/commhub/server.ts exists.
 `);
   } else if (agentType === "sdk") {
     console.log(`
