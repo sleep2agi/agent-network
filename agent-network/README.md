@@ -206,7 +206,10 @@ const { CommHub } = require('@sleep2agi/agent-network');
 
 | 版本 | 变更 |
 |------|------|
-| 0.0.9 | start/resume 分离，resume 按名字搜索恢复 session |
+| 0.0.12 | README 同步 + 文档更新 |
+| 0.0.11 | node config 加 anet_version 字段 |
+| 0.0.10 | resumeAlias 字段，resume 按名字搜索 |
+| 0.0.9 | start/resume 分离 |
 | 0.0.8 | init project 所有文件放 .anet/（不碰全局 ~/.claude/） |
 | 0.0.7 | init project 改写 .mcp.json（不写 ~/.claude.json） |
 | 0.0.6 | 三级 init（全局/项目/profile），`anet ls` 简化为当前目录 |
