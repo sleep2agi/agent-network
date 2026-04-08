@@ -109,14 +109,8 @@ async function initGlobal() {
   let hub = opts.hub;
 
   if (!hub) {
-    process.stdout.write("CommHub URL (e.g. http://YOUR_IP:9200): ");
-    hub = await new Promise<string>(resolve => {
-      process.stdin.setEncoding("utf-8");
-      process.stdin.once("data", (d) => {
-        process.stdin.unref();
-        resolve(d.toString().trim());
-      });
-    });
+    hub = await ask("CommHub URL (e.g. http://YOUR_IP:9200)");
+    closeRL();
   }
 
   if (!hub) { console.error("Error: hub URL required"); process.exit(1); }
@@ -321,13 +315,73 @@ function initProfile() {
   console.log(`\nStart: anet start ${id}`);
 }
 
+// ── interactive prompt helper ──
+
+import { createInterface } from "readline";
+let _rl: ReturnType<typeof createInterface> | null = null;
+function getRL() {
+  if (!_rl) _rl = createInterface({ input: process.stdin, output: process.stdout });
+  return _rl;
+}
+function closeRL() { if (_rl) { _rl.close(); _rl = null; } }
+
+function ask(question: string, defaultVal?: string): Promise<string> {
+  const suffix = defaultVal ? ` [${defaultVal}]` : "";
+  return new Promise(resolve => {
+    getRL().question(`${question}${suffix}: `, (answer) => {
+      resolve(answer.trim() || defaultVal || "");
+    });
+  });
+}
+
+async function interactiveCreateProfile(id: string): Promise<Profile> {
+  const gc = loadGlobal();
+  console.log(`\nProfile "${id}" not found. Let's create it:\n`);
+
+  const alias = await ask("Alias", id);
+  const channelsStr = await ask("Channels (comma-separated)", "server:commhub");
+  const channels = channelsStr.split(",").map(s => s.trim()).filter(Boolean);
+  const envStr = await ask("Extra env (K=V, comma-separated, empty to skip)");
+  const teammateMode = await ask("Teammate mode (empty to skip)");
+
+  const envMap: Record<string, string> = {};
+  if (envStr) {
+    for (const e of envStr.split(",")) {
+      const eq = e.trim().indexOf("=");
+      if (eq > 0) envMap[e.trim().slice(0, eq)] = e.trim().slice(eq + 1);
+    }
+  }
+
+  const hub = gc.hub;
+  if (!hub) {
+    console.error("\nRun 'anet init' first to configure hub URL");
+    process.exit(1);
+  }
+
+  const profile: Profile = {
+    anet_version: "0.0.20",
+    alias,
+    hub,
+    channels,
+    env: envMap,
+    flags: {
+      dangerouslySkipPermissions: true,
+      ...(teammateMode ? { teammateMode } : {}),
+    },
+  };
+
+  saveProfile(id, profile);
+  closeRL();
+  console.log(`\n✅ Profile "${id}" saved\n`);
+  return profile;
+}
+
 // ── launch helper (shared by start + resume) ──
 
-function launchClaude(id: string, mode: "start" | "resume") {
-  const profile = loadProfile(id);
+async function launchClaude(id: string, mode: "start" | "resume") {
+  let profile = loadProfile(id);
   if (!profile) {
-    console.error(`Profile "${id}" not found. Run: anet ls`);
-    process.exit(1);
+    profile = await interactiveCreateProfile(id);
   }
 
   // Build env
@@ -366,18 +420,18 @@ function launchClaude(id: string, mode: "start" | "resume") {
 
 // ── start (new session) ──
 
-function startCommand() {
+async function startCommand() {
   const id = args[1];
   if (!id) { showProfiles("start"); return; }
-  launchClaude(id, "start");
+  await launchClaude(id, "start");
 }
 
 // ── resume (continue session) ──
 
-function resumeCommand() {
+async function resumeCommand() {
   const id = args[1];
   if (!id) { showProfiles("resume"); return; }
-  launchClaude(id, "resume");
+  await launchClaude(id, "resume");
 }
 
 function showProfiles(cmd: string) {
