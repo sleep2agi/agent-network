@@ -24,12 +24,9 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 const args = process.argv.slice(2);
 let ALIAS = process.env.COMMHUB_ALIAS || "SDK马";
 let COMMHUB_URL = process.env.COMMHUB_URL || "http://127.0.0.1:9200";
-let POLL_INTERVAL = 10_000; // 10 秒轮询
-
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--alias") ALIAS = args[++i];
   if (args[i] === "--url") COMMHUB_URL = args[++i];
-  if (args[i] === "--interval") POLL_INTERVAL = parseInt(args[++i]) * 1000;
 }
 
 const log = (msg: string) => console.log(`[${new Date().toTimeString().slice(0, 8)}] [${ALIAS}] ${msg}`);
@@ -153,9 +150,97 @@ ${task}
   return result;
 }
 
-// ── 主循环 ──
+// ── 处理 inbox 消息 ──
+async function processInbox() {
+  const messages = await getInbox();
+  if (messages.length === 0) return;
+
+  for (const msg of messages) {
+    const from = msg.from_session || "hub";
+    const content = msg.content || "";
+    const msgId = msg.id;
+
+    await ackMessage(msgId);
+    log(`← task from=${from}: ${content.slice(0, 60)}`);
+
+    const result = await processTask(content, from);
+
+    try {
+      await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`);
+      log(`→ replied to ${from}: ${result.slice(0, 60)}`);
+    } catch (e: any) {
+      log(`reply failed: ${e.message}`);
+    }
+  }
+}
+
+// ── SSE 长连接监听 ──
+async function connectSSE() {
+  const encodedAlias = encodeURIComponent(ALIAS);
+  const sseUrl = `${COMMHUB_URL}/events/${encodedAlias}`;
+  let reconnectDelay = 3000;
+
+  while (true) {
+    log(`SSE connecting: ${sseUrl}`);
+    try {
+      const res = await fetch(sseUrl, {
+        headers: { Accept: "text/event-stream" },
+      });
+
+      if (!res.ok || !res.body) {
+        log(`SSE connection failed: ${res.status}`);
+        await new Promise((r) => setTimeout(r, reconnectDelay));
+        reconnectDelay = Math.min(reconnectDelay * 1.5, 60_000);
+        continue;
+      }
+
+      reconnectDelay = 3000; // 重连成功，重置延迟
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+
+          try {
+            const event = JSON.parse(data);
+
+            if (event.type === "connected") {
+              log(`SSE connected as "${ALIAS}"`);
+              continue;
+            }
+
+            if (event.type === "new_task" || event.type === "new_message" || event.type === "broadcast") {
+              log(`← SSE ${event.type} from=${event.from || "?"} priority=${event.priority || "normal"}`);
+              await processInbox();
+            }
+          } catch {
+            // 忽略非 JSON 行（keepalive 等）
+          }
+        }
+      }
+    } catch (err: any) {
+      log(`SSE error: ${err.message}`);
+    }
+
+    log(`SSE disconnected, reconnecting in ${reconnectDelay / 1000}s...`);
+    await new Promise((r) => setTimeout(r, reconnectDelay));
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 60_000);
+  }
+}
+
+// ── 主入口 ──
 async function mainLoop() {
-  log(`starting: alias=${ALIAS} url=${COMMHUB_URL} interval=${POLL_INTERVAL / 1000}s`);
+  log(`starting: alias=${ALIAS} url=${COMMHUB_URL} mode=SSE`);
 
   // 注册
   await register();
@@ -170,39 +255,8 @@ async function mainLoop() {
     }
   }, 3 * 60 * 1000);
 
-  // 轮询循环
-  while (true) {
-    try {
-      const messages = await getInbox();
-
-      if (messages.length > 0) {
-        for (const msg of messages) {
-          const from = msg.from_session || "hub";
-          const content = msg.content || "";
-          const msgId = msg.id;
-
-          // ACK
-          await ackMessage(msgId);
-          log(`← task from=${from}: ${content.slice(0, 60)}`);
-
-          // 处理
-          const result = await processTask(content, from);
-
-          // 回复发送者
-          try {
-            await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`);
-            log(`→ replied to ${from}: ${result.slice(0, 60)}`);
-          } catch (e: any) {
-            log(`reply failed: ${e.message}`);
-          }
-        }
-      }
-    } catch (err: any) {
-      log(`poll error: ${err.message}`);
-    }
-
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-  }
+  // SSE 长连接（阻塞，自动重连）
+  await connectSSE();
 }
 
 // ── 优雅退出 ──
