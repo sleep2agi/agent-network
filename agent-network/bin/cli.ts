@@ -120,6 +120,7 @@ async function initGlobal() {
   }
 
   if (!hub) { console.error("Error: hub URL required"); process.exit(1); }
+  hub = hub.replace(/\/+$/, ""); // 去掉结尾斜杠
 
   // Test connection
   try {
