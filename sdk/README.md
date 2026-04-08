@@ -12,6 +12,23 @@ npm install @sleep2agi/commhub-sdk
 bun add @sleep2agi/commhub-sdk
 ```
 
+## 服务器上安装使用
+
+```bash
+# 安装
+npm install @sleep2agi/commhub-sdk
+```
+
+```javascript
+// CommonJS
+const { CommHub } = require('@sleep2agi/commhub-sdk');
+const hub = new CommHub({ url: 'http://YOUR_COMMHUB_IP:9200', alias: '我的Agent' });
+hub.on('task', (msg) => {
+  console.log(`收到任务: ${msg.content}`);
+  hub.send(msg.from_session, '任务完成');
+});
+```
+
 ## 快速开始
 
 ```typescript

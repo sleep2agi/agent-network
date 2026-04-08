@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/commhub-sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "CommHub communication SDK — SSE real-time messaging for AI Agent networks",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
