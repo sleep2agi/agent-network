@@ -11,7 +11,7 @@ import { hostname as osHostname } from "os";
 // ── Types ──
 
 export interface CommHubOptions {
-  /** CommHub Server URL, e.g. "http://47.77.216.1:9200" */
+  /** CommHub Server URL, e.g. "http://YOUR_COMMHUB_IP:9200" */
   url: string;
   /** Session alias, e.g. "SDK马" */
   alias: string;

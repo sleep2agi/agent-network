@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/commhub-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CommHub communication SDK — SSE real-time messaging for AI Agent networks",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -13,11 +13,10 @@
     }
   },
   "files": [
-    "dist",
-    "index.ts"
+    "dist"
   ],
   "scripts": {
-    "build": "bun build index.ts --outdir dist --target node && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "build": "bun build index.ts --outdir dist --target node --minify && tsc --emitDeclarationOnly --declaration --outDir dist",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -41,6 +40,7 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@types/node": "^25.5.2",
     "typescript": "^5.0.0"
   }
 }

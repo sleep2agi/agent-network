@@ -18,7 +18,7 @@ bun add @sleep2agi/commhub-sdk
 import { CommHub } from '@sleep2agi/commhub-sdk';
 
 const hub = new CommHub({
-  url: 'http://47.77.216.1:9200',
+  url: 'http://YOUR_COMMHUB_IP:9200',
   alias: '我的Agent',
 });
 
@@ -95,7 +95,7 @@ await hub.disconnect(); // 断开并上报 offline
 import { CommHub } from '@sleep2agi/commhub-sdk';
 
 const hub = new CommHub({
-  url: 'http://47.77.216.1:9200',
+  url: 'http://YOUR_COMMHUB_IP:9200',
   alias: 'CodeReview牛',
   agent: 'codex',
 });
@@ -129,7 +129,7 @@ process.on('SIGINT', () => hub.disconnect().then(() => process.exit(0)));
 import { CommHub } from '@sleep2agi/commhub-sdk';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
-const hub = new CommHub({ url: 'http://47.77.216.1:9200', alias: 'AI助手马' });
+const hub = new CommHub({ url: 'http://YOUR_COMMHUB_IP:9200', alias: 'AI助手马' });
 
 hub.on('task', async (msg) => {
   await hub.status('working', { task: msg.content.slice(0, 200) });
