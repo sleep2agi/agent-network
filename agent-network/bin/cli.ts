@@ -43,6 +43,7 @@ interface Profile {
   env: Record<string, string>;
   flags: Record<string, any>;
   resume?: string;
+  resumeAlias?: string;
 }
 
 function loadProfile(id: string): Profile | null {
@@ -241,6 +242,7 @@ function initProfile() {
       ...(opts["teammate-mode"] ? { teammateMode: opts["teammate-mode"] } : {}),
     },
     ...(opts.resume ? { resume: opts.resume } : {}),
+    ...(opts["resume-alias"] ? { resumeAlias: opts["resume-alias"] } : {}),
   };
 
   // Write alias .env for channel
@@ -286,8 +288,9 @@ function launchClaude(id: string, mode: "start" | "resume") {
   if (profile.flags.teammateMode) claudeArgs.push("--teammate-mode", profile.flags.teammateMode);
 
   if (mode === "resume") {
-    // 按名字搜索恢复（Claude Code --resume 支持名字搜索）
-    claudeArgs.push("--resume", profile.name || profile.alias);
+    // 按 resumeAlias 或 name 搜索恢复
+    const searchTerm = profile.resumeAlias || profile.name || profile.alias;
+    claudeArgs.push("--resume", searchTerm);
   }
 
   // -n 给 session 命名（新建和恢复都加，方便下次找）
