@@ -1,153 +1,204 @@
 # @sleep2agi/agent-network CLI 设计文档
 
+> CLI 命令名：`anet` | npm 包名：`@sleep2agi/agent-network` | 当前版本：v0.0.4
+
+---
+
+## 版本历史
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| v0.0.4 | 2026-04-08 | CLI 瘦身 580KB→11KB，去除 bun:sqlite 依赖，Node.js 18+ 兼容；新增 profile 系统（setup/start/list）；支持 --name/--channel/--env 多参数 |
+| v0.0.3 | 2026-04-08 | anet setup 一键配置（自动下载 Channel 插件 + 配 ~/.claude.json） |
+| v0.0.2 | 2026-04-08 | CLI shebang 改为 node（不依赖 bun）；README 完整重写 |
+| v0.0.1 | 2026-04-08 | 首次发布（server + client + CLI 合并包） |
+
+---
+
 ## 命令总览
 
 ```
 anet <command> [options]
 
-Server 端（中心节点）:
-  server        启动 CommHub 通信中枢
-
-Node 端（Agent 节点）:
-  setup         配置新 Agent 加入网络
-  run           运行独立 Agent（SSE 监听 + 自动处理）
+  setup     创建 Agent profile（保存启动参数）
+  start     用保存的 profile 启动 Claude Code
+  list      列出所有 profile
+  run       运行独立 SSE Agent（不需要 Claude Code）
 ```
 
-## 配置文件
+---
 
-### 路径
+## Profile 系统（v0.0.4+）
 
-| 级别 | 路径 | 内容 |
-|------|------|------|
-| 全局 | `~/.anet/config.json` | CommHub URL、token、默认类型 |
-| 项目 | `{workpath}/.anet/config.json` | alias、agent 类型、项目特定配置 |
+### 概念
 
-**优先级**：项目 > 全局 > 命令行默认值。命令行参数优先级最高。
+同一目录可以启动多个 Agent（如指挥室 + 通信龙），每个用不同的 profile。
 
-### 全局配置 `~/.anet/config.json`
+Profile 存储在 `.anet/profiles/<id>.json`，包含完整的启动参数。
+
+### 目录结构
+
+```
+.anet/
+├── config.json              # 全局默认（hub URL）
+└── profiles/
+    ├── commander.json       # 指挥室的完整启动配置
+    └── comm-dragon.json     # 通信龙的完整启动配置
+```
+
+### Profile 文件格式
 
 ```json
 {
+  "name": "指挥室",
+  "alias": "指挥室",
   "hub": "http://YOUR_COMMHUB_IP:9200",
-  "token": "your-auth-token",
-  "type": "claude-code"
+  "channels": [
+    "server:commhub",
+    "plugin:telegram@claude-plugins-official"
+  ],
+  "env": {
+    "TELEGRAM_STATE_DIR": "~/.claude/channels/telegram-vincent"
+  },
+  "flags": {
+    "dangerouslySkipPermissions": true,
+    "teammateMode": "in-process"
+  },
+  "resume": "98039093-3d2f-4c1b-bf8b-664cce723aee"
 }
 ```
 
-### 项目配置 `{workpath}/.anet/config.json`
+| 字段 | 说明 |
+|------|------|
+| name | 显示名（中文，用于 list 展示） |
+| alias | CommHub session 别名 |
+| hub | CommHub Server URL |
+| channels | Claude Code channels 列表 |
+| env | 额外环境变量 |
+| flags | Claude Code 启动标志 |
+| resume | Session ID（可选，用于恢复） |
+
+---
+
+## 1. setup — 创建 Profile
+
+```bash
+anet setup --profile <id> --alias <alias> --hub <url> [options]
+```
+
+| 参数 | 必需 | 说明 |
+|------|------|------|
+| --profile | ✅ | Profile ID（英文，作为文件名） |
+| --alias | ✅ | CommHub session 别名 |
+| --hub | ✅（首次） | CommHub Server URL |
+| --name | | 显示名（中文） |
+| --channel | | 添加 channel（可重复） |
+| --env | | 添加环境变量 K=V（可重复） |
+| --resume | | Session resume ID |
+| --type | | claude-code（默认）/ sdk |
+| --teammate-mode | | 如 in-process |
+
+**setup 做的事**：
+
+1. 保存 profile 到 `.anet/profiles/<id>.json`
+2. 保存全局配置 `~/.anet/config.json`（hub URL）
+3. 测试 CommHub 连接
+4. claude-code 类型额外：下载 Channel 插件 + 配 ~/.claude.json + 写 .env
+5. 输出启动命令
+
+示例：
+```bash
+# 指挥室（带 Telegram + CommHub 双 channel）
+anet setup --profile commander --name 指挥室 --alias 指挥室 \
+  --hub http://YOUR_IP:9200 \
+  --channel server:commhub \
+  --channel plugin:telegram@claude-plugins-official \
+  --env TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent \
+  --teammate-mode in-process
+
+# 通信龙（只有 CommHub）
+anet setup --profile comm-dragon --name 通信龙 --alias 通信龙 \
+  --hub http://YOUR_IP:9200 \
+  --channel server:commhub
+
+# SDK Agent
+anet setup --profile sdk-agent --name SDK马 --alias SDK马 \
+  --hub http://YOUR_IP:9200 --type sdk
+```
+
+## 2. start — 启动 Agent
+
+```bash
+anet start <profile-id>
+anet start              # 无参数 → 列出所有 profile
+```
+
+**行为**：读取 profile JSON → 拼 claude 启动命令 → spawn 执行。
+
+等于把这一长串：
+```bash
+COMMHUB_ALIAS="指挥室" TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent \
+  claude --dangerously-skip-permissions \
+  --channels plugin:telegram@claude-plugins-official \
+  --dangerously-load-development-channels server:commhub \
+  --teammate-mode in-process \
+  --resume 98039093-3d2f-4c1b-bf8b-664cce723aee
+```
+
+变成：
+```bash
+anet start commander
+```
+
+## 3. list — 列出 Profile
+
+```bash
+anet list
+```
+
+输出：
+```
+Profiles:
+
+  commander
+    name: 指挥室  alias: 指挥室  hub: http://YOUR_IP:9200
+    channels: server:commhub, plugin:telegram@claude-plugins-official
+    env: TELEGRAM_STATE_DIR
+
+  comm-dragon
+    name: 通信龙  alias: 通信龙  hub: http://YOUR_IP:9200
+    channels: server:commhub
+```
+
+## 4. run — 独立 SSE Agent
+
+```bash
+anet run [--alias <name>] [--hub <url>] [--handler <script>]
+```
+
+不需要 Claude Code，纯 SSE 监听 + 自动回复。适合 SDK 集成场景。
+
+---
+
+## 配置文件
+
+### 全局 `~/.anet/config.json`
 
 ```json
 {
-  "alias": "开发马",
-  "type": "claude-code",
   "hub": "http://YOUR_COMMHUB_IP:9200"
 }
 ```
 
-### 配置解析顺序
+### 优先级
 
 ```
-命令行参数 --hub / --alias / --type
-    ↓ 未指定时
-项目配置 {cwd}/.anet/config.json
-    ↓ 未指定时
-全局配置 ~/.anet/config.json
-    ↓ 未指定时
-默认值（hub=http://127.0.0.1:9200, type=claude-code）
+环境变量 > 命令行参数 > profile JSON > 全局 config > 默认值
 ```
 
-## 1. server — 启动中心节点
+---
 
-```bash
-anet server [options]
-```
-
-| 参数 | 短写 | 环境变量 | 默认值 | 说明 |
-|------|------|---------|--------|------|
-| --port | -p | PORT | 9200 | 监听端口 |
-| --token | -t | COMMHUB_AUTH_TOKEN | 无（开放） | Bearer 认证 token |
-| --db | | COMMHUB_DB | ~/.commhub/commhub.db | SQLite 路径 |
-| --cors | | COMMHUB_CORS_ORIGINS | localhost | CORS origins |
-
-server 命令也从 `~/.anet/config.json` 读取 `token`（如果命令行未指定）。
-
-示例：
-```bash
-anet server
-anet server --port 9200 --token my-secret-token
-```
-
-端点：
-- POST /mcp — MCP Streamable HTTP
-- GET /events/:alias — SSE 实时推送
-- GET /health — 健康检查
-- POST /api/task — REST 发任务
-- GET /api/status — 所有 session 状态
-
-## 2. setup — 配置新 Agent
-
-```bash
-anet setup --hub <url> --alias <name> [--type <type>]
-```
-
-| 参数 | 必需 | 默认值 | 说明 |
-|------|------|--------|------|
-| --hub | ✅（首次） | 从全局配置读 | CommHub Server URL |
-| --alias | ✅ | — | Agent 别名 |
-| --type | | claude-code | claude-code / sdk |
-
-**setup 做的事**：
-
-1. 测试 CommHub 连接（GET /health）
-2. 写入全局配置 `~/.anet/config.json`（hub、token）
-3. 写入项目配置 `{cwd}/.anet/config.json`（alias、type）
-4. 根据 type 配置对应载体：
-   - **claude-code**：创建 Channel 目录 + .env + 输出启动命令
-   - **sdk**：输出 SDK 代码示例
-
-示例：
-```bash
-# 首次 setup（写入全局 + 项目配置）
-anet setup --hub http://YOUR_IP:9200 --alias 开发马
-
-# 后续项目只需指定 alias（hub 从全局配置读）
-cd ~/another-project
-anet setup --alias 另一个马
-
-# SDK Agent
-anet setup --alias SDK马 --type sdk
-```
-
-## 3. run — 运行独立 Agent
-
-```bash
-anet run [--alias <name>] [--hub <url>] [--handler <path>]
-```
-
-| 参数 | 必需 | 来源 | 说明 |
-|------|------|------|------|
-| --alias | | 项目配置 > 命令行 | Agent 别名 |
-| --hub | | 全局配置 > 命令行 | CommHub URL |
-| --handler | | 无（echo 模式） | 任务处理脚本 |
-
-**配置文件自动读取**：如果当前目录有 `.anet/config.json`，alias 和 hub 自动从中读取，无需命令行指定。
-
-行为：SSE 长连接监听 → 收到任务自动处理 → 回复发送者 → 3 分钟心跳
-
-示例：
-```bash
-# 自动从 .anet/config.json 读取 alias 和 hub
-cd ~/my-project
-anet run
-
-# 显式指定
-anet run --alias 测试马 --hub http://YOUR_IP:9200
-
-# 自定义处理脚本
-anet run --handler ./my-handler.ts
-```
-
-## 代码引用
+## 代码引用（SDK）
 
 ```typescript
 import { CommHub } from '@sleep2agi/agent-network';
@@ -157,3 +208,13 @@ hub.on('task', async (msg) => {
   await hub.send(msg.from_session, '处理完成');
 });
 ```
+
+---
+
+## 运行时要求
+
+| 组件 | 运行时 |
+|------|--------|
+| anet setup / start / list | Node.js 18+ 或 Bun |
+| anet run / SDK | Node.js 18+ 或 Bun |
+| CommHub Server | Bun 1.2+（单独部署） |
