@@ -346,7 +346,7 @@ cd channel && bun install
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": ["run", "/absolute/path/to/agent-orchestra/channel/commhub-channel.ts"],
+      "args": ["run", "/absolute/path/to/agent-comm-hub/channel/commhub-channel.ts"],
       "env": {
         "COMMHUB_URL": "http://YOUR_IP:9200"
       }
@@ -387,7 +387,7 @@ proxy/
 codex mcp add commhub-proxy \
   --env COMMHUB_URL=http://YOUR_IP:9200 \
   --env COMMHUB_ALIAS=codex-my-agent \
-  -- bun /path/to/agent-orchestra/proxy/commhub-proxy.ts
+  -- bun /path/to/agent-comm-hub/proxy/commhub-proxy.ts
 ```
 
 ### 启动

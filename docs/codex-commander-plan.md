@@ -88,7 +88,7 @@ codex mcp add commhub --url http://127.0.0.1:9200/mcp
 codex mcp add commhub-proxy \
   --env COMMHUB_URL=http://127.0.0.1:9200 \
   --env COMMHUB_ALIAS=codex-指挥室 \
-  -- bun /path/to/agent-orchestra/proxy/commhub-proxy.ts
+  -- bun /path/to/agent-comm-hub/proxy/commhub-proxy.ts
 ```
 
 ### 2.3 启动命令

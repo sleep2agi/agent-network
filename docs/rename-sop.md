@@ -4,7 +4,7 @@
 
 ### 1. 改 DB（立即生效，Dashboard 刷新可见）
 ```bash
-cd ~/agent-orchestra/server && bun -e "
+cd ~/agent-comm-hub/server && bun -e "
 const { Database } = require('bun:sqlite');
 const db = new Database(process.env.HOME + '/.commhub/commhub.db');
 db.run(\"UPDATE sessions SET alias='新名字' WHERE alias='旧名字'\");

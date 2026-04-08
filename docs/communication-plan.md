@@ -351,7 +351,7 @@ curl -fsSL https://bun.sh/install | bash
 
 **步骤 2：启动 CommHub**
 ```bash
-cd agent-orchestra/server
+cd agent-comm-hub/server
 bun install
 bun run start
 # 输出：CommHub Server v0.3.0 running on port 9200
@@ -367,7 +367,7 @@ After=network.target
 [Service]
 Type=simple
 User=your-user
-WorkingDirectory=/path/to/agent-orchestra/server
+WorkingDirectory=/path/to/agent-comm-hub/server
 ExecStart=/usr/local/bin/bun run src/index.ts
 Restart=always
 RestartSec=5

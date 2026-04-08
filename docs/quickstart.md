@@ -15,8 +15,8 @@ source ~/.bashrc  # 或 source ~/.zshrc
 bun --version  # 应该 >= 1.2
 
 # 克隆仓库
-git clone https://github.com/sleep2agi/agent-orchestra.git
-cd agent-orchestra
+git clone https://github.com/sleep2agi/agent-comm-hub.git
+cd agent-comm-hub
 ```
 
 ---
@@ -48,7 +48,7 @@ After=network.target
 [Service]
 Type=simple
 User=YOUR_USER
-WorkingDirectory=/path/to/agent-orchestra/server
+WorkingDirectory=/path/to/agent-comm-hub/server
 ExecStart=/usr/local/bin/bun run src/index.ts
 Restart=always
 RestartSec=5
@@ -79,7 +79,7 @@ iptables -A INPUT -p tcp --dport 9200 -j DROP
 ### 3a. 安装依赖
 
 ```bash
-cd agent-orchestra/channel && bun install
+cd agent-comm-hub/channel && bun install
 ```
 
 ### 3b. 创建共享配置
@@ -105,7 +105,7 @@ EOF
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": ["run", "/absolute/path/to/agent-orchestra/channel/commhub-channel.ts"]
+      "args": ["run", "/absolute/path/to/agent-comm-hub/channel/commhub-channel.ts"]
     }
   }
 }
@@ -256,7 +256,7 @@ COMMHUB_TOKEN=my-secret-token-123
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": ["run", "/home/vansin/agent-orchestra/channel/commhub-channel.ts"]
+      "args": ["run", "/home/vansin/agent-comm-hub/channel/commhub-channel.ts"]
     }
   }
 }

@@ -585,7 +585,7 @@ main().catch((err) => {
 
 ```bash
 # 在 Codex 所在机器上
-cd agent-orchestra/bridge
+cd agent-comm-hub/bridge
 bun install
 
 # 启动 bridge
