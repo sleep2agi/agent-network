@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-network",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "AI Agent Network — Server + Client + Setup in one package. SSE real-time communication for multi-agent orchestration.",
   "type": "module",
   "main": "dist/src/client.js",
@@ -19,7 +19,8 @@
   },
   "files": [
     "dist",
-    "src/server.ts"
+    "src/server.ts",
+    "src/node-server.ts"
   ],
   "scripts": {
     "build": "bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && tsc --emitDeclarationOnly --declaration --outDir dist",

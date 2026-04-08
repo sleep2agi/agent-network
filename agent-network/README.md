@@ -64,11 +64,11 @@ anet init profile <id> [options]   # → .anet/profiles/<id>.json
 
 ```
 ~/.anet/config.json                  全局（hub URL，一次性）
-{workpath}/.anet/server.ts           Channel 插件
+{workpath}/.anet/node-server.ts           Channel 插件
 {workpath}/.anet/package.json        依赖声明
 {workpath}/.anet/.env                COMMHUB_URL
 {workpath}/.anet/profiles/cmd.json   启动 profile
-{workpath}/.mcp.json                 MCP 配置（commhub → .anet/server.ts）
+{workpath}/.mcp.json                 MCP 配置（commhub → .anet/node-server.ts）
 ```
 
 全部在项目目录内，不碰全局 `~/.claude/`。
@@ -92,10 +92,10 @@ anet init
 ```bash
 cd ~/my-project
 anet init project
-# ✅ .anet/server.ts
+# ✅ .anet/node-server.ts
 # ✅ Dependencies installed
 # CommHub URL: http://YOUR_IP:9200
-# .mcp.json: commhub → .anet/server.ts
+# .mcp.json: commhub → .anet/node-server.ts
 ```
 
 #### anet init profile
@@ -206,7 +206,11 @@ const { CommHub } = require('@sleep2agi/agent-network');
 
 | 版本 | 变更 |
 |------|------|
-| 0.0.12 | README 同步 + 文档更新 |
+| 0.0.16 | server.ts → node-server.ts，从 npm 包内 copy（不依赖 GitHub 下载） |
+| 0.0.15 | 自动去掉 hub URL 结尾斜杠 |
+| 0.0.14 | init project 自动生成 CLAUDE.md |
+| 0.0.13 | init 交互输入后不再卡住 |
+| 0.0.12 | README 同步 |
 | 0.0.11 | node config 加 anet_version 字段 |
 | 0.0.10 | resumeAlias 字段，resume 按名字搜索 |
 | 0.0.9 | start/resume 分离 |
