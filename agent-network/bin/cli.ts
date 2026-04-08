@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 /**
- * @sleep2agi/agent-network CLI
+ * @sleep2agi/anet CLI
  *
  * Commands:
- *   agent-network server --port 9200 --token xxx
- *   agent-network setup --hub http://xxx:9200 --alias xxx
- *   agent-network run --alias xxx --hub http://xxx:9200
+ *   anet server --port 9200 --token xxx
+ *   anet setup --hub http://xxx:9200 --alias xxx
+ *   anet run --alias xxx --hub http://xxx:9200
  */
 
 const args = process.argv.slice(2);
@@ -24,7 +24,7 @@ function parseArgs(keys: string[]): Record<string, string> {
 
 function printHelp() {
   console.log(`
-@sleep2agi/agent-network — AI Agent 通信网络
+@sleep2agi/anet — AI Agent 通信网络
 
 Commands:
   server    Start CommHub server
@@ -32,28 +32,28 @@ Commands:
   run       Run a standalone agent with CommHub integration
 
 Server:
-  agent-network server [options]
+  anet server [options]
     --port, -p <port>     Port (default: 9200)
     --token, -t <token>   Auth token
     --db <path>           SQLite database path
     --cors <origins>      CORS origins (comma-separated)
 
 Setup:
-  agent-network setup [options]
+  anet setup [options]
     --hub <url>           CommHub server URL (e.g. http://YOUR_IP:9200)
     --alias <name>        Agent alias (e.g. 我的Agent)
     --type <type>         Agent type: claude-code | sdk | opencode (default: claude-code)
 
 Run:
-  agent-network run [options]
+  anet run [options]
     --hub <url>           CommHub server URL
     --alias <name>        Agent alias
     --handler <path>      Path to task handler script (optional)
 
 Examples:
-  agent-network server --port 9200 --token my-secret
-  agent-network setup --hub http://YOUR_IP:9200 --alias 开发马 --type claude-code
-  agent-network run --hub http://YOUR_IP:9200 --alias SDK马
+  anet server --port 9200 --token my-secret
+  anet setup --hub http://YOUR_IP:9200 --alias 开发马 --type claude-code
+  anet run --hub http://YOUR_IP:9200 --alias SDK马
 `);
 }
 
@@ -74,7 +74,7 @@ async function setupCommand() {
 
   if (!hubUrl || !alias) {
     console.error("Error: --hub and --alias are required");
-    console.error("Usage: agent-network setup --hub http://YOUR_IP:9200 --alias 我的Agent");
+    console.error("Usage: anet setup --hub http://YOUR_IP:9200 --alias 我的Agent");
     process.exit(1);
   }
 
@@ -135,7 +135,7 @@ Note: Make sure ~/.claude.json has commhub in mcpServers (stdio type)
     console.log(`
 ✅ SDK Agent setup:
 
-const { CommHub } = require('@sleep2agi/agent-network');
+const { CommHub } = require('@sleep2agi/anet');
 const hub = new CommHub({ url: '${hubUrl}', alias: '${alias}' });
 hub.on('task', async (msg) => {
   console.log('Task:', msg.content);

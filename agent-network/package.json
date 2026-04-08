@@ -15,7 +15,7 @@
     }
   },
   "bin": {
-    "agent-network": "dist/bin/cli.js"
+    "anet": "dist/bin/cli.js"
   },
   "files": [
     "dist",

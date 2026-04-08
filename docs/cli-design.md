@@ -3,7 +3,7 @@
 ## 命令总览
 
 ```
-agent-network <command> [options]
+anet <command> [options]
 
 Server 端（中心节点）:
   server        启动 CommHub 通信中枢
@@ -16,7 +16,7 @@ Node 端（Agent 节点）:
 ## 1. server — 启动中心节点
 
 ```bash
-agent-network server [options]
+anet server [options]
 ```
 
 | 参数 | 短写 | 环境变量 | 默认值 | 说明 |
@@ -28,8 +28,8 @@ agent-network server [options]
 
 示例：
 ```bash
-agent-network server
-agent-network server --port 9200 --token my-secret-token
+anet server
+anet server --port 9200 --token my-secret-token
 ```
 
 端点：
@@ -42,7 +42,7 @@ agent-network server --port 9200 --token my-secret-token
 ## 2. setup — 配置新 Agent
 
 ```bash
-agent-network setup --hub <url> --alias <name> [--type <type>]
+anet setup --hub <url> --alias <name> [--type <type>]
 ```
 
 | 参数 | 必需 | 默认值 | 说明 |
@@ -53,14 +53,14 @@ agent-network setup --hub <url> --alias <name> [--type <type>]
 
 示例：
 ```bash
-agent-network setup --hub http://YOUR_IP:9200 --alias 开发马
-agent-network setup --hub http://YOUR_IP:9200 --alias SDK马 --type sdk
+anet setup --hub http://YOUR_IP:9200 --alias 开发马
+anet setup --hub http://YOUR_IP:9200 --alias SDK马 --type sdk
 ```
 
 ## 3. run — 运行独立 Agent
 
 ```bash
-agent-network run --alias <name> [--hub <url>] [--handler <path>]
+anet run --alias <name> [--hub <url>] [--handler <path>]
 ```
 
 | 参数 | 必需 | 默认值 | 说明 |

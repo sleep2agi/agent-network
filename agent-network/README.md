@@ -1,4 +1,4 @@
-# @sleep2agi/agent-network
+# @sleep2agi/agent-network (anet)
 
 AI Agent 通信网络 — Server + Client + Setup，一个包搞定。
 
@@ -15,7 +15,7 @@ npm install -g @sleep2agi/agent-network
 ### 启动 Server
 
 ```bash
-agent-network server --port 9200 --token my-secret
+anet server --port 9200 --token my-secret
 ```
 
 | 参数 | 说明 | 默认值 |
@@ -28,7 +28,7 @@ agent-network server --port 9200 --token my-secret
 ### 配置新 Agent
 
 ```bash
-agent-network setup --hub http://YOUR_IP:9200 --alias 开发马 --type claude-code
+anet setup --hub http://YOUR_IP:9200 --alias 开发马 --type claude-code
 ```
 
 | 参数 | 说明 |
@@ -42,7 +42,7 @@ agent-network setup --hub http://YOUR_IP:9200 --alias 开发马 --type claude-co
 ### 运行独立 Agent
 
 ```bash
-agent-network run --hub http://YOUR_IP:9200 --alias SDK马
+anet run --hub http://YOUR_IP:9200 --alias SDK马
 ```
 
 SSE 长连接监听任务，收到后自动回复。可配 `--handler script.ts` 自定义处理逻辑。
@@ -129,7 +129,7 @@ hub.on('task', async (msg) => {
 ## 架构
 
 ```
-           agent-network server (:9200)
+           anet server (:9200)
                     │
     ┌───────────────┼───────────────┐
     │               │               │
