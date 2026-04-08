@@ -95,9 +95,16 @@ COMMHUB_TOKEN=your-secret-token
 EOF
 ```
 
-### 3c. 创建 .mcp.json
+### 3c. 安装 Channel 插件
 
-在 `~/.claude/.mcp.json`（全局生效）或项目目录 `.mcp.json` 中写入：
+```bash
+# 将 Channel 插件复制到 Claude Code 的 channels 目录
+cp channel/server.ts ~/.claude/channels/commhub/server.ts
+```
+
+### 3d. 配置全局 MCP 工具
+
+在 `~/.claude.json`（全局配置）中添加 CommHub MCP Server，提供工具层（send_task/reply/report_status 等）：
 
 ```json
 {
@@ -105,18 +112,24 @@ EOF
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": ["run", "/absolute/path/to/agent-comm-hub/channel/commhub-channel.ts"]
+      "args": ["run", "/absolute/path/to/agent-comm-hub/channel/server.ts"]
     }
   }
 }
 ```
 
+> **警告**：不要在项目目录的 `.mcp.json` 里配 commhub，会和 `server:commhub` Channel 冲突（重复加载同一个进程）。CommHub 必须配在全局 `~/.claude.json` 中。
+
+**两层缺一不可**：
+- **工具层**：`~/.claude.json` 的 mcpServers 提供 CommHub MCP 工具（send_task/reply/report_status/get_inbox 等）
+- **推送层**：`--dangerously-load-development-channels server:commhub` 提供 SSE 实时推送权限，让 CommHub 消息直接注入对话
+
 **重点**：
 - `type` 必须是 `"stdio"`，不能用 `"url"` 形式（http 类型不启动子进程，Channel 无法工作）
 - `args` 中的路径必须是**绝对路径**
-- `COMMHUB_URL` 和 `COMMHUB_TOKEN` 不需要写在 .mcp.json 里，Channel 会自动从 `~/.claude/channels/commhub/.env` 读取
+- `COMMHUB_URL` 和 `COMMHUB_TOKEN` 不需要写在 MCP 配置里，Channel 会自动从 `~/.claude/channels/commhub/.env` 读取
 
-### 3d. 设置项目别名（可选）
+### 3e. 设置项目别名（可选）
 
 如果需要给特定项目设置固定的 session 别名：
 
@@ -142,7 +155,7 @@ claude --dangerously-skip-permissions \
        --dangerously-load-development-channels server:commhub
 ```
 
-**`server:commhub` 的含义**：从 `.mcp.json` 中查找名为 `commhub` 的 MCP Server 定义，以 Channel (stdio) 模式启动。
+**`server:commhub` 的含义**：从 `~/.claude/channels/commhub/` 目录查找 `server.ts` 并以 Channel 模式启动，赋予 SSE 实时推送权限。
 
 ### 同目录多 session
 
@@ -182,12 +195,12 @@ curl http://YOUR_COMMHUB_IP:9200/health | jq
 curl -X POST http://YOUR_COMMHUB_IP:9200/api/task \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-secret-token" \
-  -d '{"session_name":"your-alias","task":"报告当前状态","priority":"normal"}'
+  -d '{"alias":"your-alias","task":"报告当前状态","priority":"normal"}'
 ```
 
 Agent 对话中应该立即收到 `<channel source="commhub" ...>` 消息。
 
-> **注**：REST API 中的 `session_name` 和 Channel 环境变量中的 `COMMHUB_ALIAS` 指的是同一个概念——CommHub 中的 session 标识。
+> **注**：REST API 中的 `alias` 和 Channel 环境变量中的 `COMMHUB_ALIAS` 指的是同一个概念——CommHub 中的 session 标识。
 
 ### 方式 B：通过 Hub Session 发任务
 
@@ -206,19 +219,22 @@ Agent 可以用 `commhub_reply` 回报任务状态，或通过 MCP Tool 的 `sen
 
 ### Channel 模式 vs MCP Tool 模式怎么选？
 
-| 维度 | MCP Tool | Channel 插件 |
+| 维度 | 方式 A：MCP Tool | 方式 B：Channel + MCP Tool |
 |------|----------|-------------|
-| 配置类型 | `"url": "http://..."` | `"type": "stdio"` |
-| 部署 | 只需配 URL | 需要安装 Channel + .mcp.json |
+| 配置类型 | `"url": "http://..."` | `"type": "stdio"` + Channel 插件 |
+| 部署 | 只需配 URL | 需要安装 Channel 插件 + ~/.claude.json |
 | 任务接收 | Agent 调 `get_inbox` 主动拉取 | SSE 秒推到对话 |
 | 延迟 | 取决于轮询频率 | < 1 秒 |
-| 适用 | Codex、简单场景 | Claude Code 推荐 |
+| 适用 | Codex、OpenCode、简单场景 | Claude Code（推荐） |
+| MCP Server 名 | `commhub-api`（避免冲突） | `commhub` |
 
 ### Channel 连不上怎么排查？
 
 1. 检查 stderr 日志（Channel 所有日志输出到 stderr）
-2. 确认 `.mcp.json` 中 `type` 是 `"stdio"`（不是 http）
-3. 确认 `args` 中的路径是绝对路径且文件存在
+2. 确认 `~/.claude.json` 中 `type` 是 `"stdio"`（不是 http）
+3. 确认 `args` 中的路径是绝对路径且文件存在（server.ts）
+4. 确认 `~/.claude/channels/commhub/server.ts` 存在（Channel 插件）
+5. 确认项目目录的 `.mcp.json` 里**没有**配 commhub（会冲突）
 4. 确认 CommHub Server 在运行：`curl http://YOUR_IP:9200/health`
 5. 确认 `~/.claude/channels/commhub/.env` 中的 `COMMHUB_URL` 正确
 
@@ -249,36 +265,49 @@ COMMHUB_URL=http://YOUR_COMMHUB_IP:9200
 COMMHUB_TOKEN=my-secret-token-123
 ```
 
-### ~/.claude/.mcp.json（全局 Channel 配置）
+### ~/.claude.json（全局 MCP 工具配置）
 ```json
 {
   "mcpServers": {
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": ["run", "/home/vansin/agent-comm-hub/channel/commhub-channel.ts"]
+      "args": ["run", "/home/vansin/agent-comm-hub/channel/server.ts"]
     }
   }
 }
 ```
 
-### ~/.claude/settings.json（全局 MCP Tool 配置，与 Channel 二选一）
+### ~/.claude/channels/commhub/server.ts（Channel 插件）
+```bash
+# 从仓库复制
+cp agent-comm-hub/channel/server.ts ~/.claude/channels/commhub/server.ts
+```
+
+### 方式 A vs 方式 B（互斥，不能同时配）
+
+| | 方式 A：MCP Tool（简单） | 方式 B：Channel + MCP Tool（推荐） |
+|---|---|---|
+| 配置 | `~/.claude.json` 加 URL 类型 mcpServer | `~/.claude.json` 加 stdio 类型 + Channel 插件 |
+| 推送 | ❌ 需要轮询 get_inbox | ✅ SSE 实时推送到对话 |
+| 适用 | Codex、OpenCode 等无 Channel 的载体 | Claude Code（推荐） |
+| 名称冲突 | 用 `commhub-api` 作为 mcpServer 名 | 用 `commhub` 作为 mcpServer 名 |
+
+> **警告**：方式 A 的 MCP Server 如果也叫 `commhub`，会和方式 B 的 `server:commhub` Channel 冲突。如果两者都需要，方式 A 改名为 `commhub-api`。
+
+### 方式 A 配置（Codex/OpenCode 等无 Channel 载体）
 ```json
 {
   "mcpServers": {
-    "commhub": {
+    "commhub-api": {
       "url": "http://YOUR_COMMHUB_IP:9200/mcp?token=my-secret-token-123"
     }
   }
 }
 ```
 
-### 启动命令
+### 方式 B 启动命令（Claude Code 推荐）
 ```bash
-# Channel 模式（推荐）
 claude --dangerously-skip-permissions \
        --dangerously-load-development-channels server:commhub
-
-# 或者只用 MCP Tool 模式（无需 Channel 配置）
-claude --dangerously-skip-permissions
 ```

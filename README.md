@@ -14,16 +14,18 @@
 
 ## 快速开始
 
-### 方式 A：MCP Tool 接入（最简单）
+### 方式 A：MCP Tool 接入（最简单，无推送）
 
 ```bash
 # 1. 部署 CommHub（5 分钟）
 cd server && bun install && bun run start
 
 # 2. 每个 Agent 加一行配置即可连上
-# ~/.claude/settings.json
-{ "mcpServers": { "commhub": { "url": "http://YOUR_IP:9200/mcp" } } }
+# ~/.claude/settings.json（注意用 commhub-api 避免和 Channel 冲突）
+{ "mcpServers": { "commhub-api": { "url": "http://YOUR_IP:9200/mcp" } } }
 ```
+
+> **注意**：方式 A 和方式 B 的 MCP Server 名不能都叫 `commhub`。如果同时使用两种方式，方式 A 改名为 `commhub-api`。方式 A 只提供工具，不提供 SSE 推送——适合 Codex、OpenCode 等无 Channel 的载体。
 
 ### 方式 B：Channel 插件接入（实时推送，推荐）
 
@@ -336,24 +338,27 @@ channel/
 cd channel && bun install
 ```
 
-### 配置
+### 配置（两步）
 
-在项目目录或 `~/.claude/` 下创建 `.mcp.json`：
+**第一步：安装 Channel 插件**
+```bash
+cp channel/server.ts ~/.claude/channels/commhub/server.ts
+```
 
+**第二步：配全局 MCP 工具**（`~/.claude.json`）
 ```json
 {
   "mcpServers": {
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": ["run", "/absolute/path/to/agent-comm-hub/channel/commhub-channel.ts"],
-      "env": {
-        "COMMHUB_URL": "http://YOUR_IP:9200"
-      }
+      "args": ["run", "/absolute/path/to/agent-comm-hub/channel/server.ts"]
     }
   }
 }
 ```
+
+> **警告**：不要在项目 `.mcp.json` 里配 commhub，会和 Channel 冲突。MCP 工具层配在全局 `~/.claude.json`，推送层由 Channel 插件提供，两者缺一不可。
 
 ### 启动
 
