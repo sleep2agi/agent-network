@@ -59,7 +59,8 @@ anet init profile <id> [options]   # → .anet/profiles/<id>.json
 
 ```
 ~/.anet/config.json                  全局（hub URL）
-{workpath}/.anet/profiles/cmd.json   项目 profile
+{workpath}/.mcp.json                 MCP server 配置（commhub stdio）
+{workpath}/.anet/profiles/cmd.json   启动 profile
 ```
 
 #### anet init
@@ -76,7 +77,7 @@ anet init
 
 #### anet init project
 
-下载 Channel 插件 + 安装依赖 + 配 `~/.claude.json` + 写 .env。
+下载 Channel 插件 + 安装依赖 + 写 `.mcp.json`（commhub stdio）+ 写 .env。
 
 ```bash
 cd ~/my-project
@@ -190,6 +191,7 @@ const { CommHub } = require('@sleep2agi/agent-network');
 
 | 版本 | 变更 |
 |------|------|
+| 0.0.7 | init project 改写 .mcp.json（不写 ~/.claude.json），避免全局污染 |
 | 0.0.6 | 三级 init（全局/项目/profile），`anet ls` 简化为当前目录 |
 | 0.0.5 | `anet ls` 显示本地 sessions + CommHub 网络状态 |
 | 0.0.4 | CLI 瘦身 580KB→13KB，Node.js 兼容，profile 系统 |

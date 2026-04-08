@@ -188,17 +188,17 @@ async function initProject() {
   }
   console.log(`CommHub URL: ${hub}`);
 
-  // 4. ~/.claude.json mcpServers
-  const claudeJson = join(home, ".claude.json");
-  let cc: any = {};
-  if (existsSync(claudeJson)) try { cc = JSON.parse(readFileSync(claudeJson, "utf-8")); } catch {}
-  if (!cc.mcpServers?.commhub) {
-    cc.mcpServers = cc.mcpServers || {};
-    cc.mcpServers.commhub = { type: "stdio", command: "bun", args: ["run", serverTs] };
-    writeFileSync(claudeJson, JSON.stringify(cc, null, 2) + "\n");
-    console.log(`MCP config: ${claudeJson}`);
+  // 4. 项目 .mcp.json（Claude Code 从这里读 MCP server 配置）
+  const mcpJsonPath = join(process.cwd(), ".mcp.json");
+  let mcpConfig: any = {};
+  if (existsSync(mcpJsonPath)) try { mcpConfig = JSON.parse(readFileSync(mcpJsonPath, "utf-8")); } catch {}
+  if (!mcpConfig.mcpServers?.commhub) {
+    mcpConfig.mcpServers = mcpConfig.mcpServers || {};
+    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [serverTs] };
+    writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+    console.log(`.mcp.json: commhub added`);
   } else {
-    console.log("MCP config: already set");
+    console.log(`.mcp.json: commhub already set`);
   }
 
   console.log(`\n✅ Project ready. Next: anet init profile <id> --alias <名字> --channel server:commhub`);
