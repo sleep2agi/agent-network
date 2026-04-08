@@ -109,12 +109,13 @@ async function initGlobal() {
   let hub = opts.hub;
 
   if (!hub) {
-    // Simple prompt
     process.stdout.write("CommHub URL (e.g. http://YOUR_IP:9200): ");
     hub = await new Promise<string>(resolve => {
-      let buf = "";
       process.stdin.setEncoding("utf-8");
-      process.stdin.once("data", (d) => { resolve(d.toString().trim()); });
+      process.stdin.once("data", (d) => {
+        process.stdin.unref();
+        resolve(d.toString().trim());
+      });
     });
   }
 
