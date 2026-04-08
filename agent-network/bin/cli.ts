@@ -153,30 +153,27 @@ async function initProject() {
   const anetDir = join(process.cwd(), ".anet");
   mkdirSync(anetDir, { recursive: true });
 
-  // 1. Copy server.ts from npm package
+  // 1. Write node-server.ts
   const serverTs = join(anetDir, "node-server.ts");
   if (!existsSync(serverTs)) {
-    // Find node-server.ts bundled in the npm package
-    // Resolve from the actual script location at runtime
-    const scriptDir = new URL(".", import.meta.url).pathname;
-    const bundledPath = join(scriptDir, "..", "..", "src", "node-server.ts");
-    if (existsSync(bundledPath)) {
-      const { copyFileSync } = await import("fs");
-      copyFileSync(bundledPath, serverTs);
-      console.log(`  ✅ .anet/node-server.ts (from npm package)`);
-    } else {
-      // Fallback: try download
-      try {
-        const res = await fetch("https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/commhub-channel.ts");
-        if (res.ok) {
-          writeFileSync(serverTs, await res.text());
-          console.log(`  ✅ .anet/node-server.ts (downloaded)`);
-        } else {
-          console.log(`  ❌ Cannot find channel plugin. Copy manually from agent-comm-hub/channel/commhub-channel.ts`);
-        }
-      } catch {
-        console.log(`  ❌ Cannot find channel plugin. Copy manually from agent-comm-hub/channel/commhub-channel.ts`);
+    // Try multiple paths to find node-server.ts
+    const candidates = [
+      join(new URL(".", import.meta.url).pathname, "..", "..", "src", "node-server.ts"),
+      join(new URL(".", import.meta.url).pathname, "..", "src", "node-server.ts"),
+      join(process.argv[1], "..", "..", "src", "node-server.ts"),
+    ];
+    let found = false;
+    for (const p of candidates) {
+      if (existsSync(p)) {
+        writeFileSync(serverTs, readFileSync(p, "utf-8"));
+        console.log(`  ✅ .anet/node-server.ts`);
+        found = true;
+        break;
       }
+    }
+    if (!found) {
+      console.log(`  ❌ Cannot find node-server.ts`);
+      console.log(`  Fix: cp $(npm root -g)/@sleep2agi/agent-network/src/node-server.ts .anet/node-server.ts`);
     }
   } else {
     console.log("  Channel plugin: exists");
