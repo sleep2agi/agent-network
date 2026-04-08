@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * @sleep2agi/agent-network CLI
  *
@@ -88,7 +88,21 @@ async function serverCommand() {
   if (opts.token || opts.t || config.token) process.env.COMMHUB_AUTH_TOKEN = opts.token || opts.t || config.token;
   if (opts.db) process.env.COMMHUB_DB = opts.db;
   if (opts.cors) process.env.COMMHUB_CORS_ORIGINS = opts.cors;
-  await import("../../server/src/index.js");
+
+  // Server 需要 Bun runtime + @sleep2agi/commhub-server
+  try {
+    await import("@sleep2agi/commhub-server");
+  } catch {
+    // Fallback: 在仓库内直接运行
+    try {
+      await import("../../server/src/index.js");
+    } catch {
+      console.error("Error: CommHub server not found.");
+      console.error("Install: npm install @sleep2agi/commhub-server");
+      console.error("Or run from the agent-comm-hub repo: cd server && bun run start");
+      process.exit(1);
+    }
+  }
 }
 
 async function setupCommand() {

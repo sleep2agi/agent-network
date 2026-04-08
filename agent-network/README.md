@@ -1,55 +1,85 @@
-# @sleep2agi/agent-network (anet)
+# @sleep2agi/agent-network
 
-AI Agent 通信网络 — Server + Client + Setup，一个包搞定。
+AI Agent 通信网络 — 让 AI Agent 互相发消息、派任务、协作。
+
+Server + Client + CLI，一个包搞定。
 
 ## 安装
 
 ```bash
-npm install @sleep2agi/agent-network
-# 或全局安装 CLI
+# 全局安装（提供 anet 命令）
 npm install -g @sleep2agi/agent-network
+
+# 或作为项目依赖（使用 SDK）
+npm install @sleep2agi/agent-network
 ```
+
+## 快速开始
+
+### 1. 启动 Server（中心节点，需要 Bun）
+
+```bash
+# 从源码启动（推荐）
+git clone https://github.com/sleep2agi/agent-comm-hub.git
+cd agent-comm-hub/server && bun install && bun run start
+# CommHub 运行在 http://localhost:9200
+```
+
+### 2. 配置 Agent 加入网络
+
+```bash
+cd /path/to/your/project
+anet setup --hub http://YOUR_COMMHUB_IP:9200 --alias 我的Agent
+```
+
+自动完成：
+- 测试连接
+- 写入全局配置 `~/.anet/config.json`（hub URL）
+- 写入项目配置 `.anet/config.json`（alias）
+- 输出对应启动命令
+
+### 3. 运行 Agent
+
+```bash
+# 自动从 .anet/config.json 读取配置
+anet run
+
+# 或显式指定
+anet run --alias 我的Agent --hub http://YOUR_COMMHUB_IP:9200
+```
+
+Agent 启动后：自动注册 → SSE 长连接监听 → 收到任务自动回复 → 3 分钟心跳。
 
 ## CLI 命令
 
-### 启动 Server
+```
+anet setup     配置 Agent 加入网络
+anet run       运行独立 Agent（SSE 实时监听）
+anet server    启动 CommHub Server（需要 Bun + @sleep2agi/commhub-server）
+anet --help    帮助
+```
+
+### anet setup
 
 ```bash
-anet server --port 9200 --token my-secret
+anet setup --hub <url> --alias <name> [--type claude-code|sdk]
 ```
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--port, -p` | 监听端口 | 9200 |
-| `--token, -t` | Auth token | 无（开放模式） |
-| `--db` | SQLite 数据库路径 | ~/.commhub/commhub.db |
-| `--cors` | CORS origins（逗号分隔） | localhost |
+| `--hub` | CommHub Server URL | 从 ~/.anet/config.json 读 |
+| `--alias` | Agent 别名 | 必填 |
+| `--type` | claude-code 或 sdk | claude-code |
 
-### 配置新 Agent
-
-```bash
-anet setup --hub http://YOUR_IP:9200 --alias 开发马 --type claude-code
-```
-
-| 参数 | 说明 |
-|------|------|
-| `--hub` | CommHub Server URL |
-| `--alias` | Agent 别名 |
-| `--type` | claude-code / sdk / opencode |
-
-自动完成：测试连接 → 创建 Channel 目录 → 写 .env → 输出启动命令。
-
-### 运行独立 Agent
+### anet run
 
 ```bash
-anet run --hub http://YOUR_IP:9200 --alias SDK马
+anet run [--alias <name>] [--hub <url>] [--handler <script>]
 ```
 
-SSE 长连接监听任务，收到后自动回复。可配 `--handler script.ts` 自定义处理逻辑。
+参数自动从 `.anet/config.json` 读取，setup 过的项目直接 `anet run` 即可。
 
-## 代码引用
-
-### Client（加入网络）
+## SDK 代码引用
 
 ```typescript
 import { CommHub } from '@sleep2agi/agent-network';
@@ -60,8 +90,8 @@ const hub = new CommHub({
 });
 
 hub.on('task', async (msg) => {
-  console.log(`任务: ${msg.content}`);
-  await hub.send(msg.from_session, '完成！');
+  console.log(`来自 ${msg.from_session}: ${msg.content}`);
+  await hub.send(msg.from_session, '任务完成！');
 });
 ```
 
@@ -72,80 +102,54 @@ const hub = new CommHub({ url: 'http://YOUR_COMMHUB_IP:9200', alias: '我的Agen
 hub.on('task', (msg) => console.log(msg));
 ```
 
-### Client API
+### SDK API
 
 | 方法 | 说明 |
 |------|------|
 | `hub.send(alias, content, priority?)` | 发任务 |
 | `hub.message(alias, content)` | 发消息（无生命周期） |
-| `hub.reply(taskId, result, status?)` | 回复任务 |
+| `hub.reply(taskId, text, status?)` | 回复任务 |
 | `hub.status(state, extra?)` | 更新状态 |
 | `hub.broadcast(content, filter?)` | 广播 |
-| `hub.getAllStatus()` | 查看所有 session |
 | `hub.disconnect()` | 断开 |
 
-### Events
+### 事件
 
 | 事件 | 说明 |
 |------|------|
-| `task` | 收到任务/消息 |
+| `task` | 收到任务（已自动 ACK） |
 | `connected` | SSE 连接成功 |
-| `disconnected` | SSE 断开 |
+| `disconnected` | SSE 断开（自动重连） |
 | `error` | 错误 |
 
-### Server（编程启动）
+## 配置文件
 
-```typescript
-import { startServer } from '@sleep2agi/agent-network/server';
-await startServer({ port: 9200, token: 'my-secret' });
+优先级：环境变量 > 命令行参数 > 项目 `.anet/config.json` > 全局 `~/.anet/config.json`
+
+**全局** `~/.anet/config.json`：
+```json
+{ "hub": "http://YOUR_COMMHUB_IP:9200", "token": "your-token" }
 ```
 
-## 与 Claude Agent SDK 结合
-
-```typescript
-import { CommHub } from '@sleep2agi/agent-network';
-import { query } from '@anthropic-ai/claude-agent-sdk';
-
-const hub = new CommHub({ url: 'http://YOUR_COMMHUB_IP:9200', alias: 'AI助手' });
-
-hub.on('task', async (msg) => {
-  await hub.status('working', { task: msg.content.slice(0, 200) });
-  
-  let result = '';
-  for await (const event of query({
-    prompt: msg.content,
-    options: { allowedTools: ['Read', 'Edit', 'Bash'] },
-  })) {
-    if (event.type === 'result' && event.subtype === 'success') {
-      result = event.result;
-    }
-  }
-  
-  await hub.send(msg.from_session, result);
-  await hub.status('idle');
-});
+**项目** `.anet/config.json`：
+```json
+{ "alias": "我的Agent", "type": "claude-code" }
 ```
 
-## 架构
+## 运行时要求
 
-```
-           anet server (:9200)
-                    │
-    ┌───────────────┼───────────────┐
-    │               │               │
- Channel SSE    SSE Client     REST API
-    │               │               │
- Claude Code    SDK Agent      外部系统
- (推荐)         (编程)          (curl)
-```
+| 组件 | 运行时 |
+|------|--------|
+| anet setup / run / SDK | Node.js 18+ 或 Bun |
+| anet server | Bun 1.2+（bun:sqlite） |
 
-## 内部原理
+## 相关包
 
-- **SSE 长连接**：自动重连（指数退避 3s→60s）
-- **心跳**：每 3 分钟 report_status 防 offline
-- **MCP 协议**：Streamable HTTP，兼容 Claude Code / Codex / OpenCode
-- **SQLite WAL**：消息持久化，30+ 并发无压力
-- **零依赖**（client 端）：只用 Node.js 内置模块
+| 包 | 说明 |
+|---|------|
+| @sleep2agi/agent-network | 合并包（推荐） |
+| @sleep2agi/commhub-sdk | 仅客户端 SDK |
+| @sleep2agi/commhub-server | 仅服务端 |
 
 ## License
 
