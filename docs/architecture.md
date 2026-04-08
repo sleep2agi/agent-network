@@ -377,3 +377,124 @@ Agent                    CommHub Server              Hub/指挥室
 方式 C: OpenCode + Poller（兜底）
   Poller ←SSE→ CommHub → tmux send-keys → Agent
 ```
+
+---
+
+## 10. Web Dashboard（内置轻量 UI）
+
+### 设计原则
+
+- 纯 HTML + CSS + vanilla JS，零框架
+- 内嵌到 `anet server`，不需要额外部署
+- SSE 实时更新，不用 WebSocket
+- 一个 HTML 文件搞定
+
+### 访问方式
+
+```
+anet server --port 9200
+# Dashboard: http://YOUR_IP:9200/dashboard
+```
+
+### 页面功能
+
+**节点列表（主视图）**
+
+```
+┌─────────────────────────────────────────────┐
+│  Agent Network Dashboard         ● 17 online │
+├─────────────────────────────────────────────┤
+│                                             │
+│  🟢 指挥室      working   硅谷ECS   3s ago  │
+│  🟢 通信龙      idle      硅谷ECS   15s ago │
+│  🟢 开发马      working   硅谷ECS   2m ago  │
+│  🔵 大猫        idle      96GB      1m ago  │
+│  🔵 P站MiniMax马 idle     Paper     5m ago  │
+│  ⚪ VL牛        offline   A100      2h ago  │
+│                                             │
+│  [发任务]  [广播]  [刷新]                     │
+└─────────────────────────────────────────────┘
+```
+
+节点颜色：
+- 🟢 绿色：Channel SSE 连接（实时）
+- 🔵 蓝色：Poller 模式（近实时）
+- 🟡 黄色：最近有活动但无 SSE
+- ⚪ 灰色：offline
+
+**消息流（实时）**
+
+```
+┌─────────────────────────────────────────────┐
+│  Message Stream                    [暂停]    │
+├─────────────────────────────────────────────┤
+│  15:00:42  指挥室 → 通信龙: 计时测试        │
+│  15:00:59  通信龙 → 指挥室: 收到！延迟17s    │
+│  15:01:05  指挥室 → 大猫: SSE Poller测试     │
+│  15:01:06  [SSE] 大猫 收到推送               │
+└─────────────────────────────────────────────┘
+```
+
+通过 SSE `/events/dashboard` 订阅所有事件。
+
+**任务管理（简易）**
+
+- 发任务：选目标 alias + 输入内容 + 优先级 → POST /api/task
+- 广播：输入内容 → POST /api/broadcast
+
+### 实现方案
+
+Server 端新增一个路由：
+
+```typescript
+// GET /dashboard → 返回内嵌 HTML
+if (url.pathname === "/dashboard") {
+  return new Response(DASHBOARD_HTML, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+// GET /events/dashboard → SSE 推送所有事件（用于消息流）
+```
+
+HTML 内容作为模板字符串内嵌到 server 代码中（或从 `server/dashboard.html` 读取）。
+
+### HTML 结构（~200 行）
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Agent Network Dashboard</title>
+  <meta charset="utf-8">
+  <style>
+    /* 深色主题，等宽字体，紧凑布局 */
+    body { background: #1a1a2e; color: #e0e0e0; font-family: monospace; }
+    .node { padding: 8px; border-bottom: 1px solid #333; }
+    .online { border-left: 3px solid #22c55e; }
+    .polling { border-left: 3px solid #3b82f6; }
+    .offline { border-left: 3px solid #666; opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div id="nodes"></div>
+  <div id="stream"></div>
+  <script>
+    // 每 5 秒拉 /api/status 更新节点列表
+    // SSE 连接 /events/dashboard 实时显示消息流
+    // 发任务用 fetch POST /api/task
+  </script>
+</body>
+</html>
+```
+
+### 不做的事
+
+- 不做用户认证（复用 COMMHUB_AUTH_TOKEN，URL 带 token 参数）
+- 不做 session 管理（只读展示 + 发任务）
+- 不做历史查询（只显示最近 100 条）
+- 不做移动端适配（桌面浏览器即可）
+
+### 优先级
+
+Dashboard 是锦上添花，不阻塞核心功能。建议在 server/client/CLI 稳定后再实现。
