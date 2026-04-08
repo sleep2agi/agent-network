@@ -228,6 +228,94 @@ Agent 可以用 `commhub_reply` 回报任务状态，或通过 MCP Tool 的 `sen
 
 ---
 
+## 跨服务器接入（远程机器连 CommHub）
+
+> 以 P站（8.130.134.166）接入硅谷 CommHub（47.77.216.1:9200）为例。适用于任何远程 Linux/macOS 机器。
+
+### 前提
+
+CommHub Server 的 9200 端口需要对远程服务器 IP 开放（云服务器需配安全组/防火墙规则）。
+
+### 1. 安装 Channel 插件
+
+```bash
+# 在远程服务器上执行
+mkdir -p ~/.claude/channels/commhub
+
+# 方式 A：从 CommHub 所在机器 scp
+scp vansin@47.77.216.1:~/agent-comm-hub/channel/server.ts ~/.claude/channels/commhub/server.ts
+
+# 方式 B：从 GitHub 下载
+curl -sL https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts -o ~/.claude/channels/commhub/server.ts
+
+# 安装依赖（server.ts 同目录需要 node_modules）
+cd ~/.claude/channels/commhub && bun install
+```
+
+### 2. 配共享 .env（公网 IP，不是 localhost）
+
+```bash
+cat > ~/.claude/channels/commhub/.env << 'EOF'
+COMMHUB_URL=http://47.77.216.1:9200
+COMMHUB_TOKEN=your-secret-token
+EOF
+```
+
+### 3. 配项目别名
+
+```bash
+# 路径转换：/home/vansin/blueleap → -home-vansin-blueleap
+mkdir -p ~/.claude/channels/commhub/-home-vansin-blueleap
+echo 'COMMHUB_ALIAS=P站开发马' > ~/.claude/channels/commhub/-home-vansin-blueleap/.env
+```
+
+### 4. 全局 MCP 工具配置
+
+`~/.claude.json`：
+
+```json
+{
+  "mcpServers": {
+    "commhub": {
+      "type": "stdio",
+      "command": "bun",
+      "args": ["run", "/home/vansin/.claude/channels/commhub/server.ts"]
+    }
+  }
+}
+```
+
+### 5. 启动
+
+```bash
+cd /home/vansin/blueleap
+
+COMMHUB_ALIAS="P站开发马" claude --dangerously-skip-permissions \
+  --dangerously-load-development-channels server:commhub
+```
+
+### 6. 验证
+
+```bash
+# 在 CommHub 服务器上检查
+curl -s http://47.77.216.1:9200/health | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print('SSE connections:', d['sse_connections'])
+for k,v in d['sse_sessions'].items(): print(f'  {k}: {v}')
+"
+# 应该看到 P站开发马: 1
+```
+
+### 注意事项
+
+- **公网 IP**：.env 里的 `COMMHUB_URL` 必须用 CommHub 的公网 IP，不能用 localhost
+- **防火墙**：云服务器安全组需放行 9200 端口（建议只对已知 IP 开放）
+- **延迟**：跨服务器 SSE 推送延迟通常 < 1 秒（取决于网络）
+- **断线重连**：Channel 插件内置重连（3s→5s→10s→60s 指数退避）
+- **心跳**：每 3 分钟自动 report_status，防止被标记 offline
+
+---
+
 ## 常见问题
 
 ### Channel 模式 vs MCP Tool 模式怎么选？
