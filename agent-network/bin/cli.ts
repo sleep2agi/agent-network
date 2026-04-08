@@ -145,26 +145,26 @@ async function initProject() {
     process.exit(1);
   }
 
-  const channelDir = join(home, ".claude", "channels", "commhub");
-  mkdirSync(channelDir, { recursive: true });
+  const anetDir = join(process.cwd(), ".anet");
+  mkdirSync(anetDir, { recursive: true });
 
   // 1. Download server.ts
-  const serverTs = join(channelDir, "server.ts");
+  const serverTs = join(anetDir, "server.ts");
   if (!existsSync(serverTs)) {
     console.log("Downloading Channel plugin...");
     try {
       const res = await fetch("https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts");
-      if (res.ok) { writeFileSync(serverTs, await res.text()); console.log(`  ✅ ${serverTs}`); }
+      if (res.ok) { writeFileSync(serverTs, await res.text()); console.log(`  ✅ .anet/server.ts`); }
     } catch (e: any) {
       console.log(`  ❌ Failed: ${e.message}`);
-      console.log(`  Manual: curl -sL https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts -o ${serverTs}`);
+      console.log(`  Manual: curl -sL https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts -o .anet/server.ts`);
     }
   } else {
-    console.log(`Channel plugin: exists`);
+    console.log("Channel plugin: exists");
   }
 
   // 2. Download package.json + install
-  const pkgJson = join(channelDir, "package.json");
+  const pkgJson = join(anetDir, "package.json");
   if (!existsSync(pkgJson)) {
     try {
       const res = await fetch("https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/package.json");
@@ -172,31 +172,29 @@ async function initProject() {
         writeFileSync(pkgJson, await res.text());
         try {
           const { execSync } = await import("child_process");
-          execSync("bun install", { cwd: channelDir, stdio: "pipe" });
-          console.log("Dependencies installed");
+          execSync("bun install", { cwd: anetDir, stdio: "pipe" });
+          console.log("  ✅ Dependencies installed");
         } catch {
-          console.log("⚠️  Run: cd ~/.claude/channels/commhub && bun install");
+          console.log("  ⚠️  Run: cd .anet && bun install");
         }
       }
     } catch {}
   }
 
-  // 3. Channel .env
-  const envPath = join(channelDir, ".env");
-  if (!existsSync(envPath)) {
-    writeFileSync(envPath, `COMMHUB_URL=${hub}\n`);
-  }
+  // 3. .env（CommHub URL）
+  const envPath = join(anetDir, ".env");
+  writeFileSync(envPath, `COMMHUB_URL=${hub}\n`);
   console.log(`CommHub URL: ${hub}`);
 
-  // 4. 项目 .mcp.json（Claude Code 从这里读 MCP server 配置）
+  // 4. .mcp.json（指向 .anet/server.ts）
   const mcpJsonPath = join(process.cwd(), ".mcp.json");
   let mcpConfig: any = {};
   if (existsSync(mcpJsonPath)) try { mcpConfig = JSON.parse(readFileSync(mcpJsonPath, "utf-8")); } catch {}
   if (!mcpConfig.mcpServers?.commhub) {
     mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [serverTs] };
+    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/server.ts"] };
     writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
-    console.log(`.mcp.json: commhub added`);
+    console.log(`.mcp.json: commhub → .anet/server.ts`);
   } else {
     console.log(`.mcp.json: commhub already set`);
   }
