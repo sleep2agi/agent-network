@@ -14,6 +14,19 @@
 
 ## 快速开始
 
+> ---
+> **同名冲突警告**
+>
+> 同名 `commhub` 的 MCP Tool（http 类型）和 Channel 插件（stdio 类型）**不能同时配置**。Claude Code 按优先级只加载一个，另一个会被静默忽略。
+>
+> | 载体 | 正确配法 |
+> |------|---------|
+> | **Claude Code** | 全局 `~/.claude.json` stdio 类型 + 启动参数 `server:commhub`（方式 B） |
+> | **Codex / OpenCode** | MCP Tool http 类型，名称用 `commhub-api`（方式 A） |
+>
+> **铁律：项目 `.mcp.json` 里不要配 commhub**（会覆盖全局配置导致 Channel 失效）。
+> ---
+
 ### 方式 A：MCP Tool 接入（最简单，无推送）
 
 ```bash
