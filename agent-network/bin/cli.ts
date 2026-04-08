@@ -66,7 +66,7 @@ Setup:
   anet setup [options]
     --hub <url>           CommHub server URL (e.g. http://YOUR_IP:9200)
     --alias <name>        Agent alias (e.g. 我的Agent)
-    --type <type>         Agent type: claude-code | sdk | opencode (default: claude-code)
+    --type <type>         Agent type: claude-code | sdk (default: claude-code)
 
 Run:
   anet run [options]
@@ -181,20 +181,6 @@ hub.on('task', async (msg) => {
   console.log('Task:', msg.content);
   await hub.send(msg.from_session, 'Done!');
 });
-`);
-  } else if (agentType === "opencode") {
-    console.log(`
-✅ OpenCode setup:
-
-1. Config (opencode.json):
-{
-  "mcp": {
-    "commhub": { "type": "remote", "url": "${hubUrl}/mcp" }
-  }
-}
-
-2. Start: ~/opencode-v1
-3. SSE Poller: commhub-sse-poller.sh --alias ${alias} --tmux <tmux-session> --url ${hubUrl}
 `);
   }
 }

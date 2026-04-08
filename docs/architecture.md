@@ -74,7 +74,7 @@ agent-network/
 | 字段 | 必需 | 说明 |
 |------|------|------|
 | alias | ✅ | Agent 别名 |
-| type | | claude-code / sdk / opencode |
+| type | | claude-code / sdk |
 | hub | | 覆盖全局 hub（跨网络场景） |
 
 ---
@@ -113,7 +113,7 @@ anet server [--port 9200] [--token xxx] [--db path] [--cors origins]
 配置新 Agent 加入网络。
 
 ```bash
-anet setup --hub <url> --alias <name> [--type claude-code|sdk|opencode]
+anet setup --hub <url> --alias <name> [--type claude-code|sdk]
 ```
 
 **流程**：
@@ -127,7 +127,6 @@ anet setup --hub <url> --alias <name> [--type claude-code|sdk|opencode]
 |------|---------|
 | claude-code | 创建 Channel 目录 + .env + 输出启动命令 |
 | sdk | 输出 SDK 代码模板 |
-| opencode | 输出 opencode.json + Poller 命令 |
 
 ### `anet run`
 
@@ -374,8 +373,8 @@ Agent                    CommHub Server              Hub/指挥室
 方式 B: SDK Agent（编程）
   Agent ←SSE Long→ CommHub    实时，代码控制
 
-方式 C: OpenCode + Poller（兜底）
-  Poller ←SSE→ CommHub → tmux send-keys → Agent
+方式 C: SDK Agent + anet run（编程/自动化）
+  Agent ←SSE Long→ CommHub    代码控制，自定义 handler
 ```
 
 ---

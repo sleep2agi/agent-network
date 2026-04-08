@@ -94,7 +94,7 @@ anet setup --hub <url> --alias <name> [--type <type>]
 |------|------|--------|------|
 | --hub | ✅（首次） | 从全局配置读 | CommHub Server URL |
 | --alias | ✅ | — | Agent 别名 |
-| --type | | claude-code | claude-code / sdk / opencode |
+| --type | | claude-code | claude-code / sdk |
 
 **setup 做的事**：
 
@@ -104,7 +104,6 @@ anet setup --hub <url> --alias <name> [--type <type>]
 4. 根据 type 配置对应载体：
    - **claude-code**：创建 Channel 目录 + .env + 输出启动命令
    - **sdk**：输出 SDK 代码示例
-   - **opencode**：输出 opencode.json 配置 + Poller 命令
 
 示例：
 ```bash
