@@ -58,14 +58,19 @@ anet init profile <id> [options]   # → .anet/profiles/<id>.json
 配置文件位置：
 
 ```
-~/.anet/config.json                  全局（hub URL）
-{workpath}/.mcp.json                 MCP server 配置（commhub stdio）
+~/.anet/config.json                  全局（hub URL，一次性）
+{workpath}/.anet/server.ts           Channel 插件
+{workpath}/.anet/package.json        依赖声明
+{workpath}/.anet/.env                COMMHUB_URL
 {workpath}/.anet/profiles/cmd.json   启动 profile
+{workpath}/.mcp.json                 MCP 配置（commhub → .anet/server.ts）
 ```
+
+全部在项目目录内，不碰全局 `~/.claude/`。
 
 #### anet init
 
-交互式输入 hub URL，测试连接，保存到 `~/.anet/config.json`。
+配 hub URL（全局，一次性）：
 
 ```bash
 anet init
@@ -77,11 +82,15 @@ anet init
 
 #### anet init project
 
-下载 Channel 插件 + 安装依赖 + 写 `.mcp.json`（commhub stdio）+ 写 .env。
+下载 Channel 插件到 `.anet/` + 安装依赖 + 写 `.mcp.json` + 写 `.env`：
 
 ```bash
 cd ~/my-project
 anet init project
+# ✅ .anet/server.ts
+# ✅ Dependencies installed
+# CommHub URL: http://YOUR_IP:9200
+# .mcp.json: commhub → .anet/server.ts
 ```
 
 #### anet init profile
@@ -191,7 +200,8 @@ const { CommHub } = require('@sleep2agi/agent-network');
 
 | 版本 | 变更 |
 |------|------|
-| 0.0.7 | init project 改写 .mcp.json（不写 ~/.claude.json），避免全局污染 |
+| 0.0.8 | init project 所有文件放 .anet/（不碰全局 ~/.claude/） |
+| 0.0.7 | init project 改写 .mcp.json（不写 ~/.claude.json） |
 | 0.0.6 | 三级 init（全局/项目/profile），`anet ls` 简化为当前目录 |
 | 0.0.5 | `anet ls` 显示本地 sessions + CommHub 网络状态 |
 | 0.0.4 | CLI 瘦身 580KB→13KB，Node.js 兼容，profile 系统 |
