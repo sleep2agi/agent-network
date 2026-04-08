@@ -1,8 +1,0 @@
-{
-  "name": "commhub-codex-bridge",
-  "version": "0.1.0",
-  "type": "module",
-  "scripts": {
-    "start": "bun run codex-bridge.ts"
-  }
-}
