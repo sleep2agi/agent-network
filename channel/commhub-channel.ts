@@ -420,6 +420,20 @@ async function main() {
     .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
     .catch((e) => log(`warning: could not register: ${e}`));
 
+  // Heartbeat: report_status every 3 minutes to prevent offline timeout
+  setInterval(() => {
+    callCommHub("report_status", {
+      resume_id: RESUME_ID,
+      alias: ALIAS,
+      status: "idle",
+      server: hostname(),
+      hostname: hostname(),
+      agent: "claude-code",
+      project_dir: process.cwd(),
+      tmux_name: TMUX_NAME || undefined,
+    }).catch((e) => log(`heartbeat failed: ${e}`));
+  }, 3 * 60 * 1000);
+
   log("ready — waiting for events");
 }
 
