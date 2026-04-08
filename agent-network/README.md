@@ -39,7 +39,12 @@ COMMHUB_ALIAS="指挥室" TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent
   --teammate-mode in-process --resume 98039093-...
 ```
 
-Profile 把这些参数存到 JSON，以后只需：**`anet start commander`**
+Profile 把这些参数存到 JSON，以后只需：
+
+```bash
+anet start 指挥室     # 新建 session
+anet resume 指挥室    # 恢复上次 session
+```
 
 同一目录可以有多个 profile（指挥室、通信龙、SDK马）。
 
@@ -122,12 +127,13 @@ anet init profile commander --alias 指挥室 \
 anet init profile worker --alias 开发马 --channel server:commhub
 ```
 
-### anet start
+### anet start / resume
 
 ```bash
-anet start commander    # 启动指定 profile
+anet start 指挥室       # 新建 session
+anet resume 指挥室      # 恢复上次 session（按名字搜索）
 anet start              # 列出所有 profile
-anet commander          # 快捷方式（等于 anet start commander）
+anet 指挥室             # 快捷方式（等于 anet start 指挥室）
 ```
 
 ### anet ls
@@ -200,6 +206,7 @@ const { CommHub } = require('@sleep2agi/agent-network');
 
 | 版本 | 变更 |
 |------|------|
+| 0.0.9 | start/resume 分离，resume 按名字搜索恢复 session |
 | 0.0.8 | init project 所有文件放 .anet/（不碰全局 ~/.claude/） |
 | 0.0.7 | init project 改写 .mcp.json（不写 ~/.claude.json） |
 | 0.0.6 | 三级 init（全局/项目/profile），`anet ls` 简化为当前目录 |

@@ -86,16 +86,18 @@ anet — AI Agent Network CLI
   anet init                     Configure hub URL (global, once)
   anet init project             Setup current project (channel plugin + config)
   anet init profile <id>        Create a launch profile
-  anet start <id>               Start Claude Code with profile
-  anet ls                       Show sessions + network status
+  anet start <id>               New session with profile
+  anet resume <id>              Resume last session with profile
+  anet ls                       Show profiles + sessions + network
   anet run                      Run standalone SSE agent
   anet --help                   This help
 
 Quick start:
   anet init
   anet init project
-  anet init profile cmd --alias 指挥室 --channel server:commhub
-  anet start cmd
+  anet init profile 指挥室 --alias 指挥室 --channel server:commhub
+  anet start 指挥室             # 新建
+  anet resume 指挥室            # 下次恢复
 `);
 }
 
@@ -256,26 +258,9 @@ function initProfile() {
   console.log(`\nStart: anet start ${id}`);
 }
 
-// ── start ──
+// ── launch helper (shared by start + resume) ──
 
-function startCommand() {
-  const id = args[1];
-
-  if (!id) {
-    const ids = listProfileIds();
-    if (ids.length === 0) {
-      console.log("No profiles. Run: anet init profile <id> --alias <名字>");
-      return;
-    }
-    console.log("\nProfiles:\n");
-    for (const name of ids) {
-      const p = loadProfile(name);
-      console.log(`  ${name}${p?.name ? ` (${p.name})` : ""}  →  ${p?.alias}  [${p?.channels.join(", ")}]`);
-    }
-    console.log(`\nanet start <id>\n`);
-    return;
-  }
-
+function launchClaude(id: string, mode: "start" | "resume") {
   const profile = loadProfile(id);
   if (!profile) {
     console.error(`Profile "${id}" not found. Run: anet ls`);
@@ -299,15 +284,50 @@ function startCommand() {
     }
   }
   if (profile.flags.teammateMode) claudeArgs.push("--teammate-mode", profile.flags.teammateMode);
-  if (profile.resume) claudeArgs.push("--resume", profile.resume);
 
-  // Use -n to name the session
+  if (mode === "resume") {
+    // 按名字搜索恢复（Claude Code --resume 支持名字搜索）
+    claudeArgs.push("--resume", profile.name || profile.alias);
+  }
+
+  // -n 给 session 命名（新建和恢复都加，方便下次找）
   claudeArgs.push("-n", profile.name || profile.alias);
 
-  console.log(`[anet] Starting "${id}" (${profile.alias})...\n`);
+  const label = mode === "start" ? "Starting new" : "Resuming";
+  console.log(`[anet] ${label} "${id}" (${profile.alias})...\n`);
 
   const child = spawn("claude", claudeArgs, { env, stdio: "inherit", shell: true });
   child.on("exit", (code) => process.exit(code || 0));
+}
+
+// ── start (new session) ──
+
+function startCommand() {
+  const id = args[1];
+  if (!id) { showProfiles("start"); return; }
+  launchClaude(id, "start");
+}
+
+// ── resume (continue session) ──
+
+function resumeCommand() {
+  const id = args[1];
+  if (!id) { showProfiles("resume"); return; }
+  launchClaude(id, "resume");
+}
+
+function showProfiles(cmd: string) {
+  const ids = listProfileIds();
+  if (ids.length === 0) {
+    console.log("No profiles. Run: anet init profile <id> --alias <名字>");
+    return;
+  }
+  console.log("\nProfiles:\n");
+  for (const name of ids) {
+    const p = loadProfile(name);
+    console.log(`  ${name}${p?.name ? ` (${p.name})` : ""}  →  ${p?.alias}  [${p?.channels.join(", ")}]`);
+  }
+  console.log(`\nanet ${cmd} <id>\n`);
 }
 
 // ── ls ──
@@ -423,6 +443,7 @@ switch (command) {
     else initGlobal();
     break;
   case "start": startCommand(); break;
+  case "resume": resumeCommand(); break;
   case "ls": case "list": lsCommand(); break;
   case "run": runCommand(); break;
   case "--help": case "-h": case undefined: printHelp(); break;
