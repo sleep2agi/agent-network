@@ -1,10 +1,40 @@
 {
-  "name": "commhub-mcp-server",
-  "version": "0.1.0",
+  "name": "@sleep2agi/commhub-server",
+  "version": "0.4.1",
+  "description": "CommHub MCP Server — AI Agent communication hub with SSE push, MCP protocol, and REST API",
   "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "commhub-server": "bin/commhub.ts"
+  },
+  "files": [
+    "src",
+    "bin"
+  ],
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts"
+  },
+  "keywords": [
+    "commhub",
+    "mcp",
+    "agent",
+    "ai",
+    "sse",
+    "claude",
+    "orchestration",
+    "communication",
+    "hub"
+  ],
+  "author": "sleep2agi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sleep2agi/agent-comm-hub",
+    "directory": "server"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0"

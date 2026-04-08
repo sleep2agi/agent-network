@@ -43,7 +43,9 @@ const BroadcastSchema = z.object({
 });
 
 // ── HTTP Server (Bun native) ────────────────────────
-const CORS_ORIGINS = ["https://vansin.me", "http://localhost:3000", "http://localhost:3001"];
+const CORS_ORIGINS = process.env.COMMHUB_CORS_ORIGINS
+  ? process.env.COMMHUB_CORS_ORIGINS.split(",").map((s) => s.trim())
+  : ["http://localhost:3000", "http://localhost:3001"];
 
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") || "";
@@ -64,16 +66,26 @@ function withCors(req: Request, res: Response): Response {
   return res;
 }
 
+// ── WebSocket tmux sessions ────────────────────────
+const wsTmuxIntervals = new Map<object, ReturnType<typeof setInterval>>();
+
+
 Bun.serve({
   port: PORT,
   idleTimeout: 255, // max value: keep SSE connections alive (seconds)
 
-  async fetch(req) {
-    const url = new URL(req.url);
+  async fetch(req, server) {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
 
     // ── CORS preflight ──
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(req) });
+    }
+
+    // ── WebSocket: tmux terminal ──
+    const wsMatch = url.pathname.match(/^\/ws\/tmux\/([a-zA-Z0-9_-]+)$/);
+    if (wsMatch && server.upgrade(req, { data: { tmuxName: wsMatch[1] } })) {
+      return; // upgraded
     }
 
     // ── MCP Streamable HTTP endpoint ──
@@ -189,6 +201,54 @@ Bun.serve({
       return withCors(req, Response.json({ ok: true, recipients: targets.length, message_ids: ids }));
     }
 
+    // ── REST: tmux capture-pane ──
+    const tmuxCapture = url.pathname.match(/^\/api\/tmux\/([a-zA-Z0-9_-]+)$/);
+    if (tmuxCapture && req.method === "GET") {
+      const name = tmuxCapture[1];
+      const lines = Number(url.searchParams.get("lines")) || 30;
+      try {
+        const proc = Bun.spawn(["tmux", "capture-pane", "-t", name, "-p"], {
+          stdout: "pipe", stderr: "pipe",
+        });
+        const text = await new Response(proc.stdout).text();
+        const err = await new Response(proc.stderr).text();
+        const code = await proc.exited;
+        if (code !== 0) {
+          return withCors(req, Response.json({ ok: false, error: err.trim() || `exit ${code}` }, { status: 400 }));
+        }
+        const trimmed = text.split("\n").slice(-lines).join("\n");
+        return withCors(req, Response.json({ ok: true, tmux_name: name, lines: lines, output: trimmed }));
+      } catch (e) {
+        return withCors(req, Response.json({ ok: false, error: (e as Error).message }, { status: 500 }));
+      }
+    }
+
+    // ── REST: tmux send-keys ──
+    const tmuxSend = url.pathname.match(/^\/api\/tmux\/([a-zA-Z0-9_-]+)\/send$/);
+    if (tmuxSend && req.method === "POST") {
+      const name = tmuxSend[1];
+      let body: { text?: string; enter?: boolean };
+      try { body = await req.json(); } catch {
+        return withCors(req, Response.json({ error: "invalid JSON" }, { status: 400 }));
+      }
+      if (!body.text || typeof body.text !== "string") {
+        return withCors(req, Response.json({ error: "text is required" }, { status: 400 }));
+      }
+      const args = ["tmux", "send-keys", "-t", name, body.text];
+      if (body.enter !== false) args.push("Enter");
+      try {
+        const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+        const err = await new Response(proc.stderr).text();
+        const code = await proc.exited;
+        if (code !== 0) {
+          return withCors(req, Response.json({ ok: false, error: err.trim() || `exit ${code}` }, { status: 400 }));
+        }
+        return withCors(req, Response.json({ ok: true, sent: body.text }));
+      } catch (e) {
+        return withCors(req, Response.json({ ok: false, error: (e as Error).message }, { status: 500 }));
+      }
+    }
+
     // ── REST: recent completions ──
     if (url.pathname === "/api/completions") {
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 86400000).toISOString();
@@ -206,11 +266,94 @@ Endpoints:
   GET  /api/status        - All sessions ${AUTH_TOKEN ? "(auth required)" : ""}
   POST /api/task          - Send task via REST ${AUTH_TOKEN ? "(auth required)" : ""}
   GET  /api/completions   - Recent completions ${AUTH_TOKEN ? "(auth required)" : ""}
+  GET  /api/tmux/:name    - Capture tmux pane output ${AUTH_TOKEN ? "(auth required)" : ""}
+  POST /api/tmux/:name/send - Send keys to tmux ${AUTH_TOKEN ? "(auth required)" : ""}
 
 Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMHUB_AUTH_TOKEN)" : "disabled (set COMMHUB_AUTH_TOKEN to enable)"}
 `,
       { status: 200, headers: { "Content-Type": "text/plain" } }
     ));
+  },
+
+  // ── WebSocket handler for tmux terminal streaming ──
+  websocket: {
+    open(ws) {
+      const { tmuxName } = ws.data as { tmuxName: string };
+      console.log(`[ws] tmux terminal opened: ${tmuxName}`);
+      let lastOutput = "";
+
+      // Poll capture-pane every 200ms and send diffs
+      const interval = setInterval(async () => {
+        try {
+          const proc = Bun.spawn(["tmux", "capture-pane", "-t", tmuxName, "-p", "-e"], {
+            stdout: "pipe", stderr: "pipe",
+          });
+          const output = await new Response(proc.stdout).text();
+          const code = await proc.exited;
+          if (code !== 0) return;
+
+          if (output !== lastOutput) {
+            lastOutput = output;
+            ws.send(JSON.stringify({ type: "output", data: output }));
+          }
+        } catch { /* session gone */ }
+      }, 200);
+
+      wsTmuxIntervals.set(ws, interval);
+
+      // Send initial capture immediately
+      (async () => {
+        try {
+          const proc = Bun.spawn(["tmux", "capture-pane", "-t", tmuxName, "-p", "-e"], {
+            stdout: "pipe", stderr: "pipe",
+          });
+          const output = await new Response(proc.stdout).text();
+          const code = await proc.exited;
+          if (code === 0) {
+            lastOutput = output;
+            ws.send(JSON.stringify({ type: "output", data: output }));
+          } else {
+            const err = await new Response(proc.stderr).text();
+            ws.send(JSON.stringify({ type: "error", data: err.trim() || "tmux session not found" }));
+          }
+        } catch (e) {
+          ws.send(JSON.stringify({ type: "error", data: (e as Error).message }));
+        }
+      })();
+    },
+
+    async message(ws, message) {
+      const { tmuxName } = ws.data as { tmuxName: string };
+      try {
+        const msg = JSON.parse(typeof message === "string" ? message : new TextDecoder().decode(message));
+
+        if (msg.type === "input" && typeof msg.data === "string") {
+          // Send individual characters/sequences via send-keys
+          const proc = Bun.spawn(["tmux", "send-keys", "-t", tmuxName, "-l", msg.data], {
+            stdout: "pipe", stderr: "pipe",
+          });
+          await proc.exited;
+        } else if (msg.type === "key" && typeof msg.data === "string") {
+          // Send special key names (Enter, C-c, etc.)
+          const proc = Bun.spawn(["tmux", "send-keys", "-t", tmuxName, msg.data], {
+            stdout: "pipe", stderr: "pipe",
+          });
+          await proc.exited;
+        } else if (msg.type === "resize" && msg.cols && msg.rows) {
+          // Resize tmux pane
+          Bun.spawn(["tmux", "resize-window", "-t", tmuxName, "-x", String(msg.cols), "-y", String(msg.rows)], {
+            stdout: "pipe", stderr: "pipe",
+          });
+        }
+      } catch { /* ignore malformed messages */ }
+    },
+
+    close(ws) {
+      const { tmuxName } = ws.data as { tmuxName: string };
+      console.log(`[ws] tmux terminal closed: ${tmuxName}`);
+      const interval = wsTmuxIntervals.get(ws);
+      if (interval) { clearInterval(interval); wsTmuxIntervals.delete(ws); }
+    },
   },
 });
 
