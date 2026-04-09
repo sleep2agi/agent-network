@@ -1534,6 +1534,100 @@ Data: .anet/nodes/<node-id>/channels/<type>/
   }
 }
 
+// ── setup ──
+
+async function setupCommand() {
+  const { checkbox, confirm } = await import("@inquirer/prompts");
+
+  console.log("\n[anet] Setup — install dependencies for your runtimes\n");
+
+  // Detect installed packages
+  const versions = detectInstalledPackages();
+  console.log("Detected packages:");
+  console.log(`  anet             ${versions.anet.version ? `v${versions.anet.version}` : "not installed"}`);
+  console.log(`  agent-node       ${versions.agentNode.version ? `v${versions.agentNode.version} (global)` : "not installed"}`);
+  console.log(`  claude CLI       ${versions.claude.version ? `v${versions.claude.version}` : "not installed"}`);
+  console.log(`  codex CLI        ${versions.codex.version ? `v${versions.codex.version}` : "not installed"}`);
+  console.log(`  commhub-server   ${versions.commhubServer.version ? `v${versions.commhubServer.version}` : "not installed"}`);
+  console.log();
+
+  const choices = [
+    {
+      name: `claude-code-cli    — Claude Code CLI${versions.claude.version ? " ✅ 已安装" : " （需要安装 claude CLI）"}`,
+      value: "claude-code-cli",
+      checked: !!versions.claude.version,
+    },
+    {
+      name: `codex-sdk          — Codex SDK${versions.agentNode.version && versions.codex.version ? " ✅ 已就绪" : " （需要 agent-node + codex CLI）"}`,
+      value: "codex-sdk",
+      checked: false,
+    },
+    {
+      name: `claude-agent-sdk   — Claude Agent SDK / MiniMax / 书生${versions.agentNode.version ? " ✅ agent-node 已装" : " （需要 agent-node）"}`,
+      value: "claude-agent-sdk",
+      checked: false,
+    },
+    {
+      name: `commhub-server     — 自建 CommHub Server${versions.commhubServer.version ? " ✅ 已安装" : ""}`,
+      value: "commhub-server",
+      checked: false,
+    },
+  ];
+
+  const selected = await checkbox({
+    message: "选择需要的 runtime（空格选择，回车确认）",
+    choices,
+  });
+
+  // Determine what to install
+  const toInstall: string[] = [];
+  const needAgentNode = selected.includes("codex-sdk") || selected.includes("claude-agent-sdk");
+  if (needAgentNode && !versions.agentNode.version) {
+    toInstall.push("@sleep2agi/agent-node@latest");
+  }
+  if (selected.includes("codex-sdk") && !versions.codex.version) {
+    toInstall.push("@openai/codex@latest");
+  }
+  if (selected.includes("claude-code-cli") && !versions.claude.version) {
+    toInstall.push("@anthropic-ai/claude-code@latest");
+  }
+  if (selected.includes("commhub-server") && !versions.commhubServer.version) {
+    toInstall.push("@sleep2agi/commhub-server@latest");
+  }
+
+  if (toInstall.length === 0) {
+    console.log("\n✅ All dependencies already installed. Nothing to do.");
+    return;
+  }
+
+  console.log("\nWill install:");
+  for (const pkg of toInstall) console.log(`  npm install -g ${pkg}`);
+
+  const ok = await confirm({ message: "Proceed?", default: true });
+  if (!ok) { console.log("Cancelled."); return; }
+
+  console.log();
+  for (const pkg of toInstall) {
+    try {
+      console.log(`Installing ${pkg}...`);
+      execSync(`npm install -g ${pkg}`, { stdio: "inherit" });
+    } catch {
+      console.log(`  ⚠ Failed to install ${pkg}`);
+    }
+  }
+
+  // Post-install hints
+  console.log("\n✅ Done.\n");
+  if (selected.includes("claude-code-cli") && !versions.claude.version) {
+    console.log("⚠ claude CLI needs login: claude auth login");
+  }
+  if (selected.includes("codex-sdk") && !versions.codex.version) {
+    console.log("⚠ codex CLI needs login: codex auth login");
+  }
+  console.log("\nNext: anet init --hub http://YOUR_IP:9200");
+  console.log("Then: anet create <node-name>");
+}
+
 // ── upgrade ──
 
 function upgradeCommand() {
@@ -1564,6 +1658,7 @@ switch (command) {
   case "resume": resumeCommand(); break;
   case "import": importCommand(); break;
   case "channel": channelCommand(); break;
+  case "setup": setupCommand(); break;
   case "upgrade": upgradeCommand(); break;
   case "session": sessionCommand(); break;
   case "ls": case "list": lsCommand(); break;
