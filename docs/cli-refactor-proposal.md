@@ -88,6 +88,10 @@ anet channel add telegram <node-id> \
 
 不传参数会交互式询问。channel 只管 channel，不创建 node。
 
+`anet channel add telegram A站牛` 做两件事：
+1. 创建 `.anet/nodes/A站牛/channels/telegram/`（.env + access.json + inbox/）
+2. 更新 `.anet/nodes/A站牛/config.json` 的 `channels` 数组，加入 `"telegram"`
+
 ## 配置结构
 
 ### 全局
@@ -142,10 +146,20 @@ anet channel add telegram <node-id> \
 全局 ~/.anet/config.json              hub、token 兜底
 ```
 
-## anet start 内部行为
+## anet start / resume 内部行为
 
 ### claude-code-cli
 
+**anet start：**
+```bash
+claude --dangerously-skip-permissions \
+  --dangerously-load-development-channels server:commhub \
+  --channels plugin:telegram@claude-plugins-official \
+  --teammate-mode in-process \
+  -n <alias>
+```
+
+**anet resume：**（额外加 `--resume`）
 ```bash
 claude --dangerously-skip-permissions \
   --dangerously-load-development-channels server:commhub \
@@ -157,13 +171,24 @@ claude --dangerously-skip-permissions \
 
 ### codex-sdk / claude-agent-sdk
 
+**anet start：**
 ```bash
 npx @sleep2agi/agent-node \
   --config .anet/nodes/<node-id>/config.json \
   --alias <alias>
 ```
 
-agent-node 从 config.json 读取所有配置。CLI 参数可覆盖。
+**anet resume：**（额外加 `--session`）
+```bash
+npx @sleep2agi/agent-node \
+  --config .anet/nodes/<node-id>/config.json \
+  --alias <alias> \
+  --session <session-id>
+```
+
+agent-node 从 config.json 读取所有配置（包括 channels 数组）。`channels` 解释规则：
+- `"server:commhub"` → Claude Code channel 插件（仅 claude-code-cli）
+- `"telegram"` → 读 `<node-dir>/channels/telegram/` 启动 Telegram polling
 
 ## 废弃项
 
