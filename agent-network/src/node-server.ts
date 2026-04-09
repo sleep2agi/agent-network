@@ -88,7 +88,7 @@ log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}..
 // ── MCP Server with Channel capability ──────────────
 const mcp = new Server(
   {
-    name: "commhub-channel",
+    name: `commhub · ${ALIAS}`,
     version: "0.3.0",
   },
   {
