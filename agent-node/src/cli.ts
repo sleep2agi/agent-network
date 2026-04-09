@@ -230,19 +230,18 @@ async function processWithCodex(task: string, from: string): Promise<string> {
   if (!codexThread) {
     const codex = new Codex();
     const codexModel = MODEL || "gpt-5.4";
+    const codexOpts = {
+      skipGitRepoCheck: true,
+      approvalPolicy: "never" as const,
+      model: codexModel,
+      sandboxMode: "danger-full-access" as const,
+      modelReasoningEffort: "low" as const,
+    };
     if (SESSION_ID) {
-      codexThread = codex.resumeThread(SESSION_ID, {
-        skipGitRepoCheck: true,
-        approvalPolicy: "never" as const,
-        model: codexModel,
-      });
+      codexThread = codex.resumeThread(SESSION_ID, codexOpts);
       log(`codex resumed thread: ${SESSION_ID}`);
     } else {
-      codexThread = codex.startThread({
-        skipGitRepoCheck: true,
-        approvalPolicy: "never" as const,
-        model: codexModel,
-      });
+      codexThread = codex.startThread(codexOpts);
     }
   }
 
@@ -263,6 +262,8 @@ async function processWithCodex(task: string, from: string): Promise<string> {
       skipGitRepoCheck: true,
       approvalPolicy: "never" as const,
       model: MODEL || "gpt-5.4",
+      sandboxMode: "danger-full-access" as const,
+      modelReasoningEffort: "low" as const,
     });
     const turn = await codexThread.run(prompt);
     const dt = Date.now() - t0;
