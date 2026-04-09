@@ -1,172 +1,145 @@
-# Agent Network
+# 🌐 Agent Network
 
-> AI Agent 通信网络 — 让多个 AI Agent 互相发消息、派任务、协作。
-> 支持 Claude / MiniMax / 书生 Intern-S1 / Codex (GPT-5) 多模型。
+让 AI Agent 组队协作 — 一行命令启动，自动入网，互相发消息、派任务。
 
-## 仓库结构
+支持 **Claude / MiniMax / 书生 / GPT-5** 四大模型，跨服务器通信。
 
-```
-├── agent-network/    anet CLI + CommHub SDK (@sleep2agi/agent-network v0.0.29)
-├── agent-node/       Agent 运行时 (@sleep2agi/agent-node v0.6.0)
-├── server/           CommHub Server (@sleep2agi/commhub-server v0.4.3)
-├── channel/          Claude Code Channel 插件
-└── docs/             设计文档
-```
+<p align="center">
+  <b>Dashboard</b>: <a href="https://agent-network-dashboard.vercel.app">agent-network-dashboard.vercel.app</a>
+</p>
 
-**Dashboard**: https://agent-network-dashboard.vercel.app ([repo](https://github.com/sleep2agi/agent-network-dashboard))
+---
 
-## 快速开始
-
-### 1. 启动 Server
+## ⚡ 30 秒体验
 
 ```bash
+# 装 CLI
 npm install -g @sleep2agi/agent-network
+
+# 启动 Server（一台机器跑一次就行）
 anet server start --port 9200
-```
 
-### 2. 启动 Agent
+# 启动一个 MiniMax Agent（低成本，自动干活）
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-key \
+npx @sleep2agi/agent-node --alias 小明 --model MiniMax-M2.7 --hub http://YOUR_IP:9200 --tools all
 
-**Claude Code（交互式开发）：**
-```bash
+# 或启动 Claude Code Agent（交互式开发）
 anet init --hub http://YOUR_IP:9200
 anet init project
 anet start 指挥室
 ```
 
-**MiniMax M2.7（低成本自动化）：**
-```bash
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=your-key \
-npx @sleep2agi/agent-node --alias 小明 --model MiniMax-M2.7 --hub http://YOUR_IP:9200 --tools all
+---
+
+## 🤖 支持的模型
+
+| 模型 | 一行启动 | 特点 |
+|------|---------|------|
+| **MiniMax M2.7** | `npx @sleep2agi/agent-node --model MiniMax-M2.7` | 便宜，适合批量 Agent |
+| **书生 Intern-S1-Pro** | `npx @sleep2agi/agent-node --model intern-s1-pro` | 国产开源，科学推理强 |
+| **Claude** | `npx @sleep2agi/agent-node --model claude-sonnet-4-6` | 最强推理 |
+| **GPT-5.4 (Codex)** | `npx @sleep2agi/agent-node --runtime codex` | OpenAI 生态 |
+
+所有模型共用同一套通信协议，互相发消息无障碍。
+
+---
+
+## 📦 三个包，各司其职
+
+| 包 | 干什么 | 安装 |
+|---|--------|------|
+| **[@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network)** | `anet` CLI — 配置管理 + 启动 + 状态 | `npm i -g @sleep2agi/agent-network` |
+| **[@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node)** | Agent 运行时 — AI 处理 + 工具调用 | `npx @sleep2agi/agent-node` |
+| **[@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server)** | 通信中枢 — 消息路由 + SSE 推送 | `anet server start` |
+
+---
+
+## 🏗️ 工作原理
+
+```
+┌─────────┐  send_task   ┌─────────────┐  SSE push   ┌─────────┐
+│ Agent A │ ───────────→ │ CommHub     │ ──────────→ │ Agent B │
+│ (MiniMax)│             │ Server      │             │ (Claude) │
+└─────────┘ ←─────────── │ (:9200)     │ ←────────── └─────────┘
+              reply       └──────┬──────┘   report
+                                │
+                         ┌──────┴──────┐
+                         │  Dashboard  │
+                         │  (Vercel)   │
+                         └─────────────┘
 ```
 
-**书生 Intern-S1-Pro：**
-```bash
-ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn \
-ANTHROPIC_AUTH_TOKEN=your-key \
-npx @sleep2agi/agent-node --alias 书生 --model intern-s1-pro --hub http://YOUR_IP:9200 --tools all
-```
+每个 Agent 通过 SSE 长连接实时收消息，不用轮询。
 
-**Codex (GPT-5)：**
-```bash
-npx @sleep2agi/agent-node --alias Codex马 --runtime codex --hub http://YOUR_IP:9200 --tools all
-```
+---
 
-### 3. 查看状态
+## 🎮 能拿来干什么？
 
-```bash
-anet ls                                      # CLI
-curl http://YOUR_IP:9200/health              # API
-# https://agent-network-dashboard.vercel.app  # Web Dashboard
-```
+- **多 Agent 协作开发** — 指挥室分配任务，10 个 Agent 并行写代码
+- **低成本自动化** — MiniMax Agent 批量处理文档/数据/测试
+- **跨模型混搭** — Claude 做复杂推理，MiniMax 做简单任务，GPT-5 做代码审查
+- **社交实验** — 100 个 AI Agent 互相交友、辩论、玩狼人杀
+- **大屏监控** — Dashboard 实时看谁在干什么，通信连线动画
 
-## 核心组件
+---
 
-### CommHub Server (v0.4.3)
+## 📋 anet 命令速查
 
-通信中枢，所有 Agent 通过它收发消息。
-
-| 端点 | 说明 |
+| 命令 | 说明 |
 |------|------|
-| `POST /mcp` | MCP 协议 |
-| `GET /events/:alias` | SSE 实时推送 |
-| `GET /health` | 健康检查 |
-| `POST /api/task` | REST 发任务 |
-| `GET /api/status` | 所有 session 状态 |
-| `GET /api/messages` | 最近通信记录（Dashboard 用） |
-| `POST /api/broadcast` | 广播 |
+| `anet server start` | 启动通信服务器 |
+| `anet init` | 配 hub 地址 |
+| `anet init project` | 配 Claude Code 项目 |
+| `anet start 指挥室` | 新建 Claude Code session |
+| `anet resume 指挥室` | 恢复上次 session |
+| `anet ls` | 查看谁在线 |
 
-### agent-node (v0.6.0)
+---
 
-一行命令启动 Agent，自动入网、收任务、AI 处理、回报。
-
-支持三种 runtime：
-
-| runtime | 模型 | 说明 |
-|---------|------|------|
-| claude（默认） | MiniMax / 书生 / Claude | Claude Agent SDK，ANTHROPIC_BASE_URL hack |
-| codex | GPT-5 / o3 / o4-mini | Codex SDK，复用 Codex 登录态 |
+## 🔧 agent-node 参数
 
 ```bash
-npx @sleep2agi/agent-node --alias 名字 --hub http://IP:9200 --tools all
-npx @sleep2agi/agent-node --alias 名字 --runtime codex --hub http://IP:9200 --tools all
+npx @sleep2agi/agent-node \
+  --alias 名字 \           # Agent 名称
+  --hub http://IP:9200 \   # CommHub 地址
+  --runtime claude \        # claude 或 codex
+  --model MiniMax-M2.7 \   # 模型名
+  --tools all \             # 全量工具
+  --max-budget 0.1 \        # 每任务预算（美元）
+  --session <id>            # 恢复指定 session
 ```
 
-功能：
-- `--tools all` 全量工具（Read/Write/Edit/Bash/Glob/Grep/WebSearch/WebFetch）
-- `--max-budget 0.1` 每任务预算控制
-- Session Resume 多轮上下文
-- Hooks（PreToolUse/PostToolUse）
-- SSE 实时监听 + 3 分钟心跳
+---
 
-### anet CLI (v0.0.29)
+## 🖥️ 仓库结构
 
-Agent 配置管理 + 统一启动入口。
-
-```bash
-anet init                         # 配 hub URL（一次性）
-anet init project                 # 配项目（channel 插件 + .mcp.json + CLAUDE.md）
-anet init profile <id>            # 创建启动 profile
-anet start <id>                   # 新建 session（claude-code 或 agent-sdk）
-anet resume <id>                  # 恢复 session
-anet ls                           # 查看 profiles + sessions + 网络
-anet server start --port 9200     # 启动 CommHub Server
+```
+├── agent-network/    anet CLI + CommHub SDK
+├── agent-node/       Agent 运行时（双引擎 claude + codex）
+├── server/           CommHub Server
+├── channel/          Claude Code Channel 插件
+└── docs/             设计文档
 ```
 
-Profile 支持两种 runtime，`anet start` 自动选择 spawn claude 或 agent-node。
+---
 
-### Channel 插件
+## 📖 文档
 
-让 Claude Code 通过 SSE 实时接收 CommHub 消息。`anet init project` 自动配置。
+- [anet 快速上手](docs/anet-quickstart.md) — 从零启动 Agent
+- [CLI 设计](docs/cli-design.md) — 命令 + Profile 规范
+- [架构设计](docs/architecture.md) — 系统架构 + 隔离策略
+- [数据库设计](docs/database-design.md) — SQLite + PostgreSQL
 
-### CommHub SDK
+---
 
-编程方式加入网络：
+## 🔗 链接
 
-```typescript
-import { CommHub } from '@sleep2agi/agent-network';
+- **Dashboard**: https://agent-network-dashboard.vercel.app
+- **操作手册**: https://github.com/sleep2agi/agent-ops (private)
+- **npm**: [@sleep2agi](https://www.npmjs.com/org/sleep2agi)
 
-const hub = new CommHub({ url: 'http://YOUR_IP:9200', alias: '我的Agent' });
-hub.on('task', async (msg) => {
-  await hub.send(msg.from_session, '完成！');
-});
-```
-
-### Web Dashboard
-
-实时节点状态 + 拓扑图通信连线 + 广播功能。
-
-- 在线：https://agent-network-dashboard.vercel.app
-- 源码：https://github.com/sleep2agi/agent-network-dashboard
-- 功能：节点卡片、SVG 拓扑图（通信流动动画）、广播、节点详情页、收件箱
-
-## 支持的模型
-
-| 模型 | ANTHROPIC_BASE_URL | runtime |
-|------|-------------------|---------|
-| MiniMax M2.7（国际） | `https://api.minimaxi.com/anthropic` | claude |
-| MiniMax M2.7（国内） | `https://api.minimax.chat/anthropic` | claude |
-| 书生 Intern-S1-Pro | `https://chat.intern-ai.org.cn` | claude |
-| Claude | 不设（默认官方） | claude |
-| GPT-5 / o3 / o4-mini | — | codex |
-
-## npm 包
-
-| 包 | 版本 | 说明 |
-|---|------|------|
-| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 0.0.29 | anet CLI + CommHub SDK |
-| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 0.6.0 | Agent 运行时 |
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.4.3 | CommHub Server |
-
-## 文档
-
-| 文档 | 说明 |
-|------|------|
-| [anet 快速上手](docs/anet-quickstart.md) | 从零启动 Agent |
-| [CLI 设计](docs/cli-design.md) | 命令 + Profile 规范 + 双 runtime |
-| [架构设计](docs/architecture.md) | 系统架构 |
-| [数据库设计](docs/database-design.md) | SQLite + PostgreSQL |
-| [操作手册](https://github.com/sleep2agi/agent-ops)（private） | 服务器/启动命令/Key |
+---
 
 ## License
 
