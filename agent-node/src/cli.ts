@@ -247,7 +247,7 @@ async function processWithCodex(task: string, from: string): Promise<string> {
 
   const codexModelName = MODEL || "gpt-5.4";
   log(`[codex] model=${codexModelName} thread=${codexThread?.id || "new"}`);
-  const prompt = `你是 ${ALIAS}，收到来自 ${from} 的任务：\n\n${task}\n\n执行完后简要汇报结果。`;
+  const prompt = `${task}\n\n（直接回答，不要调用任何通信工具，不要发消息给其他人）`;
   const t0 = Date.now();
   try {
     const turn = await codexThread.run(prompt);
