@@ -23,6 +23,22 @@ const home = process.env.HOME || process.env.USERPROFILE || "~";
 function globalConfigPath() { return join(home, ".anet", "config.json"); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 
+// Token/hub from: CLI --token > env > global config
+function getToken(): string {
+  const opts = parseOpts();
+  return opts.token || process.env.COMMHUB_TOKEN || loadGlobal().token || "";
+}
+
+function getHub(): string {
+  const opts = parseOpts();
+  return opts.hub || process.env.COMMHUB_URL || loadGlobal().hub || "";
+}
+
+function authHeaders(token?: string): Record<string, string> {
+  const t = token || getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 function loadGlobal(): Record<string, any> {
   const p = globalConfigPath();
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
@@ -122,8 +138,9 @@ async function initGlobal() {
   hub = hub.replace(/\/+$/, ""); // 去掉结尾斜杠
 
   // Test connection
+  const token = opts.token || "";
   try {
-    const res = await fetch(`${hub}/health`);
+    const res = await fetch(`${hub}/health`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     const data = await res.json() as any;
     console.log(`✅ CommHub v${data.version} — ${data.sessions} sessions, ${data.sse_connections} SSE`);
   } catch (e: any) {
@@ -133,7 +150,7 @@ async function initGlobal() {
 
   const gc = loadGlobal();
   gc.hub = hub;
-  if (opts.token) gc.token = opts.token;
+  if (token) gc.token = token;
   saveGlobal(gc);
   console.log(`\nSaved to ${globalConfigPath()}`);
   console.log(`Next: anet init project`);
@@ -195,10 +212,13 @@ async function initProject() {
     }
   }
 
-  // 3. .env（CommHub URL）
+  // 3. .env（CommHub URL + Token）
   const envPath = join(anetDir, ".env");
-  writeFileSync(envPath, `COMMHUB_URL=${hub}\n`);
-  console.log(`CommHub URL: ${hub}`);
+  const token = gc.token || "";
+  let envContent = `COMMHUB_URL=${hub}\n`;
+  if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
+  writeFileSync(envPath, envContent);
+  console.log(`CommHub URL: ${hub}${token ? " (with token)" : ""}`);
 
   // 4. .mcp.json（指向 .anet/node-server.ts）
   const mcpJsonPath = join(process.cwd(), ".mcp.json");
@@ -446,6 +466,14 @@ function ensureMcpJson(profile: Profile) {
     } catch {}
   }
 
+  // Write .anet/.env (hub URL + token)
+  const anetEnvPath = join(anetDir, ".env");
+  const gc = loadGlobal();
+  const token = getToken();
+  let envContent = `COMMHUB_URL=${profile.hub || gc.hub || "http://127.0.0.1:9200"}\n`;
+  if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
+  writeFileSync(anetEnvPath, envContent);
+
   // Write .mcp.json
   mcpConfig.mcpServers = mcpConfig.mcpServers || {};
   mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.ts"] };
@@ -475,7 +503,8 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     if (profile.tools?.length) agentArgs.push("--tools", profile.tools.join(","));
     if (profile.flags?.maxTurns) agentArgs.push("--max-turns", String(profile.flags.maxTurns));
 
-    const env = { ...process.env };
+    const token = getToken();
+    const env = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
     }
@@ -484,7 +513,8 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     child.on("exit", (code) => process.exit(code || 0));
   } else {
     // spawn claude CLI
-    const env = { ...process.env, COMMHUB_ALIAS: profile.alias };
+    const token = getToken();
+    const env = { ...process.env, COMMHUB_ALIAS: profile.alias, ...(token ? { COMMHUB_TOKEN: token } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
     }
@@ -615,8 +645,8 @@ async function lsCommand() {
   if (gc.hub) {
     try {
       const [statusRes, healthRes] = await Promise.all([
-        fetch(`${gc.hub}/api/status`).then(r => r.json() as any),
-        fetch(`${gc.hub}/health`).then(r => r.json() as any),
+        fetch(`${gc.hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any),
+        fetch(`${gc.hub}/health`, { headers: authHeaders() }).then(r => r.json() as any),
       ]);
       networkSessions = statusRes.sessions || [];
       sseSessions = healthRes.sse_sessions || {};
@@ -726,7 +756,7 @@ async function importCommand() {
   // Fetch all sessions from CommHub
   let sessions: any[] = [];
   try {
-    const res = await fetch(`${hub}/api/status`);
+    const res = await fetch(`${hub}/api/status`, { headers: authHeaders() });
     const data = await res.json() as any;
     sessions = data.sessions || [];
   } catch (e: any) {
