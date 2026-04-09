@@ -49,7 +49,10 @@ const CORS_ORIGINS = process.env.COMMHUB_CORS_ORIGINS
 
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") || "";
-  const allowed = CORS_ORIGINS.includes(origin) ? origin : "";
+  const allowed = CORS_ORIGINS.includes(origin)
+    || origin.endsWith(".vercel.app")
+    || origin.endsWith(".vansin.me")
+    ? origin : "";
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
