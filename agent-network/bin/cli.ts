@@ -93,15 +93,15 @@ anet — AI Agent Network CLI
   anet start <id>               New session with profile
   anet resume <id>              Resume last session with profile
   anet ls                       Show profiles + sessions + network
+  anet server start             Start CommHub Server
   anet run                      Run standalone SSE agent
   anet --help                   This help
 
 Quick start:
-  anet init
-  anet init project
-  anet init profile 指挥室 --alias 指挥室 --channel server:commhub
-  anet start 指挥室             # 新建
-  anet resume 指挥室            # 下次恢复
+  anet server start             # 启动 CommHub Server
+  anet init --hub http://IP:9200
+  anet start 指挥室             # Claude Code Agent
+  anet start 小明               # MiniMax Agent (runtime: agent-sdk)
 `);
 }
 
@@ -596,6 +596,73 @@ async function runCommand() {
   console.log(`[${alias}] Listening on ${hub}`);
 }
 
+// ── server ──
+
+async function serverCommand() {
+  const sub = args[1];
+  if (sub === "start") {
+    const opts = parseOpts();
+    const port = opts.port || "9200";
+    const host = opts.host || "0.0.0.0";
+    const token = opts.token || "";
+
+    // Find server source
+    const candidates = [
+      join(process.cwd(), "server", "src", "index.ts"),
+      join(home, "agent-orchestra", "server", "src", "index.ts"),
+      join(home, "agent-network", "server", "src", "index.ts"),
+    ];
+
+    // Also check if @sleep2agi/commhub-server is installed
+    let serverPath = "";
+    for (const p of candidates) {
+      if (existsSync(p)) { serverPath = p; break; }
+    }
+
+    if (!serverPath) {
+      // Try npm global
+      try {
+        const { execSync } = await import("child_process");
+        const npmRoot = execSync("npm root -g", { encoding: "utf-8" }).trim();
+        const npmPath = join(npmRoot, "@sleep2agi", "commhub-server", "src", "index.ts");
+        if (existsSync(npmPath)) serverPath = npmPath;
+      } catch {}
+    }
+
+    if (!serverPath) {
+      console.error("CommHub Server not found.");
+      console.error("Install: npm install -g @sleep2agi/commhub-server");
+      console.error("Or clone: git clone https://github.com/sleep2agi/agent-network.git && cd agent-network/server && bun install");
+      process.exit(1);
+    }
+
+    console.log(`[anet] Starting CommHub Server on ${host}:${port}...`);
+
+    const env: Record<string, string> = { ...process.env as any, PORT: port, HOST: host };
+    if (token) env.COMMHUB_AUTH_TOKEN = token;
+
+    const child = spawn("bun", ["run", serverPath], { env, stdio: "inherit" });
+    child.on("exit", (code) => process.exit(code || 0));
+
+  } else {
+    console.log(`
+anet server <command>
+
+  start [options]    Start CommHub Server
+
+Options:
+  --port <port>      Port (default: 9200)
+  --host <host>      Bind address (default: 0.0.0.0)
+  --token <token>    Auth token
+
+Example:
+  anet server start
+  anet server start --port 9200 --token my-secret
+  anet server start --host 0.0.0.0 --port 9200
+`);
+  }
+}
+
 // ── Main ──
 
 switch (command) {
@@ -604,6 +671,7 @@ switch (command) {
     else if (args[1] === "profile") initProfile();
     else initGlobal();
     break;
+  case "server": serverCommand(); break;
   case "start": startCommand(); break;
   case "resume": resumeCommand(); break;
   case "ls": case "list": lsCommand(); break;
