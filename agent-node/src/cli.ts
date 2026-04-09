@@ -529,7 +529,7 @@ async function handleTelegramMessage(tg: TelegramApi, msg: any) {
   const { text: prompt, images } = await telegramBuildPrompt(tg, msg);
   if (!chatId || !messageId || !prompt) return;
 
-  log(`← [${from}] ${prompt.slice(0, 100)}${images.length ? ` +${images.length}img` : ""}`);
+  debug(`[TG] processing: ${prompt.slice(0, 80)}`);
   try {
     const result = await think(prompt, from, images);
     await telegramSend(tg, chatId, result, messageId);
@@ -592,7 +592,21 @@ async function connectTelegram(channel: TelegramChannel) {
       for (const update of data.result || []) {
         // 先推队列，offset 在处理成功后才持久化
         tg.offset = update.update_id + 1; // 内存更新防重复拉取
-        if (update.message) { queue.push({ msg: update.message, updateId: update.update_id }); drainQueue(); }
+        if (update.message) {
+          const msg = update.message;
+          const from = telegramUserLabel(msg);
+          const text = msg.text || msg.caption || "";
+          log(`← TG [${from}] ${text.slice(0, 80)}${msg.photo ? " +img" : ""}${msg.document ? " +file" : ""}`);
+          // 即时反馈：react 👀 表示收到
+          if (msg.chat?.id && msg.message_id) {
+            telegramJson(tg, "setMessageReaction", {
+              chat_id: msg.chat.id, message_id: msg.message_id,
+              reaction: [{ type: "emoji", emoji: queue.length > 0 ? "⏳" : "👀" }],
+            }).catch(() => {});
+          }
+          queue.push({ msg, updateId: update.update_id });
+          drainQueue();
+        }
       }
     } catch (err: any) {
       warn(`Telegram polling error: ${err.message}`);

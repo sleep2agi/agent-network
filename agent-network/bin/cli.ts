@@ -542,9 +542,18 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     if (profile.model) agentArgs.push("--model", profile.model);
     if (profile.tools?.length) agentArgs.push("--tools", profile.tools.join(","));
     if (profile.flags?.maxTurns) agentArgs.push("--max-turns", String(profile.flags.maxTurns));
-    for (const ch of profile.channels || []) {
-      if (ch.startsWith("server:") || ch.startsWith("plugin:")) continue;
-      agentArgs.push("--channel", ch);
+    // runtime: agent-sdk 里区分 codex / claude
+    if (profile.codexRuntime) agentArgs.push("--runtime", profile.codexRuntime);
+    // session resume
+    if (mode === "resume" && profile.resume) agentArgs.push("--session", profile.resume);
+    // channel: telegram 等
+    const channelsDir = join(nodesDir(), id, "channels");
+    if (existsSync(channelsDir)) {
+      for (const ch of readdirSync(channelsDir)) {
+        if (existsSync(join(channelsDir, ch, ".env"))) {
+          agentArgs.push("--channel", `${ch}:${join(channelsDir, ch)}`);
+        }
+      }
     }
 
     const env = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}) };
