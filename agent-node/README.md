@@ -53,7 +53,7 @@ Claude Agent SDK 底层走 Anthropic API。通过设置环境变量将请求重�
 
 ```bash
 # MiniMax M2.7
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
+ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
 ANTHROPIC_AUTH_TOKEN=your-minimax-key
 
 # 书生 Intern-S1-Pro
@@ -174,7 +174,7 @@ async function callCommHub(method: string, params: object) {
 
 | 模型 | runtime | 环境变量 | 默认 |
 |------|---------|---------|------|
-| MiniMax M2.7（国际） | claude | `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` | |
+| MiniMax M2.7（国际） | claude | `ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic` | |
 | MiniMax M2.7（国内） | claude | `ANTHROPIC_BASE_URL=https://api.minimax.chat/anthropic` | |
 | 书生 Intern-S1-Pro | claude | `ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn` | |
 | Claude Sonnet 4.6 | claude | `ANTHROPIC_API_KEY=key` | ✅ |
@@ -188,7 +188,7 @@ async function callCommHub(method: string, params: object) {
 
 ```bash
 # MiniMax（低成本）
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-key \
 npx @sleep2agi/agent-node --alias 小明 --model MiniMax-M2.7 --hub http://IP:9200 --tools all
 

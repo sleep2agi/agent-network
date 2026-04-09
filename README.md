@@ -20,7 +20,7 @@ npm install -g @sleep2agi/agent-network
 anet server start --port 9200
 
 # 启动一个 MiniMax Agent（低成本，自动干活）
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-key \
 npx @sleep2agi/agent-node --alias 小明 --model MiniMax-M2.7 --hub http://YOUR_IP:9200 --tools all
 

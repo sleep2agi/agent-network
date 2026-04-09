@@ -170,7 +170,7 @@ cd server && bun run start
 | Claude | `ANTHROPIC_API_KEY=sk-ant-xxx` |
 | Codex GPT-5 | `OPENAI_API_KEY=sk-xxx` |
 | MiniMax M2.7（国内） | `ANTHROPIC_BASE_URL=https://api.minimax.chat/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
-| MiniMax M2.7（国际） | `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
+| MiniMax M2.7（国际） | `ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
 | 书生 Intern-S1-Pro | `ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
 
 env 配在 profile 里，不同 profile 用不同 key。
