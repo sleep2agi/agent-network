@@ -40,7 +40,7 @@ anet create 指挥室
 
 校验规则（`anet create` 时执行）：
 - 允许：中文、英文、数字、`-`、`_`
-- 禁止：`/` `\` `:` `*` `?` `"` `<` `>` `|`、空格、`.` 开头、空字符串、`..`
+- 禁止：`/` `\` `:` `*` `?` `"` `<` `>` `|` `.`、空格、空字符串
 - **同一个 CommHub 上 node-name 必须唯一，不要重名**
 
 ### start 行为
@@ -56,7 +56,11 @@ anet start 指挥室
 
 anet start 指挥室 --new-session
   → 强制新建，不传 --resume
-  → 不清空旧 config.session（只有确认新 session 才覆盖）
+  → 不清空旧 config.session
+  → claude-code-cli：启动的是临时未绑定 session，退出后提示：
+    [anet] New session created. To bind it: anet session ls → anet resume 指挥室 --session <new-id>
+    [anet] Next "anet start 指挥室" will still resume old session until you rebind.
+  → codex-sdk / claude-agent-sdk：SDK 自动写回新 session，无需手动
 ```
 
 `anet resume` 只作为导入/绑定快捷方式：
@@ -84,7 +88,7 @@ agent-node 负责写回 `--config` 指向的 config.json。anet 不从 stdout �
 | 名称 | 底层包 | anet start 行为 |
 |------|--------|----------------|
 | `claude-code-cli` | @anthropic-ai/claude-code | spawn claude CLI |
-| `codex-sdk` | @openai/codex | spawn agent-node |
+| `codex-sdk` | @openai/codex-sdk | spawn agent-node |
 | `claude-agent-sdk` | @anthropic-ai/claude-agent-sdk | spawn agent-node |
 
 默认 `claude-code-cli`。旧名 `agent-sdk` 兼容 2 个版本后移除。
