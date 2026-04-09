@@ -21,6 +21,7 @@ const home = process.env.HOME || process.env.USERPROFILE || "~";
 // ── Config helpers ──
 
 function globalConfigPath() { return join(home, ".anet", "config.json"); }
+function serverConfigPath() { return join(home, ".anet", "server", "config.json"); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 
 // Token/hub from: CLI --token > env > global config
@@ -47,6 +48,18 @@ function loadGlobal(): Record<string, any> {
 
 function saveGlobal(data: Record<string, any>) {
   const dir = join(home, ".anet");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "config.json"), JSON.stringify(data, null, 2) + "\n");
+}
+
+function loadServerConfig(): Record<string, any> {
+  const p = serverConfigPath();
+  if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
+  return {};
+}
+
+function saveServerConfig(data: Record<string, any>) {
+  const dir = join(home, ".anet", "server");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "config.json"), JSON.stringify(data, null, 2) + "\n");
 }
@@ -715,11 +728,26 @@ async function serverCommand() {
   const sub = args[1];
   if (sub === "start") {
     const opts = parseOpts();
-    const port = opts.port || "9200";
-    const host = opts.host || "0.0.0.0";
-    const token = opts.token || "";
+    const sc = loadServerConfig();
 
-    console.log(`[anet] Starting CommHub Server on ${host}:${port}...`);
+    // CLI > server config > global config > auto-generate
+    const port = opts.port || sc.port || "9200";
+    const host = opts.host || sc.host || "0.0.0.0";
+    let token = opts.token || sc.token || getToken();
+
+    // Auto-generate token on first start
+    if (!token) {
+      token = crypto.randomUUID().replace(/-/g, "");
+      console.log(`[anet] Generated auth token: ${token}`);
+      console.log(`[anet] Save this token — agents need it to connect.\n`);
+    }
+
+    // Save to server config + global config
+    saveServerConfig({ port, host, token });
+    const gc = loadGlobal();
+    if (!gc.token) { gc.token = token; saveGlobal(gc); }
+
+    console.log(`[anet] Starting CommHub Server on ${host}:${port}${token ? " (auth enabled)" : ""}...`);
 
     const env: Record<string, string> = { ...process.env as any, PORT: port, HOST: host };
     if (token) env.COMMHUB_AUTH_TOKEN = token;
@@ -728,21 +756,39 @@ async function serverCommand() {
     const child = spawn("npx", ["--yes", "@sleep2agi/commhub-server"], { env, stdio: "inherit", shell: true });
     child.on("exit", (code) => process.exit(code || 0));
 
+  } else if (sub === "config") {
+    // anet server config — 显示/设置 server 配置
+    const opts = parseOpts();
+    const sc = loadServerConfig();
+    if (opts.port) sc.port = opts.port;
+    if (opts.host) sc.host = opts.host;
+    if (opts.token) sc.token = opts.token;
+
+    if (opts.port || opts.host || opts.token) {
+      saveServerConfig(sc);
+      console.log(`Server config saved: ${serverConfigPath()}`);
+    }
+    console.log(JSON.stringify(sc, null, 2));
+
   } else {
     console.log(`
 anet server <command>
 
   start [options]    Start CommHub Server
+  config [options]   Show/set server config
 
 Options:
   --port <port>      Port (default: 9200)
   --host <host>      Bind address (default: 0.0.0.0)
   --token <token>    Auth token
 
+Config: ${serverConfigPath()}
+First 'anet server start' saves config, after that just 'anet server start'.
+
 Example:
-  anet server start
-  anet server start --port 9200 --token my-secret
-  anet server start --host 0.0.0.0 --port 9200
+  anet server start --port 9200 --token my-secret   # 首次，保存配置
+  anet server start                                  # 之后直接启动
+  anet server config                                 # 查看配置
 `);
   }
 }
