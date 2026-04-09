@@ -142,7 +142,7 @@ anet ls                              # profiles + sessions + 网络状态
 | 模型 | ANTHROPIC_BASE_URL | 已验证 |
 |------|-------------------|--------|
 | MiniMax M2.7（国际） | `https://api.minimaxi.com/anthropic` | ✅ 对话 + tool_use |
-| MiniMax M2.7（国内） | `https://api.minimax.chat/anthropic` | ✅ |
+| MiniMax M2.7（国内） | `https://api.minimaxi.com/anthropic` | ✅ |
 | 书生 Intern-S1-Pro | `https://chat.intern-ai.org.cn` | ✅ |
 | Claude（默认） | 不设 | ✅ |
 | 任意 Anthropic 兼容 | 对应端点 | — |
