@@ -214,6 +214,64 @@ CREATE TABLE IF NOT EXISTS completions (
 | 测试 | 1h |
 | **总计** | **~5h** |
 
+## /api/messages 端点
+
+REST API 新增 `/api/messages` 端点，用于 Dashboard 和外部系统查询 inbox 消息。
+
+### 请求
+
+```
+GET /api/messages?alias=指挥室&limit=50&acked=0
+```
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| alias | string | （必填） | 按 session alias 过滤 |
+| limit | number | 50 | 返回条数 |
+| acked | 0/1 | 不限 | 0=未确认，1=已确认，不传=全部 |
+| since | string | 不限 | 起始时间（ISO 8601） |
+
+### 响应
+
+```json
+{
+  "ok": true,
+  "messages": [
+    {
+      "id": "msg_xxx",
+      "session_name": "指挥室",
+      "type": "task",
+      "priority": "normal",
+      "content": "报告当前状态",
+      "from_session": "hub",
+      "acked": 0,
+      "created_at": "2026-04-08T10:00:00Z"
+    }
+  ],
+  "total": 3
+}
+```
+
+### 对应 SQL 查询
+
+```sql
+-- SQLite
+SELECT * FROM inbox
+WHERE session_name = ?
+  AND (? IS NULL OR acked = ?)
+  AND (? IS NULL OR created_at >= ?)
+ORDER BY created_at DESC
+LIMIT ?;
+
+-- PostgreSQL
+SELECT * FROM inbox
+WHERE session_name = $1
+  AND ($2::int IS NULL OR acked = $2)
+  AND ($3::timestamptz IS NULL OR created_at >= $3)
+ORDER BY created_at DESC
+LIMIT $4;
+```
+
 ## 后续可选
 
 - Vercel 部署支持（用 Neon/Supabase PostgreSQL）

@@ -11,7 +11,10 @@ npm install -g @sleep2agi/agent-network
 # claude-code runtime（用 Claude Code 的人装）
 npm install -g @anthropic-ai/claude-code
 
-# agent-sdk runtime（用 MiniMax 等模型的人装）
+# codex runtime（用 GPT-5 的人装）
+npm install -g @openai/codex
+
+# agent-sdk runtime（用 MiniMax / 书生 等模型的人装）
 npm install -g @sleep2agi/agent-node
 ```
 
@@ -65,7 +68,50 @@ anet resume 指挥室
 anet ls
 ```
 
-## 方案 C：交互式创建（什么都不记）
+## 方案 C：Codex Agent（GPT-5）
+
+```bash
+# 1. 配 hub（一次性）
+anet init --hub http://47.77.216.1:9200
+
+# 2. 创建 profile
+anet init profile Codex马 \
+  --runtime codex \
+  --alias Codex马 \
+  --model gpt-5 \
+  --tools all \
+  --env "OPENAI_API_KEY=sk-xxx"
+
+# 3. 启动
+anet start Codex马
+
+# 4. 查看状态
+anet ls
+```
+
+## 方案 D：书生 Intern Agent（国产）
+
+```bash
+# 1. 配 hub（一次性）
+anet init --hub http://47.77.216.1:9200
+
+# 2. 创建 profile
+anet init profile 书生马 \
+  --runtime agent-sdk \
+  --alias 书生马 \
+  --model Intern-S1-Pro \
+  --tools "Read,Bash,Grep" \
+  --env "ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic" \
+  --env "ANTHROPIC_AUTH_TOKEN=你的书生Token"
+
+# 3. 启动
+anet start 书生马
+
+# 4. 查看状态
+anet ls
+```
+
+## 方案 E：交互式创建（什么都不记）
 
 ```bash
 anet init --hub http://47.77.216.1:9200
@@ -96,24 +142,36 @@ anet ls                      # 查看状态
 
 anet 和 agent-node 共用同一套配置。
 
-## 两种 Runtime 区别
+## 启动 CommHub Server
 
-| | claude-code | agent-sdk |
-|---|---|---|
-| 底层 | spawn claude CLI | spawn agent-node |
-| 模型 | Anthropic only | MiniMax / Claude / 任意兼容 |
-| 需要 init project | ✅ | ❌ |
-| 交互式 | ✅ TUI | ❌ 后台运行 |
-| 工具 | Claude Code 全部工具 | 按 --tools 配 |
-| 适合 | 开发/调试/复杂任务 | 自动化/低成本/批量 |
+```bash
+# 方式一：anet 内置启动
+anet server start --port 9200
+
+# 方式二：从源码启动
+cd server && bun run start
+```
+
+## 三种 Runtime 区别
+
+| | claude-code | codex | agent-sdk |
+|---|---|---|---|
+| 底层 | spawn claude CLI | spawn codex CLI | spawn agent-node |
+| 模型 | Anthropic only | OpenAI GPT-5 | MiniMax / 书生 / Claude / 任意兼容 |
+| 需要 init project | ✅ | ❌ | ❌ |
+| 交互式 | ✅ TUI | ✅ TUI | ❌ 后台运行 |
+| 工具 | Claude Code 全部工具 | `--tools all` | 按 --tools 配 |
+| 适合 | 开发/调试/复杂任务 | GPT-5 重度用户 | 自动化/低成本/批量 |
 
 ## 模型配置
 
 | 模型 | env 配置 |
 |------|---------|
 | Claude | `ANTHROPIC_API_KEY=sk-ant-xxx` |
-| MiniMax（国内） | `ANTHROPIC_BASE_URL=https://api.minimax.chat/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
-| MiniMax（国际） | `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
+| Codex GPT-5 | `OPENAI_API_KEY=sk-xxx` |
+| MiniMax M2.7（国内） | `ANTHROPIC_BASE_URL=https://api.minimax.chat/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
+| MiniMax M2.7（国际） | `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
+| 书生 Intern-S1-Pro | `ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
 
 env 配在 profile 里，不同 profile 用不同 key。
 

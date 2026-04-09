@@ -1,6 +1,6 @@
 # @sleep2agi/agent-network CLI 设计文档
 
-> CLI 命令名：`anet` | npm 包名：`@sleep2agi/agent-network` | 当前版本：v0.0.10
+> CLI 命令名：`anet` | npm 包名：`@sleep2agi/agent-network` | 当前版本：v0.0.29
 
 ---
 
@@ -8,6 +8,7 @@
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v0.0.29 | 2026-04-08 | Codex runtime 支持、`anet server start`、`--tools all` / `--max-budget` / `--session` |
 | v0.0.10 | 2026-04-08 | profile 加 resumeAlias 字段 |
 | v0.0.9 | 2026-04-08 | start/resume 分离，resume 按名字搜索 |
 | v0.0.8 | 2026-04-08 | init project 文件放 .anet/，不碰 ~/.claude/ |
@@ -31,6 +32,7 @@ anet start <id>               新建 session
 anet resume <id>              恢复上次 session
 anet ls                       查看 nodes + sessions + 网络
 anet run                      独立 SSE Agent（无需 Claude Code）
+anet server start             启动 CommHub Server（anet 内置）
 ```
 
 ---
@@ -158,7 +160,16 @@ anet 指挥室           # 快捷方式
 
 行为：读 profile → 根据 runtime 分发：
 - `claude-code` → 设 env → 拼 claude 参数 → spawn claude
+- `codex` → 设 env → 拼 codex 参数 → spawn codex
 - `agent-sdk` → 设 env → spawn `npx @sleep2agi/agent-node`
+
+#### 通用新增参数
+
+| 参数 | 说明 |
+|------|------|
+| `--tools all` | 授权所有工具（跳过逐个确认） |
+| `--max-budget <n>` | 单 session 最大消费（美元） |
+| `--session <id>` | 指定 session ID（用于恢复/续接） |
 
 ### anet resume
 
@@ -190,7 +201,7 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 | 字段 | 必需 | 说明 |
 |------|------|------|
 | anet_version | | 创建时的 anet 版本 |
-| runtime | | `claude-code`（默认）或 `agent-sdk` |
+| runtime | | `claude-code`（默认）、`codex` 或 `agent-sdk` |
 | name | | 显示名 |
 | alias | ✅ | CommHub session 别名 |
 | hub | ✅ | CommHub Server URL |
@@ -206,6 +217,14 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 | flags.teammateMode | 如 in-process |
 | resume | Session ID |
 
+### codex 专用字段
+
+| 字段 | 说明 |
+|------|------|
+| model | 模型名（如 o3, gpt-5, gpt-5.4） |
+| tools | 工具授权（`all` 或列表） |
+| maxBudget | 最大消费（美元） |
+
 ### agent-sdk 专用字段
 
 | 字段 | 说明 |
@@ -219,7 +238,7 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 
 ```json
 {
-  "anet_version": "0.0.23",
+  "anet_version": "0.0.29",
   "runtime": "claude-code",
   "name": "指挥室",
   "alias": "指挥室",
@@ -236,11 +255,29 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 }
 ```
 
+### 示例：codex
+
+```json
+{
+  "anet_version": "0.0.29",
+  "runtime": "codex",
+  "name": "Codex马",
+  "alias": "Codex马",
+  "hub": "http://YOUR_IP:9200",
+  "model": "gpt-5",
+  "tools": "all",
+  "maxBudget": 20,
+  "env": {
+    "OPENAI_API_KEY": "sk-xxx"
+  }
+}
+```
+
 ### 示例：agent-sdk（MiniMax）
 
 ```json
 {
-  "anet_version": "0.0.23",
+  "anet_version": "0.0.29",
   "runtime": "agent-sdk",
   "name": "小明1号",
   "alias": "小明1号",
@@ -259,7 +296,7 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 
 ```json
 {
-  "anet_version": "0.0.23",
+  "anet_version": "0.0.29",
   "runtime": "agent-sdk",
   "alias": "Claude马",
   "hub": "http://YOUR_IP:9200",
@@ -328,6 +365,7 @@ hub.on('task', async (msg) => {
 | runtime | 需要安装 | 说明 |
 |---------|---------|------|
 | claude-code | Claude Code CLI (`npm install -g @anthropic-ai/claude-code`) | anet start 会 spawn `claude` |
+| codex | Codex CLI (`npm install -g @openai/codex`) | anet start 会 spawn `codex` |
 | agent-sdk | @sleep2agi/agent-node (`npm install -g @sleep2agi/agent-node`) | anet start 会 spawn `npx @sleep2agi/agent-node` |
 
 ### 按模型选装
@@ -335,7 +373,9 @@ hub.on('task', async (msg) => {
 | 模型 | 需要设置 | 在哪配 |
 |------|---------|--------|
 | Claude | `ANTHROPIC_API_KEY` | profile env 或系统环境变量 |
-| MiniMax | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | profile env |
+| Codex GPT-5 | `OPENAI_API_KEY` | profile env 或系统环境变量 |
+| MiniMax M2.7 | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | profile env |
+| 书生 Intern-S1-Pro | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | profile env |
 | 其他 Anthropic 兼容 | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | profile env |
 
 ### Server 部署
@@ -353,11 +393,17 @@ npm install -g @sleep2agi/agent-network
 # 用 Claude Code 的人
 npm install -g @anthropic-ai/claude-code
 
-# 用 Agent SDK（MiniMax 等）的人
+# 用 Codex 的人
+npm install -g @openai/codex
+
+# 用 Agent SDK（MiniMax / 书生 等）的人
 npm install -g @sleep2agi/agent-node
 
-# 部署 Server 的人
+# 部署 Server 的人（方式一：bun 直接启动）
 cd agent-network/server && bun install
+
+# 部署 Server 的人（方式二：anet 内置启动）
+anet server start
 ```
 
 ---

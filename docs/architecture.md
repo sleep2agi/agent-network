@@ -1,6 +1,7 @@
 # @sleep2agi/agent-network 架构设计
 
 > CLI 名：`anet` | npm 包名：`@sleep2agi/agent-network`
+> 版本：agent-network CLI v0.0.29 | agent-node v0.6.0 | commhub-server v0.4.3
 
 ---
 
@@ -25,6 +26,36 @@ agent-network/
 ```
 
 **设计原则**：client.ts 是核心（零外部依赖），server.ts 是薄包装（委托给 `../../server/src/index.ts`），cli.ts 是粘合层。
+
+### agent-node 双引擎（v0.6.0）
+
+agent-node 支持两种 runtime 引擎：
+
+| 引擎 | 说明 | 模型 |
+|------|------|------|
+| claude | Anthropic Claude Agent SDK | Claude Sonnet/Opus |
+| codex | OpenAI Codex CLI | GPT-5 / GPT-5.4 |
+
+Profile 中通过 `runtime` 字段选择：`claude-code`、`codex` 或 `agent-sdk`。
+
+支持的模型列表：
+- **MiniMax M2.7** — 低成本自动化
+- **书生 Intern-S1-Pro** — 国产大模型
+- **Claude** — Anthropic（Sonnet/Opus）
+- **Codex GPT-5** — OpenAI
+
+### 隔离策略
+
+agent-node 启动时使用 `settingSources: []` 隔离 Claude Agent SDK，防止读取用户全局配置：
+
+```typescript
+const agent = new Agent({
+  model: profile.model,
+  settingSources: [],  // 完全隔离，不读 ~/.claude/ 等全局配置
+});
+```
+
+这确保每个 agent-node 实例独立运行，不受宿主机的 Claude Code 配置影响。
 
 ---
 
@@ -106,6 +137,7 @@ anet server [--port 9200] [--token xxx] [--db path] [--cors origins]
 | /api/task | POST | 是 | REST 发任务 |
 | /api/broadcast | POST | 是 | 广播 |
 | /api/completions | GET | 是 | 最近完成记录 |
+| /api/messages | GET | 是 | 查询 inbox 消息（支持按 alias 过滤） |
 | /ws/tmux/:name | WS | 是 | tmux 终端流 |
 
 ### `anet setup`
@@ -379,9 +411,18 @@ Agent                    CommHub Server              Hub/指挥室
 
 ---
 
-## 10. Web Dashboard（内置轻量 UI）
+## 10. Web Dashboard
 
-### 设计原则
+### 两种 Dashboard
+
+| Dashboard | 技术栈 | 部署 | 地址 |
+|-----------|--------|------|------|
+| 内置轻量 UI | 纯 HTML + vanilla JS | 内嵌 `anet server` | `http://YOUR_IP:9200/dashboard` |
+| 独立 Dashboard | Next.js + Vercel | 独立部署 | https://agent-network-dashboard.vercel.app |
+
+独立 Dashboard 提供更丰富的功能：节点拓扑图、历史趋势、任务甘特图等。
+
+### 内置轻量 UI 设计原则
 
 - 纯 HTML + CSS + vanilla JS，零框架
 - 内嵌到 `anet server`，不需要额外部署
@@ -391,8 +432,9 @@ Agent                    CommHub Server              Hub/指挥室
 ### 访问方式
 
 ```
-anet server --port 9200
-# Dashboard: http://YOUR_IP:9200/dashboard
+anet server start --port 9200
+# 内置: http://YOUR_IP:9200/dashboard
+# 独立: https://agent-network-dashboard.vercel.app
 ```
 
 ### 页面功能
