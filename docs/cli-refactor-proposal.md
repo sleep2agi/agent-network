@@ -14,7 +14,7 @@ anet start <node-name>                      # 启动（有 session 自动 resume
 anet start <node-name> --new-session        # 强制新建 session
 anet resume <node-name> --session <id>      # 导入已有 session（自动创建 node，覆盖旧 session 需确认）
 anet channel add telegram <node-name>       # 给 node 加 Telegram channel
-anet channel ls [node-name]                 # 查看 channel
+anet channel ls [node-name]                 # 查看 channel（当前项目下所有 node / 指定 node）
 anet ls                                # 查看所有 node + 网络状态
 anet session ls                        # 查看当前项目的 session
 anet server start                      # 启动 CommHub Server
