@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "commhub": {
+      "type": "stdio",
+      "command": "bun",
+      "args": [
+        ".anet/node-server.ts"
+      ]
+    }
+  }
+}

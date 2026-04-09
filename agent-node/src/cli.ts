@@ -81,8 +81,9 @@ if (!opts.config && ALIAS) {
   }
 }
 
-const globalConfig = loadJson(join(home, ".anet", "config.json"));
-if (globalConfig?.hub && !fileConfig.hub) fileConfig.hub = globalConfig.hub;
+const globalConfig = loadJson(join(home, ".anet", "config.json")) || {};
+if (globalConfig.hub && !fileConfig.hub) fileConfig.hub = globalConfig.hub;
+if (globalConfig.token && !fileConfig.token) fileConfig.token = globalConfig.token;
 
 if (!opts.config && !Object.keys(fileConfig).length) {
   const legacy = loadJson(join(process.cwd(), ".agent-node.json"));
@@ -315,7 +316,9 @@ async function connectSSE() {
   while (true) {
     debug(`SSE connecting: ${sseUrl}`);
     try {
-      const res = await fetch(sseUrl, { headers: { Accept: "text/event-stream", "Cache-Control": "no-cache" } });
+      const sseHeaders: Record<string, string> = { Accept: "text/event-stream", "Cache-Control": "no-cache" };
+      if (AUTH_TOKEN) sseHeaders["Authorization"] = `Bearer ${AUTH_TOKEN}`;
+      const res = await fetch(sseUrl, { headers: sseHeaders });
       if (!res.ok || !res.body) { await new Promise(r => setTimeout(r, delay)); delay = Math.min(delay * 1.5, 60_000); continue; }
       delay = 3000;
       const reader = res.body.getReader();
