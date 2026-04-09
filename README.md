@@ -21,22 +21,15 @@ Agent Node 是网络中的工作单元，连到 Hub 后自动收任务、AI 处�
 
 用 `@sleep2agi/agent-node` 启动，AI 自动处理任务，不需要人工交互。
 
-内部有两个引擎：
+支持的模型（通过环境变量切换，零代码修改）：
 
-| 引擎 | 模型 | 说明 |
-|------|------|------|
-| **Claude Agent SDK** | Claude / MiniMax / 书生 / 任意兼容模型 | Anthropic 官方 SDK，通过 `ANTHROPIC_BASE_URL` 切换模型 |
-| **Codex SDK** | GPT-5.4 / o3 / o4-mini | OpenAI 官方 SDK，复用 Codex 登录态 |
-
-**Claude Agent SDK 支持的模型**（通过环境变量切换，零代码修改）：
-
-| 模型 | ANTHROPIC_BASE_URL | 成本 |
-|------|-------------------|------|
-| Claude Sonnet/Opus | 不设（默认官方） | 贵，最强推理 |
-| MiniMax M2.7 | `https://api.minimaxi.com/anthropic`（国内） | ¥0.002/千 token |
-| | `https://api.minimax.io/anthropic`（国际） | |
-| 书生 Intern-S1-Pro | `https://chat.intern-ai.org.cn` | 免费额度，科学推理 |
-| 任意 Anthropic 兼容 API | 对应端点 | — |
+| 引擎 | 模型 | ANTHROPIC_BASE_URL | 成本 |
+|------|------|-------------------|------|
+| Claude Agent SDK | Claude Sonnet/Opus | 不设（默认） | 贵，最强推理 |
+| Claude Agent SDK | MiniMax M2.7 | `api.minimaxi.com/anthropic`（国内）`api.minimax.io/anthropic`（国际） | ¥0.002/千 token |
+| Claude Agent SDK | 书生 Intern-S1-Pro | `chat.intern-ai.org.cn` | 免费额度，科学推理 |
+| Claude Agent SDK | 任意 Anthropic 兼容 | 对应端点 | — |
+| Codex SDK | GPT-5.4 / o3 / o4-mini | — （复用 Codex 登录态） | OpenAI 额度 |
 
 **方式二：Claude Code CLI（交互式，人机协作）**
 
