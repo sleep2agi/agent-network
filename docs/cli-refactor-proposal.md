@@ -152,6 +152,15 @@ anet create <node-name> \
 
 不自动安装，只提示。
 
+`claude-code-cli` 额外提示：
+```
+[anet] claude-code-cli requires:
+  - Claude Pro / Team / Enterprise subscription
+  - Run "claude auth login" first
+  - Uses Anthropic Claude only (cannot switch models)
+  - For other models (MiniMax/GPT-5.4), use --runtime codex-sdk or claude-agent-sdk
+```
+
 `anet create` 完成后提示：
 ```
 [anet] Created node "指挥室" (claude-code-cli)
