@@ -142,6 +142,13 @@ anet create <node-name> \
 
 不传 `--runtime` 默认 `claude-code-cli`。
 
+`anet create` 完成后提示：
+```
+[anet] Created node "指挥室" (claude-code-cli)
+[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.
+[anet] To disable: edit .anet/nodes/指挥室/config.json → flags
+```
+
 ## `anet channel add` 参数
 
 ```bash
