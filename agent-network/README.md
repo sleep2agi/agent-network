@@ -2,168 +2,175 @@
 
 AI Agent 通信网络 — 让 AI Agent 互相发消息、派任务、协作。
 
+支持两种 Agent 运行时：
+- **claude-code** — Claude Code CLI（交互式开发）
+- **agent-sdk** — Claude Agent SDK + 任意模型（MiniMax/Claude，自动化）
+
 ## 安装
 
 ```bash
-# 全局安装（推荐）
+# 必装：anet CLI + CommHub SDK
 npm install -g @sleep2agi/agent-network
 
-# 或不安装，直接用 npx
-npx @sleep2agi/agent-network --help
+# 按需装：
+npm install -g @anthropic-ai/claude-code      # claude-code runtime
+npm install -g @sleep2agi/agent-node           # agent-sdk runtime
 ```
 
-## 30 秒上手
+## 快速开始
+
+### Claude Code Agent
 
 ```bash
-# 1. 配 hub（全局，一次性）
-npx @sleep2agi/agent-network init --hub http://YOUR_COMMHUB_IP:9200
-
-# 2. 配项目（下载 channel 插件 + 配 MCP + 生成 CLAUDE.md）
-cd ~/your-project
-npx @sleep2agi/agent-network init project
-
-# 3. 创建 profile（保存启动参数）
-npx anet init profile commander --alias 指挥室 --channel server:commhub
-
-# 4. 启动（新建 session）
-npx anet start commander
-
-# 5. 恢复上次 session
-npx anet resume commander
-
-# 6. 查看状态
-npx anet ls
+anet init --hub http://YOUR_IP:9200
+anet init project
+anet init profile 指挥室 --alias 指挥室 --channel server:commhub
+anet start 指挥室
 ```
 
-## 为什么需要 Profile？
-
-Claude Code 启动参数可以非常长：
+### MiniMax Agent（低成本）
 
 ```bash
-COMMHUB_ALIAS="指挥室" TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent \
-  claude --dangerously-skip-permissions \
-  --channels plugin:telegram@claude-plugins-official \
-  --dangerously-load-development-channels server:commhub \
-  --teammate-mode in-process --resume 98039093-...
+anet init --hub http://YOUR_IP:9200
+anet init profile 小明1号 \
+  --runtime agent-sdk \
+  --alias 小明1号 \
+  --model MiniMax-M2.7 \
+  --tools "Read,Bash,Grep" \
+  --env "ANTHROPIC_BASE_URL=https://api.minimax.chat/anthropic" \
+  --env "ANTHROPIC_AUTH_TOKEN=your-minimax-key"
+anet start 小明1号
 ```
 
-Profile 把这些参数存到 JSON，以后只需：
+## 工作原理
 
-```bash
-anet start 指挥室     # 新建 session
-anet resume 指挥室    # 恢复上次 session
+`anet start` 读 profile，根据 `runtime` 自动选择启动方式：
+
+```
+anet start 指挥室  → runtime: claude-code → spawn claude CLI
+anet start 小明1号 → runtime: agent-sdk  → spawn agent-node (MiniMax)
 ```
 
-同一目录可以有多个 profile（指挥室、通信龙、SDK马）。
+同一目录可以有多个 profile，不同 runtime 共存。
 
 ## CLI 命令
 
-### anet init
+```
+anet init                    配 hub URL（全局，一次性）
+anet init project            配项目（claude-code 用：channel 插件 + .mcp.json + CLAUDE.md）
+anet init profile <id>       创建启动配置
+anet start <id>              新建 session
+anet resume <id>             恢复上次 session
+anet ls                      查看 profiles + sessions + 网络状态
+```
 
-三级初始化：
+### anet init profile
 
 ```bash
-anet init                          # → ~/.anet/config.json（hub URL）
-anet init project                  # → 下载 channel 插件 + 配 MCP + .env
-anet init profile <id> [options]   # → .anet/profiles/<id>.json
+anet init profile <id> [options]
 ```
 
-配置文件位置：
-
-```
-~/.anet/config.json                  全局（hub URL，一次性）
-{workpath}/.anet/node-server.ts           Channel 插件
-{workpath}/.anet/package.json        依赖声明
-{workpath}/.anet/.env                COMMHUB_URL
-{workpath}/.anet/profiles/cmd.json   启动 profile
-{workpath}/.mcp.json                 MCP 配置（commhub → .anet/node-server.ts）
-```
-
-全部在项目目录内，不碰全局 `~/.claude/`。
-
-#### anet init
-
-配 hub URL（全局，一次性）：
-
-```bash
-anet init
-# CommHub URL: http://YOUR_IP:9200
-# ✅ CommHub v0.4.1 — 26 sessions, 18 SSE
-```
-
-或直接传参：`anet init --hub http://YOUR_IP:9200`
-
-#### anet init project
-
-下载 Channel 插件到 `.anet/` + 安装依赖 + 写 `.mcp.json` + 写 `.env`：
-
-```bash
-cd ~/my-project
-anet init project
-# ✅ .anet/node-server.ts
-# ✅ Dependencies installed
-# CommHub URL: http://YOUR_IP:9200
-# .mcp.json: commhub → .anet/node-server.ts
-```
-
-#### anet init profile
-
-```bash
-anet init profile <id> --alias <别名> [options]
-```
+**共用参数：**
 
 | 参数 | 说明 |
 |------|------|
-| `<id>` | Profile ID（英文，作为文件名） |
 | `--alias` | CommHub session 别名 |
-| `--name` | 显示名 |
-| `--channel` | 添加 channel（可重复） |
+| `--runtime` | `claude-code`（默认）或 `agent-sdk` |
 | `--env` | 环境变量 K=V（可重复） |
-| `--resume` | Session resume ID |
-| `--teammate-mode` | 如 in-process |
 
-示例：
-```bash
-# 带 Telegram 双 channel
-anet init profile commander --alias 指挥室 \
-  --channel server:commhub \
-  --channel plugin:telegram@claude-plugins-official \
-  --env TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent \
-  --teammate-mode in-process
+**claude-code 参数：**
 
-# 简单 agent
-anet init profile worker --alias 开发马 --channel server:commhub
-```
+| 参数 | 说明 |
+|------|------|
+| `--channel` | Channel（可重复，默认 server:commhub） |
+| `--teammate-mode` | 默认 in-process |
+| `--resume-alias` | 恢复搜索名 |
+
+**agent-sdk 参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `--model` | 模型名（如 MiniMax-M2.7） |
+| `--tools` | 工具列表，逗号分隔 |
+| `--max-turns` | 每任务最大轮次 |
 
 ### anet start / resume
 
 ```bash
 anet start 指挥室       # 新建 session
-anet resume 指挥室      # 恢复上次 session（按名字搜索）
+anet resume 指挥室      # 恢复上次 session
 anet start              # 列出所有 profile
-anet 指挥室             # 快捷方式（等于 anet start 指挥室）
+anet 指挥室             # 快捷方式
 ```
+
+交互式创建：profile 不存在时自动引导创建（选 runtime、填 alias、model 等）。
+
+### anet init project
+
+仅 claude-code runtime 需要：
+
+```bash
+anet init project
+# ✅ .anet/node-server.ts（Channel 插件）
+# ✅ Dependencies installed
+# ✅ .mcp.json
+# ✅ CLAUDE.md
+```
+
+agent-sdk runtime 不需要 init project。
 
 ### anet ls
 
-显示当前目录的 sessions + 网络状态：
-
 ```
 Profiles:
-  commander (指挥室)  →  指挥室  [server:commhub, plugin:telegram]
+  指挥室  →  指挥室  [server:commhub, plugin:telegram]
+  小明1号  →  小明1号  []
 
-Sessions (/home/vansin/agent-orchestra/channel):
+Sessions (/home/vansin/project):
   SESSION              PID     NETWORK
   ──────────────────── ─────── ─────────────────────
   fef0eb55-b39c-4abc  64269   通信龙 offline ●
 ```
 
-### anet run
+## Profile 格式
 
-独立 SSE Agent（不需要 Claude Code）：
+路径：`.anet/profiles/<id>.json`
 
-```bash
-anet run --alias SDK马 --hub http://YOUR_IP:9200
+anet 和 agent-node 共用同一套配置。
+
+### claude-code 示例
+
+```json
+{
+  "runtime": "claude-code",
+  "alias": "指挥室",
+  "hub": "http://YOUR_IP:9200",
+  "channels": ["server:commhub", "plugin:telegram@claude-plugins-official"],
+  "env": { "TELEGRAM_STATE_DIR": "~/.claude/channels/telegram-vincent" },
+  "flags": { "dangerouslySkipPermissions": true, "teammateMode": "in-process" }
+}
+```
+
+### agent-sdk 示例（MiniMax）
+
+```json
+{
+  "runtime": "agent-sdk",
+  "alias": "小明1号",
+  "hub": "http://YOUR_IP:9200",
+  "model": "MiniMax-M2.7",
+  "tools": ["Read", "Bash", "Grep"],
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.minimax.chat/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "your-key"
+  }
+}
+```
+
+### 配置优先级
+
+```
+CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 ```
 
 ## SDK 代码引用
@@ -171,67 +178,35 @@ anet run --alias SDK马 --hub http://YOUR_IP:9200
 ```typescript
 import { CommHub } from '@sleep2agi/agent-network';
 
-const hub = new CommHub({
-  url: 'http://YOUR_COMMHUB_IP:9200',
-  alias: '我的Agent',
-});
-
+const hub = new CommHub({ url: 'http://YOUR_IP:9200', alias: '我的Agent' });
 hub.on('task', async (msg) => {
-  await hub.send(msg.from_session, '任务完成！');
+  await hub.send(msg.from_session, '完成！');
 });
 ```
-
-```javascript
-// CommonJS
-const { CommHub } = require('@sleep2agi/agent-network');
-```
-
-### SDK API
 
 | 方法 | 说明 |
 |------|------|
-| `hub.send(alias, content, priority?)` | 发任务 |
+| `hub.send(alias, content)` | 发任务 |
 | `hub.message(alias, content)` | 发消息 |
-| `hub.reply(taskId, text, status?)` | 回复任务 |
 | `hub.status(state, extra?)` | 更新状态 |
-| `hub.broadcast(content, filter?)` | 广播 |
 | `hub.disconnect()` | 断开 |
 
-| 事件 | 说明 |
-|------|------|
-| `task` | 收到任务（已自动 ACK） |
-| `connected` | SSE 连接成功 |
-| `disconnected` | SSE 断开（自动重连） |
+## 依赖
 
-## 运行时要求
+| 包 | 什么时候装 |
+|---|---------|
+| @sleep2agi/agent-network | 必装（anet CLI） |
+| @anthropic-ai/claude-code | runtime: claude-code |
+| @sleep2agi/agent-node | runtime: agent-sdk |
+| Bun 1.2+ | 部署 CommHub Server |
 
-| 组件 | 运行时 |
-|------|--------|
-| anet CLI / SDK | Node.js 18+ 或 Bun |
-| CommHub Server | Bun 1.2+（单独部署） |
+## 相关包
 
-## 版本历史
-
-| 版本 | 变更 |
-|------|------|
-| 0.0.18 | node-server.ts 多路径查找，兼容 npx/global/local |
-| 0.0.17 | 修复 npx 模式下路径解析 |
-| 0.0.16 | server.ts → node-server.ts，从 npm 包内 copy |
-| 0.0.15 | 自动去掉 hub URL 结尾斜杠 |
-| 0.0.14 | init project 自动生成 CLAUDE.md |
-| 0.0.13 | init 交互输入后不再卡住 |
-| 0.0.12 | README 同步 |
-| 0.0.11 | node config 加 anet_version 字段 |
-| 0.0.10 | resumeAlias 字段，resume 按名字搜索 |
-| 0.0.9 | start/resume 分离 |
-| 0.0.8 | init project 所有文件放 .anet/（不碰全局 ~/.claude/） |
-| 0.0.7 | init project 改写 .mcp.json（不写 ~/.claude.json） |
-| 0.0.6 | 三级 init（全局/项目/profile），`anet ls` 简化为当前目录 |
-| 0.0.5 | `anet ls` 显示本地 sessions + CommHub 网络状态 |
-| 0.0.4 | CLI 瘦身 580KB→13KB，Node.js 兼容，profile 系统 |
-| 0.0.3 | `anet setup` 一键配置 Channel 插件 |
-| 0.0.2 | CLI shebang 改为 node |
-| 0.0.1 | 首次发布 |
+| 包 | 说明 |
+|---|------|
+| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | anet CLI + CommHub SDK |
+| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | Agent 运行时 |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | CommHub Server |
 
 ## License
 
