@@ -13,6 +13,7 @@
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { spawn, execSync } from "child_process";
+import { select } from "@inquirer/prompts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -651,18 +652,15 @@ function writeTelegramChannelConfig(nodeId: string, botToken: string, allowId: s
 }
 
 async function askChoice<T extends string>(title: string, choices: { label: string; value: T; description?: string }[]): Promise<T> {
-  console.log(title);
-  choices.forEach((choice, index) => {
-    const desc = choice.description ? `    ${choice.description}` : "";
-    console.log(`  ${index + 1}) ${choice.label}${desc}`);
+  closeRL();
+  return await select<T>({
+    message: title,
+    choices: choices.map((choice) => ({
+      name: choice.label,
+      value: choice.value,
+      description: choice.description,
+    })),
   });
-
-  while (true) {
-    const answer = await ask("Select", "1");
-    const index = Number.parseInt(answer, 10) - 1;
-    if (index >= 0 && index < choices.length) return choices[index].value;
-    console.log(`Please enter 1-${choices.length}.`);
-  }
 }
 
 function maskSecretEnv(env: Record<string, string>): Record<string, string> {
@@ -713,10 +711,10 @@ This wizard creates one agent node for this project:
 
   console.log(`
 Runtime guide:
-  1) claude-code-cli  Use your Claude Code app/CLI session. Best for existing Claude Code workflows.
-  2) codex-sdk        Run through agent-node with Codex. Best for GPT-5.4 / OpenAI models.
-  3) claude-agent-sdk Run through agent-node with an Anthropic-compatible API.
-                      Use this for MiniMax, Intern-S1, or Anthropic API keys.
+  - claude-code-cli  Use your Claude Code app/CLI session. Best for existing Claude Code workflows.
+  - codex-sdk        Run through agent-node with Codex. Best for GPT-5.4 / OpenAI models.
+  - claude-agent-sdk Run through agent-node with an Anthropic-compatible API.
+                     Use this for MiniMax or Anthropic-compatible providers.
 `);
   const runtime = await askChoice<RuntimeName>("Select runtime:", [
     { label: "claude-code-cli", value: "claude-code-cli", description: "Claude Code CLI（需要 Pro 订阅）" },
@@ -743,31 +741,36 @@ Model guide:
   } else if (runtime === "claude-agent-sdk") {
     console.log(`
 Model guide:
-  - MiniMax-M2.7       Low-cost Claude-compatible model. anet fills MiniMax base URL for you.
-  - intern-s1-pro      Intern/书生 Claude-compatible endpoint. anet fills its base URL for you.
+  - MiniMax-M2.7       URL: https://api.minimaxi.com/anthropic
   - claude-sonnet-4-6  Anthropic Claude via the default Anthropic API.
-  - custom             Any Anthropic-compatible model name.
+  - claude-opus-4-6    Anthropic Claude via the default Anthropic API.
+  - claude-haiku-4-5   Anthropic Claude via the default Anthropic API.
+  - custom             Type both URL and model for any Anthropic-compatible provider.
 `);
     const modelChoice = await askChoice("Select model:", [
-      { label: "MiniMax-M2.7", value: "MiniMax-M2.7" },
-      { label: "intern-s1-pro", value: "intern-s1-pro" },
-      { label: "claude-sonnet-4-6", value: "claude-sonnet-4-6" },
-      { label: "custom", value: "__custom__" },
+      { label: "MiniMax-M2.7", value: "MiniMax-M2.7", description: "URL: https://api.minimaxi.com/anthropic" },
+      { label: "claude-sonnet-4-6", value: "claude-sonnet-4-6", description: "Anthropic default URL" },
+      { label: "claude-opus-4-6", value: "claude-opus-4-6", description: "Anthropic default URL" },
+      { label: "claude-haiku-4-5", value: "claude-haiku-4-5", description: "Anthropic default URL" },
+      { label: "custom", value: "__custom__", description: "Manually enter base URL + model" },
     ]);
-    opts.model = modelChoice === "__custom__" ? await ask("Model") : modelChoice;
+    opts.model = modelChoice;
 
-    if (opts.model === "MiniMax-M2.7") {
+    if (opts.model === "__custom__") {
+      const baseUrl = await ask("ANTHROPIC_BASE_URL");
+      const customModel = await ask("Model");
+      if (baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${baseUrl}`);
+      opts.model = customModel;
+    } else if (opts.model === "MiniMax-M2.7") {
       opts._envs.push("ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic");
-    } else if (opts.model === "intern-s1-pro") {
-      opts._envs.push("ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn");
     }
 
     console.log(`
 API key:
   Paste the provider key for the selected model.
   - MiniMax: get a token from the MiniMax platform / API Keys page.
-  - Intern-S1: use the key/token for chat.intern-ai.org.cn.
   - Anthropic Claude: use an Anthropic Console API key.
+  - Custom URL: use the key/token for that Anthropic-compatible provider.
 `);
     const token = await ask("ANTHROPIC_AUTH_TOKEN");
     if (token) opts._envs.push(`ANTHROPIC_AUTH_TOKEN=${token}`);

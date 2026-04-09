@@ -18,12 +18,10 @@
     "anet": "dist/bin/cli.js"
   },
   "files": [
-    "dist",
-    "src/server.ts",
-    "src/node-server.ts"
+    "dist"
   ],
   "scripts": {
-    "build": "bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "build": "bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && bun build src/node-server.ts --outdir dist/src --target node --minify --external @modelcontextprotocol/sdk && tsc --emitDeclarationOnly --declaration --outDir dist && npx javascript-obfuscator dist/bin/cli.js --output dist/bin/cli.js --compact true --control-flow-flattening true --string-array true --string-array-encoding base64 && npx javascript-obfuscator dist/src/client.js --output dist/src/client.js --compact true --string-array true && npx javascript-obfuscator dist/src/node-server.js --output dist/src/node-server.js --compact true --string-array true",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -50,8 +48,12 @@
   "engines": {
     "bun": ">=1.2.0"
   },
+  "dependencies": {
+    "@inquirer/prompts": "^7.10.1"
+  },
   "devDependencies": {
     "@types/node": "^25.0.0",
+    "javascript-obfuscator": "^5.4.1",
     "typescript": "^5.0.0"
   }
 }
