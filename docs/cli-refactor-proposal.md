@@ -7,18 +7,21 @@
 ## 命令总览
 
 ```bash
-anet init                              # 全局配置（hub URL + token）
-anet init project                      # 当前项目初始化（CommHub + .mcp.json）
-anet create <node-name> [options]           # 创建 node
-anet start <node-name>                      # 启动（有 session 自动 resume，没有新建）
-anet start <node-name> --new-session        # 强制新建 session
-anet resume <node-name> --session <id>      # 导入已有 session（自动创建 node，覆盖旧 session 需确认）
-anet channel add telegram <node-name>       # 给 node 加 Telegram channel
-anet channel ls [node-name]                 # 查看 channel（当前项目下所有 node / 指定 node）
-anet ls                                # 查看所有 node + 网络状态
-anet session ls                        # 查看当前项目的 session
-anet server start                      # 启动 CommHub Server
+# 全局 scope（~/.anet/）
+anet init                              # 配置 hub URL + token → ~/.anet/config.json
+anet server start                      # 启动 CommHub Server → ~/.anet/server/config.json
 anet -v                                # 版本
+
+# 项目 scope（{workpath}/.anet/）
+anet init project                      # 当前项目初始化（CommHub + .mcp.json）
+anet create <node-name> [options]      # 创建 node → .anet/nodes/<node-name>/config.json
+anet start <node-name>                 # 启动（有 session 自动 resume，没有新建）
+anet start <node-name> --new-session   # 强制新建 session
+anet resume <node-name> --session <id> # 导入已有 session（自动创建 node，覆盖旧 session 需确认）
+anet channel add telegram <node-name>  # 给 node 加 channel → .anet/nodes/<node-name>/channels/telegram/
+anet channel ls [node-name]            # 查看 channel（当前项目所有 node / 指定 node）
+anet ls                                # 查看当前项目所有 node + CommHub 网络状态
+anet session ls                        # 查看当前项目的 Claude Code session
 ```
 
 ## 核心概念
