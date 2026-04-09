@@ -4,7 +4,7 @@
  *
  * anet init                    配置 hub（全局）
  * anet init project            配置当前项目
- * anet init profile commander  创建启动 profile
+ * anet create commander        创建 node
  * anet start commander         启动
  * anet ls                      查看状态
  * anet run                     独立 SSE Agent
@@ -141,6 +141,20 @@ function loadProfile(id: string): Profile | null {
       flags: { ...project.flags },
     };
     return profile;
+  } catch { return null; }
+}
+
+function loadStoredProfile(id: string): Profile | null {
+  const p = join(nodesDir(), id, "config.json");
+  if (!existsSync(p)) return null;
+  try {
+    const project = JSON.parse(readFileSync(p, "utf-8"));
+    return {
+      ...project,
+      channels: Array.isArray(project.channels) ? project.channels : [],
+      env: { ...project.env },
+      flags: { ...project.flags },
+    };
   } catch { return null; }
 }
 
@@ -391,7 +405,7 @@ commhub_get_all_status()
     console.log(`CLAUDE.md: already exists`);
   }
 
-  console.log(`\n✅ Project ready. Next: anet init profile <id> --alias <名字> --channel server:commhub`);
+  console.log(`\n✅ Project ready. Next: anet create <node-name>`);
 }
 
 // ── init profile ──
@@ -424,8 +438,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     anet_version: "0.1.0",
     name: id,
     runtime,
-    alias: id,
-    hub,
+    ...(opts.hub ? { hub } : {}),
     ...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),
     ...(opts.tools ? { tools: opts.tools.split(",").map((s: string) => s.trim()) } : {}),
     channels: opts._channels.length > 0 ? opts._channels : ["server:commhub"],
@@ -665,12 +678,17 @@ async function launchAgent(id: string, forceNewSession = false) {
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
     }
+    if (profile.channels.includes("telegram")) {
+      env.TELEGRAM_STATE_DIR = join(nodesDir(), id, "channels", "telegram");
+    }
 
     const claudeArgs: string[] = [];
     if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
     for (const ch of profile.channels) {
       if (ch.startsWith("server:")) {
         claudeArgs.push("--dangerously-load-development-channels", ch);
+      } else if (ch === "telegram") {
+        claudeArgs.push("--channels", "plugin:telegram@claude-plugins-official");
       } else {
         claudeArgs.push("--channels", ch);
       }
@@ -742,10 +760,11 @@ async function resumeCommand() {
         return;
       }
     }
-    profile.session = sessionId;
-    delete profile.resume;
-    delete profile.resumeAlias;
-    saveProfile(id, profile);
+    const stored = loadStoredProfile(id) || profile;
+    stored.session = sessionId;
+    delete stored.resume;
+    delete stored.resumeAlias;
+    saveProfile(id, stored);
   }
 
   console.log(`[anet] Saved session ${sessionId.slice(0, 8)}... to .anet/nodes/${id}/config.json\n`);
@@ -755,27 +774,28 @@ async function resumeCommand() {
 function showProfiles(cmd: string) {
   const ids = listProfileIds();
   if (ids.length === 0) {
-    console.log("No profiles. Run: anet init profile <id> --alias <名字>");
+    console.log("No nodes. Run: anet create <node-name>");
     return;
   }
-  console.log("\nProfiles:\n");
+  console.log("\nNodes:\n");
   for (const name of ids) {
     const p = loadProfile(name);
-    console.log(`  ${name}${p?.name ? ` (${p.name})` : ""}  →  ${p?.alias}  [${p?.channels.join(", ")}]`);
+    console.log(`  ${name}  [${normalizeRuntime(p || undefined)}]  session=${p ? profileSession(p).slice(0, 8) || "-" : "-"}  channels=[${p?.channels.join(", ")}]`);
   }
-  console.log(`\nanet ${cmd} <id>\n`);
+  console.log(`\nanet ${cmd} <node-name>\n`);
 }
 
 // ── ls ──
 
 async function lsCommand() {
-  // Profiles
+  // Nodes
   const ids = listProfileIds();
   if (ids.length > 0) {
-    console.log("\nProfiles:\n");
+    console.log("\nNodes:\n");
     for (const id of ids) {
       const p = loadProfile(id);
-      console.log(`  ${id}${p?.name ? ` (${p.name})` : ""}  →  ${p?.alias}  [${p?.channels.join(", ")}]`);
+      const session = p ? profileSession(p).slice(0, 8) || "-" : "-";
+      console.log(`  ${id}  [${normalizeRuntime(p || undefined)}]  session=${session}  channels=[${p?.channels.join(", ")}]`);
     }
     console.log();
   }
@@ -795,7 +815,7 @@ async function lsCommand() {
   }
 
   if (localSessions.length === 0 && ids.length === 0) {
-    console.log("No sessions or profiles in this directory.");
+    console.log("No sessions or nodes in this directory.");
     console.log("Get started: anet init\n");
     return;
   }
@@ -991,13 +1011,13 @@ async function importCommand() {
     }
 
     const config: Profile = {
-      runtime: "claude-code",
-      alias: s.alias,
-      hub,
+      anet_version: "0.1.0",
+      name: s.alias,
+      runtime: "claude-code-cli",
       channels: ["server:commhub"],
       env: {},
       flags: { dangerouslySkipPermissions: true, teammateMode: "in-process" },
-      resume: s.resume_id,
+      session: s.resume_id,
     };
 
     mkdirSync(nodeDir, { recursive: true });
@@ -1075,15 +1095,8 @@ Options:
   --bot-token <token>   Bot token
   --allow <user-id>     Allow user ID
 
-Options:
-  --bot-token <token>   Bot token
-  --allow <user-id>     Allow user ID
-  --runtime <rt>        claude-code (默认) / codex / claude-sdk（node 不存在时）
-  --model <model>       模型名（codex 默认 gpt-5.4）
-
 Example:
   anet channel add telegram 指挥室 --bot-token 123:ABC --allow 7612221352
-  anet channel add telegram A站牛 --runtime codex --bot-token 123:ABC --allow 7612221352
   anet channel add telegram 指挥室     # 交互式
 `);
       return;
@@ -1093,25 +1106,12 @@ Example:
       process.exit(1);
     }
 
-    let profile = loadProfile(nodeId);
+    validateNodeName(nodeId);
+    const profile = loadProfile(nodeId);
+    const storedProfile = loadStoredProfile(nodeId);
     if (!profile) {
-      // 自动创建 node，问 runtime
-      const gc = loadGlobal();
-      let rt = opts.runtime;
-      if (!rt) rt = await ask("Runtime (claude-code/codex/claude-sdk)", "claude-code");
-      const isSDK = rt !== "claude-code";
-      profile = {
-        runtime: isSDK ? "agent-sdk" : "claude-code",
-        ...(isSDK ? { codexRuntime: rt === "codex" ? "codex" : "claude" } : {}),
-        alias: nodeId,
-        hub: gc.hub || "",
-        channels: ["server:commhub"],
-        env: {},
-        flags: { dangerouslySkipPermissions: true, teammateMode: "in-process" },
-        ...(isSDK && rt === "codex" ? { model: opts.model || "gpt-5.4" } : {}),
-      };
-      saveProfile(nodeId, profile);
-      console.log(`[anet] Created node "${nodeId}" (${rt})`);
+      console.error(`Node "${nodeId}" not found. Create it first: anet create ${nodeId} --runtime codex-sdk`);
+      process.exit(1);
     }
 
     let botToken = opts["bot-token"];
@@ -1132,7 +1132,9 @@ Example:
 
     const tokenEnvKey = "TELEGRAM_BOT_TOKEN";
 
-    writeFileSync(join(channelDir, ".env"), `${tokenEnvKey}=${botToken}\n`);
+    const envPath = join(channelDir, ".env");
+    writeFileSync(envPath, `${tokenEnvKey}=${botToken}\n`);
+    try { chmodSync(envPath, 0o600); } catch {}
     writeFileSync(join(channelDir, "access.json"), JSON.stringify({
       dmPolicy: "allowlist",
       allowFrom: [allowId],
@@ -1140,16 +1142,15 @@ Example:
       pending: {},
     }, null, 2) + "\n");
 
-    // Update node config.json.
-    // Claude Code consumes the plugin name; agent-node consumes type:path.
-    const channelSpec = (profile.runtime || "claude-code") === "agent-sdk"
-      ? `telegram:${channelDir}`
-      : "plugin:telegram@claude-plugins-official";
-    if (!profile.channels.includes(channelSpec)) {
-      profile.channels.push(channelSpec);
+    if (!storedProfile) {
+      console.error(`Node "${nodeId}" not found. Create it first: anet create ${nodeId} --runtime codex-sdk`);
+      process.exit(1);
     }
-    profile.env.TELEGRAM_STATE_DIR = channelDir;
-    saveProfile(nodeId, profile);
+    storedProfile.channels = storedProfile.channels || [];
+    if (!storedProfile.channels.includes("telegram")) {
+      storedProfile.channels.push("telegram");
+    }
+    saveProfile(nodeId, storedProfile);
 
     console.log(`\n✅ ${type} channel added to "${nodeId}"`);
     console.log(`   ${channelDir}/`);
@@ -1200,6 +1201,7 @@ switch (command) {
     else if (args[1] === "profile") initProfile();
     else initGlobal();
     break;
+  case "create": createCommand(); break;
   case "server": serverCommand(); break;
   case "start": startCommand(); break;
   case "resume": resumeCommand(); break;
