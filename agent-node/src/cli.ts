@@ -250,11 +250,28 @@ async function processWithCodex(task: string, from: string): Promise<string> {
   const prompt = `${task}\n\n（直接回答，不要调用任何通信工具，不要发消息给其他人）`;
   const t0 = Date.now();
   try {
-    const turn = await codexThread.run(prompt);
+    const { events } = await codexThread.runStreamed(prompt);
+    let finalResponse = "";
+    let usage: any = null;
+    let itemCount = 0;
+    for await (const ev of events) {
+      if (ev.type === "item.started") {
+        const it = ev.item as any;
+        debug(`[codex] ${it.type}${it.command ? `: ${it.command.slice(0, 60)}` : it.tool ? `: ${it.server}/${it.tool}` : ""}`);
+      } else if (ev.type === "item.completed") {
+        itemCount++;
+        const it = ev.item as any;
+        if (it.type === "agent_message") finalResponse = it.text || "";
+        if (it.type === "command_execution") debug(`[codex] cmd exit=${it.exit_code} | ${it.aggregated_output?.slice(0, 80)}`);
+        if (it.type === "reasoning") debug(`[codex] thinking: ${it.text?.slice(0, 80)}`);
+        if (it.type === "mcp_tool_call") debug(`[codex] mcp: ${it.server}/${it.tool} → ${it.status}`);
+      } else if (ev.type === "turn.completed") {
+        usage = ev.usage;
+      }
+    }
     const dt = Date.now() - t0;
-    const u = turn.usage || {};
-    log(`[codex] done | ${dt}ms | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | items=${turn.items?.length || 0}`);
-    return turn.finalResponse || "（无回复）";
+    log(`[codex] done | ${dt}ms | in=${usage?.input_tokens || 0} out=${usage?.output_tokens || 0} | items=${itemCount}`);
+    return finalResponse || "（无回复）";
   } catch (e: any) {
     log(`codex thread error: ${e.message}, 重建`);
     const codex = new Codex();
