@@ -846,6 +846,8 @@ async function launchAgent(id: string, forceNewSession = false) {
 
   // Token already merged in loadProfile: project > global
   const token = profile.token || "";
+  if (token) console.log(`[anet] Token: ${token.slice(0, 8)}...`);
+  else console.log(`[anet] Warning: no token configured. Check ~/.anet/config.json`);
 
   if (runtime === "codex-sdk" || runtime === "claude-agent-sdk") {
     // spawn agent-node
