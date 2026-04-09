@@ -2,12 +2,13 @@
 /**
  * @sleep2agi/agent-node CLI
  *
- * npx @sleep2agi/agent-node --alias "我的Agent" --model MiniMax-M2.7
+ * 支持两种 runtime:
+ *   --runtime claude  → Claude Agent SDK (支持 MiniMax/Claude)
+ *   --runtime codex   → Codex SDK (GPT-5/o3)
  *
  * 配置加载: CLI args > env > .anet/profiles/<alias>.json > ~/.anet/config.json > defaults
  */
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { hostname as osHostname, homedir } from "os";
@@ -28,15 +29,20 @@ for (let i = 0; i < argv.length; i++) {
 
 选项:
   --alias <name>      Agent 别名 (必需)
+  --runtime <type>    claude (default) | codex
   --url <url>         CommHub URL (default: http://127.0.0.1:9200)
   --hub <url>         同 --url
-  --model <name>      AI 模型 (default: claude-sonnet-4-6)
-  --tools <list>      工具列表，逗号分隔 ("all" = 全部工具)
-  --max-turns <n>     每任务最大轮次 (default: 5)
-  --max-budget <usd>  每任务预算上限 (default: 无限制)
+  --model <name>      AI 模型 (claude: claude-sonnet-4-6 / MiniMax-M2.7, codex: gpt-5 / o3)
+  --tools <list>      工具列表，逗号分隔 ("all" = 全部工具, claude runtime only)
+  --max-turns <n>     每任务最大轮次 (default: 5, claude runtime only)
+  --max-budget <usd>  每任务预算上限 (claude runtime only)
   --prompt <text>     自定义 System Prompt
   --config <path>     配置文件 (覆盖 .anet profile 自动查找)
   -h, --help          帮助
+
+Runtime:
+  claude  Claude Agent SDK — 支持 Claude/MiniMax，需要 ANTHROPIC_API_KEY 或 ANTHROPIC_BASE_URL+TOKEN
+  codex   Codex SDK — 支持 GPT-5/o3，复用 codex 登录态（不需要额外 key）
 `);
     process.exit(0);
   }
@@ -51,17 +57,14 @@ function loadJson(path: string): Record<string, any> | null {
   try { return JSON.parse(readFileSync(path, "utf-8")); } catch { return null; }
 }
 
-// 1. 显式 --config
 let fileConfig: Record<string, any> = {};
 if (opts.config) {
   const fc = loadJson(join(process.cwd(), opts.config));
   if (fc) { fileConfig = fc; console.log(`[agent-node] 配置: ${opts.config}`); }
 }
 
-// 2. alias
 const ALIAS = opts.alias || process.env.COMMHUB_ALIAS || process.env.ALIAS || fileConfig.alias;
 
-// 3. .anet/profiles/<alias>.json
 if (!opts.config && ALIAS) {
   const profile = loadJson(join(process.cwd(), ".anet", "profiles", `${ALIAS}.json`));
   if (profile) {
@@ -75,11 +78,9 @@ if (!opts.config && ALIAS) {
   }
 }
 
-// 4. ~/.anet/config.json
 const globalConfig = loadJson(join(home, ".anet", "config.json"));
 if (globalConfig?.hub && !fileConfig.hub) fileConfig.hub = globalConfig.hub;
 
-// 5. legacy .agent-node.json
 if (!opts.config && !Object.keys(fileConfig).length) {
   const legacy = loadJson(join(process.cwd(), ".agent-node.json"));
   if (legacy) { fileConfig = legacy; console.log(`[agent-node] 配置: .agent-node.json`); }
@@ -89,6 +90,10 @@ if (!ALIAS) {
   console.error("错误: 必须指定 --alias\n用法: npx @sleep2agi/agent-node --alias \"我的Agent\"");
   process.exit(1);
 }
+
+// anet profile 用 "agent-sdk"，映射到 "claude"
+const rawRuntime = opts.runtime || process.env.RUNTIME || fileConfig.runtime || "claude";
+const RUNTIME = (rawRuntime === "agent-sdk" ? "claude" : rawRuntime) as "claude" | "codex";
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
@@ -127,54 +132,36 @@ async function callCommHub(method: string, params: Record<string, unknown>) {
   return text ? JSON.parse(text) : data;
 }
 
-// ── CommHub 操作 ──
 const RESUME_ID = `sdk-${ALIAS}-${Date.now().toString(36)}`;
+const register = () => callCommHub("report_status", {
+  resume_id: RESUME_ID, alias: ALIAS, status: "idle",
+  server: osHostname(), hostname: osHostname(),
+  agent: `agent-node:${RUNTIME}`, project_dir: process.cwd(),
+});
+const reportStatus = (status: string, task?: string) => callCommHub("report_status", { resume_id: RESUME_ID, alias: ALIAS, status, task });
+const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 5 }))?.messages || [];
+const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
+const sendReply = (target: string, task: string) => callCommHub("send_task", { alias: target, task, priority: "normal", from_session: ALIAS });
 
-async function register() {
-  return callCommHub("report_status", {
-    resume_id: RESUME_ID, alias: ALIAS, status: "idle",
-    server: osHostname(), hostname: osHostname(),
-    agent: "agent-node", project_dir: process.cwd(),
-  });
-}
+// ══════════════════════════════════════
+// Claude Runtime
+// ══════════════════════════════════════
+let claudeSessionId: string | undefined;
 
-async function reportStatus(status: string, task?: string) {
-  return callCommHub("report_status", { resume_id: RESUME_ID, alias: ALIAS, status, task });
-}
-
-async function getInbox() {
-  const result = await callCommHub("get_inbox", { alias: ALIAS, limit: 5 });
-  return result?.messages || [];
-}
-
-async function ackMessage(id: string) {
-  return callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
-}
-
-async function sendReply(target: string, task: string) {
-  return callCommHub("send_task", { alias: target, task, priority: "normal", from_session: ALIAS });
-}
-
-// ── AI 处理 ──
-let sessionId: string | undefined;
-
-async function processTask(task: string, from: string): Promise<string> {
-  log(`→ processing: ${task.slice(0, 80)}`);
-  await reportStatus("working", task.slice(0, 200));
+async function processWithClaude(task: string, from: string): Promise<string> {
+  const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
   const prompt = `你是 ${ALIAS}，收到来自 ${from} 的任务：\n\n${task}\n\n执行完后简要汇报结果。`;
-
   const options: any = {
     model: MODEL || undefined,
     tools: TOOLS.length ? TOOLS : undefined,
     maxTurns: MAX_TURNS,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
-    settingSources: [],  // 隔离：不读 ~/.claude.json 全局配置，防止 MCP 串网
+    settingSources: [],
     env: process.env,
     cwd: process.cwd(),
     stderr: (data: string) => { if (data.trim()) log(`[stderr] ${data.trim().slice(0, 200)}`); },
-    // Hooks: 工具调用日志
     hooks: {
       PreToolUse: [{ hooks: [async (input: any) => {
         log(`[tool] ${input.tool_name}(${JSON.stringify(input.tool_input).slice(0, 80)})`);
@@ -184,22 +171,73 @@ async function processTask(task: string, from: string): Promise<string> {
   };
   if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;
   if (SYSTEM_PROMPT) options.systemPrompt = SYSTEM_PROMPT;
-  if (sessionId) options.resume = sessionId;
+  if (claudeSessionId) options.resume = claudeSessionId;
 
   let result = "";
+  for await (const message of query({ prompt, options })) {
+    if ((message as any).type === "system" && (message as any).subtype === "init") {
+      claudeSessionId = (message as any).session_id;
+    }
+    if ((message as any).type === "result") {
+      result = (message as any).subtype === "success"
+        ? (message as any).result || "任务完成"
+        : `执行出错: ${(message as any).error || (message as any).result || "未知错误"}`;
+    }
+  }
+  return result;
+}
+
+// ══════════════════════════════════════
+// Codex Runtime
+// ══════════════════════════════════════
+let codexThread: any = null;
+
+async function processWithCodex(task: string, from: string): Promise<string> {
+  const { Codex } = await import("@openai/codex-sdk");
+
+  if (!codexThread) {
+    const codex = new Codex();
+    codexThread = codex.startThread({
+      skipGitRepoCheck: true,
+      approvalPolicy: "never" as const,
+      model: MODEL || undefined,
+    });
+  }
+
+  const prompt = `你是 ${ALIAS}，收到来自 ${from} 的任务：\n\n${task}\n\n执行完后简要汇报结果。`;
   try {
-    for await (const message of query({ prompt, options })) {
-      if ((message as any).type === "system" && (message as any).subtype === "init") {
-        sessionId = (message as any).session_id;
-      }
-      if ((message as any).type === "result") {
-        result = (message as any).subtype === "success"
-          ? (message as any).result || "任务完成"
-          : `执行出错: ${(message as any).error || (message as any).result || "未知错误"}`;
-      }
+    const turn = await codexThread.run(prompt);
+    return turn.finalResponse || "（无回复）";
+  } catch (e: any) {
+    // thread 过期，重建
+    log(`codex thread error: ${e.message}, 重建`);
+    const codex = new Codex();
+    codexThread = codex.startThread({
+      skipGitRepoCheck: true,
+      approvalPolicy: "never" as const,
+      model: MODEL || undefined,
+    });
+    const turn = await codexThread.run(prompt);
+    return turn.finalResponse || "（无回复）";
+  }
+}
+
+// ══════════════════════════════════════
+// 任务分发
+// ══════════════════════════════════════
+async function processTask(task: string, from: string): Promise<string> {
+  log(`→ processing [${RUNTIME}]: ${task.slice(0, 80)}`);
+  await reportStatus("working", task.slice(0, 200));
+
+  let result: string;
+  try {
+    if (RUNTIME === "codex") {
+      result = await processWithCodex(task, from);
+    } else {
+      result = await processWithClaude(task, from);
     }
   } catch (err: any) {
-    result = `SDK 错误: ${err.message}`;
+    result = `${RUNTIME} 错误: ${err.message}`;
     log(`✗ error: ${err.message}`);
   }
 
@@ -207,74 +245,52 @@ async function processTask(task: string, from: string): Promise<string> {
   return result;
 }
 
-// ── Inbox 处理 ──
+// ── Inbox + SSE ──
 async function processInbox() {
   const messages = await getInbox();
   if (!messages.length) return;
-
   for (const msg of messages) {
     const from = msg.from_session || "hub";
     log(`← [${from}] ${(msg.content as string).slice(0, 60)}`);
     await ackMessage(msg.id);
-
     const result = await processTask(msg.content, from);
-
     try {
       await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`);
       log(`→ replied to ${from}: ${result.slice(0, 60)}`);
-    } catch (e: any) {
-      log(`reply failed: ${e.message}`);
-    }
+    } catch (e: any) { log(`reply failed: ${e.message}`); }
   }
 }
 
-// ── SSE 长连接 ──
 async function connectSSE() {
   const sseUrl = `${COMMHUB_URL}/events/${encodeURIComponent(ALIAS)}`;
   let delay = 3000;
-
   while (true) {
-    log(`SSE connecting: ${sseUrl}`);
+    log(`SSE connecting`);
     try {
-      const res = await fetch(sseUrl, {
-        headers: { Accept: "text/event-stream", "Cache-Control": "no-cache" },
-      });
-      if (!res.ok || !res.body) {
-        log(`SSE failed: ${res.status}`);
-        await new Promise(r => setTimeout(r, delay));
-        delay = Math.min(delay * 1.5, 60_000);
-        continue;
-      }
-
+      const res = await fetch(sseUrl, { headers: { Accept: "text/event-stream", "Cache-Control": "no-cache" } });
+      if (!res.ok || !res.body) { await new Promise(r => setTimeout(r, delay)); delay = Math.min(delay * 1.5, 60_000); continue; }
       delay = 3000;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
+        const lines = buffer.split("\n"); buffer = lines.pop() || "";
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
-            const event = JSON.parse(line.slice(6));
-            if (event.type === "connected") { log(`SSE connected`); continue; }
-            if (["new_task", "new_message", "broadcast"].includes(event.type)) {
-              log(`← SSE ${event.type} from=${event.from || "?"}`);
+            const ev = JSON.parse(line.slice(6));
+            if (ev.type === "connected") { log("SSE connected"); continue; }
+            if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
+              log(`← SSE ${ev.type}`);
               await processInbox();
             }
           } catch {}
         }
       }
-    } catch (err: any) {
-      log(`SSE error: ${err.message}`);
-    }
-
+    } catch (err: any) { log(`SSE error: ${err.message}`); }
     log(`SSE reconnecting (${delay / 1000}s)...`);
     await new Promise(r => setTimeout(r, delay));
     delay = Math.min(delay * 1.5, 60_000);
@@ -282,22 +298,11 @@ async function connectSSE() {
 }
 
 // ── 启动 ──
-log(`启动 | Hub: ${COMMHUB_URL} | Model: ${MODEL || "(default)"} | Tools: [${TOOLS.join(",")}]`);
-
+log(`启动 | Hub: ${COMMHUB_URL} | Runtime: ${RUNTIME} | Model: ${MODEL || "(default)"} | Tools: [${TOOLS.join(",")}]`);
 await register();
 log("已注册到 CommHub");
-
-// 心跳
 setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
-
-// 优雅退出
-const shutdown = async () => {
-  log("shutting down...");
-  await reportStatus("offline").catch(() => {});
-  process.exit(0);
-};
+const shutdown = async () => { log("shutting down..."); await reportStatus("offline").catch(() => {}); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-
-// SSE
 connectSSE();

@@ -1,7 +1,7 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "0.5.1",
-  "description": "One-command AI Agent node for CommHub networks. Powered by Claude Agent SDK.",
+  "version": "0.6.0",
+  "description": "One-command AI Agent node for CommHub networks. Claude + Codex dual runtime.",
   "bin": {
     "agent-node": "./dist/cli.js"
   },
@@ -11,10 +11,10 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/cli.ts --outfile dist/cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk",
+    "build": "bun build src/cli.ts --outfile dist/cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external @openai/codex-sdk",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["agent", "ai", "commhub", "claude", "sdk", "minimax", "swarm"],
+  "keywords": ["agent", "ai", "commhub", "claude", "codex", "gpt5", "sdk", "minimax", "swarm"],
   "author": "sleep2agi",
   "license": "MIT",
   "repository": {
@@ -24,6 +24,7 @@
   },
   "engines": { "node": ">=18.0.0" },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.96"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.96",
+    "@openai/codex-sdk": "^0.118.0"
   }
 }
