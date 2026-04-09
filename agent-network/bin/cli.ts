@@ -752,8 +752,8 @@ async function serverCommand() {
     const env: Record<string, string> = { ...process.env as any, PORT: port, HOST: host };
     if (token) env.COMMHUB_AUTH_TOKEN = token;
 
-    // 直接 npx 跑 commhub-server，不用预装
-    const child = spawn("npx", ["--yes", "@sleep2agi/commhub-server"], { env, stdio: "inherit", shell: true });
+    // bunx 跑 commhub-server（server 是 bun-only）
+    const child = spawn("bunx", ["@sleep2agi/commhub-server"], { env, stdio: "inherit", shell: true });
     child.on("exit", (code) => process.exit(code || 0));
 
   } else if (sub === "config") {
