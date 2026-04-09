@@ -315,12 +315,50 @@ hub.on('task', async (msg) => {
 
 ---
 
-## 运行时要求
+## 依赖和运行时要求
 
-| 组件 | 运行时 |
-|------|--------|
-| anet CLI / SDK | Node.js 18+ 或 Bun |
-| CommHub Server | Bun 1.2+（单独部署） |
+### 必装
+
+| 包 | 命令 | 说明 |
+|---|------|------|
+| @sleep2agi/agent-network | `npm install -g @sleep2agi/agent-network` | anet CLI + CommHub SDK |
+
+### 按 runtime 选装
+
+| runtime | 需要安装 | 说明 |
+|---------|---------|------|
+| claude-code | Claude Code CLI (`npm install -g @anthropic-ai/claude-code`) | anet start 会 spawn `claude` |
+| agent-sdk | @sleep2agi/agent-node (`npm install -g @sleep2agi/agent-node`) | anet start 会 spawn `npx @sleep2agi/agent-node` |
+
+### 按模型选装
+
+| 模型 | 需要设置 | 在哪配 |
+|------|---------|--------|
+| Claude | `ANTHROPIC_API_KEY` | profile env 或系统环境变量 |
+| MiniMax | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | profile env |
+| 其他 Anthropic 兼容 | `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | profile env |
+
+### Server 部署
+
+| 包 | 运行时 | 说明 |
+|---|--------|------|
+| CommHub Server | Bun 1.2+ | `cd server && bun run start` 或 `anet server start` |
+
+### 完整安装示例
+
+```bash
+# 基础（所有人都装）
+npm install -g @sleep2agi/agent-network
+
+# 用 Claude Code 的人
+npm install -g @anthropic-ai/claude-code
+
+# 用 Agent SDK（MiniMax 等）的人
+npm install -g @sleep2agi/agent-node
+
+# 部署 Server 的人
+cd agent-network/server && bun install
+```
 
 ---
 
