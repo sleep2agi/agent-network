@@ -494,16 +494,15 @@ function ensureMcpJson(profile: Profile) {
     } catch {}
   }
 
-  // Update .mcp.json: key = "commhub · {alias}"
-  const mcpKey = `commhub · ${profile.alias}`;
+  // Ensure .mcp.json has commhub key
   mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-  // Remove old "commhub" key if exists
-  if (mcpConfig.mcpServers.commhub) delete mcpConfig.mcpServers.commhub;
-  // Remove old commhub · xxx keys
+  // Clean up old keys
   for (const k of Object.keys(mcpConfig.mcpServers)) {
     if (k.startsWith("commhub · ") || k === "commhub-channel") delete mcpConfig.mcpServers[k];
   }
-  mcpConfig.mcpServers[mcpKey] = { type: "stdio", command: "bun", args: [".anet/node-server.ts"] };
+  if (!mcpConfig.mcpServers.commhub) {
+    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.ts"] };
+  }
   writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
 
   // Write .anet/.env (hub URL + token)
@@ -563,10 +562,7 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
     for (const ch of profile.channels) {
       if (ch.startsWith("server:")) {
-        // server:commhub → server:commhub · {alias}（匹配 .mcp.json key）
-        const serverName = ch.slice(7); // after "server:"
-        const mcpKey = serverName === "commhub" ? `commhub · ${profile.alias}` : serverName;
-        claudeArgs.push("--dangerously-load-development-channels", `server:${mcpKey}`);
+        claudeArgs.push("--dangerously-load-development-channels", ch);
       } else {
         claudeArgs.push("--channels", ch);
       }
