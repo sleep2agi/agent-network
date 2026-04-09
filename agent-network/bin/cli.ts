@@ -410,10 +410,10 @@ commhub_get_all_status()
 
 // ── init profile ──
 
-function initProfile() {
+async function initProfile() {
   console.warn(`[deprecated] anet init profile is now anet create.`);
   console.warn(`             Run: anet create <node-name> [--runtime ...]\n`);
-  createCommand(args[2]);
+  await createCommand(args[2]);
 }
 
 function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): Profile {
@@ -453,10 +453,148 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   return profile;
 }
 
-function createCommand(idOverride?: string) {
-  const id = idOverride || args[1];
+function saveCreatedNode(id: string, profile: Profile) {
+  // Write alias .env for legacy commhub Claude Code channel
+  const channelDir = join(home, ".claude", "channels", "commhub");
+  const projectKey = process.cwd().replace(/\//g, "-");
+  const aliasDir = join(channelDir, projectKey);
+  mkdirSync(aliasDir, { recursive: true });
+  writeFileSync(join(aliasDir, ".env"), `COMMHUB_ALIAS=${id}\n`);
+
+  saveProfile(id, profile);
+}
+
+function attachChannel(profile: Profile, channel: string) {
+  profile.channels = profile.channels || [];
+  if (!profile.channels.includes(channel)) profile.channels.push(channel);
+}
+
+function writeTelegramChannelConfig(nodeId: string, botToken: string, allowId: string): string {
+  const channelDir = join(nodesDir(), nodeId, "channels", "telegram");
+  mkdirSync(channelDir, { recursive: true });
+  mkdirSync(join(channelDir, "inbox"), { recursive: true });
+
+  const envPath = join(channelDir, ".env");
+  writeFileSync(envPath, `TELEGRAM_BOT_TOKEN=${botToken}\n`);
+  try { chmodSync(envPath, 0o600); } catch {}
+
+  writeFileSync(join(channelDir, "access.json"), JSON.stringify({
+    dmPolicy: "allowlist",
+    allowFrom: [allowId],
+    groups: {},
+    pending: {},
+  }, null, 2) + "\n");
+  return channelDir;
+}
+
+async function askChoice<T extends string>(title: string, choices: { label: string; value: T; description?: string }[]): Promise<T> {
+  console.log(title);
+  choices.forEach((choice, index) => {
+    const desc = choice.description ? `    ${choice.description}` : "";
+    console.log(`  ${index + 1}) ${choice.label}${desc}`);
+  });
+
+  while (true) {
+    const answer = await ask("Select", "1");
+    const index = Number.parseInt(answer, 10) - 1;
+    if (index >= 0 && index < choices.length) return choices[index].value;
+    console.log(`Please enter 1-${choices.length}.`);
+  }
+}
+
+async function createInteractiveCommand() {
+  const id = await ask("Node name");
   if (!id) {
+    closeRL();
+    console.error("Error: node-name required");
+    process.exit(1);
+  }
+  validateNodeName(id);
+  if (loadProfile(id)) {
+    closeRL();
+    console.error(`Node "${id}" already exists: .anet/nodes/${id}/config.json`);
+    process.exit(1);
+  }
+
+  const runtime = await askChoice<RuntimeName>("Select runtime:", [
+    { label: "claude-code-cli", value: "claude-code-cli", description: "Claude Code CLI（需要 Pro 订阅）" },
+    { label: "codex-sdk", value: "codex-sdk", description: "Codex SDK（GPT-5.4）" },
+    { label: "claude-agent-sdk", value: "claude-agent-sdk", description: "Claude Agent SDK（MiniMax/书生等）" },
+  ]);
+
+  const opts = parseOpts();
+  opts.runtime = runtime;
+
+  if (runtime === "codex-sdk") {
+    const modelChoice = await askChoice("Select model:", [
+      { label: "gpt-5.4", value: "gpt-5.4" },
+      { label: "o3", value: "o3" },
+      { label: "custom", value: "__custom__" },
+    ]);
+    opts.model = modelChoice === "__custom__" ? await ask("Model") : modelChoice;
+  } else if (runtime === "claude-agent-sdk") {
+    const modelChoice = await askChoice("Select model:", [
+      { label: "MiniMax-M2.7", value: "MiniMax-M2.7" },
+      { label: "intern-s1-pro", value: "intern-s1-pro" },
+      { label: "claude-sonnet-4-6", value: "claude-sonnet-4-6" },
+      { label: "custom", value: "__custom__" },
+    ]);
+    opts.model = modelChoice === "__custom__" ? await ask("Model") : modelChoice;
+
+    if (opts.model === "MiniMax-M2.7") {
+      opts._envs.push("ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic");
+    } else if (opts.model === "intern-s1-pro") {
+      opts._envs.push("ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn");
+    }
+
+    const token = await ask("ANTHROPIC_AUTH_TOKEN");
+    if (token) opts._envs.push(`ANTHROPIC_AUTH_TOKEN=${token}`);
+  }
+
+  const profile = createProfileFromOpts(id, opts);
+
+  const addTelegram = await ask("Add Telegram channel? (y/n)", "n");
+  let telegramConfig: { botToken: string; allowId: string } | null = null;
+  if (/^y(es)?$/i.test(addTelegram)) {
+    const botToken = await ask("Telegram Bot Token");
+    const allowId = await ask("Allow User ID", "7612221352");
+    if (!botToken) {
+      closeRL();
+      console.error("Error: Telegram Bot Token required");
+      process.exit(1);
+    }
+    telegramConfig = { botToken, allowId };
+    attachChannel(profile, "telegram");
+  }
+
+  const addWechat = await ask("Add WeChat channel? (y/n)", "n");
+  if (/^y(es)?$/i.test(addWechat)) {
+    console.log("[anet] WeChat channel is not implemented yet; skipped.");
+  }
+
+  closeRL();
+  saveCreatedNode(id, profile);
+  if (telegramConfig) {
+    writeTelegramChannelConfig(id, telegramConfig.botToken, telegramConfig.allowId);
+  }
+  checkRuntimeDependency(normalizeRuntime(profile), "create");
+
+  console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)})`);
+  if (telegramConfig) console.log(`[anet] ✅ Telegram channel added`);
+  if (normalizeRuntime(profile) === "claude-code-cli") {
+    printClaudeCodeNotice();
+  }
+  console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
+  console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
+  console.log(`\nStart: anet start ${id}`);
+}
+
+async function createCommand(idOverride?: string) {
+  const id = idOverride || args[1];
+  if (!id) return createInteractiveCommand();
+  if (id.startsWith("--")) {
     console.error("Usage: anet create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk] [--model ...] [--tools ...]");
+    console.error("Or run fully interactive: anet create");
     process.exit(1);
   }
   validateNodeName(id);
@@ -468,15 +606,7 @@ function createCommand(idOverride?: string) {
 
   const opts = parseOpts();
   const profile = createProfileFromOpts(id, opts);
-
-  // Write alias .env for legacy commhub Claude Code channel
-  const channelDir = join(home, ".claude", "channels", "commhub");
-  const projectKey = process.cwd().replace(/\//g, "-");
-  const aliasDir = join(channelDir, projectKey);
-  mkdirSync(aliasDir, { recursive: true });
-  writeFileSync(join(aliasDir, ".env"), `COMMHUB_ALIAS=${id}\n`);
-
-  saveProfile(id, profile);
+  saveCreatedNode(id, profile);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)})`);
@@ -1125,31 +1255,13 @@ Example:
       process.exit(1);
     }
 
-    // Store at .anet/nodes/<nodeId>/channels/<type>/
-    const channelDir = join(nodesDir(), nodeId, "channels", type);
-    mkdirSync(channelDir, { recursive: true });
-    mkdirSync(join(channelDir, "inbox"), { recursive: true });
-
-    const tokenEnvKey = "TELEGRAM_BOT_TOKEN";
-
-    const envPath = join(channelDir, ".env");
-    writeFileSync(envPath, `${tokenEnvKey}=${botToken}\n`);
-    try { chmodSync(envPath, 0o600); } catch {}
-    writeFileSync(join(channelDir, "access.json"), JSON.stringify({
-      dmPolicy: "allowlist",
-      allowFrom: [allowId],
-      groups: {},
-      pending: {},
-    }, null, 2) + "\n");
+    const channelDir = writeTelegramChannelConfig(nodeId, botToken, allowId);
 
     if (!storedProfile) {
       console.error(`Node "${nodeId}" not found. Create it first: anet create ${nodeId} --runtime codex-sdk`);
       process.exit(1);
     }
-    storedProfile.channels = storedProfile.channels || [];
-    if (!storedProfile.channels.includes("telegram")) {
-      storedProfile.channels.push("telegram");
-    }
+    attachChannel(storedProfile, "telegram");
     saveProfile(nodeId, storedProfile);
 
     console.log(`\n✅ ${type} channel added to "${nodeId}"`);
@@ -1198,10 +1310,10 @@ Data: .anet/nodes/<node-id>/channels/<type>/
 switch (command) {
   case "init":
     if (args[1] === "project") initProject();
-    else if (args[1] === "profile") initProfile();
-    else initGlobal();
+    else if (args[1] === "profile") await initProfile();
+    else await initGlobal();
     break;
-  case "create": createCommand(); break;
+  case "create": await createCommand(); break;
   case "server": serverCommand(); break;
   case "start": startCommand(); break;
   case "resume": resumeCommand(); break;
