@@ -434,15 +434,19 @@ codex CLI not installed
 缺失提示：
 
 ```text
-[anet] agent-node is not installed or cannot report a version.
-[anet] Run: anet upgrade
+[anet] Cannot determine agent-node version. npx will pull latest on start.
+[anet] If you encounter issues, run: anet upgrade
 ```
+
+注意：不要求全局安装 agent-node。anet start 通过 `npx @sleep2agi/agent-node` 启动。
+版本探测优先用 `npx @sleep2agi/agent-node --version`（检测实际会运行的版本），
+全局 `agent-node --version` 作为备选。探测失败不阻塞启动，只打印 warning。
 
 commhub-server 检查说明：
 
-- `anet start` 本地只检查“可探测到的 commhub-server 版本”。
-- 如果本机未安装 commhub-server，不阻止 agent-node 启动，因为用户可能连接远端 CommHub。
-- 如果探测到 `commhub-server < 0.4.0`，打印 warning；不在 P0 中硬失败，避免误伤远端部署：
+- 兼容矩阵描述的是运行时真实依赖关系；P0 的 CLI 只对可本地确定的 agent-node 做硬校验，对 commhub-server 仅做 best-effort 提示，不把远端部署误判成本地故障。
+- 如果本机未安装 commhub-server，不阻止启动，因为用户可能连接远端 CommHub。
+- 如果探测到 `commhub-server < 0.4.0`，打印 warning；不硬失败：
 
 ```text
 [anet] Warning: local commhub-server v0.3.9 is older than recommended >= 0.4.0.
