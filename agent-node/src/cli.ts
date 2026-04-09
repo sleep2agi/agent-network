@@ -32,7 +32,7 @@ for (let i = 0; i < argv.length; i++) {
   --runtime <type>    claude (default) | codex
   --url <url>         CommHub URL (default: http://127.0.0.1:9200)
   --hub <url>         同 --url
-  --model <name>      AI 模型 (claude: claude-sonnet-4-6 / MiniMax-M2.7, codex: gpt-5 / o3)
+  --model <name>      AI 模型 (claude: claude-sonnet-4-6 / MiniMax-M2.7, codex: gpt-5.4 / o3)
   --tools <list>      工具列表，逗号分隔 ("all" = 全部工具, claude runtime only)
   --max-turns <n>     每任务最大轮次 (default: 5, claude runtime only)
   --max-budget <usd>  每任务预算上限 (claude runtime only)
@@ -199,18 +199,19 @@ async function processWithCodex(task: string, from: string): Promise<string> {
 
   if (!codexThread) {
     const codex = new Codex();
+    const codexModel = MODEL || "gpt-5.4";
     if (SESSION_ID) {
       codexThread = codex.resumeThread(SESSION_ID, {
         skipGitRepoCheck: true,
         approvalPolicy: "never" as const,
-        model: MODEL || undefined,
+        model: codexModel,
       });
       log(`codex resumed thread: ${SESSION_ID}`);
     } else {
       codexThread = codex.startThread({
         skipGitRepoCheck: true,
         approvalPolicy: "never" as const,
-        model: MODEL || undefined,
+        model: codexModel,
       });
     }
   }
@@ -220,13 +221,12 @@ async function processWithCodex(task: string, from: string): Promise<string> {
     const turn = await codexThread.run(prompt);
     return turn.finalResponse || "（无回复）";
   } catch (e: any) {
-    // thread 过期，重建
     log(`codex thread error: ${e.message}, 重建`);
     const codex = new Codex();
     codexThread = codex.startThread({
       skipGitRepoCheck: true,
       approvalPolicy: "never" as const,
-      model: MODEL || undefined,
+      model: MODEL || "gpt-5.4",
     });
     const turn = await codexThread.run(prompt);
     return turn.finalResponse || "（无回复）";
