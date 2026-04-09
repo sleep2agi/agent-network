@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/commhub-server",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "CommHub MCP Server — AI Agent communication hub with SSE push, MCP protocol, and REST API",
   "type": "module",
   "main": "src/index.ts",
