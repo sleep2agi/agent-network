@@ -1368,6 +1368,32 @@ Data: .anet/nodes/<node-id>/channels/<type>/
   }
 }
 
+// ── upgrade ──
+
+function upgradeCommand() {
+  console.log("[anet] Upgrading all packages...\n");
+  try {
+    console.log("1/3 Updating @sleep2agi/agent-network...");
+    execSync("npm install -g @sleep2agi/agent-network@latest", { stdio: "inherit" });
+  } catch { console.log("   ⚠ Failed to update agent-network"); }
+  try {
+    console.log("\n2/3 Updating @sleep2agi/agent-node...");
+    execSync("npm install -g @sleep2agi/agent-node@latest", { stdio: "inherit" });
+  } catch { console.log("   ⚠ Failed to update agent-node"); }
+  try {
+    console.log("\n3/3 Clearing npx cache...");
+    execSync("rm -rf ~/.npm/_npx", { stdio: "inherit" });
+    console.log("   ✅ npx cache cleared");
+  } catch {}
+  console.log("\n✅ Done. Check versions:");
+  try { execSync("anet -v", { stdio: "inherit" }); } catch {}
+  try {
+    const ver = execSync("npm ls -g @sleep2agi/agent-node --depth=0 2>/dev/null", { encoding: "utf-8" });
+    const m = ver.match(/@sleep2agi\/agent-node@([\d.]+)/);
+    if (m) console.log(`agent-node v${m[1]}`);
+  } catch {}
+}
+
 // ── Main ──
 
 switch (command) {
@@ -1382,6 +1408,7 @@ switch (command) {
   case "resume": resumeCommand(); break;
   case "import": importCommand(); break;
   case "channel": channelCommand(); break;
+  case "upgrade": upgradeCommand(); break;
   case "session": sessionCommand(); break;
   case "ls": case "list": lsCommand(); break;
   case "run": runCommand(); break;
