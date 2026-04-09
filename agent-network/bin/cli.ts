@@ -81,8 +81,19 @@ interface Profile {
 
 function loadProfile(id: string): Profile | null {
   const p = join(nodesDir(), id, "config.json");
-  if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
-  return null;
+  if (!existsSync(p)) return null;
+  try {
+    const project = JSON.parse(readFileSync(p, "utf-8"));
+    const gc = loadGlobal();
+    // Global config as base, project config overlay (field-level merge)
+    return {
+      ...project,
+      hub: project.hub || gc.hub || "",
+      token: project.token || gc.token || "",
+      env: { ...project.env },
+      flags: { ...project.flags },
+    };
+  } catch { return null; }
 }
 
 function saveProfile(id: string, profile: Profile) {
@@ -482,9 +493,8 @@ function ensureMcpJson(profile: Profile) {
 
   // Write .anet/.env (hub URL + token)
   const anetEnvPath = join(anetDir, ".env");
-  const gc = loadGlobal();
-  const token = profile.token || getToken();
-  let envContent = `COMMHUB_URL=${profile.hub || gc.hub || "http://127.0.0.1:9200"}\n`;
+  const token = profile.token || "";
+  let envContent = `COMMHUB_URL=${profile.hub || "http://127.0.0.1:9200"}\n`;
   if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
   writeFileSync(anetEnvPath, envContent);
 
@@ -510,8 +520,8 @@ async function launchAgent(id: string, mode: "start" | "resume") {
   // Auto-configure .mcp.json for commhub channel
   ensureMcpJson(profile);
 
-  // Token: node config > global config
-  const token = profile.token || getToken();
+  // Token already merged in loadProfile: project > global
+  const token = profile.token || "";
 
   if (runtime === "agent-sdk") {
     // spawn agent-node
