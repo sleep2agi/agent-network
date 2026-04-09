@@ -9,12 +9,12 @@
 ```bash
 anet init                              # 全局配置（hub URL + token）
 anet init project                      # 当前项目初始化（CommHub + .mcp.json）
-anet create <name> [options]           # 创建 node
-anet start <name>                      # 启动（有 session 自动 resume，没有新建）
-anet start <name> --new-session        # 强制新建 session
-anet resume <name> --session <id>      # 导入已有 session（自动创建 node，覆盖旧 session 需确认）
-anet channel add telegram <name>       # 给 node 加 Telegram channel
-anet channel ls [name]                 # 查看 channel
+anet create <node-name> [options]           # 创建 node
+anet start <node-name>                      # 启动（有 session 自动 resume，没有新建）
+anet start <node-name> --new-session        # 强制新建 session
+anet resume <node-name> --session <id>      # 导入已有 session（自动创建 node，覆盖旧 session 需确认）
+anet channel add telegram <node-name>       # 给 node 加 Telegram channel
+anet channel ls [node-name]                 # 查看 channel
 anet ls                                # 查看所有 node + 网络状态
 anet session ls                        # 查看当前项目的 session
 anet server start                      # 启动 CommHub Server
@@ -23,22 +23,25 @@ anet -v                                # 版本
 
 ## 核心概念
 
-### name
+### node-name
+
+**一个 node = 一个 session**。node-name 是 node 的唯一标识：
 
 ```
-name = CLI 参数 = 目录名 = CommHub alias
+node-name = CLI 参数 = 目录名 = CommHub alias
 ```
 
 ```bash
 anet create 指挥室
 # → .anet/nodes/指挥室/config.json
 # → CommHub alias: 指挥室
+# → 绑定一个 session
 ```
 
 校验规则（`anet create` 时执行）：
 - 允许：中文、英文、数字、`-`、`_`
 - 禁止：`/` `\` `:` `*` `?` `"` `<` `>` `|`、空格、`.` 开头、空字符串、`..`
-- 同一个 CommHub 上 name 必须唯一
+- **同一个 CommHub 上 node-name 必须唯一，不要重名**
 
 ### start 行为
 
@@ -72,7 +75,7 @@ anet resume 指挥室 --session <id>
 | runtime | 回写方式 |
 |---------|---------|
 | codex-sdk / claude-agent-sdk | agent-node 自动写回 config.json（SDK 返回 session/thread ID） |
-| claude-code-cli | 手动绑定：`anet session ls` + `anet resume <name> --session <id>` |
+| claude-code-cli | 手动绑定：`anet session ls` + `anet resume <node-name> --session <id>` |
 
 agent-node 负责写回 `--config` 指向的 config.json。anet 不从 stdout 解析。
 
@@ -123,7 +126,7 @@ anet start 指挥室
 ## `anet create` 参数
 
 ```bash
-anet create <name> \
+anet create <node-name> \
   --runtime claude-code-cli|codex-sdk|claude-agent-sdk \
   --model <模型名>       # codex-sdk 默认 gpt-5.4
   --tools <工具列表>     # 逗号分隔，或 all
@@ -135,7 +138,7 @@ anet create <name> \
 ## `anet channel add` 参数
 
 ```bash
-anet channel add telegram <name> \
+anet channel add telegram <node-name> \
   --bot-token <token>    # Telegram Bot Token
   --allow <user-id>      # Telegram 数字 User ID（发 @userinfobot 获取）
 ```
@@ -164,7 +167,7 @@ Node "A站牛" not found. Create it first: anet create A站牛 --runtime codex-s
 ### 项目
 
 ```
-{workpath}/.anet/nodes/<name>/
+{workpath}/.anet/nodes/<node-name>/
 ├── config.json              # node 启动配置
 └── channels/
     └── telegram/
@@ -209,7 +212,7 @@ agent-node 永远启动 CommHub SSE，不依赖 channels 数组。
 ### 配置继承
 
 ```
-项目 .anet/nodes/<name>/config.json    有值的字段优先
+项目 .anet/nodes/<node-name>/config.json    有值的字段优先
         ↓ fallback
 全局 ~/.anet/config.json                hub、token 兜底
 ```
@@ -224,12 +227,12 @@ claude --dangerously-skip-permissions \
   --dangerously-load-development-channels server:commhub \
   --channels plugin:telegram@claude-plugins-official \
   --teammate-mode in-process \
-  -n <name>
+  -n <node-name>
 ```
 
 **resume（config.session 有值）：**
 ```bash
-claude ... --resume <session> -n <name>
+claude ... --resume <session> -n <node-name>
 ```
 
 `anet start` 自动 ensure 当前项目的 `.mcp.json` 和 `.anet/node-server.ts`（无需手动 `init project`）。
@@ -238,8 +241,8 @@ claude ... --resume <session> -n <name>
 
 ```bash
 npx @sleep2agi/agent-node \
-  --config .anet/nodes/<name>/config.json \
-  --alias <name>
+  --config .anet/nodes/<node-name>/config.json \
+  --alias <node-name>
 ```
 
 agent-node 从 config.json 读取所有配置。崩溃时前台退出（同 exit code），不自动重启。
@@ -249,11 +252,11 @@ agent-node 从 config.json 读取所有配置。崩溃时前台退出（同 exit
 | 旧命令/字段 | 替代 | 兼容期 |
 |-------------|------|--------|
 | `anet init profile` | `anet create` | 2 个版本 |
-| `anet resume <name>`（无 --session） | `anet start` | 2 个版本 |
+| `anet resume <node-name>`（无 --session） | `anet start` | 2 个版本 |
 | `runtime: "agent-sdk"` | `codex-sdk` / `claude-agent-sdk` | 2 个版本 |
 | `resume` / `resumeAlias` / `sessionId` | `session` | 2 个版本 |
 | `alias` | `name` | 2 个版本 |
-| `.anet/profiles/<name>.json` | `.anet/nodes/<name>/config.json` | 2 个版本 |
+| `.anet/profiles/<node-name>.json` | `.anet/nodes/<node-name>/config.json` | 2 个版本 |
 
 ## 决策记录
 
@@ -261,7 +264,7 @@ agent-node 从 config.json 读取所有配置。崩溃时前台退出（同 exit
 |---|------|------|
 | 1 | `anet start` 自动判断新建/resume | 用户不需要区分 start 和 resume |
 | 2 | `anet resume --session` 仅用于导入 | 覆盖旧 session 需确认 |
-| 3 | name 统一（目录名 = CommHub alias） | 不引入 id/name 两个概念 |
+| 3 | node-name 统一（目录名 = CommHub alias） | 一个 node 一个 session，不重名 |
 | 4 | channel node-local | 避免两个 node 误用同一个 bot token |
 | 5 | agent-node 支持 `--config` + `--alias` | `--config` 优先 |
 | 6 | session 字段统一叫 `session` | 收敛旧字段名 |
@@ -276,7 +279,7 @@ agent-node 从 config.json 读取所有配置。崩溃时前台退出（同 exit
 
 ## 已知限制（P0）
 
-- 同一 CommHub 上 name 必须唯一，多项目同名会冲突
+- 同一 CommHub 上 node-name 必须唯一，多项目同名会冲突
 - claude-code-cli session 不自动写回，需手动绑定
 - 崩溃不自动重启（用 PM2/systemd 管理）
 - 仅支持 Telegram channel，WeChat/Feishu 后续
