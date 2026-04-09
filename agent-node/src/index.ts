@@ -80,6 +80,11 @@ export class AgentNode {
       maxTurns: this.config.maxTurns,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
+      // 显式传 env 确保子进程继承所有环境变量（含 ANTHROPIC_BASE_URL 等）
+      env: process.env,
+      cwd: process.cwd(),
+      // 捕获 stderr 用于 debug
+      stderr: (data: string) => { if (data.trim()) this.log(`[stderr] ${data.trim().slice(0, 200)}`); },
     };
 
     if (this.config.systemPrompt) options.systemPrompt = this.config.systemPrompt;
