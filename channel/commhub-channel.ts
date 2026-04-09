@@ -58,11 +58,21 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-const COMMHUB_URL = process.env.COMMHUB_URL || "http://127.0.0.1:9200";
+// ── Load ~/.anet/config.json for token fallback ──────
+function loadAnetConfig(): Record<string, string> {
+  try {
+    const p = join(HOME, ".anet", "config.json");
+    if (existsSync(p)) return JSON.parse(readFileSync(p, "utf-8"));
+  } catch {}
+  return {};
+}
+const ANET_CONFIG = loadAnetConfig();
+
+const COMMHUB_URL = process.env.COMMHUB_URL || ANET_CONFIG.hub || "http://127.0.0.1:9200";
 const TMUX_NAME = process.env.COMMHUB_TMUX || getTmuxSessionName();
 const ALIAS = process.env.COMMHUB_ALIAS || TMUX_NAME || hostname();
 const RESUME_ID = process.env.COMMHUB_RESUME_ID || process.env.CLAUDE_RESUME_ID || crypto.randomUUID();
-const AUTH_TOKEN = process.env.COMMHUB_TOKEN || "";
+const AUTH_TOKEN = process.env.COMMHUB_TOKEN || ANET_CONFIG.token || "";
 
 function log(msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
