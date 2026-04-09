@@ -252,6 +252,16 @@ Bun.serve({
       }
     }
 
+    // ── REST: recent messages (for Dashboard communication graph) ──
+    if (url.pathname === "/api/messages") {
+      const limit = Number(url.searchParams.get("limit")) || 100;
+      const since = url.searchParams.get("since") ?? new Date(Date.now() - 3600000).toISOString().replace("T", " ").slice(0, 19);
+      const rows = db.query(
+        "SELECT id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at FROM inbox WHERE created_at >= ?1 ORDER BY created_at DESC LIMIT ?2"
+      ).all(since, limit);
+      return withCors(req, Response.json({ ok: true, messages: rows }));
+    }
+
     // ── REST: recent completions ──
     if (url.pathname === "/api/completions") {
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 86400000).toISOString();
