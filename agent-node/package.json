@@ -1,36 +1,20 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "One-command AI Agent node for CommHub networks. Powered by Claude Agent SDK.",
   "bin": {
     "agent-node": "./dist/cli.js"
   },
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
-  },
   "files": [
     "dist",
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/cli.ts src/index.ts --outdir dist --target node --format esm --minify && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "build": "bun build src/cli.ts --outfile dist/cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk",
     "prepublishOnly": "npm run build"
   },
-  "keywords": [
-    "agent",
-    "ai",
-    "commhub",
-    "claude",
-    "sdk",
-    "minimax",
-    "swarm"
-  ],
+  "keywords": ["agent", "ai", "commhub", "claude", "sdk", "minimax", "swarm"],
   "author": "sleep2agi",
   "license": "MIT",
   "repository": {
@@ -38,15 +22,8 @@
     "url": "https://github.com/sleep2agi/agent-comm-hub",
     "directory": "agent-node"
   },
-  "engines": {
-    "node": ">=18.0.0"
-  },
+  "engines": { "node": ">=18.0.0" },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.96",
-    "@sleep2agi/agent-network": "^0.0.26"
-  },
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "typescript": "^5.0.0"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.96"
   }
 }
