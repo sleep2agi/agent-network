@@ -1,7 +1,7 @@
 # @sleep2agi/agent-network 架构设计
 
 > CLI 名：`anet` | npm 包名：`@sleep2agi/agent-network`
-> 版本：agent-network CLI v0.0.29 | agent-node v0.6.0 | commhub-server v0.4.3
+> 版本：agent-network CLI v0.0.32 | agent-node v0.7.0 | commhub-server v0.4.3
 
 ---
 
@@ -254,18 +254,23 @@ await startServer({
 
 ---
 
-## 5. Channel 插件提取
+## 5. Channel 插件自动配置
 
-`anet setup --type claude-code` 需要将 Channel 插件放到 `~/.claude/channels/commhub/server.ts`。
+`anet start`/`anet resume` 检测到 `runtime: "claude-code"` 时，自动确保 Channel 插件可用：
 
-**当前方案**：setup 命令检查文件是否存在，不存在时提示用户手动复制或从 GitHub 下载。
+1. 从 npm 包复制 `node-server.ts` → `{项目}/.anet/node-server.ts`
+2. 安装依赖（`@modelcontextprotocol/sdk`）
+3. 写入 `.mcp.json`：`commhub → .anet/node-server.ts`
 
 ```
-如果 ~/.claude/channels/commhub/server.ts 不存在：
-  → 提示: curl -sL https://raw.githubusercontent.com/sleep2agi/agent-comm-hub/main/channel/server.ts -o ~/.claude/channels/commhub/server.ts
+{项目}/
+├── .mcp.json                # {"mcpServers":{"commhub":{"type":"stdio","command":"bun","args":[".anet/node-server.ts"]}}}
+└── .anet/
+    ├── node-server.ts       # Channel 插件（MCP server + SSE 长连接）
+    └── package.json         # 依赖
 ```
 
-**未来方案**：把 channel/server.ts 打包进 npm 包，setup 时自动提取到正确位置。
+已配置过的项目直接跳过。`anet init project` 也做同样的事（另外还写 CLAUDE.md）。
 
 ---
 

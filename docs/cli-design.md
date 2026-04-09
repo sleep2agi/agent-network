@@ -1,6 +1,6 @@
 # @sleep2agi/agent-network CLI 设计文档
 
-> CLI 命令名：`anet` | npm 包名：`@sleep2agi/agent-network` | 当前版本：v0.0.29
+> CLI 命令名：`anet` | npm 包名：`@sleep2agi/agent-network` | 当前版本：v0.0.32
 
 ---
 
@@ -8,6 +8,8 @@
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v0.0.32 | 2026-04-09 | `start`/`resume` 自动配置 `.mcp.json`，确保 commhub channel 可用 |
+| v0.0.31 | 2026-04-09 | `resume` 优先使用 session ID，修复 alias 搜索问题 |
 | v0.0.29 | 2026-04-08 | Codex runtime 支持、`anet server start`、`--tools all` / `--max-budget` / `--session` |
 | v0.0.10 | 2026-04-08 | profile 加 resumeAlias 字段 |
 | v0.0.9 | 2026-04-08 | start/resume 分离，resume 按名字搜索 |
@@ -46,38 +48,29 @@ anet server start             启动 CommHub Server（anet 内置）
 └── config.json              # hub URL（anet init 写入）
 ```
 
-### 项目（当前版本 v0.0.10）
+### 项目
 
 ```
 {workpath}/
-├── .mcp.json                # commhub → .anet/server.ts
+├── .mcp.json                # commhub MCP server（自动生成）
 └── .anet/
-    ├── server.ts            # Channel 插件（init project 下载）
-    ├── package.json         # 依赖
-    ├── node_modules/        # bun install
+    ├── node-server.ts       # Channel 插件（自动从 npm 包复制）
+    ├── package.json         # 依赖（@modelcontextprotocol/sdk）
+    ├── node_modules/
     ├── .env                 # COMMHUB_URL
-    └── profiles/
-        ├── 指挥室.json       # init profile 创建
-        └── 通信龙.json
+    └── nodes/
+        ├── 指挥室/
+        │   └── config.json  # 启动配置
+        └── 通信龙/
+            └── config.json
 ```
 
-### 项目（下一版计划）
+**自动配置行为**：`anet start`/`anet resume` 检测到 `runtime: "claude-code"` 且 channels 含 commhub 时，自动确保：
+1. `.anet/node-server.ts` 存在（从 npm 包复制）
+2. `.anet/package.json` + `bun install`
+3. `.mcp.json` 包含 `commhub` MCP server 配置
 
-```
-{workpath}/.anet/
-├── server.ts
-├── package.json
-├── .env
-└── nodes/
-    ├── 指挥室/
-    │   ├── config.json      # 启动配置（原 profile）
-    │   └── logs/            # 运行日志
-    └── 通信龙/
-        ├── config.json
-        └── logs/
-```
-
-`profiles/xxx.json` → `nodes/xxx/config.json`，每个 node 一个目录，可扩展存日志。
+已配置过的项目直接跳过，无重复操作。
 
 ---
 
@@ -108,15 +101,15 @@ anet init project
 ```
 
 做的事：
-1. 下载 `server.ts` → `.anet/server.ts`
-2. 下载 `package.json` → `.anet/package.json`
-3. `bun install`（在 .anet/ 下）
-4. 写 `.anet/.env`（COMMHUB_URL）
-5. 写 `.mcp.json`（commhub → .anet/server.ts）
+1. 复制 `node-server.ts` → `.anet/node-server.ts`（从 npm 包）
+2. 写 `.anet/package.json` + `bun install`
+3. 写 `.anet/.env`（COMMHUB_URL）
+4. 写 `.mcp.json`（commhub → `.anet/node-server.ts`）
+5. 写 `CLAUDE.md`（CommHub 通信指南）
 
 ### anet init profile
 
-创建 Node 启动配置：
+创建 Node 启动配置，写入 `.anet/nodes/<id>/config.json`：
 
 ```bash
 anet init profile <id> --alias <别名> [options]
@@ -124,13 +117,15 @@ anet init profile <id> --alias <别名> [options]
 
 | 参数 | 说明 |
 |------|------|
-| `<id>` | Node ID（作为文件名/目录名） |
+| `<id>` | Node ID（目录名） |
 | `--alias` | CommHub session 别名 |
+| `--runtime` | `claude-code`（默认）/ `agent-sdk` |
 | `--name` | 显示名 |
-| `--channel` | 添加 channel（可重复） |
+| `--model` | 模型名（agent-sdk 用） |
+| `--tools` | 工具列表，逗号分隔（agent-sdk 用） |
+| `--channel` | 添加 channel（可重复，claude-code 用） |
 | `--env` | 环境变量 K=V（可重复） |
 | `--resume` | Session resume ID |
-| `--resume-alias` | Resume 搜索名（默认等于 alias） |
 | `--teammate-mode` | 如 in-process |
 
 示例：
@@ -180,15 +175,26 @@ anet resume 指挥室    # 按 resumeAlias/name/alias 搜索恢复
 anet resume           # 列出所有 profile
 ```
 
-行为：同 start，额外传 `--resume <resumeAlias>` 按名字搜索旧 session
+行为：同 start，额外传 `--resume <id>`。优先级：`resume`（session ID）> `resumeAlias` > `name` > `alias`
+
+**快速接入**：config 不存在时，`--session` 参数自动创建默认配置：
+
+```bash
+anet resume 指挥室 --session <session-id>
+# → 创建 .anet/nodes/指挥室/config.json（默认 claude-code + commhub + dangerouslySkipPermissions + teammateMode）
+# → 配置 .mcp.json
+# → resume
+```
+
+**自动配置**：start/resume 都会调 `ensureMcpJson()`，确保 `.mcp.json` 有 commhub channel，避免 resume 后收不到消息。
 
 ---
 
-## Profile 规范
+## Node 配置规范
 
-路径：`.anet/profiles/<id>.json`
+路径：`.anet/nodes/<id>/config.json`
 
-anet 和 agent-node 共用同一套 profile。`anet start` 和 `npx @sleep2agi/agent-node` 都读这里。
+每个 Node 一个目录，`config.json` 存启动配置。`anet start` 和 `npx @sleep2agi/agent-node` 都读这里。
 
 ### 配置生效优先级
 
@@ -238,7 +244,7 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 
 ```json
 {
-  "anet_version": "0.0.29",
+  "anet_version": "0.0.32",
   "runtime": "claude-code",
   "name": "指挥室",
   "alias": "指挥室",
@@ -259,7 +265,7 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 
 ```json
 {
-  "anet_version": "0.0.29",
+  "anet_version": "0.0.32",
   "runtime": "codex",
   "name": "Codex马",
   "alias": "Codex马",
@@ -277,7 +283,7 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 
 ```json
 {
-  "anet_version": "0.0.29",
+  "anet_version": "0.0.32",
   "runtime": "agent-sdk",
   "name": "小明1号",
   "alias": "小明1号",
@@ -296,7 +302,7 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 
 ```json
 {
-  "anet_version": "0.0.29",
+  "anet_version": "0.0.32",
   "runtime": "agent-sdk",
   "alias": "Claude马",
   "hub": "http://YOUR_IP:9200",
@@ -312,10 +318,10 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
 
 ## anet ls
 
-显示当前目录的 profiles + sessions + 网络状态：
+显示当前目录的 nodes + sessions + 网络状态：
 
 ```
-Profiles:
+Nodes:
   指挥室  →  指挥室  [server:commhub, plugin:telegram]
   通信龙  →  通信龙  [server:commhub]
 
@@ -410,6 +416,20 @@ anet server start
 
 ## .mcp.json 与 Channel 的关系
 
-1. `.mcp.json` 配 commhub stdio server（提供 MCP 工具）
-2. `--dangerously-load-development-channels server:commhub` 从 `.mcp.json` 找 commhub 配置，授予 Channel 推送权限
-3. 两者配合：工具 + 推送都有
+1. `.mcp.json` 配 commhub stdio server → 提供 MCP 工具（send_task、reply、report_status 等）
+2. `--dangerously-load-development-channels server:commhub` → 从 `.mcp.json` 找 commhub 配置，授予 SSE Channel 推送权限
+3. 两者配合：工具调用 + 实时消息推送都有
+4. `anet start`/`anet resume` 自动检查并写入 `.mcp.json`，用户无需手动配置
+
+`.mcp.json` 示例：
+```json
+{
+  "mcpServers": {
+    "commhub": {
+      "type": "stdio",
+      "command": "bun",
+      "args": [".anet/node-server.ts"]
+    }
+  }
+}
+```

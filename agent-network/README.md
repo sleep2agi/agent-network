@@ -75,15 +75,27 @@ anet init profile <id> [options]     # 创建启动 profile
 ```bash
 anet start <id>                      # 新建 session
 anet resume <id>                     # 恢复上次 session
-anet start                           # 列出所有 profile
+anet start                           # 列出所有 node 配置
 anet <id>                            # 快捷启动
 ```
 
 profile 不存在时自动进入交互式创建。
 
-`anet start` 根据 profile 的 `runtime` 自动选择：
-- `claude-code` → spawn claude CLI
+`anet start` 根据 config 的 `runtime` 自动选择：
+- `claude-code` → spawn claude CLI（自动配置 `.mcp.json`）
 - `agent-sdk` → spawn @sleep2agi/agent-node
+
+### 快速接入已有 session
+
+已有 Claude Code session 想接入 anet？一条命令：
+
+```bash
+cd ~/your-project
+anet resume 你的Agent --session <session-id>
+# 自动创建 .anet/nodes/你的Agent/config.json + 配置 .mcp.json + resume
+```
+
+不需要先 `init profile`，直接 resume 即可。
 
 ### 状态查看
 
@@ -117,9 +129,9 @@ anet ls                              # profiles + sessions + 网络状态
 | `--max-turns` | 每任务最大轮次 |
 | `--max-budget` | 每任务预算（美元） |
 
-## Profile 格式
+## Node 配置
 
-路径：`.anet/profiles/<id>.json`，anet 和 agent-node 共用。
+路径：`.anet/nodes/<id>/config.json`，anet 和 agent-node 共用。
 
 ```json
 {

@@ -122,25 +122,40 @@ anet start 我的Agent
 #   Channels / Model / Tools ...
 ```
 
+## 快速接入已有 session
+
+已有 Claude Code session，想接入 anet？一条命令：
+
+```bash
+cd ~/your-project
+anet resume 你的Agent --session <session-id>
+# 自动创建 .anet/nodes/你的Agent/config.json + 配置 .mcp.json + resume
+```
+
+不需要先 `init project` 或 `init profile`。
+
 ## 常用命令
 
 ```bash
 anet init                    # 配 hub（一次性）
 anet init project            # 配项目（claude-code 用）
-anet init profile <id>       # 创建 profile
+anet init profile <id>       # 创建 node 配置
 anet start <id>              # 新建 session
 anet resume <id>             # 恢复 session
+anet resume <id> --session x # 快速接入已有 session
 anet ls                      # 查看状态
 ```
 
-## Profile 存在哪？
+## 配置存在哪？
 
 ```
-{项目}/.anet/profiles/指挥室.json
-{项目}/.anet/profiles/小明1号.json
+{项目}/.anet/nodes/指挥室/config.json
+{项目}/.anet/nodes/小明1号/config.json
 ```
 
-anet 和 agent-node 共用同一套配置。
+每个 Node 一个目录。anet 和 agent-node 共用同一套配置。
+
+`anet start`/`anet resume` 会自动确保 `.mcp.json` 有 commhub channel 配置（claude-code runtime）。
 
 ## 启动 CommHub Server
 

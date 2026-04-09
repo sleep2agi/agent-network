@@ -107,6 +107,7 @@ anet start 指挥室
 | `anet init project` | 配 Claude Code 项目 |
 | `anet start 指挥室` | 新建 Claude Code session |
 | `anet resume 指挥室` | 恢复上次 session |
+| `anet resume 马 --session <id>` | 快速接入已有 session（自动创建配置） |
 | `anet ls` | 查看谁在线 |
 
 ---

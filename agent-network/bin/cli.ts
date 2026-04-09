@@ -12,7 +12,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { join } from "path";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -94,6 +94,8 @@ anet — AI Agent Network CLI
   anet resume <id>              Resume last session with profile
   anet ls                       Show profiles + sessions + network
   anet server start             Start CommHub Server
+  anet import                   Import sessions from CommHub → config.json
+  anet import <alias>           Import specific session
   anet run                      Run standalone SSE agent
   anet --help                   This help
 
@@ -186,7 +188,6 @@ async function initProject() {
       }
     }, null, 2) + "\n");
     try {
-      const { execSync } = await import("child_process");
       execSync("bun install", { cwd: anetDir, stdio: "pipe" });
       console.log("  ✅ Dependencies installed");
     } catch {
@@ -401,6 +402,57 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
   return profile;
 }
 
+// ── ensure .mcp.json has commhub server ──
+
+function ensureMcpJson(profile: Profile) {
+  if ((profile.runtime || "claude-code") !== "claude-code") return;
+  if (!profile.channels?.some(ch => ch.includes("commhub"))) return;
+
+  const mcpJsonPath = join(process.cwd(), ".mcp.json");
+  let mcpConfig: any = {};
+  if (existsSync(mcpJsonPath)) try { mcpConfig = JSON.parse(readFileSync(mcpJsonPath, "utf-8")); } catch {}
+
+  if (mcpConfig.mcpServers?.commhub) return; // already configured
+
+  // Ensure .anet/node-server.ts exists
+  const anetDir = join(process.cwd(), ".anet");
+  const serverTs = join(anetDir, "node-server.ts");
+  if (!existsSync(serverTs)) {
+    mkdirSync(anetDir, { recursive: true });
+    const candidates = [
+      join(new URL(".", import.meta.url).pathname, "..", "..", "src", "node-server.ts"),
+      join(new URL(".", import.meta.url).pathname, "..", "src", "node-server.ts"),
+      join(process.argv[1], "..", "..", "src", "node-server.ts"),
+    ];
+    for (const p of candidates) {
+      if (existsSync(p)) {
+        writeFileSync(serverTs, readFileSync(p, "utf-8"));
+        console.log(`[anet] Created .anet/node-server.ts`);
+        break;
+      }
+    }
+  }
+
+  // Ensure .anet/package.json + deps
+  const pkgJson = join(anetDir, "package.json");
+  if (!existsSync(pkgJson)) {
+    mkdirSync(anetDir, { recursive: true });
+    writeFileSync(pkgJson, JSON.stringify({
+      "private": true,
+      "dependencies": { "@modelcontextprotocol/sdk": "^1.12.0" }
+    }, null, 2) + "\n");
+    try {
+      execSync("bun install", { cwd: anetDir, stdio: "pipe" });
+    } catch {}
+  }
+
+  // Write .mcp.json
+  mcpConfig.mcpServers = mcpConfig.mcpServers || {};
+  mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.ts"] };
+  writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+  console.log(`[anet] .mcp.json: added commhub channel server`);
+}
+
 // ── launch helper (shared by start + resume) ──
 
 async function launchAgent(id: string, mode: "start" | "resume") {
@@ -412,6 +464,9 @@ async function launchAgent(id: string, mode: "start" | "resume") {
   const runtime = profile.runtime || "claude-code";
   const label = mode === "start" ? "Starting new" : "Resuming";
   console.log(`[anet] ${label} "${id}" (${profile.alias}) [${runtime}]...\n`);
+
+  // Auto-configure .mcp.json for commhub channel
+  ensureMcpJson(profile);
 
   if (runtime === "agent-sdk") {
     // spawn agent-node
@@ -471,11 +526,36 @@ async function startCommand() {
 async function resumeCommand() {
   const id = args[1];
   if (!id) { showProfiles("resume"); return; }
-  const profile = loadProfile(id);
+
+  let profile = loadProfile(id);
   if (!profile) {
-    console.log(`Profile "${id}" not found. Create one first:\n\n  anet start ${id}\n`);
-    process.exit(1);
+    // Auto-create config: anet resume 指挥室 --session <id>
+    const opts = parseOpts();
+    const gc = loadGlobal();
+    const hub = opts.hub || gc.hub;
+    const sessionId = opts.session;
+
+    if (!sessionId) {
+      console.log(`Profile "${id}" not found.\n`);
+      console.log(`Quick setup:  anet resume ${id} --session <session-id>`);
+      console.log(`Or create:    anet init profile ${id} --alias ${id} --resume <session-id>`);
+      process.exit(1);
+    }
+    if (!hub) { console.error("Run 'anet init' first"); process.exit(1); }
+
+    profile = {
+      runtime: "claude-code",
+      alias: opts.alias || id,
+      hub,
+      channels: ["server:commhub"],
+      env: {},
+      flags: { dangerouslySkipPermissions: true, teammateMode: "in-process" },
+      resume: sessionId,
+    };
+    saveProfile(id, profile);
+    console.log(`[anet] Created .anet/nodes/${id}/config.json (resume: ${sessionId.slice(0, 8)}...)\n`);
   }
+
   await launchAgent(id, "resume");
 }
 
@@ -635,6 +715,74 @@ Example:
   }
 }
 
+// ── import ──
+
+async function importCommand() {
+  const gc = loadGlobal();
+  const opts = parseOpts();
+  const hub = opts.hub || gc.hub;
+  if (!hub) { console.error("Run 'anet init' first"); process.exit(1); }
+
+  // Fetch all sessions from CommHub
+  let sessions: any[] = [];
+  try {
+    const res = await fetch(`${hub}/api/status`);
+    const data = await res.json() as any;
+    sessions = data.sessions || [];
+  } catch (e: any) {
+    console.error(`Cannot reach ${hub}: ${e.message}`);
+    process.exit(1);
+  }
+
+  if (sessions.length === 0) { console.log("No sessions in CommHub."); return; }
+
+  // Filter: only claude-code agents with project_dir
+  const claudeSessions = sessions.filter((s: any) => s.agent === "claude-code" && s.project_dir);
+  if (claudeSessions.length === 0) { console.log("No claude-code sessions found."); return; }
+
+  const targetAlias = args[1]; // optional: anet import 指挥室
+  const toImport = targetAlias
+    ? claudeSessions.filter((s: any) => s.alias === targetAlias)
+    : claudeSessions;
+
+  if (toImport.length === 0) { console.log(`No session found for "${targetAlias}".`); return; }
+
+  let created = 0;
+  for (const s of toImport) {
+    const projectDir = s.project_dir;
+    const nodeDir = join(projectDir, ".anet", "nodes", s.alias);
+    const configPath = join(nodeDir, "config.json");
+
+    if (existsSync(configPath)) {
+      console.log(`  ⏭  ${s.alias} — already exists (${projectDir})`);
+      continue;
+    }
+
+    // Skip if project_dir doesn't exist on this machine
+    if (!existsSync(projectDir)) {
+      console.log(`  ⚠  ${s.alias} — project_dir not found: ${projectDir}`);
+      continue;
+    }
+
+    const config: Profile = {
+      runtime: "claude-code",
+      alias: s.alias,
+      hub,
+      channels: ["server:commhub"],
+      env: {},
+      flags: { dangerouslySkipPermissions: true, teammateMode: "in-process" },
+      resume: s.resume_id,
+    };
+
+    mkdirSync(nodeDir, { recursive: true });
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+    console.log(`  ✅ ${s.alias} → ${projectDir}/.anet/nodes/${s.alias}/config.json`);
+    created++;
+  }
+
+  console.log(`\nImported ${created} session(s). Use: cd <project> && anet resume <alias>`);
+}
+
 // ── Main ──
 
 switch (command) {
@@ -646,6 +794,7 @@ switch (command) {
   case "server": serverCommand(); break;
   case "start": startCommand(); break;
   case "resume": resumeCommand(); break;
+  case "import": importCommand(); break;
   case "ls": case "list": lsCommand(); break;
   case "run": runCommand(); break;
   case "--help": case "-h": case undefined: printHelp(); break;
