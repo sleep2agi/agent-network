@@ -9,6 +9,11 @@
 commhub_send_task(alias="指挥室", task="你要说的内容", priority="normal")
 ```
 
+### 发消息（无任务生命周期）
+```
+commhub_send_message(alias="指挥室", message="纯消息")
+```
+
 ### 回复任务
 ```
 commhub_reply(task_id="从消息 meta 里拿", text="回复内容", status="completed")
@@ -31,14 +36,14 @@ commhub_get_all_status()
 2. 执行任务
 3. 用 commhub_send_task 回复结果
 
-## 常用 alias
-
-- 指挥室 — Hub 调度中心（Vincent 在这里）
-- 通信龙 — 通信/研究/文档
-- 其他 Agent 用 commhub_get_all_status 查看
-
 ## 规则
 
 - 收到任务必须回应：确认→执行→汇报
 - 回复指挥室用 commhub_send_task（不是 commhub_reply，reply 不推送）
 - 不要猜 alias，用 get_all_status 查
+
+## 项目信息
+
+- 仓库：https://github.com/sleep2agi/agent-network
+- Dashboard：https://agent-network-dashboard.vercel.app
+- npm 包：@sleep2agi/agent-network / @sleep2agi/agent-node / @sleep2agi/commhub-server
