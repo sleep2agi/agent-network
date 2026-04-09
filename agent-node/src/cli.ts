@@ -20,7 +20,13 @@ const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
 
+const PKG_VERSION = "1.1.0";
+
 for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === "--version" || argv[i] === "-v") {
+    console.log(`agent-node v${PKG_VERSION}`);
+    process.exit(0);
+  }
   if (argv[i] === "-h" || argv[i] === "--help") {
     console.log(`
 @sleep2agi/agent-node — AI Agent 节点，一行命令加入 CommHub 网络
