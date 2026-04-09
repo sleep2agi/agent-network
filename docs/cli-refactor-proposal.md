@@ -147,8 +147,8 @@ anet create <node-name> \
 | runtime | 检测 | 提示安装 |
 |---------|------|---------|
 | `claude-code-cli` | `claude` CLI 是否在 PATH | `npm install -g @anthropic-ai/claude-code` |
-| `codex-sdk` | `@sleep2agi/agent-node` 是否可用 | `npm install -g @sleep2agi/agent-node` |
-| `claude-agent-sdk` | `@sleep2agi/agent-node` 是否可用 | `npm install -g @sleep2agi/agent-node` |
+| `codex-sdk` | `node` + `npx` 是否可用 | anet 通过 `npx @sleep2agi/agent-node` 启动，无需全局安装 |
+| `claude-agent-sdk` | `node` + `npx` 是否可用 | 同上 |
 
 不自动安装，只提示。
 
@@ -255,10 +255,13 @@ agent-node 永远启动 CommHub SSE，不依赖 channels 数组。
 ### claude-code-cli
 
 **新建 session（config.session 为空 或 --new-session）：**
+
+根据 config.channels 动态拼参数。`--channels plugin:telegram` 仅 channels 包含 `"telegram"` 时才加。
+
 ```bash
 claude --dangerously-skip-permissions \
   --dangerously-load-development-channels server:commhub \
-  --channels plugin:telegram@claude-plugins-official \   # 仅 channels 包含 "telegram" 时
+  --channels plugin:telegram@claude-plugins-official \
   --teammate-mode in-process \
   -n <node-name>
 ```
