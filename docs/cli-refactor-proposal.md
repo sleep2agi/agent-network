@@ -192,10 +192,10 @@ anet create                                              # 全部交互
 | runtime | 检测 | 提示安装 |
 |---------|------|---------|
 | `claude-code-cli` | `claude` CLI 是否在 PATH | `npm install -g @anthropic-ai/claude-code` |
-| `codex-sdk` | `node` + `npx` 是否可用 | anet 通过 `npx @sleep2agi/agent-node` 启动，无需全局安装 |
-| `claude-agent-sdk` | `node` + `npx` 是否可用 | 同上 |
+| `codex-sdk` | `agent-node` 是否在 PATH + 版本 >= 1.0.0 | `anet upgrade` 或 `npm install -g @sleep2agi/agent-node` |
+| `claude-agent-sdk` | `agent-node` 是否在 PATH + 版本 >= 1.0.0 | 同上 |
 
-不自动安装，只提示。
+不自动安装，只提示。不再使用 npx，统一用全局安装的 agent-node。
 
 `claude-code-cli` 额外提示：
 ```
@@ -321,7 +321,7 @@ claude ... --resume <session> -n <node-name>
 ### codex-sdk / claude-agent-sdk
 
 ```bash
-npx @sleep2agi/agent-node \
+agent-node \
   --config .anet/nodes/<node-name>/config.json \
   --alias <node-name>
 ```
@@ -405,7 +405,7 @@ codex CLI not installed
 
 说明：
 
-- P0 只要求显示全局安装状态；当前 `anet start` 仍用 `npx @sleep2agi/agent-node` 启动。
+- `anet start` 使用全局安装的 `agent-node`，不再通过 npx。
 - 如果命令可执行但无法解析版本，输出 `installed (version unknown)`，不要伪造成 `not installed`。
 - 版本解析统一接受 `1.0.2` / `v1.0.2` / `agent-node v1.0.2` 这几类输出。
 - `upgradeCommand()` 结尾只保留 `anet -v`，不要再单独打印一遍 agent-node。
@@ -438,9 +438,8 @@ codex CLI not installed
 [anet] If you encounter issues, run: anet upgrade
 ```
 
-注意：不要求全局安装 agent-node。anet start 通过 `npx @sleep2agi/agent-node` 启动。
-版本探测优先用 `npx @sleep2agi/agent-node --version`（检测实际会运行的版本），
-全局 `agent-node --version` 作为备选。探测失败不阻塞启动，只打印 warning。
+anet start 使用全局安装的 `agent-node`。版本探测用 `agent-node --version`。
+未安装或版本不兼容时阻塞启动，提示 `anet upgrade`。
 
 commhub-server 检查说明：
 
