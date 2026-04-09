@@ -502,7 +502,39 @@ async function askChoice<T extends string>(title: string, choices: { label: stri
   }
 }
 
+function maskSecretEnv(env: Record<string, string>): Record<string, string> {
+  const masked: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    const isSecret = /TOKEN|KEY|SECRET|PASSWORD/i.test(key);
+    masked[key] = isSecret && value ? `${value.slice(0, 4)}...` : value;
+  }
+  return masked;
+}
+
+function printProfileSummary(id: string, profile: Profile) {
+  const summary = {
+    name: nodeDisplayName(id, profile),
+    runtime: normalizeRuntime(profile),
+    model: profile.model || "(runtime default)",
+    session: profileSession(profile) || "(new)",
+    channels: profile.channels,
+    env: maskSecretEnv(profile.env || {}),
+    config: join(nodesDir(), id, "config.json"),
+  };
+  console.log(`\n[anet] Config summary:`);
+  console.log(JSON.stringify(summary, null, 2));
+}
+
 async function createInteractiveCommand() {
+  console.log(`
+[anet] Create a node
+
+This wizard creates one agent node for this project:
+  - node config: .anet/nodes/<node-name>/config.json
+  - runtime: claude-code-cli / codex-sdk / claude-agent-sdk
+  - optional Telegram channel: text + images from an allowlist user
+`);
+
   const id = await ask("Node name");
   if (!id) {
     closeRL();
@@ -516,6 +548,13 @@ async function createInteractiveCommand() {
     process.exit(1);
   }
 
+  console.log(`
+Runtime guide:
+  1) claude-code-cli  Use your Claude Code app/CLI session. Best for existing Claude Code workflows.
+  2) codex-sdk        Run through agent-node with Codex. Best for GPT-5.4 / OpenAI models.
+  3) claude-agent-sdk Run through agent-node with an Anthropic-compatible API.
+                      Use this for MiniMax, Intern-S1, or Anthropic API keys.
+`);
   const runtime = await askChoice<RuntimeName>("Select runtime:", [
     { label: "claude-code-cli", value: "claude-code-cli", description: "Claude Code CLI（需要 Pro 订阅）" },
     { label: "codex-sdk", value: "codex-sdk", description: "Codex SDK（GPT-5.4）" },
@@ -526,6 +565,12 @@ async function createInteractiveCommand() {
   opts.runtime = runtime;
 
   if (runtime === "codex-sdk") {
+    console.log(`
+Model guide:
+  - gpt-5.4  Default Codex model.
+  - o3       Reasoning model; use it if your account/session supports it.
+  - custom   Type an exact model name.
+`);
     const modelChoice = await askChoice("Select model:", [
       { label: "gpt-5.4", value: "gpt-5.4" },
       { label: "o3", value: "o3" },
@@ -533,6 +578,13 @@ async function createInteractiveCommand() {
     ]);
     opts.model = modelChoice === "__custom__" ? await ask("Model") : modelChoice;
   } else if (runtime === "claude-agent-sdk") {
+    console.log(`
+Model guide:
+  - MiniMax-M2.7       Low-cost Claude-compatible model. anet fills MiniMax base URL for you.
+  - intern-s1-pro      Intern/书生 Claude-compatible endpoint. anet fills its base URL for you.
+  - claude-sonnet-4-6  Anthropic Claude via the default Anthropic API.
+  - custom             Any Anthropic-compatible model name.
+`);
     const modelChoice = await askChoice("Select model:", [
       { label: "MiniMax-M2.7", value: "MiniMax-M2.7" },
       { label: "intern-s1-pro", value: "intern-s1-pro" },
@@ -547,6 +599,13 @@ async function createInteractiveCommand() {
       opts._envs.push("ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn");
     }
 
+    console.log(`
+API key:
+  Paste the provider key for the selected model.
+  - MiniMax: get a token from the MiniMax platform / API Keys page.
+  - Intern-S1: use the key/token for chat.intern-ai.org.cn.
+  - Anthropic Claude: use an Anthropic Console API key.
+`);
     const token = await ask("ANTHROPIC_AUTH_TOKEN");
     if (token) opts._envs.push(`ANTHROPIC_AUTH_TOKEN=${token}`);
   }
@@ -556,8 +615,14 @@ async function createInteractiveCommand() {
   const addTelegram = await ask("Add Telegram channel? (y/n)", "n");
   let telegramConfig: { botToken: string; allowId: string } | null = null;
   if (/^y(es)?$/i.test(addTelegram)) {
+    console.log(`
+Telegram setup:
+  1. Open Telegram and talk to @BotFather.
+  2. Create a bot and copy the bot token.
+  3. Talk to @userinfobot to get your numeric user ID.
+`);
     const botToken = await ask("Telegram Bot Token");
-    const allowId = await ask("Allow User ID", "7612221352");
+    const allowId = await ask("Allow User ID (numeric ID from @userinfobot)", "7612221352");
     if (!botToken) {
       closeRL();
       console.error("Error: Telegram Bot Token required");
@@ -586,6 +651,7 @@ async function createInteractiveCommand() {
   }
   console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
   console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
+  printProfileSummary(id, loadProfile(id) || profile);
   console.log(`\nStart: anet start ${id}`);
 }
 

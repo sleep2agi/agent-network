@@ -645,7 +645,11 @@ async function connectSSE() {
       const sseHeaders: Record<string, string> = { Accept: "text/event-stream", "Cache-Control": "no-cache" };
       if (AUTH_TOKEN) sseHeaders["Authorization"] = `Bearer ${AUTH_TOKEN}`;
       const res = await fetch(sseUrl, { headers: sseHeaders });
-      if (!res.ok || !res.body) { await new Promise(r => setTimeout(r, delay)); delay = Math.min(delay * 1.5, 60_000); continue; }
+      if (!res.ok || !res.body) {
+        if (res.status === 401) error(`SSE 401: token 无效或未配置。检查 ~/.anet/config.json 的 token 字段`);
+        else warn(`SSE failed: ${res.status}`);
+        await new Promise(r => setTimeout(r, delay)); delay = Math.min(delay * 1.5, 60_000); continue;
+      }
       delay = 3000;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -678,7 +682,7 @@ async function connectSSE() {
 log(`启动`);
 log(`  runtime: ${RUNTIME_LABEL}`);
 log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.4" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
-log(`  hub:     ${COMMHUB_URL}`);
+log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 log(`  tools:   ${TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)"}`);
 log(`  channels:${TELEGRAM_CHANNELS.length ? ` telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : " (none)"}`);
 log(`  session: ${SESSION_ID || "(new)"}`);
