@@ -39,11 +39,14 @@ interface Profile {
   name?: string;
   alias: string;
   hub: string;
+  runtime?: "claude-code" | "agent-sdk";
+  model?: string;
   channels: string[];
   env: Record<string, string>;
   flags: Record<string, any>;
   resume?: string;
   resumeAlias?: string;
+  tools?: string[];
 }
 
 function loadProfile(id: string): Profile | null {
@@ -338,11 +341,24 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
   const gc = loadGlobal();
   console.log(`\nProfile "${id}" not found. Let's create it:\n`);
 
+  const runtime = await ask("Runtime (claude-code / agent-sdk)", "claude-code") as "claude-code" | "agent-sdk";
   const alias = await ask("Alias", id);
-  const channelsStr = await ask("Channels (comma-separated)", "server:commhub");
-  const channels = channelsStr.split(",").map(s => s.trim()).filter(Boolean);
+  let model: string | undefined;
+  let toolsArr: string[] = [];
+  let channels: string[] = [];
+  let teammateMode = "";
+
+  if (runtime === "agent-sdk") {
+    model = await ask("Model", "MiniMax-M2.7");
+    const toolsStr = await ask("Tools (comma-separated)", "Read,Bash,Grep");
+    toolsArr = toolsStr.split(",").map(s => s.trim()).filter(Boolean);
+  } else {
+    const channelsStr = await ask("Channels (comma-separated)", "server:commhub");
+    channels = channelsStr.split(",").map(s => s.trim()).filter(Boolean);
+    teammateMode = await ask("Teammate mode", "in-process");
+  }
+
   const envStr = await ask("Extra env (K=V, comma-separated, empty to skip)");
-  const teammateMode = await ask("Teammate mode", "in-process");
 
   const envMap: Record<string, string> = {};
   if (envStr) {
@@ -359,14 +375,17 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
   }
 
   const profile: Profile = {
-    anet_version: "0.0.20",
+    anet_version: "0.0.23",
     alias,
     hub,
+    runtime,
+    ...(model ? { model } : {}),
+    ...(toolsArr.length ? { tools: toolsArr } : {}),
     channels,
     env: envMap,
     flags: {
       dangerouslySkipPermissions: true,
-      teammateMode: teammateMode || "in-process",
+      ...(teammateMode ? { teammateMode } : {}),
     },
   };
 
@@ -378,44 +397,58 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
 
 // ── launch helper (shared by start + resume) ──
 
-async function launchClaude(id: string, mode: "start" | "resume") {
+async function launchAgent(id: string, mode: "start" | "resume") {
   let profile = loadProfile(id);
   if (!profile) {
     profile = await interactiveCreateProfile(id);
   }
 
-  // Build env
-  const env = { ...process.env, COMMHUB_ALIAS: profile.alias };
-  for (const [k, v] of Object.entries(profile.env)) {
-    env[k] = v.replace(/^~/, home);
-  }
-
-  // Build claude args
-  const claudeArgs: string[] = [];
-  if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
-  for (const ch of profile.channels) {
-    if (ch.startsWith("server:")) {
-      claudeArgs.push("--dangerously-load-development-channels", ch);
-    } else {
-      claudeArgs.push("--channels", ch);
-    }
-  }
-  if (profile.flags.teammateMode) claudeArgs.push("--teammate-mode", profile.flags.teammateMode);
-
-  if (mode === "resume") {
-    // 按 resumeAlias 或 name 搜索恢复
-    const searchTerm = profile.resumeAlias || profile.name || profile.alias;
-    claudeArgs.push("--resume", searchTerm);
-  }
-
-  // -n 给 session 命名（新建和恢复都加，方便下次找）
-  claudeArgs.push("-n", profile.name || profile.alias);
-
+  const runtime = profile.runtime || "claude-code";
   const label = mode === "start" ? "Starting new" : "Resuming";
-  console.log(`[anet] ${label} "${id}" (${profile.alias})...\n`);
+  console.log(`[anet] ${label} "${id}" (${profile.alias}) [${runtime}]...\n`);
 
-  const child = spawn("claude", claudeArgs, { env, stdio: "inherit", shell: true });
-  child.on("exit", (code) => process.exit(code || 0));
+  if (runtime === "agent-sdk") {
+    // spawn agent-node
+    const agentArgs = ["@sleep2agi/agent-node", "--alias", profile.alias, "--hub", profile.hub];
+    if (profile.model) agentArgs.push("--model", profile.model);
+    if (profile.tools?.length) agentArgs.push("--tools", profile.tools.join(","));
+    if (profile.flags?.maxTurns) agentArgs.push("--max-turns", String(profile.flags.maxTurns));
+
+    const env = { ...process.env };
+    for (const [k, v] of Object.entries(profile.env)) {
+      env[k] = v.replace(/^~/, home);
+    }
+
+    const child = spawn("npx", agentArgs, { env, stdio: "inherit", shell: true });
+    child.on("exit", (code) => process.exit(code || 0));
+  } else {
+    // spawn claude CLI
+    const env = { ...process.env, COMMHUB_ALIAS: profile.alias };
+    for (const [k, v] of Object.entries(profile.env)) {
+      env[k] = v.replace(/^~/, home);
+    }
+
+    const claudeArgs: string[] = [];
+    if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
+    for (const ch of profile.channels) {
+      if (ch.startsWith("server:")) {
+        claudeArgs.push("--dangerously-load-development-channels", ch);
+      } else {
+        claudeArgs.push("--channels", ch);
+      }
+    }
+    if (profile.flags.teammateMode) claudeArgs.push("--teammate-mode", profile.flags.teammateMode);
+
+    if (mode === "resume") {
+      const searchTerm = profile.resumeAlias || profile.name || profile.alias;
+      claudeArgs.push("--resume", searchTerm);
+    }
+
+    claudeArgs.push("-n", profile.name || profile.alias);
+
+    const child = spawn("claude", claudeArgs, { env, stdio: "inherit", shell: true });
+    child.on("exit", (code) => process.exit(code || 0));
+  }
 }
 
 // ── start (new session) ──
@@ -423,7 +456,7 @@ async function launchClaude(id: string, mode: "start" | "resume") {
 async function startCommand() {
   const id = args[1];
   if (!id) { showProfiles("start"); return; }
-  await launchClaude(id, "start");
+  await launchAgent(id, "start");
 }
 
 // ── resume (continue session) ──
@@ -436,7 +469,7 @@ async function resumeCommand() {
     console.log(`Profile "${id}" not found. Create one first:\n\n  anet start ${id}\n`);
     process.exit(1);
   }
-  await launchClaude(id, "resume");
+  await launchAgent(id, "resume");
 }
 
 function showProfiles(cmd: string) {
