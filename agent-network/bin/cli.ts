@@ -195,6 +195,169 @@ function commandExists(name: string): boolean {
   }
 }
 
+type VersionState = "ok" | "unknown" | "not-installed";
+
+interface DetectedVersion {
+  name: string;
+  displayName: string;
+  version: string | null;
+  state: VersionState;
+  source?: string;
+}
+
+interface Semver {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+function packageJsonPath() {
+  return join(new URL(".", import.meta.url).pathname, "..", "..", "package.json");
+}
+
+function parseSemver(text: string): Semver | null {
+  const match = text.match(/(?:^|[^0-9])v?(\d+)\.(\d+)\.(\d+)(?:[^0-9]|$)/);
+  if (!match) return null;
+  return {
+    major: Number.parseInt(match[1], 10),
+    minor: Number.parseInt(match[2], 10),
+    patch: Number.parseInt(match[3], 10),
+  };
+}
+
+function compareSemver(a: Semver, b: Semver): number {
+  if (a.major !== b.major) return a.major > b.major ? 1 : -1;
+  if (a.minor !== b.minor) return a.minor > b.minor ? 1 : -1;
+  if (a.patch !== b.patch) return a.patch > b.patch ? 1 : -1;
+  return 0;
+}
+
+function detectCommandVersion(commandName: string, displayName: string, source?: string): DetectedVersion {
+  if (!commandExists(commandName)) {
+    return { name: commandName, displayName, version: null, state: "not-installed", source };
+  }
+  try {
+    const output = execSync(`${JSON.stringify(commandName)} --version`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: "/bin/bash",
+      timeout: 5000,
+    }).trim();
+    const parsed = parseSemver(output);
+    if (!parsed) {
+      return { name: commandName, displayName, version: null, state: "unknown", source };
+    }
+    return {
+      name: commandName,
+      displayName,
+      version: `${parsed.major}.${parsed.minor}.${parsed.patch}`,
+      state: "ok",
+      source,
+    };
+  } catch {
+    return { name: commandName, displayName, version: null, state: "unknown", source };
+  }
+}
+
+function detectGlobalNpmPackage(pkgName: string, displayName: string, source = "global"): DetectedVersion {
+  try {
+    const output = execSync(`npm ls -g ${JSON.stringify(pkgName)} --depth=0 --json`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+      shell: "/bin/bash",
+    });
+    const data = JSON.parse(output);
+    const version = data?.dependencies?.[pkgName]?.version;
+    if (!version) {
+      return { name: pkgName, displayName, version: null, state: "unknown", source };
+    }
+    const parsed = parseSemver(version);
+    if (!parsed) {
+      return { name: pkgName, displayName, version: null, state: "unknown", source };
+    }
+    return {
+      name: pkgName,
+      displayName,
+      version: `${parsed.major}.${parsed.minor}.${parsed.patch}`,
+      state: "ok",
+      source,
+    };
+  } catch {
+    return { name: pkgName, displayName, version: null, state: "not-installed", source };
+  }
+}
+
+function detectInstalledPackages() {
+  const pkg = JSON.parse(readFileSync(packageJsonPath(), "utf-8"));
+  const versions = {
+    anet: {
+      name: "anet",
+      displayName: "anet",
+      version: pkg.version as string,
+      state: "ok" as VersionState,
+    },
+    agentNode: detectCommandVersion("agent-node", "agent-node", "global"),
+    commhubServer: detectCommandVersion("commhub-server", "commhub-server", "global"),
+    claude: detectCommandVersion("claude", "claude CLI"),
+    codex: detectCommandVersion("codex", "codex CLI"),
+  };
+
+  if (versions.agentNode.state !== "ok") {
+    versions.agentNode = detectGlobalNpmPackage("@sleep2agi/agent-node", "agent-node", "global");
+  }
+  if (versions.commhubServer.state !== "ok") {
+    versions.commhubServer = detectGlobalNpmPackage("@sleep2agi/commhub-server", "commhub-server", "global");
+  }
+
+  return versions;
+}
+
+function formatDetectedVersion(pkg: DetectedVersion): string {
+  const suffix = pkg.source ? ` (${pkg.source})` : "";
+  if (pkg.state === "ok" && pkg.version) return `${pkg.displayName} v${pkg.version}${suffix}`;
+  if (pkg.state === "unknown") return `${pkg.displayName} installed (version unknown)${suffix}`;
+  return `${pkg.displayName} not installed`;
+}
+
+function printVersionReport() {
+  const versions = detectInstalledPackages();
+  console.log(`anet v${versions.anet.version}`);
+  console.log(formatDetectedVersion(versions.agentNode));
+  console.log(formatDetectedVersion(versions.commhubServer));
+  console.log(formatDetectedVersion(versions.claude));
+  console.log(formatDetectedVersion(versions.codex));
+}
+
+function assertStartCompatibility(runtime: RuntimeName) {
+  if (runtime !== "codex-sdk" && runtime !== "claude-agent-sdk") return;
+
+  const versions = detectInstalledPackages();
+  const requiredAgentNode = parseSemver("1.0.0")!;
+  const requiredCommhub = parseSemver("0.4.0")!;
+
+  if (versions.agentNode.state !== "ok" || !versions.agentNode.version) {
+    console.error(`[anet] agent-node is not installed or cannot report a version.`);
+    console.error(`[anet] Run: anet upgrade`);
+    process.exit(1);
+  }
+
+  const agentNodeVersion = parseSemver(versions.agentNode.version);
+  if (!agentNodeVersion || compareSemver(agentNodeVersion, requiredAgentNode) < 0) {
+    console.error(`[anet] Incompatible package versions.`);
+    console.error(`[anet] anet v${versions.anet.version} requires agent-node >= 1.0.0, but found agent-node v${versions.agentNode.version}.`);
+    console.error(`[anet] Run: anet upgrade`);
+    process.exit(1);
+  }
+
+  if (versions.commhubServer.state === "ok" && versions.commhubServer.version) {
+    const commhubVersion = parseSemver(versions.commhubServer.version);
+    if (commhubVersion && compareSemver(commhubVersion, requiredCommhub) < 0) {
+      console.warn(`[anet] Warning: local commhub-server v${versions.commhubServer.version} is older than recommended >= 0.4.0.`);
+      console.warn(`[anet] If this machine hosts CommHub, run: anet upgrade`);
+    }
+  }
+}
+
 function printClaudeCodeNotice() {
   console.log(`[anet] claude-code-cli requires:`);
   console.log(`  - Claude Pro / Team / Enterprise subscription`);
@@ -212,9 +375,9 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
     if (phase === "start") printClaudeCodeNotice();
     return;
   }
-  if (!commandExists("npx")) {
-    console.warn(`[anet] Warning: npx not found in PATH; cannot launch @sleep2agi/agent-node.`);
-    console.warn(`[anet] Install Node.js/npm first, or install agent-node globally: npm install -g @sleep2agi/agent-node`);
+  if (!commandExists("agent-node")) {
+    console.warn(`[anet] Warning: agent-node not found in PATH.`);
+    console.warn(`[anet] Run: anet upgrade`);
   }
 }
 
@@ -840,6 +1003,7 @@ async function launchAgent(id: string, forceNewSession = false) {
   const label = willResume ? `Resuming session ${session.slice(0, 8)}...` : "Starting new session";
   console.log(`[anet] ${label} for "${id}" [${runtime}]...\n`);
   checkRuntimeDependency(runtime, "start");
+  assertStartCompatibility(runtime);
 
   // Auto-configure .mcp.json for commhub channel
   ensureMcpJson(profile);
@@ -852,7 +1016,6 @@ async function launchAgent(id: string, forceNewSession = false) {
   if (runtime === "codex-sdk" || runtime === "claude-agent-sdk") {
     // spawn agent-node
     const agentArgs = [
-      "@sleep2agi/agent-node",
       "--config", join(nodesDir(), id, "config.json"),
       "--alias", displayName,
     ];
@@ -863,7 +1026,7 @@ async function launchAgent(id: string, forceNewSession = false) {
       env[k] = v.replace(/^~/, home);
     }
 
-    const child = spawn("npx", agentArgs, { env, stdio: "inherit", shell: true });
+    const child = spawn("agent-node", agentArgs, { env, stdio: "inherit", shell: true });
     child.on("exit", (code) => process.exit(code || 0));
   } else {
     // spawn claude CLI
@@ -1373,25 +1536,15 @@ Data: .anet/nodes/<node-id>/channels/<type>/
 function upgradeCommand() {
   console.log("[anet] Upgrading all packages...\n");
   try {
-    console.log("1/3 Updating @sleep2agi/agent-network...");
+    console.log("1/2 Updating @sleep2agi/agent-network...");
     execSync("npm install -g @sleep2agi/agent-network@latest", { stdio: "inherit" });
   } catch { console.log("   ⚠ Failed to update agent-network"); }
   try {
-    console.log("\n2/3 Updating @sleep2agi/agent-node...");
+    console.log("\n2/2 Updating @sleep2agi/agent-node...");
     execSync("npm install -g @sleep2agi/agent-node@latest", { stdio: "inherit" });
   } catch { console.log("   ⚠ Failed to update agent-node"); }
-  try {
-    console.log("\n3/3 Clearing npx cache...");
-    execSync("rm -rf ~/.npm/_npx", { stdio: "inherit" });
-    console.log("   ✅ npx cache cleared");
-  } catch {}
   console.log("\n✅ Done. Check versions:");
   try { execSync("anet -v", { stdio: "inherit" }); } catch {}
-  try {
-    const ver = execSync("npm ls -g @sleep2agi/agent-node --depth=0 2>/dev/null", { encoding: "utf-8" });
-    const m = ver.match(/@sleep2agi\/agent-node@([\d.]+)/);
-    if (m) console.log(`agent-node v${m[1]}`);
-  } catch {}
 }
 
 // ── Main ──
@@ -1413,8 +1566,7 @@ switch (command) {
   case "ls": case "list": lsCommand(); break;
   case "run": runCommand(); break;
   case "-v": case "--version": case "version": {
-    const pkg = JSON.parse(readFileSync(join(new URL(".", import.meta.url).pathname, "..", "..", "package.json"), "utf-8"));
-    console.log(`anet v${pkg.version}`);
+    printVersionReport();
     break;
   }
   case "--help": case "-h": case undefined: printHelp(); break;
