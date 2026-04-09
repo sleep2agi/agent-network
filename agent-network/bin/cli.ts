@@ -288,16 +288,22 @@ function initProfile() {
     if (eq > 0) envMap[e.slice(0, eq)] = e.slice(eq + 1);
   }
 
+  const runtime = (opts.runtime || "claude-code") as "claude-code" | "agent-sdk";
+
   const profile: Profile = {
-    anet_version: "0.0.11",
+    anet_version: "0.0.24",
     ...(opts.name ? { name: opts.name } : {}),
+    runtime,
     alias,
     hub,
-    channels: opts._channels.length > 0 ? opts._channels : ["server:commhub"],
+    ...(opts.model ? { model: opts.model } : {}),
+    ...(opts.tools ? { tools: opts.tools.split(",").map((s: string) => s.trim()) } : {}),
+    channels: opts._channels.length > 0 ? opts._channels : (runtime === "claude-code" ? ["server:commhub"] : []),
     env: envMap,
     flags: {
       dangerouslySkipPermissions: true,
-      teammateMode: opts["teammate-mode"] || "in-process",
+      ...(runtime === "claude-code" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
+      ...(opts["max-turns"] ? { maxTurns: parseInt(opts["max-turns"]) } : {}),
     },
     ...(opts.resume ? { resume: opts.resume } : {}),
     ...(opts["resume-alias"] ? { resumeAlias: opts["resume-alias"] } : {}),
