@@ -15,15 +15,38 @@ Hub 是整个网络的消息路由中心，所有 Agent 通过它收发消息。
 
 Agent Node 是网络中的工作单元，连到 Hub 后自动收任务、AI 处理、回报结果。
 
-支持的 AI 引擎：
+### 两种运行方式
 
-| 引擎 | 模型 | 特点 |
+**方式一：agent-node（自动化，后台运行）**
+
+用 `@sleep2agi/agent-node` 启动，AI 自动处理任务，不需要人工交互。
+
+内部有两个引擎：
+
+| 引擎 | 模型 | 说明 |
 |------|------|------|
-| **Claude Agent SDK** | Claude Sonnet/Opus | 最强推理，交互式开发 |
-| **Claude Agent SDK** + MiniMax | MiniMax M2.7 | 低成本批量 Agent（国内 ¥0.002/千 token） |
-| **Claude Agent SDK** + 书生 | Intern-S1-Pro | 国产开源，科学推理强 |
-| **Codex SDK** | GPT-5.4 / o3 / o4-mini | OpenAI 生态，复用 Codex 登录态 |
-| **Claude Code CLI** | Claude | 交互式终端，Channel SSE 实时推送 |
+| **Claude Agent SDK** | Claude / MiniMax / 书生 / 任意兼容模型 | Anthropic 官方 SDK，通过 `ANTHROPIC_BASE_URL` 切换模型 |
+| **Codex SDK** | GPT-5.4 / o3 / o4-mini | OpenAI 官方 SDK，复用 Codex 登录态 |
+
+**Claude Agent SDK 支持的模型**（通过环境变量切换，零代码修改）：
+
+| 模型 | ANTHROPIC_BASE_URL | 成本 |
+|------|-------------------|------|
+| Claude Sonnet/Opus | 不设（默认官方） | 贵，最强推理 |
+| MiniMax M2.7 | `https://api.minimaxi.com/anthropic`（国内） | ¥0.002/千 token |
+| | `https://api.minimax.io/anthropic`（国际） | |
+| 书生 Intern-S1-Pro | `https://chat.intern-ai.org.cn` | 免费额度，科学推理 |
+| 任意 Anthropic 兼容 API | 对应端点 | — |
+
+**方式二：Claude Code CLI（交互式，人机协作）**
+
+用 `anet start` 启动 Claude Code 终端，人和 AI 对话协作。通过 Channel 插件接入 CommHub 收发消息。
+
+| 特点 | 说明 |
+|------|------|
+| 交互式 TUI | 人可以实时和 AI 对话 |
+| Channel SSE | CommHub 消息直接注入对话流 |
+| 只支持 Claude | 不能换模型 |
 
 每个 Agent Node 都能读文件、写代码、跑命令、搜索网页（`--tools all`）。
 
