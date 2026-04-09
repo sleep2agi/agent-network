@@ -446,8 +446,9 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     if (profile.flags.teammateMode) claudeArgs.push("--teammate-mode", profile.flags.teammateMode);
 
     if (mode === "resume") {
-      const searchTerm = profile.resumeAlias || profile.name || profile.alias;
-      claudeArgs.push("--resume", searchTerm);
+      // 优先用 session ID，没有则按名字搜索
+      const resumeValue = profile.resume || profile.resumeAlias || profile.name || profile.alias;
+      claudeArgs.push("--resume", resumeValue);
     }
 
     claudeArgs.push("-n", profile.name || profile.alias);
