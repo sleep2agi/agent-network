@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { spawn, execSync } from "child_process";
 
@@ -861,6 +861,50 @@ async function importCommand() {
   console.log(`\nImported ${created} session(s). Use: cd <project> && anet resume <alias>`);
 }
 
+// ── session ──
+
+function sessionCommand() {
+  const sub = args[1];
+  if (sub === "ls" || sub === "list" || !sub) {
+    // Scan ~/.claude/projects/{project-key}/ for .jsonl files
+    const cwd = process.cwd();
+    const projectKey = cwd.replace(/\//g, "-");
+    const projectDir = join(home, ".claude", "projects", projectKey);
+
+    if (!existsSync(projectDir)) {
+      console.log(`No sessions for ${cwd}`);
+      return;
+    }
+
+    const files = readdirSync(projectDir).filter(f => f.endsWith(".jsonl")).sort((a, b) => {
+      const sa = statSync(join(projectDir, a));
+      const sb = statSync(join(projectDir, b));
+      return sb.mtimeMs - sa.mtimeMs; // newest first
+    });
+
+    if (files.length === 0) { console.log("No sessions."); return; }
+
+    console.log(`\nSessions in ${cwd} (${files.length} total):\n`);
+    console.log("  SESSION ID                             SIZE      MODIFIED");
+    console.log("  ──────────────────────────────────────  ────────  ────────────────");
+
+    for (const f of files) {
+      const id = f.replace(".jsonl", "");
+      const st = statSync(join(projectDir, f));
+      const size = st.size < 1024 ? `${st.size}B` : st.size < 1024 * 1024 ? `${(st.size / 1024).toFixed(0)}KB` : `${(st.size / 1024 / 1024).toFixed(1)}MB`;
+      const mtime = st.mtime.toISOString().replace("T", " ").slice(0, 16);
+      console.log(`  ${id}  ${size.padStart(8)}  ${mtime}`);
+    }
+    console.log();
+  } else {
+    console.log(`
+anet session <command>
+
+  ls    List Claude Code sessions in current project
+`);
+  }
+}
+
 // ── Main ──
 
 switch (command) {
@@ -873,6 +917,7 @@ switch (command) {
   case "start": startCommand(); break;
   case "resume": resumeCommand(); break;
   case "import": importCommand(); break;
+  case "session": sessionCommand(); break;
   case "ls": case "list": lsCommand(); break;
   case "run": runCommand(); break;
   case "--help": case "-h": case undefined: printHelp(); break;
