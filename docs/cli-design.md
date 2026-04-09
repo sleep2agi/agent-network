@@ -156,7 +156,9 @@ anet start            # 列出所有 profile
 anet 指挥室           # 快捷方式
 ```
 
-行为：读 profile → 设 env → 拼 claude 参数 → `-n` 命名 → spawn claude（不传 --resume）
+行为：读 profile → 根据 runtime 分发：
+- `claude-code` → 设 env → 拼 claude 参数 → spawn claude
+- `agent-sdk` → 设 env → spawn `npx @sleep2agi/agent-node`
 
 ### anet resume
 
@@ -171,21 +173,58 @@ anet resume           # 列出所有 profile
 
 ---
 
-## Node 配置文件格式
+## Profile 规范
 
-当前路径：`.anet/profiles/<id>.json`
-计划路径：`.anet/nodes/<id>/config.json`
+路径：`.anet/profiles/<id>.json`
+
+anet 和 agent-node 共用同一套 profile。`anet start` 和 `npx @sleep2agi/agent-node` 都读这里。
+
+### 配置生效优先级
+
+```
+CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
+```
+
+### 共用字段
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| anet_version | | 创建时的 anet 版本 |
+| runtime | | `claude-code`（默认）或 `agent-sdk` |
+| name | | 显示名 |
+| alias | ✅ | CommHub session 别名 |
+| hub | ✅ | CommHub Server URL |
+| env | | 环境变量（profile 级覆盖系统级） |
+
+### claude-code 专用字段
+
+| 字段 | 说明 |
+|------|------|
+| channels | Channel 列表（如 server:commhub） |
+| resumeAlias | resume 按名字搜索（默认等于 alias） |
+| flags.dangerouslySkipPermissions | 跳过权限确认 |
+| flags.teammateMode | 如 in-process |
+| resume | Session ID |
+
+### agent-sdk 专用字段
+
+| 字段 | 说明 |
+|------|------|
+| model | 模型名（如 MiniMax-M2.7） |
+| tools | 工具列表（如 ["Read", "Bash", "Grep"]） |
+| maxTurns | 每个任务最大轮次 |
+| systemPrompt | 自定义 system prompt |
+
+### 示例：claude-code
 
 ```json
 {
+  "anet_version": "0.0.23",
+  "runtime": "claude-code",
   "name": "指挥室",
   "alias": "指挥室",
-  "resumeAlias": "指挥室",
   "hub": "http://YOUR_IP:9200",
-  "channels": [
-    "server:commhub",
-    "plugin:telegram@claude-plugins-official"
-  ],
+  "channels": ["server:commhub", "plugin:telegram@claude-plugins-official"],
   "env": {
     "TELEGRAM_STATE_DIR": "~/.claude/channels/telegram-vincent"
   },
@@ -193,20 +232,44 @@ anet resume           # 列出所有 profile
     "dangerouslySkipPermissions": true,
     "teammateMode": "in-process"
   },
-  "resume": "98039093-3d2f-4c1b-bf8b-664cce723aee"
+  "resumeAlias": "指挥室"
 }
 ```
 
-| 字段 | 说明 |
-|------|------|
-| name | 显示名 |
-| alias | CommHub session 别名 |
-| resumeAlias | resume 搜索名（默认等于 alias） |
-| hub | CommHub Server URL |
-| channels | Claude Code channels 列表 |
-| env | 额外环境变量 |
-| flags | 启动标志 |
-| resume | Session ID（可选） |
+### 示例：agent-sdk（MiniMax）
+
+```json
+{
+  "anet_version": "0.0.23",
+  "runtime": "agent-sdk",
+  "name": "小明1号",
+  "alias": "小明1号",
+  "hub": "http://YOUR_IP:9200",
+  "model": "MiniMax-M2.7",
+  "tools": ["Read", "Bash", "Grep"],
+  "maxTurns": 5,
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.minimax.chat/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "sk-cp-xxx"
+  }
+}
+```
+
+### 示例：agent-sdk（Claude）
+
+```json
+{
+  "anet_version": "0.0.23",
+  "runtime": "agent-sdk",
+  "alias": "Claude马",
+  "hub": "http://YOUR_IP:9200",
+  "model": "claude-sonnet-4-6",
+  "tools": ["Read", "Bash", "Grep", "Edit"],
+  "env": {
+    "ANTHROPIC_API_KEY": "sk-ant-xxx"
+  }
+}
+```
 
 ---
 
