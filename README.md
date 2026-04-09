@@ -15,25 +15,12 @@ Hub 是整个网络的消息路由中心，所有 Agent 通过它收发消息。
 
 Agent Node 是网络中的工作单元，连到 Hub 后自动收任务、AI 处理、回报结果。
 
-### 两种运行方式
-
-**方式一：agent-node（自动化，后台运行）**
-
-用 `@sleep2agi/agent-node` 启动，AI 自动处理任务，不需要人工交互。
-
-基于 [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) / [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk) / [Claude Code CLI](https://www.npmjs.com/package/@anthropic-ai/claude-code) 三种引擎实现。
-
-**方式二：Claude Code CLI（交互式，人机协作）**
-
-用 `anet start` 启动 Claude Code 终端，人和 AI 对话协作。通过 Channel 插件接入 CommHub 收发消息。
-
-| 特点 | 说明 |
+| 方式 | 说明 |
 |------|------|
-| 交互式 TUI | 人可以实时和 AI 对话 |
-| Channel SSE | CommHub 消息直接注入对话流 |
-| 只支持 Claude | 不能换模型 |
+| `npx @sleep2agi/agent-node` | 自动化，后台运行（[Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) / [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)） |
+| `anet start` | 交互式 Claude Code 终端（[Channel 插件](channel/)接入 CommHub） |
 
-每个 Agent Node 都能读文件、写代码、跑命令、搜索网页（`--tools all`）。
+详见 [agent-node 文档](agent-node/) 和 [anet 文档](docs/anet-quickstart.md)。
 
 ---
 
