@@ -38,6 +38,8 @@ for (let i = 0; i < argv.length; i++) {
   --max-budget <usd>  每任务预算上限 (claude runtime only)
   --session <id>      恢复指定 session (claude session ID 或 codex thread ID)
   --prompt <text>     自定义 System Prompt
+  --log-dir <path>    日志目录 (default: .anet/nodes/<alias>/logs/)
+  --log-level <lvl>   debug | info (default) | warn | error
   --config <path>     配置文件 (覆盖 .anet profile 自动查找)
   -h, --help          帮助
 
@@ -106,8 +108,29 @@ const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetU
 const SESSION_ID = opts.session || fileConfig.sessionId || "";
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || fileConfig.token || "";
+const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
+const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
+const LOG_LEVEL = (LOG_LEVELS as any)[(opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info")] ?? 1;
 
-const log = (msg: string) => console.log(`[${new Date().toTimeString().slice(0, 8)}] [${ALIAS}] ${msg}`);
+// ── 日志：终端 + 文件 ──
+import { mkdirSync, appendFileSync } from "fs";
+try { mkdirSync(LOG_DIR, { recursive: true }); } catch {}
+
+function _log(level: string, levelNum: number, msg: string) {
+  if (levelNum < LOG_LEVEL) return;
+  const ts = new Date().toTimeString().slice(0, 8);
+  const tag = level.toUpperCase().padEnd(5);
+  const line = `[${ts}] [${tag}] [${ALIAS}] ${msg}`;
+  console.log(line);
+  try {
+    const date = new Date().toISOString().slice(0, 10);
+    appendFileSync(join(LOG_DIR, `${date}.log`), line + "\n");
+  } catch {}
+}
+const log = (msg: string) => _log("info", 1, msg);
+const debug = (msg: string) => _log("debug", 0, msg);
+const warn = (msg: string) => _log("warn", 2, msg);
+const error = (msg: string) => _log("error", 3, msg);
 
 // ── CommHub MCP 调用 ──
 async function callCommHub(method: string, params: Record<string, unknown>) {
@@ -163,7 +186,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     settingSources: [],
     env: process.env,
     cwd: process.cwd(),
-    stderr: (data: string) => { if (data.trim()) log(`[stderr] ${data.trim().slice(0, 200)}`); },
+    stderr: (data: string) => { if (data.trim()) debug(`[stderr] ${data.trim().slice(0, 200)}`); },
     hooks: {
       PreToolUse: [{ hooks: [async (input: any) => {
         log(`[tool] ${input.tool_name}(${JSON.stringify(input.tool_input).slice(0, 80)})`);
@@ -176,14 +199,20 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   if (claudeSessionId) options.resume = claudeSessionId;
 
   let result = "";
+  const t0 = Date.now();
   for await (const message of query({ prompt, options })) {
-    if ((message as any).type === "system" && (message as any).subtype === "init") {
-      claudeSessionId = (message as any).session_id;
+    const m = message as any;
+    if (m.type === "system" && m.subtype === "init") {
+      claudeSessionId = m.session_id;
+      log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "default"}`);
     }
-    if ((message as any).type === "result") {
-      result = (message as any).subtype === "success"
-        ? (message as any).result || "任务完成"
-        : `执行出错: ${(message as any).error || (message as any).result || "未知错误"}`;
+    if (m.type === "result") {
+      const dt = Date.now() - t0;
+      const u = m.usage || {};
+      log(`[claude] ${m.subtype} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}`);
+      result = m.subtype === "success"
+        ? m.result || "任务完成"
+        : `执行出错: ${m.error || m.result || "未知错误"}`;
     }
   }
   return result;
@@ -216,9 +245,15 @@ async function processWithCodex(task: string, from: string): Promise<string> {
     }
   }
 
+  const codexModelName = MODEL || "gpt-5.4";
+  log(`[codex] model=${codexModelName} thread=${codexThread?.id || "new"}`);
   const prompt = `你是 ${ALIAS}，收到来自 ${from} 的任务：\n\n${task}\n\n执行完后简要汇报结果。`;
+  const t0 = Date.now();
   try {
     const turn = await codexThread.run(prompt);
+    const dt = Date.now() - t0;
+    const u = turn.usage || {};
+    log(`[codex] done | ${dt}ms | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | items=${turn.items?.length || 0}`);
     return turn.finalResponse || "（无回复）";
   } catch (e: any) {
     log(`codex thread error: ${e.message}, 重建`);
@@ -229,6 +264,8 @@ async function processWithCodex(task: string, from: string): Promise<string> {
       model: MODEL || "gpt-5.4",
     });
     const turn = await codexThread.run(prompt);
+    const dt = Date.now() - t0;
+    log(`[codex] retry done | ${dt}ms`);
     return turn.finalResponse || "（无回复）";
   }
 }
@@ -249,7 +286,7 @@ async function processTask(task: string, from: string): Promise<string> {
     }
   } catch (err: any) {
     result = `${RUNTIME} 错误: ${err.message}`;
-    log(`✗ error: ${err.message}`);
+    error(`✗ ${err.message}`);
   }
 
   await reportStatus("idle");
@@ -262,13 +299,13 @@ async function processInbox() {
   if (!messages.length) return;
   for (const msg of messages) {
     const from = msg.from_session || "hub";
-    log(`← [${from}] ${(msg.content as string).slice(0, 60)}`);
+    log(`← [${from}] (${msg.priority || "normal"}) ${(msg.content as string).slice(0, 100)}`);
     await ackMessage(msg.id);
     const result = await processTask(msg.content, from);
     try {
       await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`);
-      log(`→ replied to ${from}: ${result.slice(0, 60)}`);
-    } catch (e: any) { log(`reply failed: ${e.message}`); }
+      log(`→ [${from}] ${result.slice(0, 100)}`);
+    } catch (e: any) { warn(`reply failed: ${e.message}`); }
   }
 }
 
@@ -276,7 +313,7 @@ async function connectSSE() {
   const sseUrl = `${COMMHUB_URL}/events/${encodeURIComponent(ALIAS)}`;
   let delay = 3000;
   while (true) {
-    log(`SSE connecting`);
+    debug(`SSE connecting: ${sseUrl}`);
     try {
       const res = await fetch(sseUrl, { headers: { Accept: "text/event-stream", "Cache-Control": "no-cache" } });
       if (!res.ok || !res.body) { await new Promise(r => setTimeout(r, delay)); delay = Math.min(delay * 1.5, 60_000); continue; }
@@ -301,15 +338,21 @@ async function connectSSE() {
           } catch {}
         }
       }
-    } catch (err: any) { log(`SSE error: ${err.message}`); }
-    log(`SSE reconnecting (${delay / 1000}s)...`);
+    } catch (err: any) { warn(`SSE error: ${err.message}`); }
+    debug(`SSE reconnecting (${delay / 1000}s)...`);
     await new Promise(r => setTimeout(r, delay));
     delay = Math.min(delay * 1.5, 60_000);
   }
 }
 
 // ── 启动 ──
-log(`启动 | Hub: ${COMMHUB_URL} | Runtime: ${RUNTIME} | Model: ${MODEL || "(default)"} | Tools: [${TOOLS.join(",")}]`);
+log(`启动`);
+log(`  runtime: ${RUNTIME}`);
+log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.4" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
+log(`  hub:     ${COMMHUB_URL}`);
+log(`  tools:   ${TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)"}`);
+log(`  session: ${SESSION_ID || "(new)"}`);
+log(`  log-dir: ${LOG_DIR}`);
 await register();
 log("已注册到 CommHub");
 setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
