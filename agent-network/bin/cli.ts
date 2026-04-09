@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { spawn, execSync } from "child_process";
 
@@ -66,17 +66,60 @@ function saveServerConfig(data: Record<string, any>) {
 
 interface Profile {
   name?: string;
-  alias: string;
-  hub: string;
+  alias?: string;
+  hub?: string;
   token?: string;
-  runtime?: "claude-code" | "agent-sdk";
+  runtime?: string;
+  codexRuntime?: string;
   model?: string;
   channels: string[];
   env: Record<string, string>;
   flags: Record<string, any>;
+  session?: string;
   resume?: string;
   resumeAlias?: string;
   tools?: string[];
+}
+
+type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk";
+
+function normalizeRuntime(profileOrRuntime?: Profile | string): RuntimeName {
+  if (typeof profileOrRuntime === "string") {
+    if (profileOrRuntime === "codex" || profileOrRuntime === "codex-sdk") return "codex-sdk";
+    if (profileOrRuntime === "claude" || profileOrRuntime === "claude-sdk" || profileOrRuntime === "claude-agent-sdk") return "claude-agent-sdk";
+    if (profileOrRuntime === "agent-sdk") return "claude-agent-sdk";
+    return "claude-code-cli";
+  }
+  const p = profileOrRuntime;
+  if (!p) return "claude-code-cli";
+  if (p.runtime === "agent-sdk") {
+    return p.codexRuntime === "codex" ? "codex-sdk" : "claude-agent-sdk";
+  }
+  return normalizeRuntime(p.runtime || "claude-code-cli");
+}
+
+function nodeDisplayName(id: string, profile?: Profile | null): string {
+  return profile?.name || profile?.alias || id;
+}
+
+function profileSession(profile: Profile): string {
+  return profile.session || profile.resume || "";
+}
+
+function normalizeNodeName(name: string): string {
+  return name.normalize("NFC");
+}
+
+function validateNodeName(name: string) {
+  if (name !== normalizeNodeName(name)) {
+    console.error(`Error: node-name must be Unicode NFC normalized: ${name}`);
+    process.exit(1);
+  }
+  if (!/^[^\s\/\\:*?"<>|.][^\s\/\\:*?"<>|.]*$/.test(name)) {
+    console.error(`Error: invalid node-name "${name}"`);
+    console.error(`Allowed: Chinese/letters/numbers/-/_ ; forbidden: whitespace, '.', / \\ : * ? " < > |`);
+    process.exit(1);
+  }
 }
 
 function loadProfile(id: string): Profile | null {
@@ -86,13 +129,18 @@ function loadProfile(id: string): Profile | null {
     const project = JSON.parse(readFileSync(p, "utf-8"));
     const gc = loadGlobal();
     // Global config as base, project config overlay (field-level merge)
-    return {
+    const profile: Profile = {
       ...project,
+      name: project.name || project.alias || id,
+      alias: project.alias || project.name || id,
+      session: project.session || project.resume || "",
       hub: project.hub || gc.hub || "",
       token: project.token || gc.token || "",
+      channels: Array.isArray(project.channels) ? project.channels : [],
       env: { ...project.env },
       flags: { ...project.flags },
     };
+    return profile;
   } catch { return null; }
 }
 
@@ -117,9 +165,43 @@ function parseOpts(): Record<string, string> & { _channels: string[]; _envs: str
     if (args[i] === "--env" && args[i + 1]) { r._envs.push(args[++i]); continue; }
     if (args[i].startsWith("--") && args[i + 1] && !args[i + 1].startsWith("--")) {
       r[args[i].slice(2)] = args[++i];
+    } else if (args[i].startsWith("--")) {
+      r[args[i].slice(2)] = "true";
     }
   }
   return r;
+}
+
+function commandExists(name: string): boolean {
+  try {
+    execSync(`command -v ${JSON.stringify(name)}`, { stdio: "ignore", shell: "/bin/bash" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function printClaudeCodeNotice() {
+  console.log(`[anet] claude-code-cli requires:`);
+  console.log(`  - Claude Pro / Team / Enterprise subscription`);
+  console.log(`  - Run "claude auth login" first`);
+  console.log(`  - Uses Anthropic Claude only`);
+  console.log(`  - For other models, use --runtime codex-sdk or claude-agent-sdk`);
+}
+
+function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start") {
+  if (runtime === "claude-code-cli") {
+    if (!commandExists("claude")) {
+      console.warn(`[anet] Warning: claude CLI not found in PATH.`);
+      console.warn(`[anet] Install: npm install -g @anthropic-ai/claude-code`);
+    }
+    if (phase === "start") printClaudeCodeNotice();
+    return;
+  }
+  if (!commandExists("npx")) {
+    console.warn(`[anet] Warning: npx not found in PATH; cannot launch @sleep2agi/agent-node.`);
+    console.warn(`[anet] Install Node.js/npm first, or install agent-node globally: npm install -g @sleep2agi/agent-node`);
+  }
 }
 
 // ── Help ──
@@ -130,9 +212,10 @@ anet — AI Agent Network CLI
 
   anet init                     Configure hub URL (global, once)
   anet init project             Setup current project (channel plugin + config)
-  anet init profile <id>        Create a launch profile
-  anet start <id>               New session with profile
-  anet resume <id>              Resume last session with profile
+  anet create <node-name>       Create a node
+  anet start <node-name>        Start node (resume config.session when set)
+  anet start <node-name> --new-session
+  anet resume <node-name> --session <id>
   anet ls                       Show profiles + sessions + network
   anet server start             Start CommHub Server
   anet import                   Import sessions from CommHub → config.json
@@ -143,8 +226,8 @@ anet — AI Agent Network CLI
 Quick start:
   anet server start             # 启动 CommHub Server
   anet init --hub http://IP:9200
-  anet start 指挥室             # Claude Code Agent
-  anet start 小明               # MiniMax Agent (runtime: agent-sdk)
+  anet create 指挥室
+  anet start 指挥室
 `);
 }
 
@@ -314,17 +397,14 @@ commhub_get_all_status()
 // ── init profile ──
 
 function initProfile() {
-  const id = args[2];
-  if (!id) {
-    console.error("Usage: anet init profile <id> --alias <名字> [--channel ...] [--env ...]");
-    process.exit(1);
-  }
+  console.warn(`[deprecated] anet init profile is now anet create.`);
+  console.warn(`             Run: anet create <node-name> [--runtime ...]\n`);
+  createCommand(args[2]);
+}
 
+function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): Profile {
   const gc = loadGlobal();
-  const opts = parseOpts();
-  const alias = opts.alias || id;
   const hub = opts.hub || gc.hub;
-
   if (!hub) {
     console.error("Run 'anet init' first to configure hub URL");
     process.exit(1);
@@ -337,39 +417,61 @@ function initProfile() {
     if (eq > 0) envMap[e.slice(0, eq)] = e.slice(eq + 1);
   }
 
-  const runtime = (opts.runtime || "claude-code") as "claude-code" | "agent-sdk";
+  const runtime = normalizeRuntime(opts.runtime || "claude-code-cli");
+  const defaultModel = runtime === "codex-sdk" ? "gpt-5.4" : undefined;
 
   const profile: Profile = {
-    anet_version: "0.0.24",
-    ...(opts.name ? { name: opts.name } : {}),
+    anet_version: "0.1.0",
+    name: id,
     runtime,
-    alias,
+    alias: id,
     hub,
-    ...(opts.model ? { model: opts.model } : {}),
+    ...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),
     ...(opts.tools ? { tools: opts.tools.split(",").map((s: string) => s.trim()) } : {}),
-    channels: opts._channels.length > 0 ? opts._channels : (runtime === "claude-code" ? ["server:commhub"] : []),
+    channels: opts._channels.length > 0 ? opts._channels : ["server:commhub"],
     env: envMap,
     flags: {
       dangerouslySkipPermissions: true,
-      ...(runtime === "claude-code" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
+      ...(runtime === "claude-code-cli" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
       ...(opts["max-turns"] ? { maxTurns: parseInt(opts["max-turns"]) } : {}),
     },
-    ...(opts.resume ? { resume: opts.resume } : {}),
-    ...(opts["resume-alias"] ? { resumeAlias: opts["resume-alias"] } : {}),
+    ...(opts.session ? { session: opts.session } : {}),
   };
+  return profile;
+}
 
-  // Write alias .env for channel
+function createCommand(idOverride?: string) {
+  const id = idOverride || args[1];
+  if (!id) {
+    console.error("Usage: anet create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk] [--model ...] [--tools ...]");
+    process.exit(1);
+  }
+  validateNodeName(id);
+
+  if (loadProfile(id)) {
+    console.error(`Node "${id}" already exists: .anet/nodes/${id}/config.json`);
+    process.exit(1);
+  }
+
+  const opts = parseOpts();
+  const profile = createProfileFromOpts(id, opts);
+
+  // Write alias .env for legacy commhub Claude Code channel
   const channelDir = join(home, ".claude", "channels", "commhub");
   const projectKey = process.cwd().replace(/\//g, "-");
   const aliasDir = join(channelDir, projectKey);
   mkdirSync(aliasDir, { recursive: true });
-  writeFileSync(join(aliasDir, ".env"), `COMMHUB_ALIAS=${alias}\n`);
+  writeFileSync(join(aliasDir, ".env"), `COMMHUB_ALIAS=${id}\n`);
 
   saveProfile(id, profile);
-  console.log(`\n✅ Profile "${id}" saved`);
-  console.log(`   alias: ${alias}`);
-  console.log(`   channels: ${profile.channels.join(", ")}`);
-  if (Object.keys(envMap).length) console.log(`   env: ${Object.keys(envMap).join(", ")}`);
+  checkRuntimeDependency(normalizeRuntime(profile), "create");
+
+  console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)})`);
+  if (normalizeRuntime(profile) === "claude-code-cli") {
+    printClaudeCodeNotice();
+  }
+  console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
+  console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
   console.log(`\nStart: anet start ${id}`);
 }
 
@@ -453,7 +555,7 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
 // ── ensure .mcp.json has commhub server ──
 
 function ensureMcpJson(profile: Profile) {
-  if ((profile.runtime || "claude-code") !== "claude-code") return;
+  if (normalizeRuntime(profile) !== "claude-code-cli") return;
   if (!profile.channels?.some(ch => ch.includes("commhub"))) return;
 
   const mcpJsonPath = join(process.cwd(), ".mcp.json");
@@ -520,15 +622,20 @@ function ensureMcpJson(profile: Profile) {
 
 // ── launch helper (shared by start + resume) ──
 
-async function launchAgent(id: string, mode: "start" | "resume") {
+async function launchAgent(id: string, forceNewSession = false) {
   let profile = loadProfile(id);
   if (!profile) {
-    profile = await interactiveCreateProfile(id);
+    console.error(`Node "${id}" not found. Create it first: anet create ${id}`);
+    process.exit(1);
   }
 
-  const runtime = profile.runtime || "claude-code";
-  const label = mode === "start" ? "Starting new" : "Resuming";
-  console.log(`[anet] ${label} "${id}" (${profile.alias}) [${runtime}]...\n`);
+  const runtime = normalizeRuntime(profile);
+  const displayName = nodeDisplayName(id, profile);
+  const session = profileSession(profile);
+  const willResume = !!session && !forceNewSession;
+  const label = willResume ? `Resuming session ${session.slice(0, 8)}...` : "Starting new session";
+  console.log(`[anet] ${label} for "${id}" [${runtime}]...\n`);
+  checkRuntimeDependency(runtime, "start");
 
   // Auto-configure .mcp.json for commhub channel
   ensureMcpJson(profile);
@@ -536,25 +643,14 @@ async function launchAgent(id: string, mode: "start" | "resume") {
   // Token already merged in loadProfile: project > global
   const token = profile.token || "";
 
-  if (runtime === "agent-sdk") {
+  if (runtime === "codex-sdk" || runtime === "claude-agent-sdk") {
     // spawn agent-node
-    const agentArgs = ["@sleep2agi/agent-node", "--alias", profile.alias, "--hub", profile.hub];
-    if (profile.model) agentArgs.push("--model", profile.model);
-    if (profile.tools?.length) agentArgs.push("--tools", profile.tools.join(","));
-    if (profile.flags?.maxTurns) agentArgs.push("--max-turns", String(profile.flags.maxTurns));
-    // runtime: agent-sdk 里区分 codex / claude
-    if (profile.codexRuntime) agentArgs.push("--runtime", profile.codexRuntime);
-    // session resume
-    if (mode === "resume" && profile.resume) agentArgs.push("--session", profile.resume);
-    // channel: telegram 等
-    const channelsDir = join(nodesDir(), id, "channels");
-    if (existsSync(channelsDir)) {
-      for (const ch of readdirSync(channelsDir)) {
-        if (existsSync(join(channelsDir, ch, ".env"))) {
-          agentArgs.push("--channel", `${ch}:${join(channelsDir, ch)}`);
-        }
-      }
-    }
+    const agentArgs = [
+      "@sleep2agi/agent-node",
+      "--config", join(nodesDir(), id, "config.json"),
+      "--alias", displayName,
+    ];
+    if (forceNewSession) agentArgs.push("--new-session", "true");
 
     const env = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
@@ -581,16 +677,24 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     }
     if (profile.flags.teammateMode) claudeArgs.push("--teammate-mode", profile.flags.teammateMode);
 
-    if (mode === "resume") {
-      // 优先用 session ID，没有则按名字搜索
-      const resumeValue = profile.resume || profile.resumeAlias || profile.name || profile.alias;
-      claudeArgs.push("--resume", resumeValue);
+    if (willResume) {
+      claudeArgs.push("--resume", session);
     }
 
-    claudeArgs.push("-n", profile.name || profile.alias);
+    claudeArgs.push("-n", displayName);
 
     const child = spawn("claude", claudeArgs, { env, stdio: "inherit", shell: true });
-    child.on("exit", (code) => process.exit(code || 0));
+    child.on("exit", (code) => {
+      if (!willResume || forceNewSession) {
+        console.log(`\n[anet] Tip: bind this Claude Code session with:`);
+        console.log(`[anet]   anet session ls`);
+        console.log(`[anet]   anet resume ${id} --session <session-id>`);
+        if (forceNewSession && session) {
+          console.log(`[anet] Next "anet start ${id}" will still resume ${session.slice(0, 8)}... until you rebind.`);
+        }
+      }
+      process.exit(code || 0);
+    });
   }
 }
 
@@ -599,45 +703,53 @@ async function launchAgent(id: string, mode: "start" | "resume") {
 async function startCommand() {
   const id = args[1];
   if (!id) { showProfiles("start"); return; }
-  await launchAgent(id, "start");
+  await launchAgent(id, !!parseOpts()["new-session"]);
 }
 
 // ── resume (continue session) ──
 
 async function resumeCommand() {
   const id = args[1];
-  if (!id) { showProfiles("resume"); return; }
-
-  let profile = loadProfile(id);
-  if (!profile) {
-    // Auto-create config: anet resume 指挥室 --session <id>
-    const opts = parseOpts();
-    const gc = loadGlobal();
-    const hub = opts.hub || gc.hub;
-    const sessionId = opts.session;
-
-    if (!sessionId) {
-      console.log(`Profile "${id}" not found.\n`);
-      console.log(`Quick setup:  anet resume ${id} --session <session-id>`);
-      console.log(`Or create:    anet init profile ${id} --alias ${id} --resume <session-id>`);
-      process.exit(1);
-    }
-    if (!hub) { console.error("Run 'anet init' first"); process.exit(1); }
-
-    profile = {
-      runtime: "claude-code",
-      alias: opts.alias || id,
-      hub,
-      channels: ["server:commhub"],
-      env: {},
-      flags: { dangerouslySkipPermissions: true, teammateMode: "in-process" },
-      resume: sessionId,
-    };
-    saveProfile(id, profile);
-    console.log(`[anet] Created .anet/nodes/${id}/config.json (resume: ${sessionId.slice(0, 8)}...)\n`);
+  if (!id) {
+    console.error("Usage: anet resume <node-name> --session <session-id>");
+    console.error("Daily start/resume: anet start <node-name>");
+    return;
   }
 
-  await launchAgent(id, "resume");
+  let profile = loadProfile(id);
+  const opts = parseOpts();
+  const sessionId = opts.session;
+
+  if (!sessionId) {
+    console.warn(`[deprecated] anet resume <node-name> without --session is now anet start <node-name>.`);
+    await launchAgent(id, false);
+    return;
+  }
+
+  validateNodeName(id);
+  if (!profile) {
+    const createOpts = { ...opts, session: sessionId, runtime: opts.runtime || "claude-code-cli" } as ReturnType<typeof parseOpts>;
+    profile = createProfileFromOpts(id, createOpts);
+    saveProfile(id, profile);
+    console.log(`[anet] Created node "${id}"`);
+  } else {
+    const existing = profileSession(profile);
+    if (existing && existing !== sessionId && opts.yes !== "true") {
+      const answer = await ask(`[anet] ${id} already has session ${existing.slice(0, 8)}..., overwrite? (y/n)`, "n");
+      closeRL();
+      if (!/^y(es)?$/i.test(answer)) {
+        console.log("[anet] Session unchanged.");
+        return;
+      }
+    }
+    profile.session = sessionId;
+    delete profile.resume;
+    delete profile.resumeAlias;
+    saveProfile(id, profile);
+  }
+
+  console.log(`[anet] Saved session ${sessionId.slice(0, 8)}... to .anet/nodes/${id}/config.json\n`);
+  await launchAgent(id, false);
 }
 
 function showProfiles(cmd: string) {
@@ -963,8 +1075,15 @@ Options:
   --bot-token <token>   Bot token
   --allow <user-id>     Allow user ID
 
+Options:
+  --bot-token <token>   Bot token
+  --allow <user-id>     Allow user ID
+  --runtime <rt>        claude-code (默认) / codex / claude-sdk（node 不存在时）
+  --model <model>       模型名（codex 默认 gpt-5.4）
+
 Example:
   anet channel add telegram 指挥室 --bot-token 123:ABC --allow 7612221352
+  anet channel add telegram A站牛 --runtime codex --bot-token 123:ABC --allow 7612221352
   anet channel add telegram 指挥室     # 交互式
 `);
       return;
@@ -976,18 +1095,23 @@ Example:
 
     let profile = loadProfile(nodeId);
     if (!profile) {
-      // 自动创建 node
+      // 自动创建 node，问 runtime
       const gc = loadGlobal();
+      let rt = opts.runtime;
+      if (!rt) rt = await ask("Runtime (claude-code/codex/claude-sdk)", "claude-code");
+      const isSDK = rt !== "claude-code";
       profile = {
-        runtime: "claude-code",
+        runtime: isSDK ? "agent-sdk" : "claude-code",
+        ...(isSDK ? { codexRuntime: rt === "codex" ? "codex" : "claude" } : {}),
         alias: nodeId,
         hub: gc.hub || "",
         channels: ["server:commhub"],
         env: {},
         flags: { dangerouslySkipPermissions: true, teammateMode: "in-process" },
+        ...(isSDK && rt === "codex" ? { model: opts.model || "gpt-5.4" } : {}),
       };
       saveProfile(nodeId, profile);
-      console.log(`[anet] Created node "${nodeId}"`);
+      console.log(`[anet] Created node "${nodeId}" (${rt})`);
     }
 
     let botToken = opts["bot-token"];

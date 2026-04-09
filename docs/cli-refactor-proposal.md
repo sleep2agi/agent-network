@@ -149,9 +149,32 @@ anet create <node-name> \
     claude-agent-sdk   Claude Agent SDK（支持 MiniMax/书生等）
 ```
 
-选完后继续问 model、tools 等（按 runtime 不同问不同问题）。
+选 `claude-agent-sdk` 后继续选模型，URL 自动预填：
 
-传了 `--runtime` 则跳过交互，直接创建。
+```
+? Select model:
+  ❯ MiniMax-M2.7        (ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic)
+    intern-s1-pro        (ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn)
+    claude-sonnet-4-6    (默认 Anthropic API)
+    custom               (手动输入 URL + model)
+
+? ANTHROPIC_AUTH_TOKEN: sk-xxx   # 只需填 token，URL 已预填
+```
+
+选 `codex-sdk` 后：
+
+```
+? Select model:
+  ❯ gpt-5.4
+    o3
+    custom
+
+需要先 codex auth login 登录。
+```
+
+选 `claude-code-cli` 后无需选模型（固定 Anthropic Claude）。
+
+传了 `--runtime` + `--model` 则跳过交互，直接创建。
 
 `anet create` / `anet start` 时检测依赖，未安装则提示：
 

@@ -2,11 +2,11 @@
 /**
  * @sleep2agi/agent-node CLI
  *
- * 支持两种 runtime:
- *   --runtime claude  → Claude Agent SDK (支持 MiniMax/Claude)
- *   --runtime codex   → Codex SDK (GPT-5/o3)
+ * Runtime:
+ *   --runtime claude-agent-sdk  → Claude Agent SDK (Claude/MiniMax)
+ *   --runtime codex-sdk         → Codex SDK (GPT-5.4)
  *
- * 配置加载: CLI args > env > .anet/profiles/<alias>.json > ~/.anet/config.json > defaults
+ * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
 import { readFileSync, existsSync, writeFileSync, chmodSync } from "fs";
@@ -29,25 +29,24 @@ for (let i = 0; i < argv.length; i++) {
   npx @sleep2agi/agent-node --alias "我的Agent"
 
 选项:
-  --alias <name>      Agent 别名 (必需)
-  --runtime <type>    claude (default) | codex
-  --url <url>         CommHub URL (default: http://127.0.0.1:9200)
-  --hub <url>         同 --url
-  --model <name>      AI 模型 (claude: claude-sonnet-4-6 / MiniMax-M2.7, codex: gpt-5.4 / o3)
-  --tools <list>      工具列表，逗号分隔 ("all" = 全部工具, claude runtime only)
-  --max-turns <n>     每任务最大轮次 (default: 5, claude runtime only)
-  --max-budget <usd>  每任务预算上限 (claude runtime only)
-  --session <id>      恢复指定 session (claude session ID 或 codex thread ID)
-  --channel <type>    Channel 类型。P0: telegram
+  --config <path>     配置文件 (.anet/nodes/<name>/config.json)
+  --alias <name>      Agent 别名 / CommHub alias (必需)
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk
+  --model <name>      AI 模型 (claude-agent-sdk: claude-sonnet-4-6, codex-sdk: gpt-5.4)
+  --hub <url>         CommHub URL
+  --tools <list>      工具列表，逗号分隔 ("all" = 全部)
+  --max-turns <n>     每任务最大轮次 (default: 5)
+  --max-budget <usd>  每任务预算上限
+  --session <id>      恢复 session / thread ID
+  --channel <spec>    Channel (telegram 或 telegram:/path)
   --prompt <text>     自定义 System Prompt
-  --log-dir <path>    日志目录 (default: .anet/nodes/<alias>/logs/)
+  --log-dir <path>    日志目录
   --log-level <lvl>   debug | info (default) | warn | error
-  --config <path>     配置文件 (覆盖 .anet profile 自动查找)
   -h, --help          帮助
 
 Runtime:
-  claude  Claude Agent SDK — 支持 Claude/MiniMax，需要 ANTHROPIC_API_KEY 或 ANTHROPIC_BASE_URL+TOKEN
-  codex   Codex SDK — 支持 GPT-5/o3，复用 codex 登录态（不需要额外 key）
+  claude-agent-sdk  Claude Agent SDK — Claude/MiniMax/Anthropic 兼容 API
+  codex-sdk         Codex SDK — GPT-5.4，复用 codex 登录态
 `);
     process.exit(0);
   }
@@ -82,21 +81,24 @@ function loadJson(path: string): Record<string, any> | null {
 }
 
 let fileConfig: Record<string, any> = {};
+let configFilePath = "";  // 用于 session 写回
+
 if (opts.config) {
-  const fc = loadJson(join(process.cwd(), opts.config));
-  if (fc) { fileConfig = fc; console.log(`[agent-node] 配置: ${opts.config}`); }
+  const cfgPath = opts.config.startsWith("/") ? opts.config : join(process.cwd(), opts.config);
+  const fc = loadJson(cfgPath);
+  if (fc) { fileConfig = fc; configFilePath = cfgPath; console.log(`[agent-node] Config: ${cfgPath}`); }
 }
 
 const ALIAS = opts.alias || process.env.COMMHUB_ALIAS || process.env.ALIAS || fileConfig.alias;
 
 if (!opts.config && ALIAS) {
-  // 新路径: .anet/nodes/<alias>/config.json → 旧路径: .anet/profiles/<alias>.json
   const newPath = join(process.cwd(), ".anet", "nodes", ALIAS, "config.json");
   const oldPath = join(process.cwd(), ".anet", "profiles", `${ALIAS}.json`);
   const profilePath = existsSync(newPath) ? newPath : oldPath;
   const profile = loadJson(profilePath);
   if (profile) {
     fileConfig = { ...profile, ...fileConfig };
+    configFilePath = profilePath;
     console.log(`[agent-node] Config: ${profilePath}`);
     if (profile.env && typeof profile.env === "object") {
       for (const [k, v] of Object.entries(profile.env)) {
@@ -120,9 +122,14 @@ if (!ALIAS) {
   process.exit(1);
 }
 
-// anet profile 用 "agent-sdk"，映射到 "claude"
-const rawRuntime = opts.runtime || process.env.RUNTIME || fileConfig.runtime || "claude";
-const RUNTIME = (rawRuntime === "agent-sdk" ? "claude" : rawRuntime) as "claude" | "codex";
+// runtime 映射：正式名 + 旧名兼容
+const rawRuntime = opts.runtime || process.env.RUNTIME || fileConfig.runtime || "claude-agent-sdk";
+const RUNTIME_MAP: Record<string, string> = {
+  "claude-agent-sdk": "claude", "claude-sdk": "claude", "agent-sdk": "claude", "claude": "claude",
+  "codex-sdk": "codex", "codex": "codex",
+};
+const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex";
+const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
@@ -131,14 +138,14 @@ const toolsRaw = opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.too
 let TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean);
 const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "5");
 const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
-const SESSION_ID = opts.session || fileConfig.resume || fileConfig.sessionId || "";
+const SESSION_ID = opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "";
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || fileConfig.token || "";
 const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 const LOG_LEVEL = (LOG_LEVELS as any)[(opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info")] ?? 1;
 const channelSpecs = [
-  ...((Array.isArray(fileConfig.channels) ? fileConfig.channels : []) as string[]).filter(ch => !ch.startsWith("server:")),
+  ...((Array.isArray(fileConfig.channels) ? fileConfig.channels : []) as string[]).filter(ch => !ch.startsWith("server:") && !ch.startsWith("plugin:")),
   ...cliChannels,
 ];
 const CHANNELS = channelSpecs.map((spec) => {
@@ -149,6 +156,18 @@ const CHANNELS = channelSpecs.map((spec) => {
     process.exit(1);
   }
 });
+
+// ── Session 写回 config.json ──
+function writebackSession(sessionId: string) {
+  if (!configFilePath || !sessionId) return;
+  try {
+    const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
+    if (cfg.session === sessionId) return; // 已是最新
+    cfg.session = sessionId;
+    writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
+    debug(`session 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
+  } catch {}
+}
 
 // ── Channel config ──
 function loadEnvFile(path: string) {
@@ -305,6 +324,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     if (m.type === "system" && m.subtype === "init") {
       claudeSessionId = m.session_id;
       log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "default"}`);
+      writebackSession(m.session_id);
     }
     if (m.type === "result") {
       const dt = Date.now() - t0;
@@ -374,6 +394,7 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
     }
     const dt = Date.now() - t0;
     log(`[codex] done | ${dt}ms | in=${usage?.input_tokens || 0} out=${usage?.output_tokens || 0} | items=${itemCount}`);
+    if (codexThread?.id) writebackSession(codexThread.id);
     return finalResponse || "（无回复）";
   } catch (e: any) {
     log(`codex thread error: ${e.message}, 重建`);
@@ -655,7 +676,7 @@ async function connectSSE() {
 
 // ── 启动 ──
 log(`启动`);
-log(`  runtime: ${RUNTIME}`);
+log(`  runtime: ${RUNTIME_LABEL}`);
 log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.4" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}`);
 log(`  tools:   ${TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)"}`);
