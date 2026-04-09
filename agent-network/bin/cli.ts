@@ -965,10 +965,20 @@ Example:
       process.exit(1);
     }
 
-    const profile = loadProfile(nodeId);
+    let profile = loadProfile(nodeId);
     if (!profile) {
-      console.error(`Node "${nodeId}" not found. Create it first: anet start ${nodeId}`);
-      process.exit(1);
+      // 自动创建 node
+      const gc = loadGlobal();
+      profile = {
+        runtime: "claude-code",
+        alias: nodeId,
+        hub: gc.hub || "",
+        channels: ["server:commhub"],
+        env: {},
+        flags: { dangerouslySkipPermissions: true, teammateMode: "in-process" },
+      };
+      saveProfile(nodeId, profile);
+      console.log(`[anet] Created node "${nodeId}"`);
     }
 
     let botToken = opts["bot-token"];

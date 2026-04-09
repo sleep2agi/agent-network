@@ -90,10 +90,14 @@ if (opts.config) {
 const ALIAS = opts.alias || process.env.COMMHUB_ALIAS || process.env.ALIAS || fileConfig.alias;
 
 if (!opts.config && ALIAS) {
-  const profile = loadJson(join(process.cwd(), ".anet", "profiles", `${ALIAS}.json`));
+  // 新路径: .anet/nodes/<alias>/config.json → 旧路径: .anet/profiles/<alias>.json
+  const newPath = join(process.cwd(), ".anet", "nodes", ALIAS, "config.json");
+  const oldPath = join(process.cwd(), ".anet", "profiles", `${ALIAS}.json`);
+  const profilePath = existsSync(newPath) ? newPath : oldPath;
+  const profile = loadJson(profilePath);
   if (profile) {
     fileConfig = { ...profile, ...fileConfig };
-    console.log(`[agent-node] Profile: .anet/profiles/${ALIAS}.json`);
+    console.log(`[agent-node] Config: ${profilePath}`);
     if (profile.env && typeof profile.env === "object") {
       for (const [k, v] of Object.entries(profile.env)) {
         if (!process.env[k] && typeof v === "string") process.env[k] = expandHome(v);
@@ -127,7 +131,7 @@ const toolsRaw = opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.too
 let TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean);
 const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "5");
 const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
-const SESSION_ID = opts.session || fileConfig.sessionId || "";
+const SESSION_ID = opts.session || fileConfig.resume || fileConfig.sessionId || "";
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || fileConfig.token || "";
 const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
