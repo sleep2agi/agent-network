@@ -170,6 +170,7 @@ async function processTask(task: string, from: string): Promise<string> {
     maxTurns: MAX_TURNS,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
+    settingSources: [],  // 隔离：不读 ~/.claude.json 全局配置，防止 MCP 串网
     env: process.env,
     cwd: process.cwd(),
     stderr: (data: string) => { if (data.trim()) log(`[stderr] ${data.trim().slice(0, 200)}`); },
