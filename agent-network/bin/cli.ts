@@ -542,6 +542,10 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     if (profile.model) agentArgs.push("--model", profile.model);
     if (profile.tools?.length) agentArgs.push("--tools", profile.tools.join(","));
     if (profile.flags?.maxTurns) agentArgs.push("--max-turns", String(profile.flags.maxTurns));
+    for (const ch of profile.channels || []) {
+      if (ch.startsWith("server:") || ch.startsWith("plugin:")) continue;
+      agentArgs.push("--channel", ch);
+    }
 
     const env = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
@@ -928,6 +932,123 @@ anet session <command>
   }
 }
 
+// ── channel ──
+
+async function channelCommand() {
+  // anet channel add telegram <node-id> --bot-token xxx --allow xxx
+  // anet channel ls [node-id]
+  const sub = args[1];
+  const opts = parseOpts();
+
+  if (sub === "add") {
+    const type = args[2]; // P0: telegram
+    const nodeId = args[3];
+
+    if (!type || !nodeId) {
+      console.log(`
+anet channel add <type> <node-id> [options]
+
+Types:  telegram
+
+Options:
+  --bot-token <token>   Bot token
+  --allow <user-id>     Allow user ID
+
+Example:
+  anet channel add telegram 指挥室 --bot-token 123:ABC --allow 7612221352
+  anet channel add telegram 指挥室     # 交互式
+`);
+      return;
+    }
+    if (type !== "telegram") {
+      console.error(`P0 only supports telegram channels. Unsupported type: ${type}`);
+      process.exit(1);
+    }
+
+    const profile = loadProfile(nodeId);
+    if (!profile) {
+      console.error(`Node "${nodeId}" not found. Create it first: anet start ${nodeId}`);
+      process.exit(1);
+    }
+
+    let botToken = opts["bot-token"];
+    let allowId = opts.allow;
+    if (!botToken) botToken = await ask(`${type} Bot Token`);
+    if (!allowId) allowId = await ask("Allow User ID");
+    closeRL();
+
+    if (!botToken || !allowId) {
+      console.error("Error: bot-token and allow required");
+      process.exit(1);
+    }
+
+    // Store at .anet/nodes/<nodeId>/channels/<type>/
+    const channelDir = join(nodesDir(), nodeId, "channels", type);
+    mkdirSync(channelDir, { recursive: true });
+    mkdirSync(join(channelDir, "inbox"), { recursive: true });
+
+    const tokenEnvKey = "TELEGRAM_BOT_TOKEN";
+
+    writeFileSync(join(channelDir, ".env"), `${tokenEnvKey}=${botToken}\n`);
+    writeFileSync(join(channelDir, "access.json"), JSON.stringify({
+      dmPolicy: "allowlist",
+      allowFrom: [allowId],
+      groups: {},
+      pending: {},
+    }, null, 2) + "\n");
+
+    // Update node config.json.
+    // Claude Code consumes the plugin name; agent-node consumes type:path.
+    const channelSpec = (profile.runtime || "claude-code") === "agent-sdk"
+      ? `telegram:${channelDir}`
+      : "plugin:telegram@claude-plugins-official";
+    if (!profile.channels.includes(channelSpec)) {
+      profile.channels.push(channelSpec);
+    }
+    profile.env.TELEGRAM_STATE_DIR = channelDir;
+    saveProfile(nodeId, profile);
+
+    console.log(`\n✅ ${type} channel added to "${nodeId}"`);
+    console.log(`   ${channelDir}/`);
+    console.log(`   config.json updated`);
+
+  } else if (sub === "ls") {
+    const nodeId = args[2];
+    const ids = nodeId ? [nodeId] : listProfileIds();
+    let found = false;
+
+    for (const id of ids) {
+      const channelsDir = join(nodesDir(), id, "channels");
+      if (!existsSync(channelsDir)) continue;
+      const types = readdirSync(channelsDir).filter(d => {
+        try { return statSync(join(channelsDir, d)).isDirectory(); } catch { return false; }
+      });
+      if (types.length === 0) continue;
+      if (!found) { console.log("\nNode Channels:\n"); found = true; }
+      for (const t of types) {
+        const accessPath = join(channelsDir, t, "access.json");
+        let allow = "";
+        if (existsSync(accessPath)) {
+          try { allow = JSON.parse(readFileSync(accessPath, "utf-8")).allowFrom?.join(", ") || ""; } catch {}
+        }
+        console.log(`  ${id.padEnd(20)} ${t.padEnd(12)} allow: ${allow || "(none)"}`);
+      }
+    }
+    if (!found) console.log("No channels. Add one: anet channel add telegram <node-id>");
+    console.log();
+
+  } else {
+    console.log(`
+anet channel <command>
+
+  add <type> <node-id>          Add channel to a node
+  ls [node-id]                  List channels
+
+Data: .anet/nodes/<node-id>/channels/<type>/
+`);
+  }
+}
+
 // ── Main ──
 
 switch (command) {
@@ -940,6 +1061,7 @@ switch (command) {
   case "start": startCommand(); break;
   case "resume": resumeCommand(); break;
   case "import": importCommand(); break;
+  case "channel": channelCommand(); break;
   case "session": sessionCommand(); break;
   case "ls": case "list": lsCommand(); break;
   case "run": runCommand(); break;

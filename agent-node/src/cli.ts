@@ -9,7 +9,7 @@
  * 配置加载: CLI args > env > .anet/profiles/<alias>.json > ~/.anet/config.json > defaults
  */
 
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { hostname as osHostname, homedir } from "os";
 
@@ -18,6 +18,7 @@ const home = homedir();
 // ── 参数解析 ──
 const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
+const cliChannels: string[] = [];
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "-h" || argv[i] === "--help") {
@@ -37,6 +38,7 @@ for (let i = 0; i < argv.length; i++) {
   --max-turns <n>     每任务最大轮次 (default: 5, claude runtime only)
   --max-budget <usd>  每任务预算上限 (claude runtime only)
   --session <id>      恢复指定 session (claude session ID 或 codex thread ID)
+  --channel <type>    Channel 类型。P0: telegram
   --prompt <text>     自定义 System Prompt
   --log-dir <path>    日志目录 (default: .anet/nodes/<alias>/logs/)
   --log-level <lvl>   debug | info (default) | warn | error
@@ -49,9 +51,28 @@ Runtime:
 `);
     process.exit(0);
   }
+  if (argv[i] === "--channel" && i + 1 < argv.length) {
+    cliChannels.push(argv[++i]);
+    continue;
+  }
   if (argv[i].startsWith("--") && i + 1 < argv.length) {
     opts[argv[i].slice(2)] = argv[++i];
   }
+}
+
+function expandHome(path: string): string {
+  return path.replace(/^~(?=\/|$)/, home);
+}
+
+function parseChannelSpec(spec: string): { type: string; path?: string; raw: string } {
+  const sep = spec.indexOf(":");
+  if (sep < 0) return { type: spec, raw: spec };
+  if (sep === 0 || sep === spec.length - 1) throw new Error(`invalid channel spec "${spec}" (expected type or type:path)`);
+  return {
+    type: spec.slice(0, sep),
+    path: expandHome(spec.slice(sep + 1)),
+    raw: spec,
+  };
 }
 
 // ── 配置加载 ──
@@ -75,7 +96,7 @@ if (!opts.config && ALIAS) {
     console.log(`[agent-node] Profile: .anet/profiles/${ALIAS}.json`);
     if (profile.env && typeof profile.env === "object") {
       for (const [k, v] of Object.entries(profile.env)) {
-        if (!process.env[k] && typeof v === "string") process.env[k] = v.replace(/^~/, home);
+        if (!process.env[k] && typeof v === "string") process.env[k] = expandHome(v);
       }
     }
   }
@@ -112,6 +133,72 @@ const AUTH_TOKEN = process.env.COMMHUB_TOKEN || fileConfig.token || "";
 const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 const LOG_LEVEL = (LOG_LEVELS as any)[(opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info")] ?? 1;
+const channelSpecs = [
+  ...((Array.isArray(fileConfig.channels) ? fileConfig.channels : []) as string[]).filter(ch => !ch.startsWith("server:")),
+  ...cliChannels,
+];
+const CHANNELS = channelSpecs.map((spec) => {
+  try {
+    return parseChannelSpec(spec);
+  } catch (e: any) {
+    console.error(`[agent-node] ${e.message}`);
+    process.exit(1);
+  }
+});
+
+// ── Channel config ──
+function loadEnvFile(path: string) {
+  if (!existsSync(path)) return;
+  for (const rawLine of readFileSync(path, "utf-8").split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    const val = line.slice(eq + 1).trim().replace(/^['"]|['"]$/g, "");
+    if (!process.env[key]) process.env[key] = val;
+  }
+}
+
+function defaultChannelDir(type: string) {
+  return join(process.cwd(), ".anet", "nodes", ALIAS, "channels", type);
+}
+
+interface TelegramChannel {
+  type: "telegram";
+  dir: string;
+  inboxDir: string;
+  token: string;
+  allowFrom: string[];
+}
+
+function initTelegramChannel(spec: { type: string; path?: string; raw: string }): TelegramChannel {
+  const dir = spec.path || defaultChannelDir("telegram");
+  loadEnvFile(join(dir, ".env"));
+  const token = process.env.TELEGRAM_BOT_TOKEN || "";
+  if (!token) {
+    console.error(`[agent-node] telegram channel needs TELEGRAM_BOT_TOKEN in ${join(dir, ".env")}`);
+    process.exit(1);
+  }
+
+  const access = loadJson(join(dir, "access.json")) || {};
+  const inboxDir = join(dir, "inbox");
+  try { mkdirSync(inboxDir, { recursive: true }); } catch {}
+  return {
+    type: "telegram",
+    dir,
+    inboxDir,
+    token,
+    allowFrom: Array.isArray(access.allowFrom) ? access.allowFrom.map(String) : [],
+  };
+}
+
+const TELEGRAM_CHANNELS = CHANNELS.filter(ch => ch.type === "telegram").map(initTelegramChannel);
+const UNSUPPORTED_CHANNEL = CHANNELS.find(ch => ch.type !== "telegram");
+if (UNSUPPORTED_CHANNEL) {
+  console.error(`[agent-node] unsupported channel: ${UNSUPPORTED_CHANNEL.raw}`);
+  process.exit(1);
+}
 
 // ── 日志：终端 + 文件 ──
 import { mkdirSync, appendFileSync } from "fs";
@@ -292,17 +379,25 @@ async function processWithCodex(task: string, from: string): Promise<string> {
 // ══════════════════════════════════════
 // 任务分发
 // ══════════════════════════════════════
+let thinkQueue = Promise.resolve();
+
+function think(task: string, from: string): Promise<string> {
+  const run = async () => {
+    if (RUNTIME === "codex") return processWithCodex(task, from);
+    return processWithClaude(task, from);
+  };
+  const next = thinkQueue.then(run, run);
+  thinkQueue = next.then(() => {}, () => {});
+  return next;
+}
+
 async function processTask(task: string, from: string): Promise<string> {
   log(`→ processing [${RUNTIME}]: ${task.slice(0, 80)}`);
   await reportStatus("working", task.slice(0, 200));
 
   let result: string;
   try {
-    if (RUNTIME === "codex") {
-      result = await processWithCodex(task, from);
-    } else {
-      result = await processWithClaude(task, from);
-    }
+    result = await think(task, from);
   } catch (err: any) {
     result = `${RUNTIME} 错误: ${err.message}`;
     error(`✗ ${err.message}`);
@@ -325,6 +420,132 @@ async function processInbox() {
       await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`);
       log(`→ [${from}] ${result.slice(0, 100)}`);
     } catch (e: any) { warn(`reply failed: ${e.message}`); }
+  }
+}
+
+// ── Telegram ──
+interface TelegramApi {
+  channel: TelegramChannel;
+  apiBase: string;
+  fileBase: string;
+  offset: number;
+}
+
+function telegramUserId(msg: any): string {
+  return String(msg.from?.id || msg.chat?.id || "");
+}
+
+function telegramUserLabel(msg: any): string {
+  return msg.from?.username || msg.from?.first_name || telegramUserId(msg) || "telegram";
+}
+
+function telegramAllowed(channel: TelegramChannel, msg: any): boolean {
+  if (channel.allowFrom.length === 0) return true;
+  const id = telegramUserId(msg);
+  const username = msg.from?.username ? String(msg.from.username) : "";
+  return channel.allowFrom.includes(id) || (!!username && channel.allowFrom.includes(username));
+}
+
+async function telegramJson(tg: TelegramApi, method: string, body: Record<string, unknown>) {
+  const res = await fetch(`${tg.apiBase}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json() as any;
+  if (!data.ok) throw new Error(`telegram ${method} failed: ${data.description || res.statusText}`);
+  return data.result;
+}
+
+async function telegramSend(tg: TelegramApi, chatId: number | string, text: string, replyTo?: number) {
+  const chunks = text.match(/[\s\S]{1,4096}/g) || ["（无回复）"];
+  for (let i = 0; i < chunks.length; i++) {
+    await telegramJson(tg, "sendMessage", {
+      chat_id: chatId,
+      text: chunks[i],
+      ...(replyTo && i === 0 ? { reply_to_message_id: replyTo } : {}),
+    });
+  }
+}
+
+async function telegramDownload(tg: TelegramApi, fileId: string, filenameHint?: string): Promise<string> {
+  const file = await telegramJson(tg, "getFile", { file_id: fileId });
+  const filePath = String(file.file_path || "");
+  const res = await fetch(`${tg.fileBase}/${filePath}`);
+  if (!res.ok) throw new Error(`telegram file download failed: ${res.status} ${res.statusText}`);
+
+  const extFromPath = filePath.split(".").pop();
+  const safeHint = (filenameHint || filePath.split("/").pop() || fileId).replace(/[^a-zA-Z0-9._-]/g, "_");
+  const localName = safeHint.includes(".") || !extFromPath ? safeHint : `${safeHint}.${extFromPath}`;
+  const localPath = join(tg.channel.inboxDir, `${Date.now()}_${localName}`);
+  writeFileSync(localPath, Buffer.from(await res.arrayBuffer()));
+  return localPath;
+}
+
+async function telegramBuildPrompt(tg: TelegramApi, msg: any): Promise<string> {
+  let prompt = msg.text || msg.caption || "";
+  const attachments: string[] = [];
+
+  if (Array.isArray(msg.photo) && msg.photo.length > 0) {
+    const photo = msg.photo[msg.photo.length - 1];
+    const localPath = await telegramDownload(tg, photo.file_id, `photo_${msg.message_id}.jpg`);
+    attachments.push(`图片: ${localPath}`);
+  }
+
+  const mime = String(msg.document?.mime_type || "");
+  if (msg.document && mime.startsWith("image/")) {
+    const localPath = await telegramDownload(tg, msg.document.file_id, msg.document.file_name || `image_${msg.message_id}`);
+    attachments.push(`图片: ${localPath}`);
+  }
+
+  if (attachments.length) {
+    prompt += `\n\n[Telegram 附件已下载]\n${attachments.map(path => `- ${path}`).join("\n")}`;
+  }
+  return prompt.trim();
+}
+
+async function handleTelegramMessage(tg: TelegramApi, msg: any) {
+  if (!telegramAllowed(tg.channel, msg)) return;
+
+  const chatId = msg.chat?.id;
+  const messageId = msg.message_id;
+  const from = `telegram:${telegramUserLabel(msg)}`;
+  const prompt = await telegramBuildPrompt(tg, msg);
+  if (!chatId || !messageId || !prompt) return;
+
+  log(`← [${from}] ${prompt.slice(0, 100)}`);
+  try {
+    const result = await think(prompt, from);
+    await telegramSend(tg, chatId, result, messageId);
+    log(`→ [${from}] ${result.slice(0, 100)}`);
+  } catch (e: any) {
+    error(`telegram task failed: ${e.message}`);
+    await telegramSend(tg, chatId, `处理出错: ${e.message}`, messageId).catch(() => {});
+  }
+}
+
+async function connectTelegram(channel: TelegramChannel) {
+  const tg: TelegramApi = {
+    channel,
+    apiBase: `https://api.telegram.org/bot${channel.token}`,
+    fileBase: `https://api.telegram.org/file/bot${channel.token}`,
+    offset: 0,
+  };
+
+  log(`Telegram polling: ${channel.dir}`);
+  while (true) {
+    try {
+      const res = await fetch(`${tg.apiBase}/getUpdates?offset=${tg.offset}&timeout=30`);
+      const data = await res.json() as any;
+      if (!data.ok) throw new Error(data.description || "getUpdates failed");
+      for (const update of data.result || []) {
+        tg.offset = update.update_id + 1;
+        if (update.message) await handleTelegramMessage(tg, update.message);
+      }
+    } catch (err: any) {
+      warn(`Telegram polling error: ${err.message}`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
   }
 }
 
@@ -372,6 +593,7 @@ log(`  runtime: ${RUNTIME}`);
 log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.4" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}`);
 log(`  tools:   ${TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)"}`);
+log(`  channels:${TELEGRAM_CHANNELS.length ? ` telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : " (none)"}`);
 log(`  session: ${SESSION_ID || "(new)"}`);
 log(`  log-dir: ${LOG_DIR}`);
 await register();
@@ -380,4 +602,5 @@ setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
 const shutdown = async () => { log("shutting down..."); await reportStatus("offline").catch(() => {}); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+for (const channel of TELEGRAM_CHANNELS) connectTelegram(channel);
 connectSSE();

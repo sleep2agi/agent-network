@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-network",
-  "version": "0.0.48",
+  "version": "0.0.49",
   "description": "AI Agent Network — Server + Client + Setup in one package. SSE real-time communication for multi-agent orchestration.",
   "type": "module",
   "main": "dist/src/client.js",
