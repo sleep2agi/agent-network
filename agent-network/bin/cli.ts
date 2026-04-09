@@ -55,6 +55,7 @@ interface Profile {
   name?: string;
   alias: string;
   hub: string;
+  token?: string;
   runtime?: "claude-code" | "agent-sdk";
   model?: string;
   channels: string[];
@@ -469,7 +470,7 @@ function ensureMcpJson(profile: Profile) {
   // Write .anet/.env (hub URL + token)
   const anetEnvPath = join(anetDir, ".env");
   const gc = loadGlobal();
-  const token = getToken();
+  const token = profile.token || getToken();
   let envContent = `COMMHUB_URL=${profile.hub || gc.hub || "http://127.0.0.1:9200"}\n`;
   if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
   writeFileSync(anetEnvPath, envContent);
@@ -496,6 +497,9 @@ async function launchAgent(id: string, mode: "start" | "resume") {
   // Auto-configure .mcp.json for commhub channel
   ensureMcpJson(profile);
 
+  // Token: node config > global config
+  const token = profile.token || getToken();
+
   if (runtime === "agent-sdk") {
     // spawn agent-node
     const agentArgs = ["@sleep2agi/agent-node", "--alias", profile.alias, "--hub", profile.hub];
@@ -503,7 +507,6 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     if (profile.tools?.length) agentArgs.push("--tools", profile.tools.join(","));
     if (profile.flags?.maxTurns) agentArgs.push("--max-turns", String(profile.flags.maxTurns));
 
-    const token = getToken();
     const env = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
@@ -513,7 +516,6 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     child.on("exit", (code) => process.exit(code || 0));
   } else {
     // spawn claude CLI
-    const token = getToken();
     const env = { ...process.env, COMMHUB_ALIAS: profile.alias, ...(token ? { COMMHUB_TOKEN: token } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
