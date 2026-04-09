@@ -606,42 +606,13 @@ async function serverCommand() {
     const host = opts.host || "0.0.0.0";
     const token = opts.token || "";
 
-    // Find server source
-    const candidates = [
-      join(process.cwd(), "server", "src", "index.ts"),
-      join(home, "agent-orchestra", "server", "src", "index.ts"),
-      join(home, "agent-network", "server", "src", "index.ts"),
-    ];
-
-    // Also check if @sleep2agi/commhub-server is installed
-    let serverPath = "";
-    for (const p of candidates) {
-      if (existsSync(p)) { serverPath = p; break; }
-    }
-
-    if (!serverPath) {
-      // Try npm global
-      try {
-        const { execSync } = await import("child_process");
-        const npmRoot = execSync("npm root -g", { encoding: "utf-8" }).trim();
-        const npmPath = join(npmRoot, "@sleep2agi", "commhub-server", "src", "index.ts");
-        if (existsSync(npmPath)) serverPath = npmPath;
-      } catch {}
-    }
-
-    if (!serverPath) {
-      console.error("CommHub Server not found.");
-      console.error("Install: npm install -g @sleep2agi/commhub-server");
-      console.error("Or clone: git clone https://github.com/sleep2agi/agent-network.git && cd agent-network/server && bun install");
-      process.exit(1);
-    }
-
     console.log(`[anet] Starting CommHub Server on ${host}:${port}...`);
 
     const env: Record<string, string> = { ...process.env as any, PORT: port, HOST: host };
     if (token) env.COMMHUB_AUTH_TOKEN = token;
 
-    const child = spawn("bun", ["run", serverPath], { env, stdio: "inherit" });
+    // 直接 npx 跑 commhub-server，不用预装
+    const child = spawn("npx", ["--yes", "@sleep2agi/commhub-server"], { env, stdio: "inherit", shell: true });
     child.on("exit", (code) => process.exit(code || 0));
 
   } else {
