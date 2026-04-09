@@ -364,3 +364,110 @@ agent-node 从 config.json 读取所有配置。崩溃时前台退出（同 exit
 - claude-code-cli session 不自动写回，需手动绑定
 - 崩溃不自动重启（用 PM2/systemd 管理）
 - 仅支持 Telegram channel，WeChat/Feishu 后续
+
+## 追加需求：版本展示和兼容性检测
+
+### 目标
+
+1. `anet -v` 不再只显示 anet 自身版本，要一次性显示 anet 生态里会被启动/依赖的 CLI 包。
+2. `anet start` 在启动 agent-node 前做版本兼容性检查；发现不兼容时停止启动，并提示用户运行 `anet upgrade`。
+
+### `anet -v` 输出
+
+期望格式：
+
+```bash
+anet v1.0.3
+agent-node v1.0.2 (global)
+commhub-server v0.4.3 (global)
+claude CLI v2.1.39
+codex CLI not installed
+```
+
+探测不到时使用 `not installed`：
+
+```bash
+agent-node not installed
+commhub-server not installed
+claude CLI not installed
+codex CLI not installed
+```
+
+### 包名和探测来源
+
+| 展示名 | 包/命令 | 优先探测 | 备用探测 | 位置标记 |
+|--------|---------|----------|----------|----------|
+| `anet` | `@sleep2agi/agent-network` | 当前 CLI 自带 package.json | - | 不显示 |
+| `agent-node` | `@sleep2agi/agent-node` / `agent-node` | `agent-node --version` | `npm ls -g @sleep2agi/agent-node --depth=0 --json` | `(global)` |
+| `commhub-server` | `@sleep2agi/commhub-server` / `commhub-server` | `commhub-server --version` | `npm ls -g @sleep2agi/commhub-server --depth=0 --json` | `(global)` |
+| `claude CLI` | `claude` | `claude --version` | `command -v claude` 仅判断安装 | 不显示 |
+| `codex CLI` | `codex` | `codex --version` | `command -v codex` 仅判断安装 | 不显示 |
+
+说明：
+
+- P0 只要求显示全局安装状态；当前 `anet start` 仍用 `npx @sleep2agi/agent-node` 启动。
+- 如果命令可执行但无法解析版本，输出 `installed (version unknown)`，不要伪造成 `not installed`。
+- 版本解析统一接受 `1.0.2` / `v1.0.2` / `agent-node v1.0.2` 这几类输出。
+- `upgradeCommand()` 结尾只保留 `anet -v`，不要再单独打印一遍 agent-node。
+
+### `anet start` 兼容性检查
+
+只在 `runtime === "codex-sdk" || runtime === "claude-agent-sdk"` 时检查 agent-node。
+
+检查点放在 `launchAgent()` 里：`checkRuntimeDependency(runtime, "start")` 之后、`spawn("npx", ...)` 之前。
+
+兼容矩阵：
+
+| 组件 | 约束 |
+|------|------|
+| `anet >= 1.0.0` | 需要 `agent-node >= 1.0.0` |
+| `agent-node >= 1.0.0` | 需要 `commhub-server >= 0.4.0` |
+
+失败提示：
+
+```text
+[anet] Incompatible package versions.
+[anet] anet v1.0.3 requires agent-node >= 1.0.0, but found agent-node v0.7.0.
+[anet] Run: anet upgrade
+```
+
+缺失提示：
+
+```text
+[anet] agent-node is not installed or cannot report a version.
+[anet] Run: anet upgrade
+```
+
+commhub-server 检查说明：
+
+- `anet start` 本地只检查“可探测到的 commhub-server 版本”。
+- 如果本机未安装 commhub-server，不阻止 agent-node 启动，因为用户可能连接远端 CommHub。
+- 如果探测到 `commhub-server < 0.4.0`，打印 warning；不在 P0 中硬失败，避免误伤远端部署：
+
+```text
+[anet] Warning: local commhub-server v0.3.9 is older than recommended >= 0.4.0.
+[anet] If this machine hosts CommHub, run: anet upgrade
+```
+
+### 实现拆分
+
+新增小 helper，供 `anet -v`、`anet start`、`anet upgrade` 复用：
+
+| helper | 职责 |
+|--------|------|
+| `parseSemver(text)` | 从 CLI/npm 输出中提取 `{ major, minor, patch }` |
+| `compareSemver(a, b)` | 返回 -1/0/1，只比较 major/minor/patch |
+| `detectCommandVersion(command)` | 执行 `<command> --version`，返回版本/unknown/not-installed |
+| `detectGlobalNpmPackage(pkg)` | 读取全局 npm 安装版本，返回版本/unknown/not-installed |
+| `detectInstalledPackages()` | 汇总 anet / agent-node / commhub-server / claude / codex |
+| `printVersionReport()` | 负责 `anet -v` 多行输出 |
+| `assertStartCompatibility(runtime)` | 负责 `anet start` 兼容性门禁 |
+
+### 决策
+
+| # | 决策 | 理由 |
+|---|------|------|
+| 15 | `anet -v` 升级为版本诊断 | 用户不必分别执行 npm/claude/codex 命令排查 |
+| 16 | `anet start` 对 agent-node 版本硬失败 | SDK runtime 直接依赖 agent-node，低版本可能不认识新 config/session 语义 |
+| 17 | 本地 commhub-server 低版本先 warning | CommHub 可能部署在远端；本地包版本不一定代表运行中的服务 |
+| 18 | 缺 agent-node 时提示 `anet upgrade` | upgrade 已覆盖 anet + agent-node + npx cache，用户入口统一 |
