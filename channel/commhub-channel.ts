@@ -86,6 +86,8 @@ function sleep(ms: number): Promise<void> {
 log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}... TMUX=${TMUX_NAME || "none"} CWD=${process.cwd()} PROJECT_ENV=${projectPath}`);
 
 // ── MCP Server with Channel capability ──────────────
+// name 不要拼 alias！Claude Code 用 meta.user 自动加 "· xxx" 后缀
+// 参考: telegram 插件 name 也只是 "telegram"，不是 "telegram · vansinhu"
 const mcp = new Server(
   {
     name: "commhub-channel",
@@ -360,7 +362,7 @@ async function handleSSEEvent(event: any) {
         meta: {
           sender: event.from || "hub",
           sender_id: "commhub",
-          user: event.from || "hub",
+          user: event.from || "hub", // Claude Code 用 meta.user 显示 "commhub · {user}"
           priority: "normal",
         },
       },
@@ -386,7 +388,7 @@ async function handleSSEEvent(event: any) {
         const meta: Record<string, string> = {
           sender: msg.from_session || "hub",
           sender_id: "commhub",
-          user: msg.from_session || "hub",
+          user: msg.from_session || "hub", // Claude Code 用 meta.user 显示 "commhub · {user}"
           task_id: msg.id,
           priority: msg.priority || "normal",
         };

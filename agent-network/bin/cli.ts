@@ -494,7 +494,8 @@ function ensureMcpJson(profile: Profile) {
     } catch {}
   }
 
-  // Only write .mcp.json if no commhub config exists (don't overwrite user's config)
+  // 只在没有 commhub 配置时才写 .mcp.json
+  // 用户可能手动配了指向开发源码(commhub-channel.ts)，不能覆盖
   mcpConfig.mcpServers = mcpConfig.mcpServers || {};
   const hasCommhub = Object.keys(mcpConfig.mcpServers).some(k => k.includes("commhub"));
   if (!hasCommhub) {
