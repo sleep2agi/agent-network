@@ -12,7 +12,7 @@ import type { InboxMessage } from "@sleep2agi/agent-network";
 
 export type { InboxMessage };
 
-export type Runtime = "claude" | "codex";
+export type Runtime = "claude" | "codex" | "agent-sdk";
 
 export interface AgentNodeConfig {
   alias: string;
@@ -66,7 +66,7 @@ export class AgentNode {
       if (typeof override === "string") return override;
     }
 
-    if (this.config.runtime === "codex") {
+    if (this.config.runtime === "codex") {  // agent-sdk 走 claude 路径
       // TODO: Codex runtime 支持
       return `[codex runtime 暂未实现] 收到: ${msg.content.slice(0, 100)}`;
     }

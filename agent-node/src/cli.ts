@@ -124,7 +124,9 @@ if (!alias) {
 }
 
 // ── Merge (CLI > env > profile > global > defaults) ──
-const runtime = (opts.runtime || process.env.RUNTIME || fileConfig.runtime || "claude") as "claude" | "codex";
+// anet profile 用 "agent-sdk"，映射到 "claude"
+const rawRuntime = opts.runtime || process.env.RUNTIME || fileConfig.runtime || "claude";
+const runtime = (rawRuntime === "agent-sdk" ? "claude" : rawRuntime) as "claude" | "codex";
 const toolsRaw = opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.tools.join(",") : fileConfig.tools) || "";
 
 const config = {

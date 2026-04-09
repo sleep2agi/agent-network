@@ -79,7 +79,10 @@ export class CommHub extends EventEmitter {
   // ── MCP JSON-RPC call ──
 
   private async call(tool: string, args: Record<string, unknown>): Promise<any> {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Accept": "application/json, text/event-stream",
+    };
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
 
     const res = await fetch(`${this.url}/mcp`, {
@@ -93,7 +96,10 @@ export class CommHub extends EventEmitter {
       }),
     });
 
-    const data = (await res.json()) as any;
+    const raw = await res.text();
+    // CommHub Streamable HTTP returns SSE format: "event: message\ndata: {...}"
+    const match = raw.match(/data: (.+)/);
+    const data = match ? JSON.parse(match[1]) : JSON.parse(raw);
     const text = data?.result?.content?.[0]?.text;
     return text ? JSON.parse(text) : data;
   }
