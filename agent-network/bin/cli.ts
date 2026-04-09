@@ -494,16 +494,14 @@ function ensureMcpJson(profile: Profile) {
     } catch {}
   }
 
-  // Ensure .mcp.json has commhub key
+  // Only write .mcp.json if no commhub config exists (don't overwrite user's config)
   mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-  // Clean up old keys
-  for (const k of Object.keys(mcpConfig.mcpServers)) {
-    if (k.startsWith("commhub · ") || k === "commhub-channel") delete mcpConfig.mcpServers[k];
-  }
-  if (!mcpConfig.mcpServers.commhub) {
+  const hasCommhub = Object.keys(mcpConfig.mcpServers).some(k => k.includes("commhub"));
+  if (!hasCommhub) {
     mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.ts"] };
+    writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+    console.log(`[anet] .mcp.json: added commhub`);
   }
-  writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
 
   // Write .anet/.env (hub URL + token)
   const anetEnvPath = join(anetDir, ".env");
@@ -944,6 +942,11 @@ switch (command) {
   case "session": sessionCommand(); break;
   case "ls": case "list": lsCommand(); break;
   case "run": runCommand(); break;
+  case "-v": case "--version": case "version": {
+    const pkg = JSON.parse(readFileSync(join(new URL(".", import.meta.url).pathname, "..", "..", "package.json"), "utf-8"));
+    console.log(`anet v${pkg.version}`);
+    break;
+  }
   case "--help": case "-h": case undefined: printHelp(); break;
   default:
     if (loadProfile(command)) { args.unshift("start"); startCommand(); }

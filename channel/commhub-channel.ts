@@ -88,7 +88,7 @@ log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}..
 // ── MCP Server with Channel capability ──────────────
 const mcp = new Server(
   {
-    name: `commhub · ${ALIAS}`,
+    name: "commhub-channel",
     version: "0.3.0",
   },
   {
@@ -360,6 +360,7 @@ async function handleSSEEvent(event: any) {
         meta: {
           sender: event.from || "hub",
           sender_id: "commhub",
+          user: event.from || "hub",
           priority: "normal",
         },
       },
@@ -385,6 +386,7 @@ async function handleSSEEvent(event: any) {
         const meta: Record<string, string> = {
           sender: msg.from_session || "hub",
           sender_id: "commhub",
+          user: msg.from_session || "hub",
           task_id: msg.id,
           priority: msg.priority || "normal",
         };
