@@ -38,7 +38,7 @@ node-name = CLI 参数 = 目录名 = CommHub alias
 anet create 指挥室
 # → .anet/nodes/指挥室/config.json
 # → CommHub alias: 指挥室
-# → 绑定一个 session
+# → config.session 为空，首次 start 时创建或通过 resume --session 绑定
 ```
 
 校验规则（`anet create` 时执行）：
@@ -232,7 +232,7 @@ agent-node 永远启动 CommHub SSE，不依赖 channels 数组。
 ```bash
 claude --dangerously-skip-permissions \
   --dangerously-load-development-channels server:commhub \
-  --channels plugin:telegram@claude-plugins-official \
+  --channels plugin:telegram@claude-plugins-official \   # 仅 channels 包含 "telegram" 时
   --teammate-mode in-process \
   -n <node-name>
 ```
