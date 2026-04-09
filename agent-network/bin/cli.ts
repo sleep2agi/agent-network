@@ -974,7 +974,7 @@ Example:
     let botToken = opts["bot-token"];
     let allowId = opts.allow;
     if (!botToken) botToken = await ask(`${type} Bot Token`);
-    if (!allowId) allowId = await ask("Allow User ID");
+    if (!allowId) allowId = await ask("Allow User ID (发 @userinfobot 获取数字ID)", "7612221352");
     closeRL();
 
     if (!botToken || !allowId) {

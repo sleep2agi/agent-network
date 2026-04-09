@@ -124,7 +124,7 @@ const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfi
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
 const toolsRaw = opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.tools.join(",") : fileConfig.tools) || "";
-const TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean);
+let TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean);
 const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "5");
 const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
 const SESSION_ID = opts.session || fileConfig.sessionId || "";
@@ -201,6 +201,11 @@ const UNSUPPORTED_CHANNEL = CHANNELS.find(ch => ch.type !== "telegram");
 if (UNSUPPORTED_CHANNEL) {
   console.error(`[agent-node] unsupported channel: ${UNSUPPORTED_CHANNEL.raw}`);
   process.exit(1);
+}
+
+// Telegram + Claude runtime: 自动注入 Read 工具（用于读取下载的图片/文件）
+if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && !TOOLS.includes("Read")) {
+  TOOLS.push("Read");
 }
 
 // ── 日志：终端 + 文件 ──
