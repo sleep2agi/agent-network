@@ -36,6 +36,7 @@ for (let i = 0; i < argv.length; i++) {
   --tools <list>      工具列表，逗号分隔 ("all" = 全部工具, claude runtime only)
   --max-turns <n>     每任务最大轮次 (default: 5, claude runtime only)
   --max-budget <usd>  每任务预算上限 (claude runtime only)
+  --session <id>      恢复指定 session (claude session ID 或 codex thread ID)
   --prompt <text>     自定义 System Prompt
   --config <path>     配置文件 (覆盖 .anet profile 自动查找)
   -h, --help          帮助
@@ -102,6 +103,7 @@ const toolsRaw = opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.too
 const TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean);
 const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "5");
 const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
+const SESSION_ID = opts.session || fileConfig.sessionId || "";
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || fileConfig.token || "";
 
@@ -146,7 +148,7 @@ const sendReply = (target: string, task: string) => callCommHub("send_task", { a
 // ══════════════════════════════════════
 // Claude Runtime
 // ══════════════════════════════════════
-let claudeSessionId: string | undefined;
+let claudeSessionId: string | undefined = SESSION_ID || undefined;
 
 async function processWithClaude(task: string, from: string): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
@@ -197,11 +199,20 @@ async function processWithCodex(task: string, from: string): Promise<string> {
 
   if (!codexThread) {
     const codex = new Codex();
-    codexThread = codex.startThread({
-      skipGitRepoCheck: true,
-      approvalPolicy: "never" as const,
-      model: MODEL || undefined,
-    });
+    if (SESSION_ID) {
+      codexThread = codex.resumeThread(SESSION_ID, {
+        skipGitRepoCheck: true,
+        approvalPolicy: "never" as const,
+        model: MODEL || undefined,
+      });
+      log(`codex resumed thread: ${SESSION_ID}`);
+    } else {
+      codexThread = codex.startThread({
+        skipGitRepoCheck: true,
+        approvalPolicy: "never" as const,
+        model: MODEL || undefined,
+      });
+    }
   }
 
   const prompt = `你是 ${ALIAS}，收到来自 ${from} 的任务：\n\n${task}\n\n执行完后简要汇报结果。`;
