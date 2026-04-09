@@ -142,6 +142,16 @@ anet create <node-name> \
 
 不传 `--runtime` 默认 `claude-code-cli`。
 
+`anet create` / `anet start` 时检测依赖，未安装则提示：
+
+| runtime | 检测 | 提示安装 |
+|---------|------|---------|
+| `claude-code-cli` | `claude` CLI 是否在 PATH | `npm install -g @anthropic-ai/claude-code` |
+| `codex-sdk` | `@sleep2agi/agent-node` 是否可用 | `npm install -g @sleep2agi/agent-node` |
+| `claude-agent-sdk` | `@sleep2agi/agent-node` 是否可用 | `npm install -g @sleep2agi/agent-node` |
+
+不自动安装，只提示。
+
 `anet create` 完成后提示：
 ```
 [anet] Created node "指挥室" (claude-code-cli)
