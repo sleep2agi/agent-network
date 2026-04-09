@@ -156,14 +156,16 @@ async function initGlobal() {
 
   if (!hub) {
     hub = await ask("CommHub URL (e.g. http://YOUR_IP:9200)");
-    closeRL();
   }
 
-  if (!hub) { console.error("Error: hub URL required"); process.exit(1); }
+  if (!hub) { closeRL(); console.error("Error: hub URL required"); process.exit(1); }
   hub = hub.replace(/\/+$/, ""); // 去掉结尾斜杠
 
-  // Test connection
-  const token = opts.token || "";
+  let token = opts.token || "";
+  if (!token) {
+    token = await ask("Auth token (empty to skip)");
+  }
+  closeRL();
   try {
     const res = await fetch(`${hub}/health`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     const data = await res.json() as any;
@@ -176,6 +178,7 @@ async function initGlobal() {
   const gc = loadGlobal();
   gc.hub = hub;
   if (token) gc.token = token;
+  else if (!gc.token) delete gc.token; // don't overwrite existing token with empty
   saveGlobal(gc);
   console.log(`\nSaved to ${globalConfigPath()}`);
   console.log(`Next: anet init project`);
@@ -457,24 +460,24 @@ function ensureMcpJson(profile: Profile) {
   let mcpConfig: any = {};
   if (existsSync(mcpJsonPath)) try { mcpConfig = JSON.parse(readFileSync(mcpJsonPath, "utf-8")); } catch {}
 
-  if (mcpConfig.mcpServers?.commhub) return; // already configured
-
-  // Ensure .anet/node-server.ts exists
+  // Always update .anet/node-server.ts from npm package (keep in sync)
   const anetDir = join(process.cwd(), ".anet");
   const serverTs = join(anetDir, "node-server.ts");
-  if (!existsSync(serverTs)) {
-    mkdirSync(anetDir, { recursive: true });
-    const candidates = [
-      join(new URL(".", import.meta.url).pathname, "..", "..", "src", "node-server.ts"),
-      join(new URL(".", import.meta.url).pathname, "..", "src", "node-server.ts"),
-      join(process.argv[1], "..", "..", "src", "node-server.ts"),
-    ];
-    for (const p of candidates) {
-      if (existsSync(p)) {
-        writeFileSync(serverTs, readFileSync(p, "utf-8"));
-        console.log(`[anet] Created .anet/node-server.ts`);
-        break;
+  const candidates = [
+    join(new URL(".", import.meta.url).pathname, "..", "..", "src", "node-server.ts"),
+    join(new URL(".", import.meta.url).pathname, "..", "src", "node-server.ts"),
+    join(process.argv[1], "..", "..", "src", "node-server.ts"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      mkdirSync(anetDir, { recursive: true });
+      const src = readFileSync(p, "utf-8");
+      const dst = existsSync(serverTs) ? readFileSync(serverTs, "utf-8") : "";
+      if (src !== dst) {
+        writeFileSync(serverTs, src);
+        console.log(`[anet] Updated .anet/node-server.ts`);
       }
+      break;
     }
   }
 
@@ -490,6 +493,18 @@ function ensureMcpJson(profile: Profile) {
       execSync("bun install", { cwd: anetDir, stdio: "pipe" });
     } catch {}
   }
+
+  // Update .mcp.json: key = "commhub · {alias}"
+  const mcpKey = `commhub · ${profile.alias}`;
+  mcpConfig.mcpServers = mcpConfig.mcpServers || {};
+  // Remove old "commhub" key if exists
+  if (mcpConfig.mcpServers.commhub) delete mcpConfig.mcpServers.commhub;
+  // Remove old commhub · xxx keys
+  for (const k of Object.keys(mcpConfig.mcpServers)) {
+    if (k.startsWith("commhub · ") || k === "commhub-channel") delete mcpConfig.mcpServers[k];
+  }
+  mcpConfig.mcpServers[mcpKey] = { type: "stdio", command: "bun", args: [".anet/node-server.ts"] };
+  writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
 
   // Write .anet/.env (hub URL + token)
   const anetEnvPath = join(anetDir, ".env");
@@ -548,7 +563,10 @@ async function launchAgent(id: string, mode: "start" | "resume") {
     if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
     for (const ch of profile.channels) {
       if (ch.startsWith("server:")) {
-        claudeArgs.push("--dangerously-load-development-channels", ch);
+        // server:commhub → server:commhub · {alias}（匹配 .mcp.json key）
+        const serverName = ch.slice(7); // after "server:"
+        const mcpKey = serverName === "commhub" ? `commhub · ${profile.alias}` : serverName;
+        claudeArgs.push("--dangerously-load-development-channels", `server:${mcpKey}`);
       } else {
         claudeArgs.push("--channels", ch);
       }
