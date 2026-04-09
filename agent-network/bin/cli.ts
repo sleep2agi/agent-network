@@ -21,7 +21,7 @@ const home = process.env.HOME || process.env.USERPROFILE || "~";
 // ── Config helpers ──
 
 function globalConfigPath() { return join(home, ".anet", "config.json"); }
-function profilesDir() { return join(process.cwd(), ".anet", "profiles"); }
+function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 
 function loadGlobal(): Record<string, any> {
   const p = globalConfigPath();
@@ -50,21 +50,21 @@ interface Profile {
 }
 
 function loadProfile(id: string): Profile | null {
-  const p = join(profilesDir(), `${id}.json`);
+  const p = join(nodesDir(), id, "config.json");
   if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
   return null;
 }
 
 function saveProfile(id: string, profile: Profile) {
-  const dir = profilesDir();
+  const dir = join(nodesDir(), id);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${id}.json`), JSON.stringify(profile, null, 2) + "\n");
+  writeFileSync(join(dir, "config.json"), JSON.stringify(profile, null, 2) + "\n");
 }
 
 function listProfileIds(): string[] {
-  const dir = profilesDir();
+  const dir = nodesDir();
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter(f => f.endsWith(".json")).map(f => f.replace(/\.json$/, ""));
+  return readdirSync(dir).filter(name => existsSync(join(dir, name, "config.json")));
 }
 
 // ── Parse --key value and repeatable --channel/--env ──
