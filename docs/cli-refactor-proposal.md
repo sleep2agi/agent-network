@@ -58,6 +58,8 @@ anet start 指挥室 --new-session
 ```bash
 anet resume 指挥室 --session <id>
 # → node 不存在则自动 create
+# → 已有 session 时提示确认：
+#    [anet] 指挥室 already has session abc123..., overwrite? (y/n)
 # → 写入 config.session
 # → 调用 start
 ```
@@ -212,31 +214,21 @@ agent-node 从 config.json 读取所有配置。`channels` 解释规则：
 - `"server:commhub"` → CommHub 通信（SSE + callCommHub）
 - `"telegram"` → 读 `<node-dir>/channels/telegram/` 启动 Telegram polling
 
-## Session ID 自动回写
+## Session ID 回写
 
 ### codex-sdk / claude-agent-sdk
 
-SDK 返回值里有 session_id / thread.id，直接写回 config.json。无特殊处理。
+SDK 返回值里有 session_id / thread.id，自动写回 config.json。
 
 ### claude-code-cli
 
-Claude Code 是交互进程，不会输出 session ID。用**启动前后 diff** 捕获：
+手动绑定。Claude Code 是交互进程，无法自动获取 session ID。
 
+```bash
+anet session ls                            # 查看 session 列表
+anet resume 指挥室 --session <session-id>   # 绑定（已有 session 会提示确认）
+anet start 指挥室                           # 之后自动 resume
 ```
-1. startAt = Date.now()
-2. before = 扫描当前项目的 Claude Code session 列表
-3. spawn claude（--resume 或新建）
-4. claude 退出后，after = 再扫 session 列表
-5. candidates = after 中新增或 mtime 更新的，且 mtime >= startAt - 5s
-6. 候选 1 个 → 写入 config.session
-7. 候选多个 → 选 mtime 最新，打印警告
-8. 候选 0 个 → 不覆盖旧 session，提示手动绑定
-```
-
-关键规则：
-- **确认捕获到新 session 才覆盖**，失败不丢旧绑定
-- `--new-session` 不预先清空 config.session
-- 可用 `listSessions()` from `@anthropic-ai/claude-agent-sdk`
 
 ## 废弃项
 
@@ -261,4 +253,5 @@ Claude Code 是交互进程，不会输出 session ID。用**启动前后 diff**
 | 6 | session 字段统一叫 `session` | 收敛 3 个旧字段名 |
 | 7 | runtime: claude-code-cli / codex-sdk / claude-agent-sdk | 直接对应底层包名 |
 | 8 | `--new-session` 强制新建 | 覆盖自动 resume 行为 |
-| 9 | session ID 启动前后 diff 捕获 | 退出后写回，失败不丢旧绑定 |
+| 9 | claude-code-cli session 手动绑定 | 简单可靠，避免 diff 复杂逻辑 |
+| 10 | resume --session 覆盖旧 session 需确认 | 防误操作 |
