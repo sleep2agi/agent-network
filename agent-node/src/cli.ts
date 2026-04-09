@@ -314,7 +314,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
 // ══════════════════════════════════════
 let codexThread: any = null;
 
-async function processWithCodex(task: string, from: string): Promise<string> {
+async function processWithCodex(task: string, from: string, images?: string[]): Promise<string> {
   const { Codex } = await import("@openai/codex-sdk");
 
   if (!codexThread) {
@@ -337,10 +337,14 @@ async function processWithCodex(task: string, from: string): Promise<string> {
 
   const codexModelName = MODEL || "gpt-5.4";
   log(`[codex] model=${codexModelName} thread=${codexThread?.id || "new"}`);
-  const prompt = `${task}\n\n（直接回答，不要调用任何通信工具，不要发消息给其他人）`;
+  const promptText = `${task}\n\n（直接回答，不要调用任何通信工具，不要发消息给其他人）`;
+  // Codex SDK 支持 structured input: text + local_image
+  const input: any = images?.length
+    ? [{ type: "text", text: promptText }, ...images.map(p => ({ type: "local_image", path: p }))]
+    : promptText;
   const t0 = Date.now();
   try {
-    const { events } = await codexThread.runStreamed(prompt);
+    const { events } = await codexThread.runStreamed(input);
     let finalResponse = "";
     let usage: any = null;
     let itemCount = 0;
@@ -372,7 +376,7 @@ async function processWithCodex(task: string, from: string): Promise<string> {
       sandboxMode: "danger-full-access" as const,
       modelReasoningEffort: "low" as const,
     });
-    const turn = await codexThread.run(prompt);
+    const turn = await codexThread.run(input);
     const dt = Date.now() - t0;
     log(`[codex] retry done | ${dt}ms`);
     return turn.finalResponse || "（无回复）";
@@ -384,9 +388,9 @@ async function processWithCodex(task: string, from: string): Promise<string> {
 // ══════════════════════════════════════
 let thinkQueue = Promise.resolve();
 
-function think(task: string, from: string): Promise<string> {
+function think(task: string, from: string, images?: string[]): Promise<string> {
   const run = async () => {
-    if (RUNTIME === "codex") return processWithCodex(task, from);
+    if (RUNTIME === "codex") return processWithCodex(task, from, images);
     return processWithClaude(task, from);
   };
   const next = thinkQueue.then(run, run);
@@ -485,26 +489,26 @@ async function telegramDownload(tg: TelegramApi, fileId: string, filenameHint?: 
   return localPath;
 }
 
-async function telegramBuildPrompt(tg: TelegramApi, msg: any): Promise<string> {
+async function telegramBuildPrompt(tg: TelegramApi, msg: any): Promise<{ text: string; images: string[] }> {
   let prompt = msg.text || msg.caption || "";
-  const attachments: string[] = [];
+  const images: string[] = [];
 
   if (Array.isArray(msg.photo) && msg.photo.length > 0) {
     const photo = msg.photo[msg.photo.length - 1];
     const localPath = await telegramDownload(tg, photo.file_id, `photo_${msg.message_id}.jpg`);
-    attachments.push(`图片: ${localPath}`);
+    images.push(localPath);
   }
 
   const mime = String(msg.document?.mime_type || "");
   if (msg.document && mime.startsWith("image/")) {
     const localPath = await telegramDownload(tg, msg.document.file_id, msg.document.file_name || `image_${msg.message_id}`);
-    attachments.push(`图片: ${localPath}`);
+    images.push(localPath);
   }
 
-  if (attachments.length) {
-    prompt += `\n\n[Telegram 附件已下载]\n${attachments.map(path => `- ${path}`).join("\n")}`;
+  if (images.length) {
+    prompt += `\n\n[Telegram 附件已下载]\n${images.map(p => `- 图片: ${p}`).join("\n")}`;
   }
-  return prompt.trim();
+  return { text: prompt.trim(), images };
 }
 
 async function handleTelegramMessage(tg: TelegramApi, msg: any) {
@@ -513,12 +517,12 @@ async function handleTelegramMessage(tg: TelegramApi, msg: any) {
   const chatId = msg.chat?.id;
   const messageId = msg.message_id;
   const from = `telegram:${telegramUserLabel(msg)}`;
-  const prompt = await telegramBuildPrompt(tg, msg);
+  const { text: prompt, images } = await telegramBuildPrompt(tg, msg);
   if (!chatId || !messageId || !prompt) return;
 
-  log(`← [${from}] ${prompt.slice(0, 100)}`);
+  log(`← [${from}] ${prompt.slice(0, 100)}${images.length ? ` +${images.length}img` : ""}`);
   try {
-    const result = await think(prompt, from);
+    const result = await think(prompt, from, images);
     await telegramSend(tg, chatId, result, messageId);
     log(`→ [${from}] ${result.slice(0, 100)}`);
   } catch (e: any) {
@@ -552,15 +556,20 @@ async function connectTelegram(channel: TelegramChannel) {
   } catch {}
   const saveOffset = () => { try { writeFileSync(stateFile, JSON.stringify({ offset: tg.offset }) + "\n"); } catch {} };
 
-  // 串行消息队列
+  // 串行消息队列 — 处理+回复成功后才保存 offset
   let processing = false;
-  const queue: any[] = [];
+  const queue: { msg: any; updateId: number }[] = [];
   async function drainQueue() {
     if (processing) return;
     processing = true;
     while (queue.length) {
-      const msg = queue.shift();
-      try { await handleTelegramMessage(tg, msg); } catch (e: any) { error(`TG handle: ${e.message}`); }
+      const { msg, updateId } = queue.shift()!;
+      try {
+        await handleTelegramMessage(tg, msg);
+        // 处理成功，持久化 offset
+        tg.offset = updateId + 1;
+        saveOffset();
+      } catch (e: any) { error(`TG handle: ${e.message}`); }
     }
     processing = false;
   }
@@ -572,10 +581,10 @@ async function connectTelegram(channel: TelegramChannel) {
       const data = await res.json() as any;
       if (!data.ok) throw new Error(data.description || "getUpdates failed");
       for (const update of data.result || []) {
-        tg.offset = update.update_id + 1;
-        if (update.message) { queue.push(update.message); drainQueue(); }
+        // 先推队列，offset 在处理成功后才持久化
+        tg.offset = update.update_id + 1; // 内存更新防重复拉取
+        if (update.message) { queue.push({ msg: update.message, updateId: update.update_id }); drainQueue(); }
       }
-      saveOffset();
     } catch (err: any) {
       warn(`Telegram polling error: ${err.message}`);
       await new Promise(r => setTimeout(r, 3000));
