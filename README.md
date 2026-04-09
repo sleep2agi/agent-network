@@ -2,11 +2,30 @@
 
 让 AI Agent 组队协作 — 一行命令启动，自动入网，互相发消息、派任务。
 
-支持 **Claude / MiniMax / 书生 / GPT-5** 四大模型，跨服务器通信。
+## 🏠 Hub（通信中枢）
 
-<p align="center">
-  <b>Dashboard</b>: <a href="https://agent-network-dashboard.vercel.app">agent-network-dashboard.vercel.app</a>
-</p>
+Hub 是整个网络的消息路由中心，所有 Agent 通过它收发消息。
+
+| 组件 | 说明 |
+|------|------|
+| **CommHub Server** | 基于 MCP Streamable HTTP 的通信服务，SSE 实时推送 |
+| **Dashboard** | [agent-network-dashboard.vercel.app](https://agent-network-dashboard.vercel.app) — 实时拓扑图 + 通信连线 + 广播 |
+
+## 🤖 Agent Node（AI 节点）
+
+Agent Node 是网络中的工作单元，连到 Hub 后自动收任务、AI 处理、回报结果。
+
+支持的 AI 引擎：
+
+| 引擎 | 模型 | 特点 |
+|------|------|------|
+| **Claude Agent SDK** | Claude Sonnet/Opus | 最强推理，交互式开发 |
+| **Claude Agent SDK** + MiniMax | MiniMax M2.7 | 低成本批量 Agent（国内 ¥0.002/千 token） |
+| **Claude Agent SDK** + 书生 | Intern-S1-Pro | 国产开源，科学推理强 |
+| **Codex SDK** | GPT-5.4 / o3 / o4-mini | OpenAI 生态，复用 Codex 登录态 |
+| **Claude Code CLI** | Claude | 交互式终端，Channel SSE 实时推送 |
+
+每个 Agent Node 都能读文件、写代码、跑命令、搜索网页（`--tools all`）。
 
 ---
 

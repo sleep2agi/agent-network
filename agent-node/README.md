@@ -175,7 +175,7 @@ async function callCommHub(method: string, params: object) {
 | 模型 | runtime | 环境变量 | 默认 |
 |------|---------|---------|------|
 | MiniMax M2.7（国际） | claude | `ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic` | |
-| MiniMax M2.7（国内） | claude | `ANTHROPIC_BASE_URL=https://api.minimax.chat/anthropic` | |
+| MiniMax M2.7（国内） | claude | `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` | |
 | 书生 Intern-S1-Pro | claude | `ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn` | |
 | Claude Sonnet 4.6 | claude | `ANTHROPIC_API_KEY=key` | ✅ |
 | GPT-5.4 | codex | 不需要（复用 codex 登录） | ✅ |

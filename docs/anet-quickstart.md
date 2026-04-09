@@ -30,7 +30,7 @@ anet init profile 小明2号 \
   --alias 小明2号 \
   --model MiniMax-M2.7 \
   --tools "Read,Bash,Grep" \
-  --env "ANTHROPIC_BASE_URL=https://api.minimax.chat/anthropic" \
+  --env "ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic" \
   --env "ANTHROPIC_AUTH_TOKEN=你的MiniMax-Token-Plan-Key"
 
 # 3. 启动
@@ -169,7 +169,7 @@ cd server && bun run start
 |------|---------|
 | Claude | `ANTHROPIC_API_KEY=sk-ant-xxx` |
 | Codex GPT-5 | `OPENAI_API_KEY=sk-xxx` |
-| MiniMax M2.7（国内） | `ANTHROPIC_BASE_URL=https://api.minimax.chat/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
+| MiniMax M2.7（国内） | `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
 | MiniMax M2.7（国际） | `ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
 | 书生 Intern-S1-Pro | `ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic` + `ANTHROPIC_AUTH_TOKEN=key` |
 

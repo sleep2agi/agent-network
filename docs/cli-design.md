@@ -286,7 +286,7 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
   "tools": ["Read", "Bash", "Grep"],
   "maxTurns": 5,
   "env": {
-    "ANTHROPIC_BASE_URL": "https://api.minimax.chat/anthropic",
+    "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "sk-cp-xxx"
   }
 }
