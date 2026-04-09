@@ -632,11 +632,6 @@ Telegram setup:
     attachChannel(profile, "telegram");
   }
 
-  const addWechat = await ask("Add WeChat channel? (y/n)", "n");
-  if (/^y(es)?$/i.test(addWechat)) {
-    console.log("[anet] WeChat channel is not implemented yet; skipped.");
-  }
-
   closeRL();
   saveCreatedNode(id, profile);
   if (telegramConfig) {
