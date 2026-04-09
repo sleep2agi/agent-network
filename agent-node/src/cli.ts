@@ -31,8 +31,9 @@ for (let i = 0; i < argv.length; i++) {
   --url <url>         CommHub URL (default: http://127.0.0.1:9200)
   --hub <url>         同 --url
   --model <name>      AI 模型 (default: claude-sonnet-4-6)
-  --tools <list>      工具列表，逗号分隔
+  --tools <list>      工具列表，逗号分隔 ("all" = 全部工具)
   --max-turns <n>     每任务最大轮次 (default: 5)
+  --max-budget <usd>  每任务预算上限 (default: 无限制)
   --prompt <text>     自定义 System Prompt
   --config <path>     配置文件 (覆盖 .anet profile 自动查找)
   -h, --help          帮助
@@ -91,9 +92,11 @@ if (!ALIAS) {
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
-const TOOLS = (opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.tools.join(",") : fileConfig.tools) || "")
-  .split(",").filter(Boolean);
+const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
+const toolsRaw = opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.tools.join(",") : fileConfig.tools) || "";
+const TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean);
 const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "5");
+const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || fileConfig.token || "";
 
@@ -170,7 +173,15 @@ async function processTask(task: string, from: string): Promise<string> {
     env: process.env,
     cwd: process.cwd(),
     stderr: (data: string) => { if (data.trim()) log(`[stderr] ${data.trim().slice(0, 200)}`); },
+    // Hooks: 工具调用日志
+    hooks: {
+      PreToolUse: [{ hooks: [async (input: any) => {
+        log(`[tool] ${input.tool_name}(${JSON.stringify(input.tool_input).slice(0, 80)})`);
+        return { continue: true };
+      }] }],
+    },
   };
+  if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;
   if (SYSTEM_PROMPT) options.systemPrompt = SYSTEM_PROMPT;
   if (sessionId) options.resume = sessionId;
 

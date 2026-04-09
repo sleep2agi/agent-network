@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "One-command AI Agent node for CommHub networks. Powered by Claude Agent SDK.",
   "bin": {
     "agent-node": "./dist/cli.js"
