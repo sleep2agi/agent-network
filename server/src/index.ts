@@ -50,8 +50,8 @@ const CORS_ORIGINS = process.env.COMMHUB_CORS_ORIGINS
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") || "";
   const allowed = CORS_ORIGINS.includes(origin)
-    || origin.endsWith(".vercel.app")
-    || origin.endsWith(".vansin.me")
+    || origin === "https://agent-network.vansin.me"
+    || origin === "https://agent-network-dashboard.vercel.app"
     ? origin : "";
   return {
     "Access-Control-Allow-Origin": allowed,
