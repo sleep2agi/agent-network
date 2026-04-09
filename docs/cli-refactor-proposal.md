@@ -140,41 +140,52 @@ anet create <node-name> \
   --session <session-id> # 绑定已有 session
 ```
 
-不传 `--runtime` 进入交互式选择：
+`anet create` 不传参数时进入完全交互式流程：
 
 ```
+$ anet create
+
+? Node name: 小明
+
 ? Select runtime:
-  ❯ claude-code-cli    Claude Code CLI（需要 Pro 订阅）
-    codex-sdk          Codex SDK（GPT-5.4，需要 Codex 登录）
-    claude-agent-sdk   Claude Agent SDK（支持 MiniMax/书生等）
-```
+  1) claude-code-cli    Claude Code CLI（需要 Pro 订阅）
+  2) codex-sdk          Codex SDK（GPT-5.4，需要 Codex 登录）
+  3) claude-agent-sdk   Claude Agent SDK（支持 MiniMax/书生等）
+→ 3
 
-选 `claude-agent-sdk` 后继续选模型，URL 自动预填：
-
-```
 ? Select model:
-  ❯ MiniMax-M2.7        (ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic)
-    intern-s1-pro        (ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn)
-    claude-sonnet-4-6    (默认 Anthropic API)
-    custom               (手动输入 URL + model)
+  1) MiniMax-M2.7
+  2) intern-s1-pro
+  3) claude-sonnet-4-6
+  4) custom
+→ 1
 
-? ANTHROPIC_AUTH_TOKEN: sk-xxx   # 只需填 token，URL 已预填
+? ANTHROPIC_AUTH_TOKEN: sk-xxx
+
+? Add Telegram channel? (y/n): y
+? Telegram Bot Token: 123:ABC
+? Allow User ID [7612221352]: (回车)
+
+✅ Created node "小明" (claude-agent-sdk, MiniMax-M2.7)
+✅ Telegram channel added
+⚠ dangerouslySkipPermissions and teammateMode enabled by default.
+
+Start: anet start 小明
 ```
 
-选 `codex-sdk` 后：
+**按 runtime 不同的交互差异：**
 
+- `claude-agent-sdk`：问模型（预填 URL）→ 问 token
+- `codex-sdk`：问模型（gpt-5.4/o3/custom）→ 提示需要 `codex auth login`
+- `claude-code-cli`：不问模型 → 提示需要 Pro 订阅 + `claude auth login`
+
+**传了参数则跳过对应交互：**
+
+```bash
+anet create 小明 --runtime codex-sdk --model gpt-5.4   # 全跳过
+anet create 小明 --runtime codex-sdk                     # 只问 model
+anet create                                              # 全部交互
 ```
-? Select model:
-  ❯ gpt-5.4
-    o3
-    custom
-
-需要先 codex auth login 登录。
-```
-
-选 `claude-code-cli` 后无需选模型（固定 Anthropic Claude）。
-
-传了 `--runtime` + `--model` 则跳过交互，直接创建。
 
 `anet create` / `anet start` 时检测依赖，未安装则提示：
 
