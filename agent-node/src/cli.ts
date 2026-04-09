@@ -9,7 +9,7 @@
  * 配置加载: CLI args > env > .anet/profiles/<alias>.json > ~/.anet/config.json > defaults
  */
 
-import { readFileSync, existsSync, writeFileSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, chmodSync } from "fs";
 import { join } from "path";
 import { hostname as osHostname, homedir } from "os";
 
@@ -180,6 +180,9 @@ function initTelegramChannel(spec: { type: string; path?: string; raw: string })
     console.error(`[agent-node] telegram channel needs TELEGRAM_BOT_TOKEN in ${join(dir, ".env")}`);
     process.exit(1);
   }
+
+  // .env 权限加固
+  try { chmodSync(join(dir, ".env"), 0o600); } catch {}
 
   const access = loadJson(join(dir, "access.json")) || {};
   const inboxDir = join(dir, "inbox");
@@ -532,6 +535,36 @@ async function connectTelegram(channel: TelegramChannel) {
     offset: 0,
   };
 
+  // getMe 校验 token
+  try {
+    const me = await telegramJson(tg, "getMe", {});
+    log(`Telegram bot: @${me.username} (${me.first_name})`);
+  } catch (e: any) {
+    error(`Telegram token 无效: ${e.message}`);
+    process.exit(1);
+  }
+
+  // offset 持久化
+  const stateFile = join(channel.dir, "state.json");
+  try {
+    const state = JSON.parse(readFileSync(stateFile, "utf-8"));
+    if (state.offset) { tg.offset = state.offset; debug(`Telegram offset restored: ${tg.offset}`); }
+  } catch {}
+  const saveOffset = () => { try { writeFileSync(stateFile, JSON.stringify({ offset: tg.offset }) + "\n"); } catch {} };
+
+  // 串行消息队列
+  let processing = false;
+  const queue: any[] = [];
+  async function drainQueue() {
+    if (processing) return;
+    processing = true;
+    while (queue.length) {
+      const msg = queue.shift();
+      try { await handleTelegramMessage(tg, msg); } catch (e: any) { error(`TG handle: ${e.message}`); }
+    }
+    processing = false;
+  }
+
   log(`Telegram polling: ${channel.dir}`);
   while (true) {
     try {
@@ -540,8 +573,9 @@ async function connectTelegram(channel: TelegramChannel) {
       if (!data.ok) throw new Error(data.description || "getUpdates failed");
       for (const update of data.result || []) {
         tg.offset = update.update_id + 1;
-        if (update.message) await handleTelegramMessage(tg, update.message);
+        if (update.message) { queue.push(update.message); drainQueue(); }
       }
+      saveOffset();
     } catch (err: any) {
       warn(`Telegram polling error: ${err.message}`);
       await new Promise(r => setTimeout(r, 3000));
