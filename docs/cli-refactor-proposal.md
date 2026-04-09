@@ -140,7 +140,18 @@ anet create <node-name> \
   --session <session-id> # 绑定已有 session
 ```
 
-不传 `--runtime` 默认 `claude-code-cli`。
+不传 `--runtime` 进入交互式选择：
+
+```
+? Select runtime:
+  ❯ claude-code-cli    Claude Code CLI（需要 Pro 订阅）
+    codex-sdk          Codex SDK（GPT-5.4，需要 Codex 登录）
+    claude-agent-sdk   Claude Agent SDK（支持 MiniMax/书生等）
+```
+
+选完后继续问 model、tools 等（按 runtime 不同问不同问题）。
+
+传了 `--runtime` 则跳过交互，直接创建。
 
 `anet create` / `anet start` 时检测依赖，未安装则提示：
 
