@@ -26,12 +26,16 @@ export function register(username: string, password: string, email?: string, dis
   const existing = db.get<any>("SELECT user_id FROM users WHERE username = ?1", username);
   if (existing) return { ok: false, error: "username already taken" };
 
+  // First user → auto admin
+  const userCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM users");
+  const isFirstUser = !userCount || userCount.cnt === 0;
+
   const userId = generateId("u");
   const pwHash = hashPassword(password);
 
   db.run(
-    "INSERT INTO users (user_id, username, password_hash, email, display_name) VALUES (?1, ?2, ?3, ?4, ?5)",
-    [userId, username, pwHash, email || null, displayName || username]
+    "INSERT INTO users (user_id, username, password_hash, email, display_name, role) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    [userId, username, pwHash, email || null, displayName || username, isFirstUser ? "admin" : "user"]
   );
 
   // Auto-create default network + add as owner member
@@ -55,7 +59,7 @@ export function register(username: string, password: string, email?: string, dis
 
   return {
     ok: true,
-    user: { user_id: userId, username, display_name: displayName || username, email: email || null, role: "user" },
+    user: { user_id: userId, username, display_name: displayName || username, email: email || null, role: isFirstUser ? "admin" : "user" },
     token,
   };
 }
