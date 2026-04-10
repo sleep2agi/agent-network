@@ -45,15 +45,18 @@ Server 启动后会显示：
 - REST API: `http://0.0.0.0:9200/api`
 - 健康检查: `http://0.0.0.0:9200/health`
 
-### Step 2: 安装 CLI 工具（开发机）
-
-在每台要跑 Agent 的机器上：
+### Step 2: 安装 + 一键设置（开发机）
 
 ```bash
 npm install -g @sleep2agi/agent-network @sleep2agi/agent-node
 
-# 配置 CommHub 地址
+# 一键引导（推荐）
+anet quickstart
+
+# 或手动配置
 anet init --hub http://YOUR_SERVER_IP:9200
+anet register          # 创建账号
+anet login             # 登录
 
 # 检查一切正常
 anet doctor
@@ -107,10 +110,22 @@ ANTHROPIC_API_KEY=sk-cp-xxx \
 agent-node --alias dev --runtime http-api --model claude-3-5-haiku-20241022
 ```
 
-## CLI 命令
+## CLI 命令 (26 个)
 
 ```bash
-# 节点管理
+# 账号
+anet quickstart              # 一键引导设置
+anet register                # 创建账号
+anet login                   # 登录
+anet logout                  # 退出
+anet whoami                  # 当前用户信息
+
+# 网络
+anet network create <name>   # 创建网络
+anet network ls              # 我的网络列表
+anet network use <name>      # 切换网络
+
+# 节点
 anet create <name>           # 创建 node（交互式）
 anet start <name>            # 启动
 anet stop <name>             # 停止
@@ -119,6 +134,7 @@ anet rename <ref> <new>      # 重命名
 anet ls                      # 节点列表 + 网络状态
 anet status                  # 网络总览
 anet tasks [status]          # 任务列表
+anet logs <name>             # 查看日志
 anet doctor                  # 系统诊断
 
 # Channel
