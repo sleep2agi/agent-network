@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
-import { db, logTaskEvent } from "./db.js";
+import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
 import { register, login, resolveToken, getUserNetworks, createNetwork, type AuthUser } from "./auth.js";
 
@@ -146,6 +146,7 @@ Bun.serve({
       try {
         const body = await req.json() as any;
         const result = register(body.username, body.password, body.email, body.display_name);
+        if (result.ok) logAudit(result.user!.user_id, body.username, "register", "user", result.user!.user_id);
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
@@ -156,6 +157,8 @@ Bun.serve({
       try {
         const body = await req.json() as any;
         const result = login(body.username, body.password);
+        if (result.ok) logAudit(result.user!.user_id, body.username, "login", "user", result.user!.user_id);
+        else logAudit(null, body.username, "login_failed", "user", null, "invalid credentials");
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 401 }));
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
@@ -412,6 +415,27 @@ Bun.serve({
         nodes: { total: totalNodes?.cnt || 0 },
         recent_tasks: recentTasks,
       }));
+    }
+
+    // ── REST: audit log (V3) ──
+    if (url.pathname === "/api/audit-log") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
+      const action = url.searchParams.get("action");
+      const userId = url.searchParams.get("user_id");
+      let sql = "SELECT * FROM audit_log WHERE 1=1";
+      const params: any[] = [];
+      // Non-admin can only see own logs
+      if (resolved.user.role !== "admin") { sql += ` AND user_id = ?${params.length + 1}`; params.push(resolved.user.user_id); }
+      if (action) { sql += ` AND action = ?${params.length + 1}`; params.push(action); }
+      if (userId && resolved.user.role === "admin") { sql += ` AND user_id = ?${params.length + 1}`; params.push(userId); }
+      sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
+      params.push(limit);
+      const logs = db.query(sql).all(...params);
+      return withCors(req, Response.json({ ok: true, logs, count: logs.length }));
     }
 
     // ── REST: task events (V2 Sprint 2) ──

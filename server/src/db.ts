@@ -201,6 +201,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tokens_user ON api_tokens(user_id);
 `);
 
+// ── V3: audit_log table ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       TEXT,
+    username      TEXT,
+    action        TEXT NOT NULL,
+    target_type   TEXT,
+    target_id     TEXT,
+    detail        TEXT,
+    ip            TEXT,
+    network_id    TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_network ON audit_log(network_id);
+`);
+
 // ── V3: add network_id to existing tables ──
 for (const table of ["sessions", "nodes", "tasks", "inbox", "task_events"]) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN network_id TEXT`); } catch {}
@@ -228,6 +248,15 @@ export function hashToken(token: string): string {
 
 export function generateToken(): string {
   return `atok_${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+export function logAudit(userId: string | null, username: string | null, action: string, targetType?: string, targetId?: string, detail?: string, ip?: string, networkId?: string) {
+  try {
+    db.run(
+      "INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, ip, network_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+      [userId, username, action, targetType ?? null, targetId ?? null, detail ?? null, ip ?? null, networkId ?? null]
+    );
+  } catch {}
 }
 
 export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {
