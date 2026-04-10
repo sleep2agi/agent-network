@@ -2,7 +2,7 @@
 # Master test runner — run all suites, produce final report
 echo ""
 echo "╔══════════════════════════════════════════════════╗"
-echo "║   anet V2 — Full Regression Test Suite           ║"
+echo "║   anet V3 — Full Regression Test Suite           ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
 
@@ -31,7 +31,9 @@ run_suite() {
 cd /app/server && bun run src/index.ts &>/dev/null &
 sleep 3
 
-run_suite "Base E2E (106)" "/app/test.sh 2>&1"
+run_suite "Base E2E (126)" "/app/test.sh 2>&1"
+run_suite "V3 Auth (15)" "/app/test-auth.sh 2>&1"
+run_suite "V3 Networks (16)" "/app/test-networks.sh 2>&1"
 run_suite "Config Priority (16)" "/app/test-config.sh 2>&1"
 
 echo ""
