@@ -20,7 +20,7 @@ const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
 
-const PKG_VERSION = "1.4.1";
+const PKG_VERSION = "1.4.2";
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -294,7 +294,7 @@ const register = () => callCommHub("report_status", {
 const reportStatus = (status: string, task?: string) => callCommHub("report_status", { resume_id: RESUME_ID, alias: ALIAS, status, task });
 const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 5 }))?.messages || [];
 const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
-const sendReply = (target: string, task: string) => callCommHub("send_task", { alias: target, task, priority: "normal", from_session: ALIAS });
+const sendReply = (target: string, message: string) => callCommHub("send_message", { alias: target, message, from_session: ALIAS });
 
 // ══════════════════════════════════════
 // Claude Runtime
