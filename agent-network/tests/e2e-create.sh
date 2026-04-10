@@ -8,8 +8,11 @@ mkdir -p .anet
 echo "=== Test 1: anet create with params ==="
 node /home/vansin/agent-orchestra/agent-network/dist/bin/cli.js create 测试牛 --runtime codex-sdk --model gpt-5.4
 [ -f .anet/nodes/测试牛/config.json ] && echo "✅ config.json created" || echo "❌ config.json missing"
+grep -Eq '"node_id": "n_[0-9a-f]{8}"' .anet/nodes/测试牛/config.json && echo "✅ node_id created" || echo "❌ node_id missing"
+grep -q '"node_name": "测试牛"' .anet/nodes/测试牛/config.json && echo "✅ node_name correct" || echo "❌ node_name wrong"
 grep -q "codex-sdk" .anet/nodes/测试牛/config.json && echo "✅ runtime correct" || echo "❌ runtime wrong"
 grep -q "gpt-5.4" .anet/nodes/测试牛/config.json && echo "✅ model correct" || echo "❌ model wrong"
+NODE_ID=$(sed -n 's/.*"node_id": "\(n_[0-9a-f]\{8\}\)".*/\1/p' .anet/nodes/测试牛/config.json)
 
 echo ""
 echo "=== Test 2: invalid node name ==="
@@ -25,10 +28,17 @@ node /home/vansin/agent-orchestra/agent-network/dist/bin/cli.js -v 2>&1 | grep -
 
 echo ""
 echo "=== Test 5: channel add ==="
-node /home/vansin/agent-orchestra/agent-network/dist/bin/cli.js channel add telegram 测试牛 --bot-token test123 --allow 7612221352
+node /home/vansin/agent-orchestra/agent-network/dist/bin/cli.js channel add telegram "$NODE_ID" --bot-token test123 --allow 7612221352
 [ -f .anet/nodes/测试牛/channels/telegram/.env ] && echo "✅ telegram .env created" || echo "❌ telegram .env missing"
 stat -c %a .anet/nodes/测试牛/channels/telegram/.env 2>/dev/null | grep -q "600" && echo "✅ .env chmod 600" || echo "❌ .env not 600"
 grep -q "telegram" .anet/nodes/测试牛/config.json && echo "✅ config updated with telegram" || echo "❌ config not updated"
+
+echo ""
+echo "=== Test 6: rename ==="
+node /home/vansin/agent-orchestra/agent-network/dist/bin/cli.js rename "$NODE_ID" 新测试牛
+[ -f .anet/nodes/新测试牛/config.json ] && echo "✅ renamed config exists" || echo "❌ renamed config missing"
+grep -q '"node_name": "新测试牛"' .anet/nodes/新测试牛/config.json && echo "✅ renamed node_name saved" || echo "❌ renamed node_name missing"
+grep -Eq "\"node_id\": \"$NODE_ID\"" .anet/nodes/新测试牛/config.json && echo "✅ node_id preserved" || echo "❌ node_id changed"
 
 echo ""
 echo "=== Cleanup ==="

@@ -39,6 +39,10 @@ anet create test-node --runtime codex-sdk --model gpt-5.4 2>&1
 [ -f .anet/nodes/test-node/config.json ] && pass "config.json created" || fail "config.json missing"
 grep -q "codex-sdk" .anet/nodes/test-node/config.json && pass "runtime correct" || fail "runtime wrong"
 grep -q "gpt-5.4" .anet/nodes/test-node/config.json && pass "model correct" || fail "model wrong"
+grep -q '"node_id": "n_' .anet/nodes/test-node/config.json && pass "node_id generated" || fail "node_id missing"
+grep -q '"node_name": "test-node"' .anet/nodes/test-node/config.json && pass "node_name saved" || fail "node_name missing"
+grep -q '"session"' .anet/nodes/test-node/config.json || pass "session omitted when empty"
+grep -q '"name":' .anet/nodes/test-node/config.json && fail "legacy name field still saved" || pass "legacy name field removed"
 echo ""
 
 # 4. Invalid name
@@ -51,12 +55,21 @@ echo "5. Testing duplicate create..."
 anet create test-node --runtime codex-sdk 2>&1 | grep -qi "already exists" && pass "duplicate rejected" || fail "should reject"
 echo ""
 
+# 5.1 rename + lookup by node_id
+echo "5.1 Testing rename and dual lookup..."
+NODE_ID=$(python3 -c 'import json;print(json.load(open("/tmp/test/.anet/nodes/test-node/config.json"))["node_id"])')
+anet rename "$NODE_ID" renamed-node 2>&1 | grep -qi "Renamed node" && pass "rename by node_id" || fail "rename by node_id failed"
+[ -f .anet/nodes/renamed-node/config.json ] && pass "renamed config path" || fail "renamed config path missing"
+grep -q '"node_name": "renamed-node"' .anet/nodes/renamed-node/config.json && pass "node_name updated" || fail "node_name not updated"
+anet channel ls "$NODE_ID" 2>&1 >/dev/null && pass "lookup by node_id works" || fail "lookup by node_id failed"
+echo ""
+
 # 6. Channel add
 echo "6. Testing channel add telegram..."
-anet channel add telegram test-node --bot-token test123 --allow 999 2>&1
-[ -f .anet/nodes/test-node/channels/telegram/.env ] && pass "telegram .env" || fail "telegram .env missing"
-stat -c %a .anet/nodes/test-node/channels/telegram/.env 2>/dev/null | grep -q "600" && pass "chmod 600" || fail "chmod not 600"
-grep -q "telegram" .anet/nodes/test-node/config.json && pass "config updated" || fail "config not updated"
+anet channel add telegram renamed-node --bot-token test123 --allow 999 2>&1
+[ -f .anet/nodes/renamed-node/channels/telegram/.env ] && pass "telegram .env" || fail "telegram .env missing"
+stat -c %a .anet/nodes/renamed-node/channels/telegram/.env 2>/dev/null | grep -q "600" && pass "chmod 600" || fail "chmod not 600"
+grep -q "telegram" .anet/nodes/renamed-node/config.json && pass "config updated" || fail "config not updated"
 echo ""
 
 # 7. agent-node version

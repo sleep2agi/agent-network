@@ -10,9 +10,10 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync } from "fs";
 import { join } from "path";
 import { spawn, execSync } from "child_process";
+import { createHash } from "crypto";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 
 const args = process.argv.slice(2);
@@ -66,6 +67,8 @@ function saveServerConfig(data: Record<string, any>) {
 }
 
 interface Profile {
+  node_id?: string;
+  node_name?: string;
   name?: string;
   alias?: string;
   hub?: string;
@@ -100,11 +103,51 @@ function normalizeRuntime(profileOrRuntime?: Profile | string): RuntimeName {
 }
 
 function nodeDisplayName(id: string, profile?: Profile | null): string {
-  return profile?.name || profile?.alias || id;
+  return profile?.node_name || profile?.name || profile?.alias || id;
 }
 
 function profileSession(profile: Profile): string {
-  return profile.session || profile.resume || "";
+  return profile.session || "";
+}
+
+function generateNodeId(): string {
+  return `n_${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
+}
+
+function legacyNodeId(id: string): string {
+  return `n_${createHash("sha1").update(id).digest("hex").slice(0, 8)}`;
+}
+
+function normalizeStoredProfile(id: string, project: Record<string, any>, globalConfig?: Record<string, any>): Profile {
+  const gc = globalConfig || loadGlobal();
+  const nodeName = project.node_name || project.name || project.alias || id;
+  return {
+    ...project,
+    node_id: project.node_id || legacyNodeId(id),
+    node_name: nodeName,
+    name: nodeName,
+    alias: nodeName,
+    session: project.session || project.resume || project.sessionId || "",
+    hub: project.hub || gc.hub || "",
+    token: project.token || gc.token || "",
+    channels: Array.isArray(project.channels) ? project.channels : [],
+    env: project.env && typeof project.env === "object" ? { ...project.env } : {},
+    flags: project.flags && typeof project.flags === "object" ? { ...project.flags } : {},
+  };
+}
+
+function resolveNodeRef(ref: string): { id: string; profile: Profile } | null {
+  const direct = loadProfile(ref);
+  if (direct) return { id: ref, profile: direct };
+
+  for (const id of listProfileIds()) {
+    const profile = loadProfile(id);
+    if (!profile) continue;
+    if (profile.node_id === ref || profile.node_name === ref || profile.name === ref || profile.alias === ref) {
+      return { id, profile };
+    }
+  }
+  return null;
 }
 
 function normalizeNodeName(name: string): string {
@@ -128,20 +171,7 @@ function loadProfile(id: string): Profile | null {
   if (!existsSync(p)) return null;
   try {
     const project = JSON.parse(readFileSync(p, "utf-8"));
-    const gc = loadGlobal();
-    // Global config as base, project config overlay (field-level merge)
-    const profile: Profile = {
-      ...project,
-      name: project.name || project.alias || id,
-      alias: project.alias || project.name || id,
-      session: project.session || project.resume || "",
-      hub: project.hub || gc.hub || "",
-      token: project.token || gc.token || "",
-      channels: Array.isArray(project.channels) ? project.channels : [],
-      env: { ...project.env },
-      flags: { ...project.flags },
-    };
-    return profile;
+    return normalizeStoredProfile(id, project);
   } catch { return null; }
 }
 
@@ -150,19 +180,29 @@ function loadStoredProfile(id: string): Profile | null {
   if (!existsSync(p)) return null;
   try {
     const project = JSON.parse(readFileSync(p, "utf-8"));
-    return {
-      ...project,
-      channels: Array.isArray(project.channels) ? project.channels : [],
-      env: { ...project.env },
-      flags: { ...project.flags },
-    };
+    return normalizeStoredProfile(id, project);
   } catch { return null; }
 }
 
 function saveProfile(id: string, profile: Profile) {
   const dir = join(nodesDir(), id);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "config.json"), JSON.stringify(profile, null, 2) + "\n");
+  const normalized = normalizeStoredProfile(id, profile);
+  const toSave: Record<string, any> = {
+    anet_version: normalized.anet_version,
+    node_id: normalized.node_id,
+    node_name: normalized.node_name,
+    runtime: normalized.runtime,
+    ...(normalized.hub ? { hub: normalized.hub } : {}),
+    ...(normalized.token ? { token: normalized.token } : {}),
+    ...(normalized.model ? { model: normalized.model } : {}),
+    ...(normalized.tools ? { tools: normalized.tools } : {}),
+    channels: normalized.channels || [],
+    env: normalized.env || {},
+    flags: normalized.flags || {},
+    ...(normalized.session ? { session: normalized.session } : {}),
+  };
+  writeFileSync(join(dir, "config.json"), JSON.stringify(toSave, null, 2) + "\n");
 }
 
 function listProfileIds(): string[] {
@@ -533,6 +573,7 @@ anet — AI Agent Network CLI
   anet start <node-name>        Start node (resume config.session when set)
   anet start <node-name> --new-session
   anet resume <node-name> --session <id>
+  anet rename <node-id|node-name> <new-node-name>
   anet ls                       Show profiles + sessions + network
   anet server start             Start CommHub Server
   anet import                   Import sessions from CommHub → config.json
@@ -741,7 +782,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
 
   const profile: Profile = {
     anet_version: "0.1.0",
-    name: id,
+    node_id: generateNodeId(),
+    node_name: id,
+    alias: id,
     runtime,
     ...(opts.hub ? { hub } : {}),
     ...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),
@@ -759,14 +802,16 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
 }
 
 function saveCreatedNode(id: string, profile: Profile) {
-  // Write alias .env for legacy commhub Claude Code channel
+  writeLegacyProjectAlias(profile.node_name || id);
+  saveProfile(id, profile);
+}
+
+function writeLegacyProjectAlias(alias: string) {
   const channelDir = join(home, ".claude", "channels", "commhub");
   const projectKey = process.cwd().replace(/\//g, "-");
   const aliasDir = join(channelDir, projectKey);
   mkdirSync(aliasDir, { recursive: true });
-  writeFileSync(join(aliasDir, ".env"), `COMMHUB_ALIAS=${id}\n`);
-
-  saveProfile(id, profile);
+  writeFileSync(join(aliasDir, ".env"), `COMMHUB_ALIAS=${alias}\n`);
 }
 
 function attachChannel(profile: Profile, channel: string) {
@@ -815,7 +860,8 @@ function maskSecretEnv(env: Record<string, string>): Record<string, string> {
 
 function printProfileSummary(id: string, profile: Profile) {
   const summary = {
-    name: nodeDisplayName(id, profile),
+    node_id: profile.node_id,
+    node_name: nodeDisplayName(id, profile),
     runtime: normalizeRuntime(profile),
     model: profile.model || "(runtime default)",
     session: profileSession(profile) || "(new)",
@@ -844,7 +890,7 @@ This wizard creates one agent node for this project:
     process.exit(1);
   }
   validateNodeName(id);
-  if (loadProfile(id)) {
+  if (resolveNodeRef(id)) {
     closeRL();
     console.error(`Node "${id}" already exists: .anet/nodes/${id}/config.json`);
     process.exit(1);
@@ -967,7 +1013,7 @@ async function createCommand(idOverride?: string) {
   }
   validateNodeName(id);
 
-  if (loadProfile(id)) {
+  if (resolveNodeRef(id)) {
     console.error(`Node "${id}" already exists: .anet/nodes/${id}/config.json`);
     process.exit(1);
   }
@@ -1044,6 +1090,9 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
 
   const profile: Profile = {
     anet_version: "0.0.23",
+    node_id: generateNodeId(),
+    node_name: alias,
+    name: alias,
     alias,
     hub,
     runtime,
@@ -1080,13 +1129,19 @@ function ensureMcpJson(profile: Profile) {
   const selfDir = typeof import.meta.url === "string" ? new URL(".", import.meta.url).pathname : __dirname || "";
   const argv1Dir = process.argv[1] ? join(process.argv[1], "..") : "";
   const candidates = [
+    // dist/src/node-server.js（npm 包混淆后产物，优先）
+    join(selfDir, "..", "src", "node-server.js"),
+    join(selfDir, "..", "..", "dist", "src", "node-server.js"),
+    join(argv1Dir, "..", "src", "node-server.js"),
+    join(argv1Dir, "..", "..", "dist", "src", "node-server.js"),
+    // src/node-server.ts（开发环境源码）
     join(selfDir, "..", "..", "src", "node-server.ts"),
     join(selfDir, "..", "src", "node-server.ts"),
     join(selfDir, "src", "node-server.ts"),
     join(argv1Dir, "..", "src", "node-server.ts"),
     join(argv1Dir, "..", "..", "src", "node-server.ts"),
-    // npm global install path
-    ...((() => { try { const { execSync } = require("child_process"); const root = execSync("npm root -g", { encoding: "utf-8" }).trim(); return [join(root, "@sleep2agi", "agent-network", "src", "node-server.ts")]; } catch { return []; } })()),
+    // npm global install fallback
+    ...((() => { try { const root = execSync("npm root -g", { encoding: "utf-8", timeout: 5000 }).trim(); return [join(root, "@sleep2agi", "agent-network", "dist", "src", "node-server.js"), join(root, "@sleep2agi", "agent-network", "src", "node-server.ts")]; } catch { return []; } })()),
   ];
   let found = false;
   for (const p of candidates) {
@@ -1147,18 +1202,19 @@ function ensureMcpJson(profile: Profile) {
 // ── launch helper (shared by start + resume) ──
 
 async function launchAgent(id: string, forceNewSession = false) {
-  let profile = loadProfile(id);
-  if (!profile) {
+  const resolved = resolveNodeRef(id);
+  if (!resolved) {
     console.error(`Node "${id}" not found. Create it first: anet create ${id}`);
     process.exit(1);
   }
+  const { id: nodeId, profile } = resolved;
 
   const runtime = normalizeRuntime(profile);
-  const displayName = nodeDisplayName(id, profile);
+  const displayName = nodeDisplayName(nodeId, profile);
   const session = profileSession(profile);
   const willResume = !!session && !forceNewSession;
   const label = willResume ? `Resuming session ${session.slice(0, 8)}...` : "Starting new session";
-  console.log(`[anet] ${label} for "${id}" [${runtime}]...\n`);
+  console.log(`[anet] ${label} for "${displayName}" [${runtime}]...\n`);
   checkRuntimeDependency(runtime, "start");
   assertStartCompatibility(runtime);
 
@@ -1173,7 +1229,7 @@ async function launchAgent(id: string, forceNewSession = false) {
   if (runtime === "codex-sdk" || runtime === "claude-agent-sdk") {
     // spawn agent-node
     const agentArgs = [
-      "--config", join(nodesDir(), id, "config.json"),
+      "--config", join(nodesDir(), nodeId, "config.json"),
       "--alias", displayName,
     ];
     if (forceNewSession) agentArgs.push("--new-session", "true");
@@ -1192,7 +1248,7 @@ async function launchAgent(id: string, forceNewSession = false) {
       env[k] = v.replace(/^~/, home);
     }
     if (profile.channels.includes("telegram")) {
-      env.TELEGRAM_STATE_DIR = join(nodesDir(), id, "channels", "telegram");
+      env.TELEGRAM_STATE_DIR = join(nodesDir(), nodeId, "channels", "telegram");
     }
 
     const claudeArgs: string[] = [];
@@ -1219,9 +1275,9 @@ async function launchAgent(id: string, forceNewSession = false) {
       if (!willResume || forceNewSession) {
         console.log(`\n[anet] Tip: bind this Claude Code session with:`);
         console.log(`[anet]   anet session ls`);
-        console.log(`[anet]   anet resume ${id} --session <session-id>`);
+        console.log(`[anet]   anet resume ${nodeId} --session <session-id>`);
         if (forceNewSession && session) {
-          console.log(`[anet] Next "anet start ${id}" will still resume ${session.slice(0, 8)}... until you rebind.`);
+          console.log(`[anet] Next "anet start ${nodeId}" will still resume ${session.slice(0, 8)}... until you rebind.`);
         }
       }
       process.exit(code || 0);
@@ -1240,48 +1296,48 @@ async function startCommand() {
 // ── resume (continue session) ──
 
 async function resumeCommand() {
-  const id = args[1];
-  if (!id) {
+  const ref = args[1];
+  if (!ref) {
     console.error("Usage: anet resume <node-name> --session <session-id>");
     console.error("Daily start/resume: anet start <node-name>");
     return;
   }
 
-  let profile = loadProfile(id);
+  const resolved = resolveNodeRef(ref);
+  let nodeId = resolved?.id || ref;
+  let profile = resolved?.profile || null;
   const opts = parseOpts();
   const sessionId = opts.session;
 
   if (!sessionId) {
     console.warn(`[deprecated] anet resume <node-name> without --session is now anet start <node-name>.`);
-    await launchAgent(id, false);
+    await launchAgent(nodeId, false);
     return;
   }
 
-  validateNodeName(id);
+  if (!resolved) validateNodeName(nodeId);
   if (!profile) {
     const createOpts = { ...opts, session: sessionId, runtime: opts.runtime || "claude-code-cli" } as ReturnType<typeof parseOpts>;
-    profile = createProfileFromOpts(id, createOpts);
-    saveProfile(id, profile);
-    console.log(`[anet] Created node "${id}"`);
+    profile = createProfileFromOpts(nodeId, createOpts);
+    saveProfile(nodeId, profile);
+    console.log(`[anet] Created node "${nodeId}"`);
   } else {
     const existing = profileSession(profile);
     if (existing && existing !== sessionId && opts.yes !== "true") {
-      const answer = await ask(`[anet] ${id} already has session ${existing.slice(0, 8)}..., overwrite? (y/n)`, "n");
+      const answer = await ask(`[anet] ${nodeId} already has session ${existing.slice(0, 8)}..., overwrite? (y/n)`, "n");
       closeRL();
       if (!/^y(es)?$/i.test(answer)) {
         console.log("[anet] Session unchanged.");
         return;
       }
     }
-    const stored = loadStoredProfile(id) || profile;
+    const stored = loadStoredProfile(nodeId) || profile;
     stored.session = sessionId;
-    delete stored.resume;
-    delete stored.resumeAlias;
-    saveProfile(id, stored);
+    saveProfile(nodeId, stored);
   }
 
-  console.log(`[anet] Saved session ${sessionId.slice(0, 8)}... to .anet/nodes/${id}/config.json\n`);
-  await launchAgent(id, false);
+  console.log(`[anet] Saved session ${sessionId.slice(0, 8)}... to .anet/nodes/${nodeId}/config.json\n`);
+  await launchAgent(nodeId, false);
 }
 
 function showProfiles(cmd: string) {
@@ -1291,11 +1347,12 @@ function showProfiles(cmd: string) {
     return;
   }
   console.log("\nNodes:\n");
-  for (const name of ids) {
-    const p = loadProfile(name);
-    console.log(`  ${name}  [${normalizeRuntime(p || undefined)}]  session=${p ? profileSession(p).slice(0, 8) || "-" : "-"}  channels=[${p?.channels.join(", ")}]`);
+  for (const id of ids) {
+    const p = loadProfile(id);
+    const displayName = nodeDisplayName(id, p);
+    console.log(`  ${id} (${displayName})  node_id=${p?.node_id || "-"}  [${normalizeRuntime(p || undefined)}]  session=${p ? profileSession(p).slice(0, 8) || "-" : "-"}  channels=[${p?.channels.join(", ")}]`);
   }
-  console.log(`\nanet ${cmd} <node-name>\n`);
+  console.log(`\nanet ${cmd} <node-id|node-name>\n`);
 }
 
 // ── ls ──
@@ -1308,7 +1365,8 @@ async function lsCommand() {
     for (const id of ids) {
       const p = loadProfile(id);
       const session = p ? profileSession(p).slice(0, 8) || "-" : "-";
-      console.log(`  ${id}  [${normalizeRuntime(p || undefined)}]  session=${session}  channels=[${p?.channels.join(", ")}]`);
+      const displayName = nodeDisplayName(id, p);
+      console.log(`  ${id} (${displayName})  node_id=${p?.node_id || "-"}  [${normalizeRuntime(p || undefined)}]  session=${session}  channels=[${p?.channels.join(", ")}]`);
     }
     console.log();
   }
@@ -1525,7 +1583,8 @@ async function importCommand() {
 
     const config: Profile = {
       anet_version: "0.1.0",
-      name: s.alias,
+      node_id: generateNodeId(),
+      node_name: s.alias,
       runtime: "claude-code-cli",
       channels: ["server:commhub"],
       env: {},
@@ -1534,7 +1593,16 @@ async function importCommand() {
     };
 
     mkdirSync(nodeDir, { recursive: true });
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+    writeFileSync(configPath, JSON.stringify({
+      anet_version: config.anet_version,
+      node_id: config.node_id,
+      node_name: config.node_name,
+      runtime: config.runtime,
+      channels: config.channels,
+      env: config.env,
+      flags: config.flags,
+      session: config.session,
+    }, null, 2) + "\n");
     console.log(`  ✅ ${s.alias} → ${projectDir}/.anet/nodes/${s.alias}/config.json`);
     created++;
   }
@@ -1586,6 +1654,50 @@ anet session <command>
   }
 }
 
+function renameCommand() {
+  const fromRef = args[1];
+  const newName = args[2];
+  if (!fromRef || !newName) {
+    console.log(`
+anet rename <node-id|node-name> <new-node-name>
+`);
+    return;
+  }
+
+  validateNodeName(newName);
+  const resolved = resolveNodeRef(fromRef);
+  if (!resolved) {
+    console.error(`Node "${fromRef}" not found.`);
+    process.exit(1);
+  }
+
+  const existing = resolveNodeRef(newName);
+  if (existing && existing.id !== resolved.id) {
+    console.error(`Node name "${newName}" already exists.`);
+    process.exit(1);
+  }
+
+  const oldId = resolved.id;
+  const stored = loadStoredProfile(oldId) || resolved.profile;
+  stored.node_name = newName;
+  stored.alias = newName;
+
+  const oldDir = join(nodesDir(), oldId);
+  const newDir = join(nodesDir(), newName);
+  if (oldId !== newName) {
+    if (existsSync(newDir)) {
+      console.error(`Target directory already exists: .anet/nodes/${newName}`);
+      process.exit(1);
+    }
+    renameSync(oldDir, newDir);
+  }
+
+  saveProfile(newName, stored);
+  writeLegacyProjectAlias(newName);
+  console.log(`[anet] Renamed node "${oldId}" -> "${newName}"`);
+  console.log(`[anet] node_id: ${stored.node_id}`);
+}
+
 // ── channel ──
 
 async function channelCommand() {
@@ -1596,9 +1708,9 @@ async function channelCommand() {
 
   if (sub === "add") {
     const type = args[2]; // P0: telegram
-    const nodeId = args[3];
+    const nodeRef = args[3];
 
-    if (!type || !nodeId) {
+    if (!type || !nodeRef) {
       console.log(`
 anet channel add <type> <node-id> [options]
 
@@ -1619,11 +1731,12 @@ Example:
       process.exit(1);
     }
 
-    validateNodeName(nodeId);
-    const profile = loadProfile(nodeId);
-    const storedProfile = loadStoredProfile(nodeId);
+    const resolved = resolveNodeRef(nodeRef);
+    const nodeId = resolved?.id || nodeRef;
+    const profile = resolved?.profile || null;
+    const storedProfile = profile ? (loadStoredProfile(nodeId) || profile) : null;
     if (!profile) {
-      console.error(`Node "${nodeId}" not found. Create it first: anet create ${nodeId} --runtime codex-sdk`);
+      console.error(`Node "${nodeRef}" not found. Create it first: anet create ${nodeRef} --runtime codex-sdk`);
       process.exit(1);
     }
 
@@ -1640,20 +1753,21 @@ Example:
 
     const channelDir = writeTelegramChannelConfig(nodeId, botToken, allowId);
 
-    if (!storedProfile) {
-      console.error(`Node "${nodeId}" not found. Create it first: anet create ${nodeId} --runtime codex-sdk`);
-      process.exit(1);
-    }
     attachChannel(storedProfile, "telegram");
     saveProfile(nodeId, storedProfile);
 
-    console.log(`\n✅ ${type} channel added to "${nodeId}"`);
+    console.log(`\n✅ ${type} channel added to "${nodeDisplayName(nodeId, profile)}"`);
     console.log(`   ${channelDir}/`);
     console.log(`   config.json updated`);
 
   } else if (sub === "ls") {
-    const nodeId = args[2];
-    const ids = nodeId ? [nodeId] : listProfileIds();
+    const nodeRef = args[2];
+    const resolved = nodeRef ? resolveNodeRef(nodeRef) : null;
+    if (nodeRef && !resolved) {
+      console.error(`Node "${nodeRef}" not found.`);
+      process.exit(1);
+    }
+    const ids = resolved ? [resolved.id] : listProfileIds();
     let found = false;
 
     for (const id of ids) {
@@ -1670,7 +1784,9 @@ Example:
         if (existsSync(accessPath)) {
           try { allow = JSON.parse(readFileSync(accessPath, "utf-8")).allowFrom?.join(", ") || ""; } catch {}
         }
-        console.log(`  ${id.padEnd(20)} ${t.padEnd(12)} allow: ${allow || "(none)"}`);
+        const profile = loadProfile(id);
+        const label = profile ? `${id} (${nodeDisplayName(id, profile)})` : id;
+        console.log(`  ${label.padEnd(20)} ${t.padEnd(12)} allow: ${allow || "(none)"}`);
       }
     }
     if (!found) console.log("No channels. Add one: anet channel add telegram <node-id>");
@@ -1746,6 +1862,7 @@ switch (command) {
   case "server": serverCommand(); break;
   case "start": startCommand(); break;
   case "resume": resumeCommand(); break;
+  case "rename": renameCommand(); break;
   case "import": importCommand(); break;
   case "channel": channelCommand(); break;
   case "setup": await setupCommand(); break;
@@ -1759,6 +1876,6 @@ switch (command) {
   }
   case "--help": case "-h": case undefined: printHelp(); break;
   default:
-    if (loadProfile(command)) { args.unshift("start"); startCommand(); }
+    if (resolveNodeRef(command)) { args.unshift("start"); startCommand(); }
     else { console.error(`Unknown: ${command}`); printHelp(); process.exit(1); }
 }

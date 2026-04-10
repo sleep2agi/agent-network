@@ -239,12 +239,20 @@ export function registerTools(server: McpServer, clientIP?: string) {
     async ({ alias, task, priority, context, from_session }) => {
       console.log(`[${ts()}] ${from_session} → send_task → ${alias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
       const id = uuidv4();
-      // inbox.session_name stores alias
+      // V1: inbox (backward compat)
       db.run(
-        `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session)
-         VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6)`,
+        `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response)
+         VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply')`,
         [id, alias, priority, task, context ?? null, from_session]
       );
+      // V2: tasks table (dual-write)
+      try {
+        db.run(
+          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, created_at, delivered_at)
+           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, datetime('now'), datetime('now'))`,
+          [id, from_session, alias, priority, task]
+        );
+      } catch {}
 
       const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
 
@@ -301,6 +309,69 @@ export function registerTools(server: McpServer, clientIP?: string) {
             }),
           },
         ],
+      };
+    }
+  );
+
+  // ── V2: send_reply (关联 task_id，不触发 think) ──
+  server.tool(
+    "send_reply",
+    "Send a reply to a task. Linked to task_id via in_reply_to. Does NOT trigger agent processing.",
+    {
+      alias: z.string().min(1).max(200).describe("Target session alias"),
+      text: z.string().min(1).max(10000).describe("Reply content"),
+      in_reply_to: z.string().max(200).optional().describe("Original task/message ID"),
+      from_session: z.string().max(200).optional().default("hub"),
+    },
+    async ({ alias, text, in_reply_to, from_session }) => {
+      console.log(`[${ts()}] ${from_session} → send_reply → ${alias}: ${text.slice(0, 60)}`);
+      const id = uuidv4();
+      db.run(
+        `INSERT INTO inbox (id, session_name, type, priority, content, from_session, in_reply_to, requires_response)
+         VALUES (?1, ?2, 'reply', 'normal', ?3, ?4, ?5, 'none')`,
+        [id, alias, text, from_session, in_reply_to ?? null]
+      );
+
+      // 更新 tasks 表状态（如果 in_reply_to 存在）
+      if (in_reply_to) {
+        db.run(
+          `UPDATE tasks SET status = 'replied', result = ?1, completed_at = datetime('now') WHERE task_id = ?2 AND status IN ('created', 'delivered', 'running')`,
+          [text, in_reply_to]
+        );
+      }
+
+      const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
+      pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to });
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ ok: true, message_id: id, session_status: session?.status ?? "unknown" }),
+        }],
+      };
+    }
+  );
+
+  // ── V2: send_ack (不入 inbox，仅更新状态) ──
+  server.tool(
+    "send_ack",
+    "Acknowledge receipt of a task. Does NOT enter inbox. Updates task status only.",
+    {
+      task_id: z.string().min(1).max(200).describe("Task ID to acknowledge"),
+      from_session: z.string().max(200).optional().default("hub"),
+    },
+    async ({ task_id, from_session }) => {
+      console.log(`[${ts()}] ${from_session} → send_ack → task ${task_id.slice(0, 8)}`);
+      // 更新 tasks 表
+      db.run(
+        `UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status IN ('created', 'delivered')`,
+        [task_id]
+      );
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ ok: true, task_id }),
+        }],
       };
     }
   );
