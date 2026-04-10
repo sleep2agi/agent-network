@@ -602,6 +602,8 @@ Other:
   anet network ls               List my networks
   anet network create <name>    Create a network
   anet network use <name>       Switch to a network
+  anet license                  Show license status + limits
+  anet activate <key>           Activate license key
   anet logs <name>              Show recent agent logs
   anet doctor                   System diagnostic check
   anet run                      Standalone SSE agent
@@ -2481,6 +2483,65 @@ function logsCommand() {
   }
 }
 
+// ── license ──
+
+async function licenseCommand() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  if (!hub) { console.error("Run 'anet init' first."); return; }
+
+  try {
+    const res = await fetch(`${hub}/api/license`, { headers: authHeaders() }).then(r => r.json() as any);
+    if (!res.ok) { console.error("Failed to get license info."); return; }
+    const lic = res.license;
+    const lim = res.limits;
+
+    console.log(`\n  License: ${lic.type.toUpperCase()}`);
+    if (lic.expires_at) {
+      console.log(`  Expires: ${lic.expires_at}${lic.expired ? " (EXPIRED)" : ""}`);
+      if (lic.days_left !== null) console.log(`  Days left: ${lic.days_left}`);
+    }
+    console.log(`\n  Limits:`);
+    console.log(`    Agents:    ${lim.max_agents}`);
+    console.log(`    Networks:  ${lim.max_networks}`);
+    console.log(`    Tasks/day: ${lim.max_tasks_day}`);
+
+    if (lic.expired) {
+      console.log(`\n  ⚠ License expired! Options:`);
+      console.log(`    anet activate <key>    Activate a license key`);
+      console.log(`    anet init --hub https://hub.sleep2agi.com  Use free hosted`);
+    }
+    console.log();
+  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+}
+
+async function activateCommand() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  if (!hub) { console.error("Run 'anet init' first."); return; }
+
+  const key = args[1];
+  if (!key) {
+    console.log("\nUsage: anet activate <license-key>\n\nExample: anet activate anet-XXXX-XXXX-XXXX-XXXX\n");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${hub}/api/license/activate`, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    }).then(r => r.json() as any);
+
+    if (res.ok) {
+      console.log(`\n  ✅ License activated: ${res.type.toUpperCase()}`);
+      console.log(`  Valid for ${res.expires_in_days} days\n`);
+    } else {
+      console.error(`  ❌ Activation failed: ${res.error}\n`);
+    }
+  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+}
+
 // ── doctor (diagnostic) ──
 
 async function doctorCommand() {
@@ -2565,6 +2626,8 @@ switch (command) {
   case "status": await statusCommand(); break;
   case "tasks": await tasksCommand(); break;
   case "doctor": await doctorCommand(); break;
+  case "license": await licenseCommand(); break;
+  case "activate": await activateCommand(); break;
   case "logs": logsCommand(); break;
   case "login": await loginCommand(); break;
   case "register": await registerCommand(); break;
