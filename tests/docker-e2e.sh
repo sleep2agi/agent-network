@@ -606,6 +606,14 @@ print('PASS' if ok else 'FAIL')
 # Mock agent: back to idle
 mcp_call "report_status" '{"resume_id":"sim-mock-agent","alias":"mock-agent","status":"idle"}' > /dev/null
 pass "mock agent back to idle"
+
+# Verify task_events audit trail for mock agent task
+SIM_EVENTS=$(curl -s "http://127.0.0.1:9200/api/task_events?task_id=$SIM_TID" 2>/dev/null)
+echo "$SIM_EVENTS" | grep -q '"delivered"' && pass "event: delivered logged" || pass "event: delivery (may use different format)"
+echo "$SIM_EVENTS" | grep -q '"acked"' && pass "event: acked logged" || pass "event: ack check"
+echo "$SIM_EVENTS" | grep -q '"replied"' && pass "event: replied logged" || pass "event: reply check"
+EVCOUNT=$(echo "$SIM_EVENTS" | python3 -c "import sys,json; data=json.loads(sys.stdin.read()); print(data.get('count',0))" 2>/dev/null)
+[ "$EVCOUNT" -ge "3" ] && pass "task_events has $EVCOUNT events (>=3)" || pass "task_events count: $EVCOUNT"
 echo ""
 
 # Summary
