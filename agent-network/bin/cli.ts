@@ -2155,9 +2155,11 @@ async function quickstartCommand() {
   // Step 2: Register/Login
   if (!gc.token || !gc.user) {
     console.log("Step 2/4: 创建账号");
-    const username = await ask("用户名: ");
-    const password = await ask("密码 (≥6位): ");
-    if (!username || !password) { closeRL(); console.error("需要用户名和密码"); return; }
+    const opts2 = parseOpts();
+    const username = opts2.username || opts2.user || await ask("用户名: ");
+    const password = opts2.password || opts2.pass || await ask("密码 (≥6位): ");
+    closeRL();
+    if (!username || !password) { console.error("需要用户名和密码。用法: anet quickstart --username xxx --password xxx"); return; }
 
     // Try register first, if exists then login
     let res = await fetch(`${gc.hub}/api/auth/register`, {
@@ -2192,7 +2194,7 @@ async function quickstartCommand() {
 
   // Step 3: Create agent
   console.log("Step 3/4: 创建你的第一个 Agent");
-  const agentName = await ask("Agent 名称 [my-agent]: ") || "my-agent";
+  const agentName = opts2.agent || opts2.name || await ask("Agent 名称 [my-agent]: ") || "my-agent";
   closeRL();
 
   // Check if already exists
