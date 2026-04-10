@@ -1,16 +1,17 @@
-# V2 Test Coverage Matrix
+# V3 Test Coverage Matrix
 
 ## Test Suites
 
 | Suite | Tests | Command |
 |-------|-------|---------|
-| Base E2E | 101 | `docker run --rm anet-e2e` |
+| Base E2E | 126 | `docker run --rm anet-e2e /app/test-all.sh` |
 | Config Priority | 16 | `docker run --rm anet-e2e /app/test-config.sh` |
 | Codex Real | 7 | `docker run --rm -v ~/.codex:/root/.codex anet-e2e /app/test-codex.sh` |
-| Claude SDK | 7 | `docker run --rm -e ANTHROPIC_BASE_URL=... -e ANTHROPIC_API_KEY=... anet-e2e /app/test-claude.sh` |
+| MiniMax Real | 7 | `docker run --rm -e ANTHROPIC_BASE_URL=... -e ANTHROPIC_API_KEY=... anet-e2e /app/test-minimax.sh` |
 | NPM Smoke | 12 | `docker build --no-cache -t anet-npm-test -f tests/Dockerfile.npm . && docker run --rm anet-npm-test` |
-| Idiom Game | 10 agents | `docker run --rm -v ~/.codex:/root/.codex anet-e2e /app/test-game.sh` |
-| **Total** | **143+** | |
+| Mixed Game | 10 agents | `docker run --rm -v ~/.codex:/root/.codex -e ANTHROPIC_BASE_URL=... anet-e2e /app/test-mixed.sh` |
+| Demo | interactive | `docker run --rm -v ~/.codex:/root/.codex anet-e2e /app/demo.sh` |
+| **Total** | **168+** | |
 
 ## Coverage by Component
 
