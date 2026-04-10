@@ -294,7 +294,8 @@ const register = () => callCommHub("report_status", {
 const reportStatus = (status: string, task?: string) => callCommHub("report_status", { resume_id: RESUME_ID, alias: ALIAS, status, task });
 const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 5 }))?.messages || [];
 const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
-const sendReply = (target: string, message: string) => callCommHub("send_message", { alias: target, message, from_session: ALIAS });
+const sendReply = (target: string, message: string, taskId?: string) =>
+  callCommHub("send_reply", { alias: target, text: message, from_session: ALIAS, in_reply_to: taskId || undefined, status: "replied" });
 
 // ══════════════════════════════════════
 // Claude Runtime
@@ -531,7 +532,7 @@ async function processInbox() {
     }
 
     try {
-      await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`);
+      await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`, msg.id);
       lastReplyTime[from] = Date.now(); // H3 fix: 只在成功回复后设冷却
       log(`→ [${from}] ${result.slice(0, 100)}`);
     } catch (e: any) { warn(`reply failed: ${e.message}`); }
@@ -745,6 +746,9 @@ async function connectSSE() {
             if (["new_task", "broadcast"].includes(ev.type)) {
               log(`← SSE ${ev.type}`);
               await processInbox();
+            }
+            if (ev.type === "new_reply") {
+              log(`← SSE reply from ${ev.from || "?"}${ev.in_reply_to ? ` (task ${ev.in_reply_to.slice(0, 8)})` : ""}`);
             }
           } catch {}
         }

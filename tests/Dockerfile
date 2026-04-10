@@ -6,8 +6,9 @@ RUN apt-get update && apt-get install -y curl python3 && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Install anet (global)
-RUN npm install -g @sleep2agi/agent-network@latest
+# Install local anet (V2 dev code)
+COPY agent-network/ /app/agent-network/
+RUN cd /app/agent-network && npm install && npm run build && npm install -g .
 
 # Copy local server + agent-node (V2 dev code)
 WORKDIR /app

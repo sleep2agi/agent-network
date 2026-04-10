@@ -29,17 +29,21 @@ export function registerTools(server: McpServer, clientIP?: string) {
       project_dir: z.string().max(1000).optional().describe("Agent working directory"),
       version: z.string().max(100).optional().describe("Agent version"),
       tmux_name: z.string().max(200).optional().describe("tmux session name"),
+      // V2 fields
+      node_id: z.string().max(200).optional().describe("Stable node identifier"),
+      session_id: z.string().max(200).optional().describe("Runtime session/thread ID"),
+      config_path: z.string().max(1000).optional().describe("Config file path"),
+      channels: z.string().max(2000).optional().describe("JSON array of channels"),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels }) => {
       console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
 
-      // Wrap DELETE + UPSERT in transaction to prevent race conditions
       db.run("BEGIN IMMEDIATE");
       db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2", [alias, resume_id]);
       db.run(
-        `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, datetime('now'))
+        `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, last_seen_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, datetime('now'), datetime('now'))
          ON CONFLICT(resume_id) DO UPDATE SET
            alias = COALESCE(?2, sessions.alias),
            tmux_name = COALESCE(?3, sessions.tmux_name),
@@ -54,11 +58,27 @@ export function registerTools(server: McpServer, clientIP?: string) {
            output = COALESCE(?12, sessions.output),
            progress = COALESCE(?13, sessions.progress),
            score = COALESCE(?14, sessions.score),
+           node_id = COALESCE(?15, sessions.node_id),
+           session_id = COALESCE(?16, sessions.session_id),
+           config_path = COALESCE(?17, sessions.config_path),
+           channels = COALESCE(?18, sessions.channels),
+           last_seen_at = datetime('now'),
            updated_at = datetime('now')`,
-        [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null]
+        [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null]
       );
 
       db.run("COMMIT");
+
+      // V2: sync tasks table — report_status(working) → tasks.running
+      if (status === "working" && task) {
+        try {
+          db.run(
+            `UPDATE tasks SET status = 'running', started_at = datetime('now')
+             WHERE to_name = ?1 AND status IN ('delivered', 'acked') AND content = ?2`,
+            [alias, task]
+          );
+        } catch {}
+      }
 
       // inbox uses alias for routing
       const row = db.query<{ cnt: number }, [string]>(
@@ -154,6 +174,13 @@ export function registerTools(server: McpServer, clientIP?: string) {
           content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "message not found or not yours" }) }],
         };
       }
+      // V2: sync tasks table — ack_inbox means delivered→acked
+      try {
+        db.run(
+          `UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status = 'delivered'`,
+          [message_id]
+        );
+      } catch {}
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true }) }],
       };
@@ -239,20 +266,19 @@ export function registerTools(server: McpServer, clientIP?: string) {
     async ({ alias, task, priority, context, from_session }) => {
       console.log(`[${ts()}] ${from_session} → send_task → ${alias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
       const id = uuidv4();
-      // V1: inbox (backward compat)
+      // 事务：inbox + tasks 双写
+      db.run("BEGIN IMMEDIATE");
       db.run(
         `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response)
          VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply')`,
         [id, alias, priority, task, context ?? null, from_session]
       );
-      // V2: tasks table (dual-write)
-      try {
-        db.run(
-          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, created_at, delivered_at)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, datetime('now'), datetime('now'))`,
-          [id, from_session, alias, priority, task]
-        );
-      } catch {}
+      db.run(
+        `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at)
+         VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'))`,
+        [id, from_session, alias, priority, task]
+      );
+      db.run("COMMIT");
 
       const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
 
@@ -321,10 +347,11 @@ export function registerTools(server: McpServer, clientIP?: string) {
       alias: z.string().min(1).max(200).describe("Target session alias"),
       text: z.string().min(1).max(10000).describe("Reply content"),
       in_reply_to: z.string().max(200).optional().describe("Original task/message ID"),
+      status: z.enum(["replied", "failed", "cancelled"]).optional().default("replied").describe("Task outcome"),
       from_session: z.string().max(200).optional().default("hub"),
     },
-    async ({ alias, text, in_reply_to, from_session }) => {
-      console.log(`[${ts()}] ${from_session} → send_reply → ${alias}: ${text.slice(0, 60)}`);
+    async ({ alias, text, in_reply_to, status: replyStatus, from_session }) => {
+      console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
       const id = uuidv4();
       db.run(
         `INSERT INTO inbox (id, session_name, type, priority, content, from_session, in_reply_to, requires_response)
@@ -332,16 +359,20 @@ export function registerTools(server: McpServer, clientIP?: string) {
         [id, alias, text, from_session, in_reply_to ?? null]
       );
 
-      // 更新 tasks 表状态（如果 in_reply_to 存在）
+      // 更新 tasks 表
       if (in_reply_to) {
-        db.run(
-          `UPDATE tasks SET status = 'replied', result = ?1, completed_at = datetime('now') WHERE task_id = ?2 AND status IN ('created', 'delivered', 'running')`,
-          [text, in_reply_to]
+        const result = db.run(
+          `UPDATE tasks SET status = ?1, result = ?2, completed_at = datetime('now')
+           WHERE task_id = ?3 AND status IN ('created', 'delivered', 'acked', 'running')`,
+          [replyStatus, text, in_reply_to]
         );
+        if (result.changes === 0) {
+          console.log(`[${ts()}] ⚠ send_reply: task ${in_reply_to?.slice(0, 8)} not found or already terminal`);
+        }
       }
 
       const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
-      pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to });
+      pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus });
 
       return {
         content: [{
@@ -362,15 +393,14 @@ export function registerTools(server: McpServer, clientIP?: string) {
     },
     async ({ task_id, from_session }) => {
       console.log(`[${ts()}] ${from_session} → send_ack → task ${task_id.slice(0, 8)}`);
-      // 更新 tasks 表
-      db.run(
+      const result = db.run(
         `UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status IN ('created', 'delivered')`,
         [task_id]
       );
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({ ok: true, task_id }),
+          text: JSON.stringify({ ok: result.changes > 0, task_id, updated: result.changes }),
         }],
       };
     }
