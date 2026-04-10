@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
-import { register, login, resolveToken, getUserNetworks, createNetwork, deleteNetwork, changePassword, listTokens, createToken, revokeToken, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, getUserNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, listTokens, createToken, revokeToken, type AuthUser } from "./auth.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
@@ -408,6 +408,24 @@ Bun.serve({
       const result = deleteNetwork(resolved.user.user_id, netDetailMatch[1]);
       if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "network_deleted", "network", netDetailMatch[1]);
       return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+    }
+
+    if (netDetailMatch && req.method === "PUT") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      try {
+        const body = await req.json() as any;
+        if (body.name) {
+          const result = renameNetwork(resolved.user.user_id, netDetailMatch[1], body.name);
+          if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "network_renamed", "network", netDetailMatch[1], body.name);
+          return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+        }
+        return withCors(req, Response.json({ ok: false, error: "name required" }, { status: 400 }));
+      } catch (e: any) {
+        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
+      }
     }
 
     // ── REST: health (public, no auth) ──

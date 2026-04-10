@@ -2597,11 +2597,29 @@ async function networkCommand() {
     return;
   }
 
+  if (sub === "rename") {
+    const name = args[2];
+    const newName = args[3];
+    if (!name || !newName) { console.log("Usage: anet network rename <current-name> <new-name>"); return; }
+    try {
+      const res = await fetch(`${hub}/api/networks`, { headers }).then(r => r.json() as any);
+      const net = res.networks?.find((n: any) => n.network_name === name || n.network_id === name);
+      if (!net) { console.error(`Network "${name}" not found.`); return; }
+      const rename = await fetch(`${hub}/api/networks/${net.network_id}`, { method: "PUT", headers, body: JSON.stringify({ name: newName }) }).then(r => r.json() as any);
+      if (rename.ok) {
+        console.log(`[anet] Renamed "${name}" → "${newName}"`);
+        if (gc.network_id === net.network_id) { gc.network_name = newName; saveGlobal(gc); }
+      } else { console.error(`Failed: ${rename.error}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
+    return;
+  }
+
   console.log(`
 anet network <command>
 
   ls                    List my networks
   create <name>         Create a new network
+  rename <old> <new>    Rename a network
   delete <name> --force Delete a network
   use <name>            Switch to a network
   info                  Current network details + stats

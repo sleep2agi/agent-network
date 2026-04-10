@@ -139,6 +139,16 @@ export function listTokens(userId: string) {
   ).all(userId);
 }
 
+export function renameNetwork(userId: string, networkId: string, newName: string): { ok: boolean; error?: string } {
+  const net = db.query<any, [string]>("SELECT * FROM networks WHERE network_id = ?1").get(networkId);
+  if (!net) return { ok: false, error: "network not found" };
+  if (net.owner_id !== userId) return { ok: false, error: "not your network" };
+  const dup = db.query<any, [string, string]>("SELECT network_id FROM networks WHERE owner_id = ?1 AND network_name = ?2").get(userId, newName);
+  if (dup) return { ok: false, error: "name already taken" };
+  db.run("UPDATE networks SET network_name = ?1, updated_at = datetime('now') WHERE network_id = ?2", [newName, networkId]);
+  return { ok: true };
+}
+
 export function deleteNetwork(userId: string, networkId: string): { ok: boolean; error?: string } {
   const net = db.query<any, [string]>("SELECT * FROM networks WHERE network_id = ?1").get(networkId);
   if (!net) return { ok: false, error: "network not found" };
