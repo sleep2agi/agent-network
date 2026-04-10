@@ -163,6 +163,44 @@ Bun.serve({
       return createSSEStream(sessionName);
     }
 
+    // ── V3: License endpoints ──
+    if (url.pathname === "/api/license" && req.method === "GET") {
+      const license = db.query<any, []>("SELECT * FROM licenses ORDER BY created_at LIMIT 1").get();
+      if (!license) return withCors(req, Response.json({ ok: true, status: "no_license" }));
+      const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+      const expired = license.expires_at && license.expires_at < now;
+      const daysLeft = license.expires_at
+        ? Math.max(0, Math.ceil((new Date(license.expires_at).getTime() - Date.now()) / 86400000))
+        : null;
+      return withCors(req, Response.json({
+        ok: true,
+        license: { type: license.type, expires_at: license.expires_at, days_left: daysLeft, expired },
+        limits: { max_agents: license.max_agents, max_networks: license.max_networks, max_tasks_day: license.max_tasks_day },
+      }));
+    }
+
+    if (url.pathname === "/api/license/activate" && req.method === "POST") {
+      try {
+        const body = await req.json() as any;
+        const key = body.key;
+        if (!key) return withCors(req, Response.json({ ok: false, error: "key required" }, { status: 400 }));
+        // For now: accept any key starting with "anet-" as valid pro license
+        if (!key.startsWith("anet-") || key.length < 16) {
+          return withCors(req, Response.json({ ok: false, error: "invalid license key" }, { status: 400 }));
+        }
+        // Upgrade existing license or create new
+        db.run("DELETE FROM licenses");
+        const licId = `lic_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+        db.run(
+          "INSERT INTO licenses (id, license_key, type, max_agents, max_networks, max_tasks_day, activated_at, expires_at) VALUES (?1, ?2, 'pro', 50, 10, 10000, datetime('now'), datetime('now', '+365 days'))",
+          [licId, key]
+        );
+        return withCors(req, Response.json({ ok: true, type: "pro", expires_in_days: 365 }));
+      } catch (e: any) {
+        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
+      }
+    }
+
     // ── V3: Auth endpoints (public) ──
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
       try {

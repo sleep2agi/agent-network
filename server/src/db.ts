@@ -221,6 +221,33 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_network ON audit_log(network_id);
 `);
 
+// ── V3: licenses table ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS licenses (
+    id            TEXT PRIMARY KEY,
+    license_key   TEXT UNIQUE NOT NULL,
+    type          TEXT DEFAULT 'trial',
+    max_agents    INTEGER DEFAULT 5,
+    max_networks  INTEGER DEFAULT 3,
+    max_tasks_day INTEGER DEFAULT 500,
+    activated_at  TEXT,
+    expires_at    TEXT,
+    owner_id      TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// Auto-create trial license on first run
+const existingLicense = db.query<any, []>("SELECT id FROM licenses LIMIT 1").get();
+if (!existingLicense) {
+  const trialId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+  db.run(
+    "INSERT INTO licenses (id, license_key, type, expires_at) VALUES (?1, ?2, 'trial', datetime('now', '+14 days'))",
+    [`lic_${trialId}`, `trial-${trialId}`]
+  );
+  console.log("[commhub] 🎉 14-day free trial started!");
+}
+
 // ── V3: add network_id to existing tables ──
 for (const table of ["sessions", "nodes", "tasks", "inbox", "task_events"]) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN network_id TEXT`); } catch {}
