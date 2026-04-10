@@ -316,6 +316,7 @@ async function callCommHub(method: string, params: Record<string, unknown>, retr
 
 const NODE_ID = fileConfig.node_id || "";
 const NODE_NAME = fileConfig.node_name || "";
+const NETWORK_ID = fileConfig.network_id || process.env.ANET_NETWORK_ID || globalConfig.network_id || "";
 const RESUME_ID = NODE_ID ? `sdk-${NODE_ID}` : `sdk-${ALIAS}-${Date.now().toString(36)}`;
 const register = () => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status: "idle",
@@ -327,6 +328,7 @@ const register = () => callCommHub("report_status", {
   config_path: configFilePath || undefined,
   channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
   model: MODEL || undefined,
+  network_id: NETWORK_ID || undefined,
 });
 const reportStatus = (status: string, task?: string) => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status, task,
@@ -334,6 +336,7 @@ const reportStatus = (status: string, task?: string) => callCommHub("report_stat
   session_id: claudeSessionId || SESSION_ID || undefined,
   config_path: configFilePath || undefined,
   channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
+  network_id: NETWORK_ID || undefined,
 });
 const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 20 }))?.messages || [];
 const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
@@ -908,6 +911,7 @@ log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 log(`  tools:   ${TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)"}`);
 log(`  channels:${TELEGRAM_CHANNELS.length ? ` telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : " (none)"}`);
 log(`  session: ${SESSION_ID || "(new)"}`);
+log(`  network: ${NETWORK_ID || "(global)"}`);
 log(`  log-dir: ${LOG_DIR}`);
 await register();
 log("已注册到 CommHub");
