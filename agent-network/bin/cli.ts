@@ -2527,9 +2527,12 @@ async function networkCommand() {
       if (!res.ok) { console.error(res.error); return; }
       if (!res.networks?.length) { console.log("\n  No networks. Create one: anet network create <name>\n"); return; }
       console.log("\n  Networks:\n");
+      const roleIcon: Record<string, string> = { owner: "⭐", admin: "🔧", member: "👤", viewer: "👁" };
       for (const n of res.networks) {
         const current = n.network_id === gc.network_id ? " ← current" : "";
-        console.log(`  ${n.network_name.padEnd(20)} ${n.network_id.slice(0, 16)}${current}`);
+        const icon = roleIcon[n.member_role] || " ";
+        const role = n.member_role ? ` (${n.member_role})` : "";
+        console.log(`  ${icon} ${n.network_name.padEnd(18)} ${role.padEnd(10)} ${n.network_id.slice(0, 12)}${current}`);
       }
       console.log();
     } catch (e: any) { console.error(friendlyError(e)); }
@@ -2615,15 +2618,82 @@ async function networkCommand() {
     return;
   }
 
+  if (sub === "invite") {
+    const opts = parseOpts();
+    const netId = gc.network_id;
+    if (!netId) { console.error("No network selected. Run: anet network use <name>"); return; }
+    const role = opts.role || "member";
+    const maxUses = parseInt(opts.uses || "1", 10);
+    const expiresDays = opts.expires ? parseInt(opts.expires, 10) : undefined;
+    try {
+      const res = await fetch(`${hub}/api/networks/${netId}/invite`, {
+        method: "POST", headers,
+        body: JSON.stringify({ role, max_uses: maxUses, expires_days: expiresDays }),
+      }).then(r => r.json() as any);
+      if (res.ok) {
+        console.log(`\n  Invite code: ${res.invite_code}`);
+        console.log(`  Network:     ${gc.network_name || netId}`);
+        console.log(`  Role:        ${role}`);
+        console.log(`  Uses:        ${maxUses === -1 ? "unlimited" : maxUses}`);
+        if (expiresDays) console.log(`  Expires:     ${expiresDays} days`);
+        console.log(`\n  Share this with the invitee:`);
+        console.log(`  anet network join ${res.invite_code}\n`);
+      } else { console.error(`Failed: ${res.error}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
+    return;
+  }
+
+  if (sub === "join") {
+    const code = args[2];
+    if (!code) { console.log("Usage: anet network join <invite-code>"); return; }
+    try {
+      const res = await fetch(`${hub}/api/networks/join`, {
+        method: "POST", headers,
+        body: JSON.stringify({ invite_code: code }),
+      }).then(r => r.json() as any);
+      if (res.ok) {
+        // Switch to the joined network
+        gc.network_id = res.network_id;
+        // Fetch network name
+        const nets = await fetch(`${hub}/api/networks`, { headers }).then(r => r.json() as any);
+        const net = nets.networks?.find((n: any) => n.network_id === res.network_id);
+        if (net) gc.network_name = net.network_name;
+        saveGlobal(gc);
+        console.log(`[anet] Joined network "${gc.network_name || res.network_id}" as ${res.role}`);
+        console.log(`[anet] Switched to this network.`);
+      } else { console.error(`Failed: ${res.error}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
+    return;
+  }
+
+  if (sub === "members") {
+    const netId = gc.network_id;
+    if (!netId) { console.error("No network selected. Run: anet network use <name>"); return; }
+    try {
+      const res = await fetch(`${hub}/api/networks/${netId}/members`, { headers }).then(r => r.json() as any);
+      if (!res.ok) { console.error(res.error); return; }
+      console.log(`\n  Members of ${gc.network_name || netId}:\n`);
+      const roleIcon: Record<string, string> = { owner: "⭐", admin: "🔧", member: "👤", viewer: "👁" };
+      for (const m of res.members) {
+        console.log(`  ${roleIcon[m.role] || "?"} ${(m.display_name || m.username).padEnd(16)} ${m.role.padEnd(8)} joined ${m.joined_at?.slice(0, 10) || "?"}`);
+      }
+      console.log();
+    } catch (e: any) { console.error(friendlyError(e)); }
+    return;
+  }
+
   console.log(`
 anet network <command>
 
   ls                    List my networks
   create <name>         Create a new network
-  rename <old> <new>    Rename a network
-  delete <name> --force Delete a network
   use <name>            Switch to a network
   info                  Current network details + stats
+  rename <old> <new>    Rename a network
+  delete <name> --force Delete a network
+  invite                Generate invite code for current network
+  join <code>           Join a network by invite code
+  members               List members of current network
 `);
 }
 
