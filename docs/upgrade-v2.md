@@ -4,15 +4,17 @@
 
 | 包 | 当前生产 | V2 Preview | 变化 |
 |---|---------|-----------|------|
-| @sleep2agi/agent-network (anet) | 1.3.3 | 2.0.0-preview.2 | node_id/rename/stop/delete/interactive create/ensureMcpJson/.js |
-| @sleep2agi/agent-node | 2.0.0 | 2.1.0-preview.1 | send_reply/in_reply_to/retry/V2字段/消息过滤/emoji修复 |
-| @sleep2agi/commhub-server | 0.4.4 | 0.5.0-preview.1 | tasks表/send_reply/send_ack/事务安全/MCP鉴权/任务过期 |
+| @sleep2agi/agent-network (anet) | 1.3.3 | 2.0.0-preview.4 | node_id/rename/stop/delete/status/interactive create/ensureMcpJson/.js/channel V2 |
+| @sleep2agi/agent-node | 2.0.0 | 2.1.0-preview.3 | send_reply/in_reply_to/retry/V2字段/消息过滤/emoji修复/http-api runtime/callCommHub retry |
+| @sleep2agi/commhub-server | 0.4.4 | 0.5.0-preview.3 | tasks表/nodes表/send_reply/send_ack/retry_task/事务安全/MCP鉴权/任务过期TTL/model字段 |
 
 ## 前提条件
 
-- Docker E2E 101 个测试全绿
-- Codex 真实 E2E 7/7 绿 (GPT-5.4)
-- npm smoke test 12/12 绿
+- Docker E2E 86 基础测试 + 16 配置优先级 + 7 Codex 真实 + 12 npm smoke = 121+ 全绿
+- Codex 真实 E2E (GPT-5.4 回答 "2+2=4")
+- 10-agent 成语接龙 (GPT-5.4 x 10 真实跑通)
+- npm smoke test 12/12 绿 (从 npm registry 安装验证)
+- 通信牛 5 轮 review 全部通过
 - 通信牛 4 轮 review 全部通过
 
 ## 升级步骤
