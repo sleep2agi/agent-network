@@ -2481,15 +2481,39 @@ async function loginCommand() {
 
     gc.token = res.token;
     gc.user = res.user;
-    // Get default network
-    const nets = await fetch(`${hub}/api/networks`, { headers: { Authorization: `Bearer ${res.token}` } }).then(r => r.json() as any);
-    if (nets.ok && nets.networks?.length > 0) {
-      gc.network_id = nets.networks[0].network_id;
-      gc.network_name = nets.networks[0].network_name;
-    }
-    saveGlobal(gc);
     console.log(`[anet] Logged in as ${res.user.username}`);
-    if (gc.network_name) console.log(`[anet] Network: ${gc.network_name} (${gc.network_id?.slice(0, 12)})`);
+
+    // Fetch networks and let user choose
+    const nets = await fetch(`${hub}/api/networks`, { headers: { Authorization: `Bearer ${res.token}` } }).then(r => r.json() as any);
+    const networks = nets.ok ? (nets.networks || []) : [];
+
+    if (networks.length > 1 && process.stdin.isTTY) {
+      // Multiple networks → interactive select
+      try {
+        const { select: sel } = await import("@inquirer/prompts");
+        const roleIcon: Record<string, string> = { owner: "⭐", admin: "🔧", member: "👤", viewer: "👁" };
+        const chosen = await sel({
+          message: "选择网络:",
+          choices: networks.map((n: any) => ({
+            value: n.network_id,
+            name: `${roleIcon[n.member_role] || " "} ${n.network_name} (${n.member_role || "owner"})`,
+          })),
+        });
+        const net = networks.find((n: any) => n.network_id === chosen);
+        gc.network_id = chosen;
+        gc.network_name = net?.network_name;
+      } catch {
+        // inquirer not available, use first network
+        gc.network_id = networks[0].network_id;
+        gc.network_name = networks[0].network_name;
+      }
+    } else if (networks.length > 0) {
+      gc.network_id = networks[0].network_id;
+      gc.network_name = networks[0].network_name;
+    }
+
+    saveGlobal(gc);
+    if (gc.network_name) console.log(`[anet] Network: ${gc.network_name}`);
     console.log(`[anet] Token saved to ~/.anet/config.json`);
   } catch (e: any) { console.error(friendlyError(e)); }
 }
