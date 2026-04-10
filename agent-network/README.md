@@ -1,113 +1,176 @@
-# @sleep2agi/agent-network
+# @sleep2agi/agent-network (anet)
 
-AI Agent 通信网络 — CLI + SDK + Channel，一个包搞定。
+AI Agent 通信网络 — 一行命令创建 Agent，多 Agent 协作通信。
+
+## 架构
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  Agent Node │    │  Agent Node │    │  Agent Node │
+│  (codex)    │    │  (minimax)  │    │  (claude)   │
+└──────┬──────┘    └──────┬──────┘    └──────┬──────┘
+       │ SSE              │ SSE              │ MCP
+       └──────────┬───────┴──────────────────┘
+            ┌─────┴─────┐
+            │  CommHub   │  ← MCP Server + REST API
+            │  Server    │     任务调度 + 消息路由
+            └───────────┘
+```
+
+**三个包，三个角色：**
+
+| 包 | 角色 | 安装位置 |
+|---|------|---------|
+| `@sleep2agi/commhub-server` | 通信中枢 (Server) | 服务器，只需 1 台 |
+| `@sleep2agi/agent-network` | CLI 管理工具 (anet) | 每台开发机 |
+| `@sleep2agi/agent-node` | Agent 运行时 | 每台开发机 |
+
+## 5 分钟快速上手
+
+### Step 1: 部署 CommHub Server（服务器端）
+
+在你的服务器上（需要 Bun）：
 
 ```bash
-npm install -g @sleep2agi/agent-network
-anet setup
+# 安装 Bun (如果没有)
+curl -fsSL https://bun.sh/install | bash
+
+# 启动 CommHub Server
+bunx @sleep2agi/commhub-server
+# 默认端口 9200, 访问 http://YOUR_IP:9200/health 验证
 ```
 
-## 快速开始
+Server 启动后会显示：
+- MCP 端点: `http://0.0.0.0:9200/mcp`
+- REST API: `http://0.0.0.0:9200/api`
+- 健康检查: `http://0.0.0.0:9200/health`
+
+### Step 2: 安装 CLI 工具（开发机）
+
+在每台要跑 Agent 的机器上：
 
 ```bash
-# 1. 安装 + 交互式选装依赖
-npm install -g @sleep2agi/agent-network
-anet setup
+npm install -g @sleep2agi/agent-network @sleep2agi/agent-node
 
-# 2. 配置 CommHub
-anet init --hub http://YOUR_IP:9200
+# 配置 CommHub 地址
+anet init --hub http://YOUR_SERVER_IP:9200
 
-# 3. 创建 node（交互式）
-anet create
-
-# 4. 启动
-anet start 指挥室
+# 检查一切正常
+anet doctor
 ```
 
-## 版本
+### Step 3: 创建并启动 Agent
 
 ```bash
-anet -v
-```
-```
-anet v1.3.1
-agent-node v1.1.0 (global)
-  └ @anthropic-ai/claude-agent-sdk v0.2.98
-  └ @openai/codex-sdk v0.118.0
-commhub-server not installed
-claude CLI v2.1.98
-codex CLI v0.118.0
+# 交互式创建（会问你选哪个 Runtime / Model）
+anet create my-agent
+
+# 或直接指定
+anet create my-agent --runtime codex-sdk --model gpt-5.4
+
+# 启动
+anet start my-agent
 ```
 
-## Runtime
+### Step 4: 发送任务
 
-| 名称 | 底层 | 说明 |
-|------|------|------|
-| `claude-code-cli` | Claude Code CLI | 需要 Pro 订阅 + claude auth login |
-| `codex-sdk` | Codex SDK + CLI | 需要 codex auth login |
-| `claude-agent-sdk` | Claude Agent SDK | 支持 MiniMax / 书生 / Claude |
+在另一个终端或另一台机器上：
+
+```bash
+# 查看网络状态
+anet status
+
+# 查看任务列表
+anet tasks
+```
+
+通过 MCP 工具发送任务（Claude Code / Codex 会自动发现）：
+```
+commhub_send_task(alias="my-agent", task="帮我写个 hello world")
+```
+
+## Runtime 选择
+
+| Runtime | 底层 | 需要 | 适用场景 |
+|---------|------|------|---------|
+| `codex-sdk` | GPT-5.4 via Codex | `codex auth login` | 代码任务 |
+| `claude-agent-sdk` | Claude Code | Claude Pro + `claude auth login` | 通用任务 |
+| `http-api` | 任何 OpenAI/Anthropic 兼容 API | API Key | MiniMax, DeepSeek 等 |
+
+```bash
+# Codex (GPT-5.4)
+anet create dev --runtime codex-sdk
+
+# MiniMax (通过 Anthropic 兼容 API)
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_API_KEY=sk-cp-xxx \
+agent-node --alias dev --runtime http-api --model claude-3-5-haiku-20241022
+```
 
 ## CLI 命令
 
 ```bash
-# 全局
-anet init                              # 配 hub URL + token
-anet setup                             # 交互式安装依赖
-anet upgrade                           # 一键升级所有包
-anet server start                      # 启动 CommHub Server
-anet -v                                # 版本诊断
+# 节点管理
+anet create <name>           # 创建 node（交互式）
+anet start <name>            # 启动
+anet stop <name>             # 停止
+anet delete <name> --force   # 删除
+anet rename <ref> <new>      # 重命名
+anet ls                      # 节点列表 + 网络状态
+anet status                  # 网络总览
+anet tasks [status]          # 任务列表
+anet doctor                  # 系统诊断
 
-# 项目
-anet create <node-name>                # 创建 node（交互式）
-anet start <node-name>                 # 启动（自动 resume）
-anet start <node-name> --new-session   # 强制新建
-anet resume <node-name> --session <id> # 导入已有 session
-anet channel add telegram <node-name>  # 加 Telegram channel
-anet channel ls [node-name]            # 查看 channel
-anet ls                                # 查看所有 node
-anet session ls                        # 查看 session
+# Channel
+anet channel add telegram <name> --bot-token <tok> --allow <uid>
+
+# 设置
+anet init                    # 配置 hub URL
+anet setup                   # 安装依赖
+anet server start            # 启动 CommHub
+anet upgrade                 # 检查更新
+anet -v                      # 版本信息
 ```
 
-## 配置
+## 配置文件
 
 ```
-~/.anet/config.json                    # 全局 hub + token
-{workpath}/.anet/nodes/<name>/
-├── config.json                        # node 配置
-└── channels/telegram/                 # Telegram channel
-    ├── .env                           # bot token
-    ├── access.json                    # 白名单
-    └── inbox/                         # 图片/文件
+~/.anet/config.json                     # 全局: hub URL + token
+{project}/.anet/nodes/<name>/
+├── config.json                         # 节点: runtime, model, node_id
+└── channels/telegram/
+    ├── .env                            # bot token (chmod 600)
+    └── access.json                     # 白名单
 ```
 
-## SDK
+配置优先级: CLI 参数 > 环境变量 > 项目配置 > 全局配置 > 默认值
 
-```typescript
-import { CommHub } from '@sleep2agi/agent-network';
+## REST API
 
-const hub = new CommHub({ url: 'http://YOUR_IP:9200', alias: '我的Agent' });
-hub.on('task', async (msg) => {
-  await hub.send(msg.from_session, '完成！');
-});
-```
+| 端点 | 说明 |
+|------|------|
+| `GET /health` | 健康检查 (无需 auth) |
+| `GET /api/status` | 所有 session |
+| `GET /api/tasks?status=&from_name=&to_name=&limit=` | 任务列表 |
+| `GET /api/nodes?node_id=&alias=` | 节点信息 |
+| `GET /api/task_events?task_id=` | 任务审计日志 |
+| `GET /api/messages?limit=&since=` | 消息列表 |
+| `POST /mcp` | MCP Streamable HTTP |
+
+设置 `COMMHUB_AUTH_TOKEN` 环境变量启用 Bearer token 鉴权。
 
 ## npm 包
 
-| 包 | 版本 | 说明 |
-|---|------|------|
-| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | v1.3.1 | anet CLI + CommHub SDK |
-| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | v1.1.0 | Agent 运行时 |
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | v0.4.3 | CommHub Server |
+| 包 | 最新 Preview | 说明 |
+|---|-------------|------|
+| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.0-preview.6 | anet CLI + SDK |
+| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.1.0-preview.3 | Agent 运行时 |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.0-preview.6 | CommHub Server |
 
-## 文档
-
-- [CLI 重构方案](docs/cli-refactor-proposal.md)
-- [依赖管理方案](docs/dependency-management.md)
-- [测试计划](docs/test-plan.md)
-- [踩坑经验](docs/pitfalls.md)
-- [架构设计](docs/architecture.md)
-- [CommHub Review](docs/commhub-review.md)
-- [重启策略](docs/restart-strategy.md)
+```bash
+# 安装 preview 版
+npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+```
 
 ## License
 
