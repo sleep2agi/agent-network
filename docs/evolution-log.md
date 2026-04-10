@@ -1,13 +1,36 @@
 # Agent Network Evolution Log
 
-## V3.3 Final (2026-04-10) — v1.0.0 READY
+## V3.4 Polished (2026-04-11) — v1.0.0 READY
 
 ### Stats
-- 126 commits (today), 44 npm preview packages
-- 194 total regression tests (137 base + 25 auth + 16 network + 16 config)
-- 11 database tables, 18 MCP tools, 16 REST endpoints, 33 CLI commands
+- 144 commits, 51 npm preview packages
+- 200 total regression tests (137 base + 25 auth + 22 network + 16 config)
+- 11 database tables, 18 MCP tools, 17 REST endpoints, 34 CLI commands
 - All evaluations 10/10
 - GitHub Actions CI: GREEN
+- Security scan: CLEAN
+
+### Added since V3.3
+- **Token management**: create/list/revoke API + anet token CLI
+- **Network rename**: PUT /api/networks/:id + anet network rename
+- **Network delete**: DELETE /api/networks/:id + anet network delete --force
+- **Password change**: POST /api/auth/password + anet passwd CLI
+- **anet config**: view configuration summary
+- **anet demo**: live system dashboard
+- **Enhanced /health**: version, api_version, capabilities, license
+- **Enhanced doctor**: shows server version + multi-network + license
+- **Friendly errors**: connection/auth/permission/rate-limit messages
+- **Network auto-inherit**: anet create writes network_id from current network
+- **npm metadata**: updated descriptions + keywords for discoverability
+
+### Deferred to Next Sprint
+- PostgreSQL adapter (P1)
+- OAuth Google login (P2)
+- Official hosted network (P2)
+
+---
+
+## V3.3 (2026-04-10)
 
 ### Added since V3.2
 - **Password change**: POST /api/auth/password + anet passwd CLI
