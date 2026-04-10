@@ -705,6 +705,52 @@ EVCOUNT=$(echo "$SIM_EVENTS" | python3 -c "import sys,json; data=json.loads(sys.
 [ "$EVCOUNT" -ge "3" ] && pass "task_events has $EVCOUNT events (>=3)" || pass "task_events count: $EVCOUNT"
 echo ""
 
+# 26. V3 Auth system
+echo "26. Testing V3 auth..."
+# Register
+REG=$(curl -s -X POST http://127.0.0.1:9200/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"e2e-user","password":"test123456","email":"e2e@test.com"}')
+echo "$REG" | grep -q '"ok":true' && pass "register user" || fail "register failed"
+TOKEN=$(echo "$REG" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
+[ -n "$TOKEN" ] && pass "got API token" || fail "no token"
+
+# Login (get fresh token — login rotates the old one)
+LOGIN=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"e2e-user","password":"test123456"}')
+echo "$LOGIN" | grep -q '"ok":true' && pass "login" || fail "login failed"
+TOKEN=$(echo "$LOGIN" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
+
+# Wrong password
+WRONG=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"e2e-user","password":"wrong"}')
+echo "$WRONG" | grep -q '"ok":false' && pass "wrong password rejected" || fail "wrong pw not rejected"
+
+# Me endpoint
+ME=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/auth/me)
+echo "$ME" | grep -q '"e2e-user"' && pass "auth/me returns user" || fail "auth/me broken"
+echo "$ME" | grep -q '"networks"' && pass "auth/me has networks" || fail "no networks"
+
+# Create network
+NET=$(curl -s -X POST http://127.0.0.1:9200/api/networks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"name":"test-network","description":"E2E test"}')
+echo "$NET" | grep -q '"ok":true' && pass "create network" || fail "create network failed"
+
+# List networks
+NETS=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9200/api/networks)
+echo "$NETS" | grep -q '"test-network"' && pass "list networks" || fail "network not found"
+
+# Duplicate register
+DUP=$(curl -s -X POST http://127.0.0.1:9200/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"e2e-user","password":"test123456"}')
+echo "$DUP" | grep -q 'already taken' && pass "duplicate rejected" || fail "duplicate not rejected"
+echo ""
+
 # Summary
 echo ""
 echo "========================================="
