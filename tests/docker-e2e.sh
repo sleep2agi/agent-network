@@ -353,6 +353,81 @@ AUTH_MCP_NO=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:92
 kill $AUTH_PID 2>/dev/null || true
 echo ""
 
+# 25. Full task lifecycle simulation (mock agent)
+echo "25. Simulating full agent lifecycle..."
+# Register a mock agent
+SIM_REG=$(mcp_call "report_status" '{"resume_id":"sim-mock-agent","alias":"mock-agent","status":"idle","server":"test","agent":"mock"}')
+echo "$SIM_REG" | grep -q 'ok' && pass "mock agent registered" || fail "mock agent registration failed"
+
+# Send task to mock agent
+SIM_TASK=$(mcp_call "send_task" '{"alias":"mock-agent","task":"compute 2+2","from_session":"orchestrator","priority":"normal"}')
+SIM_TID=$(echo "$SIM_TASK" | python3 -c "
+import sys,json
+raw=sys.stdin.read()
+for line in raw.strip().split('\n'):
+  if line.startswith('data: '): raw=line[6:]
+try:
+  d=json.loads(raw)
+  t=json.loads(d.get('result',{}).get('content',[{}])[0].get('text','{}'))
+  print(t.get('message_id',''))
+except: print('')
+" 2>/dev/null)
+[ -n "$SIM_TID" ] && pass "task dispatched to mock agent" || fail "task dispatch failed"
+
+# Verify task in DB = delivered
+SIM_CHECK1=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$SIM_TID" 2>/dev/null)
+echo "$SIM_CHECK1" | grep -q '"delivered"' && pass "task status = delivered" || fail "expected delivered"
+
+# Mock agent: pull inbox
+SIM_INBOX=$(mcp_call "get_inbox" '{"alias":"mock-agent","limit":5}')
+echo "$SIM_INBOX" | grep -q 'compute 2+2' && pass "mock agent received task" || fail "mock agent inbox empty"
+
+# Mock agent: ack
+SIM_ACK=$(mcp_call "ack_inbox" "{\"alias\":\"mock-agent\",\"message_id\":\"$SIM_TID\"}")
+echo "$SIM_ACK" | grep -q 'ok' && pass "mock agent acked" || fail "ack failed"
+
+# Verify task = acked
+SIM_CHECK2=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$SIM_TID" 2>/dev/null)
+echo "$SIM_CHECK2" | grep -q '"acked"' && pass "task status = acked" || fail "expected acked"
+
+# Mock agent: report working
+SIM_WORK=$(mcp_call "report_status" '{"resume_id":"sim-mock-agent","alias":"mock-agent","status":"working","task":"compute 2+2"}')
+echo "$SIM_WORK" | grep -q 'ok' && pass "mock agent working" || fail "status update failed"
+
+# Verify task = running
+sleep 1
+SIM_CHECK3=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$SIM_TID" 2>/dev/null)
+echo "$SIM_CHECK3" | grep -q '"running"' && pass "task status = running" || fail "expected running"
+
+# Mock agent: send reply with result
+SIM_REPLY=$(mcp_call "send_reply" "{\"alias\":\"orchestrator\",\"text\":\"4\",\"in_reply_to\":\"$SIM_TID\",\"status\":\"replied\",\"from_session\":\"mock-agent\"}")
+echo "$SIM_REPLY" | grep -q 'ok' && pass "mock agent replied" || fail "reply failed"
+
+# Verify task = replied with result
+SIM_CHECK4=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$SIM_TID" 2>/dev/null)
+echo "$SIM_CHECK4" | grep -q '"replied"' && pass "task status = replied (final)" || fail "expected replied"
+echo "$SIM_CHECK4" | python3 -c "
+import sys,json
+data=json.loads(sys.stdin.read())
+tasks=data.get('tasks',[])
+if tasks and tasks[0].get('result')=='4': print('PASS')
+else: print('FAIL')
+" 2>/dev/null | grep -q 'PASS' && pass "task result = 4" || fail "task result wrong"
+
+# Verify all timestamps set
+echo "$SIM_CHECK4" | python3 -c "
+import sys,json
+data=json.loads(sys.stdin.read())
+t=data.get('tasks',[{}])[0]
+ok = all(t.get(f) for f in ['created_at','delivered_at','completed_at'])
+print('PASS' if ok else 'FAIL')
+" 2>/dev/null | grep -q 'PASS' && pass "all lifecycle timestamps set" || fail "missing timestamps"
+
+# Mock agent: back to idle
+mcp_call "report_status" '{"resume_id":"sim-mock-agent","alias":"mock-agent","status":"idle"}' > /dev/null
+pass "mock agent back to idle"
+echo ""
+
 # Summary
 echo ""
 echo "========================================="
