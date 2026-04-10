@@ -78,11 +78,18 @@ export function registerTools(server: McpServer, clientIP?: string) {
       // V2: sync tasks table — report_status(working) → tasks.running
       if (status === "working" && task) {
         try {
-          db.run(
+          const runResult = db.run(
             `UPDATE tasks SET status = 'running', started_at = datetime('now')
              WHERE to_name = ?1 AND status IN ('delivered', 'acked') AND content = ?2`,
             [alias, task]
           );
+          if (runResult.changes > 0) {
+            // Find task_id for logging
+            const t = db.query<{ task_id: string }, [string, string]>(
+              "SELECT task_id FROM tasks WHERE to_name = ?1 AND content = ?2 AND status = 'running' ORDER BY started_at DESC LIMIT 1"
+            ).get(alias, task);
+            if (t) logTaskEvent(t.task_id, "acked", "running", alias);
+          }
         } catch {}
       }
 

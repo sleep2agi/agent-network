@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
-import { db } from "./db.js";
+import { db, logTaskEvent } from "./db.js";
 import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
 
 const PORT = Number(process.env.PORT) || 9200;
@@ -84,6 +84,11 @@ setInterval(() => {
     );
     if (result.changes > 0) {
       console.log(`[patrol] expired ${result.changes} stale task(s)`);
+      // Log events for expired tasks
+      const expired = db.query<{ task_id: string }, []>(
+        "SELECT task_id FROM tasks WHERE status = 'expired' AND completed_at >= datetime('now', '-1 minute')"
+      ).all();
+      for (const t of expired) logTaskEvent(t.task_id, "delivered", "expired", "patrol");
     }
   } catch {}
 }, 5 * 60 * 1000);
