@@ -89,9 +89,20 @@ delivered/acked/running → reassign → delivered (新agent)
 
 ## 鉴权
 
-设置 `COMMHUB_AUTH_TOKEN` 后, 所有端点需要 Bearer token:
-- Header: `Authorization: Bearer <token>`
-- 或 Query: `?token=<token>`
+两种认证方式:
+1. **V3 用户系统** (推荐): `POST /api/auth/register` → 获取 `atok_xxx` token
+2. **全局 token** (传统): `COMMHUB_AUTH_TOKEN` 环境变量
+
+Header: `Authorization: Bearer <token>` 或 Query: `?token=<token>`
+
+## V3 功能
+
+- **用户系统**: 注册/登录/Token 认证
+- **多网络**: 每个用户可创建多个独立网络
+- **网络隔离**: 不同网络的数据完全隔离
+- **试用授权**: 14 天免费试用, 到期需授权码
+- **审计日志**: 所有操作记录
+- **限流**: 注册 30/min, 登录 10/min (per IP)
 - `/health` 不需要 auth
 
 ## License

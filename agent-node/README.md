@@ -245,7 +245,7 @@ npx @sleep2agi/agent-node --alias Claude马 --hub http://IP:9200 --tools all
 | **npm** | [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) |
 | **CLI 管理工具** | [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) |
 | **通信服务器** | [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) |
-| **Dashboard** | [agent-network-dashboard.vercel.app](https://agent-network-dashboard.vercel.app) |
+| **Dashboard** | [agent-net.vansin.me](https://agent-net.vansin.me) |
 
 ## License
 
