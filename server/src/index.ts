@@ -171,6 +171,30 @@ Bun.serve({
       return withCors(req, Response.json({ ok: true, user: resolved.user, networks, current_network: resolved.networkId }));
     }
 
+    if (url.pathname === "/api/auth/me" && req.method === "PUT") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      try {
+        const body = await req.json() as any;
+        const updates: string[] = [];
+        const params: any[] = [];
+        if (body.display_name) { updates.push(`display_name = ?${params.length + 1}`); params.push(body.display_name); }
+        if (body.email) { updates.push(`email = ?${params.length + 1}`); params.push(body.email); }
+        if (updates.length > 0) {
+          updates.push(`updated_at = datetime('now')`);
+          params.push(resolved.user.user_id);
+          db.run(`UPDATE users SET ${updates.join(", ")} WHERE user_id = ?${params.length}`, params);
+        }
+        // Re-fetch
+        const user = db.query<any, [string]>("SELECT user_id, username, display_name, email, role FROM users WHERE user_id = ?1").get(resolved.user.user_id);
+        return withCors(req, Response.json({ ok: true, user }));
+      } catch (e: any) {
+        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
+      }
+    }
+
     // ── V3: Network management ──
     if (url.pathname === "/api/networks" && req.method === "GET") {
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
