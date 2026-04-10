@@ -2827,6 +2827,39 @@ async function demoCommand() {
   }
 }
 
+// ── config show ──
+
+function configShowCommand() {
+  const gc = loadGlobal();
+  const configPath = join(home, ".anet", "config.json");
+
+  console.log(`\n  anet config (${configPath})\n`);
+  console.log(`  hub:          ${gc.hub || "(not set — run: anet init)"}`);
+  console.log(`  token:        ${gc.token ? gc.token.slice(0, 12) + "..." : "(not set — run: anet login)"}`);
+  console.log(`  user:         ${gc.user?.username || "(not logged in)"}`);
+  console.log(`  network_id:   ${gc.network_id || "(none — run: anet network use)"}`);
+  console.log(`  network_name: ${gc.network_name || "(none)"}`);
+
+  // Show node count
+  const nd = nodesDir();
+  let nodeCount = 0;
+  try { nodeCount = readdirSync(nd).filter(d => existsSync(join(nd, d, "config.json"))).length; } catch {}
+  console.log(`\n  nodes:        ${nodeCount} in .anet/nodes/`);
+
+  const sub = args[1];
+  if (sub === "path") {
+    console.log(`\n  ${configPath}`);
+  } else if (sub === "json") {
+    console.log(`\n${JSON.stringify(gc, null, 2)}`);
+  } else {
+    console.log(`\n  Subcommands:`);
+    console.log(`    anet config          Show config summary`);
+    console.log(`    anet config path     Print config file path`);
+    console.log(`    anet config json     Print raw JSON`);
+  }
+  console.log();
+}
+
 // ── info ──
 
 async function infoCommand() {
@@ -3045,6 +3078,7 @@ switch (command) {
   case "demo": await demoCommand(); break;
   case "logs": logsCommand(); break;
   case "info": await infoCommand(); break;
+  case "config": configShowCommand(); break;
   case "login": await loginCommand(); break;
   case "register": await registerCommand(); break;
   case "quickstart": await quickstartCommand(); break;
