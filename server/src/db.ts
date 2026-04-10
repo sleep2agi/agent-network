@@ -115,6 +115,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
 `);
 
+// nodes table (V2 Sprint 2) — persistent node identity, separate from runtime sessions
+db.exec(`
+  CREATE TABLE IF NOT EXISTS nodes (
+    node_id       TEXT PRIMARY KEY,
+    node_name     TEXT NOT NULL,
+    alias         TEXT,
+    runtime       TEXT,
+    model         TEXT,
+    config_path   TEXT,
+    channels      TEXT,
+    server        TEXT,
+    hostname      TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(node_name);
+  CREATE INDEX IF NOT EXISTS idx_nodes_alias ON nodes(alias);
+`);
+
 // Helpers
 export function uuidv4(): string {
   return crypto.randomUUID();

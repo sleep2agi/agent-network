@@ -84,6 +84,26 @@ export function registerTools(server: McpServer, clientIP?: string) {
         } catch {}
       }
 
+      // V2: upsert nodes table for persistent node identity
+      if (node_id) {
+        try {
+          db.run(
+            `INSERT INTO nodes (node_id, node_name, alias, runtime, config_path, channels, server, hostname, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
+             ON CONFLICT(node_id) DO UPDATE SET
+               node_name = COALESCE(?2, nodes.node_name),
+               alias = COALESCE(?3, nodes.alias),
+               runtime = COALESCE(?4, nodes.runtime),
+               config_path = COALESCE(?5, nodes.config_path),
+               channels = COALESCE(?6, nodes.channels),
+               server = COALESCE(?7, nodes.server),
+               hostname = COALESCE(?8, nodes.hostname),
+               updated_at = datetime('now')`,
+            [node_id, alias, alias, ag ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null]
+          );
+        } catch {}
+      }
+
       // inbox uses alias for routing
       const row = db.query<{ cnt: number }, [string]>(
         "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"

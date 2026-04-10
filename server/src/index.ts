@@ -281,6 +281,19 @@ Bun.serve({
       return withCors(req, Response.json({ ok: true, messages: rows }));
     }
 
+    // ── REST: nodes table (V2 Sprint 2) ──
+    if (url.pathname === "/api/nodes") {
+      const nodeId = url.searchParams.get("node_id");
+      const alias = url.searchParams.get("alias");
+      let sql = "SELECT * FROM nodes WHERE 1=1";
+      const params: any[] = [];
+      if (nodeId) { sql += ` AND node_id = ?${params.length + 1}`; params.push(nodeId); }
+      if (alias) { sql += ` AND alias = ?${params.length + 1}`; params.push(alias); }
+      sql += " ORDER BY updated_at DESC";
+      const rows = db.query(sql).all(...params);
+      return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
+    }
+
     // ── REST: tasks table (V2) ──
     if (url.pathname === "/api/tasks") {
       const taskId = url.searchParams.get("task_id");
