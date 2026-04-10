@@ -8,6 +8,7 @@ on:
       - 'server/**'
       - 'channel/**'
       - 'tests/**'
+      - '.github/workflows/**'
   pull_request:
     paths:
       - 'agent-network/**'
