@@ -1,11 +1,28 @@
 # Agent Network Evolution Log
 
+## V3.1 License + Commercial (2026-04-10) — COMPLETE
+
+### Stats
+- 97 commits, 35 npm preview packages
+- 180 total regression tests (133 base + 15 auth + 16 network + 16 config)
+- 11 database tables, 18 MCP tools, 13 REST endpoints, 28 CLI commands
+- All evaluations 9-10/10
+
+### Completed
+- **Trial license**: auto 14-day trial on first start
+- **License activation**: anet activate <key> → Pro upgrade
+- **License API**: GET /api/license + POST /api/license/activate
+- **License CLI**: anet license + anet activate
+- **Security fixes**: SQL injection + server-enforced network_id + ownership checks
+
+---
+
 ## V3.0 Multi-Network + User System (2026-04-10) — COMPLETE
 
 ### Stats
 - 88 commits, 30 npm preview packages
 - 126 base E2E tests (+ 16 config + runtime tests = 168+ total)
-- 10 database tables, 18 MCP tools, 12 REST endpoints, 26 CLI commands
+- 11 database tables, 18 MCP tools, 13 REST endpoints, 28 CLI commands
 - All evaluations at 9/10
 - 14 docs archived, codebase cleaned
 

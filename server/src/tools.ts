@@ -351,6 +351,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ alias, task, priority, context, from_session, ttl_seconds, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
+
+      // License check
+      const license = db.query<any, []>("SELECT type, expires_at FROM licenses ORDER BY created_at LIMIT 1").get();
+      if (license?.expires_at) {
+        const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+        if (license.expires_at < now) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({
+            ok: false, error: "license_expired",
+            message: "Trial expired. Activate a license: anet activate <key>",
+          }) }] };
+        }
+      }
+
       console.log(`[${ts()}] ${from_session} → send_task → ${alias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
       const id = uuidv4();
       // 事务：inbox + tasks 双写
