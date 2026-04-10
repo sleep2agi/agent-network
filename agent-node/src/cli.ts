@@ -20,7 +20,7 @@ const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
 
-const PKG_VERSION = "1.4.0";
+const PKG_VERSION = "1.4.1";
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -356,7 +356,7 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
   const { Codex } = await import("@openai/codex-sdk");
 
   if (!codexThread) {
-    const codexInstructions = SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI Agent 节点。你通过 CommHub 通信网络接收任务。收到任务后理解内容、执行任务（可以读写文件、执行命令）、返回执行结果。你的回复会被自动发送给任务发送者。当前工作目录：${process.cwd()}。重要：不要回复纯确认消息（如"收到""好的""ok"），必须有实质内容才回复。无实质进展时保持沉默。`;
+    const codexInstructions = SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI Agent 节点。你通过 CommHub 通信网络接收任务。收到任务后理解内容、执行任务（可以读写文件、执行命令）、返回执行结果。你的回复会被自动发送给任务发送者。当前工作目录：${process.cwd()}。重要：不要回复纯确认消息（如"收到""好的""ok"），必须有实质内容才回复。无实质进展时保持沉默。没有新任务时保持安静，不要主动发消息询问或提示"等待任务"，等待下一条任务即可。`;
     const codex = new Codex({
       config: {
         model_auto_compact_token_limit: 200000,
@@ -472,6 +472,7 @@ const LOW_VALUE_PHRASES = new Set([
   "done", "ack", "roger", "yes", "no", "在线", "待命", "正常",
   "保持在线", "通信正常", "已收到", "收到了", "好", "行",
   "noted", "copy", "received", "understood",
+  "等待任务", "等待中", "等待指令", "无新任务", "idle", "waiting",
 ]);
 
 function isLowValueText(text: string): boolean {
