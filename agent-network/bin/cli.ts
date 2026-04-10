@@ -2249,6 +2249,7 @@ async function quickstartCommand() {
 `);
 
   const gc = loadGlobal();
+  const qsOpts = parseOpts();
 
   // Step 1: Hub
   if (!gc.hub) {
@@ -2268,11 +2269,10 @@ async function quickstartCommand() {
   // Step 2: Register/Login
   if (!gc.token || !gc.user) {
     console.log("Step 2/4: 创建账号");
-    const opts2 = parseOpts();
-    const username = opts2.username || opts2.user || await ask("用户名: ");
-    const password = opts2.password || opts2.pass || await ask("密码 (≥6位): ");
+    const username = qsOpts.username || qsOpts.user || await ask("用户名: ");
+    const password = qsOpts.password || qsOpts.pass || await ask("密码 (≥6位): ");
     closeRL();
-    if (!username || !password) { console.error("需要用户名和密码。用法: anet quickstart --username xxx --password xxx"); return; }
+    if (!username || !password) { closeRL(); console.error("需要用户名和密码。用法: anet quickstart --username xxx --password xxx"); return; }
 
     // Try register first, if exists then login
     let res = await fetch(`${gc.hub}/api/auth/register`, {
@@ -2307,15 +2307,15 @@ async function quickstartCommand() {
 
   // Step 3: Create agent
   console.log("Step 3/4: 创建你的第一个 Agent");
-  const agentName = opts2.agent || opts2.name || await ask("Agent 名称 [my-agent]: ") || "my-agent";
+  const agentName = qsOpts.agent || qsOpts.name || await ask("Agent 名称 [my-agent]: ") || "my-agent";
   closeRL();
 
   // Check if already exists
   const existing = resolveNodeRef(agentName);
   if (!existing) {
-    let runtime = opts2.runtime || "codex-sdk";
+    let runtime = qsOpts.runtime || "codex-sdk";
     // Only show interactive selection if no runtime specified and TTY available
-    if (!opts2.runtime && process.stdin.isTTY) {
+    if (!qsOpts.runtime && process.stdin.isTTY) {
       const runtimes = ["codex-sdk (GPT-5.4)", "http-api (MiniMax/OpenAI)", "claude-agent-sdk (Claude)"];
       console.log("\n  Runtime 选择:");
       runtimes.forEach((r, i) => console.log(`    ${i + 1}) ${r}`));
@@ -2335,7 +2335,7 @@ async function quickstartCommand() {
       } catch {
         // inquirer not available, use default
       }
-    } else if (!opts2.runtime) {
+    } else if (!qsOpts.runtime) {
       console.log(`  Using default runtime: ${runtime}`);
     }
 
