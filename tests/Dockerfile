@@ -22,7 +22,8 @@ COPY tests/docker-e2e-minimax.sh /app/test-minimax.sh
 COPY tests/docker-mixed-game.sh /app/test-mixed.sh
 COPY tests/test-all.sh /app/test-all.sh
 COPY tests/docker-config-priority.sh /app/test-config.sh
-RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh /app/test-game.sh /app/test-config.sh /app/test-minimax.sh /app/test-all.sh
+COPY tests/demo-quickstart.sh /app/demo.sh
+RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh /app/test-game.sh /app/test-config.sh /app/test-minimax.sh /app/test-all.sh /app/demo.sh
 RUN cd /app/server && bun install
 
 # Install local agent-node globally (build from source)
