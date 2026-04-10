@@ -161,51 +161,40 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ alias, task, result, artifacts, score, duration_minutes }) => {
       console.log(`[${ts()}] ${alias} → report_completion: ${task.slice(0, 60)}`);
       const id = uuidv4();
-      try {
-        db.run("BEGIN IMMEDIATE");
+      const taskUpdateChanges = db.transaction(() => {
         db.run(
           `INSERT INTO completions (id, session_name, task, result, artifacts, score, duration_minutes)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
           [id, alias, task, result, artifacts ? JSON.stringify(artifacts) : null, score ?? null, duration_minutes ?? null]
         );
-
         db.run(
           `UPDATE sessions SET status = 'idle', task = NULL, progress = 0, updated_at = datetime('now')
            WHERE alias = ?1`,
           [alias]
         );
-
         // V2: sync tasks table — try by task_id first, then by content
-        const taskUpdate = db.run(
+        const tu = db.run(
           `UPDATE tasks SET status = 'replied', result = ?1, completed_at = datetime('now')
            WHERE task_id = ?2 AND status IN ('delivered', 'acked', 'running')`,
           [result.slice(0, 4000), task]
         );
-        if (taskUpdate.changes === 0) {
-          // fallback: match most recent task by to_name + content (legacy path)
+        if (tu.changes === 0) {
           const match = db.query<{ task_id: string }, [string, string]>(
             `SELECT task_id FROM tasks WHERE to_name = ?1 AND content = ?2
              AND status IN ('delivered', 'acked', 'running') ORDER BY created_at DESC LIMIT 1`
           ).get(alias, task);
           if (match) {
-            db.run(
-              `UPDATE tasks SET status = 'replied', result = ?1, completed_at = datetime('now')
-               WHERE task_id = ?2`,
-              [result.slice(0, 4000), match.task_id]
-            );
+            db.run(`UPDATE tasks SET status = 'replied', result = ?1, completed_at = datetime('now') WHERE task_id = ?2`,
+              [result.slice(0, 4000), match.task_id]);
           }
         }
-
-        db.run("COMMIT");
-        // Log event after commit
-        const updatedTaskId = taskUpdate.changes > 0 ? task : (db.query<{ task_id: string }, [string]>(
-          "SELECT task_id FROM tasks WHERE to_name = ?1 AND status = 'replied' ORDER BY completed_at DESC LIMIT 1"
-        ).get(alias)?.task_id);
-        if (updatedTaskId) logTaskEvent(updatedTaskId, null, "replied", alias, "report_completion");
-      } catch (e) {
-        try { db.run("ROLLBACK"); } catch {}
-        throw e;
-      }
+        return tu.changes;
+      })();
+      // Log event after transaction
+      const updatedTaskId = taskUpdateChanges > 0 ? task : (db.query<{ task_id: string }, [string]>(
+        "SELECT task_id FROM tasks WHERE to_name = ?1 AND status = 'replied' ORDER BY completed_at DESC LIMIT 1"
+      ).get(alias)?.task_id);
+      if (updatedTaskId) logTaskEvent(updatedTaskId, null, "replied", alias, "report_completion");
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, completion_id: id }) }],
