@@ -2748,80 +2748,87 @@ async function demoCommand() {
   const hub = gc.hub;
   if (!hub) { console.error("Run 'anet init' or 'anet server local' first."); return; }
 
-  console.log(`
-╔══════════════════════════════════════════════════╗
-║  🎬  Agent Network Demo                          ║
-╚══════════════════════════════════════════════════╝
-`);
+  const opts = parseOpts();
+  const live = opts.live === "true" || opts.watch === "true" || args.includes("--live") || args.includes("--watch");
+  const interval = parseInt(opts.interval || "5", 10) * 1000;
 
-  const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
-  const step = async (n: number, msg: string) => {
-    await delay(300);
-    console.log(`  ${n}. ${msg}`);
-  };
+  async function renderDashboard() {
+    const h = authHeaders();
+    const [health, stats, sessions, tasks, license] = await Promise.all([
+      fetch(`${hub}/health`, { headers: h }).then(r => r.json() as any).catch(() => null),
+      fetch(`${hub}/api/stats`, { headers: h }).then(r => r.json() as any).catch(() => ({})),
+      fetch(`${hub}/api/status`, { headers: h }).then(r => r.json() as any).catch(() => ({ sessions: [] })),
+      fetch(`${hub}/api/tasks?limit=5`, { headers: h }).then(r => r.json() as any).catch(() => ({ tasks: [] })),
+      fetch(`${hub}/api/license`, { headers: h }).then(r => r.json() as any).catch(() => ({})),
+    ]);
+
+    if (!health?.ok) { console.error("  Server not reachable."); return false; }
+
+    const now = new Date().toLocaleTimeString();
+    const onlineSessions = (sessions.sessions || []).filter((s: any) => s.status !== "offline");
+    const workingSessions = onlineSessions.filter((s: any) => s.status === "working");
+
+    const lines: string[] = [];
+    lines.push(`╔══════════════════════════════════════════════════════════╗`);
+    lines.push(`║  🌐 Agent Network Dashboard          ${now.padStart(8)}          ║`);
+    lines.push(`╠══════════════════════════════════════════════════════════╣`);
+    lines.push(`║  Server: ${hub.padEnd(30)} v${(health.version || "?").padEnd(14)}  ║`);
+    lines.push(`║  License: ${((license.license?.type || "?") + " (" + (license.license?.days_left ?? "∞") + "d)").padEnd(28)} SSE: ${String(health.sse_connections || 0).padEnd(11)}  ║`);
+    lines.push(`║  Tasks: ${String(stats.tasks?.total || 0).padEnd(6)} Sessions: ${String(onlineSessions.length).padEnd(4)} Working: ${String(workingSessions.length).padEnd(9)}  ║`);
+    lines.push(`╠══════════════════════════════════════════════════════════╣`);
+
+    // Online agents
+    if (onlineSessions.length > 0) {
+      lines.push(`║  Agents Online:                                          ║`);
+      for (const s of onlineSessions.slice(0, 10)) {
+        const statusIcon = s.status === "working" ? "🔨" : s.status === "idle" ? "💤" : s.status === "blocked" ? "🚫" : "❓";
+        const task = s.task ? s.task.slice(0, 28) : "";
+        lines.push(`║  ${statusIcon} ${(s.alias || "?").padEnd(14)} ${s.status.padEnd(8)} ${task.padEnd(28)}  ║`);
+      }
+      if (onlineSessions.length > 10) lines.push(`║  ... +${onlineSessions.length - 10} more                                           ║`);
+    } else {
+      lines.push(`║  (no agents online)                                      ║`);
+    }
+
+    lines.push(`╠══════════════════════════════════════════════════════════╣`);
+
+    // Recent tasks
+    if (tasks.tasks?.length > 0) {
+      lines.push(`║  Recent Tasks:                                           ║`);
+      for (const t of tasks.tasks.slice(0, 5)) {
+        const icon = t.status === "replied" ? "✅" : t.status === "running" ? "⏳" : t.status === "delivered" ? "📬" : t.status === "failed" ? "❌" : "📋";
+        lines.push(`║  ${icon} ${(t.from_name || "?").padEnd(10)}→${(t.to_name || "?").padEnd(10)} ${t.status.padEnd(10)} ${(t.content || "").slice(0, 18).padEnd(18)}  ║`);
+      }
+    } else {
+      lines.push(`║  (no tasks yet)                                          ║`);
+    }
+
+    lines.push(`╠══════════════════════════════════════════════════════════╣`);
+    if (live) {
+      lines.push(`║  Refreshing every ${interval / 1000}s — press Ctrl+C to stop             ║`);
+    } else {
+      lines.push(`║  Tip: anet demo --live  for auto-refresh dashboard       ║`);
+    }
+    lines.push(`╚══════════════════════════════════════════════════════════╝`);
+
+    if (live) process.stdout.write("\x1B[2J\x1B[H"); // clear screen
+    console.log(lines.join("\n"));
+    return true;
+  }
 
   try {
-    // 1. Health check
-    await step(1, "Checking server...");
-    const health = await fetch(`${hub}/health`, { headers: authHeaders() }).then(r => r.json() as any);
-    if (!health.ok) { console.error("  ❌ Server not reachable. Run: anet server local"); return; }
-    console.log(`     ✅ CommHub online at ${hub}`);
+    const ok = await renderDashboard();
+    if (!ok) return;
 
-    // 2. License
-    await step(2, "License status...");
-    const lic = await fetch(`${hub}/api/license`, { headers: authHeaders() }).then(r => r.json() as any);
-    if (lic.license) console.log(`     ✅ ${lic.license.type.toUpperCase()} — ${lic.license.days_left ?? "∞"} days left`);
-
-    // 3. User
-    await step(3, "User info...");
-    const token = gc.token;
-    if (token) {
-      const me = await fetch(`${hub}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json() as any).catch(() => null);
-      if (me?.ok) console.log(`     ✅ Logged in as ${me.user.username} — ${me.networks?.length || 0} network(s)`);
-      else console.log(`     ⚠ Token expired. Run: anet login`);
-    } else {
-      console.log(`     ⚠ Not logged in. Run: anet login`);
+    if (live) {
+      // Live refresh loop
+      const loop = setInterval(async () => {
+        try { await renderDashboard(); } catch {}
+      }, interval);
+      process.on("SIGINT", () => { clearInterval(loop); process.exit(0); });
+      // Keep alive
+      await new Promise(() => {});
     }
-
-    // 4. Stats
-    await step(4, "Network stats...");
-    const stats = await fetch(`${hub}/api/stats`, { headers: authHeaders() }).then(r => r.json() as any);
-    console.log(`     📊 Tasks: ${stats.tasks?.total || 0} | Sessions: ${stats.sessions?.by_status?.reduce((a: number, s: any) => a + s.count, 0) || 0} | Nodes: ${stats.nodes?.total || 0}`);
-
-    // 5. Recent tasks
-    await step(5, "Recent activity...");
-    const tasks = await fetch(`${hub}/api/tasks?limit=3`, { headers: authHeaders() }).then(r => r.json() as any);
-    if (tasks.tasks?.length > 0) {
-      for (const t of tasks.tasks.slice(0, 3)) {
-        console.log(`     ${t.status.padEnd(10)} ${(t.from_name || "?").padEnd(12)} → ${(t.to_name || "?").padEnd(12)} ${(t.content || "").slice(0, 30)}`);
-      }
-    } else {
-      console.log(`     (no tasks yet)`);
-    }
-
-    // 6. Nodes
-    await step(6, "Local nodes...");
-    const ids = listProfileIds();
-    if (ids.length > 0) {
-      for (const id of ids.slice(0, 5)) {
-        const p = loadProfile(id);
-        const name = nodeDisplayName(id, p);
-        console.log(`     ${name.padEnd(16)} [${normalizeRuntime(p || undefined)}]`);
-      }
-    } else {
-      console.log(`     (none — run: anet create my-agent)`);
-    }
-
-    console.log(`
-╔══════════════════════════════════════════════════╗
-║  Next steps:                                      ║
-║    anet create my-agent       Create an agent      ║
-║    anet start my-agent        Start it             ║
-║    anet status                See who's online     ║
-║    anet tasks                 See task history     ║
-║    anet doctor                Full diagnostic      ║
-╚══════════════════════════════════════════════════╝
-`);
   } catch (e: any) {
     console.error(`  ❌ ${e.message}`);
   }
