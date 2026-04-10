@@ -264,6 +264,27 @@ Bun.serve({
       return withCors(req, Response.json({ ok: true, messages: rows }));
     }
 
+    // ── REST: tasks table (V2) ──
+    if (url.pathname === "/api/tasks") {
+      const taskId = url.searchParams.get("task_id");
+      const status = url.searchParams.get("status");
+      const toName = url.searchParams.get("to_name");
+      const fromName = url.searchParams.get("from_name");
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
+
+      let sql = "SELECT * FROM tasks WHERE 1=1";
+      const params: any[] = [];
+      if (taskId) { sql += ` AND task_id = ?${params.length + 1}`; params.push(taskId); }
+      if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
+      if (toName) { sql += ` AND to_name = ?${params.length + 1}`; params.push(toName); }
+      if (fromName) { sql += ` AND from_name = ?${params.length + 1}`; params.push(fromName); }
+      sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
+      params.push(limit);
+
+      const rows = db.query(sql).all(...params);
+      return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length }));
+    }
+
     // ── REST: recent completions ──
     if (url.pathname === "/api/completions") {
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 86400000).toISOString();
@@ -280,6 +301,7 @@ Endpoints:
   GET  /health            - Health check
   GET  /api/status        - All sessions ${AUTH_TOKEN ? "(auth required)" : ""}
   POST /api/task          - Send task via REST ${AUTH_TOKEN ? "(auth required)" : ""}
+  GET  /api/tasks         - Tasks table (V2) ${AUTH_TOKEN ? "(auth required)" : ""}
   GET  /api/completions   - Recent completions ${AUTH_TOKEN ? "(auth required)" : ""}
   GET  /api/tmux/:name    - Capture tmux pane output ${AUTH_TOKEN ? "(auth required)" : ""}
   POST /api/tmux/:name/send - Send keys to tmux ${AUTH_TOKEN ? "(auth required)" : ""}

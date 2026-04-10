@@ -290,9 +290,19 @@ const register = () => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status: "idle",
   server: osHostname(), hostname: osHostname(),
   agent: `agent-node:${RUNTIME}`, project_dir: process.cwd(),
+  node_id: NODE_ID || undefined,
+  session_id: SESSION_ID || undefined,
+  config_path: configFilePath || undefined,
+  channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
 });
-const reportStatus = (status: string, task?: string) => callCommHub("report_status", { resume_id: RESUME_ID, alias: ALIAS, status, task });
-const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 5 }))?.messages || [];
+const reportStatus = (status: string, task?: string) => callCommHub("report_status", {
+  resume_id: RESUME_ID, alias: ALIAS, status, task,
+  node_id: NODE_ID || undefined,
+  session_id: claudeSessionId || SESSION_ID || undefined,
+  config_path: configFilePath || undefined,
+  channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
+});
+const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 20 }))?.messages || [];
 const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
 const sendReply = (target: string, message: string, taskId?: string) =>
   callCommHub("send_reply", { alias: target, text: message, from_session: ALIAS, in_reply_to: taskId || undefined, status: "replied" });

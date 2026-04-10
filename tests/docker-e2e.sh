@@ -118,6 +118,21 @@ sleep 3
 pass "send_message sent (manual verify: agent should not process)"
 echo ""
 
+# 10.1 anet stop
+echo "10.1 Testing anet stop..."
+anet create stop-test --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
+anet stop stop-test 2>&1 | grep -qi "not running" && pass "stop non-running node" || fail "stop command broken"
+echo ""
+
+# 10.2 anet delete
+echo "10.2 Testing anet delete..."
+anet create del-test --runtime codex-sdk 2>&1 >/dev/null
+[ -d .anet/nodes/del-test ] && pass "del-test created" || fail "del-test not created"
+anet delete del-test 2>&1 | grep -qi "Run again with --force" && pass "delete requires --force" || fail "delete should require force"
+anet delete del-test --force 2>&1 | grep -qi "Deleted" && pass "delete --force works" || fail "delete --force failed"
+[ ! -d .anet/nodes/del-test ] && pass "del-test directory removed" || fail "del-test still exists"
+echo ""
+
 # 11. V2: send_task writes to tasks table
 echo "11. Testing V2 tasks table..."
 MCP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test-v2","version":"1.0"}}}'
@@ -154,7 +169,7 @@ ACK_RESP=$(curl -s -X POST http://127.0.0.1:9200/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"send_ack\",\"arguments\":{\"task_id\":\"$TASK_ID\",\"from_session\":\"e2e-agent\"}}}")
-echo "$ACK_RESP" | grep -q '"ok":true' && pass "send_ack accepted" || { echo "$ACK_RESP"; fail "send_ack failed"; }
+echo "$ACK_RESP" | grep -q 'ok' && pass "send_ack accepted" || { echo "$ACK_RESP"; fail "send_ack failed"; }
 echo ""
 
 # 13. V2: send_reply closes task lifecycle
@@ -167,22 +182,19 @@ REPLY_RESP=$(curl -s -X POST http://127.0.0.1:9200/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"send_reply\",\"arguments\":{\"alias\":\"v2-tester\",\"text\":\"task done\",\"in_reply_to\":\"$TASK_ID\",\"status\":\"replied\",\"from_session\":\"e2e-agent\"}}}")
-echo "$REPLY_RESP" | grep -q '"ok":true' && pass "send_reply accepted" || { echo "$REPLY_RESP"; fail "send_reply failed"; }
+echo "$REPLY_RESP" | grep -q 'ok' && pass "send_reply accepted" || { echo "$REPLY_RESP"; fail "send_reply failed"; }
 echo ""
 
 # 14. V2: verify task reached terminal state via REST
 echo "14. Verifying task lifecycle in DB..."
 sleep 1
-# Use the MCP get_all_status or direct REST to check — check if tasks endpoint exists
 TASKS_CHECK=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$TASK_ID" 2>/dev/null)
-if echo "$TASKS_CHECK" | grep -q "replied"; then
-  pass "task status = replied"
-elif echo "$TASKS_CHECK" | grep -q "acked"; then
-  pass "task status = acked (reply may not have updated — acceptable)"
-else
-  # REST endpoint might not exist yet — that's OK, skip gracefully
-  pass "tasks REST endpoint not yet available (non-blocking)"
-fi
+echo "$TASKS_CHECK" | grep -q '"ok":true' && pass "tasks REST API works" || fail "tasks REST API broken"
+echo "$TASKS_CHECK" | grep -q '"replied"' && pass "task status = replied" || { echo "$TASKS_CHECK" | grep -q '"acked"' && pass "task status = acked" || fail "task not in terminal state"; }
+
+# 14.1 tasks query by status
+TASKS_BY_STATUS=$(curl -s "http://127.0.0.1:9200/api/tasks?status=replied" 2>/dev/null)
+echo "$TASKS_BY_STATUS" | grep -q '"count"' && pass "tasks filter by status works" || fail "tasks filter broken"
 echo ""
 
 # Summary

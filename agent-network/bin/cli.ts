@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync } from "fs";
 import { join } from "path";
 import { spawn, execSync } from "child_process";
 import { createHash } from "crypto";
@@ -1240,7 +1240,12 @@ async function launchAgent(id: string, forceNewSession = false) {
     }
 
     const child = spawn("agent-node", agentArgs, { env, stdio: "inherit", shell: true });
-    child.on("exit", (code) => process.exit(code || 0));
+    const pidFile = join(nodesDir(), nodeId, ".pid");
+    if (child.pid) writeFileSync(pidFile, String(child.pid));
+    child.on("exit", (code) => {
+      try { rmSync(pidFile, { force: true }); } catch {}
+      process.exit(code || 0);
+    });
   } else {
     // spawn claude CLI
     const env = { ...process.env, COMMHUB_ALIAS: profile.alias, ...(token ? { COMMHUB_TOKEN: token } : {}) };
@@ -1271,7 +1276,10 @@ async function launchAgent(id: string, forceNewSession = false) {
     claudeArgs.push("-n", displayName);
 
     const child = spawn("claude", claudeArgs, { env, stdio: "inherit", shell: true });
+    const pidFile = join(nodesDir(), nodeId, ".pid");
+    if (child.pid) writeFileSync(pidFile, String(child.pid));
     child.on("exit", (code) => {
+      try { rmSync(pidFile, { force: true }); } catch {}
       if (!willResume || forceNewSession) {
         console.log(`\n[anet] Tip: bind this Claude Code session with:`);
         console.log(`[anet]   anet session ls`);
@@ -1698,6 +1706,92 @@ anet rename <node-id|node-name> <new-node-name>
   console.log(`[anet] node_id: ${stored.node_id}`);
 }
 
+// ── stop ──
+
+function stopNode(nodeId: string): boolean {
+  const pidFile = join(nodesDir(), nodeId, ".pid");
+  if (!existsSync(pidFile)) return false;
+  const pid = parseInt(readFileSync(pidFile, "utf-8").trim());
+  if (isNaN(pid)) { rmSync(pidFile, { force: true }); return false; }
+  try {
+    process.kill(pid, 0); // check alive
+    process.kill(pid, "SIGTERM");
+    rmSync(pidFile, { force: true });
+    return true;
+  } catch {
+    rmSync(pidFile, { force: true });
+    return false;
+  }
+}
+
+function stopCommand() {
+  const ref = args[1];
+  if (!ref) {
+    console.log(`
+anet stop <node-id|node-name>
+
+Stop a running agent node.
+`);
+    return;
+  }
+
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) {
+    console.error(`Node "${ref}" not found.`);
+    process.exit(1);
+  }
+
+  const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  if (stopNode(resolved.id)) {
+    console.log(`[anet] Stopped "${displayName}"`);
+  } else {
+    console.log(`[anet] "${displayName}" is not running (no PID file)`);
+  }
+}
+
+// ── delete ──
+
+function deleteCommand() {
+  const ref = args[1];
+  if (!ref) {
+    console.log(`
+anet delete <node-id|node-name>
+
+Delete a node and its config. Use --force to skip confirmation.
+`);
+    return;
+  }
+
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) {
+    console.error(`Node "${ref}" not found.`);
+    process.exit(1);
+  }
+
+  const { id: nodeId, profile } = resolved;
+  const displayName = nodeDisplayName(nodeId, profile);
+  const opts = parseOpts();
+
+  // Stop if running
+  stopNode(nodeId);
+
+  const nodeDir = join(nodesDir(), nodeId);
+  if (!existsSync(nodeDir)) {
+    console.error(`Node directory not found: ${nodeDir}`);
+    process.exit(1);
+  }
+
+  if (opts.force !== "true" && opts.yes !== "true") {
+    console.log(`[anet] This will delete "${displayName}" (node_id: ${profile.node_id || "-"})`);
+    console.log(`[anet]   ${nodeDir}`);
+    console.log(`[anet] Run again with --force to confirm.`);
+    return;
+  }
+
+  rmSync(nodeDir, { recursive: true, force: true });
+  console.log(`[anet] Deleted "${displayName}"`);
+}
+
 // ── channel ──
 
 async function channelCommand() {
@@ -1863,6 +1957,8 @@ switch (command) {
   case "start": startCommand(); break;
   case "resume": resumeCommand(); break;
   case "rename": renameCommand(); break;
+  case "stop": stopCommand(); break;
+  case "delete": deleteCommand(); break;
   case "import": importCommand(); break;
   case "channel": channelCommand(); break;
   case "setup": await setupCommand(); break;
