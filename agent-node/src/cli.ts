@@ -526,17 +526,19 @@ const LOW_VALUE_PHRASES = new Set([
   "等待任务", "等待中", "等待指令", "无新任务", "idle", "waiting",
 ]);
 
-function isLowValueText(text: string): boolean {
+function isLowValueText(text: string, isReply = false): boolean {
   if (!text) return true;
-  // 去掉标点、空格、emoji 后太短
-  const stripped = text.replace(/[\s\p{P}\p{S}\p{Emoji}]/gu, "");
-  if (stripped.length < 3) return true;
+  if (!isReply) {
+    // Only filter very short inbound messages, not AI-generated replies
+    const stripped = text.replace(/[\s\p{P}\p{S}\p{Emoji}]/gu, "");
+    if (stripped.length < 3) return true;
+  }
   // 完整匹配低价值短语
   const clean = text.trim().replace(/^[\[【].+?[\]】]\s*/, "").trim(); // 去掉 [alias] 前缀
   const lower = clean.toLowerCase().replace(/[\s。！？.!?✅❌👀⏳，,]+$/g, "").trim();
   if (LOW_VALUE_PHRASES.has(lower)) return true;
-  // 纯 emoji
-  if (/^[\p{Emoji}\s]+$/u.test(text.trim())) return true;
+  // 纯 emoji (exclude digits/# /*, which Unicode classifies as Emoji)
+  if (/^[\p{Emoji}\s]+$/u.test(text.trim()) && !/[0-9a-zA-Z#*]/.test(text)) return true;
   return false;
 }
 
@@ -570,14 +572,16 @@ async function processInbox() {
     if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }
 
     const result = await processTask(content, from);
+    log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars)`);
 
-    // 第四道防线：低价值回复不发
-    if (isLowValueText(result)) {
-      debug(`skip reply: low-value (${result.slice(0, 30)})`);
+    // 第四道防线：低价值回复不发 (isReply=true: don't filter short AI responses)
+    if (isLowValueText(result, true)) {
+      log(`skip reply: low-value (${result.slice(0, 30)})`);
       continue;
     }
 
     try {
+      log(`sending reply to ${from} (task ${msg.id.slice(0, 8)})...`);
       await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`, msg.id);
       lastReplyTime[from] = Date.now(); // H3 fix: 只在成功回复后设冷却
       log(`→ [${from}] ${result.slice(0, 100)}`);

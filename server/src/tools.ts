@@ -18,7 +18,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
     {
       resume_id: z.string().min(1).max(200).describe("Claude Code session UUID (unique per session)"),
       alias: z.string().min(1).max(200).describe("Human-readable session name for dispatching (e.g. 指挥室/知识哥)"),
-      status: z.enum(["working", "idle", "blocked", "error", "waiting_input"]),
+      status: z.enum(["working", "idle", "blocked", "error", "waiting_input", "offline"]),
       task: z.string().max(10000).optional().describe("Current task description"),
       output: z.string().max(50000).optional().describe("Recent output (max 4000 chars stored)"),
       score: z.number().min(0).max(10).optional().describe("Self-score 1-10"),

@@ -15,11 +15,12 @@ WORKDIR /app
 COPY server/ /app/server/
 COPY agent-node/ /app/agent-node/
 COPY tests/docker-e2e.sh /app/test.sh
-RUN chmod +x /app/test.sh
+COPY tests/docker-e2e-codex.sh /app/test-codex.sh
+RUN chmod +x /app/test.sh /app/test-codex.sh
 RUN cd /app/server && bun install
 
-# Install local agent-node globally
-RUN cd /app/agent-node && npm install && npm link
+# Install local agent-node globally (build from source)
+RUN cd /app/agent-node && npm install && npm run build && npm link
 
 # Setup anet config
 RUN mkdir -p /root/.anet && \
