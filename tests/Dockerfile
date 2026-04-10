@@ -18,7 +18,8 @@ COPY tests/docker-e2e.sh /app/test.sh
 COPY tests/docker-e2e-codex.sh /app/test-codex.sh
 COPY tests/docker-e2e-claude-sdk.sh /app/test-claude.sh
 COPY tests/docker-idiom-game.sh /app/test-game.sh
-RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh /app/test-game.sh
+COPY tests/docker-config-priority.sh /app/test-config.sh
+RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh /app/test-game.sh /app/test-config.sh
 RUN cd /app/server && bun install
 
 # Install local agent-node globally (build from source)
