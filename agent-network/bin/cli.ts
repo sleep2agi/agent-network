@@ -320,10 +320,34 @@ function formatDetectedVersion(pkg: DetectedVersion): string {
   return `${pkg.displayName} not installed`;
 }
 
+function detectAgentNodeSubDeps(): { claudeAgentSdk: string | null; codexSdk: string | null } {
+  const globalPrefix = execSync("npm prefix -g", { encoding: "utf-8", timeout: 5000 }).trim();
+  const base = join(globalPrefix, "lib", "node_modules", "@sleep2agi", "agent-node", "node_modules");
+  let claudeAgentSdk: string | null = null;
+  let codexSdk: string | null = null;
+  try {
+    const pkg = JSON.parse(readFileSync(join(base, "@anthropic-ai", "claude-agent-sdk", "package.json"), "utf-8"));
+    claudeAgentSdk = pkg.version;
+  } catch {}
+  try {
+    const pkg = JSON.parse(readFileSync(join(base, "@openai", "codex-sdk", "package.json"), "utf-8"));
+    codexSdk = pkg.version;
+  } catch {}
+  return { claudeAgentSdk, codexSdk };
+}
+
 function printVersionReport() {
   const versions = detectInstalledPackages();
   console.log(`anet v${versions.anet.version}`);
   console.log(formatDetectedVersion(versions.agentNode));
+  // Show SDK sub-dependencies if agent-node is installed
+  if (versions.agentNode.state === "ok") {
+    try {
+      const sub = detectAgentNodeSubDeps();
+      if (sub.claudeAgentSdk) console.log(`  └ @anthropic-ai/claude-agent-sdk v${sub.claudeAgentSdk}`);
+      if (sub.codexSdk) console.log(`  └ @openai/codex-sdk v${sub.codexSdk}`);
+    } catch {}
+  }
   console.log(formatDetectedVersion(versions.commhubServer));
   console.log(formatDetectedVersion(versions.claude));
   console.log(formatDetectedVersion(versions.codex));
