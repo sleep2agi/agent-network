@@ -608,7 +608,8 @@ Other:
   anet -v                       Version + dependency report
 
 Quick start:
-  anet init --hub http://IP:9200
+  anet quickstart                 3-minute guided setup
+  anet init --hub http://IP:9200  Manual setup
   anet create my-agent
   anet start my-agent
 `);
@@ -2125,6 +2126,124 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diff / 86400000)}d`;
 }
 
+// ── quickstart ──
+
+async function quickstartCommand() {
+  console.log(`
+╔══════════════════════════════════════════════════╗
+║   🚀 anet quickstart — 3 分钟搭建 Agent 网络     ║
+╚══════════════════════════════════════════════════╝
+`);
+
+  const gc = loadGlobal();
+
+  // Step 1: Hub
+  if (!gc.hub) {
+    console.log("Step 1/4: CommHub Server");
+    console.log("  你需要一个 CommHub Server。两种方式:");
+    console.log("  a) 本机启动: 另开终端运行 bunx @sleep2agi/commhub-server");
+    console.log("  b) 连接远程: 输入服务器地址");
+    console.log();
+    const hubUrl = await ask("CommHub URL [http://127.0.0.1:9200]: ") || "http://127.0.0.1:9200";
+    gc.hub = hubUrl;
+    saveGlobal(gc);
+    console.log(`  ✅ Hub: ${hubUrl}\n`);
+  } else {
+    console.log(`Step 1/4: Hub ✅ ${gc.hub}\n`);
+  }
+
+  // Step 2: Register/Login
+  if (!gc.token || !gc.user) {
+    console.log("Step 2/4: 创建账号");
+    const username = await ask("用户名: ");
+    const password = await ask("密码 (≥6位): ");
+    if (!username || !password) { closeRL(); console.error("需要用户名和密码"); return; }
+
+    // Try register first, if exists then login
+    let res = await fetch(`${gc.hub}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    }).then(r => r.json() as any).catch(() => null);
+
+    if (!res?.ok) {
+      // Try login
+      res = await fetch(`${gc.hub}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      }).then(r => r.json() as any).catch(() => null);
+    }
+
+    if (!res?.ok) { closeRL(); console.error(`  ❌ 失败: ${res?.error || "无法连接"}`); return; }
+
+    gc.token = res.token;
+    gc.user = res.user;
+    const nets = await fetch(`${gc.hub}/api/networks`, { headers: { Authorization: `Bearer ${res.token}` } }).then(r => r.json() as any).catch(() => ({ networks: [] }));
+    if (nets.networks?.length > 0) {
+      gc.network_id = nets.networks[0].network_id;
+      gc.network_name = nets.networks[0].network_name;
+    }
+    saveGlobal(gc);
+    console.log(`  ✅ 登录成功: ${res.user.username}\n`);
+  } else {
+    console.log(`Step 2/4: 已登录 ✅ ${gc.user.username}\n`);
+  }
+
+  // Step 3: Create agent
+  console.log("Step 3/4: 创建你的第一个 Agent");
+  const agentName = await ask("Agent 名称 [my-agent]: ") || "my-agent";
+  closeRL();
+
+  // Check if already exists
+  const existing = resolveNodeRef(agentName);
+  if (!existing) {
+    const runtimes = ["codex-sdk (GPT-5.4)", "http-api (MiniMax/OpenAI)", "claude-agent-sdk (Claude)"];
+    console.log("\n  Runtime 选择:");
+    runtimes.forEach((r, i) => console.log(`    ${i + 1}) ${r}`));
+
+    let runtime = "codex-sdk";
+    try {
+      const choice = await (async () => {
+        const { select: sel } = await import("@inquirer/prompts");
+        return sel({
+          message: "选择 Runtime:",
+          choices: [
+            { value: "codex-sdk", name: "codex-sdk (GPT-5.4) — 推荐" },
+            { value: "http-api", name: "http-api (MiniMax/OpenAI 兼容)" },
+            { value: "claude-agent-sdk", name: "claude-agent-sdk (Claude Code)" },
+          ],
+        });
+      })();
+      runtime = choice;
+    } catch {
+      // inquirer not available, use default
+    }
+
+    const createArgs = ["create", agentName, "--runtime", runtime];
+    if (runtime === "codex-sdk") createArgs.push("--model", "gpt-5.4");
+    args.splice(0, args.length, ...createArgs);
+    await createCommand();
+  } else {
+    console.log(`  ✅ Agent "${agentName}" 已存在\n`);
+  }
+
+  // Step 4: Done!
+  console.log(`
+╔══════════════════════════════════════════════════╗
+║   🎉 设置完成！                                   ║
+╠══════════════════════════════════════════════════╣
+║                                                   ║
+║   启动 Agent:  anet start ${agentName.padEnd(20)}   ║
+║   查看状态:    anet status                         ║
+║   查看任务:    anet tasks                          ║
+║   网络管理:    anet network ls                     ║
+║   系统诊断:    anet doctor                         ║
+║                                                   ║
+╚══════════════════════════════════════════════════╝
+`);
+}
+
 // ── register ──
 
 async function registerCommand() {
@@ -2443,6 +2562,7 @@ switch (command) {
   case "logs": logsCommand(); break;
   case "login": await loginCommand(); break;
   case "register": await registerCommand(); break;
+  case "quickstart": await quickstartCommand(); break;
   case "logout": logoutCommand(); break;
   case "whoami": await whoamiCommand(); break;
   case "network": await networkCommand(); break;
