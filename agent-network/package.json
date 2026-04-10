@@ -1,7 +1,7 @@
 {
   "name": "@sleep2agi/agent-network",
   "version": "2.0.0-preview.23",
-  "description": "AI Agent Network — Server + Client + Setup in one package. SSE real-time communication for multi-agent orchestration.",
+  "description": "AI Agent Network CLI \u2014 Create multi-agent networks with user management, network isolation, and 3 AI runtimes (Claude/Codex/MiniMax). 34 commands.",
   "type": "module",
   "main": "dist/src/client.js",
   "types": "dist/client.d.ts",
@@ -31,12 +31,13 @@
     "mcp",
     "sse",
     "claude",
+    "codex",
     "openai",
     "minimax",
     "orchestration",
-    "communication",
-    "hub",
-    "multi-agent"
+    "multi-agent",
+    "cli",
+    "anet"
   ],
   "author": "sleep2agi",
   "license": "MIT",

@@ -1,7 +1,7 @@
 {
   "name": "@sleep2agi/agent-node",
   "version": "2.1.0-preview.5",
-  "description": "One-command AI Agent node for CommHub networks. Claude + Codex dual runtime.",
+  "description": "AI Agent runtime for CommHub networks. Supports Claude Agent SDK, Codex SDK, and OpenAI/Anthropic-compatible HTTP API.",
   "bin": {
     "agent-node": "./dist/cli.js"
   },
@@ -23,7 +23,9 @@
     "gpt5",
     "sdk",
     "minimax",
-    "swarm"
+    "runtime",
+    "node",
+    "anthropic"
   ],
   "author": "sleep2agi",
   "license": "MIT",

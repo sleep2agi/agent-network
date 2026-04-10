@@ -1,7 +1,7 @@
 {
   "name": "@sleep2agi/commhub-server",
   "version": "0.5.0-preview.24",
-  "description": "CommHub MCP Server — AI Agent communication hub with SSE push, MCP protocol, and REST API",
+  "description": "CommHub Server \u2014 AI Agent communication hub with MCP protocol, multi-network isolation, user auth, and 18 MCP tools.",
   "type": "module",
   "main": "src/index.ts",
   "bin": {
@@ -21,10 +21,11 @@
     "agent",
     "ai",
     "sse",
-    "claude",
+    "server",
     "orchestration",
-    "communication",
-    "hub"
+    "multi-network",
+    "auth",
+    "license"
   ],
   "author": "sleep2agi",
   "license": "MIT",
