@@ -133,6 +133,27 @@ export function createNetwork(userId: string, name: string, description?: string
   return { ok: true, network_id: networkId, network_name: name };
 }
 
+export function listTokens(userId: string) {
+  return db.query<any, [string]>(
+    "SELECT token_id, name, scope, network_id, last_used_at, created_at FROM api_tokens WHERE user_id = ?1 ORDER BY created_at DESC"
+  ).all(userId);
+}
+
+export function createToken(userId: string, name: string, networkId?: string): { ok: boolean; token?: string; token_id?: string; error?: string } {
+  const token = generateToken();
+  const tokenId = generateId("tok");
+  db.run(
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    [tokenId, hashToken(token), userId, networkId || null, name, "full"]
+  );
+  return { ok: true, token, token_id: tokenId };
+}
+
+export function revokeToken(userId: string, tokenId: string): { ok: boolean; error?: string } {
+  const result = db.run("DELETE FROM api_tokens WHERE token_id = ?1 AND user_id = ?2", [tokenId, userId]);
+  return result.changes > 0 ? { ok: true } : { ok: false, error: "token not found" };
+}
+
 export function changePassword(userId: string, oldPassword: string, newPassword: string): { ok: boolean; error?: string } {
   if (!newPassword || newPassword.length < 6) return { ok: false, error: "new password must be at least 6 characters" };
   const user = db.query<any, [string]>("SELECT password_hash FROM users WHERE user_id = ?1").get(userId);

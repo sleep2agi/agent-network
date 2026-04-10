@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
-import { register, login, resolveToken, getUserNetworks, createNetwork, changePassword, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, getUserNetworks, createNetwork, changePassword, listTokens, createToken, revokeToken, type AuthUser } from "./auth.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
@@ -303,6 +303,42 @@ Bun.serve({
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
       }
+    }
+
+    // ── V3: Token management ──
+    if (url.pathname === "/api/auth/tokens" && req.method === "GET") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      const tokens = listTokens(resolved.user.user_id);
+      return withCors(req, Response.json({ ok: true, tokens }));
+    }
+
+    if (url.pathname === "/api/auth/tokens" && req.method === "POST") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      try {
+        const body = await req.json() as any;
+        const result = createToken(resolved.user.user_id, body.name || "api-token", body.network_id);
+        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "token_created", "token", result.token_id);
+        return withCors(req, Response.json(result));
+      } catch (e: any) {
+        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
+      }
+    }
+
+    const tokenDeleteMatch = url.pathname.match(/^\/api\/auth\/tokens\/([^/]+)$/);
+    if (tokenDeleteMatch && req.method === "DELETE") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      const result = revokeToken(resolved.user.user_id, tokenDeleteMatch[1]);
+      if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "token_revoked", "token", tokenDeleteMatch[1]);
+      return withCors(req, Response.json(result, { status: result.ok ? 200 : 404 }));
     }
 
     // ── V3: Network management ──
