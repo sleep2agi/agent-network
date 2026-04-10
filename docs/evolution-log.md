@@ -1,5 +1,33 @@
 # Agent Network Evolution Log
 
+## V3.0 Multi-Network + User System (2026-04-10) — IN PROGRESS
+
+### Stats
+- 75 commits, 27 npm preview packages
+- 123 base E2E tests (+ 16 config + runtime tests)
+- 10 database tables, 18 MCP tools, 12 REST endpoints, 26 CLI commands
+
+### Completed
+- **User system**: register/login/token (api_tokens table, atok_xxx format)
+- **Multi-network**: networks table + CRUD API + CLI (anet network create/ls/use)
+- **Network isolation**: network_id on all tables + REST + MCP queries verified
+- **Audit log**: audit_log table + /api/audit-log endpoint
+- **CLI auth**: anet login/logout/whoami/register + quickstart wizard
+- **Admin APIs**: /api/users, /api/networks/:id, PUT /api/auth/me
+- **Dashboard**: N站马 completed auth + network switching + admin pages
+
+### Versions
+- @sleep2agi/agent-network@2.0.0-preview.9
+- @sleep2agi/agent-node@2.1.0-preview.4
+- @sleep2agi/commhub-server@0.5.0-preview.14
+
+### Next
+- P1: PostgreSQL adapter (SQLite + PG dual support)
+- P2: OAuth (Google login)
+- P2: Trial period + license key
+
+---
+
 ## V2 Sprint 1+2 (2026-04-10) — COMPLETED
 
 ### Stats

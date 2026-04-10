@@ -21,13 +21,32 @@ function createServer(clientIP?: string): McpServer {
 
 // ── Auth helper ─────────────────────────────────────
 function requireAuth(req: Request): Response | null {
-  if (!AUTH_TOKEN) return null; // no token = open mode (dev)
-  const header = req.headers.get("Authorization");
-  if (header === `Bearer ${AUTH_TOKEN}`) return null;
-  // Also check query param for MCP clients that can't set headers
+  const header = req.headers.get("Authorization")?.replace("Bearer ", "");
   const url = new URL(req.url);
-  if (url.searchParams.get("token") === AUTH_TOKEN) return null;
+  const token = header || url.searchParams.get("token") || "";
+
+  // V3: check api_tokens first
+  if (token) {
+    const resolved = resolveToken(token);
+    if (resolved) return null; // valid user token
+  }
+
+  // Legacy: check global COMMHUB_AUTH_TOKEN
+  if (!AUTH_TOKEN) return null; // no token = open mode (dev)
+  if (token === AUTH_TOKEN) return null;
+
   return Response.json({ error: "unauthorized" }, { status: 401 });
+}
+
+// Extract user + network from request token (for authorization)
+function resolveRequestAuth(req: Request): { userId: string; networkId: string | null; username: string } | null {
+  const header = req.headers.get("Authorization")?.replace("Bearer ", "");
+  const url = new URL(req.url);
+  const token = header || url.searchParams.get("token") || "";
+  if (!token) return null;
+  const resolved = resolveToken(token);
+  if (!resolved) return null;
+  return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username };
 }
 
 // ── REST input schema ───────────────────────────────
@@ -243,6 +262,10 @@ Bun.serve({
       const networkId = netDetailMatch[1];
       const network = db.query<any, [string]>("SELECT * FROM networks WHERE network_id = ?1").get(networkId);
       if (!network) return withCors(req, Response.json({ ok: false, error: "network not found" }, { status: 404 }));
+      // Ownership check: only owner or admin can view
+      if (network.owner_id !== resolved.user.user_id && resolved.user.role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "access denied" }, { status: 403 }));
+      }
       // Get network stats
       const nodeCount = db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM nodes WHERE network_id = ?1").get(networkId);
       const sessionCount = db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1").get(networkId);
@@ -406,14 +429,22 @@ Bun.serve({
     // ── REST: stats summary ──
     if (url.pathname === "/api/stats") {
       const n = url.searchParams.get("network_id");
-      const nw = n ? ` WHERE network_id = '${n}'` : "";
-      const taskStats = db.query<any, []>(`SELECT status, COUNT(*) as count FROM tasks${nw} GROUP BY status`).all();
-      const sessionStats = db.query<any, []>(`SELECT status, COUNT(*) as count FROM sessions${nw} GROUP BY status`).all();
-      const totalTasks = db.query<{ cnt: number }, []>(`SELECT COUNT(*) as cnt FROM tasks${nw}`).get();
-      const totalNodes = db.query<{ cnt: number }, []>(`SELECT COUNT(*) as cnt FROM nodes${nw}`).get();
-      const recentTasks = db.query<any, []>(
-        `SELECT task_id, from_name, to_name, status, created_at FROM tasks${nw} ORDER BY created_at DESC LIMIT 5`
-      ).all();
+      // Parameterized queries to prevent SQL injection
+      const taskStats = n
+        ? db.query<any, [string]>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status").all(n)
+        : db.query<any, []>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status").all();
+      const sessionStats = n
+        ? db.query<any, [string]>("SELECT status, COUNT(*) as count FROM sessions WHERE network_id = ?1 GROUP BY status").all(n)
+        : db.query<any, []>("SELECT status, COUNT(*) as count FROM sessions GROUP BY status").all();
+      const totalTasks = n
+        ? db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM tasks WHERE network_id = ?1").get(n)
+        : db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM tasks").get();
+      const totalNodes = n
+        ? db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM nodes WHERE network_id = ?1").get(n)
+        : db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM nodes").get();
+      const recentTasks = n
+        ? db.query<any, [string]>("SELECT task_id, from_name, to_name, status, created_at FROM tasks WHERE network_id = ?1 ORDER BY created_at DESC LIMIT 5").all(n)
+        : db.query<any, []>("SELECT task_id, from_name, to_name, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 5").all();
       return withCors(req, Response.json({
         ok: true,
         network_id: n || null,
@@ -493,8 +524,9 @@ Bun.serve({
       params.push(limit);
 
       const rows = db.query(sql).all(...params);
-      const statsFilter = netFilter ? ` WHERE network_id = '${netFilter}'` : "";
-      const stats = db.query<any, []>(`SELECT status, COUNT(*) as count FROM tasks${statsFilter} GROUP BY status`).all();
+      const stats = netFilter
+        ? db.query<any, [string]>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status").all(netFilter)
+        : db.query<any, []>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status").all();
       return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length, stats }));
     }
 
