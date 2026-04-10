@@ -85,6 +85,9 @@ function sleep(ms: number): Promise<void> {
 
 log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}... TMUX=${TMUX_NAME || "none"} CWD=${process.cwd()} PROJECT_ENV=${projectPath}`);
 
+// V2: track task_id → originator alias for send_reply routing
+const taskOriginators = new Map<string, string>();
+
 // ── MCP Server with Channel capability ──────────────
 // name 不要拼 alias！Claude Code 用 meta.user 自动加 "· xxx" 后缀
 // 参考: telegram 插件 name 也只是 "telegram"，不是 "telegram · vansinhu"
@@ -121,8 +124,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           text: { type: "string", description: "Reply text / result summary" },
           status: {
             type: "string",
-            enum: ["completed", "blocked", "error", "in_progress"],
-            description: "Task status",
+            enum: ["completed", "failed", "cancelled", "blocked", "error", "in_progress"],
+            description: "Task outcome: completed/failed/cancelled for final results, blocked/error/in_progress for status updates",
           },
         },
         required: ["text"],
@@ -236,14 +239,21 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   if (name === "commhub_reply") {
     const { task_id, text, status } = args as any;
-    if (status === "completed") {
-      const result = await callCommHub("report_completion", {
-        alias: ALIAS,
-        task: task_id || "task",
-        result: text,
+    // V2: terminal statuses use send_reply to close task lifecycle
+    if (status === "completed" || status === "failed" || status === "cancelled") {
+      const replyStatus = status === "completed" ? "replied" : status;
+      const originator = task_id ? (taskOriginators.get(task_id) || "hub") : "hub";
+      const result = await callCommHub("send_reply", {
+        alias: originator,
+        text,
+        in_reply_to: task_id || undefined,
+        status: replyStatus,
+        from_session: ALIAS,
       });
+      if (task_id) taskOriginators.delete(task_id); // cleanup
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     }
+    // Non-terminal: update session status
     const result = await callCommHub("report_status", {
       resume_id: RESUME_ID,
       alias: ALIAS,
@@ -392,6 +402,8 @@ async function handleSSEEvent(event: any) {
           task_id: msg.id,
           priority: msg.priority || "normal",
         };
+        // V2: remember who sent this task so send_reply knows the target
+        taskOriginators.set(msg.id, msg.from_session || "hub");
 
         await mcp.notification({
           method: "notifications/claude/channel",
