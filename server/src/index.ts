@@ -432,15 +432,20 @@ Bun.serve({
     if (url.pathname === "/health") {
       const count = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM sessions").get();
       const sse = getSSEStats();
+      const license = db.query<any, []>("SELECT type, expires_at FROM licenses LIMIT 1").get();
       return withCors(req, Response.json({
         ok: true,
-        version: "0.4.1",
+        version: "1.0.0-preview",
+        api_version: "v3",
         transport: "streamable-http",
-        sessions: count?.cnt ?? 0,
+        sessions_count: count?.cnt ?? 0,
         sse_connections: sse.total,
         sse_sessions: sse.sessions,
         auth: AUTH_TOKEN ? "enabled" : "disabled",
-        uptime: process.uptime(),
+        v3_auth: true,
+        multi_network: true,
+        license: license?.type || "none",
+        uptime: Math.floor(process.uptime()),
       }));
     }
 
