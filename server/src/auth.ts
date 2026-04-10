@@ -34,11 +34,15 @@ export function register(username: string, password: string, email?: string, dis
     [userId, username, pwHash, email || null, displayName || username]
   );
 
-  // Auto-create default network
+  // Auto-create default network + add as owner member
   const networkId = generateId("net");
   db.run(
     "INSERT INTO networks (network_id, network_name, owner_id, description) VALUES (?1, ?2, ?3, ?4)",
     [networkId, "default", userId, "Auto-created default network"]
+  );
+  db.run(
+    "INSERT INTO network_members (network_id, user_id, role) VALUES (?1, ?2, 'owner')",
+    [networkId, userId]
   );
 
   // Auto-create API token
@@ -129,6 +133,10 @@ export function createNetwork(userId: string, name: string, description?: string
   db.run(
     "INSERT INTO networks (network_id, network_name, owner_id, description) VALUES (?1, ?2, ?3, ?4)",
     [networkId, name, userId, description || null]
+  );
+  db.run(
+    "INSERT INTO network_members (network_id, user_id, role) VALUES (?1, ?2, 'owner')",
+    [networkId, userId]
   );
   return { ok: true, network_id: networkId, network_name: name };
 }

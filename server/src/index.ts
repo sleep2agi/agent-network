@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
-import { register, login, resolveToken, getUserNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, listTokens, createToken, revokeToken, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, type AuthUser } from "./auth.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
@@ -346,7 +346,8 @@ Bun.serve({
       if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
-      const networks = getUserNetworks(resolved.user.user_id);
+      // V3.13: return all networks user is a member of (not just owner)
+      const networks = getUserAllNetworks(resolved.user.user_id);
       return withCors(req, Response.json({ ok: true, networks }));
     }
 
@@ -362,6 +363,72 @@ Bun.serve({
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
       }
+    }
+
+    // ── V3.13: Network members + invites ──
+    const membersMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members(?:\/([^/]+))?$/);
+    if (membersMatch) {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      const netId = membersMatch[1];
+      const targetUid = membersMatch[2];
+      const callerRole = getUserNetworkRole(resolved.user.user_id, netId);
+      if (!callerRole) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+
+      if (req.method === "GET") {
+        if (!["owner", "admin"].includes(callerRole)) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+        const members = getNetworkMembers(netId);
+        return withCors(req, Response.json({ ok: true, members }));
+      }
+      if (req.method === "POST") {
+        if (!["owner", "admin"].includes(callerRole)) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+        const body = await req.json() as any;
+        const result = addNetworkMember(netId, body.user_id, body.role || "member", resolved.user.user_id);
+        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_added", "network", netId, `${body.user_id} as ${body.role || "member"}`);
+        return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+      }
+      if (req.method === "PUT" && targetUid) {
+        if (callerRole !== "owner") return withCors(req, Response.json({ ok: false, error: "owner required" }, { status: 403 }));
+        const body = await req.json() as any;
+        const result = updateMemberRole(netId, targetUid, body.role);
+        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_role_changed", "network", netId, `${targetUid} → ${body.role}`);
+        return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+      }
+      if (req.method === "DELETE" && targetUid) {
+        if (!["owner", "admin"].includes(callerRole)) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+        const result = removeNetworkMember(netId, targetUid);
+        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "member_removed", "network", netId, targetUid);
+        return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+      }
+    }
+
+    if (url.pathname.match(/^\/api\/networks\/([^/]+)\/invite$/) && req.method === "POST") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      const netId = url.pathname.split("/")[3];
+      const callerRole = getUserNetworkRole(resolved.user.user_id, netId);
+      if (!callerRole || !["owner", "admin"].includes(callerRole)) {
+        return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+      }
+      const body = await req.json() as any;
+      const result = createInvite(netId, resolved.user.user_id, body.role || "member", body.max_uses || 1, body.expires_days);
+      if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "invite_created", "network", netId, result.invite_code);
+      return withCors(req, Response.json(result));
+    }
+
+    if (url.pathname === "/api/networks/join" && req.method === "POST") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      const body = await req.json() as any;
+      const result = joinByInvite(body.invite_code, resolved.user.user_id);
+      if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "network_joined", "network", result.network_id, `via invite, role=${result.role}`);
+      return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
     }
 
     // ── V3: Admin APIs (require auth) ──
