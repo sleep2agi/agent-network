@@ -2602,6 +2602,56 @@ function logsCommand() {
   }
 }
 
+// ── token ──
+
+async function tokenCommand() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  const token = gc.token;
+  if (!hub || !token) { console.error("Not logged in. Run: anet login"); return; }
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const sub = args[1];
+
+  if (sub === "create") {
+    const name = args[2] || "api-token";
+    try {
+      const res = await fetch(`${hub}/api/auth/tokens`, { method: "POST", headers, body: JSON.stringify({ name }) }).then(r => r.json() as any);
+      if (res.ok) {
+        console.log(`\n  ✅ Token created: ${res.token}`);
+        console.log(`  Name: ${name}`);
+        console.log(`  ID:   ${res.token_id}`);
+        console.log(`\n  ⚠ Save this token — it won't be shown again!\n`);
+      } else { console.error(`Failed: ${res.error}`); }
+    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    return;
+  }
+
+  if (sub === "revoke") {
+    const tokenId = args[2];
+    if (!tokenId) { console.log("Usage: anet token revoke <token-id>"); return; }
+    try {
+      const res = await fetch(`${hub}/api/auth/tokens/${tokenId}`, { method: "DELETE", headers }).then(r => r.json() as any);
+      if (res.ok) console.log(`  ✅ Token ${tokenId} revoked`);
+      else console.error(`Failed: ${res.error}`);
+    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    return;
+  }
+
+  // Default: list tokens
+  try {
+    const res = await fetch(`${hub}/api/auth/tokens`, { headers }).then(r => r.json() as any);
+    if (!res.ok) { console.error(res.error); return; }
+    if (!res.tokens?.length) { console.log("\n  No tokens. Create one: anet token create <name>\n"); return; }
+    console.log("\n  API Tokens:\n");
+    console.log("  ID                   NAME           LAST USED");
+    console.log("  ──────────────────── ────────────── ──────────────────");
+    for (const t of res.tokens) {
+      console.log(`  ${(t.token_id || "?").padEnd(22)} ${(t.name || "?").padEnd(14)} ${t.last_used_at || "never"}`);
+    }
+    console.log();
+  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+}
+
 // ── passwd ──
 
 async function passwdCommand() {
@@ -2932,6 +2982,7 @@ switch (command) {
   case "license": await licenseCommand(); break;
   case "activate": await activateCommand(); break;
   case "passwd": await passwdCommand(); break;
+  case "token": await tokenCommand(); break;
   case "demo": await demoCommand(); break;
   case "logs": logsCommand(); break;
   case "info": await infoCommand(); break;
