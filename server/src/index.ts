@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent } from "./db.js";
 import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
+import { register, login, resolveToken, getUserNetworks, createNetwork, type AuthUser } from "./auth.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
@@ -138,6 +139,60 @@ Bun.serve({
       if (authErr) return authErr;
       const sessionName = decodeURIComponent(eventsMatch[1]);
       return createSSEStream(sessionName);
+    }
+
+    // ── V3: Auth endpoints (public) ──
+    if (url.pathname === "/api/auth/register" && req.method === "POST") {
+      try {
+        const body = await req.json() as any;
+        const result = register(body.username, body.password, body.email, body.display_name);
+        return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+      } catch (e: any) {
+        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
+      }
+    }
+
+    if (url.pathname === "/api/auth/login" && req.method === "POST") {
+      try {
+        const body = await req.json() as any;
+        const result = login(body.username, body.password);
+        return withCors(req, Response.json(result, { status: result.ok ? 200 : 401 }));
+      } catch (e: any) {
+        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
+      }
+    }
+
+    if (url.pathname === "/api/auth/me" && req.method === "GET") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      const networks = getUserNetworks(resolved.user.user_id);
+      return withCors(req, Response.json({ ok: true, user: resolved.user, networks, current_network: resolved.networkId }));
+    }
+
+    // ── V3: Network management ──
+    if (url.pathname === "/api/networks" && req.method === "GET") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      const networks = getUserNetworks(resolved.user.user_id);
+      return withCors(req, Response.json({ ok: true, networks }));
+    }
+
+    if (url.pathname === "/api/networks" && req.method === "POST") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      try {
+        const body = await req.json() as any;
+        const result = createNetwork(resolved.user.user_id, body.name, body.description);
+        return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+      } catch (e: any) {
+        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
+      }
     }
 
     // ── REST: health (public, no auth) ──

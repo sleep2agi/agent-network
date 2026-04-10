@@ -151,9 +151,83 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_task_events_created ON task_events(created_at);
 `);
 
+// ── V3: users table ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    user_id       TEXT PRIMARY KEY,
+    username      TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    email         TEXT,
+    display_name  TEXT,
+    role          TEXT DEFAULT 'user',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+`);
+
+// ── V3: networks table ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS networks (
+    network_id    TEXT PRIMARY KEY,
+    network_name  TEXT NOT NULL,
+    owner_id      TEXT NOT NULL,
+    description   TEXT,
+    settings      TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(owner_id, network_name)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_networks_owner ON networks(owner_id);
+`);
+
+// ── V3: api_tokens table ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS api_tokens (
+    token_id      TEXT PRIMARY KEY,
+    token_hash    TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    network_id    TEXT,
+    name          TEXT NOT NULL DEFAULT 'default',
+    scope         TEXT DEFAULT 'full',
+    expires_at    TEXT,
+    last_used_at  TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tokens_hash ON api_tokens(token_hash);
+  CREATE INDEX IF NOT EXISTS idx_tokens_user ON api_tokens(user_id);
+`);
+
+// ── V3: add network_id to existing tables ──
+for (const table of ["sessions", "nodes", "tasks", "inbox", "task_events"]) {
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN network_id TEXT`); } catch {}
+}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_network ON sessions(network_id)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network ON tasks(network_id)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_nodes_network ON nodes(network_id)"); } catch {}
+
 // Helpers
 export function uuidv4(): string {
   return crypto.randomUUID();
+}
+
+export function generateId(prefix: string): string {
+  return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+export function hashPassword(password: string): string {
+  return new Bun.CryptoHasher("sha256").update(`anet:${password}`).digest("hex");
+}
+
+export function hashToken(token: string): string {
+  return new Bun.CryptoHasher("sha256").update(token).digest("hex");
+}
+
+export function generateToken(): string {
+  return `atok_${crypto.randomUUID().replace(/-/g, "")}`;
 }
 
 export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {
