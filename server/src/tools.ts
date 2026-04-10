@@ -525,6 +525,24 @@ export function registerTools(server: McpServer, clientIP?: string) {
     }
   );
 
+  // ── V2: get_task (查询任务状态) ──
+  server.tool(
+    "get_task",
+    "Get task details by task_id. Returns status, result, timestamps.",
+    {
+      task_id: z.string().min(1).max(200).describe("Task ID to query"),
+    },
+    async ({ task_id }) => {
+      const task = db.query<any, [string]>("SELECT * FROM tasks WHERE task_id = ?1").get(task_id);
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify(task ? { ok: true, task } : { ok: false, error: "task not found" }),
+        }],
+      };
+    }
+  );
+
   server.tool(
     "broadcast",
     "Send a message to multiple sessions.",

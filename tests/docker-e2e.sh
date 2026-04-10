@@ -362,6 +362,15 @@ EMPTY_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"x","from_session":"
 echo "$EMPTY_RESP" | grep -q 'ok' && pass "minimal 1-char task accepted" || fail "1-char task rejected"
 echo ""
 
+# 23.62 get_task query
+echo "23.62 Testing get_task..."
+GET_T=$(mcp_call "get_task" "{\"task_id\":\"$TASK_ID\"}")
+echo "$GET_T" | grep -q 'ok' && pass "get_task found" || fail "get_task broken"
+echo "$GET_T" | grep -q 'status' && pass "get_task shows status" || fail "get_task no status"
+GET_MISS=$(mcp_call "get_task" '{"task_id":"nonexistent"}')
+echo "$GET_MISS" | grep -q 'not found' && pass "get_task 404 for missing" || fail "get_task should 404"
+echo ""
+
 # 23.65 Task retry
 echo "23.65 Testing task retry..."
 # Create a task, fail it, then retry
