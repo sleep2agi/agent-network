@@ -9,6 +9,29 @@ import { register, login, resolveToken, getUserNetworks, createNetwork, type Aut
 const PORT = Number(process.env.PORT) || 9200;
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
 
+// ── Rate limiter (in-memory, per IP) ──
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
+  // Skip rate limiting for localhost/internal/unknown (dev/test)
+  if (!ip || ip === "unknown" || ip === "127.0.0.1" || ip === "::1") return true;
+  const now = Date.now();
+  const entry = rateLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimits.set(ip, { count: 1, resetAt: now + 60000 });
+    return true;
+  }
+  if (entry.count >= maxPerMinute) return false;
+  entry.count++;
+  return true;
+}
+// Cleanup stale entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimits) {
+    if (now > entry.resetAt) rateLimits.delete(ip);
+  }
+}, 300000);
+
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
 function createServer(clientIP?: string, enforceNetworkId?: string | null): McpServer {
   const server = new McpServer({
@@ -203,6 +226,10 @@ Bun.serve({
 
     // ── V3: Auth endpoints (public) ──
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
+      const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+      if (!checkRateLimit(clientIP, 30)) {
+        return withCors(req, Response.json({ ok: false, error: "too many requests, try again later" }, { status: 429 }));
+      }
       try {
         const body = await req.json() as any;
         const result = register(body.username, body.password, body.email, body.display_name);
@@ -214,6 +241,11 @@ Bun.serve({
     }
 
     if (url.pathname === "/api/auth/login" && req.method === "POST") {
+      const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+      if (!checkRateLimit(clientIP, 10)) {
+        logAudit(null, null, "login_rate_limited", "auth", null, clientIP);
+        return withCors(req, Response.json({ ok: false, error: "too many attempts, try again later" }, { status: 429 }));
+      }
       try {
         const body = await req.json() as any;
         const result = login(body.username, body.password);
