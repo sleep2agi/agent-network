@@ -34,6 +34,7 @@ const TaskSchema = z.object({
   alias: z.string().min(1).max(200),
   task: z.string().min(1).max(10000),
   priority: z.enum(["high", "normal", "low"]).default("normal"),
+  from: z.string().max(200).optional(),
 });
 
 const BroadcastSchema = z.object({
@@ -159,16 +160,17 @@ Bun.serve({
       }
       const body = parsed.data;
       const id = crypto.randomUUID();
+      const fromSession = body.from || "api";
       db.run(
         `INSERT INTO inbox (id, session_name, type, priority, content, from_session)
-         VALUES (?1, ?2, 'task', ?3, ?4, 'api')`,
-        [id, body.alias, body.priority, body.task]
+         VALUES (?1, ?2, 'task', ?3, ?4, ?5)`,
+        [id, body.alias, body.priority, body.task, fromSession]
       );
       // SSE push: 秒达
       const pending = db.query<{ cnt: number }, [string]>(
         "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
       ).get(body.alias);
-      pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority });
+      pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession });
       return withCors(req, Response.json({ ok: true, message_id: id }));
     }
 
