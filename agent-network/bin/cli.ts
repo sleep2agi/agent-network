@@ -2558,11 +2558,34 @@ async function networkCommand() {
     return;
   }
 
+  if (sub === "delete") {
+    const name = args[2];
+    if (!name) { console.log("Usage: anet network delete <name> --force"); return; }
+    const opts2 = parseOpts();
+    try {
+      const res = await fetch(`${hub}/api/networks`, { headers }).then(r => r.json() as any);
+      const net = res.networks?.find((n: any) => n.network_name === name || n.network_id === name);
+      if (!net) { console.error(`Network "${name}" not found.`); return; }
+      if (opts2.force !== "true") {
+        console.log(`[anet] This will delete network "${net.network_name}" (${net.network_id})`);
+        console.log(`[anet] Run again with --force to confirm.`);
+        return;
+      }
+      const del = await fetch(`${hub}/api/networks/${net.network_id}`, { method: "DELETE", headers }).then(r => r.json() as any);
+      if (del.ok) {
+        console.log(`[anet] Network "${net.network_name}" deleted`);
+        if (gc.network_id === net.network_id) { delete gc.network_id; delete gc.network_name; saveGlobal(gc); }
+      } else { console.error(`Failed: ${del.error}`); }
+    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    return;
+  }
+
   console.log(`
 anet network <command>
 
   ls                    List my networks
   create <name>         Create a new network
+  delete <name> --force Delete a network
   use <name>            Switch to a network
   info                  Current network details + stats
 `);

@@ -139,6 +139,17 @@ export function listTokens(userId: string) {
   ).all(userId);
 }
 
+export function deleteNetwork(userId: string, networkId: string): { ok: boolean; error?: string } {
+  const net = db.query<any, [string]>("SELECT * FROM networks WHERE network_id = ?1").get(networkId);
+  if (!net) return { ok: false, error: "network not found" };
+  if (net.owner_id !== userId) return { ok: false, error: "not your network" };
+  // Check if any sessions/tasks still reference this network
+  const sessions = db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1").get(networkId);
+  if (sessions && sessions.cnt > 0) return { ok: false, error: `network has ${sessions.cnt} active session(s) — stop them first` };
+  db.run("DELETE FROM networks WHERE network_id = ?1 AND owner_id = ?2", [networkId, userId]);
+  return { ok: true };
+}
+
 export function createToken(userId: string, name: string, networkId?: string): { ok: boolean; token?: string; token_id?: string; error?: string } {
   const token = generateToken();
   const tokenId = generateId("tok");
