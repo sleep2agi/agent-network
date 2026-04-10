@@ -1,0 +1,34 @@
+name: Docker E2E Tests
+
+on:
+  push:
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'server/**'
+      - 'channel/**'
+      - 'tests/**'
+  pull_request:
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'server/**'
+      - 'tests/**'
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker E2E image
+        run: docker build -t anet-e2e -f tests/Dockerfile .
+
+      - name: Run base E2E tests (106)
+        run: docker run --rm anet-e2e bash -c 'cd /app/server && bun run src/index.ts &>/dev/null & sleep 3 && /app/test.sh'
+
+      - name: Run config priority tests (16)
+        run: docker run --rm anet-e2e bash -c 'cd /app/server && bun run src/index.ts &>/dev/null & sleep 3 && /app/test-config.sh'
+
+      - name: Run full regression
+        run: docker run --rm anet-e2e /app/test-all.sh
