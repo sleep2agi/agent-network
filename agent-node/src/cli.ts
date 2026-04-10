@@ -592,7 +592,7 @@ function think(task: string, from: string, images?: string[]): Promise<string> {
 
 async function processTask(task: string, from: string): Promise<string> {
   log(`→ processing [${RUNTIME}]: ${task.slice(0, 80)}`);
-  await reportStatus("working", task.slice(0, 200));
+  await reportStatus("working", task.slice(0, 200)).catch(() => {});
 
   let result: string;
   try {
@@ -600,9 +600,10 @@ async function processTask(task: string, from: string): Promise<string> {
   } catch (err: any) {
     result = `${RUNTIME} 错误: ${err.message}`;
     error(`✗ ${err.message}`);
+  } finally {
+    // Always try to reset to idle, even if think() or network fails
+    await reportStatus("idle").catch(() => {});
   }
-
-  await reportStatus("idle");
   return result;
 }
 
