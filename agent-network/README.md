@@ -35,9 +35,12 @@ AI Agent 通信网络 — 一行命令创建 Agent，多 Agent 协作通信。
 # 安装 Bun (如果没有)
 curl -fsSL https://bun.sh/install | bash
 
-# 启动 CommHub Server
+# 启动 CommHub Server (默认 SQLite, 零配置)
 bunx @sleep2agi/commhub-server
 # 默认端口 9200, 访问 http://YOUR_IP:9200/health 验证
+
+# 或使用 PostgreSQL
+DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-server
 ```
 
 Server 启动后会显示：
@@ -110,7 +113,7 @@ ANTHROPIC_API_KEY=sk-cp-xxx \
 agent-node --alias dev --runtime http-api --model claude-3-5-haiku-20241022
 ```
 
-## CLI 命令 (26 个)
+## CLI 命令 (34 个)
 
 ```bash
 # 账号
@@ -119,11 +122,20 @@ anet register                # 创建账号
 anet login                   # 登录
 anet logout                  # 退出
 anet whoami                  # 当前用户信息
+anet passwd                  # 修改密码
+
+# Token
+anet token create <name>     # 创建 API Token
+anet token ls                # Token 列表
+anet token revoke <id>       # 撤销 Token
 
 # 网络
 anet network create <name>   # 创建网络
 anet network ls              # 我的网络列表
 anet network use <name>      # 切换网络
+anet network info            # 当前网络详情
+anet network rename <new>    # 重命名网络
+anet network delete --force  # 删除网络
 
 # 节点
 anet create <name>           # 创建 node（交互式）
@@ -133,16 +145,24 @@ anet delete <name> --force   # 删除
 anet rename <ref> <new>      # 重命名
 anet ls                      # 节点列表 + 网络状态
 anet status                  # 网络总览
+anet info <name>             # 节点详情
 anet tasks [status]          # 任务列表
 anet logs <name>             # 查看日志
 anet doctor                  # 系统诊断
+anet demo                    # 实时仪表盘
+anet config                  # 查看配置
 
 # Channel
 anet channel add telegram <name> --bot-token <tok> --allow <uid>
 
+# 授权
+anet license                 # 查看 License 状态
+anet activate <key>          # 激活授权码
+
 # 设置
 anet init                    # 配置 hub URL
 anet setup                   # 安装依赖
+anet server local            # 本地零配置启动
 anet server start            # 启动 CommHub
 anet upgrade                 # 检查更新
 anet -v                      # 版本信息
@@ -197,9 +217,9 @@ anet -v                      # 版本信息
 
 | 包 | 最新 Preview | 说明 |
 |---|-------------|------|
-| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.0-preview.6 | anet CLI + SDK |
-| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.1.0-preview.3 | Agent 运行时 |
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.0-preview.6 | CommHub Server |
+| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.0-preview.23 | anet CLI + SDK |
+| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.1.0-preview.5 | Agent 运行时 |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.0-preview.25 | CommHub Server (SQLite + PG) |
 
 ```bash
 # 安装 preview 版
