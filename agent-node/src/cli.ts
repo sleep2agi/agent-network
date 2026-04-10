@@ -494,42 +494,76 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
 // ══════════════════════════════════════
 
 async function processWithHttpApi(task: string, from: string): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.MINIMAX_CODING_API_KEY || fileConfig.apiKey || "";
-  const baseUrl = process.env.OPENAI_BASE_URL || fileConfig.apiBaseUrl || "https://api.openai.com/v1";
+  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.MINIMAX_CODING_API_KEY || fileConfig.apiKey || "";
+  const anthropicBase = process.env.ANTHROPIC_BASE_URL || fileConfig.anthropicBaseUrl || "";
+  const openaiBase = process.env.OPENAI_BASE_URL || fileConfig.apiBaseUrl || "https://api.openai.com/v1";
   const model = MODEL || "gpt-4o-mini";
+  // Auto-detect Anthropic format: if ANTHROPIC_BASE_URL is set
+  const useAnthropic = !!anthropicBase;
+  const rawBase = anthropicBase || openaiBase;
+  // Strip trailing /v1 to avoid /v1/v1/messages
+  const baseUrl = rawBase.replace(/\/v1\/?$/, "");
 
-  if (!apiKey) return "错误: 需要设置 OPENAI_API_KEY 或 MINIMAX_CODING_API_KEY";
+  if (!apiKey) return "错误: 需要设置 ANTHROPIC_API_KEY, OPENAI_API_KEY, 或 MINIMAX_CODING_API_KEY";
 
   const systemPrompt = SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI 助手。收到来自 ${from} 的任务后简要执行并汇报。`;
   const t0 = Date.now();
-  log(`[http-api] model=${model} base=${baseUrl.replace(/\/v1$/, "")}`);
+  log(`[http-api] model=${model} format=${useAnthropic ? "anthropic" : "openai"} base=${baseUrl.replace(/\/v1$/, "")}`);
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: task },
-      ],
-      max_tokens: 2000,
-    }),
-  });
+  let content = "";
+  let usage: any = null;
 
-  if (!res.ok) {
-    const err = await res.text();
-    return `HTTP API 错误 ${res.status}: ${err.slice(0, 200)}`;
+  if (useAnthropic) {
+    // Anthropic Messages API format (MiniMax, Anthropic)
+    const res = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        system: systemPrompt,
+        messages: [{ role: "user", content: task }],
+        max_tokens: 2000,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      return `Anthropic API 错误 ${res.status}: ${err.slice(0, 200)}`;
+    }
+    const data = await res.json() as any;
+    content = data.content?.[0]?.text || "";
+    usage = data.usage;
+  } else {
+    // OpenAI Chat Completions format
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: task },
+        ],
+        max_tokens: 2000,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      return `OpenAI API 错误 ${res.status}: ${err.slice(0, 200)}`;
+    }
+    const data = await res.json() as any;
+    content = data.choices?.[0]?.message?.content || "";
+    usage = data.usage;
   }
 
-  const data = await res.json() as any;
   const dt = Date.now() - t0;
-  const content = data.choices?.[0]?.message?.content || "";
-  const usage = data.usage;
-  log(`[http-api] done | ${dt}ms | in=${usage?.prompt_tokens || 0} out=${usage?.completion_tokens || 0}`);
+  log(`[http-api] done | ${dt}ms | in=${usage?.input_tokens || usage?.prompt_tokens || 0} out=${usage?.output_tokens || usage?.completion_tokens || 0}`);
   return content || "（无回复）";
 }
 

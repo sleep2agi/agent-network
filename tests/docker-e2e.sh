@@ -314,6 +314,54 @@ echo "$MSGS" | grep -q '"ok":true' && pass "messages API works" || fail "message
 echo "$MSGS" | grep -q '"messages"' && pass "messages returns array" || fail "messages missing array"
 echo ""
 
+# 23.5 Concurrent registration
+echo "23.5 Testing concurrent operations..."
+# Register 5 agents simultaneously
+for i in $(seq 1 5); do
+  mcp_call "report_status" "{\"resume_id\":\"concurrent-$i\",\"alias\":\"conc-$i\",\"status\":\"idle\",\"server\":\"test\"}" > /dev/null &
+done
+wait
+sleep 1
+CONC_COUNT=$(curl -s http://127.0.0.1:9200/api/status 2>/dev/null | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+count = sum(1 for s in data['sessions'] if s['alias'].startswith('conc-'))
+print(count)
+" 2>/dev/null)
+[ "$CONC_COUNT" = "5" ] && pass "5 concurrent registrations" || fail "concurrent: only $CONC_COUNT/5"
+
+# Concurrent send_task to same agent
+for i in $(seq 1 3); do
+  mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"concurrent task $i\",\"from_session\":\"tester\"}" > /dev/null &
+done
+wait
+sleep 1
+CONC_INBOX=$(mcp_call "get_inbox" '{"alias":"conc-1","limit":10}')
+CONC_MSG_COUNT=$(echo "$CONC_INBOX" | python3 -c "
+import sys,json
+raw=sys.stdin.read()
+for line in raw.strip().split('\n'):
+  if line.startswith('data: '): raw=line[6:]
+try:
+  d=json.loads(raw)
+  msgs=json.loads(d.get('result',{}).get('content',[{}])[0].get('text','{}')).get('messages',[])
+  print(len(msgs))
+except: print(0)
+" 2>/dev/null)
+[ "$CONC_MSG_COUNT" -ge "3" ] && pass "3 concurrent tasks received ($CONC_MSG_COUNT)" || fail "concurrent tasks: only $CONC_MSG_COUNT"
+echo ""
+
+# 23.6 Boundary: large content
+echo "23.6 Testing large content..."
+LARGE_CONTENT=$(python3 -c "print('X' * 5000)")
+LARGE_RESP=$(mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"$LARGE_CONTENT\",\"from_session\":\"tester\"}")
+echo "$LARGE_RESP" | grep -q 'ok' && pass "5KB task content accepted" || fail "large content rejected"
+
+# Boundary: empty-ish content edge
+EMPTY_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"x","from_session":"tester"}')
+echo "$EMPTY_RESP" | grep -q 'ok' && pass "minimal 1-char task accepted" || fail "1-char task rejected"
+echo ""
+
 # 24. Auth token validation
 echo "24. Testing auth token..."
 # Start a second server with auth enabled on port 9201
