@@ -1,13 +1,22 @@
 # Agent Network Evolution Log
 
-## V3.2 Production Ready (2026-04-10) — v1.0.0 READY
+## V3.3 Final (2026-04-10) — v1.0.0 READY
 
 ### Stats
-- 116 commits, 40 npm preview packages
-- 186 total regression tests (137 base + 17 auth + 16 network + 16 config)
-- 11 database tables, 18 MCP tools, 13 REST endpoints, 31 CLI commands
+- 126 commits (today), 44 npm preview packages
+- 194 total regression tests (137 base + 25 auth + 16 network + 16 config)
+- 11 database tables, 18 MCP tools, 16 REST endpoints, 33 CLI commands
 - All evaluations 10/10
 - GitHub Actions CI: GREEN
+
+### Added since V3.2
+- **Password change**: POST /api/auth/password + anet passwd CLI
+- **Token management**: create/list/revoke API + anet token CLI
+- **Token E2E tests**: 4 new (create/list/revoke/verify)
+
+---
+
+## V3.2 Production Ready (2026-04-10)
 - Security scan: CLEAN
 
 ### Added since V3.1
