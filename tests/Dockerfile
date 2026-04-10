@@ -24,7 +24,8 @@ COPY tests/test-all.sh /app/test-all.sh
 COPY tests/docker-config-priority.sh /app/test-config.sh
 COPY tests/demo-quickstart.sh /app/demo.sh
 COPY tests/docker-e2e-auth.sh /app/test-auth.sh
-RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh /app/test-game.sh /app/test-config.sh /app/test-minimax.sh /app/test-all.sh /app/demo.sh /app/test-auth.sh
+COPY tests/docker-e2e-networks.sh /app/test-networks.sh
+RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh /app/test-game.sh /app/test-config.sh /app/test-minimax.sh /app/test-all.sh /app/demo.sh /app/test-auth.sh /app/test-networks.sh
 RUN cd /app/server && bun install
 
 # Install local agent-node globally (build from source)
