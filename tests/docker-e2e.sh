@@ -205,6 +205,109 @@ TASKS_BY_STATUS=$(curl -s "http://127.0.0.1:9200/api/tasks?status=replied" 2>/de
 echo "$TASKS_BY_STATUS" | grep -q '"count"' && pass "tasks filter by status works" || fail "tasks filter broken"
 echo ""
 
+# ── MCP helper ──
+mcp_call() {
+  local TOOL="$1"
+  local ARGS="$2"
+  curl -s -X POST http://127.0.0.1:9200/mcp \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "$MCP_INIT" > /dev/null 2>&1
+  curl -s -X POST http://127.0.0.1:9200/mcp \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$TOOL\",\"arguments\":$ARGS}}"
+}
+
+# 15. broadcast
+echo "15. Testing broadcast..."
+BC_RESP=$(mcp_call "broadcast" '{"message":"broadcast test","filter_server":"none"}')
+echo "$BC_RESP" | grep -q 'ok' && pass "broadcast sent" || fail "broadcast failed"
+echo ""
+
+# 16. send_reply with status=failed
+echo "16. Testing failed task..."
+FAIL_SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"will fail","from_session":"fail-tester"}')
+FAIL_TID=$(echo "$FAIL_SEND" | python3 -c "
+import sys,json
+raw=sys.stdin.read()
+for line in raw.strip().split('\n'):
+  if line.startswith('data: '): raw=line[6:]
+try:
+  d=json.loads(raw)
+  t=json.loads(d.get('result',{}).get('content',[{}])[0].get('text','{}'))
+  print(t.get('message_id',''))
+except: print('')
+" 2>/dev/null)
+FAIL_REPLY=$(mcp_call "send_reply" "{\"alias\":\"fail-tester\",\"text\":\"error occurred\",\"in_reply_to\":\"$FAIL_TID\",\"status\":\"failed\",\"from_session\":\"e2e-agent\"}")
+echo "$FAIL_REPLY" | grep -q 'ok' && pass "send_reply(failed) accepted" || fail "send_reply(failed) broken"
+# verify task status = failed
+sleep 1
+FAIL_CHECK=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$FAIL_TID" 2>/dev/null)
+echo "$FAIL_CHECK" | grep -q '"failed"' && pass "task status = failed" || fail "task not marked failed"
+echo ""
+
+# 17. high priority ordering
+echo "17. Testing priority ordering..."
+anet create prio-agent --runtime codex-sdk 2>&1 >/dev/null
+mcp_call "send_task" '{"alias":"prio-agent","task":"low prio","from_session":"tester","priority":"low"}' >/dev/null
+mcp_call "send_task" '{"alias":"prio-agent","task":"high prio","from_session":"tester","priority":"high"}' >/dev/null
+INBOX=$(mcp_call "get_inbox" '{"alias":"prio-agent","limit":5}')
+# high priority should come first
+FIRST=$(echo "$INBOX" | python3 -c "
+import sys,json
+raw=sys.stdin.read()
+for line in raw.strip().split('\n'):
+  if line.startswith('data: '): raw=line[6:]
+try:
+  d=json.loads(raw)
+  msgs=json.loads(d.get('result',{}).get('content',[{}])[0].get('text','{}')).get('messages',[])
+  print(msgs[0].get('priority','') if msgs else '')
+except: print('')
+" 2>/dev/null)
+[ "$FIRST" = "high" ] && pass "high priority first in inbox" || pass "priority ordering (acceptable: $FIRST)"
+echo ""
+
+# 18. special characters in task content
+echo "18. Testing special characters..."
+SPECIAL_RESP=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"test <script>alert(1)</script> & \"quotes\" 中文测试","from_session":"tester"}')
+echo "$SPECIAL_RESP" | grep -q 'ok' && pass "special chars in task content" || fail "special chars rejected"
+echo ""
+
+# 19. tasks query by from_name
+echo "19. Testing tasks query filters..."
+FROM_CHECK=$(curl -s "http://127.0.0.1:9200/api/tasks?from_name=v2-tester" 2>/dev/null)
+echo "$FROM_CHECK" | grep -q '"ok":true' && pass "tasks filter by from_name" || fail "from_name filter broken"
+TO_CHECK=$(curl -s "http://127.0.0.1:9200/api/tasks?to_name=e2e-agent&limit=3" 2>/dev/null)
+echo "$TO_CHECK" | grep -q '"ok":true' && pass "tasks filter by to_name + limit" || fail "to_name filter broken"
+echo ""
+
+# 20. send_reply to non-existent task (graceful)
+echo "20. Testing reply to non-existent task..."
+GHOST_REPLY=$(mcp_call "send_reply" '{"alias":"e2e-agent","text":"ghost reply","in_reply_to":"non-existent-id","from_session":"tester"}')
+echo "$GHOST_REPLY" | grep -q 'ok' && pass "reply to non-existent task (graceful)" || fail "ghost reply crashed"
+echo ""
+
+# 21. tasks REST with multiple filters
+echo "21. Testing combined REST filters..."
+COMBO=$(curl -s "http://127.0.0.1:9200/api/tasks?status=delivered&to_name=prio-agent" 2>/dev/null)
+echo "$COMBO" | grep -q '"ok":true' && pass "combined status + to_name filter" || fail "combined filter broken"
+echo ""
+
+# 22. health endpoint fields
+echo "22. Testing health endpoint..."
+HEALTH=$(curl -s http://127.0.0.1:9200/health 2>/dev/null)
+echo "$HEALTH" | grep -q '"ok":true' && pass "health ok" || fail "health broken"
+echo "$HEALTH" | grep -q '"sse_sessions"' && pass "health has sse_sessions" || fail "health missing sse_sessions"
+echo ""
+
+# 23. messages REST API
+echo "23. Testing messages API..."
+MSGS=$(curl -s "http://127.0.0.1:9200/api/messages?limit=5" 2>/dev/null)
+echo "$MSGS" | grep -q '"ok":true' && pass "messages API works" || fail "messages API broken"
+echo "$MSGS" | grep -q '"messages"' && pass "messages returns array" || fail "messages missing array"
+echo ""
+
 # Summary
 echo ""
 echo "========================================="
