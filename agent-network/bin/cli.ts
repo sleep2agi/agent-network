@@ -573,6 +573,7 @@ Node Management:
   anet delete <name> --force    Delete node and config
   anet rename <ref> <new-name>  Rename a node (by node_id or name)
   anet ls                       List nodes with network status
+  anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
   anet tasks [status]           Query tasks (replied/failed/delivered)
 
@@ -2483,6 +2484,74 @@ function logsCommand() {
   }
 }
 
+// ── info ──
+
+async function infoCommand() {
+  const ref = args[1];
+  if (!ref) { console.log("\nanet info <node-name>   Detailed node information\n"); return; }
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) { console.error(`Node "${ref}" not found.`); process.exit(1); }
+  const { id: nodeId, profile } = resolved;
+  const displayName = nodeDisplayName(nodeId, profile);
+
+  console.log(`\n  Node: ${displayName}`);
+  console.log(`  ──────────────────────────────────`);
+  console.log(`  node_id:  ${profile.node_id || "-"}`);
+  console.log(`  runtime:  ${normalizeRuntime(profile)}`);
+  console.log(`  model:    ${profile.model || "(default)"}`);
+  console.log(`  hub:      ${profile.hub || loadGlobal().hub || "-"}`);
+  console.log(`  channels: ${profile.channels?.join(", ") || "(none)"}`);
+  console.log(`  config:   .anet/nodes/${nodeId}/config.json`);
+
+  // PID check
+  const pidFile = join(nodesDir(), nodeId, ".pid");
+  let alive = false;
+  if (existsSync(pidFile)) {
+    const pid = parseInt(readFileSync(pidFile, "utf-8").trim());
+    try { process.kill(pid, 0); alive = true; } catch {}
+    console.log(`  pid:      ${pid} ${alive ? "● running" : "✕ stopped"}`);
+  } else {
+    console.log(`  pid:      (not running)`);
+  }
+
+  // Server status
+  const gc = loadGlobal();
+  if (gc.hub) {
+    try {
+      const status = await fetch(`${gc.hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any);
+      const session = status.sessions?.find((s: any) => s.alias === displayName || s.node_id === profile.node_id);
+      if (session) {
+        console.log(`\n  Server Status:`);
+        console.log(`    status:   ${session.status}`);
+        console.log(`    task:     ${(session.task || "-").slice(0, 60)}`);
+        console.log(`    updated:  ${session.updated_at || "-"}`);
+      } else {
+        console.log(`\n  Server: not registered`);
+      }
+    } catch {}
+
+    // Recent tasks
+    try {
+      const tasks = await fetch(`${gc.hub}/api/tasks?to_name=${encodeURIComponent(displayName)}&limit=3`, { headers: authHeaders() }).then(r => r.json() as any);
+      if (tasks.tasks?.length > 0) {
+        console.log(`\n  Recent Tasks:`);
+        for (const t of tasks.tasks) {
+          console.log(`    ${t.status.padEnd(10)} ${(t.from_name || "?").padEnd(12)} ${(t.content || "").slice(0, 40)}`);
+        }
+      }
+    } catch {}
+  }
+
+  // Logs
+  const logDir = join(nodesDir(), nodeId, "logs");
+  if (existsSync(logDir)) {
+    const files = readdirSync(logDir).filter(f => f.endsWith(".log")).sort().reverse();
+    if (files.length > 0) console.log(`\n  Logs: ${files.length} file(s), latest: ${files[0]}`);
+  }
+
+  console.log();
+}
+
 // ── license ──
 
 async function licenseCommand() {
@@ -2629,6 +2698,7 @@ switch (command) {
   case "license": await licenseCommand(); break;
   case "activate": await activateCommand(); break;
   case "logs": logsCommand(); break;
+  case "info": await infoCommand(); break;
   case "login": await loginCommand(); break;
   case "register": await registerCommand(); break;
   case "quickstart": await quickstartCommand(); break;
