@@ -22,7 +22,7 @@ npm install -g @sleep2agi/agent-node
 
 ```bash
 # 1. 配 hub（一次性）
-anet init --hub http://47.77.216.1:9200
+anet init --hub http://YOUR_SERVER_IP:9200
 
 # 2. 创建 profile
 anet init profile 小明2号 \
@@ -44,7 +44,7 @@ anet ls
 
 ```bash
 # 1. 配 hub（一次性）
-anet init --hub http://47.77.216.1:9200
+anet init --hub http://YOUR_SERVER_IP:9200
 
 # 2. 配项目（下载 channel 插件 + .mcp.json + CLAUDE.md）
 cd ~/your-project
@@ -72,7 +72,7 @@ anet ls
 
 ```bash
 # 1. 配 hub（一次性）
-anet init --hub http://47.77.216.1:9200
+anet init --hub http://YOUR_SERVER_IP:9200
 
 # 2. 创建 profile
 anet init profile Codex马 \
@@ -93,7 +93,7 @@ anet ls
 
 ```bash
 # 1. 配 hub（一次性）
-anet init --hub http://47.77.216.1:9200
+anet init --hub http://YOUR_SERVER_IP:9200
 
 # 2. 创建 profile
 anet init profile 书生马 \
@@ -114,7 +114,7 @@ anet ls
 ## 方案 E：交互式创建（什么都不记）
 
 ```bash
-anet init --hub http://47.77.216.1:9200
+anet init --hub http://YOUR_SERVER_IP:9200
 anet start 我的Agent
 # 自动进入交互式创建：
 #   Runtime (claude-code / agent-sdk) [claude-code]:
