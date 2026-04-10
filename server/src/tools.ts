@@ -45,9 +45,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}${effectiveNetId ? " [net]" : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
 
-      try {
-        db.run("BEGIN IMMEDIATE");
-        // Only delete same-alias sessions within the same network (prevent cross-network alias conflict)
+      db.transaction(() => {
+        // Only delete same-alias sessions within the same network
         if (effectiveNetId) {
           db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [alias, resume_id, effectiveNetId]);
         } else {
@@ -57,33 +56,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, last_seen_at, updated_at)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, datetime('now'), datetime('now'))
            ON CONFLICT(resume_id) DO UPDATE SET
-             alias = COALESCE(?2, sessions.alias),
-             tmux_name = COALESCE(?3, sessions.tmux_name),
-             server = COALESCE(?4, sessions.server),
-             ip = COALESCE(?5, sessions.ip),
-             hostname = COALESCE(?6, sessions.hostname),
-             agent = COALESCE(?7, sessions.agent),
-             project_dir = COALESCE(?8, sessions.project_dir),
-             version = COALESCE(?9, sessions.version),
-             status = ?10,
-             task = COALESCE(?11, sessions.task),
-             output = COALESCE(?12, sessions.output),
-             progress = COALESCE(?13, sessions.progress),
-             score = COALESCE(?14, sessions.score),
-             node_id = COALESCE(?15, sessions.node_id),
-             session_id = COALESCE(?16, sessions.session_id),
-             config_path = COALESCE(?17, sessions.config_path),
-             channels = COALESCE(?18, sessions.channels),
-             network_id = COALESCE(?19, sessions.network_id),
-             last_seen_at = datetime('now'),
-             updated_at = datetime('now')`,
+             alias = COALESCE(?2, sessions.alias), tmux_name = COALESCE(?3, sessions.tmux_name),
+             server = COALESCE(?4, sessions.server), ip = COALESCE(?5, sessions.ip),
+             hostname = COALESCE(?6, sessions.hostname), agent = COALESCE(?7, sessions.agent),
+             project_dir = COALESCE(?8, sessions.project_dir), version = COALESCE(?9, sessions.version),
+             status = ?10, task = COALESCE(?11, sessions.task),
+             output = COALESCE(?12, sessions.output), progress = COALESCE(?13, sessions.progress),
+             score = COALESCE(?14, sessions.score), node_id = COALESCE(?15, sessions.node_id),
+             session_id = COALESCE(?16, sessions.session_id), config_path = COALESCE(?17, sessions.config_path),
+             channels = COALESCE(?18, sessions.channels), network_id = COALESCE(?19, sessions.network_id),
+             last_seen_at = datetime('now'), updated_at = datetime('now')`,
           [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, netId ?? null]
         );
-        db.run("COMMIT");
-      } catch (e) {
-        try { db.run("ROLLBACK"); } catch {}
-        throw e;
-      }
+      })();
 
       // V2: sync tasks table — report_status(working) → tasks.running
       if (status === "working" && task) {
@@ -356,8 +341,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       console.log(`[${ts()}] ${from_session} → send_task → ${alias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
       const id = uuidv4();
       // 事务：inbox + tasks 双写
-      try {
-        db.run("BEGIN IMMEDIATE");
+      db.transaction(() => {
         db.run(
           `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response, network_id)
            VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply', ?7)`,
@@ -368,12 +352,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
            VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7)`,
           [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId]
         );
-        db.run("COMMIT");
-        logTaskEvent(id, null, "delivered", from_session, `→ ${alias}`);
-      } catch (e) {
-        try { db.run("ROLLBACK"); } catch {}
-        throw e;
-      }
+      })();
+      logTaskEvent(id, null, "delivered", from_session, `→ ${alias}`);
 
       const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
 
@@ -448,9 +428,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ alias, text, in_reply_to, status: replyStatus, from_session }) => {
       console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
       const id = uuidv4();
-      let replyLogged = false;
-      try {
-        db.run("BEGIN IMMEDIATE");
+      const replyLogged = db.transaction(() => {
         db.run(
           `INSERT INTO inbox (id, session_name, type, priority, content, from_session, in_reply_to, requires_response)
            VALUES (?1, ?2, 'reply', 'normal', ?3, ?4, ?5, 'none')`,
@@ -466,15 +444,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           );
           if (result.changes === 0) {
             console.log(`[${ts()}] ⚠ send_reply: task ${in_reply_to?.slice(0, 8)} not found or already terminal`);
-          } else {
-            replyLogged = true;
+            return false;
           }
+          return true;
         }
-        db.run("COMMIT");
-      } catch (e) {
-        try { db.run("ROLLBACK"); } catch {}
-        throw e;
-      }
+        return false;
+      })();
 
       // Log event after commit (outside transaction)
       if (replyLogged && in_reply_to) logTaskEvent(in_reply_to, null, replyStatus, from_session, text.slice(0, 200));
@@ -535,8 +510,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!["failed", "expired", "cancelled"].includes(task.status)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: `task status is ${task.status}, not retryable` }) }] };
       }
-      try {
-        db.run("BEGIN IMMEDIATE");
+      db.transaction(() => {
         // Reset task status
         db.run(
           `UPDATE tasks SET status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, delivered_at = datetime('now'), expires_at = datetime('now', '+1 hour')
@@ -550,12 +524,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
            VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply')`,
           [retryInboxId, task.to_name, task.priority, task.content, from_session]
         );
-        db.run("COMMIT");
-        logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
-      } catch (e) {
-        try { db.run("ROLLBACK"); } catch {}
-        throw e;
-      }
+      })();
+      logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
       // SSE push
       pushEvent(task.to_name, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
       return {
@@ -663,20 +633,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: `task is terminal (${task.status})` }) }] };
       }
       const oldAlias = task.to_name;
-      try {
-        db.run("BEGIN IMMEDIATE");
+      db.transaction(() => {
         // Ack old inbox to prevent original agent from picking it up
         db.run("UPDATE inbox SET acked = 1 WHERE id = ?1 AND acked = 0", [task_id]);
         db.run("UPDATE tasks SET to_name = ?1, status = 'delivered', started_at = NULL, delivered_at = datetime('now') WHERE task_id = ?2", [new_alias, task_id]);
         const newInboxId = uuidv4();
         db.run("INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response) VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply')",
           [newInboxId, new_alias, task.priority, task.content, from_session]);
-        db.run("COMMIT");
-        logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${new_alias}`);
-      } catch (e) {
-        try { db.run("ROLLBACK"); } catch {}
-        throw e;
-      }
+      })();
+      logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${new_alias}`);
       pushEvent(new_alias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: new_alias }) }] };
     }
