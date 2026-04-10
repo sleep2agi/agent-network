@@ -1106,11 +1106,29 @@ async function createCommand(idOverride?: string) {
   }
 
   const profile = createProfileFromOpts(id, opts);
+
+  // Request a network token (ntok_) for this node
+  if (gc.token && gc.hub && gc.network_id) {
+    try {
+      const res = await fetch(`${gc.hub}/api/auth/node-token`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${gc.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ network_id: gc.network_id, node_name: id }),
+      }).then(r => r.json() as any);
+      if (res.ok && res.token) {
+        profile.token = res.token;  // ntok_ written into node config
+      }
+    } catch {}
+  }
+
   saveCreatedNode(id, profile);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   const netLabel = gc.network_name || gc.network_id || "global";
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)}) in network "${netLabel}"`);
+  if (profile.token?.startsWith("ntok_")) {
+    console.log(`[anet] Network token assigned (node-level)`);
+  }
   if (normalizeRuntime(profile) === "claude-code-cli") {
     printClaudeCodeNotice();
   }
