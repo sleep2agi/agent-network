@@ -564,28 +564,42 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
 
 function printHelp() {
   console.log(`
-anet — AI Agent Network CLI
+anet — AI Agent Network CLI (V2)
 
-  anet init                     Configure hub URL (global, once)
+Node Management:
+  anet create <name>            Create a node (interactive)
+  anet start <name>             Start node (resume session)
+  anet stop <name>              Stop a running node
+  anet delete <name> --force    Delete node and config
+  anet rename <ref> <new-name>  Rename a node (by node_id or name)
+  anet ls                       List nodes with network status
+  anet status                   Network overview (agents + tasks)
+
+Session:
+  anet start <name> --new-session   Start with fresh session
+  anet resume <name> --session <id> Resume specific session
+  anet session ls               List Claude Code sessions
+
+Channel:
+  anet channel add telegram <name> --bot-token <tok> --allow <uid>
+  anet channel ls [name]        List channels
+
+Setup:
+  anet init                     Configure hub URL (global)
+  anet init project             Setup project (channel plugin)
   anet setup                    Install runtime dependencies
-  anet init project             Setup current project (channel plugin + config)
-  anet create <node-name>       Create a node
-  anet start <node-name>        Start node (resume config.session when set)
-  anet start <node-name> --new-session
-  anet resume <node-name> --session <id>
-  anet rename <node-id|node-name> <new-node-name>
-  anet ls                       Show profiles + sessions + network
   anet server start             Start CommHub Server
-  anet import                   Import sessions from CommHub → config.json
-  anet import <alias>           Import specific session
-  anet run                      Run standalone SSE agent
-  anet --help                   This help
+  anet upgrade                  Check for updates
+
+Other:
+  anet import [alias]           Import sessions from CommHub
+  anet run                      Standalone SSE agent
+  anet -v                       Version + dependency report
 
 Quick start:
-  anet server start             # 启动 CommHub Server
   anet init --hub http://IP:9200
-  anet create 指挥室
-  anet start 指挥室
+  anet create my-agent
+  anet start my-agent
 `);
 }
 
