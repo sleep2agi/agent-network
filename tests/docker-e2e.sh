@@ -801,6 +801,22 @@ grep -q "qs-user" /root/.anet/config.json 2>/dev/null && pass "quickstart saved 
 [ -f .anet/nodes/qs-bot/config.json ] 2>/dev/null && pass "quickstart created agent" || pass "agent check (may use different cwd)"
 echo ""
 
+# 29. License system
+echo "29. Testing license system..."
+LIC=$(curl -s http://127.0.0.1:9200/api/license 2>/dev/null)
+echo "$LIC" | grep -q '"ok":true' && pass "license API works" || fail "license API broken"
+echo "$LIC" | grep -q '"trial"' && pass "auto trial created" || fail "no trial"
+echo "$LIC" | grep -q '"days_left"' && pass "days_left present" || fail "no days_left"
+echo "$LIC" | grep -q '"max_agents"' && pass "limits present" || fail "no limits"
+# Activate
+ACT=$(curl -s -X POST http://127.0.0.1:9200/api/license/activate -H "Content-Type: application/json" -d '{"key":"anet-TEST-1234-5678-ABCD"}')
+echo "$ACT" | grep -q '"ok":true' && pass "activate license" || fail "activate failed"
+echo "$ACT" | grep -q '"pro"' && pass "upgraded to pro" || fail "not pro"
+# Invalid key
+BAD=$(curl -s -X POST http://127.0.0.1:9200/api/license/activate -H "Content-Type: application/json" -d '{"key":"bad"}')
+echo "$BAD" | grep -q '"ok":false' && pass "invalid key rejected" || fail "bad key accepted"
+echo ""
+
 # Summary
 echo ""
 echo "========================================="
