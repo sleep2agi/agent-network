@@ -16,7 +16,8 @@ COPY server/ /app/server/
 COPY agent-node/ /app/agent-node/
 COPY tests/docker-e2e.sh /app/test.sh
 COPY tests/docker-e2e-codex.sh /app/test-codex.sh
-RUN chmod +x /app/test.sh /app/test-codex.sh
+COPY tests/docker-e2e-claude-sdk.sh /app/test-claude.sh
+RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh
 RUN cd /app/server && bun install
 
 # Install local agent-node globally (build from source)
