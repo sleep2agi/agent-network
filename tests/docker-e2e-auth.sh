@@ -89,6 +89,27 @@ RL_BLOCK=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login \
 echo "$RL_BLOCK" | grep -q 'too many' && pass "rate limit blocks after 10 attempts" || pass "rate limit (may need more attempts)"
 echo ""
 
+# 7. Password change
+echo "7. Password change..."
+PW_OK=$(curl -s -X POST http://127.0.0.1:9200/api/auth/password \
+  -H "Authorization: Bearer $LOGIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"old_password":"auth123456","new_password":"newpass789"}')
+echo "$PW_OK" | grep -q '"ok":true' && pass "password changed" || fail "password change failed"
+# Login with new password
+PW_LOGIN=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login \
+  -H "Content-Type: application/json" -d '{"username":"authtest","password":"newpass789"}')
+echo "$PW_LOGIN" | grep -q '"ok":true' && pass "login with new password" || fail "new password login failed"
+# Old password should fail
+PW_OLD=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login \
+  -H "Content-Type: application/json" -d '{"username":"authtest","password":"auth123456"}')
+echo "$PW_OLD" | grep -q '"ok":false' && pass "old password rejected" || fail "old password still works"
+# Wrong old password
+PW_WRONG=$(curl -s -X POST http://127.0.0.1:9200/api/auth/password \
+  -H "Authorization: Bearer $LOGIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"old_password":"wrongold","new_password":"another123"}')
+echo "$PW_WRONG" | grep -q '"ok":false' && pass "wrong old password rejected" || fail "wrong old pw accepted"
+echo ""
+
 echo ""
 echo "========================================="
 echo "  Results: $PASS passed, $FAIL failed"
