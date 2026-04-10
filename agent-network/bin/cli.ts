@@ -574,6 +574,7 @@ Node Management:
   anet rename <ref> <new-name>  Rename a node (by node_id or name)
   anet ls                       List nodes with network status
   anet status                   Network overview (agents + tasks)
+  anet tasks [status]           Query tasks (replied/failed/delivered)
 
 Session:
   anet start <name> --new-session   Start with fresh session
