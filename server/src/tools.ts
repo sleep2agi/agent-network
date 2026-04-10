@@ -34,8 +34,9 @@ export function registerTools(server: McpServer, clientIP?: string) {
       session_id: z.string().max(200).optional().describe("Runtime session/thread ID"),
       config_path: z.string().max(1000).optional().describe("Config file path"),
       channels: z.string().max(2000).optional().describe("JSON array of channels"),
+      model: z.string().max(200).optional().describe("AI model name"),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl }) => {
       console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
 
@@ -87,19 +88,22 @@ export function registerTools(server: McpServer, clientIP?: string) {
       // V2: upsert nodes table for persistent node identity
       if (node_id) {
         try {
+          // Extract runtime from agent field (e.g., "agent-node:codex" → "codex-sdk")
+          const nodeRuntime = ag?.includes(":") ? ag.split(":")[1] + "-sdk" : ag ?? null;
           db.run(
-            `INSERT INTO nodes (node_id, node_name, alias, runtime, config_path, channels, server, hostname, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
+            `INSERT INTO nodes (node_id, node_name, alias, runtime, model, config_path, channels, server, hostname, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))
              ON CONFLICT(node_id) DO UPDATE SET
                node_name = COALESCE(?2, nodes.node_name),
                alias = COALESCE(?3, nodes.alias),
                runtime = COALESCE(?4, nodes.runtime),
-               config_path = COALESCE(?5, nodes.config_path),
-               channels = COALESCE(?6, nodes.channels),
-               server = COALESCE(?7, nodes.server),
-               hostname = COALESCE(?8, nodes.hostname),
+               model = COALESCE(?5, nodes.model),
+               config_path = COALESCE(?6, nodes.config_path),
+               channels = COALESCE(?7, nodes.channels),
+               server = COALESCE(?8, nodes.server),
+               hostname = COALESCE(?9, nodes.hostname),
                updated_at = datetime('now')`,
-            [node_id, alias, alias, ag ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null]
+            [node_id, alias, alias, nodeRuntime, mdl ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null]
           );
         } catch {}
       }

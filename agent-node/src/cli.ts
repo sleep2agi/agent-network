@@ -47,8 +47,8 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | codex-sdk
-  --model <name>      AI 模型 (claude-agent-sdk: claude-sonnet-4-6, codex-sdk: gpt-5.4)
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk | http-api | minimax
+  --model <name>      AI 模型 (codex: gpt-5.4, http-api: gpt-4o-mini, minimax: MiniMax-M1)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
   --max-turns <n>     每任务最大轮次 (default: 5)
@@ -144,8 +144,9 @@ const rawRuntime = opts.runtime || process.env.RUNTIME || fileConfig.runtime || 
 const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", "claude-sdk": "claude", "agent-sdk": "claude", "claude": "claude",
   "codex-sdk": "codex", "codex": "codex",
+  "http-api": "http", "openai-api": "http", "minimax": "http",
 };
-const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex";
+const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "http";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
@@ -323,6 +324,7 @@ const register = () => callCommHub("report_status", {
   session_id: SESSION_ID || undefined,
   config_path: configFilePath || undefined,
   channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
+  model: MODEL || undefined,
 });
 const reportStatus = (status: string, task?: string) => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status, task,
@@ -488,6 +490,50 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
 }
 
 // ══════════════════════════════════════
+// HTTP API Runtime (OpenAI-compatible)
+// ══════════════════════════════════════
+
+async function processWithHttpApi(task: string, from: string): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.MINIMAX_CODING_API_KEY || fileConfig.apiKey || "";
+  const baseUrl = process.env.OPENAI_BASE_URL || fileConfig.apiBaseUrl || "https://api.openai.com/v1";
+  const model = MODEL || "gpt-4o-mini";
+
+  if (!apiKey) return "错误: 需要设置 OPENAI_API_KEY 或 MINIMAX_CODING_API_KEY";
+
+  const systemPrompt = SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI 助手。收到来自 ${from} 的任务后简要执行并汇报。`;
+  const t0 = Date.now();
+  log(`[http-api] model=${model} base=${baseUrl.replace(/\/v1$/, "")}`);
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: task },
+      ],
+      max_tokens: 2000,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    return `HTTP API 错误 ${res.status}: ${err.slice(0, 200)}`;
+  }
+
+  const data = await res.json() as any;
+  const dt = Date.now() - t0;
+  const content = data.choices?.[0]?.message?.content || "";
+  const usage = data.usage;
+  log(`[http-api] done | ${dt}ms | in=${usage?.prompt_tokens || 0} out=${usage?.completion_tokens || 0}`);
+  return content || "（无回复）";
+}
+
+// ══════════════════════════════════════
 // 任务分发
 // ══════════════════════════════════════
 let thinkQueue = Promise.resolve();
@@ -495,6 +541,7 @@ let thinkQueue = Promise.resolve();
 function think(task: string, from: string, images?: string[]): Promise<string> {
   const run = async () => {
     if (RUNTIME === "codex") return processWithCodex(task, from, images);
+    if (RUNTIME === "http") return processWithHttpApi(task, from);
     return processWithClaude(task, from);
   };
   const next = thinkQueue.then(run, run);
