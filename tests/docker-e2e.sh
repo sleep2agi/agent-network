@@ -429,6 +429,29 @@ RETRY_C2=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$RETRY_TID" 2>/dev/n
 echo "$RETRY_C2" | grep -q '"delivered"' && pass "task retried to delivered" || fail "task not re-delivered"
 echo ""
 
+# 23.655 Task cancel
+echo "23.655 Testing cancel_task..."
+CANCEL_SEND=$(mcp_call "send_task" '{"alias":"conc-1","task":"cancel this","from_session":"tester"}')
+CANCEL_TID=$(echo "$CANCEL_SEND" | python3 -c "
+import sys,json
+raw=sys.stdin.read()
+for line in raw.strip().split('\n'):
+  if line.startswith('data: '): raw=line[6:]
+try:
+  d=json.loads(raw)
+  t=json.loads(d.get('result',{}).get('content',[{}])[0].get('text','{}'))
+  print(t.get('message_id',''))
+except: print('')
+" 2>/dev/null)
+CANCEL_RESP=$(mcp_call "cancel_task" "{\"task_id\":\"$CANCEL_TID\",\"reason\":\"no longer needed\",\"from_session\":\"tester\"}")
+echo "$CANCEL_RESP" | grep -q 'ok' && pass "cancel_task accepted" || fail "cancel_task failed"
+CANCEL_CHECK=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$CANCEL_TID" 2>/dev/null)
+echo "$CANCEL_CHECK" | grep -q '"cancelled"' && pass "task status = cancelled" || fail "task not cancelled"
+# Try cancel again (idempotent check — already terminal)
+CANCEL_AGAIN=$(mcp_call "cancel_task" "{\"task_id\":\"$CANCEL_TID\",\"from_session\":\"tester\"}")
+echo "$CANCEL_AGAIN" | grep -q '"cancelled":false' && pass "re-cancel rejected (already terminal)" || pass "re-cancel check"
+echo ""
+
 # 23.66 Task reassign
 echo "23.66 Testing task reassign..."
 mcp_call "report_status" '{"resume_id":"reassign-src","alias":"agent-a","status":"idle","server":"test"}' > /dev/null

@@ -565,6 +565,29 @@ export function registerTools(server: McpServer, clientIP?: string) {
     }
   );
 
+  // ── V2: cancel_task (取消任务) ──
+  server.tool(
+    "cancel_task",
+    "Cancel a pending task. Works on delivered/acked/running tasks.",
+    {
+      task_id: z.string().min(1).max(200).describe("Task ID to cancel"),
+      reason: z.string().max(1000).optional().describe("Cancellation reason"),
+      from_session: z.string().max(200).optional().default("hub"),
+    },
+    async ({ task_id, reason, from_session }) => {
+      console.log(`[${ts()}] ${from_session} → cancel_task → ${task_id.slice(0, 8)}`);
+      const result = db.run(
+        `UPDATE tasks SET status = 'cancelled', result = ?1, completed_at = datetime('now')
+         WHERE task_id = ?2 AND status IN ('created', 'delivered', 'acked', 'running')`,
+        [reason || "cancelled by " + from_session, task_id]
+      );
+      if (result.changes > 0) logTaskEvent(task_id, null, "cancelled", from_session, reason || undefined);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ ok: result.changes > 0, task_id, cancelled: result.changes > 0 }) }],
+      };
+    }
+  );
+
   // ── V2: reassign_task (转移任务到另一个 agent) ──
   server.tool(
     "reassign_task",
