@@ -410,7 +410,12 @@ const CODEX_CONFIG = {
 };
 
 async function processWithCodex(task: string, from: string, images?: string[]): Promise<string> {
-  const { Codex } = await import("@openai/codex-sdk");
+  let Codex: any;
+  try {
+    ({ Codex } = await import("@openai/codex-sdk"));
+  } catch {
+    throw new Error("@openai/codex-sdk not installed. Run: npm install -g @openai/codex-sdk @openai/codex");
+  }
 
   if (!codexThread) {
     const codex = new Codex({ config: CODEX_CONFIG });

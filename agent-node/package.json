@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "2.1.0-preview.1",
+  "version": "2.1.0",
   "description": "One-command AI Agent node for CommHub networks. Claude + Codex dual runtime.",
   "bin": {
     "agent-node": "./dist/cli.js"
@@ -36,7 +36,12 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.96",
-    "@openai/codex-sdk": "^0.118.0"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.96"
+  },
+  "peerDependencies": {
+    "@openai/codex-sdk": ">=0.118.0"
+  },
+  "peerDependenciesMeta": {
+    "@openai/codex-sdk": { "optional": true }
   }
 }
