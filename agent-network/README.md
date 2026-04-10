@@ -161,19 +161,37 @@ anet -v                      # 版本信息
 
 配置优先级: CLI 参数 > 环境变量 > 项目配置 > 全局配置 > 默认值
 
-## REST API
+## REST API (17 endpoints)
 
 | 端点 | 说明 |
 |------|------|
-| `GET /health` | 健康检查 (无需 auth) |
-| `GET /api/status` | 所有 session |
-| `GET /api/tasks?status=&from_name=&to_name=&limit=` | 任务列表 |
-| `GET /api/nodes?node_id=&alias=` | 节点信息 |
-| `GET /api/task_events?task_id=` | 任务审计日志 |
-| `GET /api/messages?limit=&since=` | 消息列表 |
-| `POST /mcp` | MCP Streamable HTTP |
+| `POST /api/auth/register` | 注册 |
+| `POST /api/auth/login` | 登录 |
+| `GET /api/auth/me` | 当前用户 |
+| `PUT /api/auth/me` | 修改资料 |
+| `POST /api/auth/password` | 修改密码 |
+| `GET /api/auth/tokens` | Token 列表 |
+| `POST /api/auth/tokens` | 创建 Token |
+| `DELETE /api/auth/tokens/:id` | 撤销 Token |
+| `GET /api/networks` | 网络列表 |
+| `POST /api/networks` | 创建网络 |
+| `GET /api/networks/:id` | 网络详情 |
+| `PUT /api/networks/:id` | 重命名网络 |
+| `DELETE /api/networks/:id` | 删除网络 |
+| `GET /api/tasks` | 任务列表 (支持 network_id 过滤) |
+| `GET /api/stats` | 统计汇总 |
+| `GET /api/audit-log` | 审计日志 |
+| `GET /api/license` | License 状态 |
 
-设置 `COMMHUB_AUTH_TOKEN` 环境变量启用 Bearer token 鉴权。
+所有数据端点支持 `?network_id=` 过滤。认证: `Authorization: Bearer <token>`。
+
+## 文档
+
+- [Getting Started Guide](docs/getting-started.md) — 新手教程
+- [CHANGELOG](CHANGELOG.md) — 版本变更
+- [V3 设计](docs/v3-multi-network-design.md) — 架构设计
+- [测试矩阵](docs/test-coverage-matrix.md) — 200 测试
+- [Examples](examples/README.md) — Demo 场景
 
 ## npm 包
 
