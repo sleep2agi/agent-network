@@ -429,6 +429,16 @@ RETRY_C2=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$RETRY_TID" 2>/dev/n
 echo "$RETRY_C2" | grep -q '"delivered"' && pass "task retried to delivered" || fail "task not re-delivered"
 echo ""
 
+# 23.63 list_tasks + stats
+echo "23.63 Testing list_tasks..."
+LT_RESP=$(mcp_call "list_tasks" '{"alias":"e2e-agent","limit":5}')
+echo "$LT_RESP" | grep -q 'ok' && pass "list_tasks works" || fail "list_tasks broken"
+echo "$LT_RESP" | grep -q 'stats' && pass "list_tasks has stats" || fail "no stats"
+# REST stats
+REST_STATS=$(curl -s "http://127.0.0.1:9200/api/tasks?limit=1" 2>/dev/null)
+echo "$REST_STATS" | grep -q '"stats"' && pass "/api/tasks has stats" || fail "REST no stats"
+echo ""
+
 # 23.655 Task cancel
 echo "23.655 Testing cancel_task..."
 CANCEL_SEND=$(mcp_call "send_task" '{"alias":"conc-1","task":"cancel this","from_session":"tester"}')

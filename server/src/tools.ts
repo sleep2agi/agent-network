@@ -565,6 +565,40 @@ export function registerTools(server: McpServer, clientIP?: string) {
     }
   );
 
+  // ── V2: list_tasks (查询任务列表) ──
+  server.tool(
+    "list_tasks",
+    "List tasks with filters. Agents can query their own pending/running tasks.",
+    {
+      alias: z.string().max(200).optional().describe("Filter by to_name (target agent)"),
+      status: z.string().max(50).optional().describe("Filter by status"),
+      from_name: z.string().max(200).optional().describe("Filter by sender"),
+      limit: z.number().min(1).max(100).optional().default(20),
+    },
+    async ({ alias, status, from_name, limit }) => {
+      let sql = "SELECT task_id, from_name, to_name, priority, status, content, result, created_at, completed_at FROM tasks WHERE 1=1";
+      const params: any[] = [];
+      if (alias) { sql += ` AND to_name = ?${params.length + 1}`; params.push(alias); }
+      if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
+      if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
+      sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
+      params.push(limit);
+      const tasks = db.query(sql).all(...params);
+
+      // Stats
+      const stats = db.query<any, []>(
+        "SELECT status, COUNT(*) as count FROM tasks GROUP BY status"
+      ).all();
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ ok: true, tasks, count: tasks.length, stats }),
+        }],
+      };
+    }
+  );
+
   // ── V2: cancel_task (取消任务) ──
   server.tool(
     "cancel_task",

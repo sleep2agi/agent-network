@@ -330,7 +330,8 @@ Bun.serve({
       params.push(limit);
 
       const rows = db.query(sql).all(...params);
-      return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length }));
+      const stats = db.query<any, []>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status").all();
+      return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length, stats }));
     }
 
     // ── REST: recent completions ──
