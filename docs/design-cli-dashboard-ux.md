@@ -1,6 +1,12 @@
 # CLI + Dashboard 用户流程设计
 
-前提：一个用户多个 token，一个 token 绑一个网络，一个 agent-node 在一个网络。
+## 核心原则（Vincent 确认）
+
+1. **一个用户多个 token，一个 token 绑一个网络**
+2. **Token 对用户透明** — 用户只需 login + 选网络，token 自动管理
+3. **两级 scope** — 全局网络 (~/.anet/config.json) + 项目级网络 ({project}/.anet/config.json)
+4. **创建 agent 时交互选网络** — 上下键选择，viewer 网络灰色不可选
+5. **一个 agent-node 只在一个网络**
 
 ---
 
@@ -155,27 +161,58 @@ anet demo --live
 #   (每 5 秒刷新，显示 agent/任务/统计)
 ```
 
-### 场景 7：agent-node 在不同网络启动
+### 场景 7：创建 agent 时选网络（交互式）
 
 ```bash
-# 方式 1：用当前 CLI 登录的网络（最简单）
-anet create bot-a --runtime codex-sdk
-anet start bot-a
-# → 自动用 ~/.anet/config.json 的 token → 绑定当前网络
+anet create my-bot
+#   选择网络:
+#   > ⭐ default (owner)          ← 上下键选择
+#     👤 prod (member)
+#     👁 demo (viewer)            ← 灰色，不可选（viewer 不能创建）
+#
+#   选择 Runtime:
+#   > codex-sdk (GPT-5.4) — 推荐
+#     http-api (MiniMax/OpenAI 兼容)
+#     claude-agent-sdk (Claude Code)
+#
+#   ✅ my-bot 已创建，网络: default
 
-# 方式 2：指定 token（不同网络）
-COMMHUB_TOKEN=atok_prod agent-node --alias bot-prod
-# → 用 prod 网络的 token 启动
+# 如果只有一个可写网络 → 跳过选择
+# 如果当前目录有项目级网络配置 → 默认选中
+# 非 TTY（CI/脚本）→ 用 --network 参数指定
+anet create ci-bot --runtime codex-sdk --network prod
+```
 
-# 方式 3：多个 agent 在不同网络（同一台机器）
-anet network use dev
-anet create bot-dev --runtime codex-sdk
-anet start bot-dev &
+### 场景 8：两级 scope（全局 vs 项目级）
 
-anet network use prod  
-anet create bot-prod --runtime codex-sdk
-anet start bot-prod &
-# → 两个 agent 分别在 dev 和 prod 网络
+```bash
+# 全局网络（影响所有目录）
+anet network use prod
+# → 写入 ~/.anet/config.json
+
+# 项目级网络（只影响当前项目目录）
+cd ~/my-project
+anet network use dev --project
+# → 写入 ~/my-project/.anet/config.json
+
+# 优先级：项目级 > 全局
+# 在 ~/my-project 下操作 → 用 dev 网络
+# 在其他目录操作 → 用 prod 网络（全局）
+```
+
+### 场景 9：agent-node 在不同网络启动
+
+```bash
+# 最简单：自动用当前网络（token 透明）
+anet start my-bot
+# → 读 config → 自动用对应网络的 token → 启动
+
+# 高级：不同目录不同网络
+cd ~/project-a && anet start bot-a &  # → project-a 的网络
+cd ~/project-b && anet start bot-b &  # → project-b 的网络
+
+# 无人值守部署（唯一需要显式 token 的场景）
+COMMHUB_TOKEN=atok_prod agent-node --alias ci-bot
 ```
 
 ---
