@@ -594,6 +594,7 @@ Setup:
 
 Other:
   anet import [alias]           Import sessions from CommHub
+  anet logs <name>              Show recent agent logs
   anet doctor                   System diagnostic check
   anet run                      Standalone SSE agent
   anet -v                       Version + dependency report
@@ -2116,6 +2117,40 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diff / 86400000)}d`;
 }
 
+// ── logs ──
+
+function logsCommand() {
+  const ref = args[1];
+  if (!ref) {
+    console.log("\nanet logs <node-name>   Show recent agent logs\nanet logs <node-name> --follow   Tail logs\n");
+    return;
+  }
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) { console.error(`Node "${ref}" not found.`); process.exit(1); }
+
+  const logDir = join(nodesDir(), resolved.id, "logs");
+  if (!existsSync(logDir)) { console.log("No logs yet."); return; }
+
+  const files = readdirSync(logDir).filter(f => f.endsWith(".log")).sort().reverse();
+  if (files.length === 0) { console.log("No log files."); return; }
+
+  const latest = join(logDir, files[0]);
+  const opts = parseOpts();
+
+  if (opts.follow === "true" || opts.f === "true") {
+    console.log(`Tailing ${latest}...\n`);
+    const child = spawn("tail", ["-f", "-n", "50", latest], { stdio: "inherit" });
+    process.on("SIGINT", () => { child.kill(); process.exit(0); });
+  } else {
+    const lines = readFileSync(latest, "utf-8").split("\n");
+    const n = parseInt(opts.n || opts.lines || "30");
+    const tail = lines.slice(-n).join("\n");
+    console.log(`\n${files[0]} (last ${n} lines):\n`);
+    console.log(tail);
+    if (files.length > 1) console.log(`\n${files.length} log files in ${logDir}`);
+  }
+}
+
 // ── doctor (diagnostic) ──
 
 async function doctorCommand() {
@@ -2200,6 +2235,7 @@ switch (command) {
   case "status": await statusCommand(); break;
   case "tasks": await tasksCommand(); break;
   case "doctor": await doctorCommand(); break;
+  case "logs": logsCommand(); break;
   case "run": runCommand(); break;
   case "-v": case "--version": case "version": {
     printVersionReport();
