@@ -118,6 +118,13 @@ sleep 3
 pass "send_message sent (manual verify: agent should not process)"
 echo ""
 
+# 10.05 anet ls with network status
+echo "10.05 Testing anet ls..."
+LS_OUT=$(anet ls 2>&1)
+echo "$LS_OUT" | grep -q "renamed-node" && pass "ls shows node" || fail "ls missing node"
+echo "$LS_OUT" | grep -q "STATUS" && pass "ls has status column" || fail "ls missing status header"
+echo ""
+
 # 10.1 anet stop
 echo "10.1 Testing anet stop..."
 anet create stop-test --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null

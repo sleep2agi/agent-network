@@ -1366,15 +1366,53 @@ function showProfiles(cmd: string) {
 // ── ls ──
 
 async function lsCommand() {
-  // Nodes
   const ids = listProfileIds();
+
+  // Fetch CommHub status first
+  const gc = loadGlobal();
+  let networkSessions: any[] = [];
+  let sseSessions: Record<string, number> = {};
+
+  if (gc.hub) {
+    try {
+      const [statusRes, healthRes] = await Promise.all([
+        fetch(`${gc.hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any),
+        fetch(`${gc.hub}/health`, { headers: authHeaders() }).then(r => r.json() as any),
+      ]);
+      networkSessions = statusRes.sessions || [];
+      sseSessions = healthRes.sse_sessions || {};
+    } catch {}
+  }
+
+  // Nodes with network status
   if (ids.length > 0) {
     console.log("\nNodes:\n");
+    console.log("  NAME                 RUNTIME        STATUS    SSE  SESSION");
+    console.log("  ──────────────────── ────────────── ──────── ──── ────────");
     for (const id of ids) {
       const p = loadProfile(id);
-      const session = p ? profileSession(p).slice(0, 8) || "-" : "-";
       const displayName = nodeDisplayName(id, p);
-      console.log(`  ${id} (${displayName})  node_id=${p?.node_id || "-"}  [${normalizeRuntime(p || undefined)}]  session=${session}  channels=[${p?.channels.join(", ")}]`);
+      const runtime = normalizeRuntime(p || undefined);
+      const session = p ? profileSession(p).slice(0, 8) || "-" : "-";
+
+      // Check PID
+      const pidFile = join(nodesDir(), id, ".pid");
+      let localAlive = false;
+      if (existsSync(pidFile)) {
+        const pid = parseInt(readFileSync(pidFile, "utf-8").trim());
+        try { process.kill(pid, 0); localAlive = true; } catch {}
+      }
+
+      // Match with CommHub
+      const ns: any = networkSessions.find((n: any) => n.alias === displayName || n.node_id === p?.node_id);
+      const serverStatus = ns ? ns.status : (localAlive ? "starting" : "offline");
+      const sseConnected = sseSessions[displayName] ? "●" : "○";
+
+      const statusIcon = serverStatus === "idle" ? "idle" :
+                         serverStatus === "working" ? "working" :
+                         serverStatus === "offline" ? "offline" :
+                         serverStatus;
+      console.log(`  ${displayName.padEnd(20)} ${runtime.padEnd(14)} ${statusIcon.padEnd(8)} ${sseConnected.padEnd(4)} ${session}`);
     }
     console.log();
   }
@@ -1397,22 +1435,6 @@ async function lsCommand() {
     console.log("No sessions or nodes in this directory.");
     console.log("Get started: anet init\n");
     return;
-  }
-
-  // CommHub status
-  const gc = loadGlobal();
-  let networkSessions: any[] = [];
-  let sseSessions: Record<string, number> = {};
-
-  if (gc.hub) {
-    try {
-      const [statusRes, healthRes] = await Promise.all([
-        fetch(`${gc.hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any),
-        fetch(`${gc.hub}/health`, { headers: authHeaders() }).then(r => r.json() as any),
-      ]);
-      networkSessions = statusRes.sessions || [];
-      sseSessions = healthRes.sse_sessions || {};
-    } catch {}
   }
 
   // Display sessions
