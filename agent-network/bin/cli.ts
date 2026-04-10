@@ -594,6 +594,7 @@ Setup:
 
 Other:
   anet import [alias]           Import sessions from CommHub
+  anet register                  Create new account
   anet login                    Login (username + password)
   anet login --token <tok>      Login with API token
   anet logout                   Remove saved token
@@ -2124,6 +2125,45 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diff / 86400000)}d`;
 }
 
+// ── register ──
+
+async function registerCommand() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  if (!hub) { console.error("Run 'anet init' first."); return; }
+  const opts = parseOpts();
+
+  const username = opts.username || opts.user || await ask("Username: ");
+  const password = opts.password || opts.pass || await ask("Password (min 6): ");
+  const email = opts.email || await ask("Email (optional): ");
+  closeRL();
+
+  if (!username || !password) { console.error("Username and password required."); return; }
+
+  try {
+    const res = await fetch(`${hub}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password, email: email || undefined }),
+    }).then(r => r.json() as any);
+
+    if (!res.ok) { console.error(`Registration failed: ${res.error}`); return; }
+
+    // Auto-login
+    gc.token = res.token;
+    gc.user = res.user;
+    const nets = await fetch(`${hub}/api/networks`, { headers: { Authorization: `Bearer ${res.token}` } }).then(r => r.json() as any);
+    if (nets.ok && nets.networks?.length > 0) {
+      gc.network_id = nets.networks[0].network_id;
+      gc.network_name = nets.networks[0].network_name;
+    }
+    saveGlobal(gc);
+    console.log(`[anet] Registered and logged in as ${res.user.username}`);
+    if (gc.network_name) console.log(`[anet] Default network: ${gc.network_name}`);
+    console.log(`[anet] Token saved to ~/.anet/config.json`);
+  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+}
+
 // ── login/logout/whoami ──
 
 async function loginCommand() {
@@ -2402,6 +2442,7 @@ switch (command) {
   case "doctor": await doctorCommand(); break;
   case "logs": logsCommand(); break;
   case "login": await loginCommand(); break;
+  case "register": await registerCommand(); break;
   case "logout": logoutCommand(); break;
   case "whoami": await whoamiCommand(); break;
   case "network": await networkCommand(); break;
