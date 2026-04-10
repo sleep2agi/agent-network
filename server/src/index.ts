@@ -88,7 +88,7 @@ setInterval(() => {
       const expired = db.query<{ task_id: string }, []>(
         "SELECT task_id FROM tasks WHERE status = 'expired' AND completed_at >= datetime('now', '-1 minute')"
       ).all();
-      for (const t of expired) logTaskEvent(t.task_id, "delivered", "expired", "patrol");
+      for (const t of expired) logTaskEvent(t.task_id, null, "expired", "patrol");
     }
   } catch {}
 }, 5 * 60 * 1000);

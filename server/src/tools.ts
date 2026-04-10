@@ -88,7 +88,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
             const t = db.query<{ task_id: string }, [string, string]>(
               "SELECT task_id FROM tasks WHERE to_name = ?1 AND content = ?2 AND status = 'running' ORDER BY started_at DESC LIMIT 1"
             ).get(alias, task);
-            if (t) logTaskEvent(t.task_id, "acked", "running", alias);
+            if (t) logTaskEvent(t.task_id, null, "running", alias);
           }
         } catch {}
       }
