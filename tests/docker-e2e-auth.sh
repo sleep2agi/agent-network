@@ -110,6 +110,28 @@ PW_WRONG=$(curl -s -X POST http://127.0.0.1:9200/api/auth/password \
 echo "$PW_WRONG" | grep -q '"ok":false' && pass "wrong old password rejected" || fail "wrong old pw accepted"
 echo ""
 
+# 8. Token management
+echo "8. Token management..."
+# Need fresh token after password change
+FRESH_LOGIN=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login -H "Content-Type: application/json" -d '{"username":"authtest","password":"newpass789"}')
+FRESH_TOKEN=$(echo "$FRESH_LOGIN" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
+# Create token
+TK_CREATE=$(curl -s -X POST http://127.0.0.1:9200/api/auth/tokens \
+  -H "Authorization: Bearer $FRESH_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"test-agent-token"}')
+echo "$TK_CREATE" | grep -q '"ok":true' && pass "create token" || fail "create token failed"
+TK_ID=$(echo "$TK_CREATE" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('token_id',''))" 2>/dev/null)
+# List tokens
+TK_LIST=$(curl -s -H "Authorization: Bearer $FRESH_TOKEN" http://127.0.0.1:9200/api/auth/tokens)
+echo "$TK_LIST" | grep -q 'test-agent-token' && pass "list tokens shows new token" || fail "token not in list"
+# Revoke token
+TK_REVOKE=$(curl -s -X DELETE "http://127.0.0.1:9200/api/auth/tokens/$TK_ID" -H "Authorization: Bearer $FRESH_TOKEN")
+echo "$TK_REVOKE" | grep -q '"ok":true' && pass "revoke token" || fail "revoke failed"
+# Verify revoked
+TK_LIST2=$(curl -s -H "Authorization: Bearer $FRESH_TOKEN" http://127.0.0.1:9200/api/auth/tokens)
+echo "$TK_LIST2" | grep -q "$TK_ID" && fail "revoked token still listed" || pass "revoked token gone"
+echo ""
+
 echo ""
 echo "========================================="
 echo "  Results: $PASS passed, $FAIL failed"
