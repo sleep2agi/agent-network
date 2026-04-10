@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
-import { register, login, resolveToken, getUserNetworks, createNetwork, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, getUserNetworks, createNetwork, changePassword, type AuthUser } from "./auth.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
@@ -285,6 +285,21 @@ Bun.serve({
         // Re-fetch
         const user = db.query<any, [string]>("SELECT user_id, username, display_name, email, role FROM users WHERE user_id = ?1").get(resolved.user.user_id);
         return withCors(req, Response.json({ ok: true, user }));
+      } catch (e: any) {
+        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
+      }
+    }
+
+    if (url.pathname === "/api/auth/password" && req.method === "POST") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      try {
+        const body = await req.json() as any;
+        const result = changePassword(resolved.user.user_id, body.old_password, body.new_password);
+        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "password_changed", "user", resolved.user.user_id);
+        return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
       }

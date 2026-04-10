@@ -132,3 +132,12 @@ export function createNetwork(userId: string, name: string, description?: string
   );
   return { ok: true, network_id: networkId, network_name: name };
 }
+
+export function changePassword(userId: string, oldPassword: string, newPassword: string): { ok: boolean; error?: string } {
+  if (!newPassword || newPassword.length < 6) return { ok: false, error: "new password must be at least 6 characters" };
+  const user = db.query<any, [string]>("SELECT password_hash FROM users WHERE user_id = ?1").get(userId);
+  if (!user) return { ok: false, error: "user not found" };
+  if (user.password_hash !== hashPassword(oldPassword)) return { ok: false, error: "incorrect current password" };
+  db.run("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);
+  return { ok: true };
+}
