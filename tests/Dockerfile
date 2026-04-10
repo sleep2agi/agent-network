@@ -19,6 +19,7 @@ COPY tests/docker-e2e-codex.sh /app/test-codex.sh
 COPY tests/docker-e2e-claude-sdk.sh /app/test-claude.sh
 COPY tests/docker-idiom-game.sh /app/test-game.sh
 COPY tests/docker-e2e-minimax.sh /app/test-minimax.sh
+COPY tests/docker-mixed-game.sh /app/test-mixed.sh
 COPY tests/docker-config-priority.sh /app/test-config.sh
 RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh /app/test-game.sh /app/test-config.sh /app/test-minimax.sh
 RUN cd /app/server && bun install

@@ -581,7 +581,11 @@ export function registerTools(server: McpServer, clientIP?: string) {
          WHERE task_id = ?2 AND status IN ('created', 'delivered', 'acked', 'running')`,
         [reason || "cancelled by " + from_session, task_id]
       );
-      if (result.changes > 0) logTaskEvent(task_id, null, "cancelled", from_session, reason || undefined);
+      // Also ack the inbox entry to prevent agent from picking it up
+      if (result.changes > 0) {
+        db.run("UPDATE inbox SET acked = 1 WHERE id = ?1 AND acked = 0", [task_id]);
+        logTaskEvent(task_id, null, "cancelled", from_session, reason || undefined);
+      }
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: result.changes > 0, task_id, cancelled: result.changes > 0 }) }],
       };
@@ -607,6 +611,8 @@ export function registerTools(server: McpServer, clientIP?: string) {
       const oldAlias = task.to_name;
       try {
         db.run("BEGIN IMMEDIATE");
+        // Ack old inbox to prevent original agent from picking it up
+        db.run("UPDATE inbox SET acked = 1 WHERE id = ?1 AND acked = 0", [task_id]);
         db.run("UPDATE tasks SET to_name = ?1, status = 'delivered', started_at = NULL, delivered_at = datetime('now') WHERE task_id = ?2", [new_alias, task_id]);
         const newInboxId = uuidv4();
         db.run("INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response) VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply')",
