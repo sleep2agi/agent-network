@@ -27,7 +27,15 @@
 |---------|------------|------|
 | `claude-code-cli` | anet + claude CLI | `claude auth login` 登录 |
 | `codex-sdk` | anet + agent-node + codex CLI | `codex auth login` 登录 |
-| `claude-agent-sdk` | anet + agent-node | 需要 API key / ANTHROPIC_BASE_URL |
+| `claude-agent-sdk` | anet + agent-node + claude CLI | Claude Agent SDK 底层 spawn claude CLI 子进程 |
+
+## 依赖检测三态
+
+| 状态 | 含义 | 显示 |
+|------|------|------|
+| installed | 已安装且版本兼容 | ✅ agent-node v1.1.0 |
+| available | 命令存在但版本不兼容或无法解析 | ⚠ agent-node v0.9.0 (需要 >= 1.0.0) |
+| missing | 未安装 | ❌ agent-node 未安装 |
 
 ## anet setup（新用户入口）
 

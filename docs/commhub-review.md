@@ -171,8 +171,8 @@ completions -- 901 rows (任务完成记录)
 
 | # | 改进 | 优先级 |
 |---|------|--------|
-| 1 | sessions 加 `session_id` 字段（Claude/Codex session） | P1 |
-| 2 | sessions 加 `config_path` 字段 | P1 |
+| 1 | sessions 加 `session_id` 字段（Claude/Codex session） | **P0** — restart-all 前置依赖 |
+| 2 | sessions 加 `config_path` 字段 | **P0** — restart-all 前置依赖 |
 | 3 | sessions 加 `channels` JSON 字段 | P2 |
 | 4 | inbox 加 `expires_at` 字段，自动清理过期消息 | P2 |
 | 5 | 清理临时测试 session（手动或加 TTL） | P1 |
@@ -182,7 +182,7 @@ completions -- 901 rows (任务完成记录)
 
 | # | 改进 | 优先级 |
 |---|------|--------|
-| 7 | report_status 上报 session_id + config_path | P1 |
+| 7 | report_status 上报 session_id + config_path | **P0** — 和上面字段配套 |
 | 8 | 新增 DELETE /api/session/:alias 清理接口 | P2 |
 | 9 | 新增 GET /api/session/:alias/inbox 查看单个 session inbox | P2 |
 | 10 | inbox 自动过期（7 天未 ack → expired） | P2 |

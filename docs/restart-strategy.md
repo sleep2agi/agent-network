@@ -119,17 +119,25 @@ tmux new-session -d -s {tmux_name || alias} -c {project_dir} \
 
 ## 健康检查
 
+两层检测：tmux session 存在 + CommHub 状态非 offline。
+
 ```typescript
-async function waitHealthy(aliases: string[], timeoutMs = 30000) {
+async function waitHealthy(nodes: { alias: string; tmux: string }[], timeoutMs = 30000) {
   const start = Date.now();
-  const pending = new Set(aliases);
+  const pending = new Set(nodes.map(n => n.alias));
   
   while (pending.size > 0 && Date.now() - start < timeoutMs) {
-    const status = await fetch(`${HUB}/api/status`).then(r => r.json());
-    for (const s of status.sessions) {
-      if (pending.has(s.alias) && s.status !== "offline") {
-        pending.delete(s.alias);
-        console.log(`  ✅ ${s.alias} → ${s.status}`);
+    for (const node of nodes) {
+      if (!pending.has(node.alias)) continue;
+      // 1. tmux session 存在？
+      try { execSync(`tmux has-session -t ${node.tmux}`, { timeout: 2000 }); }
+      catch { continue; } // tmux 不存在 → 还没起来
+      // 2. CommHub 状态？
+      const status = await fetch(`${HUB}/api/status`).then(r => r.json());
+      const s = status.sessions?.find((s: any) => s.alias === node.alias);
+      if (s && s.status !== "offline") {
+        pending.delete(node.alias);
+        console.log(`  ✅ ${node.alias} → ${s.status}`);
       }
     }
     if (pending.size > 0) await sleep(2000);
@@ -139,6 +147,18 @@ async function waitHealthy(aliases: string[], timeoutMs = 30000) {
     console.log(`  ⚠ ${alias} → 未响应（超时）`);
   }
 }
+```
+
+## dry-run 模式
+
+```bash
+anet restart-all --dry-run
+```
+
+只打印要执行的命令，不实际启动：
+```
+[dry-run] tmux new-session -d -s intern-ai -c /home/vansin/intern-ai "claude --resume ..."
+[dry-run] tmux new-session -d -s B站牛 -c /home/vansin/blueleap "agent-node --config ..."
 ```
 
 ## 跨机器

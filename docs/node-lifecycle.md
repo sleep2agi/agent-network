@@ -64,10 +64,10 @@
 | 状态 | CommHub status | 含义 | config.json 存在 | 进程存在 |
 |------|---------------|------|-----------------|---------|
 | created | (不在 CommHub) | 配置已创建，从未启动 | 是 | 否 |
-| registered | idle | 刚启动，CommHub 已注册 | 是 | 是 |
+| *(registered)* | *(idle)* | *内部瞬时态：report_status 到 SSE connected 之间，外部不可见* | 是 | 是 |
 | online/idle | idle | 在线等待任务 | 是 | 是 |
 | running/working | working | 正在处理任务 | 是 | 是 |
-| blocked | blocked | 等待外部资源 | 是 | 是 |
+| *(blocked)* | *(blocked)* | *P0 不实现，预留* | 是 | 是 |
 | error | error | 运行时错误 | 是 | 是 |
 | offline | offline | 进程不在运行 | 是 | 否 |
 | deleted | (不在 CommHub) | 已删除 | 否 | 否 |
