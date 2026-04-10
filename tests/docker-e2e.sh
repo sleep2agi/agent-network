@@ -121,7 +121,8 @@ echo ""
 # 10.1 anet stop
 echo "10.1 Testing anet stop..."
 anet create stop-test --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
-anet stop stop-test 2>&1 | grep -qi "not running" && pass "stop non-running node" || fail "stop command broken"
+STOP_OUT=$(anet stop stop-test 2>&1)
+echo "$STOP_OUT" | grep -qi "not running\|server notified" && pass "stop non-running node (server notified)" || fail "stop command broken"
 echo ""
 
 # 10.2 anet delete

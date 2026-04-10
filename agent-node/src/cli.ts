@@ -527,8 +527,15 @@ async function processInbox() {
   for (const msg of messages) {
     const from = msg.from_session || "hub";
     const content = msg.content as string;
-    log(`← [${from}] (${msg.priority || "normal"}) ${content.slice(0, 100)}`);
+    const msgType = msg.type || "task";
+    log(`← [${from}] (${msgType}/${msg.priority || "normal"}) ${content.slice(0, 100)}`);
     await ackMessage(msg.id);
+
+    // Only process task and broadcast; skip reply/message types
+    if (msgType !== "task" && msgType !== "broadcast") {
+      debug(`skip non-task message: type=${msgType}`);
+      continue;
+    }
 
     const skip = shouldSkipMessage(from, content);
     if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }

@@ -74,6 +74,20 @@ function withCors(req: Request, res: Response): Response {
 const wsTmuxIntervals = new Map<object, ReturnType<typeof setInterval>>();
 
 
+// ── Task expiration patrol (every 5 minutes) ──
+setInterval(() => {
+  try {
+    const result = db.run(
+      `UPDATE tasks SET status = 'expired', completed_at = datetime('now')
+       WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
+         AND status IN ('created', 'delivered')`
+    );
+    if (result.changes > 0) {
+      console.log(`[patrol] expired ${result.changes} stale task(s)`);
+    }
+  } catch {}
+}, 5 * 60 * 1000);
+
 Bun.serve({
   port: PORT,
   idleTimeout: 255, // max value: keep SSE connections alive (seconds)

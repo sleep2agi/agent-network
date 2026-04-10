@@ -308,8 +308,8 @@ export function registerTools(server: McpServer, clientIP?: string) {
           [id, alias, priority, task, context ?? null, from_session]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'))`,
+          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at)
+           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', '+1 hour'))`,
           [id, from_session, alias, priority, task]
         );
         db.run("COMMIT");

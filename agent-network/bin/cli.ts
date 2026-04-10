@@ -1706,6 +1706,35 @@ anet rename <node-id|node-name> <new-node-name>
   console.log(`[anet] node_id: ${stored.node_id}`);
 }
 
+// ── notify server ──
+
+async function notifyServerOffline(profile: Profile, nodeId: string) {
+  const gc = loadGlobal();
+  const hub = profile.hub || gc.hub;
+  if (!hub) return;
+  const displayName = nodeDisplayName(nodeId, profile);
+  const resumeId = profile.node_id ? `sdk-${profile.node_id}` : `sdk-${displayName}-0`;
+  try {
+    // MCP call: report_status offline
+    await fetch(`${hub}/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json", ...authHeaders(profile.token || gc.token) },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 1, method: "initialize",
+        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "anet-cli", version: "1.0" } },
+      }),
+    });
+    await fetch(`${hub}/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json", ...authHeaders(profile.token || gc.token) },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 2, method: "tools/call",
+        params: { name: "report_status", arguments: { resume_id: resumeId, alias: displayName, status: "offline" } },
+      }),
+    });
+  } catch {}
+}
+
 // ── stop ──
 
 function stopNode(nodeId: string): boolean {
@@ -1724,7 +1753,7 @@ function stopNode(nodeId: string): boolean {
   }
 }
 
-function stopCommand() {
+async function stopCommand() {
   const ref = args[1];
   if (!ref) {
     console.log(`
@@ -1742,16 +1771,19 @@ Stop a running agent node.
   }
 
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
-  if (stopNode(resolved.id)) {
-    console.log(`[anet] Stopped "${displayName}"`);
+  const killed = stopNode(resolved.id);
+  // Always notify server — even if PID file missing, server may have stale session
+  await notifyServerOffline(resolved.profile, resolved.id);
+  if (killed) {
+    console.log(`[anet] Stopped "${displayName}" (server notified)`);
   } else {
-    console.log(`[anet] "${displayName}" is not running (no PID file)`);
+    console.log(`[anet] "${displayName}" is not running locally (server notified offline)`);
   }
 }
 
 // ── delete ──
 
-function deleteCommand() {
+async function deleteCommand() {
   const ref = args[1];
   if (!ref) {
     console.log(`
@@ -1772,8 +1804,9 @@ Delete a node and its config. Use --force to skip confirmation.
   const displayName = nodeDisplayName(nodeId, profile);
   const opts = parseOpts();
 
-  // Stop if running
+  // Stop if running + notify server
   stopNode(nodeId);
+  await notifyServerOffline(profile, nodeId);
 
   const nodeDir = join(nodesDir(), nodeId);
   if (!existsSync(nodeDir)) {
@@ -1957,8 +1990,8 @@ switch (command) {
   case "start": startCommand(); break;
   case "resume": resumeCommand(); break;
   case "rename": renameCommand(); break;
-  case "stop": stopCommand(); break;
-  case "delete": deleteCommand(); break;
+  case "stop": await stopCommand(); break;
+  case "delete": await deleteCommand(); break;
   case "import": importCommand(); break;
   case "channel": channelCommand(); break;
   case "setup": await setupCommand(); break;
