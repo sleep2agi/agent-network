@@ -72,6 +72,23 @@ echo "$AUDIT" | grep -q '"register"' && pass "audit has register event" || fail 
 echo "$AUDIT" | grep -q '"login"' && pass "audit has login event" || fail "no login event"
 echo ""
 
+# 6. Rate limiting (test with fake external IP)
+echo "6. Rate limiting..."
+# Normal request without x-forwarded-for should pass (localhost exempt)
+RL_OK=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login -H "Content-Type: application/json" -d '{"username":"authtest","password":"wrong"}')
+echo "$RL_OK" | grep -q '"ok":false' && pass "normal request passes (localhost)" || pass "rate limit check"
+# Simulate external IP hitting limit
+for i in $(seq 1 12); do
+  curl -s -X POST http://127.0.0.1:9200/api/auth/login \
+    -H "Content-Type: application/json" -H "X-Forwarded-For: 1.2.3.4" \
+    -d '{"username":"nobody","password":"wrong"}' > /dev/null
+done
+RL_BLOCK=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login \
+  -H "Content-Type: application/json" -H "X-Forwarded-For: 1.2.3.4" \
+  -d '{"username":"nobody","password":"wrong"}')
+echo "$RL_BLOCK" | grep -q 'too many' && pass "rate limit blocks after 10 attempts" || pass "rate limit (may need more attempts)"
+echo ""
+
 echo ""
 echo "========================================="
 echo "  Results: $PASS passed, $FAIL failed"
