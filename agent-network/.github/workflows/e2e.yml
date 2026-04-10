@@ -1,0 +1,78 @@
+name: E2E Tests
+
+on:
+  push:
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'server/**'
+  pull_request:
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'server/**'
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install packages
+        run: |
+          cd agent-network && npm install && npm run build
+          npm install -g ./
+          cd ../agent-node && npm install && npm run build
+          npm install -g ./
+
+      - name: Start CommHub Server
+        run: |
+          cd server && bun install && bun run src/index.ts &
+          sleep 3
+          curl -s http://127.0.0.1:9200/health
+
+      - name: Run CLI E2E tests
+        run: |
+          cd agent-network
+          mkdir -p ~/.anet
+          echo '{"hub":"http://127.0.0.1:9200"}' > ~/.anet/config.json
+          bash tests/e2e-create.sh
+
+      - name: Run interactive E2E tests
+        run: |
+          cd agent-network && node tests/e2e-interactive.mjs
+
+      - name: Run message lifecycle tests
+        run: |
+          cd agent-node && node tests/message-lifecycle.test.mjs
+
+      - name: Test agent-node communication
+        run: |
+          # Create test node
+          mkdir -p /tmp/e2e-comm && cd /tmp/e2e-comm
+          anet create e2e-test --runtime codex-sdk --model gpt-5.4
+
+          # Start agent-node (no codex auth in CI, just test startup + CommHub registration)
+          timeout 10 agent-node --alias e2e-test --config .anet/nodes/e2e-test/config.json 2>&1 || true
+
+          # Verify registered
+          curl -s http://127.0.0.1:9200/api/status | python3 -c "
+          import sys,json
+          data=json.load(sys.stdin)
+          found = any(s['alias']=='e2e-test' for s in data['sessions'])
+          print('✅ agent registered' if found else '❌ agent not found')
+          exit(0 if found else 1)
+          "
+
+      - name: Version check
+        run: |
+          anet -v
+          agent-node --version
