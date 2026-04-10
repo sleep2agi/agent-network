@@ -2001,6 +2001,59 @@ function upgradeCommand() {
 
 // ── Main ──
 
+// ── status (network overview) ──
+
+async function statusCommand() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  if (!hub) { console.log("No hub configured. Run: anet init"); return; }
+
+  try {
+    const [statusRes, healthRes, tasksRes] = await Promise.all([
+      fetch(`${hub}/api/status`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({ sessions: [] })),
+      fetch(`${hub}/health`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({})),
+      fetch(`${hub}/api/tasks?limit=10`, { headers: authHeaders() }).then(r => r.json() as any).catch(() => ({ tasks: [] })),
+    ]);
+
+    const sessions = statusRes.sessions || [];
+    const sse = healthRes.sse_sessions || {};
+    const tasks = tasksRes.tasks || [];
+
+    const idle = sessions.filter((s: any) => s.status === "idle");
+    const working = sessions.filter((s: any) => s.status === "working");
+    const offline = sessions.filter((s: any) => s.status === "offline");
+
+    console.log(`\n  CommHub: ${hub}`);
+    console.log(`  Agents: ${idle.length} idle, ${working.length} working, ${offline.length} offline`);
+    console.log(`  SSE:    ${Object.keys(sse).length} connected`);
+    console.log(`  Tasks:  ${tasks.length} recent\n`);
+
+    if (working.length > 0) {
+      console.log("  Working:");
+      for (const s of working) {
+        console.log(`    ${s.alias.padEnd(16)} ${(s.task || "").slice(0, 60)}`);
+      }
+      console.log();
+    }
+
+    if (tasks.length > 0) {
+      console.log("  Recent Tasks:");
+      console.log("  STATUS     FROM            TO              CONTENT");
+      console.log("  ──────── ─────────────── ─────────────── ────────────────────────");
+      for (const t of tasks.slice(0, 10)) {
+        const st = (t.status || "?").padEnd(8);
+        const from = (t.from_name || "?").padEnd(15);
+        const to = (t.to_name || "?").padEnd(15);
+        const content = (t.content || "").slice(0, 40);
+        console.log(`  ${st} ${from} ${to} ${content}`);
+      }
+      console.log();
+    }
+  } catch (e: any) {
+    console.error(`Failed to connect to ${hub}: ${e.message}`);
+  }
+}
+
 switch (command) {
   case "init":
     if (args[1] === "project") initProject();
@@ -2020,6 +2073,7 @@ switch (command) {
   case "upgrade": upgradeCommand(); break;
   case "session": sessionCommand(); break;
   case "ls": case "list": lsCommand(); break;
+  case "status": await statusCommand(); break;
   case "run": runCommand(); break;
   case "-v": case "--version": case "version": {
     printVersionReport();
