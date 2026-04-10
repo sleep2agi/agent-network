@@ -1,5 +1,28 @@
 # Agent Network Evolution Log
 
+## V3.2 Production Ready (2026-04-10) — v1.0.0 READY
+
+### Stats
+- 116 commits, 40 npm preview packages
+- 186 total regression tests (137 base + 17 auth + 16 network + 16 config)
+- 11 database tables, 18 MCP tools, 13 REST endpoints, 31 CLI commands
+- All evaluations 10/10
+- GitHub Actions CI: GREEN
+- Security scan: CLEAN
+
+### Added since V3.1
+- **Rate limiting**: register 30/min, login 10/min per IP (429)
+- **anet demo**: live system dashboard
+- **anet info <node>**: detailed node inspection
+- **anet network info**: current network stats
+- **anet server local**: zero-config local setup
+- **examples/README.md**: demo scenarios + cheat sheet
+- **CHANGELOG.md**: complete release notes
+- **CI fix**: make+g++ for node-pty compilation
+- **Security scan**: IP sanitized from archived docs
+
+---
+
 ## V3.1 License + Commercial (2026-04-10) — COMPLETE
 
 ### Stats
