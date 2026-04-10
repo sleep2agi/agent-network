@@ -102,8 +102,10 @@ Bun.serve({
 
     // ── WebSocket: tmux terminal ──
     const wsMatch = url.pathname.match(/^\/ws\/tmux\/([a-zA-Z0-9_-]+)$/);
-    if (wsMatch && server.upgrade(req, { data: { tmuxName: wsMatch[1] } })) {
-      return; // upgraded
+    if (wsMatch) {
+      const authErr = requireAuth(req);
+      if (authErr) return withCors(req, authErr);
+      if (server.upgrade(req, { data: { tmuxName: wsMatch[1] } })) return;
     }
 
     // ── MCP Streamable HTTP endpoint ──

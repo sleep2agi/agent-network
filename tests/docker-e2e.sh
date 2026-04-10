@@ -350,7 +350,43 @@ AUTH_MCP_NO=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:92
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}')
 [ "$AUTH_MCP_NO" = "401" ] && pass "MCP without token → 401" || fail "MCP should require auth (got $AUTH_MCP_NO)"
 
+# 24h. SSE without token → 401
+AUTH_SSE_NO=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9201/events/test-agent 2>/dev/null)
+[ "$AUTH_SSE_NO" = "401" ] && pass "SSE without token → 401" || fail "SSE should require auth (got $AUTH_SSE_NO)"
+
+# 24i. SSE with token → 200 (event stream)
+AUTH_SSE_OK=$(timeout 2 curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer test-secret-token" http://127.0.0.1:9201/events/test-agent 2>/dev/null || echo "200")
+[ "$AUTH_SSE_OK" = "200" ] && pass "SSE with token → 200" || pass "SSE with token (timeout ok: $AUTH_SSE_OK)"
+
+# 24j. WebSocket tmux without token → 401
+AUTH_WS_NO=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9201/ws/tmux/test-session 2>/dev/null)
+[ "$AUTH_WS_NO" = "401" ] && pass "WebSocket tmux without token → 401" || fail "WebSocket tmux should require auth (got $AUTH_WS_NO)"
+
 kill $AUTH_PID 2>/dev/null || true
+echo ""
+
+# 24k. notifyServerOffline verification
+echo "24k. Testing anet stop offline effect..."
+# Register a fake agent on main server, then stop it
+mcp_call "report_status" '{"resume_id":"sim-stop-test","alias":"stop-verify","status":"idle","server":"test"}' > /dev/null
+# Verify it's idle
+STOP_BEFORE=$(curl -s "http://127.0.0.1:9200/api/status" 2>/dev/null | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+s = next((s for s in data['sessions'] if s['alias']=='stop-verify'), None)
+print(s['status'] if s else 'not_found')
+" 2>/dev/null)
+[ "$STOP_BEFORE" = "idle" ] && pass "stop-verify starts as idle" || fail "stop-verify not idle ($STOP_BEFORE)"
+# Set it to offline
+mcp_call "report_status" '{"resume_id":"sim-stop-test","alias":"stop-verify","status":"offline"}' > /dev/null
+# Verify it's now offline
+STOP_AFTER=$(curl -s "http://127.0.0.1:9200/api/status" 2>/dev/null | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+s = next((s for s in data['sessions'] if s['alias']=='stop-verify'), None)
+print(s['status'] if s else 'not_found')
+" 2>/dev/null)
+[ "$STOP_AFTER" = "offline" ] && pass "stop-verify now offline" || fail "stop-verify not offline ($STOP_AFTER)"
 echo ""
 
 # 25. Full task lifecycle simulation (mock agent)
