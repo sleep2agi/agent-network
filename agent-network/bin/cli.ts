@@ -1690,18 +1690,48 @@ Data: .anet/nodes/<node-id>/channels/<type>/
 
 // ── upgrade ──
 
+function printManualAnetUpgrade() {
+  console.log("   Run manually after this command exits:");
+  console.log("     npm install -g @sleep2agi/agent-network@latest");
+  console.log("   Or run in a fresh shell:");
+  console.log("     sh -c 'npm install -g @sleep2agi/agent-network@latest && anet -v'");
+}
+
 function upgradeCommand() {
-  console.log("[anet] Upgrading all packages...\n");
+  const opts = parseOpts();
+  const forkScript = opts["fork-script"];
+
+  console.log("[anet] Upgrade plan\n");
+  console.log("1/2 anet (self)");
+  console.log("   Automatic self-upgrade is disabled.");
+  console.log("   Reason: upgrading the currently running anet process can remove or replace the CLI mid-run.");
+  if (forkScript) {
+    try {
+      const child = spawn(forkScript, [], {
+        stdio: "inherit",
+        shell: true,
+        detached: true,
+      });
+      child.unref();
+      console.log(`   Spawned external upgrade script: ${forkScript}`);
+      console.log("   Re-run `anet -v` after the script finishes.");
+    } catch (e: any) {
+      console.log(`   ⚠ Failed to start external script: ${e.message}`);
+      printManualAnetUpgrade();
+    }
+  } else {
+    printManualAnetUpgrade();
+  }
+
   try {
-    console.log("1/2 Updating @sleep2agi/agent-network...");
-    execSync("npm install -g @sleep2agi/agent-network@latest", { stdio: "inherit" });
-  } catch { console.log("   ⚠ Failed to update agent-network"); }
-  try {
-    console.log("\n2/2 Updating @sleep2agi/agent-node...");
-    execSync("npm install -g @sleep2agi/agent-node@latest", { stdio: "inherit" });
-  } catch { console.log("   ⚠ Failed to update agent-node"); }
-  console.log("\n✅ Done. Check versions:");
-  try { execSync("anet -v", { stdio: "inherit" }); } catch {}
+    console.log("\n2/2 agent-node");
+    execSync("npm install -g @sleep2agi/agent-node@latest", { stdio: "inherit", shell: "/bin/bash" });
+  } catch {
+    console.log("   ⚠ Failed to update @sleep2agi/agent-node");
+  }
+
+  console.log("\n[anet] Current versions:");
+  printVersionReport();
 }
 
 // ── Main ──

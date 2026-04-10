@@ -6,15 +6,19 @@ RUN apt-get update && apt-get install -y curl python3 && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Install anet + agent-node
-RUN npm install -g @sleep2agi/agent-network@1.3.3 @sleep2agi/agent-node@2.0.0
+# Install anet (global)
+RUN npm install -g @sleep2agi/agent-network@latest
 
-# Copy server + test script
+# Copy local server + agent-node (V2 dev code)
 WORKDIR /app
 COPY server/ /app/server/
+COPY agent-node/ /app/agent-node/
 COPY tests/docker-e2e.sh /app/test.sh
 RUN chmod +x /app/test.sh
 RUN cd /app/server && bun install
+
+# Install local agent-node globally
+RUN cd /app/agent-node && npm install && npm link
 
 # Setup anet config
 RUN mkdir -p /root/.anet && \

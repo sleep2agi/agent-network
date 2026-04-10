@@ -25,6 +25,13 @@ echo "2. Testing anet -v..."
 anet -v 2>&1 | grep -q "anet v" && pass "anet version" || fail "anet version"
 echo ""
 
+# 2.1 anet upgrade should not self-remove
+echo "2.1 Testing anet upgrade safety..."
+UPGRADE_OUTPUT=$(anet upgrade 2>&1 || true)
+echo "$UPGRADE_OUTPUT" | grep -q "Automatic self-upgrade is disabled" && pass "upgrade skips in-process self-update" || fail "upgrade self-update guard missing"
+anet -v 2>&1 | grep -q "anet v" && pass "anet still available after upgrade" || fail "anet missing after upgrade"
+echo ""
+
 # 3. anet create (param mode)
 echo "3. Testing anet create..."
 mkdir -p /tmp/test && cd /tmp/test

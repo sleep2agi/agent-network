@@ -352,17 +352,28 @@ async function processWithClaude(task: string, from: string): Promise<string> {
 // ══════════════════════════════════════
 let codexThread: any = null;
 
+// Codex instructions 提到外面，retry 复用
+const CODEX_INSTRUCTIONS = SYSTEM_PROMPT || [
+  `你是 ${ALIAS}，一个 AI Agent 节点，工作目录：${process.cwd()}。`,
+  `你通过通信网络接收任务。收到任务后执行并返回结果。`,
+  `规则：`,
+  `1. 只回复有实质内容的结果。`,
+  `2. 绝对不要回复"收到""好的""ok""在线""待命""等待任务"等确认消息。`,
+  `3. 没有新任务时保持完全沉默，不要主动发任何消息。`,
+  `4. 不要调用任何通信工具（send_task/send_message 等）。`,
+  `5. 你的回复会被系统自动发送给任务发送者。`,
+].join("\n");
+
+const CODEX_CONFIG = {
+  model_auto_compact_token_limit: 200000,
+  developer_instructions: CODEX_INSTRUCTIONS,
+};
+
 async function processWithCodex(task: string, from: string, images?: string[]): Promise<string> {
   const { Codex } = await import("@openai/codex-sdk");
 
   if (!codexThread) {
-    const codexInstructions = SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI Agent 节点。你通过 CommHub 通信网络接收任务。收到任务后理解内容、执行任务（可以读写文件、执行命令）、返回执行结果。你的回复会被自动发送给任务发送者。当前工作目录：${process.cwd()}。重要：不要回复纯确认消息（如"收到""好的""ok"），必须有实质内容才回复。无实质进展时保持沉默。没有新任务时保持安静，不要主动发消息询问或提示"等待任务"，等待下一条任务即可。`;
-    const codex = new Codex({
-      config: {
-        model_auto_compact_token_limit: 200000,
-        developer_instructions: codexInstructions,
-      },
-    });
+    const codex = new Codex({ config: CODEX_CONFIG });
     const codexModel = MODEL || "gpt-5.4";
     const codexOpts = {
       skipGitRepoCheck: true,
@@ -381,7 +392,7 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
 
   const codexModelName = MODEL || "gpt-5.4";
   log(`[codex] model=${codexModelName} thread=${codexThread?.id || "new"}`);
-  const promptText = `${task}\n\n（直接回答，不要调用任何通信工具，不要发消息给其他人）`;
+  const promptText = task; // developer_instructions 已包含行为规则
   // Codex SDK 支持 structured input: text + local_image
   const input: any = images?.length
     ? [{ type: "text", text: promptText }, ...images.map(p => ({ type: "local_image", path: p }))]
@@ -416,7 +427,7 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
     return finalResponse || "（无回复）";
   } catch (e: any) {
     log(`codex thread error: ${e.message}, 重建`);
-    const codex = new Codex({ config: { model_auto_compact_token_limit: 200000, developer_instructions: SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI Agent 节点。` } });
+    const codex = new Codex({ config: CODEX_CONFIG });
     codexThread = codex.startThread({
       skipGitRepoCheck: true,
       approvalPolicy: "never" as const,
@@ -512,7 +523,6 @@ async function processInbox() {
     if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }
 
     const result = await processTask(content, from);
-    lastReplyTime[from] = Date.now();
 
     // 第四道防线：低价值回复不发
     if (isLowValueText(result)) {
@@ -522,6 +532,7 @@ async function processInbox() {
 
     try {
       await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`);
+      lastReplyTime[from] = Date.now(); // H3 fix: 只在成功回复后设冷却
       log(`→ [${from}] ${result.slice(0, 100)}`);
     } catch (e: any) { warn(`reply failed: ${e.message}`); }
   }
