@@ -195,6 +195,37 @@ Bun.serve({
       }
     }
 
+    // ── V3: Admin APIs (require auth) ──
+    if (url.pathname === "/api/users" && req.method === "GET") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved || resolved.user.role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "admin required" }, { status: 403 }));
+      }
+      const users = db.query("SELECT user_id, username, display_name, email, role, created_at FROM users ORDER BY created_at").all();
+      return withCors(req, Response.json({ ok: true, users }));
+    }
+
+    const netDetailMatch = url.pathname.match(/^\/api\/networks\/([^/]+)$/);
+    if (netDetailMatch && req.method === "GET") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      const networkId = netDetailMatch[1];
+      const network = db.query<any, [string]>("SELECT * FROM networks WHERE network_id = ?1").get(networkId);
+      if (!network) return withCors(req, Response.json({ ok: false, error: "network not found" }, { status: 404 }));
+      // Get network stats
+      const nodeCount = db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM nodes WHERE network_id = ?1").get(networkId);
+      const sessionCount = db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1").get(networkId);
+      const taskStats = db.query<any, [string]>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status").all(networkId);
+      return withCors(req, Response.json({
+        ok: true, network,
+        stats: { nodes: nodeCount?.cnt || 0, sessions: sessionCount?.cnt || 0, tasks: taskStats },
+      }));
+    }
+
     // ── REST: health (public, no auth) ──
     if (url.pathname === "/health") {
       const count = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM sessions").get();
