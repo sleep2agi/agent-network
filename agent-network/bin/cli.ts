@@ -594,6 +594,13 @@ Setup:
 
 Other:
   anet import [alias]           Import sessions from CommHub
+  anet login                    Login (username + password)
+  anet login --token <tok>      Login with API token
+  anet logout                   Remove saved token
+  anet whoami                   Show current user + networks
+  anet network ls               List my networks
+  anet network create <name>    Create a network
+  anet network use <name>       Switch to a network
   anet logs <name>              Show recent agent logs
   anet doctor                   System diagnostic check
   anet run                      Standalone SSE agent
@@ -2117,6 +2124,164 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diff / 86400000)}d`;
 }
 
+// ── login/logout/whoami ──
+
+async function loginCommand() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  if (!hub) { console.error("Run 'anet init' first."); return; }
+
+  const opts = parseOpts();
+
+  // anet login --token <token>
+  if (opts.token) {
+    try {
+      const res = await fetch(`${hub}/api/auth/me`, { headers: { Authorization: `Bearer ${opts.token}` } }).then(r => r.json() as any);
+      if (!res.ok) { console.error(`Invalid token: ${res.error}`); return; }
+      gc.token = opts.token;
+      gc.user = res.user;
+      gc.network_id = res.current_network;
+      saveGlobal(gc);
+      console.log(`[anet] Logged in as ${res.user.username} (token)`);
+      console.log(`[anet] Network: ${res.current_network || "none"}`);
+    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    return;
+  }
+
+  // Interactive login
+  const username = opts.username || opts.user || await ask("Username: ");
+  const password = opts.password || opts.pass || await ask("Password: ");
+  closeRL();
+
+  if (!username || !password) { console.error("Username and password required."); return; }
+
+  try {
+    const res = await fetch(`${hub}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    }).then(r => r.json() as any);
+
+    if (!res.ok) { console.error(`Login failed: ${res.error}`); return; }
+
+    gc.token = res.token;
+    gc.user = res.user;
+    // Get default network
+    const nets = await fetch(`${hub}/api/networks`, { headers: { Authorization: `Bearer ${res.token}` } }).then(r => r.json() as any);
+    if (nets.ok && nets.networks?.length > 0) {
+      gc.network_id = nets.networks[0].network_id;
+      gc.network_name = nets.networks[0].network_name;
+    }
+    saveGlobal(gc);
+    console.log(`[anet] Logged in as ${res.user.username}`);
+    if (gc.network_name) console.log(`[anet] Network: ${gc.network_name} (${gc.network_id?.slice(0, 12)})`);
+    console.log(`[anet] Token saved to ~/.anet/config.json`);
+  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+}
+
+function logoutCommand() {
+  const gc = loadGlobal();
+  delete gc.token;
+  delete gc.user;
+  delete gc.network_id;
+  delete gc.network_name;
+  saveGlobal(gc);
+  console.log("[anet] Logged out. Token removed.");
+}
+
+async function whoamiCommand() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  const token = gc.token;
+  if (!hub || !token) { console.log("Not logged in. Run: anet login"); return; }
+
+  try {
+    const res = await fetch(`${hub}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json() as any);
+    if (!res.ok) { console.log("Session expired. Run: anet login"); return; }
+    console.log(`\n  User: ${res.user.username} (${res.user.user_id})`);
+    console.log(`  Role: ${res.user.role}`);
+    console.log(`  Hub:  ${hub}`);
+    if (res.networks?.length) {
+      console.log(`\n  Networks:`);
+      for (const n of res.networks) {
+        const current = n.network_id === gc.network_id ? " ← current" : "";
+        console.log(`    ${n.network_name} (${n.network_id.slice(0, 12)})${current}`);
+      }
+    }
+    console.log();
+  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+}
+
+// ── network ──
+
+async function networkCommand() {
+  const sub = args[1];
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  const token = gc.token;
+
+  if (!hub) { console.error("Run 'anet init' first."); return; }
+  if (!token) { console.error("Run 'anet login' first."); return; }
+
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+  if (sub === "create") {
+    const name = args[2];
+    const opts = parseOpts();
+    if (!name) { console.log("Usage: anet network create <name> [--description <desc>]"); return; }
+    try {
+      const res = await fetch(`${hub}/api/networks`, {
+        method: "POST", headers,
+        body: JSON.stringify({ name, description: opts.description }),
+      }).then(r => r.json() as any);
+      if (res.ok) {
+        console.log(`[anet] Network "${name}" created (${res.network_id})`);
+      } else {
+        console.error(`Failed: ${res.error}`);
+      }
+    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    return;
+  }
+
+  if (sub === "ls" || sub === "list" || !sub) {
+    try {
+      const res = await fetch(`${hub}/api/networks`, { headers }).then(r => r.json() as any);
+      if (!res.ok) { console.error(res.error); return; }
+      if (!res.networks?.length) { console.log("\n  No networks. Create one: anet network create <name>\n"); return; }
+      console.log("\n  Networks:\n");
+      for (const n of res.networks) {
+        const current = n.network_id === gc.network_id ? " ← current" : "";
+        console.log(`  ${n.network_name.padEnd(20)} ${n.network_id.slice(0, 16)}${current}`);
+      }
+      console.log();
+    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    return;
+  }
+
+  if (sub === "use") {
+    const name = args[2];
+    if (!name) { console.log("Usage: anet network use <name>"); return; }
+    try {
+      const res = await fetch(`${hub}/api/networks`, { headers }).then(r => r.json() as any);
+      const net = res.networks?.find((n: any) => n.network_name === name || n.network_id === name);
+      if (!net) { console.error(`Network "${name}" not found.`); return; }
+      gc.network_id = net.network_id;
+      gc.network_name = net.network_name;
+      saveGlobal(gc);
+      console.log(`[anet] Switched to network "${net.network_name}" (${net.network_id.slice(0, 12)})`);
+    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    return;
+  }
+
+  console.log(`
+anet network <command>
+
+  ls                    List my networks
+  create <name>         Create a new network
+  use <name>            Switch to a network
+`);
+}
+
 // ── logs ──
 
 function logsCommand() {
@@ -2236,6 +2401,10 @@ switch (command) {
   case "tasks": await tasksCommand(); break;
   case "doctor": await doctorCommand(); break;
   case "logs": logsCommand(); break;
+  case "login": await loginCommand(); break;
+  case "logout": logoutCommand(); break;
+  case "whoami": await whoamiCommand(); break;
+  case "network": await networkCommand(); break;
   case "run": runCommand(); break;
   case "-v": case "--version": case "version": {
     printVersionReport();
