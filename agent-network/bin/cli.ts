@@ -2200,26 +2200,30 @@ async function quickstartCommand() {
   // Check if already exists
   const existing = resolveNodeRef(agentName);
   if (!existing) {
-    const runtimes = ["codex-sdk (GPT-5.4)", "http-api (MiniMax/OpenAI)", "claude-agent-sdk (Claude)"];
-    console.log("\n  Runtime 选择:");
-    runtimes.forEach((r, i) => console.log(`    ${i + 1}) ${r}`));
-
-    let runtime = "codex-sdk";
-    try {
-      const choice = await (async () => {
-        const { select: sel } = await import("@inquirer/prompts");
-        return sel({
-          message: "选择 Runtime:",
-          choices: [
-            { value: "codex-sdk", name: "codex-sdk (GPT-5.4) — 推荐" },
-            { value: "http-api", name: "http-api (MiniMax/OpenAI 兼容)" },
-            { value: "claude-agent-sdk", name: "claude-agent-sdk (Claude Code)" },
-          ],
-        });
-      })();
-      runtime = choice;
-    } catch {
-      // inquirer not available, use default
+    let runtime = opts2.runtime || "codex-sdk";
+    // Only show interactive selection if no runtime specified and TTY available
+    if (!opts2.runtime && process.stdin.isTTY) {
+      const runtimes = ["codex-sdk (GPT-5.4)", "http-api (MiniMax/OpenAI)", "claude-agent-sdk (Claude)"];
+      console.log("\n  Runtime 选择:");
+      runtimes.forEach((r, i) => console.log(`    ${i + 1}) ${r}`));
+      try {
+        const choice = await (async () => {
+          const { select: sel } = await import("@inquirer/prompts");
+          return sel({
+            message: "选择 Runtime:",
+            choices: [
+              { value: "codex-sdk", name: "codex-sdk (GPT-5.4) — 推荐" },
+              { value: "http-api", name: "http-api (MiniMax/OpenAI 兼容)" },
+              { value: "claude-agent-sdk", name: "claude-agent-sdk (Claude Code)" },
+            ],
+          });
+        })();
+        runtime = choice;
+      } catch {
+        // inquirer not available, use default
+      }
+    } else if (!opts2.runtime) {
+      console.log(`  Using default runtime: ${runtime}`);
     }
 
     const createArgs = ["create", agentName, "--runtime", runtime];

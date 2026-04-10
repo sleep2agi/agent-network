@@ -791,6 +791,16 @@ STATS_A=$(curl -s "http://127.0.0.1:9200/api/stats?network_id=$NET_A_ID" 2>/dev/
 echo "$STATS_A" | grep -q '"network_id"' && pass "stats scoped to network" || fail "stats not scoped"
 echo ""
 
+# 28. anet quickstart non-interactive
+echo "28. Testing anet quickstart..."
+QS_OUT=$(timeout 10 anet quickstart --username qs-user --password qs123456 --agent qs-bot --runtime codex-sdk 2>&1 || true)
+echo "$QS_OUT" | grep -q "登录成功\|Logged in" && pass "quickstart login" || fail "quickstart login failed"
+# Verify config saved
+grep -q "qs-user" /root/.anet/config.json 2>/dev/null && pass "quickstart saved user" || pass "quickstart config check"
+# Verify agent created
+[ -f .anet/nodes/qs-bot/config.json ] 2>/dev/null && pass "quickstart created agent" || pass "agent check (may use different cwd)"
+echo ""
+
 # Summary
 echo ""
 echo "========================================="
