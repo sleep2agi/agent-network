@@ -240,6 +240,61 @@ if (!existingLicense) {
   console.log("[commhub] 🎉 14-day free trial started!");
 }
 
+// ── V3.13: network_members table (user ↔ network many-to-many) ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_members (
+    network_id  TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    role        TEXT NOT NULL DEFAULT 'member',
+    invited_by  TEXT,
+    joined_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_netmem_user ON network_members(user_id);
+  CREATE INDEX IF NOT EXISTS idx_netmem_network ON network_members(network_id);
+`);
+
+// ── V3.13: network_invites table ──
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_invites (
+    invite_code TEXT PRIMARY KEY,
+    network_id  TEXT NOT NULL,
+    role        TEXT NOT NULL DEFAULT 'member',
+    created_by  TEXT NOT NULL,
+    max_uses    INTEGER DEFAULT 1,
+    used_count  INTEGER DEFAULT 0,
+    expires_at  TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// ── V3.13: networks visibility + max_members ──
+try { db.exec("ALTER TABLE networks ADD COLUMN visibility TEXT DEFAULT 'private'"); } catch {}
+try { db.exec("ALTER TABLE networks ADD COLUMN max_members INTEGER DEFAULT 50"); } catch {}
+
+// ── V3.13: users plan field ──
+try { db.exec("ALTER TABLE users ADD COLUMN plan TEXT DEFAULT 'free'"); } catch {}
+
+// ── V3.13: migrate existing networks → network_members (owner) ──
+try {
+  const networks = db.all<any>("SELECT network_id, owner_id FROM networks");
+  for (const net of networks) {
+    const exists = db.get<any>("SELECT 1 FROM network_members WHERE network_id = ?1 AND user_id = ?2", net.network_id, net.owner_id);
+    if (!exists) {
+      db.run("INSERT INTO network_members (network_id, user_id, role) VALUES (?1, ?2, 'owner')", [net.network_id, net.owner_id]);
+    }
+  }
+} catch {}
+
+// ── V3.13: first registered user → admin ──
+try {
+  const firstUser = db.get<any>("SELECT user_id, role FROM users ORDER BY created_at LIMIT 1");
+  if (firstUser && firstUser.role !== "admin") {
+    db.run("UPDATE users SET role = 'admin' WHERE user_id = ?1", [firstUser.user_id]);
+  }
+} catch {}
+
 // ── V3: add network_id to existing tables ──
 for (const table of ["sessions", "nodes", "tasks", "inbox", "task_events"]) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN network_id TEXT`); } catch {}

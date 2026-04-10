@@ -183,3 +183,93 @@ export function changePassword(userId: string, oldPassword: string, newPassword:
   db.run("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);
   return { ok: true };
 }
+
+// ══════════════════════════════════════
+//  V3.13: Network Members
+// ══════════════════════════════════════
+
+export function getNetworkMembers(networkId: string) {
+  return db.all<any>(
+    `SELECT nm.user_id, nm.role, nm.joined_at, nm.invited_by, u.username, u.display_name
+     FROM network_members nm JOIN users u ON nm.user_id = u.user_id
+     WHERE nm.network_id = ?1 ORDER BY nm.joined_at`,
+    networkId);
+}
+
+export function getUserNetworkRole(userId: string, networkId: string): string | null {
+  const row = db.get<any>("SELECT role FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
+  return row?.role || null;
+}
+
+export function addNetworkMember(networkId: string, userId: string, role: string, invitedBy?: string): { ok: boolean; error?: string } {
+  const existing = db.get<any>("SELECT 1 FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
+  if (existing) return { ok: false, error: "user already a member" };
+  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by) VALUES (?1, ?2, ?3, ?4)",
+    [networkId, userId, role, invitedBy || null]);
+  return { ok: true };
+}
+
+export function updateMemberRole(networkId: string, userId: string, newRole: string): { ok: boolean; error?: string } {
+  if (newRole === "owner") return { ok: false, error: "cannot assign owner role" };
+  const result = db.run("UPDATE network_members SET role = ?1 WHERE network_id = ?2 AND user_id = ?3 AND role != 'owner'",
+    [newRole, networkId, userId]);
+  return result.changes > 0 ? { ok: true } : { ok: false, error: "member not found or is owner" };
+}
+
+export function removeNetworkMember(networkId: string, userId: string): { ok: boolean; error?: string } {
+  const member = db.get<any>("SELECT role FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
+  if (!member) return { ok: false, error: "not a member" };
+  if (member.role === "owner") return { ok: false, error: "cannot remove owner" };
+  db.run("DELETE FROM network_members WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
+  return { ok: true };
+}
+
+// ══════════════════════════════════════
+//  V3.13: Invite Codes
+// ══════════════════════════════════════
+
+export function createInvite(networkId: string, createdBy: string, role: string = "member", maxUses: number = 1, expiresInDays?: number): { ok: boolean; invite_code?: string; error?: string } {
+  if (!["admin", "member", "viewer"].includes(role)) return { ok: false, error: "invalid role" };
+  const code = `inv_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const expiresAt = expiresInDays ? `datetime('now', '+${expiresInDays} days')` : null;
+  if (expiresAt) {
+    db.run("INSERT INTO network_invites (invite_code, network_id, role, created_by, max_uses, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now', ?6))",
+      [code, networkId, role, createdBy, maxUses, `+${expiresInDays} days`]);
+  } else {
+    db.run("INSERT INTO network_invites (invite_code, network_id, role, created_by, max_uses) VALUES (?1, ?2, ?3, ?4, ?5)",
+      [code, networkId, role, createdBy, maxUses]);
+  }
+  return { ok: true, invite_code: code };
+}
+
+export function joinByInvite(inviteCode: string, userId: string): { ok: boolean; network_id?: string; role?: string; error?: string } {
+  const invite = db.get<any>("SELECT * FROM network_invites WHERE invite_code = ?1", inviteCode);
+  if (!invite) return { ok: false, error: "invalid invite code" };
+  if (invite.max_uses > 0 && invite.used_count >= invite.max_uses) return { ok: false, error: "invite code fully used" };
+  if (invite.expires_at) {
+    const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+    if (invite.expires_at < now) return { ok: false, error: "invite code expired" };
+  }
+  // Check not already member
+  const existing = db.get<any>("SELECT 1 FROM network_members WHERE network_id = ?1 AND user_id = ?2", invite.network_id, userId);
+  if (existing) return { ok: false, error: "already a member of this network" };
+  // Add member + increment used count
+  db.run("INSERT INTO network_members (network_id, user_id, role, invited_by) VALUES (?1, ?2, ?3, ?4)",
+    [invite.network_id, userId, invite.role, invite.created_by]);
+  db.run("UPDATE network_invites SET used_count = used_count + 1 WHERE invite_code = ?1", [inviteCode]);
+  // Auto-create a token for this network
+  const token = generateToken();
+  const tokenId = generateId("tok");
+  db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    [tokenId, hashToken(token), userId, invite.network_id, "auto-join", "full"]);
+  return { ok: true, network_id: invite.network_id, role: invite.role };
+}
+
+/** Get all networks a user is a member of (replaces owner-only query) */
+export function getUserAllNetworks(userId: string) {
+  return db.all<any>(
+    `SELECT n.*, nm.role as member_role
+     FROM networks n JOIN network_members nm ON n.network_id = nm.network_id
+     WHERE nm.user_id = ?1 ORDER BY nm.role = 'owner' DESC, n.created_at`,
+    userId);
+}
