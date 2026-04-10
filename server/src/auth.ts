@@ -1,7 +1,7 @@
 /**
  * V3 Auth module — user registration, login, token management
  */
-import { db, generateId, hashPassword, hashToken, generateToken, uuidv4 } from "./db.js";
+import { db, generateId, hashPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js";
 
 export interface AuthUser {
   user_id: string;
@@ -15,7 +15,9 @@ export interface AuthResult {
   ok: boolean;
   error?: string;
   user?: AuthUser;
-  token?: string;
+  token?: string;           // user token (utok_)
+  network_token?: string;   // network token (ntok_) for default network
+  network_id?: string;
 }
 
 export function register(username: string, password: string, email?: string, displayName?: string): AuthResult {
@@ -49,18 +51,28 @@ export function register(username: string, password: string, email?: string, dis
     [networkId, userId]
   );
 
-  // Auto-create API token
-  const token = generateToken();
-  const tokenId = generateId("tok");
+  // User token (utok_) — not bound to network, for CLI/Dashboard login
+  const userToken = generateUserToken();
+  const userTokenId = generateId("tok");
   db.run(
     "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-    [tokenId, hashToken(token), userId, networkId, "default", "full"]
+    [userTokenId, hashToken(userToken), userId, null, "user-login", "user"]
+  );
+
+  // Network token (ntok_) — bound to default network, for agent-node
+  const networkToken = generateNetworkToken();
+  const networkTokenId = generateId("tok");
+  db.run(
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    [networkTokenId, hashToken(networkToken), userId, networkId, "default-network", "network"]
   );
 
   return {
     ok: true,
     user: { user_id: userId, username, display_name: displayName || username, email: email || null, role: isFirstUser ? "admin" : "user" },
-    token,
+    token: userToken,
+    network_token: networkToken,
+    network_id: networkId,
   };
 }
 
@@ -72,34 +84,52 @@ export function login(username: string, password: string): AuthResult {
   if (!user) return { ok: false, error: "invalid username or password" };
   if (user.password_hash !== hashPassword(password)) return { ok: false, error: "invalid username or password" };
 
-  // Find or create token
-  let tokenRow = db.get<any>(
-    "SELECT token_id FROM api_tokens WHERE user_id = ?1 ORDER BY created_at DESC LIMIT 1",
+  // Generate/rotate user token (utok_, not bound to network)
+  let userTokenRow = db.get<any>(
+    "SELECT token_id FROM api_tokens WHERE user_id = ?1 AND scope = 'user' ORDER BY created_at DESC LIMIT 1",
     user.user_id);
 
-  let token: string;
-  if (tokenRow) {
-    // Generate new token (rotate)
-    token = generateToken();
+  const userToken = generateUserToken();
+  if (userTokenRow) {
     db.run("UPDATE api_tokens SET token_hash = ?1, last_used_at = datetime('now') WHERE token_id = ?2",
-      [hashToken(token), tokenRow.token_id]);
+      [hashToken(userToken), userTokenRow.token_id]);
   } else {
-    token = generateToken();
     const tokenId = generateId("tok");
-    const networkId = db.get<any>(
-      "SELECT network_id FROM networks WHERE owner_id = ?1 LIMIT 1",
-      user.user_id)?.network_id;
     db.run(
-      "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name) VALUES (?1, ?2, ?3, ?4, ?5)",
-      [tokenId, hashToken(token), user.user_id, networkId || null, "login"]
+      "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+      [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user"]
     );
   }
+
+  // Find default network
+  const defaultNet = db.get<any>(
+    "SELECT network_id FROM network_members WHERE user_id = ?1 ORDER BY role = 'owner' DESC LIMIT 1",
+    user.user_id);
+  const networkId = defaultNet?.network_id || null;
+
+  // Backward compat: also try old atok_ tokens
+  const token = userToken;
 
   return {
     ok: true,
     user: { user_id: user.user_id, username: user.username, display_name: user.display_name, email: user.email, role: user.role },
     token,
+    network_id: networkId,
   };
+}
+
+/** Create a network-scoped token (ntok_) for a specific node */
+export function createNetworkTokenForNode(userId: string, networkId: string, nodeName: string): { ok: boolean; token?: string; error?: string } {
+  // Verify user is a member of this network with write access
+  const role = getUserNetworkRole(userId, networkId);
+  if (!role || role === "viewer") return { ok: false, error: "no write access to this network" };
+  const token = generateNetworkToken();
+  const tokenId = generateId("tok");
+  db.run(
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    [tokenId, hashToken(token), userId, networkId, `node:${nodeName}`, "network"]
+  );
+  return { ok: true, token };
 }
 
 export function resolveToken(token: string): { user: AuthUser; networkId: string | null } | null {

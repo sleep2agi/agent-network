@@ -324,6 +324,14 @@ export function generateToken(): string {
   return `atok_${crypto.randomUUID().replace(/-/g, "")}`;
 }
 
+export function generateUserToken(): string {
+  return `utok_${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+export function generateNetworkToken(): string {
+  return `ntok_${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
 export function logAudit(userId: string | null, username: string | null, action: string, targetType?: string, targetId?: string, detail?: string, ip?: string, networkId?: string) {
   try {
     db.run(
