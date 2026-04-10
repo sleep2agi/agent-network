@@ -1,22 +1,39 @@
 # Agent Network Evolution Log
 
-## V3.5 PG Prep (2026-04-11) — db.transaction() migration
+## V3.6 PostgreSQL Dual Support (2026-04-11) — IN PROGRESS
 
 ### Stats
-- 146 commits, 51 npm preview packages
+- 149 commits, 51 npm preview packages
+- 200 total regression tests (137 base + 25 auth + 22 network + 16 config)
+- 11 database tables, 18 MCP tools, 17 REST endpoints, 34 CLI commands
+
+### Added since V3.5
+- **SQLiteAdapter**: Full implementation wrapping bun:sqlite (run/get/all/exec/transaction/close)
+- **DbAdapter interface**: Unified sync interface for all DB access
+- **85+ call sites migrated**: Zero raw db.query() remains in server/src/
+- **PgAdapter**: SQL auto-translation (datetime→NOW, ?N→$N, AUTOINCREMENT→SERIAL)
+- **DATABASE_URL**: env-driven adapter selection (postgres:// → PG, else SQLite)
+
+### In Progress
+- PgAdapter implementation
+- Schema DDL for PostgreSQL
+- Docker E2E verification
+
+---
+
+## V3.5 PG Prep (2026-04-11) — db.transaction() + adapter wiring
+
+### Stats
+- 148 commits, 51 npm preview packages
 - 200 total regression tests (137 base + 25 auth + 22 network + 16 config)
 - 11 database tables, 18 MCP tools, 17 REST endpoints, 34 CLI commands
 - All evaluations 10/10
 
 ### Added since V3.4
-- **db.transaction() migration**: All 7 manual BEGIN/COMMIT/ROLLBACK blocks in tools.ts converted to `db.transaction()` IIFE pattern (report_status, report_completion, get_all_status, send_task, send_reply, retry_task, reassign_task)
-- **Zero manual TX**: No manual transaction management remains — ready for PostgreSQL adapter Phase 2
-
-### Next (P1: PostgreSQL Phase 2)
-- Abstract `db.*` calls behind interface (SQLiteAdapter / PgAdapter)
-- Add `pg` / `postgres` npm dependency
-- Environment-based adapter selection (DATABASE_URL)
-- Migration runner for both engines
+- **db.transaction() migration**: All 7 manual BEGIN/COMMIT/ROLLBACK blocks converted to `db.transaction()` IIFE pattern
+- **SQLiteAdapter class**: Wraps bun:sqlite, implements DbAdapter interface
+- **Full adapter wiring**: 85+ db.query() calls migrated to db.get()/db.all()/db.run()
+- **Zero raw DB access**: All server code goes through adapter — PG-ready
 
 ---
 

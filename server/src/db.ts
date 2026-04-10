@@ -1,17 +1,6 @@
-import { Database } from "bun:sqlite";
-import { mkdirSync } from "fs";
-import { dirname } from "path";
-import { SQLiteAdapter, type DbAdapter } from "./db-adapter";
+import { createAdapter, type DbAdapter } from "./db-adapter";
 
-const DB_PATH = process.env.COMMHUB_DB || `${process.env.HOME}/.commhub/commhub.db`;
-mkdirSync(dirname(DB_PATH), { recursive: true });
-
-console.log(`[commhub] database: ${DB_PATH}`);
-const rawDb = new Database(DB_PATH);
-rawDb.exec("PRAGMA journal_mode=WAL");
-rawDb.exec("PRAGMA busy_timeout=5000");
-
-export const db: DbAdapter = new SQLiteAdapter(rawDb);
+export const db: DbAdapter = createAdapter();
 
 // Schema
 db.exec(`
