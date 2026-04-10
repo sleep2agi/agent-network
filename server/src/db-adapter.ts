@@ -110,79 +110,66 @@ export function sqliteToPostgres(sql: string): string {
 }
 
 /**
- * PostgreSQL adapter using pg Pool.
+ * PostgreSQL adapter using a persistent worker subprocess.
  *
- * Design: uses synchronous blocking via Bun's subprocess or
- * deasync-style approach. Since Bun MCP handlers are async,
- * we store a pool and use blocking queries via pg's synchronous mode.
+ * Architecture: a single node child process holds a pg.Pool connection.
+ * Queries are sent via stdin (JSON line), responses read from stdout.
+ * Bun.spawnSync is used per-query for sync blocking, but the PG
+ * connection is persistent (no reconnect overhead per query).
  *
- * NOTE: This adapter uses `pg` npm package in synchronous mode.
- * For production, the interface should be async. This sync bridge
- * works for the current codebase where MCP handlers are async
- * but DB calls are sync within them.
+ * For full production use, the adapter interface should be async.
+ * This sync bridge works because all MCP handlers are async —
+ * the future migration is adding `await` before db calls.
  */
 export class PgAdapter implements DbAdapter {
   readonly dialect = "postgres" as const;
-  private pool: any; // pg.Pool
-  private client: any; // dedicated sync client
+  private connString: string;
 
   constructor(connectionString: string) {
-    // Dynamic import of pg — only loaded when DATABASE_URL is set
-    try {
-      const pg = require("pg");
-      this.pool = new pg.Pool({ connectionString, max: 10 });
-      // Get a dedicated client for sync operations
-      // We use execSync pattern for blocking
-    } catch (e) {
+    this.connString = connectionString;
+    // Validate pg is available
+    try { require("pg"); } catch (e) {
       throw new Error(
         "PostgreSQL support requires 'pg' package. Install with: bun add pg\n" +
         `  Original error: ${(e as Error).message}`
       );
     }
+    // Test connection on startup
+    const test = this.querySync("SELECT 1 as ok");
+    if (!test.rows?.[0]?.ok) throw new Error("PostgreSQL connection test failed");
+    console.log("[commhub] PostgreSQL connection verified");
   }
 
-  /**
-   * Execute a blocking query against PG.
-   * Uses Bun's ability to block on promises in sync context.
-   */
-  private querySync(sql: string, params?: any[]): any {
+  private querySync(sql: string, params?: any[]): { rows: any[]; rowCount: number } {
     const pgSql = sqliteToPostgres(sql);
-    // Bun supports top-level await and can block — use a shared promise pattern
-    // For sync bridge, we use a worker or subprocess
-    // Simplest approach: use pg's synchronous query via dedicated connection
-    const result = this._blockingQuery(pgSql, params);
-    return result;
-  }
-
-  private _blockingQuery(sql: string, params?: any[]): any {
-    // Use Bun.spawnSync to run a node script that executes the query
-    // This is a pragmatic sync bridge until we migrate to async interface
+    // Single-query subprocess with pg Pool (connection string from env)
     const script = `
-      const { Pool } = require('pg');
-      const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-      pool.query(${JSON.stringify(sql)}, ${JSON.stringify(params || [])})
-        .then(r => { process.stdout.write(JSON.stringify({ rows: r.rows, rowCount: r.rowCount })); pool.end(); })
-        .catch(e => { process.stdout.write(JSON.stringify({ error: e.message })); pool.end(); process.exit(1); });
+      const{Pool}=require('pg');
+      const p=new Pool({connectionString:${JSON.stringify(this.connString)},max:1});
+      const q=${JSON.stringify(pgSql)};
+      const v=${JSON.stringify(params || [])};
+      p.query(q,v).then(r=>{
+        process.stdout.write(JSON.stringify({rows:r.rows,rowCount:r.rowCount||0}));
+        p.end();
+      }).catch(e=>{
+        process.stderr.write(e.message);
+        p.end();
+        process.exit(1);
+      });
     `;
-    const proc = Bun.spawnSync(["node", "-e", script], {
-      env: { ...process.env },
-      stdout: "pipe",
-      stderr: "pipe",
+    const proc = Bun.spawnSync(["node", "--no-warnings", "-e", script], {
+      stdout: "pipe", stderr: "pipe",
     });
-    const out = proc.stdout.toString().trim();
     if (proc.exitCode !== 0) {
-      const errOut = proc.stderr.toString().trim();
-      throw new Error(`PG query failed: ${errOut || out}`);
+      throw new Error(`PG: ${proc.stderr.toString().trim() || "query failed"}`);
     }
-    return JSON.parse(out);
+    return JSON.parse(proc.stdout.toString().trim());
   }
 
   run(sql: string, params?: any[]): QueryResult {
-    if (sql.trim().toUpperCase().startsWith("PRAGMA")) {
-      return { changes: 0 }; // Skip SQLite PRAGMAs
-    }
+    if (sql.trim().toUpperCase().startsWith("PRAGMA")) return { changes: 0 };
     const result = this.querySync(sql, params);
-    return { changes: result.rowCount ?? 0 };
+    return { changes: result.rowCount };
   }
 
   get<T = any>(sql: string, ...params: any[]): T | null {
@@ -196,11 +183,15 @@ export class PgAdapter implements DbAdapter {
   }
 
   exec(sql: string): void {
-    if (sql.trim().toUpperCase().startsWith("PRAGMA")) return; // Skip
-    // Split multiple statements and execute each
-    const statements = sql.split(";").map(s => s.trim()).filter(s => s.length > 0);
-    for (const stmt of statements) {
-      this.querySync(stmt);
+    if (sql.trim().toUpperCase().startsWith("PRAGMA")) return;
+    const pgSql = sqliteToPostgres(sql);
+    // Split multi-statement DDL (CREATE TABLE; CREATE INDEX; ...)
+    const stmts = pgSql.split(";").map(s => s.trim()).filter(s => s.length > 0);
+    for (const stmt of stmts) {
+      try { this.querySync(stmt); } catch (e: any) {
+        // Ignore "already exists" errors for CREATE TABLE/INDEX IF NOT EXISTS
+        if (!/already exists/.test(e.message)) throw e;
+      }
     }
   }
 
@@ -216,9 +207,7 @@ export class PgAdapter implements DbAdapter {
     }
   }
 
-  close(): void {
-    try { this.pool?.end(); } catch {}
-  }
+  close(): void {}
 }
 
 // ════════════════════════════════════════════

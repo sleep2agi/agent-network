@@ -56,9 +56,9 @@ PORT=9200 COMMHUB_AUTH_TOKEN=your-secret bunx @sleep2agi/commhub-server
 | `/api/completions` | GET | 完成记录 |
 | `/mcp` | POST | MCP Streamable HTTP |
 
-## 数据库 (6 表)
+## 数据表 (11 表)
 
-SQLite WAL 模式, 自动创建在 `~/.commhub/commhub.db`
+自动创建，支持 SQLite 和 PostgreSQL
 
 | 表 | 说明 |
 |---|------|
@@ -78,6 +78,22 @@ delivered → expired (5min patrol)
 delivered/acked/running → reassign → delivered (新agent)
 ```
 
+## 数据库 (SQLite + PostgreSQL)
+
+默认使用 SQLite（零配置），设置 `DATABASE_URL` 即切换到 PostgreSQL：
+
+```bash
+# SQLite (默认，零配置)
+bunx @sleep2agi/commhub-server
+
+# PostgreSQL
+DATABASE_URL=postgres://user:pass@localhost:5432/commhub bunx @sleep2agi/commhub-server
+```
+
+PostgreSQL 模式需要 `pg` 包：`bun add pg`
+
+所有 SQL 自动翻译（datetime→NOW, 参数占位符→$N 等），代码零修改。
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
@@ -85,7 +101,8 @@ delivered/acked/running → reassign → delivered (新agent)
 | `PORT` | 9200 | 监听端口 |
 | `HOST` | 0.0.0.0 | 监听地址 |
 | `COMMHUB_AUTH_TOKEN` | (无) | Bearer token 鉴权 |
-| `COMMHUB_DB` | ~/.commhub/commhub.db | 数据库路径 |
+| `COMMHUB_DB` | ~/.commhub/commhub.db | SQLite 数据库路径 |
+| `DATABASE_URL` | (无) | PostgreSQL 连接串 (设置后使用 PG) |
 
 ## 鉴权
 
