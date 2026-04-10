@@ -2068,6 +2068,52 @@ async function statusCommand() {
   }
 }
 
+// ── tasks (query tasks) ──
+
+async function tasksCommand() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  if (!hub) { console.log("No hub configured. Run: anet init"); return; }
+  const opts = parseOpts();
+  const status = opts.status || args[1];
+  const limit = opts.limit || "20";
+
+  try {
+    let url = `${hub}/api/tasks?limit=${limit}`;
+    if (status) url += `&status=${status}`;
+    const res = await fetch(url, { headers: authHeaders() }).then(r => r.json() as any);
+    const tasks = res.tasks || [];
+
+    if (tasks.length === 0) {
+      console.log("\n  No tasks found.\n");
+      return;
+    }
+
+    console.log(`\n  Tasks (${tasks.length}):\n`);
+    console.log("  STATUS     FROM            TO              AGE      CONTENT");
+    console.log("  ──────── ─────────────── ─────────────── ──────── ────────────────────────");
+    for (const t of tasks) {
+      const st = (t.status || "?").padEnd(8);
+      const from = (t.from_name || "?").slice(0, 15).padEnd(15);
+      const to = (t.to_name || "?").slice(0, 15).padEnd(15);
+      const age = t.created_at ? timeAgo(t.created_at) : "?";
+      const content = (t.content || "").slice(0, 40);
+      console.log(`  ${st} ${from} ${to} ${age.padEnd(8)} ${content}`);
+    }
+    console.log(`\n  Filter: anet tasks replied | anet tasks failed | anet tasks --status delivered\n`);
+  } catch (e: any) {
+    console.error(`Failed: ${e.message}`);
+  }
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr.replace(" ", "T") + "Z").getTime();
+  if (diff < 60000) return `${Math.floor(diff / 1000)}s`;
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
+  return `${Math.floor(diff / 86400000)}d`;
+}
+
 switch (command) {
   case "init":
     if (args[1] === "project") initProject();
@@ -2088,6 +2134,7 @@ switch (command) {
   case "session": sessionCommand(); break;
   case "ls": case "list": lsCommand(); break;
   case "status": await statusCommand(); break;
+  case "tasks": await tasksCommand(); break;
   case "run": runCommand(); break;
   case "-v": case "--version": case "version": {
     printVersionReport();
