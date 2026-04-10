@@ -477,6 +477,54 @@ export function registerTools(server: McpServer, clientIP?: string) {
     }
   );
 
+  // ── V2: retry_task (重新投递失败/过期任务) ──
+  server.tool(
+    "retry_task",
+    "Retry a failed, expired, or cancelled task. Resets status to delivered and re-queues in inbox.",
+    {
+      task_id: z.string().min(1).max(200).describe("Task ID to retry"),
+      from_session: z.string().max(200).optional().default("hub"),
+    },
+    async ({ task_id, from_session }) => {
+      console.log(`[${ts()}] ${from_session} → retry_task → ${task_id.slice(0, 8)}`);
+      // Find the original task
+      const task = db.query<any, [string]>(
+        "SELECT * FROM tasks WHERE task_id = ?1"
+      ).get(task_id);
+      if (!task) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "task not found" }) }] };
+      }
+      if (!["failed", "expired", "cancelled"].includes(task.status)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: `task status is ${task.status}, not retryable` }) }] };
+      }
+      try {
+        db.run("BEGIN IMMEDIATE");
+        // Reset task status
+        db.run(
+          `UPDATE tasks SET status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, delivered_at = datetime('now'), expires_at = datetime('now', '+1 hour')
+           WHERE task_id = ?1`,
+          [task_id]
+        );
+        // Re-queue in inbox with new ID (original ID may already exist)
+        const retryInboxId = uuidv4();
+        db.run(
+          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response)
+           VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply')`,
+          [retryInboxId, task.to_name, task.priority, task.content, from_session]
+        );
+        db.run("COMMIT");
+      } catch (e) {
+        try { db.run("ROLLBACK"); } catch {}
+        throw e;
+      }
+      // SSE push
+      pushEvent(task.to_name, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, retried_to: task.to_name }) }],
+      };
+    }
+  );
+
   server.tool(
     "broadcast",
     "Send a message to multiple sessions.",

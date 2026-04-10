@@ -362,6 +362,36 @@ EMPTY_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"x","from_session":"
 echo "$EMPTY_RESP" | grep -q 'ok' && pass "minimal 1-char task accepted" || fail "1-char task rejected"
 echo ""
 
+# 23.65 Task retry
+echo "23.65 Testing task retry..."
+# Create a task, fail it, then retry
+RETRY_SEND=$(mcp_call "send_task" '{"alias":"conc-1","task":"retry me","from_session":"tester"}')
+RETRY_TID=$(echo "$RETRY_SEND" | python3 -c "
+import sys,json
+raw=sys.stdin.read()
+for line in raw.strip().split('\n'):
+  if line.startswith('data: '): raw=line[6:]
+try:
+  d=json.loads(raw)
+  t=json.loads(d.get('result',{}).get('content',[{}])[0].get('text','{}'))
+  print(t.get('message_id',''))
+except: print('')
+" 2>/dev/null)
+# Fail it
+mcp_call "send_reply" "{\"alias\":\"tester\",\"text\":\"error\",\"in_reply_to\":\"$RETRY_TID\",\"status\":\"failed\",\"from_session\":\"conc-1\"}" > /dev/null
+sleep 1
+# Verify failed
+RETRY_C1=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$RETRY_TID" 2>/dev/null)
+echo "$RETRY_C1" | grep -q '"failed"' && pass "task marked failed" || fail "task not failed"
+# Retry it
+RETRY_RESP=$(mcp_call "retry_task" "{\"task_id\":\"$RETRY_TID\",\"from_session\":\"tester\"}")
+echo "$RETRY_RESP" | grep -q 'ok' && pass "retry_task accepted" || fail "retry_task failed"
+# Verify back to delivered
+sleep 1
+RETRY_C2=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$RETRY_TID" 2>/dev/null)
+echo "$RETRY_C2" | grep -q '"delivered"' && pass "task retried to delivered" || fail "task not re-delivered"
+echo ""
+
 # 23.7 Task expiration
 echo "23.7 Testing task expiration..."
 # Send a task with 2-second TTL
