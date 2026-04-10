@@ -2532,12 +2532,38 @@ async function networkCommand() {
     return;
   }
 
+  if (sub === "info") {
+    const netId = gc.network_id;
+    if (!netId) { console.log("No network selected. Run: anet network use <name>"); return; }
+    try {
+      const detail = await fetch(`${hub}/api/networks/${netId}`, { headers }).then(r => r.json() as any);
+      if (!detail.ok) { console.error(detail.error); return; }
+      const n = detail.network;
+      const s = detail.stats;
+      console.log(`\n  Network: ${n.network_name}`);
+      console.log(`  ID:      ${n.network_id}`);
+      console.log(`  Owner:   ${n.owner_id}`);
+      if (n.description) console.log(`  Desc:    ${n.description}`);
+      console.log(`  Created: ${n.created_at}`);
+      console.log(`\n  Stats:`);
+      console.log(`    Nodes:    ${s.nodes}`);
+      console.log(`    Sessions: ${s.sessions}`);
+      if (s.tasks?.length) {
+        console.log(`    Tasks:`);
+        for (const t of s.tasks) console.log(`      ${t.status}: ${t.count}`);
+      }
+      console.log();
+    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    return;
+  }
+
   console.log(`
 anet network <command>
 
   ls                    List my networks
   create <name>         Create a new network
   use <name>            Switch to a network
+  info                  Current network details + stats
 `);
 }
 
