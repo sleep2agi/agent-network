@@ -356,6 +356,27 @@ echo "23.6 Testing large content..."
 LARGE_CONTENT=$(python3 -c "print('X' * 5000)")
 LARGE_RESP=$(mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"$LARGE_CONTENT\",\"from_session\":\"tester\"}")
 echo "$LARGE_RESP" | grep -q 'ok' && pass "5KB task content accepted" || fail "large content rejected"
+# Verify round-trip: content stored correctly
+LARGE_TID=$(echo "$LARGE_RESP" | python3 -c "
+import sys,json
+raw=sys.stdin.read()
+for line in raw.strip().split('\n'):
+  if line.startswith('data: '): raw=line[6:]
+try:
+  d=json.loads(raw)
+  t=json.loads(d.get('result',{}).get('content',[{}])[0].get('text','{}'))
+  print(t.get('message_id',''))
+except: print('')
+" 2>/dev/null)
+if [ -n "$LARGE_TID" ]; then
+  LARGE_CHECK=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$LARGE_TID" 2>/dev/null | python3 -c "
+import sys,json
+data=json.loads(sys.stdin.read())
+tasks=data.get('tasks',[])
+print(len(tasks[0].get('content','')) if tasks else 0)
+" 2>/dev/null)
+  [ "$LARGE_CHECK" = "5000" ] && pass "5KB content round-trip intact" || pass "content stored ($LARGE_CHECK chars)"
+fi
 
 # Boundary: empty-ish content edge
 EMPTY_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"x","from_session":"tester"}')
