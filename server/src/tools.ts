@@ -320,8 +320,9 @@ export function registerTools(server: McpServer, clientIP?: string) {
       priority: z.enum(["high", "normal", "low"]).optional().default("normal"),
       context: z.string().max(10000).optional(),
       from_session: z.string().max(200).optional().default("hub"),
+      ttl_seconds: z.number().min(1).max(86400).optional().describe("Task TTL in seconds (default: 3600)"),
     },
-    async ({ alias, task, priority, context, from_session }) => {
+    async ({ alias, task, priority, context, from_session, ttl_seconds }) => {
       console.log(`[${ts()}] ${from_session} → send_task → ${alias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
       const id = uuidv4();
       // 事务：inbox + tasks 双写
@@ -334,8 +335,8 @@ export function registerTools(server: McpServer, clientIP?: string) {
         );
         db.run(
           `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', '+1 hour'))`,
-          [id, from_session, alias, priority, task]
+           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6))`,
+          [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`]
         );
         db.run("COMMIT");
       } catch (e) {
