@@ -536,7 +536,10 @@ async function processWithHttpApi(task: string, from: string): Promise<string> {
       return `Anthropic API 错误 ${res.status}: ${err.slice(0, 200)}`;
     }
     const data = await res.json() as any;
-    content = data.content?.[0]?.text || "";
+    // Find text content (skip thinking blocks)
+    const blocks = Array.isArray(data.content) ? data.content : [];
+    const textBlock = blocks.find((b: any) => b.type === "text") || blocks[0];
+    content = textBlock?.text || "";
     usage = data.usage;
   } else {
     // OpenAI Chat Completions format
