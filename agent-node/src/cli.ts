@@ -20,7 +20,7 @@ const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
 
-const PKG_VERSION = "1.3.2";
+const PKG_VERSION = "1.4.0";
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -56,6 +56,7 @@ Runtime:
 `);
     process.exit(0);
   }
+  if (argv[i] === "--new-session") { opts["new-session"] = "true"; continue; }
   if (argv[i] === "--channel" && i + 1 < argv.length) {
     cliChannels.push(argv[++i]);
     continue;
@@ -144,7 +145,8 @@ const toolsRaw = opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.too
 let TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean);
 const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "5");
 const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
-const SESSION_ID = opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "";
+const NEW_SESSION = opts["new-session"] === "true";
+const SESSION_ID = NEW_SESSION ? "" : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "");
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || fileConfig.token || globalConfig.token || "";
 const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
@@ -463,13 +465,26 @@ async function processTask(task: string, from: string): Promise<string> {
 // ── 防循环 + 低价值消息过滤 ──
 const lastReplyTime: Record<string, number> = {};
 const COOLDOWN_MS = 5000;
-const LOW_VALUE_RE = /^[\s]*([收到|好的|ok|嗯|是的|了解|明白|确认|done|ack|roger|yes|no|。|！|？|\.|!|\?][\s。！？.!?]*)+$/i;
+
+// 低价值短语（完整匹配）
+const LOW_VALUE_PHRASES = new Set([
+  "收到", "好的", "ok", "嗯", "是的", "了解", "明白", "确认",
+  "done", "ack", "roger", "yes", "no", "在线", "待命", "正常",
+  "保持在线", "通信正常", "已收到", "收到了", "好", "行",
+  "noted", "copy", "received", "understood",
+]);
 
 function isLowValueText(text: string): boolean {
   if (!text) return true;
-  const stripped = text.replace(/[\s\p{P}\p{S}]/gu, "");
+  // 去掉标点、空格、emoji 后太短
+  const stripped = text.replace(/[\s\p{P}\p{S}\p{Emoji}]/gu, "");
   if (stripped.length < 3) return true;
-  if (LOW_VALUE_RE.test(text.trim())) return true;
+  // 完整匹配低价值短语
+  const clean = text.trim().replace(/^[\[【].+?[\]】]\s*/, "").trim(); // 去掉 [alias] 前缀
+  const lower = clean.toLowerCase().replace(/[\s。！？.!?✅❌👀⏳，,]+$/g, "").trim();
+  if (LOW_VALUE_PHRASES.has(lower)) return true;
+  // 纯 emoji
+  if (/^[\p{Emoji}\s]+$/u.test(text.trim())) return true;
   return false;
 }
 
@@ -478,7 +493,6 @@ function shouldSkipMessage(from: string, content: string): string | null {
   if (content.startsWith(`[${ALIAS}]`)) return "own-prefix";
   const now = Date.now();
   if (lastReplyTime[from] && now - lastReplyTime[from] < COOLDOWN_MS) return "cooldown";
-  // 入站低价值消息也跳过（防止 agent 之间互发"收到"）
   if (isLowValueText(content)) return "low-value-inbound";
   return null;
 }
