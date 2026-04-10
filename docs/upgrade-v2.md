@@ -4,9 +4,9 @@
 
 | 包 | 当前生产 | V2 Preview | 变化 |
 |---|---------|-----------|------|
-| @sleep2agi/agent-network (anet) | 1.3.3 | 2.0.0-preview.4 | node_id/rename/stop/delete/status/interactive create/ensureMcpJson/.js/channel V2 |
-| @sleep2agi/agent-node | 2.0.0 | 2.1.0-preview.3 | send_reply/in_reply_to/retry/V2字段/消息过滤/emoji修复/http-api runtime/callCommHub retry |
-| @sleep2agi/commhub-server | 0.4.4 | 0.5.0-preview.3 | tasks表/nodes表/send_reply/send_ack/retry_task/事务安全/MCP鉴权/任务过期TTL/model字段 |
+| @sleep2agi/agent-network (anet) | 1.3.3 | 2.0.0-preview.8 | 18 CLI commands: stop/delete/status/tasks/doctor/logs + channel V2 |
+| @sleep2agi/agent-node | 2.0.0 | 2.1.0-preview.4 | send_reply/http-api runtime/3x retry/emoji fix/消息过滤/Anthropic format |
+| @sleep2agi/commhub-server | 0.4.4 | 0.5.0-preview.8 | 18 MCP tools + 9 REST + 6 tables + task_events + TTL + stats |
 
 ## 前提条件
 
