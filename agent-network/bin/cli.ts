@@ -562,6 +562,23 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
 
 // ── Help ──
 
+function friendlyError(e: any): string {
+  const msg = e?.message || String(e);
+  if (msg.includes("fetch failed") || msg.includes("ECONNREFUSED")) {
+    return "Cannot connect to CommHub server. Is it running?\n  Start: anet server local\n  Or check: anet doctor";
+  }
+  if (msg.includes("401") || msg.includes("unauthorized")) {
+    return "Authentication failed. Try: anet login";
+  }
+  if (msg.includes("403")) {
+    return "Access denied. You may not have permission for this operation.";
+  }
+  if (msg.includes("429")) {
+    return "Too many requests. Please wait a moment and try again.";
+  }
+  return msg;
+}
+
 function printHelp() {
   console.log(`
 anet — AI Agent Network CLI (V2)
@@ -2209,7 +2226,7 @@ async function tasksCommand() {
     }
     console.log(`\n  Filter: anet tasks replied | anet tasks failed | anet tasks --status delivered\n`);
   } catch (e: any) {
-    console.error(`Failed: ${e.message}`);
+    console.error(friendlyError(e));
   }
 }
 
@@ -2381,7 +2398,7 @@ async function registerCommand() {
     console.log(`[anet] Registered and logged in as ${res.user.username}`);
     if (gc.network_name) console.log(`[anet] Default network: ${gc.network_name}`);
     console.log(`[anet] Token saved to ~/.anet/config.json`);
-  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+  } catch (e: any) { console.error(friendlyError(e)); }
 }
 
 // ── login/logout/whoami ──
@@ -2404,7 +2421,7 @@ async function loginCommand() {
       saveGlobal(gc);
       console.log(`[anet] Logged in as ${res.user.username} (token)`);
       console.log(`[anet] Network: ${res.current_network || "none"}`);
-    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
     return;
   }
 
@@ -2436,7 +2453,7 @@ async function loginCommand() {
     console.log(`[anet] Logged in as ${res.user.username}`);
     if (gc.network_name) console.log(`[anet] Network: ${gc.network_name} (${gc.network_id?.slice(0, 12)})`);
     console.log(`[anet] Token saved to ~/.anet/config.json`);
-  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+  } catch (e: any) { console.error(friendlyError(e)); }
 }
 
 function logoutCommand() {
@@ -2469,7 +2486,7 @@ async function whoamiCommand() {
       }
     }
     console.log();
-  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+  } catch (e: any) { console.error(friendlyError(e)); }
 }
 
 // ── network ──
@@ -2499,7 +2516,7 @@ async function networkCommand() {
       } else {
         console.error(`Failed: ${res.error}`);
       }
-    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
     return;
   }
 
@@ -2514,7 +2531,7 @@ async function networkCommand() {
         console.log(`  ${n.network_name.padEnd(20)} ${n.network_id.slice(0, 16)}${current}`);
       }
       console.log();
-    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
     return;
   }
 
@@ -2529,7 +2546,7 @@ async function networkCommand() {
       gc.network_name = net.network_name;
       saveGlobal(gc);
       console.log(`[anet] Switched to network "${net.network_name}" (${net.network_id.slice(0, 12)})`);
-    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
     return;
   }
 
@@ -2554,7 +2571,7 @@ async function networkCommand() {
         for (const t of s.tasks) console.log(`      ${t.status}: ${t.count}`);
       }
       console.log();
-    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
     return;
   }
 
@@ -2576,7 +2593,7 @@ async function networkCommand() {
         console.log(`[anet] Network "${net.network_name}" deleted`);
         if (gc.network_id === net.network_id) { delete gc.network_id; delete gc.network_name; saveGlobal(gc); }
       } else { console.error(`Failed: ${del.error}`); }
-    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
     return;
   }
 
@@ -2645,7 +2662,7 @@ async function tokenCommand() {
         console.log(`  ID:   ${res.token_id}`);
         console.log(`\n  ⚠ Save this token — it won't be shown again!\n`);
       } else { console.error(`Failed: ${res.error}`); }
-    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
     return;
   }
 
@@ -2656,7 +2673,7 @@ async function tokenCommand() {
       const res = await fetch(`${hub}/api/auth/tokens/${tokenId}`, { method: "DELETE", headers }).then(r => r.json() as any);
       if (res.ok) console.log(`  ✅ Token ${tokenId} revoked`);
       else console.error(`Failed: ${res.error}`);
-    } catch (e: any) { console.error(`Failed: ${e.message}`); }
+    } catch (e: any) { console.error(friendlyError(e)); }
     return;
   }
 
@@ -2672,7 +2689,7 @@ async function tokenCommand() {
       console.log(`  ${(t.token_id || "?").padEnd(22)} ${(t.name || "?").padEnd(14)} ${t.last_used_at || "never"}`);
     }
     console.log();
-  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+  } catch (e: any) { console.error(friendlyError(e)); }
 }
 
 // ── passwd ──
@@ -2702,7 +2719,7 @@ async function passwdCommand() {
     } else {
       console.error(`[anet] Failed: ${res.error}`);
     }
-  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+  } catch (e: any) { console.error(friendlyError(e)); }
 }
 
 // ── demo ──
@@ -2888,7 +2905,7 @@ async function licenseCommand() {
       console.log(`    anet init --hub https://hub.sleep2agi.com  Use free hosted`);
     }
     console.log();
-  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+  } catch (e: any) { console.error(friendlyError(e)); }
 }
 
 async function activateCommand() {
@@ -2915,7 +2932,7 @@ async function activateCommand() {
     } else {
       console.error(`  ❌ Activation failed: ${res.error}\n`);
     }
-  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+  } catch (e: any) { console.error(friendlyError(e)); }
 }
 
 // ── doctor (diagnostic) ──
