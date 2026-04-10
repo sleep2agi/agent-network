@@ -20,7 +20,7 @@ const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
 
-const PKG_VERSION = "1.4.2";
+const PKG_VERSION = "2.0.0";
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -731,7 +731,7 @@ async function connectSSE() {
           try {
             const ev = JSON.parse(line.slice(6));
             if (ev.type === "connected") { log("SSE connected"); continue; }
-            if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
+            if (["new_task", "broadcast"].includes(ev.type)) {
               log(`← SSE ${ev.type}`);
               await processInbox();
             }

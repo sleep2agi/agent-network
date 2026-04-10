@@ -32,9 +32,10 @@ commhub_get_all_status()
 ## 收到消息
 
 来自 CommHub 的消息会以 `<channel source="commhub" sender="..." task_id="...">` 格式出现在对话中。收到后：
-1. 立即用 commhub_send_task 回复发送者确认收到
-2. 执行任务
-3. 用 commhub_send_task 回复结果
+1. 如果发送者是人类（指挥室/Vincent），用 commhub_send_task 回复确认收到
+2. 如果发送者是其他 agent（通信牛/SDK马/N站牛/测试牛等），不要回复确认，直接执行
+3. 执行任务
+4. 用 commhub_send_task 回复结果
 
 ## 规则
 
