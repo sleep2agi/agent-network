@@ -1,23 +1,27 @@
 # Agent Network Evolution Log
 
-## V3.6 PostgreSQL Dual Support (2026-04-11) — IN PROGRESS
+## V3.6 PostgreSQL Dual Support (2026-04-11) — COMPLETE
 
 ### Stats
-- 149 commits, 51 npm preview packages
+- 152 commits, 52 npm preview packages
 - 200 total regression tests (137 base + 25 auth + 22 network + 16 config)
 - 11 database tables, 18 MCP tools, 17 REST endpoints, 34 CLI commands
+- SQL translator: 161 SQL fragments audit clean, 10/10 unit tests
 
 ### Added since V3.5
 - **SQLiteAdapter**: Full implementation wrapping bun:sqlite (run/get/all/exec/transaction/close)
 - **DbAdapter interface**: Unified sync interface for all DB access
 - **85+ call sites migrated**: Zero raw db.query() remains in server/src/
-- **PgAdapter**: SQL auto-translation (datetime→NOW, ?N→$N, AUTOINCREMENT→SERIAL)
+- **PgAdapter**: SQL auto-translation (datetime→NOW, ?N→$N, datetime('now',?N)→NOW()+$N::INTERVAL, AUTOINCREMENT→SERIAL, TEXT DEFAULT→TIMESTAMP DEFAULT)
 - **DATABASE_URL**: env-driven adapter selection (postgres:// → PG, else SQLite)
+- **createAdapter() factory**: Single entry point for DB initialization
+- **db.ts simplified**: From 14 lines hardcoded SQLite → 1 line `createAdapter()`
+- **README updated**: PostgreSQL section with usage docs
+- **npm published**: commhub-server@0.5.0-preview.25
 
-### In Progress
-- PgAdapter implementation
-- Schema DDL for PostgreSQL
-- Docker E2E verification
+### Deferred
+- Async adapter interface (for true PG performance — all callers add `await`)
+- PG real-world integration test (needs PG instance)
 
 ---
 
