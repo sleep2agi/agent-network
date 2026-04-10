@@ -1,6 +1,6 @@
 # Node 节点完整生命周期
 
-> 状态：草稿 | 日期：2026-04-10 | 作者：SDK马
+> 状态：定稿 | 日期：2026-04-10 | 作者：SDK马 + 通信牛 review
 
 ---
 
@@ -108,12 +108,12 @@ config.json:
 **触发**: `anet start <node-name>` → spawn 进程 → 进程调 `report_status(idle)`
 
 **数据变更**:
-- CommHub sessions 表: INSERT/UPDATE（resume_id=node_id, alias=node_name, status=idle, agent=runtime, project_dir, server=hostname）
+- CommHub sessions 表: INSERT/UPDATE（resume_id=sdk-${node_id}, alias=node_name, status=idle, agent=runtime, project_dir, server=hostname）
 
 **agent-node 行为**:
 ```typescript
 register() → callCommHub("report_status", {
-  resume_id: node_id,      // 稳定标识
+  resume_id: `sdk-${node_id}`,  // 稳定标识，带前缀兼容现有风格
   alias: node_name,        // 显示名
   status: "idle",
   agent: `agent-node:${runtime}`,
@@ -162,13 +162,13 @@ register() → callCommHub("report_status", {
 
 **前置条件**: node 必须 offline（运行中不允许改名）
 
-**数据变更**:
+**P0 数据变更（只改本地，不依赖 CommHub rename API）**:
 1. config.json `node_name` → 新名字
-2. CommHub: UPDATE alias WHERE resume_id = node_id
+2. 旧节点（目录名=node_name）: rename 目录
 3. 新节点（目录名=node_id）: 不动目录
-4. 旧节点（目录名=node_name）: rename 目录
+4. CommHub alias：下次 `anet start` 时用新名字重新注册（旧 alias 自然过期）
 
-**CommHub API**: `update_alias(resume_id, new_alias)` 或 UPDATE sessions SET alias=? WHERE resume_id=?
+**P1**: CommHub 新增 rename API，rename 时主动更新 alias。
 
 ### 8. 下线 (offline)
 
@@ -192,7 +192,7 @@ register() → callCommHub("report_status", {
 
 **数据变更**:
 1. 删除 `.anet/nodes/<node_id>/` 目录（含 config.json、channels/、logs/）
-2. CommHub: DELETE FROM sessions WHERE resume_id = node_id
+2. CommHub: DELETE FROM sessions WHERE resume_id = sdk-${node_id}
 3. CommHub: DELETE FROM inbox WHERE session_name = node_name（清理残留消息）
 
 **确认**: 必须交互式确认
@@ -300,18 +300,19 @@ anet start 时发现 tmux session 已存在
 | config 字段名 | name / alias | node_name |
 | session 字段 | resume / sessionId | session |
 | 配置路径 | .anet/profiles/*.json | .anet/nodes/*/config.json |
-| CommHub resume_id | 随机生成（每次不同） | node_id（稳定） |
+| CommHub resume_id | 随机生成（每次不同） | sdk-${node_id}（稳定） |
 
 ### 迁移规则
 
 **原则：旧节点能跑就不动，按需迁移。**
 
-1. **agent-node 启动时自动补 node_id**:
+1. **anet 负责自动补 node_id**（agent-node 只读不写，避免双写）:
 ```typescript
-if (!fileConfig.node_id) {
-  fileConfig.node_id = `n_${crypto.randomBytes(4).toString("hex")}`;
-  writeFileSync(configFilePath, JSON.stringify(fileConfig, null, 2) + "\n");
-  log(`自动生成 node_id: ${fileConfig.node_id}`);
+// anet start 时检测
+if (!config.node_id) {
+  config.node_id = `n_${crypto.randomBytes(4).toString("hex")}`;
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+  console.log(`[anet] 自动生成 node_id: ${config.node_id}`);
 }
 ```
 
@@ -373,6 +374,32 @@ function findNode(nameOrId: string) {
 }
 ```
 
+## CLI 节点解析规则
+
+所有接受 `<node-name>` 参数的命令统一走 findNode()：
+
+```
+解析优先级:
+  1. 精确匹配目录名 .anet/nodes/<input>/（node_id 或旧 node_name）
+  2. 扫描所有 node config，匹配 node_name 字段
+  3. 兼容匹配 name / alias 旧字段
+  4. 多个匹配 → 报歧义错误
+  5. 无匹配 → "Node not found"
+```
+
+## blocked / error 退出路径
+
+```
+blocked → 资源恢复 → running → idle
+blocked → 超时 → error → idle（放弃任务）
+
+error → 自动重试（agent-node 内部）→ idle
+error → 重试失败 → report_status(error) → 等待人工干预
+error → anet stop → offline
+```
+
+P0 不实现 blocked 状态上报，error 由 agent-node 内部处理后回到 idle。
+
 ## 决策汇总
 
 | # | 决策 | 理由 |
@@ -387,6 +414,10 @@ function findNode(nameOrId: string) {
 | 8 | 自动补 node_id | 无感迁移 |
 | 9 | 两种目录名共存 | 渐进演进 |
 | 10 | CommHub alias UNIQUE 约束保持 | 防重名 |
+| 11 | resume_id 用 sdk-${node_id} 前缀 | 兼容现有风格（通信牛） |
+| 12 | node_id 由 anet 补，agent-node 只读 | 避免双写（通信牛） |
+| 13 | P0 rename 只改本地 config | 不强依赖 CommHub API（通信牛） |
+| 14 | P0 不实现 blocked 状态 | 预留，等有需求再加 |
 
 ---
 

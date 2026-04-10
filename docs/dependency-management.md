@@ -93,7 +93,6 @@ npx 缓存已清理 ✅
 
 实现要点：
 - 只升级已安装的包，不装新的
-- 清理 npx 缓存（`rm -rf ~/.npm/_npx`）
 - 升级后跑 `anet -v` 展示全量版本
 
 ## anet create 依赖检测
@@ -105,22 +104,11 @@ $ anet create 小明 --runtime codex-sdk
 [anet] ❌ agent-node 未安装
 [anet] ❌ codex CLI 未安装
 
-[anet] 需要安装以下包才能使用 codex-sdk runtime:
-  npm install -g @sleep2agi/agent-node
-  npm install -g @openai/codex
-
-[anet] 立即安装？(y/n): y
-  ✅ agent-node v1.1.0
-  ✅ codex v0.118.0
-  ⚠ 运行 "codex auth login" 完成登录
-
-[anet] 继续创建 node...
+[anet] 缺少依赖，运行 "anet setup" 安装:
+  anet setup
 ```
 
-如果用户选 n：
-```
-[anet] 跳过安装。手动安装后重试: anet create 小明 --runtime codex-sdk
-```
+create 不自动安装，只提示导向 setup。create 本身只生成 config.json。
 
 ## anet start 兼容性门禁
 
@@ -138,7 +126,7 @@ $ anet start 小明
 |------|------|
 | anet >= 1.0.0 需要 agent-node >= 1.0.0 | config 格式变更 |
 | agent-node codex-sdk 需要 codex CLI 可用 | SDK spawn CLI |
-| agent-node claude-agent-sdk 需要 claude CLI 可用 | SDK spawn claude CLI 子进程 |
+| agent-node claude-agent-sdk 需要 claude CLI 可用 | SDK spawn claude CLI 子进程（待确认：是否所有场景都需要） |
 
 ## 版本探测实现
 

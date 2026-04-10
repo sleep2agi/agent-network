@@ -1,12 +1,14 @@
 # 一键拉起/重启方案
 
-> 状态：草稿 | 日期：2026-04-10 | 作者：SDK马
+> 状态：定稿 | 日期：2026-04-10 | 作者：SDK马 + 通信牛 review
+
+**设计哲学**: best-effort 恢复。restart-all 基于 CommHub 记录 + 本地 .anet/ 配置尽力恢复，信息不完整的节点跳过并提示手动 start。
 
 ---
 
 ## 数据源
 
-CommHub `/api/status` 已有所有需要的信息：
+CommHub `/api/status` 提供辅助信息，**本地 .anet/nodes/ 配置仍是启动的主要依据**：
 
 ```json
 {
@@ -184,10 +186,10 @@ anet restart 指挥室 --new-session  # 重启并新建 session
 | 命令 | 场景 |
 |------|------|
 | `anet start 指挥室` | 正常启动/resume 一个 node（需要 .anet/nodes/ 配置） |
-| `anet restart 指挥室` | 基于 CommHub 记录重启一个 agent（不需要本地配置） |
+| `anet restart 指挥室` | 基于本地配置 + CommHub 记录辅助恢复 |
 | `anet restart-all` | 批量重启所有本机 offline agent |
 
-关键区别：`restart` 从 CommHub 数据重建启动命令，`start` 从本地 .anet/ 配置启动。
+关键区别：`restart` 批量恢复 offline agent（从本地 .anet/ 配置启动，CommHub 记录辅助筛选），`start` 启动单个 node。P0 只处理信息完整的节点（有 config.json + runtime + alias），缺少关键信息的跳过并提示手动 start。
 
 `restart` 适合机器重启后恢复所有 agent，不需要一个个 cd 到项目目录去 start。
 

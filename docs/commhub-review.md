@@ -1,6 +1,7 @@
 # CommHub 现状 Review
 
-> 状态：草稿 | 日期：2026-04-10 | 作者：SDK马
+> 状态：定稿 | 日期：2026-04-10 | 作者：SDK马 + 通信牛 review
+> 数据快照时间：2026-04-10 06:54 UTC（~/.commhub/commhub.db, 2.5MB）
 
 ---
 
@@ -136,6 +137,14 @@ completions -- 901 rows (任务完成记录)
 
 ### 问题
 
+**数据完整性分层**:
+
+| 层级 | 字段 | 说明 |
+|------|------|------|
+| 必须 | alias, status, resume_id | 核心标识和状态 |
+| 建议 | agent, project_dir, server | restart-all 需要 |
+| 辅助 | session_id, config_path, channels, tmux_name, version | 高级功能需要 |
+
 **P1: 缺少字段**
 - sessions 表没有 `session` 字段（Claude session ID / Codex thread ID）→ restart-all 无法 resume
 - sessions 表没有 `config_path` 字段 → restart-all 无法定位 config.json
@@ -146,10 +155,10 @@ completions -- 901 rows (任务完成记录)
 - inbox 表 `session_name` 而不是 `alias`（应该统一）
 - completions 表 `session_name` 同上
 
-**P3: send_task vs send_message 区别模糊**
+**P3: send_task vs send_message 区别模糊（待评估）**
 - send_task 和 send_message 都往 inbox 写，区别只是 type 字段（task vs message）
 - 实际使用中大家只用 send_task
-- 建议：P1 合并为 send，type 作为可选参数
+- 待评估：是否合并为 send。合并需考虑向后兼容（保留旧工具名作 alias）
 
 **P4: 无自动清理**
 - offline session 永远留着
