@@ -1,5 +1,23 @@
 # Agent Network Evolution Log
 
+## V3.7 E2E Verified + Demo (2026-04-11) — COMPLETE
+
+### Stats
+- 155 commits, 52 npm preview packages
+- 200 Docker tests + 19 adapter E2E tests verified
+- 11 database tables, 18 MCP tools, 17 REST endpoints, 34 CLI commands
+
+### Added since V3.6
+- **Adapter E2E verification**: 19/19 tests pass (health, register, login, auth, networks, MCP CRUD, transactions, tokens, password, license)
+- **One-click demo**: `examples/demo-one-click.sh` — 8-step automated showcase (3 virtual agents, task dispatch, completion, results dashboard)
+- **PgAdapter improvement**: Cleaner querySync, startup connection test, DDL idempotency
+
+### Deferred
+- Production server upgrade to V3.6 code (currently running v0.4.1)
+- Docker image rebuild with adapter code
+
+---
+
 ## V3.6 PostgreSQL Dual Support (2026-04-11) — COMPLETE
 
 ### Stats
