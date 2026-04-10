@@ -286,6 +286,24 @@ Bun.serve({
       return withCors(req, Response.json({ ok: true, messages: rows }));
     }
 
+    // ── REST: stats summary ──
+    if (url.pathname === "/api/stats") {
+      const taskStats = db.query<any, []>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status").all();
+      const sessionStats = db.query<any, []>("SELECT status, COUNT(*) as count FROM sessions GROUP BY status").all();
+      const totalTasks = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM tasks").get();
+      const totalNodes = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM nodes").get();
+      const recentTasks = db.query<any, []>(
+        "SELECT task_id, from_name, to_name, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 5"
+      ).all();
+      return withCors(req, Response.json({
+        ok: true,
+        tasks: { total: totalTasks?.cnt || 0, by_status: taskStats },
+        sessions: { by_status: sessionStats },
+        nodes: { total: totalNodes?.cnt || 0 },
+        recent_tasks: recentTasks,
+      }));
+    }
+
     // ── REST: task events (V2 Sprint 2) ──
     if (url.pathname === "/api/task_events") {
       const taskId = url.searchParams.get("task_id");

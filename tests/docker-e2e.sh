@@ -301,6 +301,13 @@ echo "$HEALTH" | grep -q '"ok":true' && pass "health ok" || fail "health broken"
 echo "$HEALTH" | grep -q '"sse_sessions"' && pass "health has sse_sessions" || fail "health missing sse_sessions"
 echo ""
 
+# 22.05 stats API
+echo "22.05 Testing stats API..."
+STATS=$(curl -s "http://127.0.0.1:9200/api/stats" 2>/dev/null)
+echo "$STATS" | grep -q '"ok":true' && pass "/api/stats works" || fail "stats broken"
+echo "$STATS" | grep -q '"total"' && pass "stats has totals" || fail "no totals"
+echo ""
+
 # 22.1 nodes REST API
 echo "22.1 Testing nodes API..."
 NODES=$(curl -s "http://127.0.0.1:9200/api/nodes" 2>/dev/null)
