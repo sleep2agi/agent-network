@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "bun",
       "args": [
-        ".anet/node-server.ts"
+        ".anet/node-server.js"
       ]
     }
   }

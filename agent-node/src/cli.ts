@@ -20,7 +20,7 @@ const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
 
-const PKG_VERSION = "1.3.0";
+const PKG_VERSION = "1.3.1";
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -353,8 +353,12 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
   const { Codex } = await import("@openai/codex-sdk");
 
   if (!codexThread) {
+    const codexInstructions = SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI Agent 节点。你通过 CommHub 通信网络接收任务。收到任务后理解内容、执行任务（可以读写文件、执行命令）、返回执行结果。你的回复会被自动发送给任务发送者。当前工作目录：${process.cwd()}`;
     const codex = new Codex({
-      config: { model_auto_compact_token_limit: 200000 },
+      config: {
+        model_auto_compact_token_limit: 200000,
+        developer_instructions: codexInstructions,
+      },
     });
     const codexModel = MODEL || "gpt-5.4";
     const codexOpts = {
@@ -409,7 +413,7 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
     return finalResponse || "（无回复）";
   } catch (e: any) {
     log(`codex thread error: ${e.message}, 重建`);
-    const codex = new Codex({ config: { model_auto_compact_token_limit: 200000 } });
+    const codex = new Codex({ config: { model_auto_compact_token_limit: 200000, developer_instructions: SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI Agent 节点。` } });
     codexThread = codex.startThread({
       skipGitRepoCheck: true,
       approvalPolicy: "never" as const,
