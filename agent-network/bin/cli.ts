@@ -1069,11 +1069,48 @@ async function createCommand(idOverride?: string) {
   }
 
   const opts = parseOpts();
+  const gc = loadGlobal();
+
+  // Interactive network selection (if user has multiple writable networks and no --network specified)
+  if (!opts.network && gc.token && gc.hub && process.stdin.isTTY) {
+    try {
+      const nets = await fetch(`${gc.hub}/api/networks`, {
+        headers: { Authorization: `Bearer ${gc.token}` },
+      }).then(r => r.json() as any);
+      const writable = (nets.networks || []).filter((n: any) => ["owner", "admin", "member"].includes(n.member_role));
+      if (writable.length > 1) {
+        // Multiple writable networks → interactive select
+        try {
+          const { select: sel } = await import("@inquirer/prompts");
+          const roleIcon: Record<string, string> = { owner: "⭐", admin: "🔧", member: "👤" };
+          const chosen = await sel({
+            message: "选择网络:",
+            choices: writable.map((n: any) => ({
+              value: n.network_id,
+              name: `${roleIcon[n.member_role] || " "} ${n.network_name} (${n.member_role})`,
+            })),
+            default: gc.network_id,
+          });
+          gc.network_id = chosen;
+          gc.network_name = writable.find((n: any) => n.network_id === chosen)?.network_name;
+          saveGlobal(gc);
+        } catch {
+          // inquirer not available, use current network
+        }
+      } else if (writable.length === 1 && !gc.network_id) {
+        gc.network_id = writable[0].network_id;
+        gc.network_name = writable[0].network_name;
+        saveGlobal(gc);
+      }
+    } catch {}
+  }
+
   const profile = createProfileFromOpts(id, opts);
   saveCreatedNode(id, profile);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
-  console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)})`);
+  const netLabel = gc.network_name || gc.network_id || "global";
+  console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)}) in network "${netLabel}"`);
   if (normalizeRuntime(profile) === "claude-code-cli") {
     printClaudeCodeNotice();
   }
