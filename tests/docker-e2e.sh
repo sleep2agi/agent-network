@@ -429,6 +429,34 @@ RETRY_C2=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$RETRY_TID" 2>/dev/n
 echo "$RETRY_C2" | grep -q '"delivered"' && pass "task retried to delivered" || fail "task not re-delivered"
 echo ""
 
+# 23.66 Task reassign
+echo "23.66 Testing task reassign..."
+mcp_call "report_status" '{"resume_id":"reassign-src","alias":"agent-a","status":"idle","server":"test"}' > /dev/null
+mcp_call "report_status" '{"resume_id":"reassign-dst","alias":"agent-b","status":"idle","server":"test"}' > /dev/null
+RA_SEND=$(mcp_call "send_task" '{"alias":"agent-a","task":"reassign me","from_session":"tester"}')
+RA_TID=$(echo "$RA_SEND" | python3 -c "
+import sys,json
+raw=sys.stdin.read()
+for line in raw.strip().split('\n'):
+  if line.startswith('data: '): raw=line[6:]
+try:
+  d=json.loads(raw)
+  t=json.loads(d.get('result',{}).get('content',[{}])[0].get('text','{}'))
+  print(t.get('message_id',''))
+except: print('')
+" 2>/dev/null)
+RA_RESP=$(mcp_call "reassign_task" "{\"task_id\":\"$RA_TID\",\"new_alias\":\"agent-b\",\"from_session\":\"tester\"}")
+echo "$RA_RESP" | grep -q 'agent-b' && pass "task reassigned to agent-b" || fail "reassign failed"
+# Verify task now targets agent-b
+RA_CHECK=$(curl -s "http://127.0.0.1:9200/api/tasks?task_id=$RA_TID" 2>/dev/null)
+echo "$RA_CHECK" | python3 -c "
+import sys,json
+data=json.loads(sys.stdin.read())
+t=data.get('tasks',[{}])[0]
+print('PASS' if t.get('to_name')=='agent-b' and t.get('status')=='delivered' else 'FAIL')
+" 2>/dev/null | grep -q 'PASS' && pass "task target updated in DB" || fail "task not reassigned in DB"
+echo ""
+
 # 23.7 Task expiration
 echo "23.7 Testing task expiration..."
 # Send a task with 2-second TTL

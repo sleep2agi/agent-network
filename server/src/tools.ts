@@ -565,6 +565,40 @@ export function registerTools(server: McpServer, clientIP?: string) {
     }
   );
 
+  // ── V2: reassign_task (转移任务到另一个 agent) ──
+  server.tool(
+    "reassign_task",
+    "Reassign a task to a different agent. Works on any non-terminal task (delivered/acked/running).",
+    {
+      task_id: z.string().min(1).max(200).describe("Task ID to reassign"),
+      new_alias: z.string().min(1).max(200).describe("Target agent alias"),
+      from_session: z.string().max(200).optional().default("hub"),
+    },
+    async ({ task_id, new_alias, from_session }) => {
+      console.log(`[${ts()}] ${from_session} → reassign_task → ${task_id.slice(0, 8)} → ${new_alias}`);
+      const task = db.query<any, [string]>("SELECT * FROM tasks WHERE task_id = ?1").get(task_id);
+      if (!task) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "task not found" }) }] };
+      if (["replied", "failed", "cancelled", "expired"].includes(task.status)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: `task is terminal (${task.status})` }) }] };
+      }
+      const oldAlias = task.to_name;
+      try {
+        db.run("BEGIN IMMEDIATE");
+        db.run("UPDATE tasks SET to_name = ?1, status = 'delivered', started_at = NULL, delivered_at = datetime('now') WHERE task_id = ?2", [new_alias, task_id]);
+        const newInboxId = uuidv4();
+        db.run("INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response) VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply')",
+          [newInboxId, new_alias, task.priority, task.content, from_session]);
+        db.run("COMMIT");
+        logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${new_alias}`);
+      } catch (e) {
+        try { db.run("ROLLBACK"); } catch {}
+        throw e;
+      }
+      pushEvent(new_alias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: new_alias }) }] };
+    }
+  );
+
   server.tool(
     "broadcast",
     "Send a message to multiple sessions.",
