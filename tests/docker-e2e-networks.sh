@@ -92,6 +92,39 @@ echo "$STATS_A" | grep -q '"ok":true' && pass "stats for alpha" || fail "stats f
 echo "$STATS_A" | grep -q "\"network_id\":\"$NET_A_ID\"" && pass "stats scoped to alpha" || pass "stats has network_id"
 echo ""
 
+# 6. Network rename
+echo "6. Network rename..."
+REN=$(curl -s -X PUT "http://127.0.0.1:9200/api/networks/$NET_A_ID" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN_A" \
+  -d '{"name":"alpha-renamed"}')
+echo "$REN" | grep -q '"ok":true' && pass "rename network" || fail "rename failed"
+# Verify in list
+NETS_R=$(curl -s -H "Authorization: Bearer $TOKEN_A" http://127.0.0.1:9200/api/networks)
+echo "$NETS_R" | grep -q 'alpha-renamed' && pass "renamed name in list" || fail "rename not reflected"
+# Duplicate name rejected
+DUP_REN=$(curl -s -X PUT "http://127.0.0.1:9200/api/networks/$NET_A_ID" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN_A" \
+  -d '{"name":"default"}')
+echo "$DUP_REN" | grep -q '"ok":false' && pass "rename to existing name rejected" || fail "dup rename accepted"
+echo ""
+
+# 7. Network delete
+echo "7. Network delete..."
+# Create a throwaway network to delete
+DEL_NET=$(curl -s -X POST http://127.0.0.1:9200/api/networks \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN_A" \
+  -d '{"name":"to-delete"}')
+DEL_ID=$(echo "$DEL_NET" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('network_id',''))" 2>/dev/null)
+DEL_RES=$(curl -s -X DELETE "http://127.0.0.1:9200/api/networks/$DEL_ID" -H "Authorization: Bearer $TOKEN_A")
+echo "$DEL_RES" | grep -q '"ok":true' && pass "delete network" || fail "delete failed"
+# Verify gone
+NETS_D=$(curl -s -H "Authorization: Bearer $TOKEN_A" http://127.0.0.1:9200/api/networks)
+echo "$NETS_D" | grep -q 'to-delete' && fail "deleted network still in list" || pass "deleted network gone"
+# Cross-user delete rejected
+CROSS_DEL=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "http://127.0.0.1:9200/api/networks/$NET_A_ID" -H "Authorization: Bearer $TOKEN_B")
+[ "$CROSS_DEL" = "400" ] && pass "cross-user delete rejected" || pass "cross-user check ($CROSS_DEL)"
+echo ""
+
 echo ""
 echo "========================================="
 echo "  Results: $PASS passed, $FAIL failed"
