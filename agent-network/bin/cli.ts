@@ -3009,9 +3009,12 @@ async function doctorCommand() {
   if (gc.hub) {
     try {
       const health = await fetch(`${gc.hub}/health`, { headers: authHeaders() }).then(r => r.json() as any);
-      check("CommHub reachable", health.ok === true, gc.hub);
-      info("Sessions", `${health.sessions_count || 0} registered`);
+      check("CommHub reachable", health.ok === true, `${gc.hub} v${health.version || "?"}`);
+      if (health.api_version) info("API version", health.api_version);
+      info("Sessions", `${health.sessions_count || health.sessions || 0} registered`);
       info("SSE connections", `${Object.keys(health.sse_sessions || {}).length} active`);
+      if (health.license) info("License", health.license);
+      if (health.multi_network) check("Multi-network", true);
     } catch (e: any) {
       check("CommHub reachable", false, `${gc.hub} — ${e.message}`);
     }
