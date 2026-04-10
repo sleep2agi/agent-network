@@ -835,6 +835,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     node_name: id,
     alias: id,
     runtime,
+    ...(gc.network_id ? { network_id: gc.network_id } : {}),
     ...(opts.hub ? { hub } : {}),
     ...(opts.model || defaultModel ? { model: opts.model || defaultModel } : {}),
     ...(opts.tools ? { tools: opts.tools.split(",").map((s: string) => s.trim()) } : {}),
