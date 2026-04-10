@@ -58,6 +58,63 @@ db.exec(`
   );
 `);
 
+// ── V2 schema migration (ALTER TABLE, safe to re-run) ──
+
+// sessions: add node_id, session_id, config_path, channels, last_seen_at
+for (const col of [
+  { name: "node_id", def: "TEXT" },
+  { name: "session_id", def: "TEXT" },
+  { name: "config_path", def: "TEXT" },
+  { name: "channels", def: "TEXT" },
+  { name: "last_seen_at", def: "TEXT" },
+]) {
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
+}
+
+// inbox: add in_reply_to, requires_response, expires_at, scope
+for (const col of [
+  { name: "in_reply_to", def: "TEXT" },
+  { name: "requires_response", def: "TEXT DEFAULT 'reply'" },
+  { name: "expires_at", def: "TEXT" },
+  { name: "scope", def: "TEXT DEFAULT 'single'" },
+]) {
+  try { db.exec(`ALTER TABLE inbox ADD COLUMN ${col.name} ${col.def}`); } catch {}
+}
+
+// indexes for new columns
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_type ON inbox(type)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_from ON inbox(from_session)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_reply ON inbox(in_reply_to)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_node ON sessions(node_id)"); } catch {}
+
+// tasks table (V2)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tasks (
+    task_id           TEXT PRIMARY KEY,
+    from_node_id      TEXT,
+    from_name         TEXT NOT NULL DEFAULT 'hub',
+    to_node_id        TEXT,
+    to_name           TEXT NOT NULL,
+    priority          TEXT NOT NULL DEFAULT 'normal',
+    status            TEXT NOT NULL DEFAULT 'created',
+    content           TEXT NOT NULL,
+    result            TEXT,
+    in_reply_to       TEXT,
+    requires_response TEXT DEFAULT 'reply',
+    scope             TEXT DEFAULT 'single',
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    delivered_at      TEXT,
+    started_at        TEXT,
+    completed_at      TEXT,
+    expires_at        TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tasks_to ON tasks(to_name);
+  CREATE INDEX IF NOT EXISTS idx_tasks_from ON tasks(from_name);
+  CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+  CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
+`);
+
 // Helpers
 export function uuidv4(): string {
   return crypto.randomUUID();
