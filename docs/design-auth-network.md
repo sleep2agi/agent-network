@@ -1,301 +1,313 @@
-# 用户账号 × 网络 × Agent Node 认证设计
+# 用户 × 网络 × Agent Node 认证权限设计 V2
 
-## 1. 核心概念
-
-```
-┌─────────────────────────────────────────────────┐
-│  User (人类)                                     │
-│  ├── username / password                        │
-│  ├── role: admin | user                         │
-│  └── owns N networks                            │
-│       ├── Network A (default)                   │
-│       │   ├── Token 1 (atok_xxx) → scope: full  │
-│       │   ├── Token 2 (atok_yyy) → scope: agent │
-│       │   ├── Agent Node: solver-1              │
-│       │   └── Agent Node: translator-2          │
-│       └── Network B (production)                │
-│           ├── Token 3 (atok_zzz)                │
-│           └── Agent Node: monitor-1             │
-└─────────────────────────────────────────────────┘
-```
-
-**三层关系：**
-- **User** → 拥有 → **Network** (1:N)
-- **Network** → 包含 → **Agent Node** (1:N)  
-- **Token** → 绑定 → **User + Network** (每个 token 属于一个 user，锁定一个 network)
-
-## 2. 用户体验流程
-
-### 2.1 新用户首次使用
-
-```bash
-# 安装
-npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
-
-# 一键设置（推荐）
-anet quickstart
-# → 输入 hub URL（或用官方免费: hub.sleep2agi.com）
-# → 注册用户名 + 密码
-# → 自动创建 default 网络 + token
-# → 自动写入 ~/.anet/config.json
-# → 创建第一个 agent
-
-# 或分步
-anet init --hub https://hub.sleep2agi.com
-anet register
-anet login
-anet create my-agent --runtime codex-sdk
-anet start my-agent
-```
-
-### 2.2 Dashboard 后台登录
+## 0. 总览
 
 ```
-访问 https://agent-net.vansin.me
-→ 登录页：用户名 + 密码
-→ 登录后看到：
-  - 左侧：网络列表（可切换）
-  - 首页：当前网络的 Agent 拓扑图 + 任务流
-  - Agent 页：在线 agent 列表、状态、任务
-  - Tasks 页：任务历史、状态机流转
-  - Settings：用户信息、改密码、Token 管理
-  - Admin（管理员）：用户列表、全局统计
+┌─────────────────────────────────────────────────────────────┐
+│  CommHub Server                                              │
+│                                                              │
+│  Users (账号)                                                │
+│  ├── Vincent (admin)                                        │
+│  │   ├── "dev" 网络 ────── role: owner                      │
+│  │   ├── "公司prod" 网络 ── role: member (被邀请)            │
+│  │   └── "开源demo" 网络 ── role: viewer (公开)              │
+│  │                                                          │
+│  ├── 小明 (user)                                             │
+│  │   ├── "小明实验" 网络 ── role: owner                      │
+│  │   └── "dev" 网络 ────── role: member (Vincent 邀请)       │
+│  │                                                          │
+│  └── 游客 (user)                                             │
+│      └── "开源demo" 网络 ── role: viewer (公开网络自动加入)   │
+│                                                              │
+│  每个网络内：                                                 │
+│  Network "dev" ──→ Agent: solver-1, translator-2, monitor    │
+│  Network "prod" ─→ Agent: api-bot, alert-bot                 │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 2.3 agent-node 认证
+## 1. 双层权限模型
 
-```bash
-# agent-node 启动时读取 token
-agent-node --alias my-agent --url http://hub:9200
+### Layer 1: 系统角色（全局，per user）
 
-# token 来源（优先级从高到低）：
-# 1. 环境变量 COMMHUB_TOKEN
-# 2. 节点配置 .anet/nodes/<name>/config.json → token
-# 3. 全局配置 ~/.anet/config.json → token
-```
+| 系统角色 | 谁 | 权限 |
+|---------|-----|------|
+| **admin** | 第一个注册的用户（自动） | 管理所有用户、看全局统计、开关注册 |
+| **user** | 后续注册的用户 | 创建网络、加入网络、管理自己的 agent |
 
-**认证链路：**
-```
-agent-node 发 MCP 请求
-  → Header: Authorization: Bearer atok_xxx
-  → CommHub Server resolveToken(atok_xxx)
-    → 查 api_tokens 表 → 得到 user_id + network_id
-    → 注入 enforceNetworkId → 所有查询自动隔离
-  → Agent 只能看到自己网络的数据
-```
+实现：users 表已有 `role` 字段。第一个注册的用户自动 `role = 'admin'`。
 
-## 3. Token 设计
+### Layer 2: 网络角色（per user per network）
 
-### 3.1 Token 类型
+| 网络角色 | 含义 | 权限 |
+|---------|------|------|
+| **owner** | 创建者 | 一切权限（删网络、管成员、管 token、踢人） |
+| **admin** | 网络管理员 | 管 agent + 管 token + 发任务 + 读 |
+| **member** | 成员 | 启动 agent + 发任务 + 读状态（最常用） |
+| **viewer** | 只读 | 看 agent 状态、看任务、看日志，不能写 |
 
-| 类型 | scope | 用途 | 创建方式 |
-|------|-------|------|---------|
-| **full** | 完整权限 | Dashboard 登录、CLI 操作 | 注册/登录自动生成 |
-| **agent** | 仅 MCP 工具 | agent-node 连接 | `anet token create --scope agent` |
-| **readonly** | 只读 REST | 监控/Dashboard 嵌入 | `anet token create --scope readonly` |
+### 权限矩阵
 
-### 3.2 Token 生命周期
+| 操作 | owner | admin | member | viewer |
+|------|-------|-------|--------|--------|
+| 删除/重命名网络 | ✅ | ❌ | ❌ | ❌ |
+| 邀请/踢除成员 | ✅ | ✅ | ❌ | ❌ |
+| 创建/撤销 token | ✅ | ✅ | ❌ | ❌ |
+| 启动 agent-node | ✅ | ✅ | ✅ | ❌ |
+| 发任务 (send_task) | ✅ | ✅ | ✅ | ❌ |
+| 回复任务 (send_reply) | ✅ | ✅ | ✅ | ❌ |
+| 取消/重试任务 | ✅ | ✅ | ✅ | ❌ |
+| 查看 agent 状态 | ✅ | ✅ | ✅ | ✅ |
+| 查看任务列表 | ✅ | ✅ | ✅ | ✅ |
+| 查看审计日志 | ✅ | ✅ | ❌ | ❌ |
 
-```
-创建 → 使用中（last_used_at 更新）→ 过期/撤销
+## 2. 网络加入方式
 
-- full token: 不过期（除非手动撤销）
-- agent token: 可选 --expires 7d
-- readonly token: 可选 --expires 
-```
-
-### 3.3 每个 Token 绑定一个 Network
+### 2.1 方式一：邀请码（推荐）
 
 ```
-用户 A 有两个网络：dev 和 prod
-  → token-1 (atok_abc): user=A, network=dev, scope=full
-  → token-2 (atok_def): user=A, network=prod, scope=agent
+Owner/Admin 操作：
+  anet network invite dev --role member
+  → 生成邀请码: inv_abc123 (一次性或多次使用)
+
+被邀请人操作：
+  anet network join inv_abc123
+  → 加入 "dev" 网络，角色 = member
+  → 自动创建绑定该网络的 token
+```
+
+### 2.2 方式二：Token 分发
+
+```
+Owner 操作：
+  anet token create agent-token --scope agent --network dev
+  → 返回 atok_xyz...
+
+把 token 给对方：
+  对方配置 ~/.anet/config.json → token: atok_xyz
+  → agent-node 启动时自动绑定到 dev 网络
+  → 但对方没有 Dashboard 登录能力（只有 agent 权限）
+```
+
+### 2.3 方式三：公开网络
+
+```
+Owner 操作：
+  anet network set-visibility dev --public
+  → 网络变为公开
+
+任何登录用户：
+  anet network join dev
+  → 自动以 viewer 角色加入
+  → 可以看状态，不能发任务
   
-agent-node 用 token-2 启动 → 只能访问 prod 网络的数据
+  anet network join dev --request-member
+  → 申请 member 权限（owner 审批）
 ```
 
-## 4. 网络权限模型
+## 3. 数据库变更
 
-### 4.1 核心问题：谁能读？谁能写？
-
-```
-┌───────────────────────────────────────────────┐
-│  Network "my-project"  (owner: Vincent)       │
-│                                               │
-│  访问控制：                                    │
-│  ┌─────────────┬──────┬──────┬──────────────┐ │
-│  │ Token Scope │ 读   │ 写   │ 管理         │ │
-│  ├─────────────┼──────┼──────┼──────────────┤ │
-│  │ full        │ ✅   │ ✅   │ ✅ 删除/改名 │ │
-│  │ agent       │ ✅   │ ✅   │ ❌           │ │
-│  │ readonly    │ ✅   │ ❌   │ ❌           │ │
-│  │ 无 token    │ ❌   │ ❌   │ ❌           │ │
-│  └─────────────┴──────┴──────┴──────────────┘ │
-│                                               │
-│  读 = get_inbox / get_all_status / list_tasks │
-│  写 = send_task / send_reply / report_status  │
-│  管理 = 网络 rename/delete + token 管理       │
-└───────────────────────────────────────────────┘
-```
-
-### 4.2 Token 申请闭环
-
-```
-场景：Vincent 想让同事小明的 Agent 加入网络
-
-1. Vincent 登录 Dashboard（或 CLI）
-   anet token create my-agent-token --scope agent
-   → 返回: atok_abc123...
-
-2. Vincent 把 token 给小明（微信/邮件/文档）
-
-3. 小明配置 agent-node
-   ~/.anet/config.json:
-   { "hub": "https://hub.sleep2agi.com", "token": "atok_abc123..." }
-   
-   或环境变量：
-   COMMHUB_TOKEN=atok_abc123... agent-node --alias xiaoming-bot
-
-4. 小明的 Agent 启动 → 自动绑定到 Vincent 的网络
-   → 只能看到该网络的 agents / tasks
-   → 可以收发任务（agent scope）
-   → 不能删网络 / 管理 token
-```
-
-### 4.3 官方免费网络（P2 公网）
-
-```
-场景：用户想快速体验，不想自部署
-
-1. 用户安装 anet
-   npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
-
-2. 连接官方 hub
-   anet init --hub https://hub.sleep2agi.com
-   anet register
-   → 自动创建 default 网络 + full token
-   → 14 天免费试用
-
-3. 创建 agent
-   anet create my-agent --runtime codex-sdk
-   anet start my-agent
-
-整个流程 3 分钟，零服务器配置。
-```
-
-## 5. 网络成员模型（P3 扩展）
-
-### 5.1 当前（V3）：单用户所有
-
-```
-networks 表:
-  network_id | network_name | owner_id
-  
-→ 只有 owner 能操作网络
-→ 简单，够用
-```
-
-### 5.2 未来（V4）：多成员协作
+### 3.1 新增 network_members 表
 
 ```sql
--- 新增 network_members 表
-CREATE TABLE network_members (
-  network_id TEXT NOT NULL,
-  user_id    TEXT NOT NULL,
-  role       TEXT DEFAULT 'member',  -- owner | admin | member | viewer
-  joined_at  TEXT DEFAULT (datetime('now')),
+CREATE TABLE IF NOT EXISTS network_members (
+  network_id  TEXT NOT NULL,
+  user_id     TEXT NOT NULL,
+  role        TEXT NOT NULL DEFAULT 'member',  -- owner/admin/member/viewer
+  invited_by  TEXT,                            -- 谁邀请的
+  joined_at   TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (network_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_netmem_user ON network_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_netmem_network ON network_members(network_id);
+```
+
+### 3.2 新增 network_invites 表
+
+```sql
+CREATE TABLE IF NOT EXISTS network_invites (
+  invite_code TEXT PRIMARY KEY,
+  network_id  TEXT NOT NULL,
+  role        TEXT NOT NULL DEFAULT 'member',
+  created_by  TEXT NOT NULL,
+  max_uses    INTEGER DEFAULT 1,    -- -1 = 无限
+  used_count  INTEGER DEFAULT 0,
+  expires_at  TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
+### 3.3 networks 表新增字段
+
+```sql
+ALTER TABLE networks ADD COLUMN visibility TEXT DEFAULT 'private';  -- private/public
+ALTER TABLE networks ADD COLUMN max_members INTEGER DEFAULT 50;
 ```
-Network "production"
-  ├── owner: Vincent (全部权限)
-  ├── admin: 运维组 (管理 agent，不能删网络)
-  ├── member: 开发组 (发任务，看状态)
-  └── viewer: 监控组 (只读)
+
+### 3.4 迁移兼容
+
+现有 networks 表的 owner_id → 自动在 network_members 插入一条 role='owner' 记录。
+向后兼容：如果 network_members 表不存在，fallback 到 owner_id 判断。
+
+## 4. API 变更
+
+### 4.1 新增 API
+
+| 端点 | 方法 | 说明 | 权限 |
+|------|------|------|------|
+| `/api/networks/:id/members` | GET | 网络成员列表 | owner/admin |
+| `/api/networks/:id/members` | POST | 添加成员 `{user_id, role}` | owner/admin |
+| `/api/networks/:id/members/:uid` | PUT | 修改成员角色 | owner |
+| `/api/networks/:id/members/:uid` | DELETE | 踢除成员 | owner/admin |
+| `/api/networks/:id/invite` | POST | 创建邀请码 | owner/admin |
+| `/api/networks/join` | POST | 用邀请码加入 `{invite_code}` | any user |
+
+### 4.2 修改现有 API
+
+| 端点 | 变更 |
+|------|------|
+| `GET /api/networks` | 返回用户作为成员的所有网络（不只是 owner） |
+| `GET /api/auth/me` | 返回用户在各网络的角色 |
+| MCP 写操作 | 检查 token 绑定的网络角色 ≥ member |
+| MCP 读操作 | 检查 token 绑定的网络角色 ≥ viewer |
+
+## 5. 用户体验流程
+
+### 5.1 新手首次使用
+
+```
+npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
+anet quickstart
+  → 连接 hub (官方免费 / 自部署)
+  → 注册账号 (第一个注册 → admin)
+  → 自动创建 default 网络 (owner)
+  → 创建第一个 agent
+  → 完成！3 分钟上手
 ```
 
-**暂不实现，V3 够用。** 但数据库设计已预留扩展空间。
+### 5.2 被邀请加入团队网络
 
-## 5. 安全要点
+```
+收到邀请码 inv_abc123
+anet login                    # 先登录（或注册）
+anet network join inv_abc123  # 加入网络
+anet network use prod         # 切换到该网络
+anet create my-agent          # 创建 agent（自动绑定当前网络）
+anet start my-agent           # 启动
+```
 
-### 5.1 已实现 ✅
-- 密码 SHA-256 哈希（加盐 "anet:"）
-- Token 哈希存储（不存明文）
-- server-enforced network_id（token 绑定，不信任客户端）
-- rate limit: 注册 30/min, 登录 10/min
-- 审计日志: 所有操作记录
+### 5.3 Dashboard 体验
 
-### 5.2 建议增强（P2）
-- [ ] bcrypt 替代 SHA-256（更安全）
-- [ ] JWT refresh token（短期 access + 长期 refresh）
-- [ ] OAuth Google/GitHub 登录
-- [ ] 2FA (TOTP)
-- [ ] Token IP 白名单
+```
+登录 → 左侧网络列表：
+  ⭐ dev (owner)           ← 自己创建的
+  👤 prod (member)         ← 被邀请的
+  👁 开源demo (viewer)     ← 公开只读
 
-## 6. Dashboard 后台页面清单
+点击网络 → 看到该网络的 agent / 任务 / 日志
+权限不同 → UI 按钮自动隐藏（viewer 看不到"发任务"按钮）
+```
 
-| 页面 | 状态 | 对接 API |
-|------|------|---------|
-| 登录/注册 | ✅ | POST /api/auth/login, /register |
-| 首页仪表盘 | ✅ | GET /api/stats, /api/status |
-| Agent 拓扑 | ✅ | GET /api/status (SSE 实时) |
-| 任务列表 | ✅ | GET /api/tasks |
-| 消息流 | ✅ | GET /api/messages |
-| 审计日志 | ✅ | GET /api/audit-log |
-| 用户设置 | ✅ | GET/PUT /api/auth/me |
-| License | ✅ | GET /api/license |
-| Token 管理 | ❌ TODO | GET/POST/DELETE /api/auth/tokens |
-| 改密码 | ❌ TODO | POST /api/auth/password |
-| 网络管理 | ❌ TODO | GET/POST/PUT/DELETE /api/networks |
-| 用户管理(admin) | ❌ TODO | GET /api/users |
+## 6. 账号配额（Plan）
 
-## 7. agent-node 改进建议
+不同级别的用户有不同的配额限制：
 
-### 7.1 当前问题
-- agent-node 用全局 token，没有区分 agent 专用 token
-- 启动时不验证 token 是否有效
-- 没有显示当前绑定的网络
+| 配额项 | Free (试用) | Pro (付费) | Admin (管理员) |
+|--------|------------|-----------|---------------|
+| 创建网络数 | 2 | 10 | 无限 |
+| 加入网络数 | 3 | 20 | 无限 |
+| 每网络 Agent 数 | 5 | 50 | 无限 |
+| 每天任务数 | 100 | 5000 | 无限 |
+| Token 数 | 3 | 20 | 无限 |
+| 网络最大成员 | 5 | 50 | 无限 |
+| 试用期 | 14 天 | 无限 | 无限 |
 
-### 7.2 改进方案
+### 实现方式
+
+```sql
+-- users 表新增字段
+ALTER TABLE users ADD COLUMN plan TEXT DEFAULT 'free';  -- free/pro/admin
+
+-- 或关联 licenses 表（已有）
+-- licenses.type = 'trial' → free 配额
+-- licenses.type = 'pro'   → pro 配额
+```
+
+```typescript
+// 配额检查（在创建网络 / 加入网络 / 发任务前）
+const QUOTAS = {
+  free:  { max_networks_owned: 2, max_networks_joined: 3, max_agents_per_net: 5, max_tasks_day: 100, max_tokens: 3 },
+  pro:   { max_networks_owned: 10, max_networks_joined: 20, max_agents_per_net: 50, max_tasks_day: 5000, max_tokens: 20 },
+  admin: { max_networks_owned: Infinity, max_networks_joined: Infinity, max_agents_per_net: Infinity, max_tasks_day: Infinity, max_tokens: Infinity },
+};
+```
+
+### 超配额提示
+
+```
+anet network create third-net
+→ ❌ Free plan: 最多创建 2 个网络。升级: anet activate <key>
+
+anet network join inv_xxx
+→ ❌ Free plan: 最多加入 3 个网络。升级: anet activate <key>
+```
+
+## 7. Token 设计
+
+### 6.1 Token 类型
+
+| scope | 能做什么 | 谁用 |
+|-------|---------|------|
+| **full** | 读+写+管理（等同用户本人） | Dashboard 登录、CLI |
+| **agent** | 读+写（MCP 工具） | agent-node 连接 |
+| **readonly** | 只读（REST API） | 监控、嵌入 |
+
+### 6.2 Token 绑定规则
+
+- 每个 token 绑定一个 user + 一个 network
+- Token 的有效权限 = min(token scope, 用户在该网络的角色)
+  - 例：用户是 viewer + token scope=full → 实际只有 viewer 权限
+  - 例：用户是 owner + token scope=readonly → 实际只有 readonly 权限
+- agent-node 用 token 启动 → 自动绑定到 token 的网络
+
+### 6.3 创建流程
 
 ```bash
-# 改进后的 agent-node 启动
-agent-node --alias solver-1
+# CLI 创建（推荐）
+anet token create my-bot --scope agent
+→ Token: atok_xxx... (bound to current network)
 
-# 启动输出：
-# ┌─────────────────────────────────┐
-# │ Agent Node: solver-1            │
-# │ Hub:    http://hub:9200         │
-# │ User:   vincent                 │
-# │ Network: production (net_xxx)   │
-# │ Token:  atok_abc...  (agent)    │
-# │ Runtime: codex-sdk (GPT-5.4)   │
-# └─────────────────────────────────┘
+# Dashboard 创建
+Settings → Token Management → Create Token
+→ 选 scope + 选网络 → 生成 token → 复制
+
+# 把 token 给 agent-node
+COMMHUB_TOKEN=atok_xxx agent-node --alias my-bot
 ```
 
-**启动时验证 token：**
-```
-1. 调 /api/auth/me (验证 token 有效)
-2. 显示用户名 + 网络名
-3. token 无效 → 提示 "anet login" 
-```
+## 8. 实施计划
 
-## 8. 实施优先级
+### Phase 1 (V3.13) — 网络成员 + 邀请码
+- [ ] network_members 表 + 迁移（owner_id → member role=owner）
+- [ ] network_invites 表
+- [ ] `GET /api/networks` 返回所有成员网络
+- [ ] `POST /api/networks/:id/invite` 创建邀请码
+- [ ] `POST /api/networks/join` 加入网络
+- [ ] `anet network invite` + `anet network join` CLI
+- [ ] 第一个注册用户自动 admin
+- [ ] E2E 测试
 
-| 优先级 | 任务 | 工作量 |
-|--------|------|--------|
-| **P0** | agent-node 启动显示用户+网络 | 0.5h |
-| **P0** | agent-node 启动验证 token | 0.5h |
-| **P1** | Dashboard Token 管理页 | N站马 1轮 |
-| **P1** | Dashboard 改密码 | N站马 0.5轮 |
-| **P1** | Dashboard 网络管理 | N站马 1轮 |
-| **P2** | Token scope (agent/readonly) | 2h |
-| **P2** | bcrypt 密码哈希 | 1h |
-| **P2** | OAuth Google 登录 | 4h |
-| **P3** | 网络多成员 | 1天 |
+### Phase 2 (V3.14) — 权限检查 + Token scope
+- [ ] MCP 写操作检查 member 角色
+- [ ] MCP 读操作检查 viewer 角色
+- [ ] Token scope (full/agent/readonly) 实现
+- [ ] Dashboard 按角色隐藏按钮
+
+### Phase 3 (V3.15) — 公开网络 + 审批
+- [ ] networks.visibility = public/private
+- [ ] 公开网络自动 viewer 加入
+- [ ] member 申请 + owner 审批流
 
 ---
 
-*通信龙 2026-04-11 设计，待 Vincent review*
+*通信龙 2026-04-11 V2 设计，待 Vincent review*
