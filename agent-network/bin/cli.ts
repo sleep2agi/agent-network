@@ -594,6 +594,7 @@ Setup:
 
 Other:
   anet import [alias]           Import sessions from CommHub
+  anet doctor                   System diagnostic check
   anet run                      Standalone SSE agent
   anet -v                       Version + dependency report
 
@@ -2115,6 +2116,68 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diff / 86400000)}d`;
 }
 
+// ── doctor (diagnostic) ──
+
+async function doctorCommand() {
+  console.log("\nanet doctor — System Diagnostic\n");
+  let ok = 0, warn = 0, fail = 0;
+  const check = (name: string, pass: boolean, detail?: string) => {
+    if (pass) { console.log(`  ✅ ${name}${detail ? ` (${detail})` : ""}`); ok++; }
+    else { console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`); fail++; }
+  };
+  const info = (name: string, detail: string) => { console.log(`  ℹ  ${name}: ${detail}`); };
+  const warning = (name: string, detail: string) => { console.log(`  ⚠  ${name}: ${detail}`); warn++; };
+
+  // 1. Global config
+  const gc = loadGlobal();
+  check("Global config (~/.anet/config.json)", !!gc.hub, gc.hub || "missing — run: anet init");
+  if (gc.token) check("Auth token configured", true);
+  else warning("Auth token", "not set — agents connect without auth");
+
+  // 2. Hub connectivity
+  if (gc.hub) {
+    try {
+      const health = await fetch(`${gc.hub}/health`, { headers: authHeaders() }).then(r => r.json() as any);
+      check("CommHub reachable", health.ok === true, gc.hub);
+      info("Sessions", `${health.sessions_count || 0} registered`);
+      info("SSE connections", `${Object.keys(health.sse_sessions || {}).length} active`);
+    } catch (e: any) {
+      check("CommHub reachable", false, `${gc.hub} — ${e.message}`);
+    }
+  }
+
+  // 3. Nodes
+  const ids = listProfileIds();
+  check("Nodes configured", ids.length > 0, `${ids.length} node(s)`);
+  for (const id of ids.slice(0, 5)) {
+    const p = loadProfile(id);
+    const name = nodeDisplayName(id, p);
+    const runtime = normalizeRuntime(p || undefined);
+    const pid = join(nodesDir(), id, ".pid");
+    const alive = existsSync(pid) ? (() => { try { process.kill(parseInt(readFileSync(pid, "utf-8")), 0); return true; } catch { return false; } })() : false;
+    info(`  ${name}`, `${runtime} ${alive ? "● running" : "○ stopped"} node_id=${p?.node_id || "-"}`);
+  }
+
+  // 4. Dependencies
+  try { execSync("claude --version", { stdio: "pipe" }); check("Claude Code CLI", true); } catch { warning("Claude Code CLI", "not found (needed for claude-agent-sdk runtime)"); }
+  try { execSync("codex --version", { stdio: "pipe" }); check("Codex CLI", true); } catch { warning("Codex CLI", "not found (needed for codex-sdk runtime)"); }
+  try { execSync("bun --version", { stdio: "pipe" }); check("Bun runtime", true); } catch { warning("Bun", "not found (needed for commhub-server)"); }
+
+  // 5. .mcp.json
+  const mcpPath = join(process.cwd(), ".mcp.json");
+  if (existsSync(mcpPath)) {
+    try {
+      const mcp = JSON.parse(readFileSync(mcpPath, "utf-8"));
+      const hasCommhub = Object.values(mcp.mcpServers || {}).some((s: any) => s.command?.includes("node-server") || JSON.stringify(s).includes("commhub"));
+      check(".mcp.json commhub channel", !!hasCommhub, hasCommhub ? "configured" : "missing commhub server entry");
+    } catch { warning(".mcp.json", "parse error"); }
+  } else {
+    info(".mcp.json", "not found in current directory");
+  }
+
+  console.log(`\n  Result: ${ok} ok, ${warn} warnings, ${fail} errors\n`);
+}
+
 switch (command) {
   case "init":
     if (args[1] === "project") initProject();
@@ -2136,6 +2199,7 @@ switch (command) {
   case "ls": case "list": lsCommand(); break;
   case "status": await statusCommand(); break;
   case "tasks": await tasksCommand(); break;
+  case "doctor": await doctorCommand(); break;
   case "run": runCommand(); break;
   case "-v": case "--version": case "version": {
     printVersionReport();
