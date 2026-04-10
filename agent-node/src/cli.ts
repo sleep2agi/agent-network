@@ -20,7 +20,7 @@ const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
 
-const PKG_VERSION = "1.2.0";
+const PKG_VERSION = "1.3.0";
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -353,7 +353,9 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
   const { Codex } = await import("@openai/codex-sdk");
 
   if (!codexThread) {
-    const codex = new Codex();
+    const codex = new Codex({
+      config: { model_auto_compact_token_limit: 200000 },
+    });
     const codexModel = MODEL || "gpt-5.4";
     const codexOpts = {
       skipGitRepoCheck: true,
@@ -402,30 +404,12 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
     const inTokens = usage?.input_tokens || 0;
     log(`[codex] done | ${dt}ms | in=${inTokens} out=${usage?.output_tokens || 0} | items=${itemCount}`);
     if (codexThread?.id) writebackSession(codexThread.id);
-
-    // Auto-compact: input_tokens 过大时新建 thread（带摘要）
-    const COMPACT_THRESHOLD = 500_000;
-    if (inTokens > COMPACT_THRESHOLD && finalResponse) {
-      log(`[codex] auto-compact: input_tokens ${inTokens} > ${COMPACT_THRESHOLD}, 新建 thread`);
-      const summary = `[上下文摘要] 之前对话的最后回复：${finalResponse.slice(0, 500)}`;
-      const codex = new Codex();
-      codexThread = codex.startThread({
-        skipGitRepoCheck: true,
-        approvalPolicy: "never" as const,
-        model: MODEL || "gpt-5.4",
-        sandboxMode: "danger-full-access" as const,
-        modelReasoningEffort: "low" as const,
-      });
-      // 用摘要初始化新 thread
-      await codexThread.run(summary).catch(() => {});
-      if (codexThread?.id) writebackSession(codexThread.id);
-      log(`[codex] new thread: ${codexThread?.id}`);
-    }
+    // Auto-compact 由 Codex CLI 原生处理（model_auto_compact_token_limit=200000）
 
     return finalResponse || "（无回复）";
   } catch (e: any) {
     log(`codex thread error: ${e.message}, 重建`);
-    const codex = new Codex();
+    const codex = new Codex({ config: { model_auto_compact_token_limit: 200000 } });
     codexThread = codex.startThread({
       skipGitRepoCheck: true,
       approvalPolicy: "never" as const,

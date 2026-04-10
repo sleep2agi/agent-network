@@ -598,26 +598,28 @@ async function initProject() {
   mkdirSync(anetDir, { recursive: true });
 
   // 1. Write node-server.ts
-  const serverTs = join(anetDir, "node-server.ts");
+  const serverTs = join(anetDir, "node-server.js");
   if (!existsSync(serverTs)) {
     // Try multiple paths to find node-server.ts
     const candidates = [
+      join(new URL(".", import.meta.url).pathname, "..", "..", "dist", "src", "node-server.js"),
+      join(new URL(".", import.meta.url).pathname, "..", "src", "node-server.js"),
       join(new URL(".", import.meta.url).pathname, "..", "..", "src", "node-server.ts"),
-      join(new URL(".", import.meta.url).pathname, "..", "src", "node-server.ts"),
+      join(process.argv[1], "..", "..", "dist", "src", "node-server.js"),
       join(process.argv[1], "..", "..", "src", "node-server.ts"),
     ];
     let found = false;
     for (const p of candidates) {
       if (existsSync(p)) {
         writeFileSync(serverTs, readFileSync(p, "utf-8"));
-        console.log(`  ✅ .anet/node-server.ts`);
+        console.log(`  ✅ .anet/node-server.js`);
         found = true;
         break;
       }
     }
     if (!found) {
       console.log(`  ❌ Cannot find node-server.ts`);
-      console.log(`  Fix: cp $(npm root -g)/@sleep2agi/agent-network/src/node-server.ts .anet/node-server.ts`);
+      console.log(`  Fix: cp $(npm root -g)/@sleep2agi/agent-network/src/node-server.ts .anet/node-server.js`);
     }
   } else {
     console.log("  Channel plugin: exists");
@@ -648,15 +650,15 @@ async function initProject() {
   writeFileSync(envPath, envContent);
   console.log(`CommHub URL: ${hub}${token ? " (with token)" : ""}`);
 
-  // 4. .mcp.json（指向 .anet/node-server.ts）
+  // 4. .mcp.json（指向 .anet/node-server.js）
   const mcpJsonPath = join(process.cwd(), ".mcp.json");
   let mcpConfig: any = {};
   if (existsSync(mcpJsonPath)) try { mcpConfig = JSON.parse(readFileSync(mcpJsonPath, "utf-8")); } catch {}
   if (!mcpConfig.mcpServers?.commhub) {
     mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.ts"] };
+    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.js"] };
     writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
-    console.log(`.mcp.json: commhub → .anet/node-server.ts`);
+    console.log(`.mcp.json: commhub → .anet/node-server.js`);
   } else {
     console.log(`.mcp.json: commhub already set`);
   }
@@ -1071,9 +1073,9 @@ function ensureMcpJson(profile: Profile) {
   let mcpConfig: any = {};
   if (existsSync(mcpJsonPath)) try { mcpConfig = JSON.parse(readFileSync(mcpJsonPath, "utf-8")); } catch {}
 
-  // Always update .anet/node-server.ts from npm package (keep in sync)
+  // Always update .anet/node-server.js from npm package (keep in sync)
   const anetDir = join(process.cwd(), ".anet");
-  const serverTs = join(anetDir, "node-server.ts");
+  const serverTs = join(anetDir, "node-server.js");
   const candidates = [
     join(new URL(".", import.meta.url).pathname, "..", "..", "src", "node-server.ts"),
     join(new URL(".", import.meta.url).pathname, "..", "src", "node-server.ts"),
@@ -1086,7 +1088,7 @@ function ensureMcpJson(profile: Profile) {
       const dst = existsSync(serverTs) ? readFileSync(serverTs, "utf-8") : "";
       if (src !== dst) {
         writeFileSync(serverTs, src);
-        console.log(`[anet] Updated .anet/node-server.ts`);
+        console.log(`[anet] Updated .anet/node-server.js`);
       }
       break;
     }
@@ -1110,7 +1112,7 @@ function ensureMcpJson(profile: Profile) {
   mcpConfig.mcpServers = mcpConfig.mcpServers || {};
   const hasCommhub = Object.keys(mcpConfig.mcpServers).some(k => k.includes("commhub"));
   if (!hasCommhub) {
-    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.ts"] };
+    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.js"] };
     writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
     console.log(`[anet] .mcp.json: added commhub`);
   }
@@ -1124,7 +1126,7 @@ function ensureMcpJson(profile: Profile) {
 
   // Write .mcp.json
   mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-  mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.ts"] };
+  mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.js"] };
   writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
   console.log(`[anet] .mcp.json: added commhub channel server`);
 }
