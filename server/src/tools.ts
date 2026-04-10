@@ -187,6 +187,11 @@ export function registerTools(server: McpServer, clientIP?: string) {
         }
 
         db.run("COMMIT");
+        // Log event after commit
+        const updatedTaskId = taskUpdate.changes > 0 ? task : (db.query<{ task_id: string }, [string]>(
+          "SELECT task_id FROM tasks WHERE to_name = ?1 AND status = 'replied' ORDER BY completed_at DESC LIMIT 1"
+        ).get(alias)?.task_id);
+        if (updatedTaskId) logTaskEvent(updatedTaskId, null, "replied", alias, "report_completion");
       } catch (e) {
         try { db.run("ROLLBACK"); } catch {}
         throw e;
@@ -426,6 +431,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
     async ({ alias, text, in_reply_to, status: replyStatus, from_session }) => {
       console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
       const id = uuidv4();
+      let replyLogged = false;
       try {
         db.run("BEGIN IMMEDIATE");
         db.run(
@@ -444,7 +450,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
           if (result.changes === 0) {
             console.log(`[${ts()}] ⚠ send_reply: task ${in_reply_to?.slice(0, 8)} not found or already terminal`);
           } else {
-            logTaskEvent(in_reply_to, null, replyStatus, from_session, text.slice(0, 200));
+            replyLogged = true;
           }
         }
         db.run("COMMIT");
@@ -452,6 +458,9 @@ export function registerTools(server: McpServer, clientIP?: string) {
         try { db.run("ROLLBACK"); } catch {}
         throw e;
       }
+
+      // Log event after commit (outside transaction)
+      if (replyLogged && in_reply_to) logTaskEvent(in_reply_to, null, replyStatus, from_session, text.slice(0, 200));
 
       const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
       pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus });
@@ -479,6 +488,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
         `UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status IN ('created', 'delivered')`,
         [task_id]
       );
+      if (result.changes > 0) logTaskEvent(task_id, "delivered", "acked", from_session);
       return {
         content: [{
           type: "text" as const,

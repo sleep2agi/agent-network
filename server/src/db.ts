@@ -147,7 +147,7 @@ db.exec(`
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
-  CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id);
+  CREATE INDEX IF NOT EXISTS idx_task_events_task_time ON task_events(task_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_task_events_created ON task_events(created_at);
 `);
 
