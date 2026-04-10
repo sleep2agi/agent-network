@@ -1,5 +1,27 @@
 # Agent Network Evolution Log
 
+## V3.8 Docs Alignment + v1.0.0 Polish (2026-04-11) — COMPLETE
+
+### Stats
+- 158 commits, 52 npm preview packages
+- 200 Docker tests + 19 adapter E2E tests
+- 11 database tables, 18 MCP tools, 17 REST endpoints, 34 CLI commands
+- Code audit: CLEAN (no dead code, no secrets, no unused imports)
+
+### Added since V3.7
+- **README alignment**: CLI 26→34 commands, npm versions updated, PG quick-start added
+- **CHANGELOG v1.0.0-preview.25**: Full release notes for PG adapter, architecture, testing
+- **Code audit**: Zero issues found (all console.log intentional, no hardcoded secrets)
+- **Production upgrade request**: Sent to Vincent for approval
+
+### Status
+- P0 "代码清理" ✅ DONE (code audit clean)
+- P1 PostgreSQL ✅ DONE (adapter + translator + E2E)
+- P1 试用期+授权码 ✅ DONE (V3.0)
+- Production server: awaiting Vincent approval to upgrade from v0.4.1
+
+---
+
 ## V3.7 E2E Verified + Demo (2026-04-11) — COMPLETE
 
 ### Stats
