@@ -20,7 +20,17 @@ const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
 
-const PKG_VERSION = "2.0.0";
+let PKG_VERSION = "2.1.0";
+try {
+  // Try relative to the script location (works for both dev and npm install)
+  const scriptDir = new URL(".", import.meta.url).pathname;
+  for (const rel of ["../package.json", "../../package.json"]) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(scriptDir, rel), "utf-8"));
+      if (pkg.version) { PKG_VERSION = pkg.version; break; }
+    } catch {}
+  }
+} catch {}
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -174,7 +184,9 @@ function writebackSession(sessionId: string) {
     cfg.session = sessionId;
     writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
     debug(`session 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
-  } catch {}
+  } catch (e: any) {
+    warn(`writebackSession failed: ${e.message}`);
+  }
 }
 
 // ── Channel config ──
@@ -259,29 +271,46 @@ const debug = (msg: string) => _log("debug", 0, msg);
 const warn = (msg: string) => _log("warn", 2, msg);
 const error = (msg: string) => _log("error", 3, msg);
 
-// ── CommHub MCP 调用 ──
-async function callCommHub(method: string, params: Record<string, unknown>) {
+// ── CommHub MCP 调用 (with retry) ──
+async function callCommHub(method: string, params: Record<string, unknown>, retries = 3) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Accept": "application/json, text/event-stream",
   };
   if (AUTH_TOKEN) headers["Authorization"] = `Bearer ${AUTH_TOKEN}`;
 
-  const res = await fetch(`${COMMHUB_URL}/mcp`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: Date.now(),
-      method: "tools/call",
-      params: { name: method, arguments: params },
-    }),
-  });
-  const raw = await res.text();
-  const match = raw.match(/data: (.+)/);
-  const data = match ? JSON.parse(match[1]) : JSON.parse(raw);
-  const text = data?.result?.content?.[0]?.text;
-  return text ? JSON.parse(text) : data;
+  let lastErr: Error | undefined;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`${COMMHUB_URL}/mcp`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: Date.now(),
+          method: "tools/call",
+          params: { name: method, arguments: params },
+        }),
+      });
+      if (!res.ok && attempt < retries) {
+        lastErr = new Error(`HTTP ${res.status}`);
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        continue;
+      }
+      const raw = await res.text();
+      const match = raw.match(/data: (.+)/);
+      const data = match ? JSON.parse(match[1]) : JSON.parse(raw);
+      const text = data?.result?.content?.[0]?.text;
+      return text ? JSON.parse(text) : data;
+    } catch (e: any) {
+      lastErr = e;
+      if (attempt < retries) {
+        debug(`callCommHub(${method}) attempt ${attempt + 1} failed: ${e.message}, retrying...`);
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+      }
+    }
+  }
+  throw lastErr || new Error(`callCommHub(${method}) failed after ${retries} retries`);
 }
 
 const NODE_ID = fileConfig.node_id || "";
