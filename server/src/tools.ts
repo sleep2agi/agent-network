@@ -35,8 +35,9 @@ export function registerTools(server: McpServer, clientIP?: string) {
       config_path: z.string().max(1000).optional().describe("Config file path"),
       channels: z.string().max(2000).optional().describe("JSON array of channels"),
       model: z.string().max(200).optional().describe("AI model name"),
+      node_name: z.string().max(200).optional().describe("Stable node display name (may differ from alias)"),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn }) => {
       console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
 
@@ -103,7 +104,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
                server = COALESCE(?8, nodes.server),
                hostname = COALESCE(?9, nodes.hostname),
                updated_at = datetime('now')`,
-            [node_id, alias, alias, nodeRuntime, mdl ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null]
+            [node_id, nn || alias, alias, nodeRuntime, mdl ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null]
           );
         } catch {}
       }

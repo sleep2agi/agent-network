@@ -315,12 +315,14 @@ async function callCommHub(method: string, params: Record<string, unknown>, retr
 }
 
 const NODE_ID = fileConfig.node_id || "";
+const NODE_NAME = fileConfig.node_name || "";
 const RESUME_ID = NODE_ID ? `sdk-${NODE_ID}` : `sdk-${ALIAS}-${Date.now().toString(36)}`;
 const register = () => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status: "idle",
   server: osHostname(), hostname: osHostname(),
   agent: `agent-node:${RUNTIME}`, project_dir: process.cwd(),
   node_id: NODE_ID || undefined,
+  node_name: NODE_NAME || undefined,
   session_id: SESSION_ID || undefined,
   config_path: configFilePath || undefined,
   channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
