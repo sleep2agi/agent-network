@@ -21,8 +21,11 @@ agent-node
 ├── runtime: claude ──→ @anthropic-ai/claude-agent-sdk
 │   └── query() → spawn claude CLI → AI 处理 + 工具调用
 │
-└── runtime: codex ───→ @openai/codex-sdk
-    └── exec() → spawn codex CLI → AI 处理 + 工具调用
+├── runtime: codex ───→ @openai/codex-sdk
+│   └── exec() → spawn codex CLI → AI 处理 + 工具调用
+│
+└── runtime: http-api ─→ 直接 HTTP 调用 (V2 新增)
+    └── OpenAI/Anthropic 兼容 API → MiniMax/DeepSeek 等
 ```
 
 ### Claude Agent SDK（`--runtime claude`，默认）
@@ -121,9 +124,9 @@ SSE 长连接 /events/:alias
 │     ↓
 │   report_status: working
 │     ↓
-│   AI 处理（claude query() 或 codex exec()）
+│   AI 处理（claude/codex/http-api）
 │     ↓
-│   send_task → 回报结果给发送者
+│   send_reply → 回报结果（V2: 关联 task_id）
 │     ↓
 │   report_status: idle
 │     ↓
@@ -213,8 +216,8 @@ npx @sleep2agi/agent-node --alias Claude马 --hub http://IP:9200 --tools all
 |------|--------|------|
 | `--alias` | 必填 | Agent 名称 |
 | `--hub` | `http://127.0.0.1:9200` | CommHub URL |
-| `--runtime` | `claude` | `claude` 或 `codex` |
-| `--model` | claude: `claude-sonnet-4-6` / codex: `gpt-5.4` | 模型名 |
+| `--runtime` | `claude` | `claude` / `codex` / `http-api` / `minimax` |
+| `--model` | 按 runtime | codex: `gpt-5.4`, http-api: `claude-3-5-haiku-20241022` |
 | `--tools` | 无 | `all` 或逗号分隔 |
 | `--max-turns` | `5` | 每任务最大轮次 |
 | `--max-budget` | 无 | 每任务预算（美元） |
@@ -229,8 +232,9 @@ npx @sleep2agi/agent-node --alias Claude马 --hub http://IP:9200 --tools all
 |---|------------|
 | `@anthropic-ai/claude-agent-sdk` | `--runtime claude` 时（动态 import） |
 | `@openai/codex-sdk` | `--runtime codex` 时（动态 import） |
+| 无外部依赖 | `--runtime http-api` 时（内置 fetch） |
 
-未使用的 runtime 不会加载依赖。
+未使用的 runtime 不会加载依赖。`http-api` runtime 零依赖。
 
 ---
 
