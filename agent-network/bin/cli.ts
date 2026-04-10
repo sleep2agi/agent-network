@@ -590,6 +590,7 @@ Setup:
   anet init                     Configure hub URL (global)
   anet init project             Setup project (channel plugin)
   anet setup                    Install runtime dependencies
+  anet server local              One-command local server + setup
   anet server start             Start CommHub Server
   anet upgrade                  Check for updates
 
@@ -1553,6 +1554,95 @@ async function serverCommand() {
     // bunx 跑 commhub-server（server 是 bun-only）
     const child = spawn("bunx", ["@sleep2agi/commhub-server"], { env, stdio: "inherit", shell: true });
     child.on("exit", (code) => process.exit(code || 0));
+
+  } else if (sub === "local") {
+    // anet server local — one-command local setup
+    // Starts server + configures hub + registers user + ready to go
+    const opts = parseOpts();
+    const port = opts.port || "9200";
+    const username = opts.username || opts.user || "local";
+    const password = opts.password || opts.pass || "local123456";
+
+    console.log(`
+╔══════════════════════════════════════════════════╗
+║   🏠 anet server local — One-command setup       ║
+╚══════════════════════════════════════════════════╝
+`);
+
+    console.log(`  Starting CommHub Server on port ${port}...`);
+
+    const env: Record<string, string> = { ...process.env as any, PORT: port, HOST: "127.0.0.1" };
+    const child = spawn("bunx", ["@sleep2agi/commhub-server"], { env, stdio: "pipe", shell: true });
+
+    // Wait for server to start
+    await new Promise(r => setTimeout(r, 4000));
+
+    try {
+      const health = await fetch(`http://127.0.0.1:${port}/health`).then(r => r.json() as any);
+      if (!health.ok) throw new Error("server not ready");
+      console.log(`  ✅ Server running on http://127.0.0.1:${port}`);
+    } catch {
+      console.error(`  ❌ Server failed to start. Is Bun installed?`);
+      child.kill();
+      return;
+    }
+
+    // Configure hub
+    const gc = loadGlobal();
+    gc.hub = `http://127.0.0.1:${port}`;
+    saveGlobal(gc);
+    console.log(`  ✅ Hub configured: ${gc.hub}`);
+
+    // Register + login
+    try {
+      await fetch(`${gc.hub}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const login = await fetch(`${gc.hub}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      }).then(r => r.json() as any);
+
+      if (login.ok) {
+        gc.token = login.token;
+        gc.user = login.user;
+        const nets = await fetch(`${gc.hub}/api/networks`, { headers: { Authorization: `Bearer ${login.token}` } }).then(r => r.json() as any);
+        if (nets.networks?.length > 0) {
+          gc.network_id = nets.networks[0].network_id;
+          gc.network_name = nets.networks[0].network_name;
+        }
+        saveGlobal(gc);
+        console.log(`  ✅ Logged in as "${username}"`);
+      }
+    } catch {}
+
+    // Get license info
+    try {
+      const lic = await fetch(`${gc.hub}/api/license`).then(r => r.json() as any);
+      if (lic.license) console.log(`  ✅ License: ${lic.license.type} (${lic.license.days_left} days)`);
+    } catch {}
+
+    console.log(`
+╔══════════════════════════════════════════════════╗
+║   🎉 Ready! Server running in foreground.        ║
+║                                                   ║
+║   Next steps (in another terminal):               ║
+║     anet create my-agent                          ║
+║     anet start my-agent                           ║
+║     anet status                                   ║
+║                                                   ║
+║   Press Ctrl+C to stop the server.                ║
+╚══════════════════════════════════════════════════╝
+`);
+
+    // Forward server output
+    child.stdout?.pipe(process.stdout);
+    child.stderr?.pipe(process.stderr);
+    child.on("exit", (code) => process.exit(code || 0));
+    process.on("SIGINT", () => { child.kill(); process.exit(0); });
 
   } else if (sub === "config") {
     // anet server config — 显示/设置 server 配置
