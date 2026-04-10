@@ -600,6 +600,7 @@ Other:
   anet login                    Login (username + password)
   anet login --token <tok>      Login with API token
   anet logout                   Remove saved token
+  anet passwd                   Change password
   anet whoami                   Show current user + networks
   anet network ls               List my networks
   anet network create <name>    Create a network
@@ -2601,6 +2602,36 @@ function logsCommand() {
   }
 }
 
+// ── passwd ──
+
+async function passwdCommand() {
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  const token = gc.token;
+  if (!hub || !token) { console.error("Not logged in. Run: anet login"); return; }
+
+  const opts = parseOpts();
+  const oldPw = opts["old-password"] || opts.old || await ask("Current password: ");
+  const newPw = opts["new-password"] || opts["new"] || await ask("New password (min 6): ");
+  closeRL();
+
+  if (!oldPw || !newPw) { console.error("Both passwords required."); return; }
+
+  try {
+    const res = await fetch(`${hub}/api/auth/password`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+    }).then(r => r.json() as any);
+
+    if (res.ok) {
+      console.log("[anet] Password changed successfully.");
+    } else {
+      console.error(`[anet] Failed: ${res.error}`);
+    }
+  } catch (e: any) { console.error(`Failed: ${e.message}`); }
+}
+
 // ── demo ──
 
 async function demoCommand() {
@@ -2900,6 +2931,7 @@ switch (command) {
   case "doctor": await doctorCommand(); break;
   case "license": await licenseCommand(); break;
   case "activate": await activateCommand(); break;
+  case "passwd": await passwdCommand(); break;
   case "demo": await demoCommand(); break;
   case "logs": logsCommand(); break;
   case "info": await infoCommand(); break;
