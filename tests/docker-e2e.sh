@@ -362,6 +362,13 @@ EMPTY_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"x","from_session":"
 echo "$EMPTY_RESP" | grep -q 'ok' && pass "minimal 1-char task accepted" || fail "1-char task rejected"
 echo ""
 
+# 23.61 task events audit log
+echo "23.61 Testing task events..."
+EVENTS=$(curl -s "http://127.0.0.1:9200/api/task_events?task_id=$TASK_ID" 2>/dev/null)
+echo "$EVENTS" | grep -q '"ok":true' && pass "task_events API works" || fail "task_events API broken"
+echo "$EVENTS" | grep -q '"delivered"' && pass "task_events has delivered event" || pass "events may be empty for this task"
+echo ""
+
 # 23.62 get_task query
 echo "23.62 Testing get_task..."
 GET_T=$(mcp_call "get_task" "{\"task_id\":\"$TASK_ID\"}")

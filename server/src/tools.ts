@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
-import { db, uuidv4 } from "./db.js";
+import { db, uuidv4, logTaskEvent } from "./db.js";
 import { pushEvent, pushBroadcast } from "./push.js";
 
 function ts(): string {
@@ -234,10 +234,11 @@ export function registerTools(server: McpServer, clientIP?: string) {
       }
       // V2: sync tasks table — ack_inbox means delivered→acked
       try {
-        db.run(
+        const ackResult = db.run(
           `UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status = 'delivered'`,
           [message_id]
         );
+        if (ackResult.changes > 0) logTaskEvent(message_id, "delivered", "acked", alias);
       } catch {}
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true }) }],
@@ -339,6 +340,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
           [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`]
         );
         db.run("COMMIT");
+        logTaskEvent(id, null, "delivered", from_session, `→ ${alias}`);
       } catch (e) {
         try { db.run("ROLLBACK"); } catch {}
         throw e;
@@ -434,6 +436,8 @@ export function registerTools(server: McpServer, clientIP?: string) {
           );
           if (result.changes === 0) {
             console.log(`[${ts()}] ⚠ send_reply: task ${in_reply_to?.slice(0, 8)} not found or already terminal`);
+          } else {
+            logTaskEvent(in_reply_to, null, replyStatus, from_session, text.slice(0, 200));
           }
         }
         db.run("COMMIT");
@@ -513,6 +517,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
           [retryInboxId, task.to_name, task.priority, task.content, from_session]
         );
         db.run("COMMIT");
+        logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
       } catch (e) {
         try { db.run("ROLLBACK"); } catch {}
         throw e;

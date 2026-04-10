@@ -281,6 +281,19 @@ Bun.serve({
       return withCors(req, Response.json({ ok: true, messages: rows }));
     }
 
+    // ── REST: task events (V2 Sprint 2) ──
+    if (url.pathname === "/api/task_events") {
+      const taskId = url.searchParams.get("task_id");
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 500);
+      let sql = "SELECT * FROM task_events";
+      const params: any[] = [];
+      if (taskId) { sql += " WHERE task_id = ?1"; params.push(taskId); }
+      sql += " ORDER BY created_at DESC LIMIT ?";
+      params.push(limit);
+      const rows = db.query(sql).all(...params);
+      return withCors(req, Response.json({ ok: true, events: rows, count: rows.length }));
+    }
+
     // ── REST: nodes table (V2 Sprint 2) ──
     if (url.pathname === "/api/nodes") {
       const nodeId = url.searchParams.get("node_id");

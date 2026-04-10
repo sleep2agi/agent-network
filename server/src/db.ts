@@ -135,7 +135,32 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_nodes_alias ON nodes(alias);
 `);
 
+// task_events table (V2 Sprint 2) — audit log for task state changes
+db.exec(`
+  CREATE TABLE IF NOT EXISTS task_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id       TEXT NOT NULL,
+    from_status   TEXT,
+    to_status     TEXT NOT NULL,
+    actor         TEXT NOT NULL DEFAULT 'system',
+    detail        TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id);
+  CREATE INDEX IF NOT EXISTS idx_task_events_created ON task_events(created_at);
+`);
+
 // Helpers
 export function uuidv4(): string {
   return crypto.randomUUID();
+}
+
+export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {
+  try {
+    db.run(
+      "INSERT INTO task_events (task_id, from_status, to_status, actor, detail) VALUES (?1, ?2, ?3, ?4, ?5)",
+      [taskId, fromStatus, toStatus, actor, detail ?? null]
+    );
+  } catch {}
 }
