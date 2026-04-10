@@ -107,8 +107,9 @@ Bun.serve({
     }
 
     // ── MCP Streamable HTTP endpoint ──
-    // MCP protocol handles its own auth — skip token check here
     if (url.pathname === "/mcp") {
+      const authErr = requireAuth(req);
+      if (authErr) return withCors(req, authErr);
       const fwd = req.headers.get("x-forwarded-for");
       const clientIP = fwd ? fwd.split(",")[0].trim() : (req.headers.get("x-real-ip") ?? "unknown");
       const transport = new WebStandardStreamableHTTPServerTransport({

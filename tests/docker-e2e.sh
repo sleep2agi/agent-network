@@ -343,13 +343,12 @@ AUTH_MCP=$(curl -s -X POST http://127.0.0.1:9201/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}')
 echo "$AUTH_MCP" | grep -q 'serverInfo\|capabilities' && pass "MCP with auth token works" || fail "MCP auth broken"
 
-# 24g. MCP endpoint skips token auth (by design — MCP has own auth layer)
-# This is a known P0 security issue: /mcp should eventually require auth
+# 24g. MCP without token → 401
 AUTH_MCP_NO=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:9201/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}')
-[ "$AUTH_MCP_NO" = "200" ] && pass "MCP bypasses token auth (known P0 — needs fix)" || pass "MCP auth check: $AUTH_MCP_NO"
+[ "$AUTH_MCP_NO" = "401" ] && pass "MCP without token → 401" || fail "MCP should require auth (got $AUTH_MCP_NO)"
 
 kill $AUTH_PID 2>/dev/null || true
 echo ""
