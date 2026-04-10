@@ -36,8 +36,9 @@ export function registerTools(server: McpServer, clientIP?: string) {
       channels: z.string().max(2000).optional().describe("JSON array of channels"),
       model: z.string().max(200).optional().describe("AI model name"),
       node_name: z.string().max(200).optional().describe("Stable node display name (may differ from alias)"),
+      network_id: z.string().max(200).optional().describe("Network this agent belongs to"),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId }) => {
       console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
 
@@ -45,8 +46,8 @@ export function registerTools(server: McpServer, clientIP?: string) {
         db.run("BEGIN IMMEDIATE");
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2", [alias, resume_id]);
         db.run(
-          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, last_seen_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, datetime('now'), datetime('now'))
+          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, last_seen_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, datetime('now'), datetime('now'))
            ON CONFLICT(resume_id) DO UPDATE SET
              alias = COALESCE(?2, sessions.alias),
              tmux_name = COALESCE(?3, sessions.tmux_name),
@@ -65,9 +66,10 @@ export function registerTools(server: McpServer, clientIP?: string) {
              session_id = COALESCE(?16, sessions.session_id),
              config_path = COALESCE(?17, sessions.config_path),
              channels = COALESCE(?18, sessions.channels),
+             network_id = COALESCE(?19, sessions.network_id),
              last_seen_at = datetime('now'),
              updated_at = datetime('now')`,
-          [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null]
+          [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, netId ?? null]
         );
         db.run("COMMIT");
       } catch (e) {
@@ -334,22 +336,23 @@ export function registerTools(server: McpServer, clientIP?: string) {
       context: z.string().max(10000).optional(),
       from_session: z.string().max(200).optional().default("hub"),
       ttl_seconds: z.number().min(1).max(86400).optional().describe("Task TTL in seconds (default: 3600)"),
+      network_id: z.string().max(200).optional().describe("Network scope"),
     },
-    async ({ alias, task, priority, context, from_session, ttl_seconds }) => {
+    async ({ alias, task, priority, context, from_session, ttl_seconds, network_id: netId }) => {
       console.log(`[${ts()}] ${from_session} → send_task → ${alias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
       const id = uuidv4();
       // 事务：inbox + tasks 双写
       try {
         db.run("BEGIN IMMEDIATE");
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response)
-           VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply')`,
-          [id, alias, priority, task, context ?? null, from_session]
+          `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response, network_id)
+           VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply', ?7)`,
+          [id, alias, priority, task, context ?? null, from_session, netId ?? null]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6))`,
-          [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`]
+          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id)
+           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7)`,
+          [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`, netId ?? null]
         );
         db.run("COMMIT");
         logTaskEvent(id, null, "delivered", from_session, `→ ${alias}`);
