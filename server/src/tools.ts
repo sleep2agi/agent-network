@@ -68,7 +68,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
           [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, netId ?? null]
         );
-      })();
+      });
 
       // V2: sync tasks table — report_status(working) → tasks.running
       if (status === "working" && task) {
@@ -80,9 +80,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           );
           if (runResult.changes > 0) {
             // Find task_id for logging
-            const t = db.query<{ task_id: string }, [string, string]>(
-              "SELECT task_id FROM tasks WHERE to_name = ?1 AND content = ?2 AND status = 'running' ORDER BY started_at DESC LIMIT 1"
-            ).get(alias, task);
+            const t = db.get<{ task_id: string }>(
+              "SELECT task_id FROM tasks WHERE to_name = ?1 AND content = ?2 AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+              alias, task);
             if (t) logTaskEvent(t.task_id, null, "running", alias);
           }
         } catch {}
@@ -112,9 +112,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       // inbox uses alias for routing
-      const row = db.query<{ cnt: number }, [string]>(
-        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(alias);
+      const row = db.get<{ cnt: number }>(
+        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0",
+        alias);
 
       return {
         content: [
@@ -164,21 +164,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           [result.slice(0, 4000), task]
         );
         if (tu.changes === 0) {
-          const match = db.query<{ task_id: string }, [string, string]>(
+          const match = db.get<{ task_id: string }>(
             `SELECT task_id FROM tasks WHERE to_name = ?1 AND content = ?2
-             AND status IN ('delivered', 'acked', 'running') ORDER BY created_at DESC LIMIT 1`
-          ).get(alias, task);
+             AND status IN ('delivered', 'acked', 'running') ORDER BY created_at DESC LIMIT 1`,
+            alias, task);
           if (match) {
             db.run(`UPDATE tasks SET status = 'replied', result = ?1, completed_at = datetime('now') WHERE task_id = ?2`,
               [result.slice(0, 4000), match.task_id]);
           }
         }
         return tu.changes;
-      })();
+      });
       // Log event after transaction
-      const updatedTaskId = taskUpdateChanges > 0 ? task : (db.query<{ task_id: string }, [string]>(
-        "SELECT task_id FROM tasks WHERE to_name = ?1 AND status = 'replied' ORDER BY completed_at DESC LIMIT 1"
-      ).get(alias)?.task_id);
+      const updatedTaskId = taskUpdateChanges > 0 ? task : (db.get<{ task_id: string }>(
+        "SELECT task_id FROM tasks WHERE to_name = ?1 AND status = 'replied' ORDER BY completed_at DESC LIMIT 1",
+        alias)?.task_id);
       if (updatedTaskId) logTaskEvent(updatedTaskId, null, "replied", alias, "report_completion");
 
       return {
@@ -195,16 +195,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       limit: z.number().min(1).max(100).optional().default(10),
     },
     async ({ alias, limit }) => {
-      const rows0 = db.query<{ cnt: number }, [string]>(
-        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(alias);
+      const rows0 = db.get<{ cnt: number }>(
+        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0",
+        alias);
       console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
-      const rows = db.query<any, [string, number]>(
+      const rows = db.all(
         `SELECT id, type, priority, content, context, from_session, created_at
          FROM inbox WHERE session_name = ?1 AND acked = 0
          ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
-         LIMIT ?2`
-      ).all(alias, limit);
+         LIMIT ?2`,
+        alias, limit);
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows }) }],
@@ -268,12 +268,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
         if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
         sql += " ORDER BY updated_at DESC";
-        return db.query(sql).all(...params);
-      })();
+        return db.all(sql, ...params);
+      });
 
-      const summary = db.query<any, []>(
-        "SELECT status, COUNT(*) as count FROM sessions GROUP BY status"
-      ).all();
+      const summary = db.all(
+        "SELECT status, COUNT(*) as count FROM sessions GROUP BY status");
 
       return {
         content: [
@@ -292,13 +291,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     { alias: z.string().min(1).max(200).describe("Session alias") },
     async ({ alias }) => {
       console.log(`[${ts()}] hub → get_session_status: ${alias}`);
-      const session = db.query("SELECT * FROM sessions WHERE alias = ?1").get(alias);
-      const pending = db.query<{ cnt: number }, [string]>(
-        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(alias);
-      const recent = db.query(
-        "SELECT * FROM completions WHERE session_name = ?1 ORDER BY completed_at DESC LIMIT 5"
-      ).all(alias);
+      const session = db.get("SELECT * FROM sessions WHERE alias = ?1", alias);
+      const pending = db.get<{ cnt: number }>(
+        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0",
+        alias);
+      const recent = db.all(
+        "SELECT * FROM completions WHERE session_name = ?1 ORDER BY completed_at DESC LIMIT 5",
+        alias);
 
       return {
         content: [
@@ -327,7 +326,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const effectiveNetId = getNetworkId(netId);
 
       // License check
-      const license = db.query<any, []>("SELECT type, expires_at FROM licenses ORDER BY created_at LIMIT 1").get();
+      const license = db.get<any>("SELECT type, expires_at FROM licenses ORDER BY created_at LIMIT 1");
       if (license?.expires_at) {
         const now = new Date().toISOString().replace("T", " ").slice(0, 19);
         if (license.expires_at < now) {
@@ -352,15 +351,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
            VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7)`,
           [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId]
         );
-      })();
+      });
       logTaskEvent(id, null, "delivered", from_session, `→ ${alias}`);
 
-      const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
+      const session = db.get<any>("SELECT status FROM sessions WHERE alias = ?1", alias);
 
       // SSE push by alias
-      const pending = db.query<{ cnt: number }, [string]>(
-        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(alias);
+      const pending = db.get<{ cnt: number }>(
+        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0",
+        alias);
       pushEvent(alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session });
 
       return {
@@ -395,7 +394,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         [id, alias, message, from_session]
       );
 
-      const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
+      const session = db.get<any>("SELECT status FROM sessions WHERE alias = ?1", alias);
 
       pushEvent(alias, { type: "new_message", message, from: from_session, message_id: id });
 
@@ -449,12 +448,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           return true;
         }
         return false;
-      })();
+      });
 
       // Log event after commit (outside transaction)
       if (replyLogged && in_reply_to) logTaskEvent(in_reply_to, null, replyStatus, from_session, text.slice(0, 200));
 
-      const session = db.query<any, [string]>("SELECT status FROM sessions WHERE alias = ?1").get(alias);
+      const session = db.get<any>("SELECT status FROM sessions WHERE alias = ?1", alias);
       pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus });
 
       return {
@@ -501,9 +500,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ task_id, from_session }) => {
       console.log(`[${ts()}] ${from_session} → retry_task → ${task_id.slice(0, 8)}`);
       // Find the original task
-      const task = db.query<any, [string]>(
-        "SELECT * FROM tasks WHERE task_id = ?1"
-      ).get(task_id);
+      const task = db.get<any>("SELECT * FROM tasks WHERE task_id = ?1", task_id);
       if (!task) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "task not found" }) }] };
       }
@@ -524,7 +521,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
            VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply')`,
           [retryInboxId, task.to_name, task.priority, task.content, from_session]
         );
-      })();
+      });
       logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
       // SSE push
       pushEvent(task.to_name, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
@@ -542,7 +539,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to query"),
     },
     async ({ task_id }) => {
-      const task = db.query<any, [string]>("SELECT * FROM tasks WHERE task_id = ?1").get(task_id);
+      const task = db.get<any>("SELECT * FROM tasks WHERE task_id = ?1", task_id);
       return {
         content: [{
           type: "text" as const,
@@ -573,12 +570,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
       sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
-      const tasks = db.query(sql).all(...params);
+      const tasks = db.all(sql, ...params);
 
       // Stats
-      const stats = db.query<any, []>(
-        "SELECT status, COUNT(*) as count FROM tasks GROUP BY status"
-      ).all();
+      const stats = db.all(
+        "SELECT status, COUNT(*) as count FROM tasks GROUP BY status");
 
       return {
         content: [{
@@ -627,7 +623,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ task_id, new_alias, from_session }) => {
       console.log(`[${ts()}] ${from_session} → reassign_task → ${task_id.slice(0, 8)} → ${new_alias}`);
-      const task = db.query<any, [string]>("SELECT * FROM tasks WHERE task_id = ?1").get(task_id);
+      const task = db.get<any>("SELECT * FROM tasks WHERE task_id = ?1", task_id);
       if (!task) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "task not found" }) }] };
       if (["replied", "failed", "cancelled", "expired"].includes(task.status)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: `task is terminal (${task.status})` }) }] };
@@ -640,7 +636,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         const newInboxId = uuidv4();
         db.run("INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response) VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply')",
           [newInboxId, new_alias, task.priority, task.content, from_session]);
-      })();
+      });
       logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${new_alias}`);
       pushEvent(new_alias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: new_alias }) }] };
@@ -664,7 +660,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
       if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
 
-      const targets = db.query<{ alias: string }, any[]>(sql).all(...params);
+      const targets = db.all<{ alias: string }>(sql, ...params);
       const ids: string[] = [];
 
       for (const t of targets) {
@@ -713,7 +709,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       sql += ` ORDER BY completed_at DESC LIMIT ?${paramIdx}`;
       params.push(limit);
 
-      const rows = db.query(sql).all(...params);
+      const rows = db.all(sql, ...params);
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, completions: rows }) }],
       };

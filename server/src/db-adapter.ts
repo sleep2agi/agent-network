@@ -1,11 +1,11 @@
 /**
- * Database Adapter Interface — async-first, supports SQLite and PostgreSQL
+ * Database Adapter — sync interface, supports SQLite (now) and PostgreSQL (future)
  *
- * SQLite adapter: wraps bun:sqlite sync calls in Promise (zero overhead)
- * PostgreSQL adapter: uses bun:sql native async
- *
- * All callers use await — sync SQLite just resolves immediately.
+ * SQLite adapter wraps bun:sqlite. PostgreSQL adapter will be added when needed.
+ * All callers go through DbAdapter — never touch raw bun:sqlite directly.
  */
+
+import { Database } from "bun:sqlite";
 
 export interface QueryResult {
   changes: number;
@@ -31,42 +31,50 @@ export interface DbAdapter {
   close(): void;
 
   /** Dialect identifier */
-  readonly dialect: 'sqlite' | 'postgres';
+  readonly dialect: "sqlite" | "postgres";
 }
 
-/**
- * Phase 1 strategy:
- *
- * Current code is sync (bun:sqlite). We keep it sync for now.
- * All DB access goes through the adapter interface above.
- *
- * When we add PostgreSQL (Phase 2), the adapter interface
- * will change to async. At that point we'll update callers
- * in a single pass. The unified call sites from Phase 1
- * make that pass mechanical rather than archaeological.
- *
- * Why not async-first now?
- * - bun:sqlite is sync, wrapping in Promise adds noise
- * - All MCP tool handlers are already async, so the future
- *   migration is: db.run() → await db.run(), straightforward
- * - 750+ lines of tools.ts would need gratuitous await for zero benefit today
- *
- * The contract: every DB call goes through adapter methods,
- * never through raw db.query() or db.run() on the bun:sqlite object.
- * This is what makes Phase 2 feasible.
- */
+/** SQLite implementation using bun:sqlite */
+export class SQLiteAdapter implements DbAdapter {
+  readonly dialect = "sqlite" as const;
+  constructor(private readonly rawDb: Database) {}
+
+  run(sql: string, params?: any[]): QueryResult {
+    return this.rawDb.run(sql, params as any);
+  }
+
+  get<T = any>(sql: string, ...params: any[]): T | null {
+    return this.rawDb.query<T, any[]>(sql).get(...params) ?? null;
+  }
+
+  all<T = any>(sql: string, ...params: any[]): T[] {
+    return this.rawDb.query<T, any[]>(sql).all(...params);
+  }
+
+  exec(sql: string): void {
+    this.rawDb.exec(sql);
+  }
+
+  transaction<T>(fn: () => T): T {
+    return this.rawDb.transaction(fn)();
+  }
+
+  close(): void {
+    this.rawDb.close();
+  }
+}
 
 /** SQL helpers for cross-dialect compatibility */
-export function sqlNow(dialect: 'sqlite' | 'postgres'): string {
-  return dialect === 'postgres' ? 'NOW()' : "datetime('now')";
+export function sqlNow(dialect: "sqlite" | "postgres"): string {
+  return dialect === "postgres" ? "NOW()" : "datetime('now')";
 }
 
-export function sqlAddSeconds(dialect: 'sqlite' | 'postgres', seconds: number | string): string {
-  return dialect === 'postgres'
+export function sqlAddSeconds(dialect: "sqlite" | "postgres", seconds: number | string): string {
+  return dialect === "postgres"
     ? `NOW() + INTERVAL '${seconds} seconds'`
     : `datetime('now', '+${seconds} seconds')`;
 }
 
-export function sqlPlaceholder(dialect: 'sqlite' | 'postgres', index: number): string {
-  return dialect === 'postgres' ? `$${index}` : `?${index}`;
+export function sqlPlaceholder(dialect: "sqlite" | "postgres", index: number): string {
+  return dialect === "postgres" ? `$${index}` : `?${index}`;
 }

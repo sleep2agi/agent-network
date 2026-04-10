@@ -23,7 +23,7 @@ export function register(username: string, password: string, email?: string, dis
   if (!password || password.length < 6) return { ok: false, error: "password must be at least 6 characters" };
   if (!/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/.test(username)) return { ok: false, error: "username contains invalid characters" };
 
-  const existing = db.query<any, [string]>("SELECT user_id FROM users WHERE username = ?1").get(username);
+  const existing = db.get<any>("SELECT user_id FROM users WHERE username = ?1", username);
   if (existing) return { ok: false, error: "username already taken" };
 
   const userId = generateId("u");
@@ -57,17 +57,17 @@ export function register(username: string, password: string, email?: string, dis
 }
 
 export function login(username: string, password: string): AuthResult {
-  const user = db.query<any, [string]>(
-    "SELECT user_id, username, password_hash, display_name, email, role FROM users WHERE username = ?1"
-  ).get(username);
+  const user = db.get<any>(
+    "SELECT user_id, username, password_hash, display_name, email, role FROM users WHERE username = ?1",
+    username);
 
   if (!user) return { ok: false, error: "invalid username or password" };
   if (user.password_hash !== hashPassword(password)) return { ok: false, error: "invalid username or password" };
 
   // Find or create token
-  let tokenRow = db.query<any, [string]>(
-    "SELECT token_id FROM api_tokens WHERE user_id = ?1 ORDER BY created_at DESC LIMIT 1"
-  ).get(user.user_id);
+  let tokenRow = db.get<any>(
+    "SELECT token_id FROM api_tokens WHERE user_id = ?1 ORDER BY created_at DESC LIMIT 1",
+    user.user_id);
 
   let token: string;
   if (tokenRow) {
@@ -78,9 +78,9 @@ export function login(username: string, password: string): AuthResult {
   } else {
     token = generateToken();
     const tokenId = generateId("tok");
-    const networkId = db.query<any, [string]>(
-      "SELECT network_id FROM networks WHERE owner_id = ?1 LIMIT 1"
-    ).get(user.user_id)?.network_id;
+    const networkId = db.get<any>(
+      "SELECT network_id FROM networks WHERE owner_id = ?1 LIMIT 1",
+      user.user_id)?.network_id;
     db.run(
       "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name) VALUES (?1, ?2, ?3, ?4, ?5)",
       [tokenId, hashToken(token), user.user_id, networkId || null, "login"]
@@ -96,11 +96,11 @@ export function login(username: string, password: string): AuthResult {
 
 export function resolveToken(token: string): { user: AuthUser; networkId: string | null } | null {
   const tHash = hashToken(token);
-  const row = db.query<any, [string]>(
+  const row = db.get<any>(
     `SELECT t.user_id, t.network_id, t.scope, u.username, u.display_name, u.email, u.role
      FROM api_tokens t JOIN users u ON t.user_id = u.user_id
-     WHERE t.token_hash = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`
-  ).get(tHash);
+     WHERE t.token_hash = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
+    tHash);
 
   if (!row) return null;
 
@@ -114,15 +114,15 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
 }
 
 export function getUserNetworks(userId: string) {
-  return db.query<any, [string]>(
-    "SELECT * FROM networks WHERE owner_id = ?1 ORDER BY created_at"
-  ).all(userId);
+  return db.all<any>(
+    "SELECT * FROM networks WHERE owner_id = ?1 ORDER BY created_at",
+    userId);
 }
 
 export function createNetwork(userId: string, name: string, description?: string) {
-  const existing = db.query<any, [string, string]>(
-    "SELECT network_id FROM networks WHERE owner_id = ?1 AND network_name = ?2"
-  ).get(userId, name);
+  const existing = db.get<any>(
+    "SELECT network_id FROM networks WHERE owner_id = ?1 AND network_name = ?2",
+    userId, name);
   if (existing) return { ok: false, error: "network name already exists" };
 
   const networkId = generateId("net");
@@ -134,27 +134,27 @@ export function createNetwork(userId: string, name: string, description?: string
 }
 
 export function listTokens(userId: string) {
-  return db.query<any, [string]>(
-    "SELECT token_id, name, scope, network_id, last_used_at, created_at FROM api_tokens WHERE user_id = ?1 ORDER BY created_at DESC"
-  ).all(userId);
+  return db.all<any>(
+    "SELECT token_id, name, scope, network_id, last_used_at, created_at FROM api_tokens WHERE user_id = ?1 ORDER BY created_at DESC",
+    userId);
 }
 
 export function renameNetwork(userId: string, networkId: string, newName: string): { ok: boolean; error?: string } {
-  const net = db.query<any, [string]>("SELECT * FROM networks WHERE network_id = ?1").get(networkId);
+  const net = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", networkId);
   if (!net) return { ok: false, error: "network not found" };
   if (net.owner_id !== userId) return { ok: false, error: "not your network" };
-  const dup = db.query<any, [string, string]>("SELECT network_id FROM networks WHERE owner_id = ?1 AND network_name = ?2").get(userId, newName);
+  const dup = db.get<any>("SELECT network_id FROM networks WHERE owner_id = ?1 AND network_name = ?2", userId, newName);
   if (dup) return { ok: false, error: "name already taken" };
   db.run("UPDATE networks SET network_name = ?1, updated_at = datetime('now') WHERE network_id = ?2", [newName, networkId]);
   return { ok: true };
 }
 
 export function deleteNetwork(userId: string, networkId: string): { ok: boolean; error?: string } {
-  const net = db.query<any, [string]>("SELECT * FROM networks WHERE network_id = ?1").get(networkId);
+  const net = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", networkId);
   if (!net) return { ok: false, error: "network not found" };
   if (net.owner_id !== userId) return { ok: false, error: "not your network" };
   // Check if any sessions/tasks still reference this network
-  const sessions = db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1").get(networkId);
+  const sessions = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1", networkId);
   if (sessions && sessions.cnt > 0) return { ok: false, error: `network has ${sessions.cnt} active session(s) — stop them first` };
   db.run("DELETE FROM networks WHERE network_id = ?1 AND owner_id = ?2", [networkId, userId]);
   return { ok: true };
@@ -177,7 +177,7 @@ export function revokeToken(userId: string, tokenId: string): { ok: boolean; err
 
 export function changePassword(userId: string, oldPassword: string, newPassword: string): { ok: boolean; error?: string } {
   if (!newPassword || newPassword.length < 6) return { ok: false, error: "new password must be at least 6 characters" };
-  const user = db.query<any, [string]>("SELECT password_hash FROM users WHERE user_id = ?1").get(userId);
+  const user = db.get<any>("SELECT password_hash FROM users WHERE user_id = ?1", userId);
   if (!user) return { ok: false, error: "user not found" };
   if (user.password_hash !== hashPassword(oldPassword)) return { ok: false, error: "incorrect current password" };
   db.run("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);

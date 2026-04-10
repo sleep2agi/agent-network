@@ -128,9 +128,8 @@ setInterval(() => {
     if (result.changes > 0) {
       console.log(`[patrol] expired ${result.changes} stale task(s)`);
       // Log events for expired tasks
-      const expired = db.query<{ task_id: string }, []>(
-        "SELECT task_id FROM tasks WHERE status = 'expired' AND completed_at >= datetime('now', '-1 minute')"
-      ).all();
+      const expired = db.all<{ task_id: string }>(
+        "SELECT task_id FROM tasks WHERE status = 'expired' AND completed_at >= datetime('now', '-1 minute')");
       for (const t of expired) logTaskEvent(t.task_id, null, "expired", "patrol");
     }
   } catch {}
@@ -188,7 +187,7 @@ Bun.serve({
 
     // ── V3: License endpoints ──
     if (url.pathname === "/api/license" && req.method === "GET") {
-      const license = db.query<any, []>("SELECT * FROM licenses ORDER BY created_at LIMIT 1").get();
+      const license = db.get<any>("SELECT * FROM licenses ORDER BY created_at LIMIT 1");
       if (!license) return withCors(req, Response.json({ ok: true, status: "no_license" }));
       const now = new Date().toISOString().replace("T", " ").slice(0, 19);
       const expired = license.expires_at && license.expires_at < now;
@@ -283,7 +282,7 @@ Bun.serve({
           db.run(`UPDATE users SET ${updates.join(", ")} WHERE user_id = ?${params.length}`, params);
         }
         // Re-fetch
-        const user = db.query<any, [string]>("SELECT user_id, username, display_name, email, role FROM users WHERE user_id = ?1").get(resolved.user.user_id);
+        const user = db.get<any>("SELECT user_id, username, display_name, email, role FROM users WHERE user_id = ?1", resolved.user.user_id);
         return withCors(req, Response.json({ ok: true, user }));
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
@@ -373,7 +372,7 @@ Bun.serve({
       if (!resolved || resolved.user.role !== "admin") {
         return withCors(req, Response.json({ ok: false, error: "admin required" }, { status: 403 }));
       }
-      const users = db.query("SELECT user_id, username, display_name, email, role, created_at FROM users ORDER BY created_at").all();
+      const users = db.all("SELECT user_id, username, display_name, email, role, created_at FROM users ORDER BY created_at");
       return withCors(req, Response.json({ ok: true, users }));
     }
 
@@ -384,16 +383,16 @@ Bun.serve({
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
       const networkId = netDetailMatch[1];
-      const network = db.query<any, [string]>("SELECT * FROM networks WHERE network_id = ?1").get(networkId);
+      const network = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", networkId);
       if (!network) return withCors(req, Response.json({ ok: false, error: "network not found" }, { status: 404 }));
       // Ownership check: only owner or admin can view
       if (network.owner_id !== resolved.user.user_id && resolved.user.role !== "admin") {
         return withCors(req, Response.json({ ok: false, error: "access denied" }, { status: 403 }));
       }
       // Get network stats
-      const nodeCount = db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM nodes WHERE network_id = ?1").get(networkId);
-      const sessionCount = db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1").get(networkId);
-      const taskStats = db.query<any, [string]>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status").all(networkId);
+      const nodeCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM nodes WHERE network_id = ?1", networkId);
+      const sessionCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions WHERE network_id = ?1", networkId);
+      const taskStats = db.all<any>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status", networkId);
       return withCors(req, Response.json({
         ok: true, network,
         stats: { nodes: nodeCount?.cnt || 0, sessions: sessionCount?.cnt || 0, tasks: taskStats },
@@ -430,9 +429,9 @@ Bun.serve({
 
     // ── REST: health (public, no auth) ──
     if (url.pathname === "/health") {
-      const count = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM sessions").get();
+      const count = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions");
       const sse = getSSEStats();
-      const license = db.query<any, []>("SELECT type, expires_at FROM licenses LIMIT 1").get();
+      const license = db.get<any>("SELECT type, expires_at FROM licenses LIMIT 1");
       return withCors(req, Response.json({
         ok: true,
         version: "1.0.0-preview",
@@ -461,7 +460,7 @@ Bun.serve({
       const sql = netFilter
         ? "SELECT * FROM sessions WHERE network_id = ?1 ORDER BY updated_at DESC"
         : "SELECT * FROM sessions ORDER BY updated_at DESC";
-      const sessions = netFilter ? db.query(sql).all(netFilter) : db.query(sql).all();
+      const sessions = netFilter ? db.all(sql, netFilter) : db.all(sql);
       return withCors(req, Response.json({ ok: true, sessions }));
     }
 
@@ -486,9 +485,9 @@ Bun.serve({
         [id, body.alias, body.priority, body.task, fromSession]
       );
       // SSE push: 秒达
-      const pending = db.query<{ cnt: number }, [string]>(
-        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0"
-      ).get(body.alias);
+      const pending = db.get<{ cnt: number }>(
+        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0",
+        body.alias);
       pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession });
       return withCors(req, Response.json({ ok: true, message_id: id }));
     }
@@ -510,7 +509,7 @@ Bun.serve({
       const params: any[] = [];
       if (body.filter_server) { sql += " AND server = ?"; params.push(body.filter_server); }
       if (body.filter_status) { sql += " AND status = ?"; params.push(body.filter_status); }
-      const targets = db.query<{ alias: string }, any[]>(sql).all(...params);
+      const targets = db.all<{ alias: string }>(sql, ...params);
       const ids: string[] = [];
       for (const t of targets) {
         const id = crypto.randomUUID();
@@ -577,9 +576,9 @@ Bun.serve({
     if (url.pathname === "/api/messages") {
       const limit = Number(url.searchParams.get("limit")) || 100;
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 3600000).toISOString().replace("T", " ").slice(0, 19);
-      const rows = db.query(
-        "SELECT id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at FROM inbox WHERE created_at >= ?1 ORDER BY created_at DESC LIMIT ?2"
-      ).all(since, limit);
+      const rows = db.all(
+        "SELECT id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at FROM inbox WHERE created_at >= ?1 ORDER BY created_at DESC LIMIT ?2",
+        since, limit);
       return withCors(req, Response.json({ ok: true, messages: rows }));
     }
 
@@ -588,20 +587,20 @@ Bun.serve({
       const n = url.searchParams.get("network_id");
       // Parameterized queries to prevent SQL injection
       const taskStats = n
-        ? db.query<any, [string]>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status").all(n)
-        : db.query<any, []>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status").all();
+        ? db.all<any>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status", n)
+        : db.all<any>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status");
       const sessionStats = n
-        ? db.query<any, [string]>("SELECT status, COUNT(*) as count FROM sessions WHERE network_id = ?1 GROUP BY status").all(n)
-        : db.query<any, []>("SELECT status, COUNT(*) as count FROM sessions GROUP BY status").all();
+        ? db.all<any>("SELECT status, COUNT(*) as count FROM sessions WHERE network_id = ?1 GROUP BY status", n)
+        : db.all<any>("SELECT status, COUNT(*) as count FROM sessions GROUP BY status");
       const totalTasks = n
-        ? db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM tasks WHERE network_id = ?1").get(n)
-        : db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM tasks").get();
+        ? db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM tasks WHERE network_id = ?1", n)
+        : db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM tasks");
       const totalNodes = n
-        ? db.query<{ cnt: number }, [string]>("SELECT COUNT(*) as cnt FROM nodes WHERE network_id = ?1").get(n)
-        : db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM nodes").get();
+        ? db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM nodes WHERE network_id = ?1", n)
+        : db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM nodes");
       const recentTasks = n
-        ? db.query<any, [string]>("SELECT task_id, from_name, to_name, status, created_at FROM tasks WHERE network_id = ?1 ORDER BY created_at DESC LIMIT 5").all(n)
-        : db.query<any, []>("SELECT task_id, from_name, to_name, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 5").all();
+        ? db.all<any>("SELECT task_id, from_name, to_name, status, created_at FROM tasks WHERE network_id = ?1 ORDER BY created_at DESC LIMIT 5", n)
+        : db.all<any>("SELECT task_id, from_name, to_name, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 5");
       return withCors(req, Response.json({
         ok: true,
         network_id: n || null,
@@ -629,7 +628,7 @@ Bun.serve({
       if (userId && resolved.user.role === "admin") { sql += ` AND user_id = ?${params.length + 1}`; params.push(userId); }
       sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
-      const logs = db.query(sql).all(...params);
+      const logs = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, logs, count: logs.length }));
     }
 
@@ -642,7 +641,7 @@ Bun.serve({
       if (taskId) { sql += " WHERE task_id = ?1"; params.push(taskId); }
       sql += " ORDER BY created_at DESC LIMIT ?";
       params.push(limit);
-      const rows = db.query(sql).all(...params);
+      const rows = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, events: rows, count: rows.length }));
     }
 
@@ -657,7 +656,7 @@ Bun.serve({
       if (nodeId) { sql += ` AND node_id = ?${params.length + 1}`; params.push(nodeId); }
       if (alias) { sql += ` AND alias = ?${params.length + 1}`; params.push(alias); }
       sql += " ORDER BY updated_at DESC";
-      const rows = db.query(sql).all(...params);
+      const rows = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
     }
 
@@ -680,17 +679,17 @@ Bun.serve({
       sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
 
-      const rows = db.query(sql).all(...params);
+      const rows = db.all(sql, ...params);
       const stats = netFilter
-        ? db.query<any, [string]>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status").all(netFilter)
-        : db.query<any, []>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status").all();
+        ? db.all<any>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status", netFilter)
+        : db.all<any>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status");
       return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length, stats }));
     }
 
     // ── REST: recent completions ──
     if (url.pathname === "/api/completions") {
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 86400000).toISOString();
-      const rows = db.query("SELECT * FROM completions WHERE completed_at >= ?1 ORDER BY completed_at DESC LIMIT 100").all(since);
+      const rows = db.all("SELECT * FROM completions WHERE completed_at >= ?1 ORDER BY completed_at DESC LIMIT 100", since);
       return withCors(req, Response.json({ ok: true, completions: rows }));
     }
 

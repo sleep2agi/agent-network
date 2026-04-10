@@ -1,14 +1,17 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "fs";
 import { dirname } from "path";
+import { SQLiteAdapter, type DbAdapter } from "./db-adapter";
 
 const DB_PATH = process.env.COMMHUB_DB || `${process.env.HOME}/.commhub/commhub.db`;
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
 console.log(`[commhub] database: ${DB_PATH}`);
-export const db = new Database(DB_PATH);
-db.exec("PRAGMA journal_mode=WAL");
-db.exec("PRAGMA busy_timeout=5000");
+const rawDb = new Database(DB_PATH);
+rawDb.exec("PRAGMA journal_mode=WAL");
+rawDb.exec("PRAGMA busy_timeout=5000");
+
+export const db: DbAdapter = new SQLiteAdapter(rawDb);
 
 // Schema
 db.exec(`
@@ -238,7 +241,7 @@ db.exec(`
 `);
 
 // Auto-create trial license on first run
-const existingLicense = db.query<any, []>("SELECT id FROM licenses LIMIT 1").get();
+const existingLicense = db.get<any>("SELECT id FROM licenses LIMIT 1");
 if (!existingLicense) {
   const trialId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
   db.run(
