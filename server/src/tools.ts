@@ -270,9 +270,10 @@ export function registerTools(server: McpServer, clientIP?: string) {
     {
       filter_status: z.string().max(50).optional(),
       filter_server: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional().describe("Filter by network"),
     },
-    async ({ filter_status, filter_server }) => {
-      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${filter_server ? " server=" + filter_server : ""}`);
+    async ({ filter_status, filter_server, network_id: netId }) => {
+      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${netId ? " net=" + netId.slice(0, 12) : ""}`);
 
       const sessions = db.transaction(() => {
         const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
@@ -280,6 +281,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
 
         let sql = "SELECT * FROM sessions WHERE 1=1";
         const params: any[] = [];
+        if (netId) { sql += " AND network_id = ?"; params.push(netId); }
         if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
         if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
         sql += " ORDER BY updated_at DESC";
@@ -576,11 +578,13 @@ export function registerTools(server: McpServer, clientIP?: string) {
       alias: z.string().max(200).optional().describe("Filter by to_name (target agent)"),
       status: z.string().max(50).optional().describe("Filter by status"),
       from_name: z.string().max(200).optional().describe("Filter by sender"),
+      network_id: z.string().max(200).optional().describe("Filter by network"),
       limit: z.number().min(1).max(100).optional().default(20),
     },
-    async ({ alias, status, from_name, limit }) => {
+    async ({ alias, status, from_name, network_id: netId, limit }) => {
       let sql = "SELECT task_id, from_name, to_name, priority, status, content, result, created_at, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
+      if (netId) { sql += ` AND network_id = ?${params.length + 1}`; params.push(netId); }
       if (alias) { sql += ` AND to_name = ?${params.length + 1}`; params.push(alias); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
@@ -672,11 +676,13 @@ export function registerTools(server: McpServer, clientIP?: string) {
       message: z.string().min(1).max(10000),
       filter_server: z.string().max(200).optional(),
       filter_status: z.string().max(50).optional(),
+      network_id: z.string().max(200).optional().describe("Broadcast within a specific network"),
     },
-    async ({ message, filter_server, filter_status }) => {
-      console.log(`[${ts()}] hub → broadcast: ${message.slice(0, 60)}${filter_server ? " [server=" + filter_server + "]" : ""}`);
+    async ({ message, filter_server, filter_status, network_id: netId }) => {
+      console.log(`[${ts()}] hub → broadcast: ${message.slice(0, 60)}${netId ? " [net=" + netId.slice(0, 12) + "]" : ""}`);
       let sql = "SELECT alias FROM sessions WHERE alias IS NOT NULL";
       const params: any[] = [];
+      if (netId) { sql += " AND network_id = ?"; params.push(netId); }
       if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
       if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
 
