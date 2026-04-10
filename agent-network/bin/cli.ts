@@ -1076,11 +1076,19 @@ function ensureMcpJson(profile: Profile) {
   // Always update .anet/node-server.js from npm package (keep in sync)
   const anetDir = join(process.cwd(), ".anet");
   const serverTs = join(anetDir, "node-server.js");
+  // 查找 node-server.ts 源文件——混淆后路径可能变，多个候选
+  const selfDir = typeof import.meta.url === "string" ? new URL(".", import.meta.url).pathname : __dirname || "";
+  const argv1Dir = process.argv[1] ? join(process.argv[1], "..") : "";
   const candidates = [
-    join(new URL(".", import.meta.url).pathname, "..", "..", "src", "node-server.ts"),
-    join(new URL(".", import.meta.url).pathname, "..", "src", "node-server.ts"),
-    join(process.argv[1], "..", "..", "src", "node-server.ts"),
+    join(selfDir, "..", "..", "src", "node-server.ts"),
+    join(selfDir, "..", "src", "node-server.ts"),
+    join(selfDir, "src", "node-server.ts"),
+    join(argv1Dir, "..", "src", "node-server.ts"),
+    join(argv1Dir, "..", "..", "src", "node-server.ts"),
+    // npm global install path
+    ...((() => { try { const { execSync } = require("child_process"); const root = execSync("npm root -g", { encoding: "utf-8" }).trim(); return [join(root, "@sleep2agi", "agent-network", "src", "node-server.ts")]; } catch { return []; } })()),
   ];
+  let found = false;
   for (const p of candidates) {
     if (existsSync(p)) {
       mkdirSync(anetDir, { recursive: true });
@@ -1090,8 +1098,13 @@ function ensureMcpJson(profile: Profile) {
         writeFileSync(serverTs, src);
         console.log(`[anet] Updated .anet/node-server.js`);
       }
+      found = true;
       break;
     }
+  }
+  if (!found && !existsSync(serverTs)) {
+    console.warn(`[anet] ⚠ Cannot find node-server.ts source. CommHub channel may not work.`);
+    console.warn(`[anet] Fix: npm install -g @sleep2agi/agent-network@latest`);
   }
 
   // Ensure .anet/package.json + deps

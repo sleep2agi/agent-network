@@ -20,7 +20,7 @@ const argv = process.argv.slice(2);
 const opts: Record<string, string> = {};
 const cliChannels: string[] = [];
 
-const PKG_VERSION = "1.3.1";
+const PKG_VERSION = "1.3.2";
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -282,7 +282,8 @@ async function callCommHub(method: string, params: Record<string, unknown>) {
   return text ? JSON.parse(text) : data;
 }
 
-const RESUME_ID = `sdk-${ALIAS}-${Date.now().toString(36)}`;
+const NODE_ID = fileConfig.node_id || "";
+const RESUME_ID = NODE_ID ? `sdk-${NODE_ID}` : `sdk-${ALIAS}-${Date.now().toString(36)}`;
 const register = () => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status: "idle",
   server: osHostname(), hostname: osHostname(),
@@ -353,7 +354,7 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
   const { Codex } = await import("@openai/codex-sdk");
 
   if (!codexThread) {
-    const codexInstructions = SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI Agent 节点。你通过 CommHub 通信网络接收任务。收到任务后理解内容、执行任务（可以读写文件、执行命令）、返回执行结果。你的回复会被自动发送给任务发送者。当前工作目录：${process.cwd()}`;
+    const codexInstructions = SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI Agent 节点。你通过 CommHub 通信网络接收任务。收到任务后理解内容、执行任务（可以读写文件、执行命令）、返回执行结果。你的回复会被自动发送给任务发送者。当前工作目录：${process.cwd()}。重要：不要回复纯确认消息（如"收到""好的""ok"），必须有实质内容才回复。无实质进展时保持沉默。`;
     const codex = new Codex({
       config: {
         model_auto_compact_token_limit: 200000,
@@ -459,17 +460,26 @@ async function processTask(task: string, from: string): Promise<string> {
   return result;
 }
 
-// ── 防 ping-pong 死循环 ──
+// ── 防循环 + 低价值消息过滤 ──
 const lastReplyTime: Record<string, number> = {};
-const COOLDOWN_MS = 5000; // 同一 from 5 秒内不重复处理
+const COOLDOWN_MS = 5000;
+const LOW_VALUE_RE = /^[\s]*([收到|好的|ok|嗯|是的|了解|明白|确认|done|ack|roger|yes|no|。|！|？|\.|!|\?][\s。！？.!?]*)+$/i;
+
+function isLowValueText(text: string): boolean {
+  if (!text) return true;
+  const stripped = text.replace(/[\s\p{P}\p{S}]/gu, "");
+  if (stripped.length < 3) return true;
+  if (LOW_VALUE_RE.test(text.trim())) return true;
+  return false;
+}
 
 function shouldSkipMessage(from: string, content: string): string | null {
-  // 跳过自己发的消息
   if (from === ALIAS) return "self";
   if (content.startsWith(`[${ALIAS}]`)) return "own-prefix";
-  // 冷却：同一 from 短时间内连续消息
   const now = Date.now();
   if (lastReplyTime[from] && now - lastReplyTime[from] < COOLDOWN_MS) return "cooldown";
+  // 入站低价值消息也跳过（防止 agent 之间互发"收到"）
+  if (isLowValueText(content)) return "low-value-inbound";
   return null;
 }
 
@@ -488,6 +498,13 @@ async function processInbox() {
 
     const result = await processTask(content, from);
     lastReplyTime[from] = Date.now();
+
+    // 第四道防线：低价值回复不发
+    if (isLowValueText(result)) {
+      debug(`skip reply: low-value (${result.slice(0, 30)})`);
+      continue;
+    }
+
     try {
       await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`);
       log(`→ [${from}] ${result.slice(0, 100)}`);
