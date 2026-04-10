@@ -450,15 +450,35 @@ async function processTask(task: string, from: string): Promise<string> {
   return result;
 }
 
+// ── 防 ping-pong 死循环 ──
+const lastReplyTime: Record<string, number> = {};
+const COOLDOWN_MS = 5000; // 同一 from 5 秒内不重复处理
+
+function shouldSkipMessage(from: string, content: string): string | null {
+  // 跳过自己发的消息
+  if (from === ALIAS) return "self";
+  if (content.startsWith(`[${ALIAS}]`)) return "own-prefix";
+  // 冷却：同一 from 短时间内连续消息
+  const now = Date.now();
+  if (lastReplyTime[from] && now - lastReplyTime[from] < COOLDOWN_MS) return "cooldown";
+  return null;
+}
+
 // ── Inbox + SSE ──
 async function processInbox() {
   const messages = await getInbox();
   if (!messages.length) return;
   for (const msg of messages) {
     const from = msg.from_session || "hub";
-    log(`← [${from}] (${msg.priority || "normal"}) ${(msg.content as string).slice(0, 100)}`);
+    const content = msg.content as string;
+    log(`← [${from}] (${msg.priority || "normal"}) ${content.slice(0, 100)}`);
     await ackMessage(msg.id);
-    const result = await processTask(msg.content, from);
+
+    const skip = shouldSkipMessage(from, content);
+    if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }
+
+    const result = await processTask(content, from);
+    lastReplyTime[from] = Date.now();
     try {
       await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`);
       log(`→ [${from}] ${result.slice(0, 100)}`);
