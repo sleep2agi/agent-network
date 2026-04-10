@@ -277,7 +277,11 @@ Bun.serve({
     if (url.pathname === "/api/status") {
       const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
       db.run("UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'", [cutoff]);
-      const sessions = db.query("SELECT * FROM sessions ORDER BY updated_at DESC").all();
+      const netFilter = url.searchParams.get("network_id");
+      const sql = netFilter
+        ? "SELECT * FROM sessions WHERE network_id = ?1 ORDER BY updated_at DESC"
+        : "SELECT * FROM sessions ORDER BY updated_at DESC";
+      const sessions = netFilter ? db.query(sql).all(netFilter) : db.query(sql).all();
       return withCors(req, Response.json({ ok: true, sessions }));
     }
 
@@ -401,15 +405,18 @@ Bun.serve({
 
     // ── REST: stats summary ──
     if (url.pathname === "/api/stats") {
-      const taskStats = db.query<any, []>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status").all();
-      const sessionStats = db.query<any, []>("SELECT status, COUNT(*) as count FROM sessions GROUP BY status").all();
-      const totalTasks = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM tasks").get();
-      const totalNodes = db.query<{ cnt: number }, []>("SELECT COUNT(*) as cnt FROM nodes").get();
+      const n = url.searchParams.get("network_id");
+      const nw = n ? ` WHERE network_id = '${n}'` : "";
+      const taskStats = db.query<any, []>(`SELECT status, COUNT(*) as count FROM tasks${nw} GROUP BY status`).all();
+      const sessionStats = db.query<any, []>(`SELECT status, COUNT(*) as count FROM sessions${nw} GROUP BY status`).all();
+      const totalTasks = db.query<{ cnt: number }, []>(`SELECT COUNT(*) as cnt FROM tasks${nw}`).get();
+      const totalNodes = db.query<{ cnt: number }, []>(`SELECT COUNT(*) as cnt FROM nodes${nw}`).get();
       const recentTasks = db.query<any, []>(
-        "SELECT task_id, from_name, to_name, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 5"
+        `SELECT task_id, from_name, to_name, status, created_at FROM tasks${nw} ORDER BY created_at DESC LIMIT 5`
       ).all();
       return withCors(req, Response.json({
         ok: true,
+        network_id: n || null,
         tasks: { total: totalTasks?.cnt || 0, by_status: taskStats },
         sessions: { by_status: sessionStats },
         nodes: { total: totalNodes?.cnt || 0 },
@@ -455,8 +462,10 @@ Bun.serve({
     if (url.pathname === "/api/nodes") {
       const nodeId = url.searchParams.get("node_id");
       const alias = url.searchParams.get("alias");
+      const netFilter = url.searchParams.get("network_id");
       let sql = "SELECT * FROM nodes WHERE 1=1";
       const params: any[] = [];
+      if (netFilter) { sql += ` AND network_id = ?${params.length + 1}`; params.push(netFilter); }
       if (nodeId) { sql += ` AND node_id = ?${params.length + 1}`; params.push(nodeId); }
       if (alias) { sql += ` AND alias = ?${params.length + 1}`; params.push(alias); }
       sql += " ORDER BY updated_at DESC";
@@ -470,10 +479,12 @@ Bun.serve({
       const status = url.searchParams.get("status");
       const toName = url.searchParams.get("to_name");
       const fromName = url.searchParams.get("from_name");
+      const netFilter = url.searchParams.get("network_id");
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
 
       let sql = "SELECT * FROM tasks WHERE 1=1";
       const params: any[] = [];
+      if (netFilter) { sql += ` AND network_id = ?${params.length + 1}`; params.push(netFilter); }
       if (taskId) { sql += ` AND task_id = ?${params.length + 1}`; params.push(taskId); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (toName) { sql += ` AND to_name = ?${params.length + 1}`; params.push(toName); }
@@ -482,7 +493,8 @@ Bun.serve({
       params.push(limit);
 
       const rows = db.query(sql).all(...params);
-      const stats = db.query<any, []>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status").all();
+      const statsFilter = netFilter ? ` WHERE network_id = '${netFilter}'` : "";
+      const stats = db.query<any, []>(`SELECT status, COUNT(*) as count FROM tasks${statsFilter} GROUP BY status`).all();
       return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length, stats }));
     }
 
