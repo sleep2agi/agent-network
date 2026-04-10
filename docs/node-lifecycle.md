@@ -390,4 +390,24 @@ function findNode(nameOrId: string) {
 
 ---
 
-**请通信牛 review。文件路径: ~/agent-orchestra/docs/node-lifecycle.md**
+## 通信牛 Review 意见（2026-04-10）
+
+1. **CLI 查找：支持 node_name 和 node_id 两种匹配**
+   - 精确匹配 node_id → 精确匹配 node_name → 兼容旧字段 name/alias
+   - 多个 node_name 重名时报歧义错误
+
+2. **node_name 在 CommHub 上仍须唯一**（不因有 node_id 就允许重名）
+
+3. **不直接把 resume_id 改成纯 node_id**
+   - 用 `sdk-${node_id}` 前缀，和现有风格兼容
+
+4. **自动补 node_id 由 anet 负责**，agent-node 只读不写
+   - 避免双写责任不清
+
+5. **P0 rename 只改本地 config**
+   - 不强依赖 CommHub rename API
+   - 旧目录名同步 rename
+   - CommHub alias 下次 start 时重新注册
+
+6. **受影响命令清单**
+   - create / ls / start / resume / channel add/ls / import / rename
