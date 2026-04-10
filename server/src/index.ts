@@ -10,12 +10,12 @@ const PORT = Number(process.env.PORT) || 9200;
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string): McpServer {
+function createServer(clientIP?: string, enforceNetworkId?: string | null): McpServer {
   const server = new McpServer({
     name: "commhub",
-    version: "0.4.1",
+    version: "0.5.0",
   });
-  registerTools(server, clientIP);
+  registerTools(server, clientIP, enforceNetworkId);
   return server;
 }
 
@@ -139,10 +139,13 @@ Bun.serve({
       if (authErr) return withCors(req, authErr);
       const fwd = req.headers.get("x-forwarded-for");
       const clientIP = fwd ? fwd.split(",")[0].trim() : (req.headers.get("x-real-ip") ?? "unknown");
+      // V3: resolve token → enforce network_id in all MCP tools
+      const authCtx = resolveRequestAuth(req);
+      const enforceNetId = authCtx?.networkId || null;
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      const server = createServer(clientIP);
+      const server = createServer(clientIP, enforceNetId);
       await server.connect(transport);
       const response = await transport.handleRequest(req);
       // Disconnect after response to prevent McpServer leak

@@ -7,7 +7,9 @@ function ts(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
-export function registerTools(server: McpServer, clientIP?: string) {
+export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null) {
+  // If enforceNetworkId is set, override any client-supplied network_id
+  const getNetworkId = (clientNetId?: string | null) => enforceNetworkId ?? clientNetId ?? null;
   // ═══════════════════════════════════════════
   //  Child Agent Tools (4)
   // ═══════════════════════════════════════════
@@ -39,12 +41,18 @@ export function registerTools(server: McpServer, clientIP?: string) {
       network_id: z.string().max(200).optional().describe("Network this agent belongs to"),
     },
     async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId }) => {
-      console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}`);
+      const effectiveNetId = getNetworkId(netId);
+      console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}${effectiveNetId ? " [net]" : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
 
       try {
         db.run("BEGIN IMMEDIATE");
-        db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2", [alias, resume_id]);
+        // Only delete same-alias sessions within the same network (prevent cross-network alias conflict)
+        if (effectiveNetId) {
+          db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [alias, resume_id, effectiveNetId]);
+        } else {
+          db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2", [alias, resume_id]);
+        }
         db.run(
           `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, last_seen_at, updated_at)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, datetime('now'), datetime('now'))
@@ -273,7 +281,8 @@ export function registerTools(server: McpServer, clientIP?: string) {
       network_id: z.string().max(200).optional().describe("Filter by network"),
     },
     async ({ filter_status, filter_server, network_id: netId }) => {
-      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${netId ? " net=" + netId.slice(0, 12) : ""}`);
+      const effectiveNetId = getNetworkId(netId);
+      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${effectiveNetId ? " net=" + effectiveNetId.slice(0, 12) : ""}`);
 
       const sessions = db.transaction(() => {
         const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
@@ -281,7 +290,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
 
         let sql = "SELECT * FROM sessions WHERE 1=1";
         const params: any[] = [];
-        if (netId) { sql += " AND network_id = ?"; params.push(netId); }
+        if (effectiveNetId) { sql += " AND network_id = ?"; params.push(effectiveNetId); }
         if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
         if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
         sql += " ORDER BY updated_at DESC";
@@ -341,6 +350,7 @@ export function registerTools(server: McpServer, clientIP?: string) {
       network_id: z.string().max(200).optional().describe("Network scope"),
     },
     async ({ alias, task, priority, context, from_session, ttl_seconds, network_id: netId }) => {
+      const effectiveNetId = getNetworkId(netId);
       console.log(`[${ts()}] ${from_session} → send_task → ${alias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
       const id = uuidv4();
       // 事务：inbox + tasks 双写
@@ -349,12 +359,12 @@ export function registerTools(server: McpServer, clientIP?: string) {
         db.run(
           `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response, network_id)
            VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply', ?7)`,
-          [id, alias, priority, task, context ?? null, from_session, netId ?? null]
+          [id, alias, priority, task, context ?? null, from_session, effectiveNetId]
         );
         db.run(
           `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id)
            VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7)`,
-          [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`, netId ?? null]
+          [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId]
         );
         db.run("COMMIT");
         logTaskEvent(id, null, "delivered", from_session, `→ ${alias}`);
@@ -582,9 +592,10 @@ export function registerTools(server: McpServer, clientIP?: string) {
       limit: z.number().min(1).max(100).optional().default(20),
     },
     async ({ alias, status, from_name, network_id: netId, limit }) => {
+      const effectiveNetId = getNetworkId(netId);
       let sql = "SELECT task_id, from_name, to_name, priority, status, content, result, created_at, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
-      if (netId) { sql += ` AND network_id = ?${params.length + 1}`; params.push(netId); }
+      if (effectiveNetId) { sql += ` AND network_id = ?${params.length + 1}`; params.push(effectiveNetId); }
       if (alias) { sql += ` AND to_name = ?${params.length + 1}`; params.push(alias); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
