@@ -909,10 +909,38 @@ log(`启动`);
 log(`  runtime: ${RUNTIME_LABEL}`);
 log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.4" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
+
+// Validate token + show user/network info
+if (AUTH_TOKEN) {
+  try {
+    const meRes = await fetch(`${COMMHUB_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+    }).then(r => r.json() as any).catch(() => null);
+    if (meRes?.ok && meRes.user) {
+      log(`  user:    ${meRes.user.username} (${meRes.user.role})`);
+      if (meRes.current_network) {
+        const netName = meRes.networks?.find((n: any) => n.network_id === meRes.current_network)?.network_name;
+        log(`  network: ${netName || meRes.current_network}`);
+      } else {
+        log(`  network: ${NETWORK_ID || "(global)"}`);
+      }
+    } else if (meRes?.ok === false) {
+      // Token is a legacy global token, not a V3 user token — still valid
+      log(`  network: ${NETWORK_ID || "(global)"}`);
+    } else {
+      warn(`  token 验证失败 — 检查 token 是否有效。运行: anet login`);
+    }
+  } catch {
+    // Server might not support /api/auth/me (old version) — continue anyway
+    log(`  network: ${NETWORK_ID || "(global)"}`);
+  }
+} else {
+  warn(`  未配置 token — agent 数据不隔离。运行: anet login`);
+}
+
 log(`  tools:   ${TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)"}`);
 log(`  channels:${TELEGRAM_CHANNELS.length ? ` telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : " (none)"}`);
 log(`  session: ${SESSION_ID || "(new)"}`);
-log(`  network: ${NETWORK_ID || "(global)"}`);
 log(`  log-dir: ${LOG_DIR}`);
 await register();
 log("已注册到 CommHub");
