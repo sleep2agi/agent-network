@@ -14,19 +14,19 @@ echo ""
 BASE="http://127.0.0.1:9200"
 
 # Start server
-cd /app/server && bun run src/index.ts &
+cd /app/server && COMMHUB_AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}" bun run src/index.ts &
 sleep 3
 
 # Register user A (admin) and user B (regular)
 echo "1. Register two users"
-RA=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d '{"username":"alice","password":"pass123456"}')
+RA=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"alice","password":"pass123456"}')
 echo "$RA" | grep -q '"ok":true' && pass "register alice" || fail "register alice"
 TA=$(echo "$RA" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 HA="Authorization: Bearer $TA"
 ROLE_A=$(echo "$RA" | python3 -c "import json,sys; print(json.load(sys.stdin).get('user',{}).get('role',''))" 2>/dev/null)
 [ "$ROLE_A" = "admin" ] && pass "alice is admin (first user)" || fail "alice role: $ROLE_A"
 
-RB=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d '{"username":"bob","password":"pass123456"}')
+RB=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"bob","password":"pass123456"}')
 echo "$RB" | grep -q '"ok":true' && pass "register bob" || fail "register bob"
 TB=$(echo "$RB" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 HB="Authorization: Bearer $TB"
@@ -88,7 +88,7 @@ JOIN2=$(curl -s -X POST "$BASE/api/networks/join" -H "$HB" -H "Content-Type: app
 echo "$JOIN2" | grep -qE 'already a member|fully used' && pass "invite code can't reuse" || fail "invite reused"
 
 # Register user C, try same invite (max_uses=1, already used by bob)
-RC=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d '{"username":"charlie","password":"pass123456"}')
+RC=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"charlie","password":"pass123456"}')
 TC=$(echo "$RC" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 HC="Authorization: Bearer $TC"
 JOIN3=$(curl -s -X POST "$BASE/api/networks/join" -H "$HC" -H "Content-Type: application/json" -d "{\"invite_code\":\"$CODE\"}")

@@ -13,11 +13,11 @@ echo ""
 
 BASE="http://127.0.0.1:9200"
 
-cd /app/server && bun run src/index.ts &
+cd /app/server && COMMHUB_AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}" bun run src/index.ts &
 sleep 3
 
 # Register a user for testing
-REG=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d '{"username":"sectest","password":"pass123456"}')
+REG=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"sectest","password":"pass123456"}')
 TOKEN=$(echo "$REG" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 AUTH="Authorization: Bearer $TOKEN"
 
@@ -36,10 +36,10 @@ curl -s "$BASE/health" | grep -q '"ok":true' && pass "health no auth needed" || 
 
 # 2. SQL injection
 echo "2. SQL injection"
-R=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d '{"username":"admin\"; DROP TABLE users; --","password":"pass123456"}')
+R=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"admin\"; DROP TABLE users; --","password":"pass123456"}')
 echo "$R" | grep -qE 'error|invalid' && pass "SQL injection in username blocked" || fail "SQL injection not blocked"
 
-R=$(curl -s -X POST "$BASE/api/auth/login" -H "Content-Type: application/json" -d '{"username":"\" OR 1=1 --","password":"x"}')
+R=$(curl -s -X POST "$BASE/api/auth/login" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"\" OR 1=1 --","password":"x"}')
 echo "$R" | grep -q '"ok":false' && pass "SQL injection in login blocked" || fail "login SQL injection"
 
 # Verify DB intact
@@ -49,23 +49,23 @@ curl -s "$BASE/api/auth/me" -H "$AUTH" | grep -q '"sectest"' && pass "DB intact 
 echo "3. Input validation"
 # Long username
 LONG=$(python3 -c "print('A'*10000)")
-R=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d "{\"username\":\"$LONG\",\"password\":\"pass123456\"}")
+R=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d "{\"username\":\"$LONG\",\"password\":\"pass123456\"}")
 echo "$R" | grep -qE 'error|too long' && pass "long username rejected" || fail "long username accepted"
 
 # Short password
-R=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d '{"username":"shortpw","password":"12"}')
+R=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"shortpw","password":"12"}')
 echo "$R" | grep -q 'at least 6' && pass "short password rejected" || fail "short password accepted"
 
 # Empty body
-R=$(curl -s -X POST "$BASE/api/auth/login" -H "Content-Type: application/json" -d '{}')
+R=$(curl -s -X POST "$BASE/api/auth/login" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{}')
 echo "$R" | grep -qE 'error|invalid' && pass "empty login body rejected" || fail "empty body accepted"
 
 # Malformed JSON
-R=$(curl -s -X POST "$BASE/api/auth/login" -H "Content-Type: application/json" -d 'not{json')
+R=$(curl -s -X POST "$BASE/api/auth/login" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d 'not{json')
 echo "$R" | grep -qE 'error|invalid|JSON' && pass "malformed JSON rejected" || fail "malformed JSON accepted"
 
 # Special characters in fields
-R=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d '{"username":"<script>alert(1)</script>","password":"pass123456"}')
+R=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"<script>alert(1)</script>","password":"pass123456"}')
 echo "$R" | grep -qE 'error|invalid' && pass "XSS in username blocked" || fail "XSS in username accepted"
 
 # 4. Token security
@@ -86,7 +86,7 @@ echo "$R" | grep -qE 'invalid|401|error' && pass "revoked token rejected" || fai
 # 5. Cross-user token escalation (通信牛 found this)
 echo "5. Privilege escalation"
 # Register user B
-RB=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d '{"username":"victim","password":"pass123456"}')
+RB=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"victim","password":"pass123456"}')
 NET_B=$(echo "$RB" | python3 -c "import json,sys; print(json.load(sys.stdin).get('network_id',''))" 2>/dev/null)
 
 # sectest tries to create token for victim's network

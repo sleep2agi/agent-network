@@ -5,4 +5,5 @@ COPY server/ server/
 RUN cd server && bun install
 COPY tests/test3-security/run.sh /app/run.sh
 RUN chmod +x /app/run.sh
+ENV COMMHUB_AUTH_TOKEN=test-auth-token
 CMD ["bash", "/app/run.sh"]

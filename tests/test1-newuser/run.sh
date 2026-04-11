@@ -15,7 +15,7 @@ BASE="http://127.0.0.1:9200"
 
 # 1. Server startup
 echo "1. Server startup"
-cd /app/server && bun run src/index.ts &
+cd /app/server && COMMHUB_AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}" bun run src/index.ts &
 sleep 3
 curl -s "$BASE/health" | grep -q '"ok":true' && pass "server started" || fail "server start"
 curl -s "$BASE/health" | grep -q '"v3_auth":true' && pass "v3 auth enabled" || fail "v3 auth"
@@ -23,7 +23,7 @@ curl -s "$BASE/health" | grep -q '"multi_network":true' && pass "multi network" 
 
 # 2. Register first user (should be admin)
 echo "2. Registration"
-REG=$(curl -s -X POST "$BASE/api/auth/register" -H "Content-Type: application/json" -d '{"username":"newuser","password":"pass123456"}')
+REG=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"newuser","password":"pass123456"}')
 echo "$REG" | grep -q '"ok":true' && pass "register" || fail "register"
 ROLE=$(echo "$REG" | python3 -c "import json,sys; print(json.load(sys.stdin).get('user',{}).get('role',''))" 2>/dev/null)
 [ "$ROLE" = "admin" ] && pass "first user is admin" || fail "first user role: $ROLE"
@@ -40,7 +40,7 @@ NET_ID=$(echo "$NETS" | python3 -c "import json,sys; print(json.load(sys.stdin).
 
 # 4. Login
 echo "4. Login"
-LOGIN=$(curl -s -X POST "$BASE/api/auth/login" -H "Content-Type: application/json" -d '{"username":"newuser","password":"pass123456"}')
+LOGIN=$(curl -s -X POST "$BASE/api/auth/login" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"newuser","password":"pass123456"}')
 echo "$LOGIN" | grep -q '"ok":true' && pass "login" || fail "login"
 echo "$LOGIN" | grep -q '"utok_' && pass "login returns utok_" || pass "login token (atok_ compat)"
 
@@ -85,7 +85,7 @@ curl -s "$BASE/api/stats" -H "$AUTH" | grep -q '"ok":true' && pass "GET /api/sta
 echo "10. Password management"
 PW=$(curl -s -X POST "$BASE/api/auth/password" -H "$AUTH" -H "Content-Type: application/json" -d '{"old_password":"pass123456","new_password":"newpass789"}')
 echo "$PW" | grep -q '"ok":true' && pass "change password" || fail "change password"
-RELOGIN=$(curl -s -X POST "$BASE/api/auth/login" -H "Content-Type: application/json" -d '{"username":"newuser","password":"newpass789"}')
+RELOGIN=$(curl -s -X POST "$BASE/api/auth/login" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"newuser","password":"newpass789"}')
 echo "$RELOGIN" | grep -q '"ok":true' && pass "login with new password" || fail "new password login"
 
 echo ""
