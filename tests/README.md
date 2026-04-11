@@ -120,6 +120,51 @@ echo "Result: $PASS passed, $FAIL failed"
 
 保存到 `docs/tests/report-testN.txt`，由测试号执行并写入。
 
+## 测试分层原则（从简单到复杂）
+
+测试必须分层，**前一层不过就不跑后面的**。确保被依赖的原子能力先验证可靠，再组合测试复杂场景。
+
+```
+Layer 0: 环境就绪
+  ├── server 能启动 (health check)
+  ├── codex-sdk 能启动
+  ├── claude-agent-sdk 能启动
+  └── http-api (minimax) 能启动
+
+Layer 1: 认证基础
+  ├── 注册 → 拿到 token
+  ├── 登录 → token 有效
+  ├── auth/me → 用户信息正确
+  └── 各 runtime 登录态正常
+
+Layer 2: 单点通信
+  ├── agent 注册到 hub
+  ├── 发一个任务 (send_task)
+  ├── 收到任务 (get_inbox)
+  └── 回复任务 (send_reply)
+
+Layer 3: 完整生命周期
+  ├── 任务状态机 (delivered→acked→running→replied)
+  ├── 重试/取消/转移
+  ├── 网络创建/切换
+  └── Token CRUD
+
+Layer 4: 多用户协作
+  ├── 两个用户各自的网络
+  ├── 邀请码 + 加入
+  ├── 成员角色 + 权限
+  └── 网络隔离验证
+
+Layer 5: 安全和边界
+  ├── SQL 注入 / XSS
+  ├── 跨用户越权
+  ├── 超长/空值/畸形输入
+  ├── Token 撤销后失效
+  └── 并发 + 压力
+```
+
+**核心理念：可靠性 = 每一层都验证过。被依赖的能力必须先测试通过，才能保证上层系统可靠。**
+
 ## 分工
 
 | 角色 | 职责 |
