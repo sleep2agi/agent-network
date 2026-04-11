@@ -29,11 +29,12 @@ ROLE=$(echo "$REG" | python3 -c "import json,sys; print(json.load(sys.stdin).get
 [ "$ROLE" = "admin" ] && pass "first user is admin" || fail "first user role: $ROLE"
 TOKEN=$(echo "$REG" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 echo "$TOKEN" | grep -q "^utok_" && pass "got user token (utok_)" || fail "token format: $TOKEN"
-AUTH="Authorization: Bearer $TOKEN"
+REST_AUTH="Authorization: Bearer $TOKEN"
+NTOK=$(echo "$REG" | python3 -c "import json,sys; print(json.load(sys.stdin).get('network_token',''))" 2>/dev/null)
 
 # 3. Auto-created network
 echo "3. Default network"
-NETS=$(curl -s "$BASE/api/networks" -H "$AUTH")
+NETS=$(curl -s "$BASE/api/networks" -H "$REST_AUTH")
 echo "$NETS" | grep -q '"default"' && pass "default network created" || fail "no default network"
 NET_ID=$(echo "$NETS" | python3 -c "import json,sys; print(json.load(sys.stdin).get('networks',[])[0]['network_id'])" 2>/dev/null)
 [ -n "$NET_ID" ] && pass "network_id present" || fail "no network_id"
@@ -45,11 +46,11 @@ echo "$LOGIN" | grep -q '"ok":true' && pass "login" || fail "login"
 echo "$LOGIN" | grep -q '"utok_' && pass "login returns utok_" || pass "login token (atok_ compat)"
 # Update AUTH with fresh token from login (login rotates the old one)
 TOKEN=$(echo "$LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
-AUTH="Authorization: Bearer $TOKEN"
+REST_AUTH="Authorization: Bearer $TOKEN"
 
 # 5. Auth/me
 echo "5. Profile"
-ME=$(curl -s "$BASE/api/auth/me" -H "$AUTH")
+ME=$(curl -s "$BASE/api/auth/me" -H "$REST_AUTH")
 echo "$ME" | grep -q '"newuser"' && pass "auth/me" || fail "auth/me"
 echo "$ME" | grep -q '"networks"' && pass "networks in profile" || fail "no networks"
 
@@ -61,12 +62,18 @@ echo "$LIC" | grep -q '"days_left"' && pass "days_left" || fail "no days_left"
 
 # 7. Create node token
 echo "7. Node token"
-NTOK=$(curl -s -X POST "$BASE/api/auth/node-token" -H "$AUTH" -H "Content-Type: application/json" -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"test-bot\"}")
-echo "$NTOK" | grep -q '"ok":true' && pass "node token created" || fail "node token"
+if echo "$NTOK" | grep -q '^ntok_'; then
+  pass "register returned network token"
+else
+  NTOK_RES=$(curl -s -X POST "$BASE/api/auth/node-token" -H "$REST_AUTH" -H "Content-Type: application/json" -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"test-bot\"}")
+  NTOK=$(echo "$NTOK_RES" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+  echo "$NTOK_RES" | grep -q '"ok":true' && pass "node token created" || fail "node token"
+fi
+MCP_AUTH="Authorization: Bearer $NTOK"
 
 # 8. MCP tools via node context
 echo "8. MCP operations"
-MCP_H=(-H "$AUTH" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream")
+MCP_H=(-H "$MCP_AUTH" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream")
 mcp() { timeout 5 curl -s -X POST "$BASE/mcp" "${MCP_H[@]}" -d "$1" 2>/dev/null || true; }
 
 R=$(mcp '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"report_status","arguments":{"resume_id":"test-1","alias":"test-bot","status":"idle"}}}')
@@ -80,13 +87,13 @@ echo "$R" | grep -q 'hello world' && pass "get_inbox has task" || fail "get_inbo
 
 # 9. REST endpoints
 echo "9. REST APIs"
-curl -s "$BASE/api/status" -H "$AUTH" | grep -q 'test-bot' && pass "GET /api/status" || fail "status"
-curl -s "$BASE/api/tasks" -H "$AUTH" | grep -q 'hello world' && pass "GET /api/tasks" || fail "tasks"
-curl -s "$BASE/api/stats" -H "$AUTH" | grep -q '"ok":true' && pass "GET /api/stats" || fail "stats"
+curl -s "$BASE/api/status" -H "$REST_AUTH" | grep -q 'test-bot' && pass "GET /api/status" || fail "status"
+curl -s "$BASE/api/tasks" -H "$REST_AUTH" | grep -q 'hello world' && pass "GET /api/tasks" || fail "tasks"
+curl -s "$BASE/api/stats" -H "$REST_AUTH" | grep -q '"ok":true' && pass "GET /api/stats" || fail "stats"
 
 # 10. Password change + re-login
 echo "10. Password management"
-PW=$(curl -s -X POST "$BASE/api/auth/password" -H "$AUTH" -H "Content-Type: application/json" -d '{"old_password":"pass123456","new_password":"newpass789"}')
+PW=$(curl -s -X POST "$BASE/api/auth/password" -H "$REST_AUTH" -H "Content-Type: application/json" -d '{"old_password":"pass123456","new_password":"newpass789"}')
 echo "$PW" | grep -q '"ok":true' && pass "change password" || fail "change password"
 RELOGIN=$(curl -s -X POST "$BASE/api/auth/login" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"newuser","password":"newpass789"}')
 echo "$RELOGIN" | grep -q '"ok":true' && pass "login with new password" || fail "new password login"

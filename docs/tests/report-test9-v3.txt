@@ -1,0 +1,121 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 DONE 0.0s
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 343B done
+#1 WARN: SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "COMMHUB_AUTH_TOKEN") (line 8)
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 DONE 0.0s
+
+#5 [1/7] FROM docker.io/oven/bun:1@sha256:8956c7667fa17beb6e3c664115e66bdacfe502da5d99603626e74c197bdef160
+#5 resolve docker.io/oven/bun:1@sha256:8956c7667fa17beb6e3c664115e66bdacfe502da5d99603626e74c197bdef160 0.0s done
+#5 DONE 0.0s
+
+#4 [internal] load build context
+#4 transferring context: 321.09kB 0.4s done
+#4 DONE 0.4s
+
+#6 [5/7] RUN cd server && bun install
+#6 CACHED
+
+#7 [2/7] WORKDIR /app
+#7 CACHED
+
+#8 [3/7] RUN apt-get update && apt-get install -y curl python3 && rm -rf /var/lib/apt/lists/*
+#8 CACHED
+
+#9 [4/7] COPY server/ server/
+#9 CACHED
+
+#10 [5/7] RUN cd server && bun install
+#10 CACHED
+
+#11 [6/7] COPY tests/test9-permissions/run.sh /app/run.sh
+#11 DONE 0.1s
+
+#12 [7/7] RUN chmod +x /app/run.sh
+#12 DONE 0.4s
+
+#13 exporting to image
+#13 exporting layers
+#13 exporting layers 0.2s done
+#13 exporting manifest sha256:2d97587df1b66420cd7991120f199fc3f7f4c7d7a10884c059918d5e49fa531c 0.0s done
+#13 exporting config sha256:581e38cbcf9df413889bc81bfc102f59803ceacb88e5d8892742d0fffd07f4eb 0.0s done
+#13 exporting attestation manifest sha256:509417a180f574eec7ba2c36fe5a173199022e550b46bee7eac6c3d4fe3539fe 0.0s done
+#13 exporting manifest list sha256:3c3175e10c25c846e3dde24c66942e46312fb451f02852371c7de33aad2b8d10 0.0s done
+#13 naming to docker.io/library/anet-test9:latest
+#13 naming to docker.io/library/anet-test9:latest done
+#13 unpacking to docker.io/library/anet-test9:latest 0.1s done
+#13 DONE 0.4s
+
+ [33m1 warning found (use docker --debug to expand):
+[0m - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "COMMHUB_AUTH_TOKEN") (line 8)
+
+=========================================
+  Layer 4 Permissions + Quota Tests
+=========================================
+
+[commhub] database: /root/.commhub/commhub.db
+[commhub] 🎉 14-day free trial started!
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.4.1                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Auth: ENABLED (Bearer token)     ║
+║                                                   ║
+║   MCP:    http://0.0.0.0:9200/mcp                 ║
+║   REST:   http://0.0.0.0:9200/api                 ║
+║   Health: http://0.0.0.0:9200/health               ║
+╚══════════════════════════════════════════════════╝
+
+1. Register users...
+  ✅ five users registered/login
+
+2. Owner creates network and invites member/admin/viewer...
+  ✅ owner creates network
+  ✅ owner creates invites
+  ✅ member/admin/viewer join network
+  ✅ node-token permissions enforced
+
+3. Viewer restrictions...
+  ✅ viewer create agent rejected
+  ✅ viewer send_task blocked via ntok prerequisite
+
+4. Member restrictions and allowed actions...
+[04:03:46] perm-test → send_task → owner-bot: member can send
+  ✅ member send_task allowed
+  ✅ member invite rejected
+  ✅ member remove rejected
+
+5. Admin permissions...
+[04:03:46] perm-test → send_task → owner-bot: admin can send
+  ✅ admin send_task allowed
+  ✅ admin invite allowed
+  ✅ guest joins admin invite
+  ✅ admin remove member allowed
+  ✅ admin delete network rejected
+
+6. Owner full permissions...
+[04:03:47] perm-test → send_task → owner-bot: owner can send
+  ✅ owner send_task allowed
+  ✅ owner create agent allowed
+  ✅ owner remove member allowed
+
+7. Quota checks...
+  ✅ network quota enforced
+
+
+=========================================
+  Results: 19 passed, 0 failed
+=========================================

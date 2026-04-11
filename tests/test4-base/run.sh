@@ -763,42 +763,40 @@ echo ""
 
 # 27. V3 Multi-network isolation
 echo "27. Testing multi-network isolation..."
-# Register user
-REG_A=$(curl -s -X POST http://127.0.0.1:9200/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"net-test-user","password":"test123456"}')
-NET_TOKEN=$(echo "$REG_A" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('token',''))" 2>/dev/null)
-[ -n "$NET_TOKEN" ] && pass "user registered for network test" || fail "registration failed"
-
-# Create two networks
+# Reuse the admin token from section 26. A newly registered free user only has
+# quota for `default` + one extra network, which makes the old two-network setup fail.
 NET_A=$(curl -s -X POST http://127.0.0.1:9200/api/networks \
-  -H "Content-Type: application/json" -H "Authorization: Bearer $NET_TOKEN" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"net-alpha"}')
 NET_A_ID=$(echo "$NET_A" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('network_id',''))" 2>/dev/null)
 NET_B=$(curl -s -X POST http://127.0.0.1:9200/api/networks \
-  -H "Content-Type: application/json" -H "Authorization: Bearer $NET_TOKEN" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"net-beta"}')
 NET_B_ID=$(echo "$NET_B" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('network_id',''))" 2>/dev/null)
-[ -n "$NET_A_ID" ] && [ -n "$NET_B_ID" ] && pass "two networks created" || fail "network creation failed"
+[ -n "$NET_A_ID" ] && [ -n "$NET_B_ID" ] && pass "two networks created" || { echo "$NET_A"; echo "$NET_B"; fail "network creation failed"; }
 
-# Send task to each network
-mcp_call "send_task" "{\"alias\":\"alpha-agent\",\"task\":\"alpha task\",\"from_session\":\"tester\",\"network_id\":\"$NET_A_ID\"}" > /dev/null
-mcp_call "send_task" "{\"alias\":\"beta-agent\",\"task\":\"beta task\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}" > /dev/null
-pass "tasks sent to different networks"
+if [ -n "$NET_A_ID" ] && [ -n "$NET_B_ID" ]; then
+  # Send task to each network
+  mcp_call "send_task" "{\"alias\":\"alpha-agent\",\"task\":\"alpha task\",\"from_session\":\"tester\",\"network_id\":\"$NET_A_ID\"}" > /dev/null
+  mcp_call "send_task" "{\"alias\":\"beta-agent\",\"task\":\"beta task\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}" > /dev/null
+  pass "tasks sent to different networks"
 
-# Query network A — should only see alpha task
-TASKS_A=$(api_curl "http://127.0.0.1:9200/api/tasks?network_id=$NET_A_ID" 2>/dev/null)
-echo "$TASKS_A" | grep -q 'alpha task' && pass "net-alpha has alpha task" || fail "alpha task missing"
-echo "$TASKS_A" | grep -q 'beta task' && fail "beta task leaked to alpha!" || pass "beta task NOT in alpha (isolated)"
+  # Query network A — should only see alpha task
+  TASKS_A=$(api_curl "http://127.0.0.1:9200/api/tasks?network_id=$NET_A_ID" 2>/dev/null)
+  echo "$TASKS_A" | grep -q 'alpha task' && pass "net-alpha has alpha task" || fail "alpha task missing"
+  echo "$TASKS_A" | grep -q 'beta task' && fail "beta task leaked to alpha!" || pass "beta task NOT in alpha (isolated)"
 
-# Query network B — should only see beta task
-TASKS_B=$(api_curl "http://127.0.0.1:9200/api/tasks?network_id=$NET_B_ID" 2>/dev/null)
-echo "$TASKS_B" | grep -q 'beta task' && pass "net-beta has beta task" || fail "beta task missing"
-echo "$TASKS_B" | grep -q 'alpha task' && fail "alpha task leaked to beta!" || pass "alpha task NOT in beta (isolated)"
+  # Query network B — should only see beta task
+  TASKS_B=$(api_curl "http://127.0.0.1:9200/api/tasks?network_id=$NET_B_ID" 2>/dev/null)
+  echo "$TASKS_B" | grep -q 'beta task' && pass "net-beta has beta task" || fail "beta task missing"
+  echo "$TASKS_B" | grep -q 'alpha task' && fail "alpha task leaked to beta!" || pass "alpha task NOT in beta (isolated)"
 
-# Stats per network
-STATS_A=$(api_curl "http://127.0.0.1:9200/api/stats?network_id=$NET_A_ID" 2>/dev/null)
-echo "$STATS_A" | grep -q '"network_id"' && pass "stats scoped to network" || fail "stats not scoped"
+  # Stats per network
+  STATS_A=$(api_curl "http://127.0.0.1:9200/api/stats?network_id=$NET_A_ID" 2>/dev/null)
+  echo "$STATS_A" | grep -q '"network_id"' && pass "stats scoped to network" || fail "stats not scoped"
+else
+  fail "skip isolation checks because network ids are missing"
+fi
 echo ""
 
 # 28. anet quickstart non-interactive
