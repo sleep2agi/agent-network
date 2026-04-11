@@ -68,11 +68,31 @@ function loadAnetConfig(): Record<string, string> {
 }
 const ANET_CONFIG = loadAnetConfig();
 
-const COMMHUB_URL = process.env.COMMHUB_URL || ANET_CONFIG.hub || "http://127.0.0.1:9200";
+// ── Load node config if available ──────────────────────
+function loadNodeConfig(): Record<string, any> {
+  try {
+    // Look for .anet/nodes/*/config.json in current directory
+    const nodesDir = join(process.cwd(), ".anet", "nodes");
+    if (existsSync(nodesDir)) {
+      const { readdirSync } = require("fs");
+      const nodes = readdirSync(nodesDir);
+      if (nodes.length > 0) {
+        const p = join(nodesDir, nodes[0], "config.json");
+        if (existsSync(p)) return JSON.parse(readFileSync(p, "utf-8"));
+      }
+    }
+  } catch {}
+  return {};
+}
+const NODE_CONFIG = loadNodeConfig();
+
+const COMMHUB_URL = process.env.COMMHUB_URL || NODE_CONFIG.hub || ANET_CONFIG.hub || "http://127.0.0.1:9200";
 const TMUX_NAME = process.env.COMMHUB_TMUX || getTmuxSessionName();
-const ALIAS = process.env.COMMHUB_ALIAS || TMUX_NAME || hostname();
-const RESUME_ID = process.env.COMMHUB_RESUME_ID || process.env.CLAUDE_RESUME_ID || crypto.randomUUID();
-const AUTH_TOKEN = process.env.COMMHUB_TOKEN || ANET_CONFIG.token || "";
+const ALIAS = process.env.COMMHUB_ALIAS || NODE_CONFIG.alias || TMUX_NAME || hostname();
+const RESUME_ID = process.env.COMMHUB_RESUME_ID || process.env.CLAUDE_RESUME_ID || (NODE_CONFIG.node_id ? `sdk-${NODE_CONFIG.node_id}` : crypto.randomUUID());
+// Token priority: env > node config (ntok_) > global config > legacy
+const AUTH_TOKEN = process.env.COMMHUB_TOKEN || NODE_CONFIG.token || ANET_CONFIG.token || "";
+const NETWORK_ID = NODE_CONFIG.network_id || ANET_CONFIG.network_id || "";
 
 function log(msg: string) {
   const ts = new Date().toTimeString().slice(0, 8);
@@ -83,7 +103,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}... TMUX=${TMUX_NAME || "none"} CWD=${process.cwd()} PROJECT_ENV=${projectPath}`);
+log(`ENV: URL=${COMMHUB_URL} ALIAS=${ALIAS} RESUME_ID=${RESUME_ID.slice(0, 8)}... TMUX=${TMUX_NAME || "none"} TOKEN=${AUTH_TOKEN ? AUTH_TOKEN.slice(0, 8) + "..." : "none"} NETWORK=${NETWORK_ID || "global"} CWD=${process.cwd()}`);
 
 // V2: track task_id → originator alias for send_reply routing
 const taskOriginators = new Map<string, string>();
@@ -183,55 +203,41 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-// Helper: call CommHub MCP endpoint
+// Helper: call CommHub MCP endpoint (Streamable HTTP, no init needed)
 async function callCommHub(toolName: string, args: Record<string, unknown>): Promise<any> {
-  const initRes = await fetch(`${COMMHUB_URL}/mcp`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json, text/event-stream",
-      ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-03-26",
-        capabilities: {},
-        clientInfo: { name: "commhub-channel", version: "0.3.0" },
+  try {
+    const res = await fetch(`${COMMHUB_URL}/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
       },
-    }),
-  });
-  if (!initRes.ok) {
-    const errText = await initRes.text();
-    log(`CommHub init failed: ${initRes.status} ${errText.slice(0, 100)}`);
-    return { ok: false, error: `init failed: ${initRes.status}` };
-  }
-  await initRes.text();
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: Date.now(),
+        method: "tools/call",
+        params: { name: toolName, arguments: args },
+      }),
+    });
 
-  const res = await fetch(`${COMMHUB_URL}/mcp`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json, text/event-stream",
-      ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/call",
-      params: { name: toolName, arguments: args },
-    }),
-  });
+    if (!res.ok) {
+      const errText = await res.text();
+      log(`CommHub ${toolName} failed: ${res.status} ${errText.slice(0, 100)}`);
+      return { ok: false, error: `${res.status}: ${errText.slice(0, 100)}` };
+    }
 
-  const text = await res.text();
-  const dataLine = text.split("\n").find((l) => l.startsWith("data: "));
-  if (dataLine) {
-    const json = JSON.parse(dataLine.slice(6));
-    return json?.result?.content?.[0]?.text ? JSON.parse(json.result.content[0].text) : json;
+    const text = await res.text();
+    const dataLine = text.split("\n").find((l) => l.startsWith("data: "));
+    if (dataLine) {
+      const json = JSON.parse(dataLine.slice(6));
+      return json?.result?.content?.[0]?.text ? JSON.parse(json.result.content[0].text) : json;
+    }
+    return { ok: false, error: "no response" };
+  } catch (e: any) {
+    log(`CommHub ${toolName} error: ${e.message}`);
+    return { ok: false, error: e.message };
   }
-  return { ok: false, error: "no response" };
 }
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -442,8 +448,10 @@ async function main() {
     agent: "claude-code",
     project_dir: process.cwd(),
     tmux_name: TMUX_NAME || undefined,
+    network_id: NETWORK_ID || undefined,
+    node_id: NODE_CONFIG.node_id || undefined,
   })
-    .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
+    .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)}) network=${NETWORK_ID || "global"}`))
     .catch((e) => log(`warning: could not register: ${e}`));
 
   // Heartbeat: report_status every 3 minutes to prevent offline timeout
@@ -457,6 +465,7 @@ async function main() {
       agent: "claude-code",
       project_dir: process.cwd(),
       tmux_name: TMUX_NAME || undefined,
+      network_id: NETWORK_ID || undefined,
     }).catch((e) => log(`heartbeat failed: ${e}`));
   }, 3 * 60 * 1000);
 
@@ -473,8 +482,9 @@ async function gracefulShutdown() {
   await callCommHub("report_status", {
     resume_id: RESUME_ID,
     alias: ALIAS,
-    status: "error",
+    status: "offline",
     task: "session disconnected",
+    network_id: NETWORK_ID || undefined,
   }).catch(() => {});
   process.exit(0);
 }
