@@ -43,6 +43,9 @@ echo "4. Login"
 LOGIN=$(curl -s -X POST "$BASE/api/auth/login" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"newuser","password":"pass123456"}')
 echo "$LOGIN" | grep -q '"ok":true' && pass "login" || fail "login"
 echo "$LOGIN" | grep -q '"utok_' && pass "login returns utok_" || pass "login token (atok_ compat)"
+# Update AUTH with fresh token from login (login rotates the old one)
+TOKEN=$(echo "$LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+AUTH="Authorization: Bearer $TOKEN"
 
 # 5. Auth/me
 echo "5. Profile"
