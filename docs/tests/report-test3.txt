@@ -1,0 +1,48 @@
+
+═══ Test 3: Security + Boundaries ═══
+
+[commhub] database: /root/.commhub/commhub.db
+[commhub] 🎉 14-day free trial started!
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.4.1                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Auth: ENABLED (Bearer token)     ║
+║                                                   ║
+║   MCP:    http://0.0.0.0:9200/mcp                 ║
+║   REST:   http://0.0.0.0:9200/api                 ║
+║   Health: http://0.0.0.0:9200/health               ║
+╚══════════════════════════════════════════════════╝
+
+1. Auth bypass
+  ✅ no token → 401
+  ✅ fake token → 401
+  ✅ empty bearer → 401
+  ✅ health no auth needed
+2. SQL injection
+  ✅ SQL injection in username blocked
+  ✅ SQL injection in login blocked
+  ✅ DB intact after injection
+3. Input validation
+  ✅ long username rejected
+  ✅ short password rejected
+  ✅ empty login body rejected
+  ✅ malformed JSON rejected
+  ✅ XSS in username blocked
+4. Token security
+  ✅ create token
+  ✅ revoke token
+  ✅ revoked token rejected
+5. Privilege escalation
+  ✅ cross-network token blocked
+6. License
+  ✅ bad license key rejected
+  ✅ valid license key accepted
+  ✅ upgraded to pro
+7. MCP auth
+  ✅ MCP without token → 401
+
+═══════════════════════════════════
+  Test 3 Result: 20 passed, 0 failed
+═══════════════════════════════════
+
