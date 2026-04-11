@@ -417,6 +417,16 @@ const CODEX_CONFIG = {
 };
 
 async function processWithCodex(task: string, from: string, images?: string[]): Promise<string> {
+  // Ensure system-installed codex binary is found (npm global bin)
+  try {
+    const { execSync } = await import("child_process");
+    const codexPath = execSync("which codex 2>/dev/null", { encoding: "utf-8" }).trim();
+    if (codexPath) {
+      const codexDir = codexPath.replace(/\/codex$/, "");
+      if (!process.env.PATH?.includes(codexDir)) process.env.PATH = `${codexDir}:${process.env.PATH}`;
+    }
+  } catch {}
+
   let Codex: any;
   try {
     ({ Codex } = await import("@openai/codex-sdk"));
