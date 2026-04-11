@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+# Don't use set -e — we handle errors via pass()/fail()
 PASS=0
 FAIL=0
 

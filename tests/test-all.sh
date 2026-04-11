@@ -31,9 +31,9 @@ run_suite() {
 cd /app/server && bun run src/index.ts &>/dev/null &
 sleep 3
 
-run_suite "Base E2E (126)" "/app/test.sh 2>&1"
-run_suite "V3 Auth (15)" "/app/test-auth.sh 2>&1"
-run_suite "V3 Networks (16)" "/app/test-networks.sh 2>&1"
+run_suite "Base E2E (137)" "/app/test.sh 2>&1"
+run_suite "V3 Auth (25)" "/app/test-auth.sh 2>&1"
+run_suite "V3 Networks (22)" "/app/test-networks.sh 2>&1"
 run_suite "Config Priority (16)" "/app/test-config.sh 2>&1"
 
 echo ""
