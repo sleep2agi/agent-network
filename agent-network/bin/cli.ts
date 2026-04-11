@@ -92,6 +92,7 @@ function normalizeRuntime(profileOrRuntime?: Profile | string): RuntimeName {
     if (profileOrRuntime === "codex" || profileOrRuntime === "codex-sdk") return "codex-sdk";
     if (profileOrRuntime === "claude" || profileOrRuntime === "claude-sdk" || profileOrRuntime === "claude-agent-sdk") return "claude-agent-sdk";
     if (profileOrRuntime === "agent-sdk") return "claude-agent-sdk";
+    if (profileOrRuntime === "http-api" || profileOrRuntime === "http" || profileOrRuntime === "openai-api" || profileOrRuntime === "minimax") return "http-api";
     return "claude-code-cli";
   }
   const p = profileOrRuntime;

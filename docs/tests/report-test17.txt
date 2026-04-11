@@ -1,0 +1,290 @@
+
+═══ Test 17: Real User Journey ═══
+
+1. npm packages installed
+  ✅ npm install -g 三个包
+
+2. Start server
+  ✅ bunx server start
+
+3. health check
+{"ok":true,"version":"1.0.0-preview","api_version":"v3","transport":"streamable-http","sessions_count":0,"sse_connections":0,"sse_sessions":{},"auth":"disabled","v3_auth":true,"multi_network":true,"license":"trial","uptime":4}
+  ✅ health check
+
+4. anet init --hub http://127.0.0.1:9200
+Auth token (empty to skip): ✅ CommHub v1.0.0-preview — undefined sessions, 0 SSE
+
+Saved to /root/.anet/config.json
+Next: anet init project
+  ✅ anet init --hub http://127.0.0.1:9200
+
+5. anet register --username newbie --password pass123456
+Email (optional): : 
+  ❌ anet register --username newbie --password pass123456
+
+6. anet login --username newbie --password pass123456
+Login failed: invalid username or password
+  ❌ anet login --username newbie --password pass123456
+
+7. anet whoami
+Not logged in. Run: anet login
+  ❌ anet whoami
+
+8. anet network ls
+Run 'anet login' first.
+  ❌ anet network ls
+
+9. anet create my-first-bot --runtime http-api
+[anet] Warning: claude CLI not found in PATH.
+[anet] Install: npm install -g @anthropic-ai/claude-code
+
+[anet] Created node "my-first-bot" (claude-code-cli) in network "global"
+[anet] claude-code-cli requires:
+  - Claude Pro / Team / Enterprise subscription
+  - Run "claude auth login" first
+  - Uses Anthropic Claude only
+  - For other models, use --runtime codex-sdk or claude-agent-sdk
+[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.
+[anet] To disable: edit .anet/nodes/my-first-bot/config.json → flags
+
+Start: anet start my-first-bot
+  ❌ anet create my-first-bot --runtime http-api
+
+10. anet ls
+
+Nodes:
+
+  NAME                 RUNTIME        STATUS    SSE  SESSION
+  ──────────────────── ────────────── ──────── ──── ────────
+  my-first-bot         claude-code-cli offline  ○    -
+  ✅ anet ls
+
+11. anet status
+
+  CommHub: http://127.0.0.1:9200
+  Agents: 0 idle, 0 working, 0 offline
+  SSE:    0 connected
+  Tasks:  0 recent
+  ✅ anet status
+
+12. anet doctor
+
+anet doctor — System Diagnostic
+
+  ✅ Global config (~/.anet/config.json) (http://127.0.0.1:9200)
+  ⚠  Auth token: not set — agents connect without auth
+  ✅ CommHub reachable (http://127.0.0.1:9200 v1.0.0-preview)
+  ℹ  API version: v3
+  ℹ  Sessions: 0 registered
+  ℹ  SSE connections: 0 active
+  ℹ  License: trial
+  ✅ Multi-network
+  ✅ Nodes configured (1 node(s))
+  ℹ    my-first-bot: claude-code-cli ○ stopped node_id=n_df28054e
+  ⚠  Claude Code CLI: not found (needed for claude-agent-sdk runtime)
+  ⚠  Codex CLI: not found (needed for codex-sdk runtime)
+  ✅ Bun runtime
+  ℹ  .mcp.json: not found in current directory
+
+  Result: 5 ok, 3 warnings, 0 errors
+  ✅ anet doctor
+
+13. anet demo
+╔══════════════════════════════════════════════════════════╗
+║  🌐 Agent Network Dashboard          6:35:24 AM          ║
+╠══════════════════════════════════════════════════════════╣
+║  Server: http://127.0.0.1:9200          v1.0.0-preview   ║
+║  License: trial (14d)                  SSE: 0            ║
+║  Tasks: 0      Sessions: 0    Working: 0          ║
+╠══════════════════════════════════════════════════════════╣
+║  (no agents online)                                      ║
+╠══════════════════════════════════════════════════════════╣
+║  (no tasks yet)                                          ║
+╠══════════════════════════════════════════════════════════╣
+║  Tip: anet demo --live  for auto-refresh dashboard       ║
+╚══════════════════════════════════════════════════════════╝
+  ✅ anet demo
+
+# Test 17 User Journey Report
+
+环境：Docker 内 npm 全新安装，按真实用户顺序操作。
+
+### 1. npm i -g 三个包（preview）
+- 结果: 成功
+- 输出是否用户友好: 是
+- 困惑点: 无。安装后命令可直接用。
+- 输出摘录:
+```text
+commhub-server / anet / agent-node commands available
+```
+
+### 2. bunx @sleep2agi/commhub-server &
+- 结果: 成功
+- 输出是否用户友好: 一般
+- 困惑点: 需要用户自己猜端口和等待时间。
+- 输出摘录:
+```text
+{"ok":true,"version":"1.0.0-preview","api_version":"v3","transport":"streamable-http","sessions_count":0,"sse_connections":0,"sse_sessions":{},"auth":"disabled","v3_auth":true,"multi_network":true,"license":"trial","uptime":4}
+```
+
+### 3. health check
+- 结果: 成功
+- 输出是否用户友好: 一般
+- 困惑点: 需要用户手动知道 health URL。
+- 输出摘录:
+```text
+{"ok":true,"version":"1.0.0-preview","api_version":"v3","transport":"streamable-http","sessions_count":0,"sse_connections":0,"sse_sessions":{},"auth":"disabled","v3_auth":true,"multi_network":true,"license":"trial","uptime":4}
+```
+
+### 4. anet init --hub http://127.0.0.1:9200
+- 结果: 成功
+- 输出是否用户友好: 一般
+- 困惑点: 仍会提示 Auth token（即使可以留空），新手会疑惑。
+- 输出摘录:
+```text
+Auth token (empty to skip): ✅ CommHub v1.0.0-preview — undefined sessions, 0 SSE
+
+Saved to /root/.anet/config.json
+Next: anet init project
+```
+
+### 5. anet register --username newbie --password pass123456
+- 结果: 失败
+- 输出是否用户友好: 否
+- 困惑点: 如果仍进入交互或提示额外字段，新手会卡住。
+- 输出摘录:
+```text
+Email (optional): : 
+```
+
+### 6. anet login --username newbie --password pass123456
+- 结果: 失败
+- 输出是否用户友好: 一般
+- 困惑点: 依赖上一步是否真正注册成功。
+- 输出摘录:
+```text
+Login failed: invalid username or password
+```
+
+### 7. anet whoami
+- 结果: 失败
+- 输出是否用户友好: 是
+- 困惑点: 如果失败，通常说明登录态没有写清楚。
+- 输出摘录:
+```text
+Not logged in. Run: anet login
+```
+
+### 8. anet network ls
+- 结果: 失败
+- 输出是否用户友好: 是
+- 困惑点: 默认网络命名若不明显，用户会不知道下一步怎么选。
+- 输出摘录:
+```text
+Run 'anet login' first.
+```
+
+### 9. anet create my-first-bot --runtime http-api
+- 结果: 失败
+- 输出是否用户友好: 一般
+- 困惑点: runtime/http-api 需要用户自己理解，不算纯新手友好。
+- 输出摘录:
+```text
+[anet] Warning: claude CLI not found in PATH.
+[anet] Install: npm install -g @anthropic-ai/claude-code
+
+[anet] Created node "my-first-bot" (claude-code-cli) in network "global"
+[anet] claude-code-cli requires:
+  - Claude Pro / Team / Enterprise subscription
+  - Run "claude auth login" first
+  - Uses Anthropic Claude only
+  - For other models, use --runtime codex-sdk or claude-agent-sdk
+[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.
+[anet] To disable: edit .anet/nodes/my-first-bot/config.json → flags
+
+Start: anet start my-first-bot
+```
+
+### 10. anet ls
+- 结果: 成功
+- 输出是否用户友好: 是
+- 困惑点: 如果列表为空但 create 成功，会很困惑。
+- 输出摘录:
+```text
+
+Nodes:
+
+  NAME                 RUNTIME        STATUS    SSE  SESSION
+  ──────────────────── ────────────── ──────── ──── ────────
+  my-first-bot         claude-code-cli offline  ○    -
+```
+
+### 11. anet status
+- 结果: 成功
+- 输出是否用户友好: 一般
+- 困惑点: 状态页概念对新手略抽象，需要看输出是否直观。
+- 输出摘录:
+```text
+
+  CommHub: http://127.0.0.1:9200
+  Agents: 0 idle, 0 working, 0 offline
+  SSE:    0 connected
+  Tasks:  0 recent
+```
+
+### 12. anet doctor
+- 结果: 成功
+- 输出是否用户友好: 是
+- 困惑点: 诊断通常是新手最能理解的反馈。
+- 输出摘录:
+```text
+
+anet doctor — System Diagnostic
+
+  ✅ Global config (~/.anet/config.json) (http://127.0.0.1:9200)
+  ⚠  Auth token: not set — agents connect without auth
+  ✅ CommHub reachable (http://127.0.0.1:9200 v1.0.0-preview)
+  ℹ  API version: v3
+  ℹ  Sessions: 0 registered
+  ℹ  SSE connections: 0 active
+  ℹ  License: trial
+  ✅ Multi-network
+  ✅ Nodes configured (1 node(s))
+  ℹ    my-first-bot: claude-code-cli ○ stopped node_id=n_df28054e
+  ⚠  Claude Code CLI: not found (needed for claude-agent-sdk runtime)
+  ⚠  Codex CLI: not found (needed for codex-sdk runtime)
+  ✅ Bun runtime
+  ℹ  .mcp.json: not found in current directory
+
+  Result: 5 ok, 3 warnings, 0 errors
+```
+
+### 13. anet demo
+- 结果: 成功
+- 输出是否用户友好: 一般
+- 困惑点: 如果是交互/TUI，Docker 里可能难以验证，只能看是否能启动。
+- 输出摘录:
+```text
+╔══════════════════════════════════════════════════════════╗
+║  🌐 Agent Network Dashboard          6:35:24 AM          ║
+╠══════════════════════════════════════════════════════════╣
+║  Server: http://127.0.0.1:9200          v1.0.0-preview   ║
+║  License: trial (14d)                  SSE: 0            ║
+║  Tasks: 0      Sessions: 0    Working: 0          ║
+╠══════════════════════════════════════════════════════════╣
+║  (no agents online)                                      ║
+╠══════════════════════════════════════════════════════════╣
+║  (no tasks yet)                                          ║
+╠══════════════════════════════════════════════════════════╣
+║  Tip: anet demo --live  for auto-refresh dashboard       ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+## Summary
+
+- Results: 8 passed, 5 failed
+
+═══════════════════════════════════
+  Test 17 Result: 8 passed, 5 failed
+═══════════════════════════════════
+
