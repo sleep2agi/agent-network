@@ -1,0 +1,44 @@
+
+=========================================
+  NPM Security Boundary Test
+=========================================
+
+1. npm install 3 published packages...
+  PASS  npm packages installed
+  PASS  anet installed from npm
+  PASS  agent-node installed from npm
+  PASS  commhub-server installed from npm
+
+2. Starting npm-installed server with COMMHUB_AUTH_TOKEN...
+  PASS  server started from npm package
+
+3. No token -> 401...
+  PASS  no token rejected
+
+4. Fake token -> 401...
+  PASS  fake token rejected
+
+5. Register -> utok_ -> MCP should be 403...
+  PASS  register succeeded
+  PASS  got utok_
+  PASS  utok_ blocked from MCP
+
+6. Create ntok_ -> MCP should succeed...
+  PASS  node-token endpoint succeeded
+  PASS  got ntok_
+  PASS  ntok_ can initialize MCP
+  PASS  ntok_ can call MCP tool
+
+7. SQL injection attempt -> rejected...
+  PASS  SQL injection username rejected
+
+8. Overlong username -> rejected...
+  PASS  overlong username rejected
+
+9. License activation...
+  PASS  license activation succeeded
+  PASS  license upgraded to pro
+
+=========================================
+Result: 18 passed, 0 failed
+=========================================

@@ -1,0 +1,35 @@
+
+=========================================
+  npm Install New User Flow
+=========================================
+
+1. Package versions...
+  ✅ commhub-server preview.28 installed
+  ❌ anet version missing
+  ✅ agent-node version available
+
+2. Start server...
+  ✅ server started from npm package
+
+3. anet init...
+  ✅ anet init --hub
+
+4. anet register...
+  ✅ anet register
+
+5. anet login...
+  ✅ anet login
+
+6. anet create...
+  ✅ anet create test-bot --runtime http-api
+
+7. anet network ls...
+  ✅ anet network ls
+
+8. anet doctor...
+  ✅ anet doctor
+
+=========================================
+  Results: 9 passed, 1 failed
+=========================================
+
