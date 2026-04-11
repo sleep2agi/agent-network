@@ -1,0 +1,44 @@
+
+=========================================
+  agent-node Real Integration Test
+=========================================
+
+1. Starting server with COMMHUB_AUTH_TOKEN...
+  PASS  server started
+
+2. Register user and create ntok_...
+  PASS  register succeeded
+  PASS  utok received
+  PASS  network_id received
+  PASS  node-token created
+  PASS  ntok received
+
+3. Writing config.json for agent-node...
+  PASS  config.json written
+
+4. Starting real agent-node...
+  PASS  agent-node started
+
+5. Verify /api/status shows real-bot online...
+  PASS  real-bot online in /api/status
+
+6. Send task to real-bot via MCP...
+  PASS  send_task accepted
+
+7. Verify agent-node attempted processing...
+  PASS  agent-node entered processing path
+  PASS  http-api runtime attempted and errored as expected
+
+8. Verify startup showed user/network info...
+  PASS  startup displayed user info
+  PASS  startup displayed network info
+
+9. Stop agent-node...
+  PASS  agent-node process stopped
+
+10. Verify /api/status shows offline...
+  PASS  real-bot offline after stop
+
+=========================================
+Result: 16 passed, 0 failed
+=========================================

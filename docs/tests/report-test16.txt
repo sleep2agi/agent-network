@@ -1,0 +1,36 @@
+
+═══ Test 16: Channel Plugin ═══
+
+1. Start server
+  ✅ server started
+
+2. Register user + create ntok
+  ✅ user registered
+  ✅ ntok available
+
+3. Write node config
+  ✅ config.json written
+
+4. Start channel plugin
+  ✅ plugin started
+
+5. Agent online in /api/status
+  ✅ plugin reported online
+  ✅ status network_id correct
+
+6. Send task via MCP
+  ✅ send_task accepted
+
+7. Inbox receives task
+  ✅ inbox has task
+
+8. Stop plugin
+  ✅ plugin stopped
+
+9. Agent offline in /api/status
+  ✅ plugin reported offline
+
+═══════════════════════════════════
+  Test 16 Result: 11 passed, 0 failed
+═══════════════════════════════════
+

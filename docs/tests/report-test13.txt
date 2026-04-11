@@ -1,0 +1,122 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 346B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1
+#2 DONE 0.4s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/7] FROM docker.io/oven/bun:1@sha256:8956c7667fa17beb6e3c664115e66bdacfe502da5d99603626e74c197bdef160
+#4 resolve docker.io/oven/bun:1@sha256:8956c7667fa17beb6e3c664115e66bdacfe502da5d99603626e74c197bdef160 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 317.69kB 0.2s done
+#5 DONE 0.2s
+
+#6 [2/7] WORKDIR /app
+#6 CACHED
+
+#7 [3/7] RUN apt-get update && apt-get install -y curl python3 && rm -rf /var/lib/apt/lists/*
+#7 CACHED
+
+#8 [4/7] COPY server/ server/
+#8 CACHED
+
+#9 [5/7] RUN cd server && bun install
+#9 CACHED
+
+#10 [6/7] COPY tests/test13-multi-channel/run.sh /app/run.sh
+#10 DONE 0.0s
+
+#11 [7/7] RUN chmod +x /app/run.sh
+#11 DONE 0.3s
+
+#12 exporting to image
+#12 exporting layers
+#12 exporting layers 0.2s done
+#12 exporting manifest sha256:dfd16663c59a429c99f1df6b39499c50703969693426fcf2d2b67e4bf18a1540 0.0s done
+#12 exporting config sha256:b5e61ceb6e95b924861f7c4b602a265a27282cf869dcb5f5ac1f8e49e67b2390 0.0s done
+#12 exporting attestation manifest sha256:d7acd0126c6d1e0998dc8869abfcaf0c3a76d5ef269ba967d046dd3633201a0e 0.0s done
+#12 exporting manifest list sha256:654394d0fc61647b5271959485854624ea5cbaacbf9060ade5bf10d525a3feb5 0.0s done
+#12 naming to docker.io/library/anet-test13:latest
+#12 naming to docker.io/library/anet-test13:latest done
+#12 unpacking to docker.io/library/anet-test13:latest 0.1s done
+#12 DONE 0.5s
+
+ [33m1 warning found (use docker --debug to expand):
+[0m - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "COMMHUB_AUTH_TOKEN") (line 8)
+
+=========================================
+  Test 13: Multi Channel Communication
+=========================================
+
+1. Start server + register
+[commhub] database: /root/.commhub/commhub.db
+[commhub] 🎉 14-day free trial started!
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.4.1                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Auth: ENABLED (Bearer token)     ║
+║                                                   ║
+║   MCP:    http://0.0.0.0:9200/mcp                 ║
+║   REST:   http://0.0.0.0:9200/api                 ║
+║   Health: http://0.0.0.0:9200/health               ║
+╚══════════════════════════════════════════════════╝
+
+  ✅ server started
+  ✅ owner registered
+  ✅ network created
+
+2. Register 3 agents: agent-a / agent-b / agent-c
+  ✅ three agent ntok created
+[04:32:46] agent-a (resume-a) → report_status: idle [net]
+[04:32:46] agent-b (resume-b) → report_status: idle [net]
+[04:32:47] agent-c (resume-c) → report_status: idle [net]
+  ✅ three agents reported status
+
+3. agent-a -> agent-b send task
+[04:32:47] agent-a → send_task → agent-b: task from agent-a to agent-b
+  ✅ agent-a sent task to agent-b
+
+4. agent-b replies to agent-a
+[04:32:47] agent-b → get_inbox: 1 pending messages
+  ✅ agent-b received task
+[04:32:47] agent-b → send_reply (replied) → agent-a: reply from agent-b to agent-a
+  ✅ agent-b replied to agent-a
+
+5. Broadcast to all agents
+[04:32:47] hub → broadcast: broadcast to all agents [net=net_f17c0771]
+  ✅ broadcast sent
+
+6. Verify all agents received broadcast
+[04:32:47] agent-a → get_inbox: 2 pending messages
+[04:32:47] agent-b → get_inbox: 2 pending messages
+[04:32:47] agent-c → get_inbox: 1 pending messages
+  ✅ agent-a got broadcast
+  ✅ agent-b got broadcast
+  ✅ agent-c got broadcast
+
+7. agent-a -> agent-c and agent-c replies
+[04:32:47] agent-a → send_task → agent-c: task from agent-a to agent-c
+  ✅ agent-a sent task to agent-c
+[04:32:47] agent-c → get_inbox: 2 pending messages
+  ✅ agent-c received task
+[04:32:47] agent-c → send_reply (replied) → agent-a: reply from agent-c to agent-a
+  ✅ agent-c replied to agent-a
+
+8. Verify /api/messages communication history
+  ❌ /api/messages incomplete
+
+9. Verify /api/task_events status changes
+  ❌ /api/task_events incomplete
+
+=========================================
+  Results: 15 passed, 2 failed
+=========================================
