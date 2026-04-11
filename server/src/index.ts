@@ -469,8 +469,9 @@ Bun.serve({
       const networkId = netDetailMatch[1];
       const network = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", networkId);
       if (!network) return withCors(req, Response.json({ ok: false, error: "network not found" }, { status: 404 }));
-      // Ownership check: only owner or admin can view
-      if (network.owner_id !== resolved.user.user_id && resolved.user.role !== "admin") {
+      // Membership check: must be a member or system admin
+      const viewerRole = getUserNetworkRole(resolved.user.user_id, networkId);
+      if (!viewerRole && resolved.user.role !== "admin") {
         return withCors(req, Response.json({ ok: false, error: "access denied" }, { status: 403 }));
       }
       // Get network stats

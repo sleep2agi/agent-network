@@ -213,6 +213,88 @@ R=$(curl -s "$BASE/api/audit-log" -H "$V3H"); json_ok "$R" && pass "GET /api/aud
 echo ""
 
 # ═══════════════════════════════════════════
+#  7. Network Members + Invite (通信牛 review gap #2)
+# ═══════════════════════════════════════════
+echo "7. Network Members + Invite"
+# Get user's default network ID
+NET_ID=$(curl -s "$BASE/api/networks" -H "$V3H" | python3 -c "import json,sys; nets=json.load(sys.stdin).get('networks',[]); print(nets[0]['network_id'] if nets else '')" 2>/dev/null)
+# Create invite code
+R=$(curl -s -X POST "$BASE/api/networks/$NET_ID/invite" -H "$V3H" -H "Content-Type: application/json" -d '{"role":"member","max_uses":2}')
+INV_CODE=$(echo "$R" | python3 -c "import json,sys; print(json.load(sys.stdin).get('invite_code',''))" 2>/dev/null)
+[ -n "$INV_CODE" ] && pass "create invite code" || fail "create invite"
+
+# Register second user + join via invite
+R=$(curl -s -X POST "$BASE/api/auth/register" -H "$AUTH" -H "Content-Type: application/json" -d '{"username":"user2","password":"pass123456"}')
+V3TOK2=$(echo "$R" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+[ -n "$V3TOK2" ] && pass "register user2" || fail "register user2"
+V3H2="Authorization: Bearer $V3TOK2"
+
+R=$(curl -s -X POST "$BASE/api/networks/join" -H "$V3H2" -H "Content-Type: application/json" -d "{\"invite_code\":\"$INV_CODE\"}")
+json_ok "$R" && pass "join via invite" || fail "join invite"
+
+# List members
+R=$(curl -s "$BASE/api/networks/$NET_ID/members" -H "$V3H")
+echo "$R" | grep -q 'user2' && pass "member listed" || fail "member not listed"
+
+# Invite used count
+R=$(curl -s -X POST "$BASE/api/networks/join" -H "$V3H2" -H "Content-Type: application/json" -d "{\"invite_code\":\"$INV_CODE\"}")
+echo "$R" | grep -q 'already a member' && pass "double join rejected" || fail "double join not rejected"
+
+# Remove member
+USER2_ID=$(curl -s "$BASE/api/networks/$NET_ID/members" -H "$V3H" | python3 -c "import json,sys; ms=json.load(sys.stdin).get('members',[]); print(next((m['user_id'] for m in ms if m['username']=='user2'),''))" 2>/dev/null)
+R=$(curl -s -X DELETE "$BASE/api/networks/$NET_ID/members/$USER2_ID" -H "$V3H")
+json_ok "$R" && pass "remove member" || fail "remove member"
+echo ""
+
+# ═══════════════════════════════════════════
+#  8. Multi-Network Authorization (通信牛 review gap #3)
+# ═══════════════════════════════════════════
+echo "8. Multi-Network Authorization"
+# Register user3 (non-admin) to test cross-user isolation
+# (user1 is admin so bypasses checks — use a regular user instead)
+R=$(curl -s -X POST "$BASE/api/auth/register" -H "$AUTH" -H "Content-Type: application/json" -d '{"username":"user3","password":"pass123456"}')
+V3TOK3=$(echo "$R" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+V3H3="Authorization: Bearer $V3TOK3"
+
+# user3 (regular user) tries to access user1's network → should be blocked
+R=$(curl -s "$BASE/api/networks/$NET_ID" -H "$V3H3")
+echo "$R" | grep -qE 'denied|not found|error|403' && pass "cross-user network blocked" || fail "cross-user network leak"
+
+# user3 tries to list user1's network members → should be blocked
+R=$(curl -s "$BASE/api/networks/$NET_ID/members" -H "$V3H3")
+echo "$R" | grep -qE 'not a member|forbidden|error|403' && pass "cross-user members blocked" || fail "cross-user members leak"
+echo ""
+
+# ═══════════════════════════════════════════
+#  9. Security Boundaries (通信牛 review gap #6)
+# ═══════════════════════════════════════════
+echo "9. Security Boundaries"
+# Malformed JSON
+R=$(curl -s -X POST "$BASE/api/auth/login" -H "$AUTH" -H "Content-Type: application/json" -d 'not-json')
+echo "$R" | grep -qE 'error|400|invalid' && pass "malformed JSON rejected" || fail "malformed JSON accepted"
+
+# Empty body
+R=$(curl -s -X POST "$BASE/api/auth/login" -H "$AUTH" -H "Content-Type: application/json" -d '{}')
+echo "$R" | grep -q 'invalid\|required\|error' && pass "empty login rejected" || fail "empty login accepted"
+
+# Super long username
+LONG=$(python3 -c "print('A'*10000)")
+R=$(curl -s -X POST "$BASE/api/auth/register" -H "$AUTH" -H "Content-Type: application/json" -d "{\"username\":\"$LONG\",\"password\":\"pass123456\"}")
+echo "$R" | grep -q 'error\|invalid\|too long' && pass "long username rejected" || fail "long username accepted"
+
+# SQL injection attempt in username
+R=$(curl -s -X POST "$BASE/api/auth/register" -H "$AUTH" -H "Content-Type: application/json" -d '{"username":"admin\"; DROP TABLE users;--","password":"pass123456"}')
+echo "$R" | grep -q 'invalid\|error' && pass "SQL injection blocked" || fail "SQL injection not blocked"
+# Verify users table still exists
+R=$(curl -s "$BASE/api/auth/me" -H "$V3H")
+json_ok "$R" && pass "DB intact after injection attempt" || fail "DB corrupted"
+
+# Expired/revoked token
+R=$(curl -s "$BASE/api/auth/me" -H "Authorization: Bearer atok_definitely_fake_token_12345")
+echo "$R" | grep -q 'invalid\|unauthorized\|401\|error' && pass "fake token rejected" || fail "fake token accepted"
+echo ""
+
+# ═══════════════════════════════════════════
 #  Report
 # ═══════════════════════════════════════════
 echo "═══════════════════════════════════════════"

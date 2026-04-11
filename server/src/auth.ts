@@ -22,6 +22,7 @@ export interface AuthResult {
 
 export function register(username: string, password: string, email?: string, displayName?: string): AuthResult {
   if (!username || username.length < 2) return { ok: false, error: "username must be at least 2 characters" };
+  if (username.length > 50) return { ok: false, error: "username too long (max 50)" };
   if (!password || password.length < 6) return { ok: false, error: "password must be at least 6 characters" };
   if (!/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/.test(username)) return { ok: false, error: "username contains invalid characters" };
 
