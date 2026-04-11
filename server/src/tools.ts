@@ -13,8 +13,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const getNetworkId = (clientNetId?: string | null) => enforceNetworkId ?? clientNetId ?? null;
 
   // Check if the user has write access to the enforced network
+  // utok_ (no networkId) cannot do MCP writes — only ntok_/atok_ with network binding can
   const canWrite = (): boolean => {
-    if (!enforceNetworkId || !enforceUserId) return true; // no network bound = legacy mode, allow
+    if (!enforceUserId) return true; // legacy global token mode, allow
+    if (!enforceNetworkId) return false; // utok_ has no network → cannot write MCP
     const role = getUserNetworkRole(enforceUserId, enforceNetworkId);
     return !!role && role !== "viewer"; // owner/admin/member can write, viewer cannot
   };
@@ -74,7 +76,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              session_id = COALESCE(?16, sessions.session_id), config_path = COALESCE(?17, sessions.config_path),
              channels = COALESCE(?18, sessions.channels), network_id = COALESCE(?19, sessions.network_id),
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, netId ?? null]
+          [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, effectiveNetId ?? null]
         );
       });
 

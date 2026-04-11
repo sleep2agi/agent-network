@@ -363,7 +363,12 @@ Bun.serve({
       if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
-      // V3.13: return all networks user is a member of (not just owner)
+      // V3.13: ntok_ can only see its bound network; utok_ sees all member networks
+      if (resolved.networkId) {
+        // ntok_ — only return the bound network
+        const net = db.get<any>("SELECT * FROM networks WHERE network_id = ?1", resolved.networkId);
+        return withCors(req, Response.json({ ok: true, networks: net ? [net] : [] }));
+      }
       const networks = getUserAllNetworks(resolved.user.user_id);
       return withCors(req, Response.json({ ok: true, networks }));
     }
