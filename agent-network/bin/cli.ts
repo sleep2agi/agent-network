@@ -254,7 +254,15 @@ interface Semver {
 }
 
 function packageJsonPath() {
-  return join(new URL(".", import.meta.url).pathname, "..", "..", "package.json");
+  // Try multiple paths: compiled dist/bin/cli.js → ../../package.json, source bin/cli.ts → ../package.json
+  const candidates = [
+    join(new URL(".", import.meta.url).pathname, "..", "..", "package.json"),
+    join(new URL(".", import.meta.url).pathname, "..", "package.json"),
+  ];
+  for (const p of candidates) {
+    try { if (existsSync(p)) return p; } catch {}
+  }
+  return candidates[0]; // fallback to first
 }
 
 function parseSemver(text: string): Semver | null {
@@ -2847,7 +2855,18 @@ async function tokenCommand() {
     return;
   }
 
-  // Default: list tokens
+  if (sub === "--help" || sub === "-h" || sub === "help") {
+    console.log(`
+anet token <command>
+
+  ls                    List all tokens
+  create <name>         Create a new API token
+  revoke <token-id>     Revoke a token by ID
+`);
+    return;
+  }
+
+  // Default: list tokens (same as "ls")
   try {
     const res = await fetch(`${hub}/api/auth/tokens`, { headers }).then(r => r.json() as any);
     if (!res.ok) { console.error(res.error); return; }
