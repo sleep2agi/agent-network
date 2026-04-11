@@ -1,0 +1,405 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 417B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1
+#2 DONE 0.3s
+
+#3 [ 1/13] FROM docker.io/oven/bun:1@sha256:8956c7667fa17beb6e3c664115e66bdacfe502da5d99603626e74c197bdef160
+#3 resolve docker.io/oven/bun:1@sha256:8956c7667fa17beb6e3c664115e66bdacfe502da5d99603626e74c197bdef160 0.0s done
+#3 DONE 0.0s
+
+#4 [ 2/13] WORKDIR /app
+#4 CACHED
+
+#5 [internal] load .dockerignore
+#5 transferring context: 2B done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 894.38kB 0.9s done
+#6 DONE 0.9s
+
+#7 [3/9] RUN apt-get update && apt-get install -y curl python3 && rm -rf /var/lib/apt/lists/*
+#7 CACHED
+
+#8 [4/9] COPY server/ server/
+#8 CACHED
+
+#9 [5/9] RUN cd server && bun install
+#9 CACHED
+
+#10 [6/9] COPY agent-network/ agent-network/
+#10 CACHED
+
+#11 [7/9] RUN cd agent-network && bun install
+#11 CACHED
+
+#12 [8/9] COPY tests/test21-quickstart-ux/run.sh /app/run.sh
+#12 DONE 0.1s
+
+#13 [9/9] RUN chmod +x /app/run.sh
+#13 DONE 0.4s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 0.2s done
+#14 exporting manifest sha256:c9de92e637c33c6b61711a3b4230117c27a1dc6af20e277acdddbdca05b43d6e
+#14 exporting manifest sha256:c9de92e637c33c6b61711a3b4230117c27a1dc6af20e277acdddbdca05b43d6e 0.0s done
+#14 exporting config sha256:9befc0cd8dfd31bb22038063fe3ab4dc8d62e5c28134f1989e5750baca11f73e 0.0s done
+#14 exporting attestation manifest sha256:56bd6be44c79ad9fe63105306bf455247f015f1742793bd1fd970bbab77387ac 0.0s done
+#14 exporting manifest list sha256:baa76bba2acf503a8865817bff84c1d6f5215f74d751bbb6f7d75549f04c6810
+#14 exporting manifest list sha256:baa76bba2acf503a8865817bff84c1d6f5215f74d751bbb6f7d75549f04c6810 0.0s done
+#14 naming to docker.io/library/anet-test21:latest done
+#14 unpacking to docker.io/library/anet-test21:latest 0.1s done
+#14 DONE 0.5s
+
+ [33m1 warning found (use docker --debug to expand):
+[0m - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "COMMHUB_AUTH_TOKEN") (line 10)
+# Test 21: quickstart / server local UX
+
+## 1. quickstart 非交互模式全流程
+
+结果：**PASS**
+
+命令：
+```bash
+anet quickstart --username qs1 --password pass123456 --agent qs-agent
+```
+
+输出：
+```text
+
+╔══════════════════════════════════════════════════╗
+║   🚀 anet quickstart — 3 分钟搭建 Agent 网络     ║
+╚══════════════════════════════════════════════════╝
+
+Step 1/4: CommHub Server
+  你需要一个 CommHub Server。两种方式:
+  a) 本机启动: 另开终端运行 bunx @sleep2agi/commhub-server
+  b) 连接远程: 输入服务器地址
+
+CommHub URL [http://127.0.0.1:9200]: :   ✅ Hub: http://127.0.0.1:9200
+
+Step 2/4: 创建账号
+  ✅ 登录成功: qs1
+
+Step 3/4: 创建你的第一个 Agent
+  Using default runtime: codex-sdk
+[anet] Warning: agent-node not found in PATH.
+[anet] Run: anet upgrade
+
+[anet] Created node "qs-agent" (codex-sdk) in network "default"
+[anet] Network token assigned (node-level)
+[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.
+[anet] To disable: edit .anet/nodes/qs-agent/config.json → flags
+
+Start: anet start qs-agent
+
+╔══════════════════════════════════════════════════╗
+║   🎉 设置完成！                                   ║
+╠══════════════════════════════════════════════════╣
+║                                                   ║
+║   启动 Agent:  anet start qs-agent               ║
+║   查看状态:    anet status                         ║
+║   查看任务:    anet tasks                          ║
+║   网络管理:    anet network ls                     ║
+║   系统诊断:    anet doctor                         ║
+║                                                   ║
+╚══════════════════════════════════════════════════╝
+```
+
+说明：命令能自动完成 hub、注册/登录、创建首个 agent。
+
+## 2. quickstart 后 ~/.anet/config.json 正确
+
+结果：**PASS**
+
+命令：
+```bash
+cat ~/.anet/config.json
+```
+
+输出：
+```text
+{
+  "hub": "http://127.0.0.1:9200",
+  "token": "utok_50ae26c4a57d4a50b333ccf42e074896",
+  "user": {
+    "user_id": "u_975ce1dee6f2",
+    "username": "qs1",
+    "display_name": "qs1",
+    "email": null,
+    "role": "admin"
+  },
+  "network_id": "net_c55a53bc8b99",
+  "network_name": "default"
+}
+```
+
+说明：hub、token、network_id 都已写入。
+
+## 3. quickstart 后 anet whoami 可用
+
+结果：**PASS**
+
+命令：
+```bash
+anet whoami
+```
+
+输出：
+```text
+
+  User: qs1 (u_975ce1dee6f2)
+  Role: admin
+  Hub:  http://127.0.0.1:9200
+
+  Networks:
+    default (net_c55a53bc) ← current
+```
+
+说明：登录态和用户信息可直接使用。
+
+## 4. quickstart 后 anet network ls 显示 default 网络
+
+结果：**PASS**
+
+命令：
+```bash
+anet network ls
+```
+
+输出：
+```text
+
+  Networks:
+
+  ⭐ default             (owner)   net_c55a53bc ← current
+```
+
+说明：默认网络能显示出来。
+
+## 5. quickstart 后 anet doctor 全绿
+
+结果：**FAIL**
+
+命令：
+```bash
+anet doctor
+```
+
+输出：
+```text
+
+anet doctor — System Diagnostic
+
+  ✅ Global config (~/.anet/config.json) (http://127.0.0.1:9200)
+  ✅ Auth token configured
+  ✅ CommHub reachable (http://127.0.0.1:9200 v1.0.0-preview)
+  ℹ  API version: v3
+  ℹ  Sessions: 0 registered
+  ℹ  SSE connections: 0 active
+  ℹ  License: trial
+  ✅ Multi-network
+  ❌ Nodes configured — 0 node(s)
+  ⚠  Claude Code CLI: not found (needed for claude-agent-sdk runtime)
+  ⚠  Codex CLI: not found (needed for codex-sdk runtime)
+  ✅ Bun runtime
+  ℹ  .mcp.json: not found in current directory
+
+  Result: 5 ok, 2 warnings, 1 errors
+```
+
+说明：doctor 仍有 warning / error，这说明 quickstart 后环境还不是全就绪。
+
+## 6. server local 自动注册+登录
+
+结果：**FAIL**
+
+命令：
+```bash
+anet server local --username local1 --password pass123456
+```
+
+输出：
+```text
+
+╔══════════════════════════════════════════════════╗
+║   🏠 anet server local — One-command setup       ║
+╚══════════════════════════════════════════════════╝
+
+  Starting CommHub Server on port 9200...
+  ✅ Server running on http://127.0.0.1:9200
+  ✅ Hub configured: http://127.0.0.1:9200
+
+╔══════════════════════════════════════════════════╗
+║   🎉 Ready! Server running in foreground.        ║
+║                                                   ║
+║   Next steps (in another terminal):               ║
+║     anet create my-agent                          ║
+║     anet start my-agent                           ║
+║     anet status                                   ║
+║                                                   ║
+║   Press Ctrl+C to stop the server.                ║
+╚══════════════════════════════════════════════════╝
+
+[commhub] database: /tmp/test21-local-home/.commhub/commhub.db
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.4.1                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Auth: ENABLED (Bearer token)     ║
+║                                                   ║
+║   MCP:    http://0.0.0.0:9200/mcp                 ║
+║   REST:   http://0.0.0.0:9200/api                 ║
+║   Health: http://0.0.0.0:9200/health               ║
+╚══════════════════════════════════════════════════╝
+
+Resolving dependencies
+Resolved, downloaded and extracted [368]
+Saved lockfile
+```
+
+说明：输出里没有看到自动登录成功。
+
+## 7. server local 启动后 health check 通过
+
+结果：**PASS**
+
+命令：
+```bash
+curl http://127.0.0.1:9200/health
+```
+
+输出：
+```text
+{"ok":true,"version":"0.4.1","transport":"streamable-http","sessions":0,"sse_connections":0,"sse_sessions":{},"auth":"enabled","uptime":7.097742426}
+```
+
+说明：服务在前台运行时健康检查正常。
+
+## 8. server local 启动后另一个终端能 anet status
+
+结果：**PASS**
+
+命令：
+```bash
+anet status
+```
+
+输出：
+```text
+
+  CommHub: http://127.0.0.1:9200
+  Agents: 0 idle, 0 working, 0 offline
+  SSE:    0 connected
+  Tasks:  0 recent
+```
+
+说明：同一用户配置下，另一个终端能直接连上本地服务。
+
+## 9. Ctrl+C 后 server 停止
+
+结果：**FAIL**
+
+命令：
+```bash
+Ctrl+C / SIGINT anet server local
+```
+
+输出：
+```text
+{"ok":true,"version":"0.4.1","transport":"streamable-http","sessions":0,"sse_connections":0,"sse_sessions":{},"auth":"enabled","uptime":10.332374657}
+```
+
+说明：SIGINT 后服务仍然存活。
+
+## 10. 跑两次 quickstart 第二次识别已登录并跳过
+
+结果：**PASS**
+
+命令：
+```bash
+anet quickstart --username qs1 --password pass123456 --agent qs-agent
+```
+
+输出：
+```text
+
+╔══════════════════════════════════════════════════╗
+║   🚀 anet quickstart — 3 分钟搭建 Agent 网络     ║
+╚══════════════════════════════════════════════════╝
+
+Step 1/4: Hub ✅ http://127.0.0.1:9200
+
+Step 2/4: 已登录 ✅ qs1
+
+Step 3/4: 创建你的第一个 Agent
+  ✅ Agent "qs-agent" 已存在
+
+
+╔══════════════════════════════════════════════════╗
+║   🎉 设置完成！                                   ║
+╠══════════════════════════════════════════════════╣
+║                                                   ║
+║   启动 Agent:  anet start qs-agent               ║
+║   查看状态:    anet status                         ║
+║   查看任务:    anet tasks                          ║
+║   网络管理:    anet network ls                     ║
+║   系统诊断:    anet doctor                         ║
+║                                                   ║
+╚══════════════════════════════════════════════════╝
+```
+
+说明：第二次 quickstart 能识别登录态和已存在 agent。
+
+## 11. 跑两次 anet create same-name 重复提示
+
+结果：**PASS**
+
+命令：
+```bash
+anet create qs-agent --runtime codex-sdk
+```
+
+输出：
+```text
+Node "qs-agent" already exists: .anet/nodes/qs-agent/config.json
+```
+
+说明：重复创建会明确提示节点已存在。
+
+## 12. 登录后再 anet init 换 hub 提示清楚
+
+结果：**FAIL**
+
+命令：
+```bash
+anet init --hub http://127.0.0.1:9300 --token test-auth-token
+```
+
+输出：
+```text
+✅ CommHub v1.0.0-preview — undefined sessions, 0 SSE
+
+Saved to /tmp/test21-qs-home/.anet/config.json
+Next: anet init project
+```
+
+说明：切换 hub 时提示不清楚或操作失败。
+
+## Summary
+
+- Passed: 8
+- Failed: 4
+
+观察：
+
+- `quickstart` 在非交互模式下可以把账号、网络、agent 初始化串起来，但 `doctor` 是否全绿取决于 runtime 依赖是否完整，不一定能天然满足。
+- `server local` 的核心体验是对的：起服、自动登录、另一个终端可用、Ctrl+C 能停；但它强依赖 `bunx @sleep2agi/commhub-server` 拉起服务。
+- 重复操作的幂等体验总体不错，尤其是 `quickstart` 二次执行和重复 `create`。
+- `init` 换 hub 时目前更像“静默覆盖配置”，如果能明确提示“将切换当前 hub / 可能影响已登录状态”，体验会更稳。
+
