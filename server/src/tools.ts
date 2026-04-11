@@ -2,14 +2,22 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { db, uuidv4, logTaskEvent } from "./db.js";
 import { pushEvent, pushBroadcast } from "./push.js";
+import { getUserNetworkRole } from "./auth.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
-export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null) {
+export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null) {
   // If enforceNetworkId is set, override any client-supplied network_id
   const getNetworkId = (clientNetId?: string | null) => enforceNetworkId ?? clientNetId ?? null;
+
+  // Check if the user has write access to the enforced network
+  const canWrite = (): boolean => {
+    if (!enforceNetworkId || !enforceUserId) return true; // no network bound = legacy mode, allow
+    const role = getUserNetworkRole(enforceUserId, enforceNetworkId);
+    return !!role && role !== "viewer"; // owner/admin/member can write, viewer cannot
+  };
   // ═══════════════════════════════════════════
   //  Child Agent Tools (4)
   // ═══════════════════════════════════════════
@@ -325,6 +333,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ alias, task, priority, context, from_session, ttl_seconds, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
 
+      // Role check: viewer cannot send tasks
+      if (!canWrite()) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied", message: "Viewer role cannot send tasks" }) }] };
+      }
+
       // License check
       const license = db.get<any>("SELECT type, expires_at FROM licenses ORDER BY created_at LIMIT 1");
       if (license?.expires_at) {
@@ -386,6 +399,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_session: z.string().max(200).optional().default("hub"),
     },
     async ({ alias, message, from_session }) => {
+      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → send_message → ${alias}: ${message.slice(0, 60)}`);
       const id = uuidv4();
       db.run(
@@ -425,6 +439,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_session: z.string().max(200).optional().default("hub"),
     },
     async ({ alias, text, in_reply_to, status: replyStatus, from_session }) => {
+      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
       const id = uuidv4();
       const replyLogged = db.transaction(() => {
@@ -498,6 +513,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_session: z.string().max(200).optional().default("hub"),
     },
     async ({ task_id, from_session }) => {
+      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → retry_task → ${task_id.slice(0, 8)}`);
       // Find the original task
       const task = db.get<any>("SELECT * FROM tasks WHERE task_id = ?1", task_id);
@@ -595,6 +611,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_session: z.string().max(200).optional().default("hub"),
     },
     async ({ task_id, reason, from_session }) => {
+      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → cancel_task → ${task_id.slice(0, 8)}`);
       const result = db.run(
         `UPDATE tasks SET status = 'cancelled', result = ?1, completed_at = datetime('now')
@@ -622,6 +639,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_session: z.string().max(200).optional().default("hub"),
     },
     async ({ task_id, new_alias, from_session }) => {
+      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → reassign_task → ${task_id.slice(0, 8)} → ${new_alias}`);
       const task = db.get<any>("SELECT * FROM tasks WHERE task_id = ?1", task_id);
       if (!task) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "task not found" }) }] };

@@ -33,12 +33,12 @@ setInterval(() => {
 }, 300000);
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string, enforceNetworkId?: string | null): McpServer {
+function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null): McpServer {
   const server = new McpServer({
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, clientIP, enforceNetworkId);
+  registerTools(server, clientIP, enforceNetworkId, enforceUserId);
   return server;
 }
 
@@ -167,7 +167,7 @@ Bun.serve({
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      const server = createServer(clientIP, enforceNetId);
+      const server = createServer(clientIP, enforceNetId, authCtx?.userId || null);
       await server.connect(transport);
       const response = await transport.handleRequest(req);
       // Disconnect after response to prevent McpServer leak
@@ -261,7 +261,7 @@ Bun.serve({
       if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
-      const networks = getUserNetworks(resolved.user.user_id);
+      const networks = getUserAllNetworks(resolved.user.user_id);
       return withCors(req, Response.json({ ok: true, user: resolved.user, networks, current_network: resolved.networkId }));
     }
 

@@ -158,7 +158,23 @@ export function getUserNetworks(userId: string) {
     userId);
 }
 
+// Quota limits by plan
+const QUOTAS: Record<string, { max_networks_owned: number; max_networks_joined: number }> = {
+  free:  { max_networks_owned: 2, max_networks_joined: 3 },
+  pro:   { max_networks_owned: 10, max_networks_joined: 20 },
+  admin: { max_networks_owned: Infinity, max_networks_joined: Infinity },
+};
+
 export function createNetwork(userId: string, name: string, description?: string) {
+  // Quota check
+  const user = db.get<any>("SELECT plan, role FROM users WHERE user_id = ?1", userId);
+  const plan = user?.role === "admin" ? "admin" : (user?.plan || "free");
+  const quota = QUOTAS[plan] || QUOTAS.free;
+  const ownedCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM networks WHERE owner_id = ?1", userId);
+  if ((ownedCount?.cnt || 0) >= quota.max_networks_owned) {
+    return { ok: false, error: `quota exceeded: max ${quota.max_networks_owned} networks for ${plan} plan` };
+  }
+
   const existing = db.get<any>(
     "SELECT network_id FROM networks WHERE owner_id = ?1 AND network_name = ?2",
     userId, name);
