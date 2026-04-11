@@ -1,5 +1,32 @@
 # Agent Network Evolution Log
 
+## V3.13 Dual Token + Network Members (2026-04-11) — COMPLETE
+
+### Stats
+- 170+ commits, 55 npm preview packages (preview.27)
+- 198 Docker E2E + 42 local E2E
+- 13 database tables, 18 MCP tools, 24 REST endpoints, 37 CLI commands
+
+### Added since V3.12
+- **Dual token**: utok_ (user, global) + ntok_ (network, per-node)
+- **network_members table**: user ↔ network many-to-many with roles (owner/admin/member/viewer)
+- **network_invites table**: invite codes with max_uses + expiry
+- **6 new API endpoints**: member CRUD, invite, join
+- **POST /api/auth/node-token**: create ntok_ for a specific node
+- **anet network invite/join/members**: CLI commands
+- **anet create**: interactive network picker with role icons
+- **anet login**: network picker after login
+- **First user auto-admin**: first registered user gets admin role
+- **Design docs**: auth-network V2 + CLI/Dashboard UX (7 scenarios, 8 pages)
+
+### Product Direction (Vincent confirmed)
+- Pure local self-deploy (no hosted hub)
+- SQLite only (PG code retained, not promoted)
+- Token transparent to users (CLI manages automatically)
+- Two-level scope: global + project/node level
+
+---
+
 ## V3.8 Docs Alignment + v1.0.0 Polish (2026-04-11) — COMPLETE
 
 ### Stats
