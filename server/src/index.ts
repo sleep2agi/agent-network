@@ -537,11 +537,18 @@ Bun.serve({
     const authErr = requireAuth(req);
     if (authErr) return withCors(req, authErr);
 
+    // Resolve network scope for REST queries — enforce isolation
+    // Token-bound networkId takes precedence (ntok_ → forced), then query param
+    const restAuth = resolveRequestAuth(req);
+    const isAdmin = restAuth?.username && db.get<any>("SELECT role FROM users WHERE username = ?1", restAuth.username)?.role === "admin";
+    // ntok_ token has networkId forced; utok_ has null (uses query param or admin sees all)
+    const restNetId = restAuth?.networkId || url.searchParams.get("network_id") || null;
+
     // ── REST: all sessions status ──
     if (url.pathname === "/api/status") {
       const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
       db.run("UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'", [cutoff]);
-      const netFilter = url.searchParams.get("network_id");
+      const netFilter = restNetId;
       const sql = netFilter
         ? "SELECT * FROM sessions WHERE network_id = ?1 ORDER BY updated_at DESC"
         : "SELECT * FROM sessions ORDER BY updated_at DESC";
@@ -751,7 +758,7 @@ Bun.serve({
       const status = url.searchParams.get("status");
       const toName = url.searchParams.get("to_name");
       const fromName = url.searchParams.get("from_name");
-      const netFilter = url.searchParams.get("network_id");
+      const netFilter = restNetId || url.searchParams.get("network_id");  // token-enforced takes priority
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
 
       let sql = "SELECT * FROM tasks WHERE 1=1";

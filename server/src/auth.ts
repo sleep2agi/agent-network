@@ -204,6 +204,11 @@ export function deleteNetwork(userId: string, networkId: string): { ok: boolean;
 }
 
 export function createToken(userId: string, name: string, networkId?: string): { ok: boolean; token?: string; token_id?: string; error?: string } {
+  // Security: verify user is a member of the target network
+  if (networkId) {
+    const role = getUserNetworkRole(userId, networkId);
+    if (!role) return { ok: false, error: "not a member of this network" };
+  }
   const token = generateToken();
   const tokenId = generateId("tok");
   db.run(
