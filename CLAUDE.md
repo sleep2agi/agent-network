@@ -43,6 +43,16 @@ commhub_get_all_status()
 - 回复指挥室用 commhub_send_task（不是 commhub_reply，reply 不推送）
 - 不要猜 alias，用 get_all_status 查
 
+## 测试规则
+
+- **分层测试，从简单到复杂**：环境→认证→单点通信→完整流程→多用户→安全
+- **前一层不过就不跑后面的**：被依赖的原子能力必须先验证可靠
+- **所有测试在 Docker 里跑**：不碰本地环境，不改生产
+- **不自己跑测试**：通信龙分配任务，测试1-3号执行，通信牛 review
+- **不频繁发 preview**：本地源码开发，大版本完成时统一发 npm
+- **测试结果保存**：docs/tests/report-testN.txt
+- **每个测试套件独立 Dockerfile**：可并行构建和运行
+
 ## 项目信息
 
 - 仓库：https://github.com/sleep2agi/agent-network
