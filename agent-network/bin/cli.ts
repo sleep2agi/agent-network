@@ -2428,7 +2428,8 @@ async function registerCommand() {
 
   const username = opts.username || opts.user || await ask("Username: ");
   const password = opts.password || opts.pass || await ask("Password (min 6): ");
-  const email = opts.email || await ask("Email (optional): ");
+  // Skip email prompt if username/password provided via CLI args (non-interactive mode)
+  const email = opts.email || ((opts.username || opts.user) ? "" : await ask("Email (optional): "));
   closeRL();
 
   if (!username || !password) { console.error("Username and password required."); return; }
