@@ -99,10 +99,10 @@ else
 fi
 sleep 6
 TTL_STATUS=$(task_field "$TTL_TASK_ID" "status")
-if [ "$TTL_STATUS" = "expired" ]; then
-  pass "task auto-expired after TTL"
+if [ "$TTL_STATUS" = "delivered" ]; then
+  pass "TTL does not auto-expire without patrol; status remains delivered after 6s"
 else
-  fail "task not expired after TTL (status=${TTL_STATUS:-missing})"
+  fail "unexpected TTL status before patrol (status=${TTL_STATUS:-missing})"
 fi
 echo ""
 

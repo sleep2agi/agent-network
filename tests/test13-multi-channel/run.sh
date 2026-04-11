@@ -6,6 +6,7 @@ fail() { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
 
 BASE="http://127.0.0.1:9200"
 AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}"
+GLOBAL_AUTH="Authorization: Bearer $AUTH_TOKEN"
 
 json_get() {
   python3 -c 'import json,sys; data=json.load(sys.stdin); path=sys.argv[1].split("."); cur=data
@@ -71,7 +72,7 @@ fetch_task_id() {
   local from_name="$1"
   local to_name="$2"
   local content="$3"
-  curl -s "$BASE/api/tasks?network_id=$NET_ID&from_name=$from_name&to_name=$to_name&limit=20" -H "$OWNER_AUTH" | \
+  curl -s "$BASE/api/tasks?network_id=$NET_ID&from_name=$from_name&to_name=$to_name&limit=20" -H "$GLOBAL_AUTH" | \
     python3 -c 'import json,sys; data=json.load(sys.stdin); target=sys.argv[1]
 for task in data.get("tasks", []):
     if task.get("content") == target:
@@ -90,7 +91,7 @@ cd /app/server && COMMHUB_AUTH_TOKEN="$AUTH_TOKEN" bun run src/index.ts &
 sleep 3
 curl -s "$BASE/health" | grep -q '"ok":true' && pass "server started" || fail "server start"
 
-REG1=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer $AUTH_TOKEN" -H "Content-Type: application/json" -d '{"username":"multiowner","password":"pass123456"}')
+REG1=$(curl -s -X POST "$BASE/api/auth/register" -H "$GLOBAL_AUTH" -H "Content-Type: application/json" -d '{"username":"multiowner","password":"pass123456"}')
 echo "$REG1" | grep -q '"ok":true' && pass "owner registered" || fail "owner register"
 OWNER_UTOK=$(echo "$REG1" | json_get "token")
 OWNER_AUTH="Authorization: Bearer $OWNER_UTOK"
@@ -156,7 +157,7 @@ echo "$CA_REPLY" | grep -q 'ok\\":true' && pass "agent-c replied to agent-a" || 
 echo ""
 
 echo "8. Verify /api/messages communication history"
-MSG_RES=$(curl -s "$BASE/api/messages?limit=100")
+MSG_RES=$(curl -s "$BASE/api/messages?network_id=$NET_ID&limit=100" -H "$GLOBAL_AUTH")
 MSG_OK=$(echo "$MSG_RES" | python3 -c 'import json,sys; data=json.load(sys.stdin); contents=[m.get("content","") for m in data.get("messages",[])]; need=sys.argv[1:]; print("ok" if all(item in contents for item in need) else "missing")' \
   "task from agent-a to agent-b" \
   "reply from agent-b to agent-a" \
@@ -167,7 +168,7 @@ MSG_OK=$(echo "$MSG_RES" | python3 -c 'import json,sys; data=json.load(sys.stdin
 echo ""
 
 echo "9. Verify /api/task_events status changes"
-EVENT_RES=$(curl -s "$BASE/api/task_events?limit=50")
+EVENT_RES=$(curl -s "$BASE/api/task_events?network_id=$NET_ID&limit=50" -H "$GLOBAL_AUTH")
 EVENT_OK=$(echo "$EVENT_RES" | python3 -c 'import json,sys; data=json.load(sys.stdin); events=data.get("events",[]); ids={e.get("task_id","") for e in events}; states={e.get("to_status","") for e in events}; need_ids=set(sys.argv[1:3]); print("ok" if need_ids.issubset(ids) and {"delivered","replied"}.issubset(states) else "missing")' "$AB_TASK_ID" "$AC_TASK_ID" 2>/dev/null || true)
 [ "$EVENT_OK" = "ok" ] && pass "/api/task_events has state changes" || fail "/api/task_events incomplete"
 echo ""

@@ -1,0 +1,50 @@
+
+=========================================
+  anet Lifecycle Boundary Test
+=========================================
+
+1. Starting CommHub server...
+[commhub] database: /tmp/commhub-test11.db
+[commhub] 🎉 14-day free trial started!
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.4.1                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Auth: ENABLED (Bearer token)     ║
+║                                                   ║
+║   MCP:    http://0.0.0.0:9200/mcp                 ║
+║   REST:   http://0.0.0.0:9200/api                 ║
+║   Health: http://0.0.0.0:9200/health               ║
+╚══════════════════════════════════════════════════╝
+
+  PASS  CommHub server started
+
+2. Register lifecycle agents...
+[04:57:32] ttl-agent (ttl-agen) → report_status: idle
+[04:57:32] ack-agent (ack-agen) → report_status: idle
+[04:57:32] run-agent (run-agen) → report_status: idle
+  PASS  agents registered
+
+3. TTL boundary: ttl_seconds=5, wait 6s...
+[04:57:32] test11 → send_task → ttl-agent: ttl boundary case
+  PASS  TTL task created
+  PASS  TTL does not auto-expire without patrol; status remains delivered after 6s
+
+4. Patrol expiration logic via DB-inserted stale task...
+  PASS  patrol expiration query marks stale task expired
+
+5. send_ack transitions task -> acked...
+[04:57:39] test11 → send_task → ack-agent: ack boundary case
+[04:57:39] ack-agent → send_ack → task 6b2170f1
+  PASS  send_ack accepted
+  PASS  task status becomes acked
+
+6. report_status(working) transitions task -> running...
+[04:57:39] test11 → send_task → run-agent: run boundary case
+[04:57:39] run-agent (run-agen) → report_status: working | run boundary case
+  PASS  report_status working accepted
+  PASS  task status becomes running
+
+=========================================
+Result: 9 passed, 0 failed
+=========================================
