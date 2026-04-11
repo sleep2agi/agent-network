@@ -18,7 +18,7 @@ PORT=9200 COMMHUB_AUTH_TOKEN=your-secret bunx @sleep2agi/commhub-server
 - REST: `http://0.0.0.0:9200/api/*` (Dashboard / 监控)
 - Health: `http://0.0.0.0:9200/health`
 
-## MCP 工具 (17 个)
+## MCP 工具 (18 个)
 
 ### Agent 端 (从 Agent 调用)
 | 工具 | 说明 |
@@ -43,22 +43,50 @@ PORT=9200 COMMHUB_AUTH_TOKEN=your-secret bunx @sleep2agi/commhub-server
 | `get_session_status` | 单 session 详情 |
 | `broadcast` | 群发消息 |
 
-## REST API
+## REST API (27 端点)
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/health` | GET | 健康检查 (无需 auth) |
+| `/mcp` | POST | MCP Streamable HTTP |
+| **认证** | | |
+| `/api/auth/register` | POST | 注册 → utok_ + ntok_ |
+| `/api/auth/login` | POST | 登录 → utok_ |
+| `/api/auth/me` | GET | 当前用户信息 |
+| `/api/auth/me` | PUT | 修改资料 |
+| `/api/auth/password` | POST | 修改密码 |
+| `/api/auth/tokens` | GET | Token 列表 |
+| `/api/auth/tokens` | POST | 创建 Token |
+| `/api/auth/tokens/:id` | DELETE | 撤销 Token |
+| `/api/auth/node-token` | POST | 创建节点网络 Token (ntok_) |
+| **网络** | | |
+| `/api/networks` | GET | 我的网络列表（成员网络） |
+| `/api/networks` | POST | 创建网络 |
+| `/api/networks/:id` | GET | 网络详情 + 统计 |
+| `/api/networks/:id` | PUT | 重命名网络 |
+| `/api/networks/:id` | DELETE | 删除网络 |
+| `/api/networks/:id/members` | GET | 成员列表 |
+| `/api/networks/:id/members` | POST | 添加成员 |
+| `/api/networks/:id/members/:uid` | PUT | 修改成员角色 |
+| `/api/networks/:id/members/:uid` | DELETE | 移除成员 |
+| `/api/networks/:id/invite` | POST | 生成邀请码 |
+| `/api/networks/join` | POST | 用邀请码加入 |
+| **数据** | | |
 | `/api/status` | GET | 所有 session |
-| `/api/tasks` | GET | 任务列表 (支持 status/from_name/to_name/task_id/limit 过滤) |
-| `/api/nodes` | GET | 节点持久化信息 |
-| `/api/task_events` | GET | 任务审计日志 |
+| `/api/tasks` | GET | 任务列表 |
+| `/api/nodes` | GET | 节点信息 |
+| `/api/stats` | GET | 统计汇总 |
 | `/api/messages` | GET | 消息列表 |
 | `/api/completions` | GET | 完成记录 |
-| `/mcp` | POST | MCP Streamable HTTP |
+| `/api/task_events` | GET | 任务审计日志 |
+| `/api/audit-log` | GET | 操作审计日志 |
+| `/api/users` | GET | 用户列表 (admin) |
+| `/api/license` | GET | License 状态 |
+| `/api/license/activate` | POST | 激活授权码 |
 
-## 数据表 (11 表)
+## 数据表 (13 表)
 
-自动创建，支持 SQLite 和 PostgreSQL
+自动创建，SQLite
 
 | 表 | 说明 |
 |---|------|
@@ -68,6 +96,13 @@ PORT=9200 COMMHUB_AUTH_TOKEN=your-secret bunx @sleep2agi/commhub-server
 | `nodes` | 持久化节点身份 (11 列, 独立于 session) |
 | `completions` | 完成记录 (7 列) |
 | `task_events` | 审计日志 (7 列, 每次状态变化记录) |
+| `users` | 用户 (username/password_hash/role/plan) |
+| `networks` | 网络 (name/owner/visibility/max_members) |
+| `api_tokens` | API Token (utok_/ntok_/atok_ + scope + network) |
+| `audit_log` | 操作审计 (user/action/target/ip) |
+| `licenses` | License (type/expires/limits) |
+| `network_members` | 网络成员 (user ↔ network + role) |
+| `network_invites` | 邀请码 (code/role/max_uses/expires) |
 
 任务状态机:
 ```

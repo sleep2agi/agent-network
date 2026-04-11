@@ -1,0 +1,355 @@
+
+=========================================
+  anet Docker E2E Test Suite
+=========================================
+
+1. Starting CommHub server...
+[commhub] database: /root/.commhub/commhub.db
+[commhub] 🎉 14-day free trial started!
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.4.1                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Auth: ENABLED (Bearer token)     ║
+║                                                   ║
+║   MCP:    http://0.0.0.0:9200/mcp                 ║
+║   REST:   http://0.0.0.0:9200/api                 ║
+║   Health: http://0.0.0.0:9200/health               ║
+╚══════════════════════════════════════════════════╝
+
+  ✅ CommHub server started
+
+2. Testing anet -v...
+  ✅ anet version
+
+2.1 Testing anet upgrade safety...
+  ✅ upgrade skips in-process self-update
+  ✅ anet still available after upgrade
+
+3. Testing anet create...
+
+[anet] Created node "test-node" (codex-sdk) in network "global"
+[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.
+[anet] To disable: edit .anet/nodes/test-node/config.json → flags
+
+Start: anet start test-node
+  ✅ config.json created
+  ✅ runtime correct
+  ✅ model correct
+  ✅ node_id generated
+  ✅ node_name saved
+  ✅ session omitted when empty
+  ✅ legacy name field removed
+
+4. Testing invalid name...
+  ✅ invalid name rejected
+
+5. Testing duplicate create...
+  ✅ duplicate rejected
+
+5.1 Testing rename and dual lookup...
+  ✅ rename by node_id
+  ✅ renamed config path
+  ✅ node_name updated
+  ✅ lookup by node_id works
+
+6. Testing channel add telegram...
+
+✅ telegram channel added to "renamed-node"
+   /tmp/test/.anet/nodes/renamed-node/channels/telegram/
+   config.json updated
+  ✅ telegram .env
+  ✅ chmod 600
+  ✅ config updated
+
+7. Testing agent-node --version...
+  ✅ agent-node version
+
+8. Testing agent-node CommHub registration...
+[03:20:45] [INFO ] [e2e-agent] 启动
+[03:20:45] [INFO ] [e2e-agent]   runtime: codex-sdk
+[03:20:45] [INFO ] [e2e-agent]   model:   gpt-5.4 (default)
+[03:20:45] [INFO ] [e2e-agent]   hub:     http://127.0.0.1:9200 (auth)
+[03:20:45] [INFO ] [e2e-agent]   tools:   (none)
+[03:20:45] [INFO ] [e2e-agent]   channels: (none)
+[03:20:45] [INFO ] [e2e-agent]   session: (new)
+[03:20:45] [INFO ] [e2e-agent]   log-dir: /tmp/test/.anet/nodes/e2e-agent/logs
+[03:20:45] e2e-agent (sdk-e2e-) → report_status: idle
+[03:20:45] [INFO ] [e2e-agent] 已注册到 CommHub
+[03:20:45] SSE ← e2e-agent connected (1 clients)
+[03:20:45] [INFO ] [e2e-agent] SSE connected
+  ✅ agent registered
+
+9. Testing send_task...
+[03:20:50] tester → send_task → e2e-agent: test task
+[03:20:50] [INFO ] [e2e-agent] ← SSE new_task
+  ✅ task sent
+
+10. Testing send_message not processed...
+[03:20:50] e2e-agent → get_inbox: 1 pending messages
+[03:20:50] [INFO ] [e2e-agent] ← [tester] (task/normal) test task
+[03:20:50] e2e-agent → ack_inbox: 822e2c53
+[03:20:50] [INFO ] [e2e-agent] → processing [codex]: test task
+[03:20:50] tester → send_message → e2e-agent: should not process
+[03:20:50] e2e-agent (sdk-e2e-) → report_status: working | test task
+[03:20:50] [ERROR] [e2e-agent] ✗ @openai/codex-sdk not installed. Run: npm install -g @openai/codex-sdk @openai/codex
+[03:20:50] e2e-agent (sdk-e2e-) → report_status: idle
+[03:20:50] [INFO ] [e2e-agent] processTask returned: "codex 错误: @openai/codex-sdk not installed. Run: npm install -g @openai/codex-sdk" (94 chars)
+[03:20:50] [INFO ] [e2e-agent] sending reply to tester (task 822e2c53)...
+[03:20:50] e2e-agent → send_reply (replied) → tester: [e2e-agent] codex 错误: @openai/codex-sdk not installed. Run: 
+[03:20:50] [INFO ] [e2e-agent] → [tester] codex 错误: @openai/codex-sdk not installed. Run: npm install -g @openai/codex-sdk @openai/codex
+[03:20:53] [INFO ] [e2e-agent] shutting down...
+[03:20:53] e2e-agent (sdk-e2e-) → report_status: offline
+[03:20:53] SSE ✕ e2e-agent disconnected (0 remaining)
+  ✅ send_message sent (manual verify: agent should not process)
+
+10.05 Testing anet ls...
+  ✅ ls shows node
+  ✅ ls has status column
+
+10.1 Testing anet stop...
+  ✅ stop non-running node (server notified)
+
+10.2 Testing anet delete...
+  ✅ del-test created
+  ✅ delete requires --force
+  ✅ delete --force works
+  ✅ del-test directory removed
+
+11. Testing V2 tasks table...
+[03:20:55] v2-tester → send_task → e2e-agent: v2 lifecycle test [HIGH]
+  ✅ task_id captured: b70cd317
+
+12. Testing V2 send_ack...
+[03:20:55] e2e-agent → send_ack → task b70cd317
+  ✅ send_ack accepted
+
+13. Testing V2 send_reply...
+[03:20:55] e2e-agent → send_reply (replied) → v2-tester: task done
+  ✅ send_reply accepted
+
+14. Verifying task lifecycle in DB...
+  ✅ tasks REST API works
+  ✅ task status = replied
+  ✅ tasks filter by status works
+
+15. Testing broadcast...
+[03:20:56] hub → broadcast: broadcast test
+  ✅ broadcast sent
+
+16. Testing failed task...
+[03:20:56] fail-tester → send_task → e2e-agent: will fail
+[03:20:56] e2e-agent → send_reply (failed) → fail-tester: error occurred
+  ✅ send_reply(failed) accepted
+  ✅ task status = failed
+
+17. Testing priority ordering...
+[03:20:57] tester → send_task → prio-agent: low prio
+[03:20:57] tester → send_task → prio-agent: high prio [HIGH]
+[03:20:58] prio-agent → get_inbox: 2 pending messages
+  ✅ high priority first in inbox
+
+18. Testing special characters...
+[03:20:58] tester → send_task → e2e-agent: test <script>alert(1)</script> & "quotes" 中文测试
+  ✅ special chars in task content
+
+19. Testing tasks query filters...
+  ✅ tasks filter by from_name
+  ✅ tasks filter by to_name + limit
+
+20. Testing reply to non-existent task...
+[03:20:58] tester → send_reply (replied) → e2e-agent: ghost reply
+[03:20:58] ⚠ send_reply: task non-exis not found or already terminal
+  ✅ reply to non-existent task (graceful)
+
+21. Testing combined REST filters...
+  ✅ combined status + to_name filter
+
+22. Testing health endpoint...
+  ✅ health ok
+  ✅ health has sse_sessions
+
+22.05 Testing stats API...
+  ✅ /api/stats works
+  ✅ stats has totals
+
+22.1 Testing nodes API...
+  ✅ nodes API works
+
+23. Testing messages API...
+  ✅ messages API works
+  ✅ messages returns array
+
+23.5 Testing concurrent operations...
+[03:20:58] conc-4 (concurre) → report_status: idle
+[03:20:58] conc-3 (concurre) → report_status: idle
+[03:20:58] conc-2 (concurre) → report_status: idle
+[03:20:58] conc-5 (concurre) → report_status: idle
+[03:20:58] conc-1 (concurre) → report_status: idle
+  ✅ 5 concurrent registrations
+[03:20:59] tester → send_task → conc-1: concurrent task 3
+[03:20:59] tester → send_task → conc-1: concurrent task 1
+[03:20:59] tester → send_task → conc-1: concurrent task 2
+[03:21:00] conc-1 → get_inbox: 3 pending messages
+  ✅ 3 concurrent tasks received (3)
+
+23.6 Testing large content...
+[03:21:00] tester → send_task → conc-1: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+  ✅ 5KB task content accepted
+  ✅ 5KB content round-trip intact
+[03:21:00] tester → send_task → conc-1: x
+  ✅ minimal 1-char task accepted
+
+23.61 Testing task events...
+  ✅ task_events API works
+  ✅ task_events has delivered event
+
+23.62 Testing get_task...
+  ✅ get_task found
+  ✅ get_task shows status
+  ✅ get_task 404 for missing
+
+23.65 Testing task retry...
+[03:21:00] tester → send_task → conc-1: retry me
+[03:21:00] conc-1 → send_reply (failed) → tester: error
+  ✅ task marked failed
+[03:21:01] tester → retry_task → ba6b7553
+  ✅ retry_task accepted
+  ✅ task retried to delivered
+
+23.63 Testing list_tasks...
+  ✅ list_tasks works
+  ✅ list_tasks has stats
+  ✅ /api/tasks has stats
+
+23.655 Testing cancel_task...
+[03:21:03] tester → send_task → conc-1: cancel this
+[03:21:03] tester → cancel_task → fa87d61a
+  ✅ cancel_task accepted
+  ✅ task status = cancelled
+[03:21:03] tester → cancel_task → fa87d61a
+  ✅ re-cancel check
+
+23.66 Testing task reassign...
+[03:21:03] agent-a (reassign) → report_status: idle
+[03:21:03] agent-b (reassign) → report_status: idle
+[03:21:03] tester → send_task → agent-a: reassign me
+[03:21:03] tester → reassign_task → 26b7e3a3 → agent-b
+  ✅ task reassigned to agent-b
+  ✅ task target updated in DB
+
+23.7 Testing task expiration...
+[03:21:03] tester → send_task → conc-1: will expire
+  ✅ expiring task created
+  ✅ task initially delivered
+[03:21:06] patrol (patrol-t) → report_status: idle
+[03:21:06] hub → get_all_status
+  ✅ expires_at set (patrol pending)
+
+24. Testing auth token...
+[commhub] database: /root/.commhub/commhub.db
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.4.1                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Auth: ENABLED (Bearer token)     ║
+║                                                   ║
+║   MCP:    http://0.0.0.0:9201/mcp                 ║
+║   REST:   http://0.0.0.0:9201/api                 ║
+║   Health: http://0.0.0.0:9201/health               ║
+╚══════════════════════════════════════════════════╝
+
+  ✅ no token → 401
+  ✅ wrong token → 401
+  ✅ correct token → 200
+  ✅ token via query param → 200
+  ✅ health endpoint no auth needed
+  ✅ MCP with auth token works
+  ✅ MCP without token → 401
+  ✅ SSE without token → 401
+[03:21:08] SSE ← test-agent connected (1 clients)
+  ✅ SSE with token → 200
+[03:21:10] SSE ✕ test-agent disconnected (0 remaining)
+  ✅ WebSocket tmux without token → 401
+
+24k. Testing anet stop offline effect...
+[commhub] shutting down...
+[03:21:10] stop-verify (sim-stop) → report_status: idle
+  ✅ stop-verify starts as idle
+[03:21:11] stop-verify (sim-stop) → report_status: offline
+  ✅ stop-verify now offline
+
+25. Simulating full agent lifecycle...
+[03:21:11] mock-agent (sim-mock) → report_status: idle
+  ✅ mock agent registered
+[03:21:11] orchestrator → send_task → mock-agent: compute 2+2
+  ✅ task dispatched to mock agent
+  ✅ task status = delivered
+[03:21:11] mock-agent → get_inbox: 1 pending messages
+  ✅ mock agent received task
+[03:21:11] mock-agent → ack_inbox: bc0bb3b3
+  ✅ mock agent acked
+  ✅ task status = acked
+[03:21:11] mock-agent (sim-mock) → report_status: working | compute 2+2
+  ✅ mock agent working
+  ✅ task status = running
+[03:21:12] mock-agent → send_reply (replied) → orchestrator: 4
+  ✅ mock agent replied
+  ✅ task status = replied (final)
+  ✅ task result = 4
+  ✅ all lifecycle timestamps set
+[03:21:12] mock-agent (sim-mock) → report_status: idle
+  ✅ mock agent back to idle
+  ✅ event: delivered logged
+  ✅ event: acked logged
+  ✅ event: replied logged
+  ✅ task_events has 4 events (>=3)
+
+26. Testing V3 auth...
+  ✅ register user
+  ✅ got API token
+  ✅ login
+  ✅ wrong password rejected
+  ✅ auth/me returns user
+  ✅ auth/me has networks
+  ✅ create network
+  ✅ list networks
+  ✅ duplicate rejected
+
+27. Testing multi-network isolation...
+  ✅ user registered for network test
+  ✅ two networks created
+[03:21:12] tester → send_task → alpha-agent: alpha task
+[03:21:13] tester → send_task → beta-agent: beta task
+  ✅ tasks sent to different networks
+  ✅ net-alpha has alpha task
+  ✅ beta task NOT in alpha (isolated)
+  ✅ net-beta has beta task
+  ✅ alpha task NOT in beta (isolated)
+  ✅ stats scoped to network
+
+28. Testing anet quickstart...
+  ✅ quickstart login
+  ✅ quickstart saved user
+  ✅ quickstart created agent
+
+28.5 Testing communication reliability...
+  ✅ SSE sessions tracked
+  ✅ agents have heartbeat timestamps
+  ✅ SSE push verified (via send_task + agent registration)
+  ✅ offline detection active (10min patrol in get_all_status)
+
+29. Testing license system...
+  ✅ license API works
+  ✅ auto trial created
+  ✅ days_left present
+  ✅ limits present
+  ✅ activate license
+  ✅ upgraded to pro
+  ✅ invalid key rejected
+
+
+=========================================
+  Results: 137 passed, 0 failed
+=========================================
+

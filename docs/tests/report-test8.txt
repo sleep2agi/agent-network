@@ -1,0 +1,29 @@
+
+═══ Test 8: Runtime + SSE Smoke ═══
+
+1. Server health
+  ✅ server started
+  ✅ streamable HTTP enabled
+
+2. agent-node binary
+  ✅ agent-node installed
+
+3. codex-sdk runtime startup
+  ✅ codex binary absent, codex-sdk startup skipped by design
+
+4. http-api runtime startup
+  ✅ http-api runtime registered with mock key
+
+5. SSE connect
+  ✅ SSE connected
+
+6. send_task push
+  ✅ send_task triggered SSE new_task
+
+7. report_status visibility
+  ✅ report_status visible in /api/status
+
+═══════════════════════════════════
+  Test 8 Result: 8 passed, 0 failed
+═══════════════════════════════════
+

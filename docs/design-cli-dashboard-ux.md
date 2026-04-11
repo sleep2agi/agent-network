@@ -1,5 +1,21 @@
 # CLI + Dashboard 用户流程设计
 
+> **实现状态（2026-04-11 对齐）**
+>
+> ✅ 已实现：
+> - 双 token 体系 (utok_ + ntok_)，token 对用户透明
+> - anet login 后交互选网络
+> - anet create 交互选网络（多网络时）
+> - anet network invite/join/members CLI
+> - anet create 自动生成 ntok_ 写入节点 config
+>
+> ❌ 未实现（目标态）：
+> - Token scope 选择（agent/readonly）— createToken 统一 full
+> - 项目级 .anet/config.json 网络配置（network use --project）
+> - Dashboard Token 管理页、改密码、网络管理页
+> - 公开网络浏览 + 申请加入
+> - viewer 灰色不可选（create 时未检查角色）
+
 ## 核心原则（Vincent 确认）
 
 1. **一个用户多个 token，一个 token 绑一个网络**

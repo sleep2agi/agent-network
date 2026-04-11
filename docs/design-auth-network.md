@@ -1,5 +1,26 @@
 # 用户 × 网络 × Agent Node 认证权限设计 V2
 
+> **实现状态（2026-04-11 对齐）**
+> 
+> ✅ 已实现：
+> - 双 token：utok_（用户）+ ntok_（节点网络）+ atok_（兼容）
+> - 注册返回 utok_ + ntok_，登录返回 utok_
+> - network_members + network_invites 表
+> - 邀请码创建/加入/成员 CRUD API
+> - 首个用户自动 admin
+> - users.plan 字段 + networks.visibility/max_members 字段
+> 
+> ❌ 未实现（目标态）：
+> - MCP 写操作检查网络角色（viewer 当前能 send_task）
+> - 配额执行（字段有但不拦截）
+> - utok_/ntok_ 权限边界（utok_ 当前能调 MCP）
+> - Token scope (agent/readonly) — createToken 统一写 full
+> - 公开网络自动加入 + 审批流
+> - bcrypt 密码哈希（当前 SHA-256）
+> 
+> 注意：本文档中描述的权限矩阵、配额限制、公开网络等功能为**设计目标**，
+> 具体实现进度以上方状态为准。
+
 ## 0. 总览
 
 ```
