@@ -50,7 +50,7 @@ export class SQLiteAdapter implements DbAdapter {
   constructor(private readonly rawDb: Database) {}
 
   run(sql: string, params?: any[]): QueryResult {
-    return this.rawDb.run(sql, params as any);
+    return params ? this.rawDb.run(sql, params as any) : this.rawDb.run(sql);
   }
 
   get<T = any>(sql: string, ...params: any[]): T | null {
