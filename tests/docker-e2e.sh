@@ -209,14 +209,14 @@ echo ""
 mcp_call() {
   local TOOL="$1"
   local ARGS="$2"
-  curl -s --max-time 5 -X POST http://127.0.0.1:9200/mcp \
+  timeout 5 curl -s -X POST http://127.0.0.1:9200/mcp \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
-    -d "$MCP_INIT" 2>/dev/null | head -2 > /dev/null
-  curl -s --max-time 5 -X POST http://127.0.0.1:9200/mcp \
+    -d "$MCP_INIT" > /dev/null 2>&1 || true
+  timeout 5 curl -s -X POST http://127.0.0.1:9200/mcp \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$TOOL\",\"arguments\":$ARGS}}" 2>/dev/null | head -2
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$TOOL\",\"arguments\":$ARGS}}" 2>/dev/null || true
 }
 
 # 15. broadcast
