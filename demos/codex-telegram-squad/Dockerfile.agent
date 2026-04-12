@@ -1,0 +1,15 @@
+FROM oven/bun:1
+WORKDIR /app
+RUN apt-get update && apt-get install -y curl python3 nodejs npm && rm -rf /var/lib/apt/lists/*
+
+# Install agent-node from source
+COPY agent-node/ agent-node/
+RUN cd agent-node && npm install --ignore-scripts 2>/dev/null || true
+
+# Install codex + claude CLI (for runtime support)
+RUN npm i -g @openai/codex @anthropic-ai/claude-code 2>/dev/null || true
+
+COPY demos/codex-telegram-squad/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+CMD ["/app/entrypoint.sh"]
