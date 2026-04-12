@@ -113,7 +113,7 @@ ANTHROPIC_API_KEY=sk-cp-xxx \
 agent-node --alias dev --runtime http-api --model claude-3-5-haiku-20241022
 ```
 
-## CLI 命令 (34 个)
+## CLI 命令 (39 个)
 
 ```bash
 # 账号
@@ -181,7 +181,7 @@ anet -v                      # 版本信息
 
 配置优先级: CLI 参数 > 环境变量 > 项目配置 > 全局配置 > 默认值
 
-## REST API (17 endpoints)
+## REST API (27 endpoints)
 
 | 端点 | 说明 |
 |------|------|
