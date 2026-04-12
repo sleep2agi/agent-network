@@ -2330,6 +2330,21 @@ async function quickstartCommand() {
     console.log(`Step 1/4: Hub ✅ ${gc.hub}\n`);
   }
 
+  // Step 1.5: Check server is reachable
+  try {
+    const health = await fetch(`${gc.hub}/health`, { signal: AbortSignal.timeout(5000) }).then(r => r.json() as any).catch(() => null);
+    if (!health?.ok) {
+      console.log(`  ⚠ Server not reachable at ${gc.hub}`);
+      console.log(`  Make sure CommHub is running: bunx @sleep2agi/commhub-server`);
+      console.log(`  Or check the URL and try again.\n`);
+      return;
+    }
+    console.log(`  ✅ Server online (v${health.version || "?"})\n`);
+  } catch {
+    console.log(`  ⚠ Cannot connect to ${gc.hub}. Start server first.\n`);
+    return;
+  }
+
   // Step 2: Register/Login
   if (!gc.token || !gc.user) {
     console.log("Step 2/4: 创建账号");
