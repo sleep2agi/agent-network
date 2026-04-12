@@ -1,5 +1,28 @@
 # Agent Network Evolution Log
 
+## V3.14 Stabilization + UX (2026-04-12) — COMPLETE
+
+### Stats
+- 25 test suites, 550+ Docker tests, all green
+- 6 security bugs fixed, 3 UX P0 fixed
+- preview.28 published (3 packages)
+- 5 code reviews + 5 cross-reviews
+
+### Added since V3.13
+- **Security**: MCP canWrite() role check, utok_ blocked from MCP, ntok_ network isolation, createToken membership check, network quota execution, SQLiteAdapter.run() undefined params fix
+- **UX P0**: packageJsonPath fallback, token --help, normalizeRuntime http-api, register email skip, quickstart server check
+- **Channel plugin V3**: ntok_ support, network_id, removed MCP init
+- **Tests**: test8-22 (runtime, permissions, token, lifecycle, claude-channel, multi-channel, agent-node, telegram, channel-plugin, user-journey, error-paths, real-collab, cli-ux, quickstart-ux, agent-ux) + npm 3 suites
+- **Reviews**: server code, CLI code, telegram channel, cross-review test9/test10, bcrypt proposal, GitHub docs
+- **Docs**: README 27 REST endpoints, 19→25 test suites, implementation status headers
+
+### Product Direction
+- Pure local self-deploy, SQLite only, no hosted hub
+- Token transparent to users, two-level scope (global + node)
+- Testing: layer-based, Docker isolated, delegate to test agents
+
+---
+
 ## V3.13 Dual Token + Network Members (2026-04-11) — COMPLETE
 
 ### Stats
