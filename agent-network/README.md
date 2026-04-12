@@ -210,16 +210,16 @@ anet -v                      # 版本信息
 - [Getting Started Guide](docs/getting-started.md) — 新手教程
 - [CHANGELOG](CHANGELOG.md) — 版本变更
 - [V3 设计](docs/v3-multi-network-design.md) — 架构设计
-- [测试矩阵](docs/test-coverage-matrix.md) — 200 测试
+- [测试矩阵](tests/README.md) — 25 套 550+ Docker 测试
 - [Examples](examples/README.md) — Demo 场景
 
 ## npm 包
 
 | 包 | 最新 Preview | 说明 |
 |---|-------------|------|
-| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.0-preview.23 | anet CLI + SDK |
-| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.1.0-preview.5 | Agent 运行时 |
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.0-preview.25 | CommHub Server (SQLite + PG) |
+| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.0-preview.28 | anet CLI + SDK |
+| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.1.0-preview.8 | Agent 运行时 |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.0-preview.28 | CommHub Server |
 
 ```bash
 # 安装 preview 版
