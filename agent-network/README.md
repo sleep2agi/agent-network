@@ -181,6 +181,31 @@ anet -v                      # 版本信息
 
 配置优先级: CLI 参数 > 环境变量 > 项目配置 > 全局配置 > 默认值
 
+## Telegram Channel 接入
+
+让 Agent 自动接收 Telegram 消息并回复：
+
+```bash
+# 1. 先创建 agent 节点
+anet create my-bot --runtime http-api
+
+# 2. 添加 Telegram channel
+anet channel add telegram my-bot --bot-token 123456:ABC-xxx --allow 7612221352
+# --bot-token: 从 @BotFather 获取
+# --allow: 允许的 Telegram 用户 ID（白名单）
+
+# 3. 启动
+anet start my-bot
+# agent 会自动连 Telegram bot，收到消息后 AI 处理并回复
+```
+
+配置文件自动创建在：
+```
+.anet/nodes/my-bot/channels/telegram/
+├── .env          # BOT_TOKEN（chmod 600，安全存储）
+└── access.json   # {"allow": ["7612221352"]}
+```
+
 ## REST API (27 endpoints)
 
 | 端点 | 说明 |
