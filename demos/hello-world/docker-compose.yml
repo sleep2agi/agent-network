@@ -70,7 +70,7 @@ services:
         -H "Authorization: Bearer $$NTOK" \
         -H "Content-Type: application/json" \
         -H "Accept: application/json, text/event-stream" \
-        -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"send_task\",\"arguments\":{\"alias\":\"小明\",\"task\":\"请给小红发一条消息，问她今天过得怎么样。收到她的回复后，把结果告诉我。\",\"from_session\":\"seed\"}}}"
+        -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"send_task\",\"arguments\":{\"alias\":\"小明\",\"task\":\"你好小明！请用中文写一首关于 AI Agent 协作的四行诗，要押韵。写完后告诉我。\",\"from_session\":\"seed\"}}}"
 
       echo ""
       echo "=== Task sent! Watch agent logs for the conversation ==="
