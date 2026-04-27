@@ -574,7 +574,7 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
 function friendlyError(e: any): string {
   const msg = e?.message || String(e);
   if (msg.includes("fetch failed") || msg.includes("ECONNREFUSED")) {
-    return "Cannot connect to CommHub server. Is it running?\n  Start: anet server local\n  Or check: anet doctor";
+    return "Cannot connect to CommHub server. Is it running?\n  Start: anet hub start\n  Or check: anet doctor";
   }
   if (msg.includes("401") || msg.includes("unauthorized")) {
     return "Authentication failed. Try: anet login";
@@ -595,17 +595,20 @@ anet — AI Agent Network CLI (V2)
 Node Management:
   anet create <name>            Create a node (interactive)
   anet start <name>             Start node (resume session)
-  anet stop <name>              Stop a running node
-  anet delete <name> --force    Delete node and config
-  anet rename <ref> <new-name>  Rename a node (by node_id or name)
-  anet ls                       List nodes with network status
+  anet node create <name>        Create a new agent node
+  anet node start <name>         Start a node
+  anet node stop <name>          Stop a running node
+  anet node resume <name>        Resume interrupted session
+  anet node delete <name>        Delete node and config
+  anet node rename <ref> <new>   Rename a node
+  anet node ls                   List all nodes
   anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
   anet tasks [status]           Query tasks (replied/failed/delivered)
 
 Session:
-  anet start <name> --new-session   Start with fresh session
-  anet resume <name> --session <id> Resume specific session
+  anet node start <name> --new-session   Start with fresh session
+  anet node resume <name> --session <id> Resume specific session
   anet session ls               List Claude Code sessions
 
 Channel:
@@ -616,8 +619,9 @@ Setup:
   anet init                     Configure hub URL (global)
   anet init project             Setup project (channel plugin)
   anet setup                    Install runtime dependencies
-  anet server local              One-command local server + setup
-  anet server start             Start CommHub Server
+  anet hub start                 Start CommHub Server (one-command setup)
+  anet hub stop                  Stop CommHub Server
+  anet hub status                Check CommHub Server status
   anet upgrade                  Check for updates
 
 Other:
@@ -836,7 +840,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   }
 
   const runtime = normalizeRuntime(opts.runtime || "claude-code-cli");
-  const defaultModel = runtime === "codex-sdk" ? "gpt-5.4" : undefined;
+  const defaultModel = runtime === "codex-sdk" ? "gpt-5.5" : undefined;
 
   const profile: Profile = {
     anet_version: "0.1.0",
@@ -1079,6 +1083,58 @@ async function createCommand(idOverride?: string) {
 
   const opts = parseOpts();
   const gc = loadGlobal();
+
+  // ── Interactive model selector (when no --runtime specified) ──
+  const MODEL_PRESETS: Record<string, { runtime: string; label: string; baseUrl?: string; envKey?: string; requiresAuth?: string }> = {
+    minimax:   { runtime: "claude-agent-sdk", label: "MiniMax（推荐，国内直连，低成本）", baseUrl: "https://api.minimaxi.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
+    deepseek:  { runtime: "claude-agent-sdk", label: "DeepSeek（代码+推理，性价比极高）", baseUrl: "https://api.deepseek.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
+    glm:       { runtime: "claude-agent-sdk", label: "GLM 智谱（中文理解强）", baseUrl: "https://open.bigmodel.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
+    intern:    { runtime: "claude-agent-sdk", label: "书生 Intern（科学推理）", baseUrl: "https://chat.intern-ai.org.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
+    kimi:      { runtime: "claude-agent-sdk", label: "Kimi（长文本 128K）", baseUrl: "https://api.moonshot.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
+    openrouter:{ runtime: "claude-agent-sdk", label: "OpenRouter（一个 Key 用所有模型）", baseUrl: "https://openrouter.ai/api/v1", envKey: "ANTHROPIC_AUTH_TOKEN" },
+    claude:    { runtime: "claude-agent-sdk", label: "Claude Sonnet/Opus（海外，需 API Key）", envKey: "ANTHROPIC_API_KEY" },
+    "claude-code": { runtime: "claude-code-cli", label: "Claude Code CLI（需 Max 订阅）", requiresAuth: "claude" },
+    codex:     { runtime: "codex-sdk", label: "GPT-5.5 Codex（海外，需 codex auth login）", requiresAuth: "codex" },
+  };
+
+  if (!opts.runtime && process.stdin.isTTY) {
+    try {
+      const { select: sel } = await import("@inquirer/prompts");
+      const chosen = await sel({
+        message: "选择 AI 模型:",
+        choices: Object.entries(MODEL_PRESETS).map(([key, p]) => ({
+          value: key,
+          name: p.label,
+        })),
+      });
+      const preset = MODEL_PRESETS[chosen];
+      opts.runtime = preset.runtime;
+      if (preset.baseUrl) {
+        process.env.ANTHROPIC_BASE_URL = preset.baseUrl;
+      }
+      if (preset.envKey && !preset.requiresAuth) {
+        const key = await ask(`输入 API Key (${chosen})`);
+        if (key) process.env[preset.envKey] = key;
+      }
+      if (preset.requiresAuth === "codex") {
+        console.log("[anet] 请确保已执行: codex auth login");
+      }
+      if (preset.requiresAuth === "claude") {
+        console.log("[anet] 请确保已安装 Claude Code CLI 并登录");
+      }
+      // Save to env map for node config
+      if (preset.baseUrl) {
+        opts._envs = opts._envs || [];
+        opts._envs.push(`ANTHROPIC_BASE_URL=${preset.baseUrl}`);
+      }
+      if (preset.envKey && process.env[preset.envKey]) {
+        opts._envs = opts._envs || [];
+        opts._envs.push(`${preset.envKey}=${process.env[preset.envKey]}`);
+      }
+    } catch {
+      // inquirer not available or user cancelled
+    }
+  }
 
   // Interactive network selection (if user has multiple writable networks and no --network specified)
   if (!opts.network && gc.token && gc.hub && process.stdin.isTTY) {
@@ -1640,22 +1696,28 @@ async function serverCommand() {
     child.on("exit", (code) => process.exit(code || 0));
 
   } else if (sub === "local") {
-    // anet server local — one-command local setup
+    // anet hub start — one-command local setup
     // Starts server + configures hub + registers user + ready to go
     const opts = parseOpts();
     const port = opts.port || "9200";
     const username = opts.username || opts.user || "local";
     const password = opts.password || opts.pass || "local123456";
+    const token = opts.token || crypto.randomUUID().replace(/-/g, "");
 
     console.log(`
 ╔══════════════════════════════════════════════════╗
-║   🏠 anet server local — One-command setup       ║
+║   🏠 anet hub start — One-command setup       ║
 ╚══════════════════════════════════════════════════╝
 `);
 
     console.log(`  Starting CommHub Server on port ${port}...`);
 
-    const env: Record<string, string> = { ...process.env as any, PORT: port, HOST: "127.0.0.1" };
+    const env: Record<string, string> = {
+      ...process.env as any,
+      PORT: port,
+      HOST: "127.0.0.1",
+      COMMHUB_AUTH_TOKEN: token,
+    };
     const child = spawn("bunx", ["@sleep2agi/commhub-server"], { env, stdio: "pipe", shell: true });
 
     // Wait for server to start
@@ -1674,8 +1736,9 @@ async function serverCommand() {
     // Configure hub
     const gc = loadGlobal();
     gc.hub = `http://127.0.0.1:${port}`;
+    saveServerConfig({ port, host: "127.0.0.1", token });
     saveGlobal(gc);
-    console.log(`  ✅ Hub configured: ${gc.hub}`);
+    console.log(`  ✅ Hub configured: ${gc.hub} (auth enabled)`);
 
     // Register + login
     try {
@@ -1700,8 +1763,16 @@ async function serverCommand() {
         }
         saveGlobal(gc);
         console.log(`  ✅ Logged in as "${username}"`);
+      } else {
+        gc.token = token;
+        saveGlobal(gc);
+        console.log(`  ⚠ Login failed; saved server auth token. Run: anet login`);
       }
-    } catch {}
+    } catch {
+      gc.token = token;
+      saveGlobal(gc);
+      console.log(`  ⚠ Could not register/login; saved server auth token. Run: anet login`);
+    }
 
     // Get license info
     try {
@@ -2931,7 +3002,7 @@ async function passwdCommand() {
 async function demoCommand() {
   const gc = loadGlobal();
   const hub = gc.hub;
-  if (!hub) { console.error("Run 'anet init' or 'anet server local' first."); return; }
+  if (!hub) { console.error("Run 'anet init' or 'anet hub start' first."); return; }
 
   const opts = parseOpts();
   const live = opts.live === "true" || opts.watch === "true" || args.includes("--live") || args.includes("--watch");
@@ -3252,11 +3323,24 @@ switch (command) {
     break;
   case "create": await createCommand(); break;
   case "server": serverCommand(); break;
-  case "start": startCommand(); break;
-  case "resume": resumeCommand(); break;
-  case "rename": renameCommand(); break;
-  case "stop": await stopCommand(); break;
-  case "delete": await deleteCommand(); break;
+  case "hub": serverCommand(); break; // alias: anet hub start/stop/status
+  case "node": // anet node create/start/stop/resume/delete/ls/rename
+    switch (args[1]) {
+      case "create": args.splice(0, 1); await createCommand(); break;
+      case "start": args.splice(0, 1); startCommand(); break;
+      case "stop": args.splice(0, 1); await stopCommand(); break;
+      case "resume": args.splice(0, 1); resumeCommand(); break;
+      case "delete": args.splice(0, 1); await deleteCommand(); break;
+      case "rename": args.splice(0, 1); renameCommand(); break;
+      case "ls": case "list": lsCommand(); break;
+      default: console.log(`Usage: anet node <create|start|stop|resume|delete|ls|rename> [name]`); break;
+    }
+    break;
+  case "start": startCommand(); break;   // backward compat
+  case "resume": resumeCommand(); break; // backward compat
+  case "rename": renameCommand(); break; // backward compat
+  case "stop": await stopCommand(); break; // backward compat
+  case "delete": await deleteCommand(); break; // backward compat
   case "import": importCommand(); break;
   case "channel": channelCommand(); break;
   case "setup": await setupCommand(); break;

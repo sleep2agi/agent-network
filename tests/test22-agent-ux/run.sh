@@ -71,7 +71,7 @@ cat > "${HOME}/.anet/config.json" <<EOF
 }
 EOF
 
-HOME="${HOME}" anet create bot-a --runtime claude-agent-sdk >"${WORKDIR}/anet-create.log" 2>&1
+HOME="${HOME}" anet node create bot-a --runtime claude-agent-sdk >"${WORKDIR}/anet-create.log" 2>&1
 
 cat > "${HOME}/.anet/nodes/ux-bot/config.json" <<EOF
 {
@@ -124,21 +124,21 @@ COMMHUB_TOKEN="${NET_TOKEN_DEFAULT}" timeout 5 agent-node --alias bad-hub --runt
 grep -qE "token 验证失败|fetch failed|callCommHub\\(report_status\\) failed after" "${BAD_HUB_LOG}" && pass "hub unreachable error is visible" || { cat "${BAD_HUB_LOG}"; fail "hub unreachable error missing"; }
 echo ""
 
-echo "B6. anet start bot-a..."
-HOME="${HOME}" anet start bot-a >"${ANET_START_LOG}" 2>&1 &
+echo "B6. anet node start bot-a..."
+HOME="${HOME}" anet node start bot-a >"${ANET_START_LOG}" 2>&1 &
 ANET_PID=$!
 sleep 4
-grep -q 'Starting new session for "bot-a"' "${ANET_START_LOG}" && grep -q 'Token:' "${ANET_START_LOG}" && pass "anet start output looks normal" || { cat "${ANET_START_LOG}"; fail "anet start output unclear"; }
+grep -q 'Starting new session for "bot-a"' "${ANET_START_LOG}" && grep -q 'Token:' "${ANET_START_LOG}" && pass "anet node start output looks normal" || { cat "${ANET_START_LOG}"; fail "anet node start output unclear"; }
 echo ""
 
-echo "B7. anet start missing node..."
-MISSING_OUT=$(HOME="${HOME}" anet start missing-bot 2>&1 || true)
+echo "B7. anet node start missing node..."
+MISSING_OUT=$(HOME="${HOME}" anet node start missing-bot 2>&1 || true)
 echo "$MISSING_OUT" | grep -q 'Node "missing-bot" not found' && pass "missing node error is clear" || fail "missing node error unclear"
 echo ""
 
-echo "B8. anet stop bot-a..."
-STOP_OUT=$(HOME="${HOME}" anet stop bot-a 2>&1 || true)
-echo "$STOP_OUT" | grep -q 'Stopped "bot-a"' && pass "anet stop output is clear" || { echo "$STOP_OUT"; fail "anet stop output unclear"; }
+echo "B8. anet node stop bot-a..."
+STOP_OUT=$(HOME="${HOME}" anet node stop bot-a 2>&1 || true)
+echo "$STOP_OUT" | grep -q 'Stopped "bot-a"' && pass "anet node stop output is clear" || { echo "$STOP_OUT"; fail "anet node stop output unclear"; }
 wait "${ANET_PID}" 2>/dev/null || true
 echo ""
 

@@ -1,8 +1,6 @@
-version: "3.8"
-
-# Codex Telegram Squad: 1 server + 1 commander + 5 codex + 5 minimax
+# Codex Telegram Squad: 1 server + 1 指挥室 + 5 代码 + 5 文案
 # Usage: docker compose up -d
-# Telegram: send messages to the bot, commander will dispatch to workers
+# Telegram: 发消息给指挥室，指挥室派发给代码/文案员工
 
 x-common: &common
   build:
@@ -10,11 +8,20 @@ x-common: &common
     dockerfile: demos/codex-telegram-squad/Dockerfile.agent
   volumes:
     - ${HOME}/.codex:/root/.codex:ro
-    - ${HOME}/.claude:/root/.claude:ro
+    # .claude needs to be writable (claude-agent-sdk writes session records to ~/.claude/projects/*.jsonl).
+    # Mount host's .claude.json :ro for auth, but give each container a fresh writable /root/.claude
+    - ${HOME}/.claude.json:/root/.claude.json:ro
+    - squad_shared:/shared
+  tmpfs:
+    - /root/.claude
+    - /tmp
   depends_on:
-    server:
-      condition: service_healthy
+    seed:
+      condition: service_completed_successfully
   restart: unless-stopped
+
+volumes:
+  squad_shared: {}
 
 services:
   # ── CommHub Server ──
@@ -32,27 +39,27 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── Commander: Codex + Telegram ──
+  # ── 指挥室: Codex + Telegram ──
   commander:
     <<: *common
     environment:
-      - ALIAS=commander
+      - ALIAS=指挥室
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=gpt-5.5
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_ALLOW_USER=${TELEGRAM_ALLOW_USER:-7612221352}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
-      - SYSTEM_PROMPT=你是指挥室 commander，负责接收 Telegram 消息并分配任务给 worker-1 到 worker-10。收到任务后分析需求，选择合适的 worker 派发。
+      - SYSTEM_PROMPT=你是指挥室，负责接收 Telegram 消息并分配任务。代码类任务（读写文件/命令/代码）派给 代码1号-代码5号；文本类任务（翻译/分析/写作）派给 文案1号-文案5号。用 commhub_send_task 派发，用 commhub_get_all_status 查在线状态。
 
-  # ── Codex Workers (1-5) ──
+  # ── 代码组 (Codex GPT-5.5) ──
   worker-1:
     <<: *common
     environment:
-      - ALIAS=worker-1
+      - ALIAS=代码1号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=gpt-5.5
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
@@ -60,9 +67,9 @@ services:
   worker-2:
     <<: *common
     environment:
-      - ALIAS=worker-2
+      - ALIAS=代码2号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=gpt-5.5
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
@@ -70,9 +77,9 @@ services:
   worker-3:
     <<: *common
     environment:
-      - ALIAS=worker-3
+      - ALIAS=代码3号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=gpt-5.5
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
@@ -80,9 +87,9 @@ services:
   worker-4:
     <<: *common
     environment:
-      - ALIAS=worker-4
+      - ALIAS=代码4号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=gpt-5.5
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
@@ -90,65 +97,114 @@ services:
   worker-5:
     <<: *common
     environment:
-      - ALIAS=worker-5
+      - ALIAS=代码5号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=gpt-5.5
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
 
-  # ── MiniMax Workers (6-10) via Claude Agent SDK ──
+  # ── 文案组 (MiniMax via Claude Agent SDK) ──
   worker-6:
     <<: *common
     environment:
-      - ALIAS=worker-6
+      - ALIAS=文案1号
       - RUNTIME=claude-agent-sdk
       - MODEL=claude-3-5-haiku-20241022
       - ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-      - ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
 
   worker-7:
     <<: *common
     environment:
-      - ALIAS=worker-7
+      - ALIAS=文案2号
       - RUNTIME=claude-agent-sdk
       - MODEL=claude-3-5-haiku-20241022
       - ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-      - ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
 
   worker-8:
     <<: *common
     environment:
-      - ALIAS=worker-8
+      - ALIAS=文案3号
       - RUNTIME=claude-agent-sdk
       - MODEL=claude-3-5-haiku-20241022
       - ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-      - ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
 
   worker-9:
     <<: *common
     environment:
-      - ALIAS=worker-9
+      - ALIAS=文案4号
       - RUNTIME=claude-agent-sdk
       - MODEL=claude-3-5-haiku-20241022
       - ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-      - ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
 
   worker-10:
     <<: *common
     environment:
-      - ALIAS=worker-10
+      - ALIAS=文案5号
       - RUNTIME=claude-agent-sdk
       - MODEL=claude-3-5-haiku-20241022
       - ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-      - ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
+
+  # ── Seed admin user + export ntok_ to shared volume ──
+  seed:
+    image: curlimages/curl:latest
+    user: "0"
+    depends_on:
+      server:
+        condition: service_healthy
+    volumes:
+      - squad_shared:/shared
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ -f /shared/ntok ]; then
+          echo "seed: /shared/ntok already exists, skip"
+          exit 0
+        fi
+        RESP=$$(curl -sX POST http://server:9200/api/auth/register \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-squad-token}" \
+          -d '{"username":"admin","password":"admin123"}')
+        echo "seed: response=$$RESP"
+        NTOK=$$(echo "$$RESP" | sed -n 's/.*"network_token":"\(ntok_[^"]*\)".*/\1/p')
+        if [ -z "$$NTOK" ]; then
+          echo "seed: failed to extract ntok_"; exit 1
+        fi
+        echo "$$NTOK" > /shared/ntok
+        echo "seed: wrote ntok_ ($${#NTOK} chars) to /shared/ntok"
+    restart: "no"
+
+  # ── Dashboard (N站马 前端) ──
+  dashboard:
+    build:
+      context: ${HOME}/agent-network-dashboard
+      dockerfile: Dockerfile.squad
+    ports:
+      - "9999:3000"
+    environment:
+      - COMMHUB_URL=http://server:9200
+      - COMMHUB_AUTH_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-squad-dash}
+      - COOKIE_INSECURE=1
+      - NEXT_PUBLIC_DISABLE_SSE=1
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped

@@ -43,7 +43,7 @@ PORT=9200 COMMHUB_AUTH_TOKEN=your-secret bunx @sleep2agi/commhub-server
 | `get_session_status` | 单 session 详情 |
 | `broadcast` | 群发消息 |
 
-## REST API (27 端点)
+## REST API (33 端点)
 
 | 端点 | 方法 | 说明 |
 |------|------|------|

@@ -117,7 +117,7 @@ echo ""
 echo "3. Create node with source anet CLI..."
 cd /app
 bun agent-network/bin/cli.ts create tg-bot --runtime http-api >"${WORKDIR}/create.log" 2>&1
-grep -q 'Created node "tg-bot"' "${WORKDIR}/create.log" && pass "anet create tg-bot succeeded" || { cat "${WORKDIR}/create.log"; fail "anet create failed"; }
+grep -q 'Created node "tg-bot"' "${WORKDIR}/create.log" && pass "anet node create tg-bot succeeded" || { cat "${WORKDIR}/create.log"; fail "anet node create failed"; }
 echo ""
 
 echo "4. Add telegram channel with source anet CLI..."

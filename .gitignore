@@ -2,3 +2,8 @@
 node_modules/
 dist/
 .anet/
+demos/codex-telegram-squad/.env
+docs-site/docs/.vitepress/dist/
+docs-site/docs/.vitepress/cache/
+docs-site/node_modules/
+*.lock

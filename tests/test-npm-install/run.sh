@@ -45,7 +45,7 @@ echo ""
 
 echo "6. anet create..."
 CREATE=$($ANET create test-bot --runtime http-api 2>&1 || true)
-echo "$CREATE" | grep -Eqi "created|config.json|test-bot" && pass "anet create test-bot --runtime http-api" || { echo "$CREATE"; fail "anet create failed"; }
+echo "$CREATE" | grep -Eqi "created|config.json|test-bot" && pass "anet node create test-bot --runtime http-api" || { echo "$CREATE"; fail "anet node create failed"; }
 echo ""
 
 echo "7. anet network ls..."

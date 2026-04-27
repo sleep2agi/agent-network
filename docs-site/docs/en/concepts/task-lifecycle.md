@@ -1,0 +1,310 @@
+# Task Lifecycle
+
+A Task is the core data unit in Agent Network. Every task has a complete lifecycle, from creation to closure.
+
+## State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> created: send_task
+
+    created --> delivered: Write to inbox + SSE push
+
+    delivered --> acked: ack_inbox / send_ack
+    delivered --> cancelled: cancel_task
+    delivered --> expired: TTL timeout
+
+    acked --> running: report_status(working)
+    acked --> cancelled: cancel_task
+    acked --> expired: TTL timeout
+
+    running --> replied: send_reply(replied) / report_completion
+    running --> failed: send_reply(failed)
+    running --> cancelled: cancel_task
+
+    replied --> [*]
+    failed --> delivered: retry_task
+    cancelled --> delivered: retry_task
+    expired --> delivered: retry_task
+
+    failed --> [*]
+    cancelled --> [*]
+    expired --> [*]
+```
+
+## Status Reference
+
+| Status | Meaning | Triggered By | Next Step |
+|------|------|---------|--------|
+| `created` | Task created | `send_task` | Auto-transitions to delivered |
+| `delivered` | Delivered to inbox | Write to inbox + SSE push | Wait for agent to ack |
+| `acked` | Agent confirmed receipt | `ack_inbox` / `send_ack` | Wait for agent to start processing |
+| `running` | Agent is processing | `report_status(working)` | Wait for completion |
+| `replied` | Result returned | `send_reply` / `report_completion` | Terminal state |
+| `failed` | Processing failed | `send_reply(status=failed)` | Can be retried |
+| `cancelled` | Cancelled | `cancel_task` | Can be retried |
+| `expired` | TTL timeout | Auto-detected | Can be retried |
+
+### Terminal States
+
+The following states are terminal and cannot change (except via retry):
+
+- `replied` -- Task completed successfully
+- `failed` -- Task failed
+- `cancelled` -- Task was cancelled
+- `expired` -- Task expired
+
+## Complete Lifecycle Flow
+
+```mermaid
+sequenceDiagram
+    participant H as Commander
+    participant S as CommHub Server
+    participant A as Coder-1
+
+    H->>S: send_task(alias="coder-1", task="Write a sorting algorithm")
+    Note over S: Status: created → delivered
+    S->>S: INSERT inbox + tasks
+    S-->>A: SSE: {type: "new_task"}
+
+    A->>S: get_inbox(alias="coder-1")
+    S-->>A: [{id: "t_xxx", content: "Write a sorting algorithm"}]
+
+    A->>S: ack_inbox(id="t_xxx")
+    Note over S: Status: delivered → acked
+
+    A->>S: report_status(status="working", task="Write a sorting algorithm")
+    Note over S: Status: acked → running
+
+    Note over A: AI processing...
+
+    A->>S: send_reply(alias="commander", text="Done", in_reply_to="t_xxx")
+    Note over S: Status: running → replied
+
+    S-->>H: SSE: {type: "new_reply"}
+```
+
+## Dual-Write Mechanism
+
+Each task is written to two tables simultaneously:
+
+| Table | Purpose | Lifecycle |
+|-----|------|---------|
+| `inbox` | Message delivery queue | Marked as processed after ACK |
+| `tasks` | Task status tracking | Full lifecycle |
+
+```sql
+-- Dual write on send_task
+INSERT INTO inbox (id, session_name, type, content, ...) VALUES (...);
+INSERT INTO tasks (task_id, from_name, to_name, status, content, ...) VALUES (...);
+```
+
+`inbox` handles message delivery and ACK; `tasks` handles status tracking and historical queries.
+
+## TTL and Expiration
+
+Each task has a TTL (Time To Live), defaulting to 1 hour:
+
+```bash
+# Set TTL
+commhub_send_task(alias="coder-1", task="...", ttl_seconds=7200)  # 2 hours
+```
+
+| Parameter | Default | Range |
+|------|--------|------|
+| `ttl_seconds` | 3600 (1 hour) | 1 ~ 86400 (1 day) |
+
+Expired tasks transition to `expired` status. Expired tasks can be redelivered via `retry_task`.
+
+```sql
+-- Expiration stored in the tasks table
+expires_at = datetime('now', '+3600 seconds')
+```
+
+## Retry Mechanism
+
+Failed, cancelled, and expired tasks can all be retried:
+
+```bash
+# Retry a task
+commhub_retry_task(task_id="t_xxx")
+```
+
+Retry flow:
+
+1. Verify task status is `failed` / `cancelled` / `expired`
+2. Reset task status to `delivered`
+3. Clear result, completed_at, started_at
+4. Reset expires_at (+1 hour)
+5. Create a new inbox entry
+6. SSE push new_task
+
+```mermaid
+flowchart LR
+    A[failed/cancelled/expired] -->|retry_task| B[delivered]
+    B --> C[acked]
+    C --> D[running]
+    D --> E{Result}
+    E -->|Success| F[replied]
+    E -->|Failure| A
+```
+
+## Cancelling Tasks
+
+You can cancel tasks that haven't completed yet:
+
+```bash
+commhub_cancel_task(task_id="t_xxx", reason="No longer needed")
+```
+
+Cancellation will:
+
+1. Update task status to `cancelled`
+2. Mark the inbox entry as ACKed (prevents agent from continuing)
+3. Record the cancellation reason in the result field
+4. Log a task_event
+
+Cancellable statuses: `delivered` / `acked` / `running`
+
+## Reassigning Tasks
+
+Transfer a task from one agent to another:
+
+```bash
+commhub_reassign_task(task_id="t_xxx", new_alias="coder-2")
+```
+
+Reassignment flow:
+
+1. Mark the original agent's inbox entry as ACKed
+2. Update tasks.to_name to the new agent
+3. Reset status to `delivered`
+4. Create a new inbox entry for the new agent
+5. SSE push new_task to the new agent
+
+```mermaid
+flowchart LR
+    A[coder-1<br/>running] -->|reassign_task| B[coder-2<br/>delivered]
+    B --> C[coder-2<br/>acked]
+    C --> D[coder-2<br/>running]
+    D --> E[coder-2<br/>replied]
+```
+
+## Message Types
+
+Agent Network distinguishes four message types. Only `task` triggers AI processing:
+
+| Type | Semantics | Triggers AI | Into Inbox | SSE Event |
+|------|------|:-------:|:--------:|---------|
+| `task` | Formal task | &check; | &check; | `new_task` |
+| `reply` | Task reply | | &check; | `new_reply` |
+| `message` | Chat message | | &check; | `new_message` |
+| `ack` | Pure acknowledgement | | | (not pushed) |
+| `broadcast` | Broadcast | &check; | &check; | `broadcast` |
+
+### Why Distinguish Message Types?
+
+Without message type distinction, infinite loops would occur:
+
+```mermaid
+sequenceDiagram
+    Agent A->>Agent B: task
+    Agent B->>Agent A: reply (triggers processing)
+    Agent A->>Agent B: reply (triggers processing)
+    Note over Agent A,Agent B: Infinite loop!
+```
+
+By distinguishing types, only `task` and `broadcast` trigger processing, while `reply` and `message` are displayed but not processed.
+
+## Task Event Log
+
+Every status change is recorded in the `task_events` table:
+
+```sql
+CREATE TABLE task_events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id    TEXT NOT NULL,
+  from_state TEXT,
+  to_state   TEXT NOT NULL,
+  actor      TEXT,
+  detail     TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+Query task events:
+
+```bash
+# CLI
+anet tasks --detail t_xxx
+
+# REST API
+GET /api/task_events?task_id=t_xxx
+```
+
+Example output:
+
+```
+Task t_a1b2c3d4 events:
+  10:00:01  → delivered  by commander  (→ coder-1)
+  10:00:03  delivered → acked  by coder-1
+  10:00:03  acked → running  by coder-1
+  10:00:15  running → replied  by coder-1  (Sorting algorithm completed)
+```
+
+## Priority
+
+Tasks support three priority levels:
+
+| Priority | Meaning | Inbox Ordering |
+|--------|------|-----------|
+| `high` | Urgent task | Sorted first |
+| `normal` | Standard task | Default |
+| `low` | Low priority | Sorted last |
+
+```bash
+# Send a high-priority task
+commhub_send_task(alias="coder-1", task="Critical fix needed", priority="high")
+```
+
+When agents fetch their inbox, items are automatically sorted by priority:
+
+```sql
+ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
+```
+
+## Database Table Schema
+
+```sql
+CREATE TABLE tasks (
+  task_id           TEXT PRIMARY KEY,
+  from_name         TEXT NOT NULL,
+  to_name           TEXT NOT NULL,
+  priority          TEXT DEFAULT 'normal',
+  status            TEXT DEFAULT 'created',
+  content           TEXT NOT NULL,
+  result            TEXT,
+  requires_response TEXT DEFAULT 'reply',
+  network_id        TEXT,
+  created_at        TEXT DEFAULT (datetime('now')),
+  delivered_at      TEXT,
+  started_at        TEXT,
+  completed_at      TEXT,
+  expires_at        TEXT
+);
+
+CREATE TABLE inbox (
+  id              TEXT PRIMARY KEY,
+  session_name    TEXT NOT NULL,
+  type            TEXT DEFAULT 'task',
+  priority        TEXT DEFAULT 'normal',
+  content         TEXT NOT NULL,
+  context         TEXT,
+  from_session    TEXT,
+  in_reply_to     TEXT,
+  acked           INTEGER DEFAULT 0,
+  requires_response TEXT DEFAULT 'reply',
+  network_id      TEXT,
+  created_at      TEXT DEFAULT (datetime('now'))
+);
+```

@@ -7,6 +7,7 @@ import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.j
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 
 const PORT = Number(process.env.PORT) || 9200;
+const HOST = process.env.HOST || "0.0.0.0";
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
 
 // ── Rate limiter (in-memory, per IP) ──
@@ -72,12 +73,77 @@ function resolveRequestAuth(req: Request): { userId: string; networkId: string |
   return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username };
 }
 
+type RestNetworkScope = {
+  networkId: string | null;
+  networkIds: string[] | null;
+  denied?: string;
+};
+
+function getUserNetworkIds(userId: string): string[] {
+  return db.all<{ network_id: string }>(
+    "SELECT network_id FROM network_members WHERE user_id = ?1",
+    userId
+  ).map((row) => row.network_id);
+}
+
+function resolveRestNetworkScope(url: URL, authCtx: { userId: string; networkId: string | null } | null, isAdmin: boolean): RestNetworkScope {
+  const requested = url.searchParams.get("network_id");
+
+  // Legacy global token or open dev mode keeps the old global behavior.
+  if (!authCtx) return { networkId: requested || null, networkIds: null };
+
+  // Network tokens are forcibly scoped to their bound network.
+  if (authCtx.networkId) return { networkId: authCtx.networkId, networkIds: null };
+
+  // System admins may intentionally inspect all networks.
+  if (isAdmin) return { networkId: requested || null, networkIds: null };
+
+  if (requested) {
+    const role = getUserNetworkRole(authCtx.userId, requested);
+    if (!role) return { networkId: null, networkIds: [], denied: "access denied to requested network" };
+    return { networkId: requested, networkIds: null };
+  }
+
+  return { networkId: null, networkIds: getUserNetworkIds(authCtx.userId) };
+}
+
+function addNetworkScope(sql: string, params: any[], scope: RestNetworkScope, column = "network_id"): string {
+  if (scope.networkId) {
+    sql += ` AND ${column} = ?${params.length + 1}`;
+    params.push(scope.networkId);
+  } else if (scope.networkIds) {
+    if (scope.networkIds.length === 0) {
+      sql += " AND 1=0";
+    } else {
+      const placeholders = scope.networkIds.map((_, i) => `?${params.length + i + 1}`).join(", ");
+      sql += ` AND ${column} IN (${placeholders})`;
+      params.push(...scope.networkIds);
+    }
+  }
+  return sql;
+}
+
+function singleNetworkId(scope: RestNetworkScope): string | null {
+  if (scope.networkId) return scope.networkId;
+  if (scope.networkIds?.length === 1) return scope.networkIds[0];
+  return null;
+}
+
+function canRestWriteNetwork(authCtx: { userId: string; networkId: string | null } | null, networkId: string | null, isAdmin: boolean): boolean {
+  if (!authCtx) return true; // legacy global token or open dev mode
+  if (isAdmin) return true;
+  if (!networkId) return false;
+  const role = getUserNetworkRole(authCtx.userId, networkId);
+  return !!role && role !== "viewer";
+}
+
 // ── REST input schema ───────────────────────────────
 const TaskSchema = z.object({
   alias: z.string().min(1).max(200),
   task: z.string().min(1).max(10000),
   priority: z.enum(["high", "normal", "low"]).default("normal"),
   from: z.string().max(200).optional(),
+  network_id: z.string().max(200).optional(),
 });
 
 const BroadcastSchema = z.object({
@@ -137,6 +203,7 @@ setInterval(() => {
 
 Bun.serve({
   port: PORT,
+  hostname: HOST,
   idleTimeout: 255, // max value: keep SSE connections alive (seconds)
 
   async fetch(req, server) {
@@ -553,19 +620,24 @@ Bun.serve({
     // Resolve network scope for REST queries — enforce isolation
     // Token-bound networkId takes precedence (ntok_ → forced), then query param
     const restAuth = resolveRequestAuth(req);
-    const isAdmin = restAuth?.username && db.get<any>("SELECT role FROM users WHERE username = ?1", restAuth.username)?.role === "admin";
-    // ntok_ token has networkId forced; utok_ has null (uses query param or admin sees all)
-    const restNetId = restAuth?.networkId || url.searchParams.get("network_id") || null;
+    const isAdmin = !!(restAuth?.username && db.get<any>("SELECT role FROM users WHERE username = ?1", restAuth.username)?.role === "admin");
+    const restScope = resolveRestNetworkScope(url, restAuth, isAdmin);
+    if (restScope.denied) {
+      return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
+    }
 
     // ── REST: all sessions status ──
     if (url.pathname === "/api/status") {
       const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
-      db.run("UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'", [cutoff]);
-      const netFilter = restNetId;
-      const sql = netFilter
-        ? "SELECT * FROM sessions WHERE network_id = ?1 ORDER BY updated_at DESC"
-        : "SELECT * FROM sessions ORDER BY updated_at DESC";
-      const sessions = netFilter ? db.all(sql, netFilter) : db.all(sql);
+      const staleParams: any[] = [cutoff];
+      let staleSql = "UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'";
+      staleSql = addNetworkScope(staleSql, staleParams, restScope);
+      db.run(staleSql, staleParams);
+      const params: any[] = [];
+      let sql = "SELECT * FROM sessions WHERE 1=1";
+      sql = addNetworkScope(sql, params, restScope);
+      sql += " ORDER BY updated_at DESC";
+      const sessions = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, sessions }));
     }
 
@@ -582,18 +654,40 @@ Bun.serve({
         return withCors(req, Response.json({ error: "invalid input", details: parsed.error.format() }, { status: 400 }));
       }
       const body = parsed.data;
+      let taskNetId: string | null = null;
+      if (restAuth?.networkId) {
+        taskNetId = restAuth.networkId;
+      } else if (body.network_id) {
+        if (restAuth && !isAdmin && !getUserNetworkRole(restAuth.userId, body.network_id)) {
+          return withCors(req, Response.json({ ok: false, error: "access denied to requested network" }, { status: 403 }));
+        }
+        taskNetId = body.network_id;
+      } else {
+        taskNetId = restAuth ? singleNetworkId(restScope) : null;
+      }
+      if (restAuth && !taskNetId) {
+        return withCors(req, Response.json({ ok: false, error: "network_id required for user token when multiple networks are available" }, { status: 400 }));
+      }
+      if (!canRestWriteNetwork(restAuth, taskNetId, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+      }
       const id = crypto.randomUUID();
       const fromSession = body.from || "api";
       db.run(
-        `INSERT INTO inbox (id, session_name, type, priority, content, from_session)
-         VALUES (?1, ?2, 'task', ?3, ?4, ?5)`,
-        [id, body.alias, body.priority, body.task, fromSession]
+        `INSERT INTO inbox (id, session_name, type, priority, content, from_session, network_id)
+         VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6)`,
+        [id, body.alias, body.priority, body.task, fromSession, taskNetId]
       );
       // SSE push: 秒达
-      const pending = db.get<{ cnt: number }>(
-        "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0",
-        body.alias);
-      pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession });
+      const pendingParams: any[] = [body.alias];
+      let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
+      if (taskNetId) { pendingSql += " AND network_id = ?2"; pendingParams.push(taskNetId); }
+      const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
+      const sessionParams: any[] = [body.alias];
+      let sessionSql = "SELECT 1 FROM sessions WHERE alias = ?1";
+      if (taskNetId) { sessionSql += " AND network_id = ?2"; sessionParams.push(taskNetId); }
+      const targetSession = db.get<any>(sessionSql, ...sessionParams);
+      if (targetSession) pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession });
       return withCors(req, Response.json({ ok: true, message_id: id }));
     }
 
@@ -610,18 +704,25 @@ Bun.serve({
         return withCors(req, Response.json({ error: "invalid input", details: parsed.error.format() }, { status: 400 }));
       }
       const body = parsed.data;
-      let sql = "SELECT alias FROM sessions WHERE alias IS NOT NULL";
+      if (restAuth && !restScope.networkId && !isAdmin) {
+        return withCors(req, Response.json({ ok: false, error: "network_id required for user token when broadcasting" }, { status: 400 }));
+      }
+      if (!canRestWriteNetwork(restAuth, restScope.networkId, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+      }
+      let sql = "SELECT alias, network_id FROM sessions WHERE alias IS NOT NULL";
       const params: any[] = [];
+      sql = addNetworkScope(sql, params, restScope);
       if (body.filter_server) { sql += " AND server = ?"; params.push(body.filter_server); }
       if (body.filter_status) { sql += " AND status = ?"; params.push(body.filter_status); }
-      const targets = db.all<{ alias: string }>(sql, ...params);
+      const targets = db.all<{ alias: string; network_id: string | null }>(sql, ...params);
       const ids: string[] = [];
       for (const t of targets) {
         const id = crypto.randomUUID();
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, from_session)
-           VALUES (?1, ?2, 'broadcast', 'normal', ?3, 'api')`,
-          [id, t.alias, body.message]
+          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, network_id)
+           VALUES (?1, ?2, 'broadcast', 'normal', ?3, 'api', ?4)`,
+          [id, t.alias, body.message, t.network_id]
         );
         ids.push(id);
       }
@@ -679,36 +780,49 @@ Bun.serve({
 
     // ── REST: recent messages (for Dashboard communication graph) ──
     if (url.pathname === "/api/messages") {
-      const limit = Number(url.searchParams.get("limit")) || 100;
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 100, 500);
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 3600000).toISOString().replace("T", " ").slice(0, 19);
-      const rows = db.all(
-        "SELECT id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at FROM inbox WHERE created_at >= ?1 ORDER BY created_at DESC LIMIT ?2",
-        since, limit);
+      const params: any[] = [since];
+      let sql = "SELECT id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at, network_id FROM inbox WHERE created_at >= ?1";
+      sql = addNetworkScope(sql, params, restScope);
+      sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
+      params.push(limit);
+      const rows = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, messages: rows }));
     }
 
     // ── REST: stats summary ──
     if (url.pathname === "/api/stats") {
-      const n = url.searchParams.get("network_id");
-      // Parameterized queries to prevent SQL injection
-      const taskStats = n
-        ? db.all<any>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status", n)
-        : db.all<any>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status");
-      const sessionStats = n
-        ? db.all<any>("SELECT status, COUNT(*) as count FROM sessions WHERE network_id = ?1 GROUP BY status", n)
-        : db.all<any>("SELECT status, COUNT(*) as count FROM sessions GROUP BY status");
-      const totalTasks = n
-        ? db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM tasks WHERE network_id = ?1", n)
-        : db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM tasks");
-      const totalNodes = n
-        ? db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM nodes WHERE network_id = ?1", n)
-        : db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM nodes");
-      const recentTasks = n
-        ? db.all<any>("SELECT task_id, from_name, to_name, status, created_at FROM tasks WHERE network_id = ?1 ORDER BY created_at DESC LIMIT 5", n)
-        : db.all<any>("SELECT task_id, from_name, to_name, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 5");
+      const taskStatsParams: any[] = [];
+      let taskStatsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
+      taskStatsSql = addNetworkScope(taskStatsSql, taskStatsParams, restScope);
+      taskStatsSql += " GROUP BY status";
+      const taskStats = db.all<any>(taskStatsSql, ...taskStatsParams);
+
+      const sessionStatsParams: any[] = [];
+      let sessionStatsSql = "SELECT status, COUNT(*) as count FROM sessions WHERE 1=1";
+      sessionStatsSql = addNetworkScope(sessionStatsSql, sessionStatsParams, restScope);
+      sessionStatsSql += " GROUP BY status";
+      const sessionStats = db.all<any>(sessionStatsSql, ...sessionStatsParams);
+
+      const totalTasksParams: any[] = [];
+      let totalTasksSql = "SELECT COUNT(*) as cnt FROM tasks WHERE 1=1";
+      totalTasksSql = addNetworkScope(totalTasksSql, totalTasksParams, restScope);
+      const totalTasks = db.get<{ cnt: number }>(totalTasksSql, ...totalTasksParams);
+
+      const totalNodesParams: any[] = [];
+      let totalNodesSql = "SELECT COUNT(*) as cnt FROM nodes WHERE 1=1";
+      totalNodesSql = addNetworkScope(totalNodesSql, totalNodesParams, restScope);
+      const totalNodes = db.get<{ cnt: number }>(totalNodesSql, ...totalNodesParams);
+
+      const recentTasksParams: any[] = [];
+      let recentTasksSql = "SELECT task_id, from_name, to_name, status, created_at FROM tasks WHERE 1=1";
+      recentTasksSql = addNetworkScope(recentTasksSql, recentTasksParams, restScope);
+      recentTasksSql += " ORDER BY created_at DESC LIMIT 5";
+      const recentTasks = db.all<any>(recentTasksSql, ...recentTasksParams);
       return withCors(req, Response.json({
         ok: true,
-        network_id: n || null,
+        network_id: restScope.networkId || null,
         tasks: { total: totalTasks?.cnt || 0, by_status: taskStats },
         sessions: { by_status: sessionStats },
         nodes: { total: totalNodes?.cnt || 0 },
@@ -741,10 +855,11 @@ Bun.serve({
     if (url.pathname === "/api/task_events") {
       const taskId = url.searchParams.get("task_id");
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 500);
-      let sql = "SELECT * FROM task_events";
+      let sql = "SELECT * FROM task_events WHERE 1=1";
       const params: any[] = [];
-      if (taskId) { sql += " WHERE task_id = ?1"; params.push(taskId); }
-      sql += " ORDER BY created_at DESC LIMIT ?";
+      sql = addNetworkScope(sql, params, restScope);
+      if (taskId) { sql += ` AND task_id = ?${params.length + 1}`; params.push(taskId); }
+      sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
       const rows = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, events: rows, count: rows.length }));
@@ -754,10 +869,9 @@ Bun.serve({
     if (url.pathname === "/api/nodes") {
       const nodeId = url.searchParams.get("node_id");
       const alias = url.searchParams.get("alias");
-      const netFilter = url.searchParams.get("network_id");
       let sql = "SELECT * FROM nodes WHERE 1=1";
       const params: any[] = [];
-      if (netFilter) { sql += ` AND network_id = ?${params.length + 1}`; params.push(netFilter); }
+      sql = addNetworkScope(sql, params, restScope);
       if (nodeId) { sql += ` AND node_id = ?${params.length + 1}`; params.push(nodeId); }
       if (alias) { sql += ` AND alias = ?${params.length + 1}`; params.push(alias); }
       sql += " ORDER BY updated_at DESC";
@@ -771,12 +885,11 @@ Bun.serve({
       const status = url.searchParams.get("status");
       const toName = url.searchParams.get("to_name");
       const fromName = url.searchParams.get("from_name");
-      const netFilter = restNetId || url.searchParams.get("network_id");  // token-enforced takes priority
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
 
       let sql = "SELECT * FROM tasks WHERE 1=1";
       const params: any[] = [];
-      if (netFilter) { sql += ` AND network_id = ?${params.length + 1}`; params.push(netFilter); }
+      sql = addNetworkScope(sql, params, restScope);
       if (taskId) { sql += ` AND task_id = ?${params.length + 1}`; params.push(taskId); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (toName) { sql += ` AND to_name = ?${params.length + 1}`; params.push(toName); }
@@ -785,16 +898,22 @@ Bun.serve({
       params.push(limit);
 
       const rows = db.all(sql, ...params);
-      const stats = netFilter
-        ? db.all<any>("SELECT status, COUNT(*) as count FROM tasks WHERE network_id = ?1 GROUP BY status", netFilter)
-        : db.all<any>("SELECT status, COUNT(*) as count FROM tasks GROUP BY status");
+      const statsParams: any[] = [];
+      let statsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
+      statsSql = addNetworkScope(statsSql, statsParams, restScope);
+      statsSql += " GROUP BY status";
+      const stats = db.all<any>(statsSql, ...statsParams);
       return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length, stats }));
     }
 
     // ── REST: recent completions ──
     if (url.pathname === "/api/completions") {
       const since = url.searchParams.get("since") ?? new Date(Date.now() - 86400000).toISOString();
-      const rows = db.all("SELECT * FROM completions WHERE completed_at >= ?1 ORDER BY completed_at DESC LIMIT 100", since);
+      const params: any[] = [since];
+      let sql = "SELECT * FROM completions WHERE completed_at >= ?1";
+      sql = addNetworkScope(sql, params, restScope);
+      sql += " ORDER BY completed_at DESC LIMIT 100";
+      const rows = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, completions: rows }));
     }
 
@@ -915,8 +1034,8 @@ console.log(`
 ║   Transport: Streamable HTTP (Bun native)         ║
 ║   Auth: ${AUTH_TOKEN ? "ENABLED (Bearer token)" : "DISABLED (set COMMHUB_AUTH_TOKEN)"}${"".padEnd(AUTH_TOKEN ? 5 : 0)}║
 ║                                                   ║
-║   MCP:    http://0.0.0.0:${PORT}/mcp                 ║
-║   REST:   http://0.0.0.0:${PORT}/api                 ║
-║   Health: http://0.0.0.0:${PORT}/health               ║
+║   MCP:    http://${HOST}:${PORT}/mcp                 ║
+║   REST:   http://${HOST}:${PORT}/api                 ║
+║   Health: http://${HOST}:${PORT}/health               ║
 ╚══════════════════════════════════════════════════╝
 `);

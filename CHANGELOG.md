@@ -49,8 +49,8 @@
 - Password hashing (SHA-256)
 - Localhost exempted from rate limit (dev/test)
 
-#### Database (11 tables)
-sessions, inbox, tasks, nodes, completions, task_events, users, networks, api_tokens, audit_log, licenses
+#### Database (13 tables)
+sessions, inbox, tasks, nodes, completions, task_events, users, networks, api_tokens, audit_log, licenses, network_members, network_invites
 
 #### Testing (200 regression tests)
 - Base E2E: 137 tests (node lifecycle, message lifecycle, auth, license, SSE, concurrency)

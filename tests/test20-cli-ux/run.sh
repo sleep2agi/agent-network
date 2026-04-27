@@ -75,7 +75,7 @@ echo ""
 run_step "1" "anet --help" "$ANET --help" "Commands:|Usage:|create|network|start|doctor" "帮助入口清晰，主命令可见。" "顶层帮助不够清晰或命令分类缺失。" 4 2
 run_step "2" "anet network --help" "$ANET network --help" "create|ls|use|info|rename" "network 子命令基本齐全。" "network 子命令列表不完整或不直观。" 4 2
 run_step "3" "anet token --help" "$ANET token --help" "token|create|ls|revoke" "token 子命令存在且功能可发现。" "token 子命令缺失或帮助不可用。" 4 1
-run_step "4" "anet create --help" "$ANET create --help" "runtime|model|tools|channel|--runtime" "create 参数说明较完整。" "create 参数说明不足，用户难以理解 runtime/channel。" 4 2
+run_step "4" "anet node create --help" "$ANET create --help" "runtime|model|tools|channel|--runtime" "create 参数说明较完整。" "create 参数说明不足，用户难以理解 runtime/channel。" 4 2
 run_step "5" "anet -v" "$ANET -v" "anet v|version" "版本信息可见。" "版本输出缺失或信息不足。" 3 1
 
 run_step "6" "anet network create test-net" "$ANET network create test-net" "created|ok|network_id|test-net" "创建网络后有明确成功反馈。" "创建网络提示不清楚或失败原因不明显。" 4 2
@@ -89,8 +89,8 @@ run_step "12" "anet token ls" "$ANET token ls" "my-tok|token|active|revoked|crea
 run_step "13" "anet token revoke" "$ANET token revoke my-tok" "revoked|ok|deleted" "revoke 成功反馈清楚。" "revoke 失败或提示不明确。" 4 2
 run_step "14" "anet passwd" "$ANET passwd --old-password pass123456 --new-password pass654321" "password|changed|updated|success" "改密码支持参数模式，体验较好。" "改密码流程不清晰或仍强依赖交互。" 4 2
 
-run_step "15" "anet create bot-a --runtime codex-sdk" "$ANET create bot-a --runtime codex-sdk" "bot-a|codex-sdk|Created node" "创建 codex-sdk 节点提示明确。" "创建提示不够清晰或 runtime 不符合输入。" 4 2
-run_step "16" "anet create bot-b --runtime http-api" "$ANET create bot-b --runtime http-api" "bot-b|http-api|Created node" "http-api runtime 选择正确，提示清楚。" "runtime 选择失真，用户输入和结果不一致。" 4 1
+run_step "15" "anet node create bot-a --runtime codex-sdk" "$ANET create bot-a --runtime codex-sdk" "bot-a|codex-sdk|Created node" "创建 codex-sdk 节点提示明确。" "创建提示不够清晰或 runtime 不符合输入。" 4 2
+run_step "16" "anet node create bot-b --runtime http-api" "$ANET create bot-b --runtime http-api" "bot-b|http-api|Created node" "http-api runtime 选择正确，提示清楚。" "runtime 选择失真，用户输入和结果不一致。" 4 1
 run_step "17" "anet ls" "$ANET ls" "bot-a|bot-b|codex-sdk|http-api|Nodes:" "节点列表易读，能区分 runtime 和状态。" "节点列表看不出 runtime/状态重点。" 4 2
 run_step "18" "anet info bot-a" "$ANET info bot-a" "bot-a|runtime|node_id|network|codex-sdk" "详情页覆盖节点关键信息。" "详情页字段不全或排版不直观。" 4 2
 

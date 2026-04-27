@@ -12,7 +12,7 @@ echo ""
 
 COMMHUB_AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}" \
   bun run /app/server/src/index.ts &
-sleep 3
+for i in $(seq 1 30); do curl -sf http://127.0.0.1:9200/health >/dev/null 2>&1 && break; sleep 0.5; done
 
 # Setup: register 2 users
 REG_A=$(curl -s -X POST http://127.0.0.1:9200/api/auth/register -H "Content-Type: application/json" -d '{"username":"netuser_a","password":"test123456"}')

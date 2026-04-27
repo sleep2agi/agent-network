@@ -74,7 +74,7 @@ write_case \
   "anet register --username offlineuser --password pass123456" \
   "$OUT1" \
   "5" \
-  "错误信息直接指出无法连接 CommHub，并给出 'Is it running?'、'anet server local'、'anet doctor' 等下一步操作，比较友好。"
+  "错误信息直接指出无法连接 CommHub，并给出 'Is it running?'、'anet hub start'、'anet doctor' 等下一步操作，比较友好。"
 
 # Restart server for the rest
 start_server
@@ -116,7 +116,7 @@ write_case \
   "4" \
   "能告诉用户注册失败及具体原因；如果能补一句“直接登录即可”会更像真实产品提示。"
 
-# 5. anet create duplicate name
+# 5. anet node create duplicate name
 HOME5=/tmp/test18-home5
 PROJ5=/tmp/test18-proj5
 rm -rf "$HOME5" "$PROJ5"
@@ -126,8 +126,8 @@ init_home "$HOME5"
 (cd "$PROJ5" && HOME="$HOME5" $ANET create dup-node --runtime claude-code-cli >/tmp/test18-r5-create1.out 2>&1)
 OUT5=$(cd "$PROJ5" && HOME="$HOME5" $ANET create dup-node --runtime claude-code-cli 2>&1)
 write_case \
-  "anet create 重复名字" \
-  "anet create dup-node --runtime claude-code-cli" \
+  "anet node create 重复名字" \
+  "anet node create dup-node --runtime claude-code-cli" \
   "$OUT5" \
   "5" \
   "会明确指出节点已存在，并给出具体配置文件路径，定位非常直接。"
@@ -154,11 +154,11 @@ mkdir -p "$PROJ7"
 init_home "$HOME7"
 OUT7=$(cd "$PROJ7" && HOME="$HOME7" $ANET start ghost-node 2>&1)
 write_case \
-  "anet start 一个不存在的 node" \
-  "anet start ghost-node" \
+  "anet node start 一个不存在的 node" \
+  "anet node start ghost-node" \
   "$OUT7" \
   "5" \
-  "错误里直接写明节点不存在，并附带 'Create it first: anet create ghost-node'，属于很友好的恢复建议。"
+  "错误里直接写明节点不存在，并附带 'Create it first: anet node create ghost-node'，属于很友好的恢复建议。"
 
 # 8. Fake token against API
 OUT8=$(curl -s -i "$BASE/api/auth/me" -H "Authorization: Bearer utok_fake_token")

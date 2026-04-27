@@ -150,7 +150,7 @@ npx @sleep2agi/agent-node \
 
 ## 🔗 链接
 
-- **Dashboard**: https://agent-network-dashboard.vercel.app
+- **Dashboard**: Dashboard 默认随 anet server local 启动，也可独立部署
 - **操作手册**: https://github.com/sleep2agi/agent-ops (private)
 - **npm**: [@sleep2agi](https://www.npmjs.com/org/sleep2agi)
 

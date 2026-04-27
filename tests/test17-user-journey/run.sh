@@ -90,7 +90,7 @@ run_step "5" "anet register --username newbie --password pass123456" "anet regis
 run_step "6" "anet login --username newbie --password pass123456" "anet login --username newbie --password pass123456" "一般" "依赖上一步是否真正注册成功。" 'logged in|login successful|token|utok_'
 run_step "7" "anet whoami" "anet whoami" "是" "如果失败，通常说明登录态没有写清楚。" 'newbie|username'
 run_step "8" "anet network ls" "anet network ls" "是" "默认网络命名若不明显，用户会不知道下一步怎么选。" 'default|network_id|owner'
-run_step "9" "anet create my-first-bot --runtime http-api" "anet create my-first-bot --runtime http-api" "一般" "runtime/http-api 需要用户自己理解，不算纯新手友好。" 'Created node "my-first-bot".*http-api|my-first-bot.*http-api'
+run_step "9" "anet node create my-first-bot --runtime http-api" "anet node create my-first-bot --runtime http-api" "一般" "runtime/http-api 需要用户自己理解，不算纯新手友好。" 'Created node "my-first-bot".*http-api|my-first-bot.*http-api'
 run_step "10" "anet ls" "anet ls" "是" "如果列表为空但 create 成功，会很困惑。" 'my-first-bot'
 run_step "11" "anet status" "anet status" "一般" "状态页概念对新手略抽象，需要看输出是否直观。" 'CommHub:|Agents:|Tasks:'
 run_step "12" "anet doctor" "anet doctor" "是" "诊断通常是新手最能理解的反馈。" 'System Diagnostic|Result:'

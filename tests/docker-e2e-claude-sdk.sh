@@ -28,7 +28,7 @@ echo ""
 # 3. Create + start claude-agent-sdk agent
 echo "3. Starting claude-agent-sdk agent..."
 mkdir -p /tmp/claude-test && cd /tmp/claude-test
-anet create claude-real --runtime claude-agent-sdk --model minimax-m1 2>&1 >/dev/null
+anet node create claude-real --runtime claude-agent-sdk --model minimax-m1 2>&1 >/dev/null
 pass "node created"
 
 # Start agent-node with MiniMax env

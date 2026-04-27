@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "2.1.0-preview.8",
+  "version": "2.1.0-preview.10",
   "description": "AI Agent runtime for CommHub networks. Supports Claude Agent SDK, Codex SDK, and OpenAI/Anthropic-compatible HTTP API.",
   "bin": {
     "agent-node": "./dist/cli.js"
@@ -29,9 +29,10 @@
   ],
   "author": "sleep2agi",
   "license": "MIT",
+  "homepage": "https://anet.vansin.me",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sleep2agi/agent-comm-hub",
+    "url": "https://github.com/sleep2agi/agent-network",
     "directory": "agent-node"
   },
   "engines": {

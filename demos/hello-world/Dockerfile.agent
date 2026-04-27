@@ -1,0 +1,14 @@
+FROM oven/bun:1
+WORKDIR /app
+
+# Install Claude Code CLI (needed by claude-agent-sdk runtime)
+RUN apt-get update && apt-get install -y curl nodejs npm && rm -rf /var/lib/apt/lists/*
+RUN npm i -g @anthropic-ai/claude-code 2>/dev/null || true
+
+# Copy agent-node source
+COPY agent-node/ agent-node/
+RUN cd agent-node && npm install 2>/dev/null || true
+RUN cd agent-node && npm install @anthropic-ai/claude-agent-sdk 2>/dev/null || true
+
+# Claude CLI refuses --dangerously-skip-permissions as root without this
+ENV IS_SANDBOX=1

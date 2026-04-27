@@ -352,6 +352,19 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
   const prompt = `你是 ${ALIAS}，收到来自 ${from} 的任务：\n\n${task}\n\n执行完后简要汇报结果。`;
+  // Inject CommHub as MCP server so Claude can use send_task/get_all_status etc.
+  const commhubUrl = process.env.COMMHUB_URL || COMMHUB_URL;
+  const commhubToken = process.env.COMMHUB_TOKEN || AUTH_TOKEN;
+  const mcpServers = commhubUrl ? [{
+    name: "commhub",
+    type: "url" as const,
+    url: `${commhubUrl}/mcp`,
+    authorizationToken: commhubToken || undefined,
+  }] : [];
+
+  // Use globally installed claude binary (SDK bundled musl binary won't run on glibc containers)
+  const claudePath = (() => { try { const { execSync } = require("child_process"); return execSync("which claude", { encoding: "utf-8" }).trim(); } catch { return undefined; } })();
+
   const options: any = {
     model: MODEL || undefined,
     tools: TOOLS.length ? TOOLS : undefined,
@@ -359,6 +372,9 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     settingSources: [],
+    // mcpServers for claude-agent-sdk requires specific schema — TODO: find correct format
+    // mcpServers: mcpServers.length ? mcpServers : undefined,
+    pathToClaudeCodeExecutable: claudePath,
     env: process.env,
     cwd: process.cwd(),
     stderr: (data: string) => { if (data.trim()) debug(`[stderr] ${data.trim().slice(0, 200)}`); },
@@ -649,8 +665,11 @@ function isLowValueText(text: string, isReply = false): boolean {
 function shouldSkipMessage(from: string, content: string): string | null {
   if (from === ALIAS) return "self";
   if (content.startsWith(`[${ALIAS}]`)) return "own-prefix";
-  const now = Date.now();
-  if (lastReplyTime[from] && now - lastReplyTime[from] < COOLDOWN_MS) return "cooldown";
+  // Don't cooldown tasks from hub/dashboard — humans send rapid messages
+  if (from !== "hub" && from !== "api") {
+    const now = Date.now();
+    if (lastReplyTime[from] && now - lastReplyTime[from] < COOLDOWN_MS) return "cooldown";
+  }
   if (isLowValueText(content)) return "low-value-inbound";
   return null;
 }

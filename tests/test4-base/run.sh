@@ -37,10 +37,10 @@ echo "$UPGRADE_OUTPUT" | grep -q "Automatic self-upgrade is disabled" && pass "u
 anet -v 2>&1 | grep -q "anet v" && pass "anet still available after upgrade" || fail "anet missing after upgrade"
 echo ""
 
-# 3. anet create (param mode)
+# 3. anet node create (param mode)
 echo "3. Testing anet create..."
 mkdir -p /tmp/test && cd /tmp/test
-anet create test-node --runtime codex-sdk --model gpt-5.4 2>&1
+anet node create test-node --runtime codex-sdk --model gpt-5.4 2>&1
 [ -f .anet/nodes/test-node/config.json ] && pass "config.json created" || fail "config.json missing"
 grep -q "codex-sdk" .anet/nodes/test-node/config.json && pass "runtime correct" || fail "runtime wrong"
 grep -q "gpt-5.4" .anet/nodes/test-node/config.json && pass "model correct" || fail "model wrong"
@@ -52,12 +52,12 @@ echo ""
 
 # 4. Invalid name
 echo "4. Testing invalid name..."
-anet create "bad/name" --runtime codex-sdk 2>&1 | grep -qi "invalid" && pass "invalid name rejected" || fail "should reject"
+anet node create "bad/name" --runtime codex-sdk 2>&1 | grep -qi "invalid" && pass "invalid name rejected" || fail "should reject"
 echo ""
 
 # 5. Duplicate create
 echo "5. Testing duplicate create..."
-anet create test-node --runtime codex-sdk 2>&1 | grep -qi "already exists" && pass "duplicate rejected" || fail "should reject"
+anet node create test-node --runtime codex-sdk 2>&1 | grep -qi "already exists" && pass "duplicate rejected" || fail "should reject"
 echo ""
 
 # 5.1 rename + lookup by node_id
@@ -132,17 +132,17 @@ echo ""
 
 # 10.1 anet stop
 echo "10.1 Testing anet stop..."
-anet create stop-test --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
-STOP_OUT=$(anet stop stop-test 2>&1)
+anet node create stop-test --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
+STOP_OUT=$(anet node stop stop-test 2>&1)
 echo "$STOP_OUT" | grep -qi "not running\|server notified" && pass "stop non-running node (server notified)" || fail "stop command broken"
 echo ""
 
 # 10.2 anet delete
 echo "10.2 Testing anet delete..."
-anet create del-test --runtime codex-sdk 2>&1 >/dev/null
+anet node create del-test --runtime codex-sdk 2>&1 >/dev/null
 [ -d .anet/nodes/del-test ] && pass "del-test created" || fail "del-test not created"
-anet delete del-test 2>&1 | grep -qi "Run again with --force" && pass "delete requires --force" || fail "delete should require force"
-anet delete del-test --force 2>&1 | grep -qi "Deleted" && pass "delete --force works" || fail "delete --force failed"
+anet node delete del-test 2>&1 | grep -qi "Run again with --force" && pass "delete requires --force" || fail "delete should require force"
+anet node delete del-test --force 2>&1 | grep -qi "Deleted" && pass "delete --force works" || fail "delete --force failed"
 [ ! -d .anet/nodes/del-test ] && pass "del-test directory removed" || fail "del-test still exists"
 echo ""
 
@@ -256,7 +256,7 @@ echo ""
 
 # 17. high priority ordering
 echo "17. Testing priority ordering..."
-anet create prio-agent --runtime codex-sdk 2>&1 >/dev/null
+anet node create prio-agent --runtime codex-sdk 2>&1 >/dev/null
 mcp_call "send_task" '{"alias":"prio-agent","task":"low prio","from_session":"tester","priority":"low"}' >/dev/null
 mcp_call "send_task" '{"alias":"prio-agent","task":"high prio","from_session":"tester","priority":"high"}' >/dev/null
 INBOX=$(mcp_call "get_inbox" '{"alias":"prio-agent","limit":5}')
@@ -609,7 +609,7 @@ kill $AUTH_PID 2>/dev/null || true
 echo ""
 
 # 24k. notifyServerOffline verification
-echo "24k. Testing anet stop offline effect..."
+echo "24k. Testing anet node stop offline effect..."
 # Register a fake agent on main server, then stop it
 mcp_call "report_status" '{"resume_id":"sim-stop-test","alias":"stop-verify","status":"idle","server":"test"}' > /dev/null
 # Verify it's idle

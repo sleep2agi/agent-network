@@ -1,0 +1,183 @@
+/* ========================================
+   Agent Network Docs — Custom Theme
+   Clean, professional, Linear/Vercel-inspired
+   Dark + Light mode
+   ======================================== */
+
+/* ---------- Light-mode variables ---------- */
+:root {
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-soft: #f8f9fa;
+  --vp-c-bg-mute: #f1f3f5;
+  --vp-c-bg-alt: #f5f6f7;
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(135deg, #009e7e 0%, #00b894 100%);
+  --vp-c-brand-1: #009e7e;
+  --vp-c-brand-2: #00b894;
+  --vp-c-brand-3: #00d4aa;
+  --vp-c-brand-soft: rgba(0, 158, 126, 0.08);
+  --vp-c-text-1: #1a1a2e;
+  --vp-c-text-2: #666;
+  --vp-c-divider: #e8e8ec;
+}
+
+/* ---------- Dark-mode variables ---------- */
+.dark {
+  --vp-c-bg: #0a0a0f;
+  --vp-c-bg-soft: #12121a;
+  --vp-c-bg-mute: #1a1a24;
+  --vp-c-bg-alt: #0e0e14;
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(135deg, #00d4aa 0%, #00b894 100%);
+  --vp-c-brand-1: #00d4aa;
+  --vp-c-brand-2: #00b894;
+  --vp-c-brand-3: #009e7e;
+  --vp-c-brand-soft: rgba(0, 212, 170, 0.1);
+  --vp-c-text-1: #e5e5e5;
+  --vp-c-text-2: #888;
+  --vp-c-divider: #1e1e28;
+}
+
+/* ---------- Hero ---------- */
+.VPHero {
+  padding-bottom: 48px !important;
+}
+
+/* ---------- Feature cards ---------- */
+.VPFeature {
+  transition: transform 0.2s ease, border-color 0.2s ease !important;
+  border: 1px solid var(--vp-c-divider) !important;
+  border-radius: 8px !important;
+}
+.VPFeature:hover {
+  transform: translateY(-2px);
+  border-color: var(--vp-c-brand-1) !important;
+}
+.VPFeature {
+  background-color: var(--vp-c-bg-soft) !important;
+}
+.VPFeature:hover {
+  background-color: var(--vp-c-bg-mute) !important;
+}
+
+/* ---------- Stats Section ---------- */
+.stats-section {
+  display: flex;
+  justify-content: center;
+  gap: 56px;
+  flex-wrap: wrap;
+  padding: 48px 24px 16px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+.stat-item {
+  text-align: center;
+}
+.stat-number {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--vp-c-brand-1);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--vp-c-text-2);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ---------- How it Works ---------- */
+.how-it-works {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 56px 24px 24px;
+}
+.how-it-works h2 {
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 40px;
+  color: var(--vp-c-text-1);
+}
+.steps {
+  display: flex;
+  justify-content: center;
+  gap: 40px;
+  flex-wrap: wrap;
+}
+.step {
+  text-align: center;
+  max-width: 200px;
+  flex: 1 1 180px;
+}
+.step-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: transparent;
+  border: 2px solid var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+  font-size: 1.1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+}
+.step-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--vp-c-text-1);
+}
+.step-desc {
+  font-size: 0.82rem;
+  color: var(--vp-c-text-2);
+  line-height: 1.5;
+}
+
+/* ---------- CTA Button ---------- */
+.cta-section {
+  text-align: center;
+  padding: 40px 24px 64px;
+}
+.cta-button {
+  display: inline-block;
+  padding: 12px 32px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--vp-c-brand-1);
+  border-radius: 6px;
+  text-decoration: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.cta-button:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  color: #fff;
+}
+
+/* ---------- Divider ---------- */
+.section-divider {
+  width: 48px;
+  height: 2px;
+  background: var(--vp-c-divider);
+  border: none;
+  margin: 0 auto;
+}
+
+/* ---------- Sidebar active ---------- */
+.VPSidebarItem.is-active > .item > .link > .text {
+  color: var(--vp-c-brand-1);
+}
+
+/* ---------- Links ---------- */
+.vp-doc a {
+  color: var(--vp-c-brand-1);
+}
+.vp-doc a:hover {
+  color: var(--vp-c-brand-2);
+}

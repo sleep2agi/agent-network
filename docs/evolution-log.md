@@ -1,5 +1,32 @@
 # Agent Network Evolution Log
 
+## V3.15 Docs + Cases + CLI UX (2026-04-27) — IN PROGRESS
+
+### Stats
+- VitePress docs site: anet.vansin.me (46+ pages, Chinese + English)
+- 7 case study pages (hello-world, translation-pipeline, code-review, idiom-chain, telegram-squad, mixed-model, customer-service)
+- npm homepage → anet.vansin.me, repo URL → agent-network
+
+### Added since V3.14
+- **Docs: Account System page** (中英双语) — registration, login, RBAC, Agent tokens, model API keys
+- **Docs: Cases module** — 7 案例（入门3+进阶3+行业1），案例总览索引
+- **Docs: Model selector in CLI** — interactive picker with 9 providers (MiniMax/DeepSeek/GLM/Intern/Kimi/OpenRouter/Claude/Claude Code/Codex)
+- **Docs: API Key docs** — where to get keys, where they're stored, security tips
+- **CLI: anet hub/node/network hierarchy** — restructured commands
+- **CLI: Interactive model picker** — select → inquirer/prompts
+- **npm: homepage** → https://anet.vansin.me for all 3 packages
+- **npm: repository** → github.com/sleep2agi/agent-network
+- **Fix: Port 9999 confusion** — removed from quickstart, clarified Dashboard = 9200 built-in
+- **Fix: npx @sleep2agi/agent-node** → unified to anet node commands in all user docs (in progress)
+
+### Pending
+- npx→anet replacement (60+ locations, agent running)
+- RBAC test27 (full 4-level role testing)
+- Demo case tutorials (customer-service, content-factory — placeholder)
+- npm publish preview.31 (after doc fixes land)
+
+---
+
 ## V3.14 Stabilization + UX (2026-04-12) — COMPLETE
 
 ### Stats

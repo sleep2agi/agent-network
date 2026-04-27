@@ -30,7 +30,7 @@ echo "────────────────────────�
 mkdir -p /tmp/demo && cd /tmp/demo
 
 for AGENT in "alpha" "beta" "gamma"; do
-  anet create "$AGENT" --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
+  anet node create "$AGENT" --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
   # Inject network_id into config
   python3 -c "
 import json

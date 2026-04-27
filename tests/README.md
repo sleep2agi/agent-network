@@ -2,7 +2,7 @@
 
 ## 测试架构
 
-`tests/` 目录当前实际有 25 套独立 Docker 测试套件，可并行运行：
+`tests/` 目录当前实际有 29 套独立 Docker 测试套件，可并行运行：
 
 | 套件 | 目录 | 最新结果 | 覆盖范围 |
 |------|------|---------|---------|
@@ -25,6 +25,10 @@
 | npm API | `test-npm-api/` | 19 passed, 0 failed | npm 包 API/ntok_/utok_ 边界 |
 | npm Install | `test-npm-install/` | 9 passed, 1 failed | npm 安装新手流程（当前剩版本输出格式差异） |
 | npm Security | `test-npm-security/` | 18 passed, 0 failed | npm 包安全回归 |
+| Test 23 | `test23-codex-telegram/` | -- | Codex + Telegram 集成 |
+| Test 24 | `test24-codex-commander/` | -- | Codex 指挥室调度 |
+| Test 25 | `test25-agent-telegram/` | -- | agent-node Telegram channel |
+| Test 26 | `test26-network-scope/` | 20 passed, 0 failed | 网络隔离回归（REST auth + MCP 隔离 + viewer 提权） |
 
 另外：
 - `local-e2e.sh` — 本地快速测试（不需要 Docker）

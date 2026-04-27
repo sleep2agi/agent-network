@@ -14,7 +14,13 @@ echo ""
 BASE="http://127.0.0.1:9200"
 
 cd /app/server && COMMHUB_AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}" bun run src/index.ts &
-sleep 3
+
+# Wait for server to be healthy (up to 15s)
+for i in $(seq 1 30); do
+  curl -sf "$BASE/health" >/dev/null 2>&1 && break
+  sleep 0.5
+done
+curl -sf "$BASE/health" >/dev/null 2>&1 || { echo "❌ server failed to start"; exit 1; }
 
 # Register a user for testing
 REG=$(curl -s -X POST "$BASE/api/auth/register" -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-test-auth-token}" -H "Content-Type: application/json" -d '{"username":"sectest","password":"pass123456"}')

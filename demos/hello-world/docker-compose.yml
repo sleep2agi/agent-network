@@ -1,0 +1,143 @@
+# Hello World Demo: 2 Agents talking to each other
+# Usage: MINIMAX_API_KEY=sk-cp-xxx docker compose up --build
+#
+# What happens:
+#   1. CommHub server starts
+#   2. Seed container registers admin + creates network + generates ntok_
+#   3. Two MiniMax agents (小明, 小红) start and connect
+#   4. Seed sends a task to 小明: "Say hello to 小红"
+#   5. Watch the conversation in the logs
+
+services:
+  server:
+    image: oven/bun:1
+    working_dir: /app/server
+    volumes:
+      - ../../server:/app/server:ro
+    command: bun run src/index.ts
+    environment:
+      - COMMHUB_AUTH_TOKEN=demo-hello-token
+      - HOST=0.0.0.0
+      - PORT=9200
+    ports:
+      - "${DEMO_PORT:-9210}:9200"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:9200/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  seed:
+    image: curlimages/curl:latest
+    user: "0:0"
+    depends_on:
+      server:
+        condition: service_healthy
+    volumes:
+      - shared:/shared
+    entrypoint: /bin/sh
+    command: |
+      -c '
+      BASE=http://server:9200
+      TOKEN=demo-hello-token
+
+      echo "=== Registering admin ==="
+      REG=$$(curl -s -X POST $$BASE/api/auth/register \
+        -H "Authorization: Bearer $$TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"admin123456\"}")
+      echo "$$REG"
+
+      UTOK=$$(echo "$$REG" | sed -n "s/.*\"token\":\"\([^\"]*\)\".*/\1/p")
+      NTOK=$$(echo "$$REG" | sed -n "s/.*\"network_token\":\"\([^\"]*\)\".*/\1/p")
+
+      echo "$$NTOK" > /shared/ntok
+      echo "$$UTOK" > /shared/utok
+      echo "=== Network token saved: $$NTOK ==="
+
+      echo "=== Waiting for agents to connect ==="
+      sleep 20
+
+      echo "=== Sending task to 小明 ==="
+      curl -s -X POST $$BASE/mcp \
+        -H "Authorization: Bearer $$NTOK" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"seed\",\"version\":\"1.0\"}}}"
+
+      curl -s -X POST $$BASE/mcp \
+        -H "Authorization: Bearer $$NTOK" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"send_task\",\"arguments\":{\"alias\":\"小明\",\"task\":\"请给小红发一条消息，问她今天过得怎么样。收到她的回复后，把结果告诉我。\",\"from_session\":\"seed\"}}}"
+
+      echo ""
+      echo "=== Task sent! Watch agent logs for the conversation ==="
+      echo "=== Run: docker compose logs -f xiaoming xiaohong ==="
+      '
+
+  xiaoming:
+    build:
+      context: ../..
+      dockerfile: demos/hello-world/Dockerfile.agent
+    working_dir: /app/agent-node
+    depends_on:
+      server:
+        condition: service_healthy
+    volumes:
+      - shared:/shared:ro
+    entrypoint: /bin/sh
+    command: |
+      -c '
+      echo "Waiting for network token..."
+      while [ ! -f /shared/ntok ]; do sleep 1; done
+      export COMMHUB_TOKEN=$$(cat /shared/ntok)
+      echo "Got token: $$COMMHUB_TOKEN"
+
+      export ANTHROPIC_BASE_URL=$${ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
+      export ANTHROPIC_AUTH_TOKEN=$$MINIMAX_API_KEY
+
+      exec bun run src/cli.ts \
+        --alias 小明 \
+        --runtime claude-agent-sdk \
+        --hub http://server:9200 \
+        --prompt "你是小明，一个友好的 AI 助手。网络中还有一个叫小红的 Agent，你可以通过 send_task 给她发消息。"
+      '
+    environment:
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
+
+  xiaohong:
+    build:
+      context: ../..
+      dockerfile: demos/hello-world/Dockerfile.agent
+    working_dir: /app/agent-node
+    depends_on:
+      server:
+        condition: service_healthy
+    volumes:
+      - shared:/shared:ro
+    entrypoint: /bin/sh
+    command: |
+      -c '
+      echo "Waiting for network token..."
+      while [ ! -f /shared/ntok ]; do sleep 1; done
+      export COMMHUB_TOKEN=$$(cat /shared/ntok)
+      echo "Got token: $$COMMHUB_TOKEN"
+
+      export ANTHROPIC_BASE_URL=$${ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
+      export ANTHROPIC_AUTH_TOKEN=$$MINIMAX_API_KEY
+
+      exec bun run src/cli.ts \
+        --alias 小红 \
+        --runtime claude-agent-sdk \
+        --hub http://server:9200 \
+        --prompt "你是小红，一个开朗活泼的 AI 助手。收到消息后用中文热情回复。"
+      '
+    environment:
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
+
+volumes:
+  shared:

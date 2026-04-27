@@ -26,7 +26,7 @@ PIDS=()
 echo "Creating 5 Codex agents..."
 for i in 1 2 3 4 5; do
   NAME="codex-$i"
-  anet create "$NAME" --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
+  anet node create "$NAME" --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
   timeout 90 agent-node --alias "$NAME" --config ".anet/nodes/$NAME/config.json" 2>&1 &
   PIDS+=($!)
 done

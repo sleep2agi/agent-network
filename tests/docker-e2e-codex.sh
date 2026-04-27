@@ -28,7 +28,7 @@ echo ""
 # 3. Create + start codex agent
 echo "3. Starting codex agent..."
 mkdir -p /tmp/codex-test && cd /tmp/codex-test
-anet create codex-real --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
+anet node create codex-real --runtime codex-sdk --model gpt-5.4 2>&1 >/dev/null
 pass "node created"
 
 # Start agent-node in background (timeout 30s)

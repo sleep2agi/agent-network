@@ -116,7 +116,7 @@ wait "$SERVER1_PID" >/dev/null 2>&1
 
 LOCALHOME=/tmp/test21-local-home
 rm -rf "$LOCALHOME"
-LOCAL_CMD="anet server local --username local1 --password pass123456"
+LOCAL_CMD="anet hub start --username local1 --password pass123456"
 HOME="$LOCALHOME" $ANET server local --username local1 --password pass123456 >/tmp/test21-server-local.out 2>&1 &
 LOCAL_PID=$!
 sleep 8
@@ -146,9 +146,9 @@ kill -INT "$LOCAL_PID" >/dev/null 2>&1
 sleep 3
 POST_KILL_HEALTH=$(curl -s "$BASE/health" 2>&1)
 if ! echo "$POST_KILL_HEALTH" | grep -q '"ok":true'; then
-  record 9 "Ctrl+C 后 server 停止" "Ctrl+C / SIGINT anet server local" "$POST_KILL_HEALTH" "PASS" "SIGINT 后健康检查失败，说明服务已停止。"
+  record 9 "Ctrl+C 后 server 停止" "Ctrl+C / SIGINT anet hub start" "$POST_KILL_HEALTH" "PASS" "SIGINT 后健康检查失败，说明服务已停止。"
 else
-  record 9 "Ctrl+C 后 server 停止" "Ctrl+C / SIGINT anet server local" "$POST_KILL_HEALTH" "FAIL" "SIGINT 后服务仍然存活。"
+  record 9 "Ctrl+C 后 server 停止" "Ctrl+C / SIGINT anet hub start" "$POST_KILL_HEALTH" "FAIL" "SIGINT 后服务仍然存活。"
 fi
 
 SERVER2_PID=$(start_source_server 9200)
@@ -162,9 +162,9 @@ fi
 
 CREATE_DUP_OUT=$(cd "$QSPROJ" && HOME="$QSHOME" $ANET create qs-agent --runtime codex-sdk 2>&1)
 if echo "$CREATE_DUP_OUT" | grep -q 'already exists'; then
-  record 11 "跑两次 anet create same-name 重复提示" "anet create qs-agent --runtime codex-sdk" "$CREATE_DUP_OUT" "PASS" "重复创建会明确提示节点已存在。"
+  record 11 "跑两次 anet node create same-name 重复提示" "anet node create qs-agent --runtime codex-sdk" "$CREATE_DUP_OUT" "PASS" "重复创建会明确提示节点已存在。"
 else
-  record 11 "跑两次 anet create same-name 重复提示" "anet create qs-agent --runtime codex-sdk" "$CREATE_DUP_OUT" "FAIL" "重复创建提示不明确。"
+  record 11 "跑两次 anet node create same-name 重复提示" "anet node create qs-agent --runtime codex-sdk" "$CREATE_DUP_OUT" "FAIL" "重复创建提示不明确。"
 fi
 
 SERVER3_PID=$(start_source_server 9300)

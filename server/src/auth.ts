@@ -224,6 +224,7 @@ export function createToken(userId: string, name: string, networkId?: string): {
   if (networkId) {
     const role = getUserNetworkRole(userId, networkId);
     if (!role) return { ok: false, error: "not a member of this network" };
+    if (role === "viewer") return { ok: false, error: "viewer cannot create full-access network tokens" };
   }
   const token = generateToken();
   const tokenId = generateId("tok");

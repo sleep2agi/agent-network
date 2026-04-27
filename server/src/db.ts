@@ -46,6 +46,7 @@ db.exec(`
     artifacts        TEXT,
     score            REAL,
     duration_minutes REAL,
+    network_id       TEXT,
     completed_at     TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
@@ -296,12 +297,15 @@ try {
 } catch {}
 
 // ── V3: add network_id to existing tables ──
-for (const table of ["sessions", "nodes", "tasks", "inbox", "task_events"]) {
+for (const table of ["sessions", "nodes", "tasks", "inbox", "task_events", "completions"]) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN network_id TEXT`); } catch {}
 }
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_network ON sessions(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network ON tasks(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_nodes_network ON nodes(network_id)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network ON inbox(network_id)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_task_events_network ON task_events(network_id)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_completions_network ON completions(network_id)"); } catch {}
 
 // Helpers
 export function uuidv4(): string {
@@ -344,7 +348,8 @@ export function logAudit(userId: string | null, username: string | null, action:
 export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {
   try {
     db.run(
-      "INSERT INTO task_events (task_id, from_status, to_status, actor, detail) VALUES (?1, ?2, ?3, ?4, ?5)",
+      `INSERT INTO task_events (task_id, from_status, to_status, actor, detail, network_id)
+       VALUES (?1, ?2, ?3, ?4, ?5, (SELECT network_id FROM tasks WHERE task_id = ?1))`,
       [taskId, fromStatus, toStatus, actor, detail ?? null]
     );
   } catch {}

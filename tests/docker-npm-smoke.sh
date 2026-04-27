@@ -38,7 +38,7 @@ echo ""
 # 4. anet create
 echo "4. Testing anet create..."
 mkdir -p /tmp/npm-test && cd /tmp/npm-test
-anet create npm-test --runtime codex-sdk --model gpt-5.4 2>&1
+anet node create npm-test --runtime codex-sdk --model gpt-5.4 2>&1
 [ -f .anet/nodes/npm-test/config.json ] && pass "config.json created" || fail "config missing"
 grep -q "codex-sdk" .anet/nodes/npm-test/config.json && pass "runtime in config" || fail "runtime wrong"
 grep -q '"node_id": "n_' .anet/nodes/npm-test/config.json && pass "node_id generated" || fail "node_id missing"
@@ -79,7 +79,7 @@ echo ""
 # 8. Compare local vs npm — check critical feature parity
 echo "8. Feature parity check..."
 anet ls 2>&1 | grep -q "STATUS" && pass "anet ls has STATUS column" || fail "anet ls missing STATUS"
-anet stop npm-test 2>&1 | grep -qi "notif\|not running" && pass "anet stop works" || fail "anet stop broken"
+anet node stop npm-test 2>&1 | grep -qi "notif\|not running" && pass "anet node stop works" || fail "anet node stop broken"
 echo ""
 
 # Summary

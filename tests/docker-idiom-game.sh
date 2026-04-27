@@ -54,7 +54,7 @@ AGENTS=()
 for i in $(seq 1 10); do
   NAME="player-$i"
   RUNTIME="codex-sdk"
-  anet create "$NAME" --runtime "$RUNTIME" --model gpt-5.4 2>&1 >/dev/null
+  anet node create "$NAME" --runtime "$RUNTIME" --model gpt-5.4 2>&1 >/dev/null
   AGENTS+=("$NAME")
 done
 echo "Created: ${AGENTS[*]}"

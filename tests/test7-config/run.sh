@@ -22,7 +22,7 @@ mkdir -p /root/.anet
 # 1. Global config baseline
 echo "1. Global hub fallback..."
 echo '{"hub":"http://global-host:9200","token":"global-tok"}' > /root/.anet/config.json
-anet create cfg-test --runtime codex-sdk --model test-model 2>&1 >/dev/null
+anet node create cfg-test --runtime codex-sdk --model test-model 2>&1 >/dev/null
 # Node has no hub -> fallback to global
 HUB=$(timeout 3 agent-node --alias cfg-fb --config .anet/nodes/cfg-test/config.json 2>&1 | grep "hub:" || true)
 echo "$HUB" | grep -q "global-host" && pass "hub fallback to global" || fail "hub fallback: $HUB"
@@ -88,11 +88,11 @@ echo "$DF" | grep -q "127.0.0.1:9200" && pass "default hub = 127.0.0.1:9200" || 
 echo "$DF" | grep -q "no auth" && pass "default: no auth" || pass "auth line ok"
 echo ""
 
-# 8. anet create doesn't duplicate global token
-echo "8. anet create token inheritance..."
+# 8. anet node create doesn't duplicate global token
+echo "8. anet node create token inheritance..."
 cd /tmp/cfg-test
 echo '{"hub":"http://127.0.0.1:9200","token":"should-not-copy"}' > /root/.anet/config.json
-anet create inherit-test --runtime codex-sdk 2>&1 >/dev/null
+anet node create inherit-test --runtime codex-sdk 2>&1 >/dev/null
 grep -q "should-not-copy" .anet/nodes/inherit-test/config.json && pass "token saved to node config (known behavior)" || pass "token not in node config"
 echo ""
 
