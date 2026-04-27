@@ -355,12 +355,14 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   // Inject CommHub as MCP server so Claude can use send_task/get_all_status etc.
   const commhubUrl = process.env.COMMHUB_URL || COMMHUB_URL;
   const commhubToken = process.env.COMMHUB_TOKEN || AUTH_TOKEN;
-  const mcpServers = commhubUrl ? [{
-    name: "commhub",
-    type: "url" as const,
-    url: `${commhubUrl}/mcp`,
-    authorizationToken: commhubToken || undefined,
-  }] : [];
+  const mcpServers: Record<string, any> = {};
+  if (commhubUrl) {
+    mcpServers["commhub"] = {
+      type: "url",
+      url: `${commhubUrl}/mcp`,
+      headers: commhubToken ? { "Authorization": `Bearer ${commhubToken}` } : undefined,
+    };
+  }
 
   // Use globally installed claude binary (SDK bundled musl binary won't run on glibc containers)
   const claudePath = (() => { try { const { execSync } = require("child_process"); return execSync("which claude", { encoding: "utf-8" }).trim(); } catch { return undefined; } })();
@@ -372,8 +374,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     settingSources: [],
-    // mcpServers for claude-agent-sdk requires specific schema — TODO: find correct format
-    // mcpServers: mcpServers.length ? mcpServers : undefined,
+    mcpServers: Object.keys(mcpServers).length ? mcpServers : undefined,
     pathToClaudeCodeExecutable: claudePath,
     env: process.env,
     cwd: process.cwd(),
