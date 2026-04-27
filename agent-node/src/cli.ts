@@ -353,6 +353,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
 
   const prompt = `你是 ${ALIAS}，收到来自 ${from} 的任务：\n\n${task}\n\n执行完后简要汇报结果。`;
   // Inject CommHub as MCP server so Claude can use send_task/get_all_status etc.
+  // CLI accepts { url } format (streamable-http), auth via env or header
   const commhubUrl = process.env.COMMHUB_URL || COMMHUB_URL;
   const commhubToken = process.env.COMMHUB_TOKEN || AUTH_TOKEN;
   const mcpServers: Record<string, any> = {};
@@ -364,8 +365,29 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     };
   }
 
-  // Use globally installed claude binary (SDK bundled musl binary won't run on glibc containers)
-  const claudePath = (() => { try { const { execSync } = require("child_process"); return execSync("which claude", { encoding: "utf-8" }).trim(); } catch { return undefined; } })();
+  // SDK tries musl binary first which fails on glibc (Debian) systems.
+  // Auto-detect: try glibc binary from SDK, then global install, then let SDK default.
+  const claudePath = (() => {
+    try {
+      const { execSync } = require("child_process");
+      const fs = require("fs");
+      // Find glibc binary next to the musl one
+      try {
+        const glibcPath = require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude");
+        if (fs.existsSync(glibcPath)) {
+          execSync(`${glibcPath} --version`, { stdio: "pipe" });
+          log(`[claude] using glibc binary: ${glibcPath}`);
+          return glibcPath;
+        }
+      } catch {}
+      // Try global install
+      try {
+        const globalPath = execSync("which claude", { encoding: "utf-8" }).trim();
+        if (globalPath) { log(`[claude] using global binary: ${globalPath}`); return globalPath; }
+      } catch {}
+      return undefined; // let SDK find its own
+    } catch { return undefined; }
+  })();
 
   const options: any = {
     model: MODEL || undefined,
@@ -374,11 +396,12 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     settingSources: [],
-    mcpServers: Object.keys(mcpServers).length ? mcpServers : undefined,
+    // CLI binary rejects URL-type MCP servers. Only pass mcpServers when no custom binary needed.
+    mcpServers: !claudePath && Object.keys(mcpServers).length ? mcpServers : undefined,
     pathToClaudeCodeExecutable: claudePath,
     env: process.env,
     cwd: process.cwd(),
-    stderr: (data: string) => { if (data.trim()) debug(`[stderr] ${data.trim().slice(0, 200)}`); },
+    stderr: (data: string) => { if (data.trim()) log(`[stderr] ${data.trim().slice(0, 300)}`); },
     hooks: {
       PreToolUse: [{ hooks: [async (input: any) => {
         log(`[tool] ${input.tool_name}(${JSON.stringify(input.tool_input).slice(0, 80)})`);
@@ -392,6 +415,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
 
   let result = "";
   const t0 = Date.now();
+  log(`[claude] claudePath=${claudePath || "SDK default"}, mcpServers=${Object.keys(mcpServers).join(",") || "none"}`);
   for await (const message of query({ prompt, options })) {
     const m = message as any;
     if (m.type === "system" && m.subtype === "init") {

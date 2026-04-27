@@ -97,6 +97,7 @@ services:
 
       export ANTHROPIC_BASE_URL=$${ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
       export ANTHROPIC_AUTH_TOKEN=$$MINIMAX_API_KEY
+      export ANTHROPIC_API_KEY=$$MINIMAX_API_KEY
 
       exec bun run src/cli.ts \
         --alias 小明 \
@@ -106,7 +107,10 @@ services:
       '
     environment:
       - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
+      - IS_SANDBOX=1
 
   xiaohong:
     build:
@@ -128,6 +132,7 @@ services:
 
       export ANTHROPIC_BASE_URL=$${ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
       export ANTHROPIC_AUTH_TOKEN=$$MINIMAX_API_KEY
+      export ANTHROPIC_API_KEY=$$MINIMAX_API_KEY
 
       exec bun run src/cli.ts \
         --alias 小红 \
@@ -137,7 +142,10 @@ services:
       '
     environment:
       - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
+      - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
+      - IS_SANDBOX=1
 
 volumes:
   shared:
