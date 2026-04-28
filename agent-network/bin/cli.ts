@@ -1085,14 +1085,14 @@ async function createCommand(idOverride?: string) {
   const gc = loadGlobal();
 
   // ── Interactive model selector (when no --runtime specified) ──
-  const MODEL_PRESETS: Record<string, { runtime: string; label: string; baseUrl?: string; envKey?: string; requiresAuth?: string }> = {
-    minimax:   { runtime: "claude-agent-sdk", label: "MiniMax（推荐，国内直连，低成本）", baseUrl: "https://api.minimaxi.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
-    deepseek:  { runtime: "claude-agent-sdk", label: "DeepSeek（代码+推理，性价比极高）", baseUrl: "https://api.deepseek.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
-    glm:       { runtime: "claude-agent-sdk", label: "GLM 智谱（中文理解强）", baseUrl: "https://open.bigmodel.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
-    intern:    { runtime: "claude-agent-sdk", label: "书生 Intern（科学推理）", baseUrl: "https://chat.intern-ai.org.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
-    kimi:      { runtime: "claude-agent-sdk", label: "Kimi（长文本 128K）", baseUrl: "https://api.moonshot.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN" },
-    openrouter:{ runtime: "claude-agent-sdk", label: "OpenRouter（一个 Key 用所有模型）", baseUrl: "https://openrouter.ai/api/v1", envKey: "ANTHROPIC_AUTH_TOKEN" },
-    claude:    { runtime: "claude-agent-sdk", label: "Claude Sonnet/Opus（海外，需 API Key）", envKey: "ANTHROPIC_API_KEY" },
+  const MODEL_PRESETS: Record<string, { runtime: string; label: string; baseUrl?: string; envKey?: string; requiresAuth?: string; signupUrl?: string }> = {
+    minimax:   { runtime: "claude-agent-sdk", label: "MiniMax（推荐，国内直连，低成本）", baseUrl: "https://api.minimaxi.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.minimaxi.com" },
+    deepseek:  { runtime: "claude-agent-sdk", label: "DeepSeek（代码+推理，性价比极高）", baseUrl: "https://api.deepseek.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.deepseek.com" },
+    glm:       { runtime: "claude-agent-sdk", label: "GLM 智谱（中文理解强）", baseUrl: "https://open.bigmodel.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://open.bigmodel.cn" },
+    intern:    { runtime: "claude-agent-sdk", label: "书生 Intern（科学推理）", baseUrl: "https://chat.intern-ai.org.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn" },
+    kimi:      { runtime: "claude-agent-sdk", label: "Kimi（长文本 128K）", baseUrl: "https://api.moonshot.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.moonshot.cn" },
+    openrouter:{ runtime: "claude-agent-sdk", label: "OpenRouter（一个 Key 用所有模型）", baseUrl: "https://openrouter.ai/api/v1", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://openrouter.ai" },
+    claude:    { runtime: "claude-agent-sdk", label: "Claude Sonnet/Opus（海外，需 API Key）", envKey: "ANTHROPIC_API_KEY", signupUrl: "https://console.anthropic.com" },
     "claude-code": { runtime: "claude-code-cli", label: "Claude Code CLI（需 Max 订阅）", requiresAuth: "claude" },
     codex:     { runtime: "codex-sdk", label: "GPT-5.5 Codex（海外，需 codex auth login）", requiresAuth: "codex" },
   };
@@ -1113,6 +1113,9 @@ async function createCommand(idOverride?: string) {
         process.env.ANTHROPIC_BASE_URL = preset.baseUrl;
       }
       if (preset.envKey && !preset.requiresAuth) {
+        if (preset.signupUrl) {
+          console.log(`[anet] 没有 Key？去 ${preset.signupUrl} 注册并创建 API Key`);
+        }
         const key = await ask(`输入 API Key (${chosen})`);
         if (key) process.env[preset.envKey] = key;
       }
