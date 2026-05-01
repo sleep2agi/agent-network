@@ -1776,6 +1776,46 @@ async function serverCommand() {
     saveServerConfig({ port, host: "127.0.0.1", token });
     saveGlobal(gc);
 
+    // Wait for API to fully boot (the /api/auth/* endpoints may not respond
+    // immediately even after /health goes ok).
+    for (let i = 0; i < 10; i++) {
+      try {
+        const r = await fetch(`${hubUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: "__probe__", password: "______" }),
+        });
+        if (r.headers.get("content-type")?.includes("json")) break;
+      } catch {}
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    // Try to register a default account so anyone (this machine or remote)
+    // has a known way in. Idempotent: "already taken" is treated as success.
+    // We DO NOT log in here — that's the user's responsibility (avoids token rotation
+    // out-of-sync with config.json).
+    const defaultUser = opts.username || opts.user || "admin";
+    const defaultPass = opts.password || opts.pass || "anehub";
+    let defaultAccountReady = false;
+    try {
+      const reg = await fetch(`${hubUrl}/api/auth/register`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ username: defaultUser, password: defaultPass }),
+      }).then(r => r.json() as any);
+      if (reg.ok) {
+        defaultAccountReady = true;
+        console.log(`  ✅ Default account created: ${defaultUser} / ${defaultPass}`);
+      } else if (reg.error?.includes("already taken")) {
+        defaultAccountReady = true;
+        console.log(`  ℹ  Default account "${defaultUser}" already exists`);
+      } else {
+        console.log(`  ⚠  Could not create default account: ${reg.error}`);
+      }
+    } catch (e: any) {
+      console.log(`  ⚠  Default account creation skipped: ${e.message}`);
+    }
+
     // Verify existing user token (if any) is still valid; if not, drop it so the
     // user gets a clear "please login" prompt instead of silent staleness.
     let havValidUser = false;
@@ -1811,13 +1851,17 @@ async function serverCommand() {
 
     console.log(`\n  Server: ${hubUrl}${lanUrl ? `   (LAN: ${lanUrl})` : ""}\n`);
 
+    const loginHint = defaultAccountReady
+      ? `anet login --username ${defaultUser} --password ${defaultPass}`
+      : `anet login`;
+
     if (havValidUser) {
       console.log(`  This machine — already logged in. Next:`);
       console.log(`    anet node create my-agent`);
       console.log(`    anet node start my-agent\n`);
     } else {
-      console.log(`  This machine — first run:`);
-      console.log(`    anet register                        # or: anet login`);
+      console.log(`  This machine — login then create a node:`);
+      console.log(`    ${loginHint}`);
       console.log(`    anet node create my-agent`);
       console.log(`    anet node start my-agent\n`);
     }
@@ -1825,7 +1869,7 @@ async function serverCommand() {
     if (lanUrl) {
       console.log(`  Other machines connecting to this hub:`);
       console.log(`    anet init --hub ${lanUrl}`);
-      console.log(`    anet register                        # or: anet login`);
+      console.log(`    ${loginHint}`);
       console.log(`    anet node create my-agent\n`);
     }
 
