@@ -1797,29 +1797,43 @@ async function serverCommand() {
       }
     }
 
+    // Pick first non-loopback IPv4 so other machines on the LAN know how to reach us.
+    let lanIp = "";
+    try {
+      const nets = (await import("os")).networkInterfaces();
+      for (const list of Object.values(nets)) {
+        for (const n of list || []) {
+          if (n.family === "IPv4" && !n.internal && !lanIp) lanIp = n.address;
+        }
+      }
+    } catch {}
+    const lanUrl = lanIp ? `http://${lanIp}:${port}` : "";
+
+    console.log(`\n  Server: ${hubUrl}${lanUrl ? `   (LAN: ${lanUrl})` : ""}\n`);
+
     if (havValidUser) {
-      console.log(`
-╔══════════════════════════════════════════════════╗
-║   Ready!                                          ║
-║                                                   ║
-║   Server:    ${hubUrl}${" ".repeat(Math.max(0, 26 - hubUrl.length))}║
-║                                                   ║
-║   Next: anet node create my-agent                 ║
-╚══════════════════════════════════════════════════╝
-`);
+      console.log(`  This machine — already logged in. Next:`);
+      console.log(`    anet node create my-agent`);
+      console.log(`    anet node start my-agent\n`);
     } else {
-      console.log(`
-╔══════════════════════════════════════════════════╗
-║   Server is running                               ║
-║                                                   ║
-║   Server:    ${hubUrl}${" ".repeat(Math.max(0, 26 - hubUrl.length))}║
-║                                                   ║
-║   Next steps (in another terminal):               ║
-║     anet register                                 ║
-║     anet node create my-agent                     ║
-╚══════════════════════════════════════════════════╝
-`);
+      console.log(`  This machine — first run:`);
+      console.log(`    anet register                        # or: anet login`);
+      console.log(`    anet node create my-agent`);
+      console.log(`    anet node start my-agent\n`);
     }
+
+    if (lanUrl) {
+      console.log(`  Other machines connecting to this hub:`);
+      console.log(`    anet init --hub ${lanUrl}`);
+      console.log(`    anet register                        # or: anet login`);
+      console.log(`    anet node create my-agent\n`);
+    }
+
+    console.log(`  Start fresh (wipe everything — local SQLite + tokens + nodes):`);
+    console.log(`    # 1. stop the hub (Ctrl+C this process)`);
+    console.log(`    # 2. wipe state on this machine:`);
+    console.log(`    rm -rf ~/.commhub ~/.anet ./.anet`);
+    console.log(`    # 3. anet hub start  again\n`);
 
     if (child) {
       // Forward server output
