@@ -159,7 +159,15 @@ const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetU
 const NEW_SESSION = opts["new-session"] === "true";
 const SESSION_ID = NEW_SESSION ? "" : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "");
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
-const AUTH_TOKEN = process.env.COMMHUB_TOKEN || fileConfig.token || globalConfig.token || "";
+// Token priority: node config (ntok_) > global config > legacy env. Earlier
+// versions let process.env.COMMHUB_TOKEN win, which silently overrode the
+// node's network-bound ntok_ when users had a leftover legacy export in
+// their shell — replies then landed in the wrong network and Dashboard
+// never saw them.
+const AUTH_TOKEN = fileConfig.token || globalConfig.token || process.env.COMMHUB_TOKEN || "";
+if (process.env.COMMHUB_TOKEN && fileConfig.token && process.env.COMMHUB_TOKEN !== fileConfig.token) {
+  console.warn(`[${ALIAS}] ⚠ COMMHUB_TOKEN env override ignored (using node config token). Unset COMMHUB_TOKEN to silence this warning.`);
+}
 const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 const LOG_LEVEL = (LOG_LEVELS as any)[(opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info")] ?? 1;
@@ -340,8 +348,8 @@ const reportStatus = (status: string, task?: string) => callCommHub("report_stat
 });
 const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 20 }))?.messages || [];
 const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
-const sendReply = (target: string, message: string, taskId?: string) =>
-  callCommHub("send_reply", { alias: target, text: message, from_session: ALIAS, in_reply_to: taskId || undefined, status: "replied" });
+const sendReply = (target: string, message: string, taskId?: string, failed = false) =>
+  callCommHub("send_reply", { alias: target, text: message, from_session: ALIAS, in_reply_to: taskId || undefined, status: failed ? "failed" : "replied" });
 
 // ══════════════════════════════════════
 // Claude Runtime
@@ -641,21 +649,28 @@ function think(task: string, from: string, images?: string[]): Promise<string> {
   return next;
 }
 
-async function processTask(task: string, from: string): Promise<string> {
+async function processTask(task: string, from: string): Promise<{ text: string; failed: boolean }> {
   log(`→ processing [${RUNTIME}]: ${task.slice(0, 80)}`);
   await reportStatus("working", task.slice(0, 200)).catch(() => {});
 
-  let result: string;
+  let text: string;
+  let failed = false;
   try {
-    result = await think(task, from);
+    text = await think(task, from);
   } catch (err: any) {
-    result = `${RUNTIME} 错误: ${err.message}`;
+    text = `${RUNTIME} 错误: ${err.message}`;
+    failed = true;
     error(`✗ ${err.message}`);
   } finally {
-    // Always try to reset to idle, even if think() or network fails
     await reportStatus("idle").catch(() => {});
   }
-  return result;
+  // Detect localized API-error markers from think() — those return text but
+  // semantically mean "the LLM call failed". Surface them as failed too so
+  // Dashboard shows a failure state instead of pretending the agent answered.
+  if (!failed && /(API 错误|API error|需要设置.*KEY|missing.*key)/i.test(text)) {
+    failed = true;
+  }
+  return { text, failed };
 }
 
 // ── 防循环 + 低价值消息过滤 ──
@@ -719,19 +734,20 @@ async function processInbox() {
     const skip = shouldSkipMessage(from, content);
     if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }
 
-    const result = await processTask(content, from);
-    log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars)`);
+    const { text: result, failed } = await processTask(content, from);
+    log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
 
-    // 第四道防线：低价值回复不发 (isReply=true: don't filter short AI responses)
-    if (isLowValueText(result, true)) {
+    // Low-value filter only applies to successful replies. Failures should
+    // ALWAYS be reported back so the user sees the actual error, not silence.
+    if (!failed && isLowValueText(result, true)) {
       log(`skip reply: low-value (${result.slice(0, 30)})`);
       continue;
     }
 
     try {
-      log(`sending reply to ${from} (task ${msg.id.slice(0, 8)})...`);
-      await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`, msg.id);
-      lastReplyTime[from] = Date.now(); // H3 fix: 只在成功回复后设冷却
+      log(`sending reply to ${from} (task ${msg.id.slice(0, 8)}, status=${failed ? "failed" : "replied"})...`);
+      await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`, msg.id, failed);
+      lastReplyTime[from] = Date.now();
       log(`→ [${from}] ${result.slice(0, 100)}`);
     } catch (e: any) { warn(`reply failed: ${e.message}`); }
   }

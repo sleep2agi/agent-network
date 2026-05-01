@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "2.1.0-preview.11",
+  "version": "2.1.0-preview.12",
   "description": "AI Agent runtime for CommHub networks. Supports Claude Agent SDK, Codex SDK, and OpenAI/Anthropic-compatible HTTP API.",
   "bin": {
     "agent-node": "./dist/cli.js"
