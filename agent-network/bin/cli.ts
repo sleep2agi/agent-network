@@ -1238,6 +1238,8 @@ async function createCommand(idOverride?: string) {
   console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
   console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
   console.log(`\nStart: anet start ${id}`);
+  closeRL();
+  process.exit(0);
 }
 
 // ── interactive prompt helper ──
