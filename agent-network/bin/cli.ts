@@ -1191,29 +1191,38 @@ async function createCommand(idOverride?: string) {
 
   const profile = createProfileFromOpts(id, opts);
 
-  // Request a network token (ntok_) for this node
-  if (gc.token && gc.hub && gc.network_id) {
-    try {
-      const res = await fetch(`${gc.hub}/api/auth/node-token`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${gc.token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ network_id: gc.network_id, node_name: id }),
-      }).then(r => r.json() as any);
-      if (res.ok && res.token) {
-        profile.token = res.token;  // ntok_ written into node config
-      } else {
-        console.log(`[anet] ⚠ Could not create node token: ${res.error || "unknown"}`);
-        // Fallback: use utok_ (limited but functional for basic usage)
-        profile.token = gc.token;
-      }
-    } catch (e: any) {
-      console.log(`[anet] ⚠ Node token request failed: ${e.message}`);
-      profile.token = gc.token;
-    }
-  } else {
-    // No auth configured, use whatever token we have
-    if (gc.token) profile.token = gc.token;
+  // Request a network token (ntok_) for this node — agent-node REQUIRES ntok_ for SSE.
+  // No silent fallback to utok_; that just defers the failure to runtime.
+  if (!gc.token) {
+    console.error(`[anet] ❌ Not logged in. Run: anet login   (or: anet register)`);
+    process.exit(1);
   }
+  if (!gc.network_id) {
+    console.error(`[anet] ❌ No network selected. Run: anet login`);
+    process.exit(1);
+  }
+  let nodeTokenRes: any;
+  try {
+    nodeTokenRes = await fetch(`${gc.hub}/api/auth/node-token`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${gc.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ network_id: gc.network_id, node_name: id }),
+    }).then(r => r.json() as any);
+  } catch (e: any) {
+    console.error(`[anet] ❌ Could not reach hub: ${e.message}`);
+    console.error(`[anet]    Hub: ${gc.hub} — is it running? (anet hub status)`);
+    process.exit(1);
+  }
+  if (!nodeTokenRes.ok || !nodeTokenRes.token) {
+    if (nodeTokenRes.error?.includes("invalid token")) {
+      console.error(`[anet] ❌ Your login session has expired (server rotated the token).`);
+      console.error(`[anet]    Run: anet login   then re-run: anet node create ${id}`);
+    } else {
+      console.error(`[anet] ❌ Could not create node token: ${nodeTokenRes.error || "unknown"}`);
+    }
+    process.exit(1);
+  }
+  profile.token = nodeTokenRes.token;  // ntok_ written into node config
 
   saveCreatedNode(id, profile);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
@@ -1416,10 +1425,24 @@ async function launchAgent(id: string, forceNewSession = false) {
   // Auto-configure .mcp.json for commhub channel
   ensureMcpJson(profile);
 
-  // Token already merged in loadProfile: project > global
+  // Token already merged in loadProfile: project > global.
+  // SSE requires a network-scoped token (ntok_); utok_ leftovers from older
+  // versions cause cryptic "SSE 401" loops, so reject them up-front.
   const token = profile.token || "";
-  if (token) console.log(`[anet] Token: ${token.slice(0, 8)}...`);
-  else console.log(`[anet] Warning: no token configured. Check ~/.anet/config.json`);
+  if (!token) {
+    console.error(`[anet] ❌ No token in node config. Recreate the node:`);
+    console.error(`[anet]   anet node delete ${nodeId}`);
+    console.error(`[anet]   anet node create ${nodeId}`);
+    process.exit(1);
+  }
+  if (token.startsWith("utok_") || token.startsWith("atok_")) {
+    console.error(`[anet] ❌ Node has a user token (${token.slice(0, 5)}_…) but SSE needs a network token (ntok_).`);
+    console.error(`[anet]    This usually means the node was created on an older version. Recreate it:`);
+    console.error(`[anet]      anet node delete ${nodeId}`);
+    console.error(`[anet]      anet node create ${nodeId}`);
+    process.exit(1);
+  }
+  console.log(`[anet] Token: ${token.slice(0, 8)}...`);
 
   if (runtime === "codex-sdk" || runtime === "claude-agent-sdk") {
     // spawn agent-node
@@ -1697,12 +1720,12 @@ async function runCommand() {
 async function serverCommand() {
   const sub = args[1];
   if (sub === "start" || sub === "local" || !sub) {
-    // anet hub start — one-command local setup
-    // Starts server + configures hub + registers user + ready to go
+    // anet hub start — start the CommHub Server only.
+    // Auth (register/login) is NOT done here; user runs `anet register` or `anet login`
+    // after this. Keeps token state managed in one place and avoids rotation
+    // out-of-sync between hub-start and the saved global config.
     const opts = parseOpts();
     const port = opts.port || "9200";
-    const username = opts.username || opts.user || "admin";
-    const password = opts.password || opts.pass || "admin123456";
     const sc = loadServerConfig();
     const token = opts.token || sc.token || crypto.randomUUID().replace(/-/g, "");
     const gc = loadGlobal();
@@ -1748,101 +1771,55 @@ async function serverCommand() {
       console.log(`  ✅ Server running on ${hubUrl}`);
     }
 
-    // Save config
+    // Save hub URL + server token. Do NOT touch gc.token here — that's owned by login.
     gc.hub = hubUrl;
     saveServerConfig({ port, host: "127.0.0.1", token });
     saveGlobal(gc);
 
-    // Wait for server API to be fully ready (not just health endpoint)
-    for (let i = 0; i < 10; i++) {
+    // Verify existing user token (if any) is still valid; if not, drop it so the
+    // user gets a clear "please login" prompt instead of silent staleness.
+    let havValidUser = false;
+    if (gc.token && gc.token.startsWith("utok_")) {
       try {
-        const r = await fetch(`${hubUrl}/api/auth/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: "__probe__", password: "______" }),
-        });
-        if (r.headers.get("content-type")?.includes("json")) break; // API is ready
-      } catch {}
-      await new Promise(r => setTimeout(r, 1000));
-    }
-    const authHeader = { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
-    let loggedIn = false;
-
-    // Helper: try login and save config
-    const tryLogin = async (user: string, pass: string): Promise<boolean> => {
-      try {
-        const login = await fetch(`${hubUrl}/api/auth/login`, {
-          method: "POST",
-          headers: authHeader,
-          body: JSON.stringify({ username: user, password: pass }),
+        const me = await fetch(`${hubUrl}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${gc.token}` },
         }).then(r => r.json() as any);
-        if (login.ok) {
-          gc.token = login.token;
-          gc.user = login.user;
-          try {
-            const nets = await fetch(`${hubUrl}/api/networks`, { headers: { Authorization: `Bearer ${login.token}` } }).then(r => r.json() as any);
-            if (nets.networks?.length > 0) {
-              gc.network_id = nets.networks[0].network_id;
-              gc.network_name = nets.networks[0].network_name;
-            }
-          } catch {}
-          saveGlobal(gc);
-          return true;
+        if (me.ok) {
+          havValidUser = true;
+          console.log(`  ✅ Logged in as "${me.user.username}" (existing session)`);
         }
       } catch {}
-      return false;
-    };
-
-    // Retry register+login up to 3 times (server may still be initializing)
-    for (let attempt = 0; attempt < 3 && !loggedIn; attempt++) {
-      try {
-        const reg = await fetch(`${hubUrl}/api/auth/register`, {
-          method: "POST",
-          headers: authHeader,
-          body: JSON.stringify({ username, password }),
-        }).then(r => r.json() as any);
-
-        if (reg.ok) {
-          if (await tryLogin(username, password)) {
-            loggedIn = true;
-            console.log(`  ✅ Registered and logged in as "${username}" (password: ${password})`);
-          }
-        } else if (reg.error?.includes("already taken")) {
-          if (await tryLogin(username, password)) {
-            loggedIn = true;
-            console.log(`  ✅ Logged in as "${username}"`);
-          } else {
-            console.log(`  ⚠ 用户 "${username}" 已存在但密码不匹配`);
-            console.log(`  请在另一个终端运行: anet login`);
-            console.log(`  或删除数据库重来: rm ~/.commhub/commhub.db 然后重启`);
-            break;
-          }
-        }
-      } catch (e: any) {
-        if (attempt === 2) console.log(`  ⚠ Register/login error: ${e.message}`);
+      if (!havValidUser) {
+        console.log(`  ⚠  Saved token is no longer valid. Run: anet login`);
+        delete gc.token;
+        delete gc.user;
+        saveGlobal(gc);
       }
-      if (!loggedIn && attempt < 2) await new Promise(r => setTimeout(r, 2000));
     }
 
-    if (!loggedIn) {
-      gc.token = token;
-      saveGlobal(gc);
-    }
-
-    console.log(`
+    if (havValidUser) {
+      console.log(`
 ╔══════════════════════════════════════════════════╗
 ║   Ready!                                          ║
 ║                                                   ║
-║   Account:   ${username} / ${password}${" ".repeat(Math.max(0, 20 - username.length - password.length))}║
 ║   Server:    ${hubUrl}${" ".repeat(Math.max(0, 26 - hubUrl.length))}║
-║   Dashboard: anet hub dashboard                   ║
 ║                                                   ║
-║   Next steps (in another terminal):               ║
-║     anet node create my-agent                     ║
-║     anet node start my-agent                      ║
-║     anet status                                   ║
+║   Next: anet node create my-agent                 ║
 ╚══════════════════════════════════════════════════╝
 `);
+    } else {
+      console.log(`
+╔══════════════════════════════════════════════════╗
+║   Server is running                               ║
+║                                                   ║
+║   Server:    ${hubUrl}${" ".repeat(Math.max(0, 26 - hubUrl.length))}║
+║                                                   ║
+║   Next steps (in another terminal):               ║
+║     anet register                                 ║
+║     anet node create my-agent                     ║
+╚══════════════════════════════════════════════════╝
+`);
+    }
 
     if (child) {
       // Forward server output
@@ -1850,9 +1827,6 @@ async function serverCommand() {
       child.stderr?.pipe(process.stderr);
       child.on("exit", (code: number) => process.exit(code || 0));
       process.on("SIGINT", () => { child.kill(); process.exit(0); });
-    } else {
-      // Server was already running, just exit
-      console.log(`  Server was already running. Config saved. You can now use anet commands.`);
     }
 
   } else if (sub === "config") {
