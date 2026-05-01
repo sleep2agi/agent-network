@@ -1119,22 +1119,12 @@ async function createCommand(idOverride?: string) {
   // Two-step interactive picker: runtime first, then provider+key (only when
   // the runtime needs an Anthropic-compatible API key).
   // Each step has descriptive guidance so users know which to pick when.
+  // Inline description into name to avoid inquirer/prompts version skew with
+  // the `description` field (Vincent saw "_0x... is not a function" with .57).
   const RUNTIME_CHOICES = [
-    {
-      value: "claude-agent-sdk",
-      name: "claude-agent-sdk — 推荐",
-      description: "连任何 Anthropic 兼容 API（MiniMax / DeepSeek / GLM / Kimi / Claude）。只需要一个 API Key，无须额外订阅或登录。",
-    },
-    {
-      value: "codex-sdk",
-      name: "codex-sdk — GPT-5 / o3",
-      description: "OpenAI Codex 跑 GPT-5/o3。需要先执行 codex auth login（OpenAI 账号）。海外网络。",
-    },
-    {
-      value: "claude-code-cli",
-      name: "claude-code-cli — Claude Code 订阅",
-      description: "复用本机已登录的 Claude Code CLI 会话（需 Claude Pro/Team/Max 订阅）。先 claude auth login。",
-    },
+    { value: "claude-agent-sdk", name: "claude-agent-sdk  — 推荐: 连任何 Anthropic 兼容 API (MiniMax/DeepSeek/GLM/Kimi/Claude), 只需 API Key" },
+    { value: "codex-sdk",        name: "codex-sdk         — GPT-5 / o3 (海外, 需先 codex auth login)" },
+    { value: "claude-code-cli",  name: "claude-code-cli   — Claude Code 订阅用户 (需 Claude Pro/Team/Max + claude auth login)" },
   ];
 
   const PROVIDER_CHOICES = [
@@ -1160,6 +1150,10 @@ async function createCommand(idOverride?: string) {
       console.log(`[anet] ⚠ Runtime selector failed: ${e?.message || e}`);
       console.log(`[anet]   Defaulting to claude-agent-sdk. To pick explicitly:`);
       console.log(`[anet]   anet node create ${id} --runtime claude-agent-sdk|codex-sdk|claude-code-cli`);
+      // Critical: also set opts.runtime so step 2 (provider+key prompt) still
+      // runs. Without this the user gets a node with claude-agent-sdk runtime
+      // but no API key, every task fails.
+      opts.runtime = "claude-agent-sdk";
     }
   }
 
