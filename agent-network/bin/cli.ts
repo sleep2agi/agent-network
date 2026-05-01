@@ -2535,22 +2535,35 @@ async function quickstartCommand() {
 
 async function registerCommand() {
   const gc = loadGlobal();
-  const hub = gc.hub;
-  if (!hub) { console.error("Run 'anet init' first."); return; }
-  const opts = parseOpts();
+  const sc = loadServerConfig();
+  let hub = gc.hub;
 
+  // Auto-detect local hub
+  if (!hub) {
+    try {
+      const h = await fetch("http://127.0.0.1:9200/health").then(r => r.json() as any);
+      if (h.ok) { hub = "http://127.0.0.1:9200"; gc.hub = hub; saveGlobal(gc); console.log(`[anet] 检测到本地 CommHub: ${hub}`); }
+    } catch {}
+  }
+  if (!hub) { console.error("未找到 CommHub Server。请先运行: anet hub start"); return; }
+
+  const opts = parseOpts();
   const username = opts.username || opts.user || await ask("Username: ");
   const password = opts.password || opts.pass || await ask("Password (min 6): ");
-  // Skip email prompt if username/password provided via CLI args (non-interactive mode)
   const email = opts.email || ((opts.username || opts.user) ? "" : await ask("Email (optional): "));
   closeRL();
 
   if (!username || !password) { console.error("Username and password required."); return; }
 
+  // Auto-include server auth token for registration
+  const serverToken = sc.token || getToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (serverToken) headers["Authorization"] = `Bearer ${serverToken}`;
+
   try {
     const res = await fetch(`${hub}/api/auth/register`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ username, password, email: email || undefined }),
     }).then(r => r.json() as any);
 
