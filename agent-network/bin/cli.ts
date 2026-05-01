@@ -1429,7 +1429,7 @@ async function launchAgent(id: string, forceNewSession = false) {
     ];
     if (forceNewSession) agentArgs.push("--new-session", "true");
 
-    const hub = gc.hub || profile.hub || "";
+    const hub = profile.hub || loadGlobal().hub || "";
     const env = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}), ...(hub ? { COMMHUB_URL: hub } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
