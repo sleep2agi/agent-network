@@ -1754,9 +1754,13 @@ async function serverCommand() {
         HOST: "127.0.0.1",
         COMMHUB_AUTH_TOKEN: token,
       };
-      // Use npx instead of bunx so we always pull the latest published @preview
-      // (bunx aggressively caches and was leaving users on stale 0.4.x versions).
-      child = spawn("npx", ["-y", "--", "@sleep2agi/commhub-server@preview"], { env, stdio: "pipe", shell: true });
+      // Pin to a specific version to defeat bunx caching of older versions.
+      // Bump this whenever commhub-server is updated. (bunx with @preview will
+      // cache the first-resolved version and may not refetch even when the
+      // tag points at something newer; specifying the exact version forces
+      // a fresh install whenever this string changes.)
+      const PINNED_SERVER_VERSION = "0.5.0-preview.33";
+      child = spawn("bunx", ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`], { env, stdio: "pipe", shell: true });
 
       // Wait for server with polling
       let ready = false;
