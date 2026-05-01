@@ -839,7 +839,10 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     if (eq > 0) envMap[e.slice(0, eq)] = e.slice(eq + 1);
   }
 
-  const runtime = normalizeRuntime(opts.runtime || "claude-code-cli");
+  // Default to claude-agent-sdk — works with any Anthropic-compatible API
+  // (MiniMax/DeepSeek/GLM/Kimi/Anthropic). claude-code-cli only works for Max/Pro
+  // subscribers and was a poor default that left non-subscribers with broken nodes.
+  const runtime = normalizeRuntime(opts.runtime || "claude-agent-sdk");
   const defaultModel = runtime === "codex-sdk" ? "gpt-5.5" : undefined;
 
   const profile: Profile = {
@@ -1150,8 +1153,13 @@ async function createCommand(idOverride?: string) {
         opts._envs = opts._envs || [];
         opts._envs.push(`${preset.envKey}=${process.env[preset.envKey]}`);
       }
-    } catch {
-      // inquirer not available or user cancelled
+    } catch (e: any) {
+      // Surface inquirer/import failures instead of silently falling back —
+      // the silent catch was masking real bugs (e.g. preset lookup throws
+      // and the user thinks runtime was set when it wasn't).
+      console.log(`[anet] ⚠ Model selector failed: ${e?.message || e}`);
+      console.log(`[anet]   Defaulting runtime to claude-agent-sdk. To pick explicitly:`);
+      console.log(`[anet]   anet node create ${id} --runtime claude-agent-sdk|codex-sdk|claude-code-cli`);
     }
   }
 
