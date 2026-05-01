@@ -228,17 +228,12 @@ Bun.serve({
       if (authErr) return withCors(req, authErr);
       const fwd = req.headers.get("x-forwarded-for");
       const clientIP = fwd ? fwd.split(",")[0].trim() : (req.headers.get("x-real-ip") ?? "unknown");
-      // V3: resolve token → enforce network_id in all MCP tools
+      // V3: resolve token → enforce network_id in all MCP tools.
+      // utok_ (user token, not network-bound) is allowed — the tool layer
+      // scopes to the user's accessible networks. Without this Dashboard
+      // (which logs in as a user) cannot call send_task.
       const authCtx = resolveRequestAuth(req);
       const enforceNetId = authCtx?.networkId || null;
-      // utok_ (no network binding) cannot use MCP — only ntok_/atok_/global token
-      if (authCtx && !authCtx.networkId) {
-        return withCors(req, Response.json({
-          jsonrpc: "2.0",
-          error: { code: -32000, message: "User token (utok_) cannot access MCP. Use a network token (ntok_) instead." },
-          id: null,
-        }, { status: 403 }));
-      }
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });

@@ -12,13 +12,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // If enforceNetworkId is set, override any client-supplied network_id
   const getNetworkId = (clientNetId?: string | null) => enforceNetworkId ?? clientNetId ?? null;
 
-  // Check if the user has write access to the enforced network
-  // utok_ (no networkId) cannot do MCP writes — only ntok_/atok_ with network binding can
-  const canWrite = (): boolean => {
+  // Check write access. For ntok_ the network is enforced by the token.
+  // For utok_ (no enforced network) we accept the network_id supplied in the
+  // request and verify the user has a write role on it.
+  const canWrite = (effectiveNetworkId?: string | null): boolean => {
     if (!enforceUserId) return true; // legacy global token mode, allow
-    if (!enforceNetworkId) return false; // utok_ has no network → cannot write MCP
-    const role = getUserNetworkRole(enforceUserId, enforceNetworkId);
-    return !!role && role !== "viewer"; // owner/admin/member can write, viewer cannot
+    const netId = enforceNetworkId ?? effectiveNetworkId ?? null;
+    if (!netId) return false; // no network resolvable
+    const role = getUserNetworkRole(enforceUserId, netId);
+    return !!role && role !== "viewer"; // owner/admin/member can write
   };
 
   const addScope = (sql: string, params: any[], networkId?: string | null, column = "network_id"): string => {
@@ -66,7 +68,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
-      if (!canWrite()) {
+      if (!canWrite(effectiveNetId)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       }
       console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}${effectiveNetId ? " [net]" : ""}`);
@@ -177,7 +179,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ alias, task, result, artifacts, score, duration_minutes, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
-      if (!canWrite()) {
+      if (!canWrite(effectiveNetId)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       }
       console.log(`[${ts()}] ${alias} → report_completion: ${task.slice(0, 60)}${effectiveNetId ? " [net]" : ""}`);
@@ -267,7 +269,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ alias, message_id, response }) => {
       const effectiveNetId = getNetworkId(null);
-      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
+      if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${alias} → ack_inbox: ${message_id.slice(0, 8)}`);
       const ackParams: any[] = [message_id, alias];
       let ackSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2";
@@ -391,7 +393,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const effectiveNetId = getNetworkId(netId);
 
       // Role check: viewer cannot send tasks
-      if (!canWrite()) {
+      if (!canWrite(effectiveNetId)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied", message: "Viewer role cannot send tasks" }) }] };
       }
 
@@ -458,7 +460,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ alias, message, from_session }) => {
       const effectiveNetId = getNetworkId(null);
-      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
+      if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → send_message → ${alias}: ${message.slice(0, 60)}`);
       const id = uuidv4();
       db.run(
@@ -499,7 +501,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ alias, text, in_reply_to, status: replyStatus, from_session }) => {
       const effectiveNetId = getNetworkId(null);
-      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
+      if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
       const id = uuidv4();
       const replyLogged = db.transaction(() => {
@@ -550,7 +552,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ task_id, from_session }) => {
       const effectiveNetId = getNetworkId(null);
-      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
+      if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → send_ack → task ${task_id.slice(0, 8)}`);
       const updateParams: any[] = [task_id];
       let updateSql = "UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status IN ('created', 'delivered')";
@@ -576,7 +578,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ task_id, from_session }) => {
       const effectiveNetId = getNetworkId(null);
-      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
+      if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → retry_task → ${task_id.slice(0, 8)}`);
       // Find the original task
       const taskParams: any[] = [task_id];
@@ -687,7 +689,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ task_id, reason, from_session }) => {
       const effectiveNetId = getNetworkId(null);
-      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
+      if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → cancel_task → ${task_id.slice(0, 8)}`);
       const updateParams: any[] = [reason || "cancelled by " + from_session, task_id];
       let updateSql = `UPDATE tasks SET status = 'cancelled', result = ?1, completed_at = datetime('now')
@@ -719,7 +721,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ task_id, new_alias, from_session }) => {
       const effectiveNetId = getNetworkId(null);
-      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
+      if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → reassign_task → ${task_id.slice(0, 8)} → ${new_alias}`);
       const taskParams: any[] = [task_id];
       let taskSql = "SELECT * FROM tasks WHERE task_id = ?1";
@@ -765,7 +767,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
     async ({ message, filter_server, filter_status, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
-      if (!canWrite()) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
+      if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] hub → broadcast: ${message.slice(0, 60)}${effectiveNetId ? " [net=" + effectiveNetId.slice(0, 12) + "]" : ""}`);
       let sql = "SELECT alias, network_id FROM sessions WHERE alias IS NOT NULL";
       const params: any[] = [];
