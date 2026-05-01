@@ -1767,11 +1767,14 @@ async function serverCommand() {
 
     console.log(`
 ╔══════════════════════════════════════════════════╗
-║   🎉 Ready! Server running in foreground.        ║
+║   Ready! Server running in foreground.            ║
+║                                                   ║
+║   Login:     ${username} / ${password.slice(0,4)}...${" ".repeat(Math.max(0, 24 - username.length))}║
+║   Dashboard: anet hub dashboard                   ║
 ║                                                   ║
 ║   Next steps (in another terminal):               ║
-║     anet create my-agent                          ║
-║     anet start my-agent                           ║
+║     anet node create my-agent                     ║
+║     anet node start my-agent                      ║
 ║     anet status                                   ║
 ║                                                   ║
 ║   Press Ctrl+C to stop the server.                ║
@@ -1798,11 +1801,38 @@ async function serverCommand() {
     }
     console.log(JSON.stringify(sc, null, 2));
 
+  } else if (sub === "dashboard" || sub === "dash") {
+    // anet hub dashboard — start Dashboard UI
+    const opts = parseOpts();
+    const gc = loadGlobal();
+    const hubUrl = gc.hub || "http://127.0.0.1:9200";
+    const dashPort = opts.port || "3000";
+
+    console.log(`[anet] Starting Dashboard on port ${dashPort}...`);
+    console.log(`[anet] Connecting to CommHub: ${hubUrl}`);
+
+    const env: Record<string, string> = {
+      ...process.env as any,
+      PORT: dashPort,
+      NEXT_PUBLIC_COMMHUB_URL: hubUrl,
+      COMMHUB_URL: hubUrl,
+    };
+
+    // Try npx first
+    const dashChild = spawn("npx", ["-y", "@sleep2agi/agent-network-dashboard"], { env, stdio: "inherit", shell: true });
+    dashChild.on("error", () => {
+      console.error(`[anet] Dashboard package not found. Install manually:`);
+      console.error(`  npx @sleep2agi/agent-network-dashboard`);
+    });
+    dashChild.on("exit", (code) => process.exit(code || 0));
+    process.on("SIGINT", () => { dashChild.kill(); process.exit(0); });
+
   } else {
     console.log(`
-anet server <command>
+anet hub <command>
 
-  start [options]    Start CommHub Server
+  start [options]    Start CommHub Server (auto register + login)
+  dashboard          Start Dashboard UI
   config [options]   Show/set server config
 
 Options:
@@ -1810,13 +1840,16 @@ Options:
   --host <host>      Bind address (default: 0.0.0.0)
   --token <token>    Auth token
 
-Config: ${serverConfigPath()}
-First 'anet server start' saves config, after that just 'anet server start'.
+Options:
+  --port <port>      Port (default: 9200 for server, 3000 for dashboard)
+  --username <user>  Admin username (default: local)
+  --password <pass>  Admin password (default: local123456)
 
 Example:
-  anet server start --port 9200 --token my-secret   # 首次，保存配置
-  anet server start                                  # 之后直接启动
-  anet server config                                 # 查看配置
+  anet hub start                     # Start server + auto register + login
+  anet hub dashboard                 # Start Dashboard UI
+  anet hub start --port 8080         # Custom port
+  anet hub config                    # Show config
 `);
   }
 }
