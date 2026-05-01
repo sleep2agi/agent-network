@@ -1937,7 +1937,9 @@ async function serverCommand() {
     };
 
     // Try npx first
-    const dashChild = spawn("npx", ["-y", "@sleep2agi/agent-network-dashboard"], { env, stdio: "inherit", shell: true });
+    // Pin Dashboard version. Bump whenever the Dashboard package is updated.
+    const PINNED_DASHBOARD_VERSION = "0.1.0-preview.3";
+    const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit", shell: true });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
       console.error(`  npx @sleep2agi/agent-network-dashboard`);
