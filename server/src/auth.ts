@@ -85,22 +85,15 @@ export function login(username: string, password: string): AuthResult {
   if (!user) return { ok: false, error: "invalid username or password" };
   if (user.password_hash !== hashPassword(password)) return { ok: false, error: "invalid username or password" };
 
-  // Generate/rotate user token (utok_, not bound to network)
-  let userTokenRow = db.get<any>(
-    "SELECT token_id FROM api_tokens WHERE user_id = ?1 AND scope = 'user' ORDER BY created_at DESC LIMIT 1",
-    user.user_id);
-
+  // Issue a NEW user token — do NOT rotate/invalidate existing ones. Each
+  // login (cli, dashboard, second machine) gets its own row so they don't
+  // kick each other out of session. Tokens can be revoked via /api/auth/tokens.
   const userToken = generateUserToken();
-  if (userTokenRow) {
-    db.run("UPDATE api_tokens SET token_hash = ?1, last_used_at = datetime('now') WHERE token_id = ?2",
-      [hashToken(userToken), userTokenRow.token_id]);
-  } else {
-    const tokenId = generateId("tok");
-    db.run(
-      "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-      [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user"]
-    );
-  }
+  const tokenId = generateId("tok");
+  db.run(
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user"]
+  );
 
   // Find default network
   const defaultNet = db.get<any>(
