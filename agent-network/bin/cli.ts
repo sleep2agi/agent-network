@@ -1116,7 +1116,16 @@ async function createCommand(idOverride?: string) {
     codex:     { runtime: "codex-sdk", label: "GPT-5.5 Codex（海外，需 codex auth login）", requiresAuth: "codex" },
   };
 
-  if (!opts.runtime && process.stdin.isTTY) {
+  // Show provider/model picker whenever the user runs the runtime that needs
+  // an Anthropic-compatible HTTP key (claude-agent-sdk) and we don't already
+  // have a key configured. Previously this was gated on `!opts.runtime`,
+  // which meant `quickstart` (always passes --runtime claude-agent-sdk)
+  // skipped the prompt entirely — users then had a node with empty env and
+  // every task failed with no API key.
+  const needsApiKey = (!opts.runtime || opts.runtime === "claude-agent-sdk")
+    && !process.env.ANTHROPIC_AUTH_TOKEN
+    && !process.env.ANTHROPIC_API_KEY;
+  if (needsApiKey && process.stdin.isTTY) {
     try {
       const { select: sel } = await import("@inquirer/prompts");
       const chosen = await sel({

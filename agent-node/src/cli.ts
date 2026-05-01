@@ -664,10 +664,13 @@ async function processTask(task: string, from: string): Promise<{ text: string; 
   } finally {
     await reportStatus("idle").catch(() => {});
   }
-  // Detect localized API-error markers from think() — those return text but
-  // semantically mean "the LLM call failed". Surface them as failed too so
-  // Dashboard shows a failure state instead of pretending the agent answered.
-  if (!failed && /(API 错误|API error|需要设置.*KEY|missing.*key)/i.test(text)) {
+  // Detect API-error markers from think(). These return text (so the SDK
+  // didn't throw) but semantically mean "the LLM call failed". Surface as
+  // failed so Dashboard shows a real failure instead of pretending success.
+  // Patterns: localized 错误, "API error", missing key, model-not-found
+  // (Claude returns English "There's an issue with the selected model" /
+  // "may not have access" / "may not exist").
+  if (!failed && /(API 错误|API error|需要设置.*KEY|missing.*key|issue with the selected model|may not have access|may not exist|model.+not.+(found|available))/i.test(text)) {
     failed = true;
   }
   return { text, failed };
@@ -688,21 +691,19 @@ const LOW_VALUE_PHRASES = new Set([
 
 function isLowValueText(text: string, isReply = false): boolean {
   if (!text) return true;
-  if (!isReply) {
-    // Only filter very short inbound messages, not AI-generated replies
-    const stripped = text.replace(/[\s\p{P}\p{S}\p{Emoji}]/gu, "");
-    if (stripped.length < 3) return true;
-  }
   // 完整匹配低价值短语
-  const clean = text.trim().replace(/^[\[【].+?[\]】]\s*/, "").trim(); // 去掉 [alias] 前缀
+  const clean = text.trim().replace(/^[\[【].+?[\]】]\s*/, "").trim();
   const lower = clean.toLowerCase().replace(/[\s。！？.!?✅❌👀⏳，,]+$/g, "").trim();
   if (LOW_VALUE_PHRASES.has(lower)) return true;
   // 纯 emoji (exclude digits/# /*, which Unicode classifies as Emoji)
   if (/^[\p{Emoji}\s]+$/u.test(text.trim()) && !/[0-9a-zA-Z#*]/.test(text)) return true;
+  // Tasks from humans (e.g. "你好" = 2 chars) are NEVER low-value, regardless
+  // of length. The earlier length<3 filter swallowed legitimate short
+  // greetings → users saw "Dashboard tasks get swallowed" silence.
   return false;
 }
 
-function shouldSkipMessage(from: string, content: string): string | null {
+function shouldSkipMessage(from: string, content: string, msgType?: string): string | null {
   if (from === ALIAS) return "self";
   if (content.startsWith(`[${ALIAS}]`)) return "own-prefix";
   // Don't cooldown tasks from hub/dashboard — humans send rapid messages
@@ -710,7 +711,11 @@ function shouldSkipMessage(from: string, content: string): string | null {
     const now = Date.now();
     if (lastReplyTime[from] && now - lastReplyTime[from] < COOLDOWN_MS) return "cooldown";
   }
-  if (isLowValueText(content)) return "low-value-inbound";
+  // Only apply low-value/agent-chatter filter to non-task types. Tasks are
+  // explicit human or system requests and must always be processed.
+  if (msgType !== "task" && msgType !== "broadcast" && isLowValueText(content)) {
+    return "low-value-inbound";
+  }
   return null;
 }
 
@@ -731,7 +736,7 @@ async function processInbox() {
       continue;
     }
 
-    const skip = shouldSkipMessage(from, content);
+    const skip = shouldSkipMessage(from, content, msgType);
     if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }
 
     const { text: result, failed } = await processTask(content, from);
