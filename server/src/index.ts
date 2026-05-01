@@ -10,6 +10,14 @@ const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "0.0.0.0";
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
 
+// Read version from package.json so banners and /health stay in sync.
+const SERVER_VERSION = (() => {
+  try {
+    const url = new URL("../package.json", import.meta.url);
+    return JSON.parse(require("fs").readFileSync(url, "utf8")).version || "?";
+  } catch { return "?"; }
+})();
+
 // ── Rate limiter (in-memory, per IP) ──
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
@@ -594,7 +602,7 @@ Bun.serve({
       const license = db.get<any>("SELECT type, expires_at FROM licenses LIMIT 1");
       return withCors(req, Response.json({
         ok: true,
-        version: "0.5.0-preview.33",
+        version: SERVER_VERSION,
         api_version: "v3",
         transport: "streamable-http",
         sessions_count: count?.cnt ?? 0,
@@ -913,7 +921,7 @@ Bun.serve({
     }
 
     return withCors(req, new Response(
-      `CommHub MCP Server v0.5.0-preview.33 (Streamable HTTP + SSE Push)
+      `CommHub MCP Server v${SERVER_VERSION} (Streamable HTTP + SSE Push)
 
 Endpoints:
   POST /mcp               - MCP Streamable HTTP (for Claude Code / Codex)
@@ -1025,7 +1033,7 @@ process.on("SIGINT", shutdown);
 
 console.log(`
 ╔══════════════════════════════════════════════════╗
-║   CommHub MCP Server v0.5.0-preview.33                     ║
+║   CommHub MCP Server v${SERVER_VERSION}                     ║
 ║   Transport: Streamable HTTP (Bun native)         ║
 ║   Auth: ${AUTH_TOKEN ? "ENABLED (Bearer token)" : "DISABLED (set COMMHUB_AUTH_TOKEN)"}${"".padEnd(AUTH_TOKEN ? 5 : 0)}║
 ║                                                   ║
