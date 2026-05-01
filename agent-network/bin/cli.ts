@@ -1713,7 +1713,7 @@ async function serverCommand() {
         HOST: "127.0.0.1",
         COMMHUB_AUTH_TOKEN: token,
       };
-      child = spawn("bunx", ["@sleep2agi/commhub-server"], { env, stdio: "pipe", shell: true });
+      child = spawn("bunx", ["--bun", "@sleep2agi/commhub-server@preview"], { env, stdio: "pipe", shell: true });
 
       // Wait for server with polling
       let ready = false;
@@ -1737,7 +1737,18 @@ async function serverCommand() {
     saveServerConfig({ port, host: "127.0.0.1", token });
     saveGlobal(gc);
 
-    // Register + login (with server auth token)
+    // Wait for server API to be fully ready (not just health endpoint)
+    for (let i = 0; i < 10; i++) {
+      try {
+        const r = await fetch(`${hubUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: "__probe__", password: "______" }),
+        });
+        if (r.headers.get("content-type")?.includes("json")) break; // API is ready
+      } catch {}
+      await new Promise(r => setTimeout(r, 1000));
+    }
     const authHeader = { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
     let loggedIn = false;
 
@@ -1766,33 +1777,36 @@ async function serverCommand() {
       return false;
     };
 
-    try {
-      // Try register
-      const reg = await fetch(`${hubUrl}/api/auth/register`, {
-        method: "POST",
-        headers: authHeader,
-        body: JSON.stringify({ username, password }),
-      }).then(r => r.json() as any);
+    // Retry register+login up to 3 times (server may still be initializing)
+    for (let attempt = 0; attempt < 3 && !loggedIn; attempt++) {
+      try {
+        const reg = await fetch(`${hubUrl}/api/auth/register`, {
+          method: "POST",
+          headers: authHeader,
+          body: JSON.stringify({ username, password }),
+        }).then(r => r.json() as any);
 
-      if (reg.ok) {
-        // New user registered, login
-        if (await tryLogin(username, password)) {
-          loggedIn = true;
-          console.log(`  ✅ Registered and logged in as "${username}" (password: ${password})`);
+        if (reg.ok) {
+          if (await tryLogin(username, password)) {
+            loggedIn = true;
+            console.log(`  ✅ Registered and logged in as "${username}" (password: ${password})`);
+          }
+        } else if (reg.error?.includes("already taken")) {
+          if (await tryLogin(username, password)) {
+            loggedIn = true;
+            console.log(`  ✅ Logged in as "${username}"`);
+          } else {
+            console.log(`  ⚠ 用户 "${username}" 已存在但密码不匹配`);
+            console.log(`  请在另一个终端运行: anet login`);
+            console.log(`  或删除数据库重来: rm ~/.commhub/commhub.db 然后重启`);
+            break;
+          }
         }
-      } else if (reg.error?.includes("already taken")) {
-        // User exists, try login with default password
-        if (await tryLogin(username, password)) {
-          loggedIn = true;
-          console.log(`  ✅ Logged in as "${username}"`);
-        } else {
-          // Default password doesn't match, ask user
-          console.log(`  ⚠ 用户 "${username}" 已存在但密码不匹配`);
-          console.log(`  请在另一个终端运行: anet login`);
-          console.log(`  或删除数据库重来: rm ~/.commhub/commhub.db 然后重启`);
-        }
+      } catch (e: any) {
+        if (attempt === 2) console.log(`  ⚠ Register/login error: ${e.message}`);
       }
-    } catch {}
+      if (!loggedIn && attempt < 2) await new Promise(r => setTimeout(r, 2000));
+    }
 
     if (!loggedIn) {
       gc.token = token;
