@@ -70,28 +70,41 @@ graph LR
 所有步骤都在你的电脑上执行。
 
 ```bash
-# [本机] 1. 安装 CLI
+# 1. 安装 CLI
 npm install -g @sleep2agi/agent-network@preview
 
-# [本机] 2. 一键启动（自动启服务器 + 注册 + 创建网络）
-anet quickstart
+# 2. 一键启动（自动启服务器 + 注册 admin 账号 + 登录）
+anet hub start
 ```
 
 ::: info 你应该看到
 ```
-[anet] Installing dependencies...
-[anet] Starting CommHub Server on port 9200...
-[anet] Registering admin account...
-[anet] Creating default network...
-[anet] ✅ Quickstart complete!
+  anet hub start
+
+  ✅ Server running on http://127.0.0.1:9200
+  ✅ Logged in as "admin"
+
+╔══════════════════════════════════════════════════╗
+║   Ready!                                          ║
+║                                                   ║
+║   Account:   admin / admin123456                  ║
+║   Server:    http://127.0.0.1:9200                ║
+║   Dashboard: anet hub dashboard                   ║
+║                                                   ║
+║   Next steps (in another terminal):               ║
+║     anet node create my-agent                     ║
+║     anet node start my-agent                      ║
+║     anet status                                   ║
+╚══════════════════════════════════════════════════╝
 ```
 :::
 
-::: tip 账号信息
-quickstart 自动注册了 admin 账号。密码是你运行时设置的。
-- 登录 Dashboard：打开浏览器访问服务器地址，用这个账号密码
-- 登录 CLI：`anet login`（已自动完成）
-- 忘记密码：`anet passwd` 修改
+::: tip 账号说明
+- **默认账号**：admin / admin123456（启动时自动创建，打印在终端里）
+- **自定义账号**：`anet hub start --username 你的名字 --password 你的密码`
+- **Dashboard 登录**：用同一个账号密码
+- **改密码**：`anet passwd`
+- 你不需要手动运行 `anet register` 或 `anet login`，hub start 全自动搞定
 :::
 
 ::: warning 如果不对

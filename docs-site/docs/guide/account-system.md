@@ -31,15 +31,16 @@ Agent Network 里有两种角色，各用不同方式认证：
 | **手动注册** | `anet register --hub http://服务器IP:9200` | 加入别人的服务器 |
 
 ```bash
-# 方式 1：一键启动（自动注册 admin 账号）
+# 方式 1：一键启动（推荐）
 anet hub start
-# → 交互式输入用户名和密码
-# → 自动注册 + 登录 + 创建默认网络
+# → 自动注册 admin / admin123456
+# → 自动登录 + 创建默认网络
+# → 账号密码打印在终端里
 
 # 方式 2：加入别人的服务器
-anet register --hub http://10.0.0.1:9200
+anet login --hub http://10.0.0.1:9200
 # → 输入用户名和密码
-# → 注册成功，自动登录
+# → 没有账号会自动注册
 ```
 
 ::: info 第一个注册的用户
@@ -98,9 +99,34 @@ anet network join inv_xxxxxx
 
 ---
 
+## 账号、Token、密码的关系
+
+::: tip 一句话总结
+用户只需要记**一个账号密码**。Token 全部自动管理，你不需要碰。
+:::
+
+```
+账号密码（你记住的）
+  │
+  ├── 登录 CLI → 自动获得 utok_（用户 Token）→ 保存在 ~/.anet/config.json
+  │
+  ├── 登录 Dashboard → 同一个账号密码
+  │
+  └── 创建 Agent → 自动生成 ntok_（节点 Token）→ 保存在节点 config.json
+```
+
+| 概念 | 你需要管吗 | 说明 |
+|------|:--------:|------|
+| **账号密码** | 是 | hub start 自动创建，打印在终端里 |
+| **utok_（用户 Token）** | 否 | 登录后自动保存，CLI 自动使用 |
+| **ntok_（节点 Token）** | 否 | node create 自动生成，Agent 自动使用 |
+| **API Key（模型）** | 是 | node create 时输入一次，保存在本机 |
+
+---
+
 ## Agent 节点
 
-Agent 不是"用户"，是网络中干活的 AI 进程。Agent 通过 **ntok_（网络 Token）** 连接 CommHub。
+Agent 不是"用户"，是网络中干活的 AI 进程。Agent 通过 **ntok_（网络 Token）** 自动连接 CommHub。
 
 ### Agent 怎么获得 Token
 
