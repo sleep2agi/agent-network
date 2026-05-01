@@ -1740,40 +1740,63 @@ async function serverCommand() {
     // Register + login (with server auth token)
     const authHeader = { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
     let loggedIn = false;
+
+    // Helper: try login and save config
+    const tryLogin = async (user: string, pass: string): Promise<boolean> => {
+      try {
+        const login = await fetch(`${hubUrl}/api/auth/login`, {
+          method: "POST",
+          headers: authHeader,
+          body: JSON.stringify({ username: user, password: pass }),
+        }).then(r => r.json() as any);
+        if (login.ok) {
+          gc.token = login.token;
+          gc.user = login.user;
+          try {
+            const nets = await fetch(`${hubUrl}/api/networks`, { headers: { Authorization: `Bearer ${login.token}` } }).then(r => r.json() as any);
+            if (nets.networks?.length > 0) {
+              gc.network_id = nets.networks[0].network_id;
+              gc.network_name = nets.networks[0].network_name;
+            }
+          } catch {}
+          saveGlobal(gc);
+          return true;
+        }
+      } catch {}
+      return false;
+    };
+
     try {
-      // Try register (ignore if already exists)
-      await fetch(`${hubUrl}/api/auth/register`, {
-        method: "POST",
-        headers: authHeader,
-        body: JSON.stringify({ username, password }),
-      });
-      // Login
-      const login = await fetch(`${hubUrl}/api/auth/login`, {
+      // Try register
+      const reg = await fetch(`${hubUrl}/api/auth/register`, {
         method: "POST",
         headers: authHeader,
         body: JSON.stringify({ username, password }),
       }).then(r => r.json() as any);
 
-      if (login.ok) {
-        gc.token = login.token;
-        gc.user = login.user;
-        try {
-          const nets = await fetch(`${hubUrl}/api/networks`, { headers: { Authorization: `Bearer ${login.token}` } }).then(r => r.json() as any);
-          if (nets.networks?.length > 0) {
-            gc.network_id = nets.networks[0].network_id;
-            gc.network_name = nets.networks[0].network_name;
-          }
-        } catch {}
-        saveGlobal(gc);
-        loggedIn = true;
-        console.log(`  ✅ Logged in as "${username}"`);
+      if (reg.ok) {
+        // New user registered, login
+        if (await tryLogin(username, password)) {
+          loggedIn = true;
+          console.log(`  ✅ Registered and logged in as "${username}" (password: ${password})`);
+        }
+      } else if (reg.error?.includes("already taken")) {
+        // User exists, try login with default password
+        if (await tryLogin(username, password)) {
+          loggedIn = true;
+          console.log(`  ✅ Logged in as "${username}"`);
+        } else {
+          // Default password doesn't match, ask user
+          console.log(`  ⚠ 用户 "${username}" 已存在但密码不匹配`);
+          console.log(`  请在另一个终端运行: anet login`);
+          console.log(`  或删除数据库重来: rm ~/.commhub/commhub.db 然后重启`);
+        }
       }
     } catch {}
 
     if (!loggedIn) {
       gc.token = token;
       saveGlobal(gc);
-      console.log(`  ⚠ Auto-login failed. Run: anet login`);
     }
 
     console.log(`
