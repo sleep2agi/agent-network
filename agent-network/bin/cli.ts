@@ -1754,23 +1754,35 @@ async function serverCommand() {
         HOST: "127.0.0.1",
         COMMHUB_AUTH_TOKEN: token,
       };
-      child = spawn("bunx", ["--bun", "@sleep2agi/commhub-server@preview"], { env, stdio: "pipe", shell: true });
+      // Use npx instead of bunx so we always pull the latest published @preview
+      // (bunx aggressively caches and was leaving users on stale 0.4.x versions).
+      child = spawn("npx", ["-y", "--", "@sleep2agi/commhub-server@preview"], { env, stdio: "pipe", shell: true });
 
       // Wait for server with polling
       let ready = false;
-      for (let i = 0; i < 20; i++) {
+      let serverVersion = "";
+      for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 500));
         try {
           const h = await fetch(`${hubUrl}/health`).then(r => r.json() as any);
-          if (h.ok) { ready = true; break; }
+          if (h.ok) { ready = true; serverVersion = h.version || ""; break; }
         } catch {}
       }
       if (!ready) {
-        console.error(`  ❌ Server failed to start. Is Bun installed? (brew install oven-sh/bun/bun)`);
+        console.error(`  ❌ Server failed to start. Is Node.js or Bun installed?`);
         child?.kill();
         return;
       }
-      console.log(`  ✅ Server running on ${hubUrl}`);
+      console.log(`  ✅ Server running on ${hubUrl} (commhub-server v${serverVersion || "?"})`);
+      // Warn loudly if user is on a known-broken old version (cache poisoning).
+      if (serverVersion && serverVersion.startsWith("0.4.")) {
+        console.error(`\n  ⚠️  Old commhub-server v${serverVersion} detected — task routing will not work.`);
+        console.error(`     Clear caches and restart:`);
+        console.error(`       pkill -f commhub-server`);
+        console.error(`       bun pm cache rm  ;  rm -rf ~/.bun/install/cache/@sleep2agi`);
+        console.error(`       npm cache clean --force`);
+        console.error(`       anet hub start\n`);
+      }
     }
 
     // Save hub URL + server token. Do NOT touch gc.token here — that's owned by login.
@@ -1797,7 +1809,7 @@ async function serverCommand() {
     // We DO NOT log in here — that's the user's responsibility (avoids token rotation
     // out-of-sync with config.json).
     const defaultUser = opts.username || opts.user || "admin";
-    const defaultPass = opts.password || opts.pass || "anehub";
+    const defaultPass = opts.password || opts.pass || "anethub";
     let defaultAccountReady = false;
     try {
       const reg = await fetch(`${hubUrl}/api/auth/register`, {
