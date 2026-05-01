@@ -1685,107 +1685,122 @@ async function serverCommand() {
     // Starts server + configures hub + registers user + ready to go
     const opts = parseOpts();
     const port = opts.port || "9200";
-    const username = opts.username || opts.user || "local";
-    const password = opts.password || opts.pass || "local123456";
-    const token = opts.token || crypto.randomUUID().replace(/-/g, "");
+    const username = opts.username || opts.user || "admin";
+    const password = opts.password || opts.pass || "admin123456";
+    const sc = loadServerConfig();
+    const token = opts.token || sc.token || crypto.randomUUID().replace(/-/g, "");
+    const gc = loadGlobal();
+    const hubUrl = `http://127.0.0.1:${port}`;
 
-    console.log(`
-╔══════════════════════════════════════════════════╗
-║   🏠 anet hub start — One-command setup       ║
-╚══════════════════════════════════════════════════╝
-`);
+    console.log(`\n  anet hub start\n`);
 
-    console.log(`  Starting CommHub Server on port ${port}...`);
-
-    const env: Record<string, string> = {
-      ...process.env as any,
-      PORT: port,
-      HOST: "127.0.0.1",
-      COMMHUB_AUTH_TOKEN: token,
-    };
-    const child = spawn("bunx", ["@sleep2agi/commhub-server"], { env, stdio: "pipe", shell: true });
-
-    // Wait for server to start
-    await new Promise(r => setTimeout(r, 4000));
-
+    // Check if server already running
+    let serverAlreadyRunning = false;
+    let child: any = null;
     try {
-      const health = await fetch(`http://127.0.0.1:${port}/health`).then(r => r.json() as any);
-      if (!health.ok) throw new Error("server not ready");
-      console.log(`  ✅ Server running on http://127.0.0.1:${port}`);
-    } catch {
-      console.error(`  ❌ Server failed to start. Is Bun installed?`);
-      child.kill();
-      return;
+      const h = await fetch(`${hubUrl}/health`).then(r => r.json() as any);
+      if (h.ok) {
+        serverAlreadyRunning = true;
+        console.log(`  ✅ CommHub Server already running on ${hubUrl}`);
+      }
+    } catch {}
+
+    if (!serverAlreadyRunning) {
+      console.log(`  Starting CommHub Server on port ${port}...`);
+      const env: Record<string, string> = {
+        ...process.env as any,
+        PORT: port,
+        HOST: "127.0.0.1",
+        COMMHUB_AUTH_TOKEN: token,
+      };
+      child = spawn("bunx", ["@sleep2agi/commhub-server"], { env, stdio: "pipe", shell: true });
+
+      // Wait for server with polling
+      let ready = false;
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        try {
+          const h = await fetch(`${hubUrl}/health`).then(r => r.json() as any);
+          if (h.ok) { ready = true; break; }
+        } catch {}
+      }
+      if (!ready) {
+        console.error(`  ❌ Server failed to start. Is Bun installed? (brew install oven-sh/bun/bun)`);
+        child?.kill();
+        return;
+      }
+      console.log(`  ✅ Server running on ${hubUrl}`);
     }
 
-    // Configure hub
-    const gc = loadGlobal();
-    gc.hub = `http://127.0.0.1:${port}`;
+    // Save config
+    gc.hub = hubUrl;
     saveServerConfig({ port, host: "127.0.0.1", token });
     saveGlobal(gc);
-    console.log(`  ✅ Hub configured: ${gc.hub} (auth enabled)`);
 
-    // Register + login
+    // Register + login (with server auth token)
+    const authHeader = { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
+    let loggedIn = false;
     try {
-      await fetch(`${gc.hub}/api/auth/register`, {
+      // Try register (ignore if already exists)
+      await fetch(`${hubUrl}/api/auth/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeader,
         body: JSON.stringify({ username, password }),
       });
-      const login = await fetch(`${gc.hub}/api/auth/login`, {
+      // Login
+      const login = await fetch(`${hubUrl}/api/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeader,
         body: JSON.stringify({ username, password }),
       }).then(r => r.json() as any);
 
       if (login.ok) {
         gc.token = login.token;
         gc.user = login.user;
-        const nets = await fetch(`${gc.hub}/api/networks`, { headers: { Authorization: `Bearer ${login.token}` } }).then(r => r.json() as any);
-        if (nets.networks?.length > 0) {
-          gc.network_id = nets.networks[0].network_id;
-          gc.network_name = nets.networks[0].network_name;
-        }
+        try {
+          const nets = await fetch(`${hubUrl}/api/networks`, { headers: { Authorization: `Bearer ${login.token}` } }).then(r => r.json() as any);
+          if (nets.networks?.length > 0) {
+            gc.network_id = nets.networks[0].network_id;
+            gc.network_name = nets.networks[0].network_name;
+          }
+        } catch {}
         saveGlobal(gc);
+        loggedIn = true;
         console.log(`  ✅ Logged in as "${username}"`);
-      } else {
-        gc.token = token;
-        saveGlobal(gc);
-        console.log(`  ⚠ Login failed; saved server auth token. Run: anet login`);
       }
-    } catch {
+    } catch {}
+
+    if (!loggedIn) {
       gc.token = token;
       saveGlobal(gc);
-      console.log(`  ⚠ Could not register/login; saved server auth token. Run: anet login`);
+      console.log(`  ⚠ Auto-login failed. Run: anet login`);
     }
-
-    // Get license info
-    try {
-      const lic = await fetch(`${gc.hub}/api/license`).then(r => r.json() as any);
-      if (lic.license) console.log(`  ✅ License: ${lic.license.type} (${lic.license.days_left} days)`);
-    } catch {}
 
     console.log(`
 ╔══════════════════════════════════════════════════╗
-║   Ready! Server running in foreground.            ║
+║   Ready!                                          ║
 ║                                                   ║
-║   Login:     ${username} / ${password.slice(0,4)}...${" ".repeat(Math.max(0, 24 - username.length))}║
+║   Account:   ${username} / ${password}${" ".repeat(Math.max(0, 20 - username.length - password.length))}║
+║   Server:    ${hubUrl}${" ".repeat(Math.max(0, 26 - hubUrl.length))}║
 ║   Dashboard: anet hub dashboard                   ║
 ║                                                   ║
 ║   Next steps (in another terminal):               ║
 ║     anet node create my-agent                     ║
 ║     anet node start my-agent                      ║
 ║     anet status                                   ║
-║                                                   ║
-║   Press Ctrl+C to stop the server.                ║
 ╚══════════════════════════════════════════════════╝
 `);
 
-    // Forward server output
-    child.stdout?.pipe(process.stdout);
-    child.stderr?.pipe(process.stderr);
-    child.on("exit", (code) => process.exit(code || 0));
-    process.on("SIGINT", () => { child.kill(); process.exit(0); });
+    if (child) {
+      // Forward server output
+      child.stdout?.pipe(process.stdout);
+      child.stderr?.pipe(process.stderr);
+      child.on("exit", (code: number) => process.exit(code || 0));
+      process.on("SIGINT", () => { child.kill(); process.exit(0); });
+    } else {
+      // Server was already running, just exit
+      console.log(`  Server was already running. Config saved. You can now use anet commands.`);
+    }
 
   } else if (sub === "config") {
     // anet server config — 显示/设置 server 配置
