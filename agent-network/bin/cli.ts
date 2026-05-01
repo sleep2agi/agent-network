@@ -1116,60 +1116,84 @@ async function createCommand(idOverride?: string) {
     codex:     { runtime: "codex-sdk", label: "GPT-5.5 Codex（海外，需 codex auth login）", requiresAuth: "codex" },
   };
 
-  // Show provider/model picker whenever the user runs the runtime that needs
-  // an Anthropic-compatible HTTP key (claude-agent-sdk) and we don't already
-  // have a key configured. Previously this was gated on `!opts.runtime`,
-  // which meant `quickstart` (always passes --runtime claude-agent-sdk)
-  // skipped the prompt entirely — users then had a node with empty env and
-  // every task failed with no API key.
-  const needsApiKey = (!opts.runtime || opts.runtime === "claude-agent-sdk")
-    && !process.env.ANTHROPIC_AUTH_TOKEN
-    && !process.env.ANTHROPIC_API_KEY;
-  if (needsApiKey && process.stdin.isTTY) {
+  // Two-step interactive picker: runtime first, then provider+key (only when
+  // the runtime needs an Anthropic-compatible API key).
+  // Each step has descriptive guidance so users know which to pick when.
+  const RUNTIME_CHOICES = [
+    {
+      value: "claude-agent-sdk",
+      name: "claude-agent-sdk — 推荐",
+      description: "连任何 Anthropic 兼容 API（MiniMax / DeepSeek / GLM / Kimi / Claude）。只需要一个 API Key，无须额外订阅或登录。",
+    },
+    {
+      value: "codex-sdk",
+      name: "codex-sdk — GPT-5 / o3",
+      description: "OpenAI Codex 跑 GPT-5/o3。需要先执行 codex auth login（OpenAI 账号）。海外网络。",
+    },
+    {
+      value: "claude-code-cli",
+      name: "claude-code-cli — Claude Code 订阅",
+      description: "复用本机已登录的 Claude Code CLI 会话（需 Claude Pro/Team/Max 订阅）。先 claude auth login。",
+    },
+  ];
+
+  const PROVIDER_CHOICES = [
+    { key: "minimax",    label: "MiniMax — 国内直连，低成本，速度快",        baseUrl: "https://api.minimaxi.com/anthropic",     signupUrl: "https://platform.minimaxi.com" },
+    { key: "deepseek",   label: "DeepSeek — 代码 + 推理性价比高",            baseUrl: "https://api.deepseek.com/anthropic",     signupUrl: "https://platform.deepseek.com" },
+    { key: "glm",        label: "GLM 智谱 — 中文理解强",                     baseUrl: "https://open.bigmodel.cn/anthropic",     signupUrl: "https://open.bigmodel.cn" },
+    { key: "kimi",       label: "Kimi — 长文本 128K",                       baseUrl: "https://api.moonshot.cn/anthropic",      signupUrl: "https://platform.moonshot.cn" },
+    { key: "intern",     label: "书生 Intern — 科学推理",                    baseUrl: "https://chat.intern-ai.org.cn/anthropic", signupUrl: "https://chat.intern-ai.org.cn" },
+    { key: "openrouter", label: "OpenRouter — 一个 Key 用所有模型",          baseUrl: "https://openrouter.ai/api/v1",           signupUrl: "https://openrouter.ai" },
+    { key: "claude",     label: "Claude Sonnet/Opus — 海外，官方 API Key",    baseUrl: "",                                        signupUrl: "https://console.anthropic.com" },
+    { key: "custom",     label: "自定义 — 输入你的 baseUrl",                  baseUrl: "",                                        signupUrl: "" },
+  ];
+
+  // Step 1: pick runtime if not supplied via --runtime.
+  if (!opts.runtime && process.stdin.isTTY) {
     try {
       const { select: sel } = await import("@inquirer/prompts");
-      const chosen = await sel({
-        message: "选择 AI 模型:",
-        choices: Object.entries(MODEL_PRESETS).map(([key, p]) => ({
-          value: key,
-          name: p.label,
-        })),
+      opts.runtime = await sel({
+        message: "选择 runtime:",
+        choices: RUNTIME_CHOICES,
       });
-      const preset = MODEL_PRESETS[chosen];
-      opts.runtime = preset.runtime;
-      if (preset.baseUrl) {
-        process.env.ANTHROPIC_BASE_URL = preset.baseUrl;
-      }
-      if (preset.envKey && !preset.requiresAuth) {
-        if (preset.signupUrl) {
-          console.log(`[anet] 没有 Key？去 ${preset.signupUrl} 注册并创建 API Key`);
-        }
-        const key = await ask(`输入 API Key (${chosen})`);
-        if (key) process.env[preset.envKey] = key;
-      }
-      if (preset.requiresAuth === "codex") {
-        console.log("[anet] 请确保已执行: codex auth login");
-      }
-      if (preset.requiresAuth === "claude") {
-        console.log("[anet] 请确保已安装 Claude Code CLI 并登录");
-      }
-      // Save to env map for node config
-      if (preset.baseUrl) {
-        opts._envs = opts._envs || [];
-        opts._envs.push(`ANTHROPIC_BASE_URL=${preset.baseUrl}`);
-      }
-      if (preset.envKey && process.env[preset.envKey]) {
-        opts._envs = opts._envs || [];
-        opts._envs.push(`${preset.envKey}=${process.env[preset.envKey]}`);
-      }
     } catch (e: any) {
-      // Surface inquirer/import failures instead of silently falling back —
-      // the silent catch was masking real bugs (e.g. preset lookup throws
-      // and the user thinks runtime was set when it wasn't).
-      console.log(`[anet] ⚠ Model selector failed: ${e?.message || e}`);
-      console.log(`[anet]   Defaulting runtime to claude-agent-sdk. To pick explicitly:`);
+      console.log(`[anet] ⚠ Runtime selector failed: ${e?.message || e}`);
+      console.log(`[anet]   Defaulting to claude-agent-sdk. To pick explicitly:`);
       console.log(`[anet]   anet node create ${id} --runtime claude-agent-sdk|codex-sdk|claude-code-cli`);
     }
+  }
+
+  // Step 2: provider + key, only for claude-agent-sdk and only if we don't already have a key.
+  const wantsProviderPrompt = opts.runtime === "claude-agent-sdk"
+    && !process.env.ANTHROPIC_AUTH_TOKEN
+    && !process.env.ANTHROPIC_API_KEY;
+  if (wantsProviderPrompt && process.stdin.isTTY) {
+    try {
+      const { select: sel } = await import("@inquirer/prompts");
+      const provider = await sel({
+        message: "选择模型 provider:",
+        choices: PROVIDER_CHOICES.map(p => ({ value: p.key, name: p.label })),
+      });
+      const cfg = PROVIDER_CHOICES.find(p => p.key === provider)!;
+      let baseUrl = cfg.baseUrl;
+      if (cfg.key === "custom") {
+        baseUrl = await ask("baseUrl (e.g. https://your-host/anthropic)") || "";
+      }
+      if (cfg.signupUrl) {
+        console.log(`[anet] 没有 Key？去 ${cfg.signupUrl} 注册并创建 API Key`);
+      }
+      const key = await ask(`输入 API Key (${cfg.key})`);
+      const envKey = cfg.key === "claude" ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN";
+      opts._envs = opts._envs || [];
+      if (baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${baseUrl}`);
+      if (key) opts._envs.push(`${envKey}=${key}`);
+    } catch (e: any) {
+      console.log(`[anet] ⚠ Provider selector failed: ${e?.message || e}`);
+    }
+  } else if (opts.runtime === "codex-sdk") {
+    console.log("[anet] 请确保已执行: codex auth login");
+  } else if (opts.runtime === "claude-code-cli") {
+    console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
   }
 
   // Interactive network selection (if user has multiple writable networks and no --network specified)
