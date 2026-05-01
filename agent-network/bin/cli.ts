@@ -1084,6 +1084,22 @@ async function createCommand(idOverride?: string) {
   const opts = parseOpts();
   const gc = loadGlobal();
 
+  // ── Check hub connection BEFORE asking for model/key ──
+  if (!gc.hub) {
+    try {
+      const h = await fetch("http://127.0.0.1:9200/health").then(r => r.json() as any);
+      if (h.ok) {
+        gc.hub = "http://127.0.0.1:9200";
+        saveGlobal(gc);
+        console.log(`[anet] 检测到本地 CommHub: ${gc.hub}`);
+      }
+    } catch {}
+  }
+  if (!gc.hub) {
+    console.error("未找到 CommHub Server。请先运行:\n  anet hub start\n\n或手动配置:\n  anet init --hub http://YOUR_IP:9200");
+    process.exit(1);
+  }
+
   // ── Interactive model selector (when no --runtime specified) ──
   const MODEL_PRESETS: Record<string, { runtime: string; label: string; baseUrl?: string; envKey?: string; requiresAuth?: string; signupUrl?: string }> = {
     minimax:   { runtime: "claude-agent-sdk", label: "MiniMax（推荐，国内直连，低成本）", baseUrl: "https://api.minimaxi.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.minimaxi.com" },
@@ -1255,11 +1271,7 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
     }
   }
 
-  const hub = gc.hub;
-  if (!hub) {
-    console.error("\nRun 'anet init' first to configure hub URL");
-    process.exit(1);
-  }
+  const hub = gc.hub; // already validated above
 
   const profile: Profile = {
     anet_version: "0.0.23",
@@ -1668,37 +1680,7 @@ async function runCommand() {
 
 async function serverCommand() {
   const sub = args[1];
-  if (sub === "start") {
-    const opts = parseOpts();
-    const sc = loadServerConfig();
-
-    // CLI > server config > global config > auto-generate
-    const port = opts.port || sc.port || "9200";
-    const host = opts.host || sc.host || "0.0.0.0";
-    let token = opts.token || sc.token || getToken();
-
-    // Auto-generate token on first start
-    if (!token) {
-      token = crypto.randomUUID().replace(/-/g, "");
-      console.log(`[anet] Generated auth token: ${token}`);
-      console.log(`[anet] Save this token — agents need it to connect.\n`);
-    }
-
-    // Save to server config + global config
-    saveServerConfig({ port, host, token });
-    const gc = loadGlobal();
-    if (!gc.token) { gc.token = token; saveGlobal(gc); }
-
-    console.log(`[anet] Starting CommHub Server on ${host}:${port}${token ? " (auth enabled)" : ""}...`);
-
-    const env: Record<string, string> = { ...process.env as any, PORT: port, HOST: host };
-    if (token) env.COMMHUB_AUTH_TOKEN = token;
-
-    // bunx 跑 commhub-server（server 是 bun-only）
-    const child = spawn("bunx", ["@sleep2agi/commhub-server"], { env, stdio: "inherit", shell: true });
-    child.on("exit", (code) => process.exit(code || 0));
-
-  } else if (sub === "local") {
+  if (sub === "start" || sub === "local" || !sub) {
     // anet hub start — one-command local setup
     // Starts server + configures hub + registers user + ready to go
     const opts = parseOpts();
