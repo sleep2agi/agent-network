@@ -428,12 +428,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const session = scopedSessionStatus(alias, effectiveNetId);
 
-      // SSE push by alias
+      // SSE push by alias.
+      // The SSE channel is keyed by alias (subscribers connected to /events/<alias>),
+      // not by network_id. Earlier we gated the push on a network-scoped session
+      // lookup, which silently dropped pushes whenever an agent registered with
+      // network_id=null but the sender supplied an explicit network_id (the
+      // exact mismatch hit by Dashboard tasks). Push unconditionally; the
+      // subscriber's own auth (ntok_) constrains who can listen.
       const pendingParams: any[] = [alias];
       let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
       pendingSql = addScope(pendingSql, pendingParams, effectiveNetId);
       const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
-      if (session) pushEvent(alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session });
+      pushEvent(alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session });
 
       return {
         content: [
@@ -471,7 +477,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const session = scopedSessionStatus(alias, effectiveNetId);
 
-      if (session) pushEvent(alias, { type: "new_message", message, from: from_session, message_id: id });
+      pushEvent(alias, { type: "new_message", message, from: from_session, message_id: id });
 
       return {
         content: [
@@ -531,7 +537,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (replyLogged && in_reply_to) logTaskEvent(in_reply_to, null, replyStatus, from_session, text.slice(0, 200));
 
       const session = scopedSessionStatus(alias, effectiveNetId);
-      if (session) pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus });
+      pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus });
 
       return {
         content: [{
@@ -607,10 +613,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         );
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
-      // SSE push
-      if (scopedSessionStatus(task.to_name, effectiveNetId ?? task.network_id)) {
-        pushEvent(task.to_name, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
-      }
+      // SSE push (unconditional — channel is keyed by alias, not network)
+      pushEvent(task.to_name, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, retried_to: task.to_name }) }],
       };
@@ -749,9 +753,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           [newInboxId, new_alias, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]);
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${new_alias}`);
-      if (scopedSessionStatus(new_alias, effectiveNetId ?? task.network_id)) {
-        pushEvent(new_alias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
-      }
+      pushEvent(new_alias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: new_alias }) }] };
     }
   );
