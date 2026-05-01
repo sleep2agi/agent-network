@@ -1201,8 +1201,18 @@ async function createCommand(idOverride?: string) {
       }).then(r => r.json() as any);
       if (res.ok && res.token) {
         profile.token = res.token;  // ntok_ written into node config
+      } else {
+        console.log(`[anet] ⚠ Could not create node token: ${res.error || "unknown"}`);
+        // Fallback: use utok_ (limited but functional for basic usage)
+        profile.token = gc.token;
       }
-    } catch {}
+    } catch (e: any) {
+      console.log(`[anet] ⚠ Node token request failed: ${e.message}`);
+      profile.token = gc.token;
+    }
+  } else {
+    // No auth configured, use whatever token we have
+    if (gc.token) profile.token = gc.token;
   }
 
   saveCreatedNode(id, profile);
@@ -1419,12 +1429,18 @@ async function launchAgent(id: string, forceNewSession = false) {
     ];
     if (forceNewSession) agentArgs.push("--new-session", "true");
 
-    const env = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}) };
+    const hub = gc.hub || profile.hub || "";
+    const env = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}), ...(hub ? { COMMHUB_URL: hub } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
     }
 
-    const child = spawn("agent-node", agentArgs, { env, stdio: "inherit", shell: true });
+    // Try agent-node from PATH, fallback to npx
+    let cmd = "agent-node";
+    try { execSync("which agent-node", { stdio: "pipe" }); } catch {
+      cmd = "npx -y @sleep2agi/agent-node@preview";
+    }
+    const child = spawn(cmd, agentArgs, { env, stdio: "inherit", shell: true });
     const pidFile = join(nodesDir(), nodeId, ".pid");
     if (child.pid) writeFileSync(pidFile, String(child.pid));
     child.on("exit", (code) => {
