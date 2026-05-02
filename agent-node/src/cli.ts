@@ -407,6 +407,23 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     ].join("\n");
   }
 
+  // Claude Code refuses --dangerously-skip-permissions when running as root
+  // (security policy). Without that flag, every tool call would block on
+  // human approval → 永远卡住. Detect early and return a clear error.
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    return [
+      "claude 错误: 当前以 root 用户运行,Claude Code 拒绝 --dangerously-skip-permissions。",
+      "解决方案 (推荐 1):",
+      "  1. 建非 root 用户后再启动:",
+      "       useradd -m anet-agent",
+      "       su - anet-agent",
+      "       anet login --hub <URL> --username <user> --password <pass>",
+      "       anet node start <name>",
+      "  2. 或切换 runtime 为 codex-sdk (root 下可运行,需 codex auth login):",
+      "       anet node delete <name> && anet node create <name> --runtime codex-sdk",
+    ].join("\n");
+  }
+
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
   // Default prompt that teaches the agent to use commhub MCP tools when it
