@@ -1,251 +1,143 @@
-# 🤖 @sleep2agi/agent-node
+# @sleep2agi/agent-node
 
-一行命令启动 AI Agent，加入 CommHub 通信网络。
+AI Agent 运行时 — 一行命令启动 Agent，自动入网 CommHub。
 
-基于 [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) + [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk) 双引擎实现。
+**v2.1.1 stable** — 推荐通过 `anet node create / anet node start` 使用，CLI 会帮你写好 `config.json` 和环境变量。
 
-```bash
-npx @sleep2agi/agent-node --alias "我的Agent" --hub http://YOUR_HUB:9200 --tools all
-```
+## 三种 Runtime
 
----
+| Runtime | 底层 | 适合 |
+|---------|------|------|
+| `claude-agent-sdk` (默认) | [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) | Anthropic 兼容 API（最广，DeepSeek/GLM/Kimi/MiniMax/OpenRouter 等） |
+| `codex-sdk` | [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk) | OpenAI GPT-5 / o3 / o4-mini |
+| `claude-code-cli` | 本地 `claude` CLI | Claude Pro 订阅复用 |
 
-## 🏗️ 技术实现
+未使用的 runtime 不会加载依赖。`claude-code-cli` 零额外 SDK。
 
-### 双引擎架构
-
-agent-node 内部根据 `--runtime` 参数选择不同的 AI 引擎：
-
-```
-agent-node
-├── runtime: claude ──→ @anthropic-ai/claude-agent-sdk
-│   └── query() → spawn claude CLI → AI 处理 + 工具调用
-│
-├── runtime: codex ───→ @openai/codex-sdk
-│   └── exec() → spawn codex CLI → AI 处理 + 工具调用
-│
-└── runtime: http-api ─→ 直接 HTTP 调用 (V2 新增)
-    └── OpenAI/Anthropic 兼容 API → MiniMax/DeepSeek 等
-```
-
-### Claude Agent SDK（`--runtime claude`，默认）
-
-基于 Anthropic 的 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript)，底层 spawn `claude` CLI 进程。
-
-**核心调用**：
-```typescript
-import { query } from "@anthropic-ai/claude-agent-sdk";
-
-for await (const message of query({
-  prompt: "任务内容",
-  options: {
-    model: "MiniMax-M2.7",      // 支持任意 Anthropic API 兼容模型
-    tools: ["Read", "Bash", "Grep"],
-    maxTurns: 5,
-    permissionMode: "bypassPermissions",
-    settingSources: [],          // 隔离全局配置，防止串网
-  }
-})) {
-  if (message.type === "result") console.log(message.result);
-}
-```
-
-**MiniMax / 书生模型怎么跑在 Claude SDK 上？**
-
-Claude Agent SDK 底层走 Anthropic API。通过设置环境变量将请求重定向到兼容端点，零代码修改：
+## 快速启动（推荐）
 
 ```bash
-# MiniMax M2.7
-ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
-ANTHROPIC_AUTH_TOKEN=your-minimax-key
-
-# 书生 Intern-S1-Pro
-ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn
-ANTHROPIC_AUTH_TOKEN=your-intern-key
+npm install -g @sleep2agi/agent-network
+anet hub start                # 起本地 hub
+anet node create alice        # 两步交互式选 Runtime + Provider
+anet node start alice         # 起 Agent
 ```
 
-SDK 不校验模型名，`--model MiniMax-M2.7` 原样传给 API。
-
-**已验证功能**：
-- ✅ 单轮/多轮对话
-- ✅ tool_use（Read/Write/Edit/Bash/Glob/Grep/WebSearch/WebFetch）
-- ✅ Extended Thinking（`<think>` 标签）
-- ✅ Session Resume（跨 query 保持上下文）
-- ✅ SSE streaming
-- ✅ Hooks（PreToolUse/PostToolUse）
-- ✅ maxBudgetUsd 预算控制
-- ✅ settingSources 隔离（防止读全局 MCP 配置串网）
-
-### Codex SDK（`--runtime codex`）
-
-基于 OpenAI 的 [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)，复用 Codex CLI 登录态。
-
-**核心调用**：
-```typescript
-import Codex from "@openai/codex-sdk";
-
-const client = new Codex();
-const thread = await client.threads.create();
-
-const response = await client.responses.create({
-  model: "gpt-5.4",
-  thread_id: thread.id,
-  input: "任务内容",
-  tools: [{ type: "code_interpreter" }, { type: "file_search" }],
-});
-
-console.log(response.output_text);
-```
-
-**特点**：
-- 不需要额外 API key（复用 `codex` CLI 登录态）
-- 支持 gpt-5.4（默认）/ o3 / o4-mini
-- Thread 保持上下文（多轮对话）
-- Thread 过期自动重建
-
----
-
-## 🔄 Agent 主循环
-
-无论哪种 runtime，agent-node 的主循环都一样：
-
-```
-启动
-  ↓
-注册到 CommHub（report_status: idle）
-  ↓
-SSE 长连接 /events/:alias
-  ↓
-┌─→ 收到 new_task 事件
-│     ↓
-│   get_inbox → 拿任务内容
-│     ↓
-│   ack_inbox → 确认收到
-│     ↓
-│   report_status: working
-│     ↓
-│   AI 处理（claude/codex/http-api）
-│     ↓
-│   send_reply → 回报结果（V2: 关联 task_id）
-│     ↓
-│   report_status: idle
-│     ↓
-└─── 等待下一个任务
-      ↓ (每 3 分钟)
-    heartbeat → report_status: idle
-```
-
-**CommHub 通信层**（agent-node 自己的代码，不经过 AI 子进程）：
-
-```typescript
-// 直接 HTTP POST 到 CommHub MCP 端点
-async function callCommHub(method: string, params: object) {
-  const res = await fetch(`${HUB_URL}/mcp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Accept": "application/json, text/event-stream" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "tools/call",
-      params: { name: method, arguments: params },
-    }),
-  });
-  // ...
-}
-```
-
----
-
-## 🛡️ 隔离策略
-
-`settingSources: []` 阻止 claude 子进程读全局 `~/.claude.json`：
-
-```
-❌ 没有隔离时：
-  agent-node → query() → spawn claude
-    → claude 读 ~/.claude.json → 加载全局 commhub MCP
-    → AI 调 send_task → 消息发到主网络（串网！）
-
-✅ 有隔离时：
-  agent-node → query({ settingSources: [] }) → spawn claude
-    → claude 不读任何全局配置
-    → AI 只能用 agent-node 显式传的工具
-```
-
----
-
-## 📊 模型对照表
-
-| 模型 | runtime | 环境变量 | 默认 |
-|------|---------|---------|------|
-| MiniMax M2.7（国际） | claude | `ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic` | |
-| MiniMax M2.7（国内） | claude | `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` | |
-| 书生 Intern-S1-Pro | claude | `ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn` | |
-| Claude Sonnet 4.6 | claude | `ANTHROPIC_API_KEY=key` | ✅ |
-| GPT-5.4 | codex | 不需要（复用 codex 登录） | ✅ |
-| o3 | codex | 不需要 | |
-| o4-mini | codex | 不需要 | |
-
----
-
-## 🚀 快速启动
+## 直接 npx 启动
 
 ```bash
-# MiniMax（低成本）
+npx @sleep2agi/agent-node --alias 小明 --hub http://127.0.0.1:9200 --tools all
+```
+
+## Provider 预设
+
+`anet node create` 会让你二级选择 Provider，每个预设自动写好 `ANTHROPIC_BASE_URL` + 默认模型：
+
+| Provider | Base URL | 默认模型 |
+|---------|----------|---------|
+| Anthropic | `https://api.anthropic.com` | claude-sonnet-4-5 |
+| DeepSeek | `https://api.deepseek.com/anthropic` | deepseek-chat |
+| GLM (智谱) | `https://open.bigmodel.cn/api/anthropic` | glm-4-plus |
+| Kimi (月之暗面) | `https://api.moonshot.cn/anthropic` | moonshot-v1-32k |
+| MiniMax (国际) | `https://api.minimax.io/anthropic` | MiniMax-M2.7 |
+| MiniMax (国内) | `https://api.minimaxi.com/anthropic` | MiniMax-M2.7 |
+| OpenRouter | `https://openrouter.ai/api/v1` | (任选) |
+| 自定义 | 用户填 | 用户填 |
+
+`claude-agent-sdk` 走 Anthropic Messages API；只要服务端兼容这套协议，所有上面的 Provider 都不需要改一行代码 — `--model` 原样透传。
+
+## 示例：手动 npx + 环境变量
+
+```bash
+# DeepSeek
+ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=sk-... \
+npx @sleep2agi/agent-node --alias deep --hub http://127.0.0.1:9200 --tools all
+
+# MiniMax
 ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-key \
-npx @sleep2agi/agent-node --alias 小明 --model MiniMax-M2.7 --hub http://IP:9200 --tools all
+npx @sleep2agi/agent-node --alias mini --model MiniMax-M2.7 --hub http://127.0.0.1:9200 --tools all
 
-# 书生（国产）
-ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn \
-ANTHROPIC_AUTH_TOKEN=your-key \
-npx @sleep2agi/agent-node --alias 书生 --model intern-s1-pro --hub http://IP:9200 --tools all
-
-# Codex GPT-5.4（OpenAI）
-npx @sleep2agi/agent-node --alias Codex马 --runtime codex --hub http://IP:9200 --tools all
-
-# Claude
-ANTHROPIC_API_KEY=your-key \
-npx @sleep2agi/agent-node --alias Claude马 --hub http://IP:9200 --tools all
+# Codex GPT-5
+npx @sleep2agi/agent-node --alias codex --runtime codex-sdk --hub http://127.0.0.1:9200 --tools all
 ```
 
----
+## 配置文件示例
 
-## ⚙️ CLI 参数
+`anet node create` 写出的典型 `config.json`（位置 `.anet/nodes/<name>/config.json`）：
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
+```json
+{
+  "alias": "alice",
+  "hub": "http://127.0.0.1:9200",
+  "runtime": "claude-agent-sdk",
+  "model": "MiniMax-M2.7",
+  "anthropic_base_url": "https://api.minimax.io/anthropic",
+  "anthropic_auth_token": "sk-...",
+  "tools": "all",
+  "maxTurns": 50,
+  "dangerouslySkipPermissions": true,
+  "teammateMode": true
+}
+```
+
+字段级覆盖：项目 config 字段优先于全局 `~/.anet/config.json`，缺失字段 fallback 到全局。
+
+## CLI 参数
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
 | `--alias` | 必填 | Agent 名称 |
 | `--hub` | `http://127.0.0.1:9200` | CommHub URL |
-| `--runtime` | `claude` | `claude` / `codex` / `http-api` / `minimax` |
-| `--model` | 按 runtime | codex: `gpt-5.4`, http-api: `claude-3-5-haiku-20241022` |
+| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `--model` | 按 runtime | 透传给 SDK |
 | `--tools` | 无 | `all` 或逗号分隔 |
-| `--max-turns` | `5` | 每任务最大轮次 |
-| `--max-budget` | 无 | 每任务预算（美元） |
+| `--max-turns` | `50` | 每任务最大轮次 |
 | `--session` | 无 | 恢复指定 session/thread |
-| `--prompt` | 无 | 自定义 system prompt |
 
----
+## 主循环
 
-## 📦 依赖
+无论哪个 runtime：
 
-| 包 | 什么时候需要 |
-|---|------------|
-| `@anthropic-ai/claude-agent-sdk` | `--runtime claude` 时（动态 import） |
-| `@openai/codex-sdk` | `--runtime codex` 时（动态 import） |
-| 无外部依赖 | `--runtime http-api` 时（内置 fetch） |
+```
+启动 → report_status: idle
+        ↓
+  SSE 长连接 /events/:alias
+        ↓
+  收到 new_task → get_inbox → ack_inbox
+        ↓
+  report_status: working
+        ↓
+  AI 处理（带 commhub MCP 工具，可与其他 Agent 协作）
+        ↓
+  send_reply → report_status: idle
+```
 
-未使用的 runtime 不会加载依赖。`http-api` runtime 零依赖。
+## 协作能力
 
----
+启动后 Agent 自动注入 commhub MCP 工具，可以：
 
-## 🔗 相关
+- `commhub_get_all_status()` — 看谁在线
+- `commhub_send_task(alias, task)` — 给别的 Agent 派活
+- `commhub_get_task(task_id)` — 轮询对方进度
+- `commhub_send_message(alias, message)` — 单纯发消息（不创建任务）
+- `commhub_report_status(status, task)` — 自报进度
+
+这套机制支撑 Dashboard 实时看到 agent 间通信。
+
+## 隔离
+
+`claude-code-cli` runtime 启动子进程时传 `settingSources: []`，阻止 claude 子进程读全局 `~/.claude.json` 串网。
+
+## 相关包
 
 | | |
 |---|---|
-| **npm** | [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) |
-| **CLI 管理工具** | [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) |
-| **通信服务器** | [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) |
-| **Dashboard** | [agent-net.vansin.me](https://agent-net.vansin.me) |
+| npm | [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) (2.1.1) |
+| CLI | [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) (2.0.0) |
+| Hub | [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) (0.5.0) |
+| Dashboard | [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) (0.1.0) |
 
 ## License
 

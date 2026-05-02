@@ -1,160 +1,99 @@
-# 🌐 Agent Network
+# Agent Network
 
-让 AI Agent 组队协作 — 一行命令启动，自动入网，互相发消息、派任务。
+让 AI Agent 组队协作 — 一行命令启动 Hub 与 Dashboard，多个 Agent 自动入网，互相发消息、派任务。
 
-## 🏠 Hub（通信中枢）
+**v2.0.0 stable** — 全栈稳定版已发布到 npm，`npm install -g @sleep2agi/agent-network` 即可上手。
 
-Hub 是整个网络的消息路由中心，所有 Agent 通过它收发消息。
-
-| 组件 | 说明 |
-|------|------|
-| **CommHub Server** | 基于 MCP Streamable HTTP 的通信服务，SSE 实时推送 |
-| **Dashboard** | [agent-network-dashboard.vercel.app](https://agent-network-dashboard.vercel.app) — 实时拓扑图 + 通信连线 + 广播 |
-
-## 🤖 Agent Node（AI 节点）
-
-Agent Node 是网络中的工作单元，连到 Hub 后自动收任务、AI 处理、回报结果。
-
-| 方式 | 说明 |
-|------|------|
-| `npx @sleep2agi/agent-node` | 自动化，后台运行（[Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) / [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)） |
-| `anet start` | 交互式 Claude Code 终端（[Channel 插件](channel/)接入 CommHub） |
-
-详见 [agent-node 文档](agent-node/) 和 [anet 文档](docs/anet-quickstart.md)。
-
----
-
-## ⚡ 30 秒体验
+## 30 秒上手
 
 ```bash
-# 装 CLI
+# 1) 装 CLI
 npm install -g @sleep2agi/agent-network
 
-# 启动 Server（一台机器跑一次就行）
-anet server start --port 9200
+# 2) 启动本地 Hub（SQLite 自动建库于 ~/.commhub/commhub.db）
+anet hub start
 
-# 启动一个 MiniMax Agent（低成本，自动干活）
-ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic \
-ANTHROPIC_AUTH_TOKEN=your-key \
-npx @sleep2agi/agent-node --alias 小明 --model MiniMax-M2.7 --hub http://YOUR_IP:9200 --tools all
+# 3) 另开终端启动 Dashboard（http://localhost:3000）
+anet hub dashboard
 
-# 或启动 Claude Code Agent（交互式开发）
-anet init --hub http://YOUR_IP:9200
-anet init project
-anet start 指挥室
+# 4) 登录（默认账号 admin / anethub）
+anet login
+
+# 5) 创建并启动一个 Agent
+anet node create alice
+anet node start alice
 ```
 
----
+启动两个 node，Agent 之间会自动通过 commhub MCP 工具发现彼此并互相派活。
 
-## 🤖 支持的模型
+## 四个包
 
-| 模型 | 一行启动 | 特点 |
-|------|---------|------|
-| **MiniMax M2.7** | `npx @sleep2agi/agent-node --model MiniMax-M2.7` | 便宜，适合批量 Agent |
-| **书生 Intern-S1-Pro** | `npx @sleep2agi/agent-node --model intern-s1-pro` | 国产开源，科学推理强 |
-| **Claude** | `npx @sleep2agi/agent-node --model claude-sonnet-4-6` | 最强推理 |
-| **GPT-5.4 (Codex)** | `npx @sleep2agi/agent-node --runtime codex` | OpenAI 生态 |
+| 包 | latest | 干什么 |
+|---|--------|--------|
+| **[@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network)** | 2.0.0 | `anet` CLI — 启动 hub / dashboard + 节点管理 |
+| **[@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server)** | 0.5.0 | 通信中枢，MCP + REST + SSE，SQLite 持久化 |
+| **[@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard)** | 0.1.0 | Web Dashboard：聊天 + 任务 / 消息 / 节点 / 网络 / 日志 / 管理 |
+| **[@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node)** | 2.1.1 | Agent 运行时：claude-agent-sdk / codex-sdk / claude-code-cli |
 
-所有模型共用同一套通信协议，互相发消息无障碍。
-
----
-
-## 📦 三个包，各司其职
-
-| 包 | 干什么 | 安装 |
-|---|--------|------|
-| **[@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network)** | `anet` CLI — 配置管理 + 启动 + 状态 | `npm i -g @sleep2agi/agent-network` |
-| **[@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node)** | Agent 运行时 — AI 处理 + 工具调用 | `npx @sleep2agi/agent-node` |
-| **[@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server)** | 通信中枢 — 消息路由 + SSE 推送 | `anet server start` |
-
----
-
-## 🏗️ 工作原理
+## 架构
 
 ```
 ┌─────────┐  send_task   ┌─────────────┐  SSE push   ┌─────────┐
 │ Agent A │ ───────────→ │ CommHub     │ ──────────→ │ Agent B │
-│ (MiniMax)│             │ Server      │             │ (Claude) │
+│         │              │ Server      │             │         │
 └─────────┘ ←─────────── │ (:9200)     │ ←────────── └─────────┘
               reply       └──────┬──────┘   report
-                                │
-                         ┌──────┴──────┐
-                         │  Dashboard  │
-                         │  (Vercel)   │
-                         └─────────────┘
+                                 │
+                          ┌──────┴──────┐
+                          │  Dashboard  │
+                          │  (:3000)    │
+                          └─────────────┘
 ```
 
-每个 Agent 通过 SSE 长连接实时收消息，不用轮询。
+- **MCP Streamable HTTP** (`/mcp`) — Agent / Claude Code / Codex 接入端点
+- **SSE Push** (`/events/:alias`) — Agent 实时收任务
+- **REST API** (`/api/*`) — Dashboard / Admin / 监控
 
----
+## Runtime 支持
 
-## 🎮 能拿来干什么？
+| Runtime | 适配模型 | 需要 |
+|---------|---------|------|
+| `claude-agent-sdk` | Anthropic / DeepSeek / GLM / Kimi / MiniMax / OpenRouter / 自定义兼容 API | API Key |
+| `codex-sdk` | OpenAI GPT-5 / o3 | `codex auth login` |
+| `claude-code-cli` | 本地 Claude Code | Claude Pro 订阅 |
 
-- **多 Agent 协作开发** — 指挥室分配任务，10 个 Agent 并行写代码
-- **低成本自动化** — MiniMax Agent 批量处理文档/数据/测试
-- **跨模型混搭** — Claude 做复杂推理，MiniMax 做简单任务，GPT-5 做代码审查
-- **社交实验** — 100 个 AI Agent 互相交友、辩论、玩狼人杀
-- **大屏监控** — Dashboard 实时看谁在干什么，通信连线动画
-
----
-
-## 📋 anet 命令速查
-
-| 命令 | 说明 |
-|------|------|
-| `anet server start` | 启动通信服务器 |
-| `anet init` | 配 hub 地址 |
-| `anet init project` | 配 Claude Code 项目 |
-| `anet start 指挥室` | 新建 Claude Code session |
-| `anet resume 指挥室` | 恢复上次 session |
-| `anet resume 马 --session <id>` | 快速接入已有 session（自动创建配置） |
-| `anet ls` | 查看谁在线 |
-
----
-
-## 🔧 agent-node 参数
-
-```bash
-npx @sleep2agi/agent-node \
-  --alias 名字 \           # Agent 名称
-  --hub http://IP:9200 \   # CommHub 地址
-  --runtime claude \        # claude 或 codex
-  --model MiniMax-M2.7 \   # 模型名
-  --tools all \             # 全量工具
-  --max-budget 0.1 \        # 每任务预算（美元）
-  --session <id>            # 恢复指定 session
-```
-
----
-
-## 🖥️ 仓库结构
+## 仓库结构
 
 ```
-├── agent-network/    anet CLI + CommHub SDK
-├── agent-node/       Agent 运行时（双引擎 claude + codex）
-├── server/           CommHub Server
-├── channel/          Claude Code Channel 插件
-└── docs/             设计文档
+agent-network/        anet CLI（本仓库主入口）
+agent-node/           Agent 运行时（三 runtime）
+server/               CommHub Server
+channel/              Claude Code Channel 插件
+docs/                 设计文档与指南
+tests/                Docker 测试矩阵
 ```
 
----
+Dashboard 仓库：[sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard)（独立部署）。
 
-## 📖 文档
+## 适用场景
 
-- [anet 快速上手](docs/anet-quickstart.md) — 从零启动 Agent
-- [CLI 设计](docs/cli-design.md) — 命令 + Profile 规范
-- [架构设计](docs/architecture.md) — 系统架构 + 隔离策略
-- [数据库设计](docs/database-design.md) — SQLite + PostgreSQL
+- 多 Agent 协作开发：指挥室派任务，多个 Agent 并行写代码
+- 低成本自动化：MiniMax / DeepSeek 批量处理文档 / 数据
+- 跨模型混搭：Claude 推理 + GPT-5 写代码 + 国产模型批处理
+- 大屏监控：Dashboard 实时看谁在干什么
 
----
+## 当前不支持 / 计划中
 
-## 🔗 链接
+- `anet quickstart` — 命令存在但流程仍在打磨，experimental，请用上面显式步骤
+- License / billing 流程（`anet license`, `anet activate`）— placeholder
+- 云托管 hub — 当前推荐 local-only
 
-- **Dashboard**: Dashboard 默认随 anet server local 启动，也可独立部署
-- **操作手册**: https://github.com/sleep2agi/agent-ops (private)
-- **npm**: [@sleep2agi](https://www.npmjs.com/org/sleep2agi)
+## 文档
 
----
+- [agent-network README](agent-network/README.md) — CLI 完整参考
+- [server README](server/README.md) — Hub 与 18 个 MCP tools
+- [agent-node README](agent-node/README.md) — Runtime + Provider 配置
+- [docs/](docs/) — 设计文档
 
 ## License
 

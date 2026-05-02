@@ -2,13 +2,19 @@
 
 AI Agent 通信中枢 — MCP Server + SSE Push + REST API。
 
+**v0.5.0 stable** — 单二进制 Bun 进程，零配置 SQLite。最简单的用法是装 anet CLI：`anet hub start`。
+
 ## 快速启动
 
 ```bash
-# 需要 Bun
+# 推荐：通过 anet 启动（自动写好端口 / token / 默认账号）
+npm install -g @sleep2agi/agent-network
+anet hub start
+
+# 或直接 bunx（需要 Bun）
 bunx @sleep2agi/commhub-server
 
-# 或指定端口 + auth
+# 指定端口 / 鉴权
 PORT=9200 COMMHUB_AUTH_TOKEN=your-secret bunx @sleep2agi/commhub-server
 ```
 
@@ -42,6 +48,8 @@ PORT=9200 COMMHUB_AUTH_TOKEN=your-secret bunx @sleep2agi/commhub-server
 | `get_all_status` | 全局状态面板 |
 | `get_session_status` | 单 session 详情 |
 | `broadcast` | 群发消息 |
+| `list_tasks` | 任务列表（含 network_id 过滤） |
+| `get_completions` | 完成列表 |
 
 ## REST API (33 端点)
 
