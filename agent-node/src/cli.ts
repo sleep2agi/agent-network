@@ -370,8 +370,13 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   const commhubToken = process.env.COMMHUB_TOKEN || AUTH_TOKEN;
   const mcpServers: Record<string, any> = {};
   if (commhubUrl) {
+    // SDK schema requires type:'http' (or 'sse'/'stdio'). The local Claude
+    // CLI binary previously accepted type:'url' but the SDK rejects it with
+    // 'Does not adhere to MCP server configuration schema' and the agent
+    // crashes before any tool call. Verified via E2E: with type:'http' the
+    // SDK connects to the streamable-http MCP transport at /mcp.
     mcpServers["commhub"] = {
-      type: "url",
+      type: "http",
       url: `${commhubUrl}/mcp`,
       headers: commhubToken ? { "Authorization": `Bearer ${commhubToken}` } : undefined,
     };
