@@ -19,6 +19,10 @@
 set -euo pipefail
 
 MINIMAX_KEY="${MINIMAX_KEY:-}"
+# MiniMax Anthropic-compatible 网关支持的模型名(2026 年常见):
+#   MiniMax-M1, MiniMax-M2, MiniMax-Text-01
+# 默认 MiniMax-M1; 可用 MINIMAX_MODEL=MiniMax-M2 ./setup-anet.sh 覆盖
+MINIMAX_MODEL="${MINIMAX_MODEL:-MiniMax-M1}"
 USERNAME="${ANET_USER:-anet}"
 HUB_IP="${ANET_HUB_IP:-0.0.0.0}"
 
@@ -65,11 +69,15 @@ grep -q '.npm-global/bin' ~/.bashrc 2>/dev/null || echo 'export PATH=~/.npm-glob
 export PATH=~/.npm-global/bin:$PATH
 npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview --silent 2>&1 | tail -5
 
-# === 3. 启动 hub (tmux window 0) ===
+# 每个进程独立 tmux session,方便独立 attach/restart 不干扰别人
+PATH_PREFIX="PATH=~/.npm-global/bin:\$PATH"
+kill_session() { tmux kill-session -t "$1" 2>/dev/null || true; }
+
+# === 3. 启动 hub (独立 tmux session: anet-hub) ===
 mkdir -p ~/anodes && cd ~/anodes
-echo "[3/5] 启动 hub (tmux session: anet) ..."
-tmux kill-session -t anet 2>/dev/null || true
-tmux new-session -d -s anet -n hub "PATH=~/.npm-global/bin:\$PATH anet hub start --ip $HUB_IP; bash"
+echo "[3/5] 启动 hub (tmux session: anet-hub) ..."
+kill_session anet-hub
+tmux new-session -d -s anet-hub -n hub "$PATH_PREFIX anet hub start --ip $HUB_IP; bash"
 
 # 等 hub 健康
 for i in $(seq 1 30); do
@@ -83,36 +91,50 @@ done
 echo "[3/5] 登录 admin/anethub ..."
 anet login --hub http://127.0.0.1:9200 --username admin --password anethub
 
-# === 4. 启动 dashboard (tmux window 1) ===
-echo "[4/5] 启动 dashboard ..."
-tmux new-window -t anet -n dashboard "PATH=~/.npm-global/bin:\$PATH anet hub dashboard --ip $HUB_IP; bash"
+# === 4. 启动 dashboard (独立 tmux session: anet-dashboard) ===
+echo "[4/5] 启动 dashboard (tmux session: anet-dashboard) ..."
+kill_session anet-dashboard
+tmux new-session -d -s anet-dashboard -n dashboard "$PATH_PREFIX anet hub dashboard --ip $HUB_IP; bash"
 
-# === 5. 创建 + 启动 N 个 agent (跳过 picker,用 --env 直注 MiniMax) ===
+# === 5. 每个 agent 独立 tmux session: anet-node-<alias> ===
 echo "[5/5] 创建并启动 ${NODES[*]} ..."
 for alias in "${NODES[@]}"; do
   if [ ! -f ".anet/nodes/$alias/config.json" ]; then
     echo "  + 创建节点 $alias"
     anet node create "$alias" --runtime claude-agent-sdk \
+      --model "$MINIMAX_MODEL" \
       --env "ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic" \
       --env "ANTHROPIC_AUTH_TOKEN=$MINIMAX_KEY" \
-      --env "ANTHROPIC_MODEL=MiniMax-M2" \
+      --env "ANTHROPIC_MODEL=$MINIMAX_MODEL" \
       >/dev/null
   else
     echo "  - 节点 $alias 已存在,跳过创建"
   fi
-  tmux new-window -t anet -n "$alias" "PATH=~/.npm-global/bin:\$PATH anet node start \"$alias\"; bash"
+  SESS="anet-node-$alias"
+  kill_session "$SESS"
+  tmux new-session -d -s "$SESS" -n "$alias" "$PATH_PREFIX anet node start \"$alias\"; bash"
   sleep 0.5
 done
 
 LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo ""
 echo "================================================================"
-echo "  ✅ Agent Network 已启动 (tmux session: anet)"
+echo "  ✅ Agent Network 已启动 (每个进程一个独立 tmux session)"
 echo ""
-echo "  Hub:        http://$LAN_IP:9200"
-echo "  Dashboard:  http://$LAN_IP:3000   (admin / anethub)"
+echo "  Hub:        http://$LAN_IP:9200    (tmux session: anet-hub)"
+echo "  Dashboard:  http://$LAN_IP:3000    (tmux session: anet-dashboard)  admin/anethub"
 echo ""
+for alias in "${NODES[@]}"; do
+  echo "  Agent $alias  →  tmux a -t anet-node-$alias"
+done
+echo ""
+echo "  查看所有 sessions:    tmux ls"
+echo "  attach 某个进程:      tmux a -t anet-hub | anet-dashboard | anet-node-<alias>"
+echo "  detach:               Ctrl-b d"
+echo "  停掉某个:             tmux kill-session -t anet-node-<alias>"
+echo "  停掉所有 anet-*:      tmux ls | awk -F: '/^anet-/{print \$1}' | xargs -I{} tmux kill-session -t {}"
+echo "================================================================"
 echo "  查看运行状态:   tmux a -t anet"
 echo "  关闭整个网络:   tmux kill-session -t anet"
 echo "================================================================"
-tmux list-windows -t anet
+tmux ls
