@@ -22,6 +22,7 @@ export default withMermaid(defineConfig({
               { text: '基本概念', link: '/guide/basics' },
               { text: '简介', link: '/guide/introduction' },
               { text: '上手指南', link: '/guide/getting-started' },
+              { text: '一键安装 (多 Agent + tmux)', link: '/guide/one-shot-install' },
               { text: '架构概览', link: '/guide/architecture' },
             ]
           },
