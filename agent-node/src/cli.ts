@@ -361,13 +361,10 @@ const sendReply = (target: string, message: string, taskId?: string, failed = fa
 let claudeSessionId: string | undefined = SESSION_ID || undefined;
 
 async function processWithClaude(task: string, from: string): Promise<string> {
-  // If we don't have a Claude binary AND we have an Anthropic-compatible
-  // HTTP base URL + key (MiniMax/DeepSeek/GLM/Kimi flow), transparently
-  // fall back to the http runtime — the user almost certainly wanted to
-  // hit their provider's HTTP endpoint, not the local Claude Code CLI.
-  // Without this, claude-agent-sdk + MiniMax fails with 'native binary
-  // not found' on Linux glibc systems where the SDK's bundled musl
-  // binary doesn't run.
+  // Pre-flight: if no Claude binary is resolvable, on-the-fly install the
+  // glibc one. SDK ships musl-only by default on Linux x64 which fails on
+  // Debian/Ubuntu/RHEL hosts. Auto-install means the user doesn't need to
+  // know about the binary distribution detail.
   const { existsSync } = await import("fs");
   let hasBinary = false;
   try {
@@ -381,13 +378,33 @@ async function processWithClaude(task: string, from: string): Promise<string> {
       hasBinary = true;
     } catch {}
   }
-  const hasAnthropicCompatibleApi = !!(
-    process.env.ANTHROPIC_BASE_URL &&
-    (process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY)
-  );
-  if (!hasBinary && hasAnthropicCompatibleApi) {
-    log(`[claude] no Claude Code binary; falling back to http runtime against ${process.env.ANTHROPIC_BASE_URL}`);
-    return processWithHttpApi(task, from);
+  if (!hasBinary && process.platform === "linux") {
+    try {
+      const { execSync } = await import("child_process");
+      log(`[claude] no Claude binary found — installing @anthropic-ai/claude-agent-sdk-linux-x64 (glibc) ...`);
+      execSync("npm install --no-save --prefix " + JSON.stringify(__dirname + "/../") + " @anthropic-ai/claude-agent-sdk-linux-x64", {
+        stdio: "pipe", timeout: 60_000,
+      });
+      try {
+        const glibcPath2 = require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude");
+        if (existsSync(glibcPath2)) {
+          hasBinary = true;
+          log(`[claude] glibc binary installed: ${glibcPath2}`);
+        }
+      } catch {}
+    } catch (e: any) {
+      log(`[claude] auto-install of glibc binary failed: ${e?.message || e}`);
+    }
+  }
+  if (!hasBinary) {
+    return [
+      "claude 错误: Claude Code 二进制未找到。",
+      "agent-node 默认运行 claude-agent-sdk runtime 需要 Claude Code 本地二进制。",
+      "解决方案：",
+      "  1. 全局安装 Claude Code: npm i -g @anthropic-ai/claude-code",
+      "  2. 或者切换到 codex-sdk runtime: anet node create <name> --runtime codex-sdk (需 codex auth login)",
+      "  3. 或者在 node config.json 里设 pathToClaudeCodeExecutable 指向已安装的 claude 二进制",
+    ].join("\n");
   }
 
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
