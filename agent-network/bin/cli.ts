@@ -1815,7 +1815,17 @@ async function serverCommand() {
         } catch {}
       }
       if (!ready) {
-        console.error(`  ❌ Server failed to start. Is Node.js or Bun installed?`);
+        // commhub-server is TypeScript w/ a bun shebang; it requires Bun.
+        // Most Node-only systems hit this exact failure.
+        let bunInstalled = false;
+        try { execSync("command -v bun", { stdio: "pipe" }); bunInstalled = true; } catch {}
+        if (!bunInstalled) {
+          console.error(`  ❌ Bun is required to run commhub-server. Install with:`);
+          console.error(`     curl -fsSL https://bun.sh/install | bash`);
+          console.error(`     # then re-run: anet hub start`);
+        } else {
+          console.error(`  ❌ Server failed to start. Check the bunx output above for the real error.`);
+        }
         child?.kill();
         return;
       }

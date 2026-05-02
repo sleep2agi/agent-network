@@ -38,11 +38,21 @@ if [ "$(id -u)" -eq 0 ]; then
   echo "[1/5] root 检测到 — 准备 $USERNAME 用户 + 系统依赖..."
   id "$USERNAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USERNAME"
   apt-get update -qq
-  apt-get install -y -qq curl tmux ca-certificates >/dev/null
+  apt-get install -y -qq curl tmux ca-certificates unzip >/dev/null
   if ! command -v node >/dev/null 2>&1; then
     echo "[1/5] 装 Node.js 20 LTS ..."
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
     apt-get install -y -qq nodejs >/dev/null
+  fi
+  # Bun is required by commhub-server (TypeScript source with bun shebang).
+  # Install system-wide so both root and the anet user can use it.
+  if ! command -v bun >/dev/null 2>&1; then
+    echo "[1/5] 装 Bun (commhub-server 需要) ..."
+    curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1 || true
+    if [ -x "$HOME/.bun/bin/bun" ]; then
+      cp "$HOME/.bun/bin/bun" /usr/local/bin/bun
+      chmod +x /usr/local/bin/bun
+    fi
   fi
   cp "$0" "/home/$USERNAME/setup-anet.sh"
   chmod +x "/home/$USERNAME/setup-anet.sh"
