@@ -361,6 +361,35 @@ const sendReply = (target: string, message: string, taskId?: string, failed = fa
 let claudeSessionId: string | undefined = SESSION_ID || undefined;
 
 async function processWithClaude(task: string, from: string): Promise<string> {
+  // If we don't have a Claude binary AND we have an Anthropic-compatible
+  // HTTP base URL + key (MiniMax/DeepSeek/GLM/Kimi flow), transparently
+  // fall back to the http runtime — the user almost certainly wanted to
+  // hit their provider's HTTP endpoint, not the local Claude Code CLI.
+  // Without this, claude-agent-sdk + MiniMax fails with 'native binary
+  // not found' on Linux glibc systems where the SDK's bundled musl
+  // binary doesn't run.
+  const { existsSync } = await import("fs");
+  let hasBinary = false;
+  try {
+    const glibcPath = require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude");
+    if (existsSync(glibcPath)) hasBinary = true;
+  } catch {}
+  if (!hasBinary) {
+    try {
+      const { execSync } = await import("child_process");
+      execSync("which claude", { stdio: "pipe" });
+      hasBinary = true;
+    } catch {}
+  }
+  const hasAnthropicCompatibleApi = !!(
+    process.env.ANTHROPIC_BASE_URL &&
+    (process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY)
+  );
+  if (!hasBinary && hasAnthropicCompatibleApi) {
+    log(`[claude] no Claude Code binary; falling back to http runtime against ${process.env.ANTHROPIC_BASE_URL}`);
+    return processWithHttpApi(task, from);
+  }
+
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
   // Default prompt that teaches the agent to use commhub MCP tools when it
@@ -406,17 +435,17 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     };
   }
 
-  // SDK tries musl binary first which fails on glibc (Debian) systems.
-  // Auto-detect: try glibc binary from SDK, then global install, then let SDK default.
-  // CRITICAL: when we need to inject commhub MCP server (URL type), the local
-  // Claude CLI binary rejects URL-type MCP entries — so we must use the SDK's
-  // own model invocation (claudePath = undefined). Without commhub MCP the
-  // agent has no commhub_send_task tool and CANNOT talk to other agents.
-  const needsUrlMcp = Object.keys(mcpServers).length > 0;
-  const claudePath = needsUrlMcp ? undefined : (() => {
+  // ALWAYS resolve a working binary. Earlier we returned undefined when
+  // commhub MCP was injected to avoid a URL-MCP rejection, but the SDK's
+  // default falls back to a musl binary on Linux that doesn't exist on
+  // glibc (Debian/Ubuntu) → 'Claude Code native binary not found'. Newer
+  // SDK + Claude CLI accept URL-type MCP, so we resolve a binary either
+  // way and let it handle the MCP config.
+  const claudePath = (() => {
     try {
       const { execSync } = require("child_process");
       const fs = require("fs");
+      // 1. SDK-bundled glibc binary (works on most Linux x64)
       try {
         const glibcPath = require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude");
         if (fs.existsSync(glibcPath)) {
@@ -425,10 +454,14 @@ async function processWithClaude(task: string, from: string): Promise<string> {
           return glibcPath;
         }
       } catch {}
+      // 2. Global Claude Code install (claude in PATH — Mac users on Pro)
       try {
         const globalPath = execSync("which claude", { encoding: "utf-8" }).trim();
         if (globalPath) { log(`[claude] using global binary: ${globalPath}`); return globalPath; }
       } catch {}
+      // 3. SDK default (likely fails on glibc but lets the SDK surface a
+      // clearer error than a silent path mismatch).
+      log(`[claude] no binary resolved, falling back to SDK default`);
       return undefined;
     } catch { return undefined; }
   })();
