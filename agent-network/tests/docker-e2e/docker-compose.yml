@@ -1,0 +1,145 @@
+# E2E test stack for Agent Network.
+#
+# Runs three services (hub, dashboard, agent-node) plus an on-demand
+# playwright runner. The hub is built from the local monorepo source
+# (server/) so we test what's about to ship; dashboard + agent-node
+# pull the published @preview tags so we test what real users get.
+
+services:
+  hub:
+    image: oven/bun:1
+    container_name: anet-e2e-hub
+    working_dir: /app/server
+    # Mount the local server source read-only and a writable volume for
+    # node_modules so we don't pollute the host. The hub speaks REST + MCP
+    # + SSE on 9200.
+    volumes:
+      - ../../../server:/app/server:ro
+      - hub_node_modules:/app/server/node_modules
+      - hub_data:/root/.commhub
+    environment:
+      PORT: "9200"
+      HOST: "0.0.0.0"
+      # Don't set AUTH_TOKEN — V3 user-auth flow handles per-user tokens.
+    # Map to host 9201 so the test stack doesn't fight with a developer
+    # commhub-server already on :9200. Inside the docker network the hub
+    # is always reachable at hub:9200 — only the host-facing port shifted.
+    ports:
+      - "9201:9200"
+    command: >
+      sh -c "
+        cd /app/server &&
+        if [ ! -d node_modules/@modelcontextprotocol ]; then bun install --frozen-lockfile; fi &&
+        exec bun run src/index.ts
+      "
+    # Bun image is debian-slim and has neither curl nor wget. Use bun's
+    # built-in fetch for the healthcheck.
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:9200/health').then(r=>r.json()).then(d=>{if(!d.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 4s
+      retries: 30
+      start_period: 5s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard.Dockerfile
+    image: anet-e2e-dashboard:0.1.0-preview.7
+    container_name: anet-e2e-dashboard
+    depends_on:
+      hub:
+        condition: service_healthy
+    environment:
+      PORT: "3000"
+      # Server-side env: where Next.js route handlers reach the hub.
+      COMMHUB_URL: "http://hub:9200"
+      # Client-side env (browser) — same network from the docker host.
+      NEXT_PUBLIC_COMMHUB_URL: "http://hub:9200"
+      # Allow http cookies (we're not on https inside docker).
+      COOKIE_INSECURE: "1"
+      # Skip the password warning by giving an explicit dashboard password.
+      # (We don't actually use it — V3 register flow sets a v3:utok_ cookie.)
+      DASHBOARD_PASSWORD: "anethub-test"
+    # Same as hub: map dashboard to a non-default host port so the test
+    # stack co-exists with anything already on :3000.
+    ports:
+      - "3001:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/login"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 15s
+
+  agent-node:
+    build:
+      context: .
+      dockerfile: agent-node.Dockerfile
+    image: anet-e2e-agent-node:2.1.0-preview.13
+    container_name: anet-e2e-agent-node
+    working_dir: /work
+    depends_on:
+      hub:
+        condition: service_healthy
+    environment:
+      # The agent will call a MiniMax-style /v1/messages endpoint; we
+      # point it at a fake hub path that returns 404. This guarantees
+      # every reply lands as `failed` — which is exactly what scenario
+      # 05 asserts.
+      ANTHROPIC_API_KEY: "fake-test-key"
+      ANTHROPIC_AUTH_TOKEN: "fake-test-key"
+      ANTHROPIC_BASE_URL: "http://hub:9200/__nope__"
+      # Tell agent-node where the hub lives.
+      COMMHUB_URL: "http://hub:9200"
+      LOG_LEVEL: "debug"
+    volumes:
+      - ./.tmp/agent-node:/work/.anet
+    # We mount a config.json under .anet/nodes/vbot/config.json — written
+    # by run-e2e.sh after the hub has issued an ntok_ for vbot. The CLI
+    # picks it up via --alias vbot (loadJson at .anet/nodes/<alias>/config.json).
+    command:
+      - sh
+      - -c
+      - |
+        until [ -f /work/.anet/nodes/vbot/config.json ]; do
+          echo '[agent-node] waiting for config.json...'; sleep 1;
+        done
+        echo '[agent-node] config.json found, starting...'
+        exec node /app/node_modules/@sleep2agi/agent-node/dist/cli.js --alias vbot --runtime http-api --hub http://hub:9200
+
+  playwright:
+    build:
+      context: .
+      dockerfile: playwright.Dockerfile
+    image: anet-e2e-playwright:1.49.0
+    container_name: anet-e2e-playwright
+    working_dir: /tests
+    depends_on:
+      hub:
+        condition: service_healthy
+    environment:
+      DASHBOARD_URL: "http://dashboard:3000"
+      HUB_URL: "http://hub:9200"
+      CI: "1"
+    volumes:
+      # Mount only the spec files + config + helpers — NOT package.json,
+      # because we already npm-installed inside the image. Mounting the
+      # whole dir would shadow node_modules.
+      - ./playwright/playwright.config.ts:/tests/playwright.config.ts:ro
+      - ./playwright/helpers.ts:/tests/helpers.ts:ro
+      - ./playwright/01-register.spec.ts:/tests/01-register.spec.ts:ro
+      - ./playwright/02-create-node.spec.ts:/tests/02-create-node.spec.ts:ro
+      - ./playwright/03-sse-connected.spec.ts:/tests/03-sse-connected.spec.ts:ro
+      - ./playwright/04-send-via-enter.spec.ts:/tests/04-send-via-enter.spec.ts:ro
+      - ./playwright/05-receive-failed-reply.spec.ts:/tests/05-receive-failed-reply.spec.ts:ro
+      - ./playwright/06-refresh-keeps-history.spec.ts:/tests/06-refresh-keeps-history.spec.ts:ro
+      - ./playwright/07-multi-message.spec.ts:/tests/07-multi-message.spec.ts:ro
+      - ./results:/results
+      - ./.tmp/test-state.json:/tests/test-state.json:ro
+    profiles: ["runner"]
+    command: ["npx", "playwright", "test", "--reporter=list,junit", "--output=/results/artifacts"]
+
+volumes:
+  hub_node_modules:
+  hub_data:

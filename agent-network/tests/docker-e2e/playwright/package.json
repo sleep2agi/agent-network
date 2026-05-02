@@ -1,0 +1,10 @@
+{
+  "name": "anet-e2e-playwright",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "1.49.0",
+    "@types/node": "20.11.30"
+  }
+}
