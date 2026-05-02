@@ -51,7 +51,7 @@ for (let i = 0; i < argv.length; i++) {
   --model <name>      AI 模型 (codex: gpt-5.4, http-api: gpt-4o-mini, minimax: MiniMax-M1)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
-  --max-turns <n>     每任务最大轮次 (default: 5)
+  --max-turns <n>     每任务最大轮次 (default: 50)
   --max-budget <usd>  每任务预算上限
   --session <id>      恢复 session / thread ID
   --channel <spec>    Channel (telegram 或 telegram:/path)
@@ -154,7 +154,11 @@ const MODEL = opts.model || process.env.MODEL || fileConfig.model;
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
 const toolsRaw = opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.tools.join(",") : fileConfig.tools) || "";
 let TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean);
-const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "5");
+// Default 50 turns. The old default of 5 was way too low — Claude Agent SDK
+// uses one turn per tool roundtrip, so any task that uses commhub MCP or
+// reads files burns through 5 turns instantly and fails with
+// "Reached maximum number of turns (5)" — which is what Vincent saw.
+const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "50");
 const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
 const NEW_SESSION = opts["new-session"] === "true";
 const SESSION_ID = NEW_SESSION ? "" : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "");
