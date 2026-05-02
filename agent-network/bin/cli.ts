@@ -13,7 +13,7 @@
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync } from "fs";
 import { join } from "path";
 import { spawn, execSync } from "child_process";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 
 const args = process.argv.slice(2);
@@ -112,7 +112,7 @@ function profileSession(profile: Profile): string {
 }
 
 function generateNodeId(): string {
-  return `n_${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
+  return `n_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
 }
 
 function legacyNodeId(id: string): string {
@@ -1764,7 +1764,7 @@ async function serverCommand() {
     const opts = parseOpts();
     const port = opts.port || "9200";
     const sc = loadServerConfig();
-    const token = opts.token || sc.token || crypto.randomUUID().replace(/-/g, "");
+    const token = opts.token || sc.token || randomUUID().replace(/-/g, "");
     const gc = loadGlobal();
     const hubUrl = `http://127.0.0.1:${port}`;
 

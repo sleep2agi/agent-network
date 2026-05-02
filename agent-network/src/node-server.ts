@@ -13,6 +13,7 @@
  */
 
 import { readFileSync, existsSync } from "fs";
+import { randomUUID } from "crypto";
 import { join } from "path";
 import { hostname } from "os";
 import { execSync } from "child_process";
@@ -71,7 +72,7 @@ const ANET_CONFIG = loadAnetConfig();
 const COMMHUB_URL = process.env.COMMHUB_URL || ANET_CONFIG.hub || "http://127.0.0.1:9200";
 const TMUX_NAME = process.env.COMMHUB_TMUX || getTmuxSessionName();
 const ALIAS = process.env.COMMHUB_ALIAS || TMUX_NAME || hostname();
-const RESUME_ID = process.env.COMMHUB_RESUME_ID || process.env.CLAUDE_RESUME_ID || crypto.randomUUID();
+const RESUME_ID = process.env.COMMHUB_RESUME_ID || process.env.CLAUDE_RESUME_ID || randomUUID();
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || ANET_CONFIG.token || "";
 
 function log(msg: string) {
