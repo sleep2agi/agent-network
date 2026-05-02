@@ -19,10 +19,12 @@
 set -euo pipefail
 
 MINIMAX_KEY="${MINIMAX_KEY:-}"
-# MiniMax Anthropic-compatible 网关支持的模型名(2026 年常见):
-#   MiniMax-M1, MiniMax-M2, MiniMax-Text-01
-# 默认 MiniMax-M1; 可用 MINIMAX_MODEL=MiniMax-M2 ./setup-anet.sh 覆盖
-MINIMAX_MODEL="${MINIMAX_MODEL:-MiniMax-M1}"
+# MiniMax Anthropic-compatible 网关支持的模型 (官方文档):
+#   MiniMax-M2.7, MiniMax-M2.7-highspeed,
+#   MiniMax-M2.5, MiniMax-M2.5-highspeed,
+#   MiniMax-M2.1, MiniMax-M2.1-highspeed, MiniMax-M2
+# 默认 MiniMax-M2.7 (最新); 可用 MINIMAX_MODEL=MiniMax-M2 ./setup-anet.sh 覆盖
+MINIMAX_MODEL="${MINIMAX_MODEL:-MiniMax-M2.7}"
 USERNAME="${ANET_USER:-anet}"
 HUB_IP="${ANET_HUB_IP:-0.0.0.0}"
 
