@@ -1763,9 +1763,16 @@ async function serverCommand() {
     // out-of-sync between hub-start and the saved global config.
     const opts = parseOpts();
     const port = opts.port || "9200";
+    // --host / --ip flag (or HOST env) controls the bind address. Default to
+    // 127.0.0.1 (loopback only) for safety; users running on a remote box
+    // who want LAN access pass --ip 0.0.0.0 explicitly.
+    const host = opts.ip || opts.host || process.env.HOST || "127.0.0.1";
     const sc = loadServerConfig();
     const token = opts.token || sc.token || randomUUID().replace(/-/g, "");
     const gc = loadGlobal();
+    // Health checks always go to loopback; the saved hub URL also stays on
+    // loopback for the local machine. LAN clients use the LAN URL printed
+    // below in the next-steps banner.
     const hubUrl = `http://127.0.0.1:${port}`;
 
     console.log(`\n  anet hub start\n`);
@@ -1782,11 +1789,11 @@ async function serverCommand() {
     } catch {}
 
     if (!serverAlreadyRunning) {
-      console.log(`  Starting CommHub Server on port ${port}...`);
+      console.log(`  Starting CommHub Server on port ${port} (bind ${host})...`);
       const env: Record<string, string> = {
         ...process.env as any,
         PORT: port,
-        HOST: "127.0.0.1",
+        HOST: host,
         COMMHUB_AUTH_TOKEN: token,
       };
       // Pin to a specific version to defeat bunx caching of older versions.
@@ -1826,7 +1833,7 @@ async function serverCommand() {
 
     // Save hub URL + server token. Do NOT touch gc.token here — that's owned by login.
     gc.hub = hubUrl;
-    saveServerConfig({ port, host: "127.0.0.1", token });
+    saveServerConfig({ port, host, token });
     saveGlobal(gc);
 
     // Wait for API to fully boot (the /api/auth/* endpoints may not respond
@@ -1960,20 +1967,23 @@ async function serverCommand() {
     const gc = loadGlobal();
     const hubUrl = gc.hub || "http://127.0.0.1:9200";
     const dashPort = opts.port || "3000";
+    // --host / --ip for LAN access; defaults to 127.0.0.1.
+    const dashHost = opts.ip || opts.host || process.env.HOSTNAME || "127.0.0.1";
 
-    console.log(`[anet] Starting Dashboard on port ${dashPort}...`);
+    console.log(`[anet] Starting Dashboard on ${dashHost}:${dashPort}...`);
     console.log(`[anet] Connecting to CommHub: ${hubUrl}`);
 
     const env: Record<string, string> = {
       ...process.env as any,
       PORT: dashPort,
+      HOSTNAME: dashHost,
       NEXT_PUBLIC_COMMHUB_URL: hubUrl,
       COMMHUB_URL: hubUrl,
     };
 
     // Try npx first
     // Pin Dashboard version. Bump whenever the Dashboard package is updated.
-    const PINNED_DASHBOARD_VERSION = "0.1.0";
+    const PINNED_DASHBOARD_VERSION = "0.1.1-preview.0";
     const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit", shell: true });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
