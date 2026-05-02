@@ -23,14 +23,14 @@
 ## 一行命令
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sleep2agi/agent-network/main/demos/setup-anet.sh \
+curl -fsSL https://anet.vansin.me/setup-anet.sh \
   | MINIMAX_KEY=sk-cp-你的key bash
 ```
 
 或者保存到本地后执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sleep2agi/agent-network/main/demos/setup-anet.sh \
+curl -fsSL https://anet.vansin.me/setup-anet.sh \
   -o setup-anet.sh
 chmod +x setup-anet.sh
 MINIMAX_KEY=sk-cp-你的key ./setup-anet.sh
