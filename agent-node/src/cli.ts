@@ -363,7 +363,31 @@ let claudeSessionId: string | undefined = SESSION_ID || undefined;
 async function processWithClaude(task: string, from: string): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
 
-  const prompt = `你是 ${ALIAS}，收到来自 ${from} 的任务：\n\n${task}\n\n执行完后简要汇报结果。`;
+  // Default prompt that teaches the agent to use commhub MCP tools when it
+  // needs another agent's help. Without this guidance models default to
+  // 'I'll send a message and report back' without ever waiting for the
+  // peer's reply, leading to the empty answer Vincent saw.
+  const defaultPrompt = [
+    `你是 ${ALIAS}，一个 AI Agent 节点。收到来自 ${from} 的任务：`,
+    ``,
+    task,
+    ``,
+    `【若任务需要其他 agent 协助】`,
+    `1. 先用 mcp_commhub__get_all_status 看哪些 agent 在线。`,
+    `2. 用 mcp_commhub__send_task(alias, task) 派给合适的 agent，记下 task_id。`,
+    `3. 用 mcp_commhub__get_task(task_id) 轮询直到 status 是 replied 或 failed，拿到 reply 内容。`,
+    `4. 把对方的 reply 整合到你给 ${from} 的最终汇报里。`,
+    ``,
+    `【禁止】`,
+    `- 不要给自己（${ALIAS}）发任务（死循环）。`,
+    `- 不要回复"收到""ok""明白了"等无内容确认。`,
+    `- 不要在无新任务时主动调用通信工具。`,
+    ``,
+    `执行完后简要汇报结果。`,
+  ].join("\n");
+  const prompt = SYSTEM_PROMPT
+    ? `${SYSTEM_PROMPT}\n\n收到来自 ${from} 的任务：\n\n${task}`
+    : defaultPrompt;
   // Inject CommHub as MCP server so Claude can use send_task/get_all_status etc.
   // CLI accepts { url } format (streamable-http), auth via env or header
   const commhubUrl = process.env.COMMHUB_URL || COMMHUB_URL;
@@ -462,16 +486,33 @@ async function processWithClaude(task: string, from: string): Promise<string> {
 // ══════════════════════════════════════
 let codexThread: any = null;
 
-// Codex instructions 提到外面，retry 复用
+// Codex instructions — balance autonomy + safety. Earlier version banned
+// all comm tools, killing multi-agent coordination. Now we allow them
+// with clear guardrails so agents can collaborate without infinite loops.
 const CODEX_INSTRUCTIONS = SYSTEM_PROMPT || [
   `你是 ${ALIAS}，一个 AI Agent 节点，工作目录：${process.cwd()}。`,
-  `你通过通信网络接收任务。收到任务后执行并返回结果。`,
-  `规则：`,
-  `1. 只回复有实质内容的结果。`,
-  `2. 绝对不要回复"收到""好的""ok""在线""待命""等待任务"等确认消息。`,
-  `3. 没有新任务时保持完全沉默，不要主动发任何消息。`,
-  `4. 不要调用任何通信工具（send_task/send_message 等）。`,
-  `5. 你的回复会被系统自动发送给任务发送者。`,
+  `你通过通信网络（CommHub）接收任务并和其他 agent 协作。`,
+  ``,
+  `【可用通信工具】`,
+  `- mcp_commhub__send_task(alias, task)：派任务给指定 agent，等其 LLM 处理完返回 reply（同步语义）。`,
+  `- mcp_commhub__send_message(alias, message)：发聊天消息（不要求对方回复）。`,
+  `- mcp_commhub__get_task(task_id)：查询某任务的当前状态/reply。`,
+  `- mcp_commhub__get_all_status()：查看网络上所有在线 agent。`,
+  ``,
+  `【协作模式】`,
+  `当你的任务需要其他 agent 的能力时：`,
+  `1. 先 get_all_status 看哪些 agent 在线。`,
+  `2. 用 send_task 派给合适的 agent。`,
+  `3. **必须** 用 get_task 轮询那个 task_id 直到 status=replied，拿到对方的 reply 内容。`,
+  `4. 把 reply 整合进你给原始任务发起者的最终汇报。`,
+  ``,
+  `【禁止】`,
+  `- 不要回复"收到""好的""ok""在线""待命"等无内容确认。`,
+  `- 不要给自己发任务（会死循环）。`,
+  `- 收到的若是 reply 类型，不要再 send_task 给原方（会乒乓回复）。`,
+  `- 没有新任务时保持沉默，不主动发消息。`,
+  ``,
+  `你的最终回复会被系统自动 send_reply 给任务发起者。`,
 ].join("\n");
 
 const CODEX_CONFIG = {
