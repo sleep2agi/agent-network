@@ -156,6 +156,6 @@ Dashboard 实时展示谁在干什么、通信连线、任务进度 -- 像作战
 
 ## 下一步
 
-- [快速开始](/guide/quickstart) -- 3 分钟跑通第一个任务
+- [上手指南](/guide/getting-started) -- 跟着做，跑通本地第一个 Agent
 - [架构概览](/guide/architecture) -- 深入了解系统设计
 - [CLI 命令](/guide/cli) -- 掌握全部命令

@@ -2,73 +2,31 @@
 layout: home
 hero:
   name: Agent Network
-  text: Multi-Agent Collaboration, Simplified
-  tagline: Make Claude, GPT, and MiniMax work together like a team. Set up in 3 minutes, command from your browser.
+  text: Multi-Agent Collaboration, Local-First
+  tagline: One machine, one npm package. Spin up the hub, the dashboard, and your agents — Claude, GPT, MiniMax dispatch tasks to each other.
   actions:
     - theme: brand
       text: Get Started
-      link: /en/guide/quickstart
+      link: /en/guide/getting-started
     - theme: alt
       text: GitHub
       link: https://github.com/sleep2agi/agent-network
 
 features:
-  - title: 3 Commands to Run
-    details: "npm install → anet quickstart → open browser. Zero config, zero code."
-  - title: Browser-Based Command
-    details: Click an Agent to chat. Assign tasks, view results, batch dispatch — no terminal needed.
-  - title: Mixed Model Teams
-    details: Claude writes code, GPT runs commands, MiniMax writes copy — each does what it's best at.
-  - title: Enterprise Isolation
-    details: Multi-network isolation, four-tier RBAC (Owner/Admin/Member/Viewer), full audit trail.
-  - title: Multiple Entry Points
-    details: Dashboard / Telegram / WeChat / CLI — use whatever feels natural.
-  - title: Production Ready
-    details: 3 npm packages + Docker Compose. From local dev to production in one stack.
+  - title: One CLI is enough
+    details: "npm i -g @sleep2agi/agent-network; then anet hub start / anet hub dashboard / anet node create — three commands."
+  - title: Browser command center
+    details: The bundled Dashboard ships a chat panel — click an agent, send a message, see markdown replies.
+  - title: Multi-provider out of the box
+    details: claude-agent-sdk talks to MiniMax / DeepSeek / GLM / Kimi / Anthropic — any Anthropic-compatible API works.
+  - title: Multi-agent coordination
+    details: Agents discover each other through the commhub MCP toolset and dispatch sub-tasks to peers.
+  - title: Local-first
+    details: SQLite at ~/.commhub/commhub.db. Hub and dashboard run on your own machine.
+  - title: LAN-shared hub
+    details: anet init --hub http://&lt;LAN&gt;:9200 lets other machines join the same hub.
 ---
 
-<div class="stats-section">
-  <div class="stat-item">
-    <div class="stat-number">70+</div>
-    <div class="stat-label">Agents</div>
-  </div>
-  <div class="stat-item">
-    <div class="stat-number">434+</div>
-    <div class="stat-label">Tests</div>
-  </div>
-  <div class="stat-item">
-    <div class="stat-number">99.8%</div>
-    <div class="stat-label">Pass Rate</div>
-  </div>
-  <div class="stat-item">
-    <div class="stat-number">12d+</div>
-    <div class="stat-label">Zero Downtime</div>
-  </div>
-</div>
-
-<hr class="section-divider" />
-
-<div class="how-it-works">
-  <h2>How it Works</h2>
-  <div class="steps">
-    <div class="step">
-      <div class="step-circle">1</div>
-      <div class="step-title">Install</div>
-      <div class="step-desc">npm i -g @sleep2agi/agent-network && anet quickstart</div>
-    </div>
-    <div class="step">
-      <div class="step-circle">2</div>
-      <div class="step-title">Connect</div>
-      <div class="step-desc">Agents auto-join, real-time comms, Dashboard at a glance</div>
-    </div>
-    <div class="step">
-      <div class="step-circle">3</div>
-      <div class="step-title">Command</div>
-      <div class="step-desc">Browser / Telegram / CLI — issue orders to your AI fleet</div>
-    </div>
-  </div>
-</div>
-
 <div class="cta-section">
-  <a class="cta-button" href="/en/guide/quickstart">Get Started →</a>
+  <a class="cta-button" href="/en/guide/getting-started">Get Started →</a>
 </div>

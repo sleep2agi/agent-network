@@ -11,7 +11,7 @@ export default withMermaid(defineConfig({
       lang: 'zh-CN',
       themeConfig: {
         nav: [
-          { text: '指南', link: '/guide/quickstart' },
+          { text: '指南', link: '/guide/getting-started' },
           { text: 'API', link: '/api/mcp-tools' },
           { text: 'Demo', link: '/deploy/demo' },
         ],
@@ -21,7 +21,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: '基本概念', link: '/guide/basics' },
               { text: '简介', link: '/guide/introduction' },
-              { text: '快速开始', link: '/guide/quickstart' },
+              { text: '上手指南', link: '/guide/getting-started' },
               { text: '架构概览', link: '/guide/architecture' },
             ]
           },
@@ -91,7 +91,7 @@ export default withMermaid(defineConfig({
       description: 'Enterprise-grade Multi-Agent Orchestration Platform',
       themeConfig: {
         nav: [
-          { text: 'Guide', link: '/en/guide/quickstart' },
+          { text: 'Guide', link: '/en/guide/getting-started' },
           { text: 'API', link: '/en/api/mcp-tools' },
           { text: 'Demo', link: '/deploy/demo' },
         ],
@@ -101,7 +101,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Key Concepts', link: '/en/guide/basics' },
               { text: 'Introduction', link: '/en/guide/introduction' },
-              { text: 'Quick Start', link: '/en/guide/quickstart' },
+              { text: 'Getting Started', link: '/en/guide/getting-started' },
               { text: 'Architecture', link: '/en/guide/architecture' },
             ]
           },

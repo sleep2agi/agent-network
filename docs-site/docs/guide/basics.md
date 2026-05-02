@@ -214,8 +214,8 @@ http://10.0.0.1:9200/dashboard    # 远程
 
 | 问题 | 答案 |
 |------|------|
-| 账号从哪来？ | `anet quickstart` 或 `anet hub start` 时自动创建 |
-| 用户名是什么？ | 你在 `anet register` 时输入的（quickstart 默认是 `admin`） |
+| 账号从哪来？ | `anet hub start` 时自动创建（默认 admin / anethub） |
+| 用户名是什么？ | 默认 `admin`，可用 `anet register` 另开账号 |
 | 密码是什么？ | 你自己设置的 |
 | Dashboard 和 CLI 是同一个账号吗？ | 是的，完全相同 |
 | 怎么改密码？ | 终端运行 `anet passwd` |
@@ -285,17 +285,17 @@ Agent Network 有两种 Token：
 
 ## 总结：先做什么？
 
-1. **装 CLI**：`npm install -g @sleep2agi/agent-network@preview`
-2. **一键启动**：`anet quickstart`（自动完成启动服务器 + 注册 + 登录）
-3. **创建 Agent**：`anet node create 文案1号 --runtime claude-agent-sdk --model claude-3-5-haiku-20241022`
-4. **开始干活**：`anet node start 文案1号`
+1. **装 CLI**：`npm install -g @sleep2agi/agent-network`
+2. **启 Hub**：`anet hub start`（自动建库 + 默认 admin/anethub）
+3. **启 Dashboard**：`anet hub dashboard`
+4. **登录 + 建 Agent**：`anet login` → `anet node create my-bot` → `anet node start my-bot`
 
-详细步骤请看 [快速开始](/guide/quickstart)。
+详细步骤请看 [上手指南](/guide/getting-started)。
 
 ---
 
 ## 下一步
 
-- [快速开始](/guide/quickstart) -- 跟着做，3 分钟跑起来
+- [上手指南](/guide/getting-started) -- 跟着做，跑通本地第一个 Agent
 - [架构概览](/guide/architecture) -- 更深入地了解系统设计
 - [CLI 命令](/guide/cli) -- 查看所有 anet 命令

@@ -14,11 +14,11 @@ npm install -g @sleep2agi/agent-network@preview
 
 ### 快速启动
 
-| 命令 | 说明 |
-|------|------|
-| `anet quickstart` | 一键启动（启服务器 + 注册 + 创建网络） |
-| `anet init` | 配置 hub 地址 |
-| `anet init project` | 配置 Claude Code 项目（.mcp.json + CLAUDE.md） |
+| 命令 | 说明 | 状态 |
+|------|------|------|
+| `anet init` | 配置 hub 地址 | 已验证 |
+| `anet init project` | 配置 Claude Code 项目（.mcp.json + CLAUDE.md） | 已验证 |
+| `anet quickstart` | 旧的一键启动命令 | 未验证 / 不推荐使用 |
 
 ### 服务器管理
 
@@ -100,27 +100,6 @@ npm install -g @sleep2agi/agent-network@preview
 ---
 
 ## 详细用法
-
-### anet quickstart
-
-一键启动整个 Agent Network 环境。
-
-```bash
-anet quickstart [--port <port>] [--hub <url>]
-```
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--port` | 9200 | Server 端口 |
-| `--hub` | http://127.0.0.1:9200 | 远程 hub 地址（不启本地 Server） |
-
-**流程**：
-
-1. 检测端口是否可用
-2. 启动 CommHub Server
-3. 注册管理员账号（交互式输入用户名密码）
-4. 创建默认网络
-5. 保存配置到 `~/.anet/config.json`
 
 ### anet hub start
 

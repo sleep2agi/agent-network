@@ -27,7 +27,7 @@ Two ways to register — both create the same type of account:
 
 | Method | Command | When to use |
 |------|-----------|-----------|
-| **Auto-register during setup** | `anet hub start` or `anet quickstart` | First time, setting up locally |
+| **Auto-register during setup** | `anet hub start` | First time, setting up locally |
 | **Manual register** | `anet register --hub http://server-IP:9200` | Joining someone else's server |
 
 ```bash

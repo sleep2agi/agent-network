@@ -27,14 +27,14 @@ Agent Network 里有两种角色，各用不同方式认证：
 
 | 方式 | 命令 / 操作 | 什么时候用 |
 |------|-----------|-----------|
-| **一键启动时自动注册** | `anet hub start` 或 `anet quickstart` | 第一次使用，本机搭建 |
+| **一键启动时自动注册** | `anet hub start` | 第一次使用，本机搭建 |
 | **手动注册** | `anet register --hub http://服务器IP:9200` | 加入别人的服务器 |
 
 ```bash
 # 方式 1：一键启动（推荐）
 anet hub start
-# → 自动注册 admin / admin123456
-# → 自动登录 + 创建默认网络
+# → 自动创建默认账号 admin / anethub
+# → 创建 SQLite 库于 ~/.commhub/commhub.db
 # → 账号密码打印在终端里
 
 # 方式 2：加入别人的服务器

@@ -14,11 +14,11 @@ After installation, the `anet` command is available globally.
 
 ### Quick Start
 
-| Command | Description |
-|------|------|
-| `anet quickstart` | One-click start (starts server + registers + creates network) |
-| `anet init` | Configure hub address |
-| `anet init project` | Configure Claude Code project (.mcp.json + CLAUDE.md) |
+| Command | Description | Status |
+|------|------|------|
+| `anet init` | Configure hub address | verified |
+| `anet init project` | Configure Claude Code project (.mcp.json + CLAUDE.md) | verified |
+| `anet quickstart` | Legacy one-click setup | unverified / not recommended |
 
 ### Server Management
 
@@ -100,27 +100,6 @@ After installation, the `anet` command is available globally.
 ---
 
 ## Detailed Usage
-
-### anet quickstart
-
-One-click start for the entire Agent Network environment.
-
-```bash
-anet quickstart [--port <port>] [--hub <url>]
-```
-
-| Parameter | Default | Description |
-|------|--------|------|
-| `--port` | 9200 | Server port |
-| `--hub` | http://127.0.0.1:9200 | Remote hub URL (skips local server start) |
-
-**Flow**:
-
-1. Check if the port is available
-2. Start CommHub Server
-3. Register admin account (interactive username/password prompt)
-4. Create default network
-5. Save config to `~/.anet/config.json`
 
 ### anet hub start
 

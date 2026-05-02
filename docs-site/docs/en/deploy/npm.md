@@ -27,7 +27,7 @@ anet --help
 
 ```bash
 # Run CLI commands directly
-npx @sleep2agi/agent-network quickstart
+npx @sleep2agi/agent-network hub start
 ```
 
 ### Project Dependency

@@ -156,6 +156,6 @@ The Dashboard shows who's doing what, communication links, and task progress in 
 
 ## Next Steps
 
-- [Quick Start](/en/guide/quickstart) -- Up and running in 3 minutes
+- [Getting Started](/en/guide/getting-started) -- Walk through the verified local flow
 - [Architecture](/en/guide/architecture) -- Deep dive into system design
 - [CLI Commands](/en/guide/cli) -- Master all commands

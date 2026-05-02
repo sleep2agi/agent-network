@@ -1,169 +1,157 @@
 # @sleep2agi/commhub-server
 
-AI Agent 通信中枢 — MCP Server + SSE Push + REST API。
+CommHub: MCP Streamable HTTP + SSE push + REST API for an AI agent network. Single-process Bun server, SQLite-backed, zero config.
 
-**v0.5.0 stable** — 单二进制 Bun 进程，零配置 SQLite。最简单的用法是装 anet CLI：`anet hub start`。
+**v0.5.0 stable.** The supported path is to install the `anet` CLI (`@sleep2agi/agent-network` 2.0.0) and run `anet hub start`, which wires up port, default account, and config for you.
 
-## 快速启动
+## Quick start (verified)
 
 ```bash
-# 推荐：通过 anet 启动（自动写好端口 / token / 默认账号）
+# Recommended — through the anet CLI
 npm install -g @sleep2agi/agent-network
 anet hub start
+#   • http://127.0.0.1:9200 (also bound to LAN)
+#   • SQLite at ~/.commhub/commhub.db
+#   • Default admin account auto-created: admin / anethub
+#   • Reset hint printed in the launch banner
 
-# 或直接 bunx（需要 Bun）
+# Or directly via bunx (Bun required)
 bunx @sleep2agi/commhub-server
 
-# 指定端口 / 鉴权
+# With custom port / auth token
 PORT=9200 COMMHUB_AUTH_TOKEN=your-secret bunx @sleep2agi/commhub-server
 ```
 
-启动后:
-- MCP: `http://0.0.0.0:9200/mcp` (Claude Code / Codex 连接)
-- SSE: `http://0.0.0.0:9200/events/:alias` (Agent 实时推送)
-- REST: `http://0.0.0.0:9200/api/*` (Dashboard / 监控)
-- Health: `http://0.0.0.0:9200/health`
+Once running:
 
-## MCP 工具 (18 个)
+| Surface | URL |
+|---|---|
+| Health | `GET /health` |
+| MCP (Streamable HTTP) | `POST /mcp` |
+| SSE per-agent push | `GET /events/:alias` |
+| REST | `/api/*` |
 
-### Agent 端 (从 Agent 调用)
-| 工具 | 说明 |
-|------|------|
-| `report_status` | 心跳 + 状态更新 (idle/working/blocked/error/offline) |
-| `report_completion` | 任务完成汇报 |
-| `get_inbox` | 拉取待办任务 |
-| `ack_inbox` | 确认收到任务 |
+## Pairs with
 
-### Hub 端 (从指挥室 / Dashboard 调用)
-| 工具 | 说明 |
-|------|------|
-| `send_task` | 下发任务 (+ 可选 ttl_seconds) |
-| `send_message` | 发消息 (不触发 Agent 处理) |
-| `send_reply` | 回复任务 (replied/failed/cancelled + in_reply_to) |
-| `send_ack` | 确认任务 (不入 inbox) |
-| `retry_task` | 重试失败/过期/取消的任务 |
-| `cancel_task` | 取消待处理任务 |
-| `reassign_task` | 转移任务到另一个 Agent |
-| `get_task` | 查询任务详情 |
-| `get_all_status` | 全局状态面板 |
-| `get_session_status` | 单 session 详情 |
-| `broadcast` | 群发消息 |
-| `list_tasks` | 任务列表（含 network_id 过滤） |
-| `get_completions` | 完成列表 |
+| Package | Version |
+|---|---|
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.0 |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.1.0 |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.1.1 |
 
-## REST API (33 端点)
+## MCP tools (18)
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/health` | GET | 健康检查 (无需 auth) |
-| `/mcp` | POST | MCP Streamable HTTP |
-| **认证** | | |
-| `/api/auth/register` | POST | 注册 → utok_ + ntok_ |
-| `/api/auth/login` | POST | 登录 → utok_ |
-| `/api/auth/me` | GET | 当前用户信息 |
-| `/api/auth/me` | PUT | 修改资料 |
-| `/api/auth/password` | POST | 修改密码 |
-| `/api/auth/tokens` | GET | Token 列表 |
-| `/api/auth/tokens` | POST | 创建 Token |
-| `/api/auth/tokens/:id` | DELETE | 撤销 Token |
-| `/api/auth/node-token` | POST | 创建节点网络 Token (ntok_) |
-| **网络** | | |
-| `/api/networks` | GET | 我的网络列表（成员网络） |
-| `/api/networks` | POST | 创建网络 |
-| `/api/networks/:id` | GET | 网络详情 + 统计 |
-| `/api/networks/:id` | PUT | 重命名网络 |
-| `/api/networks/:id` | DELETE | 删除网络 |
-| `/api/networks/:id/members` | GET | 成员列表 |
-| `/api/networks/:id/members` | POST | 添加成员 |
-| `/api/networks/:id/members/:uid` | PUT | 修改成员角色 |
-| `/api/networks/:id/members/:uid` | DELETE | 移除成员 |
-| `/api/networks/:id/invite` | POST | 生成邀请码 |
-| `/api/networks/join` | POST | 用邀请码加入 |
-| **数据** | | |
-| `/api/status` | GET | 所有 session |
-| `/api/tasks` | GET | 任务列表 |
-| `/api/nodes` | GET | 节点信息 |
-| `/api/stats` | GET | 统计汇总 |
-| `/api/messages` | GET | 消息列表 |
-| `/api/completions` | GET | 完成记录 |
-| `/api/task_events` | GET | 任务审计日志 |
-| `/api/audit-log` | GET | 操作审计日志 |
-| `/api/users` | GET | 用户列表 (admin) |
-| `/api/license` | GET | License 状态 |
-| `/api/license/activate` | POST | 激活授权码 |
+### Agent-side
+| Tool | Description |
+|---|---|
+| `report_status` | Heartbeat + status (idle / working / blocked / error / offline) |
+| `report_completion` | Final completion payload |
+| `get_inbox` | Pull pending tasks |
+| `ack_inbox` | Acknowledge receipt |
 
-## 数据表 (13 表)
+### Hub-side (used by Dashboard, Claude Code, peer agents)
+| Tool | Description |
+|---|---|
+| `send_task` | Dispatch a task (supports `ttl_seconds`) |
+| `send_message` | Send a chat message (no task lifecycle) |
+| `send_reply` | Reply to a task (`replied` / `failed` / `cancelled`, plus `in_reply_to`) |
+| `send_ack` | Acknowledge without inbox |
+| `retry_task` | Retry failed / expired / cancelled tasks |
+| `cancel_task` | Cancel a pending task |
+| `reassign_task` | Move a task to a different agent |
+| `get_task` | Fetch task details (used by peer-coordination polling) |
+| `get_all_status` | Global presence panel |
+| `get_session_status` | Per-session detail |
+| `broadcast` | Group send |
+| `list_tasks` | Task list, filterable by `network_id` |
+| `get_completions` | Completion history |
 
-自动创建，SQLite
+## REST API
 
-| 表 | 说明 |
-|---|------|
-| `sessions` | 运行时 session (21 列, 含 node_id/session_id/channels) |
-| `inbox` | 消息队列 (13 列, 含 in_reply_to/scope) |
-| `tasks` | 任务生命周期 (17 列, 完整状态机) |
-| `nodes` | 持久化节点身份 (11 列, 独立于 session) |
-| `completions` | 完成记录 (7 列) |
-| `task_events` | 审计日志 (7 列, 每次状态变化记录) |
-| `users` | 用户 (username/password_hash/role/plan) |
-| `networks` | 网络 (name/owner/visibility/max_members) |
-| `api_tokens` | API Token (utok_/ntok_/atok_ + scope + network) |
-| `audit_log` | 操作审计 (user/action/target/ip) |
-| `licenses` | License (type/expires/limits) |
-| `network_members` | 网络成员 (user ↔ network + role) |
-| `network_invites` | 邀请码 (code/role/max_uses/expires) |
+The server exposes ~33 endpoints across health, auth, networks, and observability surfaces. The endpoints in use today by the verified flow are:
 
-任务状态机:
+| Method | Endpoint | Notes |
+|---|---|---|
+| GET | `/health` | No auth |
+| POST | `/mcp` | MCP entry |
+| POST | `/api/auth/register` | Bootstrap admin |
+| POST | `/api/auth/login` | Returns user token |
+| GET | `/api/auth/me` | Current user |
+| PUT | `/api/auth/me` | Edit profile |
+| POST | `/api/auth/password` | Change password |
+| GET / POST / DELETE | `/api/auth/tokens[…]` | Manage API tokens |
+| GET | `/api/status` | Sessions snapshot |
+| GET | `/api/tasks` | Task list (Dashboard) |
+| GET | `/api/messages` | Message list (Dashboard) |
+| GET | `/api/nodes` | Node directory |
+| GET | `/api/stats` | Aggregate stats |
+| GET | `/api/audit-log` | Audit trail |
+
+Network-management endpoints (`/api/networks…`) and `/api/license[…]` are present but are **not** part of the v2.0.0 verified flow — see *Not verified* below.
+
+Auth: `Authorization: Bearer <token>` header, or `?token=<token>` query.
+
+## SQLite schema (13 tables)
+
+Auto-created on first run.
+
+| Table | Purpose |
+|---|---|
+| `sessions` | Live agent sessions |
+| `inbox` | Pending messages and tasks |
+| `tasks` | Task state machine |
+| `nodes` | Persistent node identity |
+| `completions` | Final completion records |
+| `task_events` | Per-state audit |
+| `users` | Accounts |
+| `networks` | Workspaces |
+| `api_tokens` | `utok_` / `ntok_` / `atok_` tokens |
+| `audit_log` | Operation audit |
+| `licenses` | License placeholder |
+| `network_members` | Workspace membership |
+| `network_invites` | Invite codes |
+
+Task state machine:
+
 ```
 created → delivered → acked → running → replied
                                       → failed → retry → delivered
                                       → cancelled
-delivered → expired (5min patrol)
-delivered/acked/running → reassign → delivered (新agent)
+delivered → expired (5min watchdog)
+delivered/acked/running → reassign → delivered (new agent)
 ```
 
-## 数据库 (SQLite + PostgreSQL)
+## PostgreSQL (experimental)
 
-默认使用 SQLite（零配置），设置 `DATABASE_URL` 即切换到 PostgreSQL：
+Set `DATABASE_URL` to switch to PostgreSQL — the SQL layer auto-translates SQLite-isms (datetime, parameter placeholders) so application code is unchanged. Requires `bun add pg`. **Not in the v2.0.0 verified path.**
 
 ```bash
-# SQLite (默认，零配置)
-bunx @sleep2agi/commhub-server
-
-# PostgreSQL
-DATABASE_URL=postgres://user:pass@localhost:5432/commhub bunx @sleep2agi/commhub-server
+DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-server
 ```
 
-PostgreSQL 模式需要 `pg` 包：`bun add pg`
+## Environment
 
-所有 SQL 自动翻译（datetime→NOW, 参数占位符→$N 等），代码零修改。
+| Variable | Default | Notes |
+|---|---|---|
+| `PORT` | `9200` | listen port |
+| `HOST` | `0.0.0.0` | listen address |
+| `COMMHUB_AUTH_TOKEN` | (none) | Bearer token gate (legacy) |
+| `COMMHUB_DB` | `~/.commhub/commhub.db` | SQLite path |
+| `DATABASE_URL` | (none) | switches to PostgreSQL when set (unverified) |
 
-## 环境变量
+## Auth modes
 
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `PORT` | 9200 | 监听端口 |
-| `HOST` | 0.0.0.0 | 监听地址 |
-| `COMMHUB_AUTH_TOKEN` | (无) | Bearer token 鉴权 |
-| `COMMHUB_DB` | ~/.commhub/commhub.db | SQLite 数据库路径 |
-| `DATABASE_URL` | (无) | PostgreSQL 连接串 (设置后使用 PG) |
+1. **V3 user system (default)** — `POST /api/auth/register` and `/api/auth/login` issue `utok_…` tokens; nodes get `ntok_…`.
+2. **Legacy global token** — set `COMMHUB_AUTH_TOKEN` and pass it as Bearer / query.
 
-## 鉴权
+`/health` is always public.
 
-两种认证方式:
-1. **V3 用户系统** (推荐): `POST /api/auth/register` → 获取 `atok_xxx` token
-2. **全局 token** (传统): `COMMHUB_AUTH_TOKEN` 环境变量
+## Not verified
 
-Header: `Authorization: Bearer <token>` 或 Query: `?token=<token>`
-
-## V3 功能
-
-- **用户系统**: 注册/登录/Token 认证
-- **多网络**: 每个用户可创建多个独立网络
-- **网络隔离**: 不同网络的数据完全隔离
-- **试用授权**: 14 天免费试用, 到期需授权码
-- **审计日志**: 所有操作记录
-- **限流**: 注册 30/min, 登录 10/min (per IP)
-- `/health` 不需要 auth
+- `/api/networks*` (multi-network create / invite / member management) — code present, not E2E regressed.
+- `/api/license*` — placeholder for a future paid tier.
+- PostgreSQL backend — translation layer exists, no E2E run.
+- Telegram / WeChat / Feishu channel endpoints — out of scope for v2.0.0 verification.
 
 ## License
 

@@ -212,8 +212,8 @@ This is your **Agent Network account**, used for both the CLI and the Dashboard.
 
 | Question | Answer |
 |----------|--------|
-| Where does the account come from? | Auto-created when you run `anet quickstart` or `anet hub start` |
-| What is the username? | Whatever you entered during `anet register` (quickstart defaults to `admin`) |
+| Where does the account come from? | Auto-created when you run `anet hub start` (default `admin` / `anethub`) |
+| What is the username? | Default is `admin`; you can run `anet register` to add more users |
 | What is the password? | The one you set yourself |
 | Are Dashboard and CLI the same account? | Yes, exactly the same |
 | How to change password? | Run `anet passwd` in your terminal |
@@ -283,17 +283,17 @@ Agent Network has two types of Tokens:
 
 ## Summary: What Do I Do First?
 
-1. **Install CLI**: `npm install -g @sleep2agi/agent-network@preview`
-2. **One-click start**: `anet quickstart` (automatically starts server + registers + logs in)
-3. **Create an Agent**: `anet node create writer-1 --runtime claude-agent-sdk --model claude-3-5-haiku-20241022`
-4. **Start working**: `anet node start coder-1`
+1. **Install CLI**: `npm install -g @sleep2agi/agent-network`
+2. **Start the hub**: `anet hub start` (creates default `admin` / `anethub`)
+3. **Start the dashboard**: `anet hub dashboard`
+4. **Login + create an agent**: `anet login` → `anet node create my-bot` → `anet node start my-bot`
 
-For detailed steps, see [Quick Start](/en/guide/quickstart).
+For detailed steps, see [Getting Started](/en/guide/getting-started).
 
 ---
 
 ## Next Steps
 
-- [Quick Start](/en/guide/quickstart) -- Follow along and get running in 3 minutes
+- [Getting Started](/en/guide/getting-started) -- Walk through the verified local flow
 - [Architecture](/en/guide/architecture) -- Deeper dive into system design
 - [CLI Commands](/en/guide/cli) -- See all anet commands

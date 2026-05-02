@@ -28,5 +28,7 @@
 ---
 
 ::: tip 运行案例前
-确保已完成 [快速开始](/guide/quickstart)，CommHub Server 正在运行。
+确保已完成 [上手指南](/guide/getting-started)，CommHub Server 正在运行。
+
+注意：以下案例为设计稿，仅入门两步（启动 Hub + 单 Agent + Dashboard 派任务）已端到端验证，多 Agent 案例请视为参考方案，部分细节可能未与 v2.0.0 实时同步。
 :::

@@ -28,5 +28,7 @@ Real, runnable Agent Network examples — from simple to complex, each can be la
 ---
 
 ::: tip Before running examples
-Make sure you've completed the [Quick Start](/en/guide/quickstart) and CommHub Server is running.
+Make sure you've completed the [Getting Started guide](/en/guide/getting-started) and the CommHub server is running.
+
+Note: only the basic local flow (start hub + single agent + dispatch from Dashboard) is fully verified in v2.0.0. The multi-agent examples below are reference designs and may not match the latest CLI exactly.
 :::
