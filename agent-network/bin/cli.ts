@@ -2763,10 +2763,16 @@ async function registerCommand() {
 
 async function loginCommand() {
   const gc = loadGlobal();
-  const hub = gc.hub;
-  if (!hub) { console.error("Run 'anet init' first."); return; }
-
   const opts = parseOpts();
+  // Accept --hub on the login command directly so scripts (setup-anet.sh)
+  // don't have to run a separate `anet init` step. If supplied, persist it
+  // to gc.hub so subsequent commands work.
+  const hub = opts.hub || gc.hub;
+  if (!hub) { console.error("No hub configured. Pass --hub <url> or run 'anet init' first."); return; }
+  if (opts.hub && opts.hub !== gc.hub) {
+    gc.hub = opts.hub;
+    saveGlobal(gc);
+  }
 
   // anet login --token <token>
   if (opts.token) {
