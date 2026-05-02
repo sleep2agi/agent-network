@@ -126,10 +126,11 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
   return { ok: true, token };
 }
 
-export function resolveToken(token: string): { user: AuthUser; networkId: string | null } | null {
+export function resolveToken(token: string): { user: AuthUser; networkId: string | null; tokenName: string | null } | null {
   const tHash = hashToken(token);
   const row = db.get<any>(
-    `SELECT t.user_id, t.network_id, t.scope, u.username, u.display_name, u.email, u.role
+    `SELECT t.user_id, t.network_id, t.scope, t.name AS token_name,
+            u.username, u.display_name, u.email, u.role
      FROM api_tokens t JOIN users u ON t.user_id = u.user_id
      WHERE t.token_hash = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
     tHash);
@@ -142,6 +143,11 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
   return {
     user: { user_id: row.user_id, username: row.username, display_name: row.display_name, email: row.email, role: row.role },
     networkId: row.network_id,
+    // tokenName carries the binding identity. For node-scoped ntok_, it's
+    // 'node:<alias>'; we strip the prefix and use it as the default
+    // from_session for any MCP send_task / send_message / etc, so peer
+    // agents see who actually called them (not 'hub').
+    tokenName: row.token_name || null,
   };
 }
 

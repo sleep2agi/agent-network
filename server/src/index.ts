@@ -42,12 +42,12 @@ setInterval(() => {
 }, 300000);
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null): McpServer {
+function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null): McpServer {
   const server = new McpServer({
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, clientIP, enforceNetworkId, enforceUserId);
+  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias);
   return server;
 }
 
@@ -70,15 +70,15 @@ function requireAuth(req: Request): Response | null {
   return Response.json({ error: "unauthorized" }, { status: 401 });
 }
 
-// Extract user + network from request token (for authorization)
-function resolveRequestAuth(req: Request): { userId: string; networkId: string | null; username: string } | null {
+// Extract user + network + token-binding identity from request token.
+function resolveRequestAuth(req: Request): { userId: string; networkId: string | null; username: string; tokenName: string | null } | null {
   const header = req.headers.get("Authorization")?.replace("Bearer ", "");
   const url = new URL(req.url);
   const token = header || url.searchParams.get("token") || "";
   if (!token) return null;
   const resolved = resolveToken(token);
   if (!resolved) return null;
-  return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username };
+  return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName };
 }
 
 type RestNetworkScope = {
@@ -242,10 +242,15 @@ Bun.serve({
       // (which logs in as a user) cannot call send_task.
       const authCtx = resolveRequestAuth(req);
       const enforceNetId = authCtx?.networkId || null;
+      // Derive the calling alias from the token name (e.g., 'node:视频审查')
+      // so peer agents see the real sender instead of 'hub' on send_task.
+      const callerAlias = authCtx?.tokenName?.startsWith("node:")
+        ? authCtx.tokenName.slice("node:".length)
+        : (authCtx?.username || null);
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      const server = createServer(clientIP, enforceNetId, authCtx?.userId || null);
+      const server = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias);
       await server.connect(transport);
       const response = await transport.handleRequest(req);
       // Disconnect after response to prevent McpServer leak

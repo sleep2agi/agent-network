@@ -8,7 +8,13 @@ function ts(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
-export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null) {
+export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null) {
+  // Default from_session for outbound tools — extracted from the calling
+  // token's binding (ntok_ → node alias, utok_ → username). Without this,
+  // an agent's send_task call always claimed from='hub' and peer agents
+  // couldn't tell who actually asked them. Tool callers can still override
+  // by passing from_session explicitly.
+  const defaultFrom = (clientFrom?: string) => clientFrom || callerAlias || "hub";
   // If enforceNetworkId is set, override any client-supplied network_id
   const getNetworkId = (clientNetId?: string | null) => enforceNetworkId ?? clientNetId ?? null;
 
@@ -385,11 +391,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task: z.string().min(1).max(10000).describe("Task content"),
       priority: z.enum(["high", "normal", "low"]).optional().default("normal"),
       context: z.string().max(10000).optional(),
-      from_session: z.string().max(200).optional().default("hub"),
+      from_session: z.string().max(200).optional(),
       ttl_seconds: z.number().min(1).max(86400).optional().describe("Task TTL in seconds (default: 3600)"),
       network_id: z.string().max(200).optional().describe("Network scope"),
     },
-    async ({ alias, task, priority, context, from_session, ttl_seconds, network_id: netId }) => {
+    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId }) => { const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
 
       // Role check: viewer cannot send tasks
@@ -462,9 +468,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     {
       alias: z.string().min(1).max(200).describe("Target session alias"),
       message: z.string().min(1).max(10000).describe("Message content"),
-      from_session: z.string().max(200).optional().default("hub"),
+      from_session: z.string().max(200).optional(),
     },
-    async ({ alias, message, from_session }) => {
+    async ({ alias, message, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → send_message → ${alias}: ${message.slice(0, 60)}`);
@@ -503,9 +509,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       text: z.string().min(1).max(10000).describe("Reply content"),
       in_reply_to: z.string().max(200).optional().describe("Original task/message ID"),
       status: z.enum(["replied", "failed", "cancelled"]).optional().default("replied").describe("Task outcome"),
-      from_session: z.string().max(200).optional().default("hub"),
+      from_session: z.string().max(200).optional(),
     },
-    async ({ alias, text, in_reply_to, status: replyStatus, from_session }) => {
+    async ({ alias, text, in_reply_to, status: replyStatus, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
@@ -554,9 +560,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Acknowledge receipt of a task. Does NOT enter inbox. Updates task status only.",
     {
       task_id: z.string().min(1).max(200).describe("Task ID to acknowledge"),
-      from_session: z.string().max(200).optional().default("hub"),
+      from_session: z.string().max(200).optional(),
     },
-    async ({ task_id, from_session }) => {
+    async ({ task_id, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → send_ack → task ${task_id.slice(0, 8)}`);
@@ -580,9 +586,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Retry a failed, expired, or cancelled task. Resets status to delivered and re-queues in inbox.",
     {
       task_id: z.string().min(1).max(200).describe("Task ID to retry"),
-      from_session: z.string().max(200).optional().default("hub"),
+      from_session: z.string().max(200).optional(),
     },
-    async ({ task_id, from_session }) => {
+    async ({ task_id, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → retry_task → ${task_id.slice(0, 8)}`);
@@ -689,9 +695,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     {
       task_id: z.string().min(1).max(200).describe("Task ID to cancel"),
       reason: z.string().max(1000).optional().describe("Cancellation reason"),
-      from_session: z.string().max(200).optional().default("hub"),
+      from_session: z.string().max(200).optional(),
     },
-    async ({ task_id, reason, from_session }) => {
+    async ({ task_id, reason, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → cancel_task → ${task_id.slice(0, 8)}`);
@@ -721,9 +727,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     {
       task_id: z.string().min(1).max(200).describe("Task ID to reassign"),
       new_alias: z.string().min(1).max(200).describe("Target agent alias"),
-      from_session: z.string().max(200).optional().default("hub"),
+      from_session: z.string().max(200).optional(),
     },
-    async ({ task_id, new_alias, from_session }) => {
+    async ({ task_id, new_alias, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       console.log(`[${ts()}] ${from_session} → reassign_task → ${task_id.slice(0, 8)} → ${new_alias}`);
