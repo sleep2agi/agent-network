@@ -379,11 +379,15 @@ async function processWithClaude(task: string, from: string): Promise<string> {
 
   // SDK tries musl binary first which fails on glibc (Debian) systems.
   // Auto-detect: try glibc binary from SDK, then global install, then let SDK default.
-  const claudePath = (() => {
+  // CRITICAL: when we need to inject commhub MCP server (URL type), the local
+  // Claude CLI binary rejects URL-type MCP entries — so we must use the SDK's
+  // own model invocation (claudePath = undefined). Without commhub MCP the
+  // agent has no commhub_send_task tool and CANNOT talk to other agents.
+  const needsUrlMcp = Object.keys(mcpServers).length > 0;
+  const claudePath = needsUrlMcp ? undefined : (() => {
     try {
       const { execSync } = require("child_process");
       const fs = require("fs");
-      // Find glibc binary next to the musl one
       try {
         const glibcPath = require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude");
         if (fs.existsSync(glibcPath)) {
@@ -392,12 +396,11 @@ async function processWithClaude(task: string, from: string): Promise<string> {
           return glibcPath;
         }
       } catch {}
-      // Try global install
       try {
         const globalPath = execSync("which claude", { encoding: "utf-8" }).trim();
         if (globalPath) { log(`[claude] using global binary: ${globalPath}`); return globalPath; }
       } catch {}
-      return undefined; // let SDK find its own
+      return undefined;
     } catch { return undefined; }
   })();
 
@@ -408,8 +411,10 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     settingSources: [],
-    // CLI binary rejects URL-type MCP servers. Only pass mcpServers when no custom binary needed.
-    mcpServers: !claudePath && Object.keys(mcpServers).length ? mcpServers : undefined,
+    // mcpServers active when no claudePath (forced above for URL-type MCP).
+    // This gives the agent commhub_send_task / get_all_status / etc. so it
+    // can actually talk to other agents in the network.
+    mcpServers: Object.keys(mcpServers).length ? mcpServers : undefined,
     pathToClaudeCodeExecutable: claudePath,
     env: process.env,
     cwd: process.cwd(),
