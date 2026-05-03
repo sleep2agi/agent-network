@@ -686,7 +686,12 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
 // ══════════════════════════════════════
 
 async function processWithHttpApi(task: string, from: string): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.MINIMAX_CODING_API_KEY || fileConfig.apiKey || "";
+  const apiKey = process.env.ANTHROPIC_API_KEY
+    || process.env.ANTHROPIC_AUTH_TOKEN
+    || process.env.OPENAI_API_KEY
+    || process.env.MINIMAX_CODING_API_KEY
+    || fileConfig.apiKey
+    || "";
   const anthropicBase = process.env.ANTHROPIC_BASE_URL || fileConfig.anthropicBaseUrl || "";
   const openaiBase = process.env.OPENAI_BASE_URL || fileConfig.apiBaseUrl || "https://api.openai.com/v1";
   const model = MODEL || "gpt-4o-mini";

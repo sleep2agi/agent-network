@@ -1481,11 +1481,12 @@ async function launchAgent(id: string, forceNewSession = false) {
   }
   console.log(`[anet] Token: ${token.slice(0, 8)}...`);
 
-  if (runtime === "codex-sdk" || runtime === "claude-agent-sdk") {
+  if (runtime === "codex-sdk" || runtime === "claude-agent-sdk" || runtime === "http-api") {
     // spawn agent-node
     const agentArgs = [
       "--config", join(nodesDir(), nodeId, "config.json"),
       "--alias", displayName,
+      "--runtime", runtime,
     ];
     if (forceNewSession) agentArgs.push("--new-session", "true");
 
@@ -1993,7 +1994,7 @@ async function serverCommand() {
 
     // Try npx first
     // Pin Dashboard version. Bump whenever the Dashboard package is updated.
-    const PINNED_DASHBOARD_VERSION = "0.2.1-preview.0";
+    const PINNED_DASHBOARD_VERSION = "0.2.1-preview.1";
     const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit", shell: true });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
@@ -3212,6 +3213,52 @@ async function passwdCommand() {
 // ── demo ──
 
 async function demoCommand() {
+  const sub = args[1];
+  // No subcommand or only flags → backward-compat: --live/--watch keeps old monitor,
+  // bare `anet demo` lists available demos.
+  if (!sub || sub.startsWith("-")) {
+    if (args.includes("--live") || args.includes("--watch")) {
+      return await demoMonitorCommand();
+    }
+    return demoListCommand();
+  }
+  switch (sub) {
+    case "ls": case "list":
+      return demoListCommand();
+    case "debate":
+      args.splice(1, 1);
+      return await demoDebateCommand();
+    case "monitor": case "dashboard":
+      args.splice(1, 1);
+      return await demoMonitorCommand();
+    default:
+      console.error(`Unknown demo "${sub}". Run 'anet demo ls' to see all available demos.`);
+      process.exit(1);
+  }
+}
+
+function demoListCommand() {
+  console.log(`
+  Available demos:
+
+  [32m●[0m debate          辩论赛 — 6 agent (主持人 / 正反 4 辩 / 评委), ~10 min
+                  anet demo debate --topic "AI 创造的岗位是否比消灭的多"
+                  anet demo debate              # 交互模式
+
+  [90m○[0m storyvideo      故事→视频流水线 (多模态秀肌肉)         coming soon
+  [90m○[0m standup         团队站会模拟 (4-5 角色异步站会)         coming soon
+  [90m○[0m codereview      多专家 PR review 流水线                  coming soon
+
+  [32m●[0m monitor         系统监控大屏 (旧 anet demo --live)
+                  anet demo monitor --live
+
+  [32m●[0m = ready  [90m○[0m = planned
+
+  See 'anet demo <name> --help' for details.
+`);
+}
+
+async function demoMonitorCommand() {
   const gc = loadGlobal();
   const hub = gc.hub;
   if (!hub) { console.error("Run 'anet init' or 'anet hub start' first."); return; }
@@ -3300,6 +3347,335 @@ async function demoCommand() {
   } catch (e: any) {
     console.error(`  ❌ ${e.message}`);
   }
+}
+
+// ── demo: debate ──
+// Runs a multi-agent debate with 6 roles (host / 2 pro / 2 con / judge).
+// Spawns local agents that connect to the configured hub, dispatches 9 steps
+// in sequence, then prints+saves a markdown transcript. Self-cleaning unless
+// --keep is passed.
+
+const DEBATE_ROLES = ["主持人", "正方一辩", "正方二辩", "反方一辩", "反方二辩", "评委"] as const;
+
+const DEBATE_PROMPTS: Record<string, (topic: string) => string> = {
+  "主持人": (topic) => `你是辩论赛**主持人**，姓名"周老师"。
+本次议题：「${topic}」（正方：肯定 / 反方：否定）
+
+收到来自用户/api 的"开场"任务时:
+- 用富有节奏感的台词宣布议题、介绍辩论流程(立论→质询→总结→评判),点燃气氛
+- 200 字以内,要有梗、要有金句
+
+收到"宣布结束并交评委"任务时:
+- 简要回顾本场亮点 50-100 字
+- 邀请评委判分
+
+风格：央视《对话》主持的稳重 + 综艺主持的节奏感。`,
+  "正方一辩": (topic) => `你是**正方一辩**,姓名"林希",立场:支持议题「${topic}」。
+角色个性:逻辑严密、引用数据(可合理虚构)、善用历史经验类比。
+
+收到"立论"任务:
+- 直接抛出核心观点 + 3 个论据
+- 350-500 字,开篇要抓人
+
+收到"总结陈词"任务:
+- 用对方在质询/反驳中暴露的弱点反将一军
+- 重申核心立场,留金句
+- 250-350 字`,
+  "正方二辩": (topic) => `你是**正方二辩**,姓名"陈一川",立场:支持议题「${topic}」。
+角色个性:犀利、好斗、专挑对方逻辑漏洞。
+
+收到"质询反方"任务(附反方一辩立论):
+- 针对反方立论的 2-3 个具体论点,用反问/数据/案例反驳
+- 不要客套,火力全开
+- 250-400 字`,
+  "反方一辩": (topic) => `你是**反方一辩**,姓名"沈墨",立场:反对议题「${topic}」。
+角色个性:冷静的现实派,引用研究报告,强调本议题与表面相似情境的本质差异。
+
+收到"立论"任务(附议题+正方一辩立论):
+- 先指出正方论证的最大破绽
+- 列举 3 个论据(可合理虚构数据)
+- 350-500 字
+
+收到"总结陈词"任务:
+- 强化"质量胜过数量"或类似的核心论调
+- 250-350 字`,
+  "反方二辩": (topic) => `你是**反方二辩**,姓名"白川",立场:反对议题「${topic}」。
+角色个性:辛辣、直接、喜欢戳破对方的"乐观假设",常用类比讽刺。
+
+收到"质询正方"任务(附正方一辩立论):
+- 用讽刺、类比、反问对正方 2-3 个具体论点开火
+- 250-400 字`,
+  "评委": (_topic) => `你是辩论赛**评委**,姓名"张教授",公允、深刻、点评一针见血。
+
+收到"判分并宣布胜负"任务(附整场辩论实录):
+- 先 100 字总评本场亮点
+- 然后给正方/反方分别打分(0-100),列出 2 条加分、2 条扣分理由
+- 最后宣布胜负 + 给出核心理由
+- 总长 400-600 字
+- 不要讨好双方,必须分出胜负`,
+};
+
+async function demoDebateCommand() {
+  const opts = parseOpts();
+  const help = args.includes("--help") || args.includes("-h");
+  if (help) {
+    console.log(`
+  anet demo debate — 多 agent 辩论赛 demo
+
+  Usage:
+    anet demo debate [--topic <议题>] [--key <minimax-key>] [--out <path>] [--keep] [--quick]
+
+  Options:
+    --topic <text>    辩题 (默认交互输入)
+    --key <key>       MiniMax API key (默认 \$MINIMAX_KEY 或交互)
+    --out <path>      实录保存路径 (默认 ./debate-<topic>-<ts>.md)
+    --keep            跑完不删 6 个 agent (默认会清掉)
+    --quick           简化版 (开场→正一→反一→评委,4 步)
+    --step-timeout    每步超时秒数 (默认 360)
+    --suffix          自定义 alias 后缀 (默认随机 4 位)
+
+  Examples:
+    anet demo debate --topic "AI 创造的岗位是否比消灭的多"
+    anet demo debate --keep --topic "..."        # 保留 agent
+    MINIMAX_KEY=sk-cp-xxx anet demo debate
+
+  需要:
+    - 已 anet login 到 hub
+    - MiniMax key (Token Plan 至少有 MiniMax-M* 配额)
+`);
+    return;
+  }
+
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  if (!hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); return; }
+  if (!gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); return; }
+
+  let topic = opts.topic || "";
+  if (!topic) {
+    process.stdout.write("  辩题: ");
+    topic = await new Promise<string>(r => {
+      let buf = "";
+      process.stdin.on("data", chunk => {
+        buf += chunk.toString();
+        if (buf.includes("\n")) r(buf.trim());
+      });
+    });
+  }
+  if (!topic) { console.error("  ❌ 议题不能为空."); return; }
+
+  const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
+  if (!minimaxKey) {
+    console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=sk-cp-...");
+    return;
+  }
+
+  const stepTimeout = parseInt(opts["step-timeout"] || "360", 10) * 1000;
+  const keep = args.includes("--keep");
+  const quick = args.includes("--quick");
+  const suffix = opts.suffix || Math.random().toString(16).slice(2, 6);
+  const outPath = opts.out || `./debate-${topic.slice(0, 20).replace(/[^一-龥\w]/g, "-")}-${Date.now()}.md`;
+
+  // Default network for the script-dispatched tasks (matches inbox.network_id
+  // so ntok-scoped agents can fetch their inbox — without this they hang).
+  let networkId = "";
+  try {
+    const me = await fetch(`${hub}/api/auth/me`, { headers: authHeaders() }).then(r => r.json() as any);
+    networkId = me?.user?.default_network_id || "";
+  } catch {}
+  if (!networkId) {
+    try {
+      const nets = await fetch(`${hub}/api/networks`, { headers: authHeaders() }).then(r => r.json() as any);
+      const def = (nets?.networks || []).find((n: any) => n.network_name === "default") || nets?.networks?.[0];
+      networkId = def?.network_id || "";
+    } catch {}
+  }
+  if (!networkId) {
+    console.error("  ⚠️  Couldn't resolve default network_id — tasks may not reach agents.");
+  }
+
+  // Aliases used for this run (with suffix to avoid collision).
+  const roleAliases: Record<string, string> = {};
+  for (const r of DEBATE_ROLES) roleAliases[r] = `${r}-${suffix}`;
+
+  console.log(`\n  🎙️  辩题: ${topic}`);
+  console.log(`  📡 Hub:  ${hub}`);
+  console.log(`  🆔 Run:  ${suffix}\n`);
+
+  // 1. Create + configure 6 agents
+  console.log(`  [1/4] 创建 6 个 agent (alias 后缀 -${suffix})...`);
+  const nodesRoot = nodesDir();
+  for (const role of DEBATE_ROLES) {
+    const alias = roleAliases[role];
+    if (!existsSync(join(nodesRoot, alias, "config.json"))) {
+      const createArgs = ["create", alias,
+        "--runtime", "claude-agent-sdk",
+        "--model", "MiniMax-M2.7",
+        "--env", `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic`,
+        "--env", `ANTHROPIC_AUTH_TOKEN=${minimaxKey}`,
+        "--env", `ANTHROPIC_MODEL=MiniMax-M2.7`,
+      ];
+      args.length = 0; args.push(...createArgs);
+      try { await createCommand(); } catch (e: any) {
+        console.error(`     ❌ create ${alias}: ${e.message}`);
+        return;
+      }
+    }
+    // Inject systemPrompt for this role
+    const cfgPath = join(nodesRoot, alias, "config.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
+    cfg.systemPrompt = DEBATE_PROMPTS[role](topic);
+    writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+  }
+  console.log(`        ✓ 创建/更新 6 个 agent`);
+
+  // 2. Start each in tmux
+  console.log(`  [2/4] 启动 6 个 agent (tmux session)...`);
+  for (const role of DEBATE_ROLES) {
+    const alias = roleAliases[role];
+    const sessName = `debate-${suffix}-${alias}`;
+    try { execSync(`tmux kill-session -t ${JSON.stringify(sessName)} 2>/dev/null`, { stdio: "pipe" }); } catch {}
+    try {
+      execSync(`tmux new-session -d -s ${JSON.stringify(sessName)} 'anet node start ${JSON.stringify(alias)}'`, { stdio: "pipe", shell: "/bin/bash" });
+    } catch (e: any) {
+      console.error(`     ❌ tmux ${alias}: ${e.message}`);
+      return;
+    }
+  }
+
+  // Wait until all 6 are SSE-connected
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const h = await fetch(`${hub}/health`).then(r => r.json() as any);
+      const sse = h?.sse_sessions || {};
+      const allUp = DEBATE_ROLES.every(r => sse[roleAliases[r]] >= 1);
+      if (allUp) { console.log(`        ✓ 6 agent 全部 SSE connected`); break; }
+    } catch {}
+  }
+
+  // 3. Drive the 8 (or 4 quick) steps
+  type Speech = { header: string; speaker: string; alias: string; text: string };
+  const transcript: Speech[] = [];
+
+  async function postTask(alias: string, task: string): Promise<string> {
+    const body = JSON.stringify({ alias, task, priority: "normal", from: "api", network_id: networkId || undefined });
+    const res = await fetch(`${hub}/api/task`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body,
+    });
+    const j: any = await res.json();
+    if (!j?.ok) throw new Error(`postTask failed: ${JSON.stringify(j)}`);
+    return j.message_id;
+  }
+
+  // Wait for a reply via /api/messages polling (looks for type='reply' with in_reply_to=msgId).
+  async function waitReply(msgId: string, alias: string, timeoutMs: number): Promise<string> {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const r = await fetch(`${hub}/api/messages?limit=200`, { headers: authHeaders() }).then(x => x.json() as any);
+        const msg = (r?.messages || []).find((m: any) => m.from_alias === alias && m.type === "reply" && m.content);
+        // /api/messages doesn't include in_reply_to in the SELECT yet, so we
+        // match by recency + speaker. Since each step is sequential and we
+        // only wait for one alias at a time, this is unambiguous.
+        if (msg) {
+          let text = msg.content as string;
+          if (text.startsWith(`[${alias}]`)) text = text.slice(alias.length + 2).trimStart();
+          return text;
+        }
+      } catch {}
+    }
+    throw new Error(`timeout waiting for ${alias} reply`);
+  }
+
+  async function step(stepNo: number, total: number, header: string, role: string, task: string): Promise<string> {
+    const alias = roleAliases[role];
+    process.stdout.write(`  [${stepNo}/${total}] ${header} (${alias}) ... `);
+    const t0 = Date.now();
+    const msgId = await postTask(alias, task);
+    const reply = await waitReply(msgId, alias, stepTimeout);
+    const dt = Math.round((Date.now() - t0) / 1000);
+    console.log(`✓ ${dt}s, ${reply.length} 字`);
+    transcript.push({ header, speaker: role, alias, text: reply });
+    return reply;
+  }
+
+  console.log(`  [3/4] 驱动辩论流程 (${quick ? 4 : 9} 步)...`);
+  try {
+    if (quick) {
+      const t = 4;
+      await step(1, t, "开场", "主持人",
+        `请你作为主持人,开场宣布以下辩题并介绍流程：\n议题：「${topic}」`);
+      const pro = await step(2, t, "正方立论", "正方一辩", `议题:「${topic}」\n请发表立论,直接开始。`);
+      const con = await step(3, t, "反方立论", "反方一辩",
+        `议题:「${topic}」\n\n正方立论:\n---\n${pro}\n---\n\n请反方立论。`);
+      const md = transcript.map(s => `## ${s.header} — ${s.speaker}\n\n${s.text}\n`).join("\n");
+      await step(4, t, "评委判分", "评委",
+        `议题:「${topic}」\n\n请根据完整辩论判分:\n\n${md}`);
+    } else {
+      const t = 9;
+      await step(1, t, "开场", "主持人",
+        `请你作为主持人,开场宣布以下辩题并介绍辩论流程:\n议题：「${topic}」`);
+      const pro1 = await step(2, t, "正一立论", "正方一辩",
+        `议题:「${topic}」\n你是正方一辩,请立论。`);
+      const con1 = await step(3, t, "反一立论", "反方一辩",
+        `议题:「${topic}」\n\n正方一辩立论:\n---\n${pro1}\n---\n\n你是反方一辩,请立论。`);
+      const pro2 = await step(4, t, "正二质询", "正方二辩",
+        `议题:「${topic}」\n\n反方一辩立论:\n---\n${con1}\n---\n\n你是正方二辩,请质询反方。`);
+      const con2 = await step(5, t, "反二质询", "反方二辩",
+        `议题:「${topic}」\n\n正方一辩立论:\n---\n${pro1}\n---\n\n你是反方二辩,请质询正方。`);
+      const conS = await step(6, t, "反一总结", "反方一辩",
+        `议题:「${topic}」\n你是反方一辩,请总结陈词。前面发言:\n[正一]\n${pro1}\n\n[反一(你)]\n${con1}\n\n[正二]\n${pro2}\n\n[反二]\n${con2}`);
+      const proS = await step(7, t, "正一总结", "正方一辩",
+        `议题:「${topic}」\n你是正方一辩,请总结陈词。完整辩论:\n[正一(你)]\n${pro1}\n\n[反一]\n${con1}\n\n[正二]\n${pro2}\n\n[反二]\n${con2}\n\n[反一总结]\n${conS}`);
+      const md = transcript.map(s => `【${s.header}】${s.speaker}\n${s.text}`).join("\n\n");
+      const verdict = await step(8, t, "评委判分", "评委",
+        `议题:「${topic}」\n请根据完整辩论判分。完整实录:\n\n${md}`);
+      await step(9, t, "闭幕", "主持人",
+        `议题:「${topic}」\n\n评委已宣布:\n---\n${verdict}\n---\n\n请你做闭幕,回顾本场亮点 50-100 字。`);
+    }
+  } catch (e: any) {
+    console.error(`\n  ❌ 流程失败: ${e.message}`);
+    if (!keep) console.log(`  (--keep 未指定,稍后会清理 agent)`);
+  }
+
+  // 4. Output transcript
+  console.log(`\n  [4/4] 写入实录: ${outPath}`);
+  const md = [
+    `# 辩论赛实录`,
+    ``,
+    `**议题**: ${topic}`,
+    ``,
+    `**时间**: ${new Date().toLocaleString()}`,
+    ``,
+    `**Run**: ${suffix}`,
+    ``,
+    ...transcript.flatMap(s => [`## ${s.header} — ${s.speaker}`, ``, s.text, ``]),
+  ].join("\n");
+  writeFileSync(outPath, md);
+  console.log(`        ✓ ${md.length} 字写入 ${outPath}`);
+
+  // Cleanup unless --keep
+  if (!keep) {
+    console.log(`\n  🧹 清理 6 个 agent (用 --keep 跳过)...`);
+    for (const role of DEBATE_ROLES) {
+      const alias = roleAliases[role];
+      const sessName = `debate-${suffix}-${alias}`;
+      try { execSync(`tmux kill-session -t ${JSON.stringify(sessName)} 2>/dev/null`, { stdio: "pipe" }); } catch {}
+      args.length = 0; args.push("delete", alias);
+      try { await deleteCommand(); } catch {}
+    }
+    console.log(`        ✓ 清理完成`);
+  } else {
+    console.log(`\n  📌 已保留 6 个 agent (alias 后缀 -${suffix})。手动清理:`);
+    console.log(`     tmux kill-session -t debate-${suffix}-*`);
+    console.log(`     anet node delete ${DEBATE_ROLES.map(r => `${r}-${suffix}`).join(" ")}`);
+  }
+
+  console.log(`\n  🏁 完成！实录: ${outPath}\n`);
 }
 
 // ── config show ──
