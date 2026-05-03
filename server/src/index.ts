@@ -18,6 +18,24 @@ const SERVER_VERSION = (() => {
   } catch { return "?"; }
 })();
 
+// In-memory log ring buffer — last N lines streamed via /api/server-logs.
+// Wraps console.log/info/warn/error so EVERY existing log call lands here
+// without source changes. Dashboard tails this buffer for "hub server log
+// view" feature.
+const LOG_RING_CAP = Number(process.env.COMMHUB_LOG_RING || 500);
+type LogEntry = { ts: string; level: "log" | "info" | "warn" | "error"; line: string };
+const logRing: LogEntry[] = [];
+const _origConsole = { log: console.log.bind(console), info: console.info.bind(console), warn: console.warn.bind(console), error: console.error.bind(console) };
+function pushLog(level: LogEntry["level"], args: any[]) {
+  const line = args.map(a => typeof a === "string" ? a : (() => { try { return JSON.stringify(a); } catch { return String(a); } })()).join(" ");
+  logRing.push({ ts: new Date().toISOString(), level, line: line.slice(0, 4000) });
+  if (logRing.length > LOG_RING_CAP) logRing.splice(0, logRing.length - LOG_RING_CAP);
+}
+console.log = (...args: any[]) => { pushLog("log", args); _origConsole.log(...args); };
+console.info = (...args: any[]) => { pushLog("info", args); _origConsole.info(...args); };
+console.warn = (...args: any[]) => { pushLog("warn", args); _origConsole.warn(...args); };
+console.error = (...args: any[]) => { pushLog("error", args); _origConsole.error(...args); };
+
 // ── Rate limiter (in-memory, per IP) ──
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
@@ -836,6 +854,23 @@ Bun.serve({
         nodes: { total: totalNodes?.cnt || 0 },
         recent_tasks: recentTasks,
       }));
+    }
+
+    // ── REST: server log tail (in-memory ring buffer, last LOG_RING_CAP lines) ──
+    // Admin-only because logs may include user names + task content.
+    if (url.pathname === "/api/server-logs") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
+      if (resolved.user.role !== "admin") return withCors(req, Response.json({ ok: false, error: "admin only" }, { status: 403 }));
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 200, LOG_RING_CAP);
+      const since = url.searchParams.get("since"); // ISO timestamp; only return logs newer
+      let entries = logRing.slice(-limit);
+      if (since) entries = entries.filter(e => e.ts > since);
+      // Newest first
+      entries = entries.slice().reverse();
+      return withCors(req, Response.json({ ok: true, logs: entries, capacity: LOG_RING_CAP }));
     }
 
     // ── REST: audit log (V3) ──

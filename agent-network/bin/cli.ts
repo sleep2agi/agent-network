@@ -1801,7 +1801,7 @@ async function serverCommand() {
       // cache the first-resolved version and may not refetch even when the
       // tag points at something newer; specifying the exact version forces
       // a fresh install whenever this string changes.)
-      const PINNED_SERVER_VERSION = "0.5.1";
+      const PINNED_SERVER_VERSION = "0.5.2-preview.0";
       child = spawn("bunx", ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`], { env, stdio: "pipe", shell: true });
 
       // Wait for server with polling
@@ -1993,7 +1993,7 @@ async function serverCommand() {
 
     // Try npx first
     // Pin Dashboard version. Bump whenever the Dashboard package is updated.
-    const PINNED_DASHBOARD_VERSION = "0.2.0";
+    const PINNED_DASHBOARD_VERSION = "0.2.1-preview.0";
     const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit", shell: true });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
