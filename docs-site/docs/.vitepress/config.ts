@@ -53,6 +53,7 @@ export default withMermaid(defineConfig({
               { text: 'Docker 部署', link: '/deploy/docker' },
               { text: 'npm 部署', link: '/deploy/npm' },
               { text: 'Demo 编排', link: '/deploy/demo' },
+              { text: '🎙️ 辩论赛 Demo', link: '/deploy/demo-debate' },
             ]
           },
           {

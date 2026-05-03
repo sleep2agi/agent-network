@@ -1,5 +1,71 @@
 # 更新日志
 
+## 2026-05-03 — `anet demo` 子命令族 + 多个 bug 修复
+
+**版本同步**：anet@2.0.3-preview.4 / agent-node@2.2.0-preview.1 / dashboard@0.2.1-preview.1 / commhub-server@0.5.3-preview.0
+
+### 新功能
+
+- **`anet demo ls`** — 列出可用 demo
+- **`anet demo debate`** — 一键 6-agent 辩论赛（主持人/正反 4 辩/评委）
+  - `--topic "议题"` 议题（默认交互输入）
+  - `--key sk-cp-xxx` MiniMax API key（默认 `$MINIMAX_KEY`）
+  - `--quick` 4 步简化版（默认 9 步完整版）
+  - `--keep` 跑完保留 6 个临时 agent（默认清掉）
+  - `--out path.md` 实录路径
+  - 角色个性独立 systemPrompt，跑完输出 markdown 实录
+- **`anet demo monitor`**（旧 `anet demo --live` 别名保留）
+
+### Bug 修复
+
+- **anet CLI**：`--runtime http-api` 在 `node start` 时错走 claude CLI 分支 → 改为 spawn agent-node 并显式传 `--runtime`
+- **agent-node**：HTTP runtime 加读 `ANTHROPIC_AUTH_TOKEN` env（之前只读 `ANTHROPIC_API_KEY`，导致 MiniMax 配置无法工作）
+- **dashboard**：`useSSE` 钩子的 `connect` callback 依赖 `onEvent`，调用方传内联函数导致每次 render 都 reconnect → 用 ref 包装 `onEvent`（修复了"hub 收 1500+ admin SSE"的死循环）
+- **hub-only.sh** 一键脚本重写：自动加 4G swap、配 sudoers NOPASSWD、enable-linger、systemd --user 自启（`AUTOSTART=1` 启用）
+
+---
+
+## 2026-04-30 — Parent Task Lineage + Auto-Chain Reply
+
+**commhub-server@0.5.3-preview.0**
+
+修复多 agent 链式调用断链问题：admin → 指挥室 → 主编 时，指挥室 reply 后会话结束，主编返回结果时找不到 admin。
+
+- `tasks` 表加 `parent_task_id` 列 + `chainReplyToParent()` helper
+- `send_task` 接受 `parent_task_id`（缺失时根据 caller 最近一个 open task 推断）
+- `send_reply` / `report_completion` 自动沿 parent 链向上转发结果
+- agent-node 自动注入 `CURRENT_TASK_ID` env，prompt 提示 LLM 必须传 `parent_task_id`
+
+---
+
+## 2026-04-26 — Hub Server Logs Page + V2 Lineage Foundation
+
+**commhub-server@0.5.2-preview.0 / dashboard@0.2.1-preview.0 / anet@2.0.3-preview.1**
+
+- Dashboard 新页面 `/server-logs`：实时查看 hub stdout（最近 N 行 ring buffer）
+- REST `GET /api/server-logs`（admin 鉴权）
+- Hub banner & `/health` 显示真实 published 版本号
+
+---
+
+## 2026-04-15 — V3 Stable: Multi-Network + User System + Trial License
+
+**Agent Network V3 — Multi-Network + Commercial Ready**（commhub-server 0.5.x、anet 2.0.x）
+
+主要交付：
+- **多网络支持**：每个网络隔离 nodes/tasks/sessions
+- **用户系统**：用户名+密码注册/登录、JWT、双 Token 体系（utok_ + ntok_）
+- **试用授权**：14 天免费试用，授权码激活 Pro
+- **39 CLI 命令**：quickstart、login、register、passwd、token、network (CRUD)、status、tasks、doctor、info、logs、demo、config、license、activate、hub start...
+- **18 MCP 工具**：send_task/send_reply/retry_task/cancel_task/reassign_task/list_tasks/get_task/...
+- **17 REST 端点**：/api/auth/* + /api/networks/* + /api/tasks + /api/nodes + /api/stats + /api/audit-log + /api/license + ...
+- **3 种 Runtime**：claude-agent-sdk、codex-sdk、http-api（OpenAI/MiniMax 兼容）
+- **审计日志** + **速率限制** + **PostgreSQL 支持**（DbAdapter 接口）
+
+测试：200+ Docker E2E 回归测试覆盖（认证、网络、隔离、token CRUD、SSE 并发、审计）。
+
+---
+
 ## v1.0.0-preview.25 (2026-04-11)
 
 ### PostgreSQL + Adapter Architecture

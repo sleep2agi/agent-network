@@ -79,8 +79,18 @@ npm install -g @sleep2agi/agent-network@preview
 |------|------|
 | `anet status` | 网络概览（在线 Agent + 任务统计） |
 | `anet tasks [status]` | 查看任务列表 |
-| `anet demo` | 实时系统 Dashboard（终端版） |
+| `anet demo monitor --live` | 实时系统 Dashboard（终端版，旧 `anet demo --live`） |
 | `anet doctor` | 系统诊断 |
+
+### Demo（多 Agent 演示）
+
+| 命令 | 说明 |
+|------|------|
+| `anet demo ls` | 列出可用 demo |
+| `anet demo debate [opts]` | **辩论赛**：6 角色（主持/正反 4 辩/评委）一键 9 步辩论 |
+| `anet demo monitor [--live]` | 终端 Dashboard（保留兼容） |
+
+详见 [辩论赛 Demo 文档](/deploy/demo-debate)。
 
 ### Channel 管理
 

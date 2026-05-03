@@ -1,14 +1,14 @@
 # 上手指南
 
-本页是 Agent Network v2.0.0 已经端到端跑通的最小路径。每一步都经过 playwright + Docker E2E 验证，照着敲就能走通。
+本页是 Agent Network v2.x 已经端到端跑通的最小路径。每一步都经过 playwright + Docker E2E 验证，照着敲就能走通。
 
-::: tip 角色
+::: tip 角色（最新 preview 版本）
 | 包 | 版本 | 角色 |
 |---|------|------|
-| `@sleep2agi/agent-network` | 2.0.0 | `anet` CLI（启动 Hub / Dashboard，管理节点） |
-| `@sleep2agi/commhub-server` | 0.5.0 | 通信中枢（MCP + REST + SSE，SQLite 持久化） |
-| `@sleep2agi/agent-network-dashboard` | 0.1.0 | Web Dashboard |
-| `@sleep2agi/agent-node` | 2.1.1 | Agent 运行时 |
+| `@sleep2agi/agent-network` | 2.0.3-preview.4 | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
+| `@sleep2agi/commhub-server` | 0.5.3-preview.0 | 通信中枢（MCP + REST + SSE，SQLite/Postgres） |
+| `@sleep2agi/agent-network-dashboard` | 0.2.1-preview.1 | Web Dashboard（Next.js 16） |
+| `@sleep2agi/agent-node` | 2.2.0-preview.1 | Agent 运行时（claude-agent-sdk / codex-sdk / http-api） |
 :::
 
 ## 0. 前置
