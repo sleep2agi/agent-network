@@ -7,9 +7,12 @@
 #     ANET_HUB=http://你的云服务器IP:9200 \
 #     MINIMAX_KEY=sk-cp-xxxxx \
 #     MINIMAX_MODEL=MiniMax-M2.7 \
-#     bash 主编 编辑
+#     bash -s -- 主编 编辑
 #
-# 不传 alias 会按可用内存自动决定起多少个 (1G->1, 2G->1, 4G->2, 6G->3, 8G+ ->5).
+# 注意 `bash -s --` 不能少:`-s` 让 bash 从 stdin 读脚本,`--` 把后面的当位置参数.
+# 不传 alias 会按可用内存自动决定起多少个 (1G->1, 2G->1, 4G->2, 6G->3, 8G+ ->5):
+#   curl -fsSL https://anet.vansin.me/agent-only.sh | \
+#     ANET_HUB=... MINIMAX_KEY=... bash
 
 set -euo pipefail
 
