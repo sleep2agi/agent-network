@@ -307,6 +307,13 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network ON inbox(network_id)
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_task_events_network ON task_events(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_completions_network ON completions(network_id)"); } catch {}
 
+// ── Task lineage: parent_task_id for auto-chaining sub-task replies up the chain.
+// When 主编 (child) replies to a task that 指挥室 sent on behalf of admin, we want
+// admin to see the answer even if 指挥室's own session has died. The hub forwards
+// the reply up the chain via parent_task_id.
+try { db.exec("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)"); } catch {}
+
 // Helpers
 export function uuidv4(): string {
   return crypto.randomUUID();
@@ -343,6 +350,77 @@ export function logAudit(userId: string | null, username: string | null, action:
       [userId, username, action, targetType ?? null, targetId ?? null, detail ?? null, ip ?? null, networkId ?? null]
     );
   } catch {}
+}
+
+// Auto-chain a sub-task's reply up to the parent task lineage so the original
+// requester sees the final answer even if the intermediate session timed out.
+//
+// Why: 链路 admin → 指挥室 → 主编. 主编 finishes 5min later, but 指挥室's
+// session has already ended (replied with 'still working'). Without lineage,
+// 主编's reply just sits in 指挥室's inbox unread and admin never gets the
+// answer.
+//
+// What we do: when a child task with parent_task_id reaches a terminal state,
+// append the child reply to the parent task's result, bump parent status to
+// 'replied' if it's still open, and post an inbox notification to the parent's
+// originator (so an upstream agent or the dashboard sees the chained answer).
+// Recurse up the chain (in case of N hops).
+export function chainReplyToParent(childTaskId: string, replyText: string, replyStatus: "replied" | "failed" | "cancelled" = "replied", maxDepth = 5): void {
+  let currentChildId: string | null = childTaskId;
+  let currentReply = replyText;
+  let depth = 0;
+  while (currentChildId && depth < maxDepth) {
+    depth++;
+    type ChildRow = { parent_task_id: string | null; to_name: string; from_name: string; content: string };
+    type ParentRow = { task_id: string; from_name: string; to_name: string; status: string; result: string | null; network_id: string | null; parent_task_id: string | null };
+    const child: ChildRow | null = db.get<ChildRow>(
+      "SELECT parent_task_id, to_name, from_name, content FROM tasks WHERE task_id = ?1",
+      currentChildId
+    );
+    if (!child?.parent_task_id) return;
+    const parent: ParentRow | null = db.get<ParentRow>(
+      "SELECT task_id, from_name, to_name, status, result, network_id, parent_task_id FROM tasks WHERE task_id = ?1",
+      child.parent_task_id
+    );
+    if (!parent) return;
+
+    const childAlias = child.to_name;
+    const marker = `\n\n[via ${childAlias} 子任务结果]\n${currentReply}`;
+    const newResult = parent.result ? parent.result + marker : `[via ${childAlias} 子任务结果]\n${currentReply}`;
+
+    // Bump parent status to replied if still open. If it was already replied
+    // (e.g. 指挥室 sent an early status update), we still want to update the
+    // result so the dashboard can render the final chained answer — but keep
+    // status as replied (it was already terminal).
+    if (parent.status === "delivered" || parent.status === "acked" || parent.status === "running" || parent.status === "created") {
+      db.run(
+        "UPDATE tasks SET status = ?1, result = ?2, completed_at = datetime('now') WHERE task_id = ?3",
+        [replyStatus, newResult.slice(0, 8000), parent.task_id]
+      );
+      logTaskEvent(parent.task_id, parent.status, replyStatus, "auto-chain", `from ${childAlias}`);
+    } else {
+      db.run(
+        "UPDATE tasks SET result = ?1, completed_at = datetime('now') WHERE task_id = ?2",
+        [newResult.slice(0, 8000), parent.task_id]
+      );
+      logTaskEvent(parent.task_id, parent.status, parent.status, "auto-chain-append", `from ${childAlias}`);
+    }
+
+    if (parent.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
+      try {
+        const notifyId = `chain_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+        db.run(
+          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, in_reply_to, requires_response, network_id)
+           VALUES (?1, ?2, 'reply', 'normal', ?3, ?4, ?5, 'none', ?6)`,
+          [notifyId, parent.from_name, `[${childAlias} 子任务完成]\n${currentReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
+        );
+      } catch {}
+    }
+
+    // Recurse up the chain.
+    currentChildId = parent.task_id;
+    currentReply = newResult;
+  }
 }
 
 export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {

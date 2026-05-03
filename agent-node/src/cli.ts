@@ -430,21 +430,25 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   // needs another agent's help. Without this guidance models default to
   // 'I'll send a message and report back' without ever waiting for the
   // peer's reply, leading to the empty answer Vincent saw.
+  const currentTaskId = process.env.CURRENT_TASK_ID || "";
   const defaultPrompt = [
-    `你是 ${ALIAS}，一个 AI Agent 节点。收到来自 ${from} 的任务：`,
+    `你是 ${ALIAS}，一个 AI Agent 节点。收到来自 ${from} 的任务 (task_id=${currentTaskId})：`,
     ``,
     task,
     ``,
     `【若任务需要其他 agent 协助】`,
     `1. 先用 mcp_commhub__get_all_status 看哪些 agent 在线。`,
-    `2. 用 mcp_commhub__send_task(alias, task) 派给合适的 agent，记下 task_id。`,
-    `3. 用 mcp_commhub__get_task(task_id) 轮询直到 status 是 replied 或 failed，拿到 reply 内容。`,
-    `4. 把对方的 reply 整合到你给 ${from} 的最终汇报里。`,
+    `2. 用 mcp_commhub__send_task(alias, task, parent_task_id="${currentTaskId}") 派给合适的 agent。`,
+    `   ⚠ 必须把 parent_task_id 设成你当前任务的 ID，这样系统会自动把子任务的最终结果串回给 ${from}。`,
+    `3. 用 mcp_commhub__get_task(task_id) 轮询子任务状态。允许中途给 ${from} 发"还在等待"的进度汇报，但你必须继续轮询直到子任务 replied/failed。`,
+    `4. 拿到子任务 reply 后把内容整合到你给 ${from} 的最终汇报里。`,
+    `   即便你的 session 中途断开，只要 parent_task_id 设了，系统也会自动把子任务结果交付给 ${from}，所以不必焦虑。`,
     ``,
     `【禁止】`,
     `- 不要给自己（${ALIAS}）发任务（死循环）。`,
     `- 不要回复"收到""ok""明白了"等无内容确认。`,
     `- 不要在无新任务时主动调用通信工具。`,
+    `- send_task 时不要忘记 parent_task_id；忘了就要不回来 ${from} 的链路。`,
     ``,
     `执行完后简要汇报结果。`,
   ].join("\n");
@@ -569,9 +573,11 @@ const CODEX_INSTRUCTIONS = SYSTEM_PROMPT || [
   `【协作模式】`,
   `当你的任务需要其他 agent 的能力时：`,
   `1. 先 get_all_status 看哪些 agent 在线。`,
-  `2. 用 send_task 派给合适的 agent。`,
-  `3. **必须** 用 get_task 轮询那个 task_id 直到 status=replied，拿到对方的 reply 内容。`,
-  `4. 把 reply 整合进你给原始任务发起者的最终汇报。`,
+  `2. 用 send_task(alias, task, parent_task_id=<env CURRENT_TASK_ID>) 派给合适的 agent。`,
+  `   ⚠ 必须把 parent_task_id 设成你当前任务的 ID（环境变量 CURRENT_TASK_ID 里），系统会自动把子任务最终结果串回给你的上游。`,
+  `3. 用 get_task 轮询子任务直到 status=replied/failed。允许中途汇报"还在等"，但要继续轮询。`,
+  `4. 拿到 reply 后整合进你给上游的最终汇报。`,
+  `   即使你的 session 中途断开，只要 parent_task_id 设了，结果也会被系统自动 chain 回上游，不必焦虑。`,
   ``,
   `【禁止】`,
   `- 不要回复"收到""好的""ok""在线""待命"等无内容确认。`,
@@ -760,25 +766,35 @@ async function processWithHttpApi(task: string, from: string): Promise<string> {
 // ══════════════════════════════════════
 let thinkQueue = Promise.resolve();
 
-function think(task: string, from: string, images?: string[]): Promise<string> {
+function think(task: string, from: string, taskId: string | null, images?: string[]): Promise<string> {
   const run = async () => {
-    if (RUNTIME === "codex") return processWithCodex(task, from, images);
-    if (RUNTIME === "http") return processWithHttpApi(task, from);
-    return processWithClaude(task, from);
+    // Expose CURRENT_TASK_ID for runtime processes (Claude SDK / Codex / HTTP)
+    // so the LLM can pass it as parent_task_id when delegating sub-tasks.
+    // Server has a fallback (latest open task to this caller) but explicit
+    // is more reliable for multi-task interleavings.
+    const prev = process.env.CURRENT_TASK_ID;
+    if (taskId) process.env.CURRENT_TASK_ID = taskId; else delete process.env.CURRENT_TASK_ID;
+    try {
+      if (RUNTIME === "codex") return await processWithCodex(task, from, images);
+      if (RUNTIME === "http") return await processWithHttpApi(task, from);
+      return await processWithClaude(task, from);
+    } finally {
+      if (prev !== undefined) process.env.CURRENT_TASK_ID = prev; else delete process.env.CURRENT_TASK_ID;
+    }
   };
   const next = thinkQueue.then(run, run);
   thinkQueue = next.then(() => {}, () => {});
   return next;
 }
 
-async function processTask(task: string, from: string): Promise<{ text: string; failed: boolean }> {
+async function processTask(task: string, from: string, taskId: string | null = null): Promise<{ text: string; failed: boolean }> {
   log(`→ processing [${RUNTIME}]: ${task.slice(0, 80)}`);
   await reportStatus("working", task.slice(0, 200)).catch(() => {});
 
   let text: string;
   let failed = false;
   try {
-    text = await think(task, from);
+    text = await think(task, from, taskId);
   } catch (err: any) {
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;
@@ -861,7 +877,7 @@ async function processInbox() {
     const skip = shouldSkipMessage(from, content, msgType);
     if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }
 
-    const { text: result, failed } = await processTask(content, from);
+    const { text: result, failed } = await processTask(content, from, msg.id);
     log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
 
     // Low-value filter only applies to successful replies. Failures should

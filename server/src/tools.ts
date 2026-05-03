@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
-import { db, uuidv4, logTaskEvent } from "./db.js";
+import { db, uuidv4, logTaskEvent, chainReplyToParent } from "./db.js";
 import { pushEvent, pushBroadcast } from "./push.js";
 import { getUserNetworkRole } from "./auth.js";
 
@@ -230,6 +230,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Log event after transaction
       if (updatedTaskId) logTaskEvent(updatedTaskId, null, "replied", alias, "report_completion");
 
+      // Auto-chain to parent lineage (mirror of send_reply path).
+      if (updatedTaskId) {
+        try {
+          chainReplyToParent(updatedTaskId, result, "replied");
+          const parentChain = db.get<{ parent_task_id: string | null }>(
+            "SELECT parent_task_id FROM tasks WHERE task_id = ?1",
+            [updatedTaskId]
+          );
+          if (parentChain?.parent_task_id) {
+            const parent = db.get<{ from_name: string; task_id: string }>(
+              "SELECT from_name, task_id FROM tasks WHERE task_id = ?1",
+              [parentChain.parent_task_id]
+            );
+            if (parent?.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
+              pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: updatedTaskId, child_alias: alias });
+            }
+          }
+        } catch (e: any) {
+          console.log(`[${ts()}] ⚠ chainReplyToParent (completion) failed: ${e.message}`);
+        }
+      }
+
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, completion_id: id }) }],
       };
@@ -394,9 +416,23 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_session: z.string().max(200).optional(),
       ttl_seconds: z.number().min(1).max(86400).optional().describe("Task TTL in seconds (default: 3600)"),
       network_id: z.string().max(200).optional().describe("Network scope"),
+      parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. When the child task replies the hub will auto-chain the answer to the parent task's originator, so the user sees the final result even if the intermediate session ends."),
     },
-    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId }) => { const from_session = defaultFrom(_fromIn);
+    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn }) => { const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
+      // Resolve parent_task_id: explicit > inferred (caller's most recent
+      // delivered/started inbox task that's still open). Inference is the
+      // safety net for when the LLM forgets to pass parent_task_id.
+      let parentTaskId: string | null = parentIn ?? null;
+      if (!parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
+        try {
+          const recent = db.get<{ task_id: string }>(
+            "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered','started') ORDER BY created_at DESC LIMIT 1",
+            [from_session]
+          );
+          if (recent?.task_id) parentTaskId = recent.task_id;
+        } catch {}
+      }
 
       // Role check: viewer cannot send tasks
       if (!canWrite(effectiveNetId)) {
@@ -425,12 +461,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           [id, alias, priority, task, context ?? null, from_session, effectiveNetId ?? null]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7)`,
-          [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null]
+          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id)
+           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8)`,
+          [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId]
         );
       });
-      logTaskEvent(id, null, "delivered", from_session, `→ ${alias}`);
+      logTaskEvent(id, null, "delivered", from_session, parentTaskId ? `→ ${alias} (parent=${parentTaskId.slice(0,8)})` : `→ ${alias}`);
 
       const session = scopedSessionStatus(alias, effectiveNetId);
 
@@ -541,6 +577,30 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       // Log event after commit (outside transaction)
       if (replyLogged && in_reply_to) logTaskEvent(in_reply_to, null, replyStatus, from_session, text.slice(0, 200));
+
+      // Auto-chain reply up to parent task lineage so admin sees the final
+      // answer even if the intermediate session has died.
+      if (replyLogged && in_reply_to) {
+        try {
+          chainReplyToParent(in_reply_to, text, replyStatus);
+          // Push SSE event for parent originator if there is a chain.
+          const parentChain = db.get<{ parent_task_id: string | null; from_name: string }>(
+            "SELECT parent_task_id, from_name FROM tasks WHERE task_id = ?1",
+            [in_reply_to]
+          );
+          if (parentChain?.parent_task_id) {
+            const parent = db.get<{ from_name: string; task_id: string }>(
+              "SELECT from_name, task_id FROM tasks WHERE task_id = ?1",
+              [parentChain.parent_task_id]
+            );
+            if (parent?.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
+              pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: in_reply_to, child_alias: alias });
+            }
+          }
+        } catch (e: any) {
+          console.log(`[${ts()}] ⚠ chainReplyToParent failed: ${e.message}`);
+        }
+      }
 
       const session = scopedSessionStatus(alias, effectiveNetId);
       pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus });

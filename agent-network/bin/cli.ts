@@ -1801,7 +1801,7 @@ async function serverCommand() {
       // cache the first-resolved version and may not refetch even when the
       // tag points at something newer; specifying the exact version forces
       // a fresh install whenever this string changes.)
-      const PINNED_SERVER_VERSION = "0.5.2-preview.0";
+      const PINNED_SERVER_VERSION = "0.5.3-preview.0";
       child = spawn("bunx", ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`], { env, stdio: "pipe", shell: true });
 
       // Wait for server with polling
