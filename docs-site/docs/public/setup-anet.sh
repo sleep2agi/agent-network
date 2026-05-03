@@ -151,6 +151,26 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
+# 等默认账户 admin/anethub 可登录 — anet hub start 在 /health OK 之后才异步
+# register default account, 需要再给它几秒钟. 这里直接轮询 login API.
+echo "[3/5] 等默认账户就绪 ..."
+LOGIN_OK=0
+for i in $(seq 1 30); do
+  RES=$(curl -s -X POST http://127.0.0.1:9200/api/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"admin","password":"anethub"}' 2>/dev/null || true)
+  if echo "$RES" | grep -q '"ok":true'; then
+    LOGIN_OK=1
+    break
+  fi
+  sleep 1
+done
+if [ "$LOGIN_OK" -ne 1 ]; then
+  echo "[!] admin/anethub 登录始终失败. anet-hub 那个 tmux session 里看看 hub 启动有没有报错:"
+  echo "    tmux a -t anet-hub"
+  exit 1
+fi
+
 # 登录 (cli 全局态写入 ~/.anet/config.json)
 echo "[3/5] 登录 admin/anethub ..."
 anet login --hub http://127.0.0.1:9200 --username admin --password anethub
