@@ -47,6 +47,10 @@ wipe_state() {
   pkill -f agent-node 2>/dev/null || true
   echo "[wipe] 删 ~/.anet ~/.commhub ~/.npm/_npx ~/anodes/.anet ..."
   rm -rf ~/.anet ~/.commhub ~/.npm/_npx ~/anodes/.anet 2>/dev/null || true
+  # npm-global 的 @sleep2agi 包有时半安装遗留 dir 导致下次 npm i 报 ENOTEMPTY,
+  # WIPE 模式下顺手清掉.
+  echo "[wipe] 删 ~/.npm-global/lib/node_modules/@sleep2agi/ ..."
+  rm -rf ~/.npm-global/lib/node_modules/@sleep2agi 2>/dev/null || true
   echo "[wipe] 完成。"
 }
 
@@ -103,6 +107,15 @@ export PATH=~/.npm-global/bin:$PATH
 set +e
 npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview 2>&1
 NPM_RC=$?
+# ENOTEMPTY recovery: a prior half-finished npm install can leave the
+# package dir behind; npm's atomic rename then fails. Wipe the offending
+# scope dir and retry once.
+if [ $NPM_RC -ne 0 ]; then
+  echo "[2/5] 检测到 npm install 失败,清理半装残留并重试..."
+  rm -rf ~/.npm-global/lib/node_modules/@sleep2agi 2>/dev/null
+  npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview 2>&1
+  NPM_RC=$?
+fi
 set -e
 if [ $NPM_RC -ne 0 ]; then
   echo ""
