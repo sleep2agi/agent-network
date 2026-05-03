@@ -27,6 +27,9 @@ MINIMAX_KEY="${MINIMAX_KEY:-}"
 MINIMAX_MODEL="${MINIMAX_MODEL:-MiniMax-M2.7}"
 USERNAME="${ANET_USER:-anet}"
 HUB_IP="${ANET_HUB_IP:-0.0.0.0}"
+# WIPE=1 — 启动前清光所有状态:tmux session / ~/.anet / ~/.commhub / npx cache
+# 适合每次都从干净环境重跑测试.默认关闭(增量启动).
+WIPE="${WIPE:-0}"
 
 # 默认节点列表
 if [ "$#" -gt 0 ]; then
@@ -34,6 +37,18 @@ if [ "$#" -gt 0 ]; then
 else
   NODES=("排版发布者" "主编" "信息采集" "编辑" "审核")
 fi
+
+wipe_state() {
+  echo "[wipe] 杀光 anet-* tmux session..."
+  tmux ls 2>/dev/null | awk -F: '/^anet-/{print $1}' | xargs -I{} tmux kill-session -t {} 2>/dev/null || true
+  echo "[wipe] 杀光 commhub-server / agent-network-dashboard / agent-node 进程..."
+  pkill -f commhub-server 2>/dev/null || true
+  pkill -f agent-network-dashboard 2>/dev/null || true
+  pkill -f agent-node 2>/dev/null || true
+  echo "[wipe] 删 ~/.anet ~/.commhub ~/.npm/_npx ~/anodes/.anet ..."
+  rm -rf ~/.anet ~/.commhub ~/.npm/_npx ~/anodes/.anet 2>/dev/null || true
+  echo "[wipe] 完成。"
+}
 
 # === 1. 在 root 上时:建非 root 用户,装基础包,然后切过去重新执行 ===
 if [ "$(id -u)" -eq 0 ]; then
@@ -60,10 +75,14 @@ if [ "$(id -u)" -eq 0 ]; then
   chmod +x "/home/$USERNAME/setup-anet.sh"
   chown "$USERNAME:$USERNAME" "/home/$USERNAME/setup-anet.sh"
   echo "[1/5] 切到 $USERNAME 用户继续 ..."
-  exec su - "$USERNAME" -c "MINIMAX_KEY='$MINIMAX_KEY' ANTHROPIC_HUB_IP='$HUB_IP' bash ~/setup-anet.sh ${NODES[*]}"
+  exec su - "$USERNAME" -c "MINIMAX_KEY='$MINIMAX_KEY' MINIMAX_MODEL='$MINIMAX_MODEL' ANET_HUB_IP='$HUB_IP' WIPE='$WIPE' bash ~/setup-anet.sh ${NODES[*]}"
 fi
 
 # === 以下以非 root 用户执行 ===
+
+if [ "$WIPE" = "1" ] || [ "$WIPE" = "true" ]; then
+  wipe_state
+fi
 
 if [ -z "$MINIMAX_KEY" ]; then
   echo "[!] MINIMAX_KEY 环境变量未设置。"
