@@ -95,10 +95,30 @@ cd ~
 # === 2. npm 全局到 ~/.npm-global (避免 root 权限) ===
 echo "[2/5] 装 anet cli + agent-node 到 ~/.npm-global ..."
 mkdir -p ~/.npm-global
-npm config set prefix ~/.npm-global
+npm config set prefix ~/.npm-global >/dev/null
 grep -q '.npm-global/bin' ~/.bashrc 2>/dev/null || echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
 export PATH=~/.npm-global/bin:$PATH
-npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview --silent 2>&1 | tail -5
+# Don't silence — npm 错误必须暴露,之前 --silent | tail -5 把失败信息吞了
+# 用 set +e 包一下,失败的话不让 pipefail 直接退出整个脚本
+set +e
+npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview 2>&1
+NPM_RC=$?
+set -e
+if [ $NPM_RC -ne 0 ]; then
+  echo ""
+  echo "[!] npm install 失败 (exit $NPM_RC)。可能原因:"
+  echo "    - 网络问题: 试试 npm config set registry https://registry.npmmirror.com"
+  echo "    - 权限问题: 确认 ~/.npm-global 可写"
+  echo "    - 单独装试试: npm i -g @sleep2agi/agent-network@preview"
+  exit 1
+fi
+# 验证 anet 在 PATH 里
+if ! command -v anet >/dev/null 2>&1; then
+  echo "[!] anet 命令找不到,~/.npm-global/bin 没在 PATH 里。"
+  echo "    试试: export PATH=~/.npm-global/bin:\$PATH; anet -v"
+  exit 1
+fi
+anet -v | head -1
 
 # 每个进程独立 tmux session,方便独立 attach/restart 不干扰别人
 PATH_PREFIX="PATH=~/.npm-global/bin:\$PATH"
