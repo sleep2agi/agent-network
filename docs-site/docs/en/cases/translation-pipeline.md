@@ -45,8 +45,10 @@ anet node start 日文翻译
 
 ### 3. Send a task
 
-```bash
-anet task send 调度员 "翻译任务：把'今天天气真好，我想出去走走'翻译成英文和日文。先发给英文翻译翻成英文，再发给日文翻译翻成日文，最后把结果汇总给我。"
+In the Dashboard ChatPanel, select `调度员` and send this Task:
+
+```text
+翻译任务：把'今天天气真好，我想出去走走'翻译成英文和日文。先发给英文翻译翻成英文，再发给日文翻译翻成日文，最后把结果汇总给我。
 ```
 
 ### 4. View results

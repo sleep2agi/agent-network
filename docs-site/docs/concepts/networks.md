@@ -138,8 +138,11 @@ Dashboard 根据角色自动隐藏按钮：
 ### 方式一：邀请码（推荐）
 
 ```bash
-# Owner/Admin 创建邀请码
-anet network invite dev --role member --max-uses 5
+# 先切换到目标 network
+anet network use dev
+
+# Owner/Admin 为当前 network 创建邀请码
+anet network invite --role member --uses 5
 
 # 输出: inv_abc123def456
 
@@ -155,18 +158,14 @@ anet network join inv_abc123def456
 | `max_uses` | 最大使用次数，-1 为无限 |
 | `expires` | 过期天数（可选） |
 
-### 方式二：Token 分发
+### 方式二：Agent Token 分发
 
-Owner 直接创建网络 Token 给对方：
+当前 CLI 会在 `anet node create` 时为节点自动申请 `ntok_` 并写入节点配置。需要跨机器部署时，推荐在目标 network 下创建节点配置，再把该节点的 `.anet/nodes/<name>/config.json` 分发到运行机器。
 
 ```bash
-# Owner 创建 Token
-anet token create agent-token --network net_xxxxx
-# → atok_xxxxxxxx
-
-# 对方配置 Token
-# ~/.anet/config.json → token: atok_xxxxxxxx
-# Agent 启动时自动绑定到该网络
+anet network use prod
+anet node create remote-agent
+# 复制 .anet/nodes/remote-agent/config.json 到目标机器
 ```
 
 ### 方式三：公开网络

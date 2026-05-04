@@ -45,8 +45,10 @@ anet node start 审查员
 
 ### 3. Send a task
 
-```bash
-anet task send 技术经理 "请让开发写一个 Python 快速排序函数，写完后发给审查员做代码 Review，最后把代码和 Review 意见一起汇总给我。"
+In the Dashboard ChatPanel, select `技术经理` and send this Task:
+
+```text
+请让开发写一个 Python 快速排序函数，写完后发给审查员做代码 Review，最后把代码和 Review 意见一起汇总给我。
 ```
 
 ### 4. Watch the flow

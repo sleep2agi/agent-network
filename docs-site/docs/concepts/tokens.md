@@ -15,7 +15,7 @@ Agent Network 使用三种 Token 进行认证和授权，每种 Token 有不同�
 ### 什么时候获得
 
 - **注册时**：`anet register` 成功后返回
-- **登录时**：`anet login` 成功后返回（旧 utok_ 自动轮换）
+- **登录时**：`anet login` 成功后返回一个新的 utok_（旧登录 Token 不会自动失效，可用 `anet token revoke` 撤销）
 
 ### 权限范围
 
@@ -25,12 +25,12 @@ utok_ 是用户级 Token，**不绑定任何网络**：
 |------|------|
 | CLI 登录 (`anet whoami`) | 允许 |
 | Dashboard 登录 | 允许 |
-| REST API 读取（跨网络） | 允许（仅自己的网络） |
-| MCP 写操作 (`send_task` 等) | **不允许** |
+| REST API 读取/写入 | 允许（仅自己的网络，写操作需要 owner/admin/member） |
+| MCP 写操作 (`send_task` 等) | 允许，但必须能解析到可写 network（如传 `network_id`） |
 | Agent 连接 | **不允许** |
 
 ::: warning 重要
-utok_ **不能** 用于 Agent Node 连接 CommHub。因为 MCP 写操作（如 send_task）需要明确的网络绑定，而 utok_ 没有网络信息。Agent 必须使用 ntok_。
+utok_ **不能** 用于 Agent Node 的 SSE 长连接。Agent 必须使用 `anet node create` 写入的 ntok_，这样 Hub 可以强制绑定 network。
 :::
 
 ### 使用场景
@@ -61,9 +61,8 @@ anet network ls # 列出网络
 
 ### 什么时候获得
 
-- **注册时**：自动创建一个 ntok_，绑定到默认网络
-- **创建节点时**：`anet create` 自动为节点创建 ntok_
-- **加入网络时**：`anet network join` 自动创建
+- **注册时**：Server 会返回一个默认网络的 ntok_（主要用于兼容）
+- **创建节点时**：`anet node create` 自动为该节点创建 ntok_ 并保存到节点配置
 
 ### 权限范围
 
@@ -120,13 +119,7 @@ const effectiveNetId = enforceNetworkId ?? clientNetId ?? null;
 
 ### 权限范围
 
-atok_ 有三种 scope：
-
-| Scope | 权限 | 适用场景 |
-|-------|------|---------|
-| `full` | 读 + 写 + 管理 | Dashboard 登录、CLI |
-| `agent` | 读 + 写 | Agent 连接 |
-| `readonly` | 只读 | 监控、嵌入 |
+当前 CLI 创建的是 `scope=full` 的 atok_，可选绑定到某个 network。数据库字段预留了更多 scope，但 CLI 尚未开放 `agent` / `readonly` 选择。
 
 ### 使用场景
 
@@ -160,8 +153,8 @@ flowchart TD
 
     TYPE -->|utok_| UTOK[用户级]
     UTOK --> UTOK_OP{操作类型}
-    UTOK_OP -->|REST 读| SCOPE_CHECK[检查用户网络]
-    UTOK_OP -->|MCP 写| DENY2[拒绝<br/>无网络绑定]
+    UTOK_OP -->|REST/MCP 读写| SCOPE_CHECK[检查用户网络和角色]
+    SCOPE_CHECK --> ROLE
 
     TYPE -->|ntok_| NTOK[网络级]
     NTOK --> NET_ROLE[检查网络角色]
@@ -174,8 +167,6 @@ flowchart TD
     TYPE -->|atok_| ATOK[API Token]
     ATOK --> ATOK_SCOPE{Scope}
     ATOK_SCOPE -->|full| ALLOW
-    ATOK_SCOPE -->|agent| ALLOW
-    ATOK_SCOPE -->|readonly| VIEW_OP
 ```
 
 ## 安全最佳实践
@@ -187,8 +178,8 @@ flowchart TD
 | CLI 日常管理 | utok_（登录后自动获得） |
 | Agent Node 连接 | ntok_（自动创建） |
 | Dashboard | utok_（登录） |
-| 第三方集成 | atok_（手动创建，scope=readonly） |
-| 监控系统 | atok_（scope=readonly） |
+| 第三方集成 | atok_（手动创建；如需隔离，绑定 network） |
+| 监控系统 | utok_ 或绑定 network 的 atok_ |
 
 ### 2. Token 存储安全
 
@@ -213,19 +204,22 @@ echo ".anet/" >> .gitignore
 anet token revoke tok_old
 anet token create new-token
 
-# 登录时 utok_ 自动轮换
-anet login  # 旧 utok_ 自动失效
+# 登录会创建新的 utok_，旧 token 不会自动失效
+anet token ls
+anet token revoke tok_old
 ```
 
 ### 4. 按网络隔离
 
 ```bash
-# 每个网络使用独立的 ntok_
+# 每个网络下通过 anet node create 自动生成独立 ntok_
 anet network create prod
-anet token create prod-agent --network net_prod_id
+anet network use prod
+anet node create prod-agent
 
 anet network create dev
-anet token create dev-agent --network net_dev_id
+anet network use dev
+anet node create dev-agent
 ```
 
 ## Token 生命周期
@@ -233,10 +227,10 @@ anet token create dev-agent --network net_dev_id
 | 事件 | utok_ | ntok_ | atok_ |
 |------|-------|-------|-------|
 | 注册 | 创建 | 创建（绑定默认网络） | - |
-| 登录 | 轮换 | 不变 | - |
+| 登录 | 创建新 token（旧 token 保留直到撤销） | 不变 | - |
 | 创建节点 | 不变 | 创建（绑定节点网络） | - |
 | 手动创建 | - | - | 创建 |
-| 撤销 | 不可手动撤销 | `anet token revoke` | `anet token revoke` |
+| 撤销 | `anet token revoke` | `anet token revoke` | `anet token revoke` |
 | 过期 | 无过期 | 无过期 | 可设过期时间 |
 
 ## 全局 Token (COMMHUB_AUTH_TOKEN)

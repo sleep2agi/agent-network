@@ -6,12 +6,12 @@ Codex Telegram Squad is Agent Network's flagship demo -- 1 commander + 10 AI wor
 
 ```mermaid
 graph LR
-    TG[Telegram User] -->|Message| CMD[Commander<br/>Codex GPT-5.5<br/>+ Telegram Bot]
+    TG[Telegram User] -->|Message| CMD[Commander<br/>Codex GPT-5.4<br/>+ Telegram Bot]
 
     CMD -->|Code tasks| CG[Code Team]
     CMD -->|Text tasks| WG[Writing Team]
 
-    subgraph CG[Code Team - Codex GPT-5.5]
+    subgraph CG[Code Team - Codex GPT-5.4]
         C1[coder-1]
         C2[coder-2]
         C3[coder-3]
@@ -40,8 +40,8 @@ graph LR
 |------|------|---------|------|------|
 | server | CommHub Server | Bun | - | Communication hub |
 | seed | Initialization | curl | - | Register admin, export ntok_ |
-| commander | Commander | codex-sdk | GPT-5.5 | Receive Telegram messages, intelligent dispatch |
-| worker-1~5 | Code Team | codex-sdk | GPT-5.5 | Code generation, file operations |
+| commander | Commander | codex-sdk | GPT-5.4 | Receive Telegram messages, intelligent dispatch |
+| worker-1~5 | Code Team | codex-sdk | GPT-5.4 | Code generation, file operations |
 | worker-6~10 | Writing Team | claude-agent-sdk | MiniMax | Text processing, translation, analysis |
 | dashboard | Web UI | Next.js | - | Real-time monitoring |
 
@@ -250,7 +250,7 @@ worker-11:
   environment:
     - ALIAS=coder-6
     - RUNTIME=codex-sdk
-    - MODEL=gpt-5.5
+    - MODEL=gpt-5.4
     - COMMHUB_URL=http://server:9200
     - TOOLS=Read,Write,Edit,Bash,Glob,Grep
 ```
@@ -285,8 +285,8 @@ commander:
 
 | Component | Model | Cost per Task | Notes |
 |------|------|-----------|------|
-| Commander | GPT-5.5 | ~$0.03 | Analysis + dispatch |
-| Code Team | GPT-5.5 | ~$0.05 | Code generation |
+| Commander | GPT-5.4 | ~$0.03 | Analysis + dispatch |
+| Code Team | GPT-5.4 | ~$0.05 | Code generation |
 | Writing Team | MiniMax | ~$0.003 | Text processing |
 | Server | - | Free | Self-hosted |
 

@@ -1,5 +1,63 @@
 # Changelog
 
+## 2026-05-03 - `anet demo` subcommands and bug fixes
+
+**Version sync**: anet@2.0.3-preview.4 / agent-node@2.2.0-preview.1 / dashboard@0.2.1-preview.1 / commhub-server@0.5.3-preview.0
+
+### New Features
+
+- **`anet demo ls`** - list available demos
+- **`anet demo debate`** - one-command 6-agent debate demo
+  - `--topic "..."` debate topic
+  - `--key sk-cp-xxx` MiniMax API key, defaulting to `$MINIMAX_KEY`
+  - `--quick` shortened 4-step run
+  - `--keep` keep temporary agents and network after the run
+  - `--out path.md` transcript output path
+- **`anet demo monitor`** - kept as the old `anet demo --live` alias
+
+### Fixes
+
+- **anet CLI**: `--runtime http-api` now starts through `agent-node` instead of falling into the Claude CLI branch.
+- **agent-node**: HTTP runtime reads `ANTHROPIC_AUTH_TOKEN` for MiniMax-compatible configs.
+- **dashboard**: fixed repeated SSE reconnects caused by inline `onEvent` callbacks.
+- **hub-only.sh**: rewritten with swap setup, sudoers NOPASSWD, linger, and optional systemd user autostart.
+
+---
+
+## 2026-04-30 - Parent Task Lineage + Auto-Chain Reply
+
+**commhub-server@0.5.3-preview.0**
+
+- Added `parent_task_id` to tasks and `chainReplyToParent()` to keep multi-agent chains connected.
+- `send_task` accepts `parent_task_id` and can infer it from the caller's recent open task.
+- `send_reply` / `report_completion` forward results up the parent chain automatically.
+- `agent-node` injects `CURRENT_TASK_ID` and prompts the LLM to pass `parent_task_id`.
+
+---
+
+## 2026-04-26 - Hub Server Logs Page + V2 Lineage Foundation
+
+**commhub-server@0.5.2-preview.0 / dashboard@0.2.1-preview.0 / anet@2.0.3-preview.1**
+
+- Dashboard `/server-logs` page for live hub stdout.
+- REST `GET /api/server-logs` for admin users.
+- Hub banner and `/health` show the published version.
+
+---
+
+## 2026-04-15 - V3 Stable: Multi-Network + User System + Trial License
+
+**Agent Network V3 - Multi-Network + Commercial Ready** (`commhub-server` 0.5.x, `anet` 2.0.x)
+
+- Multi-network isolation for nodes, tasks, and sessions.
+- Username/password accounts, JWT, and the `utok_` + `ntok_` token system.
+- 14-day trial licensing and Pro activation.
+- 39 CLI commands, 18 MCP tools, and 17 REST endpoint families.
+- 3 runtimes: `claude-agent-sdk`, `codex-sdk`, and `http-api`.
+- Audit logs, rate limiting, and PostgreSQL support through the `DbAdapter`.
+
+---
+
 ## v1.0.0-preview.25 (2026-04-11)
 
 ### PostgreSQL + Adapter Architecture
@@ -37,7 +95,7 @@
 - **39 CLI commands**: quickstart, login, register, passwd, token, network (create/ls/use/info/rename/delete), status, tasks, doctor, info, logs, demo, config, license, activate, hub start...
 - **18 MCP tools**: send_task, send_reply, retry_task, cancel_task, reassign_task, list_tasks, get_task...
 - **17 REST endpoints**: /api/auth/*, /api/networks/*, /api/tasks, /api/nodes, /api/stats, /api/audit-log, /api/license...
-- **2 AI runtimes**: codex-sdk (GPT-5.5), claude-agent-sdk (Claude / MiniMax / OpenAI-compatible)
+- **2 AI runtimes**: codex-sdk (GPT-5.4), claude-agent-sdk (Claude / MiniMax / OpenAI-compatible)
 - **Audit logging**: All user operations + task state changes recorded
 - **Rate limiting**: Registration 30/min, login 10/min per IP
 
@@ -57,7 +115,7 @@ sessions, inbox, tasks, nodes, completions, task_events, users, networks, api_to
 - Auth suite: 25 tests (registration, login, token, profile, password, audit, rate limiting)
 - Network suite: 22 tests (CRUD, isolation, ownership, rename, delete, cross-user)
 - Config priority: 16 tests (CLI > env > project > global)
-- Real AI: Codex GPT-5.5 + MiniMax (Anthropic API) verified
+- Real AI: Codex GPT-5.4 + MiniMax (Anthropic API) verified
 - 10-agent idiom chain (mixed codex + minimax)
 
 **npm packages**:

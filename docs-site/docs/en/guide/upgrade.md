@@ -10,11 +10,11 @@ This guide covers how to upgrade Agent Network to the latest version, along with
 # Check CLI version
 anet --version
 
-# Check Agent Node version
-anet node --version
+# Check Agent Node version, if globally installed
+agent-node --version
 
 # Check CommHub Server version
-anet hub start --version
+curl http://127.0.0.1:9200/health
 ```
 
 ### 2. Backup Configuration
@@ -45,18 +45,20 @@ npm install -g @sleep2agi/agent-node@preview
 # If using npx, no manual upgrade needed -- it automatically pulls the latest version
 ```
 
-### 4. Restart Nodes
+### 4. Restart Processes
 
 ```bash
-# Stop all running agents
-anet node stop --all
+# List local nodes
+anet node ls
 
-# Restart CommHub Server
-anet hub stop
+# Stop the agents you need to restart
+anet node stop <name>
+
+# If the Hub is running in the foreground, stop it with Ctrl-C, then restart
 anet hub start
 
-# Restart all agents
-anet restart-all
+# Restart agents
+anet node start <name>
 ```
 
 ### 5. Verify the Upgrade
@@ -106,7 +108,7 @@ V3 is a major upgrade with the following key changes:
 The following are automatically preserved or migrated during upgrade:
 
 - **Node configuration**: runtime, model, tools, and other settings in `config.json` are preserved
-- **Session resume**: the `session` field is preserved, so you can use `anet resume` to restore previous conversations
+- **Session resume**: the `session` field is preserved, so you can use `anet node resume` to restore previous conversations
 - **Node names**: alias/node_name remain unchanged
 - **Environment variables**: API keys and other settings in the `env` field remain intact
 
@@ -134,8 +136,8 @@ If you encounter issues after upgrading, you can roll back to a previous version
 
 ```bash
 # 1. Stop all services
-anet node stop --all
-anet hub stop
+anet node stop <name>
+# If the Hub is running in the foreground, stop it with Ctrl-C
 
 # 2. Restore backed-up config
 rm -rf ~/.anet
@@ -147,7 +149,7 @@ npm install -g @sleep2agi/agent-node@<old-version>
 
 # 4. Restart services
 anet hub start
-anet restart-all
+anet node start <name>
 
 # 5. Verify
 anet doctor

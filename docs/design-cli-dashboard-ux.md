@@ -5,9 +5,9 @@
 > ✅ 已实现：
 > - 双 token 体系 (utok_ + ntok_)，token 对用户透明
 > - anet login 后交互选网络
-> - anet create 交互选网络（多网络时）
+> - anet node create 交互选网络（多网络时）
 > - anet network invite/join/members CLI
-> - anet create 自动生成 ntok_ 写入节点 config
+> - anet node create 自动生成 ntok_ 写入节点 config
 >
 > ❌ 未实现（目标态）：
 > - Token scope 选择（agent/readonly）— createToken 统一 full
@@ -32,7 +32,7 @@
 
 ```bash
 # 1. 安装
-npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
+npm i -g @sleep2agi/agent-network@preview
 
 # 2. 一键设置
 anet quickstart
@@ -48,10 +48,10 @@ anet quickstart
 #   ✅ Token: atok_abc... (已保存到 ~/.anet/config.json)
 #   ✅ Agent "my-agent" 已创建
 #
-#   下一步：anet start my-agent
+#   下一步：anet node start my-agent
 
 # 3. 启动 agent
-anet start my-agent
+anet node start my-agent
 #   启动
 #   runtime: codex-sdk
 #   model:   gpt-5.4
@@ -123,8 +123,8 @@ anet network join inv_abc123
 #   ✅ 已切换到 default
 
 # 在这个网络里创建 agent
-anet create my-bot --runtime codex-sdk
-anet start my-bot
+anet node create my-bot --runtime codex-sdk
+anet node start my-bot
 #   user:    xiaoming
 #   network: default (member)
 ```
@@ -137,18 +137,13 @@ anet token ls
 #   TOKEN ID       NAME          SCOPE    NETWORK        LAST USED
 #   tok_abc        default       full     default        2 min ago
 #   tok_def        my-project    full     my-project     1 hour ago
-#   tok_ghi        bot-token     agent    default        5 min ago
+#   tok_ghi        bot-token     full     default        5 min ago
 
-# 为 agent 创建专用 token
-anet token create prod-bot --scope agent
+# 创建 API token（当前 CLI 不支持 scope / --network 参数）
+anet token create prod-bot
 #   ✅ Token: atok_jkl...
-#   绑定: default 网络, scope: agent
+#   scope: full
 #   用法: COMMHUB_TOKEN=atok_jkl... agent-node --alias prod-bot
-
-# 为其他网络创建 token
-anet token create monitor --scope readonly --network team-prod
-#   ✅ Token: atok_mno...
-#   绑定: team-prod 网络, scope: readonly
 
 # 撤销 token
 anet token revoke tok_def
@@ -180,7 +175,7 @@ anet demo --live
 ### 场景 7：创建 agent 时选网络（交互式）
 
 ```bash
-anet create my-bot
+anet node create my-bot
 #   选择网络:
 #   > ⭐ default (owner)          ← 上下键选择
 #     👤 prod (member)
@@ -195,8 +190,9 @@ anet create my-bot
 
 # 如果只有一个可写网络 → 跳过选择
 # 如果当前目录有项目级网络配置 → 默认选中
-# 非 TTY（CI/脚本）→ 用 --network 参数指定
-anet create ci-bot --runtime codex-sdk --network prod
+# 非 TTY（CI/脚本）→ 先切换 network，再创建节点
+anet network use prod
+anet node create ci-bot --runtime codex-sdk
 ```
 
 ### 场景 8：两级 scope（全局 vs 项目级）
@@ -220,12 +216,12 @@ anet network use dev --project
 
 ```bash
 # 最简单：自动用当前网络（token 透明）
-anet start my-bot
+anet node start my-bot
 # → 读 config → 自动用对应网络的 token → 启动
 
 # 高级：不同目录不同网络
-cd ~/project-a && anet start bot-a &  # → project-a 的网络
-cd ~/project-b && anet start bot-b &  # → project-b 的网络
+cd ~/project-a && anet node start bot-a &  # → project-a 的网络
+cd ~/project-b && anet node start bot-b &  # → project-b 的网络
 
 # 无人值守部署（唯一需要显式 token 的场景）
 COMMHUB_TOKEN=atok_prod agent-node --alias ci-bot

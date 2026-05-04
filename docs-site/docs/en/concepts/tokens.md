@@ -15,7 +15,7 @@ Agent Network uses three types of tokens for authentication and authorization, e
 ### When You Get One
 
 - **On registration**: Returned after `anet register` succeeds
-- **On login**: Returned after `anet login` succeeds (old utok_ is automatically rotated)
+- **On login**: Returned after `anet login` succeeds. Each login creates a new utok_; old login tokens remain valid until revoked with `anet token revoke`.
 
 ### Permission Scope
 
@@ -25,12 +25,12 @@ utok_ is a user-level token, **not bound to any network**:
 |------|------|
 | CLI login (`anet whoami`) | Yes |
 | Dashboard login | Yes |
-| REST API read (cross-network) | Yes (only your own networks) |
-| MCP write operations (`send_task`, etc.) | **No** |
+| REST API read/write | Yes (only your own networks; writes require owner/admin/member) |
+| MCP write operations (`send_task`, etc.) | Yes, if a writable network can be resolved (for example via `network_id`) |
 | Agent connection | **No** |
 
 ::: warning Important
-utok_ **cannot** be used for Agent Node connections to CommHub. MCP write operations (like send_task) require explicit network binding, which utok_ does not have. Agents must use ntok_.
+utok_ **cannot** be used for Agent Node SSE connections. Agents must use the ntok_ written by `anet node create`, so the Hub can enforce the bound network.
 :::
 
 ### Usage Examples
@@ -61,9 +61,8 @@ anet network ls # List networks
 
 ### When You Get One
 
-- **On registration**: Automatically created, bound to the default network
-- **On node creation**: `anet create` automatically creates an ntok_ for the node
-- **On joining a network**: `anet network join` automatically creates one
+- **On registration**: The server returns an ntok_ for the default network, mainly for compatibility
+- **On node creation**: `anet node create` automatically creates an ntok_ for that node and saves it in node config
 
 ### Permission Scope
 
@@ -120,13 +119,7 @@ This means:
 
 ### Permission Scope
 
-atok_ has three scopes:
-
-| Scope | Permissions | Use Case |
-|-------|------|---------|
-| `full` | Read + write + manage | Dashboard login, CLI |
-| `agent` | Read + write | Agent connection |
-| `readonly` | Read-only | Monitoring, embedding |
+The current CLI creates `scope=full` atok_ tokens, optionally bound to a network. The database has room for more scopes, but `agent` / `readonly` selection is not exposed by the CLI yet.
 
 ### Usage Examples
 
@@ -160,8 +153,8 @@ flowchart TD
 
     TYPE -->|utok_| UTOK[User-level]
     UTOK --> UTOK_OP{Operation Type}
-    UTOK_OP -->|REST read| SCOPE_CHECK[Check user networks]
-    UTOK_OP -->|MCP write| DENY2[Denied<br/>No network binding]
+    UTOK_OP -->|REST/MCP read/write| SCOPE_CHECK[Check user networks and role]
+    SCOPE_CHECK --> ROLE
 
     TYPE -->|ntok_| NTOK[Network-level]
     NTOK --> NET_ROLE[Check network role]
@@ -174,8 +167,6 @@ flowchart TD
     TYPE -->|atok_| ATOK[API Token]
     ATOK --> ATOK_SCOPE{Scope}
     ATOK_SCOPE -->|full| ALLOW
-    ATOK_SCOPE -->|agent| ALLOW
-    ATOK_SCOPE -->|readonly| VIEW_OP
 ```
 
 ## Security Best Practices
@@ -187,8 +178,8 @@ flowchart TD
 | Daily CLI management | utok_ (obtained after login) |
 | Agent Node connection | ntok_ (auto-created) |
 | Dashboard | utok_ (login) |
-| Third-party integrations | atok_ (manually created, scope=readonly) |
-| Monitoring systems | atok_ (scope=readonly) |
+| Third-party integrations | atok_ (manually created; bind it to a network when possible) |
+| Monitoring systems | utok_ or a network-bound atok_ |
 
 ### 2. Secure Token Storage
 
@@ -213,19 +204,22 @@ echo ".anet/" >> .gitignore
 anet token revoke tok_old
 anet token create new-token
 
-# utok_ rotates automatically on login
-anet login  # Old utok_ is automatically invalidated
+# Login creates a new utok_; old tokens remain valid until revoked
+anet token ls
+anet token revoke tok_old
 ```
 
 ### 4. Network-Based Isolation
 
 ```bash
-# Use independent ntok_ per network
+# anet node create automatically creates an independent ntok_ per network
 anet network create prod
-anet token create prod-agent --network net_prod_id
+anet network use prod
+anet node create prod-agent
 
 anet network create dev
-anet token create dev-agent --network net_dev_id
+anet network use dev
+anet node create dev-agent
 ```
 
 ## Token Lifecycle
@@ -233,10 +227,10 @@ anet token create dev-agent --network net_dev_id
 | Event | utok_ | ntok_ | atok_ |
 |------|-------|-------|-------|
 | Registration | Created | Created (bound to default network) | - |
-| Login | Rotated | Unchanged | - |
+| Login | Created (old tokens remain until revoked) | Unchanged | - |
 | Node creation | Unchanged | Created (bound to node's network) | - |
 | Manual creation | - | - | Created |
-| Revocation | Cannot be manually revoked | `anet token revoke` | `anet token revoke` |
+| Revocation | `anet token revoke` | `anet token revoke` | `anet token revoke` |
 | Expiration | No expiration | No expiration | Configurable expiration |
 
 ## Global Token (COMMHUB_AUTH_TOKEN)

@@ -27,14 +27,14 @@ anet --help
 
 ```bash
 # 直接运行 CLI 命令
-npx @sleep2agi/agent-network hub start
+npx @sleep2agi/agent-network@preview hub start
 ```
 
 ### 项目依赖
 
 ```bash
 # 作为项目依赖安装
-npm install @sleep2agi/agent-network
+npm install @sleep2agi/agent-network@preview
 
 # 在代码中使用 SDK
 ```
@@ -273,7 +273,7 @@ await hub.connect();
 
 ```bash
 # 升级 CLI
-npm update -g @sleep2agi/agent-network
+npm install -g @sleep2agi/agent-network@preview
 
 # 查看当前版本
 anet --version

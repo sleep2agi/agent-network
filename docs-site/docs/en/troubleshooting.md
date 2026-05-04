@@ -127,7 +127,8 @@ anet node start my-agent --token ntok_xxx
 
 # Case 2: Upgrade your role
 # Have the owner/admin change your role
-anet network invite <network> --role member
+anet network use <network>
+anet network invite --role member
 ```
 
 ---

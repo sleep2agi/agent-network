@@ -25,7 +25,7 @@
 只需要装一个全局包：
 
 ```bash
-npm install -g @sleep2agi/agent-network
+npm install -g @sleep2agi/agent-network@preview
 ```
 
 验证：
@@ -44,7 +44,7 @@ anet hub start
 
 Hub 启动后：
 
-- 监听 `http://127.0.0.1:9200`
+- 默认只监听 `http://127.0.0.1:9200`
 - SQLite 数据库在 `~/.commhub/commhub.db`（自动创建）
 - 自动创建默认管理员账号 **admin / anethub**
 - 终端会打印局域网 URL（给其他机器加入），以及一段「重置数据」的提示
@@ -131,12 +131,16 @@ anet node start video-bot
 
 ## 9. 局域网接入（其他机器加入同一个 Hub）
 
-`anet hub start` 已经监听 `0.0.0.0`，启动日志里会打印 LAN URL。
+默认的 `anet hub start` 只绑定本机回环地址。要让局域网其他机器接入，启动 Hub 时显式绑定到 LAN：
+
+```bash
+anet hub start --host 0.0.0.0
+```
 
 在另一台机器上：
 
 ```bash
-npm install -g @sleep2agi/agent-network
+npm install -g @sleep2agi/agent-network@preview
 anet init --hub http://<HUB-LAN-IP>:9200
 anet login --username admin --password anethub
 anet node create remote-bot
@@ -147,7 +151,7 @@ anet node start remote-bot
 
 ## 已验证 vs 未验证
 
-::: info 已验证（v2.0.0 E2E 通过）
+::: info 已验证（当前 preview 线继承 v2 E2E 覆盖）
 - `anet hub start` + 默认账号自动创建
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`

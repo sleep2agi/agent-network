@@ -27,14 +27,14 @@ anet --help
 
 ```bash
 # Run CLI commands directly
-npx @sleep2agi/agent-network hub start
+npx @sleep2agi/agent-network@preview hub start
 ```
 
 ### Project Dependency
 
 ```bash
 # Install as project dependency
-npm install @sleep2agi/agent-network
+npm install @sleep2agi/agent-network@preview
 
 # Use the SDK in code
 ```
@@ -272,7 +272,7 @@ await hub.connect();
 
 ```bash
 # Upgrade CLI
-npm update -g @sleep2agi/agent-network
+npm install -g @sleep2agi/agent-network@preview
 
 # Check current version
 anet --version

@@ -4,12 +4,12 @@
 
 ### Stats
 - VitePress docs site: anet.vansin.me (46+ pages, Chinese + English)
-- 7 case study pages (hello-world, translation-pipeline, code-review, idiom-chain, telegram-squad, mixed-model, customer-service)
+- 6 maintained case study pages (hello-world, translation-pipeline, code-review, idiom-chain, telegram-squad, mixed-model)
 - npm homepage → anet.vansin.me, repo URL → agent-network
 
 ### Added since V3.14
 - **Docs: Account System page** (中英双语) — registration, login, RBAC, Agent tokens, model API keys
-- **Docs: Cases module** — 7 案例（入门3+进阶3+行业1），案例总览索引
+- **Docs: Cases module** — 6 maintained cases（入门3+进阶3），案例总览索引；未实现的行业占位页已下线
 - **Docs: Model selector in CLI** — interactive picker with 9 providers (MiniMax/DeepSeek/GLM/Intern/Kimi/OpenRouter/Claude/Claude Code/Codex)
 - **Docs: API Key docs** — where to get keys, where they're stored, security tips
 - **CLI: anet hub/node/network hierarchy** — restructured commands
@@ -22,7 +22,7 @@
 ### Pending
 - npx→anet replacement (60+ locations, agent running)
 - RBAC test27 (full 4-level role testing)
-- Demo case tutorials (customer-service, content-factory — placeholder)
+- Demo case tutorials should only be added once matching runnable assets exist
 - npm publish preview.31 (after doc fixes land)
 
 ---
@@ -64,7 +64,7 @@
 - **6 new API endpoints**: member CRUD, invite, join
 - **POST /api/auth/node-token**: create ntok_ for a specific node
 - **anet network invite/join/members**: CLI commands
-- **anet create**: interactive network picker with role icons
+- **anet node create**: interactive network picker with role icons
 - **anet login**: network picker after login
 - **First user auto-admin**: first registered user gets admin role
 - **Design docs**: auth-network V2 + CLI/Dashboard UX (7 scenarios, 8 pages)
@@ -178,7 +178,7 @@
 - **Enhanced /health**: version, api_version, capabilities, license
 - **Enhanced doctor**: shows server version + multi-network + license
 - **Friendly errors**: connection/auth/permission/rate-limit messages
-- **Network auto-inherit**: anet create writes network_id from current network
+- **Network auto-inherit**: anet node create writes network_id from current network
 - **npm metadata**: updated descriptions + keywords for discoverability
 
 ### Deferred to Next Sprint
@@ -205,7 +205,7 @@
 - **anet demo**: live system dashboard
 - **anet info <node>**: detailed node inspection
 - **anet network info**: current network stats
-- **anet server local**: zero-config local setup
+- **anet server local**: zero-config local setup（legacy name; current docs use `anet hub start`）
 - **examples/README.md**: demo scenarios + cheat sheet
 - **CHANGELOG.md**: complete release notes
 - **CI fix**: make+g++ for node-pty compilation

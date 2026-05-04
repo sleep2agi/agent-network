@@ -256,7 +256,7 @@ await startServer({
 
 ## 5. Channel 插件自动配置
 
-`anet start`/`anet resume` 检测到 `runtime: "claude-code"` 时，自动确保 Channel 插件可用：
+`anet node start`/`anet node resume` 检测到 `runtime: "claude-code"` 时，自动确保 Channel 插件可用：
 
 1. 从 npm 包复制 `node-server.ts` → `{项目}/.anet/node-server.ts`
 2. 安装依赖（`@modelcontextprotocol/sdk`）

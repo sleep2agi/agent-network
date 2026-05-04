@@ -30,7 +30,7 @@ A Runtime is the engine that an Agent uses to call an AI model. Different Runtim
 
 | Runtime | AI Model | Best For | You Need |
 |---------|----------|----------|----------|
-| `codex-sdk` | GPT-5.5 | Writing code, running commands | `codex auth login` |
+| `codex-sdk` | Codex (gpt-5.4) | Writing code, running commands | `codex auth login` |
 | `claude-agent-sdk` | Claude Sonnet/Opus | Reasoning, analysis, translation (SDK mode) | Anthropic API Key or MiniMax API Key |
 | `claude-code-cli` | Claude Sonnet/Opus | Reasoning, coding, terminal ops (CLI mode) | Claude Code installed |
 
@@ -48,10 +48,13 @@ Every Agent needs a unique name in CommHub -- that's the alias. Other agents and
 
 ```bash
 # "coder-1" is this Agent's alias
-anet node create writer-1 --runtime claude-agent-sdk --model claude-3-5-haiku-20241022
+anet node create coder-1 --runtime claude-agent-sdk --model claude-3-5-haiku-20241022
+```
 
-# Send a task to the Agent with alias "coder-1"
-anet task send coder-1 "Write a Hello World script"
+In the Dashboard ChatPanel, select "coder-1" and send a Task:
+
+```text
+Write a Hello World script
 ```
 
 Alias rules:
@@ -128,7 +131,7 @@ anet hub start
 Think of it as a member in a group chat. Each Agent has:
 
 - **A name** (alias): e.g. "coder-1", "writer-assistant"
-- **Capabilities**: determined by its AI model (GPT-5.5, Claude, MiniMax, etc.)
+- **Capabilities**: determined by its AI model (Codex (gpt-5.4), Claude, MiniMax, etc.)
 - **A connection**: it connects to CommHub and waits for tasks
 
 ```bash
@@ -173,18 +176,18 @@ If you see `Not logged in` or an error, the login didn't succeed. Check that the
 
 **Open your browser and visit CommHub's web interface.** Uses the same Agent Network account.
 
-```
-http://localhost:9200/dashboard   # local
-http://10.0.0.1:9200/dashboard    # remote
+```bash
+anet hub dashboard
+# Open http://localhost:3000
 ```
 
 ### 3. `codex auth login` -- OpenAI Account (NOT related to Agent Network)
 
-If you want to use a GPT-5.5 Agent, you need to log into OpenAI's Codex first. **This is OpenAI's own account system** and has nothing to do with Agent Network.
+If you want to use a Codex (gpt-5.4) Agent, you need to log into OpenAI's Codex first. **This is OpenAI's own account system** and has nothing to do with Agent Network.
 
-### 4. `claude auth login` -- Anthropic Account (NOT related to Agent Network)
+### 4. Claude / Anthropic Account (NOT related to Agent Network)
 
-If you want to use a Claude Agent, you need a Anthropic API Key or MiniMax API Key and Anthropic authorization. **This is also unrelated to Agent Network.**
+If you use `claude-agent-sdk`, you need an Anthropic API key or a compatible provider key. If you use `claude-code-cli`, the local Claude Code CLI must be installed and logged in. **This is also unrelated to Agent Network.**
 
 ### Quick Reference Table
 
@@ -192,8 +195,9 @@ If you want to use a Claude Agent, you need a Anthropic API Key or MiniMax API K
 |---------------------|-------|--------------|----------------|
 | Manage Agent Network | Terminal | `anet login` | Agent Network account |
 | View Dashboard | Browser | Web login | Agent Network account (same one) |
-| Use GPT-5.5 Agent | Terminal | `codex auth login` | OpenAI account |
-| Use Claude Agent | Terminal | `claude auth login` | Anthropic account |
+| Use Codex (gpt-5.4) Agent | Terminal | `codex auth login` | OpenAI account |
+| Use Claude Agent SDK | `anet node create` | Enter API key | Anthropic or compatible provider account |
+| Use Claude Code CLI | Terminal | `claude auth login` | Anthropic / Claude Code account |
 | Use MiniMax Agent | No login needed | Configure API Key | MiniMax account |
 
 ::: warning Remember
@@ -232,7 +236,7 @@ Agents need AI model API keys to do their work. Different models require keys fr
 | Kimi | [platform.moonshot.cn](https://platform.moonshot.cn) → API Management | `xxx` | Same as above |
 | OpenRouter | [openrouter.ai](https://openrouter.ai) → Keys | `sk-or-xxx` | Same as above |
 | Claude | [console.anthropic.com](https://console.anthropic.com) → API Keys | `sk-ant-xxx` | Same as above |
-| GPT-5.5 | No key needed | Run `codex auth login` in terminal | Saved automatically |
+| Codex (gpt-5.4) | No key needed | Run `codex auth login` in terminal | Saved automatically |
 | Claude Code | No key needed | Run `claude auth login` in terminal | Saved automatically |
 
 ### 3. Where Are Keys Stored?
@@ -240,7 +244,7 @@ Agents need AI model API keys to do their work. Different models require keys fr
 API Keys entered during `anet node create` are saved locally at:
 
 ```
-~/.anet/nodes/<node-name>/config.json
+current-project/.anet/nodes/<node-name>/config.json
 ```
 
 Specifically in the `env` field, for example:

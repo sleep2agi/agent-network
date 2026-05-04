@@ -6,12 +6,12 @@ Codex Telegram Squad 是 Agent Network 的旗舰 Demo -- 1 个指挥室 + 10 个
 
 ```mermaid
 graph LR
-    TG[Telegram 用户] -->|消息| CMD[指挥室<br/>Codex GPT-5.5<br/>+ Telegram Bot]
+    TG[Telegram 用户] -->|消息| CMD[指挥室<br/>Codex GPT-5.4<br/>+ Telegram Bot]
 
     CMD -->|代码任务| CG[代码组]
     CMD -->|文案任务| WG[文案组]
 
-    subgraph CG[代码组 - Codex GPT-5.5]
+    subgraph CG[代码组 - Codex GPT-5.4]
         C1[代码1号]
         C2[代码2号]
         C3[代码3号]
@@ -40,8 +40,8 @@ graph LR
 |------|------|---------|------|------|
 | server | CommHub Server | Bun | - | 通信中枢 |
 | seed | 初始化 | curl | - | 注册管理员、导出 ntok_ |
-| commander | 指挥室 | codex-sdk | GPT-5.5 | 接收 Telegram 消息，智能分配 |
-| worker-1~5 | 代码组 | codex-sdk | GPT-5.5 | 代码生成、文件操作 |
+| commander | 指挥室 | codex-sdk | GPT-5.4 | 接收 Telegram 消息，智能分配 |
+| worker-1~5 | 代码组 | codex-sdk | GPT-5.4 | 代码生成、文件操作 |
 | worker-6~10 | 文案组 | claude-agent-sdk | MiniMax | 文本处理、翻译、分析 |
 | dashboard | Web UI | Next.js | - | 实时监控 |
 
@@ -250,7 +250,7 @@ worker-11:
   environment:
     - ALIAS=代码6号
     - RUNTIME=codex-sdk
-    - MODEL=gpt-5.5
+    - MODEL=gpt-5.4
     - COMMHUB_URL=http://server:9200
     - TOOLS=Read,Write,Edit,Bash,Glob,Grep
 ```
@@ -285,8 +285,8 @@ commander:
 
 | 组件 | 模型 | 每任务成本 | 说明 |
 |------|------|-----------|------|
-| Commander | GPT-5.5 | ~$0.03 | 分析 + 分配 |
-| 代码组 | GPT-5.5 | ~$0.05 | 代码生成 |
+| Commander | GPT-5.4 | ~$0.03 | 分析 + 分配 |
+| 代码组 | GPT-5.4 | ~$0.05 | 代码生成 |
 | 文案组 | MiniMax | ~$0.003 | 文本处理 |
 | Server | - | 免费 | 自部署 |
 

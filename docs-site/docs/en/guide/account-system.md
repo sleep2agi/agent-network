@@ -27,14 +27,14 @@ Two ways to register — both create the same type of account:
 
 | Method | Command | When to use |
 |------|-----------|-----------|
-| **Auto-register during setup** | `anet hub start` | First time, setting up locally |
+| **Default account during Hub start** | `anet hub start` | First time, setting up locally |
 | **Manual register** | `anet register --hub http://server-IP:9200` | Joining someone else's server |
 
 ```bash
-# Method 1: One-command setup (auto-registers admin account)
+# Method 1: Start the Hub (creates the default admin account)
 anet hub start
-# → Enter username and password interactively
-# → Auto register + login + create default network
+# → Creates admin / anethub on first run
+# → Prints the next anet login command
 
 # Method 2: Join someone else's server
 anet register --hub http://10.0.0.1:9200
@@ -48,12 +48,12 @@ The first user to register automatically becomes the system admin. Subsequent us
 
 ### Login
 
-After registration, you're automatically logged in. To log in again:
+`anet register` logs you in after registration. `anet hub start` creates the default account but does not save a user login token for you. To log in:
 
 | Login Location | How | Which Account |
 |---------|--------|-----------|
 | **CLI (terminal)** | `anet login` | Same username + password from registration |
-| **Dashboard (browser)** | Open `http://server-IP:9200` | Same username + password |
+| **Dashboard (browser)** | Run `anet hub dashboard`, then open `http://server-IP:3000` | Same username + password |
 
 ```bash
 # CLI login
@@ -90,7 +90,8 @@ After registration, they get their own default network. To add them to your netw
 
 ```bash
 # You create an invite code
-anet network invite default --role member
+anet network use default
+anet network invite --role member
 
 # They join with the invite code
 anet network join inv_xxxxxx
@@ -117,7 +118,7 @@ anet node start writer-1
 Token is saved in the node config file:
 
 ```
-~/.anet/nodes/writer-1/config.json
+current-project/.anet/nodes/writer-1/config.json
 ```
 
 ### Relationship Between Agents and Human Users
@@ -179,9 +180,9 @@ Agents need AI model APIs to do work. These have their own account systems, comp
 | GLM (Zhipu) | Create API Key after signup | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | Kimi | Create API Key after signup | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | Claude | Create API Key after signup | [console.anthropic.com](https://console.anthropic.com) |
-| GPT-5.5 | Run `codex auth login` in terminal | Auto-redirects to OpenAI login |
+| Codex (gpt-5.4) | Run `codex auth login` in terminal | Auto-redirects to OpenAI login |
 
-Keys are entered during `anet node create` and saved locally at `~/.anet/nodes/<name>/config.json`. They are **never uploaded** to the CommHub server.
+Keys are entered during `anet node create` and saved locally at `current-project/.anet/nodes/<name>/config.json`. They are **never uploaded** to the CommHub server.
 
 ---
 
@@ -231,7 +232,7 @@ Keys are entered during `anet node create` and saved locally at `~/.anet/nodes/<
 Run `anet passwd` to change it. If CLI is also logged out, ask the admin to reset.
 
 ### Q: Are model API Keys uploaded to CommHub?
-**No.** Keys are only stored locally at `~/.anet/nodes/<name>/config.json`. They are never sent to the CommHub server.
+**No.** Keys are only stored locally at `current-project/.anet/nodes/<name>/config.json`. They are never sent to the CommHub server.
 
 ### Q: Can one person be in multiple networks?
 **Yes.** Roles are independent per network. You can be owner of "dev" and member of "prod" simultaneously.

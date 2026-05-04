@@ -1,6 +1,6 @@
 # Examples
 
-Real, runnable Agent Network examples — from simple to complex, each can be launched with one command.
+Current Agent Network examples, from simple to complex. Examples with a matching `demos/` directory can be launched with Docker; the rest are manual flows using the current CLI and Dashboard.
 
 ## Beginner
 
@@ -18,17 +18,8 @@ Real, runnable Agent Network examples — from simple to complex, each can be la
 | [Telegram Squad](/en/cases/telegram-squad) | ★★★★ | 11 | Codex + MiniMax | 1 commander + 10 workers, Docker |
 | [Mixed Model Collab](/en/cases/mixed-model) | ★★★ | 4 | Claude + MiniMax + DeepSeek | Different models for different tasks |
 
-## Industry
-
-| Example | Difficulty | Use Case | Models | Highlight |
-|---------|:----------:|----------|--------|-----------|
-| Customer Service | ★★★ | Support | MiniMax + Claude | Triage + expert routing |
-| Content Factory | ★★★ | Content | MiniMax + Kimi | Batch production + QA |
-
----
-
 ::: tip Before running examples
 Make sure you've completed the [Getting Started guide](/en/guide/getting-started) and the CommHub server is running.
 
-Note: only the basic local flow (start hub + single agent + dispatch from Dashboard) is fully verified in v2.0.0. The multi-agent examples below are reference designs and may not match the latest CLI exactly.
+Placeholder and unsupported industry examples have been removed. For a verified start, run `demos/hello-world` or `demos/translation-pipeline` first.
 :::

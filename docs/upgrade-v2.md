@@ -37,7 +37,7 @@ agent-node --version >> ~/anet-versions-before.txt
 
 ```bash
 # 停所有运行中的 agent-node 和 claude 会话
-# 或者用 anet stop <name>
+# 或者用 anet node stop <name>
 pkill -f "agent-node" || true
 ```
 
@@ -83,9 +83,9 @@ agent-node --version
 
 # 功能检查
 anet ls                           # 应该有 STATUS/SSE 列
-anet create upgrade-test --runtime codex-sdk --model gpt-5.4
-anet stop upgrade-test
-anet delete upgrade-test --force
+anet node create upgrade-test --runtime codex-sdk --model gpt-5.4
+anet node stop upgrade-test
+anet node delete upgrade-test --force
 
 # CommHub API 检查
 curl http://127.0.0.1:9200/api/tasks
@@ -96,8 +96,8 @@ curl http://127.0.0.1:9200/health
 
 ```bash
 # 重启各个 agent
-anet start 通信龙
-anet start SDK马
+anet node start 通信龙
+anet node start SDK马
 # ... 其他 agent
 ```
 
@@ -123,10 +123,10 @@ npm install -g @sleep2agi/agent-node@2.0.0
 
 ## 升级后新功能
 
-- `anet stop/delete` — 停止/删除节点
+- `anet node stop/delete` — 停止/删除节点
 - `anet ls` — 带网络状态的节点列表
-- `anet rename` — 重命名节点
-- 交互式 `anet create` — 上下选择 runtime/model
+- `anet node rename` — 重命名节点
+- 交互式 `anet node create` — 上下选择 runtime/model
 - tasks 表 — 完整任务生命周期追踪
 - `/api/tasks` — 任务查询 REST API
 - MCP/SSE/WebSocket 全部鉴权

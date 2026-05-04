@@ -2,20 +2,20 @@
 
 Agent runtime for Agent Network. Connects to a CommHub server, registers under an alias, and processes incoming tasks with one of three runtimes.
 
-**v2.1.1 stable.** The supported entry point is the `anet` CLI from `@sleep2agi/agent-network@2.0.0`, which writes the right `config.json` and environment variables for you.
+**Current preview line.** The supported entry point is the `anet` CLI from `@sleep2agi/agent-network@preview`, which writes the right `config.json`, network token, and environment variables for you.
 
 ## Install
 
 You usually don't install this package directly — `anet node create` and `anet node start` use it via `npx`. To pin it:
 
 ```bash
-npm install -g @sleep2agi/agent-node
+npm install -g @sleep2agi/agent-node@preview
 ```
 
 ## Verified flow
 
 ```bash
-npm install -g @sleep2agi/agent-network
+npm install -g @sleep2agi/agent-network@preview
 anet hub start                      # local hub (terminal 1)
 anet hub dashboard                  # web UI (terminal 2)
 anet login --username admin --password anethub
@@ -39,7 +39,7 @@ CLI flags:
 |---|---|---|
 | `--alias` | required | unique name in the hub |
 | `--hub` | `http://127.0.0.1:9200` | CommHub URL |
-| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `http-api` |
 | `--model` | runtime default | passed through to the SDK |
 | `--tools` | (none) | `all` or comma-separated list |
 | `--max-turns` | `50` | upper bound per task |
@@ -49,9 +49,10 @@ CLI flags:
 
 | Runtime | Backend | Status | Notes |
 |---|---|---|---|
-| `claude-agent-sdk` | [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) | verified | Anthropic Messages API; works with any compatible endpoint |
+| `claude-agent-sdk` | [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) | verified | Anthropic-compatible API; works with MiniMax, DeepSeek, GLM, Kimi, Anthropic, OpenRouter, or custom endpoints |
 | `codex-sdk` | [@openai/codex-sdk](https://www.npmjs.com/package/@openai/codex-sdk) | unverified end-to-end | unit tests pass, no full E2E with real codex auth |
 | `claude-code-cli` | local `claude` CLI | unverified end-to-end | runs locally for Claude Pro subscribers |
+| `http-api` | OpenAI/Anthropic-compatible HTTP | experimental | reads `ANTHROPIC_*`, `OPENAI_*`, or `MINIMAX_CODING_API_KEY` environment variables |
 
 Runtimes are loaded lazily — picking one doesn't pull the others' dependencies. `claude-code-cli` adds zero extra SDK weight.
 
@@ -61,7 +62,7 @@ Runtimes are loaded lazily — picking one doesn't pull the others' dependencies
 
 | Provider | Base URL | Default model | Status |
 |---|---|---|---|
-| Anthropic | `https://api.anthropic.com` | `claude-sonnet-4-5` | verified |
+| Anthropic | `https://api.anthropic.com` | configured by `--model` | verified |
 | MiniMax (国际) | `https://api.minimax.io/anthropic` | `MiniMax-M2.7` | verified |
 | MiniMax (国内) | `https://api.minimaxi.com/anthropic` | `MiniMax-M2.7` | verified |
 | DeepSeek | `https://api.deepseek.com/anthropic` | `deepseek-chat` | verified |
@@ -90,16 +91,23 @@ Typical output of `anet node create` at `.anet/nodes/<name>/config.json`:
 
 ```json
 {
-  "alias": "my-bot",
+  "node_id": "n_a1b2c3d4",
+  "node_name": "my-bot",
   "hub": "http://127.0.0.1:9200",
+  "token": "ntok_...",
   "runtime": "claude-agent-sdk",
   "model": "MiniMax-M2.7",
-  "anthropic_base_url": "https://api.minimax.io/anthropic",
-  "anthropic_auth_token": "sk-...",
-  "tools": "all",
-  "maxTurns": 50,
-  "dangerouslySkipPermissions": true,
-  "teammateMode": true
+  "channels": ["server:commhub"],
+  "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.minimax.io/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "sk-..."
+  },
+  "flags": {
+    "dangerouslySkipPermissions": true,
+    "teammateMode": "in-process",
+    "maxTurns": 50
+  }
 }
 ```
 
@@ -140,9 +148,9 @@ When the runtime is `claude-code-cli`, the spawned subprocess gets `settingSourc
 
 | Package | Version |
 |---|---|
-| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.0 |
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.0 |
-| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.1.0 |
+| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.3-preview.4 |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.3-preview.0 |
+| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.2.1-preview.1 |
 
 ## License
 

@@ -10,11 +10,11 @@
 # 查看 CLI 版本
 anet --version
 
-# 查看 Agent Node 版本
-anet node --version
+# 查看 Agent Node 版本（如果全局安装）
+agent-node --version
 
 # 查看 CommHub Server 版本
-anet hub start --version
+curl http://127.0.0.1:9200/health
 ```
 
 ### 2. 备份配置
@@ -45,18 +45,20 @@ npm install -g @sleep2agi/agent-node@preview
 # 如果用 npx，无需手动升级，下次运行自动拉取最新版
 ```
 
-### 4. 重启节点
+### 4. 重启进程
 
 ```bash
-# 停止所有运行中的 Agent
-anet node stop --all
+# 查看本地节点
+anet node ls
 
-# 重启 CommHub Server
-anet hub stop
+# 停止需要重启的 Agent
+anet node stop <name>
+
+# 如果 Hub 是前台运行，回到 Hub 终端 Ctrl-C 后重启
 anet hub start
 
-# 重启所有 Agent
-anet restart-all
+# 重启 Agent
+anet node start <name>
 ```
 
 ### 5. 验证升级
@@ -106,7 +108,7 @@ V3 是一次重大升级，主要变化如下：
 以下内容在升级过程中会被自动保留或迁移：
 
 - **节点配置**：`config.json` 中的 runtime、model、tools 等设置会被保留
-- **Session 恢复**：`session` 字段会被保留，可以用 `anet resume` 恢复之前的对话
+- **Session 恢复**：`session` 字段会被保留，可以用 `anet node resume` 恢复之前的对话
 - **节点名称**：alias/node_name 保持不变
 - **环境变量**：`env` 字段中的 API Key 等配置保持不变
 
@@ -134,8 +136,8 @@ anet doctor
 
 ```bash
 # 1. 停止所有服务
-anet node stop --all
-anet hub stop
+anet node stop <name>
+# Hub 如果在前台运行，用 Ctrl-C 停止
 
 # 2. 恢复备份的配置
 rm -rf ~/.anet
@@ -147,7 +149,7 @@ npm install -g @sleep2agi/agent-node@<旧版本号>
 
 # 4. 重启服务
 anet hub start
-anet restart-all
+anet node start <name>
 
 # 5. 验证
 anet doctor

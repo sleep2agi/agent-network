@@ -3,7 +3,8 @@
 Agent Node 是 Agent Network 中的工作单元 -- 接收任务、调用 AI 模型处理、回报结果。
 
 ::: tip 不知道选哪个 Runtime？
-- 想让 AI **写代码 / 跑命令** --> `codex-sdk`（推荐新手）
+- 不确定时先用 `claude-agent-sdk`（推荐新手，`anet node create` 会引导选择 MiniMax/DeepSeek/GLM/Kimi/Claude 等 provider）
+- 想让 AI **写代码 / 跑命令** --> `codex-sdk`
 - 想让 AI **写文案 / 翻译 / 分析**（编程方式调用） --> `claude-agent-sdk`
 - 想让 AI **像终端里用 Claude 一样干活** --> `claude-code-cli`
 - 想用**国产模型（MiniMax/DeepSeek/GLM）** --> `claude-agent-sdk` + `ANTHROPIC_BASE_URL`
@@ -30,8 +31,8 @@ Agent Node 支持三种 AI 运行时引擎，覆盖主流模型：
 | 属性 | 说明 |
 |------|------|
 | **模型** | Claude Sonnet 4 / Claude Opus 4 |
-| **前置** | Anthropic API Key 或 MiniMax API Key + `claude auth login` |
-| **特点** | 最强推理能力、长上下文、复杂任务 |
+| **前置** | Anthropic API Key，或任一 Anthropic 兼容 API Key（MiniMax/DeepSeek/GLM/Kimi 等） |
+| **特点** | 编程式调用 Anthropic 兼容接口，适合稳定后台 Agent |
 | **隔离** | `settingSources: []` 完全隔离宿主机配置 |
 
 ```bash
@@ -44,7 +45,6 @@ npx @sleep2agi/agent-node \
 
 ::: details 你需要准备
 - [ ] Anthropic API Key 或 MiniMax API Key（付费）
-- [ ] 运行 `claude auth login` 完成登录
 - [ ] CommHub Server 已启动
 :::
 
@@ -92,7 +92,7 @@ npx @sleep2agi/agent-node \
 
 | 属性 | 说明 |
 |------|------|
-| **模型** | GPT-5.5 |
+| **模型** | Codex SDK 模型（通过 `--model` 指定；示例使用 `gpt-5.4`） |
 | **前置** | `codex auth login` |
 | **特点** | 代码生成强、工具调用灵活 |
 | **工具** | 支持 Read / Write / Edit / Bash / Glob / Grep |
@@ -101,7 +101,7 @@ npx @sleep2agi/agent-node \
 npx @sleep2agi/agent-node \
   --alias 代码助手 \
   --runtime codex-sdk \
-  --model gpt-5.5 \
+  --model gpt-5.4 \
   --hub http://YOUR_IP:9200 \
   --tools Read,Write,Edit,Bash,Glob,Grep
 ```
@@ -169,7 +169,7 @@ npx @sleep2agi/agent-node [options]
 | `--runtime` | `-r` | claude-agent-sdk | 运行时引擎（`claude-agent-sdk` / `codex-sdk` / `claude-code-cli`） |
 | `--model` | `-m` | (按 runtime 默认) | AI 模型名称 |
 | `--tools` | `-t` | (无) | 可用工具列表，逗号分隔 |
-| `--max-budget` | | 0.1 | 每任务预算上限（美元） |
+| `--max-budget` | | 0 | 每任务预算上限（美元，0 表示不启用） |
 | `--session` | `-s` | (新建) | 恢复指定 session |
 | `--config` | `-c` | (自动查找) | 指定配置文件路径 |
 | `--token` | | (从配置/环境读取) | CommHub 认证 Token |
@@ -195,8 +195,9 @@ flowchart TD
   "anet_version": "0.1.0",
   "node_id": "n_a1b2c3d4",
   "node_name": "代码助手",
+  "token": "ntok_...",
   "runtime": "codex-sdk",
-  "model": "gpt-5.5",
+  "model": "gpt-5.4",
   "session": "",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
@@ -317,7 +318,7 @@ Agent Node 的完整生命周期：
 
 | 阶段 | CommHub 状态 | 说明 |
 |------|-------------|------|
-| 创建 | (不在 CommHub) | `anet create` 生成 config.json |
+| 创建 | (不在 CommHub) | `anet node create` 生成 config.json |
 | 注册 | idle | `report_status(idle)` |
 | 在线 | idle | SSE 连接，等待任务 |
 | 运行 | working | 正在处理任务 |

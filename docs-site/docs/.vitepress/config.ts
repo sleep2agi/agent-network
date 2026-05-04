@@ -66,7 +66,6 @@ export default withMermaid(defineConfig({
               { text: '成语接龙', link: '/cases/idiom-chain' },
               { text: '军团编队', link: '/cases/telegram-squad' },
               { text: '混合模型协作', link: '/cases/mixed-model' },
-              { text: 'OPC 自媒体军团', link: '/cases/opc-media-army' },
             ]
           },
           {

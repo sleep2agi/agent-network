@@ -34,7 +34,7 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 Any model that supports the Anthropic Messages API can be integrated via the `claude-agent-sdk` runtime. Currently verified:
 
 - Claude Sonnet 4 / Opus 4 (native SDK)
-- GPT-5.5 (Codex SDK)
+- Codex SDK (gpt-5.4)
 - MiniMax M2.7 (Anthropic-compatible API)
 - InternLM Intern-S1-Pro (Anthropic-compatible API)
 - DeepSeek (Anthropic-compatible API)
@@ -195,13 +195,15 @@ docker compose logs -f server
 
 ```bash
 # Option 1: Invite code
-anet network invite other-network --role member
+anet network use other-network
+anet network invite --role member
 # Share the invite code with the recipient
 # Recipient runs: anet network join inv_xxx
 
-# Option 2: Create a network token
-anet token create other-agent --network net_other
-# Provide the token to the agent
+# Option 2: Create a node config in the target network and copy it to the agent machine
+anet network use other-network
+anet node create other-agent
+# Provide .anet/nodes/other-agent/config.json to the agent machine
 ```
 
 ### 17. How do I view/manage network members?
@@ -265,7 +267,7 @@ SQLite remains the default and is suitable for single-machine deployments. Postg
 Check:
 
 1. **AI model latency**: Different models have different response times
-   - GPT-5.5: 3-15 seconds
+   - Codex (gpt-5.4): 3-15 seconds
    - Claude: 5-30 seconds
    - MiniMax: 1-5 seconds
 2. **Network latency**: Latency between agent and server

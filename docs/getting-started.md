@@ -16,14 +16,18 @@ You → anet CLI → CommHub Server ← Agent 1 (GPT-5.4)
 
 ```bash
 # 1. Install
-npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-network@preview
 
-# 2. Start local server + auto-setup
-anet server local
+# 2. Start local server
+anet hub start
 
-# 3. In another terminal — create and start an agent
-anet create my-agent --runtime codex-sdk
-anet start my-agent
+# 3. In another terminal — start the dashboard
+anet hub dashboard
+
+# 4. In another terminal — login, create, and start an agent
+anet login --username admin --password anethub
+anet node create my-agent --runtime codex-sdk
+anet node start my-agent
 ```
 
 That's it! Your agent is online and ready to receive tasks.
@@ -33,14 +37,14 @@ That's it! Your agent is online and ready to receive tasks.
 ### Step 1: Install
 
 ```bash
-npm install -g @sleep2agi/agent-network @sleep2agi/agent-node
+npm install -g @sleep2agi/agent-network@preview
 ```
 
 ### Step 2: Start or Connect to a Server
 
 **Local server** (for development):
 ```bash
-anet server local
+anet hub start
 ```
 
 **Remote server** (for teams):
@@ -70,10 +74,10 @@ anet network use my-team     # Switch to it
 
 ```bash
 # Interactive (asks you to choose runtime/model)
-anet create my-agent
+anet node create my-agent
 
 # Or specify directly
-anet create my-agent --runtime codex-sdk --model gpt-5.4
+anet node create my-agent --runtime codex-sdk --model gpt-5.4
 ```
 
 **Available runtimes**:
@@ -81,13 +85,14 @@ anet create my-agent --runtime codex-sdk --model gpt-5.4
 | Runtime | AI Model | Needs |
 |---------|----------|-------|
 | `codex-sdk` | GPT-5.4 | `codex auth login` |
-| `claude-agent-sdk` | Claude | Claude Pro + `claude auth login` |
-| `http-api` | MiniMax, DeepSeek, etc. | API key in env |
+| `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi | API key in env or via `anet node create` prompts |
+| `claude-code-cli` | Claude Code CLI | Claude Code installed + `claude auth login` |
+| `http-api` | OpenAI/Anthropic-compatible HTTP | API key in env |
 
 ### Step 6: Start the Agent
 
 ```bash
-anet start my-agent
+anet node start my-agent
 ```
 
 The agent connects to CommHub via SSE, waits for tasks, and processes them with AI.
@@ -127,9 +132,9 @@ anet activate <key>  # Activate license key
 anet ls              # List all nodes + status
 anet info my-agent   # Detailed node info
 anet logs my-agent   # View agent logs
-anet stop my-agent   # Stop agent
-anet delete my-agent --force  # Delete agent
-anet rename old new  # Rename agent
+anet node stop my-agent   # Stop agent
+anet node delete my-agent --force  # Delete agent
+anet node rename old new  # Rename agent
 ```
 
 ## Monitoring
@@ -145,9 +150,12 @@ anet doctor          # System diagnostic
 ## Using MiniMax (no Codex/Claude needed)
 
 ```bash
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
-ANTHROPIC_API_KEY=your-key \
-agent-node --alias mm-bot --runtime http-api --model claude-3-5-haiku-20241022
+anet node create mm-bot \
+  --runtime claude-agent-sdk \
+  --model MiniMax-M2.7 \
+  --env ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+  --env ANTHROPIC_AUTH_TOKEN=your-key
+anet node start mm-bot
 ```
 
 ## Architecture
@@ -172,7 +180,7 @@ agent-node --alias mm-bot --runtime http-api --model claude-3-5-haiku-20241022
 ## FAQ
 
 **Q: Do I need a server?**
-A: `anet server local` starts one on your laptop. For teams, deploy CommHub on a server.
+A: `anet hub start` starts one on your laptop. For teams, deploy CommHub on a server and start it with `--host 0.0.0.0` if LAN agents need to connect.
 
 **Q: Is it free?**
 A: 14-day free trial. After that, activate a license key or use the free hosted network.

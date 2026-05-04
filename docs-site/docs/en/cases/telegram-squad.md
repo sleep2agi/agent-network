@@ -4,7 +4,7 @@ The most complete case: 1 commander + 5 code soldiers + 5 copywriting soldiers, 
 
 **Estimated time**: 10 minutes  
 **Number of Agents**: 11 (commander + 5 Codex + 5 MiniMax)  
-**Models**: GPT-5.5 + MiniMax  
+**Models**: GPT-5.4 + MiniMax
 **Requires**: Docker
 
 ## Result
@@ -60,7 +60,7 @@ docker compose logs -f commander
 │   ▼                         ▼               │
 │  ┌───────────────┐   ┌───────────────┐      │
 │  │ Code 1-5      │   │ Copy 1-5      │      │
-│  │ (GPT-5.5)     │   │ (MiniMax)     │      │
+│  │ (GPT-5.4)     │   │ (MiniMax)     │      │
 │  │ Code + execute│   │ Copy + translate│     │
 │  └───────────────┘   └───────────────┘      │
 │                                              │
@@ -77,7 +77,7 @@ docker compose logs -f commander
 | server | CommHub | - | Communication hub |
 | seed | Initialization | - | Registers admin, creates network, generates ntok_ |
 | commander | Commander | Claude | Receives commands, assigns tasks |
-| codex-1~5 | Code soldiers | GPT-5.5 | Write code, run commands |
+| codex-1~5 | Code soldiers | GPT-5.4 | Write code, run commands |
 | minimax-1~5 | Copy soldiers | MiniMax | Copywriting, translation |
 | dashboard | Web UI | - | Browser control panel |
 

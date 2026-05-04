@@ -2,12 +2,12 @@
 
 `anet` — a single CLI to run a local AI Agent network. Launch the hub, the dashboard, and as many agent nodes as you want. Verified end-to-end on macOS / Linux / Docker via Playwright.
 
-**v2.0.0 stable.** Pairs with `@sleep2agi/commhub-server` 0.5.0, `@sleep2agi/agent-network-dashboard` 0.1.0, `@sleep2agi/agent-node` 2.1.1. Everything below in the **Verified flow** section has E2E coverage; everything in the **Not verified** section is best-effort.
+**Current preview line.** Pairs with `@sleep2agi/commhub-server` 0.5.3-preview.0, `@sleep2agi/agent-network-dashboard` 0.2.1-preview.1, `@sleep2agi/agent-node` 2.2.0-preview.1. The local flow below is the supported path; experimental commands are called out separately.
 
 ## Install
 
 ```bash
-npm install -g @sleep2agi/agent-network
+npm install -g @sleep2agi/agent-network@preview
 anet -v
 ```
 
@@ -23,7 +23,7 @@ anet hub start
 #   • http://127.0.0.1:9200
 #   • SQLite at ~/.commhub/commhub.db
 #   • Default admin account auto-created: admin / anethub
-#   • Prints a LAN URL so other machines can join
+#   • For LAN access, start with --host 0.0.0.0 and use the printed LAN URL
 
 # Terminal 2 — Dashboard
 anet hub dashboard
@@ -51,12 +51,18 @@ anet node start video-bot
 
 Ask `my-bot` something like *"ask video-bot what it can do"*. `my-bot` discovers `video-bot` via the commhub MCP `get_all_status` tool, dispatches the question with `send_task`, polls `get_task`, and integrates the reply. The Tasks and Messages pages show the full handshake.
 
-### LAN-shared hub (verified)
+### LAN-shared hub
 
-`anet hub start` listens on `0.0.0.0`. From another machine on the same network:
+By default `anet hub start` binds to `127.0.0.1`. To accept agents from other machines on the same network, start the hub with an explicit LAN bind:
 
 ```bash
-npm install -g @sleep2agi/agent-network
+anet hub start --host 0.0.0.0
+```
+
+Then on another machine:
+
+```bash
+npm install -g @sleep2agi/agent-network@preview
 anet init --hub http://<HUB-LAN-IP>:9200
 anet login --username admin --password anethub
 anet node create remote-bot
@@ -69,7 +75,7 @@ anet node start remote-bot
 
 | Provider | Status | Notes |
 |---|---|---|
-| Anthropic | verified | `sk-ant-...`, default `claude-sonnet-4-5` |
+| Anthropic | verified | `sk-ant-...`, model passed through from `--model` or provider default |
 | MiniMax (国内 / 国际) | verified | `sk-cp-...` |
 | DeepSeek | verified | `sk-...` |
 | GLM (智谱) | verified | open.bigmodel.cn key |
@@ -84,7 +90,6 @@ anet node start remote-bot
 ```bash
 # Hub + Dashboard
 anet hub start                     # local CommHub + auto admin/anethub  [verified]
-anet hub stop                      # stop the local hub                  [verified]
 anet hub dashboard                 # launch the Web Dashboard            [verified]
 
 # Auth
@@ -118,12 +123,12 @@ anet init project                  # write .mcp.json + CLAUDE.md         [verifi
 
 ## Not verified
 
-Listed for transparency — these commands exist but are not part of the supported v2.0.0 path.
+Listed for transparency — these commands exist but are not part of the primary supported path.
 
-- `anet quickstart` — removed from the docs; use `anet hub start` + `anet node create` instead.
+- `anet quickstart` — legacy guided setup; use `anet hub start` + `anet node create` instead.
 - `anet license` / `anet activate` — placeholders for a future paid tier.
 - `anet network create` / `anet network invite` / cross-user network sharing — code is in, no full E2E.
-- `anet channel add telegram|wechat|feishu` — channels exist but are not E2E regressed in v2.0.0.
+- `anet channel add telegram|wechat|feishu` — channel code exists; only the Telegram-oriented paths are actively exercised.
 
 ## Configuration files
 
@@ -138,16 +143,23 @@ A typical `config.json` after `anet node create`:
 
 ```json
 {
-  "alias": "my-bot",
+  "node_id": "n_a1b2c3d4",
+  "node_name": "my-bot",
   "hub": "http://127.0.0.1:9200",
+  "token": "ntok_...",
   "runtime": "claude-agent-sdk",
   "model": "MiniMax-M2.7",
-  "anthropic_base_url": "https://api.minimax.io/anthropic",
-  "anthropic_auth_token": "sk-...",
-  "tools": "all",
-  "maxTurns": 50,
-  "dangerouslySkipPermissions": true,
-  "teammateMode": true
+  "channels": ["server:commhub"],
+  "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.minimax.io/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "sk-..."
+  },
+  "flags": {
+    "dangerouslySkipPermissions": true,
+    "teammateMode": "in-process",
+    "maxTurns": 50
+  }
 }
 ```
 
@@ -155,9 +167,9 @@ A typical `config.json` after `anet node create`:
 
 | Package | Version | What it does |
 |---|---|---|
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.0 | MCP + REST + SSE hub |
-| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.1.0 | Web Dashboard |
-| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.1.1 | Agent runtime |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.3-preview.0 | MCP + REST + SSE hub |
+| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.2.1-preview.1 | Web Dashboard |
+| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.2.0-preview.1 | Agent runtime |
 
 ## Docs
 

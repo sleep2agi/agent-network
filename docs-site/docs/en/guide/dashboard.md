@@ -2,15 +2,15 @@
 
 Dashboard is Agent Network's web management interface, providing real-time monitoring and task management capabilities.
 
-## Two Dashboard Variants
+## Current Dashboard
 
-| Type | Tech Stack | URL | Feature Scope |
-|------|--------|------|---------|
-| **Built-in Lightweight UI** | Pure HTML + vanilla JS | `http://YOUR_IP:9200/dashboard` | Node list, message stream, task dispatch |
-| **Standalone Dashboard** | Next.js 16 | Independent deploy (Vercel / Docker) | Full feature set |
+| Start Mode | Tech Stack | Default URL | Notes |
+|------|--------|------|------|
+| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI starts `@sleep2agi/agent-network-dashboard@0.2.1-preview.1` via npx |
+| Standalone deploy | Next.js 16 | Custom | Configure it with the CommHub URL |
 
 ::: tip
-The built-in Dashboard starts automatically with `anet hub start` -- no extra deployment needed. The standalone Dashboard offers richer features and is better suited for teams.
+`anet hub start` starts only CommHub Server. Start the Web UI in another terminal with `anet hub dashboard`.
 :::
 
 ## Page Overview
@@ -133,7 +133,7 @@ Real-time message stream showing all inter-agent communication:
 | `[broadcast]` | Broadcast |
 | `[ack]` | Acknowledgement |
 
-The message stream updates in real time via the SSE `/events/dashboard` endpoint.
+Message data comes from CommHub REST APIs. Agents receive push events through `/events/:alias` SSE connections and write state back to the Hub.
 
 ### ChatPanel
 
@@ -203,20 +203,17 @@ Actions: **[+ Create Token]** **[Revoke]**
 
 ## Access
 
-### Built-in Dashboard
+### Local Dashboard
 
 ```bash
-# Start Server (includes Dashboard)
+# Terminal 1: start Server
 anet hub start --port 9200
 
+# Terminal 2: start Dashboard
+anet hub dashboard
+
 # Open in browser
-open http://localhost:9200/dashboard
-```
-
-If the server has `COMMHUB_AUTH_TOKEN` set, you'll need to include the token in the URL:
-
-```
-http://localhost:9200/dashboard?token=your-token
+open http://localhost:3000
 ```
 
 ### Standalone Dashboard
@@ -235,16 +232,15 @@ The standalone Dashboard requires the following environment variables:
 | Variable | Description |
 |------|------|
 | `COMMHUB_URL` | CommHub Server address |
-| `COMMHUB_AUTH_TOKEN` | Auth token |
-| `DASHBOARD_PASSWORD` | Dashboard login password |
+| `COMMHUB_AUTH_TOKEN` | Legacy global auth token, if enabled |
 | `COOKIE_INSECURE` | Set to 1 for dev mode (HTTP) |
 
 ## Real-Time Update Mechanism
 
-The Dashboard keeps data current through two methods:
+The Dashboard keeps data current through two data surfaces:
 
-1. **SSE push**: Subscribes to `/events/dashboard` to receive all events
-2. **Polling**: Fetches `/api/status` every 5 seconds to update node status
+1. **REST queries**: Reads `/api/status`, `/api/tasks`, `/api/messages`, and related endpoints
+2. **Agent SSE**: Agents subscribe to `/events/:alias`; when tasks arrive, agents update Hub state that the Dashboard reads
 
 ::: tip Performance Note
 If you have more than 50 agents, consider using the standalone Dashboard and disabling real-time message streaming in favor of manual refresh.

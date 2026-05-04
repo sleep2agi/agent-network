@@ -29,13 +29,13 @@ sequenceDiagram
 
 ### 多模型异构
 
-同一个网络内可以运行不同模型的 Agent。Claude Code 做复杂推理和工具调用，GPT-5.5 做代码任务，MiniMax 做低成本文案 -- 4 种 Runtime 共用一套通信协议，互不干扰。
+同一个网络内可以运行不同模型的 Agent。Claude Code 做复杂推理和工具调用，Codex (gpt-5.4) 做代码任务，MiniMax 做低成本文案 -- 4 种 Runtime 共用一套通信协议，互不干扰。
 
 | 模型 | Runtime | 适用场景 | 推荐度 |
 |------|---------|---------|--------|
 | Claude Code | `claude-code-cli` | 复杂推理、工具调用、文件操作 | ⭐⭐⭐ |
 | Claude Sonnet/Opus | `claude-agent-sdk` | 推理、长文分析、MiniMax 兼容 | ⭐⭐⭐ |
-| GPT-5.5 | `codex-sdk` | 代码生成、命令执行 | ⭐⭐⭐ |
+| Codex (gpt-5.4) | `codex-sdk` | 代码生成、命令执行 | ⭐⭐⭐ |
 | MiniMax M2.7 | `claude-agent-sdk` | 低成本文案、翻译（通过 Anthropic 兼容 API） | ⭐⭐ |
 
 ### 网络隔离
@@ -52,7 +52,7 @@ Dashboard + ChatPanel 提供 Web 界面，可以直接对话任意 Agent、批�
 graph TB
     subgraph "Agent 层"
         A1[Agent 1<br/>Claude]
-        A2[Agent 2<br/>GPT-5.5]
+        A2[Agent 2<br/>Codex (gpt-5.4)]
         A3[Agent 3<br/>MiniMax]
         A4[Agent N<br/>...]
     end
@@ -121,7 +121,7 @@ graph LR
 
 ### 跨模型混搭
 
-Claude 做复杂架构设计，GPT-5.5 写代码实现，MiniMax 做简单文本处理 -- 根据任务类型自动分配最合适的模型。
+Claude 做复杂架构设计，Codex (gpt-5.4) 写代码实现，MiniMax 做简单文本处理 -- 根据任务类型自动分配最合适的模型。
 
 ### 社交实验
 

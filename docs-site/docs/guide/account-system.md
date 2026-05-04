@@ -27,7 +27,7 @@ Agent Network 里有两种角色，各用不同方式认证：
 
 | 方式 | 命令 / 操作 | 什么时候用 |
 |------|-----------|-----------|
-| **一键启动时自动注册** | `anet hub start` | 第一次使用，本机搭建 |
+| **启动 Hub 时创建默认账号** | `anet hub start` | 第一次使用，本机搭建 |
 | **手动注册** | `anet register --hub http://服务器IP:9200` | 加入别人的服务器 |
 
 ```bash
@@ -35,12 +35,11 @@ Agent Network 里有两种角色，各用不同方式认证：
 anet hub start
 # → 自动创建默认账号 admin / anethub
 # → 创建 SQLite 库于 ~/.commhub/commhub.db
-# → 账号密码打印在终端里
+# → 账号密码和下一步 login 命令打印在终端里
 
 # 方式 2：加入别人的服务器
-anet login --hub http://10.0.0.1:9200
-# → 输入用户名和密码
-# → 没有账号会自动注册
+anet register --hub http://10.0.0.1:9200
+# → 输入用户名和密码，注册后自动登录
 ```
 
 ::: info 第一个注册的用户
@@ -49,12 +48,12 @@ anet login --hub http://10.0.0.1:9200
 
 ### 登录
 
-注册成功后会自动登录。如果需要重新登录：
+`anet register` 成功后会自动登录；`anet hub start` 只创建默认账号，不会替你写入用户登录态。如果需要登录：
 
 | 登录位置 | 怎么做 | 用什么账号 |
 |---------|--------|-----------|
 | **CLI（终端）** | `anet login` | 注册时的用户名 + 密码 |
-| **Dashboard（浏览器）** | 打开 `http://服务器IP:9200` | 同一个用户名 + 密码 |
+| **Dashboard（浏览器）** | 运行 `anet hub dashboard` 后打开 `http://服务器IP:3000` | 同一个用户名 + 密码 |
 
 ```bash
 # CLI 登录
@@ -91,7 +90,8 @@ anet register --hub http://你的服务器IP:9200
 
 ```bash
 # 你创建邀请码
-anet network invite default --role member
+anet network use default
+anet network invite --role member
 
 # 对方用邀请码加入
 anet network join inv_xxxxxx
@@ -143,7 +143,7 @@ anet node start 文案1号
 Token 保存在节点配置文件里：
 
 ```
-~/.anet/nodes/文案1号/config.json
+当前项目/.anet/nodes/文案1号/config.json
 ```
 
 ### Agent 和人类用户的关系
@@ -205,9 +205,9 @@ Agent 干活需要调用 AI 模型，这些模型有自己的账号体系，和 
 | 智谱 GLM | 注册后创建 API 密钥 | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | Kimi | 注册后创建 API Key | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | Claude | 注册后创建 API Key | [console.anthropic.com](https://console.anthropic.com) |
-| GPT-5.5 | 终端执行 `codex auth login` | 自动跳转 OpenAI 登录 |
+| Codex (gpt-5.4) | 终端执行 `codex auth login` | 自动跳转 OpenAI 登录 |
 
-Key 在 `anet node create` 时输入，保存在本机 `~/.anet/nodes/<名字>/config.json`，不会上传到 CommHub 服务器。
+Key 在 `anet node create` 时输入，保存在当前项目的 `.anet/nodes/<名字>/config.json`，不会上传到 CommHub 服务器。
 
 ---
 
@@ -257,7 +257,7 @@ Key 在 `anet node create` 时输入，保存在本机 `~/.anet/nodes/<名字>/c
 运行 `anet passwd` 修改密码。如果 CLI 也没登录，需要管理员重置。
 
 ### Q: 模型的 API Key 会上传到 CommHub 吗？
-**不会。** Key 只保存在你本机的 `~/.anet/nodes/<名字>/config.json`，不会发送到 CommHub 服务器。
+**不会。** Key 只保存在当前项目的 `.anet/nodes/<名字>/config.json`，不会发送到 CommHub 服务器。
 
 ### Q: 一个人可以在多个网络里吗？
 **可以。** 每个网络里的角色独立。你可以同时是 dev 的 owner 和 prod 的 member。

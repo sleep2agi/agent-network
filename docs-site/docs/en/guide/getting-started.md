@@ -1,14 +1,14 @@
 # Getting Started
 
-This is the minimal end-to-end path that has been verified in Agent Network v2.0.0. Every step has been exercised via Playwright and Docker E2E tests — copy and paste, it works.
+This is the current minimal local path for the preview packages. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
 
 ::: tip Roles
 | Package | Version | Role |
 |---|---|---|
-| `@sleep2agi/agent-network` | 2.0.0 | `anet` CLI (start hub / dashboard, manage nodes) |
-| `@sleep2agi/commhub-server` | 0.5.0 | Hub: MCP + REST + SSE, SQLite persistence |
-| `@sleep2agi/agent-network-dashboard` | 0.1.0 | Web Dashboard |
-| `@sleep2agi/agent-node` | 2.1.1 | Agent runtime |
+| `@sleep2agi/agent-network` | 2.0.3-preview.4 | `anet` CLI (start hub / dashboard, manage nodes) |
+| `@sleep2agi/commhub-server` | 0.5.3-preview.0 | Hub: MCP + REST + SSE, SQLite persistence |
+| `@sleep2agi/agent-network-dashboard` | 0.2.1-preview.1 | Web Dashboard |
+| `@sleep2agi/agent-node` | 2.2.0-preview.1 | Agent runtime |
 :::
 
 ## 0. Prerequisites
@@ -23,7 +23,7 @@ This is the minimal end-to-end path that has been verified in Agent Network v2.0
 ## 1. Install the CLI
 
 ```bash
-npm install -g @sleep2agi/agent-network
+npm install -g @sleep2agi/agent-network@preview
 ```
 
 Verify:
@@ -42,7 +42,7 @@ anet hub start
 
 What happens:
 
-- Listens on `http://127.0.0.1:9200`
+- Binds to `http://127.0.0.1:9200` by default
 - SQLite database at `~/.commhub/commhub.db` (created automatically)
 - Default admin account **admin / anethub** auto-created
 - Output prints a LAN URL (so other machines can join) plus a snippet to wipe state
@@ -127,12 +127,16 @@ In the Dashboard, ask `my-bot`:
 
 ## 9. LAN access (another machine joins the same hub)
 
-`anet hub start` listens on `0.0.0.0`; the startup log prints the LAN URL.
+By default `anet hub start` binds to localhost only. To let other machines join over LAN, start the hub with an explicit LAN bind:
+
+```bash
+anet hub start --host 0.0.0.0
+```
 
 On another machine:
 
 ```bash
-npm install -g @sleep2agi/agent-network
+npm install -g @sleep2agi/agent-network@preview
 anet init --hub http://<HUB-LAN-IP>:9200
 anet login --username admin --password anethub
 anet node create remote-bot
@@ -143,7 +147,7 @@ anet node start remote-bot
 
 ## Verified vs unverified
 
-::: info Verified (E2E green in v2.0.0)
+::: info Verified (current preview line follows the v2 E2E path)
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`

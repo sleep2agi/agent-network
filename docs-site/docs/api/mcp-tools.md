@@ -64,7 +64,7 @@ report_status({
   status: "working",
   task: "写排序算法",
   progress: 50,
-  model: "gpt-5.5",
+  model: "gpt-5.4",
   agent: "agent-node:codex"
 })
 ```
@@ -185,6 +185,7 @@ report_completion({
 | `from_session` | string | | 发送者标识（默认 "hub"） |
 | `ttl_seconds` | number | | 过期时间（默认 3600，最大 86400） |
 | `network_id` | string | | 网络 ID |
+| `parent_task_id` | string | | 父任务 ID；子任务回复后会自动沿任务链回传给父任务发起者 |
 
 **返回值**：
 
@@ -455,7 +456,7 @@ send_task({
       "alias": "代码1号",
       "status": "idle",
       "agent": "agent-node:codex",
-      "model": "gpt-5.5",
+      "model": "gpt-5.4",
       "last_seen_at": "2026-04-12 10:00:00",
       "network_id": "net_xxx"
     }
@@ -509,7 +510,9 @@ send_task({
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|
 | `alias` | string | | 按 Agent 过滤 |
-| `limit` | number | | 最大条数（默认 20） |
+| `since` | string | | 起始时间（ISO 8601，默认最近 24 小时） |
+| `network_id` | string | | 按网络过滤 |
+| `limit` | number | | 最大条数（默认 50，最大 500） |
 
 **返回值**：
 
@@ -541,7 +544,8 @@ send_task({
 ```json
 {
   "ok": true,
-  "delivered_count": 10
+  "recipients": 10,
+  "message_ids": ["uuid-xxx"]
 }
 ```
 
@@ -568,7 +572,7 @@ send_task({
 
 | 错误 | 含义 |
 |------|------|
-| `permission_denied` | 权限不足（viewer 写、utok_ 调 MCP） |
+| `permission_denied` | 权限不足（viewer 写、缺少可写 network 绑定等） |
 | `license_expired` | 试用期过期 |
 | `message not found or not yours` | 消息不存在或不属于该 Agent |
 | `task not found` | 任务不存在 |

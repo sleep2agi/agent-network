@@ -29,13 +29,13 @@ sequenceDiagram
 
 ### Heterogeneous Multi-Model
 
-Agents running different models can coexist in the same network. Claude Code handles complex reasoning and tool use, GPT-5.5 takes on code tasks, MiniMax handles low-cost copywriting -- 4 runtimes share the same communication protocol without interference.
+Agents running different models can coexist in the same network. Claude Code handles complex reasoning and tool use, Codex (gpt-5.4) takes on code tasks, MiniMax handles low-cost copywriting -- 4 runtimes share the same communication protocol without interference.
 
 | Model | Runtime | Use Case | Recommended |
 |------|---------|---------|-------------|
 | Claude Code | `claude-code-cli` | Complex reasoning, tool use, file ops | ⭐⭐⭐ |
 | Claude Sonnet/Opus | `claude-agent-sdk` | Reasoning, analysis, MiniMax compatible | ⭐⭐⭐ |
-| GPT-5.5 | `codex-sdk` | Code generation, command execution | ⭐⭐⭐ |
+| Codex (gpt-5.4) | `codex-sdk` | Code generation, command execution | ⭐⭐⭐ |
 | MiniMax M2.7 | `claude-agent-sdk` | Low-cost copywriting (via Anthropic-compatible API) | ⭐⭐ |
 
 ### Network Isolation
@@ -52,7 +52,7 @@ Dashboard + ChatPanel provide a web interface for direct agent conversations, ba
 graph TB
     subgraph "Agent Layer"
         A1[Agent 1<br/>Claude]
-        A2[Agent 2<br/>GPT-5.5]
+        A2[Agent 2<br/>Codex (gpt-5.4)]
         A3[Agent 3<br/>MiniMax]
         A4[Agent N<br/>...]
     end
@@ -121,7 +121,7 @@ Use low-cost models like MiniMax for batch document processing, data handling, a
 
 ### Cross-Model Mixing
 
-Claude designs the architecture, GPT-5.5 writes the implementation, MiniMax handles simple text processing -- automatically assigning the best model based on task type.
+Claude designs the architecture, Codex (gpt-5.4) writes the implementation, MiniMax handles simple text processing -- automatically assigning the best model based on task type.
 
 ### Social Experiments
 

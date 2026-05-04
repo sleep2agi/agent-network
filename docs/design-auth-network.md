@@ -100,11 +100,12 @@ Owner/Admin 操作：
 
 ```
 Owner 操作：
-  anet token create agent-token --scope agent --network dev
-  → 返回 atok_xyz...
+  anet network use dev
+  anet node create agent-token
+  → .anet/nodes/agent-token/config.json 内写入 ntok_...
 
-把 token 给对方：
-  对方配置 ~/.anet/config.json → token: atok_xyz
+把节点配置给对方：
+  对方复制 .anet/nodes/agent-token/config.json 到运行机器
   → agent-node 启动时自动绑定到 dev 网络
   → 但对方没有 Dashboard 登录能力（只有 agent 权限）
 ```
@@ -197,7 +198,7 @@ ALTER TABLE networks ADD COLUMN max_members INTEGER DEFAULT 50;
 ### 5.1 新手首次使用
 
 ```
-npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
+npm i -g @sleep2agi/agent-network@preview
 anet quickstart
   → 连接 hub (官方免费 / 自部署)
   → 注册账号 (第一个注册 → admin)
@@ -213,8 +214,8 @@ anet quickstart
 anet login                    # 先登录（或注册）
 anet network join inv_abc123  # 加入网络
 anet network use prod         # 切换到该网络
-anet create my-agent          # 创建 agent（自动绑定当前网络）
-anet start my-agent           # 启动
+anet node create my-agent     # 创建 agent（自动绑定当前网络）
+anet node start my-agent      # 启动
 ```
 
 ### 5.3 Dashboard 体验
@@ -295,8 +296,8 @@ anet network join inv_xxx
 
 ```bash
 # CLI 创建（推荐）
-anet token create my-bot --scope agent
-→ Token: atok_xxx... (bound to current network)
+anet node create my-bot
+→ 节点 config 内写入 ntok_xxx... (bound to current network)
 
 # Dashboard 创建
 Settings → Token Management → Create Token

@@ -239,7 +239,7 @@ DASHBOARD_PASSWORD=squad-dash
 |------|------|------|
 | `ALIAS` | Agent 名称 | `代码1号` |
 | `RUNTIME` | 运行时 | `codex-sdk` / `claude-agent-sdk` |
-| `MODEL` | 模型 | `gpt-5.5` / `claude-3-5-haiku-20241022` |
+| `MODEL` | 模型 | `gpt-5.4` / `claude-3-5-haiku-20241022` |
 | `COMMHUB_URL` | Server 地址 | `http://server:9200` |
 | `COMMHUB_TOKEN` | 认证 Token | `ntok_xxx` 或从 /shared/ntok 读取 |
 | `TOOLS` | 工具列表 | `Read,Write,Edit,Bash,Glob,Grep` |
@@ -338,7 +338,7 @@ worker-11:
   environment:
     - ALIAS=代码6号
     - RUNTIME=codex-sdk
-    - MODEL=gpt-5.5
+    - MODEL=gpt-5.4
     - COMMHUB_URL=http://server:9200
     - TOOLS=Read,Write,Edit,Bash,Glob,Grep
 ```

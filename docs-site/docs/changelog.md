@@ -103,7 +103,7 @@
 - **39 个 CLI 命令**：quickstart、login、register、passwd、token、network (create/ls/use/info/rename/delete)、status、tasks、doctor、info、logs、demo、config、license、activate、hub start...
 - **18 个 MCP 工具**：send_task、send_reply、retry_task、cancel_task、reassign_task、list_tasks、get_task...
 - **17 个 REST 端点**：/api/auth/*、/api/networks/*、/api/tasks、/api/nodes、/api/stats、/api/audit-log、/api/license...
-- **2 种 AI Runtime**：codex-sdk (GPT-5.5)、claude-agent-sdk (Claude / MiniMax / OpenAI 兼容)
+- **2 种 AI Runtime**：codex-sdk (GPT-5.4)、claude-agent-sdk (Claude / MiniMax / OpenAI 兼容)
 - **审计日志**：所有用户操作 + 任务状态变更记录
 - **速率限制**：注册 30/min、登录 10/min per IP
 
@@ -123,7 +123,7 @@ sessions、inbox、tasks、nodes、completions、task_events、users、networks�
 - 认证套件：25 个测试（注册、登录、token、profile、密码、审计、速率限制）
 - 网络套件：22 个测试（CRUD、隔离、所有权、重命名、删除、跨用户）
 - 配置优先级：16 个测试（CLI > env > project > global）
-- 真实 AI：Codex GPT-5.5 + MiniMax (Anthropic API) 验证
+- 真实 AI：Codex GPT-5.4 + MiniMax (Anthropic API) 验证
 - 10-agent 成语接龙（混合 codex + minimax）
 
 **npm 包**：

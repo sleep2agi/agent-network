@@ -49,12 +49,6 @@ Open the Dashboard (visit the CommHub address in your browser) and send a task t
 Ask 小红 to introduce herself
 ```
 
-Or use the CLI:
-
-```bash
-anet task send 小明 "请给小红发一条消息，让她自我介绍一下"
-```
-
 ### 5. View results
 
 ```bash

@@ -1,6 +1,6 @@
 # CLI 命令参考
 
-`anet` 是 Agent Network 的命令行管理工具，提供 39 个命令覆盖从启动到监控的全部操作。
+`anet` 是 Agent Network 的命令行管理工具，覆盖 Hub、账号、Network、Agent Node、监控和 Demo 操作。
 
 ## 安装
 
@@ -25,8 +25,8 @@ npm install -g @sleep2agi/agent-network@preview
 | 命令 | 说明 |
 |------|------|
 | `anet hub start` | 启动 CommHub Server |
-| `anet hub start` | 本地开发模式启动 |
-| `anet hub stop` | 停止 Server |
+| `anet hub dashboard` | 启动 Dashboard UI |
+| `anet hub config` | 查看/修改 Hub 配置 |
 
 ### 账号管理
 
@@ -47,7 +47,7 @@ npm install -g @sleep2agi/agent-network@preview
 | `anet network info <name>` | 查看网络详情 |
 | `anet network rename <old> <new>` | 重命名网络 |
 | `anet network delete <name>` | 删除网络 |
-| `anet network invite <name>` | 创建邀请码 |
+| `anet network invite` | 为当前网络创建邀请码 |
 | `anet network join <invite_code>` | 用邀请码加入网络 |
 
 ### Token 管理
@@ -71,7 +71,6 @@ npm install -g @sleep2agi/agent-network@preview
 | `anet logs <name>` | 查看 Agent 日志 |
 | `anet node rename <old> <new>` | 重命名 Agent |
 | `anet node delete <name>` | 删除 Agent |
-| `anet restart-all` | 重启所有离线 Agent |
 
 ### 监控
 
@@ -122,23 +121,24 @@ anet hub start [options]
 **执行这条命令后，系统自动完成以下操作：**
 
 1. 生成 `COMMHUB_AUTH_TOKEN`（首次运行时自动生成，保存到 `~/.anet/server/config.json`）
-2. 启动 CommHub Server（绑定 `127.0.0.1:9200`，仅本机可访问）
+2. 启动 CommHub Server（默认绑定 `127.0.0.1:9200`，仅本机可访问）
 3. 创建 SQLite 数据库（`~/.commhub/commhub.db`，含 13 张表）
-4. 自动注册 admin 用户（首次运行）
-5. 自动登录（保存 `utok_` 到 `~/.anet/config.json`）
-6. 创建默认网络（`default`）
+4. 自动注册默认 admin 用户（首次运行，默认 `admin / anethub`）
+5. 写入本机 Hub 地址到 `~/.anet/config.json`
+6. 如已有有效 `utok_` 会复用登录态；否则需要手动 `anet login`
 7. 启动 14 天免费试用
 
 ::: info 你应该看到
 ```
-╔═══════════════════════════════════════════╗
-║   🏠 anet hub start — One-command setup  ║
-╚═══════════════════════════════════════════╝
-[commhub] Server running at http://127.0.0.1:9200
-[commhub] Auth: enabled (token saved)
-[anet] ✅ Registered as admin
-[anet] ✅ Logged in (utok_xxxx)
-[anet] ✅ Default network created
+anet hub start
+Starting CommHub Server on port 9200 (bind 127.0.0.1)...
+✅ Server running on http://127.0.0.1:9200
+✅ Default account created: admin / anethub
+
+This machine — login then create a node:
+  anet login --username admin --password anethub
+  anet node create my-agent
+  anet node start my-agent
 ```
 :::
 
@@ -146,8 +146,9 @@ anet hub start [options]
 |------|--------|------|
 | `--port` | 9200 | 监听端口 |
 | `--token` | (自动生成) | Bearer 认证 Token |
-| `--db` | ~/.commhub/commhub.db | 数据库路径 |
-| `--cors` | * | CORS 允许的来源 |
+| `--host` / `--ip` | 127.0.0.1 | 绑定地址；局域网接入用 `0.0.0.0` |
+| `--username` | admin | 默认账号用户名 |
+| `--password` | anethub | 默认账号密码 |
 
 **环境变量**：
 
@@ -168,7 +169,7 @@ anet node create <name> [options]
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--runtime` | (交互选择) | `codex-sdk` / `claude-agent-sdk` |
+| `--runtime` | (交互选择) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `--model` | (按 runtime 默认) | 模型名称 |
 
 **示例**：
@@ -178,7 +179,7 @@ anet node create <name> [options]
 anet node create my-agent
 
 # 直接指定
-anet node create 代码助手 --runtime codex-sdk --model gpt-5.5
+anet node create 代码助手 --runtime codex-sdk --model gpt-5.4
 
 # MiniMax Agent
 anet node create 翻译官 --runtime claude-agent-sdk --model MiniMax-M2.7
@@ -192,7 +193,7 @@ anet node create 翻译官 --runtime claude-agent-sdk --model MiniMax-M2.7
   "node_id": "n_a1b2c3d4",
   "node_name": "代码助手",
   "runtime": "codex-sdk",
-  "model": "gpt-5.5",
+  "model": "gpt-5.4",
   "session": "",
   "channels": ["server:commhub"],
   "tools": [],
@@ -233,7 +234,7 @@ anet node start <name> [options]
 查看网络状态概览。
 
 ```bash
-anet status [--json]
+anet status
 ```
 
 输出示例：
@@ -247,8 +248,8 @@ Server:  http://localhost:9200
 
 Nodes (5 online, 2 offline):
   🟢 指挥室      idle     Claude      3s ago
-  🟢 代码1号     working  GPT-5.5     写排序算法
-  🟢 代码2号     idle     GPT-5.5     15s ago
+  🟢 代码1号     working  Codex (gpt-5.4)     写排序算法
+  🟢 代码2号     idle     Codex (gpt-5.4)     15s ago
   🟢 文案1号     idle     MiniMax     1m ago
   🟢 文案2号     idle     MiniMax     2m ago
   ⚪ 测试1号     offline              2h ago
@@ -262,16 +263,13 @@ Tasks: 42 replied, 3 running, 0 failed
 查看任务列表。
 
 ```bash
-anet tasks [status] [options]
+anet tasks [status] [--limit <n>]
 ```
 
 | 参数 | 说明 |
 |------|------|
 | `status` | 按状态过滤：`delivered` / `running` / `replied` / `failed` / `cancelled` |
 | `--limit` | 显示条数（默认 20） |
-| `--from` | 按发送者过滤 |
-| `--to` | 按接收者过滤 |
-| `--json` | JSON 格式输出 |
 
 **示例**：
 
@@ -282,11 +280,8 @@ anet tasks
 # 只看失败的
 anet tasks failed
 
-# 查看特定 Agent 的任务
-anet tasks --to 代码1号
-
-# JSON 输出
-anet tasks --json
+# 限制条数
+anet tasks --limit 5
 ```
 
 ### anet doctor
@@ -299,38 +294,41 @@ anet doctor
 
 检查项：
 
-1. Server 可达性（GET /health）
-2. 认证状态（utok_ / ntok_ 有效性）
-3. 网络配置完整性
-4. Agent 连接状态
-5. 数据库健康度
-6. 磁盘空间
+1. 全局配置（`~/.anet/config.json`）
+2. 认证 Token 是否存在
+3. Hub 可达性（GET `/health`）
+4. 本地节点配置与运行状态
+5. Claude / Codex / Bun 依赖
+6. 当前项目 `.mcp.json` 的 commhub 配置
 
 ### anet network invite
 
 创建网络邀请码。
 
 ```bash
-anet network invite <network-name> [options]
+anet network invite [options]
 ```
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--role` | member | 邀请角色：`admin` / `member` / `viewer` |
-| `--max-uses` | 1 | 最大使用次数，-1 为无限 |
+| `--uses` | 1 | 最大使用次数，-1 为无限 |
 | `--expires` | (无) | 过期天数 |
 
 **示例**：
 
 ```bash
+# 先切换到目标 network
+anet network use dev
+
 # 创建单次邀请码
-anet network invite dev
+anet network invite
 
 # 创建可用 10 次的成员邀请码
-anet network invite dev --role member --max-uses 10
+anet network invite --role member --uses 10
 
 # 创建 7 天过期的 viewer 邀请码
-anet network invite dev --role viewer --expires 7
+anet network invite --role viewer --expires 7
 ```
 
 ### anet token create
@@ -338,17 +336,14 @@ anet network invite dev --role viewer --expires 7
 创建 API Token。
 
 ```bash
-anet token create <name> [--network <id>]
+anet token create <name>
 ```
 
 **示例**：
 
 ```bash
-# 为当前网络创建 token
+# 创建 API token
 anet token create my-agent-token
-
-# 为指定网络创建 token
-anet token create prod-token --network net_xxxxx
 ```
 
 ::: warning 安全提示
@@ -373,12 +368,12 @@ anet node resume <name> [--session <id>]
 **Session 自动保存机制**：
 
 - 每次任务完成后，Agent Node 会自动将 session_id（Claude）或 thread_id（Codex）保存到 `config.json` 的 `session` 字段
-- 下次用 `anet resume` 时自动读取，无需手动记录
+- 下次用 `anet node resume` 时自动读取，无需手动记录
 
 **适用场景**：
 
 - Agent 进程崩溃或被 kill，需要恢复上下文继续工作
-- 手动 `anet stop` 后想要接着之前的对话继续
+- 手动 `anet node stop` 后想要接着之前的对话继续
 - 网络断连导致 Agent 掉线，重连后恢复
 
 ```bash
@@ -390,7 +385,7 @@ anet node resume 马 --session abc123
 ```
 
 ::: tip 和 anet node start 的区别
-`anet start` 默认创建新 session。如果想恢复旧 session，用 `anet resume`。如果想强制创建新 session，用 `anet node start <name> --new-session`。
+`anet node start` 默认创建新 session。如果想恢复旧 session，用 `anet node resume`。如果想强制创建新 session，用 `anet node start <name> --new-session`。
 :::
 
 ### anet init project
@@ -426,15 +421,14 @@ anet init project
 }
 ```
 
-## 全局选项
+## 常用选项
 
-所有命令都支持以下全局选项：
+常见命令会读取以下选项或对应配置：
 
 | 选项 | 说明 |
 |------|------|
 | `--hub <url>` | CommHub Server 地址 |
 | `--token <token>` | 认证 Token |
-| `--json` | JSON 格式输出 |
 | `--help` | 显示帮助 |
 | `--version` | 显示版本 |
 

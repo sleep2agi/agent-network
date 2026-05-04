@@ -127,7 +127,8 @@ anet node start my-agent --token ntok_xxx
 
 # 情况 2：提升角色
 # 让 owner/admin 修改你的角色
-anet network invite <network> --role member
+anet network use <network>
+anet network invite --role member
 ```
 
 ---

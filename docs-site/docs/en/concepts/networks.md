@@ -138,8 +138,11 @@ The Dashboard automatically hides buttons based on role:
 ### Option 1: Invite Code (Recommended)
 
 ```bash
-# Owner/Admin creates an invite code
-anet network invite dev --role member --max-uses 5
+# Switch to the target network first
+anet network use dev
+
+# Owner/Admin creates an invite code for the current network
+anet network invite --role member --uses 5
 
 # Output: inv_abc123def456
 
@@ -155,18 +158,14 @@ Invite code properties:
 | `max_uses` | Maximum number of uses, -1 for unlimited |
 | `expires` | Expiration in days (optional) |
 
-### Option 2: Token Distribution
+### Option 2: Agent Token Distribution
 
-Owner directly creates a network token for the recipient:
+The current CLI automatically requests an `ntok_` during `anet node create` and writes it to the node config. For cross-machine deployment, create the node config in the target network, then copy that node's `.anet/nodes/<name>/config.json` to the machine that will run it.
 
 ```bash
-# Owner creates a token
-anet token create agent-token --network net_xxxxx
-# → atok_xxxxxxxx
-
-# Recipient configures the token
-# ~/.anet/config.json → token: atok_xxxxxxxx
-# Agent automatically binds to the network on startup
+anet network use prod
+anet node create remote-agent
+# Copy .anet/nodes/remote-agent/config.json to the target machine
 ```
 
 ### Option 3: Public Networks

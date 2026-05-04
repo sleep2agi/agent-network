@@ -11,13 +11,11 @@ graph TB
     subgraph "Server (1 machine)"
         S["CommHub Server<br/>Message routing + task management<br/>Port 9200"]
         DB[(SQLite WAL<br/>13 Tables)]
-        DASH_LITE["Built-in Dashboard<br/>Port 9200/dashboard"]
         S --- DB
-        S --- DASH_LITE
     end
 
-    subgraph "Vercel / Standalone Server (optional)"
-        DASH_FULL["Standalone Dashboard<br/>Next.js 16<br/>Port 9999"]
+    subgraph "Dashboard Process (local or standalone server)"
+        DASH_FULL["Dashboard<br/>Next.js 16<br/>Default port 3000"]
     end
 
     subgraph "Client Machine A"
@@ -46,8 +44,7 @@ graph TB
 | Component | Runs On | Port | Purpose | npm Package |
 |-----------|---------|------|---------|-------------|
 | **CommHub Server** | Server (1 machine) | `9200` | Message routing, task management, auth, database | `@sleep2agi/commhub-server` |
-| **Built-in Dashboard** | Starts with CommHub | `9200/dashboard` | Lightweight Web UI (node list, message stream) | Embedded in Server |
-| **Standalone Dashboard** | Vercel or standalone server | `9999` | Full Web UI (topology, Gantt charts, etc.) | `docs-site/` |
+| **Dashboard** | Local or standalone server | `3000` default | Web UI (Chat / Nodes / Tasks / Messages / Networks / Logs / Admin) | `@sleep2agi/agent-network-dashboard` |
 | **anet CLI** | Each client machine | -- | Command-line management tool (39 commands) | `@sleep2agi/agent-network` |
 | **Agent Node** | Each client machine | -- | AI worker (receives tasks, calls AI, reports results) | `@sleep2agi/agent-node` |
 | **Claude Code** | Client machine | -- | Interactive AI development (joins network via MCP) | Anthropic official |
@@ -57,9 +54,8 @@ graph TB
 
 | Port | Component | Protocol | Description |
 |------|-----------|----------|-------------|
-| **9200** | CommHub Server | HTTP | MCP (`POST /mcp`), SSE (`GET /events/:alias`), REST (`/api/*`), Built-in Dashboard (`/dashboard`) |
-| **9999** | Standalone Dashboard | HTTP | Next.js full Dashboard (optional deployment) |
-| **3000** | Standalone Dashboard (dev) | HTTP | Default port for `npm run dev` |
+| **9200** | CommHub Server | HTTP | MCP (`POST /mcp`), SSE (`GET /events/:alias`), REST (`/api/*`) |
+| **3000** | Dashboard | HTTP | Default port for `anet hub dashboard` |
 
 ### Local vs Production
 
@@ -67,7 +63,7 @@ graph TB
 |---|---------|---------|
 | CommHub Server | Local `localhost:9200` | Server `YOUR_IP:9200` |
 | Agent Node | Local, `--hub localhost:9200` | Client machine, `--hub YOUR_IP:9200` |
-| Dashboard | `localhost:9200/dashboard` | `YOUR_IP:9200/dashboard` or Vercel |
+| Dashboard | `localhost:3000` | `YOUR_IP:3000` or standalone deploy |
 | Database | Local SQLite file | Server SQLite file |
 | Communication | All via localhost | Via internal network / public IP |
 
@@ -302,7 +298,7 @@ graph LR
 
     subgraph "Runtime"
         R1[claude-agent-sdk<br/>Claude Sonnet/Opus]
-        R2[codex-sdk<br/>GPT-5.5]
+        R2[codex-sdk<br/>Codex (gpt-5.4)]
         R3[claude-agent-sdk<br/>MiniMax/DeepSeek/...]
     end
 
@@ -314,7 +310,7 @@ graph LR
 | Runtime | AI Engine | Use Case | Models |
 |---------|---------|---------|------|
 | `claude-agent-sdk` | Anthropic Claude Agent SDK | Complex reasoning, long-document analysis | Claude Sonnet/Opus |
-| `codex-sdk` | OpenAI Codex SDK | Code generation, tool use | GPT-5.5 |
+| `codex-sdk` | OpenAI Codex SDK | Code generation, tool use | Codex (gpt-5.4) |
 | `claude-agent-sdk` | Anthropic-compatible API (via ANTHROPIC_BASE_URL) | Low-cost batch tasks | MiniMax, DeepSeek, InternLM |
 
 ### Task Processing Flow
@@ -389,12 +385,11 @@ flowchart TD
 
 ## Dashboard
 
-Dashboard offers two deployment modes:
+Dashboard is a separate Web process that talks to CommHub over REST:
 
 | Type | Tech Stack | Runs On | Port | Features |
 |------|--------|---------|------|------|
-| Built-in lightweight UI | Pure HTML + vanilla JS | Starts with CommHub Server (server) | `9200/dashboard` | Node list, message stream, task dispatch |
-| Standalone Dashboard | Next.js 16 | Vercel or standalone server | `9999` (prod) / `3000` (dev) | Full feature set (topology, Gantt charts, etc.) |
+| Dashboard | Next.js 16 | Local, Vercel, or standalone server | `3000` default | Chat, Nodes, Tasks, Messages, Networks, Logs, Admin |
 
 ## Channel Plugins
 

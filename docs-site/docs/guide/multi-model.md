@@ -21,7 +21,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | **Claude Sonnet 4** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 最强推理 | 高 |
 | **Claude Opus 4** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 复杂任务 | 极高 |
 | **Claude Code** | Anthropic | `claude-code-cli` | Claude Max 订阅 | 终端交互 | 订阅制 |
-| **GPT-5.5** | OpenAI | `codex-sdk` | codex auth login | 代码生成 | 中 |
+| **Codex (gpt-5.4)** | OpenAI | `codex-sdk` | codex auth login | 代码生成 | 中 |
 
 ## 配置方式
 
@@ -75,14 +75,14 @@ anet node create 全能助手 --runtime claude-code-cli
 anet node start 推理大师
 ```
 
-### GPT-5.5（海外）
+### Codex (gpt-5.4)（海外）
 
 ```bash
 # 先登录 OpenAI
 codex auth login
 
 # 创建 Codex Agent
-anet node create 代码机器 --runtime codex-sdk --model gpt-5.5 --tools Read,Write,Edit,Bash,Glob,Grep
+anet node create 代码机器 --runtime codex-sdk --model gpt-5.4 --tools Read,Write,Edit,Bash,Glob,Grep
 
 anet node start 代码机器
 ```
@@ -106,7 +106,7 @@ anet node create 代码审查 --runtime claude-agent-sdk
 
 # 3. 海外代码组（高能力）
 codex auth login
-anet node create 架构师 --runtime codex-sdk --model gpt-5.5
+anet node create 架构师 --runtime codex-sdk --model gpt-5.4
 
 # 4. 全部启动
 anet node start 文案1号
@@ -116,7 +116,7 @@ anet node start 架构师
 
 ::: info 混合编队的好处
 - 文案/翻译用国产模型 → 成本低、速度快、无需科学上网
-- 代码/架构用 GPT-5.5 或 Claude → 能力强
+- 代码/架构用 Codex (gpt-5.4) 或 Claude → 能力强
 - 所有 Agent 在同一个网络里协作，通过 Dashboard 统一指挥
 :::
 
@@ -144,7 +144,7 @@ ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 | 场景 | 推荐模型 | 理由 |
 |------|---------|------|
 | 日常文案/翻译 | MiniMax M2.7 | 极低成本，中文好 |
-| 代码生成/审查 | DeepSeek V3 或 GPT-5.5 | 代码能力强 |
+| 代码生成/审查 | DeepSeek V3 或 Codex (gpt-5.4) | 代码能力强 |
 | 复杂推理/分析 | Claude Sonnet 4 | 推理最强 |
 | 长文档处理 | Kimi | 128K 上下文 |
 | 科学研究 | 书生 Intern-S1 | 科研专长 |

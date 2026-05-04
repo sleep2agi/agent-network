@@ -2,15 +2,15 @@
 
 Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务管理功能。
 
-## 两种 Dashboard
+## 当前 Dashboard
 
-| 类型 | 技术栈 | 地址 | 功能范围 |
-|------|--------|------|---------|
-| **内置轻量 UI** | 纯 HTML + vanilla JS | `http://YOUR_IP:9200/dashboard` | 节点列表、消息流、发任务 |
-| **独立 Dashboard** | Next.js 16 | 独立部署（Vercel / Docker） | 完整功能 |
+| 启动方式 | 技术栈 | 默认地址 | 说明 |
+|------|--------|------|------|
+| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI 通过 `npx @sleep2agi/agent-network-dashboard@0.2.1-preview.1` 启动 |
+| 独立部署 | Next.js 16 | 自定义 | 需要自己配置 CommHub 地址 |
 
 ::: tip 提示
-内置 Dashboard 随 `anet hub start` 自动启动，无需额外部署。独立 Dashboard 提供更丰富的功能，适合团队使用。
+`anet hub start` 只启动 CommHub Server；Web UI 需要另开终端运行 `anet hub dashboard`。
 :::
 
 ## 页面一览
@@ -133,7 +133,7 @@ Event Log:
 | `[broadcast]` | 广播 |
 | `[ack]` | 确认 |
 
-消息流通过 SSE `/events/dashboard` 端点实时更新。
+消息流来自 CommHub REST 数据；Agent 自己通过 `/events/:alias` SSE 长连接接收任务推送。
 
 ### ChatPanel（对话面板）
 
@@ -203,23 +203,20 @@ Token 管理界面：
 
 ## 访问方式
 
-### 内置 Dashboard
+### 本地 Dashboard
 
 ```bash
-# 启动 Server（自带 Dashboard）
+# 终端 1：启动 Server
 anet hub start --port 9200
 
+# 终端 2：启动 Dashboard
+anet hub dashboard
+
 # 浏览器访问
-open http://localhost:9200/dashboard
+open http://localhost:3000
 ```
 
-如果 Server 设置了 `COMMHUB_AUTH_TOKEN`，访问时需要在 URL 带 token：
-
-```
-http://localhost:9200/dashboard?token=your-token
-```
-
-### 独立 Dashboard
+### 独立部署
 
 ```bash
 # Docker Compose 启动
@@ -235,16 +232,15 @@ vercel deploy --prebuilt --prod
 | 变量 | 说明 |
 |------|------|
 | `COMMHUB_URL` | CommHub Server 地址 |
-| `COMMHUB_AUTH_TOKEN` | 认证 Token |
-| `DASHBOARD_PASSWORD` | Dashboard 登录密码 |
+| `COMMHUB_AUTH_TOKEN` | 旧全局认证 Token（如启用） |
 | `COOKIE_INSECURE` | 开发模式下设为 1（HTTP） |
 
 ## 实时更新机制
 
-Dashboard 通过两种方式保持数据实时：
+Dashboard 通过两类数据面保持更新：
 
-1. **SSE 推送**：订阅 `/events/dashboard` 接收所有事件
-2. **轮询**：每 5 秒拉取 `/api/status` 更新节点状态
+1. **REST 查询**：拉取 `/api/status`、`/api/tasks`、`/api/messages` 等状态
+2. **Agent SSE**：Agent 订阅 `/events/:alias`，新任务到达后更新 Hub 数据，再被 Dashboard 读取
 
 ::: tip 性能提示
 如果 Agent 数量超过 50，建议使用独立 Dashboard 并关闭实时消息流，改为手动刷新。

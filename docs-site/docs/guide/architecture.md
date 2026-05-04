@@ -11,13 +11,11 @@ graph TB
     subgraph "服务器（1 台）"
         S["CommHub Server<br/>消息路由 + 任务管理<br/>端口 9200"]
         DB[(SQLite WAL<br/>13 张表)]
-        DASH_LITE["内置 Dashboard<br/>端口 9200/dashboard"]
         S --- DB
-        S --- DASH_LITE
     end
 
-    subgraph "Vercel / 独立服务器（可选）"
-        DASH_FULL["独立 Dashboard<br/>Next.js 16<br/>端口 9999"]
+    subgraph "Dashboard 进程（本机或独立服务器）"
+        DASH_FULL["Dashboard<br/>Next.js 16<br/>默认端口 3000"]
     end
 
     subgraph "客户端机器 A"
@@ -46,8 +44,7 @@ graph TB
 | 组件 | 跑在哪 | 端口 | 作用 | npm 包 |
 |------|--------|------|------|--------|
 | **CommHub Server** | 服务器（1 台） | `9200` | 消息路由、任务管理、认证、数据库 | `@sleep2agi/commhub-server` |
-| **内置 Dashboard** | 随 CommHub 启动 | `9200/dashboard` | 轻量 Web UI（节点列表、消息流） | 内嵌在 Server |
-| **独立 Dashboard** | Vercel 或独立服务器 | `9999` | 完整 Web UI（拓扑图、甘特图等） | `docs-site/` |
+| **Dashboard** | 本机或独立服务器 | `3000`（默认） | Web UI（Chat / Nodes / Tasks / Messages / Networks / Logs / Admin） | `@sleep2agi/agent-network-dashboard` |
 | **anet CLI** | 每台客户端机器 | -- | 管理命令行工具（39 个命令） | `@sleep2agi/agent-network` |
 | **Agent Node** | 每台客户端机器 | -- | AI 工作节点（接任务、调 AI、回结果） | `@sleep2agi/agent-node` |
 | **Claude Code** | 客户端机器 | -- | 交互式 AI 开发（通过 MCP 接入网络） | Anthropic 官方 |
@@ -57,9 +54,8 @@ graph TB
 
 | 端口 | 组件 | 协议 | 说明 |
 |------|------|------|------|
-| **9200** | CommHub Server | HTTP | MCP (`POST /mcp`)、SSE (`GET /events/:alias`)、REST (`/api/*`)、内置 Dashboard (`/dashboard`) |
-| **9999** | 独立 Dashboard | HTTP | Next.js 完整 Dashboard（可选部署） |
-| **3000** | 独立 Dashboard（开发） | HTTP | `npm run dev` 时的默认端口 |
+| **9200** | CommHub Server | HTTP | MCP (`POST /mcp`)、SSE (`GET /events/:alias`)、REST (`/api/*`) |
+| **3000** | Dashboard | HTTP | `anet hub dashboard` 默认端口 |
 
 ### 本地 vs 生产
 
@@ -67,7 +63,7 @@ graph TB
 |---|---------|---------|
 | CommHub Server | 本机 `localhost:9200` | 服务器 `YOUR_IP:9200` |
 | Agent Node | 本机，`--hub localhost:9200` | 客户端机器，`--hub YOUR_IP:9200` |
-| Dashboard | `localhost:9200/dashboard` | `YOUR_IP:9200/dashboard` 或 Vercel |
+| Dashboard | `localhost:3000` | `YOUR_IP:3000` 或独立部署 |
 | 数据库 | 本机 SQLite 文件 | 服务器 SQLite 文件 |
 | 通信 | 全部走 localhost | 走内网/公网 IP |
 
@@ -302,7 +298,7 @@ graph LR
 
     subgraph "Runtime"
         R1[claude-agent-sdk<br/>Claude Sonnet/Opus]
-        R2[codex-sdk<br/>GPT-5.5]
+        R2[codex-sdk<br/>Codex (gpt-5.4)]
         R3[claude-agent-sdk<br/>MiniMax/DeepSeek/...]
     end
 
@@ -314,7 +310,7 @@ graph LR
 | Runtime | AI 引擎 | 适用场景 | 模型 |
 |---------|---------|---------|------|
 | `claude-agent-sdk` | Anthropic Claude Agent SDK | 复杂推理、长文分析 | Claude Sonnet/Opus |
-| `codex-sdk` | OpenAI Codex SDK | 代码生成、工具调用 | GPT-5.5 |
+| `codex-sdk` | OpenAI Codex SDK | 代码生成、工具调用 | Codex (gpt-5.4) |
 | `claude-agent-sdk` | Anthropic 兼容 API（via ANTHROPIC_BASE_URL） | 低成本批量任务 | MiniMax、DeepSeek、书生 |
 
 ### 任务处理流程
@@ -389,12 +385,11 @@ flowchart TD
 
 ## Dashboard
 
-Dashboard 提供两种部署方式：
+Dashboard 是独立 Web 进程，通过 REST 连接 CommHub：
 
 | 类型 | 技术栈 | 部署位置 | 端口 | 功能 |
 |------|--------|---------|------|------|
-| 内置轻量 UI | 纯 HTML + vanilla JS | 随 CommHub Server 启动（服务器） | `9200/dashboard` | 节点列表、消息流、发任务 |
-| 独立 Dashboard | Next.js 16 | Vercel 或独立服务器 | `9999`（生产）/ `3000`（开发） | 完整功能（拓扑图、甘特图等） |
+| Dashboard | Next.js 16 | 本机、Vercel 或独立服务器 | `3000` 默认 | Chat、节点、任务、消息、网络、日志、Admin |
 
 ## Channel 插件
 

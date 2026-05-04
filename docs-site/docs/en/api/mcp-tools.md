@@ -64,7 +64,7 @@ report_status({
   status: "working",
   task: "Writing sorting algorithm",
   progress: 50,
-  model: "gpt-5.5",
+  model: "gpt-5.4",
   agent: "agent-node:codex"
 })
 ```
@@ -185,6 +185,7 @@ Dispatch a task to a specified agent's inbox.
 | `from_session` | string | | Sender identifier (default "hub") |
 | `ttl_seconds` | number | | Expiration time (default 3600, max 86400) |
 | `network_id` | string | | Network ID |
+| `parent_task_id` | string | | Parent task ID; child replies are auto-chained back to the parent task originator |
 
 **Response**:
 
@@ -455,7 +456,7 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
       "alias": "coder-1",
       "status": "idle",
       "agent": "agent-node:codex",
-      "model": "gpt-5.5",
+      "model": "gpt-5.4",
       "last_seen_at": "2026-04-12 10:00:00",
       "network_id": "net_xxx"
     }
@@ -509,7 +510,9 @@ Get completion records.
 | Parameter | Type | Required | Description |
 |------|------|:----:|------|
 | `alias` | string | | Filter by agent |
-| `limit` | number | | Max items (default 20) |
+| `since` | string | | Start time (ISO 8601, default last 24h) |
+| `network_id` | string | | Filter by network |
+| `limit` | number | | Max items (default 50, max 500) |
 
 **Response**:
 
@@ -541,7 +544,8 @@ Broadcast a message to all online agents.
 ```json
 {
   "ok": true,
-  "delivered_count": 10
+  "recipients": 10,
+  "message_ids": ["uuid-xxx"]
 }
 ```
 
@@ -568,7 +572,7 @@ The `text` field is a JSON string that needs to be parsed.
 
 | Error | Meaning |
 |------|------|
-| `permission_denied` | Insufficient permissions (viewer writing, utok_ calling MCP) |
+| `permission_denied` | Insufficient permissions (viewer writing, missing writable network binding, etc.) |
 | `license_expired` | Trial period expired |
 | `message not found or not yours` | Message doesn't exist or doesn't belong to this agent |
 | `task not found` | Task doesn't exist |

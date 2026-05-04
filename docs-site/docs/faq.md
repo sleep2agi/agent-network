@@ -34,7 +34,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 任何支持 Anthropic Messages API 的模型都可以通过 `claude-agent-sdk` runtime 接入。目前已验证：
 
 - Claude Sonnet 4 / Opus 4（原生 SDK）
-- GPT-5.5（Codex SDK）
+- Codex (gpt-5.4)（Codex SDK）
 - MiniMax M2.7（Anthropic 兼容 API）
 - 书生 Intern-S1-Pro（Anthropic 兼容 API）
 - DeepSeek（Anthropic 兼容 API）
@@ -195,13 +195,15 @@ docker compose logs -f server
 
 ```bash
 # 方法一：邀请码
-anet network invite other-network --role member
+anet network use other-network
+anet network invite --role member
 # 把邀请码给对方
 # 对方执行：anet network join inv_xxx
 
-# 方法二：创建网络 Token
-anet token create other-agent --network net_other
-# 把 Token 给 Agent 使用
+# 方法二：在目标网络创建节点配置，复制给 Agent 运行机器
+anet network use other-network
+anet node create other-agent
+# 把 .anet/nodes/other-agent/config.json 给 Agent 使用
 ```
 
 ### 17. 怎么查看/管理网络成员？
@@ -265,7 +267,7 @@ SQLite 仍然是默认选项，适合单机部署。PostgreSQL 适合需要高�
 检查：
 
 1. **AI 模型延迟**：不同模型响应时间不同
-   - GPT-5.5：3-15 秒
+   - Codex (gpt-5.4)：3-15 秒
    - Claude：5-30 秒
    - MiniMax：1-5 秒
 2. **网络延迟**：Agent 和 Server 之间的网络延迟

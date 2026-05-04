@@ -8,7 +8,7 @@
 anet demo debate --topic "AI 创造的岗位是否比消灭的多"
 ```
 
-预计 8-12 分钟跑完，自动清场。需要先 `anet login` 到 hub + 准备 MiniMax key（Token Plan）。
+预计 8-12 分钟跑完。需要先 `anet login` 到 hub + 准备 MiniMax key（Token Plan）。
 
 ## 6 个角色
 
@@ -44,10 +44,22 @@ anet demo debate --topic "AI 创造的岗位是否比消灭的多"
 | `--topic <text>` | 交互输入 | 辩题 |
 | `--key <key>` | `$MINIMAX_KEY` 或交互 | MiniMax API key |
 | `--out <path>` | `./debate-<topic>-<ts>.md` | 实录保存路径 |
-| `--keep` | false | 跑完保留 6 个临时 agent（默认清掉） |
+| `--keep` | false | 跑完保留 6 个临时 agent（默认执行清理流程） |
 | `--quick` | false | 4 步简化版 |
 | `--step-timeout <s>` | 360 | 每步超时秒数 |
 | `--suffix <s>` | 随机 4 hex | alias 后缀（避免重名冲突） |
+
+## Network 绑定
+
+当前实现会把脚本派发的任务绑定到登录用户的默认 network；如果 `/api/auth/me` 没返回默认 network，会退回到 network 列表里的 `default` 或第一项。这样可以避免 `ntok_` 作用域 agent 收到 SSE 但拉不到 inbox。
+
+注意：当前 `anet demo debate` 不会为每次运行自动创建独立 network。为了让 demo 数据和日常网络隔离，先手动切到一个临时 network 再运行：
+
+```bash
+anet network create debate-demo
+anet network use debate-demo
+anet demo debate --topic "..."
+```
 
 ## 工作机制
 
@@ -154,11 +166,12 @@ sequenceDiagram
 
 **问题**：agent 收到 SSE 但 hang，不处理任务
 - 原因：`POST /api/task` 没带 `network_id`，inbox.network_id=NULL；ntok-scoped agent 拉 inbox 时被 scope 过滤掉
-- 修复：v2.0.3-preview.4 已自动用默认 network 派任务
+- 修复：v2.0.3-preview.4+ 已自动用默认 network 派任务；当前预览线为 v2.0.3-preview.4
 
 **问题**：每步 360s 超时
 - 原因：claude-agent-sdk 首次启动需 warm up 几分钟（拉 binary + bootstrap session）
 - 解法：加大 `--step-timeout 600` 或先手动起一次 agent 让它热身
 
-**问题**：tmux session 跑完没清干净
+**问题**：tmux session 或本地 agent 配置跑完没清干净
 - 解法：`tmux ls | grep debate-<suffix>- | awk -F: '{print $1}' | xargs -I{} tmux kill-session -t {}`
+- 如 `.anet/nodes/` 里仍有 `主持人-<suffix>` 等临时配置，逐个执行 `anet node delete <name> --force`

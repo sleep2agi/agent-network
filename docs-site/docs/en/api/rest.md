@@ -23,8 +23,15 @@ curl http://localhost:9200/health
 
 ```json
 {
-  "status": "ok",
-  "version": "0.5.0",
+  "ok": true,
+  "version": "0.5.3-preview.0",
+  "api_version": "v3",
+  "transport": "streamable-http",
+  "sessions_count": 0,
+  "sse_connections": 0,
+  "auth": "enabled",
+  "v3_auth": true,
+  "multi_network": true,
   "uptime": 3600
 }
 ```
@@ -282,13 +289,14 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 
 ```json
 {
+  "ok": true,
   "sessions": [
     {
       "resume_id": "sdk-n_xxx",
       "alias": "coder-1",
       "status": "idle",
       "agent": "agent-node:codex",
-      "model": "gpt-5.5",
+      "model": "gpt-5.4",
       "task": null,
       "progress": null,
       "last_seen_at": "2026-04-12 10:00:00"
@@ -333,10 +341,10 @@ curl http://localhost:9200/api/nodes \
 
 ### GET /api/messages
 
-Get inbox message list.
+Get recent inbox messages.
 
 ```bash
-curl "http://localhost:9200/api/messages?alias=coder-1" \
+curl "http://localhost:9200/api/messages?limit=100" \
   -H "Authorization: Bearer ntok_xxx"
 ```
 
@@ -344,8 +352,8 @@ curl "http://localhost:9200/api/messages?alias=coder-1" \
 
 | Parameter | Description |
 |------|------|
-| `alias` | Filter by agent |
-| `limit` | Max items |
+| `since` | Start time, defaults to the last hour |
+| `limit` | Max items, default 100, max 500 |
 
 ---
 
@@ -384,19 +392,23 @@ curl http://localhost:9200/api/stats \
 
 ```json
 {
-  "sessions": {
-    "total": 10,
-    "online": 7,
-    "offline": 3
-  },
+  "ok": true,
+  "network_id": "net_xxx",
   "tasks": {
     "total": 100,
-    "replied": 85,
-    "running": 5,
-    "delivered": 3,
-    "failed": 2,
-    "cancelled": 5
-  }
+    "by_status": [
+      { "status": "replied", "count": 85 },
+      { "status": "running", "count": 5 }
+    ]
+  },
+  "sessions": {
+    "by_status": [
+      { "status": "idle", "count": 7 },
+      { "status": "offline", "count": 3 }
+    ]
+  },
+  "nodes": { "total": 10 },
+  "recent_tasks": []
 }
 ```
 
@@ -481,32 +493,43 @@ data: {"time":"2026-04-12T10:00:00Z"}
 
 ## Token Management Endpoints
 
-### POST /api/tokens
+### POST /api/auth/node-token
+
+Create a network-bound `ntok_` for a node. `anet node create` calls this automatically.
+
+```bash
+curl -X POST http://localhost:9200/api/auth/node-token \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"network_id": "net_xxx", "node_name": "coder-1"}'
+```
+
+### POST /api/auth/tokens
 
 Create an API token.
 
 ```bash
-curl -X POST http://localhost:9200/api/tokens \
+curl -X POST http://localhost:9200/api/auth/tokens \
   -H "Authorization: Bearer utok_xxx" \
   -H "Content-Type: application/json" \
   -d '{"name": "my-agent", "network_id": "net_xxx"}'
 ```
 
-### GET /api/tokens
+### GET /api/auth/tokens
 
 List all user tokens.
 
 ```bash
-curl http://localhost:9200/api/tokens \
+curl http://localhost:9200/api/auth/tokens \
   -H "Authorization: Bearer utok_xxx"
 ```
 
-### DELETE /api/tokens/:id
+### DELETE /api/auth/tokens/:id
 
 Revoke a token.
 
 ```bash
-curl -X DELETE http://localhost:9200/api/tokens/tok_xxx \
+curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
   -H "Authorization: Bearer utok_xxx"
 ```
 
@@ -549,12 +572,13 @@ curl -X POST http://localhost:9200/api/networks/join \
 
 ## Error Response Format
 
-All errors return a consistent format:
+Errors usually return this shape:
 
 ```json
 {
+  "ok": false,
   "error": "error_code",
-  "message": "Human-readable error message"
+  "message": "Human-readable error message (when available)"
 }
 ```
 

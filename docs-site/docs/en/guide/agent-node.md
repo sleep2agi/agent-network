@@ -3,7 +3,8 @@
 Agent Node is the working unit in Agent Network -- it receives tasks, invokes an AI model to process them, and reports results.
 
 ::: tip Not sure which Runtime to pick?
-- Want AI to **write code / run commands** --> `codex-sdk` (recommended for beginners)
+- Not sure? Start with `claude-agent-sdk`; `anet node create` guides you through MiniMax / DeepSeek / GLM / Kimi / Claude providers.
+- Want AI to **write code / run commands** --> `codex-sdk`
 - Want AI to **write copy / translate / analyze** (programmatic API) --> `claude-agent-sdk`
 - Want AI to **work like Claude in your terminal** --> `claude-code-cli`
 - Want to use **domestic models (MiniMax/DeepSeek/GLM)** --> `claude-agent-sdk` + `ANTHROPIC_BASE_URL`
@@ -19,7 +20,7 @@ npm install -g @sleep2agi/agent-node@preview
 npx @sleep2agi/agent-node --help
 ```
 
-## Four Runtimes
+## Runtimes
 
 Agent Node supports three AI runtime engines covering all major models:
 
@@ -30,8 +31,8 @@ Based on the [Anthropic Claude Agent SDK](https://www.npmjs.com/package/@anthrop
 | Property | Description |
 |------|------|
 | **Models** | Claude Sonnet 4 / Claude Opus 4 |
-| **Prerequisites** | Anthropic API Key or MiniMax API Key + `claude auth login` |
-| **Strengths** | Best-in-class reasoning, long context, complex tasks |
+| **Prerequisites** | Anthropic API Key or any Anthropic-compatible API key (MiniMax/DeepSeek/GLM/Kimi, etc.) |
+| **Strengths** | Programmatic Anthropic-compatible API calls for stable background agents |
 | **Isolation** | `settingSources: []` fully isolates host config |
 
 ```bash
@@ -44,7 +45,6 @@ npx @sleep2agi/agent-node \
 
 ::: details Prerequisites checklist
 - [ ] Anthropic API Key or MiniMax API Key (paid)
-- [ ] Run `claude auth login` to authenticate
 - [ ] CommHub Server is running
 :::
 
@@ -92,7 +92,7 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 
 | Property | Description |
 |------|------|
-| **Models** | GPT-5.5 |
+| **Models** | Codex SDK model (set with `--model`; examples use `gpt-5.4`) |
 | **Prerequisites** | `codex auth login` |
 | **Strengths** | Strong code generation, flexible tool use |
 | **Tools** | Supports Read / Write / Edit / Bash / Glob / Grep |
@@ -101,7 +101,7 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 npx @sleep2agi/agent-node \
   --alias code-assistant \
   --runtime codex-sdk \
-  --model gpt-5.5 \
+  --model gpt-5.4 \
   --hub http://YOUR_IP:9200 \
   --tools Read,Write,Edit,Bash,Glob,Grep
 ```
@@ -169,7 +169,7 @@ npx @sleep2agi/agent-node [options]
 | `--runtime` | `-r` | claude-agent-sdk | Runtime engine (`claude-agent-sdk` / `codex-sdk` / `claude-code-cli`) |
 | `--model` | `-m` | (per runtime default) | AI model name |
 | `--tools` | `-t` | (none) | Available tools, comma-separated |
-| `--max-budget` | | 0.1 | Per-task budget cap (USD) |
+| `--max-budget` | | 0 | Per-task budget cap (USD; 0 means disabled) |
 | `--session` | `-s` | (new) | Resume a specific session |
 | `--config` | `-c` | (auto-detect) | Config file path |
 | `--token` | | (from config/env) | CommHub auth token |
@@ -195,8 +195,9 @@ flowchart TD
   "anet_version": "0.1.0",
   "node_id": "n_a1b2c3d4",
   "node_name": "code-assistant",
+  "token": "ntok_...",
   "runtime": "codex-sdk",
-  "model": "gpt-5.5",
+  "model": "gpt-5.4",
   "session": "",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
@@ -317,7 +318,7 @@ The complete Agent Node lifecycle:
 
 | Phase | CommHub Status | Description |
 |------|-------------|------|
-| Created | (not in CommHub) | `anet create` generates config.json |
+| Created | (not in CommHub) | `anet node create` generates config.json |
 | Registered | idle | `report_status(idle)` |
 | Online | idle | SSE connected, waiting for tasks |
 | Running | working | Processing a task |

@@ -2,15 +2,15 @@
 
 CommHub: MCP Streamable HTTP + SSE push + REST API for an AI agent network. Single-process Bun server, SQLite-backed, zero config.
 
-**v0.5.0 stable.** The supported path is to install the `anet` CLI (`@sleep2agi/agent-network` 2.0.0) and run `anet hub start`, which wires up port, default account, and config for you.
+**Current preview line.** The supported path is to install the `anet` CLI (`@sleep2agi/agent-network` 2.0.3-preview.4) and run `anet hub start`, which wires up port, the server token, the default account, and local config for you.
 
 ## Quick start (verified)
 
 ```bash
 # Recommended — through the anet CLI
-npm install -g @sleep2agi/agent-network
+npm install -g @sleep2agi/agent-network@preview
 anet hub start
-#   • http://127.0.0.1:9200 (also bound to LAN)
+#   • http://127.0.0.1:9200 by default
 #   • SQLite at ~/.commhub/commhub.db
 #   • Default admin account auto-created: admin / anethub
 #   • Reset hint printed in the launch banner
@@ -35,9 +35,9 @@ Once running:
 
 | Package | Version |
 |---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.0 |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.1.0 |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.1.1 |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.3-preview.4 |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.2.1-preview.1 |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.2.0-preview.1 |
 
 ## MCP tools (18)
 
@@ -87,7 +87,7 @@ The server exposes ~33 endpoints across health, auth, networks, and observabilit
 | GET | `/api/stats` | Aggregate stats |
 | GET | `/api/audit-log` | Audit trail |
 
-Network-management endpoints (`/api/networks…`) and `/api/license[…]` are present but are **not** part of the v2.0.0 verified flow — see *Not verified* below.
+Network-management endpoints (`/api/networks…`) are present and used by the current CLI. `/api/license[…]` is present but remains a placeholder.
 
 Auth: `Authorization: Bearer <token>` header, or `?token=<token>` query.
 
@@ -123,7 +123,7 @@ delivered/acked/running → reassign → delivered (new agent)
 
 ## PostgreSQL (experimental)
 
-Set `DATABASE_URL` to switch to PostgreSQL — the SQL layer auto-translates SQLite-isms (datetime, parameter placeholders) so application code is unchanged. Requires `bun add pg`. **Not in the v2.0.0 verified path.**
+Set `DATABASE_URL` to switch to PostgreSQL — the SQL layer auto-translates SQLite-isms (datetime, parameter placeholders) so application code is unchanged. Requires `bun add pg`. PostgreSQL remains experimental.
 
 ```bash
 DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-server
@@ -134,7 +134,7 @@ DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-serv
 | Variable | Default | Notes |
 |---|---|---|
 | `PORT` | `9200` | listen port |
-| `HOST` | `0.0.0.0` | listen address |
+| `HOST` | `0.0.0.0` in the server package, `127.0.0.1` when launched by `anet hub start` | listen address |
 | `COMMHUB_AUTH_TOKEN` | (none) | Bearer token gate (legacy) |
 | `COMMHUB_DB` | `~/.commhub/commhub.db` | SQLite path |
 | `DATABASE_URL` | (none) | switches to PostgreSQL when set (unverified) |
@@ -148,10 +148,9 @@ DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-serv
 
 ## Not verified
 
-- `/api/networks*` (multi-network create / invite / member management) — code present, not E2E regressed.
 - `/api/license*` — placeholder for a future paid tier.
 - PostgreSQL backend — translation layer exists, no E2E run.
-- Telegram / WeChat / Feishu channel endpoints — out of scope for v2.0.0 verification.
+- Telegram / WeChat / Feishu channel endpoints — channel code exists, but only Telegram-oriented agent-node paths are actively exercised.
 
 ## License
 

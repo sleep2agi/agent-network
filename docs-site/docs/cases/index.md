@@ -1,6 +1,6 @@
 # 案例
 
-真实可运行的 Agent Network 案例，从简单到复杂，每个都可以一键启动。
+当前保留的 Agent Network 案例，从简单到复杂。带 `demos/` 目录的案例可用 Docker 一键启动，其余为基于当前 CLI 和 Dashboard 的手动流程。
 
 ## 入门案例
 
@@ -18,17 +18,8 @@
 | [军团编队](/cases/telegram-squad) | ★★★★ | 11 | Codex + MiniMax | 1 指挥 + 10 兵，Docker 编排 |
 | [混合模型协作](/cases/mixed-model) | ★★★ | 4 | Claude + MiniMax + DeepSeek | 不同模型各司其职 |
 
-## 行业案例
-
-| 案例 | 难度 | 场景 | 用到的模型 | 亮点 |
-|------|:----:|-----|-----------|------|
-| [客服团队](/cases/customer-service) | ★★★ | 客服 | MiniMax + Claude | 分诊 + 专家回答 |
-| [内容工厂](/cases/content-factory) | ★★★ | 内容 | MiniMax + Kimi | 批量生产 + 质检 |
-
----
-
 ::: tip 运行案例前
 确保已完成 [上手指南](/guide/getting-started)，CommHub Server 正在运行。
 
-注意：以下案例为设计稿，仅入门两步（启动 Hub + 单 Agent + Dashboard 派任务）已端到端验证，多 Agent 案例请视为参考方案，部分细节可能未与 v2.0.0 实时同步。
+已删除未实现或仅占位的行业案例页面。多 Agent 手动案例依赖模型能力和当前网络状态，推荐先跑通 `demos/hello-world` 或 `demos/translation-pipeline`。
 :::

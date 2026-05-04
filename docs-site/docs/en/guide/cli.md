@@ -1,6 +1,6 @@
 # CLI Command Reference
 
-`anet` is the command-line management tool for Agent Network, providing 39 commands covering everything from setup to monitoring.
+`anet` is the Agent Network command-line management tool for Hub, account, Network, Agent Node, monitoring, and Demo operations.
 
 ## Installation
 
@@ -25,8 +25,8 @@ After installation, the `anet` command is available globally.
 | Command | Description |
 |------|------|
 | `anet hub start` | Start CommHub Server |
-| `anet hub start` | Start in local dev mode |
-| `anet hub stop` | Stop the server |
+| `anet hub dashboard` | Start Dashboard UI |
+| `anet hub config` | View/change Hub config |
 
 ### Account Management
 
@@ -47,7 +47,7 @@ After installation, the `anet` command is available globally.
 | `anet network info <name>` | View network details |
 | `anet network rename <old> <new>` | Rename a network |
 | `anet network delete <name>` | Delete a network |
-| `anet network invite <name>` | Create an invite code |
+| `anet network invite` | Create an invite code for the current network |
 | `anet network join <invite_code>` | Join a network with an invite code |
 
 ### Token Management
@@ -71,7 +71,6 @@ After installation, the `anet` command is available globally.
 | `anet logs <name>` | View agent logs |
 | `anet node rename <old> <new>` | Rename an agent |
 | `anet node delete <name>` | Delete an agent |
-| `anet restart-all` | Restart all offline agents |
 
 ### Monitoring
 
@@ -109,12 +108,22 @@ Start the CommHub communication server.
 anet hub start [options]
 ```
 
+What it does:
+
+1. Generates `COMMHUB_AUTH_TOKEN` on first run and saves it to `~/.anet/server/config.json`
+2. Starts CommHub on `127.0.0.1:9200` by default
+3. Creates the SQLite database at `~/.commhub/commhub.db`
+4. Creates the default admin account on first run (`admin / anethub`)
+5. Saves the local Hub URL to `~/.anet/config.json`
+6. Reuses a valid saved `utok_` if one exists; otherwise run `anet login`
+
 | Parameter | Default | Description |
 |------|--------|------|
 | `--port` | 9200 | Listen port |
-| `--token` | (from config) | Bearer auth token |
-| `--db` | ~/.commhub/commhub.db | Database path |
-| `--cors` | * | CORS allowed origins |
+| `--token` | (auto-generated) | Bearer auth token |
+| `--host` / `--ip` | 127.0.0.1 | Bind address; use `0.0.0.0` for LAN access |
+| `--username` | admin | Default account username |
+| `--password` | anethub | Default account password |
 
 **Environment variables**:
 
@@ -125,7 +134,7 @@ anet hub start [options]
 | `DATABASE_URL` | PostgreSQL connection (optional, defaults to SQLite) |
 | `COMMHUB_CORS_ORIGINS` | CORS whitelist |
 
-### anet create
+### anet node create
 
 Create a new agent node.
 
@@ -135,7 +144,7 @@ anet node create <name> [options]
 
 | Parameter | Default | Description |
 |------|--------|------|
-| `--runtime` | (interactive) | `codex-sdk` / `claude-agent-sdk` |
+| `--runtime` | (interactive) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `--model` | (per runtime default) | Model name |
 
 **Examples**:
@@ -145,7 +154,7 @@ anet node create <name> [options]
 anet node create my-agent
 
 # Direct specification
-anet node create code-assistant --runtime codex-sdk --model gpt-5.5
+anet node create code-assistant --runtime codex-sdk --model gpt-5.4
 
 # MiniMax Agent
 anet node create translator --runtime claude-agent-sdk --model MiniMax-M2.7
@@ -159,7 +168,7 @@ After creation, a config file is generated at `.anet/nodes/<node_id>/config.json
   "node_id": "n_a1b2c3d4",
   "node_name": "code-assistant",
   "runtime": "codex-sdk",
-  "model": "gpt-5.5",
+  "model": "gpt-5.4",
   "session": "",
   "channels": ["server:commhub"],
   "tools": [],
@@ -173,7 +182,7 @@ After creation, a config file is generated at `.anet/nodes/<node_id>/config.json
 }
 ```
 
-### anet start
+### anet node start
 
 Start an agent node.
 
@@ -200,7 +209,7 @@ anet node start <name> [options]
 View network status overview.
 
 ```bash
-anet status [--json]
+anet status
 ```
 
 Example output:
@@ -214,8 +223,8 @@ Server:  http://localhost:9200
 
 Nodes (5 online, 2 offline):
   🟢 commander    idle     Claude      3s ago
-  🟢 coder-1     working  GPT-5.5     Writing sorting algorithm
-  🟢 coder-2     idle     GPT-5.5     15s ago
+  🟢 coder-1     working  Codex (gpt-5.4)     Writing sorting algorithm
+  🟢 coder-2     idle     Codex (gpt-5.4)     15s ago
   🟢 writer-1    idle     MiniMax     1m ago
   🟢 writer-2    idle     MiniMax     2m ago
   ⚪ tester-1    offline              2h ago
@@ -229,16 +238,13 @@ Tasks: 42 replied, 3 running, 0 failed
 View task list.
 
 ```bash
-anet tasks [status] [options]
+anet tasks [status] [--limit <n>]
 ```
 
 | Parameter | Description |
 |------|------|
 | `status` | Filter by status: `delivered` / `running` / `replied` / `failed` / `cancelled` |
 | `--limit` | Number of items (default 20) |
-| `--from` | Filter by sender |
-| `--to` | Filter by recipient |
-| `--json` | JSON output format |
 
 **Examples**:
 
@@ -249,11 +255,8 @@ anet tasks
 # Show only failed tasks
 anet tasks failed
 
-# View a specific agent's tasks
-anet tasks --to coder-1
-
-# JSON output
-anet tasks --json
+# Limit item count
+anet tasks --limit 5
 ```
 
 ### anet doctor
@@ -266,38 +269,41 @@ anet doctor
 
 Checks:
 
-1. Server reachability (GET /health)
-2. Auth status (utok_ / ntok_ validity)
-3. Network configuration completeness
-4. Agent connection status
-5. Database health
-6. Disk space
+1. Global config (`~/.anet/config.json`)
+2. Auth token presence
+3. Hub reachability (GET `/health`)
+4. Local node config and process status
+5. Claude / Codex / Bun dependencies
+6. Current project `.mcp.json` commhub config
 
 ### anet network invite
 
 Create a network invite code.
 
 ```bash
-anet network invite <network-name> [options]
+anet network invite [options]
 ```
 
 | Parameter | Default | Description |
 |------|--------|------|
 | `--role` | member | Invited role: `admin` / `member` / `viewer` |
-| `--max-uses` | 1 | Maximum uses, -1 for unlimited |
+| `--uses` | 1 | Maximum uses, -1 for unlimited |
 | `--expires` | (none) | Expiration in days |
 
 **Examples**:
 
 ```bash
+# Switch to the target network first
+anet network use dev
+
 # Create a single-use invite code
-anet network invite dev
+anet network invite
 
 # Create a 10-use member invite code
-anet network invite dev --role member --max-uses 10
+anet network invite --role member --uses 10
 
 # Create a 7-day expiring viewer invite code
-anet network invite dev --role viewer --expires 7
+anet network invite --role viewer --expires 7
 ```
 
 ### anet token create
@@ -305,24 +311,21 @@ anet network invite dev --role viewer --expires 7
 Create an API token.
 
 ```bash
-anet token create <name> [--network <id>]
+anet token create <name>
 ```
 
 **Examples**:
 
 ```bash
-# Create a token for the current network
+# Create an API token
 anet token create my-agent-token
-
-# Create a token for a specific network
-anet token create prod-token --network net_xxxxx
 ```
 
 ::: warning Security Note
 The created token is displayed only once. Store it securely. If lost, you'll need to create a new one.
 :::
 
-### anet resume
+### anet node resume
 
 Resume a previously interrupted agent session. When an agent crashes, is manually stopped, or exits unexpectedly, use this command to restore context without losing conversation history.
 
@@ -340,12 +343,12 @@ If `--session` is not specified, the last session saved in config.json is used.
 **Automatic session saving**:
 
 - After each task completion, Agent Node automatically saves the session_id (Claude) or thread_id (Codex) to the `session` field in `config.json`
-- On the next `anet resume`, this is read automatically -- no manual tracking needed
+- On the next `anet node resume`, this is read automatically -- no manual tracking needed
 
 **Use cases**:
 
 - Agent process crashed or was killed, need to restore context and continue working
-- After a manual `anet stop`, want to continue where the previous conversation left off
+- After a manual `anet node stop`, want to continue where the previous conversation left off
 - Network disconnect caused the agent to go offline, resume after reconnecting
 
 ```bash
@@ -356,8 +359,8 @@ anet node resume commander
 anet node resume worker --session abc123
 ```
 
-::: tip Difference from anet start
-`anet start` creates a new session by default. If you want to restore an old session, use `anet resume`. If you want to force a new session, use `anet node start <name> --new-session`.
+::: tip Difference from anet node start
+`anet node start` creates a new session by default. If you want to restore an old session, use `anet node resume`. If you want to force a new session, use `anet node start <name> --new-session`.
 :::
 
 ### anet init project
@@ -393,15 +396,14 @@ anet init project
 }
 ```
 
-## Global Options
+## Common Options
 
-All commands support the following global options:
+Common commands read these options or their saved config equivalents:
 
 | Option | Description |
 |------|------|
 | `--hub <url>` | CommHub Server address |
 | `--token <token>` | Auth token |
-| `--json` | JSON output format |
 | `--help` | Show help |
 | `--version` | Show version |
 

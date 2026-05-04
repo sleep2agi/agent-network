@@ -30,7 +30,7 @@ Runtime 就是 Agent 用来调用 AI 模型的引擎。不同的 Runtime 对接�
 
 | Runtime | 对接模型 | 适合场景 | 需要什么 |
 |---------|---------|---------|---------|
-| `codex-sdk` | GPT-5.5 | 写代码、跑命令 | `codex auth login` |
+| `codex-sdk` | Codex (gpt-5.4) | 写代码、跑命令 | `codex auth login` |
 | `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM | 推理、分析、翻译（支持国产模型） | API Key（国产或 Anthropic） |
 | `claude-code-cli` | Claude Sonnet/Opus | 推理、写代码、终端操作（CLI 模式） | Claude Code CLI 已安装 + Claude Max 订阅 |
 
@@ -51,9 +51,12 @@ Runtime 就是 Agent 用来调用 AI 模型的引擎。不同的 Runtime 对接�
 ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=你的MiniMax-API-Key \
 anet node create 文案1号 --runtime claude-agent-sdk
+```
 
-# 给 alias 为 "文案1号" 的 Agent 发任务
-anet task send 文案1号 "写一段产品介绍"
+在 Dashboard 的 ChatPanel 里选择 "文案1号"，发送 Task：
+
+```text
+写一段产品介绍
 ```
 
 Alias 的规则：
@@ -130,7 +133,7 @@ anet hub start
 就像微信群里的一个成员。每个 Agent 有：
 
 - **名字**（alias）：比如 "文案1号"、"文案助手"
-- **能力**：由它使用的 AI 模型决定（GPT-5.5、Claude、MiniMax 等）
+- **能力**：由它使用的 AI 模型决定（Codex (gpt-5.4)、Claude、MiniMax 等）
 - **连接**：它会连到 CommHub，等着接收任务
 
 ```bash
@@ -175,18 +178,18 @@ anet login --hub http://10.0.0.1:9200
 
 **打开浏览器，访问 CommHub 的网页界面。** 用的是同一个 Agent Network 账号。
 
-```
-http://localhost:9200/dashboard   # 本地
-http://10.0.0.1:9200/dashboard    # 远程
+```bash
+anet hub dashboard
+# 浏览器打开 http://localhost:3000
 ```
 
 ### 3. `codex auth login` -- OpenAI 账号（和 Agent Network 无关）
 
-如果你要用 GPT-5.5 模型的 Agent，需要先登录 OpenAI 的 Codex。**这是 OpenAI 自己的账号体系**，跟 Agent Network 没关系。
+如果你要用 Codex (gpt-5.4) 模型的 Agent，需要先登录 OpenAI 的 Codex。**这是 OpenAI 自己的账号体系**，跟 Agent Network 没关系。
 
-### 4. `claude auth login` -- Anthropic 账号（和 Agent Network 无关）
+### 4. Claude / Anthropic 账号（和 Agent Network 无关）
 
-如果你要用 Claude 模型的 Agent，需要 Anthropic API Key 或 MiniMax API Key和 Anthropic 授权。**这也跟 Agent Network 没关系。**
+如果你用 `claude-agent-sdk`，需要 Anthropic API Key 或兼容服务商的 API Key；如果你用 `claude-code-cli`，需要本机已安装并登录 Claude Code。**这也跟 Agent Network 没关系。**
 
 ### 一张表看清楚
 
@@ -194,8 +197,9 @@ http://10.0.0.1:9200/dashboard    # 远程
 |-----------|---------|---------|---------|
 | 管理 Agent Network | 终端 | `anet login` | Agent Network 账号 |
 | 看 Dashboard | 浏览器 | 网页登录 | Agent Network 账号（同一个） |
-| 用 GPT-5.5 Agent | 终端 | `codex auth login` | OpenAI 账号 |
-| 用 Claude Agent | 终端 | `claude auth login` | Anthropic 账号 |
+| 用 Codex (gpt-5.4) Agent | 终端 | `codex auth login` | OpenAI 账号 |
+| 用 Claude Agent SDK | `anet node create` | 填 API Key | Anthropic 或兼容服务商账号 |
+| 用 Claude Code CLI | 终端 | `claude auth login` | Anthropic / Claude Code 账号 |
 | 用 MiniMax Agent | 不用登录 | 配置 API Key 即可 | MiniMax 账号 |
 
 ::: warning 记住
@@ -234,7 +238,7 @@ Agent 干活需要调用 AI 模型，不同模型的 Key 要去不同地方申�
 | Kimi | [platform.moonshot.cn](https://platform.moonshot.cn) → API 管理 | `xxx` | 同上 |
 | OpenRouter | [openrouter.ai](https://openrouter.ai) → Keys | `sk-or-xxx` | 同上 |
 | Claude | [console.anthropic.com](https://console.anthropic.com) → API Keys | `sk-ant-xxx` | 同上 |
-| GPT-5.5 | 不需要 Key | 终端执行 `codex auth login` | 自动保存 |
+| Codex (gpt-5.4) | 不需要 Key | 终端执行 `codex auth login` | 自动保存 |
 | Claude Code | 不需要 Key | 终端执行 `claude auth login` | 自动保存 |
 
 ### 3. Key 保存在哪？
@@ -242,7 +246,7 @@ Agent 干活需要调用 AI 模型，不同模型的 Key 要去不同地方申�
 `anet node create` 时填入的 API Key 保存在：
 
 ```
-~/.anet/nodes/<节点名>/config.json
+当前项目/.anet/nodes/<节点名>/config.json
 ```
 
 具体在 `env` 字段里，例如：

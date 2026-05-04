@@ -3,7 +3,7 @@
 #
 # 在 root 上跑会自动建 anet 用户切过去,然后:
 #   1. 装 nodejs 20 + tmux
-#   2. npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
+#   2. npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
 #   3. tmux session "anet" 内启动: hub + dashboard + N 个 agent
 #
 # 用法:

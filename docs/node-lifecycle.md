@@ -7,13 +7,13 @@
 ## 状态机
 
 ```
-          anet create
+          anet node create
               │
               ▼
          ┌─────────┐
          │ created  │ ← config.json 存在，未注册 CommHub
          └────┬─────┘
-              │ anet start
+              │ anet node start
               ▼
          ┌─────────────┐
          │ registered   │ ← CommHub report_status(idle)，等待 SSE 连接
@@ -36,12 +36,12 @@
          │  online  │ ← report_status(idle)
          │  (idle)  │
          └────┬─────┘
-              │ anet stop / SIGINT / 崩溃
+              │ anet node stop / SIGINT / 崩溃
               ▼
          ┌─────────┐
          │ offline  │ ← CommHub 检测到断连 / report_status(offline)
          └────┬─────┘
-              │ anet start（resume）
+              │ anet node start（resume）
               ▼
          ┌─────────┐
          │  online  │ ← 恢复
@@ -55,7 +55,7 @@
          │  error   │ ← 运行时错误
          └─────────┘
          ┌─────────┐
-         │ deleted  │ ← anet delete（清除 config + CommHub 记录）
+         │ deleted  │ ← anet node delete（清除 config + CommHub 记录）
          └─────────┘
 ```
 
@@ -76,7 +76,7 @@
 
 ### 1. 创建 (created)
 
-**触发**: `anet create <node-name>`
+**触发**: `anet node create <node-name>`
 
 **数据变更**:
 ```
@@ -105,7 +105,7 @@ config.json:
 
 ### 2. 注册 (registered)
 
-**触发**: `anet start <node-name>` → spawn 进程 → 进程调 `report_status(idle)`
+**触发**: `anet node start <node-name>` → spawn 进程 → 进程调 `report_status(idle)`
 
 **数据变更**:
 - CommHub sessions 表: INSERT/UPDATE（resume_id=sdk-${node_id}, alias=node_name, status=idle, agent=runtime, project_dir, server=hostname）
@@ -148,7 +148,7 @@ register() → callCommHub("report_status", {
 
 ### 6. 恢复 (resume)
 
-**触发**: `anet start <node-name>`，config.json 有 session
+**触发**: `anet node start <node-name>`，config.json 有 session
 
 **数据变更**:
 - 进程启动，带 session/thread ID
@@ -158,7 +158,7 @@ register() → callCommHub("report_status", {
 
 ### 7. 更名 (rename)
 
-**触发**: `anet rename <old> <new>`
+**触发**: `anet node rename <old> <new>`
 
 **前置条件**: node 必须 offline（运行中不允许改名）
 
@@ -166,14 +166,14 @@ register() → callCommHub("report_status", {
 1. config.json `node_name` → 新名字
 2. 旧节点（目录名=node_name）: rename 目录
 3. 新节点（目录名=node_id）: 不动目录
-4. CommHub alias：下次 `anet start` 时用新名字重新注册（旧 alias 自然过期）
+4. CommHub alias：下次 `anet node start` 时用新名字重新注册（旧 alias 自然过期）
 
 **P1**: CommHub 新增 rename API，rename 时主动更新 alias。
 
 ### 8. 下线 (offline)
 
 **触发**:
-- `anet stop <node-name>` → kill 进程 → 进程 SIGTERM handler 调 `report_status(offline)`
+- `anet node stop <node-name>` → kill 进程 → 进程 SIGTERM handler 调 `report_status(offline)`
 - 进程崩溃 → CommHub 检测 SSE 断连 → 标记 offline
 - 网络断开 → 同上
 
@@ -186,7 +186,7 @@ register() → callCommHub("report_status", {
 
 ### 9. 删除 (deleted)
 
-**触发**: `anet delete <node-name>`
+**触发**: `anet node delete <node-name>`
 
 **前置条件**: node 必须 offline
 
@@ -206,36 +206,30 @@ register() → callCommHub("report_status", {
 
 | 命令 | 状态转换 | 说明 |
 |------|---------|------|
-| `anet create` | → created | 生成 config.json |
-| `anet start` | created/offline → registered → online | spawn 进程 |
-| `anet start --new-session` | * → registered → online | 忽略旧 session |
-| `anet stop` | online/running → offline | kill 进程 |
-| `anet rename` | offline → offline (改名) | 必须先 stop |
-| `anet delete` | offline → deleted | 必须先 stop |
-| `anet restart` | offline → registered → online | 从 CommHub 数据重建 |
-| `anet restart-all` | 批量 offline → online | 批量重启本机 |
+| `anet node create` | → created | 生成 config.json |
+| `anet node start` | created/offline → registered → online | spawn 进程 |
+| `anet node start --new-session` | * → registered → online | 忽略旧 session |
+| `anet node stop` | online/running → offline | kill 进程 |
+| `anet node rename` | offline → offline (改名) | 必须先 stop |
+| `anet node delete` | offline → deleted | 必须先 stop |
 
-## restart-all 融入生命周期
+## 批量恢复说明
 
-```
-anet restart-all
-  1. GET /api/status → 获取所有 session
-  2. 筛选：本机 + offline + 有完整信息
-  3. 按类型 spawn:
-     - claude-code-cli: tmux spawn claude CLI
-     - agent-node:*: tmux spawn agent-node --config
-  4. 等待状态变化：offline → idle
-  5. 超时 30s 报 warning
+当前 CLI 没有 `anet restart` / `anet restart-all` 命令。批量恢复仍然是多次触发 `offline → online` 状态转换：
+
+```bash
+anet node start <node-a>
+anet node start <node-b>
 ```
 
-restart-all 不改生命周期，只是批量触发 offline → online 的状态转换。
+旧的 `restart-all` 方案保留在 [archive/restart-strategy.md](archive/restart-strategy.md)，不属于当前支持命令集。
 
 ## node_id 完整设计
 
 | 属性 | 值 |
 |------|-----|
 | 格式 | `n_` + 8 位 hex（如 `n_a1b2c3d4`） |
-| 生成时机 | `anet create` 时 |
+| 生成时机 | `anet node create` 时 |
 | 可变性 | 不可变 |
 | 用途 | CommHub resume_id + 新节点目录名 |
 | 暴露 | `anet ls` 括号显示，不主动展示 |
@@ -244,7 +238,7 @@ node_name:
 | 属性 | 值 |
 |------|-----|
 | 用途 | 显示名 + CommHub alias + CLI 参数 |
-| 可变性 | `anet rename` 可改 |
+| 可变性 | `anet node rename` 可改 |
 | 约束 | 同一 CommHub 唯一，不含路径特殊字符 |
 
 ## 异常处理
@@ -256,7 +250,7 @@ node_name:
   → SIGTERM handler 来不及执行
   → CommHub 通过心跳超时检测（5 分钟）
   → 自动标记 offline
-  → anet restart-all 可恢复
+  → 逐个 `anet node start <name>` 可恢复
 ```
 
 ### 网络断开
@@ -284,9 +278,9 @@ SSE 断连
 ### 进程残留
 
 ```
-anet start 时发现 tmux session 已存在
+anet node start 时发现 tmux session 已存在
   → 提示："tmux session {name} already exists. Kill and restart? (y/n)"
-  → 或 anet stop 先 kill
+  → 或 anet node stop 先 kill
 ```
 
 ## 兼容策略（旧节点无感迁移）
@@ -308,7 +302,7 @@ anet start 时发现 tmux session 已存在
 
 1. **anet 负责自动补 node_id**（agent-node 只读不写，避免双写）:
 ```typescript
-// anet start 时检测
+// anet node start 时检测
 if (!config.node_id) {
   config.node_id = `n_${crypto.randomBytes(4).toString("hex")}`;
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
@@ -328,18 +322,18 @@ const SESSION = fileConfig.session || fileConfig.resume || fileConfig.sessionId 
   --config 显式指定 → .anet/nodes/<name>/config.json → .anet/profiles/<name>.json → .agent-node.json
 ```
 
-4. **anet start 旧节点**:
+4. **anet node start 旧节点**:
 ```
-anet start 指挥室
+anet node start 指挥室
   → 找 .anet/nodes/指挥室/config.json ← 旧目录名
   → 发现无 node_id → 自动补充
   → 正常启动
   → 下次 CommHub resume_id 稳定
 ```
 
-5. **anet rename 旧节点**:
+5. **anet node rename 旧节点**:
 ```
-anet rename 指挥室 总指挥
+anet node rename 指挥室 总指挥
   → 发现目录名=node_name（旧节点）
   → 自动补 node_id
   → rename 目录: .anet/nodes/指挥室/ → .anet/nodes/总指挥/（旧节点必须 rename 目录）
@@ -350,8 +344,8 @@ anet rename 指挥室 总指挥
 6. **不强制迁移目录名**:
 ```
 旧节点目录永远保持 node_name，不会自动 rename 成 node_id。
-只有 anet create 创建的新节点用 node_id 目录名。
-两种目录名共存，anet ls / anet start 都能识别。
+只有 `anet node create` 创建的新节点用 node_id 目录名。
+两种目录名共存，`anet node ls` / `anet node start` 都能识别。
 ```
 
 ### anet 识别 node 的逻辑
@@ -395,7 +389,7 @@ blocked → 超时 → error → idle（放弃任务）
 
 error → 自动重试（agent-node 内部）→ idle
 error → 重试失败 → report_status(error) → 等待人工干预
-error → anet stop → offline
+error → anet node stop → offline
 ```
 
 P0 不实现 blocked 状态上报，error 由 agent-node 内部处理后回到 idle。
@@ -409,7 +403,7 @@ P0 不实现 blocked 状态上报，error 由 agent-node 内部处理后回到 i
 | 3 | rename 必须 offline | 避免运行时状态不一致 |
 | 4 | delete 必须 offline + 二次确认 | 防误操作 |
 | 5 | 崩溃靠心跳超时检测 | 简单可靠 |
-| 6 | restart-all 是批量状态转换 | 不引入新状态 |
+| 6 | 批量恢复只是多次 start 状态转换 | 不引入新状态 |
 | 7 | 旧节点按需迁移，不强制 | 不破坏现有运行 |
 | 8 | 自动补 node_id | 无感迁移 |
 | 9 | 两种目录名共存 | 渐进演进 |

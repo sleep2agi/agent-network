@@ -8,7 +8,7 @@ Agent Network supports running agents with different AI models within the same n
 |------|---------|------|------|
 | **Claude Sonnet 4** | `claude-agent-sdk` | Best-in-class reasoning, long context | High |
 | **Claude Opus 4** | `claude-agent-sdk` | Complex tasks, creative writing | Very high |
-| **GPT-5.5** | `codex-sdk` | Strong code generation, tool use | Medium |
+| **Codex (gpt-5.4)** | `codex-sdk` | Strong code generation, tool use | Medium |
 | **MiniMax M2.7** | `claude-agent-sdk` | Low cost, high throughput | Very low |
 | **InternLM Intern-S1-Pro** | `claude-agent-sdk` | Domestic model, scientific reasoning | Low |
 | **DeepSeek** | `claude-agent-sdk` | Code + reasoning, excellent value | Low |
@@ -32,16 +32,16 @@ anet node start reasoning-master
 |---------|------|
 | (not needed) | Uses `claude auth login` credentials |
 
-### GPT-5.5 (codex-sdk)
+### Codex SDK (gpt-5.4)
 
-GPT-5.5 uses the OpenAI Codex SDK and requires an OpenAI account.
+Codex (gpt-5.4) uses the OpenAI Codex SDK and requires an OpenAI account.
 
 ```bash
 # Log in first
 codex auth login
 
 # Create and start a Codex agent
-anet node create code-assistant --runtime codex-sdk --model gpt-5.5 --tools Read,Write,Edit,Bash,Glob,Grep
+anet node create code-assistant --runtime codex-sdk --model gpt-5.4 --tools Read,Write,Edit,Bash,Glob,Grep
 anet node start code-assistant
 ```
 
@@ -115,7 +115,7 @@ graph LR
 
 ## Mixed Deployment in Practice
 
-A typical mixed deployment scenario: commander uses Codex, code tasks go to GPT-5.5, text tasks go to MiniMax.
+A typical mixed deployment scenario: commander uses Codex, code tasks go to Codex (gpt-5.4), text tasks go to MiniMax.
 
 ### docker-compose.yml
 
@@ -131,7 +131,7 @@ services:
     environment:
       - ALIAS=commander
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.5
+      - MODEL=gpt-5.4
       - COMMHUB_URL=http://server:9200
       - SYSTEM_PROMPT=You are the commander. Receive tasks and dispatch them. Route code tasks to the code team and text tasks to the writing team.
 
@@ -140,7 +140,7 @@ services:
     environment:
       - ALIAS=coder-1
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.5
+      - MODEL=gpt-5.4
       - COMMHUB_URL=http://server:9200
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
 
@@ -172,7 +172,7 @@ You are the commander. Receive messages and intelligently dispatch tasks:
 | Scenario | Recommended Model | Rationale |
 |------|---------|------|
 | Architecture design | Claude Opus | Best-in-class reasoning |
-| Code implementation | GPT-5.5 | Strong code + tool use |
+| Code implementation | Codex (gpt-5.4) | Strong code + tool use |
 | Code review | Claude Sonnet | High accuracy |
 | Translation / Summarization | MiniMax | Low cost, high throughput |
 | Data processing | MiniMax | Batch processing, low cost |
@@ -185,7 +185,7 @@ You are the commander. Receive messages and intelligently dispatch tasks:
 
 ```
 Complex tasks (10%) → Claude Opus ($15/M tokens)
-Medium tasks (30%)  → GPT-5.5 ($5/M tokens)
+Medium tasks (30%)  → Codex (gpt-5.4) ($5/M tokens)
 Simple tasks (60%)  → MiniMax ($0.3/M tokens)
 ```
 
