@@ -14,6 +14,8 @@ export default withMermaid(defineConfig({
           { text: '指南', link: '/guide/getting-started' },
           { text: 'API', link: '/api/mcp-tools' },
           { text: '案例 / Demo', link: '/cases/' },
+          { text: '生态', link: '/ecosystem' },
+          { text: '社群', link: '/community' },
         ],
         sidebar: [
           {
@@ -92,6 +94,8 @@ export default withMermaid(defineConfig({
           { text: 'Guide', link: '/en/guide/getting-started' },
           { text: 'API', link: '/en/api/mcp-tools' },
           { text: 'Examples / Demo', link: '/en/cases/' },
+          { text: 'Ecosystem', link: '/en/ecosystem' },
+          { text: 'Community', link: '/en/community' },
         ],
         sidebar: [
           {

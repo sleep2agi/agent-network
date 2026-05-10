@@ -226,6 +226,20 @@ Found a vulnerability? Please **don't** open a public issue. Use [GitHub Securit
 
 ---
 
+## Ecosystem
+
+Projects built on Agent Network or using anet to ship faster — full list at <https://anet.sh/ecosystem>.
+
+| Project | What it is |
+|---|---|
+| 🌀 [Agent Network](https://github.com/sleep2agi/agent-network) | This very project — **dogfood**: agent-network is developed using agent-network agents in mesh |
+| 📑 [PaperScope.ai](https://paperscope.ai) | Intelligent AI research paper discovery and explanation |
+| 📊 [AI Insight](https://ai-insight.org) | Daily AI industry intelligence — research reports + signal-rich aggregator |
+
+Using anet in your project? Open a PR to [`docs-site/docs/ecosystem.md`](./docs-site/docs/ecosystem.md) or post in [Discussions](https://github.com/sleep2agi/agent-network/discussions).
+
+---
+
 ## Resources
 
 - [anet.sh](https://anet.sh) — full documentation site

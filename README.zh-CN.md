@@ -220,6 +220,20 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 
 ---
 
+## 生态项目
+
+基于 Agent Network 构建 / 用 anet 提升生产力的项目 —— 完整列表 <https://anet.sh/ecosystem>。
+
+| 项目 | 是什么 |
+|---|---|
+| 🌀 [Agent Network](https://github.com/sleep2agi/agent-network) | 你正在看的这个项目本身 —— **dogfood**：agent-network 也是用 agent-network 开发的 |
+| 📑 [PaperScope.ai](https://paperscope.ai) | 智能 AI 论文发现与解读平台 |
+| 📊 [AI Insight](https://ai-insight.org) | 每日更新的 AI 行业研报与高信噪比资讯聚合 |
+
+你的项目用了 anet？提个 PR 到 [`docs-site/docs/ecosystem.md`](./docs-site/docs/ecosystem.md) 或发到 [Discussions](https://github.com/sleep2agi/agent-network/discussions)。
+
+---
+
 ## 资源
 
 - [anet.sh](https://anet.sh) —— 完整文档站
