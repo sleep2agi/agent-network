@@ -1,5 +1,8 @@
 # Agent Network
 
+<img width="1774" height="887" alt="image" src="https://github.com/user-attachments/assets/6bdaaa9e-969d-410c-8b48-57355e16454f" />
+
+
 Local-first multi-agent collaboration. One npm package, one local hub, a Web Dashboard, and as many agents as you want — all on your own machine, optionally shared across a LAN.
 
 **Current preview line** — the published packages are on the v2/v3 preview track. The local CLI + hub + dashboard + agent-node flow is supported; production hosting and a paid tier remain outside the supported path.
