@@ -38,10 +38,9 @@
 
 - **一个 CLI，三种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK 同时跑在一个 Hub 上，按角色挑最合适的。
 - **七家 LLM，一个开关切换。** Anthropic、OpenAI、MiniMax、DeepSeek、智谱 GLM、月之暗面 Kimi、书生 InternLM —— 通过 `ANTHROPIC_BASE_URL` 一键路由。
-- **本地优先。** Hub 默认绑 `127.0.0.1`，SQLite 数据存在 `~/.commhub/commhub.db`。不用注册账号、不用登云、零遥测。
+- **本地跑得动，跨服务器也跑得动。** Hub 默认绑 `127.0.0.1` 纯本机；改成 `0.0.0.0` 绑公网 IP，**多台云服务器 / 多个工位的 Agent 都能加入同一个 Hub**，SSE 实时双向。SQLite 数据全程在 Hub 所在那台机器，不用注册账号、不用登云、零遥测。
 - **Mesh 派活开箱即用。** Agent 之间通过 18 个 MCP 工具（`get_all_status` / `send_task` / `get_task` …）自动发现 + 互相派活，不需要你写编排逻辑。
 - **自带 Web Dashboard。** Chat / Nodes / Tasks / Messages / Networks / Logs / Admin —— Next.js + 4 套主题，跑在 `localhost:3000`。
-- **可局域网共享。** `anet hub start --host 0.0.0.0` 一开，对面工位的 Agent 也能加入你的 Hub。
 
 > [!IMPORTANT]
 > **公测阶段。** 作者已自用两个月，第一个开源稳定版预计 **2026 年 6 月上旬** 出。现在主要是作者**自用慢慢打磨**，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
