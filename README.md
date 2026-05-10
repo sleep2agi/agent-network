@@ -24,7 +24,8 @@
   <strong><a href="https://anet.sh">📖 文档 / Docs</a></strong> ·
   <strong><a href="https://www.npmjs.com/org/sleep2agi">📦 NPM</a></strong> ·
   <strong><a href="https://github.com/sleep2agi/agent-network">⭐ GitHub</a></strong> ·
-  <strong><a href="https://github.com/sleep2agi/agent-network/discussions">💬 Discussions</a></strong>
+  <strong><a href="https://github.com/sleep2agi/agent-network/discussions">💬 Discussions</a></strong> ·
+  <strong><a href="https://anet.sh/community">💚 微信群 / WeChat</a></strong>
 </p>
 
 <p align="center">
