@@ -13,7 +13,7 @@
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync } from "fs";
 import { join } from "path";
 import { spawn, execSync } from "child_process";
-import { createHash, randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 
 const args = process.argv.slice(2);
@@ -617,7 +617,7 @@ Setup:
   anet init                     Configure hub URL (global)
   anet init project             Setup project (channel plugin)
   anet setup                    Install runtime dependencies
-  anet hub start                 Start CommHub Server + default account
+  anet hub start                 Start CommHub Server + admin bootstrap
   anet hub dashboard             Start Web Dashboard
   anet hub config                Show/set server config
   anet upgrade                  Check for updates
@@ -1876,12 +1876,17 @@ async function serverCommand() {
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    // Try to register a default account so anyone (this machine or remote)
-    // has a known way in. Idempotent: "already taken" is treated as success.
-    // We DO NOT log in here — that's the user's responsibility (avoids token rotation
-    // out-of-sync with config.json).
-    const defaultUser = opts.username || opts.user || "admin";
-    const defaultPass = opts.password || opts.pass || "anethub";
+    // Bootstrap an admin account without shipping default credentials.
+    // Interactive users may enter credentials; non-interactive runs get a
+    // one-time random password printed in this banner only.
+    let defaultUser = opts.username || opts.user || "";
+    let defaultPass = opts.password || opts.pass || "";
+    if ((!defaultUser || !defaultPass) && process.stdin.isTTY) {
+      if (!defaultUser) defaultUser = await ask("Admin username");
+      if (!defaultPass) defaultPass = await ask("Admin password (leave blank to generate)");
+    }
+    if (!defaultUser) defaultUser = `admin_${randomBytes(3).toString("hex")}`;
+    if (!defaultPass) defaultPass = randomBytes(12).toString("base64url");
     let defaultAccountReady = false;
     try {
       const reg = await fetch(`${hubUrl}/api/auth/register`, {
@@ -1891,15 +1896,18 @@ async function serverCommand() {
       }).then(r => r.json() as any);
       if (reg.ok) {
         defaultAccountReady = true;
-        console.log(`  ✅ Default account created: ${defaultUser} / ${defaultPass}`);
+        console.log(`  ✅ Admin account created`);
+        console.log(`     username: ${defaultUser}`);
+        console.log(`     password: ${defaultPass}`);
+        console.log(`     Store this password now; it will not be shown again.`);
       } else if (reg.error?.includes("already taken")) {
         defaultAccountReady = true;
-        console.log(`  ℹ  Default account "${defaultUser}" already exists`);
+        console.log(`  ℹ  Admin account "${defaultUser}" already exists`);
       } else {
-        console.log(`  ⚠  Could not create default account: ${reg.error}`);
+        console.log(`  ⚠  Could not bootstrap admin account: ${reg.error}`);
       }
     } catch (e: any) {
-      console.log(`  ⚠  Default account creation skipped: ${e.message}`);
+      console.log(`  ⚠  Admin account bootstrap skipped: ${e.message}`);
     }
 
     // Verify existing user token (if any) is still valid; if not, drop it so the
@@ -2025,7 +2033,7 @@ async function serverCommand() {
     console.log(`
 anet hub <command>
 
-  start [options]    Start CommHub Server (creates default account; login separately)
+  start [options]    Start CommHub Server (bootstraps admin account; login separately)
   dashboard          Start Dashboard UI
   config [options]   Show/set server config
 
@@ -2036,11 +2044,11 @@ Options:
 
 Options:
   --port <port>      Port (default: 9200 for server, 3000 for dashboard)
-  --username <user>  Default username (default: admin)
-  --password <pass>  Default password (default: anethub)
+  --username <user>  Bootstrap admin username
+  --password <pass>  Bootstrap admin password (random if omitted)
 
 Example:
-  anet hub start                     # Start server + create default account
+  anet hub start                     # Start server + bootstrap admin account
   anet hub dashboard                 # Start Dashboard UI
   anet hub start --host 0.0.0.0      # Allow LAN agents
   anet hub start --port 8080         # Custom port

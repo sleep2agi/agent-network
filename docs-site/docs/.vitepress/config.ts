@@ -55,6 +55,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Docker 部署', link: '/deploy/docker' },
               { text: 'npm 部署', link: '/deploy/npm' },
+              { text: '生产部署 / 公网部署安全', link: '/deploy/production' },
             ]
           },
           {
@@ -134,6 +135,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Docker', link: '/en/deploy/docker' },
               { text: 'npm', link: '/en/deploy/npm' },
+              { text: 'Production / Public Internet', link: '/en/deploy/production' },
             ]
           },
           {

@@ -15,23 +15,24 @@ function ts(): string {
 }
 
 /** 创建 SSE Response 并注册到 clients map */
-export function createSSEStream(sessionName: string): Response {
+export function createSSEStream(sessionName: string, networkId?: string | null): Response {
   const encoder = new TextEncoder();
   let ctrl: ReadableStreamDefaultController;
+  const key = clientKey(sessionName, networkId);
 
   const stream = new ReadableStream({
     start(controller) {
       ctrl = controller;
       const client: SSEClient = { controller, encoder };
 
-      if (!clients.has(sessionName)) {
-        clients.set(sessionName, []);
+      if (!clients.has(key)) {
+        clients.set(key, []);
       }
-      clients.get(sessionName)!.push(client);
-      console.log(`[${ts()}] SSE ← ${sessionName} connected (${clients.get(sessionName)!.length} clients)`);
+      clients.get(key)!.push(client);
+      console.log(`[${ts()}] SSE ← ${key} connected (${clients.get(key)!.length} clients)`);
 
       // 发送初始心跳
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "connected", session: sessionName })}\n\n`));
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "connected", session: sessionName, network_id: networkId ?? null })}\n\n`));
 
       // Periodic keepalive every 30s to prevent proxy/LB idle timeout
       const keepalive = setInterval(() => {
@@ -45,15 +46,15 @@ export function createSSEStream(sessionName: string): Response {
     },
     cancel() {
       // 断线清理
-      const arr = clients.get(sessionName);
+      const arr = clients.get(key);
       if (arr) {
         const idx = arr.findIndex(c => c.controller === ctrl);
         if (idx !== -1) {
           clearInterval((arr[idx] as any)._keepalive);
           arr.splice(idx, 1);
         }
-        if (arr.length === 0) clients.delete(sessionName);
-        console.log(`[${ts()}] SSE ✕ ${sessionName} disconnected (${arr.length} remaining)`);
+        if (arr.length === 0) clients.delete(key);
+        console.log(`[${ts()}] SSE ✕ ${key} disconnected (${arr.length} remaining)`);
       }
     },
   });
@@ -67,9 +68,13 @@ export function createSSEStream(sessionName: string): Response {
   });
 }
 
+function clientKey(sessionName: string, networkId?: string | null): string {
+  return `${networkId || "global"}:${sessionName}`;
+}
+
 /** 推送事件给指定 session 的所有 SSE 连接 */
-export function pushEvent(sessionName: string, event: Record<string, unknown>): void {
-  const arr = clients.get(sessionName);
+export function pushEvent(sessionName: string, event: Record<string, unknown>, networkId?: string | null): void {
+  const arr = clients.get(clientKey(sessionName, networkId ?? (event.network_id as string | null | undefined)));
   if (!arr || arr.length === 0) return;
 
   const data = `data: ${JSON.stringify(event)}\n\n`;
@@ -87,14 +92,7 @@ export function pushEvent(sessionName: string, event: Record<string, unknown>): 
   for (let i = dead.length - 1; i >= 0; i--) {
     arr.splice(dead[i], 1);
   }
-  if (arr.length === 0) clients.delete(sessionName);
-}
-
-/** 广播给多个 session */
-export function pushBroadcast(sessionNames: string[], event: Record<string, unknown>): void {
-  for (const name of sessionNames) {
-    pushEvent(name, event);
-  }
+  if (arr.length === 0) clients.delete(clientKey(sessionName, networkId ?? (event.network_id as string | null | undefined)));
 }
 
 /** 获取当前 SSE 连接统计 */

@@ -3,12 +3,26 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
-import { createSSEStream, pushEvent, pushBroadcast, getSSEStats } from "./push.js";
+import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 
 const PORT = Number(process.env.PORT) || 9200;
-const HOST = process.env.HOST || "0.0.0.0";
+const HOST = process.env.HOST || "127.0.0.1";
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
+const DEV_OPEN = process.argv.includes("--dev-open") || process.env.COMMHUB_DEV_OPEN === "1";
+const TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1";
+const SECURITY_LABEL = AUTH_TOKEN ? "🔒 secured" : "⚠️ DEV OPEN MODE";
+const TMUX_ALLOWLIST = new Set(
+  (process.env.COMMHUB_TMUX_ALLOWLIST || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+
+if (!AUTH_TOKEN && !DEV_OPEN) {
+  console.error("[commhub] refusing to start without COMMHUB_AUTH_TOKEN. Use --dev-open or COMMHUB_DEV_OPEN=1 for local-only development.");
+  process.exit(1);
+}
 
 // Read version from package.json so banners and /health stay in sync.
 const SERVER_VERSION = (() => {
@@ -70,10 +84,19 @@ function createServer(clientIP?: string, enforceNetworkId?: string | null, enfor
 }
 
 // ── Auth helper ─────────────────────────────────────
-function requireAuth(req: Request): Response | null {
+function requestToken(req: Request): string {
   const header = req.headers.get("Authorization")?.replace("Bearer ", "");
   const url = new URL(req.url);
-  const token = header || url.searchParams.get("token") || "";
+  return header || url.searchParams.get("token") || "";
+}
+
+function isLegacyAuthToken(req: Request): boolean {
+  const token = requestToken(req);
+  return !!AUTH_TOKEN && token === AUTH_TOKEN;
+}
+
+function requireAuth(req: Request): Response | null {
+  const token = requestToken(req);
 
   // V3: check api_tokens first
   if (token) {
@@ -82,17 +105,46 @@ function requireAuth(req: Request): Response | null {
   }
 
   // Legacy: check global COMMHUB_AUTH_TOKEN
-  if (!AUTH_TOKEN) return null; // no token = open mode (dev)
+  if (!AUTH_TOKEN && DEV_OPEN) return null; // explicit local/dev open mode
   if (token === AUTH_TOKEN) return null;
 
   return Response.json({ error: "unauthorized" }, { status: 401 });
 }
 
+function getClientIP(req: Request, server?: any): string {
+  const direct = server?.requestIP?.(req)?.address;
+  if (direct) return direct;
+  const fwd = req.headers.get("x-forwarded-for");
+  return fwd ? fwd.split(",")[0].trim() : (req.headers.get("x-real-ip") ?? "unknown");
+}
+
+function isLocalhostIP(ip: string): boolean {
+  return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip === "localhost";
+}
+
+function isTmuxAllowedIP(ip: string): boolean {
+  return isLocalhostIP(ip) || TMUX_ALLOWLIST.has(ip);
+}
+
+function requireAdminAuth(req: Request): Response | null {
+  const token = requestToken(req);
+  if (!token) return Response.json({ ok: false, error: "auth required" }, { status: 401 });
+  const resolved = resolveToken(token);
+  if (!resolved) return Response.json({ ok: false, error: "invalid token" }, { status: 401 });
+  if (resolved.user.role !== "admin") return Response.json({ ok: false, error: "admin required" }, { status: 403 });
+  return null;
+}
+
+function requireTmuxAccess(req: Request, server?: any): Response | null {
+  if (!TMUX_ENABLED) return Response.json({ ok: false, error: "tmux disabled" }, { status: 404 });
+  const ip = getClientIP(req, server);
+  if (!isTmuxAllowedIP(ip)) return Response.json({ ok: false, error: "tmux access denied from this ip" }, { status: 403 });
+  return requireAdminAuth(req);
+}
+
 // Extract user + network + token-binding identity from request token.
 function resolveRequestAuth(req: Request): { userId: string; networkId: string | null; username: string; tokenName: string | null } | null {
-  const header = req.headers.get("Authorization")?.replace("Bearer ", "");
-  const url = new URL(req.url);
-  const token = header || url.searchParams.get("token") || "";
+  const token = requestToken(req);
   if (!token) return null;
   const resolved = resolveToken(token);
   if (!resolved) return null;
@@ -243,17 +295,16 @@ Bun.serve({
     // ── WebSocket: tmux terminal ──
     const wsMatch = url.pathname.match(/^\/ws\/tmux\/([a-zA-Z0-9_-]+)$/);
     if (wsMatch) {
-      const authErr = requireAuth(req);
-      if (authErr) return withCors(req, authErr);
-      if (server.upgrade(req, { data: { tmuxName: wsMatch[1] } })) return;
+      const tmuxErr = requireTmuxAccess(req, server);
+      if (tmuxErr) return withCors(req, tmuxErr);
+      if (server.upgrade(req, { data: { tmuxName: wsMatch[1] } } as any)) return;
     }
 
     // ── MCP Streamable HTTP endpoint ──
     if (url.pathname === "/mcp") {
       const authErr = requireAuth(req);
       if (authErr) return withCors(req, authErr);
-      const fwd = req.headers.get("x-forwarded-for");
-      const clientIP = fwd ? fwd.split(",")[0].trim() : (req.headers.get("x-real-ip") ?? "unknown");
+      const clientIP = getClientIP(req, server);
       // V3: resolve token → enforce network_id in all MCP tools.
       // utok_ (user token, not network-bound) is allowed — the tool layer
       // scopes to the user's accessible networks. Without this Dashboard
@@ -268,11 +319,11 @@ Bun.serve({
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      const server = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias);
-      await server.connect(transport);
+      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias);
+      await mcpServer.connect(transport);
       const response = await transport.handleRequest(req);
       // Disconnect after response to prevent McpServer leak
-      setImmediate(() => server.close().catch(() => {}));
+      setImmediate(() => mcpServer.close().catch(() => {}));
       return response;
     }
 
@@ -283,7 +334,31 @@ Bun.serve({
       const authErr = requireAuth(req);
       if (authErr) return authErr;
       const sessionName = decodeURIComponent(eventsMatch[1]);
-      return createSSEStream(sessionName);
+      const authCtx = resolveRequestAuth(req);
+      const scopedNetId = authCtx?.networkId || url.searchParams.get("network_id");
+      if (!authCtx && isLegacyAuthToken(req)) {
+        if (scopedNetId) {
+          const session = db.get<any>(
+            "SELECT 1 FROM sessions WHERE alias = ?1 AND network_id = ?2",
+            sessionName, scopedNetId
+          );
+          if (!session) return withCors(req, Response.json({ ok: false, error: "session not in requested network" }, { status: 403 }));
+        }
+        return createSSEStream(sessionName, scopedNetId);
+      }
+      if (!authCtx || !scopedNetId) {
+        return withCors(req, Response.json({ ok: false, error: "network-scoped token required for SSE" }, { status: 403 }));
+      }
+      const role = getUserNetworkRole(authCtx.userId, scopedNetId);
+      if (!role) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      const session = db.get<any>(
+        "SELECT 1 FROM sessions WHERE alias = ?1 AND network_id = ?2",
+        sessionName, scopedNetId
+      );
+      if (!session && authCtx.networkId !== scopedNetId) {
+        return withCors(req, Response.json({ ok: false, error: "session not in requested network" }, { status: 403 }));
+      }
+      return createSSEStream(sessionName, scopedNetId);
     }
 
     // ── V3: License endpoints ──
@@ -343,14 +418,14 @@ Bun.serve({
     if (url.pathname === "/api/auth/login" && req.method === "POST") {
       const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
       if (!checkRateLimit(clientIP, 10)) {
-        logAudit(null, null, "login_rate_limited", "auth", null, clientIP);
+        logAudit(null, null, "login_rate_limited", "auth", undefined, clientIP);
         return withCors(req, Response.json({ ok: false, error: "too many attempts, try again later" }, { status: 429 }));
       }
       try {
         const body = await req.json() as any;
         const result = login(body.username, body.password);
         if (result.ok) logAudit(result.user!.user_id, body.username, "login", "user", result.user!.user_id);
-        else logAudit(null, body.username, "login_failed", "user", null, "invalid credentials");
+        else logAudit(null, body.username, "login_failed", "user", undefined, "invalid credentials");
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 401 }));
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
@@ -631,7 +706,9 @@ Bun.serve({
         sessions_count: count?.cnt ?? 0,
         sse_connections: sse.total,
         sse_sessions: sse.sessions,
-        auth: AUTH_TOKEN ? "enabled" : "disabled",
+        auth: AUTH_TOKEN ? "enabled" : "dev-open",
+        security: AUTH_TOKEN ? "secured" : "dev-open",
+        tmux: TMUX_ENABLED ? "enabled" : "disabled",
         v3_auth: true,
         multi_network: true,
         license: license?.type || "none",
@@ -734,7 +811,7 @@ Bun.serve({
       let sessionSql = "SELECT 1 FROM sessions WHERE alias = ?1";
       if (taskNetId) { sessionSql += " AND network_id = ?2"; sessionParams.push(taskNetId); }
       const targetSession = db.get<any>(sessionSql, ...sessionParams);
-      if (targetSession) pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession });
+      if (targetSession) pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession }, taskNetId);
       return withCors(req, Response.json({ ok: true, message_id: id }));
     }
 
@@ -773,13 +850,17 @@ Bun.serve({
         );
         ids.push(id);
       }
-      pushBroadcast(targets.map(t => t.alias), { type: "broadcast", inbox_count: 1, message: body.message.slice(0, 200) });
+      for (const t of targets) {
+        pushEvent(t.alias, { type: "broadcast", inbox_count: 1 }, t.network_id);
+      }
       return withCors(req, Response.json({ ok: true, recipients: targets.length, message_ids: ids }));
     }
 
     // ── REST: tmux capture-pane ──
     const tmuxCapture = url.pathname.match(/^\/api\/tmux\/([a-zA-Z0-9_-]+)$/);
     if (tmuxCapture && req.method === "GET") {
+      const tmuxErr = requireTmuxAccess(req, server);
+      if (tmuxErr) return withCors(req, tmuxErr);
       const name = tmuxCapture[1];
       const lines = Number(url.searchParams.get("lines")) || 30;
       try {
@@ -802,6 +883,8 @@ Bun.serve({
     // ── REST: tmux send-keys ──
     const tmuxSend = url.pathname.match(/^\/api\/tmux\/([a-zA-Z0-9_-]+)\/send$/);
     if (tmuxSend && req.method === "POST") {
+      const tmuxErr = requireTmuxAccess(req, server);
+      if (tmuxErr) return withCors(req, tmuxErr);
       const name = tmuxSend[1];
       let body: { text?: string; enter?: boolean };
       try { body = await req.json(); } catch {
@@ -988,14 +1071,14 @@ Endpoints:
   POST /mcp               - MCP Streamable HTTP (for Claude Code / Codex)
   GET  /events/:session   - SSE realtime push (Agent subscribes here)
   GET  /health            - Health check
-  GET  /api/status        - All sessions ${AUTH_TOKEN ? "(auth required)" : ""}
-  POST /api/task          - Send task via REST ${AUTH_TOKEN ? "(auth required)" : ""}
-  GET  /api/tasks         - Tasks table (V2) ${AUTH_TOKEN ? "(auth required)" : ""}
-  GET  /api/completions   - Recent completions ${AUTH_TOKEN ? "(auth required)" : ""}
-  GET  /api/tmux/:name    - Capture tmux pane output ${AUTH_TOKEN ? "(auth required)" : ""}
-  POST /api/tmux/:name/send - Send keys to tmux ${AUTH_TOKEN ? "(auth required)" : ""}
+  GET  /api/status        - All sessions (auth required)
+  POST /api/task          - Send task via REST (auth required)
+  GET  /api/tasks         - Tasks table (V2) (auth required)
+  GET  /api/completions   - Recent completions (auth required)
+  GET  /api/tmux/:name    - Capture tmux pane output (${TMUX_ENABLED ? "admin + localhost/allowlist required" : "disabled"})
+  POST /api/tmux/:name/send - Send keys to tmux (${TMUX_ENABLED ? "admin + localhost/allowlist required" : "disabled"})
 
-Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMHUB_AUTH_TOKEN)" : "disabled (set COMMHUB_AUTH_TOKEN to enable)"}
+Security: ${SECURITY_LABEL}
 `,
       { status: 200, headers: { "Content-Type": "text/plain" } }
     ));
@@ -1004,7 +1087,7 @@ Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMHUB_AUTH_TOKEN)" : "disabled
   // ── WebSocket handler for tmux terminal streaming ──
   websocket: {
     open(ws) {
-      const { tmuxName } = ws.data as { tmuxName: string };
+      const { tmuxName } = ws.data as unknown as { tmuxName: string };
       console.log(`[ws] tmux terminal opened: ${tmuxName}`);
       let lastOutput = "";
 
@@ -1049,7 +1132,7 @@ Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMHUB_AUTH_TOKEN)" : "disabled
     },
 
     async message(ws, message) {
-      const { tmuxName } = ws.data as { tmuxName: string };
+      const { tmuxName } = ws.data as unknown as { tmuxName: string };
       try {
         const msg = JSON.parse(typeof message === "string" ? message : new TextDecoder().decode(message));
 
@@ -1075,7 +1158,7 @@ Auth: ${AUTH_TOKEN ? "Bearer token enabled (set COMMHUB_AUTH_TOKEN)" : "disabled
     },
 
     close(ws) {
-      const { tmuxName } = ws.data as { tmuxName: string };
+      const { tmuxName } = ws.data as unknown as { tmuxName: string };
       console.log(`[ws] tmux terminal closed: ${tmuxName}`);
       const interval = wsTmuxIntervals.get(ws);
       if (interval) { clearInterval(interval); wsTmuxIntervals.delete(ws); }
@@ -1096,7 +1179,8 @@ console.log(`
 ╔══════════════════════════════════════════════════╗
 ║   CommHub MCP Server v${SERVER_VERSION}                     ║
 ║   Transport: Streamable HTTP (Bun native)         ║
-║   Auth: ${AUTH_TOKEN ? "ENABLED (Bearer token)" : "DISABLED (set COMMHUB_AUTH_TOKEN)"}${"".padEnd(AUTH_TOKEN ? 5 : 0)}║
+║   Security: ${SECURITY_LABEL}${" ".repeat(Math.max(0, 33 - SECURITY_LABEL.length))}║
+║   Tmux: ${TMUX_ENABLED ? "ENABLED (admin + localhost/allowlist)" : "DISABLED (set COMMHUB_ENABLE_TMUX=1)"}${" ".repeat(Math.max(0, TMUX_ENABLED ? 0 : 2))}║
 ║                                                   ║
 ║   MCP:    http://${HOST}:${PORT}/mcp                 ║
 ║   REST:   http://${HOST}:${PORT}/api                 ║

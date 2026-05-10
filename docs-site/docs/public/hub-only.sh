@@ -44,10 +44,12 @@ COMMANDER_RUNTIME="${COMMANDER_RUNTIME:-http}"  # http (~80MB) | claude-agent-sd
 
 # === Root 阶段: 系统级配置 + 切非 root 用户 ===
 if [ "$(id -u)" -eq 0 ]; then
-  echo "[root 1/4] 建 $USERNAME 用户 + sudoers NOPASSWD..."
+  echo "[root 1/4] 建 $USERNAME 用户 (不给 sudo, 安全默认)..."
   id "$USERNAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USERNAME"
-  echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$USERNAME"
-  chmod 440 "/etc/sudoers.d/$USERNAME"
+  # anet 用户跑 hub / dashboard / agent / systemd --user / tmux 都不需要 sudo,
+  # 所以默认不给 NOPASSWD sudo (R6 安全风险). 升级 npm 包用 ~/.npm-global, 重启服务用 systemd --user.
+  # 已经存在的 sudoers.d/$USERNAME (老脚本残留) 一并清掉.
+  rm -f "/etc/sudoers.d/$USERNAME" 2>/dev/null || true
 
   echo "[root 2/4] 加 ${SWAP_SIZE_GB}G swap (防 OOM)..."
   if ! swapon --show 2>/dev/null | grep -q '/swapfile'; then

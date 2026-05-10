@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { db, uuidv4, logTaskEvent, chainReplyToParent } from "./db.js";
-import { pushEvent, pushBroadcast } from "./push.js";
+import { pushEvent } from "./push.js";
 import { getUserNetworkRole } from "./auth.js";
 
 function ts(): string {
@@ -33,6 +33,44 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     if (!networkId) return sql;
     sql += ` AND ${column} = ?${params.length + 1}`;
     params.push(networkId);
+    return sql;
+  };
+
+  type ReadScope = { networkId?: string | null; networkIds?: string[] | null; denied?: string };
+
+  const getReadableNetworkIds = (): string[] => {
+    if (!enforceUserId) return [];
+    return db.all<{ network_id: string }>(
+      "SELECT network_id FROM network_members WHERE user_id = ?1",
+      enforceUserId
+    ).map((row) => row.network_id);
+  };
+
+  const resolveReadScope = (clientNetId?: string | null): ReadScope => {
+    if (!enforceUserId) return { networkId: clientNetId ?? null, networkIds: null };
+    if (enforceNetworkId) {
+      const role = getUserNetworkRole(enforceUserId, enforceNetworkId);
+      return role ? { networkId: enforceNetworkId, networkIds: null } : { denied: "not a member of token network" };
+    }
+    if (clientNetId) {
+      const role = getUserNetworkRole(enforceUserId, clientNetId);
+      return role ? { networkId: clientNetId, networkIds: null } : { denied: "access denied to requested network" };
+    }
+    return { networkId: null, networkIds: getReadableNetworkIds() };
+  };
+
+  const addReadScope = (sql: string, params: any[], scope: ReadScope, column = "network_id"): string => {
+    if (scope.networkId) {
+      sql += ` AND ${column} = ?${params.length + 1}`;
+      params.push(scope.networkId);
+      return sql;
+    }
+    if (scope.networkIds) {
+      if (scope.networkIds.length === 0) return `${sql} AND 1=0`;
+      const placeholders = scope.networkIds.map((_, i) => `?${params.length + i + 1}`).join(", ");
+      sql += ` AND ${column} IN (${placeholders})`;
+      params.push(...scope.networkIds);
+    }
     return sql;
   };
 
@@ -244,7 +282,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               [parentChain.parent_task_id]
             );
             if (parent?.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
-              pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: updatedTaskId, child_alias: alias });
+              pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: updatedTaskId, child_alias: alias }, effectiveNetId);
             }
           }
         } catch (e: any) {
@@ -266,16 +304,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       limit: z.number().min(1).max(100).optional().default(10),
     },
     async ({ alias, limit }) => {
-      const effectiveNetId = getNetworkId(null);
+      const readScope = resolveReadScope(null);
+      if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       const countParams: any[] = [alias];
       let countSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
-      countSql = addScope(countSql, countParams, effectiveNetId);
+      countSql = addReadScope(countSql, countParams, readScope);
       const rows0 = db.get<{ cnt: number }>(countSql, ...countParams);
       console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
       const rowsParams: any[] = [alias];
       let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id
          FROM inbox WHERE session_name = ?1 AND acked = 0`;
-      rowsSql = addScope(rowsSql, rowsParams, effectiveNetId);
+      rowsSql = addReadScope(rowsSql, rowsParams, readScope);
       rowsSql += ` ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
          LIMIT ?${rowsParams.length + 1}`;
       rowsParams.push(limit);
@@ -335,19 +374,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional().describe("Filter by network"),
     },
     async ({ filter_status, filter_server, network_id: netId }) => {
-      const effectiveNetId = getNetworkId(netId);
-      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${effectiveNetId ? " net=" + effectiveNetId.slice(0, 12) : ""}`);
+      const readScope = resolveReadScope(netId);
+      if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
+      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${readScope.networkId ? " net=" + readScope.networkId.slice(0, 12) : ""}`);
 
       const sessions = db.transaction(() => {
         const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
         const staleParams: any[] = [cutoff];
         let staleSql = "UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'";
-        staleSql = addScope(staleSql, staleParams, effectiveNetId);
+        staleSql = addReadScope(staleSql, staleParams, readScope);
         db.run(staleSql, staleParams);
 
         let sql = "SELECT * FROM sessions WHERE 1=1";
         const params: any[] = [];
-        if (effectiveNetId) { sql += " AND network_id = ?"; params.push(effectiveNetId); }
+        sql = addReadScope(sql, params, readScope);
         if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
         if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
         sql += " ORDER BY updated_at DESC";
@@ -356,7 +396,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const summaryParams: any[] = [];
       let summarySql = "SELECT status, COUNT(*) as count FROM sessions WHERE 1=1";
-      summarySql = addScope(summarySql, summaryParams, effectiveNetId);
+      summarySql = addReadScope(summarySql, summaryParams, readScope);
       summarySql += " GROUP BY status";
       const summary = db.all(summarySql, ...summaryParams);
 
@@ -376,21 +416,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Get detailed status of a specific session by alias.",
     { alias: z.string().min(1).max(200).describe("Session alias") },
     async ({ alias }) => {
-      const effectiveNetId = getNetworkId(null);
+      const readScope = resolveReadScope(null);
+      if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       console.log(`[${ts()}] hub → get_session_status: ${alias}`);
       const sessionParams: any[] = [alias];
       let sessionSql = "SELECT * FROM sessions WHERE alias = ?1";
-      sessionSql = addScope(sessionSql, sessionParams, effectiveNetId);
+      sessionSql = addReadScope(sessionSql, sessionParams, readScope);
       const session = db.get(sessionSql, ...sessionParams);
 
       const pendingParams: any[] = [alias];
       let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
-      pendingSql = addScope(pendingSql, pendingParams, effectiveNetId);
+      pendingSql = addReadScope(pendingSql, pendingParams, readScope);
       const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
 
       const recentParams: any[] = [alias];
       let recentSql = "SELECT * FROM completions WHERE session_name = ?1";
-      recentSql = addScope(recentSql, recentParams, effectiveNetId);
+      recentSql = addReadScope(recentSql, recentParams, readScope);
       recentSql += " ORDER BY completed_at DESC LIMIT 5";
       const recent = db.all(recentSql, ...recentParams);
 
@@ -488,7 +529,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
       pendingSql = addScope(pendingSql, pendingParams, effectiveNetId);
       const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
-      pushEvent(alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session });
+      pushEvent(alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session }, effectiveNetId);
 
       return {
         content: [
@@ -526,7 +567,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const session = scopedSessionStatus(alias, effectiveNetId);
 
-      pushEvent(alias, { type: "new_message", message, from: from_session, message_id: id });
+      pushEvent(alias, { type: "new_message", from: from_session, message_id: id }, effectiveNetId);
 
       return {
         content: [
@@ -601,7 +642,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               [parentChain.parent_task_id]
             );
             if (parent?.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
-              pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: in_reply_to, child_alias: alias });
+              pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: in_reply_to, child_alias: alias }, effectiveNetId);
             }
           }
         } catch (e: any) {
@@ -610,7 +651,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       const session = scopedSessionStatus(alias, effectiveNetId);
-      pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus });
+      pushEvent(alias, { type: "new_reply", from: from_session, message_id: id, in_reply_to, status: replyStatus }, effectiveNetId);
 
       return {
         content: [{
@@ -687,7 +728,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
       // SSE push (unconditional — channel is keyed by alias, not network)
-      pushEvent(task.to_name, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
+      pushEvent(task.to_name, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session }, effectiveNetId ?? task.network_id ?? null);
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, retried_to: task.to_name }) }],
       };
@@ -702,10 +743,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to query"),
     },
     async ({ task_id }) => {
-      const effectiveNetId = getNetworkId(null);
+      const readScope = resolveReadScope(null);
+      if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       const params: any[] = [task_id];
       let sql = "SELECT * FROM tasks WHERE task_id = ?1";
-      sql = addScope(sql, params, effectiveNetId);
+      sql = addReadScope(sql, params, readScope);
       const task = db.get<any>(sql, ...params);
       return {
         content: [{
@@ -728,10 +770,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       limit: z.number().min(1).max(100).optional().default(20),
     },
     async ({ alias, status, from_name, network_id: netId, limit }) => {
-      const effectiveNetId = getNetworkId(netId);
+      const readScope = resolveReadScope(netId);
+      if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       let sql = "SELECT task_id, from_name, to_name, priority, status, content, result, created_at, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
-      if (effectiveNetId) { sql += ` AND network_id = ?${params.length + 1}`; params.push(effectiveNetId); }
+      sql = addReadScope(sql, params, readScope);
       if (alias) { sql += ` AND to_name = ?${params.length + 1}`; params.push(alias); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
@@ -742,7 +785,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Stats
       const statsParams: any[] = [];
       let statsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
-      statsSql = addScope(statsSql, statsParams, effectiveNetId);
+      statsSql = addReadScope(statsSql, statsParams, readScope);
       statsSql += " GROUP BY status";
       const stats = db.all(statsSql, ...statsParams);
 
@@ -826,7 +869,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           [newInboxId, new_alias, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]);
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${new_alias}`);
-      pushEvent(new_alias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session });
+      pushEvent(new_alias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session }, effectiveNetId ?? task.network_id ?? null);
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: new_alias }) }] };
     }
   );
@@ -863,7 +906,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         ids.push(id);
       }
 
-      pushBroadcast(targets.map(t => t.alias), { type: "broadcast", inbox_count: 1, message: message.slice(0, 200) });
+      for (const t of targets) {
+        pushEvent(t.alias, { type: "broadcast", inbox_count: 1 }, effectiveNetId ?? t.network_id ?? null);
+      }
 
       return {
         content: [
@@ -886,12 +931,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       limit: z.number().min(1).max(500).optional().default(50),
     },
     async ({ since, alias, network_id: netId, limit }) => {
-      const effectiveNetId = getNetworkId(netId);
+      const readScope = resolveReadScope(netId);
+      if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       console.log(`[${ts()}] hub → get_completions${alias ? ": " + alias : ""}`);
       const cutoff = since ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       let sql = "SELECT * FROM completions WHERE completed_at >= ?1";
       const params: any[] = [cutoff];
-      sql = addScope(sql, params, effectiveNetId);
+      sql = addReadScope(sql, params, readScope);
 
       if (alias) {
         sql += ` AND session_name = ?${params.length + 1}`;
