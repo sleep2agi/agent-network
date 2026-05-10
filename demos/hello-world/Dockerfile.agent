@@ -1,0 +1,9 @@
+FROM oven/bun:1
+WORKDIR /app
+
+# Copy agent-node source and install dependencies
+COPY agent-node/ agent-node/
+RUN cd agent-node && bun install 2>/dev/null || true
+
+# Claude Agent SDK bundles its own native binary — no need to install Claude Code CLI separately
+ENV IS_SANDBOX=1

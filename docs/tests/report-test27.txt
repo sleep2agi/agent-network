@@ -1,0 +1,77 @@
+
+=========================================
+  Test 27: Cases + Demo Docs
+=========================================
+
+A. Case page inventory
+  PASS  Chinese case index exists
+  PASS  Chinese debate case exists
+  PASS  Chinese hello-world case exists
+  PASS  Chinese translation case exists
+  PASS  Chinese telegram squad case exists
+  PASS  English case index exists
+  PASS  English debate case exists
+  PASS  Removed Chinese code-review page
+  PASS  Removed Chinese idiom-chain page
+  PASS  Removed Chinese mixed-model page
+  PASS  Removed English code-review page
+  PASS  Removed English idiom-chain page
+  PASS  Removed English mixed-model page
+  PASS  No links to removed case routes
+
+B. Demo and case navigation are merged
+  PASS  Chinese top nav points to cases
+  PASS  English top nav points to examples
+  PASS  Chinese sidebar includes debate case
+  PASS  English sidebar includes debate case
+  PASS  Demo pages are not primary navigation
+  PASS  Chinese demo deploy page is compatibility bridge
+  PASS  Chinese debate deploy page is compatibility bridge
+  PASS  English demo deploy page is compatibility bridge
+  PASS  English debate deploy page is compatibility bridge
+
+C. Runnable assets referenced by cases
+  PASS  hello-world Docker Compose exists
+  PASS  translation Docker Compose exists
+  PASS  telegram squad Docker Compose exists
+  PASS  telegram squad agent Dockerfile exists
+  PASS  telegram squad server Dockerfile exists
+  PASS  telegram squad compose uses current Codex model
+  PASS  Chinese telegram docs use worker service names
+  PASS  English telegram docs use worker service names
+
+D. CLI demo surface
+  PASS  anet demo lists demos
+  PASS  anet demo includes debate
+  PASS  anet demo includes monitor
+  PASS  debate help includes quick mode
+  PASS  debate help includes no-network option
+  PASS  debate help includes explicit network option
+
+E. VitePress build
+
+> docs-site@1.0.0 build
+> vitepress build docs
+
+
+  vitepress v1.6.4
+
+build complete in 52.27s.
+  PASS  docs-site build succeeds
+  PASS  Built Chinese case index
+  PASS  Built Chinese debate case
+  PASS  Built Chinese hello-world case
+  PASS  Built Chinese translation case
+  PASS  Built Chinese telegram case
+  PASS  Built English case index
+  PASS  Built English debate case
+  PASS  Removed Chinese code-review output
+  PASS  Removed Chinese idiom-chain output
+  PASS  Removed Chinese mixed-model output
+  PASS  Removed English code-review output
+  PASS  Removed English idiom-chain output
+  PASS  Removed English mixed-model output
+
+=========================================
+Result: 51 passed, 0 failed
+=========================================

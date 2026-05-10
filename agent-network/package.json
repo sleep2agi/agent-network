@@ -1,0 +1,68 @@
+{
+  "name": "@sleep2agi/agent-network",
+  "version": "2.1.0",
+  "description": "AI Agent Network CLI — Create multi-agent networks with user management, network isolation, and 3 AI runtimes (Claude/Codex/MiniMax). 39 commands.",
+  "type": "module",
+  "main": "dist/src/client.js",
+  "types": "dist/client.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/src/client.js",
+      "types": "./dist/client.d.ts"
+    },
+    "./server": {
+      "import": "./src/server.ts"
+    }
+  },
+  "bin": {
+    "anet": "dist/bin/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && bun build src/node-server.ts --outdir dist/src --target node --minify --external @modelcontextprotocol/sdk && tsc --emitDeclarationOnly --declaration --outDir dist && npx javascript-obfuscator dist/bin/cli.js --output dist/bin/cli.js --compact true --string-array true --string-array-encoding base64 && npx javascript-obfuscator dist/src/client.js --output dist/src/client.js --compact true --string-array true && npx javascript-obfuscator dist/src/node-server.js --output dist/src/node-server.js --compact true --string-array true",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "agent",
+    "network",
+    "ai",
+    "mcp",
+    "sse",
+    "claude",
+    "codex",
+    "openai",
+    "minimax",
+    "orchestration",
+    "multi-agent",
+    "cli",
+    "anet"
+  ],
+  "author": "sleep2agi",
+  "license": "Apache-2.0",
+  "homepage": "https://anet.sh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sleep2agi/agent-network",
+    "directory": "agent-network"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bugs": {
+    "url": "https://github.com/sleep2agi/agent-network/issues"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "javascript-obfuscator": "^5.4.1",
+    "node-pty": "^1.1.0",
+    "typescript": "^5.0.0"
+  }
+}

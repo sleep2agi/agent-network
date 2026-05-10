@@ -1,0 +1,546 @@
+# @sleep2agi/agent-network 架构设计
+
+> CLI 名：`anet` | npm 包名：`@sleep2agi/agent-network`
+> 版本：agent-network CLI v0.0.32 | agent-node v0.7.0 | commhub-server v0.4.3
+
+---
+
+## 1. 目录结构
+
+```
+agent-network/
+├── bin/
+│   └── cli.ts              # CLI 入口（anet 命令）
+├── src/
+│   ├── index.ts             # npm 包入口（re-export client + server）
+│   ├── client.ts            # CommHub SDK 客户端（EventEmitter + SSE）
+│   └── server.ts            # Server 编程启动入口
+├── dist/                    # 编译产物（minified，发布到 npm）
+│   ├── bin/cli.js
+│   ├── src/client.js
+│   └── client.d.ts          # TypeScript 类型声明
+├── package.json
+├── tsconfig.json
+├── .gitignore
+└── README.md
+```
+
+**设计原则**：client.ts 是核心（零外部依赖），server.ts 是薄包装（委托给 `../../server/src/index.ts`），cli.ts 是粘合层。
+
+### agent-node 双引擎（v0.6.0）
+
+agent-node 支持两种 runtime 引擎：
+
+| 引擎 | 说明 | 模型 |
+|------|------|------|
+| claude | Anthropic Claude Agent SDK | Claude Sonnet/Opus |
+| codex | OpenAI Codex CLI | GPT-5 / GPT-5.4 |
+
+Profile 中通过 `runtime` 字段选择：`claude-code`、`codex` 或 `agent-sdk`。
+
+支持的模型列表：
+- **MiniMax M2.7** — 低成本自动化
+- **书生 Intern-S1-Pro** — 国产大模型
+- **Claude** — Anthropic（Sonnet/Opus）
+- **Codex GPT-5** — OpenAI
+
+### 隔离策略
+
+agent-node 启动时使用 `settingSources: []` 隔离 Claude Agent SDK，防止读取用户全局配置：
+
+```typescript
+const agent = new Agent({
+  model: profile.model,
+  settingSources: [],  // 完全隔离，不读 ~/.claude/ 等全局配置
+});
+```
+
+这确保每个 agent-node 实例独立运行，不受宿主机的 Claude Code 配置影响。
+
+---
+
+## 2. 配置文件
+
+### 路径和优先级
+
+```
+环境变量（COMMHUB_URL / COMMHUB_ALIAS / COMMHUB_AUTH_TOKEN）
+  ↓ 未设置时
+命令行参数（--hub / --alias / --token）
+  ↓ 未指定时
+项目配置 {cwd}/.anet/config.json
+  ↓ 未找到时
+全局配置 ~/.anet/config.json
+  ↓ 未找到时
+默认值（hub=http://127.0.0.1:9200, type=claude-code）
+```
+
+### 全局配置 `~/.anet/config.json`
+
+跨项目共享，`anet setup` 首次运行时创建。
+
+```json
+{
+  "hub": "http://YOUR_COMMHUB_IP:9200",
+  "token": "your-auth-token"
+}
+```
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| hub | ✅ | CommHub Server URL |
+| token | | Bearer auth token |
+
+### 项目配置 `{workpath}/.anet/config.json`
+
+每个项目独立，`anet setup` 运行时创建。
+
+```json
+{
+  "alias": "开发马",
+  "type": "claude-code"
+}
+```
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| alias | ✅ | Agent 别名 |
+| type | | claude-code / sdk |
+| hub | | 覆盖全局 hub（跨网络场景） |
+
+---
+
+## 3. CLI 命令详细设计
+
+### `anet server`
+
+启动 CommHub 通信中枢。
+
+```bash
+anet server [--port 9200] [--token xxx] [--db path] [--cors origins]
+```
+
+**流程**：
+1. 读取 `~/.anet/config.json` 中的 token（如果 CLI 未指定）
+2. 设置环境变量
+3. 动态 import `../../server/src/index.ts`
+4. Bun.serve 启动 HTTP server
+
+**端点**：
+
+| 端点 | 方法 | 认证 | 说明 |
+|------|------|------|------|
+| /mcp | POST | 否 | MCP Streamable HTTP |
+| /events/:alias | GET | 是 | SSE 实时推送 |
+| /health | GET | 否 | 健康检查 |
+| /api/status | GET | 是 | 所有 session 状态 |
+| /api/task | POST | 是 | REST 发任务 |
+| /api/broadcast | POST | 是 | 广播 |
+| /api/completions | GET | 是 | 最近完成记录 |
+| /api/messages | GET | 是 | 查询 inbox 消息（支持按 alias 过滤） |
+| /ws/tmux/:name | WS | 是 | tmux 终端流 |
+
+### `anet setup`
+
+配置新 Agent 加入网络。
+
+```bash
+anet setup --hub <url> --alias <name> [--type claude-code|sdk]
+```
+
+**流程**：
+1. 解析参数（CLI > 已有配置 > 默认值）
+2. 写入 `~/.anet/config.json`（hub, token）
+3. 写入 `{cwd}/.anet/config.json`（alias, type）
+4. 测试连接（GET /health）
+5. 根据 type 执行额外配置：
+
+| type | 额外操作 |
+|------|---------|
+| claude-code | 创建 Channel 目录 + .env + 输出启动命令 |
+| sdk | 输出 SDK 代码模板 |
+
+### `anet run`
+
+运行独立 Agent（SSE 监听 + 自动处理）。
+
+```bash
+anet run [--alias name] [--hub url] [--handler script.ts]
+```
+
+**流程**：
+1. 读取配置（env > CLI > .anet/config.json > ~/.anet/config.json）
+2. 创建 CommHub 客户端（SSE 长连接）
+3. 自动注册（report_status idle）
+4. 启动心跳（3 分钟）
+5. 监听 SSE 事件 → 拉 inbox → ACK → 处理 → 回复
+6. SIGINT/SIGTERM → 上报 offline → 退出
+
+**handler 协议**：
+- 无 handler：echo 模式（收到什么回什么）
+- 有 handler：`bun <handler> <msg_json>` → stdout 作为回复内容
+
+---
+
+## 4. SDK API 设计
+
+### Client（核心）
+
+```typescript
+import { CommHub } from '@sleep2agi/agent-network';
+
+const hub = new CommHub(options: CommHubOptions);
+```
+
+**CommHubOptions**：
+
+| 字段 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| url | string | ✅ | — | CommHub Server URL |
+| alias | string | ✅ | — | Session 别名 |
+| token | string | | — | Auth token |
+| agent | string | | "sdk" | Agent 类型标识 |
+| heartbeatInterval | number | | 180000 | 心跳间隔（ms） |
+| reconnectDelay | number | | 3000 | SSE 重连基础延迟（ms） |
+| autoConnect | boolean | | true | 创建时自动连接 |
+
+**方法**：
+
+| 方法 | 返回 | 说明 |
+|------|------|------|
+| `connect()` | Promise | 连接 + 注册 + SSE + 心跳 |
+| `disconnect()` | Promise | 断开 + 上报 offline |
+| `send(alias, content, priority?)` | Promise | 发任务 |
+| `message(alias, content)` | Promise | 发消息（无生命周期） |
+| `reply(taskId, text, status?)` | Promise | 回复任务状态 |
+| `status(state, extra?)` | Promise | 更新 session 状态 |
+| `getAllStatus()` | Promise | 获取所有 session 状态 |
+| `broadcast(content, filter?)` | Promise | 广播 |
+
+**事件**：
+
+| 事件 | 参数 | 说明 |
+|------|------|------|
+| task | InboxMessage | 收到任务（已自动 ACK） |
+| message | InboxMessage | 同 task（别名） |
+| connected | — | SSE 连接成功 |
+| disconnected | — | SSE 断开 |
+| error | Error | 错误 |
+
+**InboxMessage**：
+
+```typescript
+interface InboxMessage {
+  id: string;
+  content: string;
+  from_session: string;
+  priority: string;
+  created_at: string;
+}
+```
+
+### Server（编程入口）
+
+```typescript
+import { startServer } from '@sleep2agi/agent-network/server';
+
+await startServer({
+  port: 9200,
+  token: 'secret',
+  db: '~/.commhub/commhub.db',
+  corsOrigins: ['http://localhost:3000'],
+});
+```
+
+---
+
+## 5. Channel 插件自动配置
+
+`anet node start`/`anet node resume` 检测到 `runtime: "claude-code"` 时，自动确保 Channel 插件可用：
+
+1. 从 npm 包复制 `node-server.ts` → `{项目}/.anet/node-server.ts`
+2. 安装依赖（`@modelcontextprotocol/sdk`）
+3. 写入 `.mcp.json`：`commhub → .anet/node-server.ts`
+
+```
+{项目}/
+├── .mcp.json                # {"mcpServers":{"commhub":{"type":"stdio","command":"bun","args":[".anet/node-server.ts"]}}}
+└── .anet/
+    ├── node-server.ts       # Channel 插件（MCP server + SSE 长连接）
+    └── package.json         # 依赖
+```
+
+已配置过的项目直接跳过。`anet init project` 也做同样的事（另外还写 CLAUDE.md）。
+
+---
+
+## 6. 与现有包的关系
+
+```
+@sleep2agi/agent-network（合并包，推荐）
+  ├── Client SDK = @sleep2agi/commhub-sdk（独立客户端包）
+  ├── Server = @sleep2agi/commhub-server（独立服务端包）
+  └── CLI（anet）= 新增，只在合并包里
+
+三个包共存：
+- agent-network：一站式，推荐新用户
+- commhub-sdk：只需客户端的场景（嵌入现有 Node.js 应用）
+- commhub-server：只需服务端的场景（已有客户端方案）
+```
+
+代码复用关系：
+- `agent-network/src/client.ts` = `sdk/index.ts`（相同代码）
+- `agent-network/src/server.ts` → 动态 import `server/src/index.ts`
+- `agent-network/bin/cli.ts` → 引用 client.ts + server
+
+---
+
+## 7. npm 发布结构
+
+### 发布内容
+
+```
+dist/
+├── bin/cli.js       # CLI 入口（minified，~580KB 含 MCP SDK bundle）
+├── src/client.js    # Client（minified，~4.4KB）
+└── client.d.ts      # TypeScript 类型声明
+src/
+└── server.ts        # Server 入口（Bun-only，保留 .ts 源码）
+package.json
+README.md
+```
+
+### package.json 关键字段
+
+```json
+{
+  "name": "@sleep2agi/agent-network",
+  "bin": { "anet": "dist/bin/cli.js" },
+  "main": "dist/src/client.js",
+  "types": "dist/client.d.ts",
+  "exports": {
+    ".": { "import": "./dist/src/client.js", "types": "./dist/client.d.ts" },
+    "./server": { "import": "./src/server.ts" }
+  },
+  "files": ["dist", "src/server.ts"]
+}
+```
+
+### 构建
+
+```bash
+# bun build: minify JS（client + CLI）
+bun build src/client.ts bin/cli.ts --outdir dist --target node --minify
+
+# tsc: 生成类型声明（仅 client）
+tsc --emitDeclarationOnly --declaration --outDir dist
+```
+
+---
+
+## 8. 安全考虑
+
+### 代码安全
+- 零硬编码 IP/token/key（全部通过 config 或 env）
+- npm 发布前自动 grep 检查敏感信息
+- dist/ 只包含 minified JS，不含 .ts 源码（server.ts 除外，因 Bun-only）
+
+### 通信安全
+- Bearer token 认证（COMMHUB_AUTH_TOKEN）
+- CORS 白名单（COMMHUB_CORS_ORIGINS）
+- 建议防火墙 IP 白名单（9200 端口）
+- SSE 连接认证（同 Bearer token）
+
+### 配置安全
+- `~/.anet/config.json` 中的 token 存储在用户 home 目录（权限 600）
+- 项目 `.anet/config.json` 不应包含 token（放全局配置）
+- `.anet/` 应加入 `.gitignore` 防止提交
+
+### 运行时安全
+- SQLite WAL 模式 + busy_timeout 防并发冲突
+- inbox 消息 ACK 机制防重复处理
+- 心跳机制检测 zombie session
+- graceful shutdown 上报 offline
+
+---
+
+## 9. 通信协议流程图
+
+### Agent 注册和任务处理
+
+```
+Agent                    CommHub Server              Hub/指挥室
+  │                          │                          │
+  │  report_status(idle)     │                          │
+  ├─────────────────────────►│                          │
+  │                          │                          │
+  │  SSE /events/:alias      │                          │
+  ├─────────────────────────►│ (长连接保持)               │
+  │                          │                          │
+  │                          │  send_task(alias,task)   │
+  │                          │◄─────────────────────────┤
+  │                          │                          │
+  │  SSE: new_task event     │                          │
+  │◄─────────────────────────┤                          │
+  │                          │                          │
+  │  get_inbox(alias)        │                          │
+  ├─────────────────────────►│                          │
+  │  [{id,content,from}]     │                          │
+  │◄─────────────────────────┤                          │
+  │                          │                          │
+  │  ack_inbox(id)           │                          │
+  ├─────────────────────────►│                          │
+  │                          │                          │
+  │  (处理任务...)            │                          │
+  │                          │                          │
+  │  send_task(hub,result)   │                          │
+  ├─────────────────────────►│  SSE: new_task           │
+  │                          │─────────────────────────►│
+  │                          │                          │
+  │  report_status(idle)     │  (每 3 分钟心跳)          │
+  ├─────────────────────────►│                          │
+```
+
+### 三种接入方式对比
+
+```
+方式 A: Claude Code + Channel（最优）
+  Agent ←SSE Push→ CommHub    实时，零延迟
+
+方式 B: SDK Agent（编程）
+  Agent ←SSE Long→ CommHub    实时，代码控制
+
+方式 C: SDK Agent + anet run（编程/自动化）
+  Agent ←SSE Long→ CommHub    代码控制，自定义 handler
+```
+
+---
+
+## 10. Web Dashboard
+
+### 两种 Dashboard
+
+| Dashboard | 技术栈 | 部署 | 地址 |
+|-----------|--------|------|------|
+| 内置轻量 UI | 纯 HTML + vanilla JS | 内嵌 `anet server` | `http://YOUR_IP:9200/dashboard` |
+| 独立 Dashboard | Next.js + Vercel | 独立部署 | https://agent-network-dashboard.vercel.app |
+
+独立 Dashboard 提供更丰富的功能：节点拓扑图、历史趋势、任务甘特图等。
+
+### 内置轻量 UI 设计原则
+
+- 纯 HTML + CSS + vanilla JS，零框架
+- 内嵌到 `anet server`，不需要额外部署
+- SSE 实时更新，不用 WebSocket
+- 一个 HTML 文件搞定
+
+### 访问方式
+
+```
+anet server start --port 9200
+# 内置: http://YOUR_IP:9200/dashboard
+# 独立: https://agent-network-dashboard.vercel.app
+```
+
+### 页面功能
+
+**节点列表（主视图）**
+
+```
+┌─────────────────────────────────────────────┐
+│  Agent Network Dashboard         ● 17 online │
+├─────────────────────────────────────────────┤
+│                                             │
+│  🟢 指挥室      working   硅谷ECS   3s ago  │
+│  🟢 通信龙      idle      硅谷ECS   15s ago │
+│  🟢 开发马      working   硅谷ECS   2m ago  │
+│  🔵 大猫        idle      96GB      1m ago  │
+│  🔵 P站MiniMax马 idle     Paper     5m ago  │
+│  ⚪ VL牛        offline   A100      2h ago  │
+│                                             │
+│  [发任务]  [广播]  [刷新]                     │
+└─────────────────────────────────────────────┘
+```
+
+节点颜色：
+- 🟢 绿色：Channel SSE 连接（实时）
+- 🔵 蓝色：Poller 模式（近实时）
+- 🟡 黄色：最近有活动但无 SSE
+- ⚪ 灰色：offline
+
+**消息流（实时）**
+
+```
+┌─────────────────────────────────────────────┐
+│  Message Stream                    [暂停]    │
+├─────────────────────────────────────────────┤
+│  15:00:42  指挥室 → 通信龙: 计时测试        │
+│  15:00:59  通信龙 → 指挥室: 收到！延迟17s    │
+│  15:01:05  指挥室 → 大猫: SSE Poller测试     │
+│  15:01:06  [SSE] 大猫 收到推送               │
+└─────────────────────────────────────────────┘
+```
+
+通过 SSE `/events/dashboard` 订阅所有事件。
+
+**任务管理（简易）**
+
+- 发任务：选目标 alias + 输入内容 + 优先级 → POST /api/task
+- 广播：输入内容 → POST /api/broadcast
+
+### 实现方案
+
+Server 端新增一个路由：
+
+```typescript
+// GET /dashboard → 返回内嵌 HTML
+if (url.pathname === "/dashboard") {
+  return new Response(DASHBOARD_HTML, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+// GET /events/dashboard → SSE 推送所有事件（用于消息流）
+```
+
+HTML 内容作为模板字符串内嵌到 server 代码中（或从 `server/dashboard.html` 读取）。
+
+### HTML 结构（~200 行）
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Agent Network Dashboard</title>
+  <meta charset="utf-8">
+  <style>
+    /* 深色主题，等宽字体，紧凑布局 */
+    body { background: #1a1a2e; color: #e0e0e0; font-family: monospace; }
+    .node { padding: 8px; border-bottom: 1px solid #333; }
+    .online { border-left: 3px solid #22c55e; }
+    .polling { border-left: 3px solid #3b82f6; }
+    .offline { border-left: 3px solid #666; opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div id="nodes"></div>
+  <div id="stream"></div>
+  <script>
+    // 每 5 秒拉 /api/status 更新节点列表
+    // SSE 连接 /events/dashboard 实时显示消息流
+    // 发任务用 fetch POST /api/task
+  </script>
+</body>
+</html>
+```
+
+### 不做的事
+
+- 不做用户认证（复用 COMMHUB_AUTH_TOKEN，URL 带 token 参数）
+- 不做 session 管理（只读展示 + 发任务）
+- 不做历史查询（只显示最近 100 条）
+- 不做移动端适配（桌面浏览器即可）
+
+### 优先级
+
+Dashboard 是锦上添花，不阻塞核心功能。建议在 server/client/CLI 稳定后再实现。

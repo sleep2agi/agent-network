@@ -1,0 +1,17 @@
+CommHub Server (@sleep2agi/commhub-server)
+Copyright 2025-2026 sleep2agi
+
+This product includes software developed by sleep2agi (https://anet.sh).
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+This product is part of the Agent Network suite, which also includes:
+  - @sleep2agi/agent-network            (anet CLI)
+  - @sleep2agi/agent-node               (Agent Runtime)
+  - @sleep2agi/agent-network-dashboard  (Web Dashboard)
+
+See https://github.com/sleep2agi/agent-network for source.

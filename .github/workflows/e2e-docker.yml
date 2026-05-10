@@ -1,0 +1,31 @@
+name: Docker E2E Tests
+
+on:
+  push:
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'server/**'
+      - 'channel/**'
+      - 'tests/**'
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'server/**'
+      - 'tests/**'
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker E2E image
+        run: docker build -t anet-e2e -f tests/Dockerfile .
+        timeout-minutes: 10
+
+      - name: Run full regression (186 tests)
+        run: docker run --rm anet-e2e /app/test-all.sh
+        timeout-minutes: 5

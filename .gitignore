@@ -1,0 +1,31 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+demos/codex-telegram-squad/.env
+
+# dependencies
+node_modules/
+*.lock
+
+# build output
+dist/
+.next/
+docs-site/docs/.vitepress/dist/
+docs-site/docs/.vitepress/cache/
+docs-site/node_modules/
+
+# deploy state
+.vercel/
+
+# runtime state
+.anet/
+.tmp/
+agent-network/tests/docker-e2e/.tmp/
+agent-network/tests/docker-e2e/results/
+
+# logs / scratch
+*.log
+*.tmp
+*.bak
+.DS_Store

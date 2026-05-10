@@ -1,0 +1,75 @@
+# Changelog
+
+## v1.0.0-preview.25 (2026-04-11)
+
+### PostgreSQL + Adapter Architecture
+
+#### New Features
+- **PostgreSQL support**: `DATABASE_URL=postgres://...` enables PostgreSQL (SQLite remains default)
+- **DbAdapter interface**: Unified database abstraction (SQLiteAdapter + PgAdapter)
+- **SQL auto-translator**: `sqliteToPostgres()` handles datetime→NOW, ?N→$N, AUTOINCREMENT→SERIAL
+- **34 CLI commands**: Added passwd, token (create/ls/revoke), network (info/rename/delete), demo, config, license, activate, server local
+- **17 REST endpoints**: Added PUT /api/networks/:id, DELETE /api/networks/:id, POST /api/auth/password, token CRUD
+- **One-click demo**: `bash examples/demo-one-click.sh` — 60-second automated showcase
+- **createAdapter() factory**: Environment-driven DB selection
+
+#### Architecture
+- All 85+ raw `db.query()` calls migrated to adapter methods (`db.get()`, `db.all()`, `db.run()`)
+- All 7 manual `BEGIN/COMMIT/ROLLBACK` transactions converted to `db.transaction()`
+- Zero raw database access — all code goes through `DbAdapter` interface
+- SQL translator handles 161 SQL fragments across 4 source files
+
+#### Testing
+- 200 Docker E2E tests (137 base + 25 auth + 22 network + 16 config)
+- 19 adapter-specific E2E tests (verified post-refactor)
+- 10 SQL translator unit tests
+
+---
+
+## v1.0.0-preview (2026-04-10)
+
+### Agent Network V3 — Multi-Network + Commercial Ready
+
+#### New Features
+- **Multi-network support**: Create isolated networks, each with their own nodes/tasks/sessions
+- **User system**: Register/login with username+password, API token authentication
+- **Trial licensing**: 14-day free trial, license key activation for Pro
+- **34 CLI commands**: quickstart, login, register, passwd, token, network (create/ls/use/info/rename/delete), status, tasks, doctor, info, logs, demo, config, license, activate, server local...
+- **18 MCP tools**: send_task, send_reply, retry_task, cancel_task, reassign_task, list_tasks, get_task...
+- **17 REST endpoints**: /api/auth/*, /api/networks/*, /api/tasks, /api/nodes, /api/stats, /api/audit-log, /api/license...
+- **3 AI runtimes**: codex-sdk (GPT-5.4), claude-agent-sdk (Claude), http-api (MiniMax/OpenAI compatible)
+- **Audit logging**: Every user action + task state change recorded
+- **Rate limiting**: Register 30/min, login 10/min per IP
+
+#### Security
+- MCP/SSE/WebSocket authentication
+- Server-enforced network_id (token-bound, no client override)
+- SQL injection fixes (parameterized queries)
+- Network ownership checks (403 on cross-user access)
+- Password hashing (SHA-256)
+- Localhost exempted from rate limit (dev/test)
+
+#### Database (13 tables)
+sessions, inbox, tasks, nodes, completions, task_events, users, networks, api_tokens, audit_log, licenses, network_members, network_invites
+
+#### Testing (200 regression tests)
+- Base E2E: 137 tests (node lifecycle, message lifecycle, auth, license, SSE, concurrency)
+- Auth suite: 25 tests (register, login, token, profile, password, audit, rate limit)
+- Network suite: 22 tests (CRUD, isolation, ownership, rename, delete, cross-user)
+- Config priority: 16 tests (CLI > env > project > global)
+- Real AI: Codex GPT-5.4 + MiniMax (Anthropic API) verified
+- 10-agent idiom chain game (mixed codex + minimax)
+
+#### npm packages
+- @sleep2agi/agent-network (anet CLI)
+- @sleep2agi/agent-node (Agent runtime)
+- @sleep2agi/commhub-server (Communication hub)
+
+---
+
+## v0.x (2026-03 to 2026-04-09) — Pre-V3
+
+- Basic CommHub Server with MCP + SSE
+- agent-node with Claude + Codex dual runtime
+- anet CLI (create/start/resume/channel)
+- Dashboard basic

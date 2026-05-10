@@ -1,0 +1,121 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 776B 0.0s done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/oven/bun:1
+#2 DONE 0.2s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 DONE 0.0s
+
+#5 [ 1/13] FROM docker.io/oven/bun:1@sha256:87416c977a612a204eb54ab9f3927023c2a3c971f4f345a01da08ea6262ae30e
+#5 resolve docker.io/oven/bun:1@sha256:87416c977a612a204eb54ab9f3927023c2a3c971f4f345a01da08ea6262ae30e 0.1s done
+#5 DONE 0.1s
+
+#4 [internal] load build context
+#4 transferring context: 938.11kB 1.2s done
+#4 DONE 1.2s
+
+#6 [ 6/13] COPY agent-network/ agent-network/
+#6 CACHED
+
+#7 [ 8/13] RUN cd agent-node && npm install --ignore-scripts 2>/dev/null || true
+#7 CACHED
+
+#8 [ 2/13] WORKDIR /app
+#8 CACHED
+
+#9 [ 4/13] COPY server/ server/
+#9 CACHED
+
+#10 [ 5/13] COPY agent-node/ agent-node/
+#10 CACHED
+
+#11 [ 9/13] RUN cd agent-network && npm install --ignore-scripts 2>/dev/null || true
+#11 CACHED
+
+#12 [10/13] RUN cd agent-node && npm run build && npm link
+#12 CACHED
+
+#13 [ 3/13] RUN apt-get update && apt-get install -y curl python3 make g++ procps &&     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&     apt-get install -y nodejs &&     rm -rf /var/lib/apt/lists/*
+#13 CACHED
+
+#14 [ 7/13] RUN cd server && bun install
+#14 CACHED
+
+#15 [11/13] RUN cd agent-network && npm run build && npm link
+#15 CACHED
+
+#16 [12/13] COPY tests/test22-agent-ux/run.sh /app/run.sh
+#16 DONE 0.1s
+
+#17 [13/13] RUN chmod +x /app/run.sh
+#17 DONE 0.4s
+
+#18 exporting to image
+#18 exporting layers
+#18 exporting layers 0.2s done
+#18 exporting manifest sha256:82d65117bdba3168e87a5e38ec4d91b3f722785deda9eed708d5ad5593e362ce 0.0s done
+#18 exporting config sha256:e46806ee351b7945dbe3ac0c33a9390e0ebf2ddb4690fd7118f4d0cc592159a8 0.0s done
+#18 exporting attestation manifest sha256:90296b28e6562ee4992a0629cf448d1d23953d8cc36e7506bae0a841e014751b 0.0s done
+#18 exporting manifest list sha256:2fbe8466cb63c69c234540890b66dfb6f792e443ceacf2b88bf9d515c8a84627 0.0s done
+#18 naming to docker.io/library/anet-test22-docs:latest
+#18 naming to docker.io/library/anet-test22-docs:latest done
+#18 unpacking to docker.io/library/anet-test22-docs:latest 0.1s done
+#18 DONE 0.6s
+
+ [33m1 warning found (use docker --debug to expand):
+[0m - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "COMMHUB_AUTH_TOKEN") (line 23)
+
+=========================================
+  agent-node / anet UX Test
+=========================================
+
+Setup. Start server and prepare config...
+  PASS  setup complete
+
+A1. agent-node --help...
+  PASS  agent-node help is clear
+
+A2. agent-node -v...
+  PASS  agent-node version shown
+
+A3. agent-node startup output with user/network...
+  PASS  startup shows user/network info
+
+A4. startup without token...
+  PASS  no-token warning is friendly
+
+A5. hub unreachable startup...
+  PASS  hub unreachable error is visible
+
+B6. anet node start bot-a...
+  PASS  anet node start output looks normal
+
+B7. anet node start missing node...
+  PASS  missing node error is clear
+
+B8. anet node stop bot-a...
+  PASS  anet node stop output is clear
+
+B9. anet logs bot-a...
+  PASS  anet logs shows log content
+
+C10. anet demo...
+  PASS  anet demo lists available demos
+
+C11. anet demo --live...
+  PASS  anet demo --live refreshes
+
+C12. anet config...
+  PASS  anet config shows complete summary
+
+=========================================
+Result: 13 passed, 0 failed
+=========================================

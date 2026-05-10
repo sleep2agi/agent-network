@@ -1,0 +1,157 @@
+# @sleep2agi/agent-node
+
+Agent runtime for Agent Network. Connects to a CommHub server, registers under an alias, and processes incoming tasks with one of three runtimes.
+
+**Current preview line.** The supported entry point is the `anet` CLI from `@sleep2agi/agent-network@preview`, which writes the right `config.json`, network token, and environment variables for you.
+
+## Install
+
+You usually don't install this package directly — `anet node create` and `anet node start` use it via `npx`. To pin it:
+
+```bash
+npm install -g @sleep2agi/agent-node@preview
+```
+
+## Verified flow
+
+```bash
+npm install -g @sleep2agi/agent-network@preview
+anet hub start                      # local hub (terminal 1)
+anet hub dashboard                  # web UI (terminal 2)
+anet login --username admin --password anethub
+anet node create my-bot             # two-step picker: runtime, then provider
+anet node start my-bot              # → SSE connected
+```
+
+The picker writes `.anet/nodes/<name>/config.json`. `anet node start` reads it and runs this package under the hood.
+
+## Direct invocation
+
+For scripts and CI:
+
+```bash
+npx @sleep2agi/agent-node --alias my-bot --hub http://127.0.0.1:9200 --tools all
+```
+
+CLI flags:
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--alias` | required | unique name in the hub |
+| `--hub` | `http://127.0.0.1:9200` | CommHub URL |
+| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `http-api` |
+| `--model` | runtime default | passed through to the SDK |
+| `--tools` | (none) | `all` or comma-separated list |
+| `--max-turns` | `50` | upper bound per task |
+| `--session` | (none) | resume a prior session / thread |
+
+## Runtimes
+
+| Runtime | Backend | Status | Notes |
+|---|---|---|---|
+| `claude-agent-sdk` | [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) | verified | Anthropic-compatible API; works with MiniMax, DeepSeek, GLM, Kimi, Anthropic, OpenRouter, or custom endpoints |
+| `codex-sdk` | [@openai/codex-sdk](https://www.npmjs.com/package/@openai/codex-sdk) | unverified end-to-end | unit tests pass, no full E2E with real codex auth |
+| `claude-code-cli` | local `claude` CLI | unverified end-to-end | runs locally for Claude Pro subscribers |
+| `http-api` | OpenAI/Anthropic-compatible HTTP | experimental | reads `ANTHROPIC_*`, `OPENAI_*`, or `MINIMAX_CODING_API_KEY` environment variables |
+
+Runtimes are loaded lazily — picking one doesn't pull the others' dependencies. `claude-code-cli` adds zero extra SDK weight.
+
+## Provider presets (claude-agent-sdk)
+
+`anet node create` step 2 picks one of these and writes `ANTHROPIC_BASE_URL` + a default model. All Anthropic-compatible HTTP API; `--model` is passed through verbatim.
+
+| Provider | Base URL | Default model | Status |
+|---|---|---|---|
+| Anthropic | `https://api.anthropic.com` | configured by `--model` | verified |
+| MiniMax (国际) | `https://api.minimax.io/anthropic` | `MiniMax-M2.7` | verified |
+| MiniMax (国内) | `https://api.minimaxi.com/anthropic` | `MiniMax-M2.7` | verified |
+| DeepSeek | `https://api.deepseek.com/anthropic` | `deepseek-chat` | verified |
+| GLM (智谱) | `https://open.bigmodel.cn/api/anthropic` | `glm-4-plus` | verified |
+| Kimi (Moonshot) | `https://api.moonshot.cn/anthropic` | `moonshot-v1-32k` | verified |
+| OpenRouter | `https://openrouter.ai/api/v1` | (user-chosen) | unverified end-to-end |
+| Custom | user-supplied | user-supplied | unverified end-to-end |
+
+## Manual env-var examples
+
+```bash
+# DeepSeek
+ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=sk-... \
+npx @sleep2agi/agent-node --alias deep --hub http://127.0.0.1:9200 --tools all
+
+# MiniMax
+ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-key \
+npx @sleep2agi/agent-node --alias mini --model MiniMax-M2.7 --hub http://127.0.0.1:9200 --tools all
+```
+
+## Configuration file
+
+Typical output of `anet node create` at `.anet/nodes/<name>/config.json`:
+
+```json
+{
+  "node_id": "n_a1b2c3d4",
+  "node_name": "my-bot",
+  "hub": "http://127.0.0.1:9200",
+  "token": "ntok_...",
+  "runtime": "claude-agent-sdk",
+  "model": "MiniMax-M2.7",
+  "channels": ["server:commhub"],
+  "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.minimax.io/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "sk-..."
+  },
+  "flags": {
+    "dangerouslySkipPermissions": true,
+    "teammateMode": "in-process",
+    "maxTurns": 50
+  }
+}
+```
+
+Per-node config wins over `~/.anet/config.json`; missing fields fall back to global, then defaults.
+
+## Main loop
+
+Same shape across runtimes:
+
+```
+start
+  → report_status: idle
+  → SSE long-poll /events/:alias
+  → on new_task: get_inbox → ack_inbox
+  → report_status: working
+  → run the LLM (with commhub MCP tools injected)
+  → send_reply
+  → report_status: idle
+```
+
+## Peer coordination (verified)
+
+When the agent runs, the commhub MCP tools are auto-injected. The model can call:
+
+- `commhub_get_all_status()` — see who else is online
+- `commhub_send_task(alias, task)` — dispatch a sub-task to a peer
+- `commhub_get_task(task_id)` — poll for the peer's reply
+- `commhub_send_message(alias, message)` — chat without a task lifecycle
+- `commhub_report_status(status, task)` — push status update
+
+This is what powers the multi-agent flow demonstrated in `anet hub dashboard` (e.g. ask one bot to consult another — the Tasks and Messages pages show the full handshake live).
+
+## Isolation
+
+When the runtime is `claude-code-cli`, the spawned subprocess gets `settingSources: []` so it doesn't read the host's `~/.claude.json` and accidentally cross networks.
+
+## Companion packages
+
+| Package | Version |
+|---|---|
+| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.3-preview.4 |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.3-preview.0 |
+| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.2.1-preview.1 |
+
+## License
+
+MIT

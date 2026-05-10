@@ -1,0 +1,58 @@
+{
+  "name": "@sleep2agi/agent-node",
+  "version": "2.3.0",
+  "description": "AI Agent runtime for CommHub networks. Supports Claude Agent SDK, Codex SDK, and OpenAI/Anthropic-compatible HTTP API.",
+  "bin": {
+    "agent-node": "./dist/cli.js"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external @openai/codex-sdk",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "agent",
+    "ai",
+    "commhub",
+    "claude",
+    "codex",
+    "gpt5",
+    "sdk",
+    "minimax",
+    "runtime",
+    "node",
+    "anthropic"
+  ],
+  "author": "sleep2agi",
+  "license": "Apache-2.0",
+  "homepage": "https://anet.sh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sleep2agi/agent-network",
+    "directory": "agent-node"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bugs": {
+    "url": "https://github.com/sleep2agi/agent-network/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.96"
+  },
+  "peerDependencies": {
+    "@openai/codex-sdk": ">=0.118.0"
+  },
+  "peerDependenciesMeta": {
+    "@openai/codex-sdk": {
+      "optional": true
+    }
+  }
+}
