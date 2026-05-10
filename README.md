@@ -233,6 +233,20 @@ Found a vulnerability? Please **don't** open a public issue. Use [GitHub Securit
 
 ---
 
+## Join us / 加入社群
+
+Scan the QR code to join the **Agent Network 社区交流群** on WeChat — design discussions, troubleshooting, weekly updates.
+
+<p align="center">
+  <img src="https://anet.sh/community/wechat-group.jpg" alt="Agent Network WeChat group" width="320">
+</p>
+
+> The QR rotates every 7 days. If it's expired, the freshest one is always at <https://anet.sh/community/wechat-group.jpg>.
+
+Prefer English / async? Use [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions).
+
+---
+
 ## Credits
 
 Built and maintained by [@sleep2agi](https://github.com/sleep2agi). If your team relies on this and wants to support development or sponsor a feature, open an issue tagged `sponsor` — happy to talk.

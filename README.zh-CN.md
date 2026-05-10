@@ -231,6 +231,20 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 
 ---
 
+## 加入社群 / Join us
+
+扫码加入 **Agent Network 社区交流群** —— 设计讨论、排查问题、版本动态：
+
+<p align="center">
+  <img src="https://anet.sh/community/wechat-group.jpg" alt="Agent Network 微信群" width="320">
+</p>
+
+> 二维码每 7 天轮换一次，过期了到 <https://anet.sh/community/wechat-group.jpg> 拿最新版（地址不变）。
+
+英文 / 异步用户：[GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions)。
+
+---
+
 ## 鸣谢
 
 由 [@sleep2agi](https://github.com/sleep2agi) 构建和维护。如果你的团队在用、想资助开发或赞助某个 feature，开一个 `sponsor` 标签的 issue，欢迎聊。
