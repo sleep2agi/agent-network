@@ -1,15 +1,11 @@
-
-
-
-
-
-<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/697f7c78-7782-42d4-935a-6a22029e2054" />
-
+<p align="center">
+  <img width="1672" height="941" alt="Agent Network" src="https://github.com/user-attachments/assets/697f7c78-7782-42d4-935a-6a22029e2054" />
+</p>
 
 <h1 align="center">Agent Network</h1>
 
 <p align="center">
-  Local-first multi-agent collaboration. One npm package — one local hub, a Web Dashboard, and as many agents as you want, all on your own machine and optionally shared across a LAN.
+  本地优先的多 Agent 协作平台。一个 npm 包搞定 Hub、Web Dashboard、N 个 Agent —— 全部跑在你自己的机器上，可选共享到局域网。
 </p>
 
 <p align="center">
@@ -25,95 +21,95 @@
 </p>
 
 <p align="center">
-  <strong><a href="https://anet.sh">📖 文档 / Docs</a></strong> ·
+  <strong><a href="https://anet.sh">📖 文档</a></strong> ·
   <strong><a href="https://www.npmjs.com/org/sleep2agi">📦 NPM</a></strong> ·
   <strong><a href="https://github.com/sleep2agi/agent-network">⭐ GitHub</a></strong> ·
   <strong><a href="https://github.com/sleep2agi/agent-network/discussions">💬 Discussions</a></strong> ·
-  <strong><a href="https://anet.sh/community">💚 微信群 / WeChat</a></strong>
+  <strong><a href="https://anet.sh/community">💚 微信群</a></strong>
 </p>
 
 <p align="center">
-  <strong>English</strong> · <a href="./README.zh-CN.md">中文</a>
+  <a href="./README.en.md">English</a> · <strong>中文</strong>
 </p>
 
 ---
 
-## Why Agent Network
+## 为什么用 Agent Network
 
-- **One CLI, three runtimes.** Run Claude Code CLI, the Claude Agent SDK, and OpenAI's Codex SDK side-by-side on the same hub. Mix-and-match per role.
-- **Seven LLM providers, one config switch.** Anthropic, OpenAI, MiniMax, DeepSeek, GLM (智谱), Kimi (Moonshot), and 书生 InternLM — all routed through `ANTHROPIC_BASE_URL`.
-- **Local-first.** Hub binds to `127.0.0.1` by default. SQLite at `~/.commhub/commhub.db`. No cloud account, no telemetry, no signup.
-- **Mesh dispatch out of the box.** Agents discover each other via 18 MCP tools (`get_all_status`, `send_task`, `get_task`, …) and coordinate without you scripting the choreography.
-- **Web Dashboard included.** Chat, Nodes, Tasks, Messages, Networks, Logs, Admin — Next.js app, 4 themes, runs at `localhost:3000`.
-- **LAN-shareable.** `anet hub start --host 0.0.0.0` lets a teammate's agent join your hub from across the room.
+- **一个 CLI，三种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK 同时跑在一个 Hub 上，按角色挑最合适的。
+- **七家 LLM，一个开关切换。** Anthropic、OpenAI、MiniMax、DeepSeek、智谱 GLM、月之暗面 Kimi、书生 InternLM —— 通过 `ANTHROPIC_BASE_URL` 一键路由。
+- **本地优先。** Hub 默认绑 `127.0.0.1`，SQLite 数据存在 `~/.commhub/commhub.db`。不用注册账号、不用登云、零遥测。
+- **Mesh 派活开箱即用。** Agent 之间通过 18 个 MCP 工具（`get_all_status` / `send_task` / `get_task` …）自动发现 + 互相派活，不需要你写编排逻辑。
+- **自带 Web Dashboard。** Chat / Nodes / Tasks / Messages / Networks / Logs / Admin —— Next.js + 4 套主题，跑在 `localhost:3000`。
+- **可局域网共享。** `anet hub start --host 0.0.0.0` 一开，对面工位的 Agent 也能加入你的 Hub。
 
 > [!IMPORTANT]
-> **Public beta.** Self-used daily for two months by the maintainer; v2.1 is the first stable open-source line. APIs may still shift between minor versions — pin your dependencies.
+> **公测阶段。** 作者已自用两个月，第一个开源稳定版预计 **2026 年 6 月上旬** 出。现在主要是作者**自用慢慢打磨**，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
 >
-> **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
+> **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
 
 ---
 
-## 30-second quickstart
+## 30 秒上手
 
 ```bash
-# Install one global package
+# 装一个全局包
 npm install -g @sleep2agi/agent-network
 
-# Terminal 1 — start the hub (keep open)
+# 终端 1 —— 起 Hub（保持开着）
 anet hub start
-#   listens on http://127.0.0.1:9200
-#   SQLite at ~/.commhub/commhub.db
-#   default account auto-created: admin / anethub
+#   监听 http://127.0.0.1:9200
+#   SQLite 在 ~/.commhub/commhub.db
+#   自动创建默认账号：admin / anethub
 
-# Terminal 2 — start the dashboard (keep open)
+# 终端 2 —— 起 Dashboard（保持开着）
 anet hub dashboard
-#   open http://localhost:3000
+#   浏览器访问 http://localhost:3000
 
-# Terminal 3 — log in, create + start an agent
+# 终端 3 —— 登录 + 创建 + 启动 Agent
 anet login --username admin --password anethub
-anet node create my-bot          # two-step picker: runtime → provider → API key
-anet node start my-bot           # waits for "SSE connected"
+anet node create my-bot          # 两步交互：选 runtime → 选 provider → 填 API key
+anet node start my-bot           # 等到 "SSE connected" 即就绪
 ```
 
-Send a task from the Dashboard's Chat panel. Spin up a second node and ask the first to delegate — the agents will discover each other and coordinate via MCP. That's it.
+从 Dashboard 的 Chat 面板派任务即可。再起一个节点让第一个去派活，两个 Agent 会通过 MCP 自动发现彼此并协作。
 
-📖 Full walkthrough → <https://anet.sh/guide/getting-started>
+📖 完整指南 → <https://anet.sh/guide/getting-started>
 
 ---
 
-## One-line demos
+## 一键 Demo
 
 ```bash
 export MINIMAX_KEY=sk-cp-xxx
 
-# 6 agents, 9-step debate, ~10 minutes
-anet demo debate --topic "Will AI create more jobs than it destroys?"
+# 6 角色 9 步辩论赛，约 10 分钟
+anet demo debate --topic "AI 创造的岗位是否比消灭的多"
 
-# 4 agents, content factory, ~3 minutes
-anet demo socialmedia --topic "Focus in the AI era" --platform xiaohongshu
+# 4 角色社媒内容工厂，约 3 分钟
+anet demo socialmedia --topic "AI 时代如何提升专注力" --platform xiaohongshu
 ```
 
-Each demo runs in an isolated network and cleans up afterwards — your `default` network stays untouched.
+每个 demo 跑在独立 network 里，跑完自动清场，**不会污染** `default` network。
 
 ---
 
-## Packages
+## 套件包
 
-Stable, Apache-2.0, published to npm.
+稳定版，Apache-2.0，已发 npm。
 
-| Package | Version | Role |
+| 包 | 版本 | 角色 |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.0` | `anet` CLI — hub / dashboard / agent / demo launcher |
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.6.0` | MCP + REST + SSE hub (SQLite default, optional PostgreSQL) |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.3.0` | Web UI — Next.js, 4 themes, Chat / Nodes / Tasks / Networks / Logs / Admin |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.0` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.6.0` | MCP + REST + SSE 通信中枢（默认 SQLite，可换 PostgreSQL） |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.3.0` | Web Dashboard —— Next.js 16，4 套主题，Chat / Nodes / Tasks / Networks / Logs / Admin |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK |
 
-The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. You only ever globally install one package.
+CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
 
 ---
 
-## Architecture
+## 架构
 
 ```
 ┌──────────┐   send_task   ┌────────────────┐   SSE push   ┌──────────┐
@@ -127,148 +123,146 @@ The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. 
                           └─────────────────┘
 ```
 
-- **MCP Streamable HTTP** at `/mcp` — agents and Claude Code / Codex connect here
-- **SSE Push** at `/events/:alias` — server pushes tasks to agents in real time
-- **REST** at `/api/*` — Dashboard, admin, monitoring, audit log
-- **18 MCP tools** — `send_task`, `get_task`, `send_reply`, `report_status`, `get_all_status`, …
+- **MCP Streamable HTTP**（`/mcp`）—— Agent / Claude Code / Codex 接入点
+- **SSE 推送**（`/events/:alias`）—— Hub 实时把任务推给 Agent
+- **REST API**（`/api/*`）—— Dashboard、管理、监控、审计日志
+- **18 个 MCP 工具** —— `send_task`、`get_task`、`send_reply`、`report_status`、`get_all_status`、…
 
-📖 Architecture deep dive → <https://anet.sh/guide/architecture>
+📖 架构详解 → <https://anet.sh/guide/architecture>
 
 ---
 
-## Runtimes
+## 三种 Runtime
 
-Pick one per node. Mix freely on the same hub.
+每个节点选一种，同一个 Hub 上自由混搭。
 
-| Runtime | What it does | Best for | Auth |
+| Runtime | 工作方式 | 适合场景 | 鉴权 |
 |---|---|---|---|
-| `claude-code-cli` | Spawns your local `claude` CLI as a subprocess | Reusing a Claude Pro subscription, full Claude Code tool suite | `claude` already logged in |
-| `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic, MiniMax, DeepSeek, GLM, Kimi, InternLM via `ANTHROPIC_BASE_URL` | API key |
-| `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex auth login` or `OPENAI_API_KEY` |
+| `claude-code-cli` | spawn 本地 `claude` CLI 子进程 | 复用 Claude Pro 订阅，享 Claude Code 全套工具 | 本地 `claude` 已登录 |
+| `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 等（通过 `ANTHROPIC_BASE_URL`） | API key |
+| `codex-sdk` | OpenAI `@openai/codex-sdk` | 写代码 / 跑命令 | `codex auth login` 或 `OPENAI_API_KEY` |
 
-📖 Runtime deep dive → <https://anet.sh/guide/runtimes>
+📖 Runtime 详解 → <https://anet.sh/guide/runtimes>
 
 ---
 
-## Verified providers
+## 已验证 Provider
 
-`claude-agent-sdk` is just an Anthropic Messages client — any compatible endpoint works.
+`claude-agent-sdk` 本质就是 Anthropic Messages 客户端，任何兼容 endpoint 都能跑。
 
-| Provider | Status | `ANTHROPIC_BASE_URL` |
+| Provider | 状态 | `ANTHROPIC_BASE_URL` |
 |---|---|---|
 | Anthropic | verified | `https://api.anthropic.com` |
 | MiniMax | verified | `https://api.minimaxi.com/anthropic` |
-| DeepSeek | verified | (official Anthropic-compatible endpoint) |
-| GLM 智谱 | verified | (open.bigmodel.cn Anthropic adapter) |
-| Kimi (Moonshot) | verified | (platform.moonshot.cn Anthropic-compatible) |
+| DeepSeek | verified | （官方 Anthropic 兼容 endpoint） |
+| 智谱 GLM | verified | （open.bigmodel.cn Anthropic 适配） |
+| 月之暗面 Kimi | verified | （platform.moonshot.cn Anthropic 兼容） |
 | 书生 InternLM | verified | `https://chat.intern-ai.org.cn/anthropic` |
-| OpenAI (via `codex-sdk`) | verified | n/a — OpenAI native |
-| OpenRouter / custom Anthropic-compatible | works in dev, no E2E | provide base URL + token |
+| OpenAI（通过 `codex-sdk`）| verified | n/a —— OpenAI 原生 |
+| OpenRouter / 自定义 Anthropic 兼容 | dev 跑通，无 E2E | 自填 base URL + token |
 
-📖 Per-provider keys, models, and presets → <https://anet.sh/guide/multi-model>
+📖 各家 Key / 模型 / 预设 → <https://anet.sh/guide/multi-model>
 
 ---
 
-## Repo layout
+## 仓库结构
 
 ```
 agent-network/   anet CLI         (npm: @sleep2agi/agent-network)
-agent-node/      agent runtime    (npm: @sleep2agi/agent-node)
-server/          CommHub server   (npm: @sleep2agi/commhub-server)
-channel/         Claude Code channel plugin
-docs-site/       VitePress source for https://anet.sh
-docs/            design notes, RFCs, evolution log
-tests/           Docker test matrix
+agent-node/      Agent 运行时     (npm: @sleep2agi/agent-node)
+server/          CommHub Server   (npm: @sleep2agi/commhub-server)
+channel/         Claude Code Channel 插件
+docs-site/       VitePress 源码（https://anet.sh）
+docs/            设计文档 / RFC / 演进日志
+tests/           Docker 测试矩阵
 ```
 
-The Dashboard lives in a separate repo: [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard).
+Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard)。
 
 ---
 
-## Status & known limitations
+## 状态 & 已知限制
 
-What's solid, and what to watch out for.
-
-**Stable and E2E-tested**
+**已稳定 + E2E 通过**
 
 - `anet hub start` / `hub dashboard` / `login` / `register` / `whoami` / `logout`
 - `anet node create / start / stop / delete / ls / logs`
-- `claude-agent-sdk` with all six providers above (Docker E2E)
-- Dashboard Chat — markdown, optimistic echo, source labels, error fallback, history persistence
-- Multi-agent peer dispatch via `get_all_status` + `send_task` + `get_task`
-- LAN-shared hub with `--host 0.0.0.0`
+- `claude-agent-sdk` + 上面六家 Provider（Docker E2E）
+- Dashboard Chat —— markdown 渲染、乐观回显、来源标签、错误兜底、历史持久
+- 多 Agent 互派（`get_all_status` + `send_task` + `get_task`）
+- 局域网共用 Hub（`--host 0.0.0.0`）
 
-**Works, but not yet covered by full E2E**
+**能跑但缺 E2E 回归**
 
-- `claude-code-cli` runtime — runs locally; no automated regression yet
-- `codex-sdk` runtime — unit-tested; live OAuth path not in CI
-- `anet network create` and cross-user network sharing — code merged, no E2E
-- `anet channel add telegram | wechat | feishu` — Telegram path is exercised, others are not
+- `claude-code-cli` runtime —— 本机能跑，未自动化
+- `codex-sdk` runtime —— 单元测试通过，真实 OAuth 流程未上 CI
+- `anet network create` + 跨用户网络共享 —— 代码已合并，未做 E2E
+- `anet channel add telegram | wechat | feishu` —— Telegram 路径已跑通，其他未跑
 
-**Not yet implemented**
+**未实现**
 
-- `anet license` / `anet activate` — placeholders for a future paid tier
-- Hosted hub / public demo site — local + LAN only for now
-
----
-
-## Contributing
-
-PRs welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, branch naming, and the test matrix layout. By contributing you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md).
-
-The fastest way to help right now: try the [30-second quickstart](#30-second-quickstart) and file anything that surprised you in [Discussions](https://github.com/sleep2agi/agent-network/discussions) or [Issues](https://github.com/sleep2agi/agent-network/issues).
+- `anet license` / `anet activate` —— 给未来付费版预留的占位命令
+- 云托管 Hub / 公开 Demo 站点 —— 当前只支持本地 / 局域网
 
 ---
 
-## Security
+## 贡献
 
-Found a vulnerability? Please **don't** open a public issue. Use [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) instead. See [SECURITY.md](./SECURITY.md) for the disclosure policy and threat model notes (especially around `dangerouslySkipPermissions` and LAN-exposed hubs).
+欢迎 PR。环境搭建、分支命名、测试矩阵详见 [CONTRIBUTING.md](./CONTRIBUTING.md)。提交即代表同意 [Code of Conduct](./CODE_OF_CONDUCT.md)。
+
+最快帮上忙的方式：跑一遍上面的 [30 秒上手](#30-秒上手)，把任何"咦？"的地方发到 [Discussions](https://github.com/sleep2agi/agent-network/discussions) 或 [Issues](https://github.com/sleep2agi/agent-network/issues)。
 
 ---
 
-## Ecosystem
+## 安全
 
-Projects built on Agent Network or using anet to ship faster — full list at <https://anet.sh/ecosystem>.
+发现漏洞？**别**开公开 issue。请用 [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) 私下报告。完整披露流程和威胁模型（特别是 `dangerouslySkipPermissions` 和局域网 Hub 暴露相关）见 [SECURITY.md](./SECURITY.md)。
 
-| Project | What it is |
+---
+
+## 生态项目
+
+基于 Agent Network 构建 / 用 anet 提升生产力的项目 —— 完整列表 <https://anet.sh/ecosystem>。
+
+| 项目 | 是什么 |
 |---|---|
-| 🌀 [Agent Network](https://github.com/sleep2agi/agent-network) | This very project — **dogfood**: agent-network is developed using agent-network agents in mesh |
-| 📑 [PaperScope.ai](https://paperscope.ai) | Intelligent AI research paper discovery and explanation |
-| 📊 [AI Insight](https://ai-insight.org) | Daily AI industry intelligence — research reports + signal-rich aggregator |
+| 🌀 [Agent Network](https://github.com/sleep2agi/agent-network) | 你正在看的这个项目本身 —— **dogfood**：agent-network 也是用 agent-network 开发的 |
+| 📑 [PaperScope.ai](https://paperscope.ai) | 智能 AI 论文发现与解读平台 |
+| 📊 [AI Insight](https://ai-insight.org) | 每日更新的 AI 行业研报与高信噪比资讯聚合 |
 
-Using anet in your project? Open a PR to [`docs-site/docs/ecosystem.md`](./docs-site/docs/ecosystem.md) or post in [Discussions](https://github.com/sleep2agi/agent-network/discussions).
-
----
-
-## Resources
-
-- [anet.sh](https://anet.sh) — full documentation site
-- [Getting started](https://anet.sh/guide/getting-started) — verified end-to-end path
-- [Runtimes](https://anet.sh/guide/runtimes) — Claude Code CLI vs Agent SDK vs Codex
-- [Architecture](https://anet.sh/guide/architecture) — MCP, SSE, REST, SQLite schema
-- [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) — package index
-- [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — questions, ideas
-- [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) — bug reports
+你的项目用了 anet？提个 PR 到 [`docs-site/docs/ecosystem.md`](./docs-site/docs/ecosystem.md) 或发到 [Discussions](https://github.com/sleep2agi/agent-network/discussions)。
 
 ---
 
-## Join us / 加入社群
+## 资源
 
-Scan the QR code to join the **Agent Network 社区交流群** on WeChat — design discussions, troubleshooting, weekly updates.
+- [anet.sh](https://anet.sh) —— 完整文档站
+- [上手指南](https://anet.sh/guide/getting-started) —— 已 E2E 验证的全链路
+- [节点 Runtime](https://anet.sh/guide/runtimes) —— Claude Code CLI vs Agent SDK vs Codex
+- [架构概览](https://anet.sh/guide/architecture) —— MCP / SSE / REST / SQLite schema
+- [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) —— 包索引
+- [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) —— 问答 / 想法
+- [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) —— bug 反馈
+
+---
+
+## 加入社群 / Join us
+
+扫码加入 **Agent Network 社区交流群** —— 设计讨论、排查问题、版本动态：
 
 <p align="center">
-  <img src="https://anet.sh/community/wechat-group.jpg" alt="Agent Network WeChat group" width="320">
+  <img src="https://anet.sh/community/wechat-group.jpg" alt="Agent Network 微信群" width="320">
 </p>
 
-> The QR rotates every 7 days. If it's expired, the freshest one is always at <https://anet.sh/community/wechat-group.jpg>.
+> 二维码每 7 天轮换一次，过期了到 <https://anet.sh/community/wechat-group.jpg> 拿最新版（地址不变）。
 
-Prefer English / async? Use [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions).
+英文 / 异步用户：[GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions)。
 
 ---
 
-## Credits
+## 鸣谢
 
-Built and maintained by [@sleep2agi](https://github.com/sleep2agi). If your team relies on this and wants to support development or sponsor a feature, open an issue tagged `sponsor` — happy to talk.
+由 [@sleep2agi](https://github.com/sleep2agi) 构建和维护。如果你的团队在用、想资助开发或赞助某个 feature，开一个 `sponsor` 标签的 issue，欢迎聊。
 
 ## License
 

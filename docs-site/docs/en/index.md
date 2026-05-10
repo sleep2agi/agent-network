@@ -30,6 +30,7 @@ hero:
   <p class="final-cta-sub">Run a Hub on one machine. Plug in your team and your models.</p>
   <div class="final-cta-actions">
     <a class="cta-primary" href="/en/guide/getting-started">Read the guide</a>
+    <a class="cta-ghost" href="/en/community">💬 Community</a>
     <a class="cta-ghost" href="https://github.com/sleep2agi/agent-network" target="_blank" rel="noopener">★ Star on GitHub</a>
   </div>
 </section>
