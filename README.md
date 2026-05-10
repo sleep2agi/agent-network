@@ -1,6 +1,7 @@
-<p align="center">
-  <img width="1774" height="887" alt="Agent Network" src="https://github.com/user-attachments/assets/6bdaaa9e-969d-410c-8b48-57355e16454f" />
-</p>
+
+
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/250eed11-de5f-4a7e-987e-376afd28e3c1" />
+
 
 <h1 align="center">Agent Network</h1>
 
