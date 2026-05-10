@@ -47,6 +47,16 @@
 >
 > **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
 
+> [!WARNING]
+> **公网自部署有风险，先看完这一段再开放安全组。**
+> 当前默认配置只为**本机使用**优化：
+> 1. **默认账号** `admin / anethub` —— 任何公网部署都必须立刻 `anet passwd` 改密，否则被人扫到端口就能进
+> 2. **Hub 默认绑 `127.0.0.1`** —— 公网模式（`--host 0.0.0.0`）必须配反代（Caddy / Nginx）+ TLS，不要把 9200 / 3000 直接挂公网
+> 3. **多租户隔离不完整** —— 当前任意有效 token 可读全局任务 / 订阅其他 alias SSE，多用户共享 Hub 之前先 review 你信谁
+> 4. **tmux 控制面** —— 在 open mode（无 token）下可远程读写终端，等同 RCE。生产环境务必设置 `COMMHUB_AUTH_TOKEN` 并把 tmux 接口绑 localhost
+>
+> 完整安全审计 + 修复清单：[`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md)（v0.6.1 stable 会修掉 P0）
+
 ---
 
 ## 30 秒上手

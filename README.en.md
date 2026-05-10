@@ -51,6 +51,16 @@
 >
 > **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
 
+> [!WARNING]
+> **Self-hosting on the public internet has real risks. Read this before opening firewall ports.**
+> The current defaults are tuned for **local use**:
+> 1. **Default credentials** `admin / anethub` — any public deployment must `anet passwd` immediately, or anyone scanning your port can walk in
+> 2. **Hub binds to `127.0.0.1` by default** — for public mode (`--host 0.0.0.0`), put a reverse proxy with TLS in front (Caddy / Nginx). Never expose 9200 / 3000 directly
+> 3. **Multi-tenant isolation is incomplete** — any valid token can read global tasks / subscribe to other aliases via SSE. Vet who shares a Hub with you before going multi-user
+> 4. **The tmux control plane** — in open mode (no token), it allows remote terminal read/write, effectively RCE. Always set `COMMHUB_AUTH_TOKEN` in production and bind tmux endpoints to localhost
+>
+> Full security audit + fix list: [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md) (v0.6.1 stable will close the P0 items)
+
 ---
 
 ## 30-second quickstart
