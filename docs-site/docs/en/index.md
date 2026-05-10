@@ -5,7 +5,7 @@ titleTemplate: Multi-Agent, One Command
 hero:
   name: Agent Network
   text: Multi-Agent, One Command
-  tagline: Install one npm package and let Claude, GPT, and MiniMax work together on your laptop.
+  tagline: Burn tokens efficiently. Drive 100+ Agent armies. Multiply your productivity.
   actions:
     - theme: brand
       text: Get Started →

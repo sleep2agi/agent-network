@@ -5,7 +5,7 @@ titleTemplate: 多 Agent，一行命令
 hero:
   name: Agent Network
   text: 多 Agent，一行命令
-  tagline: 装一个 npm 包，让 Claude / GPT / MiniMax 在你电脑上一起干活。
+  tagline: 高效燃烧 Tokens 驱动 100+ Agent 军团提升你的生产力
   actions:
     - theme: brand
       text: 30 秒上手 →
