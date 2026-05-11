@@ -132,7 +132,9 @@ function normalizeStoredProfile(id: string, project: Record<string, any>, global
     alias: nodeName,
     session: project.session || project.resume || project.sessionId || "",
     hub: project.hub || gc.hub || "",
-    token: project.token || gc.token || "",
+    // Node tokens are per-node (ntok_). Do not fall back to the global user
+    // token; doing so silently corrupts the SSE handshake.
+    token: project.token || "",
     channels: Array.isArray(project.channels) ? project.channels : [],
     env: project.env && typeof project.env === "object" ? { ...project.env } : {},
     flags: project.flags && typeof project.flags === "object" ? { ...project.flags } : {},
@@ -899,6 +901,35 @@ function saveCreatedNode(id: string, profile: Profile) {
   saveProfile(id, profile);
 }
 
+async function requestNodeToken(profile: Profile, id: string): Promise<string> {
+  const gc = loadGlobal();
+  const hub = profile.hub || gc.hub;
+  const networkId = profile.network_id || gc.network_id;
+  const userToken = gc.token;
+  const nodeName = profile.node_name || profile.name || profile.alias || id;
+  if (!hub) throw new Error("missing hub; run: anet init");
+  if (!userToken) throw new Error("missing login token; run: anet login");
+  if (!networkId) throw new Error("missing network_id; run: anet login");
+
+  const res = await fetch(`${hub}/api/auth/node-token`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${userToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ network_id: networkId, node_name: nodeName }),
+  });
+  const body = await res.json() as any;
+  if (!body?.ok || !body.token) {
+    throw new Error(`node-token request failed: ${body?.error || res.status}`);
+  }
+  return body.token;
+}
+
+async function ensureNodeToken(profile: Profile, id: string): Promise<Profile> {
+  const token = profile.token || "";
+  if (token.startsWith("ntok_")) return profile;
+  profile.token = await requestNodeToken(profile, id);
+  return profile;
+}
+
 function writeLegacyProjectAlias(alias: string) {
   const channelDir = join(home, ".claude", "channels", "commhub");
   const projectKey = process.cwd().replace(/\//g, "-");
@@ -1056,7 +1087,7 @@ API key:
     if (token) opts._envs.push(`ANTHROPIC_AUTH_TOKEN=${token}`);
   }
 
-  const profile = createProfileFromOpts(id, opts);
+  const profile = await ensureNodeToken(createProfileFromOpts(id, opts), id);
 
   const addTelegram = await ask("Add Telegram channel? (y/n)", "n");
   let telegramConfig: { botToken: string; allowId: string } | null = null;
@@ -1369,7 +1400,7 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
 
   const hub = gc.hub; // already validated above
 
-  const profile: Profile = {
+  let profile: Profile = {
     anet_version: "0.0.23",
     node_id: generateNodeId(),
     node_name: alias,
@@ -1387,6 +1418,7 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
     },
   };
 
+  profile = await ensureNodeToken(profile, id);
   saveProfile(id, profile);
   closeRL();
   console.log(`\n✅ Profile "${id}" saved\n`);
@@ -1507,14 +1539,18 @@ async function launchAgent(id: string, forceNewSession = false) {
   // versions cause cryptic "SSE 401" loops, so reject them up-front.
   const token = profile.token || "";
   if (!token) {
-    console.error(`[anet] ❌ No token in node config. Recreate the node:`);
-    console.error(`[anet]   anet node delete ${nodeId}`);
-    console.error(`[anet]   anet node create ${nodeId}`);
+    console.error(`[anet] ❌ Node config has no token but SSE needs ntok_.`);
+    console.error(`[anet]    Run \`anet doctor --fix\` to repair (re-requests ntok_ from hub).`);
+    console.error(`[anet]    Or recreate manually:`);
+    console.error(`[anet]      anet node delete ${nodeId}`);
+    console.error(`[anet]      anet node create ${nodeId}`);
     process.exit(1);
   }
   if (token.startsWith("utok_") || token.startsWith("atok_")) {
-    console.error(`[anet] ❌ Node has a user token (${token.slice(0, 5)}_…) but SSE needs a network token (ntok_).`);
-    console.error(`[anet]    This usually means the node was created on an older version. Recreate it:`);
+    const prefix = token.slice(0, 4);
+    console.error(`[anet] ❌ Node config has a ${prefix}_ token but SSE needs ntok_.`);
+    console.error(`[anet]    Run \`anet doctor --fix\` to repair (re-requests ntok_ from hub).`);
+    console.error(`[anet]    Or recreate manually:`);
     console.error(`[anet]      anet node delete ${nodeId}`);
     console.error(`[anet]      anet node create ${nodeId}`);
     process.exit(1);
@@ -1628,7 +1664,7 @@ async function resumeCommand() {
   if (!resolved) validateNodeName(nodeId);
   if (!profile) {
     const createOpts = { ...opts, session: sessionId, runtime: opts.runtime || "claude-code-cli" } as unknown as ReturnType<typeof parseOpts>;
-    profile = createProfileFromOpts(nodeId, createOpts);
+    profile = await ensureNodeToken(createProfileFromOpts(nodeId, createOpts), nodeId);
     saveProfile(nodeId, profile);
     console.log(`[anet] Created node "${nodeId}"`);
   } else {
@@ -1643,6 +1679,7 @@ async function resumeCommand() {
     }
     const stored = loadStoredProfile(nodeId) || profile;
     stored.session = sessionId;
+    await ensureNodeToken(stored, nodeId);
     saveProfile(nodeId, stored);
   }
 
@@ -1842,7 +1879,7 @@ async function serverCommand() {
       // cache the first-resolved version and may not refetch even when the
       // tag points at something newer; specifying the exact version forces
       // a fresh install whenever this string changes.)
-      const PINNED_SERVER_VERSION = "0.6.0";
+      const PINNED_SERVER_VERSION = "0.7.0-preview.0";
       child = spawn("bunx", ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`], { env, stdio: "pipe", shell: true });
 
       // Wait for server with polling
@@ -2045,7 +2082,7 @@ async function serverCommand() {
 
     // Try npx first
     // Pin Dashboard version. Bump whenever the Dashboard package is updated.
-    const PINNED_DASHBOARD_VERSION = "0.3.2";
+    const PINNED_DASHBOARD_VERSION = "0.3.3-preview.0";
     const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit", shell: true });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
@@ -2204,7 +2241,7 @@ anet session <command>
   }
 }
 
-function renameCommand() {
+async function renameCommand() {
   const fromRef = args[1];
   const newName = args[2];
   if (!fromRef || !newName) {
@@ -2231,6 +2268,7 @@ anet node rename <node-id|node-name> <new-node-name>
   const stored = loadStoredProfile(oldId) || resolved.profile;
   stored.node_name = newName;
   stored.alias = newName;
+  await ensureNodeToken(stored, oldId);
 
   const oldDir = join(nodesDir(), oldId);
   const newDir = join(nodesDir(), newName);
@@ -2423,6 +2461,7 @@ Example:
     const channelDir = writeTelegramChannelConfig(nodeId, botToken, allowId);
 
     attachChannel(storedProfile, "telegram");
+    await ensureNodeToken(storedProfile, nodeId);
     saveProfile(nodeId, storedProfile);
 
     console.log(`\n✅ ${type} channel added to "${nodeDisplayName(nodeId, profile)}"`);
@@ -4240,6 +4279,7 @@ type NodeIssue =
   | { kind: "legacy_runtime_name"; from: string }
   | { kind: "stale_dev_hub"; current: string }
   | { kind: "missing_token" }
+  | { kind: "user_token"; prefix: string }
   | { kind: "untyped_token"; preview: string }
   | { kind: "missing_node_id" };
 
@@ -4259,8 +4299,11 @@ function diagnoseNode(id: string): { raw: Record<string, any>; issues: NodeIssue
   if (raw.hub && (STALE_HUBS.includes(raw.hub) || (gc.hub && raw.hub !== gc.hub))) {
     issues.push({ kind: "stale_dev_hub", current: raw.hub });
   }
-  if (!raw.token) issues.push({ kind: "missing_token" });
-  else if (!String(raw.token).startsWith("ntok_") && !String(raw.token).startsWith("utok_") && !String(raw.token).startsWith("atok_")) {
+  const rawToken = String(raw.token || "");
+  if (!rawToken) issues.push({ kind: "missing_token" });
+  else if (rawToken.startsWith("utok_") || rawToken.startsWith("atok_")) {
+    issues.push({ kind: "user_token", prefix: rawToken.slice(0, 4) });
+  } else if (!rawToken.startsWith("ntok_")) {
     issues.push({ kind: "untyped_token", preview: String(raw.token).slice(0, 8) + "…" });
   }
   if (!raw.node_id) issues.push({ kind: "missing_node_id" });
@@ -4291,10 +4334,9 @@ async function migrateNode(id: string, opts: { hub: string; utok: string; networ
   if (!raw.node_id) { raw.node_id = `n_${Math.random().toString(16).slice(2, 10)}`; changes.push(`node_id=${raw.node_id}`); }
   if (!raw.node_name) raw.node_name = raw.name || id;
 
-  // Token: if missing or untyped, request a fresh ntok_ from hub
+  // Token: if missing, user-scoped, or untyped, request a fresh ntok_ from hub
   const tokenStr = String(raw.token || "");
-  const tokenIsTyped = tokenStr.startsWith("ntok_") || tokenStr.startsWith("utok_") || tokenStr.startsWith("atok_");
-  if (!tokenStr || !tokenIsTyped) {
+  if (!tokenStr || !tokenStr.startsWith("ntok_")) {
     try {
       const res = await fetch(`${opts.hub}/api/auth/node-token`, {
         method: "POST",
@@ -4370,6 +4412,7 @@ async function doctorCommand() {
             case "legacy_runtime_name": return `runtime '${issue.from}' is V2; should be 'claude-code-cli'`;
             case "stale_dev_hub": return `hub='${issue.current}' doesn't match global hub`;
             case "missing_token": return "no token field — V3 SSE requires ntok_";
+            case "user_token": return `token is ${issue.prefix}_ user-scoped; SSE requires ntok_`;
             case "untyped_token": return `token has no V3 prefix (preview '${issue.preview}')`;
             case "missing_node_id": return "no node_id field";
           }
@@ -4445,22 +4488,22 @@ switch (command) {
   case "node": // anet node create/start/stop/resume/delete/ls/rename
     switch (args[1]) {
       case "create": args.splice(0, 1); await createCommand(); break;
-      case "start": args.splice(0, 1); startCommand(); break;
+      case "start": args.splice(0, 1); await startCommand(); break;
       case "stop": args.splice(0, 1); await stopCommand(); break;
-      case "resume": args.splice(0, 1); resumeCommand(); break;
+      case "resume": args.splice(0, 1); await resumeCommand(); break;
       case "delete": args.splice(0, 1); await deleteCommand(); break;
-      case "rename": args.splice(0, 1); renameCommand(); break;
+      case "rename": args.splice(0, 1); await renameCommand(); break;
       case "ls": case "list": lsCommand(); break;
       default: console.log(`Usage: anet node <create|start|stop|resume|delete|ls|rename> [name]`); break;
     }
     break;
-  case "start": startCommand(); break;   // backward compat
-  case "resume": resumeCommand(); break; // backward compat
-  case "rename": renameCommand(); break; // backward compat
+  case "start": await startCommand(); break;   // backward compat
+  case "resume": await resumeCommand(); break; // backward compat
+  case "rename": await renameCommand(); break; // backward compat
   case "stop": await stopCommand(); break; // backward compat
   case "delete": await deleteCommand(); break; // backward compat
   case "import": importCommand(); break;
-  case "channel": channelCommand(); break;
+  case "channel": await channelCommand(); break;
   case "setup": await setupCommand(); break;
   case "upgrade": upgradeCommand(); break;
   case "session": sessionCommand(); break;
@@ -4489,6 +4532,6 @@ switch (command) {
   }
   case "--help": case "-h": case undefined: printHelp(); break;
   default:
-    if (resolveNodeRef(command)) { args.unshift("start"); startCommand(); }
+    if (resolveNodeRef(command)) { args.unshift("start"); await startCommand(); }
     else { console.error(`Unknown: ${command}`); printHelp(); process.exit(1); }
 }

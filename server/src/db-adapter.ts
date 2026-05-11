@@ -110,16 +110,13 @@ export function sqliteToPostgres(sql: string): string {
 }
 
 /**
- * PostgreSQL adapter using a persistent worker subprocess.
+ * PostgreSQL adapter using a synchronous subprocess bridge.
  *
- * Architecture: a single node child process holds a pg.Pool connection.
- * Queries are sent via stdin (JSON line), responses read from stdout.
- * Bun.spawnSync is used per-query for sync blocking, but the PG
- * connection is persistent (no reconnect overhead per query).
- *
- * For full production use, the adapter interface should be async.
- * This sync bridge works because all MCP handlers are async —
- * the future migration is adding `await` before db calls.
+ * TODO(P0-4): this is not transaction-safe. querySync currently starts a
+ * fresh `node -e` process for every statement, so BEGIN/COMMIT/ROLLBACK do
+ * not share one backend connection. PostgreSQL support is demoted behind
+ * SQLite for now; before advertising it as production-ready, replace this
+ * bridge with a long-lived worker or make DbAdapter async and use pg directly.
  */
 export class PgAdapter implements DbAdapter {
   readonly dialect = "postgres" as const;
@@ -196,6 +193,7 @@ export class PgAdapter implements DbAdapter {
   }
 
   transaction<T>(fn: () => T): T {
+    // Not atomic for PostgreSQL until P0-4 is implemented; see class TODO.
     this.querySync("BEGIN");
     try {
       const result = fn();
