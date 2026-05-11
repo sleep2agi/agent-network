@@ -1,98 +1,52 @@
-<script setup lang="ts">
-// Each card carries: tone (color theme), icon, title, oneLiner, and a slot-style mini illustration
-</script>
-
 <template>
   <section class="fg">
     <div class="fg-grid">
-      <!-- 1. 一行装完 -->
-      <article class="fg-card" data-tone="emerald">
-        <div class="fg-stripe"></div>
-        <div class="fg-icon">🚀</div>
+      <article class="fg-card">
+        <div class="fg-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </div>
         <h3 class="fg-title">一行装完</h3>
-        <p class="fg-desc">npm 一条命令把 Hub + Dashboard + Agent 全部就位。</p>
-        <div class="fg-mini fg-mini-term">
-          <div class="fg-mini-head">
-            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-          </div>
-          <div class="fg-mini-body">
-            <span class="prompt">$</span> <span class="cmd">npm</span> i -g <span class="pkg">@sleep2agi/agent-network</span>
-          </div>
-        </div>
+        <p class="fg-desc">npm i -g 一条命令把 Hub + Dashboard + Agent 三件套就位，零额外配置。</p>
       </article>
 
-      <!-- 2. 三种 Runtime -->
-      <article class="fg-card" data-tone="brand">
-        <div class="fg-stripe"></div>
-        <div class="fg-icon">🧠</div>
+      <article class="fg-card">
+        <div class="fg-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 20h8M12 18v2"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="11" r="1"/><circle cx="16" cy="11" r="1"/></svg>
+        </div>
         <h3 class="fg-title">三种 Runtime</h3>
-        <p class="fg-desc">同一 Hub 跑三种 Agent 内核，按场景挑。</p>
-        <div class="fg-mini fg-mini-chips">
-          <span class="rt-chip rt-1">⌨ Claude Code CLI</span>
-          <span class="rt-chip rt-2">◆ Claude Agent SDK</span>
-          <span class="rt-chip rt-3">◇ Codex SDK</span>
-        </div>
+        <p class="fg-desc">同一 Hub 跑 Claude Code CLI、Claude Agent SDK、Codex SDK 三种内核，按角色挑。</p>
       </article>
 
-      <!-- 3. 一键 Demo -->
-      <article class="fg-card" data-tone="orange">
-        <div class="fg-stripe"></div>
-        <div class="fg-icon">🎙️</div>
+      <article class="fg-card">
+        <div class="fg-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+        </div>
         <h3 class="fg-title">一键 Demo</h3>
-        <p class="fg-desc">6 角色辩论赛 / 4 角色社媒工厂，一行命令 10 分钟跑完。</p>
-        <div class="fg-mini fg-mini-term">
-          <div class="fg-mini-head">
-            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-          </div>
-          <div class="fg-mini-body">
-            <span class="prompt">$</span> <span class="cmd">anet</span> demo <span class="arg">debate</span>
-          </div>
-        </div>
+        <p class="fg-desc">anet demo debate 6 角色辩论赛、anet demo socialmedia 4 角色社媒工厂，10 分钟跑完。</p>
       </article>
 
-      <!-- 4. 跨机器组网 -->
-      <article class="fg-card" data-tone="cyan">
-        <div class="fg-stripe"></div>
-        <div class="fg-icon">🌐</div>
+      <article class="fg-card">
+        <div class="fg-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        </div>
         <h3 class="fg-title">跨机器组网</h3>
-        <p class="fg-desc">Hub 绑 0.0.0.0，其他机器 anet login --hub 加入，SSE 实时双向。</p>
-        <svg class="fg-mini fg-mini-mesh" viewBox="0 0 200 60" aria-hidden="true">
-          <line x1="40" y1="30" x2="100" y2="15" />
-          <line x1="40" y1="30" x2="100" y2="45" />
-          <line x1="100" y1="15" x2="160" y2="30" />
-          <line x1="100" y1="45" x2="160" y2="30" />
-          <line x1="100" y1="15" x2="100" y2="45" />
-          <circle cx="40" cy="30" r="6" />
-          <circle cx="100" cy="15" r="6" />
-          <circle cx="100" cy="45" r="6" />
-          <circle cx="160" cy="30" r="6" />
-        </svg>
+        <p class="fg-desc">Hub 起在公网或局域网，其他机器 anet login --hub 加入，SSE 实时双向。</p>
       </article>
 
-      <!-- 5. 自动迁移 -->
-      <article class="fg-card" data-tone="purple">
-        <div class="fg-stripe"></div>
-        <div class="fg-icon">🩺</div>
+      <article class="fg-card">
+        <div class="fg-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3.5-7.1M21 4v5h-5"/></svg>
+        </div>
         <h3 class="fg-title">自动迁移</h3>
-        <p class="fg-desc">老 V2 配置一键检测 + 修复，session 历史不丢。</p>
-        <div class="fg-mini fg-mini-diff">
-          <div class="diff-line minus"><span class="sigil">-</span> alias: <span class="str">"指挥室"</span></div>
-          <div class="diff-line plus"><span class="sigil">+</span> name:  <span class="str">"指挥室"</span></div>
-          <div class="diff-line plus"><span class="sigil">+</span> token: <span class="str">"ntok_..."</span></div>
-        </div>
+        <p class="fg-desc">anet doctor --fix 一键检测 + 修复老 V2 配置，session 历史不丢。</p>
       </article>
 
-      <!-- 6. 本地优先 -->
-      <article class="fg-card" data-tone="pink">
-        <div class="fg-stripe"></div>
-        <div class="fg-icon">🔒</div>
-        <h3 class="fg-title">本地优先</h3>
-        <p class="fg-desc">SQLite 跑你自己机器，可换 PostgreSQL，可选 ntok_ 网络隔离。</p>
-        <div class="fg-mini fg-mini-stack">
-          <span class="stack-row"><span class="kbd">SQLite</span><span class="muted">~/.commhub/commhub.db</span></span>
-          <span class="stack-row"><span class="kbd">utok_</span><span class="muted">user-scoped</span></span>
-          <span class="stack-row"><span class="kbd">ntok_</span><span class="muted">network-scoped</span></span>
+      <article class="fg-card">
+        <div class="fg-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4"/></svg>
         </div>
+        <h3 class="fg-title">本地优先</h3>
+        <p class="fg-desc">SQLite 跑你机器上，可换 PostgreSQL，可选 ntok_ 网络隔离，零遥测。</p>
       </article>
     </div>
   </section>
