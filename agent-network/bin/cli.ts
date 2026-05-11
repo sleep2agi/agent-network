@@ -4589,11 +4589,13 @@ async function doctorCommand() {
   // otherwise valid, only the token string is stale. We patch only the token
   // field, preserving session_id / channels / runtime / everything else.
   if (fix && gc.hub && gc.token && gc.network_id) {
+    // Probe ALL nodes with ntok_, regardless of other issues — the migrateNode
+    // pass above only re-issues when token is missing / utok_ / atok_ /
+    // untyped; a hub-rejected ntok_ slips past it (Vincent reported this).
     const staleNtokNodes: string[] = [];
     for (const id of ids) {
       const p = loadProfile(id);
       if (!p?.token?.startsWith("ntok_")) continue;
-      if (needsMigration.includes(id)) continue;
       try {
         const r = await fetch(`${gc.hub}/api/auth/me`, {
           headers: { Authorization: `Bearer ${p.token}` },
