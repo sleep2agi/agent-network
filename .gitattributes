@@ -1,0 +1,30 @@
+# Linguist overrides — keep GitHub's "Languages" bar honest.
+#
+# The core of this project is TypeScript (cli, server, node, dashboard).
+# But the repo also ships a lot of shell:
+#   - tests/**/*.sh           Docker E2E harnesses (47 files, one per test)
+#   - demos/**/*.sh           one-click installers / demos
+#   - docs-site/docs/public/  curl-pipe-sh installers served at anet.sh
+#   - scripts/*.sh            ops / release scripts
+#   - examples/**/*.sh        copy-pasteable user examples
+#
+# These are infrastructure / tooling, not the product. Tell linguist
+# to treat them as vendored so they don't dominate the language bar.
+
+tests/**/*.sh           linguist-vendored
+demos/*.sh              linguist-vendored
+docs-site/docs/public/*.sh   linguist-vendored
+scripts/*.sh            linguist-vendored
+examples/**/*.sh        linguist-vendored
+
+# Generated / built assets — never count
+docs-site/docs/.vitepress/dist/    linguist-generated
+agent-network/dist/                linguist-generated
+agent-node/dist/                   linguist-generated
+
+# Lock files / package metadata noise
+**/bun.lock             linguist-generated
+**/package-lock.json    linguist-generated
+
+# Archive: kept for history, not current product
+docs/archive/           linguist-documentation
