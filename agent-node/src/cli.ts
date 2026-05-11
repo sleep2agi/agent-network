@@ -168,9 +168,19 @@ const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
 // node's network-bound ntok_ when users had a leftover legacy export in
 // their shell — replies then landed in the wrong network and Dashboard
 // never saw them.
-const AUTH_TOKEN = fileConfig.token || globalConfig.token || process.env.COMMHUB_TOKEN || "";
+let AUTH_TOKEN = fileConfig.token || globalConfig.token || process.env.COMMHUB_TOKEN || "";
 if (process.env.COMMHUB_TOKEN && fileConfig.token && process.env.COMMHUB_TOKEN !== fileConfig.token) {
   console.warn(`[${ALIAS}] ⚠ COMMHUB_TOKEN env override ignored (using node config token). Unset COMMHUB_TOKEN to silence this warning.`);
+}
+function reloadNodeToken(): boolean {
+  if (!configFilePath) return false;
+  const freshConfig = loadJson(configFilePath);
+  const freshToken = typeof freshConfig?.token === "string" ? freshConfig.token : "";
+  if (!freshToken || freshToken === AUTH_TOKEN) return false;
+  AUTH_TOKEN = freshToken;
+  fileConfig.token = freshToken;
+  warn(`reloaded node token from ${configFilePath}`);
+  return true;
 }
 const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
@@ -1087,7 +1097,14 @@ async function connectSSE() {
       if (AUTH_TOKEN) sseHeaders["Authorization"] = `Bearer ${AUTH_TOKEN}`;
       const res = await fetch(sseUrl, { headers: sseHeaders });
       if (!res.ok || !res.body) {
-        if (res.status === 401) error(`SSE 401: token 无效或未配置。检查 ~/.anet/config.json 的 token 字段`);
+        if (res.status === 401) {
+          if (reloadNodeToken()) {
+            warn(`SSE 401: ntok_ 已刷新，正在用 .anet/nodes/${ALIAS}/config.json 里的新 token 重试`);
+            await new Promise(r => setTimeout(r, 500));
+            continue;
+          }
+          error(`SSE 401: ntok_ 已失效（hub DB 可能被重置或 token 被撤销）。试 \`anet doctor --fix\``);
+        }
         else warn(`SSE failed: ${res.status}`);
         await new Promise(r => setTimeout(r, delay)); delay = Math.min(delay * 1.5, 60_000); continue;
       }

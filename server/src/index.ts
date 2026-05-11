@@ -74,12 +74,12 @@ setInterval(() => {
 }, 300000);
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null): McpServer {
+function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false): McpServer {
   const server = new McpServer({
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias);
+  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork);
   return server;
 }
 
@@ -318,6 +318,7 @@ Bun.serve({
       // utok_ (user token, not network-bound) is allowed — the tool layer
       // scopes to the user's accessible networks. Without this Dashboard
       // (which logs in as a user) cannot call send_task.
+      const token = requestToken(req);
       const authCtx = resolveRequestAuth(req);
       const enforceNetId = authCtx?.networkId || null;
       // Derive the calling alias from the token name (e.g., 'node:视频审查')
@@ -328,7 +329,7 @@ Bun.serve({
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias);
+      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"));
       await mcpServer.connect(transport);
       const response = await transport.handleRequest(req);
       // Disconnect after response to prevent McpServer leak
@@ -343,6 +344,7 @@ Bun.serve({
       const authErr = requireAuth(req);
       if (authErr) return authErr;
       const sessionName = decodeURIComponent(eventsMatch[1]);
+      const token = requestToken(req);
       const authCtx = resolveRequestAuth(req);
       const scopedNetId = authCtx?.networkId || url.searchParams.get("network_id");
       if (!authCtx && isLegacyAuthToken(req)) {
@@ -355,7 +357,7 @@ Bun.serve({
         }
         return createSSEStream(sessionName, scopedNetId);
       }
-      if (!authCtx || !scopedNetId) {
+      if (!token?.startsWith("ntok_") || !authCtx || !scopedNetId) {
         return withCors(req, Response.json({ ok: false, error: "network-scoped token required for SSE" }, { status: 403 }));
       }
       const role = getUserNetworkRole(authCtx.userId, scopedNetId);
@@ -755,7 +757,14 @@ Bun.serve({
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC";
       const sessions = db.all(sql, ...params);
-      return withCors(req, Response.json({ ok: true, sessions }));
+      const summary = sessions.reduce((acc: any, session: any) => {
+        const raw = String(session.status || "").toLowerCase();
+        if (raw === "offline") acc.offline++;
+        else if (["working", "blocked", "error", "waiting_input", "running", "busy"].includes(raw)) acc.working++;
+        else acc.idle++;
+        return acc;
+      }, { idle: 0, working: 0, offline: 0, total: sessions.length });
+      return withCors(req, Response.json({ ok: true, sessions, summary }));
     }
 
     // ── REST: send task ──

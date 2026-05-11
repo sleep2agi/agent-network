@@ -8,7 +8,7 @@ function ts(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
-export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null) {
+export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false) {
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
   // an agent's send_task call always claimed from='hub' and peer agents
@@ -113,6 +113,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
+      if (!callerTokenIsNetwork || !enforceNetworkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "network_token_required" }) }] };
+      }
       if (!canWrite(effectiveNetId)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "permission_denied" }) }] };
       }

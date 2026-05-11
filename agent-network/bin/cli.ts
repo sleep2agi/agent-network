@@ -2704,12 +2704,23 @@ async function statusCommand() {
     const sse = healthRes.sse_sessions || {};
     const tasks = tasksRes.tasks || [];
 
-    const idle = sessions.filter((s: any) => s.status === "idle");
-    const working = sessions.filter((s: any) => s.status === "working");
-    const offline = sessions.filter((s: any) => s.status === "offline");
+    const classifyStatus = (s: any) => {
+      const raw = String(s?.status || "").toLowerCase();
+      if (raw === "offline") return "offline";
+      if (["working", "blocked", "error", "waiting_input", "running", "busy"].includes(raw)) return "working";
+      return "idle";
+    };
+    const summary = statusRes.summary || sessions.reduce((acc: any, s: any) => {
+      acc[classifyStatus(s)]++;
+      acc.total++;
+      return acc;
+    }, { idle: 0, working: 0, offline: 0, total: 0 });
+    const idle = sessions.filter((s: any) => classifyStatus(s) === "idle");
+    const working = sessions.filter((s: any) => classifyStatus(s) === "working");
+    const offline = sessions.filter((s: any) => classifyStatus(s) === "offline");
 
     console.log(`\n  CommHub: ${hub}`);
-    console.log(`  Agents: ${idle.length} idle, ${working.length} working, ${offline.length} offline`);
+    console.log(`  Agents: ${summary.idle || 0} idle, ${summary.working || 0} working, ${summary.offline || 0} offline`);
     console.log(`  SSE:    ${Object.keys(sse).length} connected`);
     console.log(`  Tasks:  ${tasks.length} recent\n`);
 
