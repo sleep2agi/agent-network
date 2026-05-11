@@ -1981,7 +1981,7 @@ async function serverCommand() {
     }
 
     // Bootstrap an admin account without shipping default credentials.
-    // Skip the whole prompt + register flow if admin-utok.json already exists —
+    // Skip the whole register flow if admin-utok.json already exists —
     // re-running `anet hub start` should be idempotent.
     const existingAdmin = loadAdminUtok();
     let defaultUser = opts.username || opts.user || "";
@@ -1994,12 +1994,8 @@ async function serverCommand() {
       defaultUser = existingAdmin.username || defaultUser;
       console.log(`  ✅ Admin already exists (admin-utok.json found, user=${existingAdmin.username || "?"})`);
     } else {
-      // Interactive users may enter credentials; non-interactive runs get a
-      // one-time random password printed in this banner only.
-      if ((!defaultUser || !defaultPass) && process.stdin.isTTY) {
-        if (!defaultUser) defaultUser = await ask("Admin username (leave blank to generate)");
-        if (!defaultPass) defaultPass = await ask("Admin password (leave blank to generate)");
-      }
+      // Silent auto-generate by default. Users who want custom credentials pass
+      // --username / --password flags; no prompt to interrupt the start flow.
       if (!defaultUser) defaultUser = `admin_${randomBytes(3).toString("hex")}`;
       if (!defaultPass) defaultPass = randomBytes(12).toString("base64url");
     }
