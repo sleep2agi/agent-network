@@ -45,6 +45,7 @@ export default withMermaid(defineConfig({
             text: '核心概念',
             items: [
               { text: 'Token 体系', link: '/concepts/tokens' },
+              { text: '角色与权限', link: '/concepts/roles' },
               { text: '网络隔离', link: '/concepts/networks' },
               { text: '任务生命周期', link: '/concepts/task-lifecycle' },
               { text: '安全设计', link: '/concepts/security' },
@@ -125,6 +126,7 @@ export default withMermaid(defineConfig({
             text: 'Core Concepts',
             items: [
               { text: 'Token System', link: '/en/concepts/tokens' },
+              { text: 'Roles & Permissions', link: '/en/concepts/roles' },
               { text: 'Network Isolation', link: '/en/concepts/networks' },
               { text: 'Task Lifecycle', link: '/en/concepts/task-lifecycle' },
               { text: 'Security Design', link: '/en/concepts/security' },
