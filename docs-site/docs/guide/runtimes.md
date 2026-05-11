@@ -24,6 +24,43 @@
 
 复用你**本地已经登录的 Claude CLI 订阅**——不用 API Key、不用 token，跑起来就能干活。
 
+### 前置
+
+`@sleep2agi/agent-network` 自己**不会**帮你装 Claude CLI——它是 spawn 你本机已有的 `claude` 二进制。所以你得先把 CLI 装好、登录好。
+
+**1. 安装 Claude Code CLI**（npm 全局包）：
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+**2. 登录 Claude.ai 订阅**（OAuth 流程，浏览器一次性授权）：
+
+```bash
+claude
+# 首次启动会弹登录提示，按引导走完即可
+```
+
+**3. 验证**：
+
+```bash
+claude --version
+# 期望输出：claude-code 1.x.x（具体版本号可能不同）
+
+which claude
+# 期望输出：一个 PATH 上能找到的路径，比如 /usr/local/bin/claude 或 ~/.npm-global/bin/claude
+```
+
+**常见坑**：装完 `claude: command not found`。原因是 npm 全局 bin 不在 PATH 上。修复：
+
+```bash
+npm config get prefix
+# 把输出后面加 /bin 加进你的 PATH，比如：
+# export PATH="$(npm config get prefix)/bin:$PATH"
+```
+
+写进 `~/.bashrc` / `~/.zshrc` 后 `source` 一下即可。
+
 ### 工作原理
 
 ```
@@ -74,6 +111,42 @@ anet node start my-bot
 ## claude-agent-sdk
 
 编程式调用 **任意 Anthropic 兼容 API** —— 默认接 Anthropic，也能指 MiniMax / DeepSeek / GLM / Kimi 等国产模型的 Anthropic 兼容 endpoint。
+
+### 前置
+
+这个 runtime **不需要你额外装任何二进制**——`@anthropic-ai/claude-agent-sdk` 已经随 `@sleep2agi/agent-node@2.3.0` 一起 bundle 进来了。你只要装 anet 本体 + 准备好一个 API Key。
+
+**1. 安装 anet**（如果还没装）：
+
+```bash
+npm install -g @sleep2agi/agent-network@2.1.2
+```
+
+**2. 准备 API Key**（任选一家）：
+
+| Provider | 环境变量 | 申请入口 |
+|---|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` | https://console.anthropic.com |
+| MiniMax | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` | MiniMax 开放平台 |
+| DeepSeek / GLM / Kimi / Moonshot / 书生 | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<对应 endpoint>` | 各家开放平台 |
+
+国产模型的完整 endpoint 表见 [多模型配置](/guide/multi-model)。
+
+**3. 验证**：
+
+```bash
+anet --version
+# 期望输出：2.1.2
+
+# 启起来一个节点后看进程
+anet node start planner
+# 期望：日志里能看到 "spawned @anthropic-ai/claude-agent-sdk"，不会因为找不到 SDK 包而崩
+```
+
+**常见坑**：节点起来后立刻报 `401 Unauthorized` 或 `invalid x-api-key`。原因是 `ANTHROPIC_AUTH_TOKEN`（国产 endpoint）和 `ANTHROPIC_API_KEY`（Anthropic 直连）这两个变量没分清。修复：
+
+- 接 **api.anthropic.com** → 用 `ANTHROPIC_API_KEY`
+- 接 **任何第三方 Anthropic 兼容 endpoint** → 用 `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`
 
 ### 工作原理
 
@@ -148,6 +221,45 @@ anet node create translator \
 ## codex-sdk
 
 接 **OpenAI Codex CLI** —— 适合写代码、跑命令，工具调用最灵活。
+
+### 前置
+
+`@openai/codex-sdk` 已经 bundle 在 `@sleep2agi/agent-node@2.3.0` 里，但 SDK **本身要 spawn 一个 `codex` 二进制**——所以你还得把 codex CLI 全局装一遍。
+
+**1. 安装 codex CLI**（npm 全局包）：
+
+```bash
+npm install -g @openai/codex
+```
+
+**2. 登录 OpenAI**（任选其一）：
+
+```bash
+# 方式 A：OAuth 流程（推荐，复用 ChatGPT Plus / Pro 订阅）
+codex auth login
+
+# 方式 B：直接走 API Key
+export OPENAI_API_KEY=sk-xxx
+```
+
+**3. 验证**：
+
+```bash
+codex --version
+# 期望输出：codex 0.x.x（具体版本号可能不同）
+
+codex auth status
+# 期望：显示当前登录的 OpenAI 账号 / API key 状态
+```
+
+**常见坑**：节点启动时报 `Error: spawn codex ENOENT`。原因是 `codex` 不在 PATH 上——`@openai/codex-sdk` 只是 Node 封装层，实际调用还是要找全局 `codex` 二进制。修复：
+
+```bash
+which codex
+# 如果空，说明没装或者 npm 全局 bin 没在 PATH 上
+npm install -g @openai/codex
+# 装完仍然找不到，参见 claude-code-cli 章节的 PATH 修复方法
+```
 
 ### 工作原理
 

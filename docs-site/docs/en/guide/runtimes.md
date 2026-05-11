@@ -24,6 +24,43 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 
 Reuses your **already-logged-in Claude CLI session** — no API key, no token, just works.
 
+### Prerequisites
+
+`@sleep2agi/agent-network` **does not** install the Claude CLI for you — it spawns the `claude` binary that's already on your machine. You have to install and authenticate the CLI yourself first.
+
+**1. Install Claude Code CLI** (npm global):
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+**2. Log in to your Claude.ai subscription** (one-time OAuth flow in the browser):
+
+```bash
+claude
+# The first launch prompts you to log in — follow the on-screen flow.
+```
+
+**3. Verify**:
+
+```bash
+claude --version
+# Expected: claude-code 1.x.x (exact version may differ)
+
+which claude
+# Expected: a path on your PATH, e.g. /usr/local/bin/claude or ~/.npm-global/bin/claude
+```
+
+**Common failure**: after install, `claude: command not found`. Cause: npm's global bin directory isn't on your PATH. Fix:
+
+```bash
+npm config get prefix
+# Append /bin to the output and add it to PATH, e.g.:
+# export PATH="$(npm config get prefix)/bin:$PATH"
+```
+
+Add that line to `~/.bashrc` / `~/.zshrc` and `source` it.
+
 ### How it works
 
 ```
@@ -74,6 +111,42 @@ anet node start my-bot
 ## claude-agent-sdk
 
 Programmatic access to **any Anthropic-compatible API** — Anthropic by default, but redirectable to MiniMax / DeepSeek / GLM / Kimi via `ANTHROPIC_BASE_URL`.
+
+### Prerequisites
+
+This runtime **requires no extra binary** — `@anthropic-ai/claude-agent-sdk` is bundled inside `@sleep2agi/agent-node@2.3.0`. All you need is anet itself plus an API key.
+
+**1. Install anet** (if you haven't):
+
+```bash
+npm install -g @sleep2agi/agent-network@2.1.2
+```
+
+**2. Get an API key** (pick one provider):
+
+| Provider | Env var | Where to get one |
+|---|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` | https://console.anthropic.com |
+| MiniMax | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` | MiniMax platform |
+| DeepSeek / GLM / Kimi / Moonshot / InternLM | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<provider endpoint>` | Each provider's platform |
+
+Full provider endpoint table: [Multi-model setup](/en/guide/multi-model).
+
+**3. Verify**:
+
+```bash
+anet --version
+# Expected: 2.1.2
+
+# Start a node and check the logs
+anet node start planner
+# Expected: the log shows "spawned @anthropic-ai/claude-agent-sdk" without an SDK-not-found crash
+```
+
+**Common failure**: the node starts but immediately hits `401 Unauthorized` or `invalid x-api-key`. Cause: confusion between `ANTHROPIC_AUTH_TOKEN` (third-party endpoints) and `ANTHROPIC_API_KEY` (Anthropic direct). Fix:
+
+- Talking to **api.anthropic.com** → use `ANTHROPIC_API_KEY`
+- Talking to **any third-party Anthropic-compatible endpoint** → use `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`
 
 ### How it works
 
@@ -132,6 +205,45 @@ anet node create translator \
 ## codex-sdk
 
 OpenAI **Codex CLI** runtime — best for writing code and running shell commands.
+
+### Prerequisites
+
+`@openai/codex-sdk` ships inside `@sleep2agi/agent-node@2.3.0`, but the SDK **spawns a `codex` binary under the hood** — so you still have to install the codex CLI globally.
+
+**1. Install codex CLI** (npm global):
+
+```bash
+npm install -g @openai/codex
+```
+
+**2. Authenticate to OpenAI** (pick one):
+
+```bash
+# Option A: OAuth flow (recommended, reuses your ChatGPT Plus / Pro)
+codex auth login
+
+# Option B: raw API key
+export OPENAI_API_KEY=sk-xxx
+```
+
+**3. Verify**:
+
+```bash
+codex --version
+# Expected: codex 0.x.x (exact version may differ)
+
+codex auth status
+# Expected: shows the logged-in OpenAI account or API key state
+```
+
+**Common failure**: node startup errors with `Error: spawn codex ENOENT`. Cause: `codex` isn't on your PATH — `@openai/codex-sdk` is just the Node wrapper, the actual `codex` global binary still has to be findable. Fix:
+
+```bash
+which codex
+# If empty, codex isn't installed or npm's global bin isn't on PATH.
+npm install -g @openai/codex
+# If still missing, see the PATH fix in the claude-code-cli section.
+```
 
 ### How it works
 
