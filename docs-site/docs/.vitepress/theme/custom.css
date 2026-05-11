@@ -942,6 +942,203 @@
   color: var(--vp-c-brand-2);
 }
 
+/* ---------- Mobile (≤ 720px) — landing-only tuning ---------- */
+@media (max-width: 720px) {
+  /* Hero typography */
+  .VPHero {
+    padding-top: 56px !important;
+    padding-bottom: 16px !important;
+  }
+  .VPHero .name {
+    font-size: clamp(2.4rem, 11vw, 3.2rem) !important;
+    letter-spacing: -0.03em !important;
+  }
+  .VPHero .text {
+    font-size: clamp(1.5rem, 6.5vw, 2rem) !important;
+  }
+  .VPHero .tagline {
+    font-size: 0.95rem !important;
+    margin-top: 14px !important;
+  }
+  .VPHero .actions {
+    gap: 10px !important;
+    margin-top: 22px !important;
+  }
+  .VPHero .VPButton {
+    height: 42px !important;
+    line-height: 42px !important;
+    padding: 0 16px !important;
+    font-size: 0.92rem !important;
+  }
+
+  /* Hero notice — compact */
+  .hero-notice {
+    padding: 5px 10px 5px 5px;
+    font-size: 0.72rem;
+    margin-bottom: 18px;
+  }
+  .hero-notice-text {
+    font-size: 0.72rem;
+    line-height: 1.4;
+  }
+  .hero-notice-code {
+    font-size: 0.68rem;
+  }
+
+  /* Hero image (video) — full width below */
+  .VPHero .image-container {
+    margin: 24px 0 0 !important;
+    max-width: 100% !important;
+  }
+  .hero-video-card {
+    margin: 0;
+    max-width: 100%;
+  }
+  .hero-video-frame {
+    aspect-ratio: 16 / 10;
+  }
+  .hero-video-play {
+    width: 60px;
+    height: 60px;
+    font-size: 1.1rem;
+  }
+
+  /* Install command — fit small screens */
+  .install-cmd {
+    margin-top: 22px;
+    max-width: 100%;
+  }
+  .install-cmd-head {
+    padding: 8px 12px;
+  }
+  .install-cmd-body {
+    padding: 12px 14px 14px;
+    font-size: 0.82rem;
+  }
+  .install-cmd-line {
+    font-size: 0.78rem;
+  }
+  .install-cmd-text {
+    font-size: 0.78rem;
+  }
+  .install-cmd-copy {
+    padding: 4px 10px;
+    font-size: 0.7rem;
+  }
+
+  /* Hero badges — single column, no overflow */
+  .hero-badges {
+    margin-top: 24px;
+    gap: 14px;
+  }
+  .hero-badges-list {
+    gap: 6px;
+  }
+  .hero-badge {
+    padding: 4px 10px 4px 5px;
+    font-size: 0.7rem;
+  }
+  .hero-badge-logo {
+    width: 18px;
+    height: 18px;
+  }
+  .hero-badge-logo img {
+    width: 12px;
+    height: 12px;
+  }
+  .hero-badge-logo.is-mono img {
+    width: 14px;
+    height: 14px;
+  }
+  .runtime-badge {
+    font-size: 0.7rem;
+  }
+
+  /* Trust row — 2×2 grid on small screens, looks more balanced */
+  .trust-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px 12px;
+    padding: 40px 24px 8px;
+  }
+  .trust-num {
+    font-size: 1.7rem;
+  }
+  .trust-label {
+    font-size: 0.66rem;
+    margin-top: 6px;
+  }
+
+  /* Feature grid — already 1 col, tighten padding */
+  .fg {
+    margin-top: 48px;
+  }
+  .fg-card {
+    padding: 24px 22px;
+  }
+  .fg-icon {
+    width: 32px;
+    height: 32px;
+    margin-bottom: 14px;
+  }
+  .fg-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+  .fg-title {
+    font-size: 1rem !important;
+  }
+  .fg-desc {
+    font-size: 0.85rem;
+  }
+
+  /* Final CTA — buttons stack on tiny screens, side-by-side mid */
+  .final-cta {
+    padding: 56px 24px 72px;
+  }
+  .final-cta-title {
+    font-size: clamp(1.6rem, 7vw, 2rem);
+  }
+  .final-cta-sub {
+    font-size: 0.92rem;
+    margin-bottom: 24px;
+  }
+  .final-cta-actions {
+    width: 100%;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .cta-primary,
+  .cta-ghost {
+    width: 100%;
+    justify-content: center;
+    padding: 12px 20px;
+  }
+
+  /* Hero backdrop scaled down — orbs less aggressive */
+  .hero-backdrop { height: 580px; }
+  .hero-orb-a { width: 360px; height: 360px; }
+  .hero-orb-b { width: 320px; height: 320px; }
+  .hero-orb-c { width: 280px; height: 280px; }
+}
+
+/* Extra tight phones */
+@media (max-width: 380px) {
+  .VPHero .name {
+    font-size: 2.1rem !important;
+  }
+  .VPHero .text {
+    font-size: 1.3rem !important;
+  }
+  .trust-row {
+    padding: 32px 20px 8px;
+    gap: 20px 8px;
+  }
+  .install-cmd-body {
+    font-size: 0.74rem;
+  }
+}
+
 /* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   .hero-orb,
