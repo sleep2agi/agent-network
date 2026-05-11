@@ -5,9 +5,9 @@
 ::: tip 角色（v2.1 正式版）
 | 包 | 版本 | 角色 |
 |---|------|------|
-| `@sleep2agi/agent-network` | 2.1.0 | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
+| `@sleep2agi/agent-network` | 2.1.1 | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
 | `@sleep2agi/commhub-server` | 0.6.0 | 通信中枢（MCP + REST + SSE，SQLite/Postgres） |
-| `@sleep2agi/agent-network-dashboard` | 0.3.0 | Web Dashboard（Next.js 16） |
+| `@sleep2agi/agent-network-dashboard` | 0.3.1 | Web Dashboard（Next.js 16） |
 | `@sleep2agi/agent-node` | 2.3.0 | Agent 运行时（claude-agent-sdk / codex-sdk / http-api） |
 :::
 
