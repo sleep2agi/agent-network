@@ -4584,6 +4584,53 @@ async function doctorCommand() {
     }
   }
 
+  // Probe each ntok_ against hub; auto-reissue any that hub rejects with 401.
+  // This handles "hub DB was wiped / token revoked" — the node config is
+  // otherwise valid, only the token string is stale. We patch only the token
+  // field, preserving session_id / channels / runtime / everything else.
+  if (fix && gc.hub && gc.token && gc.network_id) {
+    const staleNtokNodes: string[] = [];
+    for (const id of ids) {
+      const p = loadProfile(id);
+      if (!p?.token?.startsWith("ntok_")) continue;
+      if (needsMigration.includes(id)) continue;
+      try {
+        const r = await fetch(`${gc.hub}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${p.token}` },
+        });
+        if (r.status === 401 || r.status === 403) staleNtokNodes.push(id);
+      } catch { /* network error — skip, don't false-alarm */ }
+    }
+    if (staleNtokNodes.length) {
+      console.log(`\n  ⚙  Probing ntok_ ... ${staleNtokNodes.length} node(s) rejected by hub. Re-issuing...`);
+      for (const id of staleNtokNodes) {
+        const p = loadProfile(id);
+        if (!p) continue;
+        const nodeName = p.node_name || p.name || p.alias || id;
+        try {
+          const r = await fetch(`${gc.hub}/api/auth/node-token`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${gc.token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ network_id: gc.network_id, node_name: nodeName }),
+          });
+          const body = await r.json() as any;
+          if (body?.ok && body.token) {
+            p.token = body.token;
+            saveProfile(id, p);
+            console.log(`     ✅ ${id}: ntok_ re-issued (…${body.token.slice(-6)}), session/channels/role preserved`);
+            ok++;
+          } else {
+            console.log(`     ❌ ${id}: re-issue failed: ${body?.error || r.status}`);
+            fail++;
+          }
+        } catch (e: any) {
+          console.log(`     ❌ ${id}: re-issue threw: ${e.message}`);
+          fail++;
+        }
+      }
+    }
+  }
+
   // 4. Dependencies
   try { execSync("claude --version", { stdio: "pipe" }); check("Claude Code CLI", true); } catch { warning("Claude Code CLI", "not found (needed for claude-code-cli runtime)"); }
   try { execSync("codex --version", { stdio: "pipe" }); check("Codex CLI", true); } catch { warning("Codex CLI", "not found (needed for codex-sdk runtime)"); }
