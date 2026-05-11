@@ -1,0 +1,147 @@
+# 生产部署 / 公网部署安全指南
+
+::: danger 默认配置不能直接挂公网
+Agent Network v2.1 的默认配置只为**本机使用**优化。直接 `--host 0.0.0.0` 公网开放 = 给攻击者敞开大门。
+
+把这一页**全部读完**再开安全组。
+:::
+
+## 当前默认的安全状态
+
+| 项 | 默认 | 风险 |
+|---|---|---|
+| Hub bind | `127.0.0.1`（仅本机） | 公网模式必须显式 `--host 0.0.0.0` |
+| 默认账号 | `admin / anethub`（快速上手默认）；或 `--username/--password` 自定义 | **必须**立刻 `anet passwd` 改成强密码 |
+| `COMMHUB_AUTH_TOKEN` | v0.8 起软废弃 | 不再作为主线部署配置 |
+| tmux 控制面 | 默认关闭 | 需要 `COMMHUB_ENABLE_TMUX=1` + admin 鉴权 |
+| 多租户隔离 | network scope 强制 | 用户只能访问所属 network |
+| HTTPS | 无 | 9200 / 3000 默认明文 |
+
+完整审计见 [`docs/open-source-security-risk-report.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)。**v0.6.1 stable 会修掉 P0 项**（默认 auth required / 默认 localhost / 默认随机密码 / tmux 默认关闭 / network scope 强制），届时这一页会简化。
+
+## 公网部署最小检查清单
+
+### 1. bootstrap + 立刻改密
+
+```bash
+# 首次 anet hub start 默认账号是 admin / anethub（快速上手），banner 也会提示
+anet login --username admin --password anethub
+
+# 公网部署立刻改成强密码（≥ 8 位 + 非弱密码字典）
+anet passwd
+```
+
+若你 bootstrap 时通过 `--username/--password` 自定义了凭证，直接用你自己设的登录后改密即可。
+
+### 2. v0.8 起不再配置 master token
+
+```bash
+anet hub start --host 0.0.0.0
+```
+
+首次启动会创建 admin 用户，并把本机恢复用 admin `utok_` 写到 `~/.anet/server/admin-utok.json`（权限 `600`）。旧的 `COMMHUB_AUTH_TOKEN` / `--token` 只保留软兼容到 v1.0，会打印 deprecation warning。
+
+### 3. 反代 + TLS（必须）
+
+不要直接把 `9200` / `3000` 端口挂公网。用 Caddy 自动 HTTPS：
+
+```caddy
+# /etc/caddy/Caddyfile
+hub.your-domain.com {
+    reverse_proxy localhost:9200
+    header {
+        # 防嗅探
+        X-Content-Type-Options nosniff
+        # 隐藏服务器信息
+        -Server
+    }
+}
+
+dashboard.your-domain.com {
+    reverse_proxy localhost:3000
+    # 限制访问 IP（可选）
+    # @blocked not remote_ip 1.2.3.4 5.6.7.8
+    # respond @blocked 403
+}
+```
+
+启动：
+
+```bash
+sudo systemctl reload caddy
+```
+
+DNS 解析到你的服务器 IP，Caddy 会自动签发 Let's Encrypt 证书。
+
+### 4. 安全组只放 80/443
+
+让安全组**只放 22(SSH) + 80 + 443**。9200 / 3000 不要开放给公网。Caddy 在 80/443 反代过去。
+
+### 5. 关闭 tmux 控制面（强烈建议）
+
+如果你不需要 dashboard 的 tmux 终端功能，启动 hub 时设：
+
+```bash
+COMMHUB_ENABLE_TMUX=0 anet hub start --host 0.0.0.0
+```
+
+（v0.6.1 之后默认关闭，需要显式 `=1` 才打开）
+
+### 6. 备份 SQLite 数据
+
+```bash
+# 每天 03:00 备份
+crontab -l 2>/dev/null > /tmp/cron
+echo "0 3 * * * sqlite3 ~/.commhub/commhub.db \".backup '~/.commhub/backup-\$(date +\\%F).db'\"" >> /tmp/cron
+crontab /tmp/cron
+```
+
+每周清一次：`find ~/.commhub/backup-*.db -mtime +30 -delete`。
+
+### 7. 监控登录失败
+
+```bash
+# 在 dashboard / hub log 里 grep 401
+journalctl --user -u anet-hub | grep -E '401|auth' | tail -50
+```
+
+未来 v0.7+ 会内置 audit log 查询 + 告警。
+
+## 多用户共享 Hub？先看这条
+
+::: warning v2.1 多租户隔离不完整
+当前任何持有有效 user token 的用户都可以：
+
+- `get_inbox` / `get_all_status` / `list_tasks` 读全局
+- 通过 SSE 订阅其他 alias 的事件流
+
+如果你和**完全不信任**的用户共用一个 Hub（比如对外开放注册），等到 **v0.6.1 stable**（预计 2026 年 6 月上旬）修了 R7 + R8 之后再开。
+:::
+
+当前可接受的多用户场景：
+
+- 团队内部，互相信任
+- 自己一个人多个 agent
+- 受信外协，正式签了 NDA
+
+## 选型：自建 vs 托管
+
+| 选项 | 适用 | 说明 |
+|---|---|---|
+| **本机** | 个人开发 | 最安全，零配置 |
+| **局域网** | 团队 5-20 人 | 内网受信，不需 TLS |
+| **VPS + 反代** | 想跨城协作 | 按本页跑完所有 7 步 |
+| **托管 SaaS** | ❌ 暂不提供 | 项目方向是 self-hosted，不做托管 |
+
+## 我们的承诺
+
+- v0.6.1（预计 2026 年 6 月上旬）会修 P0：默认 auth required / 默认 localhost / 移除默认密码 / tmux 默认关闭 / 多租户隔离
+- v0.7（预计 2026 年 7 月）：密码 Argon2id + token TTL + chmod 600 + 安装脚本 checksum
+- 漏洞披露走 [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new)，48 小时响应、7 天修 critical
+
+## 反馈
+
+如果你正在做公网部署，遇到这一页没覆盖的场景，发到：
+- [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — 公开讨论
+- [微信社群](/community) — 中文实时
+- [Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) — 私下漏洞
