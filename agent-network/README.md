@@ -2,12 +2,12 @@
 
 `anet` — a single CLI to run a local AI Agent network. Launch the hub, the dashboard, and as many agent nodes as you want. Verified end-to-end on macOS / Linux / Docker via Playwright.
 
-**Current preview line.** Pairs with `@sleep2agi/commhub-server` 0.5.3-preview.0, `@sleep2agi/agent-network-dashboard` 0.2.1-preview.1, `@sleep2agi/agent-node` 2.2.0-preview.1. The local flow below is the supported path; experimental commands are called out separately.
+Pairs with `@sleep2agi/commhub-server` 0.6.0, `@sleep2agi/agent-network-dashboard` 0.3.0, `@sleep2agi/agent-node` 2.3.0. The local flow below is the supported path; experimental commands are called out separately.
 
 ## Install
 
 ```bash
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 anet -v
 ```
 
@@ -62,7 +62,7 @@ anet hub start --host 0.0.0.0
 Then on another machine:
 
 ```bash
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 anet init --hub http://<HUB-LAN-IP>:9200
 anet login --username admin --password anethub
 anet node create remote-bot
@@ -167,9 +167,9 @@ A typical `config.json` after `anet node create`:
 
 | Package | Version | What it does |
 |---|---|---|
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.3-preview.0 | MCP + REST + SSE hub |
-| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.2.1-preview.1 | Web Dashboard |
-| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.2.0-preview.1 | Agent runtime |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.6.0 | MCP + REST + SSE hub |
+| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.3.0 | Web Dashboard |
+| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.3.0 | Agent runtime |
 
 ## Docs
 

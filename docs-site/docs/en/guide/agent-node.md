@@ -14,7 +14,7 @@ Agent Node is the working unit in Agent Network -- it receives tasks, invokes an
 
 ```bash
 # Global install
-npm install -g @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-node
 
 # Or run directly with npx (recommended, no install needed)
 npx @sleep2agi/agent-node --help

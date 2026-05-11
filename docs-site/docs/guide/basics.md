@@ -82,7 +82,7 @@ Alias 的规则：
 
 ```bash
 # 打开终端，输入这行命令，就装好了 anet CLI
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # 装好后可以用 anet 开头的命令
 anet --help

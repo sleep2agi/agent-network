@@ -4,7 +4,7 @@
 
 ```bash
 # Install
-npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
 
 # Start local server (Terminal 1)
 anet server local

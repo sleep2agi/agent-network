@@ -31,27 +31,11 @@ HUB_IP="${ANET_HUB_IP:-0.0.0.0}"
 # 适合每次都从干净环境重跑测试.默认关闭(增量启动).
 WIPE="${WIPE:-0}"
 
-# 默认节点列表 — 根据可用内存自动收缩,避免小 VM 上 5 个 Claude SDK 进程把
-# 服务器 OOM 死。每个 claude-agent-sdk 进程峰值 ~400MB,加 hub+dashboard 自身
-# 约 500MB,所以 1G/agent 是安全估算.
+# 默认节点列表
 if [ "$#" -gt 0 ]; then
   NODES=("$@")
 else
-  MEM_GB=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}')
-  MEM_GB=${MEM_GB:-4}
-  if [ "$MEM_GB" -le 2 ]; then
-    NODES=("助手")
-    echo "[!] 内存仅 ${MEM_GB}G,只起 1 个 agent(避免 OOM). 多 agent 需要至少 4G."
-  elif [ "$MEM_GB" -le 4 ]; then
-    NODES=("主编" "编辑")
-    echo "[i] 内存 ${MEM_GB}G,起 2 个 agent."
-  elif [ "$MEM_GB" -le 6 ]; then
-    NODES=("主编" "编辑" "审核")
-    echo "[i] 内存 ${MEM_GB}G,起 3 个 agent."
-  else
-    NODES=("排版发布者" "主编" "信息采集" "编辑" "审核")
-    echo "[i] 内存 ${MEM_GB}G,起 5 个 agent (默认)."
-  fi
+  NODES=("排版发布者" "主编" "信息采集" "编辑" "审核")
 fi
 
 wipe_state() {

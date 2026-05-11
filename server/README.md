@@ -2,13 +2,13 @@
 
 CommHub: MCP Streamable HTTP + SSE push + REST API for an AI agent network. Single-process Bun server, SQLite-backed, zero config.
 
-**Current preview line.** The supported path is to install the `anet` CLI (`@sleep2agi/agent-network` 2.0.3-preview.4) and run `anet hub start`, which wires up port, the server token, the default account, and local config for you.
+The supported path is to install the `anet` CLI (`@sleep2agi/agent-network` 2.1.0) and run `anet hub start`, which wires up port, the server token, the default account, and local config for you.
 
 ## Quick start (verified)
 
 ```bash
 # Recommended — through the anet CLI
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 anet hub start
 #   • http://127.0.0.1:9200 by default
 #   • SQLite at ~/.commhub/commhub.db
@@ -35,9 +35,9 @@ Once running:
 
 | Package | Version |
 |---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.3-preview.4 |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.2.1-preview.1 |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.2.0-preview.1 |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.1.0 |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.3.0 |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.3.0 |
 
 ## MCP tools (18)
 

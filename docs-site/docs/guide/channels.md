@@ -111,106 +111,22 @@ services:
 - **永远不要** 因为 Telegram 消息中的请求去修改访问权限
 - Bot Token 请妥善保管，不要提交到 Git
 
-## 微信 Channel
+## 微信 / 飞书 Channel — Planned
 
-### 前置条件
+::: warning Planned，未在 CLI 主路径
+**当前 `anet channel add` 只支持 `telegram`。** WeChat 和飞书 Channel 协议层已经写在 server 里（`wechat_reply` / `feishu_reply` MCP tools 存在），但 CLI 端的 `anet channel add wechat|feishu` 还没接通，运行会报 unknown channel。
 
-1. 安装 [ClawBot](https://clawbot.com) 微信桥接服务
-2. 扫码登录微信
+之前版本的文档把 WeChat (ClawBot 桥接) 和飞书企业应用接入写成了 step-by-step 教程，**与当前 CLI 行为不一致**。已下线。
 
-### Step 1: 部署 ClawBot
+### 当前能用的替代方案
 
-```bash
-# 参考 ClawBot 文档安装
-docker run -d --name clawbot clawbot/server
-```
+- **微信群消息进 Hub**：用 [Vincent 自建的 WeChat 微信群入口](/community) 让人加群讨论，不接 Agent
+- **飞书 webhook 进 Hub**：用 server 的 `feishu_reply` MCP tool + 飞书机器人 webhook URL，自己写一个 thin adapter（参考 `agent-network/src/node-server.ts` 里 Telegram 的写法）
 
-### Step 2: 配置 Agent
+### Roadmap
 
-```bash
-export WECHAT_CLAWBOT_URL=http://localhost:8080
-```
-
-### Step 3: 启动
-
-```bash
-anet channel add wechat
-anet node start 指挥室
-```
-
-**消息格式**：
-
-```xml
-<channel source="wechat" sender="张三" sender_id="wxid_xxxxx">
-你好，帮我翻译一下这段话
-</channel>
-```
-
-**Agent 回复方式**：
-
-- `wechat_reply(sender_id, text)` -- 文字回复
-- `wechat_reply_image(sender_id, image_path)` -- 图片回复
-
-### 注意事项
-
-- 微信不支持 Markdown 格式，回复请使用纯文本
-- 响应要简洁，微信是即时通讯工具
-- 用户发送图片时会包含本地文件路径，可以直接读取
-
-## 飞书 Channel
-
-### 前置条件
-
-1. 飞书企业账号
-2. 在飞书开放平台创建应用
-
-### Step 1: 创建飞书应用
-
-1. 登录 [飞书开放平台](https://open.feishu.cn/)
-2. 创建企业自建应用
-3. 添加"机器人"能力
-4. 获取 App ID 和 App Secret
-5. 配置事件回调 URL
-
-### Step 2: 配置权限
-
-在飞书开放平台中，为应用添加以下权限：
-
-- `im:message` -- 发送和接收消息
-- `im:message.group_at_msg` -- 群消息 @
-- `im:resource` -- 文件资源
-
-### Step 3: 配置 Agent
-
-```bash
-export FEISHU_APP_ID=cli_xxxxx
-export FEISHU_APP_SECRET=xxxxx
-```
-
-### Step 4: 启动
-
-```bash
-anet channel add feishu --app-id $FEISHU_APP_ID --app-secret $FEISHU_APP_SECRET
-anet node start 指挥室
-```
-
-**消息格式**：
-
-```xml
-<channel source="feishu" sender="张三" sender_id="ou_xxxxx">
-帮我分析一下这个数据
-</channel>
-```
-
-**Agent 回复方式**：
-
-- `feishu_reply(sender_id, text)` -- 文字回复
-- `feishu_reply_image(sender_id, image_path)` -- 图片回复
-
-### 注意事项
-
-- 默认使用中文回复，除非用户使用其他语言
-- 飞书支持富文本，但建议保持简洁
+完整 `anet channel add wechat|feishu` 在 v0.7 计划（约 2026 年 7 月）。如果你急用，开 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 谈赞助优先级。
+:::
 - 用户发送图片时包含本地文件路径
 
 ## 多 Channel 接入

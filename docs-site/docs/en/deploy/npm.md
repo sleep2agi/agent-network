@@ -16,7 +16,7 @@ Installing and deploying Agent Network via npm is the simplest approach.
 
 ```bash
 # Install CLI
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # Verify
 anet --version
@@ -27,14 +27,14 @@ anet --help
 
 ```bash
 # Run CLI commands directly
-npx @sleep2agi/agent-network@preview hub start
+npx @sleep2agi/agent-network hub start
 ```
 
 ### Project Dependency
 
 ```bash
 # Install as project dependency
-npm install @sleep2agi/agent-network@preview
+npm install @sleep2agi/agent-network
 
 # Use the SDK in code
 ```
@@ -132,7 +132,7 @@ Single machine, everything local.
 
 ```bash
 # 1. Install
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # 2. Start Server
 anet hub start
@@ -148,13 +148,13 @@ Server deployed on a cloud instance, team members each start their own agents.
 
 ```bash
 # --- Server side ---
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # Start Server (background)
 nohup anet hub start --port 9200 --token team-secret &
 
 # --- Client side ---
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # Initialize
 anet init --hub http://TEAM_SERVER:9200
@@ -176,7 +176,7 @@ For use in CI/CD or scripts.
 #!/bin/bash
 
 # Install
-npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-network @sleep2agi/agent-node
 
 # Configure
 export COMMHUB_URL=http://server:9200
@@ -272,7 +272,7 @@ await hub.connect();
 
 ```bash
 # Upgrade CLI
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # Check current version
 anet --version
@@ -281,8 +281,8 @@ anet --version
 npm view @sleep2agi/agent-network versions
 ```
 
-::: warning Preview Version
-Currently using the `@preview` tag. Once officially released, remove `@preview`.
+::: tip Stable Release
+`npm install -g @sleep2agi/agent-network` pulls the latest stable release (v2.1.0). If you still want to track the preview channel, add `@preview` explicitly.
 :::
 
 ## System Requirements

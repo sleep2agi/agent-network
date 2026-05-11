@@ -5,7 +5,7 @@
 ## Installation
 
 ```bash
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 ```
 
 After installation, the `anet` command is available globally.

@@ -80,7 +80,7 @@ You may already use CLI tools without realizing it:
 
 ```bash
 # Open your terminal. Type this to install the anet CLI.
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # Now you can use commands starting with "anet"
 anet --help

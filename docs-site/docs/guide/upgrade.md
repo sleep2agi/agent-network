@@ -40,7 +40,7 @@ cp -r .anet .anet.backup
 npm install -g @sleep2agi/agent-network
 
 # 升级 Agent Node（如果全局安装了的话）
-npm install -g @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-node
 
 # 如果用 npx，无需手动升级，下次运行自动拉取最新版
 ```

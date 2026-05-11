@@ -32,7 +32,7 @@
 set -euo pipefail
 
 USERNAME="${ANET_USER:-anet}"
-HUB_IP="${ANET_HUB_IP:-0.0.0.0}"
+HUB_IP="${ANET_HUB_IP:-127.0.0.1}"   # 默认只 bind 本机 (安全). 想公网: ANET_HUB_IP=0.0.0.0 必须先改密 + 反代 + TLS
 WIPE="${WIPE:-0}"
 NO_DASHBOARD="${NO_DASHBOARD:-0}"
 AUTOSTART="${AUTOSTART:-0}"
@@ -44,10 +44,12 @@ COMMANDER_RUNTIME="${COMMANDER_RUNTIME:-http}"  # http (~80MB) | claude-agent-sd
 
 # === Root 阶段: 系统级配置 + 切非 root 用户 ===
 if [ "$(id -u)" -eq 0 ]; then
-  echo "[root 1/4] 建 $USERNAME 用户 + sudoers NOPASSWD..."
+  echo "[root 1/4] 建 $USERNAME 用户 (不给 sudo, 安全默认)..."
   id "$USERNAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USERNAME"
-  echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$USERNAME"
-  chmod 440 "/etc/sudoers.d/$USERNAME"
+  # anet 用户跑 hub / dashboard / agent / systemd --user / tmux 都不需要 sudo,
+  # 所以默认不给 NOPASSWD sudo (R6 安全风险). 升级 npm 包用 ~/.npm-global, 重启服务用 systemd --user.
+  # 已经存在的 sudoers.d/$USERNAME (老脚本残留) 一并清掉.
+  rm -f "/etc/sudoers.d/$USERNAME" 2>/dev/null || true
 
   echo "[root 2/4] 加 ${SWAP_SIZE_GB}G swap (防 OOM)..."
   if ! swapon --show 2>/dev/null | grep -q '/swapfile'; then
@@ -225,10 +227,24 @@ else
   echo "  ✅ Hub + Dashboard 已启动 [$MODE_TAG]"
 fi
 echo ""
-echo "  Hub:        http://$PUB_IP:9200      内网: http://$LAN_IP:9200"
-[ "$NO_DASHBOARD" != "1" ] && \
-echo "  Dashboard:  http://$PUB_IP:3000      内网: http://$LAN_IP:3000"
-echo "  默认账户:    admin / anethub"
+if [ "$HUB_IP" = "0.0.0.0" ]; then
+  echo "  ⚠️  公网模式 (绑 0.0.0.0) — 立刻做这三件事:"
+  echo "     1. anet login --username admin --password anethub  → 然后 anet passwd 改密"
+  echo "     2. 安全组只放给受信 IP / 走反代 + TLS (Caddy/Nginx)"
+  echo "     3. 不要把 dashboard / tmux 接口直接挂公网"
+  echo ""
+  echo "  Hub:        http://$PUB_IP:9200      内网: http://$LAN_IP:9200"
+  [ "$NO_DASHBOARD" != "1" ] && \
+  echo "  Dashboard:  http://$PUB_IP:3000      内网: http://$LAN_IP:3000"
+else
+  echo "  🔒 本机模式 (绑 $HUB_IP) — 默认安全, 只本地能访问"
+  echo "     想跨服务器组网, 设 ANET_HUB_IP=0.0.0.0 重跑 (公网前先改密 + 反代 + TLS)"
+  echo ""
+  echo "  Hub:        http://127.0.0.1:9200"
+  [ "$NO_DASHBOARD" != "1" ] && \
+  echo "  Dashboard:  http://127.0.0.1:3000"
+fi
+echo "  默认账户:    admin / anethub  ⚠️  立刻 \`anet passwd\` 改密 (尤其公网部署)"
 echo ""
 if [ "$AUTOSTART" = "1" ] || [ "$AUTOSTART" = "true" ]; then
   echo "  systemd 管理:"

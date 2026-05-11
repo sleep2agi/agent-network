@@ -32,7 +32,7 @@ echo "  Backup: ~/.commhub/commhub.db.bak.$(date +%Y%m%d_%H%M%S)"
 
 # Step 3: Update npm package
 echo -e "${C_YELLOW}[3/5]${C_RESET} Updating @sleep2agi/commhub-server..."
-npm i -g @sleep2agi/commhub-server@preview 2>&1 | tail -3
+npm i -g @sleep2agi/commhub-server 2>&1 | tail -3
 NEW_PKG_VER=$(npm ls -g @sleep2agi/commhub-server 2>/dev/null | grep commhub-server | grep -o '[0-9].*' || echo "?")
 echo "  Installed: $NEW_PKG_VER"
 

@@ -57,14 +57,14 @@ SQLite WAL 模式支持高并发读写，瓶颈通常在 AI 模型的响应速�
 # 方法一：使用 nvm 管理 Node.js（推荐）
 nvm install 20
 nvm use 20
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # 方法二：修改 npm 全局目录
 mkdir ~/.npm-global
 npm config set prefix '~/.npm-global'
 echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 ```
 
 ### 7. 找不到 bun 命令

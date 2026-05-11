@@ -16,7 +16,7 @@
 
 ```bash
 # 安装 CLI
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # 验证
 anet --version
@@ -27,14 +27,14 @@ anet --help
 
 ```bash
 # 直接运行 CLI 命令
-npx @sleep2agi/agent-network@preview hub start
+npx @sleep2agi/agent-network hub start
 ```
 
 ### 项目依赖
 
 ```bash
 # 作为项目依赖安装
-npm install @sleep2agi/agent-network@preview
+npm install @sleep2agi/agent-network
 
 # 在代码中使用 SDK
 ```
@@ -132,7 +132,7 @@ bunx @sleep2agi/commhub-server
 
 ```bash
 # 1. 安装
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # 2. 启动 Server
 anet hub start
@@ -148,13 +148,13 @@ Server 部署在云服务器，团队成员各自启动 Agent。
 
 ```bash
 # --- 服务器端 ---
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # 启动 Server（后台运行）
 nohup anet hub start --port 9200 --token team-secret &
 
 # --- 成员端 ---
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # 初始化
 anet init --hub http://TEAM_SERVER:9200
@@ -177,7 +177,7 @@ anet node start my-agent
 #!/bin/bash
 
 # 安装
-npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-network @sleep2agi/agent-node
 
 # 配置
 export COMMHUB_URL=http://server:9200
@@ -273,7 +273,7 @@ await hub.connect();
 
 ```bash
 # 升级 CLI
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # 查看当前版本
 anet --version
@@ -282,8 +282,8 @@ anet --version
 npm view @sleep2agi/agent-network versions
 ```
 
-::: warning preview 版本
-当前使用 `@preview` tag。正式发布后去掉 `@preview` 即可。
+::: tip 正式版本
+默认 `npm install -g @sleep2agi/agent-network` 即可拉取最新正式版（v2.1.0）。如果你仍想跟踪 preview，可显式 `@preview` 指定。
 :::
 
 ## 系统要求

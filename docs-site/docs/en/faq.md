@@ -57,14 +57,14 @@ SQLite WAL mode supports high-concurrency reads and writes. The bottleneck is ty
 # Option 1: Use nvm to manage Node.js (recommended)
 nvm install 20
 nvm use 20
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # Option 2: Change npm global directory
 mkdir ~/.npm-global
 npm config set prefix '~/.npm-global'
 echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 ```
 
 ### 7. bun command not found

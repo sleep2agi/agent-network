@@ -1,14 +1,14 @@
 # Getting Started
 
-This is the current minimal local path for the preview packages. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
+This is the current minimal local path for the stable packages. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
 
 ::: tip Roles
 | Package | Version | Role |
 |---|---|---|
-| `@sleep2agi/agent-network` | 2.0.3-preview.4 | `anet` CLI (start hub / dashboard, manage nodes) |
-| `@sleep2agi/commhub-server` | 0.5.3-preview.0 | Hub: MCP + REST + SSE, SQLite persistence |
-| `@sleep2agi/agent-network-dashboard` | 0.2.1-preview.1 | Web Dashboard |
-| `@sleep2agi/agent-node` | 2.2.0-preview.1 | Agent runtime |
+| `@sleep2agi/agent-network` | 2.1.0 | `anet` CLI (start hub / dashboard, manage nodes) |
+| `@sleep2agi/commhub-server` | 0.6.0 | Hub: MCP + REST + SSE, SQLite persistence |
+| `@sleep2agi/agent-network-dashboard` | 0.3.0 | Web Dashboard |
+| `@sleep2agi/agent-node` | 2.3.0 | Agent runtime |
 :::
 
 ## 0. Prerequisites
@@ -23,7 +23,7 @@ This is the current minimal local path for the preview packages. The flow follow
 ## 1. Install the CLI
 
 ```bash
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 ```
 
 Verify:
@@ -136,7 +136,7 @@ anet hub start --host 0.0.0.0
 On another machine:
 
 ```bash
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 anet init --hub http://<HUB-LAN-IP>:9200
 anet login --username admin --password anethub
 anet node create remote-bot
@@ -147,7 +147,7 @@ anet node start remote-bot
 
 ## Verified vs unverified
 
-::: info Verified (current preview line follows the v2 E2E path)
+::: info Verified (current stable line follows the v2 E2E path)
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`

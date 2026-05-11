@@ -1,5 +1,73 @@
 # Changelog
 
+## 2026-05-10 — **v2.1 stable release**
+
+**Version sync** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.1.0`
+- `@sleep2agi/commhub-server@0.6.0`
+- `@sleep2agi/agent-node@2.3.0`
+- `@sleep2agi/agent-network-dashboard@0.3.0`
+
+::: tip Install
+```bash
+npm install -g @sleep2agi/agent-network
+```
+No more `@preview` tag needed — `latest` is now the stable line.
+:::
+
+### What's new
+
+**`anet doctor --fix` auto-migrates legacy V2 nodes**
+Frontline pain point: `claude-code-cli` runtime hit many V2-era node configs (with `alias`/`resume`/no token / dev IP for hub) that throw `utok_ but SSE needs ntok_` against the V3 hub. `doctor` now:
+- Detects 6 classes of legacy config issues (renamed fields, runtime rename, stale hub, missing token, unprefixed token, missing node_id)
+- One-shot `--fix` migration; **preserves the session field so chat history is not lost**, re-issues `ntok_`
+
+**`anet demo` subcommand family**
+- `anet demo ls` — list demos
+- `anet demo debate` — 6-agent, 9-step debate
+- `anet demo socialmedia` — 4-agent social media content factory (Xiaohongshu / Twitter / WeChat / LinkedIn)
+- Defaults to a standalone `demo-<suffix>` network, auto-cleaned afterwards — **never pollutes `default`**
+
+**Hub telemetry fixes**
+- `POST /api/task` now double-writes the inbox + tasks tables (previously only the inbox, which left the Dashboard Tasks page empty and `send_reply` unable to find tasks)
+- Dispatching a task immediately UPDATEs `sessions.task` + `updated_at` so the Dashboard Overview reflects "task in flight" in real time
+
+**Dashboard theming**
+- 4 themes: Cyber (default dark) / Light / Mint / Sunset, switcher bottom-right, persisted in localStorage
+- Fixed the `useSSE` reconnect loop (the hub used to receive 1500+ admin SSE reconnects that DoSed mcp)
+- `COMMHUB_URL` fallback restored to `127.0.0.1:9200` (was a leftover dev IP)
+
+**CLI**
+- `--runtime http-api` no longer falls into the Claude CLI branch
+- `agent-node` HTTP runtime now also reads `ANTHROPIC_AUTH_TOKEN` (previously only `ANTHROPIC_API_KEY`)
+- Demo subcommands no longer trigger 6 "select provider" interactive prompts when calling `createCommand`
+
+**One-shot deploy scripts**
+- `hub-only.sh` rewritten: 4G swap + sudoers NOPASSWD + enable-linger + systemd autostart + `AUTOSTART=1`
+- `agent-only.sh` updated to match
+
+### Upgrade path
+
+```bash
+# 1. Upgrade the CLI
+npm install -g @sleep2agi/agent-network    # or: npm update -g
+
+# 2. Restart the hub (so the new commhub-server takes effect)
+# tmux: tmux kill-session -t hub; tmux new -d -s hub 'anet hub start'
+# systemd-user: systemctl --user restart anet-hub
+
+# 3. In every legacy project directory, run doctor --fix
+cd <project-dir>
+anet doctor --fix
+
+# 4. Restart agents
+kill <claude-pid> && anet resume <node-name>
+```
+
+See the [Upgrade Guide](/en/guide/upgrade) for details.
+
+---
+
 ## 2026-05-03 - `anet demo` subcommands and bug fixes
 
 **Version sync**: anet@2.0.3-preview.4 / agent-node@2.2.0-preview.1 / dashboard@0.2.1-preview.1 / commhub-server@0.5.3-preview.0

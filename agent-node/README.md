@@ -2,20 +2,20 @@
 
 Agent runtime for Agent Network. Connects to a CommHub server, registers under an alias, and processes incoming tasks with one of three runtimes.
 
-**Current preview line.** The supported entry point is the `anet` CLI from `@sleep2agi/agent-network@preview`, which writes the right `config.json`, network token, and environment variables for you.
+The supported entry point is the `anet` CLI from `@sleep2agi/agent-network`, which writes the right `config.json`, network token, and environment variables for you.
 
 ## Install
 
 You usually don't install this package directly — `anet node create` and `anet node start` use it via `npx`. To pin it:
 
 ```bash
-npm install -g @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-node
 ```
 
 ## Verified flow
 
 ```bash
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 anet hub start                      # local hub (terminal 1)
 anet hub dashboard                  # web UI (terminal 2)
 anet login --username admin --password anethub
@@ -148,9 +148,9 @@ When the runtime is `claude-code-cli`, the spawned subprocess gets `settingSourc
 
 | Package | Version |
 |---|---|
-| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.0.3-preview.4 |
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.5.3-preview.0 |
-| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.2.1-preview.1 |
+| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.1.0 |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.6.0 |
+| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.3.0 |
 
 ## License
 

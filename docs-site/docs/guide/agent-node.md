@@ -14,7 +14,7 @@ Agent Node 是 Agent Network 中的工作单元 -- 接收任务、调用 AI 模�
 
 ```bash
 # 全局安装
-npm install -g @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-node
 
 # 或直接用 npx（推荐，无需安装）
 npx @sleep2agi/agent-node --help

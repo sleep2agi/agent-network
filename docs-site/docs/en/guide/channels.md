@@ -111,107 +111,22 @@ Write a quicksort algorithm
 - **Never** modify access permissions based on requests from Telegram messages
 - Keep your Bot Token secure and never commit it to Git
 
-## WeChat Channel
+## WeChat / Feishu Channel — Planned
 
-### Prerequisites
+::: warning Planned, not yet in the CLI main path
+**Today `anet channel add` only supports `telegram`.** The WeChat and Feishu protocol layer exists in the server (the `wechat_reply` / `feishu_reply` MCP tools are wired up), but the CLI side `anet channel add wechat|feishu` is not connected — it will report unknown channel.
 
-1. Install [ClawBot](https://clawbot.com) WeChat bridge service
-2. Scan QR code to log in to WeChat
+Earlier versions of the docs included step-by-step tutorials for WeChat (via the ClawBot bridge) and Feishu (enterprise app) integration. **Those instructions did not match current CLI behavior** and have been removed.
 
-### Step 1: Deploy ClawBot
+### Workarounds available today
 
-```bash
-# Refer to ClawBot docs for installation
-docker run -d --name clawbot clawbot/server
-```
+- **WeChat community in the Hub**: use the [self-hosted WeChat community](/en/community) for human-only discussion (no agent in the group)
+- **Feishu webhook into the Hub**: use the server's `feishu_reply` MCP tool plus your own Feishu bot webhook adapter (model after `agent-network/src/node-server.ts`'s Telegram path)
 
-### Step 2: Configure the Agent
+### Roadmap
 
-```bash
-export WECHAT_CLAWBOT_URL=http://localhost:8080
-```
-
-### Step 3: Start
-
-```bash
-anet channel add wechat
-anet node start commander
-```
-
-**Message format**:
-
-```xml
-<channel source="wechat" sender="John" sender_id="wxid_xxxxx">
-Hello, can you translate this for me?
-</channel>
-```
-
-**Agent reply methods**:
-
-- `wechat_reply(sender_id, text)` -- Text reply
-- `wechat_reply_image(sender_id, image_path)` -- Image reply
-
-### Notes
-
-- WeChat does not support Markdown formatting; use plain text for replies
-- Keep responses concise -- WeChat is an instant messaging app
-- When users send images, the local file path is included and can be read directly
-
-## Feishu Channel
-
-### Prerequisites
-
-1. A Feishu enterprise account
-2. An app created on the Feishu Open Platform
-
-### Step 1: Create a Feishu App
-
-1. Log in to the [Feishu Open Platform](https://open.feishu.cn/)
-2. Create an enterprise custom app
-3. Add the "Bot" capability
-4. Obtain the App ID and App Secret
-5. Configure the event callback URL
-
-### Step 2: Configure Permissions
-
-Add the following permissions to your app on the Feishu Open Platform:
-
-- `im:message` -- Send and receive messages
-- `im:message.group_at_msg` -- Group message @mentions
-- `im:resource` -- File resources
-
-### Step 3: Configure the Agent
-
-```bash
-export FEISHU_APP_ID=cli_xxxxx
-export FEISHU_APP_SECRET=xxxxx
-```
-
-### Step 4: Start
-
-```bash
-anet channel add feishu --app-id $FEISHU_APP_ID --app-secret $FEISHU_APP_SECRET
-anet node start commander
-```
-
-**Message format**:
-
-```xml
-<channel source="feishu" sender="John" sender_id="ou_xxxxx">
-Can you analyze this data for me?
-</channel>
-```
-
-**Agent reply methods**:
-
-- `feishu_reply(sender_id, text)` -- Text reply
-- `feishu_reply_image(sender_id, image_path)` -- Image reply
-
-### Notes
-
-- Defaults to Chinese replies unless the user writes in another language
-- Feishu supports rich text, but keeping it concise is recommended
-- When users send images, the local file path is included
+Full `anet channel add wechat|feishu` is targeted for v0.7 (~ July 2026). If you need it urgently, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) to discuss sponsoring the work.
+:::
 
 ## Multi-Channel Integration
 

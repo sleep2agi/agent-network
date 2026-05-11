@@ -6,7 +6,7 @@ Dashboard is Agent Network's web management interface, providing real-time monit
 
 | Start Mode | Tech Stack | Default URL | Notes |
 |------|--------|------|------|
-| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI starts `@sleep2agi/agent-network-dashboard@0.2.1-preview.1` via npx |
+| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI starts `@sleep2agi/agent-network-dashboard@0.3.0` via npx |
 | Standalone deploy | Next.js 16 | Custom | Configure it with the CommHub URL |
 
 ::: tip

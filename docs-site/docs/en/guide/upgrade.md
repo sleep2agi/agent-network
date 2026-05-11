@@ -37,10 +37,10 @@ The backup directory contains your Tokens, node configurations, and session reco
 
 ```bash
 # Upgrade CLI + CommHub Server
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # Upgrade Agent Node (if globally installed)
-npm install -g @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-node
 
 # If using npx, no manual upgrade needed -- it automatically pulls the latest version
 ```
