@@ -17,7 +17,7 @@ Agent Network v2.1 的默认配置只为**本机使用**优化。直接 `--host 
 | 多租户隔离 | network scope 强制 | 用户只能访问所属 network |
 | HTTPS | 无 | 9200 / 3000 默认明文 |
 
-完整审计见 [`docs/open-source-security-risk-report.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)。**v0.6.1 stable 会修掉 P0 项**（默认 auth required / 默认 localhost / 默认随机密码 / tmux 默认关闭 / network scope 强制），届时这一页会简化。
+完整审计见 [`docs/open-source-security-risk-report.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)。**v0.8.0 / v0.8.1 已经修掉所有 P0 项**（默认 auth required ✅ / 默认 localhost ✅ / 默认 admin/anethub 必须立刻 passwd ✅ / tmux 默认关闭 ✅ / network scope 强制 ✅）。本页保留作为公网部署 checklist。
 
 ## 公网部署最小检查清单
 
@@ -85,7 +85,7 @@ DNS 解析到你的服务器 IP，Caddy 会自动签发 Let's Encrypt 证书。
 COMMHUB_ENABLE_TMUX=0 anet hub start --host 0.0.0.0
 ```
 
-（v0.6.1 之后默认关闭，需要显式 `=1` 才打开）
+（v0.8 起默认关闭，需要显式 `COMMHUB_ENABLE_TMUX=1` 才打开）
 
 ### 6. 备份 SQLite 数据
 
@@ -105,17 +105,17 @@ crontab /tmp/cron
 journalctl --user -u anet-hub | grep -E '401|auth' | tail -50
 ```
 
-未来 v0.7+ 会内置 audit log 查询 + 告警。
+v0.8 已内置 `/api/admin/audit-log` 端点 + Dashboard Audit Log 页面，按角色 `admin` 可见。
 
 ## 多用户共享 Hub？先看这条
 
-::: warning v2.1 多租户隔离不完整
-当前任何持有有效 user token 的用户都可以：
+::: tip v0.8 多租户隔离已落地
+v0.8.0 起：
 
-- `get_inbox` / `get_all_status` / `list_tasks` 读全局
-- 通过 SSE 订阅其他 alias 的事件流
+- `get_inbox` / `get_all_status` / `list_tasks` 全部按 user 所属 network 过滤（R7 / R8 修复）
+- SSE 订阅强制 network 成员校验
 
-如果你和**完全不信任**的用户共用一个 Hub（比如对外开放注册），等到 **v0.6.1 stable**（预计 2026 年 6 月上旬）修了 R7 + R8 之后再开。
+跨团队 / 对外开放注册的场景现在**可以放心开**，但仍建议：用 invite-only 邀请（`anet network invite --role member --uses N`）而不是完全开放 register。
 :::
 
 当前可接受的多用户场景：
@@ -135,8 +135,8 @@ journalctl --user -u anet-hub | grep -E '401|auth' | tail -50
 
 ## 我们的承诺
 
-- v0.6.1（预计 2026 年 6 月上旬）会修 P0：默认 auth required / 默认 localhost / 移除默认密码 / tmux 默认关闭 / 多租户隔离
-- v0.7（预计 2026 年 7 月）：密码 Argon2id + token TTL + chmod 600 + 安装脚本 checksum
+- v0.8.0 / v0.8.1 已修 P0：默认 auth required ✅ / 默认 localhost ✅ / `admin/anethub` 默认 + 强制 passwd 改密路径 ✅ / tmux 默认关闭 ✅ / 多租户隔离 ✅
+- v0.9（计划中）：密码 Argon2id + token TTL + 安装脚本 checksum
 - 漏洞披露走 [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new)，48 小时响应、7 天修 critical
 
 ## 反馈

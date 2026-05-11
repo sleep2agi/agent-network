@@ -17,7 +17,7 @@ Read this entire page **before opening any firewall ports**.
 | Multi-tenant isolation | network-scoped | Users only access networks they belong to |
 | HTTPS | none | 9200 / 3000 are plaintext by default |
 
-Full audit: [`docs/open-source-security-risk-report.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md). **v0.6.1 stable will close all P0 items** (auth required / localhost-only / random initial password / tmux off / scope enforced) — when that ships, this page gets shorter.
+Full audit: [`docs/open-source-security-risk-report.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md). **v0.8.0 / v0.8.1 has closed all P0 items** (auth required ✅ / localhost-only default ✅ / `admin/anethub` default with forced `anet passwd` rotation ✅ / tmux off ✅ / network scope enforced ✅). This page is kept as a public-deployment checklist.
 
 ## Minimum checklist for public deployment
 
@@ -72,7 +72,7 @@ If you don't need the dashboard's terminal feature:
 COMMHUB_ENABLE_TMUX=0 anet hub start --host 0.0.0.0
 ```
 
-(In v0.6.1+ this is off by default; you'll need `=1` to opt in.)
+(As of v0.8, tmux is off by default — set `COMMHUB_ENABLE_TMUX=1` to opt in.)
 
 ### 6. Back up the SQLite database
 
@@ -90,17 +90,17 @@ Prune weekly: `find ~/.commhub/backup-*.db -mtime +30 -delete`.
 journalctl --user -u anet-hub | grep -E '401|auth' | tail -50
 ```
 
-Built-in audit-log queries + alerts are coming in v0.7.
+v0.8 ships `/api/admin/audit-log` + a Dashboard Audit Log page (admin role).
 
 ## Sharing a Hub across users? Read this
 
-::: warning Multi-tenant isolation is incomplete in v2.1
-Any valid user token can currently:
+::: tip v0.8 has multi-tenant isolation
+As of v0.8.0:
 
-- `get_inbox` / `get_all_status` / `list_tasks` across the whole hub
-- Subscribe to any alias's SSE stream
+- `get_inbox` / `get_all_status` / `list_tasks` are filtered by the caller's network membership (R7 / R8 fixed)
+- SSE subscribe enforces network membership
 
-If you'd be sharing a Hub with users you **don't fully trust** (e.g. open registration), wait for **v0.6.1 stable** (early June 2026) which closes R7 + R8.
+Cross-team / open-registration scenarios are safe to enable, but we still recommend invite-only via `anet network invite --role member --uses N` rather than fully-open `/api/auth/register`.
 :::
 
 Acceptable today:
@@ -120,8 +120,8 @@ Acceptable today:
 
 ## Our commitments
 
-- v0.6.1 (early June 2026) closes P0: auth required / localhost-only default / no shipped password / tmux off by default / multi-tenant scope enforcement
-- v0.7 (~ July 2026): Argon2id passwords / token TTL + revoke-all / `chmod 600` on secrets / pinned + checksummed install scripts
+- v0.8.0 / v0.8.1 has closed P0: auth required ✅ / localhost-only default ✅ / `admin/anethub` default with required `anet passwd` rotation ✅ / tmux off ✅ / network scope enforced ✅
+- v0.9 (planned): Argon2id passwords / token TTL + revoke-all / pinned + checksummed install scripts
 - Vulnerabilities: report via [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) — 48-hour ack, 7-day patch for critical
 
 ## Feedback

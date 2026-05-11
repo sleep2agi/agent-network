@@ -16,6 +16,15 @@ export default withMermaid(defineConfig({
           { text: '案例 / Demo', link: '/cases/' },
           { text: '生态', link: '/ecosystem' },
           { text: '社群', link: '/community' },
+          {
+            text: 'v0.8.1',
+            items: [
+              { text: 'v0.8.1（latest）', link: '/changelog' },
+              // 历史版本暂未独立发布，可在 changelog 查看完整发版历史
+              { text: '所有版本（changelog）', link: '/changelog' },
+              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
+            ]
+          },
         ],
         sidebar: [
           {
@@ -98,6 +107,14 @@ export default withMermaid(defineConfig({
           { text: 'Examples / Demo', link: '/en/cases/' },
           { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
+          {
+            text: 'v0.8.1',
+            items: [
+              { text: 'v0.8.1 (latest)', link: '/en/changelog' },
+              { text: 'All versions (changelog)', link: '/en/changelog' },
+              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
+            ]
+          },
         ],
         sidebar: [
           {
