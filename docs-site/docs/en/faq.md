@@ -24,14 +24,14 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 
 ### 3. Is it free?
 
-**Yes — Apache-2.0 open source, fully self-hosted, no official SaaS, no forced license keys.**
+**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.8 server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
 
 - Public repo, modifiable source
-- Business model = courses + consulting, **not license sales**
-- The `anet license` / `anet activate` subcommands are v3-era placeholder commands kept around for "some future paid plugin." They do not gate any v0.8 functionality.
+- Business model = courses + consulting, not a forced hosted SaaS
+- `anet license` / `anet activate` are experimental legacy commands. If the auto-created trial expires, the Hub can return `license_expired`; handle it via troubleshooting or activate an `anet-...` key.
 
 ::: warning experimental
-The "14-day free trial / license activation" flow that appears in older v2.x docs no longer applies. As of v0.8 the hub does not check any license. `anet activate` still runs and writes a local license file, but no functionality is unlocked by it.
+Do not describe this path as inert: the current server auto-creates a 14-day trial and checks `licenses.expires_at` inside `send_task`. This mechanism should be cleaned up or redesigned later.
 :::
 
 ### 4. Which AI models are supported?
@@ -257,8 +257,8 @@ Don't build on Vercel, as environment variables may be missing.
 
 ### 20. What about PostgreSQL support?
 
-::: warning Not recommended in v2.1
-The code has a `DATABASE_URL=postgres://...` entry point, but PostgreSQL **has not been end-to-end verified on v2.1 stable** — don't use it in production yet.
+::: warning Not recommended on the current stable line
+The code has a `DATABASE_URL=postgres://...` entry point, but PostgreSQL **has not been end-to-end verified on the current stable line** — don't use it in production yet.
 
 For now, please stick with the default **SQLite** (`~/.commhub/commhub.db`). SQLite handles 100+ agents on a single machine just fine for the supported deployment shape.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Compatibility shim — the preview track is no longer the recommended path.
 #
-# As of v2.1.0 the stable release line tracks `latest`. This script now
+# As of the v0.8.1 / CLI v2.1.5 stable line, `latest` is the recommended track. This script now
 # delegates to the stable upgrade script (upgrade.sh). If you genuinely
 # need to track preview, run:
 #     npm i -g @sleep2agi/agent-network@preview
@@ -13,7 +13,7 @@ cat <<'BANNER'
 ================================================================
   NOTE: the preview track is no longer the recommended path.
   Falling back to the stable upgrade (upgrade.sh).
-  v2.1.0 is the current stable release on the npm `latest` tag.
+  v0.8.1 / CLI v2.1.5 is the current stable line on the npm `latest` tag.
 
   If you specifically want the preview channel, run manually:
     npm i -g @sleep2agi/agent-network@preview

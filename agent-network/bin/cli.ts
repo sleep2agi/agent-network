@@ -1961,7 +1961,7 @@ async function serverCommand() {
       }
     }
 
-    // Save hub URL + server token. Do NOT touch gc.token here — that's owned by login.
+    // Save hub URL + launch config. Do NOT touch gc.token here — that's owned by login.
     gc.hub = hubUrl;
     saveServerConfig({ ...sc, port, host });
     saveGlobal(gc);
@@ -2227,13 +2227,13 @@ anet hub <command>
 Options:
   --port <port>      Port (default: 9200)
   --host <host>      Bind address (default: 127.0.0.1)
-  --token <token>    Auth token (normally auto-generated)
+  --token <token>    Legacy master token (deprecated; prefer user/ntok auth)
   --dev-open         Disable hub auth for local development only
 
 Options:
   --port <port>      Port (default: 9200 for server, 3000 for dashboard)
   --username <user>  Bootstrap admin username
-  --password <pass>  Bootstrap admin password (random if omitted)
+  --password <pass>  Bootstrap admin password (default: anethub)
 
 Example:
   anet hub start                     # Start server + bootstrap admin account

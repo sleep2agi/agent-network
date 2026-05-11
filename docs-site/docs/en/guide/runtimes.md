@@ -341,7 +341,7 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 
 ## Verified vs not
 
-::: info Verified (v2.1 E2E)
+::: info Verified (current stable line inherits v2 E2E coverage)
 - `claude-agent-sdk` — Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM all pass E2E
 - Multi-runtime mesh (peer agents auto-coordinate via `get_all_status` + `send_task` + `get_task`)
 :::

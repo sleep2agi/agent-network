@@ -43,7 +43,7 @@ C. Runnable assets referenced by cases
 D. CLI demo surface
   PASS  anet demo lists demos
   PASS  anet demo includes debate
-  PASS  anet demo includes monitor
+  PASS  anet demo includes socialmedia
   PASS  debate help includes quick mode
   PASS  debate help includes no-network option
   PASS  debate help includes explicit network option
@@ -56,7 +56,7 @@ E. VitePress build
 
   vitepress v1.6.4
 
-build complete in 52.27s.
+build complete in 42.21s.
   PASS  docs-site build succeeds
   PASS  Built Chinese case index
   PASS  Built Chinese debate case

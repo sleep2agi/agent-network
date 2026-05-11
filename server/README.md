@@ -1,8 +1,8 @@
 # @sleep2agi/commhub-server
 
-CommHub: MCP Streamable HTTP + SSE push + REST API for an AI agent network. Single-process Bun server, SQLite-backed, zero config.
+CommHub: MCP Streamable HTTP + SSE push + REST API for an AI agent network. Single-process Bun server, SQLite-backed, zero config when launched through `anet`.
 
-The supported path is to install the `anet` CLI (`@sleep2agi/agent-network` 2.1.0) and run `anet hub start`, which wires up port, the server token, the default account, and local config for you.
+The supported path is to install the `anet` CLI (`@sleep2agi/agent-network` 2.1.5) and run `anet hub start`, which wires up the port, default admin account, recovery admin `utok_`, and local config for you.
 
 ## Quick start (verified)
 
@@ -15,11 +15,11 @@ anet hub start
 #   • Default admin account auto-created: admin / anethub
 #   • Reset hint printed in the launch banner
 
-# Or directly via bunx (Bun required)
-bunx @sleep2agi/commhub-server
+# Or directly via bunx (Bun required). Direct runs need explicit auth or dev-open.
+bunx @sleep2agi/commhub-server --dev-open
 
-# With custom port / auth token
-PORT=9200 COMMHUB_AUTH_TOKEN=your-secret bunx @sleep2agi/commhub-server
+# With custom port / legacy master token (soft-deprecated; prefer user/ntok auth)
+bunx @sleep2agi/commhub-server --port 9200 --token your-secret
 ```
 
 Once running:
@@ -35,11 +35,11 @@ Once running:
 
 | Package | Version |
 |---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.1.0 |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.3.0 |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.1.5 |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.4.2 |
 | [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.3.0 |
 
-## MCP tools (18)
+## MCP tools (17)
 
 ### Agent-side
 | Tool | Description |
@@ -87,7 +87,7 @@ The server exposes ~33 endpoints across health, auth, networks, and observabilit
 | GET | `/api/stats` | Aggregate stats |
 | GET | `/api/audit-log` | Audit trail |
 
-Network-management endpoints (`/api/networks…`) are present and used by the current CLI. `/api/license[…]` is present but remains a placeholder.
+Network-management endpoints (`/api/networks…`) are present and used by the current CLI. `/api/license[…]` is present as an experimental legacy trial/pro-license surface.
 
 Auth: `Authorization: Bearer <token>` header, or `?token=<token>` query.
 
@@ -107,7 +107,7 @@ Auto-created on first run.
 | `networks` | Workspaces |
 | `api_tokens` | `utok_` / `ntok_` / `atok_` tokens |
 | `audit_log` | Operation audit |
-| `licenses` | License placeholder |
+| `licenses` | Experimental trial/pro-license state |
 | `network_members` | Workspace membership |
 | `network_invites` | Invite codes |
 
@@ -148,10 +148,10 @@ DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-serv
 
 ## Not verified
 
-- `/api/license*` — placeholder for a future paid tier.
+- `/api/license*` — experimental legacy trial/pro-license endpoints.
 - PostgreSQL backend — translation layer exists, no E2E run.
 - Telegram / WeChat / Feishu channel endpoints — channel code exists, but only Telegram-oriented agent-node paths are actively exercised.
 
 ## License
 
-MIT
+Apache-2.0

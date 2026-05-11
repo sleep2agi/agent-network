@@ -134,8 +134,12 @@ Server 部署在云服务器，团队成员各自启动 Agent。
 # --- 服务器端 ---
 npm install -g @sleep2agi/agent-network
 
-# 启动 Server（后台运行）
-nohup anet hub start --port 9200 --token team-secret &
+# 启动 Server（后台运行；公网部署请配反代 TLS）
+nohup anet hub start --host 0.0.0.0 --port 9200 &
+
+# 首次启动后立即改掉快速上手默认密码
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+anet passwd
 
 # --- 成员端 ---
 npm install -g @sleep2agi/agent-network
@@ -143,8 +147,7 @@ npm install -g @sleep2agi/agent-network
 # 初始化
 anet init --hub http://TEAM_SERVER:9200
 
-# 注册/登录
-# 如果 anet hub start 已自动注册，可跳过
+# 注册/登录（团队内每个用户使用自己的账号）
 anet register
 anet login
 

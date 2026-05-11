@@ -2,7 +2,7 @@ FROM oven/bun:1
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y curl python3 ca-certificates && \
+RUN apt-get update && apt-get install -y curl git python3 ca-certificates && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*

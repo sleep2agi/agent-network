@@ -1,7 +1,7 @@
 # Production / Public-Internet Deployment
 
 ::: danger Default config is NOT safe for the public internet
-Agent Network v2.1 defaults are tuned for **local use only**. Running with `--host 0.0.0.0` straight to the open internet leaves you wide open.
+The current stable line (v0.8.1 / CLI v2.1.5) is tuned for **local use only**. Running with `--host 0.0.0.0` straight to the open internet leaves you wide open.
 
 Read this entire page **before opening any firewall ports**.
 :::
@@ -11,7 +11,7 @@ Read this entire page **before opening any firewall ports**.
 | Item | Default | Risk |
 |---|---|---|
 | Hub bind | `127.0.0.1` (local only) | Public mode needs explicit `--host 0.0.0.0` |
-| Default account | generated on first start or set by `--username/--password` | Save once, then rotate password |
+| Default account | `admin / anethub` for quick-start, or set by `--username/--password` | Rotate immediately with `anet passwd` |
 | `COMMHUB_AUTH_TOKEN` | deprecated in v0.8 | No longer part of the main deployment path |
 | tmux control plane | disabled by default | Requires `COMMHUB_ENABLE_TMUX=1` + admin auth |
 | Multi-tenant isolation | network-scoped | Users only access networks they belong to |

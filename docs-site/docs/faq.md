@@ -24,14 +24,14 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 ### 3. 免费吗？
 
-**完全免费、Apache-2.0 开源**。整个项目是 self-hosted，没有官方 SaaS 托管，也不会强制激活码。
+**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.8 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
 
 - 仓库公开、源码可改
-- 商业模式 = 卖课 + 卖服务咨询，**不卖 license**
-- 任何 `anet license` / `anet activate` 子命令都是 v3 时期遗留的占位实验性命令，预留给"未来某天可能出现的付费插件"，**不影响主线功能**
+- 商业模式 = 卖课 + 卖服务咨询，不依赖强制官方 SaaS
+- `anet license` / `anet activate` 是实验性 legacy 命令；如果自动 trial 过期，Hub 可能返回 `license_expired`，需要按 troubleshooting 处理或激活一个 `anet-...` key
 
 ::: warning experimental
-v2.x 历史文档里出现过的 "14 天免费试用 / 激活授权" 流程已不再适用 —— v0.8 起 hub 不检查 license。`anet activate` 仍能跑，但只是写一个本地 license 文件，不会因此 unlock 任何功能。
+文档不应把它描述成空操作：当前 server 会自动创建 14 天 trial，并在 `send_task` 时检查 `licenses.expires_at`。这个机制后续应清理或重新设计。
 :::
 
 ### 4. 支持哪些 AI 模型？
@@ -257,8 +257,8 @@ vercel deploy --prebuilt --prod
 
 ### 20. PostgreSQL 支持如何？
 
-::: warning v2.1 暂不推荐 PostgreSQL
-代码里有 `DATABASE_URL=postgres://...` 的入口，但 v2.1 stable 上没有做过 PostgreSQL 的 E2E 验证，**不建议生产使用**。
+::: warning 当前 stable 暂不推荐 PostgreSQL
+代码里有 `DATABASE_URL=postgres://...` 的入口，但当前 stable 上没有做过 PostgreSQL 的 E2E 验证，**不建议生产使用**。
 
 当前请用默认的 **SQLite**（在 `~/.commhub/commhub.db`）。SQLite 已经能跑到 100+ Agent 规模，单机部署足够。
 

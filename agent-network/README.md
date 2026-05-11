@@ -2,7 +2,7 @@
 
 `anet` — a single CLI to run a local AI Agent network. Launch the hub, the dashboard, and as many agent nodes as you want. Verified end-to-end on macOS / Linux / Docker via Playwright.
 
-Pairs with `@sleep2agi/commhub-server` 0.6.0, `@sleep2agi/agent-network-dashboard` 0.3.0, `@sleep2agi/agent-node` 2.3.0. The local flow below is the supported path; experimental commands are called out separately.
+Pairs with `@sleep2agi/commhub-server` 0.8.0, `@sleep2agi/agent-network-dashboard` 0.4.2, `@sleep2agi/agent-node` 2.3.0 on the current stable flow. The local flow below is the supported path; experimental commands are called out separately.
 
 ## Install
 
@@ -126,7 +126,7 @@ anet init project                  # write .mcp.json + CLAUDE.md         [verifi
 Listed for transparency — these commands exist but are not part of the primary supported path.
 
 - `anet quickstart` — legacy guided setup; use `anet hub start` + `anet node create` instead.
-- `anet license` / `anet activate` — placeholders for a future paid tier.
+- `anet license` / `anet activate` — experimental legacy trial/pro-license commands; not part of the primary local flow.
 - `anet network create` / `anet network invite` / cross-user network sharing — code is in, no full E2E.
 - `anet channel add telegram|wechat|feishu` — channel code exists; only the Telegram-oriented paths are actively exercised.
 
@@ -167,8 +167,8 @@ A typical `config.json` after `anet node create`:
 
 | Package | Version | What it does |
 |---|---|---|
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.6.0 | MCP + REST + SSE hub |
-| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.3.0 | Web Dashboard |
+| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.8.0 | MCP + REST + SSE hub |
+| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.4.2 | Web Dashboard |
 | [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.3.0 | Agent runtime |
 
 ## Docs
@@ -179,4 +179,4 @@ A typical `config.json` after `anet node create`:
 
 ## License
 
-MIT
+Apache-2.0

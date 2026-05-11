@@ -134,8 +134,12 @@ Server deployed on a cloud instance, team members each start their own agents.
 # --- Server side ---
 npm install -g @sleep2agi/agent-network
 
-# Start Server (background)
-nohup anet hub start --port 9200 --token team-secret &
+# Start Server (background; put reverse-proxy TLS in front for public access)
+nohup anet hub start --host 0.0.0.0 --port 9200 &
+
+# Immediately rotate the quick-start default password after first start
+anet login --hub http://127.0.0.1:9200 --username admin --password anethub
+anet passwd
 
 # --- Client side ---
 npm install -g @sleep2agi/agent-network
@@ -143,7 +147,7 @@ npm install -g @sleep2agi/agent-network
 # Initialize
 anet init --hub http://TEAM_SERVER:9200
 
-# Register/Login
+# Register/Login (each team member uses their own account)
 anet register
 anet login
 

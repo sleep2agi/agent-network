@@ -101,8 +101,8 @@ npm install -g @sleep2agi/agent-network
 | 命令 | 说明 |
 |------|------|
 | `anet config` | 查看/修改配置 |
-| `anet license` | 查看授权状态（实验性，无 op；项目 Apache-2.0 开源，无 license 销售） |
-| `anet activate <key>` | 激活授权（实验性，无 op；项目 Apache-2.0 开源，无 license 销售） |
+| `anet license` | 查看 legacy trial/pro-license 状态（实验性；当前 Hub 的 `send_task` 仍检查过期 trial） |
+| `anet activate <key>` | 写入 pro license key（实验性；用于处理 `license_expired`） |
 
 ---
 
@@ -131,7 +131,7 @@ anet hub start [options]
 ```
 anet hub start
 Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.1)
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.0)
 🔒 secured
 ✅ Admin account created
    username: admin
@@ -176,7 +176,7 @@ admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次
 |------|------|
 | `PORT` | 监听端口 |
 | `COMMHUB_AUTH_TOKEN` | 旧 master token 兼容环境变量；v0.8 起 deprecated |
-| `DATABASE_URL` | PostgreSQL 连接（代码层入口，v2.1 未做 E2E 验证，**不推荐生产使用**；默认 SQLite） |
+| `DATABASE_URL` | PostgreSQL 连接（代码层入口，当前 stable 未做 E2E 验证，**不推荐生产使用**；默认 SQLite） |
 | `COMMHUB_CORS_ORIGINS` | CORS 白名单 |
 
 ### anet passwd

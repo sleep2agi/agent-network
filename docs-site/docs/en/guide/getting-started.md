@@ -127,7 +127,7 @@ In the Dashboard, ask `my-bot`:
 
 > ask video-bot what it can do
 
-`my-bot` discovers `video-bot` via the commhub MCP `get_all_status` tool and dispatches the question with `send_task`. The Agent Node wrapper internally polls the hub and surfaces the reply to the agent as a new task context / report_completion callback — agents do **not** call `get_task` themselves (the wrapper does not expose that tool). The Tasks and Messages pages show the full handshake live.
+`my-bot` discovers `video-bot` via the commhub MCP `get_all_status` tool, dispatches the question with `send_task`, and polls the sub-task result with `get_task`. When `parent_task_id` is set, the Agent Node wrapper also chains the child result back to the upstream task. The Tasks and Messages pages show the full handshake live.
 
 ## 9. LAN access (another machine joins the same hub)
 
@@ -157,7 +157,7 @@ anet node start remote-bot
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
 - `anet node create / start / delete / ls` with `claude-agent-sdk` + MiniMax / DeepSeek / GLM / Kimi / Anthropic
 - Dashboard chat: markdown, Enter-to-send, optimistic echo, source labels, failure rendering, persistent history
-- Multi-agent coordination via `get_all_status` + `send_task` (the wrapper internally feeds peer replies back as task context, agents do not call `get_task` directly)
+- Multi-agent coordination via `get_all_status` + `send_task` + `get_task`, with `parent_task_id` chaining handled by the Agent Node wrapper
 - LAN-shared hub
 :::
 
@@ -165,7 +165,7 @@ anet node start remote-bot
 - `anet quickstart` — removed from the docs.
 - `codex-sdk` runtime end-to-end.
 - `claude-code-cli` runtime end-to-end.
-- `anet license` / `anet activate` — experimental placeholder commands. The project is Apache-2.0 open source; the business model is courses + consulting, **not license sales** — these commands no longer gate any functionality.
+- `anet license` / `anet activate` — experimental legacy trial/pro-license commands. They are outside the primary local flow, but the current Hub still creates a 14-day trial and `send_task` can return `license_expired` after it expires.
 - `anet network create` and cross-user network sharing — V3 multi-network code is in but not E2E regressed.
 - The hosted `agent-net.vansin.me` demo — local / LAN is the supported path today.
 :::

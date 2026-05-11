@@ -94,7 +94,7 @@ mkdir -p /tmp/anet-test-home
 HOME=/tmp/anet-test-home bun run /app/agent-network/bin/cli.ts demo >/tmp/anet-demo.txt 2>&1 || true
 check_grep "Available demos" "/tmp/anet-demo.txt" "anet demo lists demos"
 check_grep "debate" "/tmp/anet-demo.txt" "anet demo includes debate"
-check_grep "monitor" "/tmp/anet-demo.txt" "anet demo includes monitor"
+check_grep "socialmedia" "/tmp/anet-demo.txt" "anet demo includes socialmedia"
 HOME=/tmp/anet-test-home bun run /app/agent-network/bin/cli.ts demo debate --help >/tmp/anet-demo-debate-help.txt 2>&1 || true
 check_grep "--quick" "/tmp/anet-demo-debate-help.txt" "debate help includes quick mode"
 check_grep "--no-network" "/tmp/anet-demo-debate-help.txt" "debate help includes no-network option"

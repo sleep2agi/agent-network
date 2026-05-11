@@ -1,6 +1,6 @@
 # 上手指南
 
-本页是 Agent Network v2.1 端到端跑通的最小路径。每一步都经过 playwright + Docker E2E 验证，照着敲就能走通。
+本页是当前 stable（v0.8.1 / CLI v2.1.5）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
 
 ::: tip 角色（v0.8.1，git tag `v0.8.1`）
 | 包 | 版本 | 角色 |
@@ -131,7 +131,7 @@ anet node start video-bot
 
 > ask video-bot what it can do
 
-`my-bot` 会通过 commhub MCP 工具的 `get_all_status` 发现 `video-bot`，再用 `send_task` 把问题派出去。Agent Node wrapper 内部轮询 hub 并把回复以新的 task 上下文 / report_completion 回调形式喂给 agent —— agent 自己**不**调用 `get_task`（wrapper 不暴露该 tool）。整个交互在 Tasks / Messages 页面可以实时看到。
+`my-bot` 会通过 commhub MCP 工具的 `get_all_status` 发现 `video-bot`，再用 `send_task` 把问题派出去，并通过 `get_task` 轮询子任务结果。设置 `parent_task_id` 后，Agent Node wrapper 还会把子任务最终结果串回上游；整个交互在 Tasks / Messages 页面可以实时看到。
 
 ## 9. 局域网接入（其他机器加入同一个 Hub）
 
@@ -169,7 +169,7 @@ anet node start remote-bot
 - `anet quickstart` —— 已从文档中移除
 - `codex-sdk` runtime 的端到端流程
 - `claude-code-cli` runtime 的端到端流程
-- `anet license` / `anet activate` —— experimental 占位命令；项目方向是 Apache-2.0 开源 + 卖课 + 卖服务，**不再做付费 license**，所以这两个命令不影响主线功能
+- `anet license` / `anet activate` —— experimental legacy trial/pro-license 命令；不属于本地上手主线，但当前 Hub 仍会创建 14 天 trial，并在过期后让 `send_task` 返回 `license_expired`
 - `anet network create` 与跨用户网络共享 —— V3 多网络代码已合并但未做 E2E 回归
 - 云托管的 `agent-net.vansin.me` 演示站点（计划中，当前只支持本地 / 局域网）
 :::

@@ -366,7 +366,7 @@ anet node start coder
 
 ## 已验证 vs 未验证
 
-::: info 已验证（v2.1 E2E 覆盖）
+::: info 已验证（当前 stable 继承 v2 E2E 覆盖）
 - `claude-agent-sdk` —— Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 全部 E2E 通过
 - 多 Runtime 混搭（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调）
 :::

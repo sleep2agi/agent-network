@@ -96,8 +96,8 @@ See [Debate Demo](/en/cases/debate) for the runnable multi-agent demo.
 | Command | Description |
 |------|------|
 | `anet config` | View/modify configuration |
-| `anet license` | View license status (experimental no-op; project is Apache-2.0, no license sales) |
-| `anet activate <key>` | Activate a license (experimental no-op; project is Apache-2.0, no license sales) |
+| `anet license` | View legacy trial/pro-license status (experimental; the current Hub still checks expired trials in `send_task`) |
+| `anet activate <key>` | Write a pro license key (experimental; used to handle `license_expired`) |
 
 ---
 
@@ -124,7 +124,7 @@ What it does:
 ```
 anet hub start
 Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.1)
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.0)
 🔒 secured
 ✅ Admin account created
    username: admin
@@ -163,7 +163,7 @@ Once admin is bootstrapped (`~/.anet/server/admin-utok.json` exists), `anet hub 
 |------|------|
 | `PORT` | Listen port |
 | `COMMHUB_AUTH_TOKEN` | Legacy master token env; deprecated in v0.8 |
-| `DATABASE_URL` | PostgreSQL connection (code-level entry, **not E2E-verified on v2.1; not recommended for production**; default SQLite) |
+| `DATABASE_URL` | PostgreSQL connection (code-level entry, **not E2E-verified on the current stable line; not recommended for production**; default SQLite) |
 | `COMMHUB_CORS_ORIGINS` | CORS whitelist |
 
 ### anet passwd
