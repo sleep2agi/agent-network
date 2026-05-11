@@ -2804,7 +2804,7 @@ async function quickstartCommand() {
     console.log("  a) 本机启动: 另开终端运行 bunx @sleep2agi/commhub-server");
     console.log("  b) 连接远程: 输入服务器地址");
     console.log();
-    const hubUrl = await ask("CommHub URL [http://127.0.0.1:9200]: ") || "http://127.0.0.1:9200";
+    const hubUrl = await ask("CommHub URL [http://127.0.0.1:9200]") || "http://127.0.0.1:9200";
     gc.hub = hubUrl;
     saveGlobal(gc);
     console.log(`  ✅ Hub: ${hubUrl}\n`);
@@ -2830,8 +2830,8 @@ async function quickstartCommand() {
   // Step 2: Register/Login
   if (!gc.token || !gc.user) {
     console.log("Step 2/4: 创建账号");
-    const username = qsOpts.username || qsOpts.user || await ask("用户名: ");
-    const password = qsOpts.password || qsOpts.pass || await ask("密码 (≥6位): ");
+    const username = qsOpts.username || qsOpts.user || await ask("用户名");
+    const password = qsOpts.password || qsOpts.pass || await ask("密码 (≥6位)");
     closeRL();
     if (!username || !password) { closeRL(); console.error("需要用户名和密码。用法: anet quickstart --username xxx --password xxx"); return; }
 
@@ -2868,7 +2868,7 @@ async function quickstartCommand() {
 
   // Step 3: Create agent
   console.log("Step 3/4: 创建你的第一个 Agent");
-  const agentName = qsOpts.agent || qsOpts.name || await ask("Agent 名称 [my-agent]: ") || "my-agent";
+  const agentName = qsOpts.agent || qsOpts.name || await ask("Agent 名称 [my-agent]") || "my-agent";
   closeRL();
 
   // Check if already exists
@@ -2941,9 +2941,9 @@ async function registerCommand() {
   if (!hub) { console.error("未找到 CommHub Server。请先运行: anet hub start"); return; }
 
   const opts = parseOpts();
-  const username = opts.username || opts.user || await ask("Username: ");
-  const password = opts.password || opts.pass || await ask("Password (min 6): ");
-  const email = opts.email || ((opts.username || opts.user) ? "" : await ask("Email (optional): "));
+  const username = opts.username || opts.user || await ask("Username");
+  const password = opts.password || opts.pass || await ask("Password (min 6)");
+  const email = opts.email || ((opts.username || opts.user) ? "" : await ask("Email (optional)"));
   closeRL();
 
   if (!username || !password) { console.error("Username and password required."); return; }
@@ -3008,8 +3008,8 @@ async function loginCommand() {
   }
 
   // Interactive login
-  const username = opts.username || opts.user || await ask("Username: ");
-  const password = opts.password || opts.pass || await ask("Password: ");
+  const username = opts.username || opts.user || await ask("Username");
+  const password = opts.password || opts.pass || await ask("Password");
   closeRL();
 
   if (!username || !password) { console.error("Username and password required."); return; }
@@ -3021,11 +3021,11 @@ async function loginCommand() {
       body: JSON.stringify({ username, password }),
     }).then(r => r.json() as any);
 
-    if (!res.ok) { console.error(`Login failed: ${res.error}`); return; }
+    if (!res.ok) { console.error(`❌ Login failed: ${res.error}`); return; }
 
     gc.token = res.token;
     gc.user = res.user;
-    console.log(`[anet] Logged in as ${res.user.username}`);
+    console.log(`✅ Logged in as ${res.user.username}`);
 
     // Fetch networks and let user choose
     const nets = await fetch(`${hub}/api/networks`, { headers: { Authorization: `Bearer ${res.token}` } }).then(r => r.json() as any);
@@ -3057,8 +3057,9 @@ async function loginCommand() {
     }
 
     saveGlobal(gc);
-    if (gc.network_name) console.log(`[anet] Network: ${gc.network_name}`);
-    console.log(`[anet] Token saved to ~/.anet/config.json`);
+    if (gc.network_name) console.log(`   network: ${gc.network_name}`);
+    console.log(`   token saved to ~/.anet/config.json`);
+    console.log(`✅ Login successful — next: anet status / anet node create my-agent`);
   } catch (e: any) { console.error(friendlyError(e)); }
 }
 
@@ -3406,11 +3407,11 @@ async function passwdCommand() {
   if (!hub || !token) { console.error("Not logged in. Run: anet login"); return; }
 
   const opts = parseOpts();
-  const oldPw = opts["old-password"] || opts.old || await ask("Current password: ");
+  const oldPw = opts["old-password"] || opts.old || await ask("Current password");
   const scriptedNew = opts["new-password"] || opts["new"];
-  const newPw = scriptedNew || await ask("New password (min 8): ");
+  const newPw = scriptedNew || await ask("New password (min 8)");
   if (!scriptedNew) {
-    const confirmPw = await ask("Confirm new password: ");
+    const confirmPw = await ask("Confirm new password");
     if (newPw !== confirmPw) {
       closeRL();
       console.error("[anet] Failed: passwords do not match");
