@@ -168,6 +168,68 @@ if (authErr) return authErr;
 - 文档里 master token 相关内容全部清掉。
 - `SECURITY.md` 和安全风险报告里 R3 / R4 条目加脚注："已在 v1.0 通过 RFC-001 解决"。
 
+## 用户密码管理（v0.8 一并上）
+
+`COMMHUB_AUTH_TOKEN` 拿掉以后，user 密码 + `utok_` 是唯一的鉴权基线。原本零散的密码相关代码需要补齐成完整闭环，与本 RFC 同节奏在 v0.8 落地（不另开 RFC，体量太小）。
+
+### A. 主动改密（已部分实现，补齐）
+
+当前已有：
+- 后端 `POST /api/auth/password`（`server/src/auth.ts:242`）。
+- CLI `anet passwd`。
+- Dashboard `/settings` 页有 Change Password 表单（`app/settings/page.tsx:162-189`）。
+
+补齐项（v0.8）：
+- CLI `anet passwd` 默认进交互（依次 prompt 旧密码 → 新密码 → 确认）；保留 `--old / --new` 给脚本调用。
+- 改密成功后，**自动撤销该用户的所有其他 `utok_`**（即当前会话之外的，其他设备同步登出）。`ntok_` **不撤** —— 它是设备/节点维度的凭证，不绑定密码生命周期。
+- Dashboard 改密成功后，前端轮换 session cookie（拿新 `utok_` 重新写 cookie），其他设备会在下次请求时收到 401。
+
+### B. 忘记密码 → admin-assisted reset
+
+新增本机 CLI 命令 `anet hub admin reset-user --username <u>`：
+
+1. 直接读 SQLite，绕过 HTTP API。
+2. 拒绝在非 hub 主机环境运行（与 `anet hub admin reset` 相同的本机闸门）。
+3. 生成随机密码，更新 `users.password_hash`，打印新密码一次。
+4. **撤销该用户全部 `utok_`**（强迫被重置用户重新 `anet login`）。
+5. 在 `audit_log` 写一条 `password_reset_by_admin` 事件，记录操作 hub admin + 被重置 user。
+
+不做邮件 reset（项目暂无邮件服务）。需要找回密码但又上不了 hub 主机的人，需要联系自托管 admin —— 这跟 local-first 定位一致。
+
+### C. 邮件 reset
+
+**暂不做。** 需要先接入邮件服务（SMTP / Resend / SES）。等 v0.9+ 真正有用户群体反馈需求时再做插件化设计。
+
+### D. 密码强度
+
+- 最小长度从 6 升到 **8**。
+- 拒绝 top-1000 弱密码（embed 一个 ~10KB 字典）。
+- 不强制大小写 / 数字 / 特殊字符（UX 太烦，企业 SSO 才需要）。
+
+### E. token 撤销语义（最终决策）
+
+| 触发场景 | utok_ 撤销范围 | ntok_ 撤销范围 |
+|---|---|---|
+| 用户改自己的密码（成功） | 撤销该用户所有 utok_，**保留**当前会话的那一张 | 不撤 |
+| Admin reset 用户密码 | 该用户全部 utok_ 撤销 | 不撤 |
+| 用户手动 `anet token revoke <id>` | 仅撤指定 token | 同 |
+| 用户主动 `anet logout` | 撤销当前会话 utok_ | 不撤 |
+
+`ntok_` 设计上是设备/节点凭证，密码事件不波及。需要撤 `ntok_` 时用户走 `anet token revoke` 或在 Dashboard `/settings/tokens` 显式操作。
+
+### F. 实施范围（给实施方）
+
+| 模块 | 改动 | 估算 |
+|---|---|---|
+| `server/src/auth.ts` | `changePassword()` 后调撤销其他 utok_；新增 `resetUserPassword()` 函数 | ~30 行 |
+| `server/src/index.ts` | 改密接口返回新颁的 utok_（替当前会话） | ~10 行 |
+| `agent-network/bin/cli.ts` | `anet passwd` 交互式 prompt；`anet hub admin reset-user` 子命令 | ~80 行 |
+| `agent-network-dashboard/app/settings/page.tsx` | 改密成功后用新 utok_ 替换 sessionStorage / cookie | ~20 行 |
+| `server/src/passwordStrength.ts` | 新文件：长度 + 字典校验；embed top-1000 弱密码 | ~50 行 |
+| 测试 | server unit + CLI E2E + Dashboard Playwright | 1 套 |
+
+预计 1-2 天工作量（通信牛 codex）。
+
 ## 兼容性
 
 **不会破坏的**：
@@ -196,6 +258,8 @@ if (authErr) return authErr;
 5. **不**撤销其他 admin token —— 留给运维自己用 `anet token revoke` 处理。
 
 不提供网络化恢复路径。如果你拿不到 hub 主机的 shell，admin 就找不回 —— 这是有意为之，跟"local-first"的产品方向一致。
+
+**普通用户忘记密码**：参见上文"用户密码管理 §B"，由 hub admin 用 `anet hub admin reset-user --username <u>` 重置。
 
 **Dashboard 跨机部署**：直接 `anet hub dashboard --hub https://hub.example.com`。Dashboard backend 不持任何 token，每个浏览器 session 自己跟 hub 建立身份。无文件拷贝、无主机相关配置。（详见设计方案 §2。）
 
