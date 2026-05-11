@@ -27,6 +27,7 @@ npm install -g @sleep2agi/agent-network
 | `anet hub start` | 启动 CommHub Server |
 | `anet hub dashboard` | 启动 Dashboard UI |
 | `anet hub config` | 查看/修改 Hub 配置 |
+| `anet hub admin reset-user --username <u>` | 本机重置普通用户密码 |
 
 ### 账号管理
 
@@ -120,10 +121,10 @@ anet hub start [options]
 
 **执行这条命令后，系统自动完成以下操作：**
 
-1. 生成 `COMMHUB_AUTH_TOKEN`（首次运行时自动生成，保存到 `~/.anet/server/config.json`）
+1. 启动 CommHub Server（v0.8 起不需要 `COMMHUB_AUTH_TOKEN`）
 2. 启动 CommHub Server（默认绑定 `127.0.0.1:9200`，仅本机可访问）
 3. 创建 SQLite 数据库（`~/.commhub/commhub.db`，含 13 张表）
-4. 自动注册默认 admin 用户（首次运行，默认 `admin / anethub`）
+4. 自动注册 admin 用户（首次运行）并写 `~/.anet/server/admin-utok.json`
 5. 写入本机 Hub 地址到 `~/.anet/config.json`
 6. 如已有有效 `utok_` 会复用登录态；否则需要手动 `anet login`
 7. 启动 14 天免费试用
@@ -145,7 +146,7 @@ This machine — login then create a node:
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--port` | 9200 | 监听端口 |
-| `--token` | (自动生成) | Bearer 认证 Token |
+| `--token` | - | 旧 master token 兼容参数；v0.8 起 deprecated |
 | `--host` / `--ip` | 127.0.0.1 | 绑定地址；局域网接入用 `0.0.0.0` |
 | `--username` | admin | 默认账号用户名 |
 | `--password` | anethub | 默认账号密码 |
@@ -155,9 +156,32 @@ This machine — login then create a node:
 | 变量 | 说明 |
 |------|------|
 | `PORT` | 监听端口 |
-| `COMMHUB_AUTH_TOKEN` | 全局认证 Token |
+| `COMMHUB_AUTH_TOKEN` | 旧 master token 兼容环境变量；v0.8 起 deprecated |
 | `DATABASE_URL` | PostgreSQL 连接（代码层入口，v2.1 未做 E2E 验证，**不推荐生产使用**；默认 SQLite） |
 | `COMMHUB_CORS_ORIGINS` | CORS 白名单 |
+
+### anet node create
+
+### anet passwd
+
+修改当前登录用户密码。默认交互式输入旧密码、新密码、确认密码；脚本可用 `--old` / `--new`。
+
+```bash
+anet passwd
+anet passwd --old old-password --new new-password
+```
+
+成功后 hub 会返回新的 `utok_`，CLI 自动写回 `~/.anet/config.json`。该用户其他设备上的 `utok_` 会失效；agent 使用的 `ntok_` 不受影响。
+
+### anet hub admin reset-user
+
+Hub 主机本机恢复命令，绕过 HTTP API 直接读 SQLite。
+
+```bash
+anet hub admin reset-user --username alice
+```
+
+它会生成随机新密码、撤销该用户全部 `utok_`、颁发一个新的 `utok_` 并在 `audit_log` 写入 `password_reset_by_admin`。新密码只打印一次。
 
 ### anet node create
 

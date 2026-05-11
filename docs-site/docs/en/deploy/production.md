@@ -11,10 +11,10 @@ Read this entire page **before opening any firewall ports**.
 | Item | Default | Risk |
 |---|---|---|
 | Hub bind | `127.0.0.1` (local only) | Public mode needs explicit `--host 0.0.0.0` |
-| Default account | `admin / anethub` | **Must change immediately** |
-| `COMMHUB_AUTH_TOKEN` | unset = open mode | `requireAuth()` is bypassed in open mode |
-| tmux control plane | enabled | Open mode allows remote terminal R/W ≈ RCE |
-| Multi-tenant isolation | incomplete | Any valid token can read global tasks / subscribe to other aliases via SSE |
+| Default account | generated on first start or set by `--username/--password` | Save once, then rotate password |
+| `COMMHUB_AUTH_TOKEN` | deprecated in v0.8 | No longer part of the main deployment path |
+| tmux control plane | disabled by default | Requires `COMMHUB_ENABLE_TMUX=1` + admin auth |
+| Multi-tenant isolation | network-scoped | Users only access networks they belong to |
 | HTTPS | none | 9200 / 3000 are plaintext by default |
 
 Full audit: [`docs/open-source-security-risk-report.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md). **v0.6.1 stable will close all P0 items** (auth required / localhost-only / random initial password / tmux off / scope enforced) — when that ships, this page gets shorter.
@@ -28,14 +28,13 @@ anet login --username admin --password anethub
 anet passwd                       # interactive, ≥ 12 chars, mixed case + digits + symbols
 ```
 
-### 2. Set `COMMHUB_AUTH_TOKEN`
+### 2. Do not configure a master token in v0.8+
 
 ```bash
-COMMHUB_AUTH_TOKEN="$(openssl rand -hex 32)"
-anet hub start --host 0.0.0.0 --token "$COMMHUB_AUTH_TOKEN"
+anet hub start --host 0.0.0.0
 ```
 
-Persist via the systemd unit `Environment=` or `~/.anet/server/config.json`.
+First start provisions an admin user and writes a local recovery admin `utok_` to `~/.anet/server/admin-utok.json` (`chmod 600`). Legacy `COMMHUB_AUTH_TOKEN` / `--token` remains as a v0.8 soft-compat path only and logs a deprecation warning.
 
 ### 3. Reverse proxy + TLS (required)
 
@@ -70,7 +69,7 @@ Keep the security group / firewall locked down to **22(SSH) + 80 + 443**. Don't 
 If you don't need the dashboard's terminal feature:
 
 ```bash
-COMMHUB_ENABLE_TMUX=0 anet hub start --host 0.0.0.0 --token "$TOKEN"
+COMMHUB_ENABLE_TMUX=0 anet hub start --host 0.0.0.0
 ```
 
 (In v0.6.1+ this is off by default; you'll need `=1` to opt in.)

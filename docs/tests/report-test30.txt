@@ -1,0 +1,22 @@
+Test: test30-v0.8-auth-deprecation
+Date: 2026-05-11T10:39:45Z
+Runner: Docker (sg docker)
+
+Commands:
+- sg docker -c 'docker build -t anet-test30-v08-auth -f tests/test30-v0.8-auth-deprecation/Dockerfile .'
+- sg docker -c 'docker run --rm anet-test30-v08-auth'
+
+Published packages verified:
+- @sleep2agi/commhub-server@0.8.0-preview.0 (preview)
+- @sleep2agi/agent-network@2.1.4-preview.2 (preview)
+- @sleep2agi/agent-network-dashboard@0.4.0-preview.0 (preview)
+
+Coverage:
+- Fresh hub bootstrap without COMMHUB_AUTH_TOKEN creates ~/.anet/server/admin-utok.json with mode 600.
+- Admin password change returns a new utok_ and revokes other utok_ sessions.
+- Weak passwords "password" and "123456" are rejected.
+- anet hub admin reset-user revokes target utok_ sessions and writes audit_log password_reset_by_admin.
+- anet hub dashboard starts with admin-utok.json token discovery.
+
+Result:
+PASS test30 v0.8 auth deprecation

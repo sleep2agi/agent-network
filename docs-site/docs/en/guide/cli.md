@@ -27,6 +27,7 @@ After installation, the `anet` command is available globally.
 | `anet hub start` | Start CommHub Server |
 | `anet hub dashboard` | Start Dashboard UI |
 | `anet hub config` | View/change Hub config |
+| `anet hub admin reset-user --username <u>` | Locally reset a user's password |
 
 ### Account Management
 
@@ -114,17 +115,17 @@ anet hub start [options]
 
 What it does:
 
-1. Generates `COMMHUB_AUTH_TOKEN` on first run and saves it to `~/.anet/server/config.json`
+1. Starts CommHub without requiring `COMMHUB_AUTH_TOKEN` in v0.8+
 2. Starts CommHub on `127.0.0.1:9200` by default
 3. Creates the SQLite database at `~/.commhub/commhub.db`
-4. Creates the default admin account on first run (`admin / anethub`)
+4. Creates the admin account on first run and writes `~/.anet/server/admin-utok.json`
 5. Saves the local Hub URL to `~/.anet/config.json`
 6. Reuses a valid saved `utok_` if one exists; otherwise run `anet login`
 
 | Parameter | Default | Description |
 |------|--------|------|
 | `--port` | 9200 | Listen port |
-| `--token` | (auto-generated) | Bearer auth token |
+| `--token` | - | Legacy master token compatibility; deprecated in v0.8 |
 | `--host` / `--ip` | 127.0.0.1 | Bind address; use `0.0.0.0` for LAN access |
 | `--username` | admin | Default account username |
 | `--password` | anethub | Default account password |
@@ -134,9 +135,30 @@ What it does:
 | Variable | Description |
 |------|------|
 | `PORT` | Listen port |
-| `COMMHUB_AUTH_TOKEN` | Global auth token |
+| `COMMHUB_AUTH_TOKEN` | Legacy master token env; deprecated in v0.8 |
 | `DATABASE_URL` | PostgreSQL connection (code-level entry, **not E2E-verified on v2.1; not recommended for production**; default SQLite) |
 | `COMMHUB_CORS_ORIGINS` | CORS whitelist |
+
+### anet passwd
+
+Change the current logged-in user's password. By default it prompts for old password, new password, and confirmation. Scripts may pass `--old` / `--new`.
+
+```bash
+anet passwd
+anet passwd --old old-password --new new-password
+```
+
+On success the hub returns a fresh `utok_`; CLI saves it back to `~/.anet/config.json`. Other devices' `utok_` are revoked. Agent `ntok_` credentials are not affected.
+
+### anet hub admin reset-user
+
+Local hub-host recovery command. It bypasses HTTP and reads SQLite directly.
+
+```bash
+anet hub admin reset-user --username alice
+```
+
+It generates a random password, revokes all user `utok_`, issues a fresh `utok_`, and writes `password_reset_by_admin` to `audit_log`. The password is printed once.
 
 ### anet node create
 

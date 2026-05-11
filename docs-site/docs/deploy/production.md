@@ -11,10 +11,10 @@ Agent Network v2.1 的默认配置只为**本机使用**优化。直接 `--host 
 | 项 | 默认 | 风险 |
 |---|---|---|
 | Hub bind | `127.0.0.1`（仅本机） | 公网模式必须显式 `--host 0.0.0.0` |
-| 默认账号 | `admin / anethub` | **必须立刻改密** |
-| `COMMHUB_AUTH_TOKEN` | 未设置 = open mode | open mode 下 `requireAuth()` 放行所有接口 |
-| tmux 控制面 | 启用 | open mode 下可远程读写终端 ≈ RCE |
-| 多租户隔离 | 不完整 | 任意 token 可读全局任务 + 订阅他人 SSE |
+| 默认账号 | 首次启动随机生成或按 `--username/--password` 指定 | 保存一次，随后改密 |
+| `COMMHUB_AUTH_TOKEN` | v0.8 起软废弃 | 不再作为主线部署配置 |
+| tmux 控制面 | 默认关闭 | 需要 `COMMHUB_ENABLE_TMUX=1` + admin 鉴权 |
+| 多租户隔离 | network scope 强制 | 用户只能访问所属 network |
 | HTTPS | 无 | 9200 / 3000 默认明文 |
 
 完整审计见 [`docs/open-source-security-risk-report.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)。**v0.6.1 stable 会修掉 P0 项**（默认 auth required / 默认 localhost / 默认随机密码 / tmux 默认关闭 / network scope 强制），届时这一页会简化。
@@ -28,17 +28,13 @@ anet login --username admin --password anethub
 anet passwd                       # 交互输入新密码（≥ 12 位，含大小写+数字+符号）
 ```
 
-### 2. 设置 `COMMHUB_AUTH_TOKEN`
+### 2. v0.8 起不再配置 master token
 
 ```bash
-# 生成强随机 token
-COMMHUB_AUTH_TOKEN="$(openssl rand -hex 32)"
-
-# 启动 hub 时带上
-anet hub start --host 0.0.0.0 --token "$COMMHUB_AUTH_TOKEN"
+anet hub start --host 0.0.0.0
 ```
 
-加到 systemd unit 的 `Environment=COMMHUB_AUTH_TOKEN=...` 或 `~/.anet/server/config.json`。
+首次启动会创建 admin 用户，并把本机恢复用 admin `utok_` 写到 `~/.anet/server/admin-utok.json`（权限 `600`）。旧的 `COMMHUB_AUTH_TOKEN` / `--token` 只保留软兼容到 v1.0，会打印 deprecation warning。
 
 ### 3. 反代 + TLS（必须）
 
@@ -81,7 +77,7 @@ DNS 解析到你的服务器 IP，Caddy 会自动签发 Let's Encrypt 证书。
 如果你不需要 dashboard 的 tmux 终端功能，启动 hub 时设：
 
 ```bash
-COMMHUB_ENABLE_TMUX=0 anet hub start --host 0.0.0.0 --token "$TOKEN"
+COMMHUB_ENABLE_TMUX=0 anet hub start --host 0.0.0.0
 ```
 
 （v0.6.1 之后默认关闭，需要显式 `=1` 才打开）

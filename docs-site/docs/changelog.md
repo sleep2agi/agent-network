@@ -1,5 +1,28 @@
 # 更新日志
 
+## 2026-05-11 — v0.8.0 preview：RFC-001 阶段 2
+
+**版本同步**（npm `preview` tag）：
+- `@sleep2agi/commhub-server@0.8.0-preview.0`
+- `@sleep2agi/agent-network@2.1.4-preview.0`
+- `@sleep2agi/agent-network-dashboard@0.4.0-preview.0`
+
+### 鉴权变化
+
+- `COMMHUB_AUTH_TOKEN` 进入软废弃：v0.8 只保留 `/api/*` 读类兼容并打印 warning，v1.0 移除。
+- `anet hub start` 首次启动会创建 admin 用户，并把本机恢复用 admin `utok_` 写到 `~/.anet/server/admin-utok.json`（`chmod 600`）。
+- Dashboard 走浏览器用户登录 cookie 透传，不再依赖长期 service/master token。
+- tmux / admin 端点强制 admin `utok_`。
+
+### 密码管理
+
+- `anet passwd` 默认交互输入旧密码、新密码、确认密码；保留 `--old` / `--new`。
+- 改密成功后当前设备换新 `utok_`，其他设备 `utok_` 自动失效；Agent `ntok_` 不受影响。
+- 新增 `anet hub admin reset-user --username <u>`，仅 hub 主机本机恢复普通用户密码，写入 `password_reset_by_admin` 审计事件。
+- 密码最小长度提升到 8，并拒绝常见弱密码。
+
+---
+
 ## 2026-05-10 — **v2.1 正式版** 🎉
 
 **版本同步**（npm `latest` tag）：

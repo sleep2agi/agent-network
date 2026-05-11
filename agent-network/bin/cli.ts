@@ -12,7 +12,7 @@
 
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync } from "fs";
 import { join } from "path";
-import { spawn, execSync } from "child_process";
+import { spawn, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 
@@ -24,6 +24,7 @@ const home = process.env.HOME || process.env.USERPROFILE || "~";
 
 function globalConfigPath() { return join(home, ".anet", "config.json"); }
 function serverConfigPath() { return join(home, ".anet", "server", "config.json"); }
+function adminUtokPath() { return join(home, ".anet", "server", "admin-utok.json"); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 
 // Token/hub from: CLI --token > env > global config
@@ -62,8 +63,32 @@ function loadServerConfig(): Record<string, any> {
 
 function saveServerConfig(data: Record<string, any>) {
   const dir = join(home, ".anet", "server");
+  const p = serverConfigPath();
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "config.json"), JSON.stringify(data, null, 2) + "\n");
+  writeFileSync(p, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+  try { chmodSync(p, 0o600); } catch {}
+}
+
+function serverAuthTokenFromConfig(config = loadServerConfig()): string {
+  return config.auth_token || config.token || "";
+}
+
+function commhubDbPath() {
+  return process.env.COMMHUB_DB || join(home, ".commhub", "commhub.db");
+}
+
+function saveAdminUtok(data: Record<string, any>) {
+  const dir = join(home, ".anet", "server");
+  const p = adminUtokPath();
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(p, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+  try { chmodSync(p, 0o600); } catch {}
+}
+
+function loadAdminUtok(): Record<string, any> {
+  const p = adminUtokPath();
+  if (existsSync(p)) try { return JSON.parse(readFileSync(p, "utf-8")); } catch {}
+  return {};
 }
 
 interface Profile {
@@ -1846,7 +1871,17 @@ async function serverCommand() {
     // who want LAN access pass --ip 0.0.0.0 explicitly.
     const host = opts.ip || opts.host || process.env.HOST || "127.0.0.1";
     const sc = loadServerConfig();
-    const token = opts.token || sc.token || randomUUID().replace(/-/g, "");
+    const devOpen = opts["dev-open"] === "true";
+    let tokenSource: "flag" | "env" | "dev-open" | "none" = devOpen ? "dev-open" : "none";
+    let token = "";
+    if (serverAuthTokenFromConfig(sc)) {
+      console.warn(`[anet] ⚠ ~/.anet/server/config.json auth_token is deprecated and ignored in v0.8. See RFC-001.`);
+    }
+    if (!devOpen) {
+      if (opts.token) { token = opts.token; tokenSource = "flag"; }
+      else if (process.env.COMMHUB_AUTH_TOKEN) { token = process.env.COMMHUB_AUTH_TOKEN; tokenSource = "env"; }
+      if (token) console.warn(`[anet] ⚠ COMMHUB_AUTH_TOKEN / --token is deprecated and will be removed in v1.0. See RFC-001.`);
+    }
     const gc = loadGlobal();
     // Health checks always go to loopback; the saved hub URL also stays on
     // loopback for the local machine. LAN clients use the LAN URL printed
@@ -1872,15 +1907,17 @@ async function serverCommand() {
         ...process.env as any,
         PORT: port,
         HOST: host,
-        COMMHUB_AUTH_TOKEN: token,
+        ...(devOpen ? { COMMHUB_DEV_OPEN: "1" } : token ? { COMMHUB_AUTH_TOKEN: token } : {}),
       };
       // Pin to a specific version to defeat bunx caching of older versions.
       // Bump this whenever commhub-server is updated. (bunx with @preview will
       // cache the first-resolved version and may not refetch even when the
       // tag points at something newer; specifying the exact version forces
       // a fresh install whenever this string changes.)
-      const PINNED_SERVER_VERSION = "0.7.0-preview.0";
-      child = spawn("bunx", ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`], { env, stdio: "pipe", shell: true });
+      const PINNED_SERVER_VERSION = "0.8.0-preview.0";
+      const serverArgs = ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`];
+      if (devOpen) serverArgs.push("--dev-open");
+      child = spawn("bunx", serverArgs, { env, stdio: "pipe", shell: true });
 
       // Wait for server with polling
       let ready = false;
@@ -1908,6 +1945,11 @@ async function serverCommand() {
         return;
       }
       console.log(`  ✅ Server running on ${hubUrl} (commhub-server v${serverVersion || "?"})`);
+      if (devOpen) {
+        console.log(`  ⚠️  DEV OPEN MODE`);
+      } else {
+        console.log(`  🔒 secured`);
+      }
       // Warn loudly if user is on a known-broken old version (cache poisoning).
       if (serverVersion && serverVersion.startsWith("0.4.")) {
         console.error(`\n  ⚠️  Old commhub-server v${serverVersion} detected — task routing will not work.`);
@@ -1921,7 +1963,7 @@ async function serverCommand() {
 
     // Save hub URL + server token. Do NOT touch gc.token here — that's owned by login.
     gc.hub = hubUrl;
-    saveServerConfig({ port, host, token });
+    saveServerConfig({ ...sc, port, host });
     saveGlobal(gc);
 
     // Wait for API to fully boot (the /api/auth/* endpoints may not respond
@@ -1953,15 +1995,24 @@ async function serverCommand() {
     try {
       const reg = await fetch(`${hubUrl}/api/auth/register`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
         body: JSON.stringify({ username: defaultUser, password: defaultPass }),
       }).then(r => r.json() as any);
       if (reg.ok) {
         defaultAccountReady = true;
+        if (reg.token) {
+          saveAdminUtok({
+            username: reg.user?.username || defaultUser,
+            user_id: reg.user?.user_id,
+            token: reg.token,
+            created_at: new Date().toISOString(),
+          });
+        }
         console.log(`  ✅ Admin account created`);
         console.log(`     username: ${defaultUser}`);
         console.log(`     password: ${defaultPass}`);
         console.log(`     Store this password now; it will not be shown again.`);
+        if (reg.token) console.log(`     Admin token saved to ~/.anet/server/admin-utok.json`);
       } else if (reg.error?.includes("already taken")) {
         defaultAccountReady = true;
         console.log(`  ℹ  Admin account "${defaultUser}" already exists`);
@@ -2046,13 +2097,67 @@ async function serverCommand() {
       process.on("SIGINT", () => { child.kill(); process.exit(0); });
     }
 
+  } else if (sub === "admin" && args[2] === "reset-user") {
+    const opts = parseOpts();
+    const username = opts.username || opts.user;
+    if (!username) {
+      console.error("Usage: anet hub admin reset-user --username <user>");
+      return;
+    }
+    const dbPath = commhubDbPath();
+    if (!existsSync(dbPath) && opts["i-am-on-the-hub-host"] !== "true") {
+      console.error(`[anet] Refusing reset-user: local hub DB not found at ${dbPath}`);
+      console.error(`[anet] Run this on the hub host, or pass --i-am-on-the-hub-host if COMMHUB_DB points to the DB.`);
+      return;
+    }
+    const script = `
+      import { Database } from "bun:sqlite";
+      const db = new Database(process.env.COMMHUB_DB);
+      const username = process.env.RESET_USERNAME;
+      const user = db.query("SELECT user_id, username FROM users WHERE username = ?1").get(username);
+      if (!user) { console.log(JSON.stringify({ ok: false, error: "user not found" })); process.exit(0); }
+      const hashPassword = (p) => new Bun.CryptoHasher("sha256").update("anet:" + p).digest("hex");
+      const hashToken = (t) => new Bun.CryptoHasher("sha256").update(t).digest("hex");
+      const id = (prefix) => prefix + "_" + crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+      const password = "anet-" + crypto.randomUUID().replace(/-/g, "").slice(0, 18);
+      const token = "utok_" + crypto.randomUUID().replace(/-/g, "");
+      const tokenId = id("tok");
+      db.run("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(password), user.user_id]);
+      const revoked = db.run("DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL", [user.user_id]).changes;
+      db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, NULL, 'admin-reset', 'user')", [tokenId, hashToken(token), user.user_id]);
+      db.run("INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail) VALUES (?1, ?2, 'password_reset_by_admin', 'user', ?3, 'local cli reset-user')", [user.user_id, user.username, user.user_id]);
+      console.log(JSON.stringify({ ok: true, username: user.username, user_id: user.user_id, password, token, token_id: tokenId, revoked }));
+    `;
+    try {
+      const out = execFileSync("bun", ["-e", script], {
+        encoding: "utf-8",
+        env: { ...process.env, COMMHUB_DB: dbPath, RESET_USERNAME: username },
+      }).trim();
+      const result = JSON.parse(out);
+      if (!result.ok) {
+        console.error(`[anet] reset-user failed: ${result.error}`);
+        return;
+      }
+      console.log(`[anet] User password reset: ${result.username}`);
+      console.log(`[anet] user_id: ${result.user_id}`);
+      console.log(`[anet] new password: ${result.password}`);
+      console.log(`[anet] new token: ${result.token}`);
+      console.log(`[anet] revoked utok_: ${result.revoked}`);
+      console.log(`[anet] Save this password now; it will not be shown again.`);
+    } catch (e: any) {
+      console.error(`[anet] reset-user failed: ${e.message}`);
+    }
+
   } else if (sub === "config") {
     // anet server config — 显示/设置 server 配置
     const opts = parseOpts();
     const sc = loadServerConfig();
     if (opts.port) sc.port = opts.port;
     if (opts.host) sc.host = opts.host;
-    if (opts.token) sc.token = opts.token;
+    if (opts.token) {
+      console.warn(`[anet] ⚠ anet hub config --token is deprecated and ignored by v0.8 hub start. Use admin utok_ login instead.`);
+      sc.auth_token = opts.token;
+    }
 
     if (opts.port || opts.host || opts.token) {
       saveServerConfig(sc);
@@ -2071,6 +2176,15 @@ async function serverCommand() {
 
     console.log(`[anet] Starting Dashboard on ${dashHost}:${dashPort}...`);
     console.log(`[anet] Connecting to CommHub: ${hubUrl}`);
+    const adminUtok = loadAdminUtok();
+    const fallbackMaster = process.env.COMMHUB_AUTH_TOKEN;
+    const dashboardToken = adminUtok.token || fallbackMaster || "";
+    if (dashboardToken) {
+      if (adminUtok.token) console.log(`[anet] 🔒 Dashboard auth token loaded from admin-utok.json`);
+      else console.warn(`[anet] ⚠ COMMHUB_AUTH_TOKEN fallback is deprecated and will be removed in v1.0. See RFC-001.`);
+    } else {
+      console.warn(`[anet] Could not auto-read admin utok. If hub is on another machine, login in the Dashboard UI or pass COMMHUB_AUTH_TOKEN=<hub's token> temporarily.`);
+    }
 
     const env: Record<string, string> = {
       ...process.env as any,
@@ -2078,11 +2192,12 @@ async function serverCommand() {
       HOSTNAME: dashHost,
       NEXT_PUBLIC_COMMHUB_URL: hubUrl,
       COMMHUB_URL: hubUrl,
+      ...(dashboardToken ? { COMMHUB_AUTH_TOKEN: dashboardToken } : {}),
     };
 
     // Try npx first
     // Pin Dashboard version. Bump whenever the Dashboard package is updated.
-    const PINNED_DASHBOARD_VERSION = "0.3.3-preview.0";
+    const PINNED_DASHBOARD_VERSION = "0.4.0-preview.0";
     const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit", shell: true });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
@@ -2102,7 +2217,8 @@ anet hub <command>
 Options:
   --port <port>      Port (default: 9200)
   --host <host>      Bind address (default: 127.0.0.1)
-  --token <token>    Auth token
+  --token <token>    Auth token (normally auto-generated)
+  --dev-open         Disable hub auth for local development only
 
 Options:
   --port <port>      Port (default: 9200 for server, 3000 for dashboard)
@@ -2823,7 +2939,7 @@ async function registerCommand() {
   if (!username || !password) { console.error("Username and password required."); return; }
 
   // Auto-include server auth token for registration
-  const serverToken = sc.token || getToken();
+  const serverToken = serverAuthTokenFromConfig(sc) || getToken();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (serverToken) headers["Authorization"] = `Bearer ${serverToken}`;
 
@@ -3281,7 +3397,16 @@ async function passwdCommand() {
 
   const opts = parseOpts();
   const oldPw = opts["old-password"] || opts.old || await ask("Current password: ");
-  const newPw = opts["new-password"] || opts["new"] || await ask("New password (min 6): ");
+  const scriptedNew = opts["new-password"] || opts["new"];
+  const newPw = scriptedNew || await ask("New password (min 8): ");
+  if (!scriptedNew) {
+    const confirmPw = await ask("Confirm new password: ");
+    if (newPw !== confirmPw) {
+      closeRL();
+      console.error("[anet] Failed: passwords do not match");
+      return;
+    }
+  }
   closeRL();
 
   if (!oldPw || !newPw) { console.error("Both passwords required."); return; }
@@ -3294,7 +3419,12 @@ async function passwdCommand() {
     }).then(r => r.json() as any);
 
     if (res.ok) {
+      if (res.token) {
+        gc.token = res.token;
+        saveGlobal(gc);
+      }
       console.log("[anet] Password changed successfully.");
+      if (res.token) console.log("[anet] Login token rotated and saved.");
     } else {
       console.error(`[anet] Failed: ${res.error}`);
     }

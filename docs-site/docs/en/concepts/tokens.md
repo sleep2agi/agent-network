@@ -131,10 +131,10 @@ A: None. Flow:
 Whole flow: **zero manual token entry**.
 
 **Q: Does the hub server itself have a token?**
-A: Yes. `anet hub start` auto-generates one to `~/.anet/server/config.json` for hub internals. **You don't touch it.** Use `anet hub token` to view / rotate it if you ever need to. See [Deploy hub](/en/deploy/production) (ops only).
+A: Since v0.8, the hub bootstraps an admin `utok_` to `~/.anet/server/admin-utok.json` for local recovery/admin commands. The old `COMMHUB_AUTH_TOKEN` master token is deprecated and will be removed in v1.0.
 
 **Q: Does the dashboard need a token to start?**
-A: Not when co-located with the hub — `anet hub dashboard` auto-reads from the hub config. Cross-machine dashboard is a niche case; see [deployment docs](/en/deploy/production).
+A: Users log into Dashboard with username/password. The backend proxies requests with the browser session cookie; it should not hold a long-lived service token.
 
 **Q: Do tokens expire?**
 A: Not today. TTL + revoke-all planned for v0.7.0+.

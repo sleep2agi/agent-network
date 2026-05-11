@@ -4,24 +4,24 @@ import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
-import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
+import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
 const AUTH_TOKEN = process.env.COMMHUB_AUTH_TOKEN;
 const DEV_OPEN = process.argv.includes("--dev-open") || process.env.COMMHUB_DEV_OPEN === "1";
 const TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1";
-const SECURITY_LABEL = AUTH_TOKEN ? "🔒 secured" : "⚠️ DEV OPEN MODE";
+const SECURITY_LABEL = DEV_OPEN ? "⚠️ DEV OPEN MODE" : "🔒 secured";
 const TMUX_ALLOWLIST = new Set(
   (process.env.COMMHUB_TMUX_ALLOWLIST || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
 );
+let masterTokenDeprecationLogged = false;
 
-if (!AUTH_TOKEN && !DEV_OPEN) {
-  console.error("[commhub] refusing to start without COMMHUB_AUTH_TOKEN. Use --dev-open or COMMHUB_DEV_OPEN=1 for local-only development.");
-  process.exit(1);
+if (AUTH_TOKEN) {
+  console.warn("[commhub] COMMHUB_AUTH_TOKEN is deprecated and will be removed in v1.0. See RFC-001.");
 }
 
 // Read version from package.json so banners and /health stay in sync.
@@ -106,7 +106,16 @@ function requireAuth(req: Request): Response | null {
 
   // Legacy: check global COMMHUB_AUTH_TOKEN
   if (!AUTH_TOKEN && DEV_OPEN) return null; // explicit local/dev open mode
-  if (token === AUTH_TOKEN) return null;
+  if (token === AUTH_TOKEN) {
+    const u = new URL(req.url);
+    const readOnlyApi = u.pathname.startsWith("/api/") && (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS");
+    if (!readOnlyApi) return Response.json({ ok: false, error: "master-token auth is deprecated; use admin utok_" }, { status: 401 });
+    if (!masterTokenDeprecationLogged) {
+      console.warn("[commhub] master-token auth is deprecated and will be removed in v1.0. See RFC-001.");
+      masterTokenDeprecationLogged = true;
+    }
+    return null;
+  }
 
   return Response.json({ error: "unauthorized" }, { status: 401 });
 }
@@ -472,9 +481,14 @@ Bun.serve({
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token" }, { status: 401 }));
       try {
         const body = await req.json() as any;
-        const result = changePassword(resolved.user.user_id, body.old_password, body.new_password);
-        if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "password_changed", "user", resolved.user.user_id);
-        return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+        const result = changePassword(resolved.user.user_id, body.old_password, body.new_password, resolved.tokenId);
+        if (result.ok) {
+          const issued = issueUserToken(resolved.user.user_id, "password-change");
+          if (resolved.tokenId) revokeToken(resolved.user.user_id, resolved.tokenId);
+          logAudit(resolved.user.user_id, resolved.user.username, "password_changed", "user", resolved.user.user_id);
+          return withCors(req, Response.json({ ...result, token: issued.token, token_id: issued.token_id }));
+        }
+        return withCors(req, Response.json(result, { status: 400 }));
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
       }
@@ -706,8 +720,8 @@ Bun.serve({
         sessions_count: count?.cnt ?? 0,
         sse_connections: sse.total,
         sse_sessions: sse.sessions,
-        auth: AUTH_TOKEN ? "enabled" : "dev-open",
-        security: AUTH_TOKEN ? "secured" : "dev-open",
+        auth: DEV_OPEN ? "dev-open" : "user-token",
+        security: DEV_OPEN ? "dev-open" : "secured",
         tmux: TMUX_ENABLED ? "enabled" : "disabled",
         v3_auth: true,
         multi_network: true,

@@ -115,65 +115,21 @@ anet node start 翻译官
 
 ---
 
-# 下面是高级 / 运维内容
+# 运维补充：Bootstrap Admin Token
 
-::: warning 普通用户不用看
-下面是部署 hub 的人（运维 / DevOps）才需要了解的。如果你只是**用 anet 接入别人的 hub**，到这里就够了，下面跳过。
-:::
+v0.8 起，`COMMHUB_AUTH_TOKEN` 进入软废弃。Hub 的长期身份统一收敛到用户 token：管理员也是 `utok_`，Agent 仍然是 `ntok_`。
 
----
-
-## 高级 · 部署 hub 才会碰到的 `COMMHUB_AUTH_TOKEN`
-
-### 是啥
-
-Hub 服务器自己的"启动口令"。**只有 hub 自己内部用**，给 hub 进程验证调用者身份。
-
-### 谁会碰
-
-- **部署 hub 的人**（启动 hub 时设一次）
-- **dashboard 后端**（自动跟 hub 同机读取）
-- **管理员 curl hub admin 接口**（如审计日志、wipe-db 等）
-
-### 普通 agent 用户不接触
-
-- 用 anet CLI 在另一台机器加 agent → **不需要**
-- 浏览器登录 dashboard → **不需要**
-- 写代码用 SDK 调 hub → **不需要**
-
-类比：你住公寓不需要知道大楼的"主电闸密码"，只有物业管理员碰它。
-
-### 怎么用
-
-部署 hub 时（**仅一次**）：
+首次 `anet hub start` 会自动创建 admin 用户，并把一个本机恢复用的 admin `utok_` 写到：
 
 ```bash
-# 在 hub 服务器上
-COMMHUB_AUTH_TOKEN=$(openssl rand -hex 32)
-echo "记下来：$COMMHUB_AUTH_TOKEN"
-anet hub start --host 0.0.0.0 --token $COMMHUB_AUTH_TOKEN
+~/.anet/server/admin-utok.json
 ```
 
-设好后再也不用碰。CLI 会把它写到 `~/.anet/server/config.json`，下次重启 hub 自动读。
+文件权限为 `600`，内容包含 `username`、`user_id`、`token`、`created_at`。它只用于本机运维命令和启动 Dashboard 的便利路径，不需要复制到别的机器。
 
-::: tip v0.7.0+ 之后会更简单
-`anet hub start` 不带 `--token` 时会**自动生成**一个随机 token 写到 `~/.anet/server/config.json`，你完全不用管。
+::: warning
+`~/.anet/server/config.json` 里的 `auth_token` 从 v0.8 开始会被忽略并打印迁移 warning。`COMMHUB_AUTH_TOKEN` 只保留软兼容到 v1.0，并且只允许少量 `/api/*` 读请求。
 :::
-
-### 不设会怎样
-
-- **v0.5.x（老）**：可以不设（默认 open mode），但 hub 公网部署 = 谁都能匿名调你 hub 接口（R3 安全漏洞）
-- **v0.7.0+（新）**：必须设。不设 hub 拒绝启动（除非显式加 `--dev-open` flag）
-
-### Dashboard 跟 hub 不同机部署
-
-如果 dashboard 部署在另一台机器（不是 hub 那台），dashboard 启动时要把 hub 的 `COMMHUB_AUTH_TOKEN` 传过去：
-
-```bash
-COMMHUB_AUTH_TOKEN=<hub 的 token> anet hub dashboard
-```
-
-同机部署不用，CLI 自动读。
 
 ---
 
@@ -181,30 +137,26 @@ COMMHUB_AUTH_TOKEN=<hub 的 token> anet hub dashboard
 
 ### Token 生命周期对照
 
-| 事件 | utok_ | ntok_ | COMMHUB_AUTH_TOKEN |
-|---|---|---|---|
-| 部署 hub | - | - | 启动 hub 时手动设 / 自动生成 |
-| 注册账号 | 创建一个 | 附带创建一个绑默认网络 | - |
-| 登录 | 创建一个新的（老的不自动失效） | 不变 | - |
-| 创建 node | 不变 | 创建一个绑该 node + network | - |
-| 删 node | 不变 | hub 撤销 | - |
-| 删 user | 全部撤销 | 同左 | - |
-| 手动撤销 | `anet token revoke <id>` | 同左 | 改 hub config 重启 |
-| 过期 | 无（v0.7.0+ 计划加 TTL） | 无 | 永久（除非你换） |
+| 事件 | utok_ | ntok_ |
+|---|---|---|
+| 部署 hub | 自动 bootstrap admin `utok_` 到 `admin-utok.json` | - |
+| 注册账号 | 创建一个 | 附带创建一个绑默认网络 |
+| 登录 | 创建一个新的（老的不自动失效） | 不变 |
+| 改密码 | 当前设备换新 `utok_`，其他设备 `utok_` 失效 | 不变 |
+| 创建 node | 不变 | 创建一个绑该 node + network |
+| 删 node | 不变 | hub 撤销 |
+| 手动撤销 | `anet token revoke <id>` | 同左 |
 
 ### 权限决策（hub 端怎么判断你能不能调）
 
 ```mermaid
 flowchart TD
     REQ[请求到达 hub] --> HAS{带 Bearer token?}
-    HAS -->|否| OPENCHECK{hub 设了 COMMHUB_AUTH_TOKEN?}
-    OPENCHECK -->|否 v0.5.x| OPEN[开放模式<br/>放行 ⚠️]
-    OPENCHECK -->|是| DENY1[401 拒绝]
+    HAS -->|否| DENY1[401 拒绝<br/>除非显式 --dev-open]
 
     HAS -->|是| TYPE{Token 类型}
     TYPE -->|utok_| UTOK[用户级:<br/>查 users 表]
     TYPE -->|ntok_| NTOK[网络级:<br/>查 api_tokens 表]
-    TYPE -->|等于 COMMHUB_AUTH_TOKEN| MASTER[Master 放行]
 
     UTOK --> UROLE{是这个 network 的成员?}
     UROLE -->|是| UOP{读还是写?}

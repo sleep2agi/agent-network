@@ -2,6 +2,7 @@
  * V3 Auth module — user registration, login, token management
  */
 import { db, generateId, hashPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js";
+import { WEAK_PASSWORDS } from "./password-dict.js";
 
 export interface AuthUser {
   user_id: string;
@@ -20,10 +21,17 @@ export interface AuthResult {
   network_id?: string;
 }
 
+function validatePasswordStrength(password: string, label = "password"): string | null {
+  if (!password || password.length < 8) return `${label} must be at least 8 characters`;
+  if (WEAK_PASSWORDS.has(password.toLowerCase())) return `${label} is too common`;
+  return null;
+}
+
 export function register(username: string, password: string, email?: string, displayName?: string): AuthResult {
   if (!username || username.length < 2) return { ok: false, error: "username must be at least 2 characters" };
   if (username.length > 50) return { ok: false, error: "username too long (max 50)" };
-  if (!password || password.length < 6) return { ok: false, error: "password must be at least 6 characters" };
+  const passwordError = validatePasswordStrength(password);
+  if (passwordError) return { ok: false, error: passwordError };
   if (!/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/.test(username)) return { ok: false, error: "username contains invalid characters" };
 
   const existing = db.get<any>("SELECT user_id FROM users WHERE username = ?1", username);
@@ -126,10 +134,10 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
   return { ok: true, token };
 }
 
-export function resolveToken(token: string): { user: AuthUser; networkId: string | null; tokenName: string | null } | null {
+export function resolveToken(token: string): { user: AuthUser; networkId: string | null; tokenName: string | null; tokenId: string | null } | null {
   const tHash = hashToken(token);
   const row = db.get<any>(
-    `SELECT t.user_id, t.network_id, t.scope, t.name AS token_name,
+    `SELECT t.token_id, t.user_id, t.network_id, t.scope, t.name AS token_name,
             u.username, u.display_name, u.email, u.role
      FROM api_tokens t JOIN users u ON t.user_id = u.user_id
      WHERE t.token_hash = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
@@ -143,6 +151,7 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
   return {
     user: { user_id: row.user_id, username: row.username, display_name: row.display_name, email: row.email, role: row.role },
     networkId: row.network_id,
+    tokenId: row.token_id || null,
     // tokenName carries the binding identity. For node-scoped ntok_, it's
     // 'node:<alias>'; we strip the prefix and use it as the default
     // from_session for any MCP send_task / send_message / etc, so peer
@@ -239,13 +248,47 @@ export function revokeToken(userId: string, tokenId: string): { ok: boolean; err
   return result.changes > 0 ? { ok: true } : { ok: false, error: "token not found" };
 }
 
-export function changePassword(userId: string, oldPassword: string, newPassword: string): { ok: boolean; error?: string } {
-  if (!newPassword || newPassword.length < 6) return { ok: false, error: "new password must be at least 6 characters" };
+export function issueUserToken(userId: string, name = "user-login"): { token: string; token_id: string } {
+  const token = generateUserToken();
+  const tokenId = generateId("tok");
+  db.run(
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, NULL, ?4, 'user')",
+    [tokenId, hashToken(token), userId, name]
+  );
+  return { token, token_id: tokenId };
+}
+
+export function revokeOtherUserTokens(userId: string, exceptTokenId?: string | null): number {
+  const result = exceptTokenId
+    ? db.run("DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL AND token_id != ?2", [userId, exceptTokenId])
+    : db.run("DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL", [userId]);
+  return result.changes;
+}
+
+export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null): { ok: boolean; error?: string; revoked?: number } {
+  const passwordError = validatePasswordStrength(newPassword, "new password");
+  if (passwordError) return { ok: false, error: passwordError };
   const user = db.get<any>("SELECT password_hash FROM users WHERE user_id = ?1", userId);
   if (!user) return { ok: false, error: "user not found" };
   if (user.password_hash !== hashPassword(oldPassword)) return { ok: false, error: "incorrect current password" };
   db.run("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);
-  return { ok: true };
+  const revoked = revokeOtherUserTokens(userId, currentTokenId);
+  return { ok: true, revoked };
+}
+
+export function resetUserPassword(targetUsername: string, callerIsHubAdmin: boolean): { ok: boolean; error?: string; username?: string; user_id?: string; password?: string; token?: string; token_id?: string; revoked?: number } {
+  if (!callerIsHubAdmin) return { ok: false, error: "hub admin required" };
+  const user = db.get<any>("SELECT user_id, username FROM users WHERE username = ?1", targetUsername);
+  if (!user) return { ok: false, error: "user not found" };
+  const password = `anet-${crypto.randomUUID().replace(/-/g, "").slice(0, 18)}`;
+  db.run("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(password), user.user_id]);
+  const revoked = revokeOtherUserTokens(user.user_id, null);
+  const issued = issueUserToken(user.user_id, "admin-reset");
+  db.run(
+    "INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail) VALUES (?1, ?2, 'password_reset_by_admin', 'user', ?3, ?4)",
+    [user.user_id, user.username, user.user_id, "local hub admin reset"]
+  );
+  return { ok: true, username: user.username, user_id: user.user_id, password, token: issued.token, token_id: issued.token_id, revoked };
 }
 
 // ══════════════════════════════════════
