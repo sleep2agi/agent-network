@@ -1981,46 +1981,59 @@ async function serverCommand() {
     }
 
     // Bootstrap an admin account without shipping default credentials.
-    // Interactive users may enter credentials; non-interactive runs get a
-    // one-time random password printed in this banner only.
+    // Skip the whole prompt + register flow if admin-utok.json already exists —
+    // re-running `anet hub start` should be idempotent.
+    const existingAdmin = loadAdminUtok();
     let defaultUser = opts.username || opts.user || "";
     let defaultPass = opts.password || opts.pass || "";
-    if ((!defaultUser || !defaultPass) && process.stdin.isTTY) {
-      if (!defaultUser) defaultUser = await ask("Admin username");
-      if (!defaultPass) defaultPass = await ask("Admin password (leave blank to generate)");
-    }
-    if (!defaultUser) defaultUser = `admin_${randomBytes(3).toString("hex")}`;
-    if (!defaultPass) defaultPass = randomBytes(12).toString("base64url");
     let defaultAccountReady = false;
-    try {
-      const reg = await fetch(`${hubUrl}/api/auth/register`, {
-        method: "POST",
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
-        body: JSON.stringify({ username: defaultUser, password: defaultPass }),
-      }).then(r => r.json() as any);
-      if (reg.ok) {
-        defaultAccountReady = true;
-        if (reg.token) {
-          saveAdminUtok({
-            username: reg.user?.username || defaultUser,
-            user_id: reg.user?.user_id,
-            token: reg.token,
-            created_at: new Date().toISOString(),
-          });
-        }
-        console.log(`  ✅ Admin account created`);
-        console.log(`     username: ${defaultUser}`);
-        console.log(`     password: ${defaultPass}`);
-        console.log(`     Store this password now; it will not be shown again.`);
-        if (reg.token) console.log(`     Admin token saved to ~/.anet/server/admin-utok.json`);
-      } else if (reg.error?.includes("already taken")) {
-        defaultAccountReady = true;
-        console.log(`  ℹ  Admin account "${defaultUser}" already exists`);
-      } else {
-        console.log(`  ⚠  Could not bootstrap admin account: ${reg.error}`);
+    let skippedBootstrap = false;
+    if (existingAdmin.token) {
+      skippedBootstrap = true;
+      defaultAccountReady = true;
+      defaultUser = existingAdmin.username || defaultUser;
+      console.log(`  ✅ Admin already exists (admin-utok.json found, user=${existingAdmin.username || "?"})`);
+    } else {
+      // Interactive users may enter credentials; non-interactive runs get a
+      // one-time random password printed in this banner only.
+      if ((!defaultUser || !defaultPass) && process.stdin.isTTY) {
+        if (!defaultUser) defaultUser = await ask("Admin username (leave blank to generate)");
+        if (!defaultPass) defaultPass = await ask("Admin password (leave blank to generate)");
       }
-    } catch (e: any) {
-      console.log(`  ⚠  Admin account bootstrap skipped: ${e.message}`);
+      if (!defaultUser) defaultUser = `admin_${randomBytes(3).toString("hex")}`;
+      if (!defaultPass) defaultPass = randomBytes(12).toString("base64url");
+    }
+    if (!skippedBootstrap) {
+      try {
+        const reg = await fetch(`${hubUrl}/api/auth/register`, {
+          method: "POST",
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
+          body: JSON.stringify({ username: defaultUser, password: defaultPass }),
+        }).then(r => r.json() as any);
+        if (reg.ok) {
+          defaultAccountReady = true;
+          if (reg.token) {
+            saveAdminUtok({
+              username: reg.user?.username || defaultUser,
+              user_id: reg.user?.user_id,
+              token: reg.token,
+              created_at: new Date().toISOString(),
+            });
+          }
+          console.log(`  ✅ Admin account created`);
+          console.log(`     username: ${defaultUser}`);
+          console.log(`     password: ${defaultPass}`);
+          console.log(`     Store this password now; it will not be shown again.`);
+          if (reg.token) console.log(`     Admin token saved to ~/.anet/server/admin-utok.json`);
+        } else if (reg.error?.includes("already taken")) {
+          defaultAccountReady = true;
+          console.log(`  ℹ  Admin account "${defaultUser}" already exists`);
+        } else {
+          console.log(`  ⚠  Could not bootstrap admin account: ${reg.error}`);
+        }
+      } catch (e: any) {
+        console.log(`  ⚠  Admin account bootstrap skipped: ${e.message}`);
+      }
     }
 
     // Verify existing user token (if any) is still valid; if not, drop it so the
@@ -2058,7 +2071,7 @@ async function serverCommand() {
 
     console.log(`\n  Server: ${hubUrl}${lanUrl ? `   (LAN: ${lanUrl})` : ""}\n`);
 
-    const loginHint = defaultAccountReady
+    const loginHint = (defaultAccountReady && defaultPass)
       ? `anet login --username ${defaultUser} --password ${defaultPass}`
       : `anet login`;
 
