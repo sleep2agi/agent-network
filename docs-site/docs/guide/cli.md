@@ -18,7 +18,6 @@ npm install -g @sleep2agi/agent-network
 |------|------|------|
 | `anet init` | 配置 hub 地址 | 已验证 |
 | `anet init project` | 配置 Claude Code 项目（.mcp.json + CLAUDE.md） | 已验证 |
-| `anet quickstart` | 旧的一键启动命令 | 未验证 / 不推荐使用 |
 
 ### 服务器管理
 
@@ -45,7 +44,7 @@ npm install -g @sleep2agi/agent-network
 | `anet network ls` | 列出网络 |
 | `anet network create <name>` | 创建网络 |
 | `anet network use <name>` | 切换当前网络 |
-| `anet network info <name>` | 查看网络详情 |
+| `anet network info` | 查看当前网络详情 |
 | `anet network rename <old> <new>` | 重命名网络 |
 | `anet network delete <name>` | 删除网络 |
 | `anet network invite` | 为当前网络创建邀请码 |
@@ -79,7 +78,6 @@ npm install -g @sleep2agi/agent-network
 |------|------|
 | `anet status` | 网络概览（在线 Agent + 任务统计） |
 | `anet tasks [status]` | 查看任务列表 |
-| `anet demo monitor --live` | 实时系统 Dashboard（终端版，旧 `anet demo --live`） |
 | `anet doctor` | 系统诊断 |
 
 ### Demo（多 Agent 演示）
@@ -88,7 +86,6 @@ npm install -g @sleep2agi/agent-network
 |------|------|
 | `anet demo ls` | 列出可用 demo |
 | `anet demo debate [opts]` | **辩论赛**：6 角色（主持/正反 4 辩/评委）一键 9 步辩论 |
-| `anet demo monitor [--live]` | 终端 Dashboard（保留兼容） |
 
 详见 [辩论赛 Demo 案例](/cases/debate)。
 
@@ -104,8 +101,8 @@ npm install -g @sleep2agi/agent-network
 | 命令 | 说明 |
 |------|------|
 | `anet config` | 查看/修改配置 |
-| `anet license` | 查看授权状态 |
-| `anet activate <key>` | 激活授权 |
+| `anet license` | 查看授权状态（实验性，无 op；项目 Apache-2.0 开源，无 license 销售） |
+| `anet activate <key>` | 激活授权（实验性，无 op；项目 Apache-2.0 开源，无 license 销售） |
 
 ---
 
@@ -132,7 +129,7 @@ anet hub start [options]
 ```
 anet hub start
 Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.0-...)
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.1)
 🔒 secured
 ✅ Admin account created
    username: admin
@@ -179,8 +176,6 @@ admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次
 | `COMMHUB_AUTH_TOKEN` | 旧 master token 兼容环境变量；v0.8 起 deprecated |
 | `DATABASE_URL` | PostgreSQL 连接（代码层入口，v2.1 未做 E2E 验证，**不推荐生产使用**；默认 SQLite） |
 | `COMMHUB_CORS_ORIGINS` | CORS 白名单 |
-
-### anet node create
 
 ### anet passwd
 

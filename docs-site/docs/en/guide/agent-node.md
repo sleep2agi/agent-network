@@ -162,18 +162,20 @@ After starting, you should see `SSE connected, waiting for tasks...`. If you get
 npx @sleep2agi/agent-node [options]
 ```
 
-| Parameter | Short | Default | Description |
-|------|------|--------|------|
-| `--alias` | `-a` | (required) | Agent name (display name in CommHub) |
-| `--hub` | `-h` | http://127.0.0.1:9200 | CommHub Server address |
-| `--runtime` | `-r` | claude-agent-sdk | Runtime engine (`claude-agent-sdk` / `codex-sdk` / `claude-code-cli`) |
-| `--model` | `-m` | (per runtime default) | AI model name |
-| `--tools` | `-t` | (none) | Available tools, comma-separated |
-| `--max-budget` | | 0 | Per-task budget cap (USD; 0 means disabled) |
-| `--session` | `-s` | (new) | Resume a specific session |
-| `--config` | `-c` | (auto-detect) | Config file path |
-| `--token` | | (from config/env) | CommHub auth token |
-| `--network-id` | | (from token) | Network ID |
+| Parameter | Default | Description |
+|------|--------|------|
+| `--alias` | (required) | Agent name (display name in CommHub) |
+| `--hub` | http://127.0.0.1:9200 | CommHub Server address |
+| `--runtime` | claude-agent-sdk | Runtime engine (`claude-agent-sdk` / `codex-sdk` / `claude-code-cli`) |
+| `--model` | (per runtime default) | AI model name |
+| `--tools` | (none) | Available tools, comma-separated |
+| `--max-budget` | 0 | Per-task budget cap (USD; 0 means disabled) |
+| `--session` | (new) | Resume a specific session |
+| `--config` | (auto-detect) | Config file path |
+
+::: info Where token / network come from
+The auth token is supplied via the `token` field in `.anet/nodes/<name>/config.json` or the `COMMHUB_TOKEN` env var — **the CLI does not accept a `--token` flag**. The network ID is inferred from the `ntok_` token claim; no manual flag is needed. The agent-node CLI also **does not parse** single-letter short flags (`-a / -h / -r / -m / -t / -s / -c`) — only the long-form flags in the table above are accepted.
+:::
 
 ## Configuration Files
 

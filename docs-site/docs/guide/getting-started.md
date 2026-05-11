@@ -131,7 +131,7 @@ anet node start video-bot
 
 > ask video-bot what it can do
 
-`my-bot` 会通过 commhub MCP 工具的 `get_all_status` 发现 `video-bot`，再用 `send_task` 把问题派出去，轮询 `get_task` 收回回复，整合后再答给你。整个交互在 Tasks / Messages 页面可以实时看到。
+`my-bot` 会通过 commhub MCP 工具的 `get_all_status` 发现 `video-bot`，再用 `send_task` 把问题派出去。Agent Node wrapper 内部轮询 hub 并把回复以新的 task 上下文 / report_completion 回调形式喂给 agent —— agent 自己**不**调用 `get_task`（wrapper 不暴露该 tool）。整个交互在 Tasks / Messages 页面可以实时看到。
 
 ## 9. 局域网接入（其他机器加入同一个 Hub）
 
@@ -161,7 +161,7 @@ anet node start remote-bot
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
 - `anet node create / start / delete / ls`（claude-agent-sdk + MiniMax / DeepSeek / GLM / Kimi / Anthropic）
 - Dashboard Chat：markdown / Enter 发送 / 乐观回显 / 来源标签 / 错误兜底 / 历史持久
-- 多 Agent 协作（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调）
+- 多 Agent 协作（peer agents 通过 `get_all_status` + `send_task` 自治协调，wrapper 内部把回复回灌为新 task 上下文）
 - 局域网共用 Hub
 :::
 

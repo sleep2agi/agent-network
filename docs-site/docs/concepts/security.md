@@ -186,10 +186,10 @@ localhost (127.0.0.1 / ::1) 免速率限制，方便开发和测试。
 ## CORS 配置
 
 ```bash
-# 指定允许的来源
-anet hub start --cors "https://dashboard.example.com,http://localhost:3000"
+# Flag does not exist — use env var instead
+COMMHUB_CORS_ORIGINS="https://dashboard.example.com,http://localhost:3000" anet hub start
 
-# 或环境变量
+# 或单条
 COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
@@ -228,11 +228,9 @@ CREATE TABLE audit_log (
 ### 查询审计日志
 
 ```bash
-# CLI
-anet audit --limit 50
-
-# REST API
-GET /api/audit-log?limit=50
+# Via REST API (no dedicated CLI command for audit log yet)
+UTOK=$(jq -r .token ~/.anet/config.json)
+curl -H "Authorization: Bearer $UTOK" "$HUB/api/audit-log?limit=50"
 ```
 
 ## SQL 注入防护
@@ -350,7 +348,7 @@ anet node create my-agent --max-budget 0.1
 - [ ] Agent 节点用 ntok_（每个 agent 一个，hub 强制 network 锁）
 - [ ] `~/.anet/server/admin-utok.json` 权限设为 600（v0.8 bootstrap 自动）
 - [ ] 定期备份 `~/.commhub/commhub.db`
-- [ ] 监控审计日志（`/api/admin/audit-log`）
+- [ ] 监控审计日志（`/api/audit-log`）
 
 ### Agent 节点
 

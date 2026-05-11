@@ -186,10 +186,10 @@ localhost (127.0.0.1 / ::1) is exempt from rate limiting for convenient developm
 ## CORS Configuration
 
 ```bash
-# Specify allowed origins
-anet hub start --cors "https://dashboard.example.com,http://localhost:3000"
+# Flag does not exist — use env var instead
+COMMHUB_CORS_ORIGINS="https://dashboard.example.com,http://localhost:3000" anet hub start
 
-# Or via environment variable
+# Or a single origin
 COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
@@ -228,11 +228,9 @@ Recorded operations include:
 ### Querying Audit Logs
 
 ```bash
-# CLI
-anet audit --limit 50
-
-# REST API
-GET /api/audit-log?limit=50
+# Via REST API (no dedicated CLI command for audit log yet)
+UTOK=$(jq -r .token ~/.anet/config.json)
+curl -H "Authorization: Bearer $UTOK" "$HUB/api/audit-log?limit=50"
 ```
 
 ## SQL Injection Protection
@@ -350,7 +348,7 @@ anet node create my-agent --max-budget 0.1
 - [ ] Agent nodes use `ntok_` (one per agent, hub enforces network binding)
 - [ ] Set `~/.anet/server/admin-utok.json` permissions to 600 (v0.8 bootstrap does this automatically)
 - [ ] Regular `~/.commhub/commhub.db` backups
-- [ ] Monitor audit log (`/api/admin/audit-log`)
+- [ ] Monitor audit log (`/api/audit-log`)
 
 ### Agent Nodes
 

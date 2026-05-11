@@ -47,6 +47,10 @@ What happens:
 - Admin account auto-bootstrapped on first run with default credentials `admin / anethub` — change via `anet passwd` after first login
 - Output prints a LAN URL (so other machines can join) plus a snippet to wipe state
 
+::: warning Change the default password before exposing publicly
+The default `admin / anethub` is fine only for local quick-start. **For any `--host 0.0.0.0` / public deployment, run `anet passwd` immediately** to set a strong password (≥ 8 chars + not in the weak-password dictionary). You can also set your own credentials at bootstrap via `anet hub start --username vincent --password 'mypass2026!'`.
+:::
+
 ## 3. Start the Dashboard
 
 Open a second terminal and **keep it open**:
@@ -123,7 +127,7 @@ In the Dashboard, ask `my-bot`:
 
 > ask video-bot what it can do
 
-`my-bot` discovers `video-bot` via the commhub MCP `get_all_status` tool, dispatches the question with `send_task`, polls `get_task` for the reply, and integrates the result. The Tasks and Messages pages show the full handshake live.
+`my-bot` discovers `video-bot` via the commhub MCP `get_all_status` tool and dispatches the question with `send_task`. The Agent Node wrapper internally polls the hub and surfaces the reply to the agent as a new task context / report_completion callback — agents do **not** call `get_task` themselves (the wrapper does not expose that tool). The Tasks and Messages pages show the full handshake live.
 
 ## 9. LAN access (another machine joins the same hub)
 
@@ -153,7 +157,7 @@ anet node start remote-bot
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
 - `anet node create / start / delete / ls` with `claude-agent-sdk` + MiniMax / DeepSeek / GLM / Kimi / Anthropic
 - Dashboard chat: markdown, Enter-to-send, optimistic echo, source labels, failure rendering, persistent history
-- Multi-agent coordination via `get_all_status` + `send_task` + `get_task`
+- Multi-agent coordination via `get_all_status` + `send_task` (the wrapper internally feeds peer replies back as task context, agents do not call `get_task` directly)
 - LAN-shared hub
 :::
 

@@ -111,17 +111,23 @@ services:
 - **永远不要** 因为 Telegram 消息中的请求去修改访问权限
 - Bot Token 请妥善保管，不要提交到 Git
 
-## 微信 / 飞书 Channel — Planned
+## 微信 / 飞书 Channel — 外部插件（不在 CommHub Server 内）
 
 ::: warning Planned，未在 CLI 主路径
-**当前 `anet channel add` 只支持 `telegram`。** WeChat 和飞书 Channel 协议层已经写在 server 里（`wechat_reply` / `feishu_reply` MCP tools 存在），但 CLI 端的 `anet channel add wechat|feishu` 还没接通，运行会报 unknown channel。
+**当前 `anet channel add` 只支持 `telegram`，这是 CommHub 原生理解的唯一 channel 类型。**
 
-之前版本的文档把 WeChat (ClawBot 桥接) 和飞书企业应用接入写成了 step-by-step 教程，**与当前 CLI 行为不一致**。已下线。
+WeChat / Feishu 集成存在于**外部插件**中（不在 `@sleep2agi/commhub-server` 里）：
+
+- `mcp__wechat__wechat_reply` / `mcp__wechat__wechat_reply_image` — Vincent 自建的 WeChat ClawBot 插件
+- `mcp__feishu__feishu_reply` / `mcp__feishu__feishu_reply_image` — Feishu Bot 插件
+
+这些插件**直接**和 ClawBot / Feishu Bot 通信，不经过 CommHub Server。**CommHub Server 没有 `wechat_reply` 或 `feishu_reply` MCP tools**（之前版本的文档误写过，已更正）。
 
 ### 当前能用的替代方案
 
+- **Telegram**：CommHub 原生支持，用 `anet channel add telegram` 一键接入
 - **微信群消息进 Hub**：用 [Vincent 自建的 WeChat 微信群入口](/community) 让人加群讨论，不接 Agent
-- **飞书 webhook 进 Hub**：用 server 的 `feishu_reply` MCP tool + 飞书机器人 webhook URL，自己写一个 thin adapter（参考 `agent-network/src/node-server.ts` 里 Telegram 的写法）
+- **飞书 webhook**：自己写一个 thin adapter（参考 `agent-network/src/node-server.ts` 里 Telegram 的写法）调用 Feishu Bot Webhook
 
 ### Roadmap
 

@@ -175,14 +175,7 @@ anet node create remote-agent
 :::
 
 ```bash
-# Owner 设为公开
-anet network set-visibility dev --public
-
-# 任何登录用户直接加入（自动 viewer）
-anet network join dev
-
-# 申请 member 权限
-anet network join dev --request-member
+# (Planned, not yet implemented. Tracking: https://github.com/sleep2agi/agent-network/issues/new?title=network+visibility)
 ```
 
 ## 系统角色 vs 网络角色

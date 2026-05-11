@@ -175,14 +175,7 @@ Public network functionality is a design goal and not yet fully implemented.
 :::
 
 ```bash
-# Owner sets network to public
-anet network set-visibility dev --public
-
-# Any logged-in user joins directly (auto-viewer)
-anet network join dev
-
-# Request member access
-anet network join dev --request-member
+# (Planned, not yet implemented. Tracking: https://github.com/sleep2agi/agent-network/issues/new?title=network+visibility)
 ```
 
 ## System Roles vs. Network Roles

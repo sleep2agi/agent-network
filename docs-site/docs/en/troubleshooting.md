@@ -214,12 +214,16 @@ curl "http://localhost:9200/api/tasks?limit=10" -H "Authorization: Bearer ntok_x
 
 **Solution**:
 
-```bash
-# Cancel the running task first
-commhub_cancel_task(task_id="t_xxx", reason="Need to retry")
+::: tip
+The following calls go via REST `POST /mcp` rather than the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools (reply / report_status / send_task / send_message / get_all_status); cancel/retry/reassign/get_inbox are admin/dashboard ops, not agent self-service.
+:::
 
-# Then retry
-commhub_retry_task(task_id="t_xxx")
+```bash
+# Cancel the running task first (POST /mcp, tool=cancel_task)
+cancel_task(task_id="t_xxx", reason="Need to retry")
+
+# Then retry (POST /mcp, tool=retry_task)
+retry_task(task_id="t_xxx")
 ```
 
 ---
@@ -254,9 +258,13 @@ commhub_send_task(alias="coder-1", task="Re-execute: ...")
 
 **Solution**:
 
+::: tip
+`get_inbox` is an admin/dashboard op exposed via REST `POST /mcp`, not the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools: reply / report_status / send_task / send_message / get_all_status.
+:::
+
 ```bash
-# Check messages in the inbox
-commhub_get_inbox(alias="coder-1")
+# Check messages in the inbox (POST /mcp, tool=get_inbox)
+get_inbox(alias="coder-1")
 ```
 
 ---

@@ -162,18 +162,20 @@ npx @sleep2agi/agent-node \
 npx @sleep2agi/agent-node [options]
 ```
 
-| 参数 | 缩写 | 默认值 | 说明 |
-|------|------|--------|------|
-| `--alias` | `-a` | (必需) | Agent 名称（在 CommHub 中的显示名） |
-| `--hub` | `-h` | http://127.0.0.1:9200 | CommHub Server 地址 |
-| `--runtime` | `-r` | claude-agent-sdk | 运行时引擎（`claude-agent-sdk` / `codex-sdk` / `claude-code-cli`） |
-| `--model` | `-m` | (按 runtime 默认) | AI 模型名称 |
-| `--tools` | `-t` | (无) | 可用工具列表，逗号分隔 |
-| `--max-budget` | | 0 | 每任务预算上限（美元，0 表示不启用） |
-| `--session` | `-s` | (新建) | 恢复指定 session |
-| `--config` | `-c` | (自动查找) | 指定配置文件路径 |
-| `--token` | | (从配置/环境读取) | CommHub 认证 Token |
-| `--network-id` | | (从 token 推断) | 网络 ID |
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--alias` | (必需) | Agent 名称（在 CommHub 中的显示名） |
+| `--hub` | http://127.0.0.1:9200 | CommHub Server 地址 |
+| `--runtime` | claude-agent-sdk | 运行时引擎（`claude-agent-sdk` / `codex-sdk` / `claude-code-cli`） |
+| `--model` | (按 runtime 默认) | AI 模型名称 |
+| `--tools` | (无) | 可用工具列表，逗号分隔 |
+| `--max-budget` | 0 | 每任务预算上限（美元，0 表示不启用） |
+| `--session` | (新建) | 恢复指定 session |
+| `--config` | (自动查找) | 指定配置文件路径 |
+
+::: info Token / 网络从哪里来
+token 由 `.anet/nodes/<name>/config.json` 的 `token` 字段或 `COMMHUB_TOKEN` env 提供，**不接受 CLI flag**。网络 ID 从 `ntok_` token claim 推断，无需手动指定。agent-node CLI **不解析** `-a / -h / -r / -m / -t / -s / -c` 等单字符短 flag，只接受上表中的长形式。
+:::
 
 ## 配置文件
 

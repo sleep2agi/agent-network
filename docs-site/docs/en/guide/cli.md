@@ -18,7 +18,6 @@ After installation, the `anet` command is available globally.
 |------|------|------|
 | `anet init` | Configure hub address | verified |
 | `anet init project` | Configure Claude Code project (.mcp.json + CLAUDE.md) | verified |
-| `anet quickstart` | Legacy one-click setup | unverified / not recommended |
 
 ### Server Management
 
@@ -45,7 +44,7 @@ After installation, the `anet` command is available globally.
 | `anet network ls` | List networks |
 | `anet network create <name>` | Create a network |
 | `anet network use <name>` | Switch active network |
-| `anet network info <name>` | View network details |
+| `anet network info` | View current network details |
 | `anet network rename <old> <new>` | Rename a network |
 | `anet network delete <name>` | Delete a network |
 | `anet network invite` | Create an invite code for the current network |
@@ -81,7 +80,6 @@ After installation, the `anet` command is available globally.
 | `anet tasks [status]` | View task list |
 | `anet demo ls` | List available demos |
 | `anet demo debate [opts]` | **Debate demo**: 6 roles and a 9-step debate flow |
-| `anet demo monitor [--live]` | Terminal dashboard (keeps the old `anet demo --live` alias) |
 | `anet doctor` | System diagnostics |
 
 See [Debate Demo](/en/cases/debate) for the runnable multi-agent demo.
@@ -98,8 +96,8 @@ See [Debate Demo](/en/cases/debate) for the runnable multi-agent demo.
 | Command | Description |
 |------|------|
 | `anet config` | View/modify configuration |
-| `anet license` | View license status |
-| `anet activate <key>` | Activate a license |
+| `anet license` | View license status (experimental no-op; project is Apache-2.0, no license sales) |
+| `anet activate <key>` | Activate a license (experimental no-op; project is Apache-2.0, no license sales) |
 
 ---
 
@@ -126,7 +124,7 @@ What it does:
 ```
 anet hub start
 Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.0-...)
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.1)
 🔒 secured
 ✅ Admin account created
    username: admin

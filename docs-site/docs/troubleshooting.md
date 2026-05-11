@@ -212,12 +212,16 @@ curl "http://localhost:9200/api/tasks?limit=10" -H "Authorization: Bearer ntok_x
 
 **解决**：
 
-```bash
-# 先取消正在运行的任务
-commhub_cancel_task(task_id="t_xxx", reason="需要重试")
+::: tip
+The following calls go via REST `POST /mcp` rather than the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools (reply / report_status / send_task / send_message / get_all_status); cancel/retry/reassign/get_inbox are admin/dashboard ops, not agent self-service.
+:::
 
-# 然后重试
-commhub_retry_task(task_id="t_xxx")
+```bash
+# 先取消正在运行的任务（POST /mcp，tool=cancel_task）
+cancel_task(task_id="t_xxx", reason="需要重试")
+
+# 然后重试（POST /mcp，tool=retry_task）
+retry_task(task_id="t_xxx")
 ```
 
 ---
@@ -252,9 +256,13 @@ commhub_send_task(alias="代码1号", task="重新执行: ...")
 
 **解决**：
 
+::: tip
+`get_inbox` is an admin/dashboard op exposed via REST `POST /mcp`, not the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools: reply / report_status / send_task / send_message / get_all_status.
+:::
+
 ```bash
-# 确认 inbox 中的消息
-commhub_get_inbox(alias="代码1号")
+# 确认 inbox 中的消息（POST /mcp，tool=get_inbox）
+get_inbox(alias="代码1号")
 ```
 
 ---

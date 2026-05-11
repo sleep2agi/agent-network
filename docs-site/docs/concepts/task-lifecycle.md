@@ -125,9 +125,13 @@ expires_at = datetime('now', '+3600 seconds')
 
 失败、取消、过期的任务都可以重试：
 
+::: tip
+The following calls go via REST `POST /mcp` rather than the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools (reply / report_status / send_task / send_message / get_all_status); cancel/retry/reassign/get_inbox are admin/dashboard ops, not agent self-service.
+:::
+
 ```bash
-# 重试任务
-commhub_retry_task(task_id="t_xxx")
+# 重试任务（POST /mcp，tool=retry_task）
+retry_task(task_id="t_xxx")
 ```
 
 重试流程：
@@ -154,7 +158,8 @@ flowchart LR
 可以取消尚未完成的任务：
 
 ```bash
-commhub_cancel_task(task_id="t_xxx", reason="不再需要")
+# POST /mcp，tool=cancel_task
+cancel_task(task_id="t_xxx", reason="不再需要")
 ```
 
 取消会：
@@ -171,7 +176,8 @@ commhub_cancel_task(task_id="t_xxx", reason="不再需要")
 将任务从一个 Agent 转给另一个：
 
 ```bash
-commhub_reassign_task(task_id="t_xxx", new_alias="代码2号")
+# POST /mcp，tool=reassign_task
+reassign_task(task_id="t_xxx", new_alias="代码2号")
 ```
 
 转移流程：

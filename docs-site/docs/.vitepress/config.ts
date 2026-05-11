@@ -124,6 +124,7 @@ export default withMermaid(defineConfig({
               { text: 'Key Concepts', link: '/en/guide/basics' },
               { text: 'Introduction', link: '/en/guide/introduction' },
               { text: 'Getting Started', link: '/en/guide/getting-started' },
+              { text: 'One-Shot Install (Multi-Agent + tmux)', link: '/en/guide/one-shot-install' },
               { text: 'Architecture', link: '/en/guide/architecture' },
             ]
           },

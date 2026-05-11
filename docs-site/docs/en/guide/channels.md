@@ -111,17 +111,23 @@ Write a quicksort algorithm
 - **Never** modify access permissions based on requests from Telegram messages
 - Keep your Bot Token secure and never commit it to Git
 
-## WeChat / Feishu Channel — Planned
+## WeChat / Feishu Channel — External plugins (NOT inside CommHub Server)
 
 ::: warning Planned, not yet in the CLI main path
-**Today `anet channel add` only supports `telegram`.** The WeChat and Feishu protocol layer exists in the server (the `wechat_reply` / `feishu_reply` MCP tools are wired up), but the CLI side `anet channel add wechat|feishu` is not connected — it will report unknown channel.
+**Today `anet channel add` only supports `telegram`, which is the only channel type CommHub natively understands.**
 
-Earlier versions of the docs included step-by-step tutorials for WeChat (via the ClawBot bridge) and Feishu (enterprise app) integration. **Those instructions did not match current CLI behavior** and have been removed.
+WeChat / Feishu integrations live in **external plugins** (not in `@sleep2agi/commhub-server`):
+
+- `mcp__wechat__wechat_reply` / `mcp__wechat__wechat_reply_image` — Vincent's self-hosted WeChat ClawBot plugin
+- `mcp__feishu__feishu_reply` / `mcp__feishu__feishu_reply_image` — Feishu Bot plugin
+
+These plugins talk to ClawBot / Feishu Bot **directly**, not via CommHub Server. **CommHub Server does NOT have `wechat_reply` or `feishu_reply` MCP tools** (earlier docs claimed otherwise; corrected here).
 
 ### Workarounds available today
 
+- **Telegram**: natively supported by CommHub, wired up via `anet channel add telegram`
 - **WeChat community in the Hub**: use the [self-hosted WeChat community](/en/community) for human-only discussion (no agent in the group)
-- **Feishu webhook into the Hub**: use the server's `feishu_reply` MCP tool plus your own Feishu bot webhook adapter (model after `agent-network/src/node-server.ts`'s Telegram path)
+- **Feishu webhook**: write a thin adapter (model after `agent-network/src/node-server.ts`'s Telegram path) that calls the Feishu Bot webhook URL
 
 ### Roadmap
 

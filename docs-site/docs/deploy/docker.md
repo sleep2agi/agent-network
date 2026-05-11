@@ -130,14 +130,15 @@ if [ -f /shared/ntok ]; then
 fi
 
 # 启动 Agent Node
+# 注意：agent-node 不接受 --token flag；token 已通过 COMMHUB_TOKEN env 传入。
+# 系统提示词的真实 flag 是 --prompt（不是 --system-prompt）。
 exec npx @sleep2agi/agent-node \
   --alias "$ALIAS" \
   --runtime "$RUNTIME" \
   --model "$MODEL" \
   --hub "$COMMHUB_URL" \
-  --token "$COMMHUB_TOKEN" \
   ${TOOLS:+--tools "$TOOLS"} \
-  ${SYSTEM_PROMPT:+--system-prompt "$SYSTEM_PROMPT"}
+  ${SYSTEM_PROMPT:+--prompt "$SYSTEM_PROMPT"}
 ```
 
 ## docker-compose.yml 详解

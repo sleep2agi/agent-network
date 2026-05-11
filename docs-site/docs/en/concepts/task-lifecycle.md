@@ -125,9 +125,13 @@ expires_at = datetime('now', '+3600 seconds')
 
 Failed, cancelled, and expired tasks can all be retried:
 
+::: tip
+The following calls go via REST `POST /mcp` rather than the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools (reply / report_status / send_task / send_message / get_all_status); cancel/retry/reassign/get_inbox are admin/dashboard ops, not agent self-service.
+:::
+
 ```bash
-# Retry a task
-commhub_retry_task(task_id="t_xxx")
+# Retry a task (POST /mcp, tool=retry_task)
+retry_task(task_id="t_xxx")
 ```
 
 Retry flow:
@@ -154,7 +158,8 @@ flowchart LR
 You can cancel tasks that haven't completed yet:
 
 ```bash
-commhub_cancel_task(task_id="t_xxx", reason="No longer needed")
+# POST /mcp, tool=cancel_task
+cancel_task(task_id="t_xxx", reason="No longer needed")
 ```
 
 Cancellation will:
@@ -171,7 +176,8 @@ Cancellable statuses: `delivered` / `acked` / `running`
 Transfer a task from one agent to another:
 
 ```bash
-commhub_reassign_task(task_id="t_xxx", new_alias="coder-2")
+# POST /mcp, tool=reassign_task
+reassign_task(task_id="t_xxx", new_alias="coder-2")
 ```
 
 Reassignment flow:
