@@ -109,9 +109,9 @@ anet demo socialmedia --topic "AI 时代如何提升专注力" --platform xiaoho
 
 | 包 | 版本 | 角色 |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.1` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.2` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.6.0` | MCP + REST + SSE 通信中枢（SQLite） |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.3.1` | Web Dashboard —— Next.js 16，4 套主题，Chat / Nodes / Tasks / Networks / Logs / Admin |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.3.2` | Web Dashboard —— Next.js 16，4 套主题，Chat / Nodes / Tasks / Networks / Logs / Admin |
 | [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK |
 
 CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。

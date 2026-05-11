@@ -5,9 +5,9 @@ This is the current minimal local path for the stable packages. The flow follows
 ::: tip Roles
 | Package | Version | Role |
 |---|---|---|
-| `@sleep2agi/agent-network` | 2.1.1 | `anet` CLI (start hub / dashboard, manage nodes) |
+| `@sleep2agi/agent-network` | 2.1.2 | `anet` CLI (start hub / dashboard, manage nodes) |
 | `@sleep2agi/commhub-server` | 0.6.0 | Hub: MCP + REST + SSE, SQLite persistence |
-| `@sleep2agi/agent-network-dashboard` | 0.3.1 | Web Dashboard |
+| `@sleep2agi/agent-network-dashboard` | 0.3.2 | Web Dashboard |
 | `@sleep2agi/agent-node` | 2.3.0 | Agent runtime |
 :::
 

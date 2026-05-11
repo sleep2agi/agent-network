@@ -369,6 +369,18 @@ function formatDetectedVersion(pkg: DetectedVersion): string {
   return `${pkg.displayName} not installed`;
 }
 
+function formatLazyComponent(pkg: DetectedVersion): string {
+  if (pkg.state === "ok" && pkg.version) return `✓ ${pkg.displayName} v${pkg.version}`;
+  if (pkg.state === "unknown") return `✓ ${pkg.displayName} installed`;
+  return `○ ${pkg.displayName} — not installed yet (will fetch via npx on first use)`;
+}
+
+function formatOptionalRuntime(pkg: DetectedVersion, reason: string): string {
+  if (pkg.state === "ok" && pkg.version) return `✓ ${pkg.displayName} v${pkg.version}`;
+  if (pkg.state === "unknown") return `✓ ${pkg.displayName} installed`;
+  return `○ ${pkg.displayName} — only needed for ${reason}`;
+}
+
 function detectAgentNodeSubDeps(): { claudeAgentSdk: string | null; codexSdk: string | null } {
   const globalPrefix = execSync("npm prefix -g", { encoding: "utf-8", timeout: 5000 }).trim();
   const base = join(globalPrefix, "lib", "node_modules", "@sleep2agi", "agent-node", "node_modules");
@@ -387,19 +399,30 @@ function detectAgentNodeSubDeps(): { claudeAgentSdk: string | null; codexSdk: st
 
 function printVersionReport() {
   const versions = detectInstalledPackages();
-  console.log(`anet v${versions.anet.version}`);
-  console.log(formatDetectedVersion(versions.agentNode));
-  // Show SDK sub-dependencies if agent-node is installed
+  console.log(`anet v${versions.anet.version}\n`);
+
+  console.log("Components (auto-fetched on first use, you don't need to install them manually):");
+  console.log(`  ${formatLazyComponent(versions.agentNode)}`);
   if (versions.agentNode.state === "ok") {
     try {
       const sub = detectAgentNodeSubDeps();
-      if (sub.claudeAgentSdk) console.log(`  └ @anthropic-ai/claude-agent-sdk v${sub.claudeAgentSdk}`);
-      if (sub.codexSdk) console.log(`  └ @openai/codex-sdk v${sub.codexSdk}`);
+      if (sub.claudeAgentSdk) console.log(`    └ @anthropic-ai/claude-agent-sdk v${sub.claudeAgentSdk}`);
+      if (sub.codexSdk) console.log(`    └ @openai/codex-sdk v${sub.codexSdk}`);
     } catch {}
   }
-  console.log(formatDetectedVersion(versions.commhubServer));
-  console.log(formatDetectedVersion(versions.claude));
-  console.log(formatDetectedVersion(versions.codex));
+  console.log(`  ${formatLazyComponent(versions.commhubServer)}`);
+
+  console.log("\nOptional runtimes (install only what you'll use):");
+  console.log(`  ${formatOptionalRuntime(versions.claude, "the claude-code-cli runtime")}`);
+  console.log(`  ${formatOptionalRuntime(versions.codex, "the codex-sdk runtime")}`);
+
+  const componentsMissing = versions.agentNode.state !== "ok" || versions.commhubServer.state !== "ok";
+  if (componentsMissing) {
+    console.log("\nNothing is broken — components are fetched the first time you run:");
+    console.log("  anet hub start          # bootstraps commhub-server");
+    console.log("  anet node start <name>  # bootstraps agent-node");
+    console.log("\nDocs: https://anet.sh/guide/getting-started");
+  }
 }
 
 function isInstalled(pkg: DetectedVersion): boolean {
@@ -2020,7 +2043,7 @@ async function serverCommand() {
 
     // Try npx first
     // Pin Dashboard version. Bump whenever the Dashboard package is updated.
-    const PINNED_DASHBOARD_VERSION = "0.3.1";
+    const PINNED_DASHBOARD_VERSION = "0.3.2";
     const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit", shell: true });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
