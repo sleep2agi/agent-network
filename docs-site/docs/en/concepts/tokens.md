@@ -1,321 +1,277 @@
 # Token System
 
-::: tip One-line summary
-**You only deal with 2 tokens day-to-day: `utok_` (your user badge) and `ntok_` (each agent's network pass).** `COMMHUB_AUTH_TOKEN` is the hub service's own ops key — you set it once when deploying the hub and never type it again.
+::: tip One line
+**Day-to-day you have 2 tokens: `utok_` (yours) and `ntok_` (one per agent).** Both are CLI-managed; you never type them. 95% of this page is about these two.
 :::
 
-## The 3 layers you need to know
+## The absolute simplest picture
 
-| Layer | Token | Used by | How you get it |
-|---|---|---|---|
-| **User layer (humans)** | `utok_xxx` | You — CLI / Dashboard login | Hub issues it after `anet login` |
-| **App layer (agents)** | `ntok_xxx` | Agent nodes — SSE to hub | CLI fetches it from hub during `anet node create` |
-| **Service layer (hub ops)** | `COMMHUB_AUTH_TOKEN` | The hub server itself | You generate it once when starting the hub |
+```
+You (human)        ──── utok_ ────►   hub
+                                         │
+                                         │ Verifies, then issues ntok_ for each agent
+                                         ▼
+Your agent node ──── ntok_ ────►   hub
+```
 
-Below, each layer in detail.
+That's it. **Your token mental model is exactly these two.**
 
 ---
 
-## User layer · `utok_` (your badge)
+## 1. `utok_` — your token (for humans)
 
-### Who issues it
+### How you get it
 
-The hub, after `anet register` / `anet login`.
+```bash
+anet login --username admin --password anethub
+```
 
-### Who consumes it
-
-- CLI (`anet status` / `anet tasks` / `anet network ls`, etc.)
-- Web Dashboard (stored in browser cookie after login)
+The hub verifies your credentials and issues a `utok_xxxxxxxx...` to you.
 
 ### Where it lives
 
+```bash
+~/.anet/config.json
+```
+
+Contains:
 ```json
-// ~/.anet/config.json
 {
-  "hub": "http://YOUR_IP:9200",
+  "hub": "http://hub:9200",
   "token": "utok_xxxxxxxxxxxxxxxx",
-  "network_id": "net_xxx",
   "user": { "username": "admin", ... }
 }
 ```
 
-### What it can do
+### What it does
 
-| Operation | Allowed |
-|---|---|
-| CLI read / write commands | ✅ |
-| Dashboard login | ✅ |
-| REST `/api/*` (only networks you're a member of) | ✅ |
-| MCP tools like `send_task` | ✅ (must resolve to a writable network_id) |
-| **Agent SSE connection** | ❌ |
+The CLI automatically attaches it on every hub call:
+- `anet status`, `anet tasks`, `anet network ls` — all use it
+- Browser dashboard login exchanges it for a cookie
 
-### ⚠️ Important: `utok_` is NOT for agents
+**You never type it.** After one `anet login`, you don't touch it again.
 
-Agent nodes connecting to the hub via SSE **must use `ntok_`**, not `utok_`. This enforces network isolation at the protocol layer (so an agent's token can't accidentally be used to read another network's data).
+### What it can't do
 
-Before v2.1.2, the CLI had a silent fallback bug where node configs missing a token would silently get `utok_` injected, causing the SSE handshake to reject. **Fixed in 2.1.3-preview.2.**
+- ❌ Cannot be used by agents to connect to the hub (agents must use `ntok_`)
 
 ---
 
-## App layer · `ntok_` (agent's pass)
+## 2. `ntok_` — agent's token (one per agent)
 
-### Who issues it
+### How you get it
 
-The CLI, automatically. When you run `anet node create <name>`, the CLI calls the hub's `/api/auth/node-token` using your `utok_` and exchanges it for an `ntok_`.
+```bash
+anet node create translator --runtime claude-agent-sdk ...
+```
 
-### Who consumes it
-
-The `agent-node` process (the long-running SSE connection to the hub).
+Behind the scenes: the CLI takes your `utok_`, asks the hub for a fresh `ntok_xxxxxxxx...` for "translator", and saves it.
 
 ### Where it lives
 
+```bash
+.anet/nodes/translator/config.json
+```
+
+Contains:
 ```json
-// .anet/nodes/<node-name>/config.json
 {
-  "node_id": "n_xxx",
   "node_name": "translator",
-  "runtime": "claude-agent-sdk",
   "token": "ntok_xxxxxxxxxxxxxxxx",
   "network_id": "net_xxx",
   ...
 }
 ```
 
-### What it can do
+### What it does
 
-| Operation | Allowed |
+```bash
+anet node start translator
+```
+
+Agent process reads its `ntok_` to open the SSE connection to the hub. **You never type it either.**
+
+### Why one per agent
+
+Each `ntok_` is bound to a specific `(agent, network)` pair, and the hub **forces** that binding — agents cannot cross networks. This is the core isolation mechanism.
+
+---
+
+## That's it. Just these two.
+
+Recap: **Day-to-day, the CLI handles both tokens for you**:
+
+| You do | CLI manages |
 |---|---|
-| Agent SSE connect | ✅ |
-| Call MCP tools (only its bound network) | ✅ |
-| Read tasks from other networks | ❌ |
-| Modify members / config of other networks | ❌ |
+| `anet login` | Writes `utok_` to `~/.anet/config.json` |
+| `anet node create X` | Uses `utok_` to fetch an `ntok_` from hub, saves to `.anet/nodes/X/config.json` |
+| `anet node start X` | Loads X's `ntok_` and connects to hub SSE |
+| Any other `anet ...` command | Uses `utok_` automatically |
 
-### Hard network isolation
-
-The hub **forces** the `network_id` from the `ntok_` binding — clients can't override it:
-
-```ts
-// server side
-const effectiveNetId = ntok.network_id;
-// even if client passes network_id=B, hub uses ntok's bound A
-```
-
-This isolation is by design: an agent can never operate outside its own network.
+You **don't need to**:
+- ❌ Copy/paste token strings
+- ❌ Remember any token value
+- ❌ Know what tokens look like
 
 ---
 
-## Service layer · `COMMHUB_AUTH_TOKEN` (hub master key)
+# Advanced — for hub operators only
 
-### Who issues it
+::: warning Skip this if you only use anet to connect to someone else's hub
+Below is for people deploying their own hub. End users stop reading here.
+:::
 
-**You**, when deploying the hub:
+---
+
+## `COMMHUB_AUTH_TOKEN` — the hub's own startup secret
+
+### What it is
+
+The hub server's master key — used internally by the hub to gate admin endpoints.
+
+### Who touches it
+
+- **Person deploying the hub** (sets it once at startup)
+- **Dashboard backend** (reads it automatically when co-located with hub)
+- **Hub admins running curl** against admin endpoints (audit log, wipe-db, etc.)
+
+### Regular users don't touch it
+
+- Adding an agent on another machine via anet CLI → **not needed**
+- Logging into the dashboard via browser → **not needed**
+- Using the SDK to talk to the hub → **not needed**
+
+Analogy: you don't need the building's main breaker password to live in your apartment — only facility management touches it.
+
+### How to use
+
+When deploying the hub (**one time**):
 
 ```bash
+# On the hub server
 COMMHUB_AUTH_TOKEN=$(openssl rand -hex 32)
-echo "Save: $COMMHUB_AUTH_TOKEN"
+echo "Save this: $COMMHUB_AUTH_TOKEN"
+anet hub start --host 0.0.0.0 --token $COMMHUB_AUTH_TOKEN
 ```
 
-### Who consumes it
+After setup, you never touch it. The CLI persists it to `~/.anet/server/config.json` for hub restarts.
 
-Only the hub itself (+ dashboard ↔ hub internal calls).
+::: tip v0.7.0+ makes this even simpler
+`anet hub start` without `--token` will **auto-generate** a random one to `~/.anet/server/config.json`. You don't manage it at all.
+:::
 
-### Where it lives
+### What if not set
+
+- **v0.5.x (old)**: optional. If unset, hub runs open mode — anyone hitting your hub anonymously can call MCP / REST (R3 vulnerability).
+- **v0.7.0+ (new)**: required. Hub refuses to start unless you set it (or pass `--dev-open` to explicitly opt into open mode).
+
+### Dashboard on a different machine
+
+If the dashboard is on a separate machine from the hub, pass the hub's token when starting it:
 
 ```bash
-# Pass --token at startup, or set as env
-anet hub start --host 0.0.0.0 --token "$COMMHUB_AUTH_TOKEN"
-
-# Or write to hub's server config (on the machine running the hub)
-~/.anet/server/config.json
+COMMHUB_AUTH_TOKEN=<hub's token> anet hub dashboard
 ```
 
-### Why this exists
-
-**v0.5.x (old)**: optional — if unset, hub runs in **open mode** and lets through any request that doesn't carry a `utok_`. Public deployment = naked (R3 vulnerability).
-
-**v0.7.0+ (new)**: **required**. Hub refuses to start without it, unless you pass an explicit `--dev-open` flag.
-
-### Users **don't** need to type `COMMHUB_AUTH_TOKEN` day-to-day
-
-- `anet login` / `anet node create` / `anet node start` — all use `utok_` + `ntok_`
-- Dashboard browser session — uses `utok_` cookie
-- `COMMHUB_AUTH_TOKEN` is for hub internals + admin endpoints
-
-Think of it as **the hub server's WiFi password**: you need it to enter the network, but once inside, you log into web apps with your Facebook account (`utok_`). Two independent layers.
+Co-located: not needed; CLI auto-reads from the local hub config.
 
 ---
 
-## Legacy · `atok_` (you can ignore this)
+## For audit / security reviewers
 
-V2 had `atok_` (api token). The V3 system replaced it with `utok_` + `ntok_`.
+### Token lifecycle
 
-The codebase still tolerates the `atok_` prefix for backward compat, but **new users don't need to touch it**. `anet token create / ls / revoke` commands work on `utok_`/`ntok_` under the hood.
+| Event | utok_ | ntok_ | COMMHUB_AUTH_TOKEN |
+|---|---|---|---|
+| Deploy hub | - | - | Set manually at startup / auto-generated |
+| Register | One created | One created bound to default network | - |
+| Login | New one each login (old not auto-revoked) | Unchanged | - |
+| Create node | Unchanged | One created bound to that node + network | - |
+| Delete node | Unchanged | Revoked on hub | - |
+| Delete user | All revoked | Same | - |
+| Manual revoke | `anet token revoke <id>` | Same | Edit hub config + restart |
+| Expiry | None (TTL planned for v0.7.0+) | None | Permanent until you change it |
 
----
-
-## End-to-end: from hub launch to agent dispatch
-
-```
-[Step 1] Deploy the hub (SSH into the hub server)
-   ↓
-   COMMHUB_AUTH_TOKEN=$(openssl rand -hex 32)
-   anet hub start --host 0.0.0.0 --token $COMMHUB_AUTH_TOKEN
-   ↓
-   Hub running on :9200, every request needs a token
-
-[Step 2] You log in (your laptop)
-   ↓
-   anet login --username admin --password anethub
-   ↓
-   Hub verifies credentials, issues utok_xxx
-   ↓
-   Written to ~/.anet/config.json
-
-[Step 3] Create an agent
-   ↓
-   anet node create translator --runtime claude-agent-sdk ...
-   ↓
-   CLI uses utok_xxx to call hub /api/auth/node-token
-   ↓
-   Hub verifies utok_, issues ntok_yyy (bound to network=default)
-   ↓
-   Written to .anet/nodes/translator/config.json
-
-[Step 4] Start the agent
-   ↓
-   anet node start translator
-   ↓
-   spawn agent-node process, reads ntok_yyy
-   ↓
-   agent-node connects to hub /events/translator over SSE with ntok_yyy
-   ↓
-   Hub verifies ntok_, opens the (network_id, alias) channel
-   ↓
-   Agent idle, ready for tasks
-
-[Step 5] Dispatch a task
-   ↓
-   dashboard or another agent → send_task(alias="translator", task="...")
-   ↓
-   Hub pushes via SSE to translator
-   ↓
-   translator replies → hub → originator
-```
-
-`COMMHUB_AUTH_TOKEN` shows up only in Step 1. After that, everything uses `utok_` + `ntok_`.
-
----
-
-## Permission decision (hub side)
+### Permission decision (hub side)
 
 ```mermaid
 flowchart TD
-    REQ[Request hits hub] --> HASTOKEN{Bearer token?}
-    HASTOKEN -->|No| HASMASTER{COMMHUB_AUTH_TOKEN set?}
-    HASMASTER -->|No v0.5.x| OPEN[Open mode<br/>Allow ⚠️]
-    HASMASTER -->|Yes| DENY1[401 Unauthorized]
+    REQ[Request hits hub] --> HAS{Bearer token?}
+    HAS -->|No| OPENCHECK{hub has COMMHUB_AUTH_TOKEN set?}
+    OPENCHECK -->|No v0.5.x| OPEN[Open mode<br/>Allow ⚠️]
+    OPENCHECK -->|Yes| DENY1[401 Unauthorized]
 
-    HASTOKEN -->|Yes| MATCH{Token type}
-    MATCH -->|== COMMHUB_AUTH_TOKEN| MASTER[Master allow]
-    MATCH -->|utok_| UTOK[Lookup users table]
-    MATCH -->|ntok_| NTOK[Lookup api_tokens table]
-    MATCH -->|atok_| ATOK[Legacy compat]
+    HAS -->|Yes| TYPE{Token type}
+    TYPE -->|utok_| UTOK[User-level:<br/>lookup users table]
+    TYPE -->|ntok_| NTOK[Network-level:<br/>lookup api_tokens table]
+    TYPE -->|equals COMMHUB_AUTH_TOKEN| MASTER[Master allow]
 
     UTOK --> UROLE{Member of this network?}
     UROLE -->|Yes| UOP{Read or write?}
     UROLE -->|No| DENY2[403 Forbidden]
-    UOP -->|Read + viewer/member/admin/owner| ALLOW
-    UOP -->|Write + member/admin/owner| ALLOW
-    UOP -->|Write + viewer| DENY3[viewer can't write]
+    UOP -->|Read| ALLOW[Allow]
+    UOP -->|Write + role ≥ member| ALLOW
+    UOP -->|Write + viewer| DENY3[viewer cannot write]
 
-    NTOK --> NSCOPE[Force network_id<br/>to ntok's binding]
-    NSCOPE --> NROLE{Node has owner/admin/member<br/>in that network?}
+    NTOK --> FORCED[Hub forces network_id<br/>to ntok's binding]
+    FORCED --> NROLE{Node has ≥ member<br/>in that network?}
     NROLE -->|Yes| ALLOW
-    NROLE -->|No| DENY4[403]
+    NROLE -->|No| DENY4[403 Forbidden]
 ```
 
----
-
-## Security best practices
-
-### 1. Right token for the job
-
-| Scenario | Use |
-|---|---|
-| Daily CLI | `utok_` (auto after `anet login`) |
-| Agent SSE | `ntok_` (auto after `anet node create`) |
-| Dashboard browsing | `utok_` (cookie after login) |
-| Hub launch / dashboard backend | `COMMHUB_AUTH_TOKEN` |
-| Third-party integration | `utok_` (scoped to its network), or create a dedicated user |
-
-### 2. Token storage
+### Best practices
 
 ```bash
-# chmod 600 on config files
-chmod 600 ~/.anet/config.json
+# 1. chmod 600 on config files (CLI v0.7.0+ does this automatically)
+chmod 600 ~/.anet/config.json ~/.anet/server/config.json
 
-# Never commit
+# 2. .anet/ should not be in git
 echo ".anet/" >> .gitignore
 
-# In Docker, pass via env, don't bake into image
-docker run -e COMMHUB_TOKEN=ntok_xxx ...
-```
+# 3. Use strong random for COMMHUB_AUTH_TOKEN
+anet hub start --token "$(openssl rand -hex 32)"   # ✅
+anet hub start --token "anethub"                    # ❌ short / guessable
 
-### 3. Token rotation
-
-```bash
-# List
-anet token ls
-
-# Revoke
-anet token revoke tok_old
-
-# Login again issues a new utok_ (old one isn't auto-revoked)
-anet login --username admin --password $NEW_PASSWORD
-```
-
-### 4. Don't use weak strings for `COMMHUB_AUTH_TOKEN`
-
-```bash
-# Bad
-anet hub start --token anethub      # ❌ short + guessable
-
-# Good
-anet hub start --token "$(openssl rand -hex 32)"     # ✅
+# 4. Rotate login tokens periodically
+anet token ls                  # List current utok_
+anet token revoke tok_xxx      # Revoke old
+anet login                     # Log in again to get a new utok_
 ```
 
 ---
 
-## Lifecycle comparison
+## Legacy (don't worry about it)
 
-| Event | utok_ | ntok_ | COMMHUB_AUTH_TOKEN |
-|---|---|---|---|
-| Deploy hub | - | - | You generate + set once |
-| Register / login | New one each login (old not auto-revoked) | One created bound to default network at register | Unchanged |
-| Create node | Unchanged | Auto-created bound to node's network | Unchanged |
-| Delete node | Unchanged | Revoked on hub side | Unchanged |
-| Delete user | All `utok_` / `ntok_` revoked | Same | Unchanged |
-| Manual revoke | `anet token revoke` | `anet token revoke` | Edit hub config + restart |
-| Expiry | None today (TTL planned for v0.7.0+) | None today | Permanent until you change it |
+### `atok_`
+
+V2 had `atok_` (api token). V3 replaced it with `utok_` + `ntok_`.
+
+The codebase still tolerates the `atok_` prefix for backward compat (no errors), but **new users don't need it**. `anet token create / ls / revoke` operate on `utok_` / `ntok_` under the hood.
 
 ---
 
 ## FAQ
 
-**Q: As a daily anet user, do I need to remember `utok_` or `ntok_`?**
-A: Neither. `anet login` writes `utok_` once; `anet node create` writes `ntok_` automatically.
+**Q: How many tokens do I type per day?**
+A: **Zero**. The CLI handles both for you. You `anet login` once, then `anet node create` per agent — tokens get written to files automatically.
 
-**Q: Why does the hub require `COMMHUB_AUTH_TOKEN`?**
-A: v0.7.0+ enforces it so anonymous strangers can't hit your hub's MCP / REST endpoints. R3 hardening from the security audit.
+**Q: Is `admin / anethub` a token?**
+A: No, that's a username + password. After `anet login` succeeds, the hub issues a `utok_` to you in exchange.
 
-**Q: Is `admin/anethub` a token?**
-A: No, that's a username/password. After `anet login` succeeds, the hub issues a `utok_` to you.
+**Q: Adding an agent on another server — do I need `COMMHUB_AUTH_TOKEN`?**
+A: **No**. Just run:
+1. `anet init --hub http://hub:9200`
+2. `anet login --username admin --password ...`
+3. `anet node create xxx ...`
+4. `anet node start xxx`
 
-**Q: What's the actual difference between `utok_` and `ntok_`?**
-A: `utok_` is *your* identity — you can operate across networks you're a member of. `ntok_` is *one agent's identity in one network* — the hub forces it to stay in that network forever.
+The whole flow never touches `COMMHUB_AUTH_TOKEN`.
 
-**Q: Can I delete `COMMHUB_AUTH_TOKEN` and run open mode?**
-A: v0.5.x: yes (default). v0.7.0+: only with explicit `--dev-open`, and the banner shouts "⚠️ DEV OPEN MODE" so you know you're insecure.
+**Q: Real difference between `utok_` and `ntok_`?**
+A: `utok_` is **your** identity — can act across the networks you're a member of. `ntok_` is **one agent's identity in one network** — the hub locks it there, no crossing.
 
-**Q: After I upgrade the hub to 0.7.0+, do my existing agents' `ntok_` still work?**
-A: Yes. Schema migration keeps old `ntok_` valid. But you must set `COMMHUB_AUTH_TOKEN` for the hub to start.
+**Q: What if I don't set `COMMHUB_AUTH_TOKEN` on v0.5.x?**
+A: Open mode by default — anonymous requests pass. R3 security risk; public deployment = naked.
+
+**Q: After upgrading hub to 0.7.0+, do existing `ntok_` still work?**
+A: Yes. Schema migration keeps old `ntok_` valid. But the hub itself won't start without `COMMHUB_AUTH_TOKEN` now.

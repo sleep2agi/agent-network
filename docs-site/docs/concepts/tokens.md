@@ -1,321 +1,277 @@
 # Token 体系
 
-::: tip 一句话总结
-**你日常只接触 2 个 token：utok_（你的工牌）和 ntok_（每个 agent 的通行证）。** COMMHUB_AUTH_TOKEN 是 hub 服务自己的运维钥匙，你部署 hub 时设一次就好，不需要在 CLI / agent 里输。
+::: tip 一句话
+**日常你只有 2 个 token：`utok_`（你的）和 `ntok_`（每个 agent 的）。** 都是 CLI 自动管理，不用手输。本文 95% 内容讲这两个。
 :::
 
-## 你需要记住的 3 层
+## 简到不能再简的图
 
-| 层 | Token | 谁用 | 怎么拿到 |
-|---|---|---|---|
-| **用户层（人面对的）** | `utok_xxx` | 你（人）— CLI / Dashboard 登录 | `anet login` 后 hub 发给你 |
-| **应用层（agent 面对的）** | `ntok_xxx` | agent node — 跟 hub 建 SSE 通信 | `anet node create` 时 CLI 帮你向 hub 申请 |
-| **服务层（hub 运维）** | `COMMHUB_AUTH_TOKEN` | hub 启动时验身份 | 启动 hub 时**你**生成一次设进去 |
+```
+你（人）          ──── utok_ ────►   hub
+                                       │
+                                       │ 验证 OK 后发 ntok_ 给每个 agent
+                                       ▼
+你的 agent 节点 ──── ntok_ ────►   hub
+```
 
-下面分层细讲。
+完了。**你的 token 心智模型就这两个**。
 
 ---
 
-## 用户层 · `utok_`（你的工牌）
+## 1. `utok_`：你的 token（人面对）
 
-### 谁产生
+### 怎么来的
 
-Hub 在你 `anet register` / `anet login` 时发给你。
+```bash
+anet login --username admin --password anethub
+```
 
-### 谁消费
-
-- CLI（`anet status` / `anet tasks` / `anet network ls` 等命令）
-- Web Dashboard（你浏览器登录后存 cookie 里）
+hub 验账号密码 OK，发一个 `utok_xxxxxxxx...` 给你。
 
 ### 存哪
 
+```bash
+~/.anet/config.json
+```
+
+里面长这样：
 ```json
-// ~/.anet/config.json
 {
-  "hub": "http://YOUR_IP:9200",
+  "hub": "http://hub:9200",
   "token": "utok_xxxxxxxxxxxxxxxx",
-  "network_id": "net_xxx",
   "user": { "username": "admin", ... }
 }
 ```
 
-### 能做什么
+### 干啥用
 
-| 操作 | 允许 |
-|---|---|
-| CLI 查询 / 写命令 | ✅ |
-| Dashboard 登录 | ✅ |
-| REST `/api/*`（仅自己有权限的网络） | ✅ |
-| 调 MCP 工具 `send_task` 等 | ✅（必须能解析到一个可写的 network_id） |
-| **Agent SSE 连接** | ❌ |
+CLI 自动带着它去调 hub：
+- `anet status`、`anet tasks`、`anet network ls` — 全用它
+- 浏览器登录 dashboard — 拿它换 cookie
 
-### ⚠️ 关键：utok_ 不能给 agent 用
+**你不用手动输**。一次 `anet login` 之后就不用管它了。
 
-Agent node 跟 hub 建 SSE 长连接时**必须用 ntok_**，不能用 utok_。这是为了在协议层强制网络隔离（防止一个 agent 的 token 用错地方读到别人网络）。
+### 不能干啥
 
-V2.1.2 之前 CLI 有个 silent fallback bug：node config 缺 token 时偷偷塞 utok_，结果 SSE 拒绝。**已在 2.1.3-preview.2 修复**。
+- ❌ 不能给 agent 直连 hub 用（agent 必须用 `ntok_`）
 
 ---
 
-## 应用层 · `ntok_`（agent 的通行证）
+## 2. `ntok_`：agent 的 token（每个 agent 一个）
 
-### 谁产生
+### 怎么来的
 
-CLI 在你 `anet node create <name>` 时，自动调 hub `/api/auth/node-token` 用你的 utok_ 换一个 ntok_。
+```bash
+anet node create 翻译官 --runtime claude-agent-sdk ...
+```
 
-### 谁消费
-
-`agent-node` 进程（spawn 后跟 hub 建 SSE 长连接）。
+CLI 在背后做了一件事：拿你的 `utok_` 找 hub 换一个 `ntok_xxxxxxxx...` 给"翻译官"这个 agent 用。
 
 ### 存哪
 
+```bash
+.anet/nodes/翻译官/config.json
+```
+
+里面长这样：
 ```json
-// .anet/nodes/<node-name>/config.json
 {
-  "node_id": "n_xxx",
   "node_name": "翻译官",
-  "runtime": "claude-agent-sdk",
   "token": "ntok_xxxxxxxxxxxxxxxx",
   "network_id": "net_xxx",
   ...
 }
 ```
 
-### 能做什么
+### 干啥用
 
-| 操作 | 允许 |
-|---|---|
-| Agent 连 SSE | ✅ |
-| 调 MCP 工具（仅绑定的 network） | ✅ |
-| 读其他 network 的任务 | ❌ |
-| 改其他 network 的成员 / 配置 | ❌ |
-
-### 强网络隔离
-
-Hub 端**强制**把 `network_id` 锁定在 ntok_ 自带的 binding 上，客户端无法 override：
-
-```ts
-// server 侧
-const effectiveNetId = ntok.network_id;
-// 即使 client 传 network_id=B，hub 仍然用 ntok_ 绑定的 A
+```bash
+anet node start 翻译官
 ```
 
-这是设计上的"不可绕过"，保证 agent 永远只能在自己 network 里活动。
+启动 agent 时，agent 拿 `ntok_` 跟 hub 建 SSE 长连接。**你也不用手动输**。
+
+### 为啥每个 agent 一个
+
+每个 `ntok_` 跟一个 `(agent, network)` 绑死，hub 端**强制**不允许跨网络。这是网络隔离的核心机制。
 
 ---
 
-## 服务层 · `COMMHUB_AUTH_TOKEN`（hub 大楼总钥匙）
+## 就这两个，没了。
 
-### 谁产生
+完。 **你日常用 anet 接触的 token 只有这两个，CLI 全帮你管好**：
 
-**你自己**。部署 hub 时生成一次：
+| 你做啥 | CLI 帮你管哪个 token |
+|---|---|
+| `anet login` | 写 `utok_` 到 `~/.anet/config.json` |
+| `anet node create X` | 用 `utok_` 跟 hub 换 `ntok_`，写到 `.anet/nodes/X/config.json` |
+| `anet node start X` | 拿 X 的 `ntok_` 连 hub SSE |
+| `anet status` 等其他命令 | 自动用 `utok_` |
+
+你**不需要**：
+- ❌ 手动 copy/paste token 字符串
+- ❌ 记住 token 是啥
+- ❌ 知道 token 长啥样
+
+---
+
+# 下面是高级 / 运维内容
+
+::: warning 普通用户不用看
+下面是部署 hub 的人（运维 / DevOps）才需要了解的。如果你只是**用 anet 接入别人的 hub**，到这里就够了，下面跳过。
+:::
+
+---
+
+## 高级 · 部署 hub 才会碰到的 `COMMHUB_AUTH_TOKEN`
+
+### 是啥
+
+Hub 服务器自己的"启动口令"。**只有 hub 自己内部用**，给 hub 进程验证调用者身份。
+
+### 谁会碰
+
+- **部署 hub 的人**（启动 hub 时设一次）
+- **dashboard 后端**（自动跟 hub 同机读取）
+- **管理员 curl hub admin 接口**（如审计日志、wipe-db 等）
+
+### 普通 agent 用户不接触
+
+- 用 anet CLI 在另一台机器加 agent → **不需要**
+- 浏览器登录 dashboard → **不需要**
+- 写代码用 SDK 调 hub → **不需要**
+
+类比：你住公寓不需要知道大楼的"主电闸密码"，只有物业管理员碰它。
+
+### 怎么用
+
+部署 hub 时（**仅一次**）：
 
 ```bash
+# 在 hub 服务器上
 COMMHUB_AUTH_TOKEN=$(openssl rand -hex 32)
-echo "Save: $COMMHUB_AUTH_TOKEN"
+echo "记下来：$COMMHUB_AUTH_TOKEN"
+anet hub start --host 0.0.0.0 --token $COMMHUB_AUTH_TOKEN
 ```
 
-### 谁消费
+设好后再也不用碰。CLI 会把它写到 `~/.anet/server/config.json`，下次重启 hub 自动读。
 
-只有 hub 自己（+ dashboard ↔ hub 内部通信）。
+::: tip v0.7.0+ 之后会更简单
+`anet hub start` 不带 `--token` 时会**自动生成**一个随机 token 写到 `~/.anet/server/config.json`，你完全不用管。
+:::
 
-### 存哪
+### 不设会怎样
+
+- **v0.5.x（老）**：可以不设（默认 open mode），但 hub 公网部署 = 谁都能匿名调你 hub 接口（R3 安全漏洞）
+- **v0.7.0+（新）**：必须设。不设 hub 拒绝启动（除非显式加 `--dev-open` flag）
+
+### Dashboard 跟 hub 不同机部署
+
+如果 dashboard 部署在另一台机器（不是 hub 那台），dashboard 启动时要把 hub 的 `COMMHUB_AUTH_TOKEN` 传过去：
 
 ```bash
-# 启动 hub 时传 --token，或者 env var
-anet hub start --host 0.0.0.0 --token "$COMMHUB_AUTH_TOKEN"
-
-# 或写到 hub 的 server config（在跑 hub 的那台机器上）
-~/.anet/server/config.json
+COMMHUB_AUTH_TOKEN=<hub 的 token> anet hub dashboard
 ```
 
-### 为啥需要这个
-
-**v0.5.x（旧）**：不设也行（默认 open mode），但 hub 端**任何不带 utok_ 的请求都放行** = 公网部署裸奔（R3 漏洞）。
-
-**v0.7.0+（新）**：**强制必备**。不设 hub 拒绝启动，除非显式 `--dev-open` flag。
-
-### 用户日常**不需要**输入 COMMHUB_AUTH_TOKEN
-
-- 你跑 `anet login`、`anet node create`、`anet node start` — 全程用 utok_ + ntok_
-- 你跟 dashboard 交互 — 用 utok_（cookie）
-- COMMHUB_AUTH_TOKEN 仅 hub 内部 / admin 接口用
-
-类比：**它是 hub 服务器的 wifi 密码**，进网必须，但你电脑登 web 应用用的是 facebook 账号（utok_）。两层独立。
+同机部署不用，CLI 自动读。
 
 ---
 
-## 历史兼容 · `atok_`（不用管）
+## 法务 / 安全审计才看的部分
 
-V2 时代有过 `atok_`（api token），现在 V3 体系下已被 utok_/ntok_ 完全替代。
-
-代码里还保留 `atok_` 前缀的兼容判断，不会报错；**新用户完全不用接触**。`anet token create / ls / revoke` 命令底层走的也是 utok_/ntok_。
-
----
-
-## 端到端流程：从启动 hub 到 agent 派活
-
-```
-[Step 1] 部署 hub（你 ssh 上 hub 服务器跑）
-   ↓
-   COMMHUB_AUTH_TOKEN=$(openssl rand -hex 32)
-   anet hub start --host 0.0.0.0 --token $COMMHUB_AUTH_TOKEN
-   ↓
-   hub 起来，监听 :9200，所有请求要带 token 才放行
-
-[Step 2] 你在本机登录
-   ↓
-   anet login --username admin --password anethub
-   ↓
-   hub 验账号 OK，发 utok_xxx 给你
-   ↓
-   写到 ~/.anet/config.json
-
-[Step 3] 创建一个 agent
-   ↓
-   anet node create 翻译官 --runtime claude-agent-sdk ...
-   ↓
-   CLI 拿 utok_xxx 调 hub /api/auth/node-token
-   ↓
-   hub 验 utok_ OK，发 ntok_yyy（绑 network=default）
-   ↓
-   写到 .anet/nodes/翻译官/config.json
-
-[Step 4] 启动 agent
-   ↓
-   anet node start 翻译官
-   ↓
-   spawn agent-node 进程，读 ntok_yyy
-   ↓
-   agent-node 拿 ntok_yyy 连 hub /events/翻译官 SSE
-   ↓
-   hub 验 ntok_ OK，绑定 (network_id, alias) 通道
-   ↓
-   开始等任务
-
-[Step 5] 你派任务
-   ↓
-   dashboard 或别的 agent → send_task(alias="翻译官", task="...")
-   ↓
-   hub 走 SSE 把任务推给翻译官
-   ↓
-   翻译官 reply → hub → 派活方
-```
-
-`COMMHUB_AUTH_TOKEN` 只在 Step 1 出现一次，之后全程是 utok_ + ntok_ 在工作。
-
----
-
-## 权限决策（hub 端）
-
-```mermaid
-flowchart TD
-    REQ[请求到达 hub] --> HASTOKEN{带 Bearer token?}
-    HASTOKEN -->|否| HASMASTER{hub 设了 COMMHUB_AUTH_TOKEN?}
-    HASMASTER -->|否 v0.5.x| OPEN[Open mode<br/>放行 ⚠️]
-    HASMASTER -->|是| DENY1[401 Unauthorized]
-
-    HASTOKEN -->|是| MATCH{Token 类型}
-    MATCH -->|== COMMHUB_AUTH_TOKEN| MASTER[Master 放行]
-    MATCH -->|utok_| UTOK[查 users 表]
-    MATCH -->|ntok_| NTOK[查 api_tokens 表]
-    MATCH -->|atok_| ATOK[兼容老 atok_]
-
-    UTOK --> UROLE{是这个 network 的成员吗?}
-    UROLE -->|是| UOP{读 or 写?}
-    UROLE -->|否| DENY2[403 Forbidden]
-    UOP -->|读 + viewer/member/admin/owner| ALLOW
-    UOP -->|写 + member/admin/owner| ALLOW
-    UOP -->|写 + viewer| DENY3[viewer 不能写]
-
-    NTOK --> NSCOPE[强制锁 network_id<br/>到 ntok 自带的 binding]
-    NSCOPE --> NROLE{node 在该 network<br/>有 owner/admin/member 吗?}
-    NROLE -->|是| ALLOW
-    NROLE -->|否| DENY4[403]
-```
-
----
-
-## 安全最佳实践
-
-### 1. 不同场景用对 token
-
-| 场景 | 用什么 |
-|---|---|
-| CLI 日常管理 | utok_（`anet login` 后自动） |
-| Agent SSE 连接 | ntok_（`anet node create` 后自动） |
-| Dashboard 浏览 | utok_（浏览器登录后 cookie） |
-| Hub 启动 / dashboard 后端 | COMMHUB_AUTH_TOKEN |
-| 第三方监控集成 | utok_（如果只查自己的网络）/ 或为这个集成新建一个 utok_ 限定 scope |
-
-### 2. Token 存储安全
-
-```bash
-# 配置文件 chmod 600
-chmod 600 ~/.anet/config.json
-
-# 不提交到 git
-echo ".anet/" >> .gitignore
-
-# Docker 中通过 env 传，不写到 image
-docker run -e COMMHUB_TOKEN=ntok_xxx ...
-```
-
-### 3. Token 轮换
-
-```bash
-# 看现有 token
-anet token ls
-
-# 撤销
-anet token revoke tok_old
-
-# 重新登录 = 拿新 utok_（老 utok_ 不会自动失效，要手动 revoke）
-anet login --username admin --password $NEW_PASSWORD
-```
-
-### 4. 不要把 COMMHUB_AUTH_TOKEN 设成 admin/anethub 这种弱字符串
-
-```bash
-# 不要这样
-anet hub start --token anethub      # ❌ 太短太可猜
-
-# 正确：随机 32 字节
-anet hub start --token "$(openssl rand -hex 32)"     # ✅
-```
-
----
-
-## Token 生命周期对照
+### Token 生命周期对照
 
 | 事件 | utok_ | ntok_ | COMMHUB_AUTH_TOKEN |
 |---|---|---|---|
-| 部署 hub | - | - | 你手动生成一次设进去 |
-| 注册 / 登录 | 每次登录创建一个新的（老的不自动失效） | 注册时附带创建一个绑默认网络的 ntok_ | 不变 |
-| 创建 node | 不变 | 自动创建（绑该 node 的 network） | 不变 |
-| 删 node | 不变 | hub 端撤销 | 不变 |
-| 删 user | 撤销所有 utok_/ntok_ | 同左 | 不变 |
-| 手动撤销 | `anet token revoke` | `anet token revoke` | 手动改 hub config 重启 |
-| 过期 | 默认无过期（v0.7.0+ 计划加 TTL） | 默认无过期 | 永久（除非你换） |
+| 部署 hub | - | - | 启动 hub 时手动设 / 自动生成 |
+| 注册账号 | 创建一个 | 附带创建一个绑默认网络 | - |
+| 登录 | 创建一个新的（老的不自动失效） | 不变 | - |
+| 创建 node | 不变 | 创建一个绑该 node + network | - |
+| 删 node | 不变 | hub 撤销 | - |
+| 删 user | 全部撤销 | 同左 | - |
+| 手动撤销 | `anet token revoke <id>` | 同左 | 改 hub config 重启 |
+| 过期 | 无（v0.7.0+ 计划加 TTL） | 无 | 永久（除非你换） |
+
+### 权限决策（hub 端怎么判断你能不能调）
+
+```mermaid
+flowchart TD
+    REQ[请求到达 hub] --> HAS{带 Bearer token?}
+    HAS -->|否| OPENCHECK{hub 设了 COMMHUB_AUTH_TOKEN?}
+    OPENCHECK -->|否 v0.5.x| OPEN[开放模式<br/>放行 ⚠️]
+    OPENCHECK -->|是| DENY1[401 拒绝]
+
+    HAS -->|是| TYPE{Token 类型}
+    TYPE -->|utok_| UTOK[用户级:<br/>查 users 表]
+    TYPE -->|ntok_| NTOK[网络级:<br/>查 api_tokens 表]
+    TYPE -->|等于 COMMHUB_AUTH_TOKEN| MASTER[Master 放行]
+
+    UTOK --> UROLE{是这个 network 的成员?}
+    UROLE -->|是| UOP{读还是写?}
+    UROLE -->|否| DENY2[403 拒绝]
+    UOP -->|读| ALLOW[放行]
+    UOP -->|写 + 角色 ≥ member| ALLOW
+    UOP -->|写 + 是 viewer| DENY3[viewer 不能写]
+
+    NTOK --> FORCED[hub 强制锁 network_id<br/>到 ntok 自带的 binding]
+    FORCED --> NROLE{该 node 在该 network<br/>有 member 以上权限?}
+    NROLE -->|是| ALLOW
+    NROLE -->|否| DENY4[403 拒绝]
+```
+
+### 安全实践
+
+```bash
+# 1. 配置文件 chmod 600（CLI v0.7.0+ 会自动做）
+chmod 600 ~/.anet/config.json ~/.anet/server/config.json
+
+# 2. .anet/ 不要提交 git
+echo ".anet/" >> .gitignore
+
+# 3. COMMHUB_AUTH_TOKEN 用强随机字符串，别用 "anethub" 这种弱字符串
+anet hub start --token "$(openssl rand -hex 32)"   # ✅
+anet hub start --token "anethub"                    # ❌ 太可猜
+
+# 4. 定期轮换登录 token
+anet token ls                  # 看现有 utok_
+anet token revoke tok_xxx      # 撤销老的
+anet login                     # 重新登录拿新 utok_
+```
+
+---
+
+## 历史兼容（不用关心）
+
+### `atok_`
+
+V2 时代有过 `atok_`（api token）。V3 改成 `utok_` + `ntok_` 体系。
+
+代码里还保留对 `atok_` 前缀的兼容判断（不报错），但**新用户完全不需要接触**。`anet token create / ls / revoke` 命令底层走的都是 `utok_` / `ntok_`。
 
 ---
 
 ## FAQ
 
-**Q：我每天用 anet，需要记 utok_ 还是 ntok_？**
-A：都不需要记。`anet login` 一次后 utok_ 自动写文件，`anet node create` 后 ntok_ 自动写文件。
+**Q：我每天接触几个 token？**
+A：**0 个手动输入**。CLI 全自动管理。你只要 `anet login` 一次 + `anet node create` 每个 agent 一次，token 自动写文件，之后就不管了。
 
-**Q：为什么 hub 要求 COMMHUB_AUTH_TOKEN？**
-A：v0.7.0+ 强制要求，否则匿名陌生人能直接调你 hub 的 MCP / REST。是 R3 安全 hardening 的一部分。
+**Q：admin / anethub 是 token 吗？**
+A：不是。是账号密码。用账号密码 `anet login` 后才换到 `utok_`。
 
-**Q：admin/anethub 是 token 吗？**
-A：不是，是账号密码。你拿账号密码 `anet login` 后 hub 才发 utok_ 给你。
+**Q：我在另一台服务器加 agent，要用 COMMHUB_AUTH_TOKEN 吗？**
+A：**不要**。另一台服务器加 agent 只要：
+1. `anet init --hub http://hub:9200`
+2. `anet login --username admin --password ...`
+3. `anet node create xxx ...`
+4. `anet node start xxx`
 
-**Q：utok_ 和 ntok_ 有什么具体差别？**
-A：utok_ 是"你"的身份，可以跨 network 操作；ntok_ 是"某个 agent 在某个 network"的身份，被 hub 强制绑死在那个 network 上不能跨。
+整个流程 0 接触 COMMHUB_AUTH_TOKEN。
 
-**Q：可以删掉 COMMHUB_AUTH_TOKEN 让 hub 跑 open mode 吗？**
-A：v0.5.x 可以（默认）；v0.7.0+ 必须显式 `--dev-open` flag，且会大字打"⚠️ DEV OPEN MODE"提示你不安全。
+**Q：utok_ 和 ntok_ 实际差别？**
+A：`utok_` 是**你**的身份证，可跨 network。`ntok_` 是**某个 agent**在**某个 network** 的身份证，被 hub 锁死，跨不出去。
 
-**Q：升级到 0.7.0+ 后，已有 agent 的 ntok_ 还能用吗？**
-A：能用。schema migration 兼容老 ntok_。但你要给 hub 设 COMMHUB_AUTH_TOKEN，否则 hub 拒绝启动。
+**Q：v0.5.x 没设 COMMHUB_AUTH_TOKEN 会怎样？**
+A：默认 open mode，匿名请求放行。R3 安全漏洞 — 公网部署等于裸奔。v0.7.0+ 强制要求设。
+
+**Q：升级 hub 到 0.7.0+ 后，已有 agent 的 ntok_ 还能用吗？**
+A：能用。schema migration 兼容老 ntok_。但 hub 启动必须设 `COMMHUB_AUTH_TOKEN`，否则起不来。
