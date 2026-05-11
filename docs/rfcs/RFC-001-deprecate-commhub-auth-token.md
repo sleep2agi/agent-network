@@ -1,69 +1,69 @@
-# RFC-001: Deprecate COMMHUB_AUTH_TOKEN, consolidate on user tokens
+# RFC-001：废弃 COMMHUB_AUTH_TOKEN，统一收敛到用户 Token
 
-| Field        | Value                                  |
-| ------------ | -------------------------------------- |
-| Status       | **Accepted** (Vincent, 2026-05-11)     |
-| Created      | 2026-05-11                             |
-| Updated      | 2026-05-11 (dashboard simplification)  |
-| Author       | Vincent (sleep2agi)                    |
-| Implementer  | 通信牛 / SDK马                          |
-| Target       | server v0.8.0 → v1.0                   |
-| Discussion   | [#3](https://github.com/sleep2agi/agent-network/issues/3) |
+| 字段        | 内容                                   |
+| ----------- | -------------------------------------- |
+| 状态        | **已采纳** (Vincent, 2026-05-11)         |
+| 提出        | 2026-05-11                             |
+| 更新        | 2026-05-11（Dashboard 简化方案）         |
+| 作者        | Vincent (sleep2agi)                    |
+| 实施人      | 通信牛 / SDK马                          |
+| 目标版本    | server v0.8.0 → v1.0                    |
+| 讨论        | [#3](https://github.com/sleep2agi/agent-network/issues/3) |
 
-## Summary
+## 摘要
 
-We have three tokens in the hub today: `utok_` (user), `ntok_` (network-scoped node), and `COMMHUB_AUTH_TOKEN` (service master key). The master key predates the V3 auth schema and is no longer pulling its weight — `utok_` with `role=admin` covers every legitimate use case it serves. This RFC proposes removing `COMMHUB_AUTH_TOKEN` over two minor versions, with a hard cutoff at v1.0.
+当前 hub 里有三种 token：`utok_`（用户 token）、`ntok_`（节点-网络维度 token）、以及 `COMMHUB_AUTH_TOKEN`（服务级 master key）。master key 在 V3 鉴权之前就存在了，如今已经不再发挥独立价值 —— `role=admin` 的 `utok_` 可以完全覆盖它的所有合法用途。本 RFC 提议在两个 minor 版本里把 `COMMHUB_AUTH_TOKEN` 拆掉，v1.0 硬性下线。
 
-## Motivation
+## 动机
 
-Why the status quo is bad:
+为什么现状不好：
 
-1. **Cognitive load for users who will never need it.** End users learn `anet login` (gets `utok_`) and `anet node create` (gets `ntok_`). The master token only matters for self-hosters running a multi-tenant hub — and even there it offers no advantage over an admin `utok_`. Docs already have to apologize for the concept (`docs-site/docs/concepts/tokens.md:126` literally headers the section "Advanced · only relevant if you deploy a hub").
+1. **给永远用不到的用户增加认知负担。** 终端用户只需要学 `anet login`（拿到 `utok_`）和 `anet node create`（拿到 `ntok_`）。master token 只对多租户自托管的运维有意义 —— 而且就算在那种场景下，admin `utok_` 也能完全替代它。文档自己都不得不写"高级·只在你自部署 hub 时才相关"（`docs-site/docs/concepts/tokens.md:126`）。
 
-2. **Three concepts where one would do.** `requireAuth()` in `server/src/index.ts:98-112` tries `resolveToken()` first, then falls back to `token === AUTH_TOKEN`. That fallback is the only reason `isLegacyAuthToken()` exists (`index.ts:93-96`), the only reason `/events/:alias` has the special-case branch at `index.ts:339-348`, and the only reason `auth_token` exists in `~/.anet/server/config.json` (`bin/cli.ts:1865, 1952, 2083`).
+2. **三个概念能合并成一个。** `requireAuth()`（`server/src/index.ts:98-112`）先调 `resolveToken()`，失败再退回到 `token === AUTH_TOKEN`。这条 fallback 是 `isLegacyAuthToken()`（`index.ts:93-96`）存在的唯一理由，也是 `/events/:alias` 里那段特殊分支（`index.ts:339-348`）存在的唯一理由，也是 `~/.anet/server/config.json` 里 `auth_token` 字段存在的唯一理由（`bin/cli.ts:1865, 1952, 2083`）。
 
-3. **No audit trail.** A request authenticated by `COMMHUB_AUTH_TOKEN` has no user, no network, no token name. The audit log row attributes the action to nothing. Anything done through the master token is effectively anonymous-but-authorized.
+3. **没有审计踪迹。** 用 `COMMHUB_AUTH_TOKEN` 鉴权过的请求没有 user、没有 network、没有 token 名。审计日志里这一行操作归属为空。任何通过 master token 走的操作，等于"匿名但被授权"。
 
-4. **No role binding.** Master token grants are all-or-nothing. There's no way to limit a service to `read` or scope it to one network. Admin `utok_` with `scope`/role enforcement (R12 from the security report) gives us a real permission model.
+4. **没有 role 绑定。** master token 是全开或全关。无法限制某个服务为 `read` 权限、或限制它只能访问某个 network。改用 admin `utok_` 配合 `scope` / role 强制校验（安全报告 R12 的要求），我们能拿到一个真正的权限模型。
 
-5. **Security audit pressure.** The status quo is implicated in three findings from `docs/open-source-security-risk-report.md`:
-   - **R3 (Critical)** — open-mode startup is gated on `COMMHUB_AUTH_TOKEN` being unset. Once `COMMHUB_AUTH_TOKEN` is gone the open-mode codepath collapses to one explicit `--dev-open` flag, which is much harder to trip over by accident.
-   - **R4 (Critical)** — `requireAuth()` accepts the master token, which is what allows the tmux WebSocket to authenticate without being tied to a user. Tying tmux access to admin `utok_` lets us actually attribute the session.
-   - **R7 (High)** — MCP read tools don't verify network membership when the caller is the master token, because the master token has no user/network. Removing the master path forces every caller to have a `userId`/`networkId`, which makes `canRead()` enforceable everywhere.
+5. **安全审计压力。** 现状在 `docs/open-source-security-risk-report.md` 里被三个 finding 点名：
+   - **R3（Critical）** —— 开放模式启动的判定靠"`COMMHUB_AUTH_TOKEN` 没设"。一旦 `COMMHUB_AUTH_TOKEN` 拿掉，开放模式路径就坍缩成一个明确的 `--dev-open` flag，几乎不可能误触发。
+   - **R4（Critical）** —— `requireAuth()` 接受 master token，导致 tmux WebSocket 没有绑定具体用户也能鉴过。把 tmux 接入绑死到 admin `utok_`，session 才能真正归属到人。
+   - **R7（High）** —— 当调用方是 master token 时，MCP 读类 tool 不校验 network 成员关系，因为 master token 没有 user/network。把 master 这条路径删掉，强制每个调用方都带 `userId`/`networkId`，`canRead()` 才能处处生效。
 
-## Current state
+## 现状
 
-`COMMHUB_AUTH_TOKEN` enters the system in five places:
+`COMMHUB_AUTH_TOKEN` 在系统里出现在 5 个地方：
 
-1. **Server startup gate.** `server/src/index.ts:11` reads it from env. `index.ts:22-25` refuses to start if it is unset and `--dev-open` was not passed. The banner string at `index.ts:14` and the `/health` payload at `index.ts:709-710` both echo whether it is set.
+1. **server 启动闸门。** `server/src/index.ts:11` 从 env 读取。`index.ts:22-25` 在它未设、且没传 `--dev-open` 的情况下拒绝启动。`index.ts:14` 的 banner 和 `index.ts:709-710` 的 `/health` 返回都会回声它的设置状态。
 
-2. **`requireAuth()` fallback.** `server/src/index.ts:107-109`:
+2. **`requireAuth()` 的 fallback。** `server/src/index.ts:107-109`：
    ```ts
    // Legacy: check global COMMHUB_AUTH_TOKEN
    if (!AUTH_TOKEN && DEV_OPEN) return null;
    if (token === AUTH_TOKEN) return null;
    ```
-   This is the path that lets a bearer of the master token call `/mcp`, `/events/:alias`, and every `/api/*` endpoint without a `user_id` ever being resolved.
+   就是这条路径让 master token 持有者能调 `/mcp`、`/events/:alias` 以及所有 `/api/*` 端点，而 `user_id` 始终没被解析出来。
 
-3. **SSE legacy branch.** `server/src/index.ts:339-348` — when `isLegacyAuthToken(req)` is true (and only then), SSE subscribes without doing membership scoping. This is one of the cleanest deletions: with `COMMHUB_AUTH_TOKEN` gone, R8 from the security report ("SSE doesn't check token/network") fixes itself.
+3. **SSE 的 legacy 分支。** `server/src/index.ts:339-348` —— 仅当 `isLegacyAuthToken(req)` 为真时，SSE 订阅会跳过成员关系校验。这是删起来最干净的一段：拿掉 `COMMHUB_AUTH_TOKEN`，安全报告里的 R8（"SSE 不校验 token/network"）顺手就修了。
 
-4. **CLI lifecycle.** `agent-network/bin/cli.ts` reads/writes the master token in four places:
-   - `:1860` reads `process.env.COMMHUB_AUTH_TOKEN` as a fallback for `anet hub start`.
-   - `:1865, :1952` saves `auth_token` into `~/.anet/server/config.json`.
-   - `:2083` lets `anet hub config --token <t>` overwrite it.
-   - `:2103-2116` passes it to the Dashboard subprocess via env so the Dashboard can talk to the hub.
+4. **CLI 生命周期。** `agent-network/bin/cli.ts` 在 4 个地方读写 master token：
+   - `:1860` 把 `process.env.COMMHUB_AUTH_TOKEN` 当作 `anet hub start` 的 fallback。
+   - `:1865, :1952` 把 `auth_token` 落到 `~/.anet/server/config.json`。
+   - `:2083` 让 `anet hub config --token <t>` 覆盖它。
+   - `:2103-2116` 通过 env 把它传给 Dashboard 子进程，让 Dashboard 能跟 hub 通信。
 
-5. **Documentation.** `docs-site/docs/concepts/tokens.md`, `docs-site/docs/deploy/production.md`, `docs-site/docs/api/rest.md`, the bilingual CLI guides, and the docker deploy doc all reference it. Most are aimed at self-hosters.
+5. **文档。** `docs-site/docs/concepts/tokens.md`、`docs-site/docs/deploy/production.md`、`docs-site/docs/api/rest.md`、中英 CLI 指南、以及 docker 部署文档都引用了它。基本都面向自托管。
 
-Notably: agent nodes never use the master token. They all have `ntok_`. So removing master will not affect a single user-installed agent.
+值得注意：agent 节点从不使用 master token。它们都拿 `ntok_`。删除 master 不会影响任何一个已部署的用户 agent。
 
-## Proposed design
+## 设计方案
 
-### 1. Admin endpoints use admin-role `utok_`
+### 1. Admin 端点改用 admin role 的 `utok_`
 
-The hub already issues `role=admin` to the first registered user (`server/src/auth.ts:33-42`). `requireAdminAuth()` (`server/src/index.ts:129-136`) already does the right thing: resolve token → check `user.role === "admin"`. We extend coverage so that every endpoint currently relying on `COMMHUB_AUTH_TOKEN` for elevated privilege explicitly calls `requireAdminAuth()`.
+hub 已经会给第一个注册用户颁 `role=admin`（`server/src/auth.ts:33-42`）。`requireAdminAuth()`（`server/src/index.ts:129-136`）也已经实现了正确逻辑：解析 token → 校验 `user.role === "admin"`。我们把覆盖面扩大 —— 凡是当前依赖 `COMMHUB_AUTH_TOKEN` 才能获得高权限的端点，都显式调 `requireAdminAuth()`。
 
-Example: tmux WebSocket today is `requireTmuxAccess` → `requireAdminAuth`, which already requires admin `utok_`. After this RFC, the same pattern applies to the catch-all `/api/*` admin block and to anything that previously authenticated via the master token without a user.
+举例：tmux WebSocket 当前走 `requireTmuxAccess` → `requireAdminAuth`，已经要求 admin `utok_`。本 RFC 之后，对兜底的 `/api/*` admin 块、以及任何此前靠 master token 无身份鉴权的路径，全部套用同一模式。
 
 ```ts
 // Before
@@ -75,47 +75,47 @@ const authErr = requireAdminAuth(req);   // resolved utok_, role=admin
 if (authErr) return authErr;
 ```
 
-For non-elevated endpoints (`/mcp`, `/events/:alias`, REST reads), `requireAuth()` keeps its `resolveToken()` path and drops the master-token fallback. Every successful auth produces a `userId` and (for `ntok_`) a `networkId`.
+对于非高权端点（`/mcp`、`/events/:alias`、REST 读类），`requireAuth()` 保留 `resolveToken()` 路径，删掉 master-token fallback。每次成功鉴权都会产出一个 `userId`，以及（如果用的是 `ntok_`）一个 `networkId`。
 
-### 2. Dashboard is a thin proxy — holds NO token
+### 2. Dashboard 改为 thin proxy —— 不持有任何 token
 
-After discussion (issue #3 reply from maintainer), the previous proposal of giving the Dashboard its own service token is **dropped**. The Dashboard backend holds zero credentials.
+经过 issue #3 讨论（maintainer 回复后），之前提议的"Dashboard 自己持有一个 service token"被**否决**。Dashboard backend 不持有任何凭证。
 
-**Single model, same-machine and cross-machine**:
+**唯一一套模型，同机部署 / 跨机部署都一样**：
 
 ```
-1. Operator starts Dashboard:    anet hub dashboard --hub https://hub.example.com
-                                  (Dashboard knows only the hub URL. Zero token persisted.)
+1. 运维启动 Dashboard:    anet hub dashboard --hub https://hub.example.com
+                          （Dashboard 只知道 hub URL。不落任何 token。）
 
-2. User opens browser:           https://dashboard.example.com
+2. 用户打开浏览器：       https://dashboard.example.com
 
-3. User submits username + password to Dashboard login page.
+3. 用户在 Dashboard 登录页提交 用户名 + 密码。
 
-4. Dashboard backend POSTs credentials to hub /api/auth/login,
-   gets back a `utok_` with the user's role baked in,
-   writes it as an HTTP-only session cookie scoped to the Dashboard origin.
+4. Dashboard backend POST 凭证到 hub /api/auth/login，
+   拿回一个 `utok_`（里面已绑定用户 role），
+   作为 HTTP-only 的 session cookie 写回浏览器，scope 限定到 Dashboard origin。
 
-5. Every subsequent browser → Dashboard request:
-   Dashboard backend reads the `utok_` from the cookie,
-   forwards it as `Authorization: Bearer utok_…` on the call to the hub.
+5. 之后每次 浏览器 → Dashboard 的请求：
+   Dashboard backend 从 cookie 读出 `utok_`，
+   作为 `Authorization: Bearer utok_…` 透传给 hub。
 
-6. Hub authorizes by the `utok_`'s embedded role.
+6. hub 按 `utok_` 内嵌的 role 决定授权结果。
 ```
 
-**Why this is strictly better than holding a service token**:
+**为什么这个方案比"持 service token"严格更好**：
 
-- Zero long-lived service credential to be stolen if the Dashboard host is compromised — only currently-online users' session cookies are exposed (and they rotate with each `anet login`).
-- Every hub call is attributable to a real user. The audit log shows real identities, not "the Dashboard did it." This resolves the old Open Question 2 by construction.
-- Cross-machine deployment becomes the same flow as same-machine — just point at the hub. No extra steps, no token copying, no `admin-utok.json` to chmod.
-- No code path exists in the Dashboard for "service identity" — fewer pieces to test, fewer pieces to misconfigure.
+- Dashboard 主机被攻破时，没有任何长期凭证可被偷走 —— 暴露的只是当前在线用户的 session cookie，并且每次 `anet login` 都会自动轮换。
+- 每一次 hub 调用都能归属到一个真实用户。审计日志显示的是真实身份，而不是"Dashboard 干的"。原 Open Question 2 由此构造性消解。
+- 跨机部署和同机部署是同一条路径 —— 指过去就行。无额外步骤、无 token 拷贝、无 `admin-utok.json` chmod。
+- Dashboard 里不存在"service 身份"的代码分支 —— 测试面更小，配置出错点更少。
 
-**The `admin-utok.json` file is still created** by `anet hub start` (so that local-only CLI commands like `anet hub admin reset` can authenticate without prompting), but the Dashboard does not read it.
+**`admin-utok.json` 文件仍然由 `anet hub start` 生成**（让 `anet hub admin reset` 这类本机 CLI 命令可以免交互鉴权），但 Dashboard 不读它。
 
 ### 3. Bootstrap
 
-First-run `anet hub start` already creates an admin account today (`bin/cli.ts:1969-2001`). We tighten this:
+首次运行 `anet hub start` 当前已经会创建 admin 账户（`bin/cli.ts:1969-2001`）。我们再收紧一些：
 
-- After admin creation, also create one named `utok_` (token name e.g. `admin-bootstrap`) and persist it to `~/.anet/server/admin-utok.json` with `chmod 600`:
+- admin 创建后，额外创建一个具名 `utok_`（token name 比如 `admin-bootstrap`），落到 `~/.anet/server/admin-utok.json`，权限 `chmod 600`：
   ```json
   {
     "username": "admin_a1b2c3",
@@ -124,111 +124,111 @@ First-run `anet hub start` already creates an admin account today (`bin/cli.ts:1
     "created_at": "2026-05-11T..."
   }
   ```
-- The banner continues to show the admin username + one-time password.
-- The banner additionally shows `Admin token saved (used by dashboard)` — no value printed.
-- No env var is exported into the user's shell. Nothing for the user to copy.
+- banner 继续显示 admin 用户名 + 一次性密码。
+- banner 额外提示一句 `Admin token saved (used by dashboard)` —— 不打印 token 值。
+- 不再向用户 shell 注入任何 env 变量。用户没有需要复制的东西。
 
-### Removed code paths (final state at v1.0)
+### 最终下线的代码路径（v1.0 终态）
 
-- `AUTH_TOKEN` constant in `server/src/index.ts:11`.
-- `isLegacyAuthToken()` and its call sites.
-- The `if (token === AUTH_TOKEN) return null;` branch in `requireAuth()`.
-- The SSE legacy branch at `index.ts:339-348`.
-- The `auth_token` field in the server config JSON schema.
-- The `--token` flag of `anet hub start` (replaced by login flow; admin token is internal).
-- `COMMHUB_AUTH_TOKEN` env var: no longer read anywhere; warned in v0.8 and ignored in v1.0.
+- `server/src/index.ts:11` 的 `AUTH_TOKEN` 常量。
+- `isLegacyAuthToken()` 及其全部调用点。
+- `requireAuth()` 里 `if (token === AUTH_TOKEN) return null;` 分支。
+- `index.ts:339-348` 的 SSE legacy 分支。
+- server config JSON schema 里的 `auth_token` 字段。
+- `anet hub start` 的 `--token` flag（用 login 流程取代，admin token 内化为内部细节）。
+- `COMMHUB_AUTH_TOKEN` env 变量：所有地方都不再读取；v0.8 警告，v1.0 完全忽略。
 
-## Migration plan
+## 迁移计划
 
-### Phase 1 — v0.7.x (in-flight, no breaking change)
+### 阶段 1 —— v0.7.x（推进中，无破坏性变更）
 
-- Keep `COMMHUB_AUTH_TOKEN` working exactly as it is.
-- CLI continues to auto-manage `auth_token` in `~/.anet/server/config.json`; users never type it.
-- **Cancel** the previously planned `anet hub token` subcommand. We are deprecating the concept, so we are not adding user-facing CLI surface for it.
-- No new docs mentioning master token. Existing docs stay until Phase 2.
+- 保持 `COMMHUB_AUTH_TOKEN` 行为完全不变。
+- CLI 继续自动管理 `~/.anet/server/config.json` 里的 `auth_token`；用户从不手敲。
+- **取消**此前计划的 `anet hub token` 子命令。既然要废弃这个概念，就不再为它新增用户层 CLI 接口。
+- 不新增任何提及 master token 的文档。已有文档保留到阶段 2。
 
-### Phase 2 — v0.8.0 (new flow ships, old flow soft-deprecated)
+### 阶段 2 —— v0.8.0（新流程上线，老流程软废弃）
 
-- Server boots admin `utok_` on first run (`admin-utok.json` lands).
-- `requireAdminAuth` enforced on tmux + admin REST endpoints; master-token branch in `requireAuth` still present **but only for `/api/*` reads**, gated behind a warning log:
+- 首次运行时 server 自动 bootstrap admin `utok_`（`admin-utok.json` 落盘）。
+- tmux + admin REST 端点强制 `requireAdminAuth`；`requireAuth` 里的 master-token 分支**仍保留，但只允许 `/api/*` 读类**，附带 warning log：
   > `[commhub] master-token auth is deprecated and will be removed in v1.0. See RFC-001.`
-- CLI:
-  - `anet hub dashboard` uses admin `utok_` from `admin-utok.json` (falls back to `COMMHUB_AUTH_TOKEN` with the same deprecation warning if the file is missing).
-  - `anet hub config --token` writes to the file with a deprecation warning.
-  - Silent-ignore `auth_token` in `config.json` if present (warning logged once at startup, value not used by hub).
-- Dashboard switched to admin `utok_`.
-- **Open-mode default removed.** `anet hub start` without `--dev-open` always provisions an admin user + token. The "no token configured → open mode" path is gone. R3 closes.
-- `COMMHUB_DEV_OPEN=1` and `--dev-open` still work for the offline-tutorial case, with a louder banner.
+- CLI：
+  - `anet hub dashboard` 改用 `admin-utok.json` 里的 admin `utok_`（文件缺失时 fallback 到 `COMMHUB_AUTH_TOKEN`，附同样的 deprecation warning）。
+  - `anet hub config --token` 落盘时打印 deprecation warning。
+  - 启动时如发现 `config.json` 里有 `auth_token`，静默忽略（startup 阶段打一次 warning，hub 不再使用此值）。
+- Dashboard 切换为 admin `utok_`。
+- **默认开放模式取消。** `anet hub start` 不带 `--dev-open` 时一律 provision admin 用户 + token。"没设 token 就走开放模式"这条路径不复存在。R3 关闭。
+- `COMMHUB_DEV_OPEN=1` 和 `--dev-open` 仍可用于"离线教程"场景，banner 改得更显眼。
 
-### Phase 3 — v1.0 (hard removal)
+### 阶段 3 —— v1.0（硬下线）
 
-- All code paths listed under "Removed code paths" above are deleted.
-- `auth_token` in `~/.anet/server/config.json` is unrecognized (warning + ignored, schema validator rejects in strict mode).
-- `COMMHUB_AUTH_TOKEN` env var is unread. Setting it has no effect.
-- Docs purged of all master-token references.
-- `SECURITY.md` and the security risk report's R3/R4 entries get a "resolved in v1.0 by RFC-001" footnote.
+- 上文"最终下线的代码路径"全部删除。
+- `~/.anet/server/config.json` 里出现 `auth_token` 视为未识别字段（warning + 忽略，严格模式直接拒绝）。
+- `COMMHUB_AUTH_TOKEN` env 不再被读取。设置它没有任何效果。
+- 文档里 master token 相关内容全部清掉。
+- `SECURITY.md` 和安全风险报告里 R3 / R4 条目加脚注："已在 v1.0 通过 RFC-001 解决"。
 
-## Compatibility
+## 兼容性
 
-What **does not break**:
+**不会破坏的**：
 
-- Existing agents running `ntok_` keep working unchanged. `ntok_` is a row in `api_tokens`, completely independent of master.
-- Existing user CLIs/Dashboards that already have a `utok_` in `~/.anet/global.json` keep working.
-- Hubs running v0.5.x or v0.7.x continue to accept `COMMHUB_AUTH_TOKEN` from old clients during Phase 2 — they just log a warning.
-- The hub's SQLite DB schema is unchanged. No migration needed.
+- 已经在跑的 `ntok_` agent 完全不受影响。`ntok_` 是 `api_tokens` 表里的一行，跟 master 完全独立。
+- 已经在 `~/.anet/global.json` 里持有 `utok_` 的用户 CLI / Dashboard，继续工作。
+- 运行 v0.5.x / v0.7.x 的 hub 在阶段 2 内仍接受老客户端的 `COMMHUB_AUTH_TOKEN` —— 只是会 log warning。
+- hub 的 SQLite schema 不变。不需要迁移脚本。
 
-What **does** break:
+**会破坏的**：
 
-- **CI scripts** that set `COMMHUB_AUTH_TOKEN=...` in their environment: warning in v0.8, fail (auth rejected) in v1.0. Migration: `anet login` to get an admin `utok_`, store that as a secret.
-- **Third-party integrations** that hardcoded the master token as a service credential: same as above.
-- **Operators who put `auth_token` in `~/.anet/server/config.json`**: silent-ignore + warning in v0.8, unrecognized field in v1.0. The hub no longer needs it because admin token bootstrap is automatic.
-- **Open-mode-by-default deployments** (e.g. someone running bare `commhub-server` with no env): refused to start without `--dev-open`. Already true since v0.5.x for `commhub-server`, but `anet hub start` was papering over it by auto-generating a master. In v0.8 the auto-generation switches to admin-user bootstrap. Behavior changes only for users who started `commhub-server` directly without env — and they get a clear error message pointing to `anet hub start`.
+- **CI 脚本** 通过 `COMMHUB_AUTH_TOKEN=...` 配置鉴权的：v0.8 warning，v1.0 鉴权失败。迁移方式：`anet login` 拿到 admin `utok_`，存为 CI secret。
+- **第三方集成** 把 master token 硬编码为服务凭证的：同上。
+- **运维在 `~/.anet/server/config.json` 里写了 `auth_token` 的**：v0.8 静默忽略 + warning，v1.0 视为未识别字段。hub 已经不需要它，admin token bootstrap 是自动的。
+- **默认开放模式部署**（比如用空 env 直接启 `commhub-server`）：没传 `--dev-open` 一律拒绝启动。`commhub-server` 自 v0.5.x 起其实就这样，是 `anet hub start` 在自动生成 master 替它兜底。v0.8 里这条 auto-gen 改成 admin user bootstrap。行为变化只影响"直接 `commhub-server` 起 + 无 env"的人 —— 他们会拿到清晰错误信息，提示去用 `anet hub start`。
 
-## Recovery / edge cases
+## 恢复 / 边界情况
 
-**Admin user accidentally deleted, or admin password lost:**
-A new CLI subcommand, `anet hub admin reset`, runs locally on the hub host. It:
+**admin 用户被误删，或 admin 密码丢失**：
+新增一个本机 CLI 子命令 `anet hub admin reset`，在 hub 主机上运行。它会：
 
-1. Reads the SQLite DB directly (`~/.commhub/commhub.db`), bypassing the HTTP API.
-2. Refuses to run unless invoked with `--i-am-on-the-hub-host` or by a process whose `cwd` is the hub's data dir.
-3. Generates a new random password, updates `users.password_hash` for the admin row (or recreates the admin row if missing).
-4. Issues a fresh admin `utok_`, writes it to `admin-utok.json` (chmod 600), and prints the new password once.
-5. Does **not** revoke other admin tokens — leaves that as an explicit follow-up the operator can do via `anet token revoke`.
+1. 直接读 SQLite DB（`~/.commhub/commhub.db`），绕过 HTTP API。
+2. 拒绝在非主机环境运行，除非显式传 `--i-am-on-the-hub-host`、或调用进程 `cwd` 指向 hub 数据目录。
+3. 生成一个随机密码，更新 admin 行的 `users.password_hash`（如果 admin 行已不存在，则重建）。
+4. 颁发一个新的 admin `utok_`，落到 `admin-utok.json`（chmod 600），并把新密码打印一次。
+5. **不**撤销其他 admin token —— 留给运维自己用 `anet token revoke` 处理。
 
-There is no networked recovery path. If you lose admin access on a hub you can't shell into, you cannot recover — that's by design, and consistent with the local-first product direction.
+不提供网络化恢复路径。如果你拿不到 hub 主机的 shell，admin 就找不回 —— 这是有意为之，跟"local-first"的产品方向一致。
 
-**Dashboard cross-machine deployment:** trivially `anet hub dashboard --hub https://hub.example.com`. The Dashboard backend holds no token; each browser session establishes its own. No file copying, no per-host setup. (See Proposed design §2.)
+**Dashboard 跨机部署**：直接 `anet hub dashboard --hub https://hub.example.com`。Dashboard backend 不持任何 token，每个浏览器 session 自己跟 hub 建立身份。无文件拷贝、无主机相关配置。（详见设计方案 §2。）
 
-**Migration of pre-V3 hubs:** any hub that predates the `api_tokens` table is already incompatible with v0.5+; this RFC does not change that.
+**Pre-V3 hub 的迁移**：任何早于 `api_tokens` 表的 hub 自 v0.5+ 起就已经不兼容；本 RFC 不改变这一点。
 
-## Alternatives considered
+## 备选方案
 
-1. **Keep `COMMHUB_AUTH_TOKEN` but make it CLI-invisible.** Rejected. It still shows up in audit logs as "no user", still requires special-case code in `requireAuth`, still confuses contributors reading the source. The whole point is to delete the concept, not hide it.
+1. **保留 `COMMHUB_AUTH_TOKEN`，只是在 CLI 层不可见。** 拒绝。它仍会以"无用户"形式出现在审计日志里、仍需要 `requireAuth` 里的特殊分支、仍会让读源码的贡献者困惑。我们的目标是删掉这个概念，不是把它藏起来。
 
-2. **mTLS / cert-based auth between Dashboard and hub.** Rejected. anet is a local-first product. Most users run hub + dashboard on the same laptop. Cert provisioning is over-engineering and would add a separate parallel auth path on top of the token one we already have.
+2. **Dashboard ↔ hub 改用 mTLS / 证书鉴权。** 拒绝。anet 是 local-first 产品，绝大多数用户把 hub + dashboard 跑在同一台笔记本上。证书 provisioning 是过度工程，会在 token 路径之外再开一条并行鉴权路径。
 
-3. **Per-instance service tokens (Dashboard service token, CLI service token, etc).** Rejected. anet has no cluster, no service mesh, no Kubernetes. There is one hub and a handful of admin-equivalent callers. Admin `utok_` plus optional per-name admin tokens (`anet token create --name dashboard`) gives all the granularity anyone will reach for, without inventing a new token type.
+3. **Per-instance service token（Dashboard 一个、CLI 一个等）。** 拒绝。anet 没有集群、没有 service mesh、没有 Kubernetes。只有一个 hub 和有限的几类 admin-equivalent 调用方。Admin `utok_` 加上按名命名的 admin token（`anet token create --name dashboard`）已经覆盖了任何合理粒度，不需要新发明一种 token 类型。
 
-4. **Issue Dashboard a non-admin `service` scope.** ~~Rejected for v1.0~~ — superseded 2026-05-11 by the simpler "Dashboard holds no token" model (Proposed design §2). The Dashboard is now a thin cookie-forwarding proxy; there is no service identity to scope.
+4. **给 Dashboard 颁发非 admin 的 `service` scope。** ~~v1.0 之前拒绝~~ —— 2026-05-11 已被更简单的"Dashboard 不持任何 token"方案取代（设计方案 §2）。Dashboard 现在是一个 thin cookie-forwarding 代理，根本不存在 service 身份去 scope。
 
-## Open questions
+## 待解决问题
 
-1. **~~Dedicated Dashboard service token~~** — **Resolved** 2026-05-11: the Dashboard holds no token (see Proposed design §2). Audit-log attribution falls out for free.
+1. **~~给 Dashboard 一个专用 service token~~** —— **已解决** 2026-05-11：Dashboard 不持任何 token（见设计方案 §2）。审计日志归属自动到真实用户头上。
 
-2. **Where does `anet hub admin reset` live?** Two options:
-   - Its own subcommand under `anet hub admin ...`.
-   - A flag on `anet doctor --fix` ("found broken admin user, recreate?").
-   Preference: a dedicated `anet hub admin reset` so it shows up in `--help` and is obviously a recovery tool. `anet doctor` should detect-and-suggest, not silently mutate.
+2. **`anet hub admin reset` 放在哪里？** 两个候选：
+   - 作为 `anet hub admin ...` 下的独立子命令。
+   - 作为 `anet doctor --fix` 的一个 flag（"发现 admin 损坏，要重建吗？"）。
+   倾向：独立 `anet hub admin reset` 子命令，让它在 `--help` 里能被看到、明确是恢复工具。`anet doctor` 只做检测 + 提示，不应静默改库。
 
-3. **Bunx caching of old `commhub-server` versions.** The CLI pins `PINNED_SERVER_VERSION` to defeat bunx caching (`bin/cli.ts:1900`). When v0.8 ships, users on older CLI will pull old server. We need to coordinate the bump or accept a one-release window where the old server still accepts master tokens (it will — the soft-deprecation in v0.8 covers this).
+3. **bunx 缓存老版 `commhub-server`。** CLI 通过 `PINNED_SERVER_VERSION`（`bin/cli.ts:1900`）来规避 bunx 缓存。v0.8 上线时，老 CLI 用户会拉到老 server。需要协调好版本 bump 节奏，或者接受一个 release 窗口期内老 server 仍接受 master token —— 反正 v0.8 的软废弃就是给这个 case 准备的。
 
-4. **The `--token` flag on `anet hub start`.** Currently used by power users and by some test scripts. Phase 2 keeps it (with warning). Phase 3 removes it. Are there in-tree tests under `tests/` that use it? Implementer should grep and migrate before v1.0.
+4. **`anet hub start --token` flag。** 当前被部分 power user 和测试脚本使用。阶段 2 保留（warning）。阶段 3 删除。`tests/` 下有没有用到？实施方在 v1.0 前要 grep 并迁移。
 
-## Approval
+## 审批
 
-| Role        | Name                | Status   |
+| 角色        | 姓名                | 状态     |
 | ----------- | ------------------- | -------- |
 | Maintainer  | Vincent (sleep2agi) | pending  |
-| Implementer | 通信牛 / SDK马        | pending  |
+| Implementer | 通信牛 / SDK马       | pending  |
 
-Implementation tracking: open a tracking issue referencing this RFC once approved; link the Phase 2 / Phase 3 PRs from the issue.
+实施跟踪方式：RFC 采纳后开一个 tracking issue 引用本 RFC；阶段 2 / 阶段 3 的 PR 都 link 回该 issue。
