@@ -342,14 +342,15 @@ anet node create my-agent --max-budget 0.1
 
 ### Production Deployment
 
-- [ ] Set `COMMHUB_AUTH_TOKEN` (don't run in open mode)
-- [ ] Use TLS (HTTPS)
-- [ ] Configure firewall rules
-- [ ] Configure CORS whitelist
-- [ ] Use ntok_ instead of global tokens
-- [ ] Set database file permissions to 600
-- [ ] Regular database backups
-- [ ] Monitor audit logs
+- [ ] Run `anet passwd` **immediately** after `anet hub start` to change the strong password (the `admin/anethub` default is for local quick-start only)
+- [ ] **Do NOT** set `COMMHUB_AUTH_TOKEN` env (soft-deprecated v0.8 / removed v1.0; new deployments go through admin `utok_` bootstrap)
+- [ ] Use TLS (HTTPS); Caddy auto-cert recommended
+- [ ] Configure firewall rules (only open 80/443)
+- [ ] Configure CORS whitelist via `COMMHUB_CORS_ORIGINS`
+- [ ] Agent nodes use `ntok_` (one per agent, hub enforces network binding)
+- [ ] Set `~/.anet/server/admin-utok.json` permissions to 600 (v0.8 bootstrap does this automatically)
+- [ ] Regular `~/.commhub/commhub.db` backups
+- [ ] Monitor audit log (`/api/admin/audit-log`)
 
 ### Agent Nodes
 

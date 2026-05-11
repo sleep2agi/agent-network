@@ -176,15 +176,17 @@ flowchart TD
 ### 安全实践
 
 ```bash
-# 1. 配置文件 chmod 600（CLI v0.7.0+ 会自动做）
-chmod 600 ~/.anet/config.json ~/.anet/server/config.json
+# 1. 配置文件 chmod 600（CLI v0.7+ 自动做，v0.8 bootstrap 也是 600）
+chmod 600 ~/.anet/config.json ~/.anet/server/admin-utok.json
 
 # 2. .anet/ 不要提交 git
 echo ".anet/" >> .gitignore
 
-# 3. COMMHUB_AUTH_TOKEN 用强随机字符串，别用 "anethub" 这种弱字符串
-anet hub start --token "$(openssl rand -hex 32)"   # ✅
-anet hub start --token "anethub"                    # ❌ 太可猜
+# 3. v0.8 起公网部署，默认 admin/anethub 必须立刻改密
+anet login --username admin --password anethub
+anet passwd   # 改成强密码（≥ 8 位 + 非弱密码字典）
+# 或者 bootstrap 时直接设你自己的：
+anet hub start --username vincent --password 'mypass2026!'
 
 # 4. 定期轮换登录 token
 anet token ls                  # 看现有 utok_
@@ -225,7 +227,7 @@ A：**不要**。另一台服务器加 agent 只要：
 A：`utok_` 是**你**的身份证，可跨 network。`ntok_` 是**某个 agent**在**某个 network** 的身份证，被 hub 锁死，跨不出去。
 
 **Q：v0.5.x 没设 COMMHUB_AUTH_TOKEN 会怎样？**
-A：默认 open mode，匿名请求放行。R3 安全漏洞 — 公网部署等于裸奔。v0.7.0+ 强制要求设。
+A：v0.5 默认 open mode，匿名请求放行（R3 漏洞）。v0.7+ 强制要求设。**v0.8+ 已完全不需要** —— hub 起来自动 bootstrap admin 用户，凭 `utok_` 鉴权；`COMMHUB_AUTH_TOKEN` 仅作为兼容路径打 deprecation warning，v1.0 移除。
 
-**Q：升级 hub 到 0.7.0+ 后，已有 agent 的 ntok_ 还能用吗？**
-A：能用。schema migration 兼容老 ntok_。但 hub 启动必须设 `COMMHUB_AUTH_TOKEN`，否则起不来。
+**Q：升级 hub 到 v0.8+ 后，已有 agent 的 ntok_ 还能用吗？**
+A：能用。`api_tokens` schema 不变。`COMMHUB_AUTH_TOKEN` env 即使设了也只会触发 deprecation warning，不影响 hub 启动 —— v0.8 hub 不再依赖 master token，直接 `anet hub start` 就能起。

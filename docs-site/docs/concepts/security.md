@@ -342,14 +342,15 @@ anet node create my-agent --max-budget 0.1
 
 ### 生产部署
 
-- [ ] 设置 `COMMHUB_AUTH_TOKEN`（不要开放模式）
-- [ ] 使用 TLS（HTTPS）
-- [ ] 配置防火墙规则
-- [ ] 配置 CORS 白名单
-- [ ] 使用 ntok_ 而非全局 Token
-- [ ] 数据库文件权限设为 600
-- [ ] 定期备份数据库
-- [ ] 监控审计日志
+- [ ] `anet hub start` 后**立刻** `anet passwd` 改强密码（默认 `admin/anethub` 仅供本机快速上手）
+- [ ] **不要**设置 `COMMHUB_AUTH_TOKEN` env（v0.8 软废弃 / v1.0 移除；新部署直接走 admin `utok_` bootstrap）
+- [ ] 使用 TLS（HTTPS），Caddy 自动 cert
+- [ ] 配置防火墙规则（只放 80/443）
+- [ ] 配置 CORS 白名单 `COMMHUB_CORS_ORIGINS`
+- [ ] Agent 节点用 ntok_（每个 agent 一个，hub 强制 network 锁）
+- [ ] `~/.anet/server/admin-utok.json` 权限设为 600（v0.8 bootstrap 自动）
+- [ ] 定期备份 `~/.commhub/commhub.db`
+- [ ] 监控审计日志（`/api/admin/audit-log`）
 
 ### Agent 节点
 

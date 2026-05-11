@@ -24,14 +24,18 @@ curl http://localhost:9200/health
 ```json
 {
   "ok": true,
-  "version": "0.6.0",
+  "version": "0.8.0",
   "api_version": "v3",
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
-  "auth": "enabled",
+  "sse_sessions": {},
+  "auth": "user-token",
+  "security": "secured",
+  "tmux": "disabled",
   "v3_auth": true,
   "multi_network": true,
+  "license": "trial",
   "uptime": 3600
 }
 ```
@@ -45,12 +49,12 @@ curl http://localhost:9200/health
 注册新用户。第一个注册的用户自动成为管理员。
 
 ```bash
+# v0.8+：注册不需要 master token，公开端点
 curl -X POST http://localhost:9200/api/auth/register \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $COMMHUB_AUTH_TOKEN" \
   -d '{
     "username": "vincent",
-    "password": "mypassword",
+    "password": "mypassword2026",
     "email": "vincent@example.com",
     "display_name": "Vincent"
   }'
@@ -61,7 +65,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|
 | `username` | string | &check; | 用户名（2-50 字符，字母/数字/下划线/中文） |
-| `password` | string | &check; | 密码（>= 6 字符） |
+| `password` | string | &check; | 密码（>= 8 字符 + 非弱密码字典；首个 bootstrap admin 例外，>= 4 即可） |
 | `email` | string | | 邮箱 |
 | `display_name` | string | | 显示名 |
 
@@ -91,12 +95,12 @@ curl -X POST http://localhost:9200/api/auth/register \
 用户登录。
 
 ```bash
+# v0.8+：登录不需要 master token，公开端点
 curl -X POST http://localhost:9200/api/auth/login \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $COMMHUB_AUTH_TOKEN" \
   -d '{
     "username": "vincent",
-    "password": "mypassword"
+    "password": "mypassword2026"
   }'
 ```
 

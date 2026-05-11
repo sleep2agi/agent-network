@@ -24,14 +24,18 @@ curl http://localhost:9200/health
 ```json
 {
   "ok": true,
-  "version": "0.6.0",
+  "version": "0.8.0",
   "api_version": "v3",
   "transport": "streamable-http",
   "sessions_count": 0,
   "sse_connections": 0,
-  "auth": "enabled",
+  "sse_sessions": {},
+  "auth": "user-token",
+  "security": "secured",
+  "tmux": "disabled",
   "v3_auth": true,
   "multi_network": true,
+  "license": "trial",
   "uptime": 3600
 }
 ```
@@ -45,12 +49,12 @@ curl http://localhost:9200/health
 Register a new user. The first user registered automatically becomes admin.
 
 ```bash
+# v0.8+: register is a public endpoint, no master token needed
 curl -X POST http://localhost:9200/api/auth/register \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $COMMHUB_AUTH_TOKEN" \
   -d '{
     "username": "vincent",
-    "password": "mypassword",
+    "password": "mypassword2026",
     "email": "vincent@example.com",
     "display_name": "Vincent"
   }'
@@ -61,7 +65,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 | Field | Type | Required | Description |
 |------|------|:----:|------|
 | `username` | string | &check; | Username (2-50 chars, letters/numbers/underscores/Chinese) |
-| `password` | string | &check; | Password (>= 6 chars) |
+| `password` | string | &check; | Password (>= 8 chars + not in weak-password dictionary; first bootstrap admin exempt, >= 4 OK) |
 | `email` | string | | Email |
 | `display_name` | string | | Display name |
 
@@ -91,12 +95,12 @@ curl -X POST http://localhost:9200/api/auth/register \
 User login.
 
 ```bash
+# v0.8+: login is a public endpoint, no master token needed
 curl -X POST http://localhost:9200/api/auth/login \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $COMMHUB_AUTH_TOKEN" \
   -d '{
     "username": "vincent",
-    "password": "mypassword"
+    "password": "mypassword2026"
   }'
 ```
 
