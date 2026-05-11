@@ -17,6 +17,8 @@ CommHub Server 提供 17 个 MCP Tools，通过 `POST /mcp`（Streamable HTTP）
 
 ### report_status
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L88)
+
 上报 Agent 状态。同时用作心跳（建议每 3 分钟调用一次）。
 
 **参数**：
@@ -73,6 +75,8 @@ report_status({
 
 ### report_completion
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L213)
+
 汇报任务完成。会自动更新 session 状态为 idle。
 
 **参数**：
@@ -113,6 +117,8 @@ report_completion({
 
 ### get_inbox
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L300)
+
 拉取待处理的消息。
 
 **参数**：
@@ -148,6 +154,8 @@ report_completion({
 
 ### ack_inbox
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L330)
+
 确认消息已接收。ACK 后消息不会再被 get_inbox 返回。
 
 **参数**：
@@ -171,6 +179,8 @@ report_completion({
 ## 任务管理工具
 
 ### send_task
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L450)
 
 派发任务到指定 Agent 的 inbox。
 
@@ -218,6 +228,8 @@ send_task({
 
 ### send_message
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L550)
+
 发消息（不触发 AI 处理，只展示）。
 
 **参数**：
@@ -241,6 +253,8 @@ send_task({
 ---
 
 ### send_reply
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L589)
 
 回复任务。关联到原始 task_id，不触发对方 AI 处理。
 
@@ -268,6 +282,8 @@ send_task({
 
 ### send_ack
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L667)
+
 确认收到任务（轻量级，不入 inbox）。
 
 **参数**：
@@ -290,6 +306,8 @@ send_task({
 ---
 
 ### retry_task
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L693)
 
 重试失败/取消/过期的任务。
 
@@ -318,6 +336,8 @@ send_task({
 
 ### cancel_task
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L803)
+
 取消待处理的任务。
 
 **参数**：
@@ -341,6 +361,8 @@ send_task({
 ---
 
 ### reassign_task
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L835)
 
 将任务转给另一个 Agent。
 
@@ -368,6 +390,8 @@ send_task({
 ## 查询工具
 
 ### get_task
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L740)
 
 查询任务详情。
 
@@ -404,6 +428,8 @@ send_task({
 
 ### list_tasks
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L763)
+
 查询任务列表，支持多维度过滤。
 
 **参数**：
@@ -434,6 +460,8 @@ send_task({
 ---
 
 ### get_all_status
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L369)
 
 获取所有 Session 状态。超过 10 分钟无心跳的自动标记为 offline。
 
@@ -473,6 +501,8 @@ send_task({
 
 ### get_session_status
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L415)
+
 获取单个 Session 的详细状态，包括 inbox 待处理数和最近完成记录。
 
 **参数**：
@@ -503,6 +533,8 @@ send_task({
 
 ### get_completions
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L925)
+
 获取完成记录列表。
 
 **参数**：
@@ -528,6 +560,8 @@ send_task({
 ## 广播工具
 
 ### broadcast
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L878)
 
 向所有在线 Agent 广播消息。
 

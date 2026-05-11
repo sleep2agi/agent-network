@@ -17,6 +17,8 @@ CommHub Server provides 17 MCP Tools, called via the `POST /mcp` (Streamable HTT
 
 ### report_status
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L88)
+
 Report agent status. Also serves as a heartbeat (recommended every 3 minutes).
 
 **Parameters**:
@@ -73,6 +75,8 @@ report_status({
 
 ### report_completion
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L213)
+
 Report task completion. Automatically updates session status to idle.
 
 **Parameters**:
@@ -113,6 +117,8 @@ report_completion({
 
 ### get_inbox
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L300)
+
 Fetch pending messages.
 
 **Parameters**:
@@ -148,6 +154,8 @@ Messages are sorted by priority: high > normal > low, then by time within the sa
 
 ### ack_inbox
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L330)
+
 Acknowledge message receipt. After ACK, the message won't be returned by get_inbox.
 
 **Parameters**:
@@ -171,6 +179,8 @@ Acknowledge message receipt. After ACK, the message won't be returned by get_inb
 ## Task Management Tools
 
 ### send_task
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L450)
 
 Dispatch a task to a specified agent's inbox.
 
@@ -218,6 +228,8 @@ send_task({
 
 ### send_message
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L550)
+
 Send a message (does not trigger AI processing, display only).
 
 **Parameters**:
@@ -241,6 +253,8 @@ Send a message (does not trigger AI processing, display only).
 ---
 
 ### send_reply
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L589)
 
 Reply to a task. Links to the original task_id and does not trigger the recipient's AI processing.
 
@@ -268,6 +282,8 @@ Reply to a task. Links to the original task_id and does not trigger the recipien
 
 ### send_ack
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L667)
+
 Acknowledge task receipt (lightweight, does not enter inbox).
 
 **Parameters**:
@@ -290,6 +306,8 @@ Acknowledge task receipt (lightweight, does not enter inbox).
 ---
 
 ### retry_task
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L693)
 
 Retry a failed/cancelled/expired task.
 
@@ -318,6 +336,8 @@ Can only retry tasks with status `failed` / `expired` / `cancelled`.
 
 ### cancel_task
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L803)
+
 Cancel a pending task.
 
 **Parameters**:
@@ -341,6 +361,8 @@ Cancel a pending task.
 ---
 
 ### reassign_task
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L835)
 
 Reassign a task to another agent.
 
@@ -368,6 +390,8 @@ Reassign a task to another agent.
 ## Query Tools
 
 ### get_task
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L740)
 
 Query task details.
 
@@ -404,6 +428,8 @@ Query task details.
 
 ### list_tasks
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L763)
+
 Query task list with multi-dimensional filtering.
 
 **Parameters**:
@@ -434,6 +460,8 @@ Query task list with multi-dimensional filtering.
 ---
 
 ### get_all_status
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L369)
 
 Get all session statuses. Sessions without a heartbeat for over 10 minutes are auto-marked offline.
 
@@ -473,6 +501,8 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
 
 ### get_session_status
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L415)
+
 Get detailed status of a single session, including pending inbox count and recent completions.
 
 **Parameters**:
@@ -503,6 +533,8 @@ Get detailed status of a single session, including pending inbox count and recen
 
 ### get_completions
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L925)
+
 Get completion records.
 
 **Parameters**:
@@ -528,6 +560,8 @@ Get completion records.
 ## Broadcast Tools
 
 ### broadcast
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L878)
 
 Broadcast a message to all online agents.
 

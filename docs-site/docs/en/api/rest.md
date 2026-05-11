@@ -15,6 +15,9 @@ CommHub Server provides a REST API for Dashboard, CLI, and third-party system in
 
 ### GET /health
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L713)
+
 Health check, no authentication required.
 
 ```bash
@@ -45,6 +48,9 @@ curl http://localhost:9200/health
 ## Auth Endpoints
 
 ### POST /api/auth/register
+
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L414)
 
 Register a new user. The first user registered automatically becomes admin.
 
@@ -92,6 +98,9 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 ### POST /api/auth/login
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L429)
+
 User login.
 
 ```bash
@@ -126,6 +135,9 @@ curl -X POST http://localhost:9200/api/auth/login \
 
 ### GET /api/auth/me
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L446)
+
 Get current user info.
 
 ```bash
@@ -151,6 +163,9 @@ curl http://localhost:9200/api/auth/me \
 
 ### PUT /api/auth/me
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L455)
+
 Update personal info.
 
 ```bash
@@ -163,6 +178,9 @@ curl -X PUT http://localhost:9200/api/auth/me \
 ---
 
 ### POST /api/auth/password
+
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L479)
 
 Change password.
 
@@ -181,6 +199,9 @@ curl -X POST http://localhost:9200/api/auth/password \
 ## Network Endpoints
 
 ### GET /api/networks
+
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L553)
 
 Get all networks the user belongs to.
 
@@ -212,6 +233,9 @@ curl http://localhost:9200/api/networks \
 
 ### POST /api/networks
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L568)
+
 Create a new network.
 
 ```bash
@@ -238,6 +262,8 @@ curl -X POST http://localhost:9200/api/networks \
 
 ### GET /api/networks/:id
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L660)
+
 Get network details.
 
 ```bash
@@ -248,6 +274,8 @@ curl http://localhost:9200/api/networks/net_abc123 \
 ---
 
 ### PUT /api/networks/:id
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L694)
 
 Update network info (owner only).
 
@@ -262,6 +290,8 @@ curl -X PUT http://localhost:9200/api/networks/net_abc123 \
 
 ### DELETE /api/networks/:id
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L684)
+
 Delete a network (owner only, must have no active sessions).
 
 ```bash
@@ -274,6 +304,9 @@ curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
 ## Data Query Endpoints
 
 ### GET /api/status
+
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L749)
 
 Get all session statuses.
 
@@ -313,6 +346,9 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 
 ### GET /api/tasks
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1053)
+
 Get task list.
 
 ```bash
@@ -334,6 +370,9 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 
 ### GET /api/nodes
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1039)
+
 Get node list (persistent node info, distinct from session's transient state).
 
 ```bash
@@ -344,6 +383,9 @@ curl http://localhost:9200/api/nodes \
 ---
 
 ### GET /api/messages
+
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L935)
 
 Get recent inbox messages.
 
@@ -363,6 +405,9 @@ curl "http://localhost:9200/api/messages?limit=100" \
 
 ### GET /api/completions
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1080)
+
 Get completion records.
 
 ```bash
@@ -374,6 +419,9 @@ curl "http://localhost:9200/api/completions?limit=20" \
 
 ### GET /api/task_events
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1025)
+
 Get task event log.
 
 ```bash
@@ -384,6 +432,9 @@ curl "http://localhost:9200/api/task_events?task_id=uuid-xxx" \
 ---
 
 ### GET /api/stats
+
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L948)
 
 Get aggregate statistics.
 
@@ -420,6 +471,9 @@ curl http://localhost:9200/api/stats \
 
 ### GET /api/audit-log
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1004)
+
 Get audit log (admin/owner only).
 
 ```bash
@@ -430,6 +484,9 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
 ---
 
 ### GET /api/users
+
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L649)
 
 Get all user list (system admin only).
 
@@ -443,6 +500,8 @@ curl http://localhost:9200/api/users \
 ## MCP Endpoint
 
 ### POST /mcp
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L313)
 
 MCP Streamable HTTP endpoint. Agents call MCP Tools through this endpoint.
 
@@ -466,6 +525,8 @@ curl -X POST http://localhost:9200/mcp \
 ## SSE Endpoint
 
 ### GET /events/:alias
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L342)
 
 SSE real-time push endpoint. Agents receive events via long connections.
 
@@ -499,6 +560,9 @@ data: {"time":"2026-04-12T10:00:00Z"}
 
 ### POST /api/auth/node-token
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L500)
+
 Create a network-bound `ntok_` for a node. `anet node create` calls this automatically.
 
 ```bash
@@ -509,6 +573,9 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 ```
 
 ### POST /api/auth/tokens
+
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L526)
 
 Create an API token.
 
@@ -521,6 +588,9 @@ curl -X POST http://localhost:9200/api/auth/tokens \
 
 ### GET /api/auth/tokens
 
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L517)
+
 List all user tokens.
 
 ```bash
@@ -529,6 +599,8 @@ curl http://localhost:9200/api/auth/tokens \
 ```
 
 ### DELETE /api/auth/tokens/:id
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L541)
 
 Revoke a token.
 
@@ -543,6 +615,8 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 ### GET /api/networks/:id/members
 
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L583)
+
 Get network member list.
 
 ```bash
@@ -551,6 +625,8 @@ curl http://localhost:9200/api/networks/net_xxx/members \
 ```
 
 ### POST /api/networks/:id/invite
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L621)
 
 Create an invite code.
 
@@ -562,6 +638,9 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 ```
 
 ### POST /api/networks/join
+
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L637)
 
 Join a network with an invite code.
 

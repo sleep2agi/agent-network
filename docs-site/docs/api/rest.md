@@ -15,6 +15,9 @@ CommHub Server 提供 REST API 供 Dashboard、CLI 和第三方系统调用。
 
 ### GET /health
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L713)
+
 健康检查，不需要认证。
 
 ```bash
@@ -45,6 +48,9 @@ curl http://localhost:9200/health
 ## 认证端点
 
 ### POST /api/auth/register
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L414)
 
 注册新用户。第一个注册的用户自动成为管理员。
 
@@ -92,6 +98,9 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 ### POST /api/auth/login
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L429)
+
 用户登录。
 
 ```bash
@@ -126,6 +135,9 @@ curl -X POST http://localhost:9200/api/auth/login \
 
 ### GET /api/auth/me
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L446)
+
 获取当前用户信息。
 
 ```bash
@@ -151,6 +163,9 @@ curl http://localhost:9200/api/auth/me \
 
 ### PUT /api/auth/me
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L455)
+
 修改个人信息。
 
 ```bash
@@ -163,6 +178,9 @@ curl -X PUT http://localhost:9200/api/auth/me \
 ---
 
 ### POST /api/auth/password
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L479)
 
 修改密码。
 
@@ -181,6 +199,9 @@ curl -X POST http://localhost:9200/api/auth/password \
 ## 网络端点
 
 ### GET /api/networks
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L553)
 
 获取用户所属的所有网络。
 
@@ -212,6 +233,9 @@ curl http://localhost:9200/api/networks \
 
 ### POST /api/networks
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L568)
+
 创建新网络。
 
 ```bash
@@ -238,6 +262,8 @@ curl -X POST http://localhost:9200/api/networks \
 
 ### GET /api/networks/:id
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L660)
+
 获取网络详情。
 
 ```bash
@@ -248,6 +274,8 @@ curl http://localhost:9200/api/networks/net_abc123 \
 ---
 
 ### PUT /api/networks/:id
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L694)
 
 修改网络信息（仅 owner）。
 
@@ -262,6 +290,8 @@ curl -X PUT http://localhost:9200/api/networks/net_abc123 \
 
 ### DELETE /api/networks/:id
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L684)
+
 删除网络（仅 owner，必须无活跃 session）。
 
 ```bash
@@ -274,6 +304,9 @@ curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
 ## 数据查询端点
 
 ### GET /api/status
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L749)
 
 获取所有 session 状态。
 
@@ -313,6 +346,9 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 
 ### GET /api/tasks
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1053)
+
 获取任务列表。
 
 ```bash
@@ -334,6 +370,9 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 
 ### GET /api/nodes
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1039)
+
 获取节点列表（持久化节点信息，区别于 session 的临时状态）。
 
 ```bash
@@ -344,6 +383,9 @@ curl http://localhost:9200/api/nodes \
 ---
 
 ### GET /api/messages
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L935)
 
 获取最近 inbox 消息列表。
 
@@ -363,6 +405,9 @@ curl "http://localhost:9200/api/messages?limit=100" \
 
 ### GET /api/completions
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1080)
+
 获取完成记录。
 
 ```bash
@@ -374,6 +419,9 @@ curl "http://localhost:9200/api/completions?limit=20" \
 
 ### GET /api/task_events
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1025)
+
 获取任务事件日志。
 
 ```bash
@@ -384,6 +432,9 @@ curl "http://localhost:9200/api/task_events?task_id=uuid-xxx" \
 ---
 
 ### GET /api/stats
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L948)
 
 获取统计数据。
 
@@ -420,6 +471,9 @@ curl http://localhost:9200/api/stats \
 
 ### GET /api/audit-log
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1004)
+
 获取审计日志（仅 admin/owner）。
 
 ```bash
@@ -430,6 +484,9 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
 ---
 
 ### GET /api/users
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L649)
 
 获取所有用户列表（仅系统 admin）。
 
@@ -443,6 +500,8 @@ curl http://localhost:9200/api/users \
 ## MCP 端点
 
 ### POST /mcp
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L313)
 
 MCP Streamable HTTP 端点，Agent 通过此端点调用 MCP Tools。
 
@@ -466,6 +525,8 @@ curl -X POST http://localhost:9200/mcp \
 ## SSE 端点
 
 ### GET /events/:alias
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L342)
 
 SSE 实时推送端点，Agent 通过长连接接收事件。
 
@@ -499,6 +560,9 @@ data: {"time":"2026-04-12T10:00:00Z"}
 
 ### POST /api/auth/node-token
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L500)
+
 为某个节点创建网络绑定的 `ntok_`。`anet node create` 会自动调用它。
 
 ```bash
@@ -509,6 +573,9 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 ```
 
 ### POST /api/auth/tokens
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L526)
 
 创建 API Token。
 
@@ -521,6 +588,9 @@ curl -X POST http://localhost:9200/api/auth/tokens \
 
 ### GET /api/auth/tokens
 
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L517)
+
 列出用户的所有 Token。
 
 ```bash
@@ -529,6 +599,8 @@ curl http://localhost:9200/api/auth/tokens \
 ```
 
 ### DELETE /api/auth/tokens/:id
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L541)
 
 撤销 Token。
 
@@ -543,6 +615,8 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 ### GET /api/networks/:id/members
 
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L583)
+
 获取网络成员列表。
 
 ```bash
@@ -551,6 +625,8 @@ curl http://localhost:9200/api/networks/net_xxx/members \
 ```
 
 ### POST /api/networks/:id/invite
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L621)
 
 创建邀请码。
 
@@ -562,6 +638,9 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 ```
 
 ### POST /api/networks/join
+
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L637)
 
 用邀请码加入网络。
 

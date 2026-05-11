@@ -194,6 +194,12 @@ export default withMermaid(defineConfig({
     ],
     search: { provider: 'local' },
     footer: { message: 'Powered by Sleep2AGI', copyright: '© 2026 sleep2agi' },
+    editLink: {
+      pattern: 'https://github.com/sleep2agi/agent-network/edit/main/docs-site/docs/:path',
+      text: '在 GitHub 上编辑此页 / Edit this page on GitHub',
+    },
+    lastUpdated: { text: '更新于 / Updated' },
   },
   mermaid: {},
+  lastUpdated: true,
 }))
