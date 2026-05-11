@@ -114,7 +114,7 @@ Stable, Apache-2.0, published to npm.
 | Package | Version | Role |
 |---|---|---|
 | [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.0` | `anet` CLI — hub / dashboard / agent / demo launcher |
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.6.0` | MCP + REST + SSE hub (SQLite default, optional PostgreSQL) |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.6.0` | MCP + REST + SSE hub (SQLite) |
 | [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.3.0` | Web UI — Next.js, 4 themes, Chat / Nodes / Tasks / Networks / Logs / Admin |
 | [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK |
 

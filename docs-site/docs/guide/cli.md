@@ -156,7 +156,7 @@ This machine — login then create a node:
 |------|------|
 | `PORT` | 监听端口 |
 | `COMMHUB_AUTH_TOKEN` | 全局认证 Token |
-| `DATABASE_URL` | PostgreSQL 连接（可选，默认 SQLite） |
+| `DATABASE_URL` | PostgreSQL 连接（代码层入口，v2.1 未做 E2E 验证，**不推荐生产使用**；默认 SQLite） |
 | `COMMHUB_CORS_ORIGINS` | CORS 白名单 |
 
 ### anet node create

@@ -252,13 +252,13 @@ vercel deploy --prebuilt --prod
 
 ### 20. PostgreSQL 支持如何？
 
-v1.0.0-preview.25 开始支持 PostgreSQL：
+::: warning v2.1 暂不推荐 PostgreSQL
+代码里有 `DATABASE_URL=postgres://...` 的入口，但 v2.1 stable 上没有做过 PostgreSQL 的 E2E 验证，**不建议生产使用**。
 
-```bash
-DATABASE_URL=postgres://user:pass@host:5432/commhub anet hub start
-```
+当前请用默认的 **SQLite**（在 `~/.commhub/commhub.db`）。SQLite 已经能跑到 100+ Agent 规模，单机部署足够。
 
-SQLite 仍然是默认选项，适合单机部署。PostgreSQL 适合需要高可用的生产环境。
+如果你确实有 HA / 多写副本场景需要 Postgres，到 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 反馈，我们会按需求优先级排到后续版本。
+:::
 
 ## 性能问题
 

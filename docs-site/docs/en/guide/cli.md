@@ -135,7 +135,7 @@ What it does:
 |------|------|
 | `PORT` | Listen port |
 | `COMMHUB_AUTH_TOKEN` | Global auth token |
-| `DATABASE_URL` | PostgreSQL connection (optional, defaults to SQLite) |
+| `DATABASE_URL` | PostgreSQL connection (code-level entry, **not E2E-verified on v2.1; not recommended for production**; default SQLite) |
 | `COMMHUB_CORS_ORIGINS` | CORS whitelist |
 
 ### anet node create

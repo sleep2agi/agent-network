@@ -252,13 +252,13 @@ Don't build on Vercel, as environment variables may be missing.
 
 ### 20. What about PostgreSQL support?
 
-Starting from v1.0.0-preview.25, PostgreSQL is supported:
+::: warning Not recommended in v2.1
+The code has a `DATABASE_URL=postgres://...` entry point, but PostgreSQL **has not been end-to-end verified on v2.1 stable** — don't use it in production yet.
 
-```bash
-DATABASE_URL=postgres://user:pass@host:5432/commhub anet hub start
-```
+For now, please stick with the default **SQLite** (`~/.commhub/commhub.db`). SQLite handles 100+ agents on a single machine just fine for the supported deployment shape.
 
-SQLite remains the default and is suitable for single-machine deployments. PostgreSQL is appropriate for production environments requiring high availability.
+If you have a real HA / multi-writer use case for Postgres, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) and we'll prioritize it for a later release.
+:::
 
 ## Performance Issues
 
