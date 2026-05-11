@@ -2,12 +2,13 @@
 
 | Field        | Value                                  |
 | ------------ | -------------------------------------- |
-| Status       | Draft                                  |
+| Status       | **Accepted** (Vincent, 2026-05-11)     |
 | Created      | 2026-05-11                             |
-| Updated      | 2026-05-11                             |
+| Updated      | 2026-05-11 (dashboard simplification)  |
 | Author       | Vincent (sleep2agi)                    |
 | Implementer  | 通信牛 / SDK马                          |
 | Target       | server v0.8.0 → v1.0                   |
+| Discussion   | [#3](https://github.com/sleep2agi/agent-network/issues/3) |
 
 ## Summary
 
@@ -76,11 +77,39 @@ if (authErr) return authErr;
 
 For non-elevated endpoints (`/mcp`, `/events/:alias`, REST reads), `requireAuth()` keeps its `resolveToken()` path and drops the master-token fallback. Every successful auth produces a `userId` and (for `ntok_`) a `networkId`.
 
-### 2. Dashboard ↔ hub uses admin `utok_`
+### 2. Dashboard is a thin proxy — holds NO token
 
-**Same-machine deployment** (the common case — `anet hub dashboard`): on first run after upgrade, the CLI reads the admin `utok_` from a known local path (`~/.anet/server/admin-utok.json`, chmod 600) and exports it to the Dashboard child process as `ANET_ADMIN_TOKEN` (or similar — name TBD, see Open Questions). The Dashboard signs all its hub calls with that token. The token's audit-log entries are attributable to the admin user.
+After discussion (issue #3 reply from maintainer), the previous proposal of giving the Dashboard its own service token is **dropped**. The Dashboard backend holds zero credentials.
 
-**Cross-machine deployment** (Dashboard on a different host than the hub): the operator runs `anet login --username <admin> --password <pw>` on the Dashboard host, gets their own `utok_` with `role=admin`, and the Dashboard uses that. This is exactly the same auth path a human admin would use, so there is no service-specific code path to maintain. Documented explicitly so the user doesn't try to copy `auth_token` across machines.
+**Single model, same-machine and cross-machine**:
+
+```
+1. Operator starts Dashboard:    anet hub dashboard --hub https://hub.example.com
+                                  (Dashboard knows only the hub URL. Zero token persisted.)
+
+2. User opens browser:           https://dashboard.example.com
+
+3. User submits username + password to Dashboard login page.
+
+4. Dashboard backend POSTs credentials to hub /api/auth/login,
+   gets back a `utok_` with the user's role baked in,
+   writes it as an HTTP-only session cookie scoped to the Dashboard origin.
+
+5. Every subsequent browser → Dashboard request:
+   Dashboard backend reads the `utok_` from the cookie,
+   forwards it as `Authorization: Bearer utok_…` on the call to the hub.
+
+6. Hub authorizes by the `utok_`'s embedded role.
+```
+
+**Why this is strictly better than holding a service token**:
+
+- Zero long-lived service credential to be stolen if the Dashboard host is compromised — only currently-online users' session cookies are exposed (and they rotate with each `anet login`).
+- Every hub call is attributable to a real user. The audit log shows real identities, not "the Dashboard did it." This resolves the old Open Question 2 by construction.
+- Cross-machine deployment becomes the same flow as same-machine — just point at the hub. No extra steps, no token copying, no `admin-utok.json` to chmod.
+- No code path exists in the Dashboard for "service identity" — fewer pieces to test, fewer pieces to misconfigure.
+
+**The `admin-utok.json` file is still created** by `anet hub start` (so that local-only CLI commands like `anet hub admin reset` can authenticate without prompting), but the Dashboard does not read it.
 
 ### 3. Bootstrap
 
@@ -168,7 +197,7 @@ A new CLI subcommand, `anet hub admin reset`, runs locally on the hub host. It:
 
 There is no networked recovery path. If you lose admin access on a hub you can't shell into, you cannot recover — that's by design, and consistent with the local-first product direction.
 
-**Dashboard cross-machine deployment:** documented explicitly. The Dashboard host must run `anet login --username <admin>` against the remote hub. Do not copy `admin-utok.json` across machines (the token is bound to an audit identity; copying it muddies attribution). Use `anet token create --name dashboard-host-2` for an explicit per-host admin token if you want auditable separation.
+**Dashboard cross-machine deployment:** trivially `anet hub dashboard --hub https://hub.example.com`. The Dashboard backend holds no token; each browser session establishes its own. No file copying, no per-host setup. (See Proposed design §2.)
 
 **Migration of pre-V3 hubs:** any hub that predates the `api_tokens` table is already incompatible with v0.5+; this RFC does not change that.
 
@@ -180,11 +209,11 @@ There is no networked recovery path. If you lose admin access on a hub you can't
 
 3. **Per-instance service tokens (Dashboard service token, CLI service token, etc).** Rejected. anet has no cluster, no service mesh, no Kubernetes. There is one hub and a handful of admin-equivalent callers. Admin `utok_` plus optional per-name admin tokens (`anet token create --name dashboard`) gives all the granularity anyone will reach for, without inventing a new token type.
 
-4. **Issue Dashboard a non-admin `service` scope.** Rejected for v1.0 — see Open Questions below. The Dashboard currently needs admin-equivalent read across all networks. Tightening that to a dedicated `service` scope is reasonable but should be its own RFC after the audit-log scope work (R12) lands.
+4. **Issue Dashboard a non-admin `service` scope.** ~~Rejected for v1.0~~ — superseded 2026-05-11 by the simpler "Dashboard holds no token" model (Proposed design §2). The Dashboard is now a thin cookie-forwarding proxy; there is no service identity to scope.
 
 ## Open questions
 
-1. **Dedicated Dashboard service token, separate from admin.** Should the Dashboard get a `utok_` with a distinct token name (e.g. `service:dashboard`) so its activity is distinguishable in the audit log from human admin actions? Strong intuition: yes. Same `user_id` (the admin), different `api_tokens.name`, audit log shows `tokenName=service:dashboard`. Defer the implementation to Phase 2 once we see what the audit-log UI actually needs.
+1. **~~Dedicated Dashboard service token~~** — **Resolved** 2026-05-11: the Dashboard holds no token (see Proposed design §2). Audit-log attribution falls out for free.
 
 2. **Where does `anet hub admin reset` live?** Two options:
    - Its own subcommand under `anet hub admin ...`.
