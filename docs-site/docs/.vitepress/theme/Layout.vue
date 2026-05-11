@@ -6,6 +6,7 @@ import HeroBadges from './components/HeroBadges.vue'
 import HeroNotice from './components/HeroNotice.vue'
 import InstallCommand from './components/InstallCommand.vue'
 import FeatureGrid from './components/FeatureGrid.vue'
+import SelectionReporter from './SelectionReporter.vue'
 
 const { Layout } = DefaultTheme
 </script>
@@ -29,6 +30,9 @@ const { Layout } = DefaultTheme
     </template>
     <template #home-features-before>
       <FeatureGrid />
+    </template>
+    <template #layout-bottom>
+      <SelectionReporter />
     </template>
   </Layout>
 </template>
