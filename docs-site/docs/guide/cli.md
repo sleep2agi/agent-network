@@ -124,17 +124,21 @@ anet hub start [options]
 1. 启动 CommHub Server（v0.8 起不需要 `COMMHUB_AUTH_TOKEN`）
 2. 启动 CommHub Server（默认绑定 `127.0.0.1:9200`，仅本机可访问）
 3. 创建 SQLite 数据库（`~/.commhub/commhub.db`，含 13 张表）
-4. 自动注册 admin 用户（首次运行）并写 `~/.anet/server/admin-utok.json`
+4. 首次运行自动 bootstrap admin 账户，默认凭证 **`admin / anethub`**（快速上手），并把 admin `utok_` 写到 `~/.anet/server/admin-utok.json`（chmod 600）
 5. 写入本机 Hub 地址到 `~/.anet/config.json`
-6. 如已有有效 `utok_` 会复用登录态；否则需要手动 `anet login`
-7. 启动 14 天免费试用
+6. 如已有有效 `utok_` 会复用登录态；否则用默认凭证 `anet login --username admin --password anethub`
+7. **公网部署立刻 `anet passwd` 改密**
 
 ::: info 你应该看到
 ```
 anet hub start
 Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200
-✅ Default account created: admin / anethub
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.0-...)
+🔒 secured
+✅ Admin account created
+   username: admin
+   password: anethub
+   Admin token saved to ~/.anet/server/admin-utok.json
 
 This machine — login then create a node:
   anet login --username admin --password anethub
@@ -143,13 +147,38 @@ This machine — login then create a node:
 ```
 :::
 
+::: tip 想自定义凭证（推荐公网部署）
+默认 `admin / anethub` 只适合本机快速上手。公网部署可以传 flag 直接设强密码：
+```bash
+anet hub start --username vincent --password 'mypass2026!'
+```
+注意：自定义密码必须 ≥ 8 位且不在 top-1000 弱密码字典里。默认凭证（首次启动）不受此强度限制 —— 但**必须**用 `anet passwd` 立刻改成强密码。
+:::
+
+::: tip 第二次启动
+admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次 `anet hub start` 会显示：
+```
+✅ Admin already exists (admin-utok.json found, user=admin)
+```
+不会重复创建。
+:::
+
+::: tip 第二次启动
+admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次 `anet hub start` 会显示：
+```
+✅ Admin already exists (admin-utok.json found, user=admin)
+```
+不会重复创建。
+:::
+
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--port` | 9200 | 监听端口 |
-| `--token` | - | 旧 master token 兼容参数；v0.8 起 deprecated |
 | `--host` / `--ip` | 127.0.0.1 | 绑定地址；局域网接入用 `0.0.0.0` |
-| `--username` | admin | 默认账号用户名 |
-| `--password` | anethub | 默认账号密码 |
+| `--username` | `admin` | 自定义 admin 用户名 |
+| `--password` | `anethub`（快速上手默认） | 自定义 admin 密码（≥8 位 + 非弱密码；默认值跳过强度校验） |
+| `--dev-open` | false | **危险**：无鉴权运行，仅用于离线 tutorial |
+| `--token` | — | 旧 master token 兼容参数；v0.8 起 deprecated |
 
 **环境变量**：
 

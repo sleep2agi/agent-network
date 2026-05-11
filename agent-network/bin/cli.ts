@@ -1914,7 +1914,7 @@ async function serverCommand() {
       // cache the first-resolved version and may not refetch even when the
       // tag points at something newer; specifying the exact version forces
       // a fresh install whenever this string changes.)
-      const PINNED_SERVER_VERSION = "0.8.0-preview.0";
+      const PINNED_SERVER_VERSION = "0.8.0-preview.1";
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`];
       if (devOpen) serverArgs.push("--dev-open");
       child = spawn("bunx", serverArgs, { env, stdio: "pipe", shell: true });
@@ -1994,10 +1994,11 @@ async function serverCommand() {
       defaultUser = existingAdmin.username || defaultUser;
       console.log(`  ✅ Admin already exists (admin-utok.json found, user=${existingAdmin.username || "?"})`);
     } else {
-      // Silent auto-generate by default. Users who want custom credentials pass
-      // --username / --password flags; no prompt to interrupt the start flow.
-      if (!defaultUser) defaultUser = `admin_${randomBytes(3).toString("hex")}`;
-      if (!defaultPass) defaultPass = randomBytes(12).toString("base64url");
+      // Quick-start defaults: admin / anethub. User is expected to rotate the
+      // password via `anet passwd` after first login. Override with
+      // --username / --password flags.
+      if (!defaultUser) defaultUser = "admin";
+      if (!defaultPass) defaultPass = "anethub";
     }
     if (!skippedBootstrap) {
       try {

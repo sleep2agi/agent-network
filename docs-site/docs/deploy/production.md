@@ -11,7 +11,7 @@ Agent Network v2.1 的默认配置只为**本机使用**优化。直接 `--host 
 | 项 | 默认 | 风险 |
 |---|---|---|
 | Hub bind | `127.0.0.1`（仅本机） | 公网模式必须显式 `--host 0.0.0.0` |
-| 默认账号 | 首次启动随机生成或按 `--username/--password` 指定 | 保存一次，随后改密 |
+| 默认账号 | `admin / anethub`（快速上手默认）；或 `--username/--password` 自定义 | **必须**立刻 `anet passwd` 改成强密码 |
 | `COMMHUB_AUTH_TOKEN` | v0.8 起软废弃 | 不再作为主线部署配置 |
 | tmux 控制面 | 默认关闭 | 需要 `COMMHUB_ENABLE_TMUX=1` + admin 鉴权 |
 | 多租户隔离 | network scope 强制 | 用户只能访问所属 network |
@@ -21,12 +21,17 @@ Agent Network v2.1 的默认配置只为**本机使用**优化。直接 `--host 
 
 ## 公网部署最小检查清单
 
-### 1. 立刻改密
+### 1. bootstrap + 立刻改密
 
 ```bash
+# 首次 anet hub start 默认账号是 admin / anethub（快速上手），banner 也会提示
 anet login --username admin --password anethub
-anet passwd                       # 交互输入新密码（≥ 12 位，含大小写+数字+符号）
+
+# 公网部署立刻改成强密码（≥ 8 位 + 非弱密码字典）
+anet passwd
 ```
+
+若你 bootstrap 时通过 `--username/--password` 自定义了凭证，直接用你自己设的登录后改密即可。
 
 ### 2. v0.8 起不再配置 master token
 

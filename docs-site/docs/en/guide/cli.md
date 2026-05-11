@@ -118,17 +118,46 @@ What it does:
 1. Starts CommHub without requiring `COMMHUB_AUTH_TOKEN` in v0.8+
 2. Starts CommHub on `127.0.0.1:9200` by default
 3. Creates the SQLite database at `~/.commhub/commhub.db`
-4. Creates the admin account on first run and writes `~/.anet/server/admin-utok.json`
+4. **First run only**: bootstraps admin with default credentials **`admin / anethub`** (quick-start), saves the admin `utok_` to `~/.anet/server/admin-utok.json` (chmod 600). Change this password immediately via `anet passwd`.
 5. Saves the local Hub URL to `~/.anet/config.json`
-6. Reuses a valid saved `utok_` if one exists; otherwise run `anet login`
+6. Reuses a valid saved `utok_` if one exists; otherwise `anet login --username admin --password anethub`
+
+::: info Expected output
+```
+anet hub start
+Starting CommHub Server on port 9200 (bind 127.0.0.1)...
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.0-...)
+🔒 secured
+✅ Admin account created
+   username: admin
+   password: anethub
+   Admin token saved to ~/.anet/server/admin-utok.json
+```
+:::
+
+::: tip Custom credentials (recommended for public deployment)
+Default `admin / anethub` is fine only for local quick-start. For public deployment, set a strong password at bootstrap:
+```bash
+anet hub start --username vincent --password 'mypass2026!'
+```
+Custom passwords must be ≥ 8 chars and not in the top-1000 weak-password dictionary. The default credentials bypass this strength check — change via `anet passwd` ASAP.
+:::
+
+::: tip Subsequent starts
+Once admin is bootstrapped (`~/.anet/server/admin-utok.json` exists), `anet hub start` is idempotent:
+```
+✅ Admin already exists (admin-utok.json found, user=admin)
+```
+:::
 
 | Parameter | Default | Description |
 |------|--------|------|
 | `--port` | 9200 | Listen port |
-| `--token` | - | Legacy master token compatibility; deprecated in v0.8 |
 | `--host` / `--ip` | 127.0.0.1 | Bind address; use `0.0.0.0` for LAN access |
-| `--username` | admin | Default account username |
-| `--password` | anethub | Default account password |
+| `--username` | `admin` | Custom admin username |
+| `--password` | `anethub` (quick-start default) | Custom admin password (≥8 chars + not in weak-password dict; default bypasses check) |
+| `--dev-open` | false | **Dangerous**: runs with no auth, only for offline tutorials |
+| `--token` | — | Legacy master token compatibility; deprecated in v0.8 |
 
 **Environment variables**:
 

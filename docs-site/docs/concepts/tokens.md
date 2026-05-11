@@ -28,6 +28,8 @@ anet login --username admin --password anethub
 
 hub 验账号密码 OK，发一个 `utok_xxxxxxxx...` 给你。
 
+> ℹ️ 首次 `anet hub start` 默认账户是 `admin / anethub`（快速上手）。**立刻用 `anet passwd` 改成你自己的强密码**。也可以 `anet hub start --username vincent --password mypass2026` 自定义。
+
 ### 存哪
 
 ```bash
@@ -207,13 +209,13 @@ V2 时代有过 `atok_`（api token）。V3 改成 `utok_` + `ntok_` 体系。
 **Q：我每天接触几个 token？**
 A：**0 个手动输入**。CLI 全自动管理。你只要 `anet login` 一次 + `anet node create` 每个 agent 一次，token 自动写文件，之后就不管了。
 
-**Q：admin / anethub 是 token 吗？**
-A：不是。是账号密码。用账号密码 `anet login` 后才换到 `utok_`。
+**Q：admin 账户的默认密码是什么？**
+A：`admin / anethub`（快速上手默认）。**首次 `anet login` 之后立刻 `anet passwd` 改成你自己的强密码**（≥ 8 位 + 非弱密码）。也可以在 `anet hub start --username … --password …` 时直接传你想要的。
 
 **Q：我在另一台服务器加 agent，要用 COMMHUB_AUTH_TOKEN 吗？**
 A：**不要**。另一台服务器加 agent 只要：
 1. `anet init --hub http://hub:9200`
-2. `anet login --username admin --password ...`
+2. `anet login --username admin --password anethub`
 3. `anet node create xxx ...`
 4. `anet node start xxx`
 

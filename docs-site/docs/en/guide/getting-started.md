@@ -44,7 +44,7 @@ What happens:
 
 - Binds to `http://127.0.0.1:9200` by default
 - SQLite database at `~/.commhub/commhub.db` (created automatically)
-- Default admin account **admin / anethub** auto-created
+- Admin account auto-bootstrapped on first run with default credentials `admin / anethub` — change via `anet passwd` after first login
 - Output prints a LAN URL (so other machines can join) plus a snippet to wipe state
 
 ## 3. Start the Dashboard
@@ -55,7 +55,7 @@ Open a second terminal and **keep it open**:
 anet hub dashboard
 ```
 
-Open `http://localhost:3000` in a browser, log in with `admin / anethub`.
+Open `http://localhost:3000` in a browser, log in with `admin / anethub` (the default — change it via `anet passwd` after).
 
 Pages: Chat / Nodes / Tasks / Messages / Networks / Logs / Admin / Docs. The Chat page renders markdown, sends on Enter, shows source labels (`You` / `↳ peer-agent`), and persists history across reloads.
 

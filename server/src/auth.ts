@@ -30,16 +30,22 @@ function validatePasswordStrength(password: string, label = "password"): string 
 export function register(username: string, password: string, email?: string, displayName?: string): AuthResult {
   if (!username || username.length < 2) return { ok: false, error: "username must be at least 2 characters" };
   if (username.length > 50) return { ok: false, error: "username too long (max 50)" };
-  const passwordError = validatePasswordStrength(password);
-  if (passwordError) return { ok: false, error: passwordError };
   if (!/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/.test(username)) return { ok: false, error: "username contains invalid characters" };
 
   const existing = db.get<any>("SELECT user_id FROM users WHERE username = ?1", username);
   if (existing) return { ok: false, error: "username already taken" };
 
-  // First user → auto admin
+  // First user → auto admin. Bootstrap admin may use a weak/memorable default
+  // password (e.g. "anethub") for quick start; they should rotate via
+  // `anet passwd` afterwards. Subsequent users must meet full strength.
   const userCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM users");
   const isFirstUser = !userCount || userCount.cnt === 0;
+  if (isFirstUser) {
+    if (!password || password.length < 4) return { ok: false, error: "password must be at least 4 characters" };
+  } else {
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) return { ok: false, error: passwordError };
+  }
 
   const userId = generateId("u");
   const pwHash = hashPassword(password);
