@@ -65,8 +65,6 @@ dist/
 ├── bin/cli.js       # CLI 入口（minified，~580KB 含 MCP SDK bundle）
 ├── src/client.js    # CommHub SDK 客户端（minified，~4.4KB）
 └── client.d.ts      # TypeScript 类型声明
-src/
-└── server.ts        # Server 编程入口（Bun-only，保留 .ts 源码）
 package.json
 README.md
 ```
@@ -80,8 +78,7 @@ README.md
   "main": "dist/src/client.js",
   "types": "dist/client.d.ts",
   "exports": {
-    ".": { "import": "./dist/src/client.js", "types": "./dist/client.d.ts" },
-    "./server": { "import": "./src/server.ts" }
+    ".": { "import": "./dist/src/client.js", "types": "./dist/client.d.ts" }
   }
 }
 ```
@@ -105,20 +102,7 @@ anet node start my-agent
 
 ### @sleep2agi/commhub-server
 
-CommHub Server 可以通过编程方式启动：
-
-```typescript
-import { startServer } from '@sleep2agi/agent-network/server';
-
-await startServer({
-  port: 9200,
-  token: 'secret',
-  db: '~/.commhub/commhub.db',
-  corsOrigins: ['http://localhost:3000'],
-});
-```
-
-或者通过 bunx 直接运行：
+CommHub Server 通过独立包运行：
 
 ```bash
 bunx @sleep2agi/commhub-server

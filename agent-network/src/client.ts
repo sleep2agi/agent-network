@@ -154,7 +154,7 @@ export class CommHub extends EventEmitter {
 
   /** Reply to a task (update status) */
   async reply(taskId: string, text: string, status: "completed" | "blocked" | "error" | "in_progress" = "completed") {
-    return this.call("reply", { task_id: taskId, text, status });
+    return this.call("send_reply", { in_reply_to: taskId, text, status });
   }
 
   /** Update session status */

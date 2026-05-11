@@ -43,7 +43,7 @@
 - **One CLI, three runtimes.** Run Claude Code CLI, the Claude Agent SDK, and OpenAI's Codex SDK side-by-side on the same hub. Mix-and-match per role.
 - **Seven LLM providers, one config switch.** Anthropic, OpenAI, MiniMax, DeepSeek, GLM (智谱), Kimi (Moonshot), and 书生 InternLM — all routed through `ANTHROPIC_BASE_URL`.
 - **Local. LAN. Cross-server. Same Hub.** Hub binds to `127.0.0.1` for pure local mode; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers across the internet can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
-- **Mesh dispatch out of the box.** Agents discover each other via 18 MCP tools (`get_all_status`, `send_task`, `get_task`, …) and coordinate without you scripting the choreography.
+- **Mesh dispatch out of the box.** Agents discover each other via 17 MCP tools (`get_all_status`, `send_task`, `get_task`, …) and coordinate without you scripting the choreography.
 - **Web Dashboard included.** Chat, Nodes, Tasks, Messages, Networks, Logs, Admin — Next.js app, 4 themes, runs at `localhost:3000`.
 
 > [!IMPORTANT]
@@ -139,7 +139,7 @@ The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. 
 - **MCP Streamable HTTP** at `/mcp` — agents and Claude Code / Codex connect here
 - **SSE Push** at `/events/:alias` — server pushes tasks to agents in real time
 - **REST** at `/api/*` — Dashboard, admin, monitoring, audit log
-- **18 MCP tools** — `send_task`, `get_task`, `send_reply`, `report_status`, `get_all_status`, …
+- **17 MCP tools** — `send_task`, `get_task`, `send_reply`, `report_status`, `get_all_status`, …
 
 📖 Architecture deep dive → <https://anet.sh/guide/architecture>
 

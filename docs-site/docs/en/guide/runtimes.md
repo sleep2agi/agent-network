@@ -193,12 +193,16 @@ anet node create translator \
 
 | Provider | Model | `ANTHROPIC_BASE_URL` |
 |---|---|---|
-| Anthropic | claude-sonnet-4-6 / claude-opus-4-7 / claude-haiku-4-5 | `https://api.anthropic.com` |
-| MiniMax | MiniMax-M2.7 | `https://api.minimaxi.com/anthropic` |
-| DeepSeek | deepseek-v3-0324 | (per provider docs) |
-| Zhipu GLM | glm-4-plus | (per provider docs) |
-| Moonshot Kimi | kimi-k1.5 | (per provider docs) |
-| InternLM | intern-s1-pro | `https://chat.intern-ai.org.cn/anthropic` |
+| Anthropic | Latest Sonnet / Opus / Haiku (see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)) | `https://api.anthropic.com` |
+| MiniMax | Latest M-series (see [MiniMax platform](https://platform.minimaxi.com)) | `https://api.minimaxi.com/anthropic` |
+| DeepSeek | Latest V / R series (see [DeepSeek platform](https://platform.deepseek.com)) | per DeepSeek's Anthropic-compatible docs |
+| Zhipu GLM | Latest GLM series (see [Zhipu Open Platform](https://open.bigmodel.cn)) | per Zhipu's Anthropic-adapter docs |
+| Moonshot Kimi | Latest K-series (see [Moonshot platform](https://platform.moonshot.cn)) | per Moonshot's Anthropic-compatible docs |
+| InternLM | Latest Intern-S series (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn/anthropic` |
+
+::: tip Model IDs change frequently
+Providers ship new model versions every few weeks. **Pull the latest model ID from the provider's console** and pass it to `--model`.
+:::
 
 ---
 

@@ -120,7 +120,7 @@ See the [Upgrade Guide](/en/guide/upgrade) for details.
 - Multi-network isolation for nodes, tasks, and sessions.
 - Username/password accounts, JWT, and the `utok_` + `ntok_` token system.
 - 14-day trial licensing and Pro activation.
-- 39 CLI commands, 18 MCP tools, and 17 REST endpoint families.
+- 39 CLI commands, 17 MCP tools, and 17 REST endpoint families.
 - 3 runtimes: `claude-agent-sdk`, `codex-sdk`, and `http-api`.
 - Audit logs, rate limiting, and PostgreSQL support through the `DbAdapter`.
 
@@ -161,7 +161,7 @@ See the [Upgrade Guide](/en/guide/upgrade) for details.
 - **User system**: Username + password registration/login, API token authentication
 - **Trial licensing**: 14-day free trial, license key activation for Pro
 - **39 CLI commands**: quickstart, login, register, passwd, token, network (create/ls/use/info/rename/delete), status, tasks, doctor, info, logs, demo, config, license, activate, hub start...
-- **18 MCP tools**: send_task, send_reply, retry_task, cancel_task, reassign_task, list_tasks, get_task...
+- **17 MCP tools**: send_task, send_reply, retry_task, cancel_task, reassign_task, list_tasks, get_task...
 - **17 REST endpoints**: /api/auth/*, /api/networks/*, /api/tasks, /api/nodes, /api/stats, /api/audit-log, /api/license...
 - **2 AI runtimes**: codex-sdk (GPT-5.4), claude-agent-sdk (Claude / MiniMax / OpenAI-compatible)
 - **Audit logging**: All user operations + task state changes recorded

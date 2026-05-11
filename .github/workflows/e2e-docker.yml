@@ -22,6 +22,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install agent-network dependencies
+        working-directory: agent-network
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck agent-network
+        working-directory: agent-network
+        run: bun tsc --noEmit
+
       - name: Build Docker E2E image
         run: docker build -t anet-e2e -f tests/Dockerfile .
         timeout-minutes: 10

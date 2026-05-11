@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-CommHub Server 提供 18 个 MCP Tools，通过 `POST /mcp`（Streamable HTTP）端点调用。
+CommHub Server 提供 17 个 MCP Tools，通过 `POST /mcp`（Streamable HTTP）端点调用。
 
 ## 工具分类
 

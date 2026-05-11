@@ -17,7 +17,7 @@ Agent Network was built to solve exactly these problems.
 
 ### Communication Hub (CommHub)
 
-All agents communicate through a centralized communication server (CommHub Server). CommHub is built on the [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) standard, providing 18 MCP Tools with Streamable HTTP + SSE real-time push.
+All agents communicate through a centralized communication server (CommHub Server). CommHub is built on the [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) standard, providing 17 MCP Tools with Streamable HTTP + SSE real-time push.
 
 ```mermaid
 sequenceDiagram

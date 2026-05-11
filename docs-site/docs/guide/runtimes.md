@@ -205,12 +205,16 @@ anet node create translator \
 
 | Provider | 模型 | `ANTHROPIC_BASE_URL` |
 |---|---|---|
-| Anthropic | claude-sonnet-4-6 / claude-opus-4-7 / claude-haiku-4-5 | `https://api.anthropic.com` |
-| MiniMax | MiniMax-M2.7 | `https://api.minimaxi.com/anthropic` |
-| DeepSeek | deepseek-v3-0324 | （根据官方 Anthropic 兼容 endpoint） |
-| 智谱 GLM | glm-4-plus | （智谱开放平台 Anthropic 适配） |
-| Moonshot Kimi | kimi-k1.5 | （Moonshot Anthropic 兼容） |
-| 书生 InternLM | intern-s1-pro | `https://chat.intern-ai.org.cn/anthropic` |
+| Anthropic | 当前主线 Sonnet / Opus / Haiku（具体型号查 [Anthropic 官方](https://docs.anthropic.com/claude/docs/models-overview)） | `https://api.anthropic.com` |
+| MiniMax | 当前主线 M 系列（查 [MiniMax 开放平台](https://platform.minimaxi.com)） | `https://api.minimaxi.com/anthropic` |
+| DeepSeek | 当前主线 V/R 系列（查 [DeepSeek 平台](https://platform.deepseek.com)） | 见 DeepSeek Anthropic 兼容文档 |
+| 智谱 GLM | 当前主线 GLM 系列（查 [智谱开放平台](https://open.bigmodel.cn)） | 见智谱 Anthropic 适配文档 |
+| Moonshot Kimi | 当前主线 K 系列（查 [Moonshot 开放平台](https://platform.moonshot.cn)） | 见 Moonshot Anthropic 兼容文档 |
+| 书生 InternLM | 当前主线 Intern-S 系列（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn/anthropic` |
+
+::: tip 模型版本号会变
+各家 LLM 厂商每隔几周升级模型，硬编码具体版本号容易过时。**到对应平台拿最新 model id**，填到 `--model` 参数即可。
+:::
 
 ::: details 国产模型 endpoint 完整列表
 查看 [多模型配置](/guide/multi-model) — 每家厂商的 Anthropic 兼容 URL + 示例 key。

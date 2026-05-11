@@ -137,7 +137,7 @@ CommHub Server is the core of the entire system, responsible for message routing
 
 ### MCP Tool Groups
 
-CommHub provides 18 MCP Tools in two groups:
+CommHub provides 17 MCP Tools in two groups:
 
 **Agent-side tools (4)** -- agents report status and fetch tasks:
 
@@ -416,7 +416,7 @@ agent-orchestra/
 ├── server/            # CommHub Server (Bun + SQLite) → runs on Server
 │   └── src/
 │       ├── index.ts   # HTTP routing + MCP + SSE
-│       ├── tools.ts   # 18 MCP Tools
+│       ├── tools.ts   # 17 MCP Tools
 │       ├── auth.ts    # Auth + permissions + network management
 │       ├── db.ts      # Database + table definitions
 │       └── push.ts    # SSE push management

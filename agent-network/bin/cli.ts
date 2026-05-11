@@ -67,6 +67,7 @@ function saveServerConfig(data: Record<string, any>) {
 }
 
 interface Profile {
+  anet_version?: string;
   node_id?: string;
   node_name?: string;
   name?: string;
@@ -83,9 +84,10 @@ interface Profile {
   resume?: string;
   resumeAlias?: string;
   tools?: string[];
+  network_id?: string;
 }
 
-type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk";
+type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk" | "http-api";
 
 function normalizeRuntime(profileOrRuntime?: Profile | string): RuntimeName {
   if (typeof profileOrRuntime === "string") {
@@ -1529,7 +1531,7 @@ async function launchAgent(id: string, forceNewSession = false) {
     if (forceNewSession) agentArgs.push("--new-session", "true");
 
     const hub = profile.hub || loadGlobal().hub || "";
-    const env = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}), ...(hub ? { COMMHUB_URL: hub } : {}) };
+    const env: NodeJS.ProcessEnv = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}), ...(hub ? { COMMHUB_URL: hub } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
     }
@@ -1548,7 +1550,7 @@ async function launchAgent(id: string, forceNewSession = false) {
     });
   } else {
     // spawn claude CLI
-    const env = { ...process.env, COMMHUB_ALIAS: profile.alias, ...(token ? { COMMHUB_TOKEN: token } : {}) };
+    const env: NodeJS.ProcessEnv = { ...process.env, COMMHUB_ALIAS: profile.alias, ...(token ? { COMMHUB_TOKEN: token } : {}) };
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
     }
@@ -1625,7 +1627,7 @@ async function resumeCommand() {
 
   if (!resolved) validateNodeName(nodeId);
   if (!profile) {
-    const createOpts = { ...opts, session: sessionId, runtime: opts.runtime || "claude-code-cli" } as ReturnType<typeof parseOpts>;
+    const createOpts = { ...opts, session: sessionId, runtime: opts.runtime || "claude-code-cli" } as unknown as ReturnType<typeof parseOpts>;
     profile = createProfileFromOpts(nodeId, createOpts);
     saveProfile(nodeId, profile);
     console.log(`[anet] Created node "${nodeId}"`);
@@ -2401,11 +2403,11 @@ Example:
     const resolved = resolveNodeRef(nodeRef);
     const nodeId = resolved?.id || nodeRef;
     const profile = resolved?.profile || null;
-    const storedProfile = profile ? (loadStoredProfile(nodeId) || profile) : null;
     if (!profile) {
       console.error(`Node "${nodeRef}" not found. Create it first: anet node create ${nodeRef} --runtime codex-sdk`);
       process.exit(1);
     }
+    const storedProfile = loadStoredProfile(nodeId) || profile;
 
     let botToken = opts["bot-token"];
     let allowId = opts.allow;

@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-CommHub Server provides 18 MCP Tools, called via the `POST /mcp` (Streamable HTTP) endpoint.
+CommHub Server provides 17 MCP Tools, called via the `POST /mcp` (Streamable HTTP) endpoint.
 
 ## Tool Categories
 

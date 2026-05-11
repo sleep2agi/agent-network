@@ -6,7 +6,7 @@ export const db: DbAdapter = createAdapter();
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     resume_id     TEXT PRIMARY KEY,
-    alias         TEXT UNIQUE,
+    alias         TEXT,
     tmux_name     TEXT,
     server        TEXT DEFAULT 'unknown',
     ip            TEXT,
@@ -19,8 +19,10 @@ db.exec(`
     output        TEXT,
     progress      INTEGER DEFAULT 0,
     score         REAL,
+    network_id    TEXT NOT NULL DEFAULT 'default',
     registered_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (network_id, alias)
   );
 
   CREATE TABLE IF NOT EXISTS inbox (
@@ -300,7 +302,82 @@ try {
 for (const table of ["sessions", "nodes", "tasks", "inbox", "task_events", "completions"]) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN network_id TEXT`); } catch {}
 }
+
+// ── P0: sessions alias uniqueness is network-scoped.
+// Older SQLite databases created `alias TEXT UNIQUE`, which prevents the same
+// agent alias from existing in two networks. SQLite cannot drop a UNIQUE
+// constraint in place, so rebuild the table once with UNIQUE(network_id, alias).
+function migrateSessionsNetworkAliasUnique() {
+  try {
+    db.run("UPDATE sessions SET network_id = 'default' WHERE network_id IS NULL OR network_id = ''");
+  } catch {}
+
+  if (db.dialect === "postgres") {
+    try { db.exec("ALTER TABLE sessions ALTER COLUMN network_id SET DEFAULT 'default'"); } catch {}
+    try { db.exec("UPDATE sessions SET network_id = 'default' WHERE network_id IS NULL OR network_id = ''"); } catch {}
+    try { db.exec("ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_alias_key"); } catch {}
+    try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_network_alias_unique ON sessions(network_id, alias)"); } catch {}
+    return;
+  }
+
+  let needsRebuild = true;
+  try {
+    const createSql = db.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'");
+    needsRebuild = !!createSql?.sql && !/UNIQUE\s*\(\s*network_id\s*,\s*alias\s*\)/i.test(createSql.sql);
+  } catch {}
+  if (!needsRebuild) return;
+
+  db.transaction(() => {
+    db.exec("DROP TABLE IF EXISTS sessions_migrated");
+    db.exec(`
+      CREATE TABLE sessions_migrated (
+        resume_id     TEXT PRIMARY KEY,
+        alias         TEXT,
+        tmux_name     TEXT,
+        server        TEXT DEFAULT 'unknown',
+        ip            TEXT,
+        hostname      TEXT,
+        agent         TEXT,
+        project_dir   TEXT,
+        version       TEXT,
+        status        TEXT DEFAULT 'offline',
+        task          TEXT,
+        output        TEXT,
+        progress      INTEGER DEFAULT 0,
+        score         REAL,
+        registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        node_id       TEXT,
+        session_id    TEXT,
+        config_path   TEXT,
+        channels      TEXT,
+        last_seen_at  TEXT,
+        network_id    TEXT NOT NULL DEFAULT 'default',
+        UNIQUE (network_id, alias)
+      )
+    `);
+    db.exec(`
+      INSERT OR REPLACE INTO sessions_migrated (
+        resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version,
+        status, task, output, progress, score, registered_at, updated_at, node_id,
+        session_id, config_path, channels, last_seen_at, network_id
+      )
+      SELECT
+        resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version,
+        status, task, output, progress, score, registered_at, updated_at, node_id,
+        session_id, config_path, channels, last_seen_at,
+        COALESCE(NULLIF(network_id, ''), 'default')
+      FROM sessions
+      ORDER BY updated_at
+    `);
+    db.exec("DROP TABLE sessions");
+    db.exec("ALTER TABLE sessions_migrated RENAME TO sessions");
+  });
+}
+migrateSessionsNetworkAliasUnique();
+
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_network ON sessions(network_id)"); } catch {}
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_network_alias_unique ON sessions(network_id, alias)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network ON tasks(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_nodes_network ON nodes(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network ON inbox(network_id)"); } catch {}

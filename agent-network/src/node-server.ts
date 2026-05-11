@@ -235,7 +235,7 @@ async function callCommHub(toolName: string, args: Record<string, unknown>): Pro
   return { ok: false, error: "no response" };
 }
 
-mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
+mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
   const { name, arguments: args } = req.params;
 
   if (name === "commhub_reply") {

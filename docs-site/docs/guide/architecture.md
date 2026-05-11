@@ -137,7 +137,7 @@ CommHub Server 是整个系统的核心，负责消息路由、状态管理、�
 
 ### MCP 工具分组
 
-CommHub 提供 18 个 MCP Tools，分为两组：
+CommHub 提供 17 个 MCP Tools，分为两组：
 
 **Agent 端工具（4 个）** -- Agent 上报状态、拉取任务：
 
@@ -416,7 +416,7 @@ agent-orchestra/
 ├── server/            # CommHub Server (Bun + SQLite) → 跑在服务器
 │   └── src/
 │       ├── index.ts   # HTTP 路由 + MCP + SSE
-│       ├── tools.ts   # 18 个 MCP Tools
+│       ├── tools.ts   # 17 个 MCP Tools
 │       ├── auth.ts    # 认证 + 权限 + 网络管理
 │       ├── db.ts      # 数据库 + 表定义
 │       └── push.ts    # SSE 推送管理

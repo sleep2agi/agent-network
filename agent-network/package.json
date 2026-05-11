@@ -9,9 +9,6 @@
     ".": {
       "import": "./dist/src/client.js",
       "types": "./dist/client.d.ts"
-    },
-    "./server": {
-      "import": "./src/server.ts"
     }
   },
   "bin": {
@@ -21,6 +18,7 @@
     "dist"
   ],
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "build": "bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && bun build src/node-server.ts --outdir dist/src --target node --minify --external @modelcontextprotocol/sdk && tsc --emitDeclarationOnly --declaration --outDir dist && npx javascript-obfuscator dist/bin/cli.js --output dist/bin/cli.js --compact true --string-array true --string-array-encoding base64 && npx javascript-obfuscator dist/src/client.js --output dist/src/client.js --compact true --string-array true && npx javascript-obfuscator dist/src/node-server.js --output dist/src/node-server.js --compact true --string-array true",
     "prepublishOnly": "npm run build"
   },
@@ -60,6 +58,7 @@
     "@inquirer/prompts": "^7.10.1"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
     "@types/node": "^25.0.0",
     "javascript-obfuscator": "^5.4.1",
     "node-pty": "^1.1.0",

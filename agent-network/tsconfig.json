@@ -9,5 +9,5 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["src/client.ts"]
+  "include": ["src/client.ts", "src/node-server.ts", "bin/cli.ts"]
 }

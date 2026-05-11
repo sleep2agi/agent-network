@@ -65,8 +65,6 @@ dist/
 ├── bin/cli.js       # CLI entry (minified, ~580KB includes MCP SDK bundle)
 ├── src/client.js    # CommHub SDK client (minified, ~4.4KB)
 └── client.d.ts      # TypeScript type declarations
-src/
-└── server.ts        # Server programmatic entry (Bun-only, kept as .ts source)
 package.json
 README.md
 ```
@@ -80,8 +78,7 @@ README.md
   "main": "dist/src/client.js",
   "types": "dist/client.d.ts",
   "exports": {
-    ".": { "import": "./dist/src/client.js", "types": "./dist/client.d.ts" },
-    "./server": { "import": "./src/server.ts" }
+    ".": { "import": "./dist/src/client.js", "types": "./dist/client.d.ts" }
   }
 }
 ```
@@ -105,20 +102,7 @@ anet node start my-agent
 
 ### @sleep2agi/commhub-server
 
-CommHub Server can be started programmatically:
-
-```typescript
-import { startServer } from '@sleep2agi/agent-network/server';
-
-await startServer({
-  port: 9200,
-  token: 'secret',
-  db: '~/.commhub/commhub.db',
-  corsOrigins: ['http://localhost:3000'],
-});
-```
-
-Or run directly via bunx:
+CommHub Server runs from its standalone package:
 
 ```bash
 bunx @sleep2agi/commhub-server
