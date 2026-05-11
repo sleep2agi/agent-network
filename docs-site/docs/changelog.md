@@ -1,11 +1,12 @@
 # 更新日志
 
-## 2026-05-11 — **v0.8.1 补丁** Dashboard SSE-online 全局修补
+## 2026-05-11 — **v0.8.1 补丁** Dashboard SSE-online 全局修补 ✅ stable
 
 **版本同步**（npm `latest` tag，git tag `v0.8.1`）：
 - `@sleep2agi/commhub-server@0.8.0` *(无变化)*
 - `@sleep2agi/agent-network@2.1.5`
 - `@sleep2agi/agent-network-dashboard@0.4.2`
+- `@sleep2agi/agent-node@2.3.0` *(无变化)*
 
 ### 修复
 
@@ -14,12 +15,13 @@
 
 ---
 
-## 2026-05-11 — **v0.8.0 正式版** 🎉 RFC-001 阶段 2 落地
+## 2026-05-11 — **v0.8.0 正式版** 🎉 RFC-001 阶段 2 落地 ✅ stable
 
-**版本同步**（npm `latest` tag，git tag `v0.8.0`）：
+**版本同步**（git tag `v0.8.0`）：
 - `@sleep2agi/commhub-server@0.8.0`
 - `@sleep2agi/agent-network@2.1.4`
 - `@sleep2agi/agent-network-dashboard@0.4.1`
+- `@sleep2agi/agent-node@2.3.0` *(无变化)*
 
 ### 鉴权变化
 
@@ -280,19 +282,20 @@ sessions、inbox、tasks、nodes、completions、task_events、users、networks�
 
 ## 未来规划
 
-### V3.14 -- 权限增强
-- MCP 写操作检查网络角色
+### v0.9 -- 安全硬化
+- 密码哈希升级到 Argon2id（当前 SHA-256）
+- `utok_` / `ntok_` TTL + revoke-all
+- 安装脚本 checksum 校验
+- Dashboard 完整 0-token 模型收尾
+
+### v1.0 -- 清理 + 公开网络
+- 完全移除 `COMMHUB_AUTH_TOKEN` 兼容路径
 - Token scope (full/agent/readonly) 完整实现
-- Dashboard 按角色控制按钮可见性
+- 公开 / 邀请混合网络（member 申请 + owner 审批流）
+- Dashboard 按角色精细化按钮可见性
 
-### V3.15 -- 公开网络
-- 网络 visibility 设置
-- 公开网络自动 viewer 加入
-- member 申请 + owner 审批流
-
-### V4.0 -- 企业功能
-- bcrypt 密码哈希
-- 可选 PostgreSQL 后端（已支持）
+### 后续探索
+- 可选 PostgreSQL 后端持续完善（adapter 已支持）
 - SSO 集成
 - Webhook 回调
-- 任务调度（定时任务）
+- 任务调度（cron）

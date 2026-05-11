@@ -92,7 +92,7 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 **解决**：
 
 ```bash
-# 检查当前 Token
+# 检查当前 Token / 用户身份（v0.8 推荐入口）
 anet whoami
 
 # 如果 Token 过期，重新登录
@@ -101,8 +101,8 @@ anet login
 # 检查配置文件中的 Token
 cat ~/.anet/config.json
 
-# 如果使用全局 Token，确保环境变量正确
-echo $COMMHUB_AUTH_TOKEN
+# （旧路径，已不推荐）COMMHUB_AUTH_TOKEN 自 v0.8 起软废弃；v1.0 移除。
+# 如果你只是想看身份，请用 anet whoami；如果环境里残留了这个变量请清掉，避免触发 deprecation warning。
 ```
 
 ---
@@ -150,7 +150,8 @@ anet license
 # 激活授权码
 anet activate anet-XXXX-XXXX-XXXX-XXXX
 
-# 或在开发模式下不设 COMMHUB_AUTH_TOKEN（跳过授权检查）
+# 或在开发模式下显式 `anet hub start --dev-open`（跳过授权检查，仅离线 tutorial 用）
+# 注：v0.8 起 COMMHUB_AUTH_TOKEN 已不再控制授权路径，仅作为兼容兜底打 deprecation warning
 ```
 
 ---

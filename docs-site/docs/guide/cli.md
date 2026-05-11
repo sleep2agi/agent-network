@@ -121,13 +121,12 @@ anet hub start [options]
 
 **执行这条命令后，系统自动完成以下操作：**
 
-1. 启动 CommHub Server（v0.8 起不需要 `COMMHUB_AUTH_TOKEN`）
-2. 启动 CommHub Server（默认绑定 `127.0.0.1:9200`，仅本机可访问）
-3. 创建 SQLite 数据库（`~/.commhub/commhub.db`，含 13 张表）
-4. 首次运行自动 bootstrap admin 账户，默认凭证 **`admin / anethub`**（快速上手），并把 admin `utok_` 写到 `~/.anet/server/admin-utok.json`（chmod 600）
-5. 写入本机 Hub 地址到 `~/.anet/config.json`
-6. 如已有有效 `utok_` 会复用登录态；否则用默认凭证 `anet login --username admin --password anethub`
-7. **公网部署立刻 `anet passwd` 改密**
+1. 启动 CommHub Server（默认绑定 `127.0.0.1:9200`，仅本机可访问；v0.8 起不再需要 `COMMHUB_AUTH_TOKEN`）
+2. 创建 SQLite 数据库（`~/.commhub/commhub.db`，含 13 张表）
+3. 首次运行自动 bootstrap admin 账户，默认凭证 **`admin / anethub`**（快速上手），并把 admin `utok_` 写到 `~/.anet/server/admin-utok.json`（chmod 600）
+4. 写入本机 Hub 地址到 `~/.anet/config.json`
+5. 如已有有效 `utok_` 会复用登录态；否则用默认凭证 `anet login --username admin --password anethub`
+6. **公网部署立刻 `anet passwd` 改密**
 
 ::: info 你应该看到
 ```
@@ -155,20 +154,12 @@ anet hub start --username vincent --password 'mypass2026!'
 注意：自定义密码必须 ≥ 8 位且不在 top-1000 弱密码字典里。默认凭证（首次启动）不受此强度限制 —— 但**必须**用 `anet passwd` 立刻改成强密码。
 :::
 
-::: tip 第二次启动
+::: tip 第二次启动（idempotent）
 admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次 `anet hub start` 会显示：
 ```
 ✅ Admin already exists (admin-utok.json found, user=admin)
 ```
-不会重复创建。
-:::
-
-::: tip 第二次启动
-admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次 `anet hub start` 会显示：
-```
-✅ Admin already exists (admin-utok.json found, user=admin)
-```
-不会重复创建。
+不会重复创建，也不会再 prompt。
 :::
 
 | 参数 | 默认值 | 说明 |
@@ -491,8 +482,8 @@ anet init project
 |------|------|--------|
 | `COMMHUB_URL` | CommHub Server 地址 | 最高 |
 | `COMMHUB_ALIAS` | Agent 别名 | 最高 |
-| `COMMHUB_AUTH_TOKEN` | 认证 Token | 最高 |
-| `COMMHUB_TOKEN` | 认证 Token（别名） | 最高 |
+| `COMMHUB_AUTH_TOKEN` | 认证 Token（v0.8 软废弃，v1.0 移除） | 最高 |
+| `COMMHUB_TOKEN` | 认证 Token（别名；同上 v0.8 软废弃） | 最高 |
 | `ANTHROPIC_BASE_URL` | 模型 API 地址（MiniMax 等） | - |
 | `ANTHROPIC_AUTH_TOKEN` | 模型 API Key | - |
 | `ANTHROPIC_API_KEY` | 模型 API Key（别名） | - |

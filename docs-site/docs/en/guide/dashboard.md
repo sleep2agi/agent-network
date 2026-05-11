@@ -6,7 +6,7 @@ Dashboard is Agent Network's web management interface, providing real-time monit
 
 | Start Mode | Tech Stack | Default URL | Notes |
 |------|--------|------|------|
-| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI starts `@sleep2agi/agent-network-dashboard@0.3.0` via npx |
+| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI starts `@sleep2agi/agent-network-dashboard@0.4.2` via npx (pinned in v0.8.1); thin cookie-proxy mode (no service token) |
 | Standalone deploy | Next.js 16 | Custom | Configure it with the CommHub URL |
 
 ::: tip
@@ -232,7 +232,7 @@ The standalone Dashboard requires the following environment variables:
 | Variable | Description |
 |------|------|
 | `COMMHUB_URL` | CommHub Server address |
-| `COMMHUB_AUTH_TOKEN` | Legacy global auth token, if enabled |
+| `COMMHUB_AUTH_TOKEN` | Legacy global auth token; soft-deprecated in v0.8, removed in v1.0. v0.4.2 Dashboard runs as a thin cookie proxy and no longer needs it. |
 | `COOKIE_INSECURE` | Set to 1 for dev mode (HTTP) |
 
 ## Real-Time Update Mechanism

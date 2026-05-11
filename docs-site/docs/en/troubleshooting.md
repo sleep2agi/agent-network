@@ -92,7 +92,7 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 **Solution**:
 
 ```bash
-# Check current token
+# Check current token / identity (v0.8 recommended entrypoint)
 anet whoami
 
 # If token expired, log in again
@@ -101,8 +101,9 @@ anet login
 # Check token in config file
 cat ~/.anet/config.json
 
-# If using global token, verify the environment variable
-echo $COMMHUB_AUTH_TOKEN
+# (Legacy path, not recommended) `COMMHUB_AUTH_TOKEN` is soft-deprecated since v0.8;
+# v1.0 removes it. For identity checks use `anet whoami`. If your env still has this
+# variable set, unset it to avoid the deprecation warning on every request.
 ```
 
 ---
@@ -150,7 +151,9 @@ anet license
 # Activate a license key
 anet activate anet-XXXX-XXXX-XXXX-XXXX
 
-# Or run in dev mode without COMMHUB_AUTH_TOKEN (skips licensing checks)
+# Or run in dev mode with `anet hub start --dev-open` (skips auth, offline tutorial only)
+# Note: since v0.8, COMMHUB_AUTH_TOKEN no longer controls the auth path — it only
+# fires a deprecation warning if it is still set.
 ```
 
 ---

@@ -351,7 +351,7 @@ anet CLI 是 Agent Network 的管理工具，提供 39 个命令。
 
 ```mermaid
 flowchart TD
-    A["环境变量\nCOMMHUB_URL / COMMHUB_ALIAS / COMMHUB_AUTH_TOKEN"]
+    A["环境变量\nCOMMHUB_URL / COMMHUB_ALIAS（COMMHUB_AUTH_TOKEN v0.8 软废弃）"]
     B["命令行参数\n--hub / --alias / --token"]
     C["项目配置\n{cwd}/.anet/config.json"]
     D["全局配置\n~/.anet/config.json"]

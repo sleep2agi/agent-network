@@ -1,7 +1,7 @@
 # 角色 / Roles & 权限
 
 ::: tip 一句话
-Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 utok_ 里带的角色决定你能调哪些 API**。RFC-001 之后没有"超级 master 钥匙"，全部基于角色。
+Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 utok_ 里带的角色决定你能调哪些 API**。RFC-001 已于 v0.8 落地之后，没有"超级 master 钥匙"，全部基于角色。
 :::
 
 ## 4 个角色对照
@@ -214,9 +214,9 @@ A：对，连派 task 都不行。如果想"能看 + 偶尔派"，给 member。
 
 ## 与 RFC-001 的关系
 
-[RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) 提议 v0.8.0 删 `COMMHUB_AUTH_TOKEN`，**hub 鉴权完全基于本文档的 4 个 role**。删完之后：
-- 没有"master 钥匙" bypass role 检查
-- 所有 admin 操作 = admin role utok_ + role check
-- 所有 hub ↔ dashboard 内部通信 = admin user 的 utok_
+[RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) 已于 **v0.8.0 落地**：`COMMHUB_AUTH_TOKEN` 进入软废弃（v1.0 完全移除），**hub 鉴权完全基于本文档的 4 个 role**：
+- ✅ 没有 "master 钥匙" bypass role 检查
+- ✅ 所有 admin 操作 = admin role `utok_` + role check
+- ✅ 所有 hub ↔ dashboard 内部通信 = admin user 的 `utok_`（Dashboard 0.4.2 已切到 thin cookie-proxy）
 
-这是为啥要把 role 体系写清楚 —— 它是**唯一**的鉴权基础。
+这就是为啥要把 role 体系写清楚 —— 它是**唯一**的鉴权基础。

@@ -267,7 +267,7 @@ npm view @sleep2agi/agent-network versions
 ```
 
 ::: tip 正式版本
-默认 `npm install -g @sleep2agi/agent-network` 即可拉取最新正式版（v2.1.0）。如果你仍想跟踪 preview，可显式 `@preview` 指定。
+默认 `npm install -g @sleep2agi/agent-network` 即可拉取最新正式版（当前 latest：CLI v2.1.5，对应 server v0.8.0 / dashboard v0.4.2 / agent-node v2.3.0，发布在 git tag `v0.8.1` 同步）。如果你仍想跟踪 preview，可显式 `@preview` 指定。
 :::
 
 ## 系统要求

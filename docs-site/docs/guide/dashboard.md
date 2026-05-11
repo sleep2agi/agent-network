@@ -6,7 +6,7 @@ Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务�
 
 | 启动方式 | 技术栈 | 默认地址 | 说明 |
 |------|--------|------|------|
-| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI 通过 `npx @sleep2agi/agent-network-dashboard@0.3.0` 启动 |
+| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI 通过 `npx @sleep2agi/agent-network-dashboard@0.4.2`（v0.8.1 起 pin 该版本）启动，thin cookie-proxy 模式（不再持 service token） |
 | 独立部署 | Next.js 16 | 自定义 | 需要自己配置 CommHub 地址 |
 
 ::: tip 提示
@@ -232,7 +232,7 @@ vercel deploy --prebuilt --prod
 | 变量 | 说明 |
 |------|------|
 | `COMMHUB_URL` | CommHub Server 地址 |
-| `COMMHUB_AUTH_TOKEN` | 旧全局认证 Token（如启用） |
+| `COMMHUB_AUTH_TOKEN` | 旧全局认证 Token；v0.8 起软废弃，v1.0 移除。v0.4.2 Dashboard 已是 thin cookie-proxy，不再需要 |
 | `COOKIE_INSECURE` | 开发模式下设为 1（HTTP） |
 
 ## 实时更新机制

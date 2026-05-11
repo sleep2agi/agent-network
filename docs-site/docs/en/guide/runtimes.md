@@ -119,7 +119,7 @@ This runtime **requires no extra binary** — `@anthropic-ai/claude-agent-sdk` i
 **1. Install anet** (if you haven't):
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.1.2
+npm install -g @sleep2agi/agent-network@2.1.5
 ```
 
 **2. Get an API key** (pick one provider):
@@ -136,7 +136,7 @@ Full provider endpoint table: [Multi-model setup](/en/guide/multi-model).
 
 ```bash
 anet --version
-# Expected: 2.1.2
+# Expected: 2.1.5
 
 # Start a node and check the logs
 anet node start planner

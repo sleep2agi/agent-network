@@ -1,7 +1,7 @@
 # Roles & Permissions
 
 ::: tip One line
-Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role embedded in your `utok_` decides which APIs you can call.** After RFC-001, there is no master-key bypass — everything is role-based.
+Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role embedded in your `utok_` decides which APIs you can call.** After RFC-001 (landed in v0.8), there is no master-key bypass — everything is role-based.
 :::
 
 ## The 4 roles at a glance
@@ -159,10 +159,10 @@ A: Correct. If you want "read + occasional dispatch", grant `member`.
 
 ## Relationship to RFC-001
 
-[RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) proposes removing `COMMHUB_AUTH_TOKEN` in v0.8.0, leaving hub authentication entirely based on these 4 roles:
+[RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) **landed in v0.8.0**: `COMMHUB_AUTH_TOKEN` is now soft-deprecated (full removal in v1.0). Hub authentication is entirely based on these 4 roles:
 
-- No master-key bypass for role checks
-- All admin ops = admin-role `utok_` + role check
-- All hub ↔ dashboard internal calls = admin user's `utok_`
+- ✅ No master-key bypass for role checks
+- ✅ All admin ops = admin-role `utok_` + role check
+- ✅ All hub ↔ dashboard internal calls = admin user's `utok_` (Dashboard 0.4.2 is a thin cookie-proxy)
 
 The role system is the only auth basis going forward.

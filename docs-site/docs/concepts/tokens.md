@@ -176,7 +176,7 @@ flowchart TD
 ### 安全实践
 
 ```bash
-# 1. 配置文件 chmod 600（CLI v0.7+ 自动做，v0.8 bootstrap 也是 600）
+# 1. 配置文件 chmod 600（CLI 自动做，v0.8 bootstrap 也是 600）
 chmod 600 ~/.anet/config.json ~/.anet/server/admin-utok.json
 
 # 2. .anet/ 不要提交 git
@@ -227,7 +227,7 @@ A：**不要**。另一台服务器加 agent 只要：
 A：`utok_` 是**你**的身份证，可跨 network。`ntok_` 是**某个 agent**在**某个 network** 的身份证，被 hub 锁死，跨不出去。
 
 **Q：v0.5.x 没设 COMMHUB_AUTH_TOKEN 会怎样？**
-A：v0.5 默认 open mode，匿名请求放行（R3 漏洞）。v0.7+ 强制要求设。**v0.8+ 已完全不需要** —— hub 起来自动 bootstrap admin 用户，凭 `utok_` 鉴权；`COMMHUB_AUTH_TOKEN` 仅作为兼容路径打 deprecation warning，v1.0 移除。
+A：v0.5 默认 open mode，匿名请求放行（R3 漏洞，**已于 v0.7 / v0.8 修掉**）。**v0.8+ 已完全不需要 `COMMHUB_AUTH_TOKEN`** —— hub 起来自动 bootstrap admin 用户，凭 `utok_` 鉴权；旧 master token 仅作为兼容路径打 deprecation warning，v1.0 移除。
 
 **Q：升级 hub 到 v0.8+ 后，已有 agent 的 ntok_ 还能用吗？**
 A：能用。`api_tokens` schema 不变。`COMMHUB_AUTH_TOKEN` env 即使设了也只会触发 deprecation warning，不影响 hub 启动 —— v0.8 hub 不再依赖 master token，直接 `anet hub start` 就能起。

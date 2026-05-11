@@ -155,7 +155,7 @@ anet node start remote-bot
 
 ## 已验证 vs 未验证
 
-::: info 已验证（当前 preview 线继承 v2 E2E 覆盖）
+::: info 已验证（当前 v0.8.1 stable，继承 v2 E2E 覆盖 + v0.8 新增回归）
 - `anet hub start` + 默认账号自动创建
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
@@ -169,7 +169,7 @@ anet node start remote-bot
 - `anet quickstart` —— 已从文档中移除
 - `codex-sdk` runtime 的端到端流程
 - `claude-code-cli` runtime 的端到端流程
-- `anet license` / `anet activate` —— 当前是占位命令，给未来付费版预留
+- `anet license` / `anet activate` —— experimental 占位命令；项目方向是 Apache-2.0 开源 + 卖课 + 卖服务，**不再做付费 license**，所以这两个命令不影响主线功能
 - `anet network create` 与跨用户网络共享 —— V3 多网络代码已合并但未做 E2E 回归
 - 云托管的 `agent-net.vansin.me` 演示站点（计划中，当前只支持本地 / 局域网）
 :::

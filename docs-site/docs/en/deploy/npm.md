@@ -266,7 +266,7 @@ npm view @sleep2agi/agent-network versions
 ```
 
 ::: tip Stable Release
-`npm install -g @sleep2agi/agent-network` pulls the latest stable release (v2.1.0). If you still want to track the preview channel, add `@preview` explicitly.
+`npm install -g @sleep2agi/agent-network` pulls the latest stable release (currently CLI v2.1.5, paired with server v0.8.0 / dashboard v0.4.2 / agent-node v2.3.0; synced to git tag `v0.8.1`). If you still want to track the preview channel, add `@preview` explicitly.
 :::
 
 ## System Requirements

@@ -24,10 +24,15 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 
 ### 3. Is it free?
 
-- **14-day free trial**: Full-featured, no limits
-- **After trial expires**: Read-only mode (queries only, no task dispatch)
-- **Activate a license**: `anet activate <license-key>` to restore full functionality
-- **Dev mode**: Without `COMMHUB_AUTH_TOKEN` set, licensing is not checked
+**Yes — Apache-2.0 open source, fully self-hosted, no official SaaS, no forced license keys.**
+
+- Public repo, modifiable source
+- Business model = courses + consulting, **not license sales**
+- The `anet license` / `anet activate` subcommands are v3-era placeholder commands kept around for "some future paid plugin." They do not gate any v0.8 functionality.
+
+::: warning experimental
+The "14-day free trial / license activation" flow that appears in older v2.x docs no longer applies. As of v0.8 the hub does not check any license. `anet activate` still runs and writes a local license file, but no functionality is unlocked by it.
+:::
 
 ### 4. Which AI models are supported?
 

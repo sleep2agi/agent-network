@@ -137,15 +137,15 @@ A: Since v0.8, the hub bootstraps an admin `utok_` to `~/.anet/server/admin-utok
 A: Users log into Dashboard with username/password. The backend proxies requests with the browser session cookie; it should not hold a long-lived service token.
 
 **Q: Do tokens expire?**
-A: Not today. TTL + revoke-all planned for v0.7.0+.
+A: Not today. TTL + revoke-all is on the v0.9 roadmap. `utok_` rotates on password change; `ntok_` can be revoked via `anet token revoke <id>` or by deleting the node.
 
 ---
 
 ## Basic security
 
 ```bash
-# chmod 600 (CLI v0.7.0+ does this automatically)
-chmod 600 ~/.anet/config.json
+# chmod 600 (CLI does this automatically; v0.8 bootstrap also writes admin-utok.json at 600)
+chmod 600 ~/.anet/config.json ~/.anet/server/admin-utok.json
 
 # Don't commit .anet/
 echo ".anet/" >> .gitignore

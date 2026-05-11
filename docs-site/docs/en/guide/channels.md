@@ -125,7 +125,7 @@ Earlier versions of the docs included step-by-step tutorials for WeChat (via the
 
 ### Roadmap
 
-Full `anet channel add wechat|feishu` is targeted for v0.7 (~ July 2026). If you need it urgently, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) to discuss sponsoring the work.
+Full `anet channel add wechat|feishu` is on the v0.9 / v1.0 roadmap (not yet scheduled). If you need it urgently, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) to discuss sponsoring the work.
 :::
 
 ## Multi-Channel Integration

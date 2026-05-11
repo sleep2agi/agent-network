@@ -1,8 +1,63 @@
 # Changelog
 
+## 2026-05-11 — **v0.8.1 patch** Dashboard SSE-online global fix ✅ stable
+
+**Version sync** (npm `latest` tag, git tag `v0.8.1`):
+- `@sleep2agi/commhub-server@0.8.0` *(unchanged)*
+- `@sleep2agi/agent-network@2.1.5`
+- `@sleep2agi/agent-network-dashboard@0.4.2`
+- `@sleep2agi/agent-node@2.3.0` *(unchanged)*
+
+### Fixes
+
+- Dashboard `/nodes`, `/admin`, and `/api/hub/session` all showed every agent as offline because the SSE key in server v0.7+ became `network_id:alias`. The 0.4.1 fix missed these three; 0.4.2 adds alias-fallback to all global SSE lookups.
+- CLI bumps `PINNED_DASHBOARD_VERSION` to 0.4.2 so `anet hub dashboard` pulls the patched version.
+
+---
+
+## 2026-05-11 — **v0.8.0 stable release** 🎉 RFC-001 phase 2 landed ✅ stable
+
+**Version sync** (git tag `v0.8.0`):
+- `@sleep2agi/commhub-server@0.8.0`
+- `@sleep2agi/agent-network@2.1.4`
+- `@sleep2agi/agent-network-dashboard@0.4.1`
+- `@sleep2agi/agent-node@2.3.0` *(unchanged)*
+
+### Auth changes
+
+- `COMMHUB_AUTH_TOKEN` is now soft-deprecated: v0.8 keeps only `/api/*` read-side compat and logs a warning; v1.0 removes it entirely.
+- First `anet hub start` bootstraps a default admin account (**`admin / anethub`** quick-start default) and writes a local recovery admin `utok_` to `~/.anet/server/admin-utok.json` (`chmod 600`). **Public deployments must immediately `anet passwd` to a strong password.**
+- Subsequent `anet hub start` is idempotent: if `admin-utok.json` exists it skips bootstrap and no longer prompts.
+- Dashboard moved to browser-cookie passthrough (thin proxy mode — the full 0-token model lands later in v0.8.x).
+- tmux and admin endpoints now require an admin `utok_`.
+
+### Password management
+
+- `anet passwd` prompts for old / new / confirm by default; `--old` / `--new` still supported.
+- Successful change rotates the current device's `utok_`; other devices lose their `utok_` automatically. Agent `ntok_` are unaffected.
+- New: `anet hub admin reset-user --username <u>` — hub-host-only recovery for non-admin users, emits a `password_reset_by_admin` audit event.
+- User-chosen passwords require ≥ 8 chars + are checked against the top-1000 weak-password dictionary. The first-run bootstrap admin password is exempt (≥ 4 is accepted) since it must be rotated immediately anyway.
+
+### Doctor enhancements
+
+- `anet doctor --fix` now **actively probes every node's `ntok_`** against the hub. On 401/403 it auto-reissues a fresh `ntok_` from the current `utok_` and **patches the file in place** — `session_id` / `channels` / `runtime` / `role` are all preserved. This covers the "hub DB wiped / token revoked" failure mode.
+
+### CLI / UX
+
+- `anet hub start` is silent auto-generate by default and no longer interrupts startup with prompts.
+- `anet login` prints ✅ and a next-step hint; double-colon prompt bug fixed.
+- CLI error output switched from the flat `[anet]` prefix to ✅ / ❌ visual markers.
+
+### Dashboard 0.4.1
+
+- Fixed Command Mesh's `sse:undefined`: SSE key in server v0.7+ became `network_id:alias`; dashboard now queries with the double-layer key, with alias-only fallback for older hubs.
+- Light / Mint theme solid-button polish (regressions since 0.3.4).
+
+---
+
 ## 2026-05-10 — **v2.1 stable release**
 
-**Version sync** (npm `latest` tag):
+**Version sync** (git tag `v2.1.0`):
 - `@sleep2agi/agent-network@2.1.0`
 - `@sleep2agi/commhub-server@0.6.0`
 - `@sleep2agi/agent-node@2.3.0`
@@ -218,19 +273,20 @@ sessions, inbox, tasks, nodes, completions, task_events, users, networks, api_to
 
 ## Roadmap
 
-### V3.14 -- Permission Enhancements
-- MCP write operations check network roles
-- Token scope (full/agent/readonly) full implementation
-- Dashboard button visibility based on roles
+### v0.9 — Security hardening
+- Argon2id password hashing (currently SHA-256)
+- `utok_` / `ntok_` TTL + revoke-all
+- Install-script checksum verification
+- Dashboard full 0-token model finishing touches
 
-### V3.15 -- Public Networks
-- Network visibility settings
-- Auto-join public networks as viewer
-- Member application + owner approval flow
+### v1.0 — Cleanup + public networks
+- Remove `COMMHUB_AUTH_TOKEN` compat path entirely
+- Token scope (full / agent / readonly) full implementation
+- Public / invite-hybrid networks (member application + owner approval flow)
+- Per-role button visibility in Dashboard
 
-### V4.0 -- Enterprise Features
-- bcrypt password hashing
-- Optional PostgreSQL backend (already supported)
+### Later
+- Continued PostgreSQL adapter improvements (adapter is in)
 - SSO integration
 - Webhook callbacks
-- Task scheduling (cron tasks)
+- Cron-style task scheduling

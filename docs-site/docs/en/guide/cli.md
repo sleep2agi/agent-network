@@ -468,8 +468,8 @@ Common commands read these options or their saved config equivalents:
 |------|------|--------|
 | `COMMHUB_URL` | CommHub Server address | Highest |
 | `COMMHUB_ALIAS` | Agent alias | Highest |
-| `COMMHUB_AUTH_TOKEN` | Auth token | Highest |
-| `COMMHUB_TOKEN` | Auth token (alias) | Highest |
+| `COMMHUB_AUTH_TOKEN` | Auth token (v0.8 soft-deprecated, removed in v1.0) | Highest |
+| `COMMHUB_TOKEN` | Auth token (alias; same v0.8 soft-deprecation as `COMMHUB_AUTH_TOKEN`) | Highest |
 | `ANTHROPIC_BASE_URL` | Model API URL (MiniMax, etc.) | - |
 | `ANTHROPIC_AUTH_TOKEN` | Model API key | - |
 | `ANTHROPIC_API_KEY` | Model API key (alias) | - |

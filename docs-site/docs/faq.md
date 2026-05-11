@@ -24,10 +24,15 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 ### 3. 免费吗？
 
-- **14 天免费试用**：全功能，无限制
-- **试用到期后**：只读模式（可查询，不可发任务）
-- **激活授权**：`anet activate <license-key>` 恢复全功能
-- **开发模式**：不设 `COMMHUB_AUTH_TOKEN` 时不检查授权
+**完全免费、Apache-2.0 开源**。整个项目是 self-hosted，没有官方 SaaS 托管，也不会强制激活码。
+
+- 仓库公开、源码可改
+- 商业模式 = 卖课 + 卖服务咨询，**不卖 license**
+- 任何 `anet license` / `anet activate` 子命令都是 v3 时期遗留的占位实验性命令，预留给"未来某天可能出现的付费插件"，**不影响主线功能**
+
+::: warning experimental
+v2.x 历史文档里出现过的 "14 天免费试用 / 激活授权" 流程已不再适用 —— v0.8 起 hub 不检查 license。`anet activate` 仍能跑，但只是写一个本地 license 文件，不会因此 unlock 任何功能。
+:::
 
 ### 4. 支持哪些 AI 模型？
 

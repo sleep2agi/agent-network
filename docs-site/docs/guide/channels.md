@@ -125,7 +125,7 @@ services:
 
 ### Roadmap
 
-完整 `anet channel add wechat|feishu` 在 v0.7 计划（约 2026 年 7 月）。如果你急用，开 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 谈赞助优先级。
+完整 `anet channel add wechat|feishu` 排在 v0.9 / v1.0 路线图上（暂未排期）。如果你急用，开 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 谈赞助优先级。
 :::
 - 用户发送图片时包含本地文件路径
 

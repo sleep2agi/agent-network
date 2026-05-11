@@ -147,7 +147,7 @@ anet node start remote-bot
 
 ## Verified vs unverified
 
-::: info Verified (current stable line follows the v2 E2E path)
+::: info Verified (v0.8.1 stable — inherits the v2 E2E coverage plus new v0.8 regressions)
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
@@ -161,7 +161,7 @@ anet node start remote-bot
 - `anet quickstart` — removed from the docs.
 - `codex-sdk` runtime end-to-end.
 - `claude-code-cli` runtime end-to-end.
-- `anet license` / `anet activate` — placeholder commands for a future paid tier.
+- `anet license` / `anet activate` — experimental placeholder commands. The project is Apache-2.0 open source; the business model is courses + consulting, **not license sales** — these commands no longer gate any functionality.
 - `anet network create` and cross-user network sharing — V3 multi-network code is in but not E2E regressed.
 - The hosted `agent-net.vansin.me` demo — local / LAN is the supported path today.
 :::
