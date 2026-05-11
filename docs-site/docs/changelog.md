@@ -1,8 +1,22 @@
 # 更新日志
 
+## 2026-05-11 — **v0.8.1 补丁** Dashboard SSE-online 全局修补
+
+**版本同步**（npm `latest` tag，git tag `v0.8.1`）：
+- `@sleep2agi/commhub-server@0.8.0` *(无变化)*
+- `@sleep2agi/agent-network@2.1.5`
+- `@sleep2agi/agent-network-dashboard@0.4.2`
+
+### 修复
+
+- Dashboard `/nodes`、`/admin`、`/api/hub/session` 三处都因为 SSE key 在 v0.7+ 改成 `network_id:alias` 而显示所有 agent 为 offline。0.4.1 的 fix 漏了这 3 处，0.4.2 补齐全局 sse 查询的 alias-fallback 模式。
+- CLI 同步 bump `PINNED_DASHBOARD_VERSION` 到 0.4.2，否则 `anet hub dashboard` 仍拉老版。
+
+---
+
 ## 2026-05-11 — **v0.8.0 正式版** 🎉 RFC-001 阶段 2 落地
 
-**版本同步**（npm `latest` tag）：
+**版本同步**（npm `latest` tag，git tag `v0.8.0`）：
 - `@sleep2agi/commhub-server@0.8.0`
 - `@sleep2agi/agent-network@2.1.4`
 - `@sleep2agi/agent-network-dashboard@0.4.1`
