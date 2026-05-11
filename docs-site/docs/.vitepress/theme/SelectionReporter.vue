@@ -7,9 +7,11 @@ const MIN_LEN = 5
 const visible = ref(false)
 const top = ref(0)
 const left = ref(0)
-const label = ref('📝 报告此段')
+const label = ref('📝 反馈此段（修改建议）')
 const cachedSelectedText = ref('')
 const cachedHeadingAnchor = ref('')
+const cachedSourceFile = ref('')
+const cachedSourceLine = ref(0)
 
 function isEnLocale() {
   if (typeof window === 'undefined') return false
@@ -59,6 +61,31 @@ function isInsideNavOrSidebar(node: Node | null): boolean {
     el = el.parentElement
   }
   return false
+}
+
+function findSourceLine(node: Node | null): number {
+  let cur: Node | null = node
+  while (cur && cur.nodeType !== 1) cur = cur.parentNode
+  let el = cur as HTMLElement | null
+  while (el) {
+    const v = el.getAttribute && el.getAttribute('data-source-line')
+    if (v) return parseInt(v, 10) || 0
+    el = el.parentElement
+  }
+  return 0
+}
+
+function getSourceFile(): string {
+  if (typeof window === 'undefined') return ''
+  let p = window.location.pathname
+  // /concepts/tokens → /concepts/tokens
+  // /  → /index
+  // /en/ → /en/index
+  // strip trailing slash → add /index suffix (VitePress cleanUrls)
+  if (p.endsWith('/')) p = p + 'index'
+  // strip leading slash
+  if (p.startsWith('/')) p = p.slice(1)
+  return `docs-site/docs/${p}.md`
 }
 
 function findClosestHeading(node: Node | null): string {
@@ -137,7 +164,9 @@ function handleMouseUp(_e: MouseEvent) {
 
     cachedSelectedText.value = text
     cachedHeadingAnchor.value = findClosestHeading(anchorNode)
-    label.value = isEnLocale() ? '📝 Report this' : '📝 报告此段'
+    cachedSourceLine.value = findSourceLine(anchorNode)
+    cachedSourceFile.value = getSourceFile()
+    label.value = isEnLocale() ? '📝 Suggest edit' : '📝 反馈此段（修改建议）'
 
     // position the button just above the end of the selection
     const scrollX = window.scrollX || window.pageXOffset
@@ -181,9 +210,20 @@ function buildIssueUrl(): string {
     .map((l) => `> ${l}`)
     .join('\n')
 
+  // GitHub permalink to source file + line if known
+  const srcFile = cachedSourceFile.value
+  const srcLine = cachedSourceLine.value
+  const srcLink = srcFile
+    ? `https://github.com/${REPO}/blob/main/${srcFile}${srcLine ? `#L${srcLine}` : ''}`
+    : ''
+
+  const sourceBlock = isEn
+    ? `Source: [\`${srcFile}${srcLine ? `:${srcLine}` : ''}\`](${srcLink})`
+    : `源码位置: [\`${srcFile}${srcLine ? `:${srcLine}` : ''}\`](${srcLink})`
+
   const body = isEn
-    ? `Page: ${url}\n\nSelected text:\n\n${quoted}\n\n---\n_(automated report from anet.sh)_\n`
-    : `页面: ${url}\n\n选中文字:\n\n${quoted}\n\n---\n_(automated report from anet.sh)_\n`
+    ? `Page: ${url}\n${sourceBlock}\n\nSelected text:\n\n${quoted}\n\n---\n_(automated report from anet.sh — line numbers from build-time markdown-it source map; verify before fixing.)_\n`
+    : `页面: ${url}\n${sourceBlock}\n\n选中文字:\n\n${quoted}\n\n---\n_(automated report from anet.sh —— 行号来自 markdown-it build 期 source map，提交前请人工核对一下。)_\n`
 
   const params = new URLSearchParams({
     title,

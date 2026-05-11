@@ -5,6 +5,34 @@ export default withMermaid(defineConfig({
   title: 'Agent Network',
   description: '企业级 AI Agent 军团管控平台',
   cleanUrls: true,
+  markdown: {
+    // Inject data-source-line attributes on outermost block-level tokens so
+    // SelectionReporter can construct a GitHub permalink to the exact line.
+    // Restricted to safe token types — tables / nested tokens already carry
+    // VitePress-specific attrs and adding more causes Vue SFC duplicate-attr
+    // errors during build.
+    config: (md) => {
+      const SAFE_OPENS = new Set([
+        'paragraph_open',
+        'heading_open',
+        'blockquote_open',
+        'hr',
+        // skip fence/code_block — VitePress treats their first attr as the
+        // language name, which breaks if we prepend data-source-line.
+      ])
+      md.core.ruler.push('source_line_attrs', (state: any) => {
+        state.tokens.forEach((tok: any) => {
+          if (
+            tok.map &&
+            tok.level === 0 &&
+            SAFE_OPENS.has(tok.type)
+          ) {
+            tok.attrSet('data-source-line', String(tok.map[0] + 1))
+          }
+        })
+      })
+    },
+  },
   locales: {
     root: {
       label: '简体中文',
