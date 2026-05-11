@@ -183,23 +183,38 @@ seed:
       condition: service_healthy
   volumes:
     - squad_shared:/shared
+  environment:
+    # v0.8+：register 是公开端点，不再需要 master token
+    SQUAD_ADMIN_USER: ${SQUAD_ADMIN_USER:-admin}
+    SQUAD_ADMIN_PASS: ${SQUAD_ADMIN_PASS}
   entrypoint:
     - sh
     - -c
     - |
-      # 注册管理员
+      # 幂等：seed 跑过一次就有 /shared/ntok，跳过
+      if [ -s /shared/ntok ]; then
+        echo "ntok already exists, skip"
+        exit 0
+      fi
+      # 注册管理员（第一个注册的用户自动成为 admin）
       RESP=$(curl -sX POST http://server:9200/api/auth/register \
         -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN}" \
-        -d '{"username":"admin","password":"admin123"}')
+        -d "{\"username\":\"$SQUAD_ADMIN_USER\",\"password\":\"$SQUAD_ADMIN_PASS\"}")
 
       # 提取 ntok_ 并写入共享卷
       NTOK=$(echo "$RESP" | sed -n 's/.*"network_token":"\(ntok_[^"]*\)".*/\1/p')
+      if [ -z "$NTOK" ]; then echo "register failed: $RESP" >&2; exit 1; fi
       echo "$NTOK" > /shared/ntok
   restart: "no"
 ```
 
-Seed 容器是一次性的（`restart: "no"`），只在首次启动时运行。后续重启如果 `/shared/ntok` 已存在则跳过。
+::: warning v0.8+ 注意
+1. `/api/auth/register` 是**公开端点**，不需要 `Authorization` 头。早期文档展示的 `Authorization: Bearer ${COMMHUB_AUTH_TOKEN}` 是 v0.5 遗留写法 —— v0.8 起 hub 直接拒识 master token，强制走 user/network token 体系。
+2. **`SQUAD_ADMIN_PASS` 必须强密码**（≥ 8 位且不在 top-1000 弱密码字典里）。第一个 register 的用户会被认成 bootstrap admin，但 server 仍校验长度 ≥ 4。生产部署用 `openssl rand -base64 18` 生成。
+3. 不要 hardcode `password=admin123` —— 这是教程占位符，不能进 .env。
+:::
+
+Seed 容器是一次性的（`restart: "no"`），首次启动时运行；后续重启自动跳过。
 
 ### Server 健康检查
 
@@ -219,8 +234,10 @@ server:
 ### .env 文件
 
 ```bash
-# CommHub 认证
-COMMHUB_AUTH_TOKEN=squad-token
+# Squad 管理员账号（seed 容器用，第一个 register 的用户会成为 bootstrap admin）
+# 务必用强密码 — 用 `openssl rand -base64 18` 生成
+SQUAD_ADMIN_USER=admin
+SQUAD_ADMIN_PASS=<强密码，不要 commit>
 
 # Telegram Bot
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
@@ -228,10 +245,26 @@ TELEGRAM_ALLOW_USER=7612221352
 
 # MiniMax API
 MINIMAX_API_KEY=your-minimax-api-key
-
-# Dashboard 密码
-DASHBOARD_PASSWORD=squad-dash
 ```
+
+::: danger 不要 commit .env
+`.env` 含明文密码 + API key，必须 `.gitignore`。仓库里只 commit `.env.example`（占位符）：
+
+```bash
+SQUAD_ADMIN_USER=admin
+SQUAD_ADMIN_PASS=        # 留空，每个部署者自己填强密码
+TELEGRAM_BOT_TOKEN=
+MINIMAX_API_KEY=
+```
+:::
+
+::: tip 不需要 COMMHUB_AUTH_TOKEN / DASHBOARD_PASSWORD
+v0.8 起：
+- hub 启动**不需要** `COMMHUB_AUTH_TOKEN` env，admin user 自动 bootstrap
+- dashboard **不需要** 单独的 `DASHBOARD_PASSWORD`，用 hub 的 admin 账号登录浏览器即可
+
+如果你看到旧版 docker-compose 还在用这两个变量，那是 v0.7 之前的遗物，可以删。
+:::
 
 ### 容器环境变量
 

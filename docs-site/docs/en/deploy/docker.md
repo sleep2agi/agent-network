@@ -183,23 +183,38 @@ seed:
       condition: service_healthy
   volumes:
     - squad_shared:/shared
+  environment:
+    # v0.8+: register is a public endpoint, no master token required
+    SQUAD_ADMIN_USER: ${SQUAD_ADMIN_USER:-admin}
+    SQUAD_ADMIN_PASS: ${SQUAD_ADMIN_PASS}
   entrypoint:
     - sh
     - -c
     - |
-      # Register admin
+      # Idempotent: if /shared/ntok already exists, skip
+      if [ -s /shared/ntok ]; then
+        echo "ntok already exists, skip"
+        exit 0
+      fi
+      # Register admin (first registered user becomes bootstrap admin)
       RESP=$(curl -sX POST http://server:9200/api/auth/register \
         -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN}" \
-        -d '{"username":"admin","password":"admin123"}')
+        -d "{\"username\":\"$SQUAD_ADMIN_USER\",\"password\":\"$SQUAD_ADMIN_PASS\"}")
 
       # Extract ntok_ and write to shared volume
       NTOK=$(echo "$RESP" | sed -n 's/.*"network_token":"\(ntok_[^"]*\)".*/\1/p')
+      if [ -z "$NTOK" ]; then echo "register failed: $RESP" >&2; exit 1; fi
       echo "$NTOK" > /shared/ntok
   restart: "no"
 ```
 
-The seed container is one-shot (`restart: "no"`) and only runs on first startup. Subsequent restarts skip if `/shared/ntok` already exists.
+::: warning v0.8+ notes
+1. `/api/auth/register` is a **public endpoint** and does not need an `Authorization` header. Older docs that show `Authorization: Bearer ${COMMHUB_AUTH_TOKEN}` are v0.5 leftovers — v0.8 rejects master tokens entirely and forces user/network token auth.
+2. **`SQUAD_ADMIN_PASS` must be a strong password** (≥ 8 chars and not in the top-1000 weak-password dictionary). The first registered user is treated as bootstrap admin and the server still enforces length ≥ 4. For production, generate via `openssl rand -base64 18`.
+3. Don't hardcode `password=admin123` — that's a tutorial placeholder, never commit it to `.env`.
+:::
+
+The seed container is one-shot (`restart: "no"`) and only runs on first startup. Subsequent restarts skip automatically.
 
 ### Server Health Check
 
@@ -219,8 +234,10 @@ All agent containers wait for the server via `depends_on` + `condition: service_
 ### .env File
 
 ```bash
-# CommHub auth
-COMMHUB_AUTH_TOKEN=squad-token
+# Squad admin account (used by the seed container; first registered user becomes bootstrap admin)
+# Must be a strong password — generate via `openssl rand -base64 18`
+SQUAD_ADMIN_USER=admin
+SQUAD_ADMIN_PASS=<strong-password-never-commit>
 
 # Telegram Bot
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
@@ -228,10 +245,26 @@ TELEGRAM_ALLOW_USER=7612221352
 
 # MiniMax API
 MINIMAX_API_KEY=your-minimax-api-key
-
-# Dashboard password
-DASHBOARD_PASSWORD=squad-dash
 ```
+
+::: danger Don't commit `.env`
+`.env` contains plaintext passwords and API keys — always add it to `.gitignore`. Commit only `.env.example` with placeholders:
+
+```bash
+SQUAD_ADMIN_USER=admin
+SQUAD_ADMIN_PASS=        # leave empty — each deployer fills in their own strong password
+TELEGRAM_BOT_TOKEN=
+MINIMAX_API_KEY=
+```
+:::
+
+::: tip No more COMMHUB_AUTH_TOKEN / DASHBOARD_PASSWORD
+As of v0.8:
+- The hub no longer needs `COMMHUB_AUTH_TOKEN` env — the admin user is auto-bootstrapped.
+- The dashboard does not need a separate `DASHBOARD_PASSWORD` — browser users log in with the hub admin account.
+
+If you see legacy docker-compose files still using these two variables, they're pre-v0.7 artifacts and can be removed.
+:::
 
 ### Container Environment Variables
 
