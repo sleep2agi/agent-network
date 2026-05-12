@@ -64,10 +64,13 @@ See the [PR template](./.github/PULL_REQUEST_TEMPLATE.md) — the checklist live
 
 ## Releasing (maintainers)
 
-1. Update version in each affected `package.json`
+1. Update version in each affected `package.json` (use `x.y.z-preview.N` for pre-releases)
 2. Update `docs-site/docs/changelog.md`
 3. Tag: `git tag vX.Y.Z`
-4. CI publishes to npm with `--tag latest` for stable, `--tag preview` for pre-releases
+4. **`npm publish --tag preview`** first (release-preview-first policy since 2026-05-11 — avoid pushing bugs to all `@latest` users)
+5. After manual smoke test, promote: `npm dist-tag add @sleep2agi/<pkg>@x.y.z latest`
+
+Note: no CI auto-publish workflow yet (only `e2e-docker.yml` runs on PRs); all `npm publish` is manual by a maintainer.
 
 ## Where to ask
 
