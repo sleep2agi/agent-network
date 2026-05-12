@@ -6,7 +6,7 @@ const route = useRoute()
 const isEn = computed(() => route.path.startsWith('/en/'))
 const copyLabel = computed(() => (isEn.value ? 'Copy' : '复制'))
 const copiedLabel = computed(() => (isEn.value ? '✓ Copied' : '✓ 已复制'))
-const comingSoon = computed(() => (isEn.value ? '(coming soon)' : '(即将上线)'))
+const oneLinerLabel = computed(() => (isEn.value ? '(one-liner)' : '(一行装好)'))
 
 const cmd = 'npm install -g @sleep2agi/agent-network'
 const copied = ref(false)
@@ -50,7 +50,7 @@ async function copy() {
       <div class="install-cmd-line is-comment">
         <span class="install-cmd-prompt is-comment-prompt">#</span>
         <code class="install-cmd-text"
-          ><span class="ic-cmt">curl -fsSL https://anet.sh/install.sh | sh  &nbsp;</span><span class="ic-todo">{{ comingSoon }}</span></code
+          ><span class="ic-cmt">curl -fsSL https://anet.sh/install.sh | sh  &nbsp;</span><span class="ic-todo">{{ oneLinerLabel }}</span></code
         >
       </div>
       <div class="install-cmd-line">
