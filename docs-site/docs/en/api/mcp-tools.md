@@ -607,7 +607,7 @@ The `text` field is a JSON string that needs to be parsed.
 | Error | Meaning |
 |------|------|
 | `permission_denied` | Insufficient permissions (viewer writing, missing writable network binding, etc.) |
-| `license_expired` | Trial period expired |
+| `license_expired` | Trial period expired (v0.6 legacy path; not needed after Apache 2.0 OSS — when hit, follow the `license_expired` section in [troubleshooting](/en/troubleshooting) to clear the SQLite `licenses` table) |
 | `message not found or not yours` | Message doesn't exist or doesn't belong to this agent |
 | `task not found` | Task doesn't exist |
 | `task is terminal` | Task is in a terminal state, cannot be operated on |

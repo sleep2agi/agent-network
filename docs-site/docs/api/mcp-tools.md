@@ -607,7 +607,7 @@ send_task({
 | 错误 | 含义 |
 |------|------|
 | `permission_denied` | 权限不足（viewer 写、缺少可写 network 绑定等） |
-| `license_expired` | 试用期过期 |
+| `license_expired` | 试用期过期（v0.6 legacy 路径，Apache 2.0 OSS 后不再需要；命中后照 [troubleshooting `license_expired` 段](/troubleshooting) 清 SQLite `licenses` 表即可） |
 | `message not found or not yours` | 消息不存在或不属于该 Agent |
 | `task not found` | 任务不存在 |
 | `task is terminal` | 任务已是终态，不能操作 |
