@@ -8,12 +8,18 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
-## 2026-05-12 — **v0.8.2-preview** claude-code-cli session resume fix
+## 2026-05-12 — **v0.8.2 stable release** telegram channel + claude-code-cli session resume ✅ stable
 
-**Preview release**:
-- `@sleep2agi/agent-network@2.1.7-preview.2`
+**Version sync** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.1.7`
+- `@sleep2agi/commhub-server@0.8.0` *(unchanged)*
+- `@sleep2agi/agent-node@2.3.0` *(unchanged)*
 
-**Related**: issue [#13](https://github.com/sleep2agi/agent-network/issues/13) (closed) · commit [f1e3d9c](https://github.com/sleep2agi/agent-network/commit/f1e3d9c) (`fix(cli): bind claude code sessions on first start`)
+**Related**: issue [#13](https://github.com/sleep2agi/agent-network/issues/13) (closed) · issue [#14](https://github.com/sleep2agi/agent-network/issues/14) · commit [143b2a1](https://github.com/sleep2agi/agent-network/commit/143b2a1) (`release: 2.1.7 stable`) · commit [f1e3d9c](https://github.com/sleep2agi/agent-network/commit/f1e3d9c) (`fix(cli): bind claude code sessions on first start`)
+
+### New features
+
+- **`anet channel add telegram` one-shot bind** — attaches a Telegram bot token + allow-user to an existing node, auto-generates the `channels/telegram` config (see [cases/telegram-squad](/en/cases/telegram-squad) for details).
 
 ### Fixes
 

@@ -8,12 +8,18 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
-## 2026-05-12 — **v0.8.2-preview** claude-code-cli session resume 修复
+## 2026-05-12 — **v0.8.2 正式版** telegram channel + claude-code-cli session resume ✅ stable
 
-**预览版本**：
-- `@sleep2agi/agent-network@2.1.7-preview.2`
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.1.7`
+- `@sleep2agi/commhub-server@0.8.0` *(无变化)*
+- `@sleep2agi/agent-node@2.3.0` *(无变化)*
 
-**关联**：issue [#13](https://github.com/sleep2agi/agent-network/issues/13) (closed) · commit [f1e3d9c](https://github.com/sleep2agi/agent-network/commit/f1e3d9c) (`fix(cli): bind claude code sessions on first start`)
+**关联**：issue [#13](https://github.com/sleep2agi/agent-network/issues/13) (closed) · issue [#14](https://github.com/sleep2agi/agent-network/issues/14) · commit [143b2a1](https://github.com/sleep2agi/agent-network/commit/143b2a1) (`release: 2.1.7 stable`) · commit [f1e3d9c](https://github.com/sleep2agi/agent-network/commit/f1e3d9c) (`fix(cli): bind claude code sessions on first start`)
+
+### 新功能
+
+- **`anet channel add telegram` 一键接入** — 给已有 node 绑定 Telegram bot token + allow user，自动生成 channels/telegram 配置（细节见 [cases/telegram-squad](/cases/telegram-squad)）。
 
 ### 修复
 
