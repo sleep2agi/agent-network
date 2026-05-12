@@ -309,7 +309,7 @@ sessions, inbox, tasks, nodes, completions, task_events, users, networks, api_to
 - Per-role button visibility in Dashboard
 
 ### Later
-- Continued PostgreSQL adapter improvements (adapter is in)
+- ~~Continued PostgreSQL adapter improvements~~ — adapter interface kept as extension point, but **v0.8+ product direction is SQLite only** (see [docs/v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md))
 - SSO integration
 - Webhook callbacks
 - Cron-style task scheduling

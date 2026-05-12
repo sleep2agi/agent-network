@@ -318,7 +318,7 @@ sessions、inbox、tasks、nodes、completions、task_events、users、networks�
 - Dashboard 按角色精细化按钮可见性
 
 ### 后续探索
-- 可选 PostgreSQL 后端持续完善（adapter 已支持）
+- ~~可选 PostgreSQL 后端~~ — adapter 接口保留作扩展点，**v0.8+ 产品方向已转为 SQLite only**（见 [docs/v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)）
 - SSO 集成
 - Webhook 回调
 - 任务调度（cron）
