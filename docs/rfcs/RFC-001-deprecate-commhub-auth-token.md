@@ -250,8 +250,10 @@ if (authErr) return authErr;
 
 ## 恢复 / 边界情况
 
+> **实施备注**：v0.8 阶段实际把"admin 自恢复"和"普通用户重置"合并为同一条命令 `anet hub admin reset-user --username <u>`（admin 可以传自己的 username 来重置自己）。下方设计稿区分两条命令是早期讨论，落地时归并了。最新 CLI 见 [/guide/cli](https://anet.sh/guide/cli)。
+
 **admin 用户被误删，或 admin 密码丢失**：
-新增一个本机 CLI 子命令 `anet hub admin reset`，在 hub 主机上运行。它会：
+新增一个本机 CLI 子命令 `anet hub admin reset`（落地后并入 `reset-user`），在 hub 主机上运行。它会：
 
 1. 直接读 SQLite DB（`~/.commhub/commhub.db`），绕过 HTTP API。
 2. 拒绝在非主机环境运行，除非显式传 `--i-am-on-the-hub-host`、或调用进程 `cwd` 指向 hub 数据目录。
