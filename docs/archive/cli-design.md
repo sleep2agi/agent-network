@@ -133,7 +133,7 @@ anet init profile <id> --alias <别名> [options]
 anet init profile 指挥室 --alias 指挥室 \
   --channel server:commhub \
   --channel plugin:telegram@claude-plugins-official \
-  --env TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent \
+  --env TELEGRAM_STATE_DIR=~/.claude/channels/telegram-alice \
   --teammate-mode in-process
 
 anet init profile 通信龙 --alias 通信龙 --channel server:commhub
@@ -251,7 +251,7 @@ CLI 参数 > profile env > 系统环境变量 > ~/.anet/config.json > 默认值
   "hub": "http://YOUR_IP:9200",
   "channels": ["server:commhub", "plugin:telegram@claude-plugins-official"],
   "env": {
-    "TELEGRAM_STATE_DIR": "~/.claude/channels/telegram-vincent"
+    "TELEGRAM_STATE_DIR": "~/.claude/channels/telegram-alice"
   },
   "flags": {
     "dangerouslySkipPermissions": true,

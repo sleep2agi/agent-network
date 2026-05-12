@@ -55,7 +55,7 @@ anet init profile 指挥室 \
   --alias 指挥室 \
   --channel server:commhub \
   --channel plugin:telegram@claude-plugins-official \
-  --env "TELEGRAM_STATE_DIR=~/.claude/channels/telegram-vincent" \
+  --env "TELEGRAM_STATE_DIR=~/.claude/channels/telegram-alice" \
   --teammate-mode in-process
 
 # 4. 启动
