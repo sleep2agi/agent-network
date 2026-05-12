@@ -15,7 +15,7 @@ Agent Network supports running agents with different AI models within the same n
 | **Xiaomi MiMo** | `claude-agent-sdk` | General chat ([platform.xiaomimimo.com](https://platform.xiaomimimo.com)) | Low |
 
 ::: tip Any Anthropic-compatible provider works
-The table above lists verified common providers, but `claude-agent-sdk` integrates with **any** service that supports the Anthropic Messages API via `ANTHROPIC_BASE_URL`. Providers not listed (Xiaomi MiMo, other cloud vendors, etc.) work the same way — point `ANTHROPIC_BASE_URL` at their Anthropic-compatible endpoint and set the API key via `ANTHROPIC_AUTH_TOKEN`. See "Configuration" below.
+The table above lists verified common providers, but `claude-agent-sdk` integrates with **any** service that supports the Anthropic Messages API via `ANTHROPIC_BASE_URL`. Providers not listed (self-hosted vLLM, SiliconFlow, Qwen Anthropic-compatible endpoint, etc.) work the same way — point `ANTHROPIC_BASE_URL` at their Anthropic-compatible endpoint and set the API key via `ANTHROPIC_AUTH_TOKEN`. See "Configuration" below.
 :::
 
 ## Configuration
