@@ -123,8 +123,10 @@ cat ~/.anet/config.json
 
 ```bash
 # Case 1: Use ntok_ instead of utok_
-# Agent Nodes must connect using ntok_
-anet node start my-agent --token ntok_xxx
+# Agent Nodes must connect using ntok_. The token lives in
+# .anet/nodes/<name>/config.json — agent-node CLI does NOT accept a --token flag.
+# If your current node config still has utok_/atok_, doctor migrates it:
+anet doctor --fix
 
 # Case 2: Upgrade your role
 # Have the owner/admin change your role
@@ -134,26 +136,30 @@ anet network invite --role member
 
 ---
 
-### `license_expired` -- License Expired
+### `license_expired` -- License Expired (legacy behavior)
 
 ```json
 {"ok": false, "error": "license_expired", "message": "Trial expired. Activate a license: anet activate <key>"}
 ```
 
-**Cause**: 14-day trial period has ended.
+::: info anet is Apache-2.0 OSS since v0.8 — there is no real license to buy
+This gate is a V3-era leftover still firing in the `send_task` path (`server/src/tools.ts:484`). It triggers when your local SQLite has a `licenses` row with `expires_at` in the past. **v0.9+ plans to drop the whole license check.**
+:::
+
+**Cause**: Your local SQLite `licenses` table has a row with `expires_at < now()`.
 
 **Solution**:
 
 ```bash
-# Check license status
-anet license
+# Option A (recommended): just delete the expired license row
+sqlite3 ~/.commhub/commhub.db "DELETE FROM licenses WHERE expires_at < datetime('now');"
 
-# Activate a license key
-anet activate anet-XXXX-XXXX-XXXX-XXXX
+# Option B (legacy commands, no-op placeholders):
+anet license          # inspect
+anet activate <key>   # writes a new license row (experimental; the key is not validated)
 
-# Or run in dev mode with `anet hub start --dev-open` (skips auth, offline tutorial only)
-# Note: since v0.8, COMMHUB_AUTH_TOKEN no longer controls the auth path — it only
-# fires a deprecation warning if it is still set.
+# Option C (offline tutorial): start the hub with --dev-open to skip auth
+anet hub start --dev-open
 ```
 
 ---

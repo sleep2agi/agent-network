@@ -122,8 +122,10 @@ cat ~/.anet/config.json
 
 ```bash
 # 情况 1：使用 ntok_ 而非 utok_
-# Agent Node 必须使用 ntok_ 连接
-anet node start my-agent --token ntok_xxx
+# Agent Node 必须使用 ntok_，token 来自 .anet/nodes/<name>/config.json 文件
+# （agent-node CLI 不接受 --token flag；token 由 config.json 提供）
+# 如果当前 node 的 token 是 utok_/atok_，跑 doctor 自动修：
+anet doctor --fix
 
 # 情况 2：提升角色
 # 让 owner/admin 修改你的角色
@@ -133,25 +135,30 @@ anet network invite --role member
 
 ---
 
-### `license_expired` -- 授权过期
+### `license_expired` -- 授权过期（legacy 行为）
 
 ```json
 {"ok": false, "error": "license_expired", "message": "Trial expired. Activate a license: anet activate <key>"}
 ```
 
-**原因**：14 天试用期已过。
+::: info v0.8 起 anet 完全 Apache-2.0 OSS，没有真正的 license 销售
+这条 license gate 是 V3 时代的遗留代码，仍在 `send_task` 路径里跑（`server/src/tools.ts:484`），如果你的本地 SQLite 有过期 `licenses` 行就会触发。**未来 v0.9+ 计划移除整段 license 检查**。
+:::
+
+**原因**：本地 SQLite `licenses` 表里有一行 `expires_at < now()`。
 
 **解决**：
 
 ```bash
-# 检查授权状态
-anet license
+# 方案 A（推荐）：直接清掉过期 license 行
+sqlite3 ~/.commhub/commhub.db "DELETE FROM licenses WHERE expires_at < datetime('now');"
 
-# 激活授权码
-anet activate anet-XXXX-XXXX-XXXX-XXXX
+# 方案 B（legacy 命令，仅占位实现）：
+anet license       # 查看
+anet activate <key>   # 写入新 license row（experimental，不验证 key）
 
-# 或在开发模式下显式 `anet hub start --dev-open`（跳过授权检查，仅离线 tutorial 用）
-# 注：v0.8 起 COMMHUB_AUTH_TOKEN 已不再控制授权路径，仅作为兼容兜底打 deprecation warning
+# 方案 C（离线 tutorial）：起 hub 时加 --dev-open 跳过鉴权（仅本机调试用）
+anet hub start --dev-open
 ```
 
 ---
