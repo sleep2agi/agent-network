@@ -245,3 +245,40 @@ Dashboard 通过两类数据面保持更新：
 ::: tip 性能提示
 如果 Agent 数量超过 50，建议使用独立 Dashboard 并关闭实时消息流，改为手动刷新。
 :::
+
+## Preview 通道（即将进入下一个 stable）
+
+`@sleep2agi/agent-network-dashboard@preview` 上有正在打磨的下一代 UI。当前 preview pin 是 `0.4.5-preview.1`（CLI preview tag `@sleep2agi/agent-network@preview` 自动联动）。
+
+新增能力（vs stable 0.4.2）：
+
+- **Cmd / Ctrl + K 命令面板**：键盘驱动跳转、搜索、命令调用
+- **? 键盘速查 overlay**：弹出所有快捷键
+- **全局健康 banner**：红 / 琥珀 / 绿三色 + CTA + ×
+- **KPI 卡 hover popover**：working / idle / offline 分布
+- **EmptyState 7 变体**：登录后、空网络、零任务等场景独立插画
+- **Topology 浅色变体**：中心 hub 24px 脉冲（解决了 stable 浅色不可见问题）
+- **Tasks 状态 tab**：color-coded 圆点 + 移动端横滚
+- **移动端 audit 修复**：banner 让位 hamburger / UserBar 图标化
+- **Sidebar 底部 "Quick search ⌘K" chip**：移动端 launcher 入口
+- **LoadingSkeleton 重做**：镜像 Overview 布局 + brand-pulse 节奏
+- **P0 浅色 contrast 修**：`text-{color}-300/400 → -700` sweep
+
+试用：
+
+```bash
+# 升级 CLI 到 preview
+npm i -g @sleep2agi/agent-network@preview
+anet -v                                    # 应显示 2.1.x-preview.N
+anet hub dashboard                          # 自动 npx 拉 0.4.5-preview.1
+```
+
+或直接绕过 CLI：
+
+```bash
+npx -y @sleep2agi/agent-network-dashboard@preview --ip 0.0.0.0
+```
+
+::: warning preview 不保证向后兼容
+preview 通道随时迭代，不会立刻 promote 到 latest。生产环境请继续用 stable（`@sleep2agi/agent-network@latest`）。
+:::

@@ -283,3 +283,15 @@ CREATE TABLE network_invites (
   created_at  TEXT DEFAULT (datetime('now'))
 );
 ```
+
+## 下一步
+
+**实操**：
+- 想跨机器部署 Agent？看上方 [跨机器部署](#跨机器部署) 一节 —— 每台机器单独 `anet login` + `anet node create`
+- 想看实战 demo？[辩论赛](/cases/debate) 每次跑都创建独立 network（`debate-<suffix>`）做隔离
+- 想了解邀请别人加入？[账号体系](/guide/account-system) 讲 `anet network invite create / join`
+
+**深入**：
+- 双 token 边界（utok_ vs ntok_）：[安全模型](/concepts/security)
+- 网络 + 账号在 SQLite 怎么存：上方 schema + [架构](/guide/architecture)
+- 多 network 同时跑：[CLI 命令](/guide/cli) 的 `anet network ls / use` 章节

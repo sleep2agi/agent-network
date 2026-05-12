@@ -283,3 +283,15 @@ CREATE TABLE network_invites (
   created_at  TEXT DEFAULT (datetime('now'))
 );
 ```
+
+## Next steps
+
+**Hands-on**:
+- Deploy agents across machines? See [Cross-machine deployment](#cross-machine-deployment) above -- run `anet login` + `anet node create` per machine
+- Want a real demo? [Debate](/en/cases/debate) creates an isolated network (`debate-<suffix>`) on each run for clean isolation
+- Invite others? [Account system](/en/guide/account-system) covers `anet network invite create / join`
+
+**Dig deeper**:
+- Dual token boundary (utok_ vs ntok_): [Security model](/en/concepts/security)
+- How networks + accounts persist in SQLite: schema above + [Architecture](/en/guide/architecture)
+- Switching between multiple networks: see `anet network ls / use` in [CLI commands](/en/guide/cli)

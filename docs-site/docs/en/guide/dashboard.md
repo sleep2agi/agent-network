@@ -245,3 +245,40 @@ The Dashboard keeps data current through two data surfaces:
 ::: tip Performance Note
 If you have more than 50 agents, consider using the standalone Dashboard and disabling real-time message streaming in favor of manual refresh.
 :::
+
+## Preview channel (next stable WIP)
+
+`@sleep2agi/agent-network-dashboard@preview` carries the next-gen UI under active polish. Current preview pin is `0.4.5-preview.1` (the CLI preview tag `@sleep2agi/agent-network@preview` auto-syncs).
+
+New capabilities (vs stable 0.4.2):
+
+- **Cmd / Ctrl + K command palette**: keyboard-driven navigation, search, command invocation
+- **? keyboard shortcut overlay**: all hotkeys at a glance
+- **Global health banner**: red / amber / green tri-color + CTA + dismiss
+- **KPI card hover popover**: working / idle / offline breakdown
+- **EmptyState — 7 variants**: tailored illustrations for post-login, empty network, zero tasks, etc.
+- **Topology light variant**: 24px pulse on central hub (fixes stable's "invisible on light mode" P0)
+- **Tasks status tabs**: color-coded dots + mobile horizontal scroll
+- **Mobile audit fixes**: banner yields to hamburger / UserBar iconified
+- **Sidebar "Quick search ⌘K" chip**: mobile launcher entry
+- **LoadingSkeleton redo**: mirrors Overview layout + brand-pulse rhythm
+- **P0 light-mode contrast sweep**: `text-{color}-300/400 → -700`
+
+Try it:
+
+```bash
+# Upgrade CLI to preview
+npm i -g @sleep2agi/agent-network@preview
+anet -v                                    # should show 2.1.x-preview.N
+anet hub dashboard                          # npx auto-pulls 0.4.5-preview.1
+```
+
+Or bypass the CLI entirely:
+
+```bash
+npx -y @sleep2agi/agent-network-dashboard@preview --ip 0.0.0.0
+```
+
+::: warning Preview is not backward-compatible
+The preview channel iterates continuously and is not auto-promoted to latest. Stick with stable (`@sleep2agi/agent-network@latest`) for production.
+:::
