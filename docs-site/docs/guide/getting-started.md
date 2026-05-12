@@ -165,7 +165,7 @@ anet node start remote-bot
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
 - `anet node create / start / delete / ls`（claude-agent-sdk + MiniMax / DeepSeek / GLM / Kimi / Anthropic）
 - Dashboard Chat：markdown / Enter 发送 / 乐观回显 / 来源标签 / 错误兜底 / 历史持久
-- 多 Agent 协作（peer agents 通过 `get_all_status` + `send_task` 自治协调，wrapper 内部把回复回灌为新 task 上下文）
+- 多 Agent 协作（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调；wrapper 通过 `parent_task_id` 把子任务结果回灌到上游 task 上下文）
 - 局域网共用 Hub
 :::
 
