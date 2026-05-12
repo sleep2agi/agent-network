@@ -170,7 +170,7 @@ Once admin is bootstrapped (`~/.anet/server/admin-utok.json` exists), `anet hub 
 |------|------|
 | `PORT` | Listen port |
 | `COMMHUB_AUTH_TOKEN` | Legacy master token env; deprecated in v0.8 |
-| `DATABASE_URL` | PostgreSQL connection (code-level entry, **not E2E-verified on the current stable line; not recommended for production**; default SQLite) |
+| `DATABASE_URL` | PostgreSQL connection (v0.8+ product direction has pivoted to SQLite only — see [v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md); adapter kept only as a community extension point / no E2E coverage, **not recommended for mainline production**; default SQLite) |
 | `COMMHUB_CORS_ORIGINS` | CORS whitelist |
 
 ### anet passwd

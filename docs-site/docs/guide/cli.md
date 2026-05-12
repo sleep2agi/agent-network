@@ -176,7 +176,7 @@ admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次
 |------|------|
 | `PORT` | 监听端口 |
 | `COMMHUB_AUTH_TOKEN` | 旧 master token 兼容环境变量；v0.8 起 deprecated |
-| `DATABASE_URL` | PostgreSQL 连接（代码层入口，当前 stable 未做 E2E 验证，**不推荐生产使用**；默认 SQLite） |
+| `DATABASE_URL` | PostgreSQL 连接（v0.8+ 产品方向已转 SQLite only，详见 [v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)；adapter 仅作社区扩展点保留 / E2E 未验证，**主线不推荐生产使用**；默认 SQLite） |
 | `COMMHUB_CORS_ORIGINS` | CORS 白名单 |
 
 ### anet passwd
