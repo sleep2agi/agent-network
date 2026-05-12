@@ -62,7 +62,7 @@ curl -X POST http://localhost:9200/api/auth/register \
     "username": "vincent",
     "password": "mypassword2026",
     "email": "vincent@example.com",
-    "display_name": "Vincent"
+    "display_name": "Alice"
   }'
 ```
 
@@ -83,7 +83,7 @@ curl -X POST http://localhost:9200/api/auth/register \
   "user": {
     "user_id": "u_abc123",
     "username": "vincent",
-    "display_name": "Vincent",
+    "display_name": "Alice",
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
@@ -121,7 +121,7 @@ curl -X POST http://localhost:9200/api/auth/login \
   "user": {
     "user_id": "u_abc123",
     "username": "vincent",
-    "display_name": "Vincent",
+    "display_name": "Alice",
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
@@ -153,7 +153,7 @@ curl http://localhost:9200/api/auth/me \
   "user": {
     "user_id": "u_abc123",
     "username": "vincent",
-    "display_name": "Vincent",
+    "display_name": "Alice",
     "role": "admin"
   }
 }
@@ -172,7 +172,7 @@ Update personal info.
 curl -X PUT http://localhost:9200/api/auth/me \
   -H "Authorization: Bearer utok_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"display_name": "Vincent Chen"}'
+  -d '{"display_name": "Alice Smith"}'
 ```
 
 ---
