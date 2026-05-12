@@ -43,7 +43,7 @@
 - **自带 Web Dashboard。** Chat / Nodes / Tasks / Messages / Networks / Logs / Admin —— Next.js + 4 套主题，跑在 `localhost:3000`。
 
 > [!IMPORTANT]
-> **公测阶段。** 作者已自用两个月，第一个开源稳定版预计 **2026 年 6 月上旬** 出。现在主要是作者**自用慢慢打磨**，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
+> **当前 stable: v0.8.1**（Apache 2.0，[2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)）。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
 >
 > **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
 

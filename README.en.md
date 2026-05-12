@@ -47,7 +47,7 @@
 - **Web Dashboard included.** Chat, Nodes, Tasks, Messages, Networks, Logs, Admin — Next.js app, 4 themes, runs at `localhost:3000`.
 
 > [!IMPORTANT]
-> **Public beta.** Self-used daily for two months by the maintainer; the first stable open-source release is targeted for **early June 2026**. Right now the project is mostly being polished through the maintainer's daily use — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
+> **Current stable: v0.8.1** (Apache 2.0, [released 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
 >
 > **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
 
