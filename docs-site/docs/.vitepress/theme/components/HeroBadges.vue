@@ -1,25 +1,49 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vitepress'
+
+const route = useRoute()
+const isEn = computed(() => route.path.startsWith('/en/'))
+
+const labels = computed(() =>
+  isEn.value
+    ? { runtimes: 'Runtimes', providers: 'LLM providers' }
+    : { runtimes: '支持 Runtime', providers: '兼容 LLM' }
+)
+
 const runtimes = [
   { name: 'Claude Code CLI', logo: 'claude', id: 'claude-code-cli', mono: false },
   { name: 'Claude Agent SDK', logo: 'anthropic', id: 'claude-agent-sdk', mono: true, monoColor: '#D97757' },
   { name: 'Codex SDK', logo: 'openai', id: 'codex-sdk', mono: true, monoColor: '#10A37F' },
 ]
 
-const providers = [
-  { name: 'Claude', logo: 'claude', mono: false },
-  { name: 'Codex / GPT', logo: 'openai', mono: true, monoColor: '#10A37F' },
-  { name: 'MiniMax', logo: 'minimax', mono: false },
-  { name: 'DeepSeek', logo: 'deepseek', mono: false },
-  { name: 'GLM', logo: 'zhipu', mono: false },
-  { name: 'Kimi', logo: 'kimi', mono: false },
-  { name: '书生 Intern', logo: 'internlm', mono: false },
-]
+const providers = computed(() =>
+  isEn.value
+    ? [
+        { name: 'Claude', logo: 'claude', mono: false },
+        { name: 'Codex / GPT', logo: 'openai', mono: true, monoColor: '#10A37F' },
+        { name: 'MiniMax', logo: 'minimax', mono: false },
+        { name: 'DeepSeek', logo: 'deepseek', mono: false },
+        { name: 'GLM', logo: 'zhipu', mono: false },
+        { name: 'Kimi', logo: 'kimi', mono: false },
+        { name: 'InternLM', logo: 'internlm', mono: false },
+      ]
+    : [
+        { name: 'Claude', logo: 'claude', mono: false },
+        { name: 'Codex / GPT', logo: 'openai', mono: true, monoColor: '#10A37F' },
+        { name: 'MiniMax', logo: 'minimax', mono: false },
+        { name: 'DeepSeek', logo: 'deepseek', mono: false },
+        { name: 'GLM', logo: 'zhipu', mono: false },
+        { name: 'Kimi', logo: 'kimi', mono: false },
+        { name: '书生 Intern', logo: 'internlm', mono: false },
+      ]
+)
 </script>
 
 <template>
   <div class="hero-badges">
     <div class="hero-badges-row">
-      <span class="hero-badges-label">支持 Runtime</span>
+      <span class="hero-badges-label">{{ labels.runtimes }}</span>
       <div class="hero-badges-list">
         <span
           v-for="r in runtimes"
@@ -39,7 +63,7 @@ const providers = [
       </div>
     </div>
     <div class="hero-badges-row">
-      <span class="hero-badges-label">兼容 LLM</span>
+      <span class="hero-badges-label">{{ labels.providers }}</span>
       <div class="hero-badges-list">
         <span
           v-for="p in providers"
