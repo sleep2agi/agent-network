@@ -43,7 +43,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | **hub 全局** | | | | |
 | 看 `/api/admin/audit-log` | ❌ | ❌ | ✅ | ✅ |
 | 调 `/api/admin/wipe-db` 等危险操作 | ❌ | ❌ | ✅ | ✅ |
-| `anet hub admin reset`（重置 admin） | 仅 hub 本机命令行调用，与角色无关 | | | |
+| `anet hub admin reset-user`（重置任意用户密码） | 仅 hub 本机命令行调用，与角色无关 | | | |
 
 ---
 
@@ -148,7 +148,7 @@ network 的 4 个 role（owner/admin/member/viewer）是**绑定到某个 networ
 | 操作 | network admin | hub 全局 admin (`admin` user) |
 |---|---|---|
 | 调 `/api/admin/audit-log` | ✅ | ✅ |
-| `anet hub admin reset`（重置自己） | ❌ | ✅（仅 hub 本机调用） |
+| `anet hub admin reset-user`（重置任意用户密码） | ❌ | ✅（仅 hub 本机调用） |
 | 创建新 user | ❌ | ✅（仅 hub 全局 admin） |
 | 看 hub 所有 network | ❌（只看自己有 role 的） | ✅ |
 
