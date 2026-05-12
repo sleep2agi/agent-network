@@ -31,3 +31,11 @@ The image is refreshed weekly. **Bookmark this page**, not the QR — the URL is
 ## Sponsoring
 
 If your team relies on Agent Network in production and wants to fund development or sponsor a specific feature, open an [issue tagged `sponsor`](https://github.com/sleep2agi/agent-network/issues/new) or reach out via the WeChat group.
+
+## Next steps
+
+- [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) — bug reports / feature requests
+- [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — usage questions / design discussion
+- [Ecosystem](/en/ecosystem) — projects built with anet
+- [Changelog](/en/changelog) — release notes and migration tips
+- [One-shot install](/en/guide/one-shot-install) — first run

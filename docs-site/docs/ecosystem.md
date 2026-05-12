@@ -25,3 +25,16 @@
 - 一句话能讲清"做什么"
 
 不要求开源、不要求 license、不要求复杂技术栈。
+
+## 下一步
+
+**做项目**：
+- [一键安装与起步](/guide/one-shot-install) — 装好 anet
+- [Hello World](/cases/hello-world) — 第一个 demo
+- [Channel 插件](/guide/channels) — 接你自己的 IM / API
+
+**收录你的项目**：在 GitHub 开 issue 把项目名 / 链接 / 一句话简介贴上来，加 `ecosystem` 标签。
+
+**了解项目**：
+- [社区](/community) — 微信群 / Discussions / 赞助
+- [架构概览](/guide/architecture) — 各组件能力对比

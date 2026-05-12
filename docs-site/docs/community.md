@@ -32,3 +32,11 @@
 ## 想赞助开发？
 
 如果你或你的团队在生产环境用 Agent Network，想资助开发或赞助某个 feature，开一个 [`sponsor` 标签的 issue](https://github.com/sleep2agi/agent-network/issues/new) 或加群联系作者。
+
+## 下一步
+
+- [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) — 报 bug / 提需求
+- [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — 使用问题 / 设计讨论
+- [生态](/ecosystem) — 用 anet 做出来的项目
+- [更新日志](/changelog) — 各版本变化和迁移注意
+- [一键安装与起步](/guide/one-shot-install) — 第一次跑通

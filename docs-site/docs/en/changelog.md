@@ -290,3 +290,10 @@ sessions, inbox, tasks, nodes, completions, task_events, users, networks, api_to
 - SSO integration
 - Webhook callbacks
 - Cron-style task scheduling
+
+## Next steps
+
+- [Upgrade guide](/en/guide/upgrade) — v0.7 → v0.8 behavior changes + standard steps
+- [Architecture](/en/guide/architecture) — how each release accumulated into the current system
+- [GitHub Releases](https://github.com/sleep2agi/agent-network/releases) — per-tag release notes
+- [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) — v0.8 ~ v1.0 master-token deprecation roadmap

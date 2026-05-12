@@ -299,3 +299,10 @@ sessions、inbox、tasks、nodes、completions、task_events、users、networks�
 - SSO 集成
 - Webhook 回调
 - 任务调度（cron）
+
+## 下一步
+
+- [升级指南](/guide/upgrade) — v0.7 → v0.8 行为变化 + 标准步骤
+- [架构概览](/guide/architecture) — 各版本是怎么累积成现在这套系统的
+- [GitHub Releases](https://github.com/sleep2agi/agent-network/releases) — 每个 git tag 的 release notes
+- [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) — v0.8 ~ v1.0 master token 废弃路线图
