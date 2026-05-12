@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <strong>多 Agent，一行命令。让 Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / 书生 在你电脑上一起干活。</strong>
+  <strong>Multi-agent, one command. Let Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / Intern / OpenRouter work together on your machine.</strong>
 </p>
 
 <p align="center">

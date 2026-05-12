@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>多 Agent，一行命令。让 Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / 书生 在你电脑上一起干活。</strong>
+  <strong>多 Agent，一行命令。让 Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter 在你电脑上一起干活。</strong>
 </p>
 
 <p align="center">
@@ -148,7 +148,7 @@ CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你�
 | Runtime | 工作方式 | 适合场景 | 鉴权 |
 |---|---|---|---|
 | `claude-code-cli` | spawn 本地 `claude` CLI 子进程 | 复用 Claude Pro 订阅，享 Claude Code 全套工具 | 本地 `claude` 已登录 |
-| `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 等（通过 `ANTHROPIC_BASE_URL`） | API key |
+| `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter 等（通过 `ANTHROPIC_BASE_URL`） | API key |
 | `codex-sdk` | OpenAI `@openai/codex-sdk` | 写代码 / 跑命令 | `codex auth login` 或 `OPENAI_API_KEY` |
 
 📖 Runtime 详解 → <https://anet.sh/guide/runtimes>
