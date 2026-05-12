@@ -266,6 +266,17 @@ Key 在 `anet node create` 时输入，保存在当前项目的 `.anet/nodes/<�
 
 ## 下一步
 
-- [Token 体系详解](/concepts/tokens) -- utok_ / ntok_ / atok_ 的完整说明
-- [网络隔离](/concepts/networks) -- RBAC 权限矩阵、邀请码、数据隔离原理
-- [多模型配置](/guide/multi-model) -- 各种 AI 模型怎么配
+**深入概念**：
+- [Token 体系详解](/concepts/tokens) — utok_ / ntok_ / atok_ 的完整说明
+- [角色与权限](/concepts/roles) — owner / admin / member / viewer 四级权限
+- [网络隔离](/concepts/networks) — RBAC 权限矩阵、邀请码、数据隔离原理
+
+**实操**：
+- [一键安装与起步](/guide/one-shot-install) — 装好 anet 后第一个 agent
+- [多模型配置](/guide/multi-model) — 各种 AI 模型怎么配
+- [Dashboard](/guide/dashboard) — Web UI 看 token / 用户 / 网络
+
+**v0.8 升级 + 安全**：
+- [升级指南 — v0.7 → v0.8](/guide/upgrade#v0-7-v0-8-升级注意-最新) — 首次 hub start 自动 prompt admin
+- [安全设计](/concepts/security) — 完整鉴权和隔离模型
+- [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) — COMMHUB_AUTH_TOKEN 三阶段废弃路线图

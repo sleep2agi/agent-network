@@ -266,6 +266,17 @@ Run `anet passwd` to change it. If CLI is also logged out, ask the admin to rese
 
 ## Next Steps
 
-- [Token System Details](/en/concepts/tokens) — Full explanation of utok_ / ntok_ / atok_
-- [Network Isolation](/en/concepts/networks) — RBAC permission matrix, invite codes, data isolation
-- [Multi-Model Config](/en/guide/multi-model) — How to configure different AI models
+**Dig into concepts**:
+- [Token system details](/en/concepts/tokens) — Full explanation of utok_ / ntok_ / atok_
+- [Roles and permissions](/en/concepts/roles) — owner / admin / member / viewer
+- [Network isolation](/en/concepts/networks) — RBAC permission matrix, invite codes, data isolation
+
+**Hands-on**:
+- [One-shot install](/en/guide/one-shot-install) — first agent after install
+- [Multi-model config](/en/guide/multi-model) — configure different AI models
+- [Dashboard](/en/guide/dashboard) — Web UI for tokens / users / networks
+
+**v0.8 upgrade + security**:
+- [Upgrade — v0.7 → v0.8](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — first `hub start` auto-prompts admin
+- [Security design](/en/concepts/security) — complete auth + isolation model
+- [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) — `COMMHUB_AUTH_TOKEN` three-phase deprecation

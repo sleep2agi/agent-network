@@ -372,3 +372,23 @@ SSE 断连后自动重连，使用指数退避策略：
 ::: tip Docker 使用
 在 Docker 中运行时，环境变量是最方便的配置方式。参见 [Docker 部署](/deploy/docker)。
 :::
+
+## 下一步
+
+**起步**：
+- [一键安装与起步](/guide/one-shot-install) — anet 装好后 5 分钟跑第一个 agent
+- [Hello World](/cases/hello-world) — 跟着 6 步建第一个 agent 集群
+
+**深入配置**：
+- [Runtimes](/guide/runtimes) — 三个 runtime（claude-agent-sdk / codex-sdk / claude-code-cli）选哪个
+- [多模型配置](/guide/multi-model) — 用 DeepSeek / MiniMax / Kimi / Claude 等
+- [Channel 插件](/guide/channels) — agent 怎么接 Telegram / 微信 / 飞书
+
+**生产**：
+- [Docker 部署](/deploy/docker) — 容器化 agent
+- [生产部署](/deploy/production) — 多机部署、TLS、备份
+- [Dashboard](/guide/dashboard) — 监控 agent 状态、任务、消息流
+
+**故障排查**：
+- [故障排查](/troubleshooting) — 常见问题集合
+- `anet doctor --fix` — 自动探测 ntok_ 过期等问题

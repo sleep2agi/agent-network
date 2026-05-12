@@ -372,3 +372,23 @@ If the process crashes (no time to report), CommHub detects via heartbeat timeou
 ::: tip Docker Usage
 When running in Docker, environment variables are the most convenient configuration method. See [Docker Deployment](/en/deploy/docker).
 :::
+
+## Next steps
+
+**Get started**:
+- [One-shot install](/en/guide/one-shot-install) — first agent in 5 minutes after install
+- [Hello World](/en/cases/hello-world) — 6-step walkthrough for your first agent cluster
+
+**Configure deeper**:
+- [Runtimes](/en/guide/runtimes) — picking between claude-agent-sdk / codex-sdk / claude-code-cli
+- [Multi-model](/en/guide/multi-model) — use DeepSeek / MiniMax / Kimi / Claude
+- [Channel plugins](/en/guide/channels) — wire agents to Telegram / WeChat / Feishu
+
+**Production**:
+- [Docker deployment](/en/deploy/docker) — containerized agents
+- [Production deployment](/en/deploy/production) — multi-machine, TLS, backups
+- [Dashboard](/en/guide/dashboard) — monitor agent status, tasks, message flow
+
+**Troubleshooting**:
+- [Troubleshooting](/en/troubleshooting) — common issues
+- `anet doctor --fix` — auto-detects expired ntok_ and other issues
