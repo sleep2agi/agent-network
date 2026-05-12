@@ -288,7 +288,7 @@ The code has a `DATABASE_URL=postgres://...` entry point, but PostgreSQL **has n
 
 For now, please stick with the default **SQLite** (`~/.commhub/commhub.db`). SQLite handles 100+ agents on a single machine just fine for the supported deployment shape.
 
-If you have a real HA / multi-writer use case for Postgres, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) and we'll prioritize it for a later release.
+Note: **v0.8+ product direction is SQLite only** (see [docs/v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)) — Postgres is no longer on the maintained roadmap. The adapter interface is preserved as a community extension point — if you have a real HA / multi-writer use case, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) to coordinate a self-hosted approach.
 :::
 
 ## Performance Issues

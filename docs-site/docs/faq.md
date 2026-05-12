@@ -288,7 +288,7 @@ vercel deploy --prebuilt --prod
 
 当前请用默认的 **SQLite**（在 `~/.commhub/commhub.db`）。SQLite 已经能跑到 100+ Agent 规模，单机部署足够。
 
-如果你确实有 HA / 多写副本场景需要 Postgres，到 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 反馈，我们会按需求优先级排到后续版本。
+注：**v0.8+ 产品方向已转 SQLite only**（见 [docs/v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)），不在 maintained roadmap 上。adapter 接口保留作社区扩展点 —— HA / 多写副本场景需要 Postgres 的话，欢迎到 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 讨论自部署方案。
 :::
 
 ## 性能问题
