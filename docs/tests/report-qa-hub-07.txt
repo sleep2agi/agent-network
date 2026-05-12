@@ -1,0 +1,49 @@
+Test: qa-hub-07-sse-reconnect (matrix HUB-07)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+
+Result: PASS
+Runtime: ~12s warm, ~30s cold
+
+Coverage (11 steps hard-asserted):
+- [0] hub boot
+- [1] admin login (retry-aware against bootstrap race)
+- [2] create network + mint ntok for alias 'subscriber-A'
+- [3] subscriber-A report_status(idle) via MCP — session row created
+- [4] SSE #1 connect — sees {"type":"connected"} line
+- [5] admin sends task-1 (online) — SSE #1 receives {"type":"new_task"} push
+- [6] kill SSE #1 (simulate network blip)
+- [7] admin sends task-2 (subscriber-A OFFLINE) — response ok, inbox row persists
+- [8] SSE #2 reconnect (same alias, same ntok)
+- [9] PIN: SSE #2 did NOT see task-2 new_task push (fire-and-forget contract)
+- [10] subscriber-A calls get_inbox MCP → response.messages includes offline-task-2
+- [11] admin sends task-3 (online again) — SSE #2 receives new_task push
+
+Contracts pinned (non-obvious without running this test):
+
+1. SSE push is fire-and-forget at the moment of dispatch.
+   push.ts pushEvent() iterates only over currently-connected clients in the
+   `clients` map. If no client for that alias+network is present, the event
+   is dropped silently from the push side.
+
+2. Backlog lives in the inbox table (DB), accessible via get_inbox MCP.
+   On reconnect, SSE does NOT replay missed pushes. The agent SDK must
+   actively call get_inbox to catch up.
+
+3. The 'connected' event does not carry inbox_count.
+   push.ts L35 only encodes { type, session, network_id }. Reconnect logic
+   in SDK cannot rely on the connected event to infer backlog presence —
+   must always poll get_inbox.
+
+Implication for SDK / agent-node implementors:
+- Every reconnect must be followed by get_inbox to drain backlog.
+- A naive SDK that "just resubscribes" silently loses tasks dispatched while
+  it was offline. Real agent-node CLI does this correctly (loops on
+  get_inbox after report_status), this test pins that requirement at the
+  protocol level.
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip
+  - @sleep2agi/agent-network@preview from npm
+  - No external network, no real LLM

@@ -28,7 +28,7 @@
 | HUB-04 | admin reset-user 撤销目标用户 + 审计落库 | ✅ | report-test30 |
 | HUB-05 | utok 注册 → mint ntok → report_status → POST /api/tasks → SSE new_task → DB | ✅ | [qa-hub-05](../../tests/qa-hub-05-roundtrip/) R3 全闭环 PASS（~11s） |
 | HUB-06 | utok 被撤销后，它派生的 ntok 立即失效 | 🟡 | [qa-hub-06](../../tests/qa-hub-06-token-revoke/) R5 PASS — utok 撤销 + 显式 ntok revoke 工作；**reset-user 不级联 ntok**（auth.ts L267 只 DELETE network_id IS NULL 行）— 待 Vincent/通信龙 评设计 |
-| HUB-07 | SSE 断线后重连不丢消息 | ❌ | （需要时序断言） |
+| HUB-07 | SSE 断线后重连不丢消息 | ✅ | [qa-hub-07](../../tests/qa-hub-07-sse-reconnect/) R9 PASS（~12s）— pin fire-and-forget + get_inbox backlog 契约 |
 | HUB-08 | task 状态机 pending→completed/failed 落库且 SSE 同步 | 🟡 | docker-e2e SC05（仅 failed） |
 
 ## agent-node 矩阵（persona: runtime adapter）

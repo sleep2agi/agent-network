@@ -50,6 +50,7 @@ L0_TESTS=("password-dict:server/src/password-dict.test.ts")
 L1_TESTS=(
   "qa-hub-05-roundtrip"
   "qa-hub-06-token-revoke"
+  "qa-hub-07-sse-reconnect"
   "qa-node-02-success-reply"
 )
 
