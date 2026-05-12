@@ -141,19 +141,63 @@ A: Not today. TTL + revoke-all is on the v0.9 roadmap. `utok_` rotates on passwo
 
 ---
 
-## Basic security
+## For auditors / security teams
+
+### Token lifecycle matrix
+
+| Event | `utok_` | `ntok_` |
+|---|---|---|
+| Deploy hub | Admin `utok_` auto-bootstrapped to `admin-utok.json` (v0.8) | — |
+| Register account | One created | One created bound to the default network |
+| Log in | A new one is issued (old one stays valid until revoked) | Unchanged |
+| Change password | Current device gets a new `utok_`; other devices' `utok_` are invalidated | Unchanged |
+| Create node | Unchanged | One created, bound to the node × network |
+| Delete node | Unchanged | Hub revokes it |
+| Manual revoke | `anet token revoke <id>` | Same |
+
+### Authorization decision (how the hub decides)
+
+```mermaid
+flowchart TD
+    REQ[Request arrives] --> HAS{Bearer token present?}
+    HAS -->|No| DENY1[401 — denied<br/>unless --dev-open is set]
+
+    HAS -->|Yes| TYPE{Token type}
+    TYPE -->|utok_| UTOK[User-level:<br/>look up users table]
+    TYPE -->|ntok_| NTOK[Network-level:<br/>look up api_tokens table]
+
+    UTOK --> UROLE{Member of this network?}
+    UROLE -->|Yes| UOP{Read or write?}
+    UROLE -->|No| DENY2[403 — denied]
+    UOP -->|Read| ALLOW[Allowed]
+    UOP -->|Write + role ≥ member| ALLOW
+    UOP -->|Write + viewer| DENY3[viewer cannot write]
+
+    NTOK --> FORCED[Hub forces network_id<br/>to the binding in ntok_]
+    FORCED --> NROLE{Node has ≥ member role<br/>in that network?}
+    NROLE -->|Yes| ALLOW
+    NROLE -->|No| DENY4[403 — denied]
+```
+
+### Security practices
 
 ```bash
-# chmod 600 (CLI does this automatically; v0.8 bootstrap also writes admin-utok.json at 600)
+# 1. chmod 600 (CLI does this automatically; v0.8 bootstrap also writes admin-utok.json at 600)
 chmod 600 ~/.anet/config.json ~/.anet/server/admin-utok.json
 
-# Don't commit .anet/
+# 2. Don't commit .anet/
 echo ".anet/" >> .gitignore
 
-# Rotate login tokens periodically
-anet token ls
-anet token revoke tok_old
-anet login   # gets a fresh utok_
+# 3. Public deployment: change default admin / anethub immediately
+anet login --username admin --password anethub
+anet passwd   # rotate to strong (≥ 8 chars + not in weak-password dict)
+# Or set your own at bootstrap:
+anet hub start --username vincent --password 'mypass2026!'
+
+# 4. Rotate login tokens periodically
+anet token ls                  # list current utok_
+anet token revoke tok_xxx      # revoke old ones
+anet login                     # log in again to get a fresh utok_
 ```
 
 ---
