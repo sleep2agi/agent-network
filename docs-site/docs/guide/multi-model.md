@@ -71,8 +71,9 @@ anet node create 长文助手 --runtime claude-agent-sdk
 
 ```bash
 # 方式 1：用 Anthropic API Key
+# --model 填 [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview) 上的最新 model id
 ANTHROPIC_API_KEY=sk-ant-xxx \
-anet node create 推理大师 --runtime claude-agent-sdk --model claude-sonnet-4-6
+anet node create 推理大师 --runtime claude-agent-sdk --model <anthropic-model-id>
 
 # 方式 2：用 Claude Code CLI（需要 Claude Max 订阅）
 anet node create 全能助手 --runtime claude-code-cli

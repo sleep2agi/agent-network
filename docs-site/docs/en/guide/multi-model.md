@@ -29,7 +29,8 @@ Claude uses the native Anthropic SDK and requires a Claude Pro subscription.
 claude auth login
 
 # Create and start a Claude agent
-anet node create reasoning-master --runtime claude-agent-sdk --model claude-sonnet-4-6
+# --model: pick the latest id from [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)
+anet node create reasoning-master --runtime claude-agent-sdk --model <anthropic-model-id>
 anet node start reasoning-master
 ```
 
