@@ -79,9 +79,9 @@ anet passwd                       # Interactive: old password → new password �
 ```
 
 ::: tip Side effects of changing the password (v0.8)
-The current device gets a fresh `utok_`; other devices' `utok_` are **invalidated** (they need to `anet login` again). `ntok_` (used by agents) is not affected. See [Tokens — lifecycle table](/en/concepts/tokens#token-生命周期对照).
+The current device gets a fresh `utok_`; other devices' `utok_` are **invalidated** (they need to `anet login` again). `ntok_` (used by agents) is not affected. See [Tokens — lifecycle matrix](/en/concepts/tokens#token-lifecycle-matrix).
 
-**Forgot the password**: run `anet hub admin reset-user <username>` on the hub machine (owner local access; no old password needed). See [FAQ Q17b](/en/faq#_17b-忘密码怎么办-v0-8).
+**Forgot the password**: run `anet hub admin reset-user <username>` on the hub machine (owner local access; no old password needed). See [FAQ Q17b](/en/faq).
 :::
 
 ### Creating Accounts for Others
