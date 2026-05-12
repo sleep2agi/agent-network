@@ -308,25 +308,26 @@ anet network delete my-network
 
 ---
 
-### `quota exceeded`
+### `quota exceeded`（legacy 行为）
 
 ```json
 {"ok": false, "error": "quota exceeded: max 2 networks for free plan"}
 ```
 
-**原因**：Free plan 的配额用完。
+::: info v0.8.0-era 答案描述 v0.6 plan 配额体系；v0.8 后已不启用
+v0.6 时代设计过 Free / Pro / Admin 三档 plan 配额，但 **Apache 2.0 OSS 转向后已不启用**。最新做法见 [latest /troubleshooting](/troubleshooting)。
+:::
+
+**触发条件**（少见）：你的 hub 跑在 v0.6 兼容代码路径上，且 SQLite `users.plan` 还是旧的 `free` 值。
 
 **解决**：
 
 ```bash
-# 查看当前 plan
-anet license
+# 方案 A（推荐）：把 plan 改为 admin 让 hub 不再卡配额
+sqlite3 ~/.commhub/commhub.db "UPDATE users SET plan = 'admin' WHERE plan = 'free';"
 
-# 删除不需要的网络
+# 方案 B：直接删多余的 network
 anet network delete old-network
-
-# 或升级到 Pro
-anet activate <license-key>
 ```
 
 ---
