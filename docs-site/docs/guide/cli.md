@@ -18,6 +18,7 @@ npm install -g @sleep2agi/agent-network
 |------|------|------|
 | `anet init` | 配置 hub 地址 | 已验证 |
 | `anet init project` | 配置 Claude Code 项目（.mcp.json + CLAUDE.md） | 已验证 |
+| `anet quickstart` | 一键起 hub + dashboard + node（交互式向导） | 实验性（E2E 未覆盖；[getting-started](/guide/getting-started) 推荐改用 1-7 step-by-step，更可控） |
 
 ### 服务器管理
 

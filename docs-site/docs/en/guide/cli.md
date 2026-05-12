@@ -18,6 +18,7 @@ After installation, the `anet` command is available globally.
 |------|------|------|
 | `anet init` | Configure hub address | verified |
 | `anet init project` | Configure Claude Code project (.mcp.json + CLAUDE.md) | verified |
+| `anet quickstart` | One-shot interactive bootstrap: hub + dashboard + node | Experimental (no E2E; [getting-started](/en/guide/getting-started) recommends the 1–7 step-by-step path for better control) |
 
 ### Server Management
 
