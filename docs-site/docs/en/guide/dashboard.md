@@ -63,7 +63,7 @@ The task management page displays the full lifecycle of all tasks:
 **Status filters**:
 
 ```
-[All] [Pending] [In Progress] [Completed] [Failed] [Cancelled]
+[All] [Pending] [In Progress] [Completed] [Failed] [Cancelled] [Expired]
 ```
 
 **Task detail modal**:
