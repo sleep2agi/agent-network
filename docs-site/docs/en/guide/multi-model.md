@@ -65,9 +65,10 @@ MiniMax integrates via the Anthropic-compatible API, using `ANTHROPIC_BASE_URL` 
 
 ```bash
 # Create and start a MiniMax agent
+# --model: pick the latest id from MiniMax console (see Model Mapping tip below for Claude-name fallback)
 ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-minimax-api-key \
-anet node create xiaoming --runtime claude-agent-sdk --model MiniMax-M2.7
+anet node create xiaoming --runtime claude-agent-sdk --model <minimax-model-id>
 anet node start xiaoming
 ```
 
@@ -141,7 +142,7 @@ services:
     environment:
       - ALIAS=commander
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=<codex-model-id>  # latest id from OpenAI Codex docs
       - COMMHUB_URL=http://server:9200
       - SYSTEM_PROMPT=You are the commander. Receive tasks and dispatch them. Route code tasks to the code team and text tasks to the writing team.
 
@@ -150,7 +151,7 @@ services:
     environment:
       - ALIAS=coder-1
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=<codex-model-id>
       - COMMHUB_URL=http://server:9200
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
 
