@@ -7,8 +7,8 @@ CommHub Server provides 17 MCP Tools, called via the `POST /mcp` (Streamable HTT
 | Group | Count | Purpose |
 |------|------|------|
 | Agent-side tools | 4 | Status reporting, message retrieval |
-| Task management tools | 8 | Send tasks, reply, retry, cancel, reassign |
-| Query tools | 5 | Query status, tasks, completions |
+| Task management tools | 7 | Send tasks, reply, retry, cancel, reassign |
+| Query tools | 5 | Query task detail, task list, status, completions |
 | Broadcast tools | 1 | Broadcast to all agents |
 
 ---
