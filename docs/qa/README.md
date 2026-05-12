@@ -46,6 +46,7 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 | HUB-06 | [tests/qa-hub-06-token-revoke](../../tests/qa-hub-06-token-revoke/) | commhub utok/ntok 撤销契约 |
 | HUB-07 | [tests/qa-hub-07-sse-reconnect](../../tests/qa-hub-07-sse-reconnect/) | commhub SSE 断重连 + get_inbox 拉 backlog |
 | HUB-08 | [tests/qa-hub-08-restart-persistence](../../tests/qa-hub-08-restart-persistence/) | commhub 重启不丢状态 + SSE 重订 |
+| HUB-09 | [tests/qa-hub-09-task-state-machine](../../tests/qa-hub-09-task-state-machine/) | task 状态机 3 分支 + terminal no-op |
 | NODE-02 | [tests/qa-node-02-success-reply](../../tests/qa-node-02-success-reply/) | agent-node 成功回复（mock-via-MCP） |
 
 ### L2 / L3 — 历史保护资产，不动
