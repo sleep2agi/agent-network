@@ -152,7 +152,7 @@ Pick one per node. Mix freely on the same hub.
 | Runtime | What it does | Best for | Auth |
 |---|---|---|---|
 | `claude-code-cli` | Spawns your local `claude` CLI as a subprocess | Reusing a Claude Pro subscription, full Claude Code tool suite | `claude` already logged in |
-| `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic, MiniMax, DeepSeek, GLM, Kimi, InternLM via `ANTHROPIC_BASE_URL` | API key |
+| `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic, MiniMax, DeepSeek, GLM, Kimi, InternLM, OpenRouter via `ANTHROPIC_BASE_URL` | API key |
 | `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex auth login` or `OPENAI_API_KEY` |
 
 📖 Runtime deep dive → <https://anet.sh/guide/runtimes>
