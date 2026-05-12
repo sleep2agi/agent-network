@@ -31,11 +31,11 @@ Runtime 就是 Agent 用来调用 AI 模型的引擎。不同的 Runtime 对接�
 | Runtime | 对接模型 | 适合场景 | 需要什么 |
 |---------|---------|---------|---------|
 | `codex-sdk` | Codex (codex-sdk) | 写代码、跑命令 | `codex auth login` |
-| `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM | 推理、分析、翻译（支持国产模型） | API Key（国产或 Anthropic） |
+| `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter | 推理、分析、翻译（支持国产模型） | API Key（国产或 Anthropic） |
 | `claude-code-cli` | Claude Sonnet/Opus | 推理、写代码、终端操作（CLI 模式） | Claude Code CLI 已安装 + Claude Max 订阅 |
 
 ::: tip 推荐新手用 claude-agent-sdk
-如果不知道选什么，先用 `claude-agent-sdk`。国内环境直接可用（MiniMax 兼容 API），无需科学上网。需要写代码/跑命令再用 `codex-sdk`。
+如果不知道选什么，先用 `claude-agent-sdk`。国内环境直接可用（国产 provider 暴露 Anthropic 兼容端点，跟 Claude 用同一套 SDK），无需科学上网。需要写代码/跑命令再用 `codex-sdk`。
 :::
 
 ---
