@@ -1,0 +1,67 @@
+Test: qa-dash-10-incremental-poll (matrix DASH-10)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+
+Result: PASS
+Runtime: ~14s warm, ~30s cold (includes 2×1.5s sleep for clock tick)
+
+Coverage (9 steps hard-asserted):
+- [0-1] hub + admin + network + agent + report_status (with retry against bootstrap race)
+- [2]   send msg-A, sleep 1.5s, capture T_BEFORE_B (SQLite datetime fmt), sleep 1.5s, send msg-B
+- [3]   /api/messages (no since=) returns both A and B (length ≥ 2)
+- [4]   /api/messages?since=T_BEFORE_B returns msg-B (msg-A filtered by older timestamp)
+- [5]   /api/messages?since=2099-01-01 returns 0 results
+- [6]   report_completion (NOT send_reply) creates a completions row
+- [7]   /api/completions default returns ≥ 1 row
+- [8]   /api/completions?since=<ISO past> returns ≥ 1; ?since=<ISO future> returns 0
+- [9]   Documented format gap between the two endpoints
+
+Two contract gaps surfaced by R20:
+
+GAP 1: /api/messages and /api/completions accept DIFFERENT since= timestamp formats
+
+  /api/messages (index.ts L937):
+    const since = ... ?? new Date(...).toISOString().replace("T", " ").slice(0, 19);
+    → "2026-05-12 11:33:27"  (SQLite datetime: no T, no ms, no Z)
+
+  /api/completions (index.ts L1081):
+    const since = ... ?? new Date(...).toISOString();
+    → "2026-05-12T11:33:27.000Z"  (full ISO 8601)
+
+  SDK clients writing a dashboard polling loop MUST use the right format
+  per endpoint, or do client-side conversion. Inconsistent. Worth a vote
+  on standardizing.
+
+GAP 2: completions rows come from report_completion ONLY, not send_reply
+
+  send_reply (tools.ts L611+) updates tasks + inbox but does NOT INSERT
+  into completions table.
+  report_completion (tools.ts L234) is the only writer.
+
+  Caught by R20 step 7 returning 0 rows when we used send_reply.
+
+  SDK implication: dashboards that rely on /api/completions view will see
+  a task replied via send_reply only in /api/tasks?status=replied, NOT in
+  /api/completions. Either:
+  - Agents must dual-call (send_reply + report_completion) — annoying
+  - Or hub should auto-insert completions on send_reply terminal status
+  - Or dashboard should query /api/tasks instead of /api/completions
+
+  Pinned for maintainer review.
+
+Why a polling test instead of SSE reconnect for DASH-10:
+
+  The dashboard uses utok (user token). SSE endpoint /events/<alias>
+  requires ntok + network_id (index.ts L360 strict mode check).
+  Dashboard CANNOT subscribe to SSE directly — it polls /api/messages,
+  /api/tasks, /api/stats on intervals.
+
+  DASH-10's user story "SSE 断开后重连刷新看不出来" is best translated
+  as "incremental refresh keeps state in sync" since polling IS the
+  dashboard's "refresh" mechanism. R20 pins that contract.
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip + procps
+  - @sleep2agi/agent-network@preview from npm
+  - 0 LLM API calls

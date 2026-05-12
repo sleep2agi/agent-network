@@ -45,6 +45,7 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 | CLI-02 | [tests/qa-cli-02-network-create](../../tests/qa-cli-02-network-create/) | anet login + network create + ls + dup + whoami |
 | DASH-07 | [tests/qa-dash-07-auth-boundary](../../tests/qa-dash-07-auth-boundary/) | hub-side auth boundary（24 个探测：GET/POST/SSE/MCP/admin） |
 | DASH-08 | [tests/qa-dash-08-cross-account-views](../../tests/qa-dash-08-cross-account-views/) | 跨账号 dashboard 多端点 IDOR（nodes/stats/completions/filters/tokens/events） |
+| DASH-10 | [tests/qa-dash-10-incremental-poll](../../tests/qa-dash-10-incremental-poll/) | dashboard 增量轮询 since= 过滤（messages + completions） |
 | HUB-05 | [tests/qa-hub-05-roundtrip](../../tests/qa-hub-05-roundtrip/) | commhub register→mint→send→SSE→DB |
 | HUB-06 | [tests/qa-hub-06-token-revoke](../../tests/qa-hub-06-token-revoke/) | commhub utok/ntok 撤销契约 |
 | HUB-06b | [tests/qa-hub-06b-cross-user-isolation](../../tests/qa-hub-06b-cross-user-isolation/) | commhub 跨用户 IDOR 边界 |

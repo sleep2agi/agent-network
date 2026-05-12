@@ -58,7 +58,7 @@
 | DASH-07 | 未登录访问 `/` 被拒 / 重定向 | ✅ | [qa-dash-07](../../tests/qa-dash-07-auth-boundary/) R16 PASS（~14s）— hub-side auth boundary 24 个探测（GET/POST/PUT/SSE/MCP/admin-only） |
 | DASH-08 | 跨账号不能看到别人的节点（dashboard 多端点） | ✅ | [qa-dash-08](../../tests/qa-dash-08-cross-account-views/) R19 PASS（~11s）— /api/nodes / stats / completions / tasks-filters / tokens / task_events 7 端点跨账号全隔离 |
 | DASH-09 | 关键页视觉无回归（TopoGraph / chat / node card） | 🟡 | dashboard repo Playwright（[N站马]每轮自审），跨仓库列为 L3v 保护资产 |
-| DASH-10 | SSE 断开后重连刷新看不出来 | ❌ | （R3-R4 跟 NODE-04 一起做） |
+| DASH-10 | dashboard 增量轮询 since= 过滤（取代 SSE，utok 不能直接订阅） | ✅ | [qa-dash-10](../../tests/qa-dash-10-incremental-poll/) R20 PASS（~14s）— /api/messages + /api/completions since= 过滤工作 + 2 个 gap |
 
 ## 代码视角（L0 单测）补丁清单
 
