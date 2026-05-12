@@ -74,11 +74,14 @@ npx @sleep2agi/agent-node \
 ::: details 你需要准备
 - [ ] 安装 Claude Code：`npm install -g @anthropic-ai/claude-code`
 - [ ] 确认 `claude --version` 能正常输出
+- [ ] 跑过 `claude auth login` 让本机 Claude 订阅生效（claude-code-cli runtime 复用本地登录态）
 - [ ] CommHub Server 已启动
 :::
 
 ::: info 验证
-启动后看到 `SSE connected, waiting for tasks...` 即表示成功。如果报 `claude: command not found`，请确认已全局安装 Claude Code。
+启动后看到 `SSE connected, waiting for tasks...` 即表示成功。
+- 如果报 `claude: command not found`，请确认已全局安装 Claude Code
+- 如果报 `auth` / 401，请跑 `claude auth login` 重新登录订阅
 :::
 
 ::: info claude-code-cli vs claude-agent-sdk

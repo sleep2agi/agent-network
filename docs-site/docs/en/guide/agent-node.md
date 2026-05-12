@@ -74,11 +74,14 @@ npx @sleep2agi/agent-node \
 ::: details Prerequisites checklist
 - [ ] Install Claude Code: `npm install -g @anthropic-ai/claude-code`
 - [ ] Verify `claude --version` outputs correctly
+- [ ] Run `claude auth login` so your local Claude subscription is active (claude-code-cli reuses the local login state)
 - [ ] CommHub Server is running
 :::
 
 ::: info Verify
-After starting, you should see `SSE connected, waiting for tasks...`. If you get `claude: command not found`, make sure Claude Code is installed globally.
+After starting, you should see `SSE connected, waiting for tasks...`.
+- If you get `claude: command not found`, make sure Claude Code is installed globally
+- If you get `auth` / 401, re-run `claude auth login` to refresh the subscription session
 :::
 
 ::: info claude-code-cli vs claude-agent-sdk
