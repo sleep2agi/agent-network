@@ -167,7 +167,7 @@ anet node start remote-bot
 - `claude-code-cli` runtime 的端到端流程
 - `anet license` / `anet activate` —— 当前是占位命令，给未来付费版预留
 - `anet network create` 与跨用户网络共享 —— V3 多网络代码已合并但未做 E2E 回归
-- 云托管的 `agent-net.vansin.me` 演示站点（计划中，当前只支持本地 / 局域网）
+- 维护者自部署的演示站点（v0.8 已转 Apache 2.0 OSS + 不做托管，仅保留本地 / 局域网部署）
 :::
 
 ## 下一步

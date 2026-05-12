@@ -163,7 +163,7 @@ anet node start remote-bot
 - `claude-code-cli` runtime end-to-end.
 - `anet license` / `anet activate` — placeholder commands for a future paid tier.
 - `anet network create` and cross-user network sharing — V3 multi-network code is in but not E2E regressed.
-- The hosted `agent-net.vansin.me` demo — local / LAN is the supported path today.
+- Maintainer-hosted demo site — v0.8 has switched to Apache 2.0 OSS + no SaaS hosting; only local / LAN deployment is supported.
 :::
 
 ## Next

@@ -51,8 +51,8 @@ curl -X POST http://localhost:9200/api/auth/register \
   -d '{
     "username": "vincent",
     "password": "mypassword",
-    "email": "vincent@example.com",
-    "display_name": "Vincent"
+    "email": "alice@example.com",
+    "display_name": "Alice"
   }'
 ```
 
