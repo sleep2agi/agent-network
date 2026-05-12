@@ -49,7 +49,7 @@ await reportStatus("idle").catch(() => {});                          // ← 出�
 - 8 条 silent skip 路径无感吞消息（A3）
 - Codex thread 重建丢历史 + 降级返回 \"（无回复）\"（A4）
 - `sendReply` 重试耗尽 catch 吞错（A5）
-- Codex auth/升级提示卡 stdin（A6）
+- Codex 子进程长期无 stdout + 未 emit `turn.failed` event（A6 — 可能由 .rules execpolicy 阻断 / codex 自动 update prompt 等，具体根因待 spike 验证）
 
 **关键观察**：当前**没有任何遥测能区分这 6 类失败**。RFC-003 落地后，`progress_events` 表的 `error_code` 字段第一次让 \"60% 是 anecdote\" 变成 \"按 error_code 分布的可度量数字\"。
 
@@ -131,6 +131,7 @@ export type ErrorCode =
   | 'rate_limit'
   | 'max_turns'
   | 'auth_failed'
+  | 'structured_output_invalid'   // claude SDKResultError.subtype='error_max_structured_output_retries' 或 codex 输出 JSON.parse 失败
   | 'tool_error';
 
 export type ProgressPayload =
@@ -161,9 +162,22 @@ export interface NodeEvent {
 
 `agent-node/src/adapters/claude-adapter.ts`：消费 `SDKMessage` + `HookEvent` → NodeEvent stream。
 
+**Hook emission 机制**：claude-agent-sdk 的 `HookCallback` 是 async 函数返回 `PermissionResult` / decision 对象，**不直接 yield 到主 stream**。Adapter 用一个共享 `eventBuffer: NodeEvent[]` 把 hook 触发的事件 push 进去；主 `for await` 循环每次 yield SDKMessage 后顺带 flush buffer 给下游。`PreToolUse` / `PostToolUse` / `PreCompact` / `TaskCreated` 等 hook 都通过此机制 emit。
+
 ```ts
 // 概念示意（不含完整实现）
-for await (const m of query({ prompt, options: { hooks: { ... } } })) {
+const eventBuffer: NodeEvent[] = [];
+const flushBuffer = () => { while (eventBuffer.length) yield eventBuffer.shift()!; };
+
+const hookOptions = {
+  PreToolUse: [{ hooks: [async (input) => {
+    eventBuffer.push({ kind: 'tool_start', payload: { tool_name: input.tool_name, /* ... */ }, /* ... */ });
+    return { continue: true };
+  }] }],
+  // ... 27 个 hook event
+};
+
+for await (const m of query({ prompt, options: { hooks: hookOptions } })) {
   switch (m.type) {
     case 'system':
       if (m.subtype === 'task_started') emit({ kind: 'subagent_start', /* ... */ });
@@ -222,21 +236,22 @@ Server 行为：
 2. INSERT 进 `progress_events` 表
 3. 通过 SSE 把事件转发给 `/events/:alias` 订阅者（含 dashboard 和未来的 SaaS API client）
 4. 不阻塞调用方 —— 即使转发失败也 200，progress 是 best-effort
+5. **可选** 用 Zod schema 按 `kind` discriminator 校验 `payload` 形状；校验失败降级为 INSERT + log warning，**不拒绝**（progress 是 best-effort）
 
 ### 4. SQLite schema — 新表 `progress_events`
 
 ```sql
 CREATE TABLE progress_events (
-  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id             TEXT NOT NULL,         -- 关联 messages.id
+  id                  TEXT PRIMARY KEY,      -- UUID v7（时序友好，跟 tasks.task_id TEXT 风格一致）
+  task_id             TEXT NOT NULL,         -- FK to tasks.task_id (commhub-server/src/db.ts:87)
   alias               TEXT NOT NULL,
   network_id          TEXT,                  -- 多租户隔离
-  parent_progress_id  TEXT,                  -- 嵌套（subagent）
+  parent_progress_id  TEXT,                  -- 嵌套（subagent），引用同表 id
   origin              TEXT NOT NULL,         -- claude_sdk / codex_sdk / ...
   kind                TEXT NOT NULL,         -- ProgressKind
   substate            TEXT,                  -- SubState
   ts_ms               INTEGER NOT NULL,
-  payload             TEXT,                  -- JSON
+  payload             TEXT,                  -- JSON，shape 由 kind discriminator 决定，reader 按 kind 解码
   error_code          TEXT,
   error_message       TEXT,
   retryable           INTEGER,               -- 0/1
