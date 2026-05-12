@@ -95,7 +95,7 @@ flowchart TD
 ::: warning v0.8 关键变化
 - v0.5 时代 `COMMHUB_AUTH_TOKEN` 未设 → 自动 open mode 的路径**已删除**。现在 hub 不带 `--dev-open` 必须有 utok_/ntok_。
 - master token 兼容路径**只允许少量 `/api/*` 读请求**，写操作一律拒绝。
-- 这条 legacy 路径 v1.0 完全移除（RFC-001 阶段 3）。
+- 这条 legacy 路径 v1.0 完全移除（[RFC-001 阶段 3](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)；tracking issue 见 [open issues: COMMHUB_AUTH_TOKEN](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+COMMHUB_AUTH_TOKEN)）。
 :::
 
 ### 密码安全

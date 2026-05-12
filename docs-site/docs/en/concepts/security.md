@@ -95,7 +95,7 @@ flowchart TD
 ::: warning Key changes in v0.8
 - The v0.5-era path where unset `COMMHUB_AUTH_TOKEN` triggered open mode is **deleted**. The hub now refuses to start without `--dev-open` unless a valid utok_/ntok_ exists.
 - The master-token compat path **only allows `/api/*` read requests**; all writes are rejected.
-- This legacy path is fully removed in v1.0 (RFC-001 Phase 3).
+- This legacy path is fully removed in v1.0 ([RFC-001 Phase 3](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md); tracking issue: [open issues: COMMHUB_AUTH_TOKEN](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+COMMHUB_AUTH_TOKEN)).
 :::
 
 ### Password Security
