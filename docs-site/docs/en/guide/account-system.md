@@ -78,6 +78,50 @@ anet whoami
 anet passwd
 ```
 
+::: details What happens after I change my password? (v0.8)
+
+Common question ([#17](https://github.com/sleep2agi/agent-network/issues/17)). Full side-effect list:
+
+**Current device (the one running `anet passwd`)**
+- CLI receives a freshly-issued `utok_`, auto-writes it to `~/.anet/config.json`
+- Subsequent `anet` commands keep working — **no re-login needed**
+
+**Other devices / other CLI sessions**
+- Server **revokes every old `utok_` for that user** (including the admin-utok.json bootstrap one)
+- Next API call returns `401 unauthorized` → must `anet login` to get a fresh `utok_`
+- The more devices you have, the louder the rotate. Check with `anet token ls` before rotating.
+
+**Dashboard (browser)**
+- Logged-in tab: next REST request returns 401 → Dashboard redirects to login → enter new password → fresh cookie
+- Since v0.8 the Dashboard is a thin cookie-proxy ([security model](/en/concepts/security#dashboard-auth-v0-8-thin-cookie-proxy)); the expired cookie is cleared automatically.
+
+**Agent Nodes (`ntok_`)**
+- **Unaffected.** `ntok_` is per-node-per-network and independent of user password.
+- Running agents keep running; `anet doctor --fix` still patches ntok_ issues separately.
+
+**Hub host's `~/.anet/server/admin-utok.json`** (edge case)
+- The admin `utok_` written there at bootstrap time is also revoked
+- The file **content is not auto-rotated** to the new utok_
+- Subsequent local commands (e.g. `anet hub admin reset-user <other>`) that read admin-utok.json will hit 401
+- Workaround for now: re-run `anet login --username admin --password <new-password>` to refresh `~/.anet/config.json`; admin-utok.json is a one-time bootstrap credential — `config.json` is the authoritative source going forward. A proper auto-sync fix is queued for v0.9.
+
+**Audit log**
+- `audit_log` records a `password_changed` row (or `password_reset_by_admin` if the change came via reset-user)
+- View with `anet hub admin audit-log` (owner permission)
+
+**Password strength check (server-side)**
+- ≥ 8 characters + not in the top-1000 weak-password dictionary
+- First bootstrap admin allowed ≥ 4 chars as exception
+- Weak password → server rejects with `password too weak` / `password too short`
+
+**Forgot the old password?**
+- Can't use `anet passwd` (requires old password)
+- On the Hub machine, run `anet hub admin reset-user <username>` to force-reset (local owner permission, bypasses HTTP check)
+
+Deeper: [Token system](/en/concepts/tokens) / [Security design](/en/concepts/security#password-security)
+
+:::
+
 ### Creating Accounts for Others
 
 Have them run on their own computer:
