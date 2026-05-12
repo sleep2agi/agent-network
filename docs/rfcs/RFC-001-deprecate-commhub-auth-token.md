@@ -12,7 +12,9 @@
 
 ## 摘要
 
-当前 hub 里有三种 token：`utok_`（用户 token）、`ntok_`（节点-网络维度 token）、以及 `COMMHUB_AUTH_TOKEN`（服务级 master key）。master key 在 V3 鉴权之前就存在了，如今已经不再发挥独立价值 —— `role=admin` 的 `utok_` 可以完全覆盖它的所有合法用途。本 RFC 提议在两个 minor 版本里把 `COMMHUB_AUTH_TOKEN` 拆掉，v1.0 硬性下线。
+当前 hub 里有三种 token：`utok_`（用户 token）、`ntok_`（节点-网络维度 token）、以及 `COMMHUB_AUTH_TOKEN`（服务级 master key）。master key 在 V3 鉴权之前就存在了，已经不再发挥独立价值 —— `role=admin` 的 `utok_` 可以完全覆盖它的所有合法用途。
+
+> **状态（2026-05-12）**：本 RFC 已**采纳**。阶段 2 已在 v0.8.0 / v0.8.1 全部落地（COMMHUB_AUTH_TOKEN 软废弃 + admin `utok_` bootstrap + Dashboard cookie 透传 + 密码管理）。阶段 3（v1.0 硬下线）排队等周期。issue #3 已闭环。
 
 ## 动机
 
@@ -140,14 +142,14 @@ if (authErr) return authErr;
 
 ## 迁移计划
 
-### 阶段 1 —— v0.7.x（推进中，无破坏性变更）
+### 阶段 1 —— v0.7.x（✅ 已完成）
 
-- 保持 `COMMHUB_AUTH_TOKEN` 行为完全不变。
-- CLI 继续自动管理 `~/.anet/server/config.json` 里的 `auth_token`；用户从不手敲。
-- **取消**此前计划的 `anet hub token` 子命令。既然要废弃这个概念，就不再为它新增用户层 CLI 接口。
-- 不新增任何提及 master token 的文档。已有文档保留到阶段 2。
+- ✅ `COMMHUB_AUTH_TOKEN` 行为保持不变。
+- ✅ CLI 自动管理 `~/.anet/server/config.json` 里的 `auth_token`；用户从不手敲。
+- ✅ **取消**此前计划的 `anet hub token` 子命令（既然要废弃这个概念，不再为它新增 CLI 接口）。
+- ✅ 不新增任何提及 master token 的文档。
 
-### 阶段 2 —— v0.8.0（新流程上线，老流程软废弃）
+### 阶段 2 —— v0.8.0 / v0.8.1（✅ 已落地）
 
 - 首次运行时 server 自动 bootstrap admin `utok_`（`admin-utok.json` 落盘）。
 - tmux + admin REST 端点强制 `requireAdminAuth`；`requireAuth` 里的 master-token 分支**仍保留，但只允许 `/api/*` 读类**，附带 warning log：
@@ -160,7 +162,7 @@ if (authErr) return authErr;
 - **默认开放模式取消。** `anet hub start` 不带 `--dev-open` 时一律 provision admin 用户 + token。"没设 token 就走开放模式"这条路径不复存在。R3 关闭。
 - `COMMHUB_DEV_OPEN=1` 和 `--dev-open` 仍可用于"离线教程"场景，banner 改得更显眼。
 
-### 阶段 3 —— v1.0（硬下线）
+### 阶段 3 —— v1.0（⏳ 计划中，等周期）
 
 - 上文"最终下线的代码路径"全部删除。
 - `~/.anet/server/config.json` 里出现 `auth_token` 视为未识别字段（warning + 忽略，严格模式直接拒绝）。
