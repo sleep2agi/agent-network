@@ -163,7 +163,7 @@ See the [Upgrade Guide](/en/guide/upgrade) for details.
 - **39 CLI commands**: quickstart, login, register, passwd, token, network (create/ls/use/info/rename/delete), status, tasks, doctor, info, logs, demo, config, license, activate, hub start...
 - **17 MCP tools**: send_task, send_reply, retry_task, cancel_task, reassign_task, list_tasks, get_task...
 - **17 REST endpoints**: /api/auth/*, /api/networks/*, /api/tasks, /api/nodes, /api/stats, /api/audit-log, /api/license...
-- **2 AI runtimes**: codex-sdk (GPT-5.4), claude-agent-sdk (Claude / MiniMax / OpenAI-compatible)
+- **2 AI runtimes**: codex-sdk (OpenAI Codex / GPT-5), claude-agent-sdk (Claude / MiniMax / OpenAI-compatible)
 - **Audit logging**: All user operations + task state changes recorded
 - **Rate limiting**: Registration 30/min, login 10/min per IP
 
@@ -183,7 +183,7 @@ sessions, inbox, tasks, nodes, completions, task_events, users, networks, api_to
 - Auth suite: 25 tests (registration, login, token, profile, password, audit, rate limiting)
 - Network suite: 22 tests (CRUD, isolation, ownership, rename, delete, cross-user)
 - Config priority: 16 tests (CLI > env > project > global)
-- Real AI: Codex GPT-5.4 + MiniMax (Anthropic API) verified
+- Real AI: Codex (GPT-5) + MiniMax (Anthropic API) verified
 - 10-agent idiom chain (mixed codex + minimax)
 
 **npm packages**:
