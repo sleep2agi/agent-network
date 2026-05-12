@@ -169,7 +169,6 @@ admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次
 | `--username` | `admin` | 自定义 admin 用户名 |
 | `--password` | `anethub`（快速上手默认） | 自定义 admin 密码（≥8 位 + 非弱密码；默认值跳过强度校验） |
 | `--dev-open` | false | **危险**：无鉴权运行，仅用于离线 tutorial |
-| `--token` | — | 旧 master token 兼容参数；v0.8 起 deprecated |
 
 **环境变量**：
 
@@ -492,9 +491,10 @@ anet init project
 | 选项 | 说明 |
 |------|------|
 | `--hub <url>` | CommHub Server 地址 |
-| `--token <token>` | 认证 Token |
 | `--help` | 显示帮助 |
 | `--version` | 显示版本 |
+
+> v0.8 起鉴权统一走 `anet login --hub <URL> --username --password`（一步）或 `anet login` 拿 `utok_`，不再用 `--token` 传 master token。详见 [Token 概念](/concepts/tokens) + [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)。
 
 ## 环境变量
 

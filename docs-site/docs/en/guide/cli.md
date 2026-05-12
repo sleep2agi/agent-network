@@ -163,7 +163,6 @@ Once admin is bootstrapped (`~/.anet/server/admin-utok.json` exists), `anet hub 
 | `--username` | `admin` | Custom admin username |
 | `--password` | `anethub` (quick-start default) | Custom admin password (≥8 chars + not in weak-password dict; default bypasses check) |
 | `--dev-open` | false | **Dangerous**: runs with no auth, only for offline tutorials |
-| `--token` | — | Legacy master token compatibility; deprecated in v0.8 |
 
 **Environment variables**:
 
@@ -464,9 +463,10 @@ Common commands read these options or their saved config equivalents:
 | Option | Description |
 |------|------|
 | `--hub <url>` | CommHub Server address |
-| `--token <token>` | Auth token |
 | `--help` | Show help |
 | `--version` | Show version |
+
+> Since v0.8, authentication goes through `anet login --hub <URL> --username --password` (one-step) or `anet login` to obtain `utok_`; the legacy `--token` master-token flag is no longer the recommended path. See [Tokens](/en/concepts/tokens) + [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md).
 
 ## Environment Variables
 

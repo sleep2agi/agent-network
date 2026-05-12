@@ -352,7 +352,7 @@ anet CLI is the management tool for Agent Network, providing 39 commands.
 ```mermaid
 flowchart TD
     A["Environment variables\nCOMMHUB_URL / COMMHUB_ALIAS (COMMHUB_AUTH_TOKEN soft-deprecated in v0.8)"]
-    B["Command-line arguments\n--hub / --alias / --token"]
+    B["Command-line arguments\n--hub / --alias"]
     C["Project config\n{cwd}/.anet/config.json"]
     D["Global config\n~/.anet/config.json"]
     E["Defaults\nhub=http://127.0.0.1:9200"]
