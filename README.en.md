@@ -216,8 +216,8 @@ What's solid, and what to watch out for.
 
 **Not yet implemented**
 
-- `anet license` / `anet activate` — experimental legacy trial/pro-license commands, outside the primary local flow
-- Hosted hub / public demo site — local + LAN only for now
+- `anet license` / `anet activate` — v0.6 legacy commands, **no longer needed after Apache 2.0 OSS**. The Hub still keeps a SQLite `licenses` table for backward-compat (14-day trial on first run). On `license_expired`, see [troubleshooting](https://anet.sh/en/troubleshooting).
+- **No official hosted Hub** — the product direction is Apache 2.0 + self-host + courses / consulting, **no SaaS**. For production go through [Docker](https://anet.sh/en/deploy/docker) or [production deployment](https://anet.sh/en/deploy/production).
 
 ---
 
