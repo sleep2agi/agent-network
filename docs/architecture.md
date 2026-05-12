@@ -434,6 +434,8 @@ Agent                    CommHub Server              Hub/指挥室
 
 ## 10. Web Dashboard
 
+> **命名沿用 V2 做历史参考**：本节 `anet server` 现已改名 `anet hub start`，并独立出 `anet hub dashboard` 子命令启动 Dashboard。最新部署方式见 [anet.sh/guide/dashboard](https://anet.sh/guide/dashboard)。
+
 ### 两种 Dashboard
 
 | Dashboard | 技术栈 | 部署 | 地址 |
