@@ -1,6 +1,22 @@
-# V3 Trial Period + License Key Design
+# V3 Trial Period + License Key Design（已废弃 - 历史设计稿）
 
-## 商业模式
+> **⚠️ 本文档已不代表当前方向（2026-05-12 更新）**
+>
+> 本文写于 V3 早期（2026-03 ~ 04），描述的是"14 天试用 + license key + 官方托管"的商业模式。**该方向已被废弃**（2026-04 转向），原因是产品定位转向开源工具 + 自部署，不做官方 SaaS 托管。
+>
+> **当前真实商业模式**：
+> - Apache 2.0 开源
+> - **课程**（B 站系列教程）
+> - **服务咨询**（企业落地辅导）
+> - 不做 SaaS 托管 / 不卖 license key
+>
+> **代码现状**：
+> - Hub server 仍保留 SQLite `licenses` 表 + `send_task` 过期检查作为后向兼容。如果命中 `license_expired`，按 [troubleshooting](https://anet.sh/troubleshooting) 清空 licenses 表即可。
+> - `anet license` / `anet activate <key>` CLI 命令在 `cli.ts` 仍存在但不再推荐使用，[RFC-001](rfcs/RFC-001-deprecate-commhub-auth-token.md) 之后的整体清理会一并移除。
+>
+> 本文保留为**历史归档**，方便理解为什么 hub 还有 license 相关代码路径。**新用户请忽略本文。**
+
+## 商业模式（已废弃，仅作历史参考）
 
 ```
 免费试用 (14天) → 到期提示 → 输入授权码继续使用

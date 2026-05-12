@@ -18,3 +18,19 @@ This is the runnable Agent Network example library. The site only keeps cases wi
 ::: tip Before running examples
 Complete the [Getting Started guide](/en/guide/getting-started) and prepare the model API keys required by each example. Docker examples should be run from the repository root or their `demos/` subdirectory.
 :::
+
+## Next steps
+
+**After finishing a demo**:
+- [Multi-model config](/en/guide/multi-model) — switch to DeepSeek / Kimi / Claude
+- [Dashboard](/en/guide/dashboard) — inspect the demo's data flow in the Web UI
+- [Architecture](/en/guide/architecture) — understand how Hub / agents / runtimes interact behind the demo
+
+**Productionize**:
+- [Docker deployment](/en/deploy/docker) — containerize the demo onto a server
+- [Production deployment](/en/deploy/production) — full TLS / reverse-proxy / backup checklist
+
+**Customize and extend**:
+- [Channel plugins](/en/guide/channels) — wire the demo to Telegram / WeChat / Feishu
+- [Agent Node config](/en/guide/agent-node) — full field reference for writing your own agents
+- [CLI commands](/en/guide/cli) — command reference + v0.8 new tools

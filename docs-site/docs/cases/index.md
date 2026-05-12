@@ -18,3 +18,19 @@
 ::: tip 运行案例前
 先完成 [上手指南](/guide/getting-started)，并准备对应模型 API Key。需要 Docker 的案例请在仓库根目录或对应 `demos/` 子目录运行。
 :::
+
+## 下一步
+
+**完成第一个 demo 后**：
+- [多模型配置](/guide/multi-model) — 换 DeepSeek / Kimi / Claude 等
+- [Dashboard](/guide/dashboard) — 在 Web UI 看刚刚跑的 demo 数据流
+- [架构概览](/guide/architecture) — 理解 demo 背后 Hub / agent / runtime 怎么协作
+
+**生产化**：
+- [Docker 部署](/deploy/docker) — 把 demo 容器化部署到服务器
+- [生产部署](/deploy/production) — TLS / 反向代理 / 备份完整 checklist
+
+**改造和扩展**：
+- [Channel 插件](/guide/channels) — 把 demo 接入 Telegram / 微信 / 飞书
+- [Agent Node 配置](/guide/agent-node) — 自己写 agent 的完整字段说明
+- [CLI 命令](/guide/cli) — 命令清单 + v0.8 新工具速查
