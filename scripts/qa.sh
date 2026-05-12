@@ -55,6 +55,7 @@ L1_TESTS=(
   "qa-cli-01-hub-start"
   "qa-cli-02-network-create"
   "qa-dash-07-auth-boundary"
+  "qa-dash-08-cross-account-views"
   "qa-hub-05-roundtrip"
   "qa-hub-06-token-revoke"
   "qa-hub-06b-cross-user-isolation"

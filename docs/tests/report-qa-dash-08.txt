@@ -1,0 +1,53 @@
+Test: qa-dash-08-cross-account-views (matrix DASH-08)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+
+Result: PASS
+Runtime: ~11s warm, ~30s cold
+
+Coverage (11 steps, 7 dashboard endpoints probed for cross-account leakage):
+- [0-2] hub + alice/bob + alice creates private network + agent + dispatch + reply
+        (so alice has rows in: networks, sessions, tasks, completions,
+         task_events, api_tokens, inbox)
+- [3]   bob GET /api/nodes does NOT include alice-secret-agent
+- [4]   bob GET /api/stats has recent_tasks empty + tasks.total=0
+- [5]   bob GET /api/completions does NOT contain "alice-private" string
+- [6]   bob GET /api/tasks?to_name=alice-secret-agent returns 0 results
+- [7]   bob GET /api/tasks?from_name=alice returns 0 results
+- [8]   bob GET /api/auth/tokens returns only bob's tokens (no node:alice-*)
+- [9]   bob GET /api/task_events with limit=100 has 0 events for alice's task_id
+- [10]  bogus ntok in Authorization returns 401
+- [11]  alice still sees her own data (sanity)
+
+Contracts pinned (multi-endpoint OWASP A01 dashboard view):
+
+1. addNetworkScope applied uniformly across list/aggregate endpoints
+   index.ts injects `WHERE network_id IN (user's network_members rows)`
+   on every dashboard query. Bob is not a member of alice-private →
+   all queries return empty.
+
+2. Explicit filter parameters do NOT bypass the scope
+   /api/tasks?to_name=, ?from_name=, ?status=, ?network_id= — all
+   filters are ANDed AFTER the addNetworkScope WHERE clause, not before.
+   Bob enumerating alice's aliases ("alice-secret-agent", "alice") via
+   filters returns nothing.
+
+3. Token listing per-user
+   /api/auth/tokens uses listTokens(user_id) — pure user-scoped, no
+   cross-user mixing.
+
+Combined with R17 (HUB-06b networks/tasks-unfiltered/status/messages) +
+R16 (DASH-07 auth boundary) + R5 (HUB-06 token revoke), commhub's
+auth+isolation triangle is now exhaustively pinned:
+
+  - missing auth → 401 (R16)
+  - wrong user → empty/403 across all endpoints (R17 + R19)
+  - token revoke → invalid (R5)
+
+A regression in any of the three breaks at least one of these tests.
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip + procps
+  - @sleep2agi/agent-network@preview from npm
+  - 0 LLM API calls
