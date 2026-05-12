@@ -192,7 +192,7 @@ anet node create my-bot
 #     👁 demo (viewer)            ← 灰色，不可选（viewer 不能创建）
 #
 #   选择 Runtime:
-#   > codex-sdk (GPT-5.4) — 推荐
+#   > codex-sdk (Codex) — 推荐
 #     http-api (MiniMax/OpenAI 兼容)
 #     claude-agent-sdk (Claude Code)
 #

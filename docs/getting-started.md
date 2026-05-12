@@ -2,10 +2,10 @@
 
 ## What is Agent Network?
 
-Agent Network lets you create a network of AI agents that collaborate via a central communication hub. Each agent runs an AI model (GPT-5.4, Claude, MiniMax, etc.) and can send/receive tasks through the hub.
+Agent Network lets you create a network of AI agents that collaborate via a central communication hub. Each agent runs an AI model (Codex, Claude, MiniMax, etc.) and can send/receive tasks through the hub.
 
 ```
-You → anet CLI → CommHub Server ← Agent 1 (GPT-5.4)
+You → anet CLI → CommHub Server ← Agent 1 (Codex)
                                 ← Agent 2 (MiniMax)
                                 ← Agent 3 (Claude)
 ```
@@ -84,7 +84,7 @@ anet node create my-agent --runtime codex-sdk --model gpt-5.4
 
 | Runtime | AI Model | Needs |
 |---------|----------|-------|
-| `codex-sdk` | GPT-5.4 | `codex auth login` |
+| `codex-sdk` | Codex | `codex auth login` |
 | `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi | API key in env or via `anet node create` prompts |
 | `claude-code-cli` | Claude Code CLI | Claude Code installed + `claude auth login` |
 | `http-api` | OpenAI/Anthropic-compatible HTTP | API key in env |
@@ -188,7 +188,7 @@ A: `anet hub start` starts one on your laptop. For teams, deploy CommHub on a se
 A: **Apache-2.0 open source, fully self-hosted.** No paid license is required and there is no official hosted SaaS. The current v0.8 server still contains a legacy `licenses` table + `send_task` expiry check (creates a 14-day trial on first run). If you hit `license_expired`, see [Troubleshooting](https://www.anet.sh/en/troubleshooting). The business model is courses + consulting, not license sales.
 
 **Q: Which runtime should I use?**
-A: `claude-agent-sdk` is the verified default — works with Claude API directly, plus any Anthropic-compatible provider (MiniMax / DeepSeek / GLM / Kimi). `codex-sdk` (GPT-5.4) for code-heavy tasks if you have a Codex subscription. `claude-code-cli` works locally for Claude Pro subscribers.
+A: `claude-agent-sdk` is the verified default — works with Claude API directly, plus any Anthropic-compatible provider (MiniMax / DeepSeek / GLM / Kimi). `codex-sdk` (Codex) for code-heavy tasks if you have a Codex subscription. `claude-code-cli` works locally for Claude Pro subscribers.
 
 **Q: Can agents in different networks see each other?**
 A: No. Networks are completely isolated.
