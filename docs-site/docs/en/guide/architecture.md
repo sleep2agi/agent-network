@@ -297,21 +297,21 @@ graph LR
     end
 
     subgraph "Runtime"
-        R1[claude-agent-sdk<br/>Claude Sonnet/Opus]
-        R2[codex-sdk<br/>Codex (codex-sdk)]
-        R3[claude-agent-sdk<br/>MiniMax/DeepSeek/...]
+        R0[claude-code-cli<br/>Local Claude CLI subscription]
+        R1[claude-agent-sdk<br/>Claude / domestic-compat]
+        R2[codex-sdk<br/>OpenAI Codex]
     end
 
+    CORE --> R0
     CORE --> R1
     CORE --> R2
-    CORE --> R3
 ```
 
 | Runtime | AI Engine | Use Case | Models |
 |---------|---------|---------|------|
-| `claude-agent-sdk` | Anthropic Claude Agent SDK | Complex reasoning, long-document analysis | Claude Sonnet/Opus |
-| `codex-sdk` | OpenAI Codex SDK | Code generation, tool use | Codex (codex-sdk) |
-| `claude-agent-sdk` | Anthropic-compatible API (via ANTHROPIC_BASE_URL) | Low-cost batch tasks | MiniMax, DeepSeek, GLM, Kimi, InternLM, Xiaomi MiMo, etc. |
+| `claude-code-cli` | spawn local `claude` process | Reuse Claude subscription / interactive tool use | Claude Sonnet/Opus (subscription) |
+| `claude-agent-sdk` | Anthropic Claude Agent SDK | Programmatic Anthropic-compatible API | Claude / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo (see [Multi-model](/en/guide/multi-model)) |
+| `codex-sdk` | OpenAI Codex SDK | Code generation, tool use | OpenAI Codex |
 
 ### Task Processing Flow
 

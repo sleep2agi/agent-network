@@ -297,21 +297,21 @@ graph LR
     end
 
     subgraph "Runtime"
-        R1[claude-agent-sdk<br/>Claude Sonnet/Opus]
-        R2[codex-sdk<br/>Codex (codex-sdk)]
-        R3[claude-agent-sdk<br/>MiniMax/DeepSeek/...]
+        R0[claude-code-cli<br/>本地 Claude CLI 订阅]
+        R1[claude-agent-sdk<br/>Claude / 国产兼容]
+        R2[codex-sdk<br/>OpenAI Codex]
     end
 
+    CORE --> R0
     CORE --> R1
     CORE --> R2
-    CORE --> R3
 ```
 
 | Runtime | AI 引擎 | 适用场景 | 模型 |
 |---------|---------|---------|------|
-| `claude-agent-sdk` | Anthropic Claude Agent SDK | 复杂推理、长文分析 | Claude Sonnet/Opus |
-| `codex-sdk` | OpenAI Codex SDK | 代码生成、工具调用 | Codex (codex-sdk) |
-| `claude-agent-sdk` | Anthropic 兼容 API（via ANTHROPIC_BASE_URL） | 低成本批量任务 | MiniMax、DeepSeek、GLM、Kimi、书生、小米 MiMo 等 |
+| `claude-code-cli` | spawn 本机 `claude` 进程 | 复用 Claude 订阅 / 终端交互式工具调用 | Claude Sonnet/Opus（订阅） |
+| `claude-agent-sdk` | Anthropic Claude Agent SDK | 编程式调 Anthropic 兼容 API | Claude / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo（详见 [多模型配置](/guide/multi-model)） |
+| `codex-sdk` | OpenAI Codex SDK | 代码生成、工具调用 | OpenAI Codex |
 
 ### 任务处理流程
 
