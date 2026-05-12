@@ -1,6 +1,14 @@
 # CommHub 消息生命周期设计
 
-> 状态：草稿 | 日期：2026-04-10 | 作者：SDK马
+> 状态：草稿 → **基本落地**（2026-05-12 对齐 v0.8.1） | 日期：2026-04-10 | 作者：SDK马
+>
+> v0.6 ~ v0.8 已 ship 的部分：
+> - `requires_response` 字段区分 reply / ack / none 三种行为
+> - task vs message 双轨：task 进 `tasks` 表走完整生命周期，message 只进 `messages` 表
+> - `from_session` + `in_reply_to` 串联对话链
+> - SSE 推送 task 不推普通 message（避免 think 循环）
+>
+> 公开版用户视角的简化说明见 [Task 生命周期](https://anet.sh/concepts/task-lifecycle)。本文保留为内部技术设计参考。
 
 ---
 

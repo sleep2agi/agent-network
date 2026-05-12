@@ -1,5 +1,26 @@
 # V3 Multi-Network + User System Design
 
+> **实现状态（2026-05-12 对齐 v0.8.1）**
+>
+> 历史背景：本文写于 V3 早期（2026-03 ~ 04），描述的是 user × network × node 的目标态设计。大部分已在 v0.6 ~ v0.8 落地。
+>
+> ✅ 已实现（v0.8.1）：
+> - User × Network × Node 三层模型 + RBAC（owner / admin / member / viewer）
+> - 双 token：utok_（用户）+ ntok_（节点 × 网络）
+> - 邀请码：`anet network invite create / join`，role 可选
+> - SSE 按 `network_id:alias` 路由（v0.7+ 修了跨网络泄漏 bug）
+> - **v0.8 RFC-001 Phase 2**：admin utok_ bootstrap + 密码管理（`anet passwd` / `hub admin reset-user`）+ `doctor --fix` 重发 ntok_
+>
+> ❌ 未实现（目标态，排到 v0.9+）：
+> - viewer 角色在 CLI / Dashboard 创建 agent 时灰色不可选
+> - 公开网络（visibility=public）自动加入 / 申请流
+> - Token scope 细化（agent / readonly），目前 createToken 统一 full
+> - 项目级 `.anet/config.json` 网络配置（`anet network use --project`）
+> - Dashboard 用户管理 + 网络管理 UI（CLI 已可，Dashboard 入口缺）
+> - Argon2id 密码哈希（当前 SHA-256）
+>
+> 当前 stable 行为以代码 + [anet.sh](https://anet.sh) 为准。设计目标见下方原文。
+
 ## 概念模型
 
 ```
