@@ -1,9 +1,15 @@
-# CommHub Server OSS Readiness Report
+# CommHub Server OSS Readiness Report（历史 — 已开源）
 
 Date: 2026-05-12
 Scope: `server/` package and `@sleep2agi/commhub-server`.
 
-## Summary
+> **⚠️ 状态更新（2026-05-12 晚）**
+>
+> 本报告 P0/P1 项已在 v0.8.0 / v0.8.1 处理完毕，**项目已于 2026-05-11 正式开源**（Apache 2.0，commhub-server@0.8.0 git tag `v0.8.1`）。本文保留为发布前审计快照。
+>
+> 仍未关闭的项跟踪在 GitHub Issues 和 [`docs/open-source-security-risk-report.md`](../../docs/open-source-security-risk-report.md) 顶部 banner。
+
+## Summary（历史，仅作发布前审计快照）
 
 OSS readiness: **not ready for public open-source until P0/P1 items are resolved**.
 

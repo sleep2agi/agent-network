@@ -107,10 +107,12 @@ sg docker -c 'docker build -t anet-test17 -f tests/test17-xxx/Dockerfile . && do
 
 ### Server 相关
 
-- 必须设 `COMMHUB_AUTH_TOKEN`：不设则 auth 禁用，安全测试会 false positive
-- V3 认证：`register/login` 先过 global auth，再签发用户 token
+> **v0.8 更新（2026-05-12）**：`COMMHUB_AUTH_TOKEN` 已**软废弃**（仅 `/api/*` 只读 + deprecation warning，v1.0 移除）。下面是历史 v0.5 ~ v0.7 测试模板，新写测试建议直接走 `register / login` 拿 `utok_` 或用 `--dev-open` 启动 hub 跑离线 fixture（参考 test30-v0.8-auth-deprecation 的 dockerfile）。
+
+- 历史 v0.5 模板里 `ENV COMMHUB_AUTH_TOKEN=test-auth-token` —— v0.8 起 hub 会忽略写操作（仅 `/api/*` 读类还能通过），并打 deprecation warning。新测试用 admin/anethub bootstrap 起 hub，再调 `/api/auth/login` 拿 `utok_`。
+- V3 认证：`register / login` 先过 global auth（v0.8 起 register 公开端点），再签发用户 token
 - Login 旋转 token：`login` 后旧 token 可能失效，测试里必须更新认证头
-- 首个用户自动 admin：第一个 register 的用户 role=`admin`
+- 首个用户自动 admin：第一个 register 的用户 role=`admin`（v0.8 起还有 hub 自动 bootstrap 的 `admin / anethub` 默认账号）
 
 ### MCP 相关
 
