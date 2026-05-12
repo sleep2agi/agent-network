@@ -26,7 +26,7 @@ HUB_PASS="${HUB_PASS:-anethub}"
 
 if [ -z "$ANET_HUB" ]; then
   echo "[!] ANET_HUB 必填.示例:"
-  echo "    ANET_HUB=http://47.116.5.73:9200 MINIMAX_KEY=sk-cp-xxx ./agent-only.sh"
+  echo "    ANET_HUB=http://你的云服务器IP:9200 MINIMAX_KEY=sk-cp-xxx ./agent-only.sh"
   exit 1
 fi
 if [ -z "$MINIMAX_KEY" ]; then
