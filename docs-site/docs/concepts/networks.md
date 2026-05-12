@@ -158,15 +158,24 @@ anet network join inv_abc123def456
 | `max_uses` | 最大使用次数，-1 为无限 |
 | `expires` | 过期天数（可选） |
 
-### 方式二：Agent Token 分发
+### 方式二：跨机器部署 Agent
 
-当前 CLI 会在 `anet node create` 时为节点自动申请 `ntok_` 并写入节点配置。需要跨机器部署时，推荐在目标 network 下创建节点配置，再把该节点的 `.anet/nodes/<name>/config.json` 分发到运行机器。
+**v0.8 推荐做法**：在每台目标机器上**直接 `anet node create`**，不要复制 `config.json`。每台机器的 node 是独立的注册，hub 自动颁发独立的 `ntok_`，互不冲突。
 
 ```bash
-anet network use prod
-anet node create remote-agent
-# 复制 .anet/nodes/remote-agent/config.json 到目标机器
+# 在目标机器上
+anet init --hub http://<hub-host>:9200         # 配置 hub 地址
+anet login --username admin --password ...      # 用账号登录（拿到 utok_）
+anet network use prod                            # 切到目标 network
+anet node create remote-agent                    # CLI 自动跟 hub 注册 + 拿 ntok_
+anet node start remote-agent                     # 启动
 ```
+
+::: warning 不要跨机 copy `.anet/nodes/<name>/config.json`
+config 里的 `node_id` 是 hub 端注册时分配的唯一 ID。复制到另一台机器会让两台机器都报告同一个 node，hub 端 SSE 路由会乱（先到的连接接收 task，第二台机器收不到）。
+
+如果一定要把 config 从 A 机器移到 B 机器（而不是新建），用 `anet node rename` 或在 B 上重新 `anet node create`。
+:::
 
 ### 方式三：公开网络
 

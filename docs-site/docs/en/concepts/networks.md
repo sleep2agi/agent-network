@@ -158,15 +158,24 @@ Invite code properties:
 | `max_uses` | Maximum number of uses, -1 for unlimited |
 | `expires` | Expiration in days (optional) |
 
-### Option 2: Agent Token Distribution
+### Option 2: Cross-machine Agent Deployment
 
-The current CLI automatically requests an `ntok_` during `anet node create` and writes it to the node config. For cross-machine deployment, create the node config in the target network, then copy that node's `.anet/nodes/<name>/config.json` to the machine that will run it.
+**v0.8 recommended**: on each target machine, run `anet node create` **locally** — don't copy `config.json` across machines. Each machine registers its own node, and the hub mints a unique `ntok_` per node so they don't collide.
 
 ```bash
-anet network use prod
-anet node create remote-agent
-# Copy .anet/nodes/remote-agent/config.json to the target machine
+# On the target machine
+anet init --hub http://<hub-host>:9200        # configure hub address
+anet login --username admin --password ...     # login (obtain utok_)
+anet network use prod                           # switch to target network
+anet node create remote-agent                   # CLI registers + receives ntok_
+anet node start remote-agent                    # start
 ```
+
+::: warning Do not copy `.anet/nodes/<name>/config.json` across machines
+The `node_id` inside the config is a unique ID assigned by the hub at registration. Copying it makes both machines claim the same node, and hub-side SSE routing breaks (whichever connection arrives first receives the task; the second one is silently ignored).
+
+If you really need to move a node from machine A to machine B (instead of creating a new one), use `anet node rename` or just re-run `anet node create` on B.
+:::
 
 ### Option 3: Public Networks
 
