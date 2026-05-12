@@ -169,14 +169,28 @@ anet node start remote-bot
 - `anet quickstart` — removed from the docs.
 - `codex-sdk` runtime end-to-end.
 - `claude-code-cli` runtime end-to-end.
-- `anet license` / `anet activate` — experimental legacy trial/pro-license commands. They are outside the primary local flow, but the current Hub still creates a 14-day trial and `send_task` can return `license_expired` after it expires.
+- `anet license` / `anet activate` — v0.6 legacy trial commands, **no longer needed after Apache 2.0 OSS**. The current Hub still keeps a SQLite licenses table + creates a 14-day trial (checked on `send_task`); on `license_expired` see [troubleshooting](/en/troubleshooting).
 - `anet network create` and cross-user network sharing — V3 multi-network code is in but not E2E regressed.
-- The hosted `agent-net.vansin.me` demo — local / LAN is the supported path today.
+:::
+
+::: tip No hosted service
+The project direction is **Apache 2.0 open source + self-hosted + courses / consulting** — **there is no SaaS-hosted offering**. For production go through [Docker](/en/deploy/docker) or [Production deployment](/en/deploy/production).
 :::
 
 ## Next
 
-- [Dashboard guide](/en/guide/dashboard)
-- [CLI reference](/en/guide/cli)
-- [Agent Node](/en/guide/agent-node)
-- [Architecture](/en/guide/architecture)
+**Hands-on demos**:
+- [Hello World](/en/cases/hello-world) — 6 steps to your first agent cluster
+- [Debate](/en/cases/debate) — 6 agents in one command
+- [Telegram squad](/en/cases/telegram-squad) — full Docker Compose stack
+
+**Dig into commands**:
+- [CLI reference](/en/guide/cli) — every anet command
+- [Agent Node](/en/guide/agent-node) — config.json fields
+- [Multi-model](/en/guide/multi-model) — DeepSeek / Kimi / Claude
+
+**Production + security**:
+- [Dashboard guide](/en/guide/dashboard) — Web UI monitoring
+- [Architecture](/en/guide/architecture) — system design
+- [Production deployment](/en/deploy/production) — TLS / firewall / backups
+- [v0.7 → v0.8 upgrade](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — behavior changes and migration

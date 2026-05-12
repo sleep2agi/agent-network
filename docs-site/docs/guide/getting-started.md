@@ -173,14 +173,28 @@ anet node start remote-bot
 - `anet quickstart` —— 已从文档中移除
 - `codex-sdk` runtime 的端到端流程
 - `claude-code-cli` runtime 的端到端流程
-- `anet license` / `anet activate` —— experimental legacy trial/pro-license 命令；不属于本地上手主线，但当前 Hub 仍会创建 14 天 trial，并在过期后让 `send_task` 返回 `license_expired`
+- `anet license` / `anet activate` —— v0.6 legacy trial 命令，**Apache 2.0 OSS 后不再需要**；当前 Hub 仍保留 SQLite licenses 表 + 14 天 trial 创建（送 `send_task` 时检查），命中 `license_expired` 见 [troubleshooting](/troubleshooting)
 - `anet network create` 与跨用户网络共享 —— V3 多网络代码已合并但未做 E2E 回归
-- 云托管的 `agent-net.vansin.me` 演示站点（计划中，当前只支持本地 / 局域网）
+:::
+
+::: tip 没有官方托管
+项目方向是 **Apache 2.0 开源 + 自部署 + 课程 / 服务咨询**，**不做 SaaS 托管**。生产部署请走 [Docker](/deploy/docker) 或 [生产部署](/deploy/production) 指南。
 :::
 
 ## 下一步
 
-- [Dashboard 用法](/guide/dashboard)
-- [CLI 命令清单](/guide/cli)
-- [Agent Node 配置](/guide/agent-node)
-- [架构概览](/guide/architecture)
+**实战 demo**：
+- [Hello World](/cases/hello-world) — 6 步建第一个 agent 集群
+- [辩论赛](/cases/debate) — 一条命令 6 agent
+- [军团编队](/cases/telegram-squad) — Docker Compose 全栈
+
+**深入命令**：
+- [CLI 命令清单](/guide/cli) — 全部 anet 命令
+- [Agent Node 配置](/guide/agent-node) — config.json 字段
+- [多模型配置](/guide/multi-model) — DeepSeek / Kimi / Claude
+
+**生产 + 安全**：
+- [Dashboard 用法](/guide/dashboard) — Web UI 监控
+- [架构概览](/guide/architecture) — 整体设计
+- [生产部署](/deploy/production) — TLS / 防火墙 / 备份
+- [v0.7 → v0.8 升级](/guide/upgrade#v0-7-v0-8-升级注意-最新) — 行为变化和迁移
