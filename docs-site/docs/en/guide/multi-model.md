@@ -153,7 +153,7 @@ services:
     environment:
       - ALIAS=writer-1
       - RUNTIME=claude-agent-sdk
-      - MODEL=claude-3-5-haiku-20241022
+      - MODEL=<minimax-model-id>  # or any Claude model id via the MiniMax mapping fallback (see tip above)
       - ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
       - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
       - COMMHUB_URL=http://server:9200

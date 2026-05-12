@@ -468,7 +468,8 @@ curl -I $ANTHROPIC_BASE_URL
 curl -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
   $ANTHROPIC_BASE_URL/v1/messages \
   -H "Content-Type: application/json" \
-  -d '{"model":"MiniMax-M2.7","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"<minimax-model-id>","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+# Replace <minimax-model-id> with the current model id supported by your MiniMax account (check https://platform.minimaxi.com)
 ```
 
 ---

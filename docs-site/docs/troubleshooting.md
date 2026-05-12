@@ -467,7 +467,8 @@ curl -I $ANTHROPIC_BASE_URL
 curl -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
   $ANTHROPIC_BASE_URL/v1/messages \
   -H "Content-Type: application/json" \
-  -d '{"model":"MiniMax-M2.7","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"<minimax-model-id>","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+# 把 <minimax-model-id> 替换为你 MiniMax 账号当前可用 model id（查 https://platform.minimaxi.com）
 ```
 
 ---

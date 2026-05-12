@@ -273,7 +273,7 @@ If you see legacy docker-compose files still using these two variables, they're 
 |------|------|------|
 | `ALIAS` | Agent name | `coder-1` |
 | `RUNTIME` | Runtime engine | `codex-sdk` / `claude-agent-sdk` |
-| `MODEL` | Model | `gpt-5.4` / `claude-3-5-haiku-20241022` |
+| `MODEL` | Model | provider's current model id (e.g. OpenAI Codex / MiniMax / Anthropic) |
 | `COMMHUB_URL` | Server address | `http://server:9200` |
 | `COMMHUB_TOKEN` | Auth token | `ntok_xxx` or read from /shared/ntok |
 | `TOOLS` | Tool list | `Read,Write,Edit,Bash,Glob,Grep` |
@@ -372,7 +372,7 @@ worker-11:
   environment:
     - ALIAS=coder-6
     - RUNTIME=codex-sdk
-    - MODEL=gpt-5.4
+    - MODEL=<codex-model-id>  # latest id from OpenAI Codex docs
     - COMMHUB_URL=http://server:9200
     - TOOLS=Read,Write,Edit,Bash,Glob,Grep
 ```
