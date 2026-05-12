@@ -169,7 +169,7 @@ info "Task stats: $(echo "$STATS" | python3 -c "import json,sys; d=json.load(sys
 # ── Step 8: What's next ──
 step 8 "Explore More"
 echo ""
-echo -e "  ${C_BOLD}Dashboard:${C_RESET}  https://agent-net.vansin.me"
+echo -e "  ${C_BOLD}Dashboard:${C_RESET}  $HUB:3000 (run \`anet hub dashboard\` to start)"
 echo -e "  ${C_BOLD}CLI:${C_RESET}        anet status / anet tasks / anet demo"
 echo -e "  ${C_BOLD}API docs:${C_RESET}   $HUB/health"
 echo ""
