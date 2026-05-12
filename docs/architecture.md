@@ -2,7 +2,7 @@
 
 > CLI 名：`anet` | npm 包名：`@sleep2agi/agent-network`
 > 当前 stable（v0.8.2，2026-05-12 通过 npm `latest` tag 发布；尚无对应 git tag）：agent-network CLI v2.1.7 | commhub-server v0.8.0 | agent-node v2.3.0 | agent-network-dashboard v0.4.2
-> 本文最早写于 V2 早期（CLI v0.0.x），部分目录结构 / runtime 命名描述仍保留作为历史背景；最新可执行行为以代码 + [anet.sh](https://www.anet.sh) 文档为准。
+> 本文最早写于 V2 早期（CLI v0.0.x），部分目录结构 / runtime 命名描述仍保留作为历史背景；最新可执行行为以代码 + [anet.sh](https://anet.sh) 文档为准。
 
 ---
 

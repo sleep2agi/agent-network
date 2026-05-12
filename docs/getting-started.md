@@ -185,7 +185,7 @@ anet node start mm-bot
 A: `anet hub start` starts one on your laptop. For teams, deploy CommHub on a server and start it with `--host 0.0.0.0` if LAN agents need to connect.
 
 **Q: Is it free?**
-A: **Apache-2.0 open source, fully self-hosted.** No paid license is required and there is no official hosted SaaS. The current v0.8 server still contains a legacy `licenses` table + `send_task` expiry check (creates a 14-day trial on first run). If you hit `license_expired`, see [Troubleshooting](https://www.anet.sh/en/troubleshooting). The business model is courses + consulting, not license sales.
+A: **Apache-2.0 open source, fully self-hosted.** No paid license is required and there is no official hosted SaaS. The current v0.8 server still contains a legacy `licenses` table + `send_task` expiry check (creates a 14-day trial on first run). If you hit `license_expired`, see [Troubleshooting](https://anet.sh/en/troubleshooting). The business model is courses + consulting, not license sales.
 
 **Q: Which runtime should I use?**
 A: `claude-agent-sdk` is the verified default — works with Claude API directly, plus any Anthropic-compatible provider (MiniMax / DeepSeek / GLM / Kimi). `codex-sdk` (Codex) for code-heavy tasks if you have a Codex subscription. `claude-code-cli` works locally for Claude Pro subscribers.
