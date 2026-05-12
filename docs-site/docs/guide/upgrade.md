@@ -80,6 +80,14 @@ anet status
 
 v0.8 落地了 [RFC-001 第二阶段](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)，对**鉴权和密码**有新行为：
 
+::: tip v0.8.2 (CLI 2.1.7) 增量
+v0.8.2 在 v0.8.1 stable 基础上加了：
+- **`anet channel add telegram` 一键绑定** —— 给已有 node 接 Telegram bot token + allow user，自动生成 `channels/telegram` 配置
+- **`claude-code-cli` runtime session resume 修复** —— 节点创建时预生成 Claude session UUID，重启自动 `claude --resume <uuid>` 续会话
+
+升级路径跟 v0.7 → v0.8 主路径一致（admin bootstrap + 密码管理），无额外步骤。详见 [changelog v0.8.2 entry](/changelog)。
+:::
+
 ### 行为变化
 
 | 项 | v0.7 | v0.8 | 影响 |
