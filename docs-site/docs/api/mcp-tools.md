@@ -66,7 +66,7 @@ report_status({
   status: "working",
   task: "写排序算法",
   progress: 50,
-  model: "gpt-5.4",
+  model: "your-model-id",
   agent: "agent-node:codex"
 })
 ```
@@ -484,7 +484,7 @@ send_task({
       "alias": "代码1号",
       "status": "idle",
       "agent": "agent-node:codex",
-      "model": "gpt-5.4",
+      "model": "your-model-id",
       "last_seen_at": "2026-04-12 10:00:00",
       "network_id": "net_xxx"
     }

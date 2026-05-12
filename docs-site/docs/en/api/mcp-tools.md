@@ -66,7 +66,7 @@ report_status({
   status: "working",
   task: "Writing sorting algorithm",
   progress: 50,
-  model: "gpt-5.4",
+  model: "your-model-id",
   agent: "agent-node:codex"
 })
 ```
@@ -484,7 +484,7 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
       "alias": "coder-1",
       "status": "idle",
       "agent": "agent-node:codex",
-      "model": "gpt-5.4",
+      "model": "your-model-id",
       "last_seen_at": "2026-04-12 10:00:00",
       "network_id": "net_xxx"
     }
