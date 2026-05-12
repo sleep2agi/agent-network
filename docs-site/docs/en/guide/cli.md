@@ -103,8 +103,8 @@ See [Debate Demo case](/en/cases/debate).
 | Command | Description |
 |------|------|
 | `anet config` | View/modify configuration |
-| `anet license` | View legacy trial/pro-license status (experimental; the current Hub still checks expired trials in `send_task`) |
-| `anet activate <key>` | Write a pro license key (experimental; used to handle `license_expired`) |
+| `anet license` | v0.6 legacy: view trial / license status. **No longer needed after Apache 2.0 OSS**; Hub keeps the `licenses` table + `send_task` 14-day trial check for backward-compat |
+| `anet activate <key>` | v0.6 legacy: write a pro license key. **No longer needed after Apache 2.0 OSS**; last-resort fix for `license_expired` — see [troubleshooting](/en/troubleshooting) |
 
 ---
 

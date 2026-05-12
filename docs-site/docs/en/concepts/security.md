@@ -312,7 +312,18 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com"
 
 ### SSE Connection Security
 
-SSE connections use the same authentication mechanism as the REST API (Bearer Token / URL token parameter).
+SSE connections use the same authentication mechanism as the REST API (Bearer Token / URL token parameter). **From v0.8.1, agent-node auto-reloads its token and reconnects when SSE returns 401**, so an expired ntok_ no longer leaves the agent silently offline.
+
+### Dashboard auth (v0.8 thin cookie-proxy)
+
+From v0.8.0, the Dashboard (`@sleep2agi/agent-network-dashboard@0.4.2+`) runs as a **thin cookie-proxy**:
+
+- Browser logs into the Dashboard with username / password → Next.js backend obtains a `utok_` and writes it to an HttpOnly cookie
+- The Dashboard frontend **no longer holds any long-lived service token** (the v0.7-era `COMMHUB_AUTH_TOKEN` / `DASHBOARD_PASSWORD` env vars are gone)
+- The backend forwards requests to the Hub with the current session's `utok_` Bearer header
+- Session cookie expires / user logs out → cookie cleared → next request returns 401, forcing re-login
+
+This is the Dashboard side of RFC-001 Phase 2 landing. **Combined with `admin-utok.json` local recovery, the project ships with 0-token-config quick-start**. Full design: [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md).
 
 ## Agent Runtime Security
 

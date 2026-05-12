@@ -101,8 +101,8 @@ npm install -g @sleep2agi/agent-network
 | 命令 | 说明 |
 |------|------|
 | `anet config` | 查看/修改配置 |
-| `anet license` | 查看 legacy trial/pro-license 状态（实验性；当前 Hub 的 `send_task` 仍检查过期 trial） |
-| `anet activate <key>` | 写入 pro license key（实验性；用于处理 `license_expired`） |
+| `anet license` | v0.6 legacy 命令，查看 trial / license 状态。**Apache 2.0 OSS 后不再需要**；Hub 仍保留 `licenses` 表 + `send_task` 14 天 trial 检查做后向兼容 |
+| `anet activate <key>` | v0.6 legacy，写入 pro license key。**Apache 2.0 OSS 后不再需要**；用于命中 `license_expired` 兜底，见 [troubleshooting](/troubleshooting) |
 
 ---
 

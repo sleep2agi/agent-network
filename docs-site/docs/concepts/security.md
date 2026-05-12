@@ -312,7 +312,18 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com"
 
 ### SSE 连接安全
 
-SSE 连接使用与 REST API 相同的认证机制（Bearer Token / URL token 参数）。
+SSE 连接使用与 REST API 相同的认证机制（Bearer Token / URL token 参数）。**v0.8.1 起 agent-node SSE 收到 401 会自动 reload token 并重连**，避免老 ntok_ 过期导致 agent 静默离线。
+
+### Dashboard 鉴权（v0.8 thin cookie-proxy）
+
+v0.8.0 起 Dashboard（`@sleep2agi/agent-network-dashboard@0.4.2+`）改为**thin cookie-proxy** 模式：
+
+- 浏览器走 username / password 登录 Dashboard → Next.js 后端拿到 `utok_` 写入 HttpOnly cookie
+- Dashboard 前端**不再持有任何长效 service token**（旧 v0.7 时代需要 `COMMHUB_AUTH_TOKEN` 或 `DASHBOARD_PASSWORD` env，已全部移除）
+- 后端把请求透传到 Hub 时附上当前 session 的 `utok_` Bearer Header
+- session cookie 过期 / 用户登出 → cookie 清除 → 下次请求 401 强制重登
+
+这是 RFC-001 Phase 2 在 Dashboard 端的落地，**结合 `admin-utok.json` 本地恢复机制实现 0-token-config** 起步部署。完整设计见 [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)。
 
 ## Agent 运行时安全
 
