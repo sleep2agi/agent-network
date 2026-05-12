@@ -65,6 +65,13 @@ anet node start 日文翻译
 
 ### 3. 发任务
 
+如果还没启动 Dashboard，另开一个终端：
+
+```bash
+anet hub dashboard
+# 浏览器打开 http://localhost:3000，用 admin / anethub 登录
+```
+
 在 Dashboard 的 ChatPanel 里选择 `调度员`，发送 Task：
 
 ```text
