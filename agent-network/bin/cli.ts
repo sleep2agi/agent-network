@@ -2207,7 +2207,7 @@ async function serverCommand() {
 
     // Try npx first
     // Pin Dashboard version. Bump whenever the Dashboard package is updated.
-    const PINNED_DASHBOARD_VERSION = "0.4.3-preview.0";
+    const PINNED_DASHBOARD_VERSION = "0.4.4-preview.0";
     const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit", shell: true });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
