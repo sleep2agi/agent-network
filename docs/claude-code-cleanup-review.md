@@ -46,16 +46,16 @@
 
 ## P1：需要尽快统一状态
 
-| ID | 类型 | 位置 | 问题 | 建议动作 |
-|---|---|---|---|---|
-| D6 | quickstart 状态冲突 | `docs-site/docs/guide/getting-started.md:164-168`, `docs-site/docs/guide/cli.md:21`, `agent-network/bin/cli.ts:2600`, `tests/test21-quickstart-ux/run.sh:74-79` | 文档说 `quickstart` 已移除/未验证，但 CLI 仍有完整命令，测试也覆盖了非交互流程。 | 二选一：正式支持并更新文档；或标记 deprecated，移出 help 主路径并删除/降级测试。 |
-| D7 | license 状态冲突 | `server/README.md:149-153`, `docs-site/docs/guide/getting-started.md:168`, `agent-network/bin/cli.ts:4151-4200`, `tests/test3-security/run.sh:102-111` | 文档说 license 是 placeholder，但 CLI/server/tests 都把 trial/pro 激活当功能。 | 如果不准备商业化，删除/隐藏 license 用户入口；如果保留，文档改成真实功能并补安全说明。 |
-| D8 | 中英文文档不同步 | `docs-site/docs/changelog.md:15` 说不需要 `@preview`，`docs-site/docs/en/changelog.md:5` 仍写 preview 版本同步。 | 中文站和英文站给用户不同版本事实。 | 对 docs-site 做中英文同步清单；先同步 install/version/status 页面。 |
-| D9 | archive 噪音太大 | `docs/archive/*.md` 共 14 个文件，仅 `docs/node-lifecycle.md:225` 引用其中一个。 | 旧设计/RFC/测试计划大量留在 docs 根树下，容易被 Claude Code 当成当前事实。 | 给 `docs/archive/README.md` 写“历史资料，不作为当前实现依据”；把明显过时的 `anet-quickstart.md`、`cli-design.md` 等移动到更深层或删除。 |
-| C3 | 两套 commhub channel 实现分叉 | `channel/commhub-channel.ts:71-95` 与 `agent-network/src/node-server.ts:72-76` | `channel/` 版本读取 node config / network id，`agent-network/src/node-server.ts` 版本没有；CLI 实际复制 `agent-network/src/node-server.ts`，测试又覆盖 `channel/`。 | 选择唯一实现。若 `channel/` 是旧插件，把它标 archive；若它是新版，把 CLI 复制源切到该实现。 |
-| C4 | 版本常量硬编码过期 | `server/src/index.ts:77-80`, `agent-node/src/cli.ts:23`, `agent-network/bin/cli.ts:851`, `agent-network/bin/cli.ts:1348` | MCP server version 仍 `0.5.0`；agent-node fallback `2.1.0`；node config `anet_version` 写 `0.1.0`/`0.0.23`。 | 统一从 package.json 或单一 version module 读取；配置 schema 版本要独立命名，如 `config_schema_version`。 |
-| C5 | dist 是 ignored 本地产物但 npm pack 会使用 | `agent-network/dist/*`, `agent-node/dist/*`, `.gitignore` 忽略 `dist/` | `npm pack --dry-run` 会把当前本地 `dist` 打进去；如果未先 build，可能发布旧产物。 | publish 必须只走 clean checkout + build；本地 review 时忽略 dist；可加 `prepack` 强制 build 或 CI artifact 发布。 |
-| C6 | docs 说 WeChat/Feishu “未跑通”但结构图仍当一等模块 | `README.md:209`, `docs-site/docs/guide/architecture.md:51`, `server/README.md:153` | 状态文字承认只有 Telegram，但架构/教程仍把 WeChat/Feishu放进主路径。 | 主架构写“planned adapters”；当前可用矩阵只列 Telegram。 |
+| ID | 类型 | 位置 | 问题 | 建议动作 | 状态（2026-05-13） |
+|---|---|---|---|---|---|
+| D6 | quickstart 状态冲突 | `docs-site/docs/guide/getting-started.md:164-168`, `docs-site/docs/guide/cli.md:21`, `agent-network/bin/cli.ts:2600`, `tests/test21-quickstart-ux/run.sh:74-79` | 文档说 `quickstart` 已移除/未验证，但 CLI 仍有完整命令，测试也覆盖了非交互流程。 | 二选一：正式支持并更新文档；或标记 deprecated，移出 help 主路径并删除/降级测试。 | 🟡 部分（[R57](https://github.com/sleep2agi/agent-network/commit/486a535) cli.md 加 quickstart 行标实验性 + getting-started 「未验证」section 已说明；CLI 命令保留无 deprecation 提示） |
+| D7 | license 状态冲突 | `server/README.md:149-153`, `docs-site/docs/guide/getting-started.md:168`, `agent-network/bin/cli.ts:4151-4200`, `tests/test3-security/run.sh:102-111` | 文档说 license 是 placeholder，但 CLI/server/tests 都把 trial/pro 激活当功能。 | 如果不准备商业化，删除/隐藏 license 用户入口；如果保留，文档改成真实功能并补安全说明。 | 🟡 部分（faq Q3 / cli.md / getting-started / troubleshooting 多处明确标 v0.6 legacy + Apache 2.0 OSS 后不再需要；CLI 命令保留作 SQLite 兼容路径，v0.9+ 计划整段移除 license 检查） |
+| D8 | 中英文文档不同步 | `docs-site/docs/changelog.md:15` 说不需要 `@preview`，`docs-site/docs/en/changelog.md:5` 仍写 preview 版本同步。 | 中文站和英文站给用户不同版本事实。 | 对 docs-site 做中英文同步清单；先同步 install/version/status 页面。 | ✅ 已处理（changelog 顶部 ZH+EN 同步, 都标 v0.8.2 stable + 版本号体系说明） |
+| D9 | archive 噪音太大 | `docs/archive/*.md` 共 14 个文件，仅 `docs/node-lifecycle.md:225` 引用其中一个。 | 旧设计/RFC/测试计划大量留在 docs 根树下，容易被 Claude Code 当成当前事实。 | 给 `docs/archive/README.md` 写“历史资料，不作为当前实现依据”；把明显过时的 `anet-quickstart.md`、`cli-design.md` 等移动到更深层或删除。 | ✅ 已处理（archive/README.md 现有 "This directory is a graveyard, not a source of truth" banner） |
+| C3 | 两套 commhub channel 实现分叉 | `channel/commhub-channel.ts:71-95` 与 `agent-network/src/node-server.ts:72-76` | `channel/` 版本读取 node config / network id，`agent-network/src/node-server.ts` 版本没有；CLI 实际复制 `agent-network/src/node-server.ts`，测试又覆盖 `channel/`。 | 选择唯一实现。若 `channel/` 是旧插件，把它标 archive；若它是新版，把 CLI 复制源切到该实现。 | 🔁 未验证（code-level, docs-loop 范围外） |
+| C4 | 版本常量硬编码过期 | `server/src/index.ts:77-80`, `agent-node/src/cli.ts:23`, `agent-network/bin/cli.ts:851`, `agent-network/bin/cli.ts:1348` | MCP server version 仍 `0.5.0`；agent-node fallback `2.1.0`；node config `anet_version` 写 `0.1.0`/`0.0.23`。 | 统一从 package.json 或单一 version module 读取；配置 schema 版本要独立命名，如 `config_schema_version`。 | 🔁 未验证（code-level） |
+| C5 | dist 是 ignored 本地产物但 npm pack 会使用 | `agent-network/dist/*`, `agent-node/dist/*`, `.gitignore` 忽略 `dist/` | `npm pack --dry-run` 会把当前本地 `dist` 打进去；如果未先 build，可能发布旧产物。 | publish 必须只走 clean checkout + build；本地 review 时忽略 dist；可加 `prepack` 强制 build 或 CI artifact 发布。 | 🔁 未验证（release infra） |
+| C6 | docs 说 WeChat/Feishu “未跑通”但结构图仍当一等模块 | `README.md:209`, `docs-site/docs/guide/architecture.md:51`, `server/README.md:153` | 状态文字承认只有 Telegram，但架构/教程仍把 WeChat/Feishu放进主路径。 | 主架构写“planned adapters”；当前可用矩阵只列 Telegram。 | ✅ 已处理（channels.md 现明确标外部插件 + [R72](https://github.com/sleep2agi/agent-network/commit/70b946f) architecture.md L51/L394 ZH+EN sync） |
 
 ## P2：可延后但建议整理
 
