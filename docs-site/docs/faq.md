@@ -162,7 +162,8 @@ ufw allow 9200
 # 检查 API Key 是否正确
 curl -H "Authorization: Bearer $MINIMAX_API_KEY" \
   https://api.minimaxi.com/anthropic/v1/messages \
-  -d '{"model":"MiniMax-M2.7","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"<minimax-model-id>","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}'
+# 把 <minimax-model-id> 替换为你 MiniMax 账号当前可用的 model id（查 https://platform.minimaxi.com 控制台）
 ```
 
 注意：
