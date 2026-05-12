@@ -48,7 +48,7 @@ Every Agent needs a unique name in CommHub -- that's the alias. Other agents and
 
 ```bash
 # "coder-1" is this Agent's alias
-anet node create coder-1 --runtime claude-agent-sdk --model claude-3-5-haiku-20241022
+anet node create coder-1 --runtime claude-agent-sdk --model MiniMax-M2.7
 ```
 
 In the Dashboard ChatPanel, select "coder-1" and send a Task:

@@ -138,7 +138,7 @@ anet hub start
 
 ```bash
 # 创建一个 Agent
-anet node create 文案1号 --runtime claude-agent-sdk --model claude-3-5-haiku-20241022
+anet node create 文案1号 --runtime claude-agent-sdk --model MiniMax-M2.7
 
 # 启动它（它会连上 CommHub，等任务）
 anet node start 文案1号
