@@ -45,6 +45,7 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 | DASH-07 | [tests/qa-dash-07-auth-boundary](../../tests/qa-dash-07-auth-boundary/) | hub-side auth boundary（24 个探测：GET/POST/SSE/MCP/admin） |
 | HUB-05 | [tests/qa-hub-05-roundtrip](../../tests/qa-hub-05-roundtrip/) | commhub register→mint→send→SSE→DB |
 | HUB-06 | [tests/qa-hub-06-token-revoke](../../tests/qa-hub-06-token-revoke/) | commhub utok/ntok 撤销契约 |
+| HUB-06b | [tests/qa-hub-06b-cross-user-isolation](../../tests/qa-hub-06b-cross-user-isolation/) | commhub 跨用户 IDOR 边界 |
 | HUB-07 | [tests/qa-hub-07-sse-reconnect](../../tests/qa-hub-07-sse-reconnect/) | commhub SSE 断重连 + get_inbox 拉 backlog |
 | HUB-08 | [tests/qa-hub-08-restart-persistence](../../tests/qa-hub-08-restart-persistence/) | commhub 重启不丢状态 + SSE 重订 |
 | HUB-09 | [tests/qa-hub-09-task-state-machine](../../tests/qa-hub-09-task-state-machine/) | task 状态机 3 分支 + terminal no-op |

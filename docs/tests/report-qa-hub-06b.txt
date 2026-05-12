@@ -1,0 +1,62 @@
+Test: qa-hub-06b-cross-user-isolation (matrix HUB-06b)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+
+Result: PASS
+Runtime: ~10s warm, ~30s cold
+
+Coverage (11 steps hard-asserted):
+- [0-2] hub + alice/bob registered + alice creates alice-private + alice-agent
+- [3]   alice sends task with content "top-secret-alice-payload"
+- [4]   bob's GET /api/networks does NOT include alice-private
+- [5]   bob's GET /api/tasks does NOT include alice's task content
+- [6]   bob's GET /api/status does NOT include alice-agent session
+- [7]   bob's GET /api/messages does NOT contain alice's secret string
+- [8]   bob's direct IDOR (GET /api/tasks?network_id=<alice_net>) → HTTP 403, no leak
+- [9]   bob's cross-tenant POST /api/task to alice-agent → HTTP 403, no inject
+- [10]  bob's mint POST /api/auth/node-token for alice's network → HTTP 400, no mint
+- [11]  alice still sees her own network + task (sanity)
+
+Contracts pinned (OWASP A01 — Broken Access Control class):
+
+1. Network membership scopes all list queries
+   /api/networks GET uses getUserAllNetworks(user_id) → only member networks.
+   /api/tasks / /api/messages / /api/status all run through addNetworkScope
+   which injects WHERE network_id IN (user's networks).
+   Bob is not a member of alice-private → all his list queries return empty
+   even without any network_id filter.
+
+2. Explicit network_id IDOR is checked server-side
+   /api/task POST L788:
+     if (!isAdmin && !getUserNetworkRole(restAuth.userId, body.network_id))
+       return 403 access denied
+   /api/tasks GET (read-side IDOR): also goes through addNetworkScope.
+   Bob's "but I know the network_id" attack returns 403.
+
+3. createNetworkTokenForNode enforces network role
+   auth.ts L132:
+     const role = getUserNetworkRole(userId, networkId);
+     if (!role || role === "viewer") return "no write access"
+   Bob can't mint ntok for alice's network (he has no role on it).
+
+Test approach notes:
+- Used alice and bob = SECOND and THIRD registered users (admin = first,
+  bootstrapped with --username admin). All three are independent users,
+  none member of others' networks except via register() auto-creating
+  a "default" network per user (alice's default ≠ alice-private; isolation
+  still holds across all of them).
+- The "first user is admin" relaxed-password rule (test30 / R12) doesn't
+  affect this — alice / bob are not admin, normal strict path applies.
+
+Observation surfaced:
+  Status codes for cross-tenant attempts: GET /api/tasks?network_id= → 403,
+  POST /api/task → 403, POST /api/auth/node-token → 400 (validation
+  reports "no write access" as 400, not 403). Inconsistent but secure.
+  Pinning for now; SDK clients should treat 400/403 from auth endpoints
+  as "denied", not as bad request.
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip + procps
+  - @sleep2agi/agent-network@preview from npm
+  - 0 LLM API calls

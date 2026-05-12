@@ -56,6 +56,7 @@ L1_TESTS=(
   "qa-dash-07-auth-boundary"
   "qa-hub-05-roundtrip"
   "qa-hub-06-token-revoke"
+  "qa-hub-06b-cross-user-isolation"
   "qa-hub-07-sse-reconnect"
   "qa-hub-08-restart-persistence"
   "qa-hub-09-task-state-machine"
