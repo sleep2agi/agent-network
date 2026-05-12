@@ -1,6 +1,6 @@
 # Node 节点完整生命周期
 
-> 状态：定稿 → **已 ship**（2026-05-12 对齐 v0.8.1） | 日期：2026-04-10 | 作者：SDK马 + 通信牛 review
+> 状态：定稿 → **已 ship**（2026-05-12 对齐 v0.8.2） | 日期：2026-04-10 | 作者：SDK马 + 通信牛 review
 >
 > 本文设计的状态机和 `anet node create / start / stop / delete` 流程已在 v0.6 ~ v0.7 完整 ship。v0.8 增量：
 > - `anet doctor --fix` 自动 probe + 重发过期 `ntok_`
