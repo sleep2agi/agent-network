@@ -8,6 +8,19 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## 2026-05-12 — **v0.8.2-preview** claude-code-cli session resume 修复
+
+**预览版本**：
+- `@sleep2agi/agent-network@2.1.7-preview.2`
+
+### 修复
+
+- `claude-code-cli` runtime 创建节点时预生成 Claude session UUID。
+- 首次启动使用 `claude --session-id <uuid>` 绑定固定 session；检测到本机已有 `~/.claude/projects/<cwd>/<uuid>.jsonl` 后改用 `claude --resume <uuid>` 续会话，避免 `anet node start` 误开新对话。
+- `anet node start --new-session` 会生成并保存新的 session UUID。
+
+---
+
 ## 2026-05-11 — **v0.8.1 补丁** Dashboard SSE-online 全局修补 ✅ stable
 
 **版本同步**（npm `latest` tag，git tag `v0.8.1`）：

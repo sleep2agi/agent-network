@@ -1,0 +1,24 @@
+Test: test31-claude-code-cli-resume
+Date: 2026-05-12
+Command:
+  sg docker -c 'docker build -t anet-test31-claude-resume -f tests/test31-claude-code-cli-resume/Dockerfile .' &&
+  sg docker -c 'docker run --rm anet-test31-claude-resume'
+
+Result: PASS
+
+Coverage:
+- L0 old claude-code-cli node config without session gets a generated UUID and starts with --session-id.
+- L1 existing ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl starts with --resume <uuid>.
+- L2 anet node start --new-session writes a new UUID and starts with --session-id.
+- L3 legacy Claude CLI help without --session-id falls back to --resume and prints an upgrade warning.
+- L4 cwd encoding matches Claude Code project directory naming (/tmp/anet-r13-probe -> -tmp-anet-r13-probe).
+
+Key log:
+  [L0] old config without session gets session-id on first start
+  [anet] Claude Code session pinned: 5a915f64...
+  [L1] existing Claude jsonl uses --resume
+  [L2] --new-session writes a new UUID and uses --session-id
+  [anet] New Claude Code session saved: 781fd4c9...
+  [L3] legacy Claude CLI without --session-id falls back to --resume
+  [L4] cwd encoding matches Claude projects path
+  PASS test31 claude-code-cli resume

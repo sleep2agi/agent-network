@@ -100,7 +100,7 @@ config.json:
   "node_name": "指挥室",
   "runtime": "claude-code-cli",
   "model": "",
-  "session": "",
+  "session": "550e8400-e29b-41d4-a716-446655440000",
   "channels": ["server:commhub"],
   "tools": [],
   "env": {},
@@ -306,6 +306,8 @@ anet node start 时发现 tmux session 已存在
 ### 迁移规则
 
 **原则：旧节点能跑就不动，按需迁移。**
+
+Claude Code CLI 节点的 `session` 是预分配 UUID：首次启动用 `claude --session-id` 绑定，后续检测到 `~/.claude/projects/<cwd>/<uuid>.jsonl` 后自动切到 `claude --resume`。旧节点缺少 `session` 时由 `anet node start` 自动补一个。
 
 1. **anet 负责自动补 node_id**（agent-node 只读不写，避免双写）:
 ```typescript

@@ -92,7 +92,7 @@ anet node start my-bot
 ```json
 {
   "runtime": "claude-code-cli",
-  "session": "",
+  "session": "550e8400-e29b-41d4-a716-446655440000",
   "flags": {
     "dangerouslySkipPermissions": true,
     "teammateMode": "in-process"
@@ -103,7 +103,7 @@ anet node start my-bot
 ### 注意
 
 - 需要本机已 `claude --version` 能跑（即 Claude Code CLI 已安装并登录）
-- `session` 字段会自动保存，下次 `anet node resume` 可以恢复对话历史
+- `session` 字段由 `anet node create` 预生成。首次 `anet node start` 会用 `claude --session-id <uuid>` 绑定这个 UUID；之后只要 `~/.claude/projects/<cwd>/<uuid>.jsonl` 已存在，就自动用 `claude --resume <uuid>` 续同一个 Claude Code 对话。
 - 与 SDK runtime 的关键差别：CLI runtime 拥有 Claude Code 的全套能力（文件操作 / Bash 执行 / MCP 工具）
 
 ---

@@ -12,6 +12,7 @@
 
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 import { spawn, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { checkbox, confirm, select } from "@inquirer/prompts";
@@ -26,6 +27,23 @@ function globalConfigPath() { return join(home, ".anet", "config.json"); }
 function serverConfigPath() { return join(home, ".anet", "server", "config.json"); }
 function adminUtokPath() { return join(home, ".anet", "server", "admin-utok.json"); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
+function encodeCwd(cwd: string): string { return cwd.replace(/\//g, "-"); }
+function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
+  if (!uuid) return false;
+  return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
+}
+
+let claudeSessionIdSupport: boolean | null = null;
+function claudeSupportsSessionId(): boolean {
+  if (claudeSessionIdSupport !== null) return claudeSessionIdSupport;
+  try {
+    const help = execSync("claude --help", { encoding: "utf-8", timeout: 5000 });
+    claudeSessionIdSupport = help.includes("--session-id");
+  } catch {
+    claudeSessionIdSupport = false;
+  }
+  return claudeSessionIdSupport;
+}
 
 // Token/hub from: CLI --token > env > global config
 function getToken(): string {
@@ -916,7 +934,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       ...(runtime === "claude-code-cli" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
       ...(opts["max-turns"] ? { maxTurns: parseInt(opts["max-turns"]) } : {}),
     },
-    ...(opts.session ? { session: opts.session } : {}),
+    ...(opts.session || runtime === "claude-code-cli" ? { session: opts.session || randomUUID() } : {}),
   };
   return profile;
 }
@@ -1632,8 +1650,26 @@ async function launchAgent(id: string, forceNewSession = false) {
     }
     if (profile.flags.teammateMode) claudeArgs.push("--teammate-mode", profile.flags.teammateMode);
 
-    if (willResume) {
-      claudeArgs.push("--resume", session);
+    if (!profile.session) {
+      profile.session = randomUUID();
+      saveProfile(nodeId, profile);
+    }
+
+    let launchedWithResume = false;
+    const supportsSessionId = claudeSupportsSessionId();
+    if (!supportsSessionId) {
+      console.warn(`[anet] ⚠ Your Claude Code CLI does not advertise --session-id. Upgrade @anthropic-ai/claude-code to avoid first-run resume drift.`);
+      claudeArgs.push("--resume", profile.session);
+      launchedWithResume = true;
+    } else if (forceNewSession) {
+      profile.session = randomUUID();
+      saveProfile(nodeId, profile);
+      claudeArgs.push("--session-id", profile.session);
+    } else if (sessionFileExists(profile.session)) {
+      claudeArgs.push("--resume", profile.session);
+      launchedWithResume = true;
+    } else {
+      claudeArgs.push("--session-id", profile.session);
     }
 
     claudeArgs.push("-n", displayName);
@@ -1643,13 +1679,10 @@ async function launchAgent(id: string, forceNewSession = false) {
     if (child.pid) writeFileSync(pidFile, String(child.pid));
     child.on("exit", (code) => {
       try { rmSync(pidFile, { force: true }); } catch {}
-      if (!willResume || forceNewSession) {
-        console.log(`\n[anet] Tip: bind this Claude Code session with:`);
-        console.log(`[anet]   anet session ls`);
-        console.log(`[anet]   anet node resume ${nodeId} --session <session-id>`);
-        if (forceNewSession && session) {
-          console.log(`[anet] Next "anet node start ${nodeId}" will still resume ${session.slice(0, 8)}... until you rebind.`);
-        }
+      if (forceNewSession) {
+        console.log(`\n[anet] New Claude Code session saved: ${profile.session?.slice(0, 8)}...`);
+      } else if (!launchedWithResume) {
+        console.log(`\n[anet] Claude Code session pinned: ${profile.session?.slice(0, 8)}...`);
       }
       process.exit(code || 0);
     });
