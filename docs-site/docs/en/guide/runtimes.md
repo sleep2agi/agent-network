@@ -177,14 +177,14 @@ anet node start  →  spawn agent-node subprocess
 ANTHROPIC_API_KEY=sk-ant-xxx \
 anet node create planner \
   --runtime claude-agent-sdk \
-  --model claude-sonnet-4-6
+  --model <anthropic-model-id>
 ```
 
 **MiniMax**:
 ```bash
 anet node create translator \
   --runtime claude-agent-sdk \
-  --model MiniMax-M2.7 \
+  --model <minimax-model-id> \
   --env "ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic" \
   --env "ANTHROPIC_AUTH_TOKEN=sk-cp-xxx"
 ```
@@ -280,7 +280,7 @@ codex auth login  # one-time
 
 anet node create coder \
   --runtime codex-sdk \
-  --model gpt-5 \
+  --model <codex-model-id> \
   --tools Read,Write,Edit,Bash,Glob,Grep
 ```
 
@@ -301,12 +301,12 @@ anet node create planner --runtime claude-code-cli
 # 2. MiniMax agent — translation
 anet node create translator \
   --runtime claude-agent-sdk \
-  --model MiniMax-M2.7 \
+  --model <minimax-model-id> \
   --env "ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic" \
   --env "ANTHROPIC_AUTH_TOKEN=sk-cp-xxx"
 
 # 3. Codex agent — code writing
-anet node create coder --runtime codex-sdk --model gpt-5
+anet node create coder --runtime codex-sdk --model <codex-model-id>
 
 # 4. Start all three
 anet node start planner

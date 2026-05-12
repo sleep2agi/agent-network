@@ -177,14 +177,14 @@ anet node start  →  spawn agent-node 子进程
 ANTHROPIC_API_KEY=sk-ant-xxx \
 anet node create planner \
   --runtime claude-agent-sdk \
-  --model claude-sonnet-4-6
+  --model <anthropic-model-id>
 ```
 
 **MiniMax**：
 ```bash
 anet node create translator \
   --runtime claude-agent-sdk \
-  --model MiniMax-M2.7 \
+  --model <minimax-model-id> \
   --env "ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic" \
   --env "ANTHROPIC_AUTH_TOKEN=sk-cp-xxx"
 ```
@@ -193,7 +193,7 @@ anet node create translator \
 ```json
 {
   "runtime": "claude-agent-sdk",
-  "model": "MiniMax-M2.7",
+  "model": "<minimax-model-id>",
   "env": {
     "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "sk-cp-xxx"
@@ -292,7 +292,7 @@ codex auth login  # 一次性
 
 anet node create coder \
   --runtime codex-sdk \
-  --model gpt-5 \
+  --model <codex-model-id> \
   --tools Read,Write,Edit,Bash,Glob,Grep
 ```
 
@@ -300,7 +300,7 @@ anet node create coder \
 ```json
 {
   "runtime": "codex-sdk",
-  "model": "gpt-5",
+  "model": "<codex-model-id>",
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 }
 ```
@@ -322,12 +322,12 @@ anet node create planner --runtime claude-code-cli
 # 2. MiniMax agent —— 翻译 / 文案
 anet node create translator \
   --runtime claude-agent-sdk \
-  --model MiniMax-M2.7 \
+  --model <minimax-model-id> \
   --env "ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic" \
   --env "ANTHROPIC_AUTH_TOKEN=sk-cp-xxx"
 
 # 3. Codex agent —— 写代码
-anet node create coder --runtime codex-sdk --model gpt-5
+anet node create coder --runtime codex-sdk --model <codex-model-id>
 
 # 4. 三个都启动
 anet node start planner
