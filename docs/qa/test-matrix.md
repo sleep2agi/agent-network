@@ -64,7 +64,7 @@
 | ID | 目标文件 | 测什么 | 优先级 |
 |----|----------|--------|--------|
 | UT-01 | `server/src/auth.ts` | utok / ntok 生成格式、过期、签名校验 | ⭐ 安全核心 |
-| UT-02 | `server/src/password-dict.ts` | 弱密码命中字典即拒 | 快可上 |
+| UT-02 | `server/src/password-dict.ts` | 弱密码命中字典即拒 | ✅ [qa-ut-02](../../tests/qa-ut-02-password-dict/) 19 断言 PASS，local ~55ms / Docker ~0.5s |
 | UT-03 | `server/src/db.ts` | task 状态机非法迁移被拒（completed→pending 等） | ⭐ |
 | UT-04 | `agent-network/bin/cli.ts` 解析层 | flag / 子命令解析（先重构成可测纯函数） | 大文件，分多轮 |
 | UT-05 | `agent-network/src/client.ts` | 已有 [client.test.ts](../../agent-network/src/client.test.ts) 保持，按需补边界 | 维护 |

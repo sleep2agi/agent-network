@@ -1,0 +1,35 @@
+Test: qa-ut-02-password-dict (matrix UT-02)
+Date: 2026-05-12
+Layer: L0 unit (code view, pure data + computed set)
+
+Result: PASS
+Runtime:
+  local:  bun test  ~55ms (server/ working dir)
+  Docker: build cold ~10s, run ~0.5s including image start; tests themselves ~25ms
+
+Commands:
+  # local (preferred for dev loop)
+  cd server && bun test src/password-dict.test.ts
+
+  # Docker (CI / 全平台一致性)
+  sg docker -c 'docker build -t anet-qa-ut-02 -f tests/qa-ut-02-password-dict/Dockerfile .'
+  sg docker -c 'docker run --rm anet-qa-ut-02'
+
+19 assertions / 25 expect() calls covering:
+  - Common literal entries: 123456, password, qwerty, admin, letmein, iloveyou, passw0rd
+  - Generated family: 6-digit zero-padded numbers (000000 .. 000999)
+  - Generated family: passwordN, qwertyN for N=0..999
+  - Case contract: Set stores lowercase only; caller must .toLowerCase()
+    — pins server/src/auth.ts L26 behavior (`WEAK_PASSWORDS.has(password.toLowerCase())`)
+  - Strong passwords stay out: StrongPassw0rd, multi-word, mixed-symbol etc.
+  - Size sanity: Set.size > 3000 (89 literals + 3000 family entries)
+
+Why this test matters (vs the existing test30 step 3 end-to-end check):
+  test30 verifies the HTTP endpoint rejects 'password' / '123456'. That covers
+  the integration but takes ~60s and only checks 2 inputs. The unit test
+  exercises 19 inputs in 25ms and pins the lowercase contract that the auth
+  layer relies on. Future refactors that touch either side fail fast.
+
+Resources:
+  - bun 1.x (oven/bun:1 image, ~200MB) for the Docker path
+  - no network, no DB, no commhub-server source needed
