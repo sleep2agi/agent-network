@@ -52,7 +52,7 @@ What happens:
 - Output prints a LAN URL (so other machines can join) plus a snippet to wipe state
 
 ::: warning Change the default password before exposing publicly
-The default `admin / anethub` is fine only for local quick-start. **For any `--host 0.0.0.0` / public deployment, run `anet passwd` immediately** to set a strong password (≥ 8 chars + not in the weak-password dictionary). You can also set your own credentials at bootstrap via `anet hub start --username vincent --password 'mypass2026!'`.
+The default `admin / anethub` is fine only for local quick-start. **For any `--host 0.0.0.0` / public deployment, run `anet passwd` immediately** to set a strong password (≥ 8 chars + not in the weak-password dictionary). You can also set your own credentials at bootstrap via `anet hub start --username alice --password 'your-strong-pass!'`.
 :::
 
 ## 3. Start the Dashboard

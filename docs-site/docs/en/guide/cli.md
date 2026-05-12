@@ -143,7 +143,7 @@ Starting CommHub Server on port 9200 (bind 127.0.0.1)...
 ::: tip Custom credentials (recommended for public deployment)
 Default `admin / anethub` is fine only for local quick-start. For public deployment, set a strong password at bootstrap:
 ```bash
-anet hub start --username vincent --password 'mypass2026!'
+anet hub start --username alice --password 'your-strong-pass!'
 ```
 Custom passwords must be ≥ 8 chars and not in the top-1000 weak-password dictionary. The default credentials bypass this strength check — change via `anet passwd` ASAP.
 :::

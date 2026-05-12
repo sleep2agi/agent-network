@@ -54,7 +54,7 @@ Hub 启动后：
 - 终端会打印局域网 URL（给其他机器加入），以及一段「重置数据」的提示
 
 ::: warning 公网部署立刻改密
-默认 `admin / anethub` 仅供本机快速上手。**任何 `--host 0.0.0.0` 公网部署立刻 `anet passwd` 改强密码**（≥ 8 位 + 非弱密码字典）。也可以在 `anet hub start --username vincent --password 'mypass2026!'` 时直接设你自己的凭证。
+默认 `admin / anethub` 仅供本机快速上手。**任何 `--host 0.0.0.0` 公网部署立刻 `anet passwd` 改强密码**（≥ 8 位 + 非弱密码字典）。也可以在 `anet hub start --username alice --password 'your-strong-pass!'` 时直接设你自己的凭证。
 :::
 
 ## 3. 启动 Dashboard
