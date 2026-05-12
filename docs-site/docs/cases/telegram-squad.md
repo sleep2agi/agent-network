@@ -135,7 +135,7 @@ anet channel add telegram --bot-token <BOT_TOKEN> --allow-user <TG_USER_ID>
 ## 下一步
 
 **继续看 case**：
-- [Hello World](/cases/hello-world) — 最简 6 步 demo（用 Vue 开胃）
+- [Hello World](/cases/hello-world) — 最简 6 步 demo（两个 Agent 对话开胃）
 - [辩论赛 Demo](/cases/debate) — 内置 6 Agent 辩论编排（一条命令跑完）
 - [翻译流水线](/cases/translation-pipeline) — 多 agent 串联流水线
 

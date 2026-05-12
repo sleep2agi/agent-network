@@ -135,7 +135,7 @@ This auto-generates the node's `channels/telegram` config — no `.env` edits re
 ## Next steps
 
 **More cases**:
-- [Hello World](/en/cases/hello-world) — minimal 6-step demo (warm-up with Vue)
+- [Hello World](/en/cases/hello-world) — minimal 6-step demo (two-agent conversation warm-up)
 - [Debate Demo](/en/cases/debate) — built-in 6-agent debate orchestration (one command)
 - [Translation pipeline](/en/cases/translation-pipeline) — multi-agent pipeline
 
