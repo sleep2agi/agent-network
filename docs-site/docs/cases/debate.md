@@ -118,3 +118,19 @@ anet demo debate --no-network --topic "..."
 tmux ls | grep debate-<suffix>- | awk -F: '{print $1}' | xargs -I{} tmux kill-session -t {}
 anet network delete net_xxx
 ```
+
+## 下一步
+
+**继续看 demo**：
+- [Hello World](/cases/hello-world) — 最简 6 步起步 demo
+- [翻译流水线](/cases/translation-pipeline) — 多 agent 串联流水线模式
+- [Telegram 派遣队](/cases/telegram-squad) — 接入 Telegram 实时调度
+
+**改造和深入**：
+- 想换模型？看 [多模型对比](/guide/multi-model) — DeepSeek / GLM / Kimi / Claude 各家 Anthropic-compatible endpoint
+- 想自己改 demo 行为？源码在 [agent-network/src/commands/demo/debate.ts](https://github.com/sleep2agi/agent-network/blob/main/src/commands/demo/debate.ts)
+- 想理解为啥每场都用独立 network 隔离？看 [网络与节点](/concepts/networks)
+
+**用 Dashboard 观察**：
+- 跑 `anet demo debate --keep` 保留现场 → 打开 [Dashboard](/guide/dashboard) → 在 Topology 里能看到 6 个 agent 的实时消息流
+- 任务面板能逐步看完整 9 步驱动逻辑

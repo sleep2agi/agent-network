@@ -98,3 +98,19 @@ Use `--keep`, then clean up manually:
 tmux ls | grep debate-<suffix>- | awk -F: '{print $1}' | xargs -I{} tmux kill-session -t {}
 anet network delete net_xxx
 ```
+
+## Next steps
+
+**More demos**:
+- [Hello World](/en/cases/hello-world) — minimal 6-step starter demo
+- [Translation pipeline](/en/cases/translation-pipeline) — multi-agent pipeline pattern
+- [Telegram squad](/en/cases/telegram-squad) — wire up Telegram for real-time dispatch
+
+**Customize and dig deeper**:
+- Switch models? See [multi-model comparison](/en/guide/multi-model) — DeepSeek / GLM / Kimi / Claude Anthropic-compatible endpoints
+- Hack the demo itself? Source at [agent-network/src/commands/demo/debate.ts](https://github.com/sleep2agi/agent-network/blob/main/src/commands/demo/debate.ts)
+- Why each run gets an isolated network? See [networks and nodes](/en/concepts/networks)
+
+**Watch in the Dashboard**:
+- Run `anet demo debate --keep` to preserve the run → open the [Dashboard](/en/guide/dashboard) → live message flow across 6 agents in the Topology view
+- The task panel shows the full 9-step driver logic

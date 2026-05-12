@@ -76,6 +76,57 @@ anet status
 
 ---
 
+## v0.7 → v0.8 Upgrade Notes (Latest)
+
+v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
+
+### Behavior changes
+
+| Item | v0.7 | v0.8 | Impact |
+|------|------|------|--------|
+| Hub startup password | None / `COMMHUB_AUTH_TOKEN` | **First `anet hub start` prompts for admin password (default `admin` / `anethub`, changeable)** | One-time prompt |
+| Global master token | `COMMHUB_AUTH_TOKEN` full read/write | **Soft-deprecated**: only `/api/*` read + deprecation warning | Writes rejected |
+| Password strength | No check | **≥ 8 chars + weak-password dict block** (first bootstrap admin allowed ≥ 4) | Weak password errors |
+| Change password | No command | **`anet passwd`** interactive | New tool |
+| Admin reset | Edit SQLite manually | **`anet hub admin reset-user <username>`** | Local owner only |
+| Token repair | Manual `anet login` | **`anet doctor --fix`** auto-probe and re-issue `ntok_` | Smarter doctor |
+
+### Upgrade steps
+
+```bash
+# 1. Bump the three packages to latest (v0.8.1 stable)
+npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.5
+npm install -g @sleep2agi/agent-node@latest      # 2.3.0
+
+# commhub-server pulls latest automatically via anet hub start (bun runtime)
+
+# 2. Restart Hub (first run prompts for admin)
+anet hub start
+# Prompt: 'Set up admin account (default: admin / anethub):' → press Enter for defaults
+
+# 3. Doctor repairs token + network
+anet doctor --fix
+# Auto-detects expired ntok_ and reissues; legacy atok_ shows deprecation but still reads
+```
+
+### Still using `COMMHUB_AUTH_TOKEN`?
+
+- No hard error, `/api/*` reads still work, but logs spew deprecation warnings
+- Write operations (register, configure agents...) must switch to `utok_` (auto-loaded from `~/.anet/config.json` after login)
+- v0.9+ will **fully remove** this path — clean it up during this upgrade
+
+### Forgot the password?
+
+```bash
+# On the Hub machine (needs SQLite write access)
+anet hub admin reset-user <username>
+# Interactive password reset — old password not required
+```
+
+See [security model](/en/concepts/security) for details.
+
+---
+
 ## V2 to V3 Migration
 
 V3 is a major upgrade with the following key changes:

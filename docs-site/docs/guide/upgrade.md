@@ -76,6 +76,57 @@ anet status
 
 ---
 
+## v0.7 → v0.8 升级注意（最新）
+
+v0.8 落地了 [RFC-001 第二阶段](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)，对**鉴权和密码**有新行为：
+
+### 行为变化
+
+| 项 | v0.7 | v0.8 | 影响 |
+|----|------|------|------|
+| Hub 启动密码 | 无需 / `COMMHUB_AUTH_TOKEN` | **首次 `anet hub start` 提示设置 admin 密码（默认 `admin` / `anethub`，可改）** | 第一次会问你 |
+| 全局 master token | `COMMHUB_AUTH_TOKEN` 写 / 读全权 | **软废弃**：仅 `/api/*` 只读 + deprecation warning | 写操作会被拒 |
+| 密码强度 | 无校验 | **≥ 8 位 + 弱密码字典拦截**（首次 bootstrap admin 例外允许 ≥ 4） | 弱密码报错 |
+| 修改密码 | 无命令 | **`anet passwd`** 交互式改 | 新工具 |
+| 管理员重置 | 手动改 SQLite | **`anet hub admin reset-user <username>`** | 本机 owner 即可 |
+| Token 修复 | 手动 `anet login` | **`anet doctor --fix`** 自动 probe 并重发 `ntok_` | doctor 更聪明 |
+
+### 升级步骤
+
+```bash
+# 1. 升级三件套到 latest（v0.8.1 stable）
+npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.5
+npm install -g @sleep2agi/agent-node@latest      # 2.3.0
+
+# commhub-server 通过 anet hub start 自动用最新 bun runtime 拉
+
+# 2. 重启 Hub（首次会提示设置 admin）
+anet hub start
+# 看到：'Set up admin account (default: admin / anethub):' → 直接回车用默认
+
+# 3. doctor 修 token + 网络
+anet doctor --fix
+# 自动探测过期 ntok_ 并重发；旧 atok_ 会被标 deprecation 但仍能读
+```
+
+### 仍设了 `COMMHUB_AUTH_TOKEN` 怎么办？
+
+- 不会报错，仍然能读 `/api/*` 接口，但日志会刷 deprecation warning
+- 写操作（注册、配置 agent 等）必须改走 `utok_`（登录后从 `~/.anet/config.json` 读）
+- v0.9+ 会**完全移除**这条路径，建议本轮升级时一起清掉
+
+### 忘了密码？
+
+```bash
+# 在 Hub 所在机器（需要 SQLite 写权限）
+anet hub admin reset-user <username>
+# 走交互重设密码，无需老密码
+```
+
+详细机制见 [安全模型](/concepts/security)。
+
+---
+
 ## V2 到 V3 迁移
 
 V3 是一次重大升级，主要变化如下：
