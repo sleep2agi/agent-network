@@ -110,7 +110,7 @@ cat > "${WORKDIR}/.anet/nodes/codex-commander/channels/telegram/.env" <<EOF
 TELEGRAM_BOT_TOKEN=123456:fake-bot-token
 EOF
 cat > "${WORKDIR}/.anet/nodes/codex-commander/channels/telegram/access.json" <<EOF
-{"allow":["7612221352"]}
+{"allow":["999999999"]}
 EOF
 [ -f "${WORKDIR}/.anet/nodes/codex-commander/config.json" ] && pass "node config written" || fail "node config missing"
 [ -f "${WORKDIR}/.anet/nodes/codex-commander/channels/telegram/.env" ] && [ -f "${WORKDIR}/.anet/nodes/codex-commander/channels/telegram/access.json" ] && pass "telegram channel config written" || fail "telegram channel config missing"
@@ -139,7 +139,7 @@ echo "$RECV_STATUS" | grep -q 'ok\\":true' && pass "receiver report_status ok" |
 echo ""
 
 echo "6. Simulate Telegram inbound -> agent receives task"
-SEND1=$(mcp_call "${NTOK}" "send_task" "{\"alias\":\"codex-commander\",\"task\":\"Telegram user: 请总结今天任务\",\"from_session\":\"telegram:7612221352\",\"network_id\":\"${NET_ID}\"}")
+SEND1=$(mcp_call "${NTOK}" "send_task" "{\"alias\":\"codex-commander\",\"task\":\"Telegram user: 请总结今天任务\",\"from_session\":\"telegram:999999999\",\"network_id\":\"${NET_ID}\"}")
 echo "$SEND1" | grep -q 'ok\\":true' && pass "telegram task dispatched" || { echo "$SEND1"; fail "telegram task dispatch"; }
 sleep 1
 INBOX1=$(mcp_call "${NTOK}" "get_inbox" "{\"alias\":\"codex-commander\",\"limit\":5}")
@@ -149,7 +149,7 @@ TASK1=$(task_id_by_content "Telegram user: 请总结今天任务")
 echo ""
 
 echo "7. Agent replies after processing"
-REPLY1=$(mcp_call "${NTOK}" "send_reply" "{\"alias\":\"telegram:7612221352\",\"text\":\"已收到，今天重点是测试、修文档、回归验证。\",\"in_reply_to\":\"${TASK1}\",\"status\":\"replied\",\"from_session\":\"codex-commander\"}")
+REPLY1=$(mcp_call "${NTOK}" "send_reply" "{\"alias\":\"telegram:999999999\",\"text\":\"已收到，今天重点是测试、修文档、回归验证。\",\"in_reply_to\":\"${TASK1}\",\"status\":\"replied\",\"from_session\":\"codex-commander\"}")
 echo "$REPLY1" | grep -q 'ok\\":true' && pass "send_reply ok" || { echo "$REPLY1"; fail "send_reply failed"; }
 sleep 1
 TASKS1=$(rest "${BASE}/api/tasks?network_id=${NET_ID}")

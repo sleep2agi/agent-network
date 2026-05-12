@@ -105,7 +105,7 @@ Telegram Bot API ←→ agent-node（内置 channel 模块）←→ Codex/Claude
 ```json
 {
   "dmPolicy": "allowlist",
-  "allowFrom": ["7612221352"],
+  "allowFrom": ["<your-telegram-user-id>"],
   "groups": {
     "-100123456": { "triggerOnMention": true }
   },

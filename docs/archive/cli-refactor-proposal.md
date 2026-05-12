@@ -110,7 +110,7 @@ anet start 指挥室
 
 ```bash
 anet create A站牛 --runtime codex-sdk --model gpt-5.4
-anet channel add telegram A站牛 --bot-token xxx --allow 7612221352
+anet channel add telegram A站牛 --bot-token xxx --allow <your-telegram-user-id>
 anet start A站牛
 ```
 
@@ -118,7 +118,7 @@ anet start A站牛
 
 ```bash
 anet create 小明 --runtime claude-agent-sdk --model MiniMax-M2.7
-anet channel add telegram 小明 --bot-token xxx --allow 7612221352
+anet channel add telegram 小明 --bot-token xxx --allow <your-telegram-user-id>
 anet start 小明
 ```
 
@@ -164,7 +164,7 @@ $ anet create
 
 ? Add Telegram channel? (y/n): y
 ? Telegram Bot Token: 123:ABC
-? Allow User ID [7612221352]: (回车)
+? Allow User ID [<your-telegram-user-id>]: (回车)
 
 ✅ Created node "小明" (claude-agent-sdk, MiniMax-M2.7)
 ✅ Telegram channel added
@@ -250,7 +250,7 @@ Node "A站牛" not found. Create it first: anet create A站牛 --runtime codex-s
 └── channels/
     └── telegram/
         ├── .env             # TELEGRAM_BOT_TOKEN=xxx (chmod 600)
-        ├── access.json      # { "allowFrom": ["7612221352"] }
+        ├── access.json      # { "allowFrom": ["<your-telegram-user-id>"] }
         ├── state.json       # { "offset": 12345 }
         └── inbox/           # 接收的图片/文件
 ```
