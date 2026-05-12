@@ -1,13 +1,13 @@
 # 上手指南
 
-本页是当前 stable（v0.8.1 / CLI v2.1.5）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
+本页是当前 stable（v0.8.2 / CLI v2.1.7）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
 
-::: tip 组件版本（v0.8.1，git tag `v0.8.1`）
+::: tip 组件版本（v0.8.2 stable，npm `latest` tag）
 本页涉及 4 个 npm 包，各自的职责：
 
 | 包 | 版本 | 用途 |
 |---|------|------|
-| `@sleep2agi/agent-network` | 2.1.5 | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
+| `@sleep2agi/agent-network` | 2.1.7 | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
 | `@sleep2agi/commhub-server` | 0.8.0 | 通信中枢（MCP + REST + SSE，SQLite 持久化） |
 | `@sleep2agi/agent-network-dashboard` | 0.4.2 | Web Dashboard（Next.js 16） |
 | `@sleep2agi/agent-node` | 2.3.0 | Agent 运行时（claude-agent-sdk / codex-sdk / http-api） |
@@ -159,7 +159,7 @@ anet node start remote-bot
 
 ## 已验证 vs 未验证
 
-::: info 已验证（当前 v0.8.1 stable，继承 v2 E2E 覆盖 + v0.8 新增回归）
+::: info 已验证（当前 v0.8.2 stable，继承 v2 E2E 覆盖 + v0.8 新增回归）
 - `anet hub start` + 默认账号自动创建
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`

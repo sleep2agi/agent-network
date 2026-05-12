@@ -2,12 +2,12 @@
 
 This is the current minimal local path for the stable packages. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
 
-::: tip Component versions (v0.8.1, git tag `v0.8.1`)
+::: tip Component versions (v0.8.2 stable, npm `latest` tag)
 This page touches four npm packages. Their responsibilities:
 
 | Package | Version | Purpose |
 |---|---|---|
-| `@sleep2agi/agent-network` | 2.1.5 | `anet` CLI (start hub / dashboard, manage nodes) |
+| `@sleep2agi/agent-network` | 2.1.7 | `anet` CLI (start hub / dashboard, manage nodes) |
 | `@sleep2agi/commhub-server` | 0.8.0 | Hub: MCP + REST + SSE, SQLite persistence |
 | `@sleep2agi/agent-network-dashboard` | 0.4.2 | Web Dashboard |
 | `@sleep2agi/agent-node` | 2.3.0 | Agent runtime |
@@ -155,7 +155,7 @@ anet node start remote-bot
 
 ## Verified vs unverified
 
-::: info Verified (v0.8.1 stable — inherits the v2 E2E coverage plus new v0.8 regressions)
+::: info Verified (v0.8.2 stable — inherits the v2 E2E coverage plus new v0.8 regressions)
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
