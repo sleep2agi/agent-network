@@ -123,10 +123,9 @@ A: `utok_` is **your** identity — operates across networks you belong to. `nto
 
 **Q: I'm adding an agent on another server, which token do I set?**
 A: None. Flow:
-1. `anet init --hub http://hub:9200`
-2. `anet login --username admin --password ...` ← gets `utok_` automatically
-3. `anet node create xxx ...` ← gets `ntok_` automatically
-4. `anet node start xxx` ← uses `ntok_` automatically
+1. `anet login --hub http://hub:9200 --username admin --password ...` ← one step that sets the hub URL and gets `utok_` (or two-step: `anet init --hub ...` then `anet login ...`)
+2. `anet node create xxx ...` ← gets `ntok_` automatically
+3. `anet node start xxx` ← uses `ntok_` automatically
 
 Whole flow: **zero manual token entry**.
 

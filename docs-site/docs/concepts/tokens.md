@@ -216,10 +216,9 @@ A：`admin / anethub`（快速上手默认）。**首次 `anet login` 之后立�
 
 **Q：我在另一台服务器加 agent，要用 COMMHUB_AUTH_TOKEN 吗？**
 A：**不要**。另一台服务器加 agent 只要：
-1. `anet init --hub http://hub:9200`
-2. `anet login --username admin --password anethub`
-3. `anet node create xxx ...`
-4. `anet node start xxx`
+1. `anet login --hub http://hub:9200 --username admin --password anethub`（一步配 hub + 登录；脚本化也可分两步：`anet init --hub ...` 然后 `anet login ...`）
+2. `anet node create xxx ...`
+3. `anet node start xxx`
 
 整个流程 0 接触 COMMHUB_AUTH_TOKEN。
 
