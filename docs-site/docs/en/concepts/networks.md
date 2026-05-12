@@ -163,9 +163,9 @@ Invite code properties:
 **v0.8 recommended**: on each target machine, run `anet node create` **locally** — don't copy `config.json` across machines. Each machine registers its own node, and the hub mints a unique `ntok_` per node so they don't collide.
 
 ```bash
-# On the target machine
-anet init --hub http://<hub-host>:9200        # configure hub address
-anet login --username admin --password ...     # login (obtain utok_)
+# On the target machine — one step: configure hub address + login (obtain utok_)
+anet login --hub http://<hub-host>:9200 --username admin --password ...
+
 anet network use prod                           # switch to target network
 anet node create remote-agent                   # CLI registers + receives ntok_
 anet node start remote-agent                    # start

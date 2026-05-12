@@ -163,9 +163,9 @@ anet network join inv_abc123def456
 **v0.8 推荐做法**：在每台目标机器上**直接 `anet node create`**，不要复制 `config.json`。每台机器的 node 是独立的注册，hub 自动颁发独立的 `ntok_`，互不冲突。
 
 ```bash
-# 在目标机器上
-anet init --hub http://<hub-host>:9200         # 配置 hub 地址
-anet login --username admin --password ...      # 用账号登录（拿到 utok_）
+# 在目标机器上 — 一步同时配 hub 地址 + 登录（拿到 utok_）
+anet login --hub http://<hub-host>:9200 --username admin --password ...
+
 anet network use prod                            # 切到目标 network
 anet node create remote-agent                    # CLI 自动跟 hub 注册 + 拿 ntok_
 anet node start remote-agent                     # 启动
