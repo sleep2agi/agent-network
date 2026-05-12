@@ -73,7 +73,8 @@ referencing the CVE (if assigned) and credit the reporter.
 - ✅ `chmod 600` on `~/.anet/server/admin-utok.json` (v0.8.0 bootstrap)
 - ✅ `anet doctor --fix` probes and reissues expired `ntok_`; agent-node SSE 401 auto-reload (v0.8.1)
 
-**Planned (v0.9+)**:
+**Planned (v0.9+)** — tracking issues come and go; the [open issues list](https://github.com/sleep2agi/agent-network/issues) is the source of truth. If you don't see an item below, feel free to open a tracking issue.
+
 - ⏳ **Argon2id** password hashing (SHA-256 today)
 - ⏳ Token TTL + revoke-all
 - ⏳ RFC-001 Phase 3 — fully remove `COMMHUB_AUTH_TOKEN` legacy code path (v1.0)
