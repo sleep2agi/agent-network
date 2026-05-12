@@ -12,6 +12,8 @@ Agent Network supports running agents with different AI models within the same n
 | **MiniMax M2.7** | `claude-agent-sdk` | Low cost, high throughput | Very low |
 | **InternLM Intern-S1-Pro** | `claude-agent-sdk` | Domestic model, scientific reasoning | Low |
 | **DeepSeek** | `claude-agent-sdk` | Code + reasoning, excellent value | Low |
+| **GLM 5.1** | `claude-agent-sdk` | Strong Chinese understanding (Zhipu, `open.bigmodel.cn/anthropic`) | Low |
+| **Kimi** | `claude-agent-sdk` | Long-context Q&A (Moonshot, `api.moonshot.cn/anthropic`) | Low |
 | **Xiaomi MiMo** | `claude-agent-sdk` | General chat ([platform.xiaomimimo.com](https://platform.xiaomimimo.com)) | Low |
 
 ::: tip Any Anthropic-compatible provider works
