@@ -19,7 +19,7 @@ hero:
 ---
 
 <section class="trust-row">
-  <div class="trust-item"><span class="trust-num">6</span><span class="trust-label">LLM Provider</span></div>
+  <div class="trust-item"><span class="trust-num">8+</span><span class="trust-label">LLM Provider</span></div>
   <div class="trust-item"><span class="trust-num">3</span><span class="trust-label">Runtime</span></div>
   <div class="trust-item"><span class="trust-num">100%</span><span class="trust-label">本地优先</span></div>
   <div class="trust-item"><span class="trust-num">v0.8.1</span><span class="trust-label">Stable</span></div>
