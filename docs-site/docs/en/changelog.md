@@ -13,7 +13,7 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 **Preview release**:
 - `@sleep2agi/agent-network@2.1.7-preview.2`
 
-**Related issue**: [#13](https://github.com/sleep2agi/agent-network/issues/13) (closed)
+**Related**: issue [#13](https://github.com/sleep2agi/agent-network/issues/13) (closed) · commit [f1e3d9c](https://github.com/sleep2agi/agent-network/commit/f1e3d9c) (`fix(cli): bind claude code sessions on first start`)
 
 ### Fixes
 
