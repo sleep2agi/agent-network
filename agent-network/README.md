@@ -148,7 +148,7 @@ A typical `config.json` after `anet node create`:
   "hub": "http://127.0.0.1:9200",
   "token": "ntok_...",
   "runtime": "claude-agent-sdk",
-  "model": "MiniMax-M2.7",
+  "model": "<minimax-model-id>",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
   "env": {
