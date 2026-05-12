@@ -152,6 +152,9 @@ A: Yes. Roles are per-network.
 **Q: What role does the default `admin / anethub` account have?**
 A: First-run creation sets it as hub-global admin + owner of the default network.
 
+**Q: Can a user be admin in just one network without being hub-global admin?**
+A: Yes. Make them a network owner without granting hub `admin` (i.e., don't add them to hub-global admin users). They control that one network but cannot reach hub-level admin endpoints.
+
 **Q: Viewers really can't write anything, not even dispatch tasks?**
 A: Correct. If you want "read + occasional dispatch", grant `member`.
 
