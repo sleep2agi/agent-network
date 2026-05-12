@@ -37,7 +37,7 @@ Only the latest minor version receives security updates.
 
 ## Known Risk Surface (v0.8.2 stable)
 
-If you self-host on the public internet, read [**`/deploy/production`**](https://anet.sh/deploy/production)
+If you self-host on the public internet, read [**`/en/deploy/production`**](https://anet.sh/en/deploy/production)
 before opening firewall ports. The headline items:
 
 1. **Default credentials** `admin / anethub` — fine for local quick-start; **change immediately** for any `--host 0.0.0.0` / public deployment via `anet passwd` (password strength ≥ 8 + weak-password dictionary enforced)
