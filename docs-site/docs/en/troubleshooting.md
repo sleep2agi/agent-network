@@ -502,5 +502,23 @@ Agent Node supports adjustable log levels:
 
 ## Still Having Issues?
 
-- **GitHub Issues**: [github.com/sleep2agi/agent-network/issues](https://github.com/sleep2agi/agent-network/issues)
+**Try these v0.8 auto-repair tools first**:
+
+- `anet doctor` — probes current hub / token / network state, prioritized output
+- `anet doctor --fix` — auto-probes expired ntok_ and reissues; agent-node SSE 401 auto-reloads
+- `anet hub admin reset-user <username>` — local owner on the Hub machine force-resets a user password (forgot-password recovery)
+- `anet passwd` — interactive password change
+
+**Still stuck**:
+
+- **GitHub Issues**: [github.com/sleep2agi/agent-network/issues](https://github.com/sleep2agi/agent-network/issues) — report bugs or search known issues
+- **GitHub Discussions**: [discussions](https://github.com/sleep2agi/agent-network/discussions) — usage questions / design discussion
 - **Source code**: All error messages can be found in `server/src/tools.ts` and `server/src/auth.ts`
+- **FAQ**: [Frequently asked questions](/en/faq) — model choice / cost / upgrade caveats
+
+## Next steps
+
+- [Upgrade to v0.8](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — upgrade path and behavior changes for older installs
+- [Security design](/en/concepts/security) — read before chasing an auth issue
+- [Architecture](/en/guide/architecture) — locate which layer is failing
+- [Community](/en/community) — chat groups and discussion

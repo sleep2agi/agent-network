@@ -501,5 +501,23 @@ Agent Node 支持调整日志级别：
 
 ## 还有问题？
 
-- **GitHub Issues**: [github.com/sleep2agi/agent-network/issues](https://github.com/sleep2agi/agent-network/issues)
-- **查看源码**: 所有错误消息可以在 `server/src/tools.ts` 和 `server/src/auth.ts` 中找到
+**先试这几个 v0.8 自动修复工具**：
+
+- `anet doctor` — 探测当前 hub / token / network 状态，问题分级输出
+- `anet doctor --fix` — 自动 probe 过期 ntok_ 并重发；agent-node SSE 401 自动 reload
+- `anet hub admin reset-user <username>` — 本机 owner 在 Hub 机器强制重置用户密码（忘密码场景）
+- `anet passwd` — 交互改密码
+
+**还不行**：
+
+- **GitHub Issues**：[github.com/sleep2agi/agent-network/issues](https://github.com/sleep2agi/agent-network/issues) — 报 bug 或搜已知问题
+- **GitHub Discussions**：[discussions](https://github.com/sleep2agi/agent-network/discussions) — 使用问题 / 设计讨论
+- **查看源码**：所有错误消息可以在 `server/src/tools.ts` 和 `server/src/auth.ts` 中找到
+- **FAQ**：[常见问题](/faq) — 模型选择 / 费用 / 升级注意
+
+## 下一步
+
+- [升级到 v0.8](/guide/upgrade#v0-7-v0-8-升级注意-最新) — 老用户升级路径 + 行为变化
+- [安全设计](/concepts/security) — 排查鉴权问题前看一遍
+- [架构概览](/guide/architecture) — 出问题时定位是哪一层
+- [社区](/community) — 加群和讨论

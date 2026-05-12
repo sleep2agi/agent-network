@@ -122,8 +122,9 @@ anet passwd          # Change password
 anet token create k  # Create API token for an agent
 anet token           # List tokens
 anet token revoke x  # Revoke a token
-anet license         # Check trial/license status
-anet activate <key>  # Activate license key
+# anet license / anet activate <key> — legacy v0.6 license commands;
+# Apache-2.0 OSS no longer needs them. Hub still has a `licenses` SQLite table
+# for backward-compat. If you hit `license_expired`, see docs-site/troubleshooting.
 ```
 
 ## Managing Agents
