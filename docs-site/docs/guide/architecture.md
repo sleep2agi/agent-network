@@ -48,7 +48,7 @@ graph TB
 | **anet CLI** | 每台客户端机器 | -- | 管理命令行工具（39 个命令） | `@sleep2agi/agent-network` |
 | **Agent Node** | 每台客户端机器 | -- | AI 工作节点（接任务、调 AI、回结果） | `@sleep2agi/agent-node` |
 | **Claude Code** | 客户端机器 | -- | 交互式 AI 开发（通过 MCP 接入网络） | Anthropic 官方 |
-| **Channel 插件** | 客户端机器 | -- | 接入 Telegram/微信/飞书 | `channel/` |
+| **Channel 插件** | 客户端机器 | -- | 接入 Telegram（v0.8 stable）；微信 / 飞书走外部 MCP 插件（[详见 channels.md](/guide/channels)） | `channel/` |
 
 ### 端口说明
 
@@ -393,11 +393,10 @@ Dashboard 是独立 Web 进程，通过 REST 连接 CommHub：
 
 ## Channel 插件
 
-Channel 插件让 Agent 可以接入外部通信平台。当前支持：
+Channel 插件让 Agent 可以接入外部通信平台。
 
-- **Telegram** -- 通过 Bot API 接入
-- **微信** -- 通过 ClawBot 接入
-- **飞书** -- 通过飞书开放平台接入
+- **Telegram** -- 通过 Bot API 接入（v0.8 stable，`anet channel add telegram`）
+- **微信 / 飞书** -- 走**外部** MCP 插件（不在 `@sleep2agi/commhub-server` 内）；详见 [Channel 插件文档](/guide/channels)
 
 **部署位置**：客户端机器，以 MCP Server 形式挂载到 Claude Code。
 

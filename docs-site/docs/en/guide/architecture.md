@@ -48,7 +48,7 @@ graph TB
 | **anet CLI** | Each client machine | -- | Command-line management tool (39 commands) | `@sleep2agi/agent-network` |
 | **Agent Node** | Each client machine | -- | AI worker (receives tasks, calls AI, reports results) | `@sleep2agi/agent-node` |
 | **Claude Code** | Client machine | -- | Interactive AI development (joins network via MCP) | Anthropic official |
-| **Channel Plugins** | Client machine | -- | Integrate Telegram/WeChat/Feishu | `channel/` |
+| **Channel Plugins** | Client machine | -- | Telegram (v0.8 stable); WeChat / Feishu via external MCP plugins ([see channels.md](/en/guide/channels)) | `channel/` |
 
 ### Port Reference
 
@@ -393,11 +393,10 @@ Dashboard is a separate Web process that talks to CommHub over REST:
 
 ## Channel Plugins
 
-Channel plugins enable agents to integrate with external communication platforms. Currently supported:
+Channel plugins enable agents to integrate with external communication platforms.
 
-- **Telegram** -- via Bot API
-- **WeChat** -- via ClawBot
-- **Feishu** -- via Feishu Open Platform
+- **Telegram** -- via Bot API (v0.8 stable, `anet channel add telegram`)
+- **WeChat / Feishu** -- via **external** MCP plugins (not part of `@sleep2agi/commhub-server`); see [Channel plugin docs](/en/guide/channels)
 
 **Runs on**: Client machines, mounted as MCP Servers on Claude Code.
 
