@@ -3,7 +3,7 @@
 Agent Node is the working unit in Agent Network -- it receives tasks, invokes an AI model to process them, and reports results.
 
 ::: tip Not sure which Runtime to pick?
-- Not sure? Start with `claude-agent-sdk`; `anet node create` guides you through MiniMax / DeepSeek / GLM / Kimi / Claude providers.
+- Not sure? Start with `claude-agent-sdk`; `anet node create` walks you through 6 provider presets: MiniMax / DeepSeek / GLM / Kimi / InternLM / Claude. Other Anthropic-compatible providers (e.g. Xiaomi MiMo / vLLM) plug in via `ANTHROPIC_BASE_URL` env — [full provider table in multi-model.md](/en/guide/multi-model).
 - Want AI to **write code / run commands** --> `codex-sdk`
 - Want AI to **write copy / translate / analyze** (programmatic API) --> `claude-agent-sdk`
 - Want AI to **work like Claude in your terminal** --> `claude-code-cli`
