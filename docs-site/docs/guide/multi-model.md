@@ -150,3 +150,19 @@ ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 | 科学研究 | 书生 Intern-S1 | 科研专长 |
 | 预算有限 | MiniMax + DeepSeek 混搭 | 两个都极便宜 |
 | 全能（不差钱） | Claude Opus 4 | 什么都行 |
+
+## 下一步
+
+**直接用**：
+- [Hello World](/cases/hello-world) — 用 MiniMax 跑一个最简 6 步 demo
+- [辩论赛](/cases/debate) — 6 agent + MiniMax 一条命令跑完
+- [翻译流水线](/cases/translation-pipeline) — 多模型对比同一段翻译
+
+**配置和调优**：
+- 钱花在哪儿？看 [一键安装与起步](/guide/one-shot-install) 一节的成本对比
+- 想把多个 API Key 持久化？看 [Agent Node 配置](/guide/agent-node) 的 env 字段
+- API 限流报错？多数厂商有并发上限，[FAQ](/faq) 里有应对策略
+
+**深入原理**：
+- 为什么 `ANTHROPIC_BASE_URL` 能切所有国产模型？看上方 [ANTHROPIC_BASE_URL 原理](#anthropic-base-url-原理) 一节
+- 不同 runtime 的区别？看 [Runtimes](/guide/runtimes) — `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` 三选一

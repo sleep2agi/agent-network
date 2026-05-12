@@ -214,3 +214,19 @@ for i in 1 2 3 4 5; do
   anet node start "translator-${i}" &
 done
 ```
+
+## Next steps
+
+**Use it now**:
+- [Hello World](/en/cases/hello-world) — minimal 6-step demo with MiniMax
+- [Debate](/en/cases/debate) — 6 agents + MiniMax in one command
+- [Translation pipeline](/en/cases/translation-pipeline) — compare different models on the same paragraph
+
+**Configure and tune**:
+- Where does the cost go? See the cost comparison in [One-shot install](/en/guide/one-shot-install)
+- Persist multiple API keys? See [Agent Node -- config.json env field](/en/guide/agent-node)
+- Rate-limit errors? Most providers have concurrency caps -- see [FAQ](/en/faq)
+
+**Dig deeper**:
+- Why does `ANTHROPIC_BASE_URL` work across all domestic models? See [How ANTHROPIC_BASE_URL works](#how-anthropic-base-url-works) above
+- Difference between runtimes? See [Runtimes](/en/guide/runtimes) -- `claude-agent-sdk` / `codex-sdk` / `claude-code-cli`

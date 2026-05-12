@@ -126,5 +126,17 @@ docker compose up -d --build
 
 ## 下一步
 
-- [辩论赛 Demo](/cases/debate) -- 内置 6 Agent 辩论编排
-- [案例与 Demo](/cases/) -- 返回案例总览
+**继续看 case**：
+- [Hello World](/cases/hello-world) — 最简 6 步 demo（用 Vue 开胃）
+- [辩论赛 Demo](/cases/debate) — 内置 6 Agent 辩论编排（一条命令跑完）
+- [翻译流水线](/cases/translation-pipeline) — 多 agent 串联流水线
+
+**改造和深入**：
+- 把代码兵换成 DeepSeek 或 Kimi？看 [多模型配置](/guide/multi-model) — 国产模型 Anthropic-compatible endpoint 表
+- 想理解 Telegram channel 插件怎么实现？看 [Channel 概念](/guide/channels) + 仓库 [demos/codex-telegram-squad](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad)
+- 想接微信/飞书？看 [Channel 概念](/guide/channels) 末尾的扩展指南
+
+**生产部署**：
+- 把整套搬到云服务器：[生产部署](/deploy/production)
+- 改 Docker Compose 调整 worker 数量、模型组合：直接编辑 `docker-compose.yml`，每个 worker 一段独立配置
+- 监控指挥室和 worker 状态：[Dashboard](/guide/dashboard) 的 Topology + Tasks 两个面板

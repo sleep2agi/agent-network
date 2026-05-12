@@ -126,5 +126,17 @@ docker compose up -d --build
 
 ## Next steps
 
-- [Debate Demo](/en/cases/debate) -- Built-in 6-agent debate orchestration
-- [Examples And Demo](/en/cases/) -- Back to the overview
+**More cases**:
+- [Hello World](/en/cases/hello-world) — minimal 6-step demo (warm-up with Vue)
+- [Debate Demo](/en/cases/debate) — built-in 6-agent debate orchestration (one command)
+- [Translation pipeline](/en/cases/translation-pipeline) — multi-agent pipeline
+
+**Customize and dig deeper**:
+- Swap code workers for DeepSeek or Kimi? See [multi-model](/en/guide/multi-model) — Anthropic-compatible endpoint table for domestic providers
+- Want to understand how the Telegram channel plugin works? See [Channels](/en/guide/channels) + the repo [demos/codex-telegram-squad](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad)
+- Wire up WeChat / Feishu instead? See the extension guide at the end of [Channels](/en/guide/channels)
+
+**Production**:
+- Move the whole stack to a cloud VM: [Production deployment](/en/deploy/production)
+- Adjust worker count or model mix: edit `docker-compose.yml` directly — each worker is an independent block
+- Monitor commander + workers: [Dashboard](/en/guide/dashboard) Topology + Tasks panels

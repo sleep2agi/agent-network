@@ -1,5 +1,11 @@
 # Channel 插件踩坑经验
 
+> **适用范围**：本文是给**实现 Claude Code Channel 插件**（telegram / commhub / wechat / feishu 等）的开发者看的内部踩坑记录。
+> 
+> - 内容时效：基于 V2 ~ V3 早期 channel 插件开发（2026-03 ~ 04），核心概念（`meta.user` / MCP server name / ensureMcpJson / config.json 继承）在 v0.8 阶段仍有效。
+> - 不适用于：anet 终端用户、agent 编写者。普通用户看 [https://anet.sh/concepts/channels](https://anet.sh/concepts/channels)。
+> - 官方参考：[claude-plugins-official/telegram](https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/telegram)
+
 ## 1. meta.user 字段决定 Channel 显示名
 
 Claude Code 用 channel notification 的 `meta.user` 字段生成显示名。
