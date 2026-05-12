@@ -204,7 +204,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 
 **能跑但缺 E2E 回归**
 
-- `claude-code-cli` runtime —— 本机能跑，未自动化
+- `claude-code-cli` runtime —— 本机能跑，未自动化（v0.8.2 修了 session resume 默认丢失 bug，详见 [changelog](https://anet.sh/changelog)）
 - `codex-sdk` runtime —— 单元测试通过，真实 OAuth 流程未上 CI
 - `anet network create` + 跨用户网络共享 —— 代码已合并，未做 E2E
 - `anet channel add telegram | wechat | feishu` —— Telegram 路径已跑通，其他未跑

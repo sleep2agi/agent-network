@@ -209,7 +209,7 @@ What's solid, and what to watch out for.
 
 **Works, but not yet covered by full E2E**
 
-- `claude-code-cli` runtime — runs locally; no automated regression yet
+- `claude-code-cli` runtime — runs locally; no automated regression yet (v0.8.2 fixed the session-resume default-loss bug, see [changelog](https://anet.sh/en/changelog))
 - `codex-sdk` runtime — unit-tested; live OAuth path not in CI
 - `anet network create` and cross-user network sharing — code merged, no E2E
 - `anet channel add telegram | wechat | feishu` — Telegram path is exercised, others are not
