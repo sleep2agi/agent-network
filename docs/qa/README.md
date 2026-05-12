@@ -48,6 +48,7 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 | HUB-08 | [tests/qa-hub-08-restart-persistence](../../tests/qa-hub-08-restart-persistence/) | commhub 重启不丢状态 + SSE 重订 |
 | HUB-09 | [tests/qa-hub-09-task-state-machine](../../tests/qa-hub-09-task-state-machine/) | task 状态机 3 分支 + terminal no-op |
 | NODE-02 | [tests/qa-node-02-success-reply](../../tests/qa-node-02-success-reply/) | agent-node 成功回复（mock-via-MCP） |
+| NODE-03b | [tests/qa-node-03b-task-events](../../tests/qa-node-03b-task-events/) | task_events 审计追踪 + 3 个 scenario |
 
 ### L2 / L3 — 历史保护资产，不动
 

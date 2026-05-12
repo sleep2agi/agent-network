@@ -39,6 +39,7 @@
 | NODE-01 | claude-code-cli runtime 启动 + 注册 | ✅ | docker-e2e SC03 |
 | NODE-02 | 收到 inbound task → 回复落 hub（成功路径） | ✅ | [qa-node-02](../../tests/qa-node-02-success-reply/) R6 PASS（~8.5s）— mock-via-MCP，不烧 LLM |
 | NODE-03 | LLM key 错误时 reply.status=failed 写回 hub | ✅ | docker-e2e SC05 |
+| NODE-03b | task_events 审计追踪（delivered/acked/replied/failed/cancelled）+ actor 归属 | ✅ | [qa-node-03b](../../tests/qa-node-03b-task-events/) R15 PASS（~15s）— 抠出 2 个 audit gap |
 | NODE-04 | hub 重启后 agent-node SSE 自动重连 | 🟡 | hub-side 半边 ✅ [qa-hub-08](../../tests/qa-hub-08-restart-persistence/) R11；agent-side（real CLI 自动重连）留 NODE-04b |
 | NODE-05 | runtime 切换（claude-code → codex / minimax） | ❌ | （v1，先不做） |
 | NODE-06 | config.json 缺 session 字段时自动补 UUID | ✅ | report-test31 L0 |

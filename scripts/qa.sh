@@ -59,6 +59,7 @@ L1_TESTS=(
   "qa-hub-08-restart-persistence"
   "qa-hub-09-task-state-machine"
   "qa-node-02-success-reply"
+  "qa-node-03b-task-events"
 )
 
 if [[ "${1:-}" == "--list" ]]; then

@@ -1,0 +1,49 @@
+Test: qa-node-03b-task-events (matrix NODE-03b)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+
+Result: PASS
+Runtime: ~15s warm, ~30s cold
+
+Coverage (9 steps hard-asserted):
+- [0-1] hub + admin + network + ntok + report_status
+- [2-3] Scenario A (full chain): send_task → ack_inbox → send_reply(replied)
+        events include delivered:admin / acked:agent-3b / replied:agent-3b
+- [4]   Scenario B (failed):    send_task → send_reply(failed)
+        events include delivered:admin / failed:agent-3b
+- [5]   Scenario C (cancelled): send_task → cancel_task
+        events include delivered:admin / cancelled:agent-3b
+- [6]   schema sanity: each row has task_id / to_status / actor / created_at
+- [7]   ORDER BY tolerance: only asserts events present (DESC is unstable
+        at sub-second granularity — see contract gap below)
+- [8]   ?task_id=A filter does NOT leak B/C events
+- [9]   total events >= 7 (3 delivered + 1 acked + 1 replied + 1 failed + 1 cancelled)
+
+Two contract gaps surfaced by R15:
+
+1. /api/task REST endpoint does NOT write task_events.
+   Only the MCP send_task tool path calls logTaskEvent("delivered",...).
+   The REST handler (server/src/index.ts /api/task POST) inserts rows into
+   inbox + tasks tables but never logs the audit event.
+   Impact: tasks dispatched from Dashboard (which uses REST /api/task) have
+   NO 'delivered' audit row. Audit chain is broken at the entry point.
+
+2. /api/task_events DESC ordering is unstable at sub-second granularity.
+   SQL is `ORDER BY created_at DESC` (index.ts L1032) but datetime('now')
+   has second precision. Hub-side events typically fire within a single
+   second → identical created_at → SQLite tie-breaks by rowid ASC.
+   Result: a single task's chain comes back as [delivered, acked, replied]
+   instead of [replied, acked, delivered].
+   Fix would be `ORDER BY created_at DESC, id DESC`. Caller-side fix:
+   sort by id secondary key. This test only asserts events present, no
+   order claim — pinned the gap, not the buggy behavior.
+
+Both gaps need @通信龙 / Vincent review:
+- Should REST /api/task also call logTaskEvent? Or is audit-via-MCP-only intentional?
+- Should the SQL add `, id DESC` for stable ordering?
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip + procps
+  - @sleep2agi/agent-network@preview from npm
+  - 0 LLM API calls
