@@ -76,7 +76,7 @@ anet status
 
 ---
 
-## v0.7 → v0.8 升级注意（最新）
+## v0.7 → v0.8 升级注意（最新） {#v0-7-v0-8-升级注意-最新}
 
 v0.8 落地了 [RFC-001 第二阶段](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)，对**鉴权和密码**有新行为：
 

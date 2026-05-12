@@ -76,7 +76,7 @@ anet status
 
 ---
 
-## v0.7 → v0.8 Upgrade Notes (Latest)
+## v0.7 → v0.8 Upgrade Notes (Latest) {#v0-7-v0-8-upgrade-notes-latest}
 
 v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
 
