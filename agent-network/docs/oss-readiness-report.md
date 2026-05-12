@@ -25,7 +25,7 @@ The current tree does not contain a hardcoded real MiniMax/GitHub/OpenAI token i
   - `find agent-network server -name ".env*" ...`
   - Result: no current `.env` files in scope; no added `.env` files found in history query.
 - PII/internal grep:
-  - Found `vansin`, `Vincent`, and a real server IP in source/tests.
+  - Found maintainer username and a real server IP in source/tests (specific values redacted from this report; see findings #1/#2 below for files/lines).
 - `npx license-checker --summary`:
   - MIT: 179, ISC: 11, BSD-2-Clause: 9, BSD-3-Clause: 6, Apache-2.0: 5, 0BSD: 1.
 - `npm audit --audit-level=moderate --json`:
@@ -67,7 +67,7 @@ The current tree does not contain a hardcoded real MiniMax/GitHub/OpenAI token i
 
 2. **Personal path examples remain in source comments**
    - `agent-network/src/node-server.ts:41`
-   - Risk: leaks `/home/vansin/...` style local context.
+   - Risk: leaks `/home/<user>/...` style local context (specific username appears in source comment).
    - Recommendation: change to a neutral example such as `/home/user/project`.
 
 3. **README is stale and tells users to use `admin / anethub`**
