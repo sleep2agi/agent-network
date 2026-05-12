@@ -8,7 +8,7 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 |---|---|---|---|---|
 | `claude-code-cli` | spawn local `claude` CLI | Reuse your Claude subscription | Claude Sonnet / Opus | `claude` already logged in |
 | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi | API Key |
-| `codex-sdk` | `@openai/codex-sdk` | Code writing / shell commands | OpenAI Codex (gpt-5) | `codex auth login` |
+| `codex-sdk` | `@openai/codex-sdk` | Code writing / shell commands | OpenAI Codex (gpt-5 etc) | `codex auth login` |
 
 ::: tip Not sure which one?
 - **Want to reuse a Claude subscription** → `claude-code-cli`
