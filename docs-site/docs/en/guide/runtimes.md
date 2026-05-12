@@ -204,6 +204,10 @@ anet node create translator \
 Providers ship new model versions every few weeks. **Pull the latest model ID from the provider's console** and pass it to `--model`.
 :::
 
+::: details Full domestic-provider endpoint list
+See [Multi-model config](/en/guide/multi-model) — each provider's Anthropic-compatible URL + sample setup.
+:::
+
 ---
 
 ## codex-sdk
