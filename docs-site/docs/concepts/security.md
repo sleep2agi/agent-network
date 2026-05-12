@@ -366,3 +366,24 @@ anet node create my-agent --max-budget 0.1
 - [ ] 使用 Docker 隔离
 - [ ] 不在环境变量中硬编码密钥
 - [ ] `.anet/` 加入 `.gitignore`
+
+## 下一步
+
+**深入对应实现**：
+- [RFC-001 — COMMHUB_AUTH_TOKEN 废弃路线图](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) — 三阶段 master token 软废弃机制
+- [架构概览 — 安全章节](/guide/architecture#安全架构) — token 流和数据库表的对应
+- [账号体系](/guide/account-system) — utok_ / ntok_ / 密码 三者关系
+
+**实操**：
+- 想升级到 v0.8 admin 体系？看 [升级指南 — v0.7 → v0.8](/guide/upgrade#v0-7-v0-8-升级注意-最新)
+- 忘密码：在 Hub 机器跑 `anet hub admin reset-user <username>`
+- 修复过期 token：`anet doctor --fix` 自动 probe + 重发 ntok_
+- 改密码：`anet passwd` 交互式
+
+**生产部署清单**：
+- [生产部署指南](/deploy/production) — TLS / 防火墙 / CORS / 备份 完整 checklist
+- [Docker 部署](/deploy/docker) — 容器化最佳实践
+
+::: warning 当前阶段
+v0.8 密码哈希仍是 SHA-256。**Argon2id 迁移计划在 v0.9+**（[issue 跟踪](https://github.com/sleep2agi/agent-network/issues)）。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
+:::

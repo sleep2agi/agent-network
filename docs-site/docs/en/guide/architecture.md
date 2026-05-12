@@ -444,3 +444,4 @@ See [Security Design](/en/concepts/security) for details. Key security measures:
 - **SQL injection protection**: All queries are parameterized
 - **Rate limiting**: Registration 30/min, login 10/min per IP
 - **Audit logging**: All operations recorded
+- **v0.8 RFC-001 Phase 2**: `COMMHUB_AUTH_TOKEN` master token soft-deprecated (only `/api/*` read + deprecation warning); first `anet hub start` auto-bootstraps admin utok_ (`~/.anet/server/admin-utok.json` chmod 600) with default account `admin / anethub`; password strength ≥ 8 + weak-password dictionary; `anet passwd` / `anet hub admin reset-user` tools; `anet doctor --fix` probes and reissues expired `ntok_`. See [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md).

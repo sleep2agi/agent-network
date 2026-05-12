@@ -444,3 +444,4 @@ agent-orchestra/
 - **SQL 注入防护**：全部参数化查询
 - **速率限制**：注册 30/min、登录 10/min per IP
 - **审计日志**：所有操作记录
+- **v0.8 RFC-001 阶段 2**：`COMMHUB_AUTH_TOKEN` master token 软废弃（仅 `/api/*` 只读 + deprecation warning）；首次 `anet hub start` 自动 bootstrap admin utok_（`~/.anet/server/admin-utok.json` chmod 600），默认账号 `admin / anethub`；密码强度 ≥ 8 + 弱密码字典；`anet passwd` / `anet hub admin reset-user` 工具；`anet doctor --fix` 自动探测并重发过期 `ntok_`。详见 [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)。

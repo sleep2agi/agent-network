@@ -366,3 +366,24 @@ anet node create my-agent --max-budget 0.1
 - [ ] Use Docker for isolation
 - [ ] Don't hardcode secrets in environment variables
 - [ ] Add `.anet/` to `.gitignore`
+
+## Next steps
+
+**Dig into the implementation**:
+- [RFC-001 — `COMMHUB_AUTH_TOKEN` deprecation roadmap](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) — three-phase master-token soft-deprecation
+- [Architecture — Security section](/en/guide/architecture#security-architecture) — token flow and the corresponding DB tables
+- [Account system](/en/guide/account-system) — relationship between utok_ / ntok_ / password
+
+**Hands-on**:
+- Upgrade to the v0.8 admin model: [Upgrade guide — v0.7 → v0.8](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest)
+- Forgot password: run `anet hub admin reset-user <username>` on the Hub machine
+- Repair expired tokens: `anet doctor --fix` auto-probes and reissues ntok_
+- Change password: `anet passwd` interactive
+
+**Production deployment checklist**:
+- [Production deployment](/en/deploy/production) — full TLS / firewall / CORS / backup checklist
+- [Docker deployment](/en/deploy/docker) — containerization best practices
+
+::: warning Current state
+v0.8 password hashing is still SHA-256. **Argon2id migration is planned for v0.9+** ([issue tracker](https://github.com/sleep2agi/agent-network/issues)). Production environments must pair this with: strong passwords + TLS + firewall + regular backups.
+:::
