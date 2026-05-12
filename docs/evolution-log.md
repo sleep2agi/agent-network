@@ -1,5 +1,44 @@
 # Agent Network Evolution Log
 
+## v0.8.1 Light Theme Overhaul + OSS Readiness (2026-05-12) — COMPLETE
+
+### Stats
+- git tag `v0.8.1` (current stable)
+- 3 npm packages on `latest`: `agent-network@2.1.5`, `commhub-server@0.8.0`, `agent-network-dashboard@0.4.2`, `agent-node@2.3.0`
+- N站马 7-rounds Polish Loop in dashboard preview line (0.4.3-preview.1 / 0.4.4 / 0.4.5-preview.0): Login redesign, 7-variant EmptyState, Quick Actions split, sidebar brand + live online-pulse, TopoGraph light SVG variant (closes issue #8), Settings reorganization, error chips
+- TopoGraph center hub: 24px pulse source (closes issue #5)
+- OSS-readiness reports for 3 repos; one P0 PAT leak in `agent-network-dashboard` history cleaned with full git nuke + force-push; backup retained
+- docs-loop: every-5-min cron sweeping `docs/` + `docs-site/docs/` for correctness / friendliness / outdated content; logged in issue #10
+
+### Added since v0.8.0
+- Dashboard: full light-theme parity for Command Mesh / Sidebar / Settings / EmptyState
+- CLI: `PINNED_DASHBOARD_VERSION` preview chain sync, idempotent `anet hub start`, `anet doctor --fix` probes stale ntok_ and re-issues in place
+- Docs: anet.sh version dropdown (`/`, `/v0.8.0/` archive), `editLink` per page, SelectionReporter (highlight text → GitHub issue with file:line prefilled)
+
+### Pending → v0.9
+- TopoGraph node-label collision; KPI hover affordance; ⌘K palette; mobile audit; font sans-serif review
+- Argon2id password hashing
+- `anet license` / `anet activate` legacy gate retirement
+- v1.0 RFC-001 Phase 3 (hard removal of `COMMHUB_AUTH_TOKEN`)
+
+---
+
+## v0.8.0 RFC-001 Phase 2 + Password Management (2026-05-11) — COMPLETE
+
+### Stats
+- git tag `v0.8.0`
+- 3 npm packages on `latest`: `commhub-server@0.8.0`, `agent-network@2.1.4`, `agent-network-dashboard@0.4.1`
+- Closed: issue #3 (RFC-001 tracking)
+
+### Added since V3.15
+- **Auth**: `COMMHUB_AUTH_TOKEN` soft-deprecated; admin `utok_` bootstrap on first `anet hub start` (writes `admin-utok.json` chmod 600); `admin / anethub` default credentials for quick-start; idempotent restart (skip prompt if admin-utok.json exists)
+- **Password**: `anet passwd` interactive (old → new → confirm); `anet hub admin reset-user` local recovery command; password strength ≥ 8 + top-1000 weak-password dict; first-bootstrap admin exception (≥ 4 OK)
+- **Doctor**: `anet doctor --fix` probes each node's ntok_ against the hub and auto-reissues stale ones; agent-node SSE 401 auto-reloads token from config file
+- **Dashboard**: thin cookie-proxy auth flow (RFC-001 §2); fixes for sse:undefined in Command Mesh / /nodes / /admin (SSE key is `network_id:alias`)
+- **Docs**: anet.sh content sweep for v0.8 correctness; `/v0.8.0/` archive snapshot via VitePress versioned docs
+
+---
+
 ## V3.15 Docs + Cases + CLI UX (2026-04-27) — IN PROGRESS
 
 ### Stats
