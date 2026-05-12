@@ -164,10 +164,10 @@ The Admin panel is only visible to users with role=admin.
 
 Admin features include:
 
-- **User Management** -- View all registered users, modify roles
-- **Network Management** -- View all networks, members, quotas
+- **User Management** -- View all registered users; role changes currently go through CLI ([`anet network promote / demote`](/en/guide/cli))
+- **Network Management** -- View all networks, members (plan-quota enforcement is disabled since v0.8; see [networks — quota limits](/en/concepts/networks#quota-limits-v0-6-design--currently-not-enforced))
 - **System Statistics** -- Server load, database size, connection count
-- **Audit Log** -- Detailed records of all operations
+- **Audit Log** -- Detailed records of all operations (v0.8 `/api/admin/audit-log` endpoint + Dashboard 0.4.2 Audit Log page)
 
 Audit log example:
 
