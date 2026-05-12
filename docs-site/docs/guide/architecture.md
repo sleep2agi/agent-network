@@ -92,9 +92,9 @@ graph TB
     end
 
     subgraph "Agent 节点"
-        A1["Agent Node<br/>claude-agent-sdk"]
-        A2["Agent Node<br/>codex-sdk"]
-        A3["Agent Node<br/>claude-agent-sdk"]
+        A1["Agent Node<br/>claude-code-cli"]
+        A2["Agent Node<br/>claude-agent-sdk"]
+        A3["Agent Node<br/>codex-sdk"]
         CC["Claude Code<br/>+ Channel Plugin"]
     end
 
