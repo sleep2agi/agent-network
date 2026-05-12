@@ -102,7 +102,7 @@ Upgrade path is the same as v0.7 → v0.8 main path (admin bootstrap + password 
 ### Upgrade steps
 
 ```bash
-# 1. Bump the three packages to latest (v0.8.1 stable)
+# 1. Bump the three packages to latest (v0.8.2 stable)
 npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.7
 npm install -g @sleep2agi/agent-node@latest      # 2.3.0
 

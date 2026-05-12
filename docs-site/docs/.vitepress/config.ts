@@ -136,9 +136,9 @@ export default withMermaid(defineConfig({
           { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
           {
-            text: 'v0.8.1 ▾',
+            text: 'v0.8.2 ▾',
             items: [
-              { text: 'v0.8.1 (latest)', link: '/en/' },
+              { text: 'v0.8.2 (latest)', link: '/en/' },
               { text: 'v0.8.0 (archive)', link: '/v0.8.0/' },
               { text: 'Changelog', link: '/en/changelog' },
               { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },

@@ -102,7 +102,7 @@ v0.8.2 在 v0.8.1 stable 基础上加了：
 ### 升级步骤
 
 ```bash
-# 1. 升级三件套到 latest（v0.8.1 stable）
+# 1. 升级三件套到 latest（v0.8.2 stable）
 npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.7
 npm install -g @sleep2agi/agent-node@latest      # 2.3.0
 
