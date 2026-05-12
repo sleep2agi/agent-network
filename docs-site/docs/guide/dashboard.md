@@ -246,7 +246,7 @@ Dashboard 通过两类数据面保持更新：
 如果 Agent 数量超过 50，建议使用独立 Dashboard 并关闭实时消息流，改为手动刷新。
 :::
 
-## Preview 通道（即将进入下一个 stable）
+## Preview 通道（下一个 stable WIP）
 
 `@sleep2agi/agent-network-dashboard@preview` 上有正在打磨的下一代 UI。当前 preview pin 跟 CLI preview tag `@sleep2agi/agent-network@preview` 自动联动，具体版本以 [npm preview tag](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard?activeTab=versions) 实际为准（频繁迭代，doc 不写死版本号）。
 

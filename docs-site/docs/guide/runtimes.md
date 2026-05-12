@@ -372,7 +372,7 @@ anet node start coder
 :::
 
 ::: warning 未验证（请自行评估）
-- `claude-code-cli` —— 本机能跑，未做 E2E 回归
+- `claude-code-cli` —— 本机能跑（v0.8.2 修了 session resume 默认丢失 bug，详见 [changelog](/changelog)），未做 E2E 回归
 - `codex-sdk` —— 单元测试通过，缺真实 codex 鉴权回归
 :::
 

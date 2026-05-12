@@ -351,7 +351,7 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 :::
 
 ::: warning Not verified
-- `claude-code-cli` — runs locally, no E2E regression
+- `claude-code-cli` — runs locally (v0.8.2 fixed the session-resume default-loss bug, see [changelog](/en/changelog)); no E2E regression yet
 - `codex-sdk` — unit-tested only, real codex auth E2E pending
 :::
 
