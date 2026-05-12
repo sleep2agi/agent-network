@@ -204,6 +204,8 @@ Agents need AI model APIs to do work. These have their own account systems, comp
 | DeepSeek | Create API Key after signup | [platform.deepseek.com](https://platform.deepseek.com) |
 | GLM (Zhipu) | Create API Key after signup | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | Kimi | Create API Key after signup | [platform.moonshot.cn](https://platform.moonshot.cn) |
+| InternLM | Create API Key after signup | [chat.intern-ai.org.cn](https://chat.intern-ai.org.cn) |
+| Xiaomi MiMo | Create API Key after signup | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | Claude | Create API Key after signup | [console.anthropic.com](https://console.anthropic.com) |
 | Codex (codex-sdk) | Run `codex auth login` in terminal | Auto-redirects to OpenAI login |
 

@@ -311,7 +311,7 @@ graph LR
 |---------|---------|---------|------|
 | `claude-agent-sdk` | Anthropic Claude Agent SDK | Complex reasoning, long-document analysis | Claude Sonnet/Opus |
 | `codex-sdk` | OpenAI Codex SDK | Code generation, tool use | Codex (codex-sdk) |
-| `claude-agent-sdk` | Anthropic-compatible API (via ANTHROPIC_BASE_URL) | Low-cost batch tasks | MiniMax, DeepSeek, InternLM |
+| `claude-agent-sdk` | Anthropic-compatible API (via ANTHROPIC_BASE_URL) | Low-cost batch tasks | MiniMax, DeepSeek, GLM, Kimi, InternLM, Xiaomi MiMo, etc. |
 
 ### Task Processing Flow
 

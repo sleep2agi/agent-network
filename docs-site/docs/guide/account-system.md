@@ -204,6 +204,8 @@ Agent 干活需要调用 AI 模型，这些模型有自己的账号体系，和 
 | DeepSeek | 注册后创建 API Key | [platform.deepseek.com](https://platform.deepseek.com) |
 | 智谱 GLM | 注册后创建 API 密钥 | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | Kimi | 注册后创建 API Key | [platform.moonshot.cn](https://platform.moonshot.cn) |
+| 书生 | 注册后创建 API Key | [chat.intern-ai.org.cn](https://chat.intern-ai.org.cn) |
+| 小米 MiMo | 注册后创建 API Key | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | Claude | 注册后创建 API Key | [console.anthropic.com](https://console.anthropic.com) |
 | Codex (codex-sdk) | 终端执行 `codex auth login` | 自动跳转 OpenAI 登录 |
 

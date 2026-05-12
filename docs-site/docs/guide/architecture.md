@@ -311,7 +311,7 @@ graph LR
 |---------|---------|---------|------|
 | `claude-agent-sdk` | Anthropic Claude Agent SDK | 复杂推理、长文分析 | Claude Sonnet/Opus |
 | `codex-sdk` | OpenAI Codex SDK | 代码生成、工具调用 | Codex (codex-sdk) |
-| `claude-agent-sdk` | Anthropic 兼容 API（via ANTHROPIC_BASE_URL） | 低成本批量任务 | MiniMax、DeepSeek、书生 |
+| `claude-agent-sdk` | Anthropic 兼容 API（via ANTHROPIC_BASE_URL） | 低成本批量任务 | MiniMax、DeepSeek、GLM、Kimi、书生、小米 MiMo 等 |
 
 ### 任务处理流程
 
