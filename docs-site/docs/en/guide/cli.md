@@ -324,7 +324,8 @@ anet tasks --limit 5
 System diagnostics.
 
 ```bash
-anet doctor
+anet doctor              # Diagnose only; prints ✅ / ❌ per check with fix hints
+anet doctor --fix        # Auto-repair: probes expired ntok_ and re-issues them via the hub, writing back to .anet/nodes/<name>/config.json
 ```
 
 Checks:
@@ -335,6 +336,10 @@ Checks:
 4. Local node config and process status
 5. Claude / Codex / Bun dependencies
 6. Current project `.mcp.json` commhub config
+
+::: tip `--fix` is new in v0.8
+Pre-v0.7, an expired `ntok_` required a manual `anet node delete` + recreate. Since v0.8, `--fix` probes + re-issues in place, and agent-node SSE 401 auto-reloads the token instead of going offline ([RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) implementation detail).
+:::
 
 ### anet network invite
 

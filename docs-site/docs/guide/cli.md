@@ -344,7 +344,8 @@ anet tasks --limit 5
 系统诊断。
 
 ```bash
-anet doctor
+anet doctor              # 只诊断，输出每项 ✅ / ❌ + 修复提示
+anet doctor --fix        # 自动修复：probe 过期 ntok_ 并跟 hub 重发新 token 写回 .anet/nodes/<name>/config.json
 ```
 
 检查项：
@@ -355,6 +356,10 @@ anet doctor
 4. 本地节点配置与运行状态
 5. Claude / Codex / Bun 依赖
 6. 当前项目 `.mcp.json` 的 commhub 配置
+
+::: tip `--fix` 是 v0.8 新增
+v0.7 之前 ntok_ 失效需要手动 `anet node delete` + 重新 create；v0.8 起 `--fix` 直接探测+重发，agent-node SSE 401 也会自动 reload token 不离线（[RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) 实施细节）。
+:::
 
 ### anet network invite
 
