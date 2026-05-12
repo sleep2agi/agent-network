@@ -23,10 +23,37 @@ MINIMAX_API_KEY=你的Key docker compose up
 
 ## 步骤
 
-### 1. 确保 CommHub 运行中
+### 0. 第一次用？先 init + login
+
+如果还没装过 anet：
+
+```bash
+npm i -g @sleep2agi/agent-network@latest
+```
+
+第一次跑 `anet hub start` 会提示设置 admin 账号（v0.8 起），直接回车用默认 `admin / anethub`：
 
 ```bash
 anet hub start
+# 看到：Set up admin account (default: admin / anethub):
+# → 回车确认
+```
+
+再开一个终端，登录并设置 hub 地址：
+
+```bash
+anet init        # 第一次自动指向 http://127.0.0.1:9200
+anet login       # 输入 admin / anethub，拿到 utok_
+```
+
+::: tip 已经装过、登录过？
+直接 `anet hub start` 起 hub 即可，跳到第 2 步。`anet doctor --fix` 可以自动修过期 token。
+:::
+
+### 1. 确保 CommHub 运行中
+
+```bash
+anet hub start   # 如果上面 0 步已经起着了就跳过
 ```
 
 ### 2. 创建两个 Agent

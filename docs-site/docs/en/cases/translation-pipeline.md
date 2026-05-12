@@ -26,6 +26,10 @@ You -> 调度员: "Translate: 今天天气真好"
 
 ## Steps
 
+::: tip Prerequisites
+This case assumes you've already run [Hello World](/en/cases/hello-world) to finish the first-time install + admin bootstrap + `anet login`. If not, walk through hello-world's step 0 first.
+:::
+
 ### 1. Create Agents
 
 ::: tip Two ways to create

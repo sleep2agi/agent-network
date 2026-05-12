@@ -23,10 +23,37 @@ Source: [demos/hello-world](https://github.com/sleep2agi/agent-network/tree/main
 
 ## Steps
 
-### 1. Make sure CommHub is running
+### 0. First time? Init + login first
+
+If you haven't installed `anet`:
+
+```bash
+npm i -g @sleep2agi/agent-network@latest
+```
+
+First `anet hub start` will prompt to set up an admin account (since v0.8). Press Enter to accept defaults `admin / anethub`:
 
 ```bash
 anet hub start
+# You'll see: Set up admin account (default: admin / anethub):
+# → press Enter
+```
+
+In a second terminal, register the hub URL and log in:
+
+```bash
+anet init        # First run points to http://127.0.0.1:9200
+anet login       # enter admin / anethub, get utok_
+```
+
+::: tip Already installed and logged in?
+Just run `anet hub start`, then skip to step 2. `anet doctor --fix` auto-repairs expired tokens.
+:::
+
+### 1. Make sure CommHub is running
+
+```bash
+anet hub start   # skip if step 0 already started it
 ```
 
 ### 2. Create two Agents

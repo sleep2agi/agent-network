@@ -27,6 +27,10 @@ MINIMAX_API_KEY=你的Key docker compose up
 
 ## 步骤
 
+::: tip 先决条件
+本案例假设你已经跑过 [Hello World](/cases/hello-world) 完成了首次安装 + admin bootstrap + `anet login`。如果还没装，先跟 hello-world 走一遍 0 步起步。
+:::
+
 ### 1. 创建 Agent
 
 ::: tip 两种创建方式
