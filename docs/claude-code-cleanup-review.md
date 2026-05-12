@@ -59,12 +59,12 @@
 
 ## P2：可延后但建议整理
 
-| ID | 类型 | 位置 | 问题 | 建议动作 |
-|---|---|---|---|---|
-| D10 | 旧 upgrade / evolution 文档混在主 docs | `docs/upgrade-v2.md`, `docs/evolution-log.md` | 记录历史 preview 发布、旧版本升级命令；对新维护者价值低，误导风险高。 | 移到 `docs/archive/` 或加顶部 warning。 |
-| D11 | redirect/旧页面可合并 | `docs-site/docs/deploy/demo-debate.md`, `docs-site/docs/en/deploy/demo-debate.md` | 页面只为旧链接保留。 | 如果 VitePress 支持 redirect 配置，用 redirect 代替内容页；否则加明确“old link only”。 |
-| C7 | large single-file CLI | `agent-network/bin/cli.ts` 超 4k 行 | 多个领域混在一个文件：hub、node、channel、demo、license、doctor、quickstart，Claude Code 后续修改容易互相影响。 | 后续按 command 拆文件：`commands/hub.ts`、`commands/node.ts`、`commands/channel.ts`、`commands/demo.ts`、`commands/auth.ts`。先加 typecheck 再拆。 |
-| C8 | legacy compatibility 没有到期策略 | `agent-network/bin/cli.ts` 多处 legacy alias/resume/runtime/token 迁移；`agent-node/src/cli.ts:111-134` 兼容旧路径。 | 兼容层堆积，无法判断哪些能删。 | 建 `docs/compatibility-policy.md`，写每个 legacy path 的删除版本和测试覆盖。 |
+| ID | 类型 | 位置 | 问题 | 建议动作 | 状态（2026-05-13） |
+|---|---|---|---|---|---|
+| D10 | 旧 upgrade / evolution 文档混在主 docs | `docs/upgrade-v2.md`, `docs/evolution-log.md` | 记录历史 preview 发布、旧版本升级命令；对新维护者价值低，误导风险高。 | 移到 `docs/archive/` 或加顶部 warning。 | ✅ 已处理（两个文件都加顶部 ⚠️ 历史归档 banner + 指向当前稳定路径 pointer，[R65](https://github.com/sleep2agi/agent-network/commit/1b7d8f0) 已清 upgrade-v2.md fake gpt-5.4 模型号） |
+| D11 | redirect/旧页面可合并 | `docs-site/docs/deploy/demo-debate.md`, `docs-site/docs/en/deploy/demo-debate.md` | 页面只为旧链接保留。 | 如果 VitePress 支持 redirect 配置，用 redirect 代替内容页；否则加明确“old link only”。 | ✅ 已处理（页面现已改成「已合并到案例库」+ pointer 指 /cases/debate, 仅作旧链接兼容） |
+| C7 | large single-file CLI | `agent-network/bin/cli.ts` 超 4k 行 | 多个领域混在一个文件：hub、node、channel、demo、license、doctor、quickstart，Claude Code 后续修改容易互相影响。 | 后续按 command 拆文件：`commands/hub.ts`、`commands/node.ts`、`commands/channel.ts`、`commands/demo.ts`、`commands/auth.ts`。先加 typecheck 再拆。 | 🔁 未验证（typecheck 已加, 拆文件 code-level work） |
+| C8 | legacy compatibility 没有到期策略 | `agent-network/bin/cli.ts` 多处 legacy alias/resume/runtime/token 迁移；`agent-node/src/cli.ts:111-134` 兼容旧路径。 | 兼容层堆积，无法判断哪些能删。 | 建 `docs/compatibility-policy.md`，写每个 legacy path 的删除版本和测试覆盖。 | 🔁 未验证（compatibility-policy.md 未创建; RFC-001 / changelog 散写部分 legacy 路线） |
 
 ## Claude Code 建议执行顺序
 
