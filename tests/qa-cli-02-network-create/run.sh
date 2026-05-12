@@ -34,12 +34,18 @@ HUB_PID=$!
 for i in {1..60}; do curl -fsS "$HUB_BASE/health" >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS "$HUB_BASE/health" >/dev/null
 
-echo "[1] anet login (non-interactive, --username/--password)"
-# Login also persists --hub URL on first run.
-LOGIN_OUT=$(anet login --hub "$HUB_BASE" --username admin --password "$ADMIN_PW" 2>&1)
+echo "[1] anet login (non-interactive, --username/--password, retry against bootstrap race)"
+# admin bootstrap can lag /health 200 by 1-3s — same race R6/R8 saw on REST
+# login. Retry CLI login up to ~10s.
+LOGIN_OUT=""
+for i in {1..20}; do
+  LOGIN_OUT=$(anet login --hub "$HUB_BASE" --username admin --password "$ADMIN_PW" 2>&1 || true)
+  echo "$LOGIN_OUT" | grep -qE "Logged in as admin" && break
+  sleep 0.5
+done
 echo "$LOGIN_OUT" | head -3 | sed 's/^/  /'
 echo "$LOGIN_OUT" | grep -qE "Logged in as admin" \
-  || { echo "FAIL: anet login did not confirm. Output:"; echo "$LOGIN_OUT"; exit 1; }
+  || { echo "FAIL: anet login did not confirm after retry. Output:"; echo "$LOGIN_OUT"; echo "--- hub.log tail ---"; tail -30 /tmp/hub.log; exit 1; }
 
 echo "[2] config file written"
 CFG="$HOME/.anet/config.json"
