@@ -2,7 +2,7 @@
 
 > **⚠️ 本文件为历史归档（2026-04 之前的 v1.0.0-preview.x 系列开发日志）**
 >
-> 2026-04 后版本号体系重新规划，去掉"v1.0.0-preview"的过度承诺改用 v0.6 / v0.7 / v0.8 渐进发布。**当前 stable 是 v0.8.1（2026-05-11）**。
+> 2026-04 后版本号体系重新规划，去掉"v1.0.0-preview"的过度承诺改用 v0.6 / v0.7 / v0.8 渐进发布。**当前 stable 是 v0.8.2（2026-05-12 通过 npm `latest` tag 发布，v0.8.1 是 OSS 首发版本）**。
 >
 > **认准的更新日志**：[docs-site/docs/changelog.md](./docs-site/docs/changelog.md) 或 [anet.sh/changelog](https://anet.sh/changelog) — 包含 v0.6.x ~ v0.8.x 全部 release notes，含本次 OSS 发布。
 >
