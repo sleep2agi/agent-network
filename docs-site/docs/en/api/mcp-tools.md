@@ -34,7 +34,7 @@ Report agent status. Also serves as a heartbeat (recommended every 3 minutes).
 | `progress` | number | | Progress 0-100 |
 | `server` | string | | Server identifier |
 | `hostname` | string | | Hostname |
-| `agent` | string | | Agent type (claude-code / codex / opencode) |
+| `agent` | string | | Agent type (anet runtime name: `claude-code-cli` / `claude-agent-sdk` / `codex-sdk`; free-form string for audit) |
 | `project_dir` | string | | Working directory |
 | `version` | string | | Agent version |
 | `tmux_name` | string | | tmux session name |
