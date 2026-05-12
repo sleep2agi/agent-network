@@ -7,7 +7,7 @@
 | Runtime | 内核 | 适用场景 | 主推模型 | 鉴权 |
 |---|---|---|---|---|
 | `claude-code-cli` | spawn 本地 `claude` 命令 | 想"像在终端用 Claude"那样干活 | Claude Sonnet / Opus（订阅） | `claude` CLI 已登录 |
-| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | 编程式调用 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi | API Key |
+| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | 编程式调用 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo | API Key |
 | `codex-sdk` | `@openai/codex-sdk` | 写代码 / 跑命令 | OpenAI Codex（gpt-5 等） | `codex auth login` |
 
 ::: tip 不知道怎么选？
@@ -128,7 +128,7 @@ npm install -g @sleep2agi/agent-network@2.1.7
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | https://console.anthropic.com |
 | MiniMax | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` | MiniMax 开放平台 |
-| DeepSeek / GLM / Kimi / Moonshot / 书生 | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<对应 endpoint>` | 各家开放平台 |
+| DeepSeek / GLM / Kimi / 书生 / 小米 MiMo | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<对应 endpoint>` | 各家开放平台 |
 
 国产模型的完整 endpoint 表见 [多模型配置](/guide/multi-model)。
 

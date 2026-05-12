@@ -7,7 +7,7 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 | Runtime | Engine | When to pick | Default models | Auth |
 |---|---|---|---|---|
 | `claude-code-cli` | spawn local `claude` CLI | Reuse your Claude subscription | Claude Sonnet / Opus | `claude` already logged in |
-| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi | API Key |
+| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo | API Key |
 | `codex-sdk` | `@openai/codex-sdk` | Code writing / shell commands | OpenAI Codex (gpt-5 etc) | `codex auth login` |
 
 ::: tip Not sure which one?
@@ -128,7 +128,7 @@ npm install -g @sleep2agi/agent-network@2.1.7
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | https://console.anthropic.com |
 | MiniMax | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` | MiniMax platform |
-| DeepSeek / GLM / Kimi / Moonshot / InternLM | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<provider endpoint>` | Each provider's platform |
+| DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<provider endpoint>` | Each provider's platform |
 
 Full provider endpoint table: [Multi-model setup](/en/guide/multi-model).
 
