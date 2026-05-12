@@ -55,7 +55,7 @@
     "bun": ">=1.2.0"
   },
   "dependencies": {
-    "@inquirer/prompts": "^7.10.1"
+    "@inquirer/prompts": "^8.4.3"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
