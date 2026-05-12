@@ -56,7 +56,7 @@ MINIMAX_KEY=sk-cp-xxx ANET_USER=worker ./setup-anet.sh
 
 | Model ID | Notes |
 |---|---|
-| `MiniMax-M2.7` | Latest, default |
+| `MiniMax-M2.7` | `setup-anet.sh` default fallback (check MiniMax docs for the current latest model id) |
 | `MiniMax-M2.7-highspeed` | High-speed variant |
 | `MiniMax-M2.5` | |
 | `MiniMax-M2.5-highspeed` | |
