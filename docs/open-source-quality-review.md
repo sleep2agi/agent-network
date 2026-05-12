@@ -2,7 +2,9 @@
 
 日期：2026-05-11
 
-范围：静态阅读仓库、检查 npm 打包边界、检查 CI 与测试文档、对 docs-site 运行 `npm audit --json`。本报告不是完整安全审计；安全风险另见 `docs/open-source-security-risk-report.md`，历史文档与旧代码清理另见 `docs/claude-code-cleanup-review.md`。
+范围：静态阅读仓库、检查 npm 打包边界、检查 CI 与测试文档、对 docs-site 运行 `npm audit --json`。本报告不是完整安全审计；安全风险另见 [`open-source-security-risk-report.md`](open-source-security-risk-report.md)，历史文档与旧代码清理另见 [`claude-code-cleanup-review.md`](claude-code-cleanup-review.md)。
+
+> **当前状态（2026-05-12 更新）**：本报告 P0/P1 项已基本处理完毕，项目已于 2026-05-11 正式开源（Apache 2.0）。详细处理对照见兄弟报告 [`open-source-security-risk-report.md`](open-source-security-risk-report.md) 顶部 banner。docs-loop 每 5 分钟一轮持续跟进剩余文档质量项，进度见 [issue #10](https://github.com/sleep2agi/agent-network/issues/10)。
 
 ## 总体结论
 

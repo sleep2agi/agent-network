@@ -1,7 +1,18 @@
-# 项目垃圾文档 / 过时代码 Review（给 Claude Code）
+# 项目垃圾文档 / 过时代码 Review（给 Claude Code）（历史 - 大部分已处理）
 
 审计日期：2026-05-10  
 目标：找出当前仓库里会误导维护者、用户或发布流程的过期文档、重复脚本、废弃入口和未被验证的旧代码，并整理成 Claude Code 可执行的清理参考。
+
+> **⚠️ 当前状态（2026-05-12 更新）**
+>
+> 本清单中识别的"垃圾 / 过时"项已通过 v0.8 docs sweep 和 OSS 准备清理处理：
+> - ✅ 文档版本号 / 过期 preview 引用全部刷新到 v0.8.1
+> - ✅ 死命令（`anet demo monitor` / `anet audit` 等）已从公开文档剔除或加 legacy 注释
+> - ✅ 历史 V3 设计文档（`v3-license-design` / `v3-postgresql-design` / `v3-multi-network-design` / `design-auth-network` / `design-cli-dashboard-ux`）顶部加状态 / 废弃 banner
+> - ✅ `pitfalls.md` 加适用范围 banner（明确是 Claude Code Channel 插件开发者文档）
+> - 🔁 仍在进行：docs-loop 每 5 分钟扫一轮（GitHub issue #10 跟踪）
+>
+> 本报告保留为**审计记录**。如果发现新的过时文档，开 issue 报告即可。
 
 ## 总结
 

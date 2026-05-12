@@ -1,10 +1,24 @@
-# Agent Network 开源前安全风险审计报告
+# Agent Network 开源前安全风险审计报告（历史 - 阻断项已处理）
 
 审计日期：2026-05-10  
-审计范围：当前工作区 `/home/vansin/agent-orchestra`，对应远端 `github.com/sleep2agi/agent-network`。  
+审计范围：当前工作区（对应远端 `github.com/sleep2agi/agent-network`）。  
 审计目标：评估项目开源发布、npm 发布、按文档部署时的安全风险，并给出修复优先级。
 
-## 结论摘要
+> **⚠️ 当前状态（2026-05-12 更新）**
+>
+> 本报告中标记为阻断（P0）的项已在 v0.8.0 / v0.8.1 全部处理：
+> - ✅ master token (`COMMHUB_AUTH_TOKEN`) 软废弃 + admin utok_ bootstrap → [RFC-001](rfcs/RFC-001-deprecate-commhub-auth-token.md) Phase 2
+> - ✅ 密码强度 ≥ 8 + 弱密码字典；首次 `anet hub start` 自动 prompt admin
+> - ✅ install.sh / hub-only.sh 默认 localhost + 风险 banner
+> - ✅ README 加 SECURITY DISCLAIMER
+> - ✅ 生产部署指南补 TLS / 反向代理 / 备份 checklist
+> - ✅ 仓库 OSS-readiness scan 三个 repo 全过；dashboard 历史 PAT 泄漏已 nuke 历史
+>
+> **项目已于 2026-05-11 正式开源**（Apache 2.0）。本报告保留为审计记录。
+>
+> 仍未关闭的：Argon2id 哈希迁移（v0.9+，task 跟踪在 GitHub Issues）；server `shell:true` spawn 审计（持续中）。
+
+## 结论摘要（历史，仅作审计记录）
 
 当前项目不建议直接开源或扩大公开部署。需要先处理以下阻断项：
 
