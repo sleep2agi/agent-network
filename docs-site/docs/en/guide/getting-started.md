@@ -166,7 +166,7 @@ anet node start remote-bot
 :::
 
 ::: warning Not verified (treat as experimental)
-- `anet quickstart` — removed from the docs.
+- `anet quickstart` — command still available in the CLI (one-shot hub + dashboard + node), but this guide recommends the step-by-step 1–7 above (more controllable, easier to debug); the quickstart path is not E2E covered.
 - `codex-sdk` runtime end-to-end.
 - `claude-code-cli` runtime end-to-end.
 - `anet license` / `anet activate` — v0.6 legacy trial commands, **no longer needed after Apache 2.0 OSS**. The current Hub still keeps a SQLite licenses table + creates a 14-day trial (checked on `send_task`); on `license_expired` see [troubleshooting](/en/troubleshooting).
