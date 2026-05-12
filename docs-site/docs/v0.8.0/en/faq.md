@@ -34,7 +34,7 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 Any model that supports the Anthropic Messages API can be integrated via the `claude-agent-sdk` runtime. Currently verified:
 
 - Claude Sonnet 4 / Opus 4 (native SDK)
-- Codex SDK (gpt-5.4)
+- Codex SDK (gpt-5)
 - MiniMax M2.7 (Anthropic-compatible API)
 - InternLM Intern-S1-Pro (Anthropic-compatible API)
 - DeepSeek (Anthropic-compatible API)

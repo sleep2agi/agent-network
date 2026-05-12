@@ -92,7 +92,7 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 
 | Property | Description |
 |------|------|
-| **Models** | Codex SDK model (set with `--model`; examples use `gpt-5.4`) |
+| **Models** | Codex SDK model (set with `--model`; examples use `gpt-5`) |
 | **Prerequisites** | `codex auth login` |
 | **Strengths** | Strong code generation, flexible tool use |
 | **Tools** | Supports Read / Write / Edit / Bash / Glob / Grep |
@@ -101,7 +101,7 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 npx @sleep2agi/agent-node \
   --alias code-assistant \
   --runtime codex-sdk \
-  --model gpt-5.4 \
+  --model gpt-5 \
   --hub http://YOUR_IP:9200 \
   --tools Read,Write,Edit,Bash,Glob,Grep
 ```
@@ -197,7 +197,7 @@ flowchart TD
   "node_name": "code-assistant",
   "token": "ntok_...",
   "runtime": "codex-sdk",
-  "model": "gpt-5.4",
+  "model": "gpt-5",
   "session": "",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],

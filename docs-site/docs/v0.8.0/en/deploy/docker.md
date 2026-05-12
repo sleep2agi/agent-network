@@ -239,7 +239,7 @@ DASHBOARD_PASSWORD=squad-dash
 |------|------|------|
 | `ALIAS` | Agent name | `coder-1` |
 | `RUNTIME` | Runtime engine | `codex-sdk` / `claude-agent-sdk` |
-| `MODEL` | Model | `gpt-5.4` / `claude-3-5-haiku-20241022` |
+| `MODEL` | Model | `gpt-5` / `claude-3-5-haiku-20241022` |
 | `COMMHUB_URL` | Server address | `http://server:9200` |
 | `COMMHUB_TOKEN` | Auth token | `ntok_xxx` or read from /shared/ntok |
 | `TOOLS` | Tool list | `Read,Write,Edit,Bash,Glob,Grep` |
@@ -338,7 +338,7 @@ worker-11:
   environment:
     - ALIAS=coder-6
     - RUNTIME=codex-sdk
-    - MODEL=gpt-5.4
+    - MODEL=gpt-5
     - COMMHUB_URL=http://server:9200
     - TOOLS=Read,Write,Edit,Bash,Glob,Grep
 ```

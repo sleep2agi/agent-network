@@ -92,7 +92,7 @@ npx @sleep2agi/agent-node \
 
 | 属性 | 说明 |
 |------|------|
-| **模型** | Codex SDK 模型（通过 `--model` 指定；示例使用 `gpt-5.4`） |
+| **模型** | Codex SDK 模型（通过 `--model` 指定；示例使用 `gpt-5`） |
 | **前置** | `codex auth login` |
 | **特点** | 代码生成强、工具调用灵活 |
 | **工具** | 支持 Read / Write / Edit / Bash / Glob / Grep |
@@ -101,7 +101,7 @@ npx @sleep2agi/agent-node \
 npx @sleep2agi/agent-node \
   --alias 代码助手 \
   --runtime codex-sdk \
-  --model gpt-5.4 \
+  --model gpt-5 \
   --hub http://YOUR_IP:9200 \
   --tools Read,Write,Edit,Bash,Glob,Grep
 ```
@@ -197,7 +197,7 @@ flowchart TD
   "node_name": "代码助手",
   "token": "ntok_...",
   "runtime": "codex-sdk",
-  "model": "gpt-5.4",
+  "model": "gpt-5",
   "session": "",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],

@@ -32,7 +32,7 @@ anet node start reasoning-master
 |---------|------|
 | (not needed) | Uses `claude auth login` credentials |
 
-### Codex SDK (gpt-5.4)
+### Codex SDK (gpt-5)
 
 Codex (codex-sdk) uses the OpenAI Codex SDK and requires an OpenAI account.
 
@@ -41,7 +41,7 @@ Codex (codex-sdk) uses the OpenAI Codex SDK and requires an OpenAI account.
 codex auth login
 
 # Create and start a Codex agent
-anet node create code-assistant --runtime codex-sdk --model gpt-5.4 --tools Read,Write,Edit,Bash,Glob,Grep
+anet node create code-assistant --runtime codex-sdk --model gpt-5 --tools Read,Write,Edit,Bash,Glob,Grep
 anet node start code-assistant
 ```
 
@@ -131,7 +131,7 @@ services:
     environment:
       - ALIAS=commander
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=gpt-5
       - COMMHUB_URL=http://server:9200
       - SYSTEM_PROMPT=You are the commander. Receive tasks and dispatch them. Route code tasks to the code team and text tasks to the writing team.
 
@@ -140,7 +140,7 @@ services:
     environment:
       - ALIAS=coder-1
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.4
+      - MODEL=gpt-5
       - COMMHUB_URL=http://server:9200
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
 

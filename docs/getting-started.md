@@ -77,7 +77,7 @@ anet network use my-team     # Switch to it
 anet node create my-agent
 
 # Or specify directly
-anet node create my-agent --runtime codex-sdk --model gpt-5.4
+anet node create my-agent --runtime codex-sdk --model <codex-model-id>
 ```
 
 **Available runtimes**:

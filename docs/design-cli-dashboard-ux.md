@@ -64,7 +64,7 @@ anet quickstart
 anet node start my-agent
 #   启动
 #   runtime: codex-sdk
-#   model:   gpt-5.4
+#   model:   gpt-5
 #   hub:     http://127.0.0.1:9200 (auth)
 #   user:    vincent (admin)
 #   network: default
@@ -167,7 +167,7 @@ anet token revoke tok_def
 anet status
 #   网络: default (owner)
 #   Agent:
-#     my-agent     idle       codex-sdk    gpt-5.4
+#     my-agent     idle       codex-sdk    gpt-5
 #     translator   working    http-api     minimax
 #   任务: 3 running, 12 completed
 
@@ -290,7 +290,7 @@ COMMHUB_TOKEN=atok_prod agent-node --alias ci-bot
 │  Agents — default (owner)                        │
 │                                                   │
 │  NAME        STATUS    RUNTIME    MODEL    TASK  │
-│  bot-1       🔨 working codex-sdk gpt-5.4  分析..│
+│  bot-1       🔨 working codex-sdk gpt-5  分析..│
 │  bot-2       💤 idle    http-api  minimax       │
 │  monitor     💤 idle    claude    sonnet        │
 │                                                   │

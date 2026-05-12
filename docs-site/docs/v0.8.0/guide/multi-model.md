@@ -82,7 +82,7 @@ anet node start 推理大师
 codex auth login
 
 # 创建 Codex Agent
-anet node create 代码机器 --runtime codex-sdk --model gpt-5.4 --tools Read,Write,Edit,Bash,Glob,Grep
+anet node create 代码机器 --runtime codex-sdk --model gpt-5 --tools Read,Write,Edit,Bash,Glob,Grep
 
 anet node start 代码机器
 ```
@@ -106,7 +106,7 @@ anet node create 代码审查 --runtime claude-agent-sdk
 
 # 3. 海外代码组（高能力）
 codex auth login
-anet node create 架构师 --runtime codex-sdk --model gpt-5.4
+anet node create 架构师 --runtime codex-sdk --model gpt-5
 
 # 4. 全部启动
 anet node start 文案1号
