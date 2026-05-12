@@ -82,7 +82,14 @@ After installation, the `anet` command is available globally.
 | `anet demo debate [opts]` | **Debate demo**: 6 roles and a 9-step debate flow |
 | `anet doctor` | System diagnostics |
 
-See [Debate Demo](/en/cases/debate) for the runnable multi-agent demo.
+### Demo (multi-agent showcase)
+
+| Command | Description |
+|------|------|
+| `anet demo ls` | List available demos |
+| `anet demo debate [opts]` | **Debate**: 6-role (host / pro × 2 / con × 2 / judge) one-command 9-step debate |
+
+See [Debate Demo case](/en/cases/debate).
 
 ### Channel Management
 

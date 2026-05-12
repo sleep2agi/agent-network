@@ -80,6 +80,26 @@ Use the legacy current/default network behavior:
 anet demo debate --no-network --topic "..."
 ```
 
+## Sample output
+
+```text
+  Topic: Does AI create more jobs than it destroys?
+  Hub:   http://127.0.0.1:9200
+  Net:   (debate-1a2b net_xxx)
+  Run:   1a2b
+
+  [1/4] Creating 6 agents (alias suffix -1a2b)...
+        ✓ created / updated 6 agents
+  [2/4] Starting 6 agents (tmux sessions)...
+        ✓ all 6 agents SSE-connected
+  [3/4] Driving debate flow (9 steps)...
+  [1/9] Opening (host-1a2b) ... ✓ 21s, 361 chars
+  ...
+  [4/4] Writing transcript: ./debate-AI-jobs-1714766365.md
+        ✓ Deleted isolated network (net_xxx)
+        ✓ Cleanup complete
+```
+
 ## Troubleshooting
 
 **Missing MiniMax key**
