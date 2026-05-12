@@ -166,3 +166,11 @@ A: Correct. If you want "read + occasional dispatch", grant `member`.
 - ✅ All hub ↔ dashboard internal calls = admin user's `utok_` (Dashboard 0.4.2 is a thin cookie-proxy)
 
 The role system is the only auth basis going forward.
+
+## Next steps
+
+- **CLI ops for roles**: [CLI commands — network management](/en/guide/cli) (`anet network members ls / promote / demote`)
+- **Token system mapping**: [Tokens](/en/concepts/tokens) — how the 4 roles relate to `utok_` / `ntok_`
+- **Full security model**: [Security design](/en/concepts/security)
+- **How v0.7 → v0.8 upgrade affects roles**: [Upgrade guide](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest)
+- **RFC-001 roadmap**: [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)

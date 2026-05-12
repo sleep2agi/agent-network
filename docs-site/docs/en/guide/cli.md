@@ -471,3 +471,22 @@ Common commands read these options or their saved config equivalents:
 | `ANTHROPIC_BASE_URL` | Model API URL (MiniMax, etc.) | - |
 | `ANTHROPIC_AUTH_TOKEN` | Model API key | - |
 | `ANTHROPIC_API_KEY` | Model API key (alias) | - |
+
+## Next steps
+
+**Hands-on starter**:
+- Run end-to-end: [One-shot install](/en/guide/one-shot-install) — install + first agent
+- Try demos: [Hello World](/en/cases/hello-world) / [Debate](/en/cases/debate) / [Telegram squad](/en/cases/telegram-squad)
+
+**Behind the commands**:
+- Config file structure: [Agent Node](/en/guide/agent-node) (config.json fields)
+- Pick a runtime: [Runtimes](/en/guide/runtimes)
+- Switch between domestic / overseas models: [Multi-model](/en/guide/multi-model)
+
+**v0.8 new tools**:
+- `anet passwd` — change password (see [Security](/en/concepts/security))
+- `anet hub admin reset-user <username>` — local owner force-reset
+- `anet doctor --fix` — auto-probe + reissue expired ntok_
+- `anet hub start` — first run auto-bootstraps admin (default `admin / anethub`)
+
+**Full upgrade guide**: [v0.7 → v0.8 upgrade notes](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest)

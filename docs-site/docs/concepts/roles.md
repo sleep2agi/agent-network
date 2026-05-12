@@ -220,3 +220,11 @@ A：对，连派 task 都不行。如果想"能看 + 偶尔派"，给 member。
 - ✅ 所有 hub ↔ dashboard 内部通信 = admin user 的 `utok_`（Dashboard 0.4.2 已切到 thin cookie-proxy）
 
 这就是为啥要把 role 体系写清楚 —— 它是**唯一**的鉴权基础。
+
+## 下一步
+
+- **CLI 操作 role**：[CLI 命令 — network 管理](/guide/cli)（`anet network members ls / promote / demote`）
+- **Token 体系联动**：[Token 概念](/concepts/tokens) — 4 个 role 跟 utok_/ntok_ 关系
+- **完整安全模型**：[安全设计](/concepts/security)
+- **升级 v0.7 → v0.8 怎么影响 role**：[升级指南](/guide/upgrade#v0-7-v0-8-升级注意-最新)
+- **RFC-001 路线图**：[RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)

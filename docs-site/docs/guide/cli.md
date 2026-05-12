@@ -506,3 +506,22 @@ anet init project
 | `ANTHROPIC_BASE_URL` | 模型 API 地址（MiniMax 等） | - |
 | `ANTHROPIC_AUTH_TOKEN` | 模型 API Key | - |
 | `ANTHROPIC_API_KEY` | 模型 API Key（别名） | - |
+
+## 下一步
+
+**手把手起步**：
+- 从零跑一遍：[一键安装与起步](/guide/one-shot-install) — 装 + 跑第一个 agent
+- 看 demo：[Hello World](/cases/hello-world) / [辩论赛](/cases/debate) / [军团编队](/cases/telegram-squad)
+
+**深入命令背后**：
+- 配置文件结构：[Agent Node](/guide/agent-node)（config.json 字段说明）
+- 多个 runtime 怎么选：[Runtimes](/guide/runtimes)
+- 国产/海外模型切换：[多模型配置](/guide/multi-model)
+
+**v0.8 新工具**：
+- `anet passwd` — 改密码（[安全设计](/concepts/security)）
+- `anet hub admin reset-user <username>` — 本机重置用户（owner 强制）
+- `anet doctor --fix` — 自动探测 + 重发过期 ntok_
+- `anet hub start` — 首次自动 bootstrap admin（默认 `admin / anethub`）
+
+**完整升级指南**：[v0.7 → v0.8 升级注意](/guide/upgrade#v0-7-v0-8-升级注意-最新)
