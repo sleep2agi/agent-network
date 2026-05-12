@@ -63,7 +63,7 @@
 
 | ID | 目标文件 | 测什么 | 优先级 |
 |----|----------|--------|--------|
-| UT-01 | `server/src/auth.ts` | utok / ntok 生成格式、过期、签名校验 | ⭐ 安全核心 |
+| UT-01 | `server/src/db.ts` (token gen + hash) | utok/ntok/atok 形状 + uniqueness + hashToken/hashPassword 契约 | ✅ [qa-ut-01](../../tests/qa-ut-01-auth-tokens/) 19 断言 / 76 expect / ~250ms |
 | UT-02 | `server/src/password-dict.ts` | 弱密码命中字典即拒 | ✅ [qa-ut-02](../../tests/qa-ut-02-password-dict/) 19 断言 PASS，local ~55ms / Docker ~0.5s |
 | UT-03 | `server/src/db.ts` | task 状态机非法迁移被拒（completed→pending 等） | ⭐ |
 | UT-04 | `agent-network/bin/cli.ts` 解析层 | flag / 子命令解析（先重构成可测纯函数） | 大文件，分多轮 |

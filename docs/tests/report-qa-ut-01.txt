@@ -1,0 +1,59 @@
+Test: qa-ut-01-auth-tokens (matrix UT-01)
+Date: 2026-05-12
+Layer: L0 unit (code view, pure functions in server/src/db.ts)
+
+Result: PASS
+Runtime:
+  local: bun test ~250ms (server/ working dir, COMMHUB_DB=/tmp/qa-ut-01-local.db)
+  Docker: warm ~1s (oven/bun:1 image)
+
+Commands:
+  # local
+  cd server && COMMHUB_DB=/tmp/qa-ut-01.db bun test src/auth-tokens.test.ts
+
+  # Docker
+  sg docker -c 'docker build -t anet-qa-ut-01 -f tests/qa-ut-01-auth-tokens/Dockerfile .'
+  sg docker -c 'docker run --rm anet-qa-ut-01'
+
+19 assertions / 76 expect() calls covering:
+  - uuidv4: RFC 4122 v4 shape + 1000-unique sanity
+  - generateId(prefix): `<prefix>_<12 hex>` shape
+  - Token shape contract: atok_<32hex> / utok_<32hex> / ntok_<32hex>
+  - Token prefix discrimination: utok / ntok / atok never collide
+  - Token uniqueness: 1000 invocations no collision (per generator)
+  - hashToken: 64-char hex + deterministic + similar inputs distinct
+              + known-value fixture sha256('test') = 9f86d081...
+  - hashPassword: 64-char hex + deterministic + 'anet:' salt contract
+                  (pinned via `hashPassword(x) == hashToken('anet:' + x)`)
+  - Safety: hashToken(prefix) != hashToken(full) — defends against
+            partial-input hash bugs
+
+Key contracts pinned:
+
+1. hashPassword uses 'anet:' as static salt prefix. If a refactor drops it,
+   every existing user password hash silently stops matching on login.
+   Test fails immediately on this mutation.
+
+2. All three token types are sha256-of-self, NOT of-prefix or of-body.
+   resolveToken depends on this: a bug that hashes just the suffix would
+   make `utok_xxx` and `ntok_xxx` collide.
+
+3. UUID v4 prefix-strip-and-concat scheme produces 32 hex chars (no
+   dashes). SDK regex parsers / database VARCHAR(N) defenders should
+   assume this exact length.
+
+Why a separate L0 vs the existing E2E coverage:
+  R5 (HUB-06 token-revoke) tests the auth state machine end-to-end (12s).
+  This test pins the generation/hash primitives at < 1s. Future refactor
+  of crypto.randomUUID strategy or salt scheme breaks here instantly,
+  without burning a Docker run.
+
+How the test handles db.ts schema bootstrap:
+  Importing ./db.js runs `db.exec(CREATE TABLE ...)` at module load. To
+  isolate, COMMHUB_DB env var routes the SQLite file to a throwaway path.
+  qa.sh sets COMMHUB_DB=/tmp/qa-l0-<name>.db per test. Dockerfile sets
+  COMMHUB_DB=/tmp/qa-ut-01.db.
+
+Resources:
+  - bun 1.x (oven/bun:1 image, ~200MB) for Docker
+  - no network, no commhub process, no real LLM

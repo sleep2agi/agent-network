@@ -46,7 +46,10 @@ dockerrun() {
   fi
 }
 
-L0_TESTS=("password-dict:server/src/password-dict.test.ts")
+L0_TESTS=(
+  "password-dict:server/src/password-dict.test.ts"
+  "auth-tokens:server/src/auth-tokens.test.ts"
+)
 L1_TESTS=(
   "qa-hub-05-roundtrip"
   "qa-hub-06-token-revoke"
@@ -81,7 +84,10 @@ if [[ $RUN_L0 -eq 1 ]]; then
   else
     for entry in "${L0_TESTS[@]}"; do
       name="${entry%%:*}"; path="${entry#*:}"
-      if (cd server && bun test "${path#server/}" >/tmp/qa-l0-$name.log 2>&1); then
+      # Route db.ts schema bootstrap to a throwaway file (auth-tokens needs
+      # this; password-dict ignores it).
+      if (cd server && COMMHUB_DB=/tmp/qa-l0-$name.db bun test "${path#server/}" \
+            >/tmp/qa-l0-$name.log 2>&1); then
         ok "L0 $name"
       else
         fail "L0 $name — see /tmp/qa-l0-$name.log"

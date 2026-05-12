@@ -33,6 +33,7 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 
 | ID | 文件 | 跑 |
 |----|------|----|
+| UT-01 | [server/src/auth-tokens.test.ts](../../server/src/auth-tokens.test.ts) | `COMMHUB_DB=/tmp/x.db cd server && bun test src/auth-tokens.test.ts` |
 | UT-02 | [server/src/password-dict.test.ts](../../server/src/password-dict.test.ts) | `cd server && bun test src/password-dict.test.ts` |
 
 ### L1 — Docker contract（用户视角，10-15s/条）
