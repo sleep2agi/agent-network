@@ -31,7 +31,7 @@
 
 ## 想赞助开发？
 
-如果你或你的团队在生产环境用 Agent Network，想资助开发或赞助某个 feature，开一个 [`sponsor` 标签的 issue](https://github.com/sleep2agi/agent-network/issues/new) 或加群联系作者。
+如果你或你的团队在生产环境用 Agent Network，想资助开发或赞助某个 feature，[开 issue](https://github.com/sleep2agi/agent-network/issues/new)（标题写明 "Sponsor:" 或注明赞助意向）或加群联系作者。
 
 ## 下一步
 

@@ -15,7 +15,7 @@ Projects built on Agent Network, or projects that use Agent Network as their pro
 If your project uses Agent Network as multi-agent infrastructure, or you use anet to collaborate and ship faster, we'd love to feature it:
 
 - **PR**: edit [`docs-site/docs/en/ecosystem.md`](https://github.com/sleep2agi/agent-network/blob/main/docs-site/docs/en/ecosystem.md)
-- **Discussion**: open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) tagged `ecosystem`, describe your project and how you use anet
+- **Discussion**: open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) (prefix the title with "Ecosystem:"), describe your project and how you use anet
 - **WeChat**: drop it in the [community group](/en/community), the maintainer will gather submissions
 
 ## Inclusion criteria
@@ -33,7 +33,7 @@ We don't require open source, a specific license, or any specific stack.
 - [Hello World](/en/cases/hello-world) — first demo
 - [Channel plugins](/en/guide/channels) — wire your own IM / API
 
-**Get your project listed**: open a GitHub issue with name / link / one-line description, tag `ecosystem`.
+**Get your project listed**: open a GitHub issue with name / link / one-line description (prefix the title with "Ecosystem:").
 
 **Learn more**:
 - [Community](/en/community) — WeChat group / Discussions / sponsoring

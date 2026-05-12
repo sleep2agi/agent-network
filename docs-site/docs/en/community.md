@@ -30,7 +30,7 @@ The image is refreshed weekly. **Bookmark this page**, not the QR — the URL is
 
 ## Sponsoring
 
-If your team relies on Agent Network in production and wants to fund development or sponsor a specific feature, open an [issue tagged `sponsor`](https://github.com/sleep2agi/agent-network/issues/new) or reach out via the WeChat group.
+If your team relies on Agent Network in production and wants to fund development or sponsor a specific feature, [open an issue](https://github.com/sleep2agi/agent-network/issues/new) (prefix the title with "Sponsor:" or note the sponsorship intent) or reach out via the WeChat group.
 
 ## Next steps
 

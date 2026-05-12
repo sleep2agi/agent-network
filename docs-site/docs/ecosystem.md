@@ -15,7 +15,7 @@
 如果你的项目用 Agent Network 当多 Agent 基础设施，或者用 anet 协作干活生产力翻倍，欢迎：
 
 - **提 PR**：在 [`docs-site/docs/ecosystem.md`](https://github.com/sleep2agi/agent-network/blob/main/docs-site/docs/ecosystem.md) 加上你的项目
-- **发 Discussion**：[GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 标签 `ecosystem`，描述项目 + 怎么用了 anet
+- **发 Discussion**：[GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions)（标题前缀 "Ecosystem:"），描述项目 + 怎么用了 anet
 - **加微信群**：直接发到 [社群](/community) 也行，作者会汇总进来
 
 ## 收录标准
@@ -33,7 +33,7 @@
 - [Hello World](/cases/hello-world) — 第一个 demo
 - [Channel 插件](/guide/channels) — 接你自己的 IM / API
 
-**收录你的项目**：在 GitHub 开 issue 把项目名 / 链接 / 一句话简介贴上来，加 `ecosystem` 标签。
+**收录你的项目**：在 GitHub 开 issue 把项目名 / 链接 / 一句话简介贴上来（标题前缀 "Ecosystem:"）。
 
 **了解项目**：
 - [社区](/community) — 微信群 / Discussions / 赞助
