@@ -110,12 +110,15 @@ npx @sleep2agi/agent-node \
 ```
 
 ::: details Prerequisites checklist
+- [ ] Install codex-sdk + CLI: `npm install -g @openai/codex-sdk @openai/codex` (agent-node loads both packages on start; missing either throws `@openai/codex-sdk not installed`)
 - [ ] Run `codex auth login` to authenticate with OpenAI
 - [ ] CommHub Server is running
 :::
 
 ::: info Verify
-After starting, you should see `SSE connected, waiting for tasks...`. If you get a `codex auth` error, run `codex auth login`.
+After starting, you should see `SSE connected, waiting for tasks...`.
+- If you get `@openai/codex-sdk not installed`, install `@openai/codex-sdk` + `@openai/codex` per the prereq above
+- If you get a `codex auth` error, run `codex auth login`
 :::
 
 ### claude-agent-sdk + Domestic Models

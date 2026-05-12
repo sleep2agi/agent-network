@@ -110,12 +110,15 @@ npx @sleep2agi/agent-node \
 ```
 
 ::: details 你需要准备
-- [ ] 运行 `codex auth login` 完成 OpenAI 登录
+- [ ] 安装 codex-sdk + CLI：`npm install -g @openai/codex-sdk @openai/codex`（agent-node 启动会找这两个包，缺一个就报 `@openai/codex-sdk not installed`）
+- [ ] 跑 `codex auth login` 完成 OpenAI 登录
 - [ ] CommHub Server 已启动
 :::
 
 ::: info 验证
-启动后看到 `SSE connected, waiting for tasks...` 即表示成功。如果报 `codex auth` 错误，请运行 `codex auth login`。
+启动后看到 `SSE connected, waiting for tasks...` 即表示成功。
+- 如果报 `@openai/codex-sdk not installed`，先按上一步装 `@openai/codex-sdk` + `@openai/codex`
+- 如果报 `codex auth` 错误，请跑 `codex auth login`
 :::
 
 ### claude-agent-sdk + 国产模型
