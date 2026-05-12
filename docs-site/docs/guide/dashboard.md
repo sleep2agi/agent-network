@@ -48,7 +48,7 @@ block-beta
 | From | 发送者别名 |
 | To | 接收者别名 |
 | Priority | 优先级（high / normal / low） |
-| Status | 状态（delivered / acked / running / replied / failed / cancelled） |
+| Status | 状态（delivered / acked / running / replied / failed / cancelled / expired；完整状态机见 [Task 生命周期](/concepts/task-lifecycle)） |
 | Content | 任务内容预览 |
 | Created | 创建时间 |
 | Duration | 从创建到完成的耗时 |

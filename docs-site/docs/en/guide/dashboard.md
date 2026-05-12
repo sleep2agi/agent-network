@@ -48,7 +48,7 @@ The task management page displays the full lifecycle of all tasks:
 | From | Sender alias |
 | To | Recipient alias |
 | Priority | Priority level (high / normal / low) |
-| Status | Status (delivered / acked / running / replied / failed / cancelled) |
+| Status | Status (delivered / acked / running / replied / failed / cancelled / expired; full state machine in [Task lifecycle](/en/concepts/task-lifecycle)) |
 | Content | Task content preview |
 | Created | Creation time |
 | Duration | Time from creation to completion |
