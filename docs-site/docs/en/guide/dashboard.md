@@ -248,7 +248,7 @@ If you have more than 50 agents, consider using the standalone Dashboard and dis
 
 ## Preview channel (next stable WIP)
 
-`@sleep2agi/agent-network-dashboard@preview` carries the next-gen UI under active polish. Current preview pin is `0.4.5-preview.1` (the CLI preview tag `@sleep2agi/agent-network@preview` auto-syncs).
+`@sleep2agi/agent-network-dashboard@preview` carries the next-gen UI under active polish. Current preview pin auto-syncs with the CLI preview tag `@sleep2agi/agent-network@preview`; the actual version is whatever's on the [npm preview tag](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard?activeTab=versions) (frequent iteration, this doc doesn't pin a specific number).
 
 New capabilities (vs stable 0.4.2):
 
@@ -270,7 +270,7 @@ Try it:
 # Upgrade CLI to preview
 npm i -g @sleep2agi/agent-network@preview
 anet -v                                    # should show 2.1.x-preview.N
-anet hub dashboard                          # npx auto-pulls 0.4.5-preview.1
+anet hub dashboard                          # npx auto-pulls the current preview version
 ```
 
 Or bypass the CLI entirely:

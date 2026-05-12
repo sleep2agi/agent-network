@@ -248,7 +248,7 @@ Dashboard 通过两类数据面保持更新：
 
 ## Preview 通道（即将进入下一个 stable）
 
-`@sleep2agi/agent-network-dashboard@preview` 上有正在打磨的下一代 UI。当前 preview pin 是 `0.4.5-preview.1`（CLI preview tag `@sleep2agi/agent-network@preview` 自动联动）。
+`@sleep2agi/agent-network-dashboard@preview` 上有正在打磨的下一代 UI。当前 preview pin 跟 CLI preview tag `@sleep2agi/agent-network@preview` 自动联动，具体版本以 [npm preview tag](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard?activeTab=versions) 实际为准（频繁迭代，doc 不写死版本号）。
 
 新增能力（vs stable 0.4.2）：
 
@@ -270,7 +270,7 @@ Dashboard 通过两类数据面保持更新：
 # 升级 CLI 到 preview
 npm i -g @sleep2agi/agent-network@preview
 anet -v                                    # 应显示 2.1.x-preview.N
-anet hub dashboard                          # 自动 npx 拉 0.4.5-preview.1
+anet hub dashboard                          # 自动 npx 拉当前 preview 版本
 ```
 
 或直接绕过 CLI：
