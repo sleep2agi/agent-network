@@ -11,7 +11,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | **MiniMax M2.7** | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | 低成本文案、翻译 | 极低 |
 | **DeepSeek V3** | DeepSeek | `claude-agent-sdk` | api.deepseek.com/anthropic | 代码+推理、性价比极高 | 极低 |
 | **GLM 5.1** | 智谱 | `claude-agent-sdk` | open.bigmodel.cn/anthropic | 中文理解强 | 低 |
-| **书生 Intern-S1** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn/anthropic | 科学推理 | 低 |
+| **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn/anthropic | 科学推理 | 低 |
 | **Kimi** | Moonshot | `claude-agent-sdk` | api.moonshot.cn/anthropic | 长文本处理 | 低 |
 | **小米 MiMo** | 小米 | `claude-agent-sdk` | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) Anthropic 兼容端点 | 通用对话 | 低 |
 
@@ -154,7 +154,7 @@ ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 | 代码生成/审查 | DeepSeek V3 或 Codex (codex-sdk) | 代码能力强 |
 | 复杂推理/分析 | Claude Sonnet（主线） | 推理最强 |
 | 长文档处理 | Kimi | 128K 上下文 |
-| 科学研究 | 书生 Intern-S1 | 科研专长 |
+| 科学研究 | 书生 Intern-S1-Pro | 科研专长 |
 | 预算有限 | MiniMax + DeepSeek 混搭 | 两个都极便宜 |
 | 全能（不差钱） | Claude Opus（主线） | 什么都行 |
 
