@@ -439,7 +439,7 @@ Agent                    CommHub Server              Hub/指挥室
 | Dashboard | 技术栈 | 部署 | 地址 |
 |-----------|--------|------|------|
 | 内置轻量 UI | 纯 HTML + vanilla JS | 内嵌 `anet server` | `http://YOUR_IP:9200/dashboard` |
-| 独立 Dashboard | Next.js + Vercel | 独立部署 | https://agent-network-dashboard.vercel.app |
+| 独立 Dashboard | Next.js + Vercel | 独立部署 | 你自己的 Dashboard 部署 URL |
 
 独立 Dashboard 提供更丰富的功能：节点拓扑图、历史趋势、任务甘特图等。
 
@@ -455,7 +455,7 @@ Agent                    CommHub Server              Hub/指挥室
 ```
 anet server start --port 9200
 # 内置: http://YOUR_IP:9200/dashboard
-# 独立: https://agent-network-dashboard.vercel.app
+# 独立: 你的 Dashboard 部署 URL（参考 [Dashboard 部署](https://anet.sh/guide/dashboard) 自部署）
 ```
 
 ### 页面功能
