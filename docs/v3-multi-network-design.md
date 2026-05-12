@@ -1,10 +1,10 @@
 # V3 Multi-Network + User System Design
 
-> **实现状态（2026-05-12 对齐 v0.8.1）**
+> **实现状态（2026-05-12 对齐 v0.8.2）**
 >
 > 历史背景：本文写于 V3 早期（2026-03 ~ 04），描述的是 user × network × node 的目标态设计。大部分已在 v0.6 ~ v0.8 落地。
 >
-> ✅ 已实现（v0.8.1）：
+> ✅ 已实现（v0.8.2）：
 > - User × Network × Node 三层模型 + RBAC（owner / admin / member / viewer）
 > - 双 token：utok_（用户）+ ntok_（节点 × 网络）
 > - 邀请码：`anet network invite create / join`，role 可选

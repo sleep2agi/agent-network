@@ -5,7 +5,7 @@
 > 本文写于 V3 早期（2026-03 ~ 04），目标是 CommHub Server 同时支持 SQLite 和 PostgreSQL，配合"官方托管"场景。**自从 2026-04 产品方向转向"纯本地 + SQLite only + 不做官方托管"以来，PostgreSQL 支持已从 v0.8/v0.9 路线图中移除。**
 >
 > **当前状态**：
-> - SQLite WAL 模式是**唯一**支持的存储后端（v0.8.1）
+> - SQLite WAL 模式是**唯一**支持的存储后端（v0.8.2）
 > - `db-adapter.ts` 接口和 PG adapter 代码已存在但未启用
 > - 没有计划在未来短期内 ship PostgreSQL；如有强需求，开 GitHub Issue 讨论
 >

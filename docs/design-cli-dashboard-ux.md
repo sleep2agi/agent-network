@@ -1,10 +1,10 @@
 # CLI + Dashboard 用户流程设计
 
-> **实现状态（2026-05-12 对齐 v0.8.1）**
+> **实现状态（2026-05-12 对齐 v0.8.2）**
 >
 > 历史背景：本文写于 V3 早期（2026-04-11 首次对齐），描述的是 CLI + Dashboard 的用户流程目标态。v0.8 系列大幅推进了 token 与密码管理（[RFC-001 Phase 2](rfcs/RFC-001-deprecate-commhub-auth-token.md)），UX 上还增加了首次 hub start 的 admin bootstrap 和 doctor 自动修复。
 >
-> ✅ 已实现（v0.8.1）：
+> ✅ 已实现（v0.8.2）：
 > - 双 token 体系 (utok_ + ntok_)，token 对用户透明
 > - anet login 后交互选网络
 > - anet node create 交互选网络（多网络时）

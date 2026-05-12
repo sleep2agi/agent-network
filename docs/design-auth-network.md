@@ -1,11 +1,11 @@
 # 用户 × 网络 × Agent Node 认证权限设计 V2
 
-> **实现状态（2026-05-12 对齐 v0.8.1）**
+> **实现状态（2026-05-12 对齐 v0.8.2）**
 > 
 > 历史背景：本文写于 v0.5 / V3 早期（2026-04-11 首次对齐），描述的是双 token + 网络成员 + 邀请码的**目标态设计**。
 > v0.8 系列已通过 [RFC-001](rfcs/RFC-001-deprecate-commhub-auth-token.md) Phase 1 + 2 大幅推进了 token 边界和密码管理。
 > 
-> ✅ 已实现（v0.8.1）：
+> ✅ 已实现（v0.8.2）：
 > - 双 token：utok_（用户）+ ntok_（节点网络）+ atok_（兼容）
 > - 注册返回 utok_ + ntok_，登录返回 utok_
 > - network_members + network_invites 表
