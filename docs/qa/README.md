@@ -41,6 +41,7 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 
 | ID | 测试 | persona |
 |----|------|---------|
+| CLI-02 | [tests/qa-cli-02-network-create](../../tests/qa-cli-02-network-create/) | anet login + network create + ls + dup + whoami |
 | HUB-05 | [tests/qa-hub-05-roundtrip](../../tests/qa-hub-05-roundtrip/) | commhub register→mint→send→SSE→DB |
 | HUB-06 | [tests/qa-hub-06-token-revoke](../../tests/qa-hub-06-token-revoke/) | commhub utok/ntok 撤销契约 |
 | HUB-07 | [tests/qa-hub-07-sse-reconnect](../../tests/qa-hub-07-sse-reconnect/) | commhub SSE 断重连 + get_inbox 拉 backlog |

@@ -52,6 +52,7 @@ L0_TESTS=(
   "auth-validate:server/src/auth-validate.test.ts"
 )
 L1_TESTS=(
+  "qa-cli-02-network-create"
   "qa-hub-05-roundtrip"
   "qa-hub-06-token-revoke"
   "qa-hub-07-sse-reconnect"
@@ -86,8 +87,10 @@ if [[ $RUN_L0 -eq 1 ]]; then
   else
     for entry in "${L0_TESTS[@]}"; do
       name="${entry%%:*}"; path="${entry#*:}"
-      # Route db.ts schema bootstrap to a throwaway file (auth-tokens needs
-      # this; password-dict ignores it).
+      # Route db.ts schema bootstrap to a fresh throwaway file. Tests that
+      # call register() depend on a clean DB to avoid 'username already
+      # taken' on rerun (auth-validate). Cleared by removing before each run.
+      rm -f /tmp/qa-l0-$name.db
       if (cd server && COMMHUB_DB=/tmp/qa-l0-$name.db bun test "${path#server/}" \
             >/tmp/qa-l0-$name.log 2>&1); then
         ok "L0 $name"

@@ -1,0 +1,47 @@
+Test: qa-cli-02-network-create (matrix CLI-02)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+
+Result: PASS
+Runtime: ~14s warm, ~30s cold
+
+Coverage (7 steps hard-asserted):
+- [0] hub boot
+- [1] `anet login --hub --username --password` (non-interactive) → stdout "Logged in as admin"
+- [2] ~/.anet/config.json written with hub URL + utok_
+- [3] `anet network create qa-cli02-net` → stdout exact match
+       `[anet] Network "qa-cli02-net" created (net_<hex>)`
+       (SDK scripts depend on this regex)
+- [4] REST verifies network landed in /api/networks
+- [5] `anet network ls` lists the new network
+- [6] `anet network create` with duplicate name → stdout has "already" / "taken" / "exists"
+- [7] `anet whoami` uses persisted utok → output contains "admin"
+
+Contracts pinned:
+
+1. CLI output format `[anet] Network "<name>" created (<id>)`
+   Used by setup scripts (setup-anet.sh etc.) to extract network_id.
+   A rebrand or emoji-injection breaks ALL downstream parsers — this
+   test catches it instantly.
+
+2. ~/.anet/config.json is source-of-truth
+   `anet login` writes hub + token there. Subsequent commands read it
+   without needing --hub/--token every time. This is the "stateful
+   login" UX users expect.
+
+3. Non-interactive login (--username/--password) MUST work
+   Pin "scripts/CI can use CLI without tty". cli.ts loginCommand L3055
+   passes opts.username through `ask()` fallback.
+
+Bonus observations (not assertions, surfaced by test output):
+- `anet network ls` uses ⭐ marker for owned networks + "← current"
+  for the active one — pleasant UX, but format-fragile against
+  i18n / theme changes.
+- register() auto-creates a "default" network for new users (already
+  pinned in R5 / qa-hub-06).
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip + procps
+  - @sleep2agi/agent-network@preview from npm
+  - 0 LLM API calls

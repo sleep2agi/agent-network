@@ -11,7 +11,7 @@
 | ID | 用户故事 | 现状 | 现有覆盖 |
 |----|---------|------|---------|
 | CLI-01 | 我装好后能起 hub，看到 dashboard | ❌ | （手动） |
-| CLI-02 | 我能创建一个 network，拿到 ntok_ | ❌ | （手动） |
+| CLI-02 | 我能创建一个 network，拿到 ntok_ | ✅ | [qa-cli-02](../../tests/qa-cli-02-network-create/) R13 PASS（~14s）— login + config + create + ls + dup-reject + whoami |
 | CLI-03 | 我能 `anet node create` 把当前目录注册为节点 | ❌ | （docker-e2e 用 REST 绕过） |
 | CLI-04 | 我能 `anet node start` 让 agent 连上 hub | 🟡 | docker-e2e SC03 SSE 上线 |
 | CLI-05 | 我中断后 `anet node start` 能恢复同一个 Claude session | ✅ | [report-test31.txt](../tests/report-test31.txt) |
