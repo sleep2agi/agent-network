@@ -95,7 +95,7 @@ v0.8 落地了 [RFC-001 第二阶段](https://github.com/sleep2agi/agent-network
 
 ```bash
 # 1. 升级三件套到 latest（v0.8.1 stable）
-npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.5
+npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.7
 npm install -g @sleep2agi/agent-node@latest      # 2.3.0
 
 # commhub-server 通过 anet hub start 自动用最新 bun runtime 拉

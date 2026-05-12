@@ -95,7 +95,7 @@ v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/mai
 
 ```bash
 # 1. Bump the three packages to latest (v0.8.1 stable)
-npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.5
+npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.7
 npm install -g @sleep2agi/agent-node@latest      # 2.3.0
 
 # commhub-server pulls latest automatically via anet hub start (bun runtime)

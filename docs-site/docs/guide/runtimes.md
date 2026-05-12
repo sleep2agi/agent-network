@@ -119,7 +119,7 @@ anet node start my-bot
 **1. 安装 anet**（如果还没装）：
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.1.5
+npm install -g @sleep2agi/agent-network@2.1.7
 ```
 
 **2. 准备 API Key**（任选一家）：
@@ -136,7 +136,7 @@ npm install -g @sleep2agi/agent-network@2.1.5
 
 ```bash
 anet --version
-# 期望输出：2.1.5
+# 期望输出：2.1.7
 
 # 启起来一个节点后看进程
 anet node start planner
