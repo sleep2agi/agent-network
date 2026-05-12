@@ -29,3 +29,4 @@ agent-network/tests/docker-e2e/results/
 *.tmp
 *.bak
 .DS_Store
+.env.local
