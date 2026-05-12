@@ -3,7 +3,7 @@ import { withMermaid } from 'vitepress-plugin-mermaid'
 
 export default withMermaid(defineConfig({
   title: 'Agent Network',
-  description: '企业级 AI Agent 军团管控平台',
+  description: '本地优先的多 Agent 协作平台 — Apache 2.0 开源，自部署，纯本机',
   cleanUrls: true,
   markdown: {
     // Inject data-source-line attributes on outermost block-level tokens so
@@ -127,7 +127,7 @@ export default withMermaid(defineConfig({
     en: {
       label: 'English',
       lang: 'en-US',
-      description: 'Enterprise-grade Multi-Agent Orchestration Platform',
+      description: 'Local-first Multi-Agent Collaboration — Apache 2.0 open source, self-hosted',
       themeConfig: {
         nav: [
           { text: 'Guide', link: '/en/guide/getting-started' },
