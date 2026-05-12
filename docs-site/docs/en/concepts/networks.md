@@ -158,7 +158,7 @@ Invite code properties:
 | `max_uses` | Maximum number of uses, -1 for unlimited |
 | `expires` | Expiration in days (optional) |
 
-### Option 2: Cross-machine Agent Deployment
+### Option 2: Cross-machine Agent Deployment {#cross-machine-deployment}
 
 **v0.8 recommended**: on each target machine, run `anet node create` **locally** — don't copy `config.json` across machines. Each machine registers its own node, and the hub mints a unique `ntok_` per node so they don't collide.
 

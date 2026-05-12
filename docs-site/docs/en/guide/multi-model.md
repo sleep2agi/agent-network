@@ -95,7 +95,7 @@ anet node start intern
 | `ANTHROPIC_BASE_URL` | `https://chat.intern-ai.org.cn/anthropic` |
 | `ANTHROPIC_AUTH_TOKEN` | InternLM API Key |
 
-## ANTHROPIC_BASE_URL Mechanism
+## ANTHROPIC_BASE_URL Mechanism {#how-anthropic-base-url-works}
 
 The `claude-agent-sdk` runtime uses the `ANTHROPIC_BASE_URL` environment variable to route requests to compatible API endpoints. This is the core model-mapping mechanism:
 

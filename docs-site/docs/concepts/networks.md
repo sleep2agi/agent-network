@@ -158,7 +158,7 @@ anet network join inv_abc123def456
 | `max_uses` | 最大使用次数，-1 为无限 |
 | `expires` | 过期天数（可选） |
 
-### 方式二：跨机器部署 Agent
+### 方式二：跨机器部署 Agent {#跨机器部署}
 
 **v0.8 推荐做法**：在每台目标机器上**直接 `anet node create`**，不要复制 `config.json`。每台机器的 node 是独立的注册，hub 自动颁发独立的 `ntok_`，互不冲突。
 
