@@ -16,7 +16,7 @@ You → anet CLI → CommHub Server ← Agent 1 (GPT-5.4)
 
 ```bash
 # 1. Install
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 
 # 2. Start local server
 anet hub start
@@ -37,7 +37,7 @@ That's it! Your agent is online and ready to receive tasks.
 ### Step 1: Install
 
 ```bash
-npm install -g @sleep2agi/agent-network@preview
+npm install -g @sleep2agi/agent-network
 ```
 
 ### Step 2: Start or Connect to a Server
@@ -143,8 +143,9 @@ anet node rename old new  # Rename agent
 anet status          # Network overview (agents + tasks)
 anet tasks           # Task history
 anet tasks replied   # Filter by status
-anet demo            # Live system dashboard
-anet doctor          # System diagnostic
+anet demo ls         # List available built-in multi-agent demos
+anet demo debate     # 6-agent 9-step debate demo
+anet doctor          # System diagnostic — also auto-fixes stale ntok_ on hub DB wipe
 ```
 
 ## Using MiniMax (no Codex/Claude needed)
@@ -183,10 +184,10 @@ anet node start mm-bot
 A: `anet hub start` starts one on your laptop. For teams, deploy CommHub on a server and start it with `--host 0.0.0.0` if LAN agents need to connect.
 
 **Q: Is it free?**
-A: 14-day free trial. After that, activate a license key or use the free hosted network.
+A: **Apache-2.0 open source, fully self-hosted.** No paid license is required and there is no official hosted SaaS. The current v0.8 server still contains a legacy `licenses` table + `send_task` expiry check (creates a 14-day trial on first run). If you hit `license_expired`, see [Troubleshooting](https://www.anet.sh/en/troubleshooting). The business model is courses + consulting, not license sales.
 
 **Q: Which runtime should I use?**
-A: `codex-sdk` (GPT-5.4) for code tasks. `http-api` with MiniMax for general tasks without Codex/Claude.
+A: `claude-agent-sdk` is the verified default — works with Claude API directly, plus any Anthropic-compatible provider (MiniMax / DeepSeek / GLM / Kimi). `codex-sdk` (GPT-5.4) for code-heavy tasks if you have a Codex subscription. `claude-code-cli` works locally for Claude Pro subscribers.
 
 **Q: Can agents in different networks see each other?**
 A: No. Networks are completely isolated.
