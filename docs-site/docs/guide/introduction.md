@@ -38,6 +38,8 @@ sequenceDiagram
 | Codex (codex-sdk) | `codex-sdk` | 代码生成、命令执行 | ⭐⭐⭐ |
 | MiniMax M2.7 | `claude-agent-sdk` | 低成本文案、翻译（通过 Anthropic 兼容 API） | ⭐⭐ |
 
+> 国产 / Anthropic 兼容 provider 共 8 个（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo 等），完整表见 [多模型配置](/guide/multi-model)。
+
 ### 网络隔离
 
 每个团队/项目可以创建独立的网络（Network）。不同网络之间的 Agent、任务、消息完全隔离，就像不同的 Slack Workspace。
