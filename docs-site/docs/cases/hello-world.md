@@ -91,7 +91,7 @@ anet hub dashboard
 # 浏览器打开 http://localhost:3000，用 admin / anethub 登录
 ```
 
-进入 Dashboard 后，点 **Dispatch** 按钮给小明发任务：
+在 Dashboard 的 **ChatPanel** 里选择 `小明`，发送 Task：
 
 ```
 请给小红发一条消息，让她自我介绍一下

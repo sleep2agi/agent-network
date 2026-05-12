@@ -91,7 +91,7 @@ anet hub dashboard
 # Browser opens http://localhost:3000 — log in with admin / anethub
 ```
 
-In the Dashboard, use the **Dispatch** button to send a task to 小明:
+In the Dashboard **ChatPanel**, select `小明` and send this Task:
 
 ```
 Ask 小红 to introduce herself
