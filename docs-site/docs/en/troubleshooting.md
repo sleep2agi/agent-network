@@ -30,7 +30,7 @@ cat ~/.anet/config.json
 ### `ETIMEDOUT` -- Connection Timeout
 
 ```
-Error: connect ETIMEDOUT 47.77.216.1:9200
+Error: connect ETIMEDOUT 203.0.113.10:9200
 ```
 
 **Cause**: Network unreachable or blocked by firewall.
@@ -39,8 +39,8 @@ Error: connect ETIMEDOUT 47.77.216.1:9200
 
 ```bash
 # Check network connectivity
-ping 47.77.216.1
-telnet 47.77.216.1 9200
+ping 203.0.113.10
+telnet 203.0.113.10 9200
 
 # Check firewall
 sudo ufw status
