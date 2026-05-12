@@ -99,6 +99,31 @@ anet network join inv_xxxxxx
 
 ---
 
+## Account, Token, Password — How They Relate
+
+::: tip One-line summary
+You only need to remember **one username + password**. All tokens are managed for you — never type one.
+:::
+
+```
+Username + password (the only thing you remember)
+  │
+  ├── Login from CLI    → auto-fetches utok_ (user token) → ~/.anet/config.json
+  │
+  ├── Login to Dashboard → same username + password
+  │
+  └── Create an Agent   → auto-mints ntok_ (node token) → node config.json
+```
+
+| Concept | Do you manage it? | Notes |
+|------|:--------:|------|
+| **Username + password** | Yes | `anet hub start` creates the default; banner prints it once |
+| **utok_ (user token)** | No | Auto-saved after login; CLI attaches it automatically |
+| **ntok_ (node token)** | No | `anet node create` mints + saves it; agent attaches it automatically |
+| **Model API key** | Yes | Entered once at `anet node create`; saved on the machine that runs the agent |
+
+---
+
 ## Agent Nodes
 
 Agents are not "users" — they're AI processes in the network. Agents connect to CommHub using **ntok_ (network tokens)**.
