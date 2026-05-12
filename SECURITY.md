@@ -1,8 +1,9 @@
 # Security Policy
 
-> **Status:** Agent Network v2.1 is **public beta**. A full open-source security audit
-> is published at [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md).
-> The P0 items in that report are being addressed for **v0.6.1 stable**, targeted for early June 2026.
+> **Status (2026-05-12):** Agent Network is at **v0.8.1 stable** (Apache 2.0, [released 2026-05-11](https://github.com/sleep2agi/agent-network/releases)).
+> The full open-source security audit is at [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md).
+> All P0 items from that report were addressed in **v0.8.0 / v0.8.1**. Remaining roadmap items
+> (Argon2id, signed releases, etc.) are tracked in the [Hardening Roadmap](#hardening-roadmap) below.
 
 ## Reporting a Vulnerability
 
@@ -34,17 +35,18 @@ Only the latest minor version receives security updates.
 | `@sleep2agi/agent-node` | latest 2.x |
 | `@sleep2agi/agent-network-dashboard` | latest 0.x |
 
-## Known Risk Surface (v2.1 public beta)
+## Known Risk Surface (v0.8.1 stable)
 
 If you self-host on the public internet, read [**`/deploy/production`**](https://anet.sh/deploy/production)
 before opening firewall ports. The headline items:
 
-1. **Default credentials** `admin / anethub` — change immediately on first start
-2. **Open-mode server** when `COMMHUB_AUTH_TOKEN` is unset — `requireAuth()` bypasses
-3. **tmux control plane** in open mode allows remote terminal read/write ≈ RCE
-4. **Multi-tenant scope** is incomplete — any valid token can read global tasks / SSE
+1. **Default credentials** `admin / anethub` — fine for local quick-start; **change immediately** for any `--host 0.0.0.0` / public deployment via `anet passwd` (password strength ≥ 8 + weak-password dictionary enforced)
+2. **`COMMHUB_AUTH_TOKEN` is soft-deprecated** (v0.8 RFC-001 Phase 2) — only `/api/*` reads work + deprecation warning. Hub bootstraps an admin `utok_` automatically on first `anet hub start`. Master token path will be **fully removed in v1.0**.
+3. **tmux control plane** — Hub default bind is `127.0.0.1`; bind `0.0.0.0` only behind TLS + firewall
+4. **Multi-tenant scope** is partially enforced — utok_ / ntok_ network binding is in; viewer-role write-block on MCP and project-level network config are tracked for v0.9+
 5. **Agent nodes** run with `dangerouslySkipPermissions: true` by default — agents can call any tool without confirmation. Treat agents as untrusted code, run them in disposable working directories
 6. **Plain HTTP** is the default — production deployments must front the Hub with a TLS reverse proxy (Caddy / Nginx)
+7. **Password hashing is SHA-256** — Argon2id migration planned for v0.9+. Production must pair strong passwords + TLS + firewall + regular backups.
 
 The full 20-item audit and remediation matrix lives at
 [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md).
@@ -63,8 +65,18 @@ referencing the CVE (if assigned) and credit the reporter.
 
 ## Hardening Roadmap
 
-- **v0.6.1** (early June 2026): close P0 items — default `requireAuth`, default `127.0.0.1`,
-  random initial password, tmux off by default, MCP/SSE network scope enforcement
-- **v0.7** (~ July 2026): Argon2id passwords, token TTL + revoke-all, `chmod 600` on secret
-  files, pinned + checksummed install scripts
-- **v0.8+**: signed releases, SLSA provenance, optional E2EE for inter-agent messages
+**Shipped (v0.6.1 → v0.8.1)**:
+- ✅ Default `requireAuth` / default `127.0.0.1` bind / default `admin / anethub` bootstrap with strength prompt (v0.7 ~ v0.8)
+- ✅ MCP / SSE network scope enforcement via `network_id:alias` routing (v0.7)
+- ✅ `COMMHUB_AUTH_TOKEN` master token soft-deprecation + admin `utok_` bootstrap → [RFC-001 Phase 2](./docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) (v0.8.0)
+- ✅ Password strength ≥ 8 + weak-password dictionary; `anet passwd` / `anet hub admin reset-user` (v0.8.0)
+- ✅ `chmod 600` on `~/.anet/server/admin-utok.json` (v0.8.0 bootstrap)
+- ✅ `anet doctor --fix` probes and reissues expired `ntok_`; agent-node SSE 401 auto-reload (v0.8.1)
+
+**Planned (v0.9+)**:
+- ⏳ **Argon2id** password hashing (SHA-256 today)
+- ⏳ Token TTL + revoke-all
+- ⏳ RFC-001 Phase 3 — fully remove `COMMHUB_AUTH_TOKEN` legacy code path (v1.0)
+- ⏳ Signed releases + SLSA provenance
+- ⏳ Optional E2EE for inter-agent messages
+- ⏳ Pinned + checksummed install scripts

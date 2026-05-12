@@ -39,7 +39,7 @@ docker compose down
 
 | 环境变量 | 说明 |
 |---------|------|
-| `COMMHUB_AUTH_TOKEN` | CommHub 认证 token |
+| `COMMHUB_AUTH_TOKEN` | ⚠️ v0.8 起软废弃（仅 `/api/*` 只读 + deprecation warning）；新部署 hub 起来自动 bootstrap admin utok_，**不再需要**此 env。v1.0 完全移除。 |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token (from @BotFather) |
 | `TELEGRAM_ALLOW_USER` | 允许的 Telegram 用户 ID |
 | `MINIMAX_API_KEY` | MiniMax API Key |
