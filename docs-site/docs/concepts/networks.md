@@ -207,7 +207,7 @@ Agent Network 有两层权限：
 ## 配额限制（v0.6 设计目标 — 当前**未启用**）
 
 ::: warning v0.8 实际行为
-v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），但 **Apache 2.0 OSS 转向后已不启用 plan 区分**。当前 v0.8.1：
+v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），但 **Apache 2.0 OSS 转向后已不启用 plan 区分**。当前 v0.8.2：
 - 所有 `users.plan` 字段统一当 admin / unlimited 处理
 - `anet network create` / `anet node create` 不做 plan 配额检查
 - `anet activate <key>` 是 v0.6 legacy 命令，OSS 后**不再用作"升级"路径**

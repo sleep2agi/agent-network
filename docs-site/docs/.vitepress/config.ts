@@ -45,9 +45,9 @@ export default withMermaid(defineConfig({
           { text: '生态', link: '/ecosystem' },
           { text: '社群', link: '/community' },
           {
-            text: 'v0.8.1 ▾',
+            text: 'v0.8.2 ▾',
             items: [
-              { text: 'v0.8.1（latest）', link: '/' },
+              { text: 'v0.8.2（latest）', link: '/' },
               { text: 'v0.8.0（归档）', link: '/v0.8.0/' },
               { text: '更新日志', link: '/changelog' },
               { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },

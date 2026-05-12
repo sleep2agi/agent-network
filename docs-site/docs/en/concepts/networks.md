@@ -207,7 +207,7 @@ The two layers stack. For example: a system admin can see global data, but if th
 ## Quota Limits (v0.6 design — currently **not enforced**)
 
 ::: warning v0.8 actual behavior
-v0.6 designed a Free / Pro / Admin three-tier quota system (table below), but **after the Apache 2.0 OSS pivot, plan tiers are no longer enforced**. In v0.8.1:
+v0.6 designed a Free / Pro / Admin three-tier quota system (table below), but **after the Apache 2.0 OSS pivot, plan tiers are no longer enforced**. In v0.8.2:
 - All `users.plan` field values are treated as admin / unlimited
 - `anet network create` / `anet node create` do not run plan-quota checks
 - `anet activate <key>` is a v0.6 legacy command, **no longer the "upgrade" path** after OSS
