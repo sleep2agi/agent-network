@@ -226,10 +226,10 @@ anet node create <name> [options]
 anet node create my-agent
 
 # 直接指定
-anet node create 代码助手 --runtime codex-sdk --model gpt-5.4
+anet node create 代码助手 --runtime codex-sdk --model <codex-model-id>
 
 # MiniMax Agent
-anet node create 翻译官 --runtime claude-agent-sdk --model MiniMax-M2.7
+anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 ```
 
 创建后会在 `.anet/nodes/<node_id>/config.json` 生成配置文件：
@@ -240,7 +240,7 @@ anet node create 翻译官 --runtime claude-agent-sdk --model MiniMax-M2.7
   "node_id": "n_a1b2c3d4",
   "node_name": "代码助手",
   "runtime": "codex-sdk",
-  "model": "gpt-5.4",
+  "model": "<codex-model-id>",
   "session": "",
   "channels": ["server:commhub"],
   "tools": [],

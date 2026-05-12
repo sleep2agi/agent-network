@@ -214,10 +214,10 @@ anet node create <name> [options]
 anet node create my-agent
 
 # Direct specification
-anet node create code-assistant --runtime codex-sdk --model gpt-5.4
+anet node create code-assistant --runtime codex-sdk --model <codex-model-id>
 
 # MiniMax Agent
-anet node create translator --runtime claude-agent-sdk --model MiniMax-M2.7
+anet node create translator --runtime claude-agent-sdk --model <minimax-model-id>
 ```
 
 After creation, a config file is generated at `.anet/nodes/<node_id>/config.json`:
@@ -228,7 +228,7 @@ After creation, a config file is generated at `.anet/nodes/<node_id>/config.json
   "node_id": "n_a1b2c3d4",
   "node_name": "code-assistant",
   "runtime": "codex-sdk",
-  "model": "gpt-5.4",
+  "model": "<codex-model-id>",
   "session": "",
   "channels": ["server:commhub"],
   "tools": [],

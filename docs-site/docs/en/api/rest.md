@@ -333,7 +333,7 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
       "alias": "coder-1",
       "status": "idle",
       "agent": "agent-node:codex",
-      "model": "gpt-5.4",
+      "model": "your-model-id",
       "task": null,
       "progress": null,
       "last_seen_at": "2026-04-12 10:00:00"
