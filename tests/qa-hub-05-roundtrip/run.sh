@@ -30,11 +30,18 @@ if ! curl -fsS "$HUB_BASE/health" >/dev/null 2>&1; then
 fi
 
 echo "[1] login admin → utok_"
-LOGIN_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/login" -H 'Content-Type: application/json' \
-  -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}")
-UTOK=$(echo "$LOGIN_RESP" | jq -r '.token // empty')
+# /health may return 200 before admin user is fully bootstrapped — retry up
+# to ~10s. Same race surfaced by CI (issue #31 R8) and previously by R2.
+UTOK=""
+for i in {1..20}; do
+  LOGIN_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}")
+  UTOK=$(echo "$LOGIN_RESP" | jq -r '.token // empty')
+  [[ "$UTOK" == utok_* ]] && break
+  sleep 0.5
+done
 if [[ "$UTOK" != utok_* ]]; then
-  echo "FAIL: login did not return utok_; raw response:"; echo "$LOGIN_RESP"
+  echo "FAIL: login did not return utok_; last response:"; echo "$LOGIN_RESP"
   echo "--- hub.log tail ---"; tail -40 /tmp/hub.log
   exit 1
 fi
