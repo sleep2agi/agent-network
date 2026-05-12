@@ -54,7 +54,7 @@
 | DASH-04 | agent 失败回复时聊天 + 状态 pill 同步 | ✅ | docker-e2e SC05 |
 | DASH-05 | 我刷新页面历史还在 | ✅ | docker-e2e SC06 |
 | DASH-06 | 我连发 3 条顺序不乱 | ✅ | docker-e2e SC07 |
-| DASH-07 | 未登录访问 `/` 被拒 / 重定向 | ❌ | （安全回归，**R4 候选**） |
+| DASH-07 | 未登录访问 `/` 被拒 / 重定向 | ✅ | [qa-dash-07](../../tests/qa-dash-07-auth-boundary/) R16 PASS（~14s）— hub-side auth boundary 24 个探测（GET/POST/PUT/SSE/MCP/admin-only） |
 | DASH-08 | 跨账号不能看到别人的节点 | ❌ | （安全回归，**R4 候选**） |
 | DASH-09 | 关键页视觉无回归（TopoGraph / chat / node card） | 🟡 | dashboard repo Playwright（[N站马]每轮自审），跨仓库列为 L3v 保护资产 |
 | DASH-10 | SSE 断开后重连刷新看不出来 | ❌ | （R3-R4 跟 NODE-04 一起做） |

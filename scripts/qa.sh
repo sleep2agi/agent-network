@@ -53,6 +53,7 @@ L0_TESTS=(
 )
 L1_TESTS=(
   "qa-cli-02-network-create"
+  "qa-dash-07-auth-boundary"
   "qa-hub-05-roundtrip"
   "qa-hub-06-token-revoke"
   "qa-hub-07-sse-reconnect"

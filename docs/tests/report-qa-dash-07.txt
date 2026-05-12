@@ -1,0 +1,52 @@
+Test: qa-dash-07-auth-boundary (matrix DASH-07)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+
+Result: PASS
+Runtime: ~14s warm, ~30s cold
+
+Coverage (9 steps, 24 HTTP probes):
+- [2] public endpoints (no auth) — /health, /api/auth/register, /api/auth/login
+      do NOT return auth-style 401 (registration/login may return 400/401 for
+      bad bodies, but not for missing Authorization)
+- [3] 10 protected GET endpoints — 401 without Authorization header:
+      /api/auth/me, /api/networks, /api/auth/tokens, /api/status, /api/tasks,
+      /api/messages, /api/stats, /api/task_events, /api/completions, /api/nodes
+- [4] 4 protected POST/PUT endpoints — 401 without Authorization header:
+      POST /api/networks, POST /api/task, POST /api/broadcast, PUT /api/auth/me
+- [5] all 10 protected GETs reject invalid-but-shape-valid token (utok_garbage...)
+- [6] sanity: admin utok returns 200 on 6 protected GETs
+- [7] /api/server-logs is admin-only — returns 403 for non-admin utok
+- [8] SSE /events/<alias> rejects no-auth with 401
+- [9] MCP /mcp rejects no-auth with 401
+
+Contracts pinned:
+
+1. requireAuth (index.ts L98) is the central gate.
+   - No token → 401 "unauthorized"
+   - Token but resolveToken fails → 401 "invalid token"
+   - Legacy master-token + DEV_OPEN still fallthrough (legacy compat)
+   Every /api/* endpoint must call requireAuth — a regression that misses one
+   leaks data.
+
+2. requireAdminAuth (index.ts L138) is the role gate.
+   - Token must resolve
+   - user.role === "admin" else 403
+   Example: /api/server-logs (server logs contain usernames + task content).
+
+3. SSE (/events/<alias>) and MCP (/mcp) also gated.
+   Attackers can't bypass REST auth via the streaming endpoints. Both call
+   requireAuth before opening the stream.
+
+Why DASH-07 here vs dashboard repo:
+  dashboard frontend auth (route guards, login redirects) lives in the
+  dashboard repo Playwright suite (docker-e2e SC01-07). That covers the
+  user experience — but a determined attacker bypasses the frontend.
+  DASH-07 here pins the HUB-SIDE boundary that frontend bypass cannot
+  defeat. The 24 probes form an OWASP-style enumeration.
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip + procps
+  - @sleep2agi/agent-network@preview from npm
+  - 0 LLM API calls
