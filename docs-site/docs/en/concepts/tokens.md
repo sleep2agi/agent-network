@@ -192,7 +192,7 @@ echo ".anet/" >> .gitignore
 anet login --username admin --password anethub
 anet passwd   # rotate to strong (≥ 8 chars + not in weak-password dict)
 # Or set your own at bootstrap:
-anet hub start --username vincent --password 'mypass2026!'
+anet hub start --username alice --password 'your-strong-pass!'
 
 # 4. Rotate login tokens periodically
 anet token ls                  # list current utok_

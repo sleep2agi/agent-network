@@ -28,7 +28,7 @@ anet login --username admin --password anethub
 
 hub 验账号密码 OK，发一个 `utok_xxxxxxxx...` 给你。
 
-> ℹ️ 首次 `anet hub start` 默认账户是 `admin / anethub`（快速上手）。**立刻用 `anet passwd` 改成你自己的强密码**。也可以 `anet hub start --username vincent --password mypass2026` 自定义。
+> ℹ️ 首次 `anet hub start` 默认账户是 `admin / anethub`（快速上手）。**立刻用 `anet passwd` 改成你自己的强密码**。也可以 `anet hub start --username alice --password your-strong-pass` 自定义。
 
 ### 存哪
 
@@ -186,7 +186,7 @@ echo ".anet/" >> .gitignore
 anet login --username admin --password anethub
 anet passwd   # 改成强密码（≥ 8 位 + 非弱密码字典）
 # 或者 bootstrap 时直接设你自己的：
-anet hub start --username vincent --password 'mypass2026!'
+anet hub start --username alice --password 'your-strong-pass!'
 
 # 4. 定期轮换登录 token
 anet token ls                  # 看现有 utok_
