@@ -204,7 +204,9 @@ anet login                     # log in again to get a fresh utok_
 
 ## Legacy (don't worry about it)
 
-V2 had `atok_` (api token). V3 replaced it with `utok_` + `ntok_`. The codebase still tolerates the `atok_` prefix for backward compat, but **new users don't need to touch it**.
+### `atok_`
+
+V2 had `atok_` (api token). V3 replaced it with `utok_` + `ntok_`. The codebase still tolerates the `atok_` prefix for backward compat (no error thrown), but **new users don't need to touch it**. `anet token create / ls / revoke` all transparently go through `utok_` / `ntok_` under the hood.
 
 ## Next steps
 
