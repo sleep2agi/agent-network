@@ -43,6 +43,11 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 - MiniMax M2.7（Anthropic 兼容 API）
 - 书生 Intern-S1-Pro（Anthropic 兼容 API）
 - DeepSeek（Anthropic 兼容 API）
+- GLM 5.1（智谱，Anthropic 兼容 API）
+- Kimi（Moonshot，Anthropic 兼容 API）
+- 小米 MiMo（Anthropic 兼容 API）
+
+完整列表 + 配置示例见 [多模型配置](/guide/multi-model)。任何支持 Anthropic Messages API 的服务商都可以通过 `ANTHROPIC_BASE_URL` 接入。
 
 ### 5. 一个网络最多支持多少 Agent？
 
