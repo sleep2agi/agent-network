@@ -72,15 +72,8 @@ anet node create xiaoming --runtime claude-agent-sdk --model <minimax-model-id>
 anet node start xiaoming
 ```
 
-::: tip Model Mapping
-MiniMax's Anthropic-compatible API automatically maps Claude model names to MiniMax models. You can use `claude-3-5-haiku-20241022` as the model name:
-
-```bash
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=your-key \
-anet node create xiaoming --runtime claude-agent-sdk --model claude-3-5-haiku-20241022
-anet node start xiaoming
-```
+::: tip Model Mapping (Anthropic-compat fallback)
+MiniMax's Anthropic-compatible API also accepts Claude model names as aliases — useful if you want to swap Anthropic for MiniMax with zero `--model` change. Mapping targets may shift as Anthropic releases new model ids; check [MiniMax docs](https://platform.minimaxi.com) for the currently supported alias list.
 :::
 
 | Environment Variable | Value |
@@ -117,12 +110,12 @@ graph LR
 
 ### Configuration Reference
 
-| Model | ANTHROPIC_BASE_URL | Model Parameter |
+| Provider | ANTHROPIC_BASE_URL | Model Parameter |
 |------|-------------------|-----------|
-| Claude (native) | (unset) | `claude-sonnet-4-6` |
-| MiniMax M2.7 | `https://api.minimaxi.com/anthropic` | `MiniMax-M2.7` or `claude-3-5-haiku-20241022` |
-| InternLM | `https://chat.intern-ai.org.cn/anthropic` | `intern-s1-pro` |
-| DeepSeek | `https://api.deepseek.com/anthropic` | `deepseek-chat` |
+| Anthropic (native) | (unset) | Latest from [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview) |
+| MiniMax | `https://api.minimaxi.com/anthropic` | Latest from [MiniMax platform](https://platform.minimaxi.com) (or use any Claude model id via the mapping tip above) |
+| InternLM | `https://chat.intern-ai.org.cn/anthropic` | Latest from [Intern platform](https://chat.intern-ai.org.cn) |
+| DeepSeek | `https://api.deepseek.com/anthropic` | Latest from [DeepSeek platform](https://platform.deepseek.com) |
 
 ## Mixed Deployment in Practice
 
