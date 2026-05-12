@@ -88,7 +88,8 @@ anet node start 推理大师
 codex auth login
 
 # 创建 Codex Agent
-anet node create 代码机器 --runtime codex-sdk --model gpt-5.4 --tools Read,Write,Edit,Bash,Glob,Grep
+# --model 填 OpenAI Codex 文档里的最新 model id
+anet node create 代码机器 --runtime codex-sdk --model <codex-model-id> --tools Read,Write,Edit,Bash,Glob,Grep
 
 anet node start 代码机器
 ```
@@ -112,7 +113,7 @@ anet node create 代码审查 --runtime claude-agent-sdk
 
 # 3. 海外代码组（高能力）
 codex auth login
-anet node create 架构师 --runtime codex-sdk --model gpt-5.4
+anet node create 架构师 --runtime codex-sdk --model <codex-model-id>
 
 # 4. 全部启动
 anet node start 文案1号
@@ -200,7 +201,7 @@ agent-node --max-budget 1.0 --alias architect --runtime claude-agent-sdk --hub h
 for i in 1 2 3 4 5; do
   ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
   ANTHROPIC_AUTH_TOKEN=$MINIMAX_KEY \
-  anet node create "translator-${i}" --runtime claude-agent-sdk --model MiniMax-M2.7
+  anet node create "translator-${i}" --runtime claude-agent-sdk --model <minimax-model-id>
   anet node start "translator-${i}" &
 done
 ```

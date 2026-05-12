@@ -41,7 +41,7 @@ anet node start reasoning-master
 | `ANTHROPIC_API_KEY` | Anthropic API key (Option 1: `claude-agent-sdk`) |
 | (not needed) | Option 2 reuses local `claude auth login` credentials (`claude-code-cli`) |
 
-### Codex SDK (gpt-5.4)
+### Codex SDK
 
 Codex (codex-sdk) uses the OpenAI Codex SDK and requires an OpenAI account.
 
@@ -50,7 +50,8 @@ Codex (codex-sdk) uses the OpenAI Codex SDK and requires an OpenAI account.
 codex auth login
 
 # Create and start a Codex agent
-anet node create code-assistant --runtime codex-sdk --model gpt-5.4 --tools Read,Write,Edit,Bash,Glob,Grep
+# --model: pick the latest id from OpenAI Codex docs
+anet node create code-assistant --runtime codex-sdk --model <codex-model-id> --tools Read,Write,Edit,Bash,Glob,Grep
 anet node start code-assistant
 ```
 
@@ -229,7 +230,7 @@ Distribute repetitive tasks in bulk to low-cost models:
 for i in 1 2 3 4 5; do
   ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
   ANTHROPIC_AUTH_TOKEN=$MINIMAX_KEY \
-  anet node create "translator-${i}" --runtime claude-agent-sdk --model MiniMax-M2.7
+  anet node create "translator-${i}" --runtime claude-agent-sdk --model <minimax-model-id>
   anet node start "translator-${i}" &
 done
 ```
