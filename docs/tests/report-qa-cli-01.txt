@@ -1,0 +1,65 @@
+Test: qa-cli-01-hub-start (matrix CLI-01)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+
+Result: PASS
+Runtime: ~10s warm, ~30s cold
+
+Coverage (8 steps hard-asserted):
+- [0] fresh state — rm -rf ~/.anet ~/.commhub
+- [1] anet hub start --username admin --password ... in background
+       /health responds 200 within 60s
+- [2] /health returns {ok: true}
+- [3] banner contains:
+       - "anet hub start" header line
+       - "Starting CommHub Server" status line
+       - bind address "127.0.0.1"
+- [4] ~/.anet/server/admin-utok.json
+       - file exists
+       - mode is exactly 600 (perms not leaked)
+       - .token field is utok_<hex>
+- [5] admin utok actually works: GET /api/auth/me returns
+       user.username == "admin" + user.role == "admin"
+- [6] port 9200 bound (TCP probe via curl)
+- [7] re-run idempotency: second `anet hub start` invocation
+       stdout contains "already running" / "already up"
+       admin-utok.json NOT regenerated (file mtime preserved)
+- [8] anet -v outputs non-empty version string
+
+Contracts pinned:
+
+1. Banner three-block format
+   cli.ts serverCommand L1893+ prints:
+     "\n  anet hub start\n"
+     "  Starting CommHub Server on port <PORT> (bind <HOST>)..."
+   Docs / setup scripts / user screenshots all reference these strings.
+   A wording change breaks downstream.
+
+2. admin-utok.json mode 600 + actual usability
+   R5 test30 step 1 verified the file exists at mode 600. R18 strengthens
+   by ALSO validating the embedded token authenticates as admin via
+   /api/auth/me — closing the loop "the file isn't just a placeholder".
+
+3. Idempotent re-run
+   cli.ts L1925-1933: serverCommand probes /health first. If 200, sets
+   serverAlreadyRunning=true and prints "already running" then exits 0
+   (no double-spawn). This is the UX promise: "running `anet hub start`
+   twice is safe; the second one is a no-op."
+
+   Verification approach:
+     - check stdout for "already running" / "already up"
+     - check admin-utok.json wasn't regenerated (no second bootstrap path)
+
+Test pitfall observed (and worked around):
+   pgrep -fc commhub-server counts THREE processes after spawn:
+     1. /bin/sh -c bunx ...    (shell wrapper)
+     2. bunx --bun ...         (bunx itself)
+     3. bun ... commhub-server (actual server)
+   So "≥2 means double-start" check is wrong. We probe a different proxy
+   instead (admin-utok.json not regenerated implies no second bootstrap).
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip + procps
+  - @sleep2agi/agent-network@preview from npm
+  - 0 LLM API calls

@@ -52,6 +52,7 @@ L0_TESTS=(
   "auth-validate:server/src/auth-validate.test.ts"
 )
 L1_TESTS=(
+  "qa-cli-01-hub-start"
   "qa-cli-02-network-create"
   "qa-dash-07-auth-boundary"
   "qa-hub-05-roundtrip"

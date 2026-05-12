@@ -41,6 +41,7 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 
 | ID | 测试 | persona |
 |----|------|---------|
+| CLI-01 | [tests/qa-cli-01-hub-start](../../tests/qa-cli-01-hub-start/) | anet hub start banner + /health + admin-utok 600 + 幂等 |
 | CLI-02 | [tests/qa-cli-02-network-create](../../tests/qa-cli-02-network-create/) | anet login + network create + ls + dup + whoami |
 | DASH-07 | [tests/qa-dash-07-auth-boundary](../../tests/qa-dash-07-auth-boundary/) | hub-side auth boundary（24 个探测：GET/POST/SSE/MCP/admin） |
 | HUB-05 | [tests/qa-hub-05-roundtrip](../../tests/qa-hub-05-roundtrip/) | commhub register→mint→send→SSE→DB |
