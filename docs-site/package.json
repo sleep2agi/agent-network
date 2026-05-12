@@ -1,7 +1,7 @@
 {
   "name": "docs-site",
   "version": "1.0.0",
-  "description": "",
+  "description": "Agent Network documentation site (VitePress) — anet.sh",
   "main": "index.js",
   "directories": {
     "doc": "docs"
@@ -11,9 +11,9 @@
     "build": "vitepress build docs",
     "preview": "vitepress preview docs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["agent-network", "documentation", "vitepress"],
+  "author": "sleep2agi",
+  "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
     "mermaid": "^11.14.0",

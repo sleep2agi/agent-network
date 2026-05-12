@@ -30,7 +30,7 @@ cat ~/.anet/config.json
 ### `ETIMEDOUT` -- 连接超时
 
 ```
-Error: connect ETIMEDOUT 47.77.216.1:9200
+Error: connect ETIMEDOUT 203.0.113.10:9200
 ```
 
 **原因**：网络不可达或防火墙阻止。
@@ -39,8 +39,8 @@ Error: connect ETIMEDOUT 47.77.216.1:9200
 
 ```bash
 # 检查网络连通性
-ping 47.77.216.1
-telnet 47.77.216.1 9200
+ping 203.0.113.10
+telnet 203.0.113.10 9200
 
 # 检查防火墙
 sudo ufw status
