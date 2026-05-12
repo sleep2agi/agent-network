@@ -82,7 +82,7 @@ npx @sleep2agi/agent-node --alias deep --hub http://127.0.0.1:9200 --tools all
 # MiniMax
 ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-key \
-npx @sleep2agi/agent-node --alias mini --model MiniMax-M2.7 --hub http://127.0.0.1:9200 --tools all
+npx @sleep2agi/agent-node --alias mini --model <minimax-model-id> --hub http://127.0.0.1:9200 --tools all
 ```
 
 ## Configuration file
@@ -96,7 +96,7 @@ Typical output of `anet node create` at `.anet/nodes/<name>/config.json`:
   "hub": "http://127.0.0.1:9200",
   "token": "ntok_...",
   "runtime": "claude-agent-sdk",
-  "model": "MiniMax-M2.7",
+  "model": "<minimax-model-id>",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
   "env": {
