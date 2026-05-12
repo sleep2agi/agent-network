@@ -75,8 +75,14 @@ anet whoami
 ### 修改密码
 
 ```bash
-anet passwd
+anet passwd                       # 交互式：输旧密码 → 输新密码 ≥ 8 字符 + 非弱密码字典
 ```
+
+::: tip 改密码的副作用（v0.8）
+当前设备拿到新 `utok_`，其他设备的 `utok_` **失效**（需要重新 `anet login`）。`ntok_`（agent 用）不受影响。详见 [Token 概念 — Token 生命周期对照](/concepts/tokens#token-生命周期对照)。
+
+**忘密码**：在 Hub 机器上跑 `anet hub admin reset-user <username>`（owner 本机权限即可，无需老密码）。详见 [FAQ Q17b](/faq#_17b-忘密码怎么办-v0-8)。
+:::
 
 ### 给别人开账号
 

@@ -75,8 +75,14 @@ anet whoami
 ### Change Password
 
 ```bash
-anet passwd
+anet passwd                       # Interactive: old password → new password ≥ 8 chars, not in weak-password dict
 ```
+
+::: tip Side effects of changing the password (v0.8)
+The current device gets a fresh `utok_`; other devices' `utok_` are **invalidated** (they need to `anet login` again). `ntok_` (used by agents) is not affected. See [Tokens — lifecycle table](/en/concepts/tokens#token-生命周期对照).
+
+**Forgot the password**: run `anet hub admin reset-user <username>` on the hub machine (owner local access; no old password needed). See [FAQ Q17b](/en/faq#_17b-忘密码怎么办-v0-8).
+:::
 
 ### Creating Accounts for Others
 
