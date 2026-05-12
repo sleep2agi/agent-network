@@ -22,8 +22,8 @@
 ## 前提条件
 
 - Docker E2E 86 基础测试 + 16 配置优先级 + 7 Codex 真实 + 12 npm smoke = 121+ 全绿
-- Codex 真实 E2E (GPT-5.4 回答 "2+2=4")
-- 10-agent 成语接龙 (GPT-5.4 x 10 真实跑通)
+- Codex 真实 E2E（一个 codex-sdk agent 回答简单数学题）
+- 10-agent 成语接龙（10 个 codex-sdk agent 真实跑通）
 - npm smoke test 12/12 绿 (从 npm registry 安装验证)
 - 通信牛 5 轮 review 全部通过
 - 通信牛 4 轮 review 全部通过
@@ -94,7 +94,7 @@ agent-node --version
 
 # 功能检查
 anet ls                           # 应该有 STATUS/SSE 列
-anet node create upgrade-test --runtime codex-sdk --model gpt-5.4
+anet node create upgrade-test --runtime codex-sdk --model <codex-model-id>  # pick latest from OpenAI Codex docs
 anet node stop upgrade-test
 anet node delete upgrade-test --force
 
