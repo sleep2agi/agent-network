@@ -4,7 +4,7 @@
 
 **预计时间**：10 分钟  
 **Agent 数量**：11（指挥室 + 5 Codex + 5 MiniMax）  
-**模型**：GPT-5.5 + MiniMax
+**模型**：GPT-5 + MiniMax
 **需要**：Docker
 
 ## 效果
@@ -60,7 +60,7 @@ docker compose logs -f commander
 │   ▼                         ▼               │
 │  ┌───────────────┐   ┌───────────────┐      │
 │  │ 代码 1-5 号    │   │ 文案 1-5 号    │     │
-│  │ (GPT-5.5)     │   │ (MiniMax)     │      │
+│  │ (GPT-5)     │   │ (MiniMax)     │      │
 │  │ 写代码+跑命令  │   │ 写文案+翻译    │     │
 │  └───────────────┘   └───────────────┘      │
 │                                              │
@@ -76,8 +76,8 @@ docker compose logs -f commander
 |------|------|------|------|
 | server | CommHub | - | 通信中枢 |
 | seed | 初始化 | - | 注册 admin、创建网络、生成 ntok_ |
-| commander | 指挥室 | GPT-5.5 | 接收命令、分配任务 |
-| worker-1~5 | 代码兵 | GPT-5.5 | 写代码、跑命令 |
+| commander | 指挥室 | GPT-5 | 接收命令、分配任务 |
+| worker-1~5 | 代码兵 | GPT-5 | 写代码、跑命令 |
 | worker-6~10 | 文案兵 | MiniMax | 文案、翻译 |
 | dashboard | Web UI | - | 浏览器管控台 |
 
