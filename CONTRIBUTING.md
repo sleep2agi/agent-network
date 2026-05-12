@@ -70,7 +70,7 @@ See the [PR template](./.github/PULL_REQUEST_TEMPLATE.md) — the checklist live
 4. **`npm publish --tag preview`** first (release-preview-first policy since 2026-05-11 — avoid pushing bugs to all `@latest` users)
 5. After manual smoke test, promote: `npm dist-tag add @sleep2agi/<pkg>@x.y.z latest`
 
-Note: no CI auto-publish workflow yet (only `e2e-docker.yml` runs on PRs); all `npm publish` is manual by a maintainer.
+Note: no CI auto-publish workflow yet (`e2e-docker.yml` runs Docker E2E on PRs, `qa.yml` runs `bash scripts/qa.sh` as report-only PR gate); all `npm publish` is manual by a maintainer.
 
 ## Where to ask
 
