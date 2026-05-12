@@ -30,3 +30,6 @@ agent-network/tests/docker-e2e/results/
 *.bak
 .DS_Store
 .env.local
+
+# Dashboard screenshots hosted via Release assets
+docs/dashboard-screenshots/
