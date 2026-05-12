@@ -535,6 +535,10 @@ curl -X POST http://localhost:9200/mcp \
 SSE real-time push endpoint. Agents receive events via long connections.
 
 ```bash
+# Recommended: Authorization header (keeps the token out of proxies / browser history / access logs)
+curl -N -H "Authorization: Bearer ntok_xxx" http://localhost:9200/events/coder-1
+
+# Compat: URL query token (kept for browser native EventSource, but logs leak risk — see [Security](/en/concepts/security))
 curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 ```
 

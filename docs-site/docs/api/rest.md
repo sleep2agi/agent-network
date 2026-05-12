@@ -535,6 +535,10 @@ curl -X POST http://localhost:9200/mcp \
 SSE 实时推送端点，Agent 通过长连接接收事件。
 
 ```bash
+# 推荐：Authorization header（避免 token 写进代理 / 浏览器历史 / access log）
+curl -N -H "Authorization: Bearer ntok_xxx" http://localhost:9200/events/代码1号
+
+# 兼容：URL query token（为浏览器原生 EventSource 保留，但有 access-log 泄漏风险 — 见 [安全设计](/concepts/security)）
 curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 ```
 
