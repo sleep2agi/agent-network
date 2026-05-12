@@ -37,20 +37,18 @@
 
 ## 关键问题
 
-### P0：npm export 指向未发布文件
+### P0：npm export 指向未发布文件 — ✅ 已修（2026-05-12）
 
-`agent-network/package.json`：
+> **状态**：已采取建议 2（删除 `./server` export）。当前 `agent-network/package.json` 只暴露 `"."` 一个入口指向 `./dist/src/client.js`，跟 `files: ["dist"]` 一致；`@sleep2agi/agent-network/server` 不再是 public API。下方原描述保留作为审计 trace。
 
-- `exports["./server"].import` 指向 `./src/server.ts`
-- `files` 只包含 `dist`
+~~`agent-network/package.json`：~~
 
-`npm pack --dry-run` 的结果中没有 `src/server.ts`，因此用户安装包后导入 `@sleep2agi/agent-network/server` 会失败。这是开源发布中最高优先级的问题之一，因为它会直接破坏公开 API。
+- ~~`exports["./server"].import` 指向 `./src/server.ts`~~
+- ~~`files` 只包含 `dist`~~
 
-建议：
+~~`npm pack --dry-run` 的结果中没有 `src/server.ts`，因此用户安装包后导入 `@sleep2agi/agent-network/server` 会失败。这是开源发布中最高优先级的问题之一，因为它会直接破坏公开 API。~~
 
-1. 如果 `./server` 是正式 API，把源码构建到 `dist/src/server.js` 并导出对应 `.d.ts`。
-2. 如果不是正式 API，删除这个 export。
-3. 在 CI 加 `npm pack --dry-run` + 临时目录 `npm install <tgz>` + import/bin smoke test。
+原建议中**第 3 项「在 CI 加 `npm pack --dry-run` + 临时目录 `npm install <tgz>` + import/bin smoke test」仍未实现**——目前 docker E2E 跑 npm smoke test 但没纳入 GitHub Actions CI gate。tracking 见 [open-source-quality-review.md 修复顺序 §5](#建议的修复顺序)。
 
 ### P0：CLI 类型覆盖不完整，已有类型事实冲突
 
