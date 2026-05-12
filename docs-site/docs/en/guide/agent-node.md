@@ -222,7 +222,7 @@ flowchart TD
 | `node_name` | string | Display name, can be renamed |
 | `runtime` | string | Runtime: `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `model` | string | AI model name |
-| `session` | string | Previous session/thread ID (for resume) |
+| `session` | string | session/thread ID. For the `claude-code-cli` runtime, `anet node create` pre-generates a UUID (first `start` binds it via `--session-id <uuid>`, restarts auto-`--resume <uuid>` to continue the conversation; v0.8.2 fixed a prior default session-loss bug). For other runtimes, this is the previous session ID for resume |
 | `channels` | string[] | Connected channels list |
 | `tools` | string[] | Allowed tools list |
 | `env` | object | Environment variable overrides |

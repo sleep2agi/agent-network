@@ -222,7 +222,7 @@ flowchart TD
 | `node_name` | string | 显示名称，可 rename |
 | `runtime` | string | 运行时：`claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `model` | string | AI 模型名称 |
-| `session` | string | 上次的 session/thread ID（用于 resume） |
+| `session` | string | session/thread ID。`claude-code-cli` runtime 下由 `anet node create` 预生成 UUID（首次 start 用 `--session-id <uuid>` 绑定，重启自动 `--resume <uuid>` 续会话；v0.8.2 修了之前默认丢 session 的 bug）；其他 runtime 是上次 session ID 用作 resume |
 | `channels` | string[] | 接入的 Channel 列表 |
 | `tools` | string[] | 允许使用的工具列表 |
 | `env` | object | 环境变量覆盖 |
