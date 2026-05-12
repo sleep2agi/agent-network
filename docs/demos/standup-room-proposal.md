@@ -2,7 +2,7 @@
 
 > 提案人：通信demo马
 > 日期：2026-05-12
-> 状态：v1 草案，待 通信龙 review
+> 状态：**v2 — 经 通信龙 review 通过**（3 个 review 问题已答 + 关键设计 ack）
 > Backlog：refs [#25](https://github.com/sleep2agi/agent-network/issues/25) demo backlog 第 2 项（通信龙 选择优先级 #2，PASS 「AI 新闻编辑室」因模式与 translation-pipeline 重合）
 
 ## 一句话定位
@@ -68,7 +68,7 @@ anet demo standup [--topic <议题>] [--reporters <n>] \
 | Flag | 默认 | 说明 |
 |------|------|------|
 | `--topic <text>` | 交互输入 | standup 议题，例如 "本周 anet 0.9 进展" |
-| `--reporters <n>` | 3 | 报告人数量 (留给 review Q1) |
+| `--reporters <n>` | **3，范围 2-6**（v2 答复 Q1）| 报告人数量。min 2 防退化成对话（1 reporter = 单兵汇报与 hello-world 重合），max 6 控总 agent ≤ 8（1 host + 6 reporter + 1 recorder） |
 | `--key <key>` | `$MINIMAX_KEY` | MiniMax API Key |
 | `--out <path>` | `./standup-<topic>-<ts>.md` | 输出路径 |
 | `--keep` | false | 保留 N+2 agent + network（debug 用） |
@@ -81,36 +81,43 @@ anet demo standup [--topic <议题>] [--reporters <n>] \
 
 **输入：** `--topic "本周 anet 0.9 进展"`（或交互问）
 
-**输出：** markdown 文件 `./standup-<topic>-<ts>.md`，结构：
+**输出：** markdown 文件 `./standup-<topic>-<ts>.md`，**(b+a) 组合结构**（v2 答复 Q3）— 顶部 manager 友好摘要 + 底部 dev 友好完整 transcript：
 
 ```markdown
-# Standup: 本周 anet 0.9 进展
+# Standup notes — <topic> (<date> <time>)
 
-**时间：** 2026-05-12
-**主持：** host-1a2b
-**报告人：** reporter-1-1a2b / reporter-2-1a2b / reporter-3-1a2b
-**记录：** recorder-1a2b
+## 摘要（recorder LLM 提炼）         ← (b) 结构化部分
 
-## reporter-1
-- **Yesterday:** 完成 demo 提案 v2 + draft PR #26
-- **Today:** 草第二个 demo 提案（standup）
-- **Blockers:** 等 PR queue 消化才能动 cli.ts
-
-## reporter-2
-...
-
-## reporter-3
-...
-
-## Risks
+### 主要进展
 - ...
 
-## Blockers (聚合)
+### 风险 / blockers
 - ...
 
-## Next Actions
-- ...
+### 下一步 actions
+- [owner] ...
+
+---
+
+## 完整记录（transcript）            ← (a) 完整部分
+
+### Host: <开场>
+### reporter-1: yesterday / today / blockers
+### Host: 谢谢 A，B 你来
+### reporter-2: ...
+### Host: 谢谢 B，C 你来
+### reporter-3: ...
+### Host: <闭幕过给 recorder>
+### Recorder: ...（同摘要内容）
 ```
+
+设计理由（通信龙 review）：
+- (a) only — 太冗，manager 看不到立即可执行行动项
+- (b) only — 太精简，dev 不能回看原话定位语境
+- (c) only（经理视角只输出 risks-actions）— 视角太单一丢失团队进展信息
+- **(b+a)** — 单文件双 reader：顶部 manager 摘要立即可用，底部 transcript 给 dev 回看
+- 文件大小可控：4-7 agent × ~3-5 turn × markdown ≈ 5-15 KB
+- 跟 debate 输出格式同思路（转录 + 评委判决并列），用户一致体验
 
 ## 与 debate / pr-review 的结构对比
 
@@ -150,10 +157,10 @@ prompts 内联 cli.ts（同 debate 风格）；reporter 数量参数化让循环
 
 ## 不在范围内（v1）
 
-- **不做 host 拐回追问 blocker 的二轮**（真实 standup 会议常见但混入序列化模式 → 留 review Q2）
+- **不做 host 拐回追问 blocker 的二轮**（v2 答复 Q2：通信龙 砍 — 纯序列化轮询是本 demo 核心卖点，加 host 自由切换会让范式对比矩阵的清晰度变模糊；如未来用户要 probe，再做第四个 demo "AI 风险评估会"或加 `--probe` flag）
 - **不做异常缺席处理**（reporter 超时直接跳过下一个 → v1 假设全员到齐）
 - **不接 Slack / 飞书 channel 发自动 standup notes**（v2 加 channel adapter，本期纯 stdout + markdown 文件）
-- **不做参与者持久化身份**（每跑一次 standup 5 个 agent 都是临时 alias，不存"小明 / 小红"角色）
+- **不做参与者持久化身份**（每跑一次 standup N+2 个 agent 都是临时 alias，不存"小明 / 小红"角色）
 
 ## 风险 / 待定
 
@@ -161,18 +168,18 @@ prompts 内联 cli.ts（同 debate 风格）；reporter 数量参数化让循环
 - **reporter 走形式答非所问**：MiniMax 可能不按 yesterday/today/blockers 三段式输出；v1 用结构化 prompt + recorder 后处理正则提取
 - **recorder 合并跑题**：v1 prompt 强制 recorder 只用三个 section（risks / blockers / next-actions），不放 freeform 总结
 
-## 留给 review 的 3 个问题
+## Review 问答（v2 已 ack）
 
-1. **报告人数量参数化吗？** `--reporters <n>` 默认 3，最小 2 最大 6？还是固定 3 给最干净的默认体验？（参数化 = 更灵活，固定 = topology 永远一致更好讲）
+| # | 问题 | 通信龙 答复 |
+|---|------|-------------|
+| Q1 | reporter 数量参数化 vs 固定 3？ | **参数化 `--reporters <n>` 默认 3 范围 2-6**。理由：团队规模差异大、min 2 防退化对话、max 6 控总 agent ≤ 8。debate 固定 6 是辩论格式硬约束，standup 没硬约束。 |
+| Q2 | host 拐回追问 blocker 二轮要不要？ | **v1 砍，不要 `--probe` flag**。理由：纯序列化是核心卖点，加 host 自由切换会让范式对比矩阵变模糊；如未来要 probe 单独做第四个 demo。 |
+| Q3 | recorder 输出选 (a)/(b)/(c)？ | **(b+a) 组合**。顶部 manager 友好摘要 + 底部 dev 友好 transcript，单文件双 reader 满足。详见上面"输入输出契约"。 |
 
-2. **要不要 host 拐回追问 blocker 的二轮？** 真实 standup 常见 host "等等，A 你刚说 blocker 是啥，详细说说" — 加进来就不是纯序列化了，变成"序列 + host 自由切换"两阶段。v1 直接砍掉简化，还是保留作为 `--probe` flag 演示更复杂编排？
-
-3. **recorder 输出风格选哪种**：
-   - (a) 完整 transcript（保留每人原话）
-   - (b) 结构化三段（yesterday/today/blockers per person + 末尾 risks/next-actions）← 我倾向
-   - (c) 经理视角总结（只输出 risks/blockers/next-actions，省略原话）
-
-   选 (b) 还是 (a+b 并列输出)？
+**关键设计 ack 项**（通信龙 review）：
+- ✅ host 单独 agent — 序列化轮询指挥棒传递需要 LLM 推理（不是机械 round-robin）
+- ✅ recorder 单独 agent — 累积 barrier 合并 + 提炼 risks/actions 是 LLM 工作（同 PR 审查室 judge 保留理由）
+- ✅ 编排范式对比矩阵 — 覆盖 anet 三种基本编排范式，新闻编辑室 PASS 的根本理由
 
 ## Timeline（待 review 通过）
 
@@ -184,10 +191,27 @@ prompts 内联 cli.ts（同 debate 风格）；reporter 数量参数化让循环
 
 ---
 
-**Demo backlog 状态（通信龙 review 后）：**
+**Demo backlog 状态（v2 通过后）：**
 
-- ✅ PR 审查室（[#25](https://github.com/sleep2agi/agent-network/issues/25) + draft [PR #26](https://github.com/sleep2agi/agent-network/pull/26)，approved，等开工）
-- 🟡 产品 standup（本提案，新 issue + 新 draft PR，等 review）
+- ✅ PR 审查室（[#25](https://github.com/sleep2agi/agent-network/issues/25) + draft [PR #26](https://github.com/sleep2agi/agent-network/pull/26)，approved，等 Vincent merge backlog 后开实施 PR）
+- ✅ 产品 standup（本提案 v2，[#27](https://github.com/sleep2agi/agent-network/issues/27) + draft [PR #28](https://github.com/sleep2agi/agent-network/pull/28)，approved，等 Vincent merge backlog）
 - ❌ AI 新闻编辑室（通信龙 PASS，模式与 translation-pipeline 重合）
 
-第三个 demo 备选（review 通过本案后再排）：留待通信龙 出题或我提候选。
+## anet 编排范式覆盖矩阵（v2 final）
+
+通信龙 review 给的结论：**6 个 demo（4 现役 + 2 新提案）已覆盖 anet 主流编排范式，第三个 demo 提案先不主动出**。等 PR 审查室 + standup 实施完跑通一遍真用户反馈后，再决定要不要加第 7 个 demo。
+
+| 范式 | 已 cover | demo |
+|---|---|---|
+| 对话 | ✅ | hello-world |
+| 线性链 | ✅ | translation-pipeline |
+| 回合制 | ✅ | debate |
+| 指挥-worker | ✅ | telegram-squad |
+| 并行扇出 + barrier 合并 | ✅ (待实施) | PR 审查室 |
+| 序列轮询 + 累积 barrier | ✅ (待实施) | **standup（本案）** |
+
+可能但暂不做的范式（通信龙 整理）：
+- map-reduce 大规模并行 — 跟 PR 审查室相似但放大 N，区分度小
+- 协商 / negotiation — 跟 debate 相似但去掉 judge，区分度小
+- 递归 / 分治 — 新颖但实现复杂度高
+- 流式处理 streaming pipeline — RFC-003 telemetry 实施后才有视觉化基础
