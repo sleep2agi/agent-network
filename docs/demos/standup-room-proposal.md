@@ -2,7 +2,13 @@
 
 > 提案人：通信demo马
 > 日期：2026-05-12
-> 状态：**v2 — 经 通信龙 review 通过**（3 个 review 问题已答 + 关键设计 ack）
+> 状态：**v3 — 加 §UX 反馈 (在控感) + §测试规格 两节**
+>
+> **Changelog：**
+> - v1：初版 5 agent 草案
+> - v2：通信龙 review 通过 — 3 review 问题答（参数化 reporter / 砍 probe / b+a 输出）+ 关键设计 ack
+> - **v3：通信龙 pivot ack — 加 §UX 反馈 (在控感) + §测试规格（Vincent 2026-05-12 定调 "用户能掌控多 agent + 充分测试"，refs [[feedback-demo-quality-over-count]]）**
+>
 > Backlog：refs [#25](https://github.com/sleep2agi/agent-network/issues/25) demo backlog 第 2 项（通信龙 选择优先级 #2，PASS 「AI 新闻编辑室」因模式与 translation-pipeline 重合）
 
 ## 一句话定位
@@ -146,14 +152,173 @@ prompts 内联 cli.ts（同 debate 风格）；reporter 数量参数化让循环
 
 模型默认 MiniMax M-*（跟 debate / pr-review 一致）。
 
-## 验证方式（对标 cases/index.md 标准）
+## §UX 反馈（在控感）— P0
+
+目标：用户跑完 `anet demo standup` 不需要看 docs/help，就感受到"我在指挥一群 agent"。控制台 + Dashboard 双视图设计，核心是**指挥棒 host→A→host→B→host→C→recorder 的序列节奏可视**。
+
+### 启动序
+
+```text
+$ anet demo standup --topic "本周 anet 0.9 进展" --reporters 3
+  Topic:     本周 anet 0.9 进展
+  Reporters: 3 人
+  Hub:       http://127.0.0.1:9200
+  Network:   standup-9c4e (net_ef56gh78...)
+  Dashboard: http://127.0.0.1:5173/network/net_ef56gh78  ⌘+click 打开
+
+  [0/8 +0.0s] 创建 5 agent (alias 后缀 -9c4e)...
+              ✓ host-9c4e / reporter-{1,2,3}-9c4e / recorder-9c4e
+  [1/8 +1.4s] 启动 5 agent (tmux session)...
+              ✓ 5 agent 全部 SSE connected
+```
+
+### 实时进度 feed 格式（指挥棒序列可视）
+
+总步数 = 2 (setup) + 1 (host 开场) + N (reporter 报告) + (N-1) (host 过渡) + 1 (host 闭幕) + 1 (recorder) + 1 (cleanup) = 2N+5。`--reporters 3` 时是 11 步：
+
+```text
+  [2/11 +1.5s] host 开场 → 议题介绍 + 点名 reporter-1...
+  [3/11 ✓ +14s]   host-9c4e        → "今天 standup 议题 X，A 你先来" | 12.3s
+  [4/11 +14s]  reporter-1 报告...
+  [5/11 ✓ +38s]   reporter-1-9c4e  → yesterday/today/blockers 三段 | 23.6s
+  [6/11 +38s]  host 转 reporter-2...
+  [7/11 ✓ +44s]   host-9c4e        → "谢谢 A，B 你来" | 5.4s
+  [8/11 +44s]  reporter-2 报告...
+  [8/11 ✓ +68s]   reporter-2-9c4e  → ... | 23.9s
+  [9/11 +68s]  host 转 reporter-3 → reporter-3 报告 → host 闭幕...
+  [9/11 ✓ +97s]   reporter-3-9c4e  → ... | 21.4s
+  [10/11 +97s] host 闭幕 + 整包派给 recorder...
+  [10/11 ✓ +115s] recorder-9c4e   → standup notes 1.8KB | 17.2s
+  [11/11 +115s] 清理 5 agent + 独立 network...
+              ✓ 清理完成
+```
+
+视觉卖点：用户在 terminal 滚动条上看到的就是**指挥棒在 host 和 reporter 之间真实传递**，对比 Dashboard topology 时间轴亮起的顺序对得上 — 这是 standup 序列轮询模式的核心体感。
+
+每条 line 同 PR 审查室：`+秒数` 绝对计时，`✓` 标记 agent 完成。
+
+### Dashboard 链接
+
+跟 PR 审查室一致 — 第一屏 echo `Dashboard:` URL + terminal hyperlink 转义 + `⌘+click 打开` 提示。
+
+### 失败路径友好提示
+
+| 失败 | CLI 错误输出（含恢复命令） |
+|------|---------------------------|
+| `--reporters 1` 或 > 6 | `❌ --reporters 必须在 [2, 6] 范围`<br>恢复：`--reporters 3` 默认值最常用 |
+| host 卡死（没点名下一个 reporter） | `❌ host-9c4e 120s 没回，序列卡在 reporter-N`<br>恢复：`anet logs host-9c4e` 查 SDK 报错<br>或 `--step-timeout 180` 加大超时 |
+| reporter N 超时（v1 假设全员到齐） | `❌ reporter-2-9c4e 超时，序列中断`<br>恢复：`anet logs reporter-2-9c4e` 查报错<br>未来 v2 加 `--skip-absent` flag 跳过缺席 |
+| recorder 合并跑题（不出三段结构） | `⚠️  recorder 输出未包含 ## 风险 section，已写文件但建议检查`<br>恢复：`less ./standup-*.md` 人工 review<br>或重跑（LLM 非确定性） |
+| network / hub / MiniMax 错误 | 跟 PR 审查室共用（`anet doctor --fix` / `anet hub start` / `--key`） |
+
+### 末尾输出
+
+```text
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ✓ 完成   总耗时 115s (3 reporter 序列轮询 + 1 recorder 汇总)
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Preview (摘要前 5 行)：
+  ┌─────────────────────────────────────────────────────────
+  │ # Standup notes — 本周 anet 0.9 进展 (2026-05-12)
+  │
+  │ ## 摘要
+  │
+  │ ### 主要进展
+  └─────────────────────────────────────────────────────────
+
+  完整文件：./standup-本周-anet-0.9-进展-1714766365.md
+  结构：摘要（risks/actions/进展）+ 完整 transcript
+
+  下一步建议：
+    1. 检查内容：less ./standup-*.md
+    2. 贴到团队频道：
+       - Slack: 直接复制 markdown 粘贴到 #standup 频道
+       - 飞书：复制粘贴到 daily standup 群（飞书支持 markdown）
+       - Notion：粘贴到当日 daily note page（自动渲染 markdown）
+    3. 清理 demo 现场：已自动清理 (5 agent + network)
+       想保留下次跑加 --keep
+```
+
+跟 PR 审查室的"下一步"区别 — standup 的"下一步"是 **paste 到团队协作工具**（Slack / 飞书 / Notion），不是 `gh pr comment`。两个 demo 的末尾建议都是 ready-to-act，不是泛指引。
+
+---
+
+## §测试规格（test29-standup-room）— P1
+
+目标：用户跑 demo 不踩坑，CI 跑每次 PR 都跑得稳。
+
+### 样本输入（`tests/test29-standup-room/samples/`，covering happy / boring / edge）
+
+| 文件 | 场景 | 预期 recorder 输出特征 |
+|------|------|-----------------------|
+| `topic-3-person.txt` | 经典 3 人 standup："本周 anet 0.9 进展" | 3 段 reporter transcript + risks ≤ 3 + actions ≤ 5 |
+| `topic-6-person.txt` | 6 人大组："Q3 全员战报" + `--reporters 6` | 6 段 reporter transcript + risks ≤ 5 + actions ≤ 8 |
+| `topic-blocker-heavy.txt` | 议题侧重 blocker："发版 blocker 评审" | risks 字段 ≥ 3，actions 字段每条带 [owner] 标记 |
+
+样本是 topic 文本 + 可选 `--reporters N`，跑出真实 standup notes。
+
+### Golden output 断言策略（结构断言）
+
+LLM 输出非确定性。Golden file 验证结构特征，不 verbatim 比对：
+
+| 字段 | 3-person | 6-person | blocker-heavy |
+|------|----------|----------|----------------|
+| 文件存在 `./standup-*-*.md` | ✓ | ✓ | ✓ |
+| `## 摘要` section 存在且非空 | ✓ | ✓ | ✓ |
+| `### 主要进展` / `### 风险 / blockers` / `### 下一步 actions` 三 sub-section 都存在 | ✓ | ✓ | ✓ |
+| `## 完整记录（transcript）` section 包含 `### reporter-N:` 计数 | == 3 | == 6 | ≥ 3 |
+| `### Host:` line 计数（开场 + N-1 转 + 闭幕） | == N+1 | == N+1 | == N+1 |
+| `### 风险` 列表项数 | ≤ 3 | ≤ 5 | ≥ 3 |
+| `### 下一步 actions` 每条 regex `\[.+\]` 起头（owner 标） | best-effort | best-effort | ✓ 必须 |
+
+写到 `tests/test29-standup-room/expected/assertions.json`，runner 用 jq + grep 校验。
+
+### Mock LLM provider（同 PR 审查室协议复用）
+
+复用 `tests/MOCK-LLM-PROTOCOL.md`（**当前不存在**，需要测试1-3号 起；PR 审查室提案也需要它，共用 issue）。
+
+`mock-replies.jsonl` 例子（standup）：
+```json
+{"in_substring": "你是 standup 主持人，开场介绍议题", "out": "今天 standup 议题 X，A 你先来"}
+{"in_substring": "你是报告人，请按 yesterday/today/blockers", "out": "Yesterday: ...\nToday: ...\nBlockers: 无"}
+{"in_substring": "请整合 N 份报告输出摘要", "out": "## 摘要\n### 主要进展\n- ...\n### 风险\n- ...\n### 下一步\n- [me] ..."}
+```
+
+### 三层覆盖比例
+
+| 层 | 覆盖 % | 范围 |
+|----|--------|------|
+| Unit（prompt 模板） | 80% | 3 类 prompt（host / reporter / recorder）的渲染、结构解析 |
+| Integration（CLI 入参） | 60% | `--topic / --reporters` 边界（1, 2, 6, 7）、`--keep / --network / --no-network`、错误码 |
+| E2E（Docker 全流程） | 40% | 3 个样本各跑，验证 golden；mock LLM 模式 |
+
+### 回归 case 列表
+
+| Case | 优先级 | 路径 | 说明 |
+|------|--------|------|------|
+| `--reporters` 边界（1 报错 / 2 最小 / 6 最大 / 7 报错） | **P0** | integration | 用户输入边界，必须 explicit |
+| host 不按 prompt 控制 ≤ 30 字（过长） | **P0** | unit + e2e | 直接影响整场耗时 + token 成本 |
+| reporter 不按 yesterday/today/blockers 三段式 | **P0** | unit | recorder 解析依赖结构 |
+| recorder 输出缺 `### 风险` 或 `### 下一步` section | **P0** | e2e | 摘要质量保证 |
+| 指挥棒序列中断（host 没点名下一个） | **P0** | e2e | 序列轮询模式的核心可靠性 |
+| MiniMax 429 / 超时 | P1 | integration | nightly 跑 |
+| `--keep` 保留 5 agent | P1 | e2e | nightly 跑 |
+| 6-person 长 standup token 上限 | P1 | e2e | nightly 跑（成本控制） |
+| terminal hyperlink 转义不支持终端 fallback | P2 | release | release 前手动 |
+| recorder 输出非 UTF-8（极少 LLM corner case） | P2 | release | release 前手动 |
+
+P0 必跑（每次 CI），P1 nightly，P2 release 前手动。
+
+---
+
+## 旧验证方式表（已被 §测试规格 取代，保留供参考）
 
 | 层级 | 验证 |
 |------|------|
 | 资产 | `agent-network/bin/cli.ts` 加 `demo standup` 子命令 |
-| 自动化 | 新增 `tests/test29-standup-room/` — Docker 起 hub + 5 agent，喂 `--topic` + `--reporters 3`，验证输出文件 + recorder 三段式存在 |
+| 自动化 | `tests/test29-standup-room/` — 详见 §测试规格 |
 | 文档 | `docs-site/docs/cases/standup-room.md`（ZH + EN）+ 加入 `cases/index.md` 表格 |
-| samples | 跑完留一份 `tests/test29-standup-room/expected/sample-standup-notes.md` 作为 golden 输出对照 |
 
 ## 不在范围内（v1）
 
