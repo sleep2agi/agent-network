@@ -13,10 +13,10 @@ cd server && bun install && bun run src/index.ts
 - SQLite WAL (`~/.commhub/commhub.db`)
 - V3 Auth: api_tokens + users + networks
 
-## 数据库 (10 表)
-sessions / inbox / tasks / nodes / completions / task_events / users / networks / api_tokens / audit_log
+## 数据库 (13 表)
+sessions / inbox / tasks / nodes / completions / task_events / users / networks / api_tokens / audit_log / licenses / network_members / network_invites
 
-## MCP Tools (18 个)
+## MCP Tools (17 个)
 ### Agent 端
 - `report_status` — 心跳+状态+进度 (含 network_id)
 - `report_completion` — 任务完成汇报
@@ -38,9 +38,10 @@ sessions / inbox / tasks / nodes / completions / task_events / users / networks 
 - `broadcast` — 群发 (含 network_id)
 - `get_completions` — 完成列表
 
-## REST API (12 端点)
-- POST /api/auth/register + /api/auth/login + GET /api/auth/me + PUT /api/auth/me
-- GET /api/networks + POST /api/networks + GET /api/networks/:id
-- GET /api/status + /api/tasks + /api/nodes + /api/stats + /api/audit-log + /api/task_events + /api/messages + /api/completions + /api/users (admin)
+## REST API（主要端点，完整清单见 docs-site/docs/api/rest.md）
+- Auth: POST /api/auth/register + /api/auth/login + /api/auth/password, GET /api/auth/me + PUT /api/auth/me
+- Network: GET /api/networks + POST /api/networks + GET/PUT/DELETE /api/networks/:id, GET /members + POST /invite + POST /join
+- Token: POST /api/auth/tokens (+ node-token) + GET /api/auth/tokens + DELETE /api/auth/tokens/:id
+- Read: GET /api/status + /api/tasks + /api/nodes + /api/stats + /api/audit-log + /api/task_events + /api/messages + /api/completions + /api/users (admin)
 - GET /health (public)
-- POST /mcp (MCP)
+- POST /mcp (MCP) + GET /events/:alias (SSE)
