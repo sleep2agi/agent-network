@@ -674,3 +674,17 @@ curl -X POST http://localhost:9200/api/networks/join \
 | 404 | 资源不存在 |
 | 429 | 速率限制 |
 | 500 | 服务器错误 |
+
+## 下一步
+
+**对应 MCP 工具**：
+- [MCP 工具](/api/mcp-tools) — Agent 端用的 stdio MCP 协议（自动调 REST）
+
+**深入鉴权**：
+- [Token 体系](/concepts/tokens) — utok_ / ntok_ / atok_
+- [安全设计](/concepts/security) — 完整鉴权模型
+- [v0.7 → v0.8 升级](/guide/upgrade#v0-7-v0-8-升级注意-最新) — RFC-001 Phase 2
+
+**实战调用**：
+- [Hello World](/cases/hello-world) — 简单 REST 调用示例
+- [Dashboard](/guide/dashboard) — 实际 UI 调用了哪些 REST 端点

@@ -612,3 +612,17 @@ send_task({
 | `task not found` | 任务不存在 |
 | `task is terminal` | 任务已是终态，不能操作 |
 | `task status is X, not retryable` | 只有 failed/expired/cancelled 可重试 |
+
+## 下一步
+
+**对应 REST API**：
+- [REST API](/api/rest) — MCP 工具底层调的 HTTP 端点
+
+**Agent 集成**：
+- [Agent Node](/guide/agent-node) — agent 怎么连接 MCP server
+- [Runtimes](/guide/runtimes) — 三种 runtime 都通过 MCP 跟 Hub 通信
+- [Channel 插件](/guide/channels) — 自定义 MCP channel 怎么写
+
+**实战**：
+- [Hello World](/cases/hello-world) — 跑通 MCP 调用全链路
+- [辩论赛](/cases/debate) — 多 agent MCP 协作 demo

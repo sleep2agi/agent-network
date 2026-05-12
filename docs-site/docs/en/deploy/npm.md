@@ -282,3 +282,18 @@ npm view @sleep2agi/agent-network versions
 | Memory | 256MB (Server) + 128MB per Agent |
 | Disk | 100MB + database growth |
 | Network | Connection to CommHub Server required |
+
+## Next steps
+
+**Get started**:
+- [One-shot install](/en/guide/one-shot-install) — first agent in 5 minutes after install
+- [Hello World](/en/cases/hello-world) — 6-step tutorial
+
+**Production**:
+- [Production deployment](/en/deploy/production) — multi-machine + TLS + backups
+- [Docker deployment](/en/deploy/docker) — containerization vs. npm
+
+**Dig deeper**:
+- [Architecture](/en/guide/architecture) — where each component runs
+- [CLI commands](/en/guide/cli) — full anet command reference
+- [Dashboard](/en/guide/dashboard) — Web UI monitoring

@@ -391,3 +391,20 @@ worker-deepseek:
     - ANTHROPIC_AUTH_TOKEN=${DEEPSEEK_API_KEY}
     - COMMHUB_URL=http://server:9200
 ```
+
+## Next steps
+
+**Production**:
+- [Production deployment](/en/deploy/production) — TLS / firewall / reverse proxy / backups
+- [npm deployment](/en/deploy/npm) — global npm install path without Docker
+
+**Security**:
+- [Security design](/en/concepts/security) — token / password / isolation
+- [v0.7 → v0.8 upgrade](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — admin bootstrap / RFC-001
+
+**Hands-on demos (Docker Compose)**:
+- [Telegram squad](/en/cases/telegram-squad) — Docker Compose with commander + 10 workers + Telegram
+- [Debate](/en/cases/debate) — 6-agent demo once Hub is up
+
+**Troubleshooting**:
+- [Troubleshooting](/en/troubleshooting) — common errors + `anet doctor --fix`

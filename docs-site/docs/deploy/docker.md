@@ -391,3 +391,20 @@ worker-deepseek:
     - ANTHROPIC_AUTH_TOKEN=${DEEPSEEK_API_KEY}
     - COMMHUB_URL=http://server:9200
 ```
+
+## 下一步
+
+**生产部署**：
+- [生产部署](/deploy/production) — TLS / 防火墙 / 反向代理 / 备份
+- [npm 部署](/deploy/npm) — 不用 Docker 的全局 npm 安装路径
+
+**安全**：
+- [安全设计](/concepts/security) — token / 密码 / 隔离机制
+- [v0.7 → v0.8 升级](/guide/upgrade#v0-7-v0-8-升级注意-最新) — admin bootstrap / RFC-001
+
+**实战 demo（Docker Compose）**：
+- [军团编队](/cases/telegram-squad) — Docker Compose 起一套指挥室 + 10 worker + Telegram
+- [辩论赛](/cases/debate) — Hub 起来后跑 6-agent demo
+
+**故障排查**：
+- [故障排查](/troubleshooting) — 常见错误集合 + `anet doctor --fix`

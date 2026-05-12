@@ -674,3 +674,17 @@ Errors usually return this shape:
 | 404 | Resource not found |
 | 429 | Rate limited |
 | 500 | Server error |
+
+## Next steps
+
+**Corresponding MCP tools**:
+- [MCP tools](/en/api/mcp-tools) — stdio MCP protocol used by agents (auto-calls REST)
+
+**Dig into auth**:
+- [Tokens](/en/concepts/tokens) — utok_ / ntok_ / atok_
+- [Security design](/en/concepts/security) — full auth model
+- [v0.7 → v0.8 upgrade](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — RFC-001 Phase 2
+
+**Real-world usage**:
+- [Hello World](/en/cases/hello-world) — simple REST examples
+- [Dashboard](/en/guide/dashboard) — what REST endpoints the UI actually calls

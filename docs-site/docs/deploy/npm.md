@@ -282,3 +282,18 @@ npm view @sleep2agi/agent-network versions
 | 内存 | 256MB（Server） + 128MB per Agent |
 | 磁盘 | 100MB + 数据库增长 |
 | 网络 | 需要连接 CommHub Server |
+
+## 下一步
+
+**起步**：
+- [一键安装与起步](/guide/one-shot-install) — anet 装好后 5 分钟跑第一个 agent
+- [Hello World](/cases/hello-world) — 6 步教程
+
+**生产**：
+- [生产部署](/deploy/production) — 多机部署 + TLS + 备份
+- [Docker 部署](/deploy/docker) — 容器化方案对比 npm
+
+**深入**：
+- [架构概览](/guide/architecture) — 各组件部署在哪
+- [CLI 命令](/guide/cli) — anet 39 个命令完整清单
+- [Dashboard](/guide/dashboard) — Web UI 监控

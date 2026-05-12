@@ -612,3 +612,17 @@ The `text` field is a JSON string that needs to be parsed.
 | `task not found` | Task doesn't exist |
 | `task is terminal` | Task is in a terminal state, cannot be operated on |
 | `task status is X, not retryable` | Only failed/expired/cancelled tasks can be retried |
+
+## Next steps
+
+**Corresponding REST API**:
+- [REST API](/en/api/rest) — the HTTP endpoints these MCP tools call under the hood
+
+**Agent integration**:
+- [Agent Node](/en/guide/agent-node) — how an agent connects to the MCP server
+- [Runtimes](/en/guide/runtimes) — all three runtimes talk to the Hub via MCP
+- [Channel plugins](/en/guide/channels) — how to write a custom MCP channel
+
+**Hands-on**:
+- [Hello World](/en/cases/hello-world) — full MCP call chain
+- [Debate](/en/cases/debate) — multi-agent MCP coordination demo
