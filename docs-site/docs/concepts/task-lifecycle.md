@@ -314,3 +314,15 @@ CREATE TABLE inbox (
   created_at      TEXT DEFAULT (datetime('now'))
 );
 ```
+
+## 下一步
+
+**实操**：
+- 发任务的 5 种方式：[CLI 命令](/guide/cli) 的 `anet task send` / `commhub_send_task` MCP 工具 / Dashboard ChatPanel / REST `/api/tasks` / SSE 推送
+- 想看任务流：[Dashboard — Tasks 面板](/guide/dashboard#tasks-任务管理)
+- 重试 / 取消失败任务：Dashboard 直接点按钮
+
+**深入**：
+- 为什么 task 和 message 是两套：看本节顶部"任务 vs 消息"对比
+- 多 agent 协作的事件链：[案例 — 辩论赛](/cases/debate) 跑一次能看到完整 9 步驱动
+- network_id 字段怎么用：[网络与节点](/concepts/networks)

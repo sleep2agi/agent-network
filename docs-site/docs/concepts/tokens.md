@@ -231,3 +231,11 @@ A：v0.5 默认 open mode，匿名请求放行（R3 漏洞，**已于 v0.7 / v0.
 
 **Q：升级 hub 到 v0.8+ 后，已有 agent 的 ntok_ 还能用吗？**
 A：能用。`api_tokens` schema 不变。`COMMHUB_AUTH_TOKEN` env 即使设了也只会触发 deprecation warning，不影响 hub 启动 —— v0.8 hub 不再依赖 master token，直接 `anet hub start` 就能起。
+
+## 下一步
+
+- **CLI 操作**：[CLI 命令 — token 章节](/guide/cli)（`anet token ls/create/revoke`）
+- **架构对应**：[架构概览 — 安全章节](/guide/architecture#安全架构)
+- **完整安全模型**：[安全设计](/concepts/security)
+- **升级指南**：从 v0.7 master token 模式升 v0.8 utok_/ntok_：[升级指南](/guide/upgrade#v0-7-v0-8-升级注意-最新)
+- **RFC**：[RFC-001 — COMMHUB_AUTH_TOKEN 废弃路线图](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)

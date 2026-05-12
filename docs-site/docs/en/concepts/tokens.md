@@ -161,3 +161,11 @@ anet login   # gets a fresh utok_
 ## Legacy (don't worry about it)
 
 V2 had `atok_` (api token). V3 replaced it with `utok_` + `ntok_`. The codebase still tolerates the `atok_` prefix for backward compat, but **new users don't need to touch it**.
+
+## Next steps
+
+- **CLI usage**: [CLI commands — token section](/en/guide/cli) (`anet token ls/create/revoke`)
+- **Architecture mapping**: [Architecture — Security](/en/guide/architecture#security-architecture)
+- **Full security model**: [Security design](/en/concepts/security)
+- **Upgrade**: from v0.7 master-token mode to v0.8 utok_/ntok_: [Upgrade guide](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest)
+- **RFC**: [RFC-001 — `COMMHUB_AUTH_TOKEN` deprecation roadmap](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)

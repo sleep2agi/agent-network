@@ -1,20 +1,27 @@
 # CLI + Dashboard 用户流程设计
 
-> **实现状态（2026-04-11 对齐）**
+> **实现状态（2026-05-12 对齐 v0.8.1）**
 >
-> ✅ 已实现：
+> 历史背景：本文写于 V3 早期（2026-04-11 首次对齐），描述的是 CLI + Dashboard 的用户流程目标态。v0.8 系列大幅推进了 token 与密码管理（[RFC-001 Phase 2](rfcs/RFC-001-deprecate-commhub-auth-token.md)），UX 上还增加了首次 hub start 的 admin bootstrap 和 doctor 自动修复。
+>
+> ✅ 已实现（v0.8.1）：
 > - 双 token 体系 (utok_ + ntok_)，token 对用户透明
 > - anet login 后交互选网络
 > - anet node create 交互选网络（多网络时）
 > - anet network invite/join/members CLI
 > - anet node create 自动生成 ntok_ 写入节点 config
+> - **v0.8 admin bootstrap**：首次 `anet hub start` prompt 设 admin 账号（默认 `admin / anethub`），密码强度 ≥ 8 + 弱密码字典（首次 bootstrap 例外允许 ≥ 4）
+> - **v0.8 密码管理**：`anet passwd` 交互改密 / `anet hub admin reset-user <username>` 本机 owner 强制重置
+> - **v0.8 doctor**：`anet doctor --fix` 自动 probe 并重发过期 ntok_；agent-node SSE 401 自动 reload
+> - **Dashboard 0.4.2 thin cookie-proxy**：不再需要 service token 配置（v0.8 起）
 >
-> ❌ 未实现（目标态）：
+> ❌ 未实现（目标态，排到 v0.9+）：
 > - Token scope 选择（agent/readonly）— createToken 统一 full
 > - 项目级 .anet/config.json 网络配置（network use --project）
-> - Dashboard Token 管理页、改密码、网络管理页
+> - Dashboard 改密码 UI、网络管理页（CLI 已可，Dashboard 入口缺）
 > - 公开网络浏览 + 申请加入
 > - viewer 灰色不可选（create 时未检查角色）
+> - Argon2id 密码哈希（当前 SHA-256）
 
 ## 核心原则（Vincent 确认）
 
