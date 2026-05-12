@@ -1,10 +1,31 @@
 # Agent Network Evolution Log
 
+## v0.8.2 Telegram Channel + claude-code-cli Session Resume (2026-05-12) — COMPLETE
+
+### Stats
+- npm `latest`: `agent-network@2.1.7` / `commhub-server@0.8.0` / `agent-network-dashboard@0.4.2` / `agent-node@2.3.0`
+- Released by Vincent 2026-05-12 via `npm publish --tag latest` (no git tag yet, npm-tag-driven stable promote)
+- Closed: issue #13 (telegram channel one-shot bind) — see commit `143b2a1` (release) + `f1e3d9c` (cli session resume fix)
+- docs-loop docs-site sync chain R150-R175 (changelog / README / getting-started / runtimes / deploy/production / upgrade / sidebar / homepage trust-row / v0.8.0 archive PII + product-direction align)
+
+### Added since v0.8.1
+- **CLI**: `anet channel add telegram` one-shot bind — attach Telegram bot token + allow-user to existing node, auto-generates `channels/telegram` config
+- **Runtime**: `claude-code-cli` runtime session resume fix — node creation pre-generates a Claude session UUID, restarts auto `claude --resume <uuid>` to continue conversation
+- **Docs**: anet.sh v0.8.2 trust-row + sidebar dropdown bump; comprehensive v0.8.0 archive PII sweep (TELEGRAM_ALLOW_USER / vansin.me / vincent@ / paid-tier wording)
+
+### Pending → v0.9
+- Argon2id password hashing
+- Token TTL + revoke-all
+- Pinned + checksummed install scripts
+- v1.0 RFC-001 Phase 3 (hard removal of `COMMHUB_AUTH_TOKEN`)
+
+---
+
 ## v0.8.1 Light Theme Overhaul + OSS Readiness (2026-05-12) — COMPLETE
 
 ### Stats
-- git tag `v0.8.1` (current stable)
-- 3 npm packages on `latest`: `agent-network@2.1.5`, `commhub-server@0.8.0`, `agent-network-dashboard@0.4.2`, `agent-node@2.3.0`
+- git tag `v0.8.1` (prior stable line — v0.8.2 promoted via npm `latest` 2026-05-12, see entry above)
+- 3 npm packages on `latest` at v0.8.1 cut: `agent-network@2.1.5`, `commhub-server@0.8.0`, `agent-network-dashboard@0.4.2`, `agent-node@2.3.0`
 - N站马 7-rounds Polish Loop in dashboard preview line (0.4.3-preview.1 / 0.4.4 / 0.4.5-preview.0): Login redesign, 7-variant EmptyState, Quick Actions split, sidebar brand + live online-pulse, TopoGraph light SVG variant (closes issue #8), Settings reorganization, error chips
 - TopoGraph center hub: 24px pulse source (closes issue #5)
 - OSS-readiness reports for 3 repos; one P0 PAT leak in `agent-network-dashboard` history cleaned with full git nuke + force-push; backup retained
