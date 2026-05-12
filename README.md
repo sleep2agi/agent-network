@@ -210,8 +210,8 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 
 **未实现**
 
-- `anet license` / `anet activate` —— 实验性 legacy trial/pro-license 命令，不属于本地上手主线
-- 云托管 Hub / 公开 Demo 站点 —— 当前只支持本地 / 局域网
+- `anet license` / `anet activate` —— v0.6 legacy 命令，Apache 2.0 OSS 后**不再需要**；Hub 后向兼容仍创建 14 天 trial，命中 `license_expired` 见 [troubleshooting](https://anet.sh/troubleshooting)
+- **没有官方托管 Hub** —— 产品方向是 Apache 2.0 + 自部署 + 课程 / 服务咨询，不做 SaaS；生产部署走 [Docker](https://anet.sh/deploy/docker) 或 [生产部署](https://anet.sh/deploy/production)
 
 ---
 
