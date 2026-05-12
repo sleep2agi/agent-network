@@ -136,7 +136,7 @@ Think of it as a member in a group chat. Each Agent has:
 
 ```bash
 # Create an Agent
-anet node create writer-1 --runtime claude-agent-sdk --model claude-3-5-haiku-20241022
+anet node create writer-1 --runtime claude-agent-sdk --model MiniMax-M2.7
 
 # Start it (it connects to CommHub and waits for tasks)
 anet node start coder-1
