@@ -36,7 +36,7 @@
 | ID | 用户故事 | 现状 | 现有覆盖 |
 |----|---------|------|---------|
 | NODE-01 | claude-code-cli runtime 启动 + 注册 | ✅ | docker-e2e SC03 |
-| NODE-02 | 收到 inbound task → 回复落 hub（成功路径） | ❌ | （docker-e2e 只测了 failed 路径） |
+| NODE-02 | 收到 inbound task → 回复落 hub（成功路径） | ✅ | [qa-node-02](../../tests/qa-node-02-success-reply/) R6 PASS（~8.5s）— mock-via-MCP，不烧 LLM |
 | NODE-03 | LLM key 错误时 reply.status=failed 写回 hub | ✅ | docker-e2e SC05 |
 | NODE-04 | hub 重启后 agent-node SSE 自动重连 | ❌ | （**R3 候选**） |
 | NODE-05 | runtime 切换（claude-code → codex / minimax） | ❌ | （v1，先不做） |
