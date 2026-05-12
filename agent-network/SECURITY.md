@@ -1,5 +1,7 @@
 # Security Policy
 
+> **For the v0.8.1 risk surface and hardening roadmap** see the root [`SECURITY.md`](https://github.com/sleep2agi/agent-network/blob/main/SECURITY.md). This file covers reporting + scope only.
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability, **please do not open a public issue**.
