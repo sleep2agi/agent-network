@@ -29,12 +29,12 @@ sequenceDiagram
 
 ### 多模型异构
 
-同一个网络内可以运行不同模型的 Agent。Claude Code 做复杂推理和工具调用，Codex (codex-sdk) 做代码任务，MiniMax 做低成本文案 -- 4 种 Runtime 共用一套通信协议，互不干扰。
+同一个网络内可以运行不同模型的 Agent。Claude Code 做复杂推理和工具调用，Codex (codex-sdk) 做代码任务，MiniMax 做低成本文案 -- 3 种 Runtime 共用一套通信协议，互不干扰。
 
 | 模型 | Runtime | 适用场景 | 推荐度 |
 |------|---------|---------|--------|
 | Claude Code | `claude-code-cli` | 复杂推理、工具调用、文件操作 | ⭐⭐⭐ |
-| Claude Sonnet/Opus | `claude-agent-sdk` | 推理、长文分析、MiniMax 兼容 | ⭐⭐⭐ |
+| Claude Sonnet/Opus | `claude-agent-sdk` | 推理、长文分析（Anthropic API 主线） | ⭐⭐⭐ |
 | Codex (codex-sdk) | `codex-sdk` | 代码生成、命令执行 | ⭐⭐⭐ |
 | MiniMax M2.7 | `claude-agent-sdk` | 低成本文案、翻译（通过 Anthropic 兼容 API） | ⭐⭐ |
 

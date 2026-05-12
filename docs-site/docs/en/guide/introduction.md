@@ -29,12 +29,12 @@ sequenceDiagram
 
 ### Heterogeneous Multi-Model
 
-Agents running different models can coexist in the same network. Claude Code handles complex reasoning and tool use, Codex (codex-sdk) takes on code tasks, MiniMax handles low-cost copywriting -- 4 runtimes share the same communication protocol without interference.
+Agents running different models can coexist in the same network. Claude Code handles complex reasoning and tool use, Codex (codex-sdk) takes on code tasks, MiniMax handles low-cost copywriting -- 3 runtimes share the same communication protocol without interference.
 
 | Model | Runtime | Use Case | Recommended |
 |------|---------|---------|-------------|
 | Claude Code | `claude-code-cli` | Complex reasoning, tool use, file ops | ⭐⭐⭐ |
-| Claude Sonnet/Opus | `claude-agent-sdk` | Reasoning, analysis, MiniMax compatible | ⭐⭐⭐ |
+| Claude Sonnet/Opus | `claude-agent-sdk` | Reasoning, analysis (Anthropic API mainline) | ⭐⭐⭐ |
 | Codex (codex-sdk) | `codex-sdk` | Code generation, command execution | ⭐⭐⭐ |
 | MiniMax M2.7 | `claude-agent-sdk` | Low-cost copywriting (via Anthropic-compatible API) | ⭐⭐ |
 
