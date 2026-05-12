@@ -5,8 +5,8 @@
 ## 架构
 
 ```
-Telegram → Commander (Codex GPT-5.5) → CommHub Server
-                                           ├── worker-1~5 (Codex GPT-5.5)
+Telegram → Commander (Codex) → CommHub Server
+                                           ├── worker-1~5 (Codex)
                                            └── worker-6~10 (MiniMax via Claude SDK)
 ```
 
@@ -46,6 +46,6 @@ docker compose down
 
 ## Worker 分工
 
-- **worker-1~5**: Codex (GPT-5.5) — 代码任务、文件操作
+- **worker-1~5**: Codex — 代码任务、文件操作
 - **worker-6~10**: MiniMax — 文本处理、翻译、分析
 - **commander**: 接收 Telegram 指令，智能分配给合适的 worker

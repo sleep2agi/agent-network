@@ -23,8 +23,8 @@ Two agents solve math problems:
 anet server local --username demo --password demo123456
 
 # Terminal 2: Create agents
-anet create solver-1 --runtime codex-sdk --model gpt-5.4
-anet create solver-2 --runtime codex-sdk --model gpt-5.4
+anet create solver-1 --runtime codex-sdk --model <codex-model-id>
+anet create solver-2 --runtime codex-sdk --model <codex-model-id>
 anet start solver-1 &
 anet start solver-2 &
 
