@@ -95,4 +95,18 @@ anet logs 小红
 
 ## 下一步
 
-- [翻译流水线](/cases/translation-pipeline) -- 三个 Agent 链式协作
+跑通了 hello-world，根据兴趣往下走：
+
+**更复杂的 demo**
+- [翻译流水线](/cases/translation-pipeline) — 3 个 Agent 链式协作（DeepSeek 调度 + MiniMax 翻译）
+- [辩论赛 Demo](/cases/debate) — 6 个 Agent（主持 + 正反 4 辩 + 评委）一键 9 步辩论
+- [军团编队](/cases/telegram-squad) — 11 个 Agent + Docker Compose + Telegram 接入
+
+**深入了解**
+- [CLI 命令参考](/guide/cli) — 完整命令手册
+- [多模型配置](/guide/multi-model) — 给不同 Agent 用不同模型 / provider
+- [Dashboard 指南](/guide/dashboard) — 浏览器面板里能做什么
+
+**部署到团队 / 公网**
+- [一键安装](/guide/one-shot-install) — 多 Agent + tmux 一条命令起
+- [生产部署](/deploy/production) — 公网部署 + TLS + 改密 checklist

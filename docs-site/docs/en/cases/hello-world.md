@@ -95,4 +95,18 @@ anet logs 小红
 
 ## Next steps
 
-- [Translation Pipeline](/en/cases/translation-pipeline) -- Three Agents in a chain collaboration
+Hello-world done — pick what's interesting next:
+
+**More complex demos**
+- [Translation Pipeline](/en/cases/translation-pipeline) — 3 Agents in a chain (DeepSeek dispatcher + MiniMax translators)
+- [Debate Demo](/en/cases/debate) — 6 Agents (host + 4 debaters + judge) running a 9-step debate in one command
+- [Telegram Squad](/en/cases/telegram-squad) — 11 Agents + Docker Compose + Telegram inbox
+
+**Go deeper**
+- [CLI Commands](/en/guide/cli) — complete command reference
+- [Multi-Model Config](/en/guide/multi-model) — mix providers / models across agents
+- [Dashboard Guide](/en/guide/dashboard) — what each browser-side panel does
+
+**Deploy for team / public**
+- [One-Shot Install](/en/guide/one-shot-install) — multi-agent + tmux in a single line
+- [Production Deployment](/en/deploy/production) — public-internet checklist (TLS, password rotation, firewall)
