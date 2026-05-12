@@ -67,7 +67,7 @@ const inputHash = hashToken(inputToken);
 const row = db.get("SELECT * FROM api_tokens WHERE token_hash = ?", inputHash);
 ```
 
-### Token Verification Flow
+### Token Verification Flow (v0.8)
 
 ```mermaid
 flowchart TD
@@ -76,30 +76,39 @@ flowchart TD
     HDR -->|Yes| TOKEN[Bearer token]
     HDR -->|No| QS{URL ?token=?}
     QS -->|Yes| TOKEN
-    QS -->|No| LEGACY{COMMHUB_AUTH_TOKEN?}
+    QS -->|No| DEVOPEN{--dev-open?}
 
     TOKEN --> RESOLVE[resolveToken<br/>Query api_tokens table]
     RESOLVE --> FOUND{Found?}
     FOUND -->|Yes| CHECK_EXPIRE{Expired?}
     CHECK_EXPIRE -->|No| OK[Auth passed<br/>Extract user + network]
     CHECK_EXPIRE -->|Yes| DENY[401]
-    FOUND -->|No| LEGACY
+    FOUND -->|No| LEGACY{COMMHUB_AUTH_TOKEN<br/>set & matches?<br/>/api/* reads only}
 
-    LEGACY -->|Set| MATCH{Match?}
-    MATCH -->|Yes| OK_LEGACY[Auth passed<br/>Global mode]
-    MATCH -->|No| DENY
-    LEGACY -->|Not set| OK_OPEN[Open mode<br/>Dev use]
+    LEGACY -->|Yes| OK_LEGACY[Auth passed<br/>+ deprecation warning<br/>removed in v1.0]
+    LEGACY -->|No| DENY
+
+    DEVOPEN -->|Yes| OK_OPEN[Open mode<br/>offline tutorial only]
+    DEVOPEN -->|No| DENY
 ```
+
+::: warning Key changes in v0.8
+- The v0.5-era path where unset `COMMHUB_AUTH_TOKEN` triggered open mode is **deleted**. The hub now refuses to start without `--dev-open` unless a valid utok_/ntok_ exists.
+- The master-token compat path **only allows `/api/*` read requests**; all writes are rejected.
+- This legacy path is fully removed in v1.0 (RFC-001 Phase 3).
+:::
 
 ### Password Security
 
-- Passwords stored using SHA-256 hashing
-- Minimum 6 characters
+- Passwords stored using SHA-256 hashing (planned upgrade to Argon2id — see below)
+- **Password strength**:
+  - User-chosen passwords (register / `anet passwd`): ≥ 8 chars + rejected against a top-1000 weak-password dictionary
+  - Bootstrap admin exception: ≥ 4 chars (so the quick-start `admin / anethub` default works) — public deployments must immediately rotate via `anet passwd`
 - Usernames support letters, numbers, underscores, and Chinese characters
 - Login failures don't reveal whether the username or password was wrong (prevents enumeration)
 
-::: info Improvement Planned
-Currently using SHA-256 hashing; planned upgrade to bcrypt for stronger brute-force resistance.
+::: info Planned (v0.9+)
+SHA-256 → Argon2id upgrade for stronger brute-force resistance.
 :::
 
 ## Authorization

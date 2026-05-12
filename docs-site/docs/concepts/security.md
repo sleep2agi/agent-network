@@ -67,7 +67,7 @@ const inputHash = hashToken(inputToken);
 const row = db.get("SELECT * FROM api_tokens WHERE token_hash = ?", inputHash);
 ```
 
-### Token 验证流程
+### Token 验证流程（v0.8）
 
 ```mermaid
 flowchart TD
@@ -76,30 +76,39 @@ flowchart TD
     HDR -->|有| TOKEN[Bearer token]
     HDR -->|无| QS{URL ?token=?}
     QS -->|有| TOKEN
-    QS -->|无| LEGACY{COMMHUB_AUTH_TOKEN?}
+    QS -->|无| DEVOPEN{--dev-open?}
 
     TOKEN --> RESOLVE[resolveToken<br/>查 api_tokens 表]
     RESOLVE --> FOUND{找到?}
     FOUND -->|是| CHECK_EXPIRE{过期?}
     CHECK_EXPIRE -->|否| OK[认证通过<br/>提取 user + network]
     CHECK_EXPIRE -->|是| DENY[401]
-    FOUND -->|否| LEGACY
+    FOUND -->|否| LEGACY{COMMHUB_AUTH_TOKEN<br/>set & 匹配?<br/>仅 /api/* 读类}
 
-    LEGACY -->|设置了| MATCH{匹配?}
-    MATCH -->|是| OK_LEGACY[认证通过<br/>全局模式]
-    MATCH -->|否| DENY
-    LEGACY -->|未设置| OK_OPEN[开放模式<br/>开发用]
+    LEGACY -->|是| OK_LEGACY[认证通过<br/>+ 打 deprecation warning<br/>v1.0 移除]
+    LEGACY -->|否| DENY
+
+    DEVOPEN -->|是| OK_OPEN[开放模式<br/>仅离线 tutorial 用]
+    DEVOPEN -->|否| DENY
 ```
+
+::: warning v0.8 关键变化
+- v0.5 时代 `COMMHUB_AUTH_TOKEN` 未设 → 自动 open mode 的路径**已删除**。现在 hub 不带 `--dev-open` 必须有 utok_/ntok_。
+- master token 兼容路径**只允许少量 `/api/*` 读请求**，写操作一律拒绝。
+- 这条 legacy 路径 v1.0 完全移除（RFC-001 阶段 3）。
+:::
 
 ### 密码安全
 
-- 密码使用 SHA-256 哈希存储
-- 密码最少 6 位
+- 密码使用 SHA-256 哈希存储（计划升级 Argon2id，详见下文）
+- **密码强度**：
+  - 用户自选密码（register / `anet passwd`）：≥ 8 字符 + 拒绝 top-1000 弱密码字典
+  - 首次 bootstrap admin 例外：≥ 4 字符即可（让快速上手 `admin / anethub` 默认成立）—— 公网部署必须立刻 `anet passwd` 改成强密码
 - 用户名支持字母、数字、下划线、中文
 - 登录失败不提示是用户名错还是密码错（防枚举）
 
-::: info 改进计划
-当前使用 SHA-256 哈希，计划升级为 bcrypt（更强的抗暴力破解能力）。
+::: info 计划中（v0.9+）
+SHA-256 → Argon2id 升级，提升抗暴力破解能力。
 :::
 
 ## 授权（Authorization）
