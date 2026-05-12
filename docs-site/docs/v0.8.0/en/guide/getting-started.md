@@ -161,7 +161,7 @@ anet node start remote-bot
 - `anet quickstart` — removed from the docs.
 - `codex-sdk` runtime end-to-end.
 - `claude-code-cli` runtime end-to-end.
-- `anet license` / `anet activate` — placeholder commands for a future paid tier.
+- `anet license` / `anet activate` — v0.6 legacy commands, **no longer needed after Apache 2.0 OSS** (Hub keeps the `licenses` table + 14-day trial check for backward-compat).
 - `anet network create` and cross-user network sharing — V3 multi-network code is in but not E2E regressed.
 - Maintainer-hosted demo site — v0.8 has switched to Apache 2.0 OSS + no SaaS hosting; only local / LAN deployment is supported.
 :::
