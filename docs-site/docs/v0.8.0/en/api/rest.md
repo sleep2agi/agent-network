@@ -49,7 +49,7 @@ curl -X POST http://localhost:9200/api/auth/register \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $COMMHUB_AUTH_TOKEN" \
   -d '{
-    "username": "vincent",
+    "username": "alice",
     "password": "mypassword",
     "email": "alice@example.com",
     "display_name": "Alice"
@@ -72,8 +72,8 @@ curl -X POST http://localhost:9200/api/auth/register \
   "ok": true,
   "user": {
     "user_id": "u_abc123",
-    "username": "vincent",
-    "display_name": "Vincent",
+    "username": "alice",
+    "display_name": "Alice",
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
@@ -95,7 +95,7 @@ curl -X POST http://localhost:9200/api/auth/login \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $COMMHUB_AUTH_TOKEN" \
   -d '{
-    "username": "vincent",
+    "username": "alice",
     "password": "mypassword"
   }'
 ```
@@ -107,8 +107,8 @@ curl -X POST http://localhost:9200/api/auth/login \
   "ok": true,
   "user": {
     "user_id": "u_abc123",
-    "username": "vincent",
-    "display_name": "Vincent",
+    "username": "alice",
+    "display_name": "Alice",
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
@@ -136,8 +136,8 @@ curl http://localhost:9200/api/auth/me \
   "ok": true,
   "user": {
     "user_id": "u_abc123",
-    "username": "vincent",
-    "display_name": "Vincent",
+    "username": "alice",
+    "display_name": "Alice",
     "role": "admin"
   }
 }
@@ -153,7 +153,7 @@ Update personal info.
 curl -X PUT http://localhost:9200/api/auth/me \
   -H "Authorization: Bearer utok_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"display_name": "Vincent Chen"}'
+  -d '{"display_name": "Alice Chen"}'
 ```
 
 ---

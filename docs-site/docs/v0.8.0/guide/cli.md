@@ -150,7 +150,7 @@ This machine — login then create a node:
 ::: tip 想自定义凭证（推荐公网部署）
 默认 `admin / anethub` 只适合本机快速上手。公网部署可以传 flag 直接设强密码：
 ```bash
-anet hub start --username vincent --password 'mypass2026!'
+anet hub start --username alice --password 'mypass2026!'
 ```
 注意：自定义密码必须 ≥ 8 位且不在 top-1000 弱密码字典里。默认凭证（首次启动）不受此强度限制 —— 但**必须**用 `anet passwd` 立刻改成强密码。
 :::

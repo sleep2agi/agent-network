@@ -92,7 +92,7 @@ Send a message to your bot on Telegram, and the agent will receive, process, and
 **Message format** (what the agent sees):
 
 ```xml
-<channel source="telegram" chat_id="123456" message_id="789" user="vincent" ts="1713000000">
+<channel source="telegram" chat_id="123456" message_id="789" user="alice" ts="1713000000">
 Write a quicksort algorithm
 </channel>
 ```

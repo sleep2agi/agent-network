@@ -404,7 +404,7 @@ Channel plugins enable agents to integrate with external communication platforms
 Channel message format:
 
 ```xml
-<channel source="telegram" chat_id="123" user="vincent">
+<channel source="telegram" chat_id="123" user="alice">
   User's message
 </channel>
 ```

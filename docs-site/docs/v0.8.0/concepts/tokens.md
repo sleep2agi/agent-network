@@ -28,7 +28,7 @@ anet login --username admin --password anethub
 
 hub 验账号密码 OK，发一个 `utok_xxxxxxxx...` 给你。
 
-> ℹ️ 首次 `anet hub start` 默认账户是 `admin / anethub`（快速上手）。**立刻用 `anet passwd` 改成你自己的强密码**。也可以 `anet hub start --username vincent --password mypass2026` 自定义。
+> ℹ️ 首次 `anet hub start` 默认账户是 `admin / anethub`（快速上手）。**立刻用 `anet passwd` 改成你自己的强密码**。也可以 `anet hub start --username alice --password mypass2026` 自定义。
 
 ### 存哪
 

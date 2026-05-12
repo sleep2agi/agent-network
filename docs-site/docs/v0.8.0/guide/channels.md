@@ -92,7 +92,7 @@ services:
 **消息格式**（Agent 看到的）：
 
 ```xml
-<channel source="telegram" chat_id="123456" message_id="789" user="vincent" ts="1713000000">
+<channel source="telegram" chat_id="123456" message_id="789" user="alice" ts="1713000000">
 写一个快排算法
 </channel>
 ```
@@ -120,7 +120,7 @@ services:
 
 ### 当前能用的替代方案
 
-- **微信群消息进 Hub**：用 [Vincent 自建的 WeChat 微信群入口](/community) 让人加群讨论，不接 Agent
+- **微信群消息进 Hub**：用 [维护者自建的 WeChat 微信群入口](/community) 让人加群讨论，不接 Agent
 - **飞书 webhook 进 Hub**：用 server 的 `feishu_reply` MCP tool + 飞书机器人 webhook URL，自己写一个 thin adapter（参考 `agent-network/src/node-server.ts` 里 Telegram 的写法）
 
 ### Roadmap

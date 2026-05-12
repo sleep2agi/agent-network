@@ -34,7 +34,7 @@ graph TB
         end
     end
 
-    U1[Vincent<br/>owner: dev, prod<br/>viewer: demo]
+    U1[Alice<br/>owner: dev, prod<br/>viewer: demo]
     U2[小明<br/>member: dev]
     U3[游客<br/>viewer: demo]
 
