@@ -1,5 +1,13 @@
 # 更新日志
 
+::: info 版本号体系说明
+本日志按时间倒序排列，**版本号经历过一次重新规划**：
+- **2026-05 起**：采用 v0.6 → v0.7 → v0.8.x 渐进发布，对应 `commhub-server` semver
+- **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
+- **当前 stable**：v0.8.1（2026-05-11，Apache 2.0 OSS 首发版本）
+- 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
+:::
+
 ## 2026-05-11 — **v0.8.1 补丁** Dashboard SSE-online 全局修补 ✅ stable
 
 **版本同步**（npm `latest` tag，git tag `v0.8.1`）：

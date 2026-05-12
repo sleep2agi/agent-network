@@ -156,7 +156,7 @@ sqlite3 ~/.commhub/commhub.db "DELETE FROM licenses WHERE expires_at < datetime(
 
 # Option B (legacy commands, no-op placeholders):
 anet license          # inspect
-anet activate <key>   # writes a new license row (experimental; the key is not validated)
+anet activate <key>   # v0.6 legacy command, writes a new license row (the key is not validated — placeholder only)
 
 # Option C (offline tutorial): start the hub with --dev-open to skip auth
 anet hub start --dev-open

@@ -1,5 +1,13 @@
 # Changelog
 
+::: info Versioning note
+This log runs reverse-chronologically. **The version scheme was reshuffled once**:
+- **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8.x releases, aligned with `commhub-server` semver.
+- **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
+- **Current stable**: v0.8.1 (2026-05-11, first Apache 2.0 OSS release).
+- Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
+:::
+
 ## 2026-05-11 — **v0.8.1 patch** Dashboard SSE-online global fix ✅ stable
 
 **Version sync** (npm `latest` tag, git tag `v0.8.1`):

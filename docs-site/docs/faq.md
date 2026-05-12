@@ -28,10 +28,10 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 - 仓库公开、源码可改
 - 商业模式 = 卖课 + 卖服务咨询，不依赖强制官方 SaaS
-- `anet license` / `anet activate` 是实验性 legacy 命令；如果自动 trial 过期，Hub 可能返回 `license_expired`，需要按 troubleshooting 处理或激活一个 `anet-...` key
+- `anet license` / `anet activate` 是 v0.6 legacy 命令，**OSS 后不再需要**；若命中 `license_expired`（Hub 后向兼容仍创建 14 天 trial），按 [troubleshooting](/troubleshooting) 直接清掉 `licenses` 表即可
 
-::: warning experimental
-文档不应把它描述成空操作：当前 server 会自动创建 14 天 trial，并在 `send_task` 时检查 `licenses.expires_at`。这个机制后续应清理或重新设计。
+::: info v0.6 license 路径计划清理
+当前 server 在 `send_task` 仍跑 `licenses.expires_at` 检查（V3 遗留代码），v0.9+ 计划整段移除。
 :::
 
 ### 4. 支持哪些 AI 模型？

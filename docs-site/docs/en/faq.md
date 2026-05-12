@@ -28,10 +28,10 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 
 - Public repo, modifiable source
 - Business model = courses + consulting, not a forced hosted SaaS
-- `anet license` / `anet activate` are experimental legacy commands. If the auto-created trial expires, the Hub can return `license_expired`; handle it via troubleshooting or activate an `anet-...` key.
+- `anet license` / `anet activate` are v0.6 legacy commands, **no longer needed after Apache 2.0 OSS**. If you hit `license_expired` (Hub still creates a 14-day trial for backward-compat), follow [troubleshooting](/en/troubleshooting) to clear the `licenses` table.
 
-::: warning experimental
-Do not describe this path as inert: the current server auto-creates a 14-day trial and checks `licenses.expires_at` inside `send_task`. This mechanism should be cleaned up or redesigned later.
+::: info v0.6 license path planned for removal
+The server still runs `licenses.expires_at` checks inside `send_task` (V3 legacy code). Removal scheduled for v0.9+.
 :::
 
 ### 4. Which AI models are supported?
