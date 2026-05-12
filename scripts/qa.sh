@@ -49,6 +49,7 @@ dockerrun() {
 L0_TESTS=(
   "password-dict:server/src/password-dict.test.ts"
   "auth-tokens:server/src/auth-tokens.test.ts"
+  "auth-validate:server/src/auth-validate.test.ts"
 )
 L1_TESTS=(
   "qa-hub-05-roundtrip"

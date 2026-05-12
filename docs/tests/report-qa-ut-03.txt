@@ -1,0 +1,65 @@
+Test: qa-ut-03-auth-validate (matrix UT-03)
+Date: 2026-05-12
+Layer: L0 unit (code view, server/src/auth.ts register() validation path)
+
+Result: PASS
+Runtime:
+  local: bun test ~290ms (server/, COMMHUB_DB=/tmp/qa-ut-03.db)
+  Docker: warm ~1s (oven/bun:1)
+
+Commands:
+  cd server && COMMHUB_DB=/tmp/qa-ut-03.db bun test src/auth-validate.test.ts
+  sg docker -c 'docker build -t anet-qa-ut-03 -f tests/qa-ut-03-auth-validate/Dockerfile .'
+  sg docker -c 'docker run --rm anet-qa-ut-03'
+
+23 assertions / 34 expect() calls covering:
+  username rules:
+    - empty / 1-char rejected (< 2)
+    - 2-char accepted
+    - 51-char rejected (> 50 max)
+    - space rejected (regex)
+    - '@' rejected (regex)
+    - CJK character accepted (e.g. "通信测试马" — pin 此功能不被新 regex 误删)
+    - duplicate username rejected
+  password length:
+    - empty rejected
+    - 7-char rejected (< 8 strict)
+    - 8-char accepted
+  weak-password dict (strict path):
+    - "password" / "passw0rd" / "iloveyou" / "password1" / "qwerty12"
+  case-insensitive dict:
+    - "PASSWORD" rejected
+    - "Password1" rejected
+    - (pins WEAK_PASSWORDS.has(p.toLowerCase()) — auth.ts L26)
+  strong passwords accepted:
+    - "Tr0ub4dor&3", "correct-horse-battery", "X9!kLm@PqVx", "MyDog'sName2026"
+  admin bootstrap contract:
+    - beforeAll seeds an admin so subsequent registers hit strict path
+    - then "abcd" (4 chars) rejected → proves strict path active
+
+Contracts pinned:
+
+1. validatePasswordStrength is private to auth.ts; the contract is the
+   user-visible register() return shape `{ok, error}`. UT-03 tests via
+   register() — that's also what SDKs see.
+
+2. First user gets a RELAXED rule (`min 4 chars, no dict`). Subsequent
+   users get full strict rules. test30 already covers this end-to-end;
+   UT-03 pins it in ms-budget so a refactor breaks the test fast.
+
+3. CJK username regex `[a-zA-Z0-9_\-一-鿿]+` works. This is the project's
+   "Chinese alias" feature — without UT-03, an unrelated regex tweak
+   could silently regress it.
+
+4. Dictionary lookup is case-insensitive (auth.ts L26 `.toLowerCase()`).
+   Attacker using PASSWORD / Password1 cannot bypass.
+
+Why this matters vs test30 step 3:
+  test30 covers 2 weak passwords end-to-end in 60s. UT-03 covers 14+
+  password variants + 8 username rules in <1s. A PR changing
+  validatePasswordStrength gets feedback before reviewer opens the diff.
+
+Resources:
+  - bun 1.x (oven/bun:1)
+  - COMMHUB_DB env routes schema bootstrap to throwaway file
+  - no network, no commhub process
