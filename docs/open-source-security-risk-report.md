@@ -4,19 +4,32 @@
 审计范围：当前工作区（对应远端 `github.com/sleep2agi/agent-network`）。  
 审计目标：评估项目开源发布、npm 发布、按文档部署时的安全风险，并给出修复优先级。
 
-> **⚠️ 当前状态（2026-05-12 更新）**
+> **⚠️ 当前状态（2026-05-13 更新）**
 >
-> 本报告中标记为阻断（P0）的项已在 v0.8.0 / v0.8.1 全部处理：
-> - ✅ master token (`COMMHUB_AUTH_TOKEN`) 软废弃 + admin utok_ bootstrap → [RFC-001](rfcs/RFC-001-deprecate-commhub-auth-token.md) Phase 2
-> - ✅ 密码强度 ≥ 8 + 弱密码字典；首次 `anet hub start` 自动 prompt admin
-> - ✅ install.sh / hub-only.sh 默认 localhost + 风险 banner
-> - ✅ README 加 SECURITY DISCLAIMER
-> - ✅ 生产部署指南补 TLS / 反向代理 / 备份 checklist
-> - ✅ 仓库 OSS-readiness scan 三个 repo 全过；dashboard 历史 PAT 泄漏已 nuke 历史
+> 本报告中标记为阻断（P0）的项已在 v0.8.0 / v0.8.1 全部处理（括号内是下方风险清单 ID 对应映射）：
+> - ✅ master token (`COMMHUB_AUTH_TOKEN`) 软废弃 + admin utok_ bootstrap → [RFC-001](rfcs/RFC-001-deprecate-commhub-auth-token.md) Phase 2 — 关闭 **R3**（open mode）+ **R4**（tmux 默认开启）部分
+> - ✅ 密码强度 ≥ 8 + 弱密码字典；首次 `anet hub start` 自动 prompt admin — 关闭 **R5**（默认弱凭证）
+> - ✅ install.sh / hub-only.sh 默认 localhost + 风险 banner — 关闭 **R3** 默认 0.0.0.0 部分
+> - ✅ README 加 SECURITY DISCLAIMER — 关闭 **R5** 公网默认凭证警示部分
+> - ✅ 生产部署指南补 TLS / 反向代理 / 备份 checklist — 缓解 **R17**（HTTP 明文）
+> - ✅ 仓库 OSS-readiness scan 三个 repo 全过；dashboard 历史 PAT 泄漏已 nuke 历史 — 关闭 **R1**（git remote PAT）+ **R2**（.env 发布 token）
+> - ✅ MCP 读工具加 `canRead()` + user token network scope → 关闭 **R7**（MCP 读类无 scope）
+> - ✅ SSE key 改 `network_id:alias` + 成员校验 → 关闭 **R8**（SSE 跨网络泄漏）
+> - ✅ tmux 控制面默认关闭（需 `COMMHUB_ENABLE_TMUX=1`）→ 关闭 **R4** 主路径
+> - ✅ NOPASSWD sudo 从 `docs-site/docs/public/hub-only.sh` 移除（v0.8 hardening pass）→ 关闭 **R6**
 >
 > **项目已于 2026-05-11 正式开源**（Apache 2.0）。本报告保留为审计记录。
 >
-> 仍未关闭的：Argon2id 哈希迁移（v0.9+，task 跟踪在 GitHub Issues）；server `shell:true` spawn 审计（持续中）。
+> **仍未关闭**：
+> - **R9** Argon2id 哈希迁移（v0.9+，仍 SHA-256；task 跟踪在 GitHub Issues）
+> - **R10** token 可通过 URL query 传递（部分端点仍读 `?token=`，渐进收敛）
+> - **R11** 登录 token 默认无过期（TTL + revoke-all 排 v0.9）
+> - **R12** API token scope 字段未充分执行（resolve 仍不返回 scope）
+> - **R13** license 激活接口无鉴权（OSS 后 license 路径 v0.9+ 整段移除）
+> - **R16** 安装脚本 checksum/SLSA（v0.9 计划）
+> - **R18** PostgreSQL adapter 已搁置（v3-postgresql-design.md 标 deprecated），代码保留但不进生产
+> - **R20** docs-site 依赖 5 moderate（dependabot 持续 alert，影响范围限文档构建链）
+> - server `shell:true` spawn 审计（持续中）
 
 ## 结论摘要（历史，仅作审计记录）
 
