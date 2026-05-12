@@ -225,6 +225,6 @@ npm view @sleep2agi/agent-network versions --json
 
 ## Next Steps
 
-- [Key Concepts](/en/guide/basics) -- Understand V3 core concepts
-- [CLI Commands](/en/guide/cli) -- See all V3 commands
+- [Key Concepts](/en/guide/basics) -- Understand Agent Network core concepts
+- [CLI Commands](/en/guide/cli) -- See the full anet command reference
 - [FAQ](/en/faq) -- Frequently asked questions

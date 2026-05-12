@@ -225,6 +225,6 @@ npm view @sleep2agi/agent-network versions --json
 
 ## 下一步
 
-- [基本概念](/guide/basics) -- 了解 V3 的核心概念
-- [CLI 命令](/guide/cli) -- 查看所有 V3 命令
+- [基本概念](/guide/basics) -- 了解 Agent Network 核心概念
+- [CLI 命令](/guide/cli) -- 查看完整 anet 命令清单
 - [FAQ](/faq) -- 常见问题
