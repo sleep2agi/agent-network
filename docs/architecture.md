@@ -35,7 +35,7 @@ agent-node 支持三个 runtime：
 | Runtime | 说明 | 模型 |
 |------|------|------|
 | `claude-agent-sdk`（**默认**） | Anthropic Claude Agent SDK + Anthropic 兼容 API | Claude / MiniMax / DeepSeek / GLM / Kimi 等 |
-| `codex-sdk` | OpenAI Codex SDK | GPT-5 / GPT-5.4 |
+| `codex-sdk` | OpenAI Codex SDK | OpenAI Codex（最新 model id 查官方文档） |
 | `claude-code-cli` | Claude Code CLI（要 Claude Pro 订阅） | Claude（通过本地 CLI 调用） |
 
 Profile 中通过 `runtime` 字段选择。早期文档里的 `claude-code` / `codex` / `agent-sdk` 已重命名（doctor `anet doctor --fix` 自动迁移）。
@@ -44,7 +44,7 @@ Profile 中通过 `runtime` 字段选择。早期文档里的 `claude-code` / `c
 - **MiniMax M2.7** — 低成本自动化
 - **书生 Intern-S1-Pro** — 国产大模型
 - **Claude** — Anthropic（Sonnet/Opus）
-- **Codex GPT-5** — OpenAI
+- **OpenAI Codex** — codex-sdk runtime（model id 查 OpenAI 文档）
 
 ### 隔离策略
 
