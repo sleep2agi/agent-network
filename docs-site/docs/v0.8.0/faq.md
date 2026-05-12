@@ -93,7 +93,7 @@ lsof -i :9200
 # 或
 ss -tlnp | grep 9200
 
-# 换个端��
+# 换个端口
 anet hub start --port 9201
 
 # 或停掉占用的进程
