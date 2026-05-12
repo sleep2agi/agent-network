@@ -536,13 +536,15 @@ HTML 内容作为模板字符串内嵌到 server 代码中（或从 `server/dash
 </html>
 ```
 
-### 不做的事
+### 原设计声明"不做的事"（v0.8 阶段实际已全部超越）
 
-- 不做用户认证（复用 COMMHUB_AUTH_TOKEN，URL 带 token 参数）
-- 不做 session 管理（只读展示 + 发任务）
-- 不做历史查询（只显示最近 100 条）
-- 不做移动端适配（桌面浏览器即可）
+> **更新（2026-05-12 v0.8.1 对齐）**：以下条目是 V2 早期写设计文档时的取舍声明，但 Dashboard 在 v0.6 ~ v0.8.1 已经完整建成，下面这些"不做"全部反过来了。最新 Dashboard 行为见 [anet.sh/guide/dashboard](https://anet.sh/guide/dashboard)。
+
+- ~~不做用户认证（复用 COMMHUB_AUTH_TOKEN，URL 带 token 参数）~~ → **已做**：浏览器 cookie 透传 + utok_ 鉴权，COMMHUB_AUTH_TOKEN 软废弃
+- ~~不做 session 管理（只读展示 + 发任务）~~ → **已做**：完整任务面板 + ChatPanel + 节点详情
+- ~~不做历史查询（只显示最近 100 条）~~ → **已做**：tasks/messages/audit-log 三类查询
+- ~~不做移动端适配（桌面浏览器即可）~~ → **已做**：N站马 polish loop 中加了 mobile audit（banner 让位 hamburger / UserBar 图标化）
 
 ### 优先级
 
-Dashboard 是锦上添花，不阻塞核心功能。建议在 server/client/CLI 稳定后再实现。
+Dashboard 已成为 v0.8 主线功能（package `@sleep2agi/agent-network-dashboard@0.4.2` stable / `0.4.5-preview.1` preview channel）。
