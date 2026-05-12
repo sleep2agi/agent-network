@@ -118,7 +118,7 @@ Write a quicksort algorithm
 
 WeChat / Feishu integrations live in **external plugins** (not in `@sleep2agi/commhub-server`):
 
-- `mcp__wechat__wechat_reply` / `mcp__wechat__wechat_reply_image` — Vincent's self-hosted WeChat ClawBot plugin
+- `mcp__wechat__wechat_reply` / `mcp__wechat__wechat_reply_image` — maintainer's self-hosted WeChat ClawBot plugin
 - `mcp__feishu__feishu_reply` / `mcp__feishu__feishu_reply_image` — Feishu Bot plugin
 
 These plugins talk to ClawBot / Feishu Bot **directly**, not via CommHub Server. **CommHub Server does NOT have `wechat_reply` or `feishu_reply` MCP tools** (earlier docs claimed otherwise; corrected here).

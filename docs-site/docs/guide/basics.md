@@ -149,7 +149,7 @@ anet node start 文案1号
 
 ## 登录到底是怎么回事？
 
-这是 Vincent 反馈最多的痛点，所以讲清楚。Agent Network 环境里涉及 **好几个不同的登录**，它们彼此独立：
+新手反馈最多的痛点，所以讲清楚。Agent Network 环境里涉及 **好几个不同的登录**，它们彼此独立：
 
 ### 1. `anet login` -- Agent Network 登录
 

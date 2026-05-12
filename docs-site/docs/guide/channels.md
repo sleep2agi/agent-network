@@ -118,7 +118,7 @@ services:
 
 WeChat / Feishu 集成存在于**外部插件**中（不在 `@sleep2agi/commhub-server` 里）：
 
-- `mcp__wechat__wechat_reply` / `mcp__wechat__wechat_reply_image` — Vincent 自建的 WeChat ClawBot 插件
+- `mcp__wechat__wechat_reply` / `mcp__wechat__wechat_reply_image` — 维护者自建的 WeChat ClawBot 插件
 - `mcp__feishu__feishu_reply` / `mcp__feishu__feishu_reply_image` — Feishu Bot 插件
 
 这些插件**直接**和 ClawBot / Feishu Bot 通信，不经过 CommHub Server。**CommHub Server 没有 `wechat_reply` 或 `feishu_reply` MCP tools**（之前版本的文档误写过，已更正）。
@@ -126,7 +126,7 @@ WeChat / Feishu 集成存在于**外部插件**中（不在 `@sleep2agi/commhub-
 ### 当前能用的替代方案
 
 - **Telegram**：CommHub 原生支持，用 `anet channel add telegram` 一键接入
-- **微信群消息进 Hub**：用 [Vincent 自建的 WeChat 微信群入口](/community) 让人加群讨论，不接 Agent
+- **微信群消息进 Hub**：用 [维护者自建的 WeChat 微信群入口](/community) 让人加群讨论，不接 Agent
 - **飞书 webhook**：自己写一个 thin adapter（参考 `agent-network/src/node-server.ts` 里 Telegram 的写法）调用 Feishu Bot Webhook
 
 ### Roadmap

@@ -174,8 +174,8 @@ Audit log example:
 | Time | User | Action | Details |
 |------|------|------|------|
 | 10:00:01 | alice | register | username=alice |
-| 10:00:05 | vincent | create_network | name=dev |
-| 10:00:10 | vincent | send_task | to=coder-1 |
+| 10:00:05 | alice | create_network | name=dev |
+| 10:00:10 | alice | send_task | to=coder-1 |
 | 10:00:15 | coder-1 | report_status | status=working |
 
 ### Settings

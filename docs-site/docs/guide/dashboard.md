@@ -174,8 +174,8 @@ Admin 面板仅对 role=admin 的用户可见。
 | 时间 | 用户 | 操作 | 详情 |
 |------|------|------|------|
 | 10:00:01 | alice | register | username=alice |
-| 10:00:05 | vincent | create_network | name=dev |
-| 10:00:10 | vincent | send_task | to=代码1号 |
+| 10:00:05 | alice | create_network | name=dev |
+| 10:00:10 | alice | send_task | to=代码1号 |
 | 10:00:15 | 代码1号 | report_status | status=working |
 
 ### Settings（设置）
