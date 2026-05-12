@@ -114,7 +114,15 @@ const agent = new Agent({
 
 ## 3. CLI 命令详细设计
 
-### `anet server`
+> **命名约定升级（v0.6+）**：
+> - `anet server` → **`anet hub start`** （这里下面整段保留 V2 命名做历史参考）
+> - `anet setup` / `anet run` 大部分语义已合并到 `anet init` + `anet login` + `anet node create / start`
+> - `--token` 参数 → v0.8 起 `--username` / `--password` + 自动 bootstrap admin
+> - `COMMHUB_AUTH_TOKEN` env → v0.8 软废弃（[RFC-001](rfcs/RFC-001-deprecate-commhub-auth-token.md) Phase 2）
+>
+> 最新命令清单见 [anet.sh/guide/cli](https://anet.sh/guide/cli)。
+
+### `anet server`（V2 命名 → 现 `anet hub start`）
 
 启动 CommHub 通信中枢。
 
