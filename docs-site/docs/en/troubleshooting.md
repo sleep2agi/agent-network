@@ -164,6 +164,65 @@ anet hub start --dev-open
 
 ---
 
+### `password too weak` / `password too short` -- Password strength (v0.8)
+
+```
+Error: password too short (min 8 chars)
+Error: password is in the weak-password dictionary
+```
+
+**Cause**: From v0.8, `anet passwd` / `register` / `anet hub admin reset-user` all enforce:
+- length ≥ 8 characters
+- not in the top-1000 weak-password dictionary ("password", "12345678", "qwerty123", etc.)
+
+**Exception**: first `anet hub start` prompt for admin allows ≥ 4 chars (so default `admin / anethub` works).
+
+**Fix**:
+
+```bash
+# Generate a strong 16-char password
+openssl rand -base64 16
+
+# Or with pwgen
+pwgen -s 16 1
+```
+
+::: warning Production deployments
+For any `--host 0.0.0.0` / public deployment, change the default `anethub` **immediately** after first admin bootstrap:
+```bash
+anet login --username admin --password anethub
+anet passwd                    # rotate to a strong password
+```
+:::
+
+---
+
+### `set up admin account` repeating prompt (v0.8)
+
+The first `anet hub start` set admin, but the second start still prompts to set it up again?
+
+**Cause**: An early v0.8.0 had this bug; fixed in v0.8.0 stable. If you still hit it, the SQLite db has no admin user row.
+
+**Fix**:
+
+```bash
+# Accept the defaults
+anet hub start
+# Prompt: 'Set up admin account (default: admin / anethub):' → press Enter
+
+# Or inspect the db
+sqlite3 ~/.commhub/commhub.db "SELECT username, role FROM users"
+```
+
+If there's no admin row at all, re-bootstrap:
+
+```bash
+anet hub start                  # auto-creates admin / anethub
+anet login --username admin --password anethub
+```
+
+---
+
 ### `rate_limit_exceeded` -- Rate Limited
 
 ```

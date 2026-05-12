@@ -163,6 +163,65 @@ anet hub start --dev-open
 
 ---
 
+### `password too weak` / `password too short` -- 密码强度不达标（v0.8）
+
+```
+Error: password too short (min 8 chars)
+Error: password is in the weak-password dictionary
+```
+
+**原因**：v0.8 起 `anet passwd` / `register` / `anet hub admin reset-user` 都强制：
+- 长度 ≥ 8 字符
+- 不在 top-1000 弱密码字典里（"password", "12345678", "qwerty123" 等）
+
+**例外**：首次 `anet hub start` 提示设置 admin 时允许 ≥ 4 字符（让默认 `admin / anethub` 能成立）。
+
+**解决**：
+
+```bash
+# 随机生成一个 16 字符强密码
+openssl rand -base64 16
+
+# 或用 pwgen
+pwgen -s 16 1
+```
+
+::: warning 生产部署
+任何 `--host 0.0.0.0` 公网部署，首次 admin 设默认 `anethub` 之后**立刻**改强密码：
+```bash
+anet login --username admin --password anethub
+anet passwd                    # 改成强密码
+```
+:::
+
+---
+
+### `set up admin account` 反复 prompt（v0.8）
+
+第一次 `anet hub start` 设了 admin 之后，第二次启动还反复让我设？
+
+**原因**：v0.8.0 早期有过这个 bug，已在 v0.8.0 stable 修掉。如果还遇到说明 SQLite db 里没有 admin user 记录。
+
+**解决**：
+
+```bash
+# 直接走默认 admin / anethub
+anet hub start
+# 看到 'Set up admin account (default: admin / anethub):' → 回车
+
+# 或检查 db
+sqlite3 ~/.commhub/commhub.db "SELECT username, role FROM users"
+```
+
+如果上一步 db 里完全没有 admin 记录，重新 bootstrap：
+
+```bash
+anet hub start                  # 自动建 admin / anethub
+anet login --username admin --password anethub
+```
+
+---
+
 ### `rate_limit_exceeded` -- 速率限制
 
 ```
