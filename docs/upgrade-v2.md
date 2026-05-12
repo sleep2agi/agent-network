@@ -5,7 +5,7 @@
 > 当前 stable 已是 **v0.8.2**（agent-network 2.1.7 / commhub-server 0.8.0 / agent-node 2.3.0 / dashboard 0.4.2，2026-05-12 通过 npm `latest` tag 发布）。
 > 
 > **新用户请走当前快速安装路径**：
-> - 公开站：https://anet.sh/guide/installation
+> - 公开站：https://anet.sh/guide/getting-started（或 https://anet.sh/guide/one-shot-install 一键脚本）
 > - 仓库内：[../README.md](../README.md) → `npm i -g @sleep2agi/agent-network@latest`
 > - 升级指南：[../docs-site/docs/guide/upgrade.md](../docs-site/docs/guide/upgrade.md)
 > 
