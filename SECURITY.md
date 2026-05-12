@@ -1,6 +1,6 @@
 # Security Policy
 
-> **Status (2026-05-12):** Agent Network is at **v0.8.1 stable** (Apache 2.0, [released 2026-05-11](https://github.com/sleep2agi/agent-network/releases)).
+> **Status (2026-05-12):** Agent Network is at **v0.8.2 stable** (Apache 2.0, shipped 2026-05-12 via npm `latest` tag; project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)).
 > The full open-source security audit is at [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md).
 > All P0 items from that report were addressed in **v0.8.0 / v0.8.1**. Remaining roadmap items
 > (Argon2id, signed releases, etc.) are tracked in the [Hardening Roadmap](#hardening-roadmap) below.
@@ -35,7 +35,7 @@ Only the latest minor version receives security updates.
 | `@sleep2agi/agent-node` | latest 2.x |
 | `@sleep2agi/agent-network-dashboard` | latest 0.x |
 
-## Known Risk Surface (v0.8.1 stable)
+## Known Risk Surface (v0.8.2 stable)
 
 If you self-host on the public internet, read [**`/deploy/production`**](https://anet.sh/deploy/production)
 before opening firewall ports. The headline items:
