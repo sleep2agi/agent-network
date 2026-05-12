@@ -51,7 +51,7 @@ CLI flags:
 |---|---|---|---|
 | `claude-agent-sdk` | [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) | verified | Anthropic-compatible API; works with MiniMax, DeepSeek, GLM, Kimi, Anthropic, OpenRouter, or custom endpoints |
 | `codex-sdk` | [@openai/codex-sdk](https://www.npmjs.com/package/@openai/codex-sdk) | unverified end-to-end | unit tests pass, no full E2E with real codex auth |
-| `claude-code-cli` | local `claude` CLI | unverified end-to-end | runs locally for Claude Pro subscribers |
+| `claude-code-cli` | local `claude` CLI | unverified end-to-end | runs locally for Claude Pro subscribers (v0.8.2 fixed the session-resume default-loss bug; see [changelog](https://anet.sh/en/changelog)) |
 | `http-api` | OpenAI/Anthropic-compatible HTTP | experimental | reads `ANTHROPIC_*`, `OPENAI_*`, or `MINIMAX_CODING_API_KEY` environment variables |
 
 Runtimes are loaded lazily — picking one doesn't pull the others' dependencies. `claude-code-cli` adds zero extra SDK weight.
