@@ -121,9 +121,11 @@ delivered → expired (5min watchdog)
 delivered/acked/running → reassign → delivered (new agent)
 ```
 
-## PostgreSQL (experimental)
+## PostgreSQL (community extension point — not on the maintained roadmap)
 
-Set `DATABASE_URL` to switch to PostgreSQL — the SQL layer auto-translates SQLite-isms (datetime, parameter placeholders) so application code is unchanged. Requires `bun add pg`. PostgreSQL remains experimental.
+> v0.8+ product direction is **SQLite only** (see [docs/v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)). The PostgreSQL adapter interface is preserved as a community extension point — no E2E coverage on the current stable line; **not recommended for mainline production**.
+
+Set `DATABASE_URL` to switch to PostgreSQL — the SQL layer auto-translates SQLite-isms (datetime, parameter placeholders) so application code is unchanged. Requires `bun add pg`.
 
 ```bash
 DATABASE_URL=postgres://user:pass@host:5432/commhub bunx @sleep2agi/commhub-server
