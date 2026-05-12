@@ -396,5 +396,5 @@ anet node create my-agent --max-budget 0.1
 - [Docker deployment](/en/deploy/docker) — containerization best practices
 
 ::: warning Current state
-v0.8 password hashing is still SHA-256. **Argon2id migration is planned for v0.9+** ([issue tracker](https://github.com/sleep2agi/agent-network/issues)). Production environments must pair this with: strong passwords + TLS + firewall + regular backups.
+v0.8 password hashing is still SHA-256. **Argon2id migration is planned for v0.9+** (search [open issues: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id); if no tracking issue yet, please open one). Production environments must pair this with: strong passwords + TLS + firewall + regular backups.
 :::

@@ -396,5 +396,5 @@ anet node create my-agent --max-budget 0.1
 - [Docker 部署](/deploy/docker) — 容器化最佳实践
 
 ::: warning 当前阶段
-v0.8 密码哈希仍是 SHA-256。**Argon2id 迁移计划在 v0.9+**（[issue 跟踪](https://github.com/sleep2agi/agent-network/issues)）。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
+v0.8 密码哈希仍是 SHA-256。**Argon2id 迁移计划在 v0.9+**（搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)；如果还没 tracking issue，欢迎开一个）。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
 :::
