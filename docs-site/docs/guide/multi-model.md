@@ -151,6 +151,54 @@ ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 | 预算有限 | MiniMax + DeepSeek 混搭 | 两个都极便宜 |
 | 全能（不差钱） | Claude Opus 4 | 什么都行 |
 
+## 成本优化策略
+
+### 策略 1：分级路由
+
+把任务按复杂度分发到不同模型，最大化成本效益：
+
+```
+复杂任务 (10%) → Claude Opus 4   ($15/M tokens)
+中等任务 (30%) → Codex (codex-sdk) ($5/M tokens)
+简单任务 (60%) → MiniMax M2.7    ($0.3/M tokens)
+```
+
+### 策略 2：预算控制
+
+agent-node 支持 `--max-budget <usd>` 每任务预算上限。`anet node create` 没把它当 flag 透出来 —— 写在 `config.json` 的 `flags.maxBudgetUsd`：
+
+```jsonc
+// ~/.anet/nodes/architect/config.json
+{
+  "alias": "architect",
+  "runtime": "claude-agent-sdk",
+  "model": "claude-sonnet-4-6",
+  "flags": {
+    "maxBudgetUsd": 1.0          // 每任务最多花 $1
+  }
+}
+```
+
+或者手动启动 agent-node 时直接传：
+
+```bash
+agent-node --max-budget 1.0 --alias architect --runtime claude-agent-sdk --hub http://127.0.0.1:9200
+```
+
+### 策略 3：批量低成本
+
+重复性任务一次起多个低成本 agent 并行处理：
+
+```bash
+# 起 5 个 MiniMax agent 批量翻译
+for i in 1 2 3 4 5; do
+  ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+  ANTHROPIC_AUTH_TOKEN=$MINIMAX_KEY \
+  anet node create "translator-${i}" --runtime claude-agent-sdk --model MiniMax-M2.7
+  anet node start "translator-${i}" &
+done
+```
+
 ## 下一步
 
 **直接用**：

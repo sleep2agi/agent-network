@@ -191,14 +191,24 @@ Simple tasks (60%)  → MiniMax ($0.3/M tokens)
 
 ### Strategy 2: Budget Controls
 
-Set `--max-budget` on each agent to limit per-task spend:
+agent-node supports `--max-budget <usd>` per task. It's not surfaced as an `anet node create` flag — set it via `config.json` `flags.maxBudgetUsd`:
+
+```jsonc
+// ~/.anet/nodes/architect/config.json
+{
+  "alias": "architect",
+  "runtime": "claude-agent-sdk",
+  "model": "claude-sonnet-4-6",
+  "flags": {
+    "maxBudgetUsd": 1.0          // cap at $1 per task
+  }
+}
+```
+
+Or pass it directly when launching agent-node manually:
 
 ```bash
-# Complex task agent, $1.00 budget
-anet node create architect --max-budget 1.0
-
-# Simple task agent, $0.01 budget
-anet node create translator --max-budget 0.01
+agent-node --max-budget 1.0 --alias architect --runtime claude-agent-sdk --hub http://127.0.0.1:9200
 ```
 
 ### Strategy 3: Batch with Low-Cost Models
