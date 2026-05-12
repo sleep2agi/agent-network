@@ -204,7 +204,7 @@ Each user has an independent role in each network (owner / admin / member / view
 
 The two layers stack. For example: a system admin can see global data, but if they are a viewer in a specific network, they cannot send tasks in that network.
 
-## Quota Limits (v0.6 design — currently **not enforced**)
+## Quota Limits (v0.6 design — currently **not enforced**) {#quota-limits-v0-6-design--currently-not-enforced}
 
 ::: warning v0.8 actual behavior
 v0.6 designed a Free / Pro / Admin three-tier quota system (table below), but **after the Apache 2.0 OSS pivot, plan tiers are no longer enforced**. In v0.8.2:

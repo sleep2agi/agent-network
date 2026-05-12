@@ -381,25 +381,26 @@ anet network delete my-network
 
 ---
 
-### `quota exceeded`
+### `quota exceeded` (legacy behavior)
 
 ```json
 {"ok": false, "error": "quota exceeded: max 2 networks for free plan"}
 ```
 
-**Cause**: Free plan quota exhausted.
+::: info Plan quotas are not enforced from v0.8 onward
+v0.6 designed a Free / Pro / Admin three-tier plan quota system, but **after the Apache 2.0 OSS pivot, plan tiers are no longer enforced** (`users.plan` is treated as admin / unlimited; `anet network create` / `anet node create` do not run plan-quota checks). See [Networks — Quota Limits](/en/concepts/networks#quota-limits-v0-6-design--currently-not-enforced).
+:::
+
+**Trigger condition** (rare): your hub is running v0.6-compat code paths and your SQLite `users.plan` is still the old `free` value.
 
 **Solution**:
 
 ```bash
-# Check current plan
-anet license
+# Option A (recommended): set plan to admin so the hub no longer gates by quota
+sqlite3 ~/.commhub/commhub.db "UPDATE users SET plan = 'admin' WHERE plan = 'free';"
 
-# Delete unneeded networks
+# Option B: just delete the extra network (if you only have a network count issue, no plan upgrade needed)
 anet network delete old-network
-
-# Or upgrade to Pro
-anet activate <license-key>
 ```
 
 ---
