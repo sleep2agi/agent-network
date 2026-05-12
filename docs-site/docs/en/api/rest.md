@@ -59,7 +59,7 @@ Register a new user. The first user registered automatically becomes admin.
 curl -X POST http://localhost:9200/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "vincent",
+    "username": "alice",
     "password": "mypassword2026",
     "email": "alice@example.com",
     "display_name": "Alice"
@@ -82,7 +82,7 @@ curl -X POST http://localhost:9200/api/auth/register \
   "ok": true,
   "user": {
     "user_id": "u_abc123",
-    "username": "vincent",
+    "username": "alice",
     "display_name": "Alice",
     "role": "admin"
   },
@@ -108,7 +108,7 @@ User login.
 curl -X POST http://localhost:9200/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "vincent",
+    "username": "alice",
     "password": "mypassword2026"
   }'
 ```
@@ -120,7 +120,7 @@ curl -X POST http://localhost:9200/api/auth/login \
   "ok": true,
   "user": {
     "user_id": "u_abc123",
-    "username": "vincent",
+    "username": "alice",
     "display_name": "Alice",
     "role": "admin"
   },
@@ -152,7 +152,7 @@ curl http://localhost:9200/api/auth/me \
   "ok": true,
   "user": {
     "user_id": "u_abc123",
-    "username": "vincent",
+    "username": "alice",
     "display_name": "Alice",
     "role": "admin"
   }
