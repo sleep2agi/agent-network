@@ -23,7 +23,11 @@
 > - 公开网络自动加入 + 审批流
 > - **Argon2id 密码哈希**（当前 SHA-256；v0.9+ 计划迁移）
 > - RFC-001 Phase 3：完全移除 COMMHUB_AUTH_TOKEN 代码路径
-> 
+>
+> ⛔ 已废弃方向（本文下方仍有相关引用，请忽略）：
+> - `anet quickstart` 一键命令 — 已从 CLI 移除，等价流程见 [anet.sh/guide/getting-started](https://anet.sh/guide/getting-started)
+> - "官方免费 hub" 托管 — 项目方向已转为 Apache 2.0 + 自部署，不做 SaaS 托管
+>
 > 注意：本文档中描述的权限矩阵、配额限制、公开网络等功能为**设计目标**，
 > 具体实现进度以上方状态为准。当前 stable 行为以代码 + anet.sh 文档为准。
 
