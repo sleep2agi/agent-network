@@ -319,7 +319,7 @@ CREATE TABLE inbox (
 
 **Hands-on**:
 - 5 ways to send a task: [CLI](/en/guide/cli) `anet task send` / `commhub_send_task` MCP tool / Dashboard ChatPanel / REST `/api/tasks` / SSE push
-- View the task flow: [Dashboard — Tasks panel](/en/guide/dashboard#tasks-task-management)
+- View the task flow: [Dashboard — Tasks panel](/en/guide/dashboard#tasks)
 - Retry / cancel failed tasks: click the buttons in the Dashboard
 
 **Dig deeper**:
