@@ -45,11 +45,11 @@ services:
     environment:
       - ALIAS=指挥室
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.5
+      - MODEL=${MODEL:-<codex-model-id>}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_ALLOW_USER=${TELEGRAM_ALLOW_USER:-7612221352}
+      - TELEGRAM_ALLOW_USER=${TELEGRAM_ALLOW_USER}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
       - SYSTEM_PROMPT=你是指挥室，负责接收 Telegram 消息并分配任务。代码类任务（读写文件/命令/代码）派给 代码1号-代码5号；文本类任务（翻译/分析/写作）派给 文案1号-文案5号。用 commhub_send_task 派发，用 commhub_get_all_status 查在线状态。
 
@@ -59,7 +59,7 @@ services:
     environment:
       - ALIAS=代码1号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.5
+      - MODEL=${MODEL:-<codex-model-id>}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
@@ -69,7 +69,7 @@ services:
     environment:
       - ALIAS=代码2号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.5
+      - MODEL=${MODEL:-<codex-model-id>}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
@@ -79,7 +79,7 @@ services:
     environment:
       - ALIAS=代码3号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.5
+      - MODEL=${MODEL:-<codex-model-id>}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
@@ -89,7 +89,7 @@ services:
     environment:
       - ALIAS=代码4号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.5
+      - MODEL=${MODEL:-<codex-model-id>}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
@@ -99,7 +99,7 @@ services:
     environment:
       - ALIAS=代码5号
       - RUNTIME=codex-sdk
-      - MODEL=gpt-5.5
+      - MODEL=${MODEL:-<codex-model-id>}
       - COMMHUB_URL=http://server:9200
       - COMMHUB_TOKEN=${COMMHUB_AUTH_TOKEN:-squad-token}
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
