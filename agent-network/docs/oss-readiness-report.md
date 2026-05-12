@@ -59,11 +59,11 @@ The current tree does not contain a hardcoded real MiniMax/GitHub/OpenAI token i
 
 ## P1 Risks
 
-1. **Internal IP and Vincent-specific comments remain in source**
-   - `agent-network/bin/cli.ts` contains `http://47.77.216.1:9200` in stale hub migration logic.
-   - `agent-network/bin/cli.ts` contains comments mentioning `Vincent`.
+1. **Internal IP and maintainer-specific comments remain in source**
+   - `agent-network/bin/cli.ts` contains a concrete public IP `http://<redacted-ip>:9200` (specific value omitted from this audit; see source file:line) in stale hub migration logic.
+   - `agent-network/bin/cli.ts` contains comments referencing the maintainer's first name (specific value omitted from this audit).
    - Risk: not a credential, but it exposes internal operational history and a real host reference.
-   - Recommendation: replace the concrete IP with a generic migration sentinel or remove once users have migrated; remove person-specific comments.
+   - Recommendation: replace the concrete IP with a generic migration sentinel or remove once users have migrated; remove maintainer-specific comments.
 
 2. **Personal path examples remain in source comments**
    - `agent-network/src/node-server.ts:41`
