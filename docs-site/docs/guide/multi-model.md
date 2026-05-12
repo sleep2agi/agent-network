@@ -165,10 +165,12 @@ ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 把任务按复杂度分发到不同模型，最大化成本效益：
 
 ```
-复杂任务 (10%) → Claude Opus     ($15/M tokens 量级)
-中等任务 (30%) → Codex (codex-sdk) ($5/M tokens)
-简单任务 (60%) → MiniMax M2.7    ($0.3/M tokens)
+复杂任务 (10%) → Claude Opus     (~$15/M tokens 量级)
+中等任务 (30%) → Codex (codex-sdk) (~$5/M tokens)
+简单任务 (60%) → MiniMax M2.7    (~$0.3/M tokens)
 ```
+
+> 上面数字是 2026-05 时点的量级估算；各家定价会调整，做预算前请查 provider 官方价格表。
 
 ### 策略 2：预算控制
 
