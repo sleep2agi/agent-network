@@ -204,11 +204,18 @@ Agent Network 有两层权限：
 
 两层权限叠加。例如：系统 admin 可以看全局数据，但在某个网络中如果是 viewer，则不能在该网络中发任务。
 
-## 配额限制
+## 配额限制（v0.6 设计目标 — 当前**未启用**）
 
-不同 Plan 有不同的配额：
+::: warning v0.8 实际行为
+v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），但 **Apache 2.0 OSS 转向后已不启用 plan 区分**。当前 v0.8.1：
+- 所有 `users.plan` 字段统一当 admin / unlimited 处理
+- `anet network create` / `anet node create` 不做 plan 配额检查
+- `anet activate <key>` 是 v0.6 legacy 命令，OSS 后**不再用作"升级"路径**
 
-| 配额项 | Free (试用) | Pro (付费) | Admin |
+下表保留为 v0.9+ 自部署管理员**手动设置软配额**的设计参考（仍需实现）。
+:::
+
+| 配额项 | Free（v0.6 设计） | Pro（v0.6 设计） | Admin |
 |--------|:----------:|:---------:|:-----:|
 | 创建网络数 | 2 | 10 | 无限 |
 | 加入网络数 | 3 | 20 | 无限 |
@@ -216,14 +223,8 @@ Agent Network 有两层权限：
 | 每天任务数 | 100 | 5000 | 无限 |
 | Token 数 | 3 | 20 | 无限 |
 | 网络最大成员 | 5 | 50 | 无限 |
-| 试用期 | 14 天 | 无限 | 无限 |
 
-超配额提示：
-
-```bash
-anet network create third-net
-# → 错误: Free plan 最多创建 2 个网络。升级: anet activate <key>
-```
+OSS 自部署场景下，硬件 / 数据库性能上限才是实际配额（SQLite 单机 100+ agent 验证过，多于此请 issue 讨论扩展方案）。
 
 ## Server 端强制隔离
 

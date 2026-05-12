@@ -204,11 +204,18 @@ Each user has an independent role in each network (owner / admin / member / view
 
 The two layers stack. For example: a system admin can see global data, but if they are a viewer in a specific network, they cannot send tasks in that network.
 
-## Quota Limits
+## Quota Limits (v0.6 design — currently **not enforced**)
 
-Different plans have different quotas:
+::: warning v0.8 actual behavior
+v0.6 designed a Free / Pro / Admin three-tier quota system (table below), but **after the Apache 2.0 OSS pivot, plan tiers are no longer enforced**. In v0.8.1:
+- All `users.plan` field values are treated as admin / unlimited
+- `anet network create` / `anet node create` do not run plan-quota checks
+- `anet activate <key>` is a v0.6 legacy command, **no longer the "upgrade" path** after OSS
 
-| Quota | Free (Trial) | Pro (Paid) | Admin |
+The table below is kept as a design reference for **manual soft quotas** in v0.9+ self-hosted admin setups (implementation pending).
+:::
+
+| Quota | Free (v0.6 design) | Pro (v0.6 design) | Admin |
 |--------|:----------:|:---------:|:-----:|
 | Networks created | 2 | 10 | Unlimited |
 | Networks joined | 3 | 20 | Unlimited |
@@ -216,14 +223,8 @@ Different plans have different quotas:
 | Tasks per day | 100 | 5000 | Unlimited |
 | Tokens | 3 | 20 | Unlimited |
 | Max network members | 5 | 50 | Unlimited |
-| Trial period | 14 days | Unlimited | Unlimited |
 
-Over-quota prompt:
-
-```bash
-anet network create third-net
-# → Error: Free plan allows a maximum of 2 networks. Upgrade: anet activate <key>
-```
+In OSS self-hosted deployments, hardware / database limits are the actual quota (SQLite single-machine validated past 100+ agents — beyond that, open an issue to discuss scaling options).
 
 ## Server-Side Enforced Isolation
 
