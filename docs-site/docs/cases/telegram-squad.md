@@ -124,6 +124,14 @@ docker compose up -d --build
 3. 重启：`docker compose up -d`
 4. 在 Telegram 给 Bot 发消息，指挥室会接收并分配
 
+::: tip 非 Docker 部署？用 v0.8.2 一键绑定
+如果你不跑 Docker Compose，而是用 `anet node create / start` 起的单 node，可以直接：
+```bash
+anet channel add telegram --bot-token <BOT_TOKEN> --allow-user <TG_USER_ID>
+```
+自动生成节点的 `channels/telegram` 配置，无需手编 `.env`。详见 [Channel 概念 — Telegram](/guide/channels#telegram-channel)。
+:::
+
 ## 下一步
 
 **继续看 case**：
