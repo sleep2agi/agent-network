@@ -85,9 +85,9 @@ anet node create my-agent --runtime codex-sdk --model <codex-model-id>
 | Runtime | AI Model | Needs |
 |---------|----------|-------|
 | `codex-sdk` | Codex | `codex auth login` |
-| `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi | API key in env or via `anet node create` prompts |
+| `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo | API key in env or via `anet node create` prompts |
 | `claude-code-cli` | Claude Code CLI | Claude Code installed + `claude auth login` |
-| `http-api` | OpenAI/Anthropic-compatible HTTP | API key in env |
+| `http-api` *(legacy, still in CLI for backward compat)* | OpenAI/Anthropic-compatible HTTP | API key in env — **prefer `claude-agent-sdk` + `ANTHROPIC_BASE_URL` for new agents** |
 
 ### Step 6: Start the Agent
 
@@ -188,7 +188,7 @@ A: `anet hub start` starts one on your laptop. For teams, deploy CommHub on a se
 A: **Apache-2.0 open source, fully self-hosted.** No paid license is required and there is no official hosted SaaS. The current v0.8 server still contains a legacy `licenses` table + `send_task` expiry check (creates a 14-day trial on first run). If you hit `license_expired`, see [Troubleshooting](https://anet.sh/en/troubleshooting). The business model is courses + consulting, not license sales.
 
 **Q: Which runtime should I use?**
-A: `claude-agent-sdk` is the verified default — works with Claude API directly, plus any Anthropic-compatible provider (MiniMax / DeepSeek / GLM / Kimi). `codex-sdk` (Codex) for code-heavy tasks if you have a Codex subscription. `claude-code-cli` works locally for Claude Pro subscribers.
+A: `claude-agent-sdk` is the verified default — works with Claude API directly, plus any Anthropic-compatible provider (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / etc.). `codex-sdk` (Codex) for code-heavy tasks if you have a Codex subscription. `claude-code-cli` works locally for Claude Pro subscribers.
 
 **Q: Can agents in different networks see each other?**
 A: No. Networks are completely isolated.
