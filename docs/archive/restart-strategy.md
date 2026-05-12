@@ -14,9 +14,9 @@ CommHub `/api/status` 提供辅助信息，**本地 .anet/nodes/ 配置仍是启
 {
   "alias": "I站运营马",
   "tmux_name": "intern-ai",
-  "server": "iZrj93pr2rcf5r2y9uo1oyZ",
+  "server": "your-hub-hostname",
   "agent": "claude-code",
-  "project_dir": "/home/vansin/intern-ai",
+  "project_dir": "/home/&lt;user&gt;/intern-ai",
   "status": "offline"
 }
 ```
@@ -34,29 +34,29 @@ CommHub `/api/status` 提供辅助信息，**本地 .anet/nodes/ 配置仍是启
 $ anet restart-all
 
 从 CommHub 获取 session 列表...
-  本机: iZrj93pr2rcf5r2y9uo1oyZ
+  本机: your-hub-hostname
   共 12 个 session，本机 8 个，远程 4 个
 
 本机 offline 的 agent（需要重启）:
-  1. I站运营马    claude-code      tmux:intern-ai     /home/vansin/intern-ai
-  2. A站运营马    claude-code      tmux:ai-insight     /home/vansin/ai-insight
-  3. B站牛        agent-node:codex (no tmux)           /home/vansin/blueleap
+  1. I站运营马    claude-code      tmux:intern-ai     /home/&lt;user&gt;/intern-ai
+  2. A站运营马    claude-code      tmux:ai-insight     /home/&lt;user&gt;/ai-insight
+  3. B站牛        agent-node:codex (no tmux)           /home/&lt;user&gt;/blueleap
 
 远程 offline 的 agent（跳过，需要 SSH）:
-  4. 群星马       claude-code      192.168.1.3         /Users/vansin/intern-aip
+  4. 群星马       claude-code      192.168.x.y         /Users/&lt;user&gt;/intern-aip
 
 确认重启本机 3 个 agent？(y/n): y
 
 [1/3] I站运营马 (claude-code)
-  → tmux new-session -d -s intern-ai -c /home/vansin/intern-ai "claude --resume ..."
+  → tmux new-session -d -s intern-ai -c /home/&lt;user&gt;/intern-ai "claude --resume ..."
   ✅ tmux session intern-ai 已创建
 
 [2/3] A站运营马 (claude-code)
-  → tmux new-session -d -s ai-insight -c /home/vansin/ai-insight "claude --resume ..."
+  → tmux new-session -d -s ai-insight -c /home/&lt;user&gt;/ai-insight "claude --resume ..."
   ✅ tmux session ai-insight 已创建
 
 [3/3] B站牛 (agent-node:codex)
-  → tmux new-session -d -s B站牛 -c /home/vansin/blueleap "agent-node --config ..."
+  → tmux new-session -d -s B站牛 -c /home/&lt;user&gt;/blueleap "agent-node --config ..."
   ✅ tmux session B站牛 已创建
 
 健康检查 (等 10s)...
@@ -157,8 +157,8 @@ anet restart-all --dry-run
 
 只打印要执行的命令，不实际启动：
 ```
-[dry-run] tmux new-session -d -s intern-ai -c /home/vansin/intern-ai "claude --resume ..."
-[dry-run] tmux new-session -d -s B站牛 -c /home/vansin/blueleap "agent-node --config ..."
+[dry-run] tmux new-session -d -s intern-ai -c /home/&lt;user&gt;/intern-ai "claude --resume ..."
+[dry-run] tmux new-session -d -s B站牛 -c /home/&lt;user&gt;/blueleap "agent-node --config ..."
 ```
 
 ## 跨机器
@@ -224,7 +224,7 @@ CommHub session 记录可能缺少部分启动信息（比如 env vars）。建�
 如果信息不够，fallback 到 anet start：
 ```
 [anet] 无法重建 I站运营马 的启动命令（缺少 session ID）
-[anet] 请手动: cd /home/vansin/intern-ai && anet start I站运营马
+[anet] 请手动: cd /home/&lt;user&gt;/intern-ai && anet start I站运营马
 ```
 
 ## 决策
