@@ -1,0 +1,36 @@
+Test: qa-hub-05-roundtrip (matrix HUB-05)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+Commands:
+  sg docker -c 'docker build -t anet-qa-hub-05 -f tests/qa-hub-05-roundtrip/Dockerfile .'
+  sg docker -c 'docker run --rm anet-qa-hub-05'
+
+Result: PASS (R2 scope)
+Runtime: ~11s warm, ~30s cold (includes apt + bun + npm install of @sleep2agi/agent-network@preview)
+
+Coverage (steps 0-6 hard-asserted):
+- [0] hub boot via `anet hub start --username admin --password ...` from preview npm
+- [1] POST /api/auth/login returns token starting with utok_
+- [2] POST /api/networks {name, description} returns network.network_id
+- [3] POST /api/auth/node-token {network_id, node_name} returns ntok_
+- [4] GET /events/<alias>?network_id=<id> with Authorization: Bearer ntok_ opens SSE,
+       initial `data: {"type":"connected", ...}` line received
+- [5] POST /api/task {alias, task, priority, network_id} with utok auth → ok:true + message_id
+- [6] GET /api/tasks?to_name=<alias>&network_id=<id> contains the dispatched task
+
+Documented gap (R3 TODO):
+- [7] SSE push of the task body itself requires a pre-registered session row
+       (server/src/index.ts L836: `if (targetSession) pushEvent(...)`).
+       Real agent-node CLI calls `report_status` on boot which UPSERTs that row.
+       R3 adds a `report_status` step before SSE assertion to verify end-to-end
+       push delivery (not just connection).
+
+Key log:
+  [0] start hub (no COMMHUB_AUTH_TOKEN, admin bootstrap)
+  [1] login admin → utok_
+  [2] create network → network_id   network_id=net_93554f97da1e
+  [3] mint ntok_ for node 'test-agent'
+  [4] subscribe SSE on /events/test-agent (background)
+  [5] POST /api/task → {"ok":true,"message_id":"..."}
+  [6] verify task landed in GET /api/tasks
+  PASS qa-hub-05 register→mint→send→DB-lands + SSE-connects (R2 scope)
