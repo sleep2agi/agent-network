@@ -1,0 +1,47 @@
+Test: qa-hub-06-token-revoke (matrix HUB-06)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+Commands:
+  sg docker -c 'docker build -t anet-qa-hub-06 -f tests/qa-hub-06-token-revoke/Dockerfile .'
+  sg docker -c 'docker run --rm anet-qa-hub-06'
+
+Result: PASS
+Runtime: ~15s warm, ~30s cold
+
+Coverage (9 steps hard-asserted):
+- [0] hub boot
+- [1] register bob + login → utok_bob
+- [2] bob POST /api/networks → network_id (free-plan owns 2 max; bob has 0)
+- [3] bob POST /api/auth/node-token {network_id, node_name=bob-node} → ntok_bob
+       Then look up its token_id via GET /api/auth/tokens (createNetworkTokenForNode
+       does NOT return token_id in its response shape).
+- [4] sanity: both tokens currently work (/api/auth/me + /api/networks)
+- [5] admin CLI `anet hub admin reset-user --username bob` writes new password
+       + mints fresh utok, deletes prior utok_ rows for bob
+- [6] OLD utok_bob → 401 (revoked)
+- [7] PIN — ntok_bob → 200 (current contract: cascade NOT performed)
+- [8] bob (new utok) DELETE /api/auth/tokens/<ntok_id> → ok:true
+- [9] ntok_bob → 401 (explicit revoke works)
+
+Contracts surfaced by R5:
+
+1. utok revocation does NOT cascade to ntok (server/src/auth.ts L267
+   `revokeOtherUserTokens`):
+       DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL
+   ntok rows have network_id set → they survive admin password resets.
+   Design choice or gap? Needs review by maintainer.
+
+2. register() auto-creates a default network + a default-network ntok
+   for new users. (Surfaced because bob's /api/auth/tokens response had
+   3 rows after step [3], not 2 — the auto-created ntok + bob's
+   bob-node ntok + bob's utok.) Test filter must disambiguate by token
+   name ("node:bob-node") not just scope.
+
+3. /api/auth/node-token response does NOT include token_id (only token
+   and ok). To programmatically revoke a freshly minted ntok, callers
+   must GET /api/auth/tokens and match by name.
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip
+  - @sleep2agi/agent-network@preview from npm
