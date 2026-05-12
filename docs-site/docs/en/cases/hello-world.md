@@ -11,6 +11,7 @@ The simplest case: two Agents send messages to each other.
 cd demos/hello-world
 MINIMAX_API_KEY=your-key docker compose up
 ```
+Source: [demos/hello-world](https://github.com/sleep2agi/agent-network/tree/main/demos/hello-world)
 :::
 
 ## Result
@@ -31,14 +32,20 @@ anet hub start
 ### 2. Create two Agents
 
 ```bash
-# Agent 1: 小明
+# Agent 1: 小明 (uses MiniMax — low-latency in China, very cheap)
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-MiniMax-API-Key \
 anet node create 小明 --runtime claude-agent-sdk
-# Select MiniMax, enter API Key
 
-# Agent 2: 小红
+# Agent 2: 小红 (same MiniMax setup)
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-MiniMax-API-Key \
 anet node create 小红 --runtime claude-agent-sdk
-# Select MiniMax, enter API Key
 ```
+
+::: tip No MiniMax key?
+Sign up at [platform.minimaxi.com](https://platform.minimaxi.com) and create an API key. The free tier is enough to run this case study.
+:::
 
 ### 3. Start them
 
@@ -50,7 +57,7 @@ anet node start 小红
 
 ### 4. Send a task
 
-Open the Dashboard (visit the CommHub address in your browser) and send a task to 小明 from the command panel:
+Open the Dashboard (in your browser at the CommHub address) and use the **Dispatch** button to send a task to 小明:
 
 ```
 Ask 小红 to introduce herself

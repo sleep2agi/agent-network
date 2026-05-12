@@ -57,7 +57,7 @@ anet node start 小红
 
 ### 4. 发任务
 
-打开 Dashboard（浏览器访问 CommHub 地址），在指挥面板给小明发任务：
+打开 Dashboard（浏览器访问 CommHub 地址），点 **Dispatch** 按钮给小明发任务：
 
 ```
 请给小红发一条消息，让她自我介绍一下
