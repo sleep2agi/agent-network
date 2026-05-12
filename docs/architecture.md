@@ -1,7 +1,8 @@
 # @sleep2agi/agent-network 架构设计
 
 > CLI 名：`anet` | npm 包名：`@sleep2agi/agent-network`
-> 版本：agent-network CLI v0.0.32 | agent-node v0.7.0 | commhub-server v0.4.3
+> 当前 stable（git tag v0.8.1，2026-05-12）：agent-network CLI v2.1.5 | commhub-server v0.8.0 | agent-node v2.3.0 | agent-network-dashboard v0.4.2
+> 本文最早写于 V2 早期（CLI v0.0.x），部分目录结构 / runtime 命名描述仍保留作为历史背景；最新可执行行为以代码 + [anet.sh](https://www.anet.sh) 文档为准。
 
 ---
 
@@ -27,16 +28,17 @@ agent-network/
 
 **设计原则**：client.ts 是核心（零外部依赖），server.ts 是薄包装（委托给 `../../server/src/index.ts`），cli.ts 是粘合层。
 
-### agent-node 双引擎（v0.6.0）
+### agent-node 三个 runtime（当前 v2.3.0）
 
-agent-node 支持两种 runtime 引擎：
+agent-node 支持三个 runtime：
 
-| 引擎 | 说明 | 模型 |
+| Runtime | 说明 | 模型 |
 |------|------|------|
-| claude | Anthropic Claude Agent SDK | Claude Sonnet/Opus |
-| codex | OpenAI Codex CLI | GPT-5 / GPT-5.4 |
+| `claude-agent-sdk`（**默认**） | Anthropic Claude Agent SDK + Anthropic 兼容 API | Claude / MiniMax / DeepSeek / GLM / Kimi 等 |
+| `codex-sdk` | OpenAI Codex SDK | GPT-5 / GPT-5.4 |
+| `claude-code-cli` | Claude Code CLI（要 Claude Pro 订阅） | Claude（通过本地 CLI 调用） |
 
-Profile 中通过 `runtime` 字段选择：`claude-code`、`codex` 或 `agent-sdk`。
+Profile 中通过 `runtime` 字段选择。早期文档里的 `claude-code` / `codex` / `agent-sdk` 已重命名（doctor `anet doctor --fix` 自动迁移）。
 
 支持的模型列表：
 - **MiniMax M2.7** — 低成本自动化
