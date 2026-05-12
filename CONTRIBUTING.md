@@ -56,6 +56,15 @@ For the longer-term design (CI checks, branch protection, CODEOWNERS, preview re
 
 See the [PR template](./.github/PULL_REQUEST_TEMPLATE.md) — the checklist lives there and stays in sync.
 
+## QA expectations (the `anet QA (v0)` workflow)
+
+Every PR to `main` runs [`bash scripts/qa.sh`](./scripts/qa.sh) (L0 unit + L1 Docker contract tests, ~40 s on a GH runner). The workflow is currently **report-only**: a red ✕ does **not** technically block merge, but socially it should:
+
+- **Green ✕ on `anet QA (v0)` → strongly prefer fix-or-explain before merge.** This suite has 0 known false positives across 20+ runs; a fresh fail is almost always real.
+- **Bypass only if** the failure is unrelated to your change AND you've filed an issue. Document the bypass in the PR description.
+- The matrix + strategy live in [docs/qa/](./docs/qa/) — see [docs/qa/README.md](./docs/qa/README.md) for adding new tests (6-step flow).
+- v0 ship-readiness snapshot: [docs/qa/v0-summary.md](./docs/qa/v0-summary.md). Roadmap (which way the gate is going next): [docs/qa/v1-roadmap.md](./docs/qa/v1-roadmap.md).
+
 ## Code style
 
 - TypeScript strict mode

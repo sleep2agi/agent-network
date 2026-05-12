@@ -33,3 +33,4 @@ agent-network/tests/docker-e2e/results/
 
 # Dashboard screenshots hosted via Release assets
 docs/dashboard-screenshots/
+.qa-status-history
