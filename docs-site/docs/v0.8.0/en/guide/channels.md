@@ -51,7 +51,7 @@ Set the following environment variables for the agent:
 
 ```bash
 export TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
-export TELEGRAM_ALLOW_USER=7612221352
+export TELEGRAM_ALLOW_USER=999999999
 ```
 
 ### Step 4: Start
