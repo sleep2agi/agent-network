@@ -347,6 +347,8 @@ try { db.exec("ALTER TABLE ...") } catch {}
 
 如果用户显式设置了自己的 CORS origins，一般预期是覆盖默认值，而不是仍然允许官方域名。对开源/自托管项目来说，这种"隐藏默认允许"会降低可审计性。**v0.8 后 OSS 转向不做 SaaS 托管**，建议把作者私有域名从硬编码列表里移除（root cause 在 server 代码，本 doc fix 不彻底）。
 
+**Tracking issue**：[#22](https://github.com/sleep2agi/agent-network/issues/22) — Remove hardcoded `agent-network.vansin.me` from server CORS allowlist。
+
 ### C8：SDK 的 inbox 事件语义太粗
 
 `agent-network/src/client.ts:263-270` 对每条 inbox message 都同时：
