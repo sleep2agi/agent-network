@@ -92,7 +92,7 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 
 | Property | Description |
 |------|------|
-| **Models** | Codex SDK model (set with `--model`; examples use `gpt-5.4`) |
+| **Models** | Codex SDK model (set with `--model`; see OpenAI Codex docs for the current model id) |
 | **Prerequisites** | `codex auth login` |
 | **Strengths** | Strong code generation, flexible tool use |
 | **Tools** | Supports Read / Write / Edit / Bash / Glob / Grep |
@@ -101,7 +101,7 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 npx @sleep2agi/agent-node \
   --alias code-assistant \
   --runtime codex-sdk \
-  --model gpt-5.4 \
+  --model <codex-model-id> \
   --hub http://YOUR_IP:9200 \
   --tools Read,Write,Edit,Bash,Glob,Grep
 ```
@@ -133,7 +133,7 @@ ANTHROPIC_AUTH_TOKEN=your-minimax-key \
 npx @sleep2agi/agent-node \
   --alias xiaoming \
   --runtime claude-agent-sdk \
-  --model MiniMax-M2.7 \
+  --model <minimax-model-id> \
   --hub http://YOUR_IP:9200
 
 # InternLM
@@ -199,7 +199,7 @@ flowchart TD
   "node_name": "code-assistant",
   "token": "ntok_...",
   "runtime": "codex-sdk",
-  "model": "gpt-5.4",
+  "model": "<codex-model-id>",
   "session": "",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
