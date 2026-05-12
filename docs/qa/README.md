@@ -14,7 +14,12 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 
 退出码：`0` 全过；`1` 至少一个 fail；`2` 环境问题（docker 不可用等）。
 
-PR 评审基线：`bash scripts/qa.sh` 一条命令验证。
+## CI 自动跑
+
+[.github/workflows/qa.yml](../../.github/workflows/qa.yml) — PR / push to main 时自动跑（路径过滤）。
+
+**Report-only**：失败时 PR 显示红 ✕，但**不阻塞合并**（branch protection 未加这个 check）。
+目的是让大家看见结果，不当拦路虎。详见 [strategy.md §4](strategy.md#4-ci-gate渐进三档)。
 
 ## 文档导航
 

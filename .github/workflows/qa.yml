@@ -1,0 +1,64 @@
+# anet QA (v0) — report-only PR gate
+#
+# Runs `bash scripts/qa.sh` on PRs and pushes to main.
+# Non-blocking: failures show as a red ✕ on the PR but do NOT prevent merge
+# unless someone explicitly adds this check to branch protection. This is by
+# design — see docs/qa/strategy.md §4 (CI gate first tier is "report-only").
+#
+# Tracked in https://github.com/sleep2agi/agent-network/issues/31 R8.
+
+name: anet QA (v0)
+
+on:
+  pull_request:
+    paths:
+      - 'server/**'
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'tests/qa-*/**'
+      - 'scripts/qa.sh'
+      - 'docs/qa/**'
+      - '.github/workflows/qa.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - 'agent-network/**'
+      - 'agent-node/**'
+      - 'tests/qa-*/**'
+      - 'scripts/qa.sh'
+
+# Older runs on the same ref get cancelled — saves minutes when a PR is
+# updated rapidly. main pushes run independently.
+concurrency:
+  group: qa-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  qa:
+    name: L0 + L1 (report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Show QA test inventory
+        run: bash scripts/qa.sh --list
+
+      - name: Run L0 (bun test, ms-budget)
+        run: bash scripts/qa.sh --l0
+
+      - name: Run L1 (Docker contract tests, ~16s parallel)
+        run: bash scripts/qa.sh --l1
+
+      - name: Dump test logs on failure
+        if: failure()
+        run: |
+          set +e
+          for f in /tmp/qa-*.log; do
+            echo "================ $f ================"
+            tail -60 "$f"
+          done

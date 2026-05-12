@@ -43,15 +43,17 @@
 - `server/src/password-dict.ts`（弱密码字典） — 纯函数，最快上
 - `agent-network/bin/cli.ts` 命令解析层 — 大文件 4771 行，先抽小函数再测
 
-## 4. CI gate（先不强求，但留位）
+## 4. CI gate（渐进，三档）
 
-| 触发点 | 跑什么 | 阻塞合并？ |
-|--------|--------|-----------|
-| PR 打开 | L0（bun test，~5s） | 否，仅报告 |
-| 主路径文件变更（cli.ts / server/src/) | L0 + L1 contract（~30s） | 否 |
-| Release（打 tag） | 全套 L0+L1+L2+L3 | 是 |
+| 档 | 触发点 | 跑什么 | 阻塞合并？ | 状态 |
+|----|--------|--------|-----------|------|
+| **1** | PR + push to main（路径过滤） | `bash scripts/qa.sh` = L0 + L1（~16s warm，GH Actions ~1-2min 含 setup） | **否，仅报告** | ✅ R8 上线 [.github/workflows/qa.yml](../../.github/workflows/qa.yml) |
+| 2 | 主路径文件变更（auth.ts / db.ts / cli.ts） | L0 + L1 contract | 否（先观察稳定性） | 未启用，待 R10+ |
+| 3 | Release tag | 全套 L0+L1+L2+L3 | **是** | 未启用，等本地稳了再谈 |
 
-> 第一阶段不接 GitHub Actions，只做「**本地 `pnpm qa` 一键跑**」。等本地稳了再上 CI。
+> 第一阶段已上 GitHub Actions（档 1，report-only）。失败时 PR 显示红 ✕ 但不挡合并 —
+> 让大家**看见**测试结果，不当拦路虎。等稳定 2-3 周后再讨论档 2 升级。
+> 一键跑命令：`bash scripts/qa.sh`（详见 [README.md](README.md)）。
 
 ## 5. 测试需要的资源
 
