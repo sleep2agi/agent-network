@@ -23,7 +23,7 @@ The current `server/` tree does not contain a real hardcoded MiniMax/GitHub/Open
 - `.env` history/current tree:
   - No current `.env` files found in `server/`.
 - PII/internal grep:
-  - Found private domain `agent-network.vansin.me` in CORS allowlist.
+  - Found maintainer's private domain hardcoded in CORS allowlist (specific value redacted; see finding #1 for file:line).
 - `npx license-checker --summary`:
   - MIT: 84, ISC: 7, BSD-3-Clause: 2, Apache-2.0: 1, BSD-2-Clause: 1.
 - `npm audit --audit-level=moderate --json`:
@@ -50,7 +50,7 @@ The current `server/` tree does not contain a real hardcoded MiniMax/GitHub/Open
 1. **Private/personal CORS origin is hardcoded**
    - `server/src/index.ts:249`
    - `server/src/index.ts:250`
-   - Risk: exposes `agent-network.vansin.me` and bakes a private deployment into OSS server defaults.
+   - Risk: exposes a maintainer-specific private domain and bakes a private deployment into OSS server defaults.
    - Recommendation: remove the hardcoded private origin; require `COMMHUB_CORS_ORIGINS` for non-local dashboards. Keep public production domain only if it is the official service domain.
 
 2. **No lockfile means `npm audit` cannot run reproducibly**
