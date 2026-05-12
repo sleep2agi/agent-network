@@ -29,7 +29,7 @@
   <strong><a href="https://www.npmjs.com/org/sleep2agi">📦 NPM</a></strong> ·
   <strong><a href="https://github.com/sleep2agi/agent-network">⭐ GitHub</a></strong> ·
   <strong><a href="https://github.com/sleep2agi/agent-network/discussions">💬 Discussions</a></strong> ·
-  <strong><a href="https://anet.sh/community">💚 微信群 / WeChat</a></strong>
+  <strong><a href="https://anet.sh/en/community">💚 微信群 / WeChat</a></strong>
 </p>
 
 <p align="center">
@@ -87,7 +87,7 @@ anet node start my-bot           # waits for "SSE connected"
 
 Send a task from the Dashboard's Chat panel. Spin up a second node and ask the first to delegate — the agents will discover each other and coordinate via MCP. That's it.
 
-📖 Full walkthrough → <https://anet.sh/guide/getting-started>
+📖 Full walkthrough → <https://anet.sh/en/guide/getting-started>
 
 ---
 
@@ -141,7 +141,7 @@ The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. 
 - **REST** at `/api/*` — Dashboard, admin, monitoring, audit log
 - **17 MCP tools** — `send_task`, `get_task`, `send_reply`, `report_status`, `get_all_status`, …
 
-📖 Architecture deep dive → <https://anet.sh/guide/architecture>
+📖 Architecture deep dive → <https://anet.sh/en/guide/architecture>
 
 ---
 
@@ -155,7 +155,7 @@ Pick one per node. Mix freely on the same hub.
 | `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic, MiniMax, DeepSeek, GLM, Kimi, InternLM, OpenRouter via `ANTHROPIC_BASE_URL` | API key |
 | `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex auth login` or `OPENAI_API_KEY` |
 
-📖 Runtime deep dive → <https://anet.sh/guide/runtimes>
+📖 Runtime deep dive → <https://anet.sh/en/guide/runtimes>
 
 ---
 
@@ -174,7 +174,7 @@ Pick one per node. Mix freely on the same hub.
 | OpenAI (via `codex-sdk`) | verified | n/a — OpenAI native |
 | OpenRouter / custom Anthropic-compatible | works in dev, no E2E | provide base URL + token |
 
-📖 Per-provider keys, models, and presets → <https://anet.sh/guide/multi-model>
+📖 Per-provider keys, models, and presets → <https://anet.sh/en/guide/multi-model>
 
 ---
 
@@ -237,7 +237,7 @@ Found a vulnerability? Please **don't** open a public issue. Use [GitHub Securit
 
 ## Ecosystem
 
-Projects built on Agent Network or using anet to ship faster — full list at <https://anet.sh/ecosystem>.
+Projects built on Agent Network or using anet to ship faster — full list at <https://anet.sh/en/ecosystem>.
 
 | Project | What it is |
 |---|---|
@@ -252,9 +252,9 @@ Using anet in your project? Open a PR to [`docs-site/docs/ecosystem.md`](./docs-
 ## Resources
 
 - [anet.sh](https://anet.sh) — full documentation site
-- [Getting started](https://anet.sh/guide/getting-started) — verified end-to-end path
-- [Runtimes](https://anet.sh/guide/runtimes) — Claude Code CLI vs Agent SDK vs Codex
-- [Architecture](https://anet.sh/guide/architecture) — MCP, SSE, REST, SQLite schema
+- [Getting started](https://anet.sh/en/guide/getting-started) — verified end-to-end path
+- [Runtimes](https://anet.sh/en/guide/runtimes) — Claude Code CLI vs Agent SDK vs Codex
+- [Architecture](https://anet.sh/en/guide/architecture) — MCP, SSE, REST, SQLite schema
 - [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) — package index
 - [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — questions, ideas
 - [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) — bug reports
