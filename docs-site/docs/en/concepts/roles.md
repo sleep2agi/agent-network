@@ -43,7 +43,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | **Hub-global** | | | | |
 | `/api/admin/audit-log` | ❌ | ❌ | ✅ | ✅ |
 | `/api/admin/wipe-db` (and similar) | ❌ | ❌ | ✅ | ✅ |
-| `anet hub admin reset` | Local-only CLI command on the hub host, not role-gated | | | |
+| `anet hub admin reset-user` (reset any user's password) | Local-only CLI command on the hub host, not role-gated | | | |
 
 ---
 
@@ -109,7 +109,7 @@ The 4 roles above are scoped to a single network. There is also a **hub-global a
 | Operation | network admin | hub-global admin (`admin` user) |
 |---|---|---|
 | `/api/admin/audit-log` | ✅ | ✅ |
-| `anet hub admin reset` (resets itself) | ❌ | ✅ (local-only) |
+| `anet hub admin reset-user` (reset any user's password) | ❌ | ✅ (local-only) |
 | Create new users | ❌ | ✅ |
 | See all networks on the hub | ❌ (only ones they're a member of) | ✅ |
 
