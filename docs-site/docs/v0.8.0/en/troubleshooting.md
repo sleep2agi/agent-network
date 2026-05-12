@@ -133,24 +133,27 @@ anet network invite --role member
 
 ---
 
-### `license_expired` -- License Expired
+### `license_expired` -- License Expired (legacy behavior)
 
 ```json
 {"ok": false, "error": "license_expired", "message": "Trial expired. Activate a license: anet activate <key>"}
 ```
 
-**Cause**: 14-day trial period has ended.
+::: info Since v0.8, anet is fully Apache-2.0 OSS — there is no actual license sale
+This license gate is V3-era leftover code that still runs in the `send_task` path. If your local SQLite has a stale `licenses` row, it will trigger. **v0.9+ plans to remove the whole license check.**
+:::
 
-**Solution**:
+**Cause**: Your local SQLite `licenses` table has a row with `expires_at < now()` (auto-created v0.6 legacy trial).
+
+**Solution** (this v0.8.0-era answer only listed `anet activate`; latest approach is in [latest /en/troubleshooting](/en/troubleshooting)):
 
 ```bash
-# Check license status
-anet license
+# Option A (now recommended): clear the expired license row directly
+sqlite3 ~/.commhub/commhub.db "DELETE FROM licenses WHERE expires_at < datetime('now');"
 
-# Activate a license key
-anet activate anet-XXXX-XXXX-XXXX-XXXX
-
-# Or run in dev mode without COMMHUB_AUTH_TOKEN (skips licensing checks)
+# Option B (v0.6 legacy commands, placeholder implementation only):
+anet license            # show
+anet activate <key>     # writes a new license row (does not validate the key)
 ```
 
 ---

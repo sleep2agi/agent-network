@@ -133,24 +133,27 @@ anet network invite --role member
 
 ---
 
-### `license_expired` -- 授权过期
+### `license_expired` -- 授权过期（legacy 行为）
 
 ```json
 {"ok": false, "error": "license_expired", "message": "Trial expired. Activate a license: anet activate <key>"}
 ```
 
-**原因**：14 天试用期已过。
+::: info v0.8 起 anet 完全 Apache-2.0 OSS，没有真正的 license 销售
+这条 license gate 是 V3 时代的遗留代码，仍在 `send_task` 路径里跑，如果你的本地 SQLite 有过期 `licenses` 行就会触发。**未来 v0.9+ 计划移除整段 license 检查**。
+:::
 
-**解决**：
+**原因**：本地 SQLite `licenses` 表里有一行 `expires_at < now()`（v0.6 legacy trial 自动创建）。
+
+**解决**（v0.8.0-era 答案只列了 \`anet activate\`；最新做法见 [latest /troubleshooting](/troubleshooting)）：
 
 ```bash
-# 检查授权状态
-anet license
+# 方案 A（现在推荐）：直接清掉过期 license 行
+sqlite3 ~/.commhub/commhub.db "DELETE FROM licenses WHERE expires_at < datetime('now');"
 
-# 激活授权码
-anet activate anet-XXXX-XXXX-XXXX-XXXX
-
-# 或在开发模式下不设 COMMHUB_AUTH_TOKEN（跳过授权检查）
+# 方案 B（v0.6 legacy 命令，仅占位实现）：
+anet license            # 查看
+anet activate <key>     # 写入新 license row（不验证 key, 仅占位）
 ```
 
 ---
