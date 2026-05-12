@@ -49,7 +49,7 @@ npx @sleep2agi/agent-node \
 :::
 
 ::: info Verify
-After starting, you should see `SSE connected, waiting for tasks...`. If you get an `auth` error, re-run `claude auth login`.
+After starting, you should see `SSE connected, waiting for tasks...`. If you get an `auth` / `401` / `invalid x-api-key` error: check that `ANTHROPIC_API_KEY` (for api.anthropic.com) or `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` (for a third-party Anthropic-compatible endpoint) is set correctly — see [runtimes — common pitfalls](/en/guide/runtimes#claude-agent-sdk). `claude auth login` is for the `claude-code-cli` runtime and has no effect on the SDK path.
 :::
 
 ### claude-code-cli
