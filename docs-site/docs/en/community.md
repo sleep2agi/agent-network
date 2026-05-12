@@ -18,7 +18,7 @@ The image is refreshed weekly. **Bookmark this page**, not the QR — the URL is
 
 | Channel | Best for |
 |---|---|
-| [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) | Design questions, ideas, async chat (English) |
+| [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) | Design questions, ideas, async chat (English or Chinese, both welcome) |
 | [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) | Bug reports, feature requests |
 | [Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) | Private vulnerability disclosure |
 
