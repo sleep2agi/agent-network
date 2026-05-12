@@ -197,8 +197,9 @@ function handleDocumentMouseDown(e: MouseEvent) {
 
 function buildIssueUrl(): string {
   const isEn = isEnLocale()
-  const pageTitle = (typeof document !== 'undefined' ? document.title : '').split('|')[0].trim() || 'docs page'
-  const title = `[docs] ${pageTitle}`
+  // Standardized title so all SelectionReporter-filed issues are easy to
+  // filter / triage from the issues list.
+  const title = isEn ? '[Doc] Documentation feedback' : '[Doc] 文档修改建议'
 
   let url = typeof window !== 'undefined' ? window.location.href : ''
   if (cachedHeadingAnchor.value && url.indexOf('#') === -1) {

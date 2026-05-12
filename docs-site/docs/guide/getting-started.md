@@ -2,13 +2,17 @@
 
 本页是当前 stable（v0.8.1 / CLI v2.1.5）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
 
-::: tip 角色（v0.8.1，git tag `v0.8.1`）
-| 包 | 版本 | 角色 |
+::: tip 组件版本（v0.8.1，git tag `v0.8.1`）
+本页涉及 4 个 npm 包，各自的职责：
+
+| 包 | 版本 | 用途 |
 |---|------|------|
 | `@sleep2agi/agent-network` | 2.1.5 | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
 | `@sleep2agi/commhub-server` | 0.8.0 | 通信中枢（MCP + REST + SSE，SQLite/Postgres） |
 | `@sleep2agi/agent-network-dashboard` | 0.4.2 | Web Dashboard（Next.js 16） |
 | `@sleep2agi/agent-node` | 2.3.0 | Agent 运行时（claude-agent-sdk / codex-sdk / http-api） |
+
+> 这里的"用途"指各 npm 包在系统里扮演的功能；用户的 **RBAC 角色**（owner/admin/member/viewer）见 [角色与权限](/concepts/roles)。
 :::
 
 ## 0. 前置

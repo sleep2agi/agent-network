@@ -2,13 +2,17 @@
 
 This is the current minimal local path for the stable packages. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
 
-::: tip Roles
-| Package | Version | Role |
+::: tip Component versions (v0.8.1, git tag `v0.8.1`)
+This page touches four npm packages. Their responsibilities:
+
+| Package | Version | Purpose |
 |---|---|---|
 | `@sleep2agi/agent-network` | 2.1.5 | `anet` CLI (start hub / dashboard, manage nodes) |
 | `@sleep2agi/commhub-server` | 0.8.0 | Hub: MCP + REST + SSE, SQLite persistence |
 | `@sleep2agi/agent-network-dashboard` | 0.4.2 | Web Dashboard |
 | `@sleep2agi/agent-node` | 2.3.0 | Agent runtime |
+
+> "Purpose" is what each package does in the stack. For user **RBAC roles** (owner/admin/member/viewer), see [Roles & Permissions](/en/concepts/roles).
 :::
 
 ## 0. Prerequisites
