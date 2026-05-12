@@ -138,7 +138,8 @@ anet hub start
 
 ```bash
 # 创建一个 Agent
-anet node create 文案1号 --runtime claude-agent-sdk --model MiniMax-M2.7
+# --model 替换成对应 provider 的最新 model id（各家几周一升级，到平台 console 拿）
+anet node create 文案1号 --runtime claude-agent-sdk --model <provider-model-id>
 
 # 启动它（它会连上 CommHub，等任务）
 anet node start 文案1号

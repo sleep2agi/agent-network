@@ -136,10 +136,12 @@ Think of it as a member in a group chat. Each Agent has:
 
 ```bash
 # Create an Agent
-anet node create writer-1 --runtime claude-agent-sdk --model MiniMax-M2.7
+# Replace --model with the latest model id from your provider's console
+# (each vendor ships model upgrades every few weeks)
+anet node create writer-1 --runtime claude-agent-sdk --model <provider-model-id>
 
 # Start it (it connects to CommHub and waits for tasks)
-anet node start coder-1
+anet node start writer-1
 ```
 
 ---
