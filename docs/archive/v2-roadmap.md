@@ -58,7 +58,7 @@ User / Dashboard / CLI
 
 ## 一、Node 生命周期
 
-参考已有 [node-lifecycle.md](/home/vansin/agent-orchestra/docs/node-lifecycle.md)，V2 目标不是推翻，而是把本地状态、服务端状态和 UI 状态对齐。
+参考已有 [node-lifecycle.md](../node-lifecycle.md)，V2 目标不是推翻，而是把本地状态、服务端状态和 UI 状态对齐。
 
 ### 1. 生命周期状态
 
@@ -136,7 +136,7 @@ Dashboard 对 Node 要有两层视图：
 
 ## 二、消息生命周期
 
-参考已有 [message-lifecycle.md](/home/vansin/agent-orchestra/docs/message-lifecycle.md)，V2 需要把“消息类型”和“任务状态”彻底分开。
+参考已有 [message-lifecycle.md](../message-lifecycle.md)，V2 需要把“消息类型”和“任务状态”彻底分开。
 
 ### 1. 消息类型
 

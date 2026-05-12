@@ -325,7 +325,7 @@ Nodes:
   指挥室  →  指挥室  [server:commhub, plugin:telegram]
   通信龙  →  通信龙  [server:commhub]
 
-Sessions (/home/vansin/agent-orchestra/channel):
+Sessions (&lt;repo-root&gt;/channel):
   SESSION              PID     NETWORK
   ──────────────────── ─────── ─────────────────────
   fef0eb55-b39c-4abc  64269   通信龙 offline ●
