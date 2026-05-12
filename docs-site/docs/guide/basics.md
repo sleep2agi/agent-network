@@ -31,7 +31,7 @@ Runtime 就是 Agent 用来调用 AI 模型的引擎。不同的 Runtime 对接�
 | Runtime | 对接模型 | 适合场景 | 需要什么 |
 |---------|---------|---------|---------|
 | `codex-sdk` | Codex (codex-sdk) | 写代码、跑命令 | `codex auth login` |
-| `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter | 推理、分析、翻译（支持国产模型） | API Key（国产或 Anthropic） |
+| `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter | 推理、分析、翻译（支持国产模型） | API Key（国产或 Anthropic） |
 | `claude-code-cli` | Claude Sonnet/Opus | 推理、写代码、终端操作（CLI 模式） | Claude Code CLI 已安装 + Claude Max 订阅 |
 
 ::: tip 推荐新手用 claude-agent-sdk
@@ -237,6 +237,7 @@ Agent 干活需要调用 AI 模型，不同模型的 Key 要去不同地方申�
 | GLM 智谱 | [open.bigmodel.cn](https://open.bigmodel.cn) → API 密钥 | `xxx` | 同上 |
 | 书生 | [chat.intern-ai.org.cn](https://chat.intern-ai.org.cn) → 设置 | `xxx` | 同上 |
 | Kimi | [platform.moonshot.cn](https://platform.moonshot.cn) → API 管理 | `xxx` | 同上 |
+| 小米 MiMo | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) → API Keys | `xxx` | 同上 |
 | OpenRouter | [openrouter.ai](https://openrouter.ai) → Keys | `sk-or-xxx` | 同上 |
 | Claude | [console.anthropic.com](https://console.anthropic.com) → API Keys | `sk-ant-xxx` | 同上 |
 | Codex (codex-sdk) | 不需要 Key | 终端执行 `codex auth login` | 自动保存 |
