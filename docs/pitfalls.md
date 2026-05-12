@@ -10,7 +10,7 @@
 
 Claude Code 用 channel notification 的 `meta.user` 字段生成显示名。
 
-- telegram 插件设 `user: from.username` → 显示 `telegram · vansinhu`
+- telegram 插件设 `user: from.username` → 显示 `telegram · alice`
 - commhub 插件设 `user: msg.from_session` → 显示 `commhub · SDK马`
 
 **缺少 `meta.user` 就只显示 server name，没有 `· xxx` 后缀。**
@@ -34,7 +34,7 @@ await mcp.notification({
 
 ## 2. MCP Server name 不需要带 alias
 
-telegram 插件 name 就是 `"telegram"`，不是 `"telegram · vansinhu"`。`· vansinhu` 是 Claude Code 根据 `meta.user` 自动加的。
+telegram 插件 name 就是 `"telegram"`，不是 `"telegram · alice"`。`· alice` 是 Claude Code 根据 `meta.user` 自动加的。
 
 不要在 Server constructor 的 name 里拼 alias：
 
