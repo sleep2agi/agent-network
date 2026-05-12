@@ -29,18 +29,26 @@ MINIMAX_API_KEY=你的Key docker compose up
 
 ### 1. 创建 Agent
 
+::: tip 两种创建方式
+- **A. 交互式**（推荐第一次）：跑 `anet node create <name> --runtime claude-agent-sdk`，CLI 会弹菜单让你选 provider + 输 API key
+- **B. env 预设**（脚本化）：用 `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` 前置，CLI 不再弹菜单
+:::
+
 ```bash
-# 调度员（负责编排流程）
+# 调度员（负责编排流程，用 DeepSeek，推理能力强）
+ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=你的-DeepSeek-Key \
 anet node create 调度员 --runtime claude-agent-sdk
-# 选择 DeepSeek
 
-# 英文翻译
+# 英文翻译（用 MiniMax 国内直连便宜）
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=你的-MiniMax-Key \
 anet node create 英文翻译 --runtime claude-agent-sdk
-# 选择 MiniMax
 
-# 日文翻译
+# 日文翻译（同 MiniMax）
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=你的-MiniMax-Key \
 anet node create 日文翻译 --runtime claude-agent-sdk
-# 选择 MiniMax
 ```
 
 ### 2. 全部启动

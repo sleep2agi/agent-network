@@ -28,18 +28,26 @@ You -> 调度员: "Translate: 今天天气真好"
 
 ### 1. Create Agents
 
+::: tip Two ways to create
+- **A. Interactive** (recommended first time): run `anet node create <name> --runtime claude-agent-sdk` and the CLI prompts you to pick a provider + paste an API key
+- **B. Env preset** (scriptable): prefix the command with `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` and the CLI skips the picker
+:::
+
 ```bash
-# Dispatcher (orchestrates the workflow)
+# Dispatcher (orchestrates the workflow; DeepSeek has strong reasoning)
+ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-DeepSeek-key \
 anet node create 调度员 --runtime claude-agent-sdk
-# Select DeepSeek
 
-# English translator
+# English translator (MiniMax — low-latency in China, very cheap)
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-MiniMax-key \
 anet node create 英文翻译 --runtime claude-agent-sdk
-# Select MiniMax
 
-# Japanese translator
+# Japanese translator (also MiniMax)
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-MiniMax-key \
 anet node create 日文翻译 --runtime claude-agent-sdk
-# Select MiniMax
 ```
 
 ### 2. Start all Agents
