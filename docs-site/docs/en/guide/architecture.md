@@ -415,16 +415,20 @@ Channel message format:
 agent-orchestra/
 ├── server/            # CommHub Server (Bun + SQLite) → runs on Server
 │   └── src/
-│       ├── index.ts   # HTTP routing + MCP + SSE
-│       ├── tools.ts   # 17 MCP Tools
-│       ├── auth.ts    # Auth + permissions + network management
-│       ├── db.ts      # Database + table definitions
-│       └── push.ts    # SSE push management
+│       ├── index.ts          # HTTP routing + MCP + SSE
+│       ├── tools.ts          # 17 MCP Tools
+│       ├── auth.ts           # Auth + permissions + network management
+│       ├── db.ts             # Database + table definitions
+│       ├── db-adapter.ts     # DB adapter layer (SQLite + abstract interface)
+│       ├── push.ts           # SSE push management
+│       └── password-dict.ts  # Weak password dictionary (v0.8 admin bootstrap)
 ├── agent-network/     # anet CLI + CommHub SDK → runs on Client
-│   ├── bin/cli.ts     # CLI entry (39 commands)
+│   ├── bin/cli.ts            # CLI entry (full command list: [CLI docs](/en/guide/cli))
 │   └── src/
-│       ├── client.ts  # CommHub SDK client
-│       └── server.ts  # Server programmatic entry
+│       ├── index.ts          # default export
+│       ├── client.ts         # CommHub SDK client
+│       ├── server.ts         # Server programmatic entry
+│       └── node-server.ts    # Agent Node long-running server entry
 ├── agent-node/        # Agent runtime → runs on Client
 │   └── src/cli.ts     # Three engines + task processing
 ├── channel/           # Claude Code Channel plugins → runs on Client

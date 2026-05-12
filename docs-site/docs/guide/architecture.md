@@ -415,16 +415,20 @@ Channel 消息格式：
 agent-orchestra/
 ├── server/            # CommHub Server (Bun + SQLite) → 跑在服务器
 │   └── src/
-│       ├── index.ts   # HTTP 路由 + MCP + SSE
-│       ├── tools.ts   # 17 个 MCP Tools
-│       ├── auth.ts    # 认证 + 权限 + 网络管理
-│       ├── db.ts      # 数据库 + 表定义
-│       └── push.ts    # SSE 推送管理
+│       ├── index.ts          # HTTP 路由 + MCP + SSE
+│       ├── tools.ts          # 17 个 MCP Tools
+│       ├── auth.ts           # 认证 + 权限 + 网络管理
+│       ├── db.ts             # 数据库 + 表定义
+│       ├── db-adapter.ts     # 数据库适配层（SQLite + 抽象接口）
+│       ├── push.ts           # SSE 推送管理
+│       └── password-dict.ts  # 弱密码字典（v0.8 admin bootstrap 用）
 ├── agent-network/     # anet CLI + CommHub SDK → 跑在客户端
-│   ├── bin/cli.ts     # CLI 入口（39 命令）
+│   ├── bin/cli.ts            # CLI 入口（完整命令列表见 [CLI 文档](/guide/cli)）
 │   └── src/
-│       ├── client.ts  # CommHub SDK 客户端
-│       └── server.ts  # Server 编程入口
+│       ├── index.ts          # 默认 export
+│       ├── client.ts         # CommHub SDK 客户端
+│       ├── server.ts         # Server 编程入口
+│       └── node-server.ts    # Agent Node 长跑 server entry
 ├── agent-node/        # Agent 运行时 → 跑在客户端
 │   └── src/cli.ts     # 三引擎 + 任务处理
 ├── channel/           # Claude Code Channel 插件 → 跑在客户端
