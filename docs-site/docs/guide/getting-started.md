@@ -10,7 +10,7 @@
 | `@sleep2agi/agent-network` | 2.1.7 | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
 | `@sleep2agi/commhub-server` | 0.8.0 | 通信中枢（MCP + REST + SSE，SQLite 持久化） |
 | `@sleep2agi/agent-network-dashboard` | 0.4.2 | Web Dashboard（Next.js 16） |
-| `@sleep2agi/agent-node` | 2.3.0 | Agent 运行时（claude-agent-sdk / codex-sdk / http-api） |
+| `@sleep2agi/agent-node` | 2.3.0 | Agent 运行时（claude-code-cli / claude-agent-sdk / codex-sdk） |
 
 > 这里的"用途"指各 npm 包在系统里扮演的功能；用户的 **RBAC 角色**（owner/admin/member/viewer）见 [角色与权限](/concepts/roles)。
 :::
