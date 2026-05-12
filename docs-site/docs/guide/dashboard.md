@@ -183,12 +183,12 @@ Admin 面板仅对 role=admin 的用户可见。
 设置页面管理用户个人配置：
 
 - **个人信息** -- 修改显示名、邮箱
-- **密码修改** -- 修改登录密码
+- **密码修改** -- 修改登录密码（v0.8.2 Dashboard 0.4.2 尚未实装 UI；当前请用 CLI `anet passwd`，见 [account-system 修改密码](/guide/account-system#修改密码)）
 - **Token 管理** -- 创建 / 查看 / 撤销 API Token
 - **网络设置** -- 当前网络的配置（仅 owner/admin）
   - 重命名网络
   - 创建邀请码
-  - 管理成员角色
+  - 管理成员角色（v0.8.2 Dashboard 部分功能未上 UI，CLI `anet network invite / promote / demote` 全开，详见 [CLI 命令](/guide/cli)）
   - 删除网络
 
 Token 管理界面：

@@ -183,12 +183,12 @@ Audit log example:
 The settings page manages personal configuration:
 
 - **Profile** -- Edit display name, email
-- **Password** -- Change login password
+- **Password** -- Change login password (Dashboard 0.4.2 UI not shipped yet; use CLI `anet passwd` — see [account-system / Change Password](/en/guide/account-system#change-password))
 - **Token Management** -- Create / view / revoke API tokens
 - **Network Settings** -- Current network config (owner/admin only)
   - Rename network
   - Create invite codes
-  - Manage member roles
+  - Manage member roles (Dashboard 0.4.2 partial; CLI `anet network invite / promote / demote` is complete — see [CLI commands](/en/guide/cli))
   - Delete network
 
 Token management interface:
