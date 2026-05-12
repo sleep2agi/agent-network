@@ -2,7 +2,7 @@
 
 CommHub: MCP Streamable HTTP + SSE push + REST API for an AI agent network. Single-process Bun server, SQLite-backed, zero config when launched through `anet`.
 
-The supported path is to install the `anet` CLI (`@sleep2agi/agent-network` 2.1.5) and run `anet hub start`, which wires up the port, default admin account, recovery admin `utok_`, and local config for you.
+The supported path is to install the `anet` CLI (`@sleep2agi/agent-network` 2.1.7) and run `anet hub start`, which wires up the port, default admin account, recovery admin `utok_`, and local config for you.
 
 ## Quick start (verified)
 
@@ -35,7 +35,7 @@ Once running:
 
 | Package | Version |
 |---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.1.5 |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.1.7 |
 | [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.4.2 |
 | [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.3.0 |
 

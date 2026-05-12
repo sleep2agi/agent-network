@@ -148,7 +148,7 @@ When the runtime is `claude-code-cli`, the spawned subprocess gets `settingSourc
 
 | Package | Version |
 |---|---|
-| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.1.5 |
+| [@sleep2agi/agent-network](https://www.npmjs.com/package/@sleep2agi/agent-network) | 2.1.7 |
 | [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.8.0 |
 | [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.4.2 |
 
