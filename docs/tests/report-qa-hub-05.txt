@@ -1,36 +1,53 @@
 Test: qa-hub-05-roundtrip (matrix HUB-05)
-Date: 2026-05-12
+Date: 2026-05-12 (R3 update — full closed loop)
 Runner: Docker (sg docker)
 Commands:
   sg docker -c 'docker build -t anet-qa-hub-05 -f tests/qa-hub-05-roundtrip/Dockerfile .'
   sg docker -c 'docker run --rm anet-qa-hub-05'
 
-Result: PASS (R2 scope)
-Runtime: ~11s warm, ~30s cold (includes apt + bun + npm install of @sleep2agi/agent-network@preview)
+Result: PASS (full closed loop)
+Runtime: ~11s warm, ~30s cold
 
-Coverage (steps 0-6 hard-asserted):
+Coverage (all steps hard-asserted):
 - [0] hub boot via `anet hub start --username admin --password ...` from preview npm
-- [1] POST /api/auth/login returns token starting with utok_
-- [2] POST /api/networks {name, description} returns network.network_id
-- [3] POST /api/auth/node-token {network_id, node_name} returns ntok_
-- [4] GET /events/<alias>?network_id=<id> with Authorization: Bearer ntok_ opens SSE,
-       initial `data: {"type":"connected", ...}` line received
-- [5] POST /api/task {alias, task, priority, network_id} with utok auth → ok:true + message_id
-- [6] GET /api/tasks?to_name=<alias>&network_id=<id> contains the dispatched task
+- [1] POST /api/auth/login → utok_
+- [2] POST /api/networks → network_id
+- [3] POST /api/auth/node-token → ntok_
+- [3.5] POST /mcp JSON-RPC tools/call report_status (alias=test-agent, status=idle, network_id)
+        registers the session row that pushEvent requires.
+- [4] GET /events/<alias>?network_id=<id> SSE 'connected' line received
+- [5] POST /api/task → ok:true + message_id
+- [6] SSE stream receives `{"type":"new_task", ...}` push within 5s
+- [7] GET /api/tasks shows the task body in DB
 
-Documented gap (R3 TODO):
-- [7] SSE push of the task body itself requires a pre-registered session row
-       (server/src/index.ts L836: `if (targetSession) pushEvent(...)`).
-       Real agent-node CLI calls `report_status` on boot which UPSERTs that row.
-       R3 adds a `report_status` step before SSE assertion to verify end-to-end
-       push delivery (not just connection).
+Protocol contract surfaced by R2→R3:
+- pushEvent ONLY fires when sessions row exists for the alias+network
+  (server/src/index.ts L836: `if (targetSession) pushEvent(...)`)
+- The SSE notification carries only {type, inbox_count, priority, from}
+  — NOT the task body. Agents fetch the body via get_inbox MCP tool after
+  the push. R2 originally asserted body-in-SSE which was wrong; R3 asserts
+  the push notification type, the correct contract.
+
+MCP call shape used:
+  POST /mcp
+  Authorization: Bearer <ntok>
+  Content-Type: application/json
+  Accept: application/json, text/event-stream
+  MCP-Protocol-Version: 2025-03-26
+  Body: {"jsonrpc":"2.0","id":1,"method":"tools/call",
+         "params":{"name":"report_status",
+                   "arguments":{"resume_id":"<uuid>","alias":"test-agent",
+                                "status":"idle","network_id":"<net>"}}}
+  Response is SSE-framed (`data: {...}`), unwrap with `sed -n 's/^data: //p' | head -1`.
 
 Key log:
   [0] start hub (no COMMHUB_AUTH_TOKEN, admin bootstrap)
   [1] login admin → utok_
-  [2] create network → network_id   network_id=net_93554f97da1e
+  [2] create network → network_id   network_id=net_fb211f9e4f25
   [3] mint ntok_ for node 'test-agent'
+  [3.5] register session via MCP report_status (so SSE delivery works)
   [4] subscribe SSE on /events/test-agent (background)
   [5] POST /api/task → {"ok":true,"message_id":"..."}
-  [6] verify task landed in GET /api/tasks
-  PASS qa-hub-05 register→mint→send→DB-lands + SSE-connects (R2 scope)
+  [6] wait up to 5s for SSE to receive new_task push
+  [7] verify task landed in GET /api/tasks
+  PASS qa-hub-05 register→mint→report_status→send→SSE-push→DB-lands

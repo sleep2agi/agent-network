@@ -26,7 +26,7 @@
 | HUB-02 | 改密码后老 utok 全部失效 | ✅ | report-test30 |
 | HUB-03 | 弱密码（password / 123456）被拒 | ✅ | report-test30 |
 | HUB-04 | admin reset-user 撤销目标用户 + 审计落库 | ✅ | report-test30 |
-| HUB-05 | utok 注册 → mint ntok → POST /api/tasks → SSE 推送 | 🟡 | [qa-hub-05](../../tests/qa-hub-05-roundtrip/) R2 ship — DB 闭环 + SSE 连接 PASS；SSE 收 body 待 R3 加 session pre-reg |
+| HUB-05 | utok 注册 → mint ntok → report_status → POST /api/tasks → SSE new_task → DB | ✅ | [qa-hub-05](../../tests/qa-hub-05-roundtrip/) R3 全闭环 PASS（~11s） |
 | HUB-06 | utok 被撤销后，它派生的 ntok 立即失效 | ❌ | （**R2 候选**，跟 dual_token 一致性） |
 | HUB-07 | SSE 断线后重连不丢消息 | ❌ | （需要时序断言） |
 | HUB-08 | task 状态机 pending→completed/failed 落库且 SSE 同步 | 🟡 | docker-e2e SC05（仅 failed） |

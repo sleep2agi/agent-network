@@ -55,6 +55,27 @@ NTOK=$(curl -fsS -X POST "$HUB_BASE/api/auth/node-token" \
   -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"test-agent\"}" | jq -r '.token')
 [[ "$NTOK" == ntok_* ]] || { echo "FAIL: ntok shape wrong: $NTOK"; exit 1; }
 
+echo "[3.5] register session via MCP report_status (so SSE delivery works)"
+RESUME_ID="00000000-aaaa-bbbb-cccc-000000000005"
+MCP_REQ=$(jq -nc --arg rid "$RESUME_ID" --arg net "$NET_ID" '
+  {jsonrpc:"2.0",id:1,method:"tools/call",
+   params:{name:"report_status",
+           arguments:{resume_id:$rid,alias:"test-agent",status:"idle",network_id:$net}}}')
+MCP_RESP=$(curl -sS -X POST "$HUB_BASE/mcp" \
+  -H "Authorization: Bearer $NTOK" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-03-26' \
+  -d "$MCP_REQ")
+# Streamable HTTP may return SSE-framed JSON ("data: {...}") or plain JSON
+MCP_JSON=$(echo "$MCP_RESP" | sed -n 's/^data: //p' | head -1)
+[[ -z "$MCP_JSON" ]] && MCP_JSON="$MCP_RESP"
+INBOX_OK=$(echo "$MCP_JSON" | jq -r '.result.content[0].text // empty' 2>/dev/null | jq -r '.ok // empty' 2>/dev/null)
+if [[ "$INBOX_OK" != "true" ]]; then
+  echo "FAIL: report_status MCP call did not return ok"
+  echo "raw: $MCP_RESP"; exit 1
+fi
+
 echo "[4] subscribe SSE on /events/test-agent (background)"
 : >/tmp/sse.log
 ( curl -fsSN -H "Authorization: Bearer $NTOK" \
@@ -71,17 +92,17 @@ TASK_RES=$(curl -fsS -X POST "$HUB_BASE/api/task" \
 echo "  $TASK_RES" | head -c 200; echo
 echo "$TASK_RES" | jq -e '.ok == true' >/dev/null || { echo "FAIL: task send !ok"; exit 1; }
 
-echo "[6] verify task landed in GET /api/tasks (utok scope)"
+echo "[6] wait up to 5s for SSE to receive new_task push"
+for i in {1..25}; do grep -q '"type":"new_task"' /tmp/sse.log && break; sleep 0.2; done
+if ! grep -q '"type":"new_task"' /tmp/sse.log; then
+  echo "FAIL: SSE never received new_task push"
+  echo "--- /tmp/sse.log ---"; cat /tmp/sse.log
+  exit 1
+fi
+
+echo "[7] verify task landed in GET /api/tasks (utok scope)"
 TASK_ROW=$(curl -fsS "$HUB_BASE/api/tasks?to_name=test-agent&network_id=$NET_ID" \
   -H "Authorization: Bearer $UTOK" | jq -e '.tasks[] | select(.content=="hello-r2-hub05")')
 [[ -n "$TASK_ROW" ]] || { echo "FAIL: task not in /api/tasks"; exit 1; }
 
-# Note: SSE *delivery* of the task body requires a pre-registered session
-# (server/src/index.ts L836: `if (targetSession) pushEvent(...)`). The
-# agent-node CLI would have called report_status on boot, creating that
-# row. R3 adds a report_status pre-step to assert SSE delivery end-to-end.
-# For R2 we assert only what a black-box hub user can observe from the
-# REST + SSE-connection side: connection opens + task lands in DB.
-echo "[7] (R3 TODO) assert SSE pushes task body to a pre-registered session"
-
-echo "PASS qa-hub-05 register→mint→send→DB-lands + SSE-connects (R2 scope)"
+echo "PASS qa-hub-05 register→mint→report_status→send→SSE-push→DB-lands"
