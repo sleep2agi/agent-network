@@ -84,7 +84,14 @@ anet node start 小红
 
 ### 4. Send a task
 
-Open the Dashboard (in your browser at the CommHub address) and use the **Dispatch** button to send a task to 小明:
+If you haven't started the Dashboard yet, open another terminal:
+
+```bash
+anet hub dashboard
+# Browser opens http://localhost:3000 — log in with admin / anethub
+```
+
+In the Dashboard, use the **Dispatch** button to send a task to 小明:
 
 ```
 Ask 小红 to introduce herself

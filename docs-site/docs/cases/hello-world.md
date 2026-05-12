@@ -84,7 +84,14 @@ anet node start 小红
 
 ### 4. 发任务
 
-打开 Dashboard（浏览器访问 CommHub 地址），点 **Dispatch** 按钮给小明发任务：
+如果还没启动 Dashboard，另开一个终端：
+
+```bash
+anet hub dashboard
+# 浏览器打开 http://localhost:3000，用 admin / anethub 登录
+```
+
+进入 Dashboard 后，点 **Dispatch** 按钮给小明发任务：
 
 ```
 请给小红发一条消息，让她自我介绍一下
