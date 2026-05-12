@@ -86,7 +86,7 @@ anet node create my-bot
 You'll get a two-step interactive picker:
 
 1. **Pick the runtime** — `claude-agent-sdk` is the verified default.
-2. **Pick the provider** — MiniMax / DeepSeek / GLM / Kimi / Anthropic etc. Each preset writes the right `ANTHROPIC_BASE_URL` and a sensible default model, then prompts for the API key.
+2. **Pick the provider** — MiniMax / DeepSeek / GLM / Kimi / Intern (Shusheng) / OpenRouter / Anthropic / custom. Each preset writes the right `ANTHROPIC_BASE_URL` and a sensible default model, then prompts for the API key.
 
 ::: details Other runtimes
 - `codex-sdk` — passes unit tests; **no full E2E** with real codex auth.

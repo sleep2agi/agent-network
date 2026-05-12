@@ -8,7 +8,7 @@
 | 包 | 版本 | 用途 |
 |---|------|------|
 | `@sleep2agi/agent-network` | 2.1.5 | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
-| `@sleep2agi/commhub-server` | 0.8.0 | 通信中枢（MCP + REST + SSE，SQLite/Postgres） |
+| `@sleep2agi/commhub-server` | 0.8.0 | 通信中枢（MCP + REST + SSE，SQLite 持久化） |
 | `@sleep2agi/agent-network-dashboard` | 0.4.2 | Web Dashboard（Next.js 16） |
 | `@sleep2agi/agent-node` | 2.3.0 | Agent 运行时（claude-agent-sdk / codex-sdk / http-api） |
 
@@ -90,7 +90,7 @@ anet node create my-bot
 这会进入两步交互式选择：
 
 1. **选 Runtime**：推荐 `claude-agent-sdk`（已验证）。
-2. **选 Provider**：可选 MiniMax / DeepSeek / GLM / Kimi / Anthropic 等，每个预设会自动写好 `ANTHROPIC_BASE_URL` 与默认模型，然后让你输入对应的 API Key。
+2. **选 Provider**：可选 MiniMax / DeepSeek / GLM / Kimi / 书生 Intern / OpenRouter / Anthropic / 自定义，每个预设会自动写好 `ANTHROPIC_BASE_URL` 与默认模型，然后让你输入对应的 API Key。
 
 ::: details 其他 Runtime
 - `codex-sdk` —— 单元测试通过，**端到端未验证**（缺真实 codex 鉴权回归）。
