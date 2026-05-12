@@ -5,17 +5,21 @@
 
 ## 1. 哲学（3 条铁律）
 
-1. **从用户视角写用例**，不是从代码视角。每条用例先问「这是哪个 persona 的哪个动作」。
+1. **两个视角都要**：
+   - **用户视角**（外黑盒）— 每条 L1+ 用例先问「这是哪个 persona 的哪个动作」，保证「用户能用」。
+   - **代码视角**（内白盒）— L0 单测覆盖**纯函数 / 状态机 / 解析逻辑 / 边界条件**，保证「代码不退化」。
+   - 不要互相替代：用户视角能保「能用」但不能保「健壮」，代码视角能保「健壮」但不能保「值得用」。
 2. **2 分钟原则**：单个测试套件单次跑 ≤ 2 min。超过就拆。
 3. **Docker 隔离**：所有测试在 Docker 里跑，不碰生产 hub（47.116.5.73）、不碰本地 commhub.db。
 
-## 2. 三个 Persona × 三个动作（3×3 测试矩阵）
+## 2. 四个 Persona（4×3 测试矩阵）
 
 | Persona | happy path | 常见错误 | 关键回归点 |
 |---------|-----------|---------|-----------|
 | **anet CLI 用户**（终端开发者） | `anet hub start` → `anet network create` → `anet node create` → `anet node start` | 没注册 utok 就 node create | session resume（issue #13）、--new-session、tty/non-tty 兼容 |
 | **commhub 直接调用方**（SDK/integration） | register utok → mint ntok → POST /api/tasks → SSE 收 | utok 撤销后 ntok 失效；ntok 跨网络越权 | auth 边界、SSE 重连、task 状态机（pending→completed/failed） |
 | **agent-node runtime** | 启动 + 拿 inbound task + 回复 | provider key 错误时 reply.status=failed；hub 重启时 SSE 重连 | runtime 切换（claude-code / codex / minimax）、session 恢复、failed reply 写回 |
+| **dashboard 用户**（浏览器端） | 注册 → 登录 → 看节点 → 派单 → 收到回复 → 刷新历史在 | 未登录访问 / SSE 断 / 跨账号看到别人节点 | 主要路径 UI 不破、SSE 断连恢复、视觉无回归（TopoGraph / chat 气泡 / node 卡片） |
 
 每个格子初版只要 **1 条 smoke + 1 条破坏性场景**，不追大而全。
 
@@ -23,13 +27,21 @@
 
 | 层 | 工具 | 单次预算 | 必要性 |
 |----|------|----------|--------|
-| L0 单测 | `bun test`（`*.test.ts`） | < 5s | 仅纯函数 / 解析逻辑（如 [client.test.ts](../../agent-network/src/client.test.ts) 已有） |
-| L1 contract | Docker + curl + jq | < 30s | hub REST + SSE 协议契约 |
-| L2 CLI smoke | Docker + 真 CLI（pty 模拟） | < 60s | anet CLI 主路径，参考 [docs/tests/report-test31.txt](../tests/report-test31.txt) 模式 |
-| L3 E2E | docker-compose（hub+dashboard+agent-node+playwright） | < 3 min | 已有 [tests/docker-e2e](../../agent-network/tests/docker-e2e/) 7 场景，**复用，不重写** |
+| L0 单测（代码视角） | `bun test`（`*.test.ts`） | < 5s | 纯函数 / 解析 / 状态机 / 鉴权边界。基线只有 [client.test.ts](../../agent-network/src/client.test.ts)，**严重欠覆盖**，v0 重点补 |
+| L1 contract（用户视角） | Docker + curl + jq | < 30s | hub REST + SSE 协议契约 |
+| L2 CLI smoke（用户视角） | Docker + 真 CLI（pty 模拟） | < 60s | anet CLI 主路径，参考 [docs/tests/report-test31.txt](../tests/report-test31.txt) 模式 |
+| L3 E2E（用户视角） | docker-compose（hub+dashboard+agent-node+playwright） | < 3 min | 已有 [tests/docker-e2e](../../agent-network/tests/docker-e2e/) 7 场景，**复用，不重写** |
+| L3v 视觉回归（用户视角） | Playwright screenshot diff | < 60s | dashboard 关键页面截图基线（dashboard repo 已有，跨仓库治理） |
 | L4 跨节点矩阵 | docker-compose 多 agent-node | < 5 min | 多用户、多 channel、多 runtime（后置，不在 v0 范围） |
 
-**v0 范围**：L0 + L1 + L2 三层。L3 已有，列为「保护资产」，不动。L4 推迟到 v1。
+**v0 范围**：L0 + L1 + L2 三层主推。L3 / L3v 已有，列为「保护资产」，不动。L4 推迟到 v1。
+
+**L0 单测目标清单**（v0 渐进补，每轮 ≤ 1 个文件）：
+- `agent-network/src/client.ts` 既有 → 保持
+- `server/src/auth.ts`（utok / ntok 生成 + 校验） — 安全核心，优先补
+- `server/src/db.ts`（task 状态机迁移） — 边界条件优先
+- `server/src/password-dict.ts`（弱密码字典） — 纯函数，最快上
+- `agent-network/bin/cli.ts` 命令解析层 — 大文件 4771 行，先抽小函数再测
 
 ## 4. CI gate（先不强求，但留位）
 

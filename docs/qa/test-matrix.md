@@ -1,6 +1,9 @@
 # anet 测试矩阵 v0
 
-> 配套 [strategy.md](strategy.md)。每格写「用户视角」的一句话，不是代码视角。
+> 配套 [strategy.md](strategy.md)。**用户视角 + 代码视角两条线都要**：
+> - persona 矩阵（CLI / commhub / agent-node / dashboard）= 用户视角 L1+
+> - L0 单测补丁清单 = 代码视角
+>
 > ✅ 已覆盖 / 🟡 部分 / ❌ 未覆盖（首版基线，后续每轮更新一格）。
 
 ## CLI 用户矩阵（persona: 终端开发者）
@@ -38,6 +41,33 @@
 | NODE-04 | hub 重启后 agent-node SSE 自动重连 | ❌ | （**R3 候选**） |
 | NODE-05 | runtime 切换（claude-code → codex / minimax） | ❌ | （v1，先不做） |
 | NODE-06 | config.json 缺 session 字段时自动补 UUID | ✅ | report-test31 L0 |
+
+## dashboard 矩阵（persona: 浏览器端使用者）
+
+| ID | 用户故事 | 现状 | 现有覆盖 |
+|----|---------|------|---------|
+| DASH-01 | 我能在 `/login` 注册并落到 dashboard | ✅ | docker-e2e SC01 |
+| DASH-02 | 我能看到自己网络下在线的 agent-node | ✅ | docker-e2e SC03 |
+| DASH-03 | 我打字 + Enter 就能发任务（不是 Cmd+Enter） | ✅ | docker-e2e SC04 |
+| DASH-04 | agent 失败回复时聊天 + 状态 pill 同步 | ✅ | docker-e2e SC05 |
+| DASH-05 | 我刷新页面历史还在 | ✅ | docker-e2e SC06 |
+| DASH-06 | 我连发 3 条顺序不乱 | ✅ | docker-e2e SC07 |
+| DASH-07 | 未登录访问 `/` 被拒 / 重定向 | ❌ | （安全回归，**R4 候选**） |
+| DASH-08 | 跨账号不能看到别人的节点 | ❌ | （安全回归，**R4 候选**） |
+| DASH-09 | 关键页视觉无回归（TopoGraph / chat / node card） | 🟡 | dashboard repo Playwright（[N站马]每轮自审），跨仓库列为 L3v 保护资产 |
+| DASH-10 | SSE 断开后重连刷新看不出来 | ❌ | （R3-R4 跟 NODE-04 一起做） |
+
+## 代码视角（L0 单测）补丁清单
+
+跟 [strategy.md L0 目标](strategy.md#3-测试分层从低到高) 对应：
+
+| ID | 目标文件 | 测什么 | 优先级 |
+|----|----------|--------|--------|
+| UT-01 | `server/src/auth.ts` | utok / ntok 生成格式、过期、签名校验 | ⭐ 安全核心 |
+| UT-02 | `server/src/password-dict.ts` | 弱密码命中字典即拒 | 快可上 |
+| UT-03 | `server/src/db.ts` | task 状态机非法迁移被拒（completed→pending 等） | ⭐ |
+| UT-04 | `agent-network/bin/cli.ts` 解析层 | flag / 子命令解析（先重构成可测纯函数） | 大文件，分多轮 |
+| UT-05 | `agent-network/src/client.ts` | 已有 [client.test.ts](../../agent-network/src/client.test.ts) 保持，按需补边界 | 维护 |
 
 ## 优先级（v0 R2 候选）
 
