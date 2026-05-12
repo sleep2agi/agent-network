@@ -57,8 +57,8 @@ MiniMax integrates via the Anthropic-compatible API, using `ANTHROPIC_BASE_URL` 
 # Create and start a MiniMax agent
 ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-minimax-api-key \
-anet node create xiaoming --runtime claude-agent-sdk --model MiniMax-M2.7
-anet node start xiaoming
+anet node create minimax-bot --runtime claude-agent-sdk --model MiniMax-M2.7
+anet node start minimax-bot
 ```
 
 ::: tip Model Mapping
@@ -67,8 +67,8 @@ MiniMax's Anthropic-compatible API automatically maps Claude model names to Mini
 ```bash
 ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-key \
-anet node create xiaoming --runtime claude-agent-sdk --model claude-3-5-haiku-20241022
-anet node start xiaoming
+anet node create minimax-bot --runtime claude-agent-sdk --model claude-3-5-haiku-20241022
+anet node start minimax-bot
 ```
 :::
 

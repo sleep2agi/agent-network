@@ -131,7 +131,7 @@ Routes claude-agent-sdk requests to domestic model APIs via `ANTHROPIC_BASE_URL`
 ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-minimax-key \
 npx @sleep2agi/agent-node \
-  --alias xiaoming \
+  --alias minimax-bot \
   --runtime claude-agent-sdk \
   --model MiniMax-M2.7 \
   --hub http://YOUR_IP:9200
