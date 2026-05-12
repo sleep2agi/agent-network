@@ -221,6 +221,31 @@ curl http://localhost:9200/api/networks/net_xxx/members \
 # 在 Dashboard 的 Settings 页面管理
 ```
 
+### 17a. 怎么改密码？（v0.8）
+
+```bash
+anet passwd                       # 交互式：输旧密码 → 输新密码 ≥ 8 字符 + 非弱密码字典
+```
+
+要求：≥ 8 字符 + 不在 top-1000 弱密码字典里。首次 bootstrap admin 例外允许 ≥ 4。
+
+### 17b. 忘密码怎么办？（v0.8）
+
+如果你能登录 Hub 所在机器（owner 本机权限）：
+
+```bash
+anet hub admin reset-user <username>   # 强制重置某用户密码，无需老密码
+```
+
+如果连 Hub 机器都不能登（极端情况），只能直接改 SQLite：
+
+```bash
+sqlite3 ~/.commhub/commhub.db "DELETE FROM users WHERE username='admin'"
+anet hub start                          # 重新自动 bootstrap admin / anethub
+```
+
+⚠️ 后者是兜底方案，会清掉用户记录。详见 [安全设计](/concepts/security)。
+
 ## 部署问题
 
 ### 18. Docker Compose 中 Worker 连不上 Server

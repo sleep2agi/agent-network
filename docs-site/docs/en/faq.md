@@ -221,6 +221,31 @@ curl http://localhost:9200/api/networks/net_xxx/members \
 # Manage via the Dashboard Settings page
 ```
 
+### 17a. How do I change my password? (v0.8)
+
+```bash
+anet passwd                       # interactive: old password → new password ≥ 8 chars + not in weak-password dict
+```
+
+Requirements: ≥ 8 characters + not in the top-1000 weak-password dictionary. First-time bootstrap admin is allowed ≥ 4 chars as an exception.
+
+### 17b. Forgot my password — how to reset? (v0.8)
+
+If you can log into the Hub machine (local owner access):
+
+```bash
+anet hub admin reset-user <username>   # force-reset a user's password; no old password needed
+```
+
+If you can't even reach the Hub machine (extreme case), edit SQLite directly:
+
+```bash
+sqlite3 ~/.commhub/commhub.db "DELETE FROM users WHERE username='admin'"
+anet hub start                          # restart, auto-bootstraps admin / anethub
+```
+
+⚠️ The latter is a last resort and clears user records. See [Security design](/en/concepts/security) for details.
+
 ## Deployment Issues
 
 ### 18. Workers can't connect to Server in Docker Compose
