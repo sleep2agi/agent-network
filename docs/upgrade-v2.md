@@ -2,7 +2,7 @@
 
 > **⚠️ 本文档为 V1.3 → V2.0 历史升级笔记（2026-03 ~ 04 写于 V2 preview 阶段）。**
 > 
-> 当前 stable 已是 **v0.8.1**（agent-network 2.1.5 / commhub-server 0.8.0 / agent-node 2.3.0 / dashboard 0.4.2，2026-05-12）。
+> 当前 stable 已是 **v0.8.2**（agent-network 2.1.7 / commhub-server 0.8.0 / agent-node 2.3.0 / dashboard 0.4.2，2026-05-12 通过 npm `latest` tag 发布）。
 > 
 > **新用户请走当前快速安装路径**：
 > - 公开站：https://anet.sh/guide/installation
