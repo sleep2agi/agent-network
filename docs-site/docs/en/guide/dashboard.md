@@ -97,7 +97,7 @@ The node management page displays detailed information about all agent nodes:
 |-----|------|
 | Alias | Agent name |
 | Status | State (idle / working / offline / error) |
-| Runtime | Runtime engine (claude-agent-sdk / codex-sdk) |
+| Runtime | Runtime engine (claude-agent-sdk / codex-sdk / claude-code-cli) |
 | Model | Model name |
 | Server | Host server |
 | Last Seen | Last heartbeat time |

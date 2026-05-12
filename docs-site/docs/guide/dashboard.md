@@ -97,7 +97,7 @@ Event Log:
 |-----|------|
 | Alias | Agent 名称 |
 | Status | 状态（idle / working / offline / error） |
-| Runtime | 运行时（claude-agent-sdk / codex-sdk） |
+| Runtime | 运行时（claude-agent-sdk / codex-sdk / claude-code-cli） |
 | Model | 模型名称 |
 | Server | 所在服务器 |
 | Last Seen | 最后心跳时间 |
