@@ -30,7 +30,7 @@ Agent Node 支持三种 AI 运行时引擎，覆盖主流模型：
 
 | 属性 | 说明 |
 |------|------|
-| **模型** | Claude Sonnet 4 / Claude Opus 4 |
+| **模型** | 当前主线 Claude Sonnet / Opus / Haiku（具体型号查 [Anthropic 官方](https://docs.anthropic.com/claude/docs/models-overview)） |
 | **前置** | Anthropic API Key，或任一 Anthropic 兼容 API Key（MiniMax/DeepSeek/GLM/Kimi 等） |
 | **特点** | 编程式调用 Anthropic 兼容接口，适合稳定后台 Agent |
 | **隔离** | `settingSources: []` 完全隔离宿主机配置 |
@@ -58,7 +58,7 @@ npx @sleep2agi/agent-node \
 
 | 属性 | 说明 |
 |------|------|
-| **模型** | Claude Sonnet 4 / Claude Opus 4 |
+| **模型** | 当前主线 Claude Sonnet / Opus / Haiku（具体型号查 [Anthropic 官方](https://docs.anthropic.com/claude/docs/models-overview)） |
 | **前置** | Claude Code 已安装（`npm i -g @anthropic-ai/claude-code`） |
 | **特点** | 直接 spawn `claude` 进程，拥有完整终端能力 |
 | **区别** | 与 `claude-agent-sdk` 的区别：CLI 模式 = 启动 `claude` 子进程；SDK 模式 = 编程式 API 调用 |

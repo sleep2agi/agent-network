@@ -38,7 +38,7 @@ The server still runs `licenses.expires_at` checks inside `send_task` (V3 legacy
 
 Any model that supports the Anthropic Messages API can be integrated via the `claude-agent-sdk` runtime. Currently verified:
 
-- Claude Sonnet 4 / Opus 4 (native SDK)
+- Latest Claude line (Sonnet / Opus / Haiku, native SDK; specific model IDs at [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview))
 - Codex SDK (gpt-5.4)
 - MiniMax M2.7 (Anthropic-compatible API)
 - InternLM Intern-S1-Pro (Anthropic-compatible API)

@@ -38,7 +38,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 任何支持 Anthropic Messages API 的模型都可以通过 `claude-agent-sdk` runtime 接入。目前已验证：
 
-- Claude Sonnet 4 / Opus 4（原生 SDK）
+- Claude 当前主线（Sonnet / Opus / Haiku，原生 SDK；具体型号查 [Anthropic 官方](https://docs.anthropic.com/claude/docs/models-overview)）
 - Codex (codex-sdk)（Codex SDK）
 - MiniMax M2.7（Anthropic 兼容 API）
 - 书生 Intern-S1-Pro（Anthropic 兼容 API）

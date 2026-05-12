@@ -30,7 +30,7 @@ Based on the [Anthropic Claude Agent SDK](https://www.npmjs.com/package/@anthrop
 
 | Property | Description |
 |------|------|
-| **Models** | Claude Sonnet 4 / Claude Opus 4 |
+| **Models** | Latest Claude Sonnet / Opus / Haiku (specific IDs at [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)) |
 | **Prerequisites** | Anthropic API Key or any Anthropic-compatible API key (MiniMax/DeepSeek/GLM/Kimi, etc.) |
 | **Strengths** | Programmatic Anthropic-compatible API calls for stable background agents |
 | **Isolation** | `settingSources: []` fully isolates host config |
@@ -58,7 +58,7 @@ Runs a local Claude Code CLI process -- the same `claude` command you use daily 
 
 | Property | Description |
 |------|------|
-| **Models** | Claude Sonnet 4 / Claude Opus 4 |
+| **Models** | Latest Claude Sonnet / Opus / Haiku (specific IDs at [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)) |
 | **Prerequisites** | Claude Code installed (`npm i -g @anthropic-ai/claude-code`) |
 | **Strengths** | Spawns a `claude` child process with full terminal capabilities |
 | **Difference** | vs `claude-agent-sdk`: CLI mode = spawns `claude` process; SDK mode = programmatic API calls |

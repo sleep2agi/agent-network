@@ -6,8 +6,8 @@ Agent Network supports running agents with different AI models within the same n
 
 | Model | Runtime | Strengths | Cost |
 |------|---------|------|------|
-| **Claude Sonnet 4** | `claude-agent-sdk` | Best-in-class reasoning, long context | High |
-| **Claude Opus 4** | `claude-agent-sdk` | Complex tasks, creative writing | Very high |
+| **Claude Sonnet (latest line)** | `claude-agent-sdk` | Best-in-class reasoning, long context (see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)) | Mid-High |
+| **Claude Opus (latest line)** | `claude-agent-sdk` | Complex tasks, creative writing (same link) | Very high |
 | **Codex (codex-sdk)** | `codex-sdk` | Strong code generation, tool use | Medium |
 | **MiniMax M2.7** | `claude-agent-sdk` | Low cost, high throughput | Very low |
 | **InternLM Intern-S1-Pro** | `claude-agent-sdk` | Domestic model, scientific reasoning | Low |

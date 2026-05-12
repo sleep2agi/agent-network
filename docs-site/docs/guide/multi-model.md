@@ -18,8 +18,8 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 
 | 模型 | 服务商 | Runtime | 认证方式 | 特点 | 成本 |
 |------|--------|---------|---------|------|------|
-| **Claude Sonnet 4** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 最强推理 | 高 |
-| **Claude Opus 4** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 复杂任务 | 极高 |
+| **Claude Sonnet（当前主线）** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 主力推理（具体 ID 查 [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)） | 中-高 |
+| **Claude Opus（当前主线）** | Anthropic | `claude-agent-sdk` | Anthropic API Key | 复杂任务 / 长上下文（同上） | 极高 |
 | **Claude Code** | Anthropic | `claude-code-cli` | Claude Max 订阅 | 终端交互 | 订阅制 |
 | **Codex (codex-sdk)** | OpenAI | `codex-sdk` | codex auth login | 代码生成 | 中 |
 
@@ -145,11 +145,11 @@ ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 |------|---------|------|
 | 日常文案/翻译 | MiniMax M2.7 | 极低成本，中文好 |
 | 代码生成/审查 | DeepSeek V3 或 Codex (codex-sdk) | 代码能力强 |
-| 复杂推理/分析 | Claude Sonnet 4 | 推理最强 |
+| 复杂推理/分析 | Claude Sonnet（主线） | 推理最强 |
 | 长文档处理 | Kimi | 128K 上下文 |
 | 科学研究 | 书生 Intern-S1 | 科研专长 |
 | 预算有限 | MiniMax + DeepSeek 混搭 | 两个都极便宜 |
-| 全能（不差钱） | Claude Opus 4 | 什么都行 |
+| 全能（不差钱） | Claude Opus（主线） | 什么都行 |
 
 ## 成本优化策略
 
@@ -158,7 +158,7 @@ ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 把任务按复杂度分发到不同模型，最大化成本效益：
 
 ```
-复杂任务 (10%) → Claude Opus 4   ($15/M tokens)
+复杂任务 (10%) → Claude Opus     ($15/M tokens 量级)
 中等任务 (30%) → Codex (codex-sdk) ($5/M tokens)
 简单任务 (60%) → MiniMax M2.7    ($0.3/M tokens)
 ```
