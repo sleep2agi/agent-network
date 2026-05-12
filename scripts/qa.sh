@@ -54,6 +54,7 @@ L1_TESTS=(
   "qa-hub-05-roundtrip"
   "qa-hub-06-token-revoke"
   "qa-hub-07-sse-reconnect"
+  "qa-hub-08-restart-persistence"
   "qa-node-02-success-reply"
 )
 

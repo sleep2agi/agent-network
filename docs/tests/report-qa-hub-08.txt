@@ -1,0 +1,54 @@
+Test: qa-hub-08-restart-persistence (matrix HUB-08, partial NODE-04)
+Date: 2026-05-12
+Runner: Docker (sg docker)
+
+Result: PASS
+Runtime: ~10s warm, ~30s cold
+
+Coverage (12 steps hard-asserted):
+- [0] hub boot 1
+- [1] admin login (retry-aware)
+- [2] create network + mint ntok (survive-agent)
+- [3] report_status(idle) — session row written
+- [4] admin sends pre-restart-task (no subscriber → goes to inbox)
+- [5] capture sessions+tasks counts pre-restart
+- [6] SIGTERM hub wrapper + pkill -KILL bun children (anet wrapper doesn't propagate)
+- [7] restart hub on same port, same commhub.db
+- [8] admin login post-restart — password hash persisted across restart
+- [9] sessions[survive-agent] still exists post-restart
+- [10] ORIGINAL ntok still valid (get_inbox MCP returns ok + backlog)
+- [11] new SSE subscription post-restart sees "connected"
+- [12] new task post-restart delivered via SSE (new_task push)
+
+Contracts pinned:
+
+1. Hub state is fully in SQLite (~/.commhub/commhub.db). On restart it
+   reopens with WAL → all sessions/tasks/api_tokens/inbox rows survive.
+
+2. ntok is sha256-hashed at issuance and the hash is stored in api_tokens.
+   On restart, hashToken(presented_token) == stored row → validates.
+   Token survives wallet-side, no need to re-mint after hub bounce.
+
+3. SSE clients map is in-memory only. After restart it is empty — every
+   previously connected agent / dashboard MUST re-subscribe. Old SSE
+   connection from before restart is dead (peer-closed). The hub does
+   NOT track or notify on this — clients detect via socket close.
+
+Scope note (why not also test real anet-node CLI auto-reconnect here):
+  Running real `anet node start` inside a container needs a runtime
+  binary (claude / codex / minimax) or a no-LLM stub. Adds 20-30s and
+  flakiness. The hub-side contract is the foundation; agent-side
+  reconnect is a self-contained agent-node code path, testable
+  separately as NODE-04b once we have time.
+
+Implementation note — killing the hub:
+  `anet hub start &` returns the wrapper PID. `kill -TERM <wrapper>`
+  does NOT propagate to the bun child running commhub-server. Must
+  also `pkill -KILL -f 'commhub-server'` to actually take the port down.
+  Adds 'procps' to Dockerfile apt-get list.
+
+Resources:
+  - Docker (sg docker)
+  - node:20-slim + bun + jq + unzip + procps
+  - @sleep2agi/agent-network@preview from npm
+  - 0 LLM API calls
