@@ -194,3 +194,15 @@ graph LR
     TOOLS --> WX
     TOOLS --> FS
 ```
+
+## 下一步
+
+**实操**：
+- [Telegram 派遣队](/cases/telegram-squad) — Docker Compose 一键启动指挥室 + 10 worker + Telegram 接入
+- [Hello World](/cases/hello-world) — 不接 channel 的纯本地 demo
+- [辩论赛](/cases/debate) — 内置 6 agent 编排，看 agent 之间怎么协作
+
+**深入**：
+- [Agent Node 配置](/guide/agent-node) — agent 怎么接 channel 插件
+- [Dashboard](/guide/dashboard) — channel 消息流监控
+- 想自己写一个 channel？参考仓库 [demos/codex-telegram-squad](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad) 和 [pitfalls 踩坑](https://github.com/sleep2agi/agent-network/blob/main/docs/pitfalls.md)

@@ -193,3 +193,15 @@ graph LR
     TOOLS --> WX
     TOOLS --> FS
 ```
+
+## Next steps
+
+**Hands-on**:
+- [Telegram squad](/en/cases/telegram-squad) — Docker Compose one-command start with commander + 10 workers + Telegram
+- [Hello World](/en/cases/hello-world) — pure local demo without channels
+- [Debate](/en/cases/debate) — 6-agent built-in orchestration, see how agents collaborate
+
+**Dig deeper**:
+- [Agent Node config](/en/guide/agent-node) — how agents wire up channel plugins
+- [Dashboard](/en/guide/dashboard) — channel message flow monitor
+- Want to build your own channel? See [demos/codex-telegram-squad](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad) and [pitfalls](https://github.com/sleep2agi/agent-network/blob/main/docs/pitfalls.md) in the repo

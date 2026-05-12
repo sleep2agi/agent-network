@@ -299,3 +299,24 @@ location /events/ {
     proxy_cache off;
 }
 ```
+
+## 下一步
+
+**起步教程**：
+- [一键安装与起步](/guide/one-shot-install) — 装好 anet 后第一个 agent
+- [Hello World](/cases/hello-world) — 6 步建第一个 agent 集群
+- [上手指南](/guide/getting-started) — 完整安装到第一次跑
+
+**深入概念**：
+- [安全设计](/concepts/security) — token / 密码 / 隔离
+- [账号体系](/guide/account-system) — utok_ / ntok_ / 密码 关系
+- [架构概览](/guide/architecture) — 整体系统设计
+
+**升级和故障排查**：
+- [v0.7 → v0.8 升级指南](/guide/upgrade#v0-7-v0-8-升级注意-最新) — admin bootstrap / 密码管理
+- [故障排查](/troubleshooting) — 常见错误集合
+- `anet doctor --fix` — 自动 probe + 重发 ntok_
+
+**社区**：
+- [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) — 报 bug / 功能建议
+- [社区](/community) — 加入讨论

@@ -299,3 +299,24 @@ location /events/ {
     proxy_cache off;
 }
 ```
+
+## Next steps
+
+**Getting-started tutorials**:
+- [One-shot install](/en/guide/one-shot-install) — first agent after install
+- [Hello World](/en/cases/hello-world) — 6-step walkthrough
+- [Getting started](/en/guide/getting-started) — install through first run
+
+**Dig into concepts**:
+- [Security design](/en/concepts/security) — tokens / passwords / isolation
+- [Account system](/en/guide/account-system) — utok_ / ntok_ / password relationship
+- [Architecture](/en/guide/architecture) — overall system design
+
+**Upgrade and troubleshooting**:
+- [v0.7 → v0.8 upgrade](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — admin bootstrap / password management
+- [Troubleshooting](/en/troubleshooting) — common errors
+- `anet doctor --fix` — auto-probe + reissue ntok_
+
+**Community**:
+- [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) — bug reports / feature requests
+- [Community](/en/community) — join the discussion
