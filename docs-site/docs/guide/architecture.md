@@ -404,7 +404,7 @@ Channel 插件让 Agent 可以接入外部通信平台。当前支持：
 Channel 消息格式：
 
 ```xml
-<channel source="telegram" chat_id="123" user="vincent">
+<channel source="telegram" chat_id="123" user="alice">
   用户发来的消息
 </channel>
 ```

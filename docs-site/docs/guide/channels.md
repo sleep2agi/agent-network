@@ -51,7 +51,7 @@ sequenceDiagram
 
 ```bash
 export TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
-export TELEGRAM_ALLOW_USER=7612221352
+export TELEGRAM_ALLOW_USER=<your-telegram-user-id>
 ```
 
 ### Step 4: 启动
@@ -92,7 +92,7 @@ services:
 **消息格式**（Agent 看到的）：
 
 ```xml
-<channel source="telegram" chat_id="123456" message_id="789" user="vincent" ts="1713000000">
+<channel source="telegram" chat_id="123456" message_id="789" user="alice" ts="1713000000">
 写一个快排算法
 </channel>
 ```

@@ -242,7 +242,7 @@ SQUAD_ADMIN_PASS=<强密码，不要 commit>
 
 # Telegram Bot
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
-TELEGRAM_ALLOW_USER=7612221352
+TELEGRAM_ALLOW_USER=<your-telegram-user-id>
 
 # MiniMax API
 MINIMAX_API_KEY=your-minimax-api-key
