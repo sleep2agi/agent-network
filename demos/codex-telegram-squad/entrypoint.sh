@@ -3,7 +3,7 @@
 
 ALIAS="${ALIAS:-agent}"
 RUNTIME="${RUNTIME:-codex-sdk}"
-MODEL="${MODEL:-gpt-5.5}"
+MODEL="${MODEL:-<codex-model-id>}"
 HUB="${COMMHUB_URL:-http://server:9200}"
 TOKEN="${COMMHUB_TOKEN:-}"
 TOOLS_ARG="${TOOLS:-}"
@@ -28,7 +28,7 @@ CMD=(bun /app/agent-node/src/cli.ts --alias "$ALIAS" --runtime "$RUNTIME" --url 
 # Inject network roster as prior knowledge (so node knows who it can talk to)
 ROSTER="网络成员 (CommHub alias):
 - 指挥室 (Codex 指挥，处理 Telegram 消息，不要派任务给自己)
-- 代码1号 / 代码2号 / 代码3号 / 代码4号 / 代码5号 (Codex GPT-5.4，擅长代码/文件/命令)
+- 代码1号 / 代码2号 / 代码3号 / 代码4号 / 代码5号 (Codex / GPT-5，擅长代码/文件/命令)
 - 文案1号 / 文案2号 / 文案3号 / 文案4号 / 文案5号 (MiniMax，擅长文本/翻译/分析)
 
 通信方式 (MCP tools)：

@@ -53,7 +53,7 @@ services:
       - TOOLS=Read,Write,Edit,Bash,Glob,Grep
       - SYSTEM_PROMPT=你是指挥室，负责接收 Telegram 消息并分配任务。代码类任务（读写文件/命令/代码）派给 代码1号-代码5号；文本类任务（翻译/分析/写作）派给 文案1号-文案5号。用 commhub_send_task 派发，用 commhub_get_all_status 查在线状态。
 
-  # ── 代码组 (Codex GPT-5.5) ──
+  # ── 代码组 (Codex / GPT-5) ──
   worker-1:
     <<: *common
     environment:
