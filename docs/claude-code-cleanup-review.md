@@ -34,15 +34,15 @@
 
 ## P0：优先清理
 
-| ID | 类型 | 位置 | 问题 | 建议动作 |
-|---|---|---|---|---|
-| D1 | 过期文档 | `agent-network/README.md:5`, `agent-node/README.md:5`, `server/README.md:5` | 包 README 仍写 “Current preview line”，版本表停在 `2.0.3-preview.4`、`0.5.3-preview.0`、`2.2.0-preview.1`，与 package 当前版本冲突。 | 更新为稳定版本；删除 `@preview` 安装命令；版本表改为从 package.json/常量生成或只写兼容范围。 |
-| D2 | docs-site 过期安装路径 | `docs-site/docs/en/guide/getting-started.md:8-11`, `docs-site/docs/en/guide/getting-started.md:26`, `docs-site/docs/guide/basics.md:85`, `docs-site/docs/deploy/npm.md` 多处 | 用户文档仍指导安装 `@preview`，英文 getting-started 版本表还是旧 preview。 | 全站替换稳定安装路径；保留 preview 只放在“测试 prerelease”章节。 |
-| D3 | 测试固定旧 npm preview | `tests/test-npm-install/run.sh:20`, `tests/test-npm-security/run.sh:55`, `agent-network/tests/docker-e2e/*preview*` | 测试写死 `0.5.0-preview.28`、dashboard `0.1.0-preview.7`、agent-node `2.1.0-preview.13`，会测试历史包而不是当前包。 | 决定这些测试是“历史兼容测试”还是“当前发布测试”。当前发布测试应读取 package.json 或环境变量。历史测试移到 archive 并默认不跑。 |
-| D4 | 重复脚本且内容分叉 | `docs-site/docs/public/*.sh` 与 `demos/*.sh` | `agent-only.sh` 和 `upgrade-preview.sh` 完全重复；`setup-anet.sh`、`hub-only.sh` 已分叉。尤其 `docs-site/docs/public/hub-only.sh` 默认安全化到 `127.0.0.1`，但 `demos/hub-only.sh` 仍默认 `0.0.0.0` + NOPASSWD sudo。 | 选一个目录作为源；另一个由脚本同步生成。加 CI 检查 hash 或 diff，防止再次分叉。 |
-| D5 | WeChat/Feishu 文档写成已可用 | `docs-site/docs/guide/channels.md:136-194`, `docs-site/docs/en/guide/channels.md` | docs 直接给 `anet channel add wechat/feishu` 教程，但 CLI 只支持 Telegram。 | 删除 WeChat/Feishu 教程，或移动到 “planned / design” 页；主文档只保留 Telegram。 |
-| C1 | 代码和 package 发布边界冲突 | `agent-network/package.json:13-15`, `agent-network/package.json:20-22`, `agent-network/src/server.ts:20-27` | package export `./server` 指向 `./src/server.ts`，但 `files` 只发布 `dist`；`src/server.ts` 动态 import `../../server/src/index.js`，在 npm 包里也不成立。 | 删除 `./server` export 和 `src/server.ts`，或构建成 `dist/src/server.js` 并改为依赖 `@sleep2agi/commhub-server`。 |
-| C2 | CLI 主体未被 TypeScript 检查 | `agent-network/tsconfig.json` 只 include `src/client.ts`；`agent-network/bin/cli.ts:88-96` 返回 `http-api` 但 `RuntimeName` union 不包含它。 | 把 `bin/cli.ts`、`src/node-server.ts` 纳入 typecheck；先修 `RuntimeName`，再逐步处理类型错误。 |
+| ID | 类型 | 位置 | 问题 | 建议动作 | 状态（2026-05-13） |
+|---|---|---|---|---|---|
+| D1 | 过期文档 | `agent-network/README.md:5`, `agent-node/README.md:5`, `server/README.md:5` | 包 README 仍写 “Current preview line”，版本表停在 `2.0.3-preview.4`、`0.5.3-preview.0`、`2.2.0-preview.1`，与 package 当前版本冲突。 | 更新为稳定版本；删除 `@preview` 安装命令；版本表改为从 package.json/常量生成或只写兼容范围。 | ✅ 已处理（v0.8.x 同步） |
+| D2 | docs-site 过期安装路径 | `docs-site/docs/en/guide/getting-started.md:8-11`, `docs-site/docs/en/guide/getting-started.md:26`, `docs-site/docs/guide/basics.md:85`, `docs-site/docs/deploy/npm.md` 多处 | 用户文档仍指导安装 `@preview`，英文 getting-started 版本表还是旧 preview。 | 全站替换稳定安装路径；保留 preview 只放在“测试 prerelease”章节。 | ✅ 已处理（grep `@preview` 主入门 docs 0 命中） |
+| D3 | 测试固定旧 npm preview | `tests/test-npm-install/run.sh:20`, `tests/test-npm-security/run.sh:55`, `agent-network/tests/docker-e2e/*preview*` | 测试写死 `0.5.0-preview.28`、dashboard `0.1.0-preview.7`、agent-node `2.1.0-preview.13`，会测试历史包而不是当前包。 | 决定这些测试是“历史兼容测试”还是“当前发布测试”。当前发布测试应读取 package.json 或环境变量。历史测试移到 archive 并默认不跑。 | 🔁 未验证（test infra 外, docs-loop 范围外） |
+| D4 | 重复脚本且内容分叉 | `docs-site/docs/public/*.sh` 与 `demos/*.sh` | `agent-only.sh` 和 `upgrade-preview.sh` 完全重复；`setup-anet.sh`、`hub-only.sh` 已分叉。尤其 `docs-site/docs/public/hub-only.sh` 默认安全化到 `127.0.0.1`，但 `demos/hub-only.sh` 仍默认 `0.0.0.0` + NOPASSWD sudo。 | 选一个目录作为源；另一个由脚本同步生成。加 CI 检查 hash 或 diff，防止再次分叉。 | 🔁 未验证 |
+| D5 | WeChat/Feishu 文档写成已可用 | `docs-site/docs/guide/channels.md:136-194`, `docs-site/docs/en/guide/channels.md` | docs 直接给 `anet channel add wechat/feishu` 教程，但 CLI 只支持 Telegram。 | 删除 WeChat/Feishu 教程，或移动到 “planned / design” 页；主文档只保留 Telegram。 | ✅ 已处理（channels.md 现明确只支持 telegram） |
+| C1 | 代码和 package 发布边界冲突 | `agent-network/package.json:13-15`, `agent-network/package.json:20-22`, `agent-network/src/server.ts:20-27` | package export `./server` 指向 `./src/server.ts`，但 `files` 只发布 `dist`；`src/server.ts` 动态 import `../../server/src/index.js`，在 npm 包里也不成立。 | 删除 `./server` export 和 `src/server.ts`，或构建成 `dist/src/server.js` 并改为依赖 `@sleep2agi/commhub-server`。 | ✅ 已处理（[R68](https://github.com/sleep2agi/agent-network/commit/7e93897) 验证 export 已删） |
+| C2 | CLI 主体未被 TypeScript 检查 | `agent-network/tsconfig.json` 只 include `src/client.ts`；`agent-network/bin/cli.ts:88-96` 返回 `http-api` 但 `RuntimeName` union 不包含它。 | 把 `bin/cli.ts`、`src/node-server.ts` 纳入 typecheck；先修 `RuntimeName`，再逐步处理类型错误。 | ✅ 已处理（[R69](https://github.com/sleep2agi/agent-network/commit/da1dde0) 验证 tsconfig 已扩 + CI 跑 typecheck） |
 
 ## P1：需要尽快统一状态
 
