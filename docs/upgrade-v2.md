@@ -1,8 +1,19 @@
-# V2 生产环境升级方案
+# V2 生产环境升级方案（历史归档）
 
-## 版本变化
+> **⚠️ 本文档为 V1.3 → V2.0 历史升级笔记（2026-03 ~ 04 写于 V2 preview 阶段）。**
+> 
+> 当前 stable 已是 **v0.8.1**（agent-network 2.1.5 / commhub-server 0.8.0 / agent-node 2.3.0 / dashboard 0.4.2，2026-05-12）。
+> 
+> **新用户请走当前快速安装路径**：
+> - 公开站：https://anet.sh/guide/installation
+> - 仓库内：[../README.md](../README.md) → `npm i -g @sleep2agi/agent-network@latest`
+> - 升级指南：[../docs-site/docs/guide/upgrade.md](../docs-site/docs/guide/upgrade.md)
+> 
+> 下方步骤仅供从 1.3.x 跨大版本升级的存量用户参考，新装 / 0.6+ → 0.8 用户不适用。
 
-| 包 | 当前生产 | V2 Preview | 变化 |
+## 版本变化（V1.3 → V2.0，历史）
+
+| 包 | 当时生产 | V2 Preview | 变化 |
 |---|---------|-----------|------|
 | @sleep2agi/agent-network (anet) | 1.3.3 | 2.0.0-preview.8 | 18 CLI commands: stop/delete/status/tasks/doctor/logs + channel V2 |
 | @sleep2agi/agent-node | 2.0.0 | 2.1.0-preview.4 | send_reply/http-api runtime/3x retry/emoji fix/消息过滤/Anthropic format |

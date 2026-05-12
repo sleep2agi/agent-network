@@ -1,25 +1,31 @@
 # 用户 × 网络 × Agent Node 认证权限设计 V2
 
-> **实现状态（2026-04-11 对齐）**
+> **实现状态（2026-05-12 对齐 v0.8.1）**
 > 
-> ✅ 已实现：
+> 历史背景：本文写于 v0.5 / V3 早期（2026-04-11 首次对齐），描述的是双 token + 网络成员 + 邀请码的**目标态设计**。
+> v0.8 系列已通过 [RFC-001](rfcs/RFC-001-deprecate-commhub-auth-token.md) Phase 1 + 2 大幅推进了 token 边界和密码管理。
+> 
+> ✅ 已实现（v0.8.1）：
 > - 双 token：utok_（用户）+ ntok_（节点网络）+ atok_（兼容）
 > - 注册返回 utok_ + ntok_，登录返回 utok_
 > - network_members + network_invites 表
 > - 邀请码创建/加入/成员 CRUD API
 > - 首个用户自动 admin
 > - users.plan 字段 + networks.visibility/max_members 字段
+> - **RFC-001 Phase 1**：COMMHUB_AUTH_TOKEN 软废弃，仅 `/api/*` 只读 + deprecation warning
+> - **RFC-001 Phase 2**：admin utok_ bootstrap（`~/.commhub/admin-utok.json` chmod 600）、`anet passwd` / `anet hub admin reset-user`、密码强度 ≥ 8 + 弱密码字典、`anet doctor --fix` 探测并重发 ntok_
 > 
-> ❌ 未实现（目标态）：
+> ❌ 未实现（目标态，排到 v0.9+）：
 > - MCP 写操作检查网络角色（viewer 当前能 send_task）
 > - 配额执行（字段有但不拦截）
 > - utok_/ntok_ 权限边界（utok_ 当前能调 MCP）
 > - Token scope (agent/readonly) — createToken 统一写 full
 > - 公开网络自动加入 + 审批流
-> - bcrypt 密码哈希（当前 SHA-256）
+> - **Argon2id 密码哈希**（当前 SHA-256；v0.9+ 计划迁移）
+> - RFC-001 Phase 3：完全移除 COMMHUB_AUTH_TOKEN 代码路径
 > 
 > 注意：本文档中描述的权限矩阵、配额限制、公开网络等功能为**设计目标**，
-> 具体实现进度以上方状态为准。
+> 具体实现进度以上方状态为准。当前 stable 行为以代码 + anet.sh 文档为准。
 
 ## 0. 总览
 
