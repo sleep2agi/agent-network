@@ -145,11 +145,17 @@ On another machine:
 
 ```bash
 npm install -g @sleep2agi/agent-network
-anet init --hub http://<HUB-LAN-IP>:9200
-anet login --username admin --password anethub
+
+# One step — sets hub URL and logs in at the same time (recommended; matches setup-anet.sh / hub-only.sh)
+anet login --hub http://<HUB-LAN-IP>:9200 --username admin --password anethub
+
 anet node create remote-bot
 anet node start remote-bot
 ```
+
+::: tip Two-step equivalent
+You can also do this in two commands: `anet init --hub http://<HUB-LAN-IP>:9200` to save the hub URL, then `anet login --username admin --password anethub` to authenticate. `init` saves config without logging in — useful for scripted setups or when you want to keep an existing credential.
+:::
 
 `remote-bot` shares the same hub as your local agents.
 

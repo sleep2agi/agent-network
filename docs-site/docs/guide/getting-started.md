@@ -149,11 +149,17 @@ anet hub start --host 0.0.0.0
 
 ```bash
 npm install -g @sleep2agi/agent-network
-anet init --hub http://<HUB-LAN-IP>:9200
-anet login --username admin --password anethub
+
+# 一步同时配 hub 地址 + 登录（推荐, 跟 setup-anet.sh / hub-only.sh 同款）
+anet login --hub http://<HUB-LAN-IP>:9200 --username admin --password anethub
+
 anet node create remote-bot
 anet node start remote-bot
 ```
+
+::: tip 两步版本（等价）
+也可以分两步：先 `anet init --hub http://<HUB-LAN-IP>:9200` 保存 hub 地址，再 `anet login --username admin --password anethub`。`init` 只保存配置不登录，适合脚本化或保留旧凭证场景。
+:::
 
 `remote-bot` 与本地 Agent 共用同一个 Hub。
 
