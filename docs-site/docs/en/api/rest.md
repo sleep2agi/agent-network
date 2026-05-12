@@ -43,6 +43,10 @@ curl http://localhost:9200/health
 }
 ```
 
+::: tip The `license` field is a v0.6 legacy
+`license: "trial"` is a leftover from the v0.6 era 14-day trial mechanism. After the Apache 2.0 OSS transition it is **no longer a commercial feature gate** (self-hosted has no notion of "expired"). The `send_task` path still runs the trial check only for backward compatibility; if you hit `license_expired`, see [troubleshooting](/en/troubleshooting). Planned for full removal in v0.9+.
+:::
+
 ---
 
 ## Auth Endpoints

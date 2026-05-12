@@ -43,6 +43,10 @@ curl http://localhost:9200/health
 }
 ```
 
+::: tip `license` 字段是 v0.6 legacy
+`license: "trial"` 是 v0.6 时代 14 天试用机制的残留字段，Apache 2.0 OSS 后**不再作为商业功能门控**（自部署没有"过期"概念）。`send_task` 路径仍跑 trial 检查仅为后向兼容，若命中 `license_expired` 见 [troubleshooting](/troubleshooting)。v0.9+ 计划整段移除。
+:::
+
 ---
 
 ## 认证端点
