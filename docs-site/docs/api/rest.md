@@ -7,7 +7,7 @@ CommHub Server 提供 REST API 供 Dashboard、CLI 和第三方系统调用。
 | 项 | 值 |
 |-----|-----|
 | Base URL | `http://YOUR_IP:9200` |
-| 认证 | `Authorization: Bearer <token>` 或 `?token=<token>` |
+| 认证 | `Authorization: Bearer <token>` **（推荐）**；`?token=<token>` URL query 为 SSE / 浏览器 EventSource 保留（有 access-log 泄漏风险，详见 [安全设计](/concepts/security)） |
 | 内容类型 | `application/json` |
 | 编码 | UTF-8 |
 

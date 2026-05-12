@@ -7,7 +7,7 @@ CommHub Server provides a REST API for Dashboard, CLI, and third-party system in
 | Item | Value |
 |-----|-----|
 | Base URL | `http://YOUR_IP:9200` |
-| Auth | `Authorization: Bearer <token>` or `?token=<token>` |
+| Auth | `Authorization: Bearer <token>` **(recommended)**; `?token=<token>` URL query kept for SSE / browser EventSource (access-log leak risk — see [Security](/en/concepts/security)) |
 | Content Type | `application/json` |
 | Encoding | UTF-8 |
 
