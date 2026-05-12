@@ -162,7 +162,7 @@ anet node start remote-bot
 :::
 
 ::: warning 未验证（请自行评估）
-- `anet quickstart` —— 已从文档中移除
+- `anet quickstart` —— 一键启动 hub + dashboard + node 的旧命令，CLI 中仍可用但不推荐（E2E 未覆盖），本指南改推 1-7 步分步流程
 - `codex-sdk` runtime 的端到端流程
 - `claude-code-cli` runtime 的端到端流程
 - `anet license` / `anet activate` —— v0.6 legacy 命令，**Apache 2.0 OSS 后不再需要**（Hub 后向兼容仍保留 `licenses` 表 + 14 天 trial 检查）

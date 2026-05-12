@@ -158,7 +158,7 @@ anet node start remote-bot
 :::
 
 ::: warning Not verified (treat as experimental)
-- `anet quickstart` — removed from the docs.
+- `anet quickstart` — legacy one-shot hub + dashboard + node command, still available in the CLI but not recommended (no E2E coverage); this guide recommends the step-by-step 1–7 flow instead.
 - `codex-sdk` runtime end-to-end.
 - `claude-code-cli` runtime end-to-end.
 - `anet license` / `anet activate` — v0.6 legacy commands, **no longer needed after Apache 2.0 OSS** (Hub keeps the `licenses` table + 14-day trial check for backward-compat).
