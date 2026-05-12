@@ -184,10 +184,12 @@ You are the commander. Receive messages and intelligently dispatch tasks:
 ### Strategy 1: Tiered Models
 
 ```
-Complex tasks (10%) → Claude Opus ($15/M tokens)
-Medium tasks (30%)  → Codex (codex-sdk) ($5/M tokens)
-Simple tasks (60%)  → MiniMax ($0.3/M tokens)
+Complex tasks (10%) → Claude Opus (~$15/M tokens order-of-magnitude)
+Medium tasks (30%)  → Codex (codex-sdk) (~$5/M tokens)
+Simple tasks (60%)  → MiniMax (~$0.3/M tokens)
 ```
+
+> Numbers above are order-of-magnitude estimates as of 2026-05; provider pricing changes — check the provider's official rate card before sizing a budget.
 
 ### Strategy 2: Budget Controls
 
