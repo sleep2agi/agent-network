@@ -50,9 +50,11 @@
 
 原建议中**第 3 项「在 CI 加 `npm pack --dry-run` + 临时目录 `npm install <tgz>` + import/bin smoke test」仍未实现**——目前 docker E2E 跑 npm smoke test 但没纳入 GitHub Actions CI gate。tracking 见 [open-source-quality-review.md 修复顺序 §5](#建议的修复顺序)。
 
-### P0：CLI 类型覆盖不完整，已有类型事实冲突
+### P0：CLI 类型覆盖不完整，已有类型事实冲突 — ✅ 已修（建议 1+2+3 全部落地）
 
-`agent-network/tsconfig.json` 只包含：
+> **状态**：当前 `agent-network/tsconfig.json` `include` 已扩到 `["src/client.ts", "src/node-server.ts", "bin/cli.ts"]`；`package.json` 提供 `typecheck` script (`tsc --noEmit`)；CI `.github/workflows/e2e-docker.yml` 在 e2e 步骤前先跑 `bun tsc --noEmit`。**`RuntimeName` union 现已包含 `"http-api"`**（cli.ts L133），不再跟 `normalizeRuntime()` 冲突。下方原描述保留作 audit trace。
+
+~~`agent-network/tsconfig.json` 只包含：~~
 
 ```json
 {
@@ -60,19 +62,13 @@
 }
 ```
 
-但 CLI 是项目最重要的用户入口，`agent-network/bin/cli.ts` 没有进入 TypeScript 检查。当前代码里 `RuntimeName` 定义为：
+~~但 CLI 是项目最重要的用户入口，`agent-network/bin/cli.ts` 没有进入 TypeScript 检查。当前代码里 `RuntimeName` 定义为：~~
 
 ```ts
 type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk";
 ```
 
-但 `normalizeRuntime()` 和后续逻辑已经返回/判断 `http-api`。这类问题如果被 typecheck 覆盖，应该在提交前暴露。
-
-建议：
-
-1. 新增 `tsconfig.build.json` 或扩大现有 `include`，至少覆盖 `bin/cli.ts`、`src/client.ts`、`src/node-server.ts`。
-2. 在每个包里加 `typecheck` script。
-3. CI 中先跑 typecheck，再跑 Docker E2E。
+~~但 `normalizeRuntime()` 和后续逻辑已经返回/判断 `http-api`。这类问题如果被 typecheck 覆盖，应该在提交前暴露。~~
 
 ### P0：测试文档和 CI 实际覆盖不一致
 
@@ -123,9 +119,11 @@ type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk";
 3. docs-site changelog 中历史版本可以保留 preview，但页面顶部必须清楚写当前稳定版本和推荐安装方式。
 4. 对 `@preview` 加 CI grep allowlist，避免新用户文档再次引入旧安装命令。
 
-### P0：公开 SDK 的 `reply()` API 目前调用不存在的 MCP tool
+### P0：公开 SDK 的 `reply()` API 目前调用不存在的 MCP tool — ✅ 已修（建议 1+2 落地）
 
-`agent-network/src/client.ts:155-158` 暴露：
+> **状态**：当前 `agent-network/src/client.ts:156-158` `reply()` 已改为调用 `send_reply`，status union 收敛到 `"completed" | "blocked" | "error" | "in_progress"`，传 `in_reply_to` 字段（不再用 `task_id`）。SDK API 合约对齐 server 实际注册的 tool。建议 3（tarball 安装后 SDK smoke test）尚未集成进 CI（tracking 见下方「建议的修复顺序」）。下方原描述保留作 audit trace。
+
+~~`agent-network/src/client.ts:155-158` 暴露：~~
 
 ```ts
 async reply(taskId: string, text: string, status = "completed") {
@@ -133,12 +131,12 @@ async reply(taskId: string, text: string, status = "completed") {
 }
 ```
 
-但 `server/src/tools.ts` 实际注册的工具是 `send_reply`，没有 `reply`：
+~~但 `server/src/tools.ts` 实际注册的工具是 `send_reply`，没有 `reply`：~~
 
-- `send_reply`：`server/src/tools.ts:588-589`
+- ~~`send_reply`：`server/src/tools.ts:588-589`~~
 - 全部注册工具：`report_status`、`report_completion`、`get_inbox`、`ack_inbox`、`get_all_status`、`get_session_status`、`send_task`、`send_message`、`send_reply`、`send_ack`、`retry_task`、`get_task`、`list_tasks`、`cancel_task`、`reassign_task`、`broadcast`、`get_completions`
 
-同时 docs-site npm 文档直接示例：
+~~同时 docs-site npm 文档直接示例：~~
 
 ```ts
 hub.on('task', async (msg) => {
@@ -146,13 +144,7 @@ hub.on('task', async (msg) => {
 });
 ```
 
-这意味着第三方用户按官方 SDK 文档写代码会调用不存在的工具。这个问题比“文档描述不准”更严重，是公开 API 合约断裂。
-
-建议：
-
-1. 将 SDK `reply()` 改为调用 `send_reply`。
-2. 将 SDK status 映射从 `completed/blocked/error/in_progress` 明确转换为 server 接受的 `replied/failed/cancelled` 或另设 `report_completion()`。
-3. 给 `@sleep2agi/agent-network` 加 tarball 安装后的 SDK smoke test：`send()`、`reply()`、`message()` 至少各跑一条。
+~~这意味着第三方用户按官方 SDK 文档写代码会调用不存在的工具。这个问题比"文档描述不准"更严重，是公开 API 合约断裂。~~
 
 ### P0：`startServer` 编程入口即使被打包也会解析错路径
 
