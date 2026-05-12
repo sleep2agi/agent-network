@@ -20,23 +20,26 @@ The table above lists verified common providers, but `claude-agent-sdk` integrat
 
 ## Configuration
 
-### Claude (claude-agent-sdk)
+### Claude (Overseas)
 
-Claude uses the native Anthropic SDK and requires a Claude Pro subscription.
+Two equivalent ways to run Claude — pick whichever auth you already have.
 
 ```bash
-# Log in first
-claude auth login
-
-# Create and start a Claude agent
+# Option 1: Anthropic API Key (claude-agent-sdk runtime)
 # --model: pick the latest id from [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)
+ANTHROPIC_API_KEY=sk-ant-xxx \
 anet node create reasoning-master --runtime claude-agent-sdk --model <anthropic-model-id>
+
+# Option 2: Claude Code CLI (claude-code-cli runtime, requires a Claude Max subscription)
+anet node create all-rounder --runtime claude-code-cli
+
 anet node start reasoning-master
 ```
 
 | Environment Variable | Description |
 |---------|------|
-| (not needed) | Uses `claude auth login` credentials |
+| `ANTHROPIC_API_KEY` | Anthropic API key (Option 1: `claude-agent-sdk`) |
+| (not needed) | Option 2 reuses local `claude auth login` credentials (`claude-code-cli`) |
 
 ### Codex SDK (gpt-5.4)
 
