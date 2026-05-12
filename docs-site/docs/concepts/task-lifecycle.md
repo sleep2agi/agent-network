@@ -198,7 +198,7 @@ flowchart LR
 
 ## 消息类型
 
-Agent Network 区分四种消息类型，只有 `task` 触发 AI 处理：
+Agent Network 区分五种消息类型，只有 `task` 和 `broadcast` 触发 AI 处理：
 
 | 类型 | 语义 | 触发 AI | 入 inbox | SSE 事件 |
 |------|------|:-------:|:--------:|---------|

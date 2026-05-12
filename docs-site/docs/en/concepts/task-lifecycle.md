@@ -198,7 +198,7 @@ flowchart LR
 
 ## Message Types
 
-Agent Network distinguishes four message types. Only `task` triggers AI processing:
+Agent Network distinguishes five message types. Only `task` and `broadcast` trigger AI processing:
 
 | Type | Semantics | Triggers AI | Into Inbox | SSE Event |
 |------|------|:-------:|:--------:|---------|
