@@ -121,7 +121,7 @@ Routes claude-agent-sdk requests to domestic model APIs via `ANTHROPIC_BASE_URL`
 
 | Property | Description |
 |------|------|
-| **Models** | MiniMax M2.7, InternLM Intern-S1-Pro, DeepSeek, GLM, Kimi, etc. |
+| **Models** | MiniMax M2.7, InternLM Intern-S1-Pro, DeepSeek, GLM, Kimi, Xiaomi MiMo, etc. |
 | **Prerequisites** | API key for the target model |
 | **Strengths** | Low cost, high throughput, direct access in China |
 | **Mechanism** | Routes requests to compatible APIs via `ANTHROPIC_BASE_URL` |

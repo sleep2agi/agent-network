@@ -121,7 +121,7 @@ npx @sleep2agi/agent-node \
 
 | 属性 | 说明 |
 |------|------|
-| **模型** | MiniMax M2.7、书生 Intern-S1-Pro、DeepSeek、GLM、Kimi 等 |
+| **模型** | MiniMax M2.7、书生 Intern-S1-Pro、DeepSeek、GLM、Kimi、小米 MiMo 等 |
 | **前置** | 对应模型的 API Key |
 | **特点** | 低成本、高吞吐、国内直连 |
 | **机制** | 通过 `ANTHROPIC_BASE_URL` 将请求路由到兼容 API |
