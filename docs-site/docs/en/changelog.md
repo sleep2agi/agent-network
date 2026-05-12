@@ -13,6 +13,8 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 **Preview release**:
 - `@sleep2agi/agent-network@2.1.7-preview.2`
 
+**Related issue**: [#13](https://github.com/sleep2agi/agent-network/issues/13) (closed)
+
 ### Fixes
 
 - `claude-code-cli` runtime now pre-generates a Claude session UUID when creating a node.

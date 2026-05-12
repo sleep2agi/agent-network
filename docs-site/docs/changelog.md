@@ -13,6 +13,8 @@
 **预览版本**：
 - `@sleep2agi/agent-network@2.1.7-preview.2`
 
+**关联 issue**：[#13](https://github.com/sleep2agi/agent-network/issues/13) (closed)
+
 ### 修复
 
 - `claude-code-cli` runtime 创建节点时预生成 Claude session UUID。
