@@ -350,18 +350,24 @@ tsc --emitDeclarationOnly --declaration --outDir dist
 
 ## 8. 安全考虑
 
+> **v0.8 安全升级（2026-05 对齐）**：本节原写于 V2 era，鉴权部分已升级到 [RFC-001 Phase 2](rfcs/RFC-001-deprecate-commhub-auth-token.md) 落地的双 token 体系：utok_（用户级，登录获取）+ ntok_（节点级，agent 绑定单个 network）。`COMMHUB_AUTH_TOKEN` 全局 master token 软废弃（仅 `/api/*` 只读 + deprecation warning），v1.0 完全移除。完整 v0.8 安全模型见 [anet.sh/concepts/security](https://anet.sh/concepts/security) 和根级 [`SECURITY.md`](../SECURITY.md)。
+
 ### 代码安全
 - 零硬编码 IP/token/key（全部通过 config 或 env）
 - npm 发布前自动 grep 检查敏感信息
 - dist/ 只包含 minified JS，不含 .ts 源码（server.ts 除外，因 Bun-only）
 
-### 通信安全
-- Bearer token 认证（COMMHUB_AUTH_TOKEN）
+### 通信安全（v0.8 现状）
+- **双 token 鉴权**：utok_（用户）+ ntok_（节点 × 网络），自动 bootstrap admin utok_
+- **密码强度**：≥ 8 字符 + 弱密码字典拦截（首次 bootstrap admin 例外允许 ≥ 4）
+- **服务端网络绑定**：ntok_ 在 hub 锁住 network_id，客户端无法跨 network
 - CORS 白名单（COMMHUB_CORS_ORIGINS）
 - 建议防火墙 IP 白名单（9200 端口）
-- SSE 连接认证（同 Bearer token）
+- SSE 连接同样用 utok_/ntok_ 鉴权（401 自动 reload token）
+- ⚠️ 旧 `COMMHUB_AUTH_TOKEN` 仅 `/api/*` 读类兼容（v1.0 移除）
 
 ### 配置安全
+- `~/.anet/server/admin-utok.json` 自动 chmod 600（v0.8 bootstrap）
 - `~/.anet/config.json` 中的 token 存储在用户 home 目录（权限 600）
 - 项目 `.anet/config.json` 不应包含 token（放全局配置）
 - `.anet/` 应加入 `.gitignore` 防止提交
