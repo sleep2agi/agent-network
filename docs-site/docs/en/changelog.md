@@ -8,6 +8,19 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## 2026-05-12 — **v0.8.2-preview** claude-code-cli session resume fix
+
+**Preview release**:
+- `@sleep2agi/agent-network@2.1.7-preview.2`
+
+### Fixes
+
+- `claude-code-cli` runtime now pre-generates a Claude session UUID when creating a node.
+- First start binds a fixed session with `claude --session-id <uuid>`; once `~/.claude/projects/<cwd>/<uuid>.jsonl` exists on the local machine, subsequent starts switch to `claude --resume <uuid>` to continue the same conversation — `anet node start` no longer accidentally opens a new chat.
+- `anet node start --new-session` generates and saves a fresh session UUID.
+
+---
+
 ## 2026-05-11 — **v0.8.1 patch** Dashboard SSE-online global fix ✅ stable
 
 **Version sync** (npm `latest` tag, git tag `v0.8.1`):
