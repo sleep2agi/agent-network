@@ -17,7 +17,6 @@
 > 
 > ❌ 未实现（目标态，排到 v0.9+）：
 > - MCP 写操作检查网络角色（viewer 当前能 send_task）
-> - 配额执行（字段有但不拦截）
 > - utok_/ntok_ 权限边界（utok_ 当前能调 MCP）
 > - Token scope (agent/readonly) — createToken 统一写 full
 > - 公开网络自动加入 + 审批流
@@ -25,7 +24,8 @@
 > - RFC-001 Phase 3：完全移除 COMMHUB_AUTH_TOKEN 代码路径
 >
 > ⛔ 已废弃方向（本文下方仍有相关引用，请忽略）：
-> - `anet quickstart` 一键命令 — 已从 CLI 移除，等价流程见 [anet.sh/guide/getting-started](https://anet.sh/guide/getting-started)
+> - **Free / Pro / Admin Plan 配额体系**（下方 L244 表 + users.plan 字段实现）—— v0.6 时代 SaaS 假设，Apache 2.0 OSS 转向后**永久搁置**，不再 v0.9+ planned。schema 字段保留作历史，hub 不拦截配额。详见 [anet.sh/concepts/networks 配额限制章节](https://anet.sh/concepts/networks)
+> - `anet quickstart` 一键命令 —— 命令仍在 CLI（一键起 hub + dashboard + node），但 anet.sh docs 改推 step-by-step（更可控）；E2E 未覆盖。详见 [getting-started 未验证列表](https://anet.sh/guide/getting-started)
 > - "官方免费 hub" 托管 — 项目方向已转为 Apache 2.0 + 自部署，不做 SaaS 托管
 >
 > 注意：本文档中描述的权限矩阵、配额限制、公开网络等功能为**设计目标**，
