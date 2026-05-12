@@ -27,6 +27,7 @@ on:
       - 'agent-node/**'
       - 'tests/qa-*/**'
       - 'scripts/qa.sh'
+      - '.github/workflows/qa.yml'
 
 # Older runs on the same ref get cancelled — saves minutes when a PR is
 # updated rapidly. main pushes run independently.
