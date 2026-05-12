@@ -25,6 +25,8 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 
 - **[strategy.md](strategy.md)** — 哲学 / 分层 / 资源 / 节奏
 - **[test-matrix.md](test-matrix.md)** — 4 persona 矩阵 + L0 单测清单 + 状态
+- **[v0-summary.md](v0-summary.md)** — v0 ship-readiness 盘点（R1-R20 累计成果）
+- **[v1-roadmap.md](v1-roadmap.md)** — v1 路线提案（5 方向，等 Vincent 拍板）
 - 历史报告：[../tests/report-*.txt](../tests/)
 
 ## 当前测试库
