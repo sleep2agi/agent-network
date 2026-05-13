@@ -37,8 +37,9 @@ npm install -g @anthropic-ai/claude-code
 **2. 登录 Claude.ai 订阅**（OAuth 流程，浏览器一次性授权）：
 
 ```bash
-claude
-# 首次启动会弹登录提示，按引导走完即可
+claude auth login        # 显式触发登录（idempotent, 脚本化首选）
+# 或
+claude                   # 首次启动会自动弹登录提示，按引导走完即可
 ```
 
 **3. 验证**：

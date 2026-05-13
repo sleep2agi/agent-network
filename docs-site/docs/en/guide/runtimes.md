@@ -37,8 +37,9 @@ npm install -g @anthropic-ai/claude-code
 **2. Log in to your Claude.ai subscription** (one-time OAuth flow in the browser):
 
 ```bash
-claude
-# The first launch prompts you to log in — follow the on-screen flow.
+claude auth login        # Explicit login (idempotent, preferred for scripts)
+# or
+claude                   # First launch auto-prompts the OAuth flow
 ```
 
 **3. Verify**:
