@@ -108,6 +108,25 @@ type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk" | "http-
 
 ## 3. 设计
 
+### 3.0 Phase 0 spike gate — MCP `setNotificationHandler` 实测 (blocking implement)
+
+**Per 通信牛 review P1 #2** (was §11 Q10, promoted to blocking gate):
+
+`@modelcontextprotocol/sdk` Client 的 `setNotificationHandler(schema, handler)` 通常按 schema/method 注册 typed handler, 非标准 `codex/event` method 可能不被 SDK typed dispatcher 捕获。**implement 前 30min spike 实测**, 3 个 fallback path 确认其一可用后方可启动 Phase 1:
+
+| Spike result | Fallback path | 实施 complexity |
+|---|---|---|
+| **A**: SDK Client 暴露 `fallbackNotificationHandler` 字段 (per 通信龙 plan 98b6728 §3.2 引用) | 直接用 SDK native API | ~5 行 (cli.ts L437-style) |
+| **B**: SDK 不 expose catch-all, 但 transport (`StdioClientTransport`) 暴露 `onmessage` raw event | client transport-level intercept + manual JSON-RPC dispatch | ~30 行 (复用 `/tmp/codex-schema/JSONRPCMessage.json` schema framing) |
+| **C**: 都不 work | 不用 @modelcontextprotocol/sdk Client, 自己写 raw stdio JSON-RPC parser (借鉴 codex 0.130 protocol envelope `{jsonrpc, id?, method, params?}`) | ~100 行 (full bring-your-own MCP client) + 失 SDK tools/list typed types |
+
+**Spike degradation policy** (per 通信牛 P1 #2 末段):
+- Spike A/B/C 任一 work → Phase 1 ship full feature (含 live progress forwarding)
+- Spike 全 fail → Phase 1 ship **degraded**: only `tools/call codex` SYNC return → commhub_send_task reply, 不承诺 live progress (`item/agentMessage/delta` 等). Setup wizard 显式 warn "live progress unavailable, codex 输出仅最终结果"
+- doc 显式标 spike outcome + 选用 fallback path 在 implementation PR description
+
+**Spike 谁做**: 通信工程马 implement 第一步 (在 unstash worktree 后, 改 cli.ts 之前)。
+
 ### 3.1 Architecture (Option 2: agent-node 内 runtime bridge)
 
 ```
@@ -342,68 +361,192 @@ ChatGPT account auth model 不支持时 (实测 `gpt-4.1-mini` fail):
 }
 ```
 
-→ anet bridge 须检查 `isError` field, 若 true → forward to commhub as task error 不作 success reply。
-
-### 4.4 Thread lifecycle 策略
-
-**默认 per session 一个 thread** (跟 claude-code-cli runtime 一致) — agent-node 进程 lifetime 内首单创建 threadId, 后续 task 全用 `codex-reply { threadId, prompt }`。
-
-- 优点: context 累积, 模型记忆历史 task
-- 缺点: context 超长可能撞 model_context_window (实测 gpt-5.2 是 258400 tokens)
-
-**Phase 2 可选 alternative**: `profile.flags.codex.threadStrategy: "session" | "task"` 选项, task 模式每个 commhub task 起新 thread (clean isolation)。Phase 1 hardcode `session` 简化。
-
-## 5. Live Progress Forwarding — `codex/event` → commhub `report_progress`（RFC-003 复用）
-
-### 5.1 `codex/event` notification 类型清单（probe 实测）
-
-| codex/event type | 触发时机 | RFC-003 NodeEvent.kind mapping |
-|---|---|---|
-| `session_configured` | session 初始化 | `ProgressKind.LIFECYCLE`, sub_state=`session_ready` |
-| `mcp_startup_update` | MCP 子服务 starting/ready/failed | `ProgressKind.SUBSYSTEM`, sub_state=server-state |
-| `task_started` | turn 开始 inference | `ProgressKind.TURN_STARTED` |
-| `item_started` (AgentMessage) | model 开始生成回复 | `ProgressKind.AGENT_MESSAGE_STARTED` |
-| `agent_message_content_delta` | token-level streaming | `ProgressKind.AGENT_MESSAGE_DELTA` (high-frequency, batch 200ms/1KB) |
-| `item_started` (CommandExecution) | model 决定执行 shell 命令 | `ProgressKind.TOOL_CALL_STARTED` |
-| `item_completed` (CommandExecution) | shell 命令完成 | `ProgressKind.TOOL_CALL_COMPLETED` |
-| `item_started` (FileChange) | model 改文件 | `ProgressKind.FILE_CHANGE_STARTED` |
-| `item_completed` (FileChange) | 文件改完 | `ProgressKind.FILE_CHANGE_COMPLETED` |
-| `agent_message` | 完整回复 (end of streaming) | `ProgressKind.AGENT_MESSAGE_COMPLETED` |
-| `token_count` | rate-limit + usage update | `ProgressKind.USAGE_UPDATE` |
-| `task_complete` | turn 结束 | `ProgressKind.TURN_COMPLETED`, fields={duration_ms, time_to_first_token_ms} |
-| `raw_response_item` | 原始 model 输出 item | **不 forward** (噪声太多, debug only) |
-
-### 5.2 Schema mapping (per 通信工程马 review focus)
-
-agent-node bridge 内置 mapper:
+**关键: threadId save 顺序 (per 通信牛 review P1 #3)** — 实测 model/auth error 路径 `structuredContent.threadId` 仍有值, 若 anet 盲存会让后续任务 `codex-reply` 到坏上下文。**正确顺序**:
 
 ```ts
-function codexEventToNodeEvent(ev: CodexEvent): NodeEvent | null {
-  const { type, ...rest } = ev.msg;
+const r = await this.mcpClient.callTool({...});
+
+// Step 1: 检查 isError 先决定是否进 session state
+if (r.isError) {
+  // Error path: 不 update threadId, forward as task error
+  await commhubSendReply({
+    task_id: task.task_id,
+    content: `Codex error: ${r.content?.[0]?.text || "unknown"}`,
+    isError: true,
+  });
+  return;
+}
+
+// Step 2: 验 content valid (避免 structuredContent.content 空字符串等边界)
+const finalContent = r.structuredContent?.content || r.content?.[0]?.text;
+if (!finalContent || finalContent.trim() === "") {
+  await commhubSendReply({
+    task_id: task.task_id,
+    content: "Codex returned empty content",
+    isError: true,
+  });
+  return;
+}
+
+// Step 3: 仅 success + content valid 才 save threadId
+if (isFirstTask) {
+  this.threadId = (r.structuredContent as any)?.threadId;
+  await writebackSessionId(this.threadId);  // per §4.4 align agent-node session lifecycle
+}
+
+await commhubSendReply({ task_id: task.task_id, content: finalContent });
+```
+
+### 4.4 Thread lifecycle align agent-node session 写回机制 (per 通信牛 review P1 #4)
+
+**默认 per agent-node process lifetime 一个 thread** — 跟现有 `agent-node/src/cli.ts` 的 `SESSION_ID` + `writebackSession()` 机制对称:
+
+| 时机 | 行为 |
+|---|---|
+| Agent-node 启动 | Read `.anet/nodes/<alias>/config.json` 的 `session` field (per memory `feedback_anet_session_field.md`, claude code session UUID 兼容) — 若有值, 视为 `SESSION_ID` 已存 → 首单 dispatch via `codex-reply { threadId: SESSION_ID, prompt }` (resume 路径) |
+| Agent-node 首单 (无 SESSION_ID) | `tools/call codex {prompt, ...}` → 成功返 → `writebackSession(r.structuredContent.threadId)` 写回 node config |
+| Agent-node 首单 (有 SESSION_ID) | `tools/call codex-reply {threadId: SESSION_ID, prompt}` → resume |
+| Agent-node 续单 | `tools/call codex-reply {threadId: this.threadId, prompt}` |
+| Agent-node 重启后 | Read config, 走 resume 路径 (跟 claude-code-cli / codex-sdk runtime 行为一致) |
+
+→ 用户 `anet node restart <alias>` 后 codex 会 resume 之前的 thread (rollout 文件已 disk persist), context 不丢。
+
+**Phase 2 可选 alternative**: `profile.flags.codex.threadStrategy: "session" | "task"` 选项, task 模式每个 commhub task 起新 thread (clean isolation, debug 用)。Phase 1 hardcode `session` 简化。
+
+## 5. Live Progress Forwarding — `codex/event` → commhub `report_progress`（RFC-003 复用，无 schema 改动）
+
+### 5.1 codex/event → RFC-003 NodeEvent.kind mapping (实测 + 通信牛 review P1 #1 rewrite)
+
+**关键修正 (per 通信牛 P1 #1)**: 用 RFC-003 现有 `ProgressKind` union (`turn_start` / `thinking` / `tool_start` / `tool_end` / `todo_update` / `subagent_start` / `subagent_end` / `rate_limit` / `compact` / `error` / `turn_end`) **完全 cover** codex/event types, **无 commhub schema 改动 + 无 dashboard 改动**:
+
+#### Phase 1 forward (5 high-value + 2 critical = 7 kinds) — per §11 Q6 narrow
+
+| codex/event type | RFC-003 kind | RFC-003 substate | payload | forward? |
+|---|---|---|---|---|
+| `task_started` | `turn_start` | — | `{tokens_in: 0}` (initial) | ✅ Phase 1 |
+| `agent_message_content_delta` | `thinking` | — | `{preview: <batched delta text>}` (200ms / 1KB flush) | ✅ Phase 1 |
+| `item_started` (AgentMessage) | `thinking` | `planning` | `{preview: ""}` (item started signal) | ✅ Phase 1 |
+| `item_started` (CommandExecution) | `tool_start` | `tool_running` | `{tool_name: "shell", tool_use_id: item.id, args_preview: command.slice(0, 200)}` | ✅ Phase 1 |
+| `item_completed` (CommandExecution) | `tool_end` | — | `{tool_use_id, ok: exit_code==0, duration_ms, output_preview: aggregated_output.slice(0, 500), exit_code}` | ✅ Phase 1 |
+| `item_started` (FileChange) | `tool_start` | `tool_running` | `{tool_name: "apply_patch", tool_use_id: item.id, args_preview: file_paths.join(",")}` | ✅ Phase 1 |
+| `item_completed` (FileChange) | `tool_end` | — | `{tool_use_id, ok, duration_ms, output_preview: diff_summary}` | ✅ Phase 1 |
+| `item_started` / `item_completed` (TodoList) | `todo_update` | `planning` (started) / — (completed) | `{items: todo_items, from: 'codex_native'}` | ✅ Phase 1 |
+| `task_complete` | `turn_end` | `idle` | `{tokens_in, tokens_out, cost_usd?}` (from task_complete + token_count fold) | ✅ Phase 1 |
+| `account/rateLimits/updated` (if emit) | `rate_limit` | `rate_limited` | `{resets_at_ms, limit_type, utilization}` | ✅ Phase 1 (critical) |
+| Error event (task_failed / thread.error) | `error` | — | error.field: `{code: 'tool_error' \| 'auth_failed' \| ..., message, retryable}` | ✅ Phase 1 (critical) |
+
+#### Phase 1 log-only (~6 types) — Open Q6 narrow rationale
+
+| codex/event type | reason |
+|---|---|
+| `session_configured` | session metadata (model, sandbox), not progress signal — log only |
+| `mcp_startup_update` | codex 子 MCP server startup (codex_apps / 用户 commhub-proxy 等), debug 用 — log only |
+| `item_completed` (AgentMessage) | turn_end 已 carry final content, 重复 forward — log only |
+| `agent_message` | 同 item_completed AgentMessage — log only |
+| `token_count` | fold into `turn_end` payload, 不单独 forward — log only |
+| `raw_response_item` | 原始 model item, 噪声太大 (实测 12-line rollout 大部分是这个) — log only |
+| `warning` (under-development) | filter "Under-development incomplete" message — log only |
+
+#### Phase 2 forward 候选 (Open Q6 deferred)
+
+剩余 ServerNotification types (per `/tmp/codex-schema/ServerNotification.json` 63 events) 大多 codex 内部 lifecycle 或 Windows specific, Phase 2 视 dashboard UX 需求 + 用户 feedback 决定是否加 forward。**核心 5 kinds + 2 critical 已 cover anet "派单后静默" 解决主体**。
+
+### 5.2 Schema mapping code (Phase 1)
+
+agent-node bridge 内置 mapper (用 RFC-003 actual ProgressKind union, **无新 kind 引入**):
+
+```ts
+import { ProgressKind, SubState, NodeEvent } from "./events";
+
+interface DeltaBuffer { text: string; firstTs: number; }
+const deltaBuf: Record<string /* thread_id */, DeltaBuffer> = {};
+
+function codexEventToNodeEvent(ev: any): NodeEvent | null {
+  const msg = ev.params?.msg;
+  if (!msg) return null;
+  const { type } = msg;
+  const ts_ms = Date.now();
+  const baseFields = { alias: ALIAS, task_id: CURRENT_TASK_ID, origin: "codex_sdk", ts_ms };
+  // ↑ Phase 1 reuse `codex_sdk` origin (mcp-server 本质同 codex backend; per RFC-003 origin enum)
+  // Phase 2 可加 `codex_cli` origin if dashboard 须区分 codex-sdk vs codex-cli-mcp runtime (minor schema bump)
+
   switch (type) {
-    case "agent_message_content_delta":
-      return {
-        kind: ProgressKind.AGENT_MESSAGE_DELTA,
-        delta_text: rest.delta,
-        item_id: rest.item_id,
-        thread_id: rest.thread_id,
-        turn_id: rest.turn_id,
-        timestamp: Date.now(),
-      };
+    case "task_started":
+      return { ...baseFields, kind: "turn_start", payload: { kind: "turn_start", tokens_in: 0 } };
+
+    case "agent_message_content_delta": {
+      // Batch buffer: 200ms 或 1KB flush, Phase 1 batch logic
+      const tid = msg.thread_id;
+      if (!deltaBuf[tid]) deltaBuf[tid] = { text: "", firstTs: ts_ms };
+      deltaBuf[tid].text += msg.delta;
+      const since = ts_ms - deltaBuf[tid].firstTs;
+      if (deltaBuf[tid].text.length < 1024 && since < 200) return null;  // wait for batch
+      const preview = deltaBuf[tid].text;
+      delete deltaBuf[tid];
+      return { ...baseFields, kind: "thinking", payload: { kind: "thinking", preview } };
+    }
+
+    case "item_started":
+      if (msg.item?.type === "AgentMessage")
+        return { ...baseFields, kind: "thinking", substate: "planning", payload: { kind: "thinking", preview: "" } };
+      if (msg.item?.type === "CommandExecution")
+        return { ...baseFields, kind: "tool_start", substate: "tool_running",
+                 payload: { kind: "tool_start", tool_name: "shell", tool_use_id: msg.item.id,
+                            args_preview: (msg.item.command || "").slice(0, 200) } };
+      if (msg.item?.type === "FileChange")
+        return { ...baseFields, kind: "tool_start", substate: "tool_running",
+                 payload: { kind: "tool_start", tool_name: "apply_patch", tool_use_id: msg.item.id,
+                            args_preview: (msg.item.file_paths || []).join(",") } };
+      if (msg.item?.type === "TodoList")
+        return { ...baseFields, kind: "todo_update", substate: "planning",
+                 payload: { kind: "todo_update", items: msg.item.items || [], from: "codex_native" } };
+      return null; // other item types: log only
+
+    case "item_completed":
+      if (msg.item?.type === "CommandExecution")
+        return { ...baseFields, kind: "tool_end",
+                 payload: { kind: "tool_end", tool_use_id: msg.item.id, ok: msg.item.exit_code === 0,
+                            duration_ms: msg.item.duration_ms || 0,
+                            output_preview: (msg.item.aggregated_output || "").slice(0, 500),
+                            exit_code: msg.item.exit_code } };
+      if (msg.item?.type === "FileChange")
+        return { ...baseFields, kind: "tool_end",
+                 payload: { kind: "tool_end", tool_use_id: msg.item.id, ok: msg.item.success !== false,
+                            duration_ms: msg.item.duration_ms || 0, output_preview: msg.item.diff_summary || "" } };
+      if (msg.item?.type === "TodoList")
+        return { ...baseFields, kind: "todo_update",
+                 payload: { kind: "todo_update", items: msg.item.items || [], from: "codex_native" } };
+      return null;
+
     case "task_complete":
-      return {
-        kind: ProgressKind.TURN_COMPLETED,
-        duration_ms: rest.duration_ms,
-        time_to_first_token_ms: rest.time_to_first_token_ms,
-        last_agent_message: rest.last_agent_message,
-        timestamp: Date.now(),
-      };
-    // ... 其他 mapping
+      return { ...baseFields, kind: "turn_end", substate: "idle",
+               payload: { kind: "turn_end", tokens_in: msg.tokens_in, tokens_out: msg.tokens_out, cost_usd: msg.cost_usd } };
+
+    case "task_failed":
+    case "thread.error":
+      return { ...baseFields, kind: "error",
+               error: { code: msg.error_code || "tool_error", message: msg.message || "Codex error", retryable: msg.retryable ?? true } };
+
+    case "account/rateLimits/updated":
+      return { ...baseFields, kind: "rate_limit", substate: "rate_limited",
+               payload: { kind: "rate_limit", resets_at_ms: msg.resets_at_ms, limit_type: msg.limit_type, utilization: msg.utilization } };
+
+    // log-only (Phase 1 不 forward):
+    case "session_configured":
+    case "mcp_startup_update":
     case "raw_response_item":
-      return null;  // skip noise
+    case "warning":
+    case "token_count":
+    case "agent_message":
+      return null;
+
+    default:
+      return null;  // unknown types log-only
   }
 }
 ```
+
+→ **0 commhub schema 改动 + 0 dashboard 改动** — 复用 RFC-003 已 ship `commhub_report_progress` MCP method + `progress_events` 表 + SSE + `<ProgressTimeline>`。codex agent 跟 claude agent 用同 NodeEvent schema 渲染。
 
 ### 5.3 Batch / Backpressure 策略 (per 通信工程马 review focus)
 
@@ -473,6 +616,60 @@ agent-node runtime adapter 启动 tools/call 时透传这些字段。
 - `useUserConfig: true` (默认): 尊重用户 ~/.codex/config.toml, 但用户 stale config 可能 fail 子 MCP startup (cosmetic, codex 主体仍 work)
 - `useUserConfig: false`: profile.flags 触发 anet 透传 `--ignore-user-config` 给 codex spawn, 完全隔离用户 toml
 
+### 6.5 安全 cross-runtime consistency matrix (NEW per Round 147 finding + 通信牛 P2)
+
+anet 5 runtime 默认安全策略矩阵 — Phase 1 ship codex-cli-mcp 同时 fix codex-sdk 现 inconsistency:
+
+| Runtime | 默认 approval | 默认 sandbox | 状态 |
+|---|---|---|---|
+| `claude-code-cli` | `permissionMode: "default"` (用户 confirm) | n/a (claude CLI 自身 sandbox) | ✅ conservative |
+| `claude-agent-sdk` | `permissionMode: "bypassPermissions"` (anet 当前 cli.ts L520, 全 bypass) + hooks PreToolUse log only | n/a | ⚠ 跟 codex-sdk 同样 maximally permissive (但 claude SDK 没 sandbox 概念, 风险较低) |
+| `codex-sdk` (existing, cli.ts L617-622) | `approvalPolicy: "never"` ❌ 全自动 | `sandboxMode: "danger-full-access"` ❌ 全访问含网络 | 🚨 **inconsistency, 待 fix per Round 147 finding** |
+| **`codex-cli-mcp` (RFC-007 new)** | `approval-policy: "on-failure"` ✅ | `sandbox: "workspace-write"` ✅ 限 cwd 写+禁网 | ✅ conservative default |
+| `http-api` | n/a (HTTP fetch 无 agent loop, 无 sandbox 概念) | n/a | n/a |
+
+**Phase 1 fix spec (跟 RFC-007 implement 同 PR ~10 行 edit)**:
+
+```diff
+- // agent-node/src/cli.ts:617-622 (codex-sdk runtime existing)
++ // Phase 1 安全 default upgrade per RFC-007 §6.5 cross-runtime consistency
+  const codexOpts = {
+    skipGitRepoCheck: true,
+-   approvalPolicy: "never" as const,
++   approvalPolicy: "on-failure" as const,    // ← 跟 codex-cli-mcp default 一致
+    model: codexModel,
+-   sandboxMode: "danger-full-access" as const,
++   sandboxMode: "workspace-write" as const,  // ← 跟 codex-cli-mcp default 一致
+    modelReasoningEffort: "low" as const,
+  };
+```
+
+**Backward compat**: `profile.flags.codex.approvalPolicy` + `sandbox` 仍 override default — 老用户 dev 环境想全自动可显式 opt-in:
+
+```json
+{
+  "runtime": "codex-sdk",
+  "flags": {
+    "codex": {
+      "approvalPolicy": "never",      // ← explicit opt-in
+      "sandbox": "danger-full-access" // ← explicit opt-in (with warning in wizard)
+    }
+  }
+}
+```
+
+**Wizard "danger" prompt** (cli.ts setupCommand):
+```
+? Codex sandbox mode:
+  workspace-write (default, 推荐 — agent 仅改 cwd, 禁网)
+  read-only (review-only agent)
+  danger-full-access (⚠ 全网 + 全文件系统访问, 仅 dev 环境信任 agent + sandboxed host 使用)
+```
+
+**Phase 2 considerations (per 通信牛 P2)**:
+- `approval-policy=on-failure` 对无人值守 daemon 是否够 conservative? 通信牛 raise 这条 — 等 Vincent decision (Phase 1 ship `on-failure` 作 reasonable default, Phase 2 视无人值守 use case 是否要默认 `untrusted` 全 ask)
+- 若 Vincent 要求 daemon mode 默认 `untrusted` (全 ask) → 加 profile.flags.codex.daemonMode boolean 区分 manned vs unmanned, daemonMode=true 时 default `untrusted`
+
 ## 7. Setup / cli.ts integration
 
 ### 7.1 Setup wizard 添加 runtime 选项
@@ -532,7 +729,84 @@ API key auth (set `OPENAI_API_KEY` env) 支持更多 models (按 OpenAI API plat
 
 ### 8.5 双 process 资源消耗
 
-每个 codex-cli-mcp node = agent-node 进程 + codex mcp-server child 进程 + (codex 内部 startup) 子 MCP servers (per 8.4 mcp_startup_update events)。RAM 估 **~200-300MB per node** (claude-code-cli 是 ~150MB per node, 待 task #111 真测试 confirm)。
+每个 codex-cli-mcp node = agent-node 进程 + codex mcp-server child 进程 + (codex 内部 startup) 子 MCP servers (per 8.4 mcp_startup_update events)。RAM 估 **~200-300MB per node** (claude-code-cli 是 ~150MB per node, **占位值待 task #111 benchmark 实测后 update**).
+
+### 8.6 SYNC tool call hang → child timeout + watchdog spec (NEW per 通信牛 P1 #6)
+
+**问题**: §8.2 述 SYNC return 不能 mid-turn steer; 若 codex 内部 hung tool call (e.g. shell 命令 deadlock / model API timeout / 子 MCP server stuck) → `tools/call codex` 不返 → **整个 agent-node turn 卡死, 全 anet node 不响应后续 commhub task**。
+
+**Spec — child timeout + watchdog**:
+
+```ts
+class CodexCliMcpRuntime {
+  private readonly TURN_TIMEOUT_MS = profile.flags?.codex?.turnTimeoutMs ?? 5 * 60 * 1000; // default 5min
+  private readonly CHILD_HEALTHCHECK_MS = 30 * 1000; // 30s ping
+
+  async onNewTask(task: TaskEvent) {
+    const abortController = new AbortController();
+    const timeoutHandle = setTimeout(() => {
+      this.log(`turn timeout after ${this.TURN_TIMEOUT_MS}ms, abort + kill child`);
+      abortController.abort();
+      this.killChild();          // SIGKILL codex mcp-server child
+      this.respawnChild();       // 重启 child + re-handshake initialize
+    }, this.TURN_TIMEOUT_MS);
+
+    try {
+      const r = await this.mcpClient.callTool({
+        ...
+        signal: abortController.signal,  // (若 SDK 支持 AbortSignal; Phase 0 spike verify)
+      });
+      clearTimeout(timeoutHandle);
+      // ... per §4.3 error path
+    } catch (err) {
+      clearTimeout(timeoutHandle);
+      await commhubSendReply({
+        task_id: task.task_id,
+        content: err.message === "AbortError" ? `Turn timeout after ${this.TURN_TIMEOUT_MS}ms` : err.message,
+        isError: true,
+      });
+    }
+  }
+
+  private killChild() { this.daemon?.kill("SIGKILL"); }
+
+  private async respawnChild() {
+    await this.start(this.profile); // 重 spawn + initialize + thread/resume {this.threadId}
+  }
+
+  // Heartbeat: 30s ping daemon health (avoid silent hung)
+  private startHealthcheck() {
+    setInterval(async () => {
+      try {
+        await Promise.race([
+          this.mcpClient.listTools(),  // simple keep-alive query
+          new Promise((_, rej) => setTimeout(() => rej(new Error("healthcheck timeout")), 5000)),
+        ]);
+      } catch {
+        this.log("daemon unhealthy, respawn");
+        this.killChild();
+        await this.respawnChild();
+      }
+    }, this.CHILD_HEALTHCHECK_MS);
+  }
+}
+```
+
+**Failure modes covered**:
+- ✅ tool call hang > 5min: AbortSignal trigger → kill + respawn child → anet 报 task error + 接受下一 task
+- ✅ child silent hung (无 response on stdio): 30s healthcheck failed → kill + respawn
+- ✅ child crash (segfault / OOM): node child_process `exit` event → 自动 respawn
+- ⚠ thread/resume on respawn 须 thread persist 已 disk (rollout 文件)。若 turn 内 crash, 用户当前 task 失败但下一 task 仍可走 codex-reply resume (per §4.4)
+
+**profile.flags.codex 加 timeout 字段**:
+```json
+"flags": {
+  "codex": {
+    "turnTimeoutMs": 300000,         // default 5min
+    "childHealthcheckMs": 30000      // default 30s
+  }
+}
+```
 
 ## 9. Testing
 
@@ -612,7 +886,7 @@ Phase 1 是否实施 待 Vincent 拍板 (Open Q raise in §11)。
 7. **ChatGPT account auth supported models** — gpt-5 / gpt-5-codex / o3 / o4-mini 哪些 default 推荐? gpt-4.1-mini 实测 fail (per 通信龙 §0.3) — **建议 wizard 列 supported model 矩阵 + 用户输入, default 不强制 (per 实测 model availability 实时变化)**
 8. **codex auth (OpenAI API key) 如何 inherit** — stdio child inherit env 默认拿 `OPENAI_API_KEY` from anet env? 还是用户走 `codex login` 持久化? — **建议: 推荐用户先 `codex login` (OAuth 持久化), anet 不管 auth**
 9. **agent-node 多 codex-cli-mcp runtime 同 host RAM** — 实测 codex mcp-server idle ~50MB / running ~150MB / + agent-node node ~100MB = 总 200-300MB per node — **建议 doc 标注每节点 200-300MB RAM 预算** (task #111 benchmark confirm 后定值)
-10. **`codex/event` notification handler @modelcontextprotocol/sdk API verify** — `setNotificationHandler` 对 catch-all (method 不在标准 MCP method list) 支持的具体 API 形式 — **实施时确认 SDK 文档, 必要时 patch SDK or workaround**
+10. ~~`codex/event` notification handler @modelcontextprotocol/sdk API verify~~ — **promoted to §3.0 Phase 0 spike gate (blocking)** per 通信牛 review P1 #2
 11. **Vincent codex mac mini version 验证** — 通信龙 telegram 4054 paste 显示含 `codex app` 但需 final confirm 含 `codex mcp-server` — **不阻塞, 等 Vincent `codex --version` 反馈**
 12. **Optional anet codex-setup 命令** — Phase 1 包含 (帮用户 user-mode 也接 mesh) vs 推迟 Phase 2 (避免 scope creep)? — **建议 Phase 1 ship 简单版** (cli.ts `anet codex-setup --alias X` 仅 print toml + env var template, 不自动写文件), 真写文件版 Phase 2 加 `--apply` flag
 
