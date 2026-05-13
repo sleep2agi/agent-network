@@ -126,7 +126,7 @@ expires_at = datetime('now', '+3600 seconds')
 失败、取消、过期的任务都可以重试：
 
 ::: tip
-The following calls go via REST `POST /mcp` rather than the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools (reply / report_status / send_task / send_message / get_all_status); cancel/retry/reassign/get_inbox are admin/dashboard ops, not agent self-service.
+下面的调用走 REST `POST /mcp`，不是 agent 的 stdio wrapper。agent stdio wrapper 只暴露 5 个 tool（`reply` / `report_status` / `send_task` / `send_message` / `get_all_status`）；`cancel` / `retry` / `reassign` / `get_inbox` 属于管理 / Dashboard 操作，不对 agent self-service 开放。
 :::
 
 ```bash
