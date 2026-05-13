@@ -1,0 +1,46 @@
+{
+  "description": "Structural assertions for anet demo pr-review output markdown. LLM output is non-deterministic so we assert structure (regex / counts), not verbatim strings. See docs/demos/pr-review-room-proposal.md §测试规格.",
+  "samples": {
+    "good-pr.diff": {
+      "scenario": "README typo fix, single line change",
+      "expected_verdict": "LGTM",
+      "verdict_regex": "\\*\\*决议：\\*\\*\\s*LGTM",
+      "max_security_issues": 0,
+      "max_performance_issues": 0,
+      "max_style_issues": 1,
+      "min_total_issues": 0
+    },
+    "typo-pr.diff": {
+      "scenario": "1-2 minor style issues (dead helper / over-commented), no severe",
+      "expected_verdict": "Comment",
+      "verdict_regex": "\\*\\*决议：\\*\\*\\s*Comment",
+      "max_security_issues": 1,
+      "max_performance_issues": 1,
+      "min_style_issues": 1,
+      "max_style_issues": 4
+    },
+    "cross-file-pr.diff": {
+      "scenario": "SQL injection + N+1 query + hardcoded password + unbounded log buffer + path traversal — should produce many severe issues",
+      "expected_verdict": "Request Changes",
+      "verdict_regex": "\\*\\*决议：\\*\\*\\s*Request Changes",
+      "min_security_issues": 2,
+      "min_performance_issues": 1,
+      "min_style_issues": 1,
+      "must_contain_keywords": [
+        "SQL",
+        "注入"
+      ]
+    }
+  },
+  "common_structure": {
+    "required_sections": [
+      "## 安全",
+      "## 性能",
+      "## 风格",
+      "## 终审说明"
+    ],
+    "stats_line_regex": "\\*\\*统计：\\*\\*\\s*安全\\s*\\d+\\s*处\\s*/\\s*性能\\s*\\d+\\s*处\\s*/\\s*风格\\s*\\d+\\s*处",
+    "output_filename_glob": "./pr-review-*-*.md"
+  },
+  "note": "Mock LLM protocol (issue #30) is required to make these assertions runnable in CI without burning real MiniMax tokens. Until then, run by hand: anet demo pr-review --diff tests/test28-pr-review-room/samples/<file>.diff --suffix <suffix> --out /tmp/out.md, then grep against this file."
+}

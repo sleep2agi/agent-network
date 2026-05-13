@@ -3509,6 +3509,9 @@ async function demoCommand() {
     case "socialmedia": case "social":
       args.splice(1, 1);
       return await demoSocialMediaCommand();
+    case "pr-review":
+      args.splice(1, 1);
+      return await demoPrReviewCommand();
     default:
       console.error(`Unknown demo "${sub}". Run 'anet demo ls' to see all available demos.`);
       process.exit(1);
@@ -3524,6 +3527,11 @@ function demoListCommand() {
 
   [32m●[0m socialmedia     社交媒体内容工厂 — 4 agent (选题/文案/配图/审核), ~3 min
                   anet demo socialmedia --topic "..." --platform xiaohongshu
+
+  [32m●[0m pr-review       代码 PR 审查室 — 4 agent (安全/性能/风格 3 reviewer 并行 + judge), ~2 min
+                  anet demo pr-review --diff path/to/change.diff
+                  anet demo pr-review --pr https://github.com/owner/repo/pull/N
+                  anet demo pr-review --ref origin/main
 
   See 'anet demo <name> --help' for details.
 `);
@@ -4298,6 +4306,472 @@ async function demoSocialMediaCommand() {
   }
 
   console.log(`\n  🏁 完成！实录: ${outPath}\n`);
+}
+
+// ── demo: pr-review ──
+// 4-agent PR review room: 3 reviewers (security / performance / style) fan-out
+// in parallel from the CLI, then a judge consolidates their replies at a
+// barrier. Output is a markdown PR review with a LGTM / Request Changes /
+// Comment verdict. Spec: docs/demos/pr-review-room-proposal.md (refs #25).
+
+const PR_REVIEW_ROLES = ["reviewer-security", "reviewer-performance", "reviewer-style", "judge"] as const;
+
+const PR_REVIEW_PROMPTS: Record<string, () => string> = {
+  "reviewer-security": () => `你是**安全审查员**，专注代码 diff 里的安全风险。
+
+收到任务（附 PR diff）时:
+- 检查这些维度: 注入 / 凭据泄露 / 权限绕过 / SSRF / 反序列化 / 命令注入 / 不安全反射 / 越权访问
+- 每条 issue 输出格式: "- [严重度: 严重/中/低] file:line — 问题描述（一句话） — 建议改法"
+- 没问题就写 "无安全问题。"
+- 末尾另起一段写 "## 安全 issue 数: <N>"
+
+要求:
+- 只看 diff，不脑补 diff 外内容
+- 不写客套话，不重复 reviewer 自我介绍
+- 输出 markdown，250-500 字`,
+
+  "reviewer-performance": () => `你是**性能审查员**，专注代码 diff 里的性能与资源使用问题。
+
+收到任务（附 PR diff）时:
+- 检查这些维度: N+1 查询 / O(n²) / 不必要 IO / 阻塞 await / 大对象 / 内存泄漏 / 锁粒度 / 缓存缺失
+- 每条 issue 输出格式: "- [严重度: 严重/中/低] file:line — 问题描述（一句话） — 建议改法"
+- 没问题就写 "无性能问题。"
+- 末尾另起一段写 "## 性能 issue 数: <N>"
+
+要求:
+- 只看 diff，不脑补 diff 外内容
+- 不写客套话，不重复 reviewer 自我介绍
+- 输出 markdown，250-500 字`,
+
+  "reviewer-style": () => `你是**代码风格审查员**，专注可读性与可维护性。
+
+收到任务（附 PR diff）时:
+- 检查这些维度: 命名 / 注释 / 抽象层级 / 死代码 / 复杂度 / 重复 / 类型签名
+- 每条 issue 输出格式: "- [严重度: 严重/中/低] file:line — 问题描述（一句话） — 建议改法"
+- 没问题就写 "无风格问题。"
+- 末尾另起一段写 "## 风格 issue 数: <N>"
+
+要求:
+- 只看 diff，不脑补 diff 外内容
+- 不写客套话，不重复 reviewer 自我介绍
+- 输出 markdown，250-500 字`,
+
+  "judge": () => `你是**终审 judge**，负责整合 3 份维度审查（安全/性能/风格）输出最终 PR review。
+
+收到任务（附 PR diff 摘要 + 3 份 reviewer markdown）时:
+- 先按 (file:line) 二元组去重重叠 issue
+- 按严重度排序: 严重 > 中 > 低
+- 输出一份最终 markdown:
+  - 顶部一行 "**决议：** LGTM" 或 "**决议：** Request Changes" 或 "**决议：** Comment"
+    - 任一 reviewer 报"严重"→ Request Changes
+    - 全部 reviewer 0 issue → LGTM
+    - 其它情况 → Comment
+  - 第二行 "**统计：** 安全 N 处 / 性能 N 处 / 风格 N 处"
+  - 然后三段 "## 安全" / "## 性能" / "## 风格"，每段列去重后的 issue
+  - 最后一段 "## 终审说明" 用 100-200 字解释你判 LGTM / Request Changes / Comment 的核心理由
+
+要求:
+- 必须含 "**决议：**" 字段（CLI 用 regex 解析）
+- 不重复 reviewer 原文，去重后呈现
+- 输出 markdown，500-1200 字`,
+};
+
+// fetchPrDiff: 3 入口拿 PR diff
+// - --diff <file>: local file readFileSync
+// - --ref <ref>:   git diff <ref>..HEAD
+// - --pr <url>:    gh CLI fallback (需要 user 装了 gh)
+async function fetchPrDiff(opts: Record<string, string>): Promise<{ diff: string; source: string }> {
+  if (opts.diff) {
+    const p = opts.diff;
+    if (!existsSync(p)) throw new Error(`--diff 文件不存在: ${p}`);
+    return { diff: readFileSync(p, "utf-8"), source: `local file ${p}` };
+  }
+  if (opts.ref) {
+    const ref = opts.ref;
+    try {
+      const out = execSync(`git diff ${ref}..HEAD`, { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+      if (!out.trim()) throw new Error(`git diff ${ref}..HEAD 输出为空 (无 diff 或 ref 不存在)`);
+      return { diff: out, source: `git diff ${ref}..HEAD` };
+    } catch (e: any) {
+      throw new Error(`git diff 失败: ${e.message}`);
+    }
+  }
+  if (opts.pr) {
+    // tier 2: gh CLI fallback
+    try {
+      execSync("command -v gh", { stdio: "ignore" });
+    } catch {
+      throw new Error(`--pr 需要本地装 gh CLI (https://cli.github.com)，或改用 --diff <file> / --ref <ref>`);
+    }
+    const url = opts.pr;
+    const m = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+    if (!m) throw new Error(`--pr 不是合法 GitHub PR URL: ${url}`);
+    const [, owner, repo, num] = m;
+    try {
+      const out = execSync(`gh api repos/${owner}/${repo}/pulls/${num} -H "Accept: application/vnd.github.v3.diff"`, {
+        encoding: "utf-8",
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return { diff: out, source: `${owner}/${repo}#${num} (gh api)` };
+    } catch (e: any) {
+      throw new Error(`gh api 拉 PR diff 失败: ${e.message}`);
+    }
+  }
+  throw new Error(`需要 --diff <file> / --ref <ref> / --pr <github-url> 之一`);
+}
+
+async function demoPrReviewCommand() {
+  const opts = parseOpts();
+  const help = args.includes("--help") || args.includes("-h");
+  if (help) {
+    console.log(`
+  anet demo pr-review — 代码 PR 审查室 demo (4 agent: 3 reviewer 并行 + judge)
+
+  Usage:
+    anet demo pr-review [--diff <file> | --ref <ref> | --pr <github-url>] \\
+                        [--key <minimax-key>] [--out <path>] [--keep] \\
+                        [--step-timeout <s>] [--suffix <s>] \\
+                        [--no-network | --network <id>]
+
+  Diff 入口 (三选一):
+    --diff <file>     本地 .diff / .patch 文件
+    --ref <ref>       'git diff <ref>..HEAD' 自动拿当前 branch 的 patch (e.g. --ref origin/main)
+    --pr <url>        GitHub PR URL，用 gh CLI 拉 .diff (需本地装 gh)
+
+  其它:
+    --key <key>       MiniMax API key (默认 \$MINIMAX_KEY 或 \$ANTHROPIC_AUTH_TOKEN)
+    --out <path>      评审输出 (默认 ./pr-review-<id>-<ts>.md)
+    --keep            跑完不删 4 agent + network (默认会清掉)
+    --step-timeout    单 reviewer/judge 超时秒数 (默认 180)
+    --suffix          自定义 alias 后缀 (默认随机 4 hex)
+    --no-network      跑在当前/default network 内
+    --network <id>    指定已存在的 network
+
+  Examples:
+    anet demo pr-review --diff ./my-pr.diff
+    anet demo pr-review --ref origin/main
+    anet demo pr-review --pr https://github.com/sleep2agi/agent-network/pull/40
+    anet demo pr-review --diff ./my-pr.diff --keep --suffix demo01
+
+  需要:
+    - 已 anet login 到 hub
+    - MiniMax key (Token Plan 至少有 MiniMax-M* 配额)
+    - --pr 需要本地装 gh CLI (https://cli.github.com)
+
+  完整 spec: docs/demos/pr-review-room-proposal.md
+`);
+    return;
+  }
+
+  const gc = loadGlobal();
+  const hub = gc.hub;
+  if (!hub) { console.error("  ❌ 没有 hub. 先 'anet init' 或 'anet hub start'."); return; }
+  if (!gc.token) { console.error("  ❌ 没有 token. 先 'anet login'."); return; }
+
+  // 1. Resolve diff source
+  let diff = "";
+  let diffSource = "";
+  try {
+    const r = await fetchPrDiff(opts);
+    diff = r.diff;
+    diffSource = r.source;
+  } catch (e: any) {
+    console.error(`  ❌ ${e.message}`);
+    return;
+  }
+  const diffBytes = Buffer.byteLength(diff, "utf-8");
+  const diffKb = (diffBytes / 1024).toFixed(1);
+  if (diffBytes > 30 * 1024) {
+    console.log(`  ⚠️  diff 大小 ${diffKb} KB > 30 KB，可能超 model context。建议用 'gh api -X GET repos/.../files' 先筛关键文件。继续...`);
+  }
+
+  const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
+  if (!minimaxKey) {
+    console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=sk-cp-...");
+    return;
+  }
+
+  const stepTimeout = parseInt(opts["step-timeout"] || "180", 10) * 1000;
+  const keep = args.includes("--keep");
+  const suffix = opts.suffix || Math.random().toString(16).slice(2, 6);
+  const outPath = opts.out || `./pr-review-${suffix}-${Date.now()}.md`;
+
+  // Network selection: same convention as demo debate (default = create
+  // dedicated `pr-review-<suffix>` network; --no-network = use default;
+  // --network <id> = use given existing network).
+  const useDefaultNetwork = args.includes("--no-network");
+  const explicitNetwork = opts.network || "";
+  let networkId = "";
+  let createdNetworkId = "";
+  let networkLabel = "";
+
+  if (explicitNetwork) {
+    networkId = explicitNetwork;
+    networkLabel = `(provided ${explicitNetwork.slice(0, 16)})`;
+  } else if (useDefaultNetwork) {
+    try {
+      const me = await fetch(`${hub}/api/auth/me`, { headers: authHeaders() }).then(r => r.json() as any);
+      networkId = me?.user?.default_network_id || "";
+    } catch {}
+    if (!networkId) {
+      try {
+        const nets = await fetch(`${hub}/api/networks`, { headers: authHeaders() }).then(r => r.json() as any);
+        const def = (nets?.networks || []).find((n: any) => n.network_name === "default") || nets?.networks?.[0];
+        networkId = def?.network_id || "";
+      } catch {}
+    }
+    networkLabel = `(default network)`;
+  } else {
+    const netName = `pr-review-${suffix}`;
+    console.log(`  ⏳ 正在创建独立 network: ${netName}...`);
+    try {
+      const r = await fetch(`${hub}/api/networks`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${gc.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: netName, description: `Auto-created for anet demo pr-review: ${diffSource}` }),
+      }).then(r => r.json() as any);
+      if (!r?.ok || !r.network_id) {
+        console.error(`  ❌ 创建 network 失败: ${r?.error || "unknown"}. 用 --no-network 退到 default 或 --network <id> 指定.`);
+        return;
+      }
+      createdNetworkId = r.network_id;
+      networkId = createdNetworkId;
+      networkLabel = `(${netName} ${createdNetworkId.slice(0, 16)})`;
+    } catch (e: any) {
+      console.error(`  ❌ 创建 network 抛出异常: ${e.message}.`);
+      return;
+    }
+  }
+
+  const roleAliases: Record<string, string> = {};
+  for (const r of PR_REVIEW_ROLES) roleAliases[r] = `${r}-${suffix}`;
+
+  console.log(`\n  🔍 PR diff: ${diffSource}`);
+  console.log(`  📏 Size:   ${diffKb} KB`);
+  console.log(`  📡 Hub:    ${hub}`);
+  console.log(`  📂 Net:    ${networkLabel}`);
+  console.log(`  🆔 Run:    ${suffix}\n`);
+
+  // 2. Create 4 agents
+  const origNetworkId = gc.network_id || "";
+  const origNetworkName = gc.network_name || "";
+  if (createdNetworkId) {
+    saveGlobal({ ...gc, network_id: createdNetworkId, network_name: `pr-review-${suffix}` });
+  } else if (explicitNetwork) {
+    saveGlobal({ ...gc, network_id: explicitNetwork });
+  }
+  const restoreNetwork = () => {
+    if (createdNetworkId || explicitNetwork) {
+      try {
+        const cur = loadGlobal();
+        saveGlobal({ ...cur, network_id: origNetworkId || undefined, network_name: origNetworkName || undefined });
+      } catch {}
+    }
+  };
+
+  process.env.ANET_INTERNAL_KEEP_PROCESS = "1";
+  try {
+    console.log(`  [1/6] 创建 4 个 agent (alias 后缀 -${suffix})...`);
+    const nodesRoot = nodesDir();
+    for (const role of PR_REVIEW_ROLES) {
+      const alias = roleAliases[role];
+      if (!existsSync(join(nodesRoot, alias, "config.json"))) {
+        const createArgs = ["create", alias,
+          "--runtime", "claude-agent-sdk",
+          "--model", "MiniMax-M2.7",
+          "--env", `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic`,
+          "--env", `ANTHROPIC_AUTH_TOKEN=${minimaxKey}`,
+          "--env", `ANTHROPIC_MODEL=MiniMax-M2.7`,
+          ...(networkId ? ["--network", networkId] : []),
+        ];
+        args.length = 0; args.push(...createArgs);
+        try { await createCommand(); } catch (e: any) {
+          console.error(`     ❌ create ${alias}: ${e.message}`);
+          restoreNetwork();
+          delete process.env.ANET_INTERNAL_KEEP_PROCESS;
+          return;
+        }
+      }
+      const cfgPath = join(nodesRoot, alias, "config.json");
+      const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
+      cfg.systemPrompt = PR_REVIEW_PROMPTS[role]();
+      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    }
+    console.log(`        ✓ 创建/更新 4 个 agent`);
+  } finally {
+    restoreNetwork();
+    delete process.env.ANET_INTERNAL_KEEP_PROCESS;
+  }
+
+  // 3. Start each in tmux + wait SSE
+  console.log(`  [2/6] 启动 4 个 agent (tmux session)...`);
+  for (const role of PR_REVIEW_ROLES) {
+    const alias = roleAliases[role];
+    const sessName = `pr-review-${suffix}-${alias}`;
+    killTmuxSession(sessName);
+    try {
+      startNodeTmuxSession(sessName, alias);
+    } catch (e: any) {
+      console.error(`     ❌ tmux ${alias}: ${e.message}`);
+      return;
+    }
+  }
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const h = await fetch(`${hub}/health`).then(r => r.json() as any);
+      const sse = h?.sse_sessions || {};
+      const allUp = PR_REVIEW_ROLES.every(r => sse[roleAliases[r]] >= 1);
+      if (allUp) { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
+    } catch {}
+  }
+
+  // 4. Helpers: post task + wait reply
+  async function postTask(alias: string, task: string): Promise<string> {
+    const body = JSON.stringify({ alias, task, priority: "normal", from: "api", network_id: networkId || undefined });
+    const res = await fetch(`${hub}/api/task`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body,
+    });
+    const j: any = await res.json();
+    if (!j?.ok) throw new Error(`postTask failed: ${JSON.stringify(j)}`);
+    return j.message_id;
+  }
+  async function waitReply(_msgId: string, alias: string, timeoutMs: number): Promise<string> {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const r = await fetch(`${hub}/api/messages?limit=200`, { headers: authHeaders() }).then(x => x.json() as any);
+        const msg = (r?.messages || []).find((m: any) => m.from_alias === alias && m.type === "reply" && m.content);
+        if (msg) {
+          let text = msg.content as string;
+          if (text.startsWith(`[${alias}]`)) text = text.slice(alias.length + 2).trimStart();
+          return text;
+        }
+      } catch {}
+    }
+    throw new Error(`timeout waiting for ${alias} reply`);
+  }
+
+  type ReviewSection = { role: string; alias: string; text: string; durationMs: number };
+  const reviewerOutputs: ReviewSection[] = [];
+  let judgeOutput = "";
+  const reviewerRoles = ["reviewer-security", "reviewer-performance", "reviewer-style"];
+  const t0Run = Date.now();
+
+  try {
+    // 5. Parallel fan-out to 3 reviewers
+    console.log(`  [3/6] 广播 review task 给 3 reviewer (parallel)...`);
+    const reviewerTask = `请审查以下 diff（按你专精的维度）：\n\n\`\`\`diff\n${diff}\n\`\`\``;
+    const t0Fanout = Date.now();
+    const fanouts = reviewerRoles.map(async role => {
+      const alias = roleAliases[role];
+      const t0 = Date.now();
+      const msgId = await postTask(alias, reviewerTask);
+      const reply = await waitReply(msgId, alias, stepTimeout);
+      const dt = Date.now() - t0;
+      console.log(`        ✓ ${alias.padEnd(28)} ${Math.round(dt / 1000).toString().padStart(3)}s, ${reply.length} 字`);
+      return { role, alias, text: reply, durationMs: dt };
+    });
+    const results = await Promise.all(fanouts);
+    reviewerOutputs.push(...results);
+    const fanoutDt = Date.now() - t0Fanout;
+    const serialEstimate = results.reduce((s, r) => s + r.durationMs, 0);
+    console.log(`        ─ 并行总耗时 ${Math.round(fanoutDt / 1000)}s (估串行 ${Math.round(serialEstimate / 1000)}s, 节省 ~${Math.max(0, Math.round((serialEstimate - fanoutDt) / 1000))}s)`);
+
+    // 6. Barrier → judge
+    console.log(`  [4/6] barrier 收齐 3 份 review，整包派给 judge...`);
+    const judgePackage = [
+      `## diff 摘要`,
+      `- 来源: ${diffSource}`,
+      `- 大小: ${diffKb} KB`,
+      ``,
+      `## reviewer-security 输出`,
+      reviewerOutputs.find(o => o.role === "reviewer-security")?.text || "(无)",
+      ``,
+      `## reviewer-performance 输出`,
+      reviewerOutputs.find(o => o.role === "reviewer-performance")?.text || "(无)",
+      ``,
+      `## reviewer-style 输出`,
+      reviewerOutputs.find(o => o.role === "reviewer-style")?.text || "(无)",
+    ].join("\n");
+
+    console.log(`  [5/6] judge 整合 + 终审...`);
+    const judgeAlias = roleAliases["judge"];
+    const t0Judge = Date.now();
+    const judgeMsgId = await postTask(judgeAlias, `请整合三份 review 输出最终 PR review：\n\n${judgePackage}`);
+    judgeOutput = await waitReply(judgeMsgId, judgeAlias, stepTimeout);
+    console.log(`        ✓ ${judgeAlias} ${Math.round((Date.now() - t0Judge) / 1000)}s, ${judgeOutput.length} 字`);
+  } catch (e: any) {
+    console.error(`\n  ❌ 流程失败: ${e.message}`);
+    if (!keep) console.log(`     (--keep 未指定,稍后会清理 agent)`);
+  }
+
+  // 7. Write output markdown
+  console.log(`  [6/6] 写入 review: ${outPath}`);
+  const finalMd = [
+    `# PR Review`,
+    ``,
+    `**来源**: ${diffSource}`,
+    `**大小**: ${diffKb} KB`,
+    `**时间**: ${new Date().toLocaleString()}`,
+    `**Run**: ${suffix}`,
+    `**总耗时**: ${Math.round((Date.now() - t0Run) / 1000)}s`,
+    ``,
+    judgeOutput || "(judge 没输出，看上面错误)",
+    ``,
+    `---`,
+    `## 附：3 reviewer 原始输出`,
+    ``,
+    ...reviewerOutputs.flatMap(o => [`### ${o.role} (${o.alias}, ${Math.round(o.durationMs / 1000)}s)`, ``, o.text, ``]),
+  ].join("\n");
+  writeFileSync(outPath, finalMd);
+  console.log(`        ✓ ${finalMd.length} 字写入 ${outPath}`);
+
+  // 8. Cleanup unless --keep
+  if (!keep) {
+    console.log(`\n  🧹 清理 4 个 agent (用 --keep 跳过)...`);
+    for (const role of PR_REVIEW_ROLES) {
+      const alias = roleAliases[role];
+      const sessName = `pr-review-${suffix}-${alias}`;
+      killTmuxSession(sessName);
+      args.length = 0; args.push("delete", alias, "--force");
+      try { await deleteCommand(); } catch {}
+    }
+    if (createdNetworkId) {
+      try {
+        await fetch(`${hub}/api/networks/${createdNetworkId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${gc.token}` },
+        });
+        console.log(`        ✓ 删除独立 network (${createdNetworkId.slice(0, 16)})`);
+      } catch (e: any) {
+        console.log(`        ⚠ 删除 network 失败: ${e.message}. 手动: anet network delete ${createdNetworkId}`);
+      }
+    }
+    console.log(`        ✓ 清理完成`);
+  } else {
+    console.log(`\n  📌 已保留 4 个 agent (alias 后缀 -${suffix})。手动清理:`);
+    console.log(`     tmux kill-session -t pr-review-${suffix}-*`);
+    console.log(`     anet node delete ${PR_REVIEW_ROLES.map(r => `${r}-${suffix}`).join(" ")}`);
+    if (createdNetworkId) {
+      console.log(`     anet network delete ${createdNetworkId}`);
+    }
+  }
+
+  // Hint user how to use the output
+  console.log(`\n  🏁 完成！review: ${outPath}`);
+  console.log(`\n     下一步建议:`);
+  console.log(`       1. 查看: less ${outPath}`);
+  if (opts.pr) {
+    const m = opts.pr.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+    if (m) console.log(`       2. 贴到 GitHub PR: gh pr comment ${m[3]} --repo ${m[1]}/${m[2]} -F ${outPath}`);
+  } else {
+    console.log(`       2. 贴到 GitHub PR: gh pr comment <PR-N> --repo <owner>/<repo> -F ${outPath}`);
+  }
+  console.log();
 }
 
 

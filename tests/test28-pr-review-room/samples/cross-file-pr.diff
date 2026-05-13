@@ -1,0 +1,93 @@
+diff --git a/server/src/handlers/users.ts b/server/src/handlers/users.ts
+index aaa..bbb 100644
+--- a/server/src/handlers/users.ts
++++ b/server/src/handlers/users.ts
+@@ -10,8 +10,12 @@ export async function getUser(req: Request, db: DB): Promise<Response> {
+   const id = new URL(req.url).searchParams.get("id");
+   if (!id) return new Response("missing id", { status: 400 });
+
+-  const user = await db.query("SELECT * FROM users WHERE id = ?", [id]);
+-  return Response.json(user);
++  // FIX: legacy clients pass id with leading "u_" so strip if present
++  const rawId = id.startsWith("u_") ? id.slice(2) : id;
++  const sql = `SELECT * FROM users WHERE id = '${rawId}'`;
++  const user = await db.query(sql);
++  // also fetch posts in the same handler for convenience
++  const posts = await Promise.all((user.posts_ids || []).map((pid: string) => db.query(`SELECT * FROM posts WHERE id = '${pid}'`)));
++  return Response.json({ user, posts });
+ }
+
+diff --git a/server/src/handlers/admin.ts b/server/src/handlers/admin.ts
+index ccc..ddd 100644
+--- a/server/src/handlers/admin.ts
++++ b/server/src/handlers/admin.ts
+@@ -1,7 +1,15 @@
+ import type { Request, DB } from "../types";
+
++const ADMIN_PASSWORD = "letmein123";  // shared admin password
++
+ export async function adminPanel(req: Request, db: DB): Promise<Response> {
+-  if (!req.headers.get("x-admin")) return new Response("forbidden", { status: 403 });
+-  const rows = await db.query("SELECT * FROM users");
+-  return Response.json(rows);
++  const pw = new URL(req.url).searchParams.get("pw");
++  if (pw !== ADMIN_PASSWORD) return new Response("forbidden", { status: 403 });
++  // load all data for the admin panel
++  const users = await db.query("SELECT * FROM users");
++  const groups: any[] = [];
++  for (const u of users) {
++    groups.push(await db.query(`SELECT * FROM groups WHERE owner_id = '${u.id}'`));
++  }
++  return Response.json({ users, groups });
+ }
+
+diff --git a/server/src/handlers/upload.ts b/server/src/handlers/upload.ts
+index eee..fff 100644
+--- a/server/src/handlers/upload.ts
++++ b/server/src/handlers/upload.ts
+@@ -1,5 +1,15 @@
++const fs = require("fs");
++const path = require("path");
++
+ export async function uploadHandler(req: Request): Promise<Response> {
+-  return new Response("upload disabled");
++  const filename = new URL(req.url).searchParams.get("name") || "anon.bin";
++  const body = await req.text();
++  // save under uploads/
++  const target = path.join(__dirname, "..", "uploads", filename);
++  fs.writeFileSync(target, body);
++  return Response.json({ saved: target });
+ }
+
+diff --git a/server/src/util/logger.ts b/server/src/util/logger.ts
+index ggg..hhh 100644
+--- a/server/src/util/logger.ts
++++ b/server/src/util/logger.ts
+@@ -1,4 +1,11 @@
++let buf: string[] = [];
++
+ export function log(msg: string) {
+-  console.log(`[${new Date().toISOString()}] ${msg}`);
++  buf.push(`[${new Date().toISOString()}] ${msg}`);
++  if (buf.length >= 100000) {
++    console.log(buf.join("\n"));
++    buf = [];
++  }
+ }
+
+diff --git a/server/src/index.ts b/server/src/index.ts
+index iii..jjj 100644
+--- a/server/src/index.ts
++++ b/server/src/index.ts
+@@ -3,6 +3,10 @@ import { adminPanel } from "./handlers/admin";
+ import { uploadHandler } from "./handlers/upload";
+ import { log } from "./util/logger";
+
++// helper that 1: gets data 2: returns it
++function getData(d: any): any {
++  return d;
++}
++
+ export const handler = async (req: Request, db: any): Promise<Response> => {
+   const u = new URL(req.url);
+   log(`${req.method} ${u.pathname}`);
