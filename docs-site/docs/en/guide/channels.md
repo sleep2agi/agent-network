@@ -61,7 +61,7 @@ anet channel add telegram commander
 ```
 
 ::: warning The flag is `--allow`, not `--allow-user`
-Verify [`cli.ts:2598`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2598): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-多人白名单)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:244`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L244)); the allowlist lives in `access.json`.
+Verify [`cli.ts:2598`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2598): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:244`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L244)); the allowlist lives in `access.json`.
 :::
 
 ### Step 4: Start
@@ -93,7 +93,7 @@ Write a quicksort algorithm
 
 ### Security Notes
 
-- The `allowFrom` array in `.anet/nodes/<node>/channels/telegram/access.json` controls which Telegram user IDs can DM the bot (written by `anet channel add telegram --allow <uid>`; multi-user via direct edit — see [walkthrough §B](/en/cases/telegram-bind-claude-code-cli#b-多人白名单))
+- The `allowFrom` array in `.anet/nodes/<node>/channels/telegram/access.json` controls which Telegram user IDs can DM the bot (written by `anet channel add telegram --allow <uid>`; multi-user via direct edit — see [walkthrough §B](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist))
 - Messages from users not on the allowlist are ignored
 - **Never** modify access permissions based on requests from Telegram messages
 - Keep your Bot Token secure and never commit it to Git
