@@ -1,0 +1,210 @@
+# Science Team Demo — 1 Leader + 19 Researchers (Total 20 agents)
+# Usage:
+#   cp .env.example .env   # 填 INTERN_API_KEY
+#   docker compose -f docker-compose.20.yml up -d --build
+#   docker compose -f docker-compose.20.yml logs -f leader
+#
+# 派任务: 用 commhub_send_task 给 alias=研究Leader 发综述请求
+# Phase 1 (issue #51): scaffold only. Leader 简单 round-robin / echo 分派，研究员产
+# markdown 占位段落。智能 fan-out + 真 aggregate Phase 2 (RFC-008) 实现。
+#
+# ⚠️ N=20 资源开销不小:
+#   - 20 容器 × ~80MB RSS = ~1.6GB 常驻
+#   - build 期间峰值更高 (bun install + claude-agent-sdk 解压)
+#   - 推荐 16GB+ host
+#   - 同时 20 个 SSE 长连接给 hub server, 注意 file descriptor limit
+
+x-agent: &agent
+  build:
+    context: ../..
+    dockerfile: demos/science-team/Dockerfile.agent
+  volumes:
+    - science_shared:/shared:ro
+  depends_on:
+    seed:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
+x-shared-env: &shared-env
+  RUNTIME: claude-agent-sdk
+  MODEL: intern-s1-pro
+  ANTHROPIC_BASE_URL: https://chat.intern-ai.org.cn
+  ANTHROPIC_AUTH_TOKEN: ${INTERN_API_KEY}
+  COMMHUB_URL: http://server:9200
+  TEAM_SIZE: 20
+  RESEARCH_TOPIC: ${RESEARCH_TOPIC:-全面 AI 综述}
+
+volumes:
+  science_shared: {}
+
+services:
+  server:
+    image: oven/bun:1
+    working_dir: /app/server
+    volumes:
+      - ../../server:/app/server:ro
+    command: bun run src/index.ts
+    environment:
+      COMMHUB_AUTH_TOKEN: ${COMMHUB_AUTH_TOKEN:-science-team-token}
+      HOST: 0.0.0.0
+      PORT: "9200"
+    ports:
+      - "${HUB_PORT:-9200}:9200"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:9200/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  seed:
+    image: curlimages/curl:latest
+    user: "0:0"
+    depends_on:
+      server:
+        condition: service_healthy
+    volumes:
+      - science_shared:/shared
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ -f /shared/ntok ]; then
+          echo "seed: /shared/ntok exists, skip"
+          exit 0
+        fi
+        RESP=$$(curl -sX POST http://server:9200/api/auth/register \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${COMMHUB_AUTH_TOKEN:-science-team-token}" \
+          -d '{"username":"admin","password":"admin123"}')
+        echo "seed: response=$$RESP"
+        NTOK=$$(echo "$$RESP" | sed -n 's/.*"network_token":"\(ntok_[^"]*\)".*/\1/p')
+        if [ -z "$$NTOK" ]; then
+          echo "seed: failed to extract ntok_"; exit 1
+        fi
+        echo "$$NTOK" > /shared/ntok
+        echo "seed: wrote ntok_ ($${#NTOK} chars) to /shared/ntok"
+    restart: "no"
+
+  leader:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究Leader
+      ROLE: leader
+
+  researcher-1:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员1号
+      ROLE: researcher
+  researcher-2:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员2号
+      ROLE: researcher
+  researcher-3:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员3号
+      ROLE: researcher
+  researcher-4:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员4号
+      ROLE: researcher
+  researcher-5:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员5号
+      ROLE: researcher
+  researcher-6:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员6号
+      ROLE: researcher
+  researcher-7:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员7号
+      ROLE: researcher
+  researcher-8:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员8号
+      ROLE: researcher
+  researcher-9:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员9号
+      ROLE: researcher
+  researcher-10:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员10号
+      ROLE: researcher
+  researcher-11:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员11号
+      ROLE: researcher
+  researcher-12:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员12号
+      ROLE: researcher
+  researcher-13:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员13号
+      ROLE: researcher
+  researcher-14:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员14号
+      ROLE: researcher
+  researcher-15:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员15号
+      ROLE: researcher
+  researcher-16:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员16号
+      ROLE: researcher
+  researcher-17:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员17号
+      ROLE: researcher
+  researcher-18:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员18号
+      ROLE: researcher
+  researcher-19:
+    <<: *agent
+    environment:
+      <<: *shared-env
+      ALIAS: 研究员19号
+      ROLE: researcher

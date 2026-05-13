@@ -1,0 +1,20 @@
+FROM oven/bun:1
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl python3 nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install agent-node from source + Claude Agent SDK
+COPY agent-node/ agent-node/
+RUN cd agent-node && bun install 2>/dev/null || true
+RUN cd agent-node && npm install @anthropic-ai/claude-agent-sdk 2>/dev/null || true
+
+# Claude Code CLI (bundled binary used by claude-agent-sdk)
+RUN npm i -g @anthropic-ai/claude-code 2>/dev/null || true
+
+COPY demos/science-team/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Claude CLI refuses --dangerously-skip-permissions as root without this
+ENV IS_SANDBOX=1
+
+CMD ["/app/entrypoint.sh"]
