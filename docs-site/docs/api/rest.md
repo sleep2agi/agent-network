@@ -850,7 +850,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L583)
 
-获取网络成员列表。
+获取网络成员列表（仅 owner / admin）。
 
 ```bash
 curl http://localhost:9200/api/networks/net_xxx/members \
@@ -882,6 +882,62 @@ curl http://localhost:9200/api/networks/net_xxx/members \
 ```
 
 `anet network members` CLI 用这个响应渲染成员列表（按 `m.display_name || m.username` 显示，role 加 emoji 图标）。
+
+### POST /api/networks/:id/members
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L599)
+
+添加网络成员（owner / admin only；通常 invite 流程更顺，[POST /api/networks/:id/invite](#post-api-networks-id-invite) 创建邀请码让对方自行加入）。
+
+```bash
+curl -X POST http://localhost:9200/api/networks/net_xxx/members \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "u_def456", "role": "member"}'
+```
+
+**请求体**：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|:----:|------|
+| `user_id` | string | &check; | 目标用户 ID |
+| `role` | enum | | `admin` / `member` / `viewer`（默认 `member`） |
+
+写 audit log `action='member_added'`。
+
+### PUT /api/networks/:id/members/:user_id
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L606)
+
+修改成员角色（仅 owner，不能修改 owner 自己的角色）。
+
+```bash
+curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_def456 \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+```
+
+**请求体**：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|:----:|------|
+| `role` | enum | &check; | 新角色：`admin` / `member` / `viewer`（不能改成 `owner`） |
+
+写 audit log `action='member_role_changed'`。R119 FAQ Q17 提到的「改角色」入口就是这个 endpoint。
+
+### DELETE /api/networks/:id/members/:user_id
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L613)
+
+移除成员（owner / admin only，不能移除 owner 自己）。
+
+```bash
+curl -X DELETE http://localhost:9200/api/networks/net_xxx/members/u_def456 \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+写 audit log `action='member_removed'`。
 
 ### POST /api/networks/:id/invite
 

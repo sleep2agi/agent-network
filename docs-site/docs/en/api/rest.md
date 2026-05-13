@@ -850,7 +850,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L583)
 
-Get network member list.
+Get network member list (owner / admin only).
 
 ```bash
 curl http://localhost:9200/api/networks/net_xxx/members \
@@ -882,6 +882,62 @@ curl http://localhost:9200/api/networks/net_xxx/members \
 ```
 
 `anet network members` CLI renders this response (using `m.display_name || m.username` for the name, with a role emoji icon).
+
+### POST /api/networks/:id/members
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L599)
+
+Add a member to the network (owner / admin only; the invite flow is usually smoother — see [POST /api/networks/:id/invite](#post-api-networks-id-invite) to issue a code that the recipient can redeem).
+
+```bash
+curl -X POST http://localhost:9200/api/networks/net_xxx/members \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "u_def456", "role": "member"}'
+```
+
+**Request body**:
+
+| Field | Type | Required | Description |
+|------|------|:----:|------|
+| `user_id` | string | &check; | Target user ID |
+| `role` | enum | | `admin` / `member` / `viewer` (default `member`) |
+
+Writes audit log `action='member_added'`.
+
+### PUT /api/networks/:id/members/:user_id
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L606)
+
+Change a member's role (owner only; cannot change the owner's own role).
+
+```bash
+curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_def456 \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+```
+
+**Request body**:
+
+| Field | Type | Required | Description |
+|------|------|:----:|------|
+| `role` | enum | &check; | New role: `admin` / `member` / `viewer` (cannot promote to `owner`) |
+
+Writes audit log `action='member_role_changed'`. This is the endpoint that R119 FAQ Q17 mentions for "changing roles".
+
+### DELETE /api/networks/:id/members/:user_id
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L613)
+
+Remove a member (owner / admin only; cannot remove the owner).
+
+```bash
+curl -X DELETE http://localhost:9200/api/networks/net_xxx/members/u_def456 \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+Writes audit log `action='member_removed'`.
 
 ### POST /api/networks/:id/invite
 
