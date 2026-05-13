@@ -1100,37 +1100,35 @@ Model guide:
     ]);
     opts.model = modelChoice === "__custom__" ? await ask("Model") : modelChoice;
   } else if (runtime === "claude-agent-sdk") {
+    // Vendor presets here are *verified-with-real-call* only. Adding a new
+    // vendor without per-vendor verify is forbidden (cf. preview.0-preview.2
+    // incident where DeepSeek / GLM / Kimi / MiMo entries were fabricated
+    // from PROVIDER_CHOICES — none worked). Add via `custom` until verified.
     console.log(`
-Model guide (国产 Anthropic 兼容 + Claude + 自定义):
-  - MiniMax-M2.7       MiniMax        URL: https://api.minimaxi.com/anthropic
-  - DeepSeek-V3        DeepSeek       URL: https://api.deepseek.com/anthropic
-  - GLM-5.1            智谱           URL: https://open.bigmodel.cn/anthropic
-  - Intern-S1-Pro      书生           URL: https://chat.intern-ai.org.cn/anthropic
-  - kimi-k2-0905-preview  Moonshot    URL: https://api.moonshot.cn/anthropic
-  - MiMo-V2.5          小米           URL: https://api.xiaomimimo.com/anthropic
+Model guide (verified Anthropic-compatible + Claude + custom):
+  - MiniMax-M2.7       MiniMax (api.minimaxi.com/anthropic)
+  - intern-s1-pro      上海 AI Lab 书生 (chat.intern-ai.org.cn)
   - claude-sonnet-4-6  Anthropic Claude via the default Anthropic API.
   - claude-opus-4-6    Anthropic Claude via the default Anthropic API.
   - claude-haiku-4-5   Anthropic Claude via the default Anthropic API.
-  - custom             Type both URL and model for any Anthropic-compatible provider.
+  - custom             Type both URL and model for any Anthropic-compatible
+                       provider (DeepSeek / GLM / Kimi / MiMo / OpenRouter /
+                       self-hosted vLLM, etc.).
 `);
     const modelChoice = await askChoice("Select model:", [
-      { label: "MiniMax-M2.7",          value: "MiniMax-M2.7",          description: "MiniMax (api.minimaxi.com/anthropic)" },
-      { label: "DeepSeek-V3",           value: "DeepSeek-V3",           description: "DeepSeek (api.deepseek.com/anthropic)" },
-      { label: "GLM-5.1",               value: "GLM-5.1",               description: "智谱 (open.bigmodel.cn/anthropic)" },
-      { label: "Intern-S1-Pro",         value: "Intern-S1-Pro",         description: "书生 (chat.intern-ai.org.cn/anthropic)" },
-      { label: "kimi-k2-0905-preview",  value: "kimi-k2-0905-preview",  description: "Moonshot Kimi (api.moonshot.cn/anthropic)" },
-      { label: "MiMo-V2.5",             value: "MiMo-V2.5",             description: "小米 MiMo (api.xiaomimimo.com/anthropic)" },
-      { label: "claude-sonnet-4-6",     value: "claude-sonnet-4-6",     description: "Anthropic default URL" },
-      { label: "claude-opus-4-6",       value: "claude-opus-4-6",       description: "Anthropic default URL" },
-      { label: "claude-haiku-4-5",      value: "claude-haiku-4-5",      description: "Anthropic default URL" },
-      { label: "custom",                value: "__custom__",            description: "Manually enter base URL + model" },
+      { label: "MiniMax-M2.7",       value: "MiniMax-M2.7",       description: "MiniMax (api.minimaxi.com/anthropic)" },
+      { label: "intern-s1-pro",      value: "intern-s1-pro",      description: "上海 AI Lab 书生 (chat.intern-ai.org.cn)" },
+      { label: "claude-sonnet-4-6",  value: "claude-sonnet-4-6",  description: "Anthropic default URL" },
+      { label: "claude-opus-4-6",    value: "claude-opus-4-6",    description: "Anthropic default URL" },
+      { label: "claude-haiku-4-5",   value: "claude-haiku-4-5",   description: "Anthropic default URL" },
+      { label: "custom",             value: "__custom__",         description: "Manually enter base URL + model" },
     ]);
     opts.model = modelChoice;
 
-    // Preset baseUrl injection for Anthropic-compatible vendors. Vendor list
-    // must stay in sync with PROVIDER_CHOICES (cli.ts L1232+) and the
-    // multi-model docs table (docs-site/docs/guide/multi-model.md). Refactor
-    // to derive both from a single source of truth is a separate follow-up.
+    // Preset baseUrl injection — only verified vendors. New vendor MUST land
+    // here only after per-vendor verify-with-real-call (curl ANTHROPIC_BASE_URL
+    // with the chosen model id and confirm 200), not by copying from
+    // PROVIDER_CHOICES or docs (those have not been verified end-to-end).
     if (opts.model === "__custom__") {
       const baseUrl = await ask("ANTHROPIC_BASE_URL");
       const customModel = await ask("Model");
@@ -1138,28 +1136,17 @@ Model guide (国产 Anthropic 兼容 + Claude + 自定义):
       opts.model = customModel;
     } else if (opts.model === "MiniMax-M2.7") {
       opts._envs.push("ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic");
-    } else if (opts.model === "DeepSeek-V3") {
-      opts._envs.push("ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic");
-    } else if (opts.model === "GLM-5.1") {
-      opts._envs.push("ANTHROPIC_BASE_URL=https://open.bigmodel.cn/anthropic");
-    } else if (opts.model === "Intern-S1-Pro") {
-      opts._envs.push("ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic");
-    } else if (opts.model === "kimi-k2-0905-preview") {
-      opts._envs.push("ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic");
-    } else if (opts.model === "MiMo-V2.5") {
-      opts._envs.push("ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic");
+    } else if (opts.model === "intern-s1-pro") {
+      // Intern uses the bare hostname; no /anthropic suffix (Vincent verified
+      // 2026-05-13 telegram 4227).
+      opts._envs.push("ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn");
     }
 
-    // Per-vendor signup URL hint (issue #48 follow-up). Values must stay in
-    // sync with PROVIDER_CHOICES signupUrl field (cli.ts L1264+); follow-up
-    // issue #49 will derive both from a single source of truth.
+    // Per-vendor signup URL hint. Only verified vendors get a hint; unverified
+    // ones force the user through `custom` (where they paste their own values).
     const vendorSignupUrls: Record<string, string> = {
-      "MiniMax-M2.7":          "https://platform.minimaxi.com",
-      "DeepSeek-V3":           "https://platform.deepseek.com",
-      "GLM-5.1":               "https://open.bigmodel.cn",
-      "Intern-S1-Pro":         "https://chat.intern-ai.org.cn",
-      "kimi-k2-0905-preview":  "https://platform.moonshot.cn",
-      "MiMo-V2.5":             "https://platform.xiaomimimo.com",
+      "MiniMax-M2.7":   "https://platform.minimaxi.com",
+      "intern-s1-pro":  "https://chat.intern-ai.org.cn/",
     };
     const hintUrl = vendorSignupUrls[opts.model];
 
@@ -1167,9 +1154,10 @@ Model guide (国产 Anthropic 兼容 + Claude + 自定义):
 API key:
   Paste the provider key for the selected model.${hintUrl ? `
   📋 注册 / 拿 ${opts.model} API Key: ${hintUrl}` : ""}
-  - MiniMax / DeepSeek / GLM / 书生 / Kimi / 小米 MiMo: token from the vendor's API Keys page.
+  - MiniMax / 书生: token from the vendor's API Keys page.
   - Anthropic Claude: use an Anthropic Console API key.
-  - Custom URL: use the key/token for that Anthropic-compatible provider (e.g. OpenRouter).
+  - Custom URL: use the key/token for that Anthropic-compatible provider
+    (DeepSeek / GLM / Kimi / MiMo / OpenRouter / etc. all work via custom).
 `);
     const token = await ask("ANTHROPIC_AUTH_TOKEN");
     if (token) opts._envs.push(`ANTHROPIC_AUTH_TOKEN=${token}`);
@@ -1250,13 +1238,24 @@ async function createCommand(idOverride?: string) {
   }
 
   // ── Interactive model selector (when no --runtime specified) ──
+  //
+  // Vendor URL/model values must be *verified-with-real-call* before landing.
+  // Entries marked "TODO unverified" had wrong base URLs / model ids in
+  // preview.0-preview.2 (Vincent telegram 4227 caught it). Until each vendor
+  // is re-verified (curl ANTHROPIC_BASE_URL with a known model and confirm
+  // 200), prefer the `custom` path. See feedback_vendor_verify_before_hardcode.
   const MODEL_PRESETS: Record<string, { runtime: string; label: string; baseUrl?: string; envKey?: string; requiresAuth?: string; signupUrl?: string }> = {
     minimax:   { runtime: "claude-agent-sdk", label: "MiniMax（推荐，国内直连，低成本）", baseUrl: "https://api.minimaxi.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.minimaxi.com" },
-    deepseek:  { runtime: "claude-agent-sdk", label: "DeepSeek（代码+推理，性价比极高）", baseUrl: "https://api.deepseek.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.deepseek.com" },
-    glm:       { runtime: "claude-agent-sdk", label: "GLM 智谱（中文理解强）", baseUrl: "https://open.bigmodel.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://open.bigmodel.cn" },
-    intern:    { runtime: "claude-agent-sdk", label: "书生 Intern（科学推理）", baseUrl: "https://chat.intern-ai.org.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn" },
-    kimi:      { runtime: "claude-agent-sdk", label: "Kimi（长文本 128K）", baseUrl: "https://api.moonshot.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.moonshot.cn" },
-    mimo:      { runtime: "claude-agent-sdk", label: "小米 MiMo（V2.5 系列，推理强）", baseUrl: "https://api.xiaomimimo.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.xiaomimimo.com" },
+    // TODO unverified — Vincent 4227 incident: DeepSeek base URL / model id had not been verified end-to-end. Keep entry as a stub but do NOT trust the baseUrl until re-verified.
+    deepseek:  { runtime: "claude-agent-sdk", label: "DeepSeek（代码+推理，性价比极高）[UNVERIFIED]", baseUrl: "https://api.deepseek.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.deepseek.com" },
+    // TODO unverified — same caveat as DeepSeek (Vincent 4227).
+    glm:       { runtime: "claude-agent-sdk", label: "GLM 智谱（中文理解强）[UNVERIFIED]", baseUrl: "https://open.bigmodel.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://open.bigmodel.cn" },
+    // Verified by Vincent 2026-05-13 telegram 4227: base URL is bare hostname (no /anthropic suffix). Model id `intern-s1-pro` (lowercase).
+    intern:    { runtime: "claude-agent-sdk", label: "上海 AI Lab 书生（intern-s1-pro）", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
+    // TODO unverified — same caveat as DeepSeek (Vincent 4227).
+    kimi:      { runtime: "claude-agent-sdk", label: "Kimi（长文本 128K）[UNVERIFIED]", baseUrl: "https://api.moonshot.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.moonshot.cn" },
+    // TODO unverified — same caveat as DeepSeek (Vincent 4227).
+    mimo:      { runtime: "claude-agent-sdk", label: "小米 MiMo（V2.5 系列）[UNVERIFIED]", baseUrl: "https://api.xiaomimimo.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.xiaomimimo.com" },
     openrouter:{ runtime: "claude-agent-sdk", label: "OpenRouter（一个 Key 用所有模型）", baseUrl: "https://openrouter.ai/api/v1", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://openrouter.ai" },
     claude:    { runtime: "claude-agent-sdk", label: "Claude Sonnet/Opus（海外，需 API Key）", envKey: "ANTHROPIC_API_KEY", signupUrl: "https://console.anthropic.com" },
     "claude-code": { runtime: "claude-code-cli", label: "Claude Code CLI（需 Max 订阅）", requiresAuth: "claude" },
@@ -1274,13 +1273,17 @@ async function createCommand(idOverride?: string) {
     { value: "claude-code-cli",  name: "claude-code-cli   — Claude Code 订阅用户 (需 Claude Pro/Team/Max + claude auth login)" },
   ];
 
+  // [UNVERIFIED] entries marked below — same caveat as MODEL_PRESETS above.
+  // Vincent telegram 4227 incident: only minimax + intern verified end-to-end.
+  // Use `custom` for everything else until per-vendor verify lands.
   const PROVIDER_CHOICES = [
     { key: "minimax",    label: "MiniMax — 国内直连，低成本，速度快",        baseUrl: "https://api.minimaxi.com/anthropic",     signupUrl: "https://platform.minimaxi.com" },
-    { key: "deepseek",   label: "DeepSeek — 代码 + 推理性价比高",            baseUrl: "https://api.deepseek.com/anthropic",     signupUrl: "https://platform.deepseek.com" },
-    { key: "glm",        label: "GLM 智谱 — 中文理解强",                     baseUrl: "https://open.bigmodel.cn/anthropic",     signupUrl: "https://open.bigmodel.cn" },
-    { key: "kimi",       label: "Kimi — 长文本 128K",                       baseUrl: "https://api.moonshot.cn/anthropic",      signupUrl: "https://platform.moonshot.cn" },
-    { key: "intern",     label: "书生 Intern — 科学推理",                    baseUrl: "https://chat.intern-ai.org.cn/anthropic", signupUrl: "https://chat.intern-ai.org.cn" },
-    { key: "mimo",       label: "小米 MiMo — V2.5 系列，推理强",              baseUrl: "https://api.xiaomimimo.com/anthropic",   signupUrl: "https://platform.xiaomimimo.com" },
+    { key: "deepseek",   label: "DeepSeek — 代码 + 推理性价比高 [UNVERIFIED]", baseUrl: "https://api.deepseek.com/anthropic",     signupUrl: "https://platform.deepseek.com" },
+    { key: "glm",        label: "GLM 智谱 — 中文理解强 [UNVERIFIED]",          baseUrl: "https://open.bigmodel.cn/anthropic",     signupUrl: "https://open.bigmodel.cn" },
+    { key: "kimi",       label: "Kimi — 长文本 128K [UNVERIFIED]",             baseUrl: "https://api.moonshot.cn/anthropic",      signupUrl: "https://platform.moonshot.cn" },
+    // Verified by Vincent 2026-05-13 telegram 4227: bare hostname, no /anthropic.
+    { key: "intern",     label: "上海 AI Lab 书生 — intern-s1-pro",            baseUrl: "https://chat.intern-ai.org.cn",          signupUrl: "https://chat.intern-ai.org.cn/" },
+    { key: "mimo",       label: "小米 MiMo — V2.5 [UNVERIFIED]",               baseUrl: "https://api.xiaomimimo.com/anthropic",   signupUrl: "https://platform.xiaomimimo.com" },
     { key: "openrouter", label: "OpenRouter — 一个 Key 用所有模型",          baseUrl: "https://openrouter.ai/api/v1",           signupUrl: "https://openrouter.ai" },
     { key: "claude",     label: "Claude Sonnet/Opus — 海外，官方 API Key",    baseUrl: "",                                        signupUrl: "https://console.anthropic.com" },
     { key: "custom",     label: "自定义 — 输入你的 baseUrl",                  baseUrl: "",                                        signupUrl: "" },
