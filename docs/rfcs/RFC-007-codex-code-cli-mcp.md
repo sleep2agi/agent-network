@@ -702,9 +702,9 @@ profile.flags.codex.approvalPolicy + sandbox 仍 override default:
     http-api (OpenAI-compatible HTTP)
 ```
 
-后续 prompt 加 codex-cli-mcp 特有问题:
-- approval-policy: `untrusted` / `on-failure` (default) / `on-request` / `never`
-- sandbox: `read-only` / `workspace-write` (default) / `danger-full-access`
+后续 prompt 加 codex-cli-mcp 特有问题 (default 标在 anet ecosystem autonomous 一致的值, conservative 选项仍 surface 给 dev-conscious 用户 opt-in):
+- approval-policy: `untrusted` / `on-failure` / `on-request` / `never` **(default)** — per Vincent §6.5 4144 Option A
+- sandbox: `read-only` / `workspace-write` / `danger-full-access` **(default)** — per Vincent §6.5 4144 Option A
 - model: gpt-5-codex (default for ChatGPT account) / gpt-5.2 / o3 / o4-mini / other (用户输入, ChatGPT auth 限部分 model)
 
 ### 7.2 cli.ts → agent-node delegate
@@ -929,7 +929,7 @@ Phase 1 是否实施 待 Vincent 拍板 (Open Q raise in §11)。
 
 1. **Runtime naming** — `codex-cli-mcp` (RFC-007 选, 3-token 短)  vs `codex-code-cli-mcp` (4-token 跟 `claude-code-cli` symmetry)? — **建议 `codex-cli-mcp`**, 跟 Vincent 4067 推荐一致, 减 typing
 2. **codex `--ignore-user-config` default 是否设？** — 设: avoid 用户 mcp_servers 污染 anet codex; 不设: 尊重用户已有配置 (per 通信龙 §1.2 实测 stale config 不影响 codex 主体, 仅 cosmetic mcp_startup fail) — **建议 `useUserConfig: true` default (不 ignore), profile.flags.codex.useUserConfig=false 让用户 opt-out**
-3. **Approval policy default** — `on-failure` (推荐) vs `untrusted` 更保守? — **建议 `on-failure`**, 跟 codex CLI default 一致, sandbox=workspace-write 限制下 balance OK
+3. ~~**Approval policy default**~~ — **RESOLVED per Vincent §6.5 telegram 4144 Option A**: default `never` (跟 anet autonomous teammate-mode 一致), conservative (`on-failure` / `untrusted` 等) 走 profile.flags.codex.approvalPolicy opt-in 路径
 4. **Escalate target alias 当 dangerous approval** — 走 commhub_send_task 到 `指挥室` 还是 telegram channel? — **建议: profile.flags.codex.escalateAlias 配置, default `指挥室`**
 5. **Thread per session vs per task** — Phase 1 hardcode `session` 简化; Phase 2 加选项? — **建议 Phase 1 仅 session, Phase 2 加 profile.flags.codex.threadStrategy 选项**
 6. **codex/event mapper 完整性** — 13 个 event type 都 map 还是仅 5 个 high-value (lifecycle + delta + complete)? — **建议 Phase 1 仅 high-value 5 个, Phase 2 全 map**
