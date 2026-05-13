@@ -909,17 +909,78 @@ L3 regex `codex.*mcp[_-]server` 修订: cover `mcp-server` subcommand spawn 模�
 
 Phase 1 不 ship, Phase 2 也不 ship。用户直接跑 `codex` (默认 TUI) + 手配 `~/.codex/config.toml` `[mcp_servers.commhub]` 即可 (user-mode), anet 不重复包装。
 
-### 10.3 Optional anet codex-setup user-mode 命令 (per 通信龙 plan §8 🥉)
+### 10.3 anet codex-setup user-mode 命令 — Phase 1 ship print-only (per Vincent 4154 Q12 Option A)
 
-非 runtime 路径, 帮用户配 `~/.codex/config.toml` 让用户 TUI 直接接 commhub MCP (user-mode 跟 daemon-mode 互补):
+非 runtime 路径, 帮用户配 `~/.codex/config.toml` 让用户 TUI 直接接 commhub MCP (user-mode 跟 daemon-mode 互补)。**Vincent telegram 4154 final Q12 Option A**: Phase 1 ship print-only version (~30 行 cli.ts, 不自动写文件, 用户可见可控可复制), Phase 2 加 `--apply` flag 自动写。
+
+**Phase 1 spec — print-only mode**:
 
 ```bash
 anet codex-setup --alias my-codex-user-tui
-# 输出: 写 ~/.codex/config.toml [mcp_servers.commhub-anet] section + env var instructions
-# 用户接下来直接跑 `codex` (TUI), codex 自动 connect commhub mesh
+# Output (stdout):
+# === Add to ~/.codex/config.toml ===
+# [mcp_servers.commhub-anet]
+# command = "..."
+# args = [...]
+# 
+# [mcp_servers.commhub-anet.env]
+# COMMHUB_ALIAS = "my-codex-user-tui"
+# COMMHUB_URL = "http://localhost:9200"
+# COMMHUB_NTOK = "ntok_..."
+# === End ===
+# 
+# Next steps:
+# 1. Copy above section to ~/.codex/config.toml
+# 2. Run: codex
+# 3. codex TUI will auto-connect commhub mesh; you can chat with other anet agents
 ```
 
-Phase 1 是否实施 待 Vincent 拍板 (Open Q raise in §11)。
+**cli.ts implement spec (~30 行)**:
+
+```ts
+case "codex-setup": {
+  const alias = args.alias || requireArg("--alias");
+  const commhubUrl = process.env.COMMHUB_URL || getCommhubUrlFromConfig();
+  const ntok = await mintNTok({ alias, scope: "node-bound" });
+
+  const tomlSnippet = generateCodexConfigToml({ alias, commhubUrl, ntok });
+  console.log("# === Copy below to ~/.codex/config.toml ===");
+  console.log(tomlSnippet);
+  console.log("# === End of snippet ===\n");
+  console.log("Next steps:");
+  console.log("  1. Append above section to ~/.codex/config.toml");
+  console.log("  2. Run: codex");
+  console.log("  3. codex TUI will auto-connect commhub; chat with other anet agents");
+  break;
+}
+
+function generateCodexConfigToml({ alias, commhubUrl, ntok }): string {
+  return `
+[mcp_servers.commhub-anet]
+type = "streamable-http"
+url = "${commhubUrl}/mcp"
+bearer_token_env_var = "COMMHUB_NTOK"
+
+[mcp_servers.commhub-anet.env]
+COMMHUB_ALIAS = "${alias}"
+COMMHUB_URL = "${commhubUrl}"
+COMMHUB_NTOK = "${ntok}"
+`.trim();
+}
+```
+
+**安全 (Phase 1 print-only rationale)**:
+- 用户自己复制粘贴 — 可见可控, 知道 anet 在帮配什么
+- 不自动写 `~/.codex/config.toml` — 避免 silently 改用户 system config (敏感, codex CLI 用户多用 anet 外的 codex 工作)
+- ntok 是 node-bound minted, 仅给该 alias 用 — 安全限定
+
+**Phase 2 升级 `--apply` flag** (待 Vincent 后续 ack):
+```bash
+anet codex-setup --alias my-codex-user-tui --apply
+# 自动 append section 到 ~/.codex/config.toml (backup 原文件)
+```
+
+**Vincent 决策 audit trail**: telegram 4154 final Q12 Option A (Phase 1 print-only ship), Phase 2 `--apply` deferred。
 
 ### 10.4 anet-bridge fan-out 脑洞 (Option α — per 通信龙 plan §8 中期)
 
@@ -938,7 +999,7 @@ Phase 1 是否实施 待 Vincent 拍板 (Open Q raise in §11)。
 9. **agent-node 多 codex-cli-mcp runtime 同 host RAM** — 实测 codex mcp-server idle ~50MB / running ~150MB / + agent-node node ~100MB = 总 200-300MB per node — **建议 doc 标注每节点 200-300MB RAM 预算** (task #111 benchmark confirm 后定值)
 10. ~~`codex/event` notification handler @modelcontextprotocol/sdk API verify~~ — **promoted to §3.0 Phase 0 spike gate (blocking)** per 通信牛 review P1 #2
 11. **Vincent codex mac mini version 验证** — 通信龙 telegram 4054 paste 显示含 `codex app` 但需 final confirm 含 `codex mcp-server` — **不阻塞, 等 Vincent `codex --version` 反馈**
-12. **Optional anet codex-setup 命令** — Phase 1 包含 (帮用户 user-mode 也接 mesh) vs 推迟 Phase 2 (避免 scope creep)? — **建议 Phase 1 ship 简单版** (cli.ts `anet codex-setup --alias X` 仅 print toml + env var template, 不自动写文件), 真写文件版 Phase 2 加 `--apply` flag
+12. ~~**Optional anet codex-setup 命令**~~ — **RESOLVED per Vincent telegram 4154 Q12 Option A**: Phase 1 ship print-only version (`anet codex-setup --alias <name>` 仅 print toml snippet + env vars 给用户复制粘贴), Phase 2 `--apply` flag 自动写文件版 deferred. 详 §10.3 spec.
 
 ## 12. Timeline
 
