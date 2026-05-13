@@ -181,8 +181,14 @@ flowchart TD
 ### Security practices
 
 ```bash
-# 1. chmod 600 (CLI does this automatically; v0.8 bootstrap also writes admin-utok.json at 600)
-chmod 600 ~/.anet/config.json ~/.anet/server/admin-utok.json
+# 1. Config-file permissions audit
+#    ✅ ~/.anet/server/admin-utok.json    auto 600 (cli.ts:105-111 saveAdminUtok)
+#    ✅ ~/.anet/server/config.json        auto 600 (cli.ts:89-95 saveServerConfig)
+#    ⚠ ~/.anet/config.json                **NOT auto-600** (cli.ts:77-81 saveGlobal uses the default 644) — on shared multi-user hosts, fix manually:
+chmod 600 ~/.anet/config.json
+# Single-user hosts: limited impact (HOME is usually 700 already).
+# Multi-user machines: other local users can read your utok_.
+# v0.9 RFC will auto-fix the chmod; see R223 chain.
 
 # 2. Don't commit .anet/
 echo ".anet/" >> .gitignore
