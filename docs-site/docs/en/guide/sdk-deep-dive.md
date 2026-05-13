@@ -5,8 +5,8 @@
 
 anet ships three runtimes today. Two are SDK adapters (the third, `claude-code-cli`, spawns the local `claude` binary and is out of scope here):
 
-- `claude-agent-sdk` — official `@anthropic-ai/claude-agent-sdk`, bundled as a direct dep of `@sleep2agi/agent-node`
-- `codex-sdk` — official `@openai/codex-sdk`, listed as an **optional peerDependency** (users install it + the `@openai/codex` binary globally when needed)
+- `claude-agent-sdk` — official `@anthropic-ai/claude-agent-sdk`, listed in [`@sleep2agi/agent-node`'s regular `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) (not baked into the dist — the build flag is `--external` — but npm resolves it as a sub-dependency at install time)
+- `codex-sdk` — official `@openai/codex-sdk`, listed as an **optional peerDependency** (npm 7+ pulls it in by default; if it's missing, run `npm install -g @openai/codex-sdk` plus install the `@openai/codex` binary globally)
 
 The two SDKs differ substantially across API entry, session semantics, tool registration, streaming, token accounting and error handling. The anet wrapper reconciles them with two branches (`processWithClaude()` / `processWithCodex()`) plus a single `think()` scheduler. This document walks through 11 dimensions side-by-side and ends with "how to plug in a new runtime (gemini-cli / qwen-code / …) by copying the pattern."
 
@@ -20,7 +20,7 @@ All `agent-node/src/cli.ts:NNN` line numbers below are based on `@sleep2agi/agen
 
 | Dimension | `claude-agent-sdk` | `codex-sdk` |
 |---|---|---|
-| **Package / version** | `@anthropic-ai/claude-agent-sdk` ^0.2.96 (direct dep) | `@openai/codex-sdk` >=0.118.0 (optional peerDep) |
+| **Package / version** | `@anthropic-ai/claude-agent-sdk` ^0.2.140 (regular dep — see [agent-node/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) for the source of truth) | `@openai/codex-sdk` >=0.130.0 (optional peerDep — same source) |
 | **API entry** | `query({ prompt, options })` → `AsyncGenerator<SDKMessage>` | `new Codex({...}).startThread(opts)` / `.resumeThread(id, opts)` → `Thread`; then `Thread.run()` / `Thread.runStreamed()` |
 | **Session semantics** | `SDKSystemMessage{subtype:'init'}.session_id` arrives in the first frame; resume via `Options.resume` or `Options.continue`; on-disk under `~/.claude/projects/<cwd>/<uuid>.jsonl` | `Thread.id` is only populated after the first turn starts; resume via `codex.resumeThread(id, opts)`; on-disk under `~/.codex/sessions/` |
 | **Tool registration** | `tools: string[]` for built-ins + `mcpServers: Record<string, McpServerConfig>` (stdio / http / sse); subagents definable | Toolset is **not detachable** — Codex CLI's full kit (Read/Write/Edit/Bash/Grep/Glob/WebSearch) is baked in; MCP is wired through Codex CLI's global `config.toml` |

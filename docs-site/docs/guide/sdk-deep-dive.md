@@ -5,8 +5,8 @@
 
 anet 当前内置三个 Runtime，其中两个是 SDK adapter（第三个 `claude-code-cli` 是 spawn 本机 `claude` 二进制，不在本页对比范围）：
 
-- `claude-agent-sdk` — `@anthropic-ai/claude-agent-sdk` 官方 SDK，bundle 进 `@sleep2agi/agent-node` 主依赖
-- `codex-sdk` — `@openai/codex-sdk` 官方 SDK，列为 **optional peerDependency**（要的话用户自装 + `@openai/codex` 二进制全局）
+- `claude-agent-sdk` — `@anthropic-ai/claude-agent-sdk` 官方 SDK，在 [`@sleep2agi/agent-node` 的 regular `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里（不是打进 dist；build flag `--external`，npm 安装时作为 sub-dep 自动拉）
+- `codex-sdk` — `@openai/codex-sdk` 官方 SDK，列为 **optional peerDependency**（npm 7+ 默认会拉，若没拉用户 `npm install -g @openai/codex-sdk` + `@openai/codex` 二进制全局）
 
 两家 SDK 接入语义、能力边界、session 处理、tool 注册、streaming、token 计费、错误处理差别都不小。anet 的 wrapper 用 `processWithClaude()` / `processWithCodex()` 两个分支 + 一个统一的 `think()` 调度器抹平这些差异。本文系统梳理这 11 个维度，并给出"想加 gemini-cli / qwen-code 等新 runtime 应该怎么照葫芦画瓢"的指引。
 
@@ -20,7 +20,7 @@ anet 当前内置三个 Runtime，其中两个是 SDK adapter（第三个 `claud
 
 | 维度 | `claude-agent-sdk` | `codex-sdk` |
 |---|---|---|
-| **package / 版本** | `@anthropic-ai/claude-agent-sdk` ^0.2.96（dep） | `@openai/codex-sdk` >=0.118.0（peerDep, optional） |
+| **package / 版本** | `@anthropic-ai/claude-agent-sdk` ^0.2.140（regular dep；以 [agent-node/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 为准） | `@openai/codex-sdk` >=0.130.0（optional peerDep；同上） |
 | **API entry** | `query({ prompt, options })` → `AsyncGenerator<SDKMessage>` | `new Codex({...}).startThread(opts)` / `.resumeThread(id, opts)` → `Thread`；`Thread.run()` / `Thread.runStreamed()` |
 | **Session 语义** | `SDKSystemMessage{subtype:'init'}.session_id` 第一帧拿到；resume 用 `Options.resume` 或 `Options.continue`；落盘 `~/.claude/projects/<cwd>/<uuid>.jsonl` | `Thread.id` 首次 turn 启动后才有；resume 用 `codex.resumeThread(id, opts)`；落盘 `~/.codex/sessions/` |
 | **Tool 注册** | `tools: string[]` 内置 + `mcpServers: Record<string, McpServerConfig>` 多协议（stdio / http / sse）；可定义 subagent | 工具集**不可剥离**（Codex CLI 内置 Read/Write/Edit/Bash/Grep/Glob/WebSearch 全套）；MCP 通过 Codex CLI 全局 `config.toml` 注入 |
