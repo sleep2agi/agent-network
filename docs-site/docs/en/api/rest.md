@@ -161,13 +161,13 @@ curl http://localhost:9200/api/auth/me \
     "role": "admin"
   },
   "networks": [
-    { "network_id": "net_xxx", "network_name": "default", "role": "owner" },
-    { "network_id": "net_yyy", "network_name": "team-prod", "role": "member" }
+    { "network_id": "net_xxx", "network_name": "default", "member_role": "owner" },
+    { "network_id": "net_yyy", "network_name": "team-prod", "member_role": "member" }
   ]
 }
 ```
 
-`networks` lists every network the current user belongs to along with their role; `anet whoami` uses this list (combined with the `network_id` in `config.json`) to render the "← current" marker.
+`networks` lists every network the current user belongs to along with their `member_role` in that network (field name matches [GET /api/networks](#get-api-networks)); `anet whoami` uses this list (combined with the `network_id` in `config.json`) to render the "← current" marker.
 
 ---
 

@@ -161,13 +161,13 @@ curl http://localhost:9200/api/auth/me \
     "role": "admin"
   },
   "networks": [
-    { "network_id": "net_xxx", "network_name": "default", "role": "owner" },
-    { "network_id": "net_yyy", "network_name": "team-prod", "role": "member" }
+    { "network_id": "net_xxx", "network_name": "default", "member_role": "owner" },
+    { "network_id": "net_yyy", "network_name": "team-prod", "member_role": "member" }
   ]
 }
 ```
 
-`networks` 数组列出当前用户所属的所有 network 及其 role；`anet whoami` 用它显示「← current」标记（结合 `config.json` 里的 `network_id` 字段）。
+`networks` 数组列出当前用户所属的所有 network 及在该 network 的 `member_role`（字段名跟 [GET /api/networks](#get-api-networks) 一致）；`anet whoami` 用它显示「← current」标记（结合 `config.json` 里的 `network_id` 字段）。
 
 ---
 
