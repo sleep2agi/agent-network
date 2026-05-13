@@ -213,27 +213,44 @@ anet passwd                    # rotate to a strong password
 
 ---
 
-### `set up admin account` repeating prompt (v0.8)
+### `anet hub start` keeps re-bootstrapping the admin?
 
-The first `anet hub start` set admin, but the second start still prompts to set it up again?
+The first `anet hub start` created admin, but a second start still prints `Admin account created`?
 
-**Cause**: An early v0.8.0 had this bug; fixed in v0.8.0 stable. If you still hit it, the SQLite db has no admin user row.
+::: tip Bootstrap is **non-interactive** — there is no "Set up admin account" prompt
+Verified at [`agent-network/bin/cli.ts:2027-2078`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2027): `anet hub start` simply POSTs `/api/auth/register` with username=`admin` and password=`anethub` (unless overridden by `--username` / `--password`). **No interactive prompt is involved**, so the older "repeating prompt" framing in this doc is stale and has been removed.
+
+Idempotency is driven by `~/.anet/server/admin-utok.json` as a marker — if it exists, the register flow is skipped (output: `✅ Admin already exists`). If it's missing, the register call re-runs; if the user row already exists, the hub returns `username already taken` and the CLI prints `ℹ Admin account "admin" already exists` (no duplicate is created).
+:::
+
+**Cause**: `~/.anet/server/admin-utok.json` was deleted, or the hub's `~/.commhub/commhub.db` was wiped, or you're running with a different `HOME` (e.g. a Docker container without a mounted volume).
+
+**Inspect state**:
+
+```bash
+# 1. Where is the marker?
+ls -la ~/.anet/server/admin-utok.json   # exists → next start skips register
+
+# 2. Is the admin user row present on the hub?
+sqlite3 ~/.commhub/commhub.db "SELECT username, role FROM users WHERE role='admin'"
+```
+
+**Two-file state vs. `anet hub start` output**:
+
+| `admin-utok.json` | `users` table admin row | `anet hub start` output |
+|---|---|---|
+| Present | Present | `✅ Admin already exists (admin-utok.json found, user=...)` |
+| Missing | Present | `ℹ  Admin account "admin" already exists` (hub returns `username already taken`) |
+| Missing | Missing | `✅ Admin account created` + `Admin token saved to ~/.anet/server/admin-utok.json` |
+| Present | Missing (db wiped) | `✅ Admin already exists`, but `anet login` will fail — the marker and the db are out of sync; remove the marker and re-run start |
 
 **Fix**:
 
 ```bash
-# Accept the defaults
-anet hub start
-# Prompt: 'Set up admin account (default: admin / anethub):' → press Enter
-
-# Or inspect the db
-sqlite3 ~/.commhub/commhub.db "SELECT username, role FROM users"
-```
-
-If there's no admin row at all, re-bootstrap:
-
-```bash
-anet hub start                  # auto-creates admin / anethub
+# Symptom: admin-utok.json exists, but `anet login` fails
+# → marker and db are out of sync. Remove the marker so the next start re-bootstraps.
+rm ~/.anet/server/admin-utok.json
+anet hub start                  # re-runs the register flow
 anet login --username admin --password anethub
 ```
 

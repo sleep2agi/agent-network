@@ -212,27 +212,44 @@ anet passwd                    # 改成强密码
 
 ---
 
-### `set up admin account` 反复 prompt（v0.8）
+### 第二次 `anet hub start` 还重新 bootstrap admin？
 
-第一次 `anet hub start` 设了 admin 之后，第二次启动还反复让我设？
+第一次 `anet hub start` 已经建了 admin，再启动还输出 `Admin account created`？
 
-**原因**：v0.8.0 早期有过这个 bug，已在 v0.8.0 stable 修掉。如果还遇到说明 SQLite db 里没有 admin user 记录。
+::: tip bootstrap 是**非交互**的，没有 "Set up admin account" prompt
+verify [`agent-network/bin/cli.ts:2027-2078`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2027)：`anet hub start` 默认直接 POST `/api/auth/register` username=`admin` password=`anethub`（除非传 `--username` / `--password`）。**没有任何交互 prompt**，所以「反复 prompt」描述是旧 doc，已删。
+
+幂等性靠 `~/.anet/server/admin-utok.json` 作 marker —— 文件在就跳过 register flow（输出 `✅ Admin already exists`），文件丢了就再跑 register（hub 端会因 `username already taken` 而返 `ℹ Admin account "admin" already exists`，不会重建）。
+:::
+
+**原因**：`~/.anet/server/admin-utok.json` 被删了 / hub `~/.commhub/commhub.db` 被清了 / 用了不同的 `HOME`（Docker 没挂卷）。
+
+**确认状态**：
+
+```bash
+# 1. marker 文件在哪
+ls -la ~/.anet/server/admin-utok.json   # 该文件存在 → 下次 start 跳过 register
+
+# 2. hub 端 admin user 在不在
+sqlite3 ~/.commhub/commhub.db "SELECT username, role FROM users WHERE role='admin'"
+```
+
+**两文件状态 vs `anet hub start` 行为**：
+
+| `admin-utok.json` | `users` 表 admin row | `anet hub start` 输出 |
+|---|---|---|
+| 存在 | 存在 | `✅ Admin already exists (admin-utok.json found, user=...)` |
+| 不存在 | 存在 | `ℹ  Admin account "admin" already exists`（hub 返 `username already taken`） |
+| 不存在 | 不存在 | `✅ Admin account created` + `Admin token saved to ~/.anet/server/admin-utok.json` |
+| 存在 | 不存在（db 被清） | `✅ Admin already exists` 但 `anet login` 会失败 —— 需 `rm admin-utok.json` 再 `anet hub start` |
 
 **解决**：
 
 ```bash
-# 直接走默认 admin / anethub
-anet hub start
-# 看到 'Set up admin account (default: admin / anethub):' → 回车
-
-# 或检查 db
-sqlite3 ~/.commhub/commhub.db "SELECT username, role FROM users"
-```
-
-如果上一步 db 里完全没有 admin 记录，重新 bootstrap：
-
-```bash
-anet hub start                  # 自动建 admin / anethub
+# 状况：admin-utok.json 在但 login 失败
+# → marker 跟 db 不同步，删 marker 让下次 start 重建 admin row
+rm ~/.anet/server/admin-utok.json
+anet hub start                  # 重新走 register flow
 anet login --username admin --password anethub
 ```
 
