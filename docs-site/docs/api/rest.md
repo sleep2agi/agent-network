@@ -600,6 +600,21 @@ curl -X POST http://localhost:9200/api/auth/tokens \
   -d '{"name": "my-agent", "network_id": "net_xxx"}'
 ```
 
+**响应**：
+
+```json
+{
+  "ok": true,
+  "token": "utok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_abc123def456",
+  "name": "my-agent"
+}
+```
+
+::: warning Token 明文只返回一次
+`token` 字段是明文 Token，**仅在创建时返回这一次**——hub 端只存 hash。丢失后请用 [DELETE /api/auth/tokens/:id](#delete-api-auth-tokens-id) 撤销 + 重新创建。
+:::
+
 ### GET /api/auth/tokens
 
 
@@ -612,15 +627,46 @@ curl http://localhost:9200/api/auth/tokens \
   -H "Authorization: Bearer utok_xxx"
 ```
 
+**响应**：
+
+```json
+{
+  "ok": true,
+  "tokens": [
+    {
+      "token_id": "tok_abc123def456",
+      "name": "my-agent",
+      "last_used_at": "2026-04-12 10:00:00"
+    },
+    {
+      "token_id": "tok_xyz789",
+      "name": "dashboard",
+      "last_used_at": null
+    }
+  ]
+}
+```
+
+明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
+
 ### DELETE /api/auth/tokens/:id
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L541)
 
-撤销 Token。
+撤销 Token（hub 端立即吊销，跟 `anet logout` 仅本机清 token 区别开）。
 
 ```bash
 curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
   -H "Authorization: Bearer utok_xxx"
+```
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "revoked": true
+}
 ```
 
 ---

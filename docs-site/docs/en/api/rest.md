@@ -600,6 +600,21 @@ curl -X POST http://localhost:9200/api/auth/tokens \
   -d '{"name": "my-agent", "network_id": "net_xxx"}'
 ```
 
+**Response**:
+
+```json
+{
+  "ok": true,
+  "token": "utok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_abc123def456",
+  "name": "my-agent"
+}
+```
+
+::: warning The plaintext token is returned only once
+The `token` field is the plaintext token, **returned exactly once at creation** — the hub stores only its hash. If you lose it, use [DELETE /api/auth/tokens/:id](#delete-api-auth-tokens-id) to revoke + create a fresh one.
+:::
+
 ### GET /api/auth/tokens
 
 
@@ -612,15 +627,46 @@ curl http://localhost:9200/api/auth/tokens \
   -H "Authorization: Bearer utok_xxx"
 ```
 
+**Response**:
+
+```json
+{
+  "ok": true,
+  "tokens": [
+    {
+      "token_id": "tok_abc123def456",
+      "name": "my-agent",
+      "last_used_at": "2026-04-12 10:00:00"
+    },
+    {
+      "token_id": "tok_xyz789",
+      "name": "dashboard",
+      "last_used_at": null
+    }
+  ]
+}
+```
+
+The plaintext `token` field is **not** returned here (only at POST creation).
+
 ### DELETE /api/auth/tokens/:id
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L541)
 
-Revoke a token.
+Revoke a token (immediate server-side invalidation — distinct from `anet logout` which only clears the local token).
 
 ```bash
 curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
   -H "Authorization: Bearer utok_xxx"
+```
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "revoked": true
+}
 ```
 
 ---
