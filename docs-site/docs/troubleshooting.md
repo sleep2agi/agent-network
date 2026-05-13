@@ -230,21 +230,26 @@ anet login --username admin --password anethub
 
 ---
 
-### `rate_limit_exceeded` -- 速率限制
+### 429 速率限制（`too many requests` / `too many attempts`）
 
 ```
-HTTP 429: rate_limit_exceeded
+HTTP 429
+{ "ok": false, "error": "too many requests, try again later" }     # register 命中
+{ "ok": false, "error": "too many attempts, try again later" }     # login 命中
 ```
 
-**原因**：同一 IP 请求过快。
+**原因**：同一 IP 在窗口内请求过多。
 
-| 端点 | 限制 |
-|------|------|
-| register | 30 次/分钟 |
-| login | 10 次/分钟 |
-| 其他 | 60 次/分钟 |
+| 端点 | 限制 | 命中 message |
+|------|------|---|
+| `POST /api/auth/register` | 30 次/分钟 | `too many requests, try again later` |
+| `POST /api/auth/login` | 10 次/分钟 | `too many attempts, try again later`（+ audit `login_rate_limited`） |
 
-**解决**：等待 60 秒后重试。localhost 免限制。
+::: info v0.8 当前只有这两个 endpoint 做 IP rate limit
+其他 endpoint **不做 IP rate limit**（`checkRateLimit` 函数 default=60 仅函数签名 default，[`server/src/index.ts:55`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L55) 实际只在 register/login 两处调；详见 R169 修正，[安全设计 — 速率限制](/concepts/security#速率限制-rate-limiting)）。担心其他端点被写滥用，前置反向代理（nginx / Cloudflare）加 rate limit。
+:::
+
+**解决**：等 60 秒后重试。localhost / `::1` / `unknown` IP 免限制（[`index.ts:57`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L57)）。响应**无** `retry_after_seconds` 字段，**无** `Retry-After` header，窗口固定 60 秒。
 
 ---
 

@@ -231,21 +231,26 @@ anet login --username admin --password anethub
 
 ---
 
-### `rate_limit_exceeded` -- Rate Limited
+### 429 Rate limited (`too many requests` / `too many attempts`)
 
 ```
-HTTP 429: rate_limit_exceeded
+HTTP 429
+{ "ok": false, "error": "too many requests, try again later" }    # register hit
+{ "ok": false, "error": "too many attempts, try again later" }    # login hit
 ```
 
-**Cause**: Too many requests from the same IP.
+**Cause**: Too many requests from the same IP within the window.
 
-| Endpoint | Limit |
-|------|------|
-| register | 30/minute |
-| login | 10/minute |
-| other | 60/minute |
+| Endpoint | Limit | Hit message |
+|------|------|---|
+| `POST /api/auth/register` | 30/minute | `too many requests, try again later` |
+| `POST /api/auth/login` | 10/minute | `too many attempts, try again later` (also writes audit `login_rate_limited`) |
 
-**Solution**: Wait 60 seconds before retrying. Localhost is exempt from rate limits.
+::: info Only these two endpoints have IP rate limiting in v0.8
+No other endpoint is currently IP-rate-limited. The `checkRateLimit` function's `default = 60` is a function-signature default, not actual behavior — the only call sites are register/login ([`server/src/index.ts:55`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L55); see R169 fix and [Security — Rate limiting](/en/concepts/security#rate-limiting)). If you're worried about write abuse on other endpoints, layer rate limiting at a reverse proxy (nginx / Cloudflare).
+:::
+
+**Solution**: Wait 60 seconds before retrying. Localhost / `::1` / `unknown` IPs are exempt ([`index.ts:57`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L57)). The response has **no** `retry_after_seconds` field and **no** `Retry-After` header; the window is a fixed 60 seconds.
 
 ---
 
