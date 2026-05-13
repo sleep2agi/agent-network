@@ -46,6 +46,7 @@ Any model that supports the Anthropic Messages API can be integrated via the `cl
 - GLM 5.1 (Zhipu, Anthropic-compatible API)
 - Kimi (Moonshot, Anthropic-compatible API)
 - Xiaomi MiMo (Anthropic-compatible API)
+- OpenRouter (one API key for all upstream models — GPT-4 / Claude / Gemini / Llama, etc. — Anthropic-compatible API)
 
 Full list + configuration examples at [Multi-model](/en/guide/multi-model). Any provider that supports the Anthropic Messages API works via `ANTHROPIC_BASE_URL`.
 
