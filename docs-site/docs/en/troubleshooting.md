@@ -402,27 +402,34 @@ anet network delete my-network
 
 ---
 
-### `quota exceeded` (legacy behavior)
+### `quota exceeded: max N networks for free plan`
 
 ```json
 {"ok": false, "error": "quota exceeded: max 2 networks for free plan"}
 ```
 
-::: info Plan quotas are not enforced from v0.8 onward
-v0.6 designed a Free / Pro / Admin three-tier plan quota system, but **after the Apache 2.0 OSS pivot, plan tiers are no longer enforced** (`users.plan` is treated as admin / unlimited; `anet network create` / `anet node create` do not run plan-quota checks). See [Networks — Quota Limits](/en/concepts/networks#quota-limits-v0-6-design--currently-not-enforced).
+::: warning Still enforced in v0.8 (POST /api/networks for non-admin callers)
+The older "plan quotas not enforced from v0.8 onward" claim is inaccurate. Verify [`auth.ts:184-190 createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184): it still looks up `users.plan || 'free'` in the `QUOTAS` table and gates `network create`. **Only `users.role = 'admin'` (the first registered user) is exempt** — that path sets `plan = "admin"` and uses `QUOTAS.admin`. Other users get `plan = 'free'` with `max_networks_owned = 2` by default (v0.8 did not change this default). The [Networks — Quota Limits](/en/concepts/networks#quota-limits-v0-6-design--currently-not-enforced) note about "plan tiers not enforced" actually refers to **no Dashboard plan-upgrade UI + no SaaS billing**, not "server no longer runs quota checks".
 :::
 
-**Trigger condition** (rare): your hub is running v0.6-compat code paths and your SQLite `users.plan` is still the old `free` value.
+**Trigger**: a non-admin user already owns the maximum number of networks (free = 2).
 
 **Solution**:
 
 ```bash
-# Option A (recommended): set plan to admin so the hub no longer gates by quota
-sqlite3 ~/.commhub/commhub.db "UPDATE users SET plan = 'admin' WHERE plan = 'free';"
+# Option A (recommended): promote the user to admin (a system-admin op on the hub host)
+# There's no public endpoint for this — edit SQLite directly:
+sqlite3 ~/.commhub/commhub.db "UPDATE users SET role = 'admin' WHERE user_id = 'u_xxx';"
+# After this, users.role='admin' → createNetwork uses plan='admin' → QUOTAS.admin (essentially unlimited)
 
-# Option B: just delete the extra network (if you only have a network count issue, no plan upgrade needed)
-anet network delete old-network
+# Option B: delete one of the extra networks
+anet network ls           # find one to drop
+anet network delete <old-net>
 ```
+
+::: tip Why setting `users.plan = 'admin'` is not enough
+[`auth.ts:185`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L185) actually checks `users.role === 'admin'`, not `users.plan`. A bare `UPDATE users SET plan = 'admin'` won't take effect — you must update the `role` column (the same system-admin gate that R195 documents for audit-log actions like `password_reset_by_admin`).
+:::
 
 ---
 

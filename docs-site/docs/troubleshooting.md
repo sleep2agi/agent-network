@@ -401,27 +401,34 @@ anet network delete my-network
 
 ---
 
-### `quota exceeded`（legacy 行为）
+### `quota exceeded: max N networks for free plan`
 
 ```json
 {"ok": false, "error": "quota exceeded: max 2 networks for free plan"}
 ```
 
-::: info v0.8 起不启用 plan 配额
-v0.6 时代设计过 Free / Pro / Admin 三档 plan 配额，但 **Apache 2.0 OSS 转向后已不启用**（`users.plan` 字段统一当 admin / unlimited 处理；`anet network create` / `anet node create` 不再做 plan 配额检查）。详见 [Networks — 配额限制](/concepts/networks#配额限制-v0-6-设计目标-当前未启用)。
+::: warning v0.8 仍 enforced（POST /api/networks，非 admin）
+旧版 doc 说「v0.8 起不启用 plan 配额」**不准** —— verify [`auth.ts:184-190 createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184)：仍然按 `users.plan || 'free'` 查 `QUOTAS` 表门控 `network create`。**仅 `users.role='admin'`（首位注册用户）豁免**（`plan = "admin"` 走 `QUOTAS.admin`）。其他用户 `plan='free'` 默认上限 `max_networks_owned=2`（v0.8 没改这个默认值）。跟 [Networks — 配额限制](/concepts/networks#配额限制-v0-6-设计目标-当前未启用) 描述的「未启用 plan 区分」实际指的是 **dashboard 不显示 plan 升级 UI + 没 SaaS 计费**，不是「server 端不再做 quota 检查」。
 :::
 
-**触发条件**（少见）：你的 hub 跑在 v0.6 兼容代码路径上，且 SQLite `users.plan` 还是旧的 `free` 值。
+**触发条件**：non-admin 用户创建了 ≥ `max_networks_owned`（free=2）的网络。
 
 **解决**：
 
 ```bash
-# 方案 A（推荐）：把 plan 改为 admin 让 hub 不再卡配额
-sqlite3 ~/.commhub/commhub.db "UPDATE users SET plan = 'admin' WHERE plan = 'free';"
+# 方案 A（推荐）：让 hub 把该用户升 admin（任何已 hub 主机本机权限的 system admin 操作）
+# 没有公开 endpoint, 只能 SQLite 直改：
+sqlite3 ~/.commhub/commhub.db "UPDATE users SET role = 'admin' WHERE user_id = 'u_xxx';"
+# 之后该 user.role='admin' → createNetwork plan='admin' → quota 走 QUOTAS.admin（基本无限）
 
-# 方案 B：直接删多余的 network（如果你只是网络数量超了，不需要 plan 升级）
-anet network delete old-network
+# 方案 B：直接删多余的 network
+anet network ls           # 看哪些可删
+anet network delete <old-net>
 ```
+
+::: tip 为什么 `users.plan='admin'` 不够
+[`auth.ts:185`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L185) 实际 check 的是 `users.role === 'admin'`，不是 `users.plan`。直接 SQL `UPDATE users SET plan = 'admin'` 不生效；要走 `role` 列才有效（跟 R195 audit log action `password_reset_by_admin` 等 system-admin gate 同款）。
+:::
 
 ---
 
