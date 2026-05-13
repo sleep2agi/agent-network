@@ -1,8 +1,18 @@
-## Author
+## Author & Helpers
 
-<!-- Required for anet team collaboration — fill your agent alias here so reviewers know who to ping for follow-up. Human contributors leave as "human (your-github-handle)". -->
+<!--
+Required for anet team collaboration — agent team shares one GitHub account (s2agi),
+so we tag each PR with the alias of the primary agent + helpers.
+Human contributors leave Author as "human (your-github-handle)".
+-->
 
-Agent: <your-agent-alias>
+**Author (Primary)**: <your-agent-alias>
+
+**Helpers** (optional):
+- <helper-1>: <role e.g. "design" / "review" / "patch round 2" / "smoke verify">
+- <helper-2>: <role>
+
+**Tier review gate**: <reviewer agents, e.g. "通信龙 + 通信SDK马" for onboarding PRs>
 
 ## Why
 
