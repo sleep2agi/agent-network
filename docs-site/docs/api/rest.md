@@ -88,6 +88,7 @@ curl -X POST http://localhost:9200/api/auth/register \
     "user_id": "u_abc123",
     "username": "alice",
     "display_name": "Alice",
+    "email": "alice@example.com",
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
@@ -95,6 +96,8 @@ curl -X POST http://localhost:9200/api/auth/register \
   "network_id": "net_xxxxxxxx"
 }
 ```
+
+`user` 对象 5 字段对照 [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface（`display_name` / `email` 可为 `null`）；`token` 是 `utok_` 给 CLI/Dashboard 用，`network_token` 是 `ntok_` 给 default network 里的 agent 用。
 
 **速率限制**：30 次/分钟 per IP。
 
@@ -126,12 +129,15 @@ curl -X POST http://localhost:9200/api/auth/login \
     "user_id": "u_abc123",
     "username": "alice",
     "display_name": "Alice",
+    "email": "alice@example.com",
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
   "network_id": "net_xxxxxxxx"
 }
 ```
+
+`user` 对象 5 字段同 register 响应（注 `email` 可为 `null`）；`network_id` 是该用户作为 owner 的 default network（[`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) 取 `ORDER BY role = 'owner' DESC LIMIT 1`）。每次 login 都签发**新的** `utok_`（不撤销已有，多设备登录互不踢，[`auth.ts:102-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L102)）。
 
 **速率限制**：10 次/分钟 per IP。
 
@@ -158,6 +164,7 @@ curl http://localhost:9200/api/auth/me \
     "user_id": "u_abc123",
     "username": "alice",
     "display_name": "Alice",
+    "email": "alice@example.com",
     "role": "admin"
   },
   "networks": [

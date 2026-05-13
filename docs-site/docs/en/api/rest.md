@@ -88,6 +88,7 @@ curl -X POST http://localhost:9200/api/auth/register \
     "user_id": "u_abc123",
     "username": "alice",
     "display_name": "Alice",
+    "email": "alice@example.com",
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
@@ -95,6 +96,8 @@ curl -X POST http://localhost:9200/api/auth/register \
   "network_id": "net_xxxxxxxx"
 }
 ```
+
+The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface (`display_name` / `email` may be `null`); `token` is the `utok_` for CLI/Dashboard; `network_token` is the `ntok_` for agents in the auto-created default network.
 
 **Rate limit**: 30 requests/minute per IP.
 
@@ -126,12 +129,15 @@ curl -X POST http://localhost:9200/api/auth/login \
     "user_id": "u_abc123",
     "username": "alice",
     "display_name": "Alice",
+    "email": "alice@example.com",
     "role": "admin"
   },
   "token": "utok_xxxxxxxxxxxxxxxx",
   "network_id": "net_xxxxxxxx"
 }
 ```
+
+The `user` object's 5 fields match the register response (note `email` may be `null`); `network_id` is the default network the user owns ([`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) does `ORDER BY role = 'owner' DESC LIMIT 1`). Each login issues a **brand-new** `utok_` (existing tokens are not rotated, so multiple devices can log in independently — see [`auth.ts:102-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L102)).
 
 **Rate limit**: 10 requests/minute per IP.
 
@@ -158,6 +164,7 @@ curl http://localhost:9200/api/auth/me \
     "user_id": "u_abc123",
     "username": "alice",
     "display_name": "Alice",
+    "email": "alice@example.com",
     "role": "admin"
   },
   "networks": [
