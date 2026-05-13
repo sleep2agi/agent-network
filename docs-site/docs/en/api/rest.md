@@ -490,22 +490,34 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
   "ok": true,
   "tasks": [
     {
-      "message_id": "t_a1b2c3d4",
-      "from_name": "指挥室",
-      "to_name": "代码1号",
-      "content": "Write a Python quicksort",
-      "status": "replied",
+      "task_id": "t_a1b2c3d4",
+      "from_node_id": null,
+      "from_name": "commander",
+      "to_node_id": "node_xxx",
+      "to_name": "coder-1",
       "priority": "normal",
+      "status": "replied",
+      "content": "Write a Python quicksort",
+      "result": "Done — quicksort implementation attached",
+      "in_reply_to": null,
+      "requires_response": "reply",
+      "scope": "single",
       "created_at": "2026-04-12 10:00:00",
       "delivered_at": "2026-04-12 10:00:01",
-      "replied_at": "2026-04-12 10:00:15",
-      "ttl_seconds": 3600
+      "started_at": "2026-04-12 10:00:02",
+      "completed_at": "2026-04-12 10:00:15",
+      "expires_at": "2026-04-12 11:00:00"
     }
+  ],
+  "count": 1,
+  "stats": [
+    { "status": "replied", "count": 85 },
+    { "status": "running", "count": 5 }
   ]
 }
 ```
 
-The `anet tasks` CLI uses `from_name` / `to_name` / `status` / `created_at` / `content` to render the table (cli.ts L2810-2817).
+Field mapping to the `tasks` table schema ([`server/src/db.ts:87-105`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L87)) via `SELECT *`: the primary key is `task_id` (not `message_id`); the completion timestamp is `completed_at` (not `replied_at`); the TTL field is `expires_at` (an absolute timestamp), not `ttl_seconds` — `ttl_seconds` is **input-only** on `send_task` and converted to `expires_at` when the row is written. The `anet tasks` CLI uses `from_name` / `to_name` / `status` / `created_at` / `content` to render the table (cli.ts L2810-2817).
 
 ---
 
@@ -586,24 +598,30 @@ curl "http://localhost:9200/api/messages?limit=100" \
   "ok": true,
   "messages": [
     {
-      "message_id": "m_abc123",
+      "id": "m_abc123",
       "from_alias": "coder-1",
       "to_alias": "commander",
       "type": "reply",
+      "priority": "normal",
       "content": "[coder-1] Done, used quicksort",
-      "created_at": "2026-04-12 10:00:15"
+      "created_at": "2026-04-12 10:00:15",
+      "network_id": "net_xxxxx"
     },
     {
-      "message_id": "m_def456",
+      "id": "m_def456",
       "from_alias": "commander",
       "to_alias": "coder-1",
       "type": "task",
+      "priority": "normal",
       "content": "Write a quicksort",
-      "created_at": "2026-04-12 10:00:00"
+      "created_at": "2026-04-12 10:00:00",
+      "network_id": "net_xxxxx"
     }
   ]
 }
 ```
+
+Field mapping to the server `SELECT` ([`server/src/index.ts:940`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L940)) `id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at, network_id` — the primary key is `id` (not `message_id`); the response also includes `priority` + `network_id`, which earlier doc omitted.
 
 ::: info Current schema caveat
 The SELECT doesn't include `in_reply_to` yet; reply-polling uses a heuristic of `from_alias` + `type='reply'` + recency (see comment at `cli.ts:3827`).

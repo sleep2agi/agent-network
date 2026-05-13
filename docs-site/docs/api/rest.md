@@ -490,22 +490,34 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
   "ok": true,
   "tasks": [
     {
-      "message_id": "t_a1b2c3d4",
+      "task_id": "t_a1b2c3d4",
+      "from_node_id": null,
       "from_name": "指挥室",
+      "to_node_id": "node_xxx",
       "to_name": "代码1号",
-      "content": "写一个 Python 快排算法",
-      "status": "replied",
       "priority": "normal",
+      "status": "replied",
+      "content": "写一个 Python 快排算法",
+      "result": "已完成，使用快排实现",
+      "in_reply_to": null,
+      "requires_response": "reply",
+      "scope": "single",
       "created_at": "2026-04-12 10:00:00",
       "delivered_at": "2026-04-12 10:00:01",
-      "replied_at": "2026-04-12 10:00:15",
-      "ttl_seconds": 3600
+      "started_at": "2026-04-12 10:00:02",
+      "completed_at": "2026-04-12 10:00:15",
+      "expires_at": "2026-04-12 11:00:00"
     }
+  ],
+  "count": 1,
+  "stats": [
+    { "status": "replied", "count": 85 },
+    { "status": "running", "count": 5 }
   ]
 }
 ```
 
-`anet tasks` CLI 用 `from_name` / `to_name` / `status` / `created_at` / `content` 渲染表格 (cli.ts L2810-2817)。
+字段对照 `tasks` 表 schema ([`server/src/db.ts:87-105`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L87)) `SELECT *`：主键是 `task_id` 不是 `message_id`；任务完成时间字段是 `completed_at` 不是 `replied_at`；TTL 字段是 `expires_at` 绝对时间不是 `ttl_seconds` 相对秒（`ttl_seconds` 仅 send_task **入参**用，写入时算成 `expires_at`）。`anet tasks` CLI 用 `from_name` / `to_name` / `status` / `created_at` / `content` 渲染表格 (cli.ts L2810-2817)。
 
 ---
 
@@ -586,24 +598,30 @@ curl "http://localhost:9200/api/messages?limit=100" \
   "ok": true,
   "messages": [
     {
-      "message_id": "m_abc123",
+      "id": "m_abc123",
       "from_alias": "代码1号",
       "to_alias": "指挥室",
       "type": "reply",
+      "priority": "normal",
       "content": "[代码1号] 已完成，使用快排实现",
-      "created_at": "2026-04-12 10:00:15"
+      "created_at": "2026-04-12 10:00:15",
+      "network_id": "net_xxxxx"
     },
     {
-      "message_id": "m_def456",
+      "id": "m_def456",
       "from_alias": "指挥室",
       "to_alias": "代码1号",
       "type": "task",
+      "priority": "normal",
       "content": "写一个快排算法",
-      "created_at": "2026-04-12 10:00:00"
+      "created_at": "2026-04-12 10:00:00",
+      "network_id": "net_xxxxx"
     }
   ]
 }
 ```
+
+字段对照 server SELECT ([`server/src/index.ts:940`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L940)) `id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at, network_id` —— 主键字段是 `id` 不是 `message_id`，含 `priority` + `network_id` 两个之前 doc 漏掉的字段。
 
 ::: info 当前 schema 限制
 SELECT 暂未包含 `in_reply_to` 字段；轮询匹配回复消息时按 `from_alias` + `type='reply'` + recency 启发式匹配（详见 `cli.ts:3827` 注释）。
