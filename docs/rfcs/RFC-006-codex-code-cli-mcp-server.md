@@ -15,7 +15,13 @@
 
 ## 摘要
 
-给 anet 加第 5 个 runtime — `codex-code-cli`，通过 spawn `codex mcp-server` stdio 子进程 + anet 作为 MCP client 调用 `codex` / `codex-reply` 两个 tool 的方式，让用户在 `anet node create --runtime codex-code-cli` 后启动节点时**自动接入 commhub mesh** — 跟其他 agent 用 `send_task / get_inbox / get_all_status` 等工具通信。**目的**：让 codex CLI 用户像 claude-code-cli runtime 一样直接接入 anet，**且实现成本仅 ~150-200 行**（RFC-005 TUI 方案估 ~80 行但不能 push，RFC-005 B 方案 ws daemon 估 ~590 行复杂度过高且协议未稳定）。
+给 anet 加 1 个 codex CLI runtime — **`codex-code-cli-mcp`** (daemon mode, push-driven via mcp-server stdio)，通过 spawn `codex mcp-server` stdio 子进程 + anet 作为 MCP client 调用 `codex` / `codex-reply` 两个 tool 的方式，让用户在 `anet node create --runtime codex-code-cli-mcp` 后启动节点时**自动接入 commhub mesh** — 跟其他 agent 用 `send_task / get_inbox / get_all_status` 等工具通信。**目的**：让 codex CLI 用户像 claude-code-cli runtime 一样直接接入 anet，**且实现成本仅 ~150-200 行**。
+
+**Phase 1 ship (2.1.8 大 feature, 1-2 天)**: `codex-code-cli-mcp` 单 runtime (per Vincent telegram 4074-4075 narrow 决策 — "A TUI 意义不大，先 mcp")。
+
+**Non-goal**: `codex-code-cli` TUI mode — 用户直接终端跑 `codex` + 手配 `~/.codex/config.toml` `[mcp_servers.commhub]` 即可，anet 不重复包装（详见 §10 non-goal 段）。
+
+**Phase 2 ship (2.1.9+, 2-3 weeks, 待 codex ws transport stabilize)**:`codex-code-cli-remote-control` — ws daemon mode (push-driven via [PR #21424](https://github.com/openai/codex/pull/21424) `codex remote-control` + anet ws client)，比 Phase 1 mcp daemon 更强（支持 `turn/steer` mid-execution / multi-client peer / 完整 63 ServerNotification 流），等 codex 0.131/0.132 ws transport stabilize 后 ship（[#22404](https://github.com/openai/codex/pull/22404) / [#22414](https://github.com/openai/codex/pull/22414) / [#22386](https://github.com/openai/codex/pull/22386) 都 2026-05-13 today landing 表示 stabilize 中）。Phase 2 触发条件量化见 §10.1.
 
 ## 1. 背景
 
@@ -46,7 +52,17 @@ RFC-005（草案）原描述 spawn `codex` TUI 二进制 + 注入 commhub MCP �
 | **B — `codex remote-control` ws daemon** | spawn `codex remote-control` headless daemon + anet 作 ws client（[PR #21424](https://github.com/openai/codex/pull/21424) merged 2026-05-07） | ~590-680 行（含 ws 模块 + auth + 单 client supervision） | ✅ 完整 JSON-RPC 2.0 push（turn/start + 63 ServerNotification） | ⚠ 本周仍 stabilize（[#22404](https://github.com/openai/codex/pull/22404) / [#22414](https://github.com/openai/codex/pull/22414) / [#22386](https://github.com/openai/codex/pull/22386) 都 2026-05-13 today landing） |
 | **C — `codex mcp-server` stdio** | spawn `codex mcp-server` stdio child + anet 作 MCP client（@modelcontextprotocol/sdk 复用） | **~150-200 行** | ✅ MCP `tools/call codex` SYNC return + 期间 `codex/event` 实时流（含 token-level delta） | ✅ stable（`mcp-server` 早于 0.130 已 ship） |
 
-**Path C 是 clear winner（详见 §3.2 三路径对比）**。RFC-006 基于 C path 重新 organize；RFC-005 标记 `Superseded by RFC-006`，全文保留作架构决策历史。
+**Path C 是 clear winner（详见 §3.2 三路径对比）**。
+
+**2026-05-13 Vincent telegram 4067-4075 决策 timeline (收敛到 single runtime)**:
+
+- 4067+4068: 初步 dual runtime (A TUI + C mcp daemon)
+- 4073: 加 Path B 作 Phase 2 (triple runtime: A + C + B)
+- **4074+4075: narrow back — "A 意义不大", Phase 1 仅 ship `codex-code-cli-mcp` (Path C 单 runtime)**
+
+收敛 rationale: Path A TUI 用户直接终端 `codex` + `~/.codex/config.toml` 手配 commhub MCP 已满足 (Vincent 自己 ~/.codex/config.toml 已含半成品配置)，anet 不必重复包装该 use case。Path C 是 anet 真正补的 gap (mesh 节点 push-driven 自动响应 send_task)。Path B (`codex remote-control` ws daemon) 待 codex 0.131/0.132 ws transport stabilize 后 ship Phase 2 (§10 触发条件量化)。
+
+RFC-006 §3-§13 描述 Path C 单 runtime; Path A 列入 §10.2 non-goal 段; Path B 列入 §10.1 Phase 2 触发条件段; RFC-005 标记 `Superseded by RFC-006`，全文保留作架构决策历史。
 
 ### 1.3 codex 0.130 `mcp-server` protocol probe（实测 evidence）
 
@@ -100,7 +116,7 @@ RFC-005（草案）原描述 spawn `codex` TUI 二进制 + 注入 commhub MCP �
        |
        | SSE (new_task event for codex-bot)
        v
-[agent-node (codex-code-cli runtime adapter)]
+[agent-node (codex-code-cli-mcp runtime adapter)]
        |
        | MCP stdio (via @modelcontextprotocol/sdk StdioClientTransport)
        v
@@ -124,7 +140,7 @@ RFC-005（草案）原描述 spawn `codex` TUI 二进制 + 注入 commhub MCP �
 **关键架构选择 — Option 2 vs Option 1**（per 通信工程马 e50eda1a + 9c43ba4e 共识）:
 
 - **Option 1**: anet CLI (cli.ts) 直接做 MCP client bridge — cli.ts 肿胀（+290 行）
-- **Option 2** ✅: cli.ts 仅 spawn `agent-node` 子进程（thin launcher，~30-50 行 dispatch），agent-node 内含 `codex-code-cli` runtime adapter 跟现有 `codex-sdk` runtime 同框架共用 supervision
+- **Option 2** ✅: cli.ts 仅 spawn `agent-node` 子进程（thin launcher，~30-50 行 dispatch），agent-node 内含 `codex-code-cli-mcp` runtime adapter 跟现有 `codex-sdk` runtime 同框架共用 supervision
 
 Option 2 让 cli.ts 保持 launcher 角色不肿胀，跟 codex-sdk runtime 复用 daemon lifecycle（重连 / heartbeat / shutdown），是 anet 现有架构自然 extension。
 
@@ -144,29 +160,36 @@ Option 2 让 cli.ts 保持 launcher 角色不肿胀，跟 codex-sdk runtime 复�
 | **Approval flow** | manual | server→client 9 个 reverse ServerRequest 须 anet 决策 | inherit codex 静态 approval-policy 参数（"never" / "on-failure" / "on-request" / "untrusted"） |
 | **anet 代码量** | ~80 行 cli.ts | ~590-680 行（ws + bridge + supervision） | **~150-200 行** |
 | **多 anet session 同 host** | n/a | port 冲突管理须 | ✅ 自然 stdio 隔离 |
+| **Phase 1 ship 决策** | ❌ non-goal (用户直接 `codex` + `~/.codex/config.toml` 手配 commhub MCP 已满足，anet 不重复包装) | ❌ defer Phase 2 (待 §10.1 触发条件) | ✅ ship 作 `codex-code-cli-mcp` runtime (mesh 自动响应 send_task) |
 
-Path C 在 7/12 维度优于 Path B，3/12 维度持平，2/12（Turn 中断 / Live event 类型）B 更全（但 C 通过 `codex/event` 覆盖 90% UX 需求）。**C 在复杂度 / 代码量 / 协议稳定性三大决策维度全面胜出，是 Phase 1 唯一合理选择**。
+Path C 在 7/12 维度优于 Path B，3/12 维度持平，2/12（Turn 中断 / Live event 类型）B 更全（但 C 通过 `codex/event` 覆盖 90% UX 需求）。**Phase 1 ship Path C 单 runtime**（per Vincent 4074-4075）, Path A non-goal, Path B defer Phase 2。
 
 ### 3.3 cli.ts 改动（~30-50 行）
 
 类比 codex-sdk runtime（thin launcher，重活在 agent-node）:
 
 ```ts
-// L133 RuntimeName enum 加 codex-code-cli
-type RuntimeName = "claude-code-cli" | "codex-sdk" | "codex-code-cli" | "claude-agent-sdk" | "http-api";
+// L133 RuntimeName enum 加 1 个新 runtime
+type RuntimeName =
+  | "claude-code-cli"
+  | "codex-sdk"
+  | "codex-code-cli-mcp"    // ← NEW: daemon mode (Path C, mcp-server stdio)
+  | "claude-agent-sdk"
+  | "http-api";
 
-// normalizeRuntime branch
+// normalizeRuntime 加 branch
 function normalizeRuntime(r: string): RuntimeName {
   switch (r) {
-    case "codex-cli":
-    case "codex-code-cli":
-      return "codex-code-cli";
+    case "codex-cli-mcp":
+    case "codex-code-cli-mcp":
+    case "codex-mcp":
+      return "codex-code-cli-mcp";    // daemon
     // ... existing branches
   }
 }
 
 // checkRuntimeDependency 加 codex 二进制 check
-if (profile.runtime === "codex-code-cli") {
+if (profile.runtime === "codex-code-cli-mcp") {
   if (!commandExists("codex")) {
     warn("Install codex CLI: npm i -g @openai/codex@latest");
     return false;
@@ -176,18 +199,16 @@ if (profile.runtime === "codex-code-cli") {
   // semver check
 }
 
-// setupCommand wizard choices 加 codex-code-cli 选项
-
-// launchAgent dispatch 加 case 'codex-code-cli' → delegate agent-node
-case "codex-code-cli":
-  return spawnAgentNode(profile, { runtime: "codex-code-cli" });
+// launchAgent dispatch
+case "codex-code-cli-mcp":     // daemon mode — delegate agent-node MCP client bridge
+  return spawnAgentNode(profile, { runtime: "codex-code-cli-mcp" });
 ```
 
-通信工程马 worktree `~/anet-work/rfc-005-codex-code-cli/` 6 edit 中 5 个直接复用（RuntimeName enum / normalizeRuntime / checkRuntimeDependency / setupCommand checkbox / setupCommand install logic）。第 6 个 launchAgent spawn 段从 `spawn codex 二进制 + 注入 MCP` 改为 `spawnAgentNode(profile, {runtime: "codex-code-cli"})`，跟 codex-sdk dispatch 同款。
+通信工程马 worktree `~/anet-work/rfc-005-codex-code-cli/` 6 edit 中 5 个直接复用（RuntimeName enum / normalizeRuntime / checkRuntimeDependency / setupCommand checkbox / setupCommand install logic — 现在 single runtime 也适用）。第 6 个 launchAgent spawn 段从 RFC-005 设计（spawn `codex` + `--config 'mcp_servers.commhub.url=...'` inline 注入 TUI 模式）改为 `spawnAgentNode(profile, {runtime: "codex-code-cli-mcp"})` delegate, 跟 codex-sdk dispatch 同款。原 RFC-005 §3.3 TUI mode 设计 archive 在 RFC-005 全文保留 (Superseded), 不在 Phase 1 ship。
 
 ### 3.4 agent-node 改动（~150-200 行）
 
-新增 `agent-node/src/runtime/codex-code-cli.ts`:
+新增 `agent-node/src/runtime/codex-code-cli-mcp.ts`:
 
 ```ts
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -206,7 +227,7 @@ export class CodexCodeCliRuntime {
     });
 
     this.mcpClient = new Client(
-      { name: "anet-codex-code-cli", version: AGENT_NODE_VERSION },
+      { name: "anet-codex-code-cli-mcp", version: AGENT_NODE_VERSION },
       { capabilities: {} }
     );
 
@@ -256,10 +277,10 @@ export class CodexCodeCliRuntime {
 
 复用 `codex-sdk` runtime 现有 supervision 框架（spawn / supervise / respawn / shutdown），仅替换 transport + tool call payload。
 
-### 3.5 完整 sequence diagram
+### 3.5 完整 sequence diagram (daemon mode)
 
 ```
-[commhub-server] -- SSE new_task --> [agent-node codex-code-cli runtime]
+[commhub-server] -- SSE new_task --> [agent-node codex-code-cli-mcp runtime]
                                               |
                                               | tools/call codex { prompt, cwd, model, sandbox, approval-policy }
                                               v
@@ -423,7 +444,7 @@ RFC-003 已定义 `commhub_report_progress` MCP method + `progress_events` SQLit
 
 ```json
 {
-  "runtime": "codex-code-cli",
+  "runtime": "codex-code-cli-mcp",
   "model": "gpt-5.2-codex",
   "flags": {
     "codex": {
@@ -453,11 +474,11 @@ agent-node runtime adapter 启动 tools/call 时透传这些字段。
   ❯ claude-code-cli (Claude CLI binary)
     claude-agent-sdk (Anthropic SDK)
     codex-sdk (OpenAI Codex SDK)
-    codex-code-cli (Codex CLI via mcp-server) ← NEW
+    codex-code-cli-mcp (Codex CLI daemon via mcp-server) ← NEW
     http-api (OpenAI-compatible HTTP)
 ```
 
-后续 prompt 加 codex-code-cli 特有问题:
+后续 prompt 加 codex-code-cli-mcp 特有问题:
 - approval-policy: `untrusted` / `on-failure` (default) / `on-request` / `never`
 - sandbox: `read-only` / `workspace-write` (default) / `danger-full-access`
 - model: gpt-5.2-codex (default) / gpt-5.2 / 其他
@@ -467,9 +488,9 @@ agent-node runtime adapter 启动 tools/call 时透传这些字段。
 `launchAgent` dispatch:
 
 ```ts
-case "codex-code-cli":
+case "codex-code-cli-mcp":
   // 跟 codex-sdk runtime 同框架走 agent-node 子进程
-  return spawnAgentNode(profile, { runtime: "codex-code-cli" });
+  return spawnAgentNode(profile, { runtime: "codex-code-cli-mcp" });
 ```
 
 Setup wizard 之外的 cli.ts 改动量 minimal（~30 行 dispatch + checkRuntimeDependency + assertStartCompatibility）。
@@ -484,19 +505,19 @@ Setup wizard 之外的 cli.ts 改动量 minimal（~30 行 dispatch + checkRuntim
 |---|---|---|
 | L0 | prerequisites | `which codex && which anet` |
 | L1 | hub up | `anet hub start` + `curl /health` |
-| L2 | node create | `anet node create test-codex-bot --runtime codex-code-cli` + `.anet/nodes/test-codex-bot/config.json` 写盘 |
+| L2 | node create | `anet node create test-codex-bot --runtime codex-code-cli-mcp` + `.anet/nodes/test-codex-bot/config.json` 写盘 |
 | L3 | child spawn verify | `pgrep -f "codex mcp-server"` ← path C 模式（vs RFC-005 path A `codex` TUI 或 path B `codex remote-control`） |
 | L4 | MCP handshake | netcat / fifo 读 child stdin/stdout 验 `initialize` ack |
 | L5 | tools/list verify | 验 codex + codex-reply 两 tool 都 listed |
 | L6 | push verify | `anet commhub_send_task --alias test-codex-bot --task "hello"` → 验 codex 收到 tools/call codex → SYNC return 后 commhub 收 reply |
 | L7 | live progress | 验 codex/event 流 forward 到 commhub `progress_events` 表 |
-| L8 | cross-runtime | 起 codex-code-cli + claude-code-cli 两 node → A `send_task` B → 都能 daemon push |
+| L8 | cross-runtime | 起 codex-code-cli-mcp + claude-code-cli 两 node → A `send_task` B → 都能 daemon push |
 
 L3 regex `codex.*mcp[_-]server` 修订：cover `mcp-server` subcommand spawn 模式。Phase 2 ws daemon 后再扩展。
 
 ### 8.2 Smoke test 流程
 
-1. Vincent mac mini 跑 `anet node create vincent-codex --runtime codex-code-cli`
+1. Vincent mac mini 跑 `anet node create vincent-codex --runtime codex-code-cli-mcp`
 2. 启动 `anet node start vincent-codex`
 3. 从指挥室 `commhub_send_task --alias vincent-codex --task "what is 2+2"`
 4. 验:
@@ -519,7 +540,18 @@ L3 regex `codex.*mcp[_-]server` 修订：cover `mcp-server` subcommand spawn 模
 | codex 0.130 cross-platform (mac/linux/windows) `mcp-server` 行为差 | 🟡 medium | Vincent mac mini final verify + Docker linux E2E + Windows 等 Vincent feedback |
 | `codex mcp-server` 默认加载 `~/.codex/config.toml` 把用户 mcp_servers 全注入 — context bloat | 🟡 medium | profile.flags.codex 加 `useUserConfig: false` 选项透传 `--ignore-user-config`（codex 支持） |
 
-## 10. Future Work — Phase 2 升级 ws daemon mode
+## 10. Future Work — Phase 2 升级 + Non-goal
+
+### 10.0 Non-goal — `codex-code-cli` TUI mode (Path A)
+
+per Vincent telegram 4074-4075 决策, **Phase 1 不 ship Path A TUI runtime**, 也**不进入 Phase 2 scope**:
+
+- 用户直接终端跑 `codex` (无 anet wrapper) + 手配 `~/.codex/config.toml` `[mcp_servers.commhub]` (streamable-http transport + bearer_token_env_var) 已能让 codex 接入 commhub mesh
+- Vincent 自己 `~/.codex/config.toml` 已含半成品 `[mcp_servers.commhub-proxy]` 配置，证明该 use case 用户已实证 (6429bc0 §3)
+- anet 包装 TUI mode 不增加 user value (vs 用户手配)，反而引入 maintenance cost (env injection / sandbox flag 默认 / cli.ts spawn 复杂)
+- 不阻碍 anet 路径: 用户如需 anet mesh push 行为, 用 `codex-code-cli-mcp` (Phase 1, push-driven daemon); 仅需 TUI 调试用 codex 自己即可
+
+doc-site 文档可加 cases page 教用户手配 `~/.codex/config.toml` 接 commhub (但不作 anet runtime 实施)。
 
 ### 10.1 Phase 2 触发条件（量化，避免永不来 — per 通信工程马 review focus）
 
@@ -538,7 +570,7 @@ L3 regex `codex.*mcp[_-]server` 修订：cover `mcp-server` subcommand spawn 模
 
 | 模块 | 复用度 | 备注 |
 |---|---|---|
-| cli.ts spawn dispatch | 100% | runtime: `codex-code-cli` 不变，agent-node 内换 adapter 实现 |
+| cli.ts spawn dispatch | 100% | runtime: `codex-code-cli-mcp` 保留 / Phase 2 加新 runtime `codex-code-cli-remote-control` |
 | agent-node runtime adapter 框架 | 80% | supervision / restart / lifecycle 全保留，替换 MCP stdio → WS JSON-RPC |
 | codex/event 流 → commhub mapping | 80% | event 类型相似（task_started / item_completed / agent_message_content_delta），新增 ServerRequest 9 个 reverse approval flow |
 | Dashboard `<ProgressTimeline>` | 100% | RFC-003 NodeEvent schema 统一 |
@@ -554,9 +586,10 @@ Phase 2 实施成本估 ~300-400 行（Phase 1 基础上 delta）。
 5. **codex/event mapper 完整性** — 13 个 event type 都 map 还是仅 5 个 high-value（lifecycle + delta + complete）？— **建议 Phase 1 仅 high-value 5 个，Phase 2 全 map**
 6. **Multi-language prompt encoding** — codex mcp-server tools/call prompt 是否支持中文 / emoji / multiline？— **probe 已验中文 emoji OK（prompt: "say hello in one word"）；multiline 待 cover smoke test**
 7. **codex auth (OpenAI API key) 如何 inherit** — stdio child inherit env 默认拿 `OPENAI_API_KEY` from anet env？还是用户走 `codex login` 持久化？— **建议: 推荐用户先 `codex login`（OAuth 持久化），anet 不管 auth**
-8. **agent-node 多 codex-code-cli runtime 同 host RAM** — 实测 codex mcp-server idle ~50MB / running ~150MB（待量化）— **建议 doc 标注每节点 100-200MB RAM 预算**
+8. **agent-node 多 codex-code-cli-mcp runtime 同 host RAM** — 实测 codex mcp-server idle ~50MB / running ~150MB（待量化）— **建议 doc 标注每节点 100-200MB RAM 预算**
 9. **`codex/event` notification handler @modelcontextprotocol/sdk API verify** — `setNotificationHandler` 对 catch-all（method 不在标准 MCP method list）支持的具体 API 形式 — **实施时确认 SDK 文档，必要时 patch SDK or workaround**
 10. **Vincent codex mac mini version 验证** — 通信龙 telegram 4054 paste 显示含 `codex app` 但需 final confirm 含 `codex mcp-server` — **不阻塞，等 Vincent `codex --version` 反馈**
+11. **Runtime naming convention** — `codex-code-cli-mcp` (RFC-006 选, 4-token, 跟 `claude-code-cli` 对称 + `-mcp` 后缀区分 transport) vs Vincent telegram 4067 推荐 `codex-cli-mcp` (3-token, 短) — **建议 RFC-006 现 naming `codex-code-cli-mcp` 保 anet 命名一致性 (现有 `claude-code-cli` 是 4-token)**, 但 Vincent 自己拍板这条 final
 
 ## 12. Timeline
 
@@ -568,8 +601,8 @@ Phase 2 实施成本估 ~300-400 行（Phase 1 基础上 delta）。
 - ⏳ RFC-005 mark Superseded amend commit
 
 **Day 2**:
-- 通信工程马 unstash `~/anet-work/rfc-005-codex-code-cli/` worktree 6 edit（5/6 复用 + #6 launchAgent 改 spawn agent-node）
-- 通信工程马 起 agent-node `codex-code-cli.ts` runtime adapter（~150-200 行）
+- 通信工程马 unstash `~/anet-work/rfc-005-codex-code-cli/` worktree 6 edit（5/6 复用 + #6 launchAgent 改 spawn agent-node delegate）
+- 通信工程马 起 agent-node `codex-code-cli-mcp.ts` runtime adapter（~150-200 行）
 - 通信测试马 PR #43 演进 L3 regex `mcp[_-]server` + 新 L5 tools/list verify + L7 live progress
 - 通信SDK马 review cli.ts + agent-node code
 
@@ -582,18 +615,19 @@ Phase 2 实施成本估 ~300-400 行（Phase 1 基础上 delta）。
 ## 13. 结论
 
 ✅ **anet 支持 codex CLI Phase 1 完全可行** — `codex mcp-server` stdio 0.130 已 ship 完整 daemon RPC + live event stream
+✅ **Phase 1 ship 范围确定** — `codex-code-cli-mcp` 单 runtime (per Vincent 4074-4075 narrow), Path A TUI 作 non-goal (§10.0), Path B ws daemon defer Phase 2 (§10.1 触发条件)
 ✅ **架构方向定了** — Option 2 agent-node bridge + MCP stdio + `@modelcontextprotocol/sdk` 复用
 ✅ **工作量 manageable** — ~150-200 行 agent-node + ~30-50 行 cli.ts + ~300 行 test = 总 ~500 行，2-3 天 ship 2.1.8 大 feature
-✅ **Live UX 优于 RFC-005 path A** — token-level streaming dashboard 渲染
+✅ **Live UX 优于 codex TUI 自己渲染** — token-level streaming forward 到 dashboard `<ProgressTimeline>` 统一渲染 (跟 claude agent 对称)
 ✅ **协议稳定** — mcp-server 已 stable，不依赖 stabilize 中的 ws transport PRs
-⚠ **10 个 Open Questions 待 Vincent / 通信龙 拍板** — §11
-⚠ **Phase 2 升级路径明确** — §10 触发条件量化
+⚠ **11 个 Open Questions 待 Vincent / 通信龙 拍板** — §11 (含 Q11 naming convention)
+⚠ **Phase 2 升级路径明确** — §10.1 触发条件量化避免永不来
 
 后续动作:
-- RFC-005 mark Superseded
-- 通信工程马 unstash + 实施
-- 通信测试马 PR #43 演进
-- Vincent 回答 §11 Open Questions
-- 联合 smoke test ship 2.1.8 stable
+- ✅ RFC-005 mark Superseded ([commit 63b28e3](https://github.com/sleep2agi/agent-network/commit/63b28e3))
+- 通信工程马 unstash worktree + 实施 agent-node `codex-code-cli-mcp.ts` runtime adapter
+- 通信测试马 PR #43 演进 (L3 regex `mcp[_-]server` + L5 tools/list verify + L7 live progress)
+- Vincent 回答 §11 Open Questions (重点 Q1 approval-policy / Q4 escalate target / Q11 runtime naming)
+- 联合 smoke test ship 2.1.8 preview → Vincent 亲测 → ship 2.1.8 latest stable 大 feature
 
 — END —
