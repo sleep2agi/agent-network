@@ -281,39 +281,54 @@ ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, creat
 
 ## 数据库表结构
 
+下方是 v0.8 实际生效的 schema（含所有 ALTER TABLE migration 之后的字段）。CREATE TABLE 原文 + migrations 见 [`server/src/db.ts:87-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L87)（tasks 原 17 列）+ [`db.ts:301-304`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L301) (V3 加 `network_id`) + [`db.ts:391`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L391) (加 `parent_task_id`)。
+
 ```sql
+-- 实际 tasks 表 19 列（原 17 + migration 2）
 CREATE TABLE tasks (
   task_id           TEXT PRIMARY KEY,
-  from_name         TEXT NOT NULL,
+  from_node_id      TEXT,
+  from_name         TEXT NOT NULL DEFAULT 'hub',
+  to_node_id        TEXT,
   to_name           TEXT NOT NULL,
-  priority          TEXT DEFAULT 'normal',
-  status            TEXT DEFAULT 'created',
+  priority          TEXT NOT NULL DEFAULT 'normal',
+  status            TEXT NOT NULL DEFAULT 'created',
   content           TEXT NOT NULL,
   result            TEXT,
+  in_reply_to       TEXT,
   requires_response TEXT DEFAULT 'reply',
-  network_id        TEXT,
-  created_at        TEXT DEFAULT (datetime('now')),
+  scope             TEXT DEFAULT 'single',
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
   delivered_at      TEXT,
   started_at        TEXT,
   completed_at      TEXT,
-  expires_at        TEXT
+  expires_at        TEXT,
+  network_id        TEXT,           -- ALTER (V3)
+  parent_task_id    TEXT            -- ALTER (子任务 chain)
 );
 
+-- 实际 inbox 表（原 9 + migration 5）
 CREATE TABLE inbox (
-  id              TEXT PRIMARY KEY,
-  session_name    TEXT NOT NULL,
-  type            TEXT DEFAULT 'task',
-  priority        TEXT DEFAULT 'normal',
-  content         TEXT NOT NULL,
-  context         TEXT,
-  from_session    TEXT,
-  in_reply_to     TEXT,
-  acked           INTEGER DEFAULT 0,
-  requires_response TEXT DEFAULT 'reply',
-  network_id      TEXT,
-  created_at      TEXT DEFAULT (datetime('now'))
+  id                TEXT PRIMARY KEY,
+  session_name      TEXT NOT NULL,
+  type              TEXT NOT NULL DEFAULT 'task',
+  priority          TEXT NOT NULL DEFAULT 'normal',
+  content           TEXT NOT NULL,
+  context           TEXT,
+  from_session      TEXT DEFAULT 'hub',
+  acked             INTEGER DEFAULT 0,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  in_reply_to       TEXT,           -- ALTER
+  requires_response TEXT DEFAULT 'reply',  -- ALTER
+  expires_at        TEXT,           -- ALTER
+  scope             TEXT DEFAULT 'single', -- ALTER
+  network_id        TEXT            -- ALTER (V3)
 );
 ```
+
+::: info `from_node_id` / `to_node_id` vs `from_name` / `to_name`
+`*_node_id` 是**持久节点 ID**（跟 `nodes` 表 join 用，agent 删除后 task 还能回查 metadata）；`*_name` 是**当时的 alias** 字符串（人类可读，渲染表用）。两者并存是因为 alias 可以重命名/重用，但 node_id 永远唯一。`from_name` 默认 `'hub'`（非 agent 发起的 task）。
+:::
 
 ## 下一步
 

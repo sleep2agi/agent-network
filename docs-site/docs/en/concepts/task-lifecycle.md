@@ -281,39 +281,54 @@ ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, creat
 
 ## Database Table Schema
 
+Below is the schema as it actually exists in v0.8 (after all ALTER TABLE migrations). The original CREATE TABLE and migrations live in [`server/src/db.ts:87-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L87) (tasks, 17 original columns), [`db.ts:301-304`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L301) (V3 adds `network_id`), and [`db.ts:391`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L391) (adds `parent_task_id`).
+
 ```sql
+-- Effective tasks schema: 19 columns (17 original + 2 migrations)
 CREATE TABLE tasks (
   task_id           TEXT PRIMARY KEY,
-  from_name         TEXT NOT NULL,
+  from_node_id      TEXT,
+  from_name         TEXT NOT NULL DEFAULT 'hub',
+  to_node_id        TEXT,
   to_name           TEXT NOT NULL,
-  priority          TEXT DEFAULT 'normal',
-  status            TEXT DEFAULT 'created',
+  priority          TEXT NOT NULL DEFAULT 'normal',
+  status            TEXT NOT NULL DEFAULT 'created',
   content           TEXT NOT NULL,
   result            TEXT,
+  in_reply_to       TEXT,
   requires_response TEXT DEFAULT 'reply',
-  network_id        TEXT,
-  created_at        TEXT DEFAULT (datetime('now')),
+  scope             TEXT DEFAULT 'single',
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
   delivered_at      TEXT,
   started_at        TEXT,
   completed_at      TEXT,
-  expires_at        TEXT
+  expires_at        TEXT,
+  network_id        TEXT,           -- ALTER (V3)
+  parent_task_id    TEXT            -- ALTER (sub-task chain)
 );
 
+-- Effective inbox schema (9 original + 5 migrations)
 CREATE TABLE inbox (
-  id              TEXT PRIMARY KEY,
-  session_name    TEXT NOT NULL,
-  type            TEXT DEFAULT 'task',
-  priority        TEXT DEFAULT 'normal',
-  content         TEXT NOT NULL,
-  context         TEXT,
-  from_session    TEXT,
-  in_reply_to     TEXT,
-  acked           INTEGER DEFAULT 0,
-  requires_response TEXT DEFAULT 'reply',
-  network_id      TEXT,
-  created_at      TEXT DEFAULT (datetime('now'))
+  id                TEXT PRIMARY KEY,
+  session_name      TEXT NOT NULL,
+  type              TEXT NOT NULL DEFAULT 'task',
+  priority          TEXT NOT NULL DEFAULT 'normal',
+  content           TEXT NOT NULL,
+  context           TEXT,
+  from_session      TEXT DEFAULT 'hub',
+  acked             INTEGER DEFAULT 0,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  in_reply_to       TEXT,           -- ALTER
+  requires_response TEXT DEFAULT 'reply',  -- ALTER
+  expires_at        TEXT,           -- ALTER
+  scope             TEXT DEFAULT 'single', -- ALTER
+  network_id        TEXT            -- ALTER (V3)
 );
 ```
+
+::: info `from_node_id` / `to_node_id` vs `from_name` / `to_name`
+`*_node_id` is the **persistent node ID** (joins against the `nodes` table — useful for looking up metadata even after the agent is deleted). `*_name` is the **alias as a string at the time of writing** (human-readable, used in table renders). Both exist because aliases can be renamed or reused, while `node_id` is permanently unique. `from_name` defaults to `'hub'` for tasks dispatched by the hub itself (not by an agent).
+:::
 
 ## Next steps
 
