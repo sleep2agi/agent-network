@@ -208,13 +208,22 @@ Each user has an independent role in each network (owner / admin / member / view
 
 The two layers stack. For example: a system admin can see global data, but if they are a viewer in a specific network, they cannot send tasks in that network.
 
-## Quota Limits (v0.6 design — currently **not enforced**) {#quota-limits-v0-6-design--currently-not-enforced}
+## Quota Limits (v0.6 design — partially enforced in v0.8) {#quota-limits-v0-6-design--currently-not-enforced}
 
-::: warning v0.8 actual behavior
-v0.6 designed a Free / Pro / Admin three-tier quota system (table below), but **after the Apache 2.0 OSS pivot, plan tiers are no longer enforced**. In v0.8.2:
-- All `users.plan` field values are treated as admin / unlimited
-- `anet network create` / `anet node create` do not run plan-quota checks
+::: warning R226 calibration (aligned with R208/R224 chain)
+v0.6 designed a Free / Pro / Admin three-tier quota system (table below). After the Apache 2.0 OSS pivot **most items are shelved**, but **`createNetwork` still enforces one of them**:
+
+| Quota | v0.8 actual behavior |
+|--------|---------------|
+| **Networks created** (`max_networks_owned`) | ✅ **Still enforced** — [`auth.ts:184-190 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184) reads `users.plan || "free"` and checks the `QUOTAS` cap; free defaults to **2**. Only `users.role='admin'` is exempt. |
+| Networks joined | ❌ Hub does not run quota checks on the join path |
+| Agents per network | ❌ |
+| Tasks per day | ❌ |
+| Tokens | ❌ |
+| Max network members | ❌ The `networks.max_members` column is dormant (R178 chain) |
+
 - `anet activate <key>` is a v0.6 legacy command, **no longer the "upgrade" path** after OSS
+- Only `users.role = 'admin'` (auto-granted to the first registered user) can break through the free quota — see [troubleshooting → quota_exceeded fix](/en/troubleshooting#quota-exceeded-max-n-networks-for-free-plan)
 
 The table below is kept as a design reference for **manual soft quotas** in v0.9+ self-hosted admin setups (implementation pending).
 :::

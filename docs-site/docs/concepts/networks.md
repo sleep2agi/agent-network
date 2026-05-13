@@ -208,13 +208,22 @@ Agent Network 有两层权限：
 
 两层权限叠加。例如：系统 admin 可以看全局数据，但在某个网络中如果是 viewer，则不能在该网络中发任务。
 
-## 配额限制（v0.6 设计目标 — 当前**未启用**） {#配额限制-v0-6-设计目标-当前未启用}
+## 配额限制（v0.6 设计目标 — v0.8 部分启用） {#配额限制-v0-6-设计目标-当前未启用}
 
-::: warning v0.8 实际行为
-v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），但 **Apache 2.0 OSS 转向后已不启用 plan 区分**。当前 v0.8.2：
-- 所有 `users.plan` 字段统一当 admin / unlimited 处理
-- `anet network create` / `anet node create` 不做 plan 配额检查
+::: warning R226 校准（跟 R208/R224 chain 一致）
+v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 2.0 OSS 转向后**多数项已搁置**，但 **createNetwork 仍 enforces 一项**：
+
+| 配额项 | v0.8 实际行为 |
+|--------|---------------|
+| **创建网络数** (`max_networks_owned`) | ✅ **仍 enforced** —— [`auth.ts:184-190 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184) 按 `users.plan || "free"` 查 `QUOTAS` 上限，free 默认 **2**，仅 `users.role='admin'` 豁免 |
+| 加入网络数 | ❌ hub 没在 join path 调 quota check |
+| 每网络 Agent 数 | ❌ |
+| 每天任务数 | ❌ |
+| Token 数 | ❌ |
+| 网络最大成员 | ❌ `networks.max_members` 字段 dormant（R178 chain） |
+
 - `anet activate <key>` 是 v0.6 legacy 命令，OSS 后**不再用作"升级"路径**
+- `users.role = 'admin'`（首位注册用户自动获得）才能突破 free 配额，详见 [troubleshooting → quota_exceeded 解决方案](/troubleshooting#quota-exceeded-max-n-networks-for-free-plan)
 
 下表保留为 v0.9+ 自部署管理员**手动设置软配额**的设计参考（仍需实现）。
 :::
