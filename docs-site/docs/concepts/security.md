@@ -216,33 +216,42 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 
 ## 审计日志
 
-所有关键操作记录到 `audit_log` 表：
+所有关键操作记录到 `audit_log` 表（verify [`server/src/db.ts:201-212`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L201)）：
 
 ```sql
 CREATE TABLE audit_log (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id    TEXT,
-  username   TEXT,
-  action     TEXT NOT NULL,
-  detail     TEXT,
-  ip         TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       TEXT,
+  username      TEXT,
+  action        TEXT NOT NULL,
+  target_type   TEXT,           -- 'user' / 'network' / 'token' / 'auth' / ...
+  target_id     TEXT,           -- 关联的 user_id / network_id / token_id
+  detail        TEXT,           -- 操作描述，如 '<user_id> as <role>' / '<old> → <new>'
+  ip            TEXT,           -- 触发请求的 client IP（rate-limited 等场景）
+  network_id    TEXT,           -- 操作发生在哪个 network
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
-记录的操作包括：
+记录的 action 取值（verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2182`）：
 
-| 操作 | 说明 |
-|------|------|
-| `register` | 用户注册 |
-| `login` | 用户登录 |
-| `create_network` | 创建网络 |
-| `delete_network` | 删除网络 |
-| `create_token` | 创建 Token |
-| `revoke_token` | 撤销 Token |
-| `change_password` | 修改密码 |
-| `add_member` | 添加网络成员 |
-| `remove_member` | 移除网络成员 |
+| 操作 | 触发场景 |
+|------|---------|
+| `register` | 用户注册（[`index.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L423)） |
+| `login` | 用户登录成功 |
+| `login_failed` | 用户登录失败（密码不匹配 / username 不存在） |
+| `login_rate_limited` | login 触发 IP rate limit（10/分） |
+| `password_changed` | `anet passwd` 改密码（[`index.ts:491`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L491)） |
+| `password_reset_by_admin` | hub admin 用 `anet hub admin reset-user` 强制重置（[`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) + [`cli.ts:2182`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2182)） |
+| `network_renamed` / `network_deleted` / `network_joined` | network 改名 / 删除 / 加入 |
+| `member_added` / `member_role_changed` / `member_removed` | network 成员变更（`detail` 字段记 `<user_id> as <role>` / `<user_id> → <role>`） |
+| `token_created` / `token_revoked` | API token 生命周期 |
+| `node_token_created` | `anet node create` 自动 mint `ntok_` |
+| `invite_created` | 创建网络邀请码 |
+
+::: info `create_network` / `network_created` 不写 audit
+当前 [`index.ts:569-581`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L569) 的 POST `/api/networks` 不调 `logAudit`，所以新建 network 不留 audit 行。仅 rename / delete / join 写 audit。
+:::
 
 ### 查询审计日志
 

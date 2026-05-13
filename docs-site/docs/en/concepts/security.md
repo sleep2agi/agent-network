@@ -216,33 +216,42 @@ Default CORS is `*` (allow all origins). In production, configure a whitelist.
 
 ## Audit Logging
 
-All key operations are recorded in the `audit_log` table:
+All key operations are recorded in the `audit_log` table (verify [`server/src/db.ts:201-212`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L201)):
 
 ```sql
 CREATE TABLE audit_log (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id    TEXT,
-  username   TEXT,
-  action     TEXT NOT NULL,
-  detail     TEXT,
-  ip         TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       TEXT,
+  username      TEXT,
+  action        TEXT NOT NULL,
+  target_type   TEXT,           -- 'user' / 'network' / 'token' / 'auth' / ...
+  target_id     TEXT,           -- linked user_id / network_id / token_id
+  detail        TEXT,           -- e.g. '<user_id> as <role>' / '<old> → <new>'
+  ip            TEXT,           -- client IP (rate-limited paths set this)
+  network_id    TEXT,           -- the network the operation happened in
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
-Recorded operations include:
+Recorded `action` values (verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2182`):
 
-| Operation | Description |
-|------|------|
-| `register` | User registration |
-| `login` | User login |
-| `create_network` | Network creation |
-| `delete_network` | Network deletion |
-| `create_token` | Token creation |
-| `revoke_token` | Token revocation |
-| `change_password` | Password change |
-| `add_member` | Network member addition |
-| `remove_member` | Network member removal |
+| Operation | Trigger |
+|------|---------|
+| `register` | User registration ([`index.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L423)) |
+| `login` | Successful login |
+| `login_failed` | Login failure (wrong password / unknown username) |
+| `login_rate_limited` | Login hit the IP rate limit (10/min) |
+| `password_changed` | `anet passwd` ([`index.ts:491`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L491)) |
+| `password_reset_by_admin` | hub admin force-reset via `anet hub admin reset-user` ([`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) + [`cli.ts:2182`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2182)) |
+| `network_renamed` / `network_deleted` / `network_joined` | Network rename / delete / join |
+| `member_added` / `member_role_changed` / `member_removed` | Network membership changes (`detail` records `<user_id> as <role>` / `<user_id> → <role>`) |
+| `token_created` / `token_revoked` | API-token lifecycle |
+| `node_token_created` | `anet node create` auto-mints an `ntok_` |
+| `invite_created` | Network invite code creation |
+
+::: info `create_network` / `network_created` is NOT audited
+Today's POST `/api/networks` handler ([`index.ts:569-581`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L569)) does not call `logAudit`, so new networks leave no audit row. Only rename / delete / join write audit entries.
+:::
 
 ### Querying Audit Logs
 
