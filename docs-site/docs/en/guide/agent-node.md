@@ -371,9 +371,9 @@ If the process crashes (no time to report), CommHub detects via heartbeat timeou
 | `MODEL` | AI model |
 | `TOOLS` | Tool list (comma-separated) |
 | `SYSTEM_PROMPT` | Custom system prompt |
-| `ANTHROPIC_BASE_URL` | Model API URL |
-| `ANTHROPIC_AUTH_TOKEN` | Model API key |
-| `ANTHROPIC_API_KEY` | Model API key (alias) |
+| `ANTHROPIC_BASE_URL` | Model API URL (required when targeting a third-party Anthropic-compatible endpoint) |
+| `ANTHROPIC_AUTH_TOKEN` | Model API key — **for third-party Anthropic-compatible endpoints** (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter / vLLM, etc.) |
+| `ANTHROPIC_API_KEY` | Model API key — **only for direct api.anthropic.com**; don't reuse it for third-party endpoint keys (see [runtimes — claude-agent-sdk pitfalls](/en/guide/runtimes#claude-agent-sdk)) |
 
 ::: tip Docker Usage
 When running in Docker, environment variables are the most convenient configuration method. See [Docker Deployment](/en/deploy/docker).

@@ -371,9 +371,9 @@ SSE 断连后自动重连，使用指数退避策略：
 | `MODEL` | AI 模型 |
 | `TOOLS` | 工具列表（逗号分隔） |
 | `SYSTEM_PROMPT` | 自定义系统提示词 |
-| `ANTHROPIC_BASE_URL` | 模型 API 地址 |
-| `ANTHROPIC_AUTH_TOKEN` | 模型 API Key |
-| `ANTHROPIC_API_KEY` | 模型 API Key（别名） |
+| `ANTHROPIC_BASE_URL` | 模型 API 地址（接第三方 Anthropic 兼容 endpoint 时必填） |
+| `ANTHROPIC_AUTH_TOKEN` | 模型 API Key —— **第三方 Anthropic 兼容 endpoint**（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter / vLLM 等）走这个 |
+| `ANTHROPIC_API_KEY` | 模型 API Key —— **api.anthropic.com 直连专用**，不要拿来传第三方 endpoint key（详见 [runtimes — claude-agent-sdk 常见坑](/guide/runtimes#claude-agent-sdk)） |
 
 ::: tip Docker 使用
 在 Docker 中运行时，环境变量是最方便的配置方式。参见 [Docker 部署](/deploy/docker)。
