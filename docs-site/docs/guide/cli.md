@@ -17,7 +17,7 @@ npm install -g @sleep2agi/agent-network
 | 命令 | 说明 | 状态 |
 |------|------|------|
 | `anet init` | 配置 hub 地址 | 已验证 |
-| `anet init project` | 配置 Claude Code 项目（.mcp.json + CLAUDE.md） | 已验证 |
+| `anet init project` | 配置 Claude Code 项目（`project` 是固定子命令，不是项目名占位符） | 已验证 |
 | `anet quickstart` | 一键起 hub + dashboard + node（交互式向导） | 实验性（E2E 未覆盖；[getting-started](/guide/getting-started) 推荐改用 1-7 step-by-step，更可控） |
 
 ### 服务器管理
@@ -463,6 +463,8 @@ anet node resume 马 --session abc123
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L764)
 
 初始化 Claude Code 项目，自动配置 MCP 和 CLAUDE.md。
+
+这里的 `project` 是 **固定子命令关键字**，不是可替换的项目名占位符；请按字面输入 `anet init project`。它会在你当前所在目录初始化项目配置，不会创建名为 `project` 的新目录。
 
 ```bash
 anet init project
