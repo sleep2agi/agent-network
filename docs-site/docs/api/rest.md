@@ -577,7 +577,7 @@ data: {"time":"2026-04-12T10:00:00Z"}
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L500)
 
-为某个节点创建网络绑定的 `ntok_`。`anet node create` 会自动调用它。
+为某个节点创建网络绑定的 `ntok_`。`anet node create` 会自动调用它，写入到 `.anet/nodes/<node-name>/config.json` 的 `token` 字段。
 
 ```bash
 curl -X POST http://localhost:9200/api/auth/node-token \
@@ -585,6 +585,17 @@ curl -X POST http://localhost:9200/api/auth/node-token \
   -H "Content-Type: application/json" \
   -d '{"network_id": "net_xxx", "node_name": "代码1号"}'
 ```
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "token": "ntok_xxxxxxxxxxxxxxxx"
+}
+```
+
+`token` 是该 `(node_name, network_id)` 组合的 `ntok_`，hub 端强制 binding——agent 用这个 token 调 MCP 时，server 自动锁定到 `network_id`，跨网络访问拒绝。详见 [Token 概念 — ntok_](/concepts/tokens#_2-ntok-agent-的-token-每个-agent-一个)。
 
 ### POST /api/auth/tokens
 

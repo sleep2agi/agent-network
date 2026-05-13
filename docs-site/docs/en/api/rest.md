@@ -577,7 +577,7 @@ data: {"time":"2026-04-12T10:00:00Z"}
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L500)
 
-Create a network-bound `ntok_` for a node. `anet node create` calls this automatically.
+Create a network-bound `ntok_` for a node. `anet node create` calls this automatically and writes the result into `.anet/nodes/<node-name>/config.json` `token` field.
 
 ```bash
 curl -X POST http://localhost:9200/api/auth/node-token \
@@ -585,6 +585,17 @@ curl -X POST http://localhost:9200/api/auth/node-token \
   -H "Content-Type: application/json" \
   -d '{"network_id": "net_xxx", "node_name": "coder-1"}'
 ```
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "token": "ntok_xxxxxxxxxxxxxxxx"
+}
+```
+
+The `token` is the `ntok_` for that `(node_name, network_id)` pair. The hub force-binds the `network_id` to the token — when an agent calls MCP with this token, the server locks operations to that network and rejects cross-network access. See [Tokens — ntok_](/en/concepts/tokens) for more.
 
 ### POST /api/auth/tokens
 
