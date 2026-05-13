@@ -435,27 +435,35 @@ anet network delete <old-net>
 
 ## Agent Node Errors
 
-### `alias is already taken`
+### `Node "coder-1" already exists` -- local alias collision (`anet node create`)
 
 ```
-Error: alias "coder-1" is already taken
+Node "coder-1" already exists: .anet/nodes/coder-1/config.json
 ```
 
-**Cause**: An agent with the same name is already running in the same network.
+Verified at [`agent-network/bin/cli.ts:1067-1071`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1067) + [`agent-network/bin/cli.ts:1189-1193`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1189): both the interactive and non-interactive paths of `anet node create` call `resolveNodeRef(id)` to check whether `.anet/nodes/<alias>/config.json` already exists; if so, they `process.exit(1)` without ever contacting the hub.
+
+**Cause**: a subdirectory with the same alias already exists under `.anet/nodes/` in the current project directory. This is a **local filesystem collision** — it has nothing to do with the hub-side session state.
 
 **Solution**:
 
 ```bash
-# Check online agents
-anet status
+# List locally registered nodes (scans .anet/nodes/)
+anet node ls
 
-# Use a different name
+# Option A: pick a different name
 anet node create coder-1-v2
-anet node start coder-1-v2
 
-# Or stop the existing agent
-anet node stop coder-1
+# Option B: delete the old one and reuse the name
+anet node delete coder-1
+anet node create coder-1
 ```
+
+::: warning Hub-side alias collisions are silently overwritten — there is no error
+Contrary to common intuition, the hub server has **no** `alias is already taken` error. If you run two agents with the same alias from different machines or project dirs (i.e. with two distinct `resume_id`s), the later agent's `report_status` triggers [`server/src/tools.ts:127 DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L127), which **silently evicts the previous session**. The older agent's SSE connection is still open but it no longer receives task dispatches, and the row disappears from the dashboard.
+
+**So**: don't diagnose "my agent isn't showing up in the dashboard" as an "alias-taken error" — that error doesn't exist. First check for duplicate same-alias starts across machines (use `anet status` to inspect `resume_id` / version / hostname).
+:::
 
 ---
 

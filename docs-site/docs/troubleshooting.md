@@ -434,27 +434,35 @@ anet network delete <old-net>
 
 ## Agent Node 错误
 
-### `alias 已被占用`
+### `Node "代码1号" already exists` -- alias 本地冲突（`anet node create`）
 
 ```
-Error: alias "代码1号" is already taken
+Node "代码1号" already exists: .anet/nodes/代码1号/config.json
 ```
 
-**原因**：同一网络中已有同名 Agent 在运行。
+verify [`agent-network/bin/cli.ts:1067-1071`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1067) + [`agent-network/bin/cli.ts:1189-1193`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1189)：`anet node create` 在交互式 / 非交互式两条路径都用 `resolveNodeRef(id)` 检查本地 `.anet/nodes/<alias>/config.json` 是否已存在；命中就直接 `process.exit(1)` 不连 hub。
+
+**原因**：当前项目目录 `.anet/nodes/` 下已有同名 node config 子目录。这是**本地文件冲突**，跟 hub 端 session 状态无关。
 
 **解决**：
 
 ```bash
-# 检查在线 Agent
-anet status
+# 看本地哪些 node 已注册（按 .anet/nodes/ 目录扫）
+anet node ls
 
-# 使用不同名称
+# 方案 A：换名
 anet node create 代码1号-v2
-anet node start 代码1号-v2
 
-# 或停止旧的 Agent
-anet node stop 代码1号
+# 方案 B：删旧的再用同名
+anet node delete 代码1号
+anet node create 代码1号
 ```
+
+::: warning hub 端 alias 冲突是「静默接管」不报错
+跟很多人想的不一样，hub server **没有** 「`alias is already taken`」错。如果你在不同机器 / 不同项目 dir 用同一个 alias 跑两个 agent（两条不同 `resume_id`），后启动那条 `report_status` 时会触发 [`server/src/tools.ts:127 DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L127) **静默把旧 session 清掉**。旧 agent SSE 连接还在但不再收任务派发，dashboard 里旧那行直接消失。
+
+**所以**：不要把「dashboard 看不到我的 agent」归因为「alias 冲突报错」—— 没有这个错，先排查同 alias 多机重复 start（用 `anet status` 看 `resume_id` 看版本是哪台机器）。
+:::
 
 ---
 
