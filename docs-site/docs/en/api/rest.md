@@ -648,8 +648,27 @@ Create an invite code.
 curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
   -H "Authorization: Bearer utok_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"role": "member", "max_uses": 5}'
+  -d '{"role": "member", "max_uses": 5, "expires_days": 7}'
 ```
+
+**Request body**:
+
+| Field | Type | Required | Description |
+|------|------|:----:|------|
+| `role` | enum | | `admin` / `member` / `viewer` (default `member`) |
+| `max_uses` | number | | Max usage count (default `1`; `-1` for unlimited) |
+| `expires_days` | number | | Expiration in days (omit for never-expire) |
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "invite_code": "inv_abc123def456"
+}
+```
+
+The recipient joins via `anet network join inv_abc123def456` or `POST /api/networks/join`.
 
 ### POST /api/networks/join
 

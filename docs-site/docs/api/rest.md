@@ -648,8 +648,27 @@ curl http://localhost:9200/api/networks/net_xxx/members \
 curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
   -H "Authorization: Bearer utok_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"role": "member", "max_uses": 5}'
+  -d '{"role": "member", "max_uses": 5, "expires_days": 7}'
 ```
+
+**请求体**：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|:----:|------|
+| `role` | enum | | `admin` / `member` / `viewer`（默认 `member`） |
+| `max_uses` | number | | 最大使用次数（默认 `1`；`-1` 无限） |
+| `expires_days` | number | | 过期天数（不传则不过期） |
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "invite_code": "inv_abc123def456"
+}
+```
+
+接收方用 `anet network join inv_abc123def456` 或 `POST /api/networks/join` 加入。
 
 ### POST /api/networks/join
 
