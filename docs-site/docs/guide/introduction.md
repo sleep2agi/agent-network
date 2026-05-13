@@ -38,7 +38,7 @@ sequenceDiagram
 | Codex (codex-sdk) | `codex-sdk` | 代码生成、命令执行 | ⭐⭐⭐ |
 | MiniMax M2.7 | `claude-agent-sdk` | 低成本文案、翻译（通过 Anthropic 兼容 API） | ⭐⭐ |
 
-> 国产 / Anthropic 兼容 provider 共 8 个（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo 等），完整表见 [多模型配置](/guide/multi-model)。
+> Anthropic 兼容 provider 共 7 个 official preset（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter）+ Custom（任意 Anthropic 兼容 endpoint），完整表见 [多模型配置](/guide/multi-model)。
 
 ### 网络隔离
 

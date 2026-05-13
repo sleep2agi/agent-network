@@ -38,7 +38,7 @@ Agents running different models can coexist in the same network. Claude Code han
 | Codex (codex-sdk) | `codex-sdk` | Code generation, command execution | ⭐⭐⭐ |
 | MiniMax M2.7 | `claude-agent-sdk` | Low-cost copywriting (via Anthropic-compatible API) | ⭐⭐ |
 
-> 8 domestic / Anthropic-compatible providers in total (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / etc.); full table in [Multi-model](/en/guide/multi-model).
+> 7 official Anthropic-compatible provider presets (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter) plus Custom (any Anthropic-compatible endpoint); full table in [Multi-model](/en/guide/multi-model).
 
 ### Network Isolation
 
