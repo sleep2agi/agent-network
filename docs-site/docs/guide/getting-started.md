@@ -176,7 +176,6 @@ anet node start remote-bot
 :::
 
 ::: warning 未验证（请自行评估）
-- `anet quickstart` —— 命令仍在 CLI 中可用（一键起 hub + dashboard + node），但本指南改推上面 1-7 步的 step-by-step（更可控、出问题好定位）；quickstart 路径 E2E 未覆盖
 - `codex-sdk` runtime 的端到端流程
 - `claude-code-cli` runtime 的端到端流程
 - `anet license` / `anet activate` —— v0.6 legacy trial 命令，**Apache 2.0 OSS 后不再需要**；当前 Hub 仍保留 SQLite licenses 表 + 14 天 trial 创建（送 `send_task` 时检查），命中 `license_expired` 见 [troubleshooting](/troubleshooting)

@@ -2836,145 +2836,6 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diff / 86400000)}d`;
 }
 
-// ── quickstart ──
-
-async function quickstartCommand() {
-  console.log(`
-╔══════════════════════════════════════════════════╗
-║   🚀 anet quickstart — 3 分钟搭建 Agent 网络     ║
-╚══════════════════════════════════════════════════╝
-`);
-
-  const gc = loadGlobal();
-  const qsOpts = parseOpts();
-
-  // Step 1: Hub
-  if (!gc.hub) {
-    console.log("Step 1/4: CommHub Server");
-    console.log("  你需要一个 CommHub Server。两种方式:");
-    console.log("  a) 本机启动: 另开终端运行 bunx @sleep2agi/commhub-server");
-    console.log("  b) 连接远程: 输入服务器地址");
-    console.log();
-    const hubUrl = await ask("CommHub URL [http://127.0.0.1:9200]") || "http://127.0.0.1:9200";
-    gc.hub = hubUrl;
-    saveGlobal(gc);
-    console.log(`  ✅ Hub: ${hubUrl}\n`);
-  } else {
-    console.log(`Step 1/4: Hub ✅ ${gc.hub}\n`);
-  }
-
-  // Step 1.5: Check server is reachable
-  try {
-    const health = await fetch(`${gc.hub}/health`, { signal: AbortSignal.timeout(5000) }).then(r => r.json() as any).catch(() => null);
-    if (!health?.ok) {
-      console.log(`  ⚠ Server not reachable at ${gc.hub}`);
-      console.log(`  Make sure CommHub is running: bunx @sleep2agi/commhub-server`);
-      console.log(`  Or check the URL and try again.\n`);
-      return;
-    }
-    console.log(`  ✅ Server online (v${health.version || "?"})\n`);
-  } catch {
-    console.log(`  ⚠ Cannot connect to ${gc.hub}. Start server first.\n`);
-    return;
-  }
-
-  // Step 2: Register/Login
-  if (!gc.token || !gc.user) {
-    console.log("Step 2/4: 创建账号");
-    const username = qsOpts.username || qsOpts.user || await ask("用户名");
-    const password = qsOpts.password || qsOpts.pass || await ask("密码 (≥6位)");
-    closeRL();
-    if (!username || !password) { closeRL(); console.error("需要用户名和密码。用法: anet quickstart --username xxx --password xxx"); return; }
-
-    // Try register first, if exists then login
-    let res = await fetch(`${gc.hub}/api/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    }).then(r => r.json() as any).catch(() => null);
-
-    if (!res?.ok) {
-      // Try login
-      res = await fetch(`${gc.hub}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      }).then(r => r.json() as any).catch(() => null);
-    }
-
-    if (!res?.ok) { closeRL(); console.error(`  ❌ 失败: ${res?.error || "无法连接"}`); return; }
-
-    gc.token = res.token;
-    gc.user = res.user;
-    const nets = await fetch(`${gc.hub}/api/networks`, { headers: { Authorization: `Bearer ${res.token}` } }).then(r => r.json() as any).catch(() => ({ networks: [] }));
-    if (nets.networks?.length > 0) {
-      gc.network_id = nets.networks[0].network_id;
-      gc.network_name = nets.networks[0].network_name;
-    }
-    saveGlobal(gc);
-    console.log(`  ✅ 登录成功: ${res.user.username}\n`);
-  } else {
-    console.log(`Step 2/4: 已登录 ✅ ${gc.user.username}\n`);
-  }
-
-  // Step 3: Create agent
-  console.log("Step 3/4: 创建你的第一个 Agent");
-  const agentName = qsOpts.agent || qsOpts.name || await ask("Agent 名称 [my-agent]") || "my-agent";
-  closeRL();
-
-  // Check if already exists
-  const existing = resolveNodeRef(agentName);
-  if (!existing) {
-    let runtime = qsOpts.runtime || "codex-sdk";
-    // Only show interactive selection if no runtime specified and TTY available
-    if (!qsOpts.runtime && process.stdin.isTTY) {
-      const runtimes = ["codex-sdk (GPT-5.4)", "http-api (MiniMax/OpenAI)", "claude-agent-sdk (Claude)"];
-      console.log("\n  Runtime 选择:");
-      runtimes.forEach((r, i) => console.log(`    ${i + 1}) ${r}`));
-      try {
-        const choice = await (async () => {
-          const { select: sel } = await import("@inquirer/prompts");
-          return sel({
-            message: "选择 Runtime:",
-            choices: [
-              { value: "codex-sdk", name: "codex-sdk (GPT-5.4) — 推荐" },
-              { value: "http-api", name: "http-api (MiniMax/OpenAI 兼容)" },
-              { value: "claude-agent-sdk", name: "claude-agent-sdk (Claude Code)" },
-            ],
-          });
-        })();
-        runtime = choice;
-      } catch {
-        // inquirer not available, use default
-      }
-    } else if (!qsOpts.runtime) {
-      console.log(`  Using default runtime: ${runtime}`);
-    }
-
-    const createArgs = ["create", agentName, "--runtime", runtime];
-    if (runtime === "codex-sdk") createArgs.push("--model", "gpt-5.4");
-    args.splice(0, args.length, ...createArgs);
-    await createCommand();
-  } else {
-    console.log(`  ✅ Agent "${agentName}" 已存在\n`);
-  }
-
-  // Step 4: Done!
-  console.log(`
-╔══════════════════════════════════════════════════╗
-║   🎉 设置完成！                                   ║
-╠══════════════════════════════════════════════════╣
-║                                                   ║
-║   启动 Agent:  anet node start ${agentName.padEnd(15)}   ║
-║   查看状态:    anet status                         ║
-║   查看任务:    anet tasks                          ║
-║   网络管理:    anet network ls                     ║
-║   系统诊断:    anet doctor                         ║
-║                                                   ║
-╚══════════════════════════════════════════════════╝
-`);
-}
-
 // ── register ──
 
 async function registerCommand() {
@@ -5236,7 +5097,19 @@ switch (command) {
   case "config": configShowCommand(); break;
   case "login": await loginCommand(); break;
   case "register": await registerCommand(); break;
-  case "quickstart": await quickstartCommand(); break;
+  case "quickstart": {
+    // Removed per issue #45. Print migration help and exit non-zero so users
+    // notice the breakage instead of silently failing.
+    console.error(`[anet] ⚠ 'anet quickstart' 已删除（per #45）。改用现代命令组合:
+  anet hub start          # 起 CommHub Server
+  anet setup              # 装 runtime deps + 选 runtime (wizard)
+  anet register           # 创建账号
+  anet login              # 登录
+  anet node create <name> # 创建 agent
+
+或一键 demo: cd demos/hello-world && docker compose up`);
+    process.exit(1);
+  }
   case "logout": logoutCommand(); break;
   case "whoami": await whoamiCommand(); break;
   case "network": await networkCommand(); break;
