@@ -356,7 +356,7 @@ anet node start coder
 | 你的需求 | 推荐 Runtime |
 |---|---|
 | 已经付了 Claude 订阅，不想再付 API | `claude-code-cli` |
-| 用国产模型（MiniMax / DeepSeek / GLM / Kimi） | `claude-agent-sdk` + `ANTHROPIC_BASE_URL` |
+| 用国产模型（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo 等） | `claude-agent-sdk` + `ANTHROPIC_BASE_URL` |
 | 用 Anthropic 官方 API（稳定后台） | `claude-agent-sdk` |
 | 写代码 / 跑 shell 命令 | `codex-sdk` |
 | 写文案 / 翻译 / 分析 / RAG | `claude-agent-sdk` |

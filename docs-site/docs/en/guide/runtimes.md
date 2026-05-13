@@ -111,7 +111,7 @@ anet node start my-bot
 
 ## claude-agent-sdk
 
-Programmatic access to **any Anthropic-compatible API** — Anthropic by default, but redirectable to MiniMax / DeepSeek / GLM / Kimi via `ANTHROPIC_BASE_URL`.
+Programmatic access to **any Anthropic-compatible API** — Anthropic by default, but redirectable to MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo, etc. via `ANTHROPIC_BASE_URL` (see [Multi-model](/en/guide/multi-model) for the full provider table).
 
 ### Prerequisites
 
@@ -335,7 +335,7 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 | Goal | Pick |
 |---|---|
 | Already paying for Claude, no API budget | `claude-code-cli` |
-| Domestic Chinese model (MiniMax / DeepSeek / GLM / Kimi) | `claude-agent-sdk` + `ANTHROPIC_BASE_URL` |
+| Domestic Chinese model (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo, etc.) | `claude-agent-sdk` + `ANTHROPIC_BASE_URL` |
 | Anthropic official API (stable backend) | `claude-agent-sdk` |
 | Code writing / shell | `codex-sdk` |
 | Copy / translation / analysis / RAG | `claude-agent-sdk` |
