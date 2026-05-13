@@ -105,6 +105,7 @@ export default withMermaid(defineConfig({
               { text: '你好世界', link: '/cases/hello-world' },
               { text: '翻译流水线', link: '/cases/translation-pipeline' },
               { text: '军团编队', link: '/cases/telegram-squad' },
+              { text: 'Telegram 接入已存在节点 (claude-code-cli)', link: '/cases/telegram-bind-claude-code-cli' },
             ]
           },
           {
@@ -197,6 +198,7 @@ export default withMermaid(defineConfig({
               { text: 'Hello World', link: '/en/cases/hello-world' },
               { text: 'Translation Pipeline', link: '/en/cases/translation-pipeline' },
               { text: 'Telegram Squad', link: '/en/cases/telegram-squad' },
+              { text: 'Bind Telegram to existing node (claude-code-cli)', link: '/en/cases/telegram-bind-claude-code-cli' },
             ]
           },
           {
