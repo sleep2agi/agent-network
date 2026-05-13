@@ -1,27 +1,33 @@
-# RFC-006：codex-code-cli runtime — 通过 `codex mcp-server` stdio 让 anet 用户直接用 Codex CLI 接 commhub
+# RFC-006：codex-cli-remote-control runtime — 通过 `codex remote-control` ws daemon 让 anet 用户直接用 Codex CLI 接 commhub
 
 | 字段 | 内容 |
 |---|---|
-| 状态 | **Proposed**（supersedes RFC-005） |
-| 提出 | 2026-05-13 |
+| 状态 | **Proposed**（supersedes RFC-005, supersedes own prior Path C version per Vincent 4108-4110 pivot） |
+| 提出 | 2026-05-13 (Path C primary), amended 2026-05-13 (Path B primary per Vincent 4108-4110) |
 | 作者 | 通信SDK马 |
-| 派单 / 决策 | 通信龙（roadmap + architecture pivot + deep design doc 24b744e） |
+| 派单 / 决策 | 通信龙（roadmap + architecture pivots + dual deep plan dispatch） |
 | Helpers | 通信工程马（cli.ts implementer eval + Option 2 architecture choice） |
 | 关联 issue | [#18](https://github.com/sleep2agi/agent-network/issues/18) SDK research loop |
 | 关联 RFC | RFC-002 channel-bind-cli / RFC-003 node telemetry / **RFC-005 superseded** |
-| 前置研究 | [commit 6429bc0](https://github.com/sleep2agi/agent-network/commit/6429bc0) codex CLI 直接通信 / [commit 24b744e](https://github.com/sleep2agi/agent-network/commit/24b744e) 通信龙深度设计（B path） / 本 session protocol schema dump + `codex mcp-server` real probe |
+| 关联 doc | [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) Path B 深度调研 / [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) Path C 深度调研 (Phase 2 backup) / [commit 6429bc0](https://github.com/sleep2agi/agent-network/commit/6429bc0) codex CLI 直接通信研究 / [commit 24b744e](https://github.com/sleep2agi/agent-network/commit/24b744e) 通信龙 deep design |
 | 目标版本 | agent-network v2.1.8（Phase 1 大 feature）+ agent-node v2.5 |
 | 实施人 | 通信工程马（agent-node runtime adapter + cli.ts delegate） |
 
 ## 摘要
 
-给 anet 加 1 个 codex CLI runtime — **`codex-code-cli-mcp`** (daemon mode, push-driven via mcp-server stdio)，通过 spawn `codex mcp-server` stdio 子进程 + anet 作为 MCP client 调用 `codex` / `codex-reply` 两个 tool 的方式，让用户在 `anet node create --runtime codex-code-cli-mcp` 后启动节点时**自动接入 commhub mesh** — 跟其他 agent 用 `send_task / get_inbox / get_all_status` 等工具通信。**目的**：让 codex CLI 用户像 claude-code-cli runtime 一样直接接入 anet，**且实现成本仅 ~150-200 行**。
+给 anet 加 1 个 codex CLI runtime — **`codex-cli-remote-control`** (ws daemon mode, push-driven via [codex remote-control](https://github.com/openai/codex/pull/21424) ws transport)，通过 spawn `codex --enable remote_control app-server --listen ws://127.0.0.1:<port>` daemon child + anet 作为 ws client 跑 JSON-RPC 2.0 协议的方式，让用户在 `anet node create --runtime codex-cli-remote-control` 后启动节点时**自动接入 commhub mesh**，同时支持**用户 TUI 通过 `codex --remote ws://...` 同时 attach** (multi-client peer co-presence)。
 
-**Phase 1 ship (2.1.8 大 feature, 1-2 天)**: `codex-code-cli-mcp` 单 runtime (per Vincent telegram 4074-4075 narrow 决策 — "A TUI 意义不大，先 mcp")。
+**Vincent telegram 4108+4110 拍板** (2026-05-13): Phase 1 走 Path B (ws daemon) 而非 Path C (mcp-server stdio), 接受:
+- ✅ 用户 TUI attach 价值 > mcp-server SYNC 限制
+- ✅ 完整 ServerNotification 63 events 流 (含 turn/steer mid-execution 控制)
+- ✅ Multi-client peer co-presence (anet wrapper + 用户 TUI 并发 connect 同 daemon)
+- ⚠ 接受 OpenAI "Under-development incomplete" warning (docs 标 experimental)
+- ⚠ ~1000 行实施成本 (vs Path C ~500 行, 2x 代码量)
+- ⚠ 本周协议仍 stabilize ([#22404](https://github.com/openai/codex/pull/22404) / [#22414](https://github.com/openai/codex/pull/22414) / [#22386](https://github.com/openai/codex/pull/22386) 全 2026-05-13 today landing) — Pin codex@>=0.130.0 with weekly release notes monitor
 
-**Non-goal**: `codex-code-cli` TUI mode — 用户直接终端跑 `codex` + 手配 `~/.codex/config.toml` `[mcp_servers.commhub]` 即可，anet 不重复包装（详见 §10 non-goal 段）。
+**Phase 1 ship**: `codex-cli-remote-control` 单 runtime (ETA 3-4 天, ~1000 行)。
 
-**Phase 2 ship (2.1.9+, 2-3 weeks, 待 codex ws transport stabilize)**:`codex-code-cli-remote-control` — ws daemon mode (push-driven via [PR #21424](https://github.com/openai/codex/pull/21424) `codex remote-control` + anet ws client)，比 Phase 1 mcp daemon 更强（支持 `turn/steer` mid-execution / multi-client peer / 完整 63 ServerNotification 流），等 codex 0.131/0.132 ws transport stabilize 后 ship（[#22404](https://github.com/openai/codex/pull/22404) / [#22414](https://github.com/openai/codex/pull/22414) / [#22386](https://github.com/openai/codex/pull/22386) 都 2026-05-13 today landing 表示 stabilize 中）。Phase 2 触发条件量化见 §10.1.
+**Phase 2 backup option** (`codex-code-cli-mcp`, Path C mcp-server stdio): 等 ws daemon 真正 stabilize OR 用户报 Path B `under-development` 警告太多 negative UX 时, 加 mcp-server stdio runtime 作 alternative (双 runtime, user 选)。详 §10。
 
 ## 1. 背景
 
@@ -40,594 +46,682 @@ type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk" | "http-
 | `codex-sdk` | npm SDK `@openai/codex-sdk` | — | ✅ | ✅ |
 | `http-api` | OpenAI-compatible HTTP fetch | ✅ | ✅ | ✅ |
 
-**Gap**: claude 侧有 CLI 二进制路径（claude-code-cli），codex 侧只有 SDK，缺 codex CLI 二进制路径让 codex CLI 用户原地接入 anet。
+**Gap**: claude 侧有 CLI 二进制路径（claude-code-cli），codex 侧只有 SDK，缺 codex CLI 二进制路径让 codex CLI 用户原地接入 anet **且支持用户 TUI 并发 attach**。
 
-### 1.2 Architectural Pivot — 从 RFC-005 三种方案到 RFC-006 Path C
+### 1.2 Architectural Pivot — Vincent 5 轮 decision timeline
 
-RFC-005（草案）原描述 spawn `codex` TUI 二进制 + 注入 commhub MCP 的方式。在 Vincent telegram 4023-4063 持续 push 下，本 session 实测调研发现三条候选路径：
+RFC-006 经历了 5 次 architectural pivot:
 
-| Path | 描述 | 复杂度 | Push 能力 | 协议稳定性 |
-|---|---|---|---|---|
-| **A — RFC-005 TUI mode** | spawn `codex` TUI + 注入 MCP commhub | ~80 行 | ❌ pull-on-prompt（idle TUI 不会响应 commhub push） | ✅ stable |
-| **B — `codex remote-control` ws daemon** | spawn `codex remote-control` headless daemon + anet 作 ws client（[PR #21424](https://github.com/openai/codex/pull/21424) merged 2026-05-07） | ~590-680 行（含 ws 模块 + auth + 单 client supervision） | ✅ 完整 JSON-RPC 2.0 push（turn/start + 63 ServerNotification） | ⚠ 本周仍 stabilize（[#22404](https://github.com/openai/codex/pull/22404) / [#22414](https://github.com/openai/codex/pull/22414) / [#22386](https://github.com/openai/codex/pull/22386) 都 2026-05-13 today landing） |
-| **C — `codex mcp-server` stdio** | spawn `codex mcp-server` stdio child + anet 作 MCP client（@modelcontextprotocol/sdk 复用） | **~150-200 行** | ✅ MCP `tools/call codex` SYNC return + 期间 `codex/event` 实时流（含 token-level delta） | ✅ stable（`mcp-server` 早于 0.130 已 ship） |
+| 时间 | Pivot | 描述 |
+|---|---|---|
+| 2026-05-13 morning | 初始 (Path C 单 runtime) | mcp-server stdio + tools/call codex/codex-reply, SYNC return + codex/event 流 |
+| Vincent telegram 4067+4068 | 双 runtime (A TUI + C mcp daemon) | 增 Path A 用户 attached TUI mode 作 secondary entry |
+| Vincent telegram 4073 | 三 runtime (A + C + B) | 增 Path B ws daemon 作 Phase 2 |
+| Vincent telegram 4074+4075 | narrow 回 single (C only) | "A 意义不大" — drop TUI, ship C 单 runtime |
+| **Vincent telegram 4108+4110** ← **NOW** | **pivot Phase 1 到 Path B** (ws daemon primary) | 用户 TUI attach 价值 > SYNC 限制, ship ws daemon, mcp-server stdio demoted Phase 2 backup |
 
-**Path C 是 clear winner（详见 §3.2 三路径对比）**。
+**Vincent 4108+4110 rationale** (实测驱动):
+- Vincent 4099 hands-on 实测 `codex --enable remote_control app-server --listen ws://127.0.0.1:14500` 跑通完整 ws daemon, 跟 multi-client tutorial
+- 通信SDK马 deep plan doc [093d76a](https://github.com/sleep2agi/agent-network/commit/093d76a) 跟 通信龙 mcp-server plan [98b6728](https://github.com/sleep2agi/agent-network/commit/98b6728) 双 doc 验证: Path B 功能完整 + 用户 TUI attach OK
+- 接受 trade-off: 实施 2x 代码量 + under-development experimental warning, 换取 user-facing experience completeness
 
-**2026-05-13 Vincent telegram 4067-4075 决策 timeline (收敛到 single runtime)**:
+### 1.3 三路径对比 (历史决策依据)
 
-- 4067+4068: 初步 dual runtime (A TUI + C mcp daemon)
-- 4073: 加 Path B 作 Phase 2 (triple runtime: A + C + B)
-- **4074+4075: narrow back — "A 意义不大", Phase 1 仅 ship `codex-code-cli-mcp` (Path C 单 runtime)**
+| Path | 描述 | 复杂度 | Push 能力 | 协议稳定性 | Phase 1 ship? |
+|---|---|---|---|---|---|
+| **A — TUI mode** | spawn `codex` TUI + 注入 MCP commhub | ~80 行 | ❌ pull-on-prompt | ✅ stable | ❌ non-goal (§10.2) |
+| **B — `codex remote-control` ws daemon** ✅ | spawn `codex remote-control` headless daemon + anet 作 ws client | **~1000 行** | ✅ 完整 JSON-RPC 2.0 push + multi-client peer + turn/steer | ⚠ 本周仍 stabilize | **✅ Phase 1 primary** |
+| **C — `codex mcp-server` stdio** | spawn `codex mcp-server` stdio child + anet 作 MCP client | ~500 行 | ✅ SYNC return + codex/event 流 | ✅ stable | 🟡 Phase 2 backup (§10.3) |
 
-收敛 rationale: Path A TUI 用户直接终端 `codex` + `~/.codex/config.toml` 手配 commhub MCP 已满足 (Vincent 自己 ~/.codex/config.toml 已含半成品配置)，anet 不必重复包装该 use case。Path C 是 anet 真正补的 gap (mesh 节点 push-driven 自动响应 send_task)。Path B (`codex remote-control` ws daemon) 待 codex 0.131/0.132 ws transport stabilize 后 ship Phase 2 (§10 触发条件量化)。
+### 1.4 codex remote-control ws daemon 实测 evidence (Path B)
 
-RFC-006 §3-§13 描述 Path C 单 runtime; Path A 列入 §10.2 non-goal 段; Path B 列入 §10.1 Phase 2 触发条件段; RFC-005 标记 `Superseded by RFC-006`，全文保留作架构决策历史。
+详细实测内容已在 [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) (commit 093d76a, 544 行) 覆盖。本 RFC §3-§4 主要 design 基于该 doc。Key facts:
 
-### 1.3 codex 0.130 `mcp-server` protocol probe（实测 evidence）
-
-`codex --version` → `codex-cli 0.130.0`。`codex mcp-server` stdio 实测：
-
-```jsonrpc
-// initialize ack
-{"id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"codex-mcp-server","title":"Codex","version":"0.130.0",...}}}
-
-// tools/list 返回 2 tools
-{"id":2,"result":{"tools":[
-  {"name":"codex","description":"Run a Codex session...","inputSchema":{"properties":{"prompt":{...required},"cwd":{...},"model":{...},"sandbox":{...},"approval-policy":{...},"profile":{...},"config":{...}}}},
-  {"name":"codex-reply","description":"Continue a Codex conversation...","inputSchema":{"properties":{"threadId":{...required},"prompt":{...required}}}}
-]}}
-```
-
-跑一个 real prompt `tools/call codex {prompt: "say hello in one word"}` 实测 — **SYNC return + 期间 emit 实时 `codex/event` JSON-RPC notifications 流**:
-
-```jsonrpc
-// 调用中 ~10 个 events 流（节选）:
-{"method":"codex/event","params":{"msg":{"type":"task_started","model_context_window":258400,...}}}
-{"method":"codex/event","params":{"msg":{"type":"item_started","item":{"type":"AgentMessage",...}}}}
-{"method":"codex/event","params":{"msg":{"type":"agent_message_content_delta","delta":"Hello"}}}    ← token-level streaming
-{"method":"codex/event","params":{"msg":{"type":"item_completed",...}}}
-{"method":"codex/event","params":{"msg":{"type":"task_complete","duration_ms":3088,"time_to_first_token_ms":2944}}}
-
-// 末尾 SYNC return result:
-{"id":2,"result":{"content":[{"type":"text","text":"Hello"}],"structuredContent":{"threadId":"019e1fb1-8c39-...","content":"Hello"}}}
-```
-
-**关键发现**: `codex/event` 是 codex-mcp-server 的**非标准 MCP notification**（method 字段是 `codex/event`，不是标准 MCP `notifications/progress`）。anet MCP client 须在 @modelcontextprotocol/sdk 之上 register catch-all notification handler 才能捕获（详见 §5）。
+- `codex --enable remote_control app-server --listen ws://127.0.0.1:<port>` 起 ws server (实测 :18765 / :18766 / :18778 都 OK)
+- WebSocket handshake: `HTTP/1.1 101 Switching Protocols` ✅ (with bearer) / `HTTP/1.1 401 Unauthorized` (without)
+- JSON-RPC 2.0 流: initialize → thread/start → turn/start → 25 events stream (含 `item/agentMessage/delta {"delta":"Hi"}` token-level) → turn/completed
+- Multi-client peer co-presence: 2 ws clients 并发 connect 同 daemon, lifecycle events 跨 client broadcast ✅, per-thread streaming 须 owner-subscriber 关系 (thread/resume 须 thread persist to disk)
+- Daemon emit **`warning: "Under-development features enabled: remote_control. Under-development features are incomplete and may behave unpredictably."`** + `remoteControl/status/changed: errored` — OpenAI 自己标 incomplete
 
 ## 2. 设计目标
 
 | 目标 | 描述 |
 |---|---|
-| **G1 — 对称 anet runtime** | codex CLI 用户跟 claude-code-cli 用户体验对称（functional + behavioral parity） |
-| **G2 — Push-driven** | commhub `send_task` 到达 → codex 自动响应（不依赖用户手动在 TUI 输入） |
-| **G3 — Live agent UX** | Dashboard / SaaS client 看到 codex agent live token stream（不是派单后静默 N 分钟） |
-| **G4 — 最小实现成本** | 复用 anet 现有 `@modelcontextprotocol/sdk` dep + agent-node 现有 codex-sdk runtime supervision 框架，目标 ~150-200 行 |
-| **G5 — 协议稳定** | 走 stable mcp-server protocol，不依赖正在 stabilize 的 ws transport 系列 PR |
-| **G6 — 安全默认** | approval-policy 默认 conservative，dangerous 操作 fall back escalate 或 deny |
-| **G7 — 升级路径** | Phase 2 升级 ws daemon path（when 需要 turn/steer mid-execution / multi-client peer 时） |
+| **G1 — 对称 anet runtime** | codex CLI 用户跟 claude-code-cli 用户体验对称 (functional + behavioral parity, 含用户 TUI attach 能力) |
+| **G2 — Push-driven daemon** | commhub `send_task` 到达 → codex 自动响应 (不依赖用户手动在 TUI 输入), agent-node 作 ws client `turn/start { input }` 直接 push prompt |
+| **G3 — User TUI attach co-presence** | 用户用 `codex --remote ws://127.0.0.1:<port> --remote-auth-token-env COMMHUB_TOKEN` attach 同 daemon, 看 anet 自动跑的 turn live (lifecycle events broadcast) |
+| **G4 — Live agent UX** | Dashboard / SaaS client 看到 codex agent live token stream (`item/agentMessage/delta`) 不是派单后静默 |
+| **G5 — turn/steer mid-execution** | 用户可中途 `turn/interrupt` 停止 / `turn/steer` 调整方向 (mcp-server stdio 不能) |
+| **G6 — 安全默认** | bearer auth (capability-token / signed-JWT), 限 loopback ws:// 或 wss://, approval-policy 默认 conservative, dangerous 操作 fallback escalate |
+| **G7 — Phase 2 backup option** | 若 ws daemon `under-development` warning 长期不去除 OR 用户报 UX 不好, Phase 2 加 mcp-server stdio runtime 作 alternative |
 
 ## 3. 设计
 
-### 3.1 Architecture — Option 2 (agent-node bridge)
+### 3.1 Architecture (Option 2: agent-node 内 runtime bridge)
 
 ```
 [commhub-server]
        |
        | SSE (new_task event for codex-bot)
        v
-[agent-node (codex-code-cli-mcp runtime adapter)]
+[agent-node (codex-cli-remote-control runtime adapter)]
        |
-       | MCP stdio (via @modelcontextprotocol/sdk StdioClientTransport)
+       | spawn child: codex --enable remote_control app-server --listen ws://127.0.0.1:<port> 
+       |              --ws-auth capability-token --ws-token-sha256 <hex>
+       |              (+ free port allocation + token gen)
        v
-[codex mcp-server child process]
+[codex app-server child process (codex 0.130+)]
        |
-   1. Init: initialize / notifications/initialized handshake
-   2. tools/call codex {prompt, cwd, model, sandbox, approval-policy}
-        ↳ 期间 emit `codex/event` notifications stream（token deltas + lifecycle）
-        ↳ end: SYNC return {content, structuredContent: {threadId, content}}
-   3. 续单: tools/call codex-reply {threadId, prompt}
+       | ws://127.0.0.1:<port>
+       | (HTTP upgrade with Bearer auth)
+       v
+[agent-node ws client (npm `ws` 8.x)]
+       |
+   1. Init: initialize handshake (capabilities + clientInfo)
+   2. Thread: thread/start { cwd, sandbox, approvalPolicy } → threadId
+   3. Push prompt: turn/start { threadId, input: [{ type:"text", text:<task> }] }
+   4. Stream during turn: item/agentMessage/delta {"delta":"..."} ← token-level
+   5. Reverse approval: server→client ServerRequest (e.g. execCommandApproval) → anet reply
+   6. End: turn/completed (duration_ms, time_to_first_token_ms)
        |
        v
 [agent-node bridge]
-   - Forward live codex/event → commhub report_progress (RFC-003 telemetry)
-   - Aggregate final output → commhub_send_task reply
+   - codex `ServerNotification` 流 → commhub `report_progress` (RFC-003 telemetry)
+   - Final content (last_agent_message) → commhub_send_task reply
        |
        v
-[commhub]
+[commhub-server]
+
+【并发】 用户可执行 codex --remote ws://127.0.0.1:<port> --remote-auth-token-env COMMHUB_TOKEN
+        作 second ws client, 看 anet 跑的 turn live (lifecycle broadcast)
 ```
 
-**关键架构选择 — Option 2 vs Option 1**（per 通信工程马 e50eda1a + 9c43ba4e 共识）:
+**关键架构选择 — Option 2** (per 通信工程马 e50eda1a + 9c43ba4e 共识):
+- cli.ts: thin launcher (~50 行 dispatch + setup wizard 增 entry)
+- agent-node: 重活 (ws client + bearer auth + reconnect + 9 reverse approval + supervision + bridge)
 
-- **Option 1**: anet CLI (cli.ts) 直接做 MCP client bridge — cli.ts 肿胀（+290 行）
-- **Option 2** ✅: cli.ts 仅 spawn `agent-node` 子进程（thin launcher，~30-50 行 dispatch），agent-node 内含 `codex-code-cli-mcp` runtime adapter 跟现有 `codex-sdk` runtime 同框架共用 supervision
-
-Option 2 让 cli.ts 保持 launcher 角色不肿胀，跟 codex-sdk runtime 复用 daemon lifecycle（重连 / heartbeat / shutdown），是 anet 现有架构自然 extension。
-
-### 3.2 三路径对比矩阵（决策依据）
-
-| 维度 | 🅰 RFC-005 TUI spawn | 🅱 remote-control ws daemon | 🅲 mcp-server stdio （本 RFC） |
-|---|---|---|---|
-| **Push driven?** | ❌ pull on user prompt | ✅ ws turn/start | ✅ stdio tools/call |
-| **codex version 要求** | 任意 | 0.130+（[PR #21424](https://github.com/openai/codex/pull/21424)） | 0.130+ (早期已 ship) |
-| **协议 stability** | stable | ⚠ stabilize 中（5-13 仍 3 PRs landing） | ✅ stable |
-| **Daemon supervision** | TUI process | 持续 daemon + 须 anet 写 supervisor | per-task / per-session child（生死跟 anet 同步） |
-| **anet 现 dep 复用** | inquirer | 0（new ws module 须） | ✅ @modelcontextprotocol/sdk（已 dep） |
-| **Auth complexity** | none | bearer JWT/capability-token 须 anet 签 | none（stdio child inherit env） |
-| **Live event stream** | n/a | ✅ ServerNotification 63 events | ✅ codex/event（含 token delta） |
-| **Single-client 限制** | n/a | ⚠ [issue #21551](https://github.com/openai/codex/issues/21551) open（peer-client co-presence 未 ship） | ✅ N/A（per-child stdio 隔离） |
-| **Turn 中断 / steer** | n/a | ✅ turn/interrupt + turn/steer | ❌ SYNC return（不能 mid-turn 干预） |
-| **Approval flow** | manual | server→client 9 个 reverse ServerRequest 须 anet 决策 | inherit codex 静态 approval-policy 参数（"never" / "on-failure" / "on-request" / "untrusted"） |
-| **anet 代码量** | ~80 行 cli.ts | ~590-680 行（ws + bridge + supervision） | **~150-200 行** |
-| **多 anet session 同 host** | n/a | port 冲突管理须 | ✅ 自然 stdio 隔离 |
-| **Phase 1 ship 决策** | ❌ non-goal (用户直接 `codex` + `~/.codex/config.toml` 手配 commhub MCP 已满足，anet 不重复包装) | ❌ defer Phase 2 (待 §10.1 触发条件) | ✅ ship 作 `codex-code-cli-mcp` runtime (mesh 自动响应 send_task) |
-
-Path C 在 7/12 维度优于 Path B，3/12 维度持平，2/12（Turn 中断 / Live event 类型）B 更全（但 C 通过 `codex/event` 覆盖 90% UX 需求）。**Phase 1 ship Path C 单 runtime**（per Vincent 4074-4075）, Path A non-goal, Path B defer Phase 2。
-
-### 3.3 cli.ts 改动（~30-50 行）
-
-类比 codex-sdk runtime（thin launcher，重活在 agent-node）:
+### 3.2 cli.ts 改动 (~50 行)
 
 ```ts
-// L133 RuntimeName enum 加 1 个新 runtime
+// L133 RuntimeName enum
 type RuntimeName =
   | "claude-code-cli"
   | "codex-sdk"
-  | "codex-code-cli-mcp"    // ← NEW: daemon mode (Path C, mcp-server stdio)
+  | "codex-cli-remote-control"   // ← NEW (Path B ws daemon)
   | "claude-agent-sdk"
   | "http-api";
 
-// normalizeRuntime 加 branch
+// normalizeRuntime
 function normalizeRuntime(r: string): RuntimeName {
   switch (r) {
-    case "codex-cli-mcp":
-    case "codex-code-cli-mcp":
-    case "codex-mcp":
-      return "codex-code-cli-mcp";    // daemon
+    case "codex-remote":
+    case "codex-cli-remote":
+    case "codex-cli-remote-control":
+      return "codex-cli-remote-control";
     // ... existing branches
   }
 }
 
-// checkRuntimeDependency 加 codex 二进制 check
-if (profile.runtime === "codex-code-cli-mcp") {
+// checkRuntimeDependency
+if (profile.runtime === "codex-cli-remote-control") {
   if (!commandExists("codex")) {
     warn("Install codex CLI: npm i -g @openai/codex@latest");
     return false;
   }
   // verify codex --version >= 0.130.0
   const v = execFileSync("codex", ["--version"], {encoding: "utf-8"}).trim();
-  // semver check
+  // semver check + warn if < 0.131 (under-development)
 }
 
 // launchAgent dispatch
-case "codex-code-cli-mcp":     // daemon mode — delegate agent-node MCP client bridge
-  return spawnAgentNode(profile, { runtime: "codex-code-cli-mcp" });
+case "codex-cli-remote-control":
+  return spawnAgentNode(profile, { runtime: "codex-cli-remote-control" });
 ```
 
-通信工程马 worktree `~/anet-work/rfc-005-codex-code-cli/` 6 edit 中 5 个直接复用（RuntimeName enum / normalizeRuntime / checkRuntimeDependency / setupCommand checkbox / setupCommand install logic — 现在 single runtime 也适用）。第 6 个 launchAgent spawn 段从 RFC-005 设计（spawn `codex` + `--config 'mcp_servers.commhub.url=...'` inline 注入 TUI 模式）改为 `spawnAgentNode(profile, {runtime: "codex-code-cli-mcp"})` delegate, 跟 codex-sdk dispatch 同款。原 RFC-005 §3.3 TUI mode 设计 archive 在 RFC-005 全文保留 (Superseded), 不在 Phase 1 ship。
+### 3.3 agent-node 改动 (~470 行)
 
-### 3.4 agent-node 改动（~150-200 行）
-
-新增 `agent-node/src/runtime/codex-code-cli-mcp.ts`:
+新增 `agent-node/src/runtime/codex-cli-remote-control.ts`:
 
 ```ts
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { spawn, ChildProcess } from "node:child_process";
+import crypto from "node:crypto";
+import WebSocket from "ws";
 
-export class CodexCodeCliRuntime {
-  private mcpClient: Client;
-  private transport: StdioClientTransport;
+export class CodexCliRemoteControlRuntime {
+  private daemon: ChildProcess;
+  private ws: WebSocket;
   private threadId?: string;
+  private token: string;
+  private port: number;
 
   async start(profile: Profile) {
-    this.transport = new StdioClientTransport({
-      command: "codex",
-      args: ["mcp-server"],
-      env: { ...process.env /* codex 不需要额外 token，stdio inherit */ },
+    // 1. Allocate free port (127.0.0.1:PORT range, e.g. 18000-18999)
+    this.port = await allocateFreePort();
+
+    // 2. Generate random capability token + sha256
+    this.token = crypto.randomBytes(32).toString("hex"); // 64 hex chars
+    const tokenSha256 = crypto.createHash("sha256").update(this.token).digest("hex");
+
+    // 3. Spawn codex daemon child
+    this.daemon = spawn("codex", [
+      "--enable", "remote_control",
+      "app-server",
+      "--listen", `ws://127.0.0.1:${this.port}`,
+      "--ws-auth", "capability-token",
+      "--ws-token-sha256", tokenSha256,
+    ], {
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
-    this.mcpClient = new Client(
-      { name: "anet-codex-code-cli-mcp", version: AGENT_NODE_VERSION },
-      { capabilities: {} }
-    );
+    // 4. Wait for daemon ready (poll /healthz)
+    await waitForPort(this.port, 5000);
 
-    // Register catch-all notification handler 捕 `codex/event`（非标 MCP method）
-    this.mcpClient.setNotificationHandler(/* catch-all */ async (notification) => {
-      if (notification.method === "codex/event") {
-        await this.forwardProgressEvent(notification.params);  // → commhub report_progress (§5)
+    // 5. Connect ws client with Bearer token
+    this.ws = new WebSocket(`ws://127.0.0.1:${this.port}`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+
+    await new Promise((resolve, reject) => {
+      this.ws.on("open", resolve);
+      this.ws.on("error", reject);
+    });
+
+    // 6. JSON-RPC 2.0 handshake
+    await this.rpc("initialize", { clientInfo: { name: "anet-codex-cli-remote-control", version: AGENT_NODE_VERSION } });
+
+    // 7. Listen for ServerNotifications + ServerRequest (reverse approval)
+    this.ws.on("message", (data) => {
+      const msg = JSON.parse(data.toString());
+      if (msg.method && !msg.id) {
+        // ServerNotification — forward to commhub
+        this.handleServerNotification(msg);
+      } else if (msg.method && msg.id) {
+        // ServerRequest reverse-call — anet must reply
+        this.handleServerRequest(msg);
+      } else if (msg.id) {
+        // Response to our ClientRequest
+        this.handleResponse(msg);
       }
     });
 
-    await this.mcpClient.connect(this.transport);
-    // tools/list verify codex + codex-reply available (defensive)
-  }
-
-  // commhub SSE handler — 新 task 到达
-  async onNewTask(task: TaskEvent) {
-    const args: Record<string, unknown> = {
-      prompt: task.task,
+    // 8. Start persistent thread for this anet session
+    const r = await this.rpc("thread/start", {
       cwd: profile.cwd,
-      model: profile.model,
       sandbox: profile.flags?.codex?.sandbox ?? "workspace-write",
-      "approval-policy": profile.flags?.codex?.approvalPolicy ?? "on-failure",
-    };
+      approvalPolicy: profile.flags?.codex?.approvalPolicy ?? "on-failure",
+    });
+    this.threadId = r.thread.id;
 
-    if (this.threadId) {
-      // 续单
-      const r = await this.mcpClient.callTool({
-        name: "codex-reply",
-        arguments: { threadId: this.threadId, prompt: task.task },
-      });
-      await this.replyToCommhub(task, r);
-    } else {
-      // 首单（自动开 thread）
-      const r = await this.mcpClient.callTool({ name: "codex", arguments: args });
-      this.threadId = (r.structuredContent as any)?.threadId;
-      await this.replyToCommhub(task, r);
-    }
+    // 9. Supervise daemon (reconnect on disconnect, restart on crash)
+    this.daemon.on("exit", () => { /* respawn logic */ });
+    this.ws.on("close", () => { /* reconnect logic + thread/resume */ });
   }
 
-  // 主进程关停 → kill child
+  // commhub SSE handler — new task arrives
+  async onNewTask(task: TaskEvent) {
+    await this.rpc("turn/start", {
+      threadId: this.threadId,
+      input: [{ type: "text", text: task.task }],
+    });
+    // turn/completed notification will trigger final reply via handleServerNotification
+  }
+
+  // Handle ServerNotification (broadcast events)
+  private handleServerNotification(msg: any) {
+    // Filter own thread events only (multi-client broadcast nuance)
+    if (msg.params?.threadId && msg.params.threadId !== this.threadId) return;
+
+    if (msg.method === "item/agentMessage/delta") {
+      this.bufferAndFlushDelta(msg.params.delta);
+    } else if (msg.method === "turn/completed") {
+      this.flushReplyToCommhub(msg.params.lastAgentMessage);
+    } else if (msg.method === "warning") {
+      // Filter under-development warning, log others
+    }
+    // Forward to commhub report_progress (RFC-003 telemetry)
+    forwardToCommhubProgress(msg);
+  }
+
+  // Handle ServerRequest reverse-call — 9 reverse approval types
+  private async handleServerRequest(msg: any) {
+    const policy = profile.flags?.codex?.approvalPolicy ?? "on-failure";
+    let response;
+    switch (msg.method) {
+      case "execCommandApproval":
+        response = this.smartApproveCommand(msg.params, policy);
+        break;
+      case "applyPatchApproval":
+        response = this.smartApprovePatch(msg.params, policy);
+        break;
+      case "item/permissions/requestApproval":
+        response = await this.escalateToCommander(msg.params); // commhub_send_task to 指挥室
+        break;
+      case "item/tool/call":
+        response = await this.passthroughToCommhub(msg.params); // commhub MCP tool 转发
+        break;
+      // ... 5 more cases
+    }
+    this.reply(msg.id, response);
+  }
+
   async shutdown() {
-    await this.mcpClient.close();
-    await this.transport.close();
+    this.ws.close();
+    this.daemon.kill();
   }
 }
 ```
 
-复用 `codex-sdk` runtime 现有 supervision 框架（spawn / supervise / respawn / shutdown），仅替换 transport + tool call payload。
+复用 `codex-sdk` runtime 现有 supervision 框架 (spawn / supervise / respawn / shutdown), 替换 transport (npm SDK → ws JSON-RPC 2.0)。
 
-### 3.5 完整 sequence diagram (daemon mode)
+### 3.4 完整 sequence diagram (Path B daemon mode)
 
 ```
-[commhub-server] -- SSE new_task --> [agent-node codex-code-cli-mcp runtime]
+[commhub-server] -- SSE new_task --> [agent-node codex-cli-remote-control]
                                               |
-                                              | tools/call codex { prompt, cwd, model, sandbox, approval-policy }
+                                              | spawn child: codex --enable remote_control
+                                              |              app-server --listen ws://127.0.0.1:<port>
+                                              |              --ws-auth capability-token
+                                              |              --ws-token-sha256 <hex>
                                               v
-                                  [codex mcp-server child]
+                                  [codex daemon child + auto-update loop]
                                               |
-                                              |- codex/event { type: session_configured }
-                                              |- codex/event { type: task_started }
-                                              |- codex/event { type: item_started, item: AgentMessage }
-                                              |- codex/event { type: agent_message_content_delta, delta: "Hello" }
-                                              |- codex/event { type: item_completed }
-                                              |- codex/event { type: task_complete, duration_ms, time_to_first_token_ms }
+                                              | ws://127.0.0.1:<port>
                                               v
-                                  SYNC return { content, structuredContent: { threadId, content } }
+                                  [agent-node ws client]
+                                              |
+                                              | initialize → ack
+                                              | thread/start → threadId
+                                              | turn/start { threadId, input: [{type:"text",text:<task>}] }
+                                              v
+                                  [codex inference]
+                                  - item/agentMessage/delta {"delta":"Hello"}  ← token stream
+                                  - execCommandApproval (reverse) → anet smart policy reply
+                                  - turn/completed { duration_ms, time_to_first_token_ms }
                                               |
                                               v
                               [agent-node bridge]
-                              - codex/event 流式 → commhub `report_progress` MCP (RFC-003 telemetry)
-                              - Final content 聚合 → commhub_send_task reply
+                              - ServerNotification 流 → commhub `report_progress` (RFC-003)
+                              - last_agent_message 聚合 → commhub_send_task reply
                                               |
                                               v
                                         [commhub]
+
+【并发】 另一终端用户: codex --remote ws://127.0.0.1:<port> --remote-auth-token-env COMMHUB_TOKEN
+       (TUI second client, 看 anet 跑的 turn lifecycle events broadcast)
 ```
 
-## 4. Tool Call Flow
+## 4. Tool Call Flow / Protocol Details
 
-### 4.1 首单 — `codex` tool
+### 4.1 完整 ClientRequest 序列 (Phase 1 anet 使用)
 
-| 字段 | 必填 | 说明 |
+| Method | When | Params |
 |---|---|---|
-| `prompt` | ✅ | 用户 / 派单消息原文 |
-| `cwd` | optional | 工作目录（默认 agent-node 自身 cwd） |
-| `model` | optional | `gpt-5.2` / `gpt-5.2-codex` 等（profile 配置） |
-| `sandbox` | optional | `read-only` / `workspace-write` / `danger-full-access`（默认 `workspace-write`，per §6） |
-| `approval-policy` | optional | `untrusted` / `on-failure` / `on-request` / `never`（默认 `on-failure`，per §6） |
-| `profile` | optional | codex 自身 profile（`~/.codex/config.toml` 的 `[profiles.X]` 节） |
-| `config` | optional | inline 配置覆盖（dotted-key TOML override 兼容 codex `-c key=val` 语义） |
-| `developer-instructions` | optional | 注入 developer-role system prompt（anet 可注入 "你已接入 anet network..." 提示） |
-| `base-instructions` | optional | 完全替换 codex 默认 base instructions（advanced，profile 配置） |
+| `initialize` | 1x per ws session | `clientInfo: {name, version}` |
+| `thread/start` | 1x per agent-node session | `cwd, sandbox, approvalPolicy, model?, ephemeral?` |
+| `thread/resume` | on ws reconnect | `threadId` (resume disk-persisted thread) |
+| `turn/start` | per commhub task | `threadId, input: UserInput[]` |
+| `turn/interrupt` | 用户中断 / anet 超时 | `threadId, turnId` |
+| `turn/steer` | 用户调整方向 (Phase 1 optional, Phase 2 主要) | `threadId, turnId, input` |
 
-返回 outputSchema:
-```ts
-{
-  content: [{ type: "text", text: <final output> }],
-  structuredContent: { threadId: string, content: string }
-}
+### 4.2 ServerNotification 流 (anet bridge → commhub report_progress)
+
+per [/tmp/codex-schema/ServerNotification.json](实测 dump) 63 events, anet bridge 关注 mapping:
+
+| codex ServerNotification | RFC-003 NodeEvent.kind |
+|---|---|
+| `turn/started` | `ProgressKind.TURN_STARTED` |
+| `item/started` (AgentMessage) | `ProgressKind.AGENT_MESSAGE_STARTED` |
+| `item/agentMessage/delta` | `ProgressKind.AGENT_MESSAGE_DELTA` (token, high-frequency, batch 200ms/1KB) |
+| `item/started` (CommandExecution) | `ProgressKind.TOOL_CALL_STARTED` |
+| `item/completed` (CommandExecution) | `ProgressKind.TOOL_CALL_COMPLETED` |
+| `item/started` (FileChange) | `ProgressKind.FILE_CHANGE_STARTED` |
+| `item/completed` (FileChange) | `ProgressKind.FILE_CHANGE_COMPLETED` |
+| `thread/tokenUsage/updated` | `ProgressKind.USAGE_UPDATE` |
+| `account/rateLimits/updated` | `ProgressKind.RATE_LIMIT_UPDATE` |
+| `turn/completed` | `ProgressKind.TURN_COMPLETED` (duration_ms, time_to_first_token_ms) |
+| `warning` (under-development) | log only, **不 forward** (suppress per profile.flags) |
+| `remoteControl/status/changed` | `ProgressKind.LIFECYCLE` (status: disabled/connecting/connected/errored) |
+| `mcpServer/startupStatus/updated` | `ProgressKind.SUBSYSTEM` |
+| `raw_response_item` | low-priority debug, **不 forward** (noise) |
+
+### 4.3 ServerRequest 9 个 reverse approval (anet 须 reply)
+
+| ServerRequest | anet smart policy |
+|---|---|
+| `execCommandApproval` | whitelist (ls/cat/grep/git status/git log) auto-approve / 其他 escalate `指挥室` |
+| `applyPatchApproval` | same cwd 内 + 文件数 ≤5 + lines ≤200 auto-approve / 其他 escalate |
+| `applyPatchApproval/grantRoot` | 永不 auto-approve, escalate `指挥室` |
+| `item/permissions/requestApproval` | escalate `指挥室` |
+| `item/tool/call` (codex 调 MCP tool) | passthrough commhub MCP tool 转发 |
+| `item/tool/requestUserInput` | escalate `指挥室` via commhub_send_task |
+| `mcpServer/elicitation/request` | escalate 或 auto-fill from profile.flags |
+| `account/chatgptAuthTokens/refresh` | passthrough |
+| `execCommandApproval` parsedCmd (metadata) | base whitelist 判断 |
+
+→ ~80 行决策框架 in agent-node。
+
+### 4.4 用户 TUI attach flow (G3 multi-client)
+
+per Vincent 4099 tutorial:
+
+```bash
+# Step 1: anet 已起 daemon (per §3.3 step 3)
+# daemon listen ws://127.0.0.1:<port> + token in COMMHUB_TOKEN env var
+
+# Step 2: 用户另一终端 attach
+export COMMHUB_TOKEN=<从 anet 节点 config 取或 anet 命令显示>
+codex --remote ws://127.0.0.1:<port> --remote-auth-token-env COMMHUB_TOKEN
+
+# 用户进 codex TUI, 看 lifecycle events 实时 (per multi-client broadcast)
+# 用户也可在 TUI 内 prompt → 创建新 thread (跟 anet 自动跑的 thread 独立)
 ```
 
-### 4.2 续单 — `codex-reply` tool
+**实测 caveat** (per Path B deep plan §3):
+- ✅ lifecycle events (thread/status/changed, mcpServer/startup/updated) 跨 client broadcast
+- ⚠ per-thread streaming (item/agentMessage/delta) 仅 thread owner 收到, 用户 attach 时**不能** "看 anet 跑的 turn 的 token stream"
+- 解决: anet thread `ephemeral: false` 持久化到 disk + 用户 `thread/resume {anet's threadId}` (但需 thread persist 后才能 resume, 实测 race condition)
+
+## 5. Live Progress Forwarding (RFC-003 telemetry 复用)
+
+### 5.1 ServerNotification → commhub `report_progress` mapping
+
+agent-node bridge 内置 mapper:
 
 ```ts
-{
-  threadId: <从首单 structuredContent 拿到>,
-  prompt: <续单消息>
-}
-```
-
-返回同 §4.1 outputSchema。
-
-### 4.3 Thread lifecycle 策略
-
-**默认 per session 一个 thread**（跟 claude-code-cli runtime 一致）— agent-node 进程 lifetime 内首单创建 threadId，后续 task 全用 `codex-reply { threadId, prompt }`。优点：context 累积、模型记忆历史 task；缺点：context 超长可能撞 model_context_window（258400 tokens for gpt-5.2 per probe）。
-
-**Phase 2 升级**: 加 `profile.flags.codex.threadStrategy: "session" | "task"` 选项，task 模式每个 commhub task 起新 thread（clean isolation）。Phase 1 hardcode `session` 简化。
-
-## 5. Live Progress Forwarding —— `codex/event` → commhub `report_progress`（RFC-003 复用）
-
-### 5.1 `codex/event` notification 类型清单（probe 实测）
-
-| codex/event type | 触发时机 | RFC-003 NodeEvent.kind mapping |
-|---|---|---|
-| `session_configured` | session 初始化 | `ProgressKind.LIFECYCLE`, sub_state=`session_ready` |
-| `mcp_startup_update` | MCP 子服务 starting/ready/failed | `ProgressKind.SUBSYSTEM`, sub_state=server-state |
-| `task_started` | turn 开始 inference | `ProgressKind.TURN_STARTED` |
-| `item_started` (AgentMessage) | model 开始生成回复 | `ProgressKind.AGENT_MESSAGE_STARTED` |
-| `agent_message_content_delta` | token-level streaming | `ProgressKind.AGENT_MESSAGE_DELTA`（high-frequency，batch） |
-| `item_started` (CommandExecution) | model 决定执行 shell 命令 | `ProgressKind.TOOL_CALL_STARTED` |
-| `item_completed` (CommandExecution) | shell 命令完成 | `ProgressKind.TOOL_CALL_COMPLETED` |
-| `item_started` (FileChange) | model 改文件 | `ProgressKind.FILE_CHANGE_STARTED` |
-| `item_completed` (FileChange) | 文件改完 | `ProgressKind.FILE_CHANGE_COMPLETED` |
-| `agent_message` | 完整回复（end of streaming） | `ProgressKind.AGENT_MESSAGE_COMPLETED` |
-| `token_count` | rate-limit + usage update | `ProgressKind.USAGE_UPDATE` |
-| `task_complete` | turn 结束 | `ProgressKind.TURN_COMPLETED`, fields={duration_ms, time_to_first_token_ms} |
-| `raw_response_item` | 原始 model 输出 item | low-priority debug，**不 forward**（noise 太多） |
-
-### 5.2 Schema mapping（per 通信工程马 review focus）
-
-agent-node bridge 内置 mapper 函数:
-
-```ts
-function codexEventToNodeEvent(ev: CodexEvent): NodeEvent | null {
-  const { type, ...rest } = ev.msg;
-  switch (type) {
-    case "agent_message_content_delta":
+function codexNotificationToNodeEvent(msg: any): NodeEvent | null {
+  switch (msg.method) {
+    case "item/agentMessage/delta":
       return {
         kind: ProgressKind.AGENT_MESSAGE_DELTA,
-        sub_state: null,
-        delta_text: rest.delta,
-        item_id: rest.item_id,
-        thread_id: rest.thread_id,
-        turn_id: rest.turn_id,
+        delta_text: msg.params.delta,
+        item_id: msg.params.itemId,
+        thread_id: msg.params.threadId,
+        turn_id: msg.params.turnId,
         timestamp: Date.now(),
       };
-    case "task_complete":
+    case "turn/completed":
       return {
         kind: ProgressKind.TURN_COMPLETED,
-        sub_state: null,
-        duration_ms: rest.duration_ms,
-        time_to_first_token_ms: rest.time_to_first_token_ms,
-        last_agent_message: rest.last_agent_message,
+        duration_ms: msg.params.durationMs,
+        time_to_first_token_ms: msg.params.timeToFirstTokenMs,
+        last_agent_message: msg.params.lastAgentMessage,
         timestamp: Date.now(),
       };
-    // ... 其他 mapping
     case "raw_response_item":
-      return null;  // skip noise
+      return null; // skip noise
+    case "warning":
+      if (msg.params.message?.includes("Under-development")) return null;
+      // log only
+    // ... 其他 mapping
   }
 }
 ```
 
-### 5.3 Batch / Backpressure 策略（per 通信工程马 review focus）
+### 5.2 Batch / Backpressure 策略
 
-`agent_message_content_delta` 在快速生成时可能 token-per-event（实测 1 字 1 event），single token sends 会 flood commhub `report_progress`。Phase 1 采用 **简单 batch 策略**:
+`item/agentMessage/delta` 实测 token-per-event (~100ms 间隔), flooding `report_progress`。Phase 1 简单 batch:
 
-- delta events 用 in-memory 累积 buffer，每 200ms flush 一次（或满 1KB 文本时立即 flush）
-- 其他 lifecycle events（task_started / item_completed / task_complete 等）立即 forward（low frequency）
-- commhub `report_progress` 单条 payload size cap 4KB（commhub-server 端 enforce），超过 reject + agent-node retry 拆 chunk
+- delta events buffer 200ms 或满 1KB 即 flush
+- 其他 lifecycle events 立即 forward
+- commhub `report_progress` payload size cap 4KB
 
-Phase 2 可加 backpressure：commhub 端返 429 时 agent-node 降频 + drop oldest delta（保 lifecycle）。Phase 1 不实现。
+### 5.3 跟 RFC-003 telemetry layer 复用
 
-### 5.4 跟 RFC-003 telemetry layer 复用
+RFC-003 已 ship `commhub_report_progress` MCP method + `progress_events` SQLite 表 + SSE `progress` 事件 + dashboard `<ProgressTimeline>`。**RFC-006 直接复用, 无 commhub schema 改动**。
 
-RFC-003 已定义 `commhub_report_progress` MCP method + `progress_events` SQLite 表 + SSE `progress` 事件类型 + dashboard `<ProgressTimeline>` 渲染。**RFC-006 直接复用，无 commhub schema 改动**。agent-node bridge 加 codex/event mapper 后直接调 existing `commhub_report_progress`。Dashboard 端因为 NodeEvent schema 统一，codex agent 跟 claude agent 在 timeline 上同款渲染。
+## 6. Configuration
 
-## 6. Configuration — Approval Policy & Sandbox
+### 6.1 bearer token format
 
-### 6.1 静态 approval-policy 参数（vs B path reverse ServerRequest 复杂决策）
+**推荐 `capability-token` mode** (PR #14853, anet 易实施):
 
-`codex mcp-server` 的 `tools/call codex` 接受 `approval-policy` 参数，取值:
+```bash
+# Server side (anet spawn)
+codex --enable remote_control app-server --listen ws://127.0.0.1:<port> \
+      --ws-auth capability-token \
+      --ws-token-sha256 <SHA256_HEX_OF_TOKEN>
 
-| 值 | codex 行为 | anet 适用场景 |
+# Client side (anet ws client OR user TUI)
+new WebSocket(`ws://127.0.0.1:${port}`, { headers: { Authorization: `Bearer ${TOKEN}` } })
+```
+
+Phase 2 evaluate `signed-bearer-token` (JWT with issuer/audience/clock-skew) 若 anet ntok_ 升级到 JWT 体系。
+
+### 6.2 ws listen URL
+
+- 默认 `ws://127.0.0.1:<port>` (loopback only) — per PR #14853 安全 restriction
+- 远程部署: SSH port-forwarding 或 nginx reverse proxy (不推荐直接 0.0.0.0)
+- 端口分配: agent-node 启动时 `allocateFreePort()` 动态选 (18000-18999 range), 写入 node config
+
+### 6.3 approval-policy default `on-failure`
+
+| 值 | 描述 | anet 适用 |
 |---|---|---|
-| `untrusted` | 所有 shell 命令需 approval | 高安全场景（公开 demo / Vincent 试新 agent） |
-| `on-failure` | 仅命令失败后才 ask | **默认推荐**（balance 自动化 + 安全） |
-| `on-request` | model 自己判断要 ask 才 ask | 中等信任（用户已熟悉 codex 行为） |
-| `never` | 全自动批准 | dev 内网 + 完全信任（不推荐生产） |
+| `untrusted` | 所有 shell 需 approval | 高安全场景 |
+| `on-failure` | 仅失败后 ask | **推荐 default** (balance 自动化 + 安全) |
+| `on-request` | model 判断 ask | 中等信任 |
+| `never` | 全自动批准 | dev 内网 only (不推荐生产) |
 
-**RFC-006 默认值 `on-failure`** — 跟 codex CLI default 一致，balance 自动化跟安全。在 sandbox=`workspace-write` 限制下，approval-policy=`on-failure` 是合理 default。
+### 6.4 sandbox default `workspace-write`
 
-### 6.2 默认 sandbox=`workspace-write`
+| 值 | 权限 |
+|---|---|
+| `read-only` | 仅读 + 禁网 |
+| `workspace-write` | 读 + 写 cwd + 禁网 (**推荐 default**) |
+| `danger-full-access` | 全访问 (不推荐) |
 
-`sandbox` 参数取值:
-
-| 值 | 权限 | 场景 |
-|---|---|---|
-| `read-only` | 仅读 + 禁网 | 极保守（仅 query / review 类 task） |
-| `workspace-write` | 读 + 写 cwd + 禁网 | **默认推荐**（agent 改 cwd 文件 OK，不能伤害 cwd 外 + 不能联网） |
-| `danger-full-access` | 全访问 | 不推荐（除非用户明确 opt-in） |
-
-### 6.3 profile.flags.codex 配置 schema
-
-`anet node create` 写入 `.anet/nodes/<alias>/config.json` 时支持:
+### 6.5 profile.flags.codex 配置 schema
 
 ```json
 {
-  "runtime": "codex-code-cli-mcp",
+  "runtime": "codex-cli-remote-control",
   "model": "gpt-5.2-codex",
   "flags": {
     "codex": {
       "approvalPolicy": "on-failure",
       "sandbox": "workspace-write",
-      "profile": "<可选 codex profile 名 from ~/.codex/config.toml>",
-      "config": { /* inline TOML overrides */ }
+      "wsListenPort": null,    // null = auto-allocate
+      "wsAuthMode": "capability-token",
+      "supervisorRestart": true,  // crash → respawn
+      "useUserConfig": true       // 加载 ~/.codex/config.toml mcp_servers
     }
   }
 }
 ```
 
-agent-node runtime adapter 启动 tools/call 时透传这些字段。
+### 6.6 tmux 长跑配置 (per Vincent 4099 tutorial)
 
-### 6.4 Codex MCP servers 嵌套（用户已有 ~/.codex/config.toml mcp_servers）
+```bash
+# Step 1: anet node start in tmux (long-running)
+tmux new -s codex-bot
+anet node start my-codex-bot   # auto-spawn daemon + ws client + bridge
+# Ctrl+B D detach
 
-实测 probe 时 `codex mcp-server` 自动加载 `~/.codex/config.toml` 里的 `[mcp_servers.*]`（如 `commhub-proxy`）— 用户已有自定义 MCP 配置不会被 RFC-006 干扰。anet 不修改用户 `~/.codex/config.toml`，仅注入 tools/call 参数。
+# Step 2: 用户 attach TUI from anywhere
+codex --remote ws://127.0.0.1:<port> --remote-auth-token-env COMMHUB_TOKEN
+```
+
+### 6.7 远程部署 SSH port-forward
+
+```bash
+# 远程机器跑 anet node
+ssh user@remote-host
+tmux new -s codex-bot
+anet node start my-codex-bot
+
+# 本地 attach
+ssh -L 18765:127.0.0.1:18765 user@remote-host
+codex --remote ws://127.0.0.1:18765 --remote-auth-token-env COMMHUB_TOKEN
+```
 
 ## 7. Setup / cli.ts integration
 
 ### 7.1 Setup wizard 添加 runtime 选项
-
-`anet node create` 交互流程（cli.ts setup wizard）当前有 4 runtime 选项，加 5th:
 
 ```
 ? Select runtime:
   ❯ claude-code-cli (Claude CLI binary)
     claude-agent-sdk (Anthropic SDK)
     codex-sdk (OpenAI Codex SDK)
-    codex-code-cli-mcp (Codex CLI daemon via mcp-server) ← NEW
+    codex-cli-remote-control (Codex CLI via remote-control ws daemon) ⚠ EXPERIMENTAL ← NEW
     http-api (OpenAI-compatible HTTP)
 ```
 
-后续 prompt 加 codex-code-cli-mcp 特有问题:
-- approval-policy: `untrusted` / `on-failure` (default) / `on-request` / `never`
-- sandbox: `read-only` / `workspace-write` (default) / `danger-full-access`
-- model: gpt-5.2-codex (default) / gpt-5.2 / 其他
+**Experimental warning prominent** (per Vincent 4108-4110 accept under-development risk):
+
+```
+⚠ codex-cli-remote-control uses codex 0.130 "remote_control" feature which is currently
+  marked as "Under-development incomplete" by OpenAI. Behavior may be unstable until codex
+  0.131+ ships with stable WS transport.
+
+  Continue? (Y/n)
+```
 
 ### 7.2 cli.ts → agent-node delegate
 
-`launchAgent` dispatch:
-
 ```ts
-case "codex-code-cli-mcp":
-  // 跟 codex-sdk runtime 同框架走 agent-node 子进程
-  return spawnAgentNode(profile, { runtime: "codex-code-cli-mcp" });
+case "codex-cli-remote-control":
+  return spawnAgentNode(profile, { runtime: "codex-cli-remote-control" });
 ```
-
-Setup wizard 之外的 cli.ts 改动量 minimal（~30 行 dispatch + checkRuntimeDependency + assertStartCompatibility）。
 
 ## 8. Testing
 
-### 8.1 Docker E2E test 矩阵（复用 PR #43 scaffold）
+### 8.1 Docker E2E test L0-L9 (~400 行, PR #43 演进)
 
-通信测试马 PR #43（test28-codex-code-cli E2E）当前 L3 用宽松 regex `codex.*mcp_servers\.commhub` cover TUI + batch 两模式。RFC-006 path C 下 L3 regex 演进:
-
-| Level | Check | RFC-006 path C 检查 |
-|---|---|---|
-| L0 | prerequisites | `which codex && which anet` |
-| L1 | hub up | `anet hub start` + `curl /health` |
-| L2 | node create | `anet node create test-codex-bot --runtime codex-code-cli-mcp` + `.anet/nodes/test-codex-bot/config.json` 写盘 |
-| L3 | child spawn verify | `pgrep -f "codex mcp-server"` ← path C 模式（vs RFC-005 path A `codex` TUI 或 path B `codex remote-control`） |
-| L4 | MCP handshake | netcat / fifo 读 child stdin/stdout 验 `initialize` ack |
-| L5 | tools/list verify | 验 codex + codex-reply 两 tool 都 listed |
-| L6 | push verify | `anet commhub_send_task --alias test-codex-bot --task "hello"` → 验 codex 收到 tools/call codex → SYNC return 后 commhub 收 reply |
-| L7 | live progress | 验 codex/event 流 forward 到 commhub `progress_events` 表 |
-| L8 | cross-runtime | 起 codex-code-cli-mcp + claude-code-cli 两 node → A `send_task` B → 都能 daemon push |
-
-L3 regex `codex.*mcp[_-]server` 修订：cover `mcp-server` subcommand spawn 模式。Phase 2 ws daemon 后再扩展。
+| Level | Check |
+|---|---|
+| L0 | `which codex && which anet` |
+| L1 | `anet hub start` + `curl /health` |
+| L2 | `anet node create test-codex-bot --runtime codex-cli-remote-control` |
+| L3 | child spawn verify: `pgrep -f "codex.*app-server.*--listen"` |
+| L4 | ws handshake: 验 `HTTP/1.1 101 Switching Protocols` |
+| L5 | bearer auth: 错 token → 401, 对 token → 101 |
+| L6 | JSON-RPC handshake: initialize / thread/start / threadId 验 |
+| L7 | push verify: `commhub_send_task --alias test-codex-bot --task "hello"` → turn/start → ServerNotification 流 → reply |
+| L8 | live progress: 验 `item/agentMessage/delta` forward 到 commhub `progress_events` 表 |
+| L9 | multi-client peer: 起 2nd ws client → 验 lifecycle broadcast |
+| L10 | reverse approval: turn 内 codex `execCommandApproval` → anet smart policy reply |
+| L11 | reconnect: kill ws → 验自动 reconnect + thread/resume |
 
 ### 8.2 Smoke test 流程
 
-1. Vincent mac mini 跑 `anet node create vincent-codex --runtime codex-code-cli-mcp`
-2. 启动 `anet node start vincent-codex`
-3. 从指挥室 `commhub_send_task --alias vincent-codex --task "what is 2+2"`
-4. 验:
-   - codex live token stream 在 dashboard `<TaskChatPanel>` 渲染（`<ProgressTimeline>` 显示 token_count + delta 流）
-   - `4` 回到 commhub
-5. 续单 `commhub_send_task --alias vincent-codex --task "what about 3+3"`
-6. 验 threadId 复用 + 第二轮回 `6` + context 累积（codex 知道前一轮聊过加法）
+per Vincent 4108-4110 acceptance:
 
-## 9. Risks & Mitigation
+1. Vincent mac mini 跑 `anet node create vincent-codex --runtime codex-cli-remote-control`
+2. 启动 `anet node start vincent-codex` (auto-spawn daemon)
+3. 用户另一终端 `codex --remote ws://127.0.0.1:<port> --remote-auth-token-env COMMHUB_TOKEN` attach TUI
+4. 从指挥室 `commhub_send_task --alias vincent-codex --task "what is 2+2"`
+5. 验:
+   - codex live token stream 在 dashboard `<ProgressTimeline>` 显示
+   - 用户 TUI 看到 lifecycle events broadcast
+   - `4` 回到 commhub
+6. 用户在 TUI 内 prompt "say hi" → 创建独立 thread (不干扰 anet)
+7. 验 multi-thread isolation OK
+
+## 9. Risks & Mitigation (rewrite for ws daemon)
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| `codex mcp-server` 在未来 codex release 中协议变更 | 🟡 medium | Pin codex@>=0.130 + 加 schema verify on start（tools/list 必须含 codex + codex-reply）+ fail-fast if mismatch |
-| `codex/event` 非标 MCP notification @modelcontextprotocol/sdk 不识别 | 🟡 medium | catch-all `setNotificationHandler` register（@modelcontextprotocol/sdk 1.12+ 支持 fallback handler） |
-| SYNC return 不能 turn/steer mid-execution | 🟢 low → high (per use case) | Phase 1 接受限制（适合 batch task / 短轮次）；Phase 2 升级 ws daemon mode 满足 mid-turn steer 需求 |
-| token delta flood commhub `report_progress` | 🟡 medium | §5.3 batch 策略（200ms / 1KB flush）+ Phase 2 backpressure |
-| codex child 进程 idle 资源占用 | 🟢 low | per-session lifetime（agent-node 启动时起，关停时 kill），不长期 idle |
-| 用户 `~/.codex/config.toml` 已有冲突 MCP 配置 | 🟢 low | anet 不修改用户文件；anet 注入仅 tools/call 参数，用户配置和 anet 配置并存 |
-| `approval-policy=on-failure` default 可能仍触发太多 ask | 🟡 medium | Smoke test 跟踪；如太多，default 降到 `untrusted`（更保守） |
-| codex 0.130 cross-platform (mac/linux/windows) `mcp-server` 行为差 | 🟡 medium | Vincent mac mini final verify + Docker linux E2E + Windows 等 Vincent feedback |
-| `codex mcp-server` 默认加载 `~/.codex/config.toml` 把用户 mcp_servers 全注入 — context bloat | 🟡 medium | profile.flags.codex 加 `useUserConfig: false` 选项透传 `--ignore-user-config`（codex 支持） |
+| 🔴 OpenAI 标 `remote_control` "Under-development incomplete" | high | Phase 1 setup wizard 显式 experimental warning + cases doc 标 / 监控 codex release notes 等 `under-development` 标签移除 (Phase 2 升级) |
+| 🔴 2026-05-13 三个 PRs 仍在 stabilize ws transport (#22404 #22414 #22386) | high | Pin codex@>=0.130.0 minimum + weekly release notes monitor + auto-skip update window |
+| 🟡 multi-client peer co-presence partial work (per-thread streaming 须 owner-subscriber 关系, `thread/resume` race condition) | medium | doc 显式 caveat: 用户 TUI attach 仅看 lifecycle, per-token stream 须自己创独立 thread / Phase 2 等 [issue #21551](https://github.com/openai/codex/issues/21551) RFC stable 后真 peer streaming |
+| 🟡 bearer auth complexity (token gen + sha256 + env injection + 不写 process args) | medium | crypto.randomBytes(32) + sha256 hex inline + ENV 名 in profile flags + process args 仅 sha256 (token 本身不暴露) |
+| 🟡 ws reconnect + supervision (daemon crash + ws disconnect + thread/resume timing) | medium | npm `ws` 库 reconnect 指数退避 (1s→30s, 10 retries) + `thread/resume {threadId}` 自动续 (但 thread 须 disk persist + race window ~100-500ms) |
+| 🟡 Port allocation race (多 anet node 同 host) | low | port range allocation (18000-18999) + retry on EADDRINUSE + 持久化分配在 .anet/nodes/<alias>/config.json |
+| 🟡 Token 泄漏 (env / log / process listing) | medium | token in env COMMHUB_TOKEN, sha256 in CLI args (不可逆), 不写 daemon log |
+| 🟡 daemon crash → anet 无法连接 | medium | Supervisor restart (类比 codex-sdk runtime pattern) + thread/resume on reconnect |
+| 🟡 1000 行实施成本 + 新 ws dep | low | `ws` ^8 + `@types/ws` 已成熟 npm, manageable |
+| 🟡 auto-update loop (codex 自身 update 时 daemon restart) | medium | Reconnect 策略 + thread/resume 接回原 thread |
+| 🟡 multi-anet-node 同 host 事件广播 cross-thread 泄漏 | medium | per-anet-session 独立 daemon (port + token 隔离) + client-side filter 仅订阅自己 thread events |
 
-## 10. Future Work — Phase 2 升级 + Non-goal
+## 10. Future Work — Phase 2 + Non-goal
 
-### 10.0 Non-goal — `codex-code-cli` TUI mode (Path A)
-
-per Vincent telegram 4074-4075 决策, **Phase 1 不 ship Path A TUI runtime**, 也**不进入 Phase 2 scope**:
-
-- 用户直接终端跑 `codex` (无 anet wrapper) + 手配 `~/.codex/config.toml` `[mcp_servers.commhub]` (streamable-http transport + bearer_token_env_var) 已能让 codex 接入 commhub mesh
-- Vincent 自己 `~/.codex/config.toml` 已含半成品 `[mcp_servers.commhub-proxy]` 配置，证明该 use case 用户已实证 (6429bc0 §3)
-- anet 包装 TUI mode 不增加 user value (vs 用户手配)，反而引入 maintenance cost (env injection / sandbox flag 默认 / cli.ts spawn 复杂)
-- 不阻碍 anet 路径: 用户如需 anet mesh push 行为, 用 `codex-code-cli-mcp` (Phase 1, push-driven daemon); 仅需 TUI 调试用 codex 自己即可
-
-doc-site 文档可加 cases page 教用户手配 `~/.codex/config.toml` 接 commhub (但不作 anet runtime 实施)。
-
-### 10.1 Phase 2 触发条件（量化，避免永不来 — per 通信工程马 review focus）
-
-升级到 RFC-005 path B（`codex remote-control` ws daemon）的明确触发条件:
+### 10.1 Phase 2 触发条件 (转 mcp-server stdio 加 backup runtime, OR 弃用 ws 都重 mcp-server stdio)
 
 | 触发条件 | 衡量指标 |
 |---|---|
-| **TR1**: 用户/产品需要 mid-turn 干预（停止 / 调整方向 / 注入额外信息） | Vincent / 用户在 5 个 task 中明确 ask "我能不能 cancel codex 中途换问题" |
-| **TR2**: 单 codex 节点需 multi-client peer attach（用户在 codex 跑 task 时 dashboard 显示 + iPhone app 同时 attach） | 用户 ask "我能 dashboard 跟 codex iOS app 同时看一个 codex agent 状态吗" |
-| **TR3**: codex 0.131+ stabilize 后 ws transport 进入 stable 标识 | OpenAI changelog 标 `app-server websocket transport stable` + remove "experimental" caveat |
-| **TR4**: codex 引入 inject_items 等 push 入口 + multi-subscriber RFC（[issue #21551](https://github.com/openai/codex/issues/21551)） merged | issue #21551 closed with merged PR |
+| **TR1**: codex 0.131/0.132 ship 后 `remote_control` 移出 "under-development" | OpenAI changelog 显式 "stable" 标识 |
+| **TR2**: codex multi-client RFC [#21551](https://github.com/openai/codex/issues/21551) 真正 merged (per-thread streaming subscriber model) | issue closed with PR merged |
+| **TR3**: 用户报 Phase 1 ws daemon UX 不好 (experimental warning 太频 / 协议 churn 触发频繁 break) | Vincent / 用户 feedback ≥3 起 |
 
-满足 2 个以上触发条件 → 启动 Phase 2 RFC-007（基于 RFC-005 path B 重新 organize）。
+### 10.2 Phase 2 升级路径 (Path C mcp-server stdio 作 backup runtime)
 
-### 10.2 Phase 2 跟 Phase 1 复用度
+满足 TR1+TR3 时启动 Phase 2:
+- 加 `codex-code-cli-mcp` runtime (Path C, mcp-server stdio) — 跟 `codex-cli-remote-control` 双 runtime 并存
+- 用户根据 use case 选:
+  - `codex-cli-remote-control` — 想 user TUI attach / mid-turn steer / 复杂控制
+  - `codex-code-cli-mcp` — 想简单 SYNC return / 不需要 user attach / 最低资源占用
+- Path C 实施 spec 见 [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) (通信龙 commit 98b6728, 已 ship doc 作 backup blueprint)
 
-| 模块 | 复用度 | 备注 |
-|---|---|---|
-| cli.ts spawn dispatch | 100% | runtime: `codex-code-cli-mcp` 保留 / Phase 2 加新 runtime `codex-code-cli-remote-control` |
-| agent-node runtime adapter 框架 | 80% | supervision / restart / lifecycle 全保留，替换 MCP stdio → WS JSON-RPC |
-| codex/event 流 → commhub mapping | 80% | event 类型相似（task_started / item_completed / agent_message_content_delta），新增 ServerRequest 9 个 reverse approval flow |
-| Dashboard `<ProgressTimeline>` | 100% | RFC-003 NodeEvent schema 统一 |
+### 10.3 Optional: anet codex-setup user-mode 命令 (per 通信龙 mcp-server plan §8 🥉)
 
-Phase 2 实施成本估 ~300-400 行（Phase 1 基础上 delta）。
+非 runtime 路径, 帮用户配 `~/.codex/config.toml` 让用户 TUI 直接接 commhub MCP (user-mode 跟 daemon-mode 互补):
 
-## 11. Open Questions
+```bash
+anet codex-setup --alias my-codex-user-tui
+# 输出: 写 ~/.codex/config.toml [mcp_servers.commhub-anet] section + env var instructions
+# 用户接下来直接跑 `codex` (TUI), codex 自动 connect commhub mesh
+```
 
-1. **Approval policy default** — `on-failure` vs `untrusted` 哪个更安全 default? （`untrusted` 更保守但每命令 ask 干扰 anet 自动化；`on-failure` 平衡但 dangerous 命令首次成功就过去） — **建议 `on-failure`，需 Vincent 拍板**
-2. **codex `--ignore-user-config` default 是否设？** — 设：avoid 用户 mcp_servers 污染 anet codex；不设：尊重用户已有配置 — **建议 profile.flags.codex.useUserConfig=true default（不 ignore），profile 内 opt-out**
-3. **thread per session vs per task** — Phase 1 hardcode `session` 简化；Phase 2 加选项？— **建议 Phase 1 仅 session，Phase 2 加选项**
-4. **escalate target alias 当 dangerous approval** — 走 commhub_send_task 到 `指挥室` 还是 telegram channel？ — **建议: profile.flags.codex.escalateAlias 配置，default `指挥室`**
-5. **codex/event mapper 完整性** — 13 个 event type 都 map 还是仅 5 个 high-value（lifecycle + delta + complete）？— **建议 Phase 1 仅 high-value 5 个，Phase 2 全 map**
-6. **Multi-language prompt encoding** — codex mcp-server tools/call prompt 是否支持中文 / emoji / multiline？— **probe 已验中文 emoji OK（prompt: "say hello in one word"）；multiline 待 cover smoke test**
-7. **codex auth (OpenAI API key) 如何 inherit** — stdio child inherit env 默认拿 `OPENAI_API_KEY` from anet env？还是用户走 `codex login` 持久化？— **建议: 推荐用户先 `codex login`（OAuth 持久化），anet 不管 auth**
-8. **agent-node 多 codex-code-cli-mcp runtime 同 host RAM** — 实测 codex mcp-server idle ~50MB / running ~150MB（待量化）— **建议 doc 标注每节点 100-200MB RAM 预算**
-9. **`codex/event` notification handler @modelcontextprotocol/sdk API verify** — `setNotificationHandler` 对 catch-all（method 不在标准 MCP method list）支持的具体 API 形式 — **实施时确认 SDK 文档，必要时 patch SDK or workaround**
-10. **Vincent codex mac mini version 验证** — 通信龙 telegram 4054 paste 显示含 `codex app` 但需 final confirm 含 `codex mcp-server` — **不阻塞，等 Vincent `codex --version` 反馈**
-11. **Runtime naming convention** — `codex-code-cli-mcp` (RFC-006 选, 4-token, 跟 `claude-code-cli` 对称 + `-mcp` 后缀区分 transport) vs Vincent telegram 4067 推荐 `codex-cli-mcp` (3-token, 短) — **建议 RFC-006 现 naming `codex-code-cli-mcp` 保 anet 命名一致性 (现有 `claude-code-cli` 是 4-token)**, 但 Vincent 自己拍板这条 final
+Phase 1 是否实施 待 Vincent 拍板 (raise as Open Q11)。
+
+### 10.4 Non-goal: `codex-code-cli` TUI mode (Path A)
+
+Phase 1 不 ship, Phase 2 也不 ship. 用户直接跑 `codex` (默认 TUI) + 手配 `~/.codex/config.toml` mcp_servers 即可 (user-mode), anet 不重复包装。
+
+## 11. Open Questions (12 个, 等 Vincent 拍板)
+
+1. **Runtime naming** — `codex-cli-remote-control` (RFC-006 选, 4-token 含 `-remote-control` suffix) vs 短形 `codex-remote` / `codex-cli-remote`?
+2. **bearer token format default** — `capability-token` (推荐, 实测最简) vs `signed-bearer-token` JWT (anet ntok_ 升 JWT 后)?
+3. **ws listen default port** — auto-allocate (18000-18999 range) vs fixed 4500 (per Vincent 4099 tutorial) vs dynamic?
+4. **Multi-anet-node 同 host port 分配** — 独立 daemon per node (推荐, 隔离好) vs 共享 daemon (复用, 但 cross-thread 事件泄漏)?
+5. **codex daemon crash supervisor** — auto-restart with exponential backoff (推荐) vs 标 node error / 通知用户 manual restart?
+6. **9 reverse approval flow policy default** — auto-approve safe whitelist (ls/cat/grep/git status/git log) (推荐) + escalate dangerous to 指挥室 vs 全 escalate (用户介入太多)?
+7. **ChatGPT account model 限制** — default model 选 ChatGPT 支持的 (gpt-5? o4-mini?) 须实测 / 或 API key only mode default?
+8. **Multi-client peer co-presence experimental warning** — Phase 1 setup wizard 弹 prompt 警告 (推荐) vs 仅 doc 标 / runtime metadata 标 experimental flag?
+9. **`thread/resume` race condition (multi-client subscriber)** — anet thread 默认 `ephemeral: false` 持久化 (推荐, 允许用户 resume) vs `ephemeral: true` 私有 (避免用户误改 anet 状态)?
+10. **`under-development` warning suppression** — 默认 `suppress_under_development_features_warning = true` in profile.flags (推荐, 减 log noise) vs 默认 false (保 visibility)?
+11. **Optional anet codex-setup 命令** — Phase 1 包含 (帮用户 user-mode 也接 mesh) vs 推迟 Phase 2 (避免 scope creep)?
+12. **跟 Phase 2 mcp-server stdio 共存 strategy** — Phase 2 双 runtime 并存, runtime 选择由用户决定 (推荐) vs 自动选 based on codex --version (复杂)?
 
 ## 12. Timeline
 
-**Day 1（today 2026-05-13）**:
-- ✅ 通信龙 deep design doc 24b744e（B path 视角，作 reference）
-- ✅ 通信SDK马 quick feasibility report（A/B/C 三路径对比）
-- ✅ `codex mcp-server` real probe 验证 SYNC return + `codex/event` 流
-- ✅ RFC-006（本文）push main
-- ⏳ RFC-005 mark Superseded amend commit
+**Day 1 (today 2026-05-13)**:
+- ✅ 通信龙 deep design doc 24b744e
+- ✅ Path A/B/C 三路径研究 (RFC-006 §1.3)
+- ✅ Path B 深度调研 doc [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) (通信SDK马 093d76a)
+- ✅ Path C 深度调研 doc [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) (通信龙 98b6728)
+- ✅ RFC-006 主体 ship (Path C primary) + amend narrow single runtime
+- ✅ Vincent 4108+4110 pivot Phase 1 → Path B (ws daemon)
+- ⏳ RFC-006 amend (本 commit, Path B primary, Path C demoted Phase 2 backup)
 
-**Day 2**:
-- 通信工程马 unstash `~/anet-work/rfc-005-codex-code-cli/` worktree 6 edit（5/6 复用 + #6 launchAgent 改 spawn agent-node delegate）
-- 通信工程马 起 agent-node `codex-code-cli-mcp.ts` runtime adapter（~150-200 行）
-- 通信测试马 PR #43 演进 L3 regex `mcp[_-]server` + 新 L5 tools/list verify + L7 live progress
+**Day 2-3** (Vincent GO 后):
+- 通信工程马 unstash worktree (`~/anet-work/rfc-005-codex-code-cli/`) + 重写 #6 launchAgent 改 spawn `codex --enable remote_control app-server --listen ws://...` + 起 agent-node `codex-cli-remote-control.ts` runtime adapter (~470 行)
+- 通信测试马 PR #43 演进: L3 regex `codex.*app-server.*--listen` + 新 L4-L11 (ws handshake / bearer / push / live progress / multi-client / approval / reconnect)
 - 通信SDK马 review cli.ts + agent-node code
 
-**Day 3**:
-- 联合 smoke test 跑通 commhub_send_task → codex → reply
+**Day 4**:
+- 联合 smoke test (per §8.2): 跑 commhub_send_task + 用户 TUI attach + live token stream
 - Vincent mac mini 亲测
-- Ship preview `2.1.8-preview.N`
+- Ship preview `2.1.8-preview.N` (含 codex-cli-remote-control runtime, experimental flag)
 - Vincent 亲测通过 → 升 latest `2.1.8` stable 大 feature
 
 ## 13. 结论
 
-✅ **anet 支持 codex CLI Phase 1 完全可行** — `codex mcp-server` stdio 0.130 已 ship 完整 daemon RPC + live event stream
-✅ **Phase 1 ship 范围确定** — `codex-code-cli-mcp` 单 runtime (per Vincent 4074-4075 narrow), Path A TUI 作 non-goal (§10.0), Path B ws daemon defer Phase 2 (§10.1 触发条件)
-✅ **架构方向定了** — Option 2 agent-node bridge + MCP stdio + `@modelcontextprotocol/sdk` 复用
-✅ **工作量 manageable** — ~150-200 行 agent-node + ~30-50 行 cli.ts + ~300 行 test = 总 ~500 行，2-3 天 ship 2.1.8 大 feature
-✅ **Live UX 优于 codex TUI 自己渲染** — token-level streaming forward 到 dashboard `<ProgressTimeline>` 统一渲染 (跟 claude agent 对称)
-✅ **协议稳定** — mcp-server 已 stable，不依赖 stabilize 中的 ws transport PRs
-⚠ **11 个 Open Questions 待 Vincent / 通信龙 拍板** — §11 (含 Q11 naming convention)
-⚠ **Phase 2 升级路径明确** — §10.1 触发条件量化避免永不来
+✅ **Vincent 4108+4110 pivot accepted** — Phase 1 走 ws daemon (Path B), 接受 under-development risk + 2x 代码量, 换取 user TUI attach + multi-client peer + turn/steer mid-execution 价值
+✅ **架构方向定了** — Option 2 agent-node bridge + ws JSON-RPC 2.0 + npm `ws` ^8 + bearer auth (capability-token)
+✅ **工作量** — agent-node +470 行 (ws + bearer + reconnect + 9 reverse approval + supervision) + cli.ts +50 行 + Docker E2E +400 行 + npm dep `ws`+`@types/ws` = ~1000 行总, **3-4 天 ship**
+✅ **协议 evidence** — Path B 深度调研 doc 093d76a 完整 hands-on 验证 (ws handshake / bearer auth / multi-client / 25-event 完整 sequence / token-level streaming)
+⚠ **Risk accepted** — Vincent 决定接受 OpenAI "Under-development incomplete" + 本周协议 stabilize 中 + 用户 TUI attach race condition
+⚠ **12 Open Questions** 待 Vincent 拍板 (§11)
+🟡 **Phase 2 backup option** — mcp-server stdio (`codex-code-cli-mcp` Path C) 等 TR1+TR3 触发条件后加成 alternative runtime (§10.2)
 
 后续动作:
 - ✅ RFC-005 mark Superseded ([commit 63b28e3](https://github.com/sleep2agi/agent-network/commit/63b28e3))
-- 通信工程马 unstash worktree + 实施 agent-node `codex-code-cli-mcp.ts` runtime adapter
-- 通信测试马 PR #43 演进 (L3 regex `mcp[_-]server` + L5 tools/list verify + L7 live progress)
-- Vincent 回答 §11 Open Questions (重点 Q1 approval-policy / Q4 escalate target / Q11 runtime naming)
-- 联合 smoke test ship 2.1.8 preview → Vincent 亲测 → ship 2.1.8 latest stable 大 feature
+- ⏳ 通信工程马 unstash worktree + 重写 launchAgent → ws spawn
+- ⏳ 通信测试马 PR #43 演进 L0-L11
+- ⏳ Vincent 回答 §11 12 个 Open Questions
+- ⏳ 联合 smoke test → ship 2.1.8 preview → Vincent mac mini 亲测 → ship 2.1.8 latest stable 大 feature
 
 — END —
