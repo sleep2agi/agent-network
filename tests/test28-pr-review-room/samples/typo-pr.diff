@@ -1,0 +1,26 @@
+diff --git a/src/utils/format.ts b/src/utils/format.ts
+index 1111111..2222222 100644
+--- a/src/utils/format.ts
++++ b/src/utils/format.ts
+@@ -1,9 +1,18 @@
++// truncates a string for display
+ export function truncate(s: string, n: number): string {
+   if (s.length <= n) return s;
+-  return s.slice(0, n) + "...";
++  return s.slice(0, n) + "..."; // append ellipsis
+ }
+
++// formats a number with comma separators (e.g. 1234567 -> "1,234,567")
+ export function fmtNumber(n: number): string {
+-  return n.toString();
++  // converts to a localized string for thousands grouping
++  const x = n.toString();
++  const parts: string[] = [];
++  for (let i = x.length; i > 0; i -= 3) {
++    parts.unshift(x.slice(Math.max(0, i - 3), i));
++  }
++  return parts.join(",");
+ }
+
++// TODO: dead helper, leftover from previous attempt
++function _unused(a: any) { return a; }

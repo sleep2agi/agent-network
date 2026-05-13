@@ -1,0 +1,13 @@
+diff --git a/README.md b/README.md
+index 1234567..89abcde 100644
+--- a/README.md
++++ b/README.md
+@@ -42,7 +42,7 @@ Run the demo:
+
+ ```bash
+ anet demo debate --topic "..."
+-anet demo socialmedi --platform xiaohongshu
++anet demo socialmedia --platform xiaohongshu
+ ```
+
+ See [docs/cases](./docs/cases/) for end-to-end walkthroughs.
