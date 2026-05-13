@@ -665,6 +665,18 @@ curl -X POST http://localhost:9200/api/networks/join \
   -d '{"invite_code": "inv_abc123def456"}'
 ```
 
+**响应**：
+
+```json
+{
+  "ok": true,
+  "network_id": "net_abc123",
+  "role": "member"
+}
+```
+
+`anet network join` CLI 拿到该响应后会自动切换到加入的 network（即 `~/.anet/config.json` 的 `network_id` 字段更新为 `res.network_id`），并打印 `Joined network as <role>`。
+
 ---
 
 ## 错误响应格式

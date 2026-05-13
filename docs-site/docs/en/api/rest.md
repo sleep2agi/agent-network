@@ -665,6 +665,18 @@ curl -X POST http://localhost:9200/api/networks/join \
   -d '{"invite_code": "inv_abc123def456"}'
 ```
 
+**Response**:
+
+```json
+{
+  "ok": true,
+  "network_id": "net_abc123",
+  "role": "member"
+}
+```
+
+After receiving this response, the `anet network join` CLI auto-switches to the joined network (updating the `network_id` field in `~/.anet/config.json` to `res.network_id`) and prints `Joined network as <role>`.
+
 ---
 
 ## Error Response Format
