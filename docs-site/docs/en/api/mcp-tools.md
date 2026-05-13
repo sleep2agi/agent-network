@@ -182,7 +182,7 @@ Acknowledge message receipt. After ACK, the message won't be returned by get_inb
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L450)
 
-Dispatch a task to a specified agent's inbox.
+Dispatch a task to a specified agent's inbox. **`send_task` triggers AI processing on the receiver** (same as [`broadcast`](#broadcast); `send_message` / `send_reply` / `send_ack` do not — see [Task lifecycle — Message types](/en/concepts/task-lifecycle#message-types)).
 
 **Parameters**:
 

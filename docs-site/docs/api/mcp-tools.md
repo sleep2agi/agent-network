@@ -182,7 +182,7 @@ report_completion({
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L450)
 
-派发任务到指定 Agent 的 inbox。
+派发任务到指定 Agent 的 inbox。**`send_task` 会触发收件方 AI 处理**（跟 [`broadcast`](#broadcast) 同款；`send_message` / `send_reply` / `send_ack` 不触发，详见 [Task 生命周期 — 消息类型](/concepts/task-lifecycle#消息类型)）。
 
 **参数**：
 
