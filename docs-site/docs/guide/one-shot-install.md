@@ -38,18 +38,29 @@ MINIMAX_KEY=sk-cp-你的key ./setup-anet.sh
 
 ## 自定义
 
+| 环境变量 | 默认 | 作用 |
+|---|---|---|
+| `MINIMAX_KEY` | （必填） | MiniMax API key（`ANTHROPIC_AUTH_TOKEN`） |
+| `MINIMAX_MODEL` | `MiniMax-M2.7` | 走哪个 MiniMax 模型 ID |
+| `ANET_HUB_IP` | `0.0.0.0` | Hub + Dashboard 绑定地址（0.0.0.0 = LAN 可访问，改 `127.0.0.1` 限本机） |
+| `ANET_USER` | `anet` | 非 root 用户名（脚本自动创建） |
+| `WIPE` | `0` | 设 `1` 启动前清光所有状态（tmux session / `~/.anet` / `~/.commhub` / npx cache），调试时常用 |
+
 ```bash
 # 自定义节点列表（默认 5 个：排版发布者 / 主编 / 信息采集 / 编辑 / 审核）
 MINIMAX_KEY=sk-cp-xxx ./setup-anet.sh 节点A 节点B 节点C
 
-# 选择 MiniMax 模型（默认 MiniMax-M2.7）
+# 选择 MiniMax 模型
 MINIMAX_KEY=sk-cp-xxx MINIMAX_MODEL=MiniMax-M2 ./setup-anet.sh
 
-# 改 Hub 绑定地址（默认 0.0.0.0 = LAN 可访问）
+# 改 Hub 绑定地址
 MINIMAX_KEY=sk-cp-xxx ANET_HUB_IP=127.0.0.1 ./setup-anet.sh
 
 # 改非 root 用户名
 MINIMAX_KEY=sk-cp-xxx ANET_USER=worker ./setup-anet.sh
+
+# 全清重跑（卸 tmux + 删 ~/.anet / ~/.commhub + 清 npx cache，再装一遍）
+MINIMAX_KEY=sk-cp-xxx WIPE=1 ./setup-anet.sh
 ```
 
 ## MiniMax 可用模型
@@ -96,13 +107,21 @@ tmux kill-session -t anet-node-编辑
 tmux ls | awk -F: '/^anet-/{print $1}' | xargs -I{} tmux kill-session -t {}
 ```
 
+默认端口：
+
+| 服务 | 端口 | tmux session |
+|---|---|---|
+| CommHub Server | `9200` | `anet-hub` |
+| Dashboard | `3000` | `anet-dashboard` |
+| Agent Node | `stdio` 进程内（无网络端口） | `anet-node-<alias>` |
+
 打开浏览器访问：
 
 ```
 http://你的服务器IP:3000
 ```
 
-用 `admin / anethub` 登录。所有节点在 Nodes 页面里可见，点任意节点可以发任务。
+用 `admin / anethub` 登录。所有节点在 Nodes 页面里可见，点任意节点可以发任务。**登录后立刻 `anet passwd` 改强密码**（参考 [troubleshooting → 密码强度](/troubleshooting)）。
 
 ## 已验证
 

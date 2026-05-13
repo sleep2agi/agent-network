@@ -38,18 +38,29 @@ MINIMAX_KEY=sk-cp-your-key ./setup-anet.sh
 
 ## Customization
 
+| Env var | Default | Purpose |
+|---|---|---|
+| `MINIMAX_KEY` | (required) | MiniMax API key (`ANTHROPIC_AUTH_TOKEN`) |
+| `MINIMAX_MODEL` | `MiniMax-M2.7` | Which MiniMax model ID to use |
+| `ANET_HUB_IP` | `0.0.0.0` | Hub + Dashboard bind address (0.0.0.0 = LAN accessible; change to `127.0.0.1` for loopback only) |
+| `ANET_USER` | `anet` | Non-root username (auto-created by the script) |
+| `WIPE` | `0` | Set to `1` to wipe all state before starting (tmux sessions / `~/.anet` / `~/.commhub` / npx cache). Handy when debugging |
+
 ```bash
 # Custom node list (default: 5 nodes — publisher / editor-in-chief / scout / editor / reviewer)
 MINIMAX_KEY=sk-cp-xxx ./setup-anet.sh nodeA nodeB nodeC
 
-# Pick a MiniMax model (default MiniMax-M2.7)
+# Pick a MiniMax model
 MINIMAX_KEY=sk-cp-xxx MINIMAX_MODEL=MiniMax-M2 ./setup-anet.sh
 
-# Change hub bind address (default 0.0.0.0 = LAN accessible)
+# Change hub bind address
 MINIMAX_KEY=sk-cp-xxx ANET_HUB_IP=127.0.0.1 ./setup-anet.sh
 
 # Change non-root username
 MINIMAX_KEY=sk-cp-xxx ANET_USER=worker ./setup-anet.sh
+
+# Full wipe and reinstall (kills tmux + clears ~/.anet / ~/.commhub + npx cache, then reinstalls)
+MINIMAX_KEY=sk-cp-xxx WIPE=1 ./setup-anet.sh
 ```
 
 ## Available MiniMax models
@@ -96,13 +107,21 @@ tmux kill-session -t anet-node-editor
 tmux ls | awk -F: '/^anet-/{print $1}' | xargs -I{} tmux kill-session -t {}
 ```
 
+Default ports:
+
+| Service | Port | tmux session |
+|---|---|---|
+| CommHub Server | `9200` | `anet-hub` |
+| Dashboard | `3000` | `anet-dashboard` |
+| Agent Node | in-process `stdio` (no network port) | `anet-node-<alias>` |
+
 Open a browser at:
 
 ```
 http://your-server-ip:3000
 ```
 
-Log in with `admin / anethub`. All nodes show up on the Nodes page; click any node to dispatch a task.
+Log in with `admin / anethub`. All nodes show up on the Nodes page; click any node to dispatch a task. **Run `anet passwd` to set a strong password right away** (see [troubleshooting → password strength](/en/troubleshooting)).
 
 ## Verified
 
