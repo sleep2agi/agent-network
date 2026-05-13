@@ -149,9 +149,9 @@ A: Not today. TTL + revoke-all is on the v0.9 roadmap. `utok_` rotates on passwo
 | Deploy hub | Admin `utok_` auto-bootstrapped to `admin-utok.json` (v0.8) | — |
 | Register account | One created | One created bound to the default network |
 | Log in | A new one is issued (old one stays valid until revoked) | Unchanged |
-| Change password | Current device gets a new `utok_`; other devices' `utok_` are invalidated | Unchanged |
+| Change password | Current device gets a new `utok_`; other devices' `utok_` are invalidated ([full 5 side effects](/en/api/rest#post-api-auth-password)) | Unchanged |
 | Create node | Unchanged | One created, bound to the node × network |
-| Delete node | Unchanged | Hub revokes it |
+| Delete node (`anet node delete`) | Unchanged | **Not auto-revoked** — the `api_tokens` row stays on the hub (cli.ts:2461 `notifyServerOffline` only sends `report_status` offline; it does not delete the token). Use `anet token revoke <id>` separately to fully clean up. |
 | Manual revoke | `anet token revoke <id>` | Same |
 
 ### Authorization decision (how the hub decides)
