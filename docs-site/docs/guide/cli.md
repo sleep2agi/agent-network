@@ -50,6 +50,7 @@ npm install -g @sleep2agi/agent-network
 | `anet network delete <name>` | 删除网络 |
 | `anet network invite` | 为当前网络创建邀请码 |
 | `anet network join <invite_code>` | 用邀请码加入网络 |
+| `anet network members` | 列出当前网络成员（role / joined_at） |
 
 ### Token 管理
 

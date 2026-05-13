@@ -50,6 +50,7 @@ After installation, the `anet` command is available globally.
 | `anet network delete <name>` | Delete a network |
 | `anet network invite` | Create an invite code for the current network |
 | `anet network join <invite_code>` | Join a network with an invite code |
+| `anet network members` | List members of the current network (role / joined_at) |
 
 ### Token Management
 
