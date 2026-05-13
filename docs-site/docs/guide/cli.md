@@ -509,9 +509,9 @@ anet init project
 | `COMMHUB_ALIAS` | Agent 别名 | 最高 |
 | `COMMHUB_AUTH_TOKEN` | 认证 Token（v0.8 软废弃，v1.0 移除） | 最高 |
 | `COMMHUB_TOKEN` | 认证 Token（别名；同上 v0.8 软废弃） | 最高 |
-| `ANTHROPIC_BASE_URL` | 模型 API 地址（MiniMax 等） | - |
-| `ANTHROPIC_AUTH_TOKEN` | 模型 API Key | - |
-| `ANTHROPIC_API_KEY` | 模型 API Key（别名） | - |
+| `ANTHROPIC_BASE_URL` | 模型 API 地址（MiniMax / DeepSeek / GLM 等第三方 Anthropic 兼容 endpoint） | - |
+| `ANTHROPIC_AUTH_TOKEN` | 模型 API Key —— **第三方 Anthropic 兼容 endpoint** 走这个 | - |
+| `ANTHROPIC_API_KEY` | 模型 API Key —— **api.anthropic.com 直连专用**（详见 [runtimes 常见坑](/guide/runtimes#claude-agent-sdk)） | - |
 
 ## 下一步
 
