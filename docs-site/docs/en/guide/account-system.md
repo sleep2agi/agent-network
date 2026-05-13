@@ -78,10 +78,42 @@ anet whoami
 anet passwd                       # Interactive: old password → new password ≥ 8 chars, not in weak-password dict
 ```
 
-::: tip Side effects of changing the password (v0.8)
-The current device gets a fresh `utok_`; other devices' `utok_` are **invalidated** (they need to `anet login` again). `ntok_` (used by agents) is not affected. See [Tokens — lifecycle matrix](/en/concepts/tokens#token-lifecycle-matrix).
+::: details What happens after I change my password? (v0.8)
 
-**Forgot the password**: run `anet hub admin reset-user <username>` on the hub machine (owner local access; no old password needed). See [FAQ Q17b](/en/faq).
+Common question ([#17](https://github.com/sleep2agi/agent-network/issues/17)). Full side-effect list:
+
+**Current device (the one running `anet passwd`)**
+- CLI receives a freshly-issued `utok_`, auto-writes it to `~/.anet/config.json`
+- Subsequent `anet` commands keep working — **no re-login needed**
+
+**Other devices / other CLI sessions**
+- Server **revokes every old `utok_` for that user** (including the admin-utok.json bootstrap one)
+- Next API call returns `401 unauthorized` → must `anet login` to get a fresh `utok_`
+- The more devices you have, the louder the rotate. Check with `anet token ls` before rotating.
+
+**Dashboard (browser)**
+- Logged-in tab: next REST request returns 401 → Dashboard redirects to login → enter new password → fresh cookie
+- Since v0.8 the Dashboard is a thin cookie-proxy; the expired cookie is cleared automatically (see [Security design](/en/concepts/security)).
+
+**Agent Nodes (`ntok_`)**
+- **Unaffected.** `ntok_` is per-node-per-network and independent of user password.
+- Running agents keep running; `anet doctor --fix` still patches ntok_ issues separately.
+
+**Hub host's `~/.anet/server/admin-utok.json`** (edge case)
+- The admin `utok_` written there at bootstrap time is also revoked
+- The file **content is not auto-rotated** to the new utok_
+- Subsequent local commands (e.g. `anet hub admin reset-user <other>`) that read admin-utok.json will hit 401
+- Workaround for now: re-run `anet login --username admin --password <new-password>` to refresh `~/.anet/config.json`; admin-utok.json is a one-time bootstrap credential — `config.json` is the authoritative source going forward. A proper auto-sync fix is queued for v0.9.
+
+**Audit log**
+- `audit_log` records a `password_changed` row (or `password_reset_by_admin` via the reset-user path)
+- Read via REST `GET /api/audit-log` (owner permission, see [API — audit-log](/en/api/rest#get-api-audit-log))
+
+**Forgot the old password?**
+- Can't use `anet passwd` (requires old password)
+- On the Hub machine, run `anet hub admin reset-user <username>` to force-reset (local owner permission, bypasses the HTTP check; see [FAQ Q17b](/en/faq))
+
+Deeper: [Token system](/en/concepts/tokens) / [Security design — Password security](/en/concepts/security)
 :::
 
 ### Creating Accounts for Others

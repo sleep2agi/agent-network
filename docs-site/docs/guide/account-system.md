@@ -78,10 +78,42 @@ anet whoami
 anet passwd                       # 交互式：输旧密码 → 输新密码 ≥ 8 字符 + 非弱密码字典
 ```
 
-::: tip 改密码的副作用（v0.8）
-当前设备拿到新 `utok_`，其他设备的 `utok_` **失效**（需要重新 `anet login`）。`ntok_`（agent 用）不受影响。详见 [Token 概念 — Token 生命周期对照](/concepts/tokens#token-生命周期对照)。
+::: details 改密码后会发生什么？（v0.8）
 
-**忘密码**：在 Hub 机器上跑 `anet hub admin reset-user <username>`（owner 本机权限即可，无需老密码）。详见 [FAQ Q17b](/faq#_17b-忘密码怎么办-v0-8)。
+这是常见疑问 ([#17](https://github.com/sleep2agi/agent-network/issues/17))，把所有副作用列清楚：
+
+**当前设备（运行 `anet passwd` 的那台）**
+- CLI 拿到新签发的 `utok_`，自动写回 `~/.anet/config.json`
+- 后续 `anet` 命令照旧能用，**无需重新登录**
+
+**其他设备 / 其他 CLI session**
+- 服务端**撤销该用户所有旧 `utok_`**（包括 admin-utok.json bootstrap 时颁的）
+- 下次 API 调用拿 `401 unauthorized` → 必须 `anet login` 重新登录拿新 `utok_`
+- 设备越多，rotate 噪音越大 — 改密码前可以先 `anet token ls` 看一眼
+
+**Dashboard（浏览器）**
+- 已登录的 tab：下一次 REST 请求拿 401 → Dashboard 跳回登录页 → 输入新密码 → 拿新 cookie
+- Dashboard v0.8 是 thin cookie-proxy，cookie 失效后自动清（详见 [安全设计](/concepts/security)）
+
+**Agent Node (`ntok_`)**
+- **不受影响**。`ntok_` 是 per-node-per-network 维度的 token，独立于用户密码
+- 跑着的 agent 继续跑，不会被打断；`anet doctor --fix` 仍能修 ntok_ 问题
+
+**Hub 主机的 `~/.anet/server/admin-utok.json`**（边界 case）
+- bootstrap 时写的 admin `utok_` 也被一并 revoke
+- 该文件**内容不会自动同步**为新 utok_
+- 如果你之后用 `anet hub admin reset-user <other>` 这种本机命令读 admin-utok.json → **会拿 401**
+- 当前的兜底：手动跑 `anet login --username admin --password <新密码>`，刷新 `~/.anet/config.json`；admin-utok.json 是 bootstrap 一次性凭证，长期使用以 config.json 为准。完整修复留 follow-up（v0.9）。
+
+**审计日志**
+- `audit_log` 写入一条 `password_changed`（走 reset-user 路径则是 `password_reset_by_admin`）
+- 通过 REST `GET /api/audit-log` 查看（owner 权限，详见 [API — audit-log](/api/rest#get-api-audit-log)）
+
+**忘记旧密码怎么办？**
+- 不能用 `anet passwd`（要求输旧密码）
+- 在 Hub 主机跑 `anet hub admin reset-user <username>` 强制重置（owner 本机权限即可，绕过 HTTP 校验，详见 [FAQ Q17b](/faq#_17b-忘密码怎么办-v0-8)）
+
+更深入：[Token 体系](/concepts/tokens) / [安全设计 — 密码安全](/concepts/security)
 :::
 
 ### 给别人开账号
