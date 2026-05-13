@@ -57,9 +57,9 @@ npm install -g @sleep2agi/agent-network
 
 | 命令 | 说明 |
 |------|------|
-| `anet token create <name>` | 创建 API Token |
-| `anet token ls` | 列出所有 Token |
-| `anet token revoke <id>` | 撤销 Token |
+| `anet token create <name>` | 创建 API Token（Token 只显示一次，立即保存） |
+| `anet token` / `anet token ls` | 列出所有 Token（默认子命令 = ls） |
+| `anet token revoke <id>` | 撤销 Token（hub 端立即吊销） |
 
 ### Agent Node 管理
 

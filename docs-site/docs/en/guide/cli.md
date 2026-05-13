@@ -57,9 +57,9 @@ After installation, the `anet` command is available globally.
 
 | Command | Description |
 |------|------|
-| `anet token create <name>` | Create an API token |
-| `anet token ls` | List all tokens |
-| `anet token revoke <id>` | Revoke a token |
+| `anet token create <name>` | Create an API token (token is shown **once**; save it immediately) |
+| `anet token` / `anet token ls` | List all tokens (default subcommand = ls) |
+| `anet token revoke <id>` | Revoke a token (immediate server-side invalidation) |
 
 ### Agent Node Management
 
