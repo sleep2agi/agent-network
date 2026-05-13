@@ -149,15 +149,18 @@ anet network members
 
 # 2. Change bob's role to admin (REST, owner only)
 #    Note: the `role` field cannot be 'owner' — see PUT members 4xx table.
-NET=$(anet whoami | grep -oE 'net_[a-z0-9]+')
+#    Caveat: `anet whoami` / `anet network ls` truncate network_id to 12 chars in their output,
+#            but REST calls need the full id — read it from config.json directly.
+NET=$(jq -r .network_id ~/.anet/config.json)
+UTOK=$(jq -r .token ~/.anet/config.json)
 curl -X PUT "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
-  -H "Authorization: Bearer $(cat ~/.anet/config.json | jq -r .token)" \
+  -H "Authorization: Bearer $UTOK" \
   -H "Content-Type: application/json" \
   -d '{"role": "admin"}'
 
 # 3. Remove bob (REST, owner/admin)
 curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
-  -H "Authorization: Bearer $(cat ~/.anet/config.json | jq -r .token)"
+  -H "Authorization: Bearer $UTOK"
 ```
 
 Full endpoint docs: [PUT members](/en/api/rest#put-api-networks-id-members-user-id) / [DELETE members](/en/api/rest#delete-api-networks-id-members-user-id).

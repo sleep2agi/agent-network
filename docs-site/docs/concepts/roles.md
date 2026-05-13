@@ -188,15 +188,18 @@ anet network members
 
 # 2. 改 bob 的角色为 admin（REST，owner only）
 #    role 字段不能传 'owner' —— 见 PUT members 4xx 表
-NET=$(anet whoami | grep -oE 'net_[a-z0-9]+')
+#    注：anet whoami / anet network ls 输出的 network_id 截断到 12 字符，REST 调用需完整 id；
+#       从 config.json 直接读才是完整 id
+NET=$(jq -r .network_id ~/.anet/config.json)
+UTOK=$(jq -r .token ~/.anet/config.json)
 curl -X PUT "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
-  -H "Authorization: Bearer $(cat ~/.anet/config.json | jq -r .token)" \
+  -H "Authorization: Bearer $UTOK" \
   -H "Content-Type: application/json" \
   -d '{"role": "admin"}'
 
 # 3. 移除 bob（REST，owner/admin）
 curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
-  -H "Authorization: Bearer $(cat ~/.anet/config.json | jq -r .token)"
+  -H "Authorization: Bearer $UTOK"
 ```
 
 完整 endpoint 文档：[PUT members](/api/rest#put-api-networks-id-members-user-id) / [DELETE members](/api/rest#delete-api-networks-id-members-user-id)。
