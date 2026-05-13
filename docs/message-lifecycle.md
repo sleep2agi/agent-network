@@ -38,7 +38,7 @@
 
 **核心规则：只有 `task` 和 `broadcast` 触发 think，其余只展示/记录。**
 
-> 验证：`agent-node/src/cli.ts:886` `if (msgType !== "task" && msgType !== "broadcast") { skip processing }`。public docs [concepts/task-lifecycle.md 消息类型](https://anet.sh/concepts/task-lifecycle#消息类型) 表里 task / broadcast 两行 ✓ 触发 AI；reply / message / ack 不触发。
+> 验证：[`agent-node/src/cli.ts:887`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L887) `if (msgType !== "task" && msgType !== "broadcast") { ... continue; }`（R218 校准：原 doc 行号 886，当前 main 实际 887）。Public docs [concepts/task-lifecycle.md 消息类型](https://anet.sh/concepts/task-lifecycle#消息类型) 表里 task / broadcast 两行 ✓ 触发 AI；reply / message / ack 不触发。
 
 ## inbox 表改动
 
@@ -120,28 +120,25 @@ sendReply(target, message)  → send_message
 sendReply(target, text, taskId)  → send_reply（新 MCP 工具）
 ```
 
-## commhub-channel.ts 改动
+## commhub-channel.ts 注入格式
 
-Channel 注入时带类型标记：
+::: warning R218 校准：实际未带 `type=` 属性
+[`channel/commhub-channel.ts:125`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L125) 实际描述为 `<channel source="commhub" task_id="..." priority="..." from="...">`（属性名 `from=` 不是 `sender=`，没有 `type=` 属性）。本节最初的设计意图（XML 带 `type="task"` / `type="reply"` / `type="message"`）**没有采纳** —— 类型区分实际靠 SSE event type（`new_task` / `new_reply` / `new_message`）+ agent 侧 inbox row 的 `type` 字段，不在 XML 里露出。
+:::
 
 ```xml
-<!-- task -->
-<channel source="commhub" sender="指挥室" task_id="xxx" priority="high" type="task">
+<!-- task / broadcast 实际格式（commhub-channel.ts:414-419 + node-server.ts 同样格式） -->
+<channel source="commhub" task_id="xxx" priority="high" from="指挥室">
 任务内容
 </channel>
 
-<!-- reply -->
-<channel source="commhub" sender="SDK马" task_id="xxx" type="reply" reply_to="yyy">
-回复内容
-</channel>
-
-<!-- message -->
-<channel source="commhub" sender="通信龙" type="message">
+<!-- new_message 实际格式 (commhub-channel.ts:374-385) -->
+<channel source="commhub" from="通信龙" priority="normal">
 消息内容
 </channel>
 ```
 
-Claude Code 收到 reply 和 message 时只需要阅读，不需要 send_task 回复。
+Claude Code 收到 reply 和 message 时只需要阅读，不需要 send_task 回复（agent-node 侧在 [`cli.ts:887`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L887) 直接跳过非 task/broadcast 类型，channel wrapper 走 `notifications/claude/channel` 让 Claude Code 自己决定是否回复）。
 
 ## 向后兼容
 
@@ -162,12 +159,14 @@ agent-node sendReply → send_message（已改 v1.4.2）
 2. CLAUDE.md 规则改为"不对 message 类型回复确认"
 3. agent-node processInbox 只处理 type=task
 
-### 完整实现（P1）
+### 完整实现（P1）— R218 校准：基本完成
 
-1. CommHub server 加 send_reply / send_ack 工具
-2. inbox 表加 reply_to 字段
-3. agent-node sendReply 改用 send_reply
-4. commhub-channel.ts 带 type 标记
+| # | 改动 | 状态 | 落地位置 |
+|---|------|------|------|
+| 1 | CommHub server 加 `send_reply` / `send_ack` 工具 | ✅ shipped | [server/src/tools.ts:589 send_reply](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L589) + [tools.ts:667 send_ack](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L667) |
+| 2 | inbox 表加 `in_reply_to` 字段 | ✅ shipped | [server/src/db.ts:71 + db.ts:97](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L71)（字段名实际叫 `in_reply_to` 不是设计草稿里的 `reply_to`） |
+| 3 | agent-node `sendReply` 改用 `send_reply` | ✅ shipped | agent-node 用 `send_reply` MCP tool 关联 task_id |
+| 4 | commhub-channel.ts 带 `type` 标记 | ❌ **未采纳** | XML 不带 `type=`；类型区分靠 SSE event type + inbox row.`type` 字段（见上节 ::: warning） |
 
 ## SSE push 事件区分
 
@@ -190,17 +189,15 @@ if (["new_task", "broadcast"].includes(ev.type)) {
 
 **这是最干净的解法**：SSE event type 就决定了是否触发 think，不需要在 processInbox 里再按 type 分流。
 
-## P0 最小改动清单
+## P0 最小改动清单 — R218 校准：全部落地
 
 | # | 改动 | 在哪改 | 状态 |
 |---|------|--------|------|
 | 1 | sendReply 用 send_message | agent-node | ✅ v1.4.2 |
-| 2 | SSE 只响应 new_task / broadcast | agent-node | 需改 |
-| 3 | 低价值消息过滤 | agent-node | ✅ v1.4.0 |
-| 4 | CLAUDE.md 不对 message 回复 | 各项目 CLAUDE.md | 需改 |
+| 2 | SSE 只响应 new_task / broadcast | agent-node | ✅ [cli.ts:1125 `["new_task", "broadcast"].includes(ev.type)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1125)；`new_reply` 单独走日志记录 cli.ts:1129 |
+| 3 | 低价值消息过滤 | agent-node | ✅ v1.4.0；当前在 [cli.ts:869 `shouldSkipMessage`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L869) |
+| 4 | CLAUDE.md 不对 message 回复 | 各项目 CLAUDE.md | ✅ R195 chain 模板已加 |
 | 5 | developer_instructions 安静规则 | agent-node | ✅ v1.4.1 |
-
-**只需要改 #2**：agent-node SSE handler 去掉 `new_message` 的响应。
 
 ## 决策
 
