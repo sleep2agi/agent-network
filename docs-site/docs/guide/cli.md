@@ -397,7 +397,7 @@ anet network invite --role viewer --expires 7
 
 ### anet token create
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3361)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3394)
 
 创建 API Token。
 
