@@ -932,7 +932,21 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/members \
 | `user_id` | string | &check; | 目标用户 ID |
 | `role` | enum | | `admin` / `member` / `viewer`（默认 `member`） |
 
-写 audit log `action='member_added'`。
+**响应**（成功）：
+
+```json
+{ "ok": true }
+```
+
+**常见 4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 403 | `not a member of this network` | 调用者本身不在该网络 |
+| 403 | `owner/admin required` | 调用者是 `member` / `viewer`，无权添加成员 |
+| 400 | `user already a member` | `user_id` 已经是该网络成员 |
+
+写 audit log `action='member_added'`，`detail` 字段记 `<user_id> as <role>`。
 
 ### PUT /api/networks/:id/members/:user_id
 
@@ -953,7 +967,22 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 |------|------|:----:|------|
 | `role` | enum | &check; | 新角色：`admin` / `member` / `viewer`（不能改成 `owner`） |
 
-写 audit log `action='member_role_changed'`。R119 FAQ Q17 提到的「改角色」入口就是这个 endpoint。
+**响应**（成功）：
+
+```json
+{ "ok": true }
+```
+
+**常见 4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 403 | `not a member of this network` | 调用者本身不在该网络 |
+| 403 | `owner required` | 仅 owner 能改角色（admin 也不行） |
+| 400 | `cannot assign owner role` | `role` 字段传 `owner`，server 拒绝（owner 通过创建网络获得，不能后续 promote） |
+| 400 | `member not found or is owner` | 目标 `user_id` 不在网络内，或者是 owner 自己（owner 角色不可改） |
+
+写 audit log `action='member_role_changed'`，`detail` 字段记 `<user_id> → <new_role>`。R119 FAQ Q17 提到的「改角色」入口就是这个 endpoint。
 
 ### DELETE /api/networks/:id/members/:user_id
 
@@ -966,7 +995,22 @@ curl -X DELETE http://localhost:9200/api/networks/net_xxx/members/u_def456 \
   -H "Authorization: Bearer utok_xxx"
 ```
 
-写 audit log `action='member_removed'`。
+**响应**（成功）：
+
+```json
+{ "ok": true }
+```
+
+**常见 4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 403 | `not a member of this network` | 调用者本身不在该网络 |
+| 403 | `owner/admin required` | 调用者是 `member` / `viewer`，无权移除成员 |
+| 400 | `not a member` | 目标 `user_id` 不在该网络 |
+| 400 | `cannot remove owner` | 目标是 owner（删除网络才能移除 owner，见 [DELETE /api/networks/:id](#delete-api-networks-id)） |
+
+写 audit log `action='member_removed'`，`detail` 字段记 `<user_id>`。
 
 ### POST /api/networks/:id/invite
 

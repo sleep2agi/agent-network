@@ -932,7 +932,21 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/members \
 | `user_id` | string | &check; | Target user ID |
 | `role` | enum | | `admin` / `member` / `viewer` (default `member`) |
 
-Writes audit log `action='member_added'`.
+**Response** (success):
+
+```json
+{ "ok": true }
+```
+
+**Common 4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 403 | `not a member of this network` | Caller is not a member of the network |
+| 403 | `owner/admin required` | Caller is `member` / `viewer` — cannot add members |
+| 400 | `user already a member` | `user_id` is already in the network |
+
+Writes audit log `action='member_added'`; the `detail` column records `<user_id> as <role>`.
 
 ### PUT /api/networks/:id/members/:user_id
 
@@ -953,7 +967,22 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 |------|------|:----:|------|
 | `role` | enum | &check; | New role: `admin` / `member` / `viewer` (cannot promote to `owner`) |
 
-Writes audit log `action='member_role_changed'`. This is the endpoint that R119 FAQ Q17 mentions for "changing roles".
+**Response** (success):
+
+```json
+{ "ok": true }
+```
+
+**Common 4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 403 | `not a member of this network` | Caller is not a member of the network |
+| 403 | `owner required` | Only owner can change roles (admin cannot) |
+| 400 | `cannot assign owner role` | `role` is `owner` — server rejects (owner is obtained by creating the network, not by promotion) |
+| 400 | `member not found or is owner` | Target `user_id` is not in the network, or is the owner (owner role is immutable) |
+
+Writes audit log `action='member_role_changed'`; the `detail` column records `<user_id> → <new_role>`. This is the endpoint that R119 FAQ Q17 mentions for "changing roles".
 
 ### DELETE /api/networks/:id/members/:user_id
 
@@ -966,7 +995,22 @@ curl -X DELETE http://localhost:9200/api/networks/net_xxx/members/u_def456 \
   -H "Authorization: Bearer utok_xxx"
 ```
 
-Writes audit log `action='member_removed'`.
+**Response** (success):
+
+```json
+{ "ok": true }
+```
+
+**Common 4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 403 | `not a member of this network` | Caller is not a member of the network |
+| 403 | `owner/admin required` | Caller is `member` / `viewer` — cannot remove members |
+| 400 | `not a member` | Target `user_id` is not in this network |
+| 400 | `cannot remove owner` | Target is the owner (delete the whole network to remove the owner — see [DELETE /api/networks/:id](#delete-api-networks-id)) |
+
+Writes audit log `action='member_removed'`; the `detail` column records `<user_id>`.
 
 ### POST /api/networks/:id/invite
 
