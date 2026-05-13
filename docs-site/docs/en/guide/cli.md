@@ -35,6 +35,7 @@ After installation, the `anet` command is available globally.
 |------|------|
 | `anet register` | Register an account |
 | `anet login` | Log in |
+| `anet logout` | Log out (clears the token from `~/.anet/config.json` locally; the token still works server-side — use `anet token revoke` for full invalidation) |
 | `anet whoami` | View current user |
 | `anet passwd` | Change password |
 

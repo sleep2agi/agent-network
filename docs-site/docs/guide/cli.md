@@ -35,6 +35,7 @@ npm install -g @sleep2agi/agent-network
 |------|------|
 | `anet register` | 注册账号 |
 | `anet login` | 登录 |
+| `anet logout` | 退出（清掉本机 `~/.anet/config.json` 里的 token，但 hub 端 token 仍有效；要彻底失效请用 `anet token revoke`） |
 | `anet whoami` | 查看当前用户 |
 | `anet passwd` | 修改密码 |
 
