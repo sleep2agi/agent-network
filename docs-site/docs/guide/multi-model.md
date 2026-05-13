@@ -13,7 +13,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | **GLM 5.1** | 智谱 | `claude-agent-sdk` | open.bigmodel.cn/anthropic | 中文理解强 | 低 |
 | **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn/anthropic | 科学推理 | 低 |
 | **Kimi** | Moonshot | `claude-agent-sdk` | api.moonshot.cn/anthropic | 长文本处理 | 低 |
-| **小米 MiMo** | 小米 | `claude-agent-sdk` | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) Anthropic 兼容端点 | 通用对话 | 低 |
+| **小米 MiMo V2.5** | 小米 | `claude-agent-sdk` | api.xiaomimimo.com/anthropic | 推理强、低成本 | 低 |
 
 ::: tip 任何 Anthropic-compatible 提供商都能接
 上表是验证过的常用 provider，但 `claude-agent-sdk` 通过 `ANTHROPIC_BASE_URL` 接入**任何**支持 Anthropic Messages API 的服务商。没列出的服务商（自部署 vLLM / SiliconFlow / 通义千问 Anthropic 兼容端点等）也能用，只需把 `ANTHROPIC_BASE_URL` 指向对应平台的 Anthropic 兼容 endpoint，把 API Key 设到 `ANTHROPIC_AUTH_TOKEN` 即可。详见下方"配置方式"。
@@ -64,6 +64,11 @@ anet node create 研究员 --runtime claude-agent-sdk
 ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic \
 ANTHROPIC_AUTH_TOKEN=你的Kimi-API-Key \
 anet node create 长文助手 --runtime claude-agent-sdk
+
+# 小米 MiMo
+ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=你的MiMo-API-Key \
+anet node create 推理助手 --runtime claude-agent-sdk --model mimo-v2.5-pro
 ```
 :::
 

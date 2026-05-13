@@ -14,7 +14,7 @@ Agent Network supports running agents with different AI models within the same n
 | **DeepSeek** | `claude-agent-sdk` | Code + reasoning, excellent value | Low |
 | **GLM 5.1** | `claude-agent-sdk` | Strong Chinese understanding (Zhipu, `open.bigmodel.cn/anthropic`) | Low |
 | **Kimi** | `claude-agent-sdk` | Long-context Q&A (Moonshot, `api.moonshot.cn/anthropic`) | Low |
-| **Xiaomi MiMo** | `claude-agent-sdk` | General chat ([platform.xiaomimimo.com](https://platform.xiaomimimo.com)) | Low |
+| **Xiaomi MiMo V2.5** | `claude-agent-sdk` | Strong reasoning, low cost (Xiaomi, `api.xiaomimimo.com/anthropic`) | Low |
 
 ::: tip Any Anthropic-compatible provider works
 The table above lists verified common providers, but `claude-agent-sdk` integrates with **any** service that supports the Anthropic Messages API via `ANTHROPIC_BASE_URL`. Providers not listed (self-hosted vLLM, SiliconFlow, Qwen Anthropic-compatible endpoint, etc.) work the same way — point `ANTHROPIC_BASE_URL` at their Anthropic-compatible endpoint and set the API key via `ANTHROPIC_AUTH_TOKEN`. See "Configuration" below.
@@ -97,6 +97,22 @@ anet node start intern
 | `ANTHROPIC_BASE_URL` | `https://chat.intern-ai.org.cn/anthropic` |
 | `ANTHROPIC_AUTH_TOKEN` | InternLM API Key |
 
+### Xiaomi MiMo (claude-agent-sdk)
+
+Xiaomi's MiMo platform exposes an Anthropic-compatible endpoint. The V2.5 series (`mimo-v2.5-pro`, `mimo-v2.5`, `mimo-v2.5-flash`) emphasizes reasoning and is competitively priced.
+
+```bash
+ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-mimo-api-key \
+anet node create mimo-bot --runtime claude-agent-sdk --model mimo-v2.5-pro
+anet node start mimo-bot
+```
+
+| Environment Variable | Value |
+|---------|-----|
+| `ANTHROPIC_BASE_URL` | `https://api.xiaomimimo.com/anthropic` |
+| `ANTHROPIC_AUTH_TOKEN` | Xiaomi MiMo API Key (sign up at [platform.xiaomimimo.com](https://platform.xiaomimimo.com)) |
+
 ## ANTHROPIC_BASE_URL Mechanism {#how-anthropic-base-url-works}
 
 The `claude-agent-sdk` runtime uses the `ANTHROPIC_BASE_URL` environment variable to route requests to compatible API endpoints. This is the core model-mapping mechanism:
@@ -118,6 +134,7 @@ graph LR
 | MiniMax | `https://api.minimaxi.com/anthropic` | Latest from [MiniMax platform](https://platform.minimaxi.com) (or use any Claude model id via the mapping tip above) |
 | InternLM | `https://chat.intern-ai.org.cn/anthropic` | Latest from [Intern platform](https://chat.intern-ai.org.cn) |
 | DeepSeek | `https://api.deepseek.com/anthropic` | Latest from [DeepSeek platform](https://platform.deepseek.com) |
+| Xiaomi MiMo | `https://api.xiaomimimo.com/anthropic` | `mimo-v2.5-pro` / `mimo-v2.5` / `mimo-v2.5-flash` (latest at [platform.xiaomimimo.com](https://platform.xiaomimimo.com)) |
 
 ## Mixed Deployment in Practice
 

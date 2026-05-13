@@ -90,7 +90,7 @@ anet node create my-bot
 这会进入两步交互式选择：
 
 1. **选 Runtime**：推荐 `claude-agent-sdk`（已验证）。
-2. **选 Provider**：可选 MiniMax / DeepSeek / GLM / Kimi / 书生 Intern / OpenRouter / Anthropic / 自定义，每个预设会自动写好 `ANTHROPIC_BASE_URL` 与默认模型，然后让你输入对应的 API Key。
+2. **选 Provider**：可选 MiniMax / DeepSeek / GLM / Kimi / 书生 Intern / 小米 MiMo / OpenRouter / Anthropic / 自定义，每个预设会自动写好 `ANTHROPIC_BASE_URL` 与默认模型，然后让你输入对应的 API Key。
 
 ::: details 其他 Runtime
 - `codex-sdk` —— 单元测试通过，**端到端未验证**（缺真实 codex 鉴权回归）。
@@ -169,7 +169,7 @@ anet node start remote-bot
 - `anet hub start` + 默认账号自动创建
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
-- `anet node create / start / delete / ls`（claude-agent-sdk + 7 provider preset：MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter / Anthropic + 自定义；[完整 provider 表](/guide/multi-model)）
+- `anet node create / start / delete / ls`（claude-agent-sdk + 8 provider preset：MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter / Anthropic + 自定义；[完整 provider 表](/guide/multi-model)）
 - Dashboard Chat：markdown / Enter 发送 / 乐观回显 / 来源标签 / 错误兜底 / 历史持久
 - 多 Agent 协作（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调；wrapper 通过 `parent_task_id` 把子任务结果回灌到上游 task 上下文）
 - 局域网共用 Hub

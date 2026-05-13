@@ -53,6 +53,19 @@ anet node start minimax-bot
 
 See [anet.sh/guide/multi-model](https://anet.sh/guide/multi-model) for the full provider table (DeepSeek, GLM, Kimi, InternLM, Xiaomi MiMo, OpenRouter, custom).
 
+## Demo: Xiaomi MiMo via `claude-agent-sdk`
+
+Same pattern, swap the base URL + token. Sign up at [platform.xiaomimimo.com](https://platform.xiaomimimo.com), then:
+
+```bash
+ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-mimo-api-key \
+anet node create mimo-bot --runtime claude-agent-sdk --model mimo-v2.5-pro
+anet node start mimo-bot
+```
+
+Other MiMo model ids: `mimo-v2.5`, `mimo-v2.5-flash`.
+
 ## Demo: Docker E2E
 
 Run the in-repo Docker E2E and QA suites (matches CI):
