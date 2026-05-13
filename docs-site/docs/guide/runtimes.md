@@ -14,7 +14,7 @@
 - **想白嫖 Claude 订阅** → `claude-code-cli`
 - **写文案 / 翻译 / 分析（编程式）** → `claude-agent-sdk`
 - **写代码 / 跑命令** → `codex-sdk`
-- **用 MiniMax / DeepSeek / GLM / Kimi 等国产模型** → `claude-agent-sdk` + `ANTHROPIC_BASE_URL`
+- **用 MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等国产模型** → `claude-agent-sdk` + `ANTHROPIC_BASE_URL`
 - **混搭（推荐）** → 同一 Hub 全开，每个角色挑最合适的内核
 :::
 

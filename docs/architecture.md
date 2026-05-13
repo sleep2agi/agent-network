@@ -34,7 +34,7 @@ agent-node 支持三个 runtime：
 
 | Runtime | 说明 | 模型 |
 |------|------|------|
-| `claude-agent-sdk`（**默认**） | Anthropic Claude Agent SDK + Anthropic 兼容 API | Claude / MiniMax / DeepSeek / GLM / Kimi 等 |
+| `claude-agent-sdk`（**默认**） | Anthropic Claude Agent SDK + Anthropic 兼容 API | Claude / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等（完整 provider 表见 [anet.sh / multi-model](https://anet.sh/guide/multi-model)） |
 | `codex-sdk` | OpenAI Codex SDK | OpenAI Codex（最新 model id 查官方文档） |
 | `claude-code-cli` | Claude Code CLI（要 Claude Pro 订阅） | Claude（通过本地 CLI 调用） |
 
