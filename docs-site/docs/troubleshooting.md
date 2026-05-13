@@ -128,8 +128,16 @@ cat ~/.anet/config.json
 anet doctor --fix
 
 # 情况 2：提升角色
-# 让 owner/admin 修改你的角色
-anet network use <network>
+# 让 owner（不是 admin —— admin 改不了角色，verify R149 PUT members owner-only gate）
+# 通过 REST 调用提升角色（CLI promote 子命令排在 v0.9+）：
+NET=$(jq -r .network_id ~/.anet/config.json)
+UTOK=$(jq -r .token ~/.anet/config.json)        # owner 自己的 utok_
+curl -X PUT "$HUB/api/networks/$NET/members/<your_user_id>" \
+  -H "Authorization: Bearer $UTOK" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "member"}'
+# 详见 [API — PUT members](/api/rest#put-api-networks-id-members-user-id)
+# 或者：owner 创建新邀请码让你重新加入（拿到目标 role）
 anet network invite --role member
 ```
 

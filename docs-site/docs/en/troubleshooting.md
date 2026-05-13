@@ -129,8 +129,16 @@ cat ~/.anet/config.json
 anet doctor --fix
 
 # Case 2: Upgrade your role
-# Have the owner/admin change your role
-anet network use <network>
+# Have the owner (not admin — admin can't change roles, see R149 PUT members owner-only gate)
+# call REST to promote you (no CLI promote subcommand yet — queued for v0.9+):
+NET=$(jq -r .network_id ~/.anet/config.json)
+UTOK=$(jq -r .token ~/.anet/config.json)        # owner's own utok_
+curl -X PUT "$HUB/api/networks/$NET/members/<your_user_id>" \
+  -H "Authorization: Bearer $UTOK" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "member"}'
+# See [API — PUT members](/en/api/rest#put-api-networks-id-members-user-id)
+# Alternative: the owner issues a new invite code with the target role and you re-join.
 anet network invite --role member
 ```
 
