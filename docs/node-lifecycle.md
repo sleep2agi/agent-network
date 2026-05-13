@@ -87,7 +87,7 @@
 
 **数据变更**:
 ```
-.anet/nodes/<node_id>/
+.anet/nodes/<node-name>/      ← 目录名是 alias / node-name, 不是内部 node_id 字段
 ├── config.json    ← 生成
 └── (空目录)
 ```
@@ -198,7 +198,7 @@ register() → callCommHub("report_status", {
 **前置条件**: node 必须 offline
 
 **数据变更**:
-1. 删除 `.anet/nodes/<node_id>/` 目录（含 config.json、channels/、logs/）
+1. 删除 `.anet/nodes/<node-name>/` 目录（含 config.json、channels/、logs/；目录名是 alias，不是内部 node_id 字段）
 2. CommHub: DELETE FROM sessions WHERE resume_id = sdk-${node_id}
 3. CommHub: DELETE FROM inbox WHERE session_name = node_name（清理残留消息）
 

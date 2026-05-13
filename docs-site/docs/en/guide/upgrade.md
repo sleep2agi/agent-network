@@ -144,7 +144,7 @@ V3 is a major upgrade with the following key changes:
 | Change | V2 | V3 | Impact |
 |--------|----|----|--------|
 | Token system | Single token | Dual tokens (`utok_` + `ntok_`) | **Re-login required** |
-| Config format | `.agent-node.json` | `.anet/nodes/<id>/config.json` | Auto-migrated |
+| Config format | `.agent-node.json` | `.anet/nodes/<node-name>/config.json` | Auto-migrated |
 | CLI commands | `agent-node` | `anet` | Old commands no longer work |
 
 ### Manual Actions Required

@@ -144,7 +144,7 @@ V3 是一次重大升级，主要变化如下：
 | 变更项 | V2 | V3 | 影响 |
 |--------|----|----|------|
 | Token 体系 | 单 Token | 双 Token（`utok_` + `ntok_`） | **需要重新登录** |
-| 配置格式 | `.agent-node.json` | `.anet/nodes/<id>/config.json` | 自动迁移 |
+| 配置格式 | `.agent-node.json` | `.anet/nodes/<node-name>/config.json` | 自动迁移 |
 | CLI 命令 | `agent-node` | `anet` | 旧命令不可用 |
 
 ### 需要手动操作

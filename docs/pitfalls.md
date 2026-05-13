@@ -81,7 +81,7 @@ if (src !== dst) {
 两个 config.json 都要读，字段级合并：
 
 ```
-项目 .anet/nodes/<id>/config.json  （有值的字段优先）
+项目 .anet/nodes/<node-name>/config.json  （有值的字段优先；目录名是 alias）
     ↓ fallback
 全局 ~/.anet/config.json            （缺失字段兜底）
 ```
