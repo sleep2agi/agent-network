@@ -222,7 +222,7 @@ curl -X PUT http://localhost:9200/api/auth/me \
 
 只更新提供的字段（[server/src/index.ts:464-465](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L464) 用 `if (body.X)` 条件 SQL）；`username` / `role` / `password` **不**通过此 endpoint 修改。
 
-**响应**：
+**响应**（成功）：
 
 ```json
 {
@@ -236,6 +236,17 @@ curl -X PUT http://localhost:9200/api/auth/me \
   }
 }
 ```
+
+**常见 4xx**（verify [`server/src/index.ts:456-478`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L456)）：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `<JSON parse error>` | 请求体不是合法 JSON（catch 块直接 echo 异常 message） |
+| 401 | `token required` / `invalid token` | 缺/无效 utok_ |
+
+::: info 字段缺失不报错
+如果只传 `display_name` 而省略 `email`（或两者都不传），server 不会报 400 —— [`index.ts:464-465`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L464) 用 `if (body.X)` 条件累加 SQL，全部省略时只 re-SELECT user 返回。**无字段长度校验**（要写 schema-level 校验等 v0.9+）。
+:::
 
 ---
 
@@ -1021,7 +1032,7 @@ curl -X POST http://localhost:9200/api/auth/node-token \
   -d '{"network_id": "net_xxx", "node_name": "代码1号"}'
 ```
 
-**响应**：
+**响应**（成功）：
 
 ```json
 {
@@ -1031,6 +1042,15 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 ```
 
 `token` 是该 `(node_name, network_id)` 组合的 `ntok_`，hub 端强制 binding——agent 用这个 token 调 MCP 时，server 自动锁定到 `network_id`，跨网络访问拒绝。详见 [Token 概念 — ntok_](/concepts/tokens#_2-ntok-agent-的-token-每个-agent-一个)。
+
+**常见 4xx**（verify [`auth.ts:130-141 createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L130) + [`index.ts:501-515` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L501)）：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `network_id and node_name required` | 请求体缺 `network_id` 或 `node_name` |
+| 400 | `not a member of this network` | 调用者不在 `network_id` 内（必须先 join 才能 mint ntok_） |
+| 400 | `no write access to this network` | 调用者是 `viewer` 角色（viewer 不能创建 full-access network token） |
+| 401 | `auth required` / `invalid token` | 缺/无效 utok_ |
 
 ### POST /api/auth/tokens
 

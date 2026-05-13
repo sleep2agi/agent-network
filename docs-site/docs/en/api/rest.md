@@ -222,7 +222,7 @@ curl -X PUT http://localhost:9200/api/auth/me \
 
 Only the provided fields are updated ([server/src/index.ts:464-465](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L464) uses conditional SQL with `if (body.X)`); `username` / `role` / `password` are **not** mutable through this endpoint.
 
-**Response**:
+**Response** (success):
 
 ```json
 {
@@ -236,6 +236,17 @@ Only the provided fields are updated ([server/src/index.ts:464-465](https://gith
   }
 }
 ```
+
+**Common 4xx errors** (verify [`server/src/index.ts:456-478`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L456)):
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `<JSON parse error>` | Request body is not valid JSON (the catch block echoes the exception message) |
+| 401 | `token required` / `invalid token` | Missing / invalid utok_ |
+
+::: info Missing fields are not an error
+If you supply only `display_name` and omit `email` (or omit both), the server does not return 400 — [`index.ts:464-465`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L464) builds the SQL conditionally with `if (body.X)`. When everything is omitted it just re-SELECTs and returns the user as-is. **No field-length validation** here (schema-level checks are queued for v0.9+).
+:::
 
 ---
 
@@ -1021,7 +1032,7 @@ curl -X POST http://localhost:9200/api/auth/node-token \
   -d '{"network_id": "net_xxx", "node_name": "coder-1"}'
 ```
 
-**Response**:
+**Response** (success):
 
 ```json
 {
@@ -1031,6 +1042,15 @@ curl -X POST http://localhost:9200/api/auth/node-token \
 ```
 
 The `token` is the `ntok_` for that `(node_name, network_id)` pair. The hub force-binds the `network_id` to the token — when an agent calls MCP with this token, the server locks operations to that network and rejects cross-network access. See [Tokens — ntok_](/en/concepts/tokens) for more.
+
+**Common 4xx errors** (verify [`auth.ts:130-141 createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L130) + [`index.ts:501-515` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L501)):
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `network_id and node_name required` | Body is missing `network_id` or `node_name` |
+| 400 | `not a member of this network` | Caller is not in `network_id` (must `join` first to mint an `ntok_`) |
+| 400 | `no write access to this network` | Caller is `viewer` (viewers cannot create full-access network tokens) |
+| 401 | `auth required` / `invalid token` | Missing / invalid utok_ |
 
 ### POST /api/auth/tokens
 
