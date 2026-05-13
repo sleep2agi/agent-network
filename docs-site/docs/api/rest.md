@@ -241,18 +241,22 @@ curl -X POST http://localhost:9200/api/auth/password \
 ```json
 {
   "ok": true,
+  "revoked": 2,
   "token": "utok_xxxxxxxxxxxxxxxx",
   "token_id": "tok_new_session_id"
 }
 ```
 
-**关键副作用** (verify [server/src/index.ts:486-491](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L486)):
-1. 当前调用用的 `utok_` (`resolved.tokenId`) 立即撤销
-2. 颁发新的 `utok_` (`issued.token`) 给调用方，作为本次响应返回 —— 调用方应立即用新 token 覆盖本地存储
-3. 写 audit log: `action='password_changed'`
-4. **其他设备上的 utok_ 不在此处显式撤销**——具体行为取决于 `changePassword()` 内部实现, 详见 [Token 生命周期对照](/concepts/tokens#token-生命周期对照)
+`revoked` 字段是**其他设备**上被撤销的 utok\_/atok\_ 数量（不含本次调用方自己的 token，那个是 index.ts L490 单独撤销的）。
 
-跟 `anet passwd` CLI 行为一致（CLI 拿到新 token 后自动写 `~/.anet/config.json`）。
+**关键副作用** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L267) + [`index.ts:486-492`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L486)):
+1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`index.ts:490`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L490) `revokeToken(...)` 显式删）
+2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts:269-270`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L269) `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
+3. **`ntok_` 不受影响**（`revokeOtherUserTokens` 只删 `network_id IS NULL` 的 token，agent node 用 `ntok_` 跑着的不会被改密打断；跟 [account-system 改密码副作用](/guide/account-system#修改密码) ZH 描述一致）
+4. **新 `utok_`** (`issued.token`) 颁发给调用方作为响应返回 —— 调用方应立即用新 token 覆盖本地存储
+5. 写 audit log: `action='password_changed'`
+
+跟 `anet passwd` CLI 行为一致（CLI 拿到新 token 后自动写 `~/.anet/config.json`）。其他设备下次请求拿 `401 invalid token` → 必须 `anet login` 重新登录。
 
 ---
 

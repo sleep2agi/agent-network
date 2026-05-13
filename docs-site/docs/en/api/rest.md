@@ -241,18 +241,22 @@ curl -X POST http://localhost:9200/api/auth/password \
 ```json
 {
   "ok": true,
+  "revoked": 2,
   "token": "utok_xxxxxxxxxxxxxxxx",
   "token_id": "tok_new_session_id"
 }
 ```
 
-**Key side effects** (verify [server/src/index.ts:486-491](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L486)):
-1. The `utok_` used for this call (`resolved.tokenId`) is revoked immediately
-2. A new `utok_` (`issued.token`) is minted and returned in this response — the caller must overwrite its local storage with the new token right away
-3. Writes audit log: `action='password_changed'`
-4. **Other devices' utok_ are not explicitly revoked here** — behavior depends on `changePassword()` internals; see [Token lifecycle table](/en/concepts/tokens)
+`revoked` is the number of utok\_/atok\_ tokens on **other devices** that were just revoked (it does **not** include the caller's own token — that one is revoked separately at index.ts L490).
 
-Matches the `anet passwd` CLI behavior (the CLI writes the new token back into `~/.anet/config.json` automatically).
+**Key side effects** (verify [`auth.ts:267-282 changePassword + revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L267) + [`index.ts:486-492`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L486)):
+1. **The caller's `utok_`** (`resolved.tokenId`) is revoked immediately ([`index.ts:490`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L490) `revokeToken(...)` explicit delete)
+2. **All other devices' `utok_` / `atok_`** are also revoked in one shot ([`auth.ts:269-270`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L269) `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId`) — the count is returned in the `revoked` field
+3. **`ntok_` tokens are unaffected** (`revokeOtherUserTokens` filters on `network_id IS NULL`, so agent nodes using `ntok_` keep running through a password change; matches the [account-system / Change Password](/en/guide/account-system#change-password) narrative)
+4. **A fresh `utok_`** (`issued.token`) is minted for the caller and returned in this response — the caller must overwrite local storage with the new token right away
+5. Writes audit log: `action='password_changed'`
+
+Matches the `anet passwd` CLI behavior (the CLI writes the new token back into `~/.anet/config.json` automatically). Other devices' next request returns `401 invalid token` and they must `anet login` again.
 
 ---
 
