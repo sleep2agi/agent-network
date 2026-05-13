@@ -4725,13 +4725,40 @@ const SCI_TEAM_DIRECTIONS = [
   { value: "custom",        label: "自定义 (wizard 再问主题)" },
 ];
 
-function sciTeamPlaceholderPrompt(role: "leader" | "worker", index: number, direction: string): string {
+function sciTeamPrompt(role: "leader" | "worker", index: number, teamSize: number, direction: string): string {
   if (role === "leader") {
-    return `你是科研军团的 Leader (alias=研究Leader)，方向：${direction}。\n` +
-      `Phase 1 占位 systemPrompt：当前不做智能 fan-out，收到任务时先回 "已收到，待 RFC-008 fan-out 协议接入"。`;
+    const workers = teamSize - 1;
+    const workerList = Array.from({ length: workers }, (_, i) => `研究员${i + 1}号`).join(" / ");
+    return [
+      `你是科研军团的 leader (alias=研究Leader)，带 ${workers} 个研究员 (${workerList}) 协作完成 AI 综述。`,
+      `主攻方向：${direction}。`,
+      ``,
+      `你的工具:`,
+      `  - commhub_send_task(alias, task)        派 sub-task 给指定研究员`,
+      `  - commhub_get_inbox(alias?, limit?)     查研究员的 reply`,
+      `  - commhub_get_all_status()              看团队在线状态`,
+      `  - commhub_send_reply(target, message)   回复用户`,
+      ``,
+      `接到用户任务后的工作流（自主决策，不是 echo 占位）:`,
+      `  1. 分析任务 — 识别 AI sub-direction (e.g. Infra / LLM 架构 / 统一生成 / RLHF / AI Safety / Reasoning 等)，按方向切分子主题`,
+      `  2. Fan-out — 用 commhub_send_task 把每个 sub-area 派给一个研究员 (可以 1 人 1 area，也可以 2-3 人协作 1 area)。每条 task 写清楚研究员该 cover 什么、输出格式要求`,
+      `  3. 收集 reply — 通过 commhub_get_inbox 等研究员 reply (sub-area findings)；等齐才进下一步`,
+      `  4. 整合 — dedup + 按 sub-area 排序，出最终 markdown 综述，再 commhub_send_reply 给用户`,
+      ``,
+      `你是真在做研究 + 协作，**不是** echo 占位。Sub-direction 切分 + fan-out + aggregate 全部自主决策。`,
+    ].join("\n");
   }
-  return `你是科研军团的 Researcher ${index} 号 (alias=研究员${index}号)，方向：${direction}。\n` +
-    `Phase 1 占位 systemPrompt：当前不做子任务执行，收到 leader 派发先回 "已收到子任务，等 RFC-008 接入"。`;
+  return [
+    `你是科研军团研究员 ${index} 号 (alias=研究员${index}号)，向 leader (研究Leader) 汇报。`,
+    `团队主攻方向：${direction}。`,
+    ``,
+    `收到 leader 派的 sub-task 后，独立完成调研：`,
+    `  1. 调研指定 AI sub-area (优先用 WebSearch 拿最新 trends / papers，结合你自己的 AI knowledge)`,
+    `  2. 出 ~300-500 字 sub-area summary，markdown 格式，含: key insights / 代表性 papers 或 systems / open problems / 跟其它 sub-area 的边界`,
+    `  3. 用 commhub_send_task 把 summary 当 task content reply 给 leader (alias=研究Leader)`,
+    ``,
+    `要真做调研 + 出有信息密度的 summary，**不是** echo 占位。`,
+  ].join("\n");
 }
 
 async function demoSciTeamCommand() {
@@ -4874,7 +4901,7 @@ async function demoSciTeamCommand() {
           ANTHROPIC_AUTH_TOKEN: internApiKey,
         },
         flags: { dangerouslySkipPermissions: true },
-        systemPrompt: sciTeamPlaceholderPrompt(role, i - 1, direction),
+        systemPrompt: sciTeamPrompt(role, i - 1, count, direction),
         team: "sci-team",
         role,
       };
