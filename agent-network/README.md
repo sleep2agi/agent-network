@@ -125,7 +125,6 @@ anet init project                  # write .mcp.json + CLAUDE.md         [verifi
 
 Listed for transparency — these commands exist but are not part of the primary supported path.
 
-- `anet quickstart` — legacy v0.6 guided setup (still in code but not in docs); use `anet hub start` + `anet init` + `anet login` + `anet node create` instead.
 - `anet license` / `anet activate` — v0.6 legacy trial / pro-license commands. **No longer needed after Apache 2.0 OSS.** Hub still keeps a SQLite `licenses` table for backward-compat (creates a 14-day trial on first run). On `license_expired`, see [troubleshooting](https://anet.sh/en/troubleshooting).
 - `anet network create` / `anet network invite` / cross-user network sharing — code is in, no full E2E.
 - `anet channel add telegram|wechat|feishu` — channel code exists; only the Telegram-oriented paths are actively exercised.
