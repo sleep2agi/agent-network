@@ -1,8 +1,30 @@
 # RFC-006：codex-cli-remote-control runtime — 通过 `codex remote-control` ws daemon 让 anet 用户直接用 Codex CLI 接 commhub
 
+## Superseded by RFC-007
+
+> **本 RFC 已被 [RFC-007](./RFC-007-codex-code-cli-mcp.md) 取代** (2026-05-13)
+>
+> 本 RFC 经历 6 轮 Vincent architectural pivot:
+> - **Pivot 1-4** (initial → dual A+C → triple A+C+B → narrow C only): RFC-006 主体 Path C mcp-server stdio
+> - **Pivot 5** (Vincent telegram 4108+4110): pivot 到 Path B ws remote-control daemon, 870 行 amend
+> - **Pivot 6** (Vincent telegram 4136): **复位 Path C**, "行吧先 mcp 吧"
+>
+> 6 轮 pivot 收敛 rationale (evidence-driven, hands-on multi-client thread streaming experiment falsified Path B 卖点):
+> - 通信SDK马 + 通信龙 双 deep plan 实测发现: 用户 `codex --remote ws://` TUI attach 仅看 lifecycle, **in-progress token streaming 仅 thread owner 收到** (broadcast 模型 + per-client opt-out, 真 per-thread subscriber 待 [issue #21551](https://github.com/openai/codex/issues/21551) stable)
+> - 通信龙 `thread/resume <A's id>` race: `"no rollout found for thread id"` (thread persist 须 disk write 时间)
+> - 实测直接 falsify Path B 卖点 "用户 TUI co-presence 看 anet 跑的 turn live token stream"
+> - 结合 OpenAI 自标 "Under-development incomplete" + 协议本周 stabilize (3 PRs landing #22404 #22414 #22386) + 2x 代码量, Path B trade-off 不再值得
+> - Vincent 4123 "如果不能 TUI 的话" → 4136 "行吧先 mcp 吧" final 决策
+>
+> **Phase 1 ship 改走 [RFC-007](./RFC-007-codex-code-cli-mcp.md) (Path C clean version, runtime `codex-cli-mcp`)**. 本 RFC-006 全文保留作 **Path B 设计 archive + 6 轮 pivot 决策史**, 方便未来 Phase 2 (if TR1-TR3 触发, per RFC-007 §10.1) 启动 RFC-008-like new RFC 时引用 Path B 实施 spec。
+>
+> 实施请参考 [RFC-007](./RFC-007-codex-code-cli-mcp.md)。
+
+---
+
 | 字段 | 内容 |
 |---|---|
-| 状态 | **Proposed**（supersedes RFC-005, supersedes own prior Path C version per Vincent 4108-4110 pivot） |
+| 状态 | **Superseded by RFC-007**（原: Proposed, supersedes RFC-005 + own Path C version per Vincent 4108-4110 pivot, 现 Path B archive per Vincent 4136 final pivot） |
 | 提出 | 2026-05-13 (Path C primary), amended 2026-05-13 (Path B primary per Vincent 4108-4110) |
 | 作者 | 通信SDK马 |
 | 派单 / 决策 | 通信龙（roadmap + architecture pivots + dual deep plan dispatch） |
