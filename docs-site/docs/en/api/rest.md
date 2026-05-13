@@ -316,11 +316,37 @@ curl -X POST http://localhost:9200/api/networks \
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L660)
 
-Get network details.
+Get network details (membership check: caller must be a member of the network or a system admin, otherwise 403).
 
 ```bash
 curl http://localhost:9200/api/networks/net_abc123 \
   -H "Authorization: Bearer utok_xxx"
+```
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "network": {
+    "network_id": "net_abc123",
+    "network_name": "prod",
+    "owner_id": "u_abc123",
+    "description": "Production network",
+    "visibility": "private",
+    "max_members": 50,
+    "created_at": "2026-04-12 10:00:00",
+    "updated_at": "2026-04-12 10:00:00"
+  },
+  "stats": {
+    "nodes": 5,
+    "sessions": 4,
+    "tasks": [
+      { "status": "replied", "count": 42 },
+      { "status": "running", "count": 3 }
+    ]
+  }
+}
 ```
 
 ---
@@ -329,14 +355,22 @@ curl http://localhost:9200/api/networks/net_abc123 \
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L694)
 
-Update network info (owner only).
+Rename a network (owner only).
 
 ```bash
 curl -X PUT http://localhost:9200/api/networks/net_abc123 \
   -H "Authorization: Bearer utok_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"network_name": "development"}'
+  -d '{"name": "development"}'
 ```
+
+**Request body**:
+
+| Field | Type | Required | Description |
+|------|------|:----:|------|
+| `name` | string | &check; | New network name (**note the field is `name`, not `network_name`**; missing returns `name required` 400) |
+
+Writes audit log `action='network_renamed'`.
 
 ---
 
@@ -350,6 +384,8 @@ Delete a network (owner only, must have no active sessions).
 curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
   -H "Authorization: Bearer utok_xxx"
 ```
+
+Writes audit log `action='network_deleted'`.
 
 ---
 

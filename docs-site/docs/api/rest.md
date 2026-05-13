@@ -316,11 +316,37 @@ curl -X POST http://localhost:9200/api/networks \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L660)
 
-获取网络详情。
+获取网络详情（含成员身份校验：必须是该 network 成员或系统 admin，否则 403）。
 
 ```bash
 curl http://localhost:9200/api/networks/net_abc123 \
   -H "Authorization: Bearer utok_xxx"
+```
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "network": {
+    "network_id": "net_abc123",
+    "network_name": "prod",
+    "owner_id": "u_abc123",
+    "description": "生产环境网络",
+    "visibility": "private",
+    "max_members": 50,
+    "created_at": "2026-04-12 10:00:00",
+    "updated_at": "2026-04-12 10:00:00"
+  },
+  "stats": {
+    "nodes": 5,
+    "sessions": 4,
+    "tasks": [
+      { "status": "replied", "count": 42 },
+      { "status": "running", "count": 3 }
+    ]
+  }
+}
 ```
 
 ---
@@ -329,14 +355,22 @@ curl http://localhost:9200/api/networks/net_abc123 \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L694)
 
-修改网络信息（仅 owner）。
+重命名网络（仅 owner）。
 
 ```bash
 curl -X PUT http://localhost:9200/api/networks/net_abc123 \
   -H "Authorization: Bearer utok_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"network_name": "development"}'
+  -d '{"name": "development"}'
 ```
+
+**请求体**：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|:----:|------|
+| `name` | string | &check; | 新网络名（**注意字段名是 `name` 不是 `network_name`**；缺失时返回 `name required` 400） |
+
+写 audit log `action='network_renamed'`。
 
 ---
 
@@ -350,6 +384,8 @@ curl -X PUT http://localhost:9200/api/networks/net_abc123 \
 curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
   -H "Authorization: Bearer utok_xxx"
 ```
+
+写 audit log `action='network_deleted'`。
 
 ---
 
