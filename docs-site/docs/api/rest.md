@@ -545,6 +545,36 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
   -H "Authorization: Bearer utok_xxx"
 ```
 
+**响应**：
+
+```json
+{
+  "ok": true,
+  "audit_log": [
+    {
+      "user_id": "u_abc123",
+      "username": "alice",
+      "action": "password_reset_by_admin",
+      "target_type": "user",
+      "target_id": "u_def456",
+      "detail": "local cli reset-user",
+      "created_at": "2026-04-12 10:00:00"
+    },
+    {
+      "user_id": "u_abc123",
+      "username": "alice",
+      "action": "create_network",
+      "target_type": "network",
+      "target_id": "net_xyz789",
+      "detail": "name=prod",
+      "created_at": "2026-04-12 09:55:00"
+    }
+  ]
+}
+```
+
+`audit_log` 表 schema 见 [`agent-network/bin/cli.ts:2171`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2171)（INSERT 语句明确列）。常见 `action` 值：`password_reset_by_admin` / `register` / `login` / `create_network` / `send_task` / `report_status` 等。
+
 ---
 
 ### GET /api/users

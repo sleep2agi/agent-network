@@ -545,6 +545,36 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
   -H "Authorization: Bearer utok_xxx"
 ```
 
+**Response**:
+
+```json
+{
+  "ok": true,
+  "audit_log": [
+    {
+      "user_id": "u_abc123",
+      "username": "alice",
+      "action": "password_reset_by_admin",
+      "target_type": "user",
+      "target_id": "u_def456",
+      "detail": "local cli reset-user",
+      "created_at": "2026-04-12 10:00:00"
+    },
+    {
+      "user_id": "u_abc123",
+      "username": "alice",
+      "action": "create_network",
+      "target_type": "network",
+      "target_id": "net_xyz789",
+      "detail": "name=prod",
+      "created_at": "2026-04-12 09:55:00"
+    }
+  ]
+}
+```
+
+The `audit_log` schema is in [`agent-network/bin/cli.ts:2171`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2171) (INSERT statement enumerates columns). Common `action` values: `password_reset_by_admin` / `register` / `login` / `create_network` / `send_task` / `report_status` etc.
+
 ---
 
 ### GET /api/users
