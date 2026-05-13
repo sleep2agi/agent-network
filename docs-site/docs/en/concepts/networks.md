@@ -260,8 +260,8 @@ CREATE TABLE networks (
   network_name TEXT NOT NULL,
   owner_id     TEXT NOT NULL,
   description  TEXT,
-  visibility   TEXT DEFAULT 'private',  -- private/public
-  max_members  INTEGER DEFAULT 50,
+  visibility   TEXT DEFAULT 'private',  -- private/public (**field exists but currently inert** — see [Quota limits — v0.6 design / currently not enforced](#quota-limits-v0-6-design--currently-not-enforced))
+  max_members  INTEGER DEFAULT 50,       -- **field exists, server-side enforcement is OFF**: addNetworkMember + joinByInvite have no max_members gate. Reserved for the v0.6 quota system. See the quota-limits section below.
   created_at   TEXT DEFAULT (datetime('now')),
   updated_at   TEXT DEFAULT (datetime('now'))
 );
