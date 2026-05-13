@@ -322,7 +322,7 @@ anet tasks [status] [--limit <n>]
 
 | 参数 | 说明 |
 |------|------|
-| `status` | 按状态过滤：`delivered` / `running` / `replied` / `failed` / `cancelled` |
+| `status` | 按状态过滤；任何 [Task 生命周期状态机](/concepts/task-lifecycle#状态说明) 中的状态都可传（`delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired`） |
 | `--limit` | 显示条数（默认 20） |
 
 **示例**：

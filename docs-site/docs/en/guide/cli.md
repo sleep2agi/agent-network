@@ -304,7 +304,7 @@ anet tasks [status] [--limit <n>]
 
 | Parameter | Description |
 |------|------|
-| `status` | Filter by status: `delivered` / `running` / `replied` / `failed` / `cancelled` |
+| `status` | Filter by status; any state from the [Task lifecycle state machine](/en/concepts/task-lifecycle#status-reference) is accepted (`delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired`) |
 | `--limit` | Number of items (default 20) |
 
 **Examples**:
