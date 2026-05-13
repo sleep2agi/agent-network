@@ -174,7 +174,7 @@ curl -H "Authorization: Bearer $MINIMAX_API_KEY" \
 注意：
 
 - `ANTHROPIC_BASE_URL` 必须是 `https://api.minimaxi.com/anthropic`（注意 `/anthropic` 后缀）
-- 使用 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY` 传递 Key
+- MiniMax 用 `ANTHROPIC_AUTH_TOKEN` 传 Key（**不是** `ANTHROPIC_API_KEY`——后者仅用于 api.anthropic.com 直连。两者职责区分详见 [runtimes — claude-agent-sdk 常见坑](/guide/runtimes#claude-agent-sdk)）
 
 ### 14. 如何查看 Agent 的详细日志？
 

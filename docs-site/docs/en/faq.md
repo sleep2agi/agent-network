@@ -174,7 +174,7 @@ curl -H "Authorization: Bearer $MINIMAX_API_KEY" \
 Note:
 
 - `ANTHROPIC_BASE_URL` must be `https://api.minimaxi.com/anthropic` (note the `/anthropic` suffix)
-- Use `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` for the key
+- MiniMax uses `ANTHROPIC_AUTH_TOKEN` for the key (**not** `ANTHROPIC_API_KEY` — the latter is only for direct api.anthropic.com calls; see [runtimes — claude-agent-sdk pitfalls](/en/guide/runtimes#claude-agent-sdk))
 
 ### 14. How do I view detailed agent logs?
 
