@@ -284,14 +284,19 @@ curl http://localhost:9200/api/networks \
       "network_id": "net_abc123",
       "network_name": "default",
       "owner_id": "u_abc123",
-      "member_role": "owner",
+      "description": "Auto-created default network",
+      "settings": null,
       "visibility": "private",
       "max_members": 50,
-      "created_at": "2026-04-12 10:00:00"
+      "created_at": "2026-04-12 10:00:00",
+      "updated_at": "2026-04-12 10:00:00",
+      "member_role": "owner"
     }
   ]
 }
 ```
+
+`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`server/src/db.ts:167-176`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L167) 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
 
 ---
 
@@ -345,6 +350,7 @@ curl http://localhost:9200/api/networks/net_abc123 \
     "network_name": "prod",
     "owner_id": "u_abc123",
     "description": "生产环境网络",
+    "settings": null,
     "visibility": "private",
     "max_members": 50,
     "created_at": "2026-04-12 10:00:00",
@@ -360,6 +366,8 @@ curl http://localhost:9200/api/networks/net_abc123 \
   }
 }
 ```
+
+`network` 对象 9 字段 = `SELECT * FROM networks WHERE network_id = ?1` ([`server/src/index.ts:668`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L668)) 完整 schema (含 v3 migration `visibility` + `max_members`)。`settings` 字段保留作未来 per-network JSON 配置，目前为 `null`。`stats.tasks` 按 status 聚合（同 [GET /api/stats](#get-api-stats) 内嵌结构）。
 
 ---
 

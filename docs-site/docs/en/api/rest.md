@@ -284,14 +284,19 @@ curl http://localhost:9200/api/networks \
       "network_id": "net_abc123",
       "network_name": "default",
       "owner_id": "u_abc123",
-      "member_role": "owner",
+      "description": "Auto-created default network",
+      "settings": null,
       "visibility": "private",
       "max_members": 50,
-      "created_at": "2026-04-12 10:00:00"
+      "created_at": "2026-04-12 10:00:00",
+      "updated_at": "2026-04-12 10:00:00",
+      "member_role": "owner"
     }
   ]
 }
 ```
+
+Each row in `networks` has 10 fields: the 9 `networks` table columns ([`server/src/db.ts:167-176`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L167), including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
 
 ---
 
@@ -345,6 +350,7 @@ curl http://localhost:9200/api/networks/net_abc123 \
     "network_name": "prod",
     "owner_id": "u_abc123",
     "description": "Production network",
+    "settings": null,
     "visibility": "private",
     "max_members": 50,
     "created_at": "2026-04-12 10:00:00",
@@ -360,6 +366,8 @@ curl http://localhost:9200/api/networks/net_abc123 \
   }
 }
 ```
+
+The `network` object has 9 fields = `SELECT * FROM networks WHERE network_id = ?1` ([`server/src/index.ts:668`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L668)), including the v3 migrations `visibility` + `max_members`. The `settings` column is reserved for future per-network JSON config and is currently always `null`. `stats.tasks` is aggregated by status (same shape as the nested `tasks.by_status` in [GET /api/stats](#get-api-stats)).
 
 ---
 
