@@ -148,7 +148,7 @@ CommHub 提供 17 个 MCP Tools，分为两组：
 | `get_inbox` | 拉取待处理的消息 |
 | `ack_inbox` | 确认消息已接收 |
 
-**Hub 端工具（14 个）** -- 指挥室/Dashboard 管理任务：
+**Hub 端工具（13 个）** -- 指挥室/Dashboard 管理任务：
 
 | 工具 | 说明 |
 |------|------|

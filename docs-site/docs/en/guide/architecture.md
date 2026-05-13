@@ -148,7 +148,7 @@ CommHub provides 17 MCP Tools in two groups:
 | `get_inbox` | Fetch pending messages |
 | `ack_inbox` | Acknowledge message receipt |
 
-**Hub-side tools (14)** -- command center / Dashboard manages tasks:
+**Hub-side tools (13)** -- command center / Dashboard manages tasks:
 
 | Tool | Description |
 |------|------|
