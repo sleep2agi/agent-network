@@ -61,54 +61,92 @@ const agent = new Agent({
 
 ---
 
-## 2. 配置文件
+## 2. 配置文件 — R222 校准（v0.8 实际 schema）
 
-### 路径和优先级
+### 路径和优先级（项目→全局 字段级合并）
 
 ```
-环境变量（COMMHUB_URL / COMMHUB_ALIAS / COMMHUB_AUTH_TOKEN）
+环境变量（COMMHUB_URL / COMMHUB_TOKEN / COMMHUB_ALIAS）
   ↓ 未设置时
-命令行参数（--hub / --alias / --token）
+命令行参数（--hub / --token / --alias / --runtime / --model 等）
   ↓ 未指定时
-项目配置 {cwd}/.anet/config.json
-  ↓ 未找到时
+项目配置 {cwd}/.anet/nodes/<alias>/config.json   ← R222 校准: per-node 子目录, 不是 .anet/config.json
+  ↓ 字段缺失 fallback
 全局配置 ~/.anet/config.json
   ↓ 未找到时
-默认值（hub=http://127.0.0.1:9200, type=claude-code）
+默认值（hub=http://127.0.0.1:9200, runtime=claude-agent-sdk）
 ```
+
+verify [`cli.ts:224 loadProfile`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L224):
+```ts
+const p = join(nodesDir(), id, "config.json");  // .anet/nodes/<id>/config.json
+```
+跟 [feedback_config_priority] memory 一致："项目 config 字段级覆盖全局，缺失字段 fallback 到全局"。
 
 ### 全局配置 `~/.anet/config.json`
 
-跨项目共享，`anet setup` 首次运行时创建。
+跨项目共享，`anet init` / `anet login` 首次运行时创建（不是旧 doc 写的 `anet setup` —— V2 命名已废）。
 
 ```json
 {
   "hub": "http://YOUR_COMMHUB_IP:9200",
-  "token": "your-auth-token"
+  "token": "utok_xxxxxx",
+  "network_id": "net_xxxxx"
 }
 ```
 
 | 字段 | 必需 | 说明 |
 |------|------|------|
 | hub | ✅ | CommHub Server URL |
-| token | | Bearer auth token |
+| token | | User token (`utok_` prefix per v0.8 双 Token 体系) |
+| network_id | | 当前激活 network (由 `anet network use <name>` 写入) |
 
-### 项目配置 `{workpath}/.anet/config.json`
+### 项目 Node 配置 `{cwd}/.anet/nodes/<alias>/config.json`
 
-每个项目独立，`anet setup` 运行时创建。
+每个 node 独立目录，`anet node create <alias>` 运行时创建（不是 V2 时代单 `.anet/config.json`）。
 
 ```json
 {
-  "alias": "开发马",
-  "type": "claude-code"
+  "anet_version": "0.1.0",
+  "node_id": "n_a1b2c3d4",
+  "node_name": "开发马",
+  "runtime": "claude-agent-sdk",
+  "model": "<model-id>",
+  "session": "550e8400-e29b-41d4-a716-446655440000",
+  "channels": ["server:commhub"],
+  "tools": [],
+  "env": {},
+  "flags": { "dangerouslySkipPermissions": true, "teammateMode": "in-process", "maxTurns": 20, "logLevel": "info" }
 }
+```
+
+verify [`cli.ts:242-261 saveProfile`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L242):
+```ts
+const toSave: Record<string, any> = {
+  anet_version, node_id, node_name, runtime,
+  ...(hub ? { hub } : {}), ...(token ? { token } : {}),
+  ...(model ? { model } : {}), ...(tools ? { tools } : {}),
+  channels: ..., env: ..., flags: ...,
+  ...(session ? { session } : {}),
+};
 ```
 
 | 字段 | 必需 | 说明 |
 |------|------|------|
-| alias | ✅ | Agent 别名 |
-| type | | claude-code / sdk |
-| hub | | 覆盖全局 hub（跨网络场景） |
+| `anet_version` | ✅ | schema 版本 (`0.1.0`) |
+| `node_id` | ✅ | 不可变 `n_` + 8 hex (R219 chain) |
+| `node_name` | ✅ | Agent 别名 = hub 端 alias (可 `anet node rename`) |
+| `runtime` | ✅ | `claude-agent-sdk` (默认) / `codex-sdk` / `claude-code-cli` / `http-api` (legacy) |
+| `model` | | LLM model id |
+| `session` | | 续会话 ID (claude-code-cli: Claude Code session UUID; codex-sdk: Codex Thread id, 详见 [feedback_anet_session_field]) |
+| `channels` | | array, 例 `["server:commhub", "telegram"]` |
+| `tools` | | array, claude-agent-sdk allowlist |
+| `env` | | object, agent-node 启动时 inject 子进程 env |
+| `flags` | | object, runtime-specific flags (`dangerouslySkipPermissions` / `teammateMode` / `maxTurns` / `logLevel` ...) |
+| `hub` | | 覆盖全局 hub（跨网络场景） |
+| `token` | | 覆盖全局 token（per-node ntok_ 场景） |
+
+R222 校准：原 doc 写「`{alias, type}` 2 字段」是 V2 早期 schema，当前 schema 12+ 字段 + 路径是 `.anet/nodes/<alias>/config.json` 不是 `.anet/config.json`。
 
 ---
 
