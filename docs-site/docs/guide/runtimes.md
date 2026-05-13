@@ -7,7 +7,7 @@
 | Runtime | 内核 | 适用场景 | 主推模型 | 鉴权 |
 |---|---|---|---|---|
 | `claude-code-cli` | spawn 本地 `claude` 命令 | 想"像在终端用 Claude"那样干活 | Claude Sonnet / Opus（订阅） | `claude` CLI 已登录 |
-| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | 编程式调用 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo | API Key |
+| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | 编程式调用任何 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter | API Key |
 | `codex-sdk` | `@openai/codex-sdk` | 写代码 / 跑命令 | OpenAI Codex（gpt-5 等） | `codex auth login` |
 
 ::: tip 不知道怎么选？
@@ -115,12 +115,13 @@ anet node start my-bot
 
 ### 前置
 
-这个 runtime **不需要你额外装任何二进制**——`@anthropic-ai/claude-agent-sdk` 已经随 `@sleep2agi/agent-node@2.3.0` 一起 bundle 进来了。你只要装 anet 本体 + 准备好一个 API Key。
+这个 runtime **不需要你额外装任何二进制**——`@anthropic-ai/claude-agent-sdk` 在 [`@sleep2agi/agent-node` 的 `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里，`npm install -g @sleep2agi/agent-node` 时自动一起装（不是打进 dist 里 bundle，build flag 是 `--external`，但 sub-dep 解析时会拉下来）。你只要装 anet 本体 + 准备好一个 API Key。
 
 **1. 安装 anet**（如果还没装）：
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.1.7
+npm install -g @sleep2agi/agent-network
+# 当前 latest 见 https://www.npmjs.com/package/@sleep2agi/agent-network
 ```
 
 **2. 准备 API Key**（任选一家）：
@@ -129,15 +130,15 @@ npm install -g @sleep2agi/agent-network@2.1.7
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | https://console.anthropic.com |
 | MiniMax | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` | MiniMax 开放平台 |
-| DeepSeek / GLM / Kimi / 书生 / 小米 MiMo | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<对应 endpoint>` | 各家开放平台 |
+| DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<对应 endpoint>` | 各家开放平台 |
 
-国产模型的完整 endpoint 表见 [多模型配置](/guide/multi-model)。
+国产模型 + OpenRouter 完整 endpoint 表见 [多模型配置](/guide/multi-model)。
 
 **3. 验证**：
 
 ```bash
 anet --version
-# 期望输出：2.1.7
+# 期望输出：当前 anet 版本号（npm latest tag）
 
 # 启起来一个节点后看进程
 anet node start planner
@@ -229,7 +230,7 @@ anet node create translator \
 
 ### 前置
 
-`@openai/codex-sdk` 已经 bundle 在 `@sleep2agi/agent-node@2.3.0` 里，但 SDK **本身要 spawn 一个 `codex` 二进制**——所以你还得把 codex CLI 全局装一遍。
+`@openai/codex-sdk` 在 [`@sleep2agi/agent-node` 的 optional `peerDependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) 里（不是常规 deps）—— npm 7+ 默认会跟着 agent-node 一起拉下来，**但 SDK 本身要 spawn 一个 `codex` 二进制**，所以你还得把 codex CLI 全局装一遍。如果 `anet node start` 抛 `Cannot find module '@openai/codex-sdk'`，手动补一下：`npm install -g @openai/codex-sdk`。
 
 **1. 安装 codex CLI**（npm 全局包）：
 

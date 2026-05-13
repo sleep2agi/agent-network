@@ -7,7 +7,7 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 | Runtime | Engine | When to pick | Default models | Auth |
 |---|---|---|---|---|
 | `claude-code-cli` | spawn local `claude` CLI | Reuse your Claude subscription | Claude Sonnet / Opus | `claude` already logged in |
-| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo | API Key |
+| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter | API Key |
 | `codex-sdk` | `@openai/codex-sdk` | Code writing / shell commands | OpenAI Codex (gpt-5 etc) | `codex auth login` |
 
 ::: tip Not sure which one?
@@ -115,12 +115,13 @@ Programmatic access to **any Anthropic-compatible API** — Anthropic by default
 
 ### Prerequisites
 
-This runtime **requires no extra binary** — `@anthropic-ai/claude-agent-sdk` is bundled inside `@sleep2agi/agent-node@2.3.0`. All you need is anet itself plus an API key.
+This runtime **requires no extra binary** — `@anthropic-ai/claude-agent-sdk` lives in [`@sleep2agi/agent-node`'s `dependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json), so `npm install -g @sleep2agi/agent-node` pulls it in automatically (it's not baked into the dist — the build is marked `--external` — but it gets resolved as a sub-dependency at install time). All you need is anet itself plus an API key.
 
 **1. Install anet** (if you haven't):
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.1.7
+npm install -g @sleep2agi/agent-network
+# Current latest tag: https://www.npmjs.com/package/@sleep2agi/agent-network
 ```
 
 **2. Get an API key** (pick one provider):
@@ -129,7 +130,7 @@ npm install -g @sleep2agi/agent-network@2.1.7
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | https://console.anthropic.com |
 | MiniMax | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic` | MiniMax platform |
-| DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<provider endpoint>` | Each provider's platform |
+| DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL=<provider endpoint>` | Each provider's platform |
 
 Full provider endpoint table: [Multi-model setup](/en/guide/multi-model).
 
@@ -137,7 +138,7 @@ Full provider endpoint table: [Multi-model setup](/en/guide/multi-model).
 
 ```bash
 anet --version
-# Expected: 2.1.7
+# Expected: the current anet version (npm latest tag)
 
 # Start a node and check the logs
 anet node start planner
@@ -217,7 +218,7 @@ OpenAI **Codex CLI** runtime — best for writing code and running shell command
 
 ### Prerequisites
 
-`@openai/codex-sdk` ships inside `@sleep2agi/agent-node@2.3.0`, but the SDK **spawns a `codex` binary under the hood** — so you still have to install the codex CLI globally.
+`@openai/codex-sdk` lives in [`@sleep2agi/agent-node`'s optional `peerDependencies`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/package.json) (not regular `dependencies`) — npm 7+ pulls it in alongside agent-node by default, **but the SDK spawns a `codex` binary under the hood**, so you still have to install the codex CLI globally. If `anet node start` throws `Cannot find module '@openai/codex-sdk'`, install it manually: `npm install -g @openai/codex-sdk`.
 
 **1. Install codex CLI** (npm global):
 
