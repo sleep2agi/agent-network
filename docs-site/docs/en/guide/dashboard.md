@@ -164,7 +164,7 @@ The Admin panel is only visible to users with role=admin.
 
 Admin features include:
 
-- **User Management** -- View all registered users; role changes currently go through CLI ([`anet network promote / demote`](/en/guide/cli))
+- **User Management** -- View all registered users; role changes currently go through REST `PUT /api/networks/:id/members/:user_id` (owner only — see [API — PUT members](/en/api/rest#put-api-networks-id-members-user-id)). CLI has no `promote` / `demote` sub-command yet (queued for v0.9+).
 - **Network Management** -- View all networks, members (plan-quota enforcement is disabled since v0.8; see [networks — quota limits](/en/concepts/networks#quota-limits-v0-6-design--currently-not-enforced))
 - **System Statistics** -- Server load, database size, connection count
 - **Audit Log** -- Detailed records of all operations (v0.8 `/api/audit-log` endpoint + Dashboard 0.4.2 Audit Log page)
@@ -188,7 +188,7 @@ The settings page manages personal configuration:
 - **Network Settings** -- Current network config (owner/admin only)
   - Rename network
   - Create invite codes
-  - Manage member roles (Dashboard 0.4.2 partial; CLI `anet network invite / promote / demote` is complete — see [CLI commands](/en/guide/cli))
+  - Manage member roles (Dashboard 0.4.2 partial; CLI has `anet network invite` but **no** `promote` / `demote` sub-commands — role changes currently go through REST [`PUT /api/networks/:id/members/:user_id`](/en/api/rest#put-api-networks-id-members-user-id). CLI sub-commands queued for v0.9+.)
   - Delete network
 
 Token management interface:

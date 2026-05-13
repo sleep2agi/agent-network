@@ -164,7 +164,7 @@ Admin 面板仅对 role=admin 的用户可见。
 
 管理功能包括：
 
-- **用户管理** -- 查看所有注册用户；修改角色当前走 CLI（[`anet network promote / demote`](/guide/cli)）
+- **用户管理** -- 查看所有注册用户；修改角色当前走 REST `PUT /api/networks/:id/members/:user_id`（owner only，详见 [API — PUT members](/api/rest#put-api-networks-id-members-user-id)），CLI 暂无 `promote` / `demote` 子命令（排在 v0.9+）
 - **网络管理** -- 查看所有网络、成员（配额体系 v0.8 起不再启用，详见 [networks 配额限制](/concepts/networks#配额限制-v0-6-设计目标-当前未启用)）
 - **系统统计** -- 服务器负载、数据库大小、连接数
 - **审计日志** -- 所有操作的详细记录（v0.8 `/api/audit-log` 端点 + Dashboard 0.4.2 Audit Log 页）
@@ -188,7 +188,7 @@ Admin 面板仅对 role=admin 的用户可见。
 - **网络设置** -- 当前网络的配置（仅 owner/admin）
   - 重命名网络
   - 创建邀请码
-  - 管理成员角色（v0.8.2 Dashboard 部分功能未上 UI，CLI `anet network invite / promote / demote` 全开，详见 [CLI 命令](/guide/cli)）
+  - 管理成员角色（v0.8.2 Dashboard 部分功能未上 UI；CLI 有 `anet network invite` 但**无** `promote` / `demote` 子命令，改角色目前走 REST [`PUT /api/networks/:id/members/:user_id`](/api/rest#put-api-networks-id-members-user-id)；CLI 子命令排在 v0.9+）
   - 删除网络
 
 Token 管理界面：
