@@ -1,10 +1,11 @@
 # Channel 插件踩坑经验
 
 > **适用范围**：本文是给**实现 Claude Code Channel 插件**（telegram / commhub / wechat / feishu 等）的开发者看的内部踩坑记录。
-> 
-> - 内容时效：基于 V2 ~ V3 早期 channel 插件开发（2026-03 ~ 04），核心概念（`meta.user` / MCP server name / ensureMcpJson / config.json 继承）在 v0.8 阶段仍有效。
+>
+> - 内容时效：源自 V2 ~ V3 早期 channel 插件开发（2026-03 ~ 04），R216 (2026-05-13) 对照 `agent-network/bin/cli.ts:1480-1559` + `agent-network/src/node-server.ts` + `channel/commhub-channel.ts` 做了 v0.8 source-of-truth 校准；核心概念（`meta.user` / MCP server name `commhub-channel` / `ensureMcpJson` / config.json 继承）仍有效。
 > - 不适用于：anet 终端用户、agent 编写者。普通用户看 [https://anet.sh/concepts/channels](https://anet.sh/concepts/channels)。
 > - 官方参考：[claude-plugins-official/telegram](https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/telegram)
+> - **channel 暴露的 5 个 MCP tool**：`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`（[channel/commhub-channel.ts:138-196](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L138)；`get_inbox` 故意不在列，agent 通过 SSE 自动轮询 inbox）。
 
 ## 1. meta.user 字段决定 Channel 显示名
 
@@ -63,9 +64,9 @@ if (!hasCommhub) {
 }
 ```
 
-## 4. node-server.ts 要对比更新，不能跳过已存在
+## 4. node-server.js 要对比更新，不能跳过已存在
 
-npm 包更新后，项目里的 `.anet/node-server.ts` 需要同步。不能因为文件存在就跳过。
+npm 包更新后，项目里的 `.anet/node-server.js`（**注意：是 `.js` 不是 `.ts`** —— anet 把源文件复制为 `.js` 落到项目 `.anet/` 下）需要同步。不能因为文件存在就跳过。
 
 ```typescript
 // 对比内容，不同才更新
@@ -75,6 +76,13 @@ if (src !== dst) {
   writeFileSync(localPath, src);
 }
 ```
+
+verify [`agent-network/bin/cli.ts:1490-1524`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1490)：源文件搜索顺序为
+1. `dist/src/node-server.js`（npm 包混淆后产物，优先）
+2. `src/node-server.ts`（开发环境源码）
+3. `npm root -g/@sleep2agi/agent-network/...` 全局安装路径兜底
+
+最终都落盘为项目 `.anet/node-server.js`，`.mcp.json.mcpServers.commhub.args = [".anet/node-server.js"]`（cli.ts:1548）。
 
 ## 5. config.json 全局继承规则
 
