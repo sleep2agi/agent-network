@@ -509,12 +509,14 @@ Team sharing a single bot:
 anet channel add telegram <node-id> --bot-token <tok> --allow 123456789
 
 # Add a second person — edit access.json directly (CLI doesn't take multiple --allow)
+# Replace 987654321 with the other person's Telegram numeric ID (have them run /start in @userinfobot)
 python3 -c "
 import json
 p = '/home/<user>/.anet/nodes/<node-id>/channels/telegram/access.json'
 d = json.load(open(p))
-if '9988776655' not in d['allowFrom']:
-    d['allowFrom'].append('9988776655')
+SECOND_USER_ID = '987654321'   # ← replace with the other person's Telegram numeric ID
+if SECOND_USER_ID not in d['allowFrom']:
+    d['allowFrom'].append(SECOND_USER_ID)
 json.dump(d, open(p, 'w'), indent=2)
 "
 

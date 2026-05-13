@@ -509,12 +509,14 @@ team 共用一个 bot：
 anet channel add telegram <node-id> --bot-token <tok> --allow 123456789
 
 # 再加第二个人 — 直接编 access.json，命令不支持多个 allow
+# 把 987654321 替换成对方的 Telegram numeric ID（让对方在 @userinfobot 跑 /start 获取）
 python3 -c "
 import json
 p = '/home/<user>/.anet/nodes/<node-id>/channels/telegram/access.json'
 d = json.load(open(p))
-if '9988776655' not in d['allowFrom']:
-    d['allowFrom'].append('9988776655')
+SECOND_USER_ID = '987654321'   # ← 替换成对方的 Telegram numeric ID
+if SECOND_USER_ID not in d['allowFrom']:
+    d['allowFrom'].append(SECOND_USER_ID)
 json.dump(d, open(p, 'w'), indent=2)
 "
 
