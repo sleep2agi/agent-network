@@ -170,7 +170,19 @@ Full endpoint docs: [PUT members](/en/api/rest#put-api-networks-id-members-user-
 ## FAQ
 
 **Q: After `anet login`, what role do I have?**
-A: It depends on the user's role in the current network. `anet whoami` shows it.
+A: `anet whoami`'s `Role:` field is the **system-level role** (`users.role` — either `admin` or `user`), **not the per-network role** (verified at [`agent-network/bin/cli.ts:3127-3148 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3127)):
+
+```
+  User: admin (u_xxxxxx)
+  Role: admin              ← system-level users.role ('admin' / 'user'), NOT the network role
+  Hub:  http://127.0.0.1:9200
+
+  Networks:
+    default (net_xxxxxxxxx) ← current
+    my-team (net_yyyyyyyyy)
+```
+
+To check your role **within the current network** (owner/admin/member/viewer), run `anet network members` and find your own row (bound to `network_members` — a separate state from `users.role`).
 
 **Q: Can the same user have different roles in different networks?**
 A: Yes. Roles are per-network.

@@ -209,11 +209,18 @@ curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
 ## FAQ
 
 **Q：我 `anet login` 后是什么 role？**
-A：看你登录的用户在当前 network 的 role。`anet whoami` 能看：
+A：`anet whoami` 输出的 `Role:` 是**系统级 role**（`users.role` —— `admin` 或 `user`），**不是 per-network role**（verify [`agent-network/bin/cli.ts:3127-3148 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3127)）：
 ```
-admin (admin)        ← user 名 + 当前 network 的 role
-network: default
+  User: admin (u_xxxxxx)
+  Role: admin              ← users.role 系统级（'admin' / 'user'），不是 network role
+  Hub:  http://127.0.0.1:9200
+
+  Networks:
+    default (net_xxxxxxxxx) ← current
+    my-team (net_yyyyyyyyy)
 ```
+
+要查**当前 network 内**你是 owner/admin/member/viewer 哪一个，跑 `anet network members` 看自己那行（绑定到 `network_members` 表，跟 `users.role` 系统级是两套独立 state）。
 
 **Q：能跨 network 用不同 role 吗？**
 A：能。同一个 user 在 networkA 是 admin，在 networkB 是 viewer，完全 OK。每个 network 独立 role。
