@@ -70,6 +70,12 @@ anet node create 长文助手 --runtime claude-agent-sdk
 ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=你的MiMo-API-Key \
 anet node create 推理助手 --runtime claude-agent-sdk --model mimo-v2.5-pro
+
+# OpenRouter（一个 Key 接 GPT-4 / Claude / Gemini / Llama 等所有上游）
+ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
+ANTHROPIC_AUTH_TOKEN=你的OpenRouter-API-Key \
+anet node create 多模型助手 --runtime claude-agent-sdk --model anthropic/claude-sonnet-4
+# OpenRouter model id 用 'provider/model' 格式, 完整列表见 https://openrouter.ai/models
 ```
 :::
 

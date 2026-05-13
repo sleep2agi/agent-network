@@ -114,6 +114,23 @@ anet node start mimo-bot
 | `ANTHROPIC_BASE_URL` | `https://api.xiaomimimo.com/anthropic` |
 | `ANTHROPIC_AUTH_TOKEN` | Xiaomi MiMo API Key (sign up at [platform.xiaomimimo.com](https://platform.xiaomimimo.com)) |
 
+### OpenRouter (claude-agent-sdk)
+
+OpenRouter is a multi-model gateway — one API key, all upstream models (GPT-4, Claude, Gemini, Llama, etc.) with unified billing.
+
+```bash
+ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1 \
+ANTHROPIC_AUTH_TOKEN=your-openrouter-api-key \
+anet node create multi-bot --runtime claude-agent-sdk --model anthropic/claude-sonnet-4
+anet node start multi-bot
+```
+
+| Environment Variable | Value |
+|---------|-----|
+| `ANTHROPIC_BASE_URL` | `https://openrouter.ai/api/v1` |
+| `ANTHROPIC_AUTH_TOKEN` | OpenRouter API Key (sign up at [openrouter.ai](https://openrouter.ai)) |
+| `--model` | `provider/model` format (e.g. `anthropic/claude-sonnet-4`, `openai/gpt-4o`); full list at [openrouter.ai/models](https://openrouter.ai/models) |
+
 ## ANTHROPIC_BASE_URL Mechanism {#how-anthropic-base-url-works}
 
 The `claude-agent-sdk` runtime uses the `ANTHROPIC_BASE_URL` environment variable to route requests to compatible API endpoints. This is the core model-mapping mechanism:
