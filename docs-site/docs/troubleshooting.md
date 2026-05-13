@@ -584,33 +584,49 @@ anet doctor
 ### 手动检查清单
 
 ```bash
-# 1. Server 健康
+# 1. Server 健康（含 SSE 连接数 + sessions / license / uptime，无需 auth）
 curl http://localhost:9200/health
+# 关注字段: ok / version / sessions_count / sse_connections / sse_sessions / uptime
+# verify: server/src/index.ts:718-733
 
-# 2. 认证有效
+# 2. 认证有效 + 看所有 session 状态汇总
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
+# 返回 sessions[] 全列 + summary { idle, working, offline, total }
+# ⚠ status query param 不生效 — server 端不按 status 过滤（server/src/index.ts:750-768）。
+#   要筛 idle agent，本地用 jq： curl ... /api/status | jq '.sessions[] | select(.status=="idle")'
 
-# 3. Agent 在线
-curl -H "Authorization: Bearer ntok_xxx" "http://localhost:9200/api/status?status=idle"
-
-# 4. 数据库大小
+# 3. 数据库大小
 ls -lh ~/.commhub/commhub.db
 
-# 5. SSE 连接数
+# 4. 任务 / 节点 / session 统计（非 SSE 连接数）
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/stats
+# 返回 tasks { total, by_status } / sessions { by_status } / nodes { total } / recent_tasks[5]
+# verify: server/src/index.ts:949-985
 ```
+
+::: tip 全 30+ endpoint 索引
+跳 [REST API → 基础信息表](/api/rest) 看完整 endpoint 分类（11 类含 SSE / Tmux opt-in / Legacy 等）。
+:::
 
 ### 日志级别
 
-Agent Node 支持调整日志级别：
+Agent Node 支持调整日志级别（**top-level 字段，不在 `flags` 里**）：
 
 ```json
-// config.json
+// config.json (.anet/nodes/<alias>/config.json)
 {
-  "flags": {
-    "logLevel": "debug"  // debug / info / warn / error
-  }
+  "logLevel": "debug"   // debug / info / warn / error
 }
+```
+
+verify [`agent-node/src/cli.ts:187`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L187)：`LOG_LEVEL` 从 `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` 取，**只认 top-level `logLevel`**，写在 `flags.logLevel` 不生效。
+
+也可以走环境变量或命令行：
+
+```bash
+LOG_LEVEL=debug anet node start <alias>
+# 或
+anet node start <alias> --log-level debug
 ```
 
 ## 还有问题？

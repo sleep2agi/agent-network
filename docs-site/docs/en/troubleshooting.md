@@ -585,33 +585,50 @@ anet doctor
 ### Manual Checklist
 
 ```bash
-# 1. Server health
+# 1. Server health (includes SSE connection count + sessions / license / uptime, no auth required)
 curl http://localhost:9200/health
+# Key fields: ok / version / sessions_count / sse_connections / sse_sessions / uptime
+# Verified at server/src/index.ts:718-733
 
-# 2. Valid auth
+# 2. Valid auth + summary of all session states
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
+# Returns sessions[] (full list) + summary { idle, working, offline, total }
+# ⚠ The status query param is NOT honored — the server does not filter by status
+#   (server/src/index.ts:750-768). Filter idle agents locally with jq:
+#   curl ... /api/status | jq '.sessions[] | select(.status=="idle")'
 
-# 3. Agents online
-curl -H "Authorization: Bearer ntok_xxx" "http://localhost:9200/api/status?status=idle"
-
-# 4. Database size
+# 3. Database size
 ls -lh ~/.commhub/commhub.db
 
-# 5. SSE connection count
+# 4. Task / node / session aggregates (NOT the SSE connection count)
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/stats
+# Returns tasks { total, by_status } / sessions { by_status } / nodes { total } / recent_tasks[5]
+# Verified at server/src/index.ts:949-985
 ```
+
+::: tip Full 30+ endpoint index
+See [REST API → metadata table](/en/api/rest) for the full endpoint catalog (11 categories including SSE / Tmux opt-in / Legacy etc.).
+:::
 
 ### Log Levels
 
-Agent Node supports adjustable log levels:
+Agent Node supports adjustable log levels (**top-level field — not nested under `flags`**):
 
 ```json
-// config.json
+// config.json (.anet/nodes/<alias>/config.json)
 {
-  "flags": {
-    "logLevel": "debug"  // debug / info / warn / error
-  }
+  "logLevel": "debug"   // debug / info / warn / error
 }
+```
+
+Verified at [`agent-node/src/cli.ts:187`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L187): `LOG_LEVEL` is read from `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` — it **only honors the top-level `logLevel`**. Putting `logLevel` inside `flags` has no effect.
+
+You can also set it via environment variable or CLI flag:
+
+```bash
+LOG_LEVEL=debug anet node start <alias>
+# or
+anet node start <alias> --log-level debug
 ```
 
 ## Still Having Issues?
