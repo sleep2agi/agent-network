@@ -62,6 +62,8 @@
 
 ## 30 秒上手
 
+> **前置**：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings）。
+
 ```bash
 # 装一个全局包
 npm install -g @sleep2agi/agent-network

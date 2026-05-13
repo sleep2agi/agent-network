@@ -1217,6 +1217,12 @@ Telegram setup:
 }
 
 async function createCommand(idOverride?: string) {
+  // Batch mode: `anet create --batch` enters the multi-node wizard
+  // (issue #55, Vincent 4335). All other create flows fall through to the
+  // existing single-node create path below.
+  if (!idOverride && args.includes("--batch")) {
+    return await createBatchWizardCommand();
+  }
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
@@ -4837,6 +4843,9 @@ async function demoSciTeamCommand() {
   const isCleanup = args.includes("--cleanup");
   const lifecycleDir = opts.dir || join(home, "intern-s");
   if (isStop || isRestart || isCleanup) {
+    const flag = isStop ? "--stop" : isRestart ? "--restart" : "--cleanup";
+    const verb = isStop ? "stop" : isRestart ? "restart" : "cleanup";
+    console.warn(`[deprecated] 'anet demo sci-team ${flag}' is deprecated; use 'anet batch ${verb} sci-team' (will remove in next major).`);
     return sciTeamLifecycle({ dir: lifecycleDir, restart: isRestart, cleanup: isCleanup });
   }
 
@@ -4902,106 +4911,278 @@ async function demoSciTeamCommand() {
   console.log(`        综述方向:  ${direction}`);
   console.log(`        Runtime:   claude-agent-sdk + intern-s1-pro\n`);
 
-  mkdirSync(targetDir, { recursive: true });
-  const origCwd = process.cwd();
-  const createdAliases: string[] = [];
+  // sci-team is now a preset wrapper over the generic batch primitive
+  // (issue #55). The Intern URL + model + active-fan-out sciTeamPrompt
+  // template all stay locked here; createBatch handles the per-node
+  // mkdir + ensureNodeToken + saveProfile + tmux launch loop.
+  const result = await createBatch({
+    prefix: "研究员",
+    count,
+    workdir: targetDir,
+    workdirMode: "separate",
+    runtime: "claude-agent-sdk",
+    model: "intern-s1-pro",
+    baseUrl: "https://chat.intern-ai.org.cn",
+    apiKey: internApiKey,
+    systemPrompt: (role, index, total) => sciTeamPrompt(role, index, total, direction),
+    team: "sci-team",
+    leaderAlias: "研究Leader",
+  });
 
-  try {
-    for (let i = 1; i <= count; i++) {
-      const role: "leader" | "worker" = i === 1 ? "leader" : "worker";
-      const alias = role === "leader" ? "研究Leader" : `研究员${i - 1}号`;
-      const nodeDir = join(targetDir, `node${i}`);
-      mkdirSync(nodeDir, { recursive: true });
-      process.chdir(nodeDir);
-
-      // Build profile manually (skip createCommand to avoid interactive prompts
-      // and to thread sci-team metadata + Intern preset cleanly).
-      const profile: Profile = {
-        anet_version: "0.1.0",
-        node_id: generateNodeId(),
-        node_name: alias,
-        alias,
-        runtime: "claude-agent-sdk",
-        model: "intern-s1-pro",
-        ...(gc.network_id ? { network_id: gc.network_id } : {}),
-        channels: ["server:commhub"],
-        env: {
-          ANTHROPIC_BASE_URL: "https://chat.intern-ai.org.cn",
-          ANTHROPIC_AUTH_TOKEN: internApiKey,
-        },
-        flags: { dangerouslySkipPermissions: true },
-        systemPrompt: sciTeamPrompt(role, i - 1, count, direction),
-        team: "sci-team",
-        role,
-      };
-
-      try {
-        await ensureNodeToken(profile, alias);
-      } catch (e: any) {
-        console.error(`        ❌ ${alias.padEnd(14)} ntok_ 请求失败: ${e.message}`);
-        continue;
-      }
-      saveProfile(alias, profile);
-      createdAliases.push(alias);
-      console.log(`        ✓ ${alias.padEnd(14)} (${role.padEnd(7)})  ${nodeDir}`);
-    }
-  } finally {
-    process.chdir(origCwd);
-  }
-
-  if (createdAliases.length === 0) {
+  if (result.createdAliases.length === 0) {
     console.error("\n[anet] 没有任何 node 创建成功，退出。");
     return;
-  }
-
-  // ── Launch via tmux ──
-  console.log(`\n[anet] 启动 ${createdAliases.length} 个 tmux session...`);
-  try {
-    for (let i = 0; i < createdAliases.length; i++) {
-      const alias = createdAliases[i];
-      const nodeDir = join(targetDir, `node${i + 1}`);
-      const sessName = `sci-team-${alias}`;
-      killTmuxSession(sessName);
-      try {
-        process.chdir(nodeDir);
-        startNodeTmuxSession(sessName, alias);
-        console.log(`        ✓ ${sessName}`);
-      } catch (e: any) {
-        console.error(`        ❌ tmux ${alias}: ${e.message}`);
-      }
-    }
-  } finally {
-    process.chdir(origCwd);
   }
 
   console.log(`\n[anet] 🏁 科研军团 ready.`);
   console.log(`        Dashboard:    anet hub dashboard  (or open ${gc.hub.replace(":9200", ":3000")})`);
   console.log(`        派任务:       commhub_send_task --alias 研究Leader --task "<研究 prompt>"`);
   console.log(`        Phase 1 note: leader 只是 placeholder echo, RFC-008 Phase 2 接入智能 fan-out`);
-  console.log(`        Cleanup:      anet demo sci-team --cleanup --dir ${targetDir}`);
+  console.log(`        Stop:         anet batch stop sci-team`);
+  console.log(`        Cleanup:      anet batch cleanup sci-team --workdir ${targetDir}`);
   console.log();
 }
 
+// Wrapper preserved for the `anet demo sci-team --stop|--restart|--cleanup`
+// flag path (deprecated, see warning in demoSciTeamCommand). New users should
+// use `anet batch <verb> sci-team` (the canonical lifecycle command). The
+// implementation now delegates to batchLifecycle() so behavior stays in sync.
 function sciTeamLifecycle(opts: { dir: string; restart: boolean; cleanup: boolean }) {
   const { dir, restart, cleanup } = opts;
-  if (!existsSync(dir)) {
-    console.error(`[anet] 工作目录不存在: ${dir}`);
+  if (restart) {
+    return batchLifecycle({ prefix: "sci-team", verb: "restart", workdir: dir });
+  }
+  if (cleanup) {
+    return batchLifecycle({ prefix: "sci-team", verb: "cleanup", workdir: dir });
+  }
+  return batchLifecycle({ prefix: "sci-team", verb: "stop", workdir: dir });
+}
+
+// ── Batch primitive (issue #55) ──
+//
+// `createBatch` is the generic N-node spawn primitive that both
+// `anet create --batch` (user-facing wizard) and `anet demo sci-team`
+// (preset wrapper) call into. It abstracts the pattern PR #53 first wired
+// up for sci-team: per-node mkdir + Profile build + ensureNodeToken +
+// saveProfile + tmux session launch, with the original cwd restored in a
+// finally block.
+//
+// Vendor presets must stay in sync with the Vincent-verified list at
+// cli.ts L1116+ (1bc03c0 chain): adding a new preset here requires
+// per-vendor verify-with-real-call, not byte-copy (see
+// [[feedback_vendor_verify_before_hardcode]]).
+
+interface BatchOptions {
+  prefix: string;                // alias 前缀, e.g. "工程师" → 工程师1号..工程师N号
+  count: number;                 // node 数 (caller pre-clamps to spec range)
+  workdir: string;               // 父目录 (absolute path), e.g. /home/u/anet-team
+  workdirMode: "separate" | "shared";  // separate: workdir/node{i}/.anet/nodes/<alias>  | shared: workdir/.anet/nodes/<alias>
+  runtime: string;               // claude-agent-sdk / codex-sdk / claude-code-cli / http-api
+  model?: string;                // e.g. intern-s1-pro / MiniMax-M2.7 / claude-sonnet-4-6
+  baseUrl?: string;              // ANTHROPIC_BASE_URL value (omit for Anthropic native)
+  apiKey?: string;               // ANTHROPIC_AUTH_TOKEN value (or runtime-specific token)
+  authTokenEnvName?: string;     // env var name for the auth token (default ANTHROPIC_AUTH_TOKEN)
+  systemPrompt?: string | ((role: "leader" | "worker", index: number, total: number) => string);
+  team?: string;                 // profile.team field + tmux session prefix (defaults to prefix)
+  leaderAlias?: string;          // 设了 → i=1 = leader role with this alias; i>1 = `${prefix}${i-1}号` worker. 没设 → all i = `${prefix}${i}号` workers.
+  printSummary?: boolean;        // default true
+}
+
+interface BatchResult {
+  workdir: string;
+  createdAliases: string[];
+  failedAliases: string[];
+  tmuxPrefix: string;            // for downstream lifecycle ops
+}
+
+function batchAliasFor(opts: BatchOptions, i: number): { alias: string; role: "leader" | "worker"; workerIndex: number } {
+  if (opts.leaderAlias && i === 1) {
+    return { alias: opts.leaderAlias, role: "leader", workerIndex: 0 };
+  }
+  const workerIndex = opts.leaderAlias ? i - 1 : i;
+  return { alias: `${opts.prefix}${workerIndex}号`, role: "worker", workerIndex };
+}
+
+function batchNodeDirFor(opts: BatchOptions, i: number): string {
+  return opts.workdirMode === "separate" ? join(opts.workdir, `node${i}`) : opts.workdir;
+}
+
+async function createBatch(opts: BatchOptions): Promise<BatchResult> {
+  // Validate every user-controllable string that lands in a filesystem path
+  // or a tmux session name. Single-node createCommand calls validateNodeName
+  // for the same reason (cli.ts:1233, also :1079); without it here a
+  // `--prefix '../bad'` would escape `.anet/nodes/` via saveProfile()'s
+  // `join(nodesDir(), id, "config.json")` write — caught by 通信牛 review of PR #60.
+  if (!opts.prefix || opts.prefix.length === 0) {
+    console.error("Error: batch prefix is required (got empty).");
+    process.exit(1);
+  }
+  validateNodeName(opts.prefix);
+  if (opts.team) validateNodeName(opts.team);
+  if (opts.leaderAlias) {
+    if (opts.leaderAlias.length === 0) {
+      console.error("Error: --leader-alias is empty; pass a name or drop the flag.");
+      process.exit(1);
+    }
+    validateNodeName(opts.leaderAlias);
+  }
+
+  const tmuxPrefix = opts.team || opts.prefix;
+  const gc = loadGlobal();
+  mkdirSync(opts.workdir, { recursive: true });
+  const origCwd = process.cwd();
+  const created: string[] = [];
+  const failed: string[] = [];
+
+  try {
+    for (let i = 1; i <= opts.count; i++) {
+      const { alias, role, workerIndex } = batchAliasFor(opts, i);
+      // Defense-in-depth: the prefix/leaderAlias entry-level validation above
+      // should already guarantee a safe alias here, but re-check so a bug in
+      // batchAliasFor() can never silently escape `.anet/nodes/`.
+      validateNodeName(alias);
+      const nodeDir = batchNodeDirFor(opts, i);
+      mkdirSync(nodeDir, { recursive: true });
+      process.chdir(nodeDir);
+
+      const envMap: Record<string, string> = {};
+      if (opts.baseUrl) envMap.ANTHROPIC_BASE_URL = opts.baseUrl;
+      if (opts.apiKey) envMap[opts.authTokenEnvName || "ANTHROPIC_AUTH_TOKEN"] = opts.apiKey;
+
+      const promptText = typeof opts.systemPrompt === "function"
+        ? opts.systemPrompt(role, workerIndex, opts.count)
+        : opts.systemPrompt;
+
+      const profile: Profile = {
+        anet_version: "0.1.0",
+        node_id: generateNodeId(),
+        node_name: alias,
+        alias,
+        runtime: opts.runtime,
+        ...(opts.model ? { model: opts.model } : {}),
+        ...(gc.network_id ? { network_id: gc.network_id } : {}),
+        channels: ["server:commhub"],
+        env: envMap,
+        flags: { dangerouslySkipPermissions: true },
+        ...(promptText ? { systemPrompt: promptText } : {}),
+        ...(opts.team ? { team: opts.team } : {}),
+        ...(opts.leaderAlias ? { role } : {}),
+      };
+
+      try {
+        await ensureNodeToken(profile, alias);
+      } catch (e: any) {
+        console.error(`        ❌ ${alias.padEnd(14)} ntok_ 请求失败: ${e.message}`);
+        failed.push(alias);
+        continue;
+      }
+      saveProfile(alias, profile);
+      created.push(alias);
+      if (opts.printSummary !== false) {
+        const roleTag = opts.leaderAlias ? ` (${role.padEnd(7)})` : "";
+        console.log(`        ✓ ${alias.padEnd(14)}${roleTag}  ${nodeDir}`);
+      }
+    }
+  } finally {
+    process.chdir(origCwd);
+  }
+
+  // Launch via tmux. We launch in a second pass so a partial config failure
+  // doesn't leave half-started tmux sessions running with no config.
+  if (created.length > 0) {
+    if (opts.printSummary !== false) {
+      console.log(`\n[anet] 启动 ${created.length} 个 tmux session...`);
+    }
+    try {
+      for (let idx = 0; idx < created.length; idx++) {
+        const alias = created[idx];
+        // Map created[idx] back to its original i — index in `created` may be
+        // gappy if some entries went into `failed`. We track that by scanning.
+        // For workdir-separate mode we need the matching nodeK dir.
+        let nodeI = -1;
+        for (let i = 1; i <= opts.count; i++) {
+          if (batchAliasFor(opts, i).alias === alias) { nodeI = i; break; }
+        }
+        const nodeDir = nodeI > 0 ? batchNodeDirFor(opts, nodeI) : opts.workdir;
+        const sessName = `${tmuxPrefix}-${alias}`;
+        killTmuxSession(sessName);
+        try {
+          process.chdir(nodeDir);
+          startNodeTmuxSession(sessName, alias);
+          if (opts.printSummary !== false) console.log(`        ✓ ${sessName}`);
+        } catch (e: any) {
+          console.error(`        ❌ tmux ${alias}: ${e.message}`);
+        }
+      }
+    } finally {
+      process.chdir(origCwd);
+    }
+  }
+
+  return { workdir: opts.workdir, createdAliases: created, failedAliases: failed, tmuxPrefix };
+}
+
+// Batch lifecycle (issue #55 #6 "能够 restart all" + extended verbs):
+//   - start    re-launch tmux for all `${prefix}-*` configs (skips already-running)
+//   - stop     kill any tmux session matching `${prefix}-*`
+//   - restart  stop + start (best-effort; relies on saved .anet/nodes/ configs)
+//   - cleanup  stop + rm -rf <workdir>/node*  + remove empty <workdir>
+//   - list     enumerate distinct `<prefix>` groups currently active in tmux
+
+function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restart" | "cleanup" | "list"; workdir?: string }) {
+  const { prefix, verb, workdir } = opts;
+
+  if (verb === "list") {
+    let sessions: string[] = [];
+    try {
+      const out = execSync("tmux list-sessions -F '#{session_name}' 2>/dev/null || true", { encoding: "utf-8" });
+      sessions = out.split("\n").filter(s => s && s.includes("-"));
+    } catch {}
+    const groups = new Map<string, string[]>();
+    for (const sess of sessions) {
+      const idx = sess.indexOf("-");
+      const p = sess.slice(0, idx);
+      const alias = sess.slice(idx + 1);
+      if (!groups.has(p)) groups.set(p, []);
+      groups.get(p)!.push(alias);
+    }
+    if (groups.size === 0) {
+      console.log("[anet] No batch tmux sessions found.");
+      return;
+    }
+    console.log(`[anet] Active batch groups (${groups.size}):`);
+    for (const [p, aliases] of groups) {
+      console.log(`  ${p.padEnd(20)} (${aliases.length} node)`);
+      for (const a of aliases.slice(0, 5)) console.log(`    - ${a}`);
+      if (aliases.length > 5) console.log(`    ... +${aliases.length - 5} more`);
+    }
     return;
   }
 
-  // Kill any tmux session matching the sci-team-* prefix.
+  // stop/restart/cleanup share a "kill matching tmux sessions" pass.
   let killedCount = 0;
   try {
     const out = execSync("tmux list-sessions -F '#{session_name}' 2>/dev/null || true", { encoding: "utf-8" });
-    const sessions = out.split("\n").filter(s => s.startsWith("sci-team-"));
+    const sessions = out.split("\n").filter(s => s.startsWith(`${prefix}-`));
     for (const sess of sessions) {
       killTmuxSession(sess);
       killedCount++;
     }
   } catch {}
-  console.log(`[anet] killed ${killedCount} tmux session(s) matching sci-team-*`);
+  console.log(`[anet] killed ${killedCount} tmux session(s) matching ${prefix}-*`);
 
-  if (cleanup) {
+  if (verb === "stop") return;
+
+  if (verb === "cleanup") {
+    const dir = workdir;
+    if (!dir) {
+      console.error("[anet] cleanup 需要 --workdir <path> 指明清理目录。");
+      return;
+    }
+    if (!existsSync(dir)) {
+      console.error(`[anet] 工作目录不存在: ${dir}`);
+      return;
+    }
     const subdirs = readdirSync(dir).filter(name => name.startsWith("node") && statSync(join(dir, name)).isDirectory());
     for (const sub of subdirs) {
       rmSync(join(dir, sub), { recursive: true, force: true });
@@ -5011,13 +5192,268 @@ function sciTeamLifecycle(opts: { dir: string; restart: boolean; cleanup: boolea
       if (remaining.length === 0) rmSync(dir, { recursive: true, force: true });
     } catch {}
     console.log(`[anet] 清理完成: ${dir}`);
+    // Phase 1 limitation: cleanup only handles `--workdir-mode separate` (each
+    // node has its own `<workdir>/node{i}/.anet/nodes/...` tree). For
+    // `--workdir-mode shared`, configs live under `<workdir>/.anet/nodes/${prefix}*号`
+    // and need a manual `rm -rf` (no registry yet to know which aliases this
+    // batch owns vs. other batches that may share the same dir). Phase 2 will
+    // add a `~/.anet/batches.json` marker registry to make shared-mode cleanup
+    // safe; until then surfacing the gap loudly per 通信牛 PR #60 review.
+    if (subdirs.length === 0 && existsSync(join(dir, ".anet", "nodes"))) {
+      console.warn(`[anet] ⚠ shared workdir-mode 限制: no node*/ subdirs to remove. Configs under`);
+      console.warn(`        ${join(dir, ".anet", "nodes")}/${prefix}*号/  remain on disk. Phase 1 cleanup`);
+      console.warn(`        only handles separate workdir-mode. Manual: rm -rf '${join(dir, ".anet", "nodes")}'/${prefix}*号`);
+    }
     return;
   }
 
-  if (restart) {
-    console.log(`[anet] --restart: 重新启动需要重跑 'anet demo sci-team' (Phase 1 scaffold 暂不支持 in-place relaunch — 完整 supervisor 留 Phase 2)`);
+  if (verb === "restart" || verb === "start") {
+    // Phase 1: restart/start in-place is not yet wired (would need to walk
+    // saved .anet/nodes/<alias>/config.json under <workdir>/node*/ and
+    // re-launch tmux). For now, hint the user to re-run the create wizard.
+    console.log(`[anet] '${verb}' in-place not yet implemented (Phase 1 scaffold). Re-run:`);
+    console.log(`         anet create --batch    # generic`);
+    console.log(`         anet demo sci-team     # sci-team preset`);
     return;
   }
+}
+
+// ── batch wizard (anet create --batch) ──
+//
+// Verified preset list — must stay in sync with the auth-fail flow (cli.ts
+// L1116+) and the `anet demo sci-team` preset (Vincent commit 1bc03c0 chain).
+// New presets only after per-vendor verify-with-real-call (per
+// [[feedback_vendor_verify_before_hardcode]]).
+
+const BATCH_PRESETS: Array<{
+  value: string;
+  label: string;
+  runtime: string;
+  model?: string;
+  baseUrl?: string;
+}> = [
+  { value: "intern-s1-pro",      label: "claude-agent-sdk + intern-s1-pro (书生 Intern, https://chat.intern-ai.org.cn)",
+    runtime: "claude-agent-sdk", model: "intern-s1-pro",     baseUrl: "https://chat.intern-ai.org.cn" },
+  { value: "MiniMax-M2.7",       label: "claude-agent-sdk + MiniMax-M2.7 (https://api.minimaxi.com/anthropic)",
+    runtime: "claude-agent-sdk", model: "MiniMax-M2.7",      baseUrl: "https://api.minimaxi.com/anthropic" },
+  { value: "claude-sonnet-4-6",  label: "claude-agent-sdk + claude-sonnet-4-6 (Anthropic default)",
+    runtime: "claude-agent-sdk", model: "claude-sonnet-4-6" },
+  { value: "claude-opus-4-6",    label: "claude-agent-sdk + claude-opus-4-6 (Anthropic default)",
+    runtime: "claude-agent-sdk", model: "claude-opus-4-6" },
+  { value: "claude-haiku-4-5",   label: "claude-agent-sdk + claude-haiku-4-5 (Anthropic default)",
+    runtime: "claude-agent-sdk", model: "claude-haiku-4-5" },
+  { value: "__custom__",         label: "Custom — 自行输入 runtime / base URL / model",
+    runtime: "" },
+];
+
+async function createBatchWizardCommand() {
+  const opts = parseOpts();
+  const help = args.includes("--help") || args.includes("-h");
+  if (help) {
+    console.log(`
+  anet create --batch — 批量创建 N 个 agent (issue #55)
+
+  Usage:
+    anet create --batch [--preset <key>] [--api-key <key>] [--workdir <path>]
+                        [--workdir-mode separate|shared] [--prefix <name>]
+                        [--count <N>] [--description <text>]
+                        [--leader-alias <name>]
+
+  Wizard fields (任一可用 --flag 跳过):
+    --preset <key>        intern-s1-pro / MiniMax-M2.7 / claude-sonnet-4-6 /
+                          claude-opus-4-6 / claude-haiku-4-5 / __custom__
+    --api-key <key>       runtime auth token (ANTHROPIC_AUTH_TOKEN or 等价)
+    --workdir <path>      父目录, default ~/anet-team
+    --workdir-mode        separate (default, <workdir>/node{i}) | shared (单 dir)
+    --prefix <name>       alias 前缀, e.g. 工程师 → 工程师1号..工程师N号
+    --count <N>           1-50
+    --description <text>  systemPrompt 内容 (空 → no systemPrompt)
+    --leader-alias <name> 设了 → i=1 = leader with this alias, i>1 workers
+
+  Lifecycle (issue #55 #6 "能够 restart all"):
+    anet batch start  <prefix>   # launch (Phase 1: hint re-run create)
+    anet batch stop   <prefix>   # kill all matching tmux
+    anet batch list              # all active batch groups
+    anet batch cleanup <prefix> [--workdir <path>]   # stop + rm -rf <workdir>/node*/
+    anet batch restart <prefix>  # stop + start (Phase 1 hint)
+
+  Phase 1 cleanup limitation: only --workdir-mode separate is fully cleaned
+  (rm <workdir>/node*). For --workdir-mode shared, configs at
+  <workdir>/.anet/nodes/<prefix>*号/ stay on disk — manual rm needed
+  (registry-based safe cleanup is Phase 2).
+
+  Vendor presets are Vincent-verified (commit 1bc03c0). For codex / other
+  vendors not yet verified, use --preset __custom__ and paste your own
+  runtime / baseUrl / model values.
+
+  Spec: issue #55 / RFC-008 (multi-agent team convention)
+`);
+    return;
+  }
+
+  const gc = loadGlobal();
+  if (!gc.hub) {
+    console.error("[anet] 未找到 CommHub Server。先运行 'anet hub start' 或 'anet init --hub <url>'");
+    return;
+  }
+
+  // 1. Preset
+  let presetKey = opts.preset || "";
+  if (!presetKey) {
+    presetKey = await askChoice("Model preset", BATCH_PRESETS.map(p => ({ label: p.label, value: p.value })));
+  }
+  const preset = BATCH_PRESETS.find(p => p.value === presetKey);
+  if (!preset) {
+    closeRL();
+    console.error(`[anet] Unknown preset: ${presetKey}. Use --help to see verified list.`);
+    return;
+  }
+
+  let runtime = preset.runtime;
+  let model = preset.model;
+  let baseUrl = preset.baseUrl;
+  if (preset.value === "__custom__") {
+    const customRuntime = await ask("Runtime (claude-agent-sdk / codex-sdk / claude-code-cli / http-api)", "claude-agent-sdk");
+    runtime = normalizeRuntime(customRuntime);
+    const customBase = await ask("ANTHROPIC_BASE_URL (空白=Anthropic default)", "");
+    if (customBase) baseUrl = customBase;
+    const customModel = await ask("Model id", "");
+    if (customModel) model = customModel;
+  }
+
+  // 2. API key
+  const apiKey = opts["api-key"] || opts.key || process.env.ANET_BATCH_API_KEY || await ask("API key (ANTHROPIC_AUTH_TOKEN)");
+  if (!apiKey) {
+    closeRL();
+    console.error("[anet] API key required.");
+    return;
+  }
+
+  // 3. Workdir
+  const workdir = opts.workdir || await ask("Workdir", join(home, "anet-team"));
+  const workdirMode = (opts["workdir-mode"] || "separate") as "separate" | "shared";
+  if (workdirMode !== "separate" && workdirMode !== "shared") {
+    closeRL();
+    console.error(`[anet] --workdir-mode must be 'separate' or 'shared', got: ${workdirMode}`);
+    return;
+  }
+
+  // 4. Prefix + count
+  const prefix = opts.prefix || await ask("Node prefix (e.g. 工程师)", "工程师");
+  const countRaw = parseInt(opts.count || await ask("Count (1-50)", "5"), 10);
+  const count = Math.max(1, Math.min(50, Number.isFinite(countRaw) ? countRaw : 5));
+  if (count !== countRaw) {
+    console.log(`  [anet] Count ${countRaw} → clamped to [1,50] = ${count}`);
+  }
+  if (count > 20) {
+    console.warn(`  [anet] Warning: count=${count} > 20 may exceed memory/ulimit on a developer laptop. Recommended ≤ 20 unless tested.`);
+  }
+
+  // 5. Description (systemPrompt)
+  const description = opts.description || await ask("Description / system prompt (空 → no prompt)", "");
+
+  const leaderAlias = opts["leader-alias"] || "";
+  closeRL();
+
+  // Auto-login if no user token (same admin/anethub pattern as demo sci-team)
+  if (!gc.token || !gc.user) {
+    console.log(`\n[anet] 没有 user token，自动用 default admin/anethub 登录...`);
+    const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "admin", password: "anethub" }),
+    }).then(r => r.json() as any).catch(() => null);
+    if (!loginRes?.ok) {
+      console.error(`[anet] 自动登录失败: ${loginRes?.error || "unknown"}. 先 'anet register' 创账号。`);
+      return;
+    }
+    gc.token = loginRes.token;
+    gc.user = loginRes.user;
+    const nets = await fetch(`${gc.hub}/api/networks`, { headers: { Authorization: `Bearer ${loginRes.token}` } }).then(r => r.json() as any).catch(() => ({ networks: [] }));
+    if (nets.networks?.length > 0) {
+      gc.network_id = nets.networks[0].network_id;
+      gc.network_name = nets.networks[0].network_name;
+    }
+    saveGlobal(gc);
+    console.log(`        ✓ 登录: ${loginRes.user.username}`);
+  }
+
+  console.log(`\n[anet] Creating batch '${prefix}' × ${count} in ${workdir}/...`);
+  console.log(`        Preset:        ${preset.label}`);
+  console.log(`        Workdir mode:  ${workdirMode}`);
+  if (leaderAlias) console.log(`        Leader alias:  ${leaderAlias}`);
+  console.log();
+
+  const result = await createBatch({
+    prefix,
+    count,
+    workdir,
+    workdirMode,
+    runtime,
+    model,
+    baseUrl,
+    apiKey,
+    systemPrompt: description || undefined,
+    leaderAlias: leaderAlias || undefined,
+  });
+
+  if (result.createdAliases.length === 0) {
+    console.error(`\n[anet] No nodes created.`);
+    return;
+  }
+  console.log(`\n[anet] 🏁 Batch '${prefix}' ready. ${result.createdAliases.length} node launched.`);
+  if (result.failedAliases.length > 0) {
+    console.log(`        ⚠ ${result.failedAliases.length} 失败: ${result.failedAliases.join(", ")}`);
+  }
+  console.log(`        Stop:    anet batch stop ${result.tmuxPrefix}`);
+  console.log(`        List:    anet batch list`);
+  console.log(`        Cleanup: anet batch cleanup ${result.tmuxPrefix} --workdir ${workdir}`);
+  console.log();
+}
+
+// ── batch top-level subcommand: anet batch <verb> ──
+
+async function batchCommand() {
+  const sub = args[1];
+  if (!sub || sub === "-h" || sub === "--help" || sub.startsWith("-")) {
+    console.log(`
+  anet batch <verb> <prefix>   # batch lifecycle ops (issue #55)
+
+  Verbs:
+    start <prefix>                        re-launch (Phase 1: hint re-run create)
+    stop <prefix>                         kill all tmux matching <prefix>-*
+    restart <prefix>                      stop + start
+    cleanup <prefix> --workdir <path>     stop + rm -rf <workdir>/node*/
+                                          (shared workdir-mode leaves configs
+                                          under <workdir>/.anet/nodes/; needs
+                                          manual rm — registry is Phase 2)
+    list                                  list all active batch groups
+                                          (Phase 1: also catches non-anet tmux
+                                          sessions whose names contain '-')
+
+  See also: anet create --batch  (batch create wizard)
+`);
+    return;
+  }
+  const verb = sub;
+  const validVerbs = ["start", "stop", "restart", "cleanup", "list"] as const;
+  if (!(validVerbs as readonly string[]).includes(verb)) {
+    console.error(`[anet] Unknown batch verb '${verb}'. Valid: ${validVerbs.join(" / ")}`);
+    return;
+  }
+
+  if (verb === "list") {
+    return batchLifecycle({ prefix: "", verb: "list" });
+  }
+
+  const prefix = args[2];
+  if (!prefix) {
+    console.error(`[anet] Usage: anet batch ${verb} <prefix>`);
+    return;
+  }
+  const opts = parseOpts();
+  const workdir = opts.workdir;
+  return batchLifecycle({ prefix, verb: verb as "start" | "stop" | "restart" | "cleanup", workdir });
 }
 
 
@@ -5477,6 +5913,7 @@ switch (command) {
   case "passwd": await passwdCommand(); break;
   case "token": await tokenCommand(); break;
   case "demo": await demoCommand(); break;
+  case "batch": await batchCommand(); break;
   case "logs": logsCommand(); break;
   case "info": await infoCommand(); break;
   case "config": configShowCommand(); break;
