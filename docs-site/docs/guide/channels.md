@@ -45,45 +45,31 @@ sequenceDiagram
 1. 找到 [@userinfobot](https://t.me/userinfobot) 并发送任意消息
 2. 它会返回你的用户 ID（纯数字）
 
-### Step 3: 配置 Agent
+### Step 3: 绑定 Channel 到已有节点
 
-在 Agent 的环境变量中设置：
+跑 `anet channel add telegram <node-name>` 命令一次性绑定 bot + allowlist（verify [`cli.ts:2580` `channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2580)）：
 
 ```bash
-export TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
-export TELEGRAM_ALLOW_USER=<your-telegram-user-id>
+# 假设你已有 claude-code-cli 节点 '指挥室'（没有就先 anet node create 指挥室 --runtime claude-code-cli）
+anet channel add telegram 指挥室 \
+  --bot-token 123456789:ABCdefGhIJKlmNoPQRsTUVwxyz \
+  --allow 123456789
+
+# 或交互式（不传 flag 时 prompt 输入）
+anet channel add telegram 指挥室
 ```
+
+::: warning 注意 flag 是 `--allow` 不是 `--allow-user`
+verify [`cli.ts:2598`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2598): `--bot-token <token>` + `--allow <user-id>`。命令落地：写入 `.anet/nodes/<node-name>/channels/telegram/access.json` 含 `allowFrom: ["<user-id>"]` 数组（多人白名单见 [Telegram bind 详细 walkthrough — 多人白名单](/cases/telegram-bind-claude-code-cli#多人白名单)）。**没有 `TELEGRAM_ALLOW_USER` env var**，agent-node 只读 `TELEGRAM_BOT_TOKEN` env（[`agent-node/src/cli.ts:244`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L244)），allowlist 走 access.json。
+:::
 
 ### Step 4: 启动
 
-**方式 A：通过 anet**
-
 ```bash
-anet channel add telegram --bot-token $TELEGRAM_BOT_TOKEN --allow-user $TELEGRAM_ALLOW_USER
 anet node start 指挥室
 ```
 
-**方式 B：通过 anet node**
-
-```bash
-TELEGRAM_BOT_TOKEN=your-token \
-TELEGRAM_ALLOW_USER=your-user-id \
-anet node create 指挥室 --runtime codex-sdk
-anet node start 指挥室
-```
-
-**方式 C：Docker Compose**
-
-```yaml
-services:
-  commander:
-    image: agent-node
-    environment:
-      - ALIAS=指挥室
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_ALLOW_USER=${TELEGRAM_ALLOW_USER}
-      - COMMHUB_URL=http://server:9200
-```
+跑起来后 agent-node 自动加载 `channels/telegram/` 配置 + `access.json` 白名单。详细 step-by-step + expected output + 错误排查见 [Telegram 接入已有节点案例](/cases/telegram-bind-claude-code-cli)。
 
 ### Step 5: 使用
 

@@ -45,45 +45,32 @@ You need to know the user IDs allowed to communicate with the bot. To get yours:
 1. Find [@userinfobot](https://t.me/userinfobot) and send any message
 2. It will return your user ID (a number)
 
-### Step 3: Configure the Agent
+### Step 3: Bind the channel to an existing node
 
-Set the following environment variables for the agent:
+Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts:2580 channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2580)):
 
 ```bash
-export TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
-export TELEGRAM_ALLOW_USER=<your-telegram-user-id>
+# Assumes you already have a claude-code-cli node 'commander'
+# (if not: anet node create commander --runtime claude-code-cli)
+anet channel add telegram commander \
+  --bot-token 123456789:ABCdefGhIJKlmNoPQRsTUVwxyz \
+  --allow 123456789
+
+# Interactive (omit flags and the CLI prompts for them)
+anet channel add telegram commander
 ```
+
+::: warning The flag is `--allow`, not `--allow-user`
+Verify [`cli.ts:2598`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2598): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-多人白名单)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:244`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L244)); the allowlist lives in `access.json`.
+:::
 
 ### Step 4: Start
 
-**Option A: Via anet**
-
 ```bash
-anet channel add telegram --bot-token $TELEGRAM_BOT_TOKEN --allow-user $TELEGRAM_ALLOW_USER
 anet node start commander
 ```
 
-**Option B: Via anet node**
-
-```bash
-TELEGRAM_BOT_TOKEN=your-token \
-TELEGRAM_ALLOW_USER=your-user-id \
-anet node create commander --runtime codex-sdk
-anet node start commander
-```
-
-**Option C: Docker Compose**
-
-```yaml
-services:
-  commander:
-    image: agent-node
-    environment:
-      - ALIAS=commander
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_ALLOW_USER=${TELEGRAM_ALLOW_USER}
-      - COMMHUB_URL=http://server:9200
-```
+Once running, agent-node auto-loads the `channels/telegram/` config + `access.json` allowlist. For a full step-by-step with expected output and troubleshooting, see the [Telegram bind walkthrough](/en/cases/telegram-bind-claude-code-cli).
 
 ### Step 5: Usage
 
