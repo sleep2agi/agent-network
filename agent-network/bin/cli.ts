@@ -1101,22 +1101,36 @@ Model guide:
     opts.model = modelChoice === "__custom__" ? await ask("Model") : modelChoice;
   } else if (runtime === "claude-agent-sdk") {
     console.log(`
-Model guide:
-  - MiniMax-M2.7       URL: https://api.minimaxi.com/anthropic
+Model guide (国产 Anthropic 兼容 + Claude + 自定义):
+  - MiniMax-M2.7       MiniMax        URL: https://api.minimaxi.com/anthropic
+  - DeepSeek-V3        DeepSeek       URL: https://api.deepseek.com/anthropic
+  - GLM-5.1            智谱           URL: https://open.bigmodel.cn/anthropic
+  - Intern-S1-Pro      书生           URL: https://chat.intern-ai.org.cn/anthropic
+  - kimi-k2-0905-preview  Moonshot    URL: https://api.moonshot.cn/anthropic
+  - MiMo-V2.5          小米           URL: https://api.xiaomimimo.com/anthropic
   - claude-sonnet-4-6  Anthropic Claude via the default Anthropic API.
   - claude-opus-4-6    Anthropic Claude via the default Anthropic API.
   - claude-haiku-4-5   Anthropic Claude via the default Anthropic API.
   - custom             Type both URL and model for any Anthropic-compatible provider.
 `);
     const modelChoice = await askChoice("Select model:", [
-      { label: "MiniMax-M2.7", value: "MiniMax-M2.7", description: "URL: https://api.minimaxi.com/anthropic" },
-      { label: "claude-sonnet-4-6", value: "claude-sonnet-4-6", description: "Anthropic default URL" },
-      { label: "claude-opus-4-6", value: "claude-opus-4-6", description: "Anthropic default URL" },
-      { label: "claude-haiku-4-5", value: "claude-haiku-4-5", description: "Anthropic default URL" },
-      { label: "custom", value: "__custom__", description: "Manually enter base URL + model" },
+      { label: "MiniMax-M2.7",          value: "MiniMax-M2.7",          description: "MiniMax (api.minimaxi.com/anthropic)" },
+      { label: "DeepSeek-V3",           value: "DeepSeek-V3",           description: "DeepSeek (api.deepseek.com/anthropic)" },
+      { label: "GLM-5.1",               value: "GLM-5.1",               description: "智谱 (open.bigmodel.cn/anthropic)" },
+      { label: "Intern-S1-Pro",         value: "Intern-S1-Pro",         description: "书生 (chat.intern-ai.org.cn/anthropic)" },
+      { label: "kimi-k2-0905-preview",  value: "kimi-k2-0905-preview",  description: "Moonshot Kimi (api.moonshot.cn/anthropic)" },
+      { label: "MiMo-V2.5",             value: "MiMo-V2.5",             description: "小米 MiMo (api.xiaomimimo.com/anthropic)" },
+      { label: "claude-sonnet-4-6",     value: "claude-sonnet-4-6",     description: "Anthropic default URL" },
+      { label: "claude-opus-4-6",       value: "claude-opus-4-6",       description: "Anthropic default URL" },
+      { label: "claude-haiku-4-5",      value: "claude-haiku-4-5",      description: "Anthropic default URL" },
+      { label: "custom",                value: "__custom__",            description: "Manually enter base URL + model" },
     ]);
     opts.model = modelChoice;
 
+    // Preset baseUrl injection for Anthropic-compatible vendors. Vendor list
+    // must stay in sync with PROVIDER_CHOICES (cli.ts L1232+) and the
+    // multi-model docs table (docs-site/docs/guide/multi-model.md). Refactor
+    // to derive both from a single source of truth is a separate follow-up.
     if (opts.model === "__custom__") {
       const baseUrl = await ask("ANTHROPIC_BASE_URL");
       const customModel = await ask("Model");
@@ -1124,14 +1138,24 @@ Model guide:
       opts.model = customModel;
     } else if (opts.model === "MiniMax-M2.7") {
       opts._envs.push("ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic");
+    } else if (opts.model === "DeepSeek-V3") {
+      opts._envs.push("ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic");
+    } else if (opts.model === "GLM-5.1") {
+      opts._envs.push("ANTHROPIC_BASE_URL=https://open.bigmodel.cn/anthropic");
+    } else if (opts.model === "Intern-S1-Pro") {
+      opts._envs.push("ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic");
+    } else if (opts.model === "kimi-k2-0905-preview") {
+      opts._envs.push("ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic");
+    } else if (opts.model === "MiMo-V2.5") {
+      opts._envs.push("ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic");
     }
 
     console.log(`
 API key:
   Paste the provider key for the selected model.
-  - MiniMax: get a token from the MiniMax platform / API Keys page.
+  - MiniMax / DeepSeek / GLM / 书生 / Kimi / 小米 MiMo: token from the vendor's API Keys page.
   - Anthropic Claude: use an Anthropic Console API key.
-  - Custom URL: use the key/token for that Anthropic-compatible provider.
+  - Custom URL: use the key/token for that Anthropic-compatible provider (e.g. OpenRouter).
 `);
     const token = await ask("ANTHROPIC_AUTH_TOKEN");
     if (token) opts._envs.push(`ANTHROPIC_AUTH_TOKEN=${token}`);
