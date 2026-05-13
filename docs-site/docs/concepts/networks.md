@@ -108,7 +108,7 @@ anet network delete old-network
 | **owner** | 网络创建者 | 创建网络的用户 |
 | **admin** | 管理员 | 被 owner 提升的用户 |
 | **member** | 成员 | 通过邀请码加入的用户 |
-| **viewer** | 只读 | 公开网络自动加入 |
+| **viewer** | 只读 | 通过 `anet network invite --role viewer` 邀请码加入；公开网络自动加入是设计目标（[方式三](#方式三-公开网络) 未实装） |
 
 ### 权限矩阵
 

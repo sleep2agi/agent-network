@@ -108,7 +108,7 @@ Each user has a role in each network. Four permission levels from highest to low
 | **owner** | Network creator | The user who created the network |
 | **admin** | Administrator | Users promoted by the owner |
 | **member** | Member | Users who joined via invite code |
-| **viewer** | Read-only | Auto-joined for public networks |
+| **viewer** | Read-only | Joined via `anet network invite --role viewer`; auto-join for public networks is a design goal ([Option 3](#option-3-public-networks) not implemented yet) |
 
 ### Permission Matrix
 
