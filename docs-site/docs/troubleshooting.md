@@ -279,7 +279,7 @@ curl "http://localhost:9200/api/tasks?limit=10" -H "Authorization: Bearer ntok_x
 **解决**：
 
 ::: tip
-The following calls go via REST `POST /mcp` rather than the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools (reply / report_status / send_task / send_message / get_all_status); cancel/retry/reassign/get_inbox are admin/dashboard ops, not agent self-service.
+下面的调用走 REST `POST /mcp`，不是 agent 的 stdio wrapper。agent stdio wrapper 只暴露 5 个 tool（`reply` / `report_status` / `send_task` / `send_message` / `get_all_status`）；`cancel` / `retry` / `reassign` / `get_inbox` 属于管理 / Dashboard 操作，不对 agent self-service 开放。
 :::
 
 ```bash
@@ -323,7 +323,7 @@ commhub_send_task(alias="代码1号", task="重新执行: ...")
 **解决**：
 
 ::: tip
-`get_inbox` is an admin/dashboard op exposed via REST `POST /mcp`, not the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools: reply / report_status / send_task / send_message / get_all_status.
+`get_inbox` 是走 REST `POST /mcp` 的管理 / Dashboard 操作，不是 agent stdio wrapper 暴露的 tool。agent stdio wrapper 只暴露 5 个 tool：`reply` / `report_status` / `send_task` / `send_message` / `get_all_status`。
 :::
 
 ```bash
