@@ -1,8 +1,20 @@
 # RFC-005：codex-code-cli runtime — 让 anet 用户直接用 Codex CLI 接 commhub
 
+## Superseded by RFC-006
+
+> **本 RFC 已被 [RFC-006](./RFC-006-codex-code-cli-mcp-server.md) 取代**（2026-05-13）。
+>
+> 决策路径: 在 Vincent telegram 4019/4023-4063 持续 push + 通信龙 deep design doc [24b744e](https://github.com/sleep2agi/agent-network/commit/24b744e) + 本 session `codex mcp-server` real probe 综合验证下，确认走 **Path C — `codex mcp-server` stdio** 实施 codex CLI runtime（vs 本 RFC-005 草案描述的 Path A TUI spawn 模式）。
+>
+> 本 RFC-005 §3.3 描述的 spawn `codex` TUI + 注入 commhub MCP 模式（Path A）是 pull-on-prompt 模型 — idle TUI 不会自动响应 commhub `send_task` push，没有真正的 push-driven daemon 能力（详见本 RFC §3.5 push-vs-pull 修订段）。RFC-006 改走 `codex mcp-server` stdio + anet 作 MCP client 模式，是真 push-driven，复杂度 ~150-200 行（vs RFC-005 path A 估 ~80 行但功能不达标 / vs Path B ws daemon 估 ~590 行复杂度过高且协议未稳定）。
+>
+> 全文保留作架构决策历史 record，方便未来回顾 anet codex runtime 路径选择的 rationale。**实施请参考 [RFC-006](./RFC-006-codex-code-cli-mcp-server.md)**。
+
+---
+
 | 字段 | 内容 |
 |---|---|
-| 状态 | **草案**（等 Vincent A/B/C 决策） |
+| 状态 | **Superseded by RFC-006**（原: 草案 — 等 Vincent A/B/C 决策） |
 | 提出 | 2026-05-13 |
 | 作者 | 通信SDK马 |
 | 派单 | 通信龙（roadmap + review） |
