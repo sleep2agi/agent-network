@@ -997,14 +997,21 @@ curl -X POST http://localhost:9200/api/auth/tokens \
 ```json
 {
   "ok": true,
-  "token": "utok_xxxxxxxxxxxxxxxx",
-  "token_id": "tok_abc123def456",
-  "name": "my-agent"
+  "token": "atok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_abc123def456"
 }
 ```
 
 ::: warning The plaintext token is returned only once
 The `token` field is the plaintext token, **returned exactly once at creation** — the hub stores only its hash. If you lose it, use [DELETE /api/auth/tokens/:id](#delete-api-auth-tokens-id) to revoke + create a fresh one.
+:::
+
+::: info This endpoint creates the legacy `atok_`
+This path goes through [`auth.ts:243` `generateToken()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L243), which issues an `atok_` prefix + `scope='full'` token — a V2-era compatibility path, not the v0.8 mainline (`utok_` / `ntok_`). For new code:
+- **`utok_` (user token)**: issued automatically by [POST /api/auth/login](#post-api-auth-login) or [POST /api/auth/register](#post-api-auth-register)
+- **`ntok_` (network token)**: created via [POST /api/auth/node-token](#post-api-auth-node-token) (bound to a network + node alias)
+
+See [Token system](/en/concepts/tokens) for the full picture.
 :::
 
 ### GET /api/auth/tokens
@@ -1027,19 +1034,25 @@ curl http://localhost:9200/api/auth/tokens \
   "tokens": [
     {
       "token_id": "tok_abc123def456",
-      "name": "my-agent",
-      "last_used_at": "2026-04-12 10:00:00"
+      "name": "node:coder-1",
+      "scope": "network",
+      "network_id": "net_xxxxxxxx",
+      "last_used_at": "2026-04-12 10:00:00",
+      "created_at": "2026-04-10 09:00:00"
     },
     {
       "token_id": "tok_xyz789",
-      "name": "dashboard",
-      "last_used_at": null
+      "name": "user-login",
+      "scope": "user",
+      "network_id": null,
+      "last_used_at": null,
+      "created_at": "2026-04-12 10:30:00"
     }
   ]
 }
 ```
 
-The plaintext `token` field is **not** returned here (only at POST creation).
+The 6 fields per row map directly to [`auth.ts:209-213`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L209) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
 
 ### DELETE /api/auth/tokens/:id
 
@@ -1052,14 +1065,19 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
   -H "Authorization: Bearer utok_xxx"
 ```
 
-**Response**:
+**Response** (success):
 
 ```json
-{
-  "ok": true,
-  "revoked": true
-}
+{ "ok": true }
 ```
+
+**4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts:252-254`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L252) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
+
+Writes audit log `action='token_revoked'`. After revocation, the next request using that token returns 401 `invalid token`.
 
 ---
 

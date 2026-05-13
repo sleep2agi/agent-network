@@ -997,14 +997,21 @@ curl -X POST http://localhost:9200/api/auth/tokens \
 ```json
 {
   "ok": true,
-  "token": "utok_xxxxxxxxxxxxxxxx",
-  "token_id": "tok_abc123def456",
-  "name": "my-agent"
+  "token": "atok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_abc123def456"
 }
 ```
 
 ::: warning Token 明文只返回一次
 `token` 字段是明文 Token，**仅在创建时返回这一次**——hub 端只存 hash。丢失后请用 [DELETE /api/auth/tokens/:id](#delete-api-auth-tokens-id) 撤销 + 重新创建。
+:::
+
+::: info 这个 endpoint 创建的是 legacy `atok_`
+本 endpoint 走 [`auth.ts:243` `generateToken()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L243) 颁发 `atok_` 前缀 + `scope='full'` token，是 V2 时代的兼容路径，不是 v0.8 主线的 `utok_` / `ntok_`。新代码请用：
+- **`utok_`（用户 Token）**：通过 [POST /api/auth/login](#post-api-auth-login) 或 [POST /api/auth/register](#post-api-auth-register) 自动颁发
+- **`ntok_`（节点 Token）**：通过 [POST /api/auth/node-token](#post-api-auth-node-token) 创建（绑定到指定 network + 节点 alias）
+
+详见 [Token 体系](/concepts/tokens)。
 :::
 
 ### GET /api/auth/tokens
@@ -1027,19 +1034,25 @@ curl http://localhost:9200/api/auth/tokens \
   "tokens": [
     {
       "token_id": "tok_abc123def456",
-      "name": "my-agent",
-      "last_used_at": "2026-04-12 10:00:00"
+      "name": "node:代码1号",
+      "scope": "network",
+      "network_id": "net_xxxxxxxx",
+      "last_used_at": "2026-04-12 10:00:00",
+      "created_at": "2026-04-10 09:00:00"
     },
     {
       "token_id": "tok_xyz789",
-      "name": "dashboard",
-      "last_used_at": null
+      "name": "user-login",
+      "scope": "user",
+      "network_id": null,
+      "last_used_at": null,
+      "created_at": "2026-04-12 10:30:00"
     }
   ]
 }
 ```
 
-明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
+每行 6 字段对照 [`auth.ts:209-213`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L209) `listTokens` SELECT：`token_id / name / scope / network_id / last_used_at / created_at`。`scope` 取值 `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_)；`network_id` 仅 `network` / `full` scope 有值。按 `created_at DESC` 排序。明文 Token 字段**不返回**（只能在 POST 创建时拿一次）。
 
 ### DELETE /api/auth/tokens/:id
 
@@ -1052,14 +1065,19 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
   -H "Authorization: Bearer utok_xxx"
 ```
 
-**响应**：
+**响应**（成功）：
 
 ```json
-{
-  "ok": true,
-  "revoked": true
-}
+{ "ok": true }
 ```
+
+**4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 404 | `token not found` | `token_id` 不存在或不属于当前 user（[`auth.ts:252-254`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L252) `DELETE ... WHERE token_id=?1 AND user_id=?2` 受影响行 0） |
+
+写 audit log `action='token_revoked'`。撤销后该 token 的下一次请求拿 401 `invalid token`。
 
 ---
 
