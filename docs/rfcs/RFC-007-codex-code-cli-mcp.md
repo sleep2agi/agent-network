@@ -103,7 +103,7 @@ type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk" | "http-
 | **G3 — Live agent UX** | Dashboard / SaaS client 看到 codex agent live token stream (`agent_message_content_delta`) 不是派单后静默 N 分钟 |
 | **G4 — 最小实现成本** | 复用 anet 现有 `@modelcontextprotocol/sdk` dep + agent-node 现有 codex-sdk runtime supervision 框架, 目标 ~250-350 行 |
 | **G5 — 协议稳定** | 走 stable mcp-server protocol, 不依赖正在 stabilize 的 ws transport 系列 PRs (#22404 #22414 #22386) |
-| **G6 — 安全默认** | approval-policy 默认 conservative (on-failure), sandbox 默认 workspace-write, dangerous 操作 fallback escalate |
+| **G6 — 安全默认 align anet philosophy** | approval-policy 默认 `never` + sandbox 默认 `danger-full-access` (per Vincent §6.5 4144 Option A 跟 anet autonomous teammate-mode 一致). Conservative 路径仍 surface via wizard + profile.flags 让 dev-conscious 用户 opt-in. |
 | **G7 — 升级路径明确** | Phase 2 升级 ws daemon path (when [issue #21551](https://github.com/openai/codex/issues/21551) multi-client subscriber stable + 用户真 ask mid-turn steer 时启动 RFC-008-like new RFC) |
 
 ## 3. 设计
@@ -243,8 +243,8 @@ export class CodexCliMcpRuntime {
             prompt: task.task,
             cwd: profile.cwd,
             model: profile.model,
-            sandbox: profile.flags?.codex?.sandbox ?? "workspace-write",
-            "approval-policy": profile.flags?.codex?.approvalPolicy ?? "on-failure",
+            sandbox: profile.flags?.codex?.sandbox ?? "danger-full-access",  // per Vincent §6.5 4144 Option A: anet autonomous teammate-mode default
+            "approval-policy": profile.flags?.codex?.approvalPolicy ?? "never",  // per Vincent §6.5 4144 Option A
           },
         })
       : await this.mcpClient.callTool({
@@ -322,8 +322,8 @@ export class CodexCliMcpRuntime {
 | `prompt` | ✅ | 用户 / 派单消息原文 |
 | `cwd` | optional | 工作目录 (默认 agent-node 自身 cwd) |
 | `model` | optional | `gpt-5-codex` / `gpt-5.2` / `o3` / `o4-mini` 等 (profile 配置, ChatGPT auth 限制部分 model) |
-| `sandbox` | optional | `read-only` / `workspace-write` / `danger-full-access` (默认 `workspace-write`, per §6) |
-| `approval-policy` | optional | `untrusted` / `on-failure` / `on-request` / `never` (默认 `on-failure`, per §6) |
+| `sandbox` | optional | `read-only` / `workspace-write` / `danger-full-access` (默认 `danger-full-access` per Vincent §6.5 4144 Option A) |
+| `approval-policy` | optional | `untrusted` / `on-failure` / `on-request` / `never` (默认 `never` per Vincent §6.5 4144 Option A) |
 | `profile` | optional | codex 自身 profile (`~/.codex/config.toml` 的 `[profiles.X]` 节) |
 | `config` | optional | inline 配置覆盖 (dotted-key TOML override, 兼容 codex `-c key=val` 语义) |
 | `developer-instructions` | optional | 注入 developer-role system prompt (anet 可注入 "你已接入 anet network..." 提示) |
@@ -419,7 +419,9 @@ await commhubSendReply({ task_id: task.task_id, content: finalContent });
 
 **关键修正 (per 通信牛 P1 #1)**: 用 RFC-003 现有 `ProgressKind` union (`turn_start` / `thinking` / `tool_start` / `tool_end` / `todo_update` / `subagent_start` / `subagent_end` / `rate_limit` / `compact` / `error` / `turn_end`) **完全 cover** codex/event types, **无 commhub schema 改动 + 无 dashboard 改动**:
 
-#### Phase 1 forward (5 high-value + 2 critical = 7 kinds) — per §11 Q6 narrow
+#### Phase 1 forward (core high-value + critical kinds) — per §11 Q6 narrow
+
+Phase 1 forward 包含 RFC-003 `ProgressKind` 的 8 个 kind 实例 (turn_start / thinking / tool_start / tool_end / todo_update / turn_end / rate_limit / error), 跟 codex/event types 映射如下。**别硬记数字** (per 通信牛 review P2 #5 nit), 实施时按 mapper code (§5.2) 即可:
 
 | codex/event type | RFC-003 kind | RFC-003 substate | payload | forward? |
 |---|---|---|---|---|
@@ -433,7 +435,8 @@ await commhubSendReply({ task_id: task.task_id, content: finalContent });
 | `item_started` / `item_completed` (TodoList) | `todo_update` | `planning` (started) / — (completed) | `{items: todo_items, from: 'codex_native'}` | ✅ Phase 1 |
 | `task_complete` | `turn_end` | `idle` | `{tokens_in, tokens_out, cost_usd?}` (from task_complete + token_count fold) | ✅ Phase 1 |
 | `account/rateLimits/updated` (if emit) | `rate_limit` | `rate_limited` | `{resets_at_ms, limit_type, utilization}` | ✅ Phase 1 (critical) |
-| Error event (task_failed / thread.error) | `error` | — | error.field: `{code: 'tool_error' \| 'auth_failed' \| ..., message, retryable}` | ✅ Phase 1 (critical) |
+| **`error`** (mcp-server primary, codex/event with type=error per 通信龙 plan 98b6728 §0.2 实测) | `error` | — | error.field: `{code: 'tool_error' \| 'auth_failed' \| ..., message, retryable}` | ✅ Phase 1 (critical) |
+| `task_failed` / `thread.error` (ws-schema variants, defensive future-compat) | `error` | — | (same shape, future codex versions if emit) | 🟡 defensive (Phase 1 不强测) |
 
 #### Phase 1 log-only (~6 types) — Open Q6 narrow rationale
 
@@ -522,8 +525,9 @@ function codexEventToNodeEvent(ev: any): NodeEvent | null {
       return { ...baseFields, kind: "turn_end", substate: "idle",
                payload: { kind: "turn_end", tokens_in: msg.tokens_in, tokens_out: msg.tokens_out, cost_usd: msg.cost_usd } };
 
-    case "task_failed":
-    case "thread.error":
+    case "error":          // ← Primary (per 通信龙 plan 98b6728 §0.2 实测: codex mcp-server 的 codex/event 含 type="error" event)
+    case "task_failed":    // ← Defensive future-compat (若 mcp-server 后续加 ws-schema 命名)
+    case "thread.error":   // ← Defensive future-compat (同上)
       return { ...baseFields, kind: "error",
                error: { code: msg.error_code || "tool_error", message: msg.message || "Codex error", retryable: msg.retryable ?? true } };
 
@@ -570,20 +574,22 @@ RFC-003 已 ship `commhub_report_progress` MCP method + `progress_events` SQLite
 
 | 值 | codex 行为 | anet 适用场景 |
 |---|---|---|
-| `untrusted` | 所有 shell 命令需 approval | 高安全场景 (公开 demo / Vincent 试新 agent) |
-| `on-failure` | 仅命令失败后才 ask | **默认推荐** (balance 自动化 + 安全) |
+| `untrusted` | 所有 shell 命令需 approval | 高安全场景 (公开 demo / Vincent 试新 agent) — wizard surface 但 default 不选 |
+| `on-failure` | 仅命令失败后才 ask | 中等保守, balance 自动化 + 安全 — wizard surface 但 default 不选 |
 | `on-request` | model 自己判断要 ask 才 ask | 中等信任 (用户已熟悉 codex 行为) |
-| `never` | 全自动批准 | dev 内网 + 完全信任 (不推荐生产) |
+| `never` | 全自动批准, 无 approval prompt | **RFC-007 默认值** (跟 anet autonomous teammate-mode philosophy 一致, per Vincent §6.5 4144 Option A + memory `feedback_default_flags.md`) |
 
-**RFC-007 默认值 `on-failure`** — 跟 codex CLI default 一致, balance 自动化跟安全。
+**RFC-007 默认值 `never`** (per Vincent 4144 final Option A) — 跟 anet 5-runtime autonomous teammate philosophy 一致, 用户期望 anet agents 自动跑不卡 approval prompt。conservative 路径仍 surface via wizard 让 dev-conscious 用户 opt-in (`profile.flags.codex.approvalPolicy: "on-failure"` etc)。
 
-### 6.2 默认 sandbox=`workspace-write`
+### 6.2 默认 sandbox=`danger-full-access`
 
 | 值 | 权限 | 场景 |
 |---|---|---|
-| `read-only` | 仅读 + 禁网 | 极保守 (仅 query / review 类 task) |
-| `workspace-write` | 读 + 写 cwd + 禁网 | **默认推荐** (agent 改 cwd 文件 OK, 不能伤害 cwd 外 + 不能联网) |
-| `danger-full-access` | 全访问 | 不推荐 (除非用户明确 opt-in) |
+| `read-only` | 仅读 + 禁网 | 极保守 (仅 query / review 类 task) — wizard surface 但 default 不选 |
+| `workspace-write` | 读 + 写 cwd + 禁网 | 保守 — agent 改 cwd 文件 OK, 不能伤害 cwd 外 + 不能联网。wizard surface 让 dev-conscious 用户 opt-in (`profile.flags.codex.sandbox: "workspace-write"`) |
+| `danger-full-access` | 全访问 (网络 + 全文件系统) | **RFC-007 默认值** (per Vincent §6.5 4144 Option A + anet autonomous teammate philosophy) |
+
+**RFC-007 默认值 `danger-full-access`** (per Vincent 4144 final Option A) — 跟 anet 5-runtime autonomous teammate philosophy 一致, codex-sdk runtime 也是同款 default (intentional, 非 inconsistency)。conservative 路径 wizard surface 给 dev-conscious 用户 opt-in。
 
 ### 6.3 profile.flags.codex 配置 schema
 
@@ -595,8 +601,8 @@ RFC-003 已 ship `commhub_report_progress` MCP method + `progress_events` SQLite
   "model": "gpt-5-codex",
   "flags": {
     "codex": {
-      "approvalPolicy": "on-failure",
-      "sandbox": "workspace-write",
+      "approvalPolicy": "never",            // ← default (跟 anet autonomous teammate-mode 一致)
+      "sandbox": "danger-full-access",      // ← default (跟 anet autonomous teammate-mode 一致)
       "profile": "<可选 codex profile 名 from ~/.codex/config.toml>",
       "config": { /* inline TOML overrides */ },
       "useUserConfig": true,
@@ -606,7 +612,7 @@ RFC-003 已 ship `commhub_report_progress` MCP method + `progress_events` SQLite
 }
 ```
 
-agent-node runtime adapter 启动 tools/call 时透传这些字段。
+agent-node runtime adapter 启动 tools/call 时透传这些字段。Dev-conscious 用户可显式 set conservative (`approvalPolicy: "on-failure"` + `sandbox: "workspace-write"`) 跟 anet ecosystem default 不一致 — wizard surface 这些选项。
 
 ### 6.4 Codex MCP servers 嵌套 (用户已有 ~/.codex/config.toml mcp_servers)
 
@@ -616,59 +622,70 @@ agent-node runtime adapter 启动 tools/call 时透传这些字段。
 - `useUserConfig: true` (默认): 尊重用户 ~/.codex/config.toml, 但用户 stale config 可能 fail 子 MCP startup (cosmetic, codex 主体仍 work)
 - `useUserConfig: false`: profile.flags 触发 anet 透传 `--ignore-user-config` 给 codex spawn, 完全隔离用户 toml
 
-### 6.5 安全 cross-runtime consistency matrix (NEW per Round 147 finding + 通信牛 P2)
+### 6.5 安全 cross-runtime consistency matrix (per Vincent §6.5 4144 Option A final)
 
-anet 5 runtime 默认安全策略矩阵 — Phase 1 ship codex-cli-mcp 同时 fix codex-sdk 现 inconsistency:
+anet 5 runtime 默认安全策略矩阵 — **全 autonomous teammate-mode consistent** (per Vincent telegram 4144 final Option A decision + memory `feedback_default_flags.md` philosophy):
 
 | Runtime | 默认 approval | 默认 sandbox | 状态 |
 |---|---|---|---|
-| `claude-code-cli` | `permissionMode: "default"` (用户 confirm) | n/a (claude CLI 自身 sandbox) | ✅ conservative |
-| `claude-agent-sdk` | `permissionMode: "bypassPermissions"` (anet 当前 cli.ts L520, 全 bypass) + hooks PreToolUse log only | n/a | ⚠ 跟 codex-sdk 同样 maximally permissive (但 claude SDK 没 sandbox 概念, 风险较低) |
-| `codex-sdk` (existing, cli.ts L617-622) | `approvalPolicy: "never"` ❌ 全自动 | `sandboxMode: "danger-full-access"` ❌ 全访问含网络 | 🚨 **inconsistency, 待 fix per Round 147 finding** |
-| **`codex-cli-mcp` (RFC-007 new)** | `approval-policy: "on-failure"` ✅ | `sandbox: "workspace-write"` ✅ 限 cwd 写+禁网 | ✅ conservative default |
-| `http-api` | n/a (HTTP fetch 无 agent loop, 无 sandbox 概念) | n/a | n/a |
+| `claude-code-cli` | `--dangerously-skip-permissions` (per profile.flags.dangerouslySkipPermissions default true) | n/a (claude CLI 无 sandbox 概念) | ✅ anet autonomous teammate-mode |
+| `claude-agent-sdk` | `permissionMode: "bypassPermissions" + allowDangerouslySkipPermissions: true` (cli.ts L520-524) | n/a | ✅ anet autonomous teammate-mode |
+| `codex-sdk` (existing, cli.ts L617-622) | `approvalPolicy: "never"` | `sandboxMode: "danger-full-access"` | ✅ anet autonomous teammate-mode (intentional, NOT inconsistency — Round 147 misread 修正) |
+| **`codex-cli-mcp` (RFC-007 v3 NEW)** | `approval-policy: "never"` | `sandbox: "danger-full-access"` | ✅ anet autonomous teammate-mode (per Vincent §6.5 4144 Option A) |
+| `http-api` | n/a (single-shot HTTP fetch 无 agent loop / 无 tools / 无 sandbox 概念) | n/a | n/a (per Round 152 4-runtime symmetry analysis) |
 
-**Phase 1 fix spec (跟 RFC-007 implement 同 PR ~10 行 edit)**:
+**Vincent 决策史 (§6.5 audit trail)**:
+- Round 147 我 mark codex-sdk "🚨 inconsistency 待 fix" — **MISREAD** (实际 anet pattern intentional)
+- Round 149 raise A/B/C options to Vincent
+- 通信龙 propose Option D (hybrid bounded autonomous: never + workspace-write)
+- **Vincent telegram 4144 final: Option A** — codex-cli-mcp 跟 anet autonomous teammate-mode full consistency (`never` + `danger-full-access`)
 
-```diff
-- // agent-node/src/cli.ts:617-622 (codex-sdk runtime existing)
-+ // Phase 1 安全 default upgrade per RFC-007 §6.5 cross-runtime consistency
-  const codexOpts = {
-    skipGitRepoCheck: true,
--   approvalPolicy: "never" as const,
-+   approvalPolicy: "on-failure" as const,    // ← 跟 codex-cli-mcp default 一致
-    model: codexModel,
--   sandboxMode: "danger-full-access" as const,
-+   sandboxMode: "workspace-write" as const,  // ← 跟 codex-cli-mcp default 一致
-    modelReasoningEffort: "low" as const,
-  };
-```
+**Rationale (per Vincent memory `feedback_default_flags.md` + 4144 decision)**:
+> "anet 自动生成的 config.json 必须默认带 `dangerouslySkipPermissions: true` 和 `teammateMode: "in-process"`。
+> **Why:** 用户的所有 agent 都需要这两个 flag，不开的话 Claude Code 会卡在权限确认上，无法自动化工作。"
 
-**Backward compat**: `profile.flags.codex.approvalPolicy` + `sandbox` 仍 override default — 老用户 dev 环境想全自动可显式 opt-in:
+anet 设计哲学 = **autonomous teammate-mode**, 用户期望 anet agents 自动跑不卡 approval prompt。codex-cli-mcp follow 这个 pattern 跟 ecosystem 一致。
+
+**Conservative 路径 (dev-conscious 用户 opt-in)**:
+
+profile.flags.codex.approvalPolicy + sandbox 仍 override default:
 
 ```json
 {
-  "runtime": "codex-sdk",
+  "runtime": "codex-cli-mcp",
   "flags": {
     "codex": {
-      "approvalPolicy": "never",      // ← explicit opt-in
-      "sandbox": "danger-full-access" // ← explicit opt-in (with warning in wizard)
+      "approvalPolicy": "on-failure",     // ← explicit conservative opt-in
+      "sandbox": "workspace-write"        // ← explicit sandbox opt-in
     }
   }
 }
 ```
 
-**Wizard "danger" prompt** (cli.ts setupCommand):
+**Wizard surfaces conservative 选项** (cli.ts setupCommand, 让 dev-conscious 用户选):
+
 ```
+? Codex approval policy:
+  ❯ never (default, autonomous teammate-mode — 全自动批准)
+    on-failure (失败后 ask)
+    on-request (model 判断 ask)
+    untrusted (全 ask, 最保守)
+
 ? Codex sandbox mode:
-  workspace-write (default, 推荐 — agent 仅改 cwd, 禁网)
-  read-only (review-only agent)
-  danger-full-access (⚠ 全网 + 全文件系统访问, 仅 dev 环境信任 agent + sandboxed host 使用)
+  ❯ danger-full-access (default, autonomous teammate-mode — 全访问)
+    workspace-write (限 cwd 写 + 禁网)
+    read-only (仅读)
 ```
 
-**Phase 2 considerations (per 通信牛 P2)**:
-- `approval-policy=on-failure` 对无人值守 daemon 是否够 conservative? 通信牛 raise 这条 — 等 Vincent decision (Phase 1 ship `on-failure` 作 reasonable default, Phase 2 视无人值守 use case 是否要默认 `untrusted` 全 ask)
-- 若 Vincent 要求 daemon mode 默认 `untrusted` (全 ask) → 加 profile.flags.codex.daemonMode boolean 区分 manned vs unmanned, daemonMode=true 时 default `untrusted`
+**~~Phase 1 fix codex-sdk default~~ 撤销** (per Vincent §6.5 4144 Option A):
+- codex-sdk runtime (cli.ts L617-622) **维持现状** (`never` + `danger-full-access`)
+- 不是 inconsistency, 是 intentional anet pattern
+- RFC-007 implement PR **不动** L617-622
+- 撤销 changelog / migration note (无 breaking change)
+
+**Phase 2 considerations** (deferred):
+- 若用户/产品后续 ask "我想 anet 全 conservative default" (Vincent 改主意) → Phase 2 RFC-009-like new RFC 全 runtime defaults 翻转
+- 若 daemon mode (unmanned) 跟 manned 行为差异化 → profile.flags.codex.daemonMode flag 区分
 
 ## 7. Setup / cli.ts integration
 
@@ -774,27 +791,60 @@ class CodexCliMcpRuntime {
     await this.start(this.profile); // 重 spawn + initialize + thread/resume {this.threadId}
   }
 
-  // Heartbeat: 30s ping daemon health (avoid silent hung)
+  // Heartbeat — active-turn aware (per 通信牛 review checklist #1):
+  // - inFlightTurn=true 时 SKIP listTools() (避免 active turn 期间 mcp-server 不响应 listTools 被误杀健康任务)
+  // - active turn 用 codex/event 活跃度 + turnTimeoutMs 检测 hung (lastEventAt + 60s 无 event → suspect)
+  // - idle 状态才 listTools() ping
+  private inFlightTurn = false;
+  private lastEventAt = Date.now();
+
   private startHealthcheck() {
     setInterval(async () => {
+      // Active turn check: 用 codex/event 活跃度 判 hung (无 listTools 干扰)
+      if (this.inFlightTurn) {
+        const sinceLastEvent = Date.now() - this.lastEventAt;
+        if (sinceLastEvent > 60 * 1000) {  // 60s 无 codex/event → suspect hung
+          this.log(`active turn no event for ${sinceLastEvent}ms, suspect hung (turn timeout will fire at ${this.TURN_TIMEOUT_MS}ms)`);
+          // 不立即 kill, 让 turn timeout watchdog (在 onNewTask) 处理 — 避免 race
+        }
+        return;
+      }
+      // Idle check: listTools() ping
       try {
         await Promise.race([
-          this.mcpClient.listTools(),  // simple keep-alive query
+          this.mcpClient.listTools(),  // keep-alive query (仅 idle 跑)
           new Promise((_, rej) => setTimeout(() => rej(new Error("healthcheck timeout")), 5000)),
         ]);
       } catch {
-        this.log("daemon unhealthy, respawn");
+        this.log("daemon unhealthy (idle ping failed), respawn");
         this.killChild();
         await this.respawnChild();
       }
     }, this.CHILD_HEALTHCHECK_MS);
   }
+
+  // Mapper hook: each codex/event 更新 lastEventAt
+  private updateActivity() { this.lastEventAt = Date.now(); }
 }
 ```
 
-**Failure modes covered**:
-- ✅ tool call hang > 5min: AbortSignal trigger → kill + respawn child → anet 报 task error + 接受下一 task
-- ✅ child silent hung (无 response on stdio): 30s healthcheck failed → kill + respawn
+**onNewTask 入口/出口 set inFlightTurn**:
+```ts
+async onNewTask(task: TaskEvent) {
+  this.inFlightTurn = true;
+  this.lastEventAt = Date.now();
+  try {
+    // ... turn watchdog + tool call (per §4.3 + §8.6 above)
+  } finally {
+    this.inFlightTurn = false;
+  }
+}
+```
+
+**Failure modes covered (per 通信牛 review checklist #1 amended)**:
+- ✅ tool call hang > turnTimeoutMs (default 5min): AbortSignal trigger → kill + respawn child → anet 报 task error
+- ✅ child silent hung **idle** (无 response on stdio): 30s healthcheck listTools() failed → kill + respawn
+- ✅ child silent hung **active turn** (无 codex/event 60s+): lastEventAt 检测 log warning, turnTimeout 5min trigger kill — 避免 active turn listTools race kill 健康 long task
 - ✅ child crash (segfault / OOM): node child_process `exit` event → 自动 respawn
 - ⚠ thread/resume on respawn 须 thread persist 已 disk (rollout 文件)。若 turn 内 crash, 用户当前 task 失败但下一 task 仍可走 codex-reply resume (per §4.4)
 
@@ -823,7 +873,7 @@ class CodexCliMcpRuntime {
 | L4 | MCP handshake | netcat / fifo 读 child stdin/stdout 验 `initialize` ack |
 | L5 | tools/list verify | 验 codex + codex-reply 两 tool 都 listed |
 | L6 | push verify | `anet commhub_send_task --alias test-codex-bot --task "hello"` → 验 codex 收到 tools/call codex → SYNC return 后 commhub 收 reply |
-| L7 | live progress | 验 codex/event 流 forward 到 commhub `progress_events` 表 |
+| L7 | live progress | 验 codex/event 流 forward 到 commhub `progress_events` 表 — **若 §3.0 Phase 0 spike 全 fail (degraded mode), L7 mark `expected_skip`** (per 通信牛 review checklist #5, implementation PR 须根据 spike result update test config) |
 | L8 | cross-runtime | 起 codex-cli-mcp + claude-code-cli 两 node → A `send_task` B → 都能 daemon push |
 | L9 | isError handling | 触发 codex 内部 error (e.g. model not available) → 验 anet 接到 isError=true + 正确 forward as task error |
 | L10 | useUserConfig=false | 验 --ignore-user-config flag 透传 + codex 不加载 ~/.codex/config.toml mcp_servers |
