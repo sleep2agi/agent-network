@@ -264,44 +264,55 @@ await startServer({
 
 ---
 
-## 5. Channel 插件自动配置
+## 5. Channel 插件自动配置 — R221 校准
 
-`anet node start`/`anet node resume` 检测到 `runtime: "claude-code"` 时，自动确保 Channel 插件可用：
+`anet node start` 检测到 `runtime: "claude-code-cli"` 时，自动确保 Channel 插件可用（[`cli.ts:1482 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1482)）：
 
-1. 从 npm 包复制 `node-server.ts` → `{项目}/.anet/node-server.ts`
-2. 安装依赖（`@modelcontextprotocol/sdk`）
-3. 写入 `.mcp.json`：`commhub → .anet/node-server.ts`
+1. 从 npm 包 (`dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底) 复制到 `{项目}/.anet/node-server.js`（**注意：是 `.js` 不是 `.ts`** —— [R216 chain](https://github.com/sleep2agi/agent-network/issues/10#issuecomment-4438192170)）
+2. 安装依赖（`@modelcontextprotocol/sdk ^1.12.0` 通过 `bun install`）
+3. 写入 `.mcp.json`：`commhub → .anet/node-server.js`（cli.ts:1548）
 
 ```
 {项目}/
-├── .mcp.json                # {"mcpServers":{"commhub":{"type":"stdio","command":"bun","args":[".anet/node-server.ts"]}}}
+├── .mcp.json                # {"mcpServers":{"commhub":{"type":"stdio","command":"bun","args":[".anet/node-server.js"]}}}
 └── .anet/
-    ├── node-server.ts       # Channel 插件（MCP server + SSE 长连接）
-    └── package.json         # 依赖
+    ├── node-server.js       # Channel 插件（MCP server + SSE 长连接）
+    └── package.json         # @modelcontextprotocol/sdk ^1.12.0
 ```
 
-已配置过的项目直接跳过。`anet init project` 也做同样的事（另外还写 CLAUDE.md）。
+已配置过且内容一致直接跳过（compare-by-content：`if (src !== dst) writeFileSync(...)`，cli.ts:1517-1520）。`anet init project` 也做同样的事（另外还写 CLAUDE.md）。
+
+R221 校准：原 doc 写「`runtime: "claude-code"`」+「`.anet/node-server.ts`」+「`.mcp.json args:[".anet/node-server.ts"]`」三处都是 V2 早期命名/文件名，当前 runtime name 是 `claude-code-cli`（[RuntimeName type cli.ts:140](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L140)），落盘文件名是 `.js`。
 
 ---
 
-## 6. 与现有包的关系
+## 6. 与现有包的关系 — R221 校准（v0.8 实际 4 包）
+
+verify monorepo `find . -name "package.json" -not -path "*/node_modules/*"`：
 
 ```
-@sleep2agi/agent-network（合并包，推荐）
-  ├── Client SDK = @sleep2agi/commhub-sdk（独立客户端包）
-  ├── Server = @sleep2agi/commhub-server（独立服务端包）
-  └── CLI（anet）= 新增，只在合并包里
+@sleep2agi/agent-network          CLI + Client SDK 入口 + Server 编程入口 (anet/)
+  ├── bin/cli.ts                   # anet 命令 (39 commands per package.json)
+  ├── src/client.ts                # CommHub client (`new CommHub(...)`)
+  └── src/server.ts                # 动态 import ../../server/src/index.ts
 
-三个包共存：
-- agent-network：一站式，推荐新用户
-- commhub-sdk：只需客户端的场景（嵌入现有 Node.js 应用）
-- commhub-server：只需服务端的场景（已有客户端方案）
+@sleep2agi/agent-node              Agent 运行时 (claude-agent-sdk / codex-sdk / claude-code-cli)
+  └── src/cli.ts                   # agent-node 命令 (npx-spawn 给 anet node start)
+
+@sleep2agi/commhub-server          CommHub backend (bun-only, Streamable HTTP + SSE + SQLite WAL)
+  ├── src/index.ts                 # Bun.serve 主入口
+  └── src/tools.ts                 # 17 MCP tools (4 agent + 13 hub)
+
+@sleep2agi/agent-network-dashboard Next.js UI (独立部署, R220 chain)
 ```
 
-代码复用关系：
-- `agent-network/src/client.ts` = `sdk/index.ts`（相同代码）
-- `agent-network/src/server.ts` → 动态 import `server/src/index.ts`
-- `agent-network/bin/cli.ts` → 引用 client.ts + server
+⚠ **`@sleep2agi/commhub-sdk` 不是独立 npm 包** —— Client SDK (`CommHub` class) 只在 `agent-network/src/client.ts`，通过 `import { CommHub } from '@sleep2agi/agent-network'` 使用。原 doc「三个包共存」声明 `@sleep2agi/commhub-sdk` 错。
+
+代码复用关系（实际）：
+- `agent-network/src/client.ts` → 唯一 Client SDK source
+- `agent-network/src/server.ts` → 动态 import `server/src/index.ts`（开发期 monorepo path；npm 包不直接 ship server，靠 `anet hub start` 通过 bunx 拉 `@sleep2agi/commhub-server` PIN 版）
+- `agent-network/bin/cli.ts` → 引用 client.ts；CommHub Server 不在 dist，靠 `anet hub start` 拉
+- `agent-node/src/cli.ts` → agent 进程入口，依赖 `@anthropic-ai/claude-agent-sdk` (regular dep) + `@openai/codex-sdk` (optional peer dep) — R212 chain
 
 ---
 
