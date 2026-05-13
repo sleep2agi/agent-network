@@ -102,6 +102,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: '案例总览', link: '/cases/' },
               { text: '辩论赛 Demo', link: '/cases/debate' },
+              { text: 'PR 审查室', link: '/cases/pr-review-room' },
               { text: '你好世界', link: '/cases/hello-world' },
               { text: '翻译流水线', link: '/cases/translation-pipeline' },
               { text: '军团编队', link: '/cases/telegram-squad' },
@@ -195,6 +196,7 @@ export default withMermaid(defineConfig({
             items: [
               { text: 'Overview', link: '/en/cases/' },
               { text: 'Debate Demo', link: '/en/cases/debate' },
+              { text: 'PR Review Room', link: '/en/cases/pr-review-room' },
               { text: 'Hello World', link: '/en/cases/hello-world' },
               { text: 'Translation Pipeline', link: '/en/cases/translation-pipeline' },
               { text: 'Telegram Squad', link: '/en/cases/telegram-squad' },
