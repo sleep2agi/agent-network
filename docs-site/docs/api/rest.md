@@ -371,10 +371,34 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 | 参数 | 说明 |
 |------|------|
 | `network_id` | 按网络过滤 |
-| `status` | 按状态过滤 |
+| `status` | 按状态过滤；任何 [Task 生命周期状态机](/concepts/task-lifecycle#状态说明) 状态都可传 |
 | `to_name` | 按接收者过滤 |
 | `from_name` | 按发送者过滤 |
 | `limit` | 最大条数（默认 50） |
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "tasks": [
+    {
+      "message_id": "t_a1b2c3d4",
+      "from_name": "指挥室",
+      "to_name": "代码1号",
+      "content": "写一个 Python 快排算法",
+      "status": "replied",
+      "priority": "normal",
+      "created_at": "2026-04-12 10:00:00",
+      "delivered_at": "2026-04-12 10:00:01",
+      "replied_at": "2026-04-12 10:00:15",
+      "ttl_seconds": 3600
+    }
+  ]
+}
+```
+
+`anet tasks` CLI 用 `from_name` / `to_name` / `status` / `created_at` / `content` 渲染表格 (cli.ts L2810-2817)。
 
 ---
 

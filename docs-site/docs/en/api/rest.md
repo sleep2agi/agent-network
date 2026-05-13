@@ -371,10 +371,34 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 | Parameter | Description |
 |------|------|
 | `network_id` | Filter by network |
-| `status` | Filter by status |
+| `status` | Filter by status; any [Task lifecycle state machine](/en/concepts/task-lifecycle#status-reference) state is accepted |
 | `to_name` | Filter by recipient |
 | `from_name` | Filter by sender |
 | `limit` | Max items (default 50) |
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "tasks": [
+    {
+      "message_id": "t_a1b2c3d4",
+      "from_name": "指挥室",
+      "to_name": "代码1号",
+      "content": "Write a Python quicksort",
+      "status": "replied",
+      "priority": "normal",
+      "created_at": "2026-04-12 10:00:00",
+      "delivered_at": "2026-04-12 10:00:01",
+      "replied_at": "2026-04-12 10:00:15",
+      "ttl_seconds": 3600
+    }
+  ]
+}
+```
+
+The `anet tasks` CLI uses `from_name` / `to_name` / `status` / `created_at` / `content` to render the table (cli.ts L2810-2817).
 
 ---
 
