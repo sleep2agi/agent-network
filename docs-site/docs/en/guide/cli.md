@@ -73,7 +73,7 @@ After installation, the `anet` command is available globally.
 | `anet info <name>` | View agent details |
 | `anet logs <name>` | View agent logs (add `--follow` to tail in real time) |
 | `anet node rename <old> <new>` | Rename an agent |
-| `anet node delete <name>` | Delete an agent (interactive confirm by default; add `--force` or `--yes` to skip) |
+| `anet node delete <name>` | Delete an agent (interactive confirm by default; add `--force` or `--yes` to skip; **does not auto-revoke the `ntok_`** — pair with `anet token revoke <id>` for full cleanup, see [Token lifecycle](/en/concepts/tokens#token-lifecycle-matrix)) |
 
 ### Monitoring
 

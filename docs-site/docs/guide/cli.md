@@ -73,7 +73,7 @@ npm install -g @sleep2agi/agent-network
 | `anet info <name>` | 查看 Agent 详情 |
 | `anet logs <name>` | 查看 Agent 日志（加 `--follow` 实时 tail） |
 | `anet node rename <old> <new>` | 重命名 Agent |
-| `anet node delete <name>` | 删除 Agent（默认交互式确认；加 `--force` 或 `--yes` 跳过） |
+| `anet node delete <name>` | 删除 Agent（默认交互式确认；加 `--force` 或 `--yes` 跳过；**不自动撤销 ntok_** — 要彻底清干净加 `anet token revoke <id>`，详见 [Token 生命周期](/concepts/tokens#token-生命周期对照)） |
 
 ### 监控
 
