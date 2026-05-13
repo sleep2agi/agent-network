@@ -110,7 +110,7 @@ npx @sleep2agi/agent-node \
 ```
 
 ::: details Prerequisites checklist
-- [ ] Install codex CLI: `npm install -g @openai/codex` (`@openai/codex-sdk` is already bundled with `@sleep2agi/agent-node@2.3.0`, but the SDK shells out to the `codex` binary — see [runtimes / codex-sdk prereqs](/en/guide/runtimes#codex-sdk))
+- [ ] Install codex CLI: `npm install -g @openai/codex` (`@openai/codex-sdk` lives in `@sleep2agi/agent-node`'s optional `peerDependencies`; npm 7+ pulls it in automatically with agent-node, but the SDK shells out to the `codex` binary — see [runtimes / codex-sdk prereqs](/en/guide/runtimes#codex-sdk))
 - [ ] Run `codex auth login` to authenticate with OpenAI (or `export OPENAI_API_KEY=sk-xxx`)
 - [ ] CommHub Server is running
 :::
