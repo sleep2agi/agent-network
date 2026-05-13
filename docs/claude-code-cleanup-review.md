@@ -6,7 +6,7 @@
 > **⚠️ 当前状态（2026-05-12 更新）**
 >
 > 本清单中识别的"垃圾 / 过时"项已通过 v0.8 docs sweep 和 OSS 准备清理处理：
-> - ✅ 文档版本号 / 过期 preview 引用全部刷新到 v0.8.1
+> - ✅ 文档版本号 / 过期 preview 引用全部刷新到 v0.8.2（当前 stable，2026-05-12 npm `latest`；v0.8.1 是 Apache 2.0 OSS 首发版）
 > - ✅ 死命令（`anet demo monitor` / `anet audit` 等）已从公开文档剔除或加 legacy 注释
 > - ✅ 历史 V3 设计文档（`v3-license-design` / `v3-postgresql-design` / `v3-multi-network-design` / `design-auth-network` / `design-cli-dashboard-ux`）顶部加状态 / 废弃 banner
 > - ✅ `pitfalls.md` 加适用范围 banner（明确是 Claude Code Channel 插件开发者文档）
@@ -16,14 +16,14 @@
 
 ## 总结
 
-当前项目最大的问题不是缺文档，而是**文档太多且状态不一致**。主线已经进入稳定版本：
+当前项目最大的问题不是缺文档，而是**文档太多且状态不一致**。主线已经进入稳定版本（**注：以下是 2026-05-10 审计时的快照；当前 stable 是 v0.8.2，参顶部 banner**）：
 
-- `@sleep2agi/agent-network`: `2.1.0`
-- `@sleep2agi/agent-node`: `2.3.0`
-- `@sleep2agi/commhub-server`: `0.6.0`
-- CLI 内部 pin：`commhub-server@0.6.0`、dashboard `0.3.0`
+- `@sleep2agi/agent-network`: `2.1.0` → 当前 `2.1.7`
+- `@sleep2agi/agent-node`: `2.3.0` → 当前 `2.3.0`（已 ship）
+- `@sleep2agi/commhub-server`: `0.6.0` → 当前 `0.8.0`
+- CLI 内部 pin：`commhub-server@0.6.0`、dashboard `0.3.0` → 当前 `0.8.0` / `0.4.2`
 
-但 README、docs-site、tests、examples、scripts 里仍大量出现 `@preview`、`2.0.3-preview.*`、`0.5.x-preview.*`、`0.1.0-preview.*`。另外，`quickstart`、`license/activate`、WeChat/Feishu channel、`channel/commhub-channel.ts`、`agent-network/src/server.ts` 这些入口的状态描述互相冲突，容易让 Claude Code 后续改错方向。
+但 README、docs-site、tests、examples、scripts 里仍大量出现 `@preview`、`2.0.3-preview.*`、`0.5.x-preview.*`、`0.1.0-preview.*`（审计时态；现 docs sweep 已基本清理）。另外，`quickstart`、`license/activate`、WeChat/Feishu channel、`channel/commhub-channel.ts`、`agent-network/src/server.ts` 这些入口的状态描述互相冲突，容易让 Claude Code 后续改错方向。
 
 建议清理原则：
 
