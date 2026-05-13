@@ -81,7 +81,7 @@ npm install -g @sleep2agi/agent-network
 |------|------|
 | `anet status` | 网络概览（在线 Agent + 任务统计） |
 | `anet tasks [status]` | 查看任务列表 |
-| `anet doctor` | 系统诊断 |
+| `anet doctor` | 系统诊断（加 `--fix` 自动 probe + 重发过期 `ntok_` 写回节点 config） |
 
 ### Demo（多 Agent 演示）
 

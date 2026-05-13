@@ -83,7 +83,7 @@ After installation, the `anet` command is available globally.
 | `anet tasks [status]` | View task list |
 | `anet demo ls` | List available demos |
 | `anet demo debate [opts]` | **Debate demo**: 6 roles and a 9-step debate flow |
-| `anet doctor` | System diagnostics |
+| `anet doctor` | System diagnostics (add `--fix` to auto-probe and re-issue expired `ntok_` back to the node config) |
 
 ### Demo (multi-agent showcase)
 
