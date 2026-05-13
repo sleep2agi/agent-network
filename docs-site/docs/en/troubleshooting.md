@@ -81,13 +81,17 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 ## Auth Errors
 
-### `401 unauthorized`
+### 401 `auth required` / `invalid token` / `token required`
+
+The server actually returns one of three 401 errors (**not** `{"error": "unauthorized"}`; verify `grep error.*401 server/src/index.ts`):
 
 ```json
-{"error": "unauthorized"}
+{ "ok": false, "error": "auth required" }     // most REST endpoints when Authorization header is missing
+{ "ok": false, "error": "token required" }    // some auth endpoints (e.g. /api/auth/me) when token is absent
+{ "ok": false, "error": "invalid token" }     // token is syntactically present but resolveToken failed (revoked / expired / hub DB wiped)
 ```
 
-**Cause**: Token is invalid or missing.
+**Cause**: Token is invalid or missing. `invalid token` is also common right after a hub DB wipe (reset of commhub.db) — every existing utok\_ / ntok\_ is now stale.
 
 **Solution**:
 

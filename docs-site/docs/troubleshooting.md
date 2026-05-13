@@ -81,13 +81,17 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 ## 认证类错误
 
-### `401 unauthorized`
+### 401 `auth required` / `invalid token` / `token required`
+
+实际 server 返回三种 401 错码（**不是** `{"error": "unauthorized"}`；verify `grep error.*401 server/src/index.ts`）：
 
 ```json
-{"error": "unauthorized"}
+{ "ok": false, "error": "auth required" }     // 多数 REST 端点缺 Authorization header
+{ "ok": false, "error": "token required" }    // 部分认证端点（如 /api/auth/me）缺 token
+{ "ok": false, "error": "invalid token" }     // token 字面对但 resolveToken 失败（被 revoke / 过期 / hub DB wipe）
 ```
 
-**原因**：Token 无效或缺失。
+**原因**：Token 无效或缺失。`invalid token` 常见于 hub DB 被 wipe（重置 commhub.db），原有 utok\_ / ntok\_ 全失效。
 
 **解决**：
 
