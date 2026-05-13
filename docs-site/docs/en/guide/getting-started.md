@@ -165,7 +165,7 @@ You can also do this in two commands: `anet init --hub http://<HUB-LAN-IP>:9200`
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
-- `anet node create / start / delete / ls` with `claude-agent-sdk` + MiniMax / DeepSeek / GLM / Kimi / Anthropic
+- `anet node create / start / delete / ls` with `claude-agent-sdk` + 7 provider presets: MiniMax / DeepSeek / GLM / Kimi / InternLM / OpenRouter / Anthropic + Custom ([full provider table](/en/guide/multi-model))
 - Dashboard chat: markdown, Enter-to-send, optimistic echo, source labels, failure rendering, persistent history
 - Multi-agent coordination via `get_all_status` + `send_task` + `get_task`, with `parent_task_id` chaining handled by the Agent Node wrapper
 - LAN-shared hub
