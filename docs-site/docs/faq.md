@@ -197,8 +197,8 @@ docker compose logs -f server
 
 | Token | 用途 | 能做什么 | 不能做什么 |
 |-------|------|---------|-----------|
-| `utok_` | CLI / Dashboard 登录 | REST 读取、管理 | MCP 写操作 |
-| `ntok_` | Agent 连接 | 网络内所有操作 | 跨网络 |
+| `utok_` | CLI / Dashboard 登录 | 跨网络读取；在所属 network 内 role ≥ member 时可 MCP 写（owner / admin / member 可写，viewer 只读，详见 [tokens 权限决策](/concepts/tokens#权限决策-hub-端怎么判断你能不能调)） | viewer 在该网络写、跨网络写非成员的 network |
+| `ntok_` | Agent 连接 | 锁定的单网络内所有 member+ 权限操作（hub 强制锁 network_id） | 跨网络 |
 
 **简记**：人用 utok_，Agent 用 ntok_。
 

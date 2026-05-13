@@ -197,8 +197,8 @@ docker compose logs -f server
 
 | Token | Purpose | Can Do | Cannot Do |
 |-------|------|---------|-----------|
-| `utok_` | CLI / Dashboard login | REST reads, management | MCP write operations |
-| `ntok_` | Agent connection | All operations within network | Cross-network |
+| `utok_` | CLI / Dashboard login | Cross-network reads; MCP writes within a network when role ≥ member (owner / admin / member can write, viewer is read-only — see [tokens — auth decision](/en/concepts/tokens#authorization-decision-how-the-hub-decides)) | viewer writes in that network; writes against networks where the user isn't a member |
+| `ntok_` | Agent connection | All member+ operations within the locked single network (hub force-binds network_id) | Cross-network |
 
 **Quick rule**: Humans use utok_, agents use ntok_.
 
