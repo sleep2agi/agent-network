@@ -70,7 +70,7 @@ After installation, the `anet` command is available globally.
 | `anet node resume <name>` | Resume previous session |
 | `anet node ls` | List all nodes |
 | `anet info <name>` | View agent details |
-| `anet logs <name>` | View agent logs |
+| `anet logs <name>` | View agent logs (add `--follow` to tail in real time) |
 | `anet node rename <old> <new>` | Rename an agent |
 | `anet node delete <name>` | Delete an agent |
 

@@ -70,7 +70,7 @@ npm install -g @sleep2agi/agent-network
 | `anet node resume <name>` | 恢复上次 session |
 | `anet node ls` | 列出所有节点 |
 | `anet info <name>` | 查看 Agent 详情 |
-| `anet logs <name>` | 查看 Agent 日志 |
+| `anet logs <name>` | 查看 Agent 日志（加 `--follow` 实时 tail） |
 | `anet node rename <old> <new>` | 重命名 Agent |
 | `anet node delete <name>` | 删除 Agent |
 
