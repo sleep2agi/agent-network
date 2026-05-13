@@ -13,7 +13,7 @@
 > - 首个用户自动 admin
 > - users.plan 字段 + networks.visibility/max_members 字段
 > - **RFC-001 Phase 1**：COMMHUB_AUTH_TOKEN 软废弃，仅 `/api/*` 只读 + deprecation warning
-> - **RFC-001 Phase 2**：admin utok_ bootstrap（`~/.commhub/admin-utok.json` chmod 600）、`anet passwd` / `anet hub admin reset-user`、密码强度 ≥ 8 + 弱密码字典、`anet doctor --fix` 探测并重发 ntok_
+> - **RFC-001 Phase 2**：admin utok_ bootstrap（`~/.anet/server/admin-utok.json` chmod 600，R224 校准：实际路径是 `~/.anet/server/` 不是 `~/.commhub/`，verify [`cli.ts:28 adminUtokPath`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L28)）、`anet passwd` / `anet hub admin reset-user`、密码强度 ≥ 8 + 弱密码字典、`anet doctor --fix` 探测并重发 ntok_
 > 
 > ❌ 未实现（目标态，排到 v0.9+）：
 > - MCP 写操作检查网络角色（viewer 当前能 send_task）
@@ -24,7 +24,7 @@
 > - RFC-001 Phase 3：完全移除 COMMHUB_AUTH_TOKEN 代码路径
 >
 > ⛔ 已废弃方向（本文下方仍有相关引用，请忽略）：
-> - **Free / Pro / Admin Plan 配额体系**（下方 L244 表 + users.plan 字段实现）—— v0.6 时代 SaaS 假设，Apache 2.0 OSS 转向后**永久搁置**，不再 v0.9+ planned。schema 字段保留作历史，hub 不拦截配额。详见 [anet.sh/concepts/networks 配额限制章节](https://anet.sh/concepts/networks)
+> - **Free / Pro / Admin Plan 配额体系**（下方 L244 表 + users.plan 字段实现）—— v0.6 时代 SaaS 假设，Apache 2.0 OSS 转向后**永久搁置**，不再 v0.9+ planned。**R224 校准**（跟 R208 chain 一致）：schema 字段保留作历史，但 `auth.ts:184-190 createNetwork()` 仍按 `users.plan || "free"` 查 `QUOTAS` 拦截，**仅 `users.role='admin'` 豁免**——多数 SaaS 配额项（每网络 Agent 数 / 每天任务数 / 每网络成员数 / Token 数 / 试用期）实际不生效（hub 端没在对应路径调 quota check），但「创建网络数」(`max_networks_owned`) 这一项**仍 enforced**（free 用户默认上限 2）。详见 [anet.sh/concepts/networks 配额限制章节](https://anet.sh/concepts/networks) + [anet.sh/troubleshooting quota_exceeded 解决方案](https://anet.sh/troubleshooting)。
 > - `anet quickstart` 一键命令 —— 命令仍在 CLI（一键起 hub + dashboard + node），但 anet.sh docs 改推 step-by-step（更可控）；E2E 未覆盖。详见 [getting-started 未验证列表](https://anet.sh/guide/getting-started)
 > - "官方免费 hub" 托管 — 项目方向已转为 Apache 2.0 + 自部署，不做 SaaS 托管
 >
@@ -240,7 +240,23 @@ anet node start my-agent      # 启动
 权限不同 → UI 按钮自动隐藏（viewer 看不到"发任务"按钮）
 ```
 
-## 6. 账号配额（Plan）
+## 6. 账号配额（Plan）— ⛔ R224 校准：多数项目未启用
+
+::: warning R224 校准（跟 R208 chain）
+本节 7-row Plan 配额表是 v0.6 SaaS 时代设计，**Apache 2.0 OSS 转向后多数项未启用**：
+
+| 配额项 | v0.8 实际 |
+|--------|-----------|
+| **创建网络数** | ✅ **仍 enforced**（[`auth.ts:184-190 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184)），non-admin 默认 free=2，仅 `users.role='admin'` 豁免 |
+| 加入网络数 | ❌ hub 没在 join path 调 quota check |
+| 每网络 Agent 数 | ❌ 不生效 |
+| 每天任务数 | ❌ 不生效 |
+| Token 数 | ❌ 不生效 |
+| 网络最大成员 | ❌ `networks.max_members` 字段存在但 dormant（R178 chain） |
+| 试用期 | ❌ `licenses` 表有 14 天 trial 记录但 send_task 路径外其他 hub 操作不再 gate license |
+
+下面 schema + QUOTAS 代码块保留作历史背景。
+:::
 
 不同级别的用户有不同的配额限制：
 
