@@ -38,7 +38,7 @@ const COMMHUB_DIR = join(HOME, ".claude/channels/commhub");
 loadEnvFile(join(COMMHUB_DIR, ".env"));
 
 // ── Load project-specific config ──────────────────────
-// /home/vansin/vincent → -home-vansin-vincent
+// /path/to/your/work → -path-to-your-work
 const projectPath = process.cwd().replace(/\//g, "-");
 loadEnvFile(join(COMMHUB_DIR, projectPath, ".env"));
 
