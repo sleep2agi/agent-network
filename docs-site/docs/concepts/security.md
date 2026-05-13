@@ -123,16 +123,23 @@ SHA-256 → Argon2id 升级，提升抗暴力破解能力。
 
 ### RBAC 权限检查
 
-每次 MCP 工具调用都进行权限检查：
+每次 MCP 工具调用都进行权限检查（[`server/src/tools.ts:24-30 canWrite`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)）：
 
 ```typescript
-const canWrite = (): boolean => {
-  if (!enforceUserId) return true;      // 全局 Token 模式
-  if (!enforceNetworkId) return false;  // utok_ 没有网络 → 不能写
-  const role = getUserNetworkRole(enforceUserId, enforceNetworkId);
-  return !!role && role !== "viewer";   // owner/admin/member 可写
+const canWrite = (effectiveNetworkId?: string | null): boolean => {
+  if (!enforceUserId) return true; // legacy 全局 token 模式（仅 dev-open / 旧 atok_ 路径）
+  // ntok_: enforceNetworkId 由 token 绑定锁死；utok_: 从 effectiveNetworkId 走（MCP 调用传入）
+  const netId = enforceNetworkId ?? effectiveNetworkId ?? null;
+  if (!netId) return false;        // 解析不到 network 拒绝
+  const role = getUserNetworkRole(enforceUserId, netId);
+  return !!role && role !== "viewer"; // owner/admin/member 可写
 };
 ```
+
+**关键点**:
+- `ntok_` → 由 token 锁死 `enforceNetworkId`，**不接受**客户端传入的 network_id（防跨 network 写）
+- `utok_` → `enforceNetworkId` 为空，**接受**客户端在 MCP 调用里传 `effectiveNetworkId`，并查 `network_members.role`
+- 任何一种 token，只要 role 是 `viewer` 都拒绝写
 
 ### Server 端网络强制
 

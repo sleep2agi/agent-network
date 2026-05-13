@@ -123,16 +123,23 @@ SHA-256 → Argon2id upgrade for stronger brute-force resistance.
 
 ### RBAC Permission Checks
 
-Every MCP tool call undergoes permission checking:
+Every MCP tool call goes through a permission check ([`server/src/tools.ts:24-30 canWrite`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)):
 
 ```typescript
-const canWrite = (): boolean => {
-  if (!enforceUserId) return true;      // Global token mode
-  if (!enforceNetworkId) return false;  // utok_ has no network → can't write
-  const role = getUserNetworkRole(enforceUserId, enforceNetworkId);
-  return !!role && role !== "viewer";   // owner/admin/member can write
+const canWrite = (effectiveNetworkId?: string | null): boolean => {
+  if (!enforceUserId) return true; // legacy global-token mode (dev-open / atok_ only)
+  // ntok_: enforceNetworkId is locked by the token; utok_: use effectiveNetworkId from the MCP call
+  const netId = enforceNetworkId ?? effectiveNetworkId ?? null;
+  if (!netId) return false;        // no resolvable network → deny
+  const role = getUserNetworkRole(enforceUserId, netId);
+  return !!role && role !== "viewer"; // owner/admin/member can write
 };
 ```
+
+**Key points**:
+- `ntok_` → `enforceNetworkId` is locked by the token; the server **does not honor** any client-supplied network_id (prevents cross-network writes).
+- `utok_` → `enforceNetworkId` is empty, so the server **accepts** the `effectiveNetworkId` passed in the MCP call and checks `network_members.role`.
+- Regardless of token type, a `viewer` role is denied on writes.
 
 ### Server-Side Network Enforcement
 
