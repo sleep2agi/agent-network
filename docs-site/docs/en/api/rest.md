@@ -753,19 +753,31 @@ curl http://localhost:9200/api/stats \
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1004)
 
-Get audit log (admin/owner only).
+Get the audit log. **Permissions: any authenticated user can call this endpoint, but non-**system admin** callers only see their own log rows** (the server adds `WHERE user_id = <caller>` automatically when `users.role !== 'admin'` — see [`server/src/index.ts:1016`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1016)). System admin (`users.role = 'admin'`) sees everything and can filter by any `user_id`.
+
+::: warning Not the network-level admin/owner role
+"admin" here means `users.role='admin'` (**system-level**, the first registered user by default) — **not** the per-network `owner / admin / member / viewer` roles. Same distinction as [GET /api/users](#get-api-users).
+:::
 
 ```bash
 curl "http://localhost:9200/api/audit-log?limit=50" \
   -H "Authorization: Bearer utok_xxx"
 ```
 
+**Query parameters**:
+
+| Parameter | Description |
+|------|------|
+| `limit` | Max items (default 50, max 200) |
+| `action` | Filter by action (any role can use) |
+| `user_id` | Filter by user (**system admin only**; non-admin callers pass this in vain — own-logs filter is enforced) |
+
 **Response**:
 
 ```json
 {
   "ok": true,
-  "audit_log": [
+  "logs": [
     {
       "user_id": "u_abc123",
       "username": "alice",
@@ -784,11 +796,12 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
       "detail": "name=prod",
       "created_at": "2026-04-12 09:55:00"
     }
-  ]
+  ],
+  "count": 2
 }
 ```
 
-The `audit_log` schema is in [`agent-network/bin/cli.ts:2171`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2171) (INSERT statement enumerates columns). Common `action` values: `password_reset_by_admin` / `register` / `login` / `create_network` / `send_task` / `report_status` etc.
+The fields are `logs` + `count` (**not** `audit_log` — earlier doc was wrong). The `audit_log` **table** schema is in [`agent-network/bin/cli.ts:2171`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2171) (INSERT statement enumerates columns). Common `action` values: `password_reset_by_admin` / `register` / `login` / `create_network` / `send_task` / `report_status` / `password_changed` / `member_added` / `member_role_changed` / `member_removed`, etc.
 
 ---
 

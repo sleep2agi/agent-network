@@ -753,19 +753,31 @@ curl http://localhost:9200/api/stats \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1004)
 
-获取审计日志（仅 admin/owner）。
+获取审计日志。**权限：所有已认证用户都可调，但非**系统 admin** 只能看到自己的 log 行**（server 端走 `users.role !== 'admin'` 自动加 `WHERE user_id = <caller>` 过滤，见 [`server/src/index.ts:1016`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1016)）。系统 admin (`users.role = 'admin'`) 看全部 + 可用 `user_id` 参数过滤任意用户。
+
+::: warning 不是网络级 admin/owner
+这里的 "admin" 指 `users.role='admin'`（**系统级**，首位注册用户默认是），**不是**网络级别的 `owner / admin / member / viewer`。详见 [GET /api/users](#get-api-users) 同款区分。
+:::
 
 ```bash
 curl "http://localhost:9200/api/audit-log?limit=50" \
   -H "Authorization: Bearer utok_xxx"
 ```
 
+**查询参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `limit` | 最大条数（默认 50，最大 200） |
+| `action` | 按 action 过滤（任何角色可用） |
+| `user_id` | 按用户过滤（**仅系统 admin 有效**，非 admin 传也被忽略，强制走 own-logs） |
+
 **响应**：
 
 ```json
 {
   "ok": true,
-  "audit_log": [
+  "logs": [
     {
       "user_id": "u_abc123",
       "username": "alice",
@@ -784,11 +796,12 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
       "detail": "name=prod",
       "created_at": "2026-04-12 09:55:00"
     }
-  ]
+  ],
+  "count": 2
 }
 ```
 
-`audit_log` 表 schema 见 [`agent-network/bin/cli.ts:2171`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2171)（INSERT 语句明确列）。常见 `action` 值：`password_reset_by_admin` / `register` / `login` / `create_network` / `send_task` / `report_status` 等。
+字段名是 `logs` + `count`（**不是** `audit_log`，之前 doc 误写）。`audit_log` **表** schema 见 [`agent-network/bin/cli.ts:2171`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2171)（INSERT 语句明确列）。常见 `action` 值：`password_reset_by_admin` / `register` / `login` / `create_network` / `send_task` / `report_status` / `password_changed` / `member_added` / `member_role_changed` / `member_removed` 等。
 
 ---
 
