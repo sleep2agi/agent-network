@@ -847,6 +847,48 @@ curl http://localhost:9200/api/stats \
 
 ---
 
+### GET /api/server-logs
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L989)
+
+Read the last N lines from the hub process's **in-memory console-log ring buffer** (debug aid). **`users.role = 'admin'` only** (same system-admin gate as [GET /api/users](#get-api-users) / [GET /api/audit-log](#get-api-audit-log) — **not** the per-network admin role). Buffer capacity defaults to 500 lines and is configurable via `COMMHUB_LOG_RING` ([`index.ts:39`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L39)).
+
+```bash
+curl "http://localhost:9200/api/server-logs?limit=100" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+**Query parameters**:
+
+| Parameter | Description |
+|------|------|
+| `limit` | Max lines (default 200; capped at `COMMHUB_LOG_RING`, which defaults to 500) |
+| `since` | ISO 8601 timestamp; only return entries with `ts > since` (incremental polling) |
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "logs": [
+    { "ts": "2026-04-12T10:00:00.123Z", "level": "log", "line": "[10:00:00] coder-1 (sdk-n_xxx) → report_status: working | quicksort" },
+    { "ts": "2026-04-12T10:00:01.456Z", "level": "warn", "line": "⚠ deprecation: ..." }
+  ],
+  "capacity": 500
+}
+```
+
+Sorted **newest first**; each `line` is truncated to 4000 chars ([`index.ts:45`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L45)). **The buffer is cleared on process restart** — this is not persistent storage. For durable logs, redirect stdout to a file or journald.
+
+**4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 401 | `auth required` / `invalid token` | Missing / invalid utok_ |
+| 403 | `admin only` | Caller is not `users.role = 'admin'` (only the first registered user is admin by default) |
+
+---
+
 ### GET /api/audit-log
 
 

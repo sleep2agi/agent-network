@@ -847,6 +847,48 @@ curl http://localhost:9200/api/stats \
 
 ---
 
+### GET /api/server-logs
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L989)
+
+读 hub 进程内**内存环形 buffer** 里的最近 N 行 console 日志（debug 用）。**仅 `users.role = 'admin'` 系统 admin 可调**（跟 [GET /api/users](#get-api-users) / [GET /api/audit-log](#get-api-audit-log) 同款 system-admin gate，注意**不是网络级 admin**）。Buffer 容量默认 500 行（由 `COMMHUB_LOG_RING` env 调，[`index.ts:39`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L39)）。
+
+```bash
+curl "http://localhost:9200/api/server-logs?limit=100" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+**查询参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `limit` | 最大行数（默认 200，最大 = `COMMHUB_LOG_RING`，默认上限 500） |
+| `since` | ISO 8601 时间戳；只返回 `ts > since` 的新日志（增量轮询用） |
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "logs": [
+    { "ts": "2026-04-12T10:00:00.123Z", "level": "log", "line": "[10:00:00] 代码1号 (sdk-n_xxx) → report_status: working | 写排序算法" },
+    { "ts": "2026-04-12T10:00:01.456Z", "level": "warn", "line": "⚠ deprecation: ..." }
+  ],
+  "capacity": 500
+}
+```
+
+按时间**倒序**返回（最新在最前）；每行 `line` 截断到 4000 字符（[`index.ts:45`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L45)）。**进程重启 buffer 清空** —— 这不是持久化日志，要持久化日志做 stdout/journald 重定向。
+
+**4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 401 | `auth required` / `invalid token` | 缺/无效 utok_ |
+| 403 | `admin only` | 调用者 `users.role !== 'admin'`（首位注册用户默认是 admin） |
+
+---
+
 ### GET /api/audit-log
 
 
