@@ -163,11 +163,12 @@ curl http://localhost:9200/api/auth/me \
   "networks": [
     { "network_id": "net_xxx", "network_name": "default", "member_role": "owner" },
     { "network_id": "net_yyy", "network_name": "team-prod", "member_role": "member" }
-  ]
+  ],
+  "current_network": "net_xxx"
 }
 ```
 
-`networks` 数组列出当前用户所属的所有 network 及在该 network 的 `member_role`（字段名跟 [GET /api/networks](#get-api-networks) 一致）；`anet whoami` 用它显示「← current」标记（结合 `config.json` 里的 `network_id` 字段）。
+`networks` 数组列出当前用户所属的所有 network 及在该 network 的 `member_role`（字段名跟 [GET /api/networks](#get-api-networks) 一致）；`anet whoami` 用它显示「← current」标记（结合 `config.json` 里的 `network_id` 字段）。`current_network` 字段是 server 端**根据当前 token 的 binding** 解析出的 network_id（`utok_` 是全局 token 取 `~/.anet/config.json` 的 network_id；`ntok_` 强制 binding 到颁发时的 network）。
 
 ---
 
@@ -455,9 +456,17 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
       "progress": null,
       "last_seen_at": "2026-04-12 10:00:00"
     }
-  ]
+  ],
+  "summary": {
+    "idle": 7,
+    "working": 1,
+    "offline": 2,
+    "total": 10
+  }
 }
 ```
+
+`summary` 字段是按 status 聚合的计数（[`server/src/index.ts:761-767`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L761)）：`working` 类把 `working / blocked / error / waiting_input / running / busy` 都归一进去；`offline` 类是 server 端 `updated_at` 落后 10 分钟的 session（每次 GET 实时计算并写回 DB）；其他算 `idle`。
 
 ---
 

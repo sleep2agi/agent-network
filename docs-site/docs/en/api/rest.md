@@ -163,11 +163,12 @@ curl http://localhost:9200/api/auth/me \
   "networks": [
     { "network_id": "net_xxx", "network_name": "default", "member_role": "owner" },
     { "network_id": "net_yyy", "network_name": "team-prod", "member_role": "member" }
-  ]
+  ],
+  "current_network": "net_xxx"
 }
 ```
 
-`networks` lists every network the current user belongs to along with their `member_role` in that network (field name matches [GET /api/networks](#get-api-networks)); `anet whoami` uses this list (combined with the `network_id` in `config.json`) to render the "← current" marker.
+`networks` lists every network the current user belongs to along with their `member_role` in that network (field name matches [GET /api/networks](#get-api-networks)); `anet whoami` uses this list (combined with the `network_id` in `config.json`) to render the "← current" marker. The `current_network` field is the network the server resolves from the **caller's token binding** (for `utok_` it's the `network_id` in `~/.anet/config.json`; for `ntok_` it's the network the token was issued for, which the hub enforces).
 
 ---
 
@@ -455,9 +456,17 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
       "progress": null,
       "last_seen_at": "2026-04-12 10:00:00"
     }
-  ]
+  ],
+  "summary": {
+    "idle": 7,
+    "working": 1,
+    "offline": 2,
+    "total": 10
+  }
 }
 ```
+
+The `summary` field is a count aggregated by status ([`server/src/index.ts:761-767`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L761)): the `working` bucket collapses `working / blocked / error / waiting_input / running / busy`; `offline` is sessions whose `updated_at` is older than 10 minutes (the server recomputes this on every GET and writes back to the DB); everything else counts as `idle`.
 
 ---
 
