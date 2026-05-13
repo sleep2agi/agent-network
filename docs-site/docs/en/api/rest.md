@@ -337,7 +337,7 @@ curl -X POST http://localhost:9200/api/networks \
   }'
 ```
 
-**Response**:
+**Response** (success):
 
 ```json
 {
@@ -346,6 +346,14 @@ curl -X POST http://localhost:9200/api/networks \
   "network_name": "prod"
 }
 ```
+
+**Common 4xx errors** (verify [`auth.ts:182-206 createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L182)):
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `network name already exists` | Same owner already has a network with this name (`UNIQUE(owner_id, network_name)` constraint) |
+| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate ([`auth.ts:188-190`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L188); admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column flagged in R178 |
+| 401 | `token required` / `invalid token` | Missing / invalid utok_ |
 
 ---
 
@@ -1273,7 +1281,7 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 | `max_uses` | number | | Max usage count (default `1`; `-1` for unlimited) |
 | `expires_days` | number | | Expiration in days (omit for never-expire) |
 
-**Response**:
+**Response** (success):
 
 ```json
 {
@@ -1282,7 +1290,15 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 }
 ```
 
-The recipient joins via `anet network join inv_abc123def456` or `POST /api/networks/join`.
+**Common 4xx errors** (verify [`auth.ts:344-356 createInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L344) + [`index.ts:622` route handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L622)):
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `invalid role` | `role` is not one of `admin` / `member` / `viewer` |
+| 403 | `not a member of this network` | Caller is not a member of the network ([`index.ts:622` callerRole gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L622)) |
+| 403 | `owner/admin required` | Caller is `member` / `viewer` — cannot issue invites |
+
+The recipient joins via `anet network join inv_abc123def456` or `POST /api/networks/join`. `invite_code` is `inv_` prefix + 12 characters (`auth.ts:346` `slice(0, 12)`).
 
 ### POST /api/networks/join
 
@@ -1298,7 +1314,7 @@ curl -X POST http://localhost:9200/api/networks/join \
   -d '{"invite_code": "inv_abc123def456"}'
 ```
 
-**Response**:
+**Response** (success):
 
 ```json
 {
@@ -1308,7 +1324,16 @@ curl -X POST http://localhost:9200/api/networks/join \
 }
 ```
 
-After receiving this response, the `anet network join` CLI auto-switches to the joined network (updating the `network_id` field in `~/.anet/config.json` to `res.network_id`) and prints `Joined network as <role>`.
+**Common 4xx errors** (verify [`auth.ts:358-378 joinByInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L358)):
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `invalid invite code` | `invite_code` does not exist |
+| 400 | `invite code fully used` | `used_count >= max_uses` (max_uses=-1 means unlimited) |
+| 400 | `invite code expired` | `expires_at < now()` (omit `expires_days` to create a never-expire code) |
+| 400 | `already a member of this network` | Caller is already a member |
+
+After receiving this response, the `anet network join` CLI auto-switches to the joined network (updating the `network_id` field in `~/.anet/config.json` to `res.network_id`) and prints `Joined network as <role>`. The server also auto-issues a network-bound token for the joiner ([`auth.ts:374-377`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L374), `name='auto-join' scope='full'`) and writes a `network_joined` audit row.
 
 ---
 

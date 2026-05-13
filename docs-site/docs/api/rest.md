@@ -337,7 +337,7 @@ curl -X POST http://localhost:9200/api/networks \
   }'
 ```
 
-**响应**：
+**响应**（成功）：
 
 ```json
 {
@@ -346,6 +346,14 @@ curl -X POST http://localhost:9200/api/networks \
   "network_name": "prod"
 }
 ```
+
+**常见 4xx**（verify [`auth.ts:182-206 createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L182)）：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `network name already exists` | 同一 owner 名下已有同名 network（`UNIQUE(owner_id, network_name)` 约束） |
+| 400 | `quota exceeded: max N networks for free plan` | 触发 plan quota 配额限制（v0.8 起 admin 用户豁免；free plan 默认 max_networks_owned=2，**当前 quota 仍在 `auth.ts:182-190` enforced**，跟 R178 networks 表的 `max_members` 不同：那个 dormant、这个 active） |
+| 401 | `token required` / `invalid token` | 未提供 / 提供了无效 utok_ |
 
 ---
 
@@ -1273,7 +1281,7 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 | `max_uses` | number | | 最大使用次数（默认 `1`；`-1` 无限） |
 | `expires_days` | number | | 过期天数（不传则不过期） |
 
-**响应**：
+**响应**（成功）：
 
 ```json
 {
@@ -1282,7 +1290,15 @@ curl -X POST http://localhost:9200/api/networks/net_xxx/invite \
 }
 ```
 
-接收方用 `anet network join inv_abc123def456` 或 `POST /api/networks/join` 加入。
+**常见 4xx**（verify [`auth.ts:344-356 createInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L344) + [`index.ts:622` route handler](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L622)）：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `invalid role` | `role` 不是 `admin` / `member` / `viewer` 之一 |
+| 403 | `not a member of this network` | 调用者本身不在该网络（[`index.ts:622` callerRole gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L622)） |
+| 403 | `owner/admin required` | 调用者是 `member` / `viewer`，无权 issue 邀请码 |
+
+接收方用 `anet network join inv_abc123def456` 或 `POST /api/networks/join` 加入。`invite_code` 是 `inv_` 前缀 + 12 字符（`auth.ts:346` `slice(0, 12)`）。
 
 ### POST /api/networks/join
 
@@ -1298,7 +1314,7 @@ curl -X POST http://localhost:9200/api/networks/join \
   -d '{"invite_code": "inv_abc123def456"}'
 ```
 
-**响应**：
+**响应**（成功）：
 
 ```json
 {
@@ -1308,7 +1324,16 @@ curl -X POST http://localhost:9200/api/networks/join \
 }
 ```
 
-`anet network join` CLI 拿到该响应后会自动切换到加入的 network（即 `~/.anet/config.json` 的 `network_id` 字段更新为 `res.network_id`），并打印 `Joined network as <role>`。
+**常见 4xx**（verify [`auth.ts:358-378 joinByInvite()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L358)）：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `invalid invite code` | `invite_code` 不存在 |
+| 400 | `invite code fully used` | `used_count >= max_uses`（max_uses=-1 无限） |
+| 400 | `invite code expired` | `expires_at < now()`（不传 `expires_days` 创建则不会过期） |
+| 400 | `already a member of this network` | 调用者已是该网络成员 |
+
+`anet network join` CLI 拿到该响应后会自动切换到加入的 network（即 `~/.anet/config.json` 的 `network_id` 字段更新为 `res.network_id`），并打印 `Joined network as <role>`。同时 server 自动颁发一个 `network_id` 绑定的 token 给加入者（[`auth.ts:374-377`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L374) `name='auto-join' scope='full'`），写 audit `network_joined`。
 
 ---
 
