@@ -889,10 +889,10 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
     {
       "user_id": "u_abc123",
       "username": "alice",
-      "action": "create_network",
+      "action": "network_renamed",
       "target_type": "network",
       "target_id": "net_xyz789",
-      "detail": "name=prod",
+      "detail": "prod-v2",
       "created_at": "2026-04-12 09:55:00"
     }
   ],
@@ -900,7 +900,11 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
 }
 ```
 
-字段名是 `logs` + `count`（**不是** `audit_log`，之前 doc 误写）。`audit_log` **表** schema 见 [`agent-network/bin/cli.ts:2171`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2171)（INSERT 语句明确列）。常见 `action` 值：`password_reset_by_admin` / `register` / `login` / `create_network` / `send_task` / `report_status` / `password_changed` / `member_added` / `member_role_changed` / `member_removed` 等。
+字段名是 `logs` + `count`（**不是** `audit_log`，之前 doc 误写）。`audit_log` **表** schema 见 [`server/src/db.ts:201-212`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L201) 完整 10 列（含 `ip` + `network_id`）。**完整 action 值列表 + 触发场景**见 [安全设计 — 审计日志](/concepts/security#审计日志)。
+
+::: warning `create_network` 不审计
+POST `/api/networks` 不调 `logAudit`，所以 audit_log 里**不会**有 `create_network` 行。看 network 创建请走 [`GET /api/networks`](#get-api-networks) 列表对比，或借 `target_type='network' + action='network_renamed'` 间接推断（R195 finding，跟 [security.md 审计](/concepts/security#审计日志) `::: info` 一致）。
+:::
 
 ---
 

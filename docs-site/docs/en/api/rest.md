@@ -889,10 +889,10 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
     {
       "user_id": "u_abc123",
       "username": "alice",
-      "action": "create_network",
+      "action": "network_renamed",
       "target_type": "network",
       "target_id": "net_xyz789",
-      "detail": "name=prod",
+      "detail": "prod-v2",
       "created_at": "2026-04-12 09:55:00"
     }
   ],
@@ -900,7 +900,11 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
 }
 ```
 
-The fields are `logs` + `count` (**not** `audit_log` — earlier doc was wrong). The `audit_log` **table** schema is in [`agent-network/bin/cli.ts:2171`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2171) (INSERT statement enumerates columns). Common `action` values: `password_reset_by_admin` / `register` / `login` / `create_network` / `send_task` / `report_status` / `password_changed` / `member_added` / `member_role_changed` / `member_removed`, etc.
+The fields are `logs` + `count` (**not** `audit_log` — earlier doc was wrong). The `audit_log` **table** schema is in [`server/src/db.ts:201-212`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L201) — 10 columns including `ip` and `network_id`. **Full `action` value list with triggers** is in [Security — Audit log](/en/concepts/security#audit-logging).
+
+::: warning `create_network` is NOT audited
+POST `/api/networks` does not call `logAudit`, so audit_log will **never** contain a `create_network` row. To track network creation, diff [`GET /api/networks`](#get-api-networks) or infer it from `target_type='network' + action='network_renamed'` records (R195 finding; same `::: info` lives in [security.md audit log](/en/concepts/security#audit-logging)).
+:::
 
 ---
 
