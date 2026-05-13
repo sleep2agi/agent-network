@@ -31,7 +31,7 @@ Agent Node 支持三种 AI 运行时引擎，覆盖主流模型：
 | 属性 | 说明 |
 |------|------|
 | **模型** | 当前主线 Claude Sonnet / Opus / Haiku（具体型号查 [Anthropic 官方](https://docs.anthropic.com/claude/docs/models-overview)） |
-| **前置** | Anthropic API Key，或任一 Anthropic 兼容 API Key（MiniMax/DeepSeek/GLM/Kimi 等） |
+| **前置** | Anthropic API Key，或任一 Anthropic 兼容 API Key（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等，完整列表见 [multi-model](/guide/multi-model)） |
 | **特点** | 编程式调用 Anthropic 兼容接口，适合稳定后台 Agent |
 | **隔离** | `settingSources: []` 完全隔离宿主机配置 |
 

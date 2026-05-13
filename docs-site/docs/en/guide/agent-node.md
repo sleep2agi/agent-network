@@ -31,7 +31,7 @@ Based on the [Anthropic Claude Agent SDK](https://www.npmjs.com/package/@anthrop
 | Property | Description |
 |------|------|
 | **Models** | Latest Claude Sonnet / Opus / Haiku (specific IDs at [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)) |
-| **Prerequisites** | Anthropic API Key or any Anthropic-compatible API key (MiniMax/DeepSeek/GLM/Kimi, etc.) |
+| **Prerequisites** | Anthropic API Key, or any Anthropic-compatible API key (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter, etc. — full list in [multi-model](/en/guide/multi-model)) |
 | **Strengths** | Programmatic Anthropic-compatible API calls for stable background agents |
 | **Isolation** | `settingSources: []` fully isolates host config |
 
