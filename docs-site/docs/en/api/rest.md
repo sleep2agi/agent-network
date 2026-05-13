@@ -638,6 +638,32 @@ curl http://localhost:9200/api/networks/net_xxx/members \
   -H "Authorization: Bearer utok_xxx"
 ```
 
+**Response**:
+
+```json
+{
+  "ok": true,
+  "members": [
+    {
+      "user_id": "u_abc123",
+      "username": "alice",
+      "display_name": "Alice",
+      "role": "owner",
+      "joined_at": "2026-04-12 10:00:00"
+    },
+    {
+      "user_id": "u_def456",
+      "username": "bob",
+      "display_name": "Bob",
+      "role": "member",
+      "joined_at": "2026-04-15 14:30:00"
+    }
+  ]
+}
+```
+
+`anet network members` CLI renders this response (using `m.display_name || m.username` for the name, with a role emoji icon).
+
 ### POST /api/networks/:id/invite
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L621)
