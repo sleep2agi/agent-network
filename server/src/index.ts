@@ -246,10 +246,11 @@ const CORS_ORIGINS = process.env.COMMHUB_CORS_ORIGINS
 
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") || "";
-  const allowed = CORS_ORIGINS.includes(origin)
-    || origin === "https://agent-network.vansin.me"
-    || origin === "https://agent-network-dashboard.vercel.app"
-    ? origin : "";
+  // CORS allowlist is driven entirely by COMMHUB_CORS_ORIGINS env (comma-separated).
+  // Default (env unset) allows localhost dev origins only — see CORS_ORIGINS above.
+  // No author-specific domains are hardcoded; production deployments must set
+  // COMMHUB_CORS_ORIGINS explicitly. See docs/concepts/security.md "CORS 配置".
+  const allowed = CORS_ORIGINS.includes(origin) ? origin : "";
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
