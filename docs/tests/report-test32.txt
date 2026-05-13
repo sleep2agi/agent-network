@@ -1,0 +1,22 @@
+Test: test32-agent-network-shell-spawn-audit
+Date: 2026-05-13
+Command:
+  sg docker -c 'docker build -t anet-test32-shell-spawn-audit -f tests/test32-agent-network-shell-spawn-audit/Dockerfile .' &&
+  sg docker -c 'docker run --rm anet-test32-shell-spawn-audit'
+
+Result: PASS
+
+Coverage:
+- L0 installs agent-network dependencies inside a clean Docker container.
+- L1 runs `bun tsc --noEmit`.
+- L2 asserts `agent-network/bin/cli.ts` has no `child_process.spawn(... shell: true)` usage.
+- L3 asserts demo tmux start/kill paths no longer use shell-string `execSync`.
+- L4 asserts the tmux helper shell-quotes node aliases before passing the tmux shell-command payload.
+
+Key log:
+  [L0] install agent-network dependencies
+  [L1] typecheck agent-network
+  [L2] no child_process.spawn call uses shell:true
+  [L3] tmux demo commands do not use shell-string execSync
+  [L4] safe tmux helper quotes aliases for shell-command payload
+  PASS test32 agent-network shell spawn audit

@@ -28,6 +28,13 @@ function serverConfigPath() { return join(home, ".anet", "server", "config.json"
 function adminUtokPath() { return join(home, ".anet", "server", "admin-utok.json"); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 function encodeCwd(cwd: string): string { return cwd.replace(/\//g, "-"); }
+function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
+function killTmuxSession(sessionName: string) {
+  try { execFileSync("tmux", ["kill-session", "-t", sessionName], { stdio: "pipe" }); } catch {}
+}
+function startNodeTmuxSession(sessionName: string, alias: string) {
+  execFileSync("tmux", ["new-session", "-d", "-s", sessionName, `anet node start ${shellQuote(alias)}`], { stdio: "pipe" });
+}
 function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   if (!uuid) return false;
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
@@ -277,7 +284,9 @@ function parseOpts(): Record<string, string> & { _channels: string[]; _envs: str
 
 function commandExists(name: string): boolean {
   try {
-    execSync(`command -v ${JSON.stringify(name)}`, { stdio: "ignore", shell: "/bin/bash" });
+    // `command` is a shell builtin; use /bin/sh -c with shell-safe quoting
+    // (shellQuote, NOT JSON.stringify which lets $() / `` expand inside "...")
+    execFileSync("/bin/sh", ["-c", `command -v ${shellQuote(name)}`], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -334,10 +343,9 @@ function detectCommandVersion(commandName: string, displayName: string, source?:
     return { name: commandName, displayName, version: null, state: "not-installed", source };
   }
   try {
-    const output = execSync(`${JSON.stringify(commandName)} --version`, {
+    const output = execFileSync(commandName, ["--version"], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
-      shell: "/bin/bash",
       timeout: 5000,
     }).trim();
     const parsed = parseSemver(output);
@@ -358,10 +366,9 @@ function detectCommandVersion(commandName: string, displayName: string, source?:
 
 function detectGlobalNpmPackage(pkgName: string, displayName: string, source = "global"): DetectedVersion {
   try {
-    const output = execSync(`npm ls -g ${JSON.stringify(pkgName)} --depth=0 --json`, {
+    const output = execFileSync("npm", ["ls", "-g", pkgName, "--depth=0", "--json"], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
-      shell: "/bin/bash",
     });
     const data = JSON.parse(output);
     const version = data?.dependencies?.[pkgName]?.version;
@@ -477,7 +484,7 @@ function isInstalled(pkg: DetectedVersion): boolean {
 }
 
 function installGlobalPackage(pkgName: string) {
-  execSync(`npm install -g ${JSON.stringify(pkgName)}`, { stdio: "inherit", shell: "/bin/bash" });
+  execFileSync("npm", ["install", "-g", pkgName], { stdio: "inherit" });
 }
 
 function printDetectedPackagesForSetup() {
@@ -1617,10 +1624,12 @@ async function launchAgent(id: string, forceNewSession = false) {
 
     // Try agent-node from PATH, fallback to npx
     let cmd = "agent-node";
+    let commandArgs = agentArgs;
     try { execSync("which agent-node", { stdio: "pipe" }); } catch {
-      cmd = "npx -y @sleep2agi/agent-node@preview";
+      cmd = "npx";
+      commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
     }
-    const child = spawn(cmd, agentArgs, { env, stdio: "inherit", shell: true });
+    const child = spawn(cmd, commandArgs, { env, stdio: "inherit" });
     const pidFile = join(nodesDir(), nodeId, ".pid");
     if (child.pid) writeFileSync(pidFile, String(child.pid));
     child.on("exit", (code) => {
@@ -1674,7 +1683,7 @@ async function launchAgent(id: string, forceNewSession = false) {
 
     claudeArgs.push("-n", displayName);
 
-    const child = spawn("claude", claudeArgs, { env, stdio: "inherit", shell: true });
+    const child = spawn("claude", claudeArgs, { env, stdio: "inherit" });
     const pidFile = join(nodesDir(), nodeId, ".pid");
     if (child.pid) writeFileSync(pidFile, String(child.pid));
     child.on("exit", (code) => {
@@ -1950,7 +1959,7 @@ async function serverCommand() {
       const PINNED_SERVER_VERSION = "0.8.0-preview.2";
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`];
       if (devOpen) serverArgs.push("--dev-open");
-      child = spawn("bunx", serverArgs, { env, stdio: "pipe", shell: true });
+      child = spawn("bunx", serverArgs, { env, stdio: "pipe" });
 
       // Wait for server with polling
       let ready = false;
@@ -2241,7 +2250,7 @@ async function serverCommand() {
     // Try npx first
     // Pin Dashboard version. Bump whenever the Dashboard package is updated.
     const PINNED_DASHBOARD_VERSION = "0.4.5-preview.1";
-    const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit", shell: true });
+    const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit" });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
       console.error(`  npx @sleep2agi/agent-network-dashboard`);
@@ -2690,11 +2699,7 @@ function upgradeCommand() {
   console.log("   Reason: upgrading the currently running anet process can remove or replace the CLI mid-run.");
   if (forkScript) {
     try {
-      const child = spawn(forkScript, [], {
-        stdio: "inherit",
-        shell: true,
-        detached: true,
-      });
+      const child = spawn(forkScript, [], { stdio: "inherit", detached: true });
       child.unref();
       console.log(`   Spawned external upgrade script: ${forkScript}`);
       console.log("   Re-run `anet -v` after the script finishes.");
@@ -2708,7 +2713,7 @@ function upgradeCommand() {
 
   try {
     console.log("\n2/2 agent-node");
-    execSync("npm install -g @sleep2agi/agent-node@latest", { stdio: "inherit", shell: "/bin/bash" });
+    execFileSync("npm", ["install", "-g", "@sleep2agi/agent-node@latest"], { stdio: "inherit" });
   } catch {
     console.log("   ⚠ Failed to update @sleep2agi/agent-node");
   }
@@ -3780,9 +3785,9 @@ async function demoDebateCommand() {
   for (const role of DEBATE_ROLES) {
     const alias = roleAliases[role];
     const sessName = `debate-${suffix}-${alias}`;
-    try { execSync(`tmux kill-session -t ${JSON.stringify(sessName)} 2>/dev/null`, { stdio: "pipe" }); } catch {}
+    killTmuxSession(sessName);
     try {
-      execSync(`tmux new-session -d -s ${JSON.stringify(sessName)} 'anet node start ${JSON.stringify(alias)}'`, { stdio: "pipe", shell: "/bin/bash" });
+      startNodeTmuxSession(sessName, alias);
     } catch (e: any) {
       console.error(`     ❌ tmux ${alias}: ${e.message}`);
       return;
@@ -3910,7 +3915,7 @@ async function demoDebateCommand() {
     for (const role of DEBATE_ROLES) {
       const alias = roleAliases[role];
       const sessName = `debate-${suffix}-${alias}`;
-      try { execSync(`tmux kill-session -t ${JSON.stringify(sessName)} 2>/dev/null`, { stdio: "pipe" }); } catch {}
+      killTmuxSession(sessName);
       args.length = 0; args.push("delete", alias, "--force");
       try { await deleteCommand(); } catch {}
     }
@@ -4168,9 +4173,9 @@ async function demoSocialMediaCommand() {
   for (const role of SOCIAL_ROLES) {
     const alias = roleAliases[role];
     const sessName = `social-${suffix}-${alias}`;
-    try { execSync(`tmux kill-session -t ${JSON.stringify(sessName)} 2>/dev/null`, { stdio: "pipe" }); } catch {}
+    killTmuxSession(sessName);
     try {
-      execSync(`tmux new-session -d -s ${JSON.stringify(sessName)} 'anet node start ${JSON.stringify(alias)}'`, { stdio: "pipe", shell: "/bin/bash" });
+      startNodeTmuxSession(sessName, alias);
     } catch (e: any) {
       console.error(`     ❌ tmux ${alias}: ${e.message}`);
       return;
@@ -4269,7 +4274,7 @@ async function demoSocialMediaCommand() {
     for (const role of SOCIAL_ROLES) {
       const alias = roleAliases[role];
       const sessName = `social-${suffix}-${alias}`;
-      try { execSync(`tmux kill-session -t ${JSON.stringify(sessName)} 2>/dev/null`, { stdio: "pipe" }); } catch {}
+      killTmuxSession(sessName);
       args.length = 0; args.push("delete", alias);
       try { await deleteCommand(); } catch {}
     }
