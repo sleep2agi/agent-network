@@ -363,3 +363,7 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 - [Agent Node configuration](/en/guide/agent-node)
 - [Multi-model setup](/en/guide/multi-model)
 - [CLI reference](/en/guide/cli)
+
+::: tip Going deeper on the SDK layer?
+This page is the user how-to. If you want the concrete differences between the two SDK adapters (`claude-agent-sdk` / `codex-sdk`) — session / tools / streaming / cost / error handling — and how the anet wrapper converges them, see [SDK Deep-dive](/en/guide/sdk-deep-dive).
+:::

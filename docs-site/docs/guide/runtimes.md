@@ -384,3 +384,7 @@ anet node start coder
 - [Agent Node 配置](/guide/agent-node) — 节点的完整配置文件 / 命令行参数 / 工具控制
 - [多模型配置](/guide/multi-model) — 每家国产模型的具体 endpoint / Key / 示例
 - [CLI 命令](/guide/cli) — `anet node create` 等命令的全部参数
+
+::: tip 想深入 SDK 层？
+本页面是 user how-to。如果你想搞清两个 SDK adapter（`claude-agent-sdk` / `codex-sdk`）在 session / tool / streaming / 计费 / 错误处理上的具体差异，以及 anet wrapper 怎么收敛它们 —— 看 [SDK Deep-dive](/guide/sdk-deep-dive)。
+:::
