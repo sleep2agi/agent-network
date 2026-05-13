@@ -113,7 +113,7 @@ kill <PID>
 |------|------|------|
 | 全局配置 | `~/.anet/config.json` | hub 地址、token |
 | 项目配置 | `{项目}/.anet/config.json` | alias、type |
-| 节点配置 | `.anet/nodes/<id>/config.json` | runtime、model、tools |
+| 节点配置 | `.anet/nodes/<node-name>/config.json` | runtime、model、tools（目录名是 alias，不是内部 node_id） |
 | 数据库 | `~/.commhub/commhub.db` | SQLite 数据 |
 
 ## Agent 问题

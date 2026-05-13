@@ -113,7 +113,7 @@ kill <PID>
 |------|------|------|
 | Global config | `~/.anet/config.json` | Hub address, token |
 | Project config | `{project}/.anet/config.json` | Alias, type |
-| Node config | `.anet/nodes/<id>/config.json` | Runtime, model, tools |
+| Node config | `.anet/nodes/<node-name>/config.json` | Runtime, model, tools (directory name is the alias, not the internal `node_id`) |
 | Database | `~/.commhub/commhub.db` | SQLite data |
 
 ## Agent Issues
