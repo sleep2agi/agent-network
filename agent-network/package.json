@@ -52,7 +52,8 @@
     "url": "https://github.com/sleep2agi/agent-network/issues"
   },
   "engines": {
-    "bun": ">=1.2.0"
+    "bun": ">=1.2.0",
+    "node": ">=22.13.0"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.4.3"

@@ -65,6 +65,8 @@
 
 ## 30-second quickstart
 
+> **Prereq:** Node.js ≥ 22.13.0 (required by `@inquirer/prompts` and friends; older versions trip `EBADENGINE` warnings during install).
+
 ```bash
 # Install one global package
 npm install -g @sleep2agi/agent-network
