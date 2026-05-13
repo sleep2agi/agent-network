@@ -86,7 +86,7 @@ anet node create my-bot
 You'll get a two-step interactive picker:
 
 1. **Pick the runtime** — `claude-agent-sdk` is the verified default.
-2. **Pick the provider** — MiniMax / DeepSeek / GLM / Kimi / Intern (Shusheng) / OpenRouter / Anthropic / custom. Each preset writes the right `ANTHROPIC_BASE_URL` and a sensible default model, then prompts for the API key.
+2. **Pick the provider** — MiniMax / DeepSeek / GLM / Kimi / Intern (Shusheng) / Xiaomi MiMo / OpenRouter / Anthropic / custom. Each preset writes the right `ANTHROPIC_BASE_URL` and a sensible default model, then prompts for the API key.
 
 ::: details Other runtimes
 - `codex-sdk` — passes unit tests; **no full E2E** with real codex auth.
@@ -165,7 +165,7 @@ You can also do this in two commands: `anet init --hub http://<HUB-LAN-IP>:9200`
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
-- `anet node create / start / delete / ls` with `claude-agent-sdk` + 7 provider presets: MiniMax / DeepSeek / GLM / Kimi / InternLM / OpenRouter / Anthropic + Custom ([full provider table](/en/guide/multi-model))
+- `anet node create / start / delete / ls` with `claude-agent-sdk` + 8 provider presets: MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter / Anthropic + Custom ([full provider table](/en/guide/multi-model))
 - Dashboard chat: markdown, Enter-to-send, optimistic echo, source labels, failure rendering, persistent history
 - Multi-agent coordination via `get_all_status` + `send_task` + `get_task`, with `parent_task_id` chaining handled by the Agent Node wrapper
 - LAN-shared hub
