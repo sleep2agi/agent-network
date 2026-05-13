@@ -278,6 +278,20 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 Matches the `anet passwd` CLI behavior (the CLI writes the new token back into `~/.anet/config.json` automatically). Other devices' next request returns `401 invalid token` and they must `anet login` again.
 
+**Common 4xx errors** (verify [`auth.ts:274-282 changePassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L274)):
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `new password must be at least 8 characters` | New password < 8 chars |
+| 400 | `new password is too common` | Hits the weak-password dictionary ([`password-dict.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)) |
+| 400 | `user not found` | `user_id` doesn't exist (rare; token expired or user deleted by admin) |
+| 400 | `incorrect current password` | `old_password` hash mismatch |
+| 401 | `token required` / `invalid token` | Missing / invalid utok_ |
+
+::: tip Same strength rules as register
+Password-strength validation reuses `validatePasswordStrength()` from register (see [POST /api/auth/register 4xx](#post-api-auth-register)). The bootstrap-admin exemption applies only to the first signup — **no exemption for password change**.
+:::
+
 ---
 
 ## Network Endpoints

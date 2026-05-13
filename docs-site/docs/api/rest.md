@@ -278,6 +278,20 @@ curl -X POST http://localhost:9200/api/auth/password \
 
 跟 `anet passwd` CLI 行为一致（CLI 拿到新 token 后自动写 `~/.anet/config.json`）。其他设备下次请求拿 `401 invalid token` → 必须 `anet login` 重新登录。
 
+**常见 4xx**（verify [`auth.ts:274-282 changePassword()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L274)）：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `new password must be at least 8 characters` | 新密码 < 8 字符 |
+| 400 | `new password is too common` | 命中弱密码字典（[`password-dict.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)）|
+| 400 | `user not found` | `user_id` 不存在（罕见，token 已 expire 或 user 被 admin 删） |
+| 400 | `incorrect current password` | `old_password` 跟存的 hash 不匹配 |
+| 401 | `token required` / `invalid token` | 缺 / 无效 utok_ |
+
+::: tip 跟 register 强度规则一致
+密码强度规则跟 register 共用 `validatePasswordStrength()`（参 [POST /api/auth/register 4xx](#post-api-auth-register)）。bootstrap admin 豁免仅适用于首位注册，**改密码无豁免**。
+:::
+
 ---
 
 ## 网络端点
