@@ -1142,7 +1142,7 @@ Telegram setup:
   3. Talk to @userinfobot to get your numeric user ID.
 `);
     const botToken = await ask("Telegram Bot Token");
-    const allowId = await ask("Allow User ID (numeric ID from @userinfobot)", "7612221352");
+    const allowId = await ask("Allow User ID (numeric ID from @userinfobot)", "");
     if (!botToken) {
       closeRL();
       console.error("Error: Telegram Bot Token required");
@@ -2587,7 +2587,7 @@ Options:
   --allow <user-id>     Allow user ID
 
 Example:
-  anet channel add telegram 指挥室 --bot-token 123:ABC --allow 7612221352
+  anet channel add telegram 指挥室 --bot-token 123:ABC --allow <your-numeric-uid>
   anet channel add telegram 指挥室     # 交互式
 `);
       return;
@@ -2609,7 +2609,7 @@ Example:
     let botToken = opts["bot-token"];
     let allowId = opts.allow;
     if (!botToken) botToken = await ask(`${type} Bot Token`);
-    if (!allowId) allowId = await ask("Allow User ID (发 @userinfobot 获取数字ID)", "7612221352");
+    if (!allowId) allowId = await ask("Allow User ID (发 @userinfobot 获取数字ID)", "");
     closeRL();
 
     if (!botToken || !allowId) {
