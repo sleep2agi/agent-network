@@ -146,10 +146,10 @@ ufw allow 9200
 
 检查 Agent 的消息类型处理逻辑：
 
-- `task` 类型 -> AI 处理后回复（正确）
-- `message` 类型 -> 不处理（正确，避免循环）
+- `task` / `broadcast` 类型 -> AI 处理后回复（正确）
+- `reply` / `message` / `ack` 类型 -> 不处理（正确，避免 think 循环；详见 [Task 生命周期 — 消息类型](/concepts/task-lifecycle#消息类型)）
 
-如果是 Claude Code 模式，检查 CLAUDE.md 中是否有正确的回复规则。
+如果是 `claude-code-cli` runtime，检查项目根目录 `CLAUDE.md` 中是否有正确的回复规则（CLAUDE.md 是 Claude Code 自动加载的指令文件）。
 
 ### 12. 两个 Agent 互相发消息导致无限循环
 

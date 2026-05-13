@@ -146,10 +146,10 @@ ufw allow 9200
 
 Check the agent's message type handling logic:
 
-- `task` type -> AI processes and replies (correct)
-- `message` type -> No processing (correct, prevents loops)
+- `task` / `broadcast` -> AI processes and replies (correct)
+- `reply` / `message` / `ack` -> No processing (correct, prevents think loops; see [Task lifecycle — Message types](/en/concepts/task-lifecycle#message-types))
 
-If using Claude Code mode, check that CLAUDE.md contains the correct reply rules.
+If using the `claude-code-cli` runtime, check that the project-root `CLAUDE.md` contains the right reply rules (CLAUDE.md is the instruction file Claude Code auto-loads).
 
 ### 12. Two agents sending messages back and forth in an infinite loop
 
