@@ -232,7 +232,7 @@ anet node create 代码助手 --runtime codex-sdk --model <codex-model-id>
 anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 ```
 
-创建后会在 `.anet/nodes/<node_id>/config.json` 生成配置文件：
+创建后会在 `.anet/nodes/<node-name>/config.json` 生成配置文件（目录名是 alias，不是内部 `node_id`）：
 
 ```json
 {

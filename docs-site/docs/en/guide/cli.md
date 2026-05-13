@@ -220,7 +220,7 @@ anet node create code-assistant --runtime codex-sdk --model <codex-model-id>
 anet node create translator --runtime claude-agent-sdk --model <minimax-model-id>
 ```
 
-After creation, a config file is generated at `.anet/nodes/<node_id>/config.json`:
+After creation, a config file is generated at `.anet/nodes/<node-name>/config.json` (directory name is the alias, not the internal `node_id`):
 
 ```json
 {
