@@ -296,14 +296,14 @@ curl "http://localhost:9200/api/tasks?limit=10" -H "Authorization: Bearer ntok_x
 **解决**：
 
 ::: tip
-下面的调用走 REST `POST /mcp`，不是 agent 的 stdio wrapper。agent stdio wrapper 只暴露 5 个 tool（`reply` / `report_status` / `send_task` / `send_message` / `get_all_status`）；`cancel` / `retry` / `reassign` / `get_inbox` 属于管理 / Dashboard 操作，不对 agent self-service 开放。
+下面的 `cancel_task` / `retry_task` 是 server 端 MCP tool，调用走 REST `POST /mcp`（或 SDK 直连），**不是** Claude Code agent 的 stdio wrapper。channel-wrapper（[`channel/commhub-channel.ts`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts)）只暴露 5 个 `commhub_*` tool（`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`）—— `cancel_task` / `retry_task` / `reassign_task` / `get_inbox` 是管理 / Dashboard 操作，不在 Claude Code chat agent 的 self-service 工具集里（[`commhub-channel.ts:136-203`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L136)）。
 :::
 
 ```bash
-# 先取消正在运行的任务（POST /mcp，tool=cancel_task）
+# 先取消正在运行的任务（POST /mcp tool=cancel_task）
 cancel_task(task_id="t_xxx", reason="需要重试")
 
-# 然后重试（POST /mcp，tool=retry_task）
+# 然后重试（POST /mcp tool=retry_task）
 retry_task(task_id="t_xxx")
 ```
 
@@ -340,7 +340,7 @@ commhub_send_task(alias="代码1号", task="重新执行: ...")
 **解决**：
 
 ::: tip
-`get_inbox` 是走 REST `POST /mcp` 的管理 / Dashboard 操作，不是 agent stdio wrapper 暴露的 tool。agent stdio wrapper 只暴露 5 个 tool：`reply` / `report_status` / `send_task` / `send_message` / `get_all_status`。
+`get_inbox` 是 server 端 MCP tool，调用走 REST `POST /mcp`（或 SDK 直连），**不是** Claude Code agent 的 stdio channel wrapper。channel-wrapper 只暴露 5 个 `commhub_*` tool（`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`）；`get_inbox` 故意没在 wrapper 里 —— agent 通过 SSE 自动轮询 inbox，见 [`channel/commhub-channel.ts:136-203`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L136)。
 :::
 
 ```bash

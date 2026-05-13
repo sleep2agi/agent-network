@@ -297,7 +297,7 @@ curl "http://localhost:9200/api/tasks?limit=10" -H "Authorization: Bearer ntok_x
 **Solution**:
 
 ::: tip
-The following calls go via REST `POST /mcp` rather than the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools (reply / report_status / send_task / send_message / get_all_status); cancel/retry/reassign/get_inbox are admin/dashboard ops, not agent self-service.
+The `cancel_task` / `retry_task` below are server-side MCP tools called via REST `POST /mcp` (or via an SDK) — **not** the Claude Code agent's stdio channel wrapper. The channel wrapper ([`channel/commhub-channel.ts`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts)) exposes only 5 `commhub_*` tools (`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`). `cancel_task` / `retry_task` / `reassign_task` / `get_inbox` are admin / Dashboard ops, not part of the Claude Code chat-agent toolset ([`commhub-channel.ts:136-203`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L136)).
 :::
 
 ```bash
@@ -341,7 +341,7 @@ commhub_send_task(alias="coder-1", task="Re-execute: ...")
 **Solution**:
 
 ::: tip
-`get_inbox` is an admin/dashboard op exposed via REST `POST /mcp`, not the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools: reply / report_status / send_task / send_message / get_all_status.
+`get_inbox` is a server-side MCP tool called via REST `POST /mcp` (or via an SDK) — **not** the Claude Code agent's stdio channel wrapper. The channel wrapper exposes only 5 `commhub_*` tools (`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`); `get_inbox` is intentionally left out because agents auto-poll the inbox via SSE — see [`channel/commhub-channel.ts:136-203`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L136).
 :::
 
 ```bash
