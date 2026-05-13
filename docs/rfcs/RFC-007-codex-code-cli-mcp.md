@@ -1,8 +1,43 @@
 # RFC-007：codex-cli-mcp runtime — 通过 `codex mcp-server` stdio 让 anet 用户直接用 Codex CLI 接 commhub mesh
 
+## Archive Notice — Phase 1 STOP per Vincent 4175+4176 final
+
+> **本 RFC archive 作 design exercise + 6 轮 pivot 决策 history** (2026-05-13).
+>
+> Vincent telegram 4175+4176 final 决策 **STOP implementation**: 现 anet `codex-sdk` runtime (npm `@openai/codex-sdk` 包装 codex CLI 二进制) 已 cover Vincent 关心的所有 use case (ChatGPT 订阅 + autonomous + live streaming, per §6.5 Option A consistent autonomous default). codex-cli-mcp 跟 codex-sdk capability 90%+ overlap (per Round 157 比较), 真差异化仅 npm dep + 包装层, 实施 ~600 行 over-engineering not worth.
+>
+> **Final state**:
+> - ❌ Phase 1 不 ship (Vincent 4175+4176)
+> - ❌ 不 migrate 现有 agent
+> - ✅ 新 anet 节点 default `codex-sdk` runtime
+> - ✅ RFC-007 文本保留作 design archive + 6 轮 pivot 决策 audit trail
+>
+> **6 轮 Vincent pivot timeline** (本 session capstone case study):
+> 1. 初始: Path C 单 runtime (mcp-server stdio)
+> 2. Vincent 4067+4068: dual A+C (TUI + mcp daemon)
+> 3. Vincent 4073: triple A+C+B (加 Path B ws daemon)
+> 4. Vincent 4074+4075: narrow C only ("A 意义不大")
+> 5. Vincent 4108+4110: pivot B only (ws remote-control daemon)
+> 6. Vincent 4136: 复位 C only (multi-client thread streaming hands-on falsified Path B)
+> 7. Vincent 4144: §6.5 Option A (anet autonomous teammate-mode consistency)
+> 8. Vincent 4146+4148+4154: Q1 / Q7 / Q12 Open Q closure
+> 9. Vincent 4155+4156: second thought "做出来后比 mcp 要好吗? 要不 sdk 好吗?"
+> 10. **Vincent 4175+4176: final STOP** ← current
+>
+> **关联 docs (保留作 codex CLI ecosystem 调研 archive)**:
+> - [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) — 通信龙 Path C 深度调研 (commit 98b6728)
+> - [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) — 通信SDK马 Path B 深度调研 (commit 093d76a)
+> - [`docs/codex-deep-research.md`](../codex-deep-research.md) — 通信SDK马 evidence-based deep dive (commit 96430e6)
+> - RFC-006 (codex-cli-remote-control archive)
+> - RFC-005 (codex-code-cli TUI Superseded)
+>
+> **未来重启可能性**: 若 codex CLI 0.131+ 引入 codex-sdk 不能 cover 的真用户价值 (per 通信龙 task 3b0544ec research mode), reconsider unblock RFC-007 implement.
+
+---
+
 | 字段 | 内容 |
 |---|---|
-| 状态 | **Proposed** (supersedes RFC-005 + RFC-006) |
+| 状态 | **🗄 Archived — Phase 1 STOP per Vincent 4175+4176** (was Proposed, supersedes RFC-005 + RFC-006) |
 | 提出 | 2026-05-13 |
 | 作者 | 通信SDK马 |
 | 派单 / 决策 | 通信龙（roadmap + 6 轮 architectural pivot + dual deep plan dispatch） |
