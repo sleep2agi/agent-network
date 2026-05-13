@@ -121,9 +121,14 @@ function normalizeRuntime(profileOrRuntime?: Profile | string): RuntimeName {
 }
 ```
 
-### 3.3 spawn codex CLI 路径（类比 claude-code-cli）
+### 3.3 spawn codex CLI 路径（类比 claude-code-cli — TUI attached 模式）
 
-新增 cli.ts:1640 附近的 \"spawn claude CLI\" 之后一段 \"spawn codex CLI\"：
+新增 cli.ts:1640 附近的 \"spawn claude CLI\" 之后一段 \"spawn codex CLI\"。
+
+> **⚠️ Errata (2026-05-13 通信工程马 step 1 catch + 通信龙 verify)**：
+> 早期 draft 含 `["exec", ...]` 是误抄 codex-sdk 内部 batch 模式（`exec --experimental-json`），跟 §3.6 user workflow 意图（用户 attached TUI）冲突。
+> **正确**：codex CLI **无 subcommand** = TUI 模式，跟 `claude-code-cli` `spawn("claude", ...)` 对称。节点 = attached daemon，用户在终端看 codex TUI 直接跟其他 agent 通信。
+> §6.6 session matters 同步修正：`codex resume <SESSION_ID>` 是 **top-level subcommand**（不是 `--resume <id>` flag）。
 
 ```ts
 // (sketch — 不是最终实施代码)
@@ -137,11 +142,18 @@ if (runtime === "codex-code-cli") {
     env[k] = v.replace(/^~/, home);
   }
 
-  const codexArgs: string[] = ["exec"];
+  // TUI 模式：codex 无 subcommand = interactive attached
+  // (跟 claude-code-cli L1677 `spawn("claude", claudeArgs)` 对称)
+  const codexArgs: string[] = [];
+
+  // session 续接 (TUI mode 用 top-level `resume` subcommand)
+  if (profile.session) {
+    codexArgs.push("resume", profile.session);
+  }
 
   // commhub MCP inline 注入 — 不污染 ~/.codex/config.toml
-  // 注意: 使用 array args (execFileSync pattern), 不走 shell, 避免 shell injection
-  // (cf. #86 patch round 2)
+  // 注意: 使用 array args, 不走 shell, 避免 shell injection (cf. #86 patch round 2)
+  // inner double-quote 是 TOML literal 语法需要 (codex --config value 侧 TOML 解析)
   codexArgs.push("--config", `mcp_servers.commhub.url="${commhubUrl}/mcp"`);
   codexArgs.push("--config", `mcp_servers.commhub.bearer_token_env_var="COMMHUB_TOKEN"`);
 
@@ -153,12 +165,8 @@ if (runtime === "codex-code-cli") {
   // 隔离 host 用户 codex config（R8 SaaS 沙箱化建议）
   codexArgs.push("--ignore-user-config", "--ignore-rules");
 
-  // session 续接（codex resume）
-  if (profile.session) {
-    codexArgs.unshift("resume", profile.session);
-  }
-
   // 跟 claude-code-cli 同款：spawn 后 pid 写入 .pid file，exit handler 清理
+  // TUI 模式: stdio:"inherit" attach 用户终端
   const child = spawn("codex", codexArgs, { env, stdio: "inherit" });
   const pidFile = join(nodesDir(), nodeId, ".pid");
   if (child.pid) writeFileSync(pidFile, String(child.pid));
@@ -307,9 +315,19 @@ anet node start my-codex
 
 本 runtime 的 spawn 调用**严格用** array args + `execFileSync` 或 `spawn(.., { stdio: "inherit" })` 形式，**不带** `shell: true`，避免 user alias 含特殊字符导致 shell injection — 跟 #86 patch round 2 防御纵深一致。
 
-### 6.6 session 续接 vs 新建
+### 6.6 session 续接 vs 新建（**已 amend** per 通信工程马 step 1 catch）
 
-codex `Thread.id` semantics 跟 claude session UUID 不同（codex thread ID 在 turn start 后才有，claude session UUID 在 spawn 前预生成）。codex-code-cli runtime 的 session 字段**沿用** profile.session UUID，但**首次启动**走 `codex exec`（无 resume），后续启动走 `codex exec resume <session>`。这跟 codex-sdk runtime 当前实现一致（agent-node/src/cli.ts:634-636）。
+codex `Thread.id` semantics 跟 claude session UUID 不同（codex thread ID 在 turn start 后才有，claude session UUID 在 spawn 前预生成）。
+
+**TUI mode session 续接路径**（codex-code-cli runtime 实际走）:
+
+- **首次启动**: `spawn("codex", [...flags])` — 无 resume，codex 自动生成新 thread ID
+- **后续启动**: `spawn("codex", ["resume", session, ...flags])` — `resume` 是 codex CLI **top-level subcommand**（不是 flag）
+- codex 把 thread 持久化到 `~/.codex/sessions/`（或 `--ignore-user-config` 之后走 anet 沙箱目录，具体 spike 验）
+
+> ⚠️ Errata: 早期 draft 写 `codex exec resume <session>` 是混淆了 codex-sdk 内部 batch 路径 (`exec --experimental-json`)。**TUI runtime 不走 exec subcommand**，资 §3.3 amend 一致。
+
+跟 claude-code-cli 的 `--session-id` / `--resume` flag 行为不同（claude 用 flag，codex 用 subcommand），但都是 attached daemon 模式 — anet wrapper 抽象后用户体验对称。
 
 ## 7. Smoke matrix（Docker E2E test 设计）
 
