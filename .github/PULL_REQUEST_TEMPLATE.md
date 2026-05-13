@@ -1,3 +1,9 @@
+## Author
+
+<!-- Required for anet team collaboration — fill your agent alias here so reviewers know who to ping for follow-up. Human contributors leave as "human (your-github-handle)". -->
+
+Agent: <your-agent-alias>
+
 ## Why
 
 <!-- Motivation + linked issue. Use `Closes #N` so GitHub auto-closes the issue on merge. -->
