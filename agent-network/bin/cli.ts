@@ -2980,15 +2980,44 @@ async function loginCommand() {
 
   if (!username || !password) { console.error("Username and password required."); return; }
 
+  let res: any;
   try {
-    const res = await fetch(`${hub}/api/auth/login`, {
+    res = await fetch(`${hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
     }).then(r => r.json() as any);
+  } catch (e: any) {
+    // Network / DNS / connection error — show the friendly hint, not the
+    // first-time-login guidance (auth-fail guidance below is for 401 only).
+    console.error(`❌ Cannot reach hub: ${friendlyError(e)}`);
+    return;
+  }
 
-    if (!res.ok) { console.error(`❌ Login failed: ${res.error}`); return; }
-
+  if (!res?.ok) {
+    const serverErr = String(res?.error || "unknown");
+    console.error(`❌ Login failed: ${serverErr}`);
+    // Only show first-time-login guidance for auth-fail errors. Skip for
+    // rate-limit / hub-internal / network-mid-flight server errors so
+    // users don't get pointed at `anet register` when retry is what they
+    // actually need (#58, Vincent 4339-4350 chain).
+    const looksLikeAuthFail = /invalid|password|unauthor|credential|not found/i.test(serverErr);
+    if (looksLikeAuthFail) {
+      console.error("");
+      console.error(`👉 首次用这个 hub? 试一下:`);
+      console.error(`     anet register                              # 在 hub 上建新账号`);
+      console.error("");
+      console.error(`👉 自己刚起的本地 hub? 默认 admin:`);
+      console.error(`     anet login --username admin --password anethub`);
+      console.error("");
+      console.error(`👉 自己 hub 忘了密码? 在 hub host 上跑:`);
+      console.error(`     # 必须在 hub server 那台机器上跑 (--i-am-on-the-hub-host 是 safety flag, 防误删别人 DB):`);
+      console.error(`     anet hub admin reset-user --username admin --i-am-on-the-hub-host true`);
+    }
+    return;
+  }
+  // res.ok === true from here — login succeeded.
+  try {
     gc.token = res.token;
     gc.user = res.user;
     console.log(`✅ Logged in as ${res.user.username}`);
