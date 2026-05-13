@@ -127,11 +127,15 @@ Each user has a role in each network. Four permission levels from highest to low
 
 ### Dashboard Permission Behavior
 
-The Dashboard automatically hides buttons based on role:
+The Dashboard adjusts button visibility / interactivity based on role (design goal):
 
 - **viewer** cannot see "Send Task" or "Broadcast" buttons
 - **member** cannot see "Manage Members" or "Settings" buttons
 - **admin** cannot see "Delete Network" button
+
+::: info Dashboard 0.4.2 actual behavior
+The role → button-visibility UI binding is **partially implemented**. Even if a button is still displayed, the **server side returns 403** (`canWrite()` enforces RBAC), so permissions cannot be bypassed. Full button hiding is scheduled for the v0.9+ Dashboard rework.
+:::
 
 ## Joining a Network
 

@@ -127,11 +127,15 @@ anet network delete old-network
 
 ### Dashboard 权限表现
 
-Dashboard 根据角色自动隐藏按钮：
+Dashboard 根据角色调整按钮可见性 / 可点击性（设计目标）：
 
 - **viewer** 看不到"发任务"、"广播"按钮
 - **member** 看不到"管理成员"、"设置"按钮
 - **admin** 看不到"删除网络"按钮
+
+::: info Dashboard 0.4.2 实际行为
+角色 → 按钮可见性的 UI 联动**部分实装**。即使按钮当前还显示，**Server 端会 403 拒绝**（`canWrite()` 强制 RBAC），权限本身不会绕过。完整 UI 按钮 hiding 排在 v0.9+ Dashboard 改造里。
+:::
 
 ## 加入网络
 
