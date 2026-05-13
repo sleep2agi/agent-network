@@ -758,13 +758,13 @@ async function initGlobal() {
 
   let token = opts.token || "";
   if (!token) {
-    token = await ask("Auth token (empty to skip)");
+    token = await ask("Auth token (legacy, press Enter to skip — most users skip)");
   }
   closeRL();
   try {
     const res = await fetch(`${hub}/health`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     const data = await res.json() as any;
-    console.log(`✅ CommHub v${data.version} — ${data.sessions} sessions, ${data.sse_connections} SSE`);
+    console.log(`✅ CommHub v${data.version} — ${data.sessions_count ?? 0} sessions, ${data.sse_connections ?? 0} SSE`);
   } catch (e: any) {
     console.error(`❌ Cannot reach ${hub}: ${e.message}`);
     process.exit(1);
