@@ -226,12 +226,20 @@ The `node_id` inside the config is a unique ID the hub assigns at registration. 
 ### 17. How do I view/manage network members?
 
 ```bash
-# View members
+# View members of the current network (CLI)
+anet network members
+
+# View members (direct REST)
 curl http://localhost:9200/api/networks/net_xxx/members \
   -H "Authorization: Bearer utok_xxx"
 
-# Manage via the Dashboard Settings page
+# Invite a new member (owner/admin)
+anet network invite --role member        # Generate invite code (admin/member/viewer)
 ```
+
+::: tip Role changes
+v0.8.2 doesn't expose `promote` / `demote` CLI subcommands yet — to change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.9+.
+:::
 
 ### 17a. How do I change my password? (v0.8)
 

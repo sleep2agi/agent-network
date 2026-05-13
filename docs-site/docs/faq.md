@@ -226,12 +226,20 @@ config 里的 `node_id` 是 hub 注册时分配的唯一 ID, 复制到另一台�
 ### 17. 怎么查看/管理网络成员？
 
 ```bash
-# 查看成员
+# 查看当前 network 成员（CLI）
+anet network members
+
+# 查看成员（REST 直查）
 curl http://localhost:9200/api/networks/net_xxx/members \
   -H "Authorization: Bearer utok_xxx"
 
-# 在 Dashboard 的 Settings 页面管理
+# 邀请新成员（owner/admin）
+anet network invite --role member        # 生成邀请码（admin/member/viewer）
 ```
+
+::: tip 角色变更入口
+v0.8.2 当前不提供 CLI `promote` / `demote` 子命令；改角色目前需要通过 [REST API `/api/networks/:id/members/:user_id`](/api/rest) 调用或 Dashboard Admin 页（部分实装，[详见 Dashboard Admin](/guide/dashboard#admin-管理面板)）。完整 CLI 入口排在 v0.9+。
+:::
 
 ### 17a. 怎么改密码？（v0.8）
 
