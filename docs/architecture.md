@@ -434,30 +434,40 @@ Agent                    CommHub Server              Hub/指挥室
 
 ## 10. Web Dashboard
 
-> **命名沿用 V2 做历史参考**：本节 `anet server` 现已改名 `anet hub start`，并独立出 `anet hub dashboard` 子命令启动 Dashboard。最新部署方式见 [anet.sh/guide/dashboard](https://anet.sh/guide/dashboard)。
+> **R220 校准（2026-05-13）**：本节的「内置轻量 UI」+「`http://YOUR_IP:9200/dashboard`」是 V2 早期设计草稿，**v0.8 实际未实现** —— commhub-server `server/src/index.ts` 没有 `/dashboard` 路由（[全 source grep `/dashboard` 0 hit](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts)）。当前**唯一 Dashboard 是独立的 Next.js 包 `@sleep2agi/agent-network-dashboard`**，通过 `anet hub dashboard` 子命令拉起（[`agent-network/bin/cli.ts:2223-2261`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2223)，默认端口 3000，PIN 版本 `0.4.5-preview.1`）。最新部署方式见 [anet.sh/guide/dashboard](https://anet.sh/guide/dashboard)。下面的「两种 Dashboard」/「内置 UI 设计原则」/「实现方案」/「HTML 结构」全是 V2 设计草稿，仅保留历史背景，**当前不适用**。
 
-### 两种 Dashboard
+### 当前 (v0.8) Dashboard
 
-| Dashboard | 技术栈 | 部署 | 地址 |
-|-----------|--------|------|------|
-| 内置轻量 UI | 纯 HTML + vanilla JS | 内嵌 `anet server` | `http://YOUR_IP:9200/dashboard` |
-| 独立 Dashboard | Next.js + Vercel | 独立部署 | 你自己的 Dashboard 部署 URL |
+| 维度 | 实际值 |
+|------|------|
+| 技术栈 | Next.js + Vercel-friendly build |
+| npm 包 | `@sleep2agi/agent-network-dashboard` |
+| 启动 | `anet hub dashboard` (npx-spawn pin 版) |
+| 默认地址 | `http://127.0.0.1:3000`（`--ip 0.0.0.0` 暴露 LAN） |
+| 认证 | 浏览器 cookie 透传 `utok_` |
+| Hub 连接 | `NEXT_PUBLIC_COMMHUB_URL` env 注入 hub URL |
 
-独立 Dashboard 提供更丰富的功能：节点拓扑图、历史趋势、任务甘特图等。
+### ~~两种 Dashboard~~（V2 设计草稿，未实现）
 
-### 内置轻量 UI 设计原则
+| ~~Dashboard~~ | ~~技术栈~~ | ~~部署~~ | ~~地址~~ |
+|---|---|---|---|
+| ~~内置轻量 UI~~ | ~~纯 HTML + vanilla JS~~ | ~~内嵌 `anet server`~~ | ~~`http://YOUR_IP:9200/dashboard`~~ |
+| 独立 Dashboard | Next.js + Vercel | 独立部署 | 见上「当前 Dashboard」表 |
 
-- 纯 HTML + CSS + vanilla JS，零框架
-- 内嵌到 `anet server`，不需要额外部署
-- SSE 实时更新，不用 WebSocket
-- 一个 HTML 文件搞定
+### ~~内置轻量 UI 设计原则~~（V2 设计草稿，未实现）
 
-### 访问方式
+- ~~纯 HTML + CSS + vanilla JS，零框架~~
+- ~~内嵌到 `anet server`，不需要额外部署~~
+- ~~SSE 实时更新，不用 WebSocket~~
+- ~~一个 HTML 文件搞定~~
 
-```
-anet server start --port 9200
-# 内置: http://YOUR_IP:9200/dashboard
-# 独立: 你的 Dashboard 部署 URL（参考 [Dashboard 部署](https://anet.sh/guide/dashboard) 自部署）
+### 访问方式（当前 v0.8）
+
+```bash
+anet hub start            # 起 commhub-server (9200)
+anet hub dashboard        # 起独立 Dashboard (Next.js, 3000)
+
+# 浏览器访问 http://127.0.0.1:3000，用 admin/anethub 登录
 ```
 
 ### 页面功能
@@ -506,51 +516,24 @@ anet server start --port 9200
 - 发任务：选目标 alias + 输入内容 + 优先级 → POST /api/task
 - 广播：输入内容 → POST /api/broadcast
 
-### 实现方案
+### ~~实现方案~~（V2 设计草稿，未实现）
 
-Server 端新增一个路由：
+::: warning 本节不要照抄实现
+此段「Server 端新增 `/dashboard` 路由」是 V2 早期设计草稿，**v0.8 不打算这么做** —— commhub-server 维持 backend-only 不内嵌 UI，独立 Next.js Dashboard 已经覆盖所有用例。如有人考虑加内置 UI，先开 RFC 讨论必要性。
+:::
 
-```typescript
+~~Server 端新增一个路由：~~
+
+~~```typescript
 // GET /dashboard → 返回内嵌 HTML
 if (url.pathname === "/dashboard") {
-  return new Response(DASHBOARD_HTML, {
-    headers: { "Content-Type": "text/html; charset=utf-8" },
-  });
+  return new Response(DASHBOARD_HTML, { ... });
 }
+```~~
 
-// GET /events/dashboard → SSE 推送所有事件（用于消息流）
-```
+### ~~HTML 结构~~（V2 设计草稿，未实现）
 
-HTML 内容作为模板字符串内嵌到 server 代码中（或从 `server/dashboard.html` 读取）。
-
-### HTML 结构（~200 行）
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Agent Network Dashboard</title>
-  <meta charset="utf-8">
-  <style>
-    /* 深色主题，等宽字体，紧凑布局 */
-    body { background: #1a1a2e; color: #e0e0e0; font-family: monospace; }
-    .node { padding: 8px; border-bottom: 1px solid #333; }
-    .online { border-left: 3px solid #22c55e; }
-    .polling { border-left: 3px solid #3b82f6; }
-    .offline { border-left: 3px solid #666; opacity: 0.6; }
-  </style>
-</head>
-<body>
-  <div id="nodes"></div>
-  <div id="stream"></div>
-  <script>
-    // 每 5 秒拉 /api/status 更新节点列表
-    // SSE 连接 /events/dashboard 实时显示消息流
-    // 发任务用 fetch POST /api/task
-  </script>
-</body>
-</html>
-```
+省略 V2 设计草稿 HTML 模板（深色主题 + vanilla JS + SSE poll）—— 实际 Dashboard 用 Next.js + React，看 [`@sleep2agi/agent-network-dashboard` 源码](https://github.com/sleep2agi/agent-network-dashboard)。
 
 ### 原设计声明"不做的事"（v0.8 阶段实际已全部超越）
 
