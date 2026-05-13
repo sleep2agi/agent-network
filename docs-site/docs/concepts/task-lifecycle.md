@@ -126,7 +126,7 @@ expires_at = datetime('now', '+3600 seconds')
 失败、取消、过期的任务都可以重试：
 
 ::: tip
-下面的调用走 REST `POST /mcp`，不是 agent 的 stdio wrapper。agent stdio wrapper 只暴露 5 个 tool（`reply` / `report_status` / `send_task` / `send_message` / `get_all_status`）；`cancel` / `retry` / `reassign` / `get_inbox` 属于管理 / Dashboard 操作，不对 agent self-service 开放。
+下面的调用走 REST `POST /mcp`，不是 Claude Code agent 的 stdio channel wrapper。channel wrapper（[`channel/commhub-channel.ts:138-196`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L138)）只暴露 5 个 `commhub_*` tool（`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`）；`cancel_task` / `retry_task` / `reassign_task` / `get_inbox` 属于管理 / Dashboard 操作，不对 agent self-service 开放（R206 chain 一致）。
 :::
 
 ```bash
@@ -169,7 +169,7 @@ cancel_task(task_id="t_xxx", reason="不再需要")
 3. 记录取消原因到 result 字段
 4. 记录 task_event
 
-可取消的状态：`delivered` / `acked` / `running`
+可取消的状态：`created` / `delivered` / `acked` / `running`（4 个状态，verify [`server/src/tools.ts:816`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816) `WHERE status IN ('created', 'delivered', 'acked', 'running')` —— R230 校准：server 的 tool description 字符串只列 3 个少一个 `created`，实际 SQL 4 个；终态 `replied` / `failed` / `cancelled` / `expired` 不能直接 cancel，需先 retry 再 cancel）
 
 ## 转移任务
 

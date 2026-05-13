@@ -126,7 +126,7 @@ expires_at = datetime('now', '+3600 seconds')
 Failed, cancelled, and expired tasks can all be retried:
 
 ::: tip
-The following calls go via REST `POST /mcp` rather than the agent's stdio wrapper. The agent's stdio wrapper exposes 5 tools (reply / report_status / send_task / send_message / get_all_status); cancel/retry/reassign/get_inbox are admin/dashboard ops, not agent self-service.
+The following calls go via REST `POST /mcp` rather than the Claude Code agent's stdio channel wrapper. The channel wrapper ([`channel/commhub-channel.ts:138-196`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L138)) exposes 5 `commhub_*` tools (`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`); `cancel_task` / `retry_task` / `reassign_task` / `get_inbox` are admin / dashboard ops and not exposed to agent self-service (R206 chain aligned).
 :::
 
 ```bash
@@ -169,7 +169,7 @@ Cancellation will:
 3. Record the cancellation reason in the result field
 4. Log a task_event
 
-Cancellable statuses: `delivered` / `acked` / `running`
+Cancellable statuses: `created` / `delivered` / `acked` / `running` (4 statuses — verified at [`server/src/tools.ts:816`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816) `WHERE status IN ('created', 'delivered', 'acked', 'running')`. R230 calibration: the tool's own description string only mentions 3 (missing `created`); the SQL is the source of truth with 4. Terminal states `replied` / `failed` / `cancelled` / `expired` cannot be cancelled directly — retry first, then cancel.)
 
 ## Reassigning Tasks
 
