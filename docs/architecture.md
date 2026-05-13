@@ -354,46 +354,68 @@ verify monorepo `find . -name "package.json" -not -path "*/node_modules/*"`：
 
 ---
 
-## 7. npm 发布结构
+## 7. npm 发布结构 — R223 校准
 
-### 发布内容
+### 发布内容（v0.8 实际）
+
+verify [`agent-network/package.json`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json) `"files": ["dist"]`：
 
 ```
 dist/
-├── bin/cli.js       # CLI 入口（minified，~580KB 含 MCP SDK bundle）
-├── src/client.js    # Client（minified，~4.4KB）
-└── client.d.ts      # TypeScript 类型声明
-src/
-└── server.ts        # Server 入口（Bun-only，保留 .ts 源码）
+├── bin/cli.js              # CLI 入口（minified + javascript-obfuscator）
+├── src/client.js           # Client SDK（minified + obfuscator）
+├── src/node-server.js      # Channel 插件（minified + obfuscator）
+└── client.d.ts             # TypeScript 类型声明
 package.json
 README.md
 ```
 
-### package.json 关键字段
+::: warning R223 校准
+旧 doc 列「`src/server.ts` 保留 .ts 源码」+ `files: ["dist", "src/server.ts"]` —— **实际 `files` 只包含 `["dist"]`**，`src/server.ts` 不发到 npm。Server 编程入口走的是开发期 monorepo path，npm 包不直接 ship server；用户跑 `anet hub start` 时通过 bunx 拉 `@sleep2agi/commhub-server` PIN 版（R213 chain）。
+:::
+
+### package.json 关键字段（实际）
 
 ```json
 {
   "name": "@sleep2agi/agent-network",
-  "bin": { "anet": "dist/bin/cli.js" },
+  "type": "module",
   "main": "dist/src/client.js",
   "types": "dist/client.d.ts",
   "exports": {
-    ".": { "import": "./dist/src/client.js", "types": "./dist/client.d.ts" },
-    "./server": { "import": "./src/server.ts" }
+    ".": { "import": "./dist/src/client.js", "types": "./dist/client.d.ts" }
   },
-  "files": ["dist", "src/server.ts"]
+  "bin": { "anet": "dist/bin/cli.js" },
+  "files": ["dist"],
+  "engines": { "bun": ">=1.2.0" },
+  "dependencies": { "@inquirer/prompts": "^8.4.3" }
 }
 ```
 
-### 构建
+R223 校准：旧 doc 写「`exports[./server]: import src/server.ts`」**不存在**（只有 `.` 一个 export）。`engines.bun` ≥ 1.2.0 是新增字段（旧 doc 漏）。
+
+### 构建（实际）
+
+verify [`package.json#scripts.build`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json) — 三步链：
 
 ```bash
-# bun build: minify JS（client + CLI）
-bun build src/client.ts bin/cli.ts --outdir dist --target node --minify
+# 1. bun build (3 个 entry，分别 minify + 标 external)
+bun build src/client.ts --outdir dist/src --target node --minify
+bun build bin/cli.ts    --outdir dist/bin --target node --minify \
+  --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*'
+bun build src/node-server.ts --outdir dist/src --target node --minify \
+  --external @modelcontextprotocol/sdk
 
-# tsc: 生成类型声明（仅 client）
+# 2. tsc: 生成 client 类型声明
 tsc --emitDeclarationOnly --declaration --outDir dist
+
+# 3. javascript-obfuscator: 3 个产物分别做字符串数组 + base64 混淆
+npx javascript-obfuscator dist/bin/cli.js          --output dist/bin/cli.js          --compact true --string-array true --string-array-encoding base64
+npx javascript-obfuscator dist/src/client.js       --output dist/src/client.js       --compact true --string-array true
+npx javascript-obfuscator dist/src/node-server.js  --output dist/src/node-server.js  --compact true --string-array true
 ```
+
+R223 校准：旧 doc 只写 `bun build src/client.ts bin/cli.ts --outdir dist --target node --minify` 一行 —— 实际 3 个 entry 分别 build + 不同 externals + 加 obfuscator + 加 node-server.js 第三个 entry。`commhub-server` / `bun:sqlite` / `../../server/*` external 是为了让 server 不进 dist。
 
 ---
 
@@ -415,10 +437,11 @@ tsc --emitDeclarationOnly --declaration --outDir dist
 - SSE 连接同样用 utok_/ntok_ 鉴权（401 自动 reload token）
 - ⚠️ 旧 `COMMHUB_AUTH_TOKEN` 仅 `/api/*` 读类兼容（v1.0 移除）
 
-### 配置安全
-- `~/.anet/server/admin-utok.json` 自动 chmod 600（v0.8 bootstrap）
-- `~/.anet/config.json` 中的 token 存储在用户 home 目录（权限 600）
-- 项目 `.anet/config.json` 不应包含 token（放全局配置）
+### 配置安全 — R223 校准
+- `~/.anet/server/admin-utok.json` 自动 chmod 600（[`cli.ts:105-111 saveAdminUtok`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L105) `writeFileSync(..., {mode: 0o600})` + `chmodSync(..., 0o600)`，v0.8 bootstrap 写入 admin token）
+- `~/.anet/server/config.json` 自动 chmod 600（[`cli.ts:89-95 saveServerConfig`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L89)）
+- ⚠️ `~/.anet/config.json` **不是 600** —— [`cli.ts:77-81 saveGlobal`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L77) 用默认 `writeFileSync` 无 mode 选项，实际权限通常 `644` (`rw-r--r--`)。在多用户机器上其他本地用户可读你的 utok_。**单用户 host 影响有限，多用户共享 host 建议手动 `chmod 600 ~/.anet/config.json`**（v0.9 RFC 待修）
+- 项目 `.anet/nodes/<alias>/config.json` 不应包含 token（放全局配置；R222 chain 说明项目 config 用 hub/token 字段覆盖全局是 advanced use case）
 - `.anet/` 应加入 `.gitignore` 防止提交
 
 ### 运行时安全
