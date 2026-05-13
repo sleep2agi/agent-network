@@ -565,13 +565,16 @@ send_task({
 
 向所有在线 Agent 广播消息。**broadcast 与 `task` 同样会触发收件方 AI 处理**（agent-node L886 只对 `task` 和 `broadcast` 类型 think；其余 `reply` / `message` / `ack` 只展示）；如果只是想群发通知不要求 AI 回复，用循环 `send_message` 替代。完整消息类型对照见 [Task 生命周期 — 消息类型](/concepts/task-lifecycle#消息类型)。
 
-**参数**：
+**参数**（verify [`server/src/tools.ts:880-885`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L880)）：
 
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|
-| `content` | string | &check; | 广播内容 |
-| `from_session` | string | | 发送者标识 |
-| `network_id` | string | | 网络 ID（只广播到该网络） |
+| `message` | string | &check; | 广播内容（最大 10000 字符） |
+| `filter_server` | string | | 只发给指定 `server` 字段的 session |
+| `filter_status` | string | | 只发给指定 status 的 session（如 `idle` / `working`） |
+| `network_id` | string | | 网络 ID（只广播到该网络；utok\_ 调用时可指定，ntok\_ 调用强制绑当前 binding） |
+
+> 字段名是 `message` 不是 `content`；`from_session` 不是参数（server 端硬编码为 `'hub'`）。
 
 **返回值**：
 
@@ -579,9 +582,11 @@ send_task({
 {
   "ok": true,
   "recipients": 10,
-  "message_ids": ["uuid-xxx"]
+  "message_ids": ["uuid-xxx-1", "uuid-xxx-2"]
 }
 ```
+
+`message_ids` 长度 = `recipients`，每个 target session 一个 inbox row。
 
 ---
 

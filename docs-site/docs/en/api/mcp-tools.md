@@ -565,13 +565,16 @@ Get completion records.
 
 Broadcast a message to all online agents. **`broadcast` triggers AI processing on receivers, the same as `task`** (agent-node L886 thinks only on `task` and `broadcast` types; `reply` / `message` / `ack` are display-only). If you just want a notification without an AI reply, loop `send_message` instead. Full message-type table: [Task lifecycle — Message types](/en/concepts/task-lifecycle#message-types).
 
-**Parameters**:
+**Parameters** (verify [`server/src/tools.ts:880-885`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L880)):
 
 | Parameter | Type | Required | Description |
 |------|------|:----:|------|
-| `content` | string | &check; | Broadcast content |
-| `from_session` | string | | Sender identifier |
-| `network_id` | string | | Network ID (broadcast to this network only) |
+| `message` | string | &check; | Broadcast content (max 10000 chars) |
+| `filter_server` | string | | Only deliver to sessions whose `server` field matches |
+| `filter_status` | string | | Only deliver to sessions in the given status (e.g. `idle` / `working`) |
+| `network_id` | string | | Network ID (broadcast within this network only; can be supplied with a `utok_`, but `ntok_` callers are pinned to their bound network) |
+
+> The field is `message`, not `content`; `from_session` is **not** a parameter — the server hard-codes it to `'hub'`.
 
 **Response**:
 
@@ -579,9 +582,11 @@ Broadcast a message to all online agents. **`broadcast` triggers AI processing o
 {
   "ok": true,
   "recipients": 10,
-  "message_ids": ["uuid-xxx"]
+  "message_ids": ["uuid-xxx-1", "uuid-xxx-2"]
 }
 ```
+
+`message_ids.length === recipients` — one inbox row per target session.
 
 ---
 
