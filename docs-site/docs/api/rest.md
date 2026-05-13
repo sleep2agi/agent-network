@@ -182,7 +182,31 @@ curl http://localhost:9200/api/auth/me \
 curl -X PUT http://localhost:9200/api/auth/me \
   -H "Authorization: Bearer utok_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"display_name": "Alice Smith"}'
+  -d '{"display_name": "Alice Smith", "email": "alice@example.com"}'
+```
+
+**请求体**：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|:----:|------|
+| `display_name` | string | | 显示名 |
+| `email` | string | | 邮箱 |
+
+只更新提供的字段（[server/src/index.ts:464-465](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L464) 用 `if (body.X)` 条件 SQL）；`username` / `role` / `password` **不**通过此 endpoint 修改。
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "user": {
+    "user_id": "u_abc123",
+    "username": "alice",
+    "display_name": "Alice Smith",
+    "email": "alice@example.com",
+    "role": "admin"
+  }
+}
 ```
 
 ---

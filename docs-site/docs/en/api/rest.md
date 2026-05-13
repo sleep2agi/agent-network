@@ -182,7 +182,31 @@ Update personal info.
 curl -X PUT http://localhost:9200/api/auth/me \
   -H "Authorization: Bearer utok_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"display_name": "Alice Smith"}'
+  -d '{"display_name": "Alice Smith", "email": "alice@example.com"}'
+```
+
+**Request body**:
+
+| Field | Type | Required | Description |
+|------|------|:----:|------|
+| `display_name` | string | | Display name |
+| `email` | string | | Email |
+
+Only the provided fields are updated ([server/src/index.ts:464-465](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L464) uses conditional SQL with `if (body.X)`); `username` / `role` / `password` are **not** mutable through this endpoint.
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "user": {
+    "user_id": "u_abc123",
+    "username": "alice",
+    "display_name": "Alice Smith",
+    "email": "alice@example.com",
+    "role": "admin"
+  }
+}
 ```
 
 ---
