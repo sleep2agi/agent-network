@@ -47,7 +47,7 @@ After installation, the `anet` command is available globally.
 | `anet network use <name>` | Switch active network |
 | `anet network info` | View current network details |
 | `anet network rename <old> <new>` | Rename a network |
-| `anet network delete <name>` | Delete a network |
+| `anet network delete <name> --force` | Delete a network (owner-only; `--force` skips the confirm prompt) |
 | `anet network invite` | Create an invite code for the current network |
 | `anet network join <invite_code>` | Join a network with an invite code |
 | `anet network members` | List members of the current network (role / joined_at) |
@@ -72,7 +72,7 @@ After installation, the `anet` command is available globally.
 | `anet info <name>` | View agent details |
 | `anet logs <name>` | View agent logs (add `--follow` to tail in real time) |
 | `anet node rename <old> <new>` | Rename an agent |
-| `anet node delete <name>` | Delete an agent |
+| `anet node delete <name>` | Delete an agent (interactive confirm by default; add `--force` or `--yes` to skip) |
 
 ### Monitoring
 

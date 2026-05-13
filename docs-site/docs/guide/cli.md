@@ -47,7 +47,7 @@ npm install -g @sleep2agi/agent-network
 | `anet network use <name>` | 切换当前网络 |
 | `anet network info` | 查看当前网络详情 |
 | `anet network rename <old> <new>` | 重命名网络 |
-| `anet network delete <name>` | 删除网络 |
+| `anet network delete <name> --force` | 删除网络（owner 限定，需要 `--force` 跳过确认） |
 | `anet network invite` | 为当前网络创建邀请码 |
 | `anet network join <invite_code>` | 用邀请码加入网络 |
 | `anet network members` | 列出当前网络成员（role / joined_at） |
@@ -72,7 +72,7 @@ npm install -g @sleep2agi/agent-network
 | `anet info <name>` | 查看 Agent 详情 |
 | `anet logs <name>` | 查看 Agent 日志（加 `--follow` 实时 tail） |
 | `anet node rename <old> <new>` | 重命名 Agent |
-| `anet node delete <name>` | 删除 Agent |
+| `anet node delete <name>` | 删除 Agent（默认交互式确认；加 `--force` 或 `--yes` 跳过） |
 
 ### 监控
 
