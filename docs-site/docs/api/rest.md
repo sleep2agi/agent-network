@@ -10,6 +10,8 @@ CommHub Server 提供 REST API 供 Dashboard、CLI 和第三方系统调用。
 | 认证 | `Authorization: Bearer <token>` **（推荐）**；`?token=<token>` URL query 为 SSE / 浏览器 EventSource 保留（有 access-log 泄漏风险，详见 [安全设计](/concepts/security)） |
 | 内容类型 | `application/json` |
 | 编码 | UTF-8 |
+| Endpoint 数 | 30+（**11 类**：[公开 1](#公开端点) · [认证 5](#认证端点) · [网络 5](#网络端点) · [数据查询 9](#数据查询端点) · [任务派发 2](#任务派发端点) · [MCP 1](#mcp-端点) · [SSE 1](#sse-端点) · [Token 管理 4](#token-管理端点) · [网络成员 6](#网络成员端点) · [Tmux 调试 2 (opt-in)](#tmux-调试端点-opt-in) · [Legacy 2](#legacy-端点-v0-6-时代-oss-后不再演进)） |
+| 全 endpoint source | [`server/src/index.ts:377-1090`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L377) |
 
 ## 公开端点
 
