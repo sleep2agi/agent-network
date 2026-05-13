@@ -135,6 +135,11 @@ interface Profile {
   resumeAlias?: string;
   tools?: string[];
   network_id?: string;
+  systemPrompt?: string;
+  // Team-scale demo metadata (issue #51 / RFC-008). Read by Phase 2 leader
+  // fan-out logic — set by `anet demo science-team` scaffold.
+  team?: string;
+  role?: "leader" | "worker";
 }
 
 type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk" | "http-api";
@@ -256,6 +261,14 @@ function saveProfile(id: string, profile: Profile) {
     env: normalized.env || {},
     flags: normalized.flags || {},
     ...(normalized.session ? { session: normalized.session } : {}),
+    // RFC-008 / issue #51 team-scale demo metadata. Optional on every node;
+    // present only when set by `anet demo science-team` (Phase 1 scaffold) or
+    // a future RFC-008 client. Without this persist, agent-node reads back a
+    // config.json missing systemPrompt / team / role and the scaffold's
+    // placeholder leader/researcher prompts are silently dropped.
+    ...(normalized.systemPrompt ? { systemPrompt: normalized.systemPrompt } : {}),
+    ...(normalized.team ? { team: normalized.team } : {}),
+    ...(normalized.role ? { role: normalized.role } : {}),
   };
   writeFileSync(join(dir, "config.json"), JSON.stringify(toSave, null, 2) + "\n");
 }
@@ -3414,6 +3427,9 @@ async function demoCommand() {
     case "pr-review":
       args.splice(1, 1);
       return await demoPrReviewCommand();
+    case "science-team":
+      args.splice(1, 1);
+      return await demoScienceTeamCommand();
     default:
       console.error(`Unknown demo "${sub}". Run 'anet demo ls' to see all available demos.`);
       process.exit(1);
@@ -3434,6 +3450,11 @@ function demoListCommand() {
                   anet demo pr-review --diff path/to/change.diff
                   anet demo pr-review --pr https://github.com/owner/repo/pull/N
                   anet demo pr-review --ref origin/main
+
+  [32m●[0m science-team    科研军团 — 1 leader + N-1 worker (默认 10, 5-50 可调) 跑书生模型, Phase 1 scaffold
+                  anet demo science-team
+                  anet demo science-team --count 20 --dir ~/intern-s --intern-api $KEY
+                  anet demo science-team --stop / --restart / --cleanup
 
   See 'anet demo <name> --help' for details.
 `);
@@ -4674,6 +4695,273 @@ async function demoPrReviewCommand() {
     console.log(`       2. 贴到 GitHub PR: gh pr comment <PR-N> --repo <owner>/<repo> -F ${outPath}`);
   }
   console.log();
+}
+
+// ── demo: science-team ──
+// Phase 1 scaffold per issue #51: batch-create N claude-agent-sdk agents
+// (1 leader + N-1 workers) under a team directory, each in its own subdir
+// with its own .anet/nodes/<alias>/config.json. Phase 1 wires up wizard +
+// creation + launch + stop/restart/cleanup lifecycle. Leader fan-out and
+// aggregation logic is deferred to Phase 2 (waiting on RFC-008) — the
+// systemPrompts here are intentionally placeholders.
+//
+// Verified vendor values (per Vincent telegram 4227, commit 1bc03c0):
+//   runtime: claude-agent-sdk
+//   model:   intern-s1-pro
+//   baseUrl: https://chat.intern-ai.org.cn   (bare hostname, no /anthropic)
+//   token:   ANTHROPIC_AUTH_TOKEN injected from user-supplied Intern API key
+//
+// Note: each node lives under <dir>/node<i>, so we briefly process.chdir()
+// before save so nodesDir()/saveProfile() drops files in the right place.
+// The original cwd is always restored in a finally clause.
+
+const SCIENCE_TEAM_DIRECTIONS = [
+  { value: "comprehensive", label: "全面 AI" },
+  { value: "infra",         label: "AI Infra (训练 / 推理 / 部署)" },
+  { value: "llm-arch",      label: "LLM 架构" },
+  { value: "unified-gen",   label: "统一生成 (multi-modal)" },
+  { value: "rlhf",          label: "RLHF / Alignment" },
+  { value: "ai-safety",     label: "AI Safety" },
+  { value: "custom",        label: "自定义 (wizard 再问主题)" },
+];
+
+function scienceTeamPlaceholderPrompt(role: "leader" | "worker", index: number, direction: string): string {
+  if (role === "leader") {
+    return `你是科研军团的 Leader (alias=研究Leader)，方向：${direction}。\n` +
+      `Phase 1 占位 systemPrompt：当前不做智能 fan-out，收到任务时先回 "已收到，待 RFC-008 fan-out 协议接入"。`;
+  }
+  return `你是科研军团的 Researcher ${index} 号 (alias=研究员${index}号)，方向：${direction}。\n` +
+    `Phase 1 占位 systemPrompt：当前不做子任务执行，收到 leader 派发先回 "已收到子任务，等 RFC-008 接入"。`;
+}
+
+async function demoScienceTeamCommand() {
+  const opts = parseOpts();
+  const help = args.includes("--help") || args.includes("-h");
+  if (help) {
+    console.log(`
+  anet demo science-team — Phase 1 scaffold: batch-create N 研究 agent (1 leader + N-1 worker)
+
+  Usage:
+    anet demo science-team [--count N] [--dir <path>] [--intern-api <key>] [--direction <key>]
+    anet demo science-team --stop      # kill 所有 science-team tmux session
+    anet demo science-team --restart   # --stop 然后 hint 重跑创建
+    anet demo science-team --cleanup   # --stop + 删 node 子目录 + rm -rf 工作目录
+
+  Wizard fields (任一可用 --flag 跳过 prompt):
+    --intern-api <key>   书生 API key (Anthropic-compatible Intern)
+    --count <N>          军团人数 (5-50, 默认 10)
+    --dir <path>         工作目录 (默认 ~/intern-s)
+    --direction <key>    综述方向 (comprehensive/infra/llm-arch/unified-gen/rlhf/ai-safety/custom)
+
+  Vendor values (Vincent verified per commit 1bc03c0):
+    runtime  = claude-agent-sdk
+    model    = intern-s1-pro
+    baseUrl  = https://chat.intern-ai.org.cn   (no /anthropic suffix)
+    token    = \$ANTHROPIC_AUTH_TOKEN (= 你的 Intern API key)
+
+  Phase 1 scope (scaffold only):
+    - Wizard + 批量 mkdir <dir>/node1..nodeN (每个 node 独立 cwd)
+    - 每个 node 写 config.json + Intern preset + placeholder systemPrompt
+    - Auto register/login (default admin/anethub if no token) + ntok_ per alias
+    - Launch all nodes via tmux
+
+  Phase 2+ defer:
+    - Leader 智能 fan-out / sub-area assignment / aggregate 综述 (待 RFC-008)
+    - Dashboard team 聚合视图 (issue #50)
+    - 真实学术 systemPrompts
+
+  Spec: issue #51
+`);
+    return;
+  }
+
+  // ── Lifecycle flags first (so --stop/--cleanup don't trigger wizard) ──
+  const isStop    = args.includes("--stop");
+  const isRestart = args.includes("--restart");
+  const isCleanup = args.includes("--cleanup");
+  const lifecycleDir = opts.dir || join(home, "intern-s");
+  if (isStop || isRestart || isCleanup) {
+    return scienceTeamLifecycle({ dir: lifecycleDir, restart: isRestart, cleanup: isCleanup });
+  }
+
+  // ── Wizard prompts ──
+  const gc = loadGlobal();
+  if (!gc.hub) {
+    console.error("[anet] 未找到 CommHub Server。先运行 'anet hub start' 或 'anet init --hub <url>'");
+    return;
+  }
+
+  const internApiKey = opts["intern-api"] || opts["api-key"] || process.env.INTERN_API_KEY || await ask("书生 (Intern) API key");
+  if (!internApiKey) {
+    closeRL();
+    console.error("[anet] 需要 Intern API key. 申请页: https://chat.intern-ai.org.cn/");
+    return;
+  }
+
+  const countStr = opts.count || await ask("军团人数 (5-50)", "10");
+  const countRaw = parseInt(countStr, 10);
+  const count = Math.max(5, Math.min(50, Number.isFinite(countRaw) ? countRaw : 10));
+  if (count !== countRaw) {
+    console.log(`  [anet] 人数 ${countRaw} → 钳到合法区间 [5,50] = ${count}`);
+  }
+
+  const targetDir = opts.dir || await ask("工作目录", join(home, "intern-s"));
+
+  let direction = opts.direction || "";
+  if (!direction) {
+    direction = await askChoice("综述方向", SCIENCE_TEAM_DIRECTIONS.map(d => ({ label: d.label, value: d.value })));
+  }
+  if (direction === "custom") {
+    direction = await ask("自定义方向 (一句话描述)", "通用研究");
+  }
+  closeRL();
+
+  // ── Auto register/login (default admin/anethub) ──
+  if (!gc.token || !gc.user) {
+    console.log(`\n[anet] 没有 user token，自动用 default admin/anethub 登录...`);
+    const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "admin", password: "anethub" }),
+    }).then(r => r.json() as any).catch(() => null);
+    if (!loginRes?.ok) {
+      console.error(`[anet] 自动登录失败: ${loginRes?.error || "unknown"}. 先 'anet register' 创账号。`);
+      return;
+    }
+    gc.token = loginRes.token;
+    gc.user = loginRes.user;
+    const nets = await fetch(`${gc.hub}/api/networks`, { headers: { Authorization: `Bearer ${loginRes.token}` } }).then(r => r.json() as any).catch(() => ({ networks: [] }));
+    if (nets.networks?.length > 0) {
+      gc.network_id = nets.networks[0].network_id;
+      gc.network_name = nets.networks[0].network_name;
+    }
+    saveGlobal(gc);
+    console.log(`        ✓ 登录: ${loginRes.user.username}`);
+  }
+
+  // ── Plan + create ──
+  console.log(`\n[anet] 创建科研军团:`);
+  console.log(`        工作目录:  ${targetDir}`);
+  console.log(`        节点数:    ${count} (1 leader + ${count - 1} worker)`);
+  console.log(`        综述方向:  ${direction}`);
+  console.log(`        Runtime:   claude-agent-sdk + intern-s1-pro\n`);
+
+  mkdirSync(targetDir, { recursive: true });
+  const origCwd = process.cwd();
+  const createdAliases: string[] = [];
+
+  try {
+    for (let i = 1; i <= count; i++) {
+      const role: "leader" | "worker" = i === 1 ? "leader" : "worker";
+      const alias = role === "leader" ? "研究Leader" : `研究员${i - 1}号`;
+      const nodeDir = join(targetDir, `node${i}`);
+      mkdirSync(nodeDir, { recursive: true });
+      process.chdir(nodeDir);
+
+      // Build profile manually (skip createCommand to avoid interactive prompts
+      // and to thread science-team metadata + Intern preset cleanly).
+      const profile: Profile = {
+        anet_version: "0.1.0",
+        node_id: generateNodeId(),
+        node_name: alias,
+        alias,
+        runtime: "claude-agent-sdk",
+        model: "intern-s1-pro",
+        ...(gc.network_id ? { network_id: gc.network_id } : {}),
+        channels: ["server:commhub"],
+        env: {
+          ANTHROPIC_BASE_URL: "https://chat.intern-ai.org.cn",
+          ANTHROPIC_AUTH_TOKEN: internApiKey,
+        },
+        flags: { dangerouslySkipPermissions: true },
+        systemPrompt: scienceTeamPlaceholderPrompt(role, i - 1, direction),
+        team: "science-team",
+        role,
+      };
+
+      try {
+        await ensureNodeToken(profile, alias);
+      } catch (e: any) {
+        console.error(`        ❌ ${alias.padEnd(14)} ntok_ 请求失败: ${e.message}`);
+        continue;
+      }
+      saveProfile(alias, profile);
+      createdAliases.push(alias);
+      console.log(`        ✓ ${alias.padEnd(14)} (${role.padEnd(7)})  ${nodeDir}`);
+    }
+  } finally {
+    process.chdir(origCwd);
+  }
+
+  if (createdAliases.length === 0) {
+    console.error("\n[anet] 没有任何 node 创建成功，退出。");
+    return;
+  }
+
+  // ── Launch via tmux ──
+  console.log(`\n[anet] 启动 ${createdAliases.length} 个 tmux session...`);
+  try {
+    for (let i = 0; i < createdAliases.length; i++) {
+      const alias = createdAliases[i];
+      const nodeDir = join(targetDir, `node${i + 1}`);
+      const sessName = `science-team-${alias}`;
+      killTmuxSession(sessName);
+      try {
+        process.chdir(nodeDir);
+        startNodeTmuxSession(sessName, alias);
+        console.log(`        ✓ ${sessName}`);
+      } catch (e: any) {
+        console.error(`        ❌ tmux ${alias}: ${e.message}`);
+      }
+    }
+  } finally {
+    process.chdir(origCwd);
+  }
+
+  console.log(`\n[anet] 🏁 科研军团 ready.`);
+  console.log(`        Dashboard:    anet hub dashboard  (or open ${gc.hub.replace(":9200", ":3000")})`);
+  console.log(`        派任务:       commhub_send_task --alias 研究Leader --task "<研究 prompt>"`);
+  console.log(`        Phase 1 note: leader 只是 placeholder echo, RFC-008 Phase 2 接入智能 fan-out`);
+  console.log(`        Cleanup:      anet demo science-team --cleanup --dir ${targetDir}`);
+  console.log();
+}
+
+function scienceTeamLifecycle(opts: { dir: string; restart: boolean; cleanup: boolean }) {
+  const { dir, restart, cleanup } = opts;
+  if (!existsSync(dir)) {
+    console.error(`[anet] 工作目录不存在: ${dir}`);
+    return;
+  }
+
+  // Kill any tmux session matching the science-team-* prefix.
+  let killedCount = 0;
+  try {
+    const out = execSync("tmux list-sessions -F '#{session_name}' 2>/dev/null || true", { encoding: "utf-8" });
+    const sessions = out.split("\n").filter(s => s.startsWith("science-team-"));
+    for (const sess of sessions) {
+      killTmuxSession(sess);
+      killedCount++;
+    }
+  } catch {}
+  console.log(`[anet] killed ${killedCount} tmux session(s) matching science-team-*`);
+
+  if (cleanup) {
+    const subdirs = readdirSync(dir).filter(name => name.startsWith("node") && statSync(join(dir, name)).isDirectory());
+    for (const sub of subdirs) {
+      rmSync(join(dir, sub), { recursive: true, force: true });
+    }
+    try {
+      const remaining = readdirSync(dir);
+      if (remaining.length === 0) rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    console.log(`[anet] 清理完成: ${dir}`);
+    return;
+  }
+
+  if (restart) {
+    console.log(`[anet] --restart: 重新启动需要重跑 'anet demo science-team' (Phase 1 scaffold 暂不支持 in-place relaunch — 完整 supervisor 留 Phase 2)`);
+    return;
+  }
 }
 
 
