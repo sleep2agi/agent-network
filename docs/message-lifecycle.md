@@ -36,7 +36,9 @@
 | 需要回复 | ✅ | ❌ | ❌ | ❌ |
 | 关联字段 | — | task_id | — | task_id |
 
-**核心规则：只有 task 触发 think，其余只展示/记录。**
+**核心规则：只有 `task` 和 `broadcast` 触发 think，其余只展示/记录。**
+
+> 验证：`agent-node/src/cli.ts:886` `if (msgType !== "task" && msgType !== "broadcast") { skip processing }`。public docs [concepts/task-lifecycle.md 消息类型](https://anet.sh/concepts/task-lifecycle#消息类型) 表里 task / broadcast 两行 ✓ 触发 AI；reply / message / ack 不触发。
 
 ## inbox 表改动
 
