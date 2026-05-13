@@ -133,7 +133,6 @@ WeChat / Feishu 集成存在于**外部插件**中（不在 `@sleep2agi/commhub-
 
 完整 `anet channel add wechat|feishu` 排在 v0.9 / v1.0 路线图上（暂未排期）。如果你急用，开 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 谈赞助优先级。
 :::
-- 用户发送图片时包含本地文件路径
 
 ## 多 Channel 接入
 
