@@ -224,29 +224,29 @@ By distinguishing types, only `task` and `broadcast` trigger processing, while `
 
 ## Task Event Log
 
-Every status change is recorded in the `task_events` table:
+Every status change is recorded in the `task_events` table (verified at [`server/src/db.ts:133-147`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L133)):
 
 ```sql
 CREATE TABLE task_events (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id    TEXT NOT NULL,
-  from_state TEXT,
-  to_state   TEXT NOT NULL,
-  actor      TEXT,
-  detail     TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id       TEXT NOT NULL,
+  from_status   TEXT,                                    -- R231 calibration: column is from_status, not from_state
+  to_status     TEXT NOT NULL,                           -- R231 calibration: column is to_status, not to_state
+  actor         TEXT NOT NULL DEFAULT 'system',          -- R231 calibration: NOT NULL with default 'system'
+  detail        TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
 Query task events:
 
 ```bash
-# CLI
-anet tasks --detail t_xxx
-
-# REST API
-GET /api/task_events?task_id=t_xxx
+# REST API (no CLI shortcut — `anet tasks` only supports --status / --limit filters; --detail does not exist)
+curl "http://localhost:9200/api/task_events?task_id=t_xxx" \
+  -H "Authorization: Bearer ntok_xxx"
 ```
+
+R231 calibration: the original doc's `anet tasks --detail t_xxx` CLI command does not exist ([`cli.ts:2795-2829 tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2795) only parses `--status` and `--limit` — `--detail` is silently ignored and prints `?` placeholders).
 
 Example output:
 

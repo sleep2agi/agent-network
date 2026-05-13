@@ -224,29 +224,29 @@ sequenceDiagram
 
 ## 任务事件日志
 
-每个状态变更都记录到 `task_events` 表：
+每个状态变更都记录到 `task_events` 表（verify [`server/src/db.ts:133-147`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L133)）：
 
 ```sql
 CREATE TABLE task_events (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id    TEXT NOT NULL,
-  from_state TEXT,
-  to_state   TEXT NOT NULL,
-  actor      TEXT,
-  detail     TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id       TEXT NOT NULL,
+  from_status   TEXT,                                    -- R231 校准: 列名是 from_status 不是 from_state
+  to_status     TEXT NOT NULL,                           -- R231 校准: 列名是 to_status 不是 to_state
+  actor         TEXT NOT NULL DEFAULT 'system',          -- R231 校准: NOT NULL + 默认 'system'
+  detail        TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
 查询任务事件：
 
 ```bash
-# CLI
-anet tasks --detail t_xxx
-
-# REST API
-GET /api/task_events?task_id=t_xxx
+# REST API（无 CLI 快捷方式 —— anet tasks 子命令仅支持 --status / --limit 过滤，不支持 --detail）
+curl "http://localhost:9200/api/task_events?task_id=t_xxx" \
+  -H "Authorization: Bearer ntok_xxx"
 ```
+
+R231 校准：原 doc 写 `anet tasks --detail t_xxx` CLI 命令不存在（[`cli.ts:2795-2829 tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2795) 只解析 `--status` 和 `--limit`，没 `--detail` 参数），用户跑会 hit `?` 占位输出。
 
 示例输出：
 
