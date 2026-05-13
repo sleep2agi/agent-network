@@ -80,7 +80,7 @@ anet status
 
 v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
 
-::: tip v0.8.2 (CLI 2.1.7) increment
+::: tip v0.8.2 increment (commhub-server v0.8.2)
 On top of v0.8.1 stable, v0.8.2 adds:
 - **`anet channel add telegram` one-shot bind** — attach a Telegram bot token + allow-user to an existing node, auto-generates `channels/telegram` config
 - **`claude-code-cli` runtime session resume fix** — node creation pre-generates a Claude session UUID, restarts use `claude --resume <uuid>` to continue the conversation
@@ -92,7 +92,7 @@ Upgrade path is the same as v0.7 → v0.8 main path (admin bootstrap + password 
 
 | Item | v0.7 | v0.8 | Impact |
 |------|------|------|--------|
-| Hub startup password | None / `COMMHUB_AUTH_TOKEN` | **First `anet hub start` prompts for admin password (default `admin` / `anethub`, changeable)** | One-time prompt |
+| Hub startup password | None / `COMMHUB_AUTH_TOKEN` | **First `anet hub start` non-interactively bootstraps admin (default `admin` / `anethub`; overridable via `--username` / `--password` flags)** | One-time auto-create, no interactive prompt |
 | Global master token | `COMMHUB_AUTH_TOKEN` full read/write | **Soft-deprecated**: only `/api/*` read + deprecation warning | Writes rejected |
 | Password strength | No check | **≥ 8 chars + weak-password dict block** (first bootstrap admin allowed ≥ 4) | Weak password errors |
 | Change password | No command | **`anet passwd`** interactive | New tool |
@@ -102,15 +102,21 @@ Upgrade path is the same as v0.7 → v0.8 main path (admin bootstrap + password 
 ### Upgrade steps
 
 ```bash
-# 1. Bump the three packages to latest (v0.8.2 stable)
-npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.7
-npm install -g @sleep2agi/agent-node@latest      # 2.3.0
+# 1. Bump the three packages (npm latest tag — see npmjs.com for the current version)
+npm install -g @sleep2agi/agent-network@latest
+npm install -g @sleep2agi/agent-node@latest
 
-# commhub-server pulls latest automatically via anet hub start (bun runtime)
+# commhub-server isn't installed separately — `anet hub start` runs it via bunx
+# at a PINNED version (verify agent-network/bin/cli.ts:1961 PINNED_SERVER_VERSION;
+# the pin bumps along with the anet release).
+# ⚠ commhub-server is bun-shebang TypeScript — install Bun first:
+#   curl -fsSL https://bun.sh/install | bash
 
-# 2. Restart Hub (first run prompts for admin)
+# 2. Restart Hub (first run non-interactively bootstraps admin — no prompt)
 anet hub start
-# Prompt: 'Set up admin account (default: admin / anethub):' → press Enter for defaults
+# Expect: '✅ Admin account created' + 'username: admin / password: anethub'
+# Or:    '✅ Admin already exists' (if ~/.anet/server/admin-utok.json exists, register is skipped)
+# Details: troubleshooting → 'second anet hub start re-bootstraps admin?'
 
 # 3. Doctor repairs token + network
 anet doctor --fix

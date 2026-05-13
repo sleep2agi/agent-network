@@ -80,7 +80,7 @@ anet status
 
 v0.8 落地了 [RFC-001 第二阶段](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)，对**鉴权和密码**有新行为：
 
-::: tip v0.8.2 (CLI 2.1.7) 增量
+::: tip v0.8.2 增量（commhub-server v0.8.2）
 v0.8.2 在 v0.8.1 stable 基础上加了：
 - **`anet channel add telegram` 一键绑定** —— 给已有 node 接 Telegram bot token + allow user，自动生成 `channels/telegram` 配置
 - **`claude-code-cli` runtime session resume 修复** —— 节点创建时预生成 Claude session UUID，重启自动 `claude --resume <uuid>` 续会话
@@ -92,7 +92,7 @@ v0.8.2 在 v0.8.1 stable 基础上加了：
 
 | 项 | v0.7 | v0.8 | 影响 |
 |----|------|------|------|
-| Hub 启动密码 | 无需 / `COMMHUB_AUTH_TOKEN` | **首次 `anet hub start` 提示设置 admin 密码（默认 `admin` / `anethub`，可改）** | 第一次会问你 |
+| Hub 启动密码 | 无需 / `COMMHUB_AUTH_TOKEN` | **首次 `anet hub start` 非交互 bootstrap admin（默认 `admin` / `anethub`，flag `--username` / `--password` 可覆盖）** | 首次自动创建，无交互 prompt |
 | 全局 master token | `COMMHUB_AUTH_TOKEN` 写 / 读全权 | **软废弃**：仅 `/api/*` 只读 + deprecation warning | 写操作会被拒 |
 | 密码强度 | 无校验 | **≥ 8 位 + 弱密码字典拦截**（首次 bootstrap admin 例外允许 ≥ 4） | 弱密码报错 |
 | 修改密码 | 无命令 | **`anet passwd`** 交互式改 | 新工具 |
@@ -102,15 +102,19 @@ v0.8.2 在 v0.8.1 stable 基础上加了：
 ### 升级步骤
 
 ```bash
-# 1. 升级三件套到 latest（v0.8.2 stable）
-npm install -g @sleep2agi/agent-network@latest   # anet CLI 2.1.7
-npm install -g @sleep2agi/agent-node@latest      # 2.3.0
+# 1. 升级三件套（npm latest tag —— 当前主线见 npmjs.com 主页）
+npm install -g @sleep2agi/agent-network@latest
+npm install -g @sleep2agi/agent-node@latest
 
-# commhub-server 通过 anet hub start 自动用最新 bun runtime 拉
+# commhub-server 不用单独装 —— anet hub start 会用 bunx 拉一个 PINNED 版本
+# (verify agent-network/bin/cli.ts:1961 PINNED_SERVER_VERSION; anet 升级时这个版本号会跟着升)
+# ⚠ commhub-server 是 bun shebang TypeScript，必须先装 Bun: curl -fsSL https://bun.sh/install | bash
 
-# 2. 重启 Hub（首次会提示设置 admin）
+# 2. 重启 Hub（首次自动 bootstrap admin，无 prompt）
 anet hub start
-# 看到：'Set up admin account (default: admin / anethub):' → 直接回车用默认
+# 看到 '✅ Admin account created' + 'username: admin / password: anethub'
+# 或 '✅ Admin already exists' (~/.anet/server/admin-utok.json 已存在则跳过 register)
+# 详见 [troubleshooting#admin-bootstrap](/troubleshooting)
 
 # 3. doctor 修 token + 网络
 anet doctor --fix
