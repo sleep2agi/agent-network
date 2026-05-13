@@ -15,6 +15,7 @@ Agent Network supports running agents with different AI models within the same n
 | **GLM 5.1** | `claude-agent-sdk` | Strong Chinese understanding (Zhipu, `open.bigmodel.cn/anthropic`) | Low |
 | **Kimi** | `claude-agent-sdk` | Long-context Q&A (Moonshot, `api.moonshot.cn/anthropic`) | Low |
 | **Xiaomi MiMo V2.5** | `claude-agent-sdk` | Strong reasoning, low cost (Xiaomi, `api.xiaomimimo.com/anthropic`) | Low |
+| **OpenRouter (multi-model gateway)** | `claude-agent-sdk` | One API key, all upstream models (GPT-4 / Claude / Gemini / Llama, etc.); unified billing. Built-in `anet node create` preset; uses `openrouter.ai/api/v1` + `ANTHROPIC_AUTH_TOKEN`. | Upstream pass-through |
 
 ::: tip Any Anthropic-compatible provider works
 The table above lists verified common providers, but `claude-agent-sdk` integrates with **any** service that supports the Anthropic Messages API via `ANTHROPIC_BASE_URL`. Providers not listed (self-hosted vLLM, SiliconFlow, Qwen Anthropic-compatible endpoint, etc.) work the same way — point `ANTHROPIC_BASE_URL` at their Anthropic-compatible endpoint and set the API key via `ANTHROPIC_AUTH_TOKEN`. See "Configuration" below.
