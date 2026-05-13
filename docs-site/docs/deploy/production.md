@@ -105,7 +105,7 @@ crontab /tmp/cron
 journalctl --user -u anet-hub | grep -E '401|auth' | tail -50
 ```
 
-v0.8 已内置 `/api/admin/audit-log` 端点 + Dashboard Audit Log 页面，按角色 `admin` 可见。
+v0.8 已内置 `/api/audit-log` 端点 + Dashboard Audit Log 页面，按角色 `admin` 可见。
 
 ## 多用户共享 Hub？先看这条
 

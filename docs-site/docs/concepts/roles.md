@@ -9,7 +9,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 角色 | 典型用例 | 简介 |
 |---|---|---|
 | **owner** | network 创建者 / 唯一最高权 | 能改成员 + 能删 network + 全部 admin 操作 |
-| **admin** | 团队负责人 / 受信运维 | 能加减成员 + 能调 `/api/admin/*` + 能改 hub 设置 |
+| **admin** | 团队负责人 / 受信运维 | 能加减成员 + 能调 admin-only 端点 (`/api/audit-log`, `/api/users` 等) + 能改 hub 设置 |
 | **member** | 普通团队工程师 | 能创建 / 启动 agent + 派 task + 看本网络数据 |
 | **viewer** | 实习生 / 审计员 / 只读对接 | 只能看，不能写 |
 
@@ -41,7 +41,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 重命名 network | ❌ | ❌ | ✅ | ✅ |
 | 删除 network | ❌ | ❌ | ❌ | ✅ |
 | **hub 全局** | | | | |
-| 看 `/api/admin/audit-log` | ❌ | ❌ | ✅ | ✅ |
+| 看 `/api/audit-log` | ❌ | ❌ | ✅ | ✅ |
 | 调 `/api/admin/wipe-db` 等危险操作 | ❌ | ❌ | ✅ | ✅ |
 | `anet hub admin reset-user`（重置任意用户密码） | 仅 hub 本机命令行调用，与角色无关 | | | |
 
@@ -102,8 +102,8 @@ anet network join <code>                         # 用邀请码加入
 - 加减 network 成员（不能动 owner）
 - 改成员 role（不能升到 owner）
 - 改 / 删 / 启动停止任何 agent（包括别人创建的）
-- 看 `/api/admin/audit-log`
-- 调 `/api/admin/*` 系统接口
+- 看 `/api/audit-log`
+- 调 admin-only 端点（`/api/audit-log`, `/api/users` 等）
 
 **不能干什么**：
 - ❌ 删除 network 本身（只有 owner 能）
@@ -147,7 +147,7 @@ network 的 4 个 role（owner/admin/member/viewer）是**绑定到某个 networ
 
 | 操作 | network admin | hub 全局 admin (`admin` user) |
 |---|---|---|
-| 调 `/api/admin/audit-log` | ✅ | ✅ |
+| 调 `/api/audit-log` | ✅ | ✅ |
 | `anet hub admin reset-user`（重置任意用户密码） | ❌ | ✅（仅 hub 本机调用） |
 | 创建新 user | ❌ | ✅（仅 hub 全局 admin） |
 | 看 hub 所有 network | ❌（只看自己有 role 的） | ✅ |

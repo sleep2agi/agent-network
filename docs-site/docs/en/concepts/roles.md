@@ -9,7 +9,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | Role | Typical use | One-liner |
 |---|---|---|
 | **owner** | Network creator, top of the hierarchy | Manage members + delete network + all admin ops |
-| **admin** | Team lead / trusted operator | Add/remove members + `/api/admin/*` + hub settings |
+| **admin** | Team lead / trusted operator | Add/remove members + admin-only endpoints (`/api/audit-log`, `/api/users`, etc.) + hub settings |
 | **member** | Regular team engineer | Create / start agents, dispatch tasks, see network data |
 | **viewer** | Intern / auditor / read-only integration | Read only, no writes |
 
@@ -41,7 +41,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | Rename network | ❌ | ❌ | ✅ | ✅ |
 | Delete network | ❌ | ❌ | ❌ | ✅ |
 | **Hub-global** | | | | |
-| `/api/admin/audit-log` | ❌ | ❌ | ✅ | ✅ |
+| `/api/audit-log` | ❌ | ❌ | ✅ | ✅ |
 | `/api/admin/wipe-db` (and similar) | ❌ | ❌ | ✅ | ✅ |
 | `anet hub admin reset-user` (reset any user's password) | Local-only CLI command on the hub host, not role-gated | | | |
 
@@ -78,7 +78,7 @@ anet network join <code>
 
 For team leads, trusted operators, anyone who needs to manage members or read audit logs.
 
-- **Can**: everything member can; add / remove members (cannot touch owner); change member roles (cannot promote to owner); modify any agent; view `/api/admin/audit-log`; hit `/api/admin/*` endpoints.
+- **Can**: everything member can; add / remove members (cannot touch owner); change member roles (cannot promote to owner); modify any agent; view `/api/audit-log`; hit admin-only endpoints (`/api/audit-log`, `/api/users`, etc.).
 - **Cannot**: delete the network itself; remove an owner or promote anyone to owner.
 
 Become an admin:
@@ -108,7 +108,7 @@ The 4 roles above are scoped to a single network. There is also a **hub-global a
 
 | Operation | network admin | hub-global admin (`admin` user) |
 |---|---|---|
-| `/api/admin/audit-log` | ✅ | ✅ |
+| `/api/audit-log` | ✅ | ✅ |
 | `anet hub admin reset-user` (reset any user's password) | ❌ | ✅ (local-only) |
 | Create new users | ❌ | ✅ |
 | See all networks on the hub | ❌ (only ones they're a member of) | ✅ |

@@ -90,7 +90,7 @@ Prune weekly: `find ~/.commhub/backup-*.db -mtime +30 -delete`.
 journalctl --user -u anet-hub | grep -E '401|auth' | tail -50
 ```
 
-v0.8 ships `/api/admin/audit-log` + a Dashboard Audit Log page (admin role).
+v0.8 ships `/api/audit-log` + a Dashboard Audit Log page (admin role).
 
 ## Sharing a Hub across users? Read this
 
