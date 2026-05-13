@@ -14,7 +14,7 @@
 
 ## 摘要
 
-给 anet 加 **team-scale convention**: 用户用 `anet demo science-team` 命令一键创建 N 节点 (5-50) 科研军团 (1 leader + N-1 researcher), 全员 `codex-sdk` runtime + intern (书生) model, 演示 **leader 智能 fan-out + worker 协作综述 + 整合输出** AI 研究综述 (per Vincent 4274 MVP 收窄 — research/综述 only, drop experiment/repro/meta-reflection).
+给 anet 加 **team-scale convention**: 用户用 `anet demo science-team` 命令一键创建 N 节点 (5-50) 科研军团 (1 leader + N-1 researcher), 全员 `claude-agent-sdk` runtime + intern-s1-pro (书生) model (per Vendor-runtime matrix §3.5 — 书生 = Anthropic-compatible endpoint, NOT codex-sdk runtime), 演示 **leader 智能 fan-out + worker 协作综述 + 整合输出** AI 研究综述 (per Vincent 4274 MVP 收窄 — research/综述 only, drop experiment/repro/meta-reflection).
 
 **核心 design 决策** (per Vincent 4237-4277 telegram chain):
 - 命名: 中文 `研究Leader` + `研究员1号 .. 研究员49号` (Vincent 4264-4265 final)
@@ -122,10 +122,11 @@ const workerAliases = (N: number): string[] => {
 interface NodeConfig {
   // Existing fields (backward compat, 不动)
   alias: string;            // e.g. "研究Leader" / "研究员1号"
-  runtime: RuntimeName;     // "codex-sdk" (per Vincent demo lock)
-  model: string;            // "intern-s1-pro" (Vincent 4227 verified, lowercase, no /anthropic 后缀)
-  baseUrl?: string;         // "https://chat.intern-ai.org.cn" (per Vincent 4227)
-  apiKey?: string;          // 用户输入 INTERN_API_KEY (env var $INTERN_API)
+  runtime: RuntimeName;     // "claude-agent-sdk" (per §3.5 Vendor-runtime matrix — 书生 = Anthropic-compatible endpoint, NOT codex-sdk)
+  model: string;            // "intern-s1-pro" (Vincent 4227 verified, lowercase)
+  baseUrl?: string;         // "https://chat.intern-ai.org.cn" (per Vincent 4227, no /anthropic 后缀)
+  // Auth env (per §3.5 matrix — claude-agent-sdk runtime 用 ANTHROPIC_AUTH_TOKEN, 不是 OPENAI_API_KEY)
+  // env: { ANTHROPIC_AUTH_TOKEN: "$INTERN_API_KEY" }
   // ... other existing fields
 
   // NEW for team-scale (RFC-008)
@@ -136,6 +137,30 @@ interface NodeConfig {
 ```
 
 **Backward compat**: `team` / `role` / `systemPrompt` 全 optional, 跟现有 `anet node create` 默认值 path 一致。Single-node `anet node create my-bot --runtime claude-agent-sdk` 不需要 team/role 字段。
+
+### 3.5 Vendor-Runtime Matrix (per 通信龙 task b8185c1a spec error catch — 工程马 catch)
+
+**🚨 Spec error correction (RFC-008 v1 dispatch task body 含 runtime=codex-sdk 错误)**:
+
+书生 (Intern) + MiniMax / DeepSeek / GLM / Kimi / MiMo 等 vendor 都暴露 **Anthropic-compatible endpoint** (跟 anet `multi-model.md` doc routing 一致), 须用 **`claude-agent-sdk` runtime** (跟 anet existing claude-agent-sdk runtime model routing 一致), **不是** `codex-sdk` runtime。
+
+`codex-sdk` runtime 仅适合 OpenAI / Codex GPT-5.x native endpoint (per Vincent §6.5 4144 + RFC-007 archive context)。
+
+| Vendor | Runtime | Endpoint | Auth env | Verify state |
+|---|---|---|---|---|
+| 书生 (Intern) | **`claude-agent-sdk`** | `https://chat.intern-ai.org.cn` (no /anthropic 后缀, per Vincent 4227 hands-on) | `ANTHROPIC_AUTH_TOKEN` | ✅ Vincent 4227 verified |
+| MiniMax | **`claude-agent-sdk`** | `https://api.minimaxi.com/anthropic` | `ANTHROPIC_AUTH_TOKEN` | ✅ 2.1.7 baseline preserved |
+| Claude native | **`claude-agent-sdk`** | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | ✅ anet core |
+| OpenAI / Codex | `codex-sdk` | `https://api.openai.com` | `OPENAI_API_KEY` | n/a (not science-team default) |
+| DeepSeek / GLM / Kimi / MiMo | **`claude-agent-sdk`** | (各 vendor anthropic-compatible endpoint) | `ANTHROPIC_AUTH_TOKEN` | ❌ **[UNVERIFIED]** — per `feedback_vendor_verify_before_hardcode` SOP, await per-vendor verify (curl + dashboard sign-up + real API call) 才 ship 回 preset |
+
+**Science-team demo 默认 lock** (per §1.2 + Vincent 4270 AI-focused):
+- Runtime: `claude-agent-sdk`
+- Model: `intern-s1-pro`
+- BaseUrl: `https://chat.intern-ai.org.cn`
+- Auth env: `ANTHROPIC_AUTH_TOKEN` (从用户 `$INTERN_API_KEY` env 注入)
+
+**Lesson learned (per 通信龙 task b8185c1a)**: 这是 **第二次** fabrication pattern (preview.1+2 vendor URL preset + RFC-008 v1 runtime binding 都同款 — assumed binding without cross-verify). `feedback_vendor_verify_before_hardcode` SOP 扩展到 **runtime choice 也要 verify-with-real-call** (e.g. curl 实际 endpoint 看 returns Anthropic-format response 才 lock `claude-agent-sdk` vs `codex-sdk` routing)。
 
 ### 3.4 systemPrompt content (per Vincent 4270 AI-focused)
 
