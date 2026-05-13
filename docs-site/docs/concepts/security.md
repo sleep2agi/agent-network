@@ -165,7 +165,10 @@ REST API 根据 Token 类型自动限制范围：
 |------|------|------|
 | `POST /api/auth/register` | 30 次/分 | 防注册攻击 |
 | `POST /api/auth/login` | 10 次/分 | 防暴力破解 |
-| 其他 API | 60 次/分 | 通用限制 |
+
+::: info v0.8 当前只有 register + login 两端点做了 IP rate limit
+verify [`server/src/index.ts:417`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L417) + [L432](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L432) `checkRateLimit()` 调用点 —— 全 server 只这两处。`checkRateLimit` 函数签名 `maxPerMinute = 60` 默认值是为未来扩展预留，**当前其他 endpoint 不做 IP rate limit**。如果你担心写操作被滥用，前置反向代理（nginx / cloudflare 等）补 rate limit 即可。
+:::
 
 ### 实现方式
 
@@ -187,14 +190,13 @@ function checkRateLimit(ip: string, maxPerMinute: number): boolean {
 }
 ```
 
-超过限制返回 HTTP 429：
+超过限制返回 HTTP 429，body 形如：
 
 ```json
-{
-  "error": "rate_limit_exceeded",
-  "retry_after_seconds": 60
-}
+{ "ok": false, "error": "too many requests, try again later" }
 ```
+
+（`/login` 命中是 `"too many attempts, try again later"`；命中后 server 还写 audit `action='login_rate_limited'` + clientIP detail。verify [`server/src/index.ts:418/434`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L418)。**响应不含 `retry_after_seconds` / `Retry-After` header**——窗口固定 60 秒，等就完事。）
 
 ### 本地豁免
 

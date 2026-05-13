@@ -165,7 +165,10 @@ REST API automatically scopes based on token type:
 |------|------|------|
 | `POST /api/auth/register` | 30/min | Prevent registration attacks |
 | `POST /api/auth/login` | 10/min | Prevent brute force |
-| Other API | 60/min | General limit |
+
+::: info Only register + login have IP rate limiting in v0.8
+Verify [`server/src/index.ts:417`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L417) + [L432](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L432) — these are the only two call sites for `checkRateLimit()`. The function's `maxPerMinute = 60` default is reserved for future expansion; **no other endpoint currently rate-limits per IP**. If you're worried about write abuse, layer rate limiting at a reverse proxy (nginx / Cloudflare / etc.) in front.
+:::
 
 ### Implementation
 
@@ -187,14 +190,13 @@ function checkRateLimit(ip: string, maxPerMinute: number): boolean {
 }
 ```
 
-When the limit is exceeded, HTTP 429 is returned:
+When the limit is exceeded the server returns HTTP 429 with a body like:
 
 ```json
-{
-  "error": "rate_limit_exceeded",
-  "retry_after_seconds": 60
-}
+{ "ok": false, "error": "too many requests, try again later" }
 ```
+
+(`/login` returns `"too many attempts, try again later"`; on a `/login` hit the server also writes audit `action='login_rate_limited'` with the client IP. Verify [`server/src/index.ts:418/434`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L418). **No `retry_after_seconds` field or `Retry-After` header is set** — the window is a fixed 60 seconds, just wait.)
 
 ### Localhost Exemption
 
