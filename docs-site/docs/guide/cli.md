@@ -113,7 +113,7 @@ npm install -g @sleep2agi/agent-network
 
 ### anet hub start
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1860)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1893)
 
 启动 CommHub 通信服务器。
 
@@ -183,7 +183,7 @@ admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次
 
 ### anet passwd
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3414)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3447)
 
 修改当前登录用户密码。默认交互式输入旧密码、新密码、确认密码；脚本可用 `--old` / `--new`。
 
@@ -196,7 +196,7 @@ anet passwd --old old-password --new new-password
 
 ### anet hub admin reset-user
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2110)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2143)
 
 Hub 主机本机恢复命令，绕过 HTTP API 直接读 SQLite。
 
@@ -208,7 +208,7 @@ anet hub admin reset-user --username alice
 
 ### anet node create
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1155)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1173)
 
 创建新的 Agent 节点。
 
@@ -258,7 +258,7 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 
 ### anet node start
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1661)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1694)
 
 启动 Agent 节点。
 
@@ -282,7 +282,7 @@ anet node start <name> [options]
 
 ### anet status
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2691)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2724)
 
 查看网络状态概览。
 
@@ -313,7 +313,7 @@ Tasks: 42 replied, 3 running, 0 failed
 
 ### anet tasks
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2755)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2788)
 
 查看任务列表。
 
@@ -341,7 +341,7 @@ anet tasks --limit 5
 
 ### anet doctor
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4513)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4546)
 
 系统诊断。
 
@@ -365,7 +365,7 @@ v0.7 之前 ntok_ 失效需要手动 `anet node delete` + 重新 create；v0.8 �
 
 ### anet network invite
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3238)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3271)
 
 创建网络邀请码。
 
@@ -418,7 +418,7 @@ anet token create my-agent-token
 
 ### anet node resume
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1669)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1702)
 
 恢复之前被中断的 Agent session。当 Agent 崩溃、手动停止或意外退出时，可以用此命令恢复上下文，不丢失之前的对话历史。
 
@@ -458,7 +458,7 @@ anet node resume 马 --session abc123
 
 ### anet init project
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L746)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L764)
 
 初始化 Claude Code 项目，自动配置 MCP 和 CLAUDE.md。
 
