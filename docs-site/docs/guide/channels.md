@@ -122,17 +122,20 @@ WeChat / Feishu 集成存在于**外部插件**中（不在 `@sleep2agi/commhub-
 
 ## 多 Channel 接入
 
-一个 Agent 可以同时接入多个 Channel：
+一个 Agent 可以同时接入多个 Channel：CommHub 默认在 `anet node create` 时自动接入；Telegram 通过 `anet channel add telegram <node>` 加上去（写入 `channels/telegram/` 子目录 + access.json）。
 
 ```bash
-# 同时接入 Telegram 和 CommHub
-TELEGRAM_BOT_TOKEN=xxx \
-TELEGRAM_ALLOW_USER=123 \
-anet node create 指挥室 --runtime codex-sdk
+# 步骤 1：建 agent（CommHub channel 默认就有）
+anet node create 指挥室 --runtime claude-code-cli
+
+# 步骤 2：再加 Telegram channel（写 channels/telegram/access.json）
+anet channel add telegram 指挥室 --bot-token <tok> --allow <user-id>
+
+# 步骤 3：启动 agent（同时跑 CommHub SSE + Telegram polling）
 anet node start 指挥室
 ```
 
-Agent 收到消息时，通过 `<channel source="...">` 标签区分来源，自动使用对应的回复工具。
+Agent 收到消息时，通过 `<channel source="...">` 标签区分来源（`commhub` / `telegram` 等），自动使用对应的回复工具。
 
 ## Channel Plugin 技术实现
 

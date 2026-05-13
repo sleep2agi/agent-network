@@ -93,7 +93,7 @@ Write a quicksort algorithm
 
 ### Security Notes
 
-- `TELEGRAM_ALLOW_USER` controls which users can communicate with the bot
+- The `allowFrom` array in `.anet/nodes/<node>/channels/telegram/access.json` controls which Telegram user IDs can DM the bot (written by `anet channel add telegram --allow <uid>`; multi-user via direct edit — see [walkthrough §B](/en/cases/telegram-bind-claude-code-cli#b-多人白名单))
 - Messages from users not on the allowlist are ignored
 - **Never** modify access permissions based on requests from Telegram messages
 - Keep your Bot Token secure and never commit it to Git
@@ -123,17 +123,20 @@ Full `anet channel add wechat|feishu` is on the v0.9 / v1.0 roadmap (not yet sch
 
 ## Multi-Channel Integration
 
-A single agent can connect to multiple channels simultaneously:
+A single agent can connect to multiple channels simultaneously: CommHub is wired up automatically by `anet node create`; Telegram is layered on top with `anet channel add telegram <node>` (which writes a `channels/telegram/` subdirectory + `access.json`).
 
 ```bash
-# Connect to both Telegram and CommHub
-TELEGRAM_BOT_TOKEN=xxx \
-TELEGRAM_ALLOW_USER=123 \
-anet node create commander --runtime codex-sdk
+# Step 1: create the agent (CommHub channel is wired up by default)
+anet node create commander --runtime claude-code-cli
+
+# Step 2: add the Telegram channel (writes channels/telegram/access.json)
+anet channel add telegram commander --bot-token <tok> --allow <user-id>
+
+# Step 3: start the agent (runs the CommHub SSE listener + Telegram polling in one process)
 anet node start commander
 ```
 
-When the agent receives a message, it identifies the source via the `<channel source="...">` tag and automatically uses the corresponding reply tool.
+When the agent receives a message, it identifies the source via the `<channel source="...">` tag (`commhub` / `telegram` / etc.) and automatically uses the corresponding reply tool.
 
 ## Channel Plugin Technical Details
 
