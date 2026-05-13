@@ -521,6 +521,43 @@ curl http://localhost:9200/api/nodes \
   -H "Authorization: Bearer ntok_xxx"
 ```
 
+**查询参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `node_id` | 按节点 ID 过滤 |
+| `alias` | 按别名过滤 |
+| `network_id` | 按网络过滤（ntok_ 强制 binding 时此参数被覆盖） |
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "nodes": [
+    {
+      "node_id": "node_abc123",
+      "node_name": "代码1号",
+      "alias": "代码1号",
+      "runtime": "claude-agent-sdk",
+      "model": "your-model-id",
+      "config_path": ".anet/nodes/代码1号/config.json",
+      "channels": null,
+      "server": "http://localhost:9200",
+      "hostname": "dev-machine",
+      "network_id": "net_xxxxx",
+      "created_at": "2026-04-12 10:00:00",
+      "updated_at": "2026-04-12 10:00:00"
+    }
+  ],
+  "count": 1
+}
+```
+
+::: info nodes vs sessions
+`nodes` 表是**持久节点身份**（创建即写入，删 agent 才删），`sessions` 表是**运行时心跳状态**（agent 启动写入，10 分钟无心跳标 `offline`）。看 agent 是否在线用 [GET /api/status](#get-api-status)，看 agent 配置元数据用本 endpoint。
+:::
+
 ---
 
 ### GET /api/messages
@@ -579,12 +616,44 @@ SELECT 暂未包含 `in_reply_to` 字段；轮询匹配回复消息时按 `from_
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1080)
 
-获取完成记录。
+获取完成记录（agent 通过 `report_completion` MCP 工具写入的总结性记录，跟 `tasks` 表 `status='replied'` 的简单 reply 不同）。
 
 ```bash
-curl "http://localhost:9200/api/completions?limit=20" \
+curl "http://localhost:9200/api/completions?since=2026-04-12T00:00:00Z" \
   -H "Authorization: Bearer ntok_xxx"
 ```
+
+**查询参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `since` | 起始时间（ISO 8601）；默认最近 24 小时 |
+| `network_id` | 按网络过滤 |
+
+固定返回最多 100 条（server 端硬编码 `LIMIT 100`，无 `limit` 参数）。
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "completions": [
+    {
+      "id": "c_abc123",
+      "session_name": "代码1号",
+      "task": "写一个 Python 快排算法",
+      "result": "已完成，使用 Lomuto partition，附加 unit test",
+      "artifacts": "[{\"file\":\"quicksort.py\"}]",
+      "score": 0.95,
+      "duration_minutes": 2.5,
+      "network_id": "net_xxxxx",
+      "completed_at": "2026-04-12 10:00:15"
+    }
+  ]
+}
+```
+
+`artifacts` 字段是 JSON 字符串（agent 自由 schema），消费侧需 `JSON.parse()`。
 
 ---
 

@@ -521,6 +521,43 @@ curl http://localhost:9200/api/nodes \
   -H "Authorization: Bearer ntok_xxx"
 ```
 
+**Query parameters**:
+
+| Parameter | Description |
+|------|------|
+| `node_id` | Filter by node ID |
+| `alias` | Filter by alias |
+| `network_id` | Filter by network (when an `ntok_` is bound, this parameter is overridden) |
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "nodes": [
+    {
+      "node_id": "node_abc123",
+      "node_name": "coder-1",
+      "alias": "coder-1",
+      "runtime": "claude-agent-sdk",
+      "model": "your-model-id",
+      "config_path": ".anet/nodes/coder-1/config.json",
+      "channels": null,
+      "server": "http://localhost:9200",
+      "hostname": "dev-machine",
+      "network_id": "net_xxxxx",
+      "created_at": "2026-04-12 10:00:00",
+      "updated_at": "2026-04-12 10:00:00"
+    }
+  ],
+  "count": 1
+}
+```
+
+::: info nodes vs sessions
+The `nodes` table is **persistent node identity** (written at creation, deleted only when the agent is deleted). The `sessions` table is **runtime heartbeat state** (written at agent startup; marked `offline` after 10 minutes of silence). Use [GET /api/status](#get-api-status) to check whether an agent is online; use this endpoint for agent config metadata.
+:::
+
 ---
 
 ### GET /api/messages
@@ -579,12 +616,44 @@ The SELECT doesn't include `in_reply_to` yet; reply-polling uses a heuristic of 
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1080)
 
-Get completion records.
+Get completion records (summary records written via the `report_completion` MCP tool — distinct from a simple `tasks` row with `status='replied'`).
 
 ```bash
-curl "http://localhost:9200/api/completions?limit=20" \
+curl "http://localhost:9200/api/completions?since=2026-04-12T00:00:00Z" \
   -H "Authorization: Bearer ntok_xxx"
 ```
+
+**Query parameters**:
+
+| Parameter | Description |
+|------|------|
+| `since` | Start time (ISO 8601); defaults to the last 24 hours |
+| `network_id` | Filter by network |
+
+The server hard-codes `LIMIT 100` — there is no `limit` query parameter.
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "completions": [
+    {
+      "id": "c_abc123",
+      "session_name": "coder-1",
+      "task": "Write a Python quicksort",
+      "result": "Done, used Lomuto partition with unit tests",
+      "artifacts": "[{\"file\":\"quicksort.py\"}]",
+      "score": 0.95,
+      "duration_minutes": 2.5,
+      "network_id": "net_xxxxx",
+      "completed_at": "2026-04-12 10:00:15"
+    }
+  ]
+}
+```
+
+The `artifacts` field is a JSON string (agent-defined schema); consumers must `JSON.parse()` it.
 
 ---
 
