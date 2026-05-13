@@ -163,19 +163,19 @@ register() → callCommHub("report_status", {
 
 **关键**: node_id 不变 → CommHub 识别为同一个 node → 不会重复注册
 
-### 7. 更名 (rename)
+### 7. 更名 (rename) — R219 校准
 
 **触发**: `anet node rename <old> <new>`
 
-**前置条件**: node 必须 offline（运行中不允许改名）
+**前置条件（约定，未强制）**: 推荐 node offline 时改 —— [`cli.ts:2415-2456 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2415) **不调 `stopNode`**，运行中改名也能跑通本地 `renameSync`，但已 spawn 的子进程仍指向旧 config 路径，行为未定义。
 
 **P0 数据变更（只改本地，不依赖 CommHub rename API）**:
-1. config.json `node_name` → 新名字
-2. 旧节点（目录名=node_name）: rename 目录
-3. 新节点（目录名=node_id）: 不动目录
-4. CommHub alias：下次 `anet node start` 时用新名字重新注册（旧 alias 自然过期）
+1. `stored.node_name = newName` + `stored.alias = newName`（cli.ts:2439-2440）
+2. `renameSync(.anet/nodes/<oldId>, .anet/nodes/<newName>)`（cli.ts:2450）
+3. `saveProfile(newName, stored)` + `writeLegacyProjectAlias(newName)`（cli.ts:2453-2454）
+4. CommHub alias：下次 `anet node start` 时用新名字 `report_status(idle)` 重新注册（旧 alias 自然 stale，10 分钟后被服务端 cutoff 标 offline）
 
-**P1**: CommHub 新增 rename API，rename 时主动更新 alias。
+**P1**: CommHub 新增 rename API 主动更新 alias —— **未采纳**（rely on 自然 stale + 重新注册流程）。
 
 ### 8. 下线 (offline)
 
@@ -189,25 +189,36 @@ register() → callCommHub("report_status", {
 - config.json: 不变（session 已写回）
 - 进程退出
 
-**CommHub 超时检测**: 心跳 3 分钟间隔，超过 5 分钟无心跳 → 自动标记 offline
+**CommHub 超时检测**: 心跳 3 分钟间隔（[`agent-node/src/cli.ts:1182`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1182) `setInterval(() => reportStatus("idle"), 3 * 60 * 1000)`），超过 **10 分钟**无心跳 → 自动标记 offline（[`server/src/index.ts:751-755`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L751) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。R219 校准：原 doc 5 分钟错。
 
-### 9. 删除 (deleted)
+### 9. 删除 (deleted) — R219 校准
 
-**触发**: `anet node delete <node-name>`
+**触发**: `anet node delete <node-name>` （首次提示，再加 `--force` 才真删）
 
-**前置条件**: node 必须 offline
+**前置条件**: 不强制 offline —— `anet node delete` 会先 `stopNode(nodeId)` 杀进程 + `await notifyServerOffline(...)` 通知 hub 后再删本地目录（[cli.ts:2557-2575](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2557)）。
 
-**数据变更**:
-1. 删除 `.anet/nodes/<node-name>/` 目录（含 config.json、channels/、logs/；目录名是 alias，不是内部 node_id 字段）
-2. CommHub: DELETE FROM sessions WHERE resume_id = sdk-${node_id}
-3. CommHub: DELETE FROM inbox WHERE session_name = node_name（清理残留消息）
+**实际数据变更**:
+1. **本地**: `rmSync(.anet/nodes/<id>/, { recursive: true, force: true })` —— 删整个目录（含 config.json、channels/、logs/；目录名是 alias / node_name，不是内部 node_id 字段；R209 chain 一致）
+2. **CommHub session**: `notifyServerOffline` 调用 `report_status(offline)`（[cli.ts:2461-2486](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2461)）—— **只把 sessions row.status 改成 offline，不 DELETE**。这一行 session 会一直留在 db 里（10 分钟 stale cutoff 触发时也只是再次 mark offline）。
+3. **CommHub inbox**: **不清理** —— 残留 inbox 消息会一直留着。如果之后用同 alias 再 `anet node start`，新进程会从 `getInbox` 拉到旧消息（注意：旧消息可能跟新进程 session 上下文无关）。
 
-**确认**: 必须交互式确认
+::: warning 旧 doc P1 设计未采纳
+原 doc 写「DELETE FROM sessions / DELETE FROM inbox」是设计草稿意图，**未实施**。当前 v0.8.2 实际只 mark offline + 删本地目录，不清服务端 row。
+:::
+
+**确认流程**（[cli.ts:2567-2572](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2567)）：
+
 ```
-[anet] 删除 node "指挥室" (n_a1b2c3d4)?
-[anet] 这将删除配置、channel、日志和 CommHub 注册。
-[anet] 输入 node 名称确认: 指挥室
+$ anet node delete 指挥室
+[anet] This will delete "指挥室" (node_id: n_a1b2c3d4)
+[anet]   .anet/nodes/指挥室
+[anet] Run again with --force to confirm.
+
+$ anet node delete 指挥室 --force
+[anet] Deleted "指挥室"
 ```
+
+非交互式（不是 readline 输入 node 名称），用 `--force` flag 二次确认。R219 校准：原 doc fictional 交互式 prompt。
 
 ## CLI 命令 ↔ 状态转换
 
