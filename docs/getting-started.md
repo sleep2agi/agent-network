@@ -171,7 +171,7 @@ anet node start mm-bot
        └──────────┬───────┴──────────────────┘
             ┌─────┴─────┐
             │  CommHub   │  ← MCP + REST + SSE
-            │  Server    │  ← SQLite / PostgreSQL
+            │  Server    │  ← SQLite (WAL, ~/.commhub/commhub.db)
             └─────┬─────┘
                   │
             ┌─────┴─────┐

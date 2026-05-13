@@ -28,7 +28,7 @@ Two ways to register — both create the same type of account:
 | Method | Command | When to use |
 |------|-----------|-----------|
 | **Default account during Hub start** | `anet hub start` | First time, setting up locally |
-| **Manual register** | `anet register --hub http://server-IP:9200` | Joining someone else's server |
+| **Manual register** | `anet init --hub http://server-IP:9200` → `anet register` | Joining someone else's server (init configures the hub, then register creates the account) |
 
 ```bash
 # Method 1: Start the Hub (creates the default admin account)
@@ -37,9 +37,10 @@ anet hub start
 # → Prints the next anet login command
 
 # Method 2: Join someone else's server
-anet register --hub http://10.0.0.1:9200
-# → Enter username and password
-# → Registered and auto-logged in
+anet init --hub http://10.0.0.1:9200    # one-time: write hub URL to ~/.anet/config.json
+anet register                           # → enter username and password; auto-logged in on success
+# ⚠ `anet register` itself does not accept --hub; the hub must be configured
+#   via `anet init` first (or auto-detected via `anet hub start` on localhost:9200)
 ```
 
 ::: info First registered user
@@ -121,7 +122,8 @@ Deeper: [Token system](/en/concepts/tokens) / [Security design — Password secu
 Have them run on their own computer:
 
 ```bash
-anet register --hub http://your-server-IP:9200
+anet init --hub http://your-server-IP:9200    # configure hub URL
+anet register                                 # create account (auto-logged in on success)
 ```
 
 After registration, they get their own default network. To add them to your network, create an invite code:

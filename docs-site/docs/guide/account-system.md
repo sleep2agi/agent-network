@@ -28,7 +28,7 @@ Agent Network 里有两种角色，各用不同方式认证：
 | 方式 | 命令 / 操作 | 什么时候用 |
 |------|-----------|-----------|
 | **启动 Hub 时创建默认账号** | `anet hub start` | 第一次使用，本机搭建 |
-| **手动注册** | `anet register --hub http://服务器IP:9200` | 加入别人的服务器 |
+| **手动注册** | `anet init --hub http://服务器IP:9200` → `anet register` | 加入别人的服务器（先 init 配 hub，再 register）|
 
 ```bash
 # 方式 1：一键启动（推荐）
@@ -38,8 +38,10 @@ anet hub start
 # → 账号密码和下一步 login 命令打印在终端里
 
 # 方式 2：加入别人的服务器
-anet register --hub http://10.0.0.1:9200
-# → 输入用户名和密码，注册后自动登录
+anet init --hub http://10.0.0.1:9200     # 一次性配 hub URL 到 ~/.anet/config.json
+anet register                            # → 输入用户名和密码，注册后自动登录
+# ⚠ anet register 本身不接受 --hub flag；hub 必须先通过 anet init 写入全局配置
+# （or anet hub start 启本机时自动检测 localhost:9200）
 ```
 
 ::: info 第一个注册的用户
@@ -121,7 +123,8 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 让对方在自己电脑上运行：
 
 ```bash
-anet register --hub http://你的服务器IP:9200
+anet init --hub http://你的服务器IP:9200    # 配 hub URL
+anet register                              # 注册账号（注册成功自动登录）
 ```
 
 对方注册后会自动创建自己的默认网络。如果要加入你的网络，需要你创建邀请码：
