@@ -180,7 +180,8 @@ Note:
 
 ```bash
 # Agent started via anet
-anet logs coder-1
+anet logs coder-1                # recent slice
+anet logs coder-1 --follow       # live tail (like `tail -f`)
 
 # Agent started via npx: check terminal output directly
 

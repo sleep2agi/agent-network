@@ -180,7 +180,8 @@ curl -H "Authorization: Bearer $MINIMAX_API_KEY" \
 
 ```bash
 # anet 启动的 Agent
-anet logs 代码1号
+anet logs 代码1号                # 最近一段
+anet logs 代码1号 --follow       # 实时 tail（类似 tail -f）
 
 # npx 启动的 Agent：直接看终端输出
 
