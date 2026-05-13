@@ -1543,6 +1543,67 @@ curl -X POST http://localhost:9200/api/networks/join \
 
 ---
 
+## Tmux 调试端点（opt-in）
+
+::: warning 默认关闭
+仅在 `COMMHUB_ENABLE_TMUX=1` 启动 hub 时启用（[`index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13)）。**默认全部返回 404 `tmux disabled`**。启用后还需 (a) 调用方 IP 在 `COMMHUB_TMUX_ALLOW` 允许范围（默认仅 localhost）+ (b) `users.role='admin'` system-admin auth。设计意图：让 hub 主机上的 agent tmux session 暴露给同机的 dev / dashboard 调试，**绝不要在公网开**。
+:::
+
+### GET /api/tmux/:name
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L884)
+
+抓取指定 tmux session 当前 pane 末尾 N 行输出（`tmux capture-pane -t <name> -p` 包装）。
+
+```bash
+curl "http://localhost:9200/api/tmux/anet-node-代码1号?lines=50" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+**查询参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `lines` | 末尾行数（默认 30） |
+
+**响应**（成功）：
+
+```json
+{ "ok": true, "tmux_name": "anet-node-代码1号", "lines": 50, "output": "...captured pane content..." }
+```
+
+### POST /api/tmux/:name/send
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L908)
+
+往指定 tmux session 注入按键（`tmux send-keys -t <name> "<text>" Enter` 包装）。
+
+```bash
+curl -X POST "http://localhost:9200/api/tmux/anet-node-代码1号/send" \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "/help", "enter": true}'
+```
+
+**请求体**：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|:----:|------|
+| `text` | string | &check; | 要注入的按键内容 |
+| `enter` | boolean | | 是否末尾追加 Enter 键（默认 `true`） |
+
+**4xx / 4xx 都共用**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 404 | `tmux disabled` | 未设 `COMMHUB_ENABLE_TMUX=1` |
+| 403 | `tmux access denied from this ip` | 调用方 IP 不在 `COMMHUB_TMUX_ALLOW` 范围（默认仅 localhost） |
+| 401 / 403 | 需 admin auth（同 [GET /api/server-logs](#get-api-server-logs)） |
+| 400 | `text is required` (POST only) | 请求体缺 `text` 字段 |
+| 400 | `<tmux stderr>` | `tmux` 子进程非 0 退出（如 session 不存在） |
+
+---
+
 ## Legacy 端点（v0.6 时代，OSS 后不再演进）
 
 ::: warning Apache 2.0 OSS 后不再依赖

@@ -1543,6 +1543,67 @@ Errors usually return this shape:
 
 ---
 
+## Tmux Debug Endpoints (opt-in)
+
+::: warning Off by default
+Only available when the hub is started with `COMMHUB_ENABLE_TMUX=1` ([`index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13)). **Otherwise all paths return 404 `tmux disabled`**. Even when enabled, you still need (a) the caller IP to be inside `COMMHUB_TMUX_ALLOW` (defaults to localhost only) and (b) `users.role = 'admin'` system-admin auth. Intended use: expose tmux sessions running agents on the hub machine to local devs / Dashboard. **Never expose on the public internet.**
+:::
+
+### GET /api/tmux/:name
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L884)
+
+Capture the tail of a tmux session's current pane (`tmux capture-pane -t <name> -p` wrapper).
+
+```bash
+curl "http://localhost:9200/api/tmux/anet-node-coder-1?lines=50" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+**Query parameters**:
+
+| Parameter | Description |
+|------|------|
+| `lines` | Tail line count (default 30) |
+
+**Response** (success):
+
+```json
+{ "ok": true, "tmux_name": "anet-node-coder-1", "lines": 50, "output": "...captured pane content..." }
+```
+
+### POST /api/tmux/:name/send
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L908)
+
+Send keys into a tmux session (`tmux send-keys -t <name> "<text>" Enter` wrapper).
+
+```bash
+curl -X POST "http://localhost:9200/api/tmux/anet-node-coder-1/send" \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "/help", "enter": true}'
+```
+
+**Request body**:
+
+| Field | Type | Required | Description |
+|------|------|:----:|------|
+| `text` | string | &check; | Keys to send |
+| `enter` | boolean | | Append Enter (default `true`) |
+
+**4xx errors (shared by both endpoints)**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 404 | `tmux disabled` | `COMMHUB_ENABLE_TMUX=1` not set |
+| 403 | `tmux access denied from this ip` | Caller IP outside `COMMHUB_TMUX_ALLOW` (defaults to localhost only) |
+| 401 / 403 | Admin auth required (same gate as [GET /api/server-logs](#get-api-server-logs)) |
+| 400 | `text is required` (POST only) | Body missing `text` |
+| 400 | `<tmux stderr>` | `tmux` subprocess exited non-zero (e.g. session not found) |
+
+---
+
 ## Legacy Endpoints (v0.6 era — frozen in OSS)
 
 ::: warning Not required since Apache 2.0
