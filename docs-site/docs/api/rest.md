@@ -998,15 +998,18 @@ curl -N -H "Authorization: Bearer ntok_xxx" http://localhost:9200/events/代码1
 curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 ```
 
-**推送的事件类型**：
+**推送的事件类型**（verify `grep pushEvent server/src/tools.ts`）：
 
 | 事件 | 触发条件 | 数据 |
 |------|---------|------|
-| `new_task` | 收到新任务 | `{inbox_count, priority, from}` |
-| `new_message` | 收到新消息 | `{message, from, message_id}` |
-| `new_reply` | 收到回复 | `{from, message_id, in_reply_to, status}` |
-| `broadcast` | 收到广播 | `{content, from}` |
-| `heartbeat` | 服务端心跳 | `{time}` |
+| `new_task` | 收到新任务（`send_task` / `retry_task` / `reassign_task` / REST `POST /api/task`） | `{inbox_count, priority, from}` |
+| `new_message` | 收到新消息（`send_message`） | `{from, message_id}` |
+| `new_reply` | 收到 reply（`send_reply`） | `{from, message_id, in_reply_to, status}` |
+| `broadcast` | 收到广播（`broadcast` 工具） | `{inbox_count}` |
+| `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts:285/645`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L285)) | `{parent_task_id, child_task_id, child_alias}` |
+| `heartbeat` | 服务端定时心跳 | `{time}` |
+
+> 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts:570 + 910`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L570) 实际 payload 只有上表中字段。
 
 **示例 SSE 数据流**：
 

@@ -998,15 +998,18 @@ curl -N -H "Authorization: Bearer ntok_xxx" http://localhost:9200/events/coder-1
 curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 ```
 
-**Pushed event types**:
+**Pushed event types** (verify `grep pushEvent server/src/tools.ts`):
 
 | Event | Trigger | Data |
 |------|---------|------|
-| `new_task` | New task received | `{inbox_count, priority, from}` |
-| `new_message` | New message received | `{message, from, message_id}` |
-| `new_reply` | Reply received | `{from, message_id, in_reply_to, status}` |
-| `broadcast` | Broadcast received | `{content, from}` |
-| `heartbeat` | Server heartbeat | `{time}` |
+| `new_task` | New task received (`send_task` / `retry_task` / `reassign_task` / REST `POST /api/task`) | `{inbox_count, priority, from}` |
+| `new_message` | New chat message (`send_message`) | `{from, message_id}` |
+| `new_reply` | Reply to a task (`send_reply`) | `{from, message_id, in_reply_to, status}` |
+| `broadcast` | Broadcast received (`broadcast` tool) | `{inbox_count}` |
+| `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts:285/645`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L285)) | `{parent_task_id, child_task_id, child_alias}` |
+| `heartbeat` | Periodic server heartbeat | `{time}` |
+
+> Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts:570 + 910`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L570) for the actual payloads.
 
 **Example SSE data stream**:
 
