@@ -205,17 +205,23 @@ docker compose logs -f server
 ### 16. How do I add an agent to another network?
 
 ```bash
-# Option 1: Invite code
+# Option 1: Invite code (recommended)
 anet network use other-network
 anet network invite --role member
 # Share the invite code with the recipient
-# Recipient runs: anet network join inv_xxx
+# Recipient runs (on their own machine): anet network join inv_xxx
 
-# Option 2: Create a node config in the target network and copy it to the agent machine
+# Option 2: Register the node locally on the target machine (cross-machine, **do NOT copy config.json**)
+# On the target machine:
+anet login --hub http://<hub-host>:9200 --username admin --password ...
 anet network use other-network
-anet node create other-agent
-# Provide .anet/nodes/other-agent/config.json to the agent machine
+anet node create other-agent                   # CLI registers with the hub and gets its own ntok_
+anet node start other-agent
 ```
+
+::: warning Do not copy `.anet/nodes/<name>/config.json` across machines
+The `node_id` inside the config is a unique ID the hub assigns at registration. Copying it makes two machines claim the same node and breaks SSE routing. See [networks — cross-machine deployment](/en/concepts/networks#cross-machine-deployment).
+:::
 
 ### 17. How do I view/manage network members?
 

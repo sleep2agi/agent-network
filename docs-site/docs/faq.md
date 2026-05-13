@@ -205,17 +205,23 @@ docker compose logs -f server
 ### 16. 怎么把 Agent 加入另一个网络？
 
 ```bash
-# 方法一：邀请码
+# 方法一：邀请码加入（推荐）
 anet network use other-network
 anet network invite --role member
 # 把邀请码给对方
-# 对方执行：anet network join inv_xxx
+# 对方在自己机器上执行：anet network join inv_xxx
 
-# 方法二：在目标网络创建节点配置，复制给 Agent 运行机器
+# 方法二：在目标机器本地注册 node（跨机部署，**不要 copy config.json**）
+# 在目标机器上：
+anet login --hub http://<hub-host>:9200 --username admin --password ...
 anet network use other-network
-anet node create other-agent
-# 把 .anet/nodes/other-agent/config.json 给 Agent 使用
+anet node create other-agent                   # CLI 跟 hub 注册 + 拿独立 ntok_
+anet node start other-agent
 ```
+
+::: warning 不要跨机 copy `.anet/nodes/<name>/config.json`
+config 里的 `node_id` 是 hub 注册时分配的唯一 ID, 复制到另一台机器会让两台机器同时报告同一个 node, SSE 路由会乱. 详见 [networks — 跨机器部署](/concepts/networks#跨机器部署).
+:::
 
 ### 17. 怎么查看/管理网络成员？
 
