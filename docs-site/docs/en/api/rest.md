@@ -159,9 +159,15 @@ curl http://localhost:9200/api/auth/me \
     "username": "alice",
     "display_name": "Alice",
     "role": "admin"
-  }
+  },
+  "networks": [
+    { "network_id": "net_xxx", "network_name": "default", "role": "owner" },
+    { "network_id": "net_yyy", "network_name": "team-prod", "role": "member" }
+  ]
 }
 ```
+
+`networks` lists every network the current user belongs to along with their role; `anet whoami` uses this list (combined with the `network_id` in `config.json`) to render the "← current" marker.
 
 ---
 

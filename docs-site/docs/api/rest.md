@@ -159,9 +159,15 @@ curl http://localhost:9200/api/auth/me \
     "username": "alice",
     "display_name": "Alice",
     "role": "admin"
-  }
+  },
+  "networks": [
+    { "network_id": "net_xxx", "network_name": "default", "role": "owner" },
+    { "network_id": "net_yyy", "network_name": "team-prod", "role": "member" }
+  ]
 }
 ```
+
+`networks` 数组列出当前用户所属的所有 network 及其 role；`anet whoami` 用它显示「← current」标记（结合 `config.json` 里的 `network_id` 字段）。
 
 ---
 
