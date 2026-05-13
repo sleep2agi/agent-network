@@ -1,6 +1,6 @@
 # PR Review Room Demo
 
-`anet demo pr-review` is a built-in demo in v0.9: the CLI spawns 4 ephemeral agents — 3 parallel reviewers (**security / performance / style**) plus 1 final judge — and writes a markdown PR review with an LGTM / Request Changes / Comment verdict that you can paste straight back to a GitHub PR.
+`anet demo pr-review` is a built-in demo in the anet CLI ([PR #41](https://github.com/sleep2agi/agent-network/pull/41) merged 2026-05-13; expected to ship on the `latest` tag with CLI v2.1.8). The CLI spawns 4 ephemeral agents — 3 parallel reviewers (**security / performance / style**) plus 1 final judge — and writes a markdown PR review with an LGTM / Request Changes / Comment verdict that you can paste straight back to a GitHub PR.
 
 Full design contract: [`docs/demos/pr-review-room-proposal.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/demos/pr-review-room-proposal.md).
 

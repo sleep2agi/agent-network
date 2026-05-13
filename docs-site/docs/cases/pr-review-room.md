@@ -1,6 +1,6 @@
 # 代码 PR 审查室 Demo
 
-`anet demo pr-review` 是 v0.9 内置 demo：CLI 创建 4 个临时 agent，3 个并行 reviewer（**安全 / 性能 / 风格**）+ 1 个终审 judge，跑完输出一份带 LGTM / Request Changes / Comment 决议的 markdown PR review 评论，可直接贴回 GitHub PR。
+`anet demo pr-review` 是 anet CLI 内置 demo（[PR #41](https://github.com/sleep2agi/agent-network/pull/41) 2026-05-13 merge，预计跟 CLI v2.1.8 ship `latest`）：CLI 创建 4 个临时 agent，3 个并行 reviewer（**安全 / 性能 / 风格**）+ 1 个终审 judge，跑完输出一份带 LGTM / Request Changes / Comment 决议的 markdown PR review 评论，可直接贴回 GitHub PR。
 
 完整设计契约：[`docs/demos/pr-review-room-proposal.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/demos/pr-review-room-proposal.md)。
 
@@ -221,11 +221,11 @@ anet demo pr-review --diff <file> --no-network
 
 没登录。运行 `anet login` 拿 user token。
 
-**❌ 需要 --diff <file> / --ref <ref> / --pr <github-url> 之一**
+**❌ 需要 `--diff <file>` / `--ref <ref>` / `--pr <github-url>` 之一**
 
 三种 diff 入口必须给一种。`--diff` 是最稳的（本地文件不依赖网络 / gh CLI），其次 `--ref`，最后 `--pr`。
 
-**❌ --diff 文件不存在: \<path\>**
+**❌ --diff 文件不存在: &lt;path&gt;**
 
 `--diff` 路径错了。检查是否相对路径 + 当前工作目录。仓库自带样例在 `tests/test28-pr-review-room/samples/`。
 
@@ -261,11 +261,11 @@ URL 格式必须是 `https://github.com/<owner>/<repo>/pull/<N>`。注意不是 
 
 hub 返回非 OK。检查 `anet hub status`；或 `--no-network` 退到 default network 跑。
 
-**❌ tmux \<alias\>: ...**
+**❌ tmux &lt;alias&gt;: ...**
 
 agent tmux session 没起来。检查 `tmux ls` 看是否之前有同名 session 残留。极端情况 `tmux kill-server` 后重跑。
 
-**❌ timeout waiting for \<alias\> reply**
+**❌ timeout waiting for &lt;alias&gt; reply**
 
 某个 reviewer 或 judge 超过 `--step-timeout`（默认 180s）没回 reply。常见原因：MiniMax 配额耗尽 / 模型挂了 / 大 diff 推理慢。`--step-timeout 360` 加大超时；或 `anet logs <alias>` 看 SDK 报错。
 
