@@ -224,7 +224,7 @@ anet hub dashboard
 | 密码是什么？ | 你自己设置的 |
 | Dashboard 和 CLI 是同一个账号吗？ | 是的，完全相同 |
 | 怎么改密码？ | 终端运行 `anet passwd` |
-| 怎么给别人开账号？ | 别人在自己电脑上运行 `anet register --hub http://你的IP:9200` |
+| 怎么给别人开账号？ | 别人在自己电脑上先 `anet init --hub http://你的IP:9200` 再 `anet register`（`anet register` 不接受 `--hub`，须先 init） |
 
 ### 2. AI 模型 API Key（去哪拿）
 

@@ -223,7 +223,7 @@ This is your **Agent Network account**, used for both the CLI and the Dashboard.
 | What is the password? | The one you set yourself |
 | Are Dashboard and CLI the same account? | Yes, exactly the same |
 | How to change password? | Run `anet passwd` in your terminal |
-| How to create accounts for others? | They run `anet register --hub http://YOUR_IP:9200` on their own machine |
+| How to create accounts for others? | On their own machine, run `anet init --hub http://YOUR_IP:9200` then `anet register` (`anet register` does not accept `--hub` — `init` must run first) |
 
 ### 2. AI Model API Keys (Where to Get Them)
 
