@@ -1150,9 +1150,23 @@ Model guide (国产 Anthropic 兼容 + Claude + 自定义):
       opts._envs.push("ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic");
     }
 
+    // Per-vendor signup URL hint (issue #48 follow-up). Values must stay in
+    // sync with PROVIDER_CHOICES signupUrl field (cli.ts L1264+); follow-up
+    // issue #49 will derive both from a single source of truth.
+    const vendorSignupUrls: Record<string, string> = {
+      "MiniMax-M2.7":          "https://platform.minimaxi.com",
+      "DeepSeek-V3":           "https://platform.deepseek.com",
+      "GLM-5.1":               "https://open.bigmodel.cn",
+      "Intern-S1-Pro":         "https://chat.intern-ai.org.cn",
+      "kimi-k2-0905-preview":  "https://platform.moonshot.cn",
+      "MiMo-V2.5":             "https://platform.xiaomimimo.com",
+    };
+    const hintUrl = vendorSignupUrls[opts.model];
+
     console.log(`
 API key:
-  Paste the provider key for the selected model.
+  Paste the provider key for the selected model.${hintUrl ? `
+  📋 注册 / 拿 ${opts.model} API Key: ${hintUrl}` : ""}
   - MiniMax / DeepSeek / GLM / 书生 / Kimi / 小米 MiMo: token from the vendor's API Keys page.
   - Anthropic Claude: use an Anthropic Console API key.
   - Custom URL: use the key/token for that Anthropic-compatible provider (e.g. OpenRouter).
