@@ -310,7 +310,7 @@ graph LR
 | Runtime | AI Engine | Use Case | Models |
 |---------|---------|---------|------|
 | `claude-code-cli` | spawn local `claude` process | Reuse Claude subscription / interactive tool use | Claude Sonnet/Opus (subscription) |
-| `claude-agent-sdk` | Anthropic Claude Agent SDK | Programmatic Anthropic-compatible API | Claude / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo (see [Multi-model](/en/guide/multi-model)) |
+| `claude-agent-sdk` | Anthropic Claude Agent SDK | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (see [Multi-model](/en/guide/multi-model)) |
 | `codex-sdk` | OpenAI Codex SDK | Code generation, tool use | OpenAI Codex |
 
 ### Task Processing Flow

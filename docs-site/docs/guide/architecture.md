@@ -310,7 +310,7 @@ graph LR
 | Runtime | AI 引擎 | 适用场景 | 模型 |
 |---------|---------|---------|------|
 | `claude-code-cli` | spawn 本机 `claude` 进程 | 复用 Claude 订阅 / 终端交互式工具调用 | Claude Sonnet/Opus（订阅） |
-| `claude-agent-sdk` | Anthropic Claude Agent SDK | 编程式调 Anthropic 兼容 API | Claude / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo（详见 [多模型配置](/guide/multi-model)） |
+| `claude-agent-sdk` | Anthropic Claude Agent SDK | 编程式调任何 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（详见 [多模型配置](/guide/multi-model)） |
 | `codex-sdk` | OpenAI Codex SDK | 代码生成、工具调用 | OpenAI Codex |
 
 ### 任务处理流程
