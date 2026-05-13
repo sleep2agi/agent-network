@@ -662,12 +662,51 @@ The `artifacts` field is a JSON string (agent-defined schema); consumers must `J
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1025)
 
-Get task event log.
+Get the task-state-change audit log (task lifecycle). Every time a task's `status` changes the server inserts one row — this is the primary data source for "where is this task stuck / who changed the status".
 
 ```bash
-curl "http://localhost:9200/api/task_events?task_id=uuid-xxx" \
+curl "http://localhost:9200/api/task_events?task_id=t_a1b2c3d4" \
   -H "Authorization: Bearer ntok_xxx"
 ```
+
+**Query parameters**:
+
+| Parameter | Description |
+|------|------|
+| `task_id` | Filter to a specific task (otherwise returns recent events across all tasks) |
+| `network_id` | Filter by network |
+| `limit` | Max items (default 50, max 500) |
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "events": [
+    {
+      "id": 1234,
+      "task_id": "t_a1b2c3d4",
+      "from_status": "delivered",
+      "to_status": "running",
+      "actor": "node_abc123",
+      "detail": null,
+      "created_at": "2026-04-12 10:00:02"
+    },
+    {
+      "id": 1235,
+      "task_id": "t_a1b2c3d4",
+      "from_status": "running",
+      "to_status": "replied",
+      "actor": "node_abc123",
+      "detail": "completed in 12s",
+      "created_at": "2026-04-12 10:00:14"
+    }
+  ],
+  "count": 2
+}
+```
+
+Events are sorted `created_at DESC` (newest first). `actor` is the originator of the state change (agent `node_id` / `'hub'` / `'system'`); `from_status` may be `null` for the initial `created` event. See the [Task lifecycle](/en/concepts/task-lifecycle#status-reference) state machine for the full status set.
 
 ---
 
@@ -758,12 +797,47 @@ The `audit_log` schema is in [`agent-network/bin/cli.ts:2171`](https://github.co
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L649)
 
-Get all user list (system admin only).
+Get the list of all users (**system admin** only — i.e. `users.role = 'admin'`, distinct from per-network `owner / admin / member / viewer` roles).
 
 ```bash
 curl http://localhost:9200/api/users \
   -H "Authorization: Bearer utok_xxx"
 ```
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "users": [
+    {
+      "user_id": "u_abc123",
+      "username": "alice",
+      "display_name": "Alice",
+      "email": "alice@example.com",
+      "role": "admin",
+      "created_at": "2026-04-12 10:00:00"
+    },
+    {
+      "user_id": "u_def456",
+      "username": "bob",
+      "display_name": null,
+      "email": null,
+      "role": "user",
+      "created_at": "2026-04-13 09:00:00"
+    }
+  ]
+}
+```
+
+**4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 401 | `auth required` | Missing `Authorization` header |
+| 403 | `admin required` | Caller is not `users.role='admin'` (only the first registered user is admin by default) |
+
+The response **does not include** `password_hash` (the SELECT explicitly enumerates 6 columns). Sorted by `created_at` ascending (the bootstrap admin appears first).
 
 ---
 

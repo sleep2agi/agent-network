@@ -662,12 +662,51 @@ curl "http://localhost:9200/api/completions?since=2026-04-12T00:00:00Z" \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1025)
 
-获取任务事件日志。
+获取任务状态变更日志（task 生命周期审计）。每次 task `status` 变化 server 都会插一行，是排查「任务卡住 / 谁改了状态」的主要数据源。
 
 ```bash
-curl "http://localhost:9200/api/task_events?task_id=uuid-xxx" \
+curl "http://localhost:9200/api/task_events?task_id=t_a1b2c3d4" \
   -H "Authorization: Bearer ntok_xxx"
 ```
+
+**查询参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `task_id` | 按特定 task 过滤（不传则返回最近所有 task 的事件） |
+| `network_id` | 按网络过滤 |
+| `limit` | 最大条数（默认 50，最大 500） |
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "events": [
+    {
+      "id": 1234,
+      "task_id": "t_a1b2c3d4",
+      "from_status": "delivered",
+      "to_status": "running",
+      "actor": "node_abc123",
+      "detail": null,
+      "created_at": "2026-04-12 10:00:02"
+    },
+    {
+      "id": 1235,
+      "task_id": "t_a1b2c3d4",
+      "from_status": "running",
+      "to_status": "replied",
+      "actor": "node_abc123",
+      "detail": "completed in 12s",
+      "created_at": "2026-04-12 10:00:14"
+    }
+  ],
+  "count": 2
+}
+```
+
+事件按 `created_at DESC` 排序（最新的在最前）。`actor` 是触发状态变更的发起方（agent `node_id` / `'hub'` / `'system'` 等），`from_status` 在初始 `created` 事件可能为 `null`。完整状态机见 [Task 生命周期](/concepts/task-lifecycle#状态说明)。
 
 ---
 
@@ -758,12 +797,47 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L649)
 
-获取所有用户列表（仅系统 admin）。
+获取所有用户列表（仅**系统 admin** —— 即 `users.role = 'admin'`，跟网络级别的 `owner / admin / member / viewer` 角色不同）。
 
 ```bash
 curl http://localhost:9200/api/users \
   -H "Authorization: Bearer utok_xxx"
 ```
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "users": [
+    {
+      "user_id": "u_abc123",
+      "username": "alice",
+      "display_name": "Alice",
+      "email": "alice@example.com",
+      "role": "admin",
+      "created_at": "2026-04-12 10:00:00"
+    },
+    {
+      "user_id": "u_def456",
+      "username": "bob",
+      "display_name": null,
+      "email": null,
+      "role": "user",
+      "created_at": "2026-04-13 09:00:00"
+    }
+  ]
+}
+```
+
+**4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 401 | `auth required` | 缺 `Authorization` header |
+| 403 | `admin required` | 调用者不是 `users.role='admin'`（仅首位注册用户默认 admin） |
+
+响应**不含** `password_hash` 字段（SELECT 显式 enumerate 6 列）。按 `created_at` 升序排（首位注册的 admin 在最前）。
 
 ---
 
