@@ -111,10 +111,15 @@ anet network join <code>                         # 用邀请码加入
 
 **怎么变成 admin**：
 ```bash
-# owner 调
+# 方式 1：owner 创建邀请码（推荐）—— 对方用邀请码加入直接拿到 admin role
 anet network invite --role admin --uses 1
-# 或现有 member 升级
-anet network member set <username> --role admin
+
+# 方式 2：现有 member 升级 —— 走 REST（CLI promote 子命令排在 v0.9+）
+curl -X PUT http://localhost:9200/api/networks/<net_id>/members/<user_id> \
+  -H "Authorization: Bearer <owner_utok>" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+# 详见 [API — PUT members](/api/rest#put-api-networks-id-members-user-id)
 ```
 
 ---
@@ -135,7 +140,7 @@ anet network member set <username> --role admin
 
 **怎么变成 owner**：
 - 创建 network 时自动是 owner：`anet network create <name>`
-- 或现有 owner 升你：`anet network member set <username> --role owner`
+- ⚠ **不能通过 REST `PUT /members/:user_id` promote 到 owner** —— server 拒绝（返回 `cannot assign owner role` 400，详见 [API — PUT members 4xx](/api/rest#put-api-networks-id-members-user-id)）。owner 角色只能通过创建 network 获得
 
 ---
 
@@ -173,19 +178,28 @@ CLI 不需要你输任何 role 信息 —— `anet login` 时 hub 把 role 写�
 
 ## 升降级一个成员的角色
 
+::: warning v0.8.2 还没有 `promote` / `demote` CLI 子命令
+完整 CLI 入口排在 v0.9+。目前列成员可以走 CLI，**改角色 / 移除成员一律走 REST**（详见 [API — networks members](/api/rest#get-api-networks-id-members)）。
+:::
+
 ```bash
-# 列出当前 network 所有成员 + role
-anet network member ls
+# 1. 列出当前 network 所有成员 + role（CLI，已实装）
+anet network members
 
-# 把 bob 升成 admin（你必须是 admin/owner）
-anet network member set bob --role admin
+# 2. 改 bob 的角色为 admin（REST，owner only）
+#    role 字段不能传 'owner' —— 见 PUT members 4xx 表
+NET=$(anet whoami | grep -oE 'net_[a-z0-9]+')
+curl -X PUT "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
+  -H "Authorization: Bearer $(cat ~/.anet/config.json | jq -r .token)" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
 
-# 把 bob 降回 member
-anet network member set bob --role member
-
-# 移除 bob 出 network
-anet network member rm bob
+# 3. 移除 bob（REST，owner/admin）
+curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
+  -H "Authorization: Bearer $(cat ~/.anet/config.json | jq -r .token)"
 ```
+
+完整 endpoint 文档：[PUT members](/api/rest#put-api-networks-id-members-user-id) / [DELETE members](/api/rest#delete-api-networks-id-members-user-id)。
 
 ---
 
@@ -223,7 +237,7 @@ A：对，连派 task 都不行。如果想"能看 + 偶尔派"，给 member。
 
 ## 下一步
 
-- **CLI 操作 role**：[CLI 命令 — network 管理](/guide/cli)（`anet network members ls / promote / demote`）
+- **CLI 操作 role**：[CLI 命令 — network 管理](/guide/cli)（`anet network members` 列成员；改角色走 REST [PUT members](/api/rest#put-api-networks-id-members-user-id)，CLI promote/demote 排在 v0.9+）
 - **Token 体系联动**：[Token 概念](/concepts/tokens) — 4 个 role 跟 utok_/ntok_ 关系
 - **完整安全模型**：[安全设计](/concepts/security)
 - **升级 v0.7 → v0.8 怎么影响 role**：[升级指南](/guide/upgrade#v0-7-v0-8-升级注意-最新)

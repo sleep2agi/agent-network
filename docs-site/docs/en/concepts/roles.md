@@ -83,8 +83,15 @@ For team leads, trusted operators, anyone who needs to manage members or read au
 
 Become an admin:
 ```bash
+# Option 1 (recommended): owner issues an admin invite — recipient joins directly with admin role
 anet network invite --role admin --uses 1
-anet network member set <username> --role admin
+
+# Option 2: promote an existing member via REST (no CLI promote subcommand yet — queued for v0.9+)
+curl -X PUT http://localhost:9200/api/networks/<net_id>/members/<user_id> \
+  -H "Authorization: Bearer <owner_utok>" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+# See [API — PUT members](/en/api/rest#put-api-networks-id-members-user-id)
 ```
 
 ### owner
@@ -96,7 +103,7 @@ For network creator. Fully privileged. **Every network must have at least one ow
 
 Become an owner:
 - Create a network: `anet network create <name>` (creator is auto-owner)
-- An existing owner promotes you: `anet network member set <username> --role owner`
+- ⚠ **You cannot be promoted to owner via REST `PUT /members/:user_id`** — the server rejects it with `cannot assign owner role` (400). See [API — PUT members 4xx](/en/api/rest#put-api-networks-id-members-user-id). Owner is acquired only by creating the network.
 
 ---
 
@@ -132,12 +139,28 @@ The CLI never asks you for role info — `anet login` makes the hub embed it in 
 
 ## Promote / demote a member
 
+::: warning No `promote` / `demote` CLI subcommand yet
+The full CLI entry is queued for v0.9+. Today you can list members via the CLI, but **role changes / member removal go through REST** (see [API — networks members](/en/api/rest#get-api-networks-id-members)).
+:::
+
 ```bash
-anet network member ls                                 # list members + roles
-anet network member set bob --role admin              # promote
-anet network member set bob --role member             # demote
-anet network member rm bob                             # remove
+# 1. List all members of the current network with their roles (CLI, shipped)
+anet network members
+
+# 2. Change bob's role to admin (REST, owner only)
+#    Note: the `role` field cannot be 'owner' — see PUT members 4xx table.
+NET=$(anet whoami | grep -oE 'net_[a-z0-9]+')
+curl -X PUT "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
+  -H "Authorization: Bearer $(cat ~/.anet/config.json | jq -r .token)" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+
+# 3. Remove bob (REST, owner/admin)
+curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
+  -H "Authorization: Bearer $(cat ~/.anet/config.json | jq -r .token)"
 ```
+
+Full endpoint docs: [PUT members](/en/api/rest#put-api-networks-id-members-user-id) / [DELETE members](/en/api/rest#delete-api-networks-id-members-user-id).
 
 ---
 
@@ -172,7 +195,7 @@ The role system is the only auth basis going forward.
 
 ## Next steps
 
-- **CLI ops for roles**: [CLI commands — network management](/en/guide/cli) (`anet network members ls / promote / demote`)
+- **CLI ops for roles**: [CLI commands — network management](/en/guide/cli) (`anet network members` lists members; role changes go through REST [PUT members](/en/api/rest#put-api-networks-id-members-user-id) — the CLI `promote` / `demote` subcommands are queued for v0.9+)
 - **Token system mapping**: [Tokens](/en/concepts/tokens) — how the 4 roles relate to `utok_` / `ntok_`
 - **Full security model**: [Security design](/en/concepts/security)
 - **How v0.7 → v0.8 upgrade affects roles**: [Upgrade guide](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest)
