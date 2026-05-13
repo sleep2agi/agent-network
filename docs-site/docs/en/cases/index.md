@@ -7,21 +7,23 @@ This is the runnable Agent Network example library. The site only keeps cases wi
 | Example | Run With | Agents | Verification | Highlight |
 |---------|----------|:------:|--------------|-----------|
 | [Debate Demo](/en/cases/debate) | `anet demo debate` | 6 | Docker test27 checks CLI help/list and docs build | Built-in 9-step debate orchestration with an isolated network |
+| [PR Review Room](/en/cases/pr-review-room) | `anet demo pr-review` | 4 | Docker test28 smoke + assertions.json structural checks | 3 reviewers fan-out in parallel + barrier + judge merge; outputs a markdown PR comment ready for GitHub |
 | [Hello World](/en/cases/hello-world) | `demos/hello-world` | 2 | Docker Compose assets + Docker test27 docs checks | Simplest two-agent conversation |
 | [Translation Pipeline](/en/cases/translation-pipeline) | `demos/translation-pipeline` | 3 | Docker Compose assets + Docker test27 docs checks | CN to EN to JP chain translation |
 | [Telegram Squad](/en/cases/telegram-squad) | `demos/codex-telegram-squad` | 11 | Docker test23/test24 communication flow + test27 docs checks | 1 commander + 10 workers, Telegram/Dashboard |
 | [Telegram bind for existing node](/en/cases/telegram-bind-claude-code-cli) | `anet channel add telegram <node> ...` | 1 (channel attached to an existing node) | Manual walkthrough (`claude-code-cli` runtime; RFC-002 Phase 1 queued) | DM the bot → full Claude Code capabilities (bash / file edits / MCP) |
 
-::: info Built-in demos not yet in this table (cases doc pending, [refs #25](https://github.com/sleep2agi/agent-network/issues/25))
+::: info Built-in demos not yet in this table (cases doc pending)
 - `anet demo socialmedia` — 4-agent social-media content factory (topic / copy / image / reviewer), ~3 min
-- `anet demo pr-review` — 4-agent PR review room (security / perf / style reviewers in parallel + judge), ~2 min (shipped via PR #41)
 
 Run `anet demo <name> --help` for usage; full case write-ups coming soon.
 :::
 
 ## Removed Examples
 
-`Code Review`, `Idiom Chain Game`, and `Mixed Model Collab` were removed from navigation and generated pages. They only had manual instructions and no independent Docker demo or stable automated verification. They can return after matching `demos/` assets and tests exist.
+`Idiom Chain Game` and `Mixed Model Collab` were removed from navigation and generated pages. They only had manual instructions and no independent Docker demo or stable automated verification. They can return after matching `demos/` assets and tests exist.
+
+> `Code Review` was restored on 2026-05-13 as [PR Review Room](/en/cases/pr-review-room) — it is now a 4-agent CLI demo with full Docker test coverage.
 
 ::: tip Before running examples
 Complete the [Getting Started guide](/en/guide/getting-started) and prepare the model API keys required by each example. Docker examples should be run from the repository root or their `demos/` subdirectory.
