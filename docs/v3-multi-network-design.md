@@ -162,6 +162,12 @@ GET  /api/v3/networks/:id/stats
 
 ## PostgreSQL 支持
 
+> **⚠️ 已搁置（2026-04-11 后路线变更）**
+>
+> 自 v0.8 产品方向转 "纯本地 + SQLite only + 不做官方托管"，PostgreSQL 支持已从 v0.8/v0.9 路线图移除。`db-adapter.ts` 接口和 `PgAdapter` 代码保留但不在 maintained roadmap 上。
+>
+> 详见 [v3-postgresql-design.md](v3-postgresql-design.md) 顶部 banner（"当前请用默认 SQLite"）。**下文保留为历史归档，描述当时的设计意图**。
+
 使用 adapter 模式:
 
 ```typescript
@@ -198,12 +204,12 @@ class PgAdapter implements DbAdapter { ... }
 4. 查询全部加网络过滤
 5. Dashboard 网络切换
 
-### V3.2: PostgreSQL (Sprint 3)
-1. DbAdapter 抽象层
-2. PostgreSQL adapter
-3. 迁移脚本
-4. Docker Compose (server + pg)
-5. 双数据库 E2E 测试
+### V3.2: PostgreSQL (Sprint 3) — ⚠️ 已搁置
+1. DbAdapter 抽象层 ✅ (v3-multi-network 接口落地，code 保留)
+2. PostgreSQL adapter ❌ 搁置（参 [v3-postgresql-design.md banner](v3-postgresql-design.md)）
+3. 迁移脚本 ❌
+4. Docker Compose (server + pg) ❌
+5. 双数据库 E2E 测试 ❌
 
 ### V3.3: 代码质量 (Sprint 4)
 1. 清理无用代码/文档
