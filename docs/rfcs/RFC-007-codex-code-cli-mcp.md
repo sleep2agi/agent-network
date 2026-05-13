@@ -321,7 +321,7 @@ export class CodexCliMcpRuntime {
 |---|---|---|
 | `prompt` | ✅ | 用户 / 派单消息原文 |
 | `cwd` | optional | 工作目录 (默认 agent-node 自身 cwd) |
-| `model` | optional | `gpt-5-codex` / `gpt-5.2` / `o3` / `o4-mini` 等 (profile 配置, ChatGPT auth 限制部分 model) |
+| `model` | optional | `gpt-5.5` (default, per Vincent §11 Q7 telegram 4148) / `gpt-5-codex` / `gpt-5.2` / `o3` / `o4-mini` 等 (profile 配置, ChatGPT auth 限制部分 model) |
 | `sandbox` | optional | `read-only` / `workspace-write` / `danger-full-access` (默认 `danger-full-access` per Vincent §6.5 4144 Option A) |
 | `approval-policy` | optional | `untrusted` / `on-failure` / `on-request` / `never` (默认 `never` per Vincent §6.5 4144 Option A) |
 | `profile` | optional | codex 自身 profile (`~/.codex/config.toml` 的 `[profiles.X]` 节) |
@@ -598,7 +598,7 @@ RFC-003 已 ship `commhub_report_progress` MCP method + `progress_events` SQLite
 ```json
 {
   "runtime": "codex-cli-mcp",
-  "model": "gpt-5-codex",
+  "model": "gpt-5.5",
   "flags": {
     "codex": {
       "approvalPolicy": "never",            // ← default (跟 anet autonomous teammate-mode 一致)
@@ -705,7 +705,7 @@ profile.flags.codex.approvalPolicy + sandbox 仍 override default:
 后续 prompt 加 codex-cli-mcp 特有问题 (default 标在 anet ecosystem autonomous 一致的值, conservative 选项仍 surface 给 dev-conscious 用户 opt-in):
 - approval-policy: `untrusted` / `on-failure` / `on-request` / `never` **(default)** — per Vincent §6.5 4144 Option A
 - sandbox: `read-only` / `workspace-write` / `danger-full-access` **(default)** — per Vincent §6.5 4144 Option A
-- model: gpt-5-codex (default for ChatGPT account) / gpt-5.2 / o3 / o4-mini / other (用户输入, ChatGPT auth 限部分 model)
+- model: `gpt-5.5` **(default per Vincent §11 Q7 telegram 4148)** / `gpt-5-codex` / `gpt-5.2` / `o3` / `o4-mini` / other (用户输入, ChatGPT auth 限部分 model)
 
 ### 7.2 cli.ts → agent-node delegate
 
@@ -933,7 +933,7 @@ Phase 1 是否实施 待 Vincent 拍板 (Open Q raise in §11)。
 4. **Escalate target alias 当 dangerous approval** — 走 commhub_send_task 到 `指挥室` 还是 telegram channel? — **建议: profile.flags.codex.escalateAlias 配置, default `指挥室`**
 5. **Thread per session vs per task** — Phase 1 hardcode `session` 简化; Phase 2 加选项? — **建议 Phase 1 仅 session, Phase 2 加 profile.flags.codex.threadStrategy 选项**
 6. **codex/event mapper 完整性** — 13 个 event type 都 map 还是仅 5 个 high-value (lifecycle + delta + complete)? — **建议 Phase 1 仅 high-value 5 个, Phase 2 全 map**
-7. **ChatGPT account auth supported models** — gpt-5 / gpt-5-codex / o3 / o4-mini 哪些 default 推荐? gpt-4.1-mini 实测 fail (per 通信龙 §0.3) — **建议 wizard 列 supported model 矩阵 + 用户输入, default 不强制 (per 实测 model availability 实时变化)**
+7. ~~**ChatGPT account auth supported models**~~ — **RESOLVED per Vincent §11 Q7 telegram 4148**: default `gpt-5.5`. wizard 仍列 supported model 矩阵 (`gpt-5.5` / `gpt-5-codex` / `gpt-5.2` / `o3` / `o4-mini`) 给用户 override. ChatGPT auth 限部分 model — Phase 1 doc 标 supported matrix, Phase 2 if model availability 变化加 dynamic detect
 8. **codex auth (OpenAI API key) 如何 inherit** — stdio child inherit env 默认拿 `OPENAI_API_KEY` from anet env? 还是用户走 `codex login` 持久化? — **建议: 推荐用户先 `codex login` (OAuth 持久化), anet 不管 auth**
 9. **agent-node 多 codex-cli-mcp runtime 同 host RAM** — 实测 codex mcp-server idle ~50MB / running ~150MB / + agent-node node ~100MB = 总 200-300MB per node — **建议 doc 标注每节点 200-300MB RAM 预算** (task #111 benchmark confirm 后定值)
 10. ~~`codex/event` notification handler @modelcontextprotocol/sdk API verify~~ — **promoted to §3.0 Phase 0 spike gate (blocking)** per 通信牛 review P1 #2
