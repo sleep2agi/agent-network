@@ -36,6 +36,14 @@ graph TB
     SQL --> AUDIT
 ```
 
+::: info Actually shipped vs design goal (v0.8.2)
+The diagram above represents the **design goal**. Current v0.8.2 reality:
+
+- ✅ **Shipped**: Rate limiting / token auth (utok_/ntok_/atok_) / CORS / 4-tier RBAC / network isolation (server-enforced) / SQL-injection guards / SHA-256 password hashing / audit log / task event log
+- ⏳ **Not fully enforced**: Token Scope (`api_tokens.scope` column exists but `createToken` writes `full` uniformly, `resolveToken` doesn't return scope; security report **R12** queued for v0.9+ — see [security audit](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md))
+- ⏳ **Planned upgrade**: SHA-256 → Argon2id password hashing (security report **R9**, v0.9+)
+:::
+
 ## Authentication
 
 ### Token System

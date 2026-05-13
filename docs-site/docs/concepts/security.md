@@ -36,6 +36,14 @@ graph TB
     SQL --> AUDIT
 ```
 
+::: info v0.8.2 实际启用 vs 设计目标
+上图反映**设计目标**，当前 v0.8.2 实际执行情况：
+
+- ✅ **已启用**：速率限制 / Token 认证（utok_/ntok_/atok_）/ CORS / RBAC 四级权限 / 网络隔离（Server 端强制） / SQL 注入防护 / 密码 SHA-256 / 审计日志 / 任务事件日志
+- ⏳ **未完全启用**：Token Scope 字段（`api_tokens.scope` 列存在但 createToken 统一写 `full`、resolveToken 也不返回 scope；security report **R12** 排队 v0.9+；详见 [安全审计报告](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)）
+- ⏳ **计划升级**：密码哈希 SHA-256 → Argon2id（security report **R9**，v0.9+）
+:::
+
 ## 认证（Authentication）
 
 ### Token 体系
