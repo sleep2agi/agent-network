@@ -168,7 +168,7 @@ anet node start  →  spawn agent-node 子进程
 ### 适用场景
 
 - 用 Anthropic 直接 API（不想依赖订阅）
-- 用 MiniMax / DeepSeek / GLM / Kimi 等国产模型（低成本 / 高吞吐 / 国内直连）
+- 用 MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo 等国产模型（低成本 / 高吞吐 / 国内直连；[完整 provider 表](/guide/multi-model)）
 - 需要灵活切 model（不同任务用不同模型）
 
 ### 配置示例

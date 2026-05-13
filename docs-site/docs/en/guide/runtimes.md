@@ -168,7 +168,7 @@ anet node start  →  spawn agent-node subprocess
 ### When to pick
 
 - Direct Anthropic API (no subscription required)
-- Domestic Chinese models (MiniMax / DeepSeek / GLM / Kimi — cheap / high-throughput / fast)
+- Domestic Chinese models (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo, etc. — cheap / high-throughput / fast; [full provider table](/en/guide/multi-model))
 - Per-task model switching
 
 ### Config
