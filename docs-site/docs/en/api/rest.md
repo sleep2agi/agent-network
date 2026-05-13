@@ -99,6 +99,19 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface (`display_name` / `email` may be `null`); `token` is the `utok_` for CLI/Dashboard; `network_token` is the `ntok_` for agents in the auto-created default network.
 
+**Common 4xx errors** (verify [`auth.ts:31-48 register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L31)):
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `username must be at least 2 characters` | Username < 2 chars |
+| 400 | `username too long (max 50)` | Username > 50 chars |
+| 400 | `username contains invalid characters` | Contains chars outside `a-zA-Z0-9_\-` or Chinese |
+| 400 | `username already taken` | Duplicate username |
+| 400 | `password must be at least 8 characters` | Non-bootstrap user password < 8 |
+| 400 | `password must be at least 4 characters` | First user (bootstrap admin) password < 4 |
+| 400 | `password is too common` | Hits the weak-password dictionary ([`password-dict.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts); bootstrap admin is exempt) |
+| 429 | `too many requests, try again later` | Exceeded 30/min IP rate limit ([`index.ts:417`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L417); localhost is exempt — see [Security — IP rate limits](/en/concepts/security#per-ip-limits)) |
+
 **Rate limit**: 30 requests/minute per IP.
 
 ---
@@ -138,6 +151,13 @@ curl -X POST http://localhost:9200/api/auth/login \
 ```
 
 The `user` object's 5 fields match the register response (note `email` may be `null`); `network_id` is the default network the user owns ([`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) does `ORDER BY role = 'owner' DESC LIMIT 1`). Each login issues a **brand-new** `utok_` (existing tokens are not rotated, so multiple devices can log in independently — see [`auth.ts:102-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L102)).
+
+**Common 4xx errors** (verify [`auth.ts:94-100 login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L94)):
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 401 | `invalid username or password` | Username doesn't exist **or** password hash mismatch ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally collapses both into the same message to avoid username enumeration); the server also writes a `login_failed` audit row |
+| 429 | `too many attempts, try again later` | Exceeded 10/min IP rate limit ([`index.ts:432`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L432); on hit the server writes a `login_rate_limited` audit row with the client IP) |
 
 **Rate limit**: 10 requests/minute per IP.
 

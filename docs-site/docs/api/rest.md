@@ -99,6 +99,19 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 `user` 对象 5 字段对照 [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface（`display_name` / `email` 可为 `null`）；`token` 是 `utok_` 给 CLI/Dashboard 用，`network_token` 是 `ntok_` 给 default network 里的 agent 用。
 
+**常见 4xx**（verify [`auth.ts:31-48 register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L31)）：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `username must be at least 2 characters` | 用户名 < 2 字符 |
+| 400 | `username too long (max 50)` | 用户名 > 50 字符 |
+| 400 | `username contains invalid characters` | 含非 `a-zA-Z0-9_\-` 或非中文字符 |
+| 400 | `username already taken` | 用户名重复 |
+| 400 | `password must be at least 8 characters` | 第二个起注册用户密码 < 8 |
+| 400 | `password must be at least 4 characters` | 首位用户（bootstrap admin）密码 < 4 |
+| 400 | `password is too common` | 命中弱密码字典（[`password-dict.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)，首位用户豁免） |
+| 429 | `too many requests, try again later` | 超过 30/分 IP rate limit（[`index.ts:417`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L417)；localhost 豁免，详见 [安全 — IP rate limit](/concepts/security#ip-级别限制)）|
+
 **速率限制**：30 次/分钟 per IP。
 
 ---
@@ -138,6 +151,13 @@ curl -X POST http://localhost:9200/api/auth/login \
 ```
 
 `user` 对象 5 字段同 register 响应（注 `email` 可为 `null`）；`network_id` 是该用户作为 owner 的 default network（[`auth.ts:113-115`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L113) 取 `ORDER BY role = 'owner' DESC LIMIT 1`）。每次 login 都签发**新的** `utok_`（不撤销已有，多设备登录互不踢，[`auth.ts:102-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L102)）。
+
+**常见 4xx**（verify [`auth.ts:94-100 login()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L94)）：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 401 | `invalid username or password` | 用户名不存在 **或** 密码哈希不匹配（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration）；server 同时写 `login_failed` audit |
+| 429 | `too many attempts, try again later` | 超过 10/分 IP rate limit（[`index.ts:432`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L432)；触发时写 `login_rate_limited` audit + clientIP）|
 
 **速率限制**：10 次/分钟 per IP。
 
