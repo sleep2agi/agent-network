@@ -143,7 +143,7 @@ Open [@userinfobot](https://t.me/userinfobot):
 ```
 You:           /start
 userinfobot:   👋 Hi User Name!
-               🆔 Id: 7612221352          ← ★ this is your numeric user ID
+               🆔 Id: 123456789          ← ★ this is your numeric user ID
                👤 Username: @your_handle
                🌐 Language: en
 ```
@@ -195,7 +195,7 @@ anet node create my-bot --runtime claude-code-cli
 ```bash
 anet channel add telegram my-bot \
   --bot-token 123456789:AAEhBP_XYZxyz... \
-  --allow 7612221352
+  --allow 123456789
 ```
 
 Full argument reference:
@@ -205,7 +205,7 @@ Full argument reference:
 | `<type>` | ✓ | First positional. Today only `telegram`. | `telegram` |
 | `<node-id>` | ✓ | Second positional. Accepts `node_name` (human-readable) or `node_id` (`n_a1b2c3d4`). | `my-bot` |
 | `--bot-token <tok>` | ✓ | Telegram bot token (from @BotFather). | `123456789:AAEhBP...` |
-| `--allow <user-id>` | ✓ | Your numeric Telegram user ID (first entry of the access.json allowlist). | `7612221352` |
+| `--allow <user-id>` | ✓ | Your numeric Telegram user ID (first entry of the access.json allowlist). | `123456789` |
 
 > [!TIP]
 > **Fully interactive**: omit all flags and the command prompts for each value — better for keeping sensitive tokens out of shell history:
@@ -220,7 +220,7 @@ Full argument reference:
 
 ```
 Telegram Bot Token: 123456789:AAEhBP_XYZxyz...
-Allow User ID (run @userinfobot for the numeric ID): 7612221352
+Allow User ID (run @userinfobot for the numeric ID): 123456789
 
 ✅ telegram channel added to "my-bot"
    /home/<user>/.anet/nodes/n_abc12345/channels/telegram/
@@ -251,7 +251,7 @@ Expected output:
 ```
 Node Channels:
 
-  n_abc12345 (my-bot)   telegram     allow: 7612221352
+  n_abc12345 (my-bot)   telegram     allow: 123456789
 ```
 
 ### 4.2 Inspect on-disk files directly
@@ -287,7 +287,7 @@ cat ~/.anet/nodes/n_abc12345/channels/telegram/access.json | python3 -m json.too
 {
   "dmPolicy": "allowlist",
   "allowFrom": [
-    "7612221352"
+    "123456789"
   ],
   "groups": {},
   "pending": {}
@@ -361,7 +361,7 @@ Expected output (key lines):
 [anet] env: COMMHUB_URL, COMMHUB_TOKEN, TELEGRAM_STATE_DIR=/home/<user>/.anet/nodes/n_abc12345/channels/telegram, ...
 [anet] Claude Code session pinned: a1b2c3d4...
 [my-bot]  SSE connected
-[my-bot]  Telegram plugin: polling started (bot @anet_test_bot, allow 7612221352)
+[my-bot]  Telegram plugin: polling started (bot @anet_test_bot, allow 123456789)
 ```
 
 **Key verify items**:
@@ -395,7 +395,7 @@ Bot:    1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 Behind the scenes:
 
 1. Telegram plugin receives the update.message
-2. Verifies `from.id == 7612221352` (allowlist) — passes
+2. Verifies `from.id == 123456789` (allowlist) — passes
 3. Feeds the message content into claude's main loop
 4. Claude Code processes (may call tools, write files, run bash)
 5. After processing, plugin calls Telegram `sendMessage` to reply
@@ -414,7 +414,7 @@ cat ~/.anet/nodes/<node-id>/channels/telegram/access.json | python3 -m json.tool
 
 ```json
 {
-  "allowFrom": ["7612221352"]   ← must include the ID you're DM-ing from
+  "allowFrom": ["123456789"]   ← must include the ID you're DM-ing from
 }
 ```
 
@@ -506,7 +506,7 @@ Team sharing a single bot:
 
 ```bash
 # Add the first person via the CLI
-anet channel add telegram <node-id> --bot-token <tok> --allow 7612221352
+anet channel add telegram <node-id> --bot-token <tok> --allow 123456789
 
 # Add a second person — edit access.json directly (CLI doesn't take multiple --allow)
 python3 -c "

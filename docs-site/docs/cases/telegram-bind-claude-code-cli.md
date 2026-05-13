@@ -143,7 +143,7 @@ BotFather:  Done! Congratulations on your new bot.
 ```
 You:           /start
 userinfobot:   👋 Hi User Name!
-               🆔 Id: 7612221352          ← ★ 这是你的数字 user id
+               🆔 Id: 123456789          ← ★ 这是你的数字 user id
                👤 Username: @your_handle
                🌐 Language: zh-hans
 ```
@@ -195,7 +195,7 @@ anet node create my-bot --runtime claude-code-cli
 ```bash
 anet channel add telegram my-bot \
   --bot-token 123456789:AAEhBP_XYZxyz... \
-  --allow 7612221352
+  --allow 123456789
 ```
 
 参数完整说明：
@@ -205,7 +205,7 @@ anet channel add telegram my-bot \
 | `<type>` | ✓ | 第一个位置参数，目前只支持 `telegram` | `telegram` |
 | `<node-id>` | ✓ | 第二个位置参数。支持 `node_name`（人类可读）或 `node_id`（`n_a1b2c3d4`）| `my-bot` |
 | `--bot-token <tok>` | ✓ | Telegram bot token（@BotFather 给的）| `123456789:AAEhBP...` |
-| `--allow <user-id>` | ✓ | 你的 Telegram 数字 user id（access.json 白名单首项）| `7612221352` |
+| `--allow <user-id>` | ✓ | 你的 Telegram 数字 user id（access.json 白名单首项）| `123456789` |
 
 > [!TIP]
 > **交互式**：所有 flag 不传时命令会一项一项问你，更适合敏感 token 不出现在 shell history：
@@ -220,7 +220,7 @@ anet channel add telegram my-bot \
 
 ```
 Telegram Bot Token: 123456789:AAEhBP_XYZxyz...
-Allow User ID (发 @userinfobot 获取数字ID): 7612221352
+Allow User ID (发 @userinfobot 获取数字ID): 123456789
 
 ✅ telegram channel added to "my-bot"
    /home/<user>/.anet/nodes/n_abc12345/channels/telegram/
@@ -251,7 +251,7 @@ anet channel ls my-bot
 ```
 Node Channels:
 
-  n_abc12345 (my-bot)   telegram     allow: 7612221352
+  n_abc12345 (my-bot)   telegram     allow: 123456789
 ```
 
 ### 4.2 直接看落盘文件
@@ -287,7 +287,7 @@ cat ~/.anet/nodes/n_abc12345/channels/telegram/access.json | python3 -m json.too
 {
   "dmPolicy": "allowlist",
   "allowFrom": [
-    "7612221352"
+    "123456789"
   ],
   "groups": {},
   "pending": {}
@@ -361,7 +361,7 @@ anet node start my-bot
 [anet] env: COMMHUB_URL, COMMHUB_TOKEN, TELEGRAM_STATE_DIR=/home/<user>/.anet/nodes/n_abc12345/channels/telegram, ...
 [anet] Claude Code session pinned: a1b2c3d4...
 [my-bot]  SSE connected
-[my-bot]  Telegram plugin: polling started (bot @anet_test_bot, allow 7612221352)
+[my-bot]  Telegram plugin: polling started (bot @anet_test_bot, allow 123456789)
 ```
 
 **关键 verify 项**：
@@ -395,7 +395,7 @@ Bot:    1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 后台 Claude Code 处理流程：
 
 1. Telegram plugin 收到 update.message
-2. 校验 `from.id == 7612221352`（白名单）通过
+2. 校验 `from.id == 123456789`（白名单）通过
 3. 把 message content 喂给 claude 主循环
 4. Claude Code 处理（可能调工具、写文件、跑 bash）
 5. 处理完通过 plugin 调 Telegram `sendMessage` 回复
@@ -414,7 +414,7 @@ cat ~/.anet/nodes/<node-id>/channels/telegram/access.json | python3 -m json.tool
 
 ```json
 {
-  "allowFrom": ["7612221352"]   ← 必须含你当前用的 ID
+  "allowFrom": ["123456789"]   ← 必须含你当前用的 ID
 }
 ```
 
@@ -506,7 +506,7 @@ team 共用一个 bot：
 
 ```bash
 # 第一个人加进 allow
-anet channel add telegram <node-id> --bot-token <tok> --allow 7612221352
+anet channel add telegram <node-id> --bot-token <tok> --allow 123456789
 
 # 再加第二个人 — 直接编 access.json，命令不支持多个 allow
 python3 -c "
