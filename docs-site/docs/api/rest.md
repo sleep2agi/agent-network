@@ -957,6 +957,105 @@ curl http://localhost:9200/api/users \
 
 ---
 
+## 任务派发端点
+
+REST 版的 `send_task` / `broadcast`（非 MCP 路径，适合 webhook / 反代 / Dashboard 用）。
+
+### POST /api/task
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L772)
+
+REST 版 `send_task`：往指定 alias 的 inbox 投递任务 + 写 tasks 表 + SSE 推 `new_task`。
+
+```bash
+curl -X POST http://localhost:9200/api/task \
+  -H "Authorization: Bearer ntok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alias": "代码1号",
+    "task": "写一个快排算法",
+    "priority": "high",
+    "ttl_seconds": 7200
+  }'
+```
+
+**请求体**（verify [`TaskSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L228)）：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|:----:|------|
+| `alias` | string | &check; | 目标 Agent 别名（最大 200 字符） |
+| `task` | string | &check; | 任务内容（最大 10000 字符） |
+| `priority` | enum | | `high` / `normal`（默认）/ `low` |
+| `from` | string | | 发送者标识（默认 `"api"`） |
+| `network_id` | string | | 目标 network（utok\_ 调用时；ntok\_ 调用强制绑定） |
+| `ttl_seconds` | number | | 过期秒数（默认 3600；非 schema 字段，server 在 [`index.ts:803`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L803) 直接取 `body.ttl_seconds`） |
+
+**响应**（成功）：
+
+```json
+{ "ok": true, "message_id": "uuid-xxx" }
+```
+
+**常见 4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `invalid JSON` | 请求体解析失败 |
+| 400 | `invalid input` | 字段类型/长度不符合 `TaskSchema`（含 `details` 字段附 zod 报错） |
+| 400 | `network_id required for user token when multiple networks are available` | utok\_ 调用方有多个 network，必须显式指定 `network_id` |
+| 403 | `access denied to requested network` | utok\_ 调用方不是 `network_id` 成员 |
+| 403 | `permission_denied` | 角色不足（viewer 不能写）|
+
+写 audit log: `action='register'` 不写，`new_task` SSE 推送给 target alias。
+
+### POST /api/broadcast
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L843)
+
+REST 版 `broadcast`：往一组 session 的 inbox 同步广播 + 给每个 SSE 推 `broadcast`。
+
+```bash
+curl -X POST http://localhost:9200/api/broadcast \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "5 分钟后例会，请保存进度",
+    "filter_status": "idle"
+  }'
+```
+
+**请求体**（verify [`BroadcastSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L236)）：
+
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|:----:|------|
+| `message` | string | &check; | 广播内容（最大 10000 字符；**字段名是 `message` 不是 `content`**） |
+| `filter_server` | string | | 只发给指定 `server` 字段的 session |
+| `filter_status` | string | | 只发给指定 status 的 session（如 `idle` / `working`） |
+
+> 跟 MCP [`broadcast`](mcp-tools#broadcast) 同款字段（R189 修过）；`from_session` 不是参数，server 端硬编码 `'api'`（[`index.ts:872`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L872) 跟 MCP 版的 `'hub'` 不同）。
+
+**响应**（成功）：
+
+```json
+{
+  "ok": true,
+  "recipients": 10,
+  "message_ids": ["uuid-1", "uuid-2"]
+}
+```
+
+`message_ids.length === recipients`，每个 target session 一个 inbox row。
+
+**常见 4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `invalid JSON` / `invalid input` | 请求体解析或字段验证失败 |
+| 400 | `network_id required for user token when broadcasting` | utok\_ 调用方有多个 network，须先 `?network_id=` 或带 ntok\_ 绑定 |
+| 403 | `permission_denied` | 角色不足（viewer 不能写） |
+
+---
+
 ## MCP 端点
 
 ### POST /mcp

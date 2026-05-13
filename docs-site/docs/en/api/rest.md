@@ -957,6 +957,105 @@ The response **does not include** `password_hash` (the SELECT explicitly enumera
 
 ---
 
+## Task Dispatch Endpoints
+
+REST equivalents of the `send_task` / `broadcast` MCP tools (non-MCP path, suitable for webhooks / reverse proxies / Dashboard).
+
+### POST /api/task
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L772)
+
+REST version of `send_task`: writes inbox + tasks rows for a target alias and pushes `new_task` over SSE.
+
+```bash
+curl -X POST http://localhost:9200/api/task \
+  -H "Authorization: Bearer ntok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alias": "coder-1",
+    "task": "Write a quicksort",
+    "priority": "high",
+    "ttl_seconds": 7200
+  }'
+```
+
+**Request body** (verify [`TaskSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L228)):
+
+| Field | Type | Required | Description |
+|------|------|:----:|------|
+| `alias` | string | &check; | Target agent alias (max 200) |
+| `task` | string | &check; | Task content (max 10000) |
+| `priority` | enum | | `high` / `normal` (default) / `low` |
+| `from` | string | | Sender identifier (default `"api"`) |
+| `network_id` | string | | Target network (utok\_ caller; ntok\_ is force-bound) |
+| `ttl_seconds` | number | | Expiry in seconds (default 3600). Not part of the schema — server reads it directly from `body.ttl_seconds` at [`index.ts:803`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L803). |
+
+**Response** (success):
+
+```json
+{ "ok": true, "message_id": "uuid-xxx" }
+```
+
+**Common 4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `invalid JSON` | Body failed to parse |
+| 400 | `invalid input` | Fields fail `TaskSchema` (response also contains a `details` field with the zod error) |
+| 400 | `network_id required for user token when multiple networks are available` | utok\_ caller has multiple networks; must specify `network_id` |
+| 403 | `access denied to requested network` | utok\_ caller is not a member of `network_id` |
+| 403 | `permission_denied` | Role is insufficient (viewer cannot write) |
+
+A `new_task` SSE event is pushed to the target alias on success.
+
+### POST /api/broadcast
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L843)
+
+REST version of `broadcast`: writes inbox rows for a group of sessions and pushes `broadcast` SSE events.
+
+```bash
+curl -X POST http://localhost:9200/api/broadcast \
+  -H "Authorization: Bearer utok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Standup in 5 minutes; please save progress",
+    "filter_status": "idle"
+  }'
+```
+
+**Request body** (verify [`BroadcastSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L236)):
+
+| Field | Type | Required | Description |
+|------|------|:----:|------|
+| `message` | string | &check; | Broadcast content (max 10000; **the field is `message`, not `content`**) |
+| `filter_server` | string | | Only deliver to sessions whose `server` field matches |
+| `filter_status` | string | | Only deliver to sessions in the given status (e.g. `idle` / `working`) |
+
+> Same field set as the MCP [`broadcast`](mcp-tools#broadcast) tool (R189 fixed it there too). `from_session` is **not** a parameter — the server hard-codes `'api'` ([`index.ts:872`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L872); the MCP version uses `'hub'`).
+
+**Response** (success):
+
+```json
+{
+  "ok": true,
+  "recipients": 10,
+  "message_ids": ["uuid-1", "uuid-2"]
+}
+```
+
+`message_ids.length === recipients` — one inbox row per target session.
+
+**Common 4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `invalid JSON` / `invalid input` | Body parse or schema validation failed |
+| 400 | `network_id required for user token when broadcasting` | utok\_ caller has multiple networks; pass `?network_id=…` or use an ntok\_ instead |
+| 403 | `permission_denied` | Role is insufficient (viewer cannot write) |
+
+---
+
 ## MCP Endpoint
 
 ### POST /mcp
