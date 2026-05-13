@@ -370,7 +370,22 @@ curl -X PUT http://localhost:9200/api/networks/net_abc123 \
 |------|------|:----:|------|
 | `name` | string | &check; | 新网络名（**注意字段名是 `name` 不是 `network_name`**；缺失时返回 `name required` 400） |
 
-写 audit log `action='network_renamed'`。
+**响应**（成功）：
+
+```json
+{ "ok": true }
+```
+
+**常见 4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `name required` | 请求体缺 `name` 字段（注意不是 `network_name`） |
+| 400 | `network not found` | `network_id` 不存在 |
+| 400 | `not your network` | 调用者不是该网络的 owner |
+| 400 | `name already taken` | 该 owner 名下已有同名网络 |
+
+写 audit log `action='network_renamed'`，`detail` 字段记新名。
 
 ---
 
@@ -384,6 +399,20 @@ curl -X PUT http://localhost:9200/api/networks/net_abc123 \
 curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
   -H "Authorization: Bearer utok_xxx"
 ```
+
+**响应**（成功）：
+
+```json
+{ "ok": true }
+```
+
+**常见 4xx**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|---------|
+| 400 | `network not found` | `network_id` 不存在 |
+| 400 | `not your network` | 调用者不是该网络的 owner |
+| 400 | `network has N active session(s) — stop them first` | 还有正在跑的 agent session 关联此网络（`anet node stop <name>` 全部停掉后再删） |
 
 写 audit log `action='network_deleted'`。
 

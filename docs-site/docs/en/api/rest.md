@@ -370,7 +370,22 @@ curl -X PUT http://localhost:9200/api/networks/net_abc123 \
 |------|------|:----:|------|
 | `name` | string | &check; | New network name (**note the field is `name`, not `network_name`**; missing returns `name required` 400) |
 
-Writes audit log `action='network_renamed'`.
+**Response** (success):
+
+```json
+{ "ok": true }
+```
+
+**Common 4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `name required` | Body missing `name` (note: not `network_name`) |
+| 400 | `network not found` | `network_id` does not exist |
+| 400 | `not your network` | Caller is not the owner |
+| 400 | `name already taken` | Caller already owns another network with this name |
+
+Writes audit log `action='network_renamed'`; the `detail` column records the new name.
 
 ---
 
@@ -384,6 +399,20 @@ Delete a network (owner only, must have no active sessions).
 curl -X DELETE http://localhost:9200/api/networks/net_abc123 \
   -H "Authorization: Bearer utok_xxx"
 ```
+
+**Response** (success):
+
+```json
+{ "ok": true }
+```
+
+**Common 4xx errors**:
+
+| Status | `error` value | Trigger |
+|------|------------|---------|
+| 400 | `network not found` | `network_id` does not exist |
+| 400 | `not your network` | Caller is not the owner |
+| 400 | `network has N active session(s) — stop them first` | Some agent sessions still reference this network (run `anet node stop <name>` on each before deleting) |
 
 Writes audit log `action='network_deleted'`.
 
