@@ -435,6 +435,36 @@ curl "http://localhost:9200/api/messages?limit=100" \
 | `since` | Start time, defaults to the last hour |
 | `limit` | Max items, default 100, max 500 |
 
+**Response**:
+
+```json
+{
+  "ok": true,
+  "messages": [
+    {
+      "message_id": "m_abc123",
+      "from_alias": "coder-1",
+      "to_alias": "commander",
+      "type": "reply",
+      "content": "[coder-1] Done, used quicksort",
+      "created_at": "2026-04-12 10:00:15"
+    },
+    {
+      "message_id": "m_def456",
+      "from_alias": "commander",
+      "to_alias": "coder-1",
+      "type": "task",
+      "content": "Write a quicksort",
+      "created_at": "2026-04-12 10:00:00"
+    }
+  ]
+}
+```
+
+::: info Current schema caveat
+The SELECT doesn't include `in_reply_to` yet; reply-polling uses a heuristic of `from_alias` + `type='reply'` + recency (see comment at `cli.ts:3827`).
+:::
+
 ---
 
 ### GET /api/completions

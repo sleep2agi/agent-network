@@ -435,6 +435,36 @@ curl "http://localhost:9200/api/messages?limit=100" \
 | `since` | 起始时间，默认最近 1 小时 |
 | `limit` | 最大条数，默认 100，最大 500 |
 
+**响应**：
+
+```json
+{
+  "ok": true,
+  "messages": [
+    {
+      "message_id": "m_abc123",
+      "from_alias": "代码1号",
+      "to_alias": "指挥室",
+      "type": "reply",
+      "content": "[代码1号] 已完成，使用快排实现",
+      "created_at": "2026-04-12 10:00:15"
+    },
+    {
+      "message_id": "m_def456",
+      "from_alias": "指挥室",
+      "to_alias": "代码1号",
+      "type": "task",
+      "content": "写一个快排算法",
+      "created_at": "2026-04-12 10:00:00"
+    }
+  ]
+}
+```
+
+::: info 当前 schema 限制
+SELECT 暂未包含 `in_reply_to` 字段；轮询匹配回复消息时按 `from_alias` + `type='reply'` + recency 启发式匹配（详见 `cli.ts:3827` 注释）。
+:::
+
 ---
 
 ### GET /api/completions
