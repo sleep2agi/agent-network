@@ -242,11 +242,15 @@ SQUAD_ADMIN_PASS=<强密码，不要 commit>
 
 # Telegram Bot
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
-TELEGRAM_ALLOW_USER=<your-telegram-user-id>
+TELEGRAM_ALLOW_USER=<your-telegram-user-id>   # 仅 demos/codex-telegram-squad/entrypoint.sh 用，会把它写入 access.json；agent-node 本体只读 TELEGRAM_BOT_TOKEN
 
 # MiniMax API
 MINIMAX_API_KEY=your-minimax-api-key
 ```
+
+::: info `TELEGRAM_ALLOW_USER` 仅 Compose 入口脚本用
+不像 `TELEGRAM_BOT_TOKEN`（agent-node 直接读），`TELEGRAM_ALLOW_USER` 是 [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh) 的 convention —— 容器启动时脚本把它转成 `access.json` 的 `allow` 数组。如果你不是用这个 demo（而是自己手写 docker-compose / 跑 `anet channel add telegram`），直接用 `anet channel add telegram <node> --allow <uid>` 命令落地写 access.json 即可，不需要 `TELEGRAM_ALLOW_USER` env var。详见 [Telegram 接入已有节点 walkthrough](/cases/telegram-bind-claude-code-cli)。
+:::
 
 ::: danger 不要 commit .env
 `.env` 含明文密码 + API key，必须 `.gitignore`。仓库里只 commit `.env.example`（占位符）：

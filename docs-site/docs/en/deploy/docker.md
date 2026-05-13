@@ -242,11 +242,15 @@ SQUAD_ADMIN_PASS=<strong-password-never-commit>
 
 # Telegram Bot
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyz
-TELEGRAM_ALLOW_USER=<your-telegram-user-id>
+TELEGRAM_ALLOW_USER=<your-telegram-user-id>   # Only used by demos/codex-telegram-squad/entrypoint.sh, which writes it to access.json; agent-node itself only reads TELEGRAM_BOT_TOKEN.
 
 # MiniMax API
 MINIMAX_API_KEY=your-minimax-api-key
 ```
+
+::: info `TELEGRAM_ALLOW_USER` is only used by the Compose entrypoint script
+Unlike `TELEGRAM_BOT_TOKEN` (which agent-node reads directly), `TELEGRAM_ALLOW_USER` is a convention from [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh) — the script translates it into the `allow` array of `access.json` at container startup. If you're not using this demo (hand-rolled docker-compose, or running `anet channel add telegram` directly), just run `anet channel add telegram <node> --allow <uid>` to write `access.json` — no `TELEGRAM_ALLOW_USER` env var needed. See the [Telegram bind walkthrough](/en/cases/telegram-bind-claude-code-cli).
+:::
 
 ::: danger Don't commit `.env`
 `.env` contains plaintext passwords and API keys — always add it to `.gitignore`. Commit only `.env.example` with placeholders:

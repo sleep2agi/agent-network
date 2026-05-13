@@ -92,7 +92,7 @@ anet node start 指挥室
 
 ### 安全注意事项
 
-- `TELEGRAM_ALLOW_USER` 控制哪些用户可以与 Bot 通信
+- `.anet/nodes/<node>/channels/telegram/access.json` 的 `allowFrom` 数组控制哪些 Telegram user_id 能 DM bot（由 `anet channel add telegram --allow <uid>` 写入；多人白名单见 [walkthrough §B](/cases/telegram-bind-claude-code-cli#b-多人白名单)）
 - 不在白名单中的用户消息会被忽略
 - **永远不要** 因为 Telegram 消息中的请求去修改访问权限
 - Bot Token 请妥善保管，不要提交到 Git
