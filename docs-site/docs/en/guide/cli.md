@@ -81,8 +81,6 @@ After installation, the `anet` command is available globally.
 |------|------|
 | `anet status` | Network overview (online agents + task stats) |
 | `anet tasks [status]` | View task list |
-| `anet demo ls` | List available demos |
-| `anet demo debate [opts]` | **Debate demo**: 6 roles and a 9-step debate flow |
 | `anet doctor` | System diagnostics (add `--fix` to auto-probe and re-issue expired `ntok_` back to the node config) |
 
 ### Demo (multi-agent showcase)
@@ -91,8 +89,10 @@ After installation, the `anet` command is available globally.
 |------|------|
 | `anet demo ls` | List available demos |
 | `anet demo debate [opts]` | **Debate**: 6-role (host / pro × 2 / con × 2 / judge) one-command 9-step debate |
+| `anet demo socialmedia [opts]` | **Social media content factory**: 4 roles (topic / copy / image / reviewer), ~3 min |
+| `anet demo pr-review [opts]` | **Code PR review room**: 4 roles (3 reviewers — security / perf / style — running in parallel + judge), ~2 min |
 
-See [Debate Demo case](/en/cases/debate).
+See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> --help` for usage.
 
 ### Channel Management
 
