@@ -10,6 +10,14 @@
 | [你好世界](/cases/hello-world) | `demos/hello-world` | 2 | Docker Compose 资产 + Docker test27 文档校验 | 最简单的两个 Agent 对话 |
 | [翻译流水线](/cases/translation-pipeline) | `demos/translation-pipeline` | 3 | Docker Compose 资产 + Docker test27 文档校验 | 中→英→日链式翻译 |
 | [军团编队](/cases/telegram-squad) | `demos/codex-telegram-squad` | 11 | Docker test23/test24 通信流 + test27 文档校验 | 1 指挥 + 10 Worker，Telegram/Dashboard |
+| [Telegram 接入已有节点](/cases/telegram-bind-claude-code-cli) | `anet channel add telegram <node> ...` | 1 (channel 加到现有 node) | 手工 walkthrough（claude-code-cli runtime；RFC-002 Phase 1 排队） | DM bot → Claude Code 全能力（bash / 改文件 / MCP）|
+
+::: info 还没进表的内置 demo（cases doc 待补，[refs #25](https://github.com/sleep2agi/agent-network/issues/25)）
+- `anet demo socialmedia` — 4-agent 社媒内容工厂（选题/文案/配图/审核），~3 min
+- `anet demo pr-review` — 4-agent PR 审查室（安全/性能/风格 3 reviewer 并行 + judge），~2 min（PR #41 by 通信工程马 ship）
+
+跑 `anet demo <name> --help` 看用法；cases 详版正在补稿。
+:::
 
 ## 已下线案例
 
