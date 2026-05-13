@@ -171,18 +171,22 @@ anet hub start --dev-open
 
 ---
 
-### `password too weak` / `password too short` -- 密码强度不达标（v0.8）
+### `password must be at least 8 characters` / `password is too common` -- 密码强度不达标（v0.8）
 
-```
-Error: password too short (min 8 chars)
-Error: password is in the weak-password dictionary
+```json
+{ "ok": false, "error": "password must be at least 8 characters" }
+{ "ok": false, "error": "password is too common" }
+{ "ok": false, "error": "new password must be at least 8 characters" }   // changePassword
+{ "ok": false, "error": "new password is too common" }                   // changePassword
 ```
 
-**原因**：v0.8 起 `anet passwd` / `register` / `anet hub admin reset-user` 都强制：
+verify [`auth.ts:24-28 validatePasswordStrength()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24)。`label` 参数让 changePassword 把前缀加成 `new password`。
+
+**原因**：v0.8 起 `register` / `anet passwd` / `anet hub admin reset-user` 都走同一 `validatePasswordStrength()` 校验：
 - 长度 ≥ 8 字符
-- 不在 top-1000 弱密码字典里（"password", "12345678", "qwerty123" 等）
+- 不在弱密码字典里（[`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 含 `"password"` / `"12345678"` / `"qwerty123"` 等 top 弱密码）
 
-**例外**：首次 `anet hub start` 提示设置 admin 时允许 ≥ 4 字符（让默认 `admin / anethub` 能成立）。
+**例外（仅 register 首位用户）**：[`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) 检测「首位注册的用户」时只校验 `length >= 4`（让 bootstrap `admin / anethub` 能成立）。`anet passwd` / `reset-user` **无此豁免**，永远强制 ≥ 8 + 非弱密码（跟 R193 chain 一致）。
 
 **解决**：
 

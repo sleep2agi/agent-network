@@ -172,18 +172,22 @@ anet hub start --dev-open
 
 ---
 
-### `password too weak` / `password too short` -- Password strength (v0.8)
+### `password must be at least 8 characters` / `password is too common` -- Password strength (v0.8)
 
+```json
+{ "ok": false, "error": "password must be at least 8 characters" }
+{ "ok": false, "error": "password is too common" }
+{ "ok": false, "error": "new password must be at least 8 characters" }   // changePassword
+{ "ok": false, "error": "new password is too common" }                   // changePassword
 ```
-Error: password too short (min 8 chars)
-Error: password is in the weak-password dictionary
-```
 
-**Cause**: From v0.8, `anet passwd` / `register` / `anet hub admin reset-user` all enforce:
-- length ≥ 8 characters
-- not in the top-1000 weak-password dictionary ("password", "12345678", "qwerty123", etc.)
+Verify [`auth.ts:24-28 validatePasswordStrength()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24). The `label` parameter is why `changePassword` returns the `new password` variant.
 
-**Exception**: first `anet hub start` prompt for admin allows ≥ 4 chars (so default `admin / anethub` works).
+**Cause**: From v0.8, `register` / `anet passwd` / `anet hub admin reset-user` all run the same `validatePasswordStrength()`:
+- Length ≥ 8 characters
+- Not in the weak-password dictionary ([`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) covers `"password"` / `"12345678"` / `"qwerty123"` and other top entries)
+
+**Exception (first registered user only)**: [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) detects the "first user" case and only enforces `length >= 4` (so the bootstrap `admin / anethub` flow works). `anet passwd` / `reset-user` have **no such exemption** — they always require ≥ 8 + non-weak (same as the R193 chain).
 
 **Fix**:
 
