@@ -14,7 +14,7 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 - **Want to reuse a Claude subscription** → `claude-code-cli`
 - **Writing copy / translation / analysis (programmatic)** → `claude-agent-sdk`
 - **Writing code / running commands** → `codex-sdk`
-- **Using MiniMax / DeepSeek / GLM / Kimi** → `claude-agent-sdk` + `ANTHROPIC_BASE_URL`
+- **Using MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo, etc.** → `claude-agent-sdk` + `ANTHROPIC_BASE_URL`
 - **Mix-and-match (recommended)** → run all three on one Hub, pick the best engine per role
 :::
 
