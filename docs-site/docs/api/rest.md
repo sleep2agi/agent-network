@@ -204,6 +204,24 @@ curl -X POST http://localhost:9200/api/auth/password \
   }'
 ```
 
+**响应**：
+
+```json
+{
+  "ok": true,
+  "token": "utok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_new_session_id"
+}
+```
+
+**关键副作用** (verify [server/src/index.ts:486-491](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L486)):
+1. 当前调用用的 `utok_` (`resolved.tokenId`) 立即撤销
+2. 颁发新的 `utok_` (`issued.token`) 给调用方，作为本次响应返回 —— 调用方应立即用新 token 覆盖本地存储
+3. 写 audit log: `action='password_changed'`
+4. **其他设备上的 utok_ 不在此处显式撤销**——具体行为取决于 `changePassword()` 内部实现, 详见 [Token 生命周期对照](/concepts/tokens#token-生命周期对照)
+
+跟 `anet passwd` CLI 行为一致（CLI 拿到新 token 后自动写 `~/.anet/config.json`）。
+
 ---
 
 ## 网络端点

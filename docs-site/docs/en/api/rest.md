@@ -204,6 +204,24 @@ curl -X POST http://localhost:9200/api/auth/password \
   }'
 ```
 
+**Response**:
+
+```json
+{
+  "ok": true,
+  "token": "utok_xxxxxxxxxxxxxxxx",
+  "token_id": "tok_new_session_id"
+}
+```
+
+**Key side effects** (verify [server/src/index.ts:486-491](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L486)):
+1. The `utok_` used for this call (`resolved.tokenId`) is revoked immediately
+2. A new `utok_` (`issued.token`) is minted and returned in this response — the caller must overwrite its local storage with the new token right away
+3. Writes audit log: `action='password_changed'`
+4. **Other devices' utok_ are not explicitly revoked here** — behavior depends on `changePassword()` internals; see [Token lifecycle table](/en/concepts/tokens)
+
+Matches the `anet passwd` CLI behavior (the CLI writes the new token back into `~/.anet/config.json` automatically).
+
 ---
 
 ## Network Endpoints
