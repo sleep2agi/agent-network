@@ -1,0 +1,67 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 515B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/node:20-slim
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [ 1/10] FROM docker.io/library/node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
+#4 resolve docker.io/library/node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 6.86kB done
+#5 DONE 0.0s
+
+#6 [ 7/10] COPY server/src ./src
+#6 CACHED
+
+#7 [ 2/10] RUN apt-get update && apt-get install -y --no-install-recommends bash curl ca-certificates jq unzip && rm -rf /var/lib/apt/lists/*
+#7 CACHED
+
+#8 [ 3/10] RUN curl -fsSL https://bun.sh/install | bash
+#8 CACHED
+
+#9 [ 4/10] WORKDIR /app/server
+#9 CACHED
+
+#10 [ 5/10] COPY server/package.json server/bun.lock ./
+#10 CACHED
+
+#11 [ 6/10] RUN bun install --frozen-lockfile
+#11 CACHED
+
+#12 [ 8/10] WORKDIR /app
+#12 CACHED
+
+#13 [ 9/10] COPY tests/qa-hub-10-network-scope-regressions/run.sh /app/run.sh
+#13 DONE 0.0s
+
+#14 [10/10] RUN chmod +x /app/run.sh
+#14 DONE 0.2s
+
+#15 exporting to image
+#15 exporting layers 0.1s done
+#15 exporting manifest sha256:2dac7c4ab78e9aac69a8f7260e1c798ed337918118b9f47d9e1ab55a9f870082
+#15 exporting manifest sha256:2dac7c4ab78e9aac69a8f7260e1c798ed337918118b9f47d9e1ab55a9f870082 0.0s done
+#15 exporting config sha256:ed65a00bba1b1181137de1b38cf2e432619ebe823e07e983f15e93a3bcd8ef0e 0.0s done
+#15 exporting attestation manifest sha256:f9c7de429eb6cb99f507bc1b6847e5731e7316cd3bf3992aec2b379051dfc532 0.0s done
+#15 exporting manifest list sha256:0d832b309364f0485cadca11b53a9077363806406168fc8694440497b69d1f22 0.0s done
+#15 naming to docker.io/library/anet-qa-hub-10:latest done
+#15 unpacking to docker.io/library/anet-qa-hub-10:latest 0.0s done
+#15 DONE 0.3s
+[0] start local hub from repository source
+[1] register two users with separate default networks
+[2] same alias reports status in both networks
+[3] utok send_task without network_id returns actionable missing-network message
+[4] connect two SSE subscribers for same alias in different networks
+[5] task push in network A must not leak to network B
+[6] task push in network B must not leak to network A
+[7] broadcast in network A must not push to network B
+PASS qa-hub-10 network scope regressions (#67 message ✓ / #54 SSE isolation ✓)
