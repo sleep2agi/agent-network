@@ -483,7 +483,7 @@ Common commands read these options or their saved config equivalents:
 | `COMMHUB_ALIAS` | Agent alias | Highest |
 | `COMMHUB_AUTH_TOKEN` | Auth token (v0.8 soft-deprecated, removed in v1.0) | Highest |
 | `COMMHUB_TOKEN` | Auth token (alias; same v0.8 soft-deprecation as `COMMHUB_AUTH_TOKEN`) | Highest |
-| `ANTHROPIC_BASE_URL` | Model API URL (MiniMax / DeepSeek / GLM and other third-party Anthropic-compatible endpoints) | - |
+| `ANTHROPIC_BASE_URL` | Model API URL (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter and other third-party Anthropic-compatible endpoints; full provider list in [multi-model](/en/guide/multi-model)) | - |
 | `ANTHROPIC_AUTH_TOKEN` | Model API key — for **third-party Anthropic-compatible endpoints** | - |
 | `ANTHROPIC_API_KEY` | Model API key — **only for direct api.anthropic.com** (see [runtimes pitfalls](/en/guide/runtimes#claude-agent-sdk)) | - |
 
