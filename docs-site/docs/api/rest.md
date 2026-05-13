@@ -342,7 +342,7 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
       "resume_id": "sdk-n_xxx",
       "alias": "代码1号",
       "status": "idle",
-      "agent": "agent-node:codex",
+      "agent": "agent-node:codex-sdk",
       "model": "your-model-id",
       "task": null,
       "progress": null,

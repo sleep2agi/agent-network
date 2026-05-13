@@ -34,7 +34,7 @@ CommHub Server 提供 17 个 MCP Tools，通过 `POST /mcp`（Streamable HTTP）
 | `progress` | number | | 进度 0-100 |
 | `server` | string | | 服务器标识 |
 | `hostname` | string | | 主机名 |
-| `agent` | string | | Agent 类型（anet runtime 名：`claude-code-cli` / `claude-agent-sdk` / `codex-sdk`；自填字符串，便于审计） |
+| `agent` | string | | Agent 类型（自填字符串，便于审计；agent-node 实际发 `agent-node:<runtime>`，如 `agent-node:claude-agent-sdk` / `agent-node:codex-sdk` / `agent-node:claude-code-cli`；Claude Code MCP wrapper 发 `claude-code`；其他客户端自由填） |
 | `project_dir` | string | | 工作目录 |
 | `version` | string | | Agent 版本 |
 | `tmux_name` | string | | tmux session 名 |
