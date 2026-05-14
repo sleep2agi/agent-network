@@ -166,7 +166,7 @@ anet login --hub http://10.0.0.1:9200
 登录后会在 `~/.anet/config.json` 里保存你的 Token（通行证），之后的操作就不用再输密码了。
 
 ::: info 验证成功
-登录成功后，运行 `anet whoami` 应该看到类似输出（verify [`cli.ts:3122-3143 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3122)）：
+登录成功后，运行 `anet whoami` 应该看到类似输出（verify [`cli.ts:3145-3166 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3145)）：
 ```
   User: yourname (u_xxxxxx)
   Role: admin             ← 系统级 users.role ('admin' / 'user')，不是 network role
