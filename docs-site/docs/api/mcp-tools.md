@@ -156,7 +156,7 @@ report_completion({
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L330)
 
-确认消息已接收。ACK 后消息不会再被 get_inbox 返回。
+确认消息已接收。ACK 后消息不会再被 `get_inbox` 返回。
 
 **参数**：
 
@@ -164,15 +164,19 @@ report_completion({
 |------|------|:----:|------|
 | `alias` | string | &check; | Session 别名 |
 | `message_id` | string | &check; | 消息 ID |
-| `response` | string | | 简短回复（最大 10000 字符） |
+| `response` | string | | **当前 no-op**：handler 接受这个参数但不写库（[`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) 整段没有引用 `response`）。schema 保留是为了 forward-compat / 不破坏现有调用方；想真正回复用 [`send_reply`](#send_reply) |
 
 **返回值**：
 
 ```json
-{
-  "ok": true
-}
+{ "ok": true }
 ```
+
+**错误**：`message_id` 不存在或不属于该 alias → `{ok: false, error: "message not found or not yours"}`。
+
+::: tip 副作用：tasks 表状态机
+ack 成功还会把 `tasks` 表里 `task_id = message_id` 的行从 `status='delivered'` UPDATE 到 `'acked'`（[`tools.ts:353`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L353)；**仅** `delivered` 起跳，跟 hub 端 [`send_ack`](#send_ack)（接受 `created` / `delivered`）不同 — R279 chain 校准，详见 [Task 生命周期 — `created` 校准](/concepts/task-lifecycle#状态机)）。
+:::
 
 ---
 

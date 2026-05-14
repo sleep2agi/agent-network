@@ -156,7 +156,7 @@ Messages are sorted by priority: high > normal > low, then by time within the sa
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L330)
 
-Acknowledge message receipt. After ACK, the message won't be returned by get_inbox.
+Acknowledge message receipt. After ACK, the message won't be returned by `get_inbox`.
 
 **Parameters**:
 
@@ -164,15 +164,19 @@ Acknowledge message receipt. After ACK, the message won't be returned by get_inb
 |------|------|:----:|------|
 | `alias` | string | &check; | Session alias |
 | `message_id` | string | &check; | Message ID |
-| `response` | string | | Brief response (max 10000 chars) |
+| `response` | string | | **Currently a no-op**: the handler accepts this parameter but never writes it to the database ([`tools.ts:337-360`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L337) never references `response`). The schema is kept for forward-compat / to avoid breaking existing callers; if you want to actually reply, use [`send_reply`](#send_reply). |
 
 **Response**:
 
 ```json
-{
-  "ok": true
-}
+{ "ok": true }
 ```
+
+**Error**: `message_id` not found or not owned by this alias → `{ok: false, error: "message not found or not yours"}`.
+
+::: tip Side effect: tasks-table state machine
+A successful ack also UPDATEs the `tasks` row where `task_id = message_id` from `status='delivered'` to `'acked'` ([`tools.ts:353`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L353); **only** transitions from `delivered`, unlike the hub-side [`send_ack`](#send_ack) which also accepts `created` — see R279 chain calibration in [Task lifecycle — `created` calibration](/en/concepts/task-lifecycle#state-machine)).
+:::
 
 ---
 
