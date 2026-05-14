@@ -260,7 +260,7 @@ node_name:
 |------|-----|
 | 用途 | 显示名 + CommHub alias + CLI 参数 |
 | 可变性 | `anet node rename` 可改 |
-| 约束 | 同一 CommHub 唯一，不含路径特殊字符 |
+| 约束 | 同一 network 内唯一（`UNIQUE(network_id, alias)`，不是全局 CommHub 唯一），不含路径特殊字符 |
 
 ## 异常处理
 
