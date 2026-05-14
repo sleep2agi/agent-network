@@ -43,7 +43,7 @@ stateDiagram-v2
 | `send_ack`（Hub tool） | `created` / `delivered` | [tools.ts:668](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L668) |
 | `ack_inbox`（Agent tool） | `delivered`（**仅 1 个**） | [tools.ts:354](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354) |
 
-R279 校准：R266 chain 原表把 `ack_inbox` 和 `send_ack` 当一行，但实际 WHERE 子句不同 —— `ack_inbox`（agent 端 tool，L353）只接受 `delivered`，`send_ack`（hub 端 tool，L678）接受 `created` / `delivered` 两种。R230 chain 校准的「4 个可取消状态」就是 `cancel_task` 那行；本节状态机图为简化未画 `created` 的出边，实际 SQL 允许（直接构造 DB row 走 INSERT 默认值才能进入 `created` 态，REST/MCP 没有这种入口）。
+R279 校准：R266 chain 原表把 `ack_inbox` 和 `send_ack` 当一行，但实际 WHERE 子句不同 —— `ack_inbox`（agent 端 tool，L354）只接受 `delivered`，`send_ack`（hub 端 tool，L679）接受 `created` / `delivered` 两种。R230 chain 校准的「4 个可取消状态」就是 `cancel_task` 那行；本节状态机图为简化未画 `created` 的出边，实际 SQL 允许（直接构造 DB row 走 INSERT 默认值才能进入 `created` 态，REST/MCP 没有这种入口）。
 :::
 
 ## 状态说明
