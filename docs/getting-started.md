@@ -86,7 +86,7 @@ anet node create my-agent --runtime codex-sdk --model <codex-model-id>
 |---------|----------|-------|
 | `codex-sdk` | Codex | `codex auth login` |
 | `claude-agent-sdk` | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (any Anthropic-compatible endpoint) | API key in env or via `anet node create` prompts |
-| `claude-code-cli` | Claude Code CLI | Claude Code installed + `claude auth login` |
+| `claude-code-cli` | Claude Code CLI | Claude Code installed + Claude Pro/Team/Max subscription (`claude auth login`) |
 
 For the full provider endpoint table (each provider's `ANTHROPIC_BASE_URL` etc.), see [docs-site/guide/multi-model](https://anet.sh/guide/multi-model).
 
