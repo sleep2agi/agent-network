@@ -370,12 +370,14 @@ v0.8.0 起 Dashboard（`@sleep2agi/agent-network-dashboard@0.4.2+`）改为**thi
 
 ### 隔离策略
 
-每个 Agent Node 完全隔离，不读取宿主机配置：
+每个 Agent Node 完全隔离，不读取宿主机配置 —— claude-agent-sdk 调 `query()` 时传 `settingSources: []`（claude-agent-sdk 入口是 `query()` 函数，不是 `new Agent({...})` 类）：
 
 ```typescript
-const agent = new Agent({
+const options = {
   settingSources: [],  // 不读任何全局配置
-});
+  // model / permissionMode / mcpServers / env ...
+};
+for await (const message of query({ prompt, options })) { /* ... */ }
 ```
 
 ### 工具权限

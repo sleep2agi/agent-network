@@ -370,12 +370,14 @@ This is the Dashboard side of RFC-001 Phase 2 landing. **Combined with `admin-ut
 
 ### Isolation Strategy
 
-Each Agent Node is fully isolated and does not read host machine config:
+Each Agent Node is fully isolated and does not read host machine config — claude-agent-sdk passes `settingSources: []` to `query()` (the SDK entry point is the `query()` function, not a `new Agent({...})` class):
 
 ```typescript
-const agent = new Agent({
+const options = {
   settingSources: [],  // No global config read
-});
+  // model / permissionMode / mcpServers / env ...
+};
+for await (const message of query({ prompt, options })) { /* ... */ }
 ```
 
 ### Tool Permissions
