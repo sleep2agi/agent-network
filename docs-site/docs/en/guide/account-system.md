@@ -223,8 +223,8 @@ Each user has a role in each network:
 |------|------|---------|
 | **owner** | Network creator | Everything, including delete network and change roles |
 | **admin** | Promoted by owner | Invite/kick members, manage tokens, cannot delete network |
-| **member** | Joined via invite | Start agents, send tasks, reply to tasks |
-| **viewer** | Read-only user | View only — cannot send tasks or start agents |
+| **member** | Joined via invite | Send tasks, reply to tasks (`send_task` / `send_reply`) |
+| **viewer** | Read-only user | View only — cannot send / reply to tasks |
 
 ::: info One user can have different roles in different networks
 For example, you can be owner in "dev", member in "prod", and viewer in "demo".
@@ -236,10 +236,12 @@ For example, you can be owner in "dev", member in "prod", and viewer in "demo".
 |------|:-----:|:-----:|:------:|:------:|
 | View agents and tasks | ✓ | ✓ | ✓ | ✓ |
 | Send / reply to tasks | ✓ | ✓ | ✓ | |
-| Start agents | ✓ | ✓ | ✓ | |
+| Create agent (`anet node create`) | ✓ | ✓ | ✓ | |
 | Invite / remove members | ✓ | ✓ | | |
 | Change member roles | ✓ | | | |
 | Delete / rename network | ✓ | | | |
+
+> Note: `anet node start / stop / delete` are **pure local CLI operations** — not gated by network role; whoever has the node config on their machine can run them. The only role-gated lifecycle op is `anet node create` (it requests an `ntok_` from the hub). See [Roles & permissions](/en/concepts/roles).
 
 ---
 
