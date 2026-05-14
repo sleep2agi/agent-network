@@ -250,9 +250,11 @@ cd agent-network
 
 ## 深度代码质量发现
 
-### C1：MCP tool 数量文档和代码不一致
+### C1：MCP tool 数量文档和代码不一致 — ✅ 已修
 
-README、server package description、docs-site API 文档都写 “18 MCP tools”。但 `server/src/tools.ts` 实际注册了 17 个工具。`docs-site/docs/api/mcp-tools.md` 自己列出的 `###` 小节也是 17 个。
+> **状态（2026-05-14 校准）**：`server/package.json` description 已改为 “17 MCP tools”，`docs-site/docs/api/mcp-tools.md` 也是 17 个 `###` 小节，跟 `server/src/tools.ts` 的 17 处 `server.tool()` 注册一致（R407 / R422 verify）。下方原描述保留作 audit trace。
+
+~~README、server package description、docs-site API 文档都写 “18 MCP tools”。但 `server/src/tools.ts` 实际注册了 17 个工具。`docs-site/docs/api/mcp-tools.md` 自己列出的 `###` 小节也是 17 个。~~
 
 建议生成工具文档：从 `server/src/tools.ts` 或一个 declarative registry 生成 tool count、名称列表和 API 表格，避免手工数字漂移。
 
