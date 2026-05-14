@@ -48,7 +48,7 @@ v1 应该选**新方向**。下面五个 by 优先级：
 
 ## D. 代码视角洼地 UT-04 cli.ts 解析层 ⭐
 
-**做什么**：[cli.ts](../../agent-network/bin/cli.ts) 4771 行 0 单测。**第一步是抽 pure function**（命令解析 / opts parser / 帮助文本生成），然后单测。
+**做什么**：[cli.ts](../../agent-network/bin/cli.ts) ~6000 行（持续增长）0 单测。**第一步是抽 pure function**（命令解析 / opts parser / 帮助文本生成），然后单测。
 
 **为什么**：代码视角 3/5 是 v0 的真洼地。但**抽函数 = 改业务代码**，违反「不改业务逻辑」铁律。
 要做必须 Vincent 同意先做小重构。

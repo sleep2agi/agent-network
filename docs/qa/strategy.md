@@ -41,7 +41,7 @@
 - `server/src/auth.ts`（utok / ntok 生成 + 校验） — 安全核心，优先补
 - `server/src/db.ts`（task 状态机迁移） — 边界条件优先
 - `server/src/password-dict.ts`（弱密码字典） — 纯函数，最快上
-- `agent-network/bin/cli.ts` 命令解析层 — 大文件 4771 行，先抽小函数再测
+- `agent-network/bin/cli.ts` 命令解析层 — 大文件 ~6000 行（持续增长），先抽小函数再测
 
 ## 4. CI gate（渐进，三档）
 
