@@ -65,10 +65,19 @@ anet login
 
 # 验证登录状态
 anet whoami
-# → Logged in as: yourname
-# → Role: admin
-# → Network: default (net_xxxxxxxx)
+# 实际输出（verify cli.ts:3127-3148）:
+#   User: yourname (u_xxxxxx)
+#   Role: admin             ← 系统级 users.role ('admin' / 'user')，不是 network role
+#   Hub:  http://127.0.0.1:9200
+#
+#   Networks:
+#     default (net_xxxxxxxx) ← current
+#     team-prod (net_yyyyyyyy)
 ```
+
+::: tip 系统级 role vs 网络级 role
+`whoami` 显示的 `Role:` 是 **系统级** `users.role`（仅 `admin` / `user` 两个值），**不是** 当前 network 内的 `owner / admin / member / viewer`。要查 network 内的 role，跑 `anet network members` 看自己那行。详见 [roles → FAQ](/concepts/roles)（R227 chain 一致）。
+:::
 
 ::: tip CLI 和 Dashboard 是同一个账号
 在终端 `anet login` 和在浏览器 Dashboard 登录用的是完全相同的用户名密码。不需要分别注册。

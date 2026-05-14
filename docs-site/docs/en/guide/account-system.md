@@ -64,10 +64,19 @@ anet login
 
 # Verify login status
 anet whoami
-# → Logged in as: yourname
-# → Role: admin
-# → Network: default (net_xxxxxxxx)
+# Actual output (verified at cli.ts:3127-3148):
+#   User: yourname (u_xxxxxx)
+#   Role: admin             ← System-level users.role ('admin' / 'user'), NOT a network role
+#   Hub:  http://127.0.0.1:9200
+#
+#   Networks:
+#     default (net_xxxxxxxx) ← current
+#     team-prod (net_yyyyyyyy)
 ```
+
+::: tip System-level role vs. network-level role
+`whoami`'s `Role:` field shows the **system-level** `users.role` (only `admin` / `user`) — it is **not** your role within the current network (`owner / admin / member / viewer`). To check the per-network role, run `anet network members` and find your own row. See [roles → FAQ](/en/concepts/roles) (R227 chain).
+:::
 
 ::: tip CLI and Dashboard use the same account
 `anet login` in the terminal and Dashboard login in the browser use the exact same username and password. No separate registration needed.
