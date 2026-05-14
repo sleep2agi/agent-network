@@ -1077,6 +1077,181 @@ async function askChoice<T extends string>(title: string, choices: { label: stri
   });
 }
 
+// ── Unified vendor registry (issue #104-B) ──
+//
+// Single source of truth for vendor → model → runtime/baseUrl wiring. This
+// consolidates the previously-scattered MODEL_PRESETS / PROVIDER_CHOICES /
+// BATCH_PRESETS / inline Path-A picker (the entry points migrate to it in
+// B2, the old structures are removed in B3). Vincent 4677+4679: "先选供应商，
+// 然后再选模型" — the create wizard is vendor-first.
+//
+// Every entry's baseUrl + model ids are verified-with-real-call before
+// landing (feedback_vendor_verify_before_hardcode). Unverified providers
+// (DeepSeek / GLM / Kimi) are intentionally NOT in this list — the `custom`
+// vendor is the honest home for not-yet-verified Anthropic-compatible APIs
+// (通信龙 decision on #104-B design pass).
+
+type VendorEnvKey = "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
+
+interface VendorModel {
+  id: string;        // exact API model id (case-sensitive — the vendor's /v1/models is authoritative)
+  label?: string;    // display label in the model picker; defaults to id
+  default?: boolean; // preselected in the model picker
+}
+
+interface Vendor {
+  key: string;                  // stable key — also accepted by --preset for back-compat
+  label: string;                // vendor picker label
+  runtime: RuntimeName;         // claude-agent-sdk | codex-sdk | claude-code-cli
+  baseUrl?: string;             // ANTHROPIC_BASE_URL value (omit = Anthropic-native / not applicable)
+  envKey?: VendorEnvKey;        // which env var the API key goes into
+  signupUrl?: string;           // "where to get a key" hint
+  requiresAuth?: "claude" | "codex"; // runtime needs an external login instead of an API key
+  models: VendorModel[];        // [] = freeform: ask the user for a model id (custom), or none (claude-code)
+  freeformBaseUrl?: boolean;    // custom only: ask the user for the base URL
+}
+
+const VENDORS: Vendor[] = [
+  {
+    // bare hostname, no /anthropic suffix (Vincent verified 2026-05-13 telegram 4227).
+    // intern-s2-preview verified by 通信测试马 real-call 2026-05-14.
+    key: "intern", label: "上海 AI Lab 书生 (Intern)",
+    runtime: "claude-agent-sdk", baseUrl: "https://chat.intern-ai.org.cn",
+    envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/",
+    models: [
+      { id: "intern-s2-preview", label: "intern-s2-preview (默认)", default: true },
+      { id: "intern-s1-pro" },
+    ],
+  },
+  {
+    key: "minimax", label: "MiniMax (国内直连，低成本)",
+    runtime: "claude-agent-sdk", baseUrl: "https://api.minimaxi.com/anthropic",
+    envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.minimaxi.com",
+    models: [{ id: "MiniMax-M2.7", default: true }],
+  },
+  {
+    // /anthropic suffix; verified by 通信SDK马 real-call 2026-05-15 (#104).
+    key: "mimo", label: "小米 MiMo",
+    runtime: "claude-agent-sdk", baseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic",
+    envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.xiaomimimo.com",
+    models: [
+      { id: "mimo-v2.5-pro", label: "mimo-v2.5-pro (默认)", default: true },
+      { id: "mimo-v2.5" },
+      { id: "mimo-v2-pro" },
+      { id: "mimo-v2-omni" },
+    ],
+  },
+  {
+    key: "anthropic", label: "Anthropic Claude (官方 API)",
+    runtime: "claude-agent-sdk", envKey: "ANTHROPIC_API_KEY",
+    signupUrl: "https://console.anthropic.com",
+    models: [
+      { id: "claude-sonnet-4-6", default: true },
+      { id: "claude-opus-4-6" },
+      { id: "claude-haiku-4-5" },
+    ],
+  },
+  {
+    key: "codex", label: "Codex / GPT (海外，需 codex auth login)",
+    runtime: "codex-sdk", requiresAuth: "codex",
+    models: [
+      { id: "gpt-5.4", default: true },
+      { id: "o3" },
+    ],
+  },
+  {
+    // claude-code-cli uses the Claude Code subscription's model; no model picker.
+    key: "claude-code", label: "Claude Code CLI (需 Claude Pro/Team/Max 订阅)",
+    runtime: "claude-code-cli", requiresAuth: "claude",
+    models: [],
+  },
+  {
+    // honest home for any not-yet-verified Anthropic-compatible API.
+    key: "custom", label: "自定义 — 任何 Anthropic 兼容 API (DeepSeek/GLM/Kimi/OpenRouter/自建)",
+    runtime: "claude-agent-sdk", envKey: "ANTHROPIC_AUTH_TOKEN",
+    freeformBaseUrl: true,
+    models: [],
+  },
+];
+
+interface VendorSelection {
+  vendorKey: string;
+  runtime: RuntimeName;
+  model?: string;
+  baseUrl?: string;
+  envKey?: VendorEnvKey;
+  signupUrl?: string;
+  requiresAuth?: "claude" | "codex";
+}
+
+// Resolve a vendor + model selection from a known vendor key (used by both the
+// interactive helper below and the --preset / --runtime / --model flag path in
+// B2). `modelOverride` lets a flag pin a specific model id without prompting.
+function resolveVendorSelection(vendorKey: string, modelOverride?: string): VendorSelection | null {
+  const vendor = VENDORS.find(v => v.key === vendorKey);
+  if (!vendor) return null;
+  const defaultModel = vendor.models.find(m => m.default)?.id || vendor.models[0]?.id;
+  return {
+    vendorKey: vendor.key,
+    runtime: vendor.runtime,
+    model: modelOverride || defaultModel,
+    baseUrl: vendor.baseUrl,
+    envKey: vendor.envKey,
+    signupUrl: vendor.signupUrl,
+    requiresAuth: vendor.requiresAuth,
+  };
+}
+
+// Unified vendor-first interactive selection (issue #104-B): pick vendor →
+// pick that vendor's model → runtime + baseUrl resolved from the registry.
+// All three create flows migrate to this in B2. Returns null when the
+// interactive picker is unavailable (non-TTY / inquirer load failure) so
+// callers can fall back to their existing default-runtime behavior.
+async function selectVendorAndModel(): Promise<VendorSelection | null> {
+  let vendorKey: string;
+  try {
+    const { select: sel } = await import("@inquirer/prompts");
+    vendorKey = await sel({
+      message: "选择供应商 (vendor):",
+      choices: VENDORS.map(v => ({ value: v.key, name: v.label })),
+    });
+  } catch (e: any) {
+    console.log(`[anet] ⚠ Vendor selector unavailable: ${e?.message || e}`);
+    return null;
+  }
+  const vendor = VENDORS.find(v => v.key === vendorKey);
+  if (!vendor) return null;
+
+  let baseUrl = vendor.baseUrl;
+  if (vendor.freeformBaseUrl) {
+    baseUrl = await ask("ANTHROPIC_BASE_URL (e.g. https://your-host/anthropic)") || "";
+  }
+
+  let model: string | undefined;
+  if (vendor.models.length === 1) {
+    model = vendor.models[0].id;
+  } else if (vendor.models.length > 1) {
+    // default-marked model sorted first so the picker preselects it.
+    const ordered = [...vendor.models].sort((a, b) => (b.default ? 1 : 0) - (a.default ? 1 : 0));
+    model = await askChoice(`选择 ${vendor.label} 模型:`,
+      ordered.map(m => ({ label: m.label || m.id, value: m.id })));
+  } else if (!vendor.requiresAuth) {
+    // freeform model (custom): ask the user for an exact model id.
+    model = (await ask("Model id")) || undefined;
+  }
+  // vendor.models.length === 0 && requiresAuth (claude-code) → no model picker.
+
+  return {
+    vendorKey: vendor.key,
+    runtime: vendor.runtime,
+    model,
+    baseUrl,
+    envKey: vendor.envKey,
+    signupUrl: vendor.signupUrl,
+    requiresAuth: vendor.requiresAuth,
+  };
+}
+
 function maskSecretEnv(env: Record<string, string>): Record<string, string> {
   const masked: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
