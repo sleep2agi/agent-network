@@ -52,7 +52,7 @@
 
 ### P0：CLI 类型覆盖不完整，已有类型事实冲突 — ✅ 已修（建议 1+2+3 全部落地）
 
-> **状态**：当前 `agent-network/tsconfig.json` `include` 已扩到 `["src/client.ts", "src/node-server.ts", "bin/cli.ts"]`；`package.json` 提供 `typecheck` script (`tsc --noEmit`)；CI `.github/workflows/e2e-docker.yml` 在 e2e 步骤前先跑 `bun tsc --noEmit`。**`RuntimeName` union 现已包含 `"http-api"`**（cli.ts L145），不再跟 `normalizeRuntime()` 冲突。下方原描述保留作 audit trace。
+> **状态**：当前 `agent-network/tsconfig.json` `include` 已扩到 `["src/client.ts", "src/node-server.ts", "bin/cli.ts"]`；`package.json` 提供 `typecheck` script (`tsc --noEmit`)；CI `.github/workflows/e2e-docker.yml` 在 e2e 步骤前先跑 `bun tsc --noEmit`。`RuntimeName` ↔ `normalizeRuntime()` 的冲突已彻底解决 —— `http-api` runtime **已从 `RuntimeName` / `normalizeRuntime()` / 全代码移除**，当前 `RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk"`（cli.ts L145，3 值无 http-api）。下方原描述保留作 audit trace。
 
 ~~`agent-network/tsconfig.json` 只包含：~~
 
