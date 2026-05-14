@@ -209,7 +209,7 @@ anet hub admin reset-user --username alice
 
 ### anet node create
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1173)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1236) (`createCommand`)
 
 创建新的 Agent 节点。
 
