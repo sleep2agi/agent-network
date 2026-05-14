@@ -101,7 +101,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface (`display_name` / `email` may be `null`); `token` is the `utok_` for CLI/Dashboard; `network_token` is the `ntok_` for agents in the auto-created default network.
 
-**Common 4xx errors** (verify [`auth.ts:31-48 register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L31)):
+**Common 4xx errors** (verify [`auth.ts:30-48 register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L30)):
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
@@ -343,7 +343,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-Each row in `networks` has 10 fields: the 9 `networks` table columns ([`server/src/db.ts:167-176`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L167), including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
+Each row in `networks` has 10 fields: the 9 `networks` table columns ([`server/src/db.ts:168-177`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L168), including the v3 migrations `visibility` + `max_members`) plus the joined `member_role` ([`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) joins `network_members`). Sort order: owner first, then by `created_at` (`ORDER BY nm.role = 'owner' DESC, n.created_at`). `settings` / `description` may be `null`. An `ntok_` caller sees only the bound network (not the full list); a `utok_` caller sees every network they belong to.
 
 ---
 
@@ -379,7 +379,7 @@ curl -X POST http://localhost:9200/api/networks \
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 400 | `network name already exists` | Same owner already has a network with this name (`UNIQUE(owner_id, network_name)` constraint) |
-| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate ([`auth.ts:188-190`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L188); admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column flagged in R178 |
+| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate ([`auth.ts:196-200`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L196); admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column flagged in R178 |
 | 401 | `token required` / `invalid token` | Missing / invalid utok_ |
 
 ---

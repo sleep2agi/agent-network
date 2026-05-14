@@ -101,7 +101,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 
 `user` 对象 5 字段对照 [`server/src/auth.ts:7-13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L7) `AuthUser` interface（`display_name` / `email` 可为 `null`）；`token` 是 `utok_` 给 CLI/Dashboard 用，`network_token` 是 `ntok_` 给 default network 里的 agent 用。
 
-**常见 4xx**（verify [`auth.ts:31-48 register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L31)）：
+**常见 4xx**（verify [`auth.ts:30-48 register()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L30)）：
 
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
@@ -343,7 +343,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`server/src/db.ts:167-176`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L167) 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
+`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`server/src/db.ts:168-177`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L168) 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts:382-388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L382) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
 
 ---
 
@@ -379,7 +379,7 @@ curl -X POST http://localhost:9200/api/networks \
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
 | 400 | `network name already exists` | 同一 owner 名下已有同名 network（`UNIQUE(owner_id, network_name)` 约束） |
-| 400 | `quota exceeded: max N networks for free plan` | 触发 plan quota 配额限制（v0.8 起 admin 用户豁免；free plan 默认 max_networks_owned=2，**当前 quota 仍在 `auth.ts:182-190` enforced**，跟 R178 networks 表的 `max_members` 不同：那个 dormant、这个 active） |
+| 400 | `quota exceeded: max N networks for free plan` | 触发 plan quota 配额限制（v0.8 起 admin 用户豁免；free plan 默认 max_networks_owned=2，**当前 quota 仍在 `auth.ts:196-200` enforced**，跟 R178 networks 表的 `max_members` 不同：那个 dormant、这个 active） |
 | 401 | `token required` / `invalid token` | 未提供 / 提供了无效 utok_ |
 
 ---
