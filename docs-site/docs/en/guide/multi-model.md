@@ -8,6 +8,7 @@ Agent Network supports running agents with different AI models within the same n
 |------|---------|------|------|
 | **Claude Sonnet (latest line)** | `claude-agent-sdk` | Best-in-class reasoning, long context (see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)) | Mid-High |
 | **Claude Opus (latest line)** | `claude-agent-sdk` | Complex tasks, creative writing (same link) | Very high |
+| **Claude Code** | `claude-code-cli` | Terminal-style agent; spawns the local `claude` binary, reuses your Claude Max subscription | Subscription |
 | **Codex (codex-sdk)** | `codex-sdk` | Strong code generation, tool use | Medium |
 | **MiniMax (latest line)** | `claude-agent-sdk` | ✅ verified — low cost, high throughput (look up the latest model id at [platform.minimaxi.com](https://platform.minimaxi.com)) | Very low |
 | **InternLM Intern-S2-Preview** (`anet node create` vendor-picker default) | `claude-agent-sdk` | ✅ verified — domestic model, scientific reasoning; the first option in `anet node create`'s vendor picker (`chat.intern-ai.org.cn`, bare hostname) | Low |
