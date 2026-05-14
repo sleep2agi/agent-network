@@ -6,7 +6,7 @@ Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务�
 
 | 启动方式 | 技术栈 | 默认地址 | 说明 |
 |------|--------|------|------|
-| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI 通过 `npx @sleep2agi/agent-network-dashboard@${tag}` 启动，`tag` 由 [`dashboardReleaseTag()` (cli.ts:348)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L348) 决定：默认 `@preview`，可用 `ANET_DASHBOARD_VERSION` env 覆盖（不再 hardcode pin 死版本，见下方 [Preview 通道](#preview-通道-下一个-stable-wip)）。thin cookie-proxy 模式（不再持 service token） |
+| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI 通过 `npx @sleep2agi/agent-network-dashboard@${tag}` 启动，`tag` 由 [`dashboardReleaseTag()` (cli.ts:347)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L347) 决定：默认 `@preview`，可用 `ANET_DASHBOARD_VERSION` env 覆盖（不再 hardcode pin 死版本，见下方 [Preview 通道](#preview-通道-下一个-stable-wip)）。thin cookie-proxy 模式（不再持 service token） |
 | 独立部署 | Next.js 16 | 自定义 | 需要自己配置 CommHub 地址 |
 
 ::: tip 提示
