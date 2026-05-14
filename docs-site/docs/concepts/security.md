@@ -289,7 +289,7 @@ db.run("SELECT * FROM sessions WHERE alias = ?1", [alias]);
 db.run(`SELECT * FROM sessions WHERE alias = '${alias}'`);
 ```
 
-全部 85+ 个 `db.query()` 调用都已迁移到参数化方式。
+全部 `db.run()` / `db.get()` / `db.all()` 调用（[`server/src/*.ts` grep 当前 150+ 处](https://github.com/sleep2agi/agent-network/tree/main/server/src)）都已迁移到参数化方式。R252 校准：原 doc 写「85+」是 v0.5 时代估算，server 端代码量翻倍后实际 150+。
 
 ## 数据库安全
 
@@ -312,13 +312,13 @@ chmod 600 ~/.commhub/commhub.db
 
 ### 敏感数据
 
-| 数据 | 存储方式 |
-|------|---------|
-| 密码 | SHA-256 哈希 |
-| Token | SHA-256 哈希 |
-| API Key | 不存储（环境变量） |
-| 任务内容 | 明文（可加密） |
-| 审计日志 | 明文 |
+| 数据 | 存储方式 | 细节 |
+|------|---------|------|
+| 密码 | SHA-256 哈希 + 静态 prefix salt `anet:` | [db.ts:403-405](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L403)；非 per-user salt，Argon2id 迁移见 [::: info 计划](#密码安全)（R248 chain） |
+| Token | SHA-256 哈希（无 salt） | token 是 `crypto.randomUUID()` 128-bit 随机值，rainbow table 不适用 |
+| API Key | 不存储（仅 process env / config.env） | agent-node 进程内 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env，hub 端 db 不存 |
+| 任务内容 | 明文 | `tasks.content` 列；多用户共享 hub 时 admin 能看所有；R195 chain `audit_log` 不含 task body |
+| 审计日志 | 明文 | `audit_log` 10 列含 user_id / username / action / detail / ip / network_id（R195 chain） |
 
 ## 通信安全
 

@@ -289,7 +289,7 @@ db.run("SELECT * FROM sessions WHERE alias = ?1", [alias]);
 db.run(`SELECT * FROM sessions WHERE alias = '${alias}'`);
 ```
 
-All 85+ `db.query()` calls have been migrated to parameterized approach.
+All `db.run()` / `db.get()` / `db.all()` calls ([currently 150+ across `server/src/*.ts`](https://github.com/sleep2agi/agent-network/tree/main/server/src)) use parameterized binding. R252 calibration: the older "85+" figure was a v0.5-era estimate; the server codebase has roughly doubled since.
 
 ## Database Security
 
@@ -312,13 +312,13 @@ chmod 600 ~/.commhub/commhub.db
 
 ### Sensitive Data
 
-| Data | Storage Method |
-|------|---------|
-| Passwords | SHA-256 hash |
-| Tokens | SHA-256 hash |
-| API Keys | Not stored (environment variables) |
-| Task content | Plaintext (encryptable) |
-| Audit logs | Plaintext |
+| Data | Storage method | Details |
+|------|---------|------|
+| Passwords | SHA-256 hash + static prefix salt `anet:` | [db.ts:403-405](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L403); not a per-user salt — Argon2id migration plan in the [::: info above](#password-security) (R248 chain) |
+| Tokens | SHA-256 hash (no salt) | Tokens are `crypto.randomUUID()` 128-bit random values; rainbow tables do not apply |
+| API keys | Not stored (only `process.env` / `config.env`) | Agent-node reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from env; the hub's DB does not store them |
+| Task content | Plaintext | The `tasks.content` column; on a shared hub, admins can read everything. R195 chain: `audit_log` does not contain task bodies |
+| Audit logs | Plaintext | `audit_log` has 10 columns including `user_id` / `username` / `action` / `detail` / `ip` / `network_id` (R195 chain) |
 
 ## Communication Security
 
