@@ -393,6 +393,14 @@ send_task({
 }
 ```
 
+::: warning 限制
+- 只能 reassign **非终态**任务：`created` / `delivered` / `acked` / `running`（[`tools.ts:851`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L851) 反向拒掉 `replied` / `failed` / `cancelled` / `expired`，返回 `{ok: false, error: "task is terminal (<status>)"}`）
+- 旧 alias 的 inbox row 被 `acked=1`（[`tools.ts:858`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L858)），原 agent 不会再 pick up
+- 任务 status reset 到 `delivered`，`started_at` 清空，`delivered_at` 刷新到当前 time（[`tools.ts:863`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L863)）—— 正在 `running` 的任务会被中断
+- TTL（`expires_at`）**不改**（跟 [`retry_task`](#retry_task) 的「固定 +1h」不同）；用原任务剩余时间
+- 新 alias 拿到新 UUID 的 inbox row + `new_task` SSE 事件
+:::
+
 ---
 
 ## 查询工具

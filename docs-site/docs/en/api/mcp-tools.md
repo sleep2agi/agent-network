@@ -393,6 +393,14 @@ Reassign a task to another agent.
 }
 ```
 
+::: warning Constraint
+- Reassign works only on **non-terminal** tasks: `created` / `delivered` / `acked` / `running` ([`tools.ts:851`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L851) rejects `replied` / `failed` / `cancelled` / `expired` with `{ok: false, error: "task is terminal (<status>)"}`)
+- The old alias's inbox row is `acked=1` ([`tools.ts:858`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L858)) so the original agent will not pick it up
+- Task status resets to `delivered`, `started_at` clears, `delivered_at` refreshes to now ([`tools.ts:863`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L863)) — a `running` task is interrupted
+- TTL (`expires_at`) is **not modified** (unlike [`retry_task`](#retry_task) which forces `+1 hour`); the task keeps its remaining time
+- The new alias receives a fresh-UUID inbox row + a `new_task` SSE event
+:::
+
 ---
 
 ## Query Tools
