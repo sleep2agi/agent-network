@@ -185,7 +185,7 @@ anet node start remote-agent                    # start
 ```
 
 ::: warning Do not copy `.anet/nodes/<name>/config.json` across machines
-The `node_id` inside the config is a unique ID assigned by the hub at registration. Copying it makes both machines claim the same node, and hub-side SSE routing breaks (whichever connection arrives first receives the task; the second one is silently ignored).
+The `node_id` inside the config is a stable ID generated **locally** by `anet node create` (`generateNodeId()`; the CommHub `resume_id` is `sdk-${node_id}`). Copying it makes both machines use the same `node_id` → the same `resume_id`, and hub-side SSE routing breaks (whichever connection arrives first receives the task; the second one is silently ignored).
 
 If you really need to move a node from machine A to machine B (instead of creating a new one), use `anet node rename` or just re-run `anet node create` on B.
 :::

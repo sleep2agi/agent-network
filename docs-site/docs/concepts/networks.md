@@ -185,7 +185,7 @@ anet node start remote-agent                     # 启动
 ```
 
 ::: warning 不要跨机 copy `.anet/nodes/<name>/config.json`
-config 里的 `node_id` 是 hub 端注册时分配的唯一 ID。复制到另一台机器会让两台机器都报告同一个 node，hub 端 SSE 路由会乱（先到的连接接收 task，第二台机器收不到）。
+config 里的 `node_id` 是 `anet node create` 时**本地随机生成**的稳定 ID（`generateNodeId()`，CommHub `resume_id` = `sdk-${node_id}`）。复制到另一台机器会让两台机器用同一个 `node_id` → 同一个 `resume_id`，hub 端 SSE 路由会乱（先到的连接接收 task，第二台机器收不到）。
 
 如果一定要把 config 从 A 机器移到 B 机器（而不是新建），用 `anet node rename` 或在 B 上重新 `anet node create`。
 :::
