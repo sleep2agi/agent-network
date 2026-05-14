@@ -241,7 +241,7 @@ erDiagram
     users ||--o{ api_tokens : "has"
 ```
 
-Additional tables: `completions` (completion records), `task_events` (task event log), `audit_log` (audit trail), `licenses` (licensing), `network_invites` (invite codes).
+Additional tables: `completions` (completion records), `task_events` (task event log), `audit_log` (audit trail), `licenses` (licensing), `network_invites` (invite codes), `rename_txn` (RFC-010 node-rename two-phase transaction state: `prepared` / `committed` / `aborted`).
 
 ### SSE Push Mechanism
 

@@ -241,7 +241,7 @@ erDiagram
     users ||--o{ api_tokens : "has"
 ```
 
-其他表：`completions`（完成记录）、`task_events`（任务事件日志）、`audit_log`（审计日志）、`licenses`（授权）、`network_invites`（邀请码）。
+其他表：`completions`（完成记录）、`task_events`（任务事件日志）、`audit_log`（审计日志）、`licenses`（授权）、`network_invites`（邀请码）、`rename_txn`（RFC-010 节点改名两阶段事务状态：`prepared` / `committed` / `aborted`）。
 
 ### SSE 推送机制
 
