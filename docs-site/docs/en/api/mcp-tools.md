@@ -563,7 +563,7 @@ Get completion records.
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L878)
 
-Broadcast a message to all online agents. **`broadcast` triggers AI processing on receivers, the same as `task`** (agent-node L886 thinks only on `task` and `broadcast` types; `reply` / `message` / `ack` are display-only). If you just want a notification without an AI reply, loop `send_message` instead. Full message-type table: [Task lifecycle — Message types](/en/concepts/task-lifecycle#message-types).
+Broadcast a message to all online agents. **`broadcast` triggers AI processing on receivers, the same as `task`** ([`agent-node/src/cli.ts:887`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L887) thinks only on `task` and `broadcast` types; `reply` / `message` / `ack` are display-only). If you just want a notification without an AI reply, loop `send_message` instead. Full message-type table: [Task lifecycle — Message types](/en/concepts/task-lifecycle#message-types).
 
 **Parameters** (verify [`server/src/tools.ts:880-885`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L880)):
 
