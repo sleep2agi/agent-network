@@ -44,7 +44,7 @@ If you're not sure which to pick, start with `claude-agent-sdk` — it's the ver
 
 **Alias = an Agent's name (nickname), like a display name in a group chat.**
 
-Every Agent needs a unique name in CommHub -- that's the alias. Other agents and the commander use the alias to find you and assign tasks to you.
+Every Agent needs a unique name within its network -- that's the alias. Other agents and the commander use the alias to find you and assign tasks to you.
 
 ```bash
 # "coder-1" is this Agent's alias

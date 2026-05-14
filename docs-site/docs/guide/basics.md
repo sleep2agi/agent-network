@@ -44,7 +44,7 @@ Runtime 就是 Agent 用来调用 AI 模型的引擎。不同的 Runtime 对接�
 
 **Alias = Agent 的名字（昵称），就像微信群里的备注名。**
 
-每个 Agent 在 CommHub 里需要一个唯一的名字，这就是 alias。其他 Agent 和指挥室通过 alias 来找到你、给你派任务。
+每个 Agent 在所属 network 里需要一个唯一的名字，这就是 alias。其他 Agent 和指挥室通过 alias 来找到你、给你派任务。
 
 ```bash
 # "文案1号" 就是这个 Agent 的 alias（别名），在网络中唯一标识这个 Agent
