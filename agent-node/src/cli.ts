@@ -167,6 +167,15 @@ let TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean)
 // "Reached maximum number of turns (5)" — which is what Vincent saw.
 const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "50");
 const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
+// Wall-clock guard for the claude-agent-sdk query(). The SDK has no HTTP-level
+// timeout: a custom ANTHROPIC_BASE_URL endpoint that accepts the connection but
+// never streams a valid response leaves query() hanging forever and the agent
+// never replies (see issue #98). When the guard fires we abort the query and
+// reply an error so the hang is at least visible. 0 disables the guard.
+const CLAUDE_TIMEOUT_MS = parseInt(
+  opts["claude-timeout-ms"] || process.env.CLAUDE_TIMEOUT_MS
+  || fileConfig.flags?.claudeTimeoutMs || fileConfig.claudeTimeoutMs || "120000"
+);
 const NEW_SESSION = opts["new-session"] === "true";
 const SESSION_ID = NEW_SESSION ? "" : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "");
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
@@ -550,21 +559,43 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   let result = "";
   const t0 = Date.now();
   log(`[claude] claudePath=${claudePath || "SDK default"}, mcpServers=${Object.keys(mcpServers).join(",") || "none"}`);
-  for await (const message of query({ prompt, options })) {
-    const m = message as any;
-    if (m.type === "system" && m.subtype === "init") {
-      claudeSessionId = m.session_id;
-      log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "default"}`);
-      writebackSession(m.session_id);
+
+  // Wall-clock guard: abort the query if it never produces a result. Without
+  // this a non-responsive endpoint hangs query() forever (issue #98).
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (CLAUDE_TIMEOUT_MS > 0) {
+    const ac = new AbortController();
+    options.abortController = ac;
+    timer = setTimeout(() => { timedOut = true; ac.abort(); }, CLAUDE_TIMEOUT_MS);
+  }
+  try {
+    for await (const message of query({ prompt, options })) {
+      const m = message as any;
+      if (m.type === "system" && m.subtype === "init") {
+        claudeSessionId = m.session_id;
+        log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "default"}`);
+        writebackSession(m.session_id);
+      }
+      if (m.type === "result") {
+        const dt = Date.now() - t0;
+        const u = m.usage || {};
+        log(`[claude] ${m.subtype} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}`);
+        result = m.subtype === "success"
+          ? m.result || "任务完成"
+          : `执行出错: ${m.error || m.result || "未知错误"}`;
+      }
     }
-    if (m.type === "result") {
+  } catch (err: any) {
+    if (timedOut) {
       const dt = Date.now() - t0;
-      const u = m.usage || {};
-      log(`[claude] ${m.subtype} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}`);
-      result = m.subtype === "success"
-        ? m.result || "任务完成"
-        : `执行出错: ${m.error || m.result || "未知错误"}`;
+      log(`[claude] ✗ timed out after ${dt}ms (CLAUDE_TIMEOUT_MS=${CLAUDE_TIMEOUT_MS}) — aborting query`);
+      return `执行出错: claude-agent-sdk 调用超时 (${Math.round(CLAUDE_TIMEOUT_MS / 1000)}s 无响应) — 检查 ANTHROPIC_BASE_URL endpoint 是否可达且 Anthropic-compatible`;
     }
+    log(`[claude] ✗ query error: ${String(err?.message || err).slice(0, 200)}`);
+    return `执行出错: ${String(err?.message || err).slice(0, 200)}`;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
   return result;
 }
