@@ -56,7 +56,7 @@ env vars 也认 `ANET_BATCH_API_KEY` 当 fallback。
 | `claude-haiku-4-5` | `claude-agent-sdk` | `claude-haiku-4-5` | (Anthropic default) |
 | `__custom__` | (输入) | (输入) | (输入) |
 
-字段值跟 `anet login` auth-fail guidance 列表 *same verified value set*（per commit 1bc03c0）—— preset 排序在 batch 这里把 `intern-s1-pro` 提到首位（用户用 batch 多半冲着 sci-team 这路），跟 cli.ts L1122+ 的顺序不严格一致，但 runtime / model / baseUrl 各值是 same source。codex-sdk preset **暂时不在列表里**——`__custom__` 自己填 runtime / model 仍可用，但默认 codex preset 还在 verify 中（follow-up issue 跟踪）。
+字段值跟 `anet login` auth-fail guidance 列表 *same verified value set*（per commit 1bc03c0）—— preset 排序在 batch 这里把 `intern-s1-pro` 提到首位（用户用 batch 多半冲着 sci-team 这路），跟 auth-fail guidance 的 choices 数组（`cli.ts:1164-1175`）顺序不严格一致，但 runtime / model / baseUrl 各值是 same source。codex-sdk preset **暂时不在列表里**——`__custom__` 自己填 runtime / model 仍可用，但默认 codex preset 还在 verify 中（follow-up issue 跟踪）。
 
 ## Lifecycle — `anet batch <verb>`
 
