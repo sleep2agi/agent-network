@@ -36,17 +36,15 @@ The server still runs `licenses.expires_at` checks inside `send_task` (V3 legacy
 
 ### 4. Which AI models are supported?
 
-Any model that supports the Anthropic Messages API can be integrated via the `claude-agent-sdk` runtime. Common providers (✅ = verified in cli.ts `MODEL_PRESETS`; ⚠ = tagged `[UNVERIFIED]` — endpoint URL filled in but no real-API regression run yet — R290 chain, see [runtimes — Verified vs not](/en/guide/runtimes#verified-vs-not)):
+Any model that supports the Anthropic Messages API can be integrated via the `claude-agent-sdk` runtime. Providers **built into** the `anet init` `VENDORS` list (every entry is verified-with-real-call before it lands — see [runtimes — Verified vs not](/en/guide/runtimes#verified-vs-not)):
 
-- ✅ Anthropic native SDK (Claude Sonnet / Opus / Haiku; see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview))
-- ✅ MiniMax (Anthropic-compatible; see [MiniMax platform](https://platform.minimaxi.com))
-- ✅ InternLM (Anthropic-compatible; see [InternLM chat](https://chat.intern-ai.org.cn))
-- ✅ OpenRouter (one API key for all upstream models — GPT-4 / Claude / Gemini / Llama, etc. — Anthropic-compatible API)
-- OpenAI Codex (`codex-sdk` runtime; see OpenAI Codex docs)
-- ⚠ DeepSeek (Anthropic-compatible; see [DeepSeek platform](https://platform.deepseek.com))
-- ⚠ Zhipu GLM (Anthropic-compatible; see [Zhipu open platform](https://open.bigmodel.cn))
-- ⚠ Moonshot Kimi (Anthropic-compatible; see [Moonshot platform](https://platform.moonshot.cn))
-- ⚠ Xiaomi MiMo (Anthropic-compatible; see [Xiaomi platform](https://platform.xiaomimimo.com))
+- **Anthropic** native SDK (Claude Sonnet / Opus / Haiku; see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview))
+- **MiniMax** (Anthropic-compatible; see [MiniMax platform](https://platform.minimaxi.com))
+- **InternLM** (Anthropic-compatible; see [InternLM chat](https://chat.intern-ai.org.cn))
+- **Xiaomi MiMo** (Anthropic-compatible; see [Xiaomi platform](https://platform.xiaomimimo.com))
+- **OpenAI Codex** (`codex-sdk` runtime; see OpenAI Codex docs)
+
+Providers NOT in the `VENDORS` list (DeepSeek / Zhipu GLM / Moonshot Kimi / OpenRouter, etc.) — reach them via the `custom` vendor: any Anthropic-compatible API accepts a base URL + model id there; usable, but verify it yourself first.
 
 Full endpoint table + configuration examples at [Multi-model](/en/guide/multi-model). Any provider that supports the Anthropic Messages API works via `ANTHROPIC_BASE_URL`.
 

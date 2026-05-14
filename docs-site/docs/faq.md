@@ -36,17 +36,15 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 ### 4. 支持哪些 AI 模型？
 
-任何支持 Anthropic Messages API 的模型都可以通过 `claude-agent-sdk` runtime 接入。常见 provider（✅ = cli.ts `MODEL_PRESETS` 已验证；⚠ = 标 `[UNVERIFIED]`，endpoint 填好但没跑通真 API 回归 —— R290 chain，详见 [runtimes 已验证 vs 未验证](/guide/runtimes#已验证-vs-未验证)）：
+任何支持 Anthropic Messages API 的模型都可以通过 `claude-agent-sdk` runtime 接入。`anet init` 的 `VENDORS` 列表里**内置**的 provider（每项都是 verified-with-real-call 才进列表，详见 [runtimes 已验证 vs 未验证](/guide/runtimes#已验证-vs-未验证)）：
 
-- ✅ Anthropic 原生 SDK（Claude Sonnet / Opus / Haiku；查 [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)）
-- ✅ MiniMax（Anthropic 兼容；查 [MiniMax 平台](https://platform.minimaxi.com)）
-- ✅ 书生 InternLM（Anthropic 兼容；查 [书生](https://chat.intern-ai.org.cn)）
-- ✅ OpenRouter（一个 Key 接 GPT-4 / Claude / Gemini / Llama 等所有上游模型，Anthropic 兼容 API）
-- OpenAI Codex（`codex-sdk` runtime；查 OpenAI Codex 文档）
-- ⚠ DeepSeek（Anthropic 兼容；查 [DeepSeek 平台](https://platform.deepseek.com)）
-- ⚠ 智谱 GLM（Anthropic 兼容；查 [智谱开放平台](https://open.bigmodel.cn)）
-- ⚠ Moonshot Kimi（Anthropic 兼容；查 [Moonshot 平台](https://platform.moonshot.cn)）
-- ⚠ 小米 MiMo（Anthropic 兼容；查 [小米开放平台](https://platform.xiaomimimo.com)）
+- **Anthropic** 原生 SDK（Claude Sonnet / Opus / Haiku；查 [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)）
+- **MiniMax**（Anthropic 兼容；查 [MiniMax 平台](https://platform.minimaxi.com)）
+- **书生 InternLM**（Anthropic 兼容；查 [书生](https://chat.intern-ai.org.cn)）
+- **小米 MiMo**（Anthropic 兼容；查 [小米开放平台](https://platform.xiaomimimo.com)）
+- **OpenAI Codex**（`codex-sdk` runtime；查 OpenAI Codex 文档）
+
+未进 `VENDORS` 列表的 provider（DeepSeek / 智谱 GLM / Moonshot Kimi / OpenRouter 等）—— 用「自定义 `custom`」供应商接入：任何 Anthropic 兼容 API 都能填 base URL + model id，能用但请自己先跑通验证。
 
 完整 endpoint 表 + 配置示例见 [多模型配置](/guide/multi-model)。任何支持 Anthropic Messages API 的服务商都可以通过 `ANTHROPIC_BASE_URL` 接入。
 

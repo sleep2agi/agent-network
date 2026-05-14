@@ -165,7 +165,7 @@ You can also do this in two commands: `anet init --hub http://<HUB-LAN-IP>:9200`
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
-- `anet node create / start / delete / ls` — the `claude-agent-sdk` runtime + CLI flow itself is verified; at the vendor level only **Anthropic / MiniMax / InternLM / OpenRouter** are verified, while **DeepSeek / GLM / Kimi / Xiaomi MiMo** are presets tagged `[UNVERIFIED]` in cli.ts `MODEL_PRESETS` — endpoint URLs filled in but no real-API regression run yet (see [runtimes — Verified vs not](/en/guide/runtimes#verified-vs-not) + [full provider table](/en/guide/multi-model))
+- `anet node create / start / delete / ls` — the `claude-agent-sdk` runtime + CLI flow itself is verified; at the vendor level the `anet init` `VENDORS` list — **Anthropic / MiniMax / InternLM / Xiaomi MiMo** — each entry is verified-with-real-call before it lands; **DeepSeek / GLM / Kimi / OpenRouter** are NOT in the `VENDORS` list, reach them via the `custom` vendor and verify yourself (see [runtimes — Verified vs not](/en/guide/runtimes#verified-vs-not) + [full provider table](/en/guide/multi-model))
 - Dashboard chat: markdown, Enter-to-send, optimistic echo, source labels, failure rendering, persistent history
 - Multi-agent coordination via `get_all_status` + `send_task` + `get_task`, with `parent_task_id` chaining handled by the Agent Node wrapper
 - LAN-shared hub
