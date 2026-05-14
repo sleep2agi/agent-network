@@ -9,7 +9,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | Role | Typical use | One-liner |
 |---|---|---|
 | **owner** | Network creator, top of the hierarchy | Manage members + delete network + all admin ops |
-| **admin** | Team lead / trusted operator | Add/remove members + admin-only endpoints (`/api/audit-log`, `/api/users`, etc.) + hub settings |
+| **admin** | Team lead / trusted operator | Add/remove members + hub settings (Note: `/api/audit-log` / `/api/users` and other admin-only endpoints are gated by **system-level** `users.role='admin'`, **not** by network admin — see [hub-global admin](#hub-global-admin-special) below) |
 | **member** | Regular team engineer | Create / start agents, dispatch tasks, see network data |
 | **viewer** | Intern / auditor / read-only integration | Read only, no writes |
 
@@ -23,7 +23,8 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | List tasks (`anet tasks`) | ✅ | ✅ | ✅ | ✅ |
 | List agents (`anet status`) | ✅ | ✅ | ✅ | ✅ |
 | Read messages / completions | ✅ | ✅ | ✅ | ✅ |
-| View audit log | ❌ | ❌ | ✅ | ✅ |
+| View audit log (your own rows only) | ✅ | ✅ | ✅ | ✅ |
+| View audit log (other users' rows) | Only **system-level** `users.role='admin'` (**not** network admin; R262 chain) | | | |
 | **Agent lifecycle** | | | | |
 | Create agent (`anet node create`) | ❌ | ✅ | ✅ | ✅ |
 | Start / stop agent | ❌ | ✅ (own) | ✅ (any) | ✅ (any) |
@@ -40,10 +41,13 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | Create network | Any logged-in user (creator becomes owner) | | | |
 | Rename network | ❌ | ❌ | ✅ | ✅ |
 | Delete network | ❌ | ❌ | ❌ | ✅ |
-| **Hub-global** | | | | |
-| `/api/audit-log` | ❌ | ❌ | ✅ | ✅ |
-| `/api/admin/wipe-db` (and similar) | ❌ | ❌ | ✅ | ✅ |
-| `anet hub admin reset-user` (reset any user's password) | Local-only CLI command on the hub host, not role-gated | | | |
+| **Hub-global** (system-level `users.role` gate, **not** network role) | | | | |
+| `/api/audit-log` — your own rows | ✅ | ✅ | ✅ | ✅ |
+| `/api/audit-log` — all rows | Only `users.role='admin'` (R262 chain; verified at [`server/src/index.ts:1015-1018`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1015)) | | | |
+| `/api/users` (list users) | Only `users.role='admin'` (same system-level gate) | | | |
+| `/api/server-logs` (debug console) | Only `users.role='admin'` | | | |
+| `/api/admin/wipe-db` (and similar) | Only `users.role='admin'` | | | |
+| `anet hub admin reset-user` (reset any user's password) | Local-only CLI command on the hub host, not role-gated (the hub owner just needs local shell access) | | | |
 
 ---
 
@@ -53,8 +57,8 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 
 For interns, auditors, read-only integrations.
 
-- **Can**: any read endpoint (tasks, agent status, messages, completions), browse dashboard.
-- **Cannot**: any write op (dispatch, agent lifecycle, config changes), view audit log.
+- **Can**: any read endpoint (tasks, agent status, messages, completions), browse dashboard, **view their own audit log rows** (R262 chain).
+- **Cannot**: any write op (dispatch, agent lifecycle, config changes); read **other users'** `/api/audit-log` rows (cross-user access needs system-level `users.role='admin'`).
 
 Become a viewer:
 ```bash
@@ -76,10 +80,10 @@ anet network join <code>
 
 ### admin
 
-For team leads, trusted operators, anyone who needs to manage members or read audit logs.
+For team leads, trusted operators, anyone who needs to manage members.
 
-- **Can**: everything member can; add / remove members (cannot touch owner); change member roles (cannot promote to owner); modify any agent; view `/api/audit-log`; hit admin-only endpoints (`/api/audit-log`, `/api/users`, etc.).
-- **Cannot**: delete the network itself; remove an owner or promote anyone to owner.
+- **Can**: everything member can; add / remove members (cannot touch owner); change member roles (cannot promote to owner); modify any agent.
+- **Cannot**: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin; R262 chain). A network admin sees only their own audit log rows, same as members and viewers.
 
 Become an admin:
 ```bash
@@ -115,7 +119,8 @@ The 4 roles above are scoped to a single network. There is also a **hub-global a
 
 | Operation | network admin | hub-global admin (`admin` user) |
 |---|---|---|
-| `/api/audit-log` | ✅ | ✅ |
+| `/api/audit-log` — own rows | ✅ | ✅ |
+| `/api/audit-log` — all rows | ❌ (server auto-filters `WHERE user_id = self`) | ✅ (R262 chain; index.ts:1015-1018) |
 | `anet hub admin reset-user` (reset any user's password) | ❌ | ✅ (local-only) |
 | Create new users | ❌ | ✅ |
 | See all networks on the hub | ❌ (only ones they're a member of) | ✅ |

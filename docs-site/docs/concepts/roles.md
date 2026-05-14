@@ -9,7 +9,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 角色 | 典型用例 | 简介 |
 |---|---|---|
 | **owner** | network 创建者 / 唯一最高权 | 能改成员 + 能删 network + 全部 admin 操作 |
-| **admin** | 团队负责人 / 受信运维 | 能加减成员 + 能调 admin-only 端点 (`/api/audit-log`, `/api/users` 等) + 能改 hub 设置 |
+| **admin** | 团队负责人 / 受信运维 | 能加减成员 + 能改 hub 设置（注：`/api/audit-log` / `/api/users` 等 admin-only 端点是**系统级** `users.role='admin'` 限定，**不是** network admin；详见下方 [hub 全局 admin 特殊](#hub-全局-admin-特殊)） |
 | **member** | 普通团队工程师 | 能创建 / 启动 agent + 派 task + 看本网络数据 |
 | **viewer** | 实习生 / 审计员 / 只读对接 | 只能看，不能写 |
 
@@ -23,7 +23,8 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 看本网络任务 (`anet tasks`) | ✅ | ✅ | ✅ | ✅ |
 | 看本网络 agent 列表 (`anet status`) | ✅ | ✅ | ✅ | ✅ |
 | 看 messages / completions | ✅ | ✅ | ✅ | ✅ |
-| 看 audit log | ❌ | ❌ | ✅ | ✅ |
+| 看 audit log（只自己的 row） | ✅ | ✅ | ✅ | ✅ |
+| 看 audit log（其他人的 row） | 仅 **系统级** `users.role='admin'`（**不是** network admin；R262 chain） | | | |
 | **agent 生命周期** | | | | |
 | 创建 agent (`anet node create`) | ❌ | ✅ | ✅ | ✅ |
 | 启动 / 停止 agent | ❌ | ✅（自己创建的） | ✅（任何） | ✅（任何） |
@@ -40,10 +41,13 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 创建 network | 任何登录用户都能在 hub 全局建（创建者自动成 owner） | | | |
 | 重命名 network | ❌ | ❌ | ✅ | ✅ |
 | 删除 network | ❌ | ❌ | ❌ | ✅ |
-| **hub 全局** | | | | |
-| 看 `/api/audit-log` | ❌ | ❌ | ✅ | ✅ |
-| 调 `/api/admin/wipe-db` 等危险操作 | ❌ | ❌ | ✅ | ✅ |
-| `anet hub admin reset-user`（重置任意用户密码） | 仅 hub 本机命令行调用，与角色无关 | | | |
+| **hub 全局**（系统级 `users.role` 门控，**不是** 网络角色） | | | | |
+| 看 `/api/audit-log` 自己的 row | ✅ | ✅ | ✅ | ✅ |
+| 看 `/api/audit-log` 全部 row | 仅 `users.role='admin'`（R262 chain；verify [`server/src/index.ts:1015-1018`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1015)） | | | |
+| `/api/users` 看用户列表 | 仅 `users.role='admin'`（同上系统级） | | | |
+| `/api/server-logs` 调试 console | 仅 `users.role='admin'` | | | |
+| 调 `/api/admin/wipe-db` 等危险操作 | 仅 `users.role='admin'` | | | |
+| `anet hub admin reset-user`（重置任意用户密码） | 仅 hub 本机命令行调用，与角色无关（owner 本机权限即可） | | | |
 
 ---
 
@@ -59,7 +63,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 
 **不能干什么**：
 - ❌ 任何写操作（派 task / 启动 agent / 改 config）
-- ❌ 看 audit log（属于 admin 才能看）
+- ❌ 看其他人的 `/api/audit-log` row（系统级 `users.role='admin'` 才有跨用户访问；viewer **能看自己的** audit log row，R262 chain）
 
 **怎么变成 viewer**：
 ```bash
@@ -95,19 +99,18 @@ anet network join <code>                         # 用邀请码加入
 
 ### admin
 
-**给谁**：团队负责人、受信运维、需要管成员 / 看审计日志的人。
+**给谁**：团队负责人、受信运维、需要管成员的人。
 
 **能干什么**：
 - member 的全部
 - 加减 network 成员（不能动 owner）
 - 改成员 role（不能升到 owner）
 - 改 / 删 / 启动停止任何 agent（包括别人创建的）
-- 看 `/api/audit-log`
-- 调 admin-only 端点（`/api/audit-log`, `/api/users` 等）
 
 **不能干什么**：
 - ❌ 删除 network 本身（只有 owner 能）
 - ❌ 移除 owner / 把别人升到 owner
+- ❌ 看其他人的 `/api/audit-log` row —— admin-only 端点是**系统级** `users.role='admin'` 限定（**不是** network admin；R262 chain）；network admin 跟 viewer / member 一样只能看自己的 audit log row
 
 **怎么变成 admin**：
 ```bash
@@ -152,7 +155,8 @@ network 的 4 个 role（owner/admin/member/viewer）是**绑定到某个 networ
 
 | 操作 | network admin | hub 全局 admin (`admin` user) |
 |---|---|---|
-| 调 `/api/audit-log` | ✅ | ✅ |
+| 调 `/api/audit-log` 看**自己的** row | ✅ | ✅ |
+| 调 `/api/audit-log` 看**其他人** row | ❌（server 自动 `WHERE user_id = self` 过滤） | ✅（看全部，R262 chain；index.ts:1015-1018） |
 | `anet hub admin reset-user`（重置任意用户密码） | ❌ | ✅（仅 hub 本机调用） |
 | 创建新 user | ❌ | ✅（仅 hub 全局 admin） |
 | 看 hub 所有 network | ❌（只看自己有 role 的） | ✅ |
