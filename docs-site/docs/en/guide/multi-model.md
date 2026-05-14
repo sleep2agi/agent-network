@@ -9,12 +9,12 @@ Agent Network supports running agents with different AI models within the same n
 | **Claude Sonnet (latest line)** | `claude-agent-sdk` | Best-in-class reasoning, long context (see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)) | Mid-High |
 | **Claude Opus (latest line)** | `claude-agent-sdk` | Complex tasks, creative writing (same link) | Very high |
 | **Codex (codex-sdk)** | `codex-sdk` | Strong code generation, tool use | Medium |
-| **MiniMax M2.7** | `claude-agent-sdk` | Low cost, high throughput | Very low |
-| **InternLM Intern-S1-Pro** | `claude-agent-sdk` | Domestic model, scientific reasoning | Low |
+| **MiniMax (latest line)** | `claude-agent-sdk` | Low cost, high throughput (look up the latest model id at [platform.minimaxi.com](https://platform.minimaxi.com)) | Very low |
+| **InternLM Intern-S1-Pro** | `claude-agent-sdk` | Domestic model, scientific reasoning (Intern-S1-Pro is the current product line; no version suffix appended) | Low |
 | **DeepSeek** | `claude-agent-sdk` | Code + reasoning, excellent value | Low |
-| **GLM 5.1** | `claude-agent-sdk` | Strong Chinese understanding (Zhipu, `open.bigmodel.cn/anthropic`) | Low |
+| **GLM (latest line)** | `claude-agent-sdk` | Strong Chinese understanding (Zhipu, `open.bigmodel.cn/anthropic`; look up model id at [open.bigmodel.cn](https://open.bigmodel.cn)) | Low |
 | **Kimi** | `claude-agent-sdk` | Long-context Q&A (Moonshot, `api.moonshot.cn/anthropic`) | Low |
-| **Xiaomi MiMo V2.5** | `claude-agent-sdk` | Strong reasoning, low cost (Xiaomi, `api.xiaomimimo.com/anthropic`) | Low |
+| **Xiaomi MiMo (latest line)** | `claude-agent-sdk` | Strong reasoning, low cost (Xiaomi, `api.xiaomimimo.com/anthropic`; look up model id at [platform.xiaomimimo.com](https://platform.xiaomimimo.com)) | Low |
 | **OpenRouter (multi-model gateway)** | `claude-agent-sdk` | One API key, all upstream models (GPT-4 / Claude / Gemini / Llama, etc.); unified billing. Built-in `anet node create` preset; uses `openrouter.ai/api/v1` + `ANTHROPIC_AUTH_TOKEN`. | Upstream pass-through |
 
 ::: tip Any Anthropic-compatible provider works

@@ -8,12 +8,12 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 
 | 模型 | 服务商 | Runtime | API 地址 | 特点 | 成本 |
 |------|--------|---------|---------|------|------|
-| **MiniMax M2.7** | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | 低成本文案、翻译 | 极低 |
-| **DeepSeek V3** | DeepSeek | `claude-agent-sdk` | api.deepseek.com/anthropic | 代码+推理、性价比极高 | 极低 |
-| **GLM 5.1** | 智谱 | `claude-agent-sdk` | open.bigmodel.cn/anthropic | 中文理解强 | 低 |
-| **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn/anthropic | 科学推理 | 低 |
+| **MiniMax**（当前主线） | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | 低成本文案、翻译（model id 查 [platform.minimaxi.com](https://platform.minimaxi.com)） | 极低 |
+| **DeepSeek**（当前主线） | DeepSeek | `claude-agent-sdk` | api.deepseek.com/anthropic | 代码+推理、性价比极高（model id 查 [api-docs.deepseek.com](https://api-docs.deepseek.com)） | 极低 |
+| **GLM**（当前主线） | 智谱 | `claude-agent-sdk` | open.bigmodel.cn/anthropic | 中文理解强（model id 查 [open.bigmodel.cn](https://open.bigmodel.cn)） | 低 |
+| **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn/anthropic | 科学推理（Intern-S1-Pro 是当前产品名，不带版本号） | 低 |
 | **Kimi** | Moonshot | `claude-agent-sdk` | api.moonshot.cn/anthropic | 长文本处理 | 低 |
-| **小米 MiMo V2.5** | 小米 | `claude-agent-sdk` | api.xiaomimimo.com/anthropic | 推理强、低成本 | 低 |
+| **小米 MiMo**（当前主线） | 小米 | `claude-agent-sdk` | api.xiaomimimo.com/anthropic | 推理强、低成本（model id 查 [platform.xiaomimimo.com](https://platform.xiaomimimo.com)） | 低 |
 
 ::: tip 任何 Anthropic-compatible 提供商都能接
 上表是验证过的常用 provider，但 `claude-agent-sdk` 通过 `ANTHROPIC_BASE_URL` 接入**任何**支持 Anthropic Messages API 的服务商。没列出的服务商（自部署 vLLM / SiliconFlow / 通义千问 Anthropic 兼容端点等）也能用，只需把 `ANTHROPIC_BASE_URL` 指向对应平台的 Anthropic 兼容 endpoint，把 API Key 设到 `ANTHROPIC_AUTH_TOKEN` 即可。详见下方"配置方式"。
