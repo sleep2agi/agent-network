@@ -185,16 +185,21 @@ The auth token is supplied via the `token` field in `.anet/nodes/<name>/config.j
 
 ## Configuration Files
 
-Agent Node supports multiple configuration methods, from highest to lowest priority:
+Agent Node supports multiple configuration methods, from highest to lowest priority (verified at [`agent-node/src/cli.ts:100-134`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)):
 
 ```mermaid
 flowchart TD
-    A["Command-line parameters"] --> B["Environment variables"]
+    A["Command-line parameters<br/>(--alias / --runtime / --model etc.)"] --> B["Environment variables<br/>(COMMHUB_ALIAS / RUNTIME / MODEL / COMMHUB_URL / COMMHUB_TOKEN)"]
     B --> C["File specified via --config"]
-    C --> D[".anet/nodes/&lt;name&gt;/config.json"]
-    D --> E[".anet/profiles/&lt;name&gt;.json (legacy format)"]
-    E --> F[".agent-node.json (legacy format)"]
+    C --> D[".anet/nodes/&lt;ALIAS&gt;/config.json<br/>(v0.8 primary path)"]
+    D --> E[".anet/profiles/&lt;ALIAS&gt;.json<br/>(legacy compatibility)"]
+    E --> G["~/.anet/config.json<br/>(global fallback — only hub + token fields)"]
+    G --> F[".agent-node.json<br/>(legacy compatibility; only when D/E/G are all empty)"]
 ```
+
+::: tip Global `~/.anet/config.json` fallback
+After the project config is loaded, [`cli.ts:128-130`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L128) fills in the missing `hub` and `token` fields from the global `~/.anet/config.json`. **Only these two fields fall back across projects** — `runtime` / `model` / `tools` / `env` must be set via project `config.json` / CLI / env; global config does not cover them. Aligned with the [feedback_config_priority] memory ("project config overrides global at the field level; missing fields fall back to global").
+:::
 
 ### Full config.json Fields
 

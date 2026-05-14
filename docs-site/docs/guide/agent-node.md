@@ -185,16 +185,21 @@ token 由 `.anet/nodes/<name>/config.json` 的 `token` 字段或 `COMMHUB_TOKEN`
 
 ## 配置文件
 
-Agent Node 支持多种配置方式，优先级从高到低：
+Agent Node 支持多种配置方式，优先级从高到低（verify [`agent-node/src/cli.ts:100-134`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)）：
 
 ```mermaid
 flowchart TD
-    A["命令行参数"] --> B["环境变量"]
+    A["命令行参数<br/>(--alias / --runtime / --model 等)"] --> B["环境变量<br/>(COMMHUB_ALIAS / RUNTIME / MODEL / COMMHUB_URL / COMMHUB_TOKEN)"]
     B --> C["--config 指定的文件"]
-    C --> D[".anet/nodes/&lt;name&gt;/config.json"]
-    D --> E[".anet/profiles/&lt;name&gt;.json (旧格式兼容)"]
-    E --> F[".agent-node.json (旧格式兼容)"]
+    C --> D[".anet/nodes/&lt;ALIAS&gt;/config.json<br/>(v0.8 主路径)"]
+    D --> E[".anet/profiles/&lt;ALIAS&gt;.json<br/>(legacy 兼容)"]
+    E --> G["~/.anet/config.json<br/>(全局 fallback, 仅 hub + token 字段)"]
+    G --> F[".agent-node.json<br/>(legacy 兼容; 仅 D/E/G 都空时启用)"]
 ```
+
+::: tip 全局 `~/.anet/config.json` fallback
+[`cli.ts:128-130`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L128) 在加载完项目 config 后会用全局 `~/.anet/config.json` 的 `hub` 和 `token` 字段填空缺。**只有这两个字段会跨项目 fallback**——`runtime` / `model` / `tools` / `env` 等都必须在项目 `config.json` / CLI / env 提供，全局 config 不接管。跟 [feedback_config_priority] memory 一致（项目字段级覆盖全局，缺失字段 fallback 到全局）。
+:::
 
 ### config.json 完整字段
 
