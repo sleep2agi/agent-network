@@ -225,7 +225,7 @@ v0.6 designed a Free / Pro / Admin three-tier quota system (table below). After 
 
 | Quota | v0.8 actual behavior |
 |--------|---------------|
-| **Networks created** (`max_networks_owned`) | ✅ **Still enforced** — [`auth.ts:184-190 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184) reads `users.plan || "free"` and checks the `QUOTAS` cap; free defaults to **2**. Only `users.role='admin'` is exempt. |
+| **Networks created** (`max_networks_owned`) | ✅ **Still enforced** — [`auth.ts:196-200 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L196) reads `users.plan || "free"` and checks the `QUOTAS` cap; free defaults to **2**. Only `users.role='admin'` is exempt. |
 | Networks joined | ❌ Hub does not run quota checks on the join path |
 | Agents per network | ❌ |
 | Tasks per day | ❌ |
@@ -275,7 +275,7 @@ Network-related database tables:
 ```sql
 -- Networks table
 CREATE TABLE networks (
-  -- Base schema (db.ts:167-176)
+  -- Base schema (db.ts:168-177)
   network_id   TEXT PRIMARY KEY,
   network_name TEXT NOT NULL,
   owner_id     TEXT NOT NULL,
@@ -284,7 +284,7 @@ CREATE TABLE networks (
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(owner_id, network_name),         -- network name unique per owner
-  -- Columns added by the V3.13 ALTER TABLE migration (db.ts:275-277)
+  -- Columns added by the V3.13 ALTER TABLE migration (db.ts:276-278)
   visibility   TEXT DEFAULT 'private',  -- private/public (**field exists but currently inert** — see [Quota limits — v0.6 design / currently not enforced](#quota-limits-v0-6-design--currently-not-enforced))
   max_members  INTEGER DEFAULT 50        -- **field exists, server-side enforcement is OFF**: addNetworkMember + joinByInvite have no max_members gate. Reserved for the v0.6 quota system. See the quota-limits section below.
 );

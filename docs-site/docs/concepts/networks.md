@@ -225,7 +225,7 @@ v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 
 
 | 配额项 | v0.8 实际行为 |
 |--------|---------------|
-| **创建网络数** (`max_networks_owned`) | ✅ **仍 enforced** —— [`auth.ts:184-190 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184) 按 `users.plan || "free"` 查 `QUOTAS` 上限，free 默认 **2**，仅 `users.role='admin'` 豁免 |
+| **创建网络数** (`max_networks_owned`) | ✅ **仍 enforced** —— [`auth.ts:196-200 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L196) 按 `users.plan || "free"` 查 `QUOTAS` 上限，free 默认 **2**，仅 `users.role='admin'` 豁免 |
 | 加入网络数 | ❌ hub 没在 join path 调 quota check |
 | 每网络 Agent 数 | ❌ |
 | 每天任务数 | ❌ |
@@ -275,7 +275,7 @@ sql = addScope(sql, params, effectiveNetId);
 ```sql
 -- 网络表
 CREATE TABLE networks (
-  -- 基础 schema（db.ts:167-176）
+  -- 基础 schema（db.ts:168-177）
   network_id   TEXT PRIMARY KEY,
   network_name TEXT NOT NULL,
   owner_id     TEXT NOT NULL,
@@ -284,7 +284,7 @@ CREATE TABLE networks (
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(owner_id, network_name),         -- 同一 owner 下 network 名唯一
-  -- V3.13 ALTER TABLE 迁移补的列（db.ts:275-277）
+  -- V3.13 ALTER TABLE 迁移补的列（db.ts:276-278）
   visibility   TEXT DEFAULT 'private',  -- private/public (**字段存在, 当前不启用**, 见 L211 配额限制 section)
   max_members  INTEGER DEFAULT 50        -- **字段存在, server 端不强制检查**: addNetworkMember + joinByInvite 都没有 max_members gate, 是 v0.6 配额体系的预留字段, 见 [配额限制 v0.6 设计目标 — 当前未启用](#配额限制-v0-6-设计目标-当前未启用)
 );
