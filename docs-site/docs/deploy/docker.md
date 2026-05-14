@@ -120,7 +120,8 @@ ENTRYPOINT ["/entrypoint.sh"]
 set -e
 
 # 等待 Server 就绪
-until curl -sf http://$COMMHUB_URL/health; do
+# 注意：COMMHUB_URL 已含 http:// scheme（如 http://server:9200），不要再加前缀
+until curl -sf "$COMMHUB_URL/health"; do
   sleep 1
 done
 

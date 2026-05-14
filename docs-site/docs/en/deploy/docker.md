@@ -120,7 +120,8 @@ Key points:
 set -e
 
 # Wait for Server to be ready
-until curl -sf http://$COMMHUB_URL/health; do
+# Note: COMMHUB_URL already includes the http:// scheme (e.g. http://server:9200) — don't prefix it again
+until curl -sf "$COMMHUB_URL/health"; do
   sleep 1
 done
 
