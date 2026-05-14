@@ -10,7 +10,7 @@ CommHub Server 提供 REST API 供 Dashboard、CLI 和第三方系统调用。
 | 认证 | `Authorization: Bearer <token>` **（推荐）**；`?token=<token>` URL query 为 SSE / 浏览器 EventSource 保留（有 access-log 泄漏风险，详见 [安全设计](/concepts/security)） |
 | 内容类型 | `application/json` |
 | 编码 | UTF-8 |
-| Endpoint 数 | 30+（**11 类**：[公开 1](#公开端点) · [认证 5](#认证端点) · [网络 5](#网络端点) · [数据查询 9](#数据查询端点) · [任务派发 2](#任务派发端点) · [MCP 1](#mcp-端点) · [SSE 1](#sse-端点) · [Token 管理 4](#token-管理端点) · [网络成员 6](#网络成员端点) · [Tmux 调试 2 (opt-in)](#tmux-调试端点-opt-in) · [Legacy 2](#legacy-端点-v0-6-时代-oss-后不再演进)） |
+| Endpoint 数 | 30+（**12 类**：[公开 1](#公开端点) · [认证 5](#认证端点) · [网络 5](#网络端点) · [数据查询 9](#数据查询端点) · [任务派发 2](#任务派发端点) · [MCP 1](#mcp-端点) · [SSE 1](#sse-端点) · [Token 管理 4](#token-管理端点) · [网络成员 6](#网络成员端点) · [节点改名 3](#节点改名端点-rfc-010) · [Tmux 调试 2 (opt-in)](#tmux-调试端点-opt-in) · [Legacy 2](#legacy-端点-v0-6-时代-oss-后不再演进)） |
 | 全 endpoint source | [`server/src/index.ts:390-1160`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L390) |
 
 ## 公开端点
@@ -1550,6 +1550,60 @@ curl -X POST http://localhost:9200/api/networks/join \
 | 404 | 资源不存在 |
 | 429 | 速率限制 |
 | 500 | 服务器错误 |
+
+---
+
+## 节点改名端点（RFC-010）
+
+> RFC-010 active-rename 两阶段事务的协调端点，由 `anet node rename` 内部调用（流程见 [node-lifecycle §7](https://github.com/sleep2agi/agent-network/blob/main/docs/node-lifecycle.md)）。一般不直接手调，列在此处供集成方参考。三个端点都要 `Authorization: Bearer`（缺 token 401 / 无效 token 401）。
+
+### POST /api/node-rename/prepare
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L533)
+
+PHASE 1：登记一笔改名事务（old node 不动，全程可回滚）。成功后写 `node_rename_prepared` audit。
+
+```bash
+curl -X POST http://localhost:9200/api/node-rename/prepare \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"network_id":"net_xxx","old_alias":"old-bot","new_alias":"new-bot"}'
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `network_id` | ✅ | 节点所在网络 |
+| `old_alias` | ✅ | 当前 alias |
+| `new_alias` | ✅ | 目标 alias |
+
+**响应**：`{ ok, txn_id }` —— `txn_id` 用于后续 commit / abort。三个字段缺一返回 400。
+
+### POST /api/node-rename/commit
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L551)
+
+PHASE 2 C1：提交改名事务（CommHub 路由切到 `new_alias`）。成功后写 `node_rename_committed` audit。
+
+```bash
+curl -X POST http://localhost:9200/api/node-rename/commit \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"txn_id":"..."}'
+```
+
+body `{ txn_id }` 必填（缺则 400）。
+
+### POST /api/node-rename/abort
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L567)
+
+回滚改名事务（C1 之前调用，old node 恢复原状）。成功后写 `node_rename_aborted` audit。
+
+```bash
+curl -X POST http://localhost:9200/api/node-rename/abort \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"txn_id":"..."}'
+```
+
+body `{ txn_id }` 必填（缺则 400）。
 
 ---
 

@@ -10,7 +10,7 @@ CommHub Server provides a REST API for Dashboard, CLI, and third-party system in
 | Auth | `Authorization: Bearer <token>` **(recommended)**; `?token=<token>` URL query kept for SSE / browser EventSource (access-log leak risk — see [Security](/en/concepts/security)) |
 | Content Type | `application/json` |
 | Encoding | UTF-8 |
-| Endpoint count | 30+ across **11 groups**: [Public 1](#public-endpoints) · [Auth 5](#auth-endpoints) · [Network 5](#network-endpoints) · [Data Query 9](#data-query-endpoints) · [Task Dispatch 2](#task-dispatch-endpoints) · [MCP 1](#mcp-endpoint) · [SSE 1](#sse-endpoint) · [Token Management 4](#token-management-endpoints) · [Network Members 6](#network-member-endpoints) · [Tmux Debug 2 (opt-in)](#tmux-debug-endpoints-opt-in) · [Legacy 2](#legacy-endpoints-v0-6-era-frozen-in-oss) |
+| Endpoint count | 30+ across **12 groups**: [Public 1](#public-endpoints) · [Auth 5](#auth-endpoints) · [Network 5](#network-endpoints) · [Data Query 9](#data-query-endpoints) · [Task Dispatch 2](#task-dispatch-endpoints) · [MCP 1](#mcp-endpoint) · [SSE 1](#sse-endpoint) · [Token Management 4](#token-management-endpoints) · [Network Members 6](#network-member-endpoints) · [Node Rename 3](#node-rename-endpoints-rfc-010) · [Tmux Debug 2 (opt-in)](#tmux-debug-endpoints-opt-in) · [Legacy 2](#legacy-endpoints-v0-6-era-frozen-in-oss) |
 | Full endpoint source | [`server/src/index.ts:390-1160`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L390) |
 
 ## Public Endpoints
@@ -1550,6 +1550,60 @@ Errors usually return this shape:
 | 404 | Resource not found |
 | 429 | Rate limited |
 | 500 | Server error |
+
+---
+
+## Node Rename Endpoints (RFC-010)
+
+> Coordination endpoints for the RFC-010 active-rename two-phase transaction, called internally by `anet node rename` (flow: [node-lifecycle §7](https://github.com/sleep2agi/agent-network/blob/main/docs/node-lifecycle.md)). Not normally called by hand — listed here for integrators. All three require `Authorization: Bearer` (missing token 401 / invalid token 401).
+
+### POST /api/node-rename/prepare
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L533)
+
+PHASE 1: register a rename transaction (old node untouched, fully rollbackable). On success writes a `node_rename_prepared` audit row.
+
+```bash
+curl -X POST http://localhost:9200/api/node-rename/prepare \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"network_id":"net_xxx","old_alias":"old-bot","new_alias":"new-bot"}'
+```
+
+| Field | Required | Description |
+|------|------|------|
+| `network_id` | ✅ | Network the node belongs to |
+| `old_alias` | ✅ | Current alias |
+| `new_alias` | ✅ | Target alias |
+
+**Response**: `{ ok, txn_id }` — `txn_id` is used for the subsequent commit / abort. Missing any of the three fields returns 400.
+
+### POST /api/node-rename/commit
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L551)
+
+PHASE 2 C1: commit the rename transaction (CommHub routing switches to `new_alias`). On success writes a `node_rename_committed` audit row.
+
+```bash
+curl -X POST http://localhost:9200/api/node-rename/commit \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"txn_id":"..."}'
+```
+
+body `{ txn_id }` is required (missing → 400).
+
+### POST /api/node-rename/abort
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L567)
+
+Roll back the rename transaction (called before C1; old node restored). On success writes a `node_rename_aborted` audit row.
+
+```bash
+curl -X POST http://localhost:9200/api/node-rename/abort \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"txn_id":"..."}'
+```
+
+body `{ txn_id }` is required (missing → 400).
 
 ---
 
