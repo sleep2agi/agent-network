@@ -1471,70 +1471,41 @@ async function createCommand(idOverride?: string) {
     { key: "custom",     label: "自定义 — 输入你的 baseUrl",                  baseUrl: "",                                        signupUrl: "" },
   ];
 
-  // Step 1: pick runtime if not supplied via --runtime.
-  if (!opts.runtime && process.stdin.isTTY) {
-    try {
-      const { select: sel } = await import("@inquirer/prompts");
-      opts.runtime = await sel({
-        message: "选择 runtime:",
-        choices: RUNTIME_CHOICES,
-      });
-    } catch (e: any) {
-      console.log(`[anet] ⚠ Runtime selector failed: ${e?.message || e}`);
-      console.log(`[anet]   Defaulting to claude-agent-sdk. To pick explicitly:`);
-      console.log(`[anet]   anet node create ${id} --runtime claude-agent-sdk|codex-sdk|claude-code-cli`);
-      // Critical: also set opts.runtime so step 2 (provider+key prompt) still
-      // runs. Without this the user gets a node with claude-agent-sdk runtime
-      // but no API key, every task fails.
-      opts.runtime = "claude-agent-sdk";
-    }
-  }
-
-  // Step 2: provider + key, only for claude-agent-sdk and only if we don't already have a key.
-  // Also skip when caller already supplied an Anthropic credential via --env on
-  // the command line — demo subcommands (debate / socialmedia) drive
-  // createCommand programmatically and pre-fill the key, so prompting again
-  // would block the run.
+  // Vendor-first selection (#104-B B2.2): pick vendor → that vendor's model →
+  // runtime + baseUrl + envKey resolved from the VENDORS registry. Replaces the
+  // old two-step runtime-picker + provider-picker.
+  //
+  // Skipped when a credential is already supplied via --env (demo subcommands
+  // pre-fill it programmatically — prompting again would block the run) or when
+  // a non-claude-agent-sdk runtime was explicitly flagged via --runtime (just
+  // print the login hint, as before).
   const envFlagHasAuth = (opts._envs || []).some((e: string) =>
     e.startsWith("ANTHROPIC_AUTH_TOKEN=") || e.startsWith("ANTHROPIC_API_KEY=")
   );
-  const wantsProviderPrompt = opts.runtime === "claude-agent-sdk"
-    && !process.env.ANTHROPIC_AUTH_TOKEN
-    && !process.env.ANTHROPIC_API_KEY
-    && !envFlagHasAuth;
-  if (wantsProviderPrompt && process.stdin.isTTY) {
-    try {
-      const { select: sel } = await import("@inquirer/prompts");
-      const provider = await sel({
-        message: "选择模型 provider:",
-        choices: PROVIDER_CHOICES.map(p => ({ value: p.key, name: p.label })),
-      });
-      const cfg = PROVIDER_CHOICES.find(p => p.key === provider)!;
-      let baseUrl = cfg.baseUrl;
-      if (cfg.key === "custom") {
-        baseUrl = await ask("baseUrl (e.g. https://your-host/anthropic)") || "";
-      }
-      // Verified vendor presets: pin the model id (runtime stays the default
-      // claude-agent-sdk). intern — #98 confirmed claude-agent-sdk ↔ intern
-      // compatible; intern-s2-preview verified by 通信测试马 real-call
-      // 2026-05-14. mimo — verified by 通信SDK马 real-call 2026-05-15 (#104).
-      if (cfg.key === "intern-s2-preview") {
-        opts.model = "intern-s2-preview";
-      } else if (cfg.key === "intern") {
-        opts.model = "intern-s1-pro";
-      } else if (cfg.key === "mimo") {
-        opts.model = "mimo-v2.5-pro";
-      }
-      if (cfg.signupUrl) {
-        console.log(`[anet] 没有 Key？去 ${cfg.signupUrl} 注册并创建 API Key`);
-      }
-      const key = await ask(`输入 API Key (${cfg.key})`);
-      const envKey = cfg.key === "claude" ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN";
+  const credAlreadyProvided = !!process.env.ANTHROPIC_AUTH_TOKEN
+    || !!process.env.ANTHROPIC_API_KEY || envFlagHasAuth;
+  const skipInteractive = credAlreadyProvided
+    || opts.runtime === "codex-sdk" || opts.runtime === "claude-code-cli";
+  if (!skipInteractive && process.stdin.isTTY) {
+    const sel = await selectVendorAndModel();
+    if (sel) {
+      opts.runtime = sel.runtime;
+      if (sel.model) opts.model = sel.model;
       opts._envs = opts._envs || [];
-      if (baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${baseUrl}`);
-      if (key) opts._envs.push(`${envKey}=${key}`);
-    } catch (e: any) {
-      console.log(`[anet] ⚠ Provider selector failed: ${e?.message || e}`);
+      if (sel.baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${sel.baseUrl}`);
+      if (sel.envKey) {
+        if (sel.signupUrl) console.log(`[anet] 没有 Key？去 ${sel.signupUrl} 注册并创建 API Key`);
+        const key = await ask(`输入 API Key (${sel.vendorKey})`);
+        if (key) opts._envs.push(`${sel.envKey}=${key}`);
+      }
+      if (sel.requiresAuth === "codex") {
+        console.log("[anet] 请确保已执行: codex auth login");
+      } else if (sel.requiresAuth === "claude") {
+        console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
+      }
+    } else {
+      console.log(`[anet] ⚠ vendor selector unavailable — defaulting to claude-agent-sdk runtime`);
+      opts.runtime = "claude-agent-sdk";
     }
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex auth login");
