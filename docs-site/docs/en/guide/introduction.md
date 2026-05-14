@@ -87,21 +87,23 @@ graph TB
     FS -->|Channel Plugin| A1
 ```
 
-## Three Packages, Clear Responsibilities
+## Four Packages, Clear Responsibilities
 
-Agent Network consists of three npm packages, each with a distinct role:
+Agent Network consists of four npm packages, each with a distinct role:
 
 | Package | Purpose | Installation |
 |------|------|---------|
 | `@sleep2agi/agent-network` | **anet CLI** -- config management, server control, status monitoring | `npm i -g @sleep2agi/agent-network` |
 | `@sleep2agi/agent-node` | **Agent runtime** -- AI model + tool calling + task processing | `anet node create` + `anet node start` |
 | `@sleep2agi/commhub-server` | **Communication hub** -- message routing + SSE push + task management | `anet hub start` |
+| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- visual monitoring + task management (Chat / Nodes / Tasks / Messages / Networks / Logs / Admin) | `anet hub dashboard` (auto-launched by the CLI) |
 
-The three packages can be used independently or together:
+These packages can be used independently or together:
 
 - **CLI management only**: install `@sleep2agi/agent-network`
 - **Agent runtime only**: `anet node create` + `anet node start`
 - **Communication server only**: `bunx @sleep2agi/commhub-server`
+- **Web UI only**: `anet hub dashboard`
 
 ## What Can You Build?
 

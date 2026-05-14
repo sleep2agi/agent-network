@@ -87,21 +87,23 @@ graph TB
     FS -->|Channel Plugin| A1
 ```
 
-## 三个包，各司其职
+## 四个包，各司其职
 
-Agent Network 由三个 npm 包组成，职责清晰：
+Agent Network 由四个 npm 包组成，职责清晰：
 
 | 包名 | 用途 | 安装方式 |
 |------|------|---------|
 | `@sleep2agi/agent-network` | **anet CLI** -- 配置管理、启动服务、状态监控 | `npm i -g @sleep2agi/agent-network` |
 | `@sleep2agi/agent-node` | **Agent 运行时** -- AI 模型 + 工具调用 + 任务处理 | `anet node create` + `anet node start` |
 | `@sleep2agi/commhub-server` | **通信中枢** -- 消息路由 + SSE 推送 + 任务管理 | `anet hub start` |
+| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- 可视化监控 + 任务管理（Chat / Nodes / Tasks / Messages / Networks / Logs / Admin）| `anet hub dashboard`（CLI 自动拉起）|
 
-三个包可以独立使用，也可以配合使用：
+这些包可以独立使用，也可以配合使用：
 
 - **只需 CLI 管控**：安装 `@sleep2agi/agent-network`
 - **只需 Agent 运行时**：`anet node create` + `anet node start`
 - **只需通信服务**：`bunx @sleep2agi/commhub-server`
+- **只需 Web 界面**：`anet hub dashboard`
 
 ## 能拿来干什么？
 
