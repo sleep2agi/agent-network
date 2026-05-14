@@ -147,11 +147,15 @@ Channel 插件是一个 MCP Server（stdio 模式），提供消息接收和回�
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": [".anet/node-server.ts"]
+      "args": [".anet/node-server.js"]
     }
   }
 }
 ```
+
+::: tip 文件名是 `.js` 不是 `.ts`
+落盘到项目目录的文件是 `.anet/node-server.js`（[`cli.ts:1492 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1492) 自动复制 npm 包 `dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底，但最终落盘统一为 `.js`）。R216/R221 chain 一致。
+:::
 
 Channel 插件同时：
 

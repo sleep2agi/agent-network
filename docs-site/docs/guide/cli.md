@@ -477,7 +477,7 @@ anet init project
 ├── .mcp.json            # MCP Server 配置
 ├── CLAUDE.md            # Agent 行为规则
 └── .anet/
-    ├── node-server.ts   # Channel 插件
+    ├── node-server.js   # Channel 插件（自动从 npm 包 dist/src/node-server.js 复制；R216/R221 chain 一致）
     └── package.json     # 依赖
 ```
 
@@ -489,7 +489,7 @@ anet init project
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": [".anet/node-server.ts"]
+      "args": [".anet/node-server.js"]
     }
   }
 }

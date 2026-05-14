@@ -148,11 +148,15 @@ A channel plugin is an MCP Server (stdio mode) that provides message receiving a
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": [".anet/node-server.ts"]
+      "args": [".anet/node-server.js"]
     }
   }
 }
 ```
+
+::: tip The filename is `.js`, not `.ts`
+The file installed in your project is `.anet/node-server.js` ([`cli.ts:1492 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1492) copies from the npm package — preferring `dist/src/node-server.js`, falling back to `src/node-server.ts` — but the on-disk filename is always `.js`). Aligned with R216/R221 chain.
+:::
 
 The channel plugin simultaneously:
 

@@ -449,7 +449,7 @@ anet init project
 ├── .mcp.json            # MCP Server config
 ├── CLAUDE.md            # Agent behavior rules
 └── .anet/
-    ├── node-server.ts   # Channel plugin
+    ├── node-server.js   # Channel plugin (auto-copied from the npm package's dist/src/node-server.js; aligned with R216/R221 chain)
     └── package.json     # Dependencies
 ```
 
@@ -461,7 +461,7 @@ anet init project
     "commhub": {
       "type": "stdio",
       "command": "bun",
-      "args": [".anet/node-server.ts"]
+      "args": [".anet/node-server.js"]
     }
   }
 }
