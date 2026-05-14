@@ -11,7 +11,8 @@ cd demos/codex-telegram-squad
 cp .env.example .env
 # Edit .env to fill in tokens and API keys
 
-# 2. Start (12 containers)
+# 2. Start (14 services: server + commander + worker-1..10 + seed + dashboard;
+#    seed exits after running, so 13 long-running containers at steady state)
 docker compose up -d
 
 # 3. Check status

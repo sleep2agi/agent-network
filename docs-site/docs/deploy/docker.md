@@ -11,7 +11,8 @@ cd demos/codex-telegram-squad
 cp .env.example .env
 # 编辑 .env 填入 Token 和 API Key
 
-# 2. 启动（12 个容器）
+# 2. 启动（14 个 service：server + commander + worker-1~10 + seed + dashboard；
+#    seed 跑完即退，稳态 13 个长期运行容器）
 docker compose up -d
 
 # 3. 查看状态
