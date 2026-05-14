@@ -112,10 +112,9 @@ kill <PID>
 
 | File | Path | Contents |
 |------|------|------|
-| Global config | `~/.anet/config.json` | Hub address, token |
-| Project config | `{project}/.anet/config.json` | Alias, type |
-| Node config | `.anet/nodes/<node-name>/config.json` | Runtime, model, tools (directory name is the alias, not the internal `node_id`) |
-| Database | `~/.commhub/commhub.db` | SQLite data |
+| Global config | `~/.anet/config.json` | Hub address, `utok_`, current active network |
+| Node config | `{cwd}/.anet/nodes/<alias>/config.json` | Runtime, model, tools, `ntok_`, env, flags (directory name is the alias, not the internal `node_id`; see [architecture R222 calibration](https://github.com/sleep2agi/agent-network/blob/main/docs/architecture.md#2-配置文件--r222-校准v08-实际-schema)) |
+| Database | `~/.commhub/commhub.db` | Hub-side SQLite (WAL mode) |
 
 ## Agent Issues
 

@@ -112,10 +112,9 @@ kill <PID>
 
 | 文件 | 路径 | 内容 |
 |------|------|------|
-| 全局配置 | `~/.anet/config.json` | hub 地址、token |
-| 项目配置 | `{项目}/.anet/config.json` | alias、type |
-| 节点配置 | `.anet/nodes/<node-name>/config.json` | runtime、model、tools（目录名是 alias，不是内部 node_id） |
-| 数据库 | `~/.commhub/commhub.db` | SQLite 数据 |
+| 全局配置 | `~/.anet/config.json` | hub 地址、`utok_`、当前激活 network |
+| 节点配置 | `{cwd}/.anet/nodes/<alias>/config.json` | runtime、model、tools、`ntok_`、env、flags（目录名是 alias，不是内部 `node_id`；详见 [architecture R222 校准](https://github.com/sleep2agi/agent-network/blob/main/docs/architecture.md#2-配置文件--r222-校准v08-实际-schema)） |
+| 数据库 | `~/.commhub/commhub.db` | hub 端 SQLite（WAL 模式） |
 
 ## Agent 问题
 
