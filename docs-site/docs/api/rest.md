@@ -56,7 +56,7 @@ curl http://localhost:9200/health
 ### POST /api/auth/register
 
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L427)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L428)
 
 注册新用户。第一个注册的用户自动成为管理员。
 
@@ -112,7 +112,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 | 400 | `password must be at least 8 characters` | 第二个起注册用户密码 < 8 |
 | 400 | `password must be at least 4 characters` | 首位用户（bootstrap admin）密码 < 4 |
 | 400 | `password is too common` | 命中弱密码字典（[`password-dict.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)，首位用户豁免） |
-| 429 | `too many requests, try again later` | 超过 30/分 IP rate limit（[`index.ts:429`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L429)；localhost 豁免，详见 [安全 — IP rate limit](/concepts/security#ip-级别限制)）|
+| 429 | `too many requests, try again later` | 超过 30/分 IP rate limit（[`index.ts:430`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L430)；localhost 豁免，详见 [安全 — IP rate limit](/concepts/security#ip-级别限制)）|
 
 **速率限制**：30 次/分钟 per IP。
 
@@ -121,7 +121,7 @@ curl -X POST http://localhost:9200/api/auth/register \
 ### POST /api/auth/login
 
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L442)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L443)
 
 用户登录。
 
@@ -159,7 +159,7 @@ curl -X POST http://localhost:9200/api/auth/login \
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
 | 401 | `invalid username or password` | 用户名不存在 **或** 密码哈希不匹配（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration）；server 同时写 `login_failed` audit |
-| 429 | `too many attempts, try again later` | 超过 10/分 IP rate limit（[`index.ts:444`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L444)；触发时写 `login_rate_limited` audit + clientIP）|
+| 429 | `too many attempts, try again later` | 超过 10/分 IP rate limit（[`index.ts:445`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L445)；触发时写 `login_rate_limited` audit + clientIP）|
 
 **速率限制**：10 次/分钟 per IP。
 

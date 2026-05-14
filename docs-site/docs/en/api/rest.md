@@ -56,7 +56,7 @@ curl http://localhost:9200/health
 ### POST /api/auth/register
 
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L427)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L428)
 
 Register a new user. The first user registered automatically becomes admin.
 
@@ -112,7 +112,7 @@ The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.co
 | 400 | `password must be at least 8 characters` | Non-bootstrap user password < 8 |
 | 400 | `password must be at least 4 characters` | First user (bootstrap admin) password < 4 |
 | 400 | `password is too common` | Hits the weak-password dictionary ([`password-dict.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts); bootstrap admin is exempt) |
-| 429 | `too many requests, try again later` | Exceeded 30/min IP rate limit ([`index.ts:429`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L429); localhost is exempt — see [Security — IP rate limits](/en/concepts/security#per-ip-limits)) |
+| 429 | `too many requests, try again later` | Exceeded 30/min IP rate limit ([`index.ts:430`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L430); localhost is exempt — see [Security — IP rate limits](/en/concepts/security#per-ip-limits)) |
 
 **Rate limit**: 30 requests/minute per IP.
 
@@ -121,7 +121,7 @@ The `user` object's 5 fields match [`server/src/auth.ts:7-13`](https://github.co
 ### POST /api/auth/login
 
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L442)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L443)
 
 User login.
 
@@ -159,7 +159,7 @@ The `user` object's 5 fields match the register response (note `email` may be `n
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 401 | `invalid username or password` | Username doesn't exist **or** password hash mismatch ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally collapses both into the same message to avoid username enumeration); the server also writes a `login_failed` audit row |
-| 429 | `too many attempts, try again later` | Exceeded 10/min IP rate limit ([`index.ts:444`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L444); on hit the server writes a `login_rate_limited` audit row with the client IP) |
+| 429 | `too many attempts, try again later` | Exceeded 10/min IP rate limit ([`index.ts:445`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L445); on hit the server writes a `login_rate_limited` audit row with the client IP) |
 
 **Rate limit**: 10 requests/minute per IP.
 
