@@ -304,7 +304,7 @@ anet dashboard
 
 **改造和深入**：
 - 想理解为什么 dispatcher 不做独立 agent？看 [完整提案 §角色](https://github.com/sleep2agi/agent-network/blob/main/docs/demos/pr-review-room-proposal.md#角色4-个-agentapproved-设计)
-- 想自己改 demo 行为？源码在 [`agent-network/bin/cli.ts:4423`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4423) `demoPrReviewCommand`
+- 想自己改 demo 行为？源码在 [`agent-network/bin/cli.ts:4424`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4424) `demoPrReviewCommand`
 - 想理解每次跑都用独立 network 隔离的设计？看 [网络与节点](/concepts/networks)
 
 **用 Dashboard 观察**：
