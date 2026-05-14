@@ -130,17 +130,17 @@ if [ -f /shared/ntok ]; then
   export COMMHUB_TOKEN=$(cat /shared/ntok)
 fi
 
-# 启动 Agent Node
+# 启动 Agent Node —— 实际 demo entrypoint.sh 用 `bun` 直接跑容器内源码（/app 下挂了源码），不是 npx 装包
 # 注意：agent-node 不接受 --token flag；token 已通过 COMMHUB_TOKEN env 传入。
-# 系统提示词的真实 flag 是 --prompt（不是 --system-prompt）。
-exec npx @sleep2agi/agent-node \
-  --alias "$ALIAS" \
-  --runtime "$RUNTIME" \
-  --model "$MODEL" \
-  --hub "$COMMHUB_URL" \
-  ${TOOLS:+--tools "$TOOLS"} \
-  ${SYSTEM_PROMPT:+--prompt "$SYSTEM_PROMPT"}
+# 系统提示词的真实 flag 是 --prompt（不是 --system-prompt）；hub 地址 demo 用 --url（--hub 也接受）。
+CMD=(bun /app/agent-node/src/cli.ts --alias "$ALIAS" --runtime "$RUNTIME" --url "$COMMHUB_URL")
+[ -n "$MODEL" ] && CMD+=(--model "$MODEL")
+[ -n "$TOOLS" ] && CMD+=(--tools "$TOOLS")
+[ -n "$SYSTEM_PROMPT" ] && CMD+=(--prompt "$SYSTEM_PROMPT")
+exec "${CMD[@]}"
 ```
+
+> 上面是精简版。完整 demo `entrypoint.sh` 还做了网络 roster 注入、Telegram channel 配置、Codex `CODEX_HOME` 隔离 —— 见 [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh)。
 
 ## docker-compose.yml 详解
 

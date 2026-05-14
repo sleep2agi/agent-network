@@ -130,17 +130,17 @@ if [ -f /shared/ntok ]; then
   export COMMHUB_TOKEN=$(cat /shared/ntok)
 fi
 
-# Start Agent Node
+# Start Agent Node — the real demo entrypoint.sh runs the in-container source via `bun` (source is mounted under /app), not via npx
 # Note: agent-node does NOT accept a --token flag; token is passed via the COMMHUB_TOKEN env var.
-# The real system-prompt flag is --prompt (not --system-prompt).
-exec npx @sleep2agi/agent-node \
-  --alias "$ALIAS" \
-  --runtime "$RUNTIME" \
-  --model "$MODEL" \
-  --hub "$COMMHUB_URL" \
-  ${TOOLS:+--tools "$TOOLS"} \
-  ${SYSTEM_PROMPT:+--prompt "$SYSTEM_PROMPT"}
+# The real system-prompt flag is --prompt (not --system-prompt); the demo uses --url for the hub address (--hub also works).
+CMD=(bun /app/agent-node/src/cli.ts --alias "$ALIAS" --runtime "$RUNTIME" --url "$COMMHUB_URL")
+[ -n "$MODEL" ] && CMD+=(--model "$MODEL")
+[ -n "$TOOLS" ] && CMD+=(--tools "$TOOLS")
+[ -n "$SYSTEM_PROMPT" ] && CMD+=(--prompt "$SYSTEM_PROMPT")
+exec "${CMD[@]}"
 ```
+
+> This is the trimmed-down version. The full demo `entrypoint.sh` also injects the network roster, sets up the Telegram channel, and isolates Codex's `CODEX_HOME` — see [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh).
 
 ## docker-compose.yml Details
 
