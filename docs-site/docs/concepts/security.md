@@ -221,14 +221,18 @@ localhost (127.0.0.1 / ::1) 免速率限制，方便开发和测试。
 ## CORS 配置
 
 ```bash
-# Flag does not exist — use env var instead
+# 没有 CLI flag —— 只能用 env 变量
 COMMHUB_CORS_ORIGINS="https://dashboard.example.com,http://localhost:3000" anet hub start
 
 # 或单条
 COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
-默认 CORS 为 `*`（允许所有来源），生产环境建议配置白名单。
+::: warning R295 校准：默认 **不是** `*`
+verify [`server/src/index.ts:243-245`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L243)：`COMMHUB_CORS_ORIGINS` 未设时默认白名单 = `["http://localhost:3000", "http://localhost:3001"]`（**仅本机 dev origin**），**不是** `*`。设了 `COMMHUB_CORS_ORIGINS`（逗号分隔）会**完全替换**这个默认值。
+
+`Access-Control-Allow-Origin` 只在请求的 `Origin` 命中白名单时回显该 origin，否则回空字符串（浏览器据此拦截跨域请求）。源码不 hardcode 任何作者域名 —— 生产部署 Dashboard 跨域必须显式设 `COMMHUB_CORS_ORIGINS`。
+:::
 
 ## 审计日志
 

@@ -221,14 +221,18 @@ localhost (127.0.0.1 / ::1) is exempt from rate limiting for convenient developm
 ## CORS Configuration
 
 ```bash
-# Flag does not exist — use env var instead
+# No CLI flag — use the env var
 COMMHUB_CORS_ORIGINS="https://dashboard.example.com,http://localhost:3000" anet hub start
 
 # Or a single origin
 COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
-Default CORS is `*` (allow all origins). In production, configure a whitelist.
+::: warning R295 calibration: the default is **not** `*`
+Verify [`server/src/index.ts:243-245`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L243): when `COMMHUB_CORS_ORIGINS` is unset the default allowlist is `["http://localhost:3000", "http://localhost:3001"]` (**localhost dev origins only**), **not** `*`. Setting `COMMHUB_CORS_ORIGINS` (comma-separated) **fully replaces** that default.
+
+`Access-Control-Allow-Origin` echoes the request `Origin` only when it's in the allowlist, otherwise it returns an empty string (the browser then blocks the cross-origin request). No author-specific domains are hardcoded — production deployments serving the Dashboard cross-origin must set `COMMHUB_CORS_ORIGINS` explicitly.
+:::
 
 ## Audit Logging
 
