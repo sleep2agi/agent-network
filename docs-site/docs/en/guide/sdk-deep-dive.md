@@ -80,7 +80,7 @@ On the next call to `processWithClaude()`, the module-level `claudeSessionId` is
 - **PATH injection**: the wrapper does `which codex` first and prepends its directory to `process.env.PATH` at [cli.ts L608-615](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) to keep subprocess spawns reliable.
 - **Bad threads rebuild from scratch**: a single failed turn drops into a catch branch that re-`startThread()` and runs once more (cli.ts L678-690) — i.e. the original thread's history is **lost** on the failure path.
 - **Token cost is DIY**: `usage` only reports token counts, not USD. To enforce a budget you need a model→price table; anet currently has **no** `maxBudgetUsd` enforcement on the codex branch.
-- **gpt-5.4 is the default**: hard-coded at three call sites (cli.ts L663 / L679 / L720). Third-party Codex-compatible providers (e.g. MiniMax) are in the RFC backlog but not wired yet.
+- **gpt-5.4 is the default**: hard-coded at three call sites (cli.ts L689 / L705 / L746). Third-party Codex-compatible providers (e.g. MiniMax) are in the RFC backlog but not wired yet.
 
 **Session writeback mechanic**
 
