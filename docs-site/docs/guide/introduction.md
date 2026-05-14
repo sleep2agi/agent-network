@@ -151,7 +151,7 @@ Dashboard 实时展示谁在干什么、通信连线、任务进度 -- 像作战
 ## 技术栈
 
 - **Server**: Bun + SQLite WAL + MCP SDK
-- **Agent**: Claude Agent SDK / OpenAI Codex SDK / HTTP API
+- **Agent**: 3 种 Runtime —— `claude-code-cli` / `claude-agent-sdk` / `codex-sdk`（`http-api` 为 legacy）
 - **CLI**: TypeScript + Commander.js
 - **Dashboard**: Next.js 16 + Vercel
 - **协议**: MCP Streamable HTTP + SSE + REST
