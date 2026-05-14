@@ -194,7 +194,121 @@ codex TUI **没有这条旁路**：
 
 ## §3 Q3 UX + Q4 限制 + Q5 与 Path C 共存
 
-> 🚧 待 R525+ /loop tick 推进
+### 3.1 Q3 — 可行情况下的 UX
+
+#### 3.1.1 发消息的 UX
+
+用户在 codex TUI 里干活，想发 commhub 消息有两种触发方式：
+
+| 方式 | 用户操作 | 实现 |
+|------|---------|------|
+| **自然语言驱动** | 用户对 codex 说"告诉指挥室任务完成了" | codex agent 理解意图 → 调 `commhub_send_task` MCP 工具 |
+| **显式约定** | 用户在 prompt 里用约定语法（如 `@指挥室 ...`） | 靠 codex agent 的 prompt 约定，非 codex 原生 UI |
+
+→ 推荐自然语言驱动 —— 与 claude-code-cli runtime 一致，用户不需要学新语法，codex agent 自己决定调工具。消息发送结果在 TUI 对话流里以 tool-call 结果呈现（codex TUI 会显示 MCP 工具调用 + 返回）。
+
+#### 3.1.2 收消息的 UX（pull 模型）
+
+§2.4 确定 receive 是 pull。pull 模型下的 UX：
+
+| 触发时机 | 机制 | 体验 |
+|---------|------|------|
+| **turn 开始时** | codex agent 每个 turn 开头自动调 `get_inbox`（靠 system prompt 约定） | 用户每次发消息，agent 先看 inbox —— 准实时 |
+| **用户显式问** | 用户问"有没有新消息" → agent 调 `get_inbox` | 完全手动 |
+| **turn 间隙** | ❌ codex TUI 没有 idle/turn 间隙的 hook | 做不到 |
+
+→ 推荐：**system prompt 约定 codex agent 每 turn 开头 `get_inbox`**。这样用户只要在 TUI 里持续干活，每个 turn 都会捎带检查 inbox，体验接近 claude-code-cli（虽然严格说仍是 pull，但 turn 频率下接近准实时）。
+
+#### 3.1.3 UX 的本质对比
+
+```yaml
+ux_comparison_R97_§3:
+  claude-code-cli runtime:
+    收: SSE push 注入 — 消息到了立即出现，不依赖 agent turn
+    发: MCP 工具 commhub_send_task
+  
+  codex TUI（本方案）:
+    收: pull — agent 每 turn 开头 get_inbox（turn 间隙的消息要等下个 turn）
+    发: MCP 工具 commhub_send_task（与 claude-code-cli 完全一致）
+  
+  差距: 仅在"收"的实时性 — codex TUI 是"turn 粒度准实时"，claude-code-cli 是"秒级 push"
+  对 Vincent 用户场景（自己在 TUI 干活）: turn 粒度通常够用
+    —— 用户活跃时 turn 频繁；用户不活跃时本来也不急着看消息
+```
+
+### 3.2 Q4 — push 受限的卡点与应对
+
+§2.4.2 已确定卡点：**codex TUI 没有把外部消息注入运行中 turn 的机制**。Q4 要的「卡在哪」+ 应对：
+
+#### 3.2.1 卡点定性
+
+- **不是** codex TUI 架构的硬墙 —— send 完全通，receive 的 pull 也通
+- **是** UX 降级 —— 缺「秒级 push」，只有「turn 粒度 pull」
+- 根因：codex TUI 的 MCP 集成是**工具调用模型**，没有「事件流订阅 → 注入 agent 输入」这一层（claude-code-cli runtime 的 SSE 旁路是 anet-node 在 SDK 之外加的，codex TUI 是用户直接跑的进程，anet 无法在中间插 SSE 注入层）
+
+#### 3.2.2 三种应对（按推荐度）
+
+| 应对 | 做法 | 实时性 | 复杂度 | 推荐 |
+|------|------|--------|--------|------|
+| **A. turn-开头 pull** | system prompt 约定每 turn `get_inbox` | turn 粒度准实时 | 低（纯 prompt） | ★ 推荐 |
+| **B. sidecar 终端提示** | anet 起一个 sidecar 进程监听 SSE，新消息时在**另一个终端**/通知里提示用户"有新 commhub 消息" | 秒级（但在 TUI 外） | 中 | 可选增强 |
+| **C. 等上游** | 等 codex 提供 turn-间隙 hook / 事件注入机制 | —— | —— | 不推荐（不可控，#21551 已显示上游对这类需求保守） |
+
+→ **推荐 A 作基础方案**（够用、零额外进程），**B 作可选增强**（给重度用户秒级感知，但承认提示在 TUI 之外）。C 不依赖。
+
+#### 3.2.3 sidecar 方案（B）的边界
+
+sidecar 不是把消息注入 TUI —— 那做不到。sidecar 只是**带外提示**：监听 commhub SSE，新消息时通过桌面通知 / 另开终端行 / 状态栏提示用户「该去 TUI 里让 agent `get_inbox` 了」。本质是「提醒用户主动 pull」，不是「push 进 TUI」。诚实定性，不夸大。
+
+### 3.3 Q5 — 与 Path C（mcp-server stdio）共存/复用
+
+#### 3.3.1 两者是正交的不同方向
+
+```yaml
+path_c_vs_97:
+  Path C (RFC-007, codex mcp-server):
+    codex 作为 MCP server (codex 是被调用方)
+    anet 通过 MCP 协议驱动 codex 跑任务 (headless)
+    方向: anet → codex
+  
+  #97 (codex TUI + commhub MCP):
+    codex TUI 作为 MCP client (codex 是调用方)
+    codex 加载 commhub MCP server, 用 commhub 工具
+    方向: codex → commhub
+  
+  → 完全正交: 一个是 codex 被调用, 一个是 codex 主动调用
+  → 不冲突, 可同时存在
+```
+
+#### 3.3.2 复用点 —— 同一个 commhub MCP server
+
+关键复用：#97 需要的「commhub MCP server」**就是 anet 现有的 commhub MCP 端点**（`POST /mcp` streamable HTTP，或 `commhub-proxy.ts` stdio 包装）。
+
+- claude-code-cli runtime 用它
+- #97 codex TUI 用它（`codex mcp add anet-commhub --url <commhub>/mcp`）
+- 是同一个 server，不需要为 codex TUI 单独造
+
+→ **Q5 答案：完全可共存，且复用同一个 commhub MCP server，无需新建基础设施。**
+
+#### 3.3.3 与 codex-sdk runtime 的关系
+
+anet 现有 `codex-sdk` runtime（RFC-002 Phase 2 / issue #35）是 headless 的（`codex exec` 包装）。#97 的 codex TUI 是**交互式**的，是另一个 runtime：
+
+| Runtime | 模式 | codex 入口 | commhub 接入 |
+|---------|------|-----------|-------------|
+| `codex-sdk` | headless autonomous | `codex exec` (SDK 包装) | anet-node 注入（同 claude） |
+| **codex TUI（#97 新）** | 交互式 | `codex`（TUI） | `codex mcp add` 挂 commhub MCP |
+| `claude-code-cli` | 交互式 | `claude`（TUI） | MCP + SSE push 旁路 |
+
+→ #97 若实施，是给 anet 增加一个**交互式 codex runtime**，与 headless `codex-sdk` 并列，与交互式 `claude-code-cli` 对等（但 receive 是 pull 不是 push）。
+
+### 3.4 §3 小结
+
+- **Q3 UX**：发 = 自然语言驱动调 MCP 工具（同 claude-code-cli）；收 = system prompt 约定每 turn 开头 `get_inbox`（turn 粒度准实时）。
+- **Q4 卡点**：push 注入做不到（codex TUI MCP 是工具调用模型），是 UX 降级非 blocker。应对：A turn-开头 pull（推荐基础）+ B sidecar 带外提示（可选增强，诚实定性为「提醒用户 pull」不是「push 进 TUI」）。
+- **Q5 共存**：与 Path C 完全正交（一个 codex 被调、一个 codex 主调），且复用同一个 commhub MCP server，无需新建基础设施。#97 是给 anet 增加一个交互式 codex runtime。
+
+§4 给综合可行性判断 + 实施方案（runtime 名 / 接入机制 / cli surface）。
 
 ---
 
