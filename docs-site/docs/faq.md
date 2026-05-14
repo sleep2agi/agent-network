@@ -36,7 +36,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 ### 4. 支持哪些 AI 模型？
 
-任何支持 Anthropic Messages API 的模型都可以通过 `claude-agent-sdk` runtime 接入。`anet init` 的 `VENDORS` 列表里**内置**的 provider（每项都是 verified-with-real-call 才进列表，详见 [runtimes 已验证 vs 未验证](/guide/runtimes#已验证-vs-未验证)）：
+任何支持 Anthropic Messages API 的模型都可以通过 `claude-agent-sdk` runtime 接入。`anet node create` 的 `VENDORS` 列表里**内置**的 provider（每项都是 verified-with-real-call 才进列表，详见 [runtimes 已验证 vs 未验证](/guide/runtimes#已验证-vs-未验证)）：
 
 - **Anthropic** 原生 SDK（Claude Sonnet / Opus / Haiku；查 [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)）
 - **MiniMax**（Anthropic 兼容；查 [MiniMax 平台](https://platform.minimaxi.com)）

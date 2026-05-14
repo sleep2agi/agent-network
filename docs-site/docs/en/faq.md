@@ -36,7 +36,7 @@ The server still runs `licenses.expires_at` checks inside `send_task` (V3 legacy
 
 ### 4. Which AI models are supported?
 
-Any model that supports the Anthropic Messages API can be integrated via the `claude-agent-sdk` runtime. Providers **built into** the `anet init` `VENDORS` list (every entry is verified-with-real-call before it lands — see [runtimes — Verified vs not](/en/guide/runtimes#verified-vs-not)):
+Any model that supports the Anthropic Messages API can be integrated via the `claude-agent-sdk` runtime. Providers **built into** the `anet node create` `VENDORS` list (every entry is verified-with-real-call before it lands — see [runtimes — Verified vs not](/en/guide/runtimes#verified-vs-not)):
 
 - **Anthropic** native SDK (Claude Sonnet / Opus / Haiku; see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview))
 - **MiniMax** (Anthropic-compatible; see [MiniMax platform](https://platform.minimaxi.com))
