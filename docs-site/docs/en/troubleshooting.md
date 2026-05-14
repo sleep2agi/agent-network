@@ -174,7 +174,7 @@ anet activate <key>   # v0.6 legacy command, writes a new license row (the key i
 anet hub start --dev-open
 # When you can't pass a CLI flag (Docker / systemd), the env var is equivalent:
 # COMMHUB_DEV_OPEN=1 anet hub start
-# (verify [`server/src/index.ts:12`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L12): either the `--dev-open` flag or `COMMHUB_DEV_OPEN=1` works)
+# (verify [`server/src/index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13): either the `--dev-open` flag or `COMMHUB_DEV_OPEN=1` works)
 ```
 
 ---
@@ -275,7 +275,7 @@ HTTP 429
 | `POST /api/auth/login` | 10/minute | `too many attempts, try again later` (also writes audit `login_rate_limited`) |
 
 ::: info Only these two endpoints have IP rate limiting in v0.8
-No other endpoint is currently IP-rate-limited. The `checkRateLimit` function's `default = 60` is a function-signature default, not actual behavior — the only call sites are register/login ([`server/src/index.ts:55`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L55); see R169 fix and [Security — Rate limiting](/en/concepts/security#rate-limiting)). If you're worried about write abuse on other endpoints, layer rate limiting at a reverse proxy (nginx / Cloudflare).
+No other endpoint is currently IP-rate-limited. The `checkRateLimit` function's `default = 60` is a function-signature default, not actual behavior — the only call sites are register/login ([`server/src/index.ts:56`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L56); see R169 fix and [Security — Rate limiting](/en/concepts/security#rate-limiting)). If you're worried about write abuse on other endpoints, layer rate limiting at a reverse proxy (nginx / Cloudflare).
 :::
 
 **Solution**: Wait 60 seconds before retrying. Localhost / `::1` / `unknown` IPs are exempt ([`index.ts:57`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L57)). The response has **no** `retry_after_seconds` field and **no** `Retry-After` header; the window is a fixed 60 seconds.

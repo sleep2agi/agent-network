@@ -173,7 +173,7 @@ anet activate <key>   # v0.6 legacy 命令，写入新 license row（不验证 k
 anet hub start --dev-open
 # Docker / systemd 场景没法加 CLI flag 时，用 env 变量等效开启：
 # COMMHUB_DEV_OPEN=1 anet hub start
-# （verify [`server/src/index.ts:12`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L12)：`--dev-open` flag 或 `COMMHUB_DEV_OPEN=1` 二选一即可）
+# （verify [`server/src/index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13)：`--dev-open` flag 或 `COMMHUB_DEV_OPEN=1` 二选一即可）
 ```
 
 ---
@@ -274,7 +274,7 @@ HTTP 429
 | `POST /api/auth/login` | 10 次/分钟 | `too many attempts, try again later`（+ audit `login_rate_limited`） |
 
 ::: info v0.8 当前只有这两个 endpoint 做 IP rate limit
-其他 endpoint **不做 IP rate limit**（`checkRateLimit` 函数 default=60 仅函数签名 default，[`server/src/index.ts:55`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L55) 实际只在 register/login 两处调；详见 R169 修正，[安全设计 — 速率限制](/concepts/security#速率限制-rate-limiting)）。担心其他端点被写滥用，前置反向代理（nginx / Cloudflare）加 rate limit。
+其他 endpoint **不做 IP rate limit**（`checkRateLimit` 函数 default=60 仅函数签名 default，[`server/src/index.ts:56`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L56) 实际只在 register/login 两处调；详见 R169 修正，[安全设计 — 速率限制](/concepts/security#速率限制-rate-limiting)）。担心其他端点被写滥用，前置反向代理（nginx / Cloudflare）加 rate limit。
 :::
 
 **解决**：等 60 秒后重试。localhost / `::1` / `unknown` IP 免限制（[`index.ts:57`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L57)）。响应**无** `retry_after_seconds` 字段，**无** `Retry-After` header，窗口固定 60 秒。
