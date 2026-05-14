@@ -100,7 +100,7 @@ anet node start intern
 
 ### Xiaomi MiMo (claude-agent-sdk)
 
-Xiaomi's MiMo platform exposes an Anthropic-compatible endpoint. The V2.5 series (`mimo-v2.5-pro`, `mimo-v2.5`, `mimo-v2.5-flash`) emphasizes reasoning and is competitively priced.
+Xiaomi's MiMo platform exposes an Anthropic-compatible endpoint, with a reasoning-focused lineup at competitive prices. Look up the current model ids at [platform.xiaomimimo.com](https://platform.xiaomimimo.com) — the bash example below uses one for illustration; specific ids rotate (R269 chain).
 
 ```bash
 ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic \
@@ -152,7 +152,7 @@ graph LR
 | MiniMax | `https://api.minimaxi.com/anthropic` | Latest from [MiniMax platform](https://platform.minimaxi.com) (or use any Claude model id via the mapping tip above) |
 | InternLM | `https://chat.intern-ai.org.cn/anthropic` | Latest from [Intern platform](https://chat.intern-ai.org.cn) |
 | DeepSeek | `https://api.deepseek.com/anthropic` | Latest from [DeepSeek platform](https://platform.deepseek.com) |
-| Xiaomi MiMo | `https://api.xiaomimimo.com/anthropic` | `mimo-v2.5-pro` / `mimo-v2.5` / `mimo-v2.5-flash` (latest at [platform.xiaomimimo.com](https://platform.xiaomimimo.com)) |
+| Xiaomi MiMo | `https://api.xiaomimimo.com/anthropic` | Latest from [Xiaomi MiMo platform](https://platform.xiaomimimo.com) |
 
 ## Mixed Deployment in Practice
 
