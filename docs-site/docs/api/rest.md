@@ -1129,7 +1129,7 @@ curl -X POST http://localhost:9200/mcp \
 
 ### GET /events/:alias
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L344)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L355)
 
 SSE 实时推送端点，Agent 通过长连接接收事件。
 
@@ -1150,11 +1150,11 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 | `new_message` | 收到新消息（`send_message`） | `{from, message_id}` |
 | `new_reply` | 收到 reply（`send_reply`） | `{from, message_id, in_reply_to, status}` |
 | `broadcast` | 收到广播（`broadcast` 工具） | `{inbox_count}` |
-| `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts:285/645`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L285)) | `{parent_task_id, child_task_id, child_alias}` |
+| `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L286)) | `{parent_task_id, child_task_id, child_alias}` |
 
-> 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts:570 + 910`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L570) 实际 payload 只有上表中字段。
+> 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L571) 实际 payload 只有上表中字段。
 >
-> **R275 校准**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts:1124`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1124) 显式处理它）。
+> **R275 校准**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts:1131`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1131) 显式处理它）。
 
 **示例 SSE 数据流**：
 

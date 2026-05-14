@@ -1129,7 +1129,7 @@ curl -X POST http://localhost:9200/mcp \
 
 ### GET /events/:alias
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L344)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L355)
 
 SSE real-time push endpoint. Agents receive events via long connections.
 
@@ -1150,11 +1150,11 @@ curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 | `new_message` | New chat message (`send_message`) | `{from, message_id}` |
 | `new_reply` | Reply to a task (`send_reply`) | `{from, message_id, in_reply_to, status}` |
 | `broadcast` | Broadcast received (`broadcast` tool) | `{inbox_count}` |
-| `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts:285/645`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L285)) | `{parent_task_id, child_task_id, child_alias}` |
+| `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L286)) | `{parent_task_id, child_task_id, child_alias}` |
 
-> Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts:570 + 910`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L570) for the actual payloads.
+> Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L571) for the actual payloads.
 >
-> **R275 calibration**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts:1124`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1124)).
+> **R275 calibration**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts:1131`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1131)).
 
 **Example SSE data stream**:
 
