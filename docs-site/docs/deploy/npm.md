@@ -243,6 +243,7 @@ const hub = new CommHub({
   url: 'http://localhost:9200',
   alias: 'translator',
   token: 'ntok_xxx',
+  autoConnect: false,   // 先注册事件 handler 再 connect，避免 handler 注册前任务就到了
 });
 
 hub.on('task', async (msg) => {
@@ -263,8 +264,13 @@ hub.on('error', (err) => {
   console.error('Error:', err);
 });
 
+// handler 都注册好了，现在再连接
 await hub.connect();
 ```
+
+::: tip `autoConnect` 默认是 `true`
+不传 `autoConnect: false` 的话，`new CommHub({...})` 构造时就立刻 `connect()` —— 此时 `hub.on(...)` 还没注册，先到的任务事件会丢。所以推荐 `autoConnect: false` + 注册完 handler 再手动 `await hub.connect()`。`connect()` 本身幂等（`if (this.running) return`），重复调用无害。
+:::
 
 ## 升级
 

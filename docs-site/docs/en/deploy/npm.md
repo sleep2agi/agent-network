@@ -243,6 +243,7 @@ const hub = new CommHub({
   url: 'http://localhost:9200',
   alias: 'translator',
   token: 'ntok_xxx',
+  autoConnect: false,   // register event handlers first, then connect — avoids missing tasks that arrive before handlers are attached
 });
 
 hub.on('task', async (msg) => {
@@ -263,8 +264,13 @@ hub.on('error', (err) => {
   console.error('Error:', err);
 });
 
+// handlers are all registered — now connect
 await hub.connect();
 ```
+
+::: tip `autoConnect` defaults to `true`
+Without `autoConnect: false`, `new CommHub({...})` calls `connect()` right away in the constructor — before `hub.on(...)` has run, so any task event that arrives first is lost. Prefer `autoConnect: false` + a manual `await hub.connect()` after the handlers are registered. `connect()` is itself idempotent (`if (this.running) return`), so calling it twice is harmless.
+:::
 
 ## Upgrading
 
