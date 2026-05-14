@@ -258,11 +258,11 @@ CREATE TABLE audit_log (
 
 | 操作 | 触发场景 |
 |------|---------|
-| `register` | 用户注册（[`index.ts:435`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L435)） |
+| `register` | 用户注册（[`index.ts:436`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L436)） |
 | `login` | 用户登录成功 |
 | `login_failed` | 用户登录失败（密码不匹配 / username 不存在） |
 | `login_rate_limited` | login 触发 IP rate limit（10/分） |
-| `password_changed` | `anet passwd` 改密码（[`index.ts:503`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L503)） |
+| `password_changed` | `anet passwd` 改密码（[`index.ts:504`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L504)） |
 | `password_reset_by_admin` | hub admin 用 `anet hub admin reset-user` 强制重置（[`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) + [`cli.ts:2346`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2346)） |
 | `network_renamed` / `network_deleted` / `network_joined` | network 改名 / 删除 / 加入 |
 | `member_added` / `member_role_changed` / `member_removed` | network 成员变更（`detail` 字段记 `<user_id> as <role>` / `<user_id> → <role>`） |

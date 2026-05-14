@@ -258,11 +258,11 @@ Recorded `action` values (**16 total**; verify `grep logAudit server/src/*.ts + 
 
 | Operation | Trigger |
 |------|---------|
-| `register` | User registration ([`index.ts:435`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L435)) |
+| `register` | User registration ([`index.ts:436`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L436)) |
 | `login` | Successful login |
 | `login_failed` | Login failure (wrong password / unknown username) |
 | `login_rate_limited` | Login hit the IP rate limit (10/min) |
-| `password_changed` | `anet passwd` ([`index.ts:503`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L503)) |
+| `password_changed` | `anet passwd` ([`index.ts:504`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L504)) |
 | `password_reset_by_admin` | hub admin force-reset via `anet hub admin reset-user` ([`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) + [`cli.ts:2346`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2346)) |
 | `network_renamed` / `network_deleted` / `network_joined` | Network rename / delete / join |
 | `member_added` / `member_role_changed` / `member_removed` | Network membership changes (`detail` records `<user_id> as <role>` / `<user_id> → <role>`) |
