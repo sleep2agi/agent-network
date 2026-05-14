@@ -253,7 +253,7 @@ function corsHeaders(req: Request): Record<string, string> {
   const allowed = CORS_ORIGINS.includes(origin) ? origin : "";
   return {
     "Access-Control-Allow-Origin": allowed,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
   };
@@ -1034,6 +1034,52 @@ Bun.serve({
       params.push(limit);
       const rows = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, events: rows, count: rows.length }));
+    }
+
+    // ── REST: delete node (Dashboard/CLI remote cleanup) ──
+    const nodeDeleteMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)$/);
+    if (nodeDeleteMatch && req.method === "DELETE") {
+      const ref = decodeURIComponent(nodeDeleteMatch[1]);
+      const params: any[] = [ref, ref, ref];
+      let sql = "SELECT * FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
+      sql = addNetworkScope(sql, params, restScope);
+      sql += " ORDER BY updated_at DESC LIMIT 1";
+      const node = db.get<any>(sql, ...params);
+      if (!node) return withCors(req, Response.json({ ok: false, error: "node not found" }, { status: 404 }));
+
+      const nodeNetId = node.network_id ?? singleNetworkId(restScope);
+      if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+      }
+
+      db.transaction(() => {
+        db.run("DELETE FROM nodes WHERE node_id = ?1", [node.node_id]);
+        if (node.alias) {
+          db.run(
+            "DELETE FROM sessions WHERE alias = ?1 AND (network_id = ?2 OR (?2 IS NULL AND network_id IS NULL))",
+            [node.alias, node.network_id ?? null]
+          );
+        }
+      });
+
+      if (node.alias) {
+        pushEvent(node.alias, {
+          type: "node_deleted",
+          node_id: node.node_id,
+          node_name: node.node_name,
+          alias: node.alias,
+          network_id: node.network_id ?? null,
+        }, node.network_id ?? null);
+      }
+
+      return withCors(req, Response.json({
+        ok: true,
+        deleted: true,
+        node_id: node.node_id,
+        node_name: node.node_name,
+        alias: node.alias,
+        network_id: node.network_id ?? null,
+      }));
     }
 
     // ── REST: nodes table (V2 Sprint 2) ──
