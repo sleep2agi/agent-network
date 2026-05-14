@@ -4,7 +4,7 @@
 |------|----|
 | **类型** | 调研报告（feasibility research） |
 | **作者** | 通信SDK马 |
-| **状态** | Draft v1（进行中） |
+| **状态** | v1 完整就绪（待 通信龙 review） |
 | **创建日期** | 2026-05-14 |
 | **关联 issue** | [#97](https://github.com/sleep2agi/agent-network/issues/97) |
 | **关联历史** | RFC-005 / RFC-006 / RFC-007（codex runtime 接入 6 轮 pivot） |
@@ -314,7 +314,139 @@ anet 现有 `codex-sdk` runtime（RFC-002 Phase 2 / issue #35）是 headless 的
 
 ## §4 可行性判断 + 实施方案 / 替代路径
 
-> 🚧 待 R526+ /loop tick 推进
+### 4.1 综合可行性判断
+
+**结论：可行（带一个明确的 UX 降级）。**
+
+| 维度 | 判断 | 依据 |
+|------|------|------|
+| 基础 send | ✅ 完全可行 | §2.3 — codex 原生 MCP 工具调用 |
+| 基础 receive | ✅ 可行（pull 模型） | §2.4.1 — `get_inbox` MCP 工具 |
+| 实时 push receive | ❌ 做不到 | §2.4.2 — codex TUI 无事件注入机制 |
+| 与现有架构冲突 | ✅ 无冲突 | §3.3 — 与 Path C 正交，复用 commhub MCP server |
+| 上游 blocker | ✅ 无 | §1.1 — #21551 falsify 的是 Path B co-presence，与 #97 无关 |
+
+**一句话给 Vincent**：codex TUI 接入 commhub **能做**，机制是 codex 原生的 `codex mcp add`（与 claude-code-cli 接 commhub 同构）；唯一差距是「收消息」只能 turn 粒度 pull，不能像 claude-code-cli 那样秒级 push —— 对「自己在 TUI 干活」的场景通常够用。**这不是重开被 falsify 的 Path B**（那是多 client 实时围观 live token，#97 不要那个）。
+
+### 4.2 实施方案（若 Vincent 决定做）
+
+> ⚠️ 本节是方案，不是实施。实施需通信龙 review + dispatch。
+
+#### 4.2.1 Runtime 名
+
+建议 runtime 名：**`codex-cli`**（与 `claude-code-cli` 对仗）。
+
+| 现有 runtime | 模式 | 本方案新增 |
+|-------------|------|-----------|
+| `claude-code-cli` | 交互式 Claude Code + commhub | —— |
+| `codex-sdk` | headless codex exec | —— |
+| `claude-agent-sdk` | headless claude SDK | —— |
+| **`codex-cli`** | **交互式 codex TUI + commhub** | ★ 本方案 |
+
+（注：runtime 命名与 §R522 的 `normalizeRuntime` 4 canonical 值需对齐 —— 现有是 `claude-code-cli` / `codex-sdk` / `claude-agent-sdk` / `http-api`，新增 `codex-cli` 需同步 #96 的 `normalizeRuntime` + dashboard 映射表。这是实施时的 cross-cutting 点。）
+
+#### 4.2.2 接入机制
+
+```yaml
+codex_cli_runtime_mechanism:
+  
+  Step 1 — commhub MCP server 接入:
+    codex mcp add anet-commhub --url <commhub>/mcp \
+      （带 ntok bearer token via bearer_token_env_var）
+    或 stdio proxy: codex mcp add anet-commhub -- bun <commhub-proxy.ts>
+    → codex TUI 获得 commhub_* 工具
+  
+  Step 2 — system prompt 约定:
+    anet 给 codex-cli runtime 注入 system prompt（codex 支持 ~/.codex 的
+    instructions / AGENTS.md）, 约定:
+      - 每 turn 开头调 get_inbox 检查新消息
+      - 收到任务按 anet 协议响应（确认→执行→汇报, 同 CLAUDE.md 规则）
+      - 发消息用 commhub_send_task / commhub_reply
+  
+  Step 3 — 节点注册:
+    codex-cli runtime 启动时, anet 须让该 codex 实例在 commhub 注册
+    (report_status with agent="codex-cli" 或类似)
+    → 注意: codex TUI 自己不会调 report_status, 须靠
+      a) system prompt 约定 agent 启动时 report_status, 或
+      b) sidecar 进程代为 report_status 心跳
+    推荐 b（心跳不该依赖 agent 自觉, 与 RFC-010 §2 reconciliation 思路一致）
+  
+  Step 4 — receive UX:
+    system prompt 约定 turn-开头 get_inbox（§3.2.2 应对 A）
+    可选: sidecar SSE 监听 + 带外提示（§3.2.2 应对 B）
+```
+
+#### 4.2.3 CLI surface
+
+```yaml
+codex_cli_surface:
+  
+  anet 侧新增 CLI:
+    anet node create <alias> --runtime codex-cli
+      → 生成 .anet/nodes/<alias>/config.json (runtime: codex-cli)
+      → 写 codex mcp config (codex mcp add anet-commhub ...)
+      → 写 codex system prompt / AGENTS.md（anet 协议约定）
+    anet node start <alias>
+      → 启动 codex TUI (codex) + sidecar 心跳进程
+      → tmux session 跑 codex TUI（用户可 attach 进去干活）
+  
+  与 RFC-010 node lifecycle 对齐:
+    codex-cli runtime 的 node 走 RFC-010 §2 状态机
+    sidecar 心跳 → commhub session state（RFC-010 §3 SSE）
+  
+  用户体验:
+    anet node start my-codex --runtime codex-cli
+    tmux attach → 进入 codex TUI 干活
+    干活时 codex agent 自动 get_inbox + 可 commhub_send_task
+```
+
+#### 4.2.4 实施工作量估算
+
+| 模块 | 工作 | 估算 |
+|------|------|------|
+| CLI: `anet node create --runtime codex-cli` | 生成 config + 写 codex mcp config + system prompt | ~80 LOC |
+| CLI: `anet node start` codex-cli 分支 | 启动 codex TUI + sidecar | ~60 LOC |
+| sidecar 心跳进程 | report_status 心跳 + 可选 SSE 带外提示 | ~120 LOC |
+| system prompt 模板 | anet 协议约定（turn-开头 get_inbox 等） | ~40 行 prompt |
+| `normalizeRuntime` + dashboard 映射 | 加 `codex-cli` canonical 值（#96 cross-cutting） | ~10 LOC |
+| **合计** | | **~270 LOC + 1 prompt 模板** |
+
+→ 比 RFC-007 Path C 的 ~600 LOC 轻（因为复用 codex 原生 `codex mcp add` + 复用现有 commhub MCP server）。
+
+### 4.3 替代路径（若 Vincent 觉得 pull 降级不可接受）
+
+如果 Vincent 认为「收消息必须秒级 push」是硬需求：
+
+| 替代 | 做法 | 评价 |
+|------|------|------|
+| **用 codex-sdk runtime 代替** | 不用 TUI，用现有 headless `codex-sdk`（有 anet-node SSE 注入，秒级 push） | 但失去「用户在 TUI 交互」—— 不满足 Vincent「自己在 TUI 干活」的诉求 |
+| **等上游事件注入机制** | 等 codex 提供 turn-间隙 hook | 不可控；#21551 已显示上游对这类需求保守；不推荐 |
+| **codex TUI + 旁开 anet 监控** | codex TUI 纯交互，commhub 收发在另一个 anet claude agent 上 | 割裂，不是 Vincent 要的「同一实例」 |
+
+→ **建议**：先按 §4.2 实施基础版（pull 模型够用），把「秒级 push」作为已知限制明确告知 Vincent。若实测后 Vincent 确实不满，再评估替代路径。不要为了假想的 push 需求过度设计。
+
+### 4.4 给通信龙 review 的关键决策点
+
+1. **runtime 名 `codex-cli`** —— 是否接受？与 `claude-code-cli` 对仗，但需同步 #96 `normalizeRuntime`。
+2. **sidecar 心跳** —— 心跳用 sidecar 进程（推荐）还是靠 agent system prompt 自觉？
+3. **receive pull 降级** —— 是否可接受作 v1？还是先跟 Vincent 确认他能否接受 turn 粒度。
+4. **实施时机** —— #97 是调研，实施需另立 dispatch（工程马 CLI + 可能通信牛 sidecar）。
+
+### 4.5 §4 小结 + 全文结论
+
+**§4 结论**：codex TUI 接入 commhub **可行**，runtime 名建议 `codex-cli`，机制 = `codex mcp add` 挂 commhub MCP server + system prompt 约定 turn-开头 `get_inbox` + sidecar 心跳，估算 ~270 LOC（比 RFC-007 Path C 轻，因复用 codex 原生机制 + 现有 commhub MCP server）。唯一降级是 receive 只能 turn 粒度 pull，对 Vincent 场景够用。
+
+**全文结论（5 问最终答案）**：
+
+| # | 问题 | 最终答案 |
+|---|------|---------|
+| Q1 | TUI 能收 commhub 消息？ | ✅ 可行，pull 模型（`get_inbox` MCP 工具，turn-开头约定 → turn 粒度准实时） |
+| Q2 | TUI 能发 commhub 消息？ | ✅ 完全可行（`commhub_send_task` 等 MCP 工具，与 claude-code-cli 同构） |
+| Q3 | 可行 → UX？ | 发=自然语言驱动 MCP 工具调用；收=每 turn 开头 `get_inbox`；体验接近 claude-code-cli（差距仅收的实时性） |
+| Q4 | 不可行 → 卡哪？ | 不是「不可行」—— 是 receive 缺 push 注入（codex TUI MCP 是工具调用模型）。UX 降级非 blocker。应对：turn-开头 pull + 可选 sidecar 带外提示 |
+| Q5 | 与 Path C 共存/复用？ | ✅ 完全正交（codex 被调 vs 主调）+ 复用同一 commhub MCP server，无需新建基础设施 |
+
+**给 Vincent 的确定答案**：**能做**。codex TUI 接 commhub 是 codex 原生支持的（`codex mcp add`），不是重开被 falsify 的 Path B。唯一已知限制：收消息是 turn 粒度 pull 不是秒级 push —— 对「自己在 TUI 干活」通常够用。建议实施基础版（~270 LOC），把 push 限制明确告知。
 
 ---
 
@@ -331,4 +463,7 @@ anet 现有 `codex-sdk` runtime（RFC-002 Phase 2 / issue #35）是 headless 的
 
 | 版本 | 日期 | 作者 | 说明 |
 |------|------|------|------|
-| Draft v1 §1 | 2026-05-14 | 通信SDK马 | §1 上游 context（#21551 CLOSED）+ codex CLI 入口面（`codex mcp add` 发现）+ 5 问 framing，§2-§4 待续 |
+| Draft v1 §1 | 2026-05-14 | 通信SDK马 | §1 上游 context（#21551 CLOSED）+ codex CLI 入口面（`codex mcp add` 发现）+ 5 问 framing |
+| Draft v1 §2 | 2026-05-14 | 通信SDK马 | §2 Q1/Q2 收发可行性 + 隔离环境 `codex mcp add` 实测 |
+| Draft v1 §3 | 2026-05-14 | 通信SDK马 | §3 Q3 UX + Q4 push 卡点与应对 + Q5 与 Path C 共存 |
+| Draft v1 §4 | 2026-05-14 | 通信SDK马 | §4 可行性判断（可行带 UX 降级）+ 实施方案（runtime `codex-cli`，~270 LOC）+ 替代路径 + 5 问最终答案；**v1 完整就绪，待 通信龙 review** |
