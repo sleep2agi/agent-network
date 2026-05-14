@@ -1145,23 +1145,29 @@ curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 
 | Event | Trigger | Data |
 |------|---------|------|
+| `connected` | Initial connection handshake ([`push.ts:35`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L35); emitted once per SSE client when the stream opens) | `{session, network_id}` |
 | `new_task` | New task received (`send_task` / `retry_task` / `reassign_task` / REST `POST /api/task`) | `{inbox_count, priority, from}` |
 | `new_message` | New chat message (`send_message`) | `{from, message_id}` |
 | `new_reply` | Reply to a task (`send_reply`) | `{from, message_id, in_reply_to, status}` |
 | `broadcast` | Broadcast received (`broadcast` tool) | `{inbox_count}` |
 | `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts:285/645`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L285)) | `{parent_task_id, child_task_id, child_alias}` |
-| `heartbeat` | Periodic server heartbeat | `{time}` |
 
 > Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts:570 + 910`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L570) for the actual payloads.
+>
+> **R275 calibration**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts:1124`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1124)).
 
 **Example SSE data stream**:
 
 ```
+event: connected
+data: {"type":"connected","session":"coder-1","network_id":"net_xxx"}
+
 event: new_task
 data: {"type":"new_task","inbox_count":1,"priority":"high","from":"commander"}
 
-event: heartbeat
-data: {"time":"2026-04-12T10:00:00Z"}
+: keepalive
+
+: keepalive
 ```
 
 ---

@@ -1145,23 +1145,29 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 
 | 事件 | 触发条件 | 数据 |
 |------|---------|------|
+| `connected` | 初始连接握手（[`push.ts:35`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L35)，每个 client 连上 SSE 时发一次） | `{session, network_id}` |
 | `new_task` | 收到新任务（`send_task` / `retry_task` / `reassign_task` / REST `POST /api/task`） | `{inbox_count, priority, from}` |
 | `new_message` | 收到新消息（`send_message`） | `{from, message_id}` |
 | `new_reply` | 收到 reply（`send_reply`） | `{from, message_id, in_reply_to, status}` |
 | `broadcast` | 收到广播（`broadcast` 工具） | `{inbox_count}` |
 | `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts:285/645`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L285)) | `{parent_task_id, child_task_id, child_alias}` |
-| `heartbeat` | 服务端定时心跳 | `{time}` |
 
 > 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts:570 + 910`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L570) 实际 payload 只有上表中字段。
+>
+> **R275 校准**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts:1124`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1124) 显式处理它）。
 
 **示例 SSE 数据流**：
 
 ```
+event: connected
+data: {"type":"connected","session":"代码1号","network_id":"net_xxx"}
+
 event: new_task
 data: {"type":"new_task","inbox_count":1,"priority":"high","from":"指挥室"}
 
-event: heartbeat
-data: {"time":"2026-04-12T10:00:00Z"}
+: keepalive
+
+: keepalive
 ```
 
 ---
