@@ -66,52 +66,51 @@ graph TB
 ### Dockerfile.server (CommHub Server)
 
 ```dockerfile
+# 跟 demos/codex-telegram-squad/Dockerfile.server 一致
 FROM oven/bun:1
 WORKDIR /app
-
-# 只复制 server 目录
-COPY server/ ./server/
-COPY agent-network/src/ ./agent-network/src/
-
-WORKDIR /app/server
-RUN bun install
-
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+COPY server/ server/
+RUN cd server && bun install
 EXPOSE 9200
-CMD ["bun", "run", "src/index.ts"]
+CMD ["bun", "run", "server/src/index.ts"]
 ```
 
 关键点：
 - 基于 Bun 镜像（CommHub Server 用 Bun 运行）
-- 只需要 `server/` 和 `agent-network/src/`
+- `apt-get install curl` —— docker-compose healthcheck（`curl -sf .../health`）需要它，`oven/bun:1` 基础镜像不自带
+- 只需要 `server/` 目录（server 自包含，不依赖 `agent-network/src/`）
 - 暴露 9200 端口
 
 ### Dockerfile.agent (Agent Node)
 
 ```dockerfile
-FROM node:20-slim
+# 跟 demos/codex-telegram-squad/Dockerfile.agent 一致
+FROM oven/bun:1
 WORKDIR /app
+RUN apt-get update && apt-get install -y curl python3 nodejs npm && rm -rf /var/lib/apt/lists/*
 
-# 安装 agent-node 和 CLI
-COPY agent-network/ ./agent-network/
-COPY agent-node/ ./agent-node/
-COPY channel/ ./channel/
+# 从源码装 agent-node + runtime SDK
+COPY agent-node/ agent-node/
+RUN cd agent-node && npm install 2>/dev/null || true
+RUN cd agent-node && npm install @openai/codex-sdk @openai/codex @anthropic-ai/claude-agent-sdk 2>/dev/null || true
 
-RUN cd agent-network && npm install && npm link
-RUN cd agent-node && npm install
+# 全局装 codex + claude CLI
+RUN npm i -g @openai/codex @anthropic-ai/claude-code 2>/dev/null || true
 
-# 安装 Codex CLI（可选）
-RUN npm install -g @openai/codex
+COPY demos/codex-telegram-squad/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-COPY demos/codex-telegram-squad/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Claude CLI 以 root 跑 --dangerously-skip-permissions 需要这个
+ENV IS_SANDBOX=1
 
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/app/entrypoint.sh"]
 ```
 
 关键点：
-- 基于 Node.js 镜像
-- 安装 agent-network (CLI) 和 agent-node (运行时)
-- 通过 entrypoint.sh 启动，根据环境变量选择 runtime
+- **基于 `oven/bun:1` 镜像**（不是 `node:*`）—— entrypoint.sh 用 `bun /app/agent-node/src/cli.ts` 跑 agent-node，base 镜像必须有 `bun`
+- `apt-get install curl python3 nodejs npm` —— entrypoint 健康检查用 curl，runtime SDK 装包用 npm
+- 通过 entrypoint.sh 启动，根据环境变量选择 runtime（`ENV IS_SANDBOX=1` 让 Claude CLI 在 root 容器里能跑）
 
 ### entrypoint.sh
 

@@ -66,52 +66,51 @@ graph TB
 ### Dockerfile.server (CommHub Server)
 
 ```dockerfile
+# Matches demos/codex-telegram-squad/Dockerfile.server
 FROM oven/bun:1
 WORKDIR /app
-
-# Copy only the server directory
-COPY server/ ./server/
-COPY agent-network/src/ ./agent-network/src/
-
-WORKDIR /app/server
-RUN bun install
-
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+COPY server/ server/
+RUN cd server && bun install
 EXPOSE 9200
-CMD ["bun", "run", "src/index.ts"]
+CMD ["bun", "run", "server/src/index.ts"]
 ```
 
 Key points:
-- Based on Bun image (CommHub Server runs on Bun)
-- Only needs `server/` and `agent-network/src/`
+- Based on the Bun image (CommHub Server runs on Bun)
+- `apt-get install curl` — the docker-compose healthcheck (`curl -sf .../health`) needs it; the `oven/bun:1` base image doesn't ship curl
+- Only needs the `server/` directory (the server is self-contained, no `agent-network/src/` dependency)
 - Exposes port 9200
 
 ### Dockerfile.agent (Agent Node)
 
 ```dockerfile
-FROM node:20-slim
+# Matches demos/codex-telegram-squad/Dockerfile.agent
+FROM oven/bun:1
 WORKDIR /app
+RUN apt-get update && apt-get install -y curl python3 nodejs npm && rm -rf /var/lib/apt/lists/*
 
-# Install agent-node and CLI
-COPY agent-network/ ./agent-network/
-COPY agent-node/ ./agent-node/
-COPY channel/ ./channel/
+# Install agent-node from source + runtime SDKs
+COPY agent-node/ agent-node/
+RUN cd agent-node && npm install 2>/dev/null || true
+RUN cd agent-node && npm install @openai/codex-sdk @openai/codex @anthropic-ai/claude-agent-sdk 2>/dev/null || true
 
-RUN cd agent-network && npm install && npm link
-RUN cd agent-node && npm install
+# Install codex + claude CLI globally
+RUN npm i -g @openai/codex @anthropic-ai/claude-code 2>/dev/null || true
 
-# Install Codex CLI (optional)
-RUN npm install -g @openai/codex
+COPY demos/codex-telegram-squad/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-COPY demos/codex-telegram-squad/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Claude CLI refuses --dangerously-skip-permissions as root without this
+ENV IS_SANDBOX=1
 
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/app/entrypoint.sh"]
 ```
 
 Key points:
-- Based on Node.js image
-- Installs agent-network (CLI) and agent-node (runtime)
-- Starts via entrypoint.sh, which selects the runtime based on environment variables
+- **Based on the `oven/bun:1` image** (not `node:*`) — entrypoint.sh runs agent-node via `bun /app/agent-node/src/cli.ts`, so the base image must have `bun`
+- `apt-get install curl python3 nodejs npm` — curl for the entrypoint health check, npm for installing the runtime SDKs
+- Starts via entrypoint.sh, which selects the runtime based on environment variables (`ENV IS_SANDBOX=1` lets the Claude CLI run inside a root container)
 
 ### entrypoint.sh
 
