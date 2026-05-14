@@ -1,16 +1,16 @@
 # 上手指南
 
-本页是当前 stable（v0.8.2 / CLI v2.1.7）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
+本页是当前 stable（v0.8.2）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
 
-::: tip 组件版本（v0.8.2 stable，npm `latest` tag）
-本页涉及 4 个 npm 包，各自的职责：
+::: tip 组件职责（v0.8.2 stable）
+本页涉及 4 个 npm 包，各自的职责（具体版本号以 npm `latest` tag 为准，doc 不写死避免 stale）：
 
-| 包 | 版本 | 用途 |
-|---|------|------|
-| `@sleep2agi/agent-network` | 2.1.7 | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
-| `@sleep2agi/commhub-server` | 0.8.0 | 通信中枢（MCP + REST + SSE，SQLite 持久化） |
-| `@sleep2agi/agent-network-dashboard` | 0.4.2 | Web Dashboard（Next.js 16） |
-| `@sleep2agi/agent-node` | 2.3.0 | Agent 运行时（claude-code-cli / claude-agent-sdk / codex-sdk） |
+| 包 | 用途 |
+|---|------|
+| `@sleep2agi/agent-network` | `anet` CLI（启动 Hub / Dashboard / Agent / Demo） |
+| `@sleep2agi/commhub-server` | 通信中枢（MCP + REST + SSE，SQLite 持久化） |
+| `@sleep2agi/agent-network-dashboard` | Web Dashboard（Next.js 16） |
+| `@sleep2agi/agent-node` | Agent 运行时（claude-code-cli / claude-agent-sdk / codex-sdk） |
 
 > 这里的"用途"指各 npm 包在系统里扮演的功能；用户的 **RBAC 角色**（owner/admin/member/viewer）见 [角色与权限](/concepts/roles)。
 :::
@@ -19,8 +19,8 @@
 
 | 依赖 | 版本 |
 |---|---|
-| Node.js | ≥ 20 |
-| npm | ≥ 9 |
+| Node.js | ≥ 22.13.0（`@sleep2agi/agent-network` `engines.node`） |
+| Bun | ≥ 1.2.0（`commhub-server` 需要） |
 
 `commhub-server` 与 `agent-node` 在第一次需要时由 `bunx` / `npx` 自动拉取，无需手动安装。
 
