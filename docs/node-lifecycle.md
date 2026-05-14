@@ -167,7 +167,7 @@ register() → callCommHub("report_status", {
 
 **触发**: `anet node rename <old> <new>`
 
-**前置条件（约定，未强制）**: 推荐 node offline 时改 —— [`cli.ts:2579-2622 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2579) **不调 `stopNode`**，运行中改名也能跑通本地 `renameSync`，但已 spawn 的子进程仍指向旧 config 路径，行为未定义。
+**前置条件（约定，未强制）**: 推荐 node offline 时改 —— [`cli.ts:2583-2626 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2583) **不调 `stopNode`**，运行中改名也能跑通本地 `renameSync`，但已 spawn 的子进程仍指向旧 config 路径，行为未定义。
 
 **P0 数据变更（只改本地，不依赖 CommHub rename API）**:
 1. `stored.node_name = newName` + `stored.alias = newName`（cli.ts:2604-2605）
@@ -195,18 +195,18 @@ register() → callCommHub("report_status", {
 
 **触发**: `anet node delete <node-name>` （首次提示，再加 `--force` 才真删）
 
-**前置条件**: 不强制 offline —— `anet node delete` 会先 `stopNode(nodeId)` 杀进程 + `await notifyServerOffline(...)` 通知 hub 后再删本地目录（[cli.ts:2701-2741 deleteCommand](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2701)）。
+**前置条件**: 不强制 offline —— `anet node delete` 会先 `stopNode(nodeId)` 杀进程 + `await notifyServerOffline(...)` 通知 hub 后再删本地目录（[cli.ts:2800-2840 deleteCommand](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2800)）。
 
 **实际数据变更**:
 1. **本地**: `rmSync(.anet/nodes/<id>/, { recursive: true, force: true })` —— 删整个目录（含 config.json、channels/、logs/；目录名是 alias / node_name，不是内部 node_id 字段；R209 chain 一致）
-2. **CommHub session**: `notifyServerOffline` 调用 `report_status(offline)`（[cli.ts:2626-2651](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2626)）—— **只把 sessions row.status 改成 offline，不 DELETE**。这一行 session 会一直留在 db 里（10 分钟 stale cutoff 触发时也只是再次 mark offline）。
+2. **CommHub session**: `notifyServerOffline` 调用 `report_status(offline)`（[cli.ts:2725-2750](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2725)）—— **只把 sessions row.status 改成 offline，不 DELETE**。这一行 session 会一直留在 db 里（10 分钟 stale cutoff 触发时也只是再次 mark offline）。
 3. **CommHub inbox**: **不清理** —— 残留 inbox 消息会一直留着。如果之后用同 alias 再 `anet node start`，新进程会从 `getInbox` 拉到旧消息（注意：旧消息可能跟新进程 session 上下文无关）。
 
 ::: warning 旧 doc P1 设计未采纳
 原 doc 写「DELETE FROM sessions / DELETE FROM inbox」是设计草稿意图，**未实施**。当前 v0.8.2 实际只 mark offline + 删本地目录，不清服务端 row。
 :::
 
-**确认流程**（[cli.ts:2732-2736](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2732)）：
+**确认流程**（[cli.ts:2831-2835](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2831)）：
 
 ```
 $ anet node delete 指挥室
