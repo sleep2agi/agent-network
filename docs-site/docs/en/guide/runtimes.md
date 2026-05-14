@@ -200,7 +200,7 @@ anet node create translator \
 | DeepSeek | Latest V / R series (see [DeepSeek platform](https://platform.deepseek.com)) | per DeepSeek's Anthropic-compatible docs |
 | Zhipu GLM | Latest GLM series (see [Zhipu Open Platform](https://open.bigmodel.cn)) | per Zhipu's Anthropic-adapter docs |
 | Moonshot Kimi | Latest K-series (see [Moonshot platform](https://platform.moonshot.cn)) | per Moonshot's Anthropic-compatible docs |
-| InternLM | Latest Intern-S series (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn` (**bare hostname, no `/anthropic` suffix** — unlike MiniMax et al.; verify [`cli.ts:1172`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1172)) |
+| InternLM | Latest Intern-S series (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn` (**bare hostname, no `/anthropic` suffix** — unlike MiniMax et al.; verify [`cli.ts:1314-1315`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1314) MODEL_PRESETS) |
 
 ::: tip Model IDs change frequently
 Providers ship new model versions every few weeks. **Pull the latest model ID from the provider's console** and pass it to `--model`.
