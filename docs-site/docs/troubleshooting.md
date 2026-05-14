@@ -460,7 +460,7 @@ anet network delete <old-net>
 Node "代码1号" already exists: .anet/nodes/代码1号/config.json
 ```
 
-verify [`agent-network/bin/cli.ts:1122`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1122) + [`agent-network/bin/cli.ts:1277`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1277)：`anet node create` 在交互式 / 非交互式两条路径都用 `resolveNodeRef(id)` 检查本地 `.anet/nodes/<alias>/config.json` 是否已存在；命中就直接 `process.exit(1)` 不连 hub。
+verify [`agent-network/bin/cli.ts:1121`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1121) + [`agent-network/bin/cli.ts:1283`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1283)：`anet node create` 在交互式 / 非交互式两条路径都用 `resolveNodeRef(id)` 检查本地 `.anet/nodes/<alias>/config.json` 是否已存在；命中就直接 `process.exit(1)` 不连 hub。
 
 **原因**：当前项目目录 `.anet/nodes/` 下已有同名 node config 子目录。这是**本地文件冲突**，跟 hub 端 session 状态无关。
 
@@ -622,7 +622,7 @@ Agent Node 支持调整日志级别（**top-level 字段，不在 `flags` 里**�
 }
 ```
 
-verify [`agent-node/src/cli.ts:203`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L203)：`LOG_LEVEL` 从 `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` 取，**只认 top-level `logLevel`**，写在 `flags.logLevel` 不生效。
+verify [`agent-node/src/cli.ts:202`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L202)：`LOG_LEVEL` 从 `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` 取，**只认 top-level `logLevel`**，写在 `flags.logLevel` 不生效。
 
 也可以走环境变量或命令行：
 

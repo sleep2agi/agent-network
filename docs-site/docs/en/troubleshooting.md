@@ -461,7 +461,7 @@ anet network delete <old-net>
 Node "coder-1" already exists: .anet/nodes/coder-1/config.json
 ```
 
-Verified at [`agent-network/bin/cli.ts:1122`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1122) + [`agent-network/bin/cli.ts:1277`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1277): both the interactive and non-interactive paths of `anet node create` call `resolveNodeRef(id)` to check whether `.anet/nodes/<alias>/config.json` already exists; if so, they `process.exit(1)` without ever contacting the hub.
+Verified at [`agent-network/bin/cli.ts:1121`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1121) + [`agent-network/bin/cli.ts:1283`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1283): both the interactive and non-interactive paths of `anet node create` call `resolveNodeRef(id)` to check whether `.anet/nodes/<alias>/config.json` already exists; if so, they `process.exit(1)` without ever contacting the hub.
 
 **Cause**: a subdirectory with the same alias already exists under `.anet/nodes/` in the current project directory. This is a **local filesystem collision** — it has nothing to do with the hub-side session state.
 
@@ -624,7 +624,7 @@ Agent Node supports adjustable log levels (**top-level field — not nested unde
 }
 ```
 
-Verified at [`agent-node/src/cli.ts:203`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L203): `LOG_LEVEL` is read from `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` — it **only honors the top-level `logLevel`**. Putting `logLevel` inside `flags` has no effect.
+Verified at [`agent-node/src/cli.ts:202`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L202): `LOG_LEVEL` is read from `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` — it **only honors the top-level `logLevel`**. Putting `logLevel` inside `flags` has no effect.
 
 You can also set it via environment variable or CLI flag:
 
