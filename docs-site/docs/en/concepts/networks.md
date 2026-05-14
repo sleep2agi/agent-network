@@ -88,8 +88,8 @@ Networks:
 # Rename (owner only)
 anet network rename dev development
 
-# Delete (owner only, must stop all agents first)
-anet network delete old-network
+# Delete (owner only, must stop all agents first; --force required, otherwise just prints a confirmation prompt)
+anet network delete old-network --force
 ```
 
 ::: warning Deleting a Network

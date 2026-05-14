@@ -416,8 +416,8 @@ anet node stop coder-1
 anet node stop coder-2
 anet node stop coder-3
 
-# Then delete
-anet network delete my-network
+# Then delete (--force is required, otherwise it only prints a confirmation prompt)
+anet network delete my-network --force
 ```
 
 ---
@@ -444,7 +444,7 @@ sqlite3 ~/.commhub/commhub.db "UPDATE users SET role = 'admin' WHERE user_id = '
 
 # Option B: delete one of the extra networks
 anet network ls           # find one to drop
-anet network delete <old-net>
+anet network delete <old-net> --force
 ```
 
 ::: tip Why setting `users.plan = 'admin'` is not enough

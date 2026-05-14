@@ -88,8 +88,8 @@ Networks:
 # 重命名（仅 owner）
 anet network rename dev development
 
-# 删除（仅 owner，必须先停止所有 Agent）
-anet network delete old-network
+# 删除（仅 owner，必须先停止所有 Agent；必须加 --force，否则只打印确认提示）
+anet network delete old-network --force
 ```
 
 ::: warning 删除网络

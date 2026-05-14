@@ -415,8 +415,8 @@ anet node stop 代码1号
 anet node stop 代码2号
 anet node stop 代码3号
 
-# 然后删除
-anet network delete my-network
+# 然后删除（必须加 --force，否则只打印确认提示）
+anet network delete my-network --force
 ```
 
 ---
@@ -443,7 +443,7 @@ sqlite3 ~/.commhub/commhub.db "UPDATE users SET role = 'admin' WHERE user_id = '
 
 # 方案 B：直接删多余的 network
 anet network ls           # 看哪些可删
-anet network delete <old-net>
+anet network delete <old-net> --force
 ```
 
 ::: tip 为什么 `users.plan='admin'` 不够

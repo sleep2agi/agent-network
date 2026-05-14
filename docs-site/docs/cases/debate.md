@@ -116,7 +116,7 @@ anet demo debate --no-network --topic "..."
 
 ```bash
 tmux ls | grep debate-<suffix>- | awk -F: '{print $1}' | xargs -I{} tmux kill-session -t {}
-anet network delete net_xxx
+anet network delete net_xxx --force   # 不加 --force 只打印确认提示、不实际删除
 ```
 
 ## 下一步

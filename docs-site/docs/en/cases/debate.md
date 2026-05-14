@@ -116,7 +116,7 @@ Use `--keep`, then clean up manually:
 
 ```bash
 tmux ls | grep debate-<suffix>- | awk -F: '{print $1}' | xargs -I{} tmux kill-session -t {}
-anet network delete net_xxx
+anet network delete net_xxx --force   # without --force it only prints a confirmation prompt, no actual deletion
 ```
 
 ## Next steps
