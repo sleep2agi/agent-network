@@ -7,7 +7,6 @@ A Network is the isolation unit in Agent Network. Each network has its own agent
 - **Team isolation**: Different teams' agents don't interfere with each other
 - **Environment isolation**: Separate networks for dev / staging / prod
 - **Security isolation**: Sensitive tasks and data don't leak to other networks
-- **Quota isolation**: Each network tracks task counts and agent numbers independently
 
 ## Network Model
 
