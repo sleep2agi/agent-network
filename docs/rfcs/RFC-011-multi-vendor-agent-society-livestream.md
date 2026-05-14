@@ -235,9 +235,88 @@ interface CommentatorSpec {
 
 ---
 
-## §3 跨厂商混合 batch 接 RFC-009（撰写中）
+## §3 跨厂商混合 batch 接 RFC-009
 
-> 跨厂商混合 batch 设计 + 在 RFC-009 `CohortSpec` 上增加 `vendor` 维度。
+「5×DeepSeek + 5×MiniMax + 5×GLM」要落地，需要两件事：(1) 一个 batch 内能创建**多 vendor** 的节点；(2) 这些节点能作为 RFC-009 实验的 cohort 参与实验。本节设计这两点 —— 都是在已有 primitive 上**加维度**，不重写。
+
+### 3.1 现状：batch 是单 vendor 的
+
+`anet create --batch`（#104-B 后走 `selectVendorAndModel()` / `--preset`）一次只选一个 vendor，创建 N 个**同 vendor** 节点。要做多厂商社会，需要在一个 batch 操作里混合多个 vendor。
+
+### 3.2 设计：`MultiVendorBatchSpec`
+
+不改 `anet create --batch` 的单 vendor 行为（向后兼容），而是新增一个**多 vendor batch 描述**，由实验编排层消费：
+
+```typescript
+// 一个多厂商社会的节点构成。实验编排层据此循环调用底层的
+// 单 vendor batch primitive，每个 cohort 一批。
+interface MultiVendorBatchSpec {
+  cohorts: VendorCohort[];
+  workdir: string;                 // 父目录；每 cohort 一个子目录
+  hub: string;
+}
+
+interface VendorCohort {
+  vendor: string;                  // VENDORS registry 的 key — 必须是已验证 vendor
+  model?: string;                  // 该 vendor 的具体 model；省略 = vendor 默认
+  count: number;                   // 这个厂商起几个节点
+  aliasPrefix: string;             // e.g. "DS" → DS1号..DS5号
+  apiKey: string;                  // 该 vendor 的 key（走 env，不入 spec 持久化）
+}
+```
+
+例（5×DeepSeek + 5×MiniMax + 5×GLM）：
+
+```typescript
+const society: MultiVendorBatchSpec = {
+  workdir: "~/anet-society",
+  hub: "http://127.0.0.1:9200",
+  cohorts: [
+    { vendor: "deepseek", count: 5, aliasPrefix: "DS",  apiKey: process.env.DEEPSEEK_KEY! },
+    { vendor: "minimax",  count: 5, aliasPrefix: "MM",  apiKey: process.env.MINIMAX_KEY! },
+    { vendor: "glm",      count: 5, aliasPrefix: "GLM", apiKey: process.env.GLM_KEY! },
+  ],
+};
+```
+
+**实现策略**：`MultiVendorBatchSpec` 的执行 = 对每个 `VendorCohort` 调用一次已有的单 vendor batch primitive（`createBatch()`，#104-B 后基于 VENDORS registry）。不发明新的节点创建路径 —— 只是「循环调用 N 次单 vendor batch」。这让多厂商 batch 天然继承 batch 已有的 lifecycle（`anet batch start/stop/restart/cleanup`）。
+
+> ⚠️ **vendor 必须已验证**：`VendorCohort.vendor` 只接受 VENDORS registry 里的 key。#104-B 把 deepseek/glm/kimi 移出了 registry —— 所以上面这个例子在 **DeepSeek/GLM 验证加回 registry 之前跑不了**。这正是 §1.2 依赖链里「前置 P1」的含义，也是本 RFC 实施 gate 的一部分。
+
+### 3.3 接 RFC-009：`CohortSpec` 增加 `vendor` 维度
+
+RFC-009 §2.3 的 `CohortSpec` 负责把 agent 切成实验分组（cohort）。RFC-011 增加一个维度：**cohort 可以按 vendor 定义**。
+
+RFC-009 现有 `CohortSpec`（摘要）按「数量 / 角色 / 标签」切分。RFC-011 提议增加一个可选字段：
+
+```typescript
+// RFC-009 CohortSpec 的 RFC-011 扩展（增量，不破坏现有字段）
+interface CohortSpec {
+  // ... RFC-009 现有字段 ...
+  vendor?: string;                 // 新增：这个 cohort 全部是该 vendor 的节点
+}
+```
+
+含义：实验设定时可以声明「cohort A = 全部 DeepSeek 节点，cohort B = 全部 GLM 节点」，于是 RFC-009 的 round 协议 / payoff 计算天然就能做**厂商间**的对比实验 —— 这正是「多厂商社会」的实验价值所在（不只是看热闹，是能产出「不同厂商模型的社会行为差异」这种学术/咨询结论）。
+
+`MultiVendorBatchSpec.cohorts` 与 RFC-009 `CohortSpec` 是**同构**的：前者描述「怎么把这群节点创建出来」，后者描述「实验里怎么把它们分组」。`vendor` 字段是两者的连接键 —— 节点创建时带上 vendor 身份（已持久化在 config.json 的 `runtime`/`model`/env，加上 #96 的视觉身份），实验编排时按 vendor 分 cohort。
+
+### 3.4 vendor 身份如何流到呈现层
+
+`SocietyEvent.vendor`（§2.1）的值从哪来？链路：
+
+```
+VendorCohort.vendor (创建时)
+  → 节点 config.json (model + ANTHROPIC_BASE_URL 已隐含 vendor)
+  → commhub 节点注册时带 agent 字段 (agent-node:claude 等) + #96 视觉身份
+  → SocietyEvent 归一化层用一个 alias→vendor 映射表回填 SocietyEvent.vendor
+```
+
+需要一个轻量的 `alias → vendor` 映射（多厂商 batch 创建时即可生成并落盘，例如 `~/anet-society/society.json`）。呈现层的归一化器读这个映射给每个事件打 vendor 标签。`[N站马 输入]` 这个映射表的存放位置与 dashboard 读取方式待定。
+
+### 3.5 §3 小结
+
+多厂商 batch = `MultiVendorBatchSpec`（多个 `VendorCohort`）→ 循环调用已有单 vendor batch primitive，继承 batch lifecycle。接 RFC-009 = 给 `CohortSpec` 加一个可选 `vendor` 字段，使厂商间对比实验成为一等公民。vendor 身份通过一个 `alias→vendor` 映射流到呈现层的 `SocietyEvent.vendor`。**实施 gate：所有目标 vendor 必须先验证加回 VENDORS registry**（§1.2 前置 P1）。
 
 ---
 
@@ -265,7 +344,7 @@ interface CommentatorSpec {
 - [x] 骨架 + 头部 + 摘要
 - [x] §1 愿景与依赖链
 - [x] §2 呈现层设计（`[N站马 输入]` 标注处待 N站马 确认）
-- [ ] §3 跨厂商混合 batch 接 RFC-009
+- [x] §3 跨厂商混合 batch 接 RFC-009
 - [ ] §4 自动导演 — 热点检测算法
 - [ ] §5 24/7 稳定性
 - [ ] §6 实施 Phase ladder
