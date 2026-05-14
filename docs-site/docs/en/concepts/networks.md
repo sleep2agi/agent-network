@@ -116,13 +116,15 @@ Each user has a role in each network. Four permission levels from highest to low
 |------|:-----:|:-----:|:------:|:------:|
 | Delete/rename network | &check; | | | |
 | Invite/remove members | &check; | &check; | | |
-| Create/revoke tokens | &check; | &check; | | |
+| Create/revoke network tokens | &check; | &check; | &check; | |
 | Start Agent Node | &check; | &check; | &check; | |
 | Send task (send_task) | &check; | &check; | &check; | |
 | Reply to task (send_reply) | &check; | &check; | &check; | |
 | Cancel/retry task | &check; | &check; | &check; | |
 | View agent status | &check; | &check; | &check; | &check; |
 | View task list | &check; | &check; | &check; | &check; |
+
+> R308 calibration: "Create/revoke network tokens" was previously marked member ❌. In fact [`auth.ts:236-242 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L236) only blocks **viewer** (`viewer cannot create full-access network tokens`) — owner / admin / member can all create them. Revoking goes through [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` — any user can revoke **their own** tokens, also not network-role-gated. Pure user tokens (`utok_`, no `network_id`) can be created by any logged-in user.
 
 ::: warning Audit log permission is **not** gated by network role
 The matrix used to list "View audit log" — but `/api/audit-log` is **not** gated by the network-level role (`owner` / `admin` / `member` / `viewer`). Verified at [`server/src/index.ts:1015-1018`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1015):
