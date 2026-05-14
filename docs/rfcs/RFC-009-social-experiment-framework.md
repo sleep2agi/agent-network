@@ -748,7 +748,241 @@ async function runTurnBased(spec: SocialExperimentSpec, runner: Runner) {
 
 ## §4 cohort / payoff / sub-network 设计
 
-> 🚧 待 R463+ /loop tick 推进
+本节详述 §2 已声明、§3 已引用的三组扩展点的具体设计。
+
+### 4.1 Cohort 切分算法
+
+#### 4.1.1 Alias 分配
+
+给定 `spec.cohorts = [{ prefix: "P1", count: 5 }, { prefix: "P2", count: 3 }]`，framework 生成 8 个 agent alias：
+
+```
+P1-0 P1-1 P1-2 P1-3 P1-4   P2-0 P2-1 P2-2
+```
+
+规则：
+- Alias 形式 `<prefix>-<cohort-local-idx>`，cohort-local-idx 从 0 开始。
+- *全局* idx 按 cohorts 数组顺序 + cohort 内 idx 顺序展开（上例 P1-0..P1-4 全局 idx = 0..4，P2-0..P2-2 = 5..7）。
+- alias 必须在 anet 网络内全局唯一，framework 调用 `commhub_get_all_status()` 校验冲突，冲突时 fail-fast。
+- 跨实验执行（同一 `name`）alias 复用，由 framework 维护 `experiment_id` 命名空间隔离（详 4.1.5）。
+
+#### 4.1.2 Spawn 流程
+
+```typescript
+// framework 内部
+async function spawnAllAgents(spec: SocialExperimentSpec): Promise<AgentHandle[]> {
+  const handles: AgentHandle[] = [];
+  let globalIdx = 0;
+
+  for (const cohort of spec.cohorts) {
+    for (let i = 0; i < cohort.count; i++) {
+      const alias = `${cohort.prefix}-${i}`;
+      const handle = await runner.spawnAgent({
+        alias,
+        runtime: cohort.metadata?.runtime ?? spec.runtime?.runtime ?? "codex",
+        model: cohort.metadata?.model ?? spec.runtime?.defaultModel,
+        experimentId: spec.runtime?.metadata?.experimentId,
+      });
+      handles.push({ ...handle, cohort: cohort.prefix, role: cohort.promptRole, cohortIdx: i, globalIdx: globalIdx++ });
+    }
+  }
+  return handles;
+}
+```
+
+底层调用 `anet batch run` 已有的 spawn 能力，framework 仅追加 metadata（cohort/role/experimentId）。
+
+#### 4.1.3 Cohort metadata 透传
+
+`CohortSpec.metadata` 是任意 key-value，会同时进入：
+- **`ExperimentContext.cohortMetadata`**——promptTemplate 第 3 参可读，用于在 prompt 中注入 cohort 特定常量（如博弈中 "你是合作型策略" / "你是背叛型策略"）。
+- **Telemetry tag**——RFC-003 telemetry 事件携带 `cohort`, `cohort_metadata` 字段，便于后续查询"哪个 cohort 的 token 消耗最多 / 决策耗时最长"。
+
+#### 4.1.4 `participatesInRound` 语义
+
+若 `cohort.participatesInRound === false`：
+- 该 cohort agent **仍 spawn**，**仍 接收 prompt**（用于初始化），但 *不计入* round payoff 计算的 decisions 列表。
+- 用例：回音室中"observer cohort"——负责观察 left-bubble + right-bubble 后做综合判断，但不投票。
+- 用例：博弈中"audience cohort"——只看不下场，结束时给出评论。
+
+#### 4.1.5 `experiment_id` 命名空间
+
+framework 在 `runSocialExperiment` 入口生成 `experiment_id = <name>-<unix_ms>-<rand_hex_4>`，注入：
+- alias prefix：实际 commhub alias 为 `<experiment_id>::<prefix>-<idx>`（双冒号分隔，避免单 dash 冲突），UI 默认隐藏 prefix 显 `<prefix>-<idx>`。
+- spec.runtime.metadata.experimentId：透传至 promptTemplate 与 telemetry。
+
+这样同一节点上 *并行* 跑两个 opinion-spread 实验不会 alias 冲突。
+
+### 4.2 Payoff 执行模型
+
+#### 4.2.1 调用时机
+
+- **broadcast**：每 round 结束后调用（若 payoffFn 存在），传入该轮的 decisions。
+- **sequential**：每个 agent decision 后调用（增量），传入仅该单步 decision。
+- **multi-round**：每 round 结束后调用（必填），传入该轮全部 decisions。
+- **turn-based**：每 round 结束后调用（含 leader 决策），传入该轮全部 decisions（含 leader）。
+
+#### 4.2.2 同步 / 异步
+
+`PayoffFn` 返回 `Payoff[] | Promise<Payoff[]>`。framework 永远 await：
+
+```typescript
+const roundPayoffs = await Promise.resolve(spec.payoffFn(decisions, ctx));
+```
+
+异步场景：payoff 需调用外部服务（如真实股价 API 回测博弈对照），或需 LLM 评分（如谈判中"公平度评分"由独立 judge agent 给出）。
+
+#### 4.2.3 Decision payload schema 约束
+
+`Decision.payload` 是 `unknown`，由 promptTemplate 与 payoffFn 之间约束。建议两种模式：
+
+**模式 A — 自由文本 + 后置解析（推荐入门）**
+
+```typescript
+promptTemplate: () => "请回答 A 或 B，仅输出单个字母",
+payoffFn: (decisions) => decisions.map(d => ({
+  ...,
+  value: parseAB(d.rawText),  // 简单解析
+}))
+```
+
+**模式 B — 结构化 outputSchema**
+
+利用 anet `batch run` 已有的 `outputSchema` 字段（per RFC-002）让 agent 输出 JSON：
+
+```typescript
+promptTemplate: () => ({
+  systemPrompt: "...",
+  userPrompt: "...",
+  outputSchema: { type: "object", properties: { choice: { enum: ["A", "B"] } } },
+}),
+payoffFn: (decisions) => decisions.map(d => ({
+  ...,
+  value: (d.payload as { choice: string }).choice === "A" ? 1 : 0,
+}))
+```
+
+framework 不强制选哪种，但在 `dryRun` 模式下会做静态校验（promptTemplate 返回 outputSchema → payoffFn 参数类型 hint）。
+
+#### 4.2.4 错误处理
+
+- `payoffFn` 抛错：framework 默认 *fail-fast* STOP 实验，错误进入 `ExperimentResult.error`。
+- 自定义 `errorPolicy: "continue" | "fail-fast"` 在 `spec.runtime` 中可覆盖（v1 默认 fail-fast，v2 候选 continue 选项）。
+- 单个 agent reply 超时：跳过该 agent，对应 decision 标记 `{ payload: null, rawText: "<timeout>" }`，payoffFn 自行决定如何处理。
+
+#### 4.2.5 Payoff 历史可见性
+
+`PayoffContext.history` 是历史 *decisions* 二维数组（`history[round]`），但 framework 还会在 promptTemplate 的 `ExperimentContext.payoffsHistory`（可选 expose）中给出历史 payoffs，让 agent 在 prompt 中可见自己的累积收益。是否暴露由 `spec.runtime.exposePayoffsToAgents`（默认 `true`）控制。
+
+### 4.3 Sub-network 隔离
+
+#### 4.3.1 子网模型
+
+`spec.subNetworks` 数组每一项定义一个 *逻辑子网*：
+
+```typescript
+{
+  id: "left-echo",
+  members: ["left-0", "left-1", ..., "left-4"],   // 显式或 framework 按 cohorts 推导
+  crossNetwork: "blocked" | "throttled" | "open",
+  throttleProbability: 0.1,
+}
+```
+
+#### 4.3.2 Members 推导默认
+
+若 `members` 未指定，framework 按 1-to-1 映射 `cohorts ↔ subNetworks`：
+- `subNetworks[0]` = `cohorts[0]` 全员
+- `subNetworks[1]` = `cohorts[1]` 全员
+- ……
+
+若 cohort 数 ≠ subNetwork 数，必须显式指定 members；否则 fail-fast。
+
+#### 4.3.3 隔离实现 — `visiblePeers` 过滤
+
+framework 在每次 promptTemplate 调用前计算 `ExperimentContext.visiblePeers`：
+
+```typescript
+function computeVisiblePeers(agent: AgentHandle, spec: SocialExperimentSpec): string[] {
+  if (!spec.subNetworks) return allAgents.map(a => a.alias);
+
+  const agentNetwork = findNetworkOf(agent, spec.subNetworks);
+  const peers: string[] = [];
+
+  for (const a of allAgents) {
+    if (a.alias === agent.alias) continue;
+    const aNetwork = findNetworkOf(a, spec.subNetworks);
+
+    if (aNetwork.id === agentNetwork.id) {
+      peers.push(a.alias);  // 同网总是可见
+    } else if (agentNetwork.crossNetwork === "open") {
+      peers.push(a.alias);
+    } else if (agentNetwork.crossNetwork === "throttled" &&
+               Math.random() < (agentNetwork.throttleProbability ?? 0.1)) {
+      peers.push(a.alias);  // 概率性可见
+    }
+    // "blocked" → skip
+  }
+  return peers;
+}
+```
+
+#### 4.3.4 隔离实现 — history 过滤
+
+`ExperimentContext.history`（broadcast / multi-round 用）也按 `visiblePeers` 过滤：agent 仅看到 *自己网内 + 跨网允许* 的 peers 历史决策。
+
+```typescript
+const filteredHistory = history.map(round =>
+  round.filter(d => visiblePeers.includes(d.agentAlias) || d.agentAlias === agent.alias)
+);
+```
+
+#### 4.3.5 隔离实现 — commhub-level 屏蔽（v2）
+
+v1 仅在 *prompt 上下文* 层面隔离（即 agent 看不到对网信息）。v2 候选：在 commhub-level *拒绝* cross-network 的 `send_task` / `send_message` 调用（防止 agent 主动越界）。v2 需 commhub server 增加 *network 标签* 字段，留待 RFC-009 v2 amend。
+
+#### 4.3.6 用例：回音室
+
+```typescript
+const echoSpec: SocialExperimentSpec = {
+  name: "echo-chamber",
+  cohorts: [
+    { prefix: "left", count: 5, promptRole: "left-leaning" },
+    { prefix: "right", count: 5, promptRole: "right-leaning" },
+    { prefix: "observer", count: 2, promptRole: "neutral-observer", participatesInRound: false },
+  ],
+  roundProtocol: "broadcast",
+  rounds: 5,
+  subNetworks: [
+    { id: "left-bubble", crossNetwork: "blocked" },     // members 默认 cohorts[0]
+    { id: "right-bubble", crossNetwork: "blocked" },    // members 默认 cohorts[1]
+    { id: "neutral", crossNetwork: "open" },             // observer 全可见
+  ],
+  promptTemplate: (role, idx, ctx) =>
+    `你是${role}。本轮可见前轮 ${ctx.history.flat().filter(d => ctx.visiblePeers.includes(d.agentAlias)).length} 个观点。请就 X 表态。`,
+};
+```
+
+执行效果：left bubble 内 5 个 agent 仅相互可见、right bubble 仅相互可见、observer 全可见。5 轮后两 bubble 内意见极化指数显著高于 baseline broadcast 单网络。
+
+### 4.4 Telemetry & 可观察性
+
+framework 调用 RFC-003 telemetry layer 写入 4 类事件：
+
+| 事件 | 触发 | 字段 |
+|------|------|------|
+| `experiment.started` | runSocialExperiment 入口 | experiment_id, spec 摘要, cohort 数, 总 agent 数 |
+| `round.completed` | 每轮结束 | round, decisions 数, payoffs 合计, 用时 ms |
+| `agent.decided` | 每个 decision | agent_alias, cohort, payload preview, tokens, latency |
+| `experiment.finished` | runSocialExperiment 出口 | total_rounds, total_tokens, total_cost, aggregated 摘要 |
+
+R415 dashboard 已有 telemetry 消费基础，无需额外改动。
+
+### 4.5 §4 小结
+
+cohort 切分 = `<prefix>-<idx>` + `experiment_id` 命名空间；payoff 同步异步均支持，dryRun 静态校验 schema；sub-network v1 在 prompt 上下文层隔离（visiblePeers + filteredHistory），v2 候选 commhub-level 屏蔽。
+
+§5 给出 Phase 1-3 实施 ladder 与 5 demo 迁移顺序。
 
 ---
 
