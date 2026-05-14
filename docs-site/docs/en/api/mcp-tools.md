@@ -541,7 +541,7 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
       "alias": "coder-1",
       "status": "idle",
       "agent": "agent-node:codex",
-      "model": "your-model-id",
+      "node_id": "n_a1b2c3d4",
       "last_seen_at": "2026-04-12 10:00:00",
       "network_id": "net_xxx"
     }
@@ -553,6 +553,10 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
   ]
 }
 ```
+
+::: warning The `sessions` row has **no `model` field**
+`get_all_status` runs `SELECT * FROM sessions` ([`tools.ts:388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L388), no JOIN). The `sessions` table schema ([`db.ts:7-26`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L7) + V2 migration [`db.ts:58-67`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L58)) has **no `model` column** — `model` lives only in the `nodes` table (R281 chain calibrated that `report_status`'s `model` parameter only writes to `nodes.model` when `node_id` is also passed). To look up an agent's model, use REST [`GET /api/nodes`](/en/api/rest#get-api-nodes) or grab `node_id` from [`get_session_status`](#get_session_status) and query the nodes table. `summary` is the status-grouped count over the entire scope (same as `list_tasks`'s `stats`).
+:::
 
 ---
 

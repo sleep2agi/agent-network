@@ -541,7 +541,7 @@ send_task({
       "alias": "代码1号",
       "status": "idle",
       "agent": "agent-node:codex",
-      "model": "your-model-id",
+      "node_id": "n_a1b2c3d4",
       "last_seen_at": "2026-04-12 10:00:00",
       "network_id": "net_xxx"
     }
@@ -553,6 +553,10 @@ send_task({
   ]
 }
 ```
+
+::: warning `sessions` 行**没有** `model` 字段
+`get_all_status` 走 `SELECT * FROM sessions`（[`tools.ts:388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L388)，无 JOIN）。`sessions` 表 schema（[`db.ts:7-26`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L7) + V2 migration [`db.ts:58-67`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L58)）**没有 `model` 列** —— `model` 只存在 `nodes` 表（R281 chain 已校准 `report_status` 的 `model` 参数只在传 `node_id` 时写 `nodes.model`）。要查 agent 的 model，用 REST [`GET /api/nodes`](/api/rest#get-api-nodes) 或 [`get_session_status`](#get_session_status) 拿 `node_id` 再查 nodes 表。`summary` 是按 status 分组的全 scope 计数（同 `list_tasks` 的 `stats`）。
+:::
 
 ---
 
