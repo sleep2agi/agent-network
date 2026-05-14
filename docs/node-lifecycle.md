@@ -337,10 +337,12 @@ if (!config.node_id) {
 }
 ```
 
-2. **字段名兼容读取**:
+2. **字段名兼容读取**（verify `agent-node/src/cli.ts`）:
 ```typescript
-const NODE_NAME = fileConfig.node_name || fileConfig.name || fileConfig.alias || ALIAS;
-const SESSION = fileConfig.session || fileConfig.resume || fileConfig.sessionId || "";
+// cli.ts:355 —— node_name 无兼容链，直接取 node_name 字段
+const NODE_NAME = fileConfig.node_name || "";
+// cli.ts:179 —— session 有字段名兼容链（session / resume / sessionId），且 CLI flag 优先
+const SESSION_ID = NEW_SESSION ? "" : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "");
 ```
 
 3. **旧路径 fallback**:
