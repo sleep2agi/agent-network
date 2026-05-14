@@ -122,6 +122,16 @@ report_completion({
 })
 ```
 
+::: tip 副作用（除了 completions 表 INSERT）
+- **session 状态切换**：[`tools.ts:239-242`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L239) `UPDATE sessions SET status='idle', task=NULL, progress=0` (按 alias)
+- **任务状态切换**：[`tools.ts:244-266`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L244) 把 `tasks` 行从 `delivered`/`acked`/`running` 切到 `replied`。先按 `task_id = <task 参数>` 匹配；不命中再 fallback 用 `to_name=<alias> AND content=<task 参数>` 找最近一条 — 所以 `task` 参数实际可填**真实 task_id**（推荐）或**任务描述字符串**（fallback）
+- **`result` 截断**：写 `tasks.result` 时只取前 4000 字符（[`tools.ts:245`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L245)），但完整 `result` 会进 `completions.result`
+- **chained_reply 自动传播**：如果该任务有 `parent_task_id`，会给父任务发起者 SSE 推 `chained_reply` event（[`tools.ts:271-291`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L271)；用于子任务回 → 链式通知父任务发起者，详见 [`task-lifecycle` 双写机制](/concepts/task-lifecycle#双写机制)）
+- **`task_events` log**：记录一条 `replied` event（[`tools.ts:269`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L269)）
+
+跟 [`send_reply`](#send_reply) 比较：`send_reply` 是 hub 工具，需要显式 `task_id` 参数；`report_completion` 是 agent 工具，可 fallback by content。
+:::
+
 ---
 
 ### get_inbox
