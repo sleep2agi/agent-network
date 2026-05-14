@@ -193,14 +193,16 @@ anet node create translator \
 
 ### Verified models
 
+The table below is the `claude-agent-sdk` runtime's built-in providers from the `anet init` vendor picker (cli.ts `VENDORS` list) — every entry's `baseUrl` + model ids are verified-with-real-call before landing:
+
 | Provider | Model | `ANTHROPIC_BASE_URL` |
 |---|---|---|
-| Anthropic | Latest Sonnet / Opus / Haiku (see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)) | `https://api.anthropic.com` |
+| Anthropic | Latest Sonnet / Opus / Haiku (see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)) | (Anthropic-native, no base URL needed) |
 | MiniMax | Latest M-series (see [MiniMax platform](https://platform.minimaxi.com)) | `https://api.minimaxi.com/anthropic` |
-| DeepSeek | Latest V / R series (see [DeepSeek platform](https://platform.deepseek.com)) | per DeepSeek's Anthropic-compatible docs |
-| Zhipu GLM | Latest GLM series (see [Zhipu Open Platform](https://open.bigmodel.cn)) | per Zhipu's Anthropic-adapter docs |
-| Moonshot Kimi | Latest K-series (see [Moonshot platform](https://platform.moonshot.cn)) | per Moonshot's Anthropic-compatible docs |
-| InternLM | Latest Intern-S series (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn` (**bare hostname, no `/anthropic` suffix** — unlike MiniMax et al.; verify [`cli.ts:1322-1324`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1322) MODEL_PRESETS) |
+| InternLM | Intern-S2-Preview (default) / Intern-S1-Pro (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn` (**bare hostname, no `/anthropic` suffix** — unlike MiniMax et al.) |
+| Xiaomi MiMo | mimo-v2.5-pro (default) / v2.5 / v2-pro / v2-omni (see [Xiaomi platform](https://platform.xiaomimimo.com)) | `https://token-plan-cn.xiaomimimo.com/anthropic` |
+
+> Source: [`cli.ts:1114-1175 VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114). **Providers that haven't passed verification (DeepSeek / GLM / Kimi) are intentionally NOT in the VENDORS list** — reach them via the `custom` vendor (any Anthropic-compatible API accepts a base URL + model there).
 
 ::: tip Model IDs change frequently
 Providers ship new model versions every few weeks. **Pull the latest model ID from the provider's console** and pass it to `--model`.
@@ -352,14 +354,14 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 
 ::: info Verified (current stable line inherits v2 E2E coverage)
 - The `claude-agent-sdk` runtime itself — passes E2E
-- At the vendor level only **Anthropic / MiniMax / InternLM** are verified (verify [`cli.ts:1314-1333`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1314) MODEL_PRESETS — the ones **not** tagged `[UNVERIFIED]`, plus OpenRouter)
+- At the vendor level: every provider in the `anet init` [`VENDORS` list (cli.ts:1114-1175)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114) (**Anthropic / MiniMax / InternLM / Xiaomi MiMo**) has its `baseUrl` + model ids verified-with-real-call before landing
 - Multi-runtime mesh (peer agents auto-coordinate via `get_all_status` + `send_task` + `get_task`)
 :::
 
 ::: warning Not verified
 - `claude-code-cli` — runs locally (v0.8.2 fixed the session-resume default-loss bug, see [changelog](/en/changelog)); no E2E regression yet
 - `codex-sdk` — unit-tested only, real codex auth E2E pending
-- **DeepSeek / GLM / Kimi / Xiaomi MiMo** — these 4 vendor presets are explicitly tagged `[UNVERIFIED]` in cli.ts MODEL_PRESETS ([`cli.ts:1317-1328`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1317)); the endpoint URLs are filled in but no real-API regression has been run — usable, but verify on your own first
+- **DeepSeek / GLM / Kimi and other unverified providers** — intentionally **not in the `VENDORS` list** (#104-B design: the list only holds verified entries, unverified ones don't get mixed in); reach them via the `custom` vendor — usable, but verify the endpoint + model id on your own first
 :::
 
 ---
