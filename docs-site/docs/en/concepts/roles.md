@@ -31,15 +31,15 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | Delete agent | ❌ | ✅ (own) | ✅ (any) | ✅ (any) |
 | **Tasks** | | | | |
 | Dispatch `send_task` | ❌ | ✅ | ✅ | ✅ |
-| `cancel_task` | ❌ | ✅ (own) | ✅ (any) | ✅ (any) |
-| `reassign_task` | ❌ | ❌ | ✅ | ✅ |
+| `cancel_task` | ❌ | ✅ | ✅ | ✅ |
+| `reassign_task` | ❌ | ✅ | ✅ | ✅ |
 | **Member management** | | | | |
 | Invite (`anet network invite`) | ❌ | ❌ | ✅ | ✅ |
 | Change member's role | ❌ | ❌ | ❌ | ✅ |
 | Remove member | ❌ | ❌ | ✅ (not owner) | ✅ |
 | **Network** | | | | |
 | Create network | Any logged-in user (creator becomes owner) | | | |
-| Rename network | ❌ | ❌ | ✅ | ✅ |
+| Rename network | ❌ | ❌ | ❌ | ✅ |
 | Delete network | ❌ | ❌ | ❌ | ✅ |
 | **Hub-global** (system-level `users.role` gate, **not** network role) | | | | |
 | `/api/audit-log` — your own rows | ✅ | ✅ | ✅ | ✅ |
@@ -48,6 +48,8 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | `/api/server-logs` (debug console) | Only `users.role='admin'` | | | |
 | `/api/admin/wipe-db` (and similar) | Only `users.role='admin'` | | | |
 | `anet hub admin reset-user` (reset any user's password) | Local-only CLI command on the hub host, not role-gated (the hub owner just needs local shell access) | | | |
+
+> R309 calibration: the three MCP write tools `send_task` / `cancel_task` / `reassign_task` pass through **a single [`canWrite` gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)** (`role !== "viewer"` — owner/admin/member all pass) with **no per-task ownership check** — a member can cancel / reassign **any** task in the network, not just ones they dispatched. Renaming a network is owner-only ([`auth.ts:218 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L218) `if (net.owner_id !== userId)`), same as deleting it — admin cannot rename.
 
 ---
 
@@ -69,7 +71,7 @@ anet network invite --role viewer --uses 1
 
 For engineers doing production work inside a team.
 
-- **Can**: everything viewer can; create their own agents (`anet node create`); start / stop / delete own agents; dispatch tasks (`send_task`); cancel own tasks.
+- **Can**: everything viewer can; create their own agents (`anet node create`); start / stop / delete own agents; dispatch / cancel / reassign tasks (`send_task` / `cancel_task` / `reassign_task` — all gated only by `canWrite`, so a member can cancel/reassign **any** task in the network, not just their own).
 - **Cannot**: modify someone else's agents; manage members; hit admin endpoints.
 
 Become a member:

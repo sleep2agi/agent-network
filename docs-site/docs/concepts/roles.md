@@ -31,15 +31,15 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 删除 agent | ❌ | ✅（自己创建的） | ✅（任何） | ✅（任何） |
 | **任务** | | | | |
 | 派任务 `send_task` | ❌ | ✅ | ✅ | ✅ |
-| 取消任务 `cancel_task` | ❌ | ✅（自己派的） | ✅（任何） | ✅（任何） |
-| 转移任务 `reassign_task` | ❌ | ❌ | ✅ | ✅ |
+| 取消任务 `cancel_task` | ❌ | ✅ | ✅ | ✅ |
+| 转移任务 `reassign_task` | ❌ | ✅ | ✅ | ✅ |
 | **成员管理** | | | | |
 | 邀请成员入网 (`anet network invite`) | ❌ | ❌ | ✅ | ✅ |
 | 改成员 role | ❌ | ❌ | ❌ | ✅ |
 | 移除成员 | ❌ | ❌ | ✅（不能移除 owner） | ✅ |
 | **network** | | | | |
 | 创建 network | 任何登录用户都能在 hub 全局建（创建者自动成 owner） | | | |
-| 重命名 network | ❌ | ❌ | ✅ | ✅ |
+| 重命名 network | ❌ | ❌ | ❌ | ✅ |
 | 删除 network | ❌ | ❌ | ❌ | ✅ |
 | **hub 全局**（系统级 `users.role` 门控，**不是** 网络角色） | | | | |
 | 看 `/api/audit-log` 自己的 row | ✅ | ✅ | ✅ | ✅ |
@@ -48,6 +48,8 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | `/api/server-logs` 调试 console | 仅 `users.role='admin'` | | | |
 | 调 `/api/admin/wipe-db` 等危险操作 | 仅 `users.role='admin'` | | | |
 | `anet hub admin reset-user`（重置任意用户密码） | 仅 hub 本机命令行调用，与角色无关（owner 本机权限即可） | | | |
+
+> R309 校准：`send_task` / `cancel_task` / `reassign_task` 三个 MCP 写工具**只过一道 [`canWrite` 门](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)**（`role !== "viewer"` —— owner/admin/member 都放行），**没有 per-task ownership 检查** —— member 可以 cancel / reassign 网络里**任何**任务，不限「自己派的」。重命名 network 是 owner-only（[`auth.ts:218 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L218) `if (net.owner_id !== userId)`），跟「删除 network」一样，admin 不能改名。
 
 ---
 
@@ -81,8 +83,7 @@ anet network invite --role viewer --uses 1
 - viewer 的全部
 - 创建自己的 agent (`anet node create`)
 - 启动 / 停止 / 删自己的 agent
-- 派任务 `send_task`
-- 取消自己派的任务
+- 派 / 取消 / 转移任务 `send_task` / `cancel_task` / `reassign_task`（都只过 `canWrite` 门，所以 member 能取消 / 转移网络里**任何**任务，不限「自己派的」）
 
 **不能干什么**：
 - ❌ 改别人的 agent
