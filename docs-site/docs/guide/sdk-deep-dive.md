@@ -11,7 +11,7 @@ anet 当前内置三个 Runtime，其中两个是 SDK adapter（第三个 `claud
 两家 SDK 接入语义、能力边界、session 处理、tool 注册、streaming、token 计费、错误处理差别都不小。anet 的 wrapper 用 `processWithClaude()` / `processWithCodex()` 两个分支 + 一个统一的 `think()` 调度器抹平这些差异。本文系统梳理这 11 个维度，并给出"想加 gemini-cli / qwen-code 等新 runtime 应该怎么照葫芦画瓢"的指引。
 
 ::: tip 阅读姿势
-本文所有 `agent-node/src/cli.ts:NNN` 行号引用基于 `@sleep2agi/agent-node@2.3.1-preview.0`。如果你看到行号有偏，去 GitHub 最新 main 对位即可，逻辑分块名（`processWithClaude` / `processWithCodex` / `writebackSession` / `think`）保持稳定。
+本文 `agent-node/src/cli.ts:NNN` 行号引用对照 GitHub `main` 校准。agent-node cli.ts 改动频繁，如果你看到行号有偏，去 GitHub 最新 main 对位即可，逻辑分块名（`processWithClaude` / `processWithCodex` / `writebackSession` / `think`）保持稳定。
 :::
 
 ---
@@ -54,7 +54,7 @@ anet 当前内置三个 Runtime，其中两个是 SDK adapter（第三个 `claud
 **session 写回机制**
 
 ```ts
-// cli.ts:546-552
+// cli.ts:573-580
 for await (const message of query({ prompt, options })) {
   const m = message as any;
   if (m.type === "system" && m.subtype === "init") {
@@ -85,7 +85,7 @@ for await (const message of query({ prompt, options })) {
 **session 写回机制**
 
 ```ts
-// cli.ts:651-673
+// cli.ts:689-710
 const { events } = await codexThread.runStreamed(input);
 for await (const ev of events) {
   if (ev.type === "turn.completed") usage = ev.usage;
@@ -105,16 +105,16 @@ if (codexThread?.id) writebackSession(codexThread.id);   // 写 config.json
 ```
                    inbox / SSE / Telegram 进 task
                               ↓
-                          think()  ← cli.ts:784
+                          think()  ← cli.ts:822
                               ↓
                   ┌───────────┼───────────┐
                   ↓           ↓           ↓
        processWithClaude  processWithCodex  processWithHttpApi
-         (cli.ts:373)      (cli.ts:606)     (cli.ts:698)
+         (cli.ts:389)      (cli.ts:644)     (cli.ts:736)
                   ↓           ↓
             SDK query()  thread.runStreamed()
                   ↓           ↓
-            writebackSession(session_id) ← 统一 cli.ts:202
+            writebackSession(session_id) ← 统一 cli.ts:218
                   ↓
                 config.json 持久化
                   ↓
@@ -143,7 +143,7 @@ if (codexThread?.id) writebackSession(codexThread.id);   // 写 config.json
 ### Step 1：声明 runtime 名 + map
 
 ```ts
-// cli.ts:144-148 附近
+// cli.ts:151-158 附近
 const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", /* ... */
   "codex-sdk": "codex",
@@ -187,7 +187,7 @@ async function processWithGemini(task: string, from: string): Promise<string> {
 ### Step 3：think() 调度分支
 
 ```ts
-// cli.ts:793 附近
+// cli.ts:831 附近
 if (RUNTIME === "gemini") return await processWithGemini(task, from);
 ```
 

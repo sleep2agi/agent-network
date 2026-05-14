@@ -11,7 +11,7 @@ anet ships three runtimes today. Two are SDK adapters (the third, `claude-code-c
 The two SDKs differ substantially across API entry, session semantics, tool registration, streaming, token accounting and error handling. The anet wrapper reconciles them with two branches (`processWithClaude()` / `processWithCodex()`) plus a single `think()` scheduler. This document walks through 11 dimensions side-by-side and ends with "how to plug in a new runtime (gemini-cli / qwen-code / …) by copying the pattern."
 
 ::: tip How to read this
-All `agent-node/src/cli.ts:NNN` line numbers below are based on `@sleep2agi/agent-node@2.3.1-preview.0`. If they drift on the latest `main`, the named blocks (`processWithClaude` / `processWithCodex` / `writebackSession` / `think`) stay stable — search by symbol.
+All `agent-node/src/cli.ts:NNN` line numbers below are calibrated against GitHub `main`. agent-node cli.ts changes often; if they drift, the named blocks (`processWithClaude` / `processWithCodex` / `writebackSession` / `think`) stay stable — search by symbol.
 :::
 
 ---
@@ -54,7 +54,7 @@ All `agent-node/src/cli.ts:NNN` line numbers below are based on `@sleep2agi/agen
 **Session writeback mechanic**
 
 ```ts
-// cli.ts:546-552
+// cli.ts:573-580
 for await (const message of query({ prompt, options })) {
   const m = message as any;
   if (m.type === "system" && m.subtype === "init") {
@@ -85,7 +85,7 @@ On the next call to `processWithClaude()`, the module-level `claudeSessionId` is
 **Session writeback mechanic**
 
 ```ts
-// cli.ts:651-673
+// cli.ts:689-710
 const { events } = await codexThread.runStreamed(input);
 for await (const ev of events) {
   if (ev.type === "turn.completed") usage = ev.usage;
@@ -105,16 +105,16 @@ The architecture in `agent-node/src/cli.ts` boils down to "two SDKs, one schedul
 ```
                    inbox / SSE / Telegram inbound task
                               ↓
-                          think()  ← cli.ts:784
+                          think()  ← cli.ts:822
                               ↓
                   ┌───────────┼───────────┐
                   ↓           ↓           ↓
        processWithClaude  processWithCodex  processWithHttpApi
-         (cli.ts:373)      (cli.ts:606)     (cli.ts:698)
+         (cli.ts:389)      (cli.ts:644)     (cli.ts:736)
                   ↓           ↓
             SDK query()  thread.runStreamed()
                   ↓           ↓
-            writebackSession(session_id) ← shared cli.ts:202
+            writebackSession(session_id) ← shared cli.ts:218
                   ↓
                 config.json persisted
                   ↓
@@ -143,7 +143,7 @@ then plugging it in is roughly 5 steps, modeled on the `processWithCodex()` bran
 ### Step 1: register the runtime name + map
 
 ```ts
-// near cli.ts:144-148
+// near cli.ts:151-158
 const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", /* ... */
   "codex-sdk": "codex",
@@ -187,7 +187,7 @@ async function processWithGemini(task: string, from: string): Promise<string> {
 ### Step 3: think() branch
 
 ```ts
-// near cli.ts:793
+// near cli.ts:831
 if (RUNTIME === "gemini") return await processWithGemini(task, from);
 ```
 
