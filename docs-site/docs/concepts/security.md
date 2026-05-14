@@ -189,12 +189,12 @@ verify [`server/src/index.ts:417`](https://github.com/sleep2agi/agent-network/bl
 ### 实现方式
 
 ```typescript
-// 内存存储，per IP
+// 内存存储，per IP（verify server/src/index.ts:55-67）
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 
-function checkRateLimit(ip: string, maxPerMinute: number): boolean {
-  // localhost 免限制（开发/测试）
-  if (!ip || ip === "127.0.0.1" || ip === "::1") return true;
+function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
+  // localhost / internal / unknown 免限制（开发/测试）
+  if (!ip || ip === "unknown" || ip === "127.0.0.1" || ip === "::1") return true;
 
   const now = Date.now();
   const entry = rateLimits.get(ip);
@@ -202,7 +202,9 @@ function checkRateLimit(ip: string, maxPerMinute: number): boolean {
     rateLimits.set(ip, { count: 1, resetAt: now + 60000 });
     return true;
   }
-  return entry.count++ < maxPerMinute;
+  if (entry.count >= maxPerMinute) return false;  // 命中上限，不再 ++
+  entry.count++;
+  return true;
 }
 ```
 
@@ -216,7 +218,7 @@ function checkRateLimit(ip: string, maxPerMinute: number): boolean {
 
 ### 本地豁免
 
-localhost (127.0.0.1 / ::1) 免速率限制，方便开发和测试。
+localhost (`127.0.0.1` / `::1`)、以及 IP 解析为空 / `"unknown"` 的请求免速率限制，方便开发和测试（[`index.ts:57`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L57)）。
 
 ## CORS 配置
 

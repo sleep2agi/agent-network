@@ -189,12 +189,12 @@ Verify [`server/src/index.ts:417`](https://github.com/sleep2agi/agent-network/bl
 ### Implementation
 
 ```typescript
-// In-memory store, per IP
+// In-memory store, per IP (verify server/src/index.ts:55-67)
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 
-function checkRateLimit(ip: string, maxPerMinute: number): boolean {
-  // localhost exempt (dev/testing)
-  if (!ip || ip === "127.0.0.1" || ip === "::1") return true;
+function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
+  // localhost / internal / unknown exempt (dev/testing)
+  if (!ip || ip === "unknown" || ip === "127.0.0.1" || ip === "::1") return true;
 
   const now = Date.now();
   const entry = rateLimits.get(ip);
@@ -202,7 +202,9 @@ function checkRateLimit(ip: string, maxPerMinute: number): boolean {
     rateLimits.set(ip, { count: 1, resetAt: now + 60000 });
     return true;
   }
-  return entry.count++ < maxPerMinute;
+  if (entry.count >= maxPerMinute) return false;  // at limit, no further ++
+  entry.count++;
+  return true;
 }
 ```
 
@@ -216,7 +218,7 @@ When the limit is exceeded the server returns HTTP 429 with a body like:
 
 ### Localhost Exemption
 
-localhost (127.0.0.1 / ::1) is exempt from rate limiting for convenient development and testing.
+localhost (`127.0.0.1` / `::1`), plus requests whose IP resolves to empty / `"unknown"`, are exempt from rate limiting for convenient development and testing ([`index.ts:57`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L57)).
 
 ## CORS Configuration
 
