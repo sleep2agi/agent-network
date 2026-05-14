@@ -377,17 +377,19 @@ anet node rename 指挥室 总指挥
 
 ### anet 识别 node 的逻辑
 
-```typescript
-function findNode(nameOrId: string) {
-  // 1. 精确匹配目录名（新节点 node_id 或旧节点 node_name）
-  const direct = join(cwd, ".anet/nodes", nameOrId, "config.json");
-  if (existsSync(direct)) return loadJson(direct);
+实际函数名 `resolveNodeRef`（[`cli.ts:198`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L198)）：
 
-  // 2. 扫描所有 node，按 node_name 匹配
-  for (const dir of readdirSync(join(cwd, ".anet/nodes"))) {
-    const cfg = loadJson(join(cwd, ".anet/nodes", dir, "config.json"));
-    if (cfg?.node_name === nameOrId || cfg?.name === nameOrId || cfg?.alias === nameOrId) {
-      return cfg;
+```typescript
+function resolveNodeRef(ref: string) {
+  // 1. 精确匹配目录名（新节点 node_id 或旧节点 node_name）
+  const direct = loadProfile(ref);
+  if (direct) return { id: ref, profile: direct };
+
+  // 2. 扫描所有 node，按 node_id / node_name / name / alias 匹配，命中即返回（first-match）
+  for (const id of listProfileIds()) {
+    const cfg = loadProfile(id);
+    if (cfg?.node_id === ref || cfg?.node_name === ref || cfg?.name === ref || cfg?.alias === ref) {
+      return { id, profile: cfg };
     }
   }
 
@@ -397,15 +399,15 @@ function findNode(nameOrId: string) {
 
 ## CLI 节点解析规则
 
-所有接受 `<node-name>` 参数的命令统一走 findNode()：
+所有接受 `<node-name>` 参数的命令统一走 `resolveNodeRef()`：
 
 ```
 解析优先级:
   1. 精确匹配目录名 .anet/nodes/<input>/（node_id 或旧 node_name）
-  2. 扫描所有 node config，匹配 node_name 字段
+  2. 扫描所有 node config，匹配 node_id / node_name 字段
   3. 兼容匹配 name / alias 旧字段
-  4. 多个匹配 → 报歧义错误
-  5. 无匹配 → "Node not found"
+  4. 命中即返回（first-match，不做歧义检测）
+  5. 无匹配 → 返回 null（调用方报 "Node not found"）
 ```
 
 ## blocked / error 退出路径
