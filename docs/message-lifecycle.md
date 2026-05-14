@@ -89,7 +89,8 @@ async function processInbox() {
 
     switch (msg.type) {
       case "task":
-        // 唯一触发 think 的类型
+      case "broadcast":
+        // task + broadcast 都触发 think（agent-node/src/cli.ts:864 `msgType !== "task" && msgType !== "broadcast"`；详见上方"消息类型"说明）
         const result = await processTask(msg.content, from);
         await sendReply(from, result, msg.id);  // reply 关联 task_id
         break;
