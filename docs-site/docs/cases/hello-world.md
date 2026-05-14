@@ -140,7 +140,7 @@ anet logs 小红
 跑通了 hello-world，根据兴趣往下走：
 
 **更复杂的 demo**
-- [翻译流水线](/cases/translation-pipeline) — 3 个 Agent 链式协作（DeepSeek 调度 + MiniMax 翻译）
+- [翻译流水线](/cases/translation-pipeline) — 3 个 Agent 链式协作（都用 MiniMax，中→英→日）
 - [辩论赛 Demo](/cases/debate) — 6 个 Agent（主持 + 正反 4 辩 + 评委）一键 9 步辩论
 - [军团编队](/cases/telegram-squad) — 11 个 Agent + Docker Compose + Telegram 接入
 

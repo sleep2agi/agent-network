@@ -140,7 +140,7 @@ anet logs 小红
 Hello-world done — pick what's interesting next:
 
 **More complex demos**
-- [Translation Pipeline](/en/cases/translation-pipeline) — 3 Agents in a chain (DeepSeek dispatcher + MiniMax translators)
+- [Translation Pipeline](/en/cases/translation-pipeline) — 3 Agents in a chain (all on MiniMax, ZH→EN→JP)
 - [Debate Demo](/en/cases/debate) — 6 Agents (host + 4 debaters + judge) running a 9-step debate in one command
 - [Telegram Squad](/en/cases/telegram-squad) — 11 Agents + Docker Compose + Telegram inbox
 
