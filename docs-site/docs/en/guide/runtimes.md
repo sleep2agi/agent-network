@@ -200,7 +200,7 @@ anet node create translator \
 | DeepSeek | Latest V / R series (see [DeepSeek platform](https://platform.deepseek.com)) | per DeepSeek's Anthropic-compatible docs |
 | Zhipu GLM | Latest GLM series (see [Zhipu Open Platform](https://open.bigmodel.cn)) | per Zhipu's Anthropic-adapter docs |
 | Moonshot Kimi | Latest K-series (see [Moonshot platform](https://platform.moonshot.cn)) | per Moonshot's Anthropic-compatible docs |
-| InternLM | Latest Intern-S series (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn` (**bare hostname, no `/anthropic` suffix** — unlike MiniMax et al.; verify [`cli.ts:1314-1315`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1314) MODEL_PRESETS) |
+| InternLM | Latest Intern-S series (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn` (**bare hostname, no `/anthropic` suffix** — unlike MiniMax et al.; verify [`cli.ts:1322-1324`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1322) MODEL_PRESETS) |
 
 ::: tip Model IDs change frequently
 Providers ship new model versions every few weeks. **Pull the latest model ID from the provider's console** and pass it to `--model`.
@@ -286,7 +286,7 @@ anet node create coder \
 ```
 
 ::: warning codex-sdk ignores `tools`
-The `codex-sdk` runtime **silently ignores** the `--tools` flag and the `config.json` `tools` field (verify [`agent-node/src/cli.ts:665-671`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L665) — `codexOpts` has no `tools` field). The tool set is baked into the `codex` CLI binary, not configured via anet. `--tools` only takes effect for the `claude-agent-sdk` runtime.
+The `codex-sdk` runtime **silently ignores** the `--tools` flag and the `config.json` `tools` field (verify [`agent-node/src/cli.ts:664-670`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L664) — `codexOpts` has no `tools` field). The tool set is baked into the `codex` CLI binary, not configured via anet. `--tools` only takes effect for the `claude-agent-sdk` runtime.
 :::
 
 ::: warning Verification status
@@ -352,14 +352,14 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 
 ::: info Verified (current stable line inherits v2 E2E coverage)
 - The `claude-agent-sdk` runtime itself — passes E2E
-- At the vendor level only **Anthropic / MiniMax / InternLM** are verified (verify [`cli.ts:1284-1322`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1284) MODEL_PRESETS — the ones **not** tagged `[UNVERIFIED]`, plus OpenRouter)
+- At the vendor level only **Anthropic / MiniMax / InternLM** are verified (verify [`cli.ts:1314-1333`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1314) MODEL_PRESETS — the ones **not** tagged `[UNVERIFIED]`, plus OpenRouter)
 - Multi-runtime mesh (peer agents auto-coordinate via `get_all_status` + `send_task` + `get_task`)
 :::
 
 ::: warning Not verified
 - `claude-code-cli` — runs locally (v0.8.2 fixed the session-resume default-loss bug, see [changelog](/en/changelog)); no E2E regression yet
 - `codex-sdk` — unit-tested only, real codex auth E2E pending
-- **DeepSeek / GLM / Kimi / Xiaomi MiMo** — these 4 vendor presets are explicitly tagged `[UNVERIFIED]` in cli.ts MODEL_PRESETS ([`cli.ts:1286-1294`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1286)); the endpoint URLs are filled in but no real-API regression has been run — usable, but verify on your own first
+- **DeepSeek / GLM / Kimi / Xiaomi MiMo** — these 4 vendor presets are explicitly tagged `[UNVERIFIED]` in cli.ts MODEL_PRESETS ([`cli.ts:1317-1328`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1317)); the endpoint URLs are filled in but no real-API regression has been run — usable, but verify on your own first
 :::
 
 ---

@@ -212,7 +212,7 @@ anet node create translator \
 | DeepSeek | 当前主线 V/R 系列（查 [DeepSeek 平台](https://platform.deepseek.com)） | 见 DeepSeek Anthropic 兼容文档 |
 | 智谱 GLM | 当前主线 GLM 系列（查 [智谱开放平台](https://open.bigmodel.cn)） | 见智谱 Anthropic 适配文档 |
 | Moonshot Kimi | 当前主线 K 系列（查 [Moonshot 开放平台](https://platform.moonshot.cn)） | 见 Moonshot Anthropic 兼容文档 |
-| 书生 InternLM | 当前主线 Intern-S 系列（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn`（**裸域名，无 `/anthropic` 后缀** —— 跟 MiniMax 等不同，verify [`cli.ts:1314-1315`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1314) MODEL_PRESETS） |
+| 书生 InternLM | 当前主线 Intern-S 系列（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn`（**裸域名，无 `/anthropic` 后缀** —— 跟 MiniMax 等不同，verify [`cli.ts:1322-1324`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1322) MODEL_PRESETS） |
 
 ::: tip 模型版本号会变
 各家 LLM 厂商每隔几周升级模型，硬编码具体版本号容易过时。**到对应平台拿最新 model id**，填到 `--model` 参数即可。
@@ -306,7 +306,7 @@ anet node create coder \
 ```
 
 ::: warning codex-sdk 不吃 `tools`
-`codex-sdk` runtime **静默忽略** `--tools` flag 和 `config.json` 的 `tools` 字段（verify [`agent-node/src/cli.ts:665-671`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L665) `codexOpts` 无 `tools` 字段）。工具集由 `codex` CLI 二进制 baked in，不由 anet 配置。`--tools` 只对 `claude-agent-sdk` runtime 生效。
+`codex-sdk` runtime **静默忽略** `--tools` flag 和 `config.json` 的 `tools` 字段（verify [`agent-node/src/cli.ts:664-670`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L664) `codexOpts` 无 `tools` 字段）。工具集由 `codex` CLI 二进制 baked in，不由 anet 配置。`--tools` 只对 `claude-agent-sdk` runtime 生效。
 :::
 
 ::: warning 验证状态
@@ -372,14 +372,14 @@ anet node start coder
 
 ::: info 已验证（当前 stable 继承 v2 E2E 覆盖）
 - `claude-agent-sdk` runtime 本身 —— E2E 通过
-- vendor 维度只有 **Anthropic / MiniMax / 书生 Intern** 是 verified（verify [`cli.ts:1284-1322`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1284) MODEL_PRESETS —— **没标 `[UNVERIFIED]`** 的就这几个 + OpenRouter）
+- vendor 维度只有 **Anthropic / MiniMax / 书生 Intern** 是 verified（verify [`cli.ts:1314-1333`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1314) MODEL_PRESETS —— **没标 `[UNVERIFIED]`** 的就这几个 + OpenRouter）
 - 多 Runtime 混搭（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调）
 :::
 
 ::: warning 未验证（请自行评估）
 - `claude-code-cli` —— 本机能跑（v0.8.2 修了 session resume 默认丢失 bug，详见 [changelog](/changelog)），未做 E2E 回归
 - `codex-sdk` —— 单元测试通过，缺真实 codex 鉴权回归
-- **DeepSeek / GLM / Kimi / 小米 MiMo** —— cli.ts MODEL_PRESETS 里这 4 个 vendor preset 显式标 `[UNVERIFIED]`（[`cli.ts:1286-1294`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1286)），endpoint URL 已填但没跑通真 API 回归；能用但请自己先验证
+- **DeepSeek / GLM / Kimi / 小米 MiMo** —— cli.ts MODEL_PRESETS 里这 4 个 vendor preset 显式标 `[UNVERIFIED]`（[`cli.ts:1317-1328`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1317)），endpoint URL 已填但没跑通真 API 回归；能用但请自己先验证
 :::
 
 ---
