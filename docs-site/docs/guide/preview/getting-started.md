@@ -70,7 +70,7 @@ preview.7 起，登录 / 注册 / provider 选择路径加了更明确的 hint�
 anet hub dashboard
 ```
 
-浏览器打开 `http://localhost:3000`。preview.10 修复了 dashboard 双 channel：通过 CLI 启动时会跟随 `@preview` tag 拉取 preview dashboard，而不是误用 latest。
+浏览器打开 `http://localhost:3000`。preview.10 修复了 dashboard 版本跟随：CLI 用 `@preview` 启动时，会拉取 dashboard 对应的 preview，而不是误用 `@latest`（避免和 anet 的 [Channel 概念](/guide/channels) 混淆，这里指的是 npm dist-tag）。
 
 ## 5. Batch primitive
 
