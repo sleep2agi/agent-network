@@ -358,6 +358,12 @@ Cancel a pending task.
 }
 ```
 
+::: warning Constraint
+Only cancellable from these 4 source statuses: `created` / `delivered` / `acked` / `running` (verify the WHERE clause at [`tools.ts:816`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816)). Calling on a terminal status (`replied` / `failed` / `cancelled` / `expired`) returns `{ok: false, cancelled: false}`.
+
+`created` is only the DB column default; the normal API path never produces a row in that state (R266 chain — see [Task lifecycle — `created` calibration](/en/concepts/task-lifecycle#state-machine)).
+:::
+
 ---
 
 ### reassign_task

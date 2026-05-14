@@ -358,6 +358,12 @@ send_task({
 }
 ```
 
+::: warning 限制
+只能取消状态为 `created` / `delivered` / `acked` / `running` 的任务（4 个 cancellable 源状态，verify [`tools.ts:816`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816) WHERE 子句）。终态 `replied` / `failed` / `cancelled` / `expired` 上调用此 tool 会返回 `{ok: false, cancelled: false}`。
+
+`created` 实际只是 DB 默认值，正常 API 路径不会观察到（R266 chain，详见 [Task 生命周期 — `created` 校准](/concepts/task-lifecycle#状态机)）。
+:::
+
 ---
 
 ### reassign_task
