@@ -104,7 +104,7 @@ npm install -g @sleep2agi/agent-network
 
 | 命令 | 说明 |
 |------|------|
-| `anet config` | **只读**查看 `~/.anet/config.json` 内容（`anet config path` 打印路径，`anet config json` 输出 raw JSON）。修改走 `anet login` / `anet init` / `anet network use`，不是 `anet config --set`。verify [`cli.ts:4780-4809 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4780) |
+| `anet config` | **只读**查看 `~/.anet/config.json` 内容（`anet config path` 打印路径，`anet config json` 输出 raw JSON）。修改走 `anet login` / `anet init` / `anet network use`，不是 `anet config --set`。verify [`cli.ts:5479-5508 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5479) |
 | `anet license` | v0.6 legacy 命令，查看 trial / license 状态。**Apache 2.0 OSS 后不再需要**；Hub 仍保留 `licenses` 表 + `send_task` 14 天 trial 检查做后向兼容 |
 | `anet activate <key>` | v0.6 legacy，写入 pro license key。**Apache 2.0 OSS 后不再需要**；用于命中 `license_expired` 兜底，见 [troubleshooting](/troubleshooting) |
 
@@ -114,7 +114,7 @@ npm install -g @sleep2agi/agent-network
 
 ### anet hub start
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1893)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1981)
 
 启动 CommHub 通信服务器。
 
@@ -184,7 +184,7 @@ admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次
 
 ### anet passwd
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3447)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3421)
 
 修改当前登录用户密码。默认交互式输入旧密码、新密码、确认密码；脚本可用 `--old` / `--new`。
 
@@ -197,7 +197,7 @@ anet passwd --old old-password --new new-password
 
 ### anet hub admin reset-user
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2143)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2231)
 
 Hub 主机本机恢复命令，绕过 HTTP API 直接读 SQLite。
 
@@ -259,7 +259,7 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 
 ### anet node start
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1694)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1782)
 
 启动 Agent 节点。
 
@@ -283,7 +283,7 @@ anet node start <name> [options]
 
 ### anet status
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2724)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2808)
 
 查看网络状态概览。
 
@@ -314,7 +314,7 @@ Tasks: 42 replied, 3 running, 0 failed
 
 ### anet tasks
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2788)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2872)
 
 查看任务列表。
 
@@ -367,7 +367,7 @@ v0.7 之前 ntok_ 失效需要手动 `anet node delete` + 重新 create；v0.8 �
 
 ### anet network invite
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3271)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3245)
 
 创建网络邀请码。
 
@@ -399,7 +399,7 @@ anet network invite --role viewer --expires 7
 
 ### anet token create
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3394)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3360)
 
 创建 API Token。
 
@@ -420,7 +420,7 @@ anet token create my-agent-token
 
 ### anet node resume
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1702)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1790)
 
 恢复之前被中断的 Agent session。当 Agent 崩溃、手动停止或意外退出时，可以用此命令恢复上下文，不丢失之前的对话历史。
 
@@ -460,7 +460,7 @@ anet node resume 马 --session abc123
 
 ### anet init project
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L764)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L801)
 
 初始化 Claude Code 项目，自动配置 MCP 和 CLAUDE.md。
 

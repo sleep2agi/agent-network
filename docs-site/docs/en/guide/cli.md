@@ -104,7 +104,7 @@ See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> 
 
 | Command | Description |
 |------|------|
-| `anet config` | **Read-only** view of `~/.anet/config.json` (`anet config path` prints the path, `anet config json` prints raw JSON). To modify config, use `anet login` / `anet init` / `anet network use` — there is no `anet config --set`. Verified at [`cli.ts:4780-4809 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4780). |
+| `anet config` | **Read-only** view of `~/.anet/config.json` (`anet config path` prints the path, `anet config json` prints raw JSON). To modify config, use `anet login` / `anet init` / `anet network use` — there is no `anet config --set`. Verified at [`cli.ts:5479-5508 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5479). |
 | `anet license` | v0.6 legacy: view trial / license status. **No longer needed after Apache 2.0 OSS**; Hub keeps the `licenses` table + `send_task` 14-day trial check for backward-compat |
 | `anet activate <key>` | v0.6 legacy: write a pro license key. **No longer needed after Apache 2.0 OSS**; last-resort fix for `license_expired` — see [troubleshooting](/en/troubleshooting) |
 
