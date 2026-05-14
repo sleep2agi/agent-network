@@ -47,7 +47,7 @@ sequenceDiagram
 
 ### Step 3: 绑定 Channel 到已有节点
 
-跑 `anet channel add telegram <node-name>` 命令一次性绑定 bot + allowlist（verify [`cli.ts:2685` `channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2685)）：
+跑 `anet channel add telegram <node-name>` 命令一次性绑定 bot + allowlist（verify [`cli.ts:2708` `channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2708)）：
 
 ```bash
 # 假设你已有 claude-code-cli 节点 '指挥室'（没有就先 anet node create 指挥室 --runtime claude-code-cli）
@@ -60,7 +60,7 @@ anet channel add telegram 指挥室
 ```
 
 ::: warning 注意 flag 是 `--allow` 不是 `--allow-user`
-verify [`cli.ts:2702-2703`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2702): `--bot-token <token>` + `--allow <user-id>`。命令落地：写入 `.anet/nodes/<node-name>/channels/telegram/access.json` 含 `allowFrom: ["<user-id>"]` 数组（多人白名单见 [Telegram bind 详细 walkthrough — 多人白名单](/cases/telegram-bind-claude-code-cli#多人白名单)）。**没有 `TELEGRAM_ALLOW_USER` env var**，agent-node 只读 `TELEGRAM_BOT_TOKEN` env（[`agent-node/src/cli.ts:260`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L260)），allowlist 走 access.json。
+verify [`cli.ts:2725-2726`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2725): `--bot-token <token>` + `--allow <user-id>`。命令落地：写入 `.anet/nodes/<node-name>/channels/telegram/access.json` 含 `allowFrom: ["<user-id>"]` 数组（多人白名单见 [Telegram bind 详细 walkthrough — 多人白名单](/cases/telegram-bind-claude-code-cli#多人白名单)）。**没有 `TELEGRAM_ALLOW_USER` env var**，agent-node 只读 `TELEGRAM_BOT_TOKEN` env（[`agent-node/src/cli.ts:259`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L259)），allowlist 走 access.json。
 :::
 
 ### Step 4: 启动
@@ -161,7 +161,7 @@ Channel 插件是一个 MCP Server（stdio 模式），提供消息接收和回�
 ```
 
 ::: tip 文件名是 `.js` 不是 `.ts`
-落盘到项目目录的文件是 `.anet/node-server.js`（[`cli.ts:1584 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1584) 自动复制 npm 包 `dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底，但最终落盘统一为 `.js`）。R216/R221 chain 一致。
+落盘到项目目录的文件是 `.anet/node-server.js`（[`cli.ts:1607 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1607) 自动复制 npm 包 `dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底，但最终落盘统一为 `.js`）。R216/R221 chain 一致。
 :::
 
 Channel 插件做的事（v0.8 实际能力）：

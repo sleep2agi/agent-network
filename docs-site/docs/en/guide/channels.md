@@ -47,7 +47,7 @@ You need to know the user IDs allowed to communicate with the bot. To get yours:
 
 ### Step 3: Bind the channel to an existing node
 
-Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts:2685 channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2685)):
+Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts:2708 channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2708)):
 
 ```bash
 # Assumes you already have a claude-code-cli node 'commander'
@@ -61,7 +61,7 @@ anet channel add telegram commander
 ```
 
 ::: warning The flag is `--allow`, not `--allow-user`
-Verify [`cli.ts:2702-2703`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2702): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:260`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L260)); the allowlist lives in `access.json`.
+Verify [`cli.ts:2725-2726`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2725): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:259`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L259)); the allowlist lives in `access.json`.
 :::
 
 ### Step 4: Start
@@ -162,7 +162,7 @@ A channel plugin is an MCP Server (stdio mode) that provides message receiving a
 ```
 
 ::: tip The filename is `.js`, not `.ts`
-The file installed in your project is `.anet/node-server.js` ([`cli.ts:1584 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1584) copies from the npm package — preferring `dist/src/node-server.js`, falling back to `src/node-server.ts` — but the on-disk filename is always `.js`). Aligned with R216/R221 chain.
+The file installed in your project is `.anet/node-server.js` ([`cli.ts:1607 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1607) copies from the npm package — preferring `dist/src/node-server.js`, falling back to `src/node-server.ts` — but the on-disk filename is always `.js`). Aligned with R216/R221 chain.
 :::
 
 What the channel plugin actually does (v0.8 capabilities):
