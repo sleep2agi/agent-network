@@ -128,7 +128,7 @@ docker compose up -d --build
 3. Restart: `docker compose up -d`
 4. Send a message to the Bot on Telegram -- the commander will receive and distribute tasks
 
-::: tip Not using Docker? v0.8.2 one-shot bind
+::: tip Not using Docker? One-shot bind with `anet channel add telegram`
 If you run a single node via `anet node create / start` instead of Docker Compose, attach Telegram in one command:
 ```bash
 # Note: telegram takes a <node-id> positional arg; the allowlist flag is --allow (not --allow-user)
