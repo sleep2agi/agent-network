@@ -483,10 +483,10 @@ Common commands read these options or their saved config equivalents:
 
 | Variable | Description | Priority |
 |------|------|--------|
-| `COMMHUB_URL` | CommHub Server address | Highest |
-| `COMMHUB_ALIAS` | Agent alias | Highest |
-| `COMMHUB_AUTH_TOKEN` | Auth token (v0.8 soft-deprecated, removed in v1.0) | Highest |
-| `COMMHUB_TOKEN` | Auth token (alias; same v0.8 soft-deprecation as `COMMHUB_AUTH_TOKEN`) | Highest |
+| `COMMHUB_URL` | CommHub Server address | env > config file (CLI `--hub` is highest) |
+| `COMMHUB_ALIAS` | Agent alias | env > config file (CLI `--alias` is highest) |
+| `COMMHUB_TOKEN` | Auth token | **agent-node: lowest** — node config (`ntok_`) > global config > this env, and if the env conflicts with the node config it is **ignored + a warning is logged** ([`agent-node/src/cli.ts:171-173`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L171), to stop a leftover export from routing replies to the wrong network). In the `anet` CLI it's env > global config instead. |
+| `COMMHUB_AUTH_TOKEN` | **Server-side** legacy master token (v0.8 soft-deprecated, removed in v1.0) — read by the hub process, not an agent-connection priority variable | server-side |
 | `ANTHROPIC_BASE_URL` | Model API URL (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter and other third-party Anthropic-compatible endpoints; full provider list in [multi-model](/en/guide/multi-model)) | - |
 | `ANTHROPIC_AUTH_TOKEN` | Model API key — for **third-party Anthropic-compatible endpoints** | - |
 | `ANTHROPIC_API_KEY` | Model API key — **only for direct api.anthropic.com** (see [runtimes pitfalls](/en/guide/runtimes#claude-agent-sdk)) | - |
