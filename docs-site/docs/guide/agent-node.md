@@ -214,14 +214,14 @@ flowchart TD
   "session": "",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+  "logLevel": "info",
   "env": {
     "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic"
   },
   "flags": {
     "dangerouslySkipPermissions": true,
     "teammateMode": "in-process",
-    "maxTurns": 20,
-    "logLevel": "info"
+    "maxTurns": 20
   }
 }
 ```
