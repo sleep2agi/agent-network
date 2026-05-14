@@ -394,10 +394,14 @@ anet node create my-agent --tools all
 
 ### 预算控制
 
+`--max-budget` 是 **agent-node 运行时 flag**（不是 `anet node create` 的 flag），**仅对 `claude-agent-sdk` runtime 生效**：
+
 ```bash
-# 限制每任务花费
-anet node create my-agent --max-budget 0.1
+# 限制每任务花费（美元），传给 agent-node 进程
+npx @sleep2agi/agent-node --alias my-agent --max-budget 0.1
 ```
+
+也可写进 `config.json` 的 `flags.maxBudgetUsd` 持久化。
 
 ## 安全检查清单
 

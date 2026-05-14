@@ -394,10 +394,14 @@ anet node create my-agent --tools all
 
 ### Budget Control
 
+`--max-budget` is an **agent-node runtime flag** (not an `anet node create` flag), and **only takes effect for the `claude-agent-sdk` runtime**:
+
 ```bash
-# Limit per-task spend
-anet node create my-agent --max-budget 0.1
+# Limit per-task spend (USD), passed to the agent-node process
+npx @sleep2agi/agent-node --alias my-agent --max-budget 0.1
 ```
+
+Or persist it via `flags.maxBudgetUsd` in `config.json`.
 
 ## Security Checklist
 
