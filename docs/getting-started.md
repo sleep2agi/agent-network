@@ -12,7 +12,7 @@ You → anet CLI → CommHub Server ← Agent 1 (Codex)
 
 ## Option A: Quickstart (Recommended)
 
-**Prerequisites**: Node.js 20+, Bun (for server)
+**Prerequisites**: Node.js >=22.13.0 (`@sleep2agi/agent-network` `engines.node`), Bun >=1.2.0 (for server)
 
 ```bash
 # 1. Install
