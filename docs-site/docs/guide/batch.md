@@ -142,7 +142,6 @@ anet create --batch \
 |------|----------|----------|
 | `batch list` 噪声 | 会列出部分非 anet tmux session | 加 `~/.anet/batches.json` registry |
 | `start` / `restart` | hint-only | 从已有 config 重新 spawn tmux |
-| Codex preset | 未默认提供 | 等 vendor/runtime 值验证后补 |
 | 精确清理 shared mode | 需手动删除 | registry 后安全清理 |
 
 ## 关联

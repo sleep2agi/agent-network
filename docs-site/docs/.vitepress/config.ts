@@ -169,6 +169,7 @@ export default withMermaid(defineConfig({
               { text: 'Account System', link: '/en/guide/account-system' },
               { text: 'Dashboard', link: '/en/guide/dashboard' },
               { text: 'CLI Commands', link: '/en/guide/cli' },
+              { text: 'Batch Agents', link: '/en/guide/batch' },
               { text: 'Agent Node', link: '/en/guide/agent-node' },
               { text: 'Node Runtime', link: '/en/guide/runtimes' },
               { text: 'SDK Deep-dive', link: '/en/guide/sdk-deep-dive' },
