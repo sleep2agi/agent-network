@@ -36,7 +36,7 @@ The backup directory contains your Tokens, node configurations, and session reco
 ### 3. Upgrade npm Packages
 
 ```bash
-# Upgrade CLI + CommHub Server
+# Upgrade the CLI (CommHub Server is NOT in this package — anet hub start in step 4 pulls it at its PINNED version via bunx)
 npm install -g @sleep2agi/agent-network
 
 # Upgrade Agent Node (if globally installed)

@@ -36,7 +36,7 @@ cp -r .anet .anet.backup
 ### 3. 升级 npm 包
 
 ```bash
-# 升级 CLI + CommHub Server
+# 升级 CLI（CommHub Server 不在此包里 —— 由下方 step 4 的 anet hub start 自动按 PINNED 版本 bunx 拉取）
 npm install -g @sleep2agi/agent-network
 
 # 升级 Agent Node（如果全局安装了的话）
