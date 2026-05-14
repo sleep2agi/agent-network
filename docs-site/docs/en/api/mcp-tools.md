@@ -463,6 +463,8 @@ Query task details.
 }
 ```
 
+`get_task` does `SELECT * FROM tasks` ([`tools.ts:749`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L749)) and returns the **full row** (the example above shows sample fields; the actual row also includes `requires_response` / `parent_task_id` and every other column). When the task doesn't exist it returns `{ok: false, error: "task not found"}`.
+
 ---
 
 ### list_tasks
@@ -486,8 +488,20 @@ Query task list with multi-dimensional filtering.
 ```json
 {
   "ok": true,
-  "tasks": [...],
-  "count": 20,
+  "tasks": [
+    {
+      "task_id": "uuid-xxx",
+      "from_name": "commander",
+      "to_name": "coder-1",
+      "priority": "normal",
+      "status": "replied",
+      "content": "Write a sorting algorithm",
+      "result": "Implemented with quicksort...",
+      "created_at": "2026-04-12 10:00:00",
+      "completed_at": "2026-04-12 10:00:15"
+    }
+  ],
+  "count": 1,
   "stats": [
     { "status": "replied", "count": 42 },
     { "status": "running", "count": 3 },
@@ -495,6 +509,10 @@ Query task list with multi-dimensional filtering.
   ]
 }
 ```
+
+::: tip `list_tasks` rows are a subset of `get_task`
+Each `list_tasks` row SELECTs only **9 columns** ([`tools.ts:775`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L775)): `task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`. It does **not** include `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` — use [`get_task`](#get_task) (`SELECT *`) for those. `count` is the number of rows returned this call (≤ `limit`); `stats` is the status-grouped count for the **entire scope** (not affected by the filters).
+:::
 
 ---
 

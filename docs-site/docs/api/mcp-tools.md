@@ -463,6 +463,8 @@ send_task({
 }
 ```
 
+`get_task` 走 `SELECT * FROM tasks`（[`tools.ts:749`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L749)），返回**完整行**（上面只是示例字段，实际还含 `requires_response` / `parent_task_id` 等所有列）。任务不存在时返回 `{ok: false, error: "task not found"}`。
+
 ---
 
 ### list_tasks
@@ -486,8 +488,20 @@ send_task({
 ```json
 {
   "ok": true,
-  "tasks": [...],
-  "count": 20,
+  "tasks": [
+    {
+      "task_id": "uuid-xxx",
+      "from_name": "指挥室",
+      "to_name": "代码1号",
+      "priority": "normal",
+      "status": "replied",
+      "content": "写排序算法",
+      "result": "使用快排实现...",
+      "created_at": "2026-04-12 10:00:00",
+      "completed_at": "2026-04-12 10:00:15"
+    }
+  ],
+  "count": 1,
   "stats": [
     { "status": "replied", "count": 42 },
     { "status": "running", "count": 3 },
@@ -495,6 +509,10 @@ send_task({
   ]
 }
 ```
+
+::: tip `list_tasks` 的行是 `get_task` 的子集
+`list_tasks` 每行只 SELECT **9 列**（[`tools.ts:775`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L775)）：`task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`。**不含** `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` —— 要这些字段用 [`get_task`](#get_task)（`SELECT *`）。`count` 是本次返回的行数（≤ `limit`），`stats` 是**整个 scope 内**按 status 分组的计数（不受 filter 影响）。
+:::
 
 ---
 
