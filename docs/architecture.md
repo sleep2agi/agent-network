@@ -138,7 +138,7 @@ const toSave: Record<string, any> = {
 | `channels` | | array, 例 `["server:commhub", "telegram"]` |
 | `tools` | | array, claude-agent-sdk allowlist |
 | `env` | | object, agent-node 启动时 inject 子进程 env |
-| `flags` | | object, runtime-specific flags (`dangerouslySkipPermissions` / `teammateMode` / `maxTurns` / `logLevel` ...) |
+| `flags` | | object, runtime-specific flags (`dangerouslySkipPermissions` / `teammateMode` / `maxTurns` / `claudeTimeoutMs` ...). 注意 `logLevel` 是 **top-level 字段**，不在 `flags` 里 |
 | `hub` | | 覆盖全局 hub（跨网络场景） |
 | `token` | | 覆盖全局 token（per-node ntok_ 场景） |
 
