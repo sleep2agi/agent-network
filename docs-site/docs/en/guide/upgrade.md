@@ -127,7 +127,7 @@ anet doctor --fix
 
 - No hard error, `/api/*` reads still work, but logs spew deprecation warnings
 - Write operations (register, configure agents...) must switch to `utok_` (auto-loaded from `~/.anet/config.json` after login)
-- v0.9+ will **fully remove** this path — clean it up during this upgrade
+- v1.0 will **fully remove** this path (RFC-001 Phase 3) — clean it up during this upgrade
 
 ### Forgot the password?
 
