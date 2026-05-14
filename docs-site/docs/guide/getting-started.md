@@ -90,7 +90,7 @@ anet node create my-bot
 这会进入两步交互式选择：
 
 1. **选 Runtime**：推荐 `claude-agent-sdk`（已验证）。
-2. **选 Provider**：可选 MiniMax / DeepSeek / GLM / Kimi / 书生 Intern / 小米 MiMo / OpenRouter / Anthropic / 自定义，每个预设会自动写好 `ANTHROPIC_BASE_URL` 与默认模型，然后让你输入对应的 API Key。
+2. **`Select model:`**：从已验证 model id 里挑 —— `MiniMax-M2.7` / `intern-s1-pro` / `claude-sonnet-4-6` / `claude-opus-4-6` / `claude-haiku-4-5`，或 `custom` 自己填 base URL + model。选定后 CLI 自动注入对应的 `ANTHROPIC_BASE_URL`（`custom` 例外，需手填），然后让你输入 API Key。DeepSeek / GLM / Kimi / 小米 MiMo / OpenRouter 等其他 provider 走 `custom`，完整 endpoint 见 [多模型配置](/guide/multi-model)。
 
 ::: details 其他 Runtime
 - `codex-sdk` —— 单元测试通过，**端到端未验证**（缺真实 codex 鉴权回归）。
