@@ -294,18 +294,20 @@ codex auth login  # 一次性
 
 anet node create coder \
   --runtime codex-sdk \
-  --model <codex-model-id> \
-  --tools Read,Write,Edit,Bash,Glob,Grep
+  --model <codex-model-id>
 ```
 
 `config.json`：
 ```json
 {
   "runtime": "codex-sdk",
-  "model": "<codex-model-id>",
-  "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+  "model": "<codex-model-id>"
 }
 ```
+
+::: warning codex-sdk 不吃 `tools`
+`codex-sdk` runtime **静默忽略** `--tools` flag 和 `config.json` 的 `tools` 字段（verify [`agent-node/src/cli.ts:627-634`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L627) `codexOpts` 无 `tools` 字段）。工具集由 `codex` CLI 二进制 baked in，不由 anet 配置。`--tools` 只对 `claude-agent-sdk` runtime 生效。
+:::
 
 ::: warning 验证状态
 codex-sdk runtime 单元测试通过，但**端到端验证不全**（缺真实 codex 鉴权回归）。如果你正在跑生产任务，建议先 `anet node start` 后用一个简单任务（"列出当前目录文件"）验证。

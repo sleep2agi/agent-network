@@ -282,9 +282,12 @@ codex auth login  # one-time
 
 anet node create coder \
   --runtime codex-sdk \
-  --model <codex-model-id> \
-  --tools Read,Write,Edit,Bash,Glob,Grep
+  --model <codex-model-id>
 ```
+
+::: warning codex-sdk ignores `tools`
+The `codex-sdk` runtime **silently ignores** the `--tools` flag and the `config.json` `tools` field (verify [`agent-node/src/cli.ts:627-634`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L627) — `codexOpts` has no `tools` field). The tool set is baked into the `codex` CLI binary, not configured via anet. `--tools` only takes effect for the `claude-agent-sdk` runtime.
+:::
 
 ::: warning Verification status
 codex-sdk passes unit tests but **lacks full end-to-end coverage** (real codex auth regressions are missing). For production runs, smoke-test with a trivial task first.
