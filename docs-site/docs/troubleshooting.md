@@ -473,8 +473,8 @@ anet node ls
 # 方案 A：换名
 anet node create 代码1号-v2
 
-# 方案 B：删旧的再用同名
-anet node delete 代码1号
+# 方案 B：删旧的再用同名（delete 必须加 --force，否则只打印确认提示不实际删除）
+anet node delete 代码1号 --force
 anet node create 代码1号
 ```
 

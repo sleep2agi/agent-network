@@ -474,8 +474,8 @@ anet node ls
 # Option A: pick a different name
 anet node create coder-1-v2
 
-# Option B: delete the old one and reuse the name
-anet node delete coder-1
+# Option B: delete the old one and reuse the name (delete needs --force, otherwise it only prints a confirmation prompt)
+anet node delete coder-1 --force
 anet node create coder-1
 ```
 
