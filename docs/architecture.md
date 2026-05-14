@@ -28,7 +28,7 @@ agent-network/
 
 **设计原则**：client.ts 是核心（零外部依赖），server.ts 是薄包装（委托给 `../../server/src/index.ts`），cli.ts 是粘合层。
 
-### agent-node 三个 runtime（当前 v2.3.0）
+### agent-node 三个 runtime
 
 agent-node 支持三个 runtime：
 
