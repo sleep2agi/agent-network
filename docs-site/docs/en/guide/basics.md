@@ -32,7 +32,7 @@ A Runtime is the engine that an Agent uses to call an AI model. Different Runtim
 |---------|----------|----------|----------|
 | `codex-sdk` | Codex (codex-sdk) | Writing code, running commands | `codex auth login` |
 | `claude-agent-sdk` | Claude / MiniMax / DeepSeek / GLM / Kimi / Intern / Xiaomi MiMo / OpenRouter | Reasoning, analysis, translation (supports domestic providers) | API Key (domestic or Anthropic) |
-| `claude-code-cli` | Claude Sonnet/Opus | Reasoning, coding, terminal ops (CLI mode) | Claude Code installed |
+| `claude-code-cli` | Claude Sonnet/Opus | Reasoning, coding, terminal ops (CLI mode) | Claude Code installed + Claude Pro/Team/Max subscription |
 
 ::: tip Recommended for beginners: claude-agent-sdk
 If you're not sure which to pick, start with `claude-agent-sdk` — it's the verified default. Domestic providers (MiniMax / DeepSeek / GLM / Kimi / Intern / Xiaomi MiMo / OpenRouter) all expose Anthropic-compatible endpoints, so the same SDK handles them. Switch to `codex-sdk` when you need to write code / run commands.
