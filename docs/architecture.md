@@ -40,11 +40,7 @@ agent-node 支持三个 runtime：
 
 Profile 中通过 `runtime` 字段选择。早期文档里的 `claude-code` / `codex` / `agent-sdk` 已重命名（doctor `anet doctor --fix` 自动迁移）。
 
-支持的模型列表：
-- **MiniMax M2.7** — 低成本自动化
-- **书生 Intern-S1-Pro** — 国产大模型
-- **Claude** — Anthropic（Sonnet/Opus）
-- **OpenAI Codex** — codex-sdk runtime（model id 查 OpenAI 文档）
+> R268 校准：原本这里另列了一段 4 行「支持的模型列表」(MiniMax M2.7 / 书生 Intern-S1-Pro / Claude / Codex)，跟上方 runtime 表重复且写死了 `M2.7` 这种快速 rotate 的版本号（违反 R175/R245/R253/R257 chain「doc 不 pin model 版本」规则）。删；完整 provider × runtime 列表见上表 + [anet.sh / multi-model](https://anet.sh/guide/multi-model)。
 
 ### 隔离策略
 
