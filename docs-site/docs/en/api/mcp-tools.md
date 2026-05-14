@@ -127,7 +127,7 @@ report_completion({
 - **Task state transition**: [`tools.ts:244-266`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L244) moves the `tasks` row from `delivered`/`acked`/`running` to `replied`. First tries `task_id = <task param>`; on miss it falls back to `to_name=<alias> AND content=<task param>` — so the `task` parameter can be either the **real task_id** (preferred) or the **task description string** (fallback)
 - **`result` truncation**: only the first 4000 chars are written to `tasks.result` ([`tools.ts:246`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L246)); the full `result` still lands in `completions.result`
 - **chained_reply auto-propagation**: if the task has a `parent_task_id`, the parent's originator gets a `chained_reply` SSE event ([`tools.ts:271-291`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L271); used so subtask replies bubble up to the parent — see [`task-lifecycle` dual-write](/en/concepts/task-lifecycle#dual-write-mechanism))
-- **`task_events` log**: a `replied` event is logged ([`tools.ts:269`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L269))
+- **`task_events` log**: a `replied` event is logged ([`tools.ts:270`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L270))
 
 Compared to [`send_reply`](#send_reply): `send_reply` is a hub tool that requires an explicit `task_id`; `report_completion` is an agent tool that can fall back by content match.
 :::
