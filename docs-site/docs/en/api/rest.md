@@ -1559,7 +1559,7 @@ Only available when the hub is started with `COMMHUB_ENABLE_TMUX=1` ([`index.ts:
 
 ### GET /api/tmux/:name
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L884)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L903)
 
 Capture the tail of a tmux session's current pane (`tmux capture-pane -t <name> -p` wrapper).
 
@@ -1582,7 +1582,7 @@ curl "http://localhost:9200/api/tmux/anet-node-coder-1?lines=50" \
 
 ### POST /api/tmux/:name/send
 
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L908)
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L927)
 
 Send keys into a tmux session (`tmux send-keys -t <name> "<text>" Enter` wrapper).
 
@@ -1609,6 +1609,18 @@ curl -X POST "http://localhost:9200/api/tmux/anet-node-coder-1/send" \
 | 401 / 403 | Admin auth required (same gate as [GET /api/server-logs](#get-api-server-logs)) |
 | 400 | `text is required` (POST only) | Body missing `text` |
 | 400 | `<tmux stderr>` | `tmux` subprocess exited non-zero (e.g. session not found) |
+
+### GET /ws/tmux/:name
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L318)
+
+WebSocket endpoint — live-streams a tmux session's pane output. It's the live counterpart of `GET /api/tmux/:name`: the HTTP one is a one-shot `capture-pane`, this one keeps streaming once connected. Auth gating is **identical** to the two HTTP endpoints above (same `requireTmuxAccess` — `COMMHUB_ENABLE_TMUX=1` + caller IP in `COMMHUB_TMUX_ALLOWLIST` + `users.role='admin'` auth; any failure is rejected before the WS upgrade).
+
+```
+ws://localhost:9200/ws/tmux/anet-node-code1
+```
+
+Once connected the server periodically runs `tmux capture-pane` and pushes the pane content; polling stops automatically on disconnect. Same rule — **never expose this on the public internet**.
 
 ---
 

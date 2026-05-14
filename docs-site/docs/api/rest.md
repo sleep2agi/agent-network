@@ -1559,7 +1559,7 @@ curl -X POST http://localhost:9200/api/networks/join \
 
 ### GET /api/tmux/:name
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L884)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L903)
 
 抓取指定 tmux session 当前 pane 末尾 N 行输出（`tmux capture-pane -t <name> -p` 包装）。
 
@@ -1582,7 +1582,7 @@ curl "http://localhost:9200/api/tmux/anet-node-代码1号?lines=50" \
 
 ### POST /api/tmux/:name/send
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L908)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L927)
 
 往指定 tmux session 注入按键（`tmux send-keys -t <name> "<text>" Enter` 包装）。
 
@@ -1609,6 +1609,18 @@ curl -X POST "http://localhost:9200/api/tmux/anet-node-代码1号/send" \
 | 401 / 403 | 需 admin auth（同 [GET /api/server-logs](#get-api-server-logs)） |
 | 400 | `text is required` (POST only) | 请求体缺 `text` 字段 |
 | 400 | `<tmux stderr>` | `tmux` 子进程非 0 退出（如 session 不存在） |
+
+### GET /ws/tmux/:name
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L318)
+
+WebSocket 端点 —— 实时流式推送指定 tmux session 的 pane 输出。是 `GET /api/tmux/:name` 的 live 版本：HTTP 那个是一次性 `capture-pane`，这个是连上后持续 stream。鉴权门控跟上面两个 HTTP 端点**完全一致**（走同一个 `requireTmuxAccess` —— `COMMHUB_ENABLE_TMUX=1` + IP 在 `COMMHUB_TMUX_ALLOWLIST` 内 + `users.role='admin'` auth；任一不满足在 WS upgrade 前就被拒）。
+
+```
+ws://localhost:9200/ws/tmux/anet-node-代码1号
+```
+
+连上后 server 按固定间隔 `tmux capture-pane` 把 pane 内容推过来；连接断开自动停止轮询。同样**绝不要在公网开**。
 
 ---
 
