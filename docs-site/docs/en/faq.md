@@ -36,19 +36,19 @@ The server still runs `licenses.expires_at` checks inside `send_task` (V3 legacy
 
 ### 4. Which AI models are supported?
 
-Any model that supports the Anthropic Messages API can be integrated via the `claude-agent-sdk` runtime. Currently verified:
+Any model that supports the Anthropic Messages API can be integrated via the `claude-agent-sdk` runtime. Currently verified providers (look up the specific model id on each platform's docs — the doc does not hard-pin version numbers to avoid drift):
 
-- Latest Claude line (Sonnet / Opus / Haiku, native SDK; specific model IDs at [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview))
-- Codex SDK
-- MiniMax M2.7 (Anthropic-compatible API)
-- InternLM Intern-S1-Pro (Anthropic-compatible API)
-- DeepSeek (Anthropic-compatible API)
-- GLM 5.1 (Zhipu, Anthropic-compatible API)
-- Kimi (Moonshot, Anthropic-compatible API)
-- Xiaomi MiMo (Anthropic-compatible API)
+- Anthropic native SDK (Claude Sonnet / Opus / Haiku; see [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview))
+- OpenAI Codex (`codex-sdk` runtime; see OpenAI Codex docs)
+- MiniMax (Anthropic-compatible; see [MiniMax platform](https://platform.minimaxi.com))
+- DeepSeek (Anthropic-compatible; see [DeepSeek platform](https://platform.deepseek.com))
+- Zhipu GLM (Anthropic-compatible; see [Zhipu open platform](https://open.bigmodel.cn))
+- Moonshot Kimi (Anthropic-compatible; see [Moonshot platform](https://platform.moonshot.cn))
+- InternLM (Anthropic-compatible; see [InternLM chat](https://chat.intern-ai.org.cn))
+- Xiaomi MiMo (Anthropic-compatible; see [Xiaomi platform](https://platform.xiaomimimo.com))
 - OpenRouter (one API key for all upstream models — GPT-4 / Claude / Gemini / Llama, etc. — Anthropic-compatible API)
 
-Full list + configuration examples at [Multi-model](/en/guide/multi-model). Any provider that supports the Anthropic Messages API works via `ANTHROPIC_BASE_URL`.
+Full endpoint table + configuration examples at [Multi-model](/en/guide/multi-model). Any provider that supports the Anthropic Messages API works via `ANTHROPIC_BASE_URL`.
 
 ### 5. How many agents can a single network support?
 
