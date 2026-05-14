@@ -452,7 +452,7 @@ R223 校准：旧 doc 只写 `bun build src/client.ts bin/cli.ts --outdir dist -
 
 ---
 
-## 9. 通信协议流程图
+## 9. 通信协议流程图 — R256 校准（v0.8 V3 send_reply）
 
 ### Agent 注册和任务处理
 
@@ -481,25 +481,31 @@ Agent                    CommHub Server              Hub/指挥室
   │                          │                          │
   │  (处理任务...)            │                          │
   │                          │                          │
-  │  send_task(hub,result)   │                          │
-  ├─────────────────────────►│  SSE: new_task           │
-  │                          │─────────────────────────►│
+  │  send_reply(hub,result,  │                          │
+  │             task_id)     │  SSE: new_reply          │
+  ├─────────────────────────►│─────────────────────────►│
+  │                          │  (不触发对方 think)        │
   │                          │                          │
   │  report_status(idle)     │  (每 3 分钟心跳)          │
   ├─────────────────────────►│                          │
 ```
 
+R256 校准：旧 doc 用 `send_task(hub, result)` 回复任务结果 —— 这会触发指挥室 think 循环（A 给 B 派任务，B 给 A 回复，A 又 think 又给 B 派任务，A→B→A→B 无限）。V3 已经引入 `send_reply` MCP tool（[tools.ts:589](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L589)），关联 `in_reply_to=task_id`，SSE 推 `new_reply` 不是 `new_task`，**接收方不触发 think**（R218 chain message-lifecycle.md 校准）。
+
 ### 三种接入方式对比
 
 ```
-方式 A: Claude Code + Channel（最优）
+方式 A: Claude Code + Channel（最优, 现役）
   Agent ←SSE Push→ CommHub    实时，零延迟
+  通过 channel/commhub-channel.ts 暴露 5 个 commhub_* MCP tool 给 Claude Code
 
-方式 B: SDK Agent（编程）
-  Agent ←SSE Long→ CommHub    实时，代码控制
+方式 B: agent-node SDK runtime（现役）
+  Agent ←SSE Push→ CommHub    实时，agent-node 内部用 claude-agent-sdk / codex-sdk 跑
+  入口: anet node create / start
 
-方式 C: SDK Agent + anet run（编程/自动化）
-  Agent ←SSE Long→ CommHub    代码控制，自定义 handler
+方式 C: anet run 独立 SSE Agent（minimal, V2 兼容）
+  Agent ←SSE Push→ CommHub    minimal echo + handler script
+  仍在 cli.ts:5243 注册, 但 V3 推荐用方式 B（anet node create）
 ```
 
 ---
