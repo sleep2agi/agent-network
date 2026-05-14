@@ -62,7 +62,7 @@ npm view @sleep2agi/commhub-server dist-tags
 npm view @sleep2agi/agent-network-dashboard dist-tags
 
 # 2. worktree 起在干净分支，避免污染主仓
-cd /home/vansin/agent-orchestra
+cd <你的 agent-network 仓库根>   # 即 git clone sleep2agi/agent-network 的本地目录
 git fetch origin main
 git worktree add ~/anet-work/release-<pkg>-<ver> -b release/<pkg>-<ver> origin/main
 cd ~/anet-work/release-<pkg>-<ver>
