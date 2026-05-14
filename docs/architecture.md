@@ -503,8 +503,8 @@ R256 校准：旧 doc 用 `send_task(hub, result)` 回复任务结果 —— 这
   Agent ←SSE Push→ CommHub    实时，agent-node 内部用 claude-agent-sdk / codex-sdk 跑
   入口: anet node create / start
 
-方式 C: anet run 独立 SSE Agent（minimal, V2 兼容）
-  Agent ←SSE Push→ CommHub    minimal echo + handler script
+方式 C: anet run 独立 SSE Agent（minimal）
+  Agent ←SSE Push→ CommHub    极简 echo「收到」回复，不跑 LLM（无 handler 机制）
   仍在 cli.ts:2044 (runCommand) 注册, 但 V3 推荐用方式 B（anet node create）
 ```
 
