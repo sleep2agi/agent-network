@@ -31,13 +31,21 @@ If you haven't installed `anet`:
 npm i -g @sleep2agi/agent-network@latest
 ```
 
-First `anet hub start` will prompt to set up an admin account (since v0.8). Press Enter to accept defaults `admin / anethub`:
+First `anet hub start` **non-interactively** bootstraps the admin account (default `admin / anethub`, no prompt):
 
 ```bash
 anet hub start
-# You'll see: Set up admin account (default: admin / anethub):
-# → press Enter
+# Expected output:
+#   ✅ Admin account created
+#      username: admin
+#      password: anethub
+#      Store this password now; it will not be shown again.
+#      Admin token saved to ~/.anet/server/admin-utok.json
 ```
+
+::: warning Change the password immediately on public deployments
+The default `admin / anethub` is for a quick local start — **not production-ready**. If you expose the hub with `anet hub start --ip 0.0.0.0` (LAN / public), run `anet passwd` right away to set a strong password (≥ 8 chars + not in the weak-password dictionary). See [troubleshooting → password strength](/en/troubleshooting).
+:::
 
 In a second terminal, register the hub URL and log in:
 

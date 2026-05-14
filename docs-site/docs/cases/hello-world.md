@@ -31,13 +31,21 @@ MINIMAX_API_KEY=你的Key docker compose up
 npm i -g @sleep2agi/agent-network@latest
 ```
 
-第一次跑 `anet hub start` 会提示设置 admin 账号（v0.8 起），直接回车用默认 `admin / anethub`：
+第一次跑 `anet hub start` 会**非交互**自动 bootstrap admin 账号（默认 `admin / anethub`，无 prompt）：
 
 ```bash
 anet hub start
-# 看到：Set up admin account (default: admin / anethub):
-# → 回车确认
+# 期望输出：
+#   ✅ Admin account created
+#      username: admin
+#      password: anethub
+#      Store this password now; it will not be shown again.
+#      Admin token saved to ~/.anet/server/admin-utok.json
 ```
+
+::: warning 公网部署立刻改密
+默认 `admin / anethub` 是快速起手，**非生产凭据**。`anet hub start --ip 0.0.0.0` 暴露 LAN/公网时必须立刻 `anet passwd` 改强密码（≥ 8 位 + 非弱密码字典），见 [troubleshooting → 密码强度](/troubleshooting)。
+:::
 
 再开一个终端，登录并设置 hub 地址：
 
