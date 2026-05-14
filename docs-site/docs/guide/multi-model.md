@@ -15,7 +15,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | **Kimi** | Moonshot | `claude-agent-sdk` | api.moonshot.cn/anthropic | ⚠ 未验证 | 低 |
 | **小米 MiMo**（当前主线） | 小米 | `claude-agent-sdk` | api.xiaomimimo.com/anthropic | ⚠ 未验证 | 低 |
 
-> 上表把「特点」列换成「验证」列。**✅ 已验证** = cli.ts `MODEL_PRESETS` 里没标 `[UNVERIFIED]` + 跑通真 API；**⚠ 未验证** = [`cli.ts:1286-1294`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1286) 显式标 `[UNVERIFIED]`，endpoint URL 填好了但没跑回归（R290 chain）。各家 model id 到对应平台官网查（[MiniMax](https://platform.minimaxi.com) / [DeepSeek](https://api-docs.deepseek.com) / [智谱](https://open.bigmodel.cn) / [小米 MiMo](https://platform.xiaomimimo.com)）。完整 verified/unverified 说明见 [runtimes — 已验证 vs 未验证](/guide/runtimes#已验证-vs-未验证)。
+> 上表把「特点」列换成「验证」列。**✅ 已验证** = cli.ts `MODEL_PRESETS` 里没标 `[UNVERIFIED]` + 跑通真 API；**⚠ 未验证** = [`cli.ts:1311-1319`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1311) `MODEL_PRESETS` 里显式标 `[UNVERIFIED]`，endpoint URL 填好了但没跑回归（R290 chain）。各家 model id 到对应平台官网查（[MiniMax](https://platform.minimaxi.com) / [DeepSeek](https://api-docs.deepseek.com) / [智谱](https://open.bigmodel.cn) / [小米 MiMo](https://platform.xiaomimimo.com)）。完整 verified/unverified 说明见 [runtimes — 已验证 vs 未验证](/guide/runtimes#已验证-vs-未验证)。
 
 ::: tip 任何 Anthropic-compatible 提供商都能接
 上表是常用 provider，但 `claude-agent-sdk` 通过 `ANTHROPIC_BASE_URL` 接入**任何**支持 Anthropic Messages API 的服务商。没列出的服务商（自部署 vLLM / SiliconFlow / 通义千问 Anthropic 兼容端点等）也能用，只需把 `ANTHROPIC_BASE_URL` 指向对应平台的 Anthropic 兼容 endpoint，把 API Key 设到 `ANTHROPIC_AUTH_TOKEN` 即可。详见下方"配置方式"。
