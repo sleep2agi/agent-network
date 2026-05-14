@@ -249,7 +249,7 @@ CREATE TABLE audit_log (
 );
 ```
 
-记录的 action 取值（verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2182`）：
+记录的 action 取值（**共 16 个**；verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2182` —— 15 个走 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L394)，`password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT，R283 chain 校准）：
 
 | 操作 | 触发场景 |
 |------|---------|
