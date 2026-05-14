@@ -11,6 +11,7 @@ stateDiagram-v2
     created --> delivered: Write to inbox + SSE push
 
     delivered --> acked: ack_inbox / send_ack
+    delivered --> running: report_status(working) (skips ack)
     delivered --> cancelled: cancel_task
     delivered --> expired: TTL timeout (patrol)
 

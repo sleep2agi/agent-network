@@ -11,6 +11,7 @@ stateDiagram-v2
     created --> delivered: 写入 inbox + 推送 SSE
 
     delivered --> acked: ack_inbox / send_ack
+    delivered --> running: report_status(working)（跳过 ack）
     delivered --> cancelled: cancel_task
     delivered --> expired: TTL 超时（巡检）
 
