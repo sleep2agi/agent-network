@@ -1,7 +1,7 @@
 # Production / Public-Internet Deployment
 
 ::: danger Default config is NOT safe for the public internet
-The current stable line (v0.8.2 / CLI v2.1.7) is tuned for **local use only**. Running with `--host 0.0.0.0` straight to the open internet leaves you wide open.
+The current stable line (v0.8.2, tracking the `commhub-server` semver; the old `v2.1.x` CLI version scheme is deprecated — see [changelog](/en/changelog)) is tuned for **local use only**. Running with `--host 0.0.0.0` straight to the open internet leaves you wide open.
 
 Read this entire page **before opening any firewall ports**.
 :::
