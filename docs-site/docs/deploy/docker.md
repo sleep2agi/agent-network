@@ -214,6 +214,7 @@ seed:
 1. `/api/auth/register` 是**公开端点**，不需要 `Authorization` 头。早期文档展示的 `Authorization: Bearer ${COMMHUB_AUTH_TOKEN}` 是 v0.5 遗留写法 —— v0.8 起 hub 直接拒识 master token，强制走 user/network token 体系。
 2. **`SQUAD_ADMIN_PASS` 必须强密码**（≥ 8 位且不在 top-1000 弱密码字典里）。第一个 register 的用户会被认成 bootstrap admin，但 server 仍校验长度 ≥ 4。生产部署用 `openssl rand -base64 18` 生成。
 3. 不要 hardcode `password=admin123` —— 这是教程占位符，不能进 .env。
+4. ⚠ 上面是**推荐的 v0.8 写法**。当前 shipped 的 [`demos/codex-telegram-squad/docker-compose.yml`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/docker-compose.yml) seed 容器**还是 legacy 形式**（带 `Authorization: Bearer` 头 + 硬编码 `admin123`）—— demo 待按本节更新；自己部署请照本节 v0.8 写法。
 :::
 
 Seed 容器是一次性的（`restart: "no"`），首次启动时运行；后续重启自动跳过。

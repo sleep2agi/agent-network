@@ -214,6 +214,7 @@ seed:
 1. `/api/auth/register` is a **public endpoint** and does not need an `Authorization` header. Older docs that show `Authorization: Bearer ${COMMHUB_AUTH_TOKEN}` are v0.5 leftovers — v0.8 rejects master tokens entirely and forces user/network token auth.
 2. **`SQUAD_ADMIN_PASS` must be a strong password** (≥ 8 chars and not in the top-1000 weak-password dictionary). The first registered user is treated as bootstrap admin and the server still enforces length ≥ 4. For production, generate via `openssl rand -base64 18`.
 3. Don't hardcode `password=admin123` — that's a tutorial placeholder, never commit it to `.env`.
+4. ⚠ The block above is the **recommended v0.8 form**. The currently shipped [`demos/codex-telegram-squad/docker-compose.yml`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/docker-compose.yml) seed container is **still the legacy form** (carries an `Authorization: Bearer` header + hardcoded `admin123`) — the demo is pending an update to match this section; for your own deployment, follow the v0.8 form here.
 :::
 
 The seed container is one-shot (`restart: "no"`) and only runs on first startup. Subsequent restarts skip automatically.
