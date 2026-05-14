@@ -652,7 +652,7 @@ send_task({
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L878)
 
-向所有在线 Agent 广播消息。**broadcast 与 `task` 同样会触发收件方 AI 处理**（[`agent-node/src/cli.ts:925`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) 只对 `task` 和 `broadcast` 类型 think；其余 `reply` / `message` / `ack` 只展示）；如果只是想群发通知不要求 AI 回复，用循环 `send_message` 替代。完整消息类型对照见 [Task 生命周期 — 消息类型](/concepts/task-lifecycle#消息类型)。
+向所有在线 Agent 广播消息。**broadcast 与 `task` 同样会触发收件方 AI 处理**（[`agent-node/src/cli.ts:863-864`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L863) 只对 `task` 和 `broadcast` 类型 think；其余 `reply` / `message` / `ack` 只展示）；如果只是想群发通知不要求 AI 回复，用循环 `send_message` 替代。完整消息类型对照见 [Task 生命周期 — 消息类型](/concepts/task-lifecycle#消息类型)。
 
 **参数**（verify [`server/src/tools.ts:880-885`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L880)）：
 
