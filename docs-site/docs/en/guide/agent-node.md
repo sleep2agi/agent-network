@@ -185,7 +185,7 @@ The auth token is supplied via the `token` field in `.anet/nodes/<name>/config.j
 
 ## Configuration Files
 
-Agent Node supports multiple configuration methods, from highest to lowest priority (verified at [`agent-node/src/cli.ts:100-134`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)):
+Agent Node supports multiple configuration methods, from highest to lowest priority (verified at [`agent-node/src/cli.ts:100-128`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)):
 
 ```mermaid
 flowchart TD
@@ -198,7 +198,7 @@ flowchart TD
 ```
 
 ::: tip Global `~/.anet/config.json` fallback
-After the project config is loaded, [`cli.ts:128-130`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L128) fills in the missing `hub` and `token` fields from the global `~/.anet/config.json`. **Only these two fields fall back across projects** — `runtime` / `model` / `tools` / `env` must be set via project `config.json` / CLI / env; global config does not cover them. Aligned with the [feedback_config_priority] memory ("project config overrides global at the field level; missing fields fall back to global").
+After the project config is loaded, [`cli.ts:123-125`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L123) fills in the missing `hub` and `token` fields from the global `~/.anet/config.json`. **Only these two fields fall back across projects** — `runtime` / `model` / `tools` / `env` must be set via project `config.json` / CLI / env; global config does not cover them. Aligned with the [feedback_config_priority] memory ("project config overrides global at the field level; missing fields fall back to global").
 :::
 
 ### Full config.json Fields
@@ -303,10 +303,10 @@ R243 calibration: the `--tools` flag only affects the `claude-agent-sdk` runtime
 | `WebSearch` | Web search | `claude-agent-sdk` |
 | `WebFetch` | Fetch URL contents | `claude-agent-sdk` |
 
-Verified at [`agent-node/src/cli.ts:154`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L154):
+Verified at [`agent-node/src/cli.ts:161`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L161):
 ```ts
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
-// ... cli.ts:519: tools: TOOLS.length ? TOOLS : undefined  ← passed to claude-agent-sdk query options
+// ... cli.ts:535: tools: TOOLS.length ? TOOLS : undefined  ← passed to claude-agent-sdk query options
 ```
 
 ```bash
@@ -337,7 +337,7 @@ npx @sleep2agi/agent-node --alias coder --max-budget 0.1
 npx @sleep2agi/agent-node --alias reasoner --max-budget 1.0
 ```
 
-Verified at [`agent-node/src/cli.ts:539`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L539):
+Verified at [`agent-node/src/cli.ts:555`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L555):
 ```ts
 if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // passed to claude-agent-sdk query options
 ```
@@ -345,7 +345,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // passed to claude-agen
 When `SDKResultMessage.total_cost_usd` reaches `maxBudgetUsd`, claude-agent-sdk automatically ends the turn and the task moves to `error_max_budget`.
 
 ::: warning codex-sdk / claude-code-cli runtime do not support a USD budget cap
-- The `codex-sdk` path ([`cli.ts:606-690 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L606)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the R215 sdk-deep-dive chain).
+- The `codex-sdk` path ([`cli.ts:644-730 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L644)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the R215 sdk-deep-dive chain).
 - `claude-code-cli` runs against your local Claude Code subscription, counted against subscription quota rather than USD.
 - **Cross-runtime budget control**: put a reverse proxy in front (nginx / Cloudflare / litellm proxy) and throttle by model-API call count.
 :::
@@ -392,7 +392,7 @@ If the process crashes (no time to report), CommHub detects via heartbeat timeou
 
 ## Environment Variables
 
-Only the env vars that agent-node actually reads from `process.env` (verified at [`agent-node/src/cli.ts:100-200`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)):
+Only the env vars that agent-node actually reads from `process.env` (verified at [`agent-node/src/cli.ts:100-260`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)):
 
 | Variable | Equivalent CLI flag / config field | Description |
 |------|------------------------------|------|

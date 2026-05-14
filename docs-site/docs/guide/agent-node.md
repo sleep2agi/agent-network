@@ -185,7 +185,7 @@ token 由 `.anet/nodes/<name>/config.json` 的 `token` 字段或 `COMMHUB_TOKEN`
 
 ## 配置文件
 
-Agent Node 支持多种配置方式，优先级从高到低（verify [`agent-node/src/cli.ts:100-134`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)）：
+Agent Node 支持多种配置方式，优先级从高到低（verify [`agent-node/src/cli.ts:100-128`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)）：
 
 ```mermaid
 flowchart TD
@@ -198,7 +198,7 @@ flowchart TD
 ```
 
 ::: tip 全局 `~/.anet/config.json` fallback
-[`cli.ts:128-130`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L128) 在加载完项目 config 后会用全局 `~/.anet/config.json` 的 `hub` 和 `token` 字段填空缺。**只有这两个字段会跨项目 fallback**——`runtime` / `model` / `tools` / `env` 等都必须在项目 `config.json` / CLI / env 提供，全局 config 不接管。跟 [feedback_config_priority] memory 一致（项目字段级覆盖全局，缺失字段 fallback 到全局）。
+[`cli.ts:123-125`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L123) 在加载完项目 config 后会用全局 `~/.anet/config.json` 的 `hub` 和 `token` 字段填空缺。**只有这两个字段会跨项目 fallback**——`runtime` / `model` / `tools` / `env` 等都必须在项目 `config.json` / CLI / env 提供，全局 config 不接管。跟 [feedback_config_priority] memory 一致（项目字段级覆盖全局，缺失字段 fallback 到全局）。
 :::
 
 ### config.json 完整字段
@@ -303,10 +303,10 @@ R243 校准：`--tools` flag 只控制 `claude-agent-sdk` runtime —— `codex-
 | `WebSearch` | 网页搜索 | `claude-agent-sdk` |
 | `WebFetch` | 抓取网页内容 | `claude-agent-sdk` |
 
-verify [`agent-node/src/cli.ts:154`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L154):
+verify [`agent-node/src/cli.ts:161`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L161):
 ```ts
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
-// ... cli.ts:519: tools: TOOLS.length ? TOOLS : undefined  ← 传给 claude-agent-sdk query options
+// ... cli.ts:535: tools: TOOLS.length ? TOOLS : undefined  ← 传给 claude-agent-sdk query options
 ```
 
 ```bash
@@ -337,7 +337,7 @@ npx @sleep2agi/agent-node --alias 代码 --max-budget 0.1
 npx @sleep2agi/agent-node --alias 推理 --max-budget 1.0
 ```
 
-verify [`agent-node/src/cli.ts:539`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L539):
+verify [`agent-node/src/cli.ts:555`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L555):
 ```ts
 if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // 传给 claude-agent-sdk query options
 ```
@@ -345,7 +345,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // 传给 claude-agent-s
 claude-agent-sdk 在 `SDKResultMessage.total_cost_usd` 达到 `maxBudgetUsd` 时自动结束当前 turn，task 状态走 `error_max_budget`。
 
 ::: warning codex-sdk / claude-code-cli runtime 不支持 budget cap
-- `codex-sdk` 路径（[`cli.ts:606-690 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L606)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（R215 sdk-deep-dive chain 一致）
+- `codex-sdk` 路径（[`cli.ts:644-730 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L644)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（R215 sdk-deep-dive chain 一致）
 - `claude-code-cli` 走本机 Claude Code 订阅，按订阅 quota 不按美金算
 - **跨 runtime 通用预算控制**：前置反向代理（nginx / Cloudflare / litellm proxy）按 model API 调用次数限流
 :::
@@ -392,7 +392,7 @@ SSE 断连后自动重连，使用指数退避策略：
 
 ## 环境变量
 
-仅列 agent-node 实际从 `process.env` 读的字段（verify [`agent-node/src/cli.ts:100-200`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)）：
+仅列 agent-node 实际从 `process.env` 读的字段（verify [`agent-node/src/cli.ts:100-260`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)）：
 
 | 变量 | 等价 CLI flag / config 字段 | 说明 |
 |------|------------------------------|------|
