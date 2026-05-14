@@ -1554,7 +1554,7 @@ Errors usually return this shape:
 ## Tmux Debug Endpoints (opt-in)
 
 ::: warning Off by default
-Only available when the hub is started with `COMMHUB_ENABLE_TMUX=1` ([`index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13)). **Otherwise all paths return 404 `tmux disabled`**. Even when enabled, you still need (a) the caller IP to be inside `COMMHUB_TMUX_ALLOW` (defaults to localhost only) and (b) `users.role = 'admin'` system-admin auth. Intended use: expose tmux sessions running agents on the hub machine to local devs / Dashboard. **Never expose on the public internet.**
+Only available when the hub is started with `COMMHUB_ENABLE_TMUX=1` ([`index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13)). **Otherwise all paths return 404 `tmux disabled`**. Even when enabled, you still need (a) the caller IP to be inside `COMMHUB_TMUX_ALLOWLIST` (comma-separated, defaults to localhost only; verify [`index.ts:16`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L16)) and (b) `users.role = 'admin'` system-admin auth. Intended use: expose tmux sessions running agents on the hub machine to local devs / Dashboard. **Never expose on the public internet.**
 :::
 
 ### GET /api/tmux/:name
@@ -1605,7 +1605,7 @@ curl -X POST "http://localhost:9200/api/tmux/anet-node-coder-1/send" \
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 404 | `tmux disabled` | `COMMHUB_ENABLE_TMUX=1` not set |
-| 403 | `tmux access denied from this ip` | Caller IP outside `COMMHUB_TMUX_ALLOW` (defaults to localhost only) |
+| 403 | `tmux access denied from this ip` | Caller IP outside `COMMHUB_TMUX_ALLOWLIST` (defaults to localhost only) |
 | 401 / 403 | Admin auth required (same gate as [GET /api/server-logs](#get-api-server-logs)) |
 | 400 | `text is required` (POST only) | Body missing `text` |
 | 400 | `<tmux stderr>` | `tmux` subprocess exited non-zero (e.g. session not found) |

@@ -1554,7 +1554,7 @@ curl -X POST http://localhost:9200/api/networks/join \
 ## Tmux 调试端点（opt-in）
 
 ::: warning 默认关闭
-仅在 `COMMHUB_ENABLE_TMUX=1` 启动 hub 时启用（[`index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13)）。**默认全部返回 404 `tmux disabled`**。启用后还需 (a) 调用方 IP 在 `COMMHUB_TMUX_ALLOW` 允许范围（默认仅 localhost）+ (b) `users.role='admin'` system-admin auth。设计意图：让 hub 主机上的 agent tmux session 暴露给同机的 dev / dashboard 调试，**绝不要在公网开**。
+仅在 `COMMHUB_ENABLE_TMUX=1` 启动 hub 时启用（[`index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13)）。**默认全部返回 404 `tmux disabled`**。启用后还需 (a) 调用方 IP 在 `COMMHUB_TMUX_ALLOWLIST` 允许范围（逗号分隔，默认仅 localhost；verify [`index.ts:16`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L16)）+ (b) `users.role='admin'` system-admin auth。设计意图：让 hub 主机上的 agent tmux session 暴露给同机的 dev / dashboard 调试，**绝不要在公网开**。
 :::
 
 ### GET /api/tmux/:name
@@ -1605,7 +1605,7 @@ curl -X POST "http://localhost:9200/api/tmux/anet-node-代码1号/send" \
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
 | 404 | `tmux disabled` | 未设 `COMMHUB_ENABLE_TMUX=1` |
-| 403 | `tmux access denied from this ip` | 调用方 IP 不在 `COMMHUB_TMUX_ALLOW` 范围（默认仅 localhost） |
+| 403 | `tmux access denied from this ip` | 调用方 IP 不在 `COMMHUB_TMUX_ALLOWLIST` 范围（默认仅 localhost） |
 | 401 / 403 | 需 admin auth（同 [GET /api/server-logs](#get-api-server-logs)） |
 | 400 | `text is required` (POST only) | 请求体缺 `text` 字段 |
 | 400 | `<tmux stderr>` | `tmux` 子进程非 0 退出（如 session 不存在） |
