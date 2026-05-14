@@ -273,6 +273,29 @@ db.exec(`
   );
 `);
 
+// ── #84: node rename — rename_txn table (RFC-010 §4) ──
+// Single isolated table holding the rename 2PC transaction state. It doubles
+// as the alias_rename_log (RFC §4 risk #5): the audit log of completed renames
+// is just `SELECT * FROM rename_txn WHERE status = 'committed'`. Kept out of
+// the sessions table so a prepared (in-flight) new-alias never shows up in
+// get_all_status / node listings. status: prepared → committed | aborted.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rename_txn (
+    txn_id        TEXT PRIMARY KEY,
+    network_id    TEXT NOT NULL,
+    old_alias     TEXT NOT NULL,
+    new_alias     TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'prepared',
+    prepared_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    committed_at  TEXT,
+    aborted_at    TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_rename_txn_new ON rename_txn(network_id, new_alias);
+  CREATE INDEX IF NOT EXISTS idx_rename_txn_old ON rename_txn(network_id, old_alias);
+  CREATE INDEX IF NOT EXISTS idx_rename_txn_status ON rename_txn(status);
+`);
+
 // ── V3.13: networks visibility + max_members ──
 try { db.exec("ALTER TABLE networks ADD COLUMN visibility TEXT DEFAULT 'private'"); } catch {}
 try { db.exec("ALTER TABLE networks ADD COLUMN max_members INTEGER DEFAULT 50"); } catch {}
