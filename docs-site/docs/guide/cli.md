@@ -225,7 +225,7 @@ anet node create <name> [options]
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--runtime` | (交互选择) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `--runtime` | 不传则走交互式 **vendor 选单**（runtime 由供应商决定，见 [上手指南 §5](/guide/getting-started)）| `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `--model` | (按 runtime 默认) | 模型名称 |
 
 **示例**：

@@ -211,7 +211,7 @@ anet node create <name> [options]
 
 | Parameter | Default | Description |
 |------|--------|------|
-| `--runtime` | (interactive) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `--runtime` | omit it to enter the interactive **vendor picker** (runtime is derived from the vendor — see [Getting Started §5](/en/guide/getting-started)) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `--model` | (per runtime default) | Model name |
 
 **Examples**:
