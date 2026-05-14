@@ -169,7 +169,7 @@ anet node start remote-bot
 - `anet hub start` + 默认账号自动创建
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
-- `anet node create / start / delete / ls`（claude-agent-sdk + 8 provider preset：MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter / Anthropic + 自定义；[完整 provider 表](/guide/multi-model)）
+- `anet node create / start / delete / ls`（claude-agent-sdk runtime + CLI 流程本身已验证；vendor 维度只有 **Anthropic / MiniMax / 书生 Intern / OpenRouter** 已验证，**DeepSeek / GLM / Kimi / 小米 MiMo** 是 cli.ts `MODEL_PRESETS` 里标 `[UNVERIFIED]` 的 preset —— endpoint 填好但没跑通真 API 回归，详见 [runtimes 已验证 vs 未验证](/guide/runtimes#已验证-vs-未验证) + [完整 provider 表](/guide/multi-model)）
 - Dashboard Chat：markdown / Enter 发送 / 乐观回显 / 来源标签 / 错误兜底 / 历史持久
 - 多 Agent 协作（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调；wrapper 通过 `parent_task_id` 把子任务结果回灌到上游 task 上下文）
 - 局域网共用 Hub
