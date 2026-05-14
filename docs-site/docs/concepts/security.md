@@ -107,7 +107,7 @@ flowchart TD
 
 ### 密码安全
 
-- 密码使用 SHA-256 哈希存储 + 静态 prefix salt `anet:` —— verify [`server/src/db.ts:403-405 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L403):
+- 密码使用 SHA-256 哈希存储 + 静态 prefix salt `anet:` —— verify [`server/src/db.ts:427-429 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427):
   ```ts
   export function hashPassword(password: string): string {
     return new Bun.CryptoHasher("sha256").update(`anet:${password}`).digest("hex");
@@ -182,7 +182,7 @@ REST API 根据 Token 类型自动限制范围：
 | `POST /api/auth/login` | 10 次/分 | 防暴力破解 |
 
 ::: info v0.8 当前只有 register + login 两端点做了 IP rate limit
-verify [`server/src/index.ts:429`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L429)（register，30/min）+ [L444](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L444)（login，10/min）`checkRateLimit()` 调用点 —— 全 server 只这两处。`checkRateLimit` 函数签名 `maxPerMinute = 60` 默认值是为未来扩展预留，**当前其他 endpoint 不做 IP rate limit**。如果你担心写操作被滥用，前置反向代理（nginx / cloudflare 等）补 rate limit 即可。
+verify [`server/src/index.ts:430`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L430)（register，30/min）+ [L444](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L445)（login，10/min）`checkRateLimit()` 调用点 —— 全 server 只这两处。`checkRateLimit` 函数签名 `maxPerMinute = 60` 默认值是为未来扩展预留，**当前其他 endpoint 不做 IP rate limit**。如果你担心写操作被滥用，前置反向代理（nginx / cloudflare 等）补 rate limit 即可。
 :::
 
 ### 实现方式
@@ -217,7 +217,7 @@ function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
 
 ### 本地豁免
 
-localhost (`127.0.0.1` / `::1`)、以及 IP 解析为空 / `"unknown"` 的请求免速率限制，方便开发和测试（[`index.ts:57`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L57)）。
+localhost (`127.0.0.1` / `::1`)、以及 IP 解析为空 / `"unknown"` 的请求免速率限制，方便开发和测试（[`index.ts:58`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L58)）。
 
 ## CORS 配置
 
@@ -230,7 +230,7 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
 ::: warning R295 校准：默认 **不是** `*`
-verify [`server/src/index.ts:255-257`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L255)：`COMMHUB_CORS_ORIGINS` 未设时默认白名单 = `["http://localhost:3000", "http://localhost:3001"]`（**仅本机 dev origin**），**不是** `*`。设了 `COMMHUB_CORS_ORIGINS`（逗号分隔）会**完全替换**这个默认值。
+verify [`server/src/index.ts:256-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L256)：`COMMHUB_CORS_ORIGINS` 未设时默认白名单 = `["http://localhost:3000", "http://localhost:3001"]`（**仅本机 dev origin**），**不是** `*`。设了 `COMMHUB_CORS_ORIGINS`（逗号分隔）会**完全替换**这个默认值。
 
 `Access-Control-Allow-Origin` 只在请求的 `Origin` 命中白名单时回显该 origin，否则回空字符串（浏览器据此拦截跨域请求）。源码不 hardcode 任何作者域名 —— 生产部署 Dashboard 跨域必须显式设 `COMMHUB_CORS_ORIGINS`。
 :::
@@ -254,7 +254,7 @@ CREATE TABLE audit_log (
 );
 ```
 
-记录的 action 取值（**共 16 个**；verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` —— 15 个走 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L424)，`password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT，R283 chain 校准）：
+记录的 action 取值（**共 16 个**；verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` —— 15 个走 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447)，`password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT，R283 chain 校准）：
 
 | 操作 | 触发场景 |
 |------|---------|
@@ -271,7 +271,7 @@ CREATE TABLE audit_log (
 | `invite_created` | 创建网络邀请码 |
 
 ::: info `create_network` / `network_created` 不写 audit
-当前 [`index.ts:581`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L581) 的 POST `/api/networks` 不调 `logAudit`，所以新建 network 不留 audit 行。仅 rename / delete / join 写 audit。
+当前 [`index.ts:635`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635) 的 POST `/api/networks` 不调 `logAudit`，所以新建 network 不留 audit 行。仅 rename / delete / join 写 audit。
 :::
 
 ### 查询审计日志
@@ -319,7 +319,7 @@ chmod 600 ~/.commhub/commhub.db
 
 | 数据 | 存储方式 | 细节 |
 |------|---------|------|
-| 密码 | SHA-256 哈希 + 静态 prefix salt `anet:` | [db.ts:403-405](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L403)；非 per-user salt，Argon2id 迁移见 [::: info 计划](#密码安全)（R248 chain） |
+| 密码 | SHA-256 哈希 + 静态 prefix salt `anet:` | [db.ts:427-429](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427)；非 per-user salt，Argon2id 迁移见 [::: info 计划](#密码安全)（R248 chain） |
 | Token | SHA-256 哈希（无 salt） | token 是 `crypto.randomUUID()` 128-bit 随机值，rainbow table 不适用 |
 | API Key | 不存储（仅 process env / config.env） | agent-node 进程内 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env，hub 端 db 不存 |
 | 任务内容 | 明文 | `tasks.content` 列；多用户共享 hub 时 admin 能看所有；R195 chain `audit_log` 不含 task body |

@@ -107,7 +107,7 @@ flowchart TD
 
 ### Password Security
 
-- Passwords are stored as SHA-256 hashes with a static prefix salt `anet:` — verified at [`server/src/db.ts:403-405 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L403):
+- Passwords are stored as SHA-256 hashes with a static prefix salt `anet:` — verified at [`server/src/db.ts:427-429 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427):
   ```ts
   export function hashPassword(password: string): string {
     return new Bun.CryptoHasher("sha256").update(`anet:${password}`).digest("hex");
@@ -182,7 +182,7 @@ REST API automatically scopes based on token type:
 | `POST /api/auth/login` | 10/min | Prevent brute force |
 
 ::: info Only register + login have IP rate limiting in v0.8
-Verify [`server/src/index.ts:429`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L429) (register, 30/min) + [L444](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L444) (login, 10/min) — these are the only two call sites for `checkRateLimit()`. The function's `maxPerMinute = 60` default is reserved for future expansion; **no other endpoint currently rate-limits per IP**. If you're worried about write abuse, layer rate limiting at a reverse proxy (nginx / Cloudflare / etc.) in front.
+Verify [`server/src/index.ts:430`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L430) (register, 30/min) + [L444](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L445) (login, 10/min) — these are the only two call sites for `checkRateLimit()`. The function's `maxPerMinute = 60` default is reserved for future expansion; **no other endpoint currently rate-limits per IP**. If you're worried about write abuse, layer rate limiting at a reverse proxy (nginx / Cloudflare / etc.) in front.
 :::
 
 ### Implementation
@@ -217,7 +217,7 @@ When the limit is exceeded the server returns HTTP 429 with a body like:
 
 ### Localhost Exemption
 
-localhost (`127.0.0.1` / `::1`), plus requests whose IP resolves to empty / `"unknown"`, are exempt from rate limiting for convenient development and testing ([`index.ts:57`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L57)).
+localhost (`127.0.0.1` / `::1`), plus requests whose IP resolves to empty / `"unknown"`, are exempt from rate limiting for convenient development and testing ([`index.ts:58`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L58)).
 
 ## CORS Configuration
 
@@ -230,7 +230,7 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
 ::: warning R295 calibration: the default is **not** `*`
-Verify [`server/src/index.ts:255-257`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L255): when `COMMHUB_CORS_ORIGINS` is unset the default allowlist is `["http://localhost:3000", "http://localhost:3001"]` (**localhost dev origins only**), **not** `*`. Setting `COMMHUB_CORS_ORIGINS` (comma-separated) **fully replaces** that default.
+Verify [`server/src/index.ts:256-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L256): when `COMMHUB_CORS_ORIGINS` is unset the default allowlist is `["http://localhost:3000", "http://localhost:3001"]` (**localhost dev origins only**), **not** `*`. Setting `COMMHUB_CORS_ORIGINS` (comma-separated) **fully replaces** that default.
 
 `Access-Control-Allow-Origin` echoes the request `Origin` only when it's in the allowlist, otherwise it returns an empty string (the browser then blocks the cross-origin request). No author-specific domains are hardcoded — production deployments serving the Dashboard cross-origin must set `COMMHUB_CORS_ORIGINS` explicitly.
 :::
@@ -254,7 +254,7 @@ CREATE TABLE audit_log (
 );
 ```
 
-Recorded `action` values (**16 total**; verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` — 15 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L424), `password_reset_by_admin` is a direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294); R283 chain calibration):
+Recorded `action` values (**16 total**; verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` — 15 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447), `password_reset_by_admin` is a direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294); R283 chain calibration):
 
 | Operation | Trigger |
 |------|---------|
@@ -271,7 +271,7 @@ Recorded `action` values (**16 total**; verify `grep logAudit server/src/*.ts + 
 | `invite_created` | Network invite code creation |
 
 ::: info `create_network` / `network_created` is NOT audited
-Today's POST `/api/networks` handler ([`index.ts:581`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L581)) does not call `logAudit`, so new networks leave no audit row. Only rename / delete / join write audit entries.
+Today's POST `/api/networks` handler ([`index.ts:635`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635)) does not call `logAudit`, so new networks leave no audit row. Only rename / delete / join write audit entries.
 :::
 
 ### Querying Audit Logs
@@ -319,7 +319,7 @@ chmod 600 ~/.commhub/commhub.db
 
 | Data | Storage method | Details |
 |------|---------|------|
-| Passwords | SHA-256 hash + static prefix salt `anet:` | [db.ts:403-405](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L403); not a per-user salt — Argon2id migration plan in the [::: info above](#password-security) (R248 chain) |
+| Passwords | SHA-256 hash + static prefix salt `anet:` | [db.ts:427-429](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427); not a per-user salt — Argon2id migration plan in the [::: info above](#password-security) (R248 chain) |
 | Tokens | SHA-256 hash (no salt) | Tokens are `crypto.randomUUID()` 128-bit random values; rainbow tables do not apply |
 | API keys | Not stored (only `process.env` / `config.env`) | Agent-node reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from env; the hub's DB does not store them |
 | Task content | Plaintext | The `tasks.content` column; on a shared hub, admins can read everything. R195 chain: `audit_log` does not contain task bodies |
