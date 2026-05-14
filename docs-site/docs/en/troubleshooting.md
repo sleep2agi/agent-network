@@ -172,6 +172,9 @@ anet activate <key>   # v0.6 legacy command, writes a new license row (the key i
 
 # Option C (offline tutorial): start the hub with --dev-open to skip auth
 anet hub start --dev-open
+# When you can't pass a CLI flag (Docker / systemd), the env var is equivalent:
+# COMMHUB_DEV_OPEN=1 anet hub start
+# (verify [`server/src/index.ts:12`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L12): either the `--dev-open` flag or `COMMHUB_DEV_OPEN=1` works)
 ```
 
 ---

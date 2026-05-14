@@ -171,6 +171,9 @@ anet activate <key>   # v0.6 legacy 命令，写入新 license row（不验证 k
 
 # 方案 C（离线 tutorial）：起 hub 时加 --dev-open 跳过鉴权（仅本机调试用）
 anet hub start --dev-open
+# Docker / systemd 场景没法加 CLI flag 时，用 env 变量等效开启：
+# COMMHUB_DEV_OPEN=1 anet hub start
+# （verify [`server/src/index.ts:12`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L12)：`--dev-open` flag 或 `COMMHUB_DEV_OPEN=1` 二选一即可）
 ```
 
 ---
