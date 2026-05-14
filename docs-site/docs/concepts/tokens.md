@@ -146,7 +146,7 @@ v0.8 起，`COMMHUB_AUTH_TOKEN` 进入软废弃。Hub 的长期身份统一收�
 | 登录 | 创建一个新的（老的不自动失效） | 不变 |
 | 改密码 | 当前设备换新 `utok_`，其他设备 `utok_` 失效（[详细 5 副作用](/api/rest#post-api-auth-password)） | 不变 |
 | 创建 node | 不变 | 创建一个绑该 node + network |
-| 删 node (`anet node delete`) | 不变 | **不自动撤销** —— hub 端 `api_tokens` 行仍保留（[`cli.ts:2538` `notifyServerOffline`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2538) 只发 `report_status` offline，不删 token）。要清干净请加 `anet token revoke <id>` |
+| 删 node (`anet node delete`) | 不变 | **不自动撤销** —— hub 端 `api_tokens` 行仍保留（[`cli.ts:2564` `notifyServerOffline`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2564) 只发 `report_status` offline，不删 token）。要清干净请加 `anet token revoke <id>` |
 | 手动撤销 | `anet token revoke <id>` | 同左 |
 
 ### 权限决策（hub 端怎么判断你能不能调）
