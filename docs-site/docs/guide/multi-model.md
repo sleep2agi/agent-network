@@ -9,6 +9,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | 模型 | 服务商 | Runtime | API 地址 | 验证 | 成本 |
 |------|--------|---------|---------|------|------|
 | **MiniMax**（当前主线） | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | ✅ 已验证 | 极低 |
+| **书生 Intern-S2-Preview**（`anet init` 默认项） | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | ✅ 已验证 | 低 |
 | **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | ✅ 已验证 | 低 |
 | **DeepSeek**（当前主线） | DeepSeek | `claude-agent-sdk` | api.deepseek.com/anthropic | ⚠ 未验证 | 极低 |
 | **GLM**（当前主线） | 智谱 | `claude-agent-sdk` | open.bigmodel.cn/anthropic | ⚠ 未验证 | 低 |

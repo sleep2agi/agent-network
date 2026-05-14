@@ -10,6 +10,7 @@ Agent Network supports running agents with different AI models within the same n
 | **Claude Opus (latest line)** | `claude-agent-sdk` | Complex tasks, creative writing (same link) | Very high |
 | **Codex (codex-sdk)** | `codex-sdk` | Strong code generation, tool use | Medium |
 | **MiniMax (latest line)** | `claude-agent-sdk` | ✅ verified — low cost, high throughput (look up the latest model id at [platform.minimaxi.com](https://platform.minimaxi.com)) | Very low |
+| **InternLM Intern-S2-Preview** (`anet init` default) | `claude-agent-sdk` | ✅ verified — domestic model, scientific reasoning; the first option in `anet init`'s model picker (`chat.intern-ai.org.cn`, bare hostname) | Low |
 | **InternLM Intern-S1-Pro** | `claude-agent-sdk` | ✅ verified — domestic model, scientific reasoning (Intern-S1-Pro is the current product line; no version suffix appended) | Low |
 | **DeepSeek** | `claude-agent-sdk` | ⚠ unverified — code + reasoning, excellent value | Low |
 | **GLM (latest line)** | `claude-agent-sdk` | ⚠ unverified — strong Chinese understanding (Zhipu, `open.bigmodel.cn/anthropic`; look up model id at [open.bigmodel.cn](https://open.bigmodel.cn)) | Low |
