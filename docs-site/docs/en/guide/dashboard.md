@@ -158,25 +158,27 @@ sequenceDiagram
 
 ### Admin
 
-::: warning Admin Only
-The Admin panel is only visible to users with role=admin.
+::: warning Only **system-level** admins
+The Admin panel is visible to users with `users.role='admin'` — that's a **system-level** role (granted automatically to the first registered user), **not** a `network_members.role='admin'` (per-network role). Aligned with the R262/R263 chain: a network-level admin can only see their own `/api/audit-log` rows like any other role; reading all rows requires the system-level admin.
 :::
 
 Admin features include:
 
-- **User Management** -- View all registered users; role changes currently go through REST `PUT /api/networks/:id/members/:user_id` (owner only — see [API — PUT members](/en/api/rest#put-api-networks-id-members-user-id)). CLI has no `promote` / `demote` sub-command yet (queued for v0.9+).
-- **Network Management** -- View all networks, members (plan-quota enforcement is disabled since v0.8; see [networks — quota limits](/en/concepts/networks#quota-limits-v0-6-design--currently-not-enforced))
+- **User Management** -- View all registered users (`/api/users` — system-level admin only); role changes currently go through REST `PUT /api/networks/:id/members/:user_id` (owner only — see [API — PUT members](/en/api/rest#put-api-networks-id-members-user-id)). CLI has no `promote` / `demote` sub-command yet (queued for v0.9+).
+- **Network Management** -- View all networks, members (plan-quota is **partially enforced** in v0.8: `createNetwork` still enforces `max_networks_owned`; other quota items are dormant — see [networks — quota limits](/en/concepts/networks#quota-limits-v0-6-design--currently-not-enforced) + R208/R226 chain)
 - **System Statistics** -- Server load, database size, connection count
-- **Audit Log** -- Detailed records of all operations (v0.8 `/api/audit-log` endpoint + Dashboard 0.4.2 Audit Log page)
+- **Audit Log** -- Detailed records of all operations (`/api/audit-log` endpoint + Dashboard 0.4.2 Audit Log page; system-level admin sees everything, other roles only see their own rows — R262/R263 chain)
 
-Audit log example:
+Audit log example (R195 chain — actual 13 actions):
 
 | Time | User | Action | Details |
 |------|------|------|------|
-| 10:00:01 | alice | register | username=alice |
-| 10:00:05 | alice | create_network | name=dev |
-| 10:00:10 | alice | send_task | to=coder-1 |
-| 10:00:15 | coder-1 | report_status | status=working |
+| 10:00:01 | alice | `register` | username=alice |
+| 10:00:05 | alice | `password_changed` | (via `anet passwd`) |
+| 10:00:10 | alice | `network_renamed` | dev → development |
+| 10:00:15 | alice | `member_added` | u_bob_xxx as member |
+
+R264 calibration: the older example listed `create_network` as an audit action — **it does not exist**. R195 chain already calibrated [`security.md` audit log](/en/concepts/security#audit-log): [`POST /api/networks` (index.ts:569-581)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L569) does **not** call `logAudit`, so the `audit_log` table never contains `create_network` or `network_created` rows. The actual 13 actions are: `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / invite_created`.
 
 ### Settings
 
