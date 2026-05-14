@@ -94,7 +94,7 @@ Agent 不需要直接调任何 `telegram_*` MCP tool —— **没有这种 tool 
 Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接生成文本**作为 reply，不需要懂 Telegram API。
 
 ::: warning R258 校准：fictional `telegram_*` tool 列表已删
-旧 doc 列过 `telegram_reply` / `telegram_edit_message` / `telegram_react` 4 个 MCP tool —— **全 source grep 0 hit**（cli.ts / commhub-channel.ts / node-server.ts 没有任何 `telegram_*` server.tool 注册）。Agent 实际是写 reply 文本，agent-node 内部 handler 自动 sendMessage。
+旧 doc 列过 `telegram_reply` / `telegram_edit_message` / `telegram_react` 3 个 MCP tool —— **全 source grep 0 hit**（cli.ts / commhub-channel.ts / node-server.ts 没有任何 `telegram_*` server.tool 注册）。Agent 实际是写 reply 文本，agent-node 内部 handler 自动 sendMessage。
 :::
 
 ### 安全注意事项
