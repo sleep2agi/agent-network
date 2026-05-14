@@ -138,6 +138,7 @@ Starting CommHub Server on port 9200 (bind 127.0.0.1)...
 ✅ Admin account created
    username: admin
    password: anethub
+   Store this password now; it will not be shown again.
    Admin token saved to ~/.anet/server/admin-utok.json
 ```
 :::
