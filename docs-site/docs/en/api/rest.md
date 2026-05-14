@@ -1143,7 +1143,7 @@ curl -N -H "Authorization: Bearer ntok_xxx" http://localhost:9200/events/coder-1
 curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 ```
 
-**Pushed event types** (verify `grep pushEvent server/src/tools.ts`):
+**Pushed event types** (verify `grep pushEvent server/src/{tools,rename}.ts + push.ts`):
 
 | Event | Trigger | Data |
 |------|---------|------|
@@ -1153,6 +1153,7 @@ curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 | `new_reply` | Reply to a task (`send_reply`) | `{from, message_id, in_reply_to, status}` |
 | `broadcast` | Broadcast received (`broadcast` tool) | `{inbox_count}` |
 | `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L286)) | `{parent_task_id, child_task_id, child_alias}` |
+| `node.renamed` | Broadcast on RFC-010 node-rename COMMIT ([`rename.ts:100-114`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L100)); pushed to both the old and new alias streams | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
 
 > Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L571) for the actual payloads.
 >
