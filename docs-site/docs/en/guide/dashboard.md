@@ -169,7 +169,7 @@ Admin features include:
 - **System Statistics** -- Server load, database size, connection count
 - **Audit Log** -- Detailed records of all operations (`/api/audit-log` endpoint + Dashboard 0.4.2 Audit Log page; system-level admin sees everything, other roles only see their own rows — R262/R263 chain)
 
-Audit log example (R195 chain — actual 13 actions):
+Audit log example (R195 chain — actual **16** actions; R283 calibration corrected from "13"):
 
 | Time | User | Action | Details |
 |------|------|------|------|
@@ -178,7 +178,7 @@ Audit log example (R195 chain — actual 13 actions):
 | 10:00:10 | alice | `network_renamed` | dev → development |
 | 10:00:15 | alice | `member_added` | u_bob_xxx as member |
 
-R264 calibration: the older example listed `create_network` as an audit action — **it does not exist**. R195 chain already calibrated [`security.md` audit log](/en/concepts/security#audit-log): [`POST /api/networks` (index.ts:569-581)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L569) does **not** call `logAudit`, so the `audit_log` table never contains `create_network` or `network_created` rows. The actual 13 actions are: `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / invite_created`.
+R264 calibration: the older example listed `create_network` as an audit action — **it does not exist**. R195 chain already calibrated [`security.md` audit log](/en/concepts/security#audit-log): [`POST /api/networks` (index.ts:569-581)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L569) does **not** call `logAudit`, so the `audit_log` table never contains `create_network` or `network_created` rows. The actual **16** actions are (R283 calibration — the list always had 16; the "13" count was a counting mistake; 15 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L394) + 1 (`password_reset_by_admin`) goes via direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294)): `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / invite_created`.
 
 ### Settings
 
