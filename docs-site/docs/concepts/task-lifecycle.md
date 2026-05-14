@@ -43,7 +43,7 @@ stateDiagram-v2
 | 操作 | 接受的当前状态 | 源码 |
 |------|---------------|------|
 | `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:817](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) |
-| `send_ack`（Hub tool） | `created` / `delivered` | [tools.ts:668](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L668) |
+| `send_ack`（Hub tool） | `created` / `delivered` | [tools.ts:679](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L679) |
 | 过期巡检（patrol） | `created` / `delivered` | [index.ts:291-293](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L291) |
 | `ack_inbox`（Agent tool） | `delivered`（**仅 1 个**） | [tools.ts:354](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354) |
 

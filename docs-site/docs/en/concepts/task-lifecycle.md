@@ -43,7 +43,7 @@ The diagram's `[*] → created → delivered` reflects the **schema default** ([
 | Operation | Accepted source states | Source |
 |------|------------------------|------|
 | `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:817](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) |
-| `send_ack` (Hub tool) | `created` / `delivered` | [tools.ts:668](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L668) |
+| `send_ack` (Hub tool) | `created` / `delivered` | [tools.ts:679](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L679) |
 | Expiration patrol | `created` / `delivered` | [index.ts:291-293](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L291) |
 | `ack_inbox` (Agent tool) | `delivered` (**only 1**) | [tools.ts:354](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354) |
 
