@@ -18,11 +18,17 @@
 |---|---|---|
 | `@sleep2agi/commhub-server` | `agent-network/bin/cli.ts` `PINNED_SERVER_VERSION` 常量 | code constant |
 | `@sleep2agi/agent-network-dashboard` | `agent-network/bin/cli.ts` `PINNED_DASHBOARD_VERSION` 常量 | code constant |
-| `@sleep2agi/agent-network` | `docs-site/docs/guide/runtimes.md` + `docs-site/docs/en/guide/runtimes.md` | docs reference |
-| `@sleep2agi/agent-node` | `docs-site/docs/guide/runtimes.md` + `agent-node.md` + `sdk-deep-dive.md`（中英各 1 份） | docs reference |
 
 > cli.ts 的两个 `PINNED_*` 常量是 release management 数据：anet 启动时 fetch 哪一版的
 > commhub-server / dashboard 就靠它们。属于 sync 范围，**不是业务逻辑**。
+
+::: tip R261 校准：docs 已无 hardcoded npm 版本，移出 Live versions
+R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md` + `agent-node.md` + `sdk-deep-dive.md` + `upgrade.md` + `deploy/npm.md` + `faq.md` 等 user-facing doc 内的 hardcoded npm 版本号（`@2.1.7` / `@2.3.0` / `MiniMax-M2.7` / Bun `>= 1.0` 等）**全部清除**，改成「查 npm latest tag / npm 包页 dist-tags」或 vendor 名（无版本）。原 docs reference 两行（runtimes / agent-node + agent-network 跨 6 doc）已经不再需要 release sync。
+
+未来加新 doc 时**不要再写硬版本号**（reviewer 拦截，rationale：每 release drift 一次维护负担，让 doc 引导用户去 npm 包页查最新 latest 比 doc 自己钉死可靠）。
+
+**例外（保留快照）**：[`docs-site/docs/guide/sdk-deep-dive.md` L14](https://github.com/sleep2agi/agent-network/blob/main/docs-site/docs/guide/sdk-deep-dive.md#L14) 用 `agent-node@2.3.1-preview.0` 做 `cli.ts:NNN` 行号引用的 snapshot pin —— 这是**有意保留**的（line numbers drift 后 reader 可以 GitHub main 对位），属于 frozen snapshots 处理。
+:::
 
 ### B. Frozen snapshots（永不动）
 
