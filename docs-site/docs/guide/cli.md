@@ -132,7 +132,7 @@ anet hub start [options]
 **执行这条命令后，系统自动完成以下操作：**
 
 1. 启动 CommHub Server（默认绑定 `127.0.0.1:9200`，仅本机可访问；v0.8 起不再需要 `COMMHUB_AUTH_TOKEN`）
-2. 创建 SQLite 数据库（`~/.commhub/commhub.db`，含 13 张表）
+2. 创建 SQLite 数据库（`~/.commhub/commhub.db`，含 14 张表）
 3. 首次运行自动 bootstrap admin 账户，默认凭证 **`admin / anethub`**（快速上手），并把 admin `utok_` 写到 `~/.anet/server/admin-utok.json`（chmod 600）
 4. 写入本机 Hub 地址到 `~/.anet/config.json`
 5. 如已有有效 `utok_` 会复用登录态；否则用默认凭证 `anet login --username admin --password anethub`

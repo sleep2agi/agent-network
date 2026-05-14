@@ -168,7 +168,7 @@ CommHub provides 17 MCP Tools in two groups:
 
 ### Database Design
 
-SQLite with WAL mode, 13 tables:
+SQLite with WAL mode, 14 tables:
 
 ```mermaid
 erDiagram
