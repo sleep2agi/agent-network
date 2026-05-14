@@ -332,13 +332,15 @@ flowchart TD
 
 ### 隔离策略
 
-每个 Agent Node 实例完全隔离，不读取宿主机的全局配置：
+每个 Agent Node 实例完全隔离，不读取宿主机的全局配置 —— 调 claude-agent-sdk 的 `query()` 时传 `settingSources: []`（claude-agent-sdk 入口是 `query()` 函数，不是 `new Agent({...})` 类）：
 
 ```typescript
-const agent = new Agent({
-  model: profile.model,
-  settingSources: [],  // 完全隔离
-});
+const options = {
+  model: MODEL || undefined,
+  settingSources: [],  // 完全隔离，不读 ~/.claude/ 等全局配置
+  // permissionMode / mcpServers / env ...
+};
+for await (const message of query({ prompt, options })) { /* ... */ }
 ```
 
 ## anet CLI

@@ -332,13 +332,15 @@ flowchart TD
 
 ### Isolation Strategy
 
-Each Agent Node instance is fully isolated and does not read host machine global config:
+Each Agent Node instance is fully isolated and does not read host machine global config — it passes `settingSources: []` to claude-agent-sdk's `query()` (the SDK entry point is the `query()` function, not a `new Agent({...})` class):
 
 ```typescript
-const agent = new Agent({
-  model: profile.model,
-  settingSources: [],  // Fully isolated
-});
+const options = {
+  model: MODEL || undefined,
+  settingSources: [],  // Fully isolated — does not read ~/.claude/ etc.
+  // permissionMode / mcpServers / env ...
+};
+for await (const message of query({ prompt, options })) { /* ... */ }
 ```
 
 ## anet CLI
