@@ -128,7 +128,7 @@ anet network delete net_xxx
 
 **Customize and dig deeper**:
 - Switch models? See [multi-model comparison](/en/guide/multi-model) — DeepSeek / GLM / Kimi / Claude Anthropic-compatible endpoints
-- Hack the demo itself? Source at [agent-network/src/commands/demo/debate.ts](https://github.com/sleep2agi/agent-network/blob/main/src/commands/demo/debate.ts)
+- Hack the demo itself? Source is [`demoDebateCommand` in `agent-network/bin/cli.ts` (L3608)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3608) (there's no separate `src/commands/demo/` directory — the demo logic all lives in cli.ts)
 - Why each run gets an isolated network? See [networks and nodes](/en/concepts/networks)
 
 **Watch in the Dashboard**:

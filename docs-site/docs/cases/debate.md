@@ -128,7 +128,7 @@ anet network delete net_xxx
 
 **改造和深入**：
 - 想换模型？看 [多模型对比](/guide/multi-model) — DeepSeek / GLM / Kimi / Claude 各家 Anthropic-compatible endpoint
-- 想自己改 demo 行为？源码在 [agent-network/src/commands/demo/debate.ts](https://github.com/sleep2agi/agent-network/blob/main/src/commands/demo/debate.ts)
+- 想自己改 demo 行为？源码是 [`agent-network/bin/cli.ts` 的 `demoDebateCommand`（L3608）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3608)（没有独立的 `src/commands/demo/` 目录，demo 逻辑都在 cli.ts 里）
 - 想理解为啥每场都用独立 network 隔离？看 [网络与节点](/concepts/networks)
 
 **用 Dashboard 观察**：
