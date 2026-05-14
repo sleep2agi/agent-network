@@ -2060,7 +2060,9 @@ async function serverCommand() {
       // cache the first-resolved version and may not refetch even when the
       // tag points at something newer; specifying the exact version forces
       // a fresh install whenever this string changes.)
-      const PINNED_SERVER_VERSION = "0.8.0-preview.2";
+      // A `latest` agent-network release must pin a *stable* commhub-server —
+      // 0.8.0 is the published latest and supersedes 0.8.0-preview.2.
+      const PINNED_SERVER_VERSION = "0.8.0";
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`];
       if (devOpen) serverArgs.push("--dev-open");
       child = spawn("bunx", serverArgs, { env, stdio: "pipe" });
