@@ -294,7 +294,7 @@ CREATE TABLE network_members (
   user_id     TEXT NOT NULL,
   role        TEXT NOT NULL DEFAULT 'member',
   invited_by  TEXT,
-  joined_at   TEXT DEFAULT (datetime('now')),
+  joined_at   TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (network_id, user_id)
 );
 
@@ -307,7 +307,7 @@ CREATE TABLE network_invites (
   max_uses    INTEGER DEFAULT 1,
   used_count  INTEGER DEFAULT 0,
   expires_at  TEXT,
-  created_at  TEXT DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
