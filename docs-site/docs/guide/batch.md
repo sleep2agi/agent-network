@@ -1,6 +1,6 @@
 # 批量 Agent：`anet create --batch` + `anet batch <verb>`
 
-> 对应 CLI preview.10 的 batch primitive（issue [#55](https://github.com/sleep2agi/agent-network/issues/55)）。本页从 `agent-network/docs/batch.md` 迁移到 docs-site，作为线上用户文档。
+> 对应 v0.8.3 起正式发布的 batch primitive（issue [#55](https://github.com/sleep2agi/agent-network/issues/55)）。已在 npm `latest` tag，不需要装 `@preview`。本页从 `agent-network/docs/batch.md` 迁移到 docs-site，作为线上用户文档。
 
 ## 一句话
 
@@ -9,8 +9,8 @@
 ## 快速开始
 
 ```bash
-# 安装 preview.10 或之后的 preview
-npm install -g @sleep2agi/agent-network@preview
+# 安装 / 升级到 latest（batch 自 v0.8.3 起在 stable）
+npm install -g @sleep2agi/agent-network
 
 # 一次创建 5 个工程师 agent
 anet create --batch \
@@ -76,7 +76,7 @@ anet batch <verb> [<prefix>] [--workdir <path>]
 | `restart <prefix>` | `stop` + `start` | `stop` 可用，`start` 仍是 hint-only |
 
 ::: warning shared mode cleanup 限制
-`--workdir-mode shared` 会把配置写到 `<workdir>/.anet/nodes/<alias>/config.json`。preview.10 的 `cleanup` 只自动删除默认 separate-mode 的 `<workdir>/node*`，shared-mode 残留配置需要手动 `rm`。Phase 2 会通过 `~/.anet/batches.json` registry 做安全清理。
+`--workdir-mode shared` 会把配置写到 `<workdir>/.anet/nodes/<alias>/config.json`。当前 `cleanup` 只自动删除默认 separate-mode 的 `<workdir>/node*`，shared-mode 残留配置需要手动 `rm`。Phase 2 会通过 `~/.anet/batches.json` registry 做安全清理。
 :::
 
 ## 目录结构
