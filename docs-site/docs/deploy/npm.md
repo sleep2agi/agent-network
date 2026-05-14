@@ -4,11 +4,12 @@
 
 ## 包概览
 
-| 包名 | CLI 命令 | 用途 | 大小 |
+| 包名 | CLI 命令 | 用途 | 备注 |
 |------|---------|------|------|
-| `@sleep2agi/agent-network` | `anet` | CLI 管理 + CommHub SDK | ~580KB |
-| `@sleep2agi/agent-node` | `agent-node` | Agent 运行时 | - |
-| `@sleep2agi/commhub-server` | - | 通信服务器（编程入口） | - |
+| `@sleep2agi/agent-network` | `anet` | CLI 管理 + Client SDK | dist 含 `bin/cli.js` + `src/client.js` + `src/node-server.js`（3 entry minify + obfuscator；具体大小查 [npm 包页](https://www.npmjs.com/package/@sleep2agi/agent-network)） |
+| `@sleep2agi/agent-node` | `agent-node` | Agent 运行时（3 个 runtime: claude-agent-sdk / codex-sdk / claude-code-cli） | regular dep `@anthropic-ai/claude-agent-sdk`；optional peerDep `@openai/codex-sdk`（R212 chain） |
+| `@sleep2agi/commhub-server` | `commhub-server` | CommHub backend（bun 必装；通过 `anet hub start` 走 bunx PIN 版自动拉） | Bun-only runtime（`engines.bun: ">=1.2.0"`） |
+| `@sleep2agi/agent-network-dashboard` | - | Next.js Web UI | `anet hub dashboard` 通过 `npx` PIN 版自动拉，独立部署 |
 
 ## 安装方式
 
@@ -62,26 +63,35 @@ await hub.connect();
 
 ```
 dist/
-├── bin/cli.js       # CLI 入口（minified，~580KB 含 MCP SDK bundle）
-├── src/client.js    # CommHub SDK 客户端（minified，~4.4KB）
-└── client.d.ts      # TypeScript 类型声明
+├── bin/cli.js              # CLI 入口（minified + javascript-obfuscator base64 string-array）
+├── src/client.js           # Client SDK（minified + obfuscator）
+├── src/node-server.js      # Channel 插件（minified + obfuscator；自动复制到项目 .anet/node-server.js，R216/R221/R240 chain）
+└── client.d.ts             # TypeScript 类型声明
 package.json
 README.md
 ```
 
-**package.json 关键字段**：
+**package.json 关键字段**（verify [agent-network/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json)，R223 chain 一致）：
 
 ```json
 {
   "name": "@sleep2agi/agent-network",
-  "bin": { "anet": "dist/bin/cli.js" },
+  "type": "module",
   "main": "dist/src/client.js",
   "types": "dist/client.d.ts",
   "exports": {
     ".": { "import": "./dist/src/client.js", "types": "./dist/client.d.ts" }
-  }
+  },
+  "bin": { "anet": "dist/bin/cli.js" },
+  "files": ["dist"],
+  "engines": { "bun": ">=1.2.0" },
+  "dependencies": { "@inquirer/prompts": "^8.4.3" }
 }
 ```
+
+::: warning 不要假设 server 在 dist 里
+旧版本 doc 列过 `src/server.ts` 在 `files` 字段 —— 当前**不存在**。`commhub-server` 通过 `anet hub start` 走 bunx PIN 版从独立 npm 包 `@sleep2agi/commhub-server` 拉，不在 `@sleep2agi/agent-network` dist 里 ship。R221/R223 chain 一致。
+:::
 
 ### @sleep2agi/agent-node
 
