@@ -254,14 +254,20 @@ MINIMAX_API_KEY=your-minimax-api-key
 :::
 
 ::: danger 不要 commit .env
-`.env` 含明文密码 + API key，必须 `.gitignore`。仓库里只 commit `.env.example`（占位符）：
+`.env` 含明文密码 + API key，必须 `.gitignore`。仓库里只 commit `.env.example`（占位符）—— 实际 [`demos/codex-telegram-squad/.env.example`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/.env.example) 内容：
 
 ```bash
-SQUAD_ADMIN_USER=admin
-SQUAD_ADMIN_PASS=        # 留空，每个部署者自己填强密码
-TELEGRAM_BOT_TOKEN=
-MINIMAX_API_KEY=
+# Legacy v0.5/v0.6 hub master token，v0.8 软废弃 / v1.0 移除。
+# 本 demo 的 docker-compose.yml 仍拿它做 worker COMMHUB_TOKEN 种子（fallback "squad-token"），
+# 保留作 demo 兼容；新部署不需要这行 —— anet hub start 自动 bootstrap admin utok_。
+COMMHUB_AUTH_TOKEN=squad-token
+
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_ALLOW_USER=your-telegram-user-id
+MINIMAX_API_KEY=your-minimax-api-key
 ```
+
+> 注：当前 demo 的 seed 容器是 `curl register` 写死 `admin/admin123`（[docker-compose.yml seed entrypoint](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/docker-compose.yml)）。上面「.env 文件」段展示的 `SQUAD_ADMIN_USER` / `SQUAD_ADMIN_PASS` 强密码变量是**推荐做法**（自部署生产时把 seed 改成读 env 强密码），不是当前 demo 的 `.env.example` 已有字段。
 :::
 
 ::: tip 不需要 COMMHUB_AUTH_TOKEN / DASHBOARD_PASSWORD
