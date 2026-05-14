@@ -344,6 +344,7 @@ Possible causes:
 - Unstable network
 - Reverse proxy timeout set too short
 - Firewall closing long connections
+- nginx `proxy_buffering` left at the default `on` (must be `off` for SSE, otherwise events sit in the buffer until it fills)
 
 Nginx configuration recommendation:
 
@@ -352,11 +353,23 @@ location /events/ {
     proxy_pass http://127.0.0.1:9200;
     proxy_http_version 1.1;
     proxy_set_header Connection "";
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;  # rate limit needs real client IP
     proxy_read_timeout 86400;   # 24 hours
     proxy_buffering off;
     proxy_cache off;
 }
+
+# Also pass X-Forwarded-For on /api/* + /mcp so audit_log records the real IP (R169 / R195 chain)
+location / {
+    proxy_pass http://127.0.0.1:9200;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Host $host;
+}
 ```
+
+::: tip Rate-limit IP detection
+The hub's `checkRateLimit` reads `req.headers["x-forwarded-for"]` and takes the first value ([`server/src/index.ts:431`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L431)). If the reverse proxy doesn't set `X-Forwarded-For`, all requests appear to come from the same IP (the proxy itself) — rate limiting then mis-trips on every user.
+:::
 
 ## Next steps
 

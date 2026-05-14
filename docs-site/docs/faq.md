@@ -344,6 +344,7 @@ vercel deploy --prebuilt --prod
 - 网络不稳定
 - 反向代理超时设置太短
 - 防火墙关闭了长连接
+- nginx `proxy_buffering` 默认 on（SSE 必须 off，否则事件被缓冲到 buffer 满才一次性送达）
 
 Nginx 配置建议：
 
@@ -352,11 +353,23 @@ location /events/ {
     proxy_pass http://127.0.0.1:9200;
     proxy_http_version 1.1;
     proxy_set_header Connection "";
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;  # rate limit 看真实 client IP
     proxy_read_timeout 86400;   # 24 小时
     proxy_buffering off;
     proxy_cache off;
 }
+
+# /api/* + /mcp 也建议透传 X-Forwarded-For 以便 audit_log 记录真实 IP（R169 / R195 chain）
+location / {
+    proxy_pass http://127.0.0.1:9200;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Host $host;
+}
 ```
+
+::: tip rate limit IP 检测
+hub 端 `checkRateLimit` 读 `req.headers["x-forwarded-for"]` 第一个值（[`server/src/index.ts:431`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L431)）。如果反代不设 `X-Forwarded-For`，所有请求会被认成同一个 IP（反代自身），rate limit 会误伤所有用户。
+:::
 
 ## 下一步
 
