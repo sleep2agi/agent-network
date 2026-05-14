@@ -254,7 +254,7 @@ CREATE TABLE audit_log (
 );
 ```
 
-Recorded `action` values (**16 total**; verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2182` — 15 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L394), `password_reset_by_admin` is a direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294); R283 chain calibration):
+Recorded `action` values (**16 total**; verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2182` — 15 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L424), `password_reset_by_admin` is a direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294); R283 chain calibration):
 
 | Operation | Trigger |
 |------|---------|
