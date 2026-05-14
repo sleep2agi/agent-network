@@ -154,7 +154,7 @@ anet network invite --role member
 ```
 
 ::: info v0.8 起 anet 完全 Apache-2.0 OSS，没有真正的 license 销售
-这条 license gate 是 V3 时代的遗留代码，仍在 `send_task` 路径里跑（`server/src/tools.ts:484`），如果你的本地 SQLite 有过期 `licenses` 行就会触发。**未来 v0.9+ 计划移除整段 license 检查**。
+这条 license gate 是 V3 时代的遗留代码，仍在 `send_task` 路径里跑（`server/src/tools.ts:485`），如果你的本地 SQLite 有过期 `licenses` 行就会触发。**未来 v0.9+ 计划移除整段 license 检查**。
 :::
 
 **原因**：本地 SQLite `licenses` 表里有一行 `expires_at < now()`。
@@ -220,7 +220,7 @@ anet passwd                    # 改成强密码
 第一次 `anet hub start` 已经建了 admin，再启动还输出 `Admin account created`？
 
 ::: tip bootstrap 是**非交互**的，没有 "Set up admin account" prompt
-verify [`agent-network/bin/cli.ts:2027-2078`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2027)：`anet hub start` 默认直接 POST `/api/auth/register` username=`admin` password=`anethub`（除非传 `--username` / `--password`）。**没有任何交互 prompt**，所以「反复 prompt」描述是旧 doc，已删。
+verify [`agent-network/bin/cli.ts:2132-2178`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2132)：`anet hub start` 默认直接 POST `/api/auth/register` username=`admin` password=`anethub`（除非传 `--username` / `--password`）。**没有任何交互 prompt**，所以「反复 prompt」描述是旧 doc，已删。
 
 幂等性靠 `~/.anet/server/admin-utok.json` 作 marker —— 文件在就跳过 register flow（输出 `✅ Admin already exists`），文件丢了就再跑 register（hub 端会因 `username already taken` 而返 `ℹ Admin account "admin" already exists`，不会重建）。
 :::
@@ -460,7 +460,7 @@ anet network delete <old-net>
 Node "代码1号" already exists: .anet/nodes/代码1号/config.json
 ```
 
-verify [`agent-network/bin/cli.ts:1067-1071`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1067) + [`agent-network/bin/cli.ts:1189-1193`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1189)：`anet node create` 在交互式 / 非交互式两条路径都用 `resolveNodeRef(id)` 检查本地 `.anet/nodes/<alias>/config.json` 是否已存在；命中就直接 `process.exit(1)` 不连 hub。
+verify [`agent-network/bin/cli.ts:1122`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1122) + [`agent-network/bin/cli.ts:1277`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1277)：`anet node create` 在交互式 / 非交互式两条路径都用 `resolveNodeRef(id)` 检查本地 `.anet/nodes/<alias>/config.json` 是否已存在；命中就直接 `process.exit(1)` 不连 hub。
 
 **原因**：当前项目目录 `.anet/nodes/` 下已有同名 node config 子目录。这是**本地文件冲突**，跟 hub 端 session 状态无关。
 
@@ -590,12 +590,12 @@ anet doctor
 # 1. Server 健康（含 SSE 连接数 + sessions / license / uptime，无需 auth）
 curl http://localhost:9200/health
 # 关注字段: ok / version / sessions_count / sse_connections / sse_sessions / uptime
-# verify: server/src/index.ts:718-733
+# verify: server/src/index.ts:726-746
 
 # 2. 认证有效 + 看所有 session 状态汇总
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 # 返回 sessions[] 全列 + summary { idle, working, offline, total }
-# ⚠ status query param 不生效 — server 端不按 status 过滤（server/src/index.ts:750-768）。
+# ⚠ status query param 不生效 — server 端不按 status 过滤（server/src/index.ts:762-788）。
 #   要筛 idle agent，本地用 jq： curl ... /api/status | jq '.sessions[] | select(.status=="idle")'
 
 # 3. 数据库大小
@@ -604,7 +604,7 @@ ls -lh ~/.commhub/commhub.db
 # 4. 任务 / 节点 / session 统计（非 SSE 连接数）
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/stats
 # 返回 tasks { total, by_status } / sessions { by_status } / nodes { total } / recent_tasks[5]
-# verify: server/src/index.ts:949-985
+# verify: server/src/index.ts:968-1004
 ```
 
 ::: tip 全 30+ endpoint 索引

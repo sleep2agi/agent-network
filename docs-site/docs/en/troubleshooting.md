@@ -155,7 +155,7 @@ anet network invite --role member
 ```
 
 ::: info anet is Apache-2.0 OSS since v0.8 — there is no real license to buy
-This gate is a V3-era leftover still firing in the `send_task` path (`server/src/tools.ts:484`). It triggers when your local SQLite has a `licenses` row with `expires_at` in the past. **v0.9+ plans to drop the whole license check.**
+This gate is a V3-era leftover still firing in the `send_task` path (`server/src/tools.ts:485`). It triggers when your local SQLite has a `licenses` row with `expires_at` in the past. **v0.9+ plans to drop the whole license check.**
 :::
 
 **Cause**: Your local SQLite `licenses` table has a row with `expires_at < now()`.
@@ -221,7 +221,7 @@ anet passwd                    # rotate to a strong password
 The first `anet hub start` created admin, but a second start still prints `Admin account created`?
 
 ::: tip Bootstrap is **non-interactive** — there is no "Set up admin account" prompt
-Verified at [`agent-network/bin/cli.ts:2027-2078`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2027): `anet hub start` simply POSTs `/api/auth/register` with username=`admin` and password=`anethub` (unless overridden by `--username` / `--password`). **No interactive prompt is involved**, so the older "repeating prompt" framing in this doc is stale and has been removed.
+Verified at [`agent-network/bin/cli.ts:2132-2178`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2132): `anet hub start` simply POSTs `/api/auth/register` with username=`admin` and password=`anethub` (unless overridden by `--username` / `--password`). **No interactive prompt is involved**, so the older "repeating prompt" framing in this doc is stale and has been removed.
 
 Idempotency is driven by `~/.anet/server/admin-utok.json` as a marker — if it exists, the register flow is skipped (output: `✅ Admin already exists`). If it's missing, the register call re-runs; if the user row already exists, the hub returns `username already taken` and the CLI prints `ℹ Admin account "admin" already exists` (no duplicate is created).
 :::
@@ -461,7 +461,7 @@ anet network delete <old-net>
 Node "coder-1" already exists: .anet/nodes/coder-1/config.json
 ```
 
-Verified at [`agent-network/bin/cli.ts:1067-1071`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1067) + [`agent-network/bin/cli.ts:1189-1193`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1189): both the interactive and non-interactive paths of `anet node create` call `resolveNodeRef(id)` to check whether `.anet/nodes/<alias>/config.json` already exists; if so, they `process.exit(1)` without ever contacting the hub.
+Verified at [`agent-network/bin/cli.ts:1122`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1122) + [`agent-network/bin/cli.ts:1277`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1277): both the interactive and non-interactive paths of `anet node create` call `resolveNodeRef(id)` to check whether `.anet/nodes/<alias>/config.json` already exists; if so, they `process.exit(1)` without ever contacting the hub.
 
 **Cause**: a subdirectory with the same alias already exists under `.anet/nodes/` in the current project directory. This is a **local filesystem collision** — it has nothing to do with the hub-side session state.
 
@@ -591,13 +591,13 @@ anet doctor
 # 1. Server health (includes SSE connection count + sessions / license / uptime, no auth required)
 curl http://localhost:9200/health
 # Key fields: ok / version / sessions_count / sse_connections / sse_sessions / uptime
-# Verified at server/src/index.ts:718-733
+# Verified at server/src/index.ts:726-746
 
 # 2. Valid auth + summary of all session states
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 # Returns sessions[] (full list) + summary { idle, working, offline, total }
 # ⚠ The status query param is NOT honored — the server does not filter by status
-#   (server/src/index.ts:750-768). Filter idle agents locally with jq:
+#   (server/src/index.ts:762-788). Filter idle agents locally with jq:
 #   curl ... /api/status | jq '.sessions[] | select(.status=="idle")'
 
 # 3. Database size
@@ -606,7 +606,7 @@ ls -lh ~/.commhub/commhub.db
 # 4. Task / node / session aggregates (NOT the SSE connection count)
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/stats
 # Returns tasks { total, by_status } / sessions { by_status } / nodes { total } / recent_tasks[5]
-# Verified at server/src/index.ts:949-985
+# Verified at server/src/index.ts:968-1004
 ```
 
 ::: tip Full 30+ endpoint index
