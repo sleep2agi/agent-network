@@ -279,19 +279,24 @@ anet --version
 npm view @sleep2agi/agent-network versions
 ```
 
-::: tip 正式版本
-默认 `npm install -g @sleep2agi/agent-network` 即可拉取最新正式版（当前 latest：CLI v2.1.7，对应 server v0.8.0 / dashboard v0.4.2 / agent-node v2.3.0，v0.8.2 stable 通过 npm `latest` tag 发布）。如果你仍想跟踪 preview，可显式 `@preview` 指定。
+::: tip 正式版本 vs preview
+默认 `npm install -g @sleep2agi/agent-network` 拉 [npm `latest` tag](https://www.npmjs.com/package/@sleep2agi/agent-network)。版本号每个 release 都跟着升，**doc 不钉死**避免 drift —— 查 npm 包页 `dist-tags` 看当前 stable / preview。
+
+要跟 preview 通道（未稳定的新功能试用），显式加 `@preview`：
+```bash
+npm install -g @sleep2agi/agent-network@preview
+```
 :::
 
 ## 系统要求
 
-| 组件 | 最低要求 |
-|------|---------|
-| Node.js | >= 20 |
-| Bun | >= 1.0（Server 必需） |
-| 内存 | 256MB（Server） + 128MB per Agent |
-| 磁盘 | 100MB + 数据库增长 |
-| 网络 | 需要连接 CommHub Server |
+| 组件 | 最低要求 | verify |
+|------|---------|------|
+| Node.js | ≥ 20 | `node --version` |
+| Bun | ≥ 1.2.0（commhub-server 必需） | `bun --version`；verify [`agent-network/package.json engines.bun`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json) `">=1.2.0"` |
+| 内存 | 256MB（Server）+ 128MB per Agent | `free -m` |
+| 磁盘 | 100MB + 数据库增长 | `df -h` |
+| 网络 | 需要连接 CommHub Server | `curl <hub>/health` |
 
 ## 下一步
 

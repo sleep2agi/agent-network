@@ -279,19 +279,24 @@ anet --version
 npm view @sleep2agi/agent-network versions
 ```
 
-::: tip Stable Release
-`npm install -g @sleep2agi/agent-network` pulls the latest stable release (currently CLI v2.1.7, paired with server v0.8.0 / dashboard v0.4.2 / agent-node v2.3.0; v0.8.2 stable shipped via npm `latest` tag). If you still want to track the preview channel, add `@preview` explicitly.
+::: tip Stable vs. Preview
+`npm install -g @sleep2agi/agent-network` follows the [npm `latest` tag](https://www.npmjs.com/package/@sleep2agi/agent-network). Versions bump with every release, so this doc **does not hard-pin them** to avoid drift — check the npm package page's `dist-tags` for the current stable / preview.
+
+To track the preview channel (trial of unstable features), pass `@preview` explicitly:
+```bash
+npm install -g @sleep2agi/agent-network@preview
+```
 :::
 
 ## System Requirements
 
-| Component | Minimum |
-|------|---------|
-| Node.js | >= 20 |
-| Bun | >= 1.0 (required for Server) |
-| Memory | 256MB (Server) + 128MB per Agent |
-| Disk | 100MB + database growth |
-| Network | Connection to CommHub Server required |
+| Component | Minimum | How to verify |
+|------|---------|------|
+| Node.js | ≥ 20 | `node --version` |
+| Bun | ≥ 1.2.0 (required by commhub-server) | `bun --version`; verified at [`agent-network/package.json engines.bun`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json) `">=1.2.0"` |
+| Memory | 256MB (Server) + 128MB per Agent | `free -m` |
+| Disk | 100MB + database growth | `df -h` |
+| Network | Connection to CommHub Server | `curl <hub>/health` |
 
 ## Next steps
 
