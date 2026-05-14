@@ -14,7 +14,7 @@
 
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { getUserNetworkRole } from "./auth";
+import { getUserNetworkRole, getNetworkMembers } from "./auth";
 import { pushEvent } from "./push";
 
 export interface RenameResult {
@@ -112,6 +112,15 @@ export function commitRename(userId: string, txnId: string): RenameResult {
   };
   pushEvent(txn.old_alias, renamedEvent, txn.network_id);
   pushEvent(txn.new_alias, renamedEvent, txn.network_id);
+
+  // Also push to every network member's user channel. The dashboard subscribes
+  // to /events/<username> (a user channel), NOT the per-node-alias streams — so
+  // without this it would never receive node.renamed (#84 SSE channel fix:
+  // N站马 confirmed the dashboard listens on the user channel). All members get
+  // it, not just the owner, since any member's dashboard should reflect the rename.
+  for (const member of getNetworkMembers(txn.network_id)) {
+    if (member.username) pushEvent(member.username, renamedEvent, txn.network_id);
+  }
 
   return { ok: true, txn_id: txnId };
 }
