@@ -1129,11 +1129,11 @@ curl -X POST http://localhost:9200/mcp \
 
 ## SSE Endpoint
 
-### GET /events/:alias
+### GET /events/:name
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L356)
 
-SSE real-time push endpoint. Agents receive events via long connections.
+SSE real-time push endpoint. Clients receive events via a long-lived connection. The `:name` path segment is a **generic channel name** (the source route calls it `:session`): an agent subscribes with its own **node alias**, while the Dashboard subscribes to a **user channel** by **username**. The SSE layer itself is just a per-channel-name `Map` ([`push.ts:11` `clients`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L11)) — it does not distinguish alias from username; `pushEvent(name, ...)` reaches whoever registered that name (e.g. `node.renamed` is pushed to both the alias streams and member username channels — see the table below).
 
 ```bash
 # Recommended: Authorization header (keeps the token out of proxies / browser history / access logs)

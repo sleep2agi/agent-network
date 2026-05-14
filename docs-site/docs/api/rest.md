@@ -1129,11 +1129,11 @@ curl -X POST http://localhost:9200/mcp \
 
 ## SSE 端点
 
-### GET /events/:alias
+### GET /events/:name
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L356)
 
-SSE 实时推送端点，Agent 通过长连接接收事件。
+SSE 实时推送端点，客户端通过长连接接收事件。路径段 `:name` 是一个**通用 channel 名**（源码里叫 `:session`）：Agent 用自己的 **node alias** 订阅、Dashboard 用 **username** 订阅 user channel。SSE 层本身是 per-channel-name 的 `Map`（[`push.ts:11` `clients`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L11)），不区分 alias / username —— `pushEvent(name, ...)` 推给谁取决于谁注册了那个 name（如 `node.renamed` 同时推 alias 流和成员 username channel，见下表）。
 
 ```bash
 # 推荐：Authorization header（避免 token 写进代理 / 浏览器历史 / access log）
