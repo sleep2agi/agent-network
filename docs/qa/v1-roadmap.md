@@ -40,7 +40,7 @@ v1 应该选**新方向**。下面五个 by 优先级：
 
 **做什么**：补 agent-node 4/6 → 6/6：
 - NODE-04b：real `anet node start` 自重连（杀 hub 看 agent 自愈）
-- NODE-05：runtime 切换（claude-code / codex / minimax 任一启动到 connected）
+- NODE-05：runtime 切换（`claude-code-cli` / `codex-sdk` / `claude-agent-sdk` 任一启动到 connected；R209 chain 校准；`minimax` 是 `http-api` runtime 的 alias 不算 v0.8 主流）
 
 **为什么**：**矩阵补齐对外好讲**，但 ROI 不高（这两条之前都判断「heavy + ROI 不高」延后）。
 

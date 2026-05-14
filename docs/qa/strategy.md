@@ -18,7 +18,7 @@
 |---------|-----------|---------|-----------|
 | **anet CLI 用户**（终端开发者） | `anet hub start` → `anet network create` → `anet node create` → `anet node start` | 没注册 utok 就 node create | session resume（issue #13）、--new-session、tty/non-tty 兼容 |
 | **commhub 直接调用方**（SDK/integration） | register utok → mint ntok → POST /api/tasks → SSE 收 | utok 撤销后 ntok 失效；ntok 跨网络越权 | auth 边界、SSE 重连、task 状态机（pending→completed/failed） |
-| **agent-node runtime** | 启动 + 拿 inbound task + 回复 | provider key 错误时 reply.status=failed；hub 重启时 SSE 重连 | runtime 切换（claude-code / codex / minimax）、session 恢复、failed reply 写回 |
+| **agent-node runtime** | 启动 + 拿 inbound task + 回复 | provider key 错误时 reply.status=failed；hub 重启时 SSE 重连 | runtime 切换（`claude-code-cli` / `codex-sdk` / `claude-agent-sdk`；R209 chain 校准；`minimax` 是 `http-api` runtime 的 alias，不算 v0.8 主流 runtime）、session 恢复、failed reply 写回 |
 | **dashboard 用户**（浏览器端） | 注册 → 登录 → 看节点 → 派单 → 收到回复 → 刷新历史在 | 未登录访问 / SSE 断 / 跨账号看到别人节点 | 主要路径 UI 不破、SSE 断连恢复、视觉无回归（TopoGraph / chat 气泡 / node 卡片） |
 
 每个格子初版只要 **1 条 smoke + 1 条破坏性场景**，不追大而全。
