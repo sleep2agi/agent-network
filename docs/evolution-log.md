@@ -25,7 +25,7 @@
 
 ### Stats
 - git tag `v0.8.1` (prior stable line — v0.8.2 promoted via npm `latest` 2026-05-12, see entry above)
-- 3 npm packages on `latest` at v0.8.1 cut: `agent-network@2.1.5`, `commhub-server@0.8.0`, `agent-network-dashboard@0.4.2`, `agent-node@2.3.0`
+- 4 npm packages on `latest` at v0.8.1 cut: `agent-network@2.1.5`, `commhub-server@0.8.0`, `agent-network-dashboard@0.4.2`, `agent-node@2.3.0`
 - N站马 7-rounds Polish Loop in dashboard preview line (0.4.3-preview.1 / 0.4.4 / 0.4.5-preview.0): Login redesign, 7-variant EmptyState, Quick Actions split, sidebar brand + live online-pulse, TopoGraph light SVG variant (closes issue #8), Settings reorganization, error chips
 - TopoGraph center hub: 24px pulse source (closes issue #5)
 - OSS-readiness reports for 3 repos; one P0 PAT leak in `agent-network-dashboard` history cleaned with full git nuke + force-push; backup retained
