@@ -90,7 +90,7 @@ Expected output structure is asserted in [`tests/test28-pr-review-room/expected/
 
 ## Output markdown structure
 
-`./pr-review-<suffix>-<ts>.md` follows a fixed shape (see [`cli.ts` lines 4714-4729](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4714)):
+`./pr-review-<suffix>-<ts>.md` follows a fixed shape (see [`cli.ts` lines 4876-4891](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4876)):
 
 ```markdown
 # PR Review
@@ -136,7 +136,7 @@ and can be addressed in a follow-up PR.
 
 ## Console output cadence
 
-What you see in the terminal once the run starts (see [`cli.ts` lines 4549-4775](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4549)):
+What you see in the terminal once the run starts (see [`cli.ts` lines 4711-4893](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4711)):
 
 ```text
   🔍 PR diff: local file tests/test28-pr-review-room/samples/typo-pr.diff
@@ -306,7 +306,7 @@ The default is MiniMax-M2.7. Swap the 4 agents' `ANTHROPIC_*` env vars to any ot
 
 **Customize and dig in**:
 - Curious why there's no dedicated dispatcher agent? See [§Roles in the full proposal](https://github.com/sleep2agi/agent-network/blob/main/docs/demos/pr-review-room-proposal.md#角色4-个-agentapproved-设计).
-- Want to modify the demo? Source at [`agent-network/bin/cli.ts:4549`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4549) `demoPrReviewCommand`.
+- Want to modify the demo? Source at [`agent-network/bin/cli.ts:4585`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4585) `demoPrReviewCommand`.
 - Why a dedicated network per run? See [Networks & Nodes](/en/concepts/networks).
 
 **Watch in Dashboard**:

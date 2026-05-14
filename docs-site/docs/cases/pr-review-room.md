@@ -90,7 +90,7 @@ anet demo pr-review --diff tests/test28-pr-review-room/samples/cross-file-pr.dif
 
 ## 输出 markdown 结构
 
-`./pr-review-<suffix>-<ts>.md` 的固定结构（来自 [`cli.ts` 4714-4729 行](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4714)）：
+`./pr-review-<suffix>-<ts>.md` 的固定结构（来自 [`cli.ts` 4876-4891 行](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4876)）：
 
 ```markdown
 # PR Review
@@ -134,7 +134,7 @@ anet demo pr-review --diff tests/test28-pr-review-room/samples/cross-file-pr.dif
 
 ## 控制台输出节奏
 
-CLI 跑起来后控制台依次打出（来自 [`cli.ts` 4549-4775 行](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4549)）：
+CLI 跑起来后控制台依次打出（来自 [`cli.ts` 4711-4893 行](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4711)）：
 
 ```text
   🔍 PR diff: local file tests/test28-pr-review-room/samples/typo-pr.diff
@@ -304,7 +304,7 @@ anet dashboard
 
 **改造和深入**：
 - 想理解为什么 dispatcher 不做独立 agent？看 [完整提案 §角色](https://github.com/sleep2agi/agent-network/blob/main/docs/demos/pr-review-room-proposal.md#角色4-个-agentapproved-设计)
-- 想自己改 demo 行为？源码在 [`agent-network/bin/cli.ts:4549`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4549) `demoPrReviewCommand`
+- 想自己改 demo 行为？源码在 [`agent-network/bin/cli.ts:4585`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4585) `demoPrReviewCommand`
 - 想理解每次跑都用独立 network 隔离的设计？看 [网络与节点](/concepts/networks)
 
 **用 Dashboard 观察**：
