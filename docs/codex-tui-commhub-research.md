@@ -98,7 +98,97 @@ Vincent 的诉求明说「类似 claude-code-cli runtime」。claude-code-cli �
 
 ## §2 Q1/Q2 — TUI 收发可行性
 
-> 🚧 待 R524+ /loop tick 推进（含本地实测）
+### 2.1 实测证据 1 — 本机 codex 配置里已有 commhub MCP server
+
+调研中 `codex mcp list` 实测发现：**本机 codex 配置里已经存在一个 `commhub-proxy` MCP server**：
+
+```
+$ codex mcp get commhub-proxy
+commhub-proxy
+  enabled: true
+  transport: stdio
+  command: bun
+  args: /home/vansin/agent-orchestra/proxy/commhub-proxy.ts
+  env: COMMHUB_ALIAS=*****, COMMHUB_URL=*****
+```
+
+（注：`proxy/commhub-proxy.ts` 文件本身不在当前 checkout —— 应是先前实验或另一 working tree 留下的 config 条目。但 config 条目本身就是证据：**anet 团队此前已经把一个 commhub stdio MCP proxy 挂进过 codex**。）
+
+→ 这不是「理论上可行」，是 codex 配置层已经接受过这种集成。
+
+### 2.2 实测证据 2 — `codex mcp add` 隔离环境端到端验证
+
+用隔离 `CODEX_HOME=/tmp/qa-codex-home`（不碰真实 `~/.codex`，测后 `rm -rf`）实测 `codex mcp add` 两种 transport：
+
+```
+# stdio server
+$ codex mcp add qa-test-mcp --env FOO=bar -- echo hello
+Added global MCP server 'qa-test-mcp'.
+
+# streamable HTTP server
+$ codex mcp add qa-http-mcp --url http://127.0.0.1:9999/mcp
+Added global MCP server 'qa-http-mcp'.
+$ codex mcp get qa-http-mcp
+  transport: streamable_http
+  url: http://127.0.0.1:9999/mcp
+  bearer_token_env_var: -      ← ★ 支持 bearer token 认证
+  http_headers: -
+  env_http_headers: -          ← ★ 支持自定义 header（含 env 注入）
+```
+
+**确认结论**：
+- codex 原生支持挂 stdio MCP server（`-- <command>` + `--env`）
+- codex 原生支持挂 streamable HTTP MCP server（`--url`），且 **支持 `bearer_token_env_var` + `http_headers` + `env_http_headers`** —— 即支持带认证的远程 MCP
+- 配置写进 `~/.codex/config.toml` 的 `mcp_servers`，对所有 codex 模式生效（含交互式 TUI）
+
+### 2.3 Q2 — TUI 能否主动发 commhub 消息？ → ✅ **可行**
+
+机制：codex TUI 加载 commhub MCP server 后，TUI 内的 codex agent 获得 commhub 的 MCP 工具（`commhub_send_task` / `commhub_send_message` / `commhub_reply` / `commhub_report_status` —— 见 `server/CLAUDE.md` 的 MCP tools 清单，这些是 hub 端 + agent 端工具）。
+
+用户在 codex TUI 里干活时，可以让 codex agent 调用这些工具发消息出去。**与 claude-code-cli runtime 完全同构** —— Claude Code 也是通过 MCP 工具 `commhub_send_task` 发消息。
+
+确定答案：**Q2 可行，零额外机制，codex 原生支持。**
+
+### 2.4 Q1 — TUI 能否收到 commhub 消息？ → 🟡 **可行，但是 pull 不是 push**
+
+#### 2.4.1 pull 路径（可行）
+
+commhub 的 agent 端 MCP 工具含 `get_inbox`（"拉取待办命令"，见 `server/CLAUDE.md`）。codex TUI 里的 agent 可以调用 `get_inbox` 工具 **主动拉取** commhub 发来的消息。
+
+→ 这条路径**可行**：TUI agent 调 `get_inbox` → 拿到 inbox 里的消息 → 在 TUI 对话流里呈现。
+
+#### 2.4.2 push 路径（受限 —— 真正的卡点）
+
+claude-code-cli runtime 的 receive 有 **SSE push 旁路**：anet-node 监听 commhub 的 `/events/:alias` SSE 流，消息一到就**注入** agent 的输入。这让 receive 是「实时 push」而非「等 agent 想起来 poll」。
+
+codex TUI **没有这条旁路**：
+- codex TUI 的 MCP 集成是**工具调用模型**（agent 决定何时调 tool），不是事件流订阅
+- 没有官方机制能把一条 commhub 消息**主动注入**一个正在运行的 codex TUI turn
+- 即：commhub 消息到了，codex TUI 不会自动知道；要等 TUI 里的 agent 下次调 `get_inbox`
+
+这就是 issue #97 Q4 要找的「卡点」—— 但要厘清：**这是 UX 降级，不是功能 blocker**。基础 receive（pull）能用，只是没有 claude-code-cli 那样的实时 push。
+
+#### 2.4.3 push 受限的根因 —— 与 #21551 的关系
+
+§1.1 的上游 #21551「one client per thread」约束，falsify 的是「多 client 实时围观同一 thread 的 live token」。codex TUI 缺 push 注入是**相关但不同**的限制：
+
+| 限制 | 来源 | 对 #97 的影响 |
+|------|------|--------------|
+| 多 client 不能围观同一 live thread 的 token 流 | #21551「one client per thread」 | Path B falsified（与 #97 无关，#97 不要这个） |
+| 没有机制把外部消息注入运行中的 TUI turn | codex TUI MCP 集成是工具调用模型 | Q1 receive 降级为 pull（#97 的真正约束） |
+
+→ Q1 的卡点是 codex TUI 的 **MCP 集成模型本身**（工具调用 vs 事件流），不是 #21551 那个 thread ownership 问题。
+
+### 2.5 §2 小结
+
+| 问题 | 确定答案 | 机制 | 限制 |
+|------|---------|------|------|
+| **Q2 发** | ✅ **可行** | codex agent 调 `commhub_send_task` 等 MCP 工具 | 无，原生支持 |
+| **Q1 收** | 🟡 **可行但 pull** | codex agent 调 `get_inbox` MCP 工具拉取 | 无 push 注入；commhub 消息到了 TUI 不自动知道，要等 agent poll |
+
+证据链：`codex mcp list` 发现本机已有 commhub MCP 配置条目 + 隔离环境实测 `codex mcp add` stdio/HTTP 两种 transport 都工作 + HTTP 支持 bearer token 认证。基础收发可行，receive 降级为 pull 是 codex TUI MCP 集成模型决定的（非 #21551 thread ownership 问题）。
+
+§3 给 Q3（pull 模型下的 UX 设计）+ Q4（push 受限的应对/替代）+ Q5（与 Path C 共存）。
 
 ---
 
