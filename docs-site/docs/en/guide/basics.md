@@ -165,13 +165,18 @@ anet login --hub http://10.0.0.1:9200
 After login, a Token (credential) is saved to `~/.anet/config.json`. You won't need to enter your password again.
 
 ::: info Verify it worked
-After logging in, run `anet whoami`. You should see output like:
+After logging in, run `anet whoami`. You should see output like (verified at [`cli.ts:3127-3148 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3127)):
 ```
-[anet] Logged in as: yourname
-[anet] Role: admin
-[anet] Network: default (net_xxxxxxxx)
+  User: yourname (u_xxxxxx)
+  Role: admin             ← System-level users.role ('admin' / 'user'), NOT a network role
+  Hub:  http://127.0.0.1:9200
+
+  Networks:
+    default (net_xxxxxxxx) ← current
 ```
-If you see `Not logged in` or an error, the login didn't succeed. Check that the CommHub server is running (`curl http://localhost:9200/health`).
+If you see `Not logged in` or `Session expired`, the login didn't succeed. Check that the CommHub server is running (`curl http://localhost:9200/health`).
+
+**System-level role vs. network-level role**: `whoami`'s `Role:` field shows the system-level `users.role` (only `admin` / `user`) — it is **not** your role within the current network (`owner / admin / member / viewer`). To check the per-network role, run `anet network members` and find your own row. See [roles → FAQ](/en/concepts/roles) (R227/R236 chain).
 :::
 
 ### 2. Dashboard Login -- Web Browser Login

@@ -166,13 +166,18 @@ anet login --hub http://10.0.0.1:9200
 登录后会在 `~/.anet/config.json` 里保存你的 Token（通行证），之后的操作就不用再输密码了。
 
 ::: info 验证成功
-登录成功后，运行 `anet whoami` 应该看到类似输出：
+登录成功后，运行 `anet whoami` 应该看到类似输出（verify [`cli.ts:3127-3148 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3127)）：
 ```
-[anet] Logged in as: yourname
-[anet] Role: admin
-[anet] Network: default (net_xxxxxxxx)
+  User: yourname (u_xxxxxx)
+  Role: admin             ← 系统级 users.role ('admin' / 'user')，不是 network role
+  Hub:  http://127.0.0.1:9200
+
+  Networks:
+    default (net_xxxxxxxx) ← current
 ```
-如果看到 `Not logged in` 或报错，说明登录没成功，请检查 CommHub 服务器是否在运行（`curl http://localhost:9200/health`）。
+如果看到 `Not logged in` 或 `Session expired`，说明登录没成功，请检查 CommHub 服务器是否在运行（`curl http://localhost:9200/health`）。
+
+**系统级 role vs 网络级 role**：`whoami` 的 `Role:` 字段是系统级 `users.role`（仅 `admin` / `user`），**不是**当前 network 内的 `owner/admin/member/viewer`。查 network role 跑 `anet network members` 看自己那行。详见 [roles → FAQ](/concepts/roles)（R227/R236 chain 一致）。
 :::
 
 ### 2. Dashboard 登录 -- 网页登录
