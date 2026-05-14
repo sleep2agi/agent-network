@@ -267,12 +267,12 @@ CREATE TABLE task_events (
 查询任务事件：
 
 ```bash
-# REST API（无 CLI 快捷方式 —— anet tasks 子命令仅支持 --status / --limit 过滤，不支持 --detail）
+# REST API（无 CLI 快捷方式 —— anet tasks 子命令仅支持 status（positional 或 --status）/ --limit 过滤，不支持 --detail）
 curl "http://localhost:9200/api/task_events?task_id=t_xxx" \
   -H "Authorization: Bearer ntok_xxx"
 ```
 
-R231 校准：原 doc 写 `anet tasks --detail t_xxx` CLI 命令不存在（[`cli.ts:3059-3094 tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3059) 只解析 `--status` 和 `--limit`，没 `--detail` 参数），用户跑会 hit `?` 占位输出。
+R231 校准：原 doc 写 `anet tasks --detail t_xxx` CLI 命令不存在（[`cli.ts:3059-3094 tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3059) 只解析 status（positional `args[1]` 或 `--status`）和 `--limit`，没 `--detail` 参数），用户跑会 hit `?` 占位输出。
 
 示例输出：
 
