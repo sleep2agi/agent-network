@@ -61,6 +61,7 @@ export default withMermaid(defineConfig({
               { text: '基本概念', link: '/guide/basics' },
               { text: '简介', link: '/guide/introduction' },
               { text: '上手指南', link: '/guide/getting-started' },
+              { text: 'Preview 快速开始', link: '/guide/preview/getting-started' },
               { text: '一键安装 (多 Agent + tmux)', link: '/guide/one-shot-install' },
               { text: '架构概览', link: '/guide/architecture' },
             ]
@@ -71,6 +72,7 @@ export default withMermaid(defineConfig({
               { text: '账号体系', link: '/guide/account-system' },
               { text: 'Dashboard', link: '/guide/dashboard' },
               { text: 'CLI 命令', link: '/guide/cli' },
+              { text: '批量 Agent', link: '/guide/batch' },
               { text: 'Agent Node', link: '/guide/agent-node' },
               { text: '节点 Runtime', link: '/guide/runtimes' },
               { text: 'SDK Deep-dive', link: '/guide/sdk-deep-dive' },
