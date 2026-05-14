@@ -144,9 +144,9 @@ describe("auth workflow — network rename/delete guards", () => {
     expect(deleteNetwork(other.user!.user_id, netId).error).toContain("not your network");
 
     db.run("INSERT INTO sessions (resume_id, alias, network_id) VALUES (?1, ?2, ?3)", ["sess_1", "a1", netId]);
-    const blockedDelete = deleteNetwork(ownerId, netId);
-    expect(blockedDelete.ok).toBe(false);
-    expect(blockedDelete.error).toContain("active session");
+    const blocked = deleteNetwork(ownerId, netId);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toContain("active session");
 
     db.run("DELETE FROM sessions WHERE resume_id = ?1", ["sess_1"]);
     expect(deleteNetwork(ownerId, netId).ok).toBe(true);
@@ -184,6 +184,8 @@ describe("auth workflow — password and admin reset lifecycle", () => {
     const admin = register("admin_seed", "abcd");
     const target = register("erin", "StrongPw123");
     issueUserToken(target.user!.user_id, "extra-before-reset");
+    issueUserToken(admin.user!.user_id, "admin-extra-1");
+    issueUserToken(admin.user!.user_id, "admin-extra-2");
 
     const denied = resetUserPassword("erin", false);
     expect(denied.ok).toBe(false);
@@ -203,7 +205,7 @@ describe("auth workflow — password and admin reset lifecycle", () => {
     );
     expect((audit?.cnt || 0) > 0).toBe(true);
 
-    expect(revokeOtherUserTokens(admin.user!.user_id)).toBeGreaterThanOrEqual(1);
+    expect(revokeOtherUserTokens(admin.user!.user_id)).toBe(3);
   });
 });
 
