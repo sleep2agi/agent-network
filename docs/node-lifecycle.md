@@ -100,12 +100,11 @@ config.json:
   "node_name": "指挥室",
   "alias": "指挥室",
   "runtime": "claude-code-cli",
-  "model": "",
-  "session": "550e8400-e29b-41d4-a716-446655440000",
+  "network_id": "net_a1b2c3d4",
   "channels": ["server:commhub"],
   "env": {},
-  "logLevel": "info",
-  "flags": { "dangerouslySkipPermissions": true, "teammateMode": "in-process" }
+  "flags": { "dangerouslySkipPermissions": true, "teammateMode": "in-process" },
+  "session": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
