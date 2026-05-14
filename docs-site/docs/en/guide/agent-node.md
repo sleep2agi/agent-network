@@ -98,15 +98,15 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 | **Models** | Codex SDK model (set with `--model`; see OpenAI Codex docs for the current model id) |
 | **Prerequisites** | `codex auth login` |
 | **Strengths** | Strong code generation, flexible tool use |
-| **Tools** | Supports Read / Write / Edit / Bash / Glob / Grep |
+| **Tools** | Codex CLI ships with Read / Write / Edit / Bash / Glob / Grep / WebSearch baked in (**does not honor `--tools`** — aligned with R243 chain) |
 
 ```bash
 npx @sleep2agi/agent-node \
   --alias code-assistant \
   --runtime codex-sdk \
   --model <codex-model-id> \
-  --hub http://YOUR_IP:9200 \
-  --tools Read,Write,Edit,Bash,Glob,Grep
+  --hub http://YOUR_IP:9200
+# Note: codex-sdk silently ignores --tools. The toolset is baked into the codex CLI binary.
 ```
 
 ::: details Prerequisites checklist
@@ -127,7 +127,7 @@ Routes claude-agent-sdk requests to domestic model APIs via `ANTHROPIC_BASE_URL`
 
 | Property | Description |
 |------|------|
-| **Models** | MiniMax M2.7, InternLM Intern-S1-Pro, DeepSeek, GLM, Kimi, Xiaomi MiMo, etc. |
+| **Models** | MiniMax, DeepSeek, GLM, Kimi, InternLM, Xiaomi MiMo, OpenRouter — any Anthropic-compatible endpoint (full provider table: [Multi-model setup](/en/guide/multi-model)) |
 | **Prerequisites** | API key for the target model |
 | **Strengths** | Low cost, high throughput, direct access in China |
 | **Mechanism** | Routes requests to compatible APIs via `ANTHROPIC_BASE_URL` |

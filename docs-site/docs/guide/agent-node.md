@@ -98,15 +98,15 @@ npx @sleep2agi/agent-node \
 | **模型** | Codex SDK 模型（通过 `--model` 指定；具体 model id 查 OpenAI Codex 文档） |
 | **前置** | `codex auth login` |
 | **特点** | 代码生成强、工具调用灵活 |
-| **工具** | 支持 Read / Write / Edit / Bash / Glob / Grep |
+| **工具** | Codex CLI 内置 Read / Write / Edit / Bash / Glob / Grep / WebSearch（baked in，**不接受 `--tools` 自定义**；R243 chain 一致） |
 
 ```bash
 npx @sleep2agi/agent-node \
   --alias 代码助手 \
   --runtime codex-sdk \
   --model <codex-model-id> \
-  --hub http://YOUR_IP:9200 \
-  --tools Read,Write,Edit,Bash,Glob,Grep
+  --hub http://YOUR_IP:9200
+# 注：codex-sdk 不接受 --tools flag（静默忽略）。工具集由 codex CLI 二进制 baked in
 ```
 
 ::: details 你需要准备
@@ -127,7 +127,7 @@ npx @sleep2agi/agent-node \
 
 | 属性 | 说明 |
 |------|------|
-| **模型** | MiniMax M2.7、书生 Intern-S1-Pro、DeepSeek、GLM、Kimi、小米 MiMo 等 |
+| **模型** | MiniMax、DeepSeek、GLM、Kimi、书生 Intern、小米 MiMo、OpenRouter 等任何 Anthropic-compatible endpoint（完整 provider 表见 [多模型配置](/guide/multi-model)） |
 | **前置** | 对应模型的 API Key |
 | **特点** | 低成本、高吞吐、国内直连 |
 | **机制** | 通过 `ANTHROPIC_BASE_URL` 将请求路由到兼容 API |
