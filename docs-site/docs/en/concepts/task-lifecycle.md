@@ -40,9 +40,10 @@ The diagram's `[*] → created → delivered` reflects the **schema default** ([
 | Operation | Accepted source states | Source |
 |------|------------------------|------|
 | `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:816](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816) |
-| `ack_inbox` / `send_ack` | `created` / `delivered` | [tools.ts:678](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L678) |
+| `send_ack` (Hub tool) | `created` / `delivered` | [tools.ts:678](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L678) |
+| `ack_inbox` (Agent tool) | `delivered` (**only 1**) | [tools.ts:353](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L353) |
 
-The "4 cancellable states" R230 chain calibration is exactly that first row. The state diagram above doesn't draw `created`'s outgoing edges for simplicity; SQL allows them, but the only way a row enters the `created` state is a direct DB INSERT that omits the status column — no REST/MCC entry point does that.
+R279 calibration: the R266 chain originally treated `ack_inbox` and `send_ack` as one row, but their WHERE clauses differ — `ack_inbox` (agent-side tool, L353) accepts only `delivered`, while `send_ack` (hub-side tool, L678) accepts `created` / `delivered`. The "4 cancellable states" R230 chain calibration is exactly the `cancel_task` row. The state diagram above doesn't draw `created`'s outgoing edges for simplicity; SQL allows them, but the only way a row enters the `created` state is a direct DB INSERT that omits the status column — no REST/MCP entry point does that.
 :::
 
 ## Status Reference
