@@ -131,7 +131,8 @@ docker compose up -d --build
 ::: tip Not using Docker? v0.8.2 one-shot bind
 If you run a single node via `anet node create / start` instead of Docker Compose, attach Telegram in one command:
 ```bash
-anet channel add telegram --bot-token <BOT_TOKEN> --allow-user <TG_USER_ID>
+# Note: telegram takes a <node-id> positional arg; the allowlist flag is --allow (not --allow-user)
+anet channel add telegram <node-id> --bot-token <BOT_TOKEN> --allow <TG_USER_ID>
 ```
 This auto-generates the node's `channels/telegram` config — no `.env` edits required. See [Channels — Telegram](/en/guide/channels#telegram-channel).
 :::

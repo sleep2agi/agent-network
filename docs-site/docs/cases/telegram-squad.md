@@ -131,7 +131,8 @@ docker compose up -d --build
 ::: tip 非 Docker 部署？用 v0.8.2 一键绑定
 如果你不跑 Docker Compose，而是用 `anet node create / start` 起的单 node，可以直接：
 ```bash
-anet channel add telegram --bot-token <BOT_TOKEN> --allow-user <TG_USER_ID>
+# 注意：telegram 后面要带 <node-id> 位置参数；白名单 flag 是 --allow（不是 --allow-user）
+anet channel add telegram <node-id> --bot-token <BOT_TOKEN> --allow <TG_USER_ID>
 ```
 自动生成节点的 `channels/telegram` 配置，无需手编 `.env`。详见 [Channel 概念 — Telegram](/guide/channels#telegram-channel)。
 :::
