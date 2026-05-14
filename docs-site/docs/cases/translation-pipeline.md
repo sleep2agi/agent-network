@@ -4,7 +4,7 @@
 
 **预计时间**：5 分钟  
 **Agent 数量**：3（调度员 + 英文翻译 + 日文翻译）  
-**模型**：MiniMax + DeepSeek
+**模型**：MiniMax（3 个 Agent 同一 provider，跟 `demos/translation-pipeline/docker-compose.yml` 一致，只需一个 `MINIMAX_API_KEY`）
 
 ::: tip Docker 一键启动
 ```bash
@@ -39,9 +39,9 @@ MINIMAX_API_KEY=你的Key docker compose up
 :::
 
 ```bash
-# 调度员（负责编排流程，用 DeepSeek，推理能力强）
-ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=你的-DeepSeek-Key \
+# 调度员（负责编排流程，用 MiniMax）
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=你的-MiniMax-Key \
 anet node create 调度员 --runtime claude-agent-sdk
 
 # 英文翻译（用 MiniMax 国内直连便宜）
@@ -110,8 +110,8 @@ anet logs 调度员
 
 ## 要点
 
-- **调度员**用 DeepSeek：擅长理解复杂指令和编排
-- **翻译**用 MiniMax：低成本、中文好，翻译质量高
+- 3 个 Agent 都用 **MiniMax**：低成本、中文好、国内直连，翻译质量高；想换 provider 把 `ANTHROPIC_BASE_URL` 指到别家即可
+- **调度员**只做编排（拆任务 + 串流程），翻译质量主要看翻译 Agent
 - Agent 之间通过 CommHub 自动通信，不需要写代码
 
 ## 下一步

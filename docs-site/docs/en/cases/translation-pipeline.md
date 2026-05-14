@@ -4,7 +4,7 @@ Three Agents form a translation pipeline: Chinese original -> English translatio
 
 **Estimated time**: 5 minutes  
 **Number of Agents**: 3 (dispatcher + English translator + Japanese translator)  
-**Models**: MiniMax + DeepSeek
+**Models**: MiniMax (all 3 Agents share one provider, matching `demos/translation-pipeline/docker-compose.yml` — only one `MINIMAX_API_KEY` needed)
 
 ::: tip Docker quick start
 ```bash
@@ -39,9 +39,9 @@ This case assumes you've already run [Hello World](/en/cases/hello-world) to fin
 :::
 
 ```bash
-# Dispatcher (orchestrates the workflow; DeepSeek has strong reasoning)
-ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=your-DeepSeek-key \
+# Dispatcher (orchestrates the workflow; MiniMax)
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
+ANTHROPIC_AUTH_TOKEN=your-MiniMax-key \
 anet node create 调度员 --runtime claude-agent-sdk
 
 # English translator (MiniMax — low-latency in China, very cheap)
@@ -110,8 +110,8 @@ anet logs 调度员
 
 ## Key points
 
-- **Dispatcher** uses DeepSeek: strong at understanding complex instructions and orchestration
-- **Translators** use MiniMax: low cost, good with Chinese, high translation quality
+- All 3 Agents use **MiniMax**: low cost, good with Chinese, low-latency in China, high translation quality; to switch provider just point `ANTHROPIC_BASE_URL` elsewhere
+- The **dispatcher** only orchestrates (splits tasks + chains the flow); translation quality is driven by the translator Agents
 - Agents communicate automatically through CommHub -- no code required
 
 ## Next steps
