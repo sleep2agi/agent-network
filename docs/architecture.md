@@ -44,16 +44,18 @@ Profile 中通过 `runtime` 字段选择。早期文档里的 `claude-code` / `c
 
 ### 隔离策略
 
-agent-node 启动时使用 `settingSources: []` 隔离 Claude Agent SDK，防止读取用户全局配置：
+agent-node 调 claude-agent-sdk 的 `query()` 时传 `settingSources: []`，隔离 SDK 防止读取用户全局配置（[`agent-node/src/cli.ts:558-598`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L558)）：
 
 ```typescript
-const agent = new Agent({
-  model: profile.model,
+const options = {
+  model: MODEL || undefined,
   settingSources: [],  // 完全隔离，不读 ~/.claude/ 等全局配置
-});
+  // permissionMode / mcpServers / env ...
+};
+for await (const message of query({ prompt, options })) { /* ... */ }
 ```
 
-这确保每个 agent-node 实例独立运行，不受宿主机的 Claude Code 配置影响。
+这确保每个 agent-node 实例独立运行，不受宿主机的 Claude Code 配置影响。注意是给 `query()` 传 options，不是 `new Agent({...})` 类（claude-agent-sdk 的入口是 `query()` 函数）。
 
 ---
 
