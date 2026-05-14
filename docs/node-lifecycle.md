@@ -123,9 +123,10 @@ register() → callCommHub("report_status", {
   resume_id: `sdk-${node_id}`,  // 稳定标识，带前缀兼容现有风格
   alias: node_name,        // 显示名
   status: "idle",
+  server: hostname,
+  hostname: hostname,      // server / hostname 两字段都发，值都是 osHostname()
   agent: `agent-node:${runtime}`,
   project_dir: cwd,
-  server: hostname,
 });
 ```
 
