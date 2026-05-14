@@ -2,11 +2,11 @@
 
 | 字段        | 内容                                   |
 | ----------- | -------------------------------------- |
-| 状态        | **草稿** (issue #14)                    |
+| 状态        | **部分实施** —— P0（`anet channel add telegram`，claude-code-cli runtime）v0.8.2 已 ship；P1-P4 见 §3 分阶段实施，仍 pending (issue #14) |
 | 提出        | 2026-05-12                             |
 | 作者        | 通信龙 (sleep2agi)                      |
 | 拟实施人    | SDK马 / 通信牛                          |
-| 目标版本    | agent-network v2.2+ / agent-node v2.4+ |
+| 目标版本    | P0 已落地 commhub-server v0.8.2；P1-P4 待定（旧的 agent-network v2.2+ 版本号体系已废弃，见 changelog）|
 | 讨论        | [#14](https://github.com/sleep2agi/agent-network/issues/14) |
 
 ## 摘要
@@ -14,7 +14,7 @@
 Vincent 提出：对**已经存在的节点**用 `anet` 命令绑定 Telegram，优先 claude-code-cli runtime / 再 claude-agent-sdk / 再 codex-sdk，形成完整方案。
 
 调研发现：
-- **claude-code-cli runtime 当前已 work** —— `anet channel add telegram <node-id> --bot-token <tok> --allow <user-id>` 命令在 `agent-network/bin/cli.ts:2570` 已实现，启动时 spawn 的 `claude` 进程通过 `--channels plugin:telegram@claude-plugins-official` 加载官方 Channel plugin。
+- **claude-code-cli runtime 当前已 work** —— `anet channel add telegram <node-id> --bot-token <tok> --allow <user-id>` 命令在 `agent-network/bin/cli.ts:2685` 已实现，启动时 spawn 的 `claude` 进程通过 `--channels plugin:telegram@claude-plugins-official` 加载官方 Channel plugin。
 - **claude-agent-sdk + codex-sdk runtime 当前不支持** —— 这两个 runtime 走 SDK 编程式调用（`@anthropic-ai/claude-agent-sdk` `query()` / `@openai/codex-sdk` `thread.run()`），SDK 本身没有 `--channels plugin` 机制，需要在 **agent-node 包装层**加 Telegram bridge worker。
 
 本 RFC 主要给出两件事：（1）当前 CLI 命令保持不变（已 work）；（2）在 agent-node runtime wrapper 里加一个 `telegram-bridge` worker 让 SDK 模式也能接 Telegram。
@@ -34,7 +34,7 @@ anet channel add telegram <node-id>
 anet channel ls [node-id]
 ```
 
-参考实现：[`agent-network/bin/cli.ts:2570-2670`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2570)。
+参考实现：[`agent-network/bin/cli.ts:2685-2788`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2685)。
 
 效果：
 - 在 `.anet/nodes/<node-id>/channels/telegram/` 落两份配置：
@@ -47,7 +47,7 @@ anet channel ls [node-id]
 
 | Runtime | 当前 Telegram 支持 | 注入机制 | 工程位置 |
 |---|---|---|---|
-| `claude-code-cli` | ✅ 已 work | spawn `claude` 时加 `--channels plugin:telegram@claude-plugins-official` + `TELEGRAM_STATE_DIR` env | `cli.ts:1636-1648`（spawn 路径）|
+| `claude-code-cli` | ✅ 已 work | spawn `claude` 时加 `--channels plugin:telegram@claude-plugins-official` + `TELEGRAM_STATE_DIR` env | `cli.ts:1750-1760`（spawn 路径）|
 | `claude-agent-sdk` | ❌ 不支持 | SDK 没暴露 channels 接口 | agent-node wrapper 缺 bridge |
 | `codex-sdk` | ❌ 不支持 | 同上 | agent-node wrapper 缺 bridge |
 
