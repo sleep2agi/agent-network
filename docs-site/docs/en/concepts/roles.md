@@ -10,7 +10,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 |---|---|---|
 | **owner** | Network creator, top of the hierarchy | Manage members + delete network + all admin ops |
 | **admin** | Team lead / trusted operator | Add/remove members + hub settings (Note: `/api/audit-log` / `/api/users` and other admin-only endpoints are gated by **system-level** `users.role='admin'`, **not** by network admin — see [hub-global admin](#hub-global-admin-special) below) |
-| **member** | Regular team engineer | Create / start agents, dispatch tasks, see network data |
+| **member** | Regular team engineer | Create agents, dispatch tasks, see network data (`anet node start/stop/delete` are local ops, not gated by role — see note ※ below) |
 | **viewer** | Intern / auditor / read-only integration | Read only, no writes |
 
 ---

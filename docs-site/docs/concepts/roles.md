@@ -10,7 +10,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 |---|---|---|
 | **owner** | network 创建者 / 唯一最高权 | 能改成员 + 能删 network + 全部 admin 操作 |
 | **admin** | 团队负责人 / 受信运维 | 能加减成员 + 能改 hub 设置（注：`/api/audit-log` / `/api/users` 等 admin-only 端点是**系统级** `users.role='admin'` 限定，**不是** network admin；详见下方 [hub 全局 admin 特殊](#hub-全局-admin-特殊)） |
-| **member** | 普通团队工程师 | 能创建 / 启动 agent + 派 task + 看本网络数据 |
+| **member** | 普通团队工程师 | 能创建 agent + 派 task + 看本网络数据（`anet node start/stop/delete` 是本地操作，不受角色门控 —— 见下方注 ※）|
 | **viewer** | 实习生 / 审计员 / 只读对接 | 只能看，不能写 |
 
 ---
