@@ -5,7 +5,7 @@
 | **RFC 编号** | 010 |
 | **标题** | Node Lifecycle — 节点完整生命周期协议（含 node rename） |
 | **作者** | 通信SDK马 |
-| **状态** | Draft v1（进行中） |
+| **状态** | Draft v1 完整就绪（待 review） |
 | **创建日期** | 2026-05-14 |
 | **关联 issue** | [#80 Node lifecycle umbrella](https://github.com/sleep2agi/agent-network/issues/80) · [#84 node rename](https://github.com/sleep2agi/agent-network/issues/84) |
 | **关联 bug** | [#74 节点删除后 dashboard 残留](https://github.com/sleep2agi/agent-network/issues/74) |
@@ -747,7 +747,138 @@ cycle_detection_R010_§5:
 
 ## §6 实施 Phase ladder
 
-> 🚧 待 R501+ /loop tick 推进
+### 6.1 整体路线
+
+```
+Phase 1 (spec)  ──►  Phase 2 (implement)  ──►  Phase 3 (test)  ──►  Phase 4 (ship)
+  RFC-010 v1         CLI + server + dashboard    11-checklist        preview → latest
+  通信SDK马           工程马 + 通信牛 + N站马       通信测试马           工程马 (release ops)
+  当前 done           ~3-5 天                     ~2-3 天             两阶段 SOP
+```
+
+### 6.2 Phase 1 — Spec 设计（当前 phase）
+
+| 角色 | 职责 |
+|------|------|
+| **通信SDK马** | RFC-010 v1 draft 作者 |
+| **通信牛** | 技术 review — 重点 server-side commhub rename API（§4.2）+ 依赖图（§5.4） |
+| **通信龙** | high-level review + Vincent 沟通 |
+| **Vincent** | final approve |
+
+**Deliverable**：`docs/rfcs/RFC-010-node-lifecycle.md` v1（本文档，§1-§6 完整）
+
+**Exit criteria**：
+- [x] §1-§6 全部 draft 完成
+- [ ] 通信牛技术 review 通过（重点 §4 rename 2PC 的 server-side 可行性）
+- [ ] Vincent OK 进入 Phase 2
+
+### 6.3 Phase 2 — 实施
+
+#### 6.3.1 Ownership 与模块拆分
+
+| 角色 | Surface | 模块 |
+|------|---------|------|
+| **工程马** | CLI | `anet node <verb>` 命令、本地 state.json 2PC、rename.lock、reconciliation |
+| **通信牛** | Server | commhub state-transition API、prepare/commit/abort-rename API、依赖图 + 环检测、SSE broadcast |
+| **N站马** | Dashboard | SSE 消费（11 事件类型）、node.renamed visual 迁移、依赖级联渲染 |
+
+#### 6.3.2 实施顺序（依赖关系）
+
+```
+1. Server: state-transition API + SSE taxonomy (§2 §3)     ← 其他都依赖
+2. CLI: state.json 2PC + reconciliation (§2)               ← 依赖 1
+3. CLI + Server: rename 2PC (§4)                            ← 依赖 1,2
+4. Server: 依赖图 + 级联 + 环检测 (§5.4)                     ← 依赖 1
+5. CLI: error recovery + node recover (§5.1-5.3)            ← 依赖 1,2
+6. Dashboard: SSE 消费 + visual (§3 §4.3 §5.4)              ← 依赖 1,3,4
+7. agent-node: SIGHUP 重读 config.alias (§4.4)              ← 依赖 3
+```
+
+#### 6.3.3 估算
+
+| 模块 | LOC 估算 |
+|------|---------|
+| Server state-transition + SSE + 依赖图 | ~400 LOC |
+| CLI 2PC + reconciliation + rename + recover | ~500 LOC |
+| Dashboard SSE 消费 + visual | ~250 LOC |
+| agent-node SIGHUP 支持 | ~50 LOC |
+| **合计** | **~1200 LOC** |
+
+**Exit criteria**：
+- [ ] 8 操作命令全部可用
+- [ ] rename 2PC 端到端跑通（created/stopped/running 三场景）
+- [ ] #74 bug 修复验证（delete 后 dashboard 不残留）
+- [ ] reconciliation 三 surface 漂移自愈
+- [ ] 通信牛 code review 通过
+
+### 6.4 Phase 3 — 测试（通信测试马，issue #84 11-checklist）
+
+issue #84 已列 11-checklist，本 RFC 补充对应章节：
+
+| # | 测试项 | 对应 RFC 章节 |
+|---|--------|--------------|
+| 1 | 8 操作基础功能 | §1.2 |
+| 2 | 状态机转换完整性（所有合法转换） | §2.2 §2.3 |
+| 3 | 2PC 原子性（PHASE 1 失败回滚 / PHASE 2 forward-fix） | §2.4 §4.5 |
+| 4 | rename — created/stopped 静态场景 | §4.2 |
+| 5 | rename — running active 场景（`--force` + SIGHUP） | §4.4 |
+| 6 | rename — 7 风险点逐一构造触发 | §4.3 |
+| 7 | rename rollback 完整性矩阵（7 失败点） | §4.5 |
+| 8 | SSE event taxonomy（11 事件类型 + 去重 + 重连 replay） | §3 |
+| 9 | #74 回归（delete 后 dashboard 不残留） | §2.6 |
+| 10 | error recovery（6 error_type + recover 命令） | §5.1-5.3 |
+| 11 | inter-node dependency 级联（pause/continue/cascade_stop + 环检测） | §5.4 |
+
+**测试环境**：Docker（per CLAUDE.md 测试规则，不碰生产 hub 47.116.5.73）。
+
+**Exit criteria**：
+- [ ] 11-checklist 全绿
+- [ ] 测试报告 `docs/tests/report-rfc010.txt`
+- [ ] 通信牛 review 测试结果
+
+### 6.5 Phase 4 — Ship
+
+| 步骤 | Owner | 说明 |
+|------|-------|------|
+| preview 发版 | 工程马 | `npm publish --tag preview`（per [[feedback_release_preview_first]]） |
+| Vincent 亲测 | Vincent | preview 上验 rename + lifecycle |
+| latest 发版 | 工程马 | 两阶段 SOP + 30min 等待窗口（per [[feedback_npm_publish_two_phase]]） |
+| issue close | 工程马 | #80 #84 评论结果 + close（per [[feedback_issue_close_protocol]]） |
+
+### 6.6 风险点与 mitigation
+
+| # | 风险 | Mitigation |
+|---|------|-----------|
+| 1 | server-side commhub rename API 工作量大 | Phase 2 实施顺序把 server API 排第 1，先验证可行性；通信牛 Phase 1 review 即评估 |
+| 2 | 2PC 跨进程协调复杂，边界情况多 | rollback 完整性矩阵（§4.5）穷举失败点；Phase 3 测试项 3/7 专测 |
+| 3 | agent-node SIGHUP 改造影响现有 6 个 claude agent | SIGHUP 是新增 handler，不改现有逻辑；agent 不支持 SIGHUP 时降级为「rename 后须手动 restart」 |
+| 4 | reconciliation 周期校验增加 commhub 负载 | 校验间隔可配（默认 30s）；只在节点数 > 阈值时启用增量校验 |
+| 5 | RFC-010 与 batch primitive lifecycle 重叠 | §1.4 已识别；RFC-010 管 single node，batch 管批量；Phase 2 文档明确二者边界 |
+
+### 6.7 Open questions / v2 候选
+
+| # | 问题 | 优先级 |
+|---|------|--------|
+| Q1 | 批量 rename（`anet node rename --pattern 'old-*' --to 'new-*'`） | 低（v2） |
+| Q2 | rename 历史审计的 UI 呈现细节（§4.3 风险 5） | 中（Phase 2 实施时定） |
+| Q3 | 跨 ntok 的 node 迁移（不只是 rename，是换网络） | 低（v2，可能独立 RFC） |
+| Q4 | 依赖图可视化（dashboard 显示 inter-node dependency 图） | 中（v2） |
+| Q5 | error 态的自动 recover 是否默认开启 | 中（Phase 1 review 定） |
+
+### 6.8 §6 小结
+
+4 phase ladder：Phase 1（当前，spec）/ Phase 2（~3-5 天，工程马+通信牛+N站马，~1200 LOC）/ Phase 3（~2-3 天，通信测试马，11-checklist Docker 测试）/ Phase 4（ship，两阶段 SOP）。Phase 2 实施顺序按依赖关系排（server API 第 1）。5 个实施风险点已识别 + mitigation。5 个 open question 留 v2。
+
+### 6.9 全文小结
+
+RFC-010 统一 anet node 的完整 lifecycle 协议，覆盖 8 操作（create/start/stop/restart/delete/**rename**/list/status）。核心设计：
+- **§2 6-state FSM + 2PC 原子转换**：本地 state.json 原子写 + commhub COMMIT + SSE ACK + txn_id 三 surface 关联；#74 bug 在此框架下根因清晰并自然修复。
+- **§3 统一 SSE event taxonomy**：单 channel + 统一 envelope（txn_id 去重 + ntok 多租户）+ 11 事件类型。
+- **§4 node rename（flagship，issue #84）**：rename 专用多 surface 2PC（PHASE 1 全 copy 不动 old → PHASE 2 顺序敏感原子切换）；7 surface 一致更新 + 7 风险点逐一 mitigation；active rename 用 tmux rename-session 不杀进程；rollback 完整性矩阵保证无"两边都坏"。
+- **§5 error recovery + inter-node dependency**：error_type 6 分类 + recover 命令；显式 `config.dependency` 声明 + pause/continue/cascade_stop 级联 + 环检测；RFC-009 social experiment 直接受益。
+- **§6 4-phase ladder**：Phase 1 spec（当前）→ Phase 2 实施（~1200 LOC）→ Phase 3 测试（11-checklist）→ Phase 4 ship。
+
+Vincent 4505 的「出方案 + 不引入新 BUG + 考虑全面 + 充分测试」四要求：方案（§1-§6）/ 不引入新 BUG（2PC + rollback 矩阵 + reconciliation）/ 考虑全面（7 surface + 7 风险 + 6 error_type + 依赖级联）/ 充分测试（§6.4 11-checklist）逐一对应。
 
 ---
 
@@ -763,4 +894,9 @@ cycle_detection_R010_§5:
 
 | 版本 | 日期 | 作者 | 说明 |
 |------|------|------|------|
-| Draft v1 §1 | 2026-05-14 | 通信SDK马 | 初稿 §1（背景 + 8 操作 scope + 现状分析 + rename 难点预览），§2-§6 stub 待续 |
+| Draft v1 §1 | 2026-05-14 | 通信SDK马 | 初稿 §1（背景 + 8 操作 scope + 现状分析 + rename 难点预览） |
+| Draft v1 §2 | 2026-05-14 | 通信SDK马 | §2 Node state machine（6-state FSM + 2PC 原子转换 + reconciliation + #74 修复） |
+| Draft v1 §3 | 2026-05-14 | 通信SDK马 | §3 SSE event taxonomy（统一 envelope + 11 事件类型 + node.renamed 特殊处理） |
+| Draft v1 §4 | 2026-05-14 | 通信SDK马 | §4 Node rename 深挖（flagship，issue #84）：rename 2PC + 7 surface + 7 风险 + rollback 矩阵 |
+| Draft v1 §5 | 2026-05-14 | 通信SDK马 | §5 error recovery（6 error_type）+ inter-node dependency（级联 + 环检测） |
+| Draft v1 §6 | 2026-05-14 | 通信SDK马 | §6 4-phase ladder + 全文小结；**v1 draft 完整就绪，待 通信牛 review** |
