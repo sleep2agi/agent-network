@@ -186,43 +186,34 @@ anet server [--port 9200] [--token xxx] [--db path] [--cors origins]
 
 ### `anet setup`
 
-配置新 Agent 加入网络。
+R511 校准：旧 doc 写「`anet setup --hub --alias --type`，配置新 Agent 加入网络」是 V2 早期签名 —— 当前 `anet setup`（[`cli.ts:556 setupCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L556)）是**交互式 runtime 依赖安装器**，不带参数，也不写网络配置（入网走 `anet node create`）。
 
 ```bash
-anet setup --hub <url> --alias <name> [--type claude-code|sdk]
+anet setup
 ```
 
 **流程**：
-1. 解析参数（CLI > 已有配置 > 默认值）
-2. 写入 `~/.anet/config.json`（hub, token）
-3. 写入 `{cwd}/.anet/config.json`（alias, type）
-4. 测试连接（GET /health）
-5. 根据 type 执行额外配置：
-
-| type | 额外操作 |
-|------|---------|
-| claude-code | 创建 Channel 目录 + .env + 输出启动命令 |
-| sdk | 输出 SDK 代码模板 |
+1. `checkbox` 勾选要用的 runtime：`claude-code-cli` / `codex-sdk` / `claude-agent-sdk`（已就绪的标 ✅）
+2. `confirm` 是否顺带装 CommHub Server（本地开发 / 测试用）
+3. 按勾选项算出缺哪些包（`@anthropic-ai/claude-code` / `@sleep2agi/agent-node` / `@openai/codex` / `@sleep2agi/commhub-server`），列出 `npm install -g` 命令
+4. `confirm` 后执行安装
+5. 验证安装结果，提示 `codex auth login` / `claude auth login`（如选了对应 runtime）
+6. 完成 → 提示下一步 `anet node create <node-name>`
 
 ### `anet run`
 
-运行独立 Agent（SSE 监听 + 自动处理）。
+R511 校准：旧 doc 写的 `[--handler script.ts]` flag + 「handler 协议」是 V2 设计草稿，**当前不存在**。当前 `anet run`（[`cli.ts:2044 runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2044)）是用 Client SDK 起的**极简 standalone SSE agent**：连 hub、监听 task、自动 echo「收到」回复 —— **不跑 LLM**，区别于 `anet node start`（跑真实 AI runtime）。
 
 ```bash
-anet run [--alias name] [--hub url] [--handler script.ts]
+anet run --alias <name> [--hub <url>]
 ```
 
 **流程**：
-1. 读取配置（env > CLI > .anet/config.json > ~/.anet/config.json）
-2. 创建 CommHub 客户端（SSE 长连接）
-3. 自动注册（report_status idle）
-4. 启动心跳（3 分钟）
-5. 监听 SSE 事件 → 拉 inbox → ACK → 处理 → 回复
-6. SIGINT/SIGTERM → 上报 offline → 退出
-
-**handler 协议**：
-- 无 handler：echo 模式（收到什么回什么）
-- 有 handler：`bun <handler> <msg_json>` → stdout 作为回复内容
+1. 读 `--alias`（必需）/ `--hub`（可选，默认 `http://127.0.0.1:9200`）/ `COMMHUB_URL`、`COMMHUB_ALIAS` env
+2. `new CommHub({ url, alias })` 建 SSE 长连接
+3. `on("task")` → 收到任务直接 echo `[alias] 收到: <内容>` 回发起方
+4. `on("connected")` / `on("disconnected")` 打日志（断线自动重连）
+5. SIGINT → `disconnect()` → 退出
 
 ---
 
