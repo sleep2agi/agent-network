@@ -387,7 +387,7 @@ README.md
   },
   "bin": { "anet": "dist/bin/cli.js" },
   "files": ["dist"],
-  "engines": { "bun": ">=1.2.0" },
+  "engines": { "bun": ">=1.2.0", "node": ">=22.13.0" },
   "dependencies": { "@inquirer/prompts": "^8.4.3" }
 }
 ```
