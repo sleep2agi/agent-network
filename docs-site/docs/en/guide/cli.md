@@ -104,7 +104,7 @@ See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> 
 
 | Command | Description |
 |------|------|
-| `anet config` | **Read-only** view of `~/.anet/config.json` (`anet config path` prints the path, `anet config json` prints raw JSON). To modify config, use `anet login` / `anet init` / `anet network use` — there is no `anet config --set`. Verified at [`cli.ts:5519-5548 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5519). |
+| `anet config` | **Read-only** view of `~/.anet/config.json` (`anet config path` prints the path, `anet config json` prints raw JSON). To modify config, use `anet login` / `anet init` / `anet network use` — there is no `anet config --set`. Verified at [`cli.ts:5551-5580 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5551). |
 | `anet upgrade` | Prints an upgrade plan (self-upgrade is disabled by default to avoid replacing the running CLI process mid-run; gives manual steps). Full guide: [Upgrade Guide](/en/guide/upgrade) |
 | `anet create --batch` / `anet batch <verb>` | Spin up N agents in bulk (auto-numbered prefix + separate workdir/config/tmux), then manage their lifecycle with `anet batch list/stop/cleanup/start`. See [Batch Agents](/guide/batch) (currently ZH only) |
 | `anet license` | v0.6 legacy: view trial / license status. **No longer needed after Apache 2.0 OSS**; Hub keeps the `licenses` table + `send_task` 14-day trial check for backward-compat |
