@@ -329,7 +329,9 @@ send_task({
 ```
 
 ::: warning 限制
-只能重试状态为 `failed` / `expired` / `cancelled` 的任务。
+- 只能重试状态为 `failed` / `expired` / `cancelled` 的任务（verify [`tools.ts:711`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L711)），其他状态返回 `{ok: false, error: "task status is <X>, not retryable"}`
+- 重试会**固定**给一个新的 `+1 小时` TTL（[`tools.ts:717`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L717) 硬编码），**不沿用原任务**的 `ttl_seconds`
+- `task_id` 不变；inbox 里会插入一条新 `id` 的 row（新 UUID），并 SSE 推 `new_task` 给目标 alias
 :::
 
 ---

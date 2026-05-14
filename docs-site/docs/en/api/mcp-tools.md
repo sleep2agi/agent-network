@@ -329,7 +329,9 @@ Retry a failed/cancelled/expired task.
 ```
 
 ::: warning Limitation
-Can only retry tasks with status `failed` / `expired` / `cancelled`.
+- Can only retry tasks with status `failed` / `expired` / `cancelled` (verify [`tools.ts:711`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L711)); other statuses return `{ok: false, error: "task status is <X>, not retryable"}`
+- Retry gives the task a **fresh `+1 hour` TTL** (hardcoded at [`tools.ts:717`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L717)) — the original task's `ttl_seconds` is **not preserved**
+- `task_id` is reused; a new inbox row (new UUID) is inserted and a `new_task` SSE event is pushed to the target alias
 :::
 
 ---
