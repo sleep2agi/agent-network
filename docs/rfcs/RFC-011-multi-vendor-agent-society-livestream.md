@@ -5,7 +5,7 @@
 | **RFC 编号** | 011 |
 | **标题** | 多厂商 AI Agent 社会 — 24/7 直播 + 自动导演 + 解说，观察涌现社会行为 |
 | **作者** | 通信SDK马 |
-| **状态** | Draft（骨架 + §1 完成，§2-§6 撰写中） |
+| **状态** | Draft v1 完整就绪（待 review） |
 | **创建日期** | 2026-05-15 |
 | **关联 issue** | [#107](https://github.com/sleep2agi/agent-network/issues/107)（umbrella 愿景，Vincent 4693-4696） |
 | **依赖** | RFC-009 社会学实验 Framework（本 RFC 是其扩展应用） |
@@ -397,16 +397,74 @@ interface HotspotDetectorConfig {
 
 ---
 
-## §5 24/7 稳定性（撰写中）
+## §5 24/7 稳定性
 
-> agent 自愈 / 长跑资源 / livestream infra。关联 #99 守护节点。
+「24/7 直播」对底层提两个要求：节点挂了要能**自愈**，长跑不能**资源泄漏**。本节不重新发明 —— 复用 #99 守护节点，并指出 RFC-011 视角下需要补的点。
+
+### 5.1 节点自愈 — 复用 #99 守护节点
+
+#99（守护节点）已经是「长跑监测」的承载。RFC-011 对它的诉求：
+
+| 诉求 | 设计 |
+|------|------|
+| 检测节点挂掉 | #99 守护节点监测 commhub status；某节点 `error` 持续 / 心跳丢失 → 判定 down |
+| 自动重启 | 复用 `anet batch restart <prefix>` lifecycle（§3.2 多厂商 batch 继承了 batch lifecycle）；守护节点按 cohort 重启挂掉的节点 |
+| 直播不中断 | 节点 down→recover 期间，呈现层照常跑（少一个节点不影响 ticker/解说）；`SocietyEvent` 发 `node_down`/`node_recovered`，解说 agent 可以顺势旁白（「DS3号 掉线了，社会少了一个声音……它回来了」）—— **故障本身变成内容** |
+| 实验一致性 | 节点重启会丢 session 上下文；RFC-009 实验需声明节点重启时的处理（重新入组 / 标记缺席）—— 这是 RFC-009 层的语义，RFC-011 标注依赖，不在此定义 |
+
+> 设计取向：**不追求零故障，追求故障可观察 + 可恢复 + 不中断直播**。24/7 真人秀里，「选手掉线又回归」是叙事的一部分，不是要藏起来的 bug。
+
+### 5.2 长跑资源
+
+| 风险 | 缓解 |
+|------|------|
+| `SocietyEvent` 流无限增长 | 呈现层只持滑动窗口（ticker 50 条 / 检测器 30-60s 窗口 / 解说 digest 用完即弃）；落盘留给指标面板做**降采样**归档，不留全量 |
+| agent session / token 累积 | claude-agent-sdk 节点长跑的 session 上下文增长 —— 复用 RFC-009 实验的 round 边界做 session 重置点；`CLAUDE_TIMEOUT_MS`（#98 timeout guard）防单次卡死 |
+| 多节点内存/句柄 | #104-B batch 已有 count clamp（≤50）+ >20 告警；多厂商社会建议起步 3×3=9 节点（§6 Phase 1），不要一上来 5×5×5 |
+| 解说 agent 自身长跑 | 解说 agent 也是 claude-agent-sdk 节点，同样吃 #98 timeout guard + round 边界重置 |
+
+### 5.3 livestream infra（Phase 4）
+
+接流本身（OBS / 流媒体推送）是**最外层**，不依赖 anet 内部 —— dashboard 渲染出可看的画面后，OBS 抓 dashboard 窗口推流即可。RFC-011 不设计推流细节（那是运营/工具问题），只声明：呈现层（§2）的产出必须是一个**自洽的、不需要人操作的浏览器画面**，这样 OBS 抓屏即可直播。`[N站马 输入]` dashboard 是否需要一个「直播模式」全屏 layout（隐藏控制 UI，只留主画面 + ticker + 解说字幕 + 指标面板）。
+
+### 5.4 §5 小结
+
+自愈复用 #99 守护节点 + batch restart lifecycle；故障可观察（`node_down`/`node_recovered` 进 `SocietyEvent`，解说顺势旁白 —— 故障变内容）。长跑资源靠滑动窗口（呈现层不留全量）+ round 边界 session 重置 + #98 timeout guard。livestream infra 是最外层 OBS 抓屏，RFC 只要求呈现层产出自洽画面。
 
 ---
 
-## §6 实施 Phase ladder（撰写中）
+## §6 实施 Phase ladder
 
-> Phase 0（前提 gate）→ Phase 1（ticker + 3×3 厂商小社会）→ Phase 2（自动导演）
-> → Phase 3（解说 agent + 指标面板）→ Phase 4（24/7 livestream infra）。
+实施严格 gate 在 §1.2 依赖链。Phase 0 不属于本 RFC（是 gate）；Phase 1+ 才是 RFC-011 的实施范围。
+
+| Phase | 内容 | 前置 | 交付 |
+|-------|------|------|------|
+| **Phase 0（gate，非本 RFC）** | #101/#102 真验证通过 + DeepSeek/GLM vendor 验证加回 VENDORS registry | — | agents 能真互动 + 目标厂商可用 |
+| **Phase 1 — 呈现层 MVP + 小社会** | `SocietyEvent` 归一化层 + 活动 ticker（§2.2）+ `MultiVendorBatchSpec`（§3.2）起一个 3×3 厂商小社会跑 RFC-009 实验 | Phase 0 | 能看到「一个跨厂商小社会在动」的最小直播画面 |
+| **Phase 2 — 自动导演** | `HotspotDetector`（§4）+ 自动聚焦（§2.3） | Phase 1 | 镜头会自动怼热点，不用人点 |
+| **Phase 3 — 解说 + 指标** | 解说 agent（§2.4，含 digest 节拍器）+ 指标面板（§2.5，按 vendor 分组） | Phase 2 | 「涌现 AI 社会真人秀」成形 —— 最像「能出的东西」 |
+| **Phase 4 — 24/7 infra** | #99 守护节点自愈接入（§5.1）+ 长跑资源加固（§5.2）+ livestream 模式 layout（§5.3）+ OBS 推流 | Phase 3 | 真正 24/7 跑得住、推得出去 |
+
+### 6.1 phasing 设计理由
+
+- **Phase 1 先 ticker 不先解说**：ticker 是「直播有在动」的最低保证，且验证 `SocietyEvent` 归一化层是否正确 —— 解说和自动导演都建在这条流上，流不对后面全错。
+- **Phase 2 自动导演先于解说**：解说 agent 的 digest 要带 hotspots（§2.4.2），所以热点检测得先有。
+- **Phase 3 才上解说**：解说是中高难度且最出彩，放在 ticker + 自动导演验证过之后，风险最低。
+- **Phase 4 最后**：24/7 infra 是「让前 3 个 phase 跑得久」，没有前 3 个 phase 就没有要 keep alive 的东西。
+- 每个 phase 都是**可独立 demo 的交付**（per [[feedback_demo_quality_over_count.md]] 质量 > 数量）—— Phase 1 就能录一段「小社会在动」的视频。
+
+### 6.2 §6 小结
+
+5 个 phase：Phase 0 是 gate（非本 RFC）；Phase 1 ticker + 3×3 小社会；Phase 2 自动导演；Phase 3 解说 + 指标（成形）；Phase 4 24/7 infra。每 phase 可独立 demo。phasing 顺序由数据流依赖决定（`SocietyEvent` → 热点检测 → 解说）。
+
+---
+
+## 附录 A：本 RFC 的边界声明
+
+- **本 RFC 只出设计，不实施任何代码**（与 RFC-009 / RFC-010 一致）。
+- **实施 gate 在 §1.2 依赖链**：RFC-011 通过 = 设计方向获批，≠ 可以开做。Phase 1 实施触发条件是 Phase 0 解锁。
+- **`[N站马 输入]` 标注的 dashboard 实现细节**需 N站马 确认后才进入实施设计。
+- 本 RFC 在 RFC-009 上**增量**（`CohortSpec` 加 `vendor` 字段），不改 RFC-009 任何现有 API；新增的 `SocietyEvent` / `HotspotEvent` / `MultiVendorBatchSpec` / `CommentatorSpec` 都是呈现/编排层的新抽象，不碰 commhub / agent-node 核心写路径。
 
 ---
 
@@ -417,5 +475,8 @@ interface HotspotDetectorConfig {
 - [x] §2 呈现层设计（`[N站马 输入]` 标注处待 N站马 确认）
 - [x] §3 跨厂商混合 batch 接 RFC-009
 - [x] §4 自动导演 — 热点检测算法
-- [ ] §5 24/7 稳定性
-- [ ] §6 实施 Phase ladder
+- [x] §5 24/7 稳定性
+- [x] §6 实施 Phase ladder
+- [x] 附录 A 边界声明
+
+**Draft v1 完整就绪 — 待 review**（通信龙 high-level · N站马 呈现层 `[N站马 输入]` 处 · Vincent final）
