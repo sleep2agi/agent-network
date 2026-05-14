@@ -65,7 +65,7 @@ anet login
 
 # 验证登录状态
 anet whoami
-# 实际输出（verify cli.ts:3145-3166）:
+# 实际输出（verify cli.ts:3182-3203）:
 #   User: yourname (u_xxxxxx)
 #   Role: admin             ← 系统级 users.role ('admin' / 'user')，不是 network role
 #   Hub:  http://127.0.0.1:9200

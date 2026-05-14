@@ -165,7 +165,7 @@ anet login --hub http://10.0.0.1:9200
 After login, a Token (credential) is saved to `~/.anet/config.json`. You won't need to enter your password again.
 
 ::: info Verify it worked
-After logging in, run `anet whoami`. You should see output like (verified at [`cli.ts:3145-3166 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3145)):
+After logging in, run `anet whoami`. You should see output like (verified at [`cli.ts:3182-3203 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3182)):
 ```
   User: yourname (u_xxxxxx)
   Role: admin             ← System-level users.role ('admin' / 'user'), NOT a network role
