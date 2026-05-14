@@ -142,7 +142,7 @@ anet channel add telegram 指挥室 --bot-token <tok> --allow <user-id>
 anet node start 指挥室
 ```
 
-Agent 收到消息时，通过 `<channel source="...">` 标签区分来源（`commhub` / `telegram` 等），自动使用对应的回复工具。
+Agent 收到消息时，通过 `<channel source="...">` 标签区分来源（`commhub` / `telegram` 等）。**Agent 只需直接生成 reply 文本** —— agent-node 的内部 handler 根据 `source` 自动路由到对应平台（telegram 走 `telegramSend(tg, chatId, text)`，commhub 走 SSE `send_reply`）。Agent 不需要懂 Telegram API / commhub MCP `send_reply` 调用细节（R258 chain 一致）。
 
 ## Channel Plugin 技术实现
 
@@ -164,34 +164,33 @@ Channel 插件是一个 MCP Server（stdio 模式），提供消息接收和回�
 落盘到项目目录的文件是 `.anet/node-server.js`（[`cli.ts:1492 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1492) 自动复制 npm 包 `dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底，但最终落盘统一为 `.js`）。R216/R221 chain 一致。
 :::
 
-Channel 插件同时：
+Channel 插件做的事（v0.8 实际能力）：
 
-1. 维护 SSE 长连接到 CommHub
-2. 监听外部平台消息（Telegram Bot API / WeChat / 飞书）
-3. 将消息注入到 Agent 上下文
-4. 提供回复工具给 Agent 调用
+1. 维护 SSE 长连接到 CommHub（receive new_task / new_message / new_reply / broadcast events）
+2. 监听 Telegram Bot API（webhook / long-polling）—— Telegram 是 v0.8 唯一原生支持的外部 channel
+3. 将消息注入到 Agent 上下文（XML `<channel source="...">` tag）
+4. **agent-node 内部 handler 自动转发** agent reply 到对应平台（commhub 走 `send_reply` MCP；telegram 走 [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L948) helper）
+
+::: warning R258 chain 校准
+原版 mermaid 图画 `AGENT → reply() → TOOLS → TG/WX/FS` —— 实际没有 agent-facing `reply()` / `telegram_reply()` MCP tool 给 agent 调。Agent 只生成 reply 文本，agent-node handler 根据 `source` 自动路由到对应平台。
+:::
 
 ```mermaid
 graph LR
-    subgraph "Channel Plugin (MCP Server)"
-        SSE[SSE 连接<br/>CommHub]
-        TG[Telegram<br/>Bot API]
-        WX[微信<br/>ClawBot]
-        FS[飞书<br/>Open API]
-        INJECT[消息注入]
-        TOOLS[回复工具]
+    subgraph "agent-node process"
+        SSE[SSE 连接<br/>CommHub<br/>recv new_task/new_reply]
+        TG[Telegram<br/>Bot API<br/>recv DM]
+        INJECT[消息注入<br/>XML channel tag]
+        HANDLER[agent-node<br/>internal handler]
     end
 
     SSE --> INJECT
     TG --> INJECT
-    WX --> INJECT
-    FS --> INJECT
 
-    INJECT -->|"<channel>消息</channel>"| AGENT[Agent]
-    AGENT -->|"reply()"| TOOLS
-    TOOLS --> TG
-    TOOLS --> WX
-    TOOLS --> FS
+    INJECT -->|"<channel source=&quot;commhub|telegram&quot;>"| AGENT[Agent LLM<br/>claude-agent-sdk /<br/>codex-sdk]
+    AGENT -->|"reply text<br/>(no MCP tool call)"| HANDLER
+    HANDLER -->|"send_reply MCP"| SSE
+    HANDLER -->|"telegramSend()"| TG
 ```
 
 ## 下一步

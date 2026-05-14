@@ -143,7 +143,7 @@ anet channel add telegram commander --bot-token <tok> --allow <user-id>
 anet node start commander
 ```
 
-When the agent receives a message, it identifies the source via the `<channel source="...">` tag (`commhub` / `telegram` / etc.) and automatically uses the corresponding reply tool.
+When the agent receives a message, it identifies the source via the `<channel source="...">` tag (`commhub` / `telegram` / etc.). **The agent just produces a reply text** — the agent-node's internal handler routes it to the right platform based on `source` (telegram replies go through `telegramSend(tg, chatId, text)`, commhub replies go through SSE `send_reply`). The agent doesn't need to know Telegram API details or the commhub MCP `send_reply` call (aligned with the R258 chain).
 
 ## Channel Plugin Technical Details
 
@@ -165,34 +165,33 @@ A channel plugin is an MCP Server (stdio mode) that provides message receiving a
 The file installed in your project is `.anet/node-server.js` ([`cli.ts:1492 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1492) copies from the npm package — preferring `dist/src/node-server.js`, falling back to `src/node-server.ts` — but the on-disk filename is always `.js`). Aligned with R216/R221 chain.
 :::
 
-The channel plugin simultaneously:
+What the channel plugin actually does (v0.8 capabilities):
 
-1. Maintains an SSE long connection to CommHub
-2. Listens for external platform messages (Telegram Bot API / WeChat / Feishu)
-3. Injects messages into the agent's context
-4. Provides reply tools for the agent to call
+1. Maintains an SSE long connection to CommHub (receives new_task / new_message / new_reply / broadcast events)
+2. Listens to the Telegram Bot API (webhook / long-polling) — Telegram is the only natively supported external channel in v0.8
+3. Injects messages into the agent's context (XML `<channel source="...">` tag)
+4. **The agent-node's internal handler automatically forwards** the agent's reply to the right platform (commhub via the `send_reply` MCP tool; telegram via the [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L948) helper)
+
+::: warning R258 chain calibration
+The original mermaid showed `AGENT → reply() → TOOLS → TG/WX/FS` — but there's no agent-facing `reply()` / `telegram_reply()` MCP tool for the agent to call. The agent only produces reply text; agent-node's handler routes it to the platform based on `source`.
+:::
 
 ```mermaid
 graph LR
-    subgraph "Channel Plugin (MCP Server)"
-        SSE[SSE Connection<br/>CommHub]
-        TG[Telegram<br/>Bot API]
-        WX[WeChat<br/>ClawBot]
-        FS[Feishu<br/>Open API]
-        INJECT[Message Injection]
-        TOOLS[Reply Tools]
+    subgraph "agent-node process"
+        SSE[SSE connection<br/>CommHub<br/>recv new_task/new_reply]
+        TG[Telegram<br/>Bot API<br/>recv DM]
+        INJECT[Message injection<br/>XML channel tag]
+        HANDLER[agent-node<br/>internal handler]
     end
 
     SSE --> INJECT
     TG --> INJECT
-    WX --> INJECT
-    FS --> INJECT
 
-    INJECT -->|"<channel>message</channel>"| AGENT[Agent]
-    AGENT -->|"reply()"| TOOLS
-    TOOLS --> TG
-    TOOLS --> WX
-    TOOLS --> FS
+    INJECT -->|"<channel source=&quot;commhub|telegram&quot;>"| AGENT[Agent LLM<br/>claude-agent-sdk /<br/>codex-sdk]
+    AGENT -->|"reply text<br/>(no MCP tool call)"| HANDLER
+    HANDLER -->|"send_reply MCP"| SSE
+    HANDLER -->|"telegramSend()"| TG
 ```
 
 ## Next steps
