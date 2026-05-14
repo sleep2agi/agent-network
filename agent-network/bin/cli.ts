@@ -10,7 +10,7 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, rmSync, cpSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { spawn, execSync, execFileSync } from "child_process";
@@ -2576,49 +2576,148 @@ anet session <command>
   }
 }
 
+// anet node rename — RFC-010 §4 multi-surface 2PC (issue #84 Phase 2).
+// PHASE 1 (prepare) is fully rollback-safe: copy-not-move + rename.lock +
+// commhub prepared rename_txn row, old node untouched. PHASE 2 (commit) is the
+// non-rollbackable point: commhub routing switch → tmux rename → delete old.
 async function renameCommand() {
   const fromRef = args[1];
   const newName = args[2];
+  const force = args.includes("--force");
   if (!fromRef || !newName) {
     console.log(`
-anet node rename <node-id|node-name> <new-node-name>
+anet node rename <node-id|node-name> <new-node-name> [--force]
+  --force  required to rename a running node (active rename, RFC-010 §4.4)
 `);
     return;
   }
 
+  // ── 4.1 前置校验 ──
   validateNodeName(newName);
   const resolved = resolveNodeRef(fromRef);
   if (!resolved) {
     console.error(`Node "${fromRef}" not found.`);
     process.exit(1);
   }
-
-  const existing = resolveNodeRef(newName);
-  if (existing && existing.id !== resolved.id) {
-    console.error(`Node name "${newName}" already exists.`);
+  const oldId = resolved.id;
+  if (oldId === newName) {
+    console.error(`New name "${newName}" is the same as the current name.`);
+    process.exit(1);
+  }
+  if (resolveNodeRef(newName)) {
+    console.error(`Node name "${newName}" already exists locally.`);
+    process.exit(1);
+  }
+  const oldDir = join(nodesDir(), oldId);
+  const newDir = join(nodesDir(), newName);
+  if (existsSync(newDir)) {
+    console.error(`Target directory already exists: .anet/nodes/${newName}`);
+    process.exit(1);
+  }
+  const lockPath = join(oldDir, "rename.lock");
+  if (existsSync(lockPath)) {
+    console.error(`Node "${oldId}" has an in-flight rename (.anet/nodes/${oldId}/rename.lock). Resolve it first.`);
+    process.exit(1);
+  }
+  // state check: running node needs --force (RFC-010 §4.4 active rename)
+  const pidFile = join(oldDir, ".pid");
+  let running = false;
+  if (existsSync(pidFile)) {
+    const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
+    if (!isNaN(pid)) { try { process.kill(pid, 0); running = true; } catch {} }
+  }
+  if (running && !force) {
+    console.error(`Node "${oldId}" is running. Use --force to rename a running node (active rename, RFC-010 §4.4).`);
     process.exit(1);
   }
 
-  const oldId = resolved.id;
+  const gc = loadGlobal();
+  const hub = resolved.profile.hub || gc.hub;
+  const token = resolved.profile.token || gc.token;
+  const networkId = resolved.profile.network_id || gc.network_id;
+  if (!hub || !token || !networkId) {
+    console.error(`[anet] rename needs hub + token + network_id — run 'anet login' first.`);
+    process.exit(1);
+  }
   const stored = loadStoredProfile(oldId) || resolved.profile;
-  stored.node_name = newName;
-  stored.alias = newName;
-  await ensureNodeToken(stored, oldId);
 
-  const oldDir = join(nodesDir(), oldId);
-  const newDir = join(nodesDir(), newName);
-  if (oldId !== newName) {
-    if (existsSync(newDir)) {
-      console.error(`Target directory already exists: .anet/nodes/${newName}`);
-      process.exit(1);
+  // ── PHASE 1: PREPARE (copy/prepare, old node untouched — fully rollbackable) ──
+  writeFileSync(lockPath, JSON.stringify({ old: oldId, new: newName, phase: "prepare", ts: Date.now() }) + "\n");
+  let txnId = "";
+  try {
+    // P2: copy (not move) old → new + update config.alias
+    cpSync(oldDir, newDir, { recursive: true });
+    const newLock = join(newDir, "rename.lock");
+    if (existsSync(newLock)) rmSync(newLock, { force: true });  // lock belongs to oldDir only
+    const newProfile = loadStoredProfile(newName) || { ...stored };
+    newProfile.node_name = newName;
+    newProfile.alias = newName;
+    saveProfile(newName, newProfile);
+    // P3: commhub prepare-rename
+    const prep = await fetch(`${hub}/api/node-rename/prepare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ network_id: networkId, old_alias: oldId, new_alias: newName }),
+    }).then(r => r.json() as any);
+    if (!prep.ok) throw new Error(`commhub prepare-rename: ${prep.error}`);
+    txnId = prep.txn_id;
+  } catch (e: any) {
+    // ── PHASE 1 失败回滚: old 原封不动 ──
+    console.error(`[anet] rename PHASE 1 failed: ${e.message} — rolling back`);
+    if (existsSync(newDir)) rmSync(newDir, { recursive: true, force: true });
+    if (txnId) {
+      await fetch(`${hub}/api/node-rename/abort`, {
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(token) },
+        body: JSON.stringify({ txn_id: txnId }),
+      }).catch(() => {});
     }
-    renameSync(oldDir, newDir);
+    if (existsSync(lockPath)) rmSync(lockPath, { force: true });
+    console.error(`[anet] rollback complete — "${oldId}" unchanged.`);
+    process.exit(1);
   }
 
-  saveProfile(newName, stored);
+  // ── PHASE 2: COMMIT (顺序敏感: commhub 路由 → tmux → 删 old) ──
+  // C1: commhub commit-rename — C1 之前仍可回滚, C1 之后转 forward-fix
+  const commit = await fetch(`${hub}/api/node-rename/commit`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ txn_id: txnId }),
+  }).then(r => r.json() as any).catch((e: any) => ({ ok: false, error: String(e?.message || e) }));
+  if (!commit.ok) {
+    // C1 失败: commhub 路由未切, 仍可干净回滚
+    console.error(`[anet] rename PHASE 2 C1 (commhub commit) failed: ${commit.error} — rolling back`);
+    if (existsSync(newDir)) rmSync(newDir, { recursive: true, force: true });
+    await fetch(`${hub}/api/node-rename/abort`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ txn_id: txnId }),
+    }).catch(() => {});
+    if (existsSync(lockPath)) rmSync(lockPath, { force: true });
+    console.error(`[anet] rollback complete — "${oldId}" unchanged.`);
+    process.exit(1);
+  }
+
+  // C2: tmux rename-session (running node) — 不杀进程; 失败转 forward-fix 不回滚
+  if (running) {
+    try {
+      execSync(`tmux rename-session -t ${JSON.stringify(oldId)} ${JSON.stringify(newName)}`, { stdio: "pipe" });
+    } catch {
+      console.warn(`[anet] ⚠ tmux rename-session failed — rename is committed; tmux session may still show "${oldId}" (reconciliation/manual fix).`);
+    }
+  }
+
+  // C3: 原子切换本地 — 删 old 目录 (含其中 rename.lock)
+  try {
+    rmSync(oldDir, { recursive: true, force: true });
+  } catch (e: any) {
+    console.warn(`[anet] ⚠ failed to remove old config dir .anet/nodes/${oldId}: ${e?.message || e} — rename is committed; clean up the stale dir manually.`);
+  }
   writeLegacyProjectAlias(newName);
-  console.log(`[anet] Renamed node "${oldId}" -> "${newName}"`);
-  console.log(`[anet] node_id: ${stored.node_id}`);
+
+  console.log(`[anet] ✅ Renamed node "${oldId}" → "${newName}" (txn ${txnId})`);
+  console.log(`[anet] node_id: ${stored.node_id} — unchanged (only the alias changed; ntok_ token still valid).`);
+  if (running) {
+    console.log(`[anet] node was running — tmux session renamed, agent process NOT restarted.`);
+    console.log(`[anet] ⚠ the agent may still report the old alias until it re-reads config (RFC-010 §4.4: SIGHUP / per-turn reload — agent-node side).`);
+  }
 }
 
 // ── notify server ──
