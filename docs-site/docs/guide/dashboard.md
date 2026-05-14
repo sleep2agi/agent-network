@@ -239,10 +239,11 @@ vercel deploy --prebuilt --prod
 
 ## 实时更新机制
 
-Dashboard 通过两类数据面保持更新：
+Dashboard 通过三类数据面保持更新：
 
 1. **REST 查询**：拉取 `/api/status`、`/api/tasks`、`/api/messages` 等状态
-2. **Agent SSE**：Agent 订阅 `/events/:alias`，新任务到达后更新 Hub 数据，再被 Dashboard 读取
+2. **Dashboard 自身 SSE**：Dashboard 用登录 username 订阅 `/events/<username>` user channel，直接收 server 推的事件（如 RFC-010 的 `node.renamed`，#84 SSE channel fix —— 详见 [REST API SSE 端点](/api/rest#sse-端点)）
+3. **Agent SSE**：Agent 用自己的 node alias 订阅 `/events/<alias>`，新任务到达后更新 Hub 数据，再被 Dashboard 读取
 
 ::: tip 性能提示
 如果 Agent 数量超过 50，建议使用独立 Dashboard 并关闭实时消息流，改为手动刷新。
