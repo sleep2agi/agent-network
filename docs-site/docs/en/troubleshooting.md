@@ -221,7 +221,7 @@ anet passwd                    # rotate to a strong password
 The first `anet hub start` created admin, but a second start still prints `Admin account created`?
 
 ::: tip Bootstrap is **non-interactive** — there is no "Set up admin account" prompt
-Verified at [`agent-network/bin/cli.ts:2132-2178`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2132): `anet hub start` simply POSTs `/api/auth/register` with username=`admin` and password=`anethub` (unless overridden by `--username` / `--password`). **No interactive prompt is involved**, so the older "repeating prompt" framing in this doc is stale and has been removed.
+Verified at [`agent-network/bin/cli.ts:2192-2233`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2192): `anet hub start` simply POSTs `/api/auth/register` with username=`admin` and password=`anethub` (unless overridden by `--username` / `--password`). **No interactive prompt is involved**, so the older "repeating prompt" framing in this doc is stale and has been removed.
 
 Idempotency is driven by `~/.anet/server/admin-utok.json` as a marker — if it exists, the register flow is skipped (output: `✅ Admin already exists`). If it's missing, the register call re-runs; if the user row already exists, the hub returns `username already taken` and the CLI prints `ℹ Admin account "admin" already exists` (no duplicate is created).
 :::
@@ -461,7 +461,7 @@ anet network delete <old-net>
 Node "coder-1" already exists: .anet/nodes/coder-1/config.json
 ```
 
-Verified at [`agent-network/bin/cli.ts:1121`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1121) + [`agent-network/bin/cli.ts:1283`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1283): both the interactive and non-interactive paths of `anet node create` call `resolveNodeRef(id)` to check whether `.anet/nodes/<alias>/config.json` already exists; if so, they `process.exit(1)` without ever contacting the hub.
+Verified at [`agent-network/bin/cli.ts:1316`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1316) + [`agent-network/bin/cli.ts:1407`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1407): both the interactive and non-interactive paths of `anet node create` call `resolveNodeRef(id)` to check whether `.anet/nodes/<alias>/config.json` already exists; if so, they `process.exit(1)` without ever contacting the hub.
 
 **Cause**: a subdirectory with the same alias already exists under `.anet/nodes/` in the current project directory. This is a **local filesystem collision** — it has nothing to do with the hub-side session state.
 

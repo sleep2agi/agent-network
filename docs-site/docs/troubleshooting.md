@@ -220,7 +220,7 @@ anet passwd                    # 改成强密码
 第一次 `anet hub start` 已经建了 admin，再启动还输出 `Admin account created`？
 
 ::: tip bootstrap 是**非交互**的，没有 "Set up admin account" prompt
-verify [`agent-network/bin/cli.ts:2132-2178`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2132)：`anet hub start` 默认直接 POST `/api/auth/register` username=`admin` password=`anethub`（除非传 `--username` / `--password`）。**没有任何交互 prompt**，所以「反复 prompt」描述是旧 doc，已删。
+verify [`agent-network/bin/cli.ts:2192-2233`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2192)：`anet hub start` 默认直接 POST `/api/auth/register` username=`admin` password=`anethub`（除非传 `--username` / `--password`）。**没有任何交互 prompt**，所以「反复 prompt」描述是旧 doc，已删。
 
 幂等性靠 `~/.anet/server/admin-utok.json` 作 marker —— 文件在就跳过 register flow（输出 `✅ Admin already exists`），文件丢了就再跑 register（hub 端会因 `username already taken` 而返 `ℹ Admin account "admin" already exists`，不会重建）。
 :::
@@ -460,7 +460,7 @@ anet network delete <old-net>
 Node "代码1号" already exists: .anet/nodes/代码1号/config.json
 ```
 
-verify [`agent-network/bin/cli.ts:1121`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1121) + [`agent-network/bin/cli.ts:1283`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1283)：`anet node create` 在交互式 / 非交互式两条路径都用 `resolveNodeRef(id)` 检查本地 `.anet/nodes/<alias>/config.json` 是否已存在；命中就直接 `process.exit(1)` 不连 hub。
+verify [`agent-network/bin/cli.ts:1316`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1316) + [`agent-network/bin/cli.ts:1407`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1407)：`anet node create` 在交互式 / 非交互式两条路径都用 `resolveNodeRef(id)` 检查本地 `.anet/nodes/<alias>/config.json` 是否已存在；命中就直接 `process.exit(1)` 不连 hub。
 
 **原因**：当前项目目录 `.anet/nodes/` 下已有同名 node config 子目录。这是**本地文件冲突**，跟 hub 端 session 状态无关。
 
