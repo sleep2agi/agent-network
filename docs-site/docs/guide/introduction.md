@@ -152,7 +152,7 @@ Dashboard 实时展示谁在干什么、通信连线、任务进度 -- 像作战
 
 - **Server**: Bun + SQLite WAL + MCP SDK
 - **Agent**: 3 种 Runtime —— `claude-code-cli` / `claude-agent-sdk` / `codex-sdk`
-- **CLI**: TypeScript + Commander.js
+- **CLI**: TypeScript（手写命令分发 + `@inquirer/prompts` 交互式向导，无 Commander 等框架）
 - **Dashboard**: Next.js 16 + Vercel
 - **协议**: MCP Streamable HTTP + SSE + REST
 
