@@ -64,15 +64,23 @@ DNS your hostname to the box and Caddy will fetch a Let's Encrypt cert automatic
 
 Keep the security group / firewall locked down to **22(SSH) + 80 + 443**. Don't open 9200 / 3000 to the world — Caddy proxies them through 443.
 
-### 5. Disable the tmux control plane (recommended)
+### 5. Verify the tmux control plane is off
 
-If you don't need the dashboard's terminal feature:
+**Since v0.8, the tmux control plane is disabled by default.** Verified at [`server/src/index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13): `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` — **only an explicit `=1` enables it**; `=0` / `=true` / unset all leave it off.
+
+So as long as you do **not** actively set `COMMHUB_ENABLE_TMUX=1`, it's already off:
 
 ```bash
-COMMHUB_ENABLE_TMUX=0 anet hub start --host 0.0.0.0
+# Default (off, no env needed)
+anet hub start --host 0.0.0.0
+
+# Verify by checking the startup banner after the hub boots:
+# Tmux: DISABLED (set COMMHUB_ENABLE_TMUX=1)   ← expected
 ```
 
-(As of v0.8, tmux is off by default — set `COMMHUB_ENABLE_TMUX=1` to opt in.)
+::: warning Drop `COMMHUB_ENABLE_TMUX=1` from legacy scripts
+v0.7 / V2-era deployment scripts often passed `COMMHUB_ENABLE_TMUX=1` (when it was the default). On a public deployment that leaves tmux HTTP/WS endpoints exposed — even with admin auth + an IP allowlist, that's an unnecessary attack surface. **Confirm any `--host 0.0.0.0` hub does not set `COMMHUB_ENABLE_TMUX=1` in env / systemd unit / docker-compose** (the startup banner should show `Tmux: DISABLED`).
+:::
 
 ### 6. Back up the SQLite database
 

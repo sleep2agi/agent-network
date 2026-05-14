@@ -77,15 +77,23 @@ DNS 解析到你的服务器 IP，Caddy 会自动签发 Let's Encrypt 证书。
 
 让安全组**只放 22(SSH) + 80 + 443**。9200 / 3000 不要开放给公网。Caddy 在 80/443 反代过去。
 
-### 5. 关闭 tmux 控制面（强烈建议）
+### 5. 确认 tmux 控制面已关闭
 
-如果你不需要 dashboard 的 tmux 终端功能，启动 hub 时设：
+**v0.8 起 tmux 控制面默认关闭**，verify [`server/src/index.ts:13`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L13) `TMUX_ENABLED = process.env.COMMHUB_ENABLE_TMUX === "1"` —— **只有显式 `=1` 才开启**，`=0` / `=true` / 不设 都是关。
+
+所以你只要**不主动设** `COMMHUB_ENABLE_TMUX=1`，就已经是关闭状态：
 
 ```bash
-COMMHUB_ENABLE_TMUX=0 anet hub start --host 0.0.0.0
+# 默认（关闭，无需任何 env）
+anet hub start --host 0.0.0.0
+
+# 验证：跑 hub 后看启动 banner 输出
+# Tmux: DISABLED (set COMMHUB_ENABLE_TMUX=1)   ← 默认应该这样
 ```
 
-（v0.8 起默认关闭，需要显式 `COMMHUB_ENABLE_TMUX=1` 才打开）
+::: warning 历史脚本里如果带 `COMMHUB_ENABLE_TMUX=1`，删掉
+v0.7 / V2 时代的部署脚本经常带 `COMMHUB_ENABLE_TMUX=1`（当时默认开启），公网部署生效后等于把 tmux HTTP/WS 端点暴露 —— 即使有 admin auth + IP allowlist，多一层 attack surface 不必要。**确认 `--host 0.0.0.0` 公网部署的 hub 没在 env / systemd unit / docker-compose 里设 `COMMHUB_ENABLE_TMUX=1`**（启动 banner 应显示 `Tmux: DISABLED`）。
+:::
 
 ### 6. 备份 SQLite 数据
 
