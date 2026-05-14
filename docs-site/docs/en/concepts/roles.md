@@ -177,7 +177,7 @@ Full endpoint docs: [PUT members](/en/api/rest#put-api-networks-id-members-user-
 ## FAQ
 
 **Q: After `anet login`, what role do I have?**
-A: `anet whoami`'s `Role:` field is the **system-level role** (`users.role` — either `admin` or `user`), **not the per-network role** (verified at [`agent-network/bin/cli.ts:3127-3148 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3127)):
+A: `anet whoami`'s `Role:` field is the **system-level role** (`users.role` — either `admin` or `user`), **not the per-network role** (verified at [`agent-network/bin/cli.ts:3120-3141 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3120)):
 
 ```
   User: admin (u_xxxxxx)

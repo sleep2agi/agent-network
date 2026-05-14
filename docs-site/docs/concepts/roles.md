@@ -214,7 +214,7 @@ curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
 ## FAQ
 
 **Q：我 `anet login` 后是什么 role？**
-A：`anet whoami` 输出的 `Role:` 是**系统级 role**（`users.role` —— `admin` 或 `user`），**不是 per-network role**（verify [`agent-network/bin/cli.ts:3127-3148 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3127)）：
+A：`anet whoami` 输出的 `Role:` 是**系统级 role**（`users.role` —— `admin` 或 `user`），**不是 per-network role**（verify [`agent-network/bin/cli.ts:3120-3141 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3120)）：
 ```
   User: admin (u_xxxxxx)
   Role: admin              ← users.role 系统级（'admin' / 'user'），不是 network role
