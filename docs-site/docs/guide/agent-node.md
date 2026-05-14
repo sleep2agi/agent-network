@@ -308,7 +308,7 @@ R243 校准：`--tools` flag 只控制 `claude-agent-sdk` runtime —— `codex-
 | `WebSearch` | 网页搜索 | `claude-agent-sdk` |
 | `WebFetch` | 抓取网页内容 | `claude-agent-sdk` |
 
-verify [`agent-node/src/cli.ts:161`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L161):
+verify [`agent-node/src/cli.ts:160`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L160):
 ```ts
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
 // ... cli.ts:560: tools: TOOLS.length ? TOOLS : undefined  ← 传给 claude-agent-sdk query options

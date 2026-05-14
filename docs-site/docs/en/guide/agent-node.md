@@ -308,7 +308,7 @@ R243 calibration: the `--tools` flag only affects the `claude-agent-sdk` runtime
 | `WebSearch` | Web search | `claude-agent-sdk` |
 | `WebFetch` | Fetch URL contents | `claude-agent-sdk` |
 
-Verified at [`agent-node/src/cli.ts:161`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L161):
+Verified at [`agent-node/src/cli.ts:160`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L160):
 ```ts
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
 // ... cli.ts:560: tools: TOOLS.length ? TOOLS : undefined  ← passed to claude-agent-sdk query options
