@@ -1202,6 +1202,26 @@ function resolveVendorSelection(vendorKey: string, modelOverride?: string): Vend
   };
 }
 
+// Resolve a model id back to its vendor. Used by the --preset flag back-compat
+// path (B2.3): the old --preset values were model ids (intern-s1-pro,
+// MiniMax-M2.7, mimo-v2.5-pro, claude-sonnet-4-6, ...), not vendor keys.
+function findVendorByModel(modelId: string): VendorSelection | null {
+  for (const vendor of VENDORS) {
+    if (vendor.models.some(m => m.id === modelId)) {
+      return {
+        vendorKey: vendor.key,
+        runtime: vendor.runtime,
+        model: modelId,
+        baseUrl: vendor.baseUrl,
+        envKey: vendor.envKey,
+        signupUrl: vendor.signupUrl,
+        requiresAuth: vendor.requiresAuth,
+      };
+    }
+  }
+  return null;
+}
+
 // Unified vendor-first interactive selection (issue #104-B): pick vendor →
 // pick that vendor's model → runtime + baseUrl resolved from the registry.
 // All three create flows migrate to this in B2. Returns null when the
@@ -5464,28 +5484,40 @@ async function createBatchWizardCommand() {
     return;
   }
 
-  // 1. Preset
-  let presetKey = opts.preset || "";
-  if (!presetKey) {
-    presetKey = await askChoice("Model preset", BATCH_PRESETS.map(p => ({ label: p.label, value: p.value })));
-  }
-  const preset = BATCH_PRESETS.find(p => p.value === presetKey);
-  if (!preset) {
-    closeRL();
-    console.error(`[anet] Unknown preset: ${presetKey}. Use --help to see verified list.`);
-    return;
-  }
-
-  let runtime = preset.runtime;
-  let model = preset.model;
-  let baseUrl = preset.baseUrl;
-  if (preset.value === "__custom__") {
+  // 1. Vendor + model (vendor-first, #104-B B2.3)
+  //
+  // --preset back-compat (通信龙 decision): old --preset values are model ids
+  // (intern-s1-pro / MiniMax-M2.7 / mimo-v2.5-pro / claude-sonnet-4-6 / ...) or
+  // "__custom__". findVendorByModel maps a model id → its vendor;
+  // resolveVendorSelection covers the case where someone passes a vendor key.
+  let runtime: string;
+  let model: string | undefined;
+  let baseUrl: string | undefined;
+  let presetLabel: string;
+  if (opts.preset === "__custom__") {
     const customRuntime = await ask("Runtime (claude-agent-sdk / codex-sdk / claude-code-cli)", "claude-agent-sdk");
     runtime = normalizeRuntime(customRuntime);
-    const customBase = await ask("ANTHROPIC_BASE_URL (空白=Anthropic default)", "");
-    if (customBase) baseUrl = customBase;
-    const customModel = await ask("Model id", "");
-    if (customModel) model = customModel;
+    baseUrl = (await ask("ANTHROPIC_BASE_URL (空白=Anthropic default)", "")) || undefined;
+    model = (await ask("Model id", "")) || undefined;
+    presetLabel = `custom (${runtime}${model ? " + " + model : ""})`;
+  } else if (opts.preset) {
+    const sel = findVendorByModel(opts.preset) || resolveVendorSelection(opts.preset);
+    if (!sel) {
+      closeRL();
+      console.error(`[anet] Unknown --preset: ${opts.preset}. 见 --help 的 vendor / model 列表。`);
+      return;
+    }
+    runtime = sel.runtime; model = sel.model; baseUrl = sel.baseUrl;
+    presetLabel = `${sel.vendorKey}${model ? " + " + model : ""}`;
+  } else {
+    const sel = await selectVendorAndModel();
+    if (!sel) {
+      closeRL();
+      console.error(`[anet] vendor selector 不可用（非交互终端？用 --preset <model-id> 指定）。`);
+      return;
+    }
+    runtime = sel.runtime; model = sel.model; baseUrl = sel.baseUrl;
+    presetLabel = `${sel.vendorKey}${model ? " + " + model : ""}`;
   }
 
   // 2. API key
@@ -5549,7 +5581,7 @@ async function createBatchWizardCommand() {
   }
 
   console.log(`\n[anet] Creating batch '${prefix}' × ${count} in ${workdir}/...`);
-  console.log(`        Preset:        ${preset.label}`);
+  console.log(`        Preset:        ${presetLabel}`);
   console.log(`        Workdir mode:  ${workdirMode}`);
   if (leaderAlias) console.log(`        Leader alias:  ${leaderAlias}`);
   console.log();
