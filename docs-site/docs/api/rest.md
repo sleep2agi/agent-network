@@ -775,9 +775,10 @@ curl "http://localhost:9200/api/task_events?task_id=t_a1b2c3d4" \
 | 参数 | 说明 |
 |------|------|
 | `task_id` | 按特定 task 过滤（不传则返回最近所有 task 的事件） |
+| `network_id` | 按网络过滤（绑了 `ntok_` 时此参数被强制覆盖为 token 自带的 network）|
 | `limit` | 最大条数（默认 50，最大 500） |
 
-> 网络过滤是**自动**的 —— handler 用 `addNetworkScope` 按调用 token 的 network scope 过滤，**没有 `network_id` 查询参数**（verify [`index.ts:1045-1056`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1045) 只读 `task_id` / `limit`）。
+> `network_id` 不在 task_events handler 本体里读，而是所有 REST 端点统一走 [`resolveRestNetworkScope` (index.ts:188-206)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L188)：`utok_` 调用可传 `network_id` 指定网络（校验 membership），`ntok_` 调用强制锁到 token 绑定的 network，system admin 可查任意网络。
 
 **响应**：
 

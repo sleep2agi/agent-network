@@ -775,9 +775,10 @@ curl "http://localhost:9200/api/task_events?task_id=t_a1b2c3d4" \
 | Parameter | Description |
 |------|------|
 | `task_id` | Filter to a specific task (otherwise returns recent events across all tasks) |
+| `network_id` | Filter by network (when an `ntok_` is bound, this parameter is overridden by the token's network) |
 | `limit` | Max items (default 50, max 500) |
 
-> Network filtering is **automatic** — the handler uses `addNetworkScope` to filter by the calling token's network scope; there is **no `network_id` query parameter** (verify [`index.ts:1045-1056`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1045) — only `task_id` / `limit` are read).
+> `network_id` isn't read inside the task_events handler itself — every REST endpoint goes through [`resolveRestNetworkScope` (index.ts:188-206)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L188): a `utok_` caller may pass `network_id` to target a network (membership is verified), an `ntok_` caller is forcibly scoped to the token's bound network, and a system admin may inspect any network.
 
 **Response**:
 
