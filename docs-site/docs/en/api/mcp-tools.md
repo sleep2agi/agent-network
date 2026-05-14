@@ -38,7 +38,7 @@ Report agent status. Also serves as a heartbeat (recommended every 3 minutes).
 | `project_dir` | string | | Working directory |
 | `version` | string | | Agent version |
 | `tmux_name` | string | | tmux session name |
-| `node_id` | string | | Stable node identifier. **Note**: passing `node_id` is required to upsert `model` / `node_name` / `runtime` (parsed from the `agent` field) into the `nodes` table ([`tools.ts:167-188`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L167)); without `node_id` the `model` / `node_name` parameters **are not stored** (the `sessions` table has no `model` / `node_name` columns). |
+| `node_id` | string | | Stable node identifier. **Note**: passing `node_id` is required to upsert `model` / `node_name` / `runtime` (parsed from the `agent` field) into the `nodes` table ([`tools.ts:168-188`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L168)). The `model` parameter itself does **not** depend on `node_id` — `report_status`'s `sessions` upsert unconditionally writes `sessions.model = COALESCE(model, old)` ([`tools.ts:129` INSERT + `tools.ts:141` ON CONFLICT](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L129)); only `node_name` has no `sessions` column and must go through the `nodes` table via `node_id`. |
 | `session_id` | string | | Runtime session/thread ID |
 | `config_path` | string | | Config file path |
 | `channels` | string | | Channel list (JSON array string) |
@@ -555,7 +555,7 @@ Get all session statuses. Sessions without a heartbeat for over 10 minutes are a
 ```
 
 ::: warning The `sessions` row has **no `model` field**
-`get_all_status` runs `SELECT * FROM sessions` ([`tools.ts:388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L388), no JOIN). The `sessions` table schema ([`db.ts:7-26`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L7) + V2 migration [`db.ts:58-67`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L58)) has **no `model` column** — `model` lives only in the `nodes` table (R281 chain calibrated that `report_status`'s `model` parameter only writes to `nodes.model` when `node_id` is also passed). To look up an agent's model, use REST [`GET /api/nodes`](/en/api/rest#get-api-nodes) or grab `node_id` from [`get_session_status`](#get_session_status) and query the nodes table. `summary` is the status-grouped count over the entire scope (same as `list_tasks`'s `stats`).
+`get_all_status` runs `SELECT * FROM sessions` ([`tools.ts:388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L388), no JOIN). The `sessions` table schema ([`db.ts:7-26`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L7) + V2 migration [`db.ts:59-68`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L59)) **has a `model` column** — the V2 migration runs `ALTER TABLE sessions ADD COLUMN model`, and `report_status`'s `sessions` upsert unconditionally writes `sessions.model = COALESCE(model, old)` ([`tools.ts:129`/`141`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L129)). So `get_all_status` returns each session's `model` directly (`null` if the agent never passed a `model` parameter). The `nodes` table also keeps a copy of `model` (synced by `report_status` when `node_id` is passed) as the more durable source. `summary` is the status-grouped count over the entire scope (same as `list_tasks`'s `stats`).
 :::
 
 ---
@@ -600,7 +600,7 @@ Get detailed status of a single session, including pending inbox count and recen
 ```
 
 ::: tip Response shape
-- `session` is `SELECT * FROM sessions` ([`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)) — the full sessions row (same as [`get_all_status`](#get_all_status)'s session row, **no `model` column**); if the alias doesn't exist `session` is `null` but `ok` is still `true`
+- `session` is `SELECT * FROM sessions` ([`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)) — the full sessions row (same as [`get_all_status`](#get_all_status)'s session row, **including the `model` column** — see the get_all_status note); if the alias doesn't exist `session` is `null` but `ok` is still `true`
 - `recent_completions` is `SELECT * FROM completions ... LIMIT 5` ([`tools.ts:433-435`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L433)) — the full 9-column completion row (`id` / `session_name` / `task` / `result` / `artifacts` / `score` / `duration_minutes` / `network_id` / `completed_at`), ordered by `completed_at` DESC, max 5
 :::
 

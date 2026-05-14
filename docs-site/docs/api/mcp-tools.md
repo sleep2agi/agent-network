@@ -38,7 +38,7 @@ CommHub Server 提供 17 个 MCP Tools，通过 `POST /mcp`（Streamable HTTP）
 | `project_dir` | string | | 工作目录 |
 | `version` | string | | Agent 版本 |
 | `tmux_name` | string | | tmux session 名 |
-| `node_id` | string | | 节点稳定标识。**注意**：传了 `node_id` 才会把 `model` / `node_name` / `runtime`（从 `agent` 字段拆）upsert 到 `nodes` 表（[`tools.ts:167-188`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L167)）；不传 `node_id` 时 `model` / `node_name` 这两个 param **不会落库**（`sessions` 表没有 `model` / `node_name` 列） |
+| `node_id` | string | | 节点稳定标识。**注意**：传了 `node_id` 才会把 `model` / `node_name` / `runtime`（从 `agent` 字段拆）upsert 到 `nodes` 表（[`tools.ts:168-188`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L168)）。`model` 参数本身**不依赖 `node_id`** —— `report_status` 的 `sessions` upsert 无条件写 `sessions.model = COALESCE(model, 旧值)`（[`tools.ts:129` INSERT + `tools.ts:141` ON CONFLICT](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L129)）；只有 `node_name` 没有 `sessions` 列、必须靠 `node_id` 走 `nodes` 表 |
 | `session_id` | string | | 运行时 session/thread ID |
 | `config_path` | string | | 配置文件路径 |
 | `channels` | string | | Channel 列表（JSON 数组字符串） |
@@ -555,7 +555,7 @@ send_task({
 ```
 
 ::: warning `sessions` 行**没有** `model` 字段
-`get_all_status` 走 `SELECT * FROM sessions`（[`tools.ts:388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L388)，无 JOIN）。`sessions` 表 schema（[`db.ts:7-26`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L7) + V2 migration [`db.ts:58-67`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L58)）**没有 `model` 列** —— `model` 只存在 `nodes` 表（R281 chain 已校准 `report_status` 的 `model` 参数只在传 `node_id` 时写 `nodes.model`）。要查 agent 的 model，用 REST [`GET /api/nodes`](/api/rest#get-api-nodes) 或 [`get_session_status`](#get_session_status) 拿 `node_id` 再查 nodes 表。`summary` 是按 status 分组的全 scope 计数（同 `list_tasks` 的 `stats`）。
+`get_all_status` 走 `SELECT * FROM sessions`（[`tools.ts:388`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L388)，无 JOIN）。`sessions` 表 schema（[`db.ts:7-26`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L7) + V2 migration [`db.ts:59-68`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L59)）**有 `model` 列** —— V2 migration `ALTER TABLE sessions ADD COLUMN model`，且 `report_status` 的 `sessions` upsert 无条件写 `sessions.model = COALESCE(model, 旧值)`（[`tools.ts:129`/`141`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L129)）。所以 `get_all_status` 直接返回每个 session 的 `model`（agent 没传 `model` 参数时为 `null`）。`nodes` 表里也有一份 `model`（传 `node_id` 时由 `report_status` 同步），是更持久的来源。`summary` 是按 status 分组的全 scope 计数（同 `list_tasks` 的 `stats`）。
 :::
 
 ---
@@ -600,7 +600,7 @@ send_task({
 ```
 
 ::: tip 返回值形状
-- `session` 走 `SELECT * FROM sessions`（[`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)），完整 sessions 行（同 [`get_all_status`](#get_all_status) 的 session 行，**无 `model` 列**）；alias 不存在时 `session` 为 `null` 但 `ok` 仍为 `true`
+- `session` 走 `SELECT * FROM sessions`（[`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)），完整 sessions 行（同 [`get_all_status`](#get_all_status) 的 session 行，**含 `model` 列** —— 见 get_all_status 说明）；alias 不存在时 `session` 为 `null` 但 `ok` 仍为 `true`
 - `recent_completions` 走 `SELECT * FROM completions ... LIMIT 5`（[`tools.ts:433-435`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L433)），完整 9 列 completion 行（`id` / `session_name` / `task` / `result` / `artifacts` / `score` / `duration_minutes` / `network_id` / `completed_at`），按 `completed_at` 倒序最多 5 条
 :::
 
