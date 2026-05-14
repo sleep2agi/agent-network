@@ -287,7 +287,7 @@ v0.8 起：
 | `ANTHROPIC_AUTH_TOKEN` | 第三方 provider API Key | 各 provider Key | agent-node 直读 |
 
 ::: info `TOOLS` / `SYSTEM_PROMPT` 是 Compose 路径的 convention
-verify [`demos/codex-telegram-squad/entrypoint.sh:135-141`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh) `${TOOLS:+--tools "$TOOLS"}` + `${SYSTEM_PROMPT:+--prompt "$SYSTEM_PROMPT"}` —— 这两个 env var 是 **entrypoint.sh 的 shell variable expansion**，会被翻译成 agent-node 的 `--tools` / `--prompt` CLI flag。**agent-node 二进制本体不读这两个 env var**（R242 chain 已经在 [agent-node — 环境变量](/guide/agent-node) 校准）。不走 docker compose entrypoint.sh 的场景（直接 `npx @sleep2agi/agent-node`），用 `--tools` / `--prompt` CLI flag 或 `config.json` 的 `tools` / `systemPrompt` 字段。
+verify [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh)：L9 `TOOLS_ARG="${TOOLS:-}"` + L10 `PROMPT="${SYSTEM_PROMPT:-}"` 先把 env var 捕获成 shell 变量，再 L26 `[ -n "$TOOLS_ARG" ] && CMD+=(--tools "$TOOLS_ARG")` / L51 `CMD+=(--prompt "$FULL_PROMPT")` 拼进 agent-node 命令数组 —— 这两个 env var 是 **entrypoint.sh 的 shell variable**，会被翻译成 agent-node 的 `--tools` / `--prompt` CLI flag。**agent-node 二进制本体不读这两个 env var**（R242 chain 已经在 [agent-node — 环境变量](/guide/agent-node) 校准）。不走 docker compose entrypoint.sh 的场景（直接 `npx @sleep2agi/agent-node`），用 `--tools` / `--prompt` CLI flag 或 `config.json` 的 `tools` / `systemPrompt` 字段。
 
 跟 R243 chain 一致：`--tools` 只 `claude-agent-sdk` runtime 生效（`codex-sdk` 内置工具集不接受 `--tools` 自定义）。
 :::
