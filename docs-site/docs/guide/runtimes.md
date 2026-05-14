@@ -205,14 +205,16 @@ anet node create translator \
 
 ### 已验证模型
 
+下表是 `anet init` 供应商选单（cli.ts `VENDORS` 列表）里 `claude-agent-sdk` runtime 的内置 provider —— 每项的 `baseUrl` + model id 都跑通过真 API 验证：
+
 | Provider | 模型 | `ANTHROPIC_BASE_URL` |
 |---|---|---|
-| Anthropic | 当前主线 Sonnet / Opus / Haiku（具体型号查 [Anthropic 官方](https://docs.anthropic.com/claude/docs/models-overview)） | `https://api.anthropic.com` |
+| Anthropic | 当前主线 Sonnet / Opus / Haiku（具体型号查 [Anthropic 官方](https://docs.anthropic.com/claude/docs/models-overview)） | （Anthropic 原生，不需设 base URL） |
 | MiniMax | 当前主线 M 系列（查 [MiniMax 开放平台](https://platform.minimaxi.com)） | `https://api.minimaxi.com/anthropic` |
-| DeepSeek | 当前主线 V/R 系列（查 [DeepSeek 平台](https://platform.deepseek.com)） | 见 DeepSeek Anthropic 兼容文档 |
-| 智谱 GLM | 当前主线 GLM 系列（查 [智谱开放平台](https://open.bigmodel.cn)） | 见智谱 Anthropic 适配文档 |
-| Moonshot Kimi | 当前主线 K 系列（查 [Moonshot 开放平台](https://platform.moonshot.cn)） | 见 Moonshot Anthropic 兼容文档 |
-| 书生 InternLM | 当前主线 Intern-S 系列（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn`（**裸域名，无 `/anthropic` 后缀** —— 跟 MiniMax 等不同，verify [`cli.ts:1322-1324`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1322) MODEL_PRESETS） |
+| 书生 InternLM | Intern-S2-Preview（默认）/ Intern-S1-Pro（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn`（**裸域名，无 `/anthropic` 后缀** —— 跟 MiniMax 等不同） |
+| 小米 MiMo | mimo-v2.5-pro（默认）/ v2.5 / v2-pro / v2-omni（查 [小米开放平台](https://platform.xiaomimimo.com)） | `https://token-plan-cn.xiaomimimo.com/anthropic` |
+
+> 来源：[`cli.ts:1114-1175 VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114)。**DeepSeek / GLM / Kimi 等没跑通验证的 provider 故意不进 VENDORS 列表** —— 用「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能填 base URL + model）。
 
 ::: tip 模型版本号会变
 各家 LLM 厂商每隔几周升级模型，硬编码具体版本号容易过时。**到对应平台拿最新 model id**，填到 `--model` 参数即可。
@@ -372,14 +374,14 @@ anet node start coder
 
 ::: info 已验证（当前 stable 继承 v2 E2E 覆盖）
 - `claude-agent-sdk` runtime 本身 —— E2E 通过
-- vendor 维度只有 **Anthropic / MiniMax / 书生 Intern** 是 verified（verify [`cli.ts:1314-1333`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1314) MODEL_PRESETS —— **没标 `[UNVERIFIED]`** 的就这几个 + OpenRouter）
+- vendor 维度：`anet init` 的 [`VENDORS` 列表（cli.ts:1114-1175）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114) 里每个 provider（**Anthropic / MiniMax / 书生 Intern / 小米 MiMo**）的 `baseUrl` + model id 都是 verified-with-real-call 才进列表的
 - 多 Runtime 混搭（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调）
 :::
 
 ::: warning 未验证（请自行评估）
 - `claude-code-cli` —— 本机能跑（v0.8.2 修了 session resume 默认丢失 bug，详见 [changelog](/changelog)），未做 E2E 回归
 - `codex-sdk` —— 单元测试通过，缺真实 codex 鉴权回归
-- **DeepSeek / GLM / Kimi / 小米 MiMo** —— cli.ts MODEL_PRESETS 里这 4 个 vendor preset 显式标 `[UNVERIFIED]`（[`cli.ts:1317-1328`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1317)），endpoint URL 已填但没跑通真 API 回归；能用但请自己先验证
+- **DeepSeek / GLM / Kimi 等没跑通验证的 provider** —— 故意**不进 `VENDORS` 列表**（#104-B 设计：列表里的都是 verified，没验证的不混进去）；要用就走「自定义」`custom` 供应商接入，能用但请自己先验证 endpoint + model id
 :::
 
 ---
