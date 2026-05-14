@@ -83,10 +83,10 @@ Credentials are saved to `~/.anet/config.json`. Subsequent `anet node ...` comma
 anet node create my-bot
 ```
 
-You'll get a two-step interactive picker:
+You'll get an interactive picker — **vendor first, then model**:
 
-1. **Pick the runtime** — `claude-agent-sdk` is the verified default.
-2. **`Select model:`** — choose from the verified model ids: `intern-s2-preview` (default) / `intern-s1-pro` / `MiniMax-M2.7` / `claude-sonnet-4-6` / `claude-opus-4-6` / `claude-haiku-4-5`, or `custom` to enter your own base URL + model. The CLI auto-injects the matching `ANTHROPIC_BASE_URL` (except `custom`, which you fill in), then prompts for the API key. Other providers (DeepSeek / GLM / Kimi / Xiaomi MiMo / OpenRouter, etc.) go through `custom` — see [Multi-model](/en/guide/multi-model) for the full endpoint table.
+1. **Pick the vendor** — choose from the built-in `VENDORS` list: InternLM / MiniMax / Xiaomi MiMo / Anthropic Claude / Codex / Claude Code CLI / custom. **The runtime is derived from the vendor** (InternLM / MiniMax / Xiaomi / Anthropic → `claude-agent-sdk`; Codex → `codex-sdk`; Claude Code → `claude-code-cli`).
+2. **Pick the model** — once a vendor is chosen, the CLI lists that vendor's available models (vendors with a single model are auto-selected; Claude Code CLI uses the subscription's model, so no model picker). The CLI then auto-injects the matching `ANTHROPIC_BASE_URL` and prompts for the API key. The `custom` vendor asks you for the base URL + model id — DeepSeek / GLM / Kimi / OpenRouter and other providers not in the built-in list go through `custom`; see [Multi-model](/en/guide/multi-model) for the full endpoint table.
 
 ::: details Other runtimes
 - `codex-sdk` — passes unit tests; **no full E2E** with real codex auth.

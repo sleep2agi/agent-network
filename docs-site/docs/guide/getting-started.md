@@ -87,10 +87,10 @@ anet login --username admin --password anethub
 anet node create my-bot
 ```
 
-这会进入两步交互式选择：
+这会进入交互式选择，**先选供应商、再选模型**：
 
-1. **选 Runtime**：推荐 `claude-agent-sdk`（已验证）。
-2. **`Select model:`**：从已验证 model id 里挑 —— `intern-s2-preview`（默认）/ `intern-s1-pro` / `MiniMax-M2.7` / `claude-sonnet-4-6` / `claude-opus-4-6` / `claude-haiku-4-5`，或 `custom` 自己填 base URL + model。选定后 CLI 自动注入对应的 `ANTHROPIC_BASE_URL`（`custom` 例外，需手填），然后让你输入 API Key。DeepSeek / GLM / Kimi / 小米 MiMo / OpenRouter 等其他 provider 走 `custom`，完整 endpoint 见 [多模型配置](/guide/multi-model)。
+1. **选供应商 (vendor)**：从内置 `VENDORS` 列表挑 —— 书生 Intern / MiniMax / 小米 MiMo / Anthropic Claude / Codex / Claude Code CLI / 自定义（custom）。**runtime 由供应商决定**（书生 / MiniMax / 小米 / Anthropic → `claude-agent-sdk`；Codex → `codex-sdk`；Claude Code → `claude-code-cli`）。
+2. **选模型**：选定供应商后，CLI 列出该供应商的可用 model 让你挑（只有 1 个 model 的供应商自动选定；Claude Code CLI 用订阅模型，没有 model 选单）。然后 CLI 自动注入对应的 `ANTHROPIC_BASE_URL`，让你输入 API Key。`custom` 供应商需手填 base URL + model id —— DeepSeek / GLM / Kimi / OpenRouter 等不在内置列表的 provider 走这里，完整 endpoint 见 [多模型配置](/guide/multi-model)。
 
 ::: details 其他 Runtime
 - `codex-sdk` —— 单元测试通过，**端到端未验证**（缺真实 codex 鉴权回归）。
