@@ -1,6 +1,6 @@
 # 代码 PR 审查室 Demo
 
-`anet demo pr-review` 是 anet CLI 内置 demo（[PR #41](https://github.com/sleep2agi/agent-network/pull/41) 2026-05-13 merge，预计跟 CLI v2.1.8 ship `latest`）：CLI 创建 4 个临时 agent，3 个并行 reviewer（**安全 / 性能 / 风格**）+ 1 个终审 judge，跑完输出一份带 LGTM / Request Changes / Comment 决议的 markdown PR review 评论，可直接贴回 GitHub PR。
+`anet demo pr-review` 是 anet CLI 内置 demo（[PR #41](https://github.com/sleep2agi/agent-network/pull/41) 2026-05-13 merge，已在 CLI `demoCommand` 里）：CLI 创建 4 个临时 agent，3 个并行 reviewer（**安全 / 性能 / 风格**）+ 1 个终审 judge，跑完输出一份带 LGTM / Request Changes / Comment 决议的 markdown PR review 评论，可直接贴回 GitHub PR。
 
 完整设计契约：[`docs/demos/pr-review-room-proposal.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/demos/pr-review-room-proposal.md)。
 
