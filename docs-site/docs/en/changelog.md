@@ -4,9 +4,47 @@
 This log runs reverse-chronologically. **The version scheme was reshuffled once**:
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8.x releases, aligned with `commhub-server` semver.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
-- **Current stable**: v0.8.2 (2026-05-12, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
+- **Current stable**: v0.8.3 (2026-05-14, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
+
+## 2026-05-14 — **v0.8.3 stable release** batch primitive + multi-demo + P0/UX fixes ✅ stable
+
+**Version sync** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.1.9`
+- `@sleep2agi/agent-node@2.3.1`
+- `@sleep2agi/commhub-server@0.8.0` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.4.5`
+
+> Note: agent-network 2.1.8 was skipped (an earlier stale build occupied the version); the stable release is 2.1.9.
+
+### New features
+
+- **`anet create --batch` batch agent primitive** (issue [#55](https://github.com/sleep2agi/agent-network/issues/55)) — spin up N identity-bearing agents in one line, `--prefix` auto-numbering, per-node working dir + config + tmux session; `anet batch <verb>` for lifecycle management (list/stop/cleanup/start/restart).
+- **`anet demo sci-team`** (issue [#51](https://github.com/sleep2agi/agent-network/issues/51)) — research-squad demo: 1 leader + N-1 workers with active fan-out collaboration.
+- **`anet demo pr-review`** (issue [#41](https://github.com/sleep2agi/agent-network/issues/41)) — 4-agent PR review room demo.
+- **`anet login` first-time login guidance** (issue [#58](https://github.com/sleep2agi/agent-network/issues/58)) — on auth failure, points to register / default account / hub admin reset-user.
+- **claude-agent-sdk model dropdown verified vendor presets** (issue [#48](https://github.com/sleep2agi/agent-network/issues/48)) — MiniMax + Intern (书生).
+- **SDK upgrades** — codex-sdk / claude-agent-sdk / inquirer dependency bumps.
+
+### Fixes
+
+- **batch node identity injection** (issue [#93](https://github.com/sleep2agi/agent-network/issues/93), P0) — batch-created nodes previously didn't know their own alias; now per-node identity prefix is injected.
+- **`anet hub dashboard` npx cache self-heal** (issue [#89](https://github.com/sleep2agi/agent-network/issues/89), P0) — auto-cleans stale staging dirs before spawn.
+- **`anet hub dashboard` release channel matching** (issue [#61](https://github.com/sleep2agi/agent-network/issues/61)) — dashboard version now dynamically matches the anet channel.
+- **`anet init` token prompt UX + session count** (issue [#56](https://github.com/sleep2agi/agent-network/issues/56)).
+- **shell removed from process spawn** (issue [#36](https://github.com/sleep2agi/agent-network/issues/36)) — eliminates command injection surface.
+- **claude-agent-sdk env injection + timeout guard** (issue [#98](https://github.com/sleep2agi/agent-network/issues/98), partial fix) — config.json env block now injected on the `--config` startup path; claude calls get a wall-clock timeout guard so hangs surface as visible timeout errors.
+- **PINNED commhub-server → 0.8.0 stable**.
+
+### Package change details
+
+- **agent-network** 2.1.7 → 2.1.9 (13 preview iterations accumulated)
+- **agent-node** 2.3.0 → 2.3.1 — claude-agent-sdk / codex-sdk dependency bumps + #98 fixes
+- **commhub-server** 0.8.0 *(unchanged)*
+- **agent-network-dashboard** 0.4.2 → 0.4.5 — tri-ring layout / alias avatars / fullscreen zoom / prefix grouping / Intern avatars / label-overlap fix / trial badge removal
+
+---
 
 ## 2026-05-12 — **v0.8.2 stable release** telegram channel + claude-code-cli session resume ✅ stable
 

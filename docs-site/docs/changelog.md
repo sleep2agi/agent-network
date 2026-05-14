@@ -4,9 +4,47 @@
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8.x 渐进发布，对应 `commhub-server` semver
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
-- **当前 stable**：v0.8.2（2026-05-12，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
+- **当前 stable**：v0.8.3（2026-05-14，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
+
+## 2026-05-14 — **v0.8.3 正式版** batch primitive + 多 demo + P0/UX 修复 ✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.1.9`
+- `@sleep2agi/agent-node@2.3.1`
+- `@sleep2agi/commhub-server@0.8.0` *(无变化)*
+- `@sleep2agi/agent-network-dashboard@0.4.5`
+
+> 注：agent-network 2.1.8 因早先 stale build 占位跳过，正式版为 2.1.9。
+
+### 新功能
+
+- **`anet create --batch` 批量 agent 原语**（issue [#55](https://github.com/sleep2agi/agent-network/issues/55)）— 一行起 N 个带身份的 agent，`--prefix` 自动编号，每节点独立工作目录 + config + tmux session；配套 `anet batch <verb>` 统一管 lifecycle（list/stop/cleanup/start/restart）。
+- **`anet demo sci-team`**（issue [#51](https://github.com/sleep2agi/agent-network/issues/51)）— 科研军团 demo：1 leader + N-1 worker 主动 fan-out 协作。
+- **`anet demo pr-review`**（issue [#41](https://github.com/sleep2agi/agent-network/issues/41)）— 4-agent PR review room demo。
+- **`anet login` 首次登录引导**（issue [#58](https://github.com/sleep2agi/agent-network/issues/58)）— 认证失败时给出 register / 默认账号 / hub admin reset-user 指引。
+- **claude-agent-sdk 模型 dropdown 增加 verified vendor presets**（issue [#48](https://github.com/sleep2agi/agent-network/issues/48)）— MiniMax + 书生 Intern。
+- **SDK 升级** — codex-sdk / claude-agent-sdk / inquirer 依赖升级。
+
+### 修复
+
+- **batch 节点身份注入**（issue [#93](https://github.com/sleep2agi/agent-network/issues/93)，P0）— batch 创建的节点之前不知道自己的 alias；现在 per-node 注入身份前缀。
+- **`anet hub dashboard` npx 缓存自愈**（issue [#89](https://github.com/sleep2agi/agent-network/issues/89)，P0）— spawn 前自动清理 stale staging dir。
+- **`anet hub dashboard` release channel 匹配**（issue [#61](https://github.com/sleep2agi/agent-network/issues/61)）— dashboard 版本号改为按 anet channel 动态匹配。
+- **`anet init` token prompt UX + session 计数**（issue [#56](https://github.com/sleep2agi/agent-network/issues/56)）。
+- **进程 spawn 移除 shell**（issue [#36](https://github.com/sleep2agi/agent-network/issues/36)）— 消除 command injection 面。
+- **claude-agent-sdk env 注入 + timeout guard**（issue [#98](https://github.com/sleep2agi/agent-network/issues/98)，部分修复）— config.json env 块在 `--config` 启动路径正确注入；claude 调用加 wall-clock timeout guard，hang 变可见超时错误。
+- **PINNED commhub-server → 0.8.0 stable**。
+
+### 包变更明细
+
+- **agent-network** 2.1.7 → 2.1.9（13 个 preview 迭代累积）
+- **agent-node** 2.3.0 → 2.3.1 — claude-agent-sdk / codex-sdk 依赖升级 + #98 修复
+- **commhub-server** 0.8.0 *(无变化)*
+- **agent-network-dashboard** 0.4.2 → 0.4.5 — 三环 layout / alias 头像 / 全屏 zoom / 前缀分组 / 书生头像 / 标签遮挡修复 / trial badge 删除
+
+---
 
 ## 2026-05-12 — **v0.8.2 正式版** telegram channel + claude-code-cli session resume ✅ stable
 
