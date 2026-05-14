@@ -174,7 +174,7 @@ register() → callCommHub("report_status", {
 
 - **PHASE 1 — PREPARE（全程可回滚，old node 原封不动）**：写 `rename.lock` → `cpSync(oldDir → newDir)`（**copy 不是 move**）→ 更新 `newProfile.node_name` / `alias` + `saveProfile` → POST `/api/node-rename/prepare` 拿 `txn_id`。任一步失败 → 回滚（删 newDir + POST `/api/node-rename/abort` + 删 lock），`old` 完全不变。
 - **PHASE 2 — COMMIT（顺序敏感）**：
-  1. **C1** POST `/api/node-rename/commit` —— C1 之前仍可干净回滚，C1 之后转 forward-fix
+  1. **C1** POST `/api/node-rename/commit` —— C1 之前仍可干净回滚，C1 之后转 forward-fix。**C4（server 侧）**：`commitRename` 成功后 server `pushEvent` 一个 `node.renamed` SSE 事件给 old + new 两个 alias 流（[`rename.ts:100-114`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L100)，envelope 见 [rest.md SSE 端点](https://anet.sh/api/rest)）
   2. **C2** 运行中 node 跑 `tmux rename-session`（不杀进程；失败转 forward-fix 不回滚）
   3. **C3** `rmSync(oldDir)` 原子切换本地 + `writeLegacyProjectAlias(newName)`
 
