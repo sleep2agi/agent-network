@@ -5092,9 +5092,18 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
       if (opts.baseUrl) envMap.ANTHROPIC_BASE_URL = opts.baseUrl;
       if (opts.apiKey) envMap[opts.authTokenEnvName || "ANTHROPIC_AUTH_TOKEN"] = opts.apiKey;
 
-      const promptText = typeof opts.systemPrompt === "function"
-        ? opts.systemPrompt(role, workerIndex, opts.count)
-        : opts.systemPrompt;
+      // #93 — per-node identity. The function form (sci-team) already bakes the
+      // alias into its template; a plain string --description is shared by every
+      // node and carries no identity, so prepend `你是 <alias>。` — without it
+      // agent-node's own `你是 ${ALIAS}` fallback is suppressed (it only fires
+      // when systemPrompt is absent) and every node thinks it is <prefix>1号.
+      // No description → leave undefined so that agent-node fallback still fires.
+      let promptText: string | undefined;
+      if (typeof opts.systemPrompt === "function") {
+        promptText = opts.systemPrompt(role, workerIndex, opts.count);
+      } else if (opts.systemPrompt) {
+        promptText = `你是 ${alias}。\n\n${opts.systemPrompt}`;
+      }
 
       const profile: Profile = {
         anet_version: "0.1.0",
@@ -5393,7 +5402,10 @@ async function createBatchWizardCommand() {
   }
 
   // 5. Description (systemPrompt)
-  const description = opts.description || await ask("Description / system prompt (空 → no prompt)", "");
+  // parseOpts maps a valueless/empty `--description` (e.g. `--description ""`)
+  // to the sentinel string "true"; treat that as "not provided" (#93).
+  const descFlag = opts.description === "true" ? "" : opts.description;
+  const description = descFlag || await ask("Description / system prompt (空 → no prompt)", "");
 
   const leaderAlias = opts["leader-alias"] || "";
   closeRL();
