@@ -284,7 +284,163 @@ node lifecycle 由 6 状态 FSM（created/starting/running/stopping/stopped/erro
 
 ## §3 SSE event taxonomy
 
-> 🚧 待 R498+ /loop tick 推进
+### 3.1 现状问题
+
+当前 dashboard 的 node 状态更新依赖零散信号（online/offline heartbeat、轮询），没有统一的事件协议。后果：
+- delete 事件不可靠（#74 根因之一）
+- 没有 restart / rename 事件——dashboard 无从知道节点改名
+- 事件 payload 不统一，dashboard 解析逻辑分散
+- 无去重机制，重复事件导致 UI 抖动
+
+§3 定义统一的 SSE event taxonomy：单一 channel、统一 envelope、每个 lifecycle 操作一个事件类型。
+
+### 3.2 统一 envelope
+
+所有 node lifecycle SSE 事件共享一个 envelope：
+
+```typescript
+interface NodeLifecycleEvent {
+  // 事件标识
+  event: NodeEventType;          // 见 3.3
+  txn_id: string;                // §2 两阶段提交的 txn_id —— 去重 + 关联
+  ts: string;                    // ISO8601 北京时间 (per feedback_beijing_time)
+
+  // 节点标识
+  alias: string;                 // 节点 alias（rename 事件特殊，见 3.4）
+  ntok: string;                  // 节点所属网络（多租户隔离）
+
+  // 状态
+  prev_state: NodeState | null;  // 转换前状态（created 事件为 null）
+  next_state: NodeState | null;  // 转换后状态（deleted 事件为 null）
+
+  // 附加 payload（事件特定，见 3.3）
+  data?: Record<string, unknown>;
+}
+
+type NodeState = 'created' | 'starting' | 'running'
+               | 'stopping' | 'stopped' | 'error';
+```
+
+设计要点：
+- **txn_id 去重**：dashboard 维护 `seen_txn_ids` LRU set，同 txn_id 重复事件直接丢弃——杜绝 UI 抖动。
+- **ntok 多租户**：dashboard 按 ntok 过滤，多网络隔离渲染。
+- **prev/next state**：dashboard 不需自己推断状态转换，envelope 直接给。
+
+### 3.3 事件类型表
+
+| `event` | 触发转换（§2） | `data` 附加字段 | dashboard 动作 |
+|---------|---------------|----------------|---------------|
+| `node.created` | `∅ → created` | `{ config_summary }` | 渲染灰节点 |
+| `node.starting` | `created → starting` | — | 黄 pulsing |
+| `node.started` | `starting → running` | `{ tmux_session, pid }` | 绿节点 |
+| `node.stopping` | `running → stopping` | `{ reason }` | 黄 pulsing |
+| `node.stopped` | `stopping → stopped` | `{ exit_clean: bool }` | 灰节点 |
+| `node.restarting` | `running → restarting` | `{ queued_tasks: number }` | 黄 pulsing + "restarting" |
+| `node.restarted` | `restarting → running` | `{ tmux_session, pid, flushed_tasks }` | 绿节点 |
+| `node.deleted` | `deleting → ∅` | `{ cleanup_summary }` | **移除节点 + invalidate cache（修 #74）** |
+| `node.renamed` | rename（§4） | `{ old_alias, new_alias, surfaces_updated }` | **alias 头像 re-render + 历史引用标注** |
+| `node.error` | `* → error` | `{ error_type, detail, recoverable: bool }` | 红节点 + alert |
+| `node.recovered` | `error → created/stopped` | `{ recovered_to: NodeState }` | 对应状态色 |
+
+11 个事件类型，覆盖 §2 状态机的全部转换。
+
+### 3.4 `node.renamed` 事件的特殊性
+
+rename 事件（§4 深挖）在 envelope 上有特殊处理——`alias` 字段语义模糊（old 还是 new？），所以：
+
+```typescript
+// node.renamed 事件的 envelope 约定:
+{
+  event: 'node.renamed',
+  txn_id: '...',
+  alias: '<new_alias>',          // alias 字段统一用 NEW（事件后的真相）
+  prev_state: <unchanged>,        // rename 不改状态
+  next_state: <unchanged>,        // prev === next
+  data: {
+    old_alias: '<old>',
+    new_alias: '<new>',
+    surfaces_updated: ['config', 'tmux', 'commhub', 'dashboard',
+                       'batch_prefix', 'session_resume'],
+    history_policy: 'preserve'    // 历史 message 的 old_alias 引用策略（§4）
+  }
+}
+```
+
+dashboard 收到 `node.renamed`：
+1. 把 old_alias 节点的 visual 迁移到 new_alias（不是删旧建新——保留位置/连线）
+2. alias 头像 hash 基于 new_alias 重算（preview.83 头像机制）
+3. 历史 message 视图中 old_alias 引用加 tooltip "→ renamed to new_alias"
+
+### 3.5 SSE channel 设计
+
+```yaml
+sse_channel_R010_§3:
+  endpoint: GET /api/events/nodes?ntok=<ntok>
+  
+  channel 模型:
+    单一 channel: 所有 node lifecycle 事件走 /api/events/nodes
+    按 ntok query param 过滤（server 侧过滤，不是 client 侧）
+    
+  vs 现状:
+    现状: online/offline 零散信号 + 轮询
+    新: 单 channel + 11 事件类型 + 统一 envelope
+  
+  断线重连:
+    SSE Last-Event-ID 标准机制
+    server 保留最近 N 个事件（ring buffer）
+    重连时 replay 漏掉的事件（txn_id 去重保证幂等）
+  
+  心跳:
+    server 每 15s 发 SSE comment ping（: keepalive）
+    防中间代理超时断连
+```
+
+### 3.6 与 RFC-003 telemetry 的关系
+
+```yaml
+rfc003_relation_R010_§3:
+  RFC-003 node telemetry: 节点的性能/资源指标（CPU/mem/token）
+  RFC-010 §3 SSE taxonomy: 节点的生命周期状态事件
+  
+  两者互补, 不重叠:
+    telemetry = 连续度量（时序数据）
+    lifecycle event = 离散转换（状态变更）
+  
+  dashboard 同时消费:
+    lifecycle event → 节点存在性 + 状态色
+    telemetry → 节点内部指标（进度条/资源图）
+  
+  可共用 SSE 基础设施:
+    建议 /api/events/nodes（lifecycle）与 /api/events/telemetry 分 channel
+    避免高频 telemetry 淹没低频 lifecycle 事件
+```
+
+### 3.7 与 R483 SDK event-bridge 的关系
+
+```yaml
+sdk_eventbridge_relation_R010_§3:
+  R483 (issue #18 /loop synthesis): SDK SDKMessage → anet event bus
+  RFC-010 §3: anet node lifecycle → dashboard SSE
+  
+  层次关系:
+    SDK SDKMessage (session_state_changed 等)
+      → R012 adapter 翻译
+      → anet 内部 event bus
+      → 部分映射为 node lifecycle 转换（§2）
+      → 触发 §3 SSE 事件
+  
+  例: SDK session_state_changed: 'idle'→'running'
+      → anet 可据此辅助判断 node running 状态（与 tmux/heartbeat 三方校验）
+      → 不直接驱动, 作为 reconciliation（§2.5）的一个信号源
+  
+  → §3 SSE 是 anet 自己的 node 抽象层, SDK event 是 R012 内部细节, 不外泄到 dashboard
+```
+
+### 3.8 §3 小结
+
+统一 SSE event taxonomy：单 channel（`/api/events/nodes`，按 ntok 过滤）、统一 envelope（含 txn_id 去重 + prev/next state + ntok 多租户）、11 个事件类型覆盖全部状态机转换。`node.renamed` 事件 envelope 特殊处理（alias 用 new、data 含 old/new + surfaces_updated）。断线重连用 SSE Last-Event-ID + ring buffer replay。与 RFC-003 telemetry 互补分 channel，与 R483 SDK event-bridge 是上下层关系（SDK event 不外泄 dashboard）。
+
+§4 深挖 node rename（flagship）——本节多次引用的 rename 操作、`node.renamed` 事件、7 surface 一致更新的完整设计。
 
 ---
 
