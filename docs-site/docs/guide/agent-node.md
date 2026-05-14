@@ -393,7 +393,7 @@ SSE 断连后自动重连，使用指数退避策略：
 2. 关闭 SSE 连接
 3. 退出进程
 
-如果进程崩溃（来不及上报），CommHub 通过心跳超时检测，**10 分钟**后自动标记 offline（verify [`server/src/index.ts:762-767`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L762) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时；R219 chain 一致）。
+如果进程崩溃（来不及上报），CommHub 通过心跳超时检测，**10 分钟**后自动标记 offline（verify [`server/src/index.ts:816-821`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L816) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时；R219 chain 一致）。
 
 ## 环境变量
 
