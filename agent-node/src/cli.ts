@@ -456,10 +456,24 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   // 'I'll send a message and report back' without ever waiting for the
   // peer's reply, leading to the empty answer Vincent saw.
   const currentTaskId = process.env.CURRENT_TASK_ID || "";
+  // Tool-capability guidance. Without it, models (especially non-Claude models
+  // behind a custom ANTHROPIC_BASE_URL) default to "I can't access the network"
+  // and fall back to their knowledge base instead of trying the tools they
+  // actually have (issue #101). Naming the tools + an explicit "don't assume
+  // restricted, try first" nudge closes the behavior gap. Reused in both the
+  // default prompt and the custom-systemPrompt branch below.
+  const toolCapabilityGuidance = [
+    `【工具能力】`,
+    `你具备 web 访问与本地执行能力（WebFetch 读取 URL、WebSearch 搜索、Bash 执行 curl/命令、Read/Write/Edit/Glob/Grep 操作文件），已开 bypassPermissions 无需批准。`,
+    `需要读取外部 URL、调用外部 API、查资料时——直接用对应工具真试。`,
+    `不要假设"网络受限""无法访问外部 API"就 fallback 到知识库；只有工具真的执行报错，才据实说明情况。`,
+  ].join("\n");
   const defaultPrompt = [
     `你是 ${ALIAS}，一个 AI Agent 节点。收到来自 ${from} 的任务 (task_id=${currentTaskId})：`,
     ``,
     task,
+    ``,
+    toolCapabilityGuidance,
     ``,
     `【若任务需要其他 agent 协助】`,
     `1. 先用 mcp_commhub__get_all_status 看哪些 agent 在线。`,
@@ -478,7 +492,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     `执行完后简要汇报结果。`,
   ].join("\n");
   const prompt = SYSTEM_PROMPT
-    ? `${SYSTEM_PROMPT}\n\n收到来自 ${from} 的任务：\n\n${task}`
+    ? `${SYSTEM_PROMPT}\n\n${toolCapabilityGuidance}\n\n收到来自 ${from} 的任务：\n\n${task}`
     : defaultPrompt;
   // Inject CommHub as MCP server so Claude can use send_task/get_all_status etc.
   // CLI accepts { url } format (streamable-http), auth via env or header
