@@ -44,7 +44,7 @@ graph TB
 | Component | Runs On | Port | Purpose | npm Package |
 |-----------|---------|------|---------|-------------|
 | **CommHub Server** | Server (1 machine) | `9200` | Message routing, task management, auth, database | `@sleep2agi/commhub-server` |
-| **Dashboard** | Local or standalone server | `3000` default | Web UI (Chat / Nodes / Tasks / Messages / Networks / Logs / Admin) | `@sleep2agi/agent-network-dashboard` |
+| **Dashboard** | Local or standalone server | `3000` default | Web UI (Overview / Nodes / Tasks / Messages / Chat / Admin / Settings — see the [Dashboard doc](/en/guide/dashboard#page-overview) for per-page detail) | `@sleep2agi/agent-network-dashboard` |
 | **anet CLI** | Each client machine | -- | Command-line management tool (full command list: [CLI reference](/en/guide/cli)) | `@sleep2agi/agent-network` |
 | **Agent Node** | Each client machine | -- | AI worker (receives tasks, calls AI, reports results) | `@sleep2agi/agent-node` |
 | **Claude Code** | Client machine | -- | Interactive AI development (joins network via MCP) | Anthropic official |

@@ -44,7 +44,7 @@ graph TB
 | 组件 | 跑在哪 | 端口 | 作用 | npm 包 |
 |------|--------|------|------|--------|
 | **CommHub Server** | 服务器（1 台） | `9200` | 消息路由、任务管理、认证、数据库 | `@sleep2agi/commhub-server` |
-| **Dashboard** | 本机或独立服务器 | `3000`（默认） | Web UI（Chat / Nodes / Tasks / Messages / Networks / Logs / Admin） | `@sleep2agi/agent-network-dashboard` |
+| **Dashboard** | 本机或独立服务器 | `3000`（默认） | Web UI（Overview / Nodes / Tasks / Messages / Chat / Admin / Settings，页面明细见 [Dashboard 文档](/guide/dashboard#页面一览)） | `@sleep2agi/agent-network-dashboard` |
 | **anet CLI** | 每台客户端机器 | -- | 管理命令行工具（完整命令清单见 [CLI 命令参考](/guide/cli)） | `@sleep2agi/agent-network` |
 | **Agent Node** | 每台客户端机器 | -- | AI 工作节点（接任务、调 AI、回结果） | `@sleep2agi/agent-node` |
 | **Claude Code** | 客户端机器 | -- | 交互式 AI 开发（通过 MCP 接入网络） | Anthropic 官方 |
