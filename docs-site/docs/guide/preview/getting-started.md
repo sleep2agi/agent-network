@@ -1,9 +1,9 @@
-# Preview 快速开始（preview.10）
+# Preview 快速开始
 
-本页面向正在安装 `@preview` 的用户，覆盖当前 preview.10 路径：Hub / Dashboard / 登录注册 / batch primitive / sci-team / token UX / 多 hub / admin reset。
+本页面向正在安装 `@preview` 的用户，覆盖 `@preview` 通道的功能路径：Hub / Dashboard / 登录注册 / batch primitive / sci-team / token UX / 多 hub / admin reset。下文以 `preview.N` 标注各功能首次进入 preview 的批次（滚动累积，新版本包含旧批次的全部内容）。
 
 ::: warning Preview 不是 latest
-`@preview` 用于提前验证下一批功能，版本可能比 npm `latest` 新，也可能包含仍在观察的 UX。生产环境优先用 `npm install -g @sleep2agi/agent-network`；需要 preview.10 功能时才安装 `@preview`。
+`@preview` 用于提前验证下一批功能，版本可能比 npm `latest` 新，也可能包含仍在观察的 UX。生产环境优先用 `npm install -g @sleep2agi/agent-network`；需要这些 preview 功能时才安装 `@preview`。
 :::
 
 ## 0. 前置
