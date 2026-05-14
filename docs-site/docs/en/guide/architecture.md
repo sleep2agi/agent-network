@@ -45,7 +45,7 @@ graph TB
 |-----------|---------|------|---------|-------------|
 | **CommHub Server** | Server (1 machine) | `9200` | Message routing, task management, auth, database | `@sleep2agi/commhub-server` |
 | **Dashboard** | Local or standalone server | `3000` default | Web UI (Chat / Nodes / Tasks / Messages / Networks / Logs / Admin) | `@sleep2agi/agent-network-dashboard` |
-| **anet CLI** | Each client machine | -- | Command-line management tool (39 commands) | `@sleep2agi/agent-network` |
+| **anet CLI** | Each client machine | -- | Command-line management tool (full command list: [CLI reference](/en/guide/cli)) | `@sleep2agi/agent-network` |
 | **Agent Node** | Each client machine | -- | AI worker (receives tasks, calls AI, reports results) | `@sleep2agi/agent-node` |
 | **Claude Code** | Client machine | -- | Interactive AI development (joins network via MCP) | Anthropic official |
 | **Channel Plugins** | Client machine | -- | Telegram (v0.8 stable); WeChat / Feishu via external MCP plugins ([see channels.md](/en/guide/channels)) | `channel/` |
@@ -343,7 +343,7 @@ const agent = new Agent({
 
 ## anet CLI
 
-anet CLI is the management tool for Agent Network, providing 39 commands.
+anet CLI is the management tool for Agent Network, covering Hub / account / network / node / monitoring / demo operations (full command list: [CLI reference](/en/guide/cli)).
 
 **Runs on**: Each client machine. Points to CommHub Server via `--hub` parameter or config file.
 

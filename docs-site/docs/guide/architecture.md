@@ -45,7 +45,7 @@ graph TB
 |------|--------|------|------|--------|
 | **CommHub Server** | 服务器（1 台） | `9200` | 消息路由、任务管理、认证、数据库 | `@sleep2agi/commhub-server` |
 | **Dashboard** | 本机或独立服务器 | `3000`（默认） | Web UI（Chat / Nodes / Tasks / Messages / Networks / Logs / Admin） | `@sleep2agi/agent-network-dashboard` |
-| **anet CLI** | 每台客户端机器 | -- | 管理命令行工具（39 个命令） | `@sleep2agi/agent-network` |
+| **anet CLI** | 每台客户端机器 | -- | 管理命令行工具（完整命令清单见 [CLI 命令参考](/guide/cli)） | `@sleep2agi/agent-network` |
 | **Agent Node** | 每台客户端机器 | -- | AI 工作节点（接任务、调 AI、回结果） | `@sleep2agi/agent-node` |
 | **Claude Code** | 客户端机器 | -- | 交互式 AI 开发（通过 MCP 接入网络） | Anthropic 官方 |
 | **Channel 插件** | 客户端机器 | -- | 接入 Telegram（v0.8 stable）；微信 / 飞书走外部 MCP 插件（[详见 channels.md](/guide/channels)） | `channel/` |
@@ -343,7 +343,7 @@ const agent = new Agent({
 
 ## anet CLI
 
-anet CLI 是 Agent Network 的管理工具，提供 39 个命令。
+anet CLI 是 Agent Network 的管理工具，覆盖 Hub / 账号 / 网络 / 节点 / 监控 / Demo 操作（完整命令清单见 [CLI 命令参考](/guide/cli)）。
 
 **部署位置**：每台客户端机器上安装，通过 `--hub` 参数或配置文件指向 CommHub Server。
 
