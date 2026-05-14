@@ -592,7 +592,156 @@ node rename 用 rename 专用多 surface 2PC：PHASE 1 全 copy/prepare（不动
 
 ## §5 Error recovery + inter-node dependency
 
-> 🚧 待 R500+ /loop tick 推进
+### 5.1 error 态的进入
+
+§2 状态机里 `error` 是任意状态可进入的异常态。进入 `error` 的途径：
+
+| 途径 | 检测方 | 典型场景 |
+|------|--------|---------|
+| crash 检测 | reconciliation（§2.5） | `state.json=running` 但 tmux session 不在 |
+| 启动失败 | CLI（start 流程） | tmux 拉起失败 / commhub 注册超时 |
+| 一致性失败 | reconciliation | 三 surface 漂移无法自动调和 |
+| 转换超时 | CLI（2PC 协议） | PHASE 1/2 某步超时未 ack |
+| 显式上报 | agent 进程自身 | agent 内部 fatal error 主动报 |
+
+进入 `error` 时，CLI 写 `.anet/nodes/<alias>/state.json = { state: "error", error_type, detail, recoverable, ts }`，commhub 标记 error，SSE 发 `node.error`。
+
+### 5.2 error_type 分类与 recoverable 判定
+
+```yaml
+error_type_R010_§5:
+  
+  crash:
+    detail: tmux session 消失但 state=running
+    recoverable: true
+    recover 策略: 清理残留 → 回到 stopped（用户可重新 start）
+  
+  start_failed:
+    detail: 启动过程失败（tmux/commhub）
+    recoverable: true
+    recover 策略: 清理半启动残留 → 回到 created
+  
+  inconsistent:
+    detail: 三 surface 漂移
+    recoverable: true（多数）
+    recover 策略: 以"实际真相"（tmux 是否存在）为准，强制三 surface 对齐
+  
+  txn_timeout:
+    detail: 2PC 某步超时
+    recoverable: true
+    recover 策略: 按 txn_id 查 phase → PHASE 1 超时则回滚，PHASE 2 超时则 forward-fix
+  
+  agent_fatal:
+    detail: agent 进程主动报 fatal
+    recoverable: false（需人工）
+    recover 策略: 保留现场，等人工介入；不自动 recover
+  
+  corrupt:
+    detail: config.json 损坏 / 目录结构破坏
+    recoverable: false
+    recover 策略: 保留现场 + 提示从备份恢复
+```
+
+### 5.3 recover 命令与流程
+
+```
+anet node recover <alias> [--to <created|stopped>] [--force]
+```
+
+```yaml
+recover_flow_R010_§5:
+  1. 读 state.json, 确认 state == error
+  2. 读 error_type, 查 5.2 recover 策略
+  3. recoverable == false 且无 --force → 拒绝，提示人工介入步骤
+  4. recoverable == true:
+     a. 清理残留（半启动的 tmux session / commhub stale entry / 半写文件）
+     b. 按策略转到目标态（created 或 stopped）
+     c. 写 state.json = { state: <target>, recovered_from: error, txn_id }
+     d. commhub 同步 + SSE node.recovered
+  5. 自动 recover（可选，配置开启）:
+     reconciliation 检测到 recoverable error → 自动跑 recover 流程
+     agent_fatal / corrupt 永不自动 recover
+```
+
+### 5.4 inter-node dependency lifecycle
+
+issue #80 提出的难点：「inter-node dependency lifecycle — sci-team / opinion-spread leader 死了 worker 怎么办」。
+
+#### 5.4.1 依赖关系模型
+
+anet 节点间存在 lifecycle 依赖，典型来自 RFC-009 social experiment：
+
+```yaml
+dependency_types_R010_§5:
+  
+  leader-worker (RFC-009 turn-based / 谈判撮合者):
+    leader 死 → workers 无法继续（撮合/仲裁缺失）
+    
+  cohort 内 peer (RFC-009 broadcast / 博弈):
+    单 peer 死 → 实验可降级继续（缺一个样本）
+    
+  sub-network (RFC-009 回音室):
+    sub-network 内节点死 → 该子网降级，其他子网不受影响
+    
+  pipeline (translation-pipeline demo):
+    上游死 → 下游饿死（无输入）
+```
+
+#### 5.4.2 依赖声明
+
+依赖不应隐式——RFC-010 建议显式声明：
+
+```jsonc
+// .anet/nodes/<alias>/config.json 增 dependency 字段
+{
+  "alias": "worker-1",
+  "dependency": {
+    "requires": ["leader"],          // 硬依赖：leader 死则本节点不可用
+    "soft": ["worker-2", "worker-3"], // 软依赖：peer 死可降级继续
+    "on_dependency_failure": "pause"  // pause | continue | cascade_stop
+  }
+}
+```
+
+#### 5.4.3 依赖失败的级联处理
+
+```yaml
+cascade_R010_§5:
+  
+  当节点 X 进入 error/stopped/deleted:
+    commhub 查依赖图, 找所有 requires X 的节点 Y
+    
+    对每个 Y, 按 Y.dependency.on_dependency_failure:
+      "pause":        Y 转 stopping → stopped, 等 X 恢复后可手动 restart
+      "continue":     Y 继续（适合 soft 依赖 / 可降级实验）
+      "cascade_stop": Y 也 stop, 递归处理 Y 的依赖者
+    
+    SSE 广播 node.* 事件（每个受影响节点一个 txn_id）
+    dashboard 渲染依赖失败的级联（连线变红）
+  
+  RFC-009 集成:
+    leader-worker → workers 配 requires: [leader], on_failure: "pause"
+      leader 死 → workers 自动 pause, 不空转烧 token
+    cohort peer → 配 soft + on_failure: "continue"
+      单 peer 死 → 实验降级继续
+    framework 的 terminateFn 可检测 "存活节点数 < 阈值" → 主动 STOP
+```
+
+#### 5.4.4 依赖环检测
+
+```yaml
+cycle_detection_R010_§5:
+  node create / dependency 配置变更时:
+    commhub 对依赖图跑拓扑排序
+    检测到环 → 拒绝配置, 报错 "dependency cycle: A → B → A"
+  → 防止级联 stop 无限递归
+```
+
+### 5.5 §5 小结
+
+`error` 态由 crash / 启动失败 / 一致性失败 / 转换超时 / agent 主动上报 五途径进入，按 `error_type` 分 6 类，其中 crash/start_failed/inconsistent/txn_timeout 可自动 recover，agent_fatal/corrupt 需人工。`anet node recover` 命令清理残留 + 转回安全态。inter-node dependency 用显式 `config.dependency` 声明（requires 硬依赖 / soft 软依赖 / on_dependency_failure 策略），依赖失败按 pause/continue/cascade_stop 级联处理，commhub 维护依赖图并做环检测。RFC-009 social experiment 直接受益——leader 死 workers 自动 pause 不空转烧 token。
+
+§6 给出实施 Phase ladder。
 
 ---
 
