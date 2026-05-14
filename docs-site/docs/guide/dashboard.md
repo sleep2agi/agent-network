@@ -169,7 +169,7 @@ Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** 
 - **系统统计** -- 服务器负载、数据库大小、连接数
 - **审计日志** -- 所有操作的详细记录（`/api/audit-log` 端点 + Dashboard 0.4.2 Audit Log 页；系统级 admin 看全部，其他角色看自己 row，R262/R263 chain）
 
-审计日志示例（按 R195 chain — 实际 16 个 action，R283 校准从「13」修正）：
+审计日志示例（按 R195 chain — 实际 19 个 action，R283 → R485 校准）：
 
 | 时间 | 用户 | 操作 | 详情 |
 |------|------|------|------|
@@ -178,7 +178,7 @@ Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** 
 | 10:00:10 | alice | `network_renamed` | dev → development |
 | 10:00:15 | alice | `member_added` | u_bob_xxx as member |
 
-R264 校准：原 doc 示例「`create_network`」action **不存在**。verify R195 chain 已在 [`security.md` 审计日志](/concepts/security#审计日志) 校准 —— [`POST /api/networks` (index.ts:635-647)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635) **不调** `logAudit`，所以 audit_log 里**不会**有 `create_network` 或 `network_created` 行。实际 16 个 action（R283 校准 — 之前句首误写「13」但列表里 16 个；15 个通过 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447) + 1 个 `password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT）: `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / invite_created`。
+R264 校准：原 doc 示例「`create_network`」action **不存在**。verify R195 chain 已在 [`security.md` 审计日志](/concepts/security#审计日志) 校准 —— [`POST /api/networks` (index.ts:635-647)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635) **不调** `logAudit`，所以 audit_log 里**不会**有 `create_network` 或 `network_created` 行。实际 19 个 action（R283 → R485 校准 — RFC-010 节点改名加了 3 个 `node_rename_*` action；18 个通过 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447) + 1 个 `password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT）: `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / node_rename_prepared / node_rename_committed / node_rename_aborted / invite_created`。
 
 ### Settings（设置）
 

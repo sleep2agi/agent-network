@@ -254,7 +254,7 @@ CREATE TABLE audit_log (
 );
 ```
 
-记录的 action 取值（**共 16 个**；verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` —— 15 个走 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447)，`password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT，R283 chain 校准）：
+记录的 action 取值（**共 19 个**；verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` —— 18 个走 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447)，`password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT，R283 → R485 chain 校准）：
 
 | 操作 | 触发场景 |
 |------|---------|
@@ -268,6 +268,7 @@ CREATE TABLE audit_log (
 | `member_added` / `member_role_changed` / `member_removed` | network 成员变更（`detail` 字段记 `<user_id> as <role>` / `<user_id> → <role>`） |
 | `token_created` / `token_revoked` | API token 生命周期 |
 | `node_token_created` | `anet node create` 自动 mint `ntok_` |
+| `node_rename_prepared` / `node_rename_committed` / `node_rename_aborted` | RFC-010 节点改名两阶段事务（PREPARE / COMMIT / ABORT 各写一条 audit） |
 | `invite_created` | 创建网络邀请码 |
 
 ::: info `create_network` / `network_created` 不写 audit

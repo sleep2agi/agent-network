@@ -254,7 +254,7 @@ CREATE TABLE audit_log (
 );
 ```
 
-Recorded `action` values (**16 total**; verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` — 15 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447), `password_reset_by_admin` is a direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294); R283 chain calibration):
+Recorded `action` values (**19 total**; verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` — 18 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447), `password_reset_by_admin` is a direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294); R283 → R485 chain calibration):
 
 | Operation | Trigger |
 |------|---------|
@@ -268,6 +268,7 @@ Recorded `action` values (**16 total**; verify `grep logAudit server/src/*.ts + 
 | `member_added` / `member_role_changed` / `member_removed` | Network membership changes (`detail` records `<user_id> as <role>` / `<user_id> → <role>`) |
 | `token_created` / `token_revoked` | API-token lifecycle |
 | `node_token_created` | `anet node create` auto-mints an `ntok_` |
+| `node_rename_prepared` / `node_rename_committed` / `node_rename_aborted` | RFC-010 node-rename two-phase transaction (one audit row each for PREPARE / COMMIT / ABORT) |
 | `invite_created` | Network invite code creation |
 
 ::: info `create_network` / `network_created` is NOT audited
