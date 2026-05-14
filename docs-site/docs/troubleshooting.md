@@ -622,7 +622,7 @@ Agent Node 支持调整日志级别（**top-level 字段，不在 `flags` 里**�
 }
 ```
 
-verify [`agent-node/src/cli.ts:187`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L187)：`LOG_LEVEL` 从 `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` 取，**只认 top-level `logLevel`**，写在 `flags.logLevel` 不生效。
+verify [`agent-node/src/cli.ts:203`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L203)：`LOG_LEVEL` 从 `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` 取，**只认 top-level `logLevel`**，写在 `flags.logLevel` 不生效。
 
 也可以走环境变量或命令行：
 

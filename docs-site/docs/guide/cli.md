@@ -516,7 +516,7 @@ anet init project
 |------|------|--------|
 | `COMMHUB_URL` | CommHub Server 地址 | env > 配置文件（命令行 `--hub` 最高） |
 | `COMMHUB_ALIAS` | Agent 别名 | env > 配置文件（命令行 `--alias` 最高） |
-| `COMMHUB_TOKEN` | 认证 Token | **agent-node：最低** —— node config (`ntok_`) > 全局 config > 此 env，且 env 跟 node config 冲突时**被忽略 + 打 warning**（[`agent-node/src/cli.ts:178-181`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L178)，防 leftover export 把回复发错 network）。`anet` CLI 里则是 env > 全局 config |
+| `COMMHUB_TOKEN` | 认证 Token | **agent-node：最低** —— node config (`ntok_`) > 全局 config > 此 env，且 env 跟 node config 冲突时**被忽略 + 打 warning**（[`agent-node/src/cli.ts:187-190`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L187)，防 leftover export 把回复发错 network）。`anet` CLI 里则是 env > 全局 config |
 | `COMMHUB_AUTH_TOKEN` | **server 端** legacy master token（v0.8 软废弃，v1.0 移除）—— 由 hub 进程读，不是 agent 连接用的优先级变量 | server-side |
 | `ANTHROPIC_BASE_URL` | 模型 API 地址（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等第三方 Anthropic 兼容 endpoint；完整 provider 列表见 [multi-model](/guide/multi-model)） | - |
 | `ANTHROPIC_AUTH_TOKEN` | 模型 API Key —— **第三方 Anthropic 兼容 endpoint** 走这个 | - |

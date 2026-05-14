@@ -624,7 +624,7 @@ Agent Node supports adjustable log levels (**top-level field — not nested unde
 }
 ```
 
-Verified at [`agent-node/src/cli.ts:187`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L187): `LOG_LEVEL` is read from `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` — it **only honors the top-level `logLevel`**. Putting `logLevel` inside `flags` has no effect.
+Verified at [`agent-node/src/cli.ts:203`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L203): `LOG_LEVEL` is read from `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` — it **only honors the top-level `logLevel`**. Putting `logLevel` inside `flags` has no effect.
 
 You can also set it via environment variable or CLI flag:
 
