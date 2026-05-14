@@ -86,10 +86,17 @@ Write a quicksort algorithm
 
 **Agent reply methods**:
 
-- `telegram_reply(chat_id, text)` -- Text reply
-- `telegram_reply(chat_id, text, files=["/path/to/image.png"])` -- Reply with attachments
-- `telegram_edit_message(chat_id, message_id, text)` -- Edit a sent message
-- `telegram_react(chat_id, message_id, emoji)` -- React with an emoji
+The agent does not call any `telegram_*` MCP tool — **no such tool exists**. The agent-node telegram handler automatically forwards the LLM's output back to the Telegram chat:
+
+1. Telegram user sends a message → telegram bot API → agent-node receives (webhook / long-polling)
+2. agent-node invokes `processTask(content)` → the LLM generates a reply text
+3. agent-node's internal [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L948) helper sends the reply back via `sendMessage` (auto-splits at 4096 chars and sets `reply_to_message_id` on the first chunk)
+
+The agent (LLM running in the claude-agent-sdk / codex-sdk runtime) just needs to **produce reply text**; it doesn't need to know the Telegram API.
+
+::: warning R258 calibration: fictional `telegram_*` tool list removed
+Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` as MCP tools — **a full source grep returns 0 hits** (no `telegram_*` `server.tool` registrations in cli.ts / commhub-channel.ts / node-server.ts). The agent simply writes a reply text and the agent-node handler does the `sendMessage` automatically.
+:::
 
 ### Security Notes
 

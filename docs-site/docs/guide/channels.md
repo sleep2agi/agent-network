@@ -85,10 +85,17 @@ anet node start 指挥室
 
 **Agent 回复方式**：
 
-- `telegram_reply(chat_id, text)` -- 文字回复
-- `telegram_reply(chat_id, text, files=["/path/to/image.png"])` -- 带附件回复
-- `telegram_edit_message(chat_id, message_id, text)` -- 编辑已发消息
-- `telegram_react(chat_id, message_id, emoji)` -- 表情回应
+Agent 不需要直接调任何 `telegram_*` MCP tool —— **没有这种 tool 存在**。agent-node 内部 telegram handler 自动把 LLM 的输出回传到 Telegram chat：
+
+1. Telegram user 发消息 → telegram bot API → agent-node 收到（webhook / long-polling）
+2. agent-node 调 `processTask(content)` → LLM 生成回复文本
+3. agent-node 内部 [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L948) helper 把回复 sendMessage 到原 chat（自动分 4096 char chunks + 自动 reply_to_message_id 关联首段）
+
+Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接生成文本**作为 reply，不需要懂 Telegram API。
+
+::: warning R258 校准：fictional `telegram_*` tool 列表已删
+旧 doc 列过 `telegram_reply` / `telegram_edit_message` / `telegram_react` 4 个 MCP tool —— **全 source grep 0 hit**（cli.ts / commhub-channel.ts / node-server.ts 没有任何 `telegram_*` server.tool 注册）。Agent 实际是写 reply 文本，agent-node 内部 handler 自动 sendMessage。
+:::
 
 ### 安全注意事项
 
