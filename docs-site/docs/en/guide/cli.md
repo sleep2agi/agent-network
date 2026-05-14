@@ -106,7 +106,7 @@ See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> 
 
 | Command | Description |
 |------|------|
-| `anet config` | **Read-only** view of `~/.anet/config.json` (`anet config path` prints the path, `anet config json` prints raw JSON). To modify config, use `anet login` / `anet init` / `anet network use` — there is no `anet config --set`. Verified at [`cli.ts:5571-5600 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5571). |
+| `anet config` | **Read-only** view of `~/.anet/config.json` (`anet config path` prints the path, `anet config json` prints raw JSON). To modify config, use `anet login` / `anet init` / `anet network use` — there is no `anet config --set`. Verified at [`cli.ts:5670-5702 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5670). |
 | `anet upgrade` | Prints an upgrade plan (self-upgrade is disabled by default to avoid replacing the running CLI process mid-run; gives manual steps). Full guide: [Upgrade Guide](/en/guide/upgrade) |
 | `anet create --batch` / `anet batch <verb>` | Spin up N agents in bulk (auto-numbered prefix + separate workdir/config/tmux), then manage their lifecycle with `anet batch list/stop/cleanup/start`. See [Batch Agents](/guide/batch) (currently ZH only) |
 | `anet license` | v0.6 legacy: view trial / license status. **No longer needed after Apache 2.0 OSS**; Hub keeps the `licenses` table + `send_task` 14-day trial check for backward-compat |
@@ -327,7 +327,7 @@ anet tasks --limit 5
 
 ### anet doctor
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5818)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5917)
 
 System diagnostics.
 
@@ -336,12 +336,12 @@ anet doctor              # Diagnose only; prints ✅ / ❌ per check with fix hi
 anet doctor --fix        # Auto-repair: (a) migrateNode converts V2 legacy fields (alias/resume/legacy_runtime_name) to v0.8 schema (b) probes expired ntok_ and re-issues them via the hub, writing back to .anet/nodes/<name>/config.json
 ```
 
-Checks (in actual order per [`cli.ts:5818-5983 doctorCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5818)):
+Checks (in actual order per [`cli.ts:5917-6082 doctorCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5917)):
 
 1. Global config (`~/.anet/config.json` — has `hub` / `token`?)
 2. Auth token presence
 3. Hub reachability (GET `/health` — shows sessions / SSE / license / multi-network info)
-4. Local node configs + per-node process status + legacy-field diagnosis ([`diagnoseNode` cli.ts:5743](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5743) detects 8 issue kinds: legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id)
+4. Local node configs + per-node process status + legacy-field diagnosis ([`diagnoseNode` cli.ts:5842](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5842) detects 8 issue kinds: legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id)
 5. Dependencies: `claude --version` / `codex --version` / `bun --version`
 6. Current project `.mcp.json` commhub config
 7. Telegram channel env (`~/.claude/channels/telegram/.env` silently empty? — known token-loss foot-gun for `/telegram:configure`)
