@@ -419,7 +419,7 @@ Channel message format:
 ## Code Structure
 
 ```
-agent-orchestra/
+agent-network/        # repo root (github.com/sleep2agi/agent-network) — monorepo
 ├── server/            # CommHub Server (Bun + SQLite) → runs on Server
 │   └── src/
 │       ├── index.ts          # HTTP routing + MCP + SSE

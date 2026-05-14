@@ -419,7 +419,7 @@ Channel 消息格式：
 ## 代码结构
 
 ```
-agent-orchestra/
+agent-network/        # 仓库根 (github.com/sleep2agi/agent-network) —— monorepo
 ├── server/            # CommHub Server (Bun + SQLite) → 跑在服务器
 │   └── src/
 │       ├── index.ts          # HTTP 路由 + MCP + SSE
