@@ -290,10 +290,14 @@ SSE 断连
   → CommHub UPDATE（不 INSERT）
   → resume_id 是主键，保证幂等
 
-同一 node_name 不同 node_id
-  → alias UNIQUE 约束
+同一 network 内同一 node_name 不同 node_id
+  → UNIQUE(network_id, alias) 复合约束
   → 第二个注册失败
   → agent-node 报错退出："alias 已被占用"
+
+（注：约束是 (network_id, alias) 复合唯一，不是 alias 单列唯一 ——
+  不同 network 可以有同名 alias。旧库的 `alias TEXT UNIQUE` 已被
+  db.ts 一次性 rebuild 迁移成 UNIQUE(network_id, alias)，见 db.ts:331-333）
 ```
 
 ### 进程残留
