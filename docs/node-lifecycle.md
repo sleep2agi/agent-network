@@ -329,9 +329,9 @@ Claude Code CLI 节点的 `session` 是预分配 UUID：首次启动用 `claude 
 
 1. **anet 负责自动补 node_id**（agent-node 只读不写，避免双写）:
 ```typescript
-// anet node start 时检测
+// anet node start 时检测；node_id 由 generateNodeId() 生成（cli.ts:170-172）
 if (!config.node_id) {
-  config.node_id = `n_${crypto.randomBytes(4).toString("hex")}`;
+  config.node_id = generateNodeId();  // `n_${randomUUID().replace(/-/g,"").slice(0,8)}` —— n_ + 8 位 hex
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
   console.log(`[anet] 自动生成 node_id: ${config.node_id}`);
 }
