@@ -1160,7 +1160,7 @@ Model guide:
     // from PROVIDER_CHOICES — none worked). Add via `custom` until verified.
     console.log(`
 Model guide (verified Anthropic-compatible + Claude + custom):
-  - intern-s2-preview  上海 AI Lab 书生 (默认, chat.intern-ai.org.cn) [UNVERIFIED]
+  - intern-s2-preview  上海 AI Lab 书生 (默认, chat.intern-ai.org.cn)
   - intern-s1-pro      上海 AI Lab 书生 (chat.intern-ai.org.cn)
   - MiniMax-M2.7       MiniMax (api.minimaxi.com/anthropic)
   - claude-sonnet-4-6  Anthropic Claude via the default Anthropic API.
@@ -1171,7 +1171,7 @@ Model guide (verified Anthropic-compatible + Claude + custom):
                        self-hosted vLLM, etc.).
 `);
     const modelChoice = await askChoice("Select model:", [
-      { label: "intern-s2-preview",  value: "intern-s2-preview",  description: "上海 AI Lab 书生 默认 [UNVERIFIED] (chat.intern-ai.org.cn)" },
+      { label: "intern-s2-preview",  value: "intern-s2-preview",  description: "上海 AI Lab 书生 默认 (chat.intern-ai.org.cn)" },
       { label: "intern-s1-pro",      value: "intern-s1-pro",      description: "上海 AI Lab 书生 (chat.intern-ai.org.cn)" },
       { label: "MiniMax-M2.7",       value: "MiniMax-M2.7",       description: "MiniMax (api.minimaxi.com/anthropic)" },
       { label: "claude-sonnet-4-6",  value: "claude-sonnet-4-6",  description: "Anthropic default URL" },
@@ -1197,8 +1197,8 @@ Model guide (verified Anthropic-compatible + Claude + custom):
       // 2026-05-13 telegram 4227). Runs on the default claude-agent-sdk runtime
       // — #98 confirmed claude-agent-sdk ↔ intern is fully compatible (the
       // earlier hang was an expired key's 401, not a runtime incompatibility).
-      // intern-s2-preview model id is [UNVERIFIED] — pending real-call verify,
-      // intern key 待 Vincent 提供后验.
+      // intern-s2-preview verified by 通信测试马 real-call 2026-05-14 (raw
+      // /v1/messages HTTP 200, returns Intern-S2-Preview).
       opts._envs.push("ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn");
     }
 
@@ -1320,8 +1320,8 @@ async function createCommand(idOverride?: string) {
     // Verified by Vincent 2026-05-13 telegram 4227: base URL is bare hostname (no /anthropic suffix). Model id `intern-s1-pro` (lowercase).
     // runtime claude-agent-sdk — #98 confirmed claude-agent-sdk ↔ intern is fully compatible (earlier hang was an expired-key 401, not a runtime issue).
     intern:    { runtime: "claude-agent-sdk", label: "上海 AI Lab 书生（intern-s1-pro）", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
-    // [UNVERIFIED] — pending real-call verify, intern key 待 Vincent 提供后验 (#98 发现旧 key 过期). Default model per Vincent 4644+4645.
-    "intern-s2": { runtime: "claude-agent-sdk", label: "上海 AI Lab 书生（intern-s2-preview，默认）[UNVERIFIED]", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
+    // Verified by 通信测试马 real-call 2026-05-14 (raw /v1/messages HTTP 200, returns Intern-S2-Preview). Default model per Vincent 4644+4645.
+    "intern-s2": { runtime: "claude-agent-sdk", label: "上海 AI Lab 书生（intern-s2-preview，默认）", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
     // TODO unverified — same caveat as DeepSeek (Vincent 4227).
     kimi:      { runtime: "claude-agent-sdk", label: "Kimi（长文本 128K）[UNVERIFIED]", baseUrl: "https://api.moonshot.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.moonshot.cn" },
     // TODO unverified — same caveat as DeepSeek (Vincent 4227).
@@ -1348,10 +1348,10 @@ async function createCommand(idOverride?: string) {
   // Use `custom` for everything else until per-vendor verify lands.
   const PROVIDER_CHOICES = [
     // intern-s2-preview = default model (Vincent 4644+4645) — listed first so the
-    // provider picker preselects it. [UNVERIFIED] — pending real-call verify,
-    // intern key 待 Vincent 提供后验. Runs on the default claude-agent-sdk runtime
-    // (#98 confirmed claude-agent-sdk ↔ intern is fully compatible).
-    { key: "intern-s2-preview", label: "上海 AI Lab 书生 — intern-s2-preview (默认) [UNVERIFIED]", baseUrl: "https://chat.intern-ai.org.cn", signupUrl: "https://chat.intern-ai.org.cn/" },
+    // provider picker preselects it. Verified by 通信测试马 real-call 2026-05-14
+    // (raw /v1/messages HTTP 200, returns Intern-S2-Preview). Runs on the default
+    // claude-agent-sdk runtime (#98 confirmed claude-agent-sdk ↔ intern compatible).
+    { key: "intern-s2-preview", label: "上海 AI Lab 书生 — intern-s2-preview (默认)", baseUrl: "https://chat.intern-ai.org.cn", signupUrl: "https://chat.intern-ai.org.cn/" },
     // Verified by Vincent 2026-05-13 telegram 4227: bare hostname, no /anthropic.
     { key: "intern",     label: "上海 AI Lab 书生 — intern-s1-pro",            baseUrl: "https://chat.intern-ai.org.cn",          signupUrl: "https://chat.intern-ai.org.cn/" },
     { key: "minimax",    label: "MiniMax — 国内直连，低成本，速度快",        baseUrl: "https://api.minimaxi.com/anthropic",     signupUrl: "https://platform.minimaxi.com" },
@@ -1409,8 +1409,8 @@ async function createCommand(idOverride?: string) {
       }
       // Intern presets: pin the model id (runtime stays the default
       // claude-agent-sdk — #98 confirmed it's fully compatible with intern).
-      // intern-s2-preview is [UNVERIFIED] — pending real-call verify once
-      // Vincent supplies a valid intern key.
+      // intern-s2-preview verified by 通信测试马 real-call 2026-05-14
+      // (raw /v1/messages HTTP 200, returns Intern-S2-Preview).
       if (cfg.key === "intern-s2-preview") {
         opts.model = "intern-s2-preview";
       } else if (cfg.key === "intern") {
@@ -5310,10 +5310,10 @@ const BATCH_PRESETS: Array<{
   baseUrl?: string;
 }> = [
   // intern-s2-preview = default model (Vincent 4644+4645) — listed first so the
-  // batch picker preselects it. [UNVERIFIED] — pending real-call verify, intern
-  // key 待 Vincent 提供后验. runtime claude-agent-sdk — #98 confirmed it's fully
-  // compatible with intern (earlier hang was an expired-key 401, not a runtime issue).
-  { value: "intern-s2-preview",  label: "claude-agent-sdk + intern-s2-preview (书生 Intern, 默认, https://chat.intern-ai.org.cn) [UNVERIFIED]",
+  // batch picker preselects it. Verified by 通信测试马 real-call 2026-05-14 (raw
+  // /v1/messages HTTP 200, returns Intern-S2-Preview). runtime claude-agent-sdk —
+  // #98 confirmed it's fully compatible with intern (earlier hang was an expired-key 401).
+  { value: "intern-s2-preview",  label: "claude-agent-sdk + intern-s2-preview (书生 Intern, 默认, https://chat.intern-ai.org.cn)",
     runtime: "claude-agent-sdk", model: "intern-s2-preview", baseUrl: "https://chat.intern-ai.org.cn" },
   { value: "intern-s1-pro",      label: "claude-agent-sdk + intern-s1-pro (书生 Intern, https://chat.intern-ai.org.cn)",
     runtime: "claude-agent-sdk", model: "intern-s1-pro",     baseUrl: "https://chat.intern-ai.org.cn" },
