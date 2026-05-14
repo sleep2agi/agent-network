@@ -84,7 +84,7 @@ anet network join <code>
 
 For team leads, trusted operators, anyone who needs to manage members.
 
-- **Can**: everything member can; invite new members + remove non-owner members ([`index.ts:629`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L629) / [`:615`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L615): `["owner","admin"]`); modify any agent.
+- **Can**: everything member can; invite new members + remove non-owner members (invite [`index.ts:641`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L641) / remove [`index.ts:627`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L627): `["owner","admin"]` gate); modify any agent.
 - **Cannot**: **change an existing member's role** — `PUT /api/networks/:id/members/:user_id` is **owner-only** ([`index.ts:620`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L620) `if (callerRole !== "owner")` → 403); admin can only invite / remove, not re-role existing members. Also cannot: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin; R262 chain). A network admin sees only their own audit log rows, same as members and viewers.
 
 Become an admin:
@@ -177,7 +177,7 @@ Full endpoint docs: [PUT members](/en/api/rest#put-api-networks-id-members-user-
 ## FAQ
 
 **Q: After `anet login`, what role do I have?**
-A: `anet whoami`'s `Role:` field is the **system-level role** (`users.role` — either `admin` or `user`), **not the per-network role** (verified at [`agent-network/bin/cli.ts:3120-3141 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3120)):
+A: `anet whoami`'s `Role:` field is the **system-level role** (`users.role` — either `admin` or `user`), **not the per-network role** (verified at [`agent-network/bin/cli.ts:3122-3143 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3122)):
 
 ```
   User: admin (u_xxxxxx)

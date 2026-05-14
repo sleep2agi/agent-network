@@ -104,7 +104,7 @@ anet network join <code>                         # 用邀请码加入
 
 **能干什么**：
 - member 的全部
-- 邀请新成员入网 + 移除非 owner 成员（[`index.ts:629`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L629) / [`:615`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L615)：`["owner","admin"]`）
+- 邀请新成员入网 + 移除非 owner 成员（invite [`index.ts:641`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L641) / remove [`index.ts:627`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L627)：`["owner","admin"]` 门控）
 - 改 / 删 / 启动停止任何 agent（包括别人创建的）
 
 **不能干什么**：
@@ -215,7 +215,7 @@ curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
 ## FAQ
 
 **Q：我 `anet login` 后是什么 role？**
-A：`anet whoami` 输出的 `Role:` 是**系统级 role**（`users.role` —— `admin` 或 `user`），**不是 per-network role**（verify [`agent-network/bin/cli.ts:3120-3141 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3120)）：
+A：`anet whoami` 输出的 `Role:` 是**系统级 role**（`users.role` —— `admin` 或 `user`），**不是 per-network role**（verify [`agent-network/bin/cli.ts:3122-3143 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3122)）：
 ```
   User: admin (u_xxxxxx)
   Role: admin              ← users.role 系统级（'admin' / 'user'），不是 network role
