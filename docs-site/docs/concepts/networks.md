@@ -126,7 +126,7 @@ anet network delete old-network
 > R308 校准：「创建/撤销 network Token」原本标 member ❌，实际 [`auth.ts:236-242 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L236) 只挡 **viewer**（`viewer cannot create full-access network tokens`），owner / admin / member 都能建。撤销 Token 走 [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` —— 任何用户都能撤销**自己的** token，也不按网络角色门控。不带 `network_id` 的纯 user token（`utok_`）任何登录用户都能创建。
 
 ::: warning 审计日志权限**不**走网络角色
-旧 doc 在这里列「查看审计日志」一行 —— 实际 `/api/audit-log` 不按 owner / admin / member / viewer **网络角色**门控（verify [`server/src/index.ts:1034-1035`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1034)）：
+旧 doc 在这里列「查看审计日志」一行 —— 实际 `/api/audit-log` 不按 owner / admin / member / viewer **网络角色**门控（verify [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086)）：
 
 - **系统级 admin**（`users.role='admin'`，首位注册用户）：看所有人 audit_log
 - **非 admin**（`users.role='user'`）：只看自己的 audit_log（server 自动加 `WHERE user_id = self` 过滤）

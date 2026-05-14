@@ -126,7 +126,7 @@ Each user has a role in each network. Four permission levels from highest to low
 > R308 calibration: "Create/revoke network tokens" was previously marked member ❌. In fact [`auth.ts:236-242 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L236) only blocks **viewer** (`viewer cannot create full-access network tokens`) — owner / admin / member can all create them. Revoking goes through [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` — any user can revoke **their own** tokens, also not network-role-gated. Pure user tokens (`utok_`, no `network_id`) can be created by any logged-in user.
 
 ::: warning Audit log permission is **not** gated by network role
-The matrix used to list "View audit log" — but `/api/audit-log` is **not** gated by the network-level role (`owner` / `admin` / `member` / `viewer`). Verified at [`server/src/index.ts:1034-1035`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1034):
+The matrix used to list "View audit log" — but `/api/audit-log` is **not** gated by the network-level role (`owner` / `admin` / `member` / `viewer`). Verified at [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086):
 
 - **System admin** (`users.role='admin'`, the first registered user): can read everyone's audit log
 - **Non-admin** (`users.role='user'`): can only see their own audit log (the server auto-adds `WHERE user_id = self`)

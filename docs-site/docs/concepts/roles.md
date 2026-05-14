@@ -42,7 +42,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 删除 network | ❌ | ❌ | ❌ | ✅ |
 | **hub 全局**（系统级 `users.role` 门控，**不是** 网络角色） | | | | |
 | 看 `/api/audit-log` 自己的 row | ✅ | ✅ | ✅ | ✅ |
-| 看 `/api/audit-log` 全部 row | 仅 `users.role='admin'`（R262 chain；verify [`server/src/index.ts:1034-1035`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1034)） | | | |
+| 看 `/api/audit-log` 全部 row | 仅 `users.role='admin'`（R262 chain；verify [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086)） | | | |
 | `/api/users` 看用户列表 | 仅 `users.role='admin'`（同上系统级） | | | |
 | `/api/server-logs` 调试 console | 仅 `users.role='admin'` | | | |
 | 调 `/api/admin/wipe-db` 等危险操作 | 仅 `users.role='admin'` | | | |
@@ -105,11 +105,11 @@ anet network join <code>                         # 用邀请码加入
 
 **能干什么**：
 - member 的全部
-- 邀请新成员入网 + 移除非 owner 成员（invite [`index.ts:641`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L641) / remove [`index.ts:627`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L627)：`["owner","admin"]` 门控）
+- 邀请新成员入网 + 移除非 owner 成员（invite [`index.ts:695`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L695) / remove [`index.ts:681`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L681)：`["owner","admin"]` 门控）
 - 改 / 删 / 启动停止任何 agent（包括别人创建的）
 
 **不能干什么**：
-- ❌ **改成员 role** —— `PUT /api/networks/:id/members/:user_id` 是 **owner only**（[`index.ts:620`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L620) `if (callerRole !== "owner")` 直接 403）；admin 只能 invite / remove，不能改已有成员的 role
+- ❌ **改成员 role** —— `PUT /api/networks/:id/members/:user_id` 是 **owner only**（[`index.ts:674`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L674) `if (callerRole !== "owner")` 直接 403）；admin 只能 invite / remove，不能改已有成员的 role
 - ❌ 删除 network 本身（只有 owner 能）
 - ❌ 移除 owner / 把别人升到 owner
 - ❌ 看其他人的 `/api/audit-log` row —— admin-only 端点是**系统级** `users.role='admin'` 限定（**不是** network admin；R262 chain）；network admin 跟 viewer / member 一样只能看自己的 audit log row
@@ -159,7 +159,7 @@ network 的 4 个 role（owner/admin/member/viewer）是**绑定到某个 networ
 | 操作 | network admin | hub 全局 admin (`admin` user) |
 |---|---|---|
 | 调 `/api/audit-log` 看**自己的** row | ✅ | ✅ |
-| 调 `/api/audit-log` 看**其他人** row | ❌（server 自动 `WHERE user_id = self` 过滤） | ✅（看全部，R262 chain；index.ts:1034-1035） |
+| 调 `/api/audit-log` 看**其他人** row | ❌（server 自动 `WHERE user_id = self` 过滤） | ✅（看全部，R262 chain；index.ts:1086-1089） |
 | `anet hub admin reset-user`（重置任意用户密码） | ❌ | ✅（仅 hub 本机调用） |
 | 创建新 user | ❌ | ✅（仅 hub 全局 admin） |
 | 看 hub 所有 network | ❌（只看自己有 role 的） | ✅ |
