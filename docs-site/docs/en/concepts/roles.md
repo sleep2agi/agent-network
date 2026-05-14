@@ -43,7 +43,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | Delete network | ❌ | ❌ | ❌ | ✅ |
 | **Hub-global** (system-level `users.role` gate, **not** network role) | | | | |
 | `/api/audit-log` — your own rows | ✅ | ✅ | ✅ | ✅ |
-| `/api/audit-log` — all rows | Only `users.role='admin'` (R262 chain; verified at [`server/src/index.ts:1015-1018`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1015)) | | | |
+| `/api/audit-log` — all rows | Only `users.role='admin'` (R262 chain; verified at [`server/src/index.ts:1034-1035`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1034)) | | | |
 | `/api/users` (list users) | Only `users.role='admin'` (same system-level gate) | | | |
 | `/api/server-logs` (debug console) | Only `users.role='admin'` | | | |
 | `/api/admin/wipe-db` (and similar) | Only `users.role='admin'` | | | |
@@ -122,7 +122,7 @@ The 4 roles above are scoped to a single network. There is also a **hub-global a
 | Operation | network admin | hub-global admin (`admin` user) |
 |---|---|---|
 | `/api/audit-log` — own rows | ✅ | ✅ |
-| `/api/audit-log` — all rows | ❌ (server auto-filters `WHERE user_id = self`) | ✅ (R262 chain; index.ts:1015-1018) |
+| `/api/audit-log` — all rows | ❌ (server auto-filters `WHERE user_id = self`) | ✅ (R262 chain; index.ts:1034-1035) |
 | `anet hub admin reset-user` (reset any user's password) | ❌ | ✅ (local-only) |
 | Create new users | ❌ | ✅ |
 | See all networks on the hub | ❌ (only ones they're a member of) | ✅ |
@@ -177,7 +177,7 @@ Full endpoint docs: [PUT members](/en/api/rest#put-api-networks-id-members-user-
 ## FAQ
 
 **Q: After `anet login`, what role do I have?**
-A: `anet whoami`'s `Role:` field is the **system-level role** (`users.role` — either `admin` or `user`), **not the per-network role** (verified at [`agent-network/bin/cli.ts:3122-3143 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3122)):
+A: `anet whoami`'s `Role:` field is the **system-level role** (`users.role` — either `admin` or `user`), **not the per-network role** (verified at [`agent-network/bin/cli.ts:3145-3166 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3145)):
 
 ```
   User: admin (u_xxxxxx)

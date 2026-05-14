@@ -43,7 +43,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 删除 network | ❌ | ❌ | ❌ | ✅ |
 | **hub 全局**（系统级 `users.role` 门控，**不是** 网络角色） | | | | |
 | 看 `/api/audit-log` 自己的 row | ✅ | ✅ | ✅ | ✅ |
-| 看 `/api/audit-log` 全部 row | 仅 `users.role='admin'`（R262 chain；verify [`server/src/index.ts:1015-1018`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1015)） | | | |
+| 看 `/api/audit-log` 全部 row | 仅 `users.role='admin'`（R262 chain；verify [`server/src/index.ts:1034-1035`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1034)） | | | |
 | `/api/users` 看用户列表 | 仅 `users.role='admin'`（同上系统级） | | | |
 | `/api/server-logs` 调试 console | 仅 `users.role='admin'` | | | |
 | 调 `/api/admin/wipe-db` 等危险操作 | 仅 `users.role='admin'` | | | |
@@ -158,7 +158,7 @@ network 的 4 个 role（owner/admin/member/viewer）是**绑定到某个 networ
 | 操作 | network admin | hub 全局 admin (`admin` user) |
 |---|---|---|
 | 调 `/api/audit-log` 看**自己的** row | ✅ | ✅ |
-| 调 `/api/audit-log` 看**其他人** row | ❌（server 自动 `WHERE user_id = self` 过滤） | ✅（看全部，R262 chain；index.ts:1015-1018） |
+| 调 `/api/audit-log` 看**其他人** row | ❌（server 自动 `WHERE user_id = self` 过滤） | ✅（看全部，R262 chain；index.ts:1034-1035） |
 | `anet hub admin reset-user`（重置任意用户密码） | ❌ | ✅（仅 hub 本机调用） |
 | 创建新 user | ❌ | ✅（仅 hub 全局 admin） |
 | 看 hub 所有 network | ❌（只看自己有 role 的） | ✅ |
@@ -215,7 +215,7 @@ curl -X DELETE "http://localhost:9200/api/networks/$NET/members/u_bob_xxx" \
 ## FAQ
 
 **Q：我 `anet login` 后是什么 role？**
-A：`anet whoami` 输出的 `Role:` 是**系统级 role**（`users.role` —— `admin` 或 `user`），**不是 per-network role**（verify [`agent-network/bin/cli.ts:3122-3143 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3122)）：
+A：`anet whoami` 输出的 `Role:` 是**系统级 role**（`users.role` —— `admin` 或 `user`），**不是 per-network role**（verify [`agent-network/bin/cli.ts:3145-3166 whoamiCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3145)）：
 ```
   User: admin (u_xxxxxx)
   Role: admin              ← users.role 系统级（'admin' / 'user'），不是 network role
