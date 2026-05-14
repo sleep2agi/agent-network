@@ -351,6 +351,31 @@ function dashboardReleaseTag(): string {
   return "preview";
 }
 
+// #89 — npx leaves half-baked `.agent-network-dashboard-<rand>` staging dirs in
+// its cache when a previous run was interrupted/concurrent; the next run's rename
+// then fails with ENOTEMPTY and the user is stuck until they manually nuke
+// ~/.npm/_npx. Best-effort sweep of *stale* (>60s, skips an in-progress concurrent
+// npx) staging dirs before spawn. Never throws — startup must not depend on this.
+function cleanStaleNpxDashboardTemp() {
+  try {
+    const npxRoot = join(home, ".npm", "_npx");
+    if (!existsSync(npxRoot)) return;
+    for (const hash of readdirSync(npxRoot)) {
+      const scopeDir = join(npxRoot, hash, "node_modules", "@sleep2agi");
+      if (!existsSync(scopeDir)) continue;
+      for (const entry of readdirSync(scopeDir)) {
+        if (!entry.startsWith(".agent-network-dashboard-")) continue;
+        const full = join(scopeDir, entry);
+        try {
+          if (Date.now() - statSync(full).mtimeMs < 60_000) continue; // in-progress
+          rmSync(full, { recursive: true, force: true });
+          console.log(`[anet] cleaned stale npx temp dir: ${entry}`);
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
 function parseSemver(text: string): Semver | null {
   const match = text.match(/(?:^|[^0-9])v?(\d+)\.(\d+)\.(\d+)(?:[^0-9]|$)/);
   if (!match) return null;
@@ -2328,6 +2353,7 @@ async function serverCommand() {
 
     // Match dashboard release channel to anet channel (see #61 + dashboardReleaseTag).
     const tag = dashboardReleaseTag();
+    cleanStaleNpxDashboardTemp(); // #89 — self-heal npx cache before spawn
     console.log(`[anet] spawning dashboard @${tag} (anet ${getAnetVersion() || "unknown"})`);
     const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${tag}`], { env, stdio: "inherit" });
     dashChild.on("error", () => {
