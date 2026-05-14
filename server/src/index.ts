@@ -131,6 +131,18 @@ function isLocalhostIP(ip: string): boolean {
   return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip === "localhost";
 }
 
+// Normalize the raw `agent` field into a canonical runtime identifier for the
+// dashboard's Runtime badge. Returns null for unknown/absent agents so the
+// frontend can fall back to a placeholder.
+function normalizeRuntime(agent: unknown): string | null {
+  if (typeof agent !== "string" || agent.length === 0) return null;
+  if (agent === "claude-code") return "claude-code-cli";
+  if (agent.startsWith("agent-node:codex")) return "codex-sdk";
+  if (agent.startsWith("agent-node:claude")) return "claude-agent-sdk";
+  if (agent === "http-api" || agent === "http" || agent === "api") return "http-api";
+  return null;
+}
+
 function isTmuxAllowedIP(ip: string): boolean {
   return isLocalhostIP(ip) || TMUX_ALLOWLIST.has(ip);
 }
@@ -757,7 +769,14 @@ Bun.serve({
       let sql = "SELECT * FROM sessions WHERE 1=1";
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC";
-      const sessions = db.all(sql, ...params);
+      // `model` comes straight from the sessions row (SELECT *); `runtime` is
+      // derived from the raw `agent` field. Both default to null for old nodes
+      // that never reported a model — the dashboard falls back to a placeholder.
+      const sessions = db.all(sql, ...params).map((s: any) => ({
+        ...s,
+        model: s.model ?? null,
+        runtime: normalizeRuntime(s.agent),
+      }));
       const summary = sessions.reduce((acc: any, session: any) => {
         const raw = String(session.status || "").toLowerCase();
         if (raw === "offline") acc.offline++;

@@ -55,13 +55,14 @@ db.exec(`
 
 // ── V2 schema migration (ALTER TABLE, safe to re-run) ──
 
-// sessions: add node_id, session_id, config_path, channels, last_seen_at
+// sessions: add node_id, session_id, config_path, channels, last_seen_at, model
 for (const col of [
   { name: "node_id", def: "TEXT" },
   { name: "session_id", def: "TEXT" },
   { name: "config_path", def: "TEXT" },
   { name: "channels", def: "TEXT" },
   { name: "last_seen_at", def: "TEXT" },
+  { name: "model", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
