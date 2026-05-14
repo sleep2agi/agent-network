@@ -302,15 +302,15 @@ docker compose logs seed
 
 ### 19. Dashboard 部署到 Vercel 失败
 
-必须使用 prebuilt 方式部署：
+必须使用 prebuilt 方式部署 —— 两步，顺序不能错：
 
 ```bash
 cd agent-network-dashboard
-npm run build
-vercel deploy --prebuilt --prod
+vercel build --prod                  # 本地 build，产物写入 .vercel/output
+vercel deploy --prebuilt --prod      # 上传 .vercel/output
 ```
 
-不要在 Vercel 上 build，因为可能缺少环境变量。
+注意 **第一步必须是 `vercel build`，不是 `npm run build`** —— `vercel deploy --prebuilt` 只上传 `.vercel/output` 目录，而这个目录由 `vercel build` 生成；只跑 `npm run build` 的话 `.vercel/output` 是空的或上一次的旧产物。不在 Vercel 云端 build 既省构建费，也避免环境变量缺失。
 
 ### 20. PostgreSQL 支持如何？
 

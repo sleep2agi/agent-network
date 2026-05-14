@@ -302,15 +302,15 @@ docker compose logs seed
 
 ### 19. Dashboard deployment to Vercel fails
 
-You must use prebuilt deployment:
+You must use prebuilt deployment — two steps, order matters:
 
 ```bash
 cd agent-network-dashboard
-npm run build
-vercel deploy --prebuilt --prod
+vercel build --prod                  # build locally; output goes to .vercel/output
+vercel deploy --prebuilt --prod      # upload .vercel/output
 ```
 
-Don't build on Vercel, as environment variables may be missing.
+Note that **step one must be `vercel build`, not `npm run build`** — `vercel deploy --prebuilt` only uploads the `.vercel/output` directory, which is produced by `vercel build`; running just `npm run build` leaves `.vercel/output` empty or stale. Building locally instead of on Vercel saves build cost and avoids missing environment variables.
 
 ### 20. What about PostgreSQL support?
 
