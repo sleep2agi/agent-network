@@ -258,6 +258,8 @@ Unlike `TELEGRAM_BOT_TOKEN` (which agent-node reads directly), `TELEGRAM_ALLOW_U
 `.env` contains plaintext passwords and API keys — always add it to `.gitignore`. Commit only `.env.example` with placeholders — the actual [`demos/codex-telegram-squad/.env.example`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/.env.example):
 
 ```bash
+# Copy to .env and fill in:
+
 # Legacy v0.5/v0.6 hub master token, soft-deprecated in v0.8 / removed in v1.0.
 # This demo's docker-compose.yml still uses it as the worker COMMHUB_TOKEN seed (fallback "squad-token"),
 # kept for demo compat; new deployments don't need this line — anet hub start auto-bootstraps the admin utok_.

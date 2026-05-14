@@ -258,9 +258,11 @@ MINIMAX_API_KEY=your-minimax-api-key
 `.env` 含明文密码 + API key，必须 `.gitignore`。仓库里只 commit `.env.example`（占位符）—— 实际 [`demos/codex-telegram-squad/.env.example`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/.env.example) 内容：
 
 ```bash
-# Legacy v0.5/v0.6 hub master token，v0.8 软废弃 / v1.0 移除。
-# 本 demo 的 docker-compose.yml 仍拿它做 worker COMMHUB_TOKEN 种子（fallback "squad-token"），
-# 保留作 demo 兼容；新部署不需要这行 —— anet hub start 自动 bootstrap admin utok_。
+# Copy to .env and fill in:
+
+# Legacy v0.5/v0.6 hub master token. v0.8 起软废弃（仅 /api/* 只读 + deprecation warning），v1.0 完全移除。
+# 本 demo 的 docker-compose.yml 仍把它作为 worker 的 COMMHUB_TOKEN 种子（fallback "squad-token"），
+# 所以保留作 demo 兼容；新部署不需要这一行——`anet hub start` 自动 bootstrap admin utok_。
 COMMHUB_AUTH_TOKEN=squad-token
 
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
