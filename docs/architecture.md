@@ -287,10 +287,23 @@ interface InboxMessage {
 }
 ```
 
-### Server（编程入口）
+### Server（编程入口 — R257 校准：仅 monorepo 开发可用，npm 包不暴露）
+
+::: warning npm 包不暴露 `./server` export
+verify [`agent-network/package.json`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json):
+```json
+"exports": { ".": { "import": "./dist/src/client.js", "types": "./dist/client.d.ts" } },
+"files": ["dist"]
+```
+
+`exports` 只有 `.` 一个 entry，`files: ["dist"]` 不含 `src/server.ts`，所以 npm 包消费者**不能** `import { startServer } from '@sleep2agi/agent-network/server'`（会 `MODULE_NOT_FOUND`）。`src/server.ts` 只在 monorepo 开发场景下 import `../../server/src/index.ts` 作 dev 入口，不对外发布。
+
+生产环境用户跑 hub 走 `anet hub start`（通过 bunx 拉独立 `@sleep2agi/commhub-server` PIN 版，跟 R221/R223/R250 chain 一致）。
+:::
 
 ```typescript
-import { startServer } from '@sleep2agi/agent-network/server';
+// monorepo 开发：直接从 src 用，跳过 npm 包
+import { startServer } from './agent-network/src/server.ts';
 
 await startServer({
   port: 9200,

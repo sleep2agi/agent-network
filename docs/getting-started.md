@@ -156,11 +156,13 @@ anet doctor          # System diagnostic — also auto-fixes stale ntok_ on hub 
 ```bash
 anet node create mm-bot \
   --runtime claude-agent-sdk \
-  --model MiniMax-M2.7 \
+  --model <minimax-model-id> \
   --env ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic \
   --env ANTHROPIC_AUTH_TOKEN=your-key
 anet node start mm-bot
 ```
+
+Look up the current MiniMax model id at [platform.minimaxi.com](https://platform.minimaxi.com) — this doc does not hard-pin model versions because each provider rotates their lineup every few weeks (R175/R245/R253 chain).
 
 ## Architecture
 
