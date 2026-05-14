@@ -48,15 +48,14 @@ graph TB
 
 ### Token 体系
 
-三种 Token 满足不同场景：
+v0.8 是**双 Token 体系**：
 
 | Token | 前缀 | 绑定 | 用途 |
 |-------|------|------|------|
 | 用户 Token | `utok_` | 用户 | CLI / Dashboard 登录 |
 | 网络 Token | `ntok_` | 用户 + 网络 | Agent 连接 |
-| API Token | `atok_` | 用户 + 可选网络 | 通用 API |
 
-详见 [Token 体系](/concepts/tokens)。
+`atok_`（V2 时代的 api token）已被 `utok_` + `ntok_` 取代 —— 代码里还保留前缀兼容判断（不报错），但**新用户不需要接触**，`anet token create / ls / revoke` 底层走的都是 `utok_` / `ntok_`。详见 [Token 体系](/concepts/tokens)。
 
 ### Token 存储
 

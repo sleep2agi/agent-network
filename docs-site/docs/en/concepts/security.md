@@ -48,15 +48,14 @@ The diagram above represents the **design goal**. Current v0.8.2 reality:
 
 ### Token System
 
-Three token types serve different scenarios:
+v0.8 uses a **dual-token system**:
 
 | Token | Prefix | Binding | Purpose |
 |-------|------|------|------|
 | User Token | `utok_` | User | CLI / Dashboard login |
 | Network Token | `ntok_` | User + Network | Agent connection |
-| API Token | `atok_` | User + Optional network | General API |
 
-See [Token System](/en/concepts/tokens) for details.
+`atok_` (the V2-era API token) has been superseded by `utok_` + `ntok_` — the code still keeps a prefix-compatibility check (it won't error), but **new users never need to touch it**; `anet token create / ls / revoke` all operate on `utok_` / `ntok_` underneath. See [Token System](/en/concepts/tokens) for details.
 
 ### Token Storage
 
