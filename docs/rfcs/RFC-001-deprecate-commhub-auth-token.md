@@ -288,7 +288,7 @@ if (authErr) return authErr;
    - 作为 `anet doctor --fix` 的一个 flag（"发现 admin 损坏，要重建吗？"）。
    倾向：独立 `anet hub admin reset` 子命令，让它在 `--help` 里能被看到、明确是恢复工具。`anet doctor` 只做检测 + 提示，不应静默改库。
 
-3. **bunx 缓存老版 `commhub-server`。** CLI 通过 `PINNED_SERVER_VERSION`（`bin/cli.ts:2065`）来规避 bunx 缓存。v0.8 上线时，老 CLI 用户会拉到老 server。需要协调好版本 bump 节奏，或者接受一个 release 窗口期内老 server 仍接受 master token —— 反正 v0.8 的软废弃就是给这个 case 准备的。
+3. **bunx 缓存老版 `commhub-server`。** CLI 通过 `PINNED_SERVER_VERSION`（`bin/cli.ts:2088`）来规避 bunx 缓存。v0.8 上线时，老 CLI 用户会拉到老 server。需要协调好版本 bump 节奏，或者接受一个 release 窗口期内老 server 仍接受 master token —— 反正 v0.8 的软废弃就是给这个 case 准备的。
 
 4. **`anet hub start --token` flag。** 当前被部分 power user 和测试脚本使用。阶段 2 保留（warning）。阶段 3 删除。`tests/` 下有没有用到？实施方在 v1.0 前要 grep 并迁移。
 
