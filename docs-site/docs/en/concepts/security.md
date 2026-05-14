@@ -108,15 +108,24 @@ flowchart TD
 
 ### Password Security
 
-- Passwords stored using SHA-256 hashing (planned upgrade to Argon2id — see below)
-- **Password strength**:
-  - User-chosen passwords (register / `anet passwd`): ≥ 8 chars + rejected against a top-1000 weak-password dictionary
-  - Bootstrap admin exception: ≥ 4 chars (so the quick-start `admin / anethub` default works) — public deployments must immediately rotate via `anet passwd`
+- Passwords are stored as SHA-256 hashes with a static prefix salt `anet:` — verified at [`server/src/db.ts:403-405 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L403):
+  ```ts
+  export function hashPassword(password: string): string {
+    return new Bun.CryptoHasher("sha256").update(`anet:${password}`).digest("hex");
+  }
+  ```
+  The `anet:` prefix defeats generic cross-project rainbow tables, but it is **not a per-user salt** — the same password produces the same hash across different accounts. Argon2id migration plan is in the ::: info below.
+
+- **Password strength** — verified at [`server/src/auth.ts:24-50 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24):
+  - User-chosen passwords (register / `anet passwd`): **≥ 8 chars** + rejected against [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)
+  - Bootstrap admin **register exception**: ≥ 4 chars (so the quick-start `admin / anethub` default works) — [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) only requires length ≥ 4 for the very first registered user; **`anet passwd` / `reset-user` have no such exemption**, always enforcing ≥ 8 + not in the weak-password dictionary
+  - Public deployments must rotate the password **immediately** via `anet passwd` (aligned with the R193 chain)
+
 - Usernames support letters, numbers, underscores, and Chinese characters
-- Login failures don't reveal whether the username or password was wrong (prevents enumeration)
+- Login failures don't reveal whether the username or password was wrong ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally merges both errors into the same message to prevent username enumeration; aligned with the R169 chain)
 
 ::: info Planned (v0.9+)
-SHA-256 → Argon2id upgrade for stronger brute-force resistance.
+SHA-256 → Argon2id upgrade ([security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)) for stronger brute-force resistance and per-user salt (to prevent identical-hash collisions for the same password). Token hashes (`hashToken` uses bare SHA-256 without a salt) do not need Argon2id — tokens are 128-bit random strings, so rainbow tables don't apply.
 :::
 
 ## Authorization

@@ -108,15 +108,24 @@ flowchart TD
 
 ### 密码安全
 
-- 密码使用 SHA-256 哈希存储（计划升级 Argon2id，详见下文）
-- **密码强度**：
-  - 用户自选密码（register / `anet passwd`）：≥ 8 字符 + 拒绝 top-1000 弱密码字典
-  - 首次 bootstrap admin 例外：≥ 4 字符即可（让快速上手 `admin / anethub` 默认成立）—— 公网部署必须立刻 `anet passwd` 改成强密码
+- 密码使用 SHA-256 哈希存储 + 静态 prefix salt `anet:` —— verify [`server/src/db.ts:403-405 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L403):
+  ```ts
+  export function hashPassword(password: string): string {
+    return new Bun.CryptoHasher("sha256").update(`anet:${password}`).digest("hex");
+  }
+  ```
+  `anet:` prefix 让跨项目通用 rainbow table 失效，但**不是 per-user salt** —— 同密码在不同账户哈希值相同。Argon2id 迁移规划见下文 ::: info。
+
+- **密码强度** —— verify [`server/src/auth.ts:24-50 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24):
+  - 用户自选密码（register / `anet passwd`）：**≥ 8 字符** + 拒绝 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典
+  - 首次 bootstrap admin **register 例外**：≥ 4 字符即可（让快速上手 `admin / anethub` 默认成立）—— [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) 检测「首位注册用户」时只校验 length ≥ 4；**`anet passwd` / `reset-user` 无此豁免**，永远强制 ≥ 8 + 非弱密码
+  - 公网部署必须**立刻** `anet passwd` 改强密码（R193 chain 一致）
+
 - 用户名支持字母、数字、下划线、中文
-- 登录失败不提示是用户名错还是密码错（防枚举）
+- 登录失败不提示是用户名错还是密码错（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration；R169 chain 一致）
 
 ::: info 计划中（v0.9+）
-SHA-256 → Argon2id 升级，提升抗暴力破解能力。
+SHA-256 → Argon2id 升级（[security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)），提升抗暴力破解能力 + per-user salt 防止同密码哈希碰撞。Token 哈希（cli.ts hashToken 用纯 SHA-256 无 salt）不需要 Argon2id —— token 是 128-bit 随机字符串，rainbow table 不适用。
 :::
 
 ## 授权（Authorization）
