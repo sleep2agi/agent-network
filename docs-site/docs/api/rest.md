@@ -1050,7 +1050,7 @@ curl -X POST http://localhost:9200/api/task \
 | 403 | `access denied to requested network` | utok\_ 调用方不是 `network_id` 成员 |
 | 403 | `permission_denied` | 角色不足（viewer 不能写）|
 
-写 audit log: `action='register'` 不写，`new_task` SSE 推送给 target alias。
+**不**写 audit log（[`/api/task` 处理函数 index.ts:772-840](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L772) 没有 `logAudit` 调用，跟 R195 chain `POST /api/networks` 的「不写」一致）；成功后给 target alias 推送 `new_task` SSE 事件。
 
 ### POST /api/broadcast
 
