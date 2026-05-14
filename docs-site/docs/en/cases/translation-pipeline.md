@@ -11,6 +11,7 @@ Three Agents form a translation pipeline: Chinese original -> English translatio
 cd demos/translation-pipeline
 MINIMAX_API_KEY=your-key docker compose up
 ```
+See [demos/translation-pipeline](https://github.com/sleep2agi/agent-network/tree/main/demos/translation-pipeline) for full source.
 :::
 
 ## Result
