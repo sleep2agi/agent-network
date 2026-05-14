@@ -231,6 +231,7 @@ flowchart TD
 | `anet_version` | string | 配置版本 |
 | `node_id` | string | 稳定唯一标识（n_ 前缀 + 8 位 hex） |
 | `node_name` | string | 显示名称，可 rename |
+| `alias` | string | 节点别名（`.anet/nodes/<alias>/` 目录名 + CommHub 上的显示标识；不单独设时等于 `node_name`） |
 | `runtime` | string | 运行时：`claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `model` | string | AI 模型名称 |
 | `session` | string | session/thread ID。`claude-code-cli` runtime 下由 `anet node create` 预生成 UUID（首次 start 用 `--session-id <uuid>` 绑定，重启自动 `--resume <uuid>` 续会话；v0.8.2 修了之前默认丢 session 的 bug）；其他 runtime 是上次 session ID 用作 resume |
@@ -238,6 +239,10 @@ flowchart TD
 | `tools` | string[] | 允许使用的工具列表。**仅 `claude-agent-sdk` 生效**；`codex-sdk` 静默忽略（工具集 baked in codex 二进制，见上方 L109 注 + [runtimes#codex-sdk](/guide/runtimes#codex-sdk)）|
 | `env` | object | 环境变量覆盖 |
 | `flags` | object | 运行时标志 |
+| `hub` | string | CommHub Server 地址覆盖（不设时 fallback 到全局 `~/.anet/config.json` 的 `hub`） |
+| `token` | string | 认证 Token 覆盖（不设时 fallback 到全局 config 的 `token`） |
+| `network_id` | string | 所属网络 ID（多数情况靠 `ntok_` 推断，不需手填） |
+| `systemPrompt` | string | 系统提示词，拼到每个任务前（也可用 `--prompt` flag；env `SYSTEM_PROMPT` **不读**，见上方 R242 注） |
 
 ## 任务处理流程
 

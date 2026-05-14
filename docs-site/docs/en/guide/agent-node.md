@@ -231,6 +231,7 @@ After the project config is loaded, [`cli.ts:123-125`](https://github.com/sleep2
 | `anet_version` | string | Config version |
 | `node_id` | string | Stable unique identifier (n_ prefix + 8-char hex) |
 | `node_name` | string | Display name, can be renamed |
+| `alias` | string | Node alias (the `.anet/nodes/<alias>/` directory name + the display identifier on CommHub; equals `node_name` when not set separately) |
 | `runtime` | string | Runtime: `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `model` | string | AI model name |
 | `session` | string | session/thread ID. For the `claude-code-cli` runtime, `anet node create` pre-generates a UUID (first `start` binds it via `--session-id <uuid>`, restarts auto-`--resume <uuid>` to continue the conversation; v0.8.2 fixed a prior default session-loss bug). For other runtimes, this is the previous session ID for resume |
@@ -238,6 +239,10 @@ After the project config is loaded, [`cli.ts:123-125`](https://github.com/sleep2
 | `tools` | string[] | Allowed tools list. **`claude-agent-sdk` only**; `codex-sdk` silently ignores it (toolset is baked into the codex binary — see the L109 note above + [runtimes#codex-sdk](/en/guide/runtimes#codex-sdk)) |
 | `env` | object | Environment variable overrides |
 | `flags` | object | Runtime flags |
+| `hub` | string | CommHub Server address override (falls back to the global `~/.anet/config.json` `hub` when unset) |
+| `token` | string | Auth token override (falls back to the global config `token` when unset) |
+| `network_id` | string | Network ID (usually inferred from `ntok_`, no need to set manually) |
+| `systemPrompt` | string | System prompt, prepended to every task (can also use the `--prompt` flag; the `SYSTEM_PROMPT` env var is **not read** — see the R242 note above) |
 
 ## Task Processing Flow
 
