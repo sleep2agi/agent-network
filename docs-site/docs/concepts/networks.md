@@ -275,14 +275,18 @@ sql = addScope(sql, params, effectiveNetId);
 ```sql
 -- 网络表
 CREATE TABLE networks (
+  -- 基础 schema（db.ts:167-176）
   network_id   TEXT PRIMARY KEY,
   network_name TEXT NOT NULL,
   owner_id     TEXT NOT NULL,
   description  TEXT,
-  visibility   TEXT DEFAULT 'private',  -- private/public (**字段存在, 当前不启用**, 见 R211 + L211 配额限制 section)
-  max_members  INTEGER DEFAULT 50,       -- **字段存在, server 端不强制检查**: addNetworkMember + joinByInvite 都没有 max_members gate, 是 v0.6 配额体系的预留字段, 见 [配额限制 v0.6 设计目标 — 当前未启用](#配额限制-v0-6-设计目标-当前未启用)
-  created_at   TEXT DEFAULT (datetime('now')),
-  updated_at   TEXT DEFAULT (datetime('now'))
+  settings     TEXT,                     -- network 级配置 JSON（预留字段）
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(owner_id, network_name),         -- 同一 owner 下 network 名唯一
+  -- V3.13 ALTER TABLE 迁移补的列（db.ts:275-277）
+  visibility   TEXT DEFAULT 'private',  -- private/public (**字段存在, 当前不启用**, 见 L211 配额限制 section)
+  max_members  INTEGER DEFAULT 50        -- **字段存在, server 端不强制检查**: addNetworkMember + joinByInvite 都没有 max_members gate, 是 v0.6 配额体系的预留字段, 见 [配额限制 v0.6 设计目标 — 当前未启用](#配额限制-v0-6-设计目标-当前未启用)
 );
 
 -- 网络成员表

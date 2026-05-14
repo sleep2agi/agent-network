@@ -275,14 +275,18 @@ Network-related database tables:
 ```sql
 -- Networks table
 CREATE TABLE networks (
+  -- Base schema (db.ts:167-176)
   network_id   TEXT PRIMARY KEY,
   network_name TEXT NOT NULL,
   owner_id     TEXT NOT NULL,
   description  TEXT,
+  settings     TEXT,                     -- network-level config JSON (reserved field)
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(owner_id, network_name),         -- network name unique per owner
+  -- Columns added by the V3.13 ALTER TABLE migration (db.ts:275-277)
   visibility   TEXT DEFAULT 'private',  -- private/public (**field exists but currently inert** — see [Quota limits — v0.6 design / currently not enforced](#quota-limits-v0-6-design--currently-not-enforced))
-  max_members  INTEGER DEFAULT 50,       -- **field exists, server-side enforcement is OFF**: addNetworkMember + joinByInvite have no max_members gate. Reserved for the v0.6 quota system. See the quota-limits section below.
-  created_at   TEXT DEFAULT (datetime('now')),
-  updated_at   TEXT DEFAULT (datetime('now'))
+  max_members  INTEGER DEFAULT 50        -- **field exists, server-side enforcement is OFF**: addNetworkMember + joinByInvite have no max_members gate. Reserved for the v0.6 quota system. See the quota-limits section below.
 );
 
 -- Network members table
