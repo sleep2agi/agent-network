@@ -1,7 +1,7 @@
 # 生产部署 / 公网部署安全指南
 
 ::: danger 默认配置不能直接挂公网
-当前 stable（v0.8.2，对应 `commhub-server` semver；旧的 `v2.1.x` CLI 版本号体系已废弃，见 [changelog](/changelog)）的默认配置只为**本机使用**优化。直接 `--host 0.0.0.0` 公网开放 = 给攻击者敞开大门。
+当前 stable（v0.8.3，对应 `commhub-server` semver；旧的 `v2.1.x` CLI 版本号体系已废弃，见 [changelog](/changelog)）的默认配置只为**本机使用**优化。直接 `--host 0.0.0.0` 公网开放 = 给攻击者敞开大门。
 
 把这一页**全部读完**再开安全组。
 :::
