@@ -133,7 +133,320 @@ payoffFn?: (decisions: Decision[]) => Payoff[];
 
 ## §2 API 规范
 
-> 🚧 待 R461+ /loop tick 推进
+### 2.1 顶层入口
+
+framework 通过一个工厂函数 `runSocialExperiment` 暴露：
+
+```typescript
+import { runSocialExperiment, SocialExperimentSpec, ExperimentResult }
+  from '@sleep2agi/agent-network/experiment';
+
+const spec: SocialExperimentSpec = { /* ... */ };
+const result: ExperimentResult = await runSocialExperiment(spec);
+```
+
+它在内部按 §3 描述的 `roundProtocol` 调度 `batch run` spawn N 个 agent，按 `cohorts` 定义切片绑定 prompt，按 `payoffFn`（如存在）计算每轮收益，按 `subNetworks`（如存在）隔离 commhub 消息。
+
+### 2.2 `SocialExperimentSpec` 完整接口
+
+```typescript
+export interface SocialExperimentSpec {
+  /** 实验名（影响 alias 前缀 + telemetry tag） */
+  name: string;
+
+  /** Cohort 分组定义（必填，至少 1 个） */
+  cohorts: CohortSpec[];
+
+  /** 主持人 alias（optional，e.g. 谈判撮合者 / 博弈裁判） */
+  leaderAlias?: string;
+
+  /** Round 协议（必填） */
+  roundProtocol: "broadcast" | "sequential" | "multi-round" | "turn-based";
+
+  /** 多轮实验的轮数（multi-round / turn-based 必填，其余 ignore） */
+  rounds?: number;
+
+  /** Payoff 计算回调（博弈 / 谈判 / 信息瀑布 必填，其余 optional） */
+  payoffFn?: PayoffFn;
+
+  /** 子网定义（回音室 必填，其余 ignore） */
+  subNetworks?: NetworkConfig[];
+
+  /** Prompt 模板回调（必填） */
+  promptTemplate: PromptTemplate;
+
+  /** 终止条件回调（optional，默认 rounds 跑完即停） */
+  terminateFn?: TerminateFn;
+
+  /** 结果聚合回调（optional，默认返回完整 events） */
+  aggregateFn?: AggregateFn;
+
+  /** Runtime 选项 */
+  runtime?: ExperimentRuntimeOptions;
+}
+```
+
+### 2.3 `CohortSpec`
+
+```typescript
+export interface CohortSpec {
+  /** Alias 前缀，e.g. "buyer" → buyer-0, buyer-1, ... */
+  prefix: string;
+
+  /** Cohort 内 agent 数量 */
+  count: number;
+
+  /** 角色标签，传入 promptTemplate 第 1 参 */
+  promptRole: string;
+
+  /** 该 cohort 是否参与 round 决策（默认 true）。设 false 表示纯旁观（如回音室的 observer cohort） */
+  participatesInRound?: boolean;
+
+  /** Cohort 级别 metadata，自由 key-value 透传 promptTemplate */
+  metadata?: Record<string, unknown>;
+}
+```
+
+### 2.4 `PromptTemplate`
+
+```typescript
+export type PromptTemplate = (
+  role: string,
+  idx: number,
+  ctx: ExperimentContext
+) => string | { systemPrompt: string; userPrompt: string };
+```
+
+返回值两种形态：
+- **`string`** — 直接作为 user message 发给该 agent。
+- **`{systemPrompt, userPrompt}`** — 分离 system 与 user，落到 batch primitive `SystemPrompt` 字段。
+
+### 2.5 `ExperimentContext`（promptTemplate 第 3 参）
+
+```typescript
+export interface ExperimentContext {
+  /** 当前轮号（0-indexed），broadcast 时永远为 0 */
+  round: number;
+
+  /** 当前 cohort 的 metadata snapshot */
+  cohortMetadata: Record<string, unknown>;
+
+  /** 历史决策（multi-round / sequential / turn-based 时累积） */
+  history: Decision[];
+
+  /** 当前 agent 在本 cohort 内的 index（0-indexed） */
+  cohortIdx: number;
+
+  /** 整体 agent 全局 idx（跨 cohort，0-indexed） */
+  globalIdx: number;
+
+  /** 当前 sub-network id（subNetworks 启用时） */
+  subNetworkId?: string;
+
+  /** 当前 agent 可见的 peers alias 集合（受 subNetwork 隔离影响） */
+  visiblePeers: string[];
+
+  /** 实验级 metadata（spec.runtime.metadata 透传） */
+  experimentMetadata: Record<string, unknown>;
+}
+```
+
+### 2.6 `Decision` / `Payoff`
+
+```typescript
+export interface Decision {
+  /** 哪个 agent 做的决策 */
+  agentAlias: string;
+
+  /** 第几轮 */
+  round: number;
+
+  /** 该 agent 所属 cohort prefix */
+  cohort: string;
+
+  /** Agent 输出的决策内容（自由 shape，由 promptTemplate 约束） */
+  payload: unknown;
+
+  /** Agent 输出原文（commhub message text） */
+  rawText: string;
+
+  /** Decision 落地时间 ISO8601 */
+  timestamp: string;
+}
+
+export type PayoffFn = (
+  decisions: Decision[],
+  ctx: PayoffContext
+) => Payoff[] | Promise<Payoff[]>;
+
+export interface PayoffContext {
+  round: number;
+  spec: SocialExperimentSpec;
+  history: Decision[][];   // 历史所有轮
+}
+
+export interface Payoff {
+  agentAlias: string;
+  round: number;
+  value: number;
+  /** Optional 自定义结构（e.g. 谈判中具体成交价 / 博弈对手） */
+  meta?: Record<string, unknown>;
+}
+```
+
+### 2.7 `NetworkConfig`（sub-network 隔离）
+
+```typescript
+export interface NetworkConfig {
+  /** 子网 ID，e.g. "left-echo" / "right-echo" */
+  id: string;
+
+  /** 该子网内的 agent alias 集合（由 framework 按 cohorts 分配，也可手动指定） */
+  members?: string[];
+
+  /** 跨子网通信策略 */
+  crossNetwork?: "blocked" | "throttled" | "open";
+
+  /** throttled 时的概率 (0.0-1.0)，默认 0.1 */
+  throttleProbability?: number;
+}
+```
+
+详细子网执行语义在 §4。
+
+### 2.8 `TerminateFn` / `AggregateFn`
+
+```typescript
+/** 终止条件 — 每轮结束后调用，返回 true 停止实验 */
+export type TerminateFn = (
+  ctx: { round: number; history: Decision[][]; payoffs: Payoff[][] }
+) => boolean;
+
+/** 结果聚合 — 实验结束后调用，返回任意 shape 作为 ExperimentResult.aggregated */
+export type AggregateFn = (
+  history: Decision[][],
+  payoffs: Payoff[][]
+) => unknown;
+```
+
+### 2.9 `ExperimentRuntimeOptions`
+
+```typescript
+export interface ExperimentRuntimeOptions {
+  /** 模型选择，per cohort 可覆盖 */
+  defaultModel?: string;
+
+  /** Agent runtime: claude-agent-sdk / codex-sdk / mixed */
+  runtime?: "claude" | "codex" | "mixed";
+
+  /** Timeout 每轮（ms），默认 120000 */
+  roundTimeoutMs?: number;
+
+  /** 自定义 metadata（透传 ExperimentContext.experimentMetadata） */
+  metadata?: Record<string, unknown>;
+
+  /** Dry-run，只 spawn 不真跑 */
+  dryRun?: boolean;
+}
+```
+
+### 2.10 `ExperimentResult`
+
+```typescript
+export interface ExperimentResult {
+  spec: SocialExperimentSpec;
+  startedAt: string;
+  endedAt: string;
+  totalRounds: number;
+  agents: Array<{ alias: string; cohort: string; role: string }>;
+  history: Decision[][];           // history[round] = decisions in that round
+  payoffs: Payoff[][];              // payoffs[round] = payoffs in that round
+  aggregated?: unknown;             // aggregateFn 返回值
+  telemetry: {
+    totalTokens: number;
+    cost: number;
+    perAgentTokens: Record<string, number>;
+  };
+}
+```
+
+### 2.11 5 demo 各自填充 spec 示例
+
+下面 5 段 *仅 sketch*，完整执行语义 §3-§4 详。
+
+```typescript
+// opinion-spread (broadcast + 2 cohort)
+const opinionSpec: SocialExperimentSpec = {
+  name: "opinion-spread-v1",
+  cohorts: [
+    { prefix: "pro", count: 5, promptRole: "supporter" },
+    { prefix: "con", count: 5, promptRole: "opponent" },
+  ],
+  roundProtocol: "broadcast",
+  promptTemplate: (role, idx, ctx) =>
+    `你是${role === "supporter" ? "支持者" : "反对者"}，请就"${ctx.experimentMetadata.topic}"发表 200 字观点`,
+};
+
+// 信息瀑布 (sequential)
+const cascadeSpec: SocialExperimentSpec = {
+  name: "info-cascade-v1",
+  cohorts: [{ prefix: "voter", count: 20, promptRole: "voter" }],
+  roundProtocol: "sequential",
+  promptTemplate: (role, idx, ctx) =>
+    `你是第 ${idx+1} 位投票者。前 ${idx} 位投票为：${ctx.history.map(d => d.payload).join(",")}\n请投 A 或 B`,
+  payoffFn: (decisions) =>
+    decisions.map(d => ({ agentAlias: d.agentAlias, round: d.round,
+                          value: d.payload === "A" ? 1 : 0 })),
+};
+
+// 博弈 (multi-round + payoff)
+const gameSpec: SocialExperimentSpec = {
+  name: "ipd-v1",
+  cohorts: [{ prefix: "player", count: 6, promptRole: "player" }],
+  roundProtocol: "multi-round",
+  rounds: 10,
+  payoffFn: prisonersDilemmaPayoff,  // 用户自定义
+  promptTemplate: ipdPromptTemplate,
+};
+
+// 谈判 (turn-based + 2 cohort)
+const bargainSpec: SocialExperimentSpec = {
+  name: "bargain-v1",
+  cohorts: [
+    { prefix: "buyer", count: 3, promptRole: "buyer" },
+    { prefix: "seller", count: 3, promptRole: "seller" },
+  ],
+  leaderAlias: "auctioneer",
+  roundProtocol: "turn-based",
+  rounds: 15,
+  payoffFn: doubleAuctionMatch,
+  promptTemplate: bargainPromptTemplate,
+};
+
+// 回音室 (sub-network)
+const echoSpec: SocialExperimentSpec = {
+  name: "echo-chamber-v1",
+  cohorts: [
+    { prefix: "left", count: 5, promptRole: "left-leaning" },
+    { prefix: "right", count: 5, promptRole: "right-leaning" },
+  ],
+  roundProtocol: "broadcast",
+  rounds: 5,
+  subNetworks: [
+    { id: "left-bubble", crossNetwork: "blocked" },
+    { id: "right-bubble", crossNetwork: "blocked" },
+  ],
+  promptTemplate: echoPromptTemplate,
+};
+```
+
+### 2.12 §2 小结
+
+`SocialExperimentSpec` 是一个 *声明式* 的 spec：必填 5 字段（name/cohorts/roundProtocol/promptTemplate + spec 类型对应的 rounds/payoffFn/subNetworks），可选 4 回调（terminateFn/aggregateFn/PayoffFn 自定义/PromptTemplate 自定义）。
+
+5 个候选实验都能用 *单一文件 spec + ~20-40 LOC promptTemplate + 0-50 LOC payoffFn* 描述完整，不需要碰 framework 内部。
+
+§3 详述 4 种 `roundProtocol` 的实际执行语义和 commhub 消息流。
 
 ---
 
