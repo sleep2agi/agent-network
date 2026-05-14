@@ -98,13 +98,14 @@ config.json:
   "anet_version": "0.1.0",
   "node_id": "n_a1b2c3d4",
   "node_name": "指挥室",
+  "alias": "指挥室",
   "runtime": "claude-code-cli",
   "model": "",
   "session": "550e8400-e29b-41d4-a716-446655440000",
   "channels": ["server:commhub"],
-  "tools": [],
   "env": {},
-  "flags": { "dangerouslySkipPermissions": true, "teammateMode": "in-process", "maxTurns": 20, "logLevel": "info" }
+  "logLevel": "info",
+  "flags": { "dangerouslySkipPermissions": true, "teammateMode": "in-process" }
 }
 ```
 
