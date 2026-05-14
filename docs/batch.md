@@ -143,7 +143,6 @@ anet create --batch \
 |------|----------|---------------|
 | `anet batch list` 噪声 | 群组 host 上**所有** `${a}-${b}` tmux session，包括非 anet | `~/.anet/batches.json` marker registry 写入 `createBatch` 时，list 时过滤 |
 | `restart` / `start` in-place | hint-only：提示重跑 wizard | 走 `<workdir>/node*/.anet/nodes/<alias>/config.json` 重新 spawn tmux |
-| Codex preset | 不在 verified 列表 | 单独 issue 跟 Vincent verify codex base URL + model id 后加 preset |
 | 多 prefix list 过滤 | 全部 group 一起返 | `anet batch list <prefix>` filter |
 | Cross-batch 任务路由 | 不做 | RFC-008 Phase 3+ |
 
