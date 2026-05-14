@@ -36,7 +36,7 @@ sequenceDiagram
 | Claude Code | `claude-code-cli` | 复杂推理、工具调用、文件操作 | ⭐⭐⭐ |
 | Claude Sonnet/Opus | `claude-agent-sdk` | 推理、长文分析（Anthropic API 主线） | ⭐⭐⭐ |
 | Codex (codex-sdk) | `codex-sdk` | 代码生成、命令执行 | ⭐⭐⭐ |
-| MiniMax M2.7 | `claude-agent-sdk` | 低成本文案、翻译（通过 Anthropic 兼容 API） | ⭐⭐ |
+| MiniMax | `claude-agent-sdk` | 低成本文案、翻译（通过 Anthropic 兼容 API；model id 查 [platform.minimaxi.com](https://platform.minimaxi.com)） | ⭐⭐ |
 
 > Anthropic 兼容 provider 共 7 个 official preset（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter）+ Custom（任意 Anthropic 兼容 endpoint），完整表见 [多模型配置](/guide/multi-model)。
 
