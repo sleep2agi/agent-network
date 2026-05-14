@@ -446,7 +446,147 @@ sdk_eventbridge_relation_R010_§3:
 
 ## §4 Node rename 深挖（flagship — issue #84）
 
-> 🚧 待 R499+ /loop tick 推进
+本节是 RFC-010 的 flagship——issue #84 的完整设计。Vincent 4505 的要求是「出方案 + 不引入新 BUG + 考虑全面 + 充分测试」。node rename 难在 alias 是 *cross-cutting identifier*，被 7 个 surface 引用，rename 必须全链路一致更新且可回滚。
+
+### 4.1 命令与前置校验
+
+```
+anet node rename <old-alias> <new-alias> [--force]
+```
+
+**前置校验**（任一失败则拒绝，不进入 rename 流程）：
+
+```yaml
+precheck_R010_§4:
+  1. old-alias 存在: .anet/nodes/<old>/ 目录 + commhub 注册 都存在
+  2. new-alias 未占用:
+     - 本地 .anet/nodes/<new>/ 不存在
+     - commhub 该 ntok 下 new-alias 未注册
+  3. new-alias 合法: 符合 alias 命名规范 (RFC-008 <prefix>-<idx> 或自由 alias)
+  4. old-node 状态校验:
+     - state ∈ {created, stopped}: 直接 rename (推荐路径)
+     - state == running: 需 --force, 触发 active rename 流程 (4.4 风险 2)
+     - state ∈ {starting, stopping, restarting, deleting}: 拒绝 (过渡态不可 rename)
+     - state == error: 拒绝, 提示先 recover
+  5. 无 in-flight transaction: old-node 无未完成的 §2 txn (避免 race)
+```
+
+### 4.2 7 surface 一致更新策略
+
+rename 的核心是 7 个 surface 的原子一致更新。沿用 §2 的两阶段提交（2PC）框架，扩展为 **rename 专用的多 surface 2PC**：
+
+| # | Surface | 更新内容 | 更新方 | 可回滚 |
+|---|---------|---------|--------|--------|
+| 1 | 本地 config 目录 | `.anet/nodes/<old>/` → `.anet/nodes/<new>/` + `config.alias` 字段 | CLI | ✅ rename 回去 |
+| 2 | tmux session | `tmux rename-session <old> <new>`（或 alias-derived 名） | CLI | ✅ rename 回去 |
+| 3 | commhub registration | hub 上 node 注册记录 alias 更新 + utok/ntok 绑定迁移 | Server | ✅ 注册记录回滚 |
+| 4 | commhub messages 历史 | 历史 message 的 sender/recipient = old alias | Server | ⚠️ 不可变（见 4.3） |
+| 5 | dashboard | node visual + alias 头像（preview.83 hash） | Dashboard（SSE 驱动） | ✅ SSE 反向事件 |
+| 6 | batch prefix grouping | `anet batch <verb> <prefix>` 的 prefix match | CLI（config 派生） | ✅ 随 config 回滚 |
+| 7 | session resume 映射 | `anet resume` 的 alias → session 映射 | CLI | ✅ 映射回滚 |
+
+#### 4.2.1 rename 2PC 协议
+
+```
+rename(old, new, force?):
+  txn_id = new()
+
+  ── PHASE 1: PREPARE (全部 surface 进入 prepared 态, 任一失败则全回滚) ──
+  P1. CLI: 写 .anet/nodes/<old>/rename.lock = { txn_id, old, new, phase: "prepare", ts }
+          (lock 文件存在 → 阻止并发 rename + 标记 in-flight)
+  P2. CLI: copy .anet/nodes/<old>/ → .anet/nodes/<new>/ (copy 不是 move, 保留 old 作回滚)
+          更新 .anet/nodes/<new>/config.json: alias = new
+  P3. Server: commhub prepare-rename API(txn_id, old, new)
+          hub 创建 new-alias 注册记录 (状态 prepared, 不接任务)
+          utok/ntok 绑定 copy 到 new (见 4.4 风险 4)
+  P4. CLI: tmux session 暂不动 (Phase 2 才 rename, 减少 running node 中断窗口)
+
+  ── PHASE 2: COMMIT (原子切换, 顺序敏感) ──
+  C1. Server: commhub commit-rename(txn_id)
+          new-alias 注册记录转 active, old-alias 转 tombstone
+          入站任务路由切到 new-alias
+  C2. CLI: tmux rename-session <old> <new> (running node) 或 无操作 (created/stopped)
+  C3. CLI: 原子切换本地: 删 .anet/nodes/<old>/, 删 rename.lock
+          (此时 .anet/nodes/<new>/ 已是唯一真相)
+  C4. Server: broadcast SSE node.renamed (txn_id, old, new, surfaces_updated)
+  C5. Dashboard: 收 node.renamed → 迁移 visual + 头像 hash 重算 (§3.4)
+
+  ── 失败回滚 (任一 PHASE 1 步骤失败) ──
+  R1. CLI: 删 .anet/nodes/<new>/ (copy 出来的)
+  R2. Server: commhub abort-rename(txn_id) → 删 new-alias prepared 记录
+  R3. CLI: 删 rename.lock
+  R4. old-alias 完全未受影响 (PHASE 1 是 copy/prepare, 没动 old)
+```
+
+**关键设计：PHASE 1 全 copy/prepare 不动 old**——保证 PHASE 1 任何失败都能干净回滚（old 原封不动）。只有 PHASE 2 才真正切换，且 PHASE 2 顺序敏感（先 commhub 切路由 C1，再 tmux C2，最后删 old C3）。
+
+#### 4.2.2 PHASE 2 不可回滚窗口
+
+PHASE 2 一旦开始（C1 执行），rename 进入**不可自动回滚**窗口——commhub 路由已切，强行回滚会丢任务。此窗口的故障处理：
+- C1 成功、C2/C3 失败 → 不回滚，转 **forward-fix**：reconciliation（§2.5）检测到 `.anet/nodes/<old>/` 残留 + commhub 已是 new → 自动完成 C2/C3（幂等）。
+- 窗口极短（C1→C3 仅本地文件操作 + tmux 命令，~毫秒级），故障概率低。
+
+### 4.3 7 风险点 mitigation
+
+| # | 风险 | Mitigation |
+|---|------|-----------|
+| 1 | **目录 rename 时 in-flight write** | PHASE 1 用 **copy 不是 move**；rename.lock 文件标记 in-flight，§2 状态转换检测到 lock 则拒绝并发写；config.json 本身走单文件原子写（write+rename） |
+| 2 | **tmux session 活跃时 rename** | running node 需 `--force`；tmux rename-session 在 PHASE 2 C2 执行（`tmux rename-session` 本身不中断 session 内进程，只改名）；commhub 路由已在 C1 切到 new，C2 期间入站任务排队（同 §2.4.2 restart 排队机制） |
+| 3 | **重名冲突** | 4.1 前置校验 P2：本地 + commhub 双重检查 new-alias 未占用；PHASE 1 P3 commhub 创建 prepared 记录时再次 CAS 检查（防 precheck 与 prepare 之间的 TOCTOU） |
+| 4 | **utok/ntok 绑定** | token **绑 ntok 不绑 alias**（per [[project_dual_token]]：ntok_ 是节点网络级）；rename 只在 ntok 内换 alias，token 不失效；PHASE 1 P3 把 utok/ntok 绑定记录 copy 到 new-alias，COMMIT 后 old 的绑定随 tombstone 失效 |
+| 5 | **历史 message 引用** | 历史不可变——old-alias 的历史 message **保留 old**（audit 完整性）；commhub 维护 `alias_rename_log` 表（old, new, txn_id, ts）；查询历史时 join 此表，UI 显示 "old-alias（→ now new-alias）"；`node.renamed` 事件 `history_policy: 'preserve'` |
+| 6 | **race condition（rename 中收到该 node 的 task）** | rename.lock + commhub prepared 态：PHASE 1 期间 commhub new-alias 是 prepared（不接任务），old-alias 仍 active（正常接，因为还没 commit）；PHASE 2 C1 原子切换路由，切换点之后 → new，之前 → old，无丢失窗口 |
+| 7 | **batch prefix grouping** | rename 跨 prefix（如 `worker-1` → `helper-1`）会改变 `anet batch stop worker` 的 match 集合；mitigation：rename 命令检测 prefix 变化时 **warn + 要求确认**（`--force` 跳过）；`node.renamed` 事件 data 含 `prefix_changed: bool`，dashboard 提示 batch grouping 已变；建议文档化「rename 不应随意跨 prefix」 |
+
+### 4.4 active node rename（running 状态，`--force`）
+
+running node 的 rename 是最复杂场景，专门设计：
+
+```yaml
+active_rename_R010_§4:
+  前提: state == running, 用户传 --force
+  
+  流程 (在 4.2.1 2PC 基础上):
+    PHASE 1: 同 4.2.1 (copy/prepare, 不动 running node)
+    PHASE 2:
+      C1. commhub commit: 路由切 new, 此刻起入站任务排队 (排给 new-alias queue)
+      C2. tmux rename-session old new:
+          - tmux rename-session 不杀进程, agent 进程继续跑
+          - 但 agent 进程内部如果硬编码了自己的 alias (从 env / config 读) → 需重读
+          - mitigation: agent 进程监听 SIGHUP, rename 后发 SIGHUP → agent 重读 config.alias
+            (或 agent 定期重读 config, 这是 agent-node 实现细节, RFC 标注需求)
+      C3. 删 old 目录 + lock
+      C4. commhub flush 排队任务给 new-alias
+    
+  中断窗口: C1→C4, 仅排队不丢弃, agent 进程不重启 (tmux rename 不杀进程)
+  → 比 restart (§2.4.2) 还轻量, 因为进程都不重启
+  
+  agent-node 配合需求 (RFC 标注, 工程马 Step 2 实现):
+    agent 进程必须支持运行时 alias 变更:
+      方案 A: SIGHUP → 重读 config.json
+      方案 B: agent 每 turn 重读 config.alias
+    推荐方案 A (即时, 低开销)
+```
+
+### 4.5 rollback 完整性矩阵
+
+| 失败点 | old 状态 | new 状态 | 回滚动作 | 结果 |
+|--------|---------|---------|---------|------|
+| P1（lock 写失败） | 完好 | 不存在 | 无需回滚 | old 可用 |
+| P2（copy 失败） | 完好 | 部分 copy | 删 new 残留 + 删 lock | old 可用 |
+| P3（commhub prepare 失败） | 完好 | copy 完成 | 删 new + commhub abort + 删 lock | old 可用 |
+| C1（commhub commit 失败） | 完好 | prepared | commhub abort + 删 new + 删 lock | old 可用 |
+| C2（tmux rename 失败） | 目录还在 | active | **forward-fix**：重试 C2 或 reconciliation 兜底 | 最终 new |
+| C3（删 old 失败） | 残留 | active | **forward-fix**：reconciliation 删 old 残留 | 最终 new |
+| C4/C5（SSE 失败） | 已删 | active | SSE replay（§3.5 ring buffer） | 最终 new |
+
+**不变式**：PHASE 1 任何失败 → old 完好可用；PHASE 2 任何失败 → forward-fix 到 new（不回退，因路由已切）。不存在"两边都坏"的状态。
+
+### 4.6 §4 小结
+
+node rename 用 rename 专用多 surface 2PC：PHASE 1 全 copy/prepare（不动 old，保证可回滚），PHASE 2 原子切换（顺序敏感：commhub 路由 → tmux → 删 old）。7 surface 一致更新，6 个可回滚 + 1 个（历史 message）不可变但用 `alias_rename_log` 保 audit。7 风险点逐一 mitigation——核心手段是 copy-not-move、rename.lock、commhub prepared 态、token 绑 ntok 不绑 alias、forward-fix。active node rename（`--force`）用 tmux rename-session 不杀进程 + SIGHUP 通知 agent 重读 config，中断窗口仅排队不丢弃。rollback 完整性矩阵保证不存在"两边都坏"状态。
+
+§5 设计 error recovery + inter-node dependency lifecycle。
 
 ---
 
