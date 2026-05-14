@@ -1156,24 +1156,26 @@ Model guide:
   } else if (runtime === "claude-agent-sdk") {
     // Vendor presets here are *verified-with-real-call* only. Adding a new
     // vendor without per-vendor verify is forbidden (cf. preview.0-preview.2
-    // incident where DeepSeek / GLM / Kimi / MiMo entries were fabricated
-    // from PROVIDER_CHOICES — none worked). Add via `custom` until verified.
+    // incident where DeepSeek / GLM / Kimi entries were fabricated from
+    // PROVIDER_CHOICES — none worked). Add via `custom` until verified.
     console.log(`
 Model guide (verified Anthropic-compatible + Claude + custom):
   - intern-s2-preview  上海 AI Lab 书生 (默认, chat.intern-ai.org.cn)
   - intern-s1-pro      上海 AI Lab 书生 (chat.intern-ai.org.cn)
   - MiniMax-M2.7       MiniMax (api.minimaxi.com/anthropic)
+  - mimo-v2.5-pro      小米 MiMo (token-plan-cn.xiaomimimo.com/anthropic)
   - claude-sonnet-4-6  Anthropic Claude via the default Anthropic API.
   - claude-opus-4-6    Anthropic Claude via the default Anthropic API.
   - claude-haiku-4-5   Anthropic Claude via the default Anthropic API.
   - custom             Type both URL and model for any Anthropic-compatible
-                       provider (DeepSeek / GLM / Kimi / MiMo / OpenRouter /
+                       provider (DeepSeek / GLM / Kimi / OpenRouter /
                        self-hosted vLLM, etc.).
 `);
     const modelChoice = await askChoice("Select model:", [
       { label: "intern-s2-preview",  value: "intern-s2-preview",  description: "上海 AI Lab 书生 默认 (chat.intern-ai.org.cn)" },
       { label: "intern-s1-pro",      value: "intern-s1-pro",      description: "上海 AI Lab 书生 (chat.intern-ai.org.cn)" },
       { label: "MiniMax-M2.7",       value: "MiniMax-M2.7",       description: "MiniMax (api.minimaxi.com/anthropic)" },
+      { label: "mimo-v2.5-pro",      value: "mimo-v2.5-pro",      description: "小米 MiMo (token-plan-cn.xiaomimimo.com/anthropic)" },
       { label: "claude-sonnet-4-6",  value: "claude-sonnet-4-6",  description: "Anthropic default URL" },
       { label: "claude-opus-4-6",    value: "claude-opus-4-6",    description: "Anthropic default URL" },
       { label: "claude-haiku-4-5",   value: "claude-haiku-4-5",   description: "Anthropic default URL" },
@@ -1192,6 +1194,12 @@ Model guide (verified Anthropic-compatible + Claude + custom):
       opts.model = customModel;
     } else if (opts.model === "MiniMax-M2.7") {
       opts._envs.push("ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic");
+    } else if (opts.model === "mimo-v2.5-pro") {
+      // 小米 MiMo — Anthropic-compat endpoint with /anthropic suffix (same
+      // pattern as MiniMax). Verified by 通信SDK马 real-call 2026-05-15:
+      // POST /anthropic/v1/messages HTTP 200, model mimo-v2.5-pro returns a
+      // proper Anthropic Messages response. Runs on claude-agent-sdk runtime.
+      opts._envs.push("ANTHROPIC_BASE_URL=https://token-plan-cn.xiaomimimo.com/anthropic");
     } else if (opts.model === "intern-s1-pro" || opts.model === "intern-s2-preview") {
       // Intern uses the bare hostname; no /anthropic suffix (Vincent verified
       // 2026-05-13 telegram 4227). Runs on the default claude-agent-sdk runtime
@@ -1206,6 +1214,7 @@ Model guide (verified Anthropic-compatible + Claude + custom):
     // ones force the user through `custom` (where they paste their own values).
     const vendorSignupUrls: Record<string, string> = {
       "MiniMax-M2.7":      "https://platform.minimaxi.com",
+      "mimo-v2.5-pro":     "https://platform.xiaomimimo.com",
       "intern-s1-pro":     "https://chat.intern-ai.org.cn/",
       "intern-s2-preview": "https://chat.intern-ai.org.cn/",
     };
@@ -1215,10 +1224,10 @@ Model guide (verified Anthropic-compatible + Claude + custom):
 API key:
   Paste the provider key for the selected model.${hintUrl ? `
   📋 注册 / 拿 ${opts.model} API Key: ${hintUrl}` : ""}
-  - MiniMax / 书生: token from the vendor's API Keys page.
+  - MiniMax / 书生 / 小米 MiMo: token from the vendor's API Keys page.
   - Anthropic Claude: use an Anthropic Console API key.
   - Custom URL: use the key/token for that Anthropic-compatible provider
-    (DeepSeek / GLM / Kimi / MiMo / OpenRouter / etc. all work via custom).
+    (DeepSeek / GLM / Kimi / OpenRouter / etc. all work via custom).
 `);
     const token = await ask("ANTHROPIC_AUTH_TOKEN");
     if (token) opts._envs.push(`ANTHROPIC_AUTH_TOKEN=${token}`);
@@ -1324,8 +1333,10 @@ async function createCommand(idOverride?: string) {
     "intern-s2": { runtime: "claude-agent-sdk", label: "上海 AI Lab 书生（intern-s2-preview，默认）", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
     // TODO unverified — same caveat as DeepSeek (Vincent 4227).
     kimi:      { runtime: "claude-agent-sdk", label: "Kimi（长文本 128K）[UNVERIFIED]", baseUrl: "https://api.moonshot.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.moonshot.cn" },
-    // TODO unverified — same caveat as DeepSeek (Vincent 4227).
-    mimo:      { runtime: "claude-agent-sdk", label: "小米 MiMo（V2.5 系列）[UNVERIFIED]", baseUrl: "https://api.xiaomimimo.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.xiaomimimo.com" },
+    // Verified by 通信SDK马 real-call 2026-05-15 (Vincent 4677+4679 / #104): base URL has the
+    // /anthropic suffix (NOT a bare hostname like intern); POST /anthropic/v1/messages HTTP 200
+    // for mimo-v2.5-pro / mimo-v2.5 / mimo-v2-pro / mimo-v2-omni. Model ids are lowercase.
+    mimo:      { runtime: "claude-agent-sdk", label: "小米 MiMo（mimo-v2.5-pro）", baseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.xiaomimimo.com" },
     openrouter:{ runtime: "claude-agent-sdk", label: "OpenRouter（一个 Key 用所有模型）", baseUrl: "https://openrouter.ai/api/v1", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://openrouter.ai" },
     claude:    { runtime: "claude-agent-sdk", label: "Claude Sonnet/Opus（海外，需 API Key）", envKey: "ANTHROPIC_API_KEY", signupUrl: "https://console.anthropic.com" },
     "claude-code": { runtime: "claude-code-cli", label: "Claude Code CLI（需 Max 订阅）", requiresAuth: "claude" },
@@ -1355,10 +1366,11 @@ async function createCommand(idOverride?: string) {
     // Verified by Vincent 2026-05-13 telegram 4227: bare hostname, no /anthropic.
     { key: "intern",     label: "上海 AI Lab 书生 — intern-s1-pro",            baseUrl: "https://chat.intern-ai.org.cn",          signupUrl: "https://chat.intern-ai.org.cn/" },
     { key: "minimax",    label: "MiniMax — 国内直连，低成本，速度快",        baseUrl: "https://api.minimaxi.com/anthropic",     signupUrl: "https://platform.minimaxi.com" },
+    // Verified by 通信SDK马 real-call 2026-05-15 (#104): /anthropic suffix, model mimo-v2.5-pro, HTTP 200.
+    { key: "mimo",       label: "小米 MiMo — mimo-v2.5-pro",                  baseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic", signupUrl: "https://platform.xiaomimimo.com" },
     { key: "deepseek",   label: "DeepSeek — 代码 + 推理性价比高 [UNVERIFIED]", baseUrl: "https://api.deepseek.com/anthropic",     signupUrl: "https://platform.deepseek.com" },
     { key: "glm",        label: "GLM 智谱 — 中文理解强 [UNVERIFIED]",          baseUrl: "https://open.bigmodel.cn/anthropic",     signupUrl: "https://open.bigmodel.cn" },
     { key: "kimi",       label: "Kimi — 长文本 128K [UNVERIFIED]",             baseUrl: "https://api.moonshot.cn/anthropic",      signupUrl: "https://platform.moonshot.cn" },
-    { key: "mimo",       label: "小米 MiMo — V2.5 [UNVERIFIED]",               baseUrl: "https://api.xiaomimimo.com/anthropic",   signupUrl: "https://platform.xiaomimimo.com" },
     { key: "openrouter", label: "OpenRouter — 一个 Key 用所有模型",          baseUrl: "https://openrouter.ai/api/v1",           signupUrl: "https://openrouter.ai" },
     { key: "claude",     label: "Claude Sonnet/Opus — 海外，官方 API Key",    baseUrl: "",                                        signupUrl: "https://console.anthropic.com" },
     { key: "custom",     label: "自定义 — 输入你的 baseUrl",                  baseUrl: "",                                        signupUrl: "" },
@@ -1407,14 +1419,16 @@ async function createCommand(idOverride?: string) {
       if (cfg.key === "custom") {
         baseUrl = await ask("baseUrl (e.g. https://your-host/anthropic)") || "";
       }
-      // Intern presets: pin the model id (runtime stays the default
-      // claude-agent-sdk — #98 confirmed it's fully compatible with intern).
-      // intern-s2-preview verified by 通信测试马 real-call 2026-05-14
-      // (raw /v1/messages HTTP 200, returns Intern-S2-Preview).
+      // Verified vendor presets: pin the model id (runtime stays the default
+      // claude-agent-sdk). intern — #98 confirmed claude-agent-sdk ↔ intern
+      // compatible; intern-s2-preview verified by 通信测试马 real-call
+      // 2026-05-14. mimo — verified by 通信SDK马 real-call 2026-05-15 (#104).
       if (cfg.key === "intern-s2-preview") {
         opts.model = "intern-s2-preview";
       } else if (cfg.key === "intern") {
         opts.model = "intern-s1-pro";
+      } else if (cfg.key === "mimo") {
+        opts.model = "mimo-v2.5-pro";
       }
       if (cfg.signupUrl) {
         console.log(`[anet] 没有 Key？去 ${cfg.signupUrl} 注册并创建 API Key`);
@@ -5319,6 +5333,9 @@ const BATCH_PRESETS: Array<{
     runtime: "claude-agent-sdk", model: "intern-s1-pro",     baseUrl: "https://chat.intern-ai.org.cn" },
   { value: "MiniMax-M2.7",       label: "claude-agent-sdk + MiniMax-M2.7 (https://api.minimaxi.com/anthropic)",
     runtime: "claude-agent-sdk", model: "MiniMax-M2.7",      baseUrl: "https://api.minimaxi.com/anthropic" },
+  // Verified by 通信SDK马 real-call 2026-05-15 (#104): /anthropic suffix, model mimo-v2.5-pro, HTTP 200.
+  { value: "mimo-v2.5-pro",      label: "claude-agent-sdk + mimo-v2.5-pro (小米 MiMo, https://token-plan-cn.xiaomimimo.com/anthropic)",
+    runtime: "claude-agent-sdk", model: "mimo-v2.5-pro",     baseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic" },
   { value: "claude-sonnet-4-6",  label: "claude-agent-sdk + claude-sonnet-4-6 (Anthropic default)",
     runtime: "claude-agent-sdk", model: "claude-sonnet-4-6" },
   { value: "claude-opus-4-6",    label: "claude-agent-sdk + claude-opus-4-6 (Anthropic default)",
@@ -5344,8 +5361,8 @@ async function createBatchWizardCommand() {
 
   Wizard fields (任一可用 --flag 跳过):
     --preset <key>        intern-s2-preview (默认) / intern-s1-pro / MiniMax-M2.7 /
-                          claude-sonnet-4-6 / claude-opus-4-6 / claude-haiku-4-5 /
-                          __custom__
+                          mimo-v2.5-pro / claude-sonnet-4-6 / claude-opus-4-6 /
+                          claude-haiku-4-5 / __custom__
     --api-key <key>       runtime auth token (ANTHROPIC_AUTH_TOKEN or 等价)
     --workdir <path>      父目录, default ~/anet-team
     --workdir-mode        separate (default, <workdir>/node{i}) | shared (单 dir)
