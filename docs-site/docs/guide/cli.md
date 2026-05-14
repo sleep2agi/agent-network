@@ -91,6 +91,7 @@ npm install -g @sleep2agi/agent-network
 | `anet demo debate [opts]` | **辩论赛**：6 角色（主持/正反 4 辩/评委）一键 9 步辩论 |
 | `anet demo socialmedia [opts]` | **社交媒体内容工厂**：4 角色（选题/文案/配图/审核）~3 min |
 | `anet demo pr-review [opts]` | **代码 PR 审查室**：4 角色（安全/性能/风格 3 reviewer 并行 + judge）~2 min |
+| `anet demo sci-team [opts]` | **科研军团**：1 leader + N-1 worker（默认 10，5-50 可调）主动 fan-out 协作 |
 
 详见 [辩论赛 Demo 案例](/cases/debate)。其他 demo 用法跑 `anet demo <name> --help` 查看。
 

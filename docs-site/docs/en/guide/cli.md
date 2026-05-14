@@ -91,6 +91,7 @@ After installation, the `anet` command is available globally.
 | `anet demo debate [opts]` | **Debate**: 6-role (host / pro × 2 / con × 2 / judge) one-command 9-step debate |
 | `anet demo socialmedia [opts]` | **Social media content factory**: 4 roles (topic / copy / image / reviewer), ~3 min |
 | `anet demo pr-review [opts]` | **Code PR review room**: 4 roles (3 reviewers — security / perf / style — running in parallel + judge), ~2 min |
+| `anet demo sci-team [opts]` | **Research squad**: 1 leader + N-1 workers (default 10, tunable 5-50) actively fanning out to collaborate |
 
 See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> --help` for usage.
 
