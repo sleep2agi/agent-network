@@ -775,8 +775,9 @@ curl "http://localhost:9200/api/task_events?task_id=t_a1b2c3d4" \
 | Parameter | Description |
 |------|------|
 | `task_id` | Filter to a specific task (otherwise returns recent events across all tasks) |
-| `network_id` | Filter by network |
 | `limit` | Max items (default 50, max 500) |
+
+> Network filtering is **automatic** — the handler uses `addNetworkScope` to filter by the calling token's network scope; there is **no `network_id` query parameter** (verify [`index.ts:1045-1056`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1045) — only `task_id` / `limit` are read).
 
 **Response**:
 
