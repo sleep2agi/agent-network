@@ -290,25 +290,39 @@ Agent Node 只对 `task` 类型消息触发 AI 处理：
 
 ### 可用工具列表
 
+R243 校准：`--tools` flag 只控制 `claude-agent-sdk` runtime —— `codex-sdk` runtime 的工具集（Read/Write/Edit/Bash/Grep/Glob/WebSearch）由 codex CLI 自己 baked in，**不接受** `--tools` 自定义；`claude-code-cli` runtime 共享本机 Claude Code 工具集，也不通过这个 flag 选。
+
 | 工具 | 说明 | 适用 Runtime |
 |------|------|-------------|
-| `Read` | 读取文件 | codex-sdk |
-| `Write` | 写入文件 | codex-sdk |
-| `Edit` | 编辑文件 | codex-sdk |
-| `Bash` | 执行命令 | codex-sdk |
-| `Glob` | 文件搜索 | codex-sdk |
-| `Grep` | 内容搜索 | codex-sdk |
+| `Read` | 读取文件 | `claude-agent-sdk` |
+| `Write` | 写入文件 | `claude-agent-sdk` |
+| `Edit` | 编辑文件 | `claude-agent-sdk` |
+| `Bash` | 执行命令 | `claude-agent-sdk` |
+| `Glob` | 文件搜索 | `claude-agent-sdk` |
+| `Grep` | 内容搜索 | `claude-agent-sdk` |
+| `WebSearch` | 网页搜索 | `claude-agent-sdk` |
+| `WebFetch` | 抓取网页内容 | `claude-agent-sdk` |
+
+verify [`agent-node/src/cli.ts:154`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L154):
+```ts
+const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
+// ... cli.ts:519: tools: TOOLS.length ? TOOLS : undefined  ← 传给 claude-agent-sdk query options
+```
 
 ```bash
-# 指定工具
+# 指定工具（仅 claude-agent-sdk runtime 生效）
 npx @sleep2agi/agent-node --alias 代码 --tools Read,Write,Edit,Bash,Glob,Grep
 
 # 全量工具
 npx @sleep2agi/agent-node --alias 代码 --tools all
+
+# codex-sdk runtime 不接受 --tools (会被静默忽略)
+npx @sleep2agi/agent-node --alias 代码 --runtime codex-sdk
+# codex 内置 Read/Write/Edit/Bash/Grep/Glob/WebSearch 全套, 无法剥离
 ```
 
 ::: warning 安全提示
-`--tools all` 会给 Agent 完整的文件系统和命令执行权限。生产环境建议明确指定所需工具。
+`--tools all` 给 Agent 完整的文件系统和命令执行权限。生产环境建议明确指定所需工具（如只读 agent 只给 `Read,Glob,Grep`）。
 :::
 
 ## 预算控制

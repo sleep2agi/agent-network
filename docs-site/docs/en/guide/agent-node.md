@@ -290,25 +290,39 @@ This design prevents message loops (A replies to B -> B replies to A -> infinite
 
 ### Available Tools
 
+R243 calibration: the `--tools` flag only affects the `claude-agent-sdk` runtime. The `codex-sdk` runtime's toolset (Read/Write/Edit/Bash/Grep/Glob/WebSearch) is baked into the codex CLI binary and **does not honor** `--tools`. The `claude-code-cli` runtime shares the host's Claude Code toolset and also does not use this flag.
+
 | Tool | Description | Applicable Runtime |
 |------|------|-------------|
-| `Read` | Read files | codex-sdk |
-| `Write` | Write files | codex-sdk |
-| `Edit` | Edit files | codex-sdk |
-| `Bash` | Execute commands | codex-sdk |
-| `Glob` | File search | codex-sdk |
-| `Grep` | Content search | codex-sdk |
+| `Read` | Read files | `claude-agent-sdk` |
+| `Write` | Write files | `claude-agent-sdk` |
+| `Edit` | Edit files | `claude-agent-sdk` |
+| `Bash` | Execute commands | `claude-agent-sdk` |
+| `Glob` | File search | `claude-agent-sdk` |
+| `Grep` | Content search | `claude-agent-sdk` |
+| `WebSearch` | Web search | `claude-agent-sdk` |
+| `WebFetch` | Fetch URL contents | `claude-agent-sdk` |
+
+Verified at [`agent-node/src/cli.ts:154`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L154):
+```ts
+const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
+// ... cli.ts:519: tools: TOOLS.length ? TOOLS : undefined  ← passed to claude-agent-sdk query options
+```
 
 ```bash
-# Specify tools
+# Specify tools (only effective for the claude-agent-sdk runtime)
 npx @sleep2agi/agent-node --alias coder --tools Read,Write,Edit,Bash,Glob,Grep
 
 # All tools
 npx @sleep2agi/agent-node --alias coder --tools all
+
+# codex-sdk runtime silently ignores --tools
+npx @sleep2agi/agent-node --alias coder --runtime codex-sdk
+# Codex has Read/Write/Edit/Bash/Grep/Glob/WebSearch baked in — you cannot detach individual tools.
 ```
 
 ::: warning Security Note
-`--tools all` gives the agent full filesystem and command execution permissions. In production, explicitly specify only the tools needed.
+`--tools all` gives the agent full filesystem and command execution permissions. In production, explicitly specify only the tools needed (e.g., a read-only agent gets just `Read,Glob,Grep`).
 :::
 
 ## Budget Control
