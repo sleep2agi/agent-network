@@ -231,8 +231,8 @@ $ anet node delete 指挥室 --force
 | `anet node start` | created/offline → registered → online | spawn 进程 |
 | `anet node start --new-session` | * → registered → online | 忽略旧 session |
 | `anet node stop` | online/running → offline | kill 进程 |
-| `anet node rename` | offline → offline (改名) | 必须先 stop |
-| `anet node delete` | offline → deleted | 必须先 stop |
+| `anet node rename` | offline/online → 改名 | RFC-010 两阶段事务；运行中 node 需 `--force`（active rename，不杀进程，详见 §7） |
+| `anet node delete` | online/offline → deleted | 自动 `stopNode` + `notifyServerOffline` 再删本地目录，**不需手动先 stop**（详见 §9） |
 
 ## 批量恢复说明
 
