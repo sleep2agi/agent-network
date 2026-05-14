@@ -15,6 +15,7 @@
 
 ::: info 还没进表的内置 demo（cases doc 待补）
 - `anet demo socialmedia` — 4-agent 社媒内容工厂（选题/文案/配图/审核），~3 min
+- `anet demo sci-team` — 科研军团：1 leader + N-1 worker（默认 10，5-50 可调）跑书生模型，Phase 1 scaffold
 
 跑 `anet demo <name> --help` 看用法；cases 详版正在补稿。
 :::

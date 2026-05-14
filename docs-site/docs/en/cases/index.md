@@ -15,6 +15,7 @@ This is the runnable Agent Network example library. The site only keeps cases wi
 
 ::: info Built-in demos not yet in this table (cases doc pending)
 - `anet demo socialmedia` — 4-agent social-media content factory (topic / copy / image / reviewer), ~3 min
+- `anet demo sci-team` — research squad: 1 leader + N-1 workers (default 10, tunable 5-50) running the InternLM model, Phase 1 scaffold
 
 Run `anet demo <name> --help` for usage; full case write-ups coming soon.
 :::
