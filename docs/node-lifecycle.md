@@ -167,12 +167,12 @@ register() → callCommHub("report_status", {
 
 **触发**: `anet node rename <old> <new>`
 
-**前置条件（约定，未强制）**: 推荐 node offline 时改 —— [`cli.ts:2517-2560 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2517) **不调 `stopNode`**，运行中改名也能跑通本地 `renameSync`，但已 spawn 的子进程仍指向旧 config 路径，行为未定义。
+**前置条件（约定，未强制）**: 推荐 node offline 时改 —— [`cli.ts:2544-2587 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2544) **不调 `stopNode`**，运行中改名也能跑通本地 `renameSync`，但已 spawn 的子进程仍指向旧 config 路径，行为未定义。
 
 **P0 数据变更（只改本地，不依赖 CommHub rename API）**:
-1. `stored.node_name = newName` + `stored.alias = newName`（cli.ts:2542-2543）
-2. `renameSync(.anet/nodes/<oldId>, .anet/nodes/<newName>)`（cli.ts:2553）
-3. `saveProfile(newName, stored)` + `writeLegacyProjectAlias(newName)`（cli.ts:2556-2557）
+1. `stored.node_name = newName` + `stored.alias = newName`（cli.ts:2569-2570）
+2. `renameSync(.anet/nodes/<oldId>, .anet/nodes/<newName>)`（cli.ts:2580）
+3. `saveProfile(newName, stored)` + `writeLegacyProjectAlias(newName)`（cli.ts:2583-2584）
 4. CommHub alias：下次 `anet node start` 时用新名字 `report_status(idle)` 重新注册（旧 alias 自然 stale，10 分钟后被服务端 cutoff 标 offline）
 
 **P1**: CommHub 新增 rename API 主动更新 alias —— **未采纳**（rely on 自然 stale + 重新注册流程）。
@@ -189,24 +189,24 @@ register() → callCommHub("report_status", {
 - config.json: 不变（session 已写回）
 - 进程退出
 
-**CommHub 超时检测**: 心跳 3 分钟间隔（[`agent-node/src/cli.ts:1182`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1182) `setInterval(() => reportStatus("idle"), 3 * 60 * 1000)`），超过 **10 分钟**无心跳 → 自动标记 offline（[`server/src/index.ts:751-755`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L751) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。R219 校准：原 doc 5 分钟错。
+**CommHub 超时检测**: 心跳 3 分钟间隔（[`agent-node/src/cli.ts:1220`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1220) `setInterval(() => reportStatus("idle"), 3 * 60 * 1000)`），超过 **10 分钟**无心跳 → 自动标记 offline（[`server/src/index.ts:762-767`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L762) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。R219 校准：原 doc 5 分钟错。
 
 ### 9. 删除 (deleted) — R219 校准
 
 **触发**: `anet node delete <node-name>` （首次提示，再加 `--force` 才真删）
 
-**前置条件**: 不强制 offline —— `anet node delete` 会先 `stopNode(nodeId)` 杀进程 + `await notifyServerOffline(...)` 通知 hub 后再删本地目录（[cli.ts:2661-2677 deleteCommand](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2661)）。
+**前置条件**: 不强制 offline —— `anet node delete` 会先 `stopNode(nodeId)` 杀进程 + `await notifyServerOffline(...)` 通知 hub 后再删本地目录（[cli.ts:2666-2706 deleteCommand](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2666)）。
 
 **实际数据变更**:
 1. **本地**: `rmSync(.anet/nodes/<id>/, { recursive: true, force: true })` —— 删整个目录（含 config.json、channels/、logs/；目录名是 alias / node_name，不是内部 node_id 字段；R209 chain 一致）
-2. **CommHub session**: `notifyServerOffline` 调用 `report_status(offline)`（[cli.ts:2564-2589](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2564)）—— **只把 sessions row.status 改成 offline，不 DELETE**。这一行 session 会一直留在 db 里（10 分钟 stale cutoff 触发时也只是再次 mark offline）。
+2. **CommHub session**: `notifyServerOffline` 调用 `report_status(offline)`（[cli.ts:2591-2616](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2591)）—— **只把 sessions row.status 改成 offline，不 DELETE**。这一行 session 会一直留在 db 里（10 分钟 stale cutoff 触发时也只是再次 mark offline）。
 3. **CommHub inbox**: **不清理** —— 残留 inbox 消息会一直留着。如果之后用同 alias 再 `anet node start`，新进程会从 `getInbox` 拉到旧消息（注意：旧消息可能跟新进程 session 上下文无关）。
 
 ::: warning 旧 doc P1 设计未采纳
 原 doc 写「DELETE FROM sessions / DELETE FROM inbox」是设计草稿意图，**未实施**。当前 v0.8.2 实际只 mark offline + 删本地目录，不清服务端 row。
 :::
 
-**确认流程**（[cli.ts:2670-2675](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2670)）：
+**确认流程**（[cli.ts:2697-2701](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2697)）：
 
 ```
 $ anet node delete 指挥室
