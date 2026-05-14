@@ -217,7 +217,7 @@ Each user has an independent role in each network (owner / admin / member / view
 
 The two layers stack. For example: a system admin can see global data, but if they are a viewer in a specific network, they cannot send tasks in that network.
 
-## Quota Limits (v0.6 design — partially enforced in v0.8) {#quota-limits-v0-6-design--currently-not-enforced}
+## Quota Limits (v0.6 design — partially enforced in v0.8) {#quota-limits}
 
 ::: warning R226 calibration (aligned with R208/R224 chain)
 v0.6 designed a Free / Pro / Admin three-tier quota system (table below). After the Apache 2.0 OSS pivot **most items are shelved**, but **`createNetwork` still enforces one of them**:
@@ -284,7 +284,7 @@ CREATE TABLE networks (
   updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(owner_id, network_name),         -- network name unique per owner
   -- Columns added by the V3.13 ALTER TABLE migration (db.ts:276-278)
-  visibility   TEXT DEFAULT 'private',  -- private/public (**field exists but currently inert** — see [Quota limits — v0.6 design / currently not enforced](#quota-limits-v0-6-design--currently-not-enforced))
+  visibility   TEXT DEFAULT 'private',  -- private/public (**field exists but currently inert** — see [Quota limits — v0.6 design / partially enforced in v0.8](#quota-limits))
   max_members  INTEGER DEFAULT 50        -- **field exists, server-side enforcement is OFF**: addNetworkMember + joinByInvite have no max_members gate. Reserved for the v0.6 quota system. See the quota-limits section below.
 );
 

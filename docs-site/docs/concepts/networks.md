@@ -217,7 +217,7 @@ Agent Network 有两层权限：
 
 两层权限叠加。例如：系统 admin 可以看全局数据，但在某个网络中如果是 viewer，则不能在该网络中发任务。
 
-## 配额限制（v0.6 设计目标 — v0.8 部分启用） {#配额限制-v0-6-设计目标-当前未启用}
+## 配额限制（v0.6 设计目标 — v0.8 部分启用） {#quota-limits}
 
 ::: warning R226 校准（跟 R208/R224 chain 一致）
 v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 2.0 OSS 转向后**多数项已搁置**，但 **createNetwork 仍 enforces 一项**：
@@ -285,7 +285,7 @@ CREATE TABLE networks (
   UNIQUE(owner_id, network_name),         -- 同一 owner 下 network 名唯一
   -- V3.13 ALTER TABLE 迁移补的列（db.ts:276-278）
   visibility   TEXT DEFAULT 'private',  -- private/public (**字段存在, 当前不启用**, 见 L211 配额限制 section)
-  max_members  INTEGER DEFAULT 50        -- **字段存在, server 端不强制检查**: addNetworkMember + joinByInvite 都没有 max_members gate, 是 v0.6 配额体系的预留字段, 见 [配额限制 v0.6 设计目标 — 当前未启用](#配额限制-v0-6-设计目标-当前未启用)
+  max_members  INTEGER DEFAULT 50        -- **字段存在, server 端不强制检查**: addNetworkMember + joinByInvite 都没有 max_members gate, 是 v0.6 配额体系的预留字段, 见 [配额限制 v0.6 设计目标 — v0.8 部分启用](#quota-limits)
 );
 
 -- 网络成员表

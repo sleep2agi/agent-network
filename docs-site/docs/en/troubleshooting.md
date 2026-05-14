@@ -429,7 +429,7 @@ anet network delete my-network
 ```
 
 ::: warning Still enforced in v0.8 (POST /api/networks for non-admin callers)
-The older "plan quotas not enforced from v0.8 onward" claim is inaccurate. Verify [`auth.ts:184-189 createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184): it still looks up `users.plan || 'free'` in the `QUOTAS` table and gates `network create`. **Only `users.role = 'admin'` (the first registered user) is exempt** — that path sets `plan = "admin"` and uses `QUOTAS.admin`. Other users get `plan = 'free'` with `max_networks_owned = 2` by default (v0.8 did not change this default). The [Networks — Quota Limits](/en/concepts/networks#quota-limits-v0-6-design--currently-not-enforced) note about "plan tiers not enforced" actually refers to **no Dashboard plan-upgrade UI + no SaaS billing**, not "server no longer runs quota checks".
+The older "plan quotas not enforced from v0.8 onward" claim is inaccurate. Verify [`auth.ts:184-189 createNetwork()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184): it still looks up `users.plan || 'free'` in the `QUOTAS` table and gates `network create`. **Only `users.role = 'admin'` (the first registered user) is exempt** — that path sets `plan = "admin"` and uses `QUOTAS.admin`. Other users get `plan = 'free'` with `max_networks_owned = 2` by default (v0.8 did not change this default). The [Networks — Quota Limits](/en/concepts/networks#quota-limits) note about "plan tiers not enforced" actually refers to **no Dashboard plan-upgrade UI + no SaaS billing**, not "server no longer runs quota checks".
 :::
 
 **Trigger**: a non-admin user already owns the maximum number of networks (free = 2).
