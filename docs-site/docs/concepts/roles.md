@@ -184,7 +184,7 @@ CLI 不需要你输任何 role 信息 —— `anet login` 时 hub 把 role 写�
 
 ## 升降级一个成员的角色
 
-::: warning v0.8.2 还没有 `promote` / `demote` CLI 子命令
+::: warning v0.8.3 还没有 `promote` / `demote` CLI 子命令
 完整 CLI 入口排在 v0.9+。目前列成员可以走 CLI，**改角色 / 移除成员一律走 REST**（详见 [API — networks members](/api/rest#get-api-networks-id-members)）。
 :::
 

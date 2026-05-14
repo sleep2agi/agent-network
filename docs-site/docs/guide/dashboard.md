@@ -185,12 +185,12 @@ R264 校准：原 doc 示例「`create_network`」action **不存在**。verify 
 设置页面管理用户个人配置：
 
 - **个人信息** -- 修改显示名、邮箱
-- **密码修改** -- 修改登录密码（v0.8.2 Dashboard 0.4.2 尚未实装 UI；当前请用 CLI `anet passwd`，见 [account-system 修改密码](/guide/account-system#修改密码)）
+- **密码修改** -- 修改登录密码（v0.8.3 Dashboard 尚未实装该 UI；当前请用 CLI `anet passwd`，见 [account-system 修改密码](/guide/account-system#修改密码)）
 - **Token 管理** -- 创建 / 查看 / 撤销 API Token
 - **网络设置** -- 当前网络的配置（仅 owner/admin）
   - 重命名网络
   - 创建邀请码
-  - 管理成员角色（v0.8.2 Dashboard 部分功能未上 UI；CLI 有 `anet network invite` 但**无** `promote` / `demote` 子命令，改角色目前走 REST [`PUT /api/networks/:id/members/:user_id`](/api/rest#put-api-networks-id-members-user-id)；CLI 子命令排在 v0.9+）
+  - 管理成员角色（v0.8.3 Dashboard 部分功能未上 UI；CLI 有 `anet network invite` 但**无** `promote` / `demote` 子命令，改角色目前走 REST [`PUT /api/networks/:id/members/:user_id`](/api/rest#put-api-networks-id-members-user-id)；CLI 子命令排在 v0.9+）
   - 删除网络
 
 Token 管理界面：

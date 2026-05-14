@@ -239,7 +239,7 @@ anet network invite --role member        # Generate invite code (admin/member/vi
 ```
 
 ::: tip Role changes
-v0.8.2 doesn't expose `promote` / `demote` CLI subcommands yet — to change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.9+.
+v0.8.3 doesn't expose `promote` / `demote` CLI subcommands yet — to change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.9+.
 :::
 
 ### 17a. How do I change my password? (v0.8)
