@@ -104,7 +104,7 @@ npm install -g @sleep2agi/agent-network
 
 | 命令 | 说明 |
 |------|------|
-| `anet config` | 查看/修改配置 |
+| `anet config` | **只读**查看 `~/.anet/config.json` 内容（`anet config path` 打印路径，`anet config json` 输出 raw JSON）。修改走 `anet login` / `anet init` / `anet network use`，不是 `anet config --set`。verify [`cli.ts:4780-4809 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4780) |
 | `anet license` | v0.6 legacy 命令，查看 trial / license 状态。**Apache 2.0 OSS 后不再需要**；Hub 仍保留 `licenses` 表 + `send_task` 14 天 trial 检查做后向兼容 |
 | `anet activate <key>` | v0.6 legacy，写入 pro license key。**Apache 2.0 OSS 后不再需要**；用于命中 `license_expired` 兜底，见 [troubleshooting](/troubleshooting) |
 
