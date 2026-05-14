@@ -34,7 +34,7 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 
 | 字段 | flag | 默认 | 说明 |
 |------|------|------|------|
-| Model preset | `--preset <key>` | (prompt) | 见下方 verified 列表，未列入的走 `__custom__` 自己填 |
+| Vendor preset | `--preset <key>` | (prompt) | vendor key（见下方 `VENDORS` 列表），未列入的 provider 走 `custom` 自己填 baseUrl + model |
 | API key | `--api-key <key>` | (prompt) | `ANTHROPIC_AUTH_TOKEN` 写入每个 node 的 `env` |
 | Workdir | `--workdir <path>` | `~/anet-team` | 父目录 |
 | Workdir mode | `--workdir-mode <mode>` | `separate` | `separate` = `<workdir>/node{i}/.anet/nodes/<alias>` 每 node 一个子目录；`shared` = 全部 N 个 node 写同一个 `<workdir>/.anet/nodes/<alias>` |
@@ -45,18 +45,21 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 
 env vars 也认 `ANET_BATCH_API_KEY` 当 fallback。
 
-## Vendor preset 列表（Vincent 已 verify）
+## Vendor preset 列表（`VENDORS` registry）
 
-| Preset | Runtime | Model | baseUrl |
+R104-B 校准：`--preset` 现在接受的是 **vendor key**（不再是 model id）。`anet create --batch` 跟 `anet create` / `anet node create` 共用同一个 `selectVendorAndModel()`（`cli.ts:1230`）+ `VENDORS` registry（`cli.ts:1114-1175`）。旧的 `MODEL_PRESETS` / `PROVIDER_CHOICES` / `BATCH_PRESETS` 三套结构已合并删除（见 `cli.ts:1083-1085` 注释）。
+
+| `--preset` key | Runtime | 内置模型 | baseUrl |
 |--------|---------|-------|---------|
-| `intern-s1-pro` | `claude-agent-sdk` | `intern-s1-pro` | `https://chat.intern-ai.org.cn` |
-| `MiniMax-M2.7` | `claude-agent-sdk` | `MiniMax-M2.7` | `https://api.minimaxi.com/anthropic` |
-| `claude-sonnet-4-6` | `claude-agent-sdk` | `claude-sonnet-4-6` | (Anthropic default) |
-| `claude-opus-4-6` | `claude-agent-sdk` | `claude-opus-4-6` | (Anthropic default) |
-| `claude-haiku-4-5` | `claude-agent-sdk` | `claude-haiku-4-5` | (Anthropic default) |
-| `__custom__` | (输入) | (输入) | (输入) |
+| `intern` | `claude-agent-sdk` | intern-s2-preview（默认）/ intern-s1-pro | `https://chat.intern-ai.org.cn`（裸域名）|
+| `minimax` | `claude-agent-sdk` | MiniMax-M2.7 | `https://api.minimaxi.com/anthropic` |
+| `mimo` | `claude-agent-sdk` | mimo-v2.5-pro（默认）/ v2.5 / v2-pro / v2-omni | `https://token-plan-cn.xiaomimimo.com/anthropic` |
+| `anthropic` | `claude-agent-sdk` | claude-sonnet-4-6（默认）/ claude-opus-4-6 / claude-haiku-4-5 | Anthropic 原生 |
+| `codex` | `codex-sdk` | gpt-5.4（默认）/ o3 | (需 `codex auth login`) |
+| `claude-code` | `claude-code-cli` | 用 Claude Code 订阅模型 | (需 Claude 订阅) |
+| `custom` | `claude-agent-sdk` | 自己填 model id | 自己填 baseUrl |
 
-字段值跟 `anet create` 交互向导的 claude-agent-sdk model 选单 *same verified value set*（per commit 1bc03c0；源码 `BATCH_PRESETS` 注释 `cli.ts:5300-5301` 也明确要求两者保持 in-sync）—— preset 排序在 batch 这里把 `intern-s1-pro` 提到首位（用户用 batch 多半冲着 sci-team 这路），跟交互向导的 `askChoice("Select model:", ...)` 数组（`cli.ts:1173-1181`，`createInteractiveCommand` 内）顺序不严格一致，但 runtime / model / baseUrl 各值是 same source。codex-sdk preset **暂时不在列表里**——`__custom__` 自己填 runtime / model 仍可用，但默认 codex preset 还在 verify 中（follow-up issue 跟踪）。
+每个内置 vendor 的 baseUrl + model id 都 verified-with-real-call 才进 `VENDORS` 列表。`--preset` 为兼容旧用法也接受旧的 model id（如 `--preset intern-s1-pro`），cli.ts 自动 resolve 回对应 vendor。不带 `--preset` 走交互式 vendor 选单（先选供应商，再在该供应商的内置模型里选）。
 
 ## Lifecycle — `anet batch <verb>`
 
