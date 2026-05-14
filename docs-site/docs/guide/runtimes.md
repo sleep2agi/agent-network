@@ -205,7 +205,7 @@ anet node create translator \
 
 ### 已验证模型
 
-下表是 `anet init` 供应商选单（cli.ts `VENDORS` 列表）里 `claude-agent-sdk` runtime 的内置 provider —— 每项的 `baseUrl` + model id 都跑通过真 API 验证：
+下表是 `anet node create` 供应商选单（cli.ts `VENDORS` 列表）里 `claude-agent-sdk` runtime 的内置 provider —— 每项的 `baseUrl` + model id 都跑通过真 API 验证：
 
 | Provider | 模型 | `ANTHROPIC_BASE_URL` |
 |---|---|---|
@@ -374,7 +374,7 @@ anet node start coder
 
 ::: info 已验证（当前 stable 继承 v2 E2E 覆盖）
 - `claude-agent-sdk` runtime 本身 —— E2E 通过
-- vendor 维度：`anet init` 的 [`VENDORS` 列表（cli.ts:1114-1175）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114) 里每个 provider（**Anthropic / MiniMax / 书生 Intern / 小米 MiMo**）的 `baseUrl` + model id 都是 verified-with-real-call 才进列表的
+- vendor 维度：`anet node create` 的 [`VENDORS` 列表（cli.ts:1114-1175）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114) 里每个 provider（**Anthropic / MiniMax / 书生 Intern / 小米 MiMo**）的 `baseUrl` + model id 都是 verified-with-real-call 才进列表的
 - 多 Runtime 混搭（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调）
 :::
 

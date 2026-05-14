@@ -193,7 +193,7 @@ anet node create translator \
 
 ### Verified models
 
-The table below is the `claude-agent-sdk` runtime's built-in providers from the `anet init` vendor picker (cli.ts `VENDORS` list) — every entry's `baseUrl` + model ids are verified-with-real-call before landing:
+The table below is the `claude-agent-sdk` runtime's built-in providers from the `anet node create` vendor picker (cli.ts `VENDORS` list) — every entry's `baseUrl` + model ids are verified-with-real-call before landing:
 
 | Provider | Model | `ANTHROPIC_BASE_URL` |
 |---|---|---|
@@ -354,7 +354,7 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 
 ::: info Verified (current stable line inherits v2 E2E coverage)
 - The `claude-agent-sdk` runtime itself — passes E2E
-- At the vendor level: every provider in the `anet init` [`VENDORS` list (cli.ts:1114-1175)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114) (**Anthropic / MiniMax / InternLM / Xiaomi MiMo**) has its `baseUrl` + model ids verified-with-real-call before landing
+- At the vendor level: every provider in the `anet node create` [`VENDORS` list (cli.ts:1114-1175)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114) (**Anthropic / MiniMax / InternLM / Xiaomi MiMo**) has its `baseUrl` + model ids verified-with-real-call before landing
 - Multi-runtime mesh (peer agents auto-coordinate via `get_all_status` + `send_task` + `get_task`)
 :::
 
