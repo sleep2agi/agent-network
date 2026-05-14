@@ -7,7 +7,7 @@
 | 包名 | CLI 命令 | 用途 | 备注 |
 |------|---------|------|------|
 | `@sleep2agi/agent-network` | `anet` | CLI 管理 + Client SDK | dist 含 `bin/cli.js` + `src/client.js` + `src/node-server.js`（3 entry minify + obfuscator；具体大小查 [npm 包页](https://www.npmjs.com/package/@sleep2agi/agent-network)） |
-| `@sleep2agi/agent-node` | `agent-node` | Agent 运行时（3 个 runtime: claude-agent-sdk / codex-sdk / claude-code-cli） | regular dep `@anthropic-ai/claude-agent-sdk`；optional peerDep `@openai/codex-sdk`（R212 chain） |
+| `@sleep2agi/agent-node` | `agent-node` | Agent 运行时，驱动 **2 个 SDK runtime**：`claude-agent-sdk` / `codex-sdk`（`claude-code-cli` runtime 不走 agent-node —— 直接 spawn 本机 `claude` 二进制） | regular dep `@anthropic-ai/claude-agent-sdk`；optional peerDep `@openai/codex-sdk`（R212 chain） |
 | `@sleep2agi/commhub-server` | `commhub-server` | CommHub backend（bun 必装；通过 `anet hub start` 走 bunx PIN 版自动拉） | Bun-only runtime（`engines.bun: ">=1.2.0"`） |
 | `@sleep2agi/agent-network-dashboard` | - | Next.js Web UI | `anet hub dashboard` 通过 `npx` 自动拉（版本走 `dashboardReleaseTag()`：默认 `@preview` tag，`ANET_DASHBOARD_VERSION` env 可覆盖 —— 不 hardcode pin，见 [dashboard.md](/guide/dashboard)），也可独立部署 |
 

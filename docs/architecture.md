@@ -28,9 +28,9 @@ agent-network/
 
 **设计原则**：client.ts 是核心（零外部依赖），server.ts 是薄包装（委托给 `../../server/src/index.ts`），cli.ts 是粘合层。
 
-### agent-node 三个 runtime
+### 三个 runtime
 
-agent-node 支持三个 runtime：
+Profile 的 `runtime` 字段有三个取值。其中 **`claude-agent-sdk` / `codex-sdk` 由 `@sleep2agi/agent-node` 驱动**（agent-node 的 `RUNTIME_MAP` 只映射这两个，见 `agent-node/src/cli.ts:151-154`）；**`claude-code-cli` 不走 agent-node** —— `anet node start` 直接 spawn 本机 `claude` 二进制：
 
 | Runtime | 说明 | 模型 |
 |------|------|------|
