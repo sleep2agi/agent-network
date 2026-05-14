@@ -85,7 +85,7 @@ anet network join <code>
 For team leads, trusted operators, anyone who needs to manage members.
 
 - **Can**: everything member can; invite new members + remove non-owner members ([`index.ts:629`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L629) / [`:615`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L615): `["owner","admin"]`); modify any agent.
-- **Cannot**: **change an existing member's role** — `PUT /api/networks/:id/members/:user_id` is **owner-only** ([`index.ts:608`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L608) `if (callerRole !== "owner")` → 403); admin can only invite / remove, not re-role existing members. Also cannot: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin; R262 chain). A network admin sees only their own audit log rows, same as members and viewers.
+- **Cannot**: **change an existing member's role** — `PUT /api/networks/:id/members/:user_id` is **owner-only** ([`index.ts:620`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L620) `if (callerRole !== "owner")` → 403); admin can only invite / remove, not re-role existing members. Also cannot: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin; R262 chain). A network admin sees only their own audit log rows, same as members and viewers.
 
 Become an admin:
 ```bash
@@ -104,8 +104,8 @@ curl -X PUT http://localhost:9200/api/networks/<net_id>/members/<user_id> \
 
 For network creator. Fully privileged. **Every network must have at least one owner.**
 
-- **Can**: everything admin can; delete the network; promote others to owner.
-- **Protections**: cannot be downgraded or removed by an admin. If only one owner remains, that owner cannot demote or remove themselves.
+- **Can**: everything admin can; delete the network; change other members' roles (`PUT /api/networks/:id/members/:user` requires the caller to be an owner — admin cannot re-role members).
+- **Protections**: cannot be downgraded or removed by an admin. If only one owner remains, that owner cannot demote or remove themselves. ⚠ The owner role **cannot be granted** to anyone (`updateMemberRole` / `createInvite` both explicitly reject `owner`) — so "multiple owners" is not a normal path; see "Become an owner" below.
 
 Become an owner:
 - Create a network: `anet network create <name>` (creator is auto-owner)

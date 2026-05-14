@@ -108,7 +108,7 @@ anet network join <code>                         # 用邀请码加入
 - 改 / 删 / 启动停止任何 agent（包括别人创建的）
 
 **不能干什么**：
-- ❌ **改成员 role** —— `PUT /api/networks/:id/members/:user_id` 是 **owner only**（[`index.ts:608`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L608) `if (callerRole !== "owner")` 直接 403）；admin 只能 invite / remove，不能改已有成员的 role
+- ❌ **改成员 role** —— `PUT /api/networks/:id/members/:user_id` 是 **owner only**（[`index.ts:620`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L620) `if (callerRole !== "owner")` 直接 403）；admin 只能 invite / remove，不能改已有成员的 role
 - ❌ 删除 network 本身（只有 owner 能）
 - ❌ 移除 owner / 把别人升到 owner
 - ❌ 看其他人的 `/api/audit-log` row —— admin-only 端点是**系统级** `users.role='admin'` 限定（**不是** network admin；R262 chain）；network admin 跟 viewer / member 一样只能看自己的 audit log row
@@ -135,12 +135,13 @@ curl -X PUT http://localhost:9200/api/networks/<net_id>/members/<user_id> \
 **能干什么**：
 - admin 的全部
 - 删除 network
-- 把其他人升到 owner（多 owner 时谁都能动谁，建议谨慎）
+- 改其他成员的 role（`PUT /api/networks/:id/members/:user` 要求 caller 是 owner —— admin 改不了成员 role）
 
 **特殊保护**：
 - ❌ 不能被 admin 改 role
 - ❌ 不能被 admin 移除
 - 如果 network 只剩一个 owner，**不能降级 / 删除自己**（避免无 owner 状态）
+- ⚠ owner 角色**不能授予**给别人（`updateMemberRole` / `createInvite` 都显式拒 `owner`，详见下方「怎么变成 owner」）—— 所以「多 owner」不是正常路径
 
 **怎么变成 owner**：
 - 创建 network 时自动是 owner：`anet network create <name>`
