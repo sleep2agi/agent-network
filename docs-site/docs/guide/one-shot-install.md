@@ -12,7 +12,7 @@
 
 脚本会自动安装下面所有缺失的包：
 
-- `nodejs ≥ 20`
+- `nodejs ≥ 22.13.0`（`@sleep2agi/agent-network` `engines.node`）
 - `npm`
 - `tmux`
 - `bun`（commhub-server 需要）

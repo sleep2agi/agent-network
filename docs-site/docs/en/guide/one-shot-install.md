@@ -12,7 +12,7 @@ If you want to spin up a complete Agent Network (hub + dashboard + multiple agen
 
 The script auto-installs anything missing from the list below:
 
-- `nodejs ≥ 20`
+- `nodejs ≥ 22.13.0` (`@sleep2agi/agent-network` `engines.node`)
 - `npm`
 - `tmux`
 - `bun` (required by commhub-server)
