@@ -40,7 +40,7 @@ anet 当前内置三个 Runtime，其中两个是 SDK adapter（第三个 `claud
 ### claude-agent-sdk
 
 **强项**
-- 内置 tool 集合 + MCP 注册都是**结构化字段**，wrapper 想加 commhub MCP 直接 push 到 `options.mcpServers`（cli.ts L479-484）即可
+- 内置 tool 集合 + MCP 注册都是**结构化字段**，wrapper 想加 commhub MCP 直接 push 到 `options.mcpServers`（cli.ts L513-520）即可
 - streaming 是 typed `AsyncGenerator<SDKMessage>`，`for await` 解构清晰
 - `SDKResultMessage.total_cost_usd` 内置，cost telemetry 不用自己算
 - 完全可禁宿主机 `~/.claude/` 影响（`settingSources: []`）—— 这是 anet 多租户多节点共存的关键
@@ -94,7 +94,7 @@ for await (const ev of events) {
 if (codexThread?.id) writebackSession(codexThread.id);   // 写 config.json
 ```
 
-注意：**Thread.id 在第一个 turn 启动之前是 `null`**。所以 wrapper 是 turn 完成后才写回，不像 claude-agent-sdk 那样在 `system/init` 帧拿到。下次进程启动，从 `config.json` 读 `session` 字段，走 `codex.resumeThread(SESSION_ID, opts)`（cli.ts L634-636）续。
+注意：**Thread.id 在第一个 turn 启动之前是 `null`**。所以 wrapper 是 turn 完成后才写回，不像 claude-agent-sdk 那样在 `system/init` 帧拿到。下次进程启动，从 `config.json` 读 `session` 字段，走 `codex.resumeThread(SESSION_ID, opts)`（cli.ts L698）续。
 
 ---
 
@@ -105,16 +105,16 @@ if (codexThread?.id) writebackSession(codexThread.id);   // 写 config.json
 ```
                    inbox / SSE / Telegram 进 task
                               ↓
-                          think()  ← cli.ts:822
+                          think()  ← cli.ts:762
                               ↓
-                  ┌───────────┼───────────┐
-                  ↓           ↓           ↓
-       processWithClaude  processWithCodex  processWithHttpApi
-         (cli.ts:389)      (cli.ts:644)     (cli.ts:736)
-                  ↓           ↓
-            SDK query()  thread.runStreamed()
-                  ↓           ↓
-            writebackSession(session_id) ← 统一 cli.ts:218
+                  ┌───────────┴───────────┐
+                  ↓                       ↓
+            processWithClaude        processWithCodex
+              (cli.ts:388)             (cli.ts:669)
+                  ↓                       ↓
+              SDK query()         thread.runStreamed()
+                  ↓                       ↓
+            writebackSession(session_id) ← 统一 cli.ts:217
                   ↓
                 config.json 持久化
                   ↓
@@ -123,11 +123,11 @@ if (codexThread?.id) writebackSession(codexThread.id);   // 写 config.json
 
 收敛的几个关键点：
 
-1. **统一调度**：`think()` 是 `Promise` 队列（cli.ts L782-803），保证同一节点同一时刻只跑一个 LLM 调用，避免并发把 commhub MCP / 文件系统打乱。
+1. **统一调度**：`think()` 是 `Promise` 队列（cli.ts L762-780），保证同一节点同一时刻只跑一个 LLM 调用，避免并发把 commhub MCP / 文件系统打乱。
 2. **统一 session 写回**：两个 SDK 各自拿 session/thread id 后都调 [`writebackSession()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 落 `.anet/nodes/<alias>/config.json` 同一字段 `session`。RUNTIME 切换时这字段语义不同（claude 是 jsonl UUID，codex 是 thread id），但写入/读取代码完全共用。
-3. **统一 task 上下文注入**：`think()` 启动前把 `taskId` 写进 `process.env.CURRENT_TASK_ID`（L790-797），两套 SDK 的 prompt 模板都引这个 env 让 LLM 在 `send_task` 时挂 `parent_task_id`，把回复链路串回上游。
-4. **统一错误降级**：`processTask()`（cli.ts L805-829）抓 `text` 后用一个 regex（L826-828）扫常见 API 错误关键词（`"may not have access"`、`"model not found"`、`"API error"` 等），把"SDK 没抛但内容是错误"也标 failed → Dashboard 显示真实失败而不是假装成功。
-5. **统一 commhub MCP 注入**：claude-agent-sdk 走 `options.mcpServers["commhub"] = { type:"http", url, headers }`（cli.ts L479-484）；codex-sdk 走 Codex CLI 的全局 `~/.codex/config.toml`（用户事先配，anet wrapper 不动）。**这是当前最不对称的一处**——RFC issue 已记，未来想统一到"wrapper 注入"。
+3. **统一 task 上下文注入**：`think()` 启动前把 `taskId` 写进 `process.env.CURRENT_TASK_ID`（L768-769），两套 SDK 的 prompt 模板都引这个 env 让 LLM 在 `send_task` 时挂 `parent_task_id`，把回复链路串回上游。
+4. **统一错误降级**：`processTask()`（cli.ts L782-829）抓 `text` 后用一个 regex（L803）扫常见 API 错误关键词（`"may not have access"`、`"model not found"`、`"API error"` 等），把"SDK 没抛但内容是错误"也标 failed → Dashboard 显示真实失败而不是假装成功。
+5. **统一 commhub MCP 注入**：claude-agent-sdk 走 `options.mcpServers["commhub"] = { type:"http", url, headers }`（cli.ts L513-520）；codex-sdk 走 Codex CLI 的全局 `~/.codex/config.toml`（用户事先配，anet wrapper 不动）。**这是当前最不对称的一处**——RFC issue 已记，未来想统一到"wrapper 注入"。
 
 ---
 

@@ -40,7 +40,7 @@ All `agent-node/src/cli.ts:NNN` line numbers below are calibrated against GitHub
 ### claude-agent-sdk
 
 **Strengths**
-- Both the built-in toolset and MCP registration are **structured fields**, so injecting commhub MCP is a clean push onto `options.mcpServers` (cli.ts L479-484).
+- Both the built-in toolset and MCP registration are **structured fields**, so injecting commhub MCP is a clean push onto `options.mcpServers` (cli.ts L513-520).
 - Streaming is a typed `AsyncGenerator<SDKMessage>` — `for await` destructures cleanly per message subtype.
 - `SDKResultMessage.total_cost_usd` is built-in, no need to compute USD cost yourself.
 - Host-side `~/.claude/` can be fully ignored via `settingSources: []` — critical for multi-tenant / multi-node coexistence.
@@ -94,7 +94,7 @@ for await (const ev of events) {
 if (codexThread?.id) writebackSession(codexThread.id);   // persist to config.json
 ```
 
-Note: **`Thread.id` is `null` until the first turn starts**, so the wrapper writes back **after** the turn completes, unlike claude-agent-sdk where the id arrives in the `system/init` frame. On a subsequent process start, the wrapper reads `session` from `config.json` and calls `codex.resumeThread(SESSION_ID, opts)` (cli.ts L634-636) to continue.
+Note: **`Thread.id` is `null` until the first turn starts**, so the wrapper writes back **after** the turn completes, unlike claude-agent-sdk where the id arrives in the `system/init` frame. On a subsequent process start, the wrapper reads `session` from `config.json` and calls `codex.resumeThread(SESSION_ID, opts)` (cli.ts L698) to continue.
 
 ---
 
@@ -105,16 +105,16 @@ The architecture in `agent-node/src/cli.ts` boils down to "two SDKs, one schedul
 ```
                    inbox / SSE / Telegram inbound task
                               ↓
-                          think()  ← cli.ts:822
+                          think()  ← cli.ts:762
                               ↓
-                  ┌───────────┼───────────┐
-                  ↓           ↓           ↓
-       processWithClaude  processWithCodex  processWithHttpApi
-         (cli.ts:389)      (cli.ts:644)     (cli.ts:736)
-                  ↓           ↓
-            SDK query()  thread.runStreamed()
-                  ↓           ↓
-            writebackSession(session_id) ← shared cli.ts:218
+                  ┌───────────┴───────────┐
+                  ↓                       ↓
+            processWithClaude        processWithCodex
+              (cli.ts:388)             (cli.ts:669)
+                  ↓                       ↓
+              SDK query()         thread.runStreamed()
+                  ↓                       ↓
+            writebackSession(session_id) ← shared cli.ts:217
                   ↓
                 config.json persisted
                   ↓
@@ -123,11 +123,11 @@ The architecture in `agent-node/src/cli.ts` boils down to "two SDKs, one schedul
 
 Key convergence points:
 
-1. **Unified scheduling.** `think()` is a `Promise` queue (cli.ts L782-803) — at most one LLM call per node at any moment, which prevents concurrent commhub MCP / filesystem interleavings.
+1. **Unified scheduling.** `think()` is a `Promise` queue (cli.ts L762-780) — at most one LLM call per node at any moment, which prevents concurrent commhub MCP / filesystem interleavings.
 2. **Unified session writeback.** Both SDKs route their session/thread id through [`writebackSession()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) into the same `.anet/nodes/<alias>/config.json` field `session`. The semantics differ per runtime (Claude → jsonl UUID, Codex → thread id), but the read/write code is shared.
-3. **Unified task-context injection.** Before dispatching, `think()` writes `taskId` into `process.env.CURRENT_TASK_ID` (L790-797); both SDK prompts reference this env so the LLM tags `parent_task_id` on `send_task` to chain replies back upstream.
-4. **Unified error degradation.** `processTask()` (cli.ts L805-829) post-scans the `text` with a regex (L826-828) for common API-error markers (`"may not have access"`, `"model not found"`, `"API error"`, …) so "SDK didn't throw but the message is an error" still surfaces as a real failure in the Dashboard instead of a fake success.
-5. **Unified commhub MCP injection.** claude-agent-sdk uses `options.mcpServers["commhub"] = { type:"http", url, headers }` (cli.ts L479-484); codex-sdk relies on the user pre-configuring Codex CLI's global `~/.codex/config.toml` — the wrapper doesn't touch it. **This is the most asymmetric piece today**; an RFC is open for a unified "wrapper-injected" approach.
+3. **Unified task-context injection.** Before dispatching, `think()` writes `taskId` into `process.env.CURRENT_TASK_ID` (L768-769); both SDK prompts reference this env so the LLM tags `parent_task_id` on `send_task` to chain replies back upstream.
+4. **Unified error degradation.** `processTask()` (cli.ts L782-829) post-scans the `text` with a regex (L803) for common API-error markers (`"may not have access"`, `"model not found"`, `"API error"`, …) so "SDK didn't throw but the message is an error" still surfaces as a real failure in the Dashboard instead of a fake success.
+5. **Unified commhub MCP injection.** claude-agent-sdk uses `options.mcpServers["commhub"] = { type:"http", url, headers }` (cli.ts L513-520); codex-sdk relies on the user pre-configuring Codex CLI's global `~/.codex/config.toml` — the wrapper doesn't touch it. **This is the most asymmetric piece today**; an RFC is open for a unified "wrapper-injected" approach.
 
 ---
 
