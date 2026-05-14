@@ -15,6 +15,7 @@
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { getUserNetworkRole } from "./auth";
+import { pushEvent } from "./push";
 
 export interface RenameResult {
   ok: boolean;
@@ -88,6 +89,30 @@ export function commitRename(userId: string, txnId: string): RenameResult {
   db.run(
     "UPDATE rename_txn SET status = 'committed', committed_at = datetime('now') WHERE txn_id = ?1",
     [txnId]);
+
+  // RFC-010 §4.2.1 C4 — broadcast node.renamed SSE. (#84 实施补漏: the Server
+  // surface originally missed C4; N站马's dashboard slice needs this event.)
+  // Envelope per RFC §3.4: alias = NEW (the post-event truth); data carries
+  // old/new + surfaces + history_policy. `type` is also set for consumers that
+  // switch on .type (the existing SSE convention). Pushed to both the old- and
+  // new-alias streams since the SSE layer is per-session-name (no network-wide
+  // broadcast primitive) — whoever watched either name gets the rename.
+  const renamedEvent: Record<string, unknown> = {
+    type: "node.renamed",
+    event: "node.renamed",
+    txn_id: txnId,
+    alias: txn.new_alias,
+    network_id: txn.network_id,
+    data: {
+      old_alias: txn.old_alias,
+      new_alias: txn.new_alias,
+      surfaces_updated: ["config", "tmux", "commhub", "dashboard", "batch_prefix", "session_resume"],
+      history_policy: "preserve",
+    },
+  };
+  pushEvent(txn.old_alias, renamedEvent, txn.network_id);
+  pushEvent(txn.new_alias, renamedEvent, txn.network_id);
+
   return { ok: true, txn_id: txnId };
 }
 
