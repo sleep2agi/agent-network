@@ -308,7 +308,7 @@ anet node create coder \
 ```
 
 ::: warning codex-sdk 不吃 `tools`
-`codex-sdk` runtime **静默忽略** `--tools` flag 和 `config.json` 的 `tools` 字段（verify [`agent-node/src/cli.ts:664-670`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L664) `codexOpts` 无 `tools` 字段）。工具集由 `codex` CLI 二进制 baked in，不由 anet 配置。`--tools` 只对 `claude-agent-sdk` runtime 生效。
+`codex-sdk` runtime **静默忽略** `--tools` flag 和 `config.json` 的 `tools` 字段（verify [`agent-node/src/cli.ts:690-696`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L690) `codexOpts` 无 `tools` 字段）。工具集由 `codex` CLI 二进制 baked in，不由 anet 配置。`--tools` 只对 `claude-agent-sdk` runtime 生效。
 :::
 
 ::: warning 验证状态

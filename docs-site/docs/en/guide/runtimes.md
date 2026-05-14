@@ -288,7 +288,7 @@ anet node create coder \
 ```
 
 ::: warning codex-sdk ignores `tools`
-The `codex-sdk` runtime **silently ignores** the `--tools` flag and the `config.json` `tools` field (verify [`agent-node/src/cli.ts:664-670`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L664) — `codexOpts` has no `tools` field). The tool set is baked into the `codex` CLI binary, not configured via anet. `--tools` only takes effect for the `claude-agent-sdk` runtime.
+The `codex-sdk` runtime **silently ignores** the `--tools` flag and the `config.json` `tools` field (verify [`agent-node/src/cli.ts:690-696`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L690) — `codexOpts` has no `tools` field). The tool set is baked into the `codex` CLI binary, not configured via anet. `--tools` only takes effect for the `claude-agent-sdk` runtime.
 :::
 
 ::: warning Verification status
