@@ -252,7 +252,7 @@ If you have more than 50 agents, consider using the standalone Dashboard and dis
 
 `@sleep2agi/agent-network-dashboard@preview` carries the next-gen UI under active polish. Current preview pin auto-syncs with the CLI preview tag `@sleep2agi/agent-network@preview`; the actual version is whatever's on the [npm preview tag](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard?activeTab=versions) (frequent iteration, this doc doesn't pin a specific number).
 
-New capabilities (vs stable 0.4.2):
+New capabilities (vs the current stable — the stable dashboard also keeps iterating; if any item below has already landed in stable, the npm package page's dist-tags are authoritative):
 
 - **Cmd / Ctrl + K command palette**: keyboard-driven navigation, search, command invocation
 - **? keyboard shortcut overlay**: all hotkeys at a glance

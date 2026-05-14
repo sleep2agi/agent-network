@@ -252,7 +252,7 @@ Dashboard 通过两类数据面保持更新：
 
 `@sleep2agi/agent-network-dashboard@preview` 上有正在打磨的下一代 UI。当前 preview pin 跟 CLI preview tag `@sleep2agi/agent-network@preview` 自动联动，具体版本以 [npm preview tag](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard?activeTab=versions) 实际为准（频繁迭代，doc 不写死版本号）。
 
-新增能力（vs stable 0.4.2）：
+新增能力（vs 当前 stable —— stable dashboard 也在持续迭代，下表如与实际 stable 重合以 npm 包页 dist-tags 为准）：
 
 - **Cmd / Ctrl + K 命令面板**：键盘驱动跳转、搜索、命令调用
 - **? 键盘速查 overlay**：弹出所有快捷键
