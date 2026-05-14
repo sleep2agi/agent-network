@@ -32,15 +32,15 @@ stateDiagram-v2
 ```
 
 ::: warning R266 校准：`created` 在生产路径上基本不可见
-状态机里的 `[*] → created → delivered` 是按 schema 默认值（[`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`）画的，但 **没有任何代码路径会把 `created` UPDATE 成 `delivered`**：[`server/src/tools.ts:508-509`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L508) 的 `send_task` 在 INSERT 时就直接写 `VALUES (..., 'delivered', ...)`，跳过默认值。所以正常 API 流程里**永远观察不到** `created` 这个状态。
+状态机里的 `[*] → created → delivered` 是按 schema 默认值（[`server/src/db.ts:95`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L95) `status TEXT NOT NULL DEFAULT 'created'`）画的，但 **没有任何代码路径会把 `created` UPDATE 成 `delivered`**：[`server/src/tools.ts:509-510`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L509) 的 `send_task` 在 INSERT 时就直接写 `VALUES (..., 'delivered', ...)`，跳过默认值。所以正常 API 流程里**永远观察不到** `created` 这个状态。
 
 `created` 仍然作为防御性兜底出现在两条 WHERE 子句里：
 
 | 操作 | 接受的当前状态 | 源码 |
 |------|---------------|------|
-| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:816](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816) |
-| `send_ack`（Hub tool） | `created` / `delivered` | [tools.ts:678](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L678) |
-| `ack_inbox`（Agent tool） | `delivered`（**仅 1 个**） | [tools.ts:353](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L353) |
+| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:817](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) |
+| `send_ack`（Hub tool） | `created` / `delivered` | [tools.ts:668](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L668) |
+| `ack_inbox`（Agent tool） | `delivered`（**仅 1 个**） | [tools.ts:354](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354) |
 
 R279 校准：R266 chain 原表把 `ack_inbox` 和 `send_ack` 当一行，但实际 WHERE 子句不同 —— `ack_inbox`（agent 端 tool，L353）只接受 `delivered`，`send_ack`（hub 端 tool，L678）接受 `created` / `delivered` 两种。R230 chain 校准的「4 个可取消状态」就是 `cancel_task` 那行；本节状态机图为简化未画 `created` 的出边，实际 SQL 允许（直接构造 DB row 走 INSERT 默认值才能进入 `created` 态，REST/MCP 没有这种入口）。
 :::
@@ -135,7 +135,7 @@ expires_at = datetime('now', '+3600 seconds')
 ```
 
 ::: warning R305 校准：过期巡检只覆盖 `created` / `delivered`
-verify [`server/src/index.ts:274-290`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L274)：过期不是实时的 —— 一个 **每 5 分钟跑一次的 patrol** 把 `expires_at < now` 且 **`status IN ('created', 'delivered')`** 的任务 UPDATE 成 `expired`。
+verify [`server/src/index.ts:286-303`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L286)：过期不是实时的 —— 一个 **每 5 分钟跑一次的 patrol** 把 `expires_at < now` 且 **`status IN ('created', 'delivered')`** 的任务 UPDATE 成 `expired`。
 
 含义：
 - 实际状态翻转最多比 `expires_at` 晚 ~5 分钟
@@ -190,7 +190,7 @@ cancel_task(task_id="t_xxx", reason="不再需要")
 3. 记录取消原因到 result 字段
 4. 记录 task_event
 
-可取消的状态：`created` / `delivered` / `acked` / `running`（4 个状态，verify [`server/src/tools.ts:816`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816) `WHERE status IN ('created', 'delivered', 'acked', 'running')` —— R230 校准：server 的 tool description 字符串只列 3 个少一个 `created`，实际 SQL 4 个；终态 `replied` / `failed` / `cancelled` / `expired` 不能直接 cancel，需先 retry 再 cancel）
+可取消的状态：`created` / `delivered` / `acked` / `running`（4 个状态，verify [`server/src/tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) `WHERE status IN ('created', 'delivered', 'acked', 'running')` —— R230 校准：server 的 tool description 字符串只列 3 个少一个 `created`，实际 SQL 4 个；终态 `replied` / `failed` / `cancelled` / `expired` 不能直接 cancel，需先 retry 再 cancel）
 
 ## 转移任务
 
@@ -245,7 +245,7 @@ sequenceDiagram
 
 ## 任务事件日志
 
-每个状态变更都记录到 `task_events` 表（verify [`server/src/db.ts:133-147`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L133)）：
+每个状态变更都记录到 `task_events` 表（verify [`server/src/db.ts:134-147`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L134)）：
 
 ```sql
 CREATE TABLE task_events (
@@ -302,7 +302,7 @@ ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, creat
 
 ## 数据库表结构
 
-下方是 v0.8 实际生效的 schema（含所有 ALTER TABLE migration 之后的字段）。CREATE TABLE 原文 + migrations 见 [`server/src/db.ts:87-110`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L87)（tasks 原 17 列）+ [`db.ts:301-304`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L301) (V3 加 `network_id`) + [`db.ts:391`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L391) (加 `parent_task_id`)。
+下方是 v0.8 实际生效的 schema（含所有 ALTER TABLE migration 之后的字段）。CREATE TABLE 原文 + migrations 见 [`server/src/db.ts:88-111`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L88)（tasks 原 17 列）+ [`db.ts:304`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L304) (V3 加 `network_id`) + [`db.ts:392`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L392) (加 `parent_task_id`)。
 
 ```sql
 -- 实际 tasks 表 19 列（原 17 + migration 2）
