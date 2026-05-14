@@ -47,7 +47,7 @@ You need to know the user IDs allowed to communicate with the bot. To get yours:
 
 ### Step 3: Bind the channel to an existing node
 
-Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts:2580 channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2580)):
+Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts:2683 channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2683)):
 
 ```bash
 # Assumes you already have a claude-code-cli node 'commander'
@@ -61,7 +61,7 @@ anet channel add telegram commander
 ```
 
 ::: warning The flag is `--allow`, not `--allow-user`
-Verify [`cli.ts:2598`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2598): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:244`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L244)); the allowlist lives in `access.json`.
+Verify [`cli.ts:2700-2701`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2700): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:244`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L244)); the allowlist lives in `access.json`.
 :::
 
 ### Step 4: Start
