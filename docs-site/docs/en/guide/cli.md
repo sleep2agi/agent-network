@@ -121,6 +121,8 @@ See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> 
 
 ### anet hub start
 
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2068)
+
 Start the CommHub communication server.
 
 ```bash
@@ -184,6 +186,8 @@ Once admin is bootstrapped (`~/.anet/server/admin-utok.json` exists), `anet hub 
 
 ### anet passwd
 
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3608)
+
 Change the current logged-in user's password. By default it prompts for old password, new password, and confirmation. Scripts may pass `--old` / `--new`.
 
 ```bash
@@ -195,6 +199,8 @@ On success the hub returns a fresh `utok_`; CLI saves it back to `~/.anet/config
 
 ### anet hub admin reset-user
 
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2318)
+
 Local hub-host recovery command. It bypasses HTTP and reads SQLite directly.
 
 ```bash
@@ -204,6 +210,8 @@ anet hub admin reset-user --username alice
 It generates a random password, revokes all user `utok_`, issues a fresh `utok_`, and writes `password_reset_by_admin` to `audit_log`. The password is printed once.
 
 ### anet node create
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1391) (`createCommand`)
 
 Create a new agent node.
 
@@ -251,6 +259,8 @@ The following fields are generated **conditionally** — not every node has them
 
 ### anet node start
 
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1867)
+
 Start an agent node.
 
 ```bash
@@ -272,6 +282,8 @@ anet node start <name> [options]
 7. Wait for tasks
 
 ### anet status
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2995)
 
 View network status overview.
 
@@ -301,6 +313,8 @@ Tasks: 42 replied, 3 running, 0 failed
 ```
 
 ### anet tasks
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3059)
 
 View task list.
 
@@ -353,6 +367,8 @@ Pre-v0.7, an expired `ntok_` required a manual `anet node delete` + recreate. Si
 
 ### anet network invite
 
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3432)
+
 Create a network invite code.
 
 ```bash
@@ -383,6 +399,8 @@ anet network invite --role viewer --expires 7
 
 ### anet token create
 
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3555)
+
 Create an API token.
 
 ```bash
@@ -401,6 +419,8 @@ The created token is displayed only once. Store it securely. If lost, you'll nee
 :::
 
 ### anet node resume
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1875)
 
 Resume a previously interrupted agent session. When an agent crashes, is manually stopped, or exits unexpectedly, use this command to restore context without losing conversation history.
 
@@ -439,6 +459,8 @@ anet node resume worker --session abc123
 :::
 
 ### anet init project
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L825)
 
 Initialize a Claude Code project with automatic MCP and CLAUDE.md configuration.
 
