@@ -468,6 +468,24 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     `需要读取外部 URL、调用外部 API、查资料时——直接用对应工具真试。`,
     `不要假设"网络受限""无法访问外部 API"就 fallback 到知识库；只有工具真的执行报错，才据实说明情况。`,
   ].join("\n");
+  // CommHub MCP tool guidance. Two bugs fixed here (issue #102):
+  // (1) tool names were wrong — claude-agent-sdk exposes MCP tools as
+  //     `mcp__<server>__<tool>` (double underscore), so the commhub tools are
+  //     `mcp__commhub__commhub_send_task` etc., NOT `mcp_commhub__send_task`.
+  // (2) custom-systemPrompt nodes never received this block at all (the prompt
+  //     ternary dropped defaultPrompt entirely), so the agent declared the
+  //     commhub tools "unavailable". Now injected into both prompt branches.
+  const commhubToolGuidance = [
+    `【多 agent 协作 — CommHub 工具】`,
+    `你已接入 CommHub 通信网络，可主动用以下 MCP 工具协调其他 agent（这些工具已 registered，直接调用即可）：`,
+    `- mcp__commhub__commhub_get_all_status() — 查看哪些 agent 在线。`,
+    `- mcp__commhub__commhub_send_task(alias, task, parent_task_id="${currentTaskId}") — 派任务给指定 agent。`,
+    `  ⚠ 必须把 parent_task_id 设成你当前任务的 ID，系统会自动把子任务的最终结果串回给 ${from}。`,
+    `- mcp__commhub__commhub_get_task(task_id) — 轮询子任务状态，直到 replied/failed。`,
+    `- mcp__commhub__commhub_send_message(alias, message) — 发纯消息（不要求对方回复）。`,
+    `拿到子任务 reply 后整合进你给 ${from} 的最终汇报。即便 session 中途断开，只要 parent_task_id 设了系统也会自动交付。`,
+    `不要假设"通信工具不可用"——它们已暴露给你，需要协调其他 agent 时直接调用。`,
+  ].join("\n");
   const defaultPrompt = [
     `你是 ${ALIAS}，一个 AI Agent 节点。收到来自 ${from} 的任务 (task_id=${currentTaskId})：`,
     ``,
@@ -475,13 +493,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     ``,
     toolCapabilityGuidance,
     ``,
-    `【若任务需要其他 agent 协助】`,
-    `1. 先用 mcp_commhub__get_all_status 看哪些 agent 在线。`,
-    `2. 用 mcp_commhub__send_task(alias, task, parent_task_id="${currentTaskId}") 派给合适的 agent。`,
-    `   ⚠ 必须把 parent_task_id 设成你当前任务的 ID，这样系统会自动把子任务的最终结果串回给 ${from}。`,
-    `3. 用 mcp_commhub__get_task(task_id) 轮询子任务状态。允许中途给 ${from} 发"还在等待"的进度汇报，但你必须继续轮询直到子任务 replied/failed。`,
-    `4. 拿到子任务 reply 后把内容整合到你给 ${from} 的最终汇报里。`,
-    `   即便你的 session 中途断开，只要 parent_task_id 设了，系统也会自动把子任务结果交付给 ${from}，所以不必焦虑。`,
+    commhubToolGuidance,
     ``,
     `【禁止】`,
     `- 不要给自己（${ALIAS}）发任务（死循环）。`,
@@ -492,7 +504,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     `执行完后简要汇报结果。`,
   ].join("\n");
   const prompt = SYSTEM_PROMPT
-    ? `${SYSTEM_PROMPT}\n\n${toolCapabilityGuidance}\n\n收到来自 ${from} 的任务：\n\n${task}`
+    ? `${SYSTEM_PROMPT}\n\n${toolCapabilityGuidance}\n\n${commhubToolGuidance}\n\n收到来自 ${from} 的任务：\n\n${task}`
     : defaultPrompt;
   // Inject CommHub as MCP server so Claude can use send_task/get_all_status etc.
   // CLI accepts { url } format (streamable-http), auth via env or header
