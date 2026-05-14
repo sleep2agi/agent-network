@@ -32,11 +32,24 @@ stateDiagram-v2
     expired --> [*]
 ```
 
+::: warning R266 校准：`created` 在生产路径上基本不可见
+状态机里的 `[*] → created → delivered` 是按 schema 默认值（[`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`）画的，但 **没有任何代码路径会把 `created` UPDATE 成 `delivered`**：[`server/src/tools.ts:508-509`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L508) 的 `send_task` 在 INSERT 时就直接写 `VALUES (..., 'delivered', ...)`，跳过默认值。所以正常 API 流程里**永远观察不到** `created` 这个状态。
+
+`created` 仍然作为防御性兜底出现在两条 WHERE 子句里：
+
+| 操作 | 接受的当前状态 | 源码 |
+|------|---------------|------|
+| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:816](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816) |
+| `ack_inbox` / `send_ack` | `created` / `delivered` | [tools.ts:678](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L678) |
+
+R230 chain 校准的「4 个可取消状态」就是上面那行；本节状态机图为简化未画 `created` 的出边，实际 SQL 允许（直接构造 DB row 走 INSERT 默认值才能进入 `created` 态，REST/MCP 没有这种入口）。
+:::
+
 ## 状态说明
 
 | 状态 | 含义 | 触发动作 | 下一步 |
 |------|------|---------|--------|
-| `created` | 任务已创建 | `send_task` | 自动变为 delivered |
+| `created` | Schema 默认值（DB column DEFAULT） | 仅在绕过 `send_task` 直接 INSERT 时出现 | 正常 API 路径不经过此状态 |
 | `delivered` | 已投递到 inbox | 写入 inbox + SSE 推送 | 等待 Agent ack |
 | `acked` | Agent 确认收到 | `ack_inbox` / `send_ack` | 等待 Agent 开始处理 |
 | `running` | Agent 正在处理 | `report_status(working)` | 等待处理完成 |

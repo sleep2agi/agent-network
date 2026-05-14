@@ -32,11 +32,24 @@ stateDiagram-v2
     expired --> [*]
 ```
 
+::: warning R266 calibration: `created` is essentially invisible on the production path
+The diagram's `[*] → created → delivered` reflects the **schema default** ([`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`), but **no code path UPDATEs `created` to `delivered`**: [`server/src/tools.ts:508-509`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L508) `send_task` inserts with `VALUES (..., 'delivered', ...)` directly, bypassing the default. So through normal API flows you'll **never observe** a task in `created` state.
+
+`created` still appears in two WHERE clauses defensively:
+
+| Operation | Accepted source states | Source |
+|------|------------------------|------|
+| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:816](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816) |
+| `ack_inbox` / `send_ack` | `created` / `delivered` | [tools.ts:678](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L678) |
+
+The "4 cancellable states" R230 chain calibration is exactly that first row. The state diagram above doesn't draw `created`'s outgoing edges for simplicity; SQL allows them, but the only way a row enters the `created` state is a direct DB INSERT that omits the status column — no REST/MCC entry point does that.
+:::
+
 ## Status Reference
 
 | Status | Meaning | Triggered By | Next Step |
 |------|------|---------|--------|
-| `created` | Task created | `send_task` | Auto-transitions to delivered |
+| `created` | Schema default (DB column DEFAULT) | Only appears if `send_task` is bypassed via direct INSERT | Not on normal API path |
 | `delivered` | Delivered to inbox | Write to inbox + SSE push | Wait for agent to ack |
 | `acked` | Agent confirmed receipt | `ack_inbox` / `send_ack` | Wait for agent to start processing |
 | `running` | Agent is processing | `report_status(working)` | Wait for completion |
