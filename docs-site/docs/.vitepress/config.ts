@@ -45,10 +45,10 @@ export default withMermaid(defineConfig({
           { text: '生态', link: '/ecosystem' },
           { text: '社群', link: '/community' },
           {
-            text: 'v0.8.2 ▾',
+            text: 'v0.8.3 ▾',
             items: [
               { text: 'preview（pre-release）', link: '/guide/preview/getting-started' },
-              { text: 'v0.8.2（latest）', link: '/' },
+              { text: 'v0.8.3（latest）', link: '/' },
               { text: 'v0.8.0（归档）', link: '/v0.8.0/' },
               { text: '更新日志', link: '/changelog' },
               { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
@@ -142,10 +142,10 @@ export default withMermaid(defineConfig({
           { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
           {
-            text: 'v0.8.2 ▾',
+            text: 'v0.8.3 ▾',
             items: [
               { text: 'preview (pre-release)', link: '/guide/preview/getting-started' },
-              { text: 'v0.8.2 (latest)', link: '/en/' },
+              { text: 'v0.8.3 (latest)', link: '/en/' },
               { text: 'v0.8.0 (archive)', link: '/v0.8.0/' },
               { text: 'Changelog', link: '/en/changelog' },
               { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
