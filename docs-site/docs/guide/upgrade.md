@@ -105,7 +105,7 @@ npm install -g @sleep2agi/agent-network@latest
 npm install -g @sleep2agi/agent-node@latest
 
 # commhub-server 不用单独装 —— anet hub start 会用 bunx 拉一个 PINNED 版本
-# (verify agent-network/bin/cli.ts:2088 PINNED_SERVER_VERSION; anet 升级时这个版本号会跟着升)
+# (verify agent-network/bin/cli.ts:2125 PINNED_SERVER_VERSION; anet 升级时这个版本号会跟着升)
 # ⚠ commhub-server 是 bun shebang TypeScript，必须先装 Bun: curl -fsSL https://bun.sh/install | bash
 
 # 2. 重启 Hub（首次自动 bootstrap admin，无 prompt）
