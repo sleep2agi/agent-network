@@ -228,8 +228,8 @@ const hub = new CommHub({
 
 | Event | Parameters | Description |
 |------|------|------|
-| `task` | InboxMessage | Task received |
-| `message` | InboxMessage | Same as task (alias) |
+| `task` | InboxMessage | Task received — the SDK has already called `ack_inbox` ([`client.ts:265`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/client.ts#L265) ACKs before emitting), so you do **not** need to ack manually in the handler |
+| `message` | InboxMessage | Same as task (alias) — every inbox message emits both `task` and `message` |
 | `connected` | - | SSE connection established |
 | `disconnected` | - | SSE disconnected |
 | `error` | Error | Error occurred |
