@@ -1070,7 +1070,7 @@ curl -X POST http://localhost:9200/api/broadcast \
   }'
 ```
 
-**Request body** (verify [`BroadcastSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L236)):
+**Request body** (verify [`BroadcastSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L248)):
 
 | Field | Type | Required | Description |
 |------|------|:----:|------|

@@ -1070,7 +1070,7 @@ curl -X POST http://localhost:9200/api/broadcast \
   }'
 ```
 
-**请求体**（verify [`BroadcastSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L236)）：
+**请求体**（verify [`BroadcastSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L248)）：
 
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|
