@@ -18,8 +18,8 @@ sequenceDiagram
     TG->>CH: Bot API webhook
     CH->>A: <channel source="telegram"...>message</channel>
     A->>A: AI processes
-    A->>CH: telegram_reply(chat_id, text)
-    CH->>TG: Bot API sendMessage
+    A->>CH: writes reply text (no telegram_* tool call)
+    CH->>TG: agent-node handler auto sendMessage
     TG->>U: Reply
     A->>S: report_status / send_task
 ```
@@ -47,7 +47,7 @@ You need to know the user IDs allowed to communicate with the bot. To get yours:
 
 ### Step 3: Bind the channel to an existing node
 
-Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts:2745 channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2745)):
+Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts:2844 channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2844)):
 
 ```bash
 # Assumes you already have a claude-code-cli node 'commander'
@@ -61,7 +61,7 @@ anet channel add telegram commander
 ```
 
 ::: warning The flag is `--allow`, not `--allow-user`
-Verify [`cli.ts:2762-2763`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2762): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:259`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L259)); the allowlist lives in `access.json`.
+Verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:259`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L259)); the allowlist lives in `access.json`.
 :::
 
 ### Step 4: Start
@@ -90,7 +90,7 @@ The agent does not call any `telegram_*` MCP tool — **no such tool exists**. T
 
 1. Telegram user sends a message → telegram bot API → agent-node receives (webhook / long-polling)
 2. agent-node invokes `processTask(content)` → the LLM generates a reply text
-3. agent-node's internal [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L986) helper sends the reply back via `sendMessage` (auto-splits at 4096 chars and sets `reply_to_message_id` on the first chunk)
+3. agent-node's internal [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper sends the reply back via `sendMessage` (auto-splits at 4096 chars and sets `reply_to_message_id` on the first chunk)
 
 The agent (LLM running in the claude-agent-sdk / codex-sdk runtime) just needs to **produce reply text**; it doesn't need to know the Telegram API.
 
@@ -170,7 +170,7 @@ What the channel plugin actually does (v0.8 capabilities):
 1. Maintains an SSE long connection to CommHub (receives new_task / new_message / new_reply / broadcast events)
 2. Listens to the Telegram Bot API (webhook / long-polling) — Telegram is the only natively supported external channel in v0.8
 3. Injects messages into the agent's context (XML `<channel source="...">` tag)
-4. **The agent-node's internal handler automatically forwards** the agent's reply to the right platform (commhub via the `send_reply` MCP tool; telegram via the [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L986) helper)
+4. **The agent-node's internal handler automatically forwards** the agent's reply to the right platform (commhub via the `send_reply` MCP tool; telegram via the [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper)
 
 ::: warning R258 chain calibration
 The original mermaid showed `AGENT → reply() → TOOLS → TG/WX/FS` — but there's no agent-facing `reply()` / `telegram_reply()` MCP tool for the agent to call. The agent only produces reply text; agent-node's handler routes it to the platform based on `source`.

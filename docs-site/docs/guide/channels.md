@@ -18,8 +18,8 @@ sequenceDiagram
     TG->>CH: Bot API webhook
     CH->>A: <channel source="telegram"...>消息</channel>
     A->>A: AI 处理
-    A->>CH: telegram_reply(chat_id, text)
-    CH->>TG: Bot API sendMessage
+    A->>CH: 输出 reply 文本（不调 telegram_* tool）
+    CH->>TG: agent-node handler 自动 sendMessage
     TG->>U: 回复消息
     A->>S: report_status / send_task
 ```
@@ -47,7 +47,7 @@ sequenceDiagram
 
 ### Step 3: 绑定 Channel 到已有节点
 
-跑 `anet channel add telegram <node-name>` 命令一次性绑定 bot + allowlist（verify [`cli.ts:2745` `channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2745)）：
+跑 `anet channel add telegram <node-name>` 命令一次性绑定 bot + allowlist（verify [`cli.ts:2844` `channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2844)）：
 
 ```bash
 # 假设你已有 claude-code-cli 节点 '指挥室'（没有就先 anet node create 指挥室 --runtime claude-code-cli）
@@ -60,7 +60,7 @@ anet channel add telegram 指挥室
 ```
 
 ::: warning 注意 flag 是 `--allow` 不是 `--allow-user`
-verify [`cli.ts:2762-2763`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2762): `--bot-token <token>` + `--allow <user-id>`。命令落地：写入 `.anet/nodes/<node-name>/channels/telegram/access.json` 含 `allowFrom: ["<user-id>"]` 数组（多人白名单见 [Telegram bind 详细 walkthrough — 多人白名单](/cases/telegram-bind-claude-code-cli#多人白名单)）。**没有 `TELEGRAM_ALLOW_USER` env var**，agent-node 只读 `TELEGRAM_BOT_TOKEN` env（[`agent-node/src/cli.ts:259`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L259)），allowlist 走 access.json。
+verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861): `--bot-token <token>` + `--allow <user-id>`。命令落地：写入 `.anet/nodes/<node-name>/channels/telegram/access.json` 含 `allowFrom: ["<user-id>"]` 数组（多人白名单见 [Telegram bind 详细 walkthrough — 多人白名单](/cases/telegram-bind-claude-code-cli#多人白名单)）。**没有 `TELEGRAM_ALLOW_USER` env var**，agent-node 只读 `TELEGRAM_BOT_TOKEN` env（[`agent-node/src/cli.ts:259`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L259)），allowlist 走 access.json。
 :::
 
 ### Step 4: 启动
@@ -89,7 +89,7 @@ Agent 不需要直接调任何 `telegram_*` MCP tool —— **没有这种 tool 
 
 1. Telegram user 发消息 → telegram bot API → agent-node 收到（webhook / long-polling）
 2. agent-node 调 `processTask(content)` → LLM 生成回复文本
-3. agent-node 内部 [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L986) helper 把回复 sendMessage 到原 chat（自动分 4096 char chunks + 自动 reply_to_message_id 关联首段）
+3. agent-node 内部 [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper 把回复 sendMessage 到原 chat（自动分 4096 char chunks + 自动 reply_to_message_id 关联首段）
 
 Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接生成文本**作为 reply，不需要懂 Telegram API。
 
@@ -169,7 +169,7 @@ Channel 插件做的事（v0.8 实际能力）：
 1. 维护 SSE 长连接到 CommHub（receive new_task / new_message / new_reply / broadcast events）
 2. 监听 Telegram Bot API（webhook / long-polling）—— Telegram 是 v0.8 唯一原生支持的外部 channel
 3. 将消息注入到 Agent 上下文（XML `<channel source="...">` tag）
-4. **agent-node 内部 handler 自动转发** agent reply 到对应平台（commhub 走 `send_reply` MCP；telegram 走 [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L986) helper）
+4. **agent-node 内部 handler 自动转发** agent reply 到对应平台（commhub 走 `send_reply` MCP；telegram 走 [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper）
 
 ::: warning R258 chain 校准
 原版 mermaid 图画 `AGENT → reply() → TOOLS → TG/WX/FS` —— 实际没有 agent-facing `reply()` / `telegram_reply()` MCP tool 给 agent 调。Agent 只生成 reply 文本，agent-node handler 根据 `source` 自动路由到对应平台。
