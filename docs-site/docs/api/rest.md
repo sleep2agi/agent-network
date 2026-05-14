@@ -511,7 +511,7 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 
 | 参数 | 说明 |
 |------|------|
-| `network_id` | 按网络过滤 |
+| `network_id` | 按网络过滤（绑了 `ntok_` 时此参数被强制覆盖为 token 自带的 network）|
 | `status` | 按状态过滤（idle / working / offline） |
 
 **响应**：
@@ -560,7 +560,7 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 
 | 参数 | 说明 |
 |------|------|
-| `network_id` | 按网络过滤 |
+| `network_id` | 按网络过滤（绑了 `ntok_` 时此参数被强制覆盖为 token 自带的 network）|
 | `status` | 按状态过滤；任何 [Task 生命周期状态机](/concepts/task-lifecycle#状态说明) 状态都可传 |
 | `to_name` | 按接收者过滤 |
 | `from_name` | 按发送者过滤 |
@@ -729,7 +729,7 @@ curl "http://localhost:9200/api/completions?since=2026-04-12T00:00:00Z" \
 | 参数 | 说明 |
 |------|------|
 | `since` | 起始时间（ISO 8601）；默认最近 24 小时 |
-| `network_id` | 按网络过滤 |
+| `network_id` | 按网络过滤（绑了 `ntok_` 时此参数被强制覆盖为 token 自带的 network）|
 
 固定返回最多 100 条（server 端硬编码 `LIMIT 100`，无 `limit` 参数）。
 

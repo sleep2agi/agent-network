@@ -511,7 +511,7 @@ curl "http://localhost:9200/api/status?network_id=net_xxx" \
 
 | Parameter | Description |
 |------|------|
-| `network_id` | Filter by network |
+| `network_id` | Filter by network (when an `ntok_` is bound, this parameter is overridden by the token's network) |
 | `status` | Filter by status (idle / working / offline) |
 
 **Response**:
@@ -560,7 +560,7 @@ curl "http://localhost:9200/api/tasks?status=running&limit=10" \
 
 | Parameter | Description |
 |------|------|
-| `network_id` | Filter by network |
+| `network_id` | Filter by network (when an `ntok_` is bound, this parameter is overridden by the token's network) |
 | `status` | Filter by status; any [Task lifecycle state machine](/en/concepts/task-lifecycle#status-reference) state is accepted |
 | `to_name` | Filter by recipient |
 | `from_name` | Filter by sender |
@@ -729,7 +729,7 @@ curl "http://localhost:9200/api/completions?since=2026-04-12T00:00:00Z" \
 | Parameter | Description |
 |------|------|
 | `since` | Start time (ISO 8601); defaults to the last 24 hours |
-| `network_id` | Filter by network |
+| `network_id` | Filter by network (when an `ntok_` is bound, this parameter is overridden by the token's network) |
 
 The server hard-codes `LIMIT 100` — there is no `limit` query parameter.
 
