@@ -110,6 +110,8 @@ See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> 
 | `anet create --batch` / `anet batch <verb>` | Spin up N agents in bulk (auto-numbered prefix + separate workdir/config/tmux), then manage their lifecycle with `anet batch list/stop/cleanup/start`. See [Batch Agents](/guide/batch) (currently ZH only) |
 | `anet license` | v0.6 legacy: view trial / license status. **No longer needed after Apache 2.0 OSS**; Hub keeps the `licenses` table + `send_task` 14-day trial check for backward-compat |
 | `anet activate <key>` | v0.6 legacy: write a pro license key. **No longer needed after Apache 2.0 OSS**; last-resort fix for `license_expired` — see [troubleshooting](/en/troubleshooting) |
+| `anet session ls` | List Claude Code sessions in the current project (for the `claude-code-cli` runtime) |
+| `anet import [alias]` | Import claude-code agent sessions from CommHub into local `.anet/nodes/<alias>/config.json` (imports all if no alias is given) |
 
 ---
 

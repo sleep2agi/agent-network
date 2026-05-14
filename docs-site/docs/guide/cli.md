@@ -110,6 +110,8 @@ npm install -g @sleep2agi/agent-network
 | `anet create --batch` / `anet batch <verb>` | 批量起 N 个 agent（prefix 自动编号 + 独立 workdir/config/tmux），再用 `anet batch list/stop/cleanup/start` 统一管 lifecycle。详见 [批量 Agent](/guide/batch) |
 | `anet license` | v0.6 legacy 命令，查看 trial / license 状态。**Apache 2.0 OSS 后不再需要**；Hub 仍保留 `licenses` 表 + `send_task` 14 天 trial 检查做后向兼容 |
 | `anet activate <key>` | v0.6 legacy，写入 pro license key。**Apache 2.0 OSS 后不再需要**；用于命中 `license_expired` 兜底，见 [troubleshooting](/troubleshooting) |
+| `anet session ls` | 列出当前项目下的 Claude Code session（`claude-code-cli` runtime 用） |
+| `anet import [alias]` | 从 CommHub 把 claude-code agent 的 session 导入为本地 `.anet/nodes/<alias>/config.json`（不传 alias 则导入全部） |
 
 ---
 
