@@ -1153,7 +1153,7 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 | `new_reply` | 收到 reply（`send_reply`） | `{from, message_id, in_reply_to, status}` |
 | `broadcast` | 收到广播（`broadcast` 工具） | `{inbox_count}` |
 | `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts:286/646`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L286)) | `{parent_task_id, child_task_id, child_alias}` |
-| `node.renamed` | RFC-010 节点改名 COMMIT 时广播（[`rename.ts:100-114`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L100)），同时推给 old + new 两个 alias 流 | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
+| `node.renamed` | RFC-010 节点改名 COMMIT 时广播（[`rename.ts:100-123`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L100)），推给 old + new 两个 alias 流 **+ 每个网络成员的 user channel**（dashboard 订阅的是 `/events/<username>` user channel、不是 per-alias 流，#84 SSE channel fix） | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
 
 > 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L571) 实际 payload 只有上表中字段。
 >
