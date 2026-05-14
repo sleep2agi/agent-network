@@ -1025,7 +1025,7 @@ curl -X POST http://localhost:9200/api/task \
   }'
 ```
 
-**请求体**（verify [`TaskSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L228)）：
+**请求体**（verify [`TaskSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L240)）：
 
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|:----:|------|

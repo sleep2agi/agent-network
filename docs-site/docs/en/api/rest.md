@@ -1025,7 +1025,7 @@ curl -X POST http://localhost:9200/api/task \
   }'
 ```
 
-**Request body** (verify [`TaskSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L228)):
+**Request body** (verify [`TaskSchema`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L240)):
 
 | Field | Type | Required | Description |
 |------|------|:----:|------|
