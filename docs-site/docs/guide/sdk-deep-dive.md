@@ -31,7 +31,7 @@ anet 当前内置三个 Runtime，其中两个是 SDK adapter（第三个 `claud
 | **BASE_URL / 等价机制** | `ANTHROPIC_BASE_URL` env（claude-agent-sdk 内部读）+ `ANTHROPIC_AUTH_TOKEN`，可路由到 MiniMax / DeepSeek / GLM / Kimi / 书生 等 Anthropic 兼容端 | `Codex({baseUrl, apiKey})` 构造参数 + `OPENAI_API_KEY` env；理论上可指 Codex 兼容的 provider，但 anet 当前没暴露入口（保留 OpenAI 直连或 `codex auth login` 走 ChatGPT 订阅） |
 | **settingSources / 项目隔离** | `Options.settingSources: SettingSource[]` —— `['user','project','local']` 选哪些层；anet 强制 `[]` 完全隔离宿主机 `~/.claude/` | `CodexOptions.env: Record<string,string>` —— 一旦设了就**不继承** `process.env`；`CodexOptions.config` 等价 `codex --config key=value` 覆盖；anet 现阶段没强隔离（继承 `process.env`） |
 | **breaking change cadence** | minor 频繁（0.x），Anthropic 主推 SDK 路线，API 变动期相对快 | 0.x 还在迭代，`ThreadEvent` schema 偶有新 item type，`Codex` 构造签名相对稳定；CLI binary 自身按 `@openai/codex` 节奏升级 |
-| **anet wrapper 关键代码位置** | `agent-node/src/cli.ts` `processWithClaude()` 入口约 L373，主循环 L546，session 写回 L551 → [`writebackSession()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) L202 | `agent-node/src/cli.ts` `processWithCodex()` 入口约 L606，streaming 循环 L655，session 写回 L673 |
+| **anet wrapper 关键代码位置** | `agent-node/src/cli.ts` `processWithClaude()` 入口约 L388，主循环 L598，session 写回 L603 → [`writebackSession()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) L217 | `agent-node/src/cli.ts` `processWithCodex()` 入口约 L669，streaming 循环 L714，session 写回 L736 |
 
 ---
 
@@ -46,15 +46,15 @@ anet 当前内置三个 Runtime，其中两个是 SDK adapter（第三个 `claud
 - 完全可禁宿主机 `~/.claude/` 影响（`settingSources: []`）—— 这是 anet 多租户多节点共存的关键
 
 **坑**
-- **Linux glibc binary 问题**：SDK 默认装 musl 变体（`@anthropic-ai/claude-agent-sdk-linux-x64-musl`），但 Debian/Ubuntu/RHEL 是 glibc，会报 `Claude Code native binary not found`。anet 在 [cli.ts L391-408](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 做了 on-the-fly `npm install --no-save @anthropic-ai/claude-agent-sdk-linux-x64`（glibc 包）兜底。
-- **root 用户禁用 dangerouslySkipPermissions**：Claude Code 安全策略，root 启动会拒绝 skip-permissions flag，每个 tool call 都卡在人工审批。wrapper 在 [cli.ts L423](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 早探早返回，提示用非 root 用户或切 `codex-sdk` runtime。
-- **MCP type 字段必须 `http` / `sse` / `stdio`**：SDK schema 严格校验，老版本 CLI 接受的 `type: "url"` 在 SDK 里直接 reject（cli.ts L474-484 注释里有踩坑记录）。
-- **maxTurns 默认值**：SDK 没默认，anet 强制 `MAX_TURNS=50`（cli.ts L161），原来默认 5 太低，一个 commhub MCP call 就 5 轮没了。
+- **Linux glibc binary 问题**：SDK 默认装 musl 变体（`@anthropic-ai/claude-agent-sdk-linux-x64-musl`），但 Debian/Ubuntu/RHEL 是 glibc，会报 `Claude Code native binary not found`。anet 在 [cli.ts L396-417](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 做了 on-the-fly `npm install --no-save @anthropic-ai/claude-agent-sdk-linux-x64`（glibc 包）兜底。
+- **root 用户禁用 dangerouslySkipPermissions**：Claude Code 安全策略，root 启动会拒绝 skip-permissions flag，每个 tool call 都卡在人工审批。wrapper 在 [cli.ts L438](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 早探早返回，提示用非 root 用户或切 `codex-sdk` runtime。
+- **MCP type 字段必须 `http` / `sse` / `stdio`**：SDK schema 严格校验，老版本 CLI 接受的 `type: "url"` 在 SDK 里直接 reject（cli.ts L514-516 注释里有踩坑记录）。
+- **maxTurns 默认值**：SDK 没默认，anet 强制 `MAX_TURNS=50`（cli.ts L167），原来默认 5 太低，一个 commhub MCP call 就 5 轮没了。
 
 **session 写回机制**
 
 ```ts
-// cli.ts:573-580
+// cli.ts:598-605
 for await (const message of query({ prompt, options })) {
   const m = message as any;
   if (m.type === "system" && m.subtype === "init") {
@@ -65,7 +65,7 @@ for await (const message of query({ prompt, options })) {
 }
 ```
 
-下次 `processWithClaude()` 走到，因为 `claudeSessionId` 还在 module-level 变量里，直接 `options.resume = claudeSessionId`（L541）→ Anthropic 服务端续上同一 session。`writebackSession()`（L202-213）把 id 落到 `.anet/nodes/<alias>/config.json` 的 `session` 字段，进程重启也能续。
+下次 `processWithClaude()` 走到，因为 `claudeSessionId` 还在 module-level 变量里，直接 `options.resume = claudeSessionId`（L582）→ Anthropic 服务端续上同一 session。`writebackSession()`（L217-228）把 id 落到 `.anet/nodes/<alias>/config.json` 的 `session` 字段，进程重启也能续。
 
 ### codex-sdk
 
@@ -76,16 +76,16 @@ for await (const message of query({ prompt, options })) {
 - `Codex({config: {model_auto_compact_token_limit: 200000}})` 让 long-running thread 自动压缩历史，不用 wrapper 手动 truncate
 
 **坑**
-- **要 spawn 全局 `codex` 二进制**：peerDependency optional，用户必须 `npm install -g @openai/codex` 才能跑；找不到时 wrapper 抛 `@openai/codex-sdk not installed` 明确报错（cli.ts L620-622）。
-- **PATH 注入**：wrapper 早在 [cli.ts L608-615](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) `which codex` 后把目录前置到 `process.env.PATH`，避免子进程 spawn 时找不到。
-- **Thread 坏掉后整体重建**：单 turn 报错走 catch 分支重 `codex.startThread()` + `thread.run()`（cli.ts L678-690），意味着原 thread 的 history 在错误后就**断了**。
+- **要 spawn 全局 `codex` 二进制**：peerDependency optional，用户必须 `npm install -g @openai/codex` 才能跑；找不到时 wrapper 抛 `@openai/codex-sdk not installed` 明确报错（cli.ts L684）。
+- **PATH 注入**：wrapper 早在 [cli.ts L670-677](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) `which codex` 后把目录前置到 `process.env.PATH`，避免子进程 spawn 时找不到。
+- **Thread 坏掉后整体重建**：单 turn 报错走 catch 分支重 `codex.startThread()` + `thread.run()`（cli.ts L741-750），意味着原 thread 的 history 在错误后就**断了**。
 - **Token 计费要自己算**：`usage` 只给 token 数没给美金。如果要做预算控制，得维护一张 model→price 表。当前 anet **没**实现 codex 侧的 `maxBudgetUsd` 强制。
 - **gpt-5.4 当前是 default**：cli.ts L689 / L705 / L746 三处 hardcode。MiniMax 等第三方 codex provider 接入计划已记入 RFC 但还没落。
 
 **session 写回机制**
 
 ```ts
-// cli.ts:689-710
+// cli.ts:714-735
 const { events } = await codexThread.runStreamed(input);
 for await (const ev of events) {
   if (ev.type === "turn.completed") usage = ev.usage;
@@ -154,7 +154,7 @@ const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "h
 
 ### Step 2：实现 processWithGemini()
 
-参考 `processWithCodex()`（cli.ts L606-692）骨架：
+参考 `processWithCodex()`（cli.ts L669-692）骨架：
 
 ```ts
 let geminiSession: any = null;

@@ -31,7 +31,7 @@ All `agent-node/src/cli.ts:NNN` line numbers below are calibrated against GitHub
 | **BASE_URL equivalent** | `ANTHROPIC_BASE_URL` env (read by claude-agent-sdk internally) + `ANTHROPIC_AUTH_TOKEN`, routable to MiniMax / DeepSeek / GLM / Kimi / InternLM Anthropic-compatible endpoints | `Codex({baseUrl, apiKey})` constructor + `OPENAI_API_KEY` env; could point at any Codex-compatible provider in principle, but anet doesn't surface this yet — stays on OpenAI direct or `codex auth login` (ChatGPT subscription) |
 | **settingSources / isolation** | `Options.settingSources: SettingSource[]` selects which layers (`['user','project','local']`) to load; anet hard-codes `[]` to fully ignore the host's `~/.claude/` | `CodexOptions.env: Record<string,string>` — once set, the SDK does **not** inherit `process.env`; `CodexOptions.config` equivalent to `codex --config key=value`; anet currently inherits `process.env` (no strict isolation yet) |
 | **Breaking-change cadence** | Frequent minors (0.x); Anthropic actively pushes the SDK roadmap, API surface still moves fast | Still 0.x; `ThreadEvent` schema occasionally gains new item types; `Codex` constructor stable; CLI binary upgrades on `@openai/codex` cadence |
-| **anet wrapper code anchors** | `agent-node/src/cli.ts` — `processWithClaude()` ~L373, main loop L546, session writeback L551 → [`writebackSession()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) L202 | `agent-node/src/cli.ts` — `processWithCodex()` ~L606, streaming loop L655, session writeback L673 |
+| **anet wrapper code anchors** | `agent-node/src/cli.ts` — `processWithClaude()` ~L388, main loop L598, session writeback L603 → [`writebackSession()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) L217 | `agent-node/src/cli.ts` — `processWithCodex()` ~L669, streaming loop L714, session writeback L736 |
 
 ---
 
@@ -46,15 +46,15 @@ All `agent-node/src/cli.ts:NNN` line numbers below are calibrated against GitHub
 - Host-side `~/.claude/` can be fully ignored via `settingSources: []` — critical for multi-tenant / multi-node coexistence.
 
 **Pitfalls**
-- **Linux glibc binary**: the SDK installs the musl variant (`@anthropic-ai/claude-agent-sdk-linux-x64-musl`) by default, which fails on glibc-based Debian/Ubuntu/RHEL with `Claude Code native binary not found`. anet bridges this at [cli.ts L391-408](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) with an on-the-fly `npm install --no-save @anthropic-ai/claude-agent-sdk-linux-x64` (glibc package).
-- **Root-user `dangerouslySkipPermissions` ban**: Claude Code refuses the skip-permissions flag when running as root (security policy), and without it every tool call hangs on human approval. The wrapper detects root early at [cli.ts L423](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) and tells the user to switch to a non-root user or to `codex-sdk`.
-- **MCP `type` must be `http` / `sse` / `stdio`**: the SDK schema is strict — an older `type: "url"` accepted by the legacy CLI is rejected here (see comment block at cli.ts L474-484).
-- **maxTurns default**: SDK has no default; anet pins `MAX_TURNS=50` (cli.ts L161). The original default of 5 burned through on one commhub MCP call.
+- **Linux glibc binary**: the SDK installs the musl variant (`@anthropic-ai/claude-agent-sdk-linux-x64-musl`) by default, which fails on glibc-based Debian/Ubuntu/RHEL with `Claude Code native binary not found`. anet bridges this at [cli.ts L396-417](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) with an on-the-fly `npm install --no-save @anthropic-ai/claude-agent-sdk-linux-x64` (glibc package).
+- **Root-user `dangerouslySkipPermissions` ban**: Claude Code refuses the skip-permissions flag when running as root (security policy), and without it every tool call hangs on human approval. The wrapper detects root early at [cli.ts L438](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) and tells the user to switch to a non-root user or to `codex-sdk`.
+- **MCP `type` must be `http` / `sse` / `stdio`**: the SDK schema is strict — an older `type: "url"` accepted by the legacy CLI is rejected here (see comment block at cli.ts L514-516).
+- **maxTurns default**: SDK has no default; anet pins `MAX_TURNS=50` (cli.ts L167). The original default of 5 burned through on one commhub MCP call.
 
 **Session writeback mechanic**
 
 ```ts
-// cli.ts:573-580
+// cli.ts:598-605
 for await (const message of query({ prompt, options })) {
   const m = message as any;
   if (m.type === "system" && m.subtype === "init") {
@@ -65,7 +65,7 @@ for await (const message of query({ prompt, options })) {
 }
 ```
 
-On the next call to `processWithClaude()`, the module-level `claudeSessionId` is reused as `options.resume = claudeSessionId` (L541), and the Anthropic backend continues the same session. `writebackSession()` (L202-213) stamps the id into `.anet/nodes/<alias>/config.json` under `session`, so a process restart still resumes.
+On the next call to `processWithClaude()`, the module-level `claudeSessionId` is reused as `options.resume = claudeSessionId` (L582), and the Anthropic backend continues the same session. `writebackSession()` (L217-228) stamps the id into `.anet/nodes/<alias>/config.json` under `session`, so a process restart still resumes.
 
 ### codex-sdk
 
@@ -76,16 +76,16 @@ On the next call to `processWithClaude()`, the module-level `claudeSessionId` is
 - `Codex({config: {model_auto_compact_token_limit: 200000}})` auto-compacts long-running threads; the wrapper doesn't need to truncate history manually.
 
 **Pitfalls**
-- **Requires the global `codex` binary**: the peerDependency is optional, so users must `npm install -g @openai/codex` to run; the wrapper raises an explicit `@openai/codex-sdk not installed` error when missing (cli.ts L620-622).
-- **PATH injection**: the wrapper does `which codex` first and prepends its directory to `process.env.PATH` at [cli.ts L608-615](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) to keep subprocess spawns reliable.
-- **Bad threads rebuild from scratch**: a single failed turn drops into a catch branch that re-`startThread()` and runs once more (cli.ts L678-690) — i.e. the original thread's history is **lost** on the failure path.
+- **Requires the global `codex` binary**: the peerDependency is optional, so users must `npm install -g @openai/codex` to run; the wrapper raises an explicit `@openai/codex-sdk not installed` error when missing (cli.ts L684).
+- **PATH injection**: the wrapper does `which codex` first and prepends its directory to `process.env.PATH` at [cli.ts L670-677](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) to keep subprocess spawns reliable.
+- **Bad threads rebuild from scratch**: a single failed turn drops into a catch branch that re-`startThread()` and runs once more (cli.ts L741-750) — i.e. the original thread's history is **lost** on the failure path.
 - **Token cost is DIY**: `usage` only reports token counts, not USD. To enforce a budget you need a model→price table; anet currently has **no** `maxBudgetUsd` enforcement on the codex branch.
 - **gpt-5.4 is the default**: hard-coded at three call sites (cli.ts L689 / L705 / L746). Third-party Codex-compatible providers (e.g. MiniMax) are in the RFC backlog but not wired yet.
 
 **Session writeback mechanic**
 
 ```ts
-// cli.ts:689-710
+// cli.ts:714-735
 const { events } = await codexThread.runStreamed(input);
 for await (const ev of events) {
   if (ev.type === "turn.completed") usage = ev.usage;
@@ -154,7 +154,7 @@ const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "h
 
 ### Step 2: implement processWithGemini()
 
-Skeleton modeled on `processWithCodex()` (cli.ts L606-692):
+Skeleton modeled on `processWithCodex()` (cli.ts L669-692):
 
 ```ts
 let geminiSession: any = null;
