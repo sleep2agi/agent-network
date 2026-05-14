@@ -334,6 +334,23 @@ function packageJsonPath() {
   return candidates[0]; // fallback to first
 }
 
+function getAnetVersion(): string {
+  try { return JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version || ""; }
+  catch { return ""; }
+}
+
+// 🅗2 temp fallback per #61 — anet@latest 用户从 dashboard 0.4.5-preview.1 (pin
+// stale 80 rounds) → 0.4.2 (current @latest) 是 *功能 regress*, 因为 dashboard
+// preview channel 远超 latest channel。短期双 channel 都拉 @preview, 等 N站马
+// promote 0.4.5 → @latest 后 swap anet@latest 路径回 @latest (🅗1)。
+// TODO(#61 phase-2): swap anet@latest fallback "preview" → "latest" once
+//   @sleep2agi/agent-network-dashboard promotes 0.4.5 stable.
+function dashboardReleaseTag(): string {
+  const envOverride = process.env.ANET_DASHBOARD_VERSION;
+  if (envOverride) return envOverride;
+  return "preview";
+}
+
 function parseSemver(text: string): Semver | null {
   const match = text.match(/(?:^|[^0-9])v?(\d+)\.(\d+)\.(\d+)(?:[^0-9]|$)/);
   if (!match) return null;
@@ -2309,10 +2326,10 @@ async function serverCommand() {
       ...(dashboardToken ? { COMMHUB_AUTH_TOKEN: dashboardToken } : {}),
     };
 
-    // Try npx first
-    // Pin Dashboard version. Bump whenever the Dashboard package is updated.
-    const PINNED_DASHBOARD_VERSION = "0.4.5-preview.1";
-    const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${PINNED_DASHBOARD_VERSION}`], { env, stdio: "inherit" });
+    // Match dashboard release channel to anet channel (see #61 + dashboardReleaseTag).
+    const tag = dashboardReleaseTag();
+    console.log(`[anet] spawning dashboard @${tag} (anet ${getAnetVersion() || "unknown"})`);
+    const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${tag}`], { env, stdio: "inherit" });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
       console.error(`  npx @sleep2agi/agent-network-dashboard`);
