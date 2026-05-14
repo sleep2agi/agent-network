@@ -86,7 +86,7 @@ anet node create my-bot
 You'll get a two-step interactive picker:
 
 1. **Pick the runtime** — `claude-agent-sdk` is the verified default.
-2. **`Select model:`** — choose from the verified model ids: `MiniMax-M2.7` / `intern-s1-pro` / `claude-sonnet-4-6` / `claude-opus-4-6` / `claude-haiku-4-5`, or `custom` to enter your own base URL + model. The CLI auto-injects the matching `ANTHROPIC_BASE_URL` (except `custom`, which you fill in), then prompts for the API key. Other providers (DeepSeek / GLM / Kimi / Xiaomi MiMo / OpenRouter, etc.) go through `custom` — see [Multi-model](/en/guide/multi-model) for the full endpoint table.
+2. **`Select model:`** — choose from the verified model ids: `intern-s2-preview` (default) / `intern-s1-pro` / `MiniMax-M2.7` / `claude-sonnet-4-6` / `claude-opus-4-6` / `claude-haiku-4-5`, or `custom` to enter your own base URL + model. The CLI auto-injects the matching `ANTHROPIC_BASE_URL` (except `custom`, which you fill in), then prompts for the API key. Other providers (DeepSeek / GLM / Kimi / Xiaomi MiMo / OpenRouter, etc.) go through `custom` — see [Multi-model](/en/guide/multi-model) for the full endpoint table.
 
 ::: details Other runtimes
 - `codex-sdk` — passes unit tests; **no full E2E** with real codex auth.
