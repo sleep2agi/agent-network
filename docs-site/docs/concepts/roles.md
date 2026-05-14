@@ -27,8 +27,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 看 audit log（其他人的 row） | 仅 **系统级** `users.role='admin'`（**不是** network admin；R262 chain） | | | |
 | **agent 生命周期** | | | | |
 | 创建 agent (`anet node create`) | ❌ | ✅ | ✅ | ✅ |
-| 启动 / 停止 agent | ❌ | ✅（自己创建的） | ✅（任何） | ✅（任何） |
-| 删除 agent | ❌ | ✅（自己创建的） | ✅（任何） | ✅（任何） |
+| 启动 / 停止 / 删除 agent (`anet node start/stop/delete`) | 不受网络角色门控 —— 见下方注 ※ | | | |
 | **任务** | | | | |
 | 派任务 `send_task` | ❌ | ✅ | ✅ | ✅ |
 | 取消任务 `cancel_task` | ❌ | ✅ | ✅ | ✅ |
@@ -48,6 +47,8 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | `/api/server-logs` 调试 console | 仅 `users.role='admin'` | | | |
 | 调 `/api/admin/wipe-db` 等危险操作 | 仅 `users.role='admin'` | | | |
 | `anet hub admin reset-user`（重置任意用户密码） | 仅 hub 本机命令行调用，与角色无关（owner 本机权限即可） | | | |
+
+> ※ R449 校准：`anet node start / stop / delete` 是**纯本地 CLI 操作** —— 直接读写本机 `.anet/nodes/<alias>/` 目录，`startCommand` / `deleteCommand` 里**没有任何网络角色 / owner / per-creator 检查**。谁的机器上有那份 node config，谁就能 start/stop/delete 它，跟该 user 在网络里是什么 role 无关。受网络角色门控的只有 `anet node create`（要向 hub 换 `ntok_`，`canWrite` 挡 viewer）。
 
 > R309 校准：`send_task` / `cancel_task` / `reassign_task` 三个 MCP 写工具**只过一道 [`canWrite` 门](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)**（`role !== "viewer"` —— owner/admin/member 都放行），**没有 per-task ownership 检查** —— member 可以 cancel / reassign 网络里**任何**任务，不限「自己派的」。重命名 network 是 owner-only（[`auth.ts:218 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L218) `if (net.owner_id !== userId)`），跟「删除 network」一样，admin 不能改名。
 

@@ -27,8 +27,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | View audit log (other users' rows) | Only **system-level** `users.role='admin'` (**not** network admin; R262 chain) | | | |
 | **Agent lifecycle** | | | | |
 | Create agent (`anet node create`) | ❌ | ✅ | ✅ | ✅ |
-| Start / stop agent | ❌ | ✅ (own) | ✅ (any) | ✅ (any) |
-| Delete agent | ❌ | ✅ (own) | ✅ (any) | ✅ (any) |
+| Start / stop / delete agent (`anet node start/stop/delete`) | Not gated by network role — see note ※ below | | | |
 | **Tasks** | | | | |
 | Dispatch `send_task` | ❌ | ✅ | ✅ | ✅ |
 | `cancel_task` | ❌ | ✅ | ✅ | ✅ |
@@ -48,6 +47,8 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | `/api/server-logs` (debug console) | Only `users.role='admin'` | | | |
 | `/api/admin/wipe-db` (and similar) | Only `users.role='admin'` | | | |
 | `anet hub admin reset-user` (reset any user's password) | Local-only CLI command on the hub host, not role-gated (the hub owner just needs local shell access) | | | |
+
+> ※ R449 calibration: `anet node start / stop / delete` are **pure local CLI operations** — they read/write the local `.anet/nodes/<alias>/` directory directly, and `startCommand` / `deleteCommand` have **no network-role / owner / per-creator check** whatsoever. Whoever has that node config on their machine can start/stop/delete it, regardless of their network role. The only network-role-gated lifecycle op is `anet node create` (it requests an `ntok_` from the hub, and `canWrite` blocks viewer).
 
 > R309 calibration: the three MCP write tools `send_task` / `cancel_task` / `reassign_task` pass through **a single [`canWrite` gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)** (`role !== "viewer"` — owner/admin/member all pass) with **no per-task ownership check** — a member can cancel / reassign **any** task in the network, not just ones they dispatched. Renaming a network is owner-only ([`auth.ts:218 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L218) `if (net.owner_id !== userId)`), same as deleting it — admin cannot rename.
 
