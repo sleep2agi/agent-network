@@ -307,7 +307,7 @@ ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, creat
 
 ## 数据库表结构
 
-下方是 v0.8 实际生效的 schema（含所有 ALTER TABLE migration 之后的字段）。CREATE TABLE 原文 + migrations 见 [`server/src/db.ts:88-111`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L88)（tasks 原 17 列）+ [`db.ts:304`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L304) (V3 加 `network_id`) + [`db.ts:392`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L392) (加 `parent_task_id`)。
+下方是 v0.8 实际生效的 schema（含所有 ALTER TABLE migration 之后的字段）。CREATE TABLE 原文 + migrations 见 [`server/src/db.ts:88-111`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L88)（tasks 原 17 列）+ [`db.ts:326-328`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L326) (V3 给 `tasks` 等 6 张表加 `network_id`) + [`db.ts:415`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L415) (加 `parent_task_id`)。
 
 ```sql
 -- 实际 tasks 表 19 列（原 17 + migration 2）

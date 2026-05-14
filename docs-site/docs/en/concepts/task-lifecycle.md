@@ -307,7 +307,7 @@ ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, creat
 
 ## Database Table Schema
 
-Below is the schema as it actually exists in v0.8 (after all ALTER TABLE migrations). The original CREATE TABLE and migrations live in [`server/src/db.ts:88-111`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L88) (tasks, 17 original columns), [`db.ts:304`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L304) (V3 adds `network_id`), and [`db.ts:392`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L392) (adds `parent_task_id`).
+Below is the schema as it actually exists in v0.8 (after all ALTER TABLE migrations). The original CREATE TABLE and migrations live in [`server/src/db.ts:88-111`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L88) (tasks, 17 original columns), [`db.ts:326-328`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L326) (V3 adds `network_id` to `tasks` and 5 other tables), and [`db.ts:415`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L415) (adds `parent_task_id`).
 
 ```sql
 -- Effective tasks schema: 19 columns (17 original + 2 migrations)
