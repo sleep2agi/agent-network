@@ -320,9 +320,80 @@ VendorCohort.vendor (创建时)
 
 ---
 
-## §4 自动导演 — 热点检测算法（撰写中）
+## §4 自动导演 — 热点检测算法
 
-> 「什么算 interesting event」—— 激烈对话 / 观点翻转 / 僵局 / 级联 的检测信号与算法。
+自动导演的核心问题：**「什么算 interesting event」**。§2.3 已设计「检测到之后镜头怎么动」；本节回答「**怎么检测**」。原则：检测器是 `SocietyEvent` 流之上的**纯函数派生层**（§2.1 已声明），输入原始事件流，输出 `HotspotEvent` —— 不碰任何核心写路径。
+
+### 4.1 检测器的位置
+
+```
+SocietyEvent 流 (原始: task_sent / message_sent / status_changed / round_* / payoff_*)
+   ↓  HotspotDetector — 滑动窗口 + 一组检测器
+HotspotEvent { kind, score, focusTargets, window, why }
+   ↓
+  ├→ §2.3 自动聚焦（score 最高的当前热点 → 镜头）
+  ├→ §2.4 解说 agent（digest 里带 hotspots，优先讲）
+  └→ 反馈进 SocietyEvent 流（kind: "opinion_shifted" 等派生事件）
+```
+
+`HotspotEvent`：
+
+```typescript
+interface HotspotEvent {
+  kind: "heated_exchange" | "opinion_flip" | "stalemate" | "cascade" | "coalition";
+  score: number;                  // 0-1，热度归一化，自动聚焦按此排序
+  focusTargets: string[];         // 涉及的 agent alias（镜头聚焦对象）
+  window: { t0: number; t1: number };
+  why: string;                    // 人类可读理由（喂解说 agent / debug）
+  vendorSplit?: Record<string, number>;  // 涉及的 vendor 分布（多厂商看点）
+}
+```
+
+### 4.2 五类热点的检测信号
+
+每类热点对应一个独立检测器，跑在最近事件的滑动窗口上（建议窗口 30-60s）。**全部基于已有信号**（消息频次、收发对、RFC-009 payoff/Decision），不需要 LLM 判断 —— 检测要快、要便宜、要确定性。
+
+| 热点类型 | 检测信号 | score 计算（直觉） |
+|---------|---------|-------------------|
+| **激烈对话 heated_exchange** | 一对（或小簇）agent 之间 message/task 往返频次在窗口内显著高于网络中位数 | 往返次数 / 网络中位数往返，clamp 0-1 |
+| **观点翻转 opinion_flip** | RFC-009 `Decision`/`payoff` 显示某 agent 的立场相对上一 round 改变 | 翻转幅度（立场距离）× 新近度 |
+| **僵局 stalemate** | 一组 agent 持续互动但 RFC-009 立场指标在 N 个 round 内方差≈0（谁也不动） | 持续 round 数 × 互动量（动而不变 = 戏剧性） |
+| **级联 cascade** | 短时间内同一「观点/行为」沿 commhub 边快速扩散（多个 agent 依次 status/decision 同向变化） | 扩散涉及的 agent 数 / 窗口时长 |
+| **联盟 coalition** | 出现一个互动密度显著高于跨组的 agent 子簇（图聚类），且该簇跨/不跨 vendor | 簇内密度 / 簇间密度；跨 vendor 的联盟 score 加权（更有看点） |
+
+> 「僵局」的设计是反直觉但重要的看点：社会真人秀里，**「一直在吵但谁也说服不了谁」** 比「平静」更值得镜头。检测信号是「互动量高 + 立场方差低」的组合。
+
+### 4.3 score 归一化与去抖
+
+- 每个检测器输出原始分 → 用网络当前规模/活跃度做基线归一化（一个 3 节点社会和一个 30 节点社会的「热」不是一个量级）
+- **去抖**：同一组 focusTargets 的同类热点在冷却期内（建议 60s）不重复 emit，只更新 score
+- **score 衰减**：热点 emit 后 score 随无新事件时间指数衰减；衰减到阈值以下 → 热点「冷却」，§2.3 镜头拉回全局
+
+### 4.4 多厂商维度的加权
+
+本 RFC 的特色：**跨 vendor 的热点更有看点**。检测器在算 score 时，对「跨厂商」的热点加权：
+
+- 跨 vendor 的 `heated_exchange`（DeepSeek 节点 vs GLM 节点对吵）score ×1.5
+- 跨 vendor 的 `coalition`（DeepSeek + MiniMax 节点结成联盟对抗 GLM）score ×1.5
+- `HotspotEvent.vendorSplit` 记录涉及的 vendor 分布，供解说 agent 和指标面板使用
+
+这让自动导演天然倾向于呈现「厂商阵营」叙事 —— 正是 §1.1 说的「多厂商才有内容看点」。
+
+### 4.5 检测器 spec
+
+```typescript
+interface HotspotDetectorConfig {
+  windowMs: number;               // 滑动窗口，建议 30000-60000
+  cooldownMs: number;             // 同热点去抖冷却，建议 60000
+  scoreDecayHalfLifeMs: number;   // score 衰减半衰期，建议 30000
+  crossVendorWeight: number;      // 跨 vendor 加权，建议 1.5
+  minScore: number;               // 低于此分不 emit / 冷却阈值，建议 0.2
+}
+```
+
+### 4.6 §4 小结
+
+热点检测 = `SocietyEvent` 流之上的纯函数派生层，5 类检测器（激烈对话 / 观点翻转 / 僵局 / 级联 / 联盟），全部基于已有信号（消息频次 / RFC-009 payoff）确定性计算，不用 LLM。score 归一化 + 去抖 + 衰减保证镜头不乱跳。跨 vendor 热点加权，让自动导演倾向「厂商阵营」叙事。输出 `HotspotEvent` 喂 §2.3 自动聚焦 + §2.4 解说。
 
 ---
 
@@ -345,6 +416,6 @@ VendorCohort.vendor (创建时)
 - [x] §1 愿景与依赖链
 - [x] §2 呈现层设计（`[N站马 输入]` 标注处待 N站马 确认）
 - [x] §3 跨厂商混合 batch 接 RFC-009
-- [ ] §4 自动导演 — 热点检测算法
+- [x] §4 自动导演 — 热点检测算法
 - [ ] §5 24/7 稳定性
 - [ ] §6 实施 Phase ladder
