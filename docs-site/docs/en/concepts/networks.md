@@ -123,7 +123,15 @@ Each user has a role in each network. Four permission levels from highest to low
 | Cancel/retry task | &check; | &check; | &check; | |
 | View agent status | &check; | &check; | &check; | &check; |
 | View task list | &check; | &check; | &check; | &check; |
-| View audit log | &check; | &check; | | |
+
+::: warning Audit log permission is **not** gated by network role
+The matrix used to list "View audit log" — but `/api/audit-log` is **not** gated by the network-level role (`owner` / `admin` / `member` / `viewer`). Verified at [`server/src/index.ts:1015-1018`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1015):
+
+- **System admin** (`users.role='admin'`, the first registered user): can read everyone's audit log
+- **Non-admin** (`users.role='user'`): can only see their own audit log (the server auto-adds `WHERE user_id = self`)
+
+This is a **system-level** role gate, not a **network-level** one (aligned with the R227/R236/R237 chain calibrating the `whoami` `Role:` field semantics). See [REST API → GET /api/audit-log](/en/api/rest#get-api-audit-log).
+:::
 
 ### Dashboard Permission Behavior
 

@@ -123,7 +123,15 @@ anet network delete old-network
 | 取消/重试任务 | &check; | &check; | &check; | |
 | 查看 Agent 状态 | &check; | &check; | &check; | &check; |
 | 查看任务列表 | &check; | &check; | &check; | &check; |
-| 查看审计日志 | &check; | &check; | | |
+
+::: warning 审计日志权限**不**走网络角色
+旧 doc 在这里列「查看审计日志」一行 —— 实际 `/api/audit-log` 不按 owner / admin / member / viewer **网络角色**门控（verify [`server/src/index.ts:1015-1018`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1015)）：
+
+- **系统级 admin**（`users.role='admin'`，首位注册用户）：看所有人 audit_log
+- **非 admin**（`users.role='user'`）：只看自己的 audit_log（server 自动加 `WHERE user_id = self` 过滤）
+
+这是「**系统级** role」gate，跟「**网络级** role」不同（R227/R236/R237 chain whoami `Role:` 字段语义校准已统一这点）。详见 [REST API → GET /api/audit-log](/api/rest#get-api-audit-log)。
+:::
 
 ### Dashboard 权限表现
 
