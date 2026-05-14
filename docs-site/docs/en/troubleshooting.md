@@ -591,13 +591,13 @@ anet doctor
 # 1. Server health (includes SSE connection count + sessions / license / uptime, no auth required)
 curl http://localhost:9200/health
 # Key fields: ok / version / sessions_count / sse_connections / sse_sessions / uptime
-# Verified at server/src/index.ts:726-746
+# Verified at server/src/index.ts:780-805
 
 # 2. Valid auth + summary of all session states
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 # Returns sessions[] (full list) + summary { idle, working, offline, total }
 # ⚠ The status query param is NOT honored — the server does not filter by status
-#   (server/src/index.ts:762-788). Filter idle agents locally with jq:
+#   (server/src/index.ts:816-843). Filter idle agents locally with jq:
 #   curl ... /api/status | jq '.sessions[] | select(.status=="idle")'
 
 # 3. Database size
@@ -606,7 +606,7 @@ ls -lh ~/.commhub/commhub.db
 # 4. Task / node / session aggregates (NOT the SSE connection count)
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/stats
 # Returns tasks { total, by_status } / sessions { by_status } / nodes { total } / recent_tasks[5]
-# Verified at server/src/index.ts:968-1004
+# Verified at server/src/index.ts:1022-1058
 ```
 
 ::: tip Full 30+ endpoint index

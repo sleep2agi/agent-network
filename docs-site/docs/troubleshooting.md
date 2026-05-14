@@ -590,12 +590,12 @@ anet doctor
 # 1. Server 健康（含 SSE 连接数 + sessions / license / uptime，无需 auth）
 curl http://localhost:9200/health
 # 关注字段: ok / version / sessions_count / sse_connections / sse_sessions / uptime
-# verify: server/src/index.ts:726-746
+# verify: server/src/index.ts:780-805
 
 # 2. 认证有效 + 看所有 session 状态汇总
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 # 返回 sessions[] 全列 + summary { idle, working, offline, total }
-# ⚠ status query param 不生效 — server 端不按 status 过滤（server/src/index.ts:762-788）。
+# ⚠ status query param 不生效 — server 端不按 status 过滤（server/src/index.ts:816-843）。
 #   要筛 idle agent，本地用 jq： curl ... /api/status | jq '.sessions[] | select(.status=="idle")'
 
 # 3. 数据库大小
@@ -604,7 +604,7 @@ ls -lh ~/.commhub/commhub.db
 # 4. 任务 / 节点 / session 统计（非 SSE 连接数）
 curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/stats
 # 返回 tasks { total, by_status } / sessions { by_status } / nodes { total } / recent_tasks[5]
-# verify: server/src/index.ts:968-1004
+# verify: server/src/index.ts:1022-1058
 ```
 
 ::: tip 全 30+ endpoint 索引
