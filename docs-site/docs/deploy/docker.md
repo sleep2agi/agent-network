@@ -384,8 +384,26 @@ worker-11:
     - RUNTIME=codex-sdk
     - MODEL=<codex-model-id>  # latest id from OpenAI Codex docs
     - COMMHUB_URL=http://server:9200
-    - TOOLS=Read,Write,Edit,Bash,Glob,Grep
+    # 注：codex-sdk runtime 不接受 --tools，TOOLS env 会被 entrypoint.sh 翻译成
+    # --tools CLI flag 但 codex-sdk 静默忽略（R243/R246 chain 一致）。
+    # 限制工具走 claude-agent-sdk runtime 才有效：
+    # - TOOLS=Read,Glob,Grep  # 只在 RUNTIME=claude-agent-sdk 时生效
 ```
+
+::: tip claude-agent-sdk worker 用 TOOLS 限制工具
+```yaml
+worker-readonly:
+  <<: *common
+  environment:
+    - ALIAS=只读agent
+    - RUNTIME=claude-agent-sdk
+    - MODEL=<minimax-model-id>
+    - ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
+    - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
+    - COMMHUB_URL=http://server:9200
+    - TOOLS=Read,Glob,Grep  # entrypoint.sh → --tools → claude-agent-sdk options
+```
+:::
 
 ### 使用不同模型
 

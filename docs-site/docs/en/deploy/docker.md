@@ -384,8 +384,27 @@ worker-11:
     - RUNTIME=codex-sdk
     - MODEL=<codex-model-id>  # latest id from OpenAI Codex docs
     - COMMHUB_URL=http://server:9200
-    - TOOLS=Read,Write,Edit,Bash,Glob,Grep
+    # Note: codex-sdk does not honor --tools. TOOLS env is expanded by
+    # entrypoint.sh into the --tools CLI flag, but codex-sdk silently
+    # ignores it (aligned with the R243/R246 chain). Only claude-agent-sdk
+    # actually applies it:
+    # - TOOLS=Read,Glob,Grep  # only effective when RUNTIME=claude-agent-sdk
 ```
+
+::: tip Restrict tools on a claude-agent-sdk worker
+```yaml
+worker-readonly:
+  <<: *common
+  environment:
+    - ALIAS=readonly-agent
+    - RUNTIME=claude-agent-sdk
+    - MODEL=<minimax-model-id>
+    - ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
+    - ANTHROPIC_AUTH_TOKEN=${MINIMAX_API_KEY}
+    - COMMHUB_URL=http://server:9200
+    - TOOLS=Read,Glob,Grep  # entrypoint.sh → --tools → claude-agent-sdk options
+```
+:::
 
 ### Using Different Models
 
