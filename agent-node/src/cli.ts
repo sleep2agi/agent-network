@@ -117,11 +117,6 @@ if (!opts.config && ALIAS) {
     fileConfig = { ...profile, ...fileConfig };
     configFilePath = profilePath;
     console.log(`[agent-node] Config: ${profilePath}`);
-    if (profile.env && typeof profile.env === "object") {
-      for (const [k, v] of Object.entries(profile.env)) {
-        if (!process.env[k] && typeof v === "string") process.env[k] = expandHome(v);
-      }
-    }
   }
 }
 
@@ -132,6 +127,18 @@ if (globalConfig.token && !fileConfig.token) fileConfig.token = globalConfig.tok
 if (!opts.config && !Object.keys(fileConfig).length) {
   const legacy = loadJson(join(process.cwd(), ".agent-node.json"));
   if (legacy) { fileConfig = legacy; console.log(`[agent-node] 配置: .agent-node.json`); }
+}
+
+// Inject config.json `env` block into process.env, regardless of which load
+// path resolved fileConfig. Previously this only ran for the `--alias` path;
+// `anet node start` spawns agent-node with BOTH `--config` and `--alias`, so
+// the `--config` branch skipped env injection entirely — ANTHROPIC_BASE_URL /
+// ANTHROPIC_AUTH_TOKEN never reached the claude-agent-sdk subprocess and the
+// LLM call silently hung against the default api.anthropic.com endpoint.
+if (fileConfig.env && typeof fileConfig.env === "object") {
+  for (const [k, v] of Object.entries(fileConfig.env)) {
+    if (!process.env[k] && typeof v === "string") process.env[k] = expandHome(v);
+  }
 }
 
 if (!ALIAS) {
