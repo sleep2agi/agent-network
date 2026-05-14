@@ -209,8 +209,8 @@ After the project config is loaded, [`cli.ts:128-130`](https://github.com/sleep2
   "node_id": "n_a1b2c3d4",
   "node_name": "code-assistant",
   "token": "ntok_...",
-  "runtime": "codex-sdk",
-  "model": "<codex-model-id>",
+  "runtime": "claude-agent-sdk",
+  "model": "<model-id>",
   "session": "",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
@@ -235,7 +235,7 @@ After the project config is loaded, [`cli.ts:128-130`](https://github.com/sleep2
 | `model` | string | AI model name |
 | `session` | string | session/thread ID. For the `claude-code-cli` runtime, `anet node create` pre-generates a UUID (first `start` binds it via `--session-id <uuid>`, restarts auto-`--resume <uuid>` to continue the conversation; v0.8.2 fixed a prior default session-loss bug). For other runtimes, this is the previous session ID for resume |
 | `channels` | string[] | Connected channels list |
-| `tools` | string[] | Allowed tools list |
+| `tools` | string[] | Allowed tools list. **`claude-agent-sdk` only**; `codex-sdk` silently ignores it (toolset is baked into the codex binary — see the L109 note above + [runtimes#codex-sdk](/en/guide/runtimes#codex-sdk)) |
 | `env` | object | Environment variable overrides |
 | `flags` | object | Runtime flags |
 

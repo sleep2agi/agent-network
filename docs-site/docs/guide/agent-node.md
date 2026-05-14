@@ -209,8 +209,8 @@ flowchart TD
   "node_id": "n_a1b2c3d4",
   "node_name": "代码助手",
   "token": "ntok_...",
-  "runtime": "codex-sdk",
-  "model": "<codex-model-id>",
+  "runtime": "claude-agent-sdk",
+  "model": "<model-id>",
   "session": "",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
@@ -235,7 +235,7 @@ flowchart TD
 | `model` | string | AI 模型名称 |
 | `session` | string | session/thread ID。`claude-code-cli` runtime 下由 `anet node create` 预生成 UUID（首次 start 用 `--session-id <uuid>` 绑定，重启自动 `--resume <uuid>` 续会话；v0.8.2 修了之前默认丢 session 的 bug）；其他 runtime 是上次 session ID 用作 resume |
 | `channels` | string[] | 接入的 Channel 列表 |
-| `tools` | string[] | 允许使用的工具列表 |
+| `tools` | string[] | 允许使用的工具列表。**仅 `claude-agent-sdk` 生效**；`codex-sdk` 静默忽略（工具集 baked in codex 二进制，见上方 L109 注 + [runtimes#codex-sdk](/guide/runtimes#codex-sdk)）|
 | `env` | object | 环境变量覆盖 |
 | `flags` | object | 运行时标志 |
 
