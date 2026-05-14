@@ -327,17 +327,28 @@ npx @sleep2agi/agent-node --alias coder --runtime codex-sdk
 
 ## Budget Control
 
-The `--max-budget` parameter controls the maximum spend per task (in USD):
+The `--max-budget` parameter caps the maximum spend per task (in USD) — **only effective for the `claude-agent-sdk` runtime**:
 
 ```bash
-# Max $0.10 per task
+# Max $0.10 per task (claude-agent-sdk)
 npx @sleep2agi/agent-node --alias coder --max-budget 0.1
 
 # Max $1.00 per task (complex tasks)
 npx @sleep2agi/agent-node --alias reasoner --max-budget 1.0
 ```
 
-When the budget is exceeded, the task automatically stops and returns the current result.
+Verified at [`agent-node/src/cli.ts:539`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L539):
+```ts
+if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // passed to claude-agent-sdk query options
+```
+
+When `SDKResultMessage.total_cost_usd` reaches `maxBudgetUsd`, claude-agent-sdk automatically ends the turn and the task moves to `error_max_budget`.
+
+::: warning codex-sdk / claude-code-cli runtime do not support a USD budget cap
+- The `codex-sdk` path ([`cli.ts:606-690 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L606)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the R215 sdk-deep-dive chain).
+- `claude-code-cli` runs against your local Claude Code subscription, counted against subscription quota rather than USD.
+- **Cross-runtime budget control**: put a reverse proxy in front (nginx / Cloudflare / litellm proxy) and throttle by model-API call count.
+:::
 
 ## Lifecycle
 

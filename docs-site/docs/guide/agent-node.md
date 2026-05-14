@@ -327,17 +327,28 @@ npx @sleep2agi/agent-node --alias 代码 --runtime codex-sdk
 
 ## 预算控制
 
-`--max-budget` 参数控制每个任务的最大花费（美元）：
+`--max-budget` 参数控制每个任务的最大花费（美元）—— **只对 `claude-agent-sdk` runtime 生效**：
 
 ```bash
-# 每任务最多 0.1 美元
+# 每任务最多 0.1 美元 (claude-agent-sdk)
 npx @sleep2agi/agent-node --alias 代码 --max-budget 0.1
 
 # 每任务最多 1 美元（复杂任务）
 npx @sleep2agi/agent-node --alias 推理 --max-budget 1.0
 ```
 
-超过预算时任务会自动停止，返回当前结果。
+verify [`agent-node/src/cli.ts:539`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L539):
+```ts
+if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // 传给 claude-agent-sdk query options
+```
+
+claude-agent-sdk 在 `SDKResultMessage.total_cost_usd` 达到 `maxBudgetUsd` 时自动结束当前 turn，task 状态走 `error_max_budget`。
+
+::: warning codex-sdk / claude-code-cli runtime 不支持 budget cap
+- `codex-sdk` 路径（[`cli.ts:606-690 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L606)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（R215 sdk-deep-dive chain 一致）
+- `claude-code-cli` 走本机 Claude Code 订阅，按订阅 quota 不按美金算
+- **跨 runtime 通用预算控制**：前置反向代理（nginx / Cloudflare / litellm proxy）按 model API 调用次数限流
+:::
 
 ## 生命周期
 
