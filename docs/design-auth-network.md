@@ -25,7 +25,7 @@
 >
 > ⛔ 已废弃方向（本文下方仍有相关引用，请忽略）：
 > - **Free / Pro / Admin Plan 配额体系**（下方 L244 表 + users.plan 字段实现）—— v0.6 时代 SaaS 假设，Apache 2.0 OSS 转向后**永久搁置**，不再 v0.9+ planned。**R224 校准**（跟 R208 chain 一致）：schema 字段保留作历史，但 `auth.ts:184-189 createNetwork()` 仍按 `users.plan || "free"` 查 `QUOTAS` 拦截，**仅 `users.role='admin'` 豁免**——多数 SaaS 配额项（每网络 Agent 数 / 每天任务数 / 每网络成员数 / Token 数 / 试用期）实际不生效（hub 端没在对应路径调 quota check），但「创建网络数」(`max_networks_owned`) 这一项**仍 enforced**（free 用户默认上限 2）。详见 [anet.sh/concepts/networks 配额限制章节](https://anet.sh/concepts/networks) + [anet.sh/troubleshooting quota_exceeded 解决方案](https://anet.sh/troubleshooting)。
-> - `anet quickstart` 一键命令 —— 命令仍在 CLI（一键起 hub + dashboard + node），但 anet.sh docs 改推 step-by-step（更可控）；E2E 未覆盖。详见 [getting-started 未验证列表](https://anet.sh/guide/getting-started)
+> - `anet quickstart` 一键命令 —— **已 per #45 删除**：`case "quickstart"` 仍在 cli.ts 但只打印 deprecation 提示，引导用 `anet setup` + step-by-step 现代命令组合，不再「一键起 hub + dashboard + node」。anet.sh docs 也只推 step-by-step。
 > - "官方免费 hub" 托管 — 项目方向已转为 Apache 2.0 + 自部署，不做 SaaS 托管
 >
 > 注意：本文档中描述的权限矩阵、配额限制、公开网络等功能为**设计目标**，
