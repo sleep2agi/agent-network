@@ -80,7 +80,7 @@ for await (const message of query({ prompt, options })) {
 - **PATH 注入**：wrapper 早在 [cli.ts L608-615](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) `which codex` 后把目录前置到 `process.env.PATH`，避免子进程 spawn 时找不到。
 - **Thread 坏掉后整体重建**：单 turn 报错走 catch 分支重 `codex.startThread()` + `thread.run()`（cli.ts L678-690），意味着原 thread 的 history 在错误后就**断了**。
 - **Token 计费要自己算**：`usage` 只给 token 数没给美金。如果要做预算控制，得维护一张 model→price 表。当前 anet **没**实现 codex 侧的 `maxBudgetUsd` 强制。
-- **gpt-5.4 当前是 default**：cli.ts L626 / L642 / L683 三处 hardcode。MiniMax 等第三方 codex provider 接入计划已记入 RFC 但还没落。
+- **gpt-5.4 当前是 default**：cli.ts L663 / L679 / L720 三处 hardcode。MiniMax 等第三方 codex provider 接入计划已记入 RFC 但还没落。
 
 **session 写回机制**
 
