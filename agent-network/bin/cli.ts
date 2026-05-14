@@ -1299,113 +1299,33 @@ This wizard creates one agent node for this project:
     process.exit(1);
   }
 
-  console.log(`
-Runtime guide:
-  - claude-code-cli  Use your Claude Code app/CLI session. Best for existing Claude Code workflows.
-  - codex-sdk        Run through agent-node with Codex. Best for GPT-5.4 / OpenAI models.
-  - claude-agent-sdk Run through agent-node with an Anthropic-compatible API.
-                     Use this for MiniMax or Anthropic-compatible providers.
-`);
-  const runtime = await askChoice<RuntimeName>("Select runtime:", [
-    { label: "claude-code-cli", value: "claude-code-cli", description: "Claude Code CLI（需要 Pro 订阅）" },
-    { label: "codex-sdk", value: "codex-sdk", description: "Codex SDK（GPT-5.4）" },
-    { label: "claude-agent-sdk", value: "claude-agent-sdk", description: "Claude Agent SDK（MiniMax/书生等）" },
-  ]);
-
+  // Vendor-first selection (#104-B B2): pick vendor → pick that vendor's model
+  // → runtime + baseUrl + envKey resolved from the VENDORS registry. Replaces
+  // the old runtime-first picker + per-runtime inline model lists.
   const opts = parseOpts();
-  opts.runtime = runtime;
-
-  if (runtime === "codex-sdk") {
-    console.log(`
-Model guide:
-  - gpt-5.4  Default Codex model.
-  - o3       Reasoning model; use it if your account/session supports it.
-  - custom   Type an exact model name.
-`);
-    const modelChoice = await askChoice("Select model:", [
-      { label: "gpt-5.4", value: "gpt-5.4" },
-      { label: "o3", value: "o3" },
-      { label: "custom", value: "__custom__" },
-    ]);
-    opts.model = modelChoice === "__custom__" ? await ask("Model") : modelChoice;
-  } else if (runtime === "claude-agent-sdk") {
-    // Vendor presets here are *verified-with-real-call* only. Adding a new
-    // vendor without per-vendor verify is forbidden (cf. preview.0-preview.2
-    // incident where DeepSeek / GLM / Kimi entries were fabricated from
-    // PROVIDER_CHOICES — none worked). Add via `custom` until verified.
-    console.log(`
-Model guide (verified Anthropic-compatible + Claude + custom):
-  - intern-s2-preview  上海 AI Lab 书生 (默认, chat.intern-ai.org.cn)
-  - intern-s1-pro      上海 AI Lab 书生 (chat.intern-ai.org.cn)
-  - MiniMax-M2.7       MiniMax (api.minimaxi.com/anthropic)
-  - mimo-v2.5-pro      小米 MiMo (token-plan-cn.xiaomimimo.com/anthropic)
-  - claude-sonnet-4-6  Anthropic Claude via the default Anthropic API.
-  - claude-opus-4-6    Anthropic Claude via the default Anthropic API.
-  - claude-haiku-4-5   Anthropic Claude via the default Anthropic API.
-  - custom             Type both URL and model for any Anthropic-compatible
-                       provider (DeepSeek / GLM / Kimi / OpenRouter /
-                       self-hosted vLLM, etc.).
-`);
-    const modelChoice = await askChoice("Select model:", [
-      { label: "intern-s2-preview",  value: "intern-s2-preview",  description: "上海 AI Lab 书生 默认 (chat.intern-ai.org.cn)" },
-      { label: "intern-s1-pro",      value: "intern-s1-pro",      description: "上海 AI Lab 书生 (chat.intern-ai.org.cn)" },
-      { label: "MiniMax-M2.7",       value: "MiniMax-M2.7",       description: "MiniMax (api.minimaxi.com/anthropic)" },
-      { label: "mimo-v2.5-pro",      value: "mimo-v2.5-pro",      description: "小米 MiMo (token-plan-cn.xiaomimimo.com/anthropic)" },
-      { label: "claude-sonnet-4-6",  value: "claude-sonnet-4-6",  description: "Anthropic default URL" },
-      { label: "claude-opus-4-6",    value: "claude-opus-4-6",    description: "Anthropic default URL" },
-      { label: "claude-haiku-4-5",   value: "claude-haiku-4-5",   description: "Anthropic default URL" },
-      { label: "custom",             value: "__custom__",         description: "Manually enter base URL + model" },
-    ]);
-    opts.model = modelChoice;
-
-    // Preset baseUrl injection — only verified vendors. New vendor MUST land
-    // here only after per-vendor verify-with-real-call (curl ANTHROPIC_BASE_URL
-    // with the chosen model id and confirm 200), not by copying from
-    // PROVIDER_CHOICES or docs (those have not been verified end-to-end).
-    if (opts.model === "__custom__") {
-      const baseUrl = await ask("ANTHROPIC_BASE_URL");
-      const customModel = await ask("Model");
-      if (baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${baseUrl}`);
-      opts.model = customModel;
-    } else if (opts.model === "MiniMax-M2.7") {
-      opts._envs.push("ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic");
-    } else if (opts.model === "mimo-v2.5-pro") {
-      // 小米 MiMo — Anthropic-compat endpoint with /anthropic suffix (same
-      // pattern as MiniMax). Verified by 通信SDK马 real-call 2026-05-15:
-      // POST /anthropic/v1/messages HTTP 200, model mimo-v2.5-pro returns a
-      // proper Anthropic Messages response. Runs on claude-agent-sdk runtime.
-      opts._envs.push("ANTHROPIC_BASE_URL=https://token-plan-cn.xiaomimimo.com/anthropic");
-    } else if (opts.model === "intern-s1-pro" || opts.model === "intern-s2-preview") {
-      // Intern uses the bare hostname; no /anthropic suffix (Vincent verified
-      // 2026-05-13 telegram 4227). Runs on the default claude-agent-sdk runtime
-      // — #98 confirmed claude-agent-sdk ↔ intern is fully compatible (the
-      // earlier hang was an expired key's 401, not a runtime incompatibility).
-      // intern-s2-preview verified by 通信测试马 real-call 2026-05-14 (raw
-      // /v1/messages HTTP 200, returns Intern-S2-Preview).
-      opts._envs.push("ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn");
-    }
-
-    // Per-vendor signup URL hint. Only verified vendors get a hint; unverified
-    // ones force the user through `custom` (where they paste their own values).
-    const vendorSignupUrls: Record<string, string> = {
-      "MiniMax-M2.7":      "https://platform.minimaxi.com",
-      "mimo-v2.5-pro":     "https://platform.xiaomimimo.com",
-      "intern-s1-pro":     "https://chat.intern-ai.org.cn/",
-      "intern-s2-preview": "https://chat.intern-ai.org.cn/",
-    };
-    const hintUrl = vendorSignupUrls[opts.model];
-
-    console.log(`
+  const sel = await selectVendorAndModel();
+  if (sel) {
+    opts.runtime = sel.runtime;
+    if (sel.model) opts.model = sel.model;
+    if (sel.baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${sel.baseUrl}`);
+    if (sel.envKey) {
+      console.log(`
 API key:
-  Paste the provider key for the selected model.${hintUrl ? `
-  📋 注册 / 拿 ${opts.model} API Key: ${hintUrl}` : ""}
-  - MiniMax / 书生 / 小米 MiMo: token from the vendor's API Keys page.
-  - Anthropic Claude: use an Anthropic Console API key.
-  - Custom URL: use the key/token for that Anthropic-compatible provider
-    (DeepSeek / GLM / Kimi / OpenRouter / etc. all work via custom).
-`);
-    const token = await ask("ANTHROPIC_AUTH_TOKEN");
-    if (token) opts._envs.push(`ANTHROPIC_AUTH_TOKEN=${token}`);
+  Paste the API key/token for the selected vendor.${sel.signupUrl ? `
+  📋 注册 / 拿 API Key: ${sel.signupUrl}` : ""}`);
+      const token = await ask(sel.envKey);
+      if (token) opts._envs.push(`${sel.envKey}=${token}`);
+    }
+    if (sel.requiresAuth === "codex") {
+      console.log(`[anet] 请确保已执行: codex auth login`);
+    } else if (sel.requiresAuth === "claude") {
+      console.log(`[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login`);
+    }
+  } else {
+    // Non-TTY / inquirer unavailable — fall back to the default runtime so the
+    // node is still created; the API key can be added later via config.json.
+    console.log(`[anet] ⚠ vendor selector unavailable — defaulting to claude-agent-sdk runtime (add API key to config.json env later)`);
+    opts.runtime = "claude-agent-sdk";
   }
 
   const profile = await ensureNodeToken(createProfileFromOpts(id, opts), id);
