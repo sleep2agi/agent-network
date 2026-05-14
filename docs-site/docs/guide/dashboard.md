@@ -48,7 +48,7 @@ block-beta
 | From | 发送者别名 |
 | To | 接收者别名 |
 | Priority | 优先级（high / normal / low） |
-| Status | 状态（delivered / acked / running / replied / failed / cancelled / expired；完整状态机见 [Task 生命周期](/concepts/task-lifecycle)） |
+| Status | 状态（`created` / `delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired` 共 **8 个状态**；verify [`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`；R230 chain 已校准 cancel_task 4 个 cancellable 状态含 `created`；完整状态机见 [Task 生命周期](/concepts/task-lifecycle)） |
 | Content | 任务内容预览 |
 | Created | 创建时间 |
 | Duration | 从创建到完成的耗时 |
