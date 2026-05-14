@@ -1080,10 +1080,10 @@ async function askChoice<T extends string>(title: string, choices: { label: stri
 // ── Unified vendor registry (issue #104-B) ──
 //
 // Single source of truth for vendor → model → runtime/baseUrl wiring. This
-// consolidates the previously-scattered MODEL_PRESETS / PROVIDER_CHOICES /
-// BATCH_PRESETS / inline Path-A picker (the entry points migrate to it in
-// B2, the old structures are removed in B3). Vincent 4677+4679: "先选供应商，
-// 然后再选模型" — the create wizard is vendor-first.
+// consolidated the previously-scattered MODEL_PRESETS / PROVIDER_CHOICES /
+// BATCH_PRESETS / inline Path-A picker — all three create flows now use
+// selectVendorAndModel() (B2) and the old structures were removed (B3).
+// Vincent 4677+4679: "先选供应商，然后再选模型" — the create wizard is vendor-first.
 //
 // Every entry's baseUrl + model ids are verified-with-real-call before
 // landing (feedback_vendor_verify_before_hardcode). Unverified providers
@@ -1427,69 +1427,6 @@ async function createCommand(idOverride?: string) {
     console.error("未找到 CommHub Server。请先运行:\n  anet hub start\n\n或手动配置:\n  anet init --hub http://YOUR_IP:9200");
     process.exit(1);
   }
-
-  // ── Interactive model selector (when no --runtime specified) ──
-  //
-  // Vendor URL/model values must be *verified-with-real-call* before landing.
-  // Entries marked "TODO unverified" had wrong base URLs / model ids in
-  // preview.0-preview.2 (Vincent telegram 4227 caught it). Until each vendor
-  // is re-verified (curl ANTHROPIC_BASE_URL with a known model and confirm
-  // 200), prefer the `custom` path. See feedback_vendor_verify_before_hardcode.
-  const MODEL_PRESETS: Record<string, { runtime: string; label: string; baseUrl?: string; envKey?: string; requiresAuth?: string; signupUrl?: string }> = {
-    minimax:   { runtime: "claude-agent-sdk", label: "MiniMax（推荐，国内直连，低成本）", baseUrl: "https://api.minimaxi.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.minimaxi.com" },
-    // TODO unverified — Vincent 4227 incident: DeepSeek base URL / model id had not been verified end-to-end. Keep entry as a stub but do NOT trust the baseUrl until re-verified.
-    deepseek:  { runtime: "claude-agent-sdk", label: "DeepSeek（代码+推理，性价比极高）[UNVERIFIED]", baseUrl: "https://api.deepseek.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.deepseek.com" },
-    // TODO unverified — same caveat as DeepSeek (Vincent 4227).
-    glm:       { runtime: "claude-agent-sdk", label: "GLM 智谱（中文理解强）[UNVERIFIED]", baseUrl: "https://open.bigmodel.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://open.bigmodel.cn" },
-    // Verified by Vincent 2026-05-13 telegram 4227: base URL is bare hostname (no /anthropic suffix). Model id `intern-s1-pro` (lowercase).
-    // runtime claude-agent-sdk — #98 confirmed claude-agent-sdk ↔ intern is fully compatible (earlier hang was an expired-key 401, not a runtime issue).
-    intern:    { runtime: "claude-agent-sdk", label: "上海 AI Lab 书生（intern-s1-pro）", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
-    // Verified by 通信测试马 real-call 2026-05-14 (raw /v1/messages HTTP 200, returns Intern-S2-Preview). Default model per Vincent 4644+4645.
-    "intern-s2": { runtime: "claude-agent-sdk", label: "上海 AI Lab 书生（intern-s2-preview，默认）", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
-    // TODO unverified — same caveat as DeepSeek (Vincent 4227).
-    kimi:      { runtime: "claude-agent-sdk", label: "Kimi（长文本 128K）[UNVERIFIED]", baseUrl: "https://api.moonshot.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.moonshot.cn" },
-    // Verified by 通信SDK马 real-call 2026-05-15 (Vincent 4677+4679 / #104): base URL has the
-    // /anthropic suffix (NOT a bare hostname like intern); POST /anthropic/v1/messages HTTP 200
-    // for mimo-v2.5-pro / mimo-v2.5 / mimo-v2-pro / mimo-v2-omni. Model ids are lowercase.
-    mimo:      { runtime: "claude-agent-sdk", label: "小米 MiMo（mimo-v2.5-pro）", baseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.xiaomimimo.com" },
-    openrouter:{ runtime: "claude-agent-sdk", label: "OpenRouter（一个 Key 用所有模型）", baseUrl: "https://openrouter.ai/api/v1", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://openrouter.ai" },
-    claude:    { runtime: "claude-agent-sdk", label: "Claude Sonnet/Opus（海外，需 API Key）", envKey: "ANTHROPIC_API_KEY", signupUrl: "https://console.anthropic.com" },
-    "claude-code": { runtime: "claude-code-cli", label: "Claude Code CLI（需 Max 订阅）", requiresAuth: "claude" },
-    codex:     { runtime: "codex-sdk", label: "GPT-5.4 Codex（海外，需 codex auth login）", requiresAuth: "codex" },
-  };
-
-  // Two-step interactive picker: runtime first, then provider+key (only when
-  // the runtime needs an Anthropic-compatible API key).
-  // Each step has descriptive guidance so users know which to pick when.
-  // Inline description into name to avoid inquirer/prompts version skew with
-  // the `description` field (Vincent saw "_0x... is not a function" with .57).
-  const RUNTIME_CHOICES = [
-    { value: "claude-agent-sdk", name: "claude-agent-sdk  — 推荐: 连任何 Anthropic 兼容 API (MiniMax/DeepSeek/GLM/Kimi/Claude), 只需 API Key" },
-    { value: "codex-sdk",        name: "codex-sdk         — GPT-5 / o3 (海外, 需先 codex auth login)" },
-    { value: "claude-code-cli",  name: "claude-code-cli   — Claude Code 订阅用户 (需 Claude Pro/Team/Max + claude auth login)" },
-  ];
-
-  // [UNVERIFIED] entries marked below — same caveat as MODEL_PRESETS above.
-  // Vincent telegram 4227 incident: only minimax + intern verified end-to-end.
-  // Use `custom` for everything else until per-vendor verify lands.
-  const PROVIDER_CHOICES = [
-    // intern-s2-preview = default model (Vincent 4644+4645) — listed first so the
-    // provider picker preselects it. Verified by 通信测试马 real-call 2026-05-14
-    // (raw /v1/messages HTTP 200, returns Intern-S2-Preview). Runs on the default
-    // claude-agent-sdk runtime (#98 confirmed claude-agent-sdk ↔ intern compatible).
-    { key: "intern-s2-preview", label: "上海 AI Lab 书生 — intern-s2-preview (默认)", baseUrl: "https://chat.intern-ai.org.cn", signupUrl: "https://chat.intern-ai.org.cn/" },
-    // Verified by Vincent 2026-05-13 telegram 4227: bare hostname, no /anthropic.
-    { key: "intern",     label: "上海 AI Lab 书生 — intern-s1-pro",            baseUrl: "https://chat.intern-ai.org.cn",          signupUrl: "https://chat.intern-ai.org.cn/" },
-    { key: "minimax",    label: "MiniMax — 国内直连，低成本，速度快",        baseUrl: "https://api.minimaxi.com/anthropic",     signupUrl: "https://platform.minimaxi.com" },
-    // Verified by 通信SDK马 real-call 2026-05-15 (#104): /anthropic suffix, model mimo-v2.5-pro, HTTP 200.
-    { key: "mimo",       label: "小米 MiMo — mimo-v2.5-pro",                  baseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic", signupUrl: "https://platform.xiaomimimo.com" },
-    { key: "deepseek",   label: "DeepSeek — 代码 + 推理性价比高 [UNVERIFIED]", baseUrl: "https://api.deepseek.com/anthropic",     signupUrl: "https://platform.deepseek.com" },
-    { key: "glm",        label: "GLM 智谱 — 中文理解强 [UNVERIFIED]",          baseUrl: "https://open.bigmodel.cn/anthropic",     signupUrl: "https://open.bigmodel.cn" },
-    { key: "kimi",       label: "Kimi — 长文本 128K [UNVERIFIED]",             baseUrl: "https://api.moonshot.cn/anthropic",      signupUrl: "https://platform.moonshot.cn" },
-    { key: "openrouter", label: "OpenRouter — 一个 Key 用所有模型",          baseUrl: "https://openrouter.ai/api/v1",           signupUrl: "https://openrouter.ai" },
-    { key: "claude",     label: "Claude Sonnet/Opus — 海外，官方 API Key",    baseUrl: "",                                        signupUrl: "https://console.anthropic.com" },
-    { key: "custom",     label: "自定义 — 输入你的 baseUrl",                  baseUrl: "",                                        signupUrl: "" },
-  ];
 
   // Vendor-first selection (#104-B B2.2): pick vendor → that vendor's model →
   // runtime + baseUrl + envKey resolved from the VENDORS registry. Replaces the
@@ -5397,40 +5334,10 @@ function batchLifecycle(opts: { prefix: string; verb: "start" | "stop" | "restar
 
 // ── batch wizard (anet create --batch) ──
 //
-// Verified preset list — must stay in sync with the auth-fail flow (cli.ts
-// L1116+) and the `anet demo sci-team` preset (Vincent commit 1bc03c0 chain).
-// New presets only after per-vendor verify-with-real-call (per
-// [[feedback_vendor_verify_before_hardcode]]).
-
-const BATCH_PRESETS: Array<{
-  value: string;
-  label: string;
-  runtime: string;
-  model?: string;
-  baseUrl?: string;
-}> = [
-  // intern-s2-preview = default model (Vincent 4644+4645) — listed first so the
-  // batch picker preselects it. Verified by 通信测试马 real-call 2026-05-14 (raw
-  // /v1/messages HTTP 200, returns Intern-S2-Preview). runtime claude-agent-sdk —
-  // #98 confirmed it's fully compatible with intern (earlier hang was an expired-key 401).
-  { value: "intern-s2-preview",  label: "claude-agent-sdk + intern-s2-preview (书生 Intern, 默认, https://chat.intern-ai.org.cn)",
-    runtime: "claude-agent-sdk", model: "intern-s2-preview", baseUrl: "https://chat.intern-ai.org.cn" },
-  { value: "intern-s1-pro",      label: "claude-agent-sdk + intern-s1-pro (书生 Intern, https://chat.intern-ai.org.cn)",
-    runtime: "claude-agent-sdk", model: "intern-s1-pro",     baseUrl: "https://chat.intern-ai.org.cn" },
-  { value: "MiniMax-M2.7",       label: "claude-agent-sdk + MiniMax-M2.7 (https://api.minimaxi.com/anthropic)",
-    runtime: "claude-agent-sdk", model: "MiniMax-M2.7",      baseUrl: "https://api.minimaxi.com/anthropic" },
-  // Verified by 通信SDK马 real-call 2026-05-15 (#104): /anthropic suffix, model mimo-v2.5-pro, HTTP 200.
-  { value: "mimo-v2.5-pro",      label: "claude-agent-sdk + mimo-v2.5-pro (小米 MiMo, https://token-plan-cn.xiaomimimo.com/anthropic)",
-    runtime: "claude-agent-sdk", model: "mimo-v2.5-pro",     baseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic" },
-  { value: "claude-sonnet-4-6",  label: "claude-agent-sdk + claude-sonnet-4-6 (Anthropic default)",
-    runtime: "claude-agent-sdk", model: "claude-sonnet-4-6" },
-  { value: "claude-opus-4-6",    label: "claude-agent-sdk + claude-opus-4-6 (Anthropic default)",
-    runtime: "claude-agent-sdk", model: "claude-opus-4-6" },
-  { value: "claude-haiku-4-5",   label: "claude-agent-sdk + claude-haiku-4-5 (Anthropic default)",
-    runtime: "claude-agent-sdk", model: "claude-haiku-4-5" },
-  { value: "__custom__",         label: "Custom — 自行输入 runtime / base URL / model",
-    runtime: "" },
-];
+// Vendor/model selection is the unified VENDORS registry + selectVendorAndModel()
+// (issue #104-B). The old BATCH_PRESETS array was removed in B3 — createBatchWizardCommand
+// now uses findVendorByModel() for --preset back-compat and selectVendorAndModel()
+// for the interactive path.
 
 async function createBatchWizardCommand() {
   const opts = parseOpts();
