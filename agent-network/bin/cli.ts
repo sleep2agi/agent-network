@@ -1161,18 +1161,21 @@ Model guide:
     // from PROVIDER_CHOICES — none worked). Add via `custom` until verified.
     console.log(`
 Model guide (verified Anthropic-compatible + Claude + custom):
-  - MiniMax-M2.7       MiniMax (api.minimaxi.com/anthropic)
+  - intern-s2-preview  上海 AI Lab 书生 (默认, chat.intern-ai.org.cn) [UNVERIFIED]
   - intern-s1-pro      上海 AI Lab 书生 (chat.intern-ai.org.cn)
+  - MiniMax-M2.7       MiniMax (api.minimaxi.com/anthropic)
   - claude-sonnet-4-6  Anthropic Claude via the default Anthropic API.
   - claude-opus-4-6    Anthropic Claude via the default Anthropic API.
   - claude-haiku-4-5   Anthropic Claude via the default Anthropic API.
   - custom             Type both URL and model for any Anthropic-compatible
                        provider (DeepSeek / GLM / Kimi / MiMo / OpenRouter /
                        self-hosted vLLM, etc.).
+  注: intern-* 走 http-api runtime — claude-agent-sdk ↔ intern endpoint 会 hang (#98)。
 `);
     const modelChoice = await askChoice("Select model:", [
+      { label: "intern-s2-preview",  value: "intern-s2-preview",  description: "上海 AI Lab 书生 默认 [UNVERIFIED] (http-api runtime)" },
+      { label: "intern-s1-pro",      value: "intern-s1-pro",      description: "上海 AI Lab 书生 (http-api runtime)" },
       { label: "MiniMax-M2.7",       value: "MiniMax-M2.7",       description: "MiniMax (api.minimaxi.com/anthropic)" },
-      { label: "intern-s1-pro",      value: "intern-s1-pro",      description: "上海 AI Lab 书生 (chat.intern-ai.org.cn)" },
       { label: "claude-sonnet-4-6",  value: "claude-sonnet-4-6",  description: "Anthropic default URL" },
       { label: "claude-opus-4-6",    value: "claude-opus-4-6",    description: "Anthropic default URL" },
       { label: "claude-haiku-4-5",   value: "claude-haiku-4-5",   description: "Anthropic default URL" },
@@ -1191,17 +1194,21 @@ Model guide (verified Anthropic-compatible + Claude + custom):
       opts.model = customModel;
     } else if (opts.model === "MiniMax-M2.7") {
       opts._envs.push("ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic");
-    } else if (opts.model === "intern-s1-pro") {
+    } else if (opts.model === "intern-s1-pro" || opts.model === "intern-s2-preview") {
       // Intern uses the bare hostname; no /anthropic suffix (Vincent verified
-      // 2026-05-13 telegram 4227).
+      // 2026-05-13 telegram 4227). Runtime forced to http-api: claude-agent-sdk
+      // ↔ intern endpoint hangs (#98 root-cause). intern-s2-preview model id is
+      // [UNVERIFIED] — pending real-call verify, intern key 待 Vincent 提供后验.
       opts._envs.push("ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn");
+      opts.runtime = "http-api";
     }
 
     // Per-vendor signup URL hint. Only verified vendors get a hint; unverified
     // ones force the user through `custom` (where they paste their own values).
     const vendorSignupUrls: Record<string, string> = {
-      "MiniMax-M2.7":   "https://platform.minimaxi.com",
-      "intern-s1-pro":  "https://chat.intern-ai.org.cn/",
+      "MiniMax-M2.7":      "https://platform.minimaxi.com",
+      "intern-s1-pro":     "https://chat.intern-ai.org.cn/",
+      "intern-s2-preview": "https://chat.intern-ai.org.cn/",
     };
     const hintUrl = vendorSignupUrls[opts.model];
 
@@ -1312,7 +1319,10 @@ async function createCommand(idOverride?: string) {
     // TODO unverified — same caveat as DeepSeek (Vincent 4227).
     glm:       { runtime: "claude-agent-sdk", label: "GLM 智谱（中文理解强）[UNVERIFIED]", baseUrl: "https://open.bigmodel.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://open.bigmodel.cn" },
     // Verified by Vincent 2026-05-13 telegram 4227: base URL is bare hostname (no /anthropic suffix). Model id `intern-s1-pro` (lowercase).
-    intern:    { runtime: "claude-agent-sdk", label: "上海 AI Lab 书生（intern-s1-pro）", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
+    // runtime http-api — claude-agent-sdk ↔ intern endpoint hangs (#98 root-cause); never leave an intern preset on a runtime that hangs.
+    intern:    { runtime: "http-api", label: "上海 AI Lab 书生（intern-s1-pro）", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
+    // [UNVERIFIED] — pending real-call verify, intern key 待 Vincent 提供后验 (#98 发现旧 key 过期). Default model per Vincent 4644+4645. runtime http-api per #98.
+    "intern-s2": { runtime: "http-api", label: "上海 AI Lab 书生（intern-s2-preview，默认）[UNVERIFIED]", baseUrl: "https://chat.intern-ai.org.cn", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://chat.intern-ai.org.cn/" },
     // TODO unverified — same caveat as DeepSeek (Vincent 4227).
     kimi:      { runtime: "claude-agent-sdk", label: "Kimi（长文本 128K）[UNVERIFIED]", baseUrl: "https://api.moonshot.cn/anthropic", envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.moonshot.cn" },
     // TODO unverified — same caveat as DeepSeek (Vincent 4227).
@@ -1338,12 +1348,17 @@ async function createCommand(idOverride?: string) {
   // Vincent telegram 4227 incident: only minimax + intern verified end-to-end.
   // Use `custom` for everything else until per-vendor verify lands.
   const PROVIDER_CHOICES = [
+    // intern-s2-preview = default model (Vincent 4644+4645) — listed first so the
+    // provider picker preselects it. [UNVERIFIED] — pending real-call verify,
+    // intern key 待 Vincent 提供后验. runtime forced to http-api in the prompt
+    // block below (claude-agent-sdk ↔ intern endpoint hangs, #98).
+    { key: "intern-s2-preview", label: "上海 AI Lab 书生 — intern-s2-preview (默认) [UNVERIFIED]", baseUrl: "https://chat.intern-ai.org.cn", signupUrl: "https://chat.intern-ai.org.cn/" },
+    // Verified by Vincent 2026-05-13 telegram 4227: bare hostname, no /anthropic.
+    { key: "intern",     label: "上海 AI Lab 书生 — intern-s1-pro",            baseUrl: "https://chat.intern-ai.org.cn",          signupUrl: "https://chat.intern-ai.org.cn/" },
     { key: "minimax",    label: "MiniMax — 国内直连，低成本，速度快",        baseUrl: "https://api.minimaxi.com/anthropic",     signupUrl: "https://platform.minimaxi.com" },
     { key: "deepseek",   label: "DeepSeek — 代码 + 推理性价比高 [UNVERIFIED]", baseUrl: "https://api.deepseek.com/anthropic",     signupUrl: "https://platform.deepseek.com" },
     { key: "glm",        label: "GLM 智谱 — 中文理解强 [UNVERIFIED]",          baseUrl: "https://open.bigmodel.cn/anthropic",     signupUrl: "https://open.bigmodel.cn" },
     { key: "kimi",       label: "Kimi — 长文本 128K [UNVERIFIED]",             baseUrl: "https://api.moonshot.cn/anthropic",      signupUrl: "https://platform.moonshot.cn" },
-    // Verified by Vincent 2026-05-13 telegram 4227: bare hostname, no /anthropic.
-    { key: "intern",     label: "上海 AI Lab 书生 — intern-s1-pro",            baseUrl: "https://chat.intern-ai.org.cn",          signupUrl: "https://chat.intern-ai.org.cn/" },
     { key: "mimo",       label: "小米 MiMo — V2.5 [UNVERIFIED]",               baseUrl: "https://api.xiaomimimo.com/anthropic",   signupUrl: "https://platform.xiaomimimo.com" },
     { key: "openrouter", label: "OpenRouter — 一个 Key 用所有模型",          baseUrl: "https://openrouter.ai/api/v1",           signupUrl: "https://openrouter.ai" },
     { key: "claude",     label: "Claude Sonnet/Opus — 海外，官方 API Key",    baseUrl: "",                                        signupUrl: "https://console.anthropic.com" },
@@ -1392,6 +1407,16 @@ async function createCommand(idOverride?: string) {
       let baseUrl = cfg.baseUrl;
       if (cfg.key === "custom") {
         baseUrl = await ask("baseUrl (e.g. https://your-host/anthropic)") || "";
+      }
+      // Intern presets: force http-api runtime (claude-agent-sdk ↔ intern
+      // endpoint hangs, #98 root-cause) and pin the model id. intern-s2-preview
+      // is [UNVERIFIED] — pending real-call verify once Vincent supplies a key.
+      if (cfg.key === "intern-s2-preview") {
+        opts.runtime = "http-api";
+        opts.model = "intern-s2-preview";
+      } else if (cfg.key === "intern") {
+        opts.runtime = "http-api";
+        opts.model = "intern-s1-pro";
       }
       if (cfg.signupUrl) {
         console.log(`[anet] 没有 Key？去 ${cfg.signupUrl} 注册并创建 API Key`);
@@ -4786,7 +4811,7 @@ async function demoPrReviewCommand() {
 // systemPrompts here are intentionally placeholders.
 //
 // Verified vendor values (per Vincent telegram 4227, commit 1bc03c0):
-//   runtime: claude-agent-sdk
+//   runtime: http-api   (claude-agent-sdk ↔ intern endpoint hangs — #98 root-cause)
 //   model:   intern-s1-pro
 //   baseUrl: https://chat.intern-ai.org.cn   (bare hostname, no /anthropic)
 //   token:   ANTHROPIC_AUTH_TOKEN injected from user-supplied Intern API key
@@ -4861,7 +4886,7 @@ async function demoSciTeamCommand() {
     --direction <key>    综述方向 (comprehensive/infra/llm-arch/unified-gen/rlhf/ai-safety/custom)
 
   Vendor values (Vincent verified per commit 1bc03c0):
-    runtime  = claude-agent-sdk
+    runtime  = http-api   (claude-agent-sdk ↔ intern endpoint hangs — #98)
     model    = intern-s1-pro
     baseUrl  = https://chat.intern-ai.org.cn   (no /anthropic suffix)
     token    = \$ANTHROPIC_AUTH_TOKEN (= 你的 Intern API key)
@@ -4954,7 +4979,7 @@ async function demoSciTeamCommand() {
   console.log(`        工作目录:  ${targetDir}`);
   console.log(`        节点数:    ${count} (1 leader + ${count - 1} worker)`);
   console.log(`        综述方向:  ${direction}`);
-  console.log(`        Runtime:   claude-agent-sdk + intern-s1-pro\n`);
+  console.log(`        Runtime:   http-api + intern-s1-pro\n`);
 
   // sci-team is now a preset wrapper over the generic batch primitive
   // (issue #55). The Intern URL + model + active-fan-out sciTeamPrompt
@@ -4965,7 +4990,7 @@ async function demoSciTeamCommand() {
     count,
     workdir: targetDir,
     workdirMode: "separate",
-    runtime: "claude-agent-sdk",
+    runtime: "http-api",
     model: "intern-s1-pro",
     baseUrl: "https://chat.intern-ai.org.cn",
     apiKey: internApiKey,
@@ -5286,8 +5311,14 @@ const BATCH_PRESETS: Array<{
   model?: string;
   baseUrl?: string;
 }> = [
-  { value: "intern-s1-pro",      label: "claude-agent-sdk + intern-s1-pro (书生 Intern, https://chat.intern-ai.org.cn)",
-    runtime: "claude-agent-sdk", model: "intern-s1-pro",     baseUrl: "https://chat.intern-ai.org.cn" },
+  // intern-s2-preview = default model (Vincent 4644+4645) — listed first so the
+  // batch picker preselects it. [UNVERIFIED] — pending real-call verify, intern
+  // key 待 Vincent 提供后验. runtime http-api: claude-agent-sdk ↔ intern endpoint
+  // hangs (#98 root-cause); no intern preset may stay on a runtime that hangs.
+  { value: "intern-s2-preview",  label: "http-api + intern-s2-preview (书生 Intern, 默认, https://chat.intern-ai.org.cn) [UNVERIFIED]",
+    runtime: "http-api",         model: "intern-s2-preview", baseUrl: "https://chat.intern-ai.org.cn" },
+  { value: "intern-s1-pro",      label: "http-api + intern-s1-pro (书生 Intern, https://chat.intern-ai.org.cn)",
+    runtime: "http-api",         model: "intern-s1-pro",     baseUrl: "https://chat.intern-ai.org.cn" },
   { value: "MiniMax-M2.7",       label: "claude-agent-sdk + MiniMax-M2.7 (https://api.minimaxi.com/anthropic)",
     runtime: "claude-agent-sdk", model: "MiniMax-M2.7",      baseUrl: "https://api.minimaxi.com/anthropic" },
   { value: "claude-sonnet-4-6",  label: "claude-agent-sdk + claude-sonnet-4-6 (Anthropic default)",
@@ -5314,8 +5345,9 @@ async function createBatchWizardCommand() {
                         [--leader-alias <name>]
 
   Wizard fields (任一可用 --flag 跳过):
-    --preset <key>        intern-s1-pro / MiniMax-M2.7 / claude-sonnet-4-6 /
-                          claude-opus-4-6 / claude-haiku-4-5 / __custom__
+    --preset <key>        intern-s2-preview (默认) / intern-s1-pro / MiniMax-M2.7 /
+                          claude-sonnet-4-6 / claude-opus-4-6 / claude-haiku-4-5 /
+                          __custom__
     --api-key <key>       runtime auth token (ANTHROPIC_AUTH_TOKEN or 等价)
     --workdir <path>      父目录, default ~/anet-team
     --workdir-mode        separate (default, <workdir>/node{i}) | shared (单 dir)
