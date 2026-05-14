@@ -577,18 +577,32 @@ Get detailed status of a single session, including pending inbox count and recen
 ```json
 {
   "ok": true,
-  "session": { ... },
+  "session": {
+    "resume_id": "sdk-n_xxx", "alias": "coder-1", "status": "idle",
+    "agent": "agent-node:codex", "node_id": "n_a1b2c3d4",
+    "last_seen_at": "2026-04-12 10:00:00", "network_id": "net_xxx"
+  },
   "inbox_pending": 2,
   "recent_completions": [
     {
       "id": "uuid-xxx",
+      "session_name": "coder-1",
       "task": "Write sorting algorithm",
       "result": "Done",
+      "artifacts": null,
+      "score": 8,
+      "duration_minutes": 2,
+      "network_id": "net_xxx",
       "completed_at": "2026-04-12 10:00:15"
     }
   ]
 }
 ```
+
+::: tip Response shape
+- `session` is `SELECT * FROM sessions` ([`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)) — the full sessions row (same as [`get_all_status`](#get_all_status)'s session row, **no `model` column**); if the alias doesn't exist `session` is `null` but `ok` is still `true`
+- `recent_completions` is `SELECT * FROM completions ... LIMIT 5` ([`tools.ts:433-435`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L433)) — the full 9-column completion row (`id` / `session_name` / `task` / `result` / `artifacts` / `score` / `duration_minutes` / `network_id` / `completed_at`), ordered by `completed_at` DESC, max 5
+:::
 
 ---
 
@@ -612,9 +626,23 @@ Get completion records.
 ```json
 {
   "ok": true,
-  "completions": [...]
+  "completions": [
+    {
+      "id": "uuid-xxx",
+      "session_name": "coder-1",
+      "task": "Write sorting algorithm",
+      "result": "Implemented with quicksort...",
+      "artifacts": "[\"/tmp/sort.py\"]",
+      "score": 8,
+      "duration_minutes": 2,
+      "network_id": "net_xxx",
+      "completed_at": "2026-04-12 10:00:15"
+    }
+  ]
 }
 ```
+
+`completions` is `SELECT * FROM completions WHERE completed_at >= <cutoff>` ([`tools.ts:938`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L938)) — the full 9-column row, ordered by `completed_at` DESC. `artifacts` is a JSON-array **string** (not a parsed array — `report_completion` `JSON.stringify`s it on the way in). When `since` is omitted the cutoff defaults to 24 hours ago.
 
 ---
 

@@ -577,18 +577,32 @@ send_task({
 ```json
 {
   "ok": true,
-  "session": { ... },
+  "session": {
+    "resume_id": "sdk-n_xxx", "alias": "代码1号", "status": "idle",
+    "agent": "agent-node:codex", "node_id": "n_a1b2c3d4",
+    "last_seen_at": "2026-04-12 10:00:00", "network_id": "net_xxx"
+  },
   "inbox_pending": 2,
   "recent_completions": [
     {
       "id": "uuid-xxx",
+      "session_name": "代码1号",
       "task": "写排序算法",
       "result": "完成",
+      "artifacts": null,
+      "score": 8,
+      "duration_minutes": 2,
+      "network_id": "net_xxx",
       "completed_at": "2026-04-12 10:00:15"
     }
   ]
 }
 ```
+
+::: tip 返回值形状
+- `session` 走 `SELECT * FROM sessions`（[`tools.ts:423`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L423)），完整 sessions 行（同 [`get_all_status`](#get_all_status) 的 session 行，**无 `model` 列**）；alias 不存在时 `session` 为 `null` 但 `ok` 仍为 `true`
+- `recent_completions` 走 `SELECT * FROM completions ... LIMIT 5`（[`tools.ts:433-435`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L433)），完整 9 列 completion 行（`id` / `session_name` / `task` / `result` / `artifacts` / `score` / `duration_minutes` / `network_id` / `completed_at`），按 `completed_at` 倒序最多 5 条
+:::
 
 ---
 
@@ -612,9 +626,23 @@ send_task({
 ```json
 {
   "ok": true,
-  "completions": [...]
+  "completions": [
+    {
+      "id": "uuid-xxx",
+      "session_name": "代码1号",
+      "task": "写排序算法",
+      "result": "使用快排实现...",
+      "artifacts": "[\"/tmp/sort.py\"]",
+      "score": 8,
+      "duration_minutes": 2,
+      "network_id": "net_xxx",
+      "completed_at": "2026-04-12 10:00:15"
+    }
+  ]
 }
 ```
+
+`completions` 走 `SELECT * FROM completions WHERE completed_at >= <cutoff>`（[`tools.ts:938`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L938)），完整 9 列行，按 `completed_at` 倒序。`artifacts` 是 JSON 数组**字符串**（不是已解析的数组 —— `report_completion` 入库时 `JSON.stringify` 过）。`since` 不传默认 cutoff = 24 小时前。
 
 ---
 
