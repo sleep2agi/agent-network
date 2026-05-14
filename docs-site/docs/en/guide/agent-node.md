@@ -306,7 +306,7 @@ R243 calibration: the `--tools` flag only affects the `claude-agent-sdk` runtime
 Verified at [`agent-node/src/cli.ts:161`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L161):
 ```ts
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
-// ... cli.ts:535: tools: TOOLS.length ? TOOLS : undefined  ← passed to claude-agent-sdk query options
+// ... cli.ts:534: tools: TOOLS.length ? TOOLS : undefined  ← passed to claude-agent-sdk query options
 ```
 
 ```bash
@@ -345,7 +345,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // passed to claude-agen
 When `SDKResultMessage.total_cost_usd` reaches `maxBudgetUsd`, claude-agent-sdk automatically ends the turn and the task moves to `error_max_budget`.
 
 ::: warning codex-sdk / claude-code-cli runtime do not support a USD budget cap
-- The `codex-sdk` path ([`cli.ts:644-730 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L644)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the R215 sdk-deep-dive chain).
+- The `codex-sdk` path ([`cli.ts:643-729 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L643)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the R215 sdk-deep-dive chain).
 - `claude-code-cli` runs against your local Claude Code subscription, counted against subscription quota rather than USD.
 - **Cross-runtime budget control**: put a reverse proxy in front (nginx / Cloudflare / litellm proxy) and throttle by model-API call count.
 :::
@@ -388,7 +388,7 @@ On SIGINT (Ctrl+C) or SIGTERM:
 2. Close SSE connection
 3. Exit process
 
-If the process crashes (no time to report), CommHub detects via heartbeat timeout and marks the agent offline after **10 minutes** (verified at [`server/src/index.ts:751`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L751) `Date.now() - 10 * 60 * 1000` cutoff, lazily triggered on `/api/status` calls; aligned with the R219 chain).
+If the process crashes (no time to report), CommHub detects via heartbeat timeout and marks the agent offline after **10 minutes** (verified at [`server/src/index.ts:762-767`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L762) `Date.now() - 10 * 60 * 1000` cutoff, lazily triggered on `/api/status` calls; aligned with the R219 chain).
 
 ## Environment Variables
 
@@ -396,19 +396,19 @@ Only the env vars that agent-node actually reads from `process.env` (verified at
 
 | Variable | Equivalent CLI flag / config field | Description |
 |------|------------------------------|------|
-| `COMMHUB_URL` | `--hub` / `--url` / `config.hub` | CommHub Server address (cli.ts:152) |
-| `COMMHUB_TOKEN` | `config.token` / `globalConfig.token` | Auth token (cli.ts:171; **no CLI flag accepted**) |
+| `COMMHUB_URL` | `--hub` / `--url` / `config.hub` | CommHub Server address (cli.ts:158) |
+| `COMMHUB_TOKEN` | `config.token` / `globalConfig.token` | Auth token (cli.ts:186; **no CLI flag accepted**) |
 | `COMMHUB_ALIAS` / `ALIAS` | `--alias` / `config.alias` | Agent alias — both env var names work (cli.ts:109) |
 | `RUNTIME` | `--runtime` / `config.runtime` | Runtime engine, defaults to `claude-agent-sdk` |
 | `MODEL` | `--model` / `config.model` | AI model |
 | `LOG_LEVEL` | `--log-level` / `config.logLevel` (**top-level**, not under `flags`) | `debug` / `info` / `warn` / `error` — aligned with R211 chain |
-| `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | Network ID fallback (typically inferred from `ntok_`; cli.ts:341) |
+| `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | Network ID fallback (typically inferred from `ntok_`; cli.ts:356) |
 | `ANTHROPIC_BASE_URL` | `config.env.ANTHROPIC_BASE_URL` | Model API URL (required when targeting a third-party Anthropic-compatible endpoint) |
 | `ANTHROPIC_AUTH_TOKEN` | `config.env.ANTHROPIC_AUTH_TOKEN` | Model API key — **for third-party Anthropic-compatible endpoints** (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter / vLLM, etc.) |
 | `ANTHROPIC_API_KEY` | `config.env.ANTHROPIC_API_KEY` | Model API key — **only for direct api.anthropic.com**; don't reuse it for third-party endpoint keys (see [runtimes — claude-agent-sdk pitfalls](/en/guide/runtimes#claude-agent-sdk)) |
 
 ::: warning `TOOLS` / `SYSTEM_PROMPT` env vars do not exist
-R242 calibration: the previously listed `TOOLS` and `SYSTEM_PROMPT` env vars are **not read** by agent-node (verified: cli.ts:155 `toolsRaw = opts.tools || fileConfig.tools` has no `process.env.TOOLS`; cli.ts:165 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` has no env reading). To set tools, use the `--tools` CLI flag or `config.json`'s `tools` field; for the system prompt, use the `--prompt` flag or `config.json`'s `systemPrompt` field.
+R242 calibration: the previously listed `TOOLS` and `SYSTEM_PROMPT` env vars are **not read** by agent-node (verified: cli.ts:161 `toolsRaw = opts.tools || fileConfig.tools` has no `process.env.TOOLS`; cli.ts:180 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` has no env reading). To set tools, use the `--tools` CLI flag or `config.json`'s `tools` field; for the system prompt, use the `--prompt` flag or `config.json`'s `systemPrompt` field.
 :::
 
 ::: tip Docker Usage

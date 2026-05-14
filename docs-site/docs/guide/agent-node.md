@@ -306,7 +306,7 @@ R243 校准：`--tools` flag 只控制 `claude-agent-sdk` runtime —— `codex-
 verify [`agent-node/src/cli.ts:161`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L161):
 ```ts
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
-// ... cli.ts:535: tools: TOOLS.length ? TOOLS : undefined  ← 传给 claude-agent-sdk query options
+// ... cli.ts:534: tools: TOOLS.length ? TOOLS : undefined  ← 传给 claude-agent-sdk query options
 ```
 
 ```bash
@@ -345,7 +345,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // 传给 claude-agent-s
 claude-agent-sdk 在 `SDKResultMessage.total_cost_usd` 达到 `maxBudgetUsd` 时自动结束当前 turn，task 状态走 `error_max_budget`。
 
 ::: warning codex-sdk / claude-code-cli runtime 不支持 budget cap
-- `codex-sdk` 路径（[`cli.ts:644-730 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L644)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（R215 sdk-deep-dive chain 一致）
+- `codex-sdk` 路径（[`cli.ts:643-729 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L643)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（R215 sdk-deep-dive chain 一致）
 - `claude-code-cli` 走本机 Claude Code 订阅，按订阅 quota 不按美金算
 - **跨 runtime 通用预算控制**：前置反向代理（nginx / Cloudflare / litellm proxy）按 model API 调用次数限流
 :::
@@ -388,7 +388,7 @@ SSE 断连后自动重连，使用指数退避策略：
 2. 关闭 SSE 连接
 3. 退出进程
 
-如果进程崩溃（来不及上报），CommHub 通过心跳超时检测，**10 分钟**后自动标记 offline（verify [`server/src/index.ts:751`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L751) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时；R219 chain 一致）。
+如果进程崩溃（来不及上报），CommHub 通过心跳超时检测，**10 分钟**后自动标记 offline（verify [`server/src/index.ts:762-767`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L762) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时；R219 chain 一致）。
 
 ## 环境变量
 
@@ -396,19 +396,19 @@ SSE 断连后自动重连，使用指数退避策略：
 
 | 变量 | 等价 CLI flag / config 字段 | 说明 |
 |------|------------------------------|------|
-| `COMMHUB_URL` | `--hub` / `--url` / `config.hub` | CommHub Server 地址（cli.ts:152） |
-| `COMMHUB_TOKEN` | `config.token` / `globalConfig.token` | 认证 Token（cli.ts:171；**不接受 CLI flag**） |
+| `COMMHUB_URL` | `--hub` / `--url` / `config.hub` | CommHub Server 地址（cli.ts:158） |
+| `COMMHUB_TOKEN` | `config.token` / `globalConfig.token` | 认证 Token（cli.ts:186；**不接受 CLI flag**） |
 | `COMMHUB_ALIAS` / `ALIAS` | `--alias` / `config.alias` | Agent 别名，两个 env 名都接受（cli.ts:109） |
 | `RUNTIME` | `--runtime` / `config.runtime` | 运行时引擎，默认 `claude-agent-sdk` |
 | `MODEL` | `--model` / `config.model` | AI 模型 |
 | `LOG_LEVEL` | `--log-level` / `config.logLevel`（**top-level**，不在 `flags` 里） | `debug` / `info` / `warn` / `error`，R211 chain 一致 |
-| `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | network ID 兜底（多数情况靠 ntok_ 推断，不需手填；cli.ts:341） |
+| `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | network ID 兜底（多数情况靠 ntok_ 推断，不需手填；cli.ts:356） |
 | `ANTHROPIC_BASE_URL` | `config.env.ANTHROPIC_BASE_URL` | 模型 API 地址（接第三方 Anthropic 兼容 endpoint 时必填） |
 | `ANTHROPIC_AUTH_TOKEN` | `config.env.ANTHROPIC_AUTH_TOKEN` | 模型 API Key —— **第三方 Anthropic 兼容 endpoint**（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter / vLLM 等）走这个 |
 | `ANTHROPIC_API_KEY` | `config.env.ANTHROPIC_API_KEY` | 模型 API Key —— **api.anthropic.com 直连专用**，不要拿来传第三方 endpoint key（详见 [runtimes — claude-agent-sdk 常见坑](/guide/runtimes#claude-agent-sdk)） |
 
 ::: warning `TOOLS` / `SYSTEM_PROMPT` env vars 不存在
-R242 校准：旧 doc 列的 `TOOLS` / `SYSTEM_PROMPT` 这两个 env var **agent-node 不读**（verify cli.ts:155 `toolsRaw = opts.tools || fileConfig.tools` 没 `process.env.TOOLS`；cli.ts:165 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` 没 env）。要设置 tools 用 `--tools` CLI flag 或 `config.json` 的 `tools` 字段；系统提示词用 `--prompt` flag 或 `config.json` 的 `systemPrompt` 字段。
+R242 校准：旧 doc 列的 `TOOLS` / `SYSTEM_PROMPT` 这两个 env var **agent-node 不读**（verify cli.ts:161 `toolsRaw = opts.tools || fileConfig.tools` 没 `process.env.TOOLS`；cli.ts:180 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` 没 env）。要设置 tools 用 `--tools` CLI flag 或 `config.json` 的 `tools` 字段；系统提示词用 `--prompt` flag 或 `config.json` 的 `systemPrompt` 字段。
 :::
 
 ::: tip Docker 使用
