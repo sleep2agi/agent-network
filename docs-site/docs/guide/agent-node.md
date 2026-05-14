@@ -142,8 +142,8 @@ npx @sleep2agi/agent-node \
   --model <minimax-model-id> \
   --hub http://YOUR_IP:9200
 
-# 书生
-ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic \
+# 书生（注意：裸域名，无 /anthropic 后缀）
+ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn \
 ANTHROPIC_AUTH_TOKEN=your-intern-key \
 npx @sleep2agi/agent-node \
   --alias 书生 \

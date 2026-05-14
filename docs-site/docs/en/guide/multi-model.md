@@ -87,7 +87,8 @@ MiniMax's Anthropic-compatible API also accepts Claude model names as aliases â€
 ### InternLM (claude-agent-sdk)
 
 ```bash
-ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic \
+# Note: bare hostname, NO /anthropic suffix â€” unlike MiniMax et al.
+ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn \
 ANTHROPIC_AUTH_TOKEN=your-intern-key \
 anet node create intern --runtime claude-agent-sdk --model intern-s1-pro
 anet node start intern
@@ -95,7 +96,7 @@ anet node start intern
 
 | Environment Variable | Value |
 |---------|-----|
-| `ANTHROPIC_BASE_URL` | `https://chat.intern-ai.org.cn/anthropic` |
+| `ANTHROPIC_BASE_URL` | `https://chat.intern-ai.org.cn` (bare hostname, no `/anthropic`) |
 | `ANTHROPIC_AUTH_TOKEN` | InternLM API Key |
 
 ### Xiaomi MiMo (claude-agent-sdk)
@@ -150,7 +151,7 @@ graph LR
 |------|-------------------|-----------|
 | Anthropic (native) | (unset) | Latest from [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview) |
 | MiniMax | `https://api.minimaxi.com/anthropic` | Latest from [MiniMax platform](https://platform.minimaxi.com) (or use any Claude model id via the mapping tip above) |
-| InternLM | `https://chat.intern-ai.org.cn/anthropic` | Latest from [Intern platform](https://chat.intern-ai.org.cn) |
+| InternLM | `https://chat.intern-ai.org.cn` (bare hostname, no `/anthropic`) | Latest from [Intern platform](https://chat.intern-ai.org.cn) |
 | DeepSeek | `https://api.deepseek.com/anthropic` | Latest from [DeepSeek platform](https://platform.deepseek.com) |
 | Xiaomi MiMo | `https://api.xiaomimimo.com/anthropic` | Latest from [Xiaomi MiMo platform](https://platform.xiaomimimo.com) |
 

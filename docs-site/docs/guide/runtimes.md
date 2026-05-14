@@ -212,7 +212,7 @@ anet node create translator \
 | DeepSeek | 当前主线 V/R 系列（查 [DeepSeek 平台](https://platform.deepseek.com)） | 见 DeepSeek Anthropic 兼容文档 |
 | 智谱 GLM | 当前主线 GLM 系列（查 [智谱开放平台](https://open.bigmodel.cn)） | 见智谱 Anthropic 适配文档 |
 | Moonshot Kimi | 当前主线 K 系列（查 [Moonshot 开放平台](https://platform.moonshot.cn)） | 见 Moonshot Anthropic 兼容文档 |
-| 书生 InternLM | 当前主线 Intern-S 系列（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn/anthropic` |
+| 书生 InternLM | 当前主线 Intern-S 系列（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn`（**裸域名，无 `/anthropic` 后缀** —— 跟 MiniMax 等不同，verify [`cli.ts:1172`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1172)） |
 
 ::: tip 模型版本号会变
 各家 LLM 厂商每隔几周升级模型，硬编码具体版本号容易过时。**到对应平台拿最新 model id**，填到 `--model` 参数即可。

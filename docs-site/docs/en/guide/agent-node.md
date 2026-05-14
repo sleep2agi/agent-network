@@ -142,8 +142,8 @@ npx @sleep2agi/agent-node \
   --model <minimax-model-id> \
   --hub http://YOUR_IP:9200
 
-# InternLM
-ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic \
+# InternLM (note: bare hostname, no /anthropic suffix)
+ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn \
 ANTHROPIC_AUTH_TOKEN=your-intern-key \
 npx @sleep2agi/agent-node \
   --alias intern \

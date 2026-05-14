@@ -11,7 +11,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | **MiniMax**（当前主线） | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | 低成本文案、翻译（model id 查 [platform.minimaxi.com](https://platform.minimaxi.com)） | 极低 |
 | **DeepSeek**（当前主线） | DeepSeek | `claude-agent-sdk` | api.deepseek.com/anthropic | 代码+推理、性价比极高（model id 查 [api-docs.deepseek.com](https://api-docs.deepseek.com)） | 极低 |
 | **GLM**（当前主线） | 智谱 | `claude-agent-sdk` | open.bigmodel.cn/anthropic | 中文理解强（model id 查 [open.bigmodel.cn](https://open.bigmodel.cn)） | 低 |
-| **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn/anthropic | 科学推理（Intern-S1-Pro 是当前产品名，不带版本号） | 低 |
+| **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 科学推理（Intern-S1-Pro 是当前产品名，不带版本号） | 低 |
 | **Kimi** | Moonshot | `claude-agent-sdk` | api.moonshot.cn/anthropic | 长文本处理 | 低 |
 | **小米 MiMo**（当前主线） | 小米 | `claude-agent-sdk` | api.xiaomimimo.com/anthropic | 推理强、低成本（model id 查 [platform.xiaomimimo.com](https://platform.xiaomimimo.com)） | 低 |
 
@@ -56,8 +56,8 @@ ANTHROPIC_BASE_URL=https://open.bigmodel.cn/anthropic \
 ANTHROPIC_AUTH_TOKEN=你的智谱-API-Key \
 anet node create 分析师 --runtime claude-agent-sdk
 
-# 书生
-ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn/anthropic \
+# 书生（注意：裸域名，无 /anthropic 后缀，跟 MiniMax 等不同）
+ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn \
 ANTHROPIC_AUTH_TOKEN=你的书生-API-Key \
 anet node create 研究员 --runtime claude-agent-sdk
 
