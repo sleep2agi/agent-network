@@ -11,7 +11,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | 模型 | 服务商 | Runtime | API 地址 | 成本 |
 |------|--------|---------|---------|------|
 | **MiniMax**（`MiniMax-M2.7`） | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | 极低 |
-| **书生 Intern-S2-Preview**（`anet init` 默认项） | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
+| **书生 Intern-S2-Preview**（`anet node create` vendor 选单默认项） | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
 | **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
 | **小米 MiMo**（`mimo-v2.5-pro` 默认 + v2.5 / v2-pro / v2-omni） | 小米 | `claude-agent-sdk` | token-plan-cn.xiaomimimo.com/anthropic | 低 |
 
@@ -69,7 +69,7 @@ ANTHROPIC_AUTH_TOKEN=你的Kimi-API-Key \
 anet node create 长文助手 --runtime claude-agent-sdk
 
 # 小米 MiMo
-ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic \
+ANTHROPIC_BASE_URL=https://token-plan-cn.xiaomimimo.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=你的MiMo-API-Key \
 anet node create 推理助手 --runtime claude-agent-sdk --model mimo-v2.5-pro
 

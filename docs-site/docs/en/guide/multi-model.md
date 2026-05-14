@@ -10,7 +10,7 @@ Agent Network supports running agents with different AI models within the same n
 | **Claude Opus (latest line)** | `claude-agent-sdk` | Complex tasks, creative writing (same link) | Very high |
 | **Codex (codex-sdk)** | `codex-sdk` | Strong code generation, tool use | Medium |
 | **MiniMax (latest line)** | `claude-agent-sdk` | ✅ verified — low cost, high throughput (look up the latest model id at [platform.minimaxi.com](https://platform.minimaxi.com)) | Very low |
-| **InternLM Intern-S2-Preview** (`anet init` default) | `claude-agent-sdk` | ✅ verified — domestic model, scientific reasoning; the first option in `anet init`'s model picker (`chat.intern-ai.org.cn`, bare hostname) | Low |
+| **InternLM Intern-S2-Preview** (`anet node create` vendor-picker default) | `claude-agent-sdk` | ✅ verified — domestic model, scientific reasoning; the first option in `anet node create`'s vendor picker (`chat.intern-ai.org.cn`, bare hostname) | Low |
 | **InternLM Intern-S1-Pro** | `claude-agent-sdk` | ✅ verified — domestic model, scientific reasoning (Intern-S1-Pro is the current product line; no version suffix appended) | Low |
 | **Xiaomi MiMo** | `claude-agent-sdk` | ✅ verified — `mimo-v2.5-pro` (default) / v2.5 / v2-pro / v2-omni, low cost (Xiaomi, `token-plan-cn.xiaomimimo.com/anthropic`; look up model id at [platform.xiaomimimo.com](https://platform.xiaomimimo.com)) | Low |
 | **OpenRouter (multi-model gateway)** | `claude-agent-sdk` | one API key, all upstream models (GPT-4 / Claude / Gemini / Llama, etc.); unified billing. Reachable via the `custom` vendor with `openrouter.ai/api/v1` + `ANTHROPIC_AUTH_TOKEN`. | Upstream pass-through |
@@ -104,7 +104,7 @@ anet node start intern
 Xiaomi's MiMo platform exposes an Anthropic-compatible endpoint, with a reasoning-focused lineup at competitive prices. Look up the current model ids at [platform.xiaomimimo.com](https://platform.xiaomimimo.com) — the bash example below uses one for illustration; specific ids rotate (R269 chain).
 
 ```bash
-ANTHROPIC_BASE_URL=https://api.xiaomimimo.com/anthropic \
+ANTHROPIC_BASE_URL=https://token-plan-cn.xiaomimimo.com/anthropic \
 ANTHROPIC_AUTH_TOKEN=your-mimo-api-key \
 anet node create mimo-bot --runtime claude-agent-sdk --model mimo-v2.5-pro
 anet node start mimo-bot
@@ -112,7 +112,7 @@ anet node start mimo-bot
 
 | Environment Variable | Value |
 |---------|-----|
-| `ANTHROPIC_BASE_URL` | `https://api.xiaomimimo.com/anthropic` |
+| `ANTHROPIC_BASE_URL` | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | `ANTHROPIC_AUTH_TOKEN` | Xiaomi MiMo API Key (sign up at [platform.xiaomimimo.com](https://platform.xiaomimimo.com)) |
 
 ### OpenRouter (claude-agent-sdk)
@@ -153,7 +153,7 @@ graph LR
 | MiniMax | `https://api.minimaxi.com/anthropic` | Latest from [MiniMax platform](https://platform.minimaxi.com) (or use any Claude model id via the mapping tip above) |
 | InternLM | `https://chat.intern-ai.org.cn` (bare hostname, no `/anthropic`) | Latest from [Intern platform](https://chat.intern-ai.org.cn) |
 | DeepSeek | `https://api.deepseek.com/anthropic` | Latest from [DeepSeek platform](https://platform.deepseek.com) |
-| Xiaomi MiMo | `https://api.xiaomimimo.com/anthropic` | Latest from [Xiaomi MiMo platform](https://platform.xiaomimimo.com) |
+| Xiaomi MiMo | `https://token-plan-cn.xiaomimimo.com/anthropic` | Latest from [Xiaomi MiMo platform](https://platform.xiaomimimo.com) |
 
 ## Mixed Deployment in Practice
 
