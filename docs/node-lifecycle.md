@@ -165,17 +165,19 @@ register() → callCommHub("report_status", {
 
 ### 7. 更名 (rename) — R219 校准
 
-**触发**: `anet node rename <old> <new>`
+**触发**: `anet node rename <old> <new>` [`--force`]
 
-**前置条件（约定，未强制）**: 推荐 node offline 时改 —— [`cli.ts:2583-2626 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2583) **不调 `stopNode`**，运行中改名也能跑通本地 `renameSync`，但已 spawn 的子进程仍指向旧 config 路径，行为未定义。
+**前置条件**: rename 需要 hub + token + network_id（`anet login` 后才有，缺则 `process.exit(1)`）。运行中的 node **必须加 `--force`** —— [`cli.ts:2629-2631 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2629) 检测到 `.pid` 进程存活且没 `--force` 时直接退出；运行中改名走 RFC-010 §4.4 active rename，**不杀进程**。
 
-**P0 数据变更（只改本地，不依赖 CommHub rename API）**:
-1. `stored.node_name = newName` + `stored.alias = newName`（cli.ts:2604-2605）
-2. `renameSync(.anet/nodes/<oldId>, .anet/nodes/<newName>)`（cli.ts:2615）
-3. `saveProfile(newName, stored)` + `writeLegacyProjectAlias(newName)`（cli.ts:2618-2619）
-4. CommHub alias：下次 `anet node start` 时用新名字 `report_status(idle)` 重新注册（旧 alias 自然 stale，10 分钟后被服务端 cutoff 标 offline）
+**RFC-010 两阶段事务** —— R481 校准：旧 doc 的「P0 只改本地 `renameSync` + P1 CommHub rename API 未采纳」已过时，当前 [`cli.ts:2583-2721 renameCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2583) 实现的是带 CommHub 协同的两阶段事务：
 
-**P1**: CommHub 新增 rename API 主动更新 alias —— **未采纳**（rely on 自然 stale + 重新注册流程）。
+- **PHASE 1 — PREPARE（全程可回滚，old node 原封不动）**：写 `rename.lock` → `cpSync(oldDir → newDir)`（**copy 不是 move**）→ 更新 `newProfile.node_name` / `alias` + `saveProfile` → POST `/api/node-rename/prepare` 拿 `txn_id`。任一步失败 → 回滚（删 newDir + POST `/api/node-rename/abort` + 删 lock），`old` 完全不变。
+- **PHASE 2 — COMMIT（顺序敏感）**：
+  1. **C1** POST `/api/node-rename/commit` —— C1 之前仍可干净回滚，C1 之后转 forward-fix
+  2. **C2** 运行中 node 跑 `tmux rename-session`（不杀进程；失败转 forward-fix 不回滚）
+  3. **C3** `rmSync(oldDir)` 原子切换本地 + `writeLegacyProjectAlias(newName)`
+
+**node_id 不变** —— 只换 alias，绑 node 的 `ntok_` token 仍有效。运行中的 agent 可能继续上报旧 alias，直到它重读 config（RFC-010 §4.4：SIGHUP / per-turn reload，agent-node 侧）。
 
 ### 8. 下线 (offline)
 
@@ -189,7 +191,7 @@ register() → callCommHub("report_status", {
 - config.json: 不变（session 已写回）
 - 进程退出
 
-**CommHub 超时检测**: 心跳 3 分钟间隔（[`agent-node/src/cli.ts:1159`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1159) `setInterval(() => reportStatus("idle"), 3 * 60 * 1000)`），超过 **10 分钟**无心跳 → 自动标记 offline（[`server/src/index.ts:762-767`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L762) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。R219 校准：原 doc 5 分钟错。
+**CommHub 超时检测**: 心跳 3 分钟间隔（[`agent-node/src/cli.ts:1159`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1159) `setInterval(() => reportStatus("idle"), 3 * 60 * 1000)`），超过 **10 分钟**无心跳 → 自动标记 offline（[`server/src/index.ts:816-821`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L816) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。R219 校准：原 doc 5 分钟错。
 
 ### 9. 删除 (deleted) — R219 校准
 
