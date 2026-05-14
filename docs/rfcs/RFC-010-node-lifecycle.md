@@ -125,7 +125,160 @@ RFC-010 统一 8 个 node lifecycle 操作的三 surface 协议。其中 create/
 
 ## §2 Node state machine
 
-> 🚧 待 R497+ /loop tick 推进
+### 2.1 状态定义
+
+node 的生命周期由一个有限状态机（FSM）描述。本 RFC 定义 6 个状态：
+
+| 状态 | 含义 | dashboard 显示 |
+|------|------|---------------|
+| `created` | 节点已创建（`.anet/nodes/<alias>/` 目录 + config.json 存在），但未启动 | 灰色（offline） |
+| `starting` | 启动过渡态（tmux session 拉起中、commhub 注册中） | 黄色（pulsing） |
+| `running` | 节点活跃（tmux session 在、commhub 已注册、可收任务） | 绿色（online） |
+| `stopping` | 停止过渡态（任务收尾、tmux session 关闭中） | 黄色（pulsing） |
+| `stopped` | 节点已停止（目录保留，tmux session 不在，commhub 标记 offline） | 灰色（offline） |
+| `error` | 异常态（crash / 启动失败 / 状态不一致） | 红色（error） |
+
+`deleted` 不是一个状态——delete 操作完成后节点不再存在于状态机中（目录删除、commhub 注销）。但 delete *过程* 经过 `deleting` 过渡态（见 2.3）。
+
+### 2.2 状态转换图
+
+```
+                 create
+                   │
+                   ▼
+              ┌─────────┐
+         ┌───►│ created │◄──────────────┐
+         │    └────┬────┘               │
+         │         │ start              │ (stop from stopped is no-op)
+         │         ▼                    │
+         │    ┌──────────┐              │
+         │    │ starting │              │
+         │    └────┬─────┘              │
+         │         │ (ready)            │
+         │         ▼                    │
+         │    ┌─────────┐   stop   ┌──────────┐
+         │    │ running │─────────►│ stopping │
+         │    └────┬────┘          └────┬─────┘
+         │         │                   │ (clean)
+         │         │ restart           ▼
+         │         │              ┌─────────┐
+         │         └─────────────►│ stopped │
+         │       (atomic stop+start)└───┬────┘
+         │                             │ delete
+         │                             ▼
+         │                        ┌──────────┐
+         │                        │ deleting │──► (gone)
+         │                        └──────────┘
+         │
+         │  any state ──(crash/失败)──► ┌───────┐
+         └──────────────(recover)──────│ error │
+                                       └───────┘
+```
+
+### 2.3 转换表（含三 surface 动作）
+
+| 转换 | 触发 | CLI 动作 | Server 动作 | Dashboard 动作 |
+|------|------|---------|-------------|---------------|
+| `∅ → created` | `node create` | 建 `.anet/nodes/<alias>/` + config.json | commhub 注册 node（offline） | SSE `node.created` → 渲染灰节点 |
+| `created → starting` | `node start` | 拉起 tmux session | 标记 `starting` | SSE `node.starting` → 黄 pulsing |
+| `starting → running` | tmux ready + commhub heartbeat | — | 标记 `running` | SSE `node.started` → 绿 |
+| `running → stopping` | `node stop` | 发停止信号、等任务收尾 | 标记 `stopping` | SSE `node.stopping` → 黄 pulsing |
+| `stopping → stopped` | tmux session 关闭 clean | kill tmux session | 标记 `offline` | SSE `node.stopped` → 灰 |
+| `running → running` | `node restart` | **原子** stop+start（见 2.4） | 标记 `restarting` → `running` | SSE `node.restarting` → `node.started` |
+| `stopped → deleting → ∅` | `node delete` | 删 `.anet/nodes/<alias>/` 目录 | **注销 node + cleanup stale entries** | SSE `node.deleted` → **移除节点（修 #74）** |
+| `* → error` | crash / 启动失败 / 一致性检查失败 | 检测并标记 | 标记 `error` | SSE `node.error` → 红 |
+| `error → created/stopped` | `node recover`（§5） | 清理残留 + 回到安全态 | 标记 recover | SSE `node.recovered` |
+
+### 2.4 原子性要求
+
+状态机的核心要求是**转换原子化**——避免 #74 那类"CLI 认为 deleted，dashboard 仍显示"的不一致。
+
+#### 2.4.1 原子转换协议
+
+每个状态转换遵循 **两阶段提交（2PC）** 风格协议：
+
+```
+1. PREPARE:  CLI 写本地状态文件 .anet/nodes/<alias>/state.json = { state: "<new>", txn_id, ts }
+             （单文件原子写：write tmp + rename，POSIX rename 原子）
+2. COMMIT:   CLI 调 commhub state-transition API（携带 txn_id）
+             commhub 更新注册表 + broadcast SSE event
+3. ACK:      commhub 返回 ack，CLI 标记 txn 完成
+4. (失败回滚): 任一步失败 → CLI 用 txn_id 回滚本地 state.json
+```
+
+关键点：
+- **本地 state.json 单文件原子写**：`write(tmp)` + `rename(tmp, state.json)`，POSIX `rename(2)` 保证原子，杜绝 in-flight 读到半写状态。
+- **txn_id 关联**：每次转换生成 txn_id，三 surface 用同一 txn_id，便于追踪 + 回滚 + 幂等。
+- **SSE event 携带 txn_id**：dashboard 收到后可去重（同 txn_id 重复事件忽略）。
+
+#### 2.4.2 restart 的原子语义
+
+`node restart` 不是朴素的 `stop` + `start` 两条命令——中间的 `stopped` 窗口期如果有任务到达会丢失。原子 restart：
+
+```
+restart(alias):
+  txn_id = new()
+  PREPARE: state.json = { state: "restarting", txn_id }
+  commhub: 标记 restarting（此期间该 node 的入站任务 → 排队不丢弃）
+  CLI: graceful stop tmux session（等当前任务收尾，超时强杀）
+  CLI: 立即 start 新 tmux session
+  commhub: heartbeat 确认 → 标记 running，flush 排队任务
+  COMMIT: state.json = { state: "running", txn_id }
+  SSE: node.restarting → node.started（同 txn_id）
+```
+
+`restarting` 期间 commhub 对该 node 的入站任务**排队而非丢弃**，是与朴素 stop+start 的关键区别。
+
+### 2.5 状态一致性校验
+
+为防止三 surface 漂移，定义周期性一致性校验（reconciliation）：
+
+```yaml
+reconciliation_R010_§2:
+  触发: 每 30s（可配） OR node 操作前
+  
+  CLI 侧真相: .anet/nodes/<alias>/state.json
+  Server 侧真相: commhub 注册表
+  实际真相: tmux session 是否存在
+  
+  校验逻辑:
+    state.json=running 但 tmux session 不在  → 标记 error（crash 检测）
+    state.json=running 但 commhub=offline   → 重新注册 OR 标记 error
+    state.json=stopped 但 tmux session 还在  → 清理残留 session
+    commhub 有 entry 但 .anet/nodes/<alias>/ 不存在 → commhub cleanup（修 #74 根因）
+  
+  不一致 → 发 SSE node.error 或自动 recover（§5）
+```
+
+### 2.6 #74 bug 在状态机框架下的根因与修复
+
+issue #74「节点删除后 dashboard 残留」在状态机框架下的根因清晰：
+
+```yaml
+bug_74_root_cause_R010_§2:
+  现象: node delete 后 dashboard 仍显示该节点
+  
+  根因:
+    delete 操作只做了 CLI 侧（删目录）+ 部分 server 侧
+    没有可靠地 broadcast node.deleted SSE event
+    dashboard cache 不 invalidate
+  
+  状态机框架下的修复:
+    delete 走 stopped → deleting → ∅ 转换
+    deleting 阶段 COMMIT 必须包含:
+      1. commhub 注销 node + cleanup ALL stale entries（含历史 message 索引）
+      2. broadcast node.deleted SSE event（携带 txn_id）
+      3. dashboard 收 node.deleted → 移除节点 + invalidate cache
+    任一步失败 → 转 error 态，reconciliation（2.5）兜底清理
+  
+  → #74 不是单点 patch，而是 delete 转换纳入原子协议后自然修复
+```
+
+### 2.7 §2 小结
+
+node lifecycle 由 6 状态 FSM（created/starting/running/stopping/stopped/error）+ deleting 过渡态描述。每个转换走两阶段提交协议（本地 state.json 原子写 + commhub COMMIT + SSE ACK + txn_id 关联），保证三 surface 一致。restart 是原子 stop+start（restarting 期间任务排队不丢）。周期性 reconciliation 校验三 surface 漂移。#74 bug 在此框架下根因清晰——delete 转换纳入原子协议后自然修复。
+
+§3 设计 SSE event taxonomy（§2 多次引用的 `node.*` 事件的统一 channel + payload schema）。
 
 ---
 
