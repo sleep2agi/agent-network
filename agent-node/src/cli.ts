@@ -47,8 +47,8 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | codex-sdk | http-api | minimax
-  --model <name>      AI 模型 (codex: gpt-5.4, http-api: gpt-4o-mini, minimax: MiniMax-M1)
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk
+  --model <name>      AI 模型 (codex 默认: gpt-5.4, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
   --max-turns <n>     每任务最大轮次 (default: 50)
@@ -151,9 +151,8 @@ const rawRuntime = opts.runtime || process.env.RUNTIME || fileConfig.runtime || 
 const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", "claude-sdk": "claude", "agent-sdk": "claude", "claude": "claude",
   "codex-sdk": "codex", "codex": "codex",
-  "http-api": "http", "openai-api": "http", "minimax": "http",
 };
-const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "http";
+const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
@@ -730,98 +729,13 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
 }
 
 // ══════════════════════════════════════
-// HTTP API Runtime (OpenAI-compatible)
-// ══════════════════════════════════════
-
-async function processWithHttpApi(task: string, from: string): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-    || process.env.ANTHROPIC_AUTH_TOKEN
-    || process.env.OPENAI_API_KEY
-    || process.env.MINIMAX_CODING_API_KEY
-    || fileConfig.apiKey
-    || "";
-  const anthropicBase = process.env.ANTHROPIC_BASE_URL || fileConfig.anthropicBaseUrl || "";
-  const openaiBase = process.env.OPENAI_BASE_URL || fileConfig.apiBaseUrl || "https://api.openai.com/v1";
-  const model = MODEL || "gpt-4o-mini";
-  // Auto-detect Anthropic format: if ANTHROPIC_BASE_URL is set
-  const useAnthropic = !!anthropicBase;
-  const rawBase = anthropicBase || openaiBase;
-  // Strip trailing /v1 to avoid /v1/v1/messages
-  const baseUrl = rawBase.replace(/\/v1\/?$/, "");
-
-  if (!apiKey) return "错误: 需要设置 ANTHROPIC_API_KEY, OPENAI_API_KEY, 或 MINIMAX_CODING_API_KEY";
-
-  const systemPrompt = SYSTEM_PROMPT || `你是 ${ALIAS}，一个 AI 助手。收到来自 ${from} 的任务后简要执行并汇报。`;
-  const t0 = Date.now();
-  log(`[http-api] model=${model} format=${useAnthropic ? "anthropic" : "openai"} base=${baseUrl.replace(/\/v1$/, "")}`);
-
-  let content = "";
-  let usage: any = null;
-
-  if (useAnthropic) {
-    // Anthropic Messages API format (MiniMax, Anthropic)
-    const res = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        system: systemPrompt,
-        messages: [{ role: "user", content: task }],
-        max_tokens: 2000,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      return `Anthropic API 错误 ${res.status}: ${err.slice(0, 200)}`;
-    }
-    const data = await res.json() as any;
-    // Concat all text blocks, skip thinking/tool_use blocks
-    const blocks = Array.isArray(data.content) ? data.content : [];
-    content = blocks.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n") || "";
-    usage = data.usage;
-  } else {
-    // OpenAI Chat Completions format
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: task },
-        ],
-        max_tokens: 2000,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      return `OpenAI API 错误 ${res.status}: ${err.slice(0, 200)}`;
-    }
-    const data = await res.json() as any;
-    content = data.choices?.[0]?.message?.content || "";
-    usage = data.usage;
-  }
-
-  const dt = Date.now() - t0;
-  log(`[http-api] done | ${dt}ms | in=${usage?.input_tokens || usage?.prompt_tokens || 0} out=${usage?.output_tokens || usage?.completion_tokens || 0}`);
-  return content || "（无回复）";
-}
-
-// ══════════════════════════════════════
 // 任务分发
 // ══════════════════════════════════════
 let thinkQueue = Promise.resolve();
 
 function think(task: string, from: string, taskId: string | null, images?: string[]): Promise<string> {
   const run = async () => {
-    // Expose CURRENT_TASK_ID for runtime processes (Claude SDK / Codex / HTTP)
+    // Expose CURRENT_TASK_ID for runtime processes (Claude SDK / Codex)
     // so the LLM can pass it as parent_task_id when delegating sub-tasks.
     // Server has a fallback (latest open task to this caller) but explicit
     // is more reliable for multi-task interleavings.
@@ -829,7 +743,6 @@ function think(task: string, from: string, taskId: string | null, images?: strin
     if (taskId) process.env.CURRENT_TASK_ID = taskId; else delete process.env.CURRENT_TASK_ID;
     try {
       if (RUNTIME === "codex") return await processWithCodex(task, from, images);
-      if (RUNTIME === "http") return await processWithHttpApi(task, from);
       return await processWithClaude(task, from);
     } finally {
       if (prev !== undefined) process.env.CURRENT_TASK_ID = prev; else delete process.env.CURRENT_TASK_ID;
