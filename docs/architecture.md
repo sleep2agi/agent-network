@@ -106,15 +106,17 @@ const p = join(nodesDir(), id, "config.json");  // .anet/nodes/<id>/config.json
   "anet_version": "0.1.0",
   "node_id": "n_a1b2c3d4",
   "node_name": "开发马",
+  "alias": "开发马",
   "runtime": "claude-agent-sdk",
   "model": "<model-id>",
-  "session": "550e8400-e29b-41d4-a716-446655440000",
+  "network_id": "net_a1b2c3d4",
   "channels": ["server:commhub"],
-  "tools": [],
   "env": {},
-  "flags": { "dangerouslySkipPermissions": true, "teammateMode": "in-process", "maxTurns": 20, "logLevel": "info" }
+  "flags": { "dangerouslySkipPermissions": true }
 }
 ```
+
+> 上例是 `anet node create 开发马 --runtime claude-agent-sdk --model <id>`（已登录）实际生成的最小集。条件字段：`teammateMode`（仅 `claude-code-cli`）、`session`（仅 `claude-code-cli` 或 `--session`）、`maxTurns`（仅 `--max-turns`）、`tools`（仅 `--tools`）；`logLevel` 是 **top-level** 字段（不在 `flags` 里），且 `createCommand` 不写它（用户可选加）。
 
 verify [`cli.ts:246-273 saveProfile`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L246):
 ```ts
