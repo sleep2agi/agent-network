@@ -85,15 +85,19 @@ docker compose logs -f commander
 
 ```bash
 # Required
-MINIMAX_API_KEY=sk-cp-xxx        # MiniMax API Key
+MINIMAX_API_KEY=sk-cp-xxx        # MiniMax API Key (used by commander + 文案 workers)
 
 # Optional (for Telegram integration)
 TELEGRAM_BOT_TOKEN=123456:ABC    # Telegram Bot Token
-TELEGRAM_ALLOWED_USERS=your_ID   # Allowed user IDs
+TELEGRAM_ALLOW_USER=your_ID      # Allowed Telegram user ID (singular ALLOW_USER, NOT ALLOWED_USERS)
 
 # Optional (for Codex)
 # Run codex auth login first
 ```
+
+::: warning Env-var naming gotcha
+`TELEGRAM_ALLOW_USER` is **singular** (verified at [`demos/codex-telegram-squad/.env.example`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/.env.example) + [`docker-compose.yml:52`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/docker-compose.yml#L52)). A typo like `TELEGRAM_ALLOWED_USERS` / `_USERS` gets silently ignored by docker compose — the Telegram bot then rejects all non-whitelisted messages but the logs show no obvious error, so it's easy to misattribute to a bot-config issue.
+:::
 
 ## Operations
 

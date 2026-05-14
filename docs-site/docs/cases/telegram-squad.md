@@ -85,15 +85,19 @@ docker compose logs -f commander
 
 ```bash
 # 必填
-MINIMAX_API_KEY=sk-cp-xxx        # MiniMax API Key
+MINIMAX_API_KEY=sk-cp-xxx        # MiniMax API Key（commander + 文案 worker 用）
 
 # 可选（接入 Telegram）
 TELEGRAM_BOT_TOKEN=123456:ABC    # Telegram Bot Token
-TELEGRAM_ALLOWED_USERS=你的ID     # 允许的用户 ID
+TELEGRAM_ALLOW_USER=你的ID        # 允许的 Telegram 用户 ID（单数 ALLOW_USER，不是 ALLOWED_USERS）
 
 # 可选（用 Codex）
 # 需要先 codex auth login
 ```
+
+::: warning env var 命名陷阱
+`TELEGRAM_ALLOW_USER` 是**单数**（verify [`demos/codex-telegram-squad/.env.example`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/.env.example) + [`docker-compose.yml:52`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/docker-compose.yml#L52)）。误写 `TELEGRAM_ALLOWED_USERS` / `_USERS` 复数 env 会被 docker compose 忽略 —— Telegram bot 收到非白名单消息直接拒绝，但日志里没明显错误，容易当成 bot 配置错。
+:::
 
 ## 操作命令
 
