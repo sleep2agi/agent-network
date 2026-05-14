@@ -65,8 +65,10 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 - 看 dashboard 主页面 / 浏览
 
 **不能干什么**：
-- ❌ 任何写操作（派 task / 启动 agent / 改 config）
+- ❌ 任何**网络级写操作**（派 task / `cancel_task` / `reassign_task` / `anet node create` —— 都过 `canWrite` 门挡 viewer）
 - ❌ 看其他人的 `/api/audit-log` row（系统级 `users.role='admin'` 才有跨用户访问；viewer **能看自己的** audit log row，R262 chain）
+
+> 注：`anet node start / stop / delete` 是**纯本地 CLI 操作**，不受网络角色门控（见上方权限矩阵注 ※）—— viewer 在自己机器上仍能 start/stop/delete 已有的 node。受网络角色门控的只有 `anet node create`（要向 hub 换 `ntok_`）。
 
 **怎么变成 viewer**：
 ```bash

@@ -61,7 +61,9 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 For interns, auditors, read-only integrations.
 
 - **Can**: any read endpoint (tasks, agent status, messages, completions), browse dashboard, **view their own audit log rows** (R262 chain).
-- **Cannot**: any write op (dispatch, agent lifecycle, config changes); read **other users'** `/api/audit-log` rows (cross-user access needs system-level `users.role='admin'`).
+- **Cannot**: any **network-level write op** (dispatch / `cancel_task` / `reassign_task` / `anet node create` — all blocked by the `canWrite` gate); read **other users'** `/api/audit-log` rows (cross-user access needs system-level `users.role='admin'`).
+
+  > Note: `anet node start / stop / delete` are **pure local CLI operations**, not gated by network role (see note ※ on the permission matrix above) — a viewer can still start/stop/delete an existing node on their own machine. Only `anet node create` is network-role-gated (it requests an `ntok_` from the hub).
 
 Become a viewer:
 ```bash
