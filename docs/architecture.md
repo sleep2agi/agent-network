@@ -132,7 +132,7 @@ const toSave: Record<string, any> = {
 | `anet_version` | ✅ | schema 版本 (`0.1.0`) |
 | `node_id` | ✅ | 不可变 `n_` + 8 hex (R219 chain) |
 | `node_name` | ✅ | Agent 别名 = hub 端 alias (可 `anet node rename`) |
-| `runtime` | ✅ | `claude-agent-sdk` (默认) / `codex-sdk` / `claude-code-cli` / `http-api` (legacy) |
+| `runtime` | ✅ | `claude-agent-sdk` (默认) / `codex-sdk` / `claude-code-cli` |
 | `model` | | LLM model id |
 | `session` | | 续会话 ID (claude-code-cli: Claude Code session UUID; codex-sdk: Codex Thread id, 详见 [feedback_anet_session_field]) |
 | `channels` | | array, 例 `["server:commhub", "telegram"]` |
