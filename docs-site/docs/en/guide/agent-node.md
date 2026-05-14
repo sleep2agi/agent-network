@@ -311,7 +311,7 @@ R243 calibration: the `--tools` flag only affects the `claude-agent-sdk` runtime
 Verified at [`agent-node/src/cli.ts:161`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L161):
 ```ts
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
-// ... cli.ts:534: tools: TOOLS.length ? TOOLS : undefined  ← passed to claude-agent-sdk query options
+// ... cli.ts:560: tools: TOOLS.length ? TOOLS : undefined  ← passed to claude-agent-sdk query options
 ```
 
 ```bash
@@ -342,7 +342,7 @@ npx @sleep2agi/agent-node --alias coder --max-budget 0.1
 npx @sleep2agi/agent-node --alias reasoner --max-budget 1.0
 ```
 
-Verified at [`agent-node/src/cli.ts:555`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L555):
+Verified at [`agent-node/src/cli.ts:580`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L580):
 ```ts
 if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // passed to claude-agent-sdk query options
 ```
@@ -350,7 +350,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // passed to claude-agen
 When `SDKResultMessage.total_cost_usd` reaches `maxBudgetUsd`, claude-agent-sdk automatically ends the turn and the task moves to `error_max_budget`.
 
 ::: warning codex-sdk / claude-code-cli runtime do not support a USD budget cap
-- The `codex-sdk` path ([`cli.ts:643-729 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L643)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the R215 sdk-deep-dive chain).
+- The `codex-sdk` path ([`cli.ts:669-755 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L669)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the R215 sdk-deep-dive chain).
 - `claude-code-cli` runs against your local Claude Code subscription, counted against subscription quota rather than USD.
 - **Cross-runtime budget control**: put a reverse proxy in front (nginx / Cloudflare / litellm proxy) and throttle by model-API call count.
 :::

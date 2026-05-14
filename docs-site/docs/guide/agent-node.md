@@ -311,7 +311,7 @@ R243 校准：`--tools` flag 只控制 `claude-agent-sdk` runtime —— `codex-
 verify [`agent-node/src/cli.ts:161`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L161):
 ```ts
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
-// ... cli.ts:534: tools: TOOLS.length ? TOOLS : undefined  ← 传给 claude-agent-sdk query options
+// ... cli.ts:560: tools: TOOLS.length ? TOOLS : undefined  ← 传给 claude-agent-sdk query options
 ```
 
 ```bash
@@ -342,7 +342,7 @@ npx @sleep2agi/agent-node --alias 代码 --max-budget 0.1
 npx @sleep2agi/agent-node --alias 推理 --max-budget 1.0
 ```
 
-verify [`agent-node/src/cli.ts:555`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L555):
+verify [`agent-node/src/cli.ts:580`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L580):
 ```ts
 if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // 传给 claude-agent-sdk query options
 ```
@@ -350,7 +350,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // 传给 claude-agent-s
 claude-agent-sdk 在 `SDKResultMessage.total_cost_usd` 达到 `maxBudgetUsd` 时自动结束当前 turn，task 状态走 `error_max_budget`。
 
 ::: warning codex-sdk / claude-code-cli runtime 不支持 budget cap
-- `codex-sdk` 路径（[`cli.ts:643-729 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L643)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（R215 sdk-deep-dive chain 一致）
+- `codex-sdk` 路径（[`cli.ts:669-755 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L669)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（R215 sdk-deep-dive chain 一致）
 - `claude-code-cli` 走本机 Claude Code 订阅，按订阅 quota 不按美金算
 - **跨 runtime 通用预算控制**：前置反向代理（nginx / Cloudflare / litellm proxy）按 model API 调用次数限流
 :::
