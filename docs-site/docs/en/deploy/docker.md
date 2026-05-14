@@ -273,17 +273,23 @@ If you see legacy docker-compose files still using these two variables, they're 
 
 ### Container Environment Variables
 
-| Variable | Description | Example |
-|------|------|------|
-| `ALIAS` | Agent name | `coder-1` |
-| `RUNTIME` | Runtime engine | `codex-sdk` / `claude-agent-sdk` |
-| `MODEL` | Model | provider's current model id (e.g. OpenAI Codex / MiniMax / Anthropic) |
-| `COMMHUB_URL` | Server address | `http://server:9200` |
-| `COMMHUB_TOKEN` | Auth token | `ntok_xxx` or read from /shared/ntok |
-| `TOOLS` | Tool list | `Read,Write,Edit,Bash,Glob,Grep` |
-| `SYSTEM_PROMPT` | System prompt | Commander's task dispatch rules |
-| `ANTHROPIC_BASE_URL` | MiniMax API URL | `https://api.minimaxi.com/anthropic` |
-| `ANTHROPIC_AUTH_TOKEN` | MiniMax API key | MiniMax Key |
+| Variable | Description | Example | Who reads it |
+|------|------|------|------|
+| `ALIAS` | Agent name | `coder-1` | agent-node directly (`COMMHUB_ALIAS` / `ALIAS` both accepted) |
+| `RUNTIME` | Runtime engine | `codex-sdk` / `claude-agent-sdk` | agent-node directly |
+| `MODEL` | Model | provider's current model id (e.g. OpenAI Codex / MiniMax / Anthropic) | agent-node directly |
+| `COMMHUB_URL` | Server address | `http://server:9200` | agent-node directly |
+| `COMMHUB_TOKEN` | Auth token | `ntok_xxx` or read from `/shared/ntok` | agent-node directly |
+| `TOOLS` | Tool list | `Read,Write,Edit,Bash,Glob,Grep` | ⚠ **entrypoint.sh only** — translated to `--tools` CLI flag (agent-node itself does **not** read `TOOLS` env) |
+| `SYSTEM_PROMPT` | System prompt | Commander's task dispatch rules | ⚠ **entrypoint.sh only** — translated to `--prompt` CLI flag (agent-node itself does **not** read `SYSTEM_PROMPT` env) |
+| `ANTHROPIC_BASE_URL` | Third-party provider API URL | `https://api.minimaxi.com/anthropic` | agent-node directly (read inside claude-agent-sdk) |
+| `ANTHROPIC_AUTH_TOKEN` | Third-party provider API key | Provider's key | agent-node directly |
+
+::: info `TOOLS` / `SYSTEM_PROMPT` are Compose-entrypoint conventions
+Verified at [`demos/codex-telegram-squad/entrypoint.sh:135-141`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh): `${TOOLS:+--tools "$TOOLS"}` + `${SYSTEM_PROMPT:+--prompt "$SYSTEM_PROMPT"}` — these env vars are **shell-variable expansions inside entrypoint.sh**, translated to agent-node's `--tools` / `--prompt` CLI flags. **The agent-node binary itself does not read these env vars** (calibrated in the R242 chain — see [agent-node — Environment Variables](/en/guide/agent-node)). When running outside docker-compose / entrypoint.sh (e.g., `npx @sleep2agi/agent-node`), use the `--tools` / `--prompt` CLI flags or the `tools` / `systemPrompt` fields in `config.json`.
+
+Aligned with the R243 chain: `--tools` only affects the `claude-agent-sdk` runtime (the `codex-sdk` runtime's built-in toolset does not honor `--tools`).
+:::
 
 ## Common Operations
 

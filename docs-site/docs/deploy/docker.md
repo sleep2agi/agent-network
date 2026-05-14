@@ -273,17 +273,23 @@ v0.8 起：
 
 ### 容器环境变量
 
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `ALIAS` | Agent 名称 | `代码1号` |
-| `RUNTIME` | 运行时 | `codex-sdk` / `claude-agent-sdk` |
-| `MODEL` | 模型 | provider 当前 model id（如 OpenAI Codex / MiniMax / Anthropic） |
-| `COMMHUB_URL` | Server 地址 | `http://server:9200` |
-| `COMMHUB_TOKEN` | 认证 Token | `ntok_xxx` 或从 /shared/ntok 读取 |
-| `TOOLS` | 工具列表 | `Read,Write,Edit,Bash,Glob,Grep` |
-| `SYSTEM_PROMPT` | 系统提示词 | 指挥室的任务分配规则 |
-| `ANTHROPIC_BASE_URL` | MiniMax API 地址 | `https://api.minimaxi.com/anthropic` |
-| `ANTHROPIC_AUTH_TOKEN` | MiniMax API Key | MiniMax Key |
+| 变量 | 说明 | 示例 | 谁读 |
+|------|------|------|------|
+| `ALIAS` | Agent 名称 | `代码1号` | agent-node 直读（`COMMHUB_ALIAS` / `ALIAS` 都接受） |
+| `RUNTIME` | 运行时 | `codex-sdk` / `claude-agent-sdk` | agent-node 直读 |
+| `MODEL` | 模型 | provider 当前 model id（如 OpenAI Codex / MiniMax / Anthropic） | agent-node 直读 |
+| `COMMHUB_URL` | Server 地址 | `http://server:9200` | agent-node 直读 |
+| `COMMHUB_TOKEN` | 认证 Token | `ntok_xxx` 或从 `/shared/ntok` 读取 | agent-node 直读 |
+| `TOOLS` | 工具列表 | `Read,Write,Edit,Bash,Glob,Grep` | ⚠ **仅 entrypoint.sh** 读 + 转 `--tools` CLI flag（agent-node 本体**不读** `TOOLS` env） |
+| `SYSTEM_PROMPT` | 系统提示词 | 指挥室的任务分配规则 | ⚠ **仅 entrypoint.sh** 读 + 转 `--prompt` CLI flag（agent-node 本体**不读** `SYSTEM_PROMPT` env） |
+| `ANTHROPIC_BASE_URL` | 第三方 provider API 地址 | `https://api.minimaxi.com/anthropic` | agent-node 直读（claude-agent-sdk SDK 内部读） |
+| `ANTHROPIC_AUTH_TOKEN` | 第三方 provider API Key | 各 provider Key | agent-node 直读 |
+
+::: info `TOOLS` / `SYSTEM_PROMPT` 是 Compose 路径的 convention
+verify [`demos/codex-telegram-squad/entrypoint.sh:135-141`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh) `${TOOLS:+--tools "$TOOLS"}` + `${SYSTEM_PROMPT:+--prompt "$SYSTEM_PROMPT"}` —— 这两个 env var 是 **entrypoint.sh 的 shell variable expansion**，会被翻译成 agent-node 的 `--tools` / `--prompt` CLI flag。**agent-node 二进制本体不读这两个 env var**（R242 chain 已经在 [agent-node — 环境变量](/guide/agent-node) 校准）。不走 docker compose entrypoint.sh 的场景（直接 `npx @sleep2agi/agent-node`），用 `--tools` / `--prompt` CLI flag 或 `config.json` 的 `tools` / `systemPrompt` 字段。
+
+跟 R243 chain 一致：`--tools` 只 `claude-agent-sdk` runtime 生效（`codex-sdk` 内置工具集不接受 `--tools` 自定义）。
+:::
 
 ## 常用操作
 
