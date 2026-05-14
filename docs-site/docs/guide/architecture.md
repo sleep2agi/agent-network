@@ -353,7 +353,7 @@ anet CLI 是 Agent Network 的管理工具，覆盖 Hub / 账号 / 网络 / 节�
 flowchart TD
     A["环境变量\nCOMMHUB_URL / COMMHUB_ALIAS（COMMHUB_AUTH_TOKEN v0.8 软废弃）"]
     B["命令行参数\n--hub / --alias"]
-    C["项目配置\n{cwd}/.anet/config.json"]
+    C["项目 Node 配置\n{cwd}/.anet/nodes/<alias>/config.json"]
     D["全局配置\n~/.anet/config.json"]
     E["默认值\nhub=http://127.0.0.1:9200"]
 
@@ -374,12 +374,20 @@ flowchart TD
 }
 ```
 
-**项目配置** `{cwd}/.anet/config.json`:
+**项目 Node 配置** `{cwd}/.anet/nodes/<alias>/config.json`（v0.8 per-node 子目录 schema；旧的 `.anet/config.json` `{alias, type}` 2 字段是 V2 早期格式，完整字段见 [Agent Node](/guide/agent-node)）:
 
 ```json
 {
+  "anet_version": "0.1.0",
+  "node_id": "n_a1b2c3d4",
+  "node_name": "指挥室",
   "alias": "指挥室",
-  "type": "claude-code"
+  "runtime": "claude-code-cli",
+  "network_id": "net_a1b2c3d4",
+  "channels": ["server:commhub"],
+  "env": {},
+  "flags": { "dangerouslySkipPermissions": true, "teammateMode": "in-process" },
+  "session": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 

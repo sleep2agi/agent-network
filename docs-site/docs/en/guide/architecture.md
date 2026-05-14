@@ -353,7 +353,7 @@ anet CLI is the management tool for Agent Network, covering Hub / account / netw
 flowchart TD
     A["Environment variables\nCOMMHUB_URL / COMMHUB_ALIAS (COMMHUB_AUTH_TOKEN soft-deprecated in v0.8)"]
     B["Command-line arguments\n--hub / --alias"]
-    C["Project config\n{cwd}/.anet/config.json"]
+    C["Project node config\n{cwd}/.anet/nodes/<alias>/config.json"]
     D["Global config\n~/.anet/config.json"]
     E["Defaults\nhub=http://127.0.0.1:9200"]
 
@@ -374,12 +374,20 @@ flowchart TD
 }
 ```
 
-**Project config** `{cwd}/.anet/config.json`:
+**Project node config** `{cwd}/.anet/nodes/<alias>/config.json` (v0.8 per-node subdirectory schema; the old `.anet/config.json` `{alias, type}` 2-field format was the early V2 layout — see [Agent Node](/en/guide/agent-node) for the full field list):
 
 ```json
 {
+  "anet_version": "0.1.0",
+  "node_id": "n_a1b2c3d4",
+  "node_name": "commander",
   "alias": "commander",
-  "type": "claude-code"
+  "runtime": "claude-code-cli",
+  "network_id": "net_a1b2c3d4",
+  "channels": ["server:commhub"],
+  "env": {},
+  "flags": { "dangerouslySkipPermissions": true, "teammateMode": "in-process" },
+  "session": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
