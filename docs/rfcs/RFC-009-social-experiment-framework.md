@@ -452,7 +452,297 @@ const echoSpec: SocialExperimentSpec = {
 
 ## §3 roundProtocol 4 种 pattern
 
-> 🚧 待 R462+ /loop tick 推进
+四种 `roundProtocol` 覆盖了 5 个候选实验的全部调度形态。本节给出每种 pattern 的：
+1. **语义**——agent 间的执行顺序与可见性
+2. **commhub 消息流**——具体消息序列
+3. **终止条件**——默认与可覆盖逻辑
+4. **执行伪码**——framework runner 实际实现骨架
+
+### 3.1 `broadcast`
+
+#### 语义
+
+所有 agent 同时收到同一个 prompt（或同结构 prompt + cohort 特定 role），并行思考、并行回复。**单轮**或**多轮**均可。各 agent 之间在该轮内**互不可见**，回复后下一轮可见上一轮所有 decision（`ExperimentContext.history`）。
+
+#### 用例
+
+- **opinion-spread**：所有 supporter / opponent 同时就一个话题表态，多轮迭代观察意见极化或收敛。
+- **回音室（内部）**：单个 sub-network 内所有 agent broadcast，但 cross-network 被 §4 描述的隔离规则屏蔽。
+
+#### Commhub 消息流
+
+```
+Runner ──── batch.run(N agents) ────────────► [agent-0 ... agent-N-1]
+   │                                                     │
+   │  ◄──── commhub_send_task(agent-i, prompt-i) ◄──────┘  (并行)
+   │                                                     │
+   │  ◄──── commhub_reply(agent-i, decision-i) ─────────┘  (并行 reply)
+   │
+   ▼ collectAll() with roundTimeoutMs
+   │
+   ▼ payoffFn?.(decisions, ctx) → payoffs[round]
+   │
+   ▼ terminateFn?.(round, history, payoffs) ? STOP : round++
+```
+
+#### 终止条件
+
+- 默认：完成 `spec.rounds` 后 STOP（broadcast 中 rounds 默认 1）。
+- 自定义 `terminateFn`：如 opinion-spread 检测连续 2 轮意见无变化即收敛 STOP。
+
+#### 执行伪码
+
+```typescript
+async function runBroadcast(spec: SocialExperimentSpec, runner: Runner) {
+  const agents = spawnAllAgents(spec);
+  const history: Decision[][] = [];
+  const payoffs: Payoff[][] = [];
+
+  for (let round = 0; round < (spec.rounds ?? 1); round++) {
+    // Round-level promise: 并行 send + reply
+    const decisions = await Promise.all(agents.map(async (a) => {
+      const ctx = buildContext(round, a, history);
+      const prompt = spec.promptTemplate(a.role, a.cohortIdx, ctx);
+      return await runner.sendAndAwait(a.alias, prompt, spec.runtime.roundTimeoutMs);
+    }));
+
+    history.push(decisions);
+    payoffs.push(spec.payoffFn ? await spec.payoffFn(decisions, { round, spec, history }) : []);
+
+    if (spec.terminateFn?.({ round, history, payoffs })) break;
+  }
+
+  return finalizeResult(spec, agents, history, payoffs);
+}
+```
+
+#### 与 batch primitive 的关系
+
+`broadcast` 本质上是 `anet batch run` 多次调用，每轮把上一轮 decisions 作为 prompt 上下文塞入。framework 复用现有 batch spawn/teardown，仅增加 *轮间收集 + payoff + history 注入* 逻辑（~80 LOC）。
+
+---
+
+### 3.2 `sequential`
+
+#### 语义
+
+agent **一个一个地**串行决策。第 `i` 个 agent 可见 `agent-0 ... agent-{i-1}` 的全部 decisions（即历史 prefix）。**通常单轮**（rounds=1），但可以多轮迭代相同 sequence。
+
+#### 用例
+
+- **信息瀑布**：第 1 个投票者凭私有信息投票；第 N 个投票者看见前 N-1 个的投票后决策；研究 cascade lock 真值是否发生。
+- **传话游戏（变体）**：第 i 个 agent 接收第 i-1 个的输出作为输入。
+
+#### Commhub 消息流
+
+```
+Runner ──── send-task(agent-0, prompt) ────────► agent-0
+   │  ◄──── reply(decision-0) ────────────────────┘
+   │
+   ▼  send-task(agent-1, prompt + history=[d0]) ─► agent-1
+   │  ◄──── reply(decision-1) ────────────────────┘
+   │
+   ▼  send-task(agent-2, prompt + history=[d0,d1]) ─► agent-2
+   ... (顺序，每步 await 前一步)
+```
+
+#### 终止条件
+
+- 默认：序列跑完即停（无 multi-round 时 rounds=1）。
+- 自定义 `terminateFn`：信息瀑布常用"连续 K 个 agent 选同一个则 cascade 已 lock，提前 STOP 节省 token"。
+
+#### 执行伪码
+
+```typescript
+async function runSequential(spec: SocialExperimentSpec, runner: Runner) {
+  const agents = spawnAllAgents(spec);
+  const history: Decision[][] = [[]];      // 单轮 sequential，history[0] 累积
+  const payoffs: Payoff[][] = [[]];
+
+  for (let i = 0; i < agents.length; i++) {
+    const a = agents[i];
+    const ctx = buildContext(0, a, history, { globalIdx: i });
+    const prompt = spec.promptTemplate(a.role, a.cohortIdx, ctx);
+    const decision = await runner.sendAndAwait(a.alias, prompt, spec.runtime.roundTimeoutMs);
+    history[0].push(decision);
+
+    if (spec.payoffFn) {
+      const newPayoffs = await spec.payoffFn([decision], { round: 0, spec, history });
+      payoffs[0].push(...newPayoffs);
+    }
+
+    if (spec.terminateFn?.({ round: 0, history, payoffs })) break;
+  }
+
+  return finalizeResult(spec, agents, history, payoffs);
+}
+```
+
+#### 注意事项
+
+- `sequential` **不能与多个 cohort `participatesInRound: true` 同时使用**——执行顺序由 `cohorts` 数组顺序 + cohort 内 idx 顺序决定，多 cohort 容易产生顺序歧义。若必须，建议使用 `turn-based`。
+
+---
+
+### 3.3 `multi-round`
+
+#### 语义
+
+所有 agent 参与，每轮像 broadcast 一样**并行决策**，但**轮数为关键变量**（typically 5-50 轮）。**每轮结束计算 payoff**，agent 在下一轮 prompt 可见自己与对手的历史 decisions + payoffs。本质上是 `broadcast × rounds + payoff per round`。
+
+#### 用例
+
+- **博弈（Iterated Prisoner's Dilemma / Public Goods）**：每轮每个 player 选择合作 / 背叛，根据双方选择计算 payoff，多轮迭代观察策略演化。
+- **演化博弈**：可加上"每 K 轮淘汰末位 + 复制策略"逻辑（通过 `terminateFn` 与 `aggregateFn` 扩展）。
+
+#### Commhub 消息流
+
+```
+[Round 0]  Runner ────► all agents 并行 ────► reply ────► payoffFn → payoff[0]
+[Round 1]  Runner ────► all agents 并行(prompt 含 history+payoff[0..]) ────► payoff[1]
+[Round 2]  ...
+... (rounds 次)
+[Final]    aggregateFn(history, payoffs) → ExperimentResult.aggregated
+```
+
+#### 终止条件
+
+- 默认：跑满 `spec.rounds`（必填）。
+- 自定义：如博弈中"全合作 STOP"或"全背叛 STOP"。
+
+#### 执行伪码
+
+```typescript
+async function runMultiRound(spec: SocialExperimentSpec, runner: Runner) {
+  if (!spec.rounds) throw new Error("multi-round requires rounds");
+  if (!spec.payoffFn) throw new Error("multi-round requires payoffFn");
+
+  const agents = spawnAllAgents(spec);
+  const history: Decision[][] = [];
+  const payoffs: Payoff[][] = [];
+
+  for (let round = 0; round < spec.rounds; round++) {
+    const decisions = await Promise.all(agents.map(async (a) => {
+      const ctx = buildContext(round, a, history, { payoffsHistory: payoffs });
+      const prompt = spec.promptTemplate(a.role, a.cohortIdx, ctx);
+      return await runner.sendAndAwait(a.alias, prompt, spec.runtime.roundTimeoutMs);
+    }));
+
+    history.push(decisions);
+    const roundPayoffs = await spec.payoffFn(decisions, { round, spec, history });
+    payoffs.push(roundPayoffs);
+
+    if (spec.terminateFn?.({ round, history, payoffs })) break;
+  }
+
+  return finalizeResult(spec, agents, history, payoffs);
+}
+```
+
+#### 与 broadcast 的差异
+
+`multi-round` = `broadcast` + 强制 `payoffFn` + 默认 rounds ≥ 2。从实现角度可视为 `broadcast` 的特化，但 spec 显式区分使得 promptTemplate 与 payoffFn 的语义更清晰（防止 broadcast 调用者忘记设 rounds 或 payoffFn）。
+
+---
+
+### 3.4 `turn-based`
+
+#### 语义
+
+多 cohort 轮流出招，每轮内每个 cohort 内部并行；轮内 *cohort 之间* 串行，cohort 内 *agent 之间* 并行。可选 `leaderAlias` 作为撮合者 / 裁判，在轮间执行匹配 / 仲裁逻辑。
+
+#### 用例
+
+- **谈判（Double Auction）**：buyer cohort 与 seller cohort 轮流报价，`leaderAlias = auctioneer` 在每轮撮合可成交对，更新成交价。
+- **辩论赛**：pro / con 双方轮流陈述，judge 最终裁决。
+- **棋类 1v1**：每个 cohort 1 个 agent 时退化为标准回合制。
+
+#### Commhub 消息流
+
+```
+[Round 0]
+  ▼ cohort[0] = buyer: 并行 send → buyer-0..buyer-{m-1} reply
+  ▼ cohort[1] = seller: 并行 send (prompt 含 buyers 报价) → seller-0..seller-{n-1} reply
+  ▼ leaderAlias=auctioneer: send (prompt 含 all buyer+seller 报价) → match decision
+  ▼ payoffFn(buyer_decisions + seller_decisions + auctioneer_match)
+[Round 1] (剔除已成交对, 余下继续)
+  ...
+```
+
+#### 终止条件
+
+- 默认：跑满 `spec.rounds`。
+- 自定义：谈判常用"全部 buyer-seller pair 成交 STOP" 或 "K 轮无新成交 STOP"。
+
+#### 执行伪码
+
+```typescript
+async function runTurnBased(spec: SocialExperimentSpec, runner: Runner) {
+  if (!spec.rounds) throw new Error("turn-based requires rounds");
+  if (spec.cohorts.length < 2) throw new Error("turn-based requires ≥ 2 cohorts");
+
+  const agents = spawnAllAgents(spec);
+  const leader = spec.leaderAlias ? await runner.spawnLeader(spec.leaderAlias) : null;
+  const history: Decision[][] = [];
+  const payoffs: Payoff[][] = [];
+
+  for (let round = 0; round < spec.rounds; round++) {
+    const roundDecisions: Decision[] = [];
+
+    // cohort 间串行
+    for (const cohort of spec.cohorts) {
+      if (cohort.participatesInRound === false) continue;
+      const cohortAgents = agents.filter(a => a.cohort === cohort.prefix);
+
+      // cohort 内并行
+      const cohortDecisions = await Promise.all(cohortAgents.map(async (a) => {
+        const ctx = buildContext(round, a, history, { currentCohort: cohort, roundDecisions });
+        const prompt = spec.promptTemplate(a.role, a.cohortIdx, ctx);
+        return await runner.sendAndAwait(a.alias, prompt, spec.runtime.roundTimeoutMs);
+      }));
+
+      roundDecisions.push(...cohortDecisions);
+    }
+
+    // leader 仲裁 (optional)
+    if (leader) {
+      const ctx = buildContext(round, leader, history, { roundDecisions });
+      const prompt = spec.promptTemplate("leader", 0, ctx);
+      const leaderDecision = await runner.sendAndAwait(leader.alias, prompt, spec.runtime.roundTimeoutMs);
+      roundDecisions.push(leaderDecision);
+    }
+
+    history.push(roundDecisions);
+    const roundPayoffs = spec.payoffFn ? await spec.payoffFn(roundDecisions, { round, spec, history }) : [];
+    payoffs.push(roundPayoffs);
+
+    if (spec.terminateFn?.({ round, history, payoffs })) break;
+  }
+
+  return finalizeResult(spec, agents, history, payoffs);
+}
+```
+
+#### Cohort 顺序定义
+
+`spec.cohorts` 数组中的顺序就是每轮内 cohort 出招顺序。如要倒序或随机，由调用方 reorder 数组或扩展 `roundProtocol` 子选项（v2 candidate）。
+
+---
+
+### 3.5 4 pattern 对照速查
+
+| Pattern | 并行/串行 | rounds | payoffFn | leader | 典型用例 |
+|---------|----------|--------|----------|--------|---------|
+| `broadcast` | 全并行 | optional (默认 1) | optional | optional | opinion-spread |
+| `sequential` | 全串行 | 通常 1 | optional | rarely | 信息瀑布 |
+| `multi-round` | 轮内并行 / 轮间串行 | 必填 | 必填 | optional | 博弈 |
+| `turn-based` | cohort 间串行 / cohort 内并行 | 必填 | 通常必填 | 通常必填 | 谈判 |
+
+### 3.6 §3 小结
+
+4 种 `roundProtocol` 覆盖 5 实验的全部 orchestration 形态；执行伪码总长 ~150 LOC，加 runner.sendAndAwait + spawnAllAgents 公共底座 ~80 LOC，合计 framework core ~230 LOC（与 §1.4 估算的 ~400 LOC core 留有 buffer 给 sub-network 实现）。
+
+§4 详述 cohort 切分算法、payoff 执行上下文、sub-network 隔离的 commhub-level 实现。
 
 ---
 
