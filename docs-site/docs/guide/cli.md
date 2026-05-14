@@ -342,23 +342,24 @@ anet tasks --limit 5
 
 ### anet doctor
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4546)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5027)
 
 系统诊断。
 
 ```bash
 anet doctor              # 只诊断，输出每项 ✅ / ❌ + 修复提示
-anet doctor --fix        # 自动修复：probe 过期 ntok_ 并跟 hub 重发新 token 写回 .anet/nodes/<name>/config.json
+anet doctor --fix        # 自动修复：(a) migrateNode 把 V2 legacy 字段 (alias/resume/legacy_runtime_name) 改成 v0.8 schema (b) probe 过期 ntok_ 并跟 hub 重发新 token 写回 .anet/nodes/<name>/config.json
 ```
 
-检查项：
+检查项（按 cli.ts:5027-5192 实际顺序）：
 
-1. 全局配置（`~/.anet/config.json`）
-2. 认证 Token 是否存在
-3. Hub 可达性（GET `/health`）
-4. 本地节点配置与运行状态
-5. Claude / Codex / Bun 依赖
+1. 全局配置（`~/.anet/config.json` 有无 hub / token）
+2. Auth token 是否存在
+3. Hub 可达性（GET `/health` + 显示 sessions / SSE / license / multi-network 信息）
+4. 本地节点配置 + 各节点运行状态 + legacy 字段诊断（[`diagnoseNode`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5070)：legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id 共 8 种）
+5. 依赖：`claude --version` / `codex --version` / `bun --version`
 6. 当前项目 `.mcp.json` 的 commhub 配置
+7. Telegram channel env（`~/.claude/channels/telegram/.env` 是否被静默清空，是 `/telegram:configure` 已知的 token 丢失 foot-gun）
 
 ::: tip `--fix` 是 v0.8 新增
 v0.7 之前 ntok_ 失效需要手动 `anet node delete` + 重新 create；v0.8 起 `--fix` 直接探测+重发，agent-node SSE 401 也会自动 reload token 不离线（[RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) 实施细节）。

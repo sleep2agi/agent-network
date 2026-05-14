@@ -322,21 +322,24 @@ anet tasks --limit 5
 
 ### anet doctor
 
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5027)
+
 System diagnostics.
 
 ```bash
 anet doctor              # Diagnose only; prints ✅ / ❌ per check with fix hints
-anet doctor --fix        # Auto-repair: probes expired ntok_ and re-issues them via the hub, writing back to .anet/nodes/<name>/config.json
+anet doctor --fix        # Auto-repair: (a) migrateNode converts V2 legacy fields (alias/resume/legacy_runtime_name) to v0.8 schema (b) probes expired ntok_ and re-issues them via the hub, writing back to .anet/nodes/<name>/config.json
 ```
 
-Checks:
+Checks (in actual order per cli.ts:5027-5192):
 
-1. Global config (`~/.anet/config.json`)
+1. Global config (`~/.anet/config.json` — has `hub` / `token`?)
 2. Auth token presence
-3. Hub reachability (GET `/health`)
-4. Local node config and process status
-5. Claude / Codex / Bun dependencies
+3. Hub reachability (GET `/health` — shows sessions / SSE / license / multi-network info)
+4. Local node configs + per-node process status + legacy-field diagnosis ([`diagnoseNode`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5070) detects 8 issue kinds: legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id)
+5. Dependencies: `claude --version` / `codex --version` / `bun --version`
 6. Current project `.mcp.json` commhub config
+7. Telegram channel env (`~/.claude/channels/telegram/.env` silently empty? — known token-loss foot-gun for `/telegram:configure`)
 
 ::: tip `--fix` is new in v0.8
 Pre-v0.7, an expired `ntok_` required a manual `anet node delete` + recreate. Since v0.8, `--fix` probes + re-issues in place, and agent-node SSE 401 auto-reloads the token instead of going offline ([RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) implementation detail).
