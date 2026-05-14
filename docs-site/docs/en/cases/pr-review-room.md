@@ -261,7 +261,7 @@ No env var or `--key` was provided. `export MINIMAX_KEY=sk-cp-...` or pass `--ke
 
 **❌ 创建 network 失败**
 
-Hub returned a non-OK response. Check `anet hub status`, or pass `--no-network` to fall back to the default network.
+Hub returned a non-OK response. Run `anet status` (or `anet doctor` to diagnose hub reachability), or pass `--no-network` to fall back to the default network.
 
 **❌ tmux \<alias\>: ...**
 

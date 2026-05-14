@@ -259,7 +259,7 @@ URL 格式必须是 `https://github.com/<owner>/<repo>/pull/<N>`。注意不是 
 
 **❌ 创建 network 失败**
 
-hub 返回非 OK。检查 `anet hub status`；或 `--no-network` 退到 default network 跑。
+hub 返回非 OK。跑 `anet status`（或 `anet doctor` 诊断 hub 可达性）；或 `--no-network` 退到 default network 跑。
 
 **❌ tmux &lt;alias&gt;: ...**
 
