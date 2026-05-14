@@ -303,6 +303,8 @@ cat ~/.anet/nodes/n_abc12345/channels/telegram/access.json | python3 -m json.too
 | `groups` | `{ <chat_id>: "active" \| "passive" \| "deny" }` | `{}` | Group chat rules. Empty object = deny all groups by default |
 | `pending` | `object` | `{}` | Internal plugin state — don't touch |
 
+> `anet channel add` only writes the defaults `{ dmPolicy: "allowlist", allowFrom: [<id>], groups: {}, pending: {} }` (verify [`agent-network/bin/cli.ts:1060-1065`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1060)). The other `dmPolicy` / `groups` values (`deny-all` / `allow-all` / `active` / `passive` / `deny`) are interpreted at runtime by the channel plugin (the telegram channel started by `.anet/node-server.js`) — edit `access.json` manually and restart the node for them to take effect.
+
 ### 4.3 Check `channels` array in node `config.json`
 
 ```bash

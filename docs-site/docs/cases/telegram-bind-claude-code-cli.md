@@ -303,6 +303,8 @@ cat ~/.anet/nodes/n_abc12345/channels/telegram/access.json | python3 -m json.too
 | `groups` | `{ <chat_id>: "active" \| "passive" \| "deny" }` | `{}` | 群聊规则。空对象 = 默认拒所有群聊 |
 | `pending` | `object` | `{}` | plugin 内部 state，无需手动改 |
 
+> `anet channel add` 只写默认值 `{ dmPolicy: "allowlist", allowFrom: [<id>], groups: {}, pending: {} }`（verify [`agent-network/bin/cli.ts:1060-1065`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1060)）。`dmPolicy` / `groups` 的其他取值（`deny-all` / `allow-all` / `active` / `passive` / `deny`）由 channel 插件（`.anet/node-server.js` 起的 telegram channel）运行时解释 —— 手动改 `access.json` 后重启 node 生效。
+
 ### 4.3 看节点 config.json 里 `channels` 数组
 
 ```bash
