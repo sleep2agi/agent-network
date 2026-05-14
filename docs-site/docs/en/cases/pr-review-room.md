@@ -306,7 +306,7 @@ The default is MiniMax-M2.7. Swap the 4 agents' `ANTHROPIC_*` env vars to any ot
 
 **Customize and dig in**:
 - Curious why there's no dedicated dispatcher agent? See [§Roles in the full proposal](https://github.com/sleep2agi/agent-network/blob/main/docs/demos/pr-review-room-proposal.md#角色4-个-agentapproved-设计).
-- Want to modify the demo? Source at [`agent-network/bin/cli.ts:4424`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4424) `demoPrReviewCommand`.
+- Want to modify the demo? Source at [`agent-network/bin/cli.ts:4449`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4449) `demoPrReviewCommand`.
 - Why a dedicated network per run? See [Networks & Nodes](/en/concepts/networks).
 
 **Watch in Dashboard**:
