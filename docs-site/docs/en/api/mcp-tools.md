@@ -125,7 +125,7 @@ report_completion({
 ::: tip Side effects (beyond the `completions` INSERT)
 - **Session state flip**: [`tools.ts:239-242`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L239) `UPDATE sessions SET status='idle', task=NULL, progress=0` (matched by alias)
 - **Task state transition**: [`tools.ts:244-266`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L244) moves the `tasks` row from `delivered`/`acked`/`running` to `replied`. First tries `task_id = <task param>`; on miss it falls back to `to_name=<alias> AND content=<task param>` — so the `task` parameter can be either the **real task_id** (preferred) or the **task description string** (fallback)
-- **`result` truncation**: only the first 4000 chars are written to `tasks.result` ([`tools.ts:245`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L245)); the full `result` still lands in `completions.result`
+- **`result` truncation**: only the first 4000 chars are written to `tasks.result` ([`tools.ts:246`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L246)); the full `result` still lands in `completions.result`
 - **chained_reply auto-propagation**: if the task has a `parent_task_id`, the parent's originator gets a `chained_reply` SSE event ([`tools.ts:271-291`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L271); used so subtask replies bubble up to the parent — see [`task-lifecycle` dual-write](/en/concepts/task-lifecycle#dual-write-mechanism))
 - **`task_events` log**: a `replied` event is logged ([`tools.ts:269`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L269))
 
@@ -194,7 +194,7 @@ Acknowledge message receipt. After ACK, the message won't be returned by `get_in
 **Error**: `message_id` not found or not owned by this alias → `{ok: false, error: "message not found or not yours"}`.
 
 ::: tip Side effect: tasks-table state machine
-A successful ack also UPDATEs the `tasks` row where `task_id = message_id` from `status='delivered'` to `'acked'` ([`tools.ts:353`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L353); **only** transitions from `delivered`, unlike the hub-side [`send_ack`](#send_ack) which also accepts `created` — see R279 chain calibration in [Task lifecycle — `created` calibration](/en/concepts/task-lifecycle#state-machine)).
+A successful ack also UPDATEs the `tasks` row where `task_id = message_id` from `status='delivered'` to `'acked'` ([`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354); **only** transitions from `delivered`, unlike the hub-side [`send_ack`](#send_ack) which also accepts `created` — see R279 chain calibration in [Task lifecycle — `created` calibration](/en/concepts/task-lifecycle#state-machine)).
 :::
 
 ---
@@ -352,8 +352,8 @@ Retry a failed/cancelled/expired task.
 ```
 
 ::: warning Limitation
-- Can only retry tasks with status `failed` / `expired` / `cancelled` (verify [`tools.ts:711`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L711)); other statuses return `{ok: false, error: "task status is <X>, not retryable"}`
-- Retry gives the task a **fresh `+1 hour` TTL** (hardcoded at [`tools.ts:717`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L717)) — the original task's `ttl_seconds` is **not preserved**
+- Can only retry tasks with status `failed` / `expired` / `cancelled` (verify [`tools.ts:713`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L713)); other statuses return `{ok: false, error: "task status is <X>, not retryable"}`
+- Retry gives the task a **fresh `+1 hour` TTL** (hardcoded at [`tools.ts:718`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L718)) — the original task's `ttl_seconds` is **not preserved**
 - `task_id` is reused; a new inbox row (new UUID) is inserted and a `new_task` SSE event is pushed to the target alias
 :::
 
@@ -384,7 +384,7 @@ Cancel a pending task.
 ```
 
 ::: warning Constraint
-Only cancellable from these 4 source statuses: `created` / `delivered` / `acked` / `running` (verify the WHERE clause at [`tools.ts:816`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L816)). Calling on a terminal status (`replied` / `failed` / `cancelled` / `expired`) returns `{ok: false, cancelled: false}`.
+Only cancellable from these 4 source statuses: `created` / `delivered` / `acked` / `running` (verify the WHERE clause at [`tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817)). Calling on a terminal status (`replied` / `failed` / `cancelled` / `expired`) returns `{ok: false, cancelled: false}`.
 
 `created` is only the DB column default; the normal API path never produces a row in that state (R266 chain — see [Task lifecycle — `created` calibration](/en/concepts/task-lifecycle#state-machine)).
 :::
@@ -417,7 +417,7 @@ Reassign a task to another agent.
 ```
 
 ::: warning Constraint
-- Reassign works only on **non-terminal** tasks: `created` / `delivered` / `acked` / `running` ([`tools.ts:851`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L851) rejects `replied` / `failed` / `cancelled` / `expired` with `{ok: false, error: "task is terminal (<status>)"}`)
+- Reassign works only on **non-terminal** tasks: `created` / `delivered` / `acked` / `running` ([`tools.ts:853`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L853) rejects `replied` / `failed` / `cancelled` / `expired` with `{ok: false, error: "task is terminal (<status>)"}`)
 - The old alias's inbox row is `acked=1` ([`tools.ts:858`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L858)) so the original agent will not pick it up
 - Task status resets to `delivered`, `started_at` clears, `delivered_at` refreshes to now ([`tools.ts:863`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L863)) — a `running` task is interrupted
 - TTL (`expires_at`) is **not modified** (unlike [`retry_task`](#retry_task) which forces `+1 hour`); the task keeps its remaining time
@@ -511,7 +511,7 @@ Query task list with multi-dimensional filtering.
 ```
 
 ::: tip `list_tasks` rows are a subset of `get_task`
-Each `list_tasks` row SELECTs only **9 columns** ([`tools.ts:775`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L775)): `task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`. It does **not** include `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` — use [`get_task`](#get_task) (`SELECT *`) for those. `count` is the number of rows returned this call (≤ `limit`); `stats` is the status-grouped count for the **entire scope** (not affected by the filters).
+Each `list_tasks` row SELECTs only **9 columns** ([`tools.ts:776`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L776)): `task_id` / `from_name` / `to_name` / `priority` / `status` / `content` / `result` / `created_at` / `completed_at`. It does **not** include `delivered_at` / `started_at` / `expires_at` / `network_id` / `requires_response` / `parent_task_id` — use [`get_task`](#get_task) (`SELECT *`) for those. `count` is the number of rows returned this call (≤ `limit`); `stats` is the status-grouped count for the **entire scope** (not affected by the filters).
 :::
 
 ---
