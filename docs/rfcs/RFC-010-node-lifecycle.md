@@ -497,8 +497,11 @@ rename(old, new, force?):
   P2. CLI: copy .anet/nodes/<old>/ → .anet/nodes/<new>/ (copy 不是 move, 保留 old 作回滚)
           更新 .anet/nodes/<new>/config.json: alias = new
   P3. Server: commhub prepare-rename API(txn_id, old, new)
-          hub 创建 new-alias 注册记录 (状态 prepared, 不接任务)
-          utok/ntok 绑定 copy 到 new (见 4.4 风险 4)
+          hub 在隔离的 rename_txn 表创建一行 (status=prepared) 预留 new-alias
+          —— 不写 sessions 表, 所以 prepared 的 new-alias 不出现在
+          get_all_status / 节点列表; CAS 检查 new-alias 在 sessions 和
+          其它 prepared rename_txn 行都未占用 (TOCTOU guard, 风险 3)
+          注: 不动 token —— 见 4.3 风险 4 (#84 实施发现修正)
   P4. CLI: tmux session 暂不动 (Phase 2 才 rename, 减少 running node 中断窗口)
 
   ── PHASE 2: COMMIT (原子切换, 顺序敏感) ──
@@ -533,7 +536,7 @@ PHASE 2 一旦开始（C1 执行），rename 进入**不可自动回滚**窗口�
 | 1 | **目录 rename 时 in-flight write** | PHASE 1 用 **copy 不是 move**；rename.lock 文件标记 in-flight，§2 状态转换检测到 lock 则拒绝并发写；config.json 本身走单文件原子写（write+rename） |
 | 2 | **tmux session 活跃时 rename** | running node 需 `--force`；tmux rename-session 在 PHASE 2 C2 执行（`tmux rename-session` 本身不中断 session 内进程，只改名）；commhub 路由已在 C1 切到 new，C2 期间入站任务排队（同 §2.4.2 restart 排队机制） |
 | 3 | **重名冲突** | 4.1 前置校验 P2：本地 + commhub 双重检查 new-alias 未占用；PHASE 1 P3 commhub 创建 prepared 记录时再次 CAS 检查（防 precheck 与 prepare 之间的 TOCTOU） |
-| 4 | **utok/ntok 绑定** | token **绑 ntok 不绑 alias**（per [[project_dual_token]]：ntok_ 是节点网络级）；rename 只在 ntok 内换 alias，token 不失效；PHASE 1 P3 把 utok/ntok 绑定记录 copy 到 new-alias，COMMIT 后 old 的绑定随 tombstone 失效 |
+| 4 | **utok/ntok 绑定** | token **绑 ntok 不绑 alias**（per [[project_dual_token]]：ntok_ 是节点网络级）；rename 只在 ntok 内换 alias，token 不失效。**#84 实施发现修正**：commhub `api_tokens` 表实测无 `alias` 列、无 `node_id` 列、无 `alias→ntok` 查找表 —— node-token 绑 `user_id + network_id`，`name="node:<x>"` 仅人类可读标签。因此 rename **对 token 表 functionally 零改动**（草稿原写「P3 把绑定 copy 到 new-alias」是错的，没有 per-alias 绑定记录可 copy）。唯一可选动作：COMMIT 时把 `api_tokens.name` 标签 `node:<old>`→`node:<new>`（cosmetic，幂等，非 rollback-critical） |
 | 5 | **历史 message 引用** | 历史不可变——old-alias 的历史 message **保留 old**（audit 完整性）；commhub 维护 `alias_rename_log` 表（old, new, txn_id, ts）；查询历史时 join 此表，UI 显示 "old-alias（→ now new-alias）"；`node.renamed` 事件 `history_policy: 'preserve'` |
 | 6 | **race condition（rename 中收到该 node 的 task）** | rename.lock + commhub prepared 态：PHASE 1 期间 commhub new-alias 是 prepared（不接任务），old-alias 仍 active（正常接，因为还没 commit）；PHASE 2 C1 原子切换路由，切换点之后 → new，之前 → old，无丢失窗口 |
 | 7 | **batch prefix grouping** | rename 跨 prefix（如 `worker-1` → `helper-1`）会改变 `anet batch stop worker` 的 match 集合；mitigation：rename 命令检测 prefix 变化时 **warn + 要求确认**（`--force` 跳过）；`node.renamed` 事件 data 含 `prefix_changed: bool`，dashboard 提示 batch grouping 已变；建议文档化「rename 不应随意跨 prefix」 |
