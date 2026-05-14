@@ -292,7 +292,7 @@ npm install -g @sleep2agi/agent-network@preview
 
 | 组件 | 最低要求 | verify |
 |------|---------|------|
-| Node.js | ≥ 20 | `node --version` |
+| Node.js | ≥ 22.13.0 | `node --version`；verify [`agent-network/package.json engines.node`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json) `">=22.13.0"`（低于会 `npm install` 时 `EBADENGINE` warn） |
 | Bun | ≥ 1.2.0（commhub-server 必需） | `bun --version`；verify [`agent-network/package.json engines.bun`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json) `">=1.2.0"` |
 | 内存 | 256MB（Server）+ 128MB per Agent | `free -m` |
 | 磁盘 | 100MB + 数据库增长 | `df -h` |

@@ -292,7 +292,7 @@ npm install -g @sleep2agi/agent-network@preview
 
 | Component | Minimum | How to verify |
 |------|---------|------|
-| Node.js | ≥ 20 | `node --version` |
+| Node.js | ≥ 22.13.0 | `node --version`; verified at [`agent-network/package.json engines.node`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json) `">=22.13.0"` (lower versions trigger an `EBADENGINE` warning on `npm install`) |
 | Bun | ≥ 1.2.0 (required by commhub-server) | `bun --version`; verified at [`agent-network/package.json engines.bun`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json) `">=1.2.0"` |
 | Memory | 256MB (Server) + 128MB per Agent | `free -m` |
 | Disk | 100MB + database growth | `df -h` |
