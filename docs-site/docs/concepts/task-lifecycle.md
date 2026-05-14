@@ -12,11 +12,10 @@ stateDiagram-v2
 
     delivered --> acked: ack_inbox / send_ack
     delivered --> cancelled: cancel_task
-    delivered --> expired: TTL 超时
+    delivered --> expired: TTL 超时（巡检）
 
     acked --> running: report_status(working)
     acked --> cancelled: cancel_task
-    acked --> expired: TTL 超时
 
     running --> replied: send_reply(replied) / report_completion
     running --> failed: send_reply(failed)
@@ -128,12 +127,20 @@ commhub_send_task(alias="代码1号", task="...", ttl_seconds=7200)  # 2 小时
 |------|--------|------|
 | `ttl_seconds` | 3600（1 小时） | 1 ~ 86400（1 天） |
 
-过期的任务状态变为 `expired`。过期任务可以通过 `retry_task` 重新投递。
+过期任务可以通过 `retry_task` 重新投递。
 
 ```sql
 -- 过期时间存在 tasks 表
 expires_at = datetime('now', '+3600 seconds')
 ```
+
+::: warning R305 校准：过期巡检只覆盖 `created` / `delivered`
+verify [`server/src/index.ts:274-290`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L274)：过期不是实时的 —— 一个 **每 5 分钟跑一次的 patrol** 把 `expires_at < now` 且 **`status IN ('created', 'delivered')`** 的任务 UPDATE 成 `expired`。
+
+含义：
+- 实际状态翻转最多比 `expires_at` 晚 ~5 分钟
+- **已经 `acked` 或 `running` 的任务不会被自动过期** —— agent 已经接手了，即使超过 TTL patrol 也不动它（所以状态机图里没有 `acked → expired` 边）。要终止一个卡住的 `running` 任务用 [`cancel_task`](/api/mcp-tools#cancel_task)
+:::
 
 ## 重试机制
 

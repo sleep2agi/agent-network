@@ -12,11 +12,10 @@ stateDiagram-v2
 
     delivered --> acked: ack_inbox / send_ack
     delivered --> cancelled: cancel_task
-    delivered --> expired: TTL timeout
+    delivered --> expired: TTL timeout (patrol)
 
     acked --> running: report_status(working)
     acked --> cancelled: cancel_task
-    acked --> expired: TTL timeout
 
     running --> replied: send_reply(replied) / report_completion
     running --> failed: send_reply(failed)
@@ -128,12 +127,20 @@ commhub_send_task(alias="coder-1", task="...", ttl_seconds=7200)  # 2 hours
 |------|--------|------|
 | `ttl_seconds` | 3600 (1 hour) | 1 ~ 86400 (1 day) |
 
-Expired tasks transition to `expired` status. Expired tasks can be redelivered via `retry_task`.
+Expired tasks can be redelivered via `retry_task`.
 
 ```sql
 -- Expiration stored in the tasks table
 expires_at = datetime('now', '+3600 seconds')
 ```
+
+::: warning R305 calibration: the expiry patrol only covers `created` / `delivered`
+Verify [`server/src/index.ts:274-290`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L274): expiration is not real-time — a **patrol that runs every 5 minutes** UPDATEs tasks with `expires_at < now` **and `status IN ('created', 'delivered')`** to `expired`.
+
+Implications:
+- The actual status flip can lag `expires_at` by up to ~5 minutes
+- **A task that's already `acked` or `running` is never auto-expired** — the agent has picked it up, so the patrol leaves it alone even past its TTL (that's why the state diagram has no `acked → expired` edge). To kill a stuck `running` task, use [`cancel_task`](/en/api/mcp-tools#cancel_task)
+:::
 
 ## Retry Mechanism
 
