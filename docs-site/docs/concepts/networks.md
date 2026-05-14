@@ -225,7 +225,7 @@ v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 
 
 | 配额项 | v0.8 实际行为 |
 |--------|---------------|
-| **创建网络数** (`max_networks_owned`) | ✅ **仍 enforced** —— [`auth.ts:196-200 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L196) 按 `users.plan || "free"` 查 `QUOTAS` 上限，free 默认 **2**，仅 `users.role='admin'` 豁免 |
+| **创建网络数** (`max_networks_owned`) | ✅ **仍 enforced** —— [`auth.ts:184-189 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184) 按 `users.plan || "free"` 查 `QUOTAS` 上限，free 默认 **2**，仅 `users.role='admin'` 豁免 |
 | 加入网络数 | ❌ hub 没在 join path 调 quota check |
 | 每网络 Agent 数 | ❌ |
 | 每天任务数 | ❌ |

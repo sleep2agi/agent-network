@@ -24,7 +24,7 @@
 > - RFC-001 Phase 3：完全移除 COMMHUB_AUTH_TOKEN 代码路径
 >
 > ⛔ 已废弃方向（本文下方仍有相关引用，请忽略）：
-> - **Free / Pro / Admin Plan 配额体系**（下方 L244 表 + users.plan 字段实现）—— v0.6 时代 SaaS 假设，Apache 2.0 OSS 转向后**永久搁置**，不再 v0.9+ planned。**R224 校准**（跟 R208 chain 一致）：schema 字段保留作历史，但 `auth.ts:196-200 createNetwork()` 仍按 `users.plan || "free"` 查 `QUOTAS` 拦截，**仅 `users.role='admin'` 豁免**——多数 SaaS 配额项（每网络 Agent 数 / 每天任务数 / 每网络成员数 / Token 数 / 试用期）实际不生效（hub 端没在对应路径调 quota check），但「创建网络数」(`max_networks_owned`) 这一项**仍 enforced**（free 用户默认上限 2）。详见 [anet.sh/concepts/networks 配额限制章节](https://anet.sh/concepts/networks) + [anet.sh/troubleshooting quota_exceeded 解决方案](https://anet.sh/troubleshooting)。
+> - **Free / Pro / Admin Plan 配额体系**（下方 L244 表 + users.plan 字段实现）—— v0.6 时代 SaaS 假设，Apache 2.0 OSS 转向后**永久搁置**，不再 v0.9+ planned。**R224 校准**（跟 R208 chain 一致）：schema 字段保留作历史，但 `auth.ts:184-189 createNetwork()` 仍按 `users.plan || "free"` 查 `QUOTAS` 拦截，**仅 `users.role='admin'` 豁免**——多数 SaaS 配额项（每网络 Agent 数 / 每天任务数 / 每网络成员数 / Token 数 / 试用期）实际不生效（hub 端没在对应路径调 quota check），但「创建网络数」(`max_networks_owned`) 这一项**仍 enforced**（free 用户默认上限 2）。详见 [anet.sh/concepts/networks 配额限制章节](https://anet.sh/concepts/networks) + [anet.sh/troubleshooting quota_exceeded 解决方案](https://anet.sh/troubleshooting)。
 > - `anet quickstart` 一键命令 —— 命令仍在 CLI（一键起 hub + dashboard + node），但 anet.sh docs 改推 step-by-step（更可控）；E2E 未覆盖。详见 [getting-started 未验证列表](https://anet.sh/guide/getting-started)
 > - "官方免费 hub" 托管 — 项目方向已转为 Apache 2.0 + 自部署，不做 SaaS 托管
 >
@@ -247,7 +247,7 @@ anet node start my-agent      # 启动
 
 | 配额项 | v0.8 实际 |
 |--------|-----------|
-| **创建网络数** | ✅ **仍 enforced**（[`auth.ts:184-190 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184)），non-admin 默认 free=2，仅 `users.role='admin'` 豁免 |
+| **创建网络数** | ✅ **仍 enforced**（[`auth.ts:184-189 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184)），non-admin 默认 free=2，仅 `users.role='admin'` 豁免 |
 | 加入网络数 | ❌ hub 没在 join path 调 quota check |
 | 每网络 Agent 数 | ❌ 不生效 |
 | 每天任务数 | ❌ 不生效 |

@@ -379,7 +379,7 @@ curl -X POST http://localhost:9200/api/networks \
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 400 | `network name already exists` | Same owner already has a network with this name (`UNIQUE(owner_id, network_name)` constraint) |
-| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate ([`auth.ts:196-200`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L196); admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column flagged in R178 |
+| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate ([`auth.ts:184-189`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184); admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column flagged in R178 |
 | 401 | `token required` / `invalid token` | Missing / invalid utok_ |
 
 ---

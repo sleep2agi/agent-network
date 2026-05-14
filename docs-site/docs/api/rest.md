@@ -379,7 +379,7 @@ curl -X POST http://localhost:9200/api/networks \
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
 | 400 | `network name already exists` | 同一 owner 名下已有同名 network（`UNIQUE(owner_id, network_name)` 约束） |
-| 400 | `quota exceeded: max N networks for free plan` | 触发 plan quota 配额限制（v0.8 起 admin 用户豁免；free plan 默认 max_networks_owned=2，**当前 quota 仍在 `auth.ts:196-200` enforced**，跟 R178 networks 表的 `max_members` 不同：那个 dormant、这个 active） |
+| 400 | `quota exceeded: max N networks for free plan` | 触发 plan quota 配额限制（v0.8 起 admin 用户豁免；free plan 默认 max_networks_owned=2，**当前 quota 仍在 `auth.ts:184-189` enforced**，跟 R178 networks 表的 `max_members` 不同：那个 dormant、这个 active） |
 | 401 | `token required` / `invalid token` | 未提供 / 提供了无效 utok_ |
 
 ---

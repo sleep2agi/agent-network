@@ -225,7 +225,7 @@ v0.6 designed a Free / Pro / Admin three-tier quota system (table below). After 
 
 | Quota | v0.8 actual behavior |
 |--------|---------------|
-| **Networks created** (`max_networks_owned`) | ✅ **Still enforced** — [`auth.ts:196-200 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L196) reads `users.plan || "free"` and checks the `QUOTAS` cap; free defaults to **2**. Only `users.role='admin'` is exempt. |
+| **Networks created** (`max_networks_owned`) | ✅ **Still enforced** — [`auth.ts:184-189 createNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184) reads `users.plan || "free"` and checks the `QUOTAS` cap; free defaults to **2**. Only `users.role='admin'` is exempt. |
 | Networks joined | ❌ Hub does not run quota checks on the join path |
 | Agents per network | ❌ |
 | Tasks per day | ❌ |
