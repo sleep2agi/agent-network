@@ -35,7 +35,7 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 
 | 字段 | flag | 默认 | 说明 |
 |------|------|------|------|
-| Model preset | `--preset <key>` | 交互选择 | 见下方 verified preset；未列入的走 `__custom__` |
+| 供应商 / 模型 | `--preset <key>` | 不传则走交互式 **vendor 选单**（跟 `anet create` 同一个 `selectVendorAndModel()`，先选供应商再选模型）| `--preset` 接受 vendor key（`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`）；为兼容旧用法也接受旧的 model id（如 `intern-s1-pro`，会自动 resolve 回对应 vendor）|
 | API key | `--api-key <key>` | 交互输入 | 写入每个 node 的 runtime auth token |
 | Workdir | `--workdir <path>` | `~/anet-team` | 父目录 |
 | Workdir mode | `--workdir-mode separate\|shared` | `separate` | `separate` 每个 node 一个子目录；`shared` 所有 node 写同一个 `<workdir>/.anet/nodes` |
@@ -46,20 +46,23 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 
 `ANET_BATCH_API_KEY` 可作为 `--api-key` fallback。
 
-## Vendor preset（Vincent 已验证）
+## 内置供应商（`VENDORS` 列表）
 
-| Preset | Runtime | Model | Base URL |
+`anet create --batch` 跟 `anet create` 共用同一个 `selectVendorAndModel()`（cli.ts `VENDORS` 列表），`--preset <vendor-key>` 直接选定供应商：
+
+| `--preset` key | Runtime | 内置模型 | Base URL |
 |--------|---------|-------|----------|
-| `intern-s1-pro` | `claude-agent-sdk` | `intern-s1-pro` | `https://chat.intern-ai.org.cn` |
-| `MiniMax-M2.7` | `claude-agent-sdk` | `MiniMax-M2.7` | `https://api.minimaxi.com/anthropic` |
-| `claude-sonnet-4-6` | `claude-agent-sdk` | `claude-sonnet-4-6` | Anthropic default |
-| `claude-opus-4-6` | `claude-agent-sdk` | `claude-opus-4-6` | Anthropic default |
-| `claude-haiku-4-5` | `claude-agent-sdk` | `claude-haiku-4-5` | Anthropic default |
-| `__custom__` | 自己输入 | 自己输入 | 自己输入 |
+| `intern` | `claude-agent-sdk` | intern-s2-preview（默认）/ intern-s1-pro | `https://chat.intern-ai.org.cn`（裸域名）|
+| `minimax` | `claude-agent-sdk` | MiniMax-M2.7 | `https://api.minimaxi.com/anthropic` |
+| `mimo` | `claude-agent-sdk` | mimo-v2.5-pro（默认）/ v2.5 / v2-pro / v2-omni | `https://token-plan-cn.xiaomimimo.com/anthropic` |
+| `anthropic` | `claude-agent-sdk` | claude-sonnet-4-6（默认）/ opus-4-6 / haiku-4-5 | Anthropic 原生 |
+| `codex` | `codex-sdk` | gpt-5.4（默认）/ o3 | （需 `codex auth login`）|
+| `claude-code` | `claude-code-cli` | 用 Claude Code 订阅模型 | （需 Claude 订阅）|
+| `custom` | `claude-agent-sdk` | 自己填 model id | 自己填 base URL |
 
-这些值与 CLI 登录失败提示里的 verified provider set 同源（commit [`1bc03c0`](https://github.com/sleep2agi/agent-network/commit/1bc03c0)）。batch 文档把 `intern-s1-pro` 放首位，因为科研军团 / sci-team 是当前主用场景；值本身保持同源。
+每个内置 vendor 的 `baseUrl` + model id 都 verified-with-real-call 才进 `VENDORS` 列表。DeepSeek / GLM / Kimi / OpenRouter 等不在列表的 provider 走 `--preset custom` 手填。
 
-Codex preset 暂未放入默认列表。需要 codex 或其他 vendor 时，使用 `--preset __custom__` 并手动填写 runtime / model / base URL。
+> 兼容性：`--preset` 也接受旧的 model-id 值（如 `--preset intern-s1-pro`），cli.ts 会自动 resolve 回对应 vendor。
 
 ## Lifecycle：`anet batch <verb>`
 
