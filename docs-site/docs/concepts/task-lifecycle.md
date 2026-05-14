@@ -9,6 +9,7 @@ stateDiagram-v2
     [*] --> created: send_task
 
     created --> delivered: 写入 inbox + 推送 SSE
+    created --> cancelled: cancel_task
 
     delivered --> acked: ack_inbox / send_ack
     delivered --> running: report_status(working)（跳过 ack）
