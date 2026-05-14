@@ -326,7 +326,7 @@ anet tasks --limit 5
 
 ### anet doctor
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5766)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5818)
 
 System diagnostics.
 
@@ -335,12 +335,12 @@ anet doctor              # Diagnose only; prints ✅ / ❌ per check with fix hi
 anet doctor --fix        # Auto-repair: (a) migrateNode converts V2 legacy fields (alias/resume/legacy_runtime_name) to v0.8 schema (b) probes expired ntok_ and re-issues them via the hub, writing back to .anet/nodes/<name>/config.json
 ```
 
-Checks (in actual order per [`cli.ts:5766-5931 doctorCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5766)):
+Checks (in actual order per [`cli.ts:5818-5983 doctorCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5818)):
 
 1. Global config (`~/.anet/config.json` — has `hub` / `token`?)
 2. Auth token presence
 3. Hub reachability (GET `/health` — shows sessions / SSE / license / multi-network info)
-4. Local node configs + per-node process status + legacy-field diagnosis ([`diagnoseNode` cli.ts:5691](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5691) detects 8 issue kinds: legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id)
+4. Local node configs + per-node process status + legacy-field diagnosis ([`diagnoseNode` cli.ts:5743](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5743) detects 8 issue kinds: legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id)
 5. Dependencies: `claude --version` / `codex --version` / `bun --version`
 6. Current project `.mcp.json` commhub config
 7. Telegram channel env (`~/.claude/channels/telegram/.env` silently empty? — known token-loss foot-gun for `/telegram:configure`)
