@@ -337,8 +337,8 @@ CREATE TABLE tasks (
 CREATE TABLE inbox (
   id                TEXT PRIMARY KEY,
   session_name      TEXT NOT NULL,
-  type              TEXT NOT NULL DEFAULT 'task',
-  priority          TEXT NOT NULL DEFAULT 'normal',
+  type              TEXT DEFAULT 'task',
+  priority          TEXT DEFAULT 'normal',
   content           TEXT NOT NULL,
   context           TEXT,
   from_session      TEXT DEFAULT 'hub',
