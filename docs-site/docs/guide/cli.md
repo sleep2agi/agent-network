@@ -18,6 +18,7 @@ npm install -g @sleep2agi/agent-network
 |------|------|------|
 | `anet init` | 配置 hub 地址 | 已验证 |
 | `anet init project` | 配置 Claude Code 项目（`project` 是固定子命令，不是项目名占位符） | 已验证 |
+| `anet setup` | 交互式安装 runtime 依赖（按需勾选 claude CLI / agent-node / codex CLI / commhub-server） | 已验证 |
 
 ### 服务器管理
 

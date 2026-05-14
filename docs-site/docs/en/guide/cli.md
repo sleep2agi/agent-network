@@ -18,6 +18,7 @@ After installation, the `anet` command is available globally.
 |------|------|------|
 | `anet init` | Configure hub address | verified |
 | `anet init project` | Configure Claude Code project (`project` is a literal subcommand, not a placeholder) | verified |
+| `anet setup` | Interactive wizard to install runtime dependencies (pick claude CLI / agent-node / codex CLI / commhub-server as needed) | verified |
 
 ### Server Management
 
