@@ -367,7 +367,7 @@ location / {
 ```
 
 ::: tip Rate-limit IP detection
-The hub's `checkRateLimit` reads `req.headers["x-forwarded-for"]` and takes the first value ([`server/src/index.ts:431`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L431)). If the reverse proxy doesn't set `X-Forwarded-For`, all requests appear to come from the same IP (the proxy itself) — rate limiting then mis-trips on every user.
+The hub's register / login endpoints take `req.headers["x-forwarded-for"]?.split(",")[0]` as the `clientIP` passed to `checkRateLimit` ([`server/src/index.ts:428`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L428) register / L443 login). If the reverse proxy doesn't set `X-Forwarded-For`, all requests appear to come from the same IP (the proxy itself) — rate limiting then mis-trips on every user.
 :::
 
 ## Next steps
