@@ -249,24 +249,35 @@ v0.8.2 doesn't expose `promote` / `demote` CLI subcommands yet — to change rol
 anet passwd                       # interactive: old password → new password ≥ 8 chars + not in weak-password dict
 ```
 
-Requirements: ≥ 8 characters + not in the top-1000 weak-password dictionary. First-time bootstrap admin is allowed ≥ 4 chars as an exception.
+Requirements: ≥ 8 characters + not in [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts). **`anet passwd` and `anet hub admin reset-user` have no length exemption** — only the first-time admin **register** path allows ≥ 4 chars so that the quick-start `admin / anethub` default works (aligned with the R193/R248 chain; verified at [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43)).
 
 ### 17b. Forgot my password — how to reset? (v0.8)
 
-If you can log into the Hub machine (local owner access):
+**Option A (recommended)**: Reset via admin on the Hub machine:
 
 ```bash
 anet hub admin reset-user <username>   # force-reset a user's password; no old password needed
+# → generates a new random password + revokes all of that user's utok_ + issues a fresh utok_ + writes audit_log password_reset_by_admin
 ```
 
-If you can't even reach the Hub machine (extreme case), edit SQLite directly:
+**Option B (last resort, if you can't even reach the Hub machine)**: Edit SQLite directly AND remove the admin marker:
 
 ```bash
+# 1. Delete the user row
 sqlite3 ~/.commhub/commhub.db "DELETE FROM users WHERE username='admin'"
-anet hub start                          # restart, auto-bootstraps admin / anethub
+
+# 2. CRITICAL: delete the admin-utok.json marker (otherwise `anet hub start` will skip register and not recreate admin)
+rm -f ~/.anet/server/admin-utok.json
+
+# 3. Restart the hub to trigger the non-interactive bootstrap (outputs '✅ Admin account created')
+anet hub start
 ```
 
-⚠️ The latter is a last resort and clears user records. See [Security design](/en/concepts/security) for details.
+::: warning You must delete the marker
+R210 chain finding: `anet hub start` bootstrap is **non-interactive and idempotent**, driven by the `~/.anet/server/admin-utok.json` marker file. **Running only `DELETE FROM users` without removing the marker → hub start sees the marker and skips the register flow → admin is NOT recreated** (you'll see `✅ Admin already exists` while the DB has no admin row). See [troubleshooting → second `anet hub start` re-bootstraps admin?](/en/troubleshooting)
+:::
+
+⚠️ Option B is a last resort and clears user records; the reset is not recorded in `audit_log`. Production should prefer Option A. See [Security design](/en/concepts/security) for details.
 
 ## Deployment Issues
 

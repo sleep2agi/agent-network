@@ -249,24 +249,35 @@ v0.8.2 当前不提供 CLI `promote` / `demote` 子命令；改角色目前需�
 anet passwd                       # 交互式：输旧密码 → 输新密码 ≥ 8 字符 + 非弱密码字典
 ```
 
-要求：≥ 8 字符 + 不在 top-1000 弱密码字典里。首次 bootstrap admin 例外允许 ≥ 4。
+要求：≥ 8 字符 + 不在 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典里。**`anet passwd` / `anet hub admin reset-user` 无任何长度豁免** —— 只有首次注册 admin（register 路径）才允许 ≥ 4，让 quick-start `admin / anethub` 默认成立（R193/R248 chain 一致；verify [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43)）。
 
 ### 17b. 忘密码怎么办？（v0.8）
 
-如果你能登录 Hub 所在机器（owner 本机权限）：
+**方案 A（推荐）**：在 Hub 所在机器跑 admin reset：
 
 ```bash
 anet hub admin reset-user <username>   # 强制重置某用户密码，无需老密码
+# → 生成随机新密码 + 撤销该用户全部 utok_ + 颁发新 utok_ + 写 audit_log password_reset_by_admin
 ```
 
-如果连 Hub 机器都不能登（极端情况），只能直接改 SQLite：
+**方案 B（兜底，连 Hub 机器都不能登的极端情况）**：直接改 SQLite + 删 admin marker：
 
 ```bash
+# 1. 删用户记录
 sqlite3 ~/.commhub/commhub.db "DELETE FROM users WHERE username='admin'"
-anet hub start                          # 重新自动 bootstrap admin / anethub
+
+# 2. 关键：删 admin-utok.json marker（否则 anet hub start 会跳过 register 不重建）
+rm -f ~/.anet/server/admin-utok.json
+
+# 3. 重启 hub 触发 non-interactive bootstrap（输出 '✅ Admin account created'）
+anet hub start
 ```
 
-⚠️ 后者是兜底方案，会清掉用户记录。详见 [安全设计](/concepts/security)。
+::: warning 必须删 marker
+R210 chain 已经发现：`anet hub start` bootstrap 是 **non-interactive 幂等**的，幂等性靠 `~/.anet/server/admin-utok.json` marker 文件。**只 `DELETE FROM users` 不删 marker → hub start 看到 marker 还在直接跳过 register flow → admin 不会重建**（输出 `✅ Admin already exists`，但 db 里其实没 admin row）。详见 [troubleshooting → 第二次 anet hub start 还重新 bootstrap admin？](/troubleshooting)
+:::
+
+⚠️ 方案 B 是兜底，会清掉用户记录 + audit_log 不记 reset 事件。生产建议方案 A。详见 [安全设计](/concepts/security)。
 
 ## 部署问题
 
