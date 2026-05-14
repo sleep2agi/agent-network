@@ -16,7 +16,7 @@
 > - **RFC-001 Phase 2**：admin utok_ bootstrap（`~/.anet/server/admin-utok.json` chmod 600，R224 校准：实际路径是 `~/.anet/server/` 不是 `~/.commhub/`，verify [`cli.ts:28 adminUtokPath`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L28)）、`anet passwd` / `anet hub admin reset-user`、密码强度 ≥ 8 + 弱密码字典、`anet doctor --fix` 探测并重发 ntok_
 > 
 > ❌ 未实现（目标态，排到 v0.9+）：
-> - MCP 写操作检查网络角色（viewer 当前能 send_task）
+> - MCP 写操作的**细粒度**网络角色检查 —— `canWrite` (tools.ts:24 `role !== "viewer"`) 只挡 viewer，owner/admin/member 一视同仁；且**无 per-task ownership 检查**（member 能 cancel/reassign 网络里任何任务，不限自己派的）。注：viewer 已经**不能** send_task（canWrite 拦住），缺的是更细的角色/归属门控
 > - utok_/ntok_ 权限边界（utok_ 当前能调 MCP）
 > - Token scope (agent/readonly) — createToken 统一写 full
 > - 公开网络自动加入 + 审批流
@@ -24,7 +24,7 @@
 > - RFC-001 Phase 3：完全移除 COMMHUB_AUTH_TOKEN 代码路径
 >
 > ⛔ 已废弃方向（本文下方仍有相关引用，请忽略）：
-> - **Free / Pro / Admin Plan 配额体系**（下方 L244 表 + users.plan 字段实现）—— v0.6 时代 SaaS 假设，Apache 2.0 OSS 转向后**永久搁置**，不再 v0.9+ planned。**R224 校准**（跟 R208 chain 一致）：schema 字段保留作历史，但 `auth.ts:184-190 createNetwork()` 仍按 `users.plan || "free"` 查 `QUOTAS` 拦截，**仅 `users.role='admin'` 豁免**——多数 SaaS 配额项（每网络 Agent 数 / 每天任务数 / 每网络成员数 / Token 数 / 试用期）实际不生效（hub 端没在对应路径调 quota check），但「创建网络数」(`max_networks_owned`) 这一项**仍 enforced**（free 用户默认上限 2）。详见 [anet.sh/concepts/networks 配额限制章节](https://anet.sh/concepts/networks) + [anet.sh/troubleshooting quota_exceeded 解决方案](https://anet.sh/troubleshooting)。
+> - **Free / Pro / Admin Plan 配额体系**（下方 L244 表 + users.plan 字段实现）—— v0.6 时代 SaaS 假设，Apache 2.0 OSS 转向后**永久搁置**，不再 v0.9+ planned。**R224 校准**（跟 R208 chain 一致）：schema 字段保留作历史，但 `auth.ts:196-200 createNetwork()` 仍按 `users.plan || "free"` 查 `QUOTAS` 拦截，**仅 `users.role='admin'` 豁免**——多数 SaaS 配额项（每网络 Agent 数 / 每天任务数 / 每网络成员数 / Token 数 / 试用期）实际不生效（hub 端没在对应路径调 quota check），但「创建网络数」(`max_networks_owned`) 这一项**仍 enforced**（free 用户默认上限 2）。详见 [anet.sh/concepts/networks 配额限制章节](https://anet.sh/concepts/networks) + [anet.sh/troubleshooting quota_exceeded 解决方案](https://anet.sh/troubleshooting)。
 > - `anet quickstart` 一键命令 —— 命令仍在 CLI（一键起 hub + dashboard + node），但 anet.sh docs 改推 step-by-step（更可控）；E2E 未覆盖。详见 [getting-started 未验证列表](https://anet.sh/guide/getting-started)
 > - "官方免费 hub" 托管 — 项目方向已转为 Apache 2.0 + 自部署，不做 SaaS 托管
 >
