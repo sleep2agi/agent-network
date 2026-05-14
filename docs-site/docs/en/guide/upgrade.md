@@ -107,7 +107,7 @@ npm install -g @sleep2agi/agent-network@latest
 npm install -g @sleep2agi/agent-node@latest
 
 # commhub-server isn't installed separately — `anet hub start` runs it via bunx
-# at a PINNED version (verify agent-network/bin/cli.ts:2063 PINNED_SERVER_VERSION;
+# at a PINNED version (verify agent-network/bin/cli.ts:2065 PINNED_SERVER_VERSION;
 # the pin bumps along with the anet release).
 # ⚠ commhub-server is bun-shebang TypeScript — install Bun first:
 #   curl -fsSL https://bun.sh/install | bash
