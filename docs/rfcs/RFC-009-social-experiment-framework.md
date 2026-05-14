@@ -5,7 +5,7 @@
 | **RFC 编号** | 009 |
 | **标题** | 社会学实验 Framework — round / payoff / cohort / sub-network 通用 protocol |
 | **作者** | 通信SDK马 |
-| **状态** | Draft v1 |
+| **状态** | Draft v1 完整就绪（待 review） |
 | **创建日期** | 2026-05-14 |
 | **关联 issue** | [#77](https://github.com/sleep2agi/agent-network/issues/77) |
 | **关联 demo** | [#72 opinion-spread](../issues/72) · [#74 信息瀑布](../issues/74) |
@@ -988,7 +988,214 @@ cohort 切分 = `<prefix>-<idx>` + `experiment_id` 命名空间；payoff 同步�
 
 ## §5 实施 Phase ladder
 
-> 🚧 待 R464+ /loop tick 推进
+本节给出从 *Spec 设计* 到 *5 demo 全量迁移* 的 3 阶段实施路线、各 phase 的 ownership、退出标准（exit criteria）与风险点。
+
+### 5.1 整体路线
+
+```
+Phase 1 (spec design)   ──►  Phase 2 (framework impl)   ──►  Phase 3 (5 demo migrate)
+  • RFC-009 v1 draft         • framework core + 1 preset      • 信息瀑布 / 博弈 / 谈判 / 回音室
+  • opinion-spread (Phase 1   wrapper (opinion-spread)         全部 migrate
+    demo 实测 inform v2 amend) • dryRun mode + telemetry hook
+  • 通信牛 review              • 1 integration test
+  通信SDK马                    工程马 + demo马                   demo马 + 工程马
+  ETA ~1 day                    ETA ~2-3 day                       ETA ~1 week
+```
+
+### 5.2 Phase 1 — Spec 设计（当前 phase）
+
+#### 5.2.1 Ownership
+
+| 角色 | 职责 |
+|------|------|
+| **通信SDK马** | RFC-009 v1 draft 作者 |
+| **通信牛** | 技术 review，重点：API 合理性、与 RFC-002/003/006/008 兼容性 |
+| **通信龙** | High-level review + Vincent 沟通 |
+| **demo马** | 实战反馈：opinion-spread Phase 1 实测中遇到的 framework 设计缺陷 |
+| **Vincent** | Final approve |
+
+#### 5.2.2 Deliverables
+
+- ✅ `docs/rfcs/RFC-009-social-experiment-framework.md` v1 (本文档)
+- ✅ Issue [#77](https://github.com/sleep2agi/agent-network/issues/77) 关联
+- ⏳ 通信牛 review 评论
+- ⏳ 通信龙 approve 评论
+- ⏳ Vincent confirm
+
+#### 5.2.3 Exit criteria
+
+- [x] §1-§5 全部 draft 完成
+- [ ] 通信牛 review 通过（或带 review comments 后修订）
+- [ ] Vincent OK 进入 Phase 2
+
+#### 5.2.4 Phase 1 时间线（细化）
+
+| Date / Round | 任务 | 状态 |
+|--------------|------|------|
+| 2026-05-14 R460 | §1 背景 + overlap | ✅ |
+| 2026-05-14 R461 | §2 API spec | ✅ |
+| 2026-05-14 R462 | §3 4 roundProtocol | ✅ |
+| 2026-05-14 R463 | §4 cohort + payoff + sub-network | ✅ |
+| 2026-05-14 R464 | §5 phase ladder | ✅（本轮） |
+| 2026-05-14 R465+ | Ping 通信龙 / 通信牛 review chain | 待 |
+| 2026-05-14 → 15 | 通信牛 review + 修订 | 待 |
+
+### 5.3 Phase 2 — Framework 实现
+
+#### 5.3.1 Ownership
+
+| 角色 | 职责 |
+|------|------|
+| **工程马** | framework core 实现（`runSocialExperiment` runner + 4 protocol + cohort spawn） |
+| **demo马** | 同步实现 opinion-spread 作为第一个 preset wrapper（验证 framework API） |
+| **通信SDK马** | 协助 RFC 解读 + spec 细节澄清 |
+| **通信牛** | Code review + 集成测试结果 review |
+
+#### 5.3.2 模块拆分
+
+```
+agent-network/src/experiment/
+├── runner.ts                # runSocialExperiment 入口
+├── protocols/
+│   ├── broadcast.ts         # §3.1 实现 (~80 LOC)
+│   ├── sequential.ts        # §3.2 实现 (~70 LOC)
+│   ├── multi-round.ts       # §3.3 实现 (~90 LOC)
+│   └── turn-based.ts        # §3.4 实现 (~120 LOC)
+├── cohort.ts                # §4.1 spawnAllAgents (~60 LOC)
+├── context.ts               # buildContext, visiblePeers, history filter (~80 LOC)
+├── payoff.ts                # payoff invoke wrapper + error policy (~40 LOC)
+├── telemetry.ts             # §4.4 4 事件触发 (~50 LOC)
+├── result.ts                # finalizeResult + aggregateFn 调用 (~30 LOC)
+└── types.ts                 # §2 全部 type export (~150 LOC)
+
+agent-network/src/experiment/presets/
+└── opinion-spread.ts        # 第 1 个 preset, ~100 LOC, 作为 framework smoke test
+```
+
+总估算 ~770 LOC src + ~300 LOC test ≈ 1070 LOC。与 §1.4 估算 ~900 LOC framework + 500 LOC presets 大致对齐（preset 仍只完成 1 个，余 4 在 Phase 3）。
+
+#### 5.3.3 Test 策略
+
+- **Unit**：每个 protocol 文件配套 `.test.ts`，使用 mock runner 验证 commhub 消息序列。
+- **Integration**：1 个端到端测试 `opinion-spread.integration.test.ts`，用 codex-sdk runtime（quota-friendly，per [[project_claude_max_quota_constraint]]） + 4 个真实 agent + 2 轮 broadcast，断言 history + payoffs 结构。
+- **DryRun**：所有 4 protocol 在 dryRun 模式下 spawn 假 agent，验证 spec 字段静态校验。
+
+#### 5.3.4 Exit criteria
+
+- [ ] framework core 编译通过 + unit test 全绿
+- [ ] opinion-spread integration test 跑通（4 agent × 2 round）
+- [ ] dryRun 模式覆盖 4 个 protocol 的 spec 校验
+- [ ] 通信牛 code review 通过
+- [ ] 不阻塞 R025 compliance template（framework 在 R028 permission chain 之内）
+
+#### 5.3.5 Phase 2 时间线（估算）
+
+| Day | 任务 |
+|-----|------|
+| Day 1 | types.ts + runner.ts skeleton + broadcast protocol + cohort.ts |
+| Day 2 | sequential / multi-round / turn-based + context.ts + payoff.ts |
+| Day 3 | telemetry + result + opinion-spread preset + integration test |
+
+### 5.4 Phase 3 — 5 demo 全量迁移
+
+#### 5.4.1 Ownership
+
+| 角色 | 职责 |
+|------|------|
+| **demo马** | 4 个剩余 demo 迁移作为 preset wrapper |
+| **工程马** | framework bug 修复（实战暴露） |
+| **通信SDK马** | RFC-009 v2 amend（基于实战反馈） |
+| **通信牛** | 每个 demo 实战结果 review + 文章草稿 review |
+| **文档马** | 5 demo 用户文档（docs-site/cases/*） |
+
+#### 5.4.2 Migrate 顺序与依赖
+
+```
+1. opinion-spread  (Phase 2 已 ship)              ← framework smoke test
+2. 信息瀑布         sequential protocol            ← 1 个新 protocol 验证
+3. 博弈            multi-round + payoffFn 重点    ← payoffFn 复杂逻辑验证
+4. 谈判            turn-based + leader 重点       ← turn-based + 撮合
+5. 回音室          sub-network 隔离 重点          ← 最复杂, 留到最后
+```
+
+每个 demo 完成后产出物：
+- `agent-network/src/experiment/presets/<demo>.ts` 实现 (~100-150 LOC)
+- `docs-site/cases/<demo>.md` 用户文档（文档马接）
+- B 站课程素材 / 学术写作 raw data（Vincent 商业 distribution）
+
+#### 5.4.3 Phase 3 时间线（估算）
+
+| Week 1 Day | 任务 |
+|------------|------|
+| Day 1 | 信息瀑布 preset + 实战 (~20 voter, 1 round sequential) |
+| Day 2 | 博弈 preset + 实战 (~6 player, 10 round IPD) |
+| Day 3 | 谈判 preset + 实战 (~3 buyer + 3 seller + auctioneer, 15 round) |
+| Day 4 | 回音室 preset + 实战 (~5 left + 5 right + 2 observer, 5 round) |
+| Day 5 | RFC-009 v2 amend + 文档马 用户文档 |
+
+总 ~5 个工作日完成全量迁移。
+
+#### 5.4.4 Exit criteria
+
+- [ ] 5 个 preset 全部 ship
+- [ ] 5 个实测结果（每个产出 1 篇 case 文档）
+- [ ] RFC-009 v2 amend 完成（实战反馈纳入）
+- [ ] 至少 1 个 demo 可用于 B 站课程录制 / 学术 paper
+
+### 5.5 风险点与 mitigation
+
+#### 5.5.1 Cohort spawn 性能
+
+- **风险**：echo-chamber + 2 observer = 12 agent 并行 spawn，commhub_get_all_status 验证、telemetry 注册可能成为瓶颈。
+- **Mitigation**：Phase 2 加 batch spawn 并发限制 (`maxConcurrentSpawn` 默认 5)，需要时升至 10。
+
+#### 5.5.2 LLM 不遵守 outputSchema
+
+- **风险**：模式 B 中 agent 不严格按 JSON 输出，payoffFn 解析错。
+- **Mitigation**：framework 在 payoffFn 入参前做 schema 校验，校验失败时把该 decision 标记 `payload: null`，由 payoffFn 自行处理（如重试机制）。
+
+#### 5.5.3 turn-based 中 leader 失败
+
+- **风险**：leaderAlias agent 在某轮 reply 超时，整轮卡死。
+- **Mitigation**：framework 对 leader 有独立 timeout（`spec.runtime.leaderTimeoutMs`，默认 60s）。超时后跳过该轮 leader 决策，payoffFn 收到 `leaderDecision = null`。
+
+#### 5.5.4 子网 v1 prompt-level 隔离绕过
+
+- **风险**：agent 在 system prompt 中被注入 visiblePeers 限制，但 LLM 仍可能"主动"调用 commhub_send_task 给非 visiblePeers 的 alias。
+- **Mitigation**：v1 仅文档化此限制（适合社会学实验"软规则"），v2 在 commhub server 加 network tag 硬性隔离。Phase 3 实战中观察 agent 是否实际越界，若高频则提前进入 v2。
+
+#### 5.5.5 RFC-009 与 RFC-002 重叠
+
+- **风险**：RFC-002 batch primitive 已 cover spawn N agents，RFC-009 framework 也 spawn agents，职责边界不清。
+- **Mitigation**：RFC-009 显式声明"复用 RFC-002 spawn 底座 + 上层 round / payoff / subNet 编排"。framework 不复制 batch spawn 实现，而是 `import { spawnAgents } from '../batch/spawn'`。代码 review 阶段卡死此边界。
+
+### 5.6 Open questions / v2 候选
+
+以下问题在 v1 不解决，列为 v2 amend 候选：
+
+| # | 问题 | 优先级 |
+|---|------|--------|
+| Q1 | sub-network commhub-level 硬性隔离（需 server network tag 字段） | 高（实战触发后） |
+| Q2 | `errorPolicy: "continue" \| "fail-fast"` | 中 |
+| Q3 | turn-based cohort 顺序自定义（reverse / random / weighted） | 低 |
+| Q4 | preset 之间共享 baseline experiments（cross-experiment learning） | 低（v3 候选） |
+| Q5 | LLM-as-judge payoffFn 内置（payoffFn 直接用 sub-agent 给分） | 中 |
+| Q6 | Distributed experiment（跨 anet 节点协作） | 低（v3 候选） |
+| Q7 | 实时 dashboard（R415 即时显示决策流） | 中 |
+
+### 5.7 §5 小结
+
+3 phase ladder，Phase 1 当前完成，Phase 2 ~3 天，Phase 3 ~1 周，总 ETA ~1.5-2 周完成 5 demo 全量 framework 化。
+
+Phase 边界清晰：spec → impl → migrate。每 phase 退出标准明确。5 个风险点已识别，mitigation 落地。v2 amend backlog 7 个 open question 暂留。
+
+### 5.8 全文小结
+
+本 RFC 提出 `SocialExperimentSpec` 声明式 framework，把 5 个候选实验（opinion-spread / 信息瀑布 / 博弈 / 谈判 / 回音室）共有的 cohort / round / payoff / sub-network 4 维度抽象出来，使后续每个新实验通过 *单文件 spec + ~20-40 LOC promptTemplate + 0-50 LOC payoffFn* 即可声明完整。
+
+预计 framework core ~900 LOC，5 个 preset ~500 LOC，单独实施 ~1520 LOC，*节省 ~40%*。更重要的是把 *实验设计* 与 *orchestration* 解耦，让研究复用性提升。
+
+实施分 3 phase：Phase 1（当前，spec 设计）/ Phase 2（~3 天，framework + opinion-spread preset）/ Phase 3（~1 周，剩余 4 demo migrate + RFC v2 amend）。商业 distribution 三条路径（B 站课程 / 学术 / 咨询）由 demo 实战素材驱动。
 
 ---
 
@@ -1014,3 +1221,7 @@ cohort 切分 = `<prefix>-<idx>` + `experiment_id` 命名空间；payoff 同步�
 | 版本 | 日期 | 作者 | 说明 |
 |------|------|------|------|
 | Draft v1 §1 | 2026-05-14 | 通信SDK马 | 初稿 §1（背景 + 5 demo overlap 矩阵），§2-§5 stub 待续 |
+| Draft v1 §2 | 2026-05-14 | 通信SDK马 | §2 SocialExperimentSpec API spec（11 字段 + 5 demo sketch） |
+| Draft v1 §3 | 2026-05-14 | 通信SDK马 | §3 4 roundProtocol（broadcast/sequential/multi-round/turn-based）+ 执行伪码 |
+| Draft v1 §4 | 2026-05-14 | 通信SDK马 | §4 cohort 切分 + payoff 模型 + sub-network 隔离（v1 prompt-level，v2 commhub-level 候选） |
+| Draft v1 §5 | 2026-05-14 | 通信SDK马 | §5 Phase 1-3 实施 ladder + 风险与 mitigation + v2 amend 候选 7 项；**v1 draft 完整就绪，待 通信牛 review** |
