@@ -35,7 +35,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | `reassign_task` | ❌ | ❌ | ✅ | ✅ |
 | **Member management** | | | | |
 | Invite (`anet network invite`) | ❌ | ❌ | ✅ | ✅ |
-| Change member's role | ❌ | ❌ | ✅ (not to owner) | ✅ |
+| Change member's role | ❌ | ❌ | ❌ | ✅ |
 | Remove member | ❌ | ❌ | ✅ (not owner) | ✅ |
 | **Network** | | | | |
 | Create network | Any logged-in user (creator becomes owner) | | | |
@@ -82,8 +82,8 @@ anet network join <code>
 
 For team leads, trusted operators, anyone who needs to manage members.
 
-- **Can**: everything member can; add / remove members (cannot touch owner); change member roles (cannot promote to owner); modify any agent.
-- **Cannot**: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin; R262 chain). A network admin sees only their own audit log rows, same as members and viewers.
+- **Can**: everything member can; invite new members + remove non-owner members ([`index.ts:629`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L629) / [`:615`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L615): `["owner","admin"]`); modify any agent.
+- **Cannot**: **change an existing member's role** — `PUT /api/networks/:id/members/:user_id` is **owner-only** ([`index.ts:608`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L608) `if (callerRole !== "owner")` → 403); admin can only invite / remove, not re-role existing members. Also cannot: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin; R262 chain). A network admin sees only their own audit log rows, same as members and viewers.
 
 Become an admin:
 ```bash

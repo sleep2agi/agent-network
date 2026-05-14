@@ -35,7 +35,7 @@ Agent Network 用 4 个角色：`owner` / `admin` / `member` / `viewer`。**你 
 | 转移任务 `reassign_task` | ❌ | ❌ | ✅ | ✅ |
 | **成员管理** | | | | |
 | 邀请成员入网 (`anet network invite`) | ❌ | ❌ | ✅ | ✅ |
-| 改成员 role | ❌ | ❌ | ✅（不能升到 owner） | ✅ |
+| 改成员 role | ❌ | ❌ | ❌ | ✅ |
 | 移除成员 | ❌ | ❌ | ✅（不能移除 owner） | ✅ |
 | **network** | | | | |
 | 创建 network | 任何登录用户都能在 hub 全局建（创建者自动成 owner） | | | |
@@ -103,11 +103,11 @@ anet network join <code>                         # 用邀请码加入
 
 **能干什么**：
 - member 的全部
-- 加减 network 成员（不能动 owner）
-- 改成员 role（不能升到 owner）
+- 邀请新成员入网 + 移除非 owner 成员（[`index.ts:629`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L629) / [`:615`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L615)：`["owner","admin"]`）
 - 改 / 删 / 启动停止任何 agent（包括别人创建的）
 
 **不能干什么**：
+- ❌ **改成员 role** —— `PUT /api/networks/:id/members/:user_id` 是 **owner only**（[`index.ts:608`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L608) `if (callerRole !== "owner")` 直接 403）；admin 只能 invite / remove，不能改已有成员的 role
 - ❌ 删除 network 本身（只有 owner 能）
 - ❌ 移除 owner / 把别人升到 owner
 - ❌ 看其他人的 `/api/audit-log` row —— admin-only 端点是**系统级** `users.role='admin'` 限定（**不是** network admin；R262 chain）；network admin 跟 viewer / member 一样只能看自己的 audit log row
