@@ -30,7 +30,7 @@ Report agent status. Also serves as a heartbeat (recommended every 3 minutes).
 | `status` | enum | &check; | `working` / `idle` / `blocked` / `error` / `waiting_input` / `offline` |
 | `task` | string | | Current task description (max 10000 chars) |
 | `output` | string | | Recent output (max 50000 chars, storage truncated to 4000) |
-| `score` | number | | Self-rating 1-10 |
+| `score` | number | | Self-rating **0-10** (doc previously said 1-10; schema is actually `.min(0).max(10)`) |
 | `progress` | number | | Progress 0-100 |
 | `server` | string | | Server identifier |
 | `hostname` | string | | Hostname |
@@ -38,12 +38,12 @@ Report agent status. Also serves as a heartbeat (recommended every 3 minutes).
 | `project_dir` | string | | Working directory |
 | `version` | string | | Agent version |
 | `tmux_name` | string | | tmux session name |
-| `node_id` | string | | Stable node identifier |
+| `node_id` | string | | Stable node identifier. **Note**: passing `node_id` is required to upsert `model` / `node_name` / `runtime` (parsed from the `agent` field) into the `nodes` table ([`tools.ts:167-188`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L167)); without `node_id` the `model` / `node_name` parameters **are not stored** (the `sessions` table has no `model` / `node_name` columns). |
 | `session_id` | string | | Runtime session/thread ID |
 | `config_path` | string | | Config file path |
 | `channels` | string | | Channel list (JSON array string) |
-| `model` | string | | AI model name |
-| `node_name` | string | | Node display name |
+| `model` | string | | AI model name (written to `nodes.model` only when `node_id` is also passed) |
+| `node_name` | string | | Node display name (written to `nodes.node_name` only when `node_id` is also passed) |
 | `network_id` | string | | Network ID |
 
 **Response**:
@@ -70,6 +70,15 @@ report_status({
   agent: "agent-node:codex"
 })
 ```
+
+::: warning Authentication required
+This tool only accepts a **`ntok_` (network-scoped) token**. Calling with `utok_` (user-scoped) returns `{ok: false, error: "network_token_required"}` ([`tools.ts:116-118`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L116)). This is a hard constraint after RFC-001 in v0.8 — agent heartbeats must be bound to a network.
+
+Side effects beyond the `sessions` table:
+- Automatically DELETEs any older session row with the same network + alias + a different `resume_id` ([`tools.ts:127`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L127); cleans up orphans across agent restarts)
+- When `status="working"` with a `task`, transitions the corresponding `tasks` row from `delivered`/`acked` to `running` ([`tools.ts:150-153`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L150); see [Task lifecycle](/en/concepts/task-lifecycle#state-machine))
+- When `node_id` is passed, upserts the `nodes` table (including `model` / `node_name` / `runtime`; see the `node_id` row above)
+:::
 
 ---
 

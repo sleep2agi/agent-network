@@ -30,7 +30,7 @@ CommHub Server 提供 17 个 MCP Tools，通过 `POST /mcp`（Streamable HTTP）
 | `status` | enum | &check; | `working` / `idle` / `blocked` / `error` / `waiting_input` / `offline` |
 | `task` | string | | 当前任务描述（最大 10000 字符） |
 | `output` | string | | 最近输出（最大 50000 字符，存储截断到 4000） |
-| `score` | number | | 自评分 1-10 |
+| `score` | number | | 自评分 **0-10**（doc 之前写 1-10，schema 实际 `.min(0).max(10)`） |
 | `progress` | number | | 进度 0-100 |
 | `server` | string | | 服务器标识 |
 | `hostname` | string | | 主机名 |
@@ -38,12 +38,12 @@ CommHub Server 提供 17 个 MCP Tools，通过 `POST /mcp`（Streamable HTTP）
 | `project_dir` | string | | 工作目录 |
 | `version` | string | | Agent 版本 |
 | `tmux_name` | string | | tmux session 名 |
-| `node_id` | string | | 节点稳定标识 |
+| `node_id` | string | | 节点稳定标识。**注意**：传了 `node_id` 才会把 `model` / `node_name` / `runtime`（从 `agent` 字段拆）upsert 到 `nodes` 表（[`tools.ts:167-188`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L167)）；不传 `node_id` 时 `model` / `node_name` 这两个 param **不会落库**（`sessions` 表没有 `model` / `node_name` 列） |
 | `session_id` | string | | 运行时 session/thread ID |
 | `config_path` | string | | 配置文件路径 |
 | `channels` | string | | Channel 列表（JSON 数组字符串） |
-| `model` | string | | AI 模型名称 |
-| `node_name` | string | | 节点显示名 |
+| `model` | string | | AI 模型名称（仅当 `node_id` 也传时写入 `nodes.model`） |
+| `node_name` | string | | 节点显示名（仅当 `node_id` 也传时写入 `nodes.node_name`） |
 | `network_id` | string | | 所属网络 ID |
 
 **返回值**：
@@ -70,6 +70,15 @@ report_status({
   agent: "agent-node:codex"
 })
 ```
+
+::: warning 认证要求
+该 tool 只接受 **`ntok_`（network-scoped）token**。用 `utok_`（user-scoped）调用会返回 `{ok: false, error: "network_token_required"}`（[`tools.ts:116-118`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L116)）。这是 v0.8 RFC-001 之后的硬约束 — agent 心跳必须绑定 network。
+
+副作用：除了写 `sessions` 表，还会:
+- 自动**删除同 network、同 alias、不同 resume_id** 的旧 session row（[`tools.ts:127`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L127)；用于 agent 重启时清理孤儿）
+- 当 `status="working"` 且有 `task` 时，触发 `tasks` 表 `delivered/acked → running` 状态切换（[`tools.ts:150-153`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L150)；详见 [Task 生命周期](/concepts/task-lifecycle#状态机)）
+- 当 `node_id` 传入时 upsert `nodes` 表（含 `model` / `node_name` / `runtime`，详见 `node_id` 参数行）
+:::
 
 ---
 
