@@ -283,7 +283,7 @@ CREATE TABLE networks (
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(owner_id, network_name),         -- 同一 owner 下 network 名唯一
-  -- V3.13 ALTER TABLE 迁移补的列（db.ts:276-278）
+  -- V3.13 ALTER TABLE 迁移补的列（db.ts:299-301）
   visibility   TEXT DEFAULT 'private',  -- private/public (**字段存在, 当前不启用**, 见下方 [配额限制 section](#quota-limits))
   max_members  INTEGER DEFAULT 50        -- **字段存在, server 端不强制检查**: addNetworkMember + joinByInvite 都没有 max_members gate, 是 v0.6 配额体系的预留字段, 见 [配额限制 v0.6 设计目标 — v0.8 部分启用](#quota-limits)
 );

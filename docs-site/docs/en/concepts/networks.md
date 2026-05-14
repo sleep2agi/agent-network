@@ -283,7 +283,7 @@ CREATE TABLE networks (
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(owner_id, network_name),         -- network name unique per owner
-  -- Columns added by the V3.13 ALTER TABLE migration (db.ts:276-278)
+  -- Columns added by the V3.13 ALTER TABLE migration (db.ts:299-301)
   visibility   TEXT DEFAULT 'private',  -- private/public (**field exists but currently inert** — see [Quota limits — v0.6 design / partially enforced in v0.8](#quota-limits))
   max_members  INTEGER DEFAULT 50        -- **field exists, server-side enforcement is OFF**: addNetworkMember + joinByInvite have no max_members gate. Reserved for the v0.6 quota system. See the quota-limits section below.
 );
