@@ -157,7 +157,7 @@ anet whoami
 只改 Hub 地址：
 
 ```bash
-anet init --hub http://192.168.1.10:9200
+anet init --hub http://10.0.0.1:9200
 ```
 
 之后再 `anet login`。不要用旧式 master token 作为主路径；v0.8 起推荐用户名密码登录拿 `utok_`。
