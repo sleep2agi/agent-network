@@ -113,6 +113,7 @@ See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> 
 | `anet activate <key>` | v0.6 legacy: write a pro license key. **No longer needed after Apache 2.0 OSS**; last-resort fix for `license_expired` — see [troubleshooting](/en/troubleshooting) |
 | `anet session ls` | List Claude Code sessions in the current project (for the `claude-code-cli` runtime) |
 | `anet import [alias]` | Import claude-code agent sessions from CommHub into local `.anet/nodes/<alias>/config.json` (imports all if no alias is given) |
+| `anet run` | Starts a **minimal standalone SSE agent** via the Client SDK: connects to the hub, listens for tasks, and auto-echoes a "received" reply — **no LLM**. Requires `--alias`, `--hub` optional. Unlike `anet node start` (which runs a real AI runtime), `anet run` is just a minimal connectivity demo. Verify [`cli.ts:2044 runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2044) |
 
 ---
 

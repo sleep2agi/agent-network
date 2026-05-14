@@ -113,6 +113,7 @@ npm install -g @sleep2agi/agent-network
 | `anet activate <key>` | v0.6 legacy，写入 pro license key。**Apache 2.0 OSS 后不再需要**；用于命中 `license_expired` 兜底，见 [troubleshooting](/troubleshooting) |
 | `anet session ls` | 列出当前项目下的 Claude Code session（`claude-code-cli` runtime 用） |
 | `anet import [alias]` | 从 CommHub 把 claude-code agent 的 session 导入为本地 `.anet/nodes/<alias>/config.json`（不传 alias 则导入全部） |
+| `anet run` | 用 Client SDK 起一个**极简 standalone SSE agent**：连 hub、监听 task、自动 echo「收到」回复 —— **不跑 LLM**。需 `--alias`，可选 `--hub`。跟 `anet node start`（跑真实 AI runtime）不同，`anet run` 只是最小连通性 demo。verify [`cli.ts:2044 runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2044) |
 
 ---
 
