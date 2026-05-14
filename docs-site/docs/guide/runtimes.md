@@ -369,13 +369,15 @@ anet node start coder
 ## 已验证 vs 未验证
 
 ::: info 已验证（当前 stable 继承 v2 E2E 覆盖）
-- `claude-agent-sdk` —— Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 全部 E2E 通过
+- `claude-agent-sdk` runtime 本身 —— E2E 通过
+- vendor 维度只有 **Anthropic / MiniMax / 书生 Intern** 是 verified（verify [`cli.ts:1284-1322`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1284) MODEL_PRESETS —— **没标 `[UNVERIFIED]`** 的就这几个 + OpenRouter）
 - 多 Runtime 混搭（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调）
 :::
 
 ::: warning 未验证（请自行评估）
 - `claude-code-cli` —— 本机能跑（v0.8.2 修了 session resume 默认丢失 bug，详见 [changelog](/changelog)），未做 E2E 回归
 - `codex-sdk` —— 单元测试通过，缺真实 codex 鉴权回归
+- **DeepSeek / GLM / Kimi / 小米 MiMo** —— cli.ts MODEL_PRESETS 里这 4 个 vendor preset 显式标 `[UNVERIFIED]`（[`cli.ts:1286-1294`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1286)），endpoint URL 已填但没跑通真 API 回归；能用但请自己先验证
 :::
 
 ---

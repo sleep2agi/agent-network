@@ -348,13 +348,15 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 ## Verified vs not
 
 ::: info Verified (current stable line inherits v2 E2E coverage)
-- `claude-agent-sdk` — Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM all pass E2E
+- The `claude-agent-sdk` runtime itself — passes E2E
+- At the vendor level only **Anthropic / MiniMax / InternLM** are verified (verify [`cli.ts:1284-1322`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1284) MODEL_PRESETS — the ones **not** tagged `[UNVERIFIED]`, plus OpenRouter)
 - Multi-runtime mesh (peer agents auto-coordinate via `get_all_status` + `send_task` + `get_task`)
 :::
 
 ::: warning Not verified
 - `claude-code-cli` — runs locally (v0.8.2 fixed the session-resume default-loss bug, see [changelog](/en/changelog)); no E2E regression yet
 - `codex-sdk` — unit-tested only, real codex auth E2E pending
+- **DeepSeek / GLM / Kimi / Xiaomi MiMo** — these 4 vendor presets are explicitly tagged `[UNVERIFIED]` in cli.ts MODEL_PRESETS ([`cli.ts:1286-1294`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1286)); the endpoint URLs are filled in but no real-API regression has been run — usable, but verify on your own first
 :::
 
 ---
