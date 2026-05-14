@@ -227,27 +227,25 @@ anet node create code-assistant --runtime codex-sdk --model <codex-model-id>
 anet node create translator --runtime claude-agent-sdk --model <minimax-model-id>
 ```
 
-After creation, a config file is generated at `.anet/nodes/<node-name>/config.json` (directory name is the alias, not the internal `node_id`):
+After creation, a config file is generated at `.anet/nodes/<node-name>/config.json` (directory name is the alias, not the internal `node_id`). Below is the actual output of the `codex-sdk` example command above (no extra flags):
 
 ```json
 {
   "anet_version": "0.1.0",
   "node_id": "n_a1b2c3d4",
   "node_name": "code-assistant",
+  "alias": "code-assistant",
   "runtime": "codex-sdk",
   "model": "<codex-model-id>",
-  "session": "",
   "channels": ["server:commhub"],
-  "tools": [],
   "env": {},
   "flags": {
-    "dangerouslySkipPermissions": true,
-    "teammateMode": "in-process",
-    "maxTurns": 20,
-    "logLevel": "info"
+    "dangerouslySkipPermissions": true
   }
 }
 ```
+
+The following fields are generated **conditionally** — not every node has them: `teammateMode` (only for the `claude-code-cli` runtime, default `in-process`), `session` (only for `claude-code-cli` or when `--session` is passed), `maxTurns` (only when `--max-turns` is passed), `tools` (only when `--tools` is passed).
 
 ### anet node start
 

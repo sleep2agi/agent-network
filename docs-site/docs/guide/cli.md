@@ -215,7 +215,7 @@ anet hub admin reset-user --username alice
 
 ### anet node create
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1261) (`createCommand`)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1267) (`createCommand`)
 
 创建新的 Agent 节点。
 
@@ -241,27 +241,25 @@ anet node create 代码助手 --runtime codex-sdk --model <codex-model-id>
 anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 ```
 
-创建后会在 `.anet/nodes/<node-name>/config.json` 生成配置文件（目录名是 alias，不是内部 `node_id`）：
+创建后会在 `.anet/nodes/<node-name>/config.json` 生成配置文件（目录名是 alias，不是内部 `node_id`）。下面是上面 `codex-sdk` 示例命令（未带额外 flag）的实际输出：
 
 ```json
 {
   "anet_version": "0.1.0",
   "node_id": "n_a1b2c3d4",
   "node_name": "代码助手",
+  "alias": "代码助手",
   "runtime": "codex-sdk",
   "model": "<codex-model-id>",
-  "session": "",
   "channels": ["server:commhub"],
-  "tools": [],
   "env": {},
   "flags": {
-    "dangerouslySkipPermissions": true,
-    "teammateMode": "in-process",
-    "maxTurns": 20,
-    "logLevel": "info"
+    "dangerouslySkipPermissions": true
   }
 }
 ```
+
+以下字段**按条件生成**，不是每个 node 都有：`teammateMode`（仅 `claude-code-cli` runtime，默认 `in-process`）、`session`（仅 `claude-code-cli` runtime 或传了 `--session`）、`maxTurns`（仅传了 `--max-turns`）、`tools`（仅传了 `--tools`）。
 
 ### anet node start
 
