@@ -3,7 +3,7 @@
 Agent Node 是 Agent Network 中的工作单元 -- 接收任务、调用 AI 模型处理、回报结果。
 
 ::: tip 不知道选哪个 Runtime？
-- 不确定时先用 `claude-agent-sdk`（推荐新手，`anet node create` 交互式选 8 个 provider preset + 自定义: MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter / Claude / 自定义；其他没列出的 Anthropic 兼容 provider（如 vLLM / SiliconFlow / 通义千问 Anthropic 兼容 endpoint 等）走「自定义」+ `ANTHROPIC_BASE_URL` env 接入，[完整 provider 表见 multi-model.md](/guide/multi-model)）
+- 不确定时先用 `claude-agent-sdk`（推荐新手）。`anet node create` 交互式**先选供应商（vendor）**：内置 `VENDORS` 列表 = 书生 Intern / MiniMax / 小米 MiMo / Anthropic Claude / Codex / Claude Code CLI / 自定义（custom）—— 每个内置 vendor 都跑通过真 API 验证。**DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问等不在内置列表的 Anthropic 兼容 provider 走「自定义」**+ `ANTHROPIC_BASE_URL` env 接入（[完整 provider 表见 multi-model.md](/guide/multi-model)）
 - 想让 AI **写代码 / 跑命令** --> `codex-sdk`
 - 想让 AI **写文案 / 翻译 / 分析**（编程方式调用） --> `claude-agent-sdk`
 - 想让 AI **像终端里用 Claude 一样干活** --> `claude-code-cli`
