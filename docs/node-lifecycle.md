@@ -117,16 +117,17 @@ config.json:
 **数据变更**:
 - CommHub sessions 表: INSERT/UPDATE（resume_id=sdk-${node_id}, alias=node_name, status=idle, agent=runtime, project_dir, server=hostname）
 
-**agent-node 行为**:
+**agent-node 行为**（verify `agent-node/src/cli.ts:357-369`）:
 ```typescript
+// RESUME_ID = NODE_ID ? `sdk-${NODE_ID}` : `sdk-${ALIAS}-${Date.now().toString(36)}`
 register() → callCommHub("report_status", {
-  resume_id: `sdk-${node_id}`,  // 稳定标识，带前缀兼容现有风格
-  alias: node_name,        // 显示名
+  resume_id: RESUME_ID,    // 有 node_id 用 sdk-<node_id>，否则 sdk-<alias>-<ts> 兜底
+  alias: ALIAS,            // 来自 --alias / env / config.alias（跟 node_name 是两个独立字段）
   status: "idle",
-  server: hostname,
-  hostname: hostname,      // server / hostname 两字段都发，值都是 osHostname()
-  agent: `agent-node:${runtime}`,
-  project_dir: cwd,
+  server: osHostname(), hostname: osHostname(),  // 两字段都发，值都是 osHostname()
+  agent: `agent-node:${RUNTIME}`,
+  project_dir: process.cwd(),
+  node_id, node_name, session_id, config_path, channels, model, network_id,  // 其余字段，缺省为 undefined
 });
 ```
 
