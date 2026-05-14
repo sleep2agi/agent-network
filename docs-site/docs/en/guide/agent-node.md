@@ -363,22 +363,28 @@ On SIGINT (Ctrl+C) or SIGTERM:
 2. Close SSE connection
 3. Exit process
 
-If the process crashes (no time to report), CommHub detects via heartbeat timeout and marks offline after 5 minutes.
+If the process crashes (no time to report), CommHub detects via heartbeat timeout and marks the agent offline after **10 minutes** (verified at [`server/src/index.ts:751`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L751) `Date.now() - 10 * 60 * 1000` cutoff, lazily triggered on `/api/status` calls; aligned with the R219 chain).
 
 ## Environment Variables
 
-| Variable | Description |
-|------|------|
-| `COMMHUB_URL` | CommHub Server address |
-| `COMMHUB_TOKEN` | Auth token |
-| `ALIAS` | Agent alias |
-| `RUNTIME` | Runtime engine |
-| `MODEL` | AI model |
-| `TOOLS` | Tool list (comma-separated) |
-| `SYSTEM_PROMPT` | Custom system prompt |
-| `ANTHROPIC_BASE_URL` | Model API URL (required when targeting a third-party Anthropic-compatible endpoint) |
-| `ANTHROPIC_AUTH_TOKEN` | Model API key — **for third-party Anthropic-compatible endpoints** (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter / vLLM, etc.) |
-| `ANTHROPIC_API_KEY` | Model API key — **only for direct api.anthropic.com**; don't reuse it for third-party endpoint keys (see [runtimes — claude-agent-sdk pitfalls](/en/guide/runtimes#claude-agent-sdk)) |
+Only the env vars that agent-node actually reads from `process.env` (verified at [`agent-node/src/cli.ts:100-200`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)):
+
+| Variable | Equivalent CLI flag / config field | Description |
+|------|------------------------------|------|
+| `COMMHUB_URL` | `--hub` / `--url` / `config.hub` | CommHub Server address (cli.ts:152) |
+| `COMMHUB_TOKEN` | `config.token` / `globalConfig.token` | Auth token (cli.ts:171; **no CLI flag accepted**) |
+| `COMMHUB_ALIAS` / `ALIAS` | `--alias` / `config.alias` | Agent alias — both env var names work (cli.ts:109) |
+| `RUNTIME` | `--runtime` / `config.runtime` | Runtime engine, defaults to `claude-agent-sdk` |
+| `MODEL` | `--model` / `config.model` | AI model |
+| `LOG_LEVEL` | `--log-level` / `config.logLevel` (**top-level**, not under `flags`) | `debug` / `info` / `warn` / `error` — aligned with R211 chain |
+| `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | Network ID fallback (typically inferred from `ntok_`; cli.ts:341) |
+| `ANTHROPIC_BASE_URL` | `config.env.ANTHROPIC_BASE_URL` | Model API URL (required when targeting a third-party Anthropic-compatible endpoint) |
+| `ANTHROPIC_AUTH_TOKEN` | `config.env.ANTHROPIC_AUTH_TOKEN` | Model API key — **for third-party Anthropic-compatible endpoints** (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter / vLLM, etc.) |
+| `ANTHROPIC_API_KEY` | `config.env.ANTHROPIC_API_KEY` | Model API key — **only for direct api.anthropic.com**; don't reuse it for third-party endpoint keys (see [runtimes — claude-agent-sdk pitfalls](/en/guide/runtimes#claude-agent-sdk)) |
+
+::: warning `TOOLS` / `SYSTEM_PROMPT` env vars do not exist
+R242 calibration: the previously listed `TOOLS` and `SYSTEM_PROMPT` env vars are **not read** by agent-node (verified: cli.ts:155 `toolsRaw = opts.tools || fileConfig.tools` has no `process.env.TOOLS`; cli.ts:165 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` has no env reading). To set tools, use the `--tools` CLI flag or `config.json`'s `tools` field; for the system prompt, use the `--prompt` flag or `config.json`'s `systemPrompt` field.
+:::
 
 ::: tip Docker Usage
 When running in Docker, environment variables are the most convenient configuration method. See [Docker Deployment](/en/deploy/docker).
