@@ -90,6 +90,7 @@ export default withMermaid(defineConfig({
               { text: '网络隔离', link: '/concepts/networks' },
               { text: '任务生命周期', link: '/concepts/task-lifecycle' },
               { text: '安全设计', link: '/concepts/security' },
+              { text: 'Vendor 适配层', link: '/concepts/vendor-adapters' },
             ]
           },
           {
@@ -186,6 +187,7 @@ export default withMermaid(defineConfig({
               { text: 'Network Isolation', link: '/en/concepts/networks' },
               { text: 'Task Lifecycle', link: '/en/concepts/task-lifecycle' },
               { text: 'Security Design', link: '/en/concepts/security' },
+              { text: 'Vendor Adapters', link: '/en/concepts/vendor-adapters' },
             ]
           },
           {
