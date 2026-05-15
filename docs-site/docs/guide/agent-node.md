@@ -293,42 +293,76 @@ Agent Node 只对 `task` 类型消息触发 AI 处理：
 
 ## 工具配置
 
-### 可用工具列表
+### 默认 = Claude Code preset 全集（v0.9.0+，#101 Option B）
 
-R243 校准：`--tools` flag 只控制 `claude-agent-sdk` runtime —— `codex-sdk` runtime 的工具集（Read/Write/Edit/Bash/Grep/Glob/WebSearch）由 codex CLI 自己 baked in，**不接受** `--tools` 自定义；`claude-code-cli` runtime 共享本机 Claude Code 工具集，也不通过这个 flag 选。
+从 [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B 起（agent-node v2.3.6+），`claude-agent-sdk` runtime **默认 toolset 是 Claude Code preset 全集**，不再是空集。每个节点 spawn 后立刻可调：
 
-| 工具 | 说明 | 适用 Runtime |
-|------|------|-------------|
-| `Read` | 读取文件 | `claude-agent-sdk` |
-| `Write` | 写入文件 | `claude-agent-sdk` |
-| `Edit` | 编辑文件 | `claude-agent-sdk` |
-| `Bash` | 执行命令 | `claude-agent-sdk` |
-| `Glob` | 文件搜索 | `claude-agent-sdk` |
-| `Grep` | 内容搜索 | `claude-agent-sdk` |
-| `WebSearch` | 网页搜索 | `claude-agent-sdk` |
-| `WebFetch` | 抓取网页内容 | `claude-agent-sdk` |
+- 文件系统：`Read` / `Write` / `Edit` / `Glob` / `Grep`
+- Shell：`Bash`（受 `dangerouslySkipPermissions=true` 默认开启影响，不弹确认）
+- 网络：`WebFetch` / `WebSearch`
+- 子任务 / 笔记本：`Task` / `NotebookEdit` / ...
 
-verify [`agent-node/src/cli.ts:160`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L160):
+加上 hub 端 17 个 MCP 工具（`commhub_send_task` / `commhub_reply` / ...）。
+
+> **Root cause** ([#101](https://github.com/sleep2agi/agent-network/issues/101))：老版本 `config.json` 无 `tools` 字段时 agent-node 传 SDK `options.tools = undefined`，SDK 解读为「零内建工具」，agent 只能调 MCP 工具，被问 WebFetch / Bash / Read 时会幻觉「网络受限」。Option B 强制 fallback 到 SDK `{ type: 'preset', preset: 'claude_code' }` sentinel —— SDK 类型定义里这是「给我全套 Claude Code 工具」的标准表达（`sdk.d.ts:1229-1238`）。
+
+### 三种 `--tools` 行为（仅 `claude-agent-sdk` runtime）
+
+`--tools` flag 只控制 `claude-agent-sdk` runtime —— `codex-sdk` 的工具集由 codex CLI baked in（`Read/Write/Edit/Bash/Grep/Glob/WebSearch`，**不接受** `--tools`）；`claude-code-cli` 共享本机 Claude Code 工具集，也不通过这个 flag 选（R243 chain）。
+
+| 输入 | 实际效果 | verify |
+|------|---------|--------|
+| `--tools all` | SDK preset 全集（同上）—— 单一 source-of-truth | [`cli.ts:219`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L219) |
+| `--tools Read,Glob,Grep` | 显式 allowlist（字符串数组），跳过 preset —— 严格 sandbox 用 | [`cli.ts:217,220`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L217) |
+| 未传 / 空字符串 | **fallback 到 preset 全集**（#101 fix；老版本是 `undefined` → 空集） | [`cli.ts:216,221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L216) |
+
+源码实际逻辑（[`agent-node/src/cli.ts:210-221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L210)）：
+
 ```ts
-const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
-// ... cli.ts:560: tools: TOOLS.length ? TOOLS : undefined  ← 传给 claude-agent-sdk query options
+const TOOLS_PRESET = { type: "preset" as const, preset: "claude_code" as const };
+// Behaviour matrix (sdk.d.ts:1229-1238):
+//   --tools "all"       → SDK preset (full Claude Code tool set)
+//   --tools "Read,Bash" → explicit allowlist
+//   --tools "" (absent) → SDK preset (the #101 fix; previously left empty)
+const TOOLS_EXPLICIT = toolsRaw === "all" ? null : toolsRaw.split(",").filter(Boolean);
+let TOOLS: string[] | typeof TOOLS_PRESET =
+  toolsRaw === "all" ? TOOLS_PRESET
+  : (TOOLS_EXPLICIT && TOOLS_EXPLICIT.length) ? TOOLS_EXPLICIT
+  : TOOLS_PRESET;
+// ... cli.ts:653: tools: TOOLS  ← 传给 claude-agent-sdk query options（preset 或 string[]）
 ```
 
 ```bash
-# 指定工具（仅 claude-agent-sdk runtime 生效）
-npx @sleep2agi/agent-node --alias 代码 --tools Read,Write,Edit,Bash,Glob,Grep
+# 默认（不传 --tools）→ Claude Code preset 全集
+npx @sleep2agi/agent-node --alias 代码
 
-# 全量工具
+# 显式 "all" → 同 preset（单一 source-of-truth，不是老版的硬编码 8-tool 列表）
 npx @sleep2agi/agent-node --alias 代码 --tools all
 
-# codex-sdk runtime 不接受 --tools (会被静默忽略)
+# 显式 allowlist（只读 agent）→ 跳过 preset，给字符串数组
+npx @sleep2agi/agent-node --alias 代码 --tools Read,Glob,Grep
+
+# codex-sdk runtime 不接受 --tools（会被静默忽略）
 npx @sleep2agi/agent-node --alias 代码 --runtime codex-sdk
 # codex 内置 Read/Write/Edit/Bash/Grep/Glob/WebSearch 全套, 无法剥离
 ```
 
+### `anet node create` 行为披露 banner（Vincent 4927 push）
+
+`anet node create <alias>` 成功后 print **行为披露 banner**：built-in tools 清单（具体 list 或 `all (Claude Code preset)`）+ MCP tools + 当前 flags（`dangerouslySkipPermissions=true` / `teammateMode=true`）+ 一行 "agent 可读写文件、跑 shell、访问网络"。banner 在 [agent-network/bin/cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) `createCommand` 末尾打印 —— 让你**看清你创建了一个能干啥的 agent**，主动决定 sandboxing。
+
+> **⚠ User responsibility**：默认 preset + 默认 `dangerouslySkipPermissions=true` 意味着 agent 启动后**能改文件、跑 shell、访问网络且不弹确认**。详见 [安全设计 → 工具权限](/concepts/security#工具权限默认-claude-code-preset-user-responsibility)。
+
 ::: warning 安全提示
-`--tools all` 给 Agent 完整的文件系统和命令执行权限。生产环境建议明确指定所需工具（如只读 agent 只给 `Read,Glob,Grep`）。
+- 默认 preset 全集 + 默认 yolo mode（`dangerouslySkipPermissions`）—— 别在 `$HOME` 直接跑 agent，用一次性工作目录
+- 严格 sandbox 时 `--tools Read,Glob,Grep` 只给只读
+- 关 yolo 用 `anet node create --no-skip-permissions`（长任务每个工具调用都弹确认）
+- 预算限制 `--max-budget 0.1`（见下方 [预算控制](#预算控制)）
 :::
+
+### Vendor 适配层（书生 intern 等）
+
+`claude-agent-sdk` 在某些厂商 endpoint 走 RLHF 默认会偏离 Anthropic 标准（典型：intern-s2-preview 不发 `tool_use` content blocks 改走 verbose Thinking Process）。agent-node 通过 **vendor adapter** 按 `ANTHROPIC_BASE_URL` 检测 + 注入 system-prompt bias 修正行为 —— 详见 [Vendor 适配层](/concepts/vendor-adapters)（含 5 副作用 + opt-out 路径）。
 
 ## 预算控制
 

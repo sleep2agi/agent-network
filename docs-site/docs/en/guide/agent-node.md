@@ -293,42 +293,76 @@ This design prevents message loops (A replies to B -> B replies to A -> infinite
 
 ## Tool Configuration
 
-### Available Tools
+### Default = full Claude Code preset (v0.9.0+, #101 Option B)
 
-R243 calibration: the `--tools` flag only affects the `claude-agent-sdk` runtime. The `codex-sdk` runtime's toolset (Read/Write/Edit/Bash/Grep/Glob/WebSearch) is baked into the codex CLI binary and **does not honor** `--tools`. The `claude-code-cli` runtime shares the host's Claude Code toolset and also does not use this flag.
+Since [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B (agent-node v2.3.6+), the `claude-agent-sdk` runtime's **default toolset is the full Claude Code preset** — not an empty set. As soon as a node spawns, it can use:
 
-| Tool | Description | Applicable Runtime |
-|------|------|-------------|
-| `Read` | Read files | `claude-agent-sdk` |
-| `Write` | Write files | `claude-agent-sdk` |
-| `Edit` | Edit files | `claude-agent-sdk` |
-| `Bash` | Execute commands | `claude-agent-sdk` |
-| `Glob` | File search | `claude-agent-sdk` |
-| `Grep` | Content search | `claude-agent-sdk` |
-| `WebSearch` | Web search | `claude-agent-sdk` |
-| `WebFetch` | Fetch URL contents | `claude-agent-sdk` |
+- Filesystem: `Read` / `Write` / `Edit` / `Glob` / `Grep`
+- Shell: `Bash` (subject to `dangerouslySkipPermissions=true`, on by default — no per-call confirmation)
+- Network: `WebFetch` / `WebSearch`
+- Subtasks / notebooks: `Task` / `NotebookEdit` / ...
 
-Verified at [`agent-node/src/cli.ts:160`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L160):
+Plus the 17 MCP tools on the hub side (`commhub_send_task` / `commhub_reply` / ...).
+
+> **Root cause** ([#101](https://github.com/sleep2agi/agent-network/issues/101)): in older versions, with no `tools` field in `config.json`, agent-node passed the SDK `options.tools = undefined`, and the SDK treated that as "no built-in tools". The agent could only call MCP tools and would hallucinate "network restricted" when asked for WebFetch / Bash / Read. Option B forces the fallback to the SDK `{ type: 'preset', preset: 'claude_code' }` sentinel — per the SDK type defs (`sdk.d.ts:1229-1238`), this is the standard way to say "give me the full Claude Code toolset".
+
+### Three `--tools` modes (only for `claude-agent-sdk`)
+
+The `--tools` flag only affects the `claude-agent-sdk` runtime — the `codex-sdk` toolset is baked into the codex CLI (`Read/Write/Edit/Bash/Grep/Glob/WebSearch`, **does not honor** `--tools`); the `claude-code-cli` runtime shares the host's Claude Code toolset and also doesn't go through this flag (R243 chain).
+
+| Input | Effect | Verify |
+|------|---------|--------|
+| `--tools all` | Full SDK preset (same as above) — single source of truth | [`cli.ts:219`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L219) |
+| `--tools Read,Glob,Grep` | Explicit allowlist (string array), bypasses preset — strict sandbox | [`cli.ts:217,220`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L217) |
+| Absent / empty string | **Falls back to full preset** (the #101 fix; previously left as `undefined` → empty set) | [`cli.ts:216,221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L216) |
+
+Actual logic from source ([`agent-node/src/cli.ts:210-221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L210)):
+
 ```ts
-const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
-// ... cli.ts:560: tools: TOOLS.length ? TOOLS : undefined  ← passed to claude-agent-sdk query options
+const TOOLS_PRESET = { type: "preset" as const, preset: "claude_code" as const };
+// Behaviour matrix (sdk.d.ts:1229-1238):
+//   --tools "all"       → SDK preset (full Claude Code tool set)
+//   --tools "Read,Bash" → explicit allowlist
+//   --tools "" (absent) → SDK preset (the #101 fix; previously left empty)
+const TOOLS_EXPLICIT = toolsRaw === "all" ? null : toolsRaw.split(",").filter(Boolean);
+let TOOLS: string[] | typeof TOOLS_PRESET =
+  toolsRaw === "all" ? TOOLS_PRESET
+  : (TOOLS_EXPLICIT && TOOLS_EXPLICIT.length) ? TOOLS_EXPLICIT
+  : TOOLS_PRESET;
+// ... cli.ts:653: tools: TOOLS  ← passed to claude-agent-sdk query options (preset or string[])
 ```
 
 ```bash
-# Specify tools (only effective for the claude-agent-sdk runtime)
-npx @sleep2agi/agent-node --alias coder --tools Read,Write,Edit,Bash,Glob,Grep
+# Default (no --tools) → full Claude Code preset
+npx @sleep2agi/agent-node --alias coder
 
-# All tools
+# Explicit "all" → same preset (single source of truth, replaces the old hardcoded 8-tool list)
 npx @sleep2agi/agent-node --alias coder --tools all
 
-# codex-sdk runtime silently ignores --tools
+# Explicit allowlist (read-only agent) — bypasses the preset
+npx @sleep2agi/agent-node --alias coder --tools Read,Glob,Grep
+
+# codex-sdk silently ignores --tools
 npx @sleep2agi/agent-node --alias coder --runtime codex-sdk
 # Codex has Read/Write/Edit/Bash/Grep/Glob/WebSearch baked in — you cannot detach individual tools.
 ```
 
-::: warning Security Note
-`--tools all` gives the agent full filesystem and command execution permissions. In production, explicitly specify only the tools needed (e.g., a read-only agent gets just `Read,Glob,Grep`).
+### `anet node create` behavior-disclosure banner (Vincent push, [#101](https://github.com/sleep2agi/agent-network/issues/101))
+
+After a successful `anet node create <alias>`, agent-node prints a **behavior-disclosure banner**: the built-in tools (explicit list or `all (Claude Code preset)`) + MCP tools + current flags (`dangerouslySkipPermissions=true` / `teammateMode=true`) + a one-liner "the agent can read/write files, run shell commands, and access the network". The banner is printed at the end of `createCommand` in [agent-network/bin/cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) — so **you actually see what the agent can do** and decide whether to sandbox it.
+
+> **⚠ User responsibility**: the default preset + default `dangerouslySkipPermissions=true` means once the agent starts it can **edit files, run shell commands, and access the network without confirmation prompts**. See [Security → Tool Permissions](/en/concepts/security#tool-permissions-default-claude-code-preset-user-responsibility).
+
+::: warning Security note
+- Default preset + default yolo mode (`dangerouslySkipPermissions`) — don't run agents directly from `$HOME`; use a disposable working directory
+- For strict sandbox: `--tools Read,Glob,Grep` gives a read-only agent
+- To turn off yolo mode: `anet node create --no-skip-permissions` (every tool call prompts, hurts long-task UX)
+- Per-task budget cap: `--max-budget 0.1` (see [Budget Control](#budget-control) below)
 :::
+
+### Vendor adapter layer (InternLM / 书生 etc.)
+
+On some vendor endpoints, `claude-agent-sdk` follows its RLHF defaults and drifts from Anthropic standard (canonical case: intern-s2-preview does not emit `tool_use` content blocks and falls back to verbose Thinking Process text). agent-node uses a **vendor adapter** to detect by `ANTHROPIC_BASE_URL` and inject a system-prompt bias that nudges behavior back — see [Vendor Adapters](/en/concepts/vendor-adapters) for the full mechanism, the 5 side effects, and the opt-out path.
 
 ## Budget Control
 
