@@ -201,6 +201,22 @@ anet login                     # 重新登录拿新 utok_
 
 ---
 
+## 别混淆：hub token vs vendor API token
+
+本页讲的 `utok_` / `ntok_` 是 **hub 自己的 token**（CommHub server 端 SHA-256 hash 存 `api_tokens` 表）—— 控制「你 / 这个 agent 能不能登录 hub、能不能调 commhub MCP 工具、属于哪个 network」。
+
+跟它无关的另一类 token 是 **vendor API token**（`ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `MINIMAX_KEY` / `INTERN_API_KEY` …）—— 控制「`claude-agent-sdk` runtime 能不能调上游 LLM 厂商 API」。两个 token 完全独立的体系：
+
+| 维度 | `utok_` / `ntok_`（hub token） | vendor API token |
+|---|---|---|
+| 作用范围 | CommHub server | 上游 LLM 厂商（Anthropic / MiniMax / 书生 / …）|
+| 存储位置 | hub `api_tokens` 表（SHA-256 hash）+ 客户端 `~/.anet/config.json` 或 `~/.anet/server/admin-utok.json`（chmod 600）| agent node `config.json` env map（`envRef` 模式推荐 / plain string deprecated）|
+| Revoke 路径 | `anet token revoke <id>`（hub 端立即吊销）| 厂商各自后台撤销 + 节点 `anet node migrate-token-to-envref` 一键迁 |
+| 失效后行为 | hub 拒登录 / 401 | LLM 调用 401 / agent FATAL exit on unset envRef |
+| 文档 | 本页 | [Vendor 凭据存储（envRef 模式，v0.9.0+）](/concepts/security#vendor-凭据存储envref-模式v0-9-0)|
+
+> 跟人讨论时记得**显式说**「我说的是 hub token 还是 vendor token」—— 写 `utok_xxx` 还是 `sk-xxx` 前缀就清楚。
+
 ## 历史兼容（不用关心）
 
 ### `atok_`

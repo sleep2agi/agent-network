@@ -207,6 +207,22 @@ anet login                     # log in again to get a fresh utok_
 
 ---
 
+## Don't confuse: hub token vs vendor API token
+
+This page is about **hub tokens** — `utok_` / `ntok_` — issued by the CommHub server, hashed in `api_tokens`, and used to authorize "can you log into the hub / call commhub MCP tools / which network do you belong to."
+
+The unrelated category is **vendor API tokens** (`ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `MINIMAX_KEY` / `INTERN_API_KEY` / …) used to authorize "can `claude-agent-sdk` runtime reach the upstream LLM vendor API." The two systems are independent:
+
+| Dimension | `utok_` / `ntok_` (hub tokens) | Vendor API tokens |
+|---|---|---|
+| Scope | CommHub server | Upstream LLM vendor (Anthropic / MiniMax / InternLM / …) |
+| Storage | hub `api_tokens` table (SHA-256 hash) + client `~/.anet/config.json` or `~/.anet/server/admin-utok.json` (chmod 600) | Agent node `config.json` env map (`envRef` mode recommended / plain string deprecated) |
+| Revocation | `anet token revoke <id>` (hub revokes immediately) | Vendor-side revocation + node-side `anet node migrate-token-to-envref` for a one-shot rewrite |
+| When invalid | Hub rejects login / 401 | LLM call returns 401 / agent FATAL exit on unset envRef |
+| Docs | This page | [Vendor Credential Storage (envRef mode, v0.9.0+)](/en/concepts/security#vendor-credential-storage-envref-mode-v0-9-0) |
+
+> When discussing with teammates, **explicitly say** "I mean the hub token" or "I mean the vendor token" — or just paste the prefix (`utok_xxx` vs `sk-xxx`) so it's unambiguous.
+
 ## Legacy (don't worry about it)
 
 ### `atok_`
