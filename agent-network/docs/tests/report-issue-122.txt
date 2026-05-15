@@ -1,0 +1,45 @@
+── Setup ──
+
+── Test 1: default TTY → auto-wrap ──
+  ✅ wrap announcement
+  ✅ 3 follow-up hints printed
+  ✅ tmux session 'a' alive after wrap
+── Test 2: --foreground → no wrap ──
+  ✅ --foreground did NOT create tmux session
+  ✅ --foreground skipped wrap announcement
+── Test 3: --no-tmux alias of --foreground ──
+  ✅ --no-tmux did NOT create tmux session
+── Test 4: $TMUX env set → no wrap (recursion layer 1) ──
+  ✅ auto-wrap correctly skipped when inside tmux
+── Test 5: non-TTY → no wrap ──
+  ✅ auto-wrap skipped in non-TTY
+── Test 6: pre-existing same-name tmux session → friendly error ──
+  ✅ friendly already-exists error
+  ✅ hint: Attach
+  ✅ hint: Restart
+  ✅ hint: --foreground escape
+── Test 7: tmux missing → foreground + warn ──
+  ✅ tmux-missing warn printed
+  ✅ warn mentions foreground fallback
+── Test 8: anet node stop also kills tmux session ──
+  ✅ (precondition) tmux 'a' still alive from Test 1
+  ✅ tmux 'a' killed by anet node stop
+  ✅ stop output mentions tmux
+── Test 9: --new-session propagates through tmux wrap ──
+  ✅ --new-session reached inner cmd
+  ✅ inner cmd also has --foreground (recursion guard layer 2)
+── Test 10: project up (#117) does not recurse ──
+  ✅ project up created both tmux sessions
+  ✅ project up inner cmd has --foreground
+  ✅ exactly 2 tmux sessions (no recursion)
+── Test 11: --attach issues tmux attach ──
+  ✅ --attach printed wrap announcement before attaching
+  ✅ --attach created the tmux session
+── Test 12: --help advertises --foreground / --no-tmux / --attach ──
+  ✅ help: --foreground
+  ✅ help: --attach
+  ✅ help mentions default detached tmux
+
+──────────────────────────────────────
+  PASS=27  FAIL=0
+──────────────────────────────────────
