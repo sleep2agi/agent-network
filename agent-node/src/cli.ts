@@ -230,9 +230,26 @@ const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetU
 // never streams a valid response leaves query() hanging forever and the agent
 // never replies (see issue #98). When the guard fires we abort the query and
 // reply an error so the hang is at least visible. 0 disables the guard.
+//
+// v0.9.2 (#132): default raised 120000 → 300000 (5min) based on
+// docs/research/sdk-concurrency-investigation.md Phase 3 — under heavy
+// concurrent fan-out (Vincent's 30-agent papercope demo), intern API per-
+// request latency stretches 10-20× (1.57s → 17-37s). The old 120s ceiling
+// fired mid-stream before the vendor's queue drained, swallowing the real
+// cause. 300s covers the observed tail (37s) with 8× headroom and lets
+// claude-agent-sdk's own 429/5xx retry chain engage.
 const CLAUDE_TIMEOUT_MS = parseInt(
   opts["claude-timeout-ms"] || process.env.CLAUDE_TIMEOUT_MS
-  || fileConfig.flags?.claudeTimeoutMs || fileConfig.claudeTimeoutMs || "120000"
+  || fileConfig.flags?.claudeTimeoutMs || fileConfig.claudeTimeoutMs || "300000"
+);
+// v0.9.2 (#129 + #132): retry count for transient LLM-call errors.
+// Auth-error class (401 / invalid_api_key / A0211) short-circuits retry —
+// retrying with the same bad credential just wastes 12s before failing
+// again. Transient (timeout / 5xx / network reset) retries with exponential
+// backoff: 4s, 8s. Set 0 to opt out entirely (returns to v0.9.1 behavior).
+const CLAUDE_MAX_RETRIES = parseInt(
+  opts["claude-max-retries"] || process.env.CLAUDE_MAX_RETRIES
+  || fileConfig.flags?.claudeMaxRetries || fileConfig.claudeMaxRetries || "2"
 );
 const NEW_SESSION = opts["new-session"] === "true";
 const SESSION_ID = NEW_SESSION ? "" : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "");
@@ -692,44 +709,91 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   const t0 = Date.now();
   log(`[claude] claudePath=${claudePath || "SDK default"}, mcpServers=${Object.keys(mcpServers).join(",") || "none"}`);
 
-  // Wall-clock guard: abort the query if it never produces a result. Without
-  // this a non-responsive endpoint hangs query() forever (issue #98).
-  let timedOut = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  if (CLAUDE_TIMEOUT_MS > 0) {
+  // v0.9.2 (#129 fast-fail + #132 fan-out retry): detect auth-class errors so
+  // we short-circuit the retry loop. Retrying with the same bad credential
+  // just wastes the backoff window; the operator needs a clear remediation
+  // hint immediately. Heuristic covers Anthropic standard + intern A02xx +
+  // common shapes from MiniMax / 小米 / generic OpenAI-compat 401s.
+  const isAuthError = (msg: string): boolean => {
+    if (!msg) return false;
+    return /(401|403)\b|invalid[_\s]?api[_\s]?key|authentication[_\s]?error|expired[_\s]?token|unauthor(iz|is)ed|A02\d{2}|user[_\s]?token[_\s]?expired/i.test(msg);
+  };
+  const remediationHint = (msg: string): string => {
+    const base = (process.env.ANTHROPIC_BASE_URL || "").toLowerCase();
+    if (base.includes("intern-ai.org.cn")) return "→ Refresh INTERN_S1_API_KEY at https://chat.intern-ai.org.cn and re-export it";
+    if (base.includes("minimax")) return "→ Refresh MiniMax API key at https://platform.minimaxi.com";
+    if (base.includes("anthropic")) return "→ Refresh ANTHROPIC_AUTH_TOKEN at https://console.anthropic.com/settings/keys";
+    return "→ Refresh your vendor API key and re-export the ENV var";
+  };
+
+  // v0.9.2 (#132): retry-with-backoff outer loop. Each attempt gets its own
+  // abort controller + timeout window. On auth-class error, short-circuit
+  // (fast-fail, no retry). On transient error / timeout, backoff 4s, 8s
+  // (+ jitter to spread herd retries across the vendor queue) and retry.
+  let lastErr: string = "";
+  let timedOutFinal = false;
+  for (let attempt = 0; attempt <= CLAUDE_MAX_RETRIES; attempt++) {
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const ac = new AbortController();
     options.abortController = ac;
-    timer = setTimeout(() => { timedOut = true; ac.abort(); }, CLAUDE_TIMEOUT_MS);
-  }
-  try {
-    for await (const message of query({ prompt, options })) {
-      const m = message as any;
-      if (m.type === "system" && m.subtype === "init") {
-        claudeSessionId = m.session_id;
-        log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "default"}`);
-        writebackSession(m.session_id);
-      }
-      if (m.type === "result") {
-        const dt = Date.now() - t0;
-        const u = m.usage || {};
-        log(`[claude] ${m.subtype} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}`);
-        result = m.subtype === "success"
-          ? m.result || "任务完成"
-          : `执行出错: ${m.error || m.result || "未知错误"}`;
-      }
+    if (CLAUDE_TIMEOUT_MS > 0) {
+      timer = setTimeout(() => { timedOut = true; ac.abort(); }, CLAUDE_TIMEOUT_MS);
     }
-  } catch (err: any) {
-    if (timedOut) {
-      const dt = Date.now() - t0;
-      log(`[claude] ✗ timed out after ${dt}ms (CLAUDE_TIMEOUT_MS=${CLAUDE_TIMEOUT_MS}) — aborting query`);
-      return `执行出错: claude-agent-sdk 调用超时 (${Math.round(CLAUDE_TIMEOUT_MS / 1000)}s 无响应) — 检查 ANTHROPIC_BASE_URL endpoint 是否可达且 Anthropic-compatible`;
+    const attemptStart = Date.now();
+    try {
+      result = "";  // reset accumulator for this attempt
+      for await (const message of query({ prompt, options })) {
+        const m = message as any;
+        if (m.type === "system" && m.subtype === "init") {
+          claudeSessionId = m.session_id;
+          log(`[claude] session=${m.session_id?.slice(0, 8)} model=${MODEL || "default"} attempt=${attempt + 1}`);
+          writebackSession(m.session_id);
+        }
+        if (m.type === "result") {
+          const dt = Date.now() - t0;
+          const u = m.usage || {};
+          log(`[claude] ${m.subtype} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}${attempt > 0 ? ` | attempt=${attempt + 1}` : ""}`);
+          result = m.subtype === "success"
+            ? m.result || "任务完成"
+            : `执行出错: ${m.error || m.result || "未知错误"}`;
+        }
+      }
+      if (timer) clearTimeout(timer);
+      return result;
+    } catch (err: any) {
+      if (timer) clearTimeout(timer);
+      const msg = String(err?.message || err).slice(0, 300);
+      const attemptDt = Date.now() - attemptStart;
+
+      // Fast-fail on auth errors — no point retrying with the same bad key.
+      if (isAuthError(msg)) {
+        log(`[claude] ✗ FATAL: vendor API auth failed (${msg.slice(0, 150)})`);
+        log(`[anet] FATAL: Vendor API auth failed — ${msg.slice(0, 100)}`);
+        log(`[anet]        ${remediationHint(msg)}`);
+        return `执行出错: vendor API auth failed (${msg.slice(0, 80)}) — refresh API key and re-export ENV var; see agent-node log for vendor-specific URL`;
+      }
+
+      lastErr = msg;
+      timedOutFinal = timedOut;
+      const reason = timedOut ? `timed out after ${attemptDt}ms` : `errored: ${msg.slice(0, 100)}`;
+
+      if (attempt < CLAUDE_MAX_RETRIES) {
+        // Exponential backoff 4s, 8s + 0-1s jitter. Jitter spreads herd
+        // retries across the vendor's recovering queue.
+        const backoffMs = 4000 * Math.pow(2, attempt) + Math.floor(Math.random() * 1000);
+        log(`[claude] attempt ${attempt + 1}/${CLAUDE_MAX_RETRIES + 1} ${reason}; retry in ${backoffMs}ms`);
+        await new Promise(r => setTimeout(r, backoffMs));
+        continue;
+      }
+      // Exhausted retries — return error.
+      log(`[claude] ✗ all ${CLAUDE_MAX_RETRIES + 1} attempts failed; last: ${reason}`);
     }
-    log(`[claude] ✗ query error: ${String(err?.message || err).slice(0, 200)}`);
-    return `执行出错: ${String(err?.message || err).slice(0, 200)}`;
-  } finally {
-    if (timer) clearTimeout(timer);
   }
-  return result;
+  if (timedOutFinal) {
+    return `执行出错: claude-agent-sdk 调用超时 (${Math.round(CLAUDE_TIMEOUT_MS / 1000)}s × ${CLAUDE_MAX_RETRIES + 1} attempts) — vendor 长时间未响应, 检查 ANTHROPIC_BASE_URL endpoint 或 vendor 负载`;
+  }
+  return `执行出错: ${lastErr.slice(0, 200)} (after ${CLAUDE_MAX_RETRIES + 1} attempts)`;
 }
 
 // ══════════════════════════════════════
