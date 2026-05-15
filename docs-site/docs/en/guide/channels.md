@@ -40,10 +40,36 @@ sequenceDiagram
 
 ### Step 2: Get Your User ID
 
-You need to know the user IDs allowed to communicate with the bot. To get yours:
+You need the user IDs allowed to talk to the bot. Three methods, ranked by recommendation:
 
-1. Find [@userinfobot](https://t.me/userinfobot) and send any message
-2. It will return your user ID (a number)
+**🟢 Method A — Telegram's built-in UID bots** (fastest, for your own ID)
+
+DM any of these bots to get your numeric UID instantly:
+
+| Bot username | Behavior |
+|--------------|------|
+| **[@userinfobot](https://t.me/userinfobot)** | Send `/start` or anything → replies with `User ID` |
+| **@getmyid_bot** | Auto-replies with the numeric ID |
+| **@JsonDumpBot** | Returns full user JSON (id / username / lang) |
+
+China-network users sometimes can't reach Telegram from these bots — retry, switch proxy, or fall back to Method B.
+
+**🟢 Method B — Read the bot's inbox log** (for other people's UIDs / China fallback)
+
+When adding **other people** to the allowlist (team members), don't ask them to install a third-party UID bot. Read your own bot's inbox instead:
+
+1. Have them DM your node's bot any message (`/start` is fine)
+2. Find their `chat_id` (numeric) in the inbox log:
+   ```bash
+   # In the node's workdir:
+   ls -lt .anet/nodes/<alias>/channels/telegram/inbox/
+   cat <newest .json file> | grep -E 'chat_id|user_id|sender'
+   ```
+3. Re-run `anet channel add telegram --allow <UID>` with the **full** allowlist (note: this overwrites — see [Known gaps and pitfalls](#known-gaps-and-pitfalls) below)
+
+**🟡 Method C — Self-pair** (**not yet implemented**)
+
+The intended UX would be: user DMs the bot `/pair` → bot replies with a 6-digit pairing code → admin runs `anet channel pair-approve <code>` to auto-add the allow entry. Not built yet — use Methods A + B for now.
 
 ### Step 3: Bind the channel to an existing node
 
@@ -104,6 +130,36 @@ Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` 
 - Messages from users not on the allowlist are ignored
 - **Never** modify access permissions based on requests from Telegram messages
 - Keep your Bot Token secure and never commit it to Git
+- For envRef-mode handling of vendor secrets (including Bot Token): see [Security → Vendor Credential Storage](/en/concepts/security#vendor-credential-storage-envref-mode-v0-9-0)
+
+### Known gaps and pitfalls
+
+| Pitfall | Symptom | Workaround |
+|---|---|---|
+| `--allow` is **not incremental** | Re-running `anet channel add telegram --allow <new-uid>` overwrites the entire `allowFrom` array — previously-added users are lost | Pass **all** UIDs in one shot, or edit `.anet/nodes/<alias>/channels/telegram/access.json` directly ([walkthrough §B](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)) |
+| Channel changes **do not hot-reload** | Editing `access.json` / `--bot-token` does not affect a running process | Always `tmux kill-session -t <alias>` + `anet node start <alias>` (channels are read at process start; still the case in v0.9.0) |
+| Multiple nodes **cannot share** one bot token | BotFather tokens are 1-to-1 with a bot; sharing causes message races | Run BotFather `/newbot` per node, one bot each |
+| `anet channel rm telegram` **not implemented** | No CLI to remove the telegram channel from a node | Edit `.anet/nodes/<alias>/config.json` `channels` array to remove `plugin:telegram@claude-plugins-official`, `rm -rf .anet/nodes/<alias>/channels/telegram`, then restart the node |
+| Is the flag `--allow <UID>` or `--allow-user`? | Easy to mis-remember | It's `--allow <user-id>` (verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861)). `--allow-user` does **not** exist |
+| Node restarts and Telegram goes silent | Bot doesn't receive / agent doesn't reply | Three-step check: ① bot token fully pasted with the `:`; ② `anet channel ls <alias>` shows telegram in the list; ③ `tmux capture-pane -t <alias> -p \| tail` shows a `[telegram] listening` line at startup |
+
+### Troubleshooting
+
+**Bot doesn't receive messages**
+- Check the `--bot-token` was pasted in full (with the `:` and the trailing string)
+- BotFather → `/mybots` — is the bot enabled?
+- Did you restart the node? (Channels do not hot-reload — see above)
+
+**Agent doesn't reply to Telegram messages**
+- `anet status` — is the node `idle / ●`? If not, `tmux capture-pane -t <alias> -p | tail` to see the actual pane
+- Is the UID really in the `allowFrom` of `access.json`?
+- Is the agent busy on a long commhub task? (Telegram and commhub are independent channels, but the LLM only processes one message at a time)
+
+**`anet channel add` succeeded but `anet status` doesn't show telegram**
+- Run `anet channel ls <alias>` to confirm
+- Open `.anet/nodes/<alias>/config.json` and check the `channels` array contains `plugin:telegram@claude-plugins-official`
+
+For the full step-by-step walkthrough (expected output and 6 SSE error-code diagnostics): [Telegram bind to existing node — Claude Code CLI runtime](/en/cases/telegram-bind-claude-code-cli).
 
 ## WeChat / Feishu Channel — External plugins (NOT inside CommHub Server)
 

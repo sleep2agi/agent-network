@@ -1,5 +1,11 @@
 # anet 节点接入 Telegram — 完整指南
 
+> 📦 **Canonical user-facing 文档已迁入 docs-site**：
+> - 主使用指南：[https://www.anet.sh/guide/channels#telegram-channel](https://www.anet.sh/guide/channels#telegram-channel)（含 3 种 UID 获取方法 + 6 种常见 gap 表 + 故障排查段）
+> - 完整 claude-code-cli 步骤 walkthrough：[https://www.anet.sh/cases/telegram-bind-claude-code-cli](https://www.anet.sh/cases/telegram-bind-claude-code-cli)（646 行细节、SSE 错误码诊断）
+>
+> 本文件作为**内部 / 团队 playbook 参考**保留（per Vincent 2026-05-15 4910 完善请求），不再更新；以 docs-site 为准。
+
 把 anet 节点（agent）接入 Telegram bot，让你在手机上跟 agent 对话 / 派任务 / 看回复。
 
 > 这份文档解决三个常见疑问：① 命令长什么样 ② token 哪儿来 ③ **`--allow <UID>` 怎么拿**（最容易卡的一步）
