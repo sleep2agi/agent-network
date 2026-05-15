@@ -1130,8 +1130,47 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
 }
 
 function saveCreatedNode(id: string, profile: Profile) {
+  // #125 fix: rewrite plain-secret env values to the envRef shape **at create
+  // time**, before the config first hits disk. Keeps secrets out of git
+  // history, dashboard, anet ls -v, etc. User sees a banner with `export …`
+  // lines so they know what to drop into ~/.bashrc.
+  rewritePlainSecretsToEnvRef(id, profile);
   writeLegacyProjectAlias(profile.node_name || id);
   saveProfile(id, profile);
+}
+
+// #125 — extracted helper so create + migrate-token-to-envref + (future)
+// batch.ts share one definition of "what counts as a secret" and one derivation
+// rule for the env-var name. Mutates profile.env in place.
+function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
+  const env: any = (profile as any).env;
+  if (!env || typeof env !== "object") return;
+  const SECRET_KEY_RX = /(_TOKEN|_KEY|_SECRET|AUTH)$/i;
+  const SECRET_VAL_RX = /^(sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer\s)/i;
+  const nodeIdShort = ((profile as any).node_id || nodeId).replace(/[^A-Za-z0-9_]/g, "_").slice(0, 16);
+  const rewrites: { key: string; refName: string; value: string }[] = [];
+  for (const [k, v] of Object.entries(env)) {
+    if (typeof v !== "string") continue; // already envRef
+    if (!(SECRET_KEY_RX.test(k) || SECRET_VAL_RX.test(v))) continue;
+    const refName = `${k}_${nodeIdShort}`.toUpperCase();
+    rewrites.push({ key: k, refName, value: v });
+    env[k] = { _envRef: refName };
+    // Also surface the value in the *current* process.env so this very
+    // session's downstream (e.g. spawning the agent right after create) can
+    // start without the user having to re-`export`. Persistent storage is
+    // still the user's responsibility (.bashrc / secrets manager).
+    if (!process.env[refName]) process.env[refName] = v;
+  }
+  if (rewrites.length === 0) return;
+  console.log(`\n[anet] 🔐 ${rewrites.length} secret value(s) in env have been moved out of config.json (envRef shape, #125).`);
+  console.log(`[anet]    config.json now stores only the env-var NAME; the secret stays in your shell.`);
+  console.log(`[anet]    To make this persistent across shells, append to ~/.bashrc / ~/.zshrc:`);
+  console.log("");
+  for (const { refName, value } of rewrites) {
+    const safe = value.replace(/'/g, `'\\''`);
+    console.log(`    export ${refName}='${safe}'`);
+  }
+  console.log("");
 }
 
 async function requestNodeToken(profile: Profile, id: string): Promise<string> {
@@ -6473,6 +6512,90 @@ async function infoCommand() {
   console.log();
 }
 
+// ── migrate-token-to-envref (issue #125) ──
+//
+// Convert plain-secret env values in a node's config.json to the envRef shape
+// (`{ "_envRef": "<NAME>" }`) so secrets stop persisting on disk. Backward
+// compat: agent-node runtime accepts both shapes; existing plain configs keep
+// working until the user migrates.
+async function migrateTokenToEnvRefCommand() {
+  const ref = args[1];
+  if (!ref) {
+    console.log(`\nanet node migrate-token-to-envref <node-name>`);
+    console.log(`\n  Convert plain-secret env values in this node's config.json to envRef shape.`);
+    console.log(`  Secrets persist in process.env only; config.json holds the env-var name.\n`);
+    return;
+  }
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) { console.error(`Node "${ref}" not found.`); process.exit(1); }
+  const { id: nodeId, profile } = resolved;
+  const envMap: any = profile.env;
+  if (!envMap || typeof envMap !== "object") {
+    console.log(`[anet] Node "${nodeId}" has no env map — nothing to migrate.`);
+    return;
+  }
+
+  // Same regex pair the runtime (#125) and `anet doctor` (#125) use.
+  const SECRET_KEY_RX = /(_TOKEN|_KEY|_SECRET|AUTH)$/i;
+  const SECRET_VAL_RX = /^(sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer\s)/i;
+  const candidates: { key: string; value: string }[] = [];
+  for (const [k, v] of Object.entries(envMap)) {
+    if (typeof v !== "string") continue; // already envRef object
+    if (SECRET_KEY_RX.test(k) || SECRET_VAL_RX.test(v)) {
+      candidates.push({ key: k, value: v });
+    }
+  }
+  if (candidates.length === 0) {
+    console.log(`[anet] Node "${nodeId}" — no plain-secret env values detected. Nothing to migrate.`);
+    return;
+  }
+
+  // Derive a safe env-var name: <KEY>_<NODE_ID_SUFFIX>. node_id is ASCII;
+  // alias may include CJK which is allowed in process.env on most shells but
+  // breaks `export NAME=...` interpolation. Pick the ASCII path.
+  const nodeIdShort = (profile.node_id || nodeId).replace(/[^A-Za-z0-9_]/g, "_").slice(0, 16);
+  const newEnv: any = { ...envMap };
+  const exportLines: string[] = [];
+  for (const { key, value } of candidates) {
+    const refName = `${key}_${nodeIdShort}`.toUpperCase();
+    newEnv[key] = { _envRef: refName };
+    // Quote the value: it may contain shell-special chars; single-quote and
+    // escape any literal single quote inside.
+    const safeVal = value.replace(/'/g, `'\\''`);
+    exportLines.push(`export ${refName}='${safeVal}'`);
+  }
+
+  // Backup the original config before overwriting, so users can revert.
+  const cfgPath = join(nodesDir(), nodeId, "config.json");
+  if (!existsSync(cfgPath)) {
+    console.error(`[anet] Node "${nodeId}" config not found at ${cfgPath}`);
+    process.exit(1);
+  }
+  const bakPath = `${cfgPath}.bak-${Date.now()}`;
+  try {
+    writeFileSync(bakPath, readFileSync(cfgPath, "utf-8"));
+  } catch (e: any) {
+    console.error(`[anet] Failed to write backup ${bakPath}: ${e.message}`);
+    process.exit(1);
+  }
+
+  // Persist the migrated env map. We rewrite the whole profile to preserve
+  // every other field (the canonical writer is `saveProfile()`).
+  const newProfile: any = { ...profile, env: newEnv };
+  saveProfile(nodeId, newProfile);
+
+  console.log(`\n[anet] ✅ Migrated ${candidates.length} env value(s) in node "${nodeId}":`);
+  for (const { key } of candidates) console.log(`         env.${key} → { _envRef: "${key}_${nodeIdShort}".toUpperCase() }`);
+  console.log(`[anet]    Backup written: ${bakPath}\n`);
+  console.log(`[anet] 🔑 Now export the secret values in your shell BEFORE starting this node:`);
+  console.log("");
+  for (const line of exportLines) console.log(`    ${line}`);
+  console.log("");
+  console.log(`[anet]    (Append these to ~/.bashrc / ~/.zshrc / your secrets manager for persistence.)`);
+  console.log(`[anet]    The agent-node runtime will refuse to start if any referenced var is unset.`);
+  console.log(`[anet]    Restart the node: anet node start ${nodeId}\n`);
+}
+
 // ── license ──
 
 async function licenseCommand() {
@@ -6706,6 +6829,34 @@ async function doctorCommand() {
     }
   }
 
+  // #125 — scan all nodes for plain-secret env values still persisted in
+  // config.json. Migration is per-node (`anet node migrate-token-to-envref
+  // <alias>`); doctor just enumerates candidates so users see the inventory
+  // before deciding whether to migrate.
+  const SECRET_KEY_RX = /(_TOKEN|_KEY|_SECRET|AUTH)$/i;
+  const SECRET_VAL_RX = /^(sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer\s)/i;
+  const plainSecretNodes: { id: string; fields: string[] }[] = [];
+  for (const id of ids) {
+    const p = loadProfile(id);
+    if (!p || !p.env || typeof p.env !== "object") continue;
+    const hits: string[] = [];
+    for (const [k, v] of Object.entries(p.env)) {
+      if (typeof v !== "string") continue; // already envRef object → safe
+      if (SECRET_KEY_RX.test(k) || SECRET_VAL_RX.test(v)) hits.push(k);
+    }
+    if (hits.length) plainSecretNodes.push({ id, fields: hits });
+  }
+  if (plainSecretNodes.length) {
+    warning("Plain-secret config detected", `${plainSecretNodes.length} node(s) persist secrets in config.json (security hygiene #125)`);
+    for (const { id, fields } of plainSecretNodes) {
+      const name = nodeDisplayName(id, loadProfile(id));
+      info(`    ↳ ${name}`, `env keys: ${fields.join(", ")}`);
+    }
+    info("→ migrate", `anet node migrate-token-to-envref <alias>   (one node at a time, prints export commands)`);
+  } else {
+    check("No plain-secret config", true, "all env values are either non-secret or envRef objects");
+  }
+
   // Probe each ntok_ against hub; auto-reissue any that hub rejects with 401.
   // This handles "hub DB was wiped / token revoked" — the node config is
   // otherwise valid, only the token string is stale. We patch only the token
@@ -6806,7 +6957,8 @@ switch (command) {
       case "delete": args.splice(0, 1); await deleteCommand(); break;
       case "rename": args.splice(0, 1); await renameCommand(); break;
       case "ls": case "list": lsCommand(); break;
-      default: console.log(`Usage: anet node <create|start|stop|resume|delete|ls|rename> [name]`); break;
+      case "migrate-token-to-envref": args.splice(0, 1); await migrateTokenToEnvRefCommand(); break;
+      default: console.log(`Usage: anet node <create|start|stop|resume|delete|ls|rename|migrate-token-to-envref> [name]`); break;
     }
     break;
   case "project": await projectCommand(); break;  // #117 — cwd-wide orchestration

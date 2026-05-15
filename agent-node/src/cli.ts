@@ -137,9 +137,47 @@ if (!opts.config && !Object.keys(fileConfig).length) {
 // the `--config` branch skipped env injection entirely — ANTHROPIC_BASE_URL /
 // ANTHROPIC_AUTH_TOKEN never reached the claude-agent-sdk subprocess and the
 // LLM call silently hung against the default api.anthropic.com endpoint.
+// #125 fix: config.json env value is now a tagged union.
+//   "plain string"                          → legacy, persisted secret (DEPRECATED)
+//   { "_envRef": "MY_TOKEN_ENV_VAR_NAME" }  → indirection via process.env
+// The envRef form keeps secrets out of the JSON file (and out of git history,
+// commhub logs, anet ls -v, dashboard, …). Backward-compat: plain strings keep
+// working but emit a single banner-style deprecation warn on startup.
 if (fileConfig.env && typeof fileConfig.env === "object") {
+  let plainSecretSeen = false;
   for (const [k, v] of Object.entries(fileConfig.env)) {
-    if (!process.env[k] && typeof v === "string") process.env[k] = expandHome(v);
+    if (process.env[k]) continue; // outer env wins (e.g. user already exported)
+    if (typeof v === "string") {
+      process.env[k] = expandHome(v);
+      // Only warn on values that *look* like secrets, not on benign env like
+      // ANTHROPIC_BASE_URL. Conservative regex: same secret-prefix family the
+      // anet CLI uses when deciding whether to auto-rewrite to envRef.
+      if (/^(sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer\s)/i.test(v) || k.match(/(_TOKEN|_KEY|_SECRET|AUTH)$/i)) {
+        plainSecretSeen = true;
+      }
+    } else if (v && typeof v === "object" && typeof (v as any)._envRef === "string") {
+      const refName = (v as any)._envRef;
+      const refVal = process.env[refName];
+      if (refVal === undefined || refVal === "") {
+        // Don't silently fall through — that would let agent-node start with a
+        // missing secret and fail mysteriously on the first LLM call. Fail
+        // loud so the user sees the cause.
+        console.error(`[anet] FATAL: config.json env.${k} references env var "${refName}" but it is not set in this shell.`);
+        console.error(`[anet]        Fix: export ${refName}=<your-value>  then re-run anet node start`);
+        console.error(`[anet]        (set the value matching the previous plain secret you migrated away from)`);
+        process.exit(1);
+      }
+      process.env[k] = refVal;
+    }
+    // Any other shape (number/boolean/array) is ignored — env values must be
+    // string or envRef-object.
+  }
+  if (plainSecretSeen) {
+    console.warn(`[anet] ⚠ DEPRECATED: config.json env contains plain secret values that are persisted on disk.`);
+    console.warn(`[anet]    Migrate to envRef form to keep secrets out of the JSON file:`);
+    console.warn(`[anet]      anet node migrate-token-to-envref ${ALIAS || "<alias>"}`);
+    console.warn(`[anet]    Or inspect candidates across all nodes:`);
+    console.warn(`[anet]      anet doctor`);
   }
 }
 
