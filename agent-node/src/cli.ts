@@ -671,7 +671,21 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     },
   };
   if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;
-  if (SYSTEM_PROMPT) options.systemPrompt = SYSTEM_PROMPT;
+  // #130 hotfix — intern-s2-preview emits Anthropic-spec `tool_use` content
+  // blocks only when biased by a system prompt; the default tool_choice:auto
+  // behaviour is verbose "Thinking Process" text-only output with tool calls
+  // embedded as text. Verified by direct curl against the intern /v1/messages
+  // endpoint (see docs/research/intern-tool-calling-investigation.md): with
+  // the bias prompt below, stop_reason flips from "max_tokens" to "tool_use"
+  // and the model emits a proper {type:"tool_use",name,input} content block.
+  // Detection is by ANTHROPIC_BASE_URL (the most stable signal across vendor
+  // presets, env, and CLI overrides). Generalises to future intern-* endpoints.
+  const isInternEndpoint = /intern-ai\.org\.cn|chat\.intern-ai/i.test(process.env.ANTHROPIC_BASE_URL || "");
+  const internToolUseBias = isInternEndpoint
+    ? "When a tool is available and applicable to the user request, you MUST respond by emitting a tool_use content block, not by writing text that describes the tool call. Do not show a verbose thinking process. Do not embed tool-call JSON inside text. Use the tool_use content channel directly. If no tool fits, respond normally with text.\n\n"
+    : "";
+  const combinedSystemPrompt = internToolUseBias + (SYSTEM_PROMPT || "");
+  if (combinedSystemPrompt) options.systemPrompt = combinedSystemPrompt;
   if (claudeSessionId) options.resume = claudeSessionId;
 
   let result = "";
