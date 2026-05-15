@@ -13,6 +13,7 @@ import { readFileSync, existsSync, writeFileSync, chmodSync } from "fs";
 import { join } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
+import { getHostTelemetry } from "./host-telemetry";
 
 const home = homedir();
 
@@ -356,6 +357,11 @@ const NODE_ID = fileConfig.node_id || "";
 const NODE_NAME = fileConfig.node_name || "";
 const NETWORK_ID = fileConfig.network_id || process.env.ANET_NETWORK_ID || globalConfig.network_id || "";
 const RESUME_ID = NODE_ID ? `sdk-${NODE_ID}` : `sdk-${ALIAS}-${Date.now().toString(36)}`;
+// #119: host telemetry attached to every report_status. Commhub server-side
+// schema lacks `host` for now (通信牛 step 2 follow-up); Zod's default object
+// mode silently drops unknown keys, so sending it here is safe — once
+// commhub-server adds the field to the schema the payload starts flowing
+// straight through without a coordinated release of both sides.
 const register = () => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status: "idle",
   server: osHostname(), hostname: osHostname(),
@@ -367,6 +373,7 @@ const register = () => callCommHub("report_status", {
   channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
   model: MODEL || undefined,
   network_id: NETWORK_ID || undefined,
+  host: getHostTelemetry(),
 });
 const reportStatus = (status: string, task?: string) => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status, task,
@@ -375,6 +382,7 @@ const reportStatus = (status: string, task?: string) => callCommHub("report_stat
   config_path: configFilePath || undefined,
   channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
   network_id: NETWORK_ID || undefined,
+  host: getHostTelemetry(),
 });
 const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 20 }))?.messages || [];
 const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
