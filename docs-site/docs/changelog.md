@@ -8,6 +8,39 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## v0.9.1 — **Patch: #130 intern tool-calling hotfix promote**（2026-05-15）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.1.14` （只升 version 字段，无源码变更；让 `anet upgrade` 看到 v0.9.1 line 跟 agent-node 2.3.9 + dashboard 配套）
+- `@sleep2agi/agent-node@2.3.9` （promote [#130](https://github.com/sleep2agi/agent-network/issues/130) hotfix to latest）
+- `@sleep2agi/commhub-server@0.8.1` *(无变化)*
+- `@sleep2agi/agent-network-dashboard@0.4.6` *(无变化)*
+
+### 修复
+
+- **[#130](https://github.com/sleep2agi/agent-network/issues/130) intern-s2-preview tool calling 真打通**（[commit `4cd0024`](https://github.com/sleep2agi/agent-network/commit/4cd0024) ＋ 双 phase publish promote）—— v0.9.0 时 intern-s2-preview 在 Anthropic 协议 `tool_choice: "auto"` 下默认走 verbose Thinking Process 不发 `tool_use` content blocks，强制 `tool_choice` 又被 `-20077` 拒。Hotfix：检测到 `ANTHROPIC_BASE_URL` 命中 `intern-ai.org.cn` / `chat.intern-ai` 时，prepend 一段短 system-prompt bias 让 model 直接发 `tool_use`。curl A/B verified：`stop_reason: max_tokens → tool_use`，`output_tokens: 1024 → 122`。详见 [Vendor 适配层](/concepts/vendor-adapters)（含 5 副作用 + opt-out 路径）。
+
+### 已知 gap 提醒（不阻 promote）
+
+- vendor adapter detection 用 URL regex 检测 vendor —— 自部署 lmdeploy / 走 proxy / 走 aggregator 的 intern endpoint 不命中 bias，需要手动 `--prompt` 复制 bias。详见 [Vendor 适配层 ⚠ 5 副作用](/concepts/vendor-adapters#副作用必读)。
+- `--no-vendor-bias` flag 未实现（P1 polish gap，跟 `bias_active` info display follow-up 一起规划）。
+
+### 发布流程
+
+per v0.9.0 split-brain 教训（[issue #126](https://github.com/sleep2agi/agent-network/issues/126)）：两 phase publish 路径
+
+```
+1. version bump → preview.N+1
+2. npm publish --tag preview     → tarball uploaded
+3. curl tarball URL               → HTTP 200 确认
+4. npm dist-tag add @<pkg>@<v> latest
+5. npm view dist-tags.latest      → "<v>" verified
+```
+
+避开 `npm publish --tag latest` 直推路径的 split-brain（CDN 异步同步窗口里 `latest` tag 指向但 tarball 还没分发）。
+
+---
+
 ## v0.9.0 — **Recovery & Observability**（2026-05-15）✅ stable
 
 - `@sleep2agi/agent-network@2.1.13`

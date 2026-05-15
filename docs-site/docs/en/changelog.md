@@ -8,6 +8,39 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## v0.9.1 — **Patch: #130 intern tool-calling hotfix promoted** (2026-05-15) ✅ stable
+
+**Version sync** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.1.14` (version-only bump, no source changes; lets `anet upgrade` show a v0.9.1 line that aligns with agent-node 2.3.9 + dashboard)
+- `@sleep2agi/agent-node@2.3.9` (promotes the [#130](https://github.com/sleep2agi/agent-network/issues/130) hotfix to latest)
+- `@sleep2agi/commhub-server@0.8.1` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.4.6` *(unchanged)*
+
+### Fixes
+
+- **[#130](https://github.com/sleep2agi/agent-network/issues/130) intern-s2-preview tool calling now works** ([commit `4cd0024`](https://github.com/sleep2agi/agent-network/commit/4cd0024) + two-phase publish promote) — in v0.9.0 the intern-s2-preview endpoint, on the Anthropic protocol with `tool_choice: "auto"`, defaulted to verbose Thinking Process text and did not emit `tool_use` content blocks. Forcing `tool_choice` was rejected with `-20077`. Hotfix: when `ANTHROPIC_BASE_URL` matches `intern-ai.org.cn` / `chat.intern-ai`, a short system-prompt bias is prepended that nudges the model to emit `tool_use` directly. Direct-curl A/B verified: `stop_reason: max_tokens → tool_use`, `output_tokens: 1024 → 122`. See [Vendor Adapters](/en/concepts/vendor-adapters) for the full mechanism, the 5 side effects, and the opt-out path.
+
+### Known gaps (non-blocking)
+
+- The vendor adapter relies on a URL regex to detect the vendor — self-hosted lmdeploy / proxied intern endpoints / aggregator routes will not trigger the bias and need a manual `--prompt`. See [Vendor Adapters — Side effects](/en/concepts/vendor-adapters#side-effects-must-read).
+- The `--no-vendor-bias` flag is not yet implemented (P1 polish gap, planned alongside a `bias_active` info-display follow-up).
+
+### Release process
+
+Per the v0.9.0 split-brain lessons ([issue #126](https://github.com/sleep2agi/agent-network/issues/126)), uses the two-phase publish path:
+
+```
+1. version bump → preview.N+1
+2. npm publish --tag preview      → tarball uploaded
+3. curl tarball URL                → HTTP 200 confirmed
+4. npm dist-tag add @<pkg>@<v> latest
+5. npm view dist-tags.latest       → verifies "<v>"
+```
+
+This avoids the direct `npm publish --tag latest` path that splits during the CDN async window, where the `latest` tag points at a version whose tarball is not yet served everywhere.
+
+---
+
 ## v0.9.0 — **Recovery & Observability** (2026-05-15) ✅ stable
 
 - `@sleep2agi/agent-network@2.1.13`
