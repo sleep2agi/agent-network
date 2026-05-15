@@ -35,6 +35,48 @@ The backup directory contains your Tokens, node configurations, and session reco
 
 ### 3. Upgrade npm Packages
 
+::: tip Preview channel (v2.1.13-preview.3+): one-shot `anet upgrade`
+[#88](https://github.com/sleep2agi/agent-network/issues/88) overhauled `anet upgrade` with 4-package coverage, dual-channel, dry-run, and opt-in self-upgrade. **Strongly recommend `--dry-run` first to inspect the plan before actually upgrading**:
+
+```bash
+# Dry run: print the plan only (4 packages × current→target × action badge)
+anet upgrade --dry-run
+
+# Real run (default = print the manual npm commands, does not touch global install; channel is auto-detected: prerelease tag → preview, otherwise latest)
+anet upgrade
+
+# Force a channel (overrides auto-detect)
+anet upgrade --channel preview
+anet upgrade --channel latest
+
+# Self-upgrade anet itself (opt-in detached spawn; stderr is captured to /tmp/anet-self-upgrade.err; without this flag the default prints the manual command to avoid replacing the running process)
+anet upgrade --self
+```
+
+**Reading the plan**: one row per package with `current → target` and an action badge:
+
+| Badge | Meaning |
+|------|------|
+| `upgrade` | current < target, install the new version |
+| `up-to-date` | already at target, skipped |
+| `lazy via npx skip` | not globally installed; anet fetches on demand via `bunx/npx`, no global upgrade needed |
+| `self skip` | anet does not self-upgrade by default (pass `--self`) |
+| `lookup failed` | npm registry lookup failed — network / package name issue |
+
+**Note on `commhub-server`**: that row always shows `PINNED_SERVER_VERSION = 0.8.0` ([`cli.ts:2125`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2125)) — `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
+
+**After the upgrade**: `anet upgrade` prints a hint that running nodes need a restart to pick up the new agent-node:
+
+```bash
+anet project restart    # #117, all nodes under cwd (preview only)
+# Or one by one: anet node stop <name> && anet node start <name>
+```
+
+`anet upgrade` is preview.3+. npm `latest` (v2.1.9) still has the old print-only behavior — running it there will not produce the 4-package plan. To install preview: `npm install -g @sleep2agi/agent-network@preview`.
+:::
+
+**Manual npm (works on any channel)**:
+
 ```bash
 # Upgrade the CLI (CommHub Server is NOT in this package — anet hub start in step 4 pulls it at its PINNED version via bunx)
 npm install -g @sleep2agi/agent-network

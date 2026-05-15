@@ -35,6 +35,48 @@ cp -r .anet .anet.backup
 
 ### 3. 升级 npm 包
 
+::: tip preview 通道（v2.1.13-preview.3+）：`anet upgrade` 一键
+[#88](https://github.com/sleep2agi/agent-network/issues/88) 给 `anet upgrade` 加了 4-包覆盖 + 双通道 + 干跑 + 自升，**强烈建议先 `--dry-run` 看计划再决定怎么动**：
+
+```bash
+# 干跑：只打印 plan，不真升（4 包 × current→target × action badge）
+anet upgrade --dry-run
+
+# 实际跑（默认 print 手动 npm 命令，不自动改全局；channel 由 anet 当前版本自动判 prerelease→preview / 否则 latest）
+anet upgrade
+
+# 强制选通道（覆盖 auto-detect）
+anet upgrade --channel preview
+anet upgrade --channel latest
+
+# 自升 anet 本身（opt-in detached spawn，stderr 落 /tmp/anet-self-upgrade.err；不加这个 flag 默认 print 手动命令避免升级时替换运行中进程）
+anet upgrade --self
+```
+
+**计划行解读**：每行一个包 + `current → target` + 一个 action badge —
+
+| Badge | 含义 |
+|------|------|
+| `upgrade` | 该包 current < target，需要装新版 |
+| `up-to-date` | 已经是 target，跳过 |
+| `lazy via npx skip` | 全局没装 + anet `bunx/npx` 按需拉取，不用全局升 |
+| `self skip` | 默认不自升 anet 本身（要加 `--self`）|
+| `lookup failed` | npm registry 查不到 latest，网络/包名问题 |
+
+**特别提示 `commhub-server`**：这行永远显示 `PINNED_SERVER_VERSION = 0.8.0`（[`cli.ts:2125`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2125)）—— `anet hub start` 不管全局装的是什么版本都跑这个 pinned 版（避免 server breaking 风险）。所以即使全局 `commhub-server` 升了也没影响 hub 实际运行。
+
+**升完之后**：`anet upgrade` 末尾会提示「跑过的节点要重启拿新 agent-node」，可以一键：
+
+```bash
+anet project restart    # #117，cwd 下所有节点（preview only）
+# 或单台单台：anet node stop <name> && anet node start <name>
+```
+
+`anet upgrade` 来自 preview.3+；npm `latest`（v2.1.9）还是旧的 print-only 行为，跑了不会出 4-包 plan。要装 preview：`npm install -g @sleep2agi/agent-network@preview`。
+:::
+
+**手动 npm（任何通道都能用）**：
+
 ```bash
 # 升级 CLI（CommHub Server 不在此包里 —— 由下方 step 4 的 anet hub start 自动按 PINNED 版本 bunx 拉取）
 npm install -g @sleep2agi/agent-network
