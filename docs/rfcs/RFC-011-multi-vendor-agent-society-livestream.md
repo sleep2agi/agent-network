@@ -5,7 +5,7 @@
 | **RFC 编号** | 011 |
 | **标题** | 多厂商 AI Agent 社会 — 24/7 直播 + 自动导演 + 解说，观察涌现社会行为 |
 | **作者** | 通信SDK马 |
-| **状态** | Draft v2 amend (通信牛 v1 review request changes → 4 blocker + 2 concern 已 address，待 second pass review) |
+| **状态** | Draft v3 amend (通信牛 v2 second pass → 1 new blocker §2.4.2 + 4 minor 已 address，待 third pass review) |
 | **创建日期** | 2026-05-15 |
 | **关联 issue** | [#107](https://github.com/sleep2agi/agent-network/issues/107)（umbrella 愿景，Vincent 4693-4696） |
 | **依赖** | RFC-009 社会学实验 Framework（本 RFC 是其扩展应用） |
@@ -110,8 +110,15 @@ Vincent 反复强调「呈现形式一定要好」—— §2 是本 RFC 的核�
 // 呈现层模块拥有的派生事件源。订阅它就拿到 network-scoped 的归一化
 // SocietyEvent 流；4 个呈现组件都消费它（互不耦合）。实现是纯派生 +
 // poll/tail 已有 server 存量，不要求改任何核心写路径。
+//
+// 鉴权语义：调用者必须已通过 utok_ Bearer auth 拿到一个 user context
+// （v3 澄清）。subscribe()/snapshot() 不显式传 user —— user 由 ACL 边界
+// 在 SocietyEventSource 的实现层（HTTP handler / dashboard backend）从
+// auth 上下文取，再去 network_members 验通过。承载方式对 RFC-011
+// 调用方是 implicit 的，避免把 token 漏进每个 callsite。
 interface SocietyEventSource {
-  // 订阅 network 内的事件流（基于用户 utok_ 鉴权 + network membership）。
+  // 订阅 network 内的事件流（user 见上方鉴权语义；按 (user, networkId)
+  // 在 network_members 表里 join 校验通过才会返回订阅句柄；否则抛 ACL 拒绝）。
   // 返回一个可取消的订阅；新事件通过 onEvent 回调推送。
   subscribe(opts: {
     networkId: string;
@@ -120,7 +127,7 @@ interface SocietyEventSource {
     onEvent: (e: SocietyEvent) => void;
   }): { close(): void };
 
-  // 一次性快照（自动导演 / 指标面板初次渲染用）。
+  // 一次性快照（自动导演 / 指标面板初次渲染用）。鉴权同 subscribe()。
   snapshot(opts: {
     networkId: string;
     fromTs: number; toTs: number;
@@ -137,8 +144,8 @@ interface SocietyEventSource {
 - **派生事件**（`opinion_shifted` 等热点） → §4 检测器在 `SocietyEventSource` 之上跑，**输出新事件再回灌进同一条订阅流**（自闭环，订阅者只看到统一抽象）
 - **`node.renamed`** / `node_down` / `node_recovered` → 守护节点 #99 / 现有 `node.renamed` SSE（#84 实施时已加 user 频道 broadcast）派生
 
-**ACL / scope**（通信牛 concern §2.1/§2.2）：
-- 订阅按 `(user, network)` 鉴权 —— 用户必须是 `network_members` 中的成员才能拿到该 network 的 `SocietyEvent`
+**ACL / scope**（通信牛 concern §2.1/§2.2，v3 接口语义澄清）：
+- 订阅按 `(user, network)` 鉴权 —— user 来自调用方 auth 上下文（utok_ Bearer），不在 `subscribe()/snapshot()` 签名里显式传；SocietyEventSource 实现侧（dashboard backend HTTP handler）从 auth context 拿 user → 用 `(user, networkId)` 查 `network_members` 表 → 不是 member 直接拒绝订阅。这保持接口最小（不让每个 callsite 拼 token）同时不失 ACL 强度
 - **`SocietyEvent.summary` 仅承载元数据**（vendor / event_kind / token counts / 截断后的 from→to 关系等），**消息正文不进 `summary`，不进 `payload`**
 - `summary` 长度上限 120 字符；超过则尾部 `…` 截断
 - `payload` 仅放 kind-specific 结构化元数据（如 round_id / payoff_delta），**禁止放原始消息文本**
@@ -187,7 +194,7 @@ interface SocietyEvent {
 | 数据源 | `SocietyEvent` where kind ∈ {task_sent, message_sent, task_replied} |
 | 渲染 | 一行一事件：`[时间] <vendor图标> from → to : summary`（vendor 图标复用 #96 厂商 LOGO） |
 | 容量 | 滚动窗口保留最近 N 条（建议 50），更早的滚出 |
-| 实现 | `[N站马 输入]` dashboard 加一个 ticker 组件，复用现有 SSE 连接，不新开连接 |
+| 实现 | `[N站马 输入]` dashboard 加一个 ticker 组件，通过 §2.1.1 `SocietyEventSource.subscribe({ kinds: ['task_sent','message_sent','task_replied'] })` 拉流 — **不**直接消费 commhub `/events/:session` SSE（v3 fix：那条 SSE 是 per-session-name 单播，不是全网事件流） |
 
 ticker 是「直播有在动」的最低保证 —— 即使自动导演没检测到热点，观众也能看到底层活动在流动。
 
@@ -238,7 +245,44 @@ dashboard 字幕区 + 可选 TTS
 
 > 这正好用上 #101/#102 的修复成果：解说 agent 也是 claude-agent-sdk 节点，需要稳定的工具/prompt 行为。但注意它**只读**，不需要 commhub 工具 —— 它的「输入」是 `SocietyEvent` 流（通过 prompt 注入或一个只读 MCP 工具），不是 commhub 互动。
 
-> ⚠️ **v2 闭环（通信牛 review concern §2.4 — 解说 agent 输入机制未闭环）**：解说 agent 通过 §2.1 v2 引入的 `SocietyEventSource.subscribe({ networkId, kinds, onEvent })` 拉取事件流，digest 拼装在解说 agent **节点外部** 完成（一个 RFC-011 呈现层模块拥有的 digest 拼装器），按 `digestIntervalMs` 节拍把 digest 作为单次 prompt 灌进解说 agent。这样解说 agent 仍是普通 claude-agent-sdk 节点（不需要新的 MCP 工具 / 自定义协议），它的"输入感官"具体落地 = 接收一个 user message 含 `EventDigest` JSON + 上段旁白。digest 拼装器与解说 agent 间通过 `commhub_send_task` 投递（沿用现有 anet 协议），不发明新通道。
+> ⚠️ **v2 闭环（通信牛 review concern §2.4 — 解说 agent 输入机制未闭环）**：解说 agent 通过 §2.1 v2 引入的 `SocietyEventSource.subscribe({ networkId, kinds, onEvent })` 拉取事件流，digest 拼装在解说 agent **节点外部** 完成（一个 RFC-011 呈现层模块拥有的 digest 拼装器），按 `digestIntervalMs` 节拍把 digest 作为单次 prompt 灌进解说 agent。这样解说 agent 仍是普通 claude-agent-sdk 节点（不需要新的 MCP 工具 / 自定义协议），它的"输入感官"具体落地 = 接收一个 user message 含 `EventDigest` JSON + 上段旁白。
+
+> ⚠️ **v3 闭环（通信牛 second pass new Blocker — digest 投递递归污染 SocietyEvent）**：v2 草稿写「digest 拼装器与解说 agent 间通过 `commhub_send_task` 投递（沿用现有 anet 协议），不发明新通道」**是个递归 trap**：
+> - 拼装器 `commhub_send_task(commentator, digest)` 在 commhub **写 tasks/inbox 行**
+> - SocietyEventSource 派生层 tail `tasks` 表 → 产 `task_sent` event（kind 在订阅过滤里）
+> - 下一个 digest tick 把这条「digest 投递事件」也算进窗口
+> - 解说 agent 看到 digest 里有它自己被投递的元事件 → 旁白污染（「现在拼装器又给我发了一段总结，我现在念……」）
+> - 严重时 digest 间互相喂回，解说陷入 self-referential loop
+>
+> **v3 修正 — Option A：control network 隔离（recommended）**
+>
+> 解说 agent + digest 拼装器跑在**独立的 commhub control network**（`network_id != experiment_network_id`），与社会实验本身的 network 物理隔离：
+>
+> ```
+> 实验 network (net_society_exp_X)
+>   ├ agent_DS_1 ↔ agent_DS_2 ↔ ... (社会成员, 互相 send_task)
+>   └ SocietyEventSource.subscribe({networkId: 'net_society_exp_X', ...})
+>                      ↓ 单向只读派生 (跨 network ACL 允许: user-scoped, 见 §2.1.1)
+>                      ↓
+>                 digest 拼装器 (跑在 control network net_control_X)
+>                      ↓ commhub_send_task (control network 内, 不出现在实验 network 的 tasks 表)
+>                      ↓
+>                 解说 agent (跑在 control network net_control_X)
+> ```
+>
+> 关键不变量：
+> - SocietyEventSource 只订阅 **实验 network** 的事件 → digest 投递发生在 **control network** → digest 投递不会回灌
+> - 解说 agent 的 ack/状态/旁白输出也都在 control network → 同理不污染
+> - 跨 network 订阅基于 user 鉴权（dashboard 用户必须是两个 network 的 member）；运维上可以让 control network 由 experiment owner 持有 + 仅自己加入
+> - 对 commhub 0 改动：现有 `UNIQUE(network_id, alias)` schema 直接支持
+>
+> **v3 Option B（rejected as primary，列为兜底方案）—— role: commentator 过滤**
+>
+> 在 SocietyEventSource 的派生逻辑里加 filter：if `from === commentator_alias || to === commentator_alias` → drop。
+> - 优点：不需要双 network，编排简单
+> - 缺点（为何 reject）：(1) 要求拼装器/解说 agent 知道全部 commentator alias 列表才能过滤准确，多解说员 / 替换解说员时漂移；(2) 不防别的非 SocietyEventSource 派生器（例如未来的指标面板独立 derive）误把 digest 投递算进 message 量；(3) role 字段是 honor system，新 derive 代码漏 filter 就泄露
+>
+> **决议**：Option A 作为 RFC-011 的明确闭环方案。Phase 1 实施时 `MultiVendorBatchSpec` 编排器（§3.2）创建实验时**额外**起 control network，所有解说层 agent（commentator + digest assembler + 任何 phase 3+ TTS 适配器）一律加入 control network，experiment network 内只跑社会成员。Option B 仅作为 control network 不可用环境的退路（例如本地单 network demo），文档明示其局限。
 
 #### 2.4.3 解说 agent 的 spec（RFC-009 风格）
 
@@ -273,7 +317,7 @@ interface CommentatorSpec {
 | dashboard 拓扑图（三环 layout + agent 发光 + #96 厂商 LOGO） | 直播主画面 |
 | Chat 浮窗 #100 / #106 | 自动聚焦的「观察窗口」（复用打开逻辑） |
 | RFC-009 social experiment framework | 实验设定 + round/payoff/cohort 抽象（指标面板数据源） |
-| commhub SSE event stream | `SocietyEvent` 的主要上游 |
+| commhub `sessions` / `tasks` / `inbox` / `task_events` 表 | `SocietyEvent` 的主要派生上游（经 `SocietyEventSource` tail/poll —— v3 fix：v1 列「SSE event stream」错，实测 SSE 是 per-session 单播） |
 | #96 节点视觉身份 LOGO | ticker / 主画面的 vendor 区分 |
 
 ### 2.7 §2 小结
@@ -426,7 +470,7 @@ v1 提的「`society.json` 外部映射文件 / `[N站马 输入]` 表的存放�
 
 ### 3.5 §3 小结
 
-多厂商 batch = `MultiVendorBatchSpec`（多个 `VendorCohort`）→ 循环调用已有单 vendor batch primitive，继承 batch lifecycle。接 RFC-009 = 给 `CohortSpec` 加一个可选 `vendor` 字段，使厂商间对比实验成为一等公民。vendor 身份通过一个 `alias→vendor` 映射流到呈现层的 `SocietyEvent.vendor`。**实施 gate：所有目标 vendor 必须先验证加回 VENDORS registry**（§1.2 前置 P1）。
+多厂商 batch = `MultiVendorBatchSpec`（多个 `VendorCohort`）→ 循环调用已有单 vendor batch primitive，继承 batch lifecycle。接 RFC-009 = 给 `CohortSpec` 加一个可选 `vendor` 字段，使厂商间对比实验成为一等公民。vendor 身份通过 **`(network_id, alias) → vendorKey` 复合键 + 显式持久化（§3.4.1 v2 修正）** 流到呈现层的 `SocietyEvent.vendor`，**不**靠 alias 单键反推 —— v1 的 `alias→vendor` 单键说法 v3 已修。**实施 gate：所有目标 vendor 必须先验证加回 VENDORS registry**（§1.2 前置 P1）。
 
 ---
 
@@ -596,7 +640,7 @@ interface HotspotDetectorConfig {
 
 ### v2 amend pass — 已 address 通信牛 v1 review
 
-通信牛 v1 review verdict: 🟡 request changes before approve（4 blocker + 2 concern）。v2 amend 已逐项 address，**待 通信牛 second pass review**：
+通信牛 v1 review verdict: 🟡 request changes before approve（4 blocker + 2 concern）。v2 amend 已逐项 address：
 
 - [x] **Blocker 1** §2.1 SSE 模型实测纠正 — v1「复用 commhub SSE」错（实测 `/events/:session` 是 alias-scoped 单播）→ v2 引入独立 `SocietyEventSource` 派生层 + ACL/截断规则（concern §2.1/§2.2 一并 close）
 - [x] **Blocker 2** §3.2 apiKey 落盘 — v1「走 env 不入 spec」错（实测 `createBatch()` 写 envMap → saveProfile config.json）→ v2 `VendorCohort` 改 `apiKeyEnvVar` 引用；surface 现有 batch primitive 的 secret hygiene 缺口作 RFC 范围外 follow-up
@@ -604,3 +648,15 @@ interface HotspotDetectorConfig {
 - [x] **Blocker 4** §3.4 `alias→vendor` 跨 network 串号 — 实测 schema `UNIQUE(network_id, alias)` 确认 → v2 改复合键 `(network_id, alias) → vendorKey`；`Profile.vendorKey` 字段 + `sessions.vendor` 列显式持久化，不靠反推
 - [x] **Concern §2.4** 解说 agent 输入机制闭环 — v2 用 §2.1.1 `SocietyEventSource.subscribe`，digest 拼装器在节点外, 解说 agent 仍是普通 claude-agent-sdk 节点
 - [x] §6 phasing 加 Phase 0.5 — batch primitive 解耦 + vendor schema 微改是 §3.2/§3.4 实施前置
+
+---
+
+### v3 amend pass — 已 address 通信牛 v2 second pass review
+
+通信牛 v2 second pass verdict: 🟡 request 1 more pass（new blocker §2.4.2 digest pollution + 4 minor 文字残留）。v3 amend 已逐项 address，**待 通信牛 third pass review**：
+
+- [x] **New Blocker §2.4.2** digest 递归污染 — v2 写「digest 拼装器 ↔ 解说 agent 用 `commhub_send_task`」会让投递本身被 SocietyEventSource derive 成 `task_sent` 回灌 → 解说看到自己被投递的元事件 → 旁白污染甚至 self-loop。v3 加 **Option A：control network 隔离（recommended）** —— commentator + digest 拼装器跑在独立 commhub network，与实验 network 物理隔离；SocietyEventSource 只订阅实验 network → digest 投递不可见。Option B (role: commentator 过滤) 列为兜底，仅 single-network demo 用，限制明示。
+- [x] **Minor §2.2 line 190** ticker 实现说"复用 SSE 连接"—— v3 改 "通过 SocietyEventSource.subscribe 拉流"，明示不直接消费 per-session SSE
+- [x] **Minor §2.6 复用表** 列「commhub SSE event stream | SocietyEvent 主要上游」与 §2.1 v2 修正矛盾 —— v3 改成「sessions / tasks / inbox / task_events 表（经 SocietyEventSource tail/poll）」
+- [x] **Minor §3.5 小结** 写「vendor 身份通过一个 `alias→vendor` 映射」与 §3.4.1 v2 复合键设计矛盾 —— v3 改成 `(network_id, alias) → vendorKey` 复合键 + 显式持久化
+- [x] **Minor §2.1.1 ACL 接口 mismatch** —— `subscribe()` 签名只有 `networkId` 没有 `user`，但 ACL 散文写「按 (user, network) 鉴权」。v3 在接口注释 + ACL bullet 显式澄清：user 由 auth 上下文 implicit 拿（utok_ Bearer），不进签名；SocietyEventSource 实现侧从 auth context 取 user → 查 network_members → 不是 member 抛 ACL 拒绝。保持接口最小同时不失 ACL 强度。
