@@ -40,8 +40,8 @@ graph TB
 上图反映**设计目标**，当前 v0.8.3 实际执行情况：
 
 - ✅ **已启用**：速率限制 / Token 认证（utok_/ntok_/atok_）/ CORS / RBAC 四级权限 / 网络隔离（Server 端强制） / SQL 注入防护 / 密码 SHA-256 / 审计日志 / 任务事件日志
-- ⏳ **未完全启用**：Token Scope 字段（`api_tokens.scope` 列存在但 createToken 统一写 `full`、resolveToken 也不返回 scope；security report **R12** 排队 v0.9+；详见 [安全审计报告](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)）
-- ⏳ **计划升级**：密码哈希 SHA-256 → Argon2id（security report **R9**，v0.9+）
+- ⏳ **未完全启用**：Token Scope 字段（`api_tokens.scope` 列存在 + [`auth.ts:73-137`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L73) `createToken` 按 token 类型写不同 scope，但 [`auth.ts:143-165 resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L143) 返回结构里**没 scope 字段** —— RBAC 决策不消费 scope 写入；security report **R12** v0.9.x 未动（Recovery & Observability scope 为先），排到 v0.10+ / 未排期；详见 [安全审计报告](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)）
+- ⏳ **计划升级**：密码哈希 SHA-256 → Argon2id（verify [`db.ts:427-429 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427) 仍 `Bun.CryptoHasher("sha256")`，security report **R9** v0.9.x 未动，排到 v0.10+ / 未排期）
 :::
 
 ## 认证（Authentication）
@@ -165,8 +165,8 @@ flowchart TD
 - 用户名支持字母、数字、下划线、中文
 - 登录失败不提示是用户名错还是密码错（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration；R169 chain 一致）
 
-::: info 计划中（v0.9+）
-SHA-256 → Argon2id 升级（[security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)），提升抗暴力破解能力 + per-user salt 防止同密码哈希碰撞。Token 哈希（cli.ts hashToken 用纯 SHA-256 无 salt）不需要 Argon2id —— token 是 128-bit 随机字符串，rainbow table 不适用。
+::: info 计划中（v0.10+ / 未排期）
+SHA-256 → Argon2id 升级（[security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)），提升抗暴力破解能力 + per-user salt 防止同密码哈希碰撞。**v0.9.x scope（Recovery & Observability）未动**，留 v0.10+ 安全主题专项升级。Token 哈希（cli.ts hashToken 用纯 SHA-256 无 salt）不需要 Argon2id —— token 是 128-bit 随机字符串，rainbow table 不适用。
 :::
 
 ## 授权（Authorization）
@@ -510,5 +510,5 @@ npx @sleep2agi/agent-node --alias my-agent --max-budget 0.1
 - [Docker 部署](/deploy/docker) — 容器化最佳实践
 
 ::: warning 当前阶段
-v0.8 密码哈希仍是 SHA-256。**Argon2id 迁移计划在 v0.9+**（搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)；如果还没 tracking issue，欢迎开一个）。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
+v0.9.1 stable 密码哈希仍是 SHA-256（verify [`db.ts:427-429 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427)）。**Argon2id 迁移 v0.9.x 未动**（Recovery & Observability scope 为先，security report **R9** 排到 v0.10+ / 未排期；搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)，如果没 tracking issue 欢迎开一个）。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
 :::
