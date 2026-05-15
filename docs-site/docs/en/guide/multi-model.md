@@ -156,6 +156,28 @@ graph LR
 | DeepSeek | `https://api.deepseek.com/anthropic` | Latest from [DeepSeek platform](https://platform.deepseek.com) |
 | Xiaomi MiMo | `https://token-plan-cn.xiaomimimo.com/anthropic` | Latest from [Xiaomi MiMo platform](https://platform.xiaomimimo.com) |
 
+## Vendor adapter (behavior-correction layer, v0.9.1+)
+
+The Anthropic-compatible protocol **only standardizes the wire format**; it **does not guarantee behavioral parity**. Each vendor's RLHF fine-tuning takes its own path, so the same `tools` + `tool_choice: "auto"` payload produces **behavioral divergence** across vendors:
+
+- ✅ MiniMax / Anthropic native: emits `tool_use` content blocks cleanly, works out of the box
+- ❌ InternLM intern-s2-preview: defaults to verbose "Thinking Process" text, **does not emit** `tool_use` blocks (forcing `tool_choice` is rejected with `-20077`)
+
+From [v0.9.1](/en/changelog#v0-9-1-patch-130-intern-tool-calling-hotfix-promoted-2026-05-15-stable) ([#130 hotfix](https://github.com/sleep2agi/agent-network/issues/130)) onward, agent-node ships a **vendor adapter** that detects `ANTHROPIC_BASE_URL` and prepends a system-prompt bias to nudge vendor behavior back to Anthropic-standard.
+
+**Current adapter (intern) trigger**: URL matches the regex `/intern-ai\.org\.cn|chat\.intern-ai/i` ([`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/commit/4cd0024)) — the "InternLM" example above (`ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn`) triggers it automatically.
+
+**Five user-visible side effects** (must-read + opt-out path):
+1. Loses Intern's Thinking Process transparency (model skips thinking)
+2. Detection fragility (self-hosted lmdeploy / proxy / aggregator endpoints don't match the regex)
+3. Silent injection (the bias is implicitly prepended; can be confusing while debugging)
+4. Forced tool-calling style (net positive for multi-agent coordination, drag on single-agent report generation)
+5. Fewer tokens out = less explainability
+
+See [Vendor Adapters](/en/concepts/vendor-adapters) for the full mechanism + per-side-effect migration hints + future polish gaps.
+
+**Opt-out**: `anet node start <alias> --prompt "your system prompt"` — `--prompt` **replaces** rather than appends, so the vendor bias is no longer prepended and the model reverts to its native RLHF.
+
 ## Mixed Deployment in Practice
 
 A typical mixed deployment scenario: commander uses Codex, code tasks go to Codex (codex-sdk), text tasks go to MiniMax.

@@ -160,6 +160,28 @@ ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 因为 `claude-agent-sdk` 内部用 Anthropic 的 Messages API 格式。国产服务商提供兼容接口后，不需要改任何代码就能切换模型。这是"一套协议接所有模型"的核心设计。
 :::
 
+## Vendor adapter（行为修正层，v0.9.1+）
+
+Anthropic 兼容协议**只解决数据格式**，**不保证行为一致**。各家厂商 RLHF 微调路径不同，同样的 `tools` + `tool_choice:"auto"` payload 在不同厂商端会产生**行为分歧**：
+
+- ✅ MiniMax / Anthropic 官方：tool_use content blocks 干净 emit，OOTB 工作
+- ❌ 书生 intern-s2-preview：默认走 verbose "Thinking Process" 文本，**不发** `tool_use` blocks（强制 `tool_choice` 还被 `-20077` 拒）
+
+从 [v0.9.1](/changelog#v0-9-1-patch-130-intern-tool-calling-hotfix-promote-2026-05-15-stable)（[#130 hotfix](https://github.com/sleep2agi/agent-network/issues/130)）起 agent-node 引入 **vendor adapter** 检测 `ANTHROPIC_BASE_URL` 后 prepend 一段 system-prompt bias 把厂商行为掰回 Anthropic 标准。
+
+**当前 adapter（intern）触发条件**：URL 命中 `/intern-ai\.org\.cn|chat\.intern-ai/i` 正则（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/commit/4cd0024)）—— 上面 "书生" 配置示例的 `ANTHROPIC_BASE_URL=https://chat.intern-ai.org.cn` 会自动触发。
+
+**5 个用户可见副作用**（必读 + opt-out 路径）：
+1. 失去 intern Thinking Process 透明度（model skip thinking）
+2. Detection fragility（自部署 lmdeploy / proxy / aggregator 不命中 regex）
+3. Silent injection（隐式 prepend，debug 困惑）
+4. Tool calling 风格强制（多 Agent 协作净正面 / 单 agent 报告任务偏移）
+5. Tokens 减输出 = 减 explainability
+
+详见 [Vendor 适配层](/concepts/vendor-adapters)（完整机制 + per-副作用 Migration hint + future polish gap）。
+
+**opt-out**：`anet node start <alias> --prompt "你的 system prompt"` —— `--prompt` 是**替换**而非追加，vendor bias 不会再被 prepend，model 退回原始 RLHF。
+
 ## 模型选择建议
 
 | 场景 | 推荐模型 | 理由 |
