@@ -427,6 +427,78 @@ Checks (in actual order per [`cli.ts:5917-6082 doctorCommand`](https://github.co
 Pre-v0.7, an expired `ntok_` required a manual `anet node delete` + recreate. Since v0.8, `--fix` probes + re-issues in place, and agent-node SSE 401 auto-reloads the token instead of going offline ([RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) implementation detail).
 :::
 
+### anet upgrade
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3522)
+
+Print / execute the upgrade plan — covers 4 packages (`anet self` / `agent-node` / `commhub-server` / `agent-network-dashboard`) across two channels (preview / latest, auto-detected or overridden via `--channel`). Rewritten in [#88](https://github.com/sleep2agi/agent-network/issues/88) for v2.1.13-preview.3+; the old behavior covered only 2/3 packages and **silently downgraded** preview-channel users to `@latest`.
+
+```bash
+anet upgrade [--channel preview|latest] [--self] [--dry-run]
+```
+
+| Parameter | Default | Description |
+|------|--------|------|
+| `--channel preview|latest` | auto-detect | Force a release channel; auto-detect: anet version has prerelease tag → `preview`, otherwise `latest` |
+| `--self` | false | Trigger a detached self-spawn upgrade of anet itself (`sh -c 'npm install -g ... && anet -v'`, stderr → `/tmp/anet-self-upgrade.err`); without this flag the default just prints the manual command, avoiding replacing the running CLI process mid-upgrade |
+| `--dry-run` | false | Print the plan only — do not actually run |
+| `--fork-script` | — | Deprecated, retained for back-compat |
+
+**Plan output (one line per package)**:
+
+```
+  anet (self)         2.1.13-preview.2     →  2.1.13-preview.4     → upgrade
+                      (self-upgrade off by default — use --self for detached spawn, or follow manual instructions below)
+  agent-node          2.3.5-preview.0      →  2.3.6-preview.0      → upgrade
+  commhub-server      not installed        →  0.8.1-preview.3      (lazy via npx, skipped)
+                      (not installed globally — lazy-fetched via npx by `anet hub start`)
+  dashboard           0.4.6-preview.12     →  0.4.6-preview.12     ✓ up to date
+```
+
+| Badge | Meaning |
+|------|------|
+| `→ upgrade` | current < target, install the new version |
+| `✓ up to date` | Already at target, skipped |
+| `(lazy via npx, skipped)` | Not installed globally — anet auto-fetches via `bunx/npx`, no global upgrade required |
+| `(self — see below)` | anet does not self-upgrade by default (pass `--self`) |
+| `⚠ npm registry lookup failed` | Bad package name or network issue |
+
+**`commhub-server` row always carries the note**: `(anet hub start uses pinned <PINNED_SERVER_VERSION>)` — `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). A global install is only useful for `bunx @sleep2agi/commhub-server` direct runs.
+
+**Node version check**: below `engines.node` (22.13.0) only warns — does not block (preview.9+ really does fail, but users who explicitly know what they're doing get to proceed). The warning suggests `nvm install 22 && nvm use 22`.
+
+**After upgrade, recommend `anet project restart`** ([#117](https://github.com/sleep2agi/agent-network/issues/117)) so already-started nodes under cwd pick up the new agent-node version.
+
+Full upgrade walkthrough: [Upgrade Guide](/en/guide/upgrade).
+
+### anet project
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3163)
+
+Cwd-wide node orchestration, introduced in [#117](https://github.com/sleep2agi/agent-network/issues/117) (v2.1.13-preview.2+). **Preview-only**; not yet in npm `latest`.
+
+```bash
+anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y]
+```
+
+| Subcommand | Behavior |
+|--------|------|
+| `anet project up` | Start every node under cwd's `.anet/nodes/`; same-name tmux already running is skipped (▶ started / ⏭ already-running) |
+| `anet project restart` | Kill each node's existing tmux session, then start fresh (↻ restarted / ▶ started) |
+| `anet project down` | Stop every node + notify hub offline (⏹ stopped) |
+
+**`down`'s 2 s offline-notify timeout** ([`cli.ts:3085-3088`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3085)): this command is commonly used when the hub itself has crashed; serially fetching offline notifications for 22 nodes would hang on 44 timeouts and deadlock the teardown. `Promise.race + setTimeout(2000)` guarantees a fast worst-case teardown.
+
+**Node selection**: `--only` / `--exclude` take aliases or node IDs (comma-separated, parsed via `splitCsv`).
+
+**Pairs with #122 / #115**: every inner `anet node start` is spawned by [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35); the inner command carries `--foreground` to avoid tmux nesting, and `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` is auto-injected to skip Claude Code's resume prompt — recovering 22 nodes after reboot via `anet project up` is genuine **zero-keystroke recovery**.
+
+### anet attach
+
+> ⏳ **Status: [#121](https://github.com/sleep2agi/agent-network/issues/121) not yet implemented** (P2; expected v0.9.x post-release)
+
+Design goal: `anet attach <alias>` = single-command attach to the detached tmux session for that alias — equivalent to `tmux attach -t <alias>` but with alias→tmux-session-name resolution (handles `node_id` references / alias normalization). For now use `tmux a -t <alias>` directly, or `anet node start <alias> --attach` (the `--attach` flag from [#122](https://github.com/sleep2agi/agent-network/issues/122) — detached + immediate attach).
+
 ### anet network invite
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3432)

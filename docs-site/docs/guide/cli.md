@@ -433,6 +433,78 @@ anet doctor --fix        # 自动修复：(a) migrateNode 把 V2 legacy 字段 (
 v0.7 之前 ntok_ 失效需要手动 `anet node delete` + 重新 create；v0.8 起 `--fix` 直接探测+重发，agent-node SSE 401 也会自动 reload token 不离线（[RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) 实施细节）。
 :::
 
+### anet upgrade
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3522)
+
+打印 / 执行升级计划 —— 4 包覆盖（`anet self` / `agent-node` / `commhub-server` / `agent-network-dashboard`）+ 双通道（preview / latest，auto-detect 或 `--channel` 覆盖）。从 [#88](https://github.com/sleep2agi/agent-network/issues/88) 起重写（v2.1.13-preview.3+），老版只覆盖 2/3 包且把 preview 用户**静默降级**到 `@latest`。
+
+```bash
+anet upgrade [--channel preview|latest] [--self] [--dry-run]
+```
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--channel preview|latest` | auto-detect | 强制选发布通道；auto-detect：当前 anet 版本含 prerelease tag → `preview`，否则 `latest` |
+| `--self` | false | 触发 detached self-spawn 升级 anet 自己（`sh -c 'npm install -g ... && anet -v'`，stderr → `/tmp/anet-self-upgrade.err`）；不加这 flag 默认只 print 手动命令，避免升级时替换运行中的 CLI 进程 |
+| `--dry-run` | false | 只 print plan + 不实际跑 |
+| `--fork-script` | — | deprecated，保留向后兼容 |
+
+**Plan 输出（per 包一行）**：
+
+```
+  anet (self)         2.1.13-preview.2     →  2.1.13-preview.4     → upgrade
+                      (self-upgrade off by default — use --self for detached spawn, or follow manual instructions below)
+  agent-node          2.3.5-preview.0      →  2.3.6-preview.0      → upgrade
+  commhub-server      not installed        →  0.8.1-preview.3      (lazy via npx, skipped)
+                      (not installed globally — lazy-fetched via npx by `anet hub start`)
+  dashboard           0.4.6-preview.12     →  0.4.6-preview.12     ✓ up to date
+```
+
+| Badge | 含义 |
+|------|------|
+| `→ upgrade` | current < target，需要装新版 |
+| `✓ up to date` | 已是 target，跳过 |
+| `(lazy via npx, skipped)` | 全局没装 —— anet 会按需 `bunx/npx` 拉取，不用全局升 |
+| `(self — see below)` | anet 自身默认不自升（要加 `--self`）|
+| `⚠ npm registry lookup failed` | 包名拼错或网络问题 |
+
+**`commhub-server` 行恒带说明**：`(anet hub start uses pinned <PINNED_SERVER_VERSION>)` —— `anet hub start` 不管全局装啥都跑 [`PINNED_SERVER_VERSION` cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) 的版本（避免 server breaking 风险）。全局 install 只给 `bunx @sleep2agi/commhub-server` 直接跑用。
+
+**Node 版本检查**：低于 `engines.node`（22.13.0）只 warn 不 block（preview.9+ 真的会 fail，但用户显式知道自己在做啥时给路过去）。附带 `nvm install 22 && nvm use 22` 提示。
+
+**升完提示跑** `anet project restart` ([#117](https://github.com/sleep2agi/agent-network/issues/117))，让 cwd 下已起的节点拿新 agent-node 版本。
+
+完整升级指南见 [升级指南](/guide/upgrade)。
+
+### anet project
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3163)
+
+cwd-wide 节点编排，[#117](https://github.com/sleep2agi/agent-network/issues/117) 引入（v2.1.13-preview.2+）。**Preview-only**；npm `latest` 暂无。
+
+```bash
+anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y]
+```
+
+| 子命令 | 行为 |
+|--------|------|
+| `anet project up` | 起 cwd `.anet/nodes/` 下所有节点；同名 tmux 已跑的 skip（▶ started / ⏭ already-running）|
+| `anet project restart` | 杀掉每个节点现有 tmux session + 重新启（↻ restarted / ▶ started） |
+| `anet project down` | 停所有节点 + notify hub offline（⏹ stopped）|
+
+**`down` 的 2s offline-notify timeout**（[`cli.ts:3085-3088`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3085)）：该命令常用于 hub 自挂场景，22 个节点串行 fetch 卡 44 个超时会拖死命令；`Promise.race + setTimeout(2000)` 保证 worst-case 也能快速 teardown。
+
+**节点选择**：`--only` / `--exclude` 接 alias 或 node_id（逗号分隔），`splitCsv` 拆分。
+
+**联动 #122 / #115**：每个内层 `anet node start` spawn 跑 [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35)，inner cmd 自动带 `--foreground` 避免 tmux 嵌套，env 自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` 跳过 Claude Code resume prompt —— 22 节点 reboot 后 `anet project up` 是真正的**零键盘恢复**。
+
+### anet attach
+
+> ⏳ **状态：[#121](https://github.com/sleep2agi/agent-network/issues/121) 待实施**（P2，预计 v0.9.x post-release 补）
+
+设计目标：`anet attach <alias>` = 一行命令 attach 到 alias 对应的 detached tmux session，等价于 `tmux attach -t <alias>` 但带 alias→tmux session 名解析（处理 `node_id` 引用 / 别名规范化）。当前请直接用 `tmux a -t <alias>` 或 `anet node start <alias> --attach`（[#122](https://github.com/sleep2agi/agent-network/issues/122) 的 `--attach` flag，detached + 立刻 attach）。
+
 ### anet network invite
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3432)
