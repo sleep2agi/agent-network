@@ -97,7 +97,7 @@ Become an admin:
 # Option 1 (recommended): owner issues an admin invite — recipient joins directly with admin role
 anet network invite --role admin --uses 1
 
-# Option 2: promote an existing member via REST (no CLI promote subcommand yet — queued for v0.9+)
+# Option 2: promote an existing member via REST (v0.9.x stable still has no CLI promote subcommand; queued for v0.10+ / unscheduled)
 curl -X PUT http://localhost:9200/api/networks/<net_id>/members/<user_id> \
   -H "Authorization: Bearer <owner_utok>" \
   -H "Content-Type: application/json" \
@@ -152,7 +152,7 @@ The CLI never asks you for role info — `anet login` makes the hub embed it in 
 ## Promote / demote a member
 
 ::: warning No `promote` / `demote` CLI subcommand yet
-The full CLI entry is queued for v0.9+. Today you can list members via the CLI, but **role changes / member removal go through REST** (see [API — networks members](/en/api/rest#get-api-networks-id-members)).
+v0.9.x stable still has no CLI promote/demote subcommand (the v0.9 scope was Recovery & Observability — member-role management was not touched); the full CLI entry is queued for v0.10+ / unscheduled. Today you can list members via the CLI, but **role changes / member removal go through REST** (see [API — networks members](/en/api/rest#get-api-networks-id-members)).
 :::
 
 ```bash
@@ -222,7 +222,7 @@ The role system is the only auth basis going forward.
 
 ## Next steps
 
-- **CLI ops for roles**: [CLI commands — network management](/en/guide/cli) (`anet network members` lists members; role changes go through REST [PUT members](/en/api/rest#put-api-networks-id-members-user-id) — the CLI `promote` / `demote` subcommands are queued for v0.9+)
+- **CLI ops for roles**: [CLI commands — network management](/en/guide/cli) (`anet network members` lists members; role changes go through REST [PUT members](/en/api/rest#put-api-networks-id-members-user-id) — the CLI `promote` / `demote` subcommands are queued for v0.10+ / unscheduled)
 - **Token system mapping**: [Tokens](/en/concepts/tokens) — how the 4 roles relate to `utok_` / `ntok_`
 - **Full security model**: [Security design](/en/concepts/security)
 - **How v0.7 → v0.8 upgrade affects roles**: [Upgrade guide](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest)
