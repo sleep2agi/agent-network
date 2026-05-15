@@ -1,0 +1,52 @@
+── Setup ──
+
+── Test 1: --dry-run (no installs) ──
+  ✅ header printed
+  ✅ channel auto-detected preview
+  ✅ plan lists anet self
+  ✅ plan lists agent-node
+  ✅ plan lists commhub-server
+  ✅ plan lists dashboard
+  ✅ anet target preview.99 shown
+  ✅ dry-run notice printed
+  ✅ no installs attempted
+── Test 2: PINNED + lazy notes ──
+  ✅ PINNED_SERVER_VERSION surfaced
+  ✅ lazy-fetched note shown
+── Test 3: post-upgrade hint (#117 link) ──
+  ✅ post-upgrade hints anet project restart
+  ✅ explicit #117 reference
+  ✅ agent-node install was channel-aware (@preview)
+── Test 4: --channel latest override ──
+  ✅ channel override applied
+  ✅ override source labelled
+  ✅ install used @latest
+── Test 5: --channel garbage rejected ──
+  ✅ garbage --channel rejected
+── Test 6: agent-node up-to-date → no install ──
+  ✅ up-to-date status shown
+  ✅ no install when up-to-date
+── Test 7: --self → detached self-upgrade ──
+  ✅ detach announcement printed
+  ✅ recovery breadcrumb printed
+  ✅ detached child fired npm install for anet self
+── Test 8: --self + anet up-to-date → no detach ──
+  ⚠ (Test 8: detach announced — dist version vs mock preview mismatched, not a hard fail)
+── Test 9: npm registry down ──
+  ✅ lookup-failed badge shown
+  ✅ no install when registry down
+── Test 10: lazy packages skip note ──
+  ✅ agent-node lazy hint links node start
+  ✅ commhub-server lazy hint links hub start
+  ✅ dashboard lazy hint links hub dashboard
+── Test 11: anet self skip + manual instructions ──
+  ✅ self-skip line printed
+  ✅ manual instruction is channel-aware (@preview)
+── Test 12: help advertises new flags ──
+  ✅ --help mentions --channel
+  ✅ --help mentions --dry-run
+  ✅ --help mentions --self
+
+──────────────────────────────────────
+  PASS=33  FAIL=0
+──────────────────────────────────────

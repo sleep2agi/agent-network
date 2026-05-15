@@ -39,6 +39,13 @@ function tmuxSessionRunning(name: string): boolean {
   try { execFileSync("tmux", ["has-session", "-t", name], { stdio: "pipe" }); return true; }
   catch { return false; }
 }
+
+// Pin commhub-server to a specific version to defeat bunx caching of older
+// versions (bunx with @preview caches the first-resolved version and may not
+// refetch). A `latest` agent-network release must pin a *stable* server.
+// `anet upgrade` (#88) surfaces this constant in its plan output so users
+// understand global-install version != version anet hub start actually runs.
+const PINNED_SERVER_VERSION = "0.8.0";
 function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   if (!uuid) return false;
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
@@ -854,7 +861,8 @@ Setup:
   anet hub start                 Start CommHub Server + admin bootstrap
   anet hub dashboard             Start Web Dashboard
   anet hub config                Show/set server config
-  anet upgrade                  Check for updates
+  anet upgrade                  Upgrade all anet packages (channel-aware)
+  anet upgrade --channel preview|latest --dry-run --self  (see flags)
 
 Other:
   anet import [alias]           Import sessions from CommHub
@@ -2264,14 +2272,7 @@ async function serverCommand() {
         HOST: host,
         ...(devOpen ? { COMMHUB_DEV_OPEN: "1" } : token ? { COMMHUB_AUTH_TOKEN: token } : {}),
       };
-      // Pin to a specific version to defeat bunx caching of older versions.
-      // Bump this whenever commhub-server is updated. (bunx with @preview will
-      // cache the first-resolved version and may not refetch even when the
-      // tag points at something newer; specifying the exact version forces
-      // a fresh install whenever this string changes.)
-      // A `latest` agent-network release must pin a *stable* commhub-server —
-      // 0.8.0 is the published latest and supersedes 0.8.0-preview.2.
-      const PINNED_SERVER_VERSION = "0.8.0";
+      // Pin to a specific version (module-level constant) — see PINNED_SERVER_VERSION.
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`];
       if (devOpen) serverArgs.push("--dev-open");
       child = spawn("bunx", serverArgs, { env, stdio: "pipe" });
@@ -3249,46 +3250,313 @@ Data: .anet/nodes/<node-id>/channels/<type>/
   }
 }
 
-// ── upgrade ──
+// ── upgrade (#88) — multi-package + dual-channel + Node-check + dry-run ─
 
-function printManualAnetUpgrade() {
-  console.log("   Run manually after this command exits:");
-  console.log("     npm install -g @sleep2agi/agent-network@latest");
-  console.log("   Or run in a fresh shell:");
-  console.log("     sh -c 'npm install -g @sleep2agi/agent-network@latest && anet -v'");
+type ReleaseChannel = "preview" | "latest";
+
+interface UpgradePlanRow {
+  pkg: string;          // npm package name
+  display: string;      // short human label
+  current: string | null;
+  target: string | null;
+  action: "upgrade" | "up-to-date" | "lazy-skip" | "self-skip" | "lookup-failed";
+  note?: string;
 }
 
-function upgradeCommand() {
+// preview if version carries a prerelease tag, otherwise latest. The same
+// channel applies to every package — we don't want one package on latest and
+// another on preview, that's how desyncs creep in.
+function detectChannel(version: string): ReleaseChannel {
+  return /-(preview|rc|alpha|beta|next)/i.test(version) ? "preview" : "latest";
+}
+
+// `npm view <pkg>@<channel> version` resolves a dist-tag to its current
+// pinned version. 8s timeout — npm registry hiccups shouldn't hang upgrade.
+// Returns null on any failure; callers degrade gracefully.
+function fetchLatestVersion(pkg: string, channel: ReleaseChannel): string | null {
+  try {
+    const out = execFileSync("npm", ["view", `${pkg}@${channel}`, "version"], {
+      encoding: "utf-8",
+      timeout: 8000,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+interface NodeCheck { ok: boolean; current: string; required: string; }
+// Read the *full* installed version (including prerelease tag) of a globally-
+// installed npm package. detectInstalledPackages strips the prerelease via
+// parseSemver, which would make every preview install look "out of date"
+// against the preview dist-tag in upgrade plans. Returns null if not installed.
+function readGlobalPackageVersion(pkgName: string): string | null {
+  try {
+    const out = execFileSync("npm", ["ls", "-g", pkgName, "--depth=0", "--json"], {
+      encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000,
+    });
+    const data = JSON.parse(out);
+    return data?.dependencies?.[pkgName]?.version || null;
+  } catch { return null; }
+}
+
+function checkNodeVersion(): NodeCheck {
+  const required = "22.13.0";
+  const current = process.versions.node;
+  const [maj, min, patch] = current.split(".").map(n => parseInt(n) || 0);
+  const [rMaj, rMin, rPatch] = required.split(".").map(n => parseInt(n) || 0);
+  const ok = maj > rMaj
+    || (maj === rMaj && min > rMin)
+    || (maj === rMaj && min === rMin && patch >= rPatch);
+  return { ok, current, required };
+}
+
+function printManualAnetUpgrade(channel: ReleaseChannel = "latest") {
+  console.log("    Run manually after this command exits:");
+  console.log(`      npm install -g @sleep2agi/agent-network@${channel}`);
+  console.log("    Or run in a fresh shell:");
+  console.log(`      sh -c 'npm install -g @sleep2agi/agent-network@${channel} && anet -v'`);
+}
+
+// Detach a self-upgrade child so the current `anet upgrade` process can exit
+// cleanly before npm replaces its binary. stderr → /tmp/anet-self-upgrade.err
+// gives users a recovery breadcrumb if the spawn fails silently after we exit.
+function selfUpgradeDetached(channel: ReleaseChannel): never {
+  const errLog = "/tmp/anet-self-upgrade.err";
+  const cmd = `npm install -g @sleep2agi/agent-network@${channel} 2>${shellQuote(errLog)} && anet -v`;
+  console.log(`\n[anet] --self: detaching upgrade. The current process will exit now.`);
+  console.log(`[anet] If it fails, check ${errLog} and re-run manually:`);
+  console.log(`         npm install -g @sleep2agi/agent-network@${channel}`);
+  try {
+    const child = spawn("sh", ["-c", cmd], { stdio: "ignore", detached: true });
+    child.unref();
+  } catch (e: any) {
+    console.log(`[anet] ❌ Failed to detach self-upgrade: ${e.message}`);
+    printManualAnetUpgrade(channel);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+function printUpgradePlan(plan: UpgradePlanRow[]) {
+  console.log("\n  Plan:");
+  for (const p of plan) {
+    const cur = p.current || "not installed";
+    const tgt = p.target || "(lookup failed)";
+    let badge = "";
+    switch (p.action) {
+      case "upgrade":       badge = "→ upgrade"; break;
+      case "up-to-date":    badge = "✓ up to date"; break;
+      case "lazy-skip":     badge = "(lazy via npx, skipped)"; break;
+      case "self-skip":     badge = "(self — see below)"; break;
+      case "lookup-failed": badge = "⚠ npm registry lookup failed"; break;
+    }
+    console.log(`    ${p.display.padEnd(18)}  ${cur.padEnd(20)}  →  ${tgt.padEnd(20)}  ${badge}`);
+    if (p.note) console.log(`      ${p.note}`);
+  }
+}
+
+async function upgradeCommand() {
   const opts = parseOpts();
+  const isSelf = opts.self === "true";
+  const isDryRun = opts["dry-run"] === "true";
   const forkScript = opts["fork-script"];
 
-  console.log("[anet] Upgrade plan\n");
-  console.log("1/2 anet (self)");
-  console.log("   Automatic self-upgrade is disabled.");
-  console.log("   Reason: upgrading the currently running anet process can remove or replace the CLI mid-run.");
+  // ── 1. Resolve channel ──
+  // NOTE: parseOpts special-cases `--channel <value>` into opts._channels
+  // (for `anet node create --channel <plugin>` semantics). In the upgrade
+  // context the same flag means release channel, so we read _channels[0].
+  // This is unambiguous because `anet upgrade` doesn't use channel plugins.
+  const anetVersion = getAnetVersion();
+  const detected = detectChannel(anetVersion || "");
+  const channelFlag = opts._channels[0];
+  let channel: ReleaseChannel;
+  if (channelFlag === "preview" || channelFlag === "latest") {
+    channel = channelFlag;
+  } else if (channelFlag) {
+    console.error(`[anet] ❌ --channel must be "preview" or "latest" (got "${channelFlag}")`);
+    process.exit(1);
+  } else {
+    channel = detected;
+  }
+
+  // ── 2. Node version sanity ──
+  const node = checkNodeVersion();
+
+  // ── 3. Header ──
+  console.log("\n[anet] anet upgrade");
+  const channelSrc = channelFlag ? "--channel override" : `detected from anet v${anetVersion}`;
+  console.log(`  Channel: ${channel} (${channelSrc})`);
+  if (node.ok) {
+    console.log(`  Node:    v${node.current} ✓`);
+  } else {
+    console.log(`  Node:    v${node.current} ⚠  (anet requires >=${node.required})`);
+    console.log(`           Continuing anyway, but agent-node preview.9+ may fail to start.`);
+    console.log(`           Tip: nvm install ${node.required.split(".")[0]} && nvm use ${node.required.split(".")[0]}`);
+  }
+
+  // ── 4. Resolve targets + build plan ──
+  console.log("\n  Resolving target versions from npm registry...");
+
+  // For "current" versions we always use the full (prerelease-preserving)
+  // version string. parseSemver strips "-preview.N" which would make every
+  // preview install look stale; this matters for #88 channel-aware UX.
+  const agentNodeCur = readGlobalPackageVersion("@sleep2agi/agent-node");
+  const serverCur    = readGlobalPackageVersion("@sleep2agi/commhub-server");
+  const dashboardCur = readGlobalPackageVersion("@sleep2agi/agent-network-dashboard");
+
+  const [anetTarget, agentNodeTarget, serverTarget, dashboardTarget] = [
+    fetchLatestVersion("@sleep2agi/agent-network", channel),
+    fetchLatestVersion("@sleep2agi/agent-node", channel),
+    fetchLatestVersion("@sleep2agi/commhub-server", channel),
+    fetchLatestVersion("@sleep2agi/agent-network-dashboard", channel),
+  ];
+
+  const plan: UpgradePlanRow[] = [];
+
+  // anet (self)
+  plan.push({
+    pkg: "@sleep2agi/agent-network",
+    display: "anet (self)",
+    current: anetVersion || null,
+    target: anetTarget,
+    action: !anetTarget ? "lookup-failed"
+      : (anetVersion === anetTarget) ? "up-to-date"
+      : isSelf ? "upgrade" : "self-skip",
+    note: !isSelf && anetVersion !== anetTarget && anetTarget
+      ? "(self-upgrade off by default — use --self for detached spawn, or follow manual instructions below)"
+      : undefined,
+  });
+
+  // agent-node
+  if (agentNodeCur) {
+    plan.push({
+      pkg: "@sleep2agi/agent-node",
+      display: "agent-node",
+      current: agentNodeCur,
+      target: agentNodeTarget,
+      action: !agentNodeTarget ? "lookup-failed"
+        : (agentNodeCur === agentNodeTarget ? "up-to-date" : "upgrade"),
+    });
+  } else {
+    plan.push({
+      pkg: "@sleep2agi/agent-node",
+      display: "agent-node",
+      current: null,
+      target: agentNodeTarget,
+      action: "lazy-skip",
+      note: "(not installed globally — lazy-fetched via npx by `anet node start`)",
+    });
+  }
+
+  // commhub-server — always note the PINNED vs global drift
+  if (serverCur) {
+    plan.push({
+      pkg: "@sleep2agi/commhub-server",
+      display: "commhub-server",
+      current: serverCur,
+      target: serverTarget,
+      action: !serverTarget ? "lookup-failed"
+        : (serverCur === serverTarget ? "up-to-date" : "upgrade"),
+      note: `(anet hub start uses pinned ${PINNED_SERVER_VERSION} — your global install is for direct CLI use only)`,
+    });
+  } else {
+    plan.push({
+      pkg: "@sleep2agi/commhub-server",
+      display: "commhub-server",
+      current: null,
+      target: serverTarget,
+      action: "lazy-skip",
+      note: `(not installed globally — \`anet hub start\` lazy-fetches pinned ${PINNED_SERVER_VERSION} via npx)`,
+    });
+  }
+
+  // dashboard
+  if (dashboardCur) {
+    plan.push({
+      pkg: "@sleep2agi/agent-network-dashboard",
+      display: "dashboard",
+      current: dashboardCur,
+      target: dashboardTarget,
+      action: !dashboardTarget ? "lookup-failed"
+        : (dashboardCur === dashboardTarget ? "up-to-date" : "upgrade"),
+    });
+  } else {
+    plan.push({
+      pkg: "@sleep2agi/agent-network-dashboard",
+      display: "dashboard",
+      current: null,
+      target: dashboardTarget,
+      action: "lazy-skip",
+      note: "(not installed globally — `anet hub dashboard` lazy-fetches via npx)",
+    });
+  }
+
+  // ── 5. Print plan ──
+  printUpgradePlan(plan);
+
+  // ── 6. Dry-run ──
+  if (isDryRun) {
+    console.log("\n[anet] --dry-run: no install actions performed.\n");
+    return;
+  }
+
+  // ── 7. Execute upgrades (anet self is handled separately at end) ──
+  let upgraded = 0, upToDate = 0, lazy = 0, failed = 0;
+  for (const p of plan) {
+    if (p.pkg === "@sleep2agi/agent-network") continue;  // self handled below
+    if (p.action === "up-to-date") { upToDate++; continue; }
+    if (p.action === "lazy-skip")  { lazy++; continue; }
+    if (p.action === "lookup-failed") {
+      console.log(`\n  ⚠ ${p.display}: registry lookup failed — skipping (try again later).`);
+      failed++;
+      continue;
+    }
+    if (p.action !== "upgrade") continue;
+    console.log(`\n  ▶ Upgrading ${p.display} → ${p.target}...`);
+    try {
+      installGlobalPackage(`${p.pkg}@${channel}`);
+      console.log(`  ✅ ${p.display} now at ${p.target}`);
+      upgraded++;
+    } catch (e: any) {
+      console.log(`  ✗ ${p.display} failed: ${e.message || e}`);
+      failed++;
+    }
+  }
+
+  // ── 8. anet self ──
+  const selfPlan = plan.find(p => p.pkg === "@sleep2agi/agent-network")!;
   if (forkScript) {
+    // Back-compat: legacy `--fork-script <path>` is still honored but
+    // superseded by `--self`. Document removal target in CHANGELOG.
     try {
       const child = spawn(forkScript, [], { stdio: "inherit", detached: true });
       child.unref();
-      console.log(`   Spawned external upgrade script: ${forkScript}`);
-      console.log("   Re-run `anet -v` after the script finishes.");
+      console.log(`\n  ▶ Spawned legacy --fork-script: ${forkScript}`);
     } catch (e: any) {
-      console.log(`   ⚠ Failed to start external script: ${e.message}`);
-      printManualAnetUpgrade();
+      console.log(`\n  ⚠ --fork-script failed: ${e.message}`);
+      printManualAnetUpgrade(channel);
     }
-  } else {
-    printManualAnetUpgrade();
+  } else if (isSelf && selfPlan.action === "upgrade") {
+    selfUpgradeDetached(channel);  // process.exit
+  } else if (selfPlan.action === "self-skip") {
+    console.log("\n  anet (self): skipped (would replace the running CLI).");
+    printManualAnetUpgrade(channel);
+  } else if (selfPlan.action === "up-to-date") {
+    console.log("\n  anet (self): up to date.");
+  } else if (selfPlan.action === "lookup-failed") {
+    console.log("\n  anet (self): registry lookup failed — try later.");
+    failed++;
   }
 
-  try {
-    console.log("\n2/2 agent-node");
-    execFileSync("npm", ["install", "-g", "@sleep2agi/agent-node@latest"], { stdio: "inherit" });
-  } catch {
-    console.log("   ⚠ Failed to update @sleep2agi/agent-node");
+  // ── 9. Post-upgrade hints ──
+  console.log(`\n[anet] Done. ${upgraded} upgraded, ${upToDate} up-to-date, ${lazy} lazy${failed ? `, ${failed} failed` : ""}.`);
+  if (upgraded > 0) {
+    console.log("\n  Restart any running nodes to pick up the new versions:");
+    console.log("    anet project restart   # (cwd-wide, see #117)");
   }
-
-  console.log("\n[anet] Current versions:");
-  printVersionReport();
+  console.log();
 }
 
 // ── Main ──
@@ -6414,7 +6682,7 @@ switch (command) {
   case "import": importCommand(); break;
   case "channel": await channelCommand(); break;
   case "setup": await setupCommand(); break;
-  case "upgrade": upgradeCommand(); break;
+  case "upgrade": await upgradeCommand(); break;
   case "session": sessionCommand(); break;
   case "ls": case "list": lsCommand(); break;
   case "status": await statusCommand(); break;
