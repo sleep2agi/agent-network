@@ -655,6 +655,61 @@ The `nodes` table is **persistent node identity** (written at creation, deleted 
 
 ---
 
+### DELETE /api/nodes/:ref
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1166)
+
+Delete a node from the hub server side — removes the persistent identity row in `nodes` and the heartbeat row in `sessions` (same transaction), and pushes a `node_deleted` SSE event to the alias channel and the network channel so dashboards refresh in real time. Shipped via PR #86 "node delete cascade and node_deleted SSE".
+
+```bash
+# :ref accepts node_id / node_name / alias (URL-encoded)
+curl -X DELETE "http://localhost:9200/api/nodes/n_abc12345" \
+  -H "Authorization: Bearer ntok_xxx"
+
+# Non-ASCII aliases need URL-encoding
+curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**Path parameter**: at [`server/src/index.ts:1170-1174`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1170), the server resolves `:ref` via `node_id = ? OR node_name = ? OR alias = ?` (filtered to the network scope, then ordered by `updated_at DESC LIMIT 1`).
+
+**Response** (success, 200):
+
+```json
+{
+  "ok": true,
+  "deleted": true,
+  "node_id": "n_abc12345",
+  "node_name": "coder-1",
+  "alias": "coder-1",
+  "network_id": "net_xxxxx"
+}
+```
+
+**SSE side effect**: after the delete, a `node_deleted` event is pushed to **two SSE channels** ([`server/src/index.ts:1192-1199`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1192)):
+- The alias's own SSE channel (if any subscribers remain)
+- The user-level SSE channel for the `network_id` (so every network member sees the deletion immediately)
+
+```json
+// node_deleted SSE event payload
+{ "type": "node_deleted", "node_id": "n_abc12345", "node_name": "coder-1", "alias": "coder-1", "network_id": "net_xxxxx" }
+```
+
+**Error responses**:
+
+| Status | `error` value | Trigger |
+|------|------------|----------|
+| 404 | `node not found` | `:ref` does not match any nodes row in the current network scope |
+| 403 | `permission_denied` | Caller is `viewer` in that network, or the `ntok_` is pinned to a different network |
+
+**Network scope**: same as `GET /api/nodes` — an `ntok_` is locked to its token's network; a `utok_` can see nodes in every network the user has access to.
+
+::: warning Not the same as `anet node delete`
+This REST endpoint only removes the hub-side `nodes` / `sessions` rows; it does **not** delete the local `.anet/nodes/<alias>/` config directory and does **not** auto-revoke the `ntok_`. Use this endpoint to clear a node identity on the hub. For one-shot client-side cleanup (local dir + tmux + optional `ntok_` revoke), use `anet node delete <alias>` (see [CLI — Agent Node Management](/en/guide/cli#agent-node-management)).
+:::
+
+---
+
 ### GET /api/servers
 
 > [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L845)

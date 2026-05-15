@@ -655,6 +655,61 @@ curl http://localhost:9200/api/nodes \
 
 ---
 
+### DELETE /api/nodes/:ref
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1166)
+
+删除节点（hub server 端）—— 从 `nodes` 表删持久身份 + 从 `sessions` 表删运行时心跳记录（同一个 transaction），并往 alias channel + network channel 推 `node_deleted` SSE 事件让 dashboard 实时刷新。配套 PR #86「node delete cascade and node_deleted SSE」。
+
+```bash
+# :ref 接受 node_id / node_name / alias 任一（URL-encoded）
+curl -X DELETE "http://localhost:9200/api/nodes/n_abc12345" \
+  -H "Authorization: Bearer ntok_xxx"
+
+# 中文 alias 要 URL-encode
+curl -X DELETE "http://localhost:9200/api/nodes/%E4%BB%A3%E7%A0%811%E5%8F%B7" \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**路径参数**：`:ref` 在 server 端 [`server/src/index.ts:1170-1174`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1170) 用 OR 拼 `node_id = ? OR node_name = ? OR alias = ?` 找节点（网络作用域过滤后取 `updated_at DESC` 第一条）。
+
+**响应**（成功，200）：
+
+```json
+{
+  "ok": true,
+  "deleted": true,
+  "node_id": "n_abc12345",
+  "node_name": "代码1号",
+  "alias": "代码1号",
+  "network_id": "net_xxxxx"
+}
+```
+
+**SSE 副作用**：删完往**两个 SSE channel** 推 `node_deleted` event（[`server/src/index.ts:1192-1199`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1192)）：
+- `alias` 自身的 SSE channel（如果还有订阅者）
+- 该 `network_id` 的 user 级 SSE channel（每个网络成员都能立刻看到）
+
+```json
+// node_deleted SSE event payload
+{ "type": "node_deleted", "node_id": "n_abc12345", "node_name": "代码1号", "alias": "代码1号", "network_id": "net_xxxxx" }
+```
+
+**错误响应**：
+
+| 状态 | `error` 值 | 触发条件 |
+|------|------------|----------|
+| 404 | `node not found` | `:ref` 在当前网络作用域内匹配不到 nodes 行 |
+| 403 | `permission_denied` | 调用方在该 network 是 `viewer`，或 `ntok_` 锁定的不是这个 network |
+
+**网络作用域**：跟 `GET /api/nodes` 一致 —— `ntok_` 锁 token 的 network；`utok_` 看到有权限的所有 networks 里的节点。
+
+::: warning 跟 `anet node delete` 不一样
+这个 REST endpoint 只删 hub server 端的 `nodes` / `sessions` 行；**不**删本地 `.anet/nodes/<alias>/` 配置目录，也**不**自动撤销 `ntok_`。从 hub 端清节点身份用本 endpoint；从 client CLI 一站式清干净（含本地 dir + tmux + 可选撤销 ntok_）用 `anet node delete <alias>`（详见 [CLI — `anet node delete`](/guide/cli#agent-node-管理)）。
+:::
+
+---
+
 ### GET /api/servers
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L845)
