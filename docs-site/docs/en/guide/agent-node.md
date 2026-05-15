@@ -408,6 +408,7 @@ Only the env vars that agent-node actually reads from `process.env` (verified at
 | `MODEL` | `--model` / `config.model` | AI model |
 | `LOG_LEVEL` | `--log-level` / `config.logLevel` (**top-level**, not under `flags`) | `debug` / `info` / `warn` / `error` — aligned with R211 chain |
 | `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | Network ID fallback (typically inferred from `ntok_`; cli.ts:356) |
+| `TELEGRAM_BOT_TOKEN` | channel `.env` / `config.env.TELEGRAM_BOT_TOKEN` | Bot token for the Telegram channel — agent-node reads it directly in the telegram channel startup path (cli.ts:259); the allowlist comes from `access.json`, not env (see [Channel — Telegram](/en/guide/channels#telegram-channel)) |
 | `CLAUDE_TIMEOUT_MS` | `--claude-timeout-ms` / `config.flags.claudeTimeoutMs` / `config.claudeTimeoutMs` | Per-query timeout (ms) for the `claude-agent-sdk` runtime, default `120000` (120s); on timeout it aborts and returns an error suggesting you check `ANTHROPIC_BASE_URL` reachability |
 | `ANTHROPIC_BASE_URL` | `config.env.ANTHROPIC_BASE_URL` | Model API URL (required when targeting a third-party Anthropic-compatible endpoint) |
 | `ANTHROPIC_AUTH_TOKEN` | `config.env.ANTHROPIC_AUTH_TOKEN` | Model API key — **for third-party Anthropic-compatible endpoints** (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter / vLLM, etc.) |

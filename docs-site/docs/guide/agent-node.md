@@ -408,6 +408,7 @@ SSE 断连后自动重连，使用指数退避策略：
 | `MODEL` | `--model` / `config.model` | AI 模型 |
 | `LOG_LEVEL` | `--log-level` / `config.logLevel`（**top-level**，不在 `flags` 里） | `debug` / `info` / `warn` / `error`，R211 chain 一致 |
 | `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | network ID 兜底（多数情况靠 ntok_ 推断，不需手填；cli.ts:356） |
+| `TELEGRAM_BOT_TOKEN` | channel `.env` / `config.env.TELEGRAM_BOT_TOKEN` | Telegram channel 的 bot token —— agent-node 在 telegram channel 启动路径直接读（cli.ts:259）；白名单走 `access.json` 不走 env（见 [Channel — Telegram](/guide/channels#telegram-channel)） |
 | `CLAUDE_TIMEOUT_MS` | `--claude-timeout-ms` / `config.flags.claudeTimeoutMs` / `config.claudeTimeoutMs` | `claude-agent-sdk` runtime 单次 query 超时（毫秒），默认 `120000`（120s）；超时 abort 并返回错误，提示检查 `ANTHROPIC_BASE_URL` 是否可达 |
 | `ANTHROPIC_BASE_URL` | `config.env.ANTHROPIC_BASE_URL` | 模型 API 地址（接第三方 Anthropic 兼容 endpoint 时必填） |
 | `ANTHROPIC_AUTH_TOKEN` | `config.env.ANTHROPIC_AUTH_TOKEN` | 模型 API Key —— **第三方 Anthropic 兼容 endpoint**（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter / vLLM 等）走这个 |
