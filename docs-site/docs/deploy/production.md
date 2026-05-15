@@ -1,7 +1,7 @@
 # 生产部署 / 公网部署安全指南
 
 ::: danger 默认配置不能直接挂公网
-当前 stable（v0.8.3，对应 `commhub-server` semver；旧的 `v2.1.x` CLI 版本号体系已废弃，见 [changelog](/changelog)）的默认配置只为**本机使用**优化。直接 `--host 0.0.0.0` 公网开放 = 给攻击者敞开大门。
+当前 stable（v0.9.1，对应 `commhub-server` semver；旧的 `v2.1.x` CLI 版本号体系已废弃，见 [changelog](/changelog)）的默认配置只为**本机使用**优化。直接 `--host 0.0.0.0` 公网开放 = 给攻击者敞开大门。
 
 把这一页**全部读完**再开安全组。
 :::
@@ -143,8 +143,9 @@ v0.8.0 起：
 
 ## 我们的承诺
 
-- v0.8.0 / v0.8.1 已修 P0：默认 auth required ✅ / 默认 localhost ✅ / `admin/anethub` 默认 + 强制 passwd 改密路径 ✅ / tmux 默认关闭 ✅ / 多租户隔离 ✅
-- v0.9（计划中）：密码 Argon2id + token TTL + 安装脚本 checksum
+- **v0.8.0 / v0.8.1 已修 P0**：默认 auth required ✅ / 默认 localhost ✅ / `admin/anethub` 默认 + 强制 passwd 改密路径 ✅ / tmux 默认关闭 ✅ / 多租户隔离 ✅
+- **v0.9.0 / v0.9.1 已 ship**（[changelog](/changelog#v0-9-0-recovery-observability-2026-05-15-stable)）：vendor 凭据 envRef 模式 ✅（[#125](https://github.com/sleep2agi/agent-network/issues/125)，secret 不再落 `config.json` 明文）+ default toolset 透明化 ✅（[#101](https://github.com/sleep2agi/agent-network/issues/101) 默认 Claude Code preset + behavior-disclosure banner，[user responsibility 4 条](/concepts/security#工具权限默认-claude-code-preset-user-responsibility)）+ host telemetry observability ✅（[#119](https://github.com/sleep2agi/agent-network/issues/119) `/api/servers` + dashboard ServersDrawer）
+- **未排期计划**：密码 Argon2id（[security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)）+ token TTL + revoke-all + 安装脚本 checksum —— **未进 v0.9.x scope**，按需要排到 v0.10+
 - 漏洞披露走 [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new)，48 小时响应、7 天修 critical
 
 ## 反馈
