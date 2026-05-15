@@ -1,15 +1,15 @@
 <p align="center">
-  <img width="1672" height="941" alt="Agent Network" src="https://github.com/user-attachments/assets/697f7c78-7782-42d4-935a-6a22029e2054" />
+  <img width="1022" height="695" alt="Agent Network — 30 节点 mesh dashboard" src="./docs/images/hero-grid-cyber.png" />
 </p>
 
 <h1 align="center">Agent Network</h1>
 
 <p align="center">
-  本地优先的多 Agent 协作平台。一个 npm 包搞定 Hub、Web Dashboard、N 个 Agent —— 全部跑在你自己的机器上，可选共享到局域网。
+  <strong>多 Agent，一行命令。让 Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter 在你电脑上一起干活。</strong>
 </p>
 
 <p align="center">
-  <strong>多 Agent，一行命令。让 Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter 在你电脑上一起干活。</strong>
+  开发团队 · 内容工厂 · 研究小组 · 辩论赛 —— 都跑在你自己的机器上。
 </p>
 
 <p align="center">
@@ -17,7 +17,11 @@
   <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-network.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/dm/@sleep2agi/agent-network.svg" alt="npm downloads"></a>
   <a href="https://anet.sh"><img src="https://img.shields.io/badge/docs-anet.sh-009e7e.svg" alt="Docs"></a>
+  <a href="https://anet.sh/changelog"><img src="https://img.shields.io/badge/changelog-anet.sh-blue.svg" alt="Changelog"></a>
   <a href="https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml"><img src="https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml/badge.svg?branch=main" alt="anet QA (v0)"></a>
+  <a href="https://github.com/sleep2agi/agent-network/commits/main"><img src="https://img.shields.io/github/last-commit/sleep2agi/agent-network" alt="last commit"></a>
+  <a href="https://github.com/sleep2agi/agent-network/commits/main"><img src="https://img.shields.io/github/commit-activity/m/sleep2agi/agent-network" alt="commits per month"></a>
+  <a href="https://github.com/sleep2agi/agent-network/releases"><img src="https://img.shields.io/github/release-date/sleep2agi/agent-network" alt="release date"></a>
   <a href="https://github.com/sleep2agi/agent-network"><img src="https://img.shields.io/github/stars/sleep2agi/agent-network?style=social" alt="GitHub stars"></a>
 </p>
 
@@ -32,31 +36,6 @@
 <p align="center">
   <a href="./README.en.md">English</a> · <strong>中文</strong>
 </p>
-
----
-
-## 为什么用 Agent Network
-
-- **一个 CLI，三种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK 同时跑在一个 Hub 上，按角色挑最合适的。
-- **八家 LLM，一个开关切换。** Anthropic、OpenAI、MiniMax、DeepSeek、智谱 GLM、月之暗面 Kimi、书生 InternLM、OpenRouter —— 通过 `ANTHROPIC_BASE_URL` 一键路由。
-- **本地跑得动，跨服务器也跑得动。** Hub 默认绑 `127.0.0.1` 纯本机；改成 `0.0.0.0` 绑公网 IP，**多台云服务器 / 多个工位的 Agent 都能加入同一个 Hub**，SSE 实时双向。SQLite 数据全程在 Hub 所在那台机器，不用注册账号、不用登云、零遥测。
-- **Mesh 派活开箱即用。** Agent 之间通过 17 个 MCP 工具（`get_all_status` / `send_task` / `get_task` …）自动发现 + 互相派活，不需要你写编排逻辑。
-- **自带 Web Dashboard。** Chat / Nodes / Tasks / Messages / Networks / Logs / Admin —— Next.js + 4 套主题，跑在 `localhost:3000`。
-
-> [!IMPORTANT]
-> **当前 stable: v0.8.2**（Apache 2.0，2026-05-12 通过 npm `latest` tag 发布；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)）。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
->
-> **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
-
-> [!WARNING]
-> **公网自部署有风险，先看完这一段再开放安全组。**
-> 当前默认配置只为**本机使用**优化：
-> 1. **默认账号** `admin / anethub` —— 任何公网部署都必须立刻 `anet passwd` 改密，否则被人扫到端口就能进
-> 2. **Hub 默认绑 `127.0.0.1`** —— 公网模式（`--host 0.0.0.0`）必须配反代（Caddy / Nginx）+ TLS，不要把 9200 / 3000 直接挂公网
-> 3. **多租户隔离依赖 network scope** —— v0.8 起已强制用户 / 节点按 network 访问；仍不要把互不信任的人放进同一个 network
-> 4. **tmux 控制面** —— 默认关闭；只有显式 `COMMHUB_ENABLE_TMUX=1` 才启用，生产环境必须配 admin 鉴权、反代 TLS 和最小暴露面
->
-> 完整安全审计 + 修复清单：[`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md)（v0.8.0 / v0.8.1 已修掉 P0）
 
 ---
 
@@ -86,8 +65,6 @@ anet node start my-bot           # 等到 "SSE connected" 即就绪
 
 从 Dashboard 的 Chat 面板派任务即可。再起一个节点让第一个去派活，两个 Agent 会通过 MCP 自动发现彼此并协作。
 
-📖 完整指南 → <https://anet.sh/guide/getting-started>
-
 ---
 
 ## 一键 Demo
@@ -104,20 +81,43 @@ anet demo socialmedia --topic "AI 时代如何提升专注力" --platform xiaoho
 
 每个 demo 跑在独立 network 里，跑完自动清场，**不会污染** `default` network。
 
+> 🎬 **Demo 录屏正在准备中**（`anet demo debate` / `socialmedia` 的实跑 GIF，过两天发上来）。在那之前直接跑命令最快。
+
 ---
 
-## 套件包
+## 下一步
 
-稳定版，Apache-2.0，已发 npm。
+跑完 30 秒上手之后：
 
-| 包 | 版本 | 角色 |
-|---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.7` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.0` | MCP + REST + SSE 通信中枢（SQLite） |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.2` | Web Dashboard —— Next.js 16，4 套主题，Chat / Nodes / Tasks / Networks / Logs / Admin |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK |
+- 🎬 **跑 demo** —— `anet demo debate` 或 `anet demo socialmedia` 看多 Agent 协作真实姿态
+- 📖 **看文档** —— [anet.sh/guide/getting-started](https://anet.sh/guide/getting-started) 全链路教程 + [架构概览](https://anet.sh/guide/architecture)
+- 💚 **加微信群** —— [扫码进群](https://anet.sh/community/wechat-group.jpg) 设计讨论、版本动态、排查问题
+- ⭐ **Star 项目** —— 觉得有用就给个 Star，活跃度直接反映在 release 节奏上
 
-CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
+---
+
+## 为什么用 Agent Network
+
+- **一个 CLI，三种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK 同时跑在一个 Hub 上，按角色挑最合适的。
+- **八家 LLM，一个开关切换。** Anthropic / OpenAI / MiniMax / DeepSeek / 智谱 GLM / 月之暗面 Kimi / 书生 InternLM / OpenRouter —— 通过 `ANTHROPIC_BASE_URL` 一键路由。
+- **本地跑得动，跨服务器也跑得动。** Hub 默认绑 `127.0.0.1` 纯本机；改成 `0.0.0.0` 绑公网 IP，**多台云服务器 / 多个工位的 Agent 都能加入同一个 Hub**，SSE 实时双向。SQLite 数据全程在 Hub 所在那台机器，不用注册账号、不用登云、零遥测。
+- **Mesh 派活开箱即用。** Agent 之间通过 17 个 MCP 工具（`get_all_status` / `send_task` / `get_task` …）自动发现 + 互相派活，不需要你写编排逻辑。
+- **自带 Web Dashboard。** Overview / Nodes / Tasks / Messages / Chat / Admin / Settings —— Next.js 16 + 4 套主题，跑在 `localhost:3000`。
+- **和 LangGraph / AutoGen / CrewAI 不一样：** anet 是 **npm 包**，零 Python 依赖；**本地优先**而非 SaaS 框架；**多厂商不锁定**而非默认 OpenAI；**人 + Agent 同台**通过 Dashboard Chat 协作而非纯程序编排。
+
+---
+
+## anet vs 其他多 Agent 框架
+
+| 维度 | anet | LangGraph | AutoGen | CrewAI |
+|---|---|---|---|---|
+| 部署模式 | 本地优先 + LAN/公网共享 | Python 库 | Python 库 | Python 库 |
+| 多 LLM 厂商 | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenAI / OpenRouter | 走 LangChain | 主要 OpenAI / Azure | 走 LangChain |
+| Agent 间通信 | MCP + SSE 中枢，自动发现 | 编程式 graph | group chat | hierarchy / sequential |
+| 人 + Agent 同台 | ✅ Dashboard Chat 同界面 | n/a（纯程序） | n/a | n/a |
+| 部署形态 | 一个 npm 包 | pip + 自写 server | pip + 自写 server | pip + 自写 server |
+
+<sub>以 2026-05 各项目公开文档对照，不构成性能 benchmark，仅说明定位差异。</sub>
 
 ---
 
@@ -133,6 +133,27 @@ CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你�
                           │ Dashboard       │
                           │ (:3000)         │
                           └─────────────────┘
+```
+
+```mermaid
+flowchart LR
+    A[Agent A] -- send_task --> H[(CommHub<br/>Server :9200)]
+    H -- SSE push --> B[Agent B]
+    B -- reply --> H
+    H -- report --> A
+    H --- D[Dashboard :3000]
+    H -.- DB[(SQLite<br/>~/.commhub)]
+```
+
+节点接入流程（从 0 到上线 30 秒）：
+
+```mermaid
+flowchart LR
+    C0[anet node create my-bot] --> C1{选 runtime}
+    C1 --> C2{选 provider}
+    C2 --> C3[填 API key]
+    C3 --> C4[anet node start my-bot]
+    C4 --> C5[SSE connected ✓ 上线]
 ```
 
 - **MCP Streamable HTTP**（`/mcp`）—— Agent / Claude Code / Codex 接入点
@@ -177,6 +198,21 @@ CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你�
 
 ---
 
+## 套件包
+
+稳定版，Apache-2.0，已发 npm。
+
+| 包 | 版本 | 角色 |
+|---|---|---|
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.7` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.0` | MCP + REST + SSE 通信中枢（SQLite） |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.2` | Web Dashboard —— Next.js 16，4 套主题，Overview / Nodes / Tasks / Messages / Chat / Admin / Settings |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK |
+
+CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
+
+---
+
 ## 仓库结构
 
 ```
@@ -218,6 +254,23 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 
 ---
 
+> [!IMPORTANT]
+> **当前 stable: v0.8.2**（Apache 2.0，2026-05-12 通过 npm `latest` tag 发布；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)）。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
+>
+> **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
+
+> [!WARNING]
+> **公网自部署有风险，先看完这一段再开放安全组。**
+> 当前默认配置只为**本机使用**优化：
+> 1. **默认账号** `admin / anethub` —— 任何公网部署都必须立刻 `anet passwd` 改密，否则被人扫到端口就能进
+> 2. **Hub 默认绑 `127.0.0.1`** —— 公网模式（`--host 0.0.0.0`）必须配反代（Caddy / Nginx）+ TLS，不要把 9200 / 3000 直接挂公网
+> 3. **多租户隔离依赖 network scope** —— v0.8 起已强制用户 / 节点按 network 访问；仍不要把互不信任的人放进同一个 network
+> 4. **tmux 控制面** —— 默认关闭；只有显式 `COMMHUB_ENABLE_TMUX=1` 才启用，生产环境必须配 admin 鉴权、反代 TLS 和最小暴露面
+>
+> 完整安全审计 + 修复清单：[`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md)（v0.8.0 / v0.8.1 已修掉 P0）
+
+---
+
 ## 贡献
 
 欢迎 PR。环境搭建、分支命名、测试矩阵详见 [CONTRIBUTING.md](./CONTRIBUTING.md)。提交即代表同意 [Code of Conduct](./CODE_OF_CONDUCT.md)。
@@ -243,6 +296,18 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 | 📊 [AI Insight](https://ai-insight.org) | 每日更新的 AI 行业研报与高信噪比资讯聚合 |
 
 你的项目用了 anet？提个 PR 到 [`docs-site/docs/ecosystem.md`](./docs-site/docs/ecosystem.md) 或发到 [Discussions](https://github.com/sleep2agi/agent-network/discussions)。
+
+---
+
+## Star History
+
+<a href="https://star-history.com/#sleep2agi/agent-network&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" />
+  </picture>
+</a>
 
 ---
 

@@ -1,19 +1,15 @@
-
-
-
-
-
-<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/697f7c78-7782-42d4-935a-6a22029e2054" />
-
+<p align="center">
+  <img width="1022" height="695" alt="Agent Network — 30-node mesh dashboard" src="./docs/images/hero-grid-cyber.png" />
+</p>
 
 <h1 align="center">Agent Network</h1>
 
 <p align="center">
-  Local-first multi-agent collaboration. One npm package — one local hub, a Web Dashboard, and as many agents as you want, all on your own machine and optionally shared across a LAN.
+  <strong>Multi-agent, one command. Let Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / InternLM / OpenRouter work together on your machine.</strong>
 </p>
 
 <p align="center">
-  <strong>Multi-agent, one command. Let Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / Intern / OpenRouter work together on your machine.</strong>
+  Dev teams · content factories · research crews · debate clubs — all running on your own box.
 </p>
 
 <p align="center">
@@ -21,45 +17,25 @@
   <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-network.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/dm/@sleep2agi/agent-network.svg" alt="npm downloads"></a>
   <a href="https://anet.sh"><img src="https://img.shields.io/badge/docs-anet.sh-009e7e.svg" alt="Docs"></a>
+  <a href="https://anet.sh/en/changelog"><img src="https://img.shields.io/badge/changelog-anet.sh-blue.svg" alt="Changelog"></a>
+  <a href="https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml"><img src="https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml/badge.svg?branch=main" alt="anet QA (v0)"></a>
+  <a href="https://github.com/sleep2agi/agent-network/commits/main"><img src="https://img.shields.io/github/last-commit/sleep2agi/agent-network" alt="last commit"></a>
+  <a href="https://github.com/sleep2agi/agent-network/commits/main"><img src="https://img.shields.io/github/commit-activity/m/sleep2agi/agent-network" alt="commits per month"></a>
+  <a href="https://github.com/sleep2agi/agent-network/releases"><img src="https://img.shields.io/github/release-date/sleep2agi/agent-network" alt="release date"></a>
   <a href="https://github.com/sleep2agi/agent-network"><img src="https://img.shields.io/github/stars/sleep2agi/agent-network?style=social" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
-  <strong><a href="https://anet.sh">📖 文档 / Docs</a></strong> ·
+  <strong><a href="https://anet.sh">📖 Docs</a></strong> ·
   <strong><a href="https://www.npmjs.com/org/sleep2agi">📦 NPM</a></strong> ·
   <strong><a href="https://github.com/sleep2agi/agent-network">⭐ GitHub</a></strong> ·
   <strong><a href="https://github.com/sleep2agi/agent-network/discussions">💬 Discussions</a></strong> ·
-  <strong><a href="https://anet.sh/en/community">💚 微信群 / WeChat</a></strong>
+  <strong><a href="https://anet.sh/en/community">💚 WeChat</a></strong>
 </p>
 
 <p align="center">
   <strong>English</strong> · <a href="./README.md">中文</a>
 </p>
-
----
-
-## Why Agent Network
-
-- **One CLI, three runtimes.** Run Claude Code CLI, the Claude Agent SDK, and OpenAI's Codex SDK side-by-side on the same hub. Mix-and-match per role.
-- **Eight LLM providers, one config switch.** Anthropic, OpenAI, MiniMax, DeepSeek, GLM (Zhipu), Kimi (Moonshot), Intern (Shusheng), and OpenRouter — all routed through `ANTHROPIC_BASE_URL`.
-- **Local. LAN. Cross-server. Same Hub.** Hub binds to `127.0.0.1` for pure local mode; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers across the internet can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
-- **Mesh dispatch out of the box.** Agents discover each other via 17 MCP tools (`get_all_status`, `send_task`, `get_task`, …) and coordinate without you scripting the choreography.
-- **Web Dashboard included.** Chat, Nodes, Tasks, Messages, Networks, Logs, Admin — Next.js app, 4 themes, runs at `localhost:3000`.
-
-> [!IMPORTANT]
-> **Current stable: v0.8.2** (Apache 2.0, shipped 2026-05-12 via npm `latest` tag; project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
->
-> **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
-
-> [!WARNING]
-> **Self-hosting on the public internet has real risks. Read this before opening firewall ports.**
-> The current defaults are tuned for **local use**:
-> 1. **Default credentials** `admin / anethub` — any public deployment must `anet passwd` immediately, or anyone scanning your port can walk in
-> 2. **Hub binds to `127.0.0.1` by default** — for public mode (`--host 0.0.0.0`), put a reverse proxy with TLS in front (Caddy / Nginx). Never expose 9200 / 3000 directly
-> 3. **Multi-tenant isolation relies on network scope** — v0.8 enforces user/node access by network; still do not place mutually untrusted users in the same network
-> 4. **The tmux control plane** — disabled by default; only enabled with `COMMHUB_ENABLE_TMUX=1`, and public deployments must require admin auth, reverse-proxy TLS, and minimal exposure
->
-> Full security audit + fix list: [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md) (v0.8.0 / v0.8.1 closed the P0 items)
 
 ---
 
@@ -89,8 +65,6 @@ anet node start my-bot           # waits for "SSE connected"
 
 Send a task from the Dashboard's Chat panel. Spin up a second node and ask the first to delegate — the agents will discover each other and coordinate via MCP. That's it.
 
-📖 Full walkthrough → <https://anet.sh/en/guide/getting-started>
-
 ---
 
 ## One-line demos
@@ -107,20 +81,43 @@ anet demo socialmedia --topic "Focus in the AI era" --platform xiaohongshu
 
 Each demo runs in an isolated network and cleans up afterwards — your `default` network stays untouched.
 
+> 🎬 **Demo screencasts are on the way** (live GIFs of `anet demo debate` / `socialmedia`). In the meantime, the fastest path is just running the commands.
+
 ---
 
-## Packages
+## What next
 
-Stable, Apache-2.0, published to npm.
+After the 30-second quickstart:
 
-| Package | Version | Role |
-|---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.7` | `anet` CLI — hub / dashboard / agent / demo launcher |
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.0` | MCP + REST + SSE hub (SQLite) |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.2` | Web UI — Next.js, 4 themes, Chat / Nodes / Tasks / Networks / Logs / Admin |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK |
+- 🎬 **Run a demo** — `anet demo debate` or `anet demo socialmedia` shows multi-agent coordination in real time
+- 📖 **Read the docs** — [anet.sh/en/guide/getting-started](https://anet.sh/en/guide/getting-started) for the full walkthrough + [architecture overview](https://anet.sh/en/guide/architecture)
+- 💚 **Join the community** — [Discussions](https://github.com/sleep2agi/agent-network/discussions) for async, or [WeChat](https://anet.sh/en/community) for real-time
+- ⭐ **Star the repo** — if you find it useful, stars directly shape release cadence
 
-The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. You only ever globally install one package.
+---
+
+## Why Agent Network
+
+- **One CLI, three runtimes.** Run Claude Code CLI, the Claude Agent SDK, and OpenAI's Codex SDK side-by-side on the same hub. Mix-and-match per role.
+- **Eight LLM providers, one config switch.** Anthropic / OpenAI / MiniMax / DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / InternLM / OpenRouter — all routed through `ANTHROPIC_BASE_URL`.
+- **Local. LAN. Cross-server. Same Hub.** Hub binds to `127.0.0.1` for pure local mode; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers across the internet can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
+- **Mesh dispatch out of the box.** Agents discover each other via 17 MCP tools (`get_all_status`, `send_task`, `get_task`, …) and coordinate without you scripting the choreography.
+- **Web Dashboard included.** Overview / Nodes / Tasks / Messages / Chat / Admin / Settings — Next.js 16 app, 4 themes, runs at `localhost:3000`.
+- **Different from LangGraph / AutoGen / CrewAI:** anet is an **npm package**, zero Python dependency; **local-first**, not a SaaS framework; **multi-vendor without lock-in**, not OpenAI-by-default; **human + agent on the same surface** via Dashboard Chat, not pure programmatic orchestration.
+
+---
+
+## anet vs other multi-agent frameworks
+
+| Dimension | anet | LangGraph | AutoGen | CrewAI |
+|---|---|---|---|---|
+| Deployment | Local-first + LAN/internet shared | Python library | Python library | Python library |
+| Multi-vendor LLM | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / OpenAI / OpenRouter | via LangChain | mainly OpenAI / Azure | via LangChain |
+| Inter-agent transport | MCP + SSE hub, auto-discovery | Programmatic graph | Group chat | Hierarchy / sequential |
+| Human + Agent on same surface | ✅ Dashboard Chat | n/a (program-only) | n/a | n/a |
+| Package form | One npm package | pip + write your own server | pip + write your own server | pip + write your own server |
+
+<sub>Cross-referenced against the public documentation of each project as of 2026-05; not a performance benchmark — a positioning comparison.</sub>
 
 ---
 
@@ -136,6 +133,27 @@ The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. 
                           │ Dashboard       │
                           │ (:3000)         │
                           └─────────────────┘
+```
+
+```mermaid
+flowchart LR
+    A[Agent A] -- send_task --> H[(CommHub<br/>Server :9200)]
+    H -- SSE push --> B[Agent B]
+    B -- reply --> H
+    H -- report --> A
+    H --- D[Dashboard :3000]
+    H -.- DB[(SQLite<br/>~/.commhub)]
+```
+
+Node onboarding flow (0 to online in 30 seconds):
+
+```mermaid
+flowchart LR
+    C0[anet node create my-bot] --> C1{pick runtime}
+    C1 --> C2{pick provider}
+    C2 --> C3[enter API key]
+    C3 --> C4[anet node start my-bot]
+    C4 --> C5[SSE connected ✓ online]
 ```
 
 - **MCP Streamable HTTP** at `/mcp` — agents and Claude Code / Codex connect here
@@ -172,11 +190,26 @@ Pick one per node. Mix freely on the same hub.
 | DeepSeek | verified | (official Anthropic-compatible endpoint) |
 | GLM 智谱 | verified | (open.bigmodel.cn Anthropic adapter) |
 | Kimi (Moonshot) | verified | (platform.moonshot.cn Anthropic-compatible) |
-| 书生 InternLM | verified | `https://chat.intern-ai.org.cn/anthropic` |
+| InternLM 书生 | verified | `https://chat.intern-ai.org.cn/anthropic` |
 | OpenAI (via `codex-sdk`) | verified | n/a — OpenAI native |
 | OpenRouter / custom Anthropic-compatible | works in dev, no E2E | provide base URL + token |
 
 📖 Per-provider keys, models, and presets → <https://anet.sh/en/guide/multi-model>
+
+---
+
+## Packages
+
+Stable, Apache-2.0, published to npm.
+
+| Package | Version | Role |
+|---|---|---|
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.7` | `anet` CLI — hub / dashboard / agent / demo launcher |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.0` | MCP + REST + SSE hub (SQLite) |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.2` | Web UI — Next.js 16, 4 themes, Overview / Nodes / Tasks / Messages / Chat / Admin / Settings |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK |
+
+The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. You only ever globally install one package.
 
 ---
 
@@ -223,6 +256,23 @@ What's solid, and what to watch out for.
 
 ---
 
+> [!IMPORTANT]
+> **Current stable: v0.8.2** (Apache 2.0, shipped 2026-05-12 via npm `latest` tag; project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
+>
+> **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
+
+> [!WARNING]
+> **Self-hosting on the public internet has real risks. Read this before opening firewall ports.**
+> The current defaults are tuned for **local use**:
+> 1. **Default credentials** `admin / anethub` — any public deployment must `anet passwd` immediately, or anyone scanning your port can walk in
+> 2. **Hub binds to `127.0.0.1` by default** — for public mode (`--host 0.0.0.0`), put a reverse proxy with TLS in front (Caddy / Nginx). Never expose 9200 / 3000 directly
+> 3. **Multi-tenant isolation relies on network scope** — v0.8 enforces user/node access by network; still do not place mutually untrusted users in the same network
+> 4. **The tmux control plane** — disabled by default; only enabled with `COMMHUB_ENABLE_TMUX=1`, and public deployments must require admin auth, reverse-proxy TLS, and minimal exposure
+>
+> Full security audit + fix list: [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md) (v0.8.0 / v0.8.1 closed the P0 items)
+
+---
+
 ## Contributing
 
 PRs welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, branch naming, and the test matrix layout. By contributing you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md).
@@ -248,6 +298,18 @@ Projects built on Agent Network or using anet to ship faster — full list at <h
 | 📊 [AI Insight](https://ai-insight.org) | Daily AI industry intelligence — research reports + signal-rich aggregator |
 
 Using anet in your project? Open a PR to [`docs-site/docs/ecosystem.md`](./docs-site/docs/ecosystem.md) or post in [Discussions](https://github.com/sleep2agi/agent-network/discussions).
+
+---
+
+## Star History
+
+<a href="https://star-history.com/#sleep2agi/agent-network&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" />
+  </picture>
+</a>
 
 ---
 
