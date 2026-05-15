@@ -40,6 +40,96 @@ function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
 }
 
+function claudeProjectDir(cwd: string = process.cwd()): string {
+  return join(homedir(), ".claude", "projects", encodeCwd(cwd));
+}
+
+interface ClaudeSessionInfo { id: string; mtimeMs: number; sizeBytes: number; summary: string; }
+
+function formatSize(bytes: number): string {
+  return bytes < 1024 ? `${bytes}B`
+    : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)}KB`
+    : `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function formatAge(mtimeMs: number): string {
+  const min = (Date.now() - mtimeMs) / 60000;
+  if (min < 60) return `${Math.max(1, Math.round(min))}m ago`;
+  const h = min / 60;
+  if (h < 24) return `${Math.round(h)}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+// Best-effort one-line label for a session: prefer a `summary` entry, else the
+// first user message. Reads only the head of the file (sessions can be huge).
+function parseSessionSummary(jsonlPath: string): string {
+  try {
+    const head = readFileSync(jsonlPath, "utf-8").slice(0, 16384);
+    const lines = head.split("\n").filter(Boolean).slice(0, 12);
+    let firstUser = "";
+    for (const line of lines) {
+      let obj: any;
+      try { obj = JSON.parse(line); } catch { continue; }
+      if (obj?.type === "summary" && typeof obj.summary === "string") {
+        return `(summary) ${obj.summary}`.replace(/\s+/g, " ").slice(0, 60);
+      }
+      if (!firstUser && obj?.type === "user") {
+        const c = obj.message?.content;
+        const text = typeof c === "string" ? c
+          : Array.isArray(c) ? (c.find((x: any) => x?.type === "text")?.text || "") : "";
+        if (text) firstUser = text;
+      }
+    }
+    return firstUser ? firstUser.replace(/\s+/g, " ").slice(0, 60) : "(no preview)";
+  } catch {
+    return "(no preview)";
+  }
+}
+
+// Scan ~/.claude/projects/<cwd-key>/*.jsonl — the Claude Code sessions that
+// belong to this directory. Newest first. Shared by `anet session ls` and the
+// `anet node create` resume picker (#115).
+function listClaudeSessions(cwd: string = process.cwd()): ClaudeSessionInfo[] {
+  const dir = claudeProjectDir(cwd);
+  if (!existsSync(dir)) return [];
+  const out: ClaudeSessionInfo[] = [];
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".jsonl")) continue;
+    const full = join(dir, f);
+    let st;
+    try { st = statSync(full); } catch { continue; }
+    out.push({
+      id: f.replace(/\.jsonl$/, ""),
+      mtimeMs: st.mtimeMs,
+      sizeBytes: st.size,
+      summary: parseSessionSummary(full),
+    });
+  }
+  return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+// #115 — `anet node create` resume picker. Returns a session id to bind, or
+// null for "fresh session". TTY-only; callers guard on process.stdin.isTTY.
+async function pickClaudeSession(alias: string, cwd: string = process.cwd()): Promise<string | null> {
+  const sessions = listClaudeSessions(cwd);
+  if (sessions.length === 0) return null; // nothing to resume — silently fresh
+  const mode = await select({
+    message: `Claude session for "${alias}":`,
+    choices: [
+      { value: "__fresh__", name: "新开 session (fresh)" },
+      { value: "__resume__", name: `Resume 已有 session… (${sessions.length} available)` },
+    ],
+  });
+  if (mode === "__fresh__") return null;
+  return await select({
+    message: "选择要绑定的 session:",
+    choices: sessions.map(s => ({
+      value: s.id,
+      name: `${s.id.slice(0, 8)}…  ${formatAge(s.mtimeMs).padEnd(8)} ${formatSize(s.sizeBytes).padStart(7)}  ${s.summary}`,
+    })),
+  });
+}
+
 let claudeSessionIdSupport: boolean | null = null;
 function claudeSupportsSessionId(): boolean {
   if (claudeSessionIdSupport !== null) return claudeSessionIdSupport;
@@ -736,6 +826,8 @@ Node Management:
   anet tasks [status]           Query tasks (replied/failed/delivered)
 
 Session:
+  anet node create <name> --resume <id>  Bind an existing Claude session
+  anet node create <name> --resume-latest  Bind the latest Claude session
   anet node start <name> --new-session   Start with fresh session
   anet node resume <name> --session <id> Resume specific session
   anet session ls               List Claude Code sessions
@@ -1504,6 +1596,42 @@ async function createCommand(idOverride?: string) {
     } catch {}
   }
 
+  // #115 — bind an existing Claude session at create time (claude-code-cli only).
+  // --resume <id> / --resume-latest for non-TTY scripts; interactive picker
+  // otherwise. The chosen id goes into opts.session, which createProfileFromOpts
+  // already consumes (`session: opts.session || randomUUID()`) — no schema change.
+  if (normalizeRuntime(opts.runtime || "claude-agent-sdk") === "claude-code-cli" && !opts.session) {
+    const wantLatest = opts["resume-latest"] === "true";
+    const wantId = opts.resume && opts.resume !== "true" ? opts.resume : "";
+    if (wantId && wantLatest) {
+      console.error("[anet] --resume <id> 和 --resume-latest 不能同时使用");
+      process.exit(1);
+    }
+    if (wantId) {
+      if (!sessionFileExists(wantId)) {
+        console.error(`[anet] ❌ session "${wantId}" 不在当前目录的 Claude project 里`);
+        console.error(`[anet]    查看可用 session: anet session ls`);
+        process.exit(1);
+      }
+      opts.session = wantId;
+      console.log(`[anet] 绑定已有 Claude session: ${wantId.slice(0, 8)}…`);
+    } else if (wantLatest) {
+      const latest = listClaudeSessions()[0];
+      if (!latest) {
+        console.error("[anet] ❌ 当前目录没有可 resume 的 Claude session");
+        process.exit(1);
+      }
+      opts.session = latest.id;
+      console.log(`[anet] 绑定最近的 Claude session: ${latest.id.slice(0, 8)}… (${formatAge(latest.mtimeMs)})`);
+    } else if (process.stdin.isTTY) {
+      const picked = await pickClaudeSession(id);
+      if (picked) {
+        opts.session = picked;
+        console.log(`[anet] 绑定已有 Claude session: ${picked.slice(0, 8)}…`);
+      }
+    }
+  }
+
   const profile = createProfileFromOpts(id, opts);
 
   // Request a network token (ntok_) for this node — agent-node REQUIRES ntok_ for SSE.
@@ -1802,7 +1930,17 @@ async function launchAgent(id: string, forceNewSession = false) {
     });
   } else {
     // spawn claude CLI
-    const env: NodeJS.ProcessEnv = { ...process.env, COMMHUB_ALIAS: profile.alias, ...(token ? { COMMHUB_TOKEN: token } : {}) };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      COMMHUB_ALIAS: profile.alias,
+      // #115 — suppress Claude Code's "Resume from summary / full session"
+      // interactive prompt so restarting a batch of nodes is zero-interaction.
+      // The prompt is gated by a session-age threshold (default 70min); a very
+      // high value disables it → resumes the full session as-is. Per-spawn,
+      // no ~/.claude/settings.json pollution. Respects an explicit user override.
+      CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: process.env.CLAUDE_CODE_RESUME_THRESHOLD_MINUTES || "999999999",
+      ...(token ? { COMMHUB_TOKEN: token } : {}),
+    };
     for (const [k, v] of Object.entries(profile.env)) {
       env[k] = v.replace(/^~/, home);
     }
@@ -2537,34 +2675,20 @@ async function importCommand() {
 function sessionCommand() {
   const sub = args[1];
   if (sub === "ls" || sub === "list" || !sub) {
-    // Scan ~/.claude/projects/{project-key}/ for .jsonl files
+    // Scan ~/.claude/projects/{project-key}/ for .jsonl files (#115: shared
+    // helper with the `anet node create` resume picker).
     const cwd = process.cwd();
-    const projectKey = cwd.replace(/\//g, "-");
-    const projectDir = join(home, ".claude", "projects", projectKey);
+    const sessions = listClaudeSessions(cwd);
 
-    if (!existsSync(projectDir)) {
-      console.log(`No sessions for ${cwd}`);
-      return;
-    }
+    if (sessions.length === 0) { console.log(`No sessions for ${cwd}`); return; }
 
-    const files = readdirSync(projectDir).filter(f => f.endsWith(".jsonl")).sort((a, b) => {
-      const sa = statSync(join(projectDir, a));
-      const sb = statSync(join(projectDir, b));
-      return sb.mtimeMs - sa.mtimeMs; // newest first
-    });
-
-    if (files.length === 0) { console.log("No sessions."); return; }
-
-    console.log(`\nSessions in ${cwd} (${files.length} total):\n`);
+    console.log(`\nSessions in ${cwd} (${sessions.length} total):\n`);
     console.log("  SESSION ID                             SIZE      MODIFIED");
     console.log("  ──────────────────────────────────────  ────────  ────────────────");
 
-    for (const f of files) {
-      const id = f.replace(".jsonl", "");
-      const st = statSync(join(projectDir, f));
-      const size = st.size < 1024 ? `${st.size}B` : st.size < 1024 * 1024 ? `${(st.size / 1024).toFixed(0)}KB` : `${(st.size / 1024 / 1024).toFixed(1)}MB`;
-      const mtime = st.mtime.toISOString().replace("T", " ").slice(0, 16);
-      console.log(`  ${id}  ${size.padStart(8)}  ${mtime}`);
+    for (const s of sessions) {
+      const mtime = new Date(s.mtimeMs).toISOString().replace("T", " ").slice(0, 16);
+      console.log(`  ${s.id}  ${formatSize(s.sizeBytes).padStart(8)}  ${mtime}`);
     }
     console.log();
   } else {

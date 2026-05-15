@@ -1,0 +1,26 @@
+── Setup ──
+
+── Test 1: --help advertises new flags ──
+  ✅ help: --resume <id>
+  ✅ help: --resume-latest
+── Test 2: anet session ls ──
+  ✅ session ls lists both
+  ✅ session ls newest-first ordering
+── Test 3: node create --resume <good> ──
+  ✅ t1 bound to aaaaaaaa-1111-2222-3333-444444444444
+── Test 4: node create --resume <bad> ──
+  ✅ t2 rejected with helpful error
+  ✅ t2 config not written
+── Test 5: node create --resume-latest ──
+  ✅ t3 bound to newest (bbbbbbbb-1111-2222-3333-444444444444)
+── Test 6: node create (no flag, non-TTY) ──
+  ✅ t4 has fresh UUID (685aef96-40c1-487d-9c9f-08bff50ac35a)
+── Test 7: node create --resume <id> --resume-latest (conflict) ──
+  ✅ t5 conflict rejected
+── Test 8: node start injects env ──
+  ✅ env injection present (CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999)
+  ✅ claude invoked with --resume aaaaaaaa-1111-2222-3333-444444444444
+
+──────────────────────────────────────
+  PASS=12  FAIL=0
+──────────────────────────────────────
