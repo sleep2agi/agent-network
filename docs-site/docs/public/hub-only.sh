@@ -70,8 +70,17 @@ if [ "$(id -u)" -eq 0 ]; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y -qq curl ca-certificates unzip tmux >/dev/null
+  # agent-network preview.9+ engines require Node >= 22.13. Install 22 LTS
+  # if Node is missing or older than 22 (NodeSource setup_22.x handles both).
+  NODE_NEEDS_INSTALL=0
   if ! command -v node >/dev/null 2>&1; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
+    NODE_NEEDS_INSTALL=1
+  else
+    NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)
+    [ "$NODE_MAJOR" -lt 22 ] && NODE_NEEDS_INSTALL=1
+  fi
+  if [ "$NODE_NEEDS_INSTALL" = "1" ]; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
     apt-get install -y -qq nodejs >/dev/null
   fi
   if ! command -v bun >/dev/null 2>&1; then
@@ -265,6 +274,8 @@ echo "      MINIMAX_KEY=sk-cp-... \\"
 echo "      bash -s -- 主编 编辑 审核 信息采集 排版发布者"
 echo ""
 echo "  云服务器安全组别忘了开 9200$([ "$NO_DASHBOARD" != "1" ] && echo " + 3000") 端口."
+echo ""
+echo "  升级 (channel-aware, #88): anet upgrade   /  anet upgrade --channel preview"
 echo "================================================================"
 free -h | head -2
 echo

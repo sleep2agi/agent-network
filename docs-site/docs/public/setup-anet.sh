@@ -2,7 +2,7 @@
 # 一键安装 + 启动 Agent Network (Ubuntu/Debian)
 #
 # 在 root 上跑会自动建 anet 用户切过去,然后:
-#   1. 装 nodejs 20 + tmux
+#   1. 装 nodejs 22 + tmux (agent-node preview.9+ 要求 node >= 22.13)
 #   2. npm i -g @sleep2agi/agent-network @sleep2agi/agent-node
 #   3. tmux session "anet" 内启动: hub + dashboard + N 个 agent
 #
@@ -60,9 +60,18 @@ if [ "$(id -u)" -eq 0 ]; then
   id "$USERNAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USERNAME"
   apt-get update -qq
   apt-get install -y -qq curl tmux ca-certificates unzip >/dev/null
+  # agent-network preview.9+ engines require Node >= 22.13. Older Node
+  # makes npm refuse install with a misleading EBADENGINE — install 22 LTS.
+  NODE_NEEDS_INSTALL=0
   if ! command -v node >/dev/null 2>&1; then
-    echo "[1/5] 装 Node.js 20 LTS ..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
+    NODE_NEEDS_INSTALL=1
+  else
+    NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)
+    if [ "$NODE_MAJOR" -lt 22 ]; then NODE_NEEDS_INSTALL=1; fi
+  fi
+  if [ "$NODE_NEEDS_INSTALL" = "1" ]; then
+    echo "[1/5] 装 Node.js 22 LTS (agent-node preview.9+ 要求) ..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
     apt-get install -y -qq nodejs >/dev/null
   fi
   # Bun is required by commhub-server (TypeScript source with bun shebang).
@@ -218,7 +227,13 @@ echo "  detach:               Ctrl-b d"
 echo "  停掉某个:             tmux kill-session -t anet-node-<alias>"
 echo "  停掉所有 anet-*:      tmux ls | awk -F: '/^anet-/{print \$1}' | xargs -I{} tmux kill-session -t {}"
 echo "================================================================"
-echo "  查看运行状态:   tmux a -t anet"
-echo "  关闭整个网络:   tmux kill-session -t anet"
+echo "  机器重启后一键恢复 (#117):"
+echo "    cd ~/anodes && anet project up"
+echo "  升级到最新 (channel-aware, #88):"
+echo "    anet upgrade                   # 当前 channel"
+echo "    anet upgrade --channel preview # 切 preview"
+echo "  Claude session 绑定 (#115):"
+echo "    anet node create <alias> --resume <session-id>"
+echo "    anet node create <alias> --resume-latest"
 echo "================================================================"
 tmux ls

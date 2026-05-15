@@ -40,8 +40,17 @@ if [ "$(id -u)" -eq 0 ]; then
   id "$USERNAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USERNAME"
   apt-get update -qq
   apt-get install -y -qq curl tmux ca-certificates >/dev/null
+  # agent-network preview.9+ engines require Node >= 22.13. Install 22 LTS
+  # if missing or older than 22.
+  NODE_NEEDS_INSTALL=0
   if ! command -v node >/dev/null 2>&1; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
+    NODE_NEEDS_INSTALL=1
+  else
+    NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)
+    [ "$NODE_MAJOR" -lt 22 ] && NODE_NEEDS_INSTALL=1
+  fi
+  if [ "$NODE_NEEDS_INSTALL" = "1" ]; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
     apt-get install -y -qq nodejs >/dev/null
   fi
   cp "$0" "/home/$USERNAME/agent-only.sh"
@@ -139,5 +148,8 @@ done
 echo ""
 echo "  浏览器访问 hub 那台机器的 Dashboard 应该能看到这些 agent 上线."
 echo "  停掉本机所有 agent:  tmux ls | awk -F: '/^anet-node-/{print \$1}' | xargs -I{} tmux kill-session -t {}"
+echo ""
+echo "  机器重启后 (#117): cd ~ && anet project up"
+echo "  升级 (channel-aware, #88): anet upgrade   /  anet upgrade --channel preview"
 echo "================================================================"
 tmux ls
