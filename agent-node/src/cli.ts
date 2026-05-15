@@ -146,15 +146,17 @@ if (!opts.config && !Object.keys(fileConfig).length) {
 if (fileConfig.env && typeof fileConfig.env === "object") {
   let plainSecretSeen = false;
   for (const [k, v] of Object.entries(fileConfig.env)) {
+    // #125 preview.3 fix — detect BEFORE the outer-env-wins skip, otherwise
+    // anet's launchAgent pre-injection (which sets process.env[k] before this
+    // child reads config.json) causes us to `continue` and miss the banner
+    // emission entirely. Detection is purely a function of the *config* shape,
+    // independent of whether outer env was already populated.
+    if (typeof v === "string" && (/^(sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer\s)/i.test(v) || k.match(/(_TOKEN|_KEY|_SECRET|AUTH)$/i))) {
+      plainSecretSeen = true;
+    }
     if (process.env[k]) continue; // outer env wins (e.g. user already exported)
     if (typeof v === "string") {
       process.env[k] = expandHome(v);
-      // Only warn on values that *look* like secrets, not on benign env like
-      // ANTHROPIC_BASE_URL. Conservative regex: same secret-prefix family the
-      // anet CLI uses when deciding whether to auto-rewrite to envRef.
-      if (/^(sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer\s)/i.test(v) || k.match(/(_TOKEN|_KEY|_SECRET|AUTH)$/i)) {
-        plainSecretSeen = true;
-      }
     } else if (v && typeof v === "object" && typeof (v as any)._envRef === "string") {
       const refName = (v as any)._envRef;
       const refVal = process.env[refName];

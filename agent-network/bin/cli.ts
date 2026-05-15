@@ -1129,6 +1129,39 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   return profile;
 }
 
+// #125 fix (preview.3) — share one resolver between the two launchAgent paths
+// (claude-agent-sdk runtime + claude-code-cli runtime). Earlier preview.2
+// inlined `v.replace(/^~/, home)` at each spawn site, which crashed when v was
+// an envRef object instead of a string. The resolver now: (a) returns the
+// string verbatim with ~ expansion, (b) resolves envRef objects from
+// process.env and FATAL-fails the parent CLI when the referenced var is
+// missing — same UX as agent-node's own resolver, just earlier in the chain
+// so we don't fork into a crashing child.
+function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!profileEnv || typeof profileEnv !== "object") return out;
+  for (const [k, v] of Object.entries(profileEnv)) {
+    if (typeof v === "string") {
+      out[k] = v.replace(/^~/, home);
+      continue;
+    }
+    if (v && typeof v === "object" && typeof (v as any)._envRef === "string") {
+      const refName = (v as any)._envRef;
+      const refVal = process.env[refName];
+      if (refVal === undefined || refVal === "") {
+        console.error(`[anet] FATAL: config.json env.${k} references env var "${refName}" but it is not set in this shell.`);
+        console.error(`[anet]        Fix: export ${refName}=<your-value>  then re-run anet node start`);
+        console.error(`[anet]        (set the value matching the previous plain secret you migrated away from)`);
+        process.exit(1);
+      }
+      out[k] = refVal;
+      continue;
+    }
+    // Any other shape is ignored — env values must be string or envRef object.
+  }
+  return out;
+}
+
 function saveCreatedNode(id: string, profile: Profile) {
   // #125 fix: rewrite plain-secret env values to the envRef shape **at create
   // time**, before the config first hits disk. Keeps secrets out of git
@@ -2003,9 +2036,10 @@ async function launchAgent(id: string, forceNewSession = false) {
 
     const hub = profile.hub || loadGlobal().hub || "";
     const env: NodeJS.ProcessEnv = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}), ...(hub ? { COMMHUB_URL: hub } : {}) };
-    for (const [k, v] of Object.entries(profile.env)) {
-      env[k] = v.replace(/^~/, home);
-    }
+    // #125 fix (preview.3) — resolve envRef before spawn so the child gets a
+    // plain string in env; the child's own envRef-resolver would otherwise
+    // never run (parent crashes on `.replace()` of an object first).
+    Object.assign(env, resolveProfileEnv(profile.env as any, home));
 
     // Try agent-node from PATH, fallback to npx
     let cmd = "agent-node";
@@ -2034,9 +2068,9 @@ async function launchAgent(id: string, forceNewSession = false) {
       CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: process.env.CLAUDE_CODE_RESUME_THRESHOLD_MINUTES || "999999999",
       ...(token ? { COMMHUB_TOKEN: token } : {}),
     };
-    for (const [k, v] of Object.entries(profile.env)) {
-      env[k] = v.replace(/^~/, home);
-    }
+    // #125 fix (preview.3) — same envRef resolution as the agent-node spawn
+    // path above, just for the claude-code-cli runtime branch.
+    Object.assign(env, resolveProfileEnv(profile.env as any, home));
     if (profile.channels.includes("telegram")) {
       env.TELEGRAM_STATE_DIR = join(nodesDir(), nodeId, "channels", "telegram");
     }
