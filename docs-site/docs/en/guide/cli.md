@@ -72,7 +72,7 @@ After installation, the `anet` command is available globally.
 | `anet node ls` | List all nodes |
 | `anet info <name>` | View agent details |
 | `anet logs <name>` | View agent logs (add `--follow` to tail in real time) |
-| `anet node rename <old> <new>` | Rename an agent |
+| `anet node rename <old> <new>` | Rename an agent — ⚠ **The node must have been `anet node start`ed at least once** (so a sessions row exists on the commhub server). Purely-created nodes that have never started will fail at the `prepareRename` step with `node not found in network`, [#110](https://github.com/sleep2agi/agent-network/issues/110). Workaround: run `anet node start <old>` once so the server registers it, then `stop` and rename. Fail-safe (PHASE 1 rollback — the old node stays intact) |
 | `anet node delete <name>` | Delete an agent (interactive confirm by default; add `--force` or `--yes` to skip; **does not auto-revoke the `ntok_`** — pair with `anet token revoke <id>` for full cleanup, see [Token lifecycle](/en/concepts/tokens#token-lifecycle-matrix)) |
 
 ### Session binding (`claude-code-cli` runtime)

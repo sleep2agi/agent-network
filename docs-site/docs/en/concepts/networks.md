@@ -188,6 +188,8 @@ anet node start remote-agent                    # start
 The `node_id` inside the config is a stable ID generated **locally** by `anet node create` (`generateNodeId()`; the CommHub `resume_id` is `sdk-${node_id}`). Copying it makes both machines use the same `node_id` → the same `resume_id`, and hub-side SSE routing breaks (whichever connection arrives first receives the task; the second one is silently ignored).
 
 If you really need to move a node from machine A to machine B (instead of creating a new one), use `anet node rename` or just re-run `anet node create` on B.
+
+> ⚠ Known gap with `anet node rename` ([#110](https://github.com/sleep2agi/agent-network/issues/110)): the node must have been started **at least once** with `anet node start` (otherwise there is no sessions row on the commhub server and `prepareRename` fails). After copying the config to B, run `anet node start` once so the server registers it, then rename. Fail-safe (PHASE 1 rollback leaves the old node intact).
 :::
 
 ### Option 3: Public Networks
