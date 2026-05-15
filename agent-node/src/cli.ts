@@ -159,9 +159,26 @@ const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
+// #101 fix: when config.tools is absent the agent must still get the full
+// built-in toolset (WebFetch / WebSearch / Bash / Read / Write / Edit / Glob /
+// Grep / Task / NotebookEdit / ...). Earlier behavior set the SDK
+// `options.tools = undefined` which the SDK treats as "no built-in", so the
+// agent only saw MCP tools and reported "network restricted" when asked to
+// fetch a URL. We now signal the SDK's "give me the full Claude Code preset"
+// when tools is unset, and pass `--tools all` to the same preset for a single
+// source-of-truth.
+const TOOLS_PRESET = { type: "preset" as const, preset: "claude_code" as const };
 const ALL_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch"];
 const toolsRaw = opts.tools || (Array.isArray(fileConfig.tools) ? fileConfig.tools.join(",") : fileConfig.tools) || "";
-let TOOLS = toolsRaw === "all" ? ALL_TOOLS : toolsRaw.split(",").filter(Boolean);
+// Behaviour matrix (see sdk.d.ts:1229-1238 for SDK semantics):
+//   --tools "all"       → SDK preset (full Claude Code tool set)
+//   --tools "Read,Bash" → explicit allowlist
+//   --tools "" (absent) → SDK preset (the #101 fix; previously left empty)
+const TOOLS_EXPLICIT = toolsRaw === "all" ? null : toolsRaw.split(",").filter(Boolean);
+let TOOLS: string[] | typeof TOOLS_PRESET =
+  toolsRaw === "all" ? TOOLS_PRESET
+  : (TOOLS_EXPLICIT && TOOLS_EXPLICIT.length) ? TOOLS_EXPLICIT
+  : TOOLS_PRESET;
 // Default 50 turns. The old default of 5 was way too low — Claude Agent SDK
 // uses one turn per tool roundtrip, so any task that uses commhub MCP or
 // reads files burns through 5 turns instantly and fails with
@@ -286,8 +303,11 @@ if (UNSUPPORTED_CHANNEL) {
   process.exit(1);
 }
 
-// Telegram + Claude runtime: 自动注入 Read 工具（用于读取下载的图片/文件）
-if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && !TOOLS.includes("Read")) {
+// Telegram + Claude runtime: 自动注入 Read 工具（用于读取下载的图片/文件）。
+// #101 fix: TOOLS may now be the preset sentinel (no array methods) — preset
+// already includes Read, so we only need to inject when TOOLS is an explicit
+// allowlist that doesn't already have Read.
+if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && Array.isArray(TOOLS) && !TOOLS.includes("Read")) {
   TOOLS.push("Read");
 }
 
@@ -588,7 +608,9 @@ async function processWithClaude(task: string, from: string): Promise<string> {
 
   const options: any = {
     model: MODEL || undefined,
-    tools: TOOLS.length ? TOOLS : undefined,
+    // #101 fix: TOOLS is now either an explicit allowlist (string[]) or the
+    // SDK's "give me the full Claude Code preset" sentinel — never undefined.
+    tools: TOOLS,
     maxTurns: MAX_TURNS,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
@@ -1181,7 +1203,14 @@ if (AUTH_TOKEN) {
   warn(`  未配置 token — agent 数据不隔离。运行: anet login`);
 }
 
-log(`  tools:   ${TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)"}`);
+// #101 fix: log resolved toolset shape — explicit list shows entries, preset
+// surfaces as "all (Claude Code preset)" so users can tell at a glance their
+// agent has the full built-in set vs a restricted allowlist.
+log(`  tools:   ${
+  Array.isArray(TOOLS)
+    ? (TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)")
+    : "all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)"
+}`);
 log(`  channels:${TELEGRAM_CHANNELS.length ? ` telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : " (none)"}`);
 log(`  session: ${SESSION_ID || "(new)"}`);
 log(`  log-dir: ${LOG_DIR}`);

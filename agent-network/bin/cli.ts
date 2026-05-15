@@ -1715,8 +1715,25 @@ async function createCommand(idOverride?: string) {
   if (normalizeRuntime(profile) === "claude-code-cli") {
     printClaudeCodeNotice();
   }
-  console.log(`[anet] ⚠ dangerouslySkipPermissions and teammateMode enabled by default.`);
-  console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
+  // #101 user warning — surface the resolved toolset + dangerouslySkipPermissions
+  // implication on every node create so users see what the agent can do before
+  // they hand it real work. The earlier behavior printed only the flags warning
+  // and left tools opaque.
+  const toolsArr = Array.isArray(profile.tools) ? profile.tools : [];
+  const toolsLabel = toolsArr.length
+    ? `[${toolsArr.join(", ")}] (explicit allowlist)`
+    : `all (Claude Code preset — WebFetch / WebSearch / Bash / Read / Write / Edit / Glob / Grep / Task / ...)`;
+  console.log(`\n[anet] ⚠ Node created with default tool set:`);
+  console.log(`[anet]    Built-in: ${toolsLabel}`);
+  console.log(`[anet]    MCP:      commhub_send_task / send_message / send_reply / get_all_status / ...`);
+  console.log(`[anet]    Flags:    dangerouslySkipPermissions=true (no per-call confirmation), teammateMode enabled`);
+  console.log(`[anet]`);
+  console.log(`[anet]    The agent can read/write files, run shell commands, and access the network.`);
+  console.log(`[anet]    Make sure this is what you want for this agent's role.`);
+  console.log(`[anet]`);
+  console.log(`[anet]    Restrict tools:        edit .anet/nodes/${id}/config.json → "tools": ["Read","Bash",...]`);
+  console.log(`[anet]    Disable auto-skip:     edit .anet/nodes/${id}/config.json → "flags.dangerouslySkipPermissions": false`);
+  console.log(`[anet]    Inspect current set:   anet info ${id}`);
   console.log(`\nStart: anet node start ${id}`);
   closeRL();
   // Only exit if invoked directly from the CLI (top-level command). When called
@@ -2179,6 +2196,10 @@ function showProfiles(cmd: string) {
 
 async function lsCommand() {
   const ids = listProfileIds();
+  // #101 user warning — verbose mode (`anet ls -v` / `--verbose`) prints a
+  // second line per node with the resolved toolset + flag set so users can
+  // see at a glance what each agent in the network is empowered to do.
+  const verbose = args.includes("-v") || args.includes("--verbose");
 
   // Fetch CommHub status first
   const gc = loadGlobal();
@@ -2225,6 +2246,15 @@ async function lsCommand() {
                          serverStatus === "offline" ? "offline" :
                          serverStatus;
       console.log(`  ${displayName.padEnd(20)} ${runtime.padEnd(14)} ${statusIcon.padEnd(8)} ${sseConnected.padEnd(4)} ${session}`);
+      if (verbose && p) {
+        // #101 verbose — second line shows tools + flags. Width-matched to the
+        // header so it lines up under NAME.
+        const toolsArr = Array.isArray(p.tools) ? p.tools : [];
+        const toolsLabel = toolsArr.length ? `[${toolsArr.join(",")}]` : "all (preset)";
+        const flags = (p as any).flags || {};
+        const flagLabel = flags.dangerouslySkipPermissions === false ? "permGate=on" : "permGate=off";
+        console.log(`  ${" ".repeat(20)} tools=${toolsLabel}  ${flagLabel}`);
+      }
     }
     console.log();
   }
@@ -6379,6 +6409,19 @@ async function infoCommand() {
   console.log(`  model:    ${profile.model || "(default)"}`);
   console.log(`  hub:      ${profile.hub || loadGlobal().hub || "-"}`);
   console.log(`  channels: ${profile.channels?.join(", ") || "(none)"}`);
+  // #101 user warning — make the effective toolset explicit. Empty / missing
+  // tools means the runtime gets the full Claude Code preset; this is shown as
+  // "all (preset)" so users don't mistake it for "no tools".
+  const toolsArr = Array.isArray(profile.tools) ? profile.tools : [];
+  console.log(`  tools:    ${toolsArr.length ? `[${toolsArr.join(", ")}]` : "all (Claude Code preset)"}`);
+  // Flags worth surfacing — dangerouslySkipPermissions is the one most likely
+  // to surprise users in retrospect, so list it first.
+  const flags = (profile as any).flags || {};
+  const flagBits = [
+    `dangerouslySkipPermissions=${flags.dangerouslySkipPermissions === false ? "false" : "true"}`,
+    flags.teammateMode ? "teammateMode" : null,
+  ].filter(Boolean);
+  console.log(`  flags:    ${flagBits.join(", ")}`);
   console.log(`  config:   .anet/nodes/${nodeId}/config.json`);
 
   // PID check
