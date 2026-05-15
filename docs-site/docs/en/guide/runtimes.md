@@ -65,16 +65,20 @@ Add that line to `~/.bashrc` / `~/.zshrc` and `source` it.
 ### How it works
 
 ```
-anet node start  →  spawn `claude` subprocess
+anet node start  →  spawn the local `claude` binary subprocess
                  ↓
-         commhub MCP (stdio) tools injected
+         .mcp.json registers commhub as { type: "stdio", command: "bun",
+                                          args: [".anet/node-server.js"] }
                  ↓
-         receive send_task → forward to Claude session → reply
+         the claude binary spawns bun .anet/node-server.js as a stdio MCP server
+                 ↓
+         node-server.ts internally forwards tool calls to CommHub /mcp over HTTP
 ```
 
-- The node spawns a `claude` CLI subprocess on start
-- The commhub MCP server (over stdio) injects "receive task / dispatch task / reply" tools into the Claude session
-- When a task arrives, the Hub pushes via SSE → MCP forwards to Claude → Claude processes and replies
+- On `anet node start` the anet CLI writes a `.mcp.json` into cwd ([`agent-network/bin/cli.ts:1898 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1898)) and then spawns the `claude` binary
+- The claude binary follows `.mcp.json` and starts a local bun MCP server (`.anet/node-server.js`, [source](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/node-server.ts) — uses `StdioServerTransport`)
+- That local MCP server forwards commhub tool calls to CommHub `/mcp` over HTTP internally
+- Full 3-runtime MCP path comparison + tool-name namespace differences: see [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0)
 
 ### When to pick
 
@@ -155,16 +159,18 @@ anet node start planner
 ```
 anet node start  →  spawn agent-node subprocess
                  ↓
-         @anthropic-ai/claude-agent-sdk
+         @anthropic-ai/claude-agent-sdk → POST ANTHROPIC_BASE_URL
                  ↓
-         POST → ANTHROPIC_BASE_URL (default api.anthropic.com)
-                 ↓
-         commhub MCP (stdio) over SSE
+         commhub tools live in an in-process SDK MCP server (#102 Option A):
+           createSdkMcpServer({ name: "commhub" }) registers 7 tools
+           handlers forward to CommHub POST /mcp (JSON-RPC initialize + tools/call)
 ```
 
 - The agent-node process drives the SDK to call any Anthropic-compatible API
 - Override the base URL with `ANTHROPIC_BASE_URL` to redirect to any compatible provider
 - `settingSources: []` fully isolates the agent from your local `~/.claude/` config
+- The LLM sees the SDK-namespaced commhub tool name **`mcp__commhub__send_task`** etc. (single `commhub` prefix; not the binary HTTP MCP path) — full 3-runtime MCP comparison: [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0)
+- The vendor adapter (e.g. the InternLM system-prompt bias) is injected at this layer — see [Vendor Adapters](/en/concepts/vendor-adapters)
 
 ### When to pick
 
@@ -260,16 +266,19 @@ npm install -g @openai/codex
 ### How it works
 
 ```
-anet node start  →  spawn @openai/codex-sdk
+anet node start  →  spawn agent-node subprocess
                  ↓
-         OpenAI API (OPENAI_API_KEY)
+         agent-node imports @openai/codex-sdk and starts a codex thread
                  ↓
-         commhub MCP (stdio) over SSE
+         the codex thread uses baked-in tools only (Read/Write/Edit/Bash/Grep/Glob/WebSearch)
+                 ↓
+         agent-node's parent process handles SSE + report_status / get_inbox / send_reply
 ```
 
-- Driven by the official `@openai/codex-sdk` package
-- Supports Read / Write / Edit / Bash / Glob / Grep tools
+- Driven by the official `@openai/codex-sdk` package, run as a codex thread
+- Supports Read / Write / Edit / Bash / Glob / Grep / WebSearch (baked into the codex CLI)
 - Auth via `codex auth login` (OAuth) or `OPENAI_API_KEY`
+- **The codex thread does not call commhub MCP tools directly** (`codexOpts` does not pass `mcpServers`, [`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)) — multi-agent dispatch happens externally in agent-node's parent process. See [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0).
 
 ### When to pick
 

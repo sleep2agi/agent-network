@@ -65,16 +65,20 @@ npm config get prefix
 ### 工作原理
 
 ```
-anet node start  →  spawn `claude` 子进程
+anet node start  →  spawn 本机 `claude` 二进制子进程
                  ↓
-         commhub MCP（stdio）注入
+         .mcp.json 注册 commhub: { type: "stdio", command: "bun",
+                                   args: [".anet/node-server.js"] }
                  ↓
-         接收 send_task → 转给 Claude session → 回复 reply
+         claude 二进制 spawn bun .anet/node-server.js 当 stdio MCP server
+                 ↓
+         node-server.ts 内部把工具调用 HTTP 转发到 CommHub /mcp
 ```
 
-- 节点启动时 spawn 一个 `claude` CLI 子进程
-- 通过 commhub MCP（stdio server）把"收任务 / 派任务 / 回复"等工具注入到 Claude session
-- 任务到达 → Hub 通过 SSE 推送 → MCP 转发给 Claude → Claude 处理并 reply
+- 节点启动时 anet CLI 在 cwd 写 `.mcp.json`（[`agent-network/bin/cli.ts:1898 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1898)）+ spawn `claude` 二进制
+- claude 按 `.mcp.json` 起一个本地 bun MCP server（`.anet/node-server.js`，[源码](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/node-server.ts) 用 `StdioServerTransport`）
+- 本地 MCP server 内部把 commhub 工具调用 HTTP 转发到 CommHub `/mcp`
+- 完整 3 runtime MCP 路径对比 + tool name 命名空间差异见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径不同-runtime-不同走法-v0-9-0)
 
 ### 适用场景
 
@@ -155,16 +159,18 @@ anet node start planner
 ```
 anet node start  →  spawn agent-node 子进程
                  ↓
-         @anthropic-ai/claude-agent-sdk
+         @anthropic-ai/claude-agent-sdk → POST ANTHROPIC_BASE_URL
                  ↓
-         POST → ANTHROPIC_BASE_URL (默认 api.anthropic.com)
-                 ↓
-         commhub MCP（stdio）接 SSE 收派任务
+         commhub 工具走 in-process SDK MCP (#102 Option A):
+           createSdkMcpServer({ name: "commhub" }) 注册 7 个工具
+           handler 转发到 CommHub POST /mcp (JSON-RPC initialize + tools/call)
 ```
 
 - agent-node 进程通过 SDK 调 Anthropic 兼容 API
 - 默认 `api.anthropic.com`，可通过 `ANTHROPIC_BASE_URL` 重定向到任何兼容服务
 - `settingSources: []` 完全隔离宿主机配置，不会读你本地的 `~/.claude/`
+- LLM 看到的 commhub 工具名是 SDK namespace 化的 **`mcp__commhub__send_task`** 等（单 `commhub` 前缀；非二进制 HTTP MCP 路径）—— 完整 3 runtime MCP 路径对比见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径不同-runtime-不同走法-v0-9-0)
+- vendor adapter（针对书生 intern 等的 system-prompt bias）也在这层注入 —— 详见 [Vendor 适配层](/concepts/vendor-adapters)
 
 ### 适用场景
 
@@ -272,16 +278,19 @@ npm install -g @openai/codex
 ### 工作原理
 
 ```
-anet node start  →  spawn @openai/codex-sdk
+anet node start  →  spawn agent-node 子进程
                  ↓
-         OpenAI API（OPENAI_API_KEY）
+         agent-node 内调 @openai/codex-sdk 起 codex thread
                  ↓
-         commhub MCP（stdio）接 SSE
+         codex thread 用 baked-in tools (Read/Write/Edit/Bash/Grep/Glob/WebSearch)
+                 ↓
+         agent-node 父进程外部维持 SSE + report_status/get_inbox/send_reply
 ```
 
-- 通过官方 `@openai/codex-sdk` 包驱动
-- 支持 Read / Write / Edit / Bash / Glob / Grep 等工具
+- 通过官方 `@openai/codex-sdk` 包驱动 codex thread
+- 支持 Read / Write / Edit / Bash / Glob / Grep / WebSearch（codex CLI baked in）
 - 鉴权走 `codex auth login`（OAuth 流程）或 `OPENAI_API_KEY`
+- **codex thread 不直接调 commhub MCP 工具**（`codexOpts` 不传 `mcpServers`，[`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)）—— 多 Agent 派活由 agent-node 父进程外部完成，详见 [架构 → MCP 接入路径](/guide/architecture#mcp-接入路径不同-runtime-不同走法-v0-9-0)
 
 ### 适用场景
 

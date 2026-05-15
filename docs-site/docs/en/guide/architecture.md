@@ -321,7 +321,8 @@ The three runtimes expose commhub tools to the LLM via **different** paths — t
 flowchart LR
     subgraph "claude-code-cli"
         CC_BIN[Claude binary<br/>spawned subprocess]
-        CC_BIN -->|"claude mcp add commhub<br/>--transport http"| HUB_MCP1[CommHub<br/>POST /mcp]
+        CC_BIN -->|".mcp.json type:stdio<br/>bun .anet/node-server.js"| LOCAL_PROXY[".anet/node-server.js<br/>local stdio MCP server"]
+        LOCAL_PROXY -->|"HTTP forward<br/>tools/call"| HUB_MCP1[CommHub<br/>POST /mcp]
     end
 
     subgraph "claude-agent-sdk"
@@ -330,8 +331,9 @@ flowchart LR
     end
 
     subgraph "codex-sdk"
-        CODEX_PROC[Codex process]
-        CODEX_PROC -->|"Built-in tools (Read/Write/Bash...)<br/>commhub via external wrapper"| EXT[External MCP wrapper]
+        CODEX_PROC[Codex process<br/>self-contained, baked-in tools only]
+        CODEX_PROC -.- AGENT_NODE[agent-node parent process<br/>SSE + report_status/get_inbox/send_reply]
+        AGENT_NODE -->|"HTTP /mcp"| HUB_MCP3[CommHub<br/>POST /mcp]
     end
 ```
 
@@ -344,9 +346,11 @@ flowchart LR
 
 **Why doesn't `claude-agent-sdk` use HTTP MCP directly?** Claude Agent SDK 0.2.x forwards `mcpServers={commhub:{type:"http", url:.../mcp}}` verbatim to the claude binary's `--mcp-config`, but the binary's HTTP MCP path **does not issue** `initialize` / `tools/list` against the endpoint — commhub never sees the binary subprocess's requests, so the tool list is empty for the LLM ([#102 root cause](https://github.com/sleep2agi/agent-network/issues/102)). Option A hosts the MCP server inside agent-node's own process to bypass this SDK limitation.
 
-**`claude-code-cli` uses the binary's native HTTP MCP**: same path as `claude mcp add commhub --transport http` — the binary itself handshakes with CommHub and calls tools. The tool names live in the binary's internal namespace (see `claude` binary `--help`).
+**`claude-code-cli` uses stdio + local `.anet/node-server.js` proxy**: the anet CLI writes a `.mcp.json` in the project cwd that registers commhub as `{ "type": "stdio", "command": "bun", "args": [".anet/node-server.js"] }` ([`agent-network/bin/cli.ts:1898 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1898)). The claude binary spawns that local bun script as a stdio MCP server, and `node-server.ts` forwards tool calls to CommHub's `/mcp` over HTTP internally ([`agent-network/src/node-server.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/node-server.ts) `StdioServerTransport`). Tool names live in the `node-server.ts` namespace.
 
-> ⚠ Debug tip: if the LLM can't call `commhub_send_task`, check the runtime first — for `claude-agent-sdk` nodes, confirm `commhub-mcp.ts` is in dist (agent-node ≥ 2.3.5-preview.0); for `claude-code-cli` nodes, check `~/.claude/projects/*/mcp.json` for the commhub registration.
+**`codex-sdk` does not expose commhub tools to the LLM**: `codexOpts` does not pass `mcpServers` ([`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)). The codex thread only sees its baked-in tools (Read / Write / Edit / Bash / Glob / Grep / WebSearch). **Multi-agent dispatch happens outside the LLM in agent-node's parent process**: agent-node maintains the SSE connection plus `report_status` / `get_inbox` / `send_reply` calls back to CommHub, feeds the task text into the codex thread, and posts the codex reply back via CommHub. The codex thread itself **does not know** commhub exists — it is just an LLM worker.
+
+> ⚠ Debug tip: if the LLM can't call a commhub tool, check the runtime first — for `claude-agent-sdk` nodes, confirm `commhub-mcp.ts` is in dist (agent-node ≥ 2.3.5-preview.0); for `claude-code-cli` nodes, check the `.mcp.json` has `type: stdio` and the `.anet/node-server.js` path is correct; for `codex-sdk` nodes, **look at the agent-node parent process logs** (the codex thread never calls commhub).
 
 ### Task Processing Flow
 

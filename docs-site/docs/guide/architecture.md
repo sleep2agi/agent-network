@@ -321,7 +321,8 @@ graph LR
 flowchart LR
     subgraph "claude-code-cli"
         CC_BIN[Claude binary<br/>spawn 子进程]
-        CC_BIN -->|"claude mcp add commhub<br/>--transport http"| HUB_MCP1[CommHub<br/>POST /mcp]
+        CC_BIN -->|".mcp.json type:stdio<br/>bun .anet/node-server.js"| LOCAL_PROXY[".anet/node-server.js<br/>本地 stdio MCP server"]
+        LOCAL_PROXY -->|"HTTP forward<br/>tools/call"| HUB_MCP1[CommHub<br/>POST /mcp]
     end
 
     subgraph "claude-agent-sdk"
@@ -330,8 +331,9 @@ flowchart LR
     end
 
     subgraph "codex-sdk"
-        CODEX_PROC[Codex 进程]
-        CODEX_PROC -->|"工具内置 (Read/Write/Bash...)<br/>commhub 通过外部 wrapper"| EXT[外部 MCP wrapper]
+        CODEX_PROC[Codex 进程<br/>baked-in tools 自闭环]
+        CODEX_PROC -.- AGENT_NODE[agent-node 父进程<br/>SSE + report_status/get_inbox/send_reply]
+        AGENT_NODE -->|"HTTP /mcp"| HUB_MCP3[CommHub<br/>POST /mcp]
     end
 ```
 
@@ -344,9 +346,11 @@ flowchart LR
 
 **为啥 `claude-agent-sdk` 不直接走 HTTP MCP？** Claude Agent SDK 0.2.x 把 `mcpServers={commhub:{type:"http", url:.../mcp}}` 配置原样传给 claude 二进制 `--mcp-config`，但二进制的 HTTP MCP 路径**不发** `initialize` / `tools/list` 给 endpoint —— commhub 看不到二进制子进程的请求，工具列表对 LLM 是空（[#102 root cause](https://github.com/sleep2agi/agent-network/issues/102)）。Option A 把 MCP server 起在 agent-node 自己进程内绕开这个 SDK 限制。
 
-**`claude-code-cli` 走二进制原生 HTTP MCP**：跟 `claude mcp add commhub --transport http` 路径一致，二进制自己跟 CommHub 握手 + 调工具。tool names 走二进制内部 namespace（详见 `claude` 二进制 `--help`）。
+**`claude-code-cli` 走 stdio + 本地 `.anet/node-server.js` proxy**：anet CLI 在项目 cwd 写 `.mcp.json` 把 commhub 注册为 `{ "type": "stdio", "command": "bun", "args": [".anet/node-server.js"] }`（[`agent-network/bin/cli.ts:1898 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1898)）。claude 二进制 spawn 这个本地 bun 脚本作为 stdio MCP server；`node-server.ts` 内部通过 HTTP 把工具调用转发到 CommHub `/mcp`（[`agent-network/src/node-server.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/node-server.ts) `StdioServerTransport`）。tool names 由 `node-server.ts` 内部命名空间决定。
 
-> ⚠ Debug tip：LLM 调不到 `commhub_send_task` 时先确认 runtime —— `claude-agent-sdk` 节点查 `commhub-mcp.ts` 在不在 dist 里（agent-node ≥ 2.3.5-preview.0）；`claude-code-cli` 节点查 `~/.claude/projects/*/mcp.json` 有没有 commhub registration。
+**`codex-sdk` 不直接给 LLM 暴露 commhub 工具**：`codexOpts` 不传 `mcpServers`（[`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)），codex thread 只用 baked-in 工具（Read / Write / Edit / Bash / Glob / Grep / WebSearch）。**多 Agent 派活通过 agent-node 父进程**外部完成：agent-node 维持 SSE + `report_status` / `get_inbox` / `send_reply` 跟 commhub roundtrip，把任务文本喂给 codex thread，再把 codex 回复经 commhub 回上游。codex thread 本身**不知道** commhub 存在 —— 它只是个 LLM 工作器。
+
+> ⚠ Debug tip：LLM 调不到 commhub 工具时先确认 runtime —— `claude-agent-sdk` 节点查 `commhub-mcp.ts` 在不在 dist 里（agent-node ≥ 2.3.5-preview.0）；`claude-code-cli` 节点查 `.mcp.json` 里 commhub 是不是 `type:stdio` + `.anet/node-server.js` 路径正确；`codex-sdk` 节点**直接看 agent-node 父进程日志**（codex thread 不调 commhub）。
 
 ### 任务处理流程
 
