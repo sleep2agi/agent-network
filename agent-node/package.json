@@ -11,7 +11,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external @openai/codex-sdk",
+    "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -45,7 +45,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.140"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.140",
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
     "@openai/codex-sdk": ">=0.130.0"

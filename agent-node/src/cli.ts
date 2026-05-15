@@ -12,6 +12,7 @@
 import { readFileSync, existsSync, writeFileSync, chmodSync } from "fs";
 import { join } from "path";
 import { hostname as osHostname, homedir } from "os";
+import { createCommhubSdkMcpServer } from "./commhub-mcp";
 
 const home = homedir();
 
@@ -468,21 +469,27 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     `需要读取外部 URL、调用外部 API、查资料时——直接用对应工具真试。`,
     `不要假设"网络受限""无法访问外部 API"就 fallback 到知识库；只有工具真的执行报错，才据实说明情况。`,
   ].join("\n");
-  // CommHub MCP tool guidance. Two bugs fixed here (issue #102):
-  // (1) tool names were wrong — claude-agent-sdk exposes MCP tools as
-  //     `mcp__<server>__<tool>` (double underscore), so the commhub tools are
-  //     `mcp__commhub__commhub_send_task` etc., NOT `mcp_commhub__send_task`.
-  // (2) custom-systemPrompt nodes never received this block at all (the prompt
-  //     ternary dropped defaultPrompt entirely), so the agent declared the
-  //     commhub tools "unavailable". Now injected into both prompt branches.
+  // CommHub MCP tool guidance. History of fixes on this prompt:
+  // c3c23f9 (#102 v1) introduced these tool names assuming the type:"http"
+  // mcpServers path worked — but smoke test 2026-05-15 found the binary
+  // subprocess never connected to /mcp, so no tools were ever registered.
+  // commhub-mcp.ts (#102 Option A) replaces type:"http" with an in-process
+  // SDK McpServer (server name "commhub", bare tool names like "send_task"),
+  // so the LLM-visible namespacing becomes `mcp__commhub__<bare>` — single
+  // commhub prefix, NOT the double `mcp__commhub__commhub_<bare>` the v1 fix
+  // taught (the double came from a different MCP host's configuration that
+  // is not what the SDK in-process server produces). Names updated below.
   const commhubToolGuidance = [
     `【多 agent 协作 — CommHub 工具】`,
     `你已接入 CommHub 通信网络，可主动用以下 MCP 工具协调其他 agent（这些工具已 registered，直接调用即可）：`,
-    `- mcp__commhub__commhub_get_all_status() — 查看哪些 agent 在线。`,
-    `- mcp__commhub__commhub_send_task(alias, task, parent_task_id="${currentTaskId}") — 派任务给指定 agent。`,
+    `- mcp__commhub__get_all_status() — 查看哪些 agent 在线。`,
+    `- mcp__commhub__send_task(alias, task, parent_task_id="${currentTaskId}") — 派任务给指定 agent。`,
     `  ⚠ 必须把 parent_task_id 设成你当前任务的 ID，系统会自动把子任务的最终结果串回给 ${from}。`,
-    `- mcp__commhub__commhub_get_task(task_id) — 轮询子任务状态，直到 replied/failed。`,
-    `- mcp__commhub__commhub_send_message(alias, message) — 发纯消息（不要求对方回复）。`,
+    `- mcp__commhub__get_task(task_id) — 轮询子任务状态，直到 replied/failed。`,
+    `- mcp__commhub__send_message(alias, message) — 发纯消息（不要求对方回复）。`,
+    `- mcp__commhub__send_reply(task_id, text) — 给某 task 发回复（不会再触发处理）。`,
+    `- mcp__commhub__get_session_status(alias) — 单 agent 详情。`,
+    `- mcp__commhub__list_tasks(...) — 查询任务列表。`,
     `拿到子任务 reply 后整合进你给 ${from} 的最终汇报。即便 session 中途断开，只要 parent_task_id 设了系统也会自动交付。`,
     `不要假设"通信工具不可用"——它们已暴露给你，需要协调其他 agent 时直接调用。`,
   ].join("\n");
@@ -507,21 +514,37 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     ? `${SYSTEM_PROMPT}\n\n${toolCapabilityGuidance}\n\n${commhubToolGuidance}\n\n收到来自 ${from} 的任务：\n\n${task}`
     : defaultPrompt;
   // Inject CommHub as MCP server so Claude can use send_task/get_all_status etc.
-  // CLI accepts { url } format (streamable-http), auth via env or header
+  //
+  // #102 Option A (post-smoke): use the SDK-instance MCP path, NOT type:"http".
+  // The previous type:"http" config was empirically broken — the SDK passes
+  // mcpServers to the claude binary via --mcp-config, but the binary's HTTP
+  // MCP path never issues an initialize/tools/list against the commhub /mcp
+  // endpoint (commhub-server logs show 0 /mcp requests from the binary
+  // subprocess across the entire smoke run, only the parent agent-node's
+  // own report_status / get_inbox / ack_inbox calls). So no commhub tools
+  // ever made it into the LLM tool list — c3c23f9's prompt-layer fix was
+  // teaching tool names for tools that weren't registered.
+  //
+  // Option A: register an in-process McpServer instance via the SDK's
+  // mcpServers `type:"sdk"` channel (createCommhubSdkMcpServer). The SDK
+  // proxies tool calls from the binary to the in-process instance over its
+  // own working transport; our handlers then forward each call to commhub's
+  // HTTP /mcp using the same JSON-RPC pattern the parent process already
+  // uses. Bypasses the binary's HTTP MCP limitations entirely.
   const commhubUrl = process.env.COMMHUB_URL || COMMHUB_URL;
   const commhubToken = process.env.COMMHUB_TOKEN || AUTH_TOKEN;
   const mcpServers: Record<string, any> = {};
   if (commhubUrl) {
-    // SDK schema requires type:'http' (or 'sse'/'stdio'). The local Claude
-    // CLI binary previously accepted type:'url' but the SDK rejects it with
-    // 'Does not adhere to MCP server configuration schema' and the agent
-    // crashes before any tool call. Verified via E2E: with type:'http' the
-    // SDK connects to the streamable-http MCP transport at /mcp.
-    mcpServers["commhub"] = {
-      type: "http",
-      url: `${commhubUrl}/mcp`,
-      headers: commhubToken ? { "Authorization": `Bearer ${commhubToken}` } : undefined,
-    };
+    try {
+      mcpServers["commhub"] = await createCommhubSdkMcpServer(commhubUrl, commhubToken);
+    } catch (e: any) {
+      log(`[claude] ⚠ commhub SDK MCP server init failed (${e?.message || e}); falling back to type:"http" (known-broken, see #102 smoke).`);
+      mcpServers["commhub"] = {
+        type: "http",
+        url: `${commhubUrl}/mcp`,
+        headers: commhubToken ? { "Authorization": `Bearer ${commhubToken}` } : undefined,
+      };
+    }
   }
 
   // ALWAYS resolve a working binary. Earlier we returned undefined when
