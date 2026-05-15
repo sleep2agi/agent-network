@@ -1,0 +1,48 @@
+── Setup ──
+
+── Test 1: --help advertises Project block ──
+  ✅ help: Project (cwd-wide) header
+  ✅ help: anet project up
+  ✅ help: anet project restart
+  ✅ help: anet project down
+  ✅ help: --stagger documented
+  ✅ help: --only / --exclude documented
+── Test 2: bare `anet project` prints usage ──
+  ✅ bare project prints usage
+── Test 3: project up with empty .anet/nodes/ ──
+  ✅ no-nodes friendly message
+── Test 4: project up starts 3 nodes ──
+  ✅ all 3 nodes shown as started
+  ✅ tmux session 'a' alive
+  ✅ tmux session 'b' alive
+  ✅ tmux session 'c' alive
+  ✅ summary shows 3/3 up
+── Test 5: project up again (idempotent) ──
+  ✅ all 3 nodes skipped (already running)
+  ✅ tmux sessions preserved on idempotent up
+── Test 6: project restart --stagger 0 ──
+  ✅ all 3 nodes show ↻ (kill+start)
+  ✅ tmux pane pids changed → real restart happened
+  ✅ all 3 tmux sessions alive after restart
+── Test 7: project down ──
+  ✅ all 3 nodes show ⏹
+  ✅ tmux 'a' gone
+  ✅ tmux 'b' gone
+  ✅ tmux 'c' gone
+── Test 8: project up --only a,b ──
+  ✅ --only started a, b
+  ✅ --only excluded c from output
+  ✅ tmux a, b alive
+  ✅ tmux c NOT started
+  ✅ summary 2/2 (filter counted)
+── Test 9: project down + project up --exclude a ──
+  ✅ --exclude started b, c
+  ✅ --exclude omitted a
+  ✅ tmux a NOT started
+  ✅ tmux b,c alive
+── Test 10: --stagger abc (invalid) ──
+  ✅ invalid --stagger rejected
+
+──────────────────────────────────────
+  PASS=32  FAIL=0
+──────────────────────────────────────

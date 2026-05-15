@@ -35,6 +35,10 @@ function killTmuxSession(sessionName: string) {
 function startNodeTmuxSession(sessionName: string, alias: string) {
   execFileSync("tmux", ["new-session", "-d", "-s", sessionName, `anet node start ${shellQuote(alias)}`], { stdio: "pipe" });
 }
+function tmuxSessionRunning(name: string): boolean {
+  try { execFileSync("tmux", ["has-session", "-t", name], { stdio: "pipe" }); return true; }
+  catch { return false; }
+}
 function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   if (!uuid) return false;
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
@@ -824,6 +828,13 @@ Node Management:
   anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
   anet tasks [status]           Query tasks (replied/failed/delivered)
+
+Project (cwd-wide):
+  anet project up                Start every node in cwd (skip already-running)
+  anet project restart           Kill existing tmux + start fresh (every node)
+  anet project down              Stop every node + notify hub offline
+  --stagger <s>                  Delay between nodes (default: 3, 0 disables)
+  --only a,b / --exclude x,y     Filter by alias or node id
 
 Session:
   anet node create <name> --resume <id>  Bind an existing Claude session
@@ -2917,6 +2928,174 @@ Stop a running agent node.
   } else {
     console.log(`[anet] "${displayName}" is not running locally (server notified offline)`);
   }
+}
+
+// ── project (#117) — cwd-wide node orchestration ─────────────────────
+//
+// Thin wrapper over `anet node start/stop` for every entry under
+// .anet/nodes/. Each spawned node inherits #115's zero-interaction restart
+// (CLAUDE_CODE_RESUME_THRESHOLD_MINUTES env injection inside launchAgent),
+// so `anet project up` on 22 nodes is genuinely zero-keystroke.
+
+interface ProjectNode { id: string; alias: string; profile: Profile | null; }
+
+function printProjectUsage() {
+  console.log(`
+anet project <up|restart|down> [options]
+
+  up        Start every node under cwd's .anet/nodes/ (skip already-running)
+  restart   Kill any existing tmux session and start fresh (every node)
+  down      Stop every node (kill tmux + notify hub offline)
+
+Options (shared):
+  --stagger <seconds>   Delay between nodes (default: 3). 0 disables.
+  --only a,b,c          Operate only on these aliases (or node ids)
+  --exclude x,y         Skip these aliases (or node ids)
+
+Examples:
+  anet project up                       # 起所有，skip 已跑的
+  anet project restart --stagger 1      # 全重启，1s 错峰
+  anet project down --only commhub_1    # 只停一个
+`);
+}
+
+function selectProjectNodes(): ProjectNode[] {
+  const opts = parseOpts();
+  const splitCsv = (s: string) => new Set(s.split(",").map(x => x.trim()).filter(Boolean));
+  const only = opts.only && opts.only !== "true" ? splitCsv(opts.only) : null;
+  const exclude = opts.exclude && opts.exclude !== "true" ? splitCsv(opts.exclude) : null;
+  const out: ProjectNode[] = [];
+  for (const id of listProfileIds()) {
+    const profile = loadProfile(id);
+    const alias = nodeDisplayName(id, profile);
+    if (only && !only.has(alias) && !only.has(id)) continue;
+    if (exclude && (exclude.has(alias) || exclude.has(id))) continue;
+    out.push({ id, alias, profile });
+  }
+  return out;
+}
+
+function parseStaggerMs(): number {
+  const raw = parseOpts().stagger;
+  if (raw === undefined) return 3000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    console.error(`[anet] ❌ --stagger must be a non-negative number (got "${raw}")`);
+    process.exit(1);
+  }
+  return Math.round(n * 1000);
+}
+
+function printProjectSummary(total: number, up: number, failed: { alias: string; reason: string }[]) {
+  console.log("\n──────────────────────────────────────────────");
+  console.log(`  ${up}/${total} up${failed.length ? ` · ${failed.length} failed` : ""}`);
+  if (failed.length > 0) {
+    console.log("  Failed:");
+    for (const f of failed) console.log(`    ✗ ${f.alias} — ${f.reason}`);
+    console.log("    → debug: anet logs <alias>  |  anet info <alias>");
+  }
+  console.log();
+}
+
+async function projectCommand() {
+  const sub = args[1];
+  switch (sub) {
+    case "up": return projectUp();
+    case "restart": return projectRestart();
+    case "down": return projectDown();
+    default: printProjectUsage();
+  }
+}
+
+async function projectUp() {
+  const nodes = selectProjectNodes();
+  if (nodes.length === 0) {
+    console.log("[anet] No nodes match. Create some with: anet node create <name>");
+    return;
+  }
+  const stagger = parseStaggerMs();
+  console.log(`\n[anet] anet project up — ${nodes.length} node(s) in ${process.cwd()}`);
+  let started = 0, alreadyUp = 0;
+  const failed: { alias: string; reason: string }[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (tmuxSessionRunning(n.alias)) {
+      console.log(`  ⏭  ${n.alias} — already running`);
+      alreadyUp++;
+      continue;
+    }
+    try {
+      startNodeTmuxSession(n.alias, n.alias);
+      console.log(`  ▶  ${n.alias}`);
+      started++;
+    } catch (e: any) {
+      const reason = (e?.stderr?.toString().trim() || e?.message || String(e)).slice(0, 200);
+      console.log(`  ✗  ${n.alias} — ${reason}`);
+      failed.push({ alias: n.alias, reason });
+    }
+    if (stagger > 0 && i < nodes.length - 1) await new Promise(r => setTimeout(r, stagger));
+  }
+  printProjectSummary(nodes.length, alreadyUp + started, failed);
+}
+
+async function projectRestart() {
+  const nodes = selectProjectNodes();
+  if (nodes.length === 0) {
+    console.log("[anet] No nodes match.");
+    return;
+  }
+  const stagger = parseStaggerMs();
+  console.log(`\n[anet] anet project restart — ${nodes.length} node(s) in ${process.cwd()}`);
+  let started = 0;
+  const failed: { alias: string; reason: string }[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const wasRunning = tmuxSessionRunning(n.alias);
+    if (wasRunning) killTmuxSession(n.alias);
+    stopNode(n.id);
+    try {
+      startNodeTmuxSession(n.alias, n.alias);
+      console.log(`  ${wasRunning ? "↻" : "▶"}  ${n.alias}`);
+      started++;
+    } catch (e: any) {
+      const reason = (e?.stderr?.toString().trim() || e?.message || String(e)).slice(0, 200);
+      console.log(`  ✗  ${n.alias} — ${reason}`);
+      failed.push({ alias: n.alias, reason });
+    }
+    if (stagger > 0 && i < nodes.length - 1) await new Promise(r => setTimeout(r, stagger));
+  }
+  printProjectSummary(nodes.length, started, failed);
+}
+
+async function projectDown() {
+  const nodes = selectProjectNodes();
+  if (nodes.length === 0) {
+    console.log("[anet] No nodes match.");
+    return;
+  }
+  console.log(`\n[anet] anet project down — ${nodes.length} node(s) in ${process.cwd()}`);
+  let stopped = 0, alreadyDown = 0;
+  for (const n of nodes) {
+    const tmuxAlive = tmuxSessionRunning(n.alias);
+    if (tmuxAlive) killTmuxSession(n.alias);
+    const localKilled = stopNode(n.id);
+    if (n.profile) {
+      // Hub may be down (the very scenario this command runs in) — cap notify
+      // at 2s so a 22-node teardown isn't held hostage by 44 hung fetches.
+      await Promise.race([
+        notifyServerOffline(n.profile, n.id),
+        new Promise<void>(r => setTimeout(r, 2000)),
+      ]).catch(() => {});
+    }
+    if (tmuxAlive || localKilled) {
+      console.log(`  ⏹  ${n.alias}`);
+      stopped++;
+    } else {
+      console.log(`  ·  ${n.alias} — not running`);
+      alreadyDown++;
+    }
+  }
+  console.log(`\n  ${stopped}/${nodes.length} stopped${alreadyDown ? ` · ${alreadyDown} were not running` : ""}\n`);
 }
 
 // ── delete ──
@@ -6226,6 +6405,7 @@ switch (command) {
       default: console.log(`Usage: anet node <create|start|stop|resume|delete|ls|rename> [name]`); break;
     }
     break;
+  case "project": await projectCommand(); break;  // #117 — cwd-wide orchestration
   case "start": await startCommand(); break;   // backward compat
   case "resume": await resumeCommand(); break; // backward compat
   case "rename": await renameCommand(); break; // backward compat
