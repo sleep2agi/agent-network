@@ -313,6 +313,41 @@ graph LR
 | `claude-agent-sdk` | Anthropic Claude Agent SDK | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (see [Multi-model](/en/guide/multi-model)) |
 | `codex-sdk` | OpenAI Codex SDK | Code generation, tool use | OpenAI Codex |
 
+### MCP integration paths (per runtime, v0.9.0+)
+
+The three runtimes expose commhub tools to the LLM via **different** paths — this affects the tool names the LLM sees and how you debug routing problems:
+
+```mermaid
+flowchart LR
+    subgraph "claude-code-cli"
+        CC_BIN[Claude binary<br/>spawned subprocess]
+        CC_BIN -->|"claude mcp add commhub<br/>--transport http"| HUB_MCP1[CommHub<br/>POST /mcp]
+    end
+
+    subgraph "claude-agent-sdk"
+        SDK_PROC[In agent-node process<br/>createSdkMcpServer]
+        SDK_PROC -->|"JSON-RPC initialize<br/>+ tools/call forwarded"| HUB_MCP2[CommHub<br/>POST /mcp]
+    end
+
+    subgraph "codex-sdk"
+        CODEX_PROC[Codex process]
+        CODEX_PROC -->|"Built-in tools (Read/Write/Bash...)<br/>commhub via external wrapper"| EXT[External MCP wrapper]
+    end
+```
+
+**`claude-agent-sdk` uses in-process SDK MCP** ([#102](https://github.com/sleep2agi/agent-network/issues/102) Option A, agent-node `2.3.5-preview.0+`):
+
+- agent-node creates an **in-process `McpServer`** via `createSdkMcpServer({ name: "commhub" })` and registers the 7 agent-facing tools (`send_task` / `send_message` / `send_reply` / `get_all_status` / `get_session_status` / `get_task` / `list_tasks`)
+- Each tool handler **forwards** the call from inside agent-node to CommHub's `POST /mcp` via the JSON-RPC `initialize → tools/call` chain
+- The LLM sees the SDK-namespaced tool name **`mcp__commhub__send_task`** (single `commhub` prefix) — not `mcp__commhub__commhub__send_task` or other double-prefix variants
+- Verify [`agent-node/src/commhub-mcp.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/commhub-mcp.ts) `createCommhubSdkMcpServer()`
+
+**Why doesn't `claude-agent-sdk` use HTTP MCP directly?** Claude Agent SDK 0.2.x forwards `mcpServers={commhub:{type:"http", url:.../mcp}}` verbatim to the claude binary's `--mcp-config`, but the binary's HTTP MCP path **does not issue** `initialize` / `tools/list` against the endpoint — commhub never sees the binary subprocess's requests, so the tool list is empty for the LLM ([#102 root cause](https://github.com/sleep2agi/agent-network/issues/102)). Option A hosts the MCP server inside agent-node's own process to bypass this SDK limitation.
+
+**`claude-code-cli` uses the binary's native HTTP MCP**: same path as `claude mcp add commhub --transport http` — the binary itself handshakes with CommHub and calls tools. The tool names live in the binary's internal namespace (see `claude` binary `--help`).
+
+> ⚠ Debug tip: if the LLM can't call `commhub_send_task`, check the runtime first — for `claude-agent-sdk` nodes, confirm `commhub-mcp.ts` is in dist (agent-node ≥ 2.3.5-preview.0); for `claude-code-cli` nodes, check `~/.claude/projects/*/mcp.json` for the commhub registration.
+
 ### Task Processing Flow
 
 ```mermaid

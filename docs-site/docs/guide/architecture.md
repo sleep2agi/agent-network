@@ -313,6 +313,41 @@ graph LR
 | `claude-agent-sdk` | Anthropic Claude Agent SDK | 编程式调任何 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（详见 [多模型配置](/guide/multi-model)） |
 | `codex-sdk` | OpenAI Codex SDK | 代码生成、工具调用 | OpenAI Codex |
 
+### MCP 接入路径（不同 runtime 不同走法，v0.9.0+）
+
+3 个 runtime 给 LLM 暴露 commhub 工具的方式**不同**，对 LLM 看到的工具名 / 排错路径都有影响：
+
+```mermaid
+flowchart LR
+    subgraph "claude-code-cli"
+        CC_BIN[Claude binary<br/>spawn 子进程]
+        CC_BIN -->|"claude mcp add commhub<br/>--transport http"| HUB_MCP1[CommHub<br/>POST /mcp]
+    end
+
+    subgraph "claude-agent-sdk"
+        SDK_PROC[agent-node 进程内<br/>createSdkMcpServer]
+        SDK_PROC -->|"JSON-RPC initialize<br/>+ tools/call 转发"| HUB_MCP2[CommHub<br/>POST /mcp]
+    end
+
+    subgraph "codex-sdk"
+        CODEX_PROC[Codex 进程]
+        CODEX_PROC -->|"工具内置 (Read/Write/Bash...)<br/>commhub 通过外部 wrapper"| EXT[外部 MCP wrapper]
+    end
+```
+
+**`claude-agent-sdk` 走 in-process SDK MCP**（[#102](https://github.com/sleep2agi/agent-network/issues/102) Option A，agent-node `2.3.5-preview.0+`）：
+
+- agent-node 进程内通过 `createSdkMcpServer({ name: "commhub" })` 起一个**进程内 McpServer**，注册 7 个 agent-facing 工具（`send_task` / `send_message` / `send_reply` / `get_all_status` / `get_session_status` / `get_task` / `list_tasks`）
+- 每个工具 handler 在 agent-node 进程内把调用**转发**到 CommHub `POST /mcp` 走 JSON-RPC `initialize → tools/call` 链
+- LLM 看到的工具名是 SDK namespace 化的 **`mcp__commhub__send_task`**（单 commhub 前缀）—— 不是 `mcp__commhub__commhub__send_task` 之类的双前缀
+- verify [`agent-node/src/commhub-mcp.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/commhub-mcp.ts) `createCommhubSdkMcpServer()`
+
+**为啥 `claude-agent-sdk` 不直接走 HTTP MCP？** Claude Agent SDK 0.2.x 把 `mcpServers={commhub:{type:"http", url:.../mcp}}` 配置原样传给 claude 二进制 `--mcp-config`，但二进制的 HTTP MCP 路径**不发** `initialize` / `tools/list` 给 endpoint —— commhub 看不到二进制子进程的请求，工具列表对 LLM 是空（[#102 root cause](https://github.com/sleep2agi/agent-network/issues/102)）。Option A 把 MCP server 起在 agent-node 自己进程内绕开这个 SDK 限制。
+
+**`claude-code-cli` 走二进制原生 HTTP MCP**：跟 `claude mcp add commhub --transport http` 路径一致，二进制自己跟 CommHub 握手 + 调工具。tool names 走二进制内部 namespace（详见 `claude` 二进制 `--help`）。
+
+> ⚠ Debug tip：LLM 调不到 `commhub_send_task` 时先确认 runtime —— `claude-agent-sdk` 节点查 `commhub-mcp.ts` 在不在 dist 里（agent-node ≥ 2.3.5-preview.0）；`claude-code-cli` 节点查 `~/.claude/projects/*/mcp.json` 有没有 commhub registration。
+
 ### 任务处理流程
 
 ```mermaid
