@@ -75,6 +75,23 @@ After installation, the `anet` command is available globally.
 | `anet node rename <old> <new>` | Rename an agent |
 | `anet node delete <name>` | Delete an agent (interactive confirm by default; add `--force` or `--yes` to skip; **does not auto-revoke the `ntok_`** — pair with `anet token revoke <id>` for full cleanup, see [Token lifecycle](/en/concepts/tokens#token-lifecycle-matrix)) |
 
+### Session binding (`claude-code-cli` runtime)
+
+> ⚠ `--resume` / `--resume-latest` come from [#115](https://github.com/sleep2agi/agent-network/issues/115), **preview channel only** (v2.1.13-preview.1+); the `latest` tag (v2.1.9) does not ship them yet.
+
+Only the `claude-code-cli` runtime touches Claude Code sessions (`~/.claude/projects/<cwd>/*.jsonl`); the `claude-agent-sdk` / `codex-sdk` runtimes have no Claude Code session semantics.
+
+| Command | Description |
+|------|------|
+| `anet node create <name> --resume <id>` | Create a node bound to a **specific session** (errors out and exits if the id is unknown, [`cli.ts:1629-1634`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1629)) |
+| `anet node create <name> --resume-latest` | Create a node bound to the **most recent session** (`listClaudeSessions()[0]`, [`cli.ts:1637-1644`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1637)) |
+| `anet node create <name>` | Interactive picker on TTY (age / size / 60-char first-line preview, [`cli.ts:1645-1651`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1645)); non-TTY falls back to a random session id |
+| `anet node start <name> --new-session` | Force a **fresh** session (overrides `profile.session`) |
+| `anet node resume <name> [--session <id>]` | Resume a session (see [anet node resume](#anet-node-resume)) |
+| `anet session ls` | List Claude Code sessions in the current cwd (the picker and `ls` share [`listClaudeSessions()` cli.ts:103](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L103)) |
+
+> **Zero-keystroke recovery:** since #115, `anet node start` injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` ([`cli.ts:1960`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1960)) into the `claude` spawn env, skipping Claude Code's default 70-minute session-age threshold for the "Resume from summary / full / Don't ask again" interactive prompt — so **restarting a batch of nodes needs no per-node keypress**. The injection is per-spawn, does not touch `~/.claude/settings.json`, and respects an explicit user override. Resume restores the **full session** as-is (no per-invocation flag forces a compact summary; per the #115 commit message, restart-recovery is safer without unexpected compaction).
+
 ### Project-wide (cwd, preview)
 
 > ⚠ **Preview channel only right now**: v2.1.13-preview.2+ (npm `@sleep2agi/agent-network@preview`); the `latest` tag (v2.1.9) does not yet ship it. Install: `npm install -g @sleep2agi/agent-network@preview`.

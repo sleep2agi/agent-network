@@ -75,6 +75,23 @@ npm install -g @sleep2agi/agent-network
 | `anet node rename <old> <new>` | 重命名 Agent |
 | `anet node delete <name>` | 删除 Agent（默认交互式确认；加 `--force` 或 `--yes` 跳过；**不自动撤销 ntok_** — 要彻底清干净加 `anet token revoke <id>`，详见 [Token 生命周期](/concepts/tokens#token-生命周期对照)） |
 
+### Session 绑定（`claude-code-cli` runtime）
+
+> ⚠ `--resume` / `--resume-latest` 来自 [#115](https://github.com/sleep2agi/agent-network/issues/115)，**仅 preview 通道有**（v2.1.13-preview.1+）；npm `latest`（v2.1.9）暂无。
+
+只 `claude-code-cli` runtime 用得上 Claude Code session（`~/.claude/projects/<cwd>/*.jsonl`）；`claude-agent-sdk` / `codex-sdk` 没有 Claude Code session 语义。
+
+| 命令 | 说明 |
+|------|------|
+| `anet node create <name> --resume <id>` | 创建节点并绑定**指定 session**（不存在则报错退出，[`cli.ts:1629-1634`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1629)） |
+| `anet node create <name> --resume-latest` | 创建节点并绑定**最新 session**（`listClaudeSessions()[0]`，[`cli.ts:1637-1644`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1637)） |
+| `anet node create <name>` | TTY 模式下交互式 picker（age / size / 前 60 字符首行预览，[`cli.ts:1645-1651`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1645)）；非 TTY 则照常给随机 session id |
+| `anet node start <name> --new-session` | 强制起**新** session（覆盖 profile.session） |
+| `anet node resume <name> [--session <id>]` | 恢复 session（详见 [anet node resume](#anet-node-resume)） |
+| `anet session ls` | 列当前 cwd 下 Claude Code session（picker 和 ls 共用 [`listClaudeSessions()` cli.ts:103](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L103)） |
+
+> **零键盘恢复**：从 #115 起，`anet node start` spawn `claude` 时自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999`（[`cli.ts:1960`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1960)），跳过 Claude Code 默认 70min session-age 阈值的「Resume from summary / full / Don't ask again」交互弹窗，**整批节点重启时不用一个个按键确认**。per-spawn 注入、不写 `~/.claude/settings.json`，用户显式 export 覆盖；resume 时还原**完整 session**（没有 per-invocation flag 强制 compact summary，#115 commit msg 解释 restart-recovery 不带意外 compaction 更安全）。
+
 ### 项目级（cwd-wide，预览功能）
 
 > ⚠ **当前仅 preview 通道有**：v2.1.13-preview.2+（npm `@sleep2agi/agent-network@preview`）；stable `latest`（v2.1.9）暂无。装预览版：`npm install -g @sleep2agi/agent-network@preview`。
