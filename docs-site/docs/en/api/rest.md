@@ -655,6 +655,55 @@ The `nodes` table is **persistent node identity** (written at creation, deleted 
 
 ---
 
+### GET /api/servers
+
+> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L845)
+
+Aggregate agents by **physical server** (`hostname` + `ip`) and return live host telemetry — used by the dashboard's "Servers" sidebar. Refs [issue #119](https://github.com/sleep2agi/agent-network/issues/119).
+
+```bash
+curl http://localhost:9200/api/servers \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**Side effect before returning**: same as `/api/status` — first mark any session idle for over 10 minutes as `offline` (`UPDATE sessions SET status='offline' WHERE updated_at < cutoff`), then aggregate. So `agent_count` reflects **every session** on that host (including offline); filter by `last_seen` on the client if you want only currently-online ones.
+
+**Response**: note that this returns a **bare JSON array**, not the `{ ok: true, ... }` wrapper used elsewhere in this file (historical choice).
+
+```json
+[
+  {
+    "hostname": "dev-machine",
+    "ip": "192.168.1.42",
+    "agent_count": 7,
+    "cpu_load_1min": 0.42,
+    "cpu_cores": 8,
+    "mem_avail_gb": 12.3,
+    "mem_used_gb": 19.7,
+    "last_seen": "2026-05-15 11:23:45"
+  }
+]
+```
+
+| Field | Source | Notes |
+|------|------|------|
+| `hostname` | agent-node `os.hostname()` | Old agents without telemetry render as `"unknown"` |
+| `ip` | agent-node's first non-internal IPv4 | Without telemetry: `"unknown"` |
+| `agent_count` | Server-side `+1` per session | Total session count on this host (includes offline) |
+| `cpu_load_1min` | Linux `/proc/loadavg`; macOS/Win `os.loadavg()` (Windows always `[0,0,0]` is actively coerced to `null`) | Picks the **most recent** row for the same hostname+ip |
+| `cpu_cores` | `os.cpus().length` | Same |
+| `mem_avail_gb` | Linux `/proc/meminfo` `MemAvailable`; macOS/Win `os.freemem()` | GB, 0.1 precision |
+| `mem_used_gb` | `mem_total - mem_avail` | GB, 0.1 precision |
+| `last_seen` | `COALESCE(last_seen_at, updated_at)` | Latest heartbeat for any session on this host |
+
+**Network scope**: same `addNetworkScope` rule as `/api/status` — an `ntok_` is pinned to its token's network; a `utok_` sees every network the user has access to.
+
+::: info Data source
+Host telemetry is reported by agent-node on every `report_status` call ([issue #119](https://github.com/sleep2agi/agent-network/issues/119) step 1, agent-node v2.3.6-preview.0+). For older agents that don't ship the telemetry fields, SQL returns `NULL` — `hostname` / `ip` render as `"unknown"` and the other fields stay `null`. The server's schema silently drops unknown keys, so agent and server can be upgraded independently.
+:::
+
+---
+
 ### GET /api/messages
 
 

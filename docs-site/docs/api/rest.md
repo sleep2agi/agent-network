@@ -655,6 +655,55 @@ curl http://localhost:9200/api/nodes \
 
 ---
 
+### GET /api/servers
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L845)
+
+按**物理服务器**（`hostname` + `ip`）聚合 agent 列表 + host 实时遥测，给 dashboard 「服务器侧栏」用。Refs [issue #119](https://github.com/sleep2agi/agent-network/issues/119)。
+
+```bash
+curl http://localhost:9200/api/servers \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**返回前的副作用**：跟 `/api/status` 一样，先把 10 分钟以上没心跳的 session 标 `offline`（`UPDATE sessions SET status='offline' WHERE updated_at < cutoff`），再做聚合。所以本 endpoint 的 `agent_count` 反映**所有 session**（不限 status）；要排除 offline 自己在客户端过滤 `last_seen` 即可。
+
+**响应**：注意是**裸数组**，不是 `{ ok: true, ... }` 包裹（跟同文件其他 endpoint 不同，是历史选择）。
+
+```json
+[
+  {
+    "hostname": "dev-machine",
+    "ip": "192.168.1.42",
+    "agent_count": 7,
+    "cpu_load_1min": 0.42,
+    "cpu_cores": 8,
+    "mem_avail_gb": 12.3,
+    "mem_used_gb": 19.7,
+    "last_seen": "2026-05-15 11:23:45"
+  }
+]
+```
+
+| 字段 | 来源 | 说明 |
+|------|------|------|
+| `hostname` | agent-node `os.hostname()` | 没 telemetry 的老 agent 显示 `"unknown"` |
+| `ip` | agent-node 首个 non-internal IPv4 | 没 telemetry 显示 `"unknown"` |
+| `agent_count` | server 聚合时 `+1` | 该 host 上的 session 总数（含 offline） |
+| `cpu_load_1min` | Linux `/proc/loadavg`；macOS/Win `os.loadavg()`（Windows 永远 `[0,0,0]` 主动转 `null`） | 同 hostname+ip 取**最新**那条 |
+| `cpu_cores` | `os.cpus().length` | 同上 |
+| `mem_avail_gb` | Linux `/proc/meminfo` MemAvailable；macOS/Win `os.freemem()` | GB, 0.1 精度 |
+| `mem_used_gb` | `mem_total - mem_avail` | GB, 0.1 精度 |
+| `last_seen` | `COALESCE(last_seen_at, updated_at)` | 该 host 下最新心跳时间 |
+
+**网络作用域**：跟 `/api/status` 一样走 `addNetworkScope` —— `ntok_` 强制锁定该 token 的 network，`utok_` 看到自己有权限的所有 networks。
+
+::: info 数据来源
+host telemetry 由 agent-node 在每次 `report_status` 时带上（[issue #119](https://github.com/sleep2agi/agent-network/issues/119) step 1，agent-node v2.3.6-preview.0+）。老 agent 不带 telemetry 字段时 SQL `NULL`，`hostname`/`ip` 渲染成 `"unknown"`、其他字段为 `null`。server 端 schema 是 silent-drop unknown keys，可以独立升级 agent / server。
+:::
+
+---
+
 ### GET /api/messages
 
 
