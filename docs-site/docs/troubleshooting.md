@@ -133,7 +133,7 @@ anet doctor --fix
 
 # 情况 2：提升角色
 # 让 owner（不是 admin —— admin 改不了角色，verify R149 PUT members owner-only gate）
-# 通过 REST 调用提升角色（CLI promote 子命令排在 v0.9+）：
+# 通过 REST 调用提升角色（CLI promote 子命令 v0.9.x 仍未提供 —— v0.9 scope 是 Recovery & Observability 未动 member role 管理；排到 v0.10+ / 未排期）：
 NET=$(jq -r .network_id ~/.anet/config.json)
 UTOK=$(jq -r .token ~/.anet/config.json)        # owner 自己的 utok_
 curl -X PUT "$HUB/api/networks/$NET/members/<your_user_id>" \
@@ -154,7 +154,7 @@ anet network invite --role member
 ```
 
 ::: info v0.8 起 anet 完全 Apache-2.0 OSS，没有真正的 license 销售
-这条 license gate 是 V3 时代的遗留代码，仍在 `send_task` 路径里跑（`server/src/tools.ts:485`），如果你的本地 SQLite 有过期 `licenses` 行就会触发。**未来 v0.9+ 计划移除整段 license 检查**。
+这条 license gate 是 V3 时代的遗留代码，仍在 `send_task` 路径里跑（verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) `license_expired` emit；同文件 L516 `SELECT type, expires_at FROM licenses`），如果你的本地 SQLite 有过期 `licenses` 行就会触发。**v0.9.x scope 未动**（Recovery & Observability 主题为先），排到 v0.10+ / 未排期移除整段 license 检查。
 :::
 
 **原因**：本地 SQLite `licenses` 表里有一行 `expires_at < now()`。
