@@ -1520,33 +1520,60 @@ This wizard creates one agent node for this project:
     process.exit(1);
   }
 
-  // Vendor-first selection (#104-B B2): pick vendor → pick that vendor's model
-  // → runtime + baseUrl + envKey resolved from the VENDORS registry. Replaces
-  // the old runtime-first picker + per-runtime inline model lists.
+  // #133 runtime-first wizard (Vincent 5101 实测 catch): pick runtime first;
+  // only claude-agent-sdk goes through the vendor picker (it's the only
+  // runtime that supports arbitrary OpenAI/Anthropic-compat vendors). Other
+  // runtimes (claude-code-cli / codex-sdk) reuse their CLI's existing auth
+  // and skip vendor selection entirely.
   const opts = parseOpts();
-  const sel = await selectVendorAndModel();
-  if (sel) {
-    opts.runtime = sel.runtime;
-    if (sel.model) opts.model = sel.model;
-    if (sel.baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${sel.baseUrl}`);
-    if (sel.envKey) {
-      console.log(`
+  let pickedRuntime: "claude-agent-sdk" | "claude-code-cli" | "codex-sdk" | null = null;
+  try {
+    const { select: sel } = await import("@inquirer/prompts");
+    pickedRuntime = await sel({
+      message: "选择 runtime:",
+      choices: [
+        { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
+        { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
+        { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+      ],
+    }) as any;
+  } catch (e: any) {
+    console.log(`[anet] ⚠ Runtime selector unavailable: ${e?.message || e} — defaulting to claude-agent-sdk`);
+    pickedRuntime = "claude-agent-sdk";
+  }
+
+  if (pickedRuntime === "claude-code-cli") {
+    opts.runtime = "claude-code-cli";
+    console.log(`[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login`);
+  } else if (pickedRuntime === "codex-sdk") {
+    opts.runtime = "codex-sdk";
+    console.log(`[anet] 请确保已执行: codex auth login`);
+  } else {
+    // claude-agent-sdk — flow continues into vendor + model picker.
+    const sel = await selectVendorAndModel();
+    if (sel) {
+      opts.runtime = sel.runtime;
+      if (sel.model) opts.model = sel.model;
+      if (sel.baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${sel.baseUrl}`);
+      if (sel.envKey) {
+        console.log(`
 API key:
   Paste the API key/token for the selected vendor.${sel.signupUrl ? `
   📋 注册 / 拿 API Key: ${sel.signupUrl}` : ""}`);
-      const token = await ask(sel.envKey);
-      if (token) opts._envs.push(`${sel.envKey}=${token}`);
+        const token = await ask(sel.envKey);
+        if (token) opts._envs.push(`${sel.envKey}=${token}`);
+      }
+      if (sel.requiresAuth === "codex") {
+        console.log(`[anet] 请确保已执行: codex auth login`);
+      } else if (sel.requiresAuth === "claude") {
+        console.log(`[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login`);
+      }
+    } else {
+      // Non-TTY / inquirer unavailable — fall back to the default runtime so the
+      // node is still created; the API key can be added later via config.json.
+      console.log(`[anet] ⚠ vendor selector unavailable — defaulting to claude-agent-sdk runtime (add API key to config.json env later)`);
+      opts.runtime = "claude-agent-sdk";
     }
-    if (sel.requiresAuth === "codex") {
-      console.log(`[anet] 请确保已执行: codex auth login`);
-    } else if (sel.requiresAuth === "claude") {
-      console.log(`[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login`);
-    }
-  } else {
-    // Non-TTY / inquirer unavailable — fall back to the default runtime so the
-    // node is still created; the API key can be added later via config.json.
-    console.log(`[anet] ⚠ vendor selector unavailable — defaulting to claude-agent-sdk runtime (add API key to config.json env later)`);
-    opts.runtime = "claude-agent-sdk";
   }
 
   const profile = await ensureNodeToken(createProfileFromOpts(id, opts), id);
@@ -1629,46 +1656,79 @@ async function createCommand(idOverride?: string) {
     process.exit(1);
   }
 
-  // Vendor-first selection (#104-B B2.2): pick vendor → that vendor's model →
-  // runtime + baseUrl + envKey resolved from the VENDORS registry. Replaces the
-  // old two-step runtime-picker + provider-picker.
-  //
-  // Skipped when a credential is already supplied via --env (demo subcommands
-  // pre-fill it programmatically — prompting again would block the run) or when
-  // a non-claude-agent-sdk runtime was explicitly flagged via --runtime (just
-  // print the login hint, as before).
+  // #133 runtime-first wizard (Vincent 5101 实测 catch): the old vendor-first
+  // selector only enumerated claude-agent-sdk vendors, leaving users who want
+  // claude-code-cli (Anthropic Max plan) or codex-sdk (OpenAI auth login)
+  // implicitly stuck — they had to know to pass `--runtime codex-sdk` on the
+  // CLI to skip the vendor picker. New flow: ask runtime first, then route:
+  //   claude-agent-sdk → existing selectVendorAndModel() vendor picker
+  //   claude-code-cli  → skip vendor entirely, print login hint
+  //   codex-sdk        → skip vendor entirely, print login hint
+  // Backward-compatible with explicit --runtime flag (skips the picker).
   const envFlagHasAuth = (opts._envs || []).some((e: string) =>
     e.startsWith("ANTHROPIC_AUTH_TOKEN=") || e.startsWith("ANTHROPIC_API_KEY=")
   );
   const credAlreadyProvided = !!process.env.ANTHROPIC_AUTH_TOKEN
     || !!process.env.ANTHROPIC_API_KEY || envFlagHasAuth;
-  const skipInteractive = credAlreadyProvided
-    || opts.runtime === "codex-sdk" || opts.runtime === "claude-code-cli";
-  if (!skipInteractive && process.stdin.isTTY) {
-    const sel = await selectVendorAndModel();
-    if (sel) {
-      opts.runtime = sel.runtime;
-      if (sel.model) opts.model = sel.model;
-      opts._envs = opts._envs || [];
-      if (sel.baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${sel.baseUrl}`);
-      if (sel.envKey) {
-        if (sel.signupUrl) console.log(`[anet] 没有 Key？去 ${sel.signupUrl} 注册并创建 API Key`);
-        const key = await ask(`输入 API Key (${sel.vendorKey})`);
-        if (key) opts._envs.push(`${sel.envKey}=${key}`);
-      }
-      if (sel.requiresAuth === "codex") {
-        console.log("[anet] 请确保已执行: codex auth login");
-      } else if (sel.requiresAuth === "claude") {
-        console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
-      }
-    } else {
-      console.log(`[anet] ⚠ vendor selector unavailable — defaulting to claude-agent-sdk runtime`);
-      opts.runtime = "claude-agent-sdk";
+  const runtimeAlreadyExplicit = opts.runtime === "codex-sdk" || opts.runtime === "claude-code-cli";
+  const skipInteractive = credAlreadyProvided || runtimeAlreadyExplicit;
+
+  // #133 selectRuntime — runtime-first, exported as a helper so create paths
+  // (interactive single / batch wizard / sci-team demo) can share the picker.
+  const selectRuntime = async (): Promise<"claude-agent-sdk" | "claude-code-cli" | "codex-sdk" | null> => {
+    try {
+      const { select: sel } = await import("@inquirer/prompts");
+      const picked = await sel({
+        message: "选择 runtime:",
+        choices: [
+          { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
+          { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
+          { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+        ],
+      });
+      return picked as any;
+    } catch (e: any) {
+      console.log(`[anet] ⚠ Runtime selector unavailable: ${e?.message || e}`);
+      return null;
     }
+  };
+
+  if (!skipInteractive && process.stdin.isTTY) {
+    const runtime = await selectRuntime();
+    if (runtime) opts.runtime = runtime;
+  }
+
+  // Per-runtime branching: vendor picker only for claude-agent-sdk; others skip.
+  if (opts.runtime === "claude-code-cli") {
+    console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex auth login");
-  } else if (opts.runtime === "claude-code-cli") {
-    console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
+  } else {
+    // Either claude-agent-sdk (explicit / picker-default) or undefined runtime
+    // — fall through to vendor selection. credAlreadyProvided also skips since
+    // demo paths pre-inject the env.
+    if (!credAlreadyProvided && process.stdin.isTTY) {
+      const sel = await selectVendorAndModel();
+      if (sel) {
+        opts.runtime = sel.runtime;
+        if (sel.model) opts.model = sel.model;
+        opts._envs = opts._envs || [];
+        if (sel.baseUrl) opts._envs.push(`ANTHROPIC_BASE_URL=${sel.baseUrl}`);
+        if (sel.envKey) {
+          if (sel.signupUrl) console.log(`[anet] 没有 Key？去 ${sel.signupUrl} 注册并创建 API Key`);
+          const key = await ask(`输入 API Key (${sel.vendorKey})`);
+          if (key) opts._envs.push(`${sel.envKey}=${key}`);
+        }
+        if (sel.requiresAuth === "codex") {
+          console.log("[anet] 请确保已执行: codex auth login");
+        } else if (sel.requiresAuth === "claude") {
+          console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
+        }
+      } else {
+        console.log(`[anet] ⚠ vendor selector unavailable — defaulting to claude-agent-sdk runtime`);
+        opts.runtime = "claude-agent-sdk";
+      }
+    }
   }
 
   // Interactive network selection (if user has multiple writable networks and no --network specified)
