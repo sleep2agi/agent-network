@@ -3,7 +3,7 @@
 Wire a running `claude-code-cli` node to Telegram — you DM the bot, the bot forwards messages to Claude Code, Claude Code replies (with its full toolset: bash / file ops / MCP). This walkthrough gives **expected output + on-disk files + error diagnosis for every step**.
 
 > [!IMPORTANT]
-> **Scope today**: `claude-code-cli` runtime only. `claude-agent-sdk` / `codex-sdk` Telegram bridge is scheduled in [RFC-002 Channel-Bind CLI](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) Phase 1, targeting v0.9+.
+> **Scope today**: `claude-code-cli` runtime only. The `claude-agent-sdk` / `codex-sdk` Telegram bridge is scheduled in [RFC-002 Channel-Bind CLI](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) Phase 1 — **the v0.9.x scope (Recovery & Observability) did not touch it** (`grep telegram-bridge` returns 0 hits in `agent-node/src`); queued for v0.10+ / unscheduled.
 
 | Info | Value |
 |---|---|
@@ -177,10 +177,10 @@ Find the node you want to bind Telegram to, confirm its `RUNTIME` column **is `c
 | Node runtime | Applicable to this case? |
 |---|---|
 | `claude-code-cli` | ✅ Yes |
-| `claude-agent-sdk` | ❌ Wait for v0.9+ (RFC-002 P1) |
-| `codex-sdk` | ❌ Wait for v0.9+ (RFC-002 P2) |
+| `claude-agent-sdk` | ❌ Wait for v0.10+ / unscheduled (RFC-002 P1, not touched in v0.9.x) |
+| `codex-sdk` | ❌ Wait for v0.10+ / unscheduled (RFC-002 P2, not touched in v0.9.x) |
 
-If your node uses an SDK runtime and you want Telegram, use [`demos/codex-telegram-squad`](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad) (Docker Compose full-stack) or wait for v0.9.
+If your node uses an SDK runtime and you want Telegram, use [`demos/codex-telegram-squad`](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad) (Docker Compose full-stack) or wait for RFC-002 to land (v0.10+ / unscheduled).
 
 No node yet? See [Hello World](/en/cases/hello-world), pick `claude-code-cli` runtime:
 
@@ -328,7 +328,7 @@ Should contain:
 ## Step 5 — Restart the node so Telegram channel takes effect
 
 > [!WARNING]
-> The current implementation does **not hot-inject** channels. The node must stop + start to apply telegram. This is an RFC-002 edge case to be improved in v0.9+.
+> The current implementation does **not hot-inject** channels. The node must stop + start to apply telegram. This is an RFC-002 edge case; not touched in v0.9.x, queued for v0.10+ / unscheduled improvement.
 
 ### 5.1 Stop the old process
 
@@ -615,7 +615,7 @@ anet node create my-bot --runtime claude-code-cli \
 | Runtime | Today | Status |
 |---|---|---|
 | `claude-code-cli` | ✅ this case | Works |
-| `claude-agent-sdk` | ❌ | [RFC-002](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) Phase 1 — agent-node gets a `telegram-bridge` worker, targeting v0.9+ |
+| `claude-agent-sdk` | ❌ | [RFC-002](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) Phase 1 — agent-node gets a `telegram-bridge` worker; not touched in v0.9.x, queued for v0.10+ / unscheduled |
 | `codex-sdk` | ❌ | RFC-002 Phase 2 — reuses the Phase 1 bridge |
 
 Why the SDK runtimes can't reuse the claude-code-cli path: claude-code-cli spawns the Claude Code CLI subprocess, and that CLI has the plugin protocol built in. The SDK runtimes are direct calls into `@anthropic-ai/claude-agent-sdk` / `@openai/codex-sdk` — no plugin hooks. To get Telegram into those runtimes we need a bridge worker in anet itself. RFC-002 has the full design.
@@ -642,5 +642,5 @@ Why the SDK runtimes can't reuse the claude-code-cli path: claude-code-cli spawn
 - [Agent Node](/en/guide/agent-node) — full node config fields
 - [Debate Demo](/en/cases/debate) — built-in 6-agent orchestration (no Telegram)
 - [Telegram Squad](/en/cases/telegram-squad) — full Docker Compose Telegram squad
-- [RFC-002 Channel-Bind CLI](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) — Telegram bridge design for SDK runtimes (v0.9+)
+- [RFC-002 Channel-Bind CLI](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) — Telegram bridge design for SDK runtimes (not touched in v0.9.x; queued for v0.10+ / unscheduled)
 - [issue #14](https://github.com/sleep2agi/agent-network/issues/14) — tracking issue
