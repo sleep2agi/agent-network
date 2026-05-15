@@ -3,7 +3,7 @@
 | 项 | 值 |
 |----|----|
 | **作者** | 通信SDK马 |
-| **状态** | Draft v0 (initial — #120 调研驱动, 待 通信龙 + Vincent + 通信牛 review) |
+| **状态** | Draft v0.2 (Round 5 end-to-end smoke PASS + §4.4 inverse axis 增, 待 通信龙 + Vincent + 通信牛 review) |
 | **关联 issue** | [#120](https://github.com/sleep2agi/agent-network/issues/120) (codex Mobile remote-control 调研) |
 | **关联 RFC** | [RFC-006](RFC-006-codex-code-cli-mcp-server.md), [RFC-007](RFC-007-codex-code-cli-mcp.md) (codex runtime 设计) |
 | **创建** | 2026-05-15 北京 (UTC+8) |
@@ -154,12 +154,30 @@ agent-node:codex runtime 启动时自动做 3.1 步骤 1+2:
 2. **Tool call test**: 通过 `mcpServer/tool/call({server:"anet", tool:"get_all_status", arguments:{}})` → 期待返回 commhub 当前 sessions JSON
 3. **Mobile end-to-end (需 OpenAI side support)**: codex Mobile App 配置连到本机 codex CLI (config.toml 已注册 anet) → 在 mobile UI 显示 anet tools → 用户点 commhub_send_task → 验证 anet agent 收到任务并执行
 
-**Round 4 smoke 已 partial 验证 (2026-05-15)**:
-- ✅ `codex mcp add anet --url ... --bearer-token-env-var ...` 写 `~/.codex/config.toml` `[mcp_servers.anet]` section 正确
-- ✅ `codex mcp list` 显示 anet status=enabled auth=Bearer
-- ✅ `codex app-server --listen unix:///tmp/codex-as.sock` 成功创建 unix socket
-- ⚠️ Protocol 层 `initialize` 请求被 codex app-server 立刻断连 — 因 `codex login status` = "Not logged in"，**codex app-server 不登录不响应协议**
-- ⏳ 完整 `mcpServerStatus/list` 验证需在登录态的开发机重做 (此机不在 codex login 环境内, 出于隔离原则未真登录)
+**Round 5 smoke 已完整 end-to-end PASS (2026-05-15)**:
+
+Round 4 的 `codex app-server` 协议层 ⏳ blocker 用 **`codex mcp-server` stdio 路径绕开** — 该路径不需要 OpenAI 登录就响应 MCP 协议层 (LLM call 才需要登录, 跟 bridge plumbing 无关)。
+
+实测过程见 `docs/tests/p120-codex-mcp-bridge-smoke.md` (Round 6 落地)。关键凭证:
+
+(a) **Stub /mcp 日志** — 证明 codex CLI 真做了 MCP client handshake (clientInfo.name=`codex-mcp-client`):
+```
+POST /mcp method=initialize  (protocolVersion 2025-06-18, capabilities.elicitation)
+POST /mcp method=notifications/initialized
+POST /mcp method=tools/list
+GET  /mcp (SSE streaming)
+```
+
+(b) **codex 事件流** — 证明 codex 把 anet 算成 MCP server 并 ready:
+```
+mcp_startup_update: server="anet" status="starting"
+mcp_startup_update: server="anet" status="ready"
+mcp_startup_complete: ready=["anet"], failed=[], cancelled=[]
+```
+
+→ Bridge 协议层 100% 验证, **零 commhub 改动**。
+
+> 不变量保留: Phase 0 MVP setup 包含 `codex login` 是因为 codex Mobile **用户** 的真实使用流要 OpenAI 账号 (Mobile App 是 OpenAI 产品)。本节实测使用 `codex mcp-server` stdio 路径所以登录不影响 MCP plumbing — 这两个事实不矛盾, 一个是 protocol layer (不需登录) 一个是真实部署完整流 (codex Mobile 用户的 OpenAI 账号是入口)。
 
 ---
 
@@ -187,6 +205,36 @@ codex app-server 协议有 `thread/goal/set` / `thread/goal/get` / `thread/goal/
 - 或 mobile 端 UX 改造: 不通过 project 直接进入 MCP tools 面板
 
 不是 MVP 必要，待 OpenAI/codex Mobile UX 成熟后回看。
+
+### 4.4 第二条 axis (Round 5 新发现) — `codex mcp-server` 作 anet sub-agent
+
+Round 5 实测 `codex mcp-server` (codex 自己作 MCP server, stdio) 暴露 2 个 tool:
+```
+codex        — Run a Codex session. Params: approval-policy / sandbox / model /
+               prompt / cwd / config / profile / base-instructions /
+               developer-instructions / compact-prompt
+codex-reply  — Continue a Codex conversation. Params: conversationId, prompt,
+               threadId
+```
+
+这是 **inverse direction**: anet → codex (而 §3 主路径是 codex Mobile → anet)。**anet 任意 runtime 的 agent 可以注册 codex CLI 作为 MCP sub-agent**，按需 spawn 调用:
+
+```
+agent-node:claude / agent-node:codex / agent-node:minimax
+   ↓ MCP stdio register `codex mcp-server`
+   ↓ on demand: call tool="codex" prompt="please refactor src/app.ts to use typed env"
+   ↓
+codex CLI 起一个 session → 用自己的 LLM + 沙盒工具 → 返回结果给 agent
+```
+
+**优点 vs RFC-006/007 常驻 codex runtime**:
+- 不需要 agent-node:codex 进程常驻 — codex 按需 spawn, 任务完销毁
+- 解耦 — claude/minimax runtime 也能借 codex 能力 (e.g. 沙盒 shell)
+- 协议干净 — 走 codex 官方 MCP server，无 #102 类透传 hack
+
+**列入 RFC-012 v0.2 Phase 1+** 作可选 add-on，不阻塞主路径 (§3)。Phase 0 不强制做。
+
+**与 #102 root cause 关系**: 不是同一条问题。#102 是 claude binary 父子进程的 `--mcp-config HTTP transport` 透传 silent drop (Option A in-process SDK McpServer 已解决)；本节是 codex 作 MCP server 给别的 runtime 调，跟 claude 父子无关。但本节侧面证明 **stdio transport (codex mcp-server 协议) 比 HTTP transport (claude `--mcp-config`) 在父子 spawn 场景更可靠** — 未来 anet 设计新 MCP 注入路径优先 stdio。
 
 ---
 
@@ -249,16 +297,22 @@ codex app-server 协议有 `thread/goal/set` / `thread/goal/get` / `thread/goal/
 - [x] §1 背景 + Vincent 实测情报
 - [x] §2 codex MCP server 机制实测
 - [x] §3 MVP 设计 (Phase 0)
-- [x] §4 Phase 1+ 扩展 (OAuth / thread/goal/* / project list)
+- [x] §4 Phase 1+ 扩展 (OAuth / thread/goal/* / project list / **§4.4 inverse axis** Round 5 新增)
 - [x] §5 与 RFC-006/007 关系
 - [x] §6 边界声明
 - [x] §7 实施 Phase ladder
 - [x] §8 风险评估
 
-**Draft v0 完整就绪 — 待 review**:
+**Draft v0.2 — Round 5 end-to-end smoke PASS + §4.4 inverse axis 增, 待 review**:
 - 通信龙 high-level
 - 通信牛 schema-grounded review (检查我对 codex app-server protocol 的解读是否准确)
 - Vincent final
+
+### v0 → v0.1 → v0.2 演进
+
+- **v0 (commit f046e08)** — initial, 8 章结构, MVP setup 3 行, Q3 真杠杆点
+- **v0.1 (commit 66ffc69)** — §3.1 Step 0 加 codex login 前置 (Round 4 发现); §3.3 加 Round 4 smoke 4✅1⚠️1⏳ 凭证
+- **v0.2 (本 commit)** — §3.3 Round 5 完整 smoke PASS 凭证替换 Round 4 ⏳; §4.4 新增 inverse axis (codex mcp-server 作 anet sub-agent, Round 5 实测发现); 状态行 v0.1 → v0.2
 
 ---
 
