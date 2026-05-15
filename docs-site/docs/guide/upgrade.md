@@ -35,7 +35,7 @@ cp -r .anet .anet.backup
 
 ### 3. 升级 npm 包
 
-::: tip preview 通道（v2.1.13-preview.3+）：`anet upgrade` 一键
+::: tip v0.9.0+：`anet upgrade` 一键
 [#88](https://github.com/sleep2agi/agent-network/issues/88) 给 `anet upgrade` 加了 4-包覆盖 + 双通道 + 干跑 + 自升，**强烈建议先 `--dry-run` 看计划再决定怎么动**：
 
 ```bash
@@ -68,11 +68,11 @@ anet upgrade --self
 **升完之后**：`anet upgrade` 末尾会提示「跑过的节点要重启拿新 agent-node」，可以一键：
 
 ```bash
-anet project restart    # #117，cwd 下所有节点（preview only）
+anet project restart    # #117，cwd 下所有节点
 # 或单台单台：anet node stop <name> && anet node start <name>
 ```
 
-`anet upgrade` 来自 preview.3+；npm `latest`（v2.1.9）还是旧的 print-only 行为，跑了不会出 4-包 plan。要装 preview：`npm install -g @sleep2agi/agent-network@preview`。
+`anet upgrade` 已是 v0.9.0+ stable (`@latest`) 默认行为。
 :::
 
 **手动 npm（任何通道都能用）**：

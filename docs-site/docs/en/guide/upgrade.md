@@ -35,7 +35,7 @@ The backup directory contains your Tokens, node configurations, and session reco
 
 ### 3. Upgrade npm Packages
 
-::: tip Preview channel (v2.1.13-preview.3+): one-shot `anet upgrade`
+::: tip v0.9.0+: one-shot `anet upgrade`
 [#88](https://github.com/sleep2agi/agent-network/issues/88) overhauled `anet upgrade` with 4-package coverage, dual-channel, dry-run, and opt-in self-upgrade. **Strongly recommend `--dry-run` first to inspect the plan before actually upgrading**:
 
 ```bash
@@ -68,11 +68,11 @@ anet upgrade --self
 **After the upgrade**: `anet upgrade` prints a hint that running nodes need a restart to pick up the new agent-node:
 
 ```bash
-anet project restart    # #117, all nodes under cwd (preview only)
+anet project restart    # #117, all nodes under cwd
 # Or one by one: anet node stop <name> && anet node start <name>
 ```
 
-`anet upgrade` is preview.3+. npm `latest` (v2.1.9) still has the old print-only behavior — running it there will not produce the 4-package plan. To install preview: `npm install -g @sleep2agi/agent-network@preview`.
+`anet upgrade` is the v0.9.0+ stable (`@latest`) default behavior.
 :::
 
 **Manual npm (works on any channel)**:

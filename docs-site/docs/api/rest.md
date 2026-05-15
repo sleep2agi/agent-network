@@ -699,7 +699,7 @@ curl http://localhost:9200/api/servers \
 **网络作用域**：跟 `/api/status` 一样走 `addNetworkScope` —— `ntok_` 强制锁定该 token 的 network，`utok_` 看到自己有权限的所有 networks。
 
 ::: info 数据来源
-host telemetry 由 agent-node 在每次 `report_status` 时带上（[issue #119](https://github.com/sleep2agi/agent-network/issues/119) step 1，agent-node v2.3.6-preview.0+）。老 agent 不带 telemetry 字段时 SQL `NULL`，`hostname`/`ip` 渲染成 `"unknown"`、其他字段为 `null`。server 端 schema 是 silent-drop unknown keys，可以独立升级 agent / server。
+host telemetry 由 agent-node 在每次 `report_status` 时带上（[issue #119](https://github.com/sleep2agi/agent-network/issues/119) step 1，agent-node v2.3.8+）。老 agent 不带 telemetry 字段时 SQL `NULL`，`hostname`/`ip` 渲染成 `"unknown"`、其他字段为 `null`。server 端 schema 是 silent-drop unknown keys，可以独立升级 agent / server。
 :::
 
 ---

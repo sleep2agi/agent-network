@@ -8,15 +8,12 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
-## 🟡 v0.9.0 — **Recovery & Observability** (preview, 2026-05-15)
+## v0.9.0 — **Recovery & Observability** (2026-05-15) ✅ stable
 
-> ⏳ **In promote flow**: the preview tag is published; the stable `latest` flip waits for all three v0.9.0 promote gates to pass. Production users stay on v0.8.3; early adopters can install the preview with `npm install -g @sleep2agi/agent-network@preview`.
-
-**Preview versions** (npm `preview` tag):
-- `@sleep2agi/agent-network@2.1.13-preview.6`
-- `@sleep2agi/agent-node@2.3.6-preview.2`
-- `@sleep2agi/commhub-server@0.8.1-preview.3`
-- `@sleep2agi/agent-network-dashboard@0.4.6-preview.12+`
+- `@sleep2agi/agent-network@2.1.13`
+- `@sleep2agi/agent-node@2.3.8`
+- `@sleep2agi/commhub-server@0.8.1`
+- `@sleep2agi/agent-network-dashboard@0.4.6`
 
 ### 🎯 Theme: Recovery & Observability
 

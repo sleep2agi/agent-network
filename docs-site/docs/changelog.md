@@ -8,15 +8,12 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
-## 🟡 v0.9.0 — **Recovery & Observability**（preview，2026-05-15）
+## v0.9.0 — **Recovery & Observability**（2026-05-15）✅ stable
 
-> ⏳ **正在 promote 流程中**：preview tag 已发，stable `latest` 待 v0.9.0 promote 3 gate 全 pass 后翻牌。当前生产用户继续走 v0.8.3 stable，提前体验装 `@preview`：`npm install -g @sleep2agi/agent-network@preview`。
-
-**Preview 版本号**（npm `preview` tag）：
-- `@sleep2agi/agent-network@2.1.13-preview.6`
-- `@sleep2agi/agent-node@2.3.6-preview.2`
-- `@sleep2agi/commhub-server@0.8.1-preview.3`
-- `@sleep2agi/agent-network-dashboard@0.4.6-preview.12+`
+- `@sleep2agi/agent-network@2.1.13`
+- `@sleep2agi/agent-node@2.3.8`
+- `@sleep2agi/commhub-server@0.8.1`
+- `@sleep2agi/agent-network-dashboard@0.4.6`
 
 ### 🎯 主题：Recovery & Observability
 

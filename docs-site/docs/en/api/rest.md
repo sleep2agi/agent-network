@@ -699,7 +699,7 @@ curl http://localhost:9200/api/servers \
 **Network scope**: same `addNetworkScope` rule as `/api/status` — an `ntok_` is pinned to its token's network; a `utok_` sees every network the user has access to.
 
 ::: info Data source
-Host telemetry is reported by agent-node on every `report_status` call ([issue #119](https://github.com/sleep2agi/agent-network/issues/119) step 1, agent-node v2.3.6-preview.0+). For older agents that don't ship the telemetry fields, SQL returns `NULL` — `hostname` / `ip` render as `"unknown"` and the other fields stay `null`. The server's schema silently drops unknown keys, so agent and server can be upgraded independently.
+Host telemetry is reported by agent-node on every `report_status` call ([issue #119](https://github.com/sleep2agi/agent-network/issues/119) step 1, agent-node v2.3.8+). For older agents that don't ship the telemetry fields, SQL returns `NULL` — `hostname` / `ip` render as `"unknown"` and the other fields stay `null`. The server's schema silently drops unknown keys, so agent and server can be upgraded independently.
 :::
 
 ---

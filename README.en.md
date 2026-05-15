@@ -204,10 +204,10 @@ Stable, Apache-2.0, published to npm.
 
 | Package | Version | Role |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.7` | `anet` CLI — hub / dashboard / agent / demo launcher |
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.0` | MCP + REST + SSE hub (SQLite) |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.2` | Web UI — Next.js 16, 4 themes, Overview / Nodes / Tasks / Messages / Chat / Admin / Settings |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.13` | `anet` CLI — hub / dashboard / agent / demo launcher |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.1` | MCP + REST + SSE hub (SQLite) |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.6` | Web UI — Next.js 16, 4 themes, Overview / Nodes / Tasks / Messages / Chat / Admin / Settings |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.8` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK |
 
 The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. You only ever globally install one package.
 
@@ -257,7 +257,7 @@ What's solid, and what to watch out for.
 ---
 
 > [!IMPORTANT]
-> **Current stable: v0.8.2** (Apache 2.0, shipped 2026-05-12 via npm `latest` tag; project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
+> **Current stable: v0.9.0** (Apache 2.0, shipped 2026-05-15 via npm `latest` tag; project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
 >
 > **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
 

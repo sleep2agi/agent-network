@@ -77,8 +77,6 @@ After installation, the `anet` command is available globally.
 
 ### Session binding (`claude-code-cli` runtime)
 
-> ⚠ `--resume` / `--resume-latest` come from [#115](https://github.com/sleep2agi/agent-network/issues/115), **preview channel only** (v2.1.13-preview.1+); the `latest` tag (v2.1.9) does not ship them yet.
-
 Only the `claude-code-cli` runtime touches Claude Code sessions (`~/.claude/projects/<cwd>/*.jsonl`); the `claude-agent-sdk` / `codex-sdk` runtimes have no Claude Code session semantics.
 
 | Command | Description |
@@ -92,9 +90,7 @@ Only the `claude-code-cli` runtime touches Claude Code sessions (`~/.claude/proj
 
 > **Zero-keystroke recovery:** since #115, `anet node start` injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` ([`cli.ts:1960`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1960)) into the `claude` spawn env, skipping Claude Code's default 70-minute session-age threshold for the "Resume from summary / full / Don't ask again" interactive prompt — so **restarting a batch of nodes needs no per-node keypress**. The injection is per-spawn, does not touch `~/.claude/settings.json`, and respects an explicit user override. Resume restores the **full session** as-is (no per-invocation flag forces a compact summary; per the #115 commit message, restart-recovery is safer without unexpected compaction).
 
-### Project-wide (cwd, preview)
-
-> ⚠ **Preview channel only right now**: v2.1.13-preview.2+ (npm `@sleep2agi/agent-network@preview`); the `latest` tag (v2.1.9) does not yet ship it. Install: `npm install -g @sleep2agi/agent-network@preview`.
+### Project-wide (cwd)
 
 Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / stops them as a batch. See [issue #117](https://github.com/sleep2agi/agent-network/issues/117) and verify [`cli.ts:3000 projectCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3000).
 
@@ -300,7 +296,7 @@ The following fields are generated **conditionally** — not every node has them
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2098)
 
-Start an agent node. From [#122](https://github.com/sleep2agi/agent-network/issues/122) onwards (v2.1.13-preview.4+), the default behavior **auto-wraps the node into a detached tmux session** (session name = alias), so recovering 22 machines after a reboot via `anet project up` no longer needs hand-rolled `tmux new-session -d -s ...` calls.
+Start an agent node. From [#122](https://github.com/sleep2agi/agent-network/issues/122) (v0.9.0+), the default behavior **auto-wraps the node into a detached tmux session** (session name = alias), so recovering 22 machines after a reboot via `anet project up` no longer needs hand-rolled `tmux new-session -d -s ...` calls.
 
 ```bash
 anet node start <name> [options]
@@ -431,7 +427,7 @@ Pre-v0.7, an expired `ntok_` required a manual `anet node delete` + recreate. Si
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3522)
 
-Print / execute the upgrade plan — covers 4 packages (`anet self` / `agent-node` / `commhub-server` / `agent-network-dashboard`) across two channels (preview / latest, auto-detected or overridden via `--channel`). Rewritten in [#88](https://github.com/sleep2agi/agent-network/issues/88) for v2.1.13-preview.3+; the old behavior covered only 2/3 packages and **silently downgraded** preview-channel users to `@latest`.
+Print / execute the upgrade plan — covers 4 packages (`anet self` / `agent-node` / `commhub-server` / `agent-network-dashboard`) across two channels (preview / latest, auto-detected or overridden via `--channel`). Rewritten in [#88](https://github.com/sleep2agi/agent-network/issues/88) for v0.9.0+; the old behavior covered only 2/3 packages and **silently downgraded** preview-channel users to `@latest`.
 
 ```bash
 anet upgrade [--channel preview|latest] [--self] [--dry-run]
@@ -475,7 +471,7 @@ Full upgrade walkthrough: [Upgrade Guide](/en/guide/upgrade).
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3163)
 
-Cwd-wide node orchestration, introduced in [#117](https://github.com/sleep2agi/agent-network/issues/117) (v2.1.13-preview.2+). **Preview-only**; not yet in npm `latest`.
+Cwd-wide node orchestration, introduced in [#117](https://github.com/sleep2agi/agent-network/issues/117) (v0.9.0+).
 
 ```bash
 anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y]

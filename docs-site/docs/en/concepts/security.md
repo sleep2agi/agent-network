@@ -74,7 +74,7 @@ const inputHash = hashToken(inputToken);
 const row = db.get("SELECT * FROM api_tokens WHERE token_hash = ?", inputHash);
 ```
 
-### Vendor Credential Storage (envRef mode, v2.1.13-preview+)
+### Vendor Credential Storage (envRef mode, v0.9.0+)
 
 When an agent node runs the `claude-agent-sdk` runtime it needs vendor API keys (`ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `MINIMAX_KEY` …). Where they live matters a lot. Since [#125](https://github.com/sleep2agi/agent-network/issues/125) (v0.9.0 promote gate #2), the agent-node `config.json` env map **accepts two value shapes** (tagged union):
 

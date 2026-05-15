@@ -74,7 +74,7 @@ const inputHash = hashToken(inputToken);
 const row = db.get("SELECT * FROM api_tokens WHERE token_hash = ?", inputHash);
 ```
 
-### Vendor 凭据存储（envRef 模式，v2.1.13-preview+）
+### Vendor 凭据存储（envRef 模式，v0.9.0+）
 
 agent node 跑 `claude-agent-sdk` runtime 时需要厂商 API key（`ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `MINIMAX_KEY` …），存哪里非常关键。从 [#125](https://github.com/sleep2agi/agent-network/issues/125)（v0.9.0 promote gate #2）起，**agent node config.json env map 支持两种值形态**（tagged union）：
 

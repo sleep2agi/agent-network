@@ -204,10 +204,10 @@ flowchart LR
 
 | 包 | 版本 | 角色 |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.7` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.0` | MCP + REST + SSE 通信中枢（SQLite） |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.2` | Web Dashboard —— Next.js 16，4 套主题，Overview / Nodes / Tasks / Messages / Chat / Admin / Settings |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.0` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.13` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.1` | MCP + REST + SSE 通信中枢（SQLite） |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.6` | Web Dashboard —— Next.js 16，4 套主题，Overview / Nodes / Tasks / Messages / Chat / Admin / Settings |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.8` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK |
 
 CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
 
@@ -255,7 +255,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 ---
 
 > [!IMPORTANT]
-> **当前 stable: v0.8.2**（Apache 2.0，2026-05-12 通过 npm `latest` tag 发布；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)）。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
+> **当前 stable: v0.9.0**（Apache 2.0，2026-05-15 通过 npm `latest` tag 发布；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)）。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
 >
 > **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
 

@@ -77,8 +77,6 @@ npm install -g @sleep2agi/agent-network
 
 ### Session 绑定（`claude-code-cli` runtime）
 
-> ⚠ `--resume` / `--resume-latest` 来自 [#115](https://github.com/sleep2agi/agent-network/issues/115)，**仅 preview 通道有**（v2.1.13-preview.1+）；npm `latest`（v2.1.9）暂无。
-
 只 `claude-code-cli` runtime 用得上 Claude Code session（`~/.claude/projects/<cwd>/*.jsonl`）；`claude-agent-sdk` / `codex-sdk` 没有 Claude Code session 语义。
 
 | 命令 | 说明 |
@@ -92,9 +90,7 @@ npm install -g @sleep2agi/agent-network
 
 > **零键盘恢复**：从 #115 起，`anet node start` spawn `claude` 时自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999`（[`cli.ts:1960`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1960)），跳过 Claude Code 默认 70min session-age 阈值的「Resume from summary / full / Don't ask again」交互弹窗，**整批节点重启时不用一个个按键确认**。per-spawn 注入、不写 `~/.claude/settings.json`，用户显式 export 覆盖；resume 时还原**完整 session**（没有 per-invocation flag 强制 compact summary，#115 commit msg 解释 restart-recovery 不带意外 compaction 更安全）。
 
-### 项目级（cwd-wide，预览功能）
-
-> ⚠ **当前仅 preview 通道有**：v2.1.13-preview.2+（npm `@sleep2agi/agent-network@preview`）；stable `latest`（v2.1.9）暂无。装预览版：`npm install -g @sleep2agi/agent-network@preview`。
+### 项目级（cwd-wide）
 
 扫描当前 cwd 下 `.anet/nodes/` 里所有节点，统一起 / 重启 / 停。见 [issue #117](https://github.com/sleep2agi/agent-network/issues/117) + verify [`cli.ts:3000 projectCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3000)。
 
@@ -306,7 +302,7 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2098)
 
-启动 Agent 节点。默认行为从 [#122](https://github.com/sleep2agi/agent-network/issues/122)（v2.1.13-preview.4+）起改成**自动把节点 wrap 进一个 detached tmux session**（session 名 = alias），所以 22 台机器重启后跑 `anet project up` 不再需要手动 `tmux new-session -d -s ...`。
+启动 Agent 节点。默认行为从 [#122](https://github.com/sleep2agi/agent-network/issues/122)（v0.9.0+）起改成**自动把节点 wrap 进一个 detached tmux session**（session 名 = alias），所以 22 台机器重启后跑 `anet project up` 不再需要手动 `tmux new-session -d -s ...`。
 
 ```bash
 anet node start <name> [options]
@@ -437,7 +433,7 @@ v0.7 之前 ntok_ 失效需要手动 `anet node delete` + 重新 create；v0.8 �
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3522)
 
-打印 / 执行升级计划 —— 4 包覆盖（`anet self` / `agent-node` / `commhub-server` / `agent-network-dashboard`）+ 双通道（preview / latest，auto-detect 或 `--channel` 覆盖）。从 [#88](https://github.com/sleep2agi/agent-network/issues/88) 起重写（v2.1.13-preview.3+），老版只覆盖 2/3 包且把 preview 用户**静默降级**到 `@latest`。
+打印 / 执行升级计划 —— 4 包覆盖（`anet self` / `agent-node` / `commhub-server` / `agent-network-dashboard`）+ 双通道（preview / latest，auto-detect 或 `--channel` 覆盖）。从 [#88](https://github.com/sleep2agi/agent-network/issues/88) 起重写（v0.9.0+），老版只覆盖 2/3 包且把 preview 用户**静默降级**到 `@latest`。
 
 ```bash
 anet upgrade [--channel preview|latest] [--self] [--dry-run]
