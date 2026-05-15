@@ -74,6 +74,48 @@ const inputHash = hashToken(inputToken);
 const row = db.get("SELECT * FROM api_tokens WHERE token_hash = ?", inputHash);
 ```
 
+### Vendor Credential Storage (envRef mode, v2.1.13-preview+)
+
+When an agent node runs the `claude-agent-sdk` runtime it needs vendor API keys (`ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `MINIMAX_KEY` …). Where they live matters a lot. Since [#125](https://github.com/sleep2agi/agent-network/issues/125) (v0.9.0 promote gate #2), the agent-node `config.json` env map **accepts two value shapes** (tagged union):
+
+```jsonc
+// Legacy shape (still works, deprecated) — plain token persisted to config.json
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-abc...xyz"        // ❌ High risk
+  }
+}
+
+// New envRef shape — only the env-var NAME is stored; the value stays in process.env
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": { "_envRef": "ANTHROPIC_AUTH_TOKEN" }   // ✅ Recommended
+  }
+}
+```
+
+**Why envRef**: a plain token written into `config.json` leaks into git history, dashboard payloads, `anet ls` output, error envelopes, log lines, and more. Keeping the secret in `process.env` instead means it never touches disk.
+
+**agent-node accepts both shapes**:
+- A bare `string` → still used as plain, prints a one-shot deprecation banner pointing at `anet node migrate-token-to-envref <alias>`
+- A `{ _envRef: "<NAME>" }` → reads `process.env[NAME]`; if the var is unset the agent **fatally exits at startup** (refuses to start silently broken) and prints an `export NAME='...'` remediation hint
+
+**`anet node create` automatically uses envRef**: after [#125](https://github.com/sleep2agi/agent-network/issues/125), `saveCreatedNode` runs `rewritePlainSecretsToEnvRef()` before writing config.json — new nodes **never persist plain secrets**; the original value is dropped into the current shell's `process.env` (so the immediate spawn works) and `export NAME='value'` lines are printed for the user to persist into `~/.bashrc` or a secrets manager.
+
+**Migrating existing nodes**:
+
+```bash
+anet node migrate-token-to-envref <alias>
+# 1. Backs up the original to config.json.bak-<ts>
+# 2. Rewrites secret-shaped env values to { _envRef: ... }
+# 3. Prints the export lines the user needs to persist
+# Idempotent: non-secret values and already-migrated values are left alone
+```
+
+`anet doctor` also enumerates plain-secret nodes and prints a migration suggestion (passive scan; does not auto-migrate).
+
+**Secret detection heuristic** (shared across agent-node / `anet node create` / `anet doctor`): env key suffix matches `/_TOKEN|_KEY|_SECRET|AUTH$/`, or value prefix matches `/sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer/` — either match flags the value as a secret.
+
 ### Token Verification Flow (v0.8)
 
 ```mermaid
@@ -380,17 +422,42 @@ const options = {
 for await (const message of query({ prompt, options })) { /* ... */ }
 ```
 
-### Tool Permissions
+### Tool Permissions (default = Claude Code preset, user responsibility)
 
-Control which tools an agent can use via `--tools`:
+Since [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B (agent-node v2.3.7-preview+), the `claude-agent-sdk` runtime's **default toolset is the full Claude Code preset** — not an empty set. Every new node, right after spawn, can:
+
+- Filesystem: `Read` / `Write` / `Edit` / `Glob` / `Grep`
+- Shell: `Bash` (subject to `dangerouslySkipPermissions=true` on by default — no per-call confirmation)
+- Network: `WebFetch` / `WebSearch`
+- Subtasks: `Task` / `NotebookEdit` / ...
+
+Plus the 17 MCP tools on the hub side (`commhub_send_task` / `commhub_reply` / ...).
+
+**Why the default changed to preset**: [#101 root cause](https://github.com/sleep2agi/agent-network/issues/101) — when `config.json` had no `tools` field, agent-node set the SDK's `options.tools = undefined`, which the SDK reads as "zero built-in tools". Agents could only call MCP tools and hallucinated "network restricted" when asked for `WebFetch` / `Bash` / `Read`. Option B forces the fallback to the SDK `{ type: 'preset', preset: 'claude_code' }` sentinel — per the SDK type definitions this is the right way to say "give me the full Claude Code toolset".
+
+**Granularity**:
 
 ```bash
-# Read-only, no write
+# Default (no --tools) → full Claude Code preset
+anet node create my-agent
+
+# Explicit "all" → same preset (single source-of-truth, not the old hardcoded 8-tool list)
+anet node create my-agent --tools all
+
+# Explicit allowlist (read-only agent) — bypasses the preset, takes a string array
 anet node create my-agent --tools Read,Glob,Grep
 
-# All tools (use with caution)
-anet node create my-agent --tools all
+# See what's actually in effect
+anet info my-agent           # prints tools: + flags: lines
 ```
+
+After a successful `anet node create`, agent-node prints a **behavior-disclosure banner**: the built-in tools (list or `"all (Claude Code preset)"`) + MCP tools + current flags (`dangerouslySkipPermissions=true` / `teammateMode=true`) + the sentence "The agent can read/write files, run shell commands, and access the network". Vincent [4927](https://github.com/sleep2agi/agent-network/issues/101) pushed for this banner so **users actually see what they signed up for and take ownership of sandboxing**.
+
+> ⚠ **User responsibility**: the default preset + default `dangerouslySkipPermissions=true` means the agent can **edit files, run shell commands, and access the network without confirmation prompts**. Please:
+> 1. **Do NOT run agents from `$HOME` directly** — use a disposable working directory (`mkdir agent-work && cd agent-work && anet node create ...`); see [SECURITY.md](https://github.com/sleep2agi/agent-network/blob/main/SECURITY.md)
+> 2. For strict sandboxing, set `--tools Read,Glob,Grep` to grant read-only permissions
+> 3. Turn off yolo mode with `anet node create --no-skip-permissions` (note: every tool call will then prompt for confirmation, which hurts long-task UX)
+> 4. Cap per-task spend: `--max-budget 0.1` (see [Budget Control](#budget-control) below)
 
 ### Budget Control
 

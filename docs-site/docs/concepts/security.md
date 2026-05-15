@@ -74,6 +74,48 @@ const inputHash = hashToken(inputToken);
 const row = db.get("SELECT * FROM api_tokens WHERE token_hash = ?", inputHash);
 ```
 
+### Vendor 凭据存储（envRef 模式，v2.1.13-preview+）
+
+agent node 跑 `claude-agent-sdk` runtime 时需要厂商 API key（`ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `MINIMAX_KEY` …），存哪里非常关键。从 [#125](https://github.com/sleep2agi/agent-network/issues/125)（v0.9.0 promote gate #2）起，**agent node config.json env map 支持两种值形态**（tagged union）：
+
+```jsonc
+// 老格式（仍兼容、deprecated）—— 明文 token 落 config.json
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-abc...xyz"        // ❌ 风险高
+  }
+}
+
+// 新格式 envRef —— 只存 env-var 名字，值留在 process.env
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": { "_envRef": "ANTHROPIC_AUTH_TOKEN" }   // ✅ 推荐
+  }
+}
+```
+
+**为啥要 envRef**：明文 token 写进 `config.json` 会泄漏到 git history / dashboard payload / `anet ls` 输出 / error envelope / log line 等多处 surface。secret 留在 `process.env` 则永远不落盘。
+
+**agent-node 兼容两种**：
+- 拿到 `string` → 仍按明文用，同时 print 一次 deprecation banner 提示用 `anet node migrate-token-to-envref <alias>` 迁
+- 拿到 `{ _envRef: "<NAME>" }` → 读 `process.env[NAME]`；**unset 时启动直接 FATAL exit**（refuse to start silently broken），打印 `export NAME='...'` remediation hint
+
+**`anet node create` 自动用 envRef**：[#125](https://github.com/sleep2agi/agent-network/issues/125) 之后，`saveCreatedNode` 前会跑 `rewritePlainSecretsToEnvRef()` —— 新建节点的 vendor secret **永不持久化明文**，原值临时塞进当前 shell `process.env`（spawn 直接拿）+ print `export NAME='value'` 让你自己抄进 `~/.bashrc` 或 secrets manager。
+
+**已有节点一键迁**：
+
+```bash
+anet node migrate-token-to-envref <alias>
+# 1. 备份原文件到 config.json.bak-<ts>
+# 2. 把所有 secret-shaped env value 改成 { _envRef: ... }
+# 3. print 必要的 export 行让你持久化
+# 幂等：非 secret value 和已 envRef 的 value 不动
+```
+
+`anet doctor` 也会 enumerate plain-secret 节点 + 提示迁移路径（passive scan，不自动改）。
+
+**Secret 识别启发式**（agent-node / cli.ts / doctor 共享）：env key 后缀匹配 `/_TOKEN|_KEY|_SECRET|AUTH$/`，或 value 前缀匹配 `/sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer/` —— 任一命中就当作 secret 处理。
+
 ### Token 验证流程（v0.8）
 
 ```mermaid
@@ -380,17 +422,42 @@ const options = {
 for await (const message of query({ prompt, options })) { /* ... */ }
 ```
 
-### 工具权限
+### 工具权限（默认 Claude Code preset，user responsibility）
 
-通过 `--tools` 参数控制 Agent 可使用的工具：
+从 [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B 起（agent-node v2.3.7-preview+），`claude-agent-sdk` runtime 的**默认 toolset 是 Claude Code preset 全集** —— 不再是空集。每个新节点 spawn 起来后就能：
+
+- 文件系统：`Read` / `Write` / `Edit` / `Glob` / `Grep`
+- Shell：`Bash`（受 `dangerouslySkipPermissions` 默认开启影响，不弹确认）
+- 网络：`WebFetch` / `WebSearch`
+- 子任务：`Task` / `NotebookEdit` / ...
+
+加上 hub 端 17 个 MCP 工具（`commhub_send_task` / `commhub_reply` / ...）。
+
+**为啥默认改成 preset**：[#101 root cause](https://github.com/sleep2agi/agent-network/issues/101) —— 老版 `config.json` 没 `tools` 字段时 agent-node 设 SDK `options.tools = undefined`，SDK 解读为「零内建工具」，agent 只能调 MCP 工具，被问 `WebFetch` / `Bash` / `Read` 时会幻觉成「网络受限」。Option B 强制 fallback 到 SDK `{ type: 'preset', preset: 'claude_code' }` sentinel —— SDK 类型定义里这是「给我全套 Claude Code 工具」的正确表达。
+
+**控制粒度**：
 
 ```bash
-# 限制只能读，不能写
+# 默认（不指定 --tools）→ Claude Code 全集 preset
+anet node create my-agent
+
+# 显式 "all" → 同 preset（单一 source-of-truth，不是老版的硬编码 8-tool 列表）
+anet node create my-agent --tools all
+
+# 显式 allowlist（只读 agent）—— 跳过 preset，给字符串数组
 anet node create my-agent --tools Read,Glob,Grep
 
-# 全量工具（谨慎使用）
-anet node create my-agent --tools all
+# 跑时看实际生效的 toolset
+anet info my-agent           # 列 tools: + flags: 行
 ```
+
+`anet node create` 成功后 print **行为披露 banner**：built-in tools 清单（list 或 "all (Claude Code preset)"）+ MCP tools + 当前 flags（`dangerouslySkipPermissions=true` / `teammateMode=true`）+ "The agent can read/write files, run shell commands, and access the network"。Vincent [4927](https://github.com/sleep2agi/agent-network/issues/101) push 加这个 banner 的初衷：**用户必须看见，承担起 sandboxing 责任**。
+
+> ⚠ **User responsibility**：默认 preset + 默认 `dangerouslySkipPermissions=true` 意味着 agent 启动后能**改文件、跑 shell、访问网络且不弹确认**。请：
+> 1. **不要在 `$HOME` 直接跑 agent**，用一次性工作目录（`mkdir agent-work && cd agent-work && anet node create ...`）—— 详见 [SECURITY.md](https://github.com/sleep2agi/agent-network/blob/main/SECURITY.md)
+> 2. 需要严格 sandbox 时显式 `--tools Read,Glob,Grep` 只给只读权限
+> 3. 关掉 yolo mode：`anet node create --no-skip-permissions`（注意：跑就会一直弹工具调用确认，长任务体验差）
+> 4. 单任务预算限制：`--max-budget 0.1`（见下方 [预算控制](#预算控制)）
 
 ### 预算控制
 
