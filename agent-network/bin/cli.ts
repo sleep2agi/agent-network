@@ -1614,6 +1614,16 @@ Telegram setup:
   console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
   printProfileSummary(id, loadProfile(id) || profile);
   console.log(`\nStart: anet node start ${id}`);
+  // #135 fix — explicit process.exit(0) to avoid Node v24's "unsettled
+  // top-level await" warning + minified stack dump. Without this, on the
+  // claude-code-cli / codex-sdk paths (which skip the vendor inquirer
+  // prompt that previously kept the event loop synchronized), Node's ESM
+  // strict-mode top-level-await checker sees readline / inquirer handlers
+  // outliving the dispatch's `await createCommand()` and warns.
+  // Matches createCommand's existing pattern (line ~1725).
+  if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") {
+    process.exit(0);
+  }
 }
 
 async function createCommand(idOverride?: string) {
