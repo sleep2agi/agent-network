@@ -8,6 +8,76 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## 🟡 v0.9.0 — **Recovery & Observability** (preview, 2026-05-15)
+
+> ⏳ **In promote flow**: the preview tag is published; the stable `latest` flip waits for all three v0.9.0 promote gates to pass. Production users stay on v0.8.3; early adopters can install the preview with `npm install -g @sleep2agi/agent-network@preview`.
+
+**Preview versions** (npm `preview` tag):
+- `@sleep2agi/agent-network@2.1.13-preview.6`
+- `@sleep2agi/agent-node@2.3.6-preview.2`
+- `@sleep2agi/commhub-server@0.8.1-preview.3`
+- `@sleep2agi/agent-network-dashboard@0.4.6-preview.12+`
+
+### 🎯 Theme: Recovery & Observability
+
+The full **zero-keystroke recovery loop** for 22-node reboots + transparent default toolset behavior + server-level aggregate observability.
+
+### New features — Recovery chain
+
+- **`anet project up / restart / down`** (issue [#117](https://github.com/sleep2agi/agent-network/issues/117)) — cwd-wide node orchestration; scans `.anet/nodes/` and starts / restarts / stops every node. Shared options: `--stagger <seconds>` (default 3) / `--only a,b,c` / `--exclude x,y`. `down` caps the hub-offline notify at a 2-second race so a crashed-hub teardown for 22 nodes doesn't deadlock.
+- **`anet node create --resume <id>` / `--resume-latest`** (issue [#115](https://github.com/sleep2agi/agent-network/issues/115)) — bind an existing Claude session at node-create time; TTY mode launches an interactive picker listing `~/.claude/projects/<cwd>/*.jsonl` (age / size / 60-char first-line preview). `anet session ls` and the picker share the same `listClaudeSessions()` helper.
+- **Zero-keystroke recovery** ([#115](https://github.com/sleep2agi/agent-network/issues/115)) — `anet node start` injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` into the `claude` spawn env, skipping Claude Code's default 70-minute session-age threshold for the "Resume from summary / full / Don't ask again" interactive prompt. Per-spawn, does not pollute `~/.claude/settings.json`, respects an explicit user override. Resume restores the full session as-is (no per-invocation flag forces a compact summary; restart-recovery is safer without surprise compaction).
+- **`anet node start` auto-wraps into detached tmux** (issue [#122](https://github.com/sleep2agi/agent-network/issues/122)) — wraps only when all four conditions hold (TTY + `$TMUX` not set + tmux installed + no same-name session). New flags: `--foreground` / `--no-tmux` (aliases) force foreground; `--attach` starts detached then immediately `tmux attach` after a 200ms grace period. **Two layers of recursion guard**: `$TMUX` env detection + inner cmd carrying explicit `--foreground`, protecting `anet project up` + 7 internal demo call-sites. `anet node stop` now `tmux kill-session`s before SIGTERM.
+- **`anet upgrade` overhaul — 4 packages, dual-channel, dry-run, self** (issue [#88](https://github.com/sleep2agi/agent-network/issues/88)) — covers `anet self` / `agent-node` / `commhub-server` / `dashboard`. Channel auto-detected (prerelease tag → preview, else latest); `--channel` overrides. `--dry-run` prints the plan only. `--self` is an opt-in detached spawn (default prints the manual command to avoid replacing the running CLI mid-upgrade). Plan rows carry action badges: `upgrade` / `up-to-date` / `lazy via npx skip` / `self skip` / `lookup failed`. The `commhub-server` row always shows `PINNED_SERVER_VERSION = 0.8.0` as a reminder that `anet hub start` runs the pinned version regardless of what's globally installed.
+- **`anet.sh` install / upgrade scripts sync** (issue [#123](https://github.com/sleep2agi/agent-network/issues/123)) — the anet.sh one-shot scripts now match npm's dual-channel layout, with the Node 22.13 engine check baked in.
+
+### New features — Runtime default-behavior transparency
+
+- **`claude-agent-sdk` default = Claude Code preset** (issue [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B) — root-cause fix: with no `tools` field in `config.json`, agent-node was passing the SDK `options.tools = undefined`, giving the agent zero built-in tools and producing hallucinated "network restricted" responses. Now agent-node falls back to the SDK `{ type: 'preset', preset: 'claude_code' }` sentinel — every agent gets WebFetch / WebSearch / Bash / Read / Write / Edit / Glob / Grep / Task / NotebookEdit by default. `--tools "all"` routes to the same preset (replaces the old hardcoded 8-tool list as the single source of truth).
+- **Behavior-disclosure banner** ([#101](https://github.com/sleep2agi/agent-network/issues/101), per Vincent 4927) — `anet node create` prints a banner with the built-in tools + MCP tools + `dangerouslySkipPermissions=true` warning + restrict-tools / disable-auto-skip / inspect-current-set hints. `anet info <alias>` displays `tools:` + `flags:` lines for ad-hoc audits.
+- **`anet ls -v` / `--verbose`** (companion to [#101](https://github.com/sleep2agi/agent-network/issues/101)) — prints a second line per node with `tools=...  permGate=on/off`.
+
+### New features — Security hardening
+
+- **Vendor token envRef mode** (issue [#125](https://github.com/sleep2agi/agent-network/issues/125), v0.9.0 P0 gate #2) — the `config.json` env map now accepts a tagged union: `string` (legacy, still works, with a one-shot deprecation banner) or `{ "_envRef": "VAR_NAME" }` (recommended — the secret stays in process.env and never touches disk). agent-node refuses to start (FATAL with remediation hint) if a referenced env var is unset — no more silent broken startup.
+- **`anet node create` auto-rewrites secrets** — `saveCreatedNode` runs `rewritePlainSecretsToEnvRef()` before the first write. The detection heuristic — key suffix `/_TOKEN|_KEY|_SECRET|AUTH$/` or value prefix `/sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer/` — flips matching values to envRef, drops the original into the current `process.env` (so the immediate spawn works), and prints `export NAME='value'` lines for the user to persist in `~/.bashrc`.
+- **`anet node migrate-token-to-envref <alias>`** — new command for migrating existing nodes in place. Writes `config.json.bak-<ts>`, rewrites + prints export lines; idempotent (non-secret and already-migrated values are left alone).
+- **`anet doctor` enumerates plain-secret nodes** — passive scan + migrate suggestion (no `--fix`; per-node opt-in).
+
+### New features — Observability
+
+- **`GET /api/servers` REST endpoint** (issue [#119](https://github.com/sleep2agi/agent-network/issues/119), server commit 11a3018) — aggregates agents by `hostname` + `ip` and returns live host telemetry, used by the dashboard's "Servers" sidebar. Returns a **bare JSON array** (not the `{ok, ...}` wrapper). Marks 10-min-stale sessions offline before aggregating; network-scoped via `addNetworkScope`. Fields: `hostname` / `ip` / `agent_count` / `cpu_load_1min` / `cpu_cores` / `mem_avail_gb` / `mem_used_gb` / `last_seen`.
+- **agent-node host telemetry** ([#119](https://github.com/sleep2agi/agent-network/issues/119) step 1, commit 5364931) — each `report_status` call now carries `host` fields. On Linux: `/proc/loadavg` + `/proc/meminfo` `MemAvailable` first. On macOS/Windows: falls back to `os.loadavg()` / `os.totalmem()` / `os.freemem()`. Windows `[0,0,0]` is actively coerced to `null`. A 10-second cache prevents burst reports.
+- **Dashboard ServersDrawer** ([#119](https://github.com/sleep2agi/agent-network/issues/119) step 3) — UI sidebar shows aggregated agent counts per physical machine alongside live CPU / RAM bars.
+- **Dashboard topology redo + 38 rounds of polish** (issues [#112](https://github.com/sleep2agi/agent-network/issues/112) + [#116](https://github.com/sleep2agi/agent-network/issues/116)) — grid + ring dual views; mount fade-in; hover ring focus; click ripple; label scaling; arrow tiers; offline dim; group-box hover; minimap; cwd tooltip; and 9+ further rounds of interaction polish.
+
+### Documentation
+
+- **GitHub README front-page overhaul** (issue [#118](https://github.com/sleep2agi/agent-network/issues/118), commit `2dd646d`) — Hero / Quick start / Demo / CTA promoted to the top; anet vs LangGraph/AutoGen/CrewAI 5×4 comparison table; trust signals (4 new badges + Star History chart); mermaid architecture diagram + node onboarding flow; ZH + EN parity.
+- **docs-site catch-up sweep** (issue [#124](https://github.com/sleep2agi/agent-network/issues/124)) — bulk-syncs every new feature shipped today to anet.sh: `cli.md` / `upgrade.md` / `security.md` / `rest.md` / `CHANGELOG.md`, all ZH + EN.
+
+### Breaking changes / Migration
+
+- ⚠ **`anet node start` default changed** — from v0.9 preview onward it auto-wraps into a detached tmux session (v0.8 ran foreground). For scripts/CI, pass `--foreground` or `--no-tmux` explicitly.
+- ⚠ **`claude-agent-sdk` node default toolset changed** — from empty to the full Claude Code preset (Bash / WebFetch / Write / …). Existing nodes with an explicit `tools` allowlist keep their old behavior; for new nodes, decide whether you need to narrow with `--tools Read,Glob,Grep`.
+- ⚠ **Vendor secrets no longer persist plain in `config.json`** — newly created nodes go through envRef automatically; for existing plain-secret nodes run `anet node migrate-token-to-envref <alias>` for a one-shot migration. The plain-string path stays compatible for now (with a deprecation banner).
+- ✅ **Preview version-number rule** ([per Vincent](https://github.com/sleep2agi/agent-network/issues/126)) — bump the `-preview.N+1` suffix within a preview chain; **do not bump the patch and reset preview.0** (avoids "backwards-looking" version numbers).
+
+### Smoke validation (before promote)
+
+```
+1. plain fallback           — old config with "sk-..." still starts + shows the deprecation banner
+2. envRef happy path        — { _envRef: "TEST_TOKEN" } + export TEST_TOKEN=fake → node receives the correct token
+3. envRef missing var FATAL — case #2 without the export → startup FATAL + remediation hint
+4. anet doctor scan         — mix of plain + envRef nodes → only plain ones surface under the warning
+5. migrate idempotent       — plain → migrate → second run is a no-op + `.bak-<ts>` exists + export lines printed
+6. anet node create auto    — `--env ANTHROPIC_AUTH_TOKEN=sk-fake` → config.json contains envRef, not literal sk-fake
+```
+
+See [issue #125](https://github.com/sleep2agi/agent-network/issues/125#issuecomment-4457630036) for full repro steps.
+
+---
+
 ## 2026-05-14 — **v0.8.3 stable release** batch primitive + multi-demo + P0/UX fixes ✅ stable
 
 **Version sync** (npm `latest` tag):

@@ -8,6 +8,76 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## 🟡 v0.9.0 — **Recovery & Observability**（preview，2026-05-15）
+
+> ⏳ **正在 promote 流程中**：preview tag 已发，stable `latest` 待 v0.9.0 promote 3 gate 全 pass 后翻牌。当前生产用户继续走 v0.8.3 stable，提前体验装 `@preview`：`npm install -g @sleep2agi/agent-network@preview`。
+
+**Preview 版本号**（npm `preview` tag）：
+- `@sleep2agi/agent-network@2.1.13-preview.6`
+- `@sleep2agi/agent-node@2.3.6-preview.2`
+- `@sleep2agi/commhub-server@0.8.1-preview.3`
+- `@sleep2agi/agent-network-dashboard@0.4.6-preview.12+`
+
+### 🎯 主题：Recovery & Observability
+
+22 节点 reboot 后的**零键盘恢复闭环** + 默认 toolset 行为透明化 + 服务器级聚合观测。
+
+### 新功能 — Recovery 链
+
+- **`anet project up / restart / down`**（issue [#117](https://github.com/sleep2agi/agent-network/issues/117)）— cwd-wide 节点编排，扫 `.anet/nodes/` 全起 / 全重启 / 全停。共享选项 `--stagger <秒>`（默认 3 错峰）/ `--only a,b,c` / `--exclude x,y`。`down` 给 hub-offline 通知设 2s race timeout 防 hub 自挂场景拖死命令。
+- **`anet node create --resume <id>` / `--resume-latest`**（issue [#115](https://github.com/sleep2agi/agent-network/issues/115)）— 创建节点时直接绑定已有 Claude session；TTY 模式下交互式 picker 列 `~/.claude/projects/<cwd>/*.jsonl`（age / size / 60-char 首行预览）。`anet session ls` 用同一份 `listClaudeSessions()` helper。
+- **零键盘恢复机制**（[#115](https://github.com/sleep2agi/agent-network/issues/115)）— `anet node start` spawn `claude` 时自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999`，跳过 Claude Code 默认 70min session-age 阈值的「Resume from summary / full / Don't ask again」交互弹窗；per-spawn 注入、不污染 `~/.claude/settings.json`、用户显式 export 覆盖；resume 还原完整 session（restart-recovery 不带意外 compaction）。
+- **`anet node start` 默认 detached tmux**（issue [#122](https://github.com/sleep2agi/agent-network/issues/122)）— 4 条件同时成立才 wrap（TTY + `$TMUX` 未设 + 装了 tmux + 同名 session 不存在）。新 flag：`--foreground` / `--no-tmux`（互为别名）强制前台；`--attach` detached + 200ms grace + `tmux attach`。**两层递归保护**：`$TMUX` env 检测 + 内层 cmd 显式带 `--foreground`，保护 `anet project up` + 7 处 demo 内部调用。`anet node stop` 联动 `tmux kill-session` 先于 SIGTERM。
+- **`anet upgrade` 4-包 + 双通道 + dry-run + self**（issue [#88](https://github.com/sleep2agi/agent-network/issues/88)）— 覆盖 `anet self` / `agent-node` / `commhub-server` / `dashboard`。Channel auto-detect（prerelease tag → preview，否则 latest）+ `--channel` 覆盖。`--dry-run` 只 print plan。`--self` opt-in detached spawn（默认 print 手动命令避免升级时替换运行进程）。Plan 行带 action badge：`upgrade` / `up-to-date` / `lazy via npx skip` / `self skip` / `lookup failed`。`commhub-server` 行恒显 `PINNED_SERVER_VERSION = 0.8.0` 提醒 `anet hub start` 跑 pinned 不跟全局走。
+- **`anet.sh` install / upgrade scripts 同步**（issue [#123](https://github.com/sleep2agi/agent-network/issues/123)）— anet.sh 一键脚本与 npm 双通道对齐 + Node 22.13 engine 校验。
+
+### 新功能 — Runtime 默认行为透明化
+
+- **`claude-agent-sdk` 默认 Claude Code preset 全集**（issue [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B）— 修了 root cause：`config.json` 无 `tools` 字段时 agent-node 设 SDK `options.tools = undefined` → agent 零内建工具 → 幻觉「网络受限」。改成 fallback 到 SDK `{ type: 'preset', preset: 'claude_code' }` sentinel，agent 默认获得 WebFetch / WebSearch / Bash / Read / Write / Edit / Glob / Grep / Task / NotebookEdit 等。`--tools "all"` 路由到同一 preset（去硬编码 8-tool 列表）。
+- **行为披露 banner**（[#101](https://github.com/sleep2agi/agent-network/issues/101) Vincent 4927 push）— `anet node create` 成功后 print built-in tools + MCP tools + `dangerouslySkipPermissions=true` 警示 + restrict-tools / disable-auto-skip / inspect-current-set hint。`anet info <alias>` 显示 `tools:` + `flags:` 行供随时审计。
+- **`anet ls -v` / `--verbose`**（同 [#101](https://github.com/sleep2agi/agent-network/issues/101) 配套）— 每节点多打一行 `tools=...  permGate=on/off`。
+
+### 新功能 — Security hardening
+
+- **Vendor token envRef 模式**（issue [#125](https://github.com/sleep2agi/agent-network/issues/125)，v0.9.0 P0 gate #2）— `config.json` env map 接受 tagged union：`string`（legacy，仍兼容，print 一次性 deprecation banner）或 `{ "_envRef": "VAR_NAME" }`（推荐，secret 留 process.env 永不落盘）。agent-node unset envRef 时**启动直接 FATAL exit** + remediation hint，refuse silent broken。
+- **`anet node create` 自动 envRef rewrite** — `saveCreatedNode` 前跑 `rewritePlainSecretsToEnvRef()`：secret 识别启发式（key 后缀 `/_TOKEN|_KEY|_SECRET|AUTH$/` 或 value 前缀 `/sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer/`）任一命中就翻 envRef，原值塞当前 `process.env`（spawn 立即可用）+ print `export NAME='value'` 让用户抄进 `~/.bashrc`。
+- **`anet node migrate-token-to-envref <alias>`** — 新命令，已有节点一键迁。备份原文件到 `config.json.bak-<ts>`，rewrite + print export 行；idempotent（非 secret + 已 envRef 不动）。
+- **`anet doctor` enumerate plain-secret 节点** — passive 扫描 + 提示走 migrate 命令（不自动 `--fix`，per-node opt-in）。
+
+### 新功能 — Observability
+
+- **`GET /api/servers` REST endpoint**（issue [#119](https://github.com/sleep2agi/agent-network/issues/119)，server 11a3018）— 按 `hostname` + `ip` 聚合 agent + host 实时遥测，dashboard「服务器侧栏」用。返回**裸 JSON array**（非 `{ok, ...}` wrapper）。先 10min stale 标 offline 再聚合；`addNetworkScope` 网络作用域。字段：`hostname` / `ip` / `agent_count` / `cpu_load_1min` / `cpu_cores` / `mem_avail_gb` / `mem_used_gb` / `last_seen`。
+- **agent-node host telemetry**（[#119](https://github.com/sleep2agi/agent-network/issues/119) step 1，5364931）— 每次 `report_status` 附带 host 字段。Linux `/proc/loadavg` + `/proc/meminfo` MemAvailable 优先；macOS/Win 兜底 `os.loadavg()` / `os.totalmem()` / `os.freemem()`；Windows `[0,0,0]` 主动 coerce `null`；10s cache 阻断 burst。
+- **Dashboard ServersDrawer**（[#119](https://github.com/sleep2agi/agent-network/issues/119) step 3）— Web UI 侧栏展示按物理机聚合的 agent count + CPU / RAM 实时条。
+- **Dashboard 拓扑图重做 + 38 轮持续 polish**（issue [#112](https://github.com/sleep2agi/agent-network/issues/112) + [#116](https://github.com/sleep2agi/agent-network/issues/116)）— grid / ring 双视图 + mount fade-in + hover ring focus + click ripple + label scale + arrow tier + offline dim + group-box hover + minimap + cwd tooltip 等 9+ 轮交互细化。
+
+### 文档
+
+- **GitHub README 门面级优化**（issue [#118](https://github.com/sleep2agi/agent-network/issues/118)，commit `2dd646d`）— Hero / Quick start / Demo / CTA 提前；anet vs LangGraph/AutoGen/CrewAI 5×4 对比表；信任信号 4-badge + Star History chart；mermaid 架构图 + 节点接入流程；ZH + EN 双语同步。
+- **docs-site catch-up sweep**（issue [#124](https://github.com/sleep2agi/agent-network/issues/124)）— 把今日 ship 的所有新功能批量同步到 anet.sh：`cli.md` / `upgrade.md` / `security.md` / `rest.md` / `CHANGELOG.md` 全部 ZH + EN。
+
+### Breaking changes / Migration
+
+- ⚠ **`anet node start` 默认行为变化** — 从 v0.9 preview 起默认 wrap 进 detached tmux（v0.8 是前台跑）。脚本/CI 场景请显式 `--foreground` 或 `--no-tmux`。
+- ⚠ **`claude-agent-sdk` 节点默认 toolset 变化** — 从空集变成 Claude Code preset 全集（含 Bash / WebFetch / Write 等）。已有节点显式 `tools` 列表保留原行为。新节点请确认是否需要 `--tools Read,Glob,Grep` 显式收窄。
+- ⚠ **vendor secret 不再落 `config.json` 明文** — 新建节点自动走 envRef；已有明文节点跑 `anet node migrate-token-to-envref <alias>` 一键迁，过渡期 plain string 仍兼容（deprecation banner 提醒）。
+- ✅ **Preview 版本号规则**（[Vincent push](https://github.com/sleep2agi/agent-network/issues/126)）— preview chain 内升 `-preview.N+1` 后缀，**不升 patch 重置 preview.0**，避免版本号「倒退看起来像 downgrade」。
+
+### Smoke validation 必跑（promote 前）
+
+```
+1. plain fallback           — 旧 config 含 "sk-..." 仍能启动 + 显示 deprecation banner
+2. envRef happy path        — { _envRef: "TEST_TOKEN" } + export TEST_TOKEN=fake → 节点拿到正确 token
+3. envRef missing var FATAL — #2 不 export → 启动 FATAL + remediation hint
+4. anet doctor 扫描         — 混合 plain + envRef 节点 → 只 plain 入 warning
+5. migrate 幂等            — plain → migrate → 再跑无 op + `.bak-<ts>` 存在 + export 行打印
+6. anet node create 自动    — `--env ANTHROPIC_AUTH_TOKEN=sk-fake` → config.json 是 envRef，不是字面 sk-fake
+```
+
+详见 [issue #125](https://github.com/sleep2agi/agent-network/issues/125#issuecomment-4457630036) 完整可复现步骤。
+
+---
+
 ## 2026-05-14 — **v0.8.3 正式版** batch primitive + 多 demo + P0/UX 修复 ✅ stable
 
 **版本同步**（npm `latest` tag）：
