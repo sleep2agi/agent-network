@@ -304,9 +304,9 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 
 ### anet node start
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1867)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2098)
 
-启动 Agent 节点。
+启动 Agent 节点。默认行为从 [#122](https://github.com/sleep2agi/agent-network/issues/122)（v2.1.13-preview.4+）起改成**自动把节点 wrap 进一个 detached tmux session**（session 名 = alias），所以 22 台机器重启后跑 `anet project up` 不再需要手动 `tmux new-session -d -s ...`。
 
 ```bash
 anet node start <name> [options]
@@ -314,17 +314,40 @@ anet node start <name> [options]
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--new-session` | false | 忽略旧 session，创建新的 |
+| `--new-session` | false | 忽略旧 session，创建新的（同 `--resume` chain 的「重新开始」） |
+| `--foreground` / `--no-tmux` | false | 强制前台跑（互为别名）—— 不 wrap tmux，stdout/stderr 接当前终端 |
+| `--attach` | false | detached tmux 起好后立即 `tmux attach`（200ms grace 让 boot 输出先打出来）|
 
-**流程**：
+**自动 wrap 的判定（4 条同时成立）**：
 
-1. 读取 `.anet/nodes/<name>/config.json`
-2. 自动补充 `node_id`（如果没有）
-3. 启动 tmux session
-4. spawn Agent 进程（根据 runtime）
-5. 连接 CommHub（`report_status(idle)`）
-6. 建立 SSE 长连接
-7. 等待任务
+| 条件 | 失败行为 |
+|------|---------|
+| 没显式 `--foreground` / `--no-tmux` | → 前台跑 |
+| `$TMUX` 未设置（不在 tmux pane 里）| → 前台跑（避免 tmux 嵌套），verify [`cli.ts:2111`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2111) |
+| stdout 是 TTY | → 前台跑（脚本/管道场景不要 detached surprise）|
+| 系统装了 tmux | → 前台跑 + ⚠ 提示装 tmux（[`cli.ts:2117-2118`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2117)）|
+
+**同名 tmux session 已存在**：拒绝 clobber，打印 3 行 actionable hint（[`cli.ts:2136-2141`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2136)）：
+
+```
+[anet] ❌ tmux session "<alias>" already exists.
+[anet]    Attach:   tmux a -t <alias>
+[anet]    Restart:  anet node stop <alias> && anet node start <alias>
+[anet]    Run here: anet node start <alias> --foreground
+```
+
+**Wrap 成功后**：
+
+```
+[anet] ▶ Started "<alias>" in tmux session "<alias>" (detached)
+[anet]   Attach:  tmux a -t <alias>
+[anet]   Stop:    anet node stop <alias>
+[anet]   Logs:    anet logs <alias>
+```
+
+> **递归保护两层**：（1）`$TMUX` env 检测 —— tmux 给 pane 内进程注入这个变量，从 #117 `anet project up` 内层 spawn 时能感知；（2）`startNodeTmuxSession` 内层命令显式带 `--foreground`（[`cli.ts:35-41`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35)），即使 `$TMUX` 没传过来也不会无限套娃。`anet project up` / `demo debate / socialmedia / pr-review / sci-team` 7 处内部调用都自动走这条路。
+
+**`anet node stop` 联动改**：检测到同名 tmux session 时**先 `tmux kill-session`**再 SIGTERM 进程 + 通知 hub，输出会告诉你 "tmux + process killed" 还是 "process killed"。
 
 ### anet status
 

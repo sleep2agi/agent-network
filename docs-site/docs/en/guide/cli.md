@@ -298,9 +298,9 @@ The following fields are generated **conditionally** — not every node has them
 
 ### anet node start
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1867)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2098)
 
-Start an agent node.
+Start an agent node. From [#122](https://github.com/sleep2agi/agent-network/issues/122) onwards (v2.1.13-preview.4+), the default behavior **auto-wraps the node into a detached tmux session** (session name = alias), so recovering 22 machines after a reboot via `anet project up` no longer needs hand-rolled `tmux new-session -d -s ...` calls.
 
 ```bash
 anet node start <name> [options]
@@ -308,17 +308,40 @@ anet node start <name> [options]
 
 | Parameter | Default | Description |
 |------|--------|------|
-| `--new-session` | false | Ignore previous session, create a new one |
+| `--new-session` | false | Ignore previous session, create a new one (the "start over" path on the `--resume` chain) |
+| `--foreground` / `--no-tmux` | false | Force foreground run (aliases of each other) — no tmux wrap; stdout/stderr stay on the current terminal |
+| `--attach` | false | Start in detached tmux, then immediately `tmux attach` (with a 200 ms grace period so boot output lands before attach) |
 
-**Flow**:
+**Auto-wrap decision matrix (all four must hold)**:
 
-1. Read `.anet/nodes/<name>/config.json`
-2. Auto-populate `node_id` (if missing)
-3. Start tmux session
-4. Spawn agent process (based on runtime)
-5. Connect to CommHub (`report_status(idle)`)
-6. Establish SSE long connection
-7. Wait for tasks
+| Condition | Failure mode |
+|------|--------|
+| `--foreground` / `--no-tmux` not set | → foreground |
+| `$TMUX` not set (we're not already inside a tmux pane) | → foreground (avoid tmux nesting), verify [`cli.ts:2111`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2111) |
+| stdout is a TTY | → foreground (scripts/pipes don't want a detached surprise) |
+| tmux is installed | → foreground + ⚠ "install tmux" hint ([`cli.ts:2117-2118`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2117)) |
+
+**Same-name tmux session already exists**: refuses to clobber, prints 3 actionable hints ([`cli.ts:2136-2141`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2136)):
+
+```
+[anet] ❌ tmux session "<alias>" already exists.
+[anet]    Attach:   tmux a -t <alias>
+[anet]    Restart:  anet node stop <alias> && anet node start <alias>
+[anet]    Run here: anet node start <alias> --foreground
+```
+
+**On successful wrap**:
+
+```
+[anet] ▶ Started "<alias>" in tmux session "<alias>" (detached)
+[anet]   Attach:  tmux a -t <alias>
+[anet]   Stop:    anet node stop <alias>
+[anet]   Logs:    anet logs <alias>
+```
+
+> **Two layers of recursion guard**: (1) `$TMUX` env detection — tmux injects this variable into every process inside a pane, so when `anet project up` (#117) spawns an inner `anet node start` it sees `$TMUX` set and falls through to foreground; (2) `startNodeTmuxSession` passes an explicit `--foreground` to the inner command ([`cli.ts:35-41`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35)), so even when `$TMUX` doesn't propagate (weird pty setups) there is no infinite nesting. All 7 internal call sites — `anet project up` / `demo debate / socialmedia / pr-review / sci-team` — pick this up automatically.
+
+**`anet node stop` matched change**: when a same-name tmux session exists, **`tmux kill-session` runs first**, then SIGTERM the recorded PID + notify the hub. Output reports either "tmux + process killed" or just "process killed".
 
 ### anet status
 
