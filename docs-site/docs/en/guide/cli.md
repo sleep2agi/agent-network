@@ -75,6 +75,28 @@ After installation, the `anet` command is available globally.
 | `anet node rename <old> <new>` | Rename an agent |
 | `anet node delete <name>` | Delete an agent (interactive confirm by default; add `--force` or `--yes` to skip; **does not auto-revoke the `ntok_`** — pair with `anet token revoke <id>` for full cleanup, see [Token lifecycle](/en/concepts/tokens#token-lifecycle-matrix)) |
 
+### Project-wide (cwd, preview)
+
+> ⚠ **Preview channel only right now**: v2.1.13-preview.2+ (npm `@sleep2agi/agent-network@preview`); the `latest` tag (v2.1.9) does not yet ship it. Install: `npm install -g @sleep2agi/agent-network@preview`.
+
+Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / stops them as a batch. See [issue #117](https://github.com/sleep2agi/agent-network/issues/117) and verify [`cli.ts:3000 projectCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3000).
+
+| Command | Description |
+|------|------|
+| `anet project up` | Start every node (skip already-running, idempotent; ▶ started / ⏭ already-running) |
+| `anet project restart` | Kill existing tmux + start fresh per node (↻ restarted / ▶ started) |
+| `anet project down` | Stop every node (kill tmux + notify hub offline; ⏹ stopped) |
+
+**Shared options:**
+
+| Option | Default | Description |
+|------|------|------|
+| `--stagger <seconds>` | `3` | Delay between nodes; `0` disables |
+| `--only a,b,c` | — | Operate only on these aliases or node IDs |
+| `--exclude x,y` | — | Skip these aliases or node IDs |
+
+> **`down` caps the hub-offline notify at a 2-second timeout** (cli.ts:3085-3088) — this command is commonly used in the "hub itself crashed" scenario, where serially fetching offline notifications for 22 nodes would hang on 44 timeouts and deadlock the teardown; the 2 s race guarantees a fast worst-case teardown.
+
 ### Monitoring
 
 | Command | Description |

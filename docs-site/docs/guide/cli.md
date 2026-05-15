@@ -75,6 +75,28 @@ npm install -g @sleep2agi/agent-network
 | `anet node rename <old> <new>` | 重命名 Agent |
 | `anet node delete <name>` | 删除 Agent（默认交互式确认；加 `--force` 或 `--yes` 跳过；**不自动撤销 ntok_** — 要彻底清干净加 `anet token revoke <id>`，详见 [Token 生命周期](/concepts/tokens#token-生命周期对照)） |
 
+### 项目级（cwd-wide，预览功能）
+
+> ⚠ **当前仅 preview 通道有**：v2.1.13-preview.2+（npm `@sleep2agi/agent-network@preview`）；stable `latest`（v2.1.9）暂无。装预览版：`npm install -g @sleep2agi/agent-network@preview`。
+
+扫描当前 cwd 下 `.anet/nodes/` 里所有节点，统一起 / 重启 / 停。见 [issue #117](https://github.com/sleep2agi/agent-network/issues/117) + verify [`cli.ts:3000 projectCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3000)。
+
+| 命令 | 说明 |
+|------|------|
+| `anet project up` | 起所有节点（已跑的 skip，幂等；▶ started / ⏭ already-running） |
+| `anet project restart` | 杀掉现有 tmux + 重新启每个节点（↻ restarted / ▶ started）|
+| `anet project down` | 停所有节点（杀 tmux + notify hub offline；⏹ stopped）|
+
+**共享选项**：
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `--stagger <秒>` | `3` | 节点之间错峰延迟，`0` 关闭 |
+| `--only a,b,c` | — | 只对列出的 alias 或 node_id 操作 |
+| `--exclude x,y` | — | 跳过列出的 alias 或 node_id |
+
+> **`down` 给 hub-offline 通知设了 2s 超时上限**（cli.ts:3085-3088）—— 这条命令常用于「hub 自己挂了」的场景，22 个节点串行 fetch 卡 44 个超时会拖死命令；2s race 保证 worst-case 也能快速 teardown。
+
 ### 监控
 
 | 命令 | 说明 |
