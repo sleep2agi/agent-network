@@ -260,7 +260,14 @@ New capabilities (vs the current stable — the stable dashboard also keeps iter
 - **Global health banner**: red / amber / green tri-color + CTA + dismiss
 - **KPI card hover popover**: working / idle / offline breakdown
 - **EmptyState — 7 variants**: tailored illustrations for post-login, empty network, zero tasks, etc.
-- **Topology light variant**: 24px pulse on central hub (fixes stable's "invisible on light mode" P0)
+- **Topology redo + 38+ rounds of polish** ([#112](https://github.com/sleep2agi/agent-network-dashboard/issues/112) + [#116](https://github.com/sleep2agi/agent-network-dashboard/issues/116)):
+  - **Dual layouts**: grid (rows-by-group) + ring (orbiting the central hub); bottom-right `G` / `R` toggle
+  - **Node interactions**: mount fade-in (nodes phase in on join) + hover ring focus (halo on hover) + click ripple + label scale on zoom (counter-scales so text stays readable)
+  - **Edge tiers**: arrow tier (message frequency drives arrow thickness / opacity) + offline dim (edges to offline nodes fade)
+  - **Grouping**: group-box hover (hovering a group title highlights every member) + dashed separators between groups
+  - **Side controls**: minimap (bottom-left thumbnail with draggable viewport box) + cwd tooltip (hover a node to see its `project_dir`) + S/M/L size toggle
+  - **Light mode**: 24px pulse on the central hub (fixes stable's "invisible on light mode" P0)
+- **ServersDrawer** ([#119](https://github.com/sleep2agi/agent-network/issues/119)): a right-hand drawer that aggregates agents by physical machine (`hostname` + `ip`) with live CPU load / memory bars and an agent count. Backed by [`GET /api/servers`](/en/api/rest#get-api-servers) (10-min stale-mark side effect + bare JSON array response, [server/src/index.ts:845](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L845)). Multiple agents on the same host collapse into one row; older agents without host telemetry are bucketed under an `unknown` host group.
 - **Tasks status tabs**: color-coded dots + mobile horizontal scroll
 - **Mobile audit fixes**: banner yields to hamburger / UserBar iconified
 - **Sidebar "Quick search ⌘K" chip**: mobile launcher entry

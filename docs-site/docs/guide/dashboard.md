@@ -260,7 +260,14 @@ Dashboard 通过三类数据面保持更新：
 - **全局健康 banner**：红 / 琥珀 / 绿三色 + CTA + ×
 - **KPI 卡 hover popover**：working / idle / offline 分布
 - **EmptyState 7 变体**：登录后、空网络、零任务等场景独立插画
-- **Topology 浅色变体**：中心 hub 24px 脉冲（解决了 stable 浅色不可见问题）
+- **Topology 拓扑视图重做 + 38+ 轮 polish**（[#112](https://github.com/sleep2agi/agent-network-dashboard/issues/112) + [#116](https://github.com/sleep2agi/agent-network-dashboard/issues/116)）：
+  - **双视图**：grid（按 group 横向分行）+ ring（绕中心 hub 环绕）；右下角 `G` / `R` toggle
+  - **节点交互**：mount fade-in（节点上线渐入）+ hover ring focus（鼠标悬停光环聚焦）+ click ripple（点击涟漪）+ label scale on zoom（缩放时 label 反向缩放保持可读）
+  - **连线分级**：arrow tier（消息频度决定箭头粗细 / 透明度）+ offline dim（离线节点连线减淡）
+  - **分组**：group-box hover（hover group 标题高亮所有成员）+ group 间虚线分隔
+  - **副控件**：minimap（左下角缩略图 + 视口框拖动）+ cwd tooltip（hover 节点显示 `project_dir`）+ S/M/L 尺寸 toggle
+  - **浅色模式**：中心 hub 24px 脉冲（解决了 stable 浅色不可见问题）
+- **ServersDrawer 服务器抽屉**（[#119](https://github.com/sleep2agi/agent-network/issues/119)）：右侧抽屉按物理机（`hostname` + `ip`）聚合 agent 列表 + 实时 CPU load / 内存柱状图 / agent count，数据来自 [`GET /api/servers`](/api/rest#get-api-servers)（10min stale-mark offline 副作用 + 裸 JSON array 响应，[server/src/index.ts:845](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L845)）。同 host 多 agent 会折叠到同一行；老 agent 没 host telemetry 字段时显示 `unknown` host group。
 - **Tasks 状态 tab**：color-coded 圆点 + 移动端横滚
 - **移动端 audit 修复**：banner 让位 hamburger / UserBar 图标化
 - **Sidebar 底部 "Quick search ⌘K" chip**：移动端 launcher 入口
