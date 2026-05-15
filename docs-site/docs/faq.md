@@ -24,14 +24,14 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 ### 3. 免费吗？
 
-**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.8 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
+**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.9.1 stable 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
 
 - 仓库公开、源码可改
 - 商业模式 = 卖课 + 卖服务咨询，不依赖强制官方 SaaS
 - `anet license` / `anet activate` 是 v0.6 legacy 命令，**OSS 后不再需要**；若命中 `license_expired`（Hub 后向兼容仍创建 14 天 trial），按 [troubleshooting — license_expired](/troubleshooting#license-expired-授权过期-legacy-行为) 直接清掉 `licenses` 表即可
 
 ::: info v0.6 license 路径计划清理
-当前 server 在 `send_task` 仍跑 `licenses.expires_at` 检查（V3 遗留代码），v0.9+ 计划整段移除。
+当前 server 在 `send_task` 仍跑 `licenses.expires_at` 检查（V3 遗留代码，verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) `license_expired` 仍在）—— **v0.9.x scope 未动**（Recovery & Observability 主题为先），排到 v0.10+ 整段移除。
 :::
 
 ### 4. 支持哪些 AI 模型？
@@ -237,7 +237,7 @@ anet network invite --role member        # 生成邀请码（admin/member/viewer
 ```
 
 ::: tip 角色变更入口
-v0.8.3 当前不提供 CLI `promote` / `demote` 子命令；改角色目前需要通过 [REST API `/api/networks/:id/members/:user_id`](/api/rest) 调用或 Dashboard Admin 页（部分实装，[详见 Dashboard Admin](/guide/dashboard#admin-管理面板)）。完整 CLI 入口排在 v0.9+。
+当前 v0.9.1 stable 仍不提供 CLI `promote` / `demote` 子命令（v0.9.x scope 是 Recovery & Observability，未动 member role 管理）；改角色目前要通过 [REST API `/api/networks/:id/members/:user_id`](/api/rest) 调用或 Dashboard Admin 页（部分实装，[详见 Dashboard Admin](/guide/dashboard#admin-管理面板)）。完整 CLI 入口排到 v0.10+ / 未排期。
 :::
 
 ### 17a. 怎么改密码？（v0.8）
