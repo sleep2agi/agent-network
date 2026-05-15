@@ -1,8 +1,8 @@
 # 上手指南
 
-本页是当前 stable（v0.8.3）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
+本页是当前 stable（v0.9.0）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
 
-::: tip 组件职责（v0.8.3 stable）
+::: tip 组件职责（v0.9.0 stable）
 本页涉及 4 个 npm 包，各自的职责（具体版本号以 npm `latest` tag 为准，doc 不写死避免 stale）：
 
 | 包 | 用途 |
@@ -137,7 +137,37 @@ anet node start video-bot
 
 `my-bot` 会通过 commhub MCP 工具的 `get_all_status` 发现 `video-bot`，再用 `send_task` 把问题派出去，并通过 `get_task` 轮询子任务结果。设置 `parent_task_id` 后，Agent Node wrapper 还会把子任务最终结果串回上游；整个交互在 Tasks / Messages 页面可以实时看到。
 
-## 9. 局域网接入（其他机器加入同一个 Hub）
+## 9. 一键管理 cwd 下所有节点（v0.9.0+）
+
+跑了多个节点之后，单独 `anet node start/stop` 每个名字逐个敲会很烦。v0.9.0 起用 `anet project` 一键批管理 cwd 下 `.anet/nodes/` 里的全部节点（来自 [#117](https://github.com/sleep2agi/agent-network/issues/117)）：
+
+```bash
+# 起所有（已跑的 skip，▶ started / ⏭ already-running）
+anet project up
+
+# 杀掉每个 tmux + 重新启每个节点（reboot 后用这条）
+anet project restart
+
+# 停所有 + notify hub（hub 自挂场景 down 给 offline-notify 设了 2s 超时防卡死）
+anet project down
+```
+
+**联动两件事**让 22 节点 reboot 是**零键盘恢复**：
+
+- `anet node start` 默认把节点 wrap 进 detached tmux session（[#122](https://github.com/sleep2agi/agent-network/issues/122)）—— `anet project up` 不用手动 `tmux new-session`
+- 启动时自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999`（[#115](https://github.com/sleep2agi/agent-network/issues/115)）跳过 Claude Code 默认的 "Resume from summary / full" 交互弹窗 —— 不用一个个按键确认
+
+常用选项：
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `--stagger <秒>` | `3` | 节点之间错峰延迟（启动洪峰让 hub 喘口气）|
+| `--only a,b,c` | — | 只对指定 alias / node_id 操作 |
+| `--exclude x,y` | — | 跳过指定 alias / node_id |
+
+详见 [CLI 命令参考 — 项目级](/guide/cli#项目级-cwd-wide)。
+
+## 10. 局域网接入（其他机器加入同一个 Hub）
 
 默认的 `anet hub start` 只绑定本机回环地址。要让局域网其他机器接入，启动 Hub 时显式绑定到 LAN：
 
@@ -165,7 +195,7 @@ anet node start remote-bot
 
 ## 已验证 vs 未验证
 
-::: info 已验证（当前 v0.8.3 stable，继承 v2 E2E 覆盖 + v0.8 新增回归）
+::: info 已验证（当前 v0.9.0 stable，继承 v2 E2E 覆盖 + v0.8 新增回归）
 - `anet hub start` + 默认账号自动创建
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`

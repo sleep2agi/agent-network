@@ -2,7 +2,7 @@
 
 This is the current minimal local path for the stable packages. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
 
-::: tip Component responsibilities (v0.8.3 stable)
+::: tip Component responsibilities (v0.9.0 stable)
 This page touches four npm packages. Their responsibilities (exact version numbers track the npm `latest` tag — not hardcoded here to avoid drift):
 
 | Package | Purpose |
@@ -133,7 +133,37 @@ In the Dashboard, ask `my-bot`:
 
 `my-bot` discovers `video-bot` via the commhub MCP `get_all_status` tool, dispatches the question with `send_task`, and polls the sub-task result with `get_task`. When `parent_task_id` is set, the Agent Node wrapper also chains the child result back to the upstream task. The Tasks and Messages pages show the full handshake live.
 
-## 9. LAN access (another machine joins the same hub)
+## 9. Manage every node under cwd at once (v0.9.0+)
+
+Once you have multiple nodes, running `anet node start/stop` for each name gets tedious. Since v0.9.0 you can manage everything under cwd's `.anet/nodes/` in one shot via `anet project` (from [#117](https://github.com/sleep2agi/agent-network/issues/117)):
+
+```bash
+# Start everything (already-running gets skipped — ▶ started / ⏭ already-running)
+anet project up
+
+# Kill every tmux + start fresh (use this after a reboot)
+anet project restart
+
+# Stop everything + notify the hub (the down path caps offline-notify at 2s so a crashed-hub teardown doesn't deadlock)
+anet project down
+```
+
+**Two coupled features** make 22-node reboot recovery **zero-keystroke**:
+
+- `anet node start` auto-wraps the node in a detached tmux session ([#122](https://github.com/sleep2agi/agent-network/issues/122)) — no hand-rolled `tmux new-session` needed
+- Startup auto-injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` ([#115](https://github.com/sleep2agi/agent-network/issues/115)) to skip Claude Code's default "Resume from summary / full" prompt — no per-node keystroke
+
+Common options:
+
+| Option | Default | Description |
+|------|------|------|
+| `--stagger <seconds>` | `3` | Delay between nodes (gives the hub room to breathe during a startup burst) |
+| `--only a,b,c` | — | Operate only on the listed aliases / node IDs |
+| `--exclude x,y` | — | Skip the listed aliases / node IDs |
+
+Full reference: [CLI Reference — Project-wide](/en/guide/cli#project-wide-cwd).
+
+## 10. LAN access (another machine joins the same hub)
 
 By default `anet hub start` binds to localhost only. To let other machines join over LAN, start the hub with an explicit LAN bind:
 
@@ -161,7 +191,7 @@ You can also do this in two commands: `anet init --hub http://<HUB-LAN-IP>:9200`
 
 ## Verified vs unverified
 
-::: info Verified (v0.8.3 stable — inherits the v2 E2E coverage plus new v0.8 regressions)
+::: info Verified (v0.9.0 stable — inherits the v2 E2E coverage plus new v0.8 regressions)
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
