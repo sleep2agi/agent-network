@@ -5,7 +5,7 @@
 | **RFC 编号** | 011 |
 | **标题** | 多厂商 AI Agent 社会 — 24/7 直播 + 自动导演 + 解说，观察涌现社会行为 |
 | **作者** | 通信SDK马 |
-| **状态** | Draft v1 完整就绪（待 review） |
+| **状态** | Draft v2 amend (通信牛 v1 review request changes → 4 blocker + 2 concern 已 address，待 second pass review) |
 | **创建日期** | 2026-05-15 |
 | **关联 issue** | [#107](https://github.com/sleep2agi/agent-network/issues/107)（umbrella 愿景，Vincent 4693-4696） |
 | **依赖** | RFC-009 社会学实验 Framework（本 RFC 是其扩展应用） |
@@ -98,40 +98,85 @@ Vincent 反复强调「呈现形式一定要好」—— §2 是本 RFC 的核�
 
 > ⚠️ §2 涉及 dashboard 的具体实现（组件挂载、SSE 复用、浮窗逻辑），这些是 N站马 的 surface。本节给出**设计意图与数据契约**；标注 `[N站马 输入]` 的地方需要 N站马 确认可行性与实现细节。
 
-### 2.1 共同基础：`SocietyEvent` 事件流
+### 2.1 共同基础：`SocietyEvent` 事件流 + `SocietyEventSource` 派生层
 
 4 个呈现组件（ticker / 自动聚焦 / 解说 / 指标面板）不各自去 scrape 数据，而是共享一条**规范化事件流** `SocietyEvent`。这是呈现层的数据契约 —— 上游产生事件，下游 4 个组件各自消费。
 
+> ⚠️ **v2 修正（通信牛 review Blocker 1）**：v1 原假定「直接复用 commhub SSE」是错的。**实测确认**：commhub 现有 SSE 是 `GET /events/:session` + `pushEvent(sessionName, event, networkId)` —— **per-session-name + network-scoped 的「单播流」**（#84 工作时核对过 server/src/push.ts / index.ts:354-387）。它面向「一个 agent 订阅自己的事件」，不是 dashboard 可消费的「全网事件流」。v2 改：定义独立的 **`SocietyEventSource`** 派生层，由 RFC-011 呈现层模块拥有，从下列**已有 server 存量**汇总归一化得出 `SocietyEvent` 流，不要求 commhub 改 SSE 模型。
+
+#### 2.1.1 `SocietyEventSource` 设计
+
 ```typescript
-// 呈现层的统一事件抽象。由 commhub SSE + RFC-009 round/payoff telemetry
-// 归一化而来；4 个呈现组件都消费它，互不耦合。
-interface SocietyEvent {
-  ts: number;                      // epoch ms
-  kind:
-    | "task_sent"                  // agent → agent 派任务
-    | "message_sent"               // agent → agent 发消息
-    | "task_replied"               // 子任务返回 reply
-    | "status_changed"             // agent working/idle/blocked/error
-    | "round_started" | "round_ended"   // RFC-009 round 边界
-    | "payoff_updated"             // RFC-009 payoff 变化
-    | "opinion_shifted"            // 派生事件：某 agent 观点翻转（见 §4）
-    | "node_down" | "node_recovered";   // 24/7 稳定性（见 §5）
-  from?: string;                   // 发起 agent alias
-  to?: string;                     // 目标 agent alias
-  vendor?: string;                 // from 节点的 vendor（多厂商维度，见 §3）
-  summary: string;                 // 一句话摘要（用于 ticker / 喂解说）
-  payload?: unknown;               // kind-specific 细节
-  experimentId?: string;           // 关联的 RFC-009 实验
+// 呈现层模块拥有的派生事件源。订阅它就拿到 network-scoped 的归一化
+// SocietyEvent 流；4 个呈现组件都消费它（互不耦合）。实现是纯派生 +
+// poll/tail 已有 server 存量，不要求改任何核心写路径。
+interface SocietyEventSource {
+  // 订阅 network 内的事件流（基于用户 utok_ 鉴权 + network membership）。
+  // 返回一个可取消的订阅；新事件通过 onEvent 回调推送。
+  subscribe(opts: {
+    networkId: string;
+    sinceTs?: number;              // 增量恢复（断线重连用）
+    kinds?: SocietyEvent["kind"][]; // 过滤; 不传 = 全要
+    onEvent: (e: SocietyEvent) => void;
+  }): { close(): void };
+
+  // 一次性快照（自动导演 / 指标面板初次渲染用）。
+  snapshot(opts: {
+    networkId: string;
+    fromTs: number; toTs: number;
+    kinds?: SocietyEvent["kind"][];
+  }): Promise<SocietyEvent[]>;
 }
 ```
 
-**数据来源**：
-- `commhub SSE`（已有）→ task_sent / message_sent / task_replied / status_changed
-- `RFC-009 telemetry`（RFC-009 §4.4 已设计 round/payoff 可观察性）→ round_* / payoff_updated
-- **派生层**（本 RFC 新增，见 §4）→ opinion_shifted 等「热点事件」由事件检测器从原始事件流计算得出
-- `守护节点`（#99）→ node_down / node_recovered
+**实现策略（不要求改 server 写路径，全部派生）**：
+- **`tasks` 表 tail**（server/src/db.ts 已有；`task_events` 表也已有，记录状态变化） → `task_sent` / `task_replied`
+- **`inbox` 表 tail**（`type: "message"` 等） → `message_sent`
+- **`sessions.status` polling**（`get_all_status` 已有 API）或定时拉差分 → `status_changed`
+- **RFC-009 round/payoff** → 当 RFC-009 实施时由其 telemetry 通道产 `round_*` / `payoff_updated`（RFC-009 §4.4），与 server 表无关
+- **派生事件**（`opinion_shifted` 等热点） → §4 检测器在 `SocietyEventSource` 之上跑，**输出新事件再回灌进同一条订阅流**（自闭环，订阅者只看到统一抽象）
+- **`node.renamed`** / `node_down` / `node_recovered` → 守护节点 #99 / 现有 `node.renamed` SSE（#84 实施时已加 user 频道 broadcast）派生
 
-> 设计约束：`SocietyEvent` 必须是**只读派生视图**，不改 commhub / RFC-009 的任何写路径 —— 纯消费。这保证呈现层是可选 add-on，不碰核心业务逻辑。
+**ACL / scope**（通信牛 concern §2.1/§2.2）：
+- 订阅按 `(user, network)` 鉴权 —— 用户必须是 `network_members` 中的成员才能拿到该 network 的 `SocietyEvent`
+- **`SocietyEvent.summary` 仅承载元数据**（vendor / event_kind / token counts / 截断后的 from→to 关系等），**消息正文不进 `summary`，不进 `payload`**
+- `summary` 长度上限 120 字符；超过则尾部 `…` 截断
+- `payload` 仅放 kind-specific 结构化元数据（如 round_id / payoff_delta），**禁止放原始消息文本**
+- 跨 network 隔离：订阅者只看到自己 network 的事件，dashboard 不会因订阅一个 network 就拿到另一个 network 的事件
+
+#### 2.1.2 与现有 SSE 的关系
+
+现有 `pushEvent(alias, event, networkId)` 不变 —— 它是「agent 自己的 inbox 推送」面向 agent-node 消费。`SocietyEventSource` 是**另一条独立的派生层**，给呈现层用：
+
+```
+sessions / tasks / inbox / task_events / node.renamed SSE / RFC-009 telemetry
+                                ↓
+                       SocietyEventSource (本 RFC 拥有的派生层)
+                                ↓
+              ticker / 自动聚焦 / 解说 agent / 指标面板
+```
+
+> 设计约束保持不变（v1 已定）：`SocietyEvent` 是**只读派生视图**，不改 commhub / RFC-009 的任何写路径 —— 纯消费。这保证呈现层是可选 add-on，不碰核心业务逻辑。
+
+```typescript
+// SocietyEvent 本身的结构 v2 不变（只是来源澄清了）
+interface SocietyEvent {
+  ts: number;                      // epoch ms
+  kind:
+    | "task_sent" | "message_sent" | "task_replied"
+    | "status_changed"
+    | "round_started" | "round_ended" | "payoff_updated"
+    | "opinion_shifted"            // 派生（§4 检测器）
+    | "node_down" | "node_recovered" | "node_renamed";
+  from?: string;                   // alias（network-scoped, 通过 vendorMap 解析 vendor）
+  to?: string;
+  vendor?: string;                 // from 节点的 vendor (§3.4 v2 mapping)
+  networkId: string;               // v2: 显式 network scope (ACL 用)
+  summary: string;                 // ≤120 字符元数据摘要, 无正文
+  payload?: Record<string, unknown>; // kind-specific 元数据, 无正文
+  experimentId?: string;           // 关联 RFC-009 实验
+}
+```
 
 ### 2.2 组件 1：活动 ticker（易）
 
@@ -193,6 +238,8 @@ dashboard 字幕区 + 可选 TTS
 
 > 这正好用上 #101/#102 的修复成果：解说 agent 也是 claude-agent-sdk 节点，需要稳定的工具/prompt 行为。但注意它**只读**，不需要 commhub 工具 —— 它的「输入」是 `SocietyEvent` 流（通过 prompt 注入或一个只读 MCP 工具），不是 commhub 互动。
 
+> ⚠️ **v2 闭环（通信牛 review concern §2.4 — 解说 agent 输入机制未闭环）**：解说 agent 通过 §2.1 v2 引入的 `SocietyEventSource.subscribe({ networkId, kinds, onEvent })` 拉取事件流，digest 拼装在解说 agent **节点外部** 完成（一个 RFC-011 呈现层模块拥有的 digest 拼装器），按 `digestIntervalMs` 节拍把 digest 作为单次 prompt 灌进解说 agent。这样解说 agent 仍是普通 claude-agent-sdk 节点（不需要新的 MCP 工具 / 自定义协议），它的"输入感官"具体落地 = 接收一个 user message 含 `EventDigest` JSON + 上段旁白。digest 拼装器与解说 agent 间通过 `commhub_send_task` 投递（沿用现有 anet 协议），不发明新通道。
+
 #### 2.4.3 解说 agent 的 spec（RFC-009 风格）
 
 ```typescript
@@ -249,37 +296,69 @@ interface CommentatorSpec {
 
 ```typescript
 // 一个多厂商社会的节点构成。实验编排层据此循环调用底层的
-// 单 vendor batch primitive，每个 cohort 一批。
+// 单 vendor batch library API（v2: 见 3.2.1 Phase 0.5），每个 cohort 一批。
 interface MultiVendorBatchSpec {
   cohorts: VendorCohort[];
   workdir: string;                 // 父目录；每 cohort 一个子目录
   hub: string;
 }
 
+// v2 修正 (通信牛 review Blocker 2): apiKey 不内嵌字符串, 改 envVarName 引用
 interface VendorCohort {
   vendor: string;                  // VENDORS registry 的 key — 必须是已验证 vendor
   model?: string;                  // 该 vendor 的具体 model；省略 = vendor 默认
   count: number;                   // 这个厂商起几个节点
   aliasPrefix: string;             // e.g. "DS" → DS1号..DS5号
-  apiKey: string;                  // 该 vendor 的 key（走 env，不入 spec 持久化）
+  apiKeyEnvVar: string;            // ⚠️ v2: 该 vendor key 所在的环境变量名 (如 "DEEPSEEK_KEY"), 不是 key 字符串本身
 }
 ```
 
 例（5×DeepSeek + 5×MiniMax + 5×GLM）：
 
 ```typescript
+// v2: spec 只引用 env var name; 执行时实验编排层 process.env[name] 读取
 const society: MultiVendorBatchSpec = {
   workdir: "~/anet-society",
   hub: "http://127.0.0.1:9200",
   cohorts: [
-    { vendor: "deepseek", count: 5, aliasPrefix: "DS",  apiKey: process.env.DEEPSEEK_KEY! },
-    { vendor: "minimax",  count: 5, aliasPrefix: "MM",  apiKey: process.env.MINIMAX_KEY! },
-    { vendor: "glm",      count: 5, aliasPrefix: "GLM", apiKey: process.env.GLM_KEY! },
+    { vendor: "deepseek", count: 5, aliasPrefix: "DS",  apiKeyEnvVar: "DEEPSEEK_KEY" },
+    { vendor: "minimax",  count: 5, aliasPrefix: "MM",  apiKeyEnvVar: "MINIMAX_KEY" },
+    { vendor: "glm",      count: 5, aliasPrefix: "GLM", apiKeyEnvVar: "GLM_KEY" },
   ],
 };
 ```
 
-**实现策略**：`MultiVendorBatchSpec` 的执行 = 对每个 `VendorCohort` 调用一次已有的单 vendor batch primitive（`createBatch()`，#104-B 后基于 VENDORS registry）。不发明新的节点创建路径 —— 只是「循环调用 N 次单 vendor batch」。这让多厂商 batch 天然继承 batch 已有的 lifecycle（`anet batch start/stop/restart/cleanup`）。
+> ⚠️ **v2 修正（通信牛 review Blocker 2 — apiKey 落盘）**：v1 草稿写「apiKey 走 env，不入 spec 持久化」是错的 —— 实测确认 `createBatch()` (`bin/cli.ts:5377-5378`) 把 apiKey 直接写进 `envMap`，然后 `saveProfile()` 落到 node config.json 里。v2 改：`VendorCohort` 不再持有 key 字符串，只持 `apiKeyEnvVar`，执行时实验编排层从 `process.env` 读，**仍会被 createBatch 落盘到 config.json env 字段**（这是现有 batch primitive 的已知 hygiene 缺口，非 RFC-011 独有）。
+>
+> **配套 follow-up (RFC 范围外)**：现有 batch primitive 把 apiKey 写 config.json 是独立 secret hygiene 问题，应另开 issue 修：node config.json 的 secret 字段走 file mode 0600 + 或迁到独立 secrets store (per-node `.anet/nodes/<alias>/secrets.json` 或 OS keychain)。RFC-011 v2 不解决它，但明确 surface 它存在。
+
+#### 3.2.1 实施前置 — Phase 0.5: 把 batch primitive 抽成 library
+
+> ⚠️ **v2 修正（通信牛 review Blocker 3 — createBatch() CLI 耦合）**：v1 草稿写「循环调用已有 `createBatch()`」假定它是可 import 的库 API —— 实测确认（`bin/cli.ts:5338`）`createBatch()` 实际深耦合 CLI 进程：`process.chdir(nodeDir)` (L5374) / `process.exit(1)` (L5346) / `console.error/log` / `loadGlobal()`。实验编排层无法干净 import 它。
+
+v2 加 **Phase 0.5（实施 gate 的一部分，§6 phasing 已 reflect）**：
+
+```yaml
+Phase 0.5 — extract batch primitive to library (通信牛 推荐 Option A):
+  目标: 把 createBatch() 的「为每 node 创建 dir/profile/token」核心循环
+        抽到 agent-network/src/batch.ts 作为纯库函数, 去掉以下耦合:
+    - process.chdir(): 改用绝对路径参数, 不动 process cwd
+    - process.exit(): 改 throw / 返 Result<{created, failed}>
+    - console.error/log: 改可选 logger 参数 (调用方提供, 默认 silent)
+    - loadGlobal(): 改显式 config 参数 (调用方决定怎么拿 global)
+  CLI 命令侧 (createBatchWizardCommand): 调库 + 处理 process.exit/console
+  RFC-009 / RFC-011 实验编排层: 直接调库, 不 shell out
+
+依赖关系:
+  Phase 0.5 完成后 (= batch library) → RFC-011 §3.2 的 MultiVendorBatchSpec 才能干净实现
+  Phase 0.5 也是 RFC-009 实验 framework 实施前置 (RFC-009 也假定能编程式起 batch)
+```
+
+**为什么不选 Option B（shell out `anet create --batch`）**：shell out 的耦合更糟 —— 实验编排层每起一个 cohort fork 一个 node CLI 进程，stdout/stderr 解析脆弱，错误恢复语义不清；且失去类型安全 / IDE 支持 / debug。通信牛 推荐 Option A，v2 采纳。
+
+#### 3.2.2 实现策略 (post Phase 0.5)
+
+`MultiVendorBatchSpec` 的执行 = 对每个 `VendorCohort` 调用一次 batch library API（Phase 0.5 抽出的纯库 `agent-network/src/batch.ts`）。不发明新的节点创建路径 —— 只是「循环调用 N 次单 vendor batch library」。lifecycle（`anet batch start/stop/restart/cleanup`）继承自 CLI 命令侧的现有实现。
 
 > ⚠️ **vendor 必须已验证**：`VendorCohort.vendor` 只接受 VENDORS registry 里的 key。#104-B 把 deepseek/glm/kimi 移出了 registry —— 所以上面这个例子在 **DeepSeek/GLM 验证加回 registry 之前跑不了**。这正是 §1.2 依赖链里「前置 P1」的含义，也是本 RFC 实施 gate 的一部分。
 
@@ -303,16 +382,47 @@ interface CohortSpec {
 
 ### 3.4 vendor 身份如何流到呈现层
 
-`SocietyEvent.vendor`（§2.1）的值从哪来？链路：
+`SocietyEvent.vendor`（§2.1）的值从哪来？
+
+> ⚠️ **v2 修正（通信牛 review Blocker 4 — alias→vendor 跨 network 串号）**：v1 草稿用 `alias → vendor` 单键映射有两个真错：
+> 1. **alias 不是全局唯一** —— commhub schema 是 `UNIQUE(network_id, alias)`（实测 db.ts:25/357），同一 alias 可同时存在于多个 network。按 alias 单键映射会把 network A 的 `DS1` vendor 串到 network B 的同名 agent。
+> 2. **靠 model/baseUrl/env 反推 vendor 脆** —— 节点 config.json 现无 `vendorKey` 字段（`Profile` 接口实测确认），只有 `runtime` + `model` + env。反推规则随 VENDORS registry 演化会失效。
+
+#### 3.4.1 v2 设计：复合键 + 显式持久化
+
+**(a) 复合键**：`(network_id, alias) → { vendorKey, model }`，不再用 `alias` 单键。
+
+**(b) 显式持久化**：batch 创建节点时把 `vendorKey` 显式写进 node config.json，不靠反推。需要 `Profile` 接口增加可选字段：
+
+```typescript
+// agent-network/bin/cli.ts Profile interface 扩展 (v2 新增字段, 增量, 不破坏现有)
+interface Profile {
+  // ... 现有字段 ...
+  runtime: RuntimeName;
+  model?: string;
+  // v2 新增 (RFC-011):
+  vendorKey?: string;  // VENDORS registry 的 key (intern / minimax / mimo / anthropic / ...)
+                       // batch 创建时由 VendorCohort.vendor 直接 set; 单 node create 流可选
+}
+```
+
+**(c) 解析链路（v2）**：
 
 ```
-VendorCohort.vendor (创建时)
-  → 节点 config.json (model + ANTHROPIC_BASE_URL 已隐含 vendor)
-  → commhub 节点注册时带 agent 字段 (agent-node:claude 等) + #96 视觉身份
-  → SocietyEvent 归一化层用一个 alias→vendor 映射表回填 SocietyEvent.vendor
+VendorCohort.vendor (MultiVendorBatchSpec 创建时)
+  → batch library API (Phase 0.5 抽出) 把 vendorKey 显式写进 Profile.vendorKey
+  → saveProfile() 落 .anet/nodes/<alias>/config.json (vendorKey 字段)
+  → commhub 节点注册时, agent-node 把 vendorKey 上报到 sessions/nodes 表的某字段
+    (v2 follow-up: server 增 sessions.vendor 列 - ALTER TABLE 兼容旧 row null)
+  → SocietyEventSource 派生事件时用 (network_id, alias) 查 sessions.vendor 回填
+    SocietyEvent.vendor (network-scoped, 不串号)
 ```
 
-需要一个轻量的 `alias → vendor` 映射（多厂商 batch 创建时即可生成并落盘，例如 `~/anet-society/society.json`）。呈现层的归一化器读这个映射给每个事件打 vendor 标签。`[N站马 输入]` 这个映射表的存放位置与 dashboard 读取方式待定。
+**(d) Server 表的微小 schema 改动**：`sessions` 表加 `vendor TEXT` 列（与现有 V2 migrations 一致 pattern，db.ts:59-67），现有节点 row 为 null（向后兼容；显示层 vendor 缺失 = 没标厂商）。这是 RFC-011 唯一对 server 写路径的依赖（且仅一列），不算破坏「呈现层只读派生」原则因为它来自节点自报，server 不在 SocietyEventSource 路径上做任何业务逻辑。
+
+#### 3.4.2 不再需要的产物
+
+v1 提的「`society.json` 外部映射文件 / `[N站马 输入]` 表的存放位置与 dashboard 读取」**v2 取消** —— 数据现在沿现有 config.json + sessions 表流动，dashboard 通过 SocietyEventSource 拉到 `SocietyEvent.vendor` 即可用，不再需要额外映射表。
 
 ### 3.5 §3 小结
 
@@ -440,9 +550,10 @@ interface HotspotDetectorConfig {
 | Phase | 内容 | 前置 | 交付 |
 |-------|------|------|------|
 | **Phase 0（gate，非本 RFC）** | #101/#102 真验证通过 + DeepSeek/GLM vendor 验证加回 VENDORS registry | — | agents 能真互动 + 目标厂商可用 |
-| **Phase 1 — 呈现层 MVP + 小社会** | `SocietyEvent` 归一化层 + 活动 ticker（§2.2）+ `MultiVendorBatchSpec`（§3.2）起一个 3×3 厂商小社会跑 RFC-009 实验 | Phase 0 | 能看到「一个跨厂商小社会在动」的最小直播画面 |
+| **Phase 0.5 — batch primitive 解耦** ⚠️ v2 新增 | 把 `createBatch()` 核心抽到 `agent-network/src/batch.ts` 纯库 (去 process.chdir/exit/console/loadGlobal 耦合, §3.2.1 Blocker 3); 加 `Profile.vendorKey` 字段 + `sessions.vendor` 列 (§3.4 Blocker 4 schema 微改) | Phase 0 | 库可被 RFC-009 / RFC-011 编程式调用; vendor 身份显式持久化 |
+| **Phase 1 — 呈现层 MVP + 小社会** | `SocietyEventSource` (§2.1.1) + 活动 ticker (§2.2) + `MultiVendorBatchSpec` (§3.2) 起 3×3 厂商小社会跑 RFC-009 实验 | Phase 0.5 | 能看到「一个跨厂商小社会在动」的最小直播画面 |
 | **Phase 2 — 自动导演** | `HotspotDetector`（§4）+ 自动聚焦（§2.3） | Phase 1 | 镜头会自动怼热点，不用人点 |
-| **Phase 3 — 解说 + 指标** | 解说 agent（§2.4，含 digest 节拍器）+ 指标面板（§2.5，按 vendor 分组） | Phase 2 | 「涌现 AI 社会真人秀」成形 —— 最像「能出的东西」 |
+| **Phase 3 — 解说 + 指标** | 解说 agent（§2.4，含 digest 节拍器 + `SocietyEventSource.subscribe` 订阅，§2.4.2 v2 闭环）+ 指标面板（§2.5，按 vendor 分组） | Phase 2 | 「涌现 AI 社会真人秀」成形 —— 最像「能出的东西」 |
 | **Phase 4 — 24/7 infra** | #99 守护节点自愈接入（§5.1）+ 长跑资源加固（§5.2）+ livestream 模式 layout（§5.3）+ OBS 推流 | Phase 3 | 真正 24/7 跑得住、推得出去 |
 
 ### 6.1 phasing 设计理由
@@ -455,7 +566,7 @@ interface HotspotDetectorConfig {
 
 ### 6.2 §6 小结
 
-5 个 phase：Phase 0 是 gate（非本 RFC）；Phase 1 ticker + 3×3 小社会；Phase 2 自动导演；Phase 3 解说 + 指标（成形）；Phase 4 24/7 infra。每 phase 可独立 demo。phasing 顺序由数据流依赖决定（`SocietyEvent` → 热点检测 → 解说）。
+6 个 phase（v2: 加 Phase 0.5）：Phase 0 是 gate（非本 RFC）；**Phase 0.5 batch primitive 解耦 + vendor schema 微改 (v2 新增)**；Phase 1 ticker + 3×3 小社会；Phase 2 自动导演；Phase 3 解说 + 指标（成形）；Phase 4 24/7 infra。每 phase 可独立 demo。phasing 顺序由数据流依赖决定（`SocietyEvent` → 热点检测 → 解说）。
 
 ---
 
@@ -480,3 +591,16 @@ interface HotspotDetectorConfig {
 - [x] 附录 A 边界声明
 
 **Draft v1 完整就绪 — 待 review**（通信龙 high-level · N站马 呈现层 `[N站马 输入]` 处 · Vincent final）
+
+---
+
+### v2 amend pass — 已 address 通信牛 v1 review
+
+通信牛 v1 review verdict: 🟡 request changes before approve（4 blocker + 2 concern）。v2 amend 已逐项 address，**待 通信牛 second pass review**：
+
+- [x] **Blocker 1** §2.1 SSE 模型实测纠正 — v1「复用 commhub SSE」错（实测 `/events/:session` 是 alias-scoped 单播）→ v2 引入独立 `SocietyEventSource` 派生层 + ACL/截断规则（concern §2.1/§2.2 一并 close）
+- [x] **Blocker 2** §3.2 apiKey 落盘 — v1「走 env 不入 spec」错（实测 `createBatch()` 写 envMap → saveProfile config.json）→ v2 `VendorCohort` 改 `apiKeyEnvVar` 引用；surface 现有 batch primitive 的 secret hygiene 缺口作 RFC 范围外 follow-up
+- [x] **Blocker 3** §3.2 `createBatch()` 不是库 API — 实测确认深耦合 process.chdir/exit/console/loadGlobal → v2 加 Phase 0.5 实施前置「抽 batch primitive 到 `agent-network/src/batch.ts` 纯库」（通信牛 推荐 Option A）
+- [x] **Blocker 4** §3.4 `alias→vendor` 跨 network 串号 — 实测 schema `UNIQUE(network_id, alias)` 确认 → v2 改复合键 `(network_id, alias) → vendorKey`；`Profile.vendorKey` 字段 + `sessions.vendor` 列显式持久化，不靠反推
+- [x] **Concern §2.4** 解说 agent 输入机制闭环 — v2 用 §2.1.1 `SocietyEventSource.subscribe`，digest 拼装器在节点外, 解说 agent 仍是普通 claude-agent-sdk 节点
+- [x] §6 phasing 加 Phase 0.5 — batch primitive 解耦 + vendor schema 微改是 §3.2/§3.4 实施前置
