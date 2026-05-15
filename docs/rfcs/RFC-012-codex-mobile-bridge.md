@@ -120,6 +120,11 @@ anet  https://commhub.example.com/mcp    COMMHUB_TOKEN         enabled  Bearer t
 **只有一个 setup 步骤**: 在每台跑 `agent-node:codex` runtime 的机器上 (用户预期会从 codex Mobile 连接的) 一次性执行:
 
 ```bash
+# 0. 前置：codex 已登录 OpenAI 账号
+# (Round 4 smoke 实测确认: codex app-server 不登录不响应协议, 连接立即关闭)
+codex login                               # 走 OpenAI OAuth, 一次性
+codex login status                        # 应显示 "Logged in"
+
 # 1. 拿到该用户的 commhub utok_
 export COMMHUB_TOKEN="utok_xxxxx"
 
@@ -131,6 +136,8 @@ codex remote-control --enable remote_control
 ```
 
 → codex Mobile 用户对这台机器开 connection 后，能在手机 UI 看到 anet 17 个 tools 并直接调用。
+
+**Step 0 (codex login) 的含义**: codex Mobile 用户的运行模型本来就要求 OpenAI 账号 (Mobile App 是 OpenAI 产品), 因此对 anet 的 agent-node:codex runtime 不增加额外用户负担。但对 anet 部署文档需要明确：「用 codex Mobile 桥接 anet 需要绑定 OpenAI 账号」, 跟 codex Mobile 主体功能一致。
 
 ### 3.2 agent-node 集成 (零强制改动, 推荐 add-on)
 
@@ -146,6 +153,13 @@ agent-node:codex runtime 启动时自动做 3.1 步骤 1+2:
 1. **Tool listing test**: codex CLI 跑起 + 注册 anet → `codex app-server` instance → 通过 stdio 或 `--listen unix://...` 给 client 发 `mcpServerStatus/list` → 期待 anet 在列且 `Connected`，tools array 含 17 个
 2. **Tool call test**: 通过 `mcpServer/tool/call({server:"anet", tool:"get_all_status", arguments:{}})` → 期待返回 commhub 当前 sessions JSON
 3. **Mobile end-to-end (需 OpenAI side support)**: codex Mobile App 配置连到本机 codex CLI (config.toml 已注册 anet) → 在 mobile UI 显示 anet tools → 用户点 commhub_send_task → 验证 anet agent 收到任务并执行
+
+**Round 4 smoke 已 partial 验证 (2026-05-15)**:
+- ✅ `codex mcp add anet --url ... --bearer-token-env-var ...` 写 `~/.codex/config.toml` `[mcp_servers.anet]` section 正确
+- ✅ `codex mcp list` 显示 anet status=enabled auth=Bearer
+- ✅ `codex app-server --listen unix:///tmp/codex-as.sock` 成功创建 unix socket
+- ⚠️ Protocol 层 `initialize` 请求被 codex app-server 立刻断连 — 因 `codex login status` = "Not logged in"，**codex app-server 不登录不响应协议**
+- ⏳ 完整 `mcpServerStatus/list` 验证需在登录态的开发机重做 (此机不在 codex login 环境内, 出于隔离原则未真登录)
 
 ---
 
