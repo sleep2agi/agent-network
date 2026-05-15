@@ -119,8 +119,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       model: z.string().max(200).optional().describe("AI model name"),
       node_name: z.string().max(200).optional().describe("Stable node display name (may differ from alias)"),
       network_id: z.string().max(200).optional().describe("Network this agent belongs to"),
+      host: z.object({
+        hostname: z.string().max(200).optional(),
+        ip: z.string().max(200).optional(),
+        cpu_load_1min: z.number().nullable().optional(),
+        cpu_cores: z.number().nullable().optional(),
+        mem_total_gb: z.number().nullable().optional(),
+        mem_used_gb: z.number().nullable().optional(),
+        mem_avail_gb: z.number().nullable().optional(),
+      }).optional().describe("Host telemetry reported by agent-node"),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -131,13 +140,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}${effectiveNetId ? " [net]" : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
+      const hostHostname = host?.hostname || hn || null;
+      const hostIp = host?.ip || clientIP || null;
+      const cpuLoad1m = typeof host?.cpu_load_1min === "number" ? host.cpu_load_1min : null;
+      const cpuCores = typeof host?.cpu_cores === "number" ? host.cpu_cores : null;
+      const memTotalGb = typeof host?.mem_total_gb === "number" ? host.mem_total_gb : null;
+      const memUsedGb = typeof host?.mem_used_gb === "number" ? host.mem_used_gb : null;
+      const memAvailGb = typeof host?.mem_avail_gb === "number" ? host.mem_avail_gb : null;
 
       db.transaction(() => {
         // Only delete same-alias sessions within the same network
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [alias, resume_id, sessionNetId]);
         db.run(
-          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, last_seen_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, datetime('now'), datetime('now'))
+          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, last_seen_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, datetime('now'), datetime('now'))
            ON CONFLICT(resume_id) DO UPDATE SET
              alias = COALESCE(?2, sessions.alias), tmux_name = COALESCE(?3, sessions.tmux_name),
              server = COALESCE(?4, sessions.server), ip = COALESCE(?5, sessions.ip),
@@ -149,8 +165,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              session_id = COALESCE(?16, sessions.session_id), config_path = COALESCE(?17, sessions.config_path),
              channels = COALESCE(?18, sessions.channels), network_id = COALESCE(?19, sessions.network_id),
              model = COALESCE(?20, sessions.model),
+             cpu_load_1min = COALESCE(?21, sessions.cpu_load_1min),
+             cpu_cores = COALESCE(?22, sessions.cpu_cores),
+             mem_total_gb = COALESCE(?23, sessions.mem_total_gb),
+             mem_used_gb = COALESCE(?24, sessions.mem_used_gb),
+             mem_avail_gb = COALESCE(?25, sessions.mem_avail_gb),
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, alias, tmux ?? null, srv ?? null, clientIP ?? null, hn ?? null, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null]
+          [resume_id, alias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb]
         );
       });
 

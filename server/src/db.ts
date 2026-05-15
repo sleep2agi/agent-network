@@ -19,6 +19,11 @@ db.exec(`
     output        TEXT,
     progress      INTEGER DEFAULT 0,
     score         REAL,
+    cpu_load_1min REAL,
+    cpu_cores     INTEGER,
+    mem_total_gb  REAL,
+    mem_used_gb   REAL,
+    mem_avail_gb  REAL,
     network_id    TEXT NOT NULL DEFAULT 'default',
     registered_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -55,7 +60,7 @@ db.exec(`
 
 // ── V2 schema migration (ALTER TABLE, safe to re-run) ──
 
-// sessions: add node_id, session_id, config_path, channels, last_seen_at, model
+// sessions: add node_id, session_id, config_path, channels, last_seen_at, model, host telemetry
 for (const col of [
   { name: "node_id", def: "TEXT" },
   { name: "session_id", def: "TEXT" },
@@ -63,6 +68,11 @@ for (const col of [
   { name: "channels", def: "TEXT" },
   { name: "last_seen_at", def: "TEXT" },
   { name: "model", def: "TEXT" },
+  { name: "cpu_load_1min", def: "REAL" },
+  { name: "cpu_cores", def: "INTEGER" },
+  { name: "mem_total_gb", def: "REAL" },
+  { name: "mem_used_gb", def: "REAL" },
+  { name: "mem_avail_gb", def: "REAL" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
@@ -376,6 +386,12 @@ function migrateSessionsNetworkAliasUnique() {
         config_path   TEXT,
         channels      TEXT,
         last_seen_at  TEXT,
+        model         TEXT,
+        cpu_load_1min REAL,
+        cpu_cores     INTEGER,
+        mem_total_gb  REAL,
+        mem_used_gb   REAL,
+        mem_avail_gb  REAL,
         network_id    TEXT NOT NULL DEFAULT 'default',
         UNIQUE (network_id, alias)
       )
@@ -384,12 +400,14 @@ function migrateSessionsNetworkAliasUnique() {
       INSERT OR REPLACE INTO sessions_migrated (
         resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version,
         status, task, output, progress, score, registered_at, updated_at, node_id,
-        session_id, config_path, channels, last_seen_at, network_id
+        session_id, config_path, channels, last_seen_at, model, cpu_load_1min,
+        cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, network_id
       )
       SELECT
         resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version,
         status, task, output, progress, score, registered_at, updated_at, node_id,
-        session_id, config_path, channels, last_seen_at,
+        session_id, config_path, channels, last_seen_at, model, cpu_load_1min,
+        cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb,
         COALESCE(NULLIF(network_id, ''), 'default')
       FROM sessions
       ORDER BY updated_at

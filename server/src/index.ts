@@ -841,6 +841,59 @@ Bun.serve({
       return withCors(req, Response.json({ ok: true, sessions, summary }));
     }
 
+    // ── REST: aggregate agents by physical server ──
+    if (url.pathname === "/api/servers") {
+      const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
+      const staleParams: any[] = [cutoff];
+      let staleSql = "UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'";
+      staleSql = addNetworkScope(staleSql, staleParams, restScope);
+      db.run(staleSql, staleParams);
+
+      const params: any[] = [];
+      let sql = `
+        SELECT hostname, ip, cpu_load_1min, cpu_cores, mem_avail_gb, mem_used_gb,
+               COALESCE(last_seen_at, updated_at) AS last_seen
+        FROM sessions
+        WHERE 1=1
+      `;
+      sql = addNetworkScope(sql, params, restScope);
+      sql += " ORDER BY COALESCE(last_seen_at, updated_at) DESC";
+
+      const grouped = new Map<string, {
+        hostname: string;
+        ip: string;
+        agent_count: number;
+        cpu_load_1min: number | null;
+        cpu_cores: number | null;
+        mem_avail_gb: number | null;
+        mem_used_gb: number | null;
+        last_seen: string | null;
+      }>();
+
+      for (const row of db.all<any>(sql, ...params)) {
+        const hostname = row.hostname || "unknown";
+        const ip = row.ip || "unknown";
+        const key = `${hostname}\u0000${ip}`;
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.agent_count += 1;
+          continue;
+        }
+        grouped.set(key, {
+          hostname,
+          ip,
+          agent_count: 1,
+          cpu_load_1min: row.cpu_load_1min ?? null,
+          cpu_cores: row.cpu_cores ?? null,
+          mem_avail_gb: row.mem_avail_gb ?? null,
+          mem_used_gb: row.mem_used_gb ?? null,
+          last_seen: row.last_seen ?? null,
+        });
+      }
+
+      return withCors(req, Response.json(Array.from(grouped.values())));
+    }
+
     // ── REST: send task ──
     if (url.pathname === "/api/task" && req.method === "POST") {
       let raw: unknown;
