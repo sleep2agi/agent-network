@@ -7119,8 +7119,8 @@ switch (command) {
     else await initGlobal();
     break;
   case "create": await createCommand(); break;
-  case "server": serverCommand(); break;
-  case "hub": serverCommand(); break; // anet hub start/dashboard/config
+  case "server": await serverCommand(); break;
+  case "hub": await serverCommand(); break; // anet hub start/dashboard/config
   case "node": // anet node create/start/stop/resume/delete/ls/rename
     switch (args[1]) {
       case "create": args.splice(0, 1); await createCommand(); break;
@@ -7129,7 +7129,7 @@ switch (command) {
       case "resume": args.splice(0, 1); await resumeCommand(); break;
       case "delete": args.splice(0, 1); await deleteCommand(); break;
       case "rename": args.splice(0, 1); await renameCommand(); break;
-      case "ls": case "list": lsCommand(); break;
+      case "ls": case "list": await lsCommand(); break;
       case "migrate-token-to-envref": args.splice(0, 1); await migrateTokenToEnvRefCommand(); break;
       default: console.log(`Usage: anet node <create|start|stop|resume|delete|ls|rename|migrate-token-to-envref> [name]`); break;
     }
@@ -7140,12 +7140,12 @@ switch (command) {
   case "rename": await renameCommand(); break; // backward compat
   case "stop": await stopCommand(); break; // backward compat
   case "delete": await deleteCommand(); break; // backward compat
-  case "import": importCommand(); break;
+  case "import": await importCommand(); break;
   case "channel": await channelCommand(); break;
   case "setup": await setupCommand(); break;
   case "upgrade": await upgradeCommand(); break;
   case "session": sessionCommand(); break;
-  case "ls": case "list": lsCommand(); break;
+  case "ls": case "list": await lsCommand(); break;
   case "status": await statusCommand(); break;
   case "tasks": await tasksCommand(); break;
   case "doctor": await doctorCommand(); break;
@@ -7176,7 +7176,7 @@ switch (command) {
   case "logout": logoutCommand(); break;
   case "whoami": await whoamiCommand(); break;
   case "network": await networkCommand(); break;
-  case "run": runCommand(); break;
+  case "run": await runCommand(); break;
   case "-v": case "--version": case "version": {
     printVersionReport();
     break;
