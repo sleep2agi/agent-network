@@ -135,6 +135,15 @@ CommHub Server 是整个系统的核心，负责消息路由、状态管理、�
 | **SSE** | `GET /events/:alias` | 实时推送任务/消息给 Agent | Bearer Token |
 | **REST** | `GET/POST /api/*` | Dashboard / CLI / 外部集成 | Bearer Token |
 
+::: tip v0.10.0 新增 — 守护节点 observability endpoint family（[#99](https://github.com/sleep2agi/agent-network/issues/99) Phase 1 scaffold，commhub-server `0.8.2`）
+REST 层新增**单机 health + agent 列表**两个 endpoint，给 dashboard ServersDrawer + 监控脚本 / 外部 observability 集成用：
+
+- `GET /api/server/:host/health` — 单 host 当前健康快照（CPU / mem / disk + 24h 分桶 history `5m`/`1h`/`24h`）+ `alert_level`
+- `GET /api/server/:host/agents` — 单 host 上 agent 列表 + per-agent `process_telemetry`（`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`，[#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 ship in `agent-node@2.4.0` + T2.2 server schema align in `commhub-server@0.8.2`）
+
+控制层（kill / restart / redeploy）defer 到 v0.11.0。详见 [REST API — server endpoint family](/api/rest#get-api-server-host-health)。
+:::
+
 ### MCP 工具分组
 
 CommHub 提供 17 个 MCP Tools，分为两组：
@@ -311,7 +320,11 @@ graph LR
 |---------|---------|---------|------|
 | `claude-code-cli` | spawn 本机 `claude` 进程 | 复用 Claude 订阅 / 终端交互式工具调用 | Claude Sonnet/Opus（订阅） |
 | `claude-agent-sdk` | Anthropic Claude Agent SDK | 编程式调任何 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（详见 [多模型配置](/guide/multi-model)） |
-| `codex-sdk` | OpenAI Codex SDK | 代码生成、工具调用 | OpenAI Codex |
+| `codex-sdk` | OpenAI Codex SDK（v0.10.0 起可 opt-in 直 stdio 路径，见下） | 代码生成、工具调用 | OpenAI Codex |
+
+::: tip v0.10.0 新增 — `codex-direct-stdio` opt-in 路径（[#141](https://github.com/sleep2agi/agent-network/issues/141)）
+设 `ANET_CODEX_STDIO_DIRECT=1`，agent-node 把 codex runtime 从 `@openai/codex-sdk` wrapper 切到 **`spawn('codex', ['app-server'])` + ~155 LOC 直 stdio JSON-RPC 客户端**，拿到完整 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** wrapper `--mcp-config` HTTP transport bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family）。**v0.10.0 默认仍走 wrapper**；v0.11.0 计划 default flip + toggle 改成 `ANET_CODEX_LEGACY_SDK=1` opt-out 反向开关。LLM 侧看到的工具集**不变**（codex thread 仍只用 baked-in 工具，commhub roundtrip 仍由 agent-node 父进程承担），变的只是 agent-node ↔ codex 进程间的**传输协议**。详见 [runtimes — codex-sdk § codex-direct-stdio](/guide/runtimes#codex-sdk) + [agent-node — 环境变量 § ANET_CODEX_STDIO_DIRECT](/guide/agent-node#环境变量) + [release notes](/preview/v0.10.0#新-runtime-路径-codex-direct-stdio)。
+:::
 
 ### MCP 接入路径（不同 runtime 不同走法，v0.9.0+）
 

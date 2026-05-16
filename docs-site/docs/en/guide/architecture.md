@@ -135,6 +135,15 @@ CommHub Server is the core of the entire system, responsible for message routing
 | **SSE** | `GET /events/:alias` | Real-time push of tasks/messages to agents | Bearer Token |
 | **REST** | `GET/POST /api/*` | Dashboard / CLI / external integrations | Bearer Token |
 
+::: tip v0.10.0 new — per-server daemon observability endpoint family ([#99](https://github.com/sleep2agi/agent-network/issues/99) Phase 1 scaffold, `commhub-server@0.8.2`)
+Two new REST endpoints expose **single-host health + per-agent list**, used by the dashboard ServersDrawer and any monitoring / external observability integration:
+
+- `GET /api/server/:host/health` — current health snapshot for a single host (CPU / mem / disk + 24h bucketed history `5m` / `1h` / `24h`) plus `alert_level`
+- `GET /api/server/:host/agents` — agents on a single host + per-agent `process_telemetry` (`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 shipped in `agent-node@2.4.0` + T2.2 server schema aligned in `commhub-server@0.8.2`)
+
+The control layer (kill / restart / redeploy) is deferred to v0.11.0. Details: [REST API — server endpoint family](/en/api/rest#get-api-server-host-health).
+:::
+
 ### MCP Tool Groups
 
 CommHub provides 17 MCP Tools in two groups:
@@ -311,7 +320,11 @@ graph LR
 |---------|---------|---------|------|
 | `claude-code-cli` | spawn local `claude` process | Reuse Claude subscription / interactive tool use | Claude Sonnet/Opus (subscription) |
 | `claude-agent-sdk` | Anthropic Claude Agent SDK | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (see [Multi-model](/en/guide/multi-model)) |
-| `codex-sdk` | OpenAI Codex SDK | Code generation, tool use | OpenAI Codex |
+| `codex-sdk` | OpenAI Codex SDK (v0.10.0+ can opt-in to a direct stdio path — see below) | Code generation, tool use | OpenAI Codex |
+
+::: tip v0.10.0 new — `codex-direct-stdio` opt-in path ([#141](https://github.com/sleep2agi/agent-network/issues/141))
+Set `ANET_CODEX_STDIO_DIRECT=1` to make agent-node switch the codex runtime from the `@openai/codex-sdk` wrapper to **`spawn('codex', ['app-server'])` + a ~155 LOC direct stdio JSON-RPC client**, getting the full 67-method v2 protocol surface (thread / turn / item / realtime) and **bypassing** the wrapper's `--mcp-config` HTTP-transport bug family ([#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause). **v0.10.0 still defaults to the wrapper**; v0.11.0 plans to flip the default and rename the toggle to `ANET_CODEX_LEGACY_SDK=1` opt-out. The LLM-side tool surface is **unchanged** (the codex thread still uses only its baked-in tools; the commhub roundtrip is still handled by the agent-node parent process) — what changes is purely the **transport protocol** between agent-node and the codex process. Details: [runtimes — codex-sdk § codex-direct-stdio](/en/guide/runtimes#codex-sdk) + [agent-node — env vars § ANET_CODEX_STDIO_DIRECT](/en/guide/agent-node#environment-variables) + [release notes](/en/preview/v0.10.0#new-runtime-path-codex-direct-stdio).
+:::
 
 ### MCP integration paths (per runtime, v0.9.0+)
 
