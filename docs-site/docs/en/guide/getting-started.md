@@ -150,7 +150,7 @@ anet project down
 
 **Two coupled features** make 22-node reboot recovery **zero-keystroke**:
 
-- `anet node start` auto-wraps the node in a detached tmux session ([#122](https://github.com/sleep2agi/agent-network/issues/122)) — no hand-rolled `tmux new-session` needed
+- `anet project up` internally spawns each node in a detached tmux session via `startNodeTmuxSession()` ([#117](https://github.com/sleep2agi/agent-network/issues/117)) — when you run `anet node start <alias>` **directly**, v0.9.2 defaults to **foreground** ([#136](https://github.com/sleep2agi/agent-network/issues/136) reverted the brief v0.9.0 #122 default-detached behavior because macOS bun triggered `setRawMode errno 5`). For tmux, use `anet node start <alias> --tmux` (attached mode)
 - Startup auto-injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` ([#115](https://github.com/sleep2agi/agent-network/issues/115)) to skip Claude Code's default "Resume from summary / full" prompt — no per-node keystroke
 
 Common options:

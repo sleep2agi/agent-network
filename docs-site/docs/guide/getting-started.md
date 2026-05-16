@@ -154,7 +154,7 @@ anet project down
 
 **联动两件事**让 22 节点 reboot 是**零键盘恢复**：
 
-- `anet node start` 默认把节点 wrap 进 detached tmux session（[#122](https://github.com/sleep2agi/agent-network/issues/122)）—— `anet project up` 不用手动 `tmux new-session`
+- `anet project up` 内部按 `startNodeTmuxSession()` 起每个节点的 detached tmux session（[#117](https://github.com/sleep2agi/agent-network/issues/117)）—— 你直接 `anet node start <alias>` 时**v0.9.2 起默认前台**（[#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 v0.9.0 短暂的 #122 默认 detached 行为，因为 macOS bun 触发 `setRawMode errno 5`）；想 tmux 用 `anet node start <alias> --tmux` 走 attached 模式
 - 启动时自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999`（[#115](https://github.com/sleep2agi/agent-network/issues/115)）跳过 Claude Code 默认的 "Resume from summary / full" 交互弹窗 —— 不用一个个按键确认
 
 常用选项：
