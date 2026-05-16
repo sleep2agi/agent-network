@@ -437,12 +437,12 @@ anet upgrade [--channel preview|latest] [--self] [--dry-run]
 **Plan output (one line per package)**:
 
 ```
-  anet (self)         2.1.13-preview.2     →  2.1.13-preview.4     → upgrade
+  anet (self)         2.1.15               →  2.2.0                → upgrade
                       (self-upgrade off by default — use --self for detached spawn, or follow manual instructions below)
-  agent-node          2.3.5-preview.0      →  2.3.6-preview.0      → upgrade
-  commhub-server      not installed        →  0.8.1-preview.3      (lazy via npx, skipped)
+  agent-node          2.3.10               →  2.4.0                → upgrade
+  commhub-server      not installed        →  0.8.2                (lazy via npx, skipped)
                       (not installed globally — lazy-fetched via npx by `anet hub start`)
-  dashboard           0.4.6-preview.12     →  0.4.6-preview.12     ✓ up to date
+  dashboard           0.5.0                →  0.5.0                ✓ up to date
 ```
 
 | Badge | Meaning |
