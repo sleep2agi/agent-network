@@ -123,6 +123,161 @@ ZH 翻译要点：
 - 保留代码名、commit SHA、issue 链接英文
 - 术语对照：preview iterations → preview 迭代 / ripple effect → 副作用族 / TTY foreground group → TTY 前台进程组
 
+### 2.4.1 发版规范 (Release Notes Format Spec)
+
+> v0.9.0 / v0.9.1 是 canonical 范本，v0.9.2 first ship 因不符合此规范被 Vincent catch（5263+5265），refactor 后才合格。
+
+**强制 section 顺序** (release body markdown 结构):
+
+```markdown
+## v0.X.Y — <theme phrase, 必跟 release name 一致>
+
+<1-line 摘要，描述本 release 的整体定位 / theme>
+
+### 🎯 Theme: <短主题>
+
+<2-3 行展开 theme>
+
+### Fixes / New features
+
+- **[#<issue> P0]** <fix headline> (`<commit-sha>`)
+  - 1-2 行 root cause 简述（详细 root cause 移到 commit message 或 issue 评论 link）
+  - **Why prior preview didn't catch this**：1 行说明
+  - 链接到 detailed analysis: [→ #132 评论](...)
+
+### Dashboard polish (#116 R<start>-R<end>)
+
+<列重要 visible 改动 1 行 each，不超 10 项>
+
+- R275-R281: 7 轮 SMIL/chip-row/panel 减法 (75% canvas motion reduction)
+- R287: sleep2agi crescent logo integrated in title block
+- ...
+
+### Docs
+
+<docs sweep 1-2 行 summary，复杂改动 link issue>
+
+### Breaking changes / Migration
+
+<⚠ 用户必看的行为改变 / 迁移指引>
+
+### Released versions (npm `latest` tag)
+
+- `@sleep2agi/agent-network@<ver>`
+- `@sleep2agi/agent-node@<ver>`
+- `@sleep2agi/commhub-server@<ver>` (unchanged if no bump)
+- `@sleep2agi/agent-network-dashboard@<ver>` (unchanged if no bump)
+
+### Upgrade
+
+\`\`\`bash
+# Channel-aware multi-package upgrade
+anet upgrade
+
+# Or via the one-shot script
+curl -fsSL https://anet.sh/upgrade.sh | bash
+\`\`\`
+
+After upgrading, restart any running nodes:
+
+\`\`\`bash
+anet project restart   # cwd-wide, see #117
+\`\`\`
+
+### Known follow-ups
+
+<v0.X+1 排期 / queued issues>
+
+---
+
+## 中文版本 — v0.X.Y — <theme 翻译>
+
+<整体重译，跟 EN section 结构一一对应，**保留** commit SHA + issue 链接 + 代码名英文>
+```
+
+**Pre-publish 强制 checklist** (gh release edit 前必跑):
+
+| 项 | 校验方式 | v0.9.2 lesson |
+|----|---------|---------------|
+| 1. Title 一致 | release name == body H2 | first ship "Fan-out resilience + runtime UX hotfix" vs name "concurrency + UX hotfix" 不一致 |
+| 2. Clean version | body 不出现 `-preview.N` 作版本号 (历史叙事允许) | first ship 含 `2.1.15-preview.7` (Vincent 5234 catch) |
+| 3. "Released versions" block 存在 | grep `npm \`latest\` tag` | first ship 缺 |
+| 4. "Upgrade" section 存在 | grep `anet upgrade` + `anet project restart` | first ship 缺 |
+| 5. Dashboard polish 列入 | 当 release 含 dashboard 改动时 | v0.9.0 列 R47-R59, v0.9.2 first ship 漏列 R275-R281 |
+| 6. ZH section 存在 | grep `## 中文版本` | per Vincent 5232 双语强制 |
+| 7. ZH 段 section 跟 EN 对齐 | section count + heading match | translation 不能只覆盖 fixes 漏掉 upgrade / packages |
+| 8. Issue cross-link | 每个 fix #issue + commit SHA | already standard |
+| 9. EN body H2 title 跟 ZH H2 title 一致 | `v0.X.Y — <theme>` + `v0.X.Y — <中文 theme>` | 对应 翻译 |
+| 10. Final preview render | `gh release view v0.X.Y --json body --jq .body \| head -30` lookable | manual eyeball 5min |
+
+**反模式** (v0.9.2 first ship 教训):
+
+- ❌ 把所有 root cause 技术细节塞 release body — user 不需要看 50 行 fa08eb4 wrap process-lifecycle race
+  - ✅ 1 行 summary + link 到 #132 评论 / commit message
+- ❌ Body H2 title 跟 release name 不一致 — user 看 GitHub release card title 是 release name, 进去看是 body H2, 两个不一样很奇怪
+  - ✅ `gh release create --title "<X>"` 跟 body 第一行 `## <X>` 必须文字完全一致
+- ❌ 漏 Upgrade section — user 看完不知道怎么升级
+  - ✅ 任何 release 必含 `anet upgrade` + curl 一行 + `anet project restart`
+
+**Canonical 范本**:
+- [v0.9.0 release](https://github.com/sleep2agi/agent-network/releases/tag/v0.9.0) — major (Recovery & Observability)
+- [v0.9.1 release](https://github.com/sleep2agi/agent-network/releases/tag/v0.9.1) — hotfix (intern-s2-preview tool-calling)
+- [v0.9.2 release](https://github.com/sleep2agi/agent-network/releases/tag/v0.9.2) — refactored hotfix (concurrency + UX)
+
+### 2.4.2 发版 SOP (Release Ops Workflow)
+
+> 完整 release 走 7 步, 任何一步 fail 都不能 ship。
+
+```
+Step 1: pre-release readiness
+  ├─ 5-gate verify (npm dist-tags / git log / issue评论 / pane / commhub status)
+  ├─ Docker + pexpect real-TTY smoke 全 PASS (§3.2 + §3.3 chain-test)
+  └─ 测试马 explicit PASS verdict posted to release tracking issue
+
+Step 2: Vincent A signal
+  ├─ telegram surface 状态给 Vincent
+  ├─ Vincent explicit "GO" or 等他 silent ≥ 30min default-dispatch
+  └─ Sessions / Twitter screenshot 等 micro 决策跟 promote chain 解耦
+
+Step 3: Phase 1 — npm 2-phase publish (§2.2 Method B)
+  ├─ version bump: -preview.N → clean version (§2.1 强制 drop suffix)
+  ├─ npm publish --tag preview (tarball 200 verify)
+  └─ npm dist-tag add latest
+
+Step 4: Phase 2 — GitHub release
+  ├─ /tmp/v0.X.Y-notes.md 跟 §2.4.1 规范 format (10 checklist 全过)
+  ├─ EN body + 中文版本 双语
+  ├─ gh release create (--draft 否, --prerelease 否, stable published)
+  └─ 关 release tracking issue + post addendum
+
+Step 5: docs swap (§2.5)
+  ├─ PINNED_*_VERSION 全更新
+  ├─ CHANGELOG.md v0.X.Y entry
+  ├─ README v0.X-1 → v0.X banner
+  ├─ anet.sh version switcher entry
+  └─ ZH+EN parity
+
+Step 6: Vercel deploy (§2.6)
+  ├─ npm run build (本地 prebuilt)
+  └─ vercel deploy --prebuilt --prod
+
+Step 7: post-promote
+  ├─ 测试马 latest install smoke verify (real-world `npm i -g`)
+  ├─ Vincent macOS retest verify (实战 ground-truth probe via commhub register)
+  └─ 通信龙 single telegram surface "all done" (per [[feedback_proactive_eta_alert]])
+```
+
+**单次 release ETA 累积数据** (per [[feedback_npm_publish_two_phase]] + [[project_release_ops_owner]]):
+
+| Release | Step 3-4 ETA forecast | 实际 | 备注 |
+|---------|---------------------|------|------|
+| v0.9.0 | 10min | ~15min | 含 2.3.6 tarball 404 ship-stopper |
+| v0.9.1 | 6min | ~6min | clean |
+| v0.9.2 first | 8min | 5min | Method B muscle memory |
+| v0.9.2 clean re-publish | 10-15min | 6min | drop -preview.N suffix |
+
+**Method B SOP** 跨 3 release ops 成熟。工程马 release ops master per [[project_release_ops_owner]]。
+
 ### 2.5 docs Preview→Stable swap
 
 per [[feedback_pinned_version_sop]]：
