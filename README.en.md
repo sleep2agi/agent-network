@@ -204,7 +204,7 @@ Stable, Apache-2.0, published to npm.
 
 | Package | Version | Role |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.1` | `anet` CLI — hub / dashboard / agent / demo launcher (v0.10.1 hotfix: `PINNED_SERVER_VERSION` bumped 0.8.0 → 0.8.2, [see changelog](https://anet.sh/en/changelog#v0-10-1-hotfix-pinned-server-version-chain-bump-after-the-v0-10-0-ship-2026-05-17-stable)) |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.1` | `anet` CLI — hub / dashboard / agent / demo launcher (v0.10.1 hotfix: `PINNED_SERVER_VERSION` bumped 0.8.0 → 0.8.2, [see changelog](https://anet.sh/en/changelog#v0-10-1-—-hotfix-pinned-server-version-chain-bump-after-the-v0-10-0-ship-2026-05-17-✅-stable)) |
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.2` | MCP + REST + SSE hub (SQLite) + `/api/server/:host/health` + `/api/server/:host/agents` |
 | [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.0` | Web UI — Next.js 16, 4 themes + Hero 3 network/node front-end 8/8 surfaces (prefix-group fix / sweep retire / recent-panel hide / grid default / hover detail card / server-health ring tint / fullscreen / canvas brand mark) + 19+ rounds of typography & corner-radius cascade polish |
 | [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.0` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry |

@@ -141,7 +141,7 @@ Two new REST endpoints expose **single-host health + per-agent list**, used by t
 - `GET /api/server/:host/health` — current health snapshot for a single host (CPU / mem / disk + 24h bucketed history `5m` / `1h` / `24h`) plus `alert_level`
 - `GET /api/server/:host/agents` — agents on a single host + per-agent `process_telemetry` (`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 shipped in `agent-node@2.4.0` + T2.2 server schema aligned in `commhub-server@0.8.2`)
 
-**Version requirement**: to reach these two endpoints via the default `anet hub start` path you need `agent-network ≥ 2.2.1` (the [v0.10.1 hotfix](/en/changelog#v0-10-1-hotfix-pinned-server-version-chain-bump-after-the-v0-10-0-ship-2026-05-17-stable) bumped `PINNED_SERVER_VERSION` from `0.8.0` to `0.8.2`).
+**Version requirement**: to reach these two endpoints via the default `anet hub start` path you need `agent-network ≥ 2.2.1` (the [v0.10.1 hotfix](/en/changelog#v0-10-1-—-hotfix-pinned-server-version-chain-bump-after-the-v0-10-0-ship-2026-05-17-✅-stable) bumped `PINNED_SERVER_VERSION` from `0.8.0` to `0.8.2`).
 
 The control layer (kill / restart / redeploy) is deferred to v0.11.0. Details: [REST API — server endpoint family](/en/api/rest#get-api-server-host-health).
 :::

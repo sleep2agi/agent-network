@@ -141,7 +141,7 @@ REST 层新增**单机 health + agent 列表**两个 endpoint，给 dashboard Se
 - `GET /api/server/:host/health` — 单 host 当前健康快照（CPU / mem / disk + 24h 分桶 history `5m`/`1h`/`24h`）+ `alert_level`
 - `GET /api/server/:host/agents` — 单 host 上 agent 列表 + per-agent `process_telemetry`（`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`，[#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 ship in `agent-node@2.4.0` + T2.2 server schema align in `commhub-server@0.8.2`）
 
-**版本要求**：`anet hub start` 默认路径要拿到这两个 endpoint 需 `agent-network ≥ 2.2.1`（[v0.10.1 hotfix](/changelog#v0-10-1-hotfix-pinned-server-version-跟-v0-10-0-ship-chain-bump-2026-05-17-stable) `PINNED_SERVER_VERSION` bump `0.8.0` → `0.8.2`）。
+**版本要求**：`anet hub start` 默认路径要拿到这两个 endpoint 需 `agent-network ≥ 2.2.1`（[v0.10.1 hotfix](/changelog#v0-10-1-—-hotfix-pinned-server-version-跟-v0-10-0-ship-chain-bump-2026-05-17-✅-stable) `PINNED_SERVER_VERSION` bump `0.8.0` → `0.8.2`）。
 
 控制层（kill / restart / redeploy）defer 到 v0.11.0。详见 [REST API — server endpoint family](/api/rest#get-api-server-host-health)。
 :::
