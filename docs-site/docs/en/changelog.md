@@ -14,7 +14,7 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - `@sleep2agi/agent-network@2.2.0`
 - `@sleep2agi/agent-node@2.4.0`
 - `@sleep2agi/commhub-server@0.8.2`
-- `@sleep2agi/agent-network-dashboard@0.4.6` *(Phase 2 — promotes to `0.5.0` after the dashboard §3.D/F/G surfaces ship, ~45-60 min later; docs will sync a second time)*
+- `@sleep2agi/agent-network-dashboard@0.5.0` ✅ Phase 2 shipped
 
 ::: tip Theme: fix the root
 v0.7 → v0.9.2 accumulated 11 releases; the 5-P0 ripple chain ([#135-#139](https://github.com/sleep2agi/agent-network/issues/135)) surfaced a runtime architecture debt. v0.10.0 fixes the root — runtime debt (codex-sdk wrapper bypass, opt-in) + observability foundations (per-server daemon endpoints + per-agent process telemetry) + release-gate playbook. This is the groundwork for v0.11.0's 24/7 multi-vendor AI Agent society live stream. See the [v0.10.0 release tracker #140](https://github.com/sleep2agi/agent-network/issues/140).
@@ -35,8 +35,18 @@ Dashboard integration lands in Phase 2 ([#119](https://github.com/sleep2agi/agen
 **C. [#142](https://github.com/sleep2agi/agent-network/issues/142) Per-agent process telemetry**
 agent-node now embeds `process_telemetry` in every `commhub_report_status` heartbeat: `rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`. Zero sysmon dependency, zero privilege. commhub-server schema is aligned on the wire (commit [`209cac7`](https://github.com/sleep2agi/agent-network/commit/209cac7)); the dashboard hover-card rendering ships in Phase 2 ([#119](https://github.com/sleep2agi/agent-network/issues/119) sibling). Sibling to [#119](https://github.com/sleep2agi/agent-network/issues/119) host fields (host step 1 ✅ earlier; agent step 2 ships in this release).
 
-**D. Dashboard network/node front-end surface upgrade (Hero 3 partial)**
-Dashboard §3.A/B/C/E/H surfaces shipped — Networks selector / Servers drawer wired to #119 + #99 / Agents card telemetry wired to #142 / Status drawer wired to server-logs / Networks management. §3.D / F / G (edit / template / rename) land in Phase 2 alongside dashboard `0.5.0` promote.
+**D. Dashboard network/node front-end surface upgrade (Hero 3 — 8/8 surfaces complete, dashboard `0.5.0`)**
+- §3.A prefix-group fix (Vincent 5304 #1 catch)
+- §3.B sweep retire (legacy sweep path merged into grid)
+- §3.C recent-panel hide
+- §3.D grid default view
+- §3.E hover detail card
+- §3.F server-health ring tint (wired to #99 endpoint)
+- §3.G fullscreen mode
+- §3.I canvas brand mark
+- *(§3.H dropped per RFC Q2 review)*
+
+Ships alongside **19+ rounds of typography + corner-radius cascade polish** (R317-R337+, four typography families + systematic corner-radius cascade rework). Dashboard `0.5.0` is now on the npm `latest` tag, landing with this v0.10.0 Phase 2 docs sync.
 
 **E. Lightweight pre-release-gate playbook (release-gate Phase 1+2)**
 [`docs/tests/release-gate-playbook.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/release-gate-playbook.md) — maintained by the test lead. Covers hub / dashboard / login / node lifecycle / runtime smoke / vendor verify. v0.10.0 is the first release to fully exercise this playbook; future latest promotes gate on it.
@@ -49,7 +59,7 @@ Dashboard §3.A/B/C/E/H surfaces shipped — Networks selector / Servers drawer 
 
 ### Known follow-ups
 
-- **Phase 2 dashboard `0.5.0` promote** (after dashboard §3.D/F/G surfaces ship, ~45-60 min later) — full ServersDrawer + Agents-card telemetry hover / per-network edit flow; docs will sync a dashboard section in a second pass.
+- ~~**Phase 2 dashboard `0.5.0` promote**~~ ✅ shipped (dashboard `0.5.0` landed with this v0.10.0 Phase 2 docs sync — 8/8 Hero 3 surfaces complete + 19+ rounds of polish)
 - **Close evidence for #102 / #103 hang** — Phase 1.5 in the preview chain already plans the regression replay against the new stdio path; we'll close them once the latest opt-in path passes the regression.
 - **Sessions NETWORK column display bug** (Vincent 5212 catch) — deferred to a v0.10.x patch or v0.11.0.
 - **#117 `anet project up` detached-tmux follow-up** (macOS bun `setRawMode` already fixed by #136, but detached-mode follow-up still pending) — to be done with the v0.11.0 control layer.

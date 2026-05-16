@@ -206,7 +206,7 @@ flowchart LR
 |---|---|---|
 | [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.0` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.2` | MCP + REST + SSE 通信中枢（SQLite）+ `/api/server/:host/health` + `/api/server/:host/agents` |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.6` | Web Dashboard —— Next.js 16，4 套主题（dashboard `0.5.0` Phase 2 ship 后再升）|
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.0` | Web Dashboard —— Next.js 16，4 套主题 + Hero 3 网络节点前端 8/8 surface（prefix-group fix / sweep retire / recent-panel hide / grid default / hover detail card / server-health ring tint / fullscreen / canvas brand mark）+ 19+ 轮 typography & 圆角级联 polish |
 | [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.0` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry |
 
 CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。

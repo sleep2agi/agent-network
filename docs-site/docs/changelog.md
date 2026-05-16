@@ -14,7 +14,7 @@
 - `@sleep2agi/agent-network@2.2.0`
 - `@sleep2agi/agent-node@2.4.0`
 - `@sleep2agi/commhub-server@0.8.2`
-- `@sleep2agi/agent-network-dashboard@0.4.6` *(Phase 2 N 站马 §3.D/F/G ship 完后 promote `0.5.0`，docs 二次 sync)*
+- `@sleep2agi/agent-network-dashboard@0.5.0` ✅ Phase 2 ship
 
 ::: tip 主题：治本
 v0.7 → v0.9.2 累积 11 release、5 P0 chain（[#135-#139](https://github.com/sleep2agi/agent-network/issues/135)）暴露 runtime 架构债。v0.10.0 治本 —— runtime 架构债（codex-sdk wrapper bypass，opt-in）+ observability 基础（守护节点 endpoint + per-agent process telemetry）+ release-gate playbook。为 v0.11.0 多厂商 AI Agent 社会 24/7 直播打地基。详见 [v0.10.0 release tracker #140](https://github.com/sleep2agi/agent-network/issues/140)。
@@ -35,8 +35,18 @@ dashboard 集成留 Phase 2（[#119](https://github.com/sleep2agi/agent-network/
 **C. [#142](https://github.com/sleep2agi/agent-network/issues/142) Per-agent process telemetry**
 agent-node 每次 `commhub_report_status` 心跳带上 `process_telemetry`：`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`。零 sysmon 依赖、零特权。commhub-server schema 端对齐（commit [`209cac7`](https://github.com/sleep2agi/agent-network/commit/209cac7)），dashboard 渲染 hover card Phase 2（[#119](https://github.com/sleep2agi/agent-network/issues/119) sibling）。跟 [#119](https://github.com/sleep2agi/agent-network/issues/119) host fields 是 sibling 关系（host step 1 ✅ 之前 ship，agent step 2 本 release ship）。
 
-**D. Dashboard 网络节点前端展示升级（Hero 3 partial）**
-N 站马 §3.A/B/C/E/H ship 完 5 surface（Networks 选择器 / Servers Drawer 接 #119 + #99 / Agents 卡片 telemetry 接 #142 / Status Drawer 接 server-logs / Networks 网络管理）。剩 §3.D / F / G（编辑 / 模板 / 重命名）Phase 2 跟 dashboard `0.5.0` promote 一起 ship。
+**D. Dashboard 网络节点前端展示升级（Hero 3 — 8/8 surface complete，dashboard `0.5.0`）**
+- §3.A prefix-group fix（Vincent 5304 #1 catch）
+- §3.B sweep retire（旧 sweep 路径并入 grid）
+- §3.C recent-panel hide
+- §3.D grid default view
+- §3.E hover detail card
+- §3.F server-health ring tint（接 #99 endpoint）
+- §3.G fullscreen mode
+- §3.I canvas brand mark
+- *(§3.H 砍 per RFC Q2 review)*
+
+随包附 **19+ 轮 typography + 圆角级联 polish**（R317-R337+，4 typography family + corner radius cascade 系统化重整）。dashboard `0.5.0` 已通过 npm `latest` tag promote，跟随 v0.10.0 Phase 2 docs sync 落地。
 
 **E. 发布前轻量级测试 playbook（release-gate Phase 1+2）**
 [`docs/tests/release-gate-playbook.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/release-gate-playbook.md) — 通信测试马 lead 维护，覆盖 hub / dashboard / login / node lifecycle / runtime smoke / vendor verify 等关键路径。本次 v0.10.0 ship 是首次完整跑通该 playbook 的 release，为后续每次 latest promote 卡 release-gate。
@@ -49,7 +59,7 @@ N 站马 §3.A/B/C/E/H ship 完 5 surface（Networks 选择器 / Servers Drawer 
 
 ### Known follow-ups
 
-- **Phase 2 dashboard `0.5.0` promote**（N 站马 §3.D/F/G ship 完，~45-60min 后）—— 完整 ServersDrawer + Agents 卡片 telemetry hover card + per-network 编辑流；docs 二次 sync 加 dashboard 段。
+- ~~**Phase 2 dashboard `0.5.0` promote**~~ ✅ 已 ship（dashboard `0.5.0` 跟随 v0.10.0 Phase 2 docs sync 落地，8/8 Hero 3 surface complete + 19+ 轮 polish）
 - **#102 / #103 hang 关闭凭证**（codex direct stdio 路径回归 #102 hang 场景 verify）—— preview chain 内 Phase 1.5 已规划，待 latest opt-in 路径回归 verify 完成关闭。
 - **Sessions NETWORK 列显示 bug**（Vincent 5212 catch）—— defer 到 v0.10.x patch 或 v0.11.0。
 - **#117 `anet project up` detached tmux follow-up**（macOS bun setRawMode 已 #136 修，但 detached 模式 follow-up 仍欠）—— v0.11.0 配套 control 层一起做。
