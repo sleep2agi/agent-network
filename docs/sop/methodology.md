@@ -1,6 +1,8 @@
-# AI-Native 研发迭代流程 SOP
+# 以 Issue 为中心的 AI-Native 研发迭代流程
 
-> Agent Network 研发组在 v0.7 — v0.9.2 之间累计 11 次 release、200+ commits、40+ memory lessons 之后沉淀出的研发流程。这份文档是 [Issue #85](https://github.com/sleep2agi/agent-network/issues/85) 的正式产物，覆盖 Issue-Centric / Release Ops / Verify-First / Agent Dispatch / Retro 五个章节。
+> Agent Network 研发组在 v0.7 — v0.9.2 之间累计 11 次 release、200+ commits、40+ memory lessons 之后沉淀出的研发流程。这份文档是 [Issue #85](https://github.com/sleep2agi/agent-network/issues/85) 的正式产物。
+>
+> **核心叙事**：**GitHub Issue 是 single source of truth**。所有研发动作 — 派任务、reviewing、Release Ops、Verify-First、Lessons 沉淀 — 都围绕 Issue 组织。Issue 是一切的中心，其他章节都是 Issue 中心的不同侧面 / 工作流。
 >
 > **适用范围**：anet 核心团队（Tier 1 agents）、贡献者（Tier 2+ contributors）、参考方法论的外部团队。
 >
@@ -24,6 +26,28 @@ AI-Native 团队特点：
 - 用 verifiable artifact 替代 trust-only 派单
 - 让 lessons 不靠口口相传
 
+### 0.1 为什么 "以 Issue 为中心"
+
+传统 software team 用 Slack / Notion / Jira 等多个 tool 散落 context，AI-Native 团队跑得太快，6+ agents 并行 ship、单 session 200k token 上限、跨 session 知识传递天然丢失。**只有 GitHub Issue 是不丢的中心**：
+
+- **不丢**：commit/PR 都强制 link issue；issue 评论永久留痕；agent session 死也不死 issue
+- **可搜**：`gh issue list --search "<keyword>"` 100ms 内拿到所有相关历史
+- **可分级**：label (P0/P1/P2) + milestone 天然给优先级排序
+- **可 cross-link**：`#N` 自动 backref，commit msg 含 `Closes #N` 自动 close
+- **公开可读**：OSS 团队 + 外部 contributor 一致 truth
+
+派单不创 issue / 进度不更新 issue / 修完不 close issue —— 这三个反模式都让 AI-Native 团队跑爆，因为下一个 session 没办法从 chat 历史 recover context。**Issue 是 anet 研发的 DRAM，其他都是 cache**。
+
+### 0.2 五个章节如何围绕 Issue 中心
+
+| 章节 | 跟 Issue 的关系 |
+|------|----------------|
+| §1 Issue-Centric Iteration | 直接讲 issue lifecycle (create / update / close / 留痕) |
+| §2 Release Ops | 每个 release 必有 tracking issue (e.g. #132 v0.9.2)，含 promote 进度 / verify 证据 / sub-task 状态 |
+| §3 Verify-First | 验证 5 件 artifacts 第 3 件就是 "issue 评论"；smoke verdict 必须 post 进 release tracking issue |
+| §4 Agent Dispatch | 派单内容指向 issue；HIGH 30s ack 也是 issue 维度；ETA stale alert 比对的是 issue 进度 |
+| §5 Retro & Lessons | lessons cross-link 触发 issues；P0 cycle teach-by-example 引用 #135-#139 series |
+
 ## 1. Issue-Centric Iteration
 
 > **核心原则**：每个 anet 工作都从 GitHub Issue 开始或结束，issue = single source of truth。
@@ -46,13 +70,36 @@ gh issue list --repo sleep2agi/agent-network --state open --search "<keyword>"
 - **Tier 1 agents**（claude-code runtime）：自己 post
 - **Tier 2+ agents**（codex-sdk runtime, PAT 受限）：lead 代 post 进度更新
 
-### 1.3 完成必 close
+### 1.3 完成必 close —— 评论 4 要素后 close
 
-修复 + 验证 + ship 后 24h 内 close issue。close 评论必含：
+per Vincent 5273 强制规范：**修完不直接 close, 必先评论 4 要素再 close**。
 
-- 修复 commit SHA
-- 验证证据（smoke 截图 / curl 输出 / PR link）
-- 已知 follow-up（如有）
+```
+✅ 修完!
+
+- **哪个版本可以用**: agent-network@2.1.15 (npm latest 已 ship)
+- **怎么修的**: <root cause + fix 1-2 行 summary + commit SHA>
+- **谁修的**: @<github-handle> / Agent-Author: <X马 alias>
+- **验证证据**: smoke 测试 / curl 输出 / PR link / release notes link
+
+Closes #<N>
+```
+
+**4 要素强制**:
+
+1. **哪个版本可以用** — 用户立刻知道升级到哪个 npm version 拿到 fix
+2. **怎么修的** — root cause + fix one-liner，详细 root cause link 到 commit message / PR body / release notes
+3. **谁修的** — author agent alias (X马) + github commit author (vansin)，留痕三轨 per [[feedback_attribution_traceability_sop]]
+4. **验证证据** — smoke PASS link / Vincent macOS 实战 alive / Docker pexpect output / 同 issue 用户在评论里实测 confirm
+
+**反模式**:
+- ❌ 修完直接 close 不评论 — 用户重新打开 issue 找不到 "升级到哪个版本就行" 答案
+- ❌ 评论 "fixed" 一字一行 close — 没说哪个版本 / 没 commit SHA / 没 verify 证据
+- ❌ commit msg 写 `Closes #N` 但 issue 没 close (PAT scope quirk 可能漏 close) — 必 verify `gh issue view N` state=CLOSED
+
+**24h 内 close**: 修 + 验证 + ship 后 24h 内必 close。超 24h 没 close 算 lead 漏管。
+
+per [[feedback_issue_close_protocol]]：close protocol 是 hard rule，不是 optional。
 
 ### 1.4 留痕三轨
 
