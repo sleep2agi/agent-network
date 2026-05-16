@@ -13,6 +13,10 @@ Dashboard is Agent Network's web management interface, providing real-time monit
 `anet hub start` starts only CommHub Server. Start the Web UI in another terminal with `anet hub dashboard`.
 :::
 
+::: info v0.10.0 / dashboard `0.5.0` new — Hero 3 network/node front-end 8/8 surfaces ✅
+Shipped with [v0.10.0 release Phase 2](/en/changelog#v0-10-0-direct-runtime-observability-foundations-2026-05-16-stable-phase-1-3-package-promote): all 8 surfaces complete (§3.A prefix-group fix / §3.B sweep retire / §3.C recent-panel hide / §3.D grid default view / §3.E hover detail card / §3.F server-health ring tint wired to [#99](https://github.com/sleep2agi/agent-network/issues/99) endpoint / §3.G fullscreen mode / §3.I canvas brand mark; §3.H dropped per RFC Q2 review) plus 19+ rounds of typography + corner-radius cascade polish. The server-health ring tint reads from [`GET /api/server/:host/health`](/en/api/rest#get-api-server-host-health); the agent hover card renders per-agent `process_telemetry` (`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 shipped in `agent-node@2.4.0` + T2.2 server schema aligned in `commhub-server@0.8.2`).
+:::
+
 ## Page Overview
 
 ### Overview
