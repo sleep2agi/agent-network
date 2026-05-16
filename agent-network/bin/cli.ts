@@ -1473,10 +1473,22 @@ async function selectVendorAndModel(): Promise<VendorSelection | null> {
   };
 }
 
-function maskSecretEnv(env: Record<string, string>): Record<string, string> {
+function maskSecretEnv(env: Record<string, any>): Record<string, string> {
   const masked: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     const isSecret = /TOKEN|KEY|SECRET|PASSWORD/i.test(key);
+    // #135 v3 — env values can be envRef objects since #125 (e.g.
+    // `{_envRef:"FOO"}`); render those as the indirection target so users
+    // can see what env var they need to set, and never call .slice() on
+    // an object (which threw TypeError before this defensive type check).
+    if (value && typeof value === "object" && typeof value._envRef === "string") {
+      masked[key] = `→ $${value._envRef}`;
+      continue;
+    }
+    if (typeof value !== "string") {
+      masked[key] = String(value);
+      continue;
+    }
     masked[key] = isSecret && value ? `${value.slice(0, 4)}...` : value;
   }
   return masked;
@@ -1614,16 +1626,11 @@ Telegram setup:
   console.log(`[anet] To disable: edit .anet/nodes/${id}/config.json → flags`);
   printProfileSummary(id, loadProfile(id) || profile);
   console.log(`\nStart: anet node start ${id}`);
-  // #135 fix — explicit process.exit(0) to avoid Node v24's "unsettled
-  // top-level await" warning + minified stack dump. Without this, on the
-  // claude-code-cli / codex-sdk paths (which skip the vendor inquirer
-  // prompt that previously kept the event loop synchronized), Node's ESM
-  // strict-mode top-level-await checker sees readline / inquirer handlers
-  // outliving the dispatch's `await createCommand()` and warns.
-  // Matches createCommand's existing pattern (line ~1725).
-  if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") {
-    process.exit(0);
-  }
+  // #135 v2 fix — let the dispatch-end exit handle clean shutdown (see top
+  // of switch block at end of file). The preview.1 inline `process.exit(0)`
+  // here was counterproductive: process.exit inside an async function leaves
+  // the outer `await createCommand()` chain unsettled in a different way,
+  // which is what Node v24 ESM strict mode actually warns about.
 }
 
 async function createCommand(idOverride?: string) {
@@ -7043,6 +7050,20 @@ async function doctorCommand() {
   console.log(`\n  Result: ${ok} ok, ${warn} warnings, ${fail} errors\n`);
 }
 
+// #135 v3 fix — Wrap the entire dispatch in `async function main()` so the
+// module's actual top-level has zero `await` expressions. Node v24 ESM
+// strict mode emits "Detected unsettled top-level await" + minified bundle
+// stack dump when the module's top-level await chain settles but the event
+// loop is still busy. With the dispatch inlined at top level (the original
+// pattern), the bundle is compiled with implicit module-level awaits that
+// the v24 check considers "unsettled" even after we call process.exit(0)
+// (the check runs BEFORE exit takes effect). Moving the dispatch into an
+// async function removes the module-level await entirely; only main()'s
+// returned promise needs to settle, and an explicit .then/.catch terminator
+// gives Node v24 a clean module shutdown signal. preview.0 / preview.1
+// fixes (process.exit in createInteractiveCommand / dispatch end) didn't
+// help because they don't change the module's top-level await profile.
+async function main() {
 switch (command) {
   case "init":
     if (args[1] === "project") initProject();
@@ -7117,3 +7138,17 @@ switch (command) {
     if (resolveNodeRef(command)) { args.unshift("start"); await startCommand(); }
     else { console.error(`Unknown: ${command}`); printHelp(); process.exit(1); }
 }
+}  // end async function main
+
+// #135 v3 — explicit .then/.catch terminator. main()'s returned promise is
+// the ONLY top-level promise the module emits; no `await` at module scope
+// means Node v24's strict ESM checker has nothing to scan. We exit
+// explicitly in both branches so readline / @inquirer signal handlers
+// don't keep the event loop alive past the dispatch.
+main().then(
+  () => { if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0); },
+  (err: any) => {
+    console.error("[anet] FATAL:", err?.stack || err?.message || err);
+    process.exit(1);
+  },
+);
