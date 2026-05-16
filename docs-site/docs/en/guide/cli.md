@@ -465,7 +465,7 @@ Full upgrade walkthrough: [Upgrade Guide](/en/guide/upgrade).
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3163)
 
-Cwd-wide node orchestration, introduced in [#117](https://github.com/sleep2agi/agent-network/issues/117) (v0.9.0+).
+Cwd-wide node orchestration, introduced in [#117](https://github.com/sleep2agi/agent-network/issues/117) (v0.9.0+, on npm `latest` since v0.10.0, verify [`agent-network/bin/cli.ts:7137` `case "project"`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L7137)).
 
 ```bash
 anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y]

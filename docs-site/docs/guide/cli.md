@@ -471,7 +471,7 @@ anet upgrade [--channel preview|latest] [--self] [--dry-run]
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3163)
 
-cwd-wide 节点编排，[#117](https://github.com/sleep2agi/agent-network/issues/117) 引入（v2.1.13-preview.2+）。**Preview-only**；npm `latest` 暂无。
+cwd-wide 节点编排，[#117](https://github.com/sleep2agi/agent-network/issues/117) 引入（v0.9.0+，v0.10.0 起进 npm `latest`，verify [`agent-network/bin/cli.ts:7137` `case "project"`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L7137)）。
 
 ```bash
 anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y]
