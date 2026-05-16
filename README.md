@@ -317,6 +317,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 - [上手指南](https://anet.sh/guide/getting-started) —— 已 E2E 验证的全链路
 - [节点 Runtime](https://anet.sh/guide/runtimes) —— Claude Code CLI vs Agent SDK vs Codex
 - [架构概览](https://anet.sh/guide/architecture) —— MCP / SSE / REST / SQLite schema
+- 📚 **[研发流程 SOP](./docs/sop/)** —— 以 Issue 为中心的 AI-Native 研发迭代流程（[方法论总览](./docs/sop/methodology.md)：Issue-Centric / Release Ops / Verify-First / Agent Dispatch / Retro 5 章节）
 - [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) —— 包索引
 - [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) —— 问答 / 想法
 - [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) —— bug 反馈

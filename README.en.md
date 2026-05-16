@@ -319,6 +319,7 @@ Using anet in your project? Open a PR to [`docs-site/docs/ecosystem.md`](./docs-
 - [Getting started](https://anet.sh/en/guide/getting-started) — verified end-to-end path
 - [Runtimes](https://anet.sh/en/guide/runtimes) — Claude Code CLI vs Agent SDK vs Codex
 - [Architecture](https://anet.sh/en/guide/architecture) — MCP, SSE, REST, SQLite schema
+- 📚 **[R&D Methodology SOPs](./docs/sop/)** — Issue-centric AI-Native development workflow ([methodology overview](./docs/sop/methodology.md): Issue-Centric / Release Ops / Verify-First / Agent Dispatch / Retro)
 - [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) — package index
 - [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — questions, ideas
 - [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) — bug reports
