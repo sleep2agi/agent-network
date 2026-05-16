@@ -115,7 +115,69 @@ git author 全是 vansin 看不出谁提的，三轨补齐才知道。
 
 ## 2. Release Ops
 
-> **核心原则**：preview.N 迭代 → clean version for latest → two-phase npm publish → GitHub release (EN+ZH) → docs Preview→Stable swap → Vercel deploy。
+> **核心原则**：以 Issue 为中心，**一个版本一个版本迭代**。每个版本流程：Issue 规划 → preview.N 迭代 + preview 文档同步 → clean version for latest → two-phase npm publish → GitHub release (EN+ZH) → stable 文档同步 (anet.sh 强制) → Vercel deploy。
+
+### 2.0 版本迭代总览 (per Vincent 5282)
+
+一个完整版本 (e.g. v0.9.X → v0.10.0) 的生命周期：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Stage 1: Issue 规划 (Issue-Centric, §1)                       │
+│ ├─ 建 release tracking issue (e.g. #132 v0.9.2)              │
+│ ├─ scope 列入 issue body (含 sub-issues + 优先级)              │
+│ └─ 子任务派单, 进度更新到 issue 评论                            │
+├─────────────────────────────────────────────────────────────┤
+│ Stage 2: preview.N 迭代 ship (中间态)                         │
+│ ├─ npm publish --tag preview (preview.0 → preview.N)         │
+│ ├─ ✅ **preview 文档同步** — 用户拿 @preview 装 时同步 docs      │
+│ │   • docs-site 中 @preview reference 跟 preview.N 同步        │
+│ │   • CHANGELOG.md preview entry (per-iteration)              │
+│ │   • Vercel deploy (10 轮节流) 让 anet.sh preview 用户读到新文档 │
+│ └─ 5 件 verifiable artifacts 全绿 + 测试马 smoke PASS          │
+├─────────────────────────────────────────────────────────────┤
+│ Stage 3: clean version promote latest (正式)                  │
+│ ├─ Vincent A signal                                          │
+│ ├─ version bump: -preview.N → clean (drop suffix, §2.1)      │
+│ ├─ Method B 2-phase npm publish (§2.2)                       │
+│ └─ npm dist-tag add latest                                    │
+├─────────────────────────────────────────────────────────────┤
+│ Stage 4: GitHub Release (§2.4, 含 EN + ZH 双语)                │
+│ ├─ release body 跟 §2.4.1 发版规范一致 (10 checklist)          │
+│ └─ release tracking issue close + addendum                   │
+├─────────────────────────────────────────────────────────────┤
+│ Stage 5: ⚠️ **anet.sh stable 文档同步 — 强制**                  │
+│ ├─ PINNED_AGENT_NETWORK_VERSION → 新 clean version             │
+│ ├─ PINNED_AGENT_NODE_VERSION → 新 clean version                │
+│ ├─ CHANGELOG.md stable entry                                  │
+│ ├─ README banner v0.X-1 → v0.X                                │
+│ ├─ anet.sh version switcher entry                             │
+│ ├─ getting-started.md / faq.md 等 banner sweep                │
+│ ├─ ZH+EN parity                                               │
+│ └─ Vercel deploy --prebuilt --prod                            │
+│                                                              │
+│ 🚫 anet.sh 文档没同步 = 用户 npm install 拿到新版但 docs 仍指    │
+│    旧版 → 用户体验破裂. 这一步**不是 optional**.                │
+├─────────────────────────────────────────────────────────────┤
+│ Stage 6: post-promote verify & lessons (§5)                  │
+│ ├─ 测试马 latest install smoke (R26 SOP)                       │
+│ ├─ Vincent macOS retest 实战 verify (ground-truth probe)       │
+│ ├─ retro lessons → memory feedback file                       │
+│ └─ 通信龙 single telegram surface "all done"                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Vincent 5282 关键洞察**：
+
+> "先在 issue 做下一个版本规划，npm 然后中间态用 preview.1 .2 发版，然后发正式版本前先更新好 preview 文档，后面再更新文档。正式版本发版一定要配备 anet.sh 网站的文档一定要更新好"
+
+→ **两阶段 docs sync**：
+1. **Preview docs** (Stage 2)：跟 preview.N ship 同步，让 `@preview` 用户拿到匹配文档
+2. **Stable docs** (Stage 5)：跟 latest ship 同步，**强制 gate**，anet.sh 文档必同步, 不同步=用户体验破裂
+
+→ **一个版本一个版本迭代**：上一个版本 ship 完整闭环（含 Stage 5 docs 同步）才开始下一个版本 issue 规划。不能 skip Stage 5。
+
+
 
 ### 2.1 Preview 版本号规则
 
