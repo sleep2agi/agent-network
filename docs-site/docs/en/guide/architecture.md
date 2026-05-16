@@ -135,11 +135,13 @@ CommHub Server is the core of the entire system, responsible for message routing
 | **SSE** | `GET /events/:alias` | Real-time push of tasks/messages to agents | Bearer Token |
 | **REST** | `GET/POST /api/*` | Dashboard / CLI / external integrations | Bearer Token |
 
-::: tip v0.10.0 new — per-server daemon observability endpoint family ([#99](https://github.com/sleep2agi/agent-network/issues/99) Phase 1 scaffold, `commhub-server@0.8.2`)
+::: tip v0.10.0 new — per-server daemon observability endpoint family ([#99](https://github.com/sleep2agi/agent-network/issues/99) Phase 1 scaffold, `commhub-server@0.8.2`, **default path needs `agent-network@2.2.1+`**)
 Two new REST endpoints expose **single-host health + per-agent list**, used by the dashboard ServersDrawer and any monitoring / external observability integration:
 
 - `GET /api/server/:host/health` — current health snapshot for a single host (CPU / mem / disk + 24h bucketed history `5m` / `1h` / `24h`) plus `alert_level`
 - `GET /api/server/:host/agents` — agents on a single host + per-agent `process_telemetry` (`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 shipped in `agent-node@2.4.0` + T2.2 server schema aligned in `commhub-server@0.8.2`)
+
+**Version requirement**: to reach these two endpoints via the default `anet hub start` path you need `agent-network ≥ 2.2.1` (the [v0.10.1 hotfix](/en/changelog#v0-10-1-hotfix-pinned-server-version-chain-bump-after-the-v0-10-0-ship-2026-05-17-stable) bumped `PINNED_SERVER_VERSION` from `0.8.0` to `0.8.2`).
 
 The control layer (kill / restart / redeploy) is deferred to v0.11.0. Details: [REST API — server endpoint family](/en/api/rest#get-api-server-host-health).
 :::

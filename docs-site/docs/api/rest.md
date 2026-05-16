@@ -765,6 +765,10 @@ host telemetry 由 agent-node 在每次 `report_status` 时带上（[issue #119]
 
 取**单台物理服务器**的当前健康快照 + 24h 分桶历史 telemetry。Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99)（守护节点 Phase 1 scaffold）。
 
+::: tip 需要 `agent-network@2.2.1+`
+通过 `anet hub start` 默认路径要拿到这个 endpoint，**agent-network 必须 ≥ 2.2.1**（v0.10.1 hotfix [`PINNED_SERVER_VERSION`](/changelog#v0-10-1-hotfix-pinned-server-version-跟-v0-10-0-ship-chain-bump-2026-05-17-stable) `0.8.0` → `0.8.2`）。老版本（含 2.2.0）`anet hub start` 仍跑 `commhub-server@0.8.0`，本 endpoint 不存在 → **404**。绕开方案：手动 `bunx --bun @sleep2agi/commhub-server@latest --host 127.0.0.1` 起新版 server。
+:::
+
 ```bash
 curl http://localhost:9200/api/server/dev-machine/health \
   -H "Authorization: Bearer ntok_xxx"

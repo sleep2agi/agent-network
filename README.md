@@ -204,7 +204,7 @@ flowchart LR
 
 | 包 | 版本 | 角色 |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.0` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.1` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器（v0.10.1 hotfix：`PINNED_SERVER_VERSION` bump 0.8.0 → 0.8.2，[详见 changelog](https://anet.sh/changelog#v0-10-1-hotfix-pinned-server-version-跟-v0-10-0-ship-chain-bump-2026-05-17-stable)）|
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.2` | MCP + REST + SSE 通信中枢（SQLite）+ `/api/server/:host/health` + `/api/server/:host/agents` |
 | [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.0` | Web Dashboard —— Next.js 16，4 套主题 + Hero 3 网络节点前端 8/8 surface（prefix-group fix / sweep retire / recent-panel hide / grid default / hover detail card / server-health ring tint / fullscreen / canvas brand mark）+ 19+ 轮 typography & 圆角级联 polish |
 | [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.0` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry |

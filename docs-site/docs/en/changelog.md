@@ -8,6 +8,52 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## v0.10.1 — **Hotfix: PINNED_SERVER_VERSION chain-bump after the v0.10.0 ship** (2026-05-17) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.1`
+- `@sleep2agi/agent-node@2.4.0` *(unchanged)*
+- `@sleep2agi/commhub-server@0.8.2` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.5.0` *(unchanged)*
+
+### Fix
+
+[`agent-network/bin/cli.ts:61` `PINNED_SERVER_VERSION`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L61) was never bumped across the v0.9.x + v0.10.0 promotes — it stayed hardcoded at `0.8.0`. That meant `anet hub start` was actually running `bunx --bun @sleep2agi/commhub-server@0.8.0` ([cli.ts:2589](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2589)) — the old server, not the v0.10.0-shipped `0.8.2`. Direct impact:
+
+- The [#99](https://github.com/sleep2agi/agent-network/issues/99) per-server daemon endpoints `GET /api/server/:host/health` + `GET /api/server/:host/agents` don't exist in 0.8.0 → **404**
+- [#142](https://github.com/sleep2agi/agent-network/issues/142) T2.2 server schema alignment for `process_telemetry` isn't wired in 0.8.0 → the older schema silently drops the field
+- Dashboard `0.5.0` §3.F server-health ring tint **had no data source** / §3.E hover card `process_telemetry` rendered all-`null`
+
+A v0.10.0-announced functionality regression on the **default `anet hub start` workflow** (manually launching `bunx --bun @sleep2agi/commhub-server@latest` was not affected).
+
+Fix (commit [`4d24024`](https://github.com/sleep2agi/agent-network/commit/4d24024)):
+
+```diff
+- const PINNED_SERVER_VERSION = "0.8.0";
++ const PINNED_SERVER_VERSION = "0.8.2";
+```
+
+### Upgrade
+
+```bash
+anet upgrade                                     # bumps agent-network 2.2.0 → 2.2.1
+anet project restart                             # restart the project (pulls the new commhub-server)
+```
+
+Or fresh install:
+
+```bash
+npm install -g @sleep2agi/agent-network@latest
+```
+
+### Lessons
+
+- **release-gate playbook now covers PINNED chain-bump** — every promote-to-latest must chain-bump `PINNED_*_VERSION` (server pin / dashboard pin / agent-node pin), or the default path keeps running the previous ship. Consistent with [#80 PINNED bump SOP](https://github.com/sleep2agi/agent-network/issues/80), but the Hero 4 release-gate playbook hadn't covered it; the case is now added (see lesson memory in [methodology](https://github.com/sleep2agi/agent-network/blob/main/docs/sop/methodology.md)).
+
+Release flow follows the [v0.9.0 split-brain lessons #126](https://github.com/sleep2agi/agent-network/issues/126) two-phase publish SOP.
+
+---
+
 ## v0.10.0 — **Direct Runtime + Observability Foundations** (2026-05-16) ✅ stable (Phase 1, 3-package promote)
 
 **Version alignment** (npm `latest` tag, Phase 1):

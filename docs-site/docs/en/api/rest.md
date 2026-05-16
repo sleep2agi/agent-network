@@ -765,6 +765,10 @@ Host telemetry is reported by agent-node on every `report_status` call ([issue #
 
 Returns the **current health snapshot of a single physical server** plus 24h-bucketed telemetry history. Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99) (per-server daemon Phase 1 scaffold).
 
+::: tip Requires `agent-network@2.2.1+`
+To reach this endpoint via the default `anet hub start` path, **agent-network must be ≥ 2.2.1** (the v0.10.1 hotfix that bumped [`PINNED_SERVER_VERSION`](/en/changelog#v0-10-1-hotfix-pinned-server-version-chain-bump-after-the-v0-10-0-ship-2026-05-17-stable) from `0.8.0` to `0.8.2`). Older versions (including 2.2.0) still launch `commhub-server@0.8.0`, where this endpoint does not exist → **404**. Workaround: launch the new server manually with `bunx --bun @sleep2agi/commhub-server@latest --host 127.0.0.1`.
+:::
+
 ```bash
 curl http://localhost:9200/api/server/dev-machine/health \
   -H "Authorization: Bearer ntok_xxx"
