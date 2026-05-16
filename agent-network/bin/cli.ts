@@ -1569,7 +1569,16 @@ This wizard creates one agent node for this project:
 API key:
   Paste the API key/token for the selected vendor.${sel.signupUrl ? `
   📋 注册 / 拿 API Key: ${sel.signupUrl}` : ""}`);
-        const token = await ask(sel.envKey);
+        // #138 fix — same inquirer-stdin issue as Telegram prompts; use
+        // inquirer input() to keep stdin handling uniform with the select()
+        // call inside selectVendorAndModel above.
+        let token: string;
+        try {
+          const { input: inquirerInput } = await import("@inquirer/prompts");
+          token = (await inquirerInput({ message: sel.envKey })).trim();
+        } catch {
+          token = await ask(sel.envKey);
+        }
         if (token) opts._envs.push(`${sel.envKey}=${token}`);
       }
       if (sel.requiresAuth === "codex") {
@@ -1587,7 +1596,22 @@ API key:
 
   const profile = await ensureNodeToken(createProfileFromOpts(id, opts), id);
 
-  const addTelegram = await ask("Add Telegram channel? (y/n)", "n");
+  // #138 fix — @inquirer/prompts select() cleanup leaves process.stdin in a
+  // state where the subsequent readline `ask()` doesn't keep the event loop
+  // alive — process exits cleanly with code 0 mid-prompt before the user
+  // can answer (zsh shows `%` artifact). Switch to inquirer `input()` for
+  // the post-select() prompts so stdin handling is uniform with select().
+  let addTelegram: string;
+  try {
+    const { input: inquirerInput } = await import("@inquirer/prompts");
+    addTelegram = (await inquirerInput({
+      message: "Add Telegram channel? (y/n)",
+      default: "n",
+    })).trim() || "n";
+  } catch {
+    // Non-TTY / inquirer unavailable — fall back to legacy readline ask().
+    addTelegram = await ask("Add Telegram channel? (y/n)", "n");
+  }
   let telegramConfig: { botToken: string; allowId: string } | null = null;
   if (/^y(es)?$/i.test(addTelegram)) {
     console.log(`
@@ -1596,8 +1620,17 @@ Telegram setup:
   2. Create a bot and copy the bot token.
   3. Talk to @userinfobot to get your numeric user ID.
 `);
-    const botToken = await ask("Telegram Bot Token");
-    const allowId = await ask("Allow User ID (numeric ID from @userinfobot)", "");
+    // #138 fix — same inquirer-stdin issue as Add Telegram prompt above.
+    let botToken: string;
+    let allowId: string;
+    try {
+      const { input: inquirerInput } = await import("@inquirer/prompts");
+      botToken = (await inquirerInput({ message: "Telegram Bot Token" })).trim();
+      allowId = (await inquirerInput({ message: "Allow User ID (numeric ID from @userinfobot)", default: "" })).trim();
+    } catch {
+      botToken = await ask("Telegram Bot Token");
+      allowId = await ask("Allow User ID (numeric ID from @userinfobot)", "");
+    }
     if (!botToken) {
       closeRL();
       console.error("Error: Telegram Bot Token required");
