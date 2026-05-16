@@ -118,14 +118,18 @@ anet status
 
 ---
 
-## v0.7 → v0.8 Upgrade Notes (Latest) {#v0-7-v0-8-upgrade-notes-latest}
+## v0.7 → v0.8 Upgrade Notes (historical path) {#v0-7-v0-8-upgrade-notes-latest}
+
+::: info Current stable is v0.10.0
+This section documents **the historical path from v0.7 to v0.8**, kept as a reference for users who need to traverse v0.7 → v0.10.0 in one go. **Upgrading between v0.8 / v0.9 / v0.10.0** is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — the auth migration below is **not** required (see [changelog](/en/changelog) and read the per-release notes for v0.8 / v0.9 / v0.10).
+:::
 
 v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
 
-::: tip v0.8.x increments (current stable: v0.8.3)
-After v0.8.1 stable, v0.8.2 / v0.8.3 progressively added: `anet channel add telegram` one-shot bind, `claude-code-cli` runtime session-resume fix, `anet create --batch` bulk-agent primitive, `anet demo sci-team` / `pr-review` demos, `anet login` first-login guidance, and more.
+::: tip v0.8.x → v0.10.0 increments
+After the v0.8 main path, v0.8.2 / v0.8.3 / v0.9.0 / v0.9.1 / v0.9.2 / **v0.10.0** (current stable; four packages at npm `latest`: `agent-network 2.2.0` / `agent-node 2.4.0` / `commhub-server 0.8.2` / `agent-network-dashboard 0.5.0`) progressively added: `anet channel add telegram` one-shot bind, `claude-code-cli` runtime session-resume fix, `anet create --batch` bulk-agent primitive, `anet demo sci-team` / `pr-review` demos, `anet login` first-login guidance, `anet doctor --fix` ntok_ repair, envRef vendor credential storage ([#125](https://github.com/sleep2agi/agent-network/issues/125)), SDK high-concurrency retry-with-backoff + 300s timeout ([#132](https://github.com/sleep2agi/agent-network/issues/132)), runtime-first wizard ([#133](https://github.com/sleep2agi/agent-network/issues/133)), `anet project up/restart/down` cwd-wide orchestration ([#117](https://github.com/sleep2agi/agent-network/issues/117)), the `codex-direct-stdio` opt-in path ([#141](https://github.com/sleep2agi/agent-network/issues/141), enable via `ANET_CODEX_STDIO_DIRECT=1`), the per-server-daemon observability endpoint family ([#99](https://github.com/sleep2agi/agent-network/issues/99) `/api/server/:host/health` + `/api/server/:host/agents`) + per-agent `process_telemetry` ([#142](https://github.com/sleep2agi/agent-network/issues/142)), dashboard Hero 3 8 surfaces, and more.
 
-These increments **keep the same upgrade path as v0.7 → v0.8 main path** (admin bootstrap + password management) — no extra steps. Full per-version increments: [changelog](/en/changelog).
+These increments **keep the same upgrade path as v0.7 → v0.8 main path** (the admin bootstrap + password management is a one-time migration; later incremental upgrades carry no extra auth steps). Full per-version increments: [changelog](/en/changelog).
 :::
 
 ### Behavior changes

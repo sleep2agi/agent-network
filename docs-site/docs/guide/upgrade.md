@@ -118,14 +118,18 @@ anet status
 
 ---
 
-## v0.7 → v0.8 升级注意（最新） {#v0-7-v0-8-升级注意-最新}
+## v0.7 → v0.8 升级注意（历史路径） {#v0-7-v0-8-升级注意-最新}
+
+::: info 当前 stable 是 v0.10.0
+本节是**从 v0.7 升 v0.8 的历史路径**，保留作 v0.7 → v0.10.0 跨版本升级时的关键节点参考。**从 v0.8 / v0.9 / v0.10.0 之间升级**直接 `anet upgrade` 或 `npm install -g @sleep2agi/agent-network@latest` 即可，无须重做下方 v0.7→v0.8 鉴权迁移（详见 [changelog](/changelog)，按 v0.8 / v0.9 / v0.10 各 release 段查行为变化）。
+:::
 
 v0.8 落地了 [RFC-001 第二阶段](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)，对**鉴权和密码**有新行为：
 
-::: tip v0.8.x 增量（当前 stable v0.8.3）
-v0.8.1 stable 之后，v0.8.2 / v0.8.3 陆续加了：`anet channel add telegram` 一键绑定、`claude-code-cli` runtime session resume 修复、`anet create --batch` 批量 agent 原语、`anet demo sci-team` / `pr-review` demo、`anet login` 首次登录引导 等。
+::: tip v0.8.x → v0.10.0 增量
+v0.8 主路径之后，v0.8.2 / v0.8.3 / v0.9.0 / v0.9.1 / v0.9.2 / **v0.10.0**（当前 stable，4 包 latest：`agent-network 2.2.0` / `agent-node 2.4.0` / `commhub-server 0.8.2` / `agent-network-dashboard 0.5.0`）陆续加了：`anet channel add telegram` 一键绑定、`claude-code-cli` runtime session resume 修复、`anet create --batch` 批量 agent 原语、`anet demo sci-team` / `pr-review` demo、`anet login` 首次登录引导、`anet doctor --fix` 修 ntok_、envRef vendor 凭据（[#125](https://github.com/sleep2agi/agent-network/issues/125)）、SDK 高并发 retry-with-backoff + 300s timeout（[#132](https://github.com/sleep2agi/agent-network/issues/132)）、runtime-first wizard（[#133](https://github.com/sleep2agi/agent-network/issues/133)）、`anet project up/restart/down` cwd-wide 编排（[#117](https://github.com/sleep2agi/agent-network/issues/117)）、`codex-direct-stdio` opt-in 路径（[#141](https://github.com/sleep2agi/agent-network/issues/141)，env `ANET_CODEX_STDIO_DIRECT=1` 启用）、守护节点 observability endpoint family（[#99](https://github.com/sleep2agi/agent-network/issues/99) `/api/server/:host/health` + `/api/server/:host/agents`）+ per-agent `process_telemetry`（[#142](https://github.com/sleep2agi/agent-network/issues/142)）、dashboard Hero 3 8 surface 等。
 
-这些增量**升级路径跟 v0.7 → v0.8 主路径一致**（admin bootstrap + 密码管理），无额外步骤。完整增量逐版见 [changelog](/changelog)。
+这些增量**升级路径跟 v0.7 → v0.8 主路径一致**（admin bootstrap + 密码管理一次性迁移完，后续 incremental upgrade 无额外鉴权步骤），完整增量逐版见 [changelog](/changelog)。
 :::
 
 ### 行为变化
