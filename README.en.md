@@ -204,10 +204,10 @@ Stable, Apache-2.0, published to npm.
 
 | Package | Version | Role |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.14` | `anet` CLI — hub / dashboard / agent / demo launcher |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.15` | `anet` CLI — hub / dashboard / agent / demo launcher |
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.1` | MCP + REST + SSE hub (SQLite) |
 | [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.6` | Web UI — Next.js 16, 4 themes, Overview / Nodes / Tasks / Messages / Chat / Admin / Settings |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.9` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.10` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK |
 
 The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. You only ever globally install one package.
 
@@ -257,7 +257,7 @@ What's solid, and what to watch out for.
 ---
 
 > [!IMPORTANT]
-> **Current stable: v0.9.1** (Apache 2.0, shipped 2026-05-15 via npm `latest` tag — the [#130 hotfix](https://github.com/sleep2agi/agent-network/issues/130) for intern tool calling, see [changelog](https://anet.sh/en/changelog#v0-9-1-patch-130-intern-tool-calling-hotfix-promoted-2026-05-15-stable); project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
+> **Current stable: v0.9.2** (Apache 2.0, shipped 2026-05-16 via npm `latest` tag — concurrency + UX hotfix ([#129](https://github.com/sleep2agi/agent-network/issues/129) auth fast-fail / [#132](https://github.com/sleep2agi/agent-network/issues/132) retry-with-backoff / [#133](https://github.com/sleep2agi/agent-network/issues/133) runtime-first wizard / [#136](https://github.com/sleep2agi/agent-network/issues/136) `anet node start` default reverted to foreground), see [changelog](https://anet.sh/en/changelog#v0-9-2-patch-auth-fast-fail-fan-out-retry-wizard-redo-122-default-tmux-reverted-2026-05-16-stable); project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
 >
 > **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
 

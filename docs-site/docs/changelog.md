@@ -8,6 +8,69 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## v0.9.2 — **Patch: Auth fast-fail + Fan-out retry + Wizard 重做 + #122 default-tmux 回退**（2026-05-16）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.1.15`
+- `@sleep2agi/agent-node@2.3.10`
+- `@sleep2agi/commhub-server@0.8.1` *(无变化)*
+- `@sleep2agi/agent-network-dashboard@0.4.6` *(无变化)*
+
+> 发布流程沿用 [v0.9.0 split-brain lessons (#126)](https://github.com/sleep2agi/agent-network/issues/126) 的两 phase publish SOP（先 `--tag preview` 上传 tarball + curl verify HTTP 200，再 `npm dist-tag add @<v> latest`）避免 `npm publish --tag latest` 直推路径在 CDN 异步窗口内的 split-brain；版本号本身用 clean semver（无 `-preview.N` 后缀，便于 `anet upgrade` 比较 + npm range 选择）。
+
+### 5 P0 fix chain
+
+**1. [#129](https://github.com/sleep2agi/agent-network/issues/129) Vendor API auth 快速失败 + vendor-specific URL hint**（[`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3)）
+Vincent telegram 4991 / 通信龙 dispatch 46fd553f：intern key 过期时 agent-node 之前默默等 120s 才报「claude-agent-sdk 调用超时」通用错误。现在 `isAuthError(msg)` 启发式正则覆盖 Anthropic 标准（401/403、`invalid_api_key`、`authentication_error`）+ intern A02xx 系列（user_token_expired）+ 通用 OpenAI-compat 401 envelope（`unauthorized` / `expired_token`），命中后**短路 retry loop**（用同一个坏 key 重试只是浪费 backoff window）并按 `ANTHROPIC_BASE_URL` 域名 print **vendor-specific URL hint**（intern → `chat.intern-ai.org.cn`、minimax → `platform.minimaxi.com`、anthropic → `console.anthropic.com`、其他 → generic）。从 v0.9.1 之前的 15min 缩到 **<5s** 拿到具体修复 URL。详见 [troubleshooting → Vendor API auth 失败](/troubleshooting#vendor-api-auth-失败401-invalid_api_key-expired_token-intern-a02xx-user_token_expired)。
+
+**2. [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) Fan-out timeout + retry-with-backoff**（同 commit [`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3)）
+[SDK concurrency investigation Phase 3](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md)：30-agent papercope fan-out demo 下 intern API per-request latency 拉到 17-37s（10-20× 单 agent 1.57s 基线），老 120s timeout 中途 abort 让 25/30 子 agent 静默 fail。两件事：
+- `CLAUDE_TIMEOUT_MS` default 120000 → **300000**（300s，给 intern queue drain 留 buffer）
+- 新 `CLAUDE_MAX_RETRIES` env var，default `2`（共 3 attempts）；transient error / timeout backoff `4s, 8s + 0-1s jitter`（jitter 散开 herd retries 防一窝蜂打 vendor queue）；auth-class 错误**不** retry（接 #129 fast-fail）
+
+设 `CLAUDE_MAX_RETRIES=0` 退回 v0.9.1 no-retry 行为。
+
+**3. [#133](https://github.com/sleep2agi/agent-network/issues/133) `anet node create` runtime-first wizard**（[`29fd290`](https://github.com/sleep2agi/agent-network/commit/29fd290)）
+Vincent 5101 catch：老 vendor-first selector 只 enum claude-agent-sdk vendors（intern / MiniMax / Claude / GLM / ...），用 `claude-code-cli` (Anthropic Max plan + 本地 `claude` CLI 登录态) 或 `codex-sdk` (OpenAI `codex auth login`) 的用户**implicitly stuck** —— 必须知道传 `--runtime codex-sdk` 才能 skip vendor picker。新 flow：
+1. `selectRuntime()` 3-way picker: `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`
+2. `claude-agent-sdk` → 继续走 `selectVendorAndModel()` (existing flow)
+3. `claude-code-cli` → print `claude auth login` hint, skip vendor
+4. `codex-sdk` → print `codex auth login` hint, skip vendor
+
+backward-compat：显式 `--runtime <X>` 仍 skip picker；demo / batch / 已 `--env` 注入 credential 的 scripted 调用路径不变。
+
+**4. [#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 v0.9.0 #122 默认 detached tmux**（[`a3a3fd4`](https://github.com/sleep2agi/agent-network/commit/a3a3fd4)）
+Vincent telegram 5158/5159/5161：detached tmux + bun claude-code-cli 调 `setRawMode` 在 macOS 触发 `errno 5 (EIO)` —— detached child 的 stdio 不是 real PTY。回退 v0.9.0 短暂引入的 4 条件 wrap 矩阵：
+- `anet node start <alias>` → **默认前台**（修 macOS bug）
+- `anet node start <alias> --tmux` → `tmux new -As <alias>` **attached** 模式（PTY chain 保持完整不再触发 setRawMode bug）
+
+移除 `--foreground` / `--no-tmux` / `--attach` flag（默认就是 foreground，`--tmux` 自带 attach）。`anet project up` 内部 `startNodeTmuxSession` 路径**仍是 detached**（在 macOS bun 下可能 re-trigger setRawMode，跟进 follow-up 待）。
+
+**5. Wizard 静默退出修复链 [#135](https://github.com/sleep2agi/agent-network/issues/135) / [#138](https://github.com/sleep2agi/agent-network/issues/138) / [#139](https://github.com/sleep2agi/agent-network/issues/139)**
+- **#135** Node v24 top-level await warning ([`fa08eb4`](https://github.com/sleep2agi/agent-network/commit/fa08eb4) v3)：dispatch 包进 `async main()` 解决 root cause
+- **#138** `@inquirer/prompts + readline ask()` stdin mismatch ([`b8c5885`](https://github.com/sleep2agi/agent-network/commit/b8c5885) preview.5 + [`596cfe9`](https://github.com/sleep2agi/agent-network/commit/596cfe9) preview.6)：wizard `select()` 之后 silent exit 修复 + `launchAgent` await child before parent exit
+- **#139** dispatch add await to 5 async commands ([`15cf6de`](https://github.com/sleep2agi/agent-network/commit/15cf6de) preview.7)
+
+跟 #133 runtime-first wizard 配合：让交互式 wizard 在 Node v24 环境跑得稳。
+
+### 6 SOP 升级
+
+- **两 phase publish SOP** 沿用（v0.9.0 split-brain lessons #126）—— 避免 npm `--tag latest` 直推
+- **macOS PTY 边界 case** 进入 release smoke checklist（detached tmux + setRawMode）
+- **fan-out / 高并发 timeout 调参文档化**：[troubleshooting Vendor API 超时段](/troubleshooting#vendor-api-超时fan-out-高并发-132-retry-with-backoff) + [agent-node.md env table](/guide/agent-node#环境变量)
+- **runtime-first wizard 区分 anet create vs --batch**：batch wizard 仍 vendor-first（用 `selectVendorAndModel()` 但不走 `selectRuntime()`），doc 显式消歧
+- **CLAUDE_MAX_RETRIES=0 opt-out**：保留退回 v0.9.1 行为路径供调试 / 跑老脚本
+- **vendor-specific remediation hint 路由**进入设计原则：每加一个 verified vendor 都附 URL hint
+
+### Breaking changes / Migration
+
+- ⚠ **`anet node start` 默认行为再变**（v0.9.0 → v0.9.1 短暂 detached → v0.9.2 回退前台）：脚本/CI 上 v0.9.1 加的 `--foreground` / `--no-tmux` flag **v0.9.2 已移除**（默认前台无需 flag）；想 tmux 用 `--tmux` opt-in attached 模式
+- ⚠ **`anet node create` interactive 行为变**（vendor-first → runtime-first）：scripted `--runtime <X>` 仍 skip picker，**没有 backward-compat 问题**；交互用户体验改善（3 runtime 平等可选）
+- ⚠ **`CLAUDE_TIMEOUT_MS` 默认从 120 → 300**：之前显式覆盖到更短超时的脚本不受影响；fan-out 场景默认更宽容
+- ✅ **新 `CLAUDE_MAX_RETRIES` env var**：默认 `2`（共 3 attempts）。设 `0` 退回 v0.9.1 no-retry 行为
+
+---
+
 ## v0.9.1 — **Patch: #130 intern tool-calling hotfix promote**（2026-05-15）✅ stable
 
 **版本同步**（npm `latest` tag）：

@@ -8,6 +8,69 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## v0.9.2 — **Patch: Auth fast-fail + fan-out retry + wizard redo + #122 default-tmux reverted** (2026-05-16) ✅ stable
+
+**Version sync** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.1.15`
+- `@sleep2agi/agent-node@2.3.10`
+- `@sleep2agi/commhub-server@0.8.1` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.4.6` *(unchanged)*
+
+> The release flow follows the [v0.9.0 split-brain lessons (#126)](https://github.com/sleep2agi/agent-network/issues/126) two-phase publish SOP (first `--tag preview` to upload + curl-verify the tarball returns HTTP 200, then `npm dist-tag add @<v> latest`), which avoids the `npm publish --tag latest` direct path's split-brain in the CDN async window. The version numbers themselves are clean semver (no `-preview.N` suffix — easier for `anet upgrade` comparison + npm range resolution).
+
+### 5 P0 fix chain
+
+**1. [#129](https://github.com/sleep2agi/agent-network/issues/129) Vendor API auth fast-fail + vendor-specific URL hint** ([`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3))
+Vincent telegram 4991 / 通信龙 dispatch 46fd553f: when an intern key expired, agent-node previously silently waited 120s then printed a generic "claude-agent-sdk 调用超时" error. Now the `isAuthError(msg)` heuristic covers the Anthropic standard (401/403, `invalid_api_key`, `authentication_error`) plus intern's A02xx family (`user_token_expired`) plus generic OpenAI-compat 401 envelopes (`unauthorized` / `expired_token`); on hit it **short-circuits the retry loop** (retrying with the same bad key just wastes the backoff window) and prints a **vendor-specific URL hint** based on `ANTHROPIC_BASE_URL` host (intern → `chat.intern-ai.org.cn`, minimax → `platform.minimaxi.com`, anthropic → `console.anthropic.com`, otherwise generic). The clear error returns in **under 5 seconds** instead of the 15 minutes pre-v0.9.1 took. Full write-up: [troubleshooting → Vendor API auth failure](/en/troubleshooting#vendor-api-auth-failure-401-invalid_api_key-expired_token-intern-a02xx-user_token_expired).
+
+**2. [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) Fan-out timeout + retry-with-backoff** (same commit [`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3))
+The [SDK concurrency investigation Phase 3](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md): in a 30-agent papercope fan-out demo, intern API per-request latency stretched to 17-37s (10-20× the 1.57s single-agent baseline), so the old 120s timeout fired mid-stream and 25 / 30 sub-agents silently failed. Two changes:
+- `CLAUDE_TIMEOUT_MS` default 120000 → **300000** (300s, leaves room for the intern queue to drain)
+- New `CLAUDE_MAX_RETRIES` env var, default `2` (3 attempts total); on transient errors / timeouts, backoff `4s, 8s + 0-1s jitter` (jitter spreads herd retries across the recovering vendor queue); auth-class errors **do not** retry (handled by #129 fast-fail above)
+
+Set `CLAUDE_MAX_RETRIES=0` to revert to the v0.9.1 no-retry behavior.
+
+**3. [#133](https://github.com/sleep2agi/agent-network/issues/133) `anet node create` runtime-first wizard** ([`29fd290`](https://github.com/sleep2agi/agent-network/commit/29fd290))
+Vincent 5101 catch: the old vendor-first selector enumerated only claude-agent-sdk vendors (intern / MiniMax / Claude / GLM / ...), leaving users who want `claude-code-cli` (Anthropic Max plan + local `claude` CLI login) or `codex-sdk` (OpenAI `codex auth login`) **implicitly stuck** — they had to know to pass `--runtime codex-sdk` to skip the vendor picker. New flow:
+1. `selectRuntime()` 3-way picker: `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`
+2. `claude-agent-sdk` → continues into `selectVendorAndModel()` (existing flow)
+3. `claude-code-cli` → prints `claude auth login` hint, skips vendor
+4. `codex-sdk` → prints `codex auth login` hint, skips vendor
+
+Backward-compatible: explicit `--runtime <X>` still skips the picker; demo / batch / scripted callers that already inject credentials via `--env` are unaffected.
+
+**4. [#136](https://github.com/sleep2agi/agent-network/issues/136) Revert v0.9.0 #122 default-detached-tmux** ([`a3a3fd4`](https://github.com/sleep2agi/agent-network/commit/a3a3fd4))
+Vincent telegram 5158/5159/5161: detached tmux + bun claude-code-cli calling `setRawMode` triggers `errno 5 (EIO)` on macOS — the detached child's stdio is not a real PTY. Reverts the brief v0.9.0 four-condition wrap matrix:
+- `anet node start <alias>` → **foreground by default** (fixes the macOS bug)
+- `anet node start <alias> --tmux` → `tmux new -As <alias>` in **attached** mode (keeps the PTY chain intact, no setRawMode bug)
+
+Removes the `--foreground` / `--no-tmux` / `--attach` flags (foreground is the default; `--tmux` already attaches). `anet project up`'s internal `startNodeTmuxSession` path **still uses detached** (which can re-trigger setRawMode on macOS bun — follow-up tracking).
+
+**5. Wizard silent-exit fix chain [#135](https://github.com/sleep2agi/agent-network/issues/135) / [#138](https://github.com/sleep2agi/agent-network/issues/138) / [#139](https://github.com/sleep2agi/agent-network/issues/139)**
+- **#135** Node v24 top-level-await warning ([`fa08eb4`](https://github.com/sleep2agi/agent-network/commit/fa08eb4) v3): wrap dispatch in an `async main()` to fix the root cause
+- **#138** `@inquirer/prompts` + `readline` ask() stdin mismatch ([`b8c5885`](https://github.com/sleep2agi/agent-network/commit/b8c5885) preview.5 + [`596cfe9`](https://github.com/sleep2agi/agent-network/commit/596cfe9) preview.6): the wizard silently exiting after `select()` is fixed + `launchAgent` now `await`s its child before the parent exits
+- **#139** dispatch — add `await` to 5 async commands ([`15cf6de`](https://github.com/sleep2agi/agent-network/commit/15cf6de) preview.7)
+
+Pairs with #133's runtime-first wizard to keep the interactive wizard stable on Node v24.
+
+### 6 SOP updates
+
+- **Two-phase publish SOP** continues (v0.9.0 split-brain lessons #126) — avoid the `npm --tag latest` direct path
+- **macOS PTY edge case** enters the release smoke checklist (detached tmux + setRawMode)
+- **Fan-out / high-concurrency timeout tuning is documented**: [troubleshooting Vendor API timeout section](/en/troubleshooting#vendor-api-timeout-high-concurrency-fan-out-132-retry-with-backoff) + [agent-node.md env table](/en/guide/agent-node#environment-variables)
+- **Runtime-first wizard split: `anet create` vs `--batch`** — the batch wizard is still vendor-first (it uses `selectVendorAndModel()` but does not go through `selectRuntime()`), and the docs now disambiguate explicitly
+- **`CLAUDE_MAX_RETRIES=0` opt-out** — keeps a path back to v0.9.1 no-retry behavior for debugging / legacy scripts
+- **Vendor-specific remediation-hint routing** is now a design principle — every newly verified vendor must ship a remediation URL hint
+
+### Breaking changes / Migration
+
+- ⚠ **`anet node start` default behavior swung again** (v0.9.0 → v0.9.1 brief detached → v0.9.2 reverted to foreground): the `--foreground` / `--no-tmux` flags scripts/CI added in v0.9.1 are **removed in v0.9.2** (foreground is the default, no flag needed); for tmux, opt in with `--tmux` (attached mode)
+- ⚠ **`anet node create` interactive flow changed** (vendor-first → runtime-first): scripted `--runtime <X>` still skips the picker, so **no backward-compat issue**; the interactive UX improves (all 3 runtimes are first-class)
+- ⚠ **`CLAUDE_TIMEOUT_MS` default 120 → 300**: scripts that already explicitly override to a shorter timeout are unaffected; the default is more tolerant of fan-out scenarios
+- ✅ **New `CLAUDE_MAX_RETRIES` env var**: default `2` (3 attempts total). Set `0` to revert to v0.9.1's no-retry behavior
+
+---
+
 ## v0.9.1 — **Patch: #130 intern tool-calling hotfix promoted** (2026-05-15) ✅ stable
 
 **Version sync** (npm `latest` tag):
