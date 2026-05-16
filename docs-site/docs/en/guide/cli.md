@@ -256,7 +256,7 @@ anet node create <name> [options]
 
 | Parameter | Default | Description |
 |------|--------|------|
-| `--runtime` | omit it to enter the interactive **vendor picker** (runtime is derived from the vendor — see [Getting Started §5](/en/guide/getting-started)) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `--runtime` | omit it to enter the interactive **runtime-first wizard** (since v0.9.2 [#133](https://github.com/sleep2agi/agent-network/issues/133), per Vincent's 5101 push: a 3-way picker chooses `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` first; **only** `claude-agent-sdk` continues into the vendor picker. `claude-code-cli` prints a `claude auth login` hint and skips the vendor step; `codex-sdk` prints a `codex auth login` hint and does the same) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `--model` | (per runtime default) | Model name |
 
 **Examples**:
