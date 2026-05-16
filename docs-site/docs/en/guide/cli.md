@@ -294,9 +294,11 @@ The following fields are generated **conditionally** — not every node has them
 
 ### anet node start
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2098)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2209)
 
-Start an agent node. From [#122](https://github.com/sleep2agi/agent-network/issues/122) (v0.9.0+), the default behavior **auto-wraps the node into a detached tmux session** (session name = alias), so recovering 22 machines after a reboot via `anet project up` no longer needs hand-rolled `tmux new-session -d -s ...` calls.
+Start an agent node. **Default is foreground** (stdio inherits the current terminal); pass `--tmux` to launch the node inside a new tmux session and attach.
+
+> v0.9.0 briefly introduced an "auto-wrap into detached tmux" default ([#122](https://github.com/sleep2agi/agent-network/issues/122)). v0.9.2 reverts it via [#136](https://github.com/sleep2agi/agent-network/issues/136) — detached tmux triggered `setRawMode errno 5` on macOS bun (the detached child's stdio isn't a real PTY, claude-code-cli's setRawMode call failed). The new `--tmux` path is **attached** (`tmux new -As`), keeping the PTY chain intact so setRawMode works everywhere.
 
 ```bash
 anet node start <name> [options]
@@ -304,40 +306,31 @@ anet node start <name> [options]
 
 | Parameter | Default | Description |
 |------|--------|------|
-| `--new-session` | false | Ignore previous session, create a new one (the "start over" path on the `--resume` chain) |
-| `--foreground` / `--no-tmux` | false | Force foreground run (aliases of each other) — no tmux wrap; stdout/stderr stay on the current terminal |
-| `--attach` | false | Start in detached tmux, then immediately `tmux attach` (with a 200 ms grace period so boot output lands before attach) |
+| `--tmux` | false | Start in a new tmux session and attach (session name = alias; `-A` attaches if it already exists). Detach with `Ctrl-B D`. |
+| `--new-session` | false | Ignore previous Claude session, create a new one (the "start over" path on the `--resume` chain) |
 
-**Auto-wrap decision matrix (all four must hold)**:
+**Default (no flag)**:
 
-| Condition | Failure mode |
-|------|--------|
-| `--foreground` / `--no-tmux` not set | → foreground |
-| `$TMUX` not set (we're not already inside a tmux pane) | → foreground (avoid tmux nesting), verify [`cli.ts:2111`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2111) |
-| stdout is a TTY | → foreground (scripts/pipes don't want a detached surprise) |
-| tmux is installed | → foreground + ⚠ "install tmux" hint ([`cli.ts:2117-2118`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2117)) |
-
-**Same-name tmux session already exists**: refuses to clobber, prints 3 actionable hints ([`cli.ts:2136-2141`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2136)):
-
-```
-[anet] ❌ tmux session "<alias>" already exists.
-[anet]    Attach:   tmux a -t <alias>
-[anet]    Restart:  anet node stop <alias> && anet node start <alias>
-[anet]    Run here: anet node start <alias> --foreground
+```bash
+anet node start <name>
+# Foreground in this terminal, stdio inherited. Ctrl-C to exit.
+# Want a background tmux session? Either roll your own —
+#   tmux new -s <name>
+#   anet node start <name>
+# — or pass --tmux for the one-liner:
+anet node start <name> --tmux
 ```
 
-**On successful wrap**:
+**`--tmux` semantics**: internally runs `tmux new -As <alias> -c <cwd> "anet node start <alias>"`:
+- `-A` — if a same-name session already exists, attach to it instead of erroring (rerun-friendly)
+- `-s` — session name = alias (discoverability)
+- `-c` — start in the current cwd
+- the inner command does **not** carry `--tmux`, so the inner `anet node start` runs foreground — no recursion
+- the parent terminal becomes a tmux client, keeping the PTY chain intact: `claude-code-cli` setRawMode, `Ctrl-C`, raw input all work normally
 
-```
-[anet] ▶ Started "<alias>" in tmux session "<alias>" (detached)
-[anet]   Attach:  tmux a -t <alias>
-[anet]   Stop:    anet node stop <alias>
-[anet]   Logs:    anet logs <alias>
-```
+**`--tmux` fallback**: if tmux isn't installed, the command errors out and suggests installing tmux or dropping the flag to run foreground.
 
-> **Two layers of recursion guard**: (1) `$TMUX` env detection — tmux injects this variable into every process inside a pane, so when `anet project up` (#117) spawns an inner `anet node start` it sees `$TMUX` set and falls through to foreground; (2) `startNodeTmuxSession` passes an explicit `--foreground` to the inner command ([`cli.ts:35-41`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35)), so even when `$TMUX` doesn't propagate (weird pty setups) there is no infinite nesting. All 7 internal call sites — `anet project up` / `demo debate / socialmedia / pr-review / sci-team` — pick this up automatically.
-
-**`anet node stop` matched change**: when a same-name tmux session exists, **`tmux kill-session` runs first**, then SIGTERM the recorded PID + notify the hub. Output reports either "tmux + process killed" or just "process killed".
+**`anet node stop` behavior**: when a same-name tmux session exists, **`tmux kill-session` runs first**, then SIGTERM the recorded PID + notify the hub. This applies both to sessions created by `--tmux` and to the detached sessions `anet project up` ([#117](https://github.com/sleep2agi/agent-network/issues/117)) spawns; output reports either "tmux + process killed" or just "process killed".
 
 ### anet status
 
@@ -487,13 +480,15 @@ anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y
 
 **Node selection**: `--only` / `--exclude` take aliases or node IDs (comma-separated, parsed via `splitCsv`).
 
-**Pairs with #122 / #115**: every inner `anet node start` is spawned by [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35); the inner command carries `--foreground` to avoid tmux nesting, and `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` is auto-injected to skip Claude Code's resume prompt — recovering 22 nodes after reboot via `anet project up` is genuine **zero-keystroke recovery**.
+**Pairs with #115**: every inner `anet node start` is spawned by [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35); `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` is auto-injected to skip Claude Code's resume prompt — recovering 22 nodes after reboot via `anet project up` is genuine **zero-keystroke recovery**.
+
+> ⚠ Since v0.9.2 `anet node start` defaults to foreground ([#136](https://github.com/sleep2agi/agent-network/issues/136)). `anet project up` still spawns each node into a detached tmux session as before, which can re-trigger `setRawMode errno 5` on macOS bun (same root cause as #136) — affected users should pre-create a `tmux new -s mybox` then sequentially run `anet node start <alias> --tmux` per node. Tracking issue for the bulk-detached path: #136 follow-up.
 
 ### anet attach
 
 > ⏳ **Status: [#121](https://github.com/sleep2agi/agent-network/issues/121) not yet implemented** (P2; expected v0.9.x post-release)
 
-Design goal: `anet attach <alias>` = single-command attach to the detached tmux session for that alias — equivalent to `tmux attach -t <alias>` but with alias→tmux-session-name resolution (handles `node_id` references / alias normalization). For now use `tmux a -t <alias>` directly, or `anet node start <alias> --attach` (the `--attach` flag from [#122](https://github.com/sleep2agi/agent-network/issues/122) — detached + immediate attach).
+Design goal: `anet attach <alias>` = single-command attach to the detached tmux session for that alias — equivalent to `tmux attach -t <alias>` but with alias→tmux-session-name resolution (handles `node_id` references / alias normalization). For now use `tmux a -t <alias>` directly, or `anet node start <alias> --tmux` (the v0.9.2 `--tmux` flag uses `tmux new -As` which attaches if the session already exists — see [#136](https://github.com/sleep2agi/agent-network/issues/136)).
 
 ### anet network invite
 

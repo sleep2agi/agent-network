@@ -300,9 +300,11 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 
 ### anet node start
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2098)
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2209)
 
-启动 Agent 节点。默认行为从 [#122](https://github.com/sleep2agi/agent-network/issues/122)（v0.9.0+）起改成**自动把节点 wrap 进一个 detached tmux session**（session 名 = alias），所以 22 台机器重启后跑 `anet project up` 不再需要手动 `tmux new-session -d -s ...`。
+启动 Agent 节点。**默认前台运行**（stdio 接当前终端）；想后台跑或想用 tmux 管理，加 `--tmux` 开 tmux session 并 attach。
+
+> v0.9.0 短暂引入过「默认 detached tmux」行为（[#122](https://github.com/sleep2agi/agent-network/issues/122)），v0.9.2 通过 [#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 —— detached tmux 触发了 macOS bun `setRawMode errno 5`（detached child 的 stdio 不是 real PTY，claude-code-cli setRawMode 调用失败）。现在的 `--tmux` 走 **attached** 模式（`tmux new -As`），PTY chain 保持完整不再触发 bug。
 
 ```bash
 anet node start <name> [options]
@@ -310,40 +312,31 @@ anet node start <name> [options]
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--new-session` | false | 忽略旧 session，创建新的（同 `--resume` chain 的「重新开始」） |
-| `--foreground` / `--no-tmux` | false | 强制前台跑（互为别名）—— 不 wrap tmux，stdout/stderr 接当前终端 |
-| `--attach` | false | detached tmux 起好后立即 `tmux attach`（200ms grace 让 boot 输出先打出来）|
+| `--tmux` | false | 在新 tmux session 里跑并 attach 进入（session 名 = alias；`-A` 已存在则 attach）；按 `Ctrl-B D` detach |
+| `--new-session` | false | 忽略旧 Claude session，创建新的（同 `--resume` chain 的「重新开始」） |
 
-**自动 wrap 的判定（4 条同时成立）**：
+**默认（无 flag）**：
 
-| 条件 | 失败行为 |
-|------|---------|
-| 没显式 `--foreground` / `--no-tmux` | → 前台跑 |
-| `$TMUX` 未设置（不在 tmux pane 里）| → 前台跑（避免 tmux 嵌套），verify [`cli.ts:2111`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2111) |
-| stdout 是 TTY | → 前台跑（脚本/管道场景不要 detached surprise）|
-| 系统装了 tmux | → 前台跑 + ⚠ 提示装 tmux（[`cli.ts:2117-2118`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2117)）|
-
-**同名 tmux session 已存在**：拒绝 clobber，打印 3 行 actionable hint（[`cli.ts:2136-2141`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2136)）：
-
-```
-[anet] ❌ tmux session "<alias>" already exists.
-[anet]    Attach:   tmux a -t <alias>
-[anet]    Restart:  anet node stop <alias> && anet node start <alias>
-[anet]    Run here: anet node start <alias> --foreground
+```bash
+anet node start <name>
+# 在当前终端跑，stdio inherit。Ctrl-C 退出。
+# 想后台跑请自己 tmux 包：
+#   tmux new -s <name>
+#   anet node start <name>
+# 或一行：
+anet node start <name> --tmux
 ```
 
-**Wrap 成功后**：
+**`--tmux` 行为**：内部执行 `tmux new -As <alias> -c <cwd> "anet node start <alias>"`：
+- `-A` —— alias 已有同名 session 直接 attach（rerun 友好）
+- `-s` —— session 名 = alias（discoverability）
+- `-c` —— start 在当前 cwd
+- inner cmd 不带 `--tmux`，所以内层就是 foreground 跑，没有递归
+- 终端是 tmux client，PTY chain 完整：claude-code-cli 的 setRawMode、`Ctrl-C`/raw input 都正常工作
 
-```
-[anet] ▶ Started "<alias>" in tmux session "<alias>" (detached)
-[anet]   Attach:  tmux a -t <alias>
-[anet]   Stop:    anet node stop <alias>
-[anet]   Logs:    anet logs <alias>
-```
+**`--tmux` 失败回退**：如果 tmux 未装，命令拒绝 + 提示装 tmux 或回退默认前台。
 
-> **递归保护两层**：（1）`$TMUX` env 检测 —— tmux 给 pane 内进程注入这个变量，从 #117 `anet project up` 内层 spawn 时能感知；（2）`startNodeTmuxSession` 内层命令显式带 `--foreground`（[`cli.ts:35-41`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35)），即使 `$TMUX` 没传过来也不会无限套娃。`anet project up` / `demo debate / socialmedia / pr-review / sci-team` 7 处内部调用都自动走这条路。
-
-**`anet node stop` 联动改**：检测到同名 tmux session 时**先 `tmux kill-session`**再 SIGTERM 进程 + 通知 hub，输出会告诉你 "tmux + process killed" 还是 "process killed"。
+**`anet node stop` 行为**：检测到同名 tmux session 时**先 `tmux kill-session`**再 SIGTERM 进程 + 通知 hub。这对 `--tmux` 创建的 session、以及 `anet project up` ([#117](https://github.com/sleep2agi/agent-network/issues/117)) 创建的 detached session 都适用，输出会告诉你 "tmux + process killed" 还是 "process killed"。
 
 ### anet status
 
@@ -493,13 +486,15 @@ anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y
 
 **节点选择**：`--only` / `--exclude` 接 alias 或 node_id（逗号分隔），`splitCsv` 拆分。
 
-**联动 #122 / #115**：每个内层 `anet node start` spawn 跑 [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35)，inner cmd 自动带 `--foreground` 避免 tmux 嵌套，env 自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` 跳过 Claude Code resume prompt —— 22 节点 reboot 后 `anet project up` 是真正的**零键盘恢复**。
+**联动 #115**：每个内层 `anet node start` spawn 跑 [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35)，env 自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` 跳过 Claude Code resume prompt —— 22 节点 reboot 后 `anet project up` 是真正的**零键盘恢复**。
+
+> ⚠ v0.9.2 起 `anet node start` 默认前台（[#136](https://github.com/sleep2agi/agent-network/issues/136)）。`anet project up` 仍走 detached tmux 起 N 个节点的内层 `anet node start <alias>`，在 macOS bun 下可能再触发 `setRawMode errno 5`（同 #136 根因）—— 受影响用户改用 `tmux new -s mybox` 然后顺序 `anet node start <alias> --tmux` 起每个节点。批量 detached 路径的修复跟进见 #136 follow-up。
 
 ### anet attach
 
 > ⏳ **状态：[#121](https://github.com/sleep2agi/agent-network/issues/121) 待实施**（P2，预计 v0.9.x post-release 补）
 
-设计目标：`anet attach <alias>` = 一行命令 attach 到 alias 对应的 detached tmux session，等价于 `tmux attach -t <alias>` 但带 alias→tmux session 名解析（处理 `node_id` 引用 / 别名规范化）。当前请直接用 `tmux a -t <alias>` 或 `anet node start <alias> --attach`（[#122](https://github.com/sleep2agi/agent-network/issues/122) 的 `--attach` flag，detached + 立刻 attach）。
+设计目标：`anet attach <alias>` = 一行命令 attach 到 alias 对应的 detached tmux session，等价于 `tmux attach -t <alias>` 但带 alias→tmux session 名解析（处理 `node_id` 引用 / 别名规范化）。当前请直接用 `tmux a -t <alias>` 或 `anet node start <alias> --tmux`（v0.9.2 起的 `--tmux` flag 用 `tmux new -As`，已存在 session 直接 attach；见 [#136](https://github.com/sleep2agi/agent-network/issues/136)）。
 
 ### anet network invite
 

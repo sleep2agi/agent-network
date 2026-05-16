@@ -33,12 +33,10 @@ function killTmuxSession(sessionName: string) {
   try { execFileSync("tmux", ["kill-session", "-t", sessionName], { stdio: "pipe" }); } catch {}
 }
 function startNodeTmuxSession(sessionName: string, alias: string) {
-  // #122 — inner cmd carries explicit `--foreground` (defense-in-depth alongside
-  // the $TMUX env check inside startCommand). Without it, the inner
-  // `anet node start` would itself try to wrap into tmux when default
-  // auto-tmux is enabled. With the flag the intent is self-documenting and
-  // resilient to non-standard pty environments where $TMUX may not propagate.
-  execFileSync("tmux", ["new-session", "-d", "-s", sessionName, `anet node start ${shellQuote(alias)} --foreground`], { stdio: "pipe" });
+  // #117 helper used by `anet project up/restart` + the debate/social/PR-review
+  // demos. Spawns a detached tmux session that runs `anet node start <alias>`
+  // (which since #136 defaults to foreground — no auto-tmux nesting).
+  execFileSync("tmux", ["new-session", "-d", "-s", sessionName, `anet node start ${shellQuote(alias)}`], { stdio: "pipe" });
 }
 function tmuxSessionRunning(name: string): boolean {
   try { execFileSync("tmux", ["has-session", "-t", name], { stdio: "pipe" }); return true; }
@@ -861,10 +859,9 @@ Project (cwd-wide):
 Session:
   anet node create <name> --resume <id>  Bind an existing Claude session
   anet node create <name> --resume-latest  Bind the latest Claude session
-  anet node start <name>                 Start in detached tmux (default, TTY only)
-  anet node start <name> --foreground    Start in this terminal (no tmux wrap)
-  anet node start <name> --attach        Detached tmux + immediately attach
-  anet node start <name> --new-session   Start with fresh session
+  anet node start <name>                 Start in this terminal (foreground, default)
+  anet node start <name> --tmux          Start in a new tmux session + attach
+  anet node start <name> --new-session   Start with fresh Claude session
   anet node resume <name> --session <id> Resume specific session
   anet session ls               List Claude Code sessions
 
@@ -2212,29 +2209,24 @@ async function startCommand() {
   const opts = parseOpts();
   const forceNewSession = !!opts["new-session"];
 
-  // #122 — auto-wrap in tmux unless any of these disable it.
-  //   --foreground / --no-tmux : user explicit opt-out (alias)
-  //   $TMUX set                : already inside a tmux pane → no nesting
-  //   stdout non-TTY           : scripts/pipes don't want detached surprise
-  //   tmux missing             : graceful foreground + one-line warn
-  const forceForeground = opts.foreground === "true" || opts["no-tmux"] === "true";
-  const attachAfter = opts.attach === "true";
-  const insideTmux = !!process.env.TMUX;
-  const isTty = !!process.stdout.isTTY;
-  const haveTmux = tmuxAvailable();
-  const shouldWrap = !forceForeground && !insideTmux && isTty && haveTmux;
+  // #136 (Vincent telegram 5158/5159/5161) — revert #122 default auto-wrap.
+  // The detached-tmux-by-default path triggered `setRawMode errno 5` on
+  // macOS bun (bun's claude-code-cli wants to call setRawMode on a real PTY
+  // and the detached tmux child's stdio doesn't satisfy that). Default is
+  // now plain foreground; users who want a tmux session opt in with
+  // `--tmux`. The `--tmux` path uses `tmux new -As <alias>` ATTACHED
+  // (foreground enter, not -d / not detached) — attached mode keeps the
+  // PTY chain intact so setRawMode works on every platform. Users can
+  // detach with `Ctrl-B D` per normal tmux behavior.
+  const wantTmux = opts.tmux === "true";
 
-  if (!forceForeground && !insideTmux && isTty && !haveTmux) {
-    console.warn(`[anet] ⚠ tmux not installed — starting in foreground.`);
-    console.warn(`[anet]    Install tmux for detached background start (recommended for long-running nodes).`);
-  }
-
-  if (!shouldWrap) {
+  if (!wantTmux) {
+    // Default: spawn the agent runtime in this terminal.
     await launchAgent(id, forceNewSession);
     return;
   }
 
-  // Resolve alias for the tmux session name.
+  // --tmux path: resolve alias for the tmux session name + inner cmd.
   const resolved = resolveNodeRef(id);
   if (!resolved) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
@@ -2242,40 +2234,31 @@ async function startCommand() {
   }
   const alias = nodeDisplayName(resolved.id, resolved.profile);
 
-  // Refuse to clobber an existing tmux session — user might be running
-  // another instance, attaching silently is too risky. Surface 3 actions.
-  if (tmuxSessionRunning(alias)) {
-    console.error(`[anet] ❌ tmux session "${alias}" already exists.`);
-    console.error(`[anet]    Attach:   tmux a -t ${shellQuote(alias)}`);
-    console.error(`[anet]    Restart:  anet node stop ${shellQuote(alias)} && anet node start ${shellQuote(alias)}`);
-    console.error(`[anet]    Run here: anet node start ${shellQuote(alias)} --foreground`);
+  if (!tmuxAvailable()) {
+    console.error(`[anet] ❌ --tmux requested but tmux is not installed.`);
+    console.error(`[anet]    Install tmux (e.g. \`brew install tmux\` / \`apt-get install tmux\`) and retry,`);
+    console.error(`[anet]    or run \`anet node start ${shellQuote(alias)}\` (without --tmux) to start in this terminal.`);
     process.exit(1);
   }
 
-  // Spawn detached tmux. Inner cmd carries `--foreground` so the inner
-  // `anet node start` doesn't try to wrap itself (defense-in-depth alongside
-  // the $TMUX env check above; same pattern as startNodeTmuxSession).
+  // `tmux new -As <alias>`:
+  //   -A  attach if the session already exists (handles the rerun case)
+  //   -s  session name (= alias for discoverability)
+  //   -c  start in cwd
+  //   <cmd> the agent runtime, foreground (no flag — default is foreground)
+  // stdio: 'inherit' makes the parent terminal a tmux client; setRawMode
+  // sees a real PTY through the tmux client/server pair.
   const inner = forceNewSession
-    ? `anet node start ${shellQuote(alias)} --foreground --new-session`
-    : `anet node start ${shellQuote(alias)} --foreground`;
+    ? `anet node start ${shellQuote(alias)} --new-session`
+    : `anet node start ${shellQuote(alias)}`;
+  const tmuxArgs = ["new", "-As", alias, "-c", process.cwd(), inner];
   try {
-    execFileSync("tmux", ["new-session", "-d", "-s", alias, inner], { stdio: "pipe" });
-  } catch (e: any) {
-    console.error(`[anet] ❌ tmux new-session failed: ${e.message || e}`);
-    console.error(`[anet]    Try foreground instead: anet node start ${shellQuote(alias)} --foreground`);
-    process.exit(1);
-  }
-  console.log(`[anet] ▶ Started "${alias}" in tmux session "${alias}" (detached)`);
-  console.log(`[anet]   Attach:  tmux a -t ${shellQuote(alias)}`);
-  console.log(`[anet]   Stop:    anet node stop ${shellQuote(alias)}`);
-  console.log(`[anet]   Logs:    anet logs ${shellQuote(alias)}`);
-
-  if (attachAfter) {
-    // Brief grace period so the user sees boot output once they attach
-    // (otherwise tmux can attach mid-spawn before anything has printed).
-    await new Promise(r => setTimeout(r, 200));
-    const child = spawn("tmux", ["attach", "-t", alias], { stdio: "inherit" });
+    const child = spawn("tmux", tmuxArgs, { stdio: "inherit" });
     child.on("exit", code => process.exit(code || 0));
+  } catch (e: any) {
+    console.error(`[anet] ❌ tmux launch failed: ${e.message || e}`);
+    console.error(`[anet]    Fall back to: anet node start ${shellQuote(alias)}`);
+    process.exit(1);
   }
 }
 
