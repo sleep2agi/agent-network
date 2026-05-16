@@ -926,6 +926,91 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
 }
 
 // ══════════════════════════════════════
+// Codex direct stdio runtime (#141 — opt-in via ANET_CODEX_STDIO_DIRECT=1)
+// ══════════════════════════════════════
+// Sibling of processWithCodex above. Bypasses @openai/codex-sdk wrapper and
+// talks to `codex app-server` directly over line-delimited JSON-RPC stdio.
+// Preview.0 gate: default is still legacy SDK; users opt-in with the env var.
+// Preview.N+1 (after Vincent macOS verify) will flip the default.
+let codexStdio: import("./runtime/codex-stdio-client").CodexStdioClient | null = null;
+let codexStdioThreadId: string | null = null;
+
+async function ensureCodexStdio(): Promise<import("./runtime/codex-stdio-client").CodexStdioClient> {
+  if (codexStdio) return codexStdio;
+  const { CodexStdioClient } = await import("./runtime/codex-stdio-client");
+  const client = new CodexStdioClient();
+  client.on("stderr", (s: string) => debug(`[codex-stderr] ${s.trim()}`));
+  client.on("exit", (info: { code: number | null; signal: string | null }) => {
+    log(`[codex-stdio] app-server exited (code=${info.code} signal=${info.signal})`);
+    codexStdio = null;
+    codexStdioThreadId = null;
+  });
+  client.on("error", (err: Error) => log(`[codex-stdio] subprocess error: ${err.message}`));
+  client.start({ cwd: process.cwd() });
+  await client.request("initialize", { clientInfo: { name: "anet/agent-node", version: "2.3.10" } });
+  codexStdio = client;
+  return client;
+}
+
+async function processWithCodexStdio(task: string, _from: string, images?: string[]): Promise<string> {
+  const client = await ensureCodexStdio();
+  if (!codexStdioThreadId) {
+    const opts: Record<string, unknown> = {
+      model: MODEL || "gpt-5.4",
+      approvalPolicy: "onRequest",
+      sandboxPolicy: { type: "dangerFullAccess" },
+    };
+    if (SESSION_ID) (opts as Record<string, unknown>).threadId = SESSION_ID;
+    const startResp = await client.request<{ thread: { id: string } }>("thread/start", opts);
+    codexStdioThreadId = startResp.thread.id;
+    log(`[codex-stdio] thread/start → ${codexStdioThreadId}`);
+    if (codexStdioThreadId) writebackSession(codexStdioThreadId);
+  }
+
+  // Build UserInput[] mirroring the SDK runtime's text + local_image shape.
+  const input: Array<{ type: string; text?: string; path?: string }> = [{ type: "text", text: task }];
+  if (images?.length) for (const p of images) input.push({ type: "localImage", path: p });
+
+  // Listen for the item.completed agentMessage and turn.completed for THIS turn.
+  // Notification methods are camelCase per #120 R225-R230 POC: item/completed
+  // and turn/completed events arrive on the EventEmitter by method name.
+  let finalText = "";
+  let itemCount = 0;
+  const turnId = await new Promise<string>(async (resolveTurn, rejectTurn) => {
+    let pendingTurnId: string | null = null;
+
+    const onItemCompleted = (params: { thread_id?: string; threadId?: string; turn_id?: string; turnId?: string; item?: { type?: string; text?: string } }) => {
+      const it = params?.item;
+      if (!it) return;
+      itemCount++;
+      if (it.type === "agentMessage" && typeof it.text === "string") finalText = it.text;
+    };
+    const onTurnCompleted = (params: { turn?: { id?: string }; turnId?: string }) => {
+      const id = params?.turn?.id ?? params?.turnId ?? null;
+      if (pendingTurnId && id && id !== pendingTurnId) return; // not our turn
+      client.off("item/completed", onItemCompleted);
+      client.off("turn/completed", onTurnCompleted);
+      resolveTurn(id || pendingTurnId || "");
+    };
+    client.on("item/completed", onItemCompleted);
+    client.on("turn/completed", onTurnCompleted);
+
+    try {
+      const tStart = Date.now();
+      const turnResp = await client.request<{ turn?: { id?: string }; turnId?: string }>("turn/start", { threadId: codexStdioThreadId, input });
+      pendingTurnId = (turnResp?.turn?.id ?? turnResp?.turnId) || null;
+      log(`[codex-stdio] turn/start → ${pendingTurnId ?? "(no id)"} ${(Date.now() - tStart)}ms`);
+    } catch (e: any) {
+      client.off("item/completed", onItemCompleted);
+      client.off("turn/completed", onTurnCompleted);
+      rejectTurn(e);
+    }
+  });
+  log(`[codex-stdio] turn done | items=${itemCount} | turn_id=${turnId.slice(0, 8)}`);
+  return finalText || "（无回复）";
+}
+
+// ══════════════════════════════════════
 // 任务分发
 // ══════════════════════════════════════
 let thinkQueue = Promise.resolve();
@@ -939,7 +1024,17 @@ function think(task: string, from: string, taskId: string | null, images?: strin
     const prev = process.env.CURRENT_TASK_ID;
     if (taskId) process.env.CURRENT_TASK_ID = taskId; else delete process.env.CURRENT_TASK_ID;
     try {
-      if (RUNTIME === "codex") return await processWithCodex(task, from, images);
+      if (RUNTIME === "codex") {
+        // #141 Phase 1.3 — opt-in to direct app-server stdio.
+        // Preview.0 default is still legacy @openai/codex-sdk wrapper for
+        // safe rollback; opt-in users set ANET_CODEX_STDIO_DIRECT=1.
+        // Preview.N+1 (after Vincent macOS verify) will flip the default
+        // and switch the toggle to ANET_CODEX_LEGACY_SDK=1 opt-out.
+        if (process.env.ANET_CODEX_STDIO_DIRECT === "1") {
+          return await processWithCodexStdio(task, from, images);
+        }
+        return await processWithCodex(task, from, images);
+      }
       return await processWithClaude(task, from);
     } finally {
       if (prev !== undefined) process.env.CURRENT_TASK_ID = prev; else delete process.env.CURRENT_TASK_ID;
