@@ -142,7 +142,7 @@ The Dashboard adjusts button visibility / interactivity based on role (design go
 - **member** cannot see "Manage Members" or "Settings" buttons
 - **admin** cannot see "Delete Network" button
 
-::: info Dashboard 0.4.6 actual behavior (v0.9.1 stable)
+::: info Dashboard 0.4.6 actual behavior (v0.9.2 stable)
 The role → button-visibility UI binding is **partially implemented**. Even if a button is still displayed, the **server side returns 403** (`canWrite()` enforces RBAC), so permissions cannot be bypassed. Full button hiding **was not addressed in the v0.9.x scope** (Recovery & Observability took priority); queued for v0.10+ / unscheduled Dashboard rework.
 :::
 

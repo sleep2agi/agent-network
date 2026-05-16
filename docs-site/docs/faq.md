@@ -24,7 +24,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 ### 3. 免费吗？
 
-**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.9.1 stable 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
+**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.9.2 stable 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
 
 - 仓库公开、源码可改
 - 商业模式 = 卖课 + 卖服务咨询，不依赖强制官方 SaaS
@@ -237,7 +237,7 @@ anet network invite --role member        # 生成邀请码（admin/member/viewer
 ```
 
 ::: tip 角色变更入口
-当前 v0.9.1 stable 仍不提供 CLI `promote` / `demote` 子命令（v0.9.x scope 是 Recovery & Observability，未动 member role 管理）；改角色目前要通过 [REST API `/api/networks/:id/members/:user_id`](/api/rest) 调用或 Dashboard Admin 页（部分实装，[详见 Dashboard Admin](/guide/dashboard#admin-管理面板)）。完整 CLI 入口排到 v0.10+ / 未排期。
+当前 v0.9.2 stable 仍不提供 CLI `promote` / `demote` 子命令（v0.9.x scope 是 Recovery & Observability，未动 member role 管理）；改角色目前要通过 [REST API `/api/networks/:id/members/:user_id`](/api/rest) 调用或 Dashboard Admin 页（部分实装，[详见 Dashboard Admin](/guide/dashboard#admin-管理面板)）。完整 CLI 入口排到 v0.10+ / 未排期。
 :::
 
 ### 17a. 怎么改密码？（v0.8）

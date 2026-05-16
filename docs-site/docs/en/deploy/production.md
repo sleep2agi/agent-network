@@ -1,7 +1,7 @@
 # Production / Public-Internet Deployment
 
 ::: danger Default config is NOT safe for the public internet
-The current stable line (v0.9.1, tracking the `commhub-server` semver; the old `v2.1.x` CLI version scheme is deprecated — see [changelog](/en/changelog)) is tuned for **local use only**. Running with `--host 0.0.0.0` straight to the open internet leaves you wide open.
+The current stable line (v0.9.2, tracking the `commhub-server` semver; the old `v2.1.x` CLI version scheme is deprecated — see [changelog](/en/changelog)) is tuned for **local use only**. Running with `--host 0.0.0.0` straight to the open internet leaves you wide open.
 
 Read this entire page **before opening any firewall ports**.
 :::
@@ -130,6 +130,7 @@ Acceptable today:
 
 - **v0.8.0 / v0.8.1 has closed P0**: auth required ✅ / localhost-only default ✅ / `admin/anethub` default with required `anet passwd` rotation ✅ / tmux off ✅ / network scope enforced ✅
 - **v0.9.0 / v0.9.1 shipped** ([changelog](/en/changelog#v0-9-0-recovery-observability-2026-05-15-stable)): vendor-credential envRef mode ✅ ([#125](https://github.com/sleep2agi/agent-network/issues/125) — secrets no longer persist in plaintext `config.json`) + default-toolset transparency ✅ ([#101](https://github.com/sleep2agi/agent-network/issues/101) — Claude Code preset by default + behavior-disclosure banner, [user-responsibility checklist](/en/concepts/security#tool-permissions-default-claude-code-preset-user-responsibility)) + host-telemetry observability ✅ ([#119](https://github.com/sleep2agi/agent-network/issues/119) `/api/servers` + dashboard ServersDrawer)
+- **v0.9.2 shipped** ([changelog](/en/changelog#v0-9-2-patch-auth-fast-fail-fan-out-retry-wizard-redo-122-default-tmux-reverted-2026-05-16-stable)): vendor API auth fast-fail ✅ ([#129](https://github.com/sleep2agi/agent-network/issues/129) — 15 min → <5 s + vendor-specific URL hint) + fan-out retry-with-backoff ✅ ([#132](https://github.com/sleep2agi/agent-network/issues/132) Tier 1 `CLAUDE_MAX_RETRIES=2` + jitter) + `anet node start` reverted to foreground default ✅ ([#136](https://github.com/sleep2agi/agent-network/issues/136) — fixes the macOS bun setRawMode bug)
 - **Unscheduled / future**: Argon2id passwords ([security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)) + token TTL + revoke-all + checksummed install scripts — **not in the v0.9.x scope**; planned for v0.10+ as priorities permit
 - Vulnerabilities: report via [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) — 48-hour ack, 7-day patch for critical
 

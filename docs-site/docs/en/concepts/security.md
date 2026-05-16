@@ -36,8 +36,8 @@ graph TB
     SQL --> AUDIT
 ```
 
-::: info Actually shipped vs design goal (v0.8.3)
-The diagram above represents the **design goal**. Current v0.9.1 reality:
+::: info Actually shipped vs design goal (v0.9.2)
+The diagram above represents the **design goal**. Current v0.9.2 reality:
 
 - ✅ **Shipped**: Rate limiting / token auth (utok_/ntok_/atok_) / CORS / 4-tier RBAC / network isolation (server-enforced) / SQL-injection guards / SHA-256 password hashing / audit log / task event log
 - ⏳ **Not fully enforced**: Token Scope (`api_tokens.scope` column exists and [`auth.ts:73-137`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L73) `createToken` writes different scope values per token type, but [`auth.ts:143-165 resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L143) **does not return `scope` in its result** — RBAC decisions don't consume the written scope; security report **R12** was not addressed in the v0.9.x scope (Recovery & Observability took priority), queued for v0.10+ / unscheduled — see [security audit](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md))
@@ -510,5 +510,5 @@ Or persist it via `flags.maxBudgetUsd` in `config.json`.
 - [Docker deployment](/en/deploy/docker) — containerization best practices
 
 ::: warning Current state
-v0.9.1 stable password hashing is still SHA-256 (verify [`db.ts:427-429 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427)). **Argon2id migration was not addressed in v0.9.x** (Recovery & Observability scope took priority); security report **R9** is queued for v0.10+ / unscheduled (search [open issues: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id); if no tracking issue yet, please open one). Production environments must pair this with: strong passwords + TLS + firewall + regular backups.
+v0.9.2 stable password hashing is still SHA-256 (verify [`db.ts:427-429 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427)). **Argon2id migration was not addressed in v0.9.x** (Recovery & Observability scope took priority); security report **R9** is queued for v0.10+ / unscheduled (search [open issues: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id); if no tracking issue yet, please open one). Production environments must pair this with: strong passwords + TLS + firewall + regular backups.
 :::
