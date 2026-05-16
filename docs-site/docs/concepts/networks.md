@@ -142,8 +142,8 @@ Dashboard 根据角色调整按钮可见性 / 可点击性（设计目标）：
 - **member** 看不到"管理成员"、"设置"按钮
 - **admin** 看不到"删除网络"按钮
 
-::: info Dashboard 0.4.2 实际行为
-角色 → 按钮可见性的 UI 联动**部分实装**。即使按钮当前还显示，**Server 端会 403 拒绝**（`canWrite()` 强制 RBAC），权限本身不会绕过。完整 UI 按钮 hiding 排在 v0.9+ Dashboard 改造里。
+::: info Dashboard 0.4.6 实际行为（v0.9.1 stable）
+角色 → 按钮可见性的 UI 联动**部分实装**。即使按钮当前还显示，**Server 端会 403 拒绝**（`canWrite()` 强制 RBAC），权限本身不会绕过。完整 UI 按钮 hiding **v0.9.x scope 未动**（Recovery & Observability 主题为先），排到 v0.10+ / 未排期 Dashboard 改造里。
 :::
 
 ## 加入网络
@@ -236,7 +236,7 @@ v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 
 - `anet activate <key>` 是 v0.6 legacy 命令，OSS 后**不再用作"升级"路径**
 - `users.role = 'admin'`（首位注册用户自动获得）才能突破 free 配额，详见 [troubleshooting → quota_exceeded 解决方案](/troubleshooting#quota-exceeded-max-n-networks-for-free-plan)
 
-下表保留为 v0.9+ 自部署管理员**手动设置软配额**的设计参考（仍需实现）。
+下表保留为自部署管理员**手动设置软配额**的设计参考（v0.9.x 未实现 —— Recovery & Observability scope 为先；排到 v0.10+ / 未排期）。
 :::
 
 | 配额项 | Free（v0.6 设计） | Pro（v0.6 设计） | Admin |
