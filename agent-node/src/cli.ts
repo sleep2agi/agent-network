@@ -14,6 +14,7 @@ import { join } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { getHostTelemetry } from "./host-telemetry";
+import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 
 const home = homedir();
 
@@ -451,6 +452,7 @@ const register = () => callCommHub("report_status", {
   model: MODEL || undefined,
   network_id: NETWORK_ID || undefined,
   host: getHostTelemetry(),
+  process_telemetry: getProcessTelemetry(),
 });
 const reportStatus = (status: string, task?: string) => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status, task,
@@ -460,6 +462,7 @@ const reportStatus = (status: string, task?: string) => callCommHub("report_stat
   channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
   network_id: NETWORK_ID || undefined,
   host: getHostTelemetry(),
+  process_telemetry: getProcessTelemetry(),
 });
 const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 20 }))?.messages || [];
 const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
@@ -1031,6 +1034,10 @@ function think(task: string, from: string, taskId: string | null, images?: strin
     // is more reliable for multi-task interleavings.
     const prev = process.env.CURRENT_TASK_ID;
     if (taskId) process.env.CURRENT_TASK_ID = taskId; else delete process.env.CURRENT_TASK_ID;
+    // #142 — track in-flight task count for per-agent telemetry. thinkQueue
+    // serializes so the counter is mostly 0 or 1, but the increment/decrement
+    // pattern is still correct under future concurrency changes.
+    incrementInFlight();
     try {
       if (RUNTIME === "codex") {
         // #141 Phase 1.3 — opt-in to direct app-server stdio.
@@ -1046,6 +1053,7 @@ function think(task: string, from: string, taskId: string | null, images?: strin
       return await processWithClaude(task, from);
     } finally {
       if (prev !== undefined) process.env.CURRENT_TASK_ID = prev; else delete process.env.CURRENT_TASK_ID;
+      decrementInFlight();
     }
   };
   const next = thinkQueue.then(run, run);
