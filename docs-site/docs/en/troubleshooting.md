@@ -529,6 +529,84 @@ curl -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
 # Replace <minimax-model-id> with the current model id supported by your MiniMax account (check https://platform.minimaxi.com)
 ```
 
+### Vendor API auth failure (401 / `invalid_api_key` / `expired_token` / intern `A02xx` / `user_token_expired`)
+
+You see this in the agent log:
+
+```
+[claude] ✗ FATAL: vendor API auth failed (...)
+[anet] FATAL: Vendor API auth failed — ...
+[anet]        → Refresh INTERN_S1_API_KEY at https://chat.intern-ai.org.cn and re-export it
+```
+
+**Cause**: The upstream vendor LLM API returned an auth-class error (401/403, `invalid_api_key`, `authentication_error`, intern's `A02xx` code family, OpenAI-compat `expired_token` / `unauthorized`, etc.).
+
+**Fast-fail behavior since v0.9.2** ([#129](https://github.com/sleep2agi/agent-network/issues/129); verify [`agent-node/src/cli.ts:717-775`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L717)):
+- agent-node uses the `isAuthError(msg)` heuristic (regex: `(401|403)\b|invalid[_\s]?api[_\s]?key|authentication[_\s]?error|expired[_\s]?token|unauthor(iz|is)ed|A02\d{2}|user[_\s]?token[_\s]?expired`)
+- **Short-circuits the retry loop** (no point retrying with the same bad key, wasting the backoff window) — before v0.9.1 you'd wait 3 attempts × 5min = 15 minutes before getting a useful error; v0.9.2+ returns **FATAL in under 5 seconds**
+- Picks a **vendor-specific remediation hint** by `ANTHROPIC_BASE_URL` host match:
+  - `intern-ai.org.cn` → `https://chat.intern-ai.org.cn`
+  - `minimax` → `https://platform.minimaxi.com`
+  - `anthropic` → `https://console.anthropic.com/settings/keys`
+  - otherwise → generic "Refresh your vendor API key and re-export the ENV var"
+
+**Solution** (look for the vendor URL in the log, then):
+
+```bash
+# 1. Get a fresh API key from the vendor's platform (URL in the log)
+
+# 2. Update the ENV var
+export ANTHROPIC_AUTH_TOKEN='<new-key>'
+
+# 3. Restart the agent so the new value takes effect (agent-node reads process.env at startup, no hot reload)
+anet node stop <alias>
+anet node start <alias>
+
+# 4. If you're on envRef mode (recommended, see /en/concepts/security#vendor-credential-storage-envref-mode-v0-9-0):
+#    config.json is unchanged (it stores the env-var NAME), just re-export the new value and restart the agent.
+```
+
+### Vendor API timeout (high-concurrency fan-out, #132 retry-with-backoff)
+
+You see this in the agent log:
+
+```
+[claude] attempt 1/3 timed out after 300000ms; retry in 4000ms
+[claude] attempt 2/3 errored: ...; retry in 8000ms
+[claude] ✗ all 3 attempts failed; last: timed out after 300000ms
+```
+
+Or finally:
+
+```
+执行出错: claude-agent-sdk 调用超时 (300s × 3 attempts) — vendor 长时间未响应, 检查 ANTHROPIC_BASE_URL endpoint 或 vendor 负载
+```
+
+**Cause**: under heavy fan-out (e.g. [#132 Tier 1's](https://github.com/sleep2agi/agent-network/issues/132) 30-agent papercope demo), per-request latency on the vendor API stretches from a 1.57s baseline to 17-37s as requests pile up in the vendor's queue.
+
+**Retry-with-backoff since v0.9.2** (verify [`agent-node/src/cli.ts:729-792`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L729)):
+- Each attempt has its own abort controller + timeout window (default `CLAUDE_TIMEOUT_MS=300000`, i.e. 300s — see [R663](https://github.com/sleep2agi/agent-network/issues/132))
+- On transient errors / timeouts, backoff `4s, 8s` + 0-1s jitter (the jitter spreads herd retries so the recovering vendor queue isn't slammed all at once)
+- Default `CLAUDE_MAX_RETRIES=2` (so 3 attempts total including the initial one) — set `0` to revert to v0.9.1 behavior (no retry)
+- **Auth-class errors do not retry** (fast-fail above)
+
+**Tuning**:
+
+```bash
+# config.json field
+{
+  "flags": {
+    "claudeTimeoutMs": 600000,   // raise per-attempt timeout to 600s
+    "claudeMaxRetries": 5        // retry up to 5 times (6 attempts total)
+  }
+}
+
+# Or via ENV
+CLAUDE_TIMEOUT_MS=600000 CLAUDE_MAX_RETRIES=5 anet node start <alias>
+```
+
+If timeouts persist, the root cause is usually vendor capacity. Shard horizontally across multiple vendors and stagger startup (`--stagger` on `anet project up`, [#117](https://github.com/sleep2agi/agent-network/issues/117)).
+
 ---
 
 ## Docker Errors

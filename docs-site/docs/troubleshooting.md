@@ -528,6 +528,84 @@ curl -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
 # 把 <minimax-model-id> 替换为你 MiniMax 账号当前可用 model id（查 https://platform.minimaxi.com）
 ```
 
+### Vendor API auth 失败（401 / `invalid_api_key` / `expired_token` / intern `A02xx` / `user_token_expired`）
+
+agent 日志里出现：
+
+```
+[claude] ✗ FATAL: vendor API auth failed (...)
+[anet] FATAL: Vendor API auth failed — ...
+[anet]        → Refresh INTERN_S1_API_KEY at https://chat.intern-ai.org.cn and re-export it
+```
+
+**原因**：上游 vendor LLM API 返回 auth-class 错误（401/403、`invalid_api_key`、`authentication_error`、intern `A02xx` 系列码、OpenAI-compat `expired_token` / `unauthorized` 等）。
+
+**v0.9.2 起 fast-fail 行为**（[#129](https://github.com/sleep2agi/agent-network/issues/129)，verify [`agent-node/src/cli.ts:717-775`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L717)）：
+- agent-node 用 `isAuthError(msg)` 启发式（正则：`(401|403)\b|invalid[_\s]?api[_\s]?key|authentication[_\s]?error|expired[_\s]?token|unauthor(iz|is)ed|A02\d{2}|user[_\s]?token[_\s]?expired`）检测到 auth 错误
+- **短路 retry loop**（避免拿同一个坏 key 浪费 backoff window）—— v0.9.1 之前会跑满 3 attempts × 5min 一共 15min 才报错，v0.9.2 起 **<5s** 就 FATAL 返回
+- 按 `ANTHROPIC_BASE_URL` 域名匹配出 **vendor-specific remediation hint**：
+  - `intern-ai.org.cn` → `https://chat.intern-ai.org.cn`
+  - `minimax` → `https://platform.minimaxi.com`
+  - `anthropic` → `https://console.anthropic.com/settings/keys`
+  - 其他 → generic「Refresh your vendor API key and re-export the ENV var」
+
+**解决**（按 vendor 看 log 里的 URL，然后）：
+
+```bash
+# 1. 去 vendor 平台拿新 API key（log 里有 URL）
+
+# 2. 更新 ENV var
+export ANTHROPIC_AUTH_TOKEN='<新 key>'
+
+# 3. 重启 agent 让新值生效（agent-node 在启动时读 process.env，不热加载）
+anet node stop <alias>
+anet node start <alias>
+
+# 4. 如果用 envRef 模式 (推荐, 见 /concepts/security#vendor-凭据存储envref-模式v0-9-0):
+#    config.json 不动 (它存的是 env var 名), 只需要把新值 export 到 process.env 再重启 agent
+```
+
+### Vendor API 超时（fan-out 高并发，#132 retry-with-backoff）
+
+agent 日志里出现：
+
+```
+[claude] attempt 1/3 timed out after 300000ms; retry in 4000ms
+[claude] attempt 2/3 errored: ...; retry in 8000ms
+[claude] ✗ all 3 attempts failed; last: timed out after 300000ms
+```
+
+或最终：
+
+```
+执行出错: claude-agent-sdk 调用超时 (300s × 3 attempts) — vendor 长时间未响应, 检查 ANTHROPIC_BASE_URL endpoint 或 vendor 负载
+```
+
+**原因**：fan-out 高并发场景下（如 [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) 的 30-agent papercope demo），vendor API 单次 latency 从基线 1.57s 拉到 17-37s，请求在 vendor 队列里堆积。
+
+**v0.9.2 起 retry-with-backoff** 行为（verify [`cli.ts:729-792`](https://github.com/sleep2agi/agent-node/src/cli.ts#L729)）：
+- 每次 attempt 独立的 abort controller + timeout window（default `CLAUDE_TIMEOUT_MS=300000` 即 300s，[R663 ship](https://github.com/sleep2agi/agent-network/issues/132)）
+- transient error / timeout 时 backoff `4s, 8s` + 0-1s jitter（jitter 散开 herd retries 避免一窝蜂打 vendor queue）
+- 默认 `CLAUDE_MAX_RETRIES=2`（共 3 attempts 含 initial）—— 设 `0` 退回 v0.9.1 行为（no retry）
+- **auth-class 错误不 retry**（fast-fail 见上方）
+
+**调参**：
+
+```bash
+# config.json 字段
+{
+  "flags": {
+    "claudeTimeoutMs": 600000,   // 单次超时拉到 600s
+    "claudeMaxRetries": 5        // 重试 5 次（最多 6 attempts）
+  }
+}
+
+# 或者 ENV
+CLAUDE_TIMEOUT_MS=600000 CLAUDE_MAX_RETRIES=5 anet node start <alias>
+```
+
+仍然 timeout 的话，根本原因常是 vendor 容量不足 → 横向 sharding 到多个 vendor + 错峰（`--stagger` per `anet project up`，[#117](https://github.com/sleep2agi/agent-network/issues/117)）。
+
 ---
 
 ## Docker 错误
