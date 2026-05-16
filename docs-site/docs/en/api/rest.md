@@ -759,6 +759,140 @@ Host telemetry is reported by agent-node on every `report_status` call ([issue #
 
 ---
 
+### GET /api/server/:host/health
+
+> [source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1014) · v0.10.0 / `commhub-server@0.8.2`
+
+Returns the **current health snapshot of a single physical server** plus 24h-bucketed telemetry history. Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99) (per-server daemon Phase 1 scaffold).
+
+```bash
+curl http://localhost:9200/api/server/dev-machine/health \
+  -H "Authorization: Bearer ntok_xxx"
+
+# host with special characters (an IP like `192.168.1.42` needs no encoding;
+# a hostname containing space or `/` must be url-encoded)
+curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(urllib.parse.quote("my host"))')/health" \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**Path params**:
+
+| Param | Description |
+|------|------|
+| `:host` | Matches `hostname` OR `ip` (URL-encoded) |
+
+**Side effect before responding**: same as `/api/servers` — marks sessions with no heartbeat in the last 10 min as `offline` first, then queries.
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "host": "dev-machine",
+  "hostname": "dev-machine",
+  "ip": "192.168.1.42",
+  "agent_count": 7,
+  "alert_level": "ok",
+  "alerts": [],
+  "latest": {
+    "cpu_load_1min": 0.42,
+    "cpu_cores": 8,
+    "cpu_pct": 5.3,
+    "mem_total_gb": 32.0,
+    "mem_used_gb": 19.7,
+    "mem_avail_gb": 12.3,
+    "disk_total_gb": 500.0,
+    "disk_used_gb": 213.5,
+    "disk_avail_gb": 286.5,
+    "last_seen": "2026-05-16 18:23:45"
+  },
+  "history": {
+    "5m":  [{ "ts": "...", "cpu_pct": 5.1, "mem_used_gb": 19.5, ... }, ...],
+    "1h":  [{ "ts": "...", "cpu_pct": 4.8, "mem_used_gb": 18.9, ... }, ...],
+    "24h": [{ "ts": "...", "cpu_pct": 4.2, "mem_used_gb": 17.6, ... }, ...]
+  }
+}
+```
+
+| Field | Description |
+|------|------|
+| `host` | The host value from the request path |
+| `agent_count` | Active session count on this host (window over the latest row's `COUNT(*) OVER ()`) |
+| `alert_level` | `ok` / `warn` / `critical` (computed by `serverAlertLevel(latest)`) |
+| `alerts` | Active alert list, non-empty when `alert_level != ok` |
+| `latest` | Most recent heartbeat instant telemetry (CPU / mem / disk + `last_seen`) |
+| `history.5m` | Last 5 min, **1 min bucket** (from the `agent_telemetry` history table) |
+| `history.1h` | Last 1 h, **5 min bucket** |
+| `history.24h` | Last 24 h, **1 hour bucket** |
+
+**404**: `{ "ok": false, "error": "server not found" }` — no (active or offline) session matches the host.
+
+**Network scope**: same as `/api/servers` — `ntok_` is locked to the token's network; `utok_` sees every network the user belongs to.
+
+---
+
+### GET /api/server/:host/agents
+
+> [source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1014) · v0.10.0 / `commhub-server@0.8.2`
+
+Returns the **agent list on a single server** plus per-agent process telemetry (rss / cpu / uptime / in-flight count). Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99) + [issue #142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry.
+
+```bash
+curl http://localhost:9200/api/server/dev-machine/agents \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**Response**:
+
+```json
+{
+  "ok": true,
+  "host": "dev-machine",
+  "agent_count": 2,
+  "agents": [
+    {
+      "alias": "coder-1",
+      "runtime": "claude-code-cli",
+      "raw_agent": "claude-code-cli",
+      "model": null,
+      "status": "idle",
+      "task": null,
+      "progress": 0,
+      "last_seen": "2026-05-16 18:23:45",
+      "health": "online",
+      "hostname": "dev-machine",
+      "ip": "192.168.1.42",
+      "telemetry": {
+        "cpu_load_1min": 0.42, "cpu_cores": 8, "cpu_pct": 5.3,
+        "mem_total_gb": 32.0, "mem_used_gb": 19.7, "mem_avail_gb": 12.3,
+        "disk_total_gb": 500.0, "disk_used_gb": 213.5, "disk_avail_gb": 286.5,
+        "process_rss_bytes": 245678912, "process_rss_mb": 234.3,
+        "process_cpu_pct": 3.1, "process_uptime_seconds": 1842,
+        "process_in_flight_count": 0
+      },
+      "process_telemetry": {
+        "rss_bytes": 245678912, "rss_mb": 234.3,
+        "cpu_pct": 3.1, "uptime_seconds": 1842, "in_flight_count": 0
+      }
+    }
+  ]
+}
+```
+
+| Field | Description |
+|------|------|
+| `agents[].runtime` | Runtime ID normalized via `normalizeRuntime(agent)` (`claude-code-cli` / `claude-agent-sdk` / `codex-sdk`) |
+| `agents[].raw_agent` | Original `agent` field (un-normalized), useful for debugging |
+| `agents[].health` | Health chip from `agentHealthChip(status, last_seen)` (`online` / `idle` / `offline` / etc.) |
+| `agents[].telemetry` | Full host-level + process-level telemetry the agent reports on heartbeat (reading-friendly view) |
+| `agents[].process_telemetry` | Per-agent process telemetry (`rss_bytes` / `rss_mb` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [issue #142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 shipped in `agent-node@2.4.0`, server schema T2.2 aligned in `commhub-server@0.8.2`) |
+
+**404**: `{ "ok": false, "error": "server not found" }` — no session matches this host.
+
+**Network scope**: same as `/api/server/:host/health`.
+
+---
+
 ### GET /api/messages
 
 

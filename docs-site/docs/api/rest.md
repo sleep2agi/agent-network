@@ -759,6 +759,139 @@ host telemetry 由 agent-node 在每次 `report_status` 时带上（[issue #119]
 
 ---
 
+### GET /api/server/:host/health
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1014) · v0.10.0 / `commhub-server@0.8.2`
+
+取**单台物理服务器**的当前健康快照 + 24h 分桶历史 telemetry。Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99)（守护节点 Phase 1 scaffold）。
+
+```bash
+curl http://localhost:9200/api/server/dev-machine/health \
+  -H "Authorization: Bearer ntok_xxx"
+
+# host 含特殊字符（如 IP `192.168.1.42` 不用 encode；hostname 含空格 / `/` 需 urlencode）
+curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(urllib.parse.quote("my host"))')/health" \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**路径参数**：
+
+| 参数 | 说明 |
+|------|------|
+| `:host` | `hostname` 或 `ip`（任一匹配即可，URL-encoded）|
+
+**返回前的副作用**：跟 `/api/servers` 一样先把 10 分钟无心跳 session 标 `offline`，再做查询。
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "host": "dev-machine",
+  "hostname": "dev-machine",
+  "ip": "192.168.1.42",
+  "agent_count": 7,
+  "alert_level": "ok",
+  "alerts": [],
+  "latest": {
+    "cpu_load_1min": 0.42,
+    "cpu_cores": 8,
+    "cpu_pct": 5.3,
+    "mem_total_gb": 32.0,
+    "mem_used_gb": 19.7,
+    "mem_avail_gb": 12.3,
+    "disk_total_gb": 500.0,
+    "disk_used_gb": 213.5,
+    "disk_avail_gb": 286.5,
+    "last_seen": "2026-05-16 18:23:45"
+  },
+  "history": {
+    "5m":  [{ "ts": "...", "cpu_pct": 5.1, "mem_used_gb": 19.5, ... }, ...],
+    "1h":  [{ "ts": "...", "cpu_pct": 4.8, "mem_used_gb": 18.9, ... }, ...],
+    "24h": [{ "ts": "...", "cpu_pct": 4.2, "mem_used_gb": 17.6, ... }, ...]
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `host` | 请求路径里传入的 host 值 |
+| `agent_count` | 该 host 上活跃 session 数（窗口取最新一行的 `COUNT(*) OVER ()`）|
+| `alert_level` | `ok` / `warn` / `critical`（取 `serverAlertLevel(latest)` 计算）|
+| `alerts` | 当前命中告警列表，`alert_level != ok` 时非空 |
+| `latest` | 该 host 最近一次心跳的瞬时 telemetry（CPU / mem / disk + `last_seen`）|
+| `history.5m` | 最近 5min，**1 min bucket**（取自 `agent_telemetry` 历史表）|
+| `history.1h` | 最近 1h，**5 min bucket** |
+| `history.24h` | 最近 24h，**1 hour bucket** |
+
+**404**：`{ "ok": false, "error": "server not found" }` —— 该 host 没有任何（活跃或离线）session 命中。
+
+**网络作用域**：同 `/api/servers`，`ntok_` 锁 token network；`utok_` 看所有有权限 networks。
+
+---
+
+### GET /api/server/:host/agents
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1014) · v0.10.0 / `commhub-server@0.8.2`
+
+取**单台服务器上的 agent 列表** + per-agent 进程 telemetry（rss / cpu / uptime / in-flight count）。Refs [issue #99](https://github.com/sleep2agi/agent-network/issues/99) + [issue #142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry。
+
+```bash
+curl http://localhost:9200/api/server/dev-machine/agents \
+  -H "Authorization: Bearer ntok_xxx"
+```
+
+**响应**：
+
+```json
+{
+  "ok": true,
+  "host": "dev-machine",
+  "agent_count": 2,
+  "agents": [
+    {
+      "alias": "代码1号",
+      "runtime": "claude-code-cli",
+      "raw_agent": "claude-code-cli",
+      "model": null,
+      "status": "idle",
+      "task": null,
+      "progress": 0,
+      "last_seen": "2026-05-16 18:23:45",
+      "health": "online",
+      "hostname": "dev-machine",
+      "ip": "192.168.1.42",
+      "telemetry": {
+        "cpu_load_1min": 0.42, "cpu_cores": 8, "cpu_pct": 5.3,
+        "mem_total_gb": 32.0, "mem_used_gb": 19.7, "mem_avail_gb": 12.3,
+        "disk_total_gb": 500.0, "disk_used_gb": 213.5, "disk_avail_gb": 286.5,
+        "process_rss_bytes": 245678912, "process_rss_mb": 234.3,
+        "process_cpu_pct": 3.1, "process_uptime_seconds": 1842,
+        "process_in_flight_count": 0
+      },
+      "process_telemetry": {
+        "rss_bytes": 245678912, "rss_mb": 234.3,
+        "cpu_pct": 3.1, "uptime_seconds": 1842, "in_flight_count": 0
+      }
+    }
+  ]
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `agents[].runtime` | `normalizeRuntime(agent)` 归一化后的 runtime ID（`claude-code-cli` / `claude-agent-sdk` / `codex-sdk`）|
+| `agents[].raw_agent` | 原 `agent` 字段（未归一化），方便排查 |
+| `agents[].health` | `agentHealthChip(status, last_seen)` 健康灯（`online` / `idle` / `offline` / 等）|
+| `agents[].telemetry` | 该 agent 心跳带上的 host-level + process-level 完整 telemetry（reading-friendly 视图）|
+| `agents[].process_telemetry` | per-agent 进程 telemetry（`rss_bytes` / `rss_mb` / `cpu_pct` / `uptime_seconds` / `in_flight_count`，[issue #142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 ship in `agent-node@2.4.0`，server schema T2.2 align in `commhub-server@0.8.2`）|
+
+**404**：`{ "ok": false, "error": "server not found" }` —— 该 host 没匹配到任何 session。
+
+**网络作用域**：同 `/api/server/:host/health`。
+
+---
+
 ### GET /api/messages
 
 
