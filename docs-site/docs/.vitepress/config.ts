@@ -47,7 +47,8 @@ export default withMermaid(defineConfig({
           {
             text: 'v0.9.2 ▾',
             items: [
-              { text: 'preview（pre-release）', link: '/guide/preview/getting-started' },
+              { text: 'v0.10.0 preview（in-progress）', link: '/preview/v0.10.0' },
+              { text: 'preview channel（pre-release）', link: '/guide/preview/getting-started' },
               { text: 'v0.9.2（latest）', link: '/' },
               { text: 'v0.9.0 → v0.9.2 changelog', link: '/changelog' },
               { text: 'v0.8.0（归档）', link: '/v0.8.0/' },
@@ -145,7 +146,8 @@ export default withMermaid(defineConfig({
           {
             text: 'v0.9.2 ▾',
             items: [
-              { text: 'preview (pre-release)', link: '/guide/preview/getting-started' },
+              { text: 'v0.10.0 preview (in-progress)', link: '/en/preview/v0.10.0' },
+              { text: 'preview channel (pre-release)', link: '/guide/preview/getting-started' },
               { text: 'v0.9.2 (latest)', link: '/en/' },
               { text: 'v0.9.0 → v0.9.2 changelog', link: '/en/changelog' },
               { text: 'v0.8.0 (archive)', link: '/v0.8.0/' },
