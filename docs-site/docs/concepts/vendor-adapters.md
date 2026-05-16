@@ -2,12 +2,18 @@
 
 > ⚠ **从 v0.9.1 起新增**（agent-node v2.3.9-preview.0+，hotfix [#130](https://github.com/sleep2agi/agent-network/issues/130) 引入）
 
+::: warning ⏳ Interim workaround，非永久方案
+**本 adapter 是 interim 补丁，不是 anet 的 vendor-specific lock-in 路线**。Vincent（2026-05-16 telegram 5021）已联系 InternLM 团队推上游修复 —— 等 intern-s2-preview endpoint 默认 emit 标准 Anthropic `tool_use` content blocks 后，这一层 adapter 就**可以下线**。
+
+加这层是为了**立即 unblock** 用户跑 intern + 多 Agent 协作（v0.9.0 promote 前 intern tool calling 完全卡死），不是 anet 愿意长期承担「贴近某家厂商行为」这种维护成本。Upstream coordination 进度见 [§5 Future polish — Upstream coordination status](#future-polish未完成-gap)。
+:::
+
 agent-node 的 `claude-agent-sdk` runtime 是 Anthropic Messages API 客户端，**理论上**任何 Anthropic 兼容 endpoint（书生 / DeepSeek / GLM / Kimi / MiniMax / OpenRouter / 自部署 lmdeploy 等）都能跑。但**实际上**各厂商的 RLHF 微调路径不一样，同样的 Anthropic 协议 payload 在不同厂商端会有**行为分歧**：
 
 - MiniMax / Anthropic 官方：tool 调用 out-of-the-box 干净，`stop_reason: "tool_use"`，content blocks 正确
 - 书生 intern-s2-preview：接受 `tools` 参数但在 `tool_choice: "auto"` 下默认走「Thinking Process」自由文本，**不发** `tool_use` content blocks；强制 `tool_choice: {type:"tool",name:...}` 又被拒（`-20077 不支持的 tool_choice 值`）
 
-为不让用户被「同样的 prompt 跑 MiniMax 工作，跑书生就废」搞晕，agent-node 引入 **vendor adapters**：根据 `ANTHROPIC_BASE_URL` 检测 vendor，prepend 一段定制 system-prompt bias 强制把 RLHF 行为掰回 Anthropic 标准。
+为不让用户被「同样的 prompt 跑 MiniMax 工作，跑书生就废」搞晕，**作为 interim 补丁** agent-node 引入 **vendor adapters**：根据 `ANTHROPIC_BASE_URL` 检测 vendor，prepend 一段定制 system-prompt bias 强制把 RLHF 行为掰回 Anthropic 标准。理想终态：上游厂商 RLHF 修了 → adapter 退役。
 
 ---
 
@@ -99,6 +105,18 @@ anet node start my-intern-agent --prompt "你是一个谨慎的代码 reviewer�
 - **P1** `--no-vendor-bias` flag —— 不替换 system prompt 单纯关掉 bias
 - **P2** verbose 模式（`--log-level debug` chain？）—— dump model raw response 含 thinking process
 - **P2** 自部署 / proxy 检测 fallback —— detection 不止 URL regex（model 名称 / 启动 banner 探测？）
+
+### Upstream coordination status
+
+| 厂商 | 状态 | 跟进通道 |
+|---|---|---|
+| InternLM 书生 | 🟡 Vincent 2026-05-16 已联系 intern 团队推上游 fix（让 `tool_choice:auto` 默认 emit 标准 Anthropic `tool_use` content blocks） | 通过 Vincent 私下渠道 |
+
+**Adapter 退役条件**（任一满足即可去掉 vendor adapter 层）：
+- intern endpoint 升级后 curl A/B 跑 `tool_choice:auto` 直接 emit `tool_use` block（不需要 system-prompt bias）
+- 或：上游同意把 prompt-bias 内嵌到 endpoint server-side，client 端 transparent
+
+**Tracking**：跟进任何 intern team 反馈（新版本 release notes / API change notice）后，在本节加 timeline；adapter 移除会在 changelog 单独发条目，**保留向后兼容**（旧 anet 版本仍带 bias 也能跑，新版可去掉）。
 
 ---
 

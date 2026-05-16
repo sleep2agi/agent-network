@@ -2,12 +2,18 @@
 
 > ⚠ **New since v0.9.1** (agent-node v2.3.9-preview.0+, introduced by hotfix [#130](https://github.com/sleep2agi/agent-network/issues/130))
 
+::: warning ⏳ Interim workaround — not a permanent design
+**This adapter is an interim patch, not anet's vendor-specific lock-in roadmap**. Vincent (2026-05-16 telegram 5021) has reached out to the InternLM team to push an upstream fix — once intern-s2-preview emits standard Anthropic `tool_use` content blocks by default, **this adapter can be retired**.
+
+We added this layer to **unblock users immediately** for intern + multi-agent coordination (before v0.9.0 promote, intern tool calling was completely broken). It's not because anet wants to take on the long-term maintenance cost of "hugging some vendor's specific behavior." See [§5 Future polish — Upstream coordination status](#upstream-coordination-status) for tracking.
+:::
+
 agent-node's `claude-agent-sdk` runtime is an Anthropic Messages API client, so **in theory** any Anthropic-compatible endpoint (InternLM / DeepSeek / GLM / Kimi / MiniMax / OpenRouter / self-hosted lmdeploy …) should just work. **In practice**, each vendor's RLHF fine-tuning takes its own path, and the same Anthropic-protocol payload produces **behavioral divergence** across vendors:
 
 - MiniMax / Anthropic native: tool calls work out of the box; `stop_reason: "tool_use"`, content blocks correct
 - InternLM intern-s2-preview: accepts the `tools` parameter but under `tool_choice: "auto"` defaults to verbose "Thinking Process" free-form text — **does not emit** `tool_use` content blocks. Forcing `tool_choice: {type:"tool", name:...}` is rejected with `-20077 不支持的 tool_choice 值`.
 
-To stop users getting stuck on "the same prompt works on MiniMax but not on Intern", agent-node introduces **vendor adapters**: detect the vendor by `ANTHROPIC_BASE_URL` and prepend a tailored system-prompt bias that nudges the model's RLHF behavior back to Anthropic-standard.
+To stop users getting stuck on "the same prompt works on MiniMax but not on Intern", **as an interim patch** agent-node introduces **vendor adapters**: detect the vendor by `ANTHROPIC_BASE_URL` and prepend a tailored system-prompt bias that nudges the model's RLHF behavior back to Anthropic-standard. The end state we want: upstream fixes the RLHF → this adapter gets retired.
 
 ---
 
@@ -99,6 +105,18 @@ Aligned with the follow-up gaps listed in [#130's engineering code trace](https:
 - **P1** `--no-vendor-bias` flag — turn off the bias without replacing the system prompt
 - **P2** Verbose mode (`--log-level debug` chain?) — dump the model's raw response including the thinking process
 - **P2** Self-hosted / proxy detection fallback — detection beyond URL regex (model name / startup banner probe?)
+
+### Upstream coordination status
+
+| Vendor | Status | Channel |
+|---|---|---|
+| InternLM | 🟡 As of 2026-05-16, Vincent has reached out to the InternLM team to push an upstream fix (have `tool_choice: auto` emit standard Anthropic `tool_use` content blocks by default) | Vincent's private contacts |
+
+**Adapter retirement conditions** (either is sufficient to remove the vendor adapter layer):
+- After an intern endpoint update, a direct curl A/B with `tool_choice: auto` emits a `tool_use` block by itself (no system-prompt bias needed)
+- Or: upstream agrees to embed the prompt bias server-side on the endpoint, transparent to clients
+
+**Tracking**: when InternLM team feedback lands (new version release notes / API change notice), we'll add a timeline entry here; adapter removal will get its own changelog item and we'll **keep backward compatibility** (older anet versions that still carry the bias must still run; the new version may drop it).
 
 ---
 
