@@ -928,6 +928,25 @@ Bun.serve({
         ...s,
         model: s.model ?? null,
         runtime: normalizeRuntime(s.agent),
+        host: {
+          hostname: s.hostname ?? null,
+          ip: s.ip ?? null,
+          cpu_load_1min: s.cpu_load_1min ?? null,
+          cpu_cores: s.cpu_cores ?? null,
+          mem_total_gb: s.mem_total_gb ?? null,
+          mem_used_gb: s.mem_used_gb ?? null,
+          mem_avail_gb: s.mem_avail_gb ?? null,
+          disk_total_gb: s.disk_total_gb ?? null,
+          disk_used_gb: s.disk_used_gb ?? null,
+          disk_avail_gb: s.disk_avail_gb ?? null,
+        },
+        process_telemetry: {
+          rss_bytes: s.process_rss_bytes ?? null,
+          rss_mb: s.process_rss_mb ?? null,
+          cpu_pct: s.process_cpu_pct ?? null,
+          uptime_seconds: s.process_uptime_seconds ?? null,
+          in_flight_count: s.process_in_flight_count ?? null,
+        },
       }));
       const summary = sessions.reduce((acc: any, session: any) => {
         const raw = String(session.status || "").toLowerCase();
@@ -1010,7 +1029,7 @@ Bun.serve({
           SELECT alias, agent, status, task, progress, model, hostname, ip,
                  cpu_load_1min, cpu_cores, mem_avail_gb, mem_used_gb, mem_total_gb,
                  disk_avail_gb, disk_used_gb, disk_total_gb,
-                 process_rss_bytes, process_cpu_pct, process_uptime_seconds, process_in_flight_count,
+                 process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count,
                  COALESCE(last_seen_at, updated_at) AS last_seen
           FROM sessions
           WHERE (hostname = ?1 OR ip = ?2)
@@ -1040,9 +1059,17 @@ Bun.serve({
             disk_used_gb: s.disk_used_gb ?? null,
             disk_avail_gb: s.disk_avail_gb ?? null,
             process_rss_bytes: s.process_rss_bytes ?? null,
+            process_rss_mb: s.process_rss_mb ?? null,
             process_cpu_pct: s.process_cpu_pct ?? null,
             process_uptime_seconds: s.process_uptime_seconds ?? null,
             process_in_flight_count: s.process_in_flight_count ?? null,
+          },
+          process_telemetry: {
+            rss_bytes: s.process_rss_bytes ?? null,
+            rss_mb: s.process_rss_mb ?? null,
+            cpu_pct: s.process_cpu_pct ?? null,
+            uptime_seconds: s.process_uptime_seconds ?? null,
+            in_flight_count: s.process_in_flight_count ?? null,
           },
         }));
         if (agents.length === 0) return withCors(req, Response.json({ ok: false, error: "server not found" }, { status: 404 }));

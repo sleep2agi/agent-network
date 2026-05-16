@@ -28,6 +28,7 @@ db.exec(`
     disk_used_gb  REAL,
     disk_avail_gb REAL,
     process_rss_bytes INTEGER,
+    process_rss_mb REAL,
     process_cpu_pct REAL,
     process_uptime_seconds REAL,
     process_in_flight_count INTEGER,
@@ -84,6 +85,7 @@ for (const col of [
   { name: "disk_used_gb", def: "REAL" },
   { name: "disk_avail_gb", def: "REAL" },
   { name: "process_rss_bytes", def: "INTEGER" },
+  { name: "process_rss_mb", def: "REAL" },
   { name: "process_cpu_pct", def: "REAL" },
   { name: "process_uptime_seconds", def: "REAL" },
   { name: "process_in_flight_count", def: "INTEGER" },
@@ -108,6 +110,7 @@ db.exec(`
     disk_used_gb            REAL,
     disk_avail_gb           REAL,
     process_rss_bytes       INTEGER,
+    process_rss_mb          REAL,
     process_cpu_pct         REAL,
     process_uptime_seconds  REAL,
     process_in_flight_count INTEGER,
@@ -439,6 +442,7 @@ function migrateSessionsNetworkAliasUnique() {
         disk_used_gb  REAL,
         disk_avail_gb REAL,
         process_rss_bytes INTEGER,
+        process_rss_mb REAL,
         process_cpu_pct REAL,
         process_uptime_seconds REAL,
         process_in_flight_count INTEGER,
@@ -452,7 +456,7 @@ function migrateSessionsNetworkAliasUnique() {
         status, task, output, progress, score, registered_at, updated_at, node_id,
         session_id, config_path, channels, last_seen_at, model, cpu_load_1min,
         cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
-        disk_used_gb, disk_avail_gb, process_rss_bytes, process_cpu_pct,
+        disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct,
         process_uptime_seconds, process_in_flight_count, network_id
       )
       SELECT
@@ -460,7 +464,7 @@ function migrateSessionsNetworkAliasUnique() {
         status, task, output, progress, score, registered_at, updated_at, node_id,
         session_id, config_path, channels, last_seen_at, model, cpu_load_1min,
         cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
-        disk_used_gb, disk_avail_gb, process_rss_bytes, process_cpu_pct,
+        disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct,
         process_uptime_seconds, process_in_flight_count,
         COALESCE(NULLIF(network_id, ''), 'default')
       FROM sessions

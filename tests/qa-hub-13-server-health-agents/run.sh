@@ -78,9 +78,9 @@ NET_B=$(echo "$B_RESP" | jq -r '.network_id // empty')
 
 echo "[2] report host/process telemetry for two agents on one server in network A"
 ARG_A1=$(jq -nc --arg net "$NET_A" \
-  '{resume_id:"140-a-1",alias:"hero-a1",status:"idle",task:"standby",progress:10,agent:"agent-node:claude",model:"intern-s1-pro",network_id:$net,host:{hostname:"hero-box",ip:"10.10.0.5",cpu_load_1min:1.0,cpu_cores:4,mem_total_gb:16,mem_used_gb:15.2,mem_avail_gb:0.8,disk_total_gb:100,disk_used_gb:92,disk_avail_gb:8},process_telemetry:{rss:123456789,cpu_pct:12.5,uptime_seconds:100,in_flight_count:0}}')
+  '{resume_id:"140-a-1",alias:"hero-a1",status:"idle",task:"standby",progress:10,agent:"agent-node:claude",model:"intern-s1-pro",network_id:$net,host:{hostname:"hero-box",ip:"10.10.0.5",cpu_load_1min:1.0,cpu_cores:4,mem_total_gb:16,mem_used_gb:15.2,mem_avail_gb:0.8,disk_total_gb:100,disk_used_gb:92,disk_avail_gb:8},process_telemetry:{rss_bytes:123456789,rss_mb:117.7,cpu_pct:12.5,uptime_seconds:100,in_flight_count:0}}')
 ARG_A2=$(jq -nc --arg net "$NET_A" \
-  '{resume_id:"140-a-2",alias:"hero-a2",status:"working",task:"compute",progress:66,agent:"agent-node:codex",model:"gpt-5.4",network_id:$net,host:{hostname:"hero-box",ip:"10.10.0.5",cpu_load_1min:3.6,cpu_cores:4,mem_total_gb:16,mem_used_gb:15.6,mem_avail_gb:0.4,disk_total_gb:100,disk_used_gb:99.2,disk_avail_gb:0.8},process_telemetry:{rss:223456789,cpu_pct:80.1,uptime_seconds:200,in_flight_count:2}}')
+  '{resume_id:"140-a-2",alias:"hero-a2",status:"working",task:"compute",progress:66,agent:"agent-node:codex",model:"gpt-5.4",network_id:$net,host:{hostname:"hero-box",ip:"10.10.0.5",cpu_load_1min:3.6,cpu_cores:4,mem_total_gb:16,mem_used_gb:15.6,mem_avail_gb:0.4,disk_total_gb:100,disk_used_gb:99.2,disk_avail_gb:0.8},process_telemetry:{rss_bytes:223456789,rss_mb:213.1,cpu_pct:80.1,uptime_seconds:200,in_flight_count:2}}')
 out=$(mcp_call "$NTOK_A" report_status "$ARG_A1")
 echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status A1: $out"; exit 1; }
 sleep 1.1
@@ -114,15 +114,39 @@ echo "$AGENTS_A" | jq -e '.agents[] | select(.alias=="hero-a2" and .runtime=="co
   echo "$AGENTS_A"
   exit 1
 }
+echo "$AGENTS_A" | jq -e '.agents[] | select(.alias=="hero-a2" and .process_telemetry.rss_bytes==223456789 and .process_telemetry.rss_mb==213.1 and .process_telemetry.cpu_pct==80.1 and .process_telemetry.uptime_seconds==200 and .process_telemetry.in_flight_count==2)' >/dev/null || {
+  echo "FAIL: hero-a2 process_telemetry missing"
+  echo "$AGENTS_A"
+  exit 1
+}
 if echo "$AGENTS_A" | jq -e '.agents[] | select(.alias=="hero-b1")' >/dev/null; then
   echo "FAIL: network B agent leaked into A agents"
   echo "$AGENTS_A"
   exit 1
 fi
 
+STATUS_A=$(curl -fsS "$HUB_BASE/api/status?network_id=$NET_A" -H "Authorization: Bearer $UTOK_A")
+echo "$STATUS_A" | jq -e '.ok == true and (.sessions[] | select(.alias=="hero-a2" and .host.hostname=="hero-box" and .process_telemetry.rss_bytes==223456789 and .process_telemetry.in_flight_count==2))' >/dev/null || {
+  echo "FAIL: /api/status should surface host + process_telemetry"
+  echo "$STATUS_A"
+  exit 1
+}
+
+echo "[5b] old clients without process_telemetry surface nulls"
+LEGACY_ARG=$(jq -nc --arg net "$NET_A" \
+  '{resume_id:"140-legacy",alias:"legacy-agent",status:"idle",network_id:$net,host:{hostname:"legacy-box",ip:"10.10.0.6",cpu_load_1min:0.1,cpu_cores:2,mem_total_gb:4,mem_used_gb:1,mem_avail_gb:3}}')
+out=$(mcp_call "$NTOK_A" report_status "$LEGACY_ARG")
+echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: legacy report_status: $out"; exit 1; }
+LEGACY_AGENTS=$(curl -fsS "$HUB_BASE/api/server/legacy-box/agents?network_id=$NET_A" -H "Authorization: Bearer $UTOK_A")
+echo "$LEGACY_AGENTS" | jq -e '.ok == true and .agents[0].process_telemetry.rss_bytes == null and .agents[0].process_telemetry.cpu_pct == null and .agents[0].process_telemetry.in_flight_count == null' >/dev/null || {
+  echo "FAIL: legacy process_telemetry should be null"
+  echo "$LEGACY_AGENTS"
+  exit 1
+}
+
 echo "[6] existing /api/servers aggregate still works"
 SERVERS_A=$(curl -fsS "$HUB_BASE/api/servers?network_id=$NET_A" -H "Authorization: Bearer $UTOK_A")
-echo "$SERVERS_A" | jq -e 'type=="array" and length==1 and .[0].hostname=="hero-box" and .[0].agent_count==2 and .[0].cpu_load_1min==3.6 and .[0].mem_avail_gb==0.4' >/dev/null || {
+echo "$SERVERS_A" | jq -e 'type=="array" and length==2 and (.[] | select(.hostname=="hero-box" and .agent_count==2 and .cpu_load_1min==3.6 and .mem_avail_gb==0.4)) and (.[] | select(.hostname=="legacy-box" and .agent_count==1))' >/dev/null || {
   echo "FAIL: /api/servers regression"
   echo "$SERVERS_A"
   exit 1
@@ -148,6 +172,12 @@ SSE_A_PID=$!
 SSE_B_PID=$!
 wait_for_log '"type":"connected"' /tmp/sse-a.log "SSE A connected"
 wait_for_log '"type":"connected"' /tmp/sse-b.log "SSE B connected"
+STATUS_UPDATE_ARG=$(jq -nc --arg net "$NET_A" \
+  '{resume_id:"140-a-1",alias:"hero-a1",status:"idle",progress:11,agent:"agent-node:claude",network_id:$net,host:{hostname:"hero-box",ip:"10.10.0.5",cpu_load_1min:1.1,cpu_cores:4,mem_total_gb:16,mem_used_gb:15.1,mem_avail_gb:0.9,disk_total_gb:100,disk_used_gb:92,disk_avail_gb:8},process_telemetry:{rss_bytes:133456789,rss_mb:127.3,cpu_pct:13.5,uptime_seconds:110,in_flight_count:1}}')
+out=$(mcp_call "$NTOK_A" report_status "$STATUS_UPDATE_ARG")
+echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: status update report_status: $out"; exit 1; }
+wait_for_log '"type":"status_update"' /tmp/sse-a.log "status update SSE"
+wait_for_log '"process_telemetry"' /tmp/sse-a.log "process telemetry SSE"
 : >/tmp/sse-a.log
 : >/tmp/sse-b.log
 BROADCAST_A=$(jq -nc '{message:"hero-broadcast"}')
