@@ -177,6 +177,42 @@ git author 全是 vansin 看不出谁提的，三轨补齐才知道。
 
 → **一个版本一个版本迭代**：上一个版本 ship 完整闭环（含 Stage 5 docs 同步）才开始下一个版本 issue 规划。不能 skip Stage 5。
 
+### 2.0.1 中间可以插入需求 (per Vincent 5284)
+
+版本迭代流程**不是死板顺序**。Stage 2 preview 迭代中，**新需求 / P0 bug / 用户实测 catch 都可以中途插入**，不必延后到下个版本。
+
+**插入触发条件**（任一）：
+- 🔴 **P0 bug** 用户实测撞（e.g. Vincent macOS 5194 撞 #138 launchAgent race during v0.9.2 preview.5）
+- 🟡 **scope creep**：原 issue 解一半发现 sub-issue（e.g. #138 ripple 到 #139 5 个 async dispatch）
+- 🟢 **战略机会**：竞品出新功能 / vendor 升级 / hot trend 需要快速 fold-in
+
+**插入 SOP**：
+
+1. **不开新 release tracking issue** — 中途插入需求归属当前 release 的 tracking issue (e.g. #132 v0.9.2 含 #135-#139 5 P0 chain)
+2. **开 sub-issue + cross-link** — 新 P0 bug 单独 issue（如 #138/#139），body 含 `Related: #132 (v0.9.2 tracking)`
+3. **新 preview.N+1** — fix 进 preview chain, e.g. preview.5 → preview.6 含 #138 fix → preview.7 含 #139 fix
+4. **release tracking issue 评论更新** — 每次 preview ship 评论 release issue，列入 scope creep
+5. **release notes narrative** — 最终 release body 把 ripple effect chain 说清楚（v0.9.2 release body 5 P0 chain narrative 是范本）
+
+**v0.9.2 实战案例**（中途插入 4 次）：
+
+| Preview | 触发 | 插入需求 |
+|---------|------|----------|
+| 0-3 | 原计划 | #133 runtime-first wizard + #129+#132 Tier 1 retry + #135 Node v24 wrap |
+| 4 | Vincent macOS catch | **+#136 setRawMode tmux pane** |
+| 5 | Vincent macOS catch | **+#137 wizard inquirer/readline stdin** |
+| 6 | Vincent macOS catch | **+#138 launchAgent parent exit race** |
+| 7 | Vincent macOS catch | **+#139 5 async dispatch missing await** |
+
+→ 5 P0 都是 preview chain 中途插入, 不延后到 v0.9.3. 单次 release 7 preview iterations, 这是**正常 AI-Native pace**。
+
+**什么时候 NOT 插入** (defer 到下一版本):
+- 非紧急 feature request — 用户 ask 但不 block 当前用户
+- RFC-level 战略改动 — 应该 v0.10.0 设计而不是 v0.9.X 临时塞
+- 工程量超 50% 当前版本剩余 scope — 拖延 ship 影响整体节奏
+
+**Lead 判断**：通信龙 / Vincent 联合决定插不插，default 倾向于"P0 必插, 其他 defer"。
+
 
 
 ### 2.1 Preview 版本号规则
