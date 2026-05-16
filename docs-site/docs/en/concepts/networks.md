@@ -142,8 +142,8 @@ The Dashboard adjusts button visibility / interactivity based on role (design go
 - **member** cannot see "Manage Members" or "Settings" buttons
 - **admin** cannot see "Delete Network" button
 
-::: info Dashboard 0.4.6 actual behavior (v0.9.2 stable)
-The role → button-visibility UI binding is **partially implemented**. Even if a button is still displayed, the **server side returns 403** (`canWrite()` enforces RBAC), so permissions cannot be bypassed. Full button hiding **was not addressed in the v0.9.x scope** (Recovery & Observability took priority); queued for v0.10+ / unscheduled Dashboard rework.
+::: info Dashboard 0.4.6 actual behavior (v0.10.0 stable Phase 1)
+The role → button-visibility UI binding is **partially implemented**. Even if a button is still displayed, the **server side returns 403** (`canWrite()` enforces RBAC), so permissions cannot be bypassed. Full button hiding **was not addressed in v0.9.x or v0.10.0 scope** (v0.9.x prioritized Recovery & Observability; v0.10.0 prioritized Direct Runtime + Observability Foundations); to be picked up alongside the dashboard `0.5.0` Phase 2 promote and the v0.11+ Dashboard rework.
 :::
 
 ## Joining a Network
@@ -236,7 +236,7 @@ v0.6 designed a Free / Pro / Admin three-tier quota system (table below). After 
 - `anet activate <key>` is a v0.6 legacy command, **no longer the "upgrade" path** after OSS
 - Only `users.role = 'admin'` (auto-granted to the first registered user) can break through the free quota — see [troubleshooting → quota_exceeded fix](/en/troubleshooting#quota-exceeded-max-n-networks-for-free-plan)
 
-The table below is kept as a design reference for **manual soft quotas** in self-hosted admin setups (not implemented in v0.9.x — Recovery & Observability took priority; queued for v0.10+ / unscheduled).
+The table below is kept as a design reference for **manual soft quotas** in self-hosted admin setups (not implemented in v0.9.x or v0.10.0 — v0.9.x prioritized Recovery & Observability, v0.10.0 prioritized Direct Runtime + Observability Foundations; queued for v0.11+ / unscheduled).
 :::
 
 | Quota | Free (v0.6 design) | Pro (v0.6 design) | Admin |

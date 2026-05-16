@@ -24,14 +24,14 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 
 ### 3. Is it free?
 
-**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.9.2 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
+**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.0 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
 
 - Public repo, modifiable source
 - Business model = courses + consulting, not a forced hosted SaaS
 - `anet license` / `anet activate` are v0.6 legacy commands, **no longer needed after Apache 2.0 OSS**. If you hit `license_expired` (Hub still creates a 14-day trial for backward-compat), follow [troubleshooting — license_expired](/en/troubleshooting#license-expired-legacy-behavior) to clear the `licenses` table.
 
 ::: info v0.6 license path planned for removal
-The server still runs `licenses.expires_at` checks inside `send_task` (V3 legacy code; verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) still emits `license_expired`) — **the v0.9.x scope didn't touch it** (Recovery & Observability took priority); planned for v0.10+ removal.
+The server still runs `licenses.expires_at` checks inside `send_task` (V3 legacy code; verify [`server/src/tools.ts` still emits `license_expired`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)) — **neither v0.9.x nor v0.10.0 scope touched it** (v0.9.x prioritized Recovery & Observability; v0.10.0 prioritized Direct Runtime + Observability Foundations); planned for v0.11+ removal.
 :::
 
 ### 4. Which AI models are supported?
@@ -237,7 +237,7 @@ anet network invite --role member        # Generate invite code (admin/member/vi
 ```
 
 ::: tip Role changes
-The current v0.9.2 stable still does not expose `promote` / `demote` CLI subcommands (the v0.9.x scope was Recovery & Observability — member-role management was not touched). To change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.10+ / unscheduled.
+The current v0.10.0 stable still does not expose `promote` / `demote` CLI subcommands (the v0.9.x scope was Recovery & Observability; v0.10.0 scope is Direct Runtime + Observability Foundations — neither touched member-role management). To change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.11+ / unscheduled.
 :::
 
 ### 17a. How do I change my password? (v0.8)
