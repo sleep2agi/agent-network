@@ -1,12 +1,12 @@
 # RFC-013 — Rename Hot-Reload 跨版本兼容性
 
 **作者**: 通信SDK马
-**状态**: Draft v2 (待 通信龙 / 通信牛 / Vincent review)
-**版本**: v1 (2026-05-17 初稿) → v2 (2026-05-17 测试马 Phase 1 finding fold-in)
+**状态**: Draft v3 (待 通信龙 / Vincent ack; 通信牛 v2 review 整改完成)
+**版本**: v1 (初稿) → v2 (测试马 Phase 1 fold-in) → v3 (通信牛 design review 4 blocker + 4 concern 整改)
 **关联 issue**: #146, #84 (rename impl), RFC-010 §4.4 (SIGHUP-based reload)
 **关联 ship**: v0.10.0 (rename 2PC), v0.10.2 candidate (本 RFC 实施)
 
-> **v2 变更说明**: 测试马 Phase 1 Docker repro (4/4 FAIL) 揭示 #146 现场实际是**多层级联**, 不只 hot-reload 单 bug. v2 加入 §1.5 多层 finding 分类 + §3.5 Layer 1 robustness (prepareRename actionable error) + §3.6 Layer 3 UX (CLI pre-check). §3-§4 hot-reload 核心设计不变 — 仍是 Vincent 实际报告的 root cause.
+> **v3 变更说明** (通信牛 [comment 4468530...](https://github.com/sleep2agi/agent-network/issues/146)): 通信牛 design review 揭示 v2 §3.3 fallback / §9.2 mutable identity / §3.1 SSE cleanup race / §4 C3 client detection 都不可实施. v3 整改 4 blocker + 4 concern, 引入 **Phase 0 server canonicalization hardening** 作必要 dependency. 实施分 **3 phase** 不再单 phase. LOC ~80 → ~120, ETA ~3h → ~4-5h. 核心设计 (capability probe + SSE re-key + agent hot-reload listener) 不变.
 
 ## 1. 背景
 
@@ -84,7 +84,72 @@ Vincent **没** hit Type A/B, 因他本地 env var 设了 + anet 命令在节点
 2. 跨版本组合 4 case 全有 deliberate design + graceful degradation, 不依赖 lockstep 同步升级.
 3. `/health` capability flag 协议留向后扩展空间 (后续类似 hot-reload 场景沿用同一探测机制).
 
+## 2.5 v3 实施分阶 (per 通信牛 review)
+
+| Phase | Scope | 依赖 | 风险 |
+|---|---|---|---|
+| **Phase 0 — server canonicalization** | `report_status` 在 upsert **之前** canonicalize alias (by node_id 或 committed rename_txn mapping). 修 Blocker 1 race. | 无 (基础层) | 低 — 纯防御性, 不改 wire 协议 |
+| **Phase 1 — SSE protocol** | `push.ts` mutable key + `migrateSSEKeys` safe / `rename.ts commitRename` 调用 + `node.alias_changed` broadcast (含 node_id) / `/health.capabilities.rename_broadcast=true` / SSE connect-time `X-Agent-Node-Version` header | Phase 0 | 中 — 修 Blocker 3 SSE cleanup, 新增 capability header |
+| **Phase 2 — agent hot-reload** | mutable `runtimeAlias` / `runtimeNodeName` (修 Blocker 2) / SSE listener / capability probe at **每次 reconnect** (修 Concern 1) / 60s alias drift self-check 独立 cadence (修 Concern 2) / Layer 3 CLI pre-check (Type A/B 防御) | Phase 0 + Phase 1 | 中 — 改 agent 内部 identity, 需 audit 所有引用 |
+
+Phase 0 不能省, 不然 Phase 1+2 仍然 race-prone (旧 agent heartbeat undoing 新 alias).
+
 ## 3. 协议设计
+
+### 3.0 (Phase 0) Server canonicalization invariant — 修 Blocker 1
+
+**Invariant**: 一个 stale OLD `report_status` heartbeat 不能 revert 已 committed 的 NEW alias.
+
+**Current bug** (通信牛 catch): `report_status` 用 `ON CONFLICT(resume_id) DO UPDATE SET alias = COALESCE(?, sessions.alias)`. rename OLD→NEW 后, 旧 agent 仍发 `report_status({resume_id: same, alias: OLD})` — server 把 OLD 写回 sessions 行, 把 commit 撤销.
+
+**Fix**: 在 upsert **之前** canonicalize. 资源 priority:
+
+```typescript
+// commhub-server/src/index.ts report_status handler (insert BEFORE the upsert)
+let canonicalAlias = body.alias;
+let stalenessDetected = false;
+
+// (a) If client sent node_id, use it as authoritative — alias from nodes table
+if (body.node_id) {
+  const row = db.get<any>(
+    "SELECT alias FROM nodes WHERE network_id = ?1 AND node_id = ?2",
+    [body.network_id, body.node_id]);
+  if (row?.alias && row.alias !== body.alias) {
+    canonicalAlias = row.alias;
+    stalenessDetected = true;
+  }
+}
+// (b) Fallback: check committed rename_txn within last 24h (defense for missing node_id)
+else {
+  const txn = db.get<any>(`
+    SELECT new_alias FROM rename_txn
+    WHERE network_id = ?1 AND old_alias = ?2 AND status = 'committed'
+      AND committed_at > datetime('now', '-24 hours')
+    ORDER BY committed_at DESC LIMIT 1`,
+    [body.network_id, body.alias]);
+  if (txn?.new_alias) {
+    canonicalAlias = txn.new_alias;
+    stalenessDetected = true;
+  }
+}
+
+// Upsert uses canonicalAlias (NEVER OLD)
+db.run(`... ON CONFLICT(resume_id) DO UPDATE SET alias = ?1 ...`, [canonicalAlias, ...]);
+
+// Response carries canonical_alias so agent can detect drift on next reply
+return Response.json({
+  ok: true,
+  canonical_alias: canonicalAlias,
+  staleness_detected: stalenessDetected,
+});
+```
+
+**Properties**:
+- 旧 agent 跑新 server: 它发 OLD heartbeat → server 写回 NEW (因 rename_txn lookup) → response 含 `canonical_alias: NEW`. 旧 agent 不识此字段(忽略), 但 sessions 行不被破坏. 行为等同 C3 graceful degradation.
+- 新 agent 跑新 server: 见 §3.3 — 收到 `canonical_alias` 不一致 → 触发 drift self-heal.
+- 新 agent 跑旧 server: 旧 server 没 §3.0 protection, 但旧 server 也没 rename hot-reload, 整体 fall back C2.
+
+**Test (per 通信牛 verify-list)**: rename OLD→NEW, 然后 force 一次 OLD `report_status` heartbeat, assert `sessions.alias` 仍是 NEW, response 含 `canonical_alias=NEW`.
 
 ### 3.1 Server-side: capability flag + broadcast
 
@@ -119,6 +184,42 @@ Vincent **没** hit Type A/B, 因他本地 env var 设了 + anet 命令在节点
 ```
 
 注意: 跟现有 `node.renamed` (RFC-010 §4.2.1 C4 — dashboard 用) 是**两条不同 event** 不复用. `node.renamed` envelope 设计给 dashboard 消费 (含 `surfaces_updated` 列表 etc.), `node.alias_changed` envelope 设计给 agent-node 消费 (只含 reload 必需字段). 这样两边各自演化不交叉.
+
+### 3.1.5 SSE client capability header — 修 Blocker 4
+
+通信牛 catch: 原 §4 C3 "old client warning via stale_clients" 不可实施 — server 没法从 `{controller, encoder}` 知道客户端版本.
+
+**Fix**: 新 agent SSE 连接时携带 capability metadata:
+
+```http
+GET /events/<alias> HTTP/1.1
+Authorization: Bearer ntok_...
+X-Agent-Node-Version: 2.4.1
+X-Agent-Capabilities: rename_broadcast.v1
+```
+
+Server 在 `createSSEStream` 入参拓展, 存到 client object:
+
+```typescript
+type SSEClient = {
+  controller: ReadableStreamDefaultController;
+  encoder: TextEncoder;
+  key: string;  // 修 Blocker 3 — see §3.1
+  version?: string;
+  capabilities?: Set<string>;
+};
+```
+
+**C3 graceful warning (软化)**: CLI rename 完成后, server commit 响应携带 `live_sse_clients` 数组 (内含 version), CLI 检测到 `version < 2.4.1 OR !capabilities.has('rename_broadcast.v1')` 时:
+
+```
+[anet] ⚠ Found 1 running agent on this alias with old client version (2.4.0).
+[anet]    The agent will retain alias "OLD" in memory until restart.
+[anet]    Fix:  anet node stop OLD-pid && anet node start NEW
+[anet]    Or:   anet upgrade  (upgrade agent-node to ≥2.4.1 for hot-reload)
+```
+
+旧 agent 完全不发此 header → server 视为 "unknown version" → CLI warning 仍 fire ("unknown agent version, recommend restart"). **不依赖 positive detection — 默认假设旧, 新 agent 主动声明**.
 
 ### 3.2 Agent-side: capability detection + listener
 
@@ -168,6 +269,53 @@ if (resp.canonical_alias && resp.canonical_alias !== ALIAS) {
 ```
 
 这是 broadcast 丢失 / 网络分区时的 final safety net. 60s within bound 即可恢复.
+
+### 3.1.7 Mutable SSE client key — 修 Blocker 3
+
+通信牛 catch: `createSSEStream` 闭包捕获 local `key`. `migrateSSEKeys(old, new)` 把数组移到 newKey + delete oldKey 后, 后续连接 cancel 仍按 oldKey 查找清理, fail silent, keepalive timer 不清.
+
+**Fix**: 把 key 存到 client object 而非闭包:
+
+```typescript
+// push.ts
+type SSEClient = {
+  controller: ReadableStreamDefaultController;
+  encoder: TextEncoder;
+  key: string;   // 当前注册位置 (rename 后会更新)
+  version?: string;
+  capabilities?: Set<string>;
+  _keepalive?: NodeJS.Timeout;
+};
+
+function createSSEStream(sessionName, networkId, version?, capabilities?) {
+  const initialKey = clientKey(sessionName, networkId);
+  const client: SSEClient = { controller, encoder, key: initialKey, version, capabilities };
+  clients.get(initialKey) ?? clients.set(initialKey, []).get(initialKey)!.push(client);
+  // cancel: 用 client.key (mutable) 找当前注册位置
+  cancel() {
+    const arr = clients.get(client.key);  // <-- mutable
+    if (arr) {
+      arr.splice(arr.findIndex(c => c === client), 1);
+      if (arr.length === 0) clients.delete(client.key);
+    }
+    clearInterval(client._keepalive);
+  }
+}
+
+export function migrateSSEKeys(oldName, newName, networkId): number {
+  const oldKey = clientKey(oldName, networkId);
+  const newKey = clientKey(newName, networkId);
+  const arr = clients.get(oldKey);
+  if (!arr) return 0;
+  for (const c of arr) c.key = newKey;     // <-- 关键: client object 内部 key 也更新
+  const existing = clients.get(newKey) || [];
+  clients.set(newKey, [...existing, ...arr]);
+  clients.delete(oldKey);
+  return arr.length;
+}
+```
+
+**Test (per 通信牛 verify-list)**: 开 SSE OLD, rename to NEW, close connection, assert `getSSEStats()` 没 OLD 也没 NEW stale entry.
 
 ### 3.4 Server-side: prepareRename actionable error (Layer 1 robustness, Type A/B 防御)
 
@@ -225,6 +373,36 @@ if (!liveSession) {
 ```
 
 → **不破坏 invariant**, 让用户提前 catch Type A/B 类问题. ~20 LOC.
+
+### 3.7 Mutable runtime identity in agent-node — 修 Blocker 2
+
+通信牛 catch: `ALIAS` / `NODE_NAME` 是 `const`, `ALIAS = ev.new_alias` 不编译; 且 many helpers 闭包捕获 ALIAS.
+
+**Fix**: 引入 runtime identity object:
+
+```typescript
+// agent-node/src/cli.ts module-level
+const initialAlias = ...;          // 启动时值 (诊断用, 不变)
+const initialNodeName = ...;
+let runtimeAlias = initialAlias;   // 运行时, hot-reload 可改
+let runtimeNodeName = initialNodeName;
+```
+
+**All helpers must read runtime value dynamically** (audit list per 通信牛):
+
+| helper | 改动 |
+|---|---|
+| `register()` | `body: { ..., alias: runtimeAlias, ... }` |
+| `reportStatus()` | `alias: runtimeAlias`, response 检查 `canonical_alias` 触发 drift self-heal |
+| `getInbox()` | `alias: runtimeAlias` |
+| `ackMessage()` | `alias: runtimeAlias` |
+| `sendReply()` | `from_session: runtimeAlias` |
+| `connectSSE()` URL | `/events/${encodeURIComponent(runtimeAlias)}` |
+| log lines (`log()`, `debug()`, `warn()`, `error()`) | prefix 用 runtimeAlias |
+| token reload warning | message 用 runtimeAlias 但保留 initialAlias 在 diagnostic |
+| `configFilePath` (per 通信牛 note) | rename 后 oldDir 已删, running process 不 rely 旧 path. Token reload / doctor-refresh 改读 `<.anet/nodes/${runtimeAlias}>/config.json` 而非 cached path |
+
+**Test**: rename 后 5min 任务流, log/SSE/inbox 全部 emit/listen NEW alias, register 用 NEW alias upsert, etc.
 
 ## 4. 兼容性矩阵 (4 case)
 
@@ -425,16 +603,24 @@ if (resp?.canonical_alias && resp.canonical_alias !== ALIAS) {
 
 ### 9.3 LOC + ETA estimate
 
-| 文件 | LOC | ETA |
-|---|---|---|
-| commhub-server src/push.ts (Type C: migrateSSEKeys) | ~10 | 15min |
-| commhub-server src/rename.ts (Type C: broadcast + diagnostic_hint) | ~15 | 15min |
-| commhub-server src/index.ts (Type C: health + report_status canonical_alias) | ~10 | 20min |
-| agent-network bin/cli.ts (Type A/B Layer 3 pre-check) | ~20 | 25min |
-| agent-node src/cli.ts (Type C: capability probe + listener + fallback) | ~25 | 30min |
-| 测试 9+2-case smoke (Docker, +Type A/B regression cases) | — | 60min |
-| 文档 (CHANGELOG + RFC fold-in + envRef migration guide) | — | 20min |
-| **合计** | **~80 LOC** | **~3h** |
+| 文件 | LOC | ETA | Phase |
+|---|---|---|---|
+| commhub-server src/index.ts — report_status canonicalization (Blocker 1) | ~25 | 30min | 0 |
+| commhub-server src/push.ts — mutable client key + SSEClient struct (Blocker 3) | ~20 | 25min | 1 |
+| commhub-server src/push.ts — `migrateSSEKeys` + version/capabilities | ~15 | 15min | 1 |
+| commhub-server src/rename.ts — commitRename re-key + broadcast (w/ node_id, Concern 3) | ~15 | 15min | 1 |
+| commhub-server src/index.ts — /health.capabilities + SSE accept headers | ~10 | 15min | 1 |
+| commhub-server src/rename.ts — prepareRename diagnostic_hint (Type A/B) | ~10 | 10min | 1 |
+| agent-network bin/cli.ts — renameCommand pre-check (Type A/B) | ~20 | 25min | 1 |
+| agent-network bin/cli.ts — renameCommand parse live_sse_clients warning (Blocker 4) | ~15 | 15min | 1 |
+| agent-node src/cli.ts — runtime identity mutable refactor (Blocker 2) | ~30 | 40min | 2 |
+| agent-node src/cli.ts — SSE capability headers on connect | ~5 | 10min | 2 |
+| agent-node src/cli.ts — capability probe at boot + every reconnect (Concern 1) | ~15 | 20min | 2 |
+| agent-node src/cli.ts — node.alias_changed listener (w/ node_id validate, Concern 3) | ~20 | 25min | 2 |
+| agent-node src/cli.ts — 60s alias drift self-check independent of heartbeat (Concern 2) | ~15 | 20min | 2 |
+| Docker smoke — 9+4 case (4 new from 通信牛 verify list) | — | 90min | test |
+| 文档 (CHANGELOG + RFC fold-in + envRef migration guide) | — | 25min | doc |
+| **合计** | **~215 LOC** | **~6.5h** | — |
 
 ## 10. Ship 路径
 
@@ -452,6 +638,17 @@ if (resp?.canonical_alias && resp.canonical_alias !== ALIAS) {
 - 节奏更慢但 cohesion 更高
 
 **SDK马 推荐 10.1** — Vincent 5387 "P0 急迫" + #146 bug 已暴露给用户, 越快 ship 越好. RFC-013 spec 完整后 impl 是 ~2.5h, 单 patch ship 合理.
+
+## 10.5 通信牛 verify list (per v2 review)
+
+测试马 Phase 2 必须含以下 4 case (额外于 §8 9-case):
+
+1. **stale OLD `report_status` after commit cannot revert alias** — 修 Blocker 1 invariant
+2. **migrated SSE disconnect cleans up stats/keepalive** — 修 Blocker 3 cleanup race
+3. **agent-first server upgrade without agent restart enables listener after SSE reconnect** — 修 Concern 1
+4. **missing `sessions` row / nodes-only rename precondition path** (含 Type A envRef + Type B cwd) — 修 Concern 4 + Layer 3 UX
+
+总 test = 9 (RFC v1) + 4 (v3 通信牛) = **13 case** smoke.
 
 ## 11. Risk + 缓解
 
