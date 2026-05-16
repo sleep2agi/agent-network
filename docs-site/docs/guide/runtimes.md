@@ -324,6 +324,18 @@ anet node create coder \
 codex-sdk runtime 单元测试通过，但**端到端验证不全**（缺真实 codex 鉴权回归）。如果你正在跑生产任务，建议先 `anet node start` 后用一个简单任务（"列出当前目录文件"）验证。
 :::
 
+::: tip v0.10.0 新增 — `codex-direct-stdio` opt-in 路径（[#141](https://github.com/sleep2agi/agent-network/issues/141)）
+v0.10.0 起 agent-node 内嵌一条 **bypass `@openai/codex-sdk` wrapper** 的直 stdio JSON-RPC 客户端路径（~155 LOC，verify [`agent-node@2.4.0`](https://www.npmjs.com/package/@sleep2agi/agent-node)）。开启方式：
+
+```bash
+ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
+```
+
+启用后 agent-node 走 `spawn('codex', ['app-server'])` + 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** `@openai/codex-sdk` `--mcp-config` HTTP transport 那条 bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family），不再受 codex-sdk breaking change 牵制。
+
+**v0.10.0 默认仍走 `@openai/codex-sdk` wrapper**（先收 preview 反馈、保 backward-compat）；v0.11.0 计划 default flip 到 stdio direct，wrapper 路径进入 deprecation warning。完整背景见 [v0.10.0 release notes](/preview/v0.10.0#新-runtime-路径-codex-direct-stdio)。
+:::
+
 ---
 
 ## 跨 Runtime 协作（Mesh 派活）
