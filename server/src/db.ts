@@ -24,6 +24,13 @@ db.exec(`
     mem_total_gb  REAL,
     mem_used_gb   REAL,
     mem_avail_gb  REAL,
+    disk_total_gb REAL,
+    disk_used_gb  REAL,
+    disk_avail_gb REAL,
+    process_rss_bytes INTEGER,
+    process_cpu_pct REAL,
+    process_uptime_seconds REAL,
+    process_in_flight_count INTEGER,
     network_id    TEXT NOT NULL DEFAULT 'default',
     registered_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -73,9 +80,45 @@ for (const col of [
   { name: "mem_total_gb", def: "REAL" },
   { name: "mem_used_gb", def: "REAL" },
   { name: "mem_avail_gb", def: "REAL" },
+  { name: "disk_total_gb", def: "REAL" },
+  { name: "disk_used_gb", def: "REAL" },
+  { name: "disk_avail_gb", def: "REAL" },
+  { name: "process_rss_bytes", def: "INTEGER" },
+  { name: "process_cpu_pct", def: "REAL" },
+  { name: "process_uptime_seconds", def: "REAL" },
+  { name: "process_in_flight_count", def: "INTEGER" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_telemetry (
+    id                      TEXT PRIMARY KEY,
+    network_id              TEXT NOT NULL DEFAULT 'default',
+    resume_id               TEXT,
+    alias                   TEXT,
+    hostname                TEXT,
+    ip                      TEXT,
+    cpu_load_1min           REAL,
+    cpu_cores               INTEGER,
+    mem_total_gb            REAL,
+    mem_used_gb             REAL,
+    mem_avail_gb            REAL,
+    disk_total_gb           REAL,
+    disk_used_gb            REAL,
+    disk_avail_gb           REAL,
+    process_rss_bytes       INTEGER,
+    process_cpu_pct         REAL,
+    process_uptime_seconds  REAL,
+    process_in_flight_count INTEGER,
+    created_at              TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_agent_telemetry_host_time
+    ON agent_telemetry(network_id, hostname, ip, created_at);
+  CREATE INDEX IF NOT EXISTS idx_agent_telemetry_alias_time
+    ON agent_telemetry(network_id, alias, created_at);
+`);
 
 // inbox: add in_reply_to, requires_response, expires_at, scope
 for (const col of [
@@ -392,6 +435,13 @@ function migrateSessionsNetworkAliasUnique() {
         mem_total_gb  REAL,
         mem_used_gb   REAL,
         mem_avail_gb  REAL,
+        disk_total_gb REAL,
+        disk_used_gb  REAL,
+        disk_avail_gb REAL,
+        process_rss_bytes INTEGER,
+        process_cpu_pct REAL,
+        process_uptime_seconds REAL,
+        process_in_flight_count INTEGER,
         network_id    TEXT NOT NULL DEFAULT 'default',
         UNIQUE (network_id, alias)
       )
@@ -401,13 +451,17 @@ function migrateSessionsNetworkAliasUnique() {
         resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version,
         status, task, output, progress, score, registered_at, updated_at, node_id,
         session_id, config_path, channels, last_seen_at, model, cpu_load_1min,
-        cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, network_id
+        cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
+        disk_used_gb, disk_avail_gb, process_rss_bytes, process_cpu_pct,
+        process_uptime_seconds, process_in_flight_count, network_id
       )
       SELECT
         resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version,
         status, task, output, progress, score, registered_at, updated_at, node_id,
         session_id, config_path, channels, last_seen_at, model, cpu_load_1min,
-        cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb,
+        cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
+        disk_used_gb, disk_avail_gb, process_rss_bytes, process_cpu_pct,
+        process_uptime_seconds, process_in_flight_count,
         COALESCE(NULLIF(network_id, ''), 'default')
       FROM sessions
       ORDER BY updated_at

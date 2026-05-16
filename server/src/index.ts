@@ -229,6 +229,104 @@ function singleNetworkId(scope: RestNetworkScope): string | null {
   return null;
 }
 
+function sqliteTime(date: Date): string {
+  return date.toISOString().replace("T", " ").slice(0, 19);
+}
+
+function parseSqliteTime(value: string | null | undefined): number {
+  if (!value) return 0;
+  const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  const ts = Date.parse(normalized);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function cpuPct(load: number | null | undefined, cores: number | null | undefined): number | null {
+  if (typeof load !== "number" || typeof cores !== "number" || cores <= 0) return null;
+  return Math.round((load / cores) * 1000) / 10;
+}
+
+function serverAlertLevel(row: any): { level: "green" | "yellow" | "red"; alerts: string[] } {
+  const alerts: string[] = [];
+  const pct = cpuPct(row?.cpu_load_1min, row?.cpu_cores);
+  if (pct !== null && pct >= 80) alerts.push(`cpu ${pct}%`);
+  if (typeof row?.mem_avail_gb === "number" && row.mem_avail_gb < 0.5) alerts.push(`memory ${row.mem_avail_gb}GB available`);
+  if (typeof row?.disk_avail_gb === "number" && row.disk_avail_gb < 1) alerts.push(`disk ${row.disk_avail_gb}GB available`);
+  if (alerts.length > 0) return { level: "red", alerts };
+
+  if (pct !== null && pct >= 60) alerts.push(`cpu ${pct}%`);
+  if (typeof row?.mem_avail_gb === "number" && row.mem_avail_gb < 1) alerts.push(`memory ${row.mem_avail_gb}GB available`);
+  if (typeof row?.disk_avail_gb === "number" && row.disk_avail_gb < 5) alerts.push(`disk ${row.disk_avail_gb}GB available`);
+  return { level: alerts.length > 0 ? "yellow" : "green", alerts };
+}
+
+function agentHealthChip(status: unknown, lastSeen: string | null | undefined): "online" | "offline" | "stale" {
+  if (String(status || "").toLowerCase() === "offline") return "offline";
+  const ts = parseSqliteTime(lastSeen);
+  if (!ts || Date.now() - ts > 5 * 60 * 1000) return "stale";
+  return "online";
+}
+
+function bucketTelemetry(rows: any[], fromMs: number, bucketMs: number) {
+  const buckets = new Map<number, {
+    ts: number;
+    count: number;
+    cpu_pct_sum: number;
+    cpu_pct_count: number;
+    cpu_load_sum: number;
+    cpu_load_count: number;
+    mem_avail_min: number | null;
+    mem_used_max: number | null;
+    disk_avail_min: number | null;
+    disk_used_max: number | null;
+  }>();
+
+  for (const row of rows) {
+    const ts = parseSqliteTime(row.created_at);
+    if (!ts || ts < fromMs) continue;
+    const bucketTs = Math.floor(ts / bucketMs) * bucketMs;
+    const bucket = buckets.get(bucketTs) ?? {
+      ts: bucketTs,
+      count: 0,
+      cpu_pct_sum: 0,
+      cpu_pct_count: 0,
+      cpu_load_sum: 0,
+      cpu_load_count: 0,
+      mem_avail_min: null,
+      mem_used_max: null,
+      disk_avail_min: null,
+      disk_used_max: null,
+    };
+    bucket.count += 1;
+    const pct = cpuPct(row.cpu_load_1min, row.cpu_cores);
+    if (pct !== null) {
+      bucket.cpu_pct_sum += pct;
+      bucket.cpu_pct_count += 1;
+    }
+    if (typeof row.cpu_load_1min === "number") {
+      bucket.cpu_load_sum += row.cpu_load_1min;
+      bucket.cpu_load_count += 1;
+    }
+    if (typeof row.mem_avail_gb === "number") bucket.mem_avail_min = bucket.mem_avail_min === null ? row.mem_avail_gb : Math.min(bucket.mem_avail_min, row.mem_avail_gb);
+    if (typeof row.mem_used_gb === "number") bucket.mem_used_max = bucket.mem_used_max === null ? row.mem_used_gb : Math.max(bucket.mem_used_max, row.mem_used_gb);
+    if (typeof row.disk_avail_gb === "number") bucket.disk_avail_min = bucket.disk_avail_min === null ? row.disk_avail_gb : Math.min(bucket.disk_avail_min, row.disk_avail_gb);
+    if (typeof row.disk_used_gb === "number") bucket.disk_used_max = bucket.disk_used_max === null ? row.disk_used_gb : Math.max(bucket.disk_used_max, row.disk_used_gb);
+    buckets.set(bucketTs, bucket);
+  }
+
+  return Array.from(buckets.values())
+    .sort((a, b) => a.ts - b.ts)
+    .map((b) => ({
+      ts: new Date(b.ts).toISOString(),
+      count: b.count,
+      cpu_pct: b.cpu_pct_count ? Math.round((b.cpu_pct_sum / b.cpu_pct_count) * 10) / 10 : null,
+      cpu_load_1min: b.cpu_load_count ? Math.round((b.cpu_load_sum / b.cpu_load_count) * 100) / 100 : null,
+      mem_avail_gb: b.mem_avail_min,
+      mem_used_gb: b.mem_used_max,
+      disk_avail_gb: b.disk_avail_min,
+      disk_used_gb: b.disk_used_max,
+    }));
+}
+
 function canRestWriteNetwork(authCtx: { userId: string; networkId: string | null } | null, networkId: string | null, isAdmin: boolean): boolean {
   if (!authCtx) return true; // legacy global token or open dev mode
   if (isAdmin) return true;
@@ -892,6 +990,119 @@ Bun.serve({
       }
 
       return withCors(req, Response.json(Array.from(grouped.values())));
+    }
+
+    const serverDetailMatch = url.pathname.match(/^\/api\/server\/([^/]+)\/(health|agents)$/);
+    if (serverDetailMatch && req.method === "GET") {
+      const host = decodeURIComponent(serverDetailMatch[1]);
+      const detailKind = serverDetailMatch[2];
+      if (!host) return withCors(req, Response.json({ ok: false, error: "host required" }, { status: 400 }));
+
+      const cutoff = sqliteTime(new Date(Date.now() - 10 * 60 * 1000));
+      const staleParams: any[] = [cutoff];
+      let staleSql = "UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'";
+      staleSql = addNetworkScope(staleSql, staleParams, restScope);
+      db.run(staleSql, staleParams);
+
+      if (detailKind === "agents") {
+        const params: any[] = [host, host];
+        let sql = `
+          SELECT alias, agent, status, task, progress, model, hostname, ip,
+                 cpu_load_1min, cpu_cores, mem_avail_gb, mem_used_gb, mem_total_gb,
+                 disk_avail_gb, disk_used_gb, disk_total_gb,
+                 process_rss_bytes, process_cpu_pct, process_uptime_seconds, process_in_flight_count,
+                 COALESCE(last_seen_at, updated_at) AS last_seen
+          FROM sessions
+          WHERE (hostname = ?1 OR ip = ?2)
+        `;
+        sql = addNetworkScope(sql, params, restScope);
+        sql += " ORDER BY alias";
+        const agents = db.all<any>(sql, ...params).map((s) => ({
+          alias: s.alias,
+          runtime: normalizeRuntime(s.agent),
+          raw_agent: s.agent ?? null,
+          model: s.model ?? null,
+          status: s.status ?? "offline",
+          task: s.task ?? null,
+          progress: s.progress ?? 0,
+          last_seen: s.last_seen ?? null,
+          health: agentHealthChip(s.status, s.last_seen),
+          hostname: s.hostname ?? null,
+          ip: s.ip ?? null,
+          telemetry: {
+            cpu_load_1min: s.cpu_load_1min ?? null,
+            cpu_cores: s.cpu_cores ?? null,
+            cpu_pct: cpuPct(s.cpu_load_1min, s.cpu_cores),
+            mem_total_gb: s.mem_total_gb ?? null,
+            mem_used_gb: s.mem_used_gb ?? null,
+            mem_avail_gb: s.mem_avail_gb ?? null,
+            disk_total_gb: s.disk_total_gb ?? null,
+            disk_used_gb: s.disk_used_gb ?? null,
+            disk_avail_gb: s.disk_avail_gb ?? null,
+            process_rss_bytes: s.process_rss_bytes ?? null,
+            process_cpu_pct: s.process_cpu_pct ?? null,
+            process_uptime_seconds: s.process_uptime_seconds ?? null,
+            process_in_flight_count: s.process_in_flight_count ?? null,
+          },
+        }));
+        if (agents.length === 0) return withCors(req, Response.json({ ok: false, error: "server not found" }, { status: 404 }));
+        return withCors(req, Response.json({ ok: true, host, agent_count: agents.length, agents }));
+      }
+
+      const latestParams: any[] = [host, host];
+      let latestSql = `
+        SELECT hostname, ip, COUNT(*) OVER () AS agent_count,
+               cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb,
+               disk_total_gb, disk_used_gb, disk_avail_gb,
+               COALESCE(last_seen_at, updated_at) AS last_seen
+        FROM sessions
+        WHERE (hostname = ?1 OR ip = ?2)
+      `;
+      latestSql = addNetworkScope(latestSql, latestParams, restScope);
+      latestSql += " ORDER BY COALESCE(last_seen_at, updated_at) DESC LIMIT 1";
+      const latest = db.get<any>(latestSql, ...latestParams);
+      if (!latest) return withCors(req, Response.json({ ok: false, error: "server not found" }, { status: 404 }));
+
+      const since24h = sqliteTime(new Date(Date.now() - 24 * 60 * 60 * 1000));
+      const histParams: any[] = [host, host, since24h];
+      let histSql = `
+        SELECT created_at, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb,
+               disk_total_gb, disk_used_gb, disk_avail_gb
+        FROM agent_telemetry
+        WHERE (hostname = ?1 OR ip = ?2) AND created_at >= ?3
+      `;
+      histSql = addNetworkScope(histSql, histParams, restScope);
+      histSql += " ORDER BY created_at ASC";
+      const historyRows = db.all<any>(histSql, ...histParams);
+      const now = Date.now();
+      const alert = serverAlertLevel(latest);
+
+      return withCors(req, Response.json({
+        ok: true,
+        host,
+        hostname: latest.hostname ?? null,
+        ip: latest.ip ?? null,
+        agent_count: latest.agent_count ?? 0,
+        alert_level: alert.level,
+        alerts: alert.alerts,
+        latest: {
+          cpu_load_1min: latest.cpu_load_1min ?? null,
+          cpu_cores: latest.cpu_cores ?? null,
+          cpu_pct: cpuPct(latest.cpu_load_1min, latest.cpu_cores),
+          mem_total_gb: latest.mem_total_gb ?? null,
+          mem_used_gb: latest.mem_used_gb ?? null,
+          mem_avail_gb: latest.mem_avail_gb ?? null,
+          disk_total_gb: latest.disk_total_gb ?? null,
+          disk_used_gb: latest.disk_used_gb ?? null,
+          disk_avail_gb: latest.disk_avail_gb ?? null,
+          last_seen: latest.last_seen ?? null,
+        },
+        history: {
+          "5m": bucketTelemetry(historyRows, now - 5 * 60 * 1000, 60 * 1000),
+          "1h": bucketTelemetry(historyRows, now - 60 * 60 * 1000, 5 * 60 * 1000),
+          "24h": bucketTelemetry(historyRows, now - 24 * 60 * 60 * 1000, 60 * 60 * 1000),
+        },
+      }));
     }
 
     // ── REST: send task ──

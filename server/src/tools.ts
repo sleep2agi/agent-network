@@ -127,9 +127,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         mem_total_gb: z.number().nullable().optional(),
         mem_used_gb: z.number().nullable().optional(),
         mem_avail_gb: z.number().nullable().optional(),
+        disk_total_gb: z.number().nullable().optional(),
+        disk_used_gb: z.number().nullable().optional(),
+        disk_avail_gb: z.number().nullable().optional(),
       }).optional().describe("Host telemetry reported by agent-node"),
+      process_telemetry: z.object({
+        rss: z.number().nullable().optional(),
+        cpu_pct: z.number().nullable().optional(),
+        uptime_seconds: z.number().nullable().optional(),
+        in_flight_count: z.number().nullable().optional(),
+      }).optional().describe("Per-agent process telemetry reported by agent-node"),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -147,13 +156,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const memTotalGb = typeof host?.mem_total_gb === "number" ? host.mem_total_gb : null;
       const memUsedGb = typeof host?.mem_used_gb === "number" ? host.mem_used_gb : null;
       const memAvailGb = typeof host?.mem_avail_gb === "number" ? host.mem_avail_gb : null;
+      const diskTotalGb = typeof host?.disk_total_gb === "number" ? host.disk_total_gb : null;
+      const diskUsedGb = typeof host?.disk_used_gb === "number" ? host.disk_used_gb : null;
+      const diskAvailGb = typeof host?.disk_avail_gb === "number" ? host.disk_avail_gb : null;
+      const processRssBytes = typeof proc?.rss === "number" ? proc.rss : null;
+      const processCpuPct = typeof proc?.cpu_pct === "number" ? proc.cpu_pct : null;
+      const processUptimeSeconds = typeof proc?.uptime_seconds === "number" ? proc.uptime_seconds : null;
+      const processInFlightCount = typeof proc?.in_flight_count === "number" ? proc.in_flight_count : null;
 
       db.transaction(() => {
         // Only delete same-alias sessions within the same network
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [alias, resume_id, sessionNetId]);
         db.run(
-          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, last_seen_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, datetime('now'), datetime('now'))
+          `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_cpu_pct, process_uptime_seconds, process_in_flight_count, last_seen_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, datetime('now'), datetime('now'))
            ON CONFLICT(resume_id) DO UPDATE SET
              alias = COALESCE(?2, sessions.alias), tmux_name = COALESCE(?3, sessions.tmux_name),
              server = COALESCE(?4, sessions.server), ip = COALESCE(?5, sessions.ip),
@@ -170,9 +186,23 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              mem_total_gb = COALESCE(?23, sessions.mem_total_gb),
              mem_used_gb = COALESCE(?24, sessions.mem_used_gb),
              mem_avail_gb = COALESCE(?25, sessions.mem_avail_gb),
+             disk_total_gb = COALESCE(?26, sessions.disk_total_gb),
+             disk_used_gb = COALESCE(?27, sessions.disk_used_gb),
+             disk_avail_gb = COALESCE(?28, sessions.disk_avail_gb),
+             process_rss_bytes = COALESCE(?29, sessions.process_rss_bytes),
+             process_cpu_pct = COALESCE(?30, sessions.process_cpu_pct),
+             process_uptime_seconds = COALESCE(?31, sessions.process_uptime_seconds),
+             process_in_flight_count = COALESCE(?32, sessions.process_in_flight_count),
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, alias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb]
+          [resume_id, alias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processCpuPct, processUptimeSeconds, processInFlightCount]
         );
+        if (host || proc) {
+          db.run(
+            `INSERT INTO agent_telemetry (id, network_id, resume_id, alias, hostname, ip, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_cpu_pct, process_uptime_seconds, process_in_flight_count, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, datetime('now'))`,
+            [uuidv4(), sessionNetId, resume_id, alias, hostHostname, hostIp, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processCpuPct, processUptimeSeconds, processInFlightCount]
+          );
+        }
       });
 
       // V2: sync tasks table — report_status(working) → tasks.running
