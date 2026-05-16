@@ -607,6 +607,75 @@ CLAUDE_TIMEOUT_MS=600000 CLAUDE_MAX_RETRIES=5 anet node start <alias>
 
 If timeouts persist, the root cause is usually vendor capacity. Shard horizontally across multiple vendors and stagger startup (`--stagger` on `anet project up`, [#117](https://github.com/sleep2agi/agent-network/issues/117)).
 
+### `codex-direct-stdio` opt-in path errors (v0.10.0+, only when `ANET_CODEX_STDIO_DIRECT=1`)
+
+v0.10.0 [#141](https://github.com/sleep2agi/agent-network/issues/141) introduces a direct stdio JSON-RPC client path that bypasses the `@openai/codex-sdk` wrapper — errors surface more directly (no wrapper buffer), but you now face the `codex` binary + `codex app-server` protocol straight on.
+
+**1. `Error: spawn codex ENOENT` (immediate failure after opt-in)**
+
+agent-node can't find the `codex` binary — the opt-in path **spawns directly**, there's no `@openai/codex-sdk` fallback.
+
+```bash
+# Check
+which codex
+# If empty, install:
+npm install -g @openai/codex
+
+# Or if the npm global bin isn't on PATH, see runtimes § codex-sdk PATH fix.
+```
+
+Fall back to the wrapper path (drop the env var):
+
+```bash
+unset ANET_CODEX_STDIO_DIRECT
+anet node start <codex-node>
+```
+
+**2. `codex app-server` subcommand missing / `unknown subcommand: app-server`**
+
+Older codex CLI versions don't have `codex app-server` ([#141](https://github.com/sleep2agi/agent-network/issues/141) verified against codex `0.130.0+`). Upgrade:
+
+```bash
+npm install -g @openai/codex@latest
+codex --version  # expect ≥ 0.130.0
+codex app-server --help  # should print subcommand help, not "unknown subcommand"
+```
+
+If you can't upgrade, fall back to the wrapper: `unset ANET_CODEX_STDIO_DIRECT`.
+
+**3. `JSON-RPC parse error` / `-32600` invalid request**
+
+Stdio protocol mismatch — usually from a codex CLI version that's older or newer than what anet expects (experimental status means the protocol can break). Reproducer + fix:
+
+```bash
+# Inspect the protocol handshake
+ANET_CODEX_STDIO_DIRECT=1 LOG_LEVEL=debug anet node start <codex-node> 2>&1 | grep -iE "initialize|protocolVersion|error"
+
+# If you see a protocolVersion mismatch
+npm install -g @openai/codex@latest
+
+# Temporary fallback to the wrapper:
+unset ANET_CODEX_STDIO_DIRECT
+```
+
+If the codex CLI is already at latest but it still errors, please file an issue with the debug output above and `codex --version`. [#141](https://github.com/sleep2agi/agent-network/issues/141) is still inside the preview-feedback window (v0.11.0 plans the default flip), so protocol-break is a known risk + mitigation path.
+
+### Dashboard agent hover card shows `process_telemetry` as `null` (v0.10.0 dashboard 0.5.0)
+
+The dashboard `0.5.0` §3.E hover detail card expects agent-node `≥ 2.4.0` ([#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1, which makes the agent emit `process_telemetry` on every heartbeat) plus commhub-server `≥ 0.8.2` (T2.2 schema align). Three possible causes:
+
+- **agent-node older than 2.4.0**: run `anet upgrade` to pull v0.10.0 latest (`agent-node 2.4.0`)
+- **commhub-server older than 0.8.2**: upgrade the server (`bunx @sleep2agi/commhub-server@latest`)
+- **Agent hasn't reported a heartbeat yet**: `process_telemetry` rides on the same heartbeat as host telemetry — a freshly started node needs ~15s
+
+Verify the real data flow:
+
+```bash
+curl http://localhost:9200/api/server/<host>/agents \
+  -H "Authorization: Bearer ntok_xxx" | jq '.agents[0].process_telemetry'
+# Expect non-null rss_bytes / cpu_pct / uptime_seconds / in_flight_count
+```
+
 ---
 
 ## Docker Errors

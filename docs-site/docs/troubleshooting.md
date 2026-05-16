@@ -606,6 +606,75 @@ CLAUDE_TIMEOUT_MS=600000 CLAUDE_MAX_RETRIES=5 anet node start <alias>
 
 仍然 timeout 的话，根本原因常是 vendor 容量不足 → 横向 sharding 到多个 vendor + 错峰（`--stagger` per `anet project up`，[#117](https://github.com/sleep2agi/agent-network/issues/117)）。
 
+### `codex-direct-stdio` opt-in 路径错误（v0.10.0+，仅 `ANET_CODEX_STDIO_DIRECT=1` 时触发）
+
+v0.10.0 [#141](https://github.com/sleep2agi/agent-network/issues/141) 引入的 codex direct stdio JSON-RPC 客户端路径绕开 `@openai/codex-sdk` wrapper —— 错误 surface 更直接（不经 wrapper buffer），但意味着你直接面对 `codex` 二进制 + `codex app-server` 协议。
+
+**1. `Error: spawn codex ENOENT`（启用 opt-in 后立即失败）**
+
+agent-node 找不到 `codex` 二进制 ——「opt-in 路径」**直 spawn**，没有 `@openai/codex-sdk` 兜底。
+
+```bash
+# 检查
+which codex
+# 若空：装一遍
+npm install -g @openai/codex
+
+# 或者 npm 全局 bin 不在 PATH 上 —— 参见 runtimes / codex-sdk § 前置 PATH 修复
+```
+
+退一步用默认 wrapper 路径（取消 env）：
+
+```bash
+unset ANET_CODEX_STDIO_DIRECT
+anet node start <codex-node>
+```
+
+**2. `codex app-server` 子命令不存在 / `unknown subcommand: app-server`**
+
+`codex app-server` 在老版本 codex CLI 上没有（[#141](https://github.com/sleep2agi/agent-network/issues/141) 验证基线 `codex 0.130.0+`）。升级：
+
+```bash
+npm install -g @openai/codex@latest
+codex --version  # 期望 ≥ 0.130.0
+codex app-server --help  # 应能 print subcommand help, 不报 "unknown subcommand"
+```
+
+升不动就回 wrapper：`unset ANET_CODEX_STDIO_DIRECT`。
+
+**3. `JSON-RPC parse error` / `-32600` invalid request**
+
+stdio 协议 mismatch —— 一般来自 codex CLI 比 anet 期望版本旧 / 新（experimental 状态下协议可能 breaking）。复现 + 修：
+
+```bash
+# 看协议握手
+ANET_CODEX_STDIO_DIRECT=1 LOG_LEVEL=debug anet node start <codex-node> 2>&1 | grep -iE "initialize|protocolVersion|error"
+
+# 若发现 protocolVersion mismatch
+npm install -g @openai/codex@latest
+
+# 临时回退用 wrapper：
+unset ANET_CODEX_STDIO_DIRECT
+```
+
+如果 codex CLI 已经 latest 仍报错，开 issue 带这段 debug 输出 + `codex --version` —— [#141](https://github.com/sleep2agi/agent-network/issues/141) 仍在 preview-feedback 窗口（v0.11.0 计划 default flip），protocol breaking 是已知 risk + mitigation 方向。
+
+### Dashboard agent hover card `process_telemetry` 字段全 `null`（v0.10.0 dashboard 0.5.0）
+
+dashboard `0.5.0` 的 §3.E hover detail card 期望 agent-node `≥ 2.4.0`（[#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 ship 起 agent 心跳带 `process_telemetry`）+ commhub-server `≥ 0.8.2`（T2.2 schema align）。三种可能：
+
+- **agent-node 老于 2.4.0**：跑 `anet upgrade` 升级到 v0.10.0 latest（`agent-node 2.4.0`）
+- **commhub-server 老于 0.8.2**：升级 server 端（`bunx @sleep2agi/commhub-server@latest`）
+- **agent 短期还没心跳**：`process_telemetry` 跟普通 host telemetry 一样需要至少 1 次心跳；新启动节点等 ~15s
+
+verify 真实数据流：
+
+```bash
+curl http://localhost:9200/api/server/<host>/agents \
+  -H "Authorization: Bearer ntok_xxx" | jq '.agents[0].process_telemetry'
+# 期望非 null 的 rss_bytes / cpu_pct / uptime_seconds / in_flight_count
+```
+
 ---
 
 ## Docker 错误
