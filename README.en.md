@@ -204,10 +204,10 @@ Stable, Apache-2.0, published to npm.
 
 | Package | Version | Role |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.1.15` | `anet` CLI — hub / dashboard / agent / demo launcher |
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.1` | MCP + REST + SSE hub (SQLite) |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.6` | Web UI — Next.js 16, 4 themes, Overview / Nodes / Tasks / Messages / Chat / Admin / Settings |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.3.10` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.0` | `anet` CLI — hub / dashboard / agent / demo launcher |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.2` | MCP + REST + SSE hub (SQLite) + `/api/server/:host/health` + `/api/server/:host/agents` |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.4.6` | Web UI — Next.js 16, 4 themes (dashboard `0.5.0` promotes after Phase 2 surfaces ship) |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.0` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry |
 
 The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. You only ever globally install one package.
 
@@ -257,7 +257,7 @@ What's solid, and what to watch out for.
 ---
 
 > [!IMPORTANT]
-> **Current stable: v0.9.2** (Apache 2.0, shipped 2026-05-16 via npm `latest` tag — concurrency + UX hotfix ([#129](https://github.com/sleep2agi/agent-network/issues/129) auth fast-fail / [#132](https://github.com/sleep2agi/agent-network/issues/132) retry-with-backoff / [#133](https://github.com/sleep2agi/agent-network/issues/133) runtime-first wizard / [#136](https://github.com/sleep2agi/agent-network/issues/136) `anet node start` default reverted to foreground), see [changelog](https://anet.sh/en/changelog#v0-9-2-patch-auth-fast-fail-fan-out-retry-wizard-redo-122-default-tmux-reverted-2026-05-16-stable); project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
+> **Current stable: v0.10.0** (Apache 2.0, shipped 2026-05-16 via npm `latest` tag, Phase 1 three-package promote — Direct Runtime + Observability Foundations ([#141](https://github.com/sleep2agi/agent-network/issues/141) codex app-server stdio direct opt-in / [#99](https://github.com/sleep2agi/agent-network/issues/99) per-server daemon Phase 1 endpoint scaffold / [#142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry / dashboard `0.5.0` Phase 2 pending §3.D/F/G ship / release-gate playbook first full run), see [changelog](https://anet.sh/en/changelog#v0-10-0-direct-runtime-observability-foundations-2026-05-16-stable-phase-1-3-package-promote); project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
 >
 > **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
 

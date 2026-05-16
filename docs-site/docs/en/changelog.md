@@ -8,6 +8,56 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## v0.10.0 — **Direct Runtime + Observability Foundations** (2026-05-16) ✅ stable (Phase 1, 3-package promote)
+
+**Version alignment** (npm `latest` tag, Phase 1):
+- `@sleep2agi/agent-network@2.2.0`
+- `@sleep2agi/agent-node@2.4.0`
+- `@sleep2agi/commhub-server@0.8.2`
+- `@sleep2agi/agent-network-dashboard@0.4.6` *(Phase 2 — promotes to `0.5.0` after the dashboard §3.D/F/G surfaces ship, ~45-60 min later; docs will sync a second time)*
+
+::: tip Theme: fix the root
+v0.7 → v0.9.2 accumulated 11 releases; the 5-P0 ripple chain ([#135-#139](https://github.com/sleep2agi/agent-network/issues/135)) surfaced a runtime architecture debt. v0.10.0 fixes the root — runtime debt (codex-sdk wrapper bypass, opt-in) + observability foundations (per-server daemon endpoints + per-agent process telemetry) + release-gate playbook. This is the groundwork for v0.11.0's 24/7 multi-vendor AI Agent society live stream. See the [v0.10.0 release tracker #140](https://github.com/sleep2agi/agent-network/issues/140).
+:::
+
+### 5 features
+
+**A. [#141](https://github.com/sleep2agi/agent-network/issues/141) codex app-server stdio direct (opt-in `ANET_CODEX_STDIO_DIRECT=1`)**
+The codex runtime previously went through the `@openai/codex-sdk` npm wrapper; the wrapper's `--mcp-config` HTTP transport bug is the root-cause family for the [#102](https://github.com/sleep2agi/agent-network/issues/102) hang. v0.10.0 adds a direct `spawn('codex', ['app-server'])` + minimal stdio JSON-RPC client (~155 LOC) path that **bypasses the wrapper entirely**, sidesteps that family bug, and exposes the full 67-method v2 protocol surface (thread / turn / item / realtime). **v0.10.0 still defaults to the wrapper path** (collecting preview feedback first); set `ANET_CODEX_STDIO_DIRECT=1` to opt in. Default flip is planned for v0.11.0.
+
+**B. [#99](https://github.com/sleep2agi/agent-network/issues/99) Per-server daemon Phase 1 scaffold (monitoring-only)**
+New server-side endpoint family (commit [`e575cc6`](https://github.com/sleep2agi/agent-network/commit/e575cc6)):
+- `GET /api/server/:host/health` — host CPU / mem / disk / process health
+- `GET /api/server/:host/agents` — per-host agent list + telemetry history
+
+Dashboard integration lands in Phase 2 ([#119](https://github.com/sleep2agi/agent-network/issues/119) ServersDrawer integration). The control layer (kill / restart / redeploy) is deferred to v0.11.0.
+
+**C. [#142](https://github.com/sleep2agi/agent-network/issues/142) Per-agent process telemetry**
+agent-node now embeds `process_telemetry` in every `commhub_report_status` heartbeat: `rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`. Zero sysmon dependency, zero privilege. commhub-server schema is aligned on the wire (commit [`209cac7`](https://github.com/sleep2agi/agent-network/commit/209cac7)); the dashboard hover-card rendering ships in Phase 2 ([#119](https://github.com/sleep2agi/agent-network/issues/119) sibling). Sibling to [#119](https://github.com/sleep2agi/agent-network/issues/119) host fields (host step 1 ✅ earlier; agent step 2 ships in this release).
+
+**D. Dashboard network/node front-end surface upgrade (Hero 3 partial)**
+Dashboard §3.A/B/C/E/H surfaces shipped — Networks selector / Servers drawer wired to #119 + #99 / Agents card telemetry wired to #142 / Status drawer wired to server-logs / Networks management. §3.D / F / G (edit / template / rename) land in Phase 2 alongside dashboard `0.5.0` promote.
+
+**E. Lightweight pre-release-gate playbook (release-gate Phase 1+2)**
+[`docs/tests/release-gate-playbook.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/release-gate-playbook.md) — maintained by the test lead. Covers hub / dashboard / login / node lifecycle / runtime smoke / vendor verify. v0.10.0 is the first release to fully exercise this playbook; future latest promotes gate on it.
+
+### Breaking changes / Migration
+
+- **`codex` runtime default behavior unchanged**: still goes through the `@openai/codex-sdk` wrapper; set `ANET_CODEX_STDIO_DIRECT=1` to switch to the direct stdio path. The preview-chain `ANET_CODEX_LEGACY_SDK=1` fallback flag is renamed to the more direct opt-in `ANET_CODEX_STDIO_DIRECT=1` for latest — same semantics, clearer name.
+- **agent-node `commhub_report_status` payload adds `process_telemetry` sub-object**: commhub-server `0.8.2` schema is aligned; older server versions (≤ `0.8.1`) silently ignore the unknown field and won't fail.
+- **`/api/server/:host/health` + `/api/server/:host/agents` are new endpoints**: rate-limit / auth behavior matches the existing `/api/servers` (admin or self-network member); no existing client is broken.
+
+### Known follow-ups
+
+- **Phase 2 dashboard `0.5.0` promote** (after dashboard §3.D/F/G surfaces ship, ~45-60 min later) — full ServersDrawer + Agents-card telemetry hover / per-network edit flow; docs will sync a dashboard section in a second pass.
+- **Close evidence for #102 / #103 hang** — Phase 1.5 in the preview chain already plans the regression replay against the new stdio path; we'll close them once the latest opt-in path passes the regression.
+- **Sessions NETWORK column display bug** (Vincent 5212 catch) — deferred to a v0.10.x patch or v0.11.0.
+- **#117 `anet project up` detached-tmux follow-up** (macOS bun `setRawMode` already fixed by #136, but detached-mode follow-up still pending) — to be done with the v0.11.0 control layer.
+
+Release flow follows the [v0.9.0 split-brain lessons #126](https://github.com/sleep2agi/agent-network/issues/126) two-phase publish SOP: publish each tarball with `--tag preview` first, curl-verify HTTP 200, then `npm dist-tag add @<v> latest`. Phase 1 three-package (agent-network / agent-node / commhub-server) clean-semver promote is complete; dashboard Phase 2 is pending §3.D/F/G.
+
+---
+
 ## v0.9.2 — **Patch: Auth fast-fail + fan-out retry + wizard redo + #122 default-tmux reverted** (2026-05-16) ✅ stable
 
 **Version sync** (npm `latest` tag):

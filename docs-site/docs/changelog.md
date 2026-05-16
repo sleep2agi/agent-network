@@ -8,6 +8,56 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## v0.10.0 — **Direct Runtime + Observability Foundations**（2026-05-16）✅ stable（Phase 1，3 包 promote）
+
+**版本同步**（npm `latest` tag，Phase 1）：
+- `@sleep2agi/agent-network@2.2.0`
+- `@sleep2agi/agent-node@2.4.0`
+- `@sleep2agi/commhub-server@0.8.2`
+- `@sleep2agi/agent-network-dashboard@0.4.6` *(Phase 2 N 站马 §3.D/F/G ship 完后 promote `0.5.0`，docs 二次 sync)*
+
+::: tip 主题：治本
+v0.7 → v0.9.2 累积 11 release、5 P0 chain（[#135-#139](https://github.com/sleep2agi/agent-network/issues/135)）暴露 runtime 架构债。v0.10.0 治本 —— runtime 架构债（codex-sdk wrapper bypass，opt-in）+ observability 基础（守护节点 endpoint + per-agent process telemetry）+ release-gate playbook。为 v0.11.0 多厂商 AI Agent 社会 24/7 直播打地基。详见 [v0.10.0 release tracker #140](https://github.com/sleep2agi/agent-network/issues/140)。
+:::
+
+### 5 features
+
+**A. [#141](https://github.com/sleep2agi/agent-network/issues/141) codex app-server stdio direct（opt-in `ANET_CODEX_STDIO_DIRECT=1`）**
+之前 codex runtime 走 `@openai/codex-sdk` npm wrapper，wrapper 的 `--mcp-config` HTTP transport bug 是 [#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family。v0.10.0 新增直 `spawn('codex', ['app-server'])` + 最小 stdio JSON-RPC client (~155 LOC) 路径，**bypass wrapper 整个绕过这 family bug**，同时拿到完整 67-method v2 protocol surface（thread / turn / item / realtime 等），不再受 codex-sdk breaking change 牵制。**v0.10.0 默认仍是 wrapper 路径**（先收 preview 反馈），显式 `ANET_CODEX_STDIO_DIRECT=1` 开启直 stdio；v0.11.0 计划 default flip。
+
+**B. [#99](https://github.com/sleep2agi/agent-network/issues/99) 守护节点 Phase 1 scaffold（监测 only）**
+新增 server-side endpoint family（commit [`e575cc6`](https://github.com/sleep2agi/agent-network/commit/e575cc6)）：
+- `GET /api/server/:host/health` — host CPU / mem / disk / process 健康
+- `GET /api/server/:host/agents` — agent list per host + telemetry 历史
+
+dashboard 集成留 Phase 2（[#119](https://github.com/sleep2agi/agent-network/issues/119) ServersDrawer 整合）。控制层（kill / restart / redeploy）defer 到 v0.11.0。
+
+**C. [#142](https://github.com/sleep2agi/agent-network/issues/142) Per-agent process telemetry**
+agent-node 每次 `commhub_report_status` 心跳带上 `process_telemetry`：`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`。零 sysmon 依赖、零特权。commhub-server schema 端对齐（commit [`209cac7`](https://github.com/sleep2agi/agent-network/commit/209cac7)），dashboard 渲染 hover card Phase 2（[#119](https://github.com/sleep2agi/agent-network/issues/119) sibling）。跟 [#119](https://github.com/sleep2agi/agent-network/issues/119) host fields 是 sibling 关系（host step 1 ✅ 之前 ship，agent step 2 本 release ship）。
+
+**D. Dashboard 网络节点前端展示升级（Hero 3 partial）**
+N 站马 §3.A/B/C/E/H ship 完 5 surface（Networks 选择器 / Servers Drawer 接 #119 + #99 / Agents 卡片 telemetry 接 #142 / Status Drawer 接 server-logs / Networks 网络管理）。剩 §3.D / F / G（编辑 / 模板 / 重命名）Phase 2 跟 dashboard `0.5.0` promote 一起 ship。
+
+**E. 发布前轻量级测试 playbook（release-gate Phase 1+2）**
+[`docs/tests/release-gate-playbook.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/release-gate-playbook.md) — 通信测试马 lead 维护，覆盖 hub / dashboard / login / node lifecycle / runtime smoke / vendor verify 等关键路径。本次 v0.10.0 ship 是首次完整跑通该 playbook 的 release，为后续每次 latest promote 卡 release-gate。
+
+### Breaking changes / Migration
+
+- **`codex` runtime 默认行为不变**：仍走 `@openai/codex-sdk` wrapper；要切直 stdio 必须显式 `ANET_CODEX_STDIO_DIRECT=1`。`ANET_CODEX_LEGACY_SDK=1` 之前 preview chain 的 fallback 命名在 latest 改成 opt-in `ANET_CODEX_STDIO_DIRECT=1` 反向开关，含义更直接。
+- **agent-node `commhub_report_status` payload 加 `process_telemetry` 子对象**：commhub-server `0.8.2` schema 已对齐；老 server 版本（≤ `0.8.1`）会忽略未知字段不会 fail。
+- **`/api/server/:host/health` + `/api/server/:host/agents` 是新 endpoint**：rate limit / auth 行为跟现有 `/api/servers` 同（admin or self-network member），不破坏现有 client。
+
+### Known follow-ups
+
+- **Phase 2 dashboard `0.5.0` promote**（N 站马 §3.D/F/G ship 完，~45-60min 后）—— 完整 ServersDrawer + Agents 卡片 telemetry hover card + per-network 编辑流；docs 二次 sync 加 dashboard 段。
+- **#102 / #103 hang 关闭凭证**（codex direct stdio 路径回归 #102 hang 场景 verify）—— preview chain 内 Phase 1.5 已规划，待 latest opt-in 路径回归 verify 完成关闭。
+- **Sessions NETWORK 列显示 bug**（Vincent 5212 catch）—— defer 到 v0.10.x patch 或 v0.11.0。
+- **#117 `anet project up` detached tmux follow-up**（macOS bun setRawMode 已 #136 修，但 detached 模式 follow-up 仍欠）—— v0.11.0 配套 control 层一起做。
+
+发布流程沿用 [v0.9.0 split-brain lessons #126](https://github.com/sleep2agi/agent-network/issues/126) 的两 phase publish SOP：先 `--tag preview` 上传 tarball + curl verify HTTP 200，再 `npm dist-tag add @<v> latest`。Phase 1 三包（agent-network / agent-node / commhub-server）clean semver promote 完成；dashboard Phase 2 待 §3.D/F/G ship。
+
+---
+
 ## v0.9.2 — **Patch: Auth fast-fail + Fan-out retry + Wizard 重做 + #122 default-tmux 回退**（2026-05-16）✅ stable
 
 **版本同步**（npm `latest` tag）：
