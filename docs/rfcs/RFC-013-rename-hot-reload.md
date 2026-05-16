@@ -1,9 +1,12 @@
 # RFC-013 — Rename Hot-Reload 跨版本兼容性
 
 **作者**: 通信SDK马
-**状态**: Draft (待 通信龙 / 通信牛 / Vincent review)
+**状态**: Draft v2 (待 通信龙 / 通信牛 / Vincent review)
+**版本**: v1 (2026-05-17 初稿) → v2 (2026-05-17 测试马 Phase 1 finding fold-in)
 **关联 issue**: #146, #84 (rename impl), RFC-010 §4.4 (SIGHUP-based reload)
 **关联 ship**: v0.10.0 (rename 2PC), v0.10.2 candidate (本 RFC 实施)
+
+> **v2 变更说明**: 测试马 Phase 1 Docker repro (4/4 FAIL) 揭示 #146 现场实际是**多层级联**, 不只 hot-reload 单 bug. v2 加入 §1.5 多层 finding 分类 + §3.5 Layer 1 robustness (prepareRename actionable error) + §3.6 Layer 3 UX (CLI pre-check). §3-§4 hot-reload 核心设计不变 — 仍是 Vincent 实际报告的 root cause.
 
 ## 1. 背景
 
@@ -26,7 +29,49 @@ Vincent 5387 实测 (#146) 暴露此 gap: rename 后 `send_task` 给 new alias *
 1. **commhub-server `clients` map** (`src/push.ts`) 用 alias 作 SSE 注册 key, rename 后 stale → `pushEvent(NEW, ...)` 找不到 subscriber, 静默 drop.
 2. **agent-node `ALIAS` 变量** (`src/cli.ts` module-level) 从 startup 时 config.json 读入, 之后不重读 → 即便 SSE 拿到, 内部仍用 OLD 调 `report_status` / `get_inbox`.
 
-### 1.3 Vincent 5390+5391 硬约束
+### 1.3 测试马 Phase 1 Docker repro (4/4 FAIL) finding 分类
+
+`docs/tests/p146-rename-repro/` 揭示 4 case 全 FAIL, 但 **错误原因分两种** — 区分是关键:
+
+**Type A: agent-node FATAL exit on envRef missing** (test_rn case)
+
+```
+[anet] FATAL: config.json env.ANTHROPIC_AUTH_TOKEN references env var
+       "ANTHROPIC_AUTH_TOKEN_N_FDABE56B" but it is not set in this shell.
+[anet]        Fix: export ANTHROPIC_AUTH_TOKEN_N_FDABE56B=<your-value>
+              then re-run anet node start
+```
+
+agent-node by #125 envRef hygiene 默认使用 indirection. test scaffold 没 set 此 env var → agent FATAL exit at startup → 永远没 register → sessions 行不存在 → rename 失败 `node X not found in this network`. 这是 **test scaffold 配置问题, 不是 product bug** — agent 给的 error 已经 actionable. 文档化 + 测试马 scaffold 需 mock env var.
+
+**Type B: CLIENT-side resolveNodeRef miss** (before_c1 / before_c2 cases)
+
+```
+[anet] Node "before_c1" not found.
+```
+
+此 error 在 cli.ts:3047 `resolveNodeRef(fromRef)` 失败 — 客户端连 server 之前已挂. 真因看 test_log 是 cwd mismatch (anet 命令运行 cwd 跟 node config dir 创建 cwd 不同). 也是 **test scaffold 问题**.
+
+**Type C: Vincent's actual #146 bug** (实测 production)
+
+Vincent **没** hit Type A/B, 因他本地 env var 设了 + anet 命令在节点 cwd 跑. 他的 repro 流程是:
+1. `anet node start` → agent successfully online + register + sessions row created
+2. `anet node rename foo bar --force` → prepareRename ✅, commitRename ✅, SQL cascade ✅
+3. `send_task --alias bar` → server 写 inbox 但**agent 收不到 SSE 推送**
+
+这是真正的 hot-reload missing bug, RFC-013 §3-§4 解决.
+
+### 1.4 多层 finding 总结
+
+| Layer | Issue | 是 product bug? | RFC-013 v2 涵盖? |
+|---|---|---|---|
+| Type A | envRef missing → agent FATAL → no sessions row | ❌ Test scaffold (envRef hygiene 按设计) | 文档化 + Layer 1 actionable error |
+| Type B | resolveNodeRef miss (cwd mismatch) | ❌ Test scaffold | Layer 3 CLI pre-check 提示 |
+| Type C | **agent hot-reload missing → send_task NEW silent drop** | ✅ **Product bug, Vincent #146** | §3-§4 (原 RFC-013 核心) |
+
+→ **RFC-013 v2 scope**: Type C primary fix + Type A/B robustness improvements (defensive, 不依赖 test scaffold 修正才有用).
+
+### 1.5 Vincent 5390+5391 硬约束
 
 - **5390 "升级一定要无痛"** — 不接受 process kill / task kill 类 fix (B 方案被否)
 - **5391 "兼容性花大功夫"** — 不接受 single-version impl, 必须 cross-version 4 case (旧+旧 / 旧+新 / 新+旧 / 新+新) 全有 deliberate design
@@ -123,6 +168,63 @@ if (resp.canonical_alias && resp.canonical_alias !== ALIAS) {
 ```
 
 这是 broadcast 丢失 / 网络分区时的 final safety net. 60s within bound 即可恢复.
+
+### 3.4 Server-side: prepareRename actionable error (Layer 1 robustness, Type A/B 防御)
+
+Current `prepareRename` (rename.ts:42-46) returns `node "X" not found in this network` when sessions row absent. 此 message **不区分**:
+- agent 没起 (Type A: envRef missing)
+- agent 起了但 register 失败 (Type B 部分 case)
+- alias 真不存在 (合法的 "not found")
+
+**v2 改进**: 错误响应携带 `diagnostic_hint` 字段:
+
+```typescript
+// server-side rename.ts:42-46
+if (!oldSession) {
+  return {
+    ok: false,
+    error: `node "${oldAlias}" not found in this network`,
+    diagnostic_hint: "agent_not_registered",  // 新字段
+  };
+}
+```
+
+CLI 端 renameCommand 看到 `diagnostic_hint: "agent_not_registered"` 显示:
+
+```
+[anet] rename PHASE 1 failed: node "foo" not found in this network — rolling back
+[anet] 💡 The agent may not have registered with the hub.
+[anet]    Check:  anet doctor foo   (verify agent online + env vars set)
+[anet]            anet node ls      (status should be "idle"/"working", not "offline")
+[anet] rollback complete — "foo" unchanged.
+```
+
+→ **零代码风险, 纯 UX 改进**, 对 Type A (envRef) 和 Type B (cwd mismatch) 都有引导. ~5 LOC server + ~10 LOC client.
+
+### 3.5 CLI-side: renameCommand pre-check (Layer 3 robustness)
+
+Current `renameCommand` (cli.ts:3032-3170) 直接进 Phase 1 prepare 不预检. **v2 改进**: 增 pre-check step before Phase 1:
+
+```typescript
+// agent-network/bin/cli.ts renameCommand at ~3082:
+// PRE-CHECK: verify agent has a live sessions row in the hub
+const statusResp = await fetch(`${hub}/api/server/${osHostname()}/agents`, {
+  headers: authHeaders(token),
+}).then(r => r.json() as any).catch(() => null);
+const liveSession = statusResp?.agents?.find((a: any) => a.alias === oldId);
+if (!liveSession) {
+  console.warn(`[anet] ⚠ "${oldId}" 在 hub 上没找到 live session.`);
+  console.warn(`[anet]    可能原因: agent 没起 / envRef env var 没设 / cwd mismatch`);
+  console.warn(`[anet]    建议: 先跑 'anet doctor ${oldId}' 验证 agent online`);
+  if (!force) {
+    console.error(`[anet] Use --force to attempt rename anyway (will likely fail at prepare).`);
+    process.exit(1);
+  }
+  // --force: 让 prepareRename 真试 + 失败时 diagnostic_hint (§3.4) 给精确提示
+}
+```
+
+→ **不破坏 invariant**, 让用户提前 catch Type A/B 类问题. ~20 LOC.
 
 ## 4. 兼容性矩阵 (4 case)
 
@@ -325,13 +427,14 @@ if (resp?.canonical_alias && resp.canonical_alias !== ALIAS) {
 
 | 文件 | LOC | ETA |
 |---|---|---|
-| commhub-server src/push.ts | ~10 | 15min |
-| commhub-server src/rename.ts | ~10 | 10min |
-| commhub-server src/index.ts | ~10 (health + report_status) | 20min |
-| agent-node src/cli.ts | ~25 | 30min |
-| 测试 9-case smoke (Docker) | — | 60min |
-| 文档 (CHANGELOG + RFC fold-in) | — | 15min |
-| **合计** | **~55 LOC** | **~2.5h** |
+| commhub-server src/push.ts (Type C: migrateSSEKeys) | ~10 | 15min |
+| commhub-server src/rename.ts (Type C: broadcast + diagnostic_hint) | ~15 | 15min |
+| commhub-server src/index.ts (Type C: health + report_status canonical_alias) | ~10 | 20min |
+| agent-network bin/cli.ts (Type A/B Layer 3 pre-check) | ~20 | 25min |
+| agent-node src/cli.ts (Type C: capability probe + listener + fallback) | ~25 | 30min |
+| 测试 9+2-case smoke (Docker, +Type A/B regression cases) | — | 60min |
+| 文档 (CHANGELOG + RFC fold-in + envRef migration guide) | — | 20min |
+| **合计** | **~80 LOC** | **~3h** |
 
 ## 10. Ship 路径
 
