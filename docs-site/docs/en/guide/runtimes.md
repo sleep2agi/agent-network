@@ -199,7 +199,7 @@ anet node create translator \
 
 ### Verified models
 
-The table below is the `claude-agent-sdk` runtime's built-in providers from the `anet node create` vendor picker (cli.ts `VENDORS` list) — every entry's `baseUrl` + model ids are verified-with-real-call before landing:
+The table below is the `claude-agent-sdk` runtime's built-in providers from `anet node create`'s vendor picker (cli.ts `VENDORS` list) — **the vendor picker only fires inside the `claude-agent-sdk` branch** of the runtime-first wizard (since v0.9.2 [#133](https://github.com/sleep2agi/agent-network/issues/133); the wizard first asks you to pick a runtime — `claude-code-cli` / `codex-sdk` skip the vendor picker entirely and just print an `auth login` hint). Every entry's `baseUrl` + model ids are verified-with-real-call before landing:
 
 | Provider | Model | `ANTHROPIC_BASE_URL` |
 |---|---|---|

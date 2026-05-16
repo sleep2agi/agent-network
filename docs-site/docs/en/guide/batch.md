@@ -35,7 +35,7 @@ Running `anet create --batch` with no flags enters the wizard.
 
 | Field | Flag | Default | Notes |
 |------|------|------|------|
-| Vendor / model | `--preset <key>` | omit → interactive **vendor picker** (same `selectVendorAndModel()` as `anet create` — pick the vendor first, then the model) | `--preset` accepts a vendor key (`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`); for backward compat it also accepts the old model id (e.g. `intern-s1-pro`, auto-resolved back to its vendor) |
+| Vendor / model | `--preset <key>` | omit → interactive **vendor picker** (shares the same `selectVendorAndModel()` implementation — ⚠ the batch wizard is still vendor-first, **unlike `anet create`'s v0.9.2+ runtime-first wizard** [#133](https://github.com/sleep2agi/agent-network/issues/133); you pick the vendor first, then the model) | `--preset` accepts a vendor key (`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`); for backward compat it also accepts the old model id (e.g. `intern-s1-pro`, auto-resolved back to its vendor) |
 | API key | `--api-key <key>` | interactive | written as each node's runtime auth token |
 | Workdir | `--workdir <path>` | `~/anet-team` | parent directory |
 | Workdir mode | `--workdir-mode separate\|shared` | `separate` | `separate` = one subdirectory per node; `shared` = all nodes write into the same `<workdir>/.anet/nodes` |
@@ -48,7 +48,7 @@ Running `anet create --batch` with no flags enters the wizard.
 
 ## Built-in vendors (`VENDORS` list)
 
-`anet create --batch` shares the same `selectVendorAndModel()` (cli.ts `VENDORS` list) as `anet create`; `--preset <vendor-key>` selects the vendor directly:
+The `anet create --batch` wizard goes through `selectVendorAndModel()` (cli.ts `VENDORS` list) — it shares the **same vendor picker implementation** as the single-node `anet create` wizard, but since v0.9.2 [#133](https://github.com/sleep2agi/agent-network/issues/133) `anet create` got a runtime-first picker on top (batch did not), so batch remains vendor-first. `--preset <vendor-key>` selects the vendor directly:
 
 | `--preset` key | Runtime | Built-in models | Base URL |
 |--------|---------|-------|----------|

@@ -11,7 +11,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | 模型 | 服务商 | Runtime | API 地址 | 成本 |
 |------|--------|---------|---------|------|
 | **MiniMax**（`MiniMax-M2.7`） | MiniMax | `claude-agent-sdk` | api.minimaxi.com/anthropic | 极低 |
-| **书生 Intern-S2-Preview**（`anet node create` vendor 选单默认项） | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
+| **书生 Intern-S2-Preview**（`anet node create` vendor 选单默认项，**仅在选 `claude-agent-sdk` runtime 后才出现** —— [#133](https://github.com/sleep2agi/agent-network/issues/133) runtime-first wizard 起 v0.9.2+） | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
 | **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
 | **小米 MiMo**（`mimo-v2.5-pro` 默认 + v2.5 / v2-pro / v2-omni） | 小米 | `claude-agent-sdk` | token-plan-cn.xiaomimimo.com/anthropic | 低 |
 

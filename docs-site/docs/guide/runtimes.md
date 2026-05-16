@@ -211,7 +211,7 @@ anet node create translator \
 
 ### 已验证模型
 
-下表是 `anet node create` 供应商选单（cli.ts `VENDORS` 列表）里 `claude-agent-sdk` runtime 的内置 provider —— 每项的 `baseUrl` + model id 都跑通过真 API 验证：
+下表是 `anet node create` 供应商选单（cli.ts `VENDORS` 列表）里 `claude-agent-sdk` runtime 的内置 provider —— **vendor 选单只在选 `claude-agent-sdk` runtime 后才出现**（v0.9.2 起 [#133](https://github.com/sleep2agi/agent-network/issues/133) runtime-first wizard：先选 runtime，`claude-code-cli` / `codex-sdk` 各自 print `auth login` hint 跳过 vendor）。每项的 `baseUrl` + model id 都跑通过真 API 验证：
 
 | Provider | 模型 | `ANTHROPIC_BASE_URL` |
 |---|---|---|

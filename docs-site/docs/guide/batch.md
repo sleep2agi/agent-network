@@ -35,7 +35,7 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 
 | 字段 | flag | 默认 | 说明 |
 |------|------|------|------|
-| 供应商 / 模型 | `--preset <key>` | 不传则走交互式 **vendor 选单**（跟 `anet create` 同一个 `selectVendorAndModel()`，先选供应商再选模型）| `--preset` 接受 vendor key（`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`）；为兼容旧用法也接受旧的 model id（如 `intern-s1-pro`，会自动 resolve 回对应 vendor）|
+| 供应商 / 模型 | `--preset <key>` | 不传则走交互式 **vendor 选单**（共用 `selectVendorAndModel()` —— ⚠ batch wizard 仍 vendor-first，**跟 `anet create` v0.9.2+ 的 runtime-first wizard 不一样** [#133](https://github.com/sleep2agi/agent-network/issues/133)；先选供应商再选模型）| `--preset` 接受 vendor key（`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`）；为兼容旧用法也接受旧的 model id（如 `intern-s1-pro`，会自动 resolve 回对应 vendor）|
 | API key | `--api-key <key>` | 交互输入 | 写入每个 node 的 runtime auth token |
 | Workdir | `--workdir <path>` | `~/anet-team` | 父目录 |
 | Workdir mode | `--workdir-mode separate\|shared` | `separate` | `separate` 每个 node 一个子目录；`shared` 所有 node 写同一个 `<workdir>/.anet/nodes` |
@@ -48,7 +48,7 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 
 ## 内置供应商（`VENDORS` 列表）
 
-`anet create --batch` 跟 `anet create` 共用同一个 `selectVendorAndModel()`（cli.ts `VENDORS` 列表），`--preset <vendor-key>` 直接选定供应商：
+`anet create --batch` wizard 走 `selectVendorAndModel()`（cli.ts `VENDORS` 列表）—— 跟 `anet create` 单节点 wizard **共用同一个 vendor 选单实现**，但 `anet create` v0.9.2 起 [#133](https://github.com/sleep2agi/agent-network/issues/133) 顶部加了 runtime-first picker（batch 没加），所以 batch 仍是 vendor-first；`--preset <vendor-key>` 直接选定供应商：
 
 | `--preset` key | Runtime | 内置模型 | Base URL |
 |--------|---------|-------|----------|
