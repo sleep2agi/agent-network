@@ -955,9 +955,17 @@ async function ensureCodexStdio(): Promise<import("./runtime/codex-stdio-client"
 async function processWithCodexStdio(task: string, _from: string, images?: string[]): Promise<string> {
   const client = await ensureCodexStdio();
   if (!codexStdioThreadId) {
+    // Note on wire conventions (see #120 R225 + Phase 1.4 smoke discovery):
+    // struct field names are camelCase (serde rename_all = "camelCase"),
+    // BUT enum variant *values* like AskForApproval use kebab-case
+    // ("on-request" not "onRequest"). Discriminated-union "type" tags ARE
+    // camelCase though (SandboxPolicy {type: "dangerFullAccess"}). Codex's
+    // -32600 error surfaces unknown variants with the valid alternatives
+    // listed, so if a future codex version renames any of these the next
+    // smoke run will pinpoint exactly which one.
     const opts: Record<string, unknown> = {
       model: MODEL || "gpt-5.4",
-      approvalPolicy: "onRequest",
+      approvalPolicy: "on-request",
       sandboxPolicy: { type: "dangerFullAccess" },
     };
     if (SESSION_ID) (opts as Record<string, unknown>).threadId = SESSION_ID;
