@@ -2155,12 +2155,24 @@ async function launchAgent(id: string, forceNewSession = false) {
       cmd = "npx";
       commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
     }
-    const child = spawn(cmd, commandArgs, { env, stdio: "inherit" });
-    const pidFile = join(nodesDir(), nodeId, ".pid");
-    if (child.pid) writeFileSync(pidFile, String(child.pid));
-    child.on("exit", (code) => {
-      try { rmSync(pidFile, { force: true }); } catch {}
-      process.exit(code || 0);
+    // #138 fix — same fa08eb4 (#135) regression as the claude-code-cli
+    // branch below: parent must stay alive while child runs, otherwise
+    // main() resolves, fa08eb4 wrap fires process.exit(0), and the agent-
+    // node child is orphaned mid-spawn.
+    await new Promise<void>((resolve) => {
+      const child = spawn(cmd, commandArgs, { env, stdio: "inherit" });
+      const pidFile = join(nodesDir(), nodeId, ".pid");
+      if (child.pid) writeFileSync(pidFile, String(child.pid));
+      child.on("exit", (code) => {
+        try { rmSync(pidFile, { force: true }); } catch {}
+        if (code && code !== 0) process.exit(code);
+        resolve();
+      });
+      child.on("error", (err) => {
+        try { rmSync(pidFile, { force: true }); } catch {}
+        console.error(`[anet] ❌ spawn ${cmd} failed: ${err.message || err}`);
+        resolve();
+      });
     });
   } else {
     // spawn claude CLI
@@ -2219,17 +2231,37 @@ async function launchAgent(id: string, forceNewSession = false) {
 
     claudeArgs.push("-n", displayName);
 
-    const child = spawn("claude", claudeArgs, { env, stdio: "inherit" });
-    const pidFile = join(nodesDir(), nodeId, ".pid");
-    if (child.pid) writeFileSync(pidFile, String(child.pid));
-    child.on("exit", (code) => {
-      try { rmSync(pidFile, { force: true }); } catch {}
-      if (forceNewSession) {
-        console.log(`\n[anet] New Claude Code session saved: ${profile.session?.slice(0, 8)}...`);
-      } else if (!launchedWithResume) {
-        console.log(`\n[anet] Claude Code session pinned: ${profile.session?.slice(0, 8)}...`);
-      }
-      process.exit(code || 0);
+    // #138 fix — fa08eb4 (#135) wrap calls `process.exit(0)` the moment
+    // main() resolves. The previous fire-and-forget `child.on("exit")` lets
+    // launchAgent return immediately, main() resolves, parent dies before
+    // the spawned claude child can claim the TTY foreground process group.
+    // On macOS the kernel is strict: orphaned child calling setRawMode on
+    // the now-relinquished TTY → EIO (errno 5). On Linux the kernel is more
+    // forgiving and the bug usually only manifests as a missing session
+    // banner. Fix: await child exit so parent stays alive while child holds
+    // the TTY; main() unwinds naturally only after claude actually exits.
+    await new Promise<void>((resolve) => {
+      const child = spawn("claude", claudeArgs, { env, stdio: "inherit" });
+      const pidFile = join(nodesDir(), nodeId, ".pid");
+      if (child.pid) writeFileSync(pidFile, String(child.pid));
+      child.on("exit", (code) => {
+        try { rmSync(pidFile, { force: true }); } catch {}
+        if (forceNewSession) {
+          console.log(`\n[anet] New Claude Code session saved: ${profile.session?.slice(0, 8)}...`);
+        } else if (!launchedWithResume) {
+          console.log(`\n[anet] Claude Code session pinned: ${profile.session?.slice(0, 8)}...`);
+        }
+        // Use the child's exit code as the parent's exit code via the
+        // fa08eb4 wrap's natural process.exit(0) path. For non-zero exits,
+        // surface explicitly so callers see the failure code.
+        if (code && code !== 0) process.exit(code);
+        resolve();
+      });
+      child.on("error", (err) => {
+        try { rmSync(pidFile, { force: true }); } catch {}
+        console.error(`[anet] ❌ spawn claude failed: ${err.message || err}`);
+        resolve();
+      });
     });
   }
 }
