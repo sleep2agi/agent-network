@@ -1,8 +1,8 @@
 # 上手指南
 
-本页是当前 stable（v0.10.0 Phase 1）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
+本页是当前 stable（v0.10.1）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
 
-::: tip 组件职责（v0.10.0 stable Phase 1）
+::: tip 组件职责（v0.10.1 stable）
 本页涉及 4 个 npm 包，各自的职责（具体版本号以 npm `latest` tag 为准，doc 不写死避免 stale）：
 
 | 包 | 用途 |
@@ -195,7 +195,7 @@ anet node start remote-bot
 
 ## 已验证 vs 未验证
 
-::: info 已验证（当前 v0.10.0 stable Phase 1，继承 v2 E2E 覆盖 + v0.8 新增回归 + v0.9.2 #129/#132/#136 修复链 + v0.10.0 release-gate playbook 首次跑通）
+::: info 已验证（当前 v0.10.1 stable，继承 v2 E2E 覆盖 + v0.8 新增回归 + v0.9.2 #129/#132/#136 修复链 + v0.10.0 release-gate playbook 首次跑通 + v0.10.1 PINNED_SERVER_VERSION chain-bump 修 default-path regression）
 - `anet hub start` + 默认账号自动创建
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
