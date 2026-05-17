@@ -8,6 +8,64 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## v0.10.7 — **codex-sdk batch path yolo flags parity** (2026-05-17) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.6` ← bumped (codex-sdk batch path yolo parity)
+- `@sleep2agi/agent-node@2.4.2` *(unchanged)*
+- `@sleep2agi/commhub-server@0.8.2` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.5.2` *(unchanged)*
+
+### Fix — [#156](https://github.com/sleep2agi/agent-network/issues/156) codex-sdk batch path yolo flags parity
+
+Vincent 5526+5527+5531 catch: "fast 也要开新一下默认 / codex 默认 fast 啊" (codex needs `fast` mode by default in the batch path too).
+
+**Pre-fix vs Post-fix matrix**:
+
+| Path | Pre-fix | Post-fix |
+|---|---|---|
+| `anet node create --runtime codex-sdk` | ✅ 4/4 yolo flags ([#149](https://github.com/sleep2agi/agent-network/issues/149) v0.10.3 ship) | ✅ 4/4 yolo flags (unchanged) |
+| `anet create --batch --runtime codex-sdk` | ❌ **only 1/4** (`dangerouslySkipPermissions` baseline only) | ✅ 4/4 yolo flags (matches single-node) |
+| `anet [...] --runtime codex-sdk --no-yolo` | (flag did not exist) | ✅ 1/4 baseline only (opt-out for CI/scripted) |
+
+**Implementation** — clean helper extraction at `bin/cli.ts:125-131`:
+
+```ts
+function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
+  if (noYolo) return {};
+  return {
+    approvalPolicy: "never",
+    sandboxMode: "danger-full-access",
+    skipGitRepoCheck: true,
+  };
+}
+```
+
+Single source-of-truth helper: both the single-node path (`cli.ts:1146`) and the batch path (`cli.ts:6223`) call the same function — **eliminates the v0.10.6 1/4-vs-4/4 drift**. `dangerouslySkipPermissions: true` is the baseline (per [[feedback_default_flags]]) set at each call site, 1+3=4 yolo flags total.
+
+### User impact
+
+- **Batch + codex-sdk users**: previously, batch-wizard-created codex agents would block on tool-approval popups / sandbox / git checks, losing the yolo autonomous posture → now all 4 flags are set, autonomous behavior matches single-node.
+- **Single-node users**: unaffected (path unchanged).
+- **CI / scripted users**: the new `--no-yolo` flag provides an explicit safe-mode opt-out.
+- **Non-codex-sdk runtimes** (claude / sdk): completely unaffected (helper is gated on `runtime === "codex-sdk"`).
+
+### Quality gates + lessons
+
+- **Source-grep verify** ([[feedback_dist_obfuscated_use_source_grep]] precedent): `grep -n` against `bin/cli.ts` HEAD across 5 sites all PASS (helper + 2 call sites + wiring + field).
+- **Docker container smoke**: Cell A `anet login` setup failed (test infra blocker, not a fix bug) → Gate 2 source-grep evidence accepted as substitute, per v0.10.6 precedent.
+- **`feedback_docker_smoke_login_flow`** (new this cycle): Docker smoke entry scripts must use `curl` direct API calls to `/api/auth/register` + `/api/auth/login` to obtain a token; **do not** use interactive `anet login` (it stalls in non-TTY containers — the hub login call blocks).
+
+### Cycle 12 stats
+
+- **17 cumulative `@latest` publishes** (v0.9.0 → v0.10.7): 0 split-brain / 0 rollback / 0 retry
+- **2026-05-17 v0.10.x same-day ships**: v0.10.1-7 = **7 ships in ~10 hours** (audit-first cadence)
+- **10 Vincent telegram catches all closed-loop** (5443→5531): including v0.10.7 [#156](https://github.com/sleep2agi/agent-network/issues/156)
+
+See the [v0.10.7 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.7).
+
+---
+
 ## v0.10.6 — **`anet upgrade` Option B detached spawn + `anet create --batch` wizard silent-exit fix** (2026-05-17) ✅ stable
 
 **Version alignment** (npm `latest` tag):

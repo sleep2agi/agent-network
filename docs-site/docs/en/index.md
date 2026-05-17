@@ -22,7 +22,7 @@ hero:
   <div class="trust-item"><span class="trust-num">8+</span><span class="trust-label">LLM Providers</span></div>
   <div class="trust-item"><span class="trust-num">3</span><span class="trust-label">Runtimes</span></div>
   <div class="trust-item"><span class="trust-num">100%</span><span class="trust-label">Local-First</span></div>
-  <div class="trust-item"><span class="trust-num">v0.10.6</span><span class="trust-label">Stable</span></div>
+  <div class="trust-item"><span class="trust-num">v0.10.7</span><span class="trust-label">Stable</span></div>
 </section>
 
 <section class="final-cta">

@@ -8,6 +8,64 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## v0.10.7 — **codex-sdk batch path yolo flags parity**（2026-05-17）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.6` ← bumped（codex-sdk batch path yolo parity）
+- `@sleep2agi/agent-node@2.4.2` *(无变化)*
+- `@sleep2agi/commhub-server@0.8.2` *(无变化)*
+- `@sleep2agi/agent-network-dashboard@0.5.2` *(无变化)*
+
+### Fix — [#156](https://github.com/sleep2agi/agent-network/issues/156) codex-sdk batch path yolo flags parity
+
+Vincent 5526+5527+5531 catch："fast 也要开新一下默认 / codex 默认 fast 啊"。
+
+**Pre-fix vs Post-fix matrix**：
+
+| Path | Pre-fix | Post-fix |
+|---|---|---|
+| `anet node create --runtime codex-sdk` | ✅ 4/4 yolo flags（[#149](https://github.com/sleep2agi/agent-network/issues/149) v0.10.3 ship） | ✅ 4/4 yolo flags（不变）|
+| `anet create --batch --runtime codex-sdk` | ❌ **仅 1/4**（`dangerouslySkipPermissions` baseline only） | ✅ 4/4 yolo flags（跟 single-node 对齐） |
+| `anet [...] --runtime codex-sdk --no-yolo` | （无此 flag） | ✅ 1/4 baseline（opt-out for CI/scripted）|
+
+**Implementation** — clean helper extraction at `bin/cli.ts:125-131`：
+
+```ts
+function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
+  if (noYolo) return {};
+  return {
+    approvalPolicy: "never",
+    sandboxMode: "danger-full-access",
+    skipGitRepoCheck: true,
+  };
+}
+```
+
+Source-of-truth helper：single-node path（`cli.ts:1146`）+ batch path（`cli.ts:6223`）都 call 同一个，**阻断 v0.10.6 1/4-vs-4/4 drift**。`dangerouslySkipPermissions: true` 是 baseline（per [[feedback_default_flags]]）在每个 call site 单独 set，1+3=4 yolo total。
+
+### 用户影响
+
+- **batch + codex-sdk 用户**：之前 batch wizard 出的 codex agents 在 tool approval popup / sandbox / git check 处 block，失去 yolo autonomous 状态 → 现在 4/4 flags 全 set，autonomous 行为跟 single-node 一致
+- **single-node 用户**：不受影响（path 不变）
+- **CI / scripted 用户**：新 `--no-yolo` flag 提供 explicit safe-mode opt-out
+- **非 codex-sdk runtime**（claude / sdk）：完全不变（helper gated on `runtime === "codex-sdk"`）
+
+### Quality gates + lessons
+
+- **Source-grep verify**（[[feedback_dist_obfuscated_use_source_grep]] precedent）：通信龙 `grep -n` 对 `bin/cli.ts` HEAD 5 sites 全 PASS（helper + 2 call sites + wiring + field）
+- **Docker container smoke**：Cell A `anet login` setup failed（test infra blocker, not a fix bug）→ Gate 2 source-grep evidence accepted as substitute per v0.10.6 precedent
+- **`feedback_docker_smoke_login_flow`**（本 cycle 新增）—— Docker smoke entry script 用 `curl` direct API call `/api/auth/register` + `/api/auth/login` 写 token，**不要** interactive `anet login`（在 non-TTY container 容易 stall，hub login 调用阻塞）
+
+### Cycle 12 stats
+
+- **17 累计 `@latest` publish**（v0.9.0 → v0.10.7）：0 split-brain / 0 rollback / 0 retry
+- **2026-05-17 当日 v0.10.x**：v0.10.1-7 = **7 ships in ~10 hours**（audit-first cadence）
+- **10 Vincent telegram catch 全闭环**（5443→5531）：包括 v0.10.7 #156
+
+详见 [release v0.10.7](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.7)。
+
+---
+
 ## v0.10.6 — **`anet upgrade` Option B detached spawn + `anet create --batch` wizard silent-exit 修**（2026-05-17）✅ stable
 
 **版本同步**（npm `latest` tag）：
