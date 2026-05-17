@@ -6416,12 +6416,21 @@ async function createBatchWizardCommand() {
   let model: string | undefined;
   let baseUrl: string | undefined;
   let presetLabel: string;
+  // #153 (Vincent 5481) — capture vendor.requiresAuth so the batch wizard
+  // can skip the ANTHROPIC_AUTH_TOKEN prompt for vendors that already login
+  // through their own CLI (codex / claude-code-cli). For __custom__ runtime,
+  // derive requiresAuth from the runtime choice.
+  let requiresAuth: "claude" | "codex" | undefined;
   if (opts.preset === "__custom__") {
     const customRuntime = await ask("Runtime (claude-agent-sdk / codex-sdk / claude-code-cli)", "claude-agent-sdk");
     runtime = normalizeRuntime(customRuntime);
     baseUrl = (await ask("ANTHROPIC_BASE_URL (空白=Anthropic default)", "")) || undefined;
     model = (await ask("Model id", "")) || undefined;
     presetLabel = `custom (${runtime}${model ? " + " + model : ""})`;
+    // Custom runtime auth inference: codex-sdk uses `codex auth login`, claude-
+    // code-cli uses `claude` subscription; the SDK path needs an API key.
+    if (runtime === "codex-sdk") requiresAuth = "codex";
+    else if (runtime === "claude-code-cli") requiresAuth = "claude";
   } else if (opts.preset) {
     const sel = findVendorByModel(opts.preset) || resolveVendorSelection(opts.preset);
     if (!sel) {
@@ -6430,6 +6439,7 @@ async function createBatchWizardCommand() {
       return;
     }
     runtime = sel.runtime; model = sel.model; baseUrl = sel.baseUrl;
+    requiresAuth = sel.requiresAuth;
     presetLabel = `${sel.vendorKey}${model ? " + " + model : ""}`;
   } else {
     const sel = await selectVendorAndModel();
@@ -6439,15 +6449,29 @@ async function createBatchWizardCommand() {
       return;
     }
     runtime = sel.runtime; model = sel.model; baseUrl = sel.baseUrl;
+    requiresAuth = sel.requiresAuth;
     presetLabel = `${sel.vendorKey}${model ? " + " + model : ""}`;
   }
 
-  // 2. API key
-  const apiKey = opts["api-key"] || opts.key || process.env.ANET_BATCH_API_KEY || await ask("API key (ANTHROPIC_AUTH_TOKEN)");
-  if (!apiKey) {
-    closeRL();
-    console.error("[anet] API key required.");
-    return;
+  // 2. API key — #153 (Vincent 5481): vendors with their own CLI login flow
+  // (codex / claude-code-cli) don't need an ANTHROPIC_AUTH_TOKEN. Skip the
+  // prompt and print a hint that the user should run the vendor's own login.
+  let apiKey: string | undefined;
+  if (requiresAuth === "codex") {
+    console.log("  [anet] codex-sdk — will reuse `codex auth login` state (no API key needed)");
+    console.log("         If not logged in: run `codex auth login` in a separate terminal first.");
+    apiKey = undefined;
+  } else if (requiresAuth === "claude") {
+    console.log("  [anet] claude-code-cli — will reuse `claude` CLI / subscription (no API key needed)");
+    console.log("         If not logged in: run `claude` once in a separate terminal to sign in.");
+    apiKey = undefined;
+  } else {
+    apiKey = opts["api-key"] || opts.key || process.env.ANET_BATCH_API_KEY || await ask("API key (ANTHROPIC_AUTH_TOKEN)");
+    if (!apiKey) {
+      closeRL();
+      console.error("[anet] API key required.");
+      return;
+    }
   }
 
   // 3. Workdir
