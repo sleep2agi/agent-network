@@ -24,6 +24,19 @@ Shipped alongside the [v0.10.2 release](/en/changelog):
 - **Disk telemetry hover-card rendering** (`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` wired to the [`GET /api/server/:host/health`](/en/api/rest#get-api-server-host-health) response; source is agent-node `≥ 2.4.1` host-telemetry's `df -k` sampling; older agents and Windows render `—` rather than a misleading `0`)
 - **100+ rounds of typography + corner-radius cascade polish** (R317-R438, accumulating with the dashboard-polish chain that started at R280)
 :::
+
+::: info v0.10.8 dashboard `0.5.3` — Servers panel UI copy fix + TopoGraph density tier
+Shipped alongside the [v0.10.8 release](/en/changelog) ([#157](https://github.com/sleep2agi/agent-network/issues/157) Fix #1, caught by Vincent 5560):
+
+- **Servers panel "not reported" copy made accurate**: the early placeholder strings `agent rollup pending hub ≥ 0.8.2-preview` / `disk metric pending hub ≥ 0.8.2-preview` were buried during the 0.8.2 upgrade window. After every hub already became ≥ 0.8.2, they still rendered (**misleading users into thinking their hub version was too old**). Now `agent rollup not reported by hub` / `disk metric not reported by hub` — accurately conveying "this hub didn't report it right now".
+- **`data-server-{agents,disk}-missing="true"` Playwright hooks**: new since dashboard 0.5.3, available for e2e validation of hub-side telemetry coverage.
+- **R502 TopoGraph density-tier polish** (purely additive, no UX change): the canvas state attribute `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` exposes a 12th observable testing surface. Tier boundaries (sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+) line up with the R109 dense-layout collapse gate.
+
+::: warning Root causes #2 + #3 located, deferred
+- **#2** (v0.10.9 candidate): missing dedupe when one hostname appears multiple times can double-count servers
+- **#3** (v0.11.0 candidate): `status=offline` vs telemetry mismatch (telemetry still reports but the SSE `last_seen` has timed out) — needs system-level status reconciliation
+:::
+:::
 :::
 
 ## Page Overview
