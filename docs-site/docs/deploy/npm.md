@@ -274,8 +274,21 @@ await hub.connect();
 
 ## 升级
 
+::: tip 推荐用 `anet upgrade`（v0.9.0+ 内置多包升级器）
+**已装 anet 老用户**首选 `anet upgrade` —— 一行自动 picks up 4 个 npm 包 latest（agent-network + agent-node + commhub-server + dashboard），跟下方 `npm install -g` 单包重装相比少漏包风险，且 chain-bump-aware（详见 [升级指南](/guide/upgrade)）：
+
 ```bash
-# 升级 CLI
+anet upgrade            # 多包 channel-aware 升级（首选）
+anet project restart    # 重启 cwd 节点接新版（[#117](https://github.com/sleep2agi/agent-network/issues/117)）
+```
+
+**全新机器**走 [上手指南（首次安装）](/guide/getting-started) 或 [本页 # 安装方式 - 全局安装](#全局安装-推荐)。
+:::
+
+如果 `anet upgrade` 不可用（CLI 版本 < v0.9.0）或单包定向升级：
+
+```bash
+# 单包升级 CLI（npm @latest tag）
 npm install -g @sleep2agi/agent-network
 
 # 查看当前版本

@@ -274,8 +274,21 @@ Without `autoConnect: false`, `new CommHub({...})` calls `connect()` right away 
 
 ## Upgrading
 
+::: tip Prefer `anet upgrade` (built-in multi-package upgrader, v0.9.0+)
+**Existing anet users** should reach for `anet upgrade` first — it picks up all four npm packages at `@latest` in one shot (agent-network + agent-node + commhub-server + dashboard), avoiding the missing-package risk of single-package `npm install -g` reinstalls, and it is chain-bump-aware (see [Upgrade Guide](/en/guide/upgrade)):
+
 ```bash
-# Upgrade CLI
+anet upgrade            # multi-package channel-aware upgrade (preferred)
+anet project restart    # restart cwd nodes against the new version ([#117](https://github.com/sleep2agi/agent-network/issues/117))
+```
+
+**Brand-new machines** go through the [Getting Started (first-time install)](/en/guide/getting-started) guide or the [# Installation Methods → Global install](#global-install-recommended) section above.
+:::
+
+If `anet upgrade` isn't available (CLI version < v0.9.0) or you want a targeted single-package upgrade:
+
+```bash
+# Single-package CLI upgrade (npm @latest tag)
 npm install -g @sleep2agi/agent-network
 
 # Check current version
