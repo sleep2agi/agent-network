@@ -31,7 +31,7 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 - `anet license` / `anet activate` are v0.6 legacy commands, **no longer needed after Apache 2.0 OSS**. If you hit `license_expired` (Hub still creates a 14-day trial for backward-compat), follow [troubleshooting — license_expired](/en/troubleshooting#license-expired-legacy-behavior) to clear the `licenses` table.
 
 ::: info v0.6 license path planned for removal
-The server still runs `licenses.expires_at` checks inside `send_task` (V3 legacy code; verify [`server/src/tools.ts` still emits `license_expired`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)) — **neither v0.9.x nor v0.10.0 scope touched it** (v0.9.x prioritized Recovery & Observability; v0.10.0 prioritized Direct Runtime + Observability Foundations); planned for v0.11+ removal.
+The server still runs `licenses.expires_at` checks inside `send_task` (V3 legacy code; verify [`server/src/tools.ts` still emits `license_expired`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)) — **no v0.9.x or v0.10.0-8 scope touched it** (v0.9.x Recovery & Observability; v0.10.0 Direct Runtime + Observability Foundations; v0.10.1 PINNED chain-bump hotfix; v0.10.2 Hero A disk + Hero D topology prefix; v0.10.3 codex preset; v0.10.4 dashboard orphan-band + `anet upgrade` UX; v0.10.5 batch wizard workdir + codex/claude skip API key; v0.10.6 `anet upgrade` Option B detached + wizard silent-exit; v0.10.7 codex-sdk batch yolo parity; v0.10.8 Servers UI copy fix — none of these themes touched the license path); planned for v0.11+ removal.
 :::
 
 ### 4. Which AI models are supported?
@@ -237,7 +237,7 @@ anet network invite --role member        # Generate invite code (admin/member/vi
 ```
 
 ::: tip Role changes
-The current v0.10.8 stable still does not expose `promote` / `demote` CLI subcommands (v0.9.x scope was Recovery & Observability; v0.10.0 scope was Direct Runtime + Observability Foundations; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2 was Hero A disk telemetry + Hero D topology prefix UX — none of them touched member-role management). To change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.11+ / unscheduled.
+The current v0.10.8 stable still does not expose `promote` / `demote` CLI subcommands (v0.9.x was Recovery & Observability; v0.10.0 was Direct Runtime + Observability Foundations; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2-8 covered Hero A disk + Hero D topology prefix / v0.10.3 codex preset / v0.10.4 dashboard orphan-band + `anet upgrade` UX warning / v0.10.5 batch wizard workdir + codex/claude skip API key / v0.10.6 `anet upgrade` Option B detached + wizard silent-exit / v0.10.7 codex-sdk batch yolo parity / v0.10.8 Servers UI copy fix — none of them touched member-role management). To change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.11+ / unscheduled.
 :::
 
 ### 17a. How do I change my password? (v0.8)
