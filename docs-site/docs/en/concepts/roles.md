@@ -152,7 +152,7 @@ The CLI never asks you for role info — `anet login` makes the hub embed it in 
 ## Promote / demote a member
 
 ::: warning No `promote` / `demote` CLI subcommand yet
-v0.10.8 stable still has no CLI promote/demote subcommand (v0.9.x scope was Recovery & Observability; v0.10.0 scope was Direct Runtime + Observability Foundations; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2 shipped Hero A disk telemetry + Hero D dashboard UX — none touched member-role management); the full CLI entry is queued for v0.11+ / unscheduled. Today you can list members via the CLI, but **role changes / member removal go through REST** (see [API — networks members](/en/api/rest#get-api-networks-id-members)).
+v0.10.8 stable still has no CLI promote/demote subcommand (v0.9.x was Recovery & Observability; v0.10.0 was Direct Runtime + Observability Foundations; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2-8 covered Hero A disk + Hero D topology prefix / v0.10.3 codex preset / v0.10.4 dashboard orphan-band + `anet upgrade` UX warning / v0.10.5 batch wizard workdir + codex/claude skip API key / v0.10.6 `anet upgrade` Option B detached + wizard silent-exit / v0.10.7 codex-sdk batch yolo parity / v0.10.8 Servers UI copy fix — none of them touched member-role management); the full CLI entry is queued for v0.11+ / unscheduled. Today you can list members via the CLI, but **role changes / member removal go through REST** (see [API — networks members](/en/api/rest#get-api-networks-id-members)).
 :::
 
 ```bash
