@@ -36,8 +36,8 @@ graph TB
     SQL --> AUDIT
 ```
 
-::: info Actually shipped vs design goal (v0.10.7)
-The diagram above represents the **design goal**. Current v0.10.7 reality:
+::: info Actually shipped vs design goal (v0.10.8)
+The diagram above represents the **design goal**. Current v0.10.8 reality:
 
 - ✅ **Shipped**: Rate limiting / token auth (utok_/ntok_/atok_) / CORS / 4-tier RBAC / network isolation (server-enforced) / SQL-injection guards / SHA-256 password hashing / audit log / task event log
 - ⏳ **Not fully enforced**: Token Scope (`api_tokens.scope` column exists and [`auth.ts:73-137`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L73) `createToken` writes different scope values per token type, but [`auth.ts:143-165 resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L143) **does not return `scope` in its result** — RBAC decisions don't consume the written scope; security report **R12** was not addressed in v0.9.x or any v0.10.x scope (Recovery & Observability / Direct Runtime + Observability Foundations / Hero A+D / subsequent UX-fix chain themes took priority), queued for v0.11+ / unscheduled — see [security audit](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md))
@@ -510,5 +510,5 @@ Or persist it via `flags.maxBudgetUsd` in `config.json`.
 - [Docker deployment](/en/deploy/docker) — containerization best practices
 
 ::: warning Current state
-v0.10.7 stable password hashing is still SHA-256 (verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)). **Argon2id migration was not addressed in v0.9.x or any v0.10.x release** (v0.9.x prioritized Recovery & Observability; v0.10.0 prioritized Direct Runtime + Observability Foundations — codex stdio + per-server daemon endpoints + process telemetry; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2 shipped Hero A disk telemetry + Hero D dashboard UX — none of them touched password hashing). Security report **R9** is queued for v0.11+ / unscheduled (search [open issues: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id); if no tracking issue yet, please open one). Production environments must pair this with: strong passwords + TLS + firewall + regular backups.
+v0.10.8 stable password hashing is still SHA-256 (verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)). **Argon2id migration was not addressed in v0.9.x or any v0.10.x release** (v0.9.x prioritized Recovery & Observability; v0.10.0 prioritized Direct Runtime + Observability Foundations — codex stdio + per-server daemon endpoints + process telemetry; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2 shipped Hero A disk telemetry + Hero D dashboard UX — none of them touched password hashing). Security report **R9** is queued for v0.11+ / unscheduled (search [open issues: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id); if no tracking issue yet, please open one). Production environments must pair this with: strong passwords + TLS + firewall + regular backups.
 :::

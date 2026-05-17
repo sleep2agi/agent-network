@@ -36,8 +36,8 @@ graph TB
     SQL --> AUDIT
 ```
 
-::: info v0.10.7 实际启用 vs 设计目标
-上图反映**设计目标**，当前 v0.10.7 实际执行情况：
+::: info v0.10.8 实际启用 vs 设计目标
+上图反映**设计目标**，当前 v0.10.8 实际执行情况：
 
 - ✅ **已启用**：速率限制 / Token 认证（utok_/ntok_/atok_）/ CORS / RBAC 四级权限 / 网络隔离（Server 端强制） / SQL 注入防护 / 密码 SHA-256 / 审计日志 / 任务事件日志
 - ⏳ **未完全启用**：Token Scope 字段（`api_tokens.scope` 列存在 + [`auth.ts:73-137`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L73) `createToken` 按 token 类型写不同 scope，但 [`auth.ts:143-165 resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L143) 返回结构里**没 scope 字段** —— RBAC 决策不消费 scope 写入；security report **R12** v0.9.x / v0.10.x 都未动（Recovery & Observability / Direct Runtime + Observability Foundations / Hero A+D / 后续 UX 修复 chain 主题为先），排到 v0.11+ / 未排期；详见 [安全审计报告](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)）
@@ -510,5 +510,5 @@ npx @sleep2agi/agent-node --alias my-agent --max-budget 0.1
 - [Docker 部署](/deploy/docker) — 容器化最佳实践
 
 ::: warning 当前阶段
-v0.10.7 stable 密码哈希仍是 SHA-256（verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)）。**Argon2id 迁移 v0.9.x / v0.10.x 都未动**（v0.9.x Recovery & Observability scope 为先，v0.10.0 Direct Runtime + Observability Foundations scope 为 codex stdio + 守护节点 endpoint + 进程 telemetry，v0.10.1 PINNED chain-bump hotfix，v0.10.2 Hero A disk telemetry + Hero D dashboard UX —— 都没碰密码哈希；security report **R9** 排到 v0.11+ / 未排期；搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)，如果没 tracking issue 欢迎开一个）。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
+v0.10.8 stable 密码哈希仍是 SHA-256（verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)）。**Argon2id 迁移 v0.9.x / v0.10.x 都未动**（v0.9.x Recovery & Observability scope 为先，v0.10.0 Direct Runtime + Observability Foundations scope 为 codex stdio + 守护节点 endpoint + 进程 telemetry，v0.10.1 PINNED chain-bump hotfix，v0.10.2 Hero A disk telemetry + Hero D dashboard UX —— 都没碰密码哈希；security report **R9** 排到 v0.11+ / 未排期；搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)，如果没 tracking issue 欢迎开一个）。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
 :::
