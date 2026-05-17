@@ -6452,11 +6452,33 @@ async function createBatchWizardCommand() {
 
   // 3. Workdir
   const workdir = opts.workdir || await ask("Workdir", join(home, "anet-team"));
-  const workdirMode = (opts["workdir-mode"] || "separate") as "separate" | "shared";
-  if (workdirMode !== "separate" && workdirMode !== "shared") {
-    closeRL();
-    console.error(`[anet] --workdir-mode must be 'separate' or 'shared', got: ${workdirMode}`);
-    return;
+  // #152 (Vincent 5477+5478) — `--workdir-mode` CLI flag already supported
+  // (separate / shared), but the interactive wizard never asked. Now it does:
+  // explicit prompt with inquirer select when the flag isn't pre-set.
+  let workdirMode: "separate" | "shared";
+  if (opts["workdir-mode"]) {
+    workdirMode = opts["workdir-mode"] as "separate" | "shared";
+    if (workdirMode !== "separate" && workdirMode !== "shared") {
+      closeRL();
+      console.error(`[anet] --workdir-mode must be 'separate' or 'shared', got: ${workdirMode}`);
+      return;
+    }
+  } else {
+    try {
+      const { select: sel } = await import("@inquirer/prompts");
+      workdirMode = await sel({
+        message: "工作目录模式 (Workdir mode):",
+        choices: [
+          { value: "separate" as const, name: `separate — 每节点独立子目录 (${workdir}/node1, ${workdir}/node2, ...)` },
+          { value: "shared"   as const, name: `shared   — 全部共享同一目录 (${workdir} 一个 .anet/nodes/, 所有 agent 同 cwd)` },
+        ],
+        default: "separate",
+      }) as "separate" | "shared";
+    } catch {
+      // Non-TTY / inquirer missing → keep existing default.
+      console.log(`[anet] ⚠ Workdir mode selector unavailable — defaulting to 'separate' (use --workdir-mode shared to opt in)`);
+      workdirMode = "separate";
+    }
   }
 
   // 4. Prefix + count
