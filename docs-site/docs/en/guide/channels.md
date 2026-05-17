@@ -137,7 +137,7 @@ Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` 
 | Pitfall | Symptom | Workaround |
 |---|---|---|
 | `--allow` is **not incremental** | Re-running `anet channel add telegram --allow <new-uid>` overwrites the entire `allowFrom` array — previously-added users are lost | Pass **all** UIDs in one shot, or edit `.anet/nodes/<alias>/channels/telegram/access.json` directly ([walkthrough §B](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)) |
-| Channel changes **do not hot-reload** | Editing `access.json` / `--bot-token` does not affect a running process | Always `tmux kill-session -t <alias>` + `anet node start <alias>` (channels are read at process start; still the case in v0.9.0) |
+| Channel changes **do not hot-reload** | Editing `access.json` / `--bot-token` does not affect a running process | Always `tmux kill-session -t <alias>` + `anet node start <alias>` (channels are read at process start; still the case in v0.10.2; hot-reload design tracked in [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 — third-pass review complete; candidate for v0.12.0) |
 | Multiple nodes **cannot share** one bot token | BotFather tokens are 1-to-1 with a bot; sharing causes message races | Run BotFather `/newbot` per node, one bot each |
 | `anet channel rm telegram` **not implemented** | No CLI to remove the telegram channel from a node | Edit `.anet/nodes/<alias>/config.json` `channels` array to remove `plugin:telegram@claude-plugins-official`, `rm -rf .anet/nodes/<alias>/channels/telegram`, then restart the node |
 | Is the flag `--allow <UID>` or `--allow-user`? | Easy to mis-remember | It's `--allow <user-id>` (verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861)). `--allow-user` does **not** exist |
@@ -181,7 +181,7 @@ These plugins talk to ClawBot / Feishu Bot **directly**, not via CommHub Server.
 
 ### Roadmap
 
-Full `anet channel add wechat|feishu` is on the v0.9 / v1.0 roadmap (not yet scheduled). If you need it urgently, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) to discuss sponsoring the work.
+Full `anet channel add wechat|feishu` is on the v0.11+ roadmap (v0.9.x / v0.10.x didn't ship it — those scopes were Recovery & Observability / Direct Runtime + Observability Foundations / Hero A disk + Hero D UX, with no channel-extension surface; still not scheduled). If you need it urgently, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) to discuss sponsoring the work.
 :::
 
 ## Multi-Channel Integration
