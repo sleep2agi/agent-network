@@ -8,6 +8,66 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## v0.10.2 — **Hero A disk telemetry + Hero D 拓扑图标签 UX**（2026-05-17）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.1` *(无变化，PINNED_SERVER_VERSION 仍 `0.8.2`)*
+- `@sleep2agi/agent-node@2.4.1` ← `2.4.0`（Hero A disk telemetry additive，commit [`50d25b2`](https://github.com/sleep2agi/agent-network/commit/50d25b2)）
+- `@sleep2agi/commhub-server@0.8.2` *(无变化)*
+- `@sleep2agi/agent-network-dashboard@0.5.1` ← `0.5.0`（Hero D 拓扑图前缀标签 Option C + disk render + 100+ 轮 polish R317-R438）
+
+### Hero A — agent-node disk telemetry（[#99](https://github.com/sleep2agi/agent-network/issues/99) 守护节点 Phase 2 host metrics 闭环 final 10%）
+
+`agent-node/src/host-telemetry.ts` 新增 `readDiskStats()`（`execFileSync('df', ['-k', '/'])`，+33 lines）：
+
+- **POSIX `-k`** 标准化 KB 输出，Linux + macOS 同一 parse 路径
+- **不走 shell pipe**（per recent shell-audit safety review），`execFileSync` direct call
+- Windows / 解析失败：**graceful null**（dashboard 渲染 `—` 不误导成 0）
+- `HostTelemetry` interface 加 `disk_total_gb` / `disk_used_gb` / `disk_avail_gb`，`getHostTelemetry()` 通过 `toGb()` 同 mem/cpu 同 path 合成
+- **Backward compat**：老 server 端 schema silent-drop unknown keys；agent / server 可独立升
+
+接 [RFC-014](https://github.com/sleep2agi/agent-network/issues/99) — `/api/server/:host/health` 响应现在带 disk 三字段 + 24h 分桶 history 也含 `disk_avail_min` / `disk_used_max`；`alert_level` 加 `disk < 1GB critical / < 5GB warn` 触发（[`server/src/index.ts:253-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L253)）。
+
+测试马 Docker Linux smoke 3/3 PASS（disk 299.8 GB total / 216 used / 71.5 avail，alert green，backward compat verified）。
+
+### Hero D — Dashboard 拓扑图前缀标签 UX Option C（dashboard `0.5.1`）
+
+[#147](https://github.com/sleep2agi/agent-network/issues/147)（5/16 ack）+ Option C 落地：
+
+- 拓扑节点前缀标签（[节点 → group 边的 label distinguishability）实装 Option C 设计（N站马 design pass）
+- disk telemetry hover card 渲染（`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` 三字段对接 [`GET /api/server/:host/health`](/api/rest#get-api-server-host-health) 响应）
+- 100+ 轮 typography + corner-radius cascade polish（R317-R438）
+
+N站马 design pass + 4/4 verify（commit `7de97ee` + screenshot evidence，local ship `f9c83cd`）。
+
+### Closed issues
+
+- [#99](https://github.com/sleep2agi/agent-network/issues/99) 守护节点 Phase 2 close gate met（host metrics 闭环 final 10%，Hero A disk ship）
+- [#147](https://github.com/sleep2agi/agent-network/issues/147) Hero D（5/16 ack 后 Option C 落地）
+
+### RFC artifacts preserved（v0.12.0 scope）
+
+本轮 v0.10.2 是 hotfix scope（不含 v0.11.0 系列 RFC ship），3 个 RFC artifact 保留进 v0.12.0 candidate：
+
+- [RFC-013 v5](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) rename hot-reload（通信牛 third pass 整改完）
+- [RFC-014 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-014-daemon-phase2-host-metrics.md) daemon Phase 2 host metrics（v0.10.2 Hero A 已 ship final 10%）
+- [RFC-015 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-015-token-usage-telemetry.md) #114 token usage UI（通信牛 first pass REVISION 完）
+
+### Upgrade
+
+```bash
+anet upgrade                                     # 升 agent-node 2.4.0 → 2.4.1 + dashboard 0.5.0 → 0.5.1
+anet project restart                             # 重启项目（拉新 agent-node + dashboard）
+```
+
+### Migration / Breaking
+
+- **No breaking changes** —— disk 字段是 additive (`HostTelemetry` interface 扩 3 字段，server schema silent-drop unknown keys backward compat)；agent / server 可独立升级，老 agent 不带字段时 SQL `NULL` → dashboard 渲染 `—` 不误导
+
+发布流程沿用 [v0.9.0 split-brain lessons #126](https://github.com/sleep2agi/agent-network/issues/126) 的两 phase publish SOP。
+
+---
+
 ## v0.10.1 — **Hotfix: PINNED_SERVER_VERSION 跟 v0.10.0 ship chain-bump**（2026-05-17）✅ stable
 
 **版本同步**（npm `latest` tag）：

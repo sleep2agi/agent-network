@@ -143,6 +143,8 @@ Two new REST endpoints expose **single-host health + per-agent list**, used by t
 
 **Version requirement**: to reach these two endpoints via the default `anet hub start` path you need `agent-network ≥ 2.2.1` (the [v0.10.1 hotfix](/en/changelog#v0-10-1-—-hotfix-pinned-server-version-chain-bump-after-the-v0-10-0-ship-2026-05-17-✅-stable) bumped `PINNED_SERVER_VERSION` from `0.8.0` to `0.8.2`).
 
+**v0.10.2 Hero A complement**: `agent-node ≥ 2.4.1` adds host **disk telemetry** — `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` (sampled via `execFileSync('df', ['-k', '/'])`, sharing one POSIX path across Linux + macOS; gracefully `null` on Windows or parse failure) + `alert_level` gains `disk_avail < 1GB critical` / `< 5GB warn` triggers + the 24h history buckets carry `disk_avail_min` / `disk_used_max` extreme-aggregation fields, closing [#99 per-server daemon Phase 2 host metrics, final 10%](https://github.com/sleep2agi/agent-network/issues/99).
+
 The control layer (kill / restart / redeploy) is deferred to v0.11.0. Details: [REST API — server endpoint family](/en/api/rest#get-api-server-host-health).
 :::
 

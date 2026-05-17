@@ -8,6 +8,66 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## v0.10.2 — **Hero A disk telemetry + Hero D topology label UX** (2026-05-17) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.1` *(unchanged — `PINNED_SERVER_VERSION` stays at `0.8.2`)*
+- `@sleep2agi/agent-node@2.4.1` ← `2.4.0` (Hero A disk telemetry, additive; commit [`50d25b2`](https://github.com/sleep2agi/agent-network/commit/50d25b2))
+- `@sleep2agi/commhub-server@0.8.2` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.5.1` ← `0.5.0` (Hero D topology prefix-label Option C + disk render + 100+ rounds of polish R317-R438)
+
+### Hero A — agent-node disk telemetry ([#99](https://github.com/sleep2agi/agent-network/issues/99) per-server daemon Phase 2 host metrics, final 10%)
+
+`agent-node/src/host-telemetry.ts` adds `readDiskStats()` via `execFileSync('df', ['-k', '/'])` (+33 lines):
+
+- **POSIX `-k`** standardizes KB output, so Linux and macOS share a single parse path
+- **No shell pipe** (per the recent shell-audit safety review) — `execFileSync` direct call
+- Windows / parse failure: **graceful null** (the dashboard renders `—` rather than a misleading `0`)
+- `HostTelemetry` interface gains `disk_total_gb` / `disk_used_gb` / `disk_avail_gb`; `getHostTelemetry()` composes disk via `toGb()` on the same path as mem/cpu
+- **Backward compat**: older servers silently drop unknown keys; agents and servers upgrade independently
+
+Wires through [RFC-014](https://github.com/sleep2agi/agent-network/issues/99) — `GET /api/server/:host/health` now returns disk's three fields, the 24h bucketed history includes `disk_avail_min` / `disk_used_max`, and `alert_level` adds `disk < 1GB critical / < 5GB warn` triggers ([`server/src/index.ts:253-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L253)).
+
+Test lead Docker Linux smoke 3/3 PASS (disk 299.8 GB total / 216 used / 71.5 avail, alert green, backward compat verified).
+
+### Hero D — Dashboard topology prefix-label UX, Option C (dashboard `0.5.1`)
+
+[#147](https://github.com/sleep2agi/agent-network/issues/147) (acked 5/16) + Option C landed:
+
+- Topology node prefix labels (the node→group edge labels' distinguishability) ship with the Option C design (dashboard team design pass)
+- Disk telemetry hover-card rendering (`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` wired to the [`GET /api/server/:host/health`](/en/api/rest#get-api-server-host-health) response)
+- 100+ rounds of typography + corner-radius cascade polish (R317-R438)
+
+Dashboard team design pass + 4/4 verify (commit `7de97ee` + screenshot evidence, local ship `f9c83cd`).
+
+### Closed issues
+
+- [#99](https://github.com/sleep2agi/agent-network/issues/99) per-server daemon Phase 2 close gate met (host metrics fully wired, Hero A disk shipped)
+- [#147](https://github.com/sleep2agi/agent-network/issues/147) Hero D (5/16 ack → Option C shipped)
+
+### RFC artifacts preserved (v0.12.0 scope)
+
+v0.10.2 is a hotfix scope (no v0.11.0-series RFC ship); three RFC artifacts are preserved as v0.12.0 candidates:
+
+- [RFC-013 v5](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) rename hot-reload (third-pass review complete)
+- [RFC-014 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-014-daemon-phase2-host-metrics.md) daemon Phase 2 host metrics (Hero A final 10% shipped in v0.10.2)
+- [RFC-015 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-015-token-usage-telemetry.md) [#114](https://github.com/sleep2agi/agent-network/issues/114) token-usage UI (first-pass REVISION complete)
+
+### Upgrade
+
+```bash
+anet upgrade                                     # bumps agent-node 2.4.0 → 2.4.1 + dashboard 0.5.0 → 0.5.1
+anet project restart                             # restart the project (pulls the new agent-node + dashboard)
+```
+
+### Migration / Breaking
+
+- **No breaking changes** — the disk fields are additive (the `HostTelemetry` interface gains three fields, the server schema silently drops unknown keys for backward compat). Agent and server upgrade independently; for agents that don't emit the field, SQL stays `NULL` and the dashboard renders `—` rather than a misleading `0`.
+
+Release flow follows the [v0.9.0 split-brain lessons #126](https://github.com/sleep2agi/agent-network/issues/126) two-phase publish SOP.
+
+---
+
 ## v0.10.1 — **Hotfix: PINNED_SERVER_VERSION chain-bump after the v0.10.0 ship** (2026-05-17) ✅ stable
 
 **Version alignment** (npm `latest` tag):

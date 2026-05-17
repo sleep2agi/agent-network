@@ -822,12 +822,13 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
 |------|------|
 | `host` | The host value from the request path |
 | `agent_count` | Active session count on this host (window over the latest row's `COUNT(*) OVER ()`) |
-| `alert_level` | `ok` / `warn` / `critical` (computed by `serverAlertLevel(latest)`) |
+| `alert_level` | `ok` / `warn` / `critical` (computed by `serverAlertLevel(latest)`; from v0.10.2 onwards, `disk_avail_gb < 1` triggers `critical` and `< 5` triggers `warn` — verify [`server/src/index.ts:253-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L253)) |
 | `alerts` | Active alert list, non-empty when `alert_level != ok` |
 | `latest` | Most recent heartbeat instant telemetry (CPU / mem / disk + `last_seen`) |
+| `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` | **Available from v0.10.2** (agent-node `2.4.1+`, [`host-telemetry.ts readDiskStats()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/host-telemetry.ts)) — sampled via `execFileSync('df', ['-k', '/'])`; the POSIX `-k` flag shares one parse path across Linux + macOS; on Windows or parse failure, all three fields gracefully fall back to `null` (the dashboard renders `—` rather than a misleading `0`). Older agents (`< 2.4.1`) emit `null` for all three. |
 | `history.5m` | Last 5 min, **1 min bucket** (from the `agent_telemetry` history table) |
 | `history.1h` | Last 1 h, **5 min bucket** |
-| `history.24h` | Last 24 h, **1 hour bucket** |
+| `history.24h` | Last 24 h, **1 hour bucket**; from v0.10.2, each bucket also carries `disk_avail_min` / `disk_used_max` extreme-aggregation fields (verify [`server/src/index.ts:311-326`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L311)) |
 
 **404**: `{ "ok": false, "error": "server not found" }` — no (active or offline) session matches the host.
 

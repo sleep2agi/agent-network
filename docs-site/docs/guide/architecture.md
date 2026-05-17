@@ -143,6 +143,8 @@ REST 层新增**单机 health + agent 列表**两个 endpoint，给 dashboard Se
 
 **版本要求**：`anet hub start` 默认路径要拿到这两个 endpoint 需 `agent-network ≥ 2.2.1`（[v0.10.1 hotfix](/changelog#v0-10-1-—-hotfix-pinned-server-version-跟-v0-10-0-ship-chain-bump-2026-05-17-✅-stable) `PINNED_SERVER_VERSION` bump `0.8.0` → `0.8.2`）。
 
+**v0.10.2 Hero A 补**：`agent-node ≥ 2.4.1` 加 host **disk telemetry** —— `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb`（`execFileSync('df', ['-k', '/'])`，Linux/macOS 同 POSIX path，Windows / 解析失败 graceful `null`）+ `alert_level` 加 `disk_avail < 1GB critical` / `< 5GB warn` 触发 + 24h history bucket 加 `disk_avail_min` / `disk_used_max` 极值聚合，完成 [#99 守护节点 Phase 2 host metrics 闭环 final 10%](https://github.com/sleep2agi/agent-network/issues/99)。
+
 控制层（kill / restart / redeploy）defer 到 v0.11.0。详见 [REST API — server endpoint family](/api/rest#get-api-server-host-health)。
 :::
 

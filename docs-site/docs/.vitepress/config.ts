@@ -45,12 +45,12 @@ export default withMermaid(defineConfig({
           { text: '生态', link: '/ecosystem' },
           { text: '社群', link: '/community' },
           {
-            text: 'v0.10.1 ▾',
+            text: 'v0.10.2 ▾',
             items: [
-              { text: 'v0.10.1（latest，hotfix）', link: '/' },
+              { text: 'v0.10.2（latest）', link: '/' },
               { text: 'v0.10.0 release notes', link: '/preview/v0.10.0' },
               { text: 'preview channel（pre-release）', link: '/guide/preview/getting-started' },
-              { text: 'v0.9.0 → v0.10.1 changelog', link: '/changelog' },
+              { text: 'v0.9.0 → v0.10.2 changelog', link: '/changelog' },
               { text: 'v0.8.0（归档）', link: '/v0.8.0/' },
               { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
             ]
@@ -144,12 +144,12 @@ export default withMermaid(defineConfig({
           { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
           {
-            text: 'v0.10.1 ▾',
+            text: 'v0.10.2 ▾',
             items: [
-              { text: 'v0.10.1 (latest, hotfix)', link: '/en/' },
+              { text: 'v0.10.2 (latest)', link: '/en/' },
               { text: 'v0.10.0 release notes', link: '/en/preview/v0.10.0' },
               { text: 'preview channel (pre-release)', link: '/guide/preview/getting-started' },
-              { text: 'v0.9.0 → v0.10.1 changelog', link: '/en/changelog' },
+              { text: 'v0.9.0 → v0.10.2 changelog', link: '/en/changelog' },
               { text: 'v0.8.0 (archive)', link: '/v0.8.0/' },
               { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
             ]

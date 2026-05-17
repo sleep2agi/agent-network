@@ -17,6 +17,13 @@ Dashboard is Agent Network's web management interface, providing real-time monit
 Shipped with [v0.10.0 release Phase 2](/en/changelog#v0-10-0-direct-runtime-observability-foundations-2026-05-16-stable-phase-1-3-package-promote): all 8 surfaces complete (§3.A prefix-group fix / §3.B sweep retire / §3.C recent-panel hide / §3.D grid default view / §3.E hover detail card / §3.F server-health ring tint wired to [#99](https://github.com/sleep2agi/agent-network/issues/99) endpoint / §3.G fullscreen mode / §3.I canvas brand mark; §3.H dropped per RFC Q2 review) plus 19+ rounds of typography + corner-radius cascade polish. The server-health ring tint reads from [`GET /api/server/:host/health`](/en/api/rest#get-api-server-host-health); the agent hover card renders per-agent `process_telemetry` (`rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 shipped in `agent-node@2.4.0` + T2.2 server schema aligned in `commhub-server@0.8.2`).
 
 **§3.E / §3.F data sources require** `agent-network ≥ 2.2.1` on the default `anet hub start` path ([v0.10.1 hotfix](/en/changelog#v0-10-1-—-hotfix-pinned-server-version-chain-bump-after-the-v0-10-0-ship-2026-05-17-✅-stable) bumped `PINNED_SERVER_VERSION` from 0.8.0 to 0.8.2). Older versions still launch `commhub-server@0.8.0`, where the #99 endpoint does not exist — the ring-tint data source fails and the hover card's `process_telemetry` is all `null`.
+
+::: info v0.10.2 Hero D — dashboard `0.5.1` topology prefix label Option C + disk render
+Shipped alongside the [v0.10.2 release](/en/changelog):
+- **Hero D topology node prefix labels — Option C implementation** ([#147](https://github.com/sleep2agi/agent-network/issues/147) acked 5/16 + Option C design pass) — node → group edge label distinguishability finally lands
+- **Disk telemetry hover-card rendering** (`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` wired to the [`GET /api/server/:host/health`](/en/api/rest#get-api-server-host-health) response; source is agent-node `≥ 2.4.1` host-telemetry's `df -k` sampling; older agents and Windows render `—` rather than a misleading `0`)
+- **100+ rounds of typography + corner-radius cascade polish** (R317-R438, accumulating with the dashboard-polish chain that started at R280)
+:::
 :::
 
 ## Page Overview

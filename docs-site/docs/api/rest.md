@@ -821,12 +821,13 @@ curl "http://localhost:9200/api/server/$(python3 -c 'import urllib.parse; print(
 |------|------|
 | `host` | 请求路径里传入的 host 值 |
 | `agent_count` | 该 host 上活跃 session 数（窗口取最新一行的 `COUNT(*) OVER ()`）|
-| `alert_level` | `ok` / `warn` / `critical`（取 `serverAlertLevel(latest)` 计算）|
+| `alert_level` | `ok` / `warn` / `critical`（取 `serverAlertLevel(latest)` 计算；v0.10.2+ 加 `disk_avail_gb < 1 → critical` / `< 5 → warn` 触发，verify [`server/src/index.ts:253-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L253)）|
 | `alerts` | 当前命中告警列表，`alert_level != ok` 时非空 |
 | `latest` | 该 host 最近一次心跳的瞬时 telemetry（CPU / mem / disk + `last_seen`）|
+| `latest.disk_total_gb` / `disk_used_gb` / `disk_avail_gb` | **v0.10.2 起**（agent-node `2.4.1+`，[`host-telemetry.ts readDiskStats()`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/host-telemetry.ts)）—— 通过 `execFileSync('df', ['-k', '/'])` 采样，POSIX `-k` Linux + macOS 同 parse 路径；Windows / 解析失败 graceful `null`（dashboard 渲染 `—` 不误导成 0）。老 agent (`< 2.4.1`) 不带字段时三字段都 `null` |
 | `history.5m` | 最近 5min，**1 min bucket**（取自 `agent_telemetry` 历史表）|
 | `history.1h` | 最近 1h，**5 min bucket** |
-| `history.24h` | 最近 24h，**1 hour bucket** |
+| `history.24h` | 最近 24h，**1 hour bucket**；v0.10.2 起 bucket 内附 `disk_avail_min` / `disk_used_max` 字段（极值聚合，verify [`server/src/index.ts:311-326`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L311)）|
 
 **404**：`{ "ok": false, "error": "server not found" }` —— 该 host 没有任何（活跃或离线）session 命中。
 

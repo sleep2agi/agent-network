@@ -2,7 +2,7 @@
 
 This is the current minimal local path for the stable packages. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
 
-::: tip Component responsibilities (v0.10.1 stable)
+::: tip Component responsibilities (v0.10.2 stable)
 This page touches four npm packages. Their responsibilities (exact version numbers track the npm `latest` tag — not hardcoded here to avoid drift):
 
 | Package | Purpose |
@@ -191,7 +191,7 @@ You can also do this in two commands: `anet init --hub http://<HUB-LAN-IP>:9200`
 
 ## Verified vs unverified
 
-::: info Verified (v0.10.1 stable — inherits the v2 E2E coverage plus new v0.8 regressions plus the v0.9.2 #129 / #132 / #136 fix chain plus the v0.10.0 release-gate playbook first full run plus the v0.10.1 PINNED_SERVER_VERSION chain-bump default-path fix)
+::: info Verified (v0.10.2 stable — inherits the v2 E2E coverage plus new v0.8 regressions plus the v0.9.2 #129 / #132 / #136 fix chain plus the v0.10.0 release-gate playbook first full run plus the v0.10.1 PINNED_SERVER_VERSION chain-bump default-path fix plus the v0.10.2 Hero A agent-node disk telemetry `df -k` Linux/macOS smoke 3/3 PASS + Hero D dashboard topology prefix-label Option C 4/4 verify)
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
