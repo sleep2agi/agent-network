@@ -3656,9 +3656,10 @@ function printManualAnetUpgrade(channel: ReleaseChannel = "latest") {
 function selfUpgradeDetached(channel: ReleaseChannel): never {
   const errLog = "/tmp/anet-self-upgrade.err";
   const cmd = `npm install -g @sleep2agi/agent-network@${channel} 2>${shellQuote(errLog)} && anet -v`;
-  console.log(`\n[anet] --self: detaching upgrade. The current process will exit now.`);
-  console.log(`[anet] If it fails, check ${errLog} and re-run manually:`);
-  console.log(`         npm install -g @sleep2agi/agent-network@${channel}`);
+  console.log(`\n[anet] ⚙️  auto self-upgrade: detaching npm install (this shell will exit).`);
+  console.log(`[anet]   Log: ${errLog}`);
+  console.log(`[anet]   When npm finishes, run \`anet --version\` in a NEW shell to verify ${channel}.`);
+  console.log(`[anet]   (Use \`anet upgrade --no-auto-self\` next time if you prefer to manage the install yourself.)`);
   try {
     const child = spawn("sh", ["-c", cmd], { stdio: "ignore", detached: true });
     child.unref();
@@ -3690,7 +3691,14 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
 
 async function upgradeCommand() {
   const opts = parseOpts();
-  const isSelf = opts.self === "true";
+  // #154 (Vincent 5489+5490) — `--self` was opt-in via #151's Option A which
+  // only printed verbiage. After Vincent hit the upgrade chicken-and-egg
+  // deadlock twice (old CLI doesn't know about the new verbiage), Option B is
+  // now the default: detached npm spawn runs automatically. `--no-auto-self`
+  // opts out for CI / scriptable use cases that prefer to manage the upgrade
+  // process themselves.
+  const isAutoSelfOptedOut = opts["no-auto-self"] === "true";
+  const isSelf = opts.self === "true" || !isAutoSelfOptedOut;
   const isDryRun = opts["dry-run"] === "true";
   const forkScript = opts["fork-script"];
 
@@ -3756,7 +3764,7 @@ async function upgradeCommand() {
       : (anetVersion === anetTarget) ? "up-to-date"
       : isSelf ? "upgrade" : "self-skip",
     note: !isSelf && anetVersion !== anetTarget && anetTarget
-      ? "(self-upgrade off by default — use --self for detached spawn, or follow manual instructions below)"
+      ? "(--no-auto-self set; use `anet upgrade --self` to detach, or follow manual instructions below)"
       : undefined,
   });
 
