@@ -113,7 +113,7 @@ Common question ([#17](https://github.com/sleep2agi/agent-network/issues/17)). F
 - The admin `utok_` written there at bootstrap time is also revoked
 - The file **content is not auto-rotated** to the new utok_
 - Subsequent local commands (e.g. `anet hub admin reset-user <other>`) that read admin-utok.json will hit 401
-- Workaround for now: re-run `anet login --username admin --password <new-password>` to refresh `~/.anet/config.json`; admin-utok.json is a one-time bootstrap credential — `config.json` is the authoritative source going forward. **Neither v0.9.x nor any v0.10.x scope addressed this** (v0.9.x Recovery & Observability, v0.10.0 Direct Runtime + Observability Foundations, v0.10.1-7 PINNED hotfix / Hero A+D / 7-cycle wizard + UX-fix chain themes took priority); a proper auto-sync fix (passwd-time refresh of `admin-utok.json`) is queued for v0.11+ / unscheduled.
+- Workaround for now: re-run `anet login --username admin --password <new-password>` to refresh `~/.anet/config.json`; admin-utok.json is a one-time bootstrap credential — `config.json` is the authoritative source going forward. **Neither v0.9.x nor any v0.10.x scope addressed this** (v0.9.x Recovery & Observability, v0.10.0 Direct Runtime + Observability Foundations, v0.10.1-8 PINNED hotfix / Hero A+D / Servers UI copy fix / 8-cycle wizard + UX-fix chain themes took priority); a proper auto-sync fix (passwd-time refresh of `admin-utok.json`) is queued for v0.11+ / unscheduled.
 
 **Audit log**
 - `audit_log` records a `password_changed` row (or `password_reset_by_admin` via the reset-user path)

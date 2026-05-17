@@ -114,7 +114,7 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 - bootstrap 时写的 admin `utok_` 也被一并 revoke
 - 该文件**内容不会自动同步**为新 utok_
 - 如果你之后用 `anet hub admin reset-user <other>` 这种本机命令读 admin-utok.json → **会拿 401**
-- 当前的兜底：手动跑 `anet login --username admin --password <新密码>`，刷新 `~/.anet/config.json`；admin-utok.json 是 bootstrap 一次性凭证，长期使用以 config.json 为准。**v0.9.x / v0.10.x scope chain 都未动**（v0.9.x Recovery & Observability、v0.10.0 Direct Runtime + Observability Foundations、v0.10.1-7 PINNED hotfix / Hero A+D / 7 拍 wizard + UX 修复 chain 主题为先），完整修复（passwd 后自动 refresh `admin-utok.json`）排到 v0.11+ / 未排期。
+- 当前的兜底：手动跑 `anet login --username admin --password <新密码>`，刷新 `~/.anet/config.json`；admin-utok.json 是 bootstrap 一次性凭证，长期使用以 config.json 为准。**v0.9.x / v0.10.x scope chain 都未动**（v0.9.x Recovery & Observability、v0.10.0 Direct Runtime + Observability Foundations、v0.10.1-8 PINNED hotfix / Hero A+D / Servers UI 文案修 / 8 拍 wizard + UX 修复 chain 主题为先），完整修复（passwd 后自动 refresh `admin-utok.json`）排到 v0.11+ / 未排期。
 
 **审计日志**
 - `audit_log` 写入一条 `password_changed`（走 reset-user 路径则是 `password_reset_by_admin`）
