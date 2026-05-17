@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-network",
-  "version": "2.2.5-preview.1",
+  "version": "2.2.5",
   "description": "AI Agent Network CLI — Create multi-agent networks with user management, network isolation, and 3 AI runtimes (Claude/Codex/MiniMax). 39 commands.",
   "type": "module",
   "main": "dist/src/client.js",
