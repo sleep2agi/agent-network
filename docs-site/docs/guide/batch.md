@@ -35,8 +35,8 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 
 | 字段 | flag | 默认 | 说明 |
 |------|------|------|------|
-| 供应商 / 模型 | `--preset <key>` | 不传则走交互式 **vendor 选单**（共用 `selectVendorAndModel()` —— ⚠ batch wizard 仍 vendor-first，**跟 `anet create` v0.9.2+ 的 runtime-first wizard 不一样** [#133](https://github.com/sleep2agi/agent-network/issues/133)；先选供应商再选模型）| `--preset` 接受 vendor key（`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`）；为兼容旧用法也接受旧的 model id（如 `intern-s1-pro`，会自动 resolve 回对应 vendor）|
-| API key | `--api-key <key>` | 交互输入 | 写入每个 node 的 runtime auth token |
+| 供应商 / 模型 | `--preset <key>` | 不传则走交互式 **vendor 选单**（共用 `selectVendorAndModel()` —— ⚠ batch wizard 仍 vendor-first，**跟 `anet create` v0.9.2+ 的 runtime-first wizard 不一样** [#133](https://github.com/sleep2agi/agent-network/issues/133)；先选供应商再选模型。v0.10.5-7 incremental UX 增强已 ship：workdir mode prompt（[#152](https://github.com/sleep2agi/agent-network/issues/152)）/ silent-exit 修（[#155](https://github.com/sleep2agi/agent-network/issues/155)）/ codex-sdk batch path yolo flags parity（[#156](https://github.com/sleep2agi/agent-network/issues/156)））| `--preset` 接受 vendor key（`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`）；为兼容旧用法也接受旧的 model id（如 `intern-s1-pro`，会自动 resolve 回对应 vendor）|
+| API key | `--api-key <key>` | 交互输入 | 写入每个 node 的 runtime auth token —— **codex-sdk / claude-code-cli runtime 自动跳过 API key prompt**（v0.10.5 [#153](https://github.com/sleep2agi/agent-network/issues/153) — 用户改去 `codex auth login` / `claude auth login`）|
 | Workdir | `--workdir <path>` | `~/anet-team` | 父目录 |
 | Workdir mode | `--workdir-mode separate\|shared` | `separate` | `separate` 每个 node 一个子目录；`shared` 所有 node 写同一个 `<workdir>/.anet/nodes` |
 | Prefix | `--prefix <name>` | 交互输入 | alias 前缀，例如 `工程师` → `工程师1号` |
@@ -48,7 +48,7 @@ anet batch cleanup 工程师 --workdir ~/anet-team
 
 ## 内置供应商（`VENDORS` 列表）
 
-`anet create --batch` wizard 走 `selectVendorAndModel()`（cli.ts `VENDORS` 列表）—— 跟 `anet create` 单节点 wizard **共用同一个 vendor 选单实现**，但 `anet create` v0.9.2 起 [#133](https://github.com/sleep2agi/agent-network/issues/133) 顶部加了 runtime-first picker（batch 没加），所以 batch 仍是 vendor-first；`--preset <vendor-key>` 直接选定供应商：
+`anet create --batch` wizard 走 `selectVendorAndModel()`（cli.ts `VENDORS` 列表）—— 跟 `anet create` 单节点 wizard **共用同一个 vendor 选单实现**，但 `anet create` v0.9.2 起 [#133](https://github.com/sleep2agi/agent-network/issues/133) 顶部加了 runtime-first picker（batch v0.10.8 仍未加 — runtime-first picker 排期 v0.11+ batch wizard 重构），所以 batch 仍是 vendor-first；`--preset <vendor-key>` 直接选定供应商：
 
 | `--preset` key | Runtime | 内置模型 | Base URL |
 |--------|---------|-------|----------|

@@ -35,8 +35,8 @@ Running `anet create --batch` with no flags enters the wizard.
 
 | Field | Flag | Default | Notes |
 |------|------|------|------|
-| Vendor / model | `--preset <key>` | omit → interactive **vendor picker** (shares the same `selectVendorAndModel()` implementation — ⚠ the batch wizard is still vendor-first, **unlike `anet create`'s v0.9.2+ runtime-first wizard** [#133](https://github.com/sleep2agi/agent-network/issues/133); you pick the vendor first, then the model) | `--preset` accepts a vendor key (`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`); for backward compat it also accepts the old model id (e.g. `intern-s1-pro`, auto-resolved back to its vendor) |
-| API key | `--api-key <key>` | interactive | written as each node's runtime auth token |
+| Vendor / model | `--preset <key>` | omit → interactive **vendor picker** (shares the same `selectVendorAndModel()` implementation — ⚠ the batch wizard is still vendor-first, **unlike `anet create`'s v0.9.2+ runtime-first wizard** [#133](https://github.com/sleep2agi/agent-network/issues/133); you pick the vendor first, then the model. v0.10.5-7 incremental UX upgrades have shipped: workdir-mode prompt ([#152](https://github.com/sleep2agi/agent-network/issues/152)) / silent-exit fix ([#155](https://github.com/sleep2agi/agent-network/issues/155)) / codex-sdk batch-path yolo flags parity ([#156](https://github.com/sleep2agi/agent-network/issues/156))) | `--preset` accepts a vendor key (`intern` / `minimax` / `mimo` / `anthropic` / `codex` / `claude-code` / `custom`); for backward compat it also accepts the old model id (e.g. `intern-s1-pro`, auto-resolved back to its vendor) |
+| API key | `--api-key <key>` | interactive | written as each node's runtime auth token — **codex-sdk / claude-code-cli runtimes now auto-skip the API-key prompt** (v0.10.5 [#153](https://github.com/sleep2agi/agent-network/issues/153) — users `codex auth login` / `claude auth login` instead) |
 | Workdir | `--workdir <path>` | `~/anet-team` | parent directory |
 | Workdir mode | `--workdir-mode separate\|shared` | `separate` | `separate` = one subdirectory per node; `shared` = all nodes write into the same `<workdir>/.anet/nodes` |
 | Prefix | `--prefix <name>` | interactive | alias prefix, e.g. `engineer` → `engineer1` |
@@ -48,7 +48,7 @@ Running `anet create --batch` with no flags enters the wizard.
 
 ## Built-in vendors (`VENDORS` list)
 
-The `anet create --batch` wizard goes through `selectVendorAndModel()` (cli.ts `VENDORS` list) — it shares the **same vendor picker implementation** as the single-node `anet create` wizard, but since v0.9.2 [#133](https://github.com/sleep2agi/agent-network/issues/133) `anet create` got a runtime-first picker on top (batch did not), so batch remains vendor-first. `--preset <vendor-key>` selects the vendor directly:
+The `anet create --batch` wizard goes through `selectVendorAndModel()` (cli.ts `VENDORS` list) — it shares the **same vendor picker implementation** as the single-node `anet create` wizard, but since v0.9.2 [#133](https://github.com/sleep2agi/agent-network/issues/133) `anet create` got a runtime-first picker on top (batch still doesn't have one as of v0.10.8 — the runtime-first picker for batch is queued for the v0.11+ batch-wizard rework), so batch remains vendor-first. `--preset <vendor-key>` selects the vendor directly:
 
 | `--preset` key | Runtime | Built-in models | Base URL |
 |--------|---------|-------|----------|
