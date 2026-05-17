@@ -443,12 +443,14 @@ anet upgrade [--channel preview|latest] [--self] [--dry-run]
 **Plan 输出（per 包一行）**：
 
 ```
-  anet (self)         2.1.15               →  2.2.0                → upgrade
-                      (self-upgrade off by default — use --self for detached spawn, or follow manual instructions below)
-  agent-node          2.3.10               →  2.4.0                → upgrade
+  anet (self)         2.2.0                →  2.2.6                → upgrade
+                      (v0.10.6 #154 起 anet upgrade 默认自动 detached spawn — self < target 不需 --self flag；
+                       chicken-and-egg 注：2.2.4 及以下用户需手装 1 次 `npm install -g @sleep2agi/agent-network@latest`
+                       升到 2.2.5+，之后再升级都自动 detached spawn)
+  agent-node          2.4.0                →  2.4.2                → upgrade
   commhub-server      not installed        →  0.8.2                (lazy via npx, skipped)
                       (not installed globally — lazy-fetched via npx by `anet hub start`)
-  dashboard           0.5.0                →  0.5.0                ✓ up to date
+  dashboard           0.5.0                →  0.5.3                → upgrade
 ```
 
 | Badge | 含义 |
