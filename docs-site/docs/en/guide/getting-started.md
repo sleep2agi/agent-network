@@ -1,6 +1,10 @@
-# Getting Started
+# Getting Started (first-time install)
 
-This is the current minimal local path for the stable packages. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
+This page is the **first-time install** path for current stable (v0.10.2) — every step is Playwright + Docker E2E verified. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
+
+::: tip Already have anet installed?
+**Upgrades** go through the [Upgrade Guide](/en/guide/upgrade) — a single `anet upgrade` picks up all four npm packages at `@latest` (including the v0.10.1 hotfix + v0.10.2 Hero A/D), followed by `anet project restart` to restart cwd nodes against the new version. This page is for **brand-new machines** / users who have never installed anet.
+:::
 
 ::: tip Component responsibilities (v0.10.2 stable)
 This page touches four npm packages. Their responsibilities (exact version numbers track the npm `latest` tag — not hardcoded here to avoid drift):

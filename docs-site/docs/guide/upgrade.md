@@ -1,6 +1,18 @@
-# 升级指南
+# 升级指南（已装 anet 升新版）
 
-本文介绍如何将 Agent Network 升级到最新版本，以及主要版本之间的迁移注意事项。
+本文介绍**老用户**将 Agent Network 升级到最新版本的步骤，以及主要版本之间的迁移注意事项。
+
+::: tip 全新机器从来没装过 anet？
+**首次安装**走 [上手指南](/guide/getting-started) 或一行 shell：
+
+```bash
+npm install -g @sleep2agi/agent-network
+# 或一键安装脚本（含 admin password 提示等 UX）
+curl -fsSL https://anet.sh/install.sh | bash
+```
+
+本页是给**已装 anet 的老用户**做版本升级用的。
+:::
 
 ## 升级步骤
 

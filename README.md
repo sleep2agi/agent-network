@@ -39,12 +39,12 @@
 
 ---
 
-## 30 秒上手
+## 30 秒上手（首次安装）
 
 > **前置**：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings）。
 
 ```bash
-# 装一个全局包
+# 装一个全局包（拉 npm @latest，当前 v0.10.2 = agent-network 2.2.1）
 npm install -g @sleep2agi/agent-network
 
 # 终端 1 —— 起 Hub（保持开着）
@@ -63,7 +63,22 @@ anet node create my-bot          # 两步交互：选 runtime → 选 provider �
 anet node start my-bot           # 等到 "SSE connected" 即就绪
 ```
 
+或一键脚本（含 admin password 等 UX 提示）：
+
+```bash
+curl -fsSL https://anet.sh/install.sh | bash
+```
+
 从 Dashboard 的 Chat 面板派任务即可。再起一个节点让第一个去派活，两个 Agent 会通过 MCP 自动发现彼此并协作。
+
+### 已装 anet？升级到最新
+
+```bash
+anet upgrade            # 一键升 4 包 @latest（含 v0.10.1 PINNED hotfix + v0.10.2 Hero A/D）
+anet project restart    # 重启 cwd 节点接新版（详见 #117）
+```
+
+完整跨版本迁移参考 [升级指南](https://anet.sh/guide/upgrade)。
 
 ---
 

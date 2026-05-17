@@ -39,12 +39,12 @@
 
 ---
 
-## 30-second quickstart
+## 30-second quickstart (first-time install)
 
 > **Prereq:** Node.js ≥ 22.13.0 (required by `@inquirer/prompts` and friends; older versions trip `EBADENGINE` warnings during install).
 
 ```bash
-# Install one global package
+# Install one global package (pulls npm @latest — currently v0.10.2 = agent-network 2.2.1)
 npm install -g @sleep2agi/agent-network
 
 # Terminal 1 — start the hub (keep open)
@@ -63,7 +63,22 @@ anet node create my-bot          # two-step picker: runtime → provider → API
 anet node start my-bot           # waits for "SSE connected"
 ```
 
+Or via the one-shot installer (handles admin-password prompts and other UX):
+
+```bash
+curl -fsSL https://anet.sh/install.sh | bash
+```
+
 Send a task from the Dashboard's Chat panel. Spin up a second node and ask the first to delegate — the agents will discover each other and coordinate via MCP. That's it.
+
+### Already have anet? Upgrade to the latest
+
+```bash
+anet upgrade            # bumps all four @latest packages (incl. v0.10.1 PINNED hotfix + v0.10.2 Hero A/D)
+anet project restart    # restart cwd nodes against the new version (see #117)
+```
+
+Full cross-version migration reference: [Upgrade Guide](https://anet.sh/en/guide/upgrade).
 
 ---
 

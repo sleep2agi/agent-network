@@ -1,6 +1,18 @@
-# Upgrade Guide
+# Upgrade Guide (already have anet — bump to a newer version)
 
-This guide covers how to upgrade Agent Network to the latest version, along with migration notes between major versions.
+This guide covers how **existing users** upgrade Agent Network to the latest version, plus migration notes between major versions.
+
+::: tip Brand-new machine, never installed anet before?
+**First-time install** goes through the [Getting Started guide](/en/guide/getting-started), or in one shell line:
+
+```bash
+npm install -g @sleep2agi/agent-network
+# Or via the one-shot install script (handles admin-password prompts and other UX)
+curl -fsSL https://anet.sh/install.sh | bash
+```
+
+This page is for **existing users** moving between versions.
+:::
 
 ## Upgrade Steps
 

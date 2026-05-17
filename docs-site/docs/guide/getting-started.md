@@ -1,6 +1,10 @@
-# 上手指南
+# 上手指南（首次安装）
 
-本页是当前 stable（v0.10.2）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
+本页是**新用户首次安装**当前 stable（v0.10.2）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
+
+::: tip 已经装过 anet？
+**升级**走 [升级指南](/guide/upgrade) —— 一行 `anet upgrade` 自动 picks up 4 个 npm 包 latest（含 v0.10.1 hotfix + v0.10.2 Hero A/D）+ 用 `anet project restart` 重启 cwd 节点接新版。本页是给**全新机器** / 从来没装过 anet 的用户。
+:::
 
 ::: tip 组件职责（v0.10.2 stable）
 本页涉及 4 个 npm 包，各自的职责（具体版本号以 npm `latest` tag 为准，doc 不写死避免 stale）：
