@@ -659,11 +659,11 @@ unset ANET_CODEX_STDIO_DIRECT
 
 如果 codex CLI 已经 latest 仍报错，开 issue 带这段 debug 输出 + `codex --version` —— [#141](https://github.com/sleep2agi/agent-network/issues/141) 仍在 preview-feedback 窗口（v0.11.0 计划 default flip），protocol breaking 是已知 risk + mitigation 方向。
 
-### Dashboard agent hover card `process_telemetry` 字段全 `null`（v0.10.0 dashboard 0.5.0）
+### Dashboard agent hover card `process_telemetry` 字段全 `null`（v0.10.0 起 ship，dashboard 0.5.0+）
 
-dashboard `0.5.0` 的 §3.E hover detail card 期望 agent-node `≥ 2.4.0`（[#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 ship 起 agent 心跳带 `process_telemetry`）+ commhub-server `≥ 0.8.2`（T2.2 schema align）。三种可能：
+dashboard `≥ 0.5.0` 的 §3.E hover detail card 期望 agent-node `≥ 2.4.0`（[#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 v0.10.0 ship 起 agent 心跳带 `process_telemetry`）+ commhub-server `≥ 0.8.2`（T2.2 schema align）。三种可能：
 
-- **agent-node 老于 2.4.0**：跑 `anet upgrade` 升级到 v0.10.0 latest（`agent-node 2.4.0`）
+- **agent-node 老于 2.4.0**：跑 `anet upgrade` 升级到 v0.10.8 latest（当前 `agent-node 2.4.2`，满足 ≥ 2.4.0 最低要求）
 - **commhub-server 老于 0.8.2**：升级 server 端（`bunx @sleep2agi/commhub-server@latest`）
 - **agent 短期还没心跳**：`process_telemetry` 跟普通 host telemetry 一样需要至少 1 次心跳；新启动节点等 ~15s
 

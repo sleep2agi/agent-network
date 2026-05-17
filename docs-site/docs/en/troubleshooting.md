@@ -660,11 +660,11 @@ unset ANET_CODEX_STDIO_DIRECT
 
 If the codex CLI is already at latest but it still errors, please file an issue with the debug output above and `codex --version`. [#141](https://github.com/sleep2agi/agent-network/issues/141) is still inside the preview-feedback window (v0.11.0 plans the default flip), so protocol-break is a known risk + mitigation path.
 
-### Dashboard agent hover card shows `process_telemetry` as `null` (v0.10.0 dashboard 0.5.0)
+### Dashboard agent hover card shows `process_telemetry` as `null` (shipped since v0.10.0, dashboard 0.5.0+)
 
-The dashboard `0.5.0` §3.E hover detail card expects agent-node `≥ 2.4.0` ([#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1, which makes the agent emit `process_telemetry` on every heartbeat) plus commhub-server `≥ 0.8.2` (T2.2 schema align). Three possible causes:
+The dashboard `≥ 0.5.0` §3.E hover detail card expects agent-node `≥ 2.4.0` ([#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 — v0.10.0 ship made the agent emit `process_telemetry` on every heartbeat) plus commhub-server `≥ 0.8.2` (T2.2 schema align). Three possible causes:
 
-- **agent-node older than 2.4.0**: run `anet upgrade` to pull v0.10.0 latest (`agent-node 2.4.0`)
+- **agent-node older than 2.4.0**: run `anet upgrade` to pull v0.10.8 latest (currently `agent-node 2.4.2`, satisfying the ≥ 2.4.0 minimum)
 - **commhub-server older than 0.8.2**: upgrade the server (`bunx @sleep2agi/commhub-server@latest`)
 - **Agent hasn't reported a heartbeat yet**: `process_telemetry` rides on the same heartbeat as host telemetry — a freshly started node needs ~15s
 
