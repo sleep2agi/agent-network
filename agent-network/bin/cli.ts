@@ -3872,7 +3872,8 @@ async function upgradeCommand() {
   } else if (isSelf && selfPlan.action === "upgrade") {
     selfUpgradeDetached(channel);  // process.exit
   } else if (selfPlan.action === "self-skip") {
-    console.log("\n  anet (self): skipped (would replace the running CLI).");
+    console.log(`\n  anet (self): ⚠️ NEEDS MANUAL UPGRADE — ${selfPlan.current} → ${selfPlan.target}`);
+    console.log("    (skipped to avoid replacing the running CLI mid-execution)");
     printManualAnetUpgrade(channel);
   } else if (selfPlan.action === "up-to-date") {
     console.log("\n  anet (self): up to date.");
@@ -3882,7 +3883,20 @@ async function upgradeCommand() {
   }
 
   // ── 9. Post-upgrade hints ──
-  console.log(`\n[anet] Done. ${upgraded} upgraded, ${upToDate} up-to-date, ${lazy} lazy${failed ? `, ${failed} failed` : ""}.`);
+  // #151 (Vincent 5462) — `Done.` previously misled users when anet itself was
+  // self-skipped: they saw `0 upgraded, 2 up-to-date, 1 lazy` and assumed they
+  // were on the new version, then ran `anet node create --batch` and still hit
+  // the old behavior because the running CLI hadn't been swapped. The summary
+  // line now explicitly flags the self-skip state.
+  const selfSkipped = selfPlan.action === "self-skip";
+  const summary = `${upgraded} upgraded, ${upToDate} up-to-date, ${lazy} lazy${failed ? `, ${failed} failed` : ""}${selfSkipped ? ", 1 NEEDS MANUAL UPGRADE (anet self)" : ""}`;
+  console.log(`\n[anet] Done. ${summary}.`);
+  if (selfSkipped) {
+    console.log(`\n  ⚠️ anet CLI itself was NOT upgraded. Run this in a fresh shell:`);
+    console.log(`      npm install -g @sleep2agi/agent-network@${channel}`);
+    console.log(`      anet --version    # verify upgrade landed`);
+    console.log(`  Without this, new features (e.g. updated vendor presets) won't apply.`);
+  }
   if (upgraded > 0) {
     console.log("\n  Restart any running nodes to pick up the new versions:");
     console.log("    anet project restart   # (cwd-wide, see #117)");
