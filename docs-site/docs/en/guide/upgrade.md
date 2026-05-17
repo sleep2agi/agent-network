@@ -147,8 +147,8 @@ anet status
 
 ## v0.7 → v0.8 Upgrade Notes (historical path) {#v0-7-v0-8-upgrade-notes-latest}
 
-::: info Current stable is v0.10.0
-This section documents **the historical path from v0.7 to v0.8**, kept as a reference for users who need to traverse v0.7 → v0.10.0 in one go. **Upgrading between v0.8 / v0.9 / v0.10.0** is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — the auth migration below is **not** required (see [changelog](/en/changelog) and read the per-release notes for v0.8 / v0.9 / v0.10).
+::: info Current stable is v0.10.8
+This section documents **the historical path from v0.7 to v0.8**, kept as a reference for users who need to traverse v0.7 → v0.10.8 in one go. **Upgrading between v0.8 / v0.9 / v0.10.x** is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — the auth migration below is **not** required (see [changelog](/en/changelog) and read the per-release notes for v0.8 / v0.9 / v0.10).
 :::
 
 v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
