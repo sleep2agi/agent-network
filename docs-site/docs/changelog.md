@@ -8,6 +8,63 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## v0.10.5 — **`anet create --batch` wizard 双修**（2026-05-17）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.4` ← bumped（CLI wizard 修）
+- `@sleep2agi/agent-node@2.4.2` *(无变化，v0.10.3 ship)*
+- `@sleep2agi/commhub-server@0.8.2` *(无变化)*
+- `@sleep2agi/agent-network-dashboard@0.5.2` *(无变化，v0.10.4 ship)*
+
+### Fixes
+
+- **[#152](https://github.com/sleep2agi/agent-network/issues/152) `anet create --batch` wizard 加 workdir mode 选择**（Vincent 5477 push）：`--workdir-mode <shared|separate>` flag 早就 ship（[#55](https://github.com/sleep2agi/agent-network/issues/55)）但 interactive wizard 从来没 prompt → 用户必须知道 flag 名才能改 default `separate`。`createBatchWizardCommand` 加 inquirer select（`separate` 默认 / `shared` 共 cwd），TTY-aware（flag set / non-TTY 都 fallback `separate` + INFO hint）。agent-node / server / dashboard 不动 —— 纯 CLI wizard UX。
+- **[#153](https://github.com/sleep2agi/agent-network/issues/153) codex-sdk / claude-code-cli 选完不再误问 `ANTHROPIC_AUTH_TOKEN`**（Vincent 5481+5485 push）：runtime-first wizard ([#133](https://github.com/sleep2agi/agent-network/issues/133)) 选 codex-sdk / claude-code-cli 时仍调 `selectVendorAndModel()` → 问 API key（只 claude-agent-sdk 需要）。Wizard 选 codex / claude-code-cli 后 skip API key prompt + print `codex auth login` / `claude auth login` 一行提示。
+
+详见 [release v0.10.5](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.5)。
+
+---
+
+## v0.10.4 — **`anet upgrade` UX 警告 + Dashboard orphan-band 布局**（2026-05-17）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.3` ← bumped（[#151](https://github.com/sleep2agi/agent-network/issues/151) anet upgrade UX）
+- `@sleep2agi/agent-network-dashboard@0.5.2` ← bumped（[#150](https://github.com/sleep2agi/agent-network/issues/150) orphan-band layout）
+- `@sleep2agi/agent-node@2.4.2` *(无变化，v0.10.3 ship)*
+- `@sleep2agi/commhub-server@0.8.2` *(无变化)*
+
+### Fixes
+
+- **[#151](https://github.com/sleep2agi/agent-network/issues/151) `anet upgrade` self-skip 警告更明确**（Vincent 5462+5472 push）：之前 `anet (self) — self-skip` 行没解释 why & how，用户照着 plan 跑完发现自己版本没升。现在加 explicit warning + 引导 `--self` flag。
+- **[#150](https://github.com/sleep2agi/agent-network/issues/150) Dashboard 拓扑图 orphan 节点收到 "其他" cluster box**（Vincent 5453 push）：之前 orphan 节点（无 prefix 分组）散落画布各处难找；现在收到统一 "其他" cluster box 跟其他 group 一起渲染。
+
+::: warning Vincent 紧急 trust path
+v0.10.4 Vincent 紧急 ship 跳过 测试马 Docker smoke gate（per `feedback_no_test_on_prod` 不豁免，但 Vincent 5462 lead-scope 决定 trust path）。Docker smoke 仍是 release-gate playbook 标准卡控点，不变。
+:::
+
+详见 [release v0.10.4](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.4)。
+
+---
+
+## v0.10.3 — **codex-sdk default model gpt-5.5 + yolo flags 可见**（2026-05-17）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.2` ← bumped（cli.ts vendor preset）
+- `@sleep2agi/agent-node@2.4.2` ← bumped（codex-sdk runtime + flags）
+- `@sleep2agi/commhub-server@0.8.2` *(无变化)*
+- `@sleep2agi/agent-network-dashboard@0.5.1` *(无变化)*
+
+### Fixes
+
+- **[#149](https://github.com/sleep2agi/agent-network/issues/149) codex-sdk 默认模型修 + yolo flags 写进 config**（Vincent 5447+5448 catch）：
+  - cli.ts codex vendor preset 默认 model placeholder `gpt-5.4` → 真实 `gpt-5.5`
+  - codex-sdk runtime 加 `yolo: true` flags（跟 Claude Code preset 的 `dangerouslySkipPermissions` + `teammateMode` 同概念）—— 跳过权限交互弹窗便于 multi-agent batch 跑
+  - flags 写进 `config.json` 而非 ephemeral runtime arg，用户能 inspect / 编辑
+
+详见 [release v0.10.3](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.3)。
+
+---
+
 ## v0.10.2 — **Hero A disk telemetry + Hero D 拓扑图标签 UX**（2026-05-17）✅ stable
 
 **版本同步**（npm `latest` tag）：

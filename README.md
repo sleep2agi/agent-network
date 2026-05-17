@@ -219,10 +219,10 @@ flowchart LR
 
 | 包 | 版本 | 角色 |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.1` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器（v0.10.1 hotfix：`PINNED_SERVER_VERSION` bump 0.8.0 → 0.8.2，[详见 changelog](https://anet.sh/changelog#v0-10-1-—-hotfix-pinned-server-version-跟-v0-10-0-ship-chain-bump-2026-05-17-✅-stable)）|
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.4` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器（v0.10.5 [#152](https://github.com/sleep2agi/agent-network/issues/152) batch wizard workdir mode + [#153](https://github.com/sleep2agi/agent-network/issues/153) codex/claude skip API key prompt / v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) anet upgrade UX warning / v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149) codex-sdk gpt-5.5 vendor preset / v0.10.1 hotfix `PINNED_SERVER_VERSION` bump 0.8.0 → 0.8.2，[详见 changelog](https://anet.sh/changelog)）|
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.2` | MCP + REST + SSE 通信中枢（SQLite）+ `/api/server/:host/health` + `/api/server/:host/agents` |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.1` | Web Dashboard —— Next.js 16，4 套主题 + Hero 3 网络节点前端 8/8 surface + Hero D 拓扑图前缀标签 Option C + disk render（v0.10.2，[详见 changelog](https://anet.sh/changelog)）+ 100+ 轮 typography & 圆角级联 polish |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.1` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry + host disk telemetry（v0.10.2 Hero A，`df -k` 走 POSIX 标准，Linux/macOS 统一）|
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.2` | Web Dashboard —— Next.js 16，4 套主题 + Hero 3 网络节点前端 8/8 surface + Hero D 拓扑前缀标签 Option C + disk render（v0.10.2）+ [#150](https://github.com/sleep2agi/agent-network/issues/150) 拓扑图 orphan 节点 "其他" cluster box（v0.10.4）+ 100+ 轮 typography & 圆角级联 polish |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.2` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry + host disk telemetry（v0.10.2 Hero A，`df -k` POSIX 标准）+ codex-sdk yolo flags（v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149)）|
 
 CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
 

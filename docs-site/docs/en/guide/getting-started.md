@@ -1,12 +1,12 @@
 # Getting Started (first-time install)
 
-This page is the **first-time install** path for current stable (v0.10.2) — every step is Playwright + Docker E2E verified. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
+This page is the **first-time install** path for current stable (v0.10.5) — every step is Playwright + Docker E2E verified. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
 
 ::: tip Already have anet installed?
-**Upgrades** go through the [Upgrade Guide](/en/guide/upgrade) — a single `anet upgrade` picks up all four npm packages at `@latest` (including the v0.10.1 hotfix + v0.10.2 Hero A/D), followed by `anet project restart` to restart cwd nodes against the new version. This page is for **brand-new machines** / users who have never installed anet.
+**Upgrades** go through the [Upgrade Guide](/en/guide/upgrade) — a single `anet upgrade` picks up all four npm packages at `@latest` (including the v0.10.1 hotfix + v0.10.2 Hero A/D + v0.10.3 codex-sdk gpt-5.5 + v0.10.4 dashboard orphan-band + v0.10.5 batch wizard double-fix), followed by `anet project restart` to restart cwd nodes against the new version. This page is for **brand-new machines** / users who have never installed anet.
 :::
 
-::: tip Component responsibilities (v0.10.2 stable)
+::: tip Component responsibilities (v0.10.5 stable)
 This page touches four npm packages. Their responsibilities (exact version numbers track the npm `latest` tag — not hardcoded here to avoid drift):
 
 | Package | Purpose |
@@ -195,7 +195,7 @@ You can also do this in two commands: `anet init --hub http://<HUB-LAN-IP>:9200`
 
 ## Verified vs unverified
 
-::: info Verified (v0.10.2 stable — inherits the v2 E2E coverage plus new v0.8 regressions plus the v0.9.2 #129 / #132 / #136 fix chain plus the v0.10.0 release-gate playbook first full run plus the v0.10.1 PINNED_SERVER_VERSION chain-bump default-path fix plus the v0.10.2 Hero A agent-node disk telemetry `df -k` Linux/macOS smoke 3/3 PASS + Hero D dashboard topology prefix-label Option C 4/4 verify)
+::: info Verified (v0.10.5 stable — inherits the v2 E2E coverage plus new v0.8 regressions plus the v0.9.2 #129 / #132 / #136 fix chain plus the v0.10.0 release-gate playbook first full run plus the v0.10.1 PINNED_SERVER_VERSION chain-bump default-path fix plus the v0.10.2 Hero A agent-node disk telemetry `df -k` Linux/macOS smoke 3/3 PASS + Hero D dashboard topology prefix-label Option C 4/4 verify + v0.10.3 codex-sdk gpt-5.5 vendor preset + yolo flags + v0.10.4 [#150 orphan-band](https://github.com/sleep2agi/agent-network/issues/150) + [#151 anet upgrade UX](https://github.com/sleep2agi/agent-network/issues/151) + v0.10.5 [#152 batch wizard workdir](https://github.com/sleep2agi/agent-network/issues/152) + [#153 codex/claude skip API key](https://github.com/sleep2agi/agent-network/issues/153))
 - `anet hub start` with auto-default-admin
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`

@@ -8,6 +8,63 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## v0.10.5 — **`anet create --batch` wizard double-fix** (2026-05-17) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.4` ← bumped (CLI wizard fixes)
+- `@sleep2agi/agent-node@2.4.2` *(unchanged, shipped in v0.10.3)*
+- `@sleep2agi/commhub-server@0.8.2` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.5.2` *(unchanged, shipped in v0.10.4)*
+
+### Fixes
+
+- **[#152](https://github.com/sleep2agi/agent-network/issues/152) `anet create --batch` wizard now prompts for workdir mode** (Vincent 5477 push): the `--workdir-mode <shared|separate>` flag has shipped since [#55](https://github.com/sleep2agi/agent-network/issues/55), but the interactive wizard never prompted — users had to know the flag name to change the default `separate`. `createBatchWizardCommand` now adds an inquirer select (`separate` default / `shared` co-cwd), TTY-aware (flag set / non-TTY both fall back to `separate` with an INFO hint). agent-node / server / dashboard untouched — purely CLI wizard UX.
+- **[#153](https://github.com/sleep2agi/agent-network/issues/153) codex-sdk / claude-code-cli runtime selection no longer falsely prompts for `ANTHROPIC_AUTH_TOKEN`** (Vincent 5481+5485 push): the runtime-first wizard ([#133](https://github.com/sleep2agi/agent-network/issues/133)) called `selectVendorAndModel()` even when codex-sdk / claude-code-cli was picked (only claude-agent-sdk needs an API key). The wizard now skips the API key prompt for those runtimes and prints a one-line `codex auth login` / `claude auth login` hint instead.
+
+See the [v0.10.5 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.5).
+
+---
+
+## v0.10.4 — **`anet upgrade` UX warning + Dashboard orphan-band layout** (2026-05-17) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.3` ← bumped ([#151](https://github.com/sleep2agi/agent-network/issues/151) anet upgrade UX)
+- `@sleep2agi/agent-network-dashboard@0.5.2` ← bumped ([#150](https://github.com/sleep2agi/agent-network/issues/150) orphan-band layout)
+- `@sleep2agi/agent-node@2.4.2` *(unchanged, shipped in v0.10.3)*
+- `@sleep2agi/commhub-server@0.8.2` *(unchanged)*
+
+### Fixes
+
+- **[#151](https://github.com/sleep2agi/agent-network/issues/151) `anet upgrade` self-skip warning is now explicit** (Vincent 5462+5472 push): the prior `anet (self) — self-skip` row didn't spell out **why** or **how**; users walked the plan and didn't realize their own version wasn't bumped. Now adds an explicit warning + guides toward the `--self` flag.
+- **[#150](https://github.com/sleep2agi/agent-network/issues/150) Dashboard topology orphan nodes now collected into an "Others" cluster box** (Vincent 5453 push): previously, orphan nodes (no prefix group) were scattered across the canvas and hard to find; they now collect into an "Others" cluster box rendered alongside the other groups.
+
+::: warning Vincent emergency trust path
+v0.10.4 was shipped via Vincent's emergency trust path, skipping the test-lead Docker smoke gate (per `feedback_no_test_on_prod` not exempt, but Vincent 5462 lead-scope trust path). Docker smoke is still the release-gate playbook standard checkpoint, unchanged.
+:::
+
+See the [v0.10.4 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.4).
+
+---
+
+## v0.10.3 — **codex-sdk default model now gpt-5.5 + yolo flags visible in config** (2026-05-17) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.2` ← bumped (cli.ts vendor preset)
+- `@sleep2agi/agent-node@2.4.2` ← bumped (codex-sdk runtime + flags)
+- `@sleep2agi/commhub-server@0.8.2` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.5.1` *(unchanged)*
+
+### Fixes
+
+- **[#149](https://github.com/sleep2agi/agent-network/issues/149) codex-sdk default model fix + yolo flags written into config** (Vincent 5447+5448 catch):
+  - cli.ts codex vendor preset default model placeholder `gpt-5.4` → real `gpt-5.5`
+  - codex-sdk runtime gains `yolo: true` flags (same concept as the Claude Code preset's `dangerouslySkipPermissions` + `teammateMode`) — skips the permission-prompt for multi-agent batch runs
+  - Flags are persisted in `config.json` rather than as an ephemeral runtime arg, so users can inspect / edit them
+
+See the [v0.10.3 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.3).
+
+---
+
 ## v0.10.2 — **Hero A disk telemetry + Hero D topology label UX** (2026-05-17) ✅ stable
 
 **Version alignment** (npm `latest` tag):
