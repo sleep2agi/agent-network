@@ -1,12 +1,14 @@
 # RFC-013 — Rename Hot-Reload 跨版本兼容性
 
 **作者**: 通信SDK马
-**状态**: Draft v4 (待 通信龙 / Vincent ack; 通信牛 third pass review 期望快通)
-**版本**: v1 (初稿) → v2 (测试马 Phase 1 fold-in) → v3 (通信牛 first design review 4 blocker + 4 concern 整改) → v4 (通信牛 second pass 2 blocker + 1 concern 修)
+**状态**: Draft v5 (待 通信龙 / Vincent ack; 通信牛 fourth pass review 期望 APPROVE 收尾)
+**版本**: v1 (初稿) → v2 (测试马 Phase 1 fold-in) → v3 (通信牛 first design review 4 blocker + 4 concern 整改) → v4 (通信牛 second pass 2 blocker + 1 concern 修) → v5 (通信牛 third pass — §9.1 migrateSSEKeys snippet 终于补 `c.key = newKey`)
 **关联 issue**: #146, #84 (rename impl), RFC-010 §4.4 (SIGHUP-based reload)
 **关联 ship**: v0.10.0 (rename 2PC), v0.10.2 candidate (本 RFC 实施)
 
 > **v3 变更说明** (通信牛 [comment 4468530...](https://github.com/sleep2agi/agent-network/issues/146)): 通信牛 design review 揭示 v2 §3.3 fallback / §9.2 mutable identity / §3.1 SSE cleanup race / §4 C3 client detection 都不可实施. v3 整改 4 blocker + 4 concern, 引入 **Phase 0 server canonicalization hardening** 作必要 dependency. 实施分 **3 phase** 不再单 phase. LOC ~80 → ~120, ETA ~3h → ~4-5h. 核心设计 (capability probe + SSE re-key + agent hot-reload listener) 不变.
+
+> **v5 变更说明** (通信牛 [comment 4468702289](https://github.com/sleep2agi/agent-network/issues/146#issuecomment-4468702289)): v4 §3.1.7 + §3.7 fix 完整, 但 §9.1 final impl snippet 仍未同步 — 这是同 bug 的第三次出现. v5 §9.1 终于补 `for (const c of arr) c.key = newKey` 行 + 加 inline 注释指向 §3.1.7 cleanup race 解释, 防 future copy 再丢. 纯 1-line snippet fix.
 
 > **v4 变更说明** (通信牛 [comment 4468681](https://github.com/sleep2agi/agent-network/issues/146#issuecomment-4468681)): 通信牛 second pass 揭示 v3 inconsistency:
 > - **B1**: §2.5 / §10.5 写了 broadcast 含 `node_id` + listener validate, 但 §3.1 envelope + §9.1 pushEvent snippet + §3.2 listener handler 都漏 → v4 三处补 `node_id`
@@ -538,6 +540,10 @@ export function migrateSSEKeys(oldName: string, newName: string, networkId?: str
   const newKey = clientKey(newName, networkId);
   const arr = clients.get(oldKey);
   if (!arr) return 0;
+  // v5 critical: update each client's own .key so cancel() handlers (which
+  // close over client object, not local key) clean up at the correct entry.
+  // Without this line, migrated clients leak on disconnect — see §3.1.7.
+  for (const c of arr) c.key = newKey;
   // Merge (in unlikely case newKey already has entries, e.g. partial pre-rename connect)
   const existing = clients.get(newKey) || [];
   clients.set(newKey, [...existing, ...arr]);
