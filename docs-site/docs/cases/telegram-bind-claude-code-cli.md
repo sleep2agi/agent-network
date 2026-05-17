@@ -180,7 +180,7 @@ Node Status:
 | `claude-agent-sdk` | ❌ 等 v0.11+ / 未排期（RFC-002 P1，v0.9.x / v0.10.x 都未动） |
 | `codex-sdk` | ❌ 等 v0.11+ / 未排期（RFC-002 P2，v0.9.x / v0.10.x 都未动） |
 
-如果你的节点是 SDK runtime 想接 Telegram，**暂时**用 [`demos/codex-telegram-squad`](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad)（Docker Compose 起一整套）或等 RFC-002 实施（v0.10+ / 未排期）。
+如果你的节点是 SDK runtime 想接 Telegram，**暂时**用 [`demos/codex-telegram-squad`](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad)（Docker Compose 起一整套）或等 RFC-002 实施（v0.11+ / 未排期）。
 
 如果还没节点，先看 [Hello World](/cases/hello-world)，注意建节点时 runtime 选 `claude-code-cli`：
 
