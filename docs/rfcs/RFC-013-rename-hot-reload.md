@@ -1,12 +1,18 @@
 # RFC-013 — Rename Hot-Reload 跨版本兼容性
 
 **作者**: 通信SDK马
-**状态**: Draft v3 (待 通信龙 / Vincent ack; 通信牛 v2 review 整改完成)
-**版本**: v1 (初稿) → v2 (测试马 Phase 1 fold-in) → v3 (通信牛 design review 4 blocker + 4 concern 整改)
+**状态**: Draft v4 (待 通信龙 / Vincent ack; 通信牛 third pass review 期望快通)
+**版本**: v1 (初稿) → v2 (测试马 Phase 1 fold-in) → v3 (通信牛 first design review 4 blocker + 4 concern 整改) → v4 (通信牛 second pass 2 blocker + 1 concern 修)
 **关联 issue**: #146, #84 (rename impl), RFC-010 §4.4 (SIGHUP-based reload)
 **关联 ship**: v0.10.0 (rename 2PC), v0.10.2 candidate (本 RFC 实施)
 
 > **v3 变更说明** (通信牛 [comment 4468530...](https://github.com/sleep2agi/agent-network/issues/146)): 通信牛 design review 揭示 v2 §3.3 fallback / §9.2 mutable identity / §3.1 SSE cleanup race / §4 C3 client detection 都不可实施. v3 整改 4 blocker + 4 concern, 引入 **Phase 0 server canonicalization hardening** 作必要 dependency. 实施分 **3 phase** 不再单 phase. LOC ~80 → ~120, ETA ~3h → ~4-5h. 核心设计 (capability probe + SSE re-key + agent hot-reload listener) 不变.
+
+> **v4 变更说明** (通信牛 [comment 4468681](https://github.com/sleep2agi/agent-network/issues/146#issuecomment-4468681)): 通信牛 second pass 揭示 v3 inconsistency:
+> - **B1**: §2.5 / §10.5 写了 broadcast 含 `node_id` + listener validate, 但 §3.1 envelope + §9.1 pushEvent snippet + §3.2 listener handler 都漏 → v4 三处补 `node_id`
+> - **B2**: §3.1.7 `migrateSSEKeys` snippet 正确, 但 §9.1 final impl sketch 漏 `c.key = newKey` → v4 §9.1 改 = §3.1.7 (consistent)
+> - **C1 (non-blocker)**: §3.2 / §3.3 / §9.2 snippets 用 `ALIAS` / `NODE_NAME`, 跟 §3.7 `runtimeAlias` / `runtimeNodeName` 不一致 → v4 统一 + 加 `runtimeNodeId`
+> 核心设计 + Phase 划分 + LOC table 不变, 纯 inconsistency fix.
 
 ## 1. 背景
 
@@ -175,6 +181,7 @@ return Response.json({
 {
   "type": "node.alias_changed",
   "event": "node.alias_changed",
+  "node_id": "n_3f8abcd1",
   "old_alias": "OLD",
   "new_alias": "NEW",
   "new_node_name": "NEW",
@@ -182,6 +189,8 @@ return Response.json({
   "txn_id": "rtxn_..."
 }
 ```
+
+**v4 注**: `node_id` 是稳定身份, 由 `commitRename` 从 `nodes WHERE network_id=? AND alias=new_alias` 查出后填入 envelope. 用于 §3.2 listener 的 identity validation — 防止 duplicate alias 场景下 rename event 错误 hot-reload 别人的 agent. 旧 server (pre-RFC-013) 不发此事件; 新 server 发但若意外 `node_id` 缺失, agent fallback 到 `old_alias === runtimeAlias` 匹配 (less safe, graceful).
 
 注意: 跟现有 `node.renamed` (RFC-010 §4.2.1 C4 — dashboard 用) 是**两条不同 event** 不复用. `node.renamed` envelope 设计给 dashboard 消费 (含 `surfaces_updated` 列表 etc.), `node.alias_changed` envelope 设计给 agent-node 消费 (只含 reload 必需字段). 这样两边各自演化不交叉.
 
@@ -235,10 +244,18 @@ const SERVER_SUPPORTS_RENAME_BROADCAST = !!health?.capabilities?.rename_broadcas
 
 ```typescript
 if (ev.type === "node.alias_changed" && SERVER_SUPPORTS_RENAME_BROADCAST) {
-  if (ev.old_alias === ALIAS) {
-    log(`[rename] hot-reload alias ${ALIAS} → ${ev.new_alias}`);
-    ALIAS = ev.new_alias;
-    NODE_NAME = ev.new_node_name || ev.new_alias;
+  // v4 identity validation: prefer node_id (stable), fall back to old_alias match
+  // for backwards-compat with rare event-without-node_id case.
+  const identityMatches =
+    ev.node_id ? (ev.node_id === runtimeNodeId)
+               : (ev.old_alias === runtimeAlias);
+  if (!identityMatches) {
+    debug(`[rename] ignoring node.alias_changed for different identity (event.node_id=${ev.node_id}, mine=${runtimeNodeId})`);
+    continue;
+  }
+  log(`[rename] hot-reload alias ${runtimeAlias} → ${ev.new_alias}`);
+  runtimeAlias = ev.new_alias;
+  runtimeNodeName = ev.new_node_name || ev.new_alias;
     // SSE 连接保持 (server-side 已 re-key, 同一 TCP/HTTP 连接继续 valid)
     // 立即 re-register 让 server-side 的 sessions row updated_at 刷新
     await register().catch(() => {});
@@ -384,8 +401,12 @@ if (!liveSession) {
 // agent-node/src/cli.ts module-level
 const initialAlias = ...;          // 启动时值 (诊断用, 不变)
 const initialNodeName = ...;
+const initialNodeId = ...;          // NODE_ID — 启动时值, 用于诊断
 let runtimeAlias = initialAlias;   // 运行时, hot-reload 可改
 let runtimeNodeName = initialNodeName;
+const runtimeNodeId = initialNodeId; // v4: node_id 不变 (rename 只改 alias, node_id 是稳定身份);
+                                    // 但用 mutable-shaped variable for symmetry + future-proof
+                                    // 若有 node_id change scenario (e.g. node clone) 不动 RFC-013
 ```
 
 **All helpers must read runtime value dynamically** (audit list per 通信牛):
@@ -531,9 +552,16 @@ export function migrateSSEKeys(oldName: string, newName: string, networkId?: str
 // RFC-013 §3.1 step 1 — re-key in-memory SSE clients map
 const migrated = migrateSSEKeys(txn.old_alias, txn.new_alias, txn.network_id);
 
+// v4: lookup stable node_id from nodes table for identity in the broadcast
+// envelope (per §3.2 listener validates ev.node_id === runtimeNodeId)
+const nodeRow = db.get<any>(
+  "SELECT node_id FROM nodes WHERE network_id = ?1 AND alias = ?2",
+  [txn.network_id, txn.new_alias]);
+
 // RFC-013 §3.1 step 2 — broadcast node.alias_changed to the (now re-keyed) stream
 pushEvent(txn.new_alias, {
   type: "node.alias_changed",
+  node_id: nodeRow?.node_id ?? null,   // v4: identity for §3.2 listener validation
   old_alias: txn.old_alias,
   new_alias: txn.new_alias,
   new_node_name: txn.new_alias,
@@ -577,27 +605,33 @@ try {
 }
 ```
 
-**`src/cli.ts:1384` SSE event loop** — 新分支:
+**`src/cli.ts:1384` SSE event loop** — 新分支 (v4: identity validation per §3.2):
 
 ```typescript
 if (ev.type === "node.alias_changed" && SERVER_SUPPORTS_RENAME_BROADCAST) {
-  if (ev.old_alias === ALIAS) {
-    log(`[rename] hot-reload ${ALIAS} → ${ev.new_alias}`);
-    ALIAS = ev.new_alias;
-    NODE_NAME = ev.new_node_name || ev.new_alias;
-    await register().catch(e => warn(`re-register failed: ${e.message}`));
+  const identityMatches =
+    ev.node_id ? (ev.node_id === runtimeNodeId)
+               : (ev.old_alias === runtimeAlias);
+  if (!identityMatches) {
+    debug(`[rename] ignoring node.alias_changed (event identity ≠ mine)`);
+    continue;
   }
+  log(`[rename] hot-reload ${runtimeAlias} → ${ev.new_alias}`);
+  runtimeAlias = ev.new_alias;
+  runtimeNodeName = ev.new_node_name || ev.new_alias;
+  // runtimeNodeId unchanged — rename only touches alias
+  await register().catch(e => warn(`re-register failed: ${e.message}`));
 }
 ```
 
-**`reportStatus` fn** — 自检 fallback:
+**`reportStatus` fn** — 自检 fallback (v4: runtimeAlias instead of ALIAS):
 
 ```typescript
 const resp = await callCommHub("report_status", {...}) as any;
-if (resp?.canonical_alias && resp.canonical_alias !== ALIAS) {
-  warn(`[rename] alias drift: local=${ALIAS} server=${resp.canonical_alias} — hot-reloading`);
-  ALIAS = resp.canonical_alias;
-  NODE_NAME = resp.canonical_alias;
+if (resp?.canonical_alias && resp.canonical_alias !== runtimeAlias) {
+  warn(`[rename] alias drift: local=${runtimeAlias} server=${resp.canonical_alias} — hot-reloading`);
+  runtimeAlias = resp.canonical_alias;
+  runtimeNodeName = resp.canonical_alias;
 }
 ```
 
