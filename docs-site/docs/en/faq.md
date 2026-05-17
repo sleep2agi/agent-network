@@ -24,7 +24,7 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 
 ### 3. Is it free?
 
-**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.2 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
+**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.7 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
 
 - Public repo, modifiable source
 - Business model = courses + consulting, not a forced hosted SaaS
@@ -237,7 +237,7 @@ anet network invite --role member        # Generate invite code (admin/member/vi
 ```
 
 ::: tip Role changes
-The current v0.10.2 stable still does not expose `promote` / `demote` CLI subcommands (v0.9.x scope was Recovery & Observability; v0.10.0 scope was Direct Runtime + Observability Foundations; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2 was Hero A disk telemetry + Hero D topology prefix UX — none of them touched member-role management). To change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.11+ / unscheduled.
+The current v0.10.7 stable still does not expose `promote` / `demote` CLI subcommands (v0.9.x scope was Recovery & Observability; v0.10.0 scope was Direct Runtime + Observability Foundations; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2 was Hero A disk telemetry + Hero D topology prefix UX — none of them touched member-role management). To change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.11+ / unscheduled.
 :::
 
 ### 17a. How do I change my password? (v0.8)

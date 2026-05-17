@@ -142,7 +142,7 @@ Dashboard 根据角色调整按钮可见性 / 可点击性（设计目标）：
 - **member** 看不到"管理成员"、"设置"按钮
 - **admin** 看不到"删除网络"按钮
 
-::: info Dashboard `0.5.1` 实际行为（v0.10.2 stable）
+::: info Dashboard `0.5.1` 实际行为（v0.10.7 stable）
 角色 → 按钮可见性的 UI 联动**部分实装**。即使按钮当前还显示，**Server 端会 403 拒绝**（`canWrite()` 强制 RBAC），权限本身不会绕过。完整 UI 按钮 hiding **v0.9.x + v0.10.x scope 都未动**（v0.9.x Recovery & Observability、v0.10.0 Direct Runtime + Observability Foundations、v0.10.1 PINNED hotfix、v0.10.2 Hero A disk telemetry + Hero D 拓扑前缀 Option C + disk render —— 主题都不在 RBAC UI），排到 v0.11+ Dashboard 改造里再补。
 :::
 

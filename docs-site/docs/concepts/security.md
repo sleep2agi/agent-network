@@ -510,5 +510,5 @@ npx @sleep2agi/agent-node --alias my-agent --max-budget 0.1
 - [Docker 部署](/deploy/docker) — 容器化最佳实践
 
 ::: warning 当前阶段
-v0.10.2 stable 密码哈希仍是 SHA-256（verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)）。**Argon2id 迁移 v0.9.x / v0.10.x 都未动**（v0.9.x Recovery & Observability scope 为先，v0.10.0 Direct Runtime + Observability Foundations scope 为 codex stdio + 守护节点 endpoint + 进程 telemetry，v0.10.1 PINNED chain-bump hotfix，v0.10.2 Hero A disk telemetry + Hero D dashboard UX —— 都没碰密码哈希；security report **R9** 排到 v0.11+ / 未排期；搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)，如果没 tracking issue 欢迎开一个）。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
+v0.10.7 stable 密码哈希仍是 SHA-256（verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)）。**Argon2id 迁移 v0.9.x / v0.10.x 都未动**（v0.9.x Recovery & Observability scope 为先，v0.10.0 Direct Runtime + Observability Foundations scope 为 codex stdio + 守护节点 endpoint + 进程 telemetry，v0.10.1 PINNED chain-bump hotfix，v0.10.2 Hero A disk telemetry + Hero D dashboard UX —— 都没碰密码哈希；security report **R9** 排到 v0.11+ / 未排期；搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)，如果没 tracking issue 欢迎开一个）。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
 :::
