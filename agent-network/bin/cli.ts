@@ -110,6 +110,27 @@ function parseSessionSummary(jsonlPath: string): string {
   }
 }
 
+// #149 (Vincent 5448) + #156 (Vincent 5531) — codex-sdk runtime fast/yolo
+// posture. agent-node's processWithCodex already hardcodes these defaults,
+// but writing them to config.json makes the permission posture visible to
+// the user and overridable per-node. Source of truth for both single-node
+// (createProfileFromOpts) and batch (createBatch) creation paths — adding
+// a fifth yolo here propagates to every path automatically (was the v0.10.6
+// gap that caused #156: batch path only wrote 1/4 because it didn't share
+// the single-node inline construction).
+//
+// `--no-yolo` opt-out is for CI / scripted users who need explicit
+// permission posture (returns empty so caller's `dangerouslySkipPermissions:
+// true` is the only yolo-ish flag landing in config).
+function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
+  if (noYolo) return {};
+  return {
+    approvalPolicy: "never",
+    sandboxMode: "danger-full-access",
+    skipGitRepoCheck: true,
+  };
+}
+
 // Scan ~/.claude/projects/<cwd-key>/*.jsonl — the Claude Code sessions that
 // belong to this directory. Newest first. Shared by `anet session ls` and the
 // `anet node create` resume picker (#115).
@@ -1120,16 +1141,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       dangerouslySkipPermissions: true,
       ...(runtime === "claude-code-cli" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
       ...(opts["max-turns"] ? { maxTurns: parseInt(opts["max-turns"]) } : {}),
-      // #149 (Vincent 5448) fast/yolo mode for codex-sdk runtime. agent-node's
-      // processWithCodex already hardcodes these defaults, but writing them
-      // explicitly to config.json makes the agent's permission posture visible
-      // to the user and overridable per-node (e.g. set sandboxMode "read-only"
-      // for a read-mostly research node).
-      ...(runtime === "codex-sdk" ? {
-        approvalPolicy: "never",
-        sandboxMode: "danger-full-access",
-        skipGitRepoCheck: true,
-      } : {}),
+      // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
+      // here only; #156 batch path missed it because of duplication).
+      ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
     },
     ...(opts.session || runtime === "claude-code-cli" ? { session: opts.session || randomUUID() } : {}),
   };
@@ -6114,6 +6128,7 @@ interface BatchOptions {
   team?: string;                 // profile.team field + tmux session prefix (defaults to prefix)
   leaderAlias?: string;          // 设了 → i=1 = leader role with this alias; i>1 = `${prefix}${i-1}号` worker. 没设 → all i = `${prefix}${i}号` workers.
   printSummary?: boolean;        // default true
+  noYolo?: boolean;              // #156 — opt out of codex-sdk yolo flags (CI / scripted use). default false (yolo on, matches single-node).
 }
 
 interface BatchResult {
@@ -6200,7 +6215,13 @@ async function createBatch(opts: BatchOptions): Promise<BatchResult> {
         ...(gc.network_id ? { network_id: gc.network_id } : {}),
         channels: ["server:commhub"],
         env: envMap,
-        flags: { dangerouslySkipPermissions: true },
+        flags: {
+          dangerouslySkipPermissions: true,
+          // #156 (Vincent 5531) — same codex-sdk yolo posture as single-node
+          // (createProfileFromOpts). Helper is the source of truth, shared
+          // between the two paths to prevent the v0.10.6 1/4-vs-4/4 drift.
+          ...(opts.runtime === "codex-sdk" ? codexSdkYoloFlags(opts.noYolo) : {}),
+        },
         ...(promptText ? { systemPrompt: promptText } : {}),
         ...(opts.team ? { team: opts.team } : {}),
         ...(opts.leaderAlias ? { role } : {}),
@@ -6601,6 +6622,7 @@ async function createBatchWizardCommand() {
     apiKey,
     systemPrompt: description || undefined,
     leaderAlias: leaderAlias || undefined,
+    noYolo: opts["no-yolo"] === "true",  // #156 — propagate opt-out to batch path
   });
 
   if (result.createdAliases.length === 0) {
