@@ -3,7 +3,7 @@
 把一个跑着的 `claude-code-cli` 节点接进 Telegram —— 你在 Telegram 里 DM bot，bot 把消息转给 Claude Code 处理，Claude Code 回复（包括跑 bash / 改文件 / 调 MCP 工具的完整能力）。本手册给**每一步的预期输出 + 落盘文件 + 错误诊断**，照着敲就能跑通。
 
 > [!IMPORTANT]
-> **当前支持范围**：仅 `claude-code-cli` runtime。`claude-agent-sdk` / `codex-sdk` 的 Telegram bridge 在 [RFC-002 Channel-Bind CLI](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) Phase 1 排期 —— **v0.9.x scope（Recovery & Observability）未动**（grep `telegram-bridge` 在 agent-node/src 0 命中），排到 v0.10+ / 未排期。
+> **当前支持范围**：仅 `claude-code-cli` runtime。`claude-agent-sdk` / `codex-sdk` 的 Telegram bridge 在 [RFC-002 Channel-Bind CLI](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) Phase 1 排期 —— **v0.9.x / v0.10.x scope chain 都未动**（grep `telegram-bridge` 在 agent-node/src 0 命中），排到 v0.11+ / 未排期。
 
 | 信息 | 值 |
 |---|---|
@@ -177,8 +177,8 @@ Node Status:
 | 节点 runtime | 本案例适用？ |
 |---|---|
 | `claude-code-cli` | ✅ 适用 |
-| `claude-agent-sdk` | ❌ 等 v0.10+ / 未排期（RFC-002 P1，v0.9.x 未动） |
-| `codex-sdk` | ❌ 等 v0.10+ / 未排期（RFC-002 P2，v0.9.x 未动） |
+| `claude-agent-sdk` | ❌ 等 v0.11+ / 未排期（RFC-002 P1，v0.9.x / v0.10.x 都未动） |
+| `codex-sdk` | ❌ 等 v0.11+ / 未排期（RFC-002 P2，v0.9.x / v0.10.x 都未动） |
 
 如果你的节点是 SDK runtime 想接 Telegram，**暂时**用 [`demos/codex-telegram-squad`](https://github.com/sleep2agi/agent-network/tree/main/demos/codex-telegram-squad)（Docker Compose 起一整套）或等 RFC-002 实施（v0.10+ / 未排期）。
 
@@ -328,7 +328,7 @@ cat ~/.anet/nodes/n_abc12345/config.json | python3 -m json.tool | grep -A 5 chan
 ## 步骤 5 — 重启节点让 Telegram channel 生效
 
 > [!WARNING]
-> 当前实现**不支持热注入** channel。节点必须 stop + start 才能让 telegram 生效。这是 RFC-002 边界 case 之一，v0.9.x 未动，排到 v0.10+ / 未排期优化。
+> 当前实现**不支持热注入** channel。节点必须 stop + start 才能让 telegram 生效。这是 RFC-002 边界 case 之一，v0.9.x / v0.10.x 都未动，排到 v0.11+ / 未排期优化。
 
 ### 5.1 停旧进程
 
@@ -615,7 +615,7 @@ anet node create my-bot --runtime claude-code-cli \
 | Runtime | 当前 | 状态 |
 |---|---|---|
 | `claude-code-cli` | ✅ 本案例 | 已 work |
-| `claude-agent-sdk` | ❌ | [RFC-002](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) Phase 1 — agent-node 加 `telegram-bridge` worker，v0.9.x 未动，排到 v0.10+ / 未排期 |
+| `claude-agent-sdk` | ❌ | [RFC-002](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) Phase 1 — agent-node 加 `telegram-bridge` worker，v0.9.x / v0.10.x 都未动，排到 v0.11+ / 未排期 |
 | `codex-sdk` | ❌ | RFC-002 Phase 2 — 复用 Phase 1 bridge |
 
 为什么 SDK 不能复用 claude-code-cli 路径：claude-code-cli 走的是 Claude Code CLI 子进程，CLI 自带 plugin 机制；SDK runtime 是 anet 直接调 `@anthropic-ai/claude-agent-sdk` / `@openai/codex-sdk`，没有 plugin 钩子，得在 anet 这边写 telegram bridge。RFC-002 给了完整设计。
@@ -642,5 +642,5 @@ anet node create my-bot --runtime claude-code-cli \
 - [Agent Node](/guide/agent-node) — 节点配置完整字段
 - [辩论赛 Demo](/cases/debate) — 6 agent 内置编排（不接 Telegram）
 - [军团编队](/cases/telegram-squad) — Docker Compose 完整 Telegram squad
-- [RFC-002 Channel-Bind CLI](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) — SDK runtime 的 Telegram bridge 设计（v0.9.x 未动，排到 v0.10+ / 未排期）
+- [RFC-002 Channel-Bind CLI](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-002-channel-bind-cli.md) — SDK runtime 的 Telegram bridge 设计（v0.9.x / v0.10.x 都未动，排到 v0.11+ / 未排期）
 - [issue #14](https://github.com/sleep2agi/agent-network/issues/14) — 本案例追踪 issue

@@ -134,7 +134,7 @@ anet doctor --fix
 
 # Case 2: Upgrade your role
 # Have the owner (not admin — admin can't change roles, see R149 PUT members owner-only gate)
-# call REST to promote you (v0.9.x stable still does not expose a CLI promote subcommand — the v0.9 scope was Recovery & Observability, member-role management was not touched; queued for v0.10+ / unscheduled):
+# call REST to promote you (v0.10.x stable still does not expose a CLI promote subcommand — the v0.9.x and v0.10.x scopes did not touch member-role management; queued for v0.11+ / unscheduled):
 NET=$(jq -r .network_id ~/.anet/config.json)
 UTOK=$(jq -r .token ~/.anet/config.json)        # owner's own utok_
 curl -X PUT "$HUB/api/networks/$NET/members/<your_user_id>" \
@@ -155,7 +155,7 @@ anet network invite --role member
 ```
 
 ::: info anet is Apache-2.0 OSS since v0.8 — there is no real license to buy
-This gate is a V3-era leftover still firing in the `send_task` path (verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) where `license_expired` is emitted; same file L516 has `SELECT type, expires_at FROM licenses`). It triggers when your local SQLite has a `licenses` row with `expires_at` in the past. **The v0.9.x scope did not touch this** (Recovery & Observability took priority); full removal is queued for v0.10+ / unscheduled.
+This gate is a V3-era leftover still firing in the `send_task` path (verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) where `license_expired` is emitted; same file L516 has `SELECT type, expires_at FROM licenses`). It triggers when your local SQLite has a `licenses` row with `expires_at` in the past. **The v0.9.x and v0.10.x scopes did not touch this** (Recovery & Observability took priority); full removal is queued for v0.11+ / unscheduled.
 :::
 
 **Cause**: Your local SQLite `licenses` table has a row with `expires_at < now()`.

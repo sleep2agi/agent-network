@@ -46,7 +46,7 @@ curl http://localhost:9200/health
 ```
 
 ::: tip The `license` field is a v0.6 legacy
-`license: "trial"` is a leftover from the v0.6 era 14-day trial mechanism. After the Apache 2.0 OSS transition it is **no longer a commercial feature gate** (self-hosted has no notion of "expired"). The `send_task` path still runs the trial check only for backward compatibility (verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) where `license_expired` is still emitted); if you hit it, see [troubleshooting](/en/troubleshooting). **The v0.9.x scope did not touch this** (Recovery & Observability took priority); full removal is queued for v0.10+ / unscheduled.
+`license: "trial"` is a leftover from the v0.6 era 14-day trial mechanism. After the Apache 2.0 OSS transition it is **no longer a commercial feature gate** (self-hosted has no notion of "expired"). The `send_task` path still runs the trial check only for backward compatibility (verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) where `license_expired` is still emitted); if you hit it, see [troubleshooting](/en/troubleshooting). **The v0.9.x and v0.10.x scopes did not touch this** (Recovery & Observability took priority); full removal is queued for v0.11+ / unscheduled.
 :::
 
 ---
@@ -247,7 +247,7 @@ Only the provided fields are updated ([server/src/index.ts:478-479](https://gith
 | 401 | `token required` / `invalid token` | Missing / invalid utok_ |
 
 ::: info Missing fields are not an error
-If you supply only `display_name` and omit `email` (or omit both), the server does not return 400 — [`index.ts:478-479`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L478) builds the SQL conditionally with `if (body.X)`. When everything is omitted it just re-SELECTs and returns the user as-is. **No field-length validation** here (the v0.9.x scope did not touch this; schema-level checks are queued for v0.10+ / unscheduled).
+If you supply only `display_name` and omit `email` (or omit both), the server does not return 400 — [`index.ts:478-479`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L478) builds the SQL conditionally with `if (body.X)`. When everything is omitted it just re-SELECTs and returns the user as-is. **No field-length validation** here (the v0.9.x and v0.10.x scopes did not touch this; schema-level checks are queued for v0.11+ / unscheduled).
 :::
 
 ---

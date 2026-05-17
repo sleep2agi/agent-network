@@ -46,7 +46,7 @@ curl http://localhost:9200/health
 ```
 
 ::: tip `license` 字段是 v0.6 legacy
-`license: "trial"` 是 v0.6 时代 14 天试用机制的残留字段，Apache 2.0 OSS 后**不再作为商业功能门控**（自部署没有"过期"概念）。`send_task` 路径仍跑 trial 检查仅为后向兼容（verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) `license_expired` 仍 emit），若命中见 [troubleshooting](/troubleshooting)。**v0.9.x scope 未动**（Recovery & Observability 主题为先），整段移除排到 v0.10+ / 未排期。
+`license: "trial"` 是 v0.6 时代 14 天试用机制的残留字段，Apache 2.0 OSS 后**不再作为商业功能门控**（自部署没有"过期"概念）。`send_task` 路径仍跑 trial 检查仅为后向兼容（verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) `license_expired` 仍 emit），若命中见 [troubleshooting](/troubleshooting)。**v0.9.x / v0.10.x scope 都未动**（Recovery & Observability 主题为先），整段移除排到 v0.11+ / 未排期。
 :::
 
 ---
@@ -247,7 +247,7 @@ curl -X PUT http://localhost:9200/api/auth/me \
 | 401 | `token required` / `invalid token` | 缺/无效 utok_ |
 
 ::: info 字段缺失不报错
-如果只传 `display_name` 而省略 `email`（或两者都不传），server 不会报 400 —— [`index.ts:478-479`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L478) 用 `if (body.X)` 条件累加 SQL，全部省略时只 re-SELECT user 返回。**无字段长度校验**（v0.9.x 未动，schema-level 校验排到 v0.10+ / 未排期）。
+如果只传 `display_name` 而省略 `email`（或两者都不传），server 不会报 400 —— [`index.ts:478-479`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L478) 用 `if (body.X)` 条件累加 SQL，全部省略时只 re-SELECT user 返回。**无字段长度校验**（v0.9.x / v0.10.x 都未动，schema-level 校验排到 v0.11+ / 未排期）。
 :::
 
 ---
