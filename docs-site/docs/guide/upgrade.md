@@ -2,6 +2,21 @@
 
 本文介绍**老用户**将 Agent Network 升级到最新版本的步骤，以及主要版本之间的迁移注意事项。
 
+::: warning v0.10.6 chicken-and-egg — 当前 binary 2.2.4 及以下需手装 1 次升到 2.2.5+
+v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) Option A 只改了 `anet upgrade` 的 verbiage（显示 "⚠️ NEEDS MANUAL UPGRADE"），**chicken-and-egg deadlock 仍在** —— Node 进程无法 in-place 替换自己的 binary。**你当前 2.2.2 / 2.2.3 / 2.2.4 binary 跑 `anet upgrade` 还是旧 "skipped" 行为**（这条逻辑 frozen 在 npm 上的老 tarball 里）。
+
+v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) 真解 chicken-and-egg：默认 `spawn(forkScript, { detached: true })` + `child.unref()` + 主进程 exit，detached child 后台跑 `npm install`。但**这个修复只在 2.2.5+ 的 binary 里生效**。
+
+**只需手装 1 次**：
+
+```bash
+npm install -g @sleep2agi/agent-network@2.2.5
+anet --version            # 期望 v2.2.5
+```
+
+之后再有新版本（e.g. 2.2.6+），直接跑 `anet upgrade` 就**自动 detached spawn**，一两分钟后 `anet --version` 已是新版，再不需要 `--self` flag 或手装。
+:::
+
 ::: tip 全新机器从来没装过 anet？
 **首次安装**走 [上手指南](/guide/getting-started) 或一行 shell：
 
@@ -138,8 +153,8 @@ anet status
 
 v0.8 落地了 [RFC-001 第二阶段](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)，对**鉴权和密码**有新行为：
 
-::: tip v0.8.x → v0.10.5 增量
-v0.8 主路径之后，v0.8.2 / v0.8.3 / v0.9.0 / v0.9.1 / v0.9.2 / v0.10.0 / v0.10.1 / v0.10.2 / v0.10.3 / v0.10.4 / **v0.10.5**（当前 stable，4 包 latest：`agent-network 2.2.4`（v0.10.3 codex preset + v0.10.4 [#151 anet upgrade UX](https://github.com/sleep2agi/agent-network/issues/151) + v0.10.5 [#152 batch workdir wizard + #153 codex/claude skip API key](https://github.com/sleep2agi/agent-network/issues/152)）/ `agent-node 2.4.2`（v0.10.2 Hero A disk + v0.10.3 codex-sdk gpt-5.5 + yolo flags）/ `commhub-server 0.8.2` / `agent-network-dashboard 0.5.2`（v0.10.2 Hero D + disk render + v0.10.4 [#150 orphan-band](https://github.com/sleep2agi/agent-network/issues/150) + 100+ 轮 polish））陆续加了：`anet channel add telegram` 一键绑定、`claude-code-cli` runtime session resume 修复、`anet create --batch` 批量 agent 原语、`anet demo sci-team` / `pr-review` demo、`anet login` 首次登录引导、`anet doctor --fix` 修 ntok_、envRef vendor 凭据（[#125](https://github.com/sleep2agi/agent-network/issues/125)）、SDK 高并发 retry-with-backoff + 300s timeout（[#132](https://github.com/sleep2agi/agent-network/issues/132)）、runtime-first wizard（[#133](https://github.com/sleep2agi/agent-network/issues/133)）、`anet project up/restart/down` cwd-wide 编排（[#117](https://github.com/sleep2agi/agent-network/issues/117)）、`codex-direct-stdio` opt-in 路径（[#141](https://github.com/sleep2agi/agent-network/issues/141)，env `ANET_CODEX_STDIO_DIRECT=1` 启用）、守护节点 observability endpoint family（[#99](https://github.com/sleep2agi/agent-network/issues/99) `/api/server/:host/health` + `/api/server/:host/agents`）+ per-agent `process_telemetry`（[#142](https://github.com/sleep2agi/agent-network/issues/142)）、dashboard Hero 3 8 surface 等。
+::: tip v0.8.x → v0.10.6 增量
+v0.8 主路径之后，v0.8.2 / v0.8.3 / v0.9.0 / v0.9.1 / v0.9.2 / v0.10.0 / v0.10.1 / v0.10.2 / v0.10.3 / v0.10.4 / v0.10.5 / **v0.10.6**（当前 stable，4 包 latest：`agent-network 2.2.5`（v0.10.6 [#154 anet upgrade Option B detached spawn 默认](https://github.com/sleep2agi/agent-network/issues/154) + [#155 batch wizard silent-exit 修](https://github.com/sleep2agi/agent-network/issues/155) + v0.10.3 codex preset + v0.10.4 [#151 anet upgrade UX](https://github.com/sleep2agi/agent-network/issues/151) + v0.10.5 [#152 batch workdir wizard + #153 codex/claude skip API key](https://github.com/sleep2agi/agent-network/issues/152)）/ `agent-node 2.4.2`（v0.10.2 Hero A disk + v0.10.3 codex-sdk gpt-5.5 + yolo flags）/ `commhub-server 0.8.2` / `agent-network-dashboard 0.5.2`（v0.10.2 Hero D + disk render + v0.10.4 [#150 orphan-band](https://github.com/sleep2agi/agent-network/issues/150) + 100+ 轮 polish））陆续加了：`anet channel add telegram` 一键绑定、`claude-code-cli` runtime session resume 修复、`anet create --batch` 批量 agent 原语、`anet demo sci-team` / `pr-review` demo、`anet login` 首次登录引导、`anet doctor --fix` 修 ntok_、envRef vendor 凭据（[#125](https://github.com/sleep2agi/agent-network/issues/125)）、SDK 高并发 retry-with-backoff + 300s timeout（[#132](https://github.com/sleep2agi/agent-network/issues/132)）、runtime-first wizard（[#133](https://github.com/sleep2agi/agent-network/issues/133)）、`anet project up/restart/down` cwd-wide 编排（[#117](https://github.com/sleep2agi/agent-network/issues/117)）、`codex-direct-stdio` opt-in 路径（[#141](https://github.com/sleep2agi/agent-network/issues/141)，env `ANET_CODEX_STDIO_DIRECT=1` 启用）、守护节点 observability endpoint family（[#99](https://github.com/sleep2agi/agent-network/issues/99) `/api/server/:host/health` + `/api/server/:host/agents`）+ per-agent `process_telemetry`（[#142](https://github.com/sleep2agi/agent-network/issues/142)）、dashboard Hero 3 8 surface 等。
 
 这些增量**升级路径跟 v0.7 → v0.8 主路径一致**（admin bootstrap + 密码管理一次性迁移完，后续 incremental upgrade 无额外鉴权步骤），完整增量逐版见 [changelog](/changelog)。
 :::

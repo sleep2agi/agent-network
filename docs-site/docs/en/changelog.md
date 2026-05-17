@@ -8,6 +8,46 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## v0.10.6 — **`anet upgrade` Option B detached spawn + `anet create --batch` wizard silent-exit fix** (2026-05-17) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.5` ← bumped (CLI upgrade + wizard fixes)
+- `@sleep2agi/agent-node@2.4.2` *(unchanged, v0.10.3)*
+- `@sleep2agi/commhub-server@0.8.2` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.5.2` *(unchanged, v0.10.4)*
+
+::: warning Chicken-and-egg upgrade note — one-time manual install required
+v0.10.4's [#151 Option A](https://github.com/sleep2agi/agent-network/issues/151) only updated the verbiage (`anet upgrade` now shows "⚠️ NEEDS MANUAL UPGRADE"), but **the chicken-and-egg deadlock wasn't fixed** — your current `2.2.2 / 2.2.3 / 2.2.4` binary still falls back to the old "skipped (would replace running CLI)" behavior (that logic is frozen on the npm tarball).
+
+```bash
+npm install -g @sleep2agi/agent-network@2.2.5    # one-time manual install
+anet --version                                    # expect v2.2.5
+```
+
+From the next release onward (e.g. 2.2.6+), `anet upgrade` will **auto detached-spawn** the install for you — no more manual install.
+:::
+
+### Fixes
+
+- **[#154](https://github.com/sleep2agi/agent-network/issues/154) `anet upgrade` Option B detached spawn enabled by default** (Vincent 5489+5490 catch): users saw `anet (self): skipped (would replace the running CLI).` + `[anet] Done.` and assumed success, but the anet binary never actually upgraded (chicken-and-egg deadlock — a Node process can't in-place replace its own binary). `bin/cli.ts:3873-3874` now does `spawn(forkScript, [], { stdio: "inherit", detached: true })` + `child.unref()` + main process `process.exit(0)`; the detached child runs `npm install` in the background. The new version takes effect 1-2 min later — no `--self` flag needed.
+- **[#155](https://github.com/sleep2agi/agent-network/issues/155) `anet create --batch` wizard silent-exit fix** (Vincent 5493 catch): after the workdir-mode `select()`, `process.stdin` state changes and the readline-based `ask()` helper returns at EOF immediately → the entire wizard **silently exits** at the `Node prefix` prompt (same root cause as [#137 in v0.9.2 preview.5 anet create regression](https://github.com/sleep2agi/agent-network/issues/137), recurring in a different code path). Fix: migrate all post-select prompts to `inquirer.input()` so stdin handling stays uniform with the preceding select; the catch fallback retains the legacy `ask()` for non-TTY / no-inquirer environments.
+
+### Quality gates + lessons
+
+- **`feedback_no_skip_smoke_gate`** (Vincent 5493): the v0.10.4 emergency trust path is **SUSPENDED** — the Docker smoke gate is never bypassed again.
+- **`feedback_no_host_test_nodes`** (Vincent 5499-5502): red-line — all test nodes go in Docker, must never connect to a host hub.
+- **`feedback_dist_obfuscated_use_source_grep`** (new this cycle): `dist/bin/cli.js` is esbuild bundled + obfuscated (rotating string table, mangled identifiers, encoded string literals) — static grep on dist is useless. Code-path verification must grep `bin/cli.ts` source (HEAD = the preview build source).
+
+### Cycle 11 stats
+
+- **16 cumulative `@latest` publishes** (v0.9.0 → v0.10.6): 0 split-brain / 0 rollback / 0 retry
+- **2026-05-17 v0.10.x same-day ships**: v0.10.1 + v0.10.2 + v0.10.3 + v0.10.4 + v0.10.5 + **v0.10.6** = **6 ships in ~9 hours** (audit-first cadence)
+- **9 Vincent telegram catches all closed-loop**: 5444 (Install/Upgrade split R697) + 5447+5448 (#149) + 5453 (#150) + 5462+5472 (#151) + 5477 (#152) + 5481+5485 (#153) + 5489+5490 (#154) + 5493 (#155) + 5499-5502 (red-line SOPs)
+
+See the [v0.10.6 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.6).
+
+---
+
 ## v0.10.5 — **`anet create --batch` wizard double-fix** (2026-05-17) ✅ stable
 
 **Version alignment** (npm `latest` tag):

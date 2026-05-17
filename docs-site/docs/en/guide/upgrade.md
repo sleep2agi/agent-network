@@ -2,6 +2,21 @@
 
 This guide covers how **existing users** upgrade Agent Network to the latest version, plus migration notes between major versions.
 
+::: warning v0.10.6 chicken-and-egg — current binary at 2.2.4 or older needs a one-time manual install to reach 2.2.5+
+v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) Option A only updated the verbiage in `anet upgrade` (displaying "⚠️ NEEDS MANUAL UPGRADE"), **but the chicken-and-egg deadlock remained** — a Node process can't in-place replace its own binary. **Your current 2.2.2 / 2.2.3 / 2.2.4 binary running `anet upgrade` still falls back to the old "skipped" behavior** (that logic is frozen in the npm tarball).
+
+v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) actually resolves the chicken-and-egg: it defaults to `spawn(forkScript, { detached: true })` + `child.unref()` + main-process exit, with the detached child running `npm install` in the background. **But this fix only lives in the 2.2.5+ binary.**
+
+**One-time manual install**:
+
+```bash
+npm install -g @sleep2agi/agent-network@2.2.5
+anet --version            # expect v2.2.5
+```
+
+From the next version onward (e.g. 2.2.6+), `anet upgrade` will **auto detached-spawn**; a minute or two later `anet --version` shows the new build — no `--self` flag or manual install required.
+:::
+
 ::: tip Brand-new machine, never installed anet before?
 **First-time install** goes through the [Getting Started guide](/en/guide/getting-started), or in one shell line:
 
@@ -138,8 +153,8 @@ This section documents **the historical path from v0.7 to v0.8**, kept as a refe
 
 v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
 
-::: tip v0.8.x → v0.10.5 increments
-After the v0.8 main path, v0.8.2 / v0.8.3 / v0.9.0 / v0.9.1 / v0.9.2 / v0.10.0 / v0.10.1 / v0.10.2 / v0.10.3 / v0.10.4 / **v0.10.5** (current stable; four packages at npm `latest`: `agent-network 2.2.4` (v0.10.3 codex preset + v0.10.4 [#151 anet upgrade UX](https://github.com/sleep2agi/agent-network/issues/151) + v0.10.5 [#152 batch workdir wizard + #153 codex/claude skip API key](https://github.com/sleep2agi/agent-network/issues/152)) / `agent-node 2.4.2` (v0.10.2 Hero A disk + v0.10.3 codex-sdk gpt-5.5 + yolo flags) / `commhub-server 0.8.2` / `agent-network-dashboard 0.5.2` (v0.10.2 Hero D + disk render + v0.10.4 [#150 orphan-band](https://github.com/sleep2agi/agent-network/issues/150) + 100+ rounds of polish)) progressively added: `anet channel add telegram` one-shot bind, `claude-code-cli` runtime session-resume fix, `anet create --batch` bulk-agent primitive, `anet demo sci-team` / `pr-review` demos, `anet login` first-login guidance, `anet doctor --fix` ntok_ repair, envRef vendor credential storage ([#125](https://github.com/sleep2agi/agent-network/issues/125)), SDK high-concurrency retry-with-backoff + 300s timeout ([#132](https://github.com/sleep2agi/agent-network/issues/132)), runtime-first wizard ([#133](https://github.com/sleep2agi/agent-network/issues/133)), `anet project up/restart/down` cwd-wide orchestration ([#117](https://github.com/sleep2agi/agent-network/issues/117)), the `codex-direct-stdio` opt-in path ([#141](https://github.com/sleep2agi/agent-network/issues/141), enable via `ANET_CODEX_STDIO_DIRECT=1`), the per-server-daemon observability endpoint family ([#99](https://github.com/sleep2agi/agent-network/issues/99) `/api/server/:host/health` + `/api/server/:host/agents`) + per-agent `process_telemetry` ([#142](https://github.com/sleep2agi/agent-network/issues/142)), dashboard Hero 3 8 surfaces, and more.
+::: tip v0.8.x → v0.10.6 increments
+After the v0.8 main path, v0.8.2 / v0.8.3 / v0.9.0 / v0.9.1 / v0.9.2 / v0.10.0 / v0.10.1 / v0.10.2 / v0.10.3 / v0.10.4 / v0.10.5 / **v0.10.6** (current stable; four packages at npm `latest`: `agent-network 2.2.5` (v0.10.6 [#154 anet upgrade Option B detached spawn default](https://github.com/sleep2agi/agent-network/issues/154) + [#155 batch wizard silent-exit fix](https://github.com/sleep2agi/agent-network/issues/155) + v0.10.3 codex preset + v0.10.4 [#151 anet upgrade UX](https://github.com/sleep2agi/agent-network/issues/151) + v0.10.5 [#152 batch workdir wizard + #153 codex/claude skip API key](https://github.com/sleep2agi/agent-network/issues/152)) / `agent-node 2.4.2` (v0.10.2 Hero A disk + v0.10.3 codex-sdk gpt-5.5 + yolo flags) / `commhub-server 0.8.2` / `agent-network-dashboard 0.5.2` (v0.10.2 Hero D + disk render + v0.10.4 [#150 orphan-band](https://github.com/sleep2agi/agent-network/issues/150) + 100+ rounds of polish)) progressively added: `anet channel add telegram` one-shot bind, `claude-code-cli` runtime session-resume fix, `anet create --batch` bulk-agent primitive, `anet demo sci-team` / `pr-review` demos, `anet login` first-login guidance, `anet doctor --fix` ntok_ repair, envRef vendor credential storage ([#125](https://github.com/sleep2agi/agent-network/issues/125)), SDK high-concurrency retry-with-backoff + 300s timeout ([#132](https://github.com/sleep2agi/agent-network/issues/132)), runtime-first wizard ([#133](https://github.com/sleep2agi/agent-network/issues/133)), `anet project up/restart/down` cwd-wide orchestration ([#117](https://github.com/sleep2agi/agent-network/issues/117)), the `codex-direct-stdio` opt-in path ([#141](https://github.com/sleep2agi/agent-network/issues/141), enable via `ANET_CODEX_STDIO_DIRECT=1`), the per-server-daemon observability endpoint family ([#99](https://github.com/sleep2agi/agent-network/issues/99) `/api/server/:host/health` + `/api/server/:host/agents`) + per-agent `process_telemetry` ([#142](https://github.com/sleep2agi/agent-network/issues/142)), dashboard Hero 3 8 surfaces, and more.
 
 These increments **keep the same upgrade path as v0.7 → v0.8 main path** (the admin bootstrap + password management is a one-time migration; later incremental upgrades carry no extra auth steps). Full per-version increments: [changelog](/en/changelog).
 :::

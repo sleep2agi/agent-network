@@ -8,6 +8,46 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## v0.10.6 — **`anet upgrade` Option B detached spawn + `anet create --batch` wizard silent-exit 修**（2026-05-17）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.5` ← bumped（CLI upgrade + wizard fixes）
+- `@sleep2agi/agent-node@2.4.2` *(无变化，v0.10.3)*
+- `@sleep2agi/commhub-server@0.8.2` *(无变化)*
+- `@sleep2agi/agent-network-dashboard@0.5.2` *(无变化，v0.10.4)*
+
+::: warning Chicken-and-egg 升级注 — 仅本次需手装 1 次
+v0.10.4 的 [#151 Option A](https://github.com/sleep2agi/agent-network/issues/151) 只改了 verbiage（`anet upgrade` 显示 "⚠️ NEEDS MANUAL UPGRADE"），**chicken-and-egg deadlock 没解** —— 你的当前 `2.2.2 / 2.2.3 / 2.2.4` binary 跑 `anet upgrade` 还会沿用旧 "skipped (would replace running CLI)" 行为（这条 frozen 在 npm 上的老逻辑）。
+
+```bash
+npm install -g @sleep2agi/agent-network@2.2.5    # 只需一次手装
+anet --version                                    # 期望 v2.2.5
+```
+
+之后再有新版本（e.g. 2.2.6+），直接跑 `anet upgrade` 就会**自动 detached spawn** 升级，不再手装。
+:::
+
+### Fixes
+
+- **[#154](https://github.com/sleep2agi/agent-network/issues/154) `anet upgrade` Option B detached spawn 默认开启**（Vincent 5489+5490 catch）：之前用户跑 `anet upgrade` 看到 `anet (self): skipped (would replace the running CLI).` + `[anet] Done.` 以为成功，实际 anet binary 没变（chicken-and-egg deadlock —— Node 进程无法 in-place 替换自己 binary）。`bin/cli.ts:3873-3874` 改成 `spawn(forkScript, [], { stdio: "inherit", detached: true })` + `child.unref()` + 主进程 `process.exit(0)`，detached child 后台跑 `npm install`。新版本一两分钟后生效，无需用户 `--self` flag。
+- **[#155](https://github.com/sleep2agi/agent-network/issues/155) `anet create --batch` wizard silent-exit 修**（Vincent 5493 catch）：workdir mode `select()` 之后 `process.stdin` 状态变化，readline-based `ask()` helper 在 EOF 立即 return → 整个 wizard 在 `Node prefix` prompt **静默退出**（同 [#137 v0.9.2 preview.5 anet create regression](https://github.com/sleep2agi/agent-network/issues/137) 同根问题，不同代码路径再发）。Fix：post-select prompts 全 migrate 到 `inquirer.input()`，stdin handling 跟前面的 select 保持一致；catch fallback 保留 legacy `ask()` for non-TTY / 无 inquirer 环境。
+
+### Quality gates + lessons
+
+- **`feedback_no_skip_smoke_gate`**（Vincent 5493）—— v0.10.4 紧急 trust path **SUSPENDED**，Docker smoke gate 永不跳。
+- **`feedback_no_host_test_nodes`**（Vincent 5499-5502）—— 红线：测试节点全 Docker，不许 connect 本机 hub。
+- **`feedback_dist_obfuscated_use_source_grep`**（本 cycle 新增）—— `dist/bin/cli.js` 是 esbuild bundled + obfuscated（rotating string-table, identifiers mangled, string literals encoded），静态 grep 对 dist 完全失效。Code-path verify 一律 grep `bin/cli.ts` source（HEAD = preview build source）。
+
+### Cycle 11 stats
+
+- **16 累计 `@latest` publish**（v0.9.0 → v0.10.6）：0 split-brain / 0 rollback / 0 retry
+- **2026-05-17 当日 v0.10.x**: v0.10.1 + v0.10.2 + v0.10.3 + v0.10.4 + v0.10.5 + **v0.10.6** = **6 ships in ~9 hours**（audit-first cadence）
+- **9 Vincent telegram catch 全闭环**：[5444 (Install/Upgrade 分块 R697)](#) + 5447+5448 (#149) + 5453 (#150) + 5462+5472 (#151) + 5477 (#152) + 5481+5485 (#153) + 5489+5490 (#154) + 5493 (#155) + 5499-5502 (red-line SOPs)
+
+详见 [release v0.10.6](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.6)。
+
+---
+
 ## v0.10.5 — **`anet create --batch` wizard 双修**（2026-05-17）✅ stable
 
 **版本同步**（npm `latest` tag）：
