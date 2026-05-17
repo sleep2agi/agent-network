@@ -41,7 +41,7 @@
 **Hero A Phase 2 实际是 "complete the last 10%", 不是 greenfield daemon**:
 
 1. **Agent-node host-telemetry.ts add disk** (~30 LOC, ~30min):
-   - Linux: `statfs(2)` via `child_process.exec('df -B1 / | tail -1')` 或 `import fs.statvfsSync`
+   - Linux/macOS: `execFileSync("df", ["-k", "/"])` (POSIX-standard, unified KB parse, no shell pipe per repo shell audit)
    - macOS: same `df` approach
    - Windows: `wmic logicaldisk` 或 mark disk_*_gb=null (graceful)
 2. **N站马 dashboard render alert_level** (~1d if not done, verify first):
@@ -116,7 +116,7 @@ LOC = N站马 lane估算.
 
 | OS | CPU | Mem | Disk | 通过 |
 |---|---|---|---|---|
-| Linux | `/proc/loadavg` | `/proc/meminfo` | `df -B1` | ✅ |
+| Linux | `/proc/loadavg` | `/proc/meminfo` | `df -k` | ✅ |
 | macOS | `os.loadavg()` | `os.totalmem()` + `os.freemem()` (approx) | `df -k` + `* 1024` | ✅ |
 | Windows | `null` (loadavg 0-coerced) | `os.totalmem()` | `null` (graceful) | ⚠️ disk + cpu 缺数据但 graceful |
 
@@ -143,7 +143,7 @@ Single Docker case sufficient (~30min):
 
 ## 5. Open questions
 
-1. macOS df -k vs Linux df -B1: 是否 worth unified `df -k` to simplify? (yes — same parse logic)
+1. ~~macOS df -k vs Linux df -B1~~ → **v2 closed**: unified on `df -k` POSIX-standard, both platforms KB-based, single parse path. No platform branch within success path.
 2. Windows disk 是否值得 v0.11.0 内 implement (`wmic`)? 当前用户 0 Windows (agent-node), 推 v0.11.x follow-up.
 3. alert_level 阈值 (80% / 60% / 0.5GB / 1GB / 5GB) 现 hardcoded — 是否要 config 化? 当前推 hardcode, 若用户 surface 再加 v0.11.x.
 

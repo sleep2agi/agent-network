@@ -18,6 +18,7 @@
 // cache is mostly defensive against bursts (working/idle transitions in
 // quick succession after a task completes).
 import { readFileSync } from "fs";
+import { execFileSync } from "child_process";
 import {
   hostname as osHostname,
   loadavg as osLoadavg,
@@ -36,6 +37,9 @@ export interface HostTelemetry {
   mem_total_gb: number | null;
   mem_used_gb: number | null;
   mem_avail_gb: number | null;
+  disk_total_gb: number | null;
+  disk_used_gb: number | null;
+  disk_avail_gb: number | null;
 }
 
 let _cache: { ts: number; value: HostTelemetry } | null = null;
@@ -105,6 +109,34 @@ function readMemoryStats(): MemStats {
   }
 }
 
+interface DiskStats { total: number | null; used: number | null; avail: number | null }
+
+// RFC-014 §2.1 — disk telemetry via execFileSync('df', ['-k', '/']).
+// `-k` is POSIX-standard and reports KB on both Linux and macOS, so the
+// parse logic is unified — no `-B1` (Linux-only) vs `-k` (macOS) divergence.
+// execFileSync (not execSync + shell pipe) per repo shell-pipe audit hygiene.
+// Windows: graceful null (dashboard shows "—" rather than misleading 0).
+function readDiskStats(): DiskStats {
+  if (osPlatform() === "linux" || osPlatform() === "darwin") {
+    try {
+      const out = execFileSync("df", ["-k", "/"], { encoding: "utf-8", timeout: 1000 });
+      // df output: header line + one data row. Format:
+      //   <fs> <1K-blocks> <used> <available> <use%> <mountpoint>
+      // Take last non-empty line to skip the header.
+      const lines = out.trim().split(/\n/);
+      const lastLine = lines[lines.length - 1] || "";
+      const fields = lastLine.split(/\s+/);
+      const totalKb = parseInt(fields[1], 10);
+      const usedKb  = parseInt(fields[2], 10);
+      const availKb = parseInt(fields[3], 10);
+      if (Number.isFinite(totalKb) && Number.isFinite(usedKb) && Number.isFinite(availKb)) {
+        return { total: totalKb * 1024, used: usedKb * 1024, avail: availKb * 1024 };
+      }
+    } catch { /* fall through to null */ }
+  }
+  return { total: null, used: null, avail: null };
+}
+
 const toGb = (bytes: number | null): number | null =>
   bytes == null ? null : Math.round((bytes / (1024 ** 3)) * 10) / 10;
 
@@ -121,6 +153,7 @@ export function getHostTelemetry(): HostTelemetry {
   const now = Date.now();
   if (_cache && now - _cache.ts < CACHE_MS) return _cache.value;
   const mem = readMemoryStats();
+  const disk = readDiskStats();
   const value: HostTelemetry = {
     hostname: osHostname() || "unknown",
     ip: firstNonInternalIPv4(),
@@ -129,6 +162,9 @@ export function getHostTelemetry(): HostTelemetry {
     mem_total_gb: toGb(mem.total),
     mem_used_gb: toGb(mem.used),
     mem_avail_gb: toGb(mem.avail),
+    disk_total_gb: toGb(disk.total),
+    disk_used_gb: toGb(disk.used),
+    disk_avail_gb: toGb(disk.avail),
   };
   _cache = { ts: now, value };
   return value;
