@@ -6513,9 +6513,43 @@ async function createBatchWizardCommand() {
     }
   }
 
-  // 4. Prefix + count
-  const prefix = opts.prefix || await ask("Node prefix (e.g. 工程师)", "工程师");
-  const countRaw = parseInt(opts.count || await ask("Count (1-50)", "5"), 10);
+  // 4. Prefix + count — #155 (Vincent 5493 hit wizard exit here)
+  //
+  // After the inquirer select() prompt for workdir mode (above), @inquirer/
+  // prompts leaves process.stdin in a state where the readline-based ask()
+  // returns immediately at EOF and the process silently exits — the EXACT
+  // same #137 (preview.5) pattern. The fix is to use inquirer input() for
+  // all post-select prompts so stdin handling stays uniform with the select
+  // that came before.
+  let prefix: string;
+  let countStr: string;
+  let description: string;
+  try {
+    const { input: inquirerInput } = await import("@inquirer/prompts");
+    prefix = opts.prefix || (await inquirerInput({
+      message: "Node prefix (e.g. 工程师)",
+      default: "工程师",
+    })).trim() || "工程师";
+    countStr = opts.count || (await inquirerInput({
+      message: "Count (1-50)",
+      default: "5",
+    })).trim() || "5";
+    // 5. Description (systemPrompt)
+    // parseOpts maps a valueless/empty `--description` (e.g. `--description ""`)
+    // to the sentinel string "true"; treat that as "not provided" (#93).
+    const descFlag = opts.description === "true" ? "" : opts.description;
+    description = descFlag || (await inquirerInput({
+      message: "Description / system prompt (空 → no prompt)",
+      default: "",
+    })).trim();
+  } catch {
+    // Non-TTY / inquirer unavailable — fall back to legacy readline ask().
+    prefix = opts.prefix || await ask("Node prefix (e.g. 工程师)", "工程师");
+    countStr = opts.count || await ask("Count (1-50)", "5");
+    const descFlag = opts.description === "true" ? "" : opts.description;
+    description = descFlag || await ask("Description / system prompt (空 → no prompt)", "");
+  }
+  const countRaw = parseInt(countStr, 10);
   const count = Math.max(1, Math.min(50, Number.isFinite(countRaw) ? countRaw : 5));
   if (count !== countRaw) {
     console.log(`  [anet] Count ${countRaw} → clamped to [1,50] = ${count}`);
@@ -6523,12 +6557,6 @@ async function createBatchWizardCommand() {
   if (count > 20) {
     console.warn(`  [anet] Warning: count=${count} > 20 may exceed memory/ulimit on a developer laptop. Recommended ≤ 20 unless tested.`);
   }
-
-  // 5. Description (systemPrompt)
-  // parseOpts maps a valueless/empty `--description` (e.g. `--description ""`)
-  // to the sentinel string "true"; treat that as "not provided" (#93).
-  const descFlag = opts.description === "true" ? "" : opts.description;
-  const description = descFlag || await ask("Description / system prompt (空 → no prompt)", "");
 
   const leaderAlias = opts["leader-alias"] || "";
   closeRL();
