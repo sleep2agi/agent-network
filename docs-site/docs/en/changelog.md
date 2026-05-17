@@ -8,6 +8,57 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
 
+## v0.10.8 — **Dashboard Servers panel UI copy fix + TopoGraph density-tier polish** (2026-05-17) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.6` *(unchanged, v0.10.7)*
+- `@sleep2agi/agent-node@2.4.2` *(unchanged)*
+- `@sleep2agi/commhub-server@0.8.2` *(unchanged)*
+- `@sleep2agi/agent-network-dashboard@0.5.3` ← bumped (UI copy + Playwright attrs + polish fold-in)
+
+### Fix — [#157](https://github.com/sleep2agi/agent-network/issues/157) Dashboard Servers panel UI copy fix (Root cause #1)
+
+Vincent 5560 caught this in real testing (with dashboard screenshot): the Servers panel was rendering `agent rollup pending hub ≥ 0.8.2-preview` / `disk metric pending hub ≥ 0.8.2-preview` for every hub, even though every production hub is already at `≥ 0.8.2`. **The copy was outdated and misleading** — for a moment Vincent thought the version dashboard data was completely broken.
+
+**Root cause #1 (this patch)**: ServersDrawer UI carried placeholder text introduced during the 0.8.2 upgrade window. 0.8.2 has long since shipped, but the placeholder text was never removed, so it kept rendering "pending" for `≥ 0.8.2` hubs and led users to believe the hub data was missing.
+
+**Implementation** (`app/components/ServersDrawer.tsx`):
+
+```diff
+- <div ...>agent rollup pending hub ≥ 0.8.2-preview</div>
+- <div ...>disk metric pending hub ≥ 0.8.2-preview</div>
++ <div ... data-server-agents-missing="true">agent rollup not reported by hub</div>
++ <div ... data-server-disk-missing="true">disk metric not reported by hub</div>
+```
+
+The new copy accurately says "this hub didn't report it right now" instead of implying the hub version is too old. The new `data-server-agents-missing` / `data-server-disk-missing` Playwright hooks enable the next e2e round to validate hub-side telemetry coverage.
+
+::: info Root causes #2 + #3 located, deferred
+- **#2** (v0.10.9 candidate): missing dedupe when one hostname appears multiple times can double-count servers — the dashboard team's fix is backed up at `/tmp/.../fix2-dedupe-v0.10.9.patch`.
+- **#3** (v0.11.0 candidate): `status=offline` vs telemetry mismatch (telemetry still reports but SSE `last_seen` has timed out) — needs system-level status reconciliation.
+:::
+
+### Polish fold-in — TopoGraph density-tier (R502, purely additive)
+
+Dashboard team commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) (0.5.3-preview.16) — the canvas state attribute `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` exposes a 12th observable testing surface. Tier boundaries (sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+) line up with the R109 dense-layout collapse gate. **Purely additive, no UX change**. Paired with the R469 numeric counts, e2e selectors now have a complete canvas-state snapshot.
+
+### Quality gates + lessons
+
+- **Source-grep verify**: the lead's `grep -rh "not reported by hub"` hits + the legacy copy only survives in JSDoc comments ✅
+- **Docker preview smoke**: `docker run --rm node:24-slim sh -c "npm install -g @sleep2agi/agent-network-dashboard@0.5.3-preview.15 && grep..."` ✅
+- **Reuses [[feedback_dist_obfuscated_use_source_grep]]**: JSX copy verification works at the `app/components/ServersDrawer.tsx` source level — no dependency on the `.next/server` bundled output
+- **v0.10.x patch density of 8 patches in one day** validates that the audit-first cadence is sustainable
+
+### Cycle 13 stats
+
+- **18 cumulative `@latest` publishes** (v0.9.0 → v0.10.8): 0 split-brain / 0 rollback / 0 retry
+- **2026-05-17 v0.10.x same-day ships**: v0.10.1-8 = **8 ships in ~11 hours** (audit-first cadence)
+- Vincent 5560 catch + Vincent [#158 LOCKED directive](https://github.com/sleep2agi/agent-network/issues/158) closed out in the same cycle
+
+See the [v0.10.8 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.8).
+
+---
+
 ## v0.10.7 — **codex-sdk batch path yolo flags parity** (2026-05-17) ✅ stable
 
 **Version alignment** (npm `latest` tag):

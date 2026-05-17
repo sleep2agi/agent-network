@@ -8,6 +8,57 @@
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
+## v0.10.8 — **Dashboard Servers 面板 UI 文案修 + TopoGraph density tier polish**（2026-05-17）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.6` *(无变化，v0.10.7)*
+- `@sleep2agi/agent-node@2.4.2` *(无变化)*
+- `@sleep2agi/commhub-server@0.8.2` *(无变化)*
+- `@sleep2agi/agent-network-dashboard@0.5.3` ← bumped（UI copy + Playwright attrs + polish fold-in）
+
+### Fix — [#157](https://github.com/sleep2agi/agent-network/issues/157) Dashboard Servers 面板 UI 文案修正（Root cause #1）
+
+Vincent 5560 实测 catch（附 dashboard 截图）：Servers 面板对每台 hub 显示 `agent rollup pending hub ≥ 0.8.2-preview` / `disk metric pending hub ≥ 0.8.2-preview`，但生产 hub 已经全部 ≥ 0.8.2，**文案过时且误导**，让 Vincent 一度以为版本控制台数据完全错误。
+
+**Root cause #1（本 patch）**：ServersDrawer UI 早期为 0.8.2 升级 window 而埋的占位文字。0.8.2 早已上线，但占位文字未删，对 ≥ 0.8.2 hub 仍显示 "pending"，误导用户认为 hub 数据缺失。
+
+**Implementation**（`app/components/ServersDrawer.tsx`）：
+
+```diff
+- <div ...>agent rollup pending hub ≥ 0.8.2-preview</div>
+- <div ...>disk metric pending hub ≥ 0.8.2-preview</div>
++ <div ... data-server-agents-missing="true">agent rollup not reported by hub</div>
++ <div ... data-server-disk-missing="true">disk metric not reported by hub</div>
+```
+
+文案精准反映"该 hub 此刻未上报"语义，不再 imply 版本不够。新增 `data-server-agents-missing` / `data-server-disk-missing` Playwright 钩子供下一轮 e2e 验证 hub-side telemetry coverage。
+
+::: info Root cause #2 + #3 已定位但 defer
+- **#2**（v0.10.9 候选）：同 hostname 多实例时 dedupe 缺失，可能 double-count 服务器 —— N 站牛 fix backed up `/tmp/.../fix2-dedupe-v0.10.9.patch`
+- **#3**（v0.11.0 候选）：`status=offline` 与 telemetry 报告 mismatch（telemetry 仍上报但 SSE last_seen 超时）—— 系统级 status 协调
+:::
+
+### Polish fold-in — TopoGraph density tier（R502，纯 additive）
+
+N 站马 commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) （0.5.3-preview.16）—— Canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface。Tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 R109 dense-layout collapse gate 对齐。**纯 additive，无 UX 改变**，配 R469 numeric counts 提供 e2e selector 完整 canvas state snapshot 能力。
+
+### Quality gates + lessons
+
+- **Source-grep verify**：通信龙 `grep -rh "not reported by hub"` 命中 + 旧文案只在 JSDoc 注释 ✅
+- **Docker preview 实测**：`docker run --rm node:24-slim sh -c "npm install -g @sleep2agi/agent-network-dashboard@0.5.3-preview.15 && grep..."` ✅
+- **沿用 [[feedback_dist_obfuscated_use_source_grep]]**：JSX 文案 verify 在 `app/components/ServersDrawer.tsx` source level，不依赖 `.next/server` bundled output
+- **v0.10.x patch density 单日 8 patch** 验证 audit-first cadence 可持续
+
+### Cycle 13 stats
+
+- **18 累计 `@latest` publish**（v0.9.0 → v0.10.8）：0 split-brain / 0 rollback / 0 retry
+- **2026-05-17 当日 v0.10.x**：v0.10.1-8 = **8 ships in ~11 hours**（audit-first cadence）
+- Vincent 5560 catch + Vincent [#158 LOCKED directive](https://github.com/sleep2agi/agent-network/issues/158) 同 cycle 闭环
+
+详见 [release v0.10.8](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.8)。
+
+---
+
 ## v0.10.7 — **codex-sdk batch path yolo flags parity**（2026-05-17）✅ stable
 
 **版本同步**（npm `latest` tag）：
