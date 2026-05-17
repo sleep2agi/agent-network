@@ -1,10 +1,16 @@
 # RFC-015 — Hero B: #114 Agent Token 使用量 UI (telemetry 接续)
 
 **作者**: 通信SDK马
-**状态**: Draft (待 通信龙 / 通信牛 / Vincent review)
+**状态**: Draft v2 (通信牛 first pass REVISION 3 blocker 修)
+**版本**: v1 初稿 → v2 (通信牛 [comment 4468752760](https://github.com/sleep2agi/agent-network/issues/114#issuecomment-4468752760) 3 blocker 修)
 **关联 issue**: #114 (Agent Token UI), #142 (process_telemetry — shipped v0.10.0), RFC-014 (Hero A daemon Phase 2)
 **关联 ship**: v0.11.0 candidate
 **作者预 finding**: agent-node side ~70% 已 ready (token 数据已采), server side + dashboard side 是真 gap
+
+> **v2 变更说明** (通信牛 first pass REVISION):
+> - **B1 immediate flush**: token_usage_delta 不能等 3min heartbeat. v2 改为 turn completion 后立即 flush via dedicated mode (§2.1 wire 改).
+> - **B2 idempotency**: 加 `usage_event_id` stable key + server-side `agent_token_usage` 表 `UNIQUE(network_id, usage_event_id)` 防重复计费.
+> - **B3 placeholder pricing**: v1 wire **drop `cost_usd` field** — agent 只发 tokens. Cost estimate 移到 dashboard side lazy compute via vendor pricing endpoint (v2 阶段加真价格). v1 ship 0 误导风险.
 
 ## 1. 背景 + 现状审计
 
@@ -38,83 +44,138 @@ per Vincent /goal 5410 + 通信龙 5413 dispatch — "Agent Token 使用量 UI",
 
 ## 2. 设计
 
-### 2.1 Wire protocol — agent → commhub
+### 2.1 Wire protocol — agent → commhub (v2 redesign per B1+B2)
 
-**Option 1 — Extend `report_status` payload** (推荐, 跟 #142 process_telemetry 同模式):
+**v1 误判**: 用 heartbeat (3min) 携带 `token_usage_delta` 会丢/延 (B1 通信牛 catch). 跨 heartbeat 重试无幂等 key 会重复计费 (B2 通信牛 catch).
+
+**v2 设计**: turn completion 后**立即** flush, 携带 `usage_event_id` 幂等键.
+
+**Wire**: new MCP/REST endpoint **`POST /api/agent/token_usage`** (跟 `report_status` 分开, 因为 cadence + 幂等语义 不同):
 
 ```typescript
-// agent-node report_status body 加字段:
+// POST /api/agent/token_usage body:
 {
-  ...,
-  process_telemetry: { rss_mb, cpu_pct, uptime_seconds, in_flight_count, ... },
-  token_usage_delta: {                          // 新, 自上次 report 以来的累计
-    input_tokens: number,
-    output_tokens: number,
-    cost_usd: number | null,                    // 来自 claude SDK; codex 不报 cost
-    turns: number,
-    vendor: "claude-sonnet-4-6" | "gpt-5.4" | "intern-s2-preview" | ...,
+  usage_event_id: string,    // 幂等键, agent-side: `${resume_id}:${turn_id}:${seq}`
+  resume_id: string,
+  task_id?: string,          // 关联 inbox/tasks 表 (per-task drill-down possible)
+  network_id: string,
+  vendor: string,            // "claude-sonnet-4-6" | "gpt-5.4" | "intern-s2-preview" | ...
+  model?: string,            // 可选 — vendor 不能区分 model 时填 (e.g. gpt-5.4-mini vs gpt-5.4)
+  input_tokens: number,      // delta this turn
+  output_tokens: number,
+  turns: number,             // 通常 1 per call, batching 可 >1
+  ts: number,                // agent-side timestamp (ms epoch)
+  // v2 注: 不发 cost_usd. Cost 由 dashboard side lazy compute via
+  // vendor_pricing endpoint (per B3, 防 placeholder 误导用户).
+}
+```
+
+**Agent-side flush points** (cli.ts 改):
+
+| Runtime | Flush location | Token source |
+|---|---|---|
+| Claude SDK | After `processWithClaude` returns final response | `m.usage` (cli.ts:758) |
+| Codex stdio | After `turn/completed` notification fires | `usage` from event (cli.ts:890) |
+| Claude-code-cli | Not applicable (binary doesn't expose usage stably) | skip — log only |
+
+Fire-and-forget POST (don't block agent reply); failure logs warn, doesn't retry (per-task granularity, occasional miss acceptable).
+
+### 2.1.1 Idempotency design (v2 per B2)
+
+`usage_event_id` format: `${resume_id}:${turn_id}:${seq}` where:
+- `resume_id`: agent identity (stable per agent process)
+- `turn_id`: vendor's turn/response identifier (Claude `m.session_id` or Codex `turn.id`)
+- `seq`: 0-indexed within turn (for multi-call turns or chunked responses; usually `0`)
+
+Server-side schema:
+
+```sql
+CREATE TABLE agent_token_usage (
+  usage_event_id TEXT NOT NULL,
+  network_id TEXT NOT NULL,
+  resume_id TEXT NOT NULL,
+  task_id TEXT,
+  vendor TEXT NOT NULL,
+  model TEXT,
+  input_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,
+  turns INTEGER NOT NULL DEFAULT 1,
+  ts INTEGER NOT NULL,            -- agent-supplied
+  recorded_at INTEGER NOT NULL,   -- server-supplied
+  UNIQUE(network_id, usage_event_id)
+);
+CREATE INDEX agent_token_usage_resume_idx ON agent_token_usage(network_id, resume_id, ts);
+```
+
+`INSERT OR IGNORE` on the unique constraint — duplicate events from network retry silently dedup.
+
+### 2.2 Server-side schema (v2)
+
+See §2.1.1 above for `agent_token_usage` table DDL.
+
+**Aggregation endpoint**: `GET /api/network/:network_id/token_usage?window=1h`:
+
+```json
+{
+  "window_start_ms": 1747200000000,
+  "window_end_ms":   1747203600000,
+  "by_agent": {
+    "alias_or_resume_id": {
+      "vendor_breakdown": {
+        "claude-sonnet-4-6": { "input_tokens": 12340, "output_tokens": 5671, "turns": 8 },
+        "gpt-5.4":           { "input_tokens": 2100,  "output_tokens": 890,  "turns": 3 }
+      },
+      "totals": { "input_tokens": 14440, "output_tokens": 6561, "turns": 11 }
+    }
+  },
+  "network_totals": { "input_tokens": ..., "output_tokens": ..., "turns": ... }
+}
+```
+
+**No cost field in response** (v2 per B3) — dashboard side lazy-computes via separate pricing endpoint (§2.3).
+
+### 2.3 Dashboard side (N站马 lane) — v2 split: tokens vs pricing
+
+**Cost compute moved to dashboard** (per B3). Server provides:
+
+1. Token data: `/api/network/:network_id/token_usage` (above)
+2. Pricing data: `GET /api/vendor_pricing` (new) — returns vendor pricing table, **explicitly flagged**:
+
+```json
+{
+  "version": 1,
+  "last_updated_ms": 1747200000000,
+  "source": "placeholder (not verified)",
+  "warning": "These prices are placeholder estimates and may not match current vendor billing. Verify against vendor invoice before relying on cost figures.",
+  "vendors": {
+    "claude-sonnet-4-6":   { "input_per_1m_usd": null, "output_per_1m_usd": null, "verified": false },
+    "claude-opus-4-7":     { "input_per_1m_usd": null, "output_per_1m_usd": null, "verified": false },
+    "gpt-5.4":             { "input_per_1m_usd": null, "output_per_1m_usd": null, "verified": false },
+    "intern-s2-preview":   { "input_per_1m_usd": 0,    "output_per_1m_usd": 0,    "verified": true, "note": "free preview" }
   }
 }
 ```
 
-**Option 2 — Standalone `agent:token_usage` event** (per-task, finer granularity):
+**v1 ship strategy** (per B3): all non-free prices `null` + `verified: false`. Dashboard shows `—` (em-dash) for cost where price is `null`. Once Vincent / 工程马 confirm real prices, `verified: true` + actual numbers go in, no schema change.
 
-```typescript
-// 新 commhub MCP/REST endpoint: POST /api/agent/token_usage
-{ resume_id, task_id?, input_tokens, output_tokens, cost_usd, vendor, ts }
-```
-
-**Recommend Option 1** — fewer endpoints, aligns with existing #142 telemetry pattern, server-side aggregation across heartbeat intervals (3min) acceptable for cost-dashboard refresh rate.
-
-### 2.2 Server-side schema
-
-`agent_telemetry` table extend (or new `agent_token_usage` 累计表):
-
-```sql
-ALTER TABLE agent_telemetry
-  ADD COLUMN token_input_delta INTEGER,
-  ADD COLUMN token_output_delta INTEGER,
-  ADD COLUMN token_cost_delta_usd REAL,
-  ADD COLUMN token_vendor TEXT;
-```
-
-(Or simpler — store in sessions row as running totals; agent-side delta computation each heartbeat.)
-
-Endpoint: `/api/server/:host/agents` 加 `token_usage_total` (累计) + `token_usage_rate` (per minute window).
-
-### 2.3 Dashboard side (N站马 lane)
-
-- per-agent token usage chip
-- per-network rate (rolling 1h)
-- cost estimate using vendor pricing table
-
-**Vendor pricing table** — config in `commhub-server/src/vendor-pricing.ts` (server-side, single source of truth, sync to dashboard via endpoint):
-
-```typescript
-export const VENDOR_PRICING: Record<string, { input_per_1m: number; output_per_1m: number }> = {
-  "claude-sonnet-4-6":   { input_per_1m: 3,    output_per_1m: 15 },     // USD
-  "claude-opus-4-7":     { input_per_1m: 15,   output_per_1m: 75 },
-  "gpt-5.4":             { input_per_1m: 5,    output_per_1m: 20 },     // placeholder
-  "intern-s2-preview":   { input_per_1m: 0,    output_per_1m: 0 },      // free preview
-  ...
-};
-```
-
-(Real prices need verify; current values are placeholders — Vincent / 工程马 lane to confirm.)
+Dashboard responsibility:
+- Token usage chips (always available from `/api/network/.../token_usage`)
+- Cost chips only when `verified: true` for that vendor (show "Cost estimated using verified pricing")
+- Otherwise: "Cost: — (pricing not verified yet)"
 
 ## 3. 实施 LOC + ETA
 
 | 文件 | LOC | ETA |
 |---|---|---|
-| agent-node src/cli.ts — token delta tracking + report_status payload extension | ~25 | 30min |
-| commhub-server src/db.ts — agent_telemetry migration | ~10 | 15min |
-| commhub-server src/tools.ts — accept token_usage_delta field | ~10 | 15min |
-| commhub-server src/index.ts — /api/server/:host/agents token aggregation | ~20 | 25min |
-| commhub-server src/vendor-pricing.ts — placeholder pricing table + endpoint | ~25 | 30min |
-| 测试 Docker chain smoke (rename + telemetry both PASS) | — | 45min |
-| 文档 (CHANGELOG + this RFC fold-in) | — | 15min |
-| **SDK马 own**: | **~90 LOC** | **~3h** |
-| N站马 lane dashboard | depends | ~1d |
+| agent-node src/cli.ts — token flush on turn completion + `usage_event_id` generation | ~35 | 45min |
+| commhub-server src/db.ts — `agent_token_usage` table migration | ~15 | 15min |
+| commhub-server src/index.ts — `POST /api/agent/token_usage` endpoint (INSERT OR IGNORE) | ~20 | 25min |
+| commhub-server src/index.ts — `GET /api/network/:network_id/token_usage?window=` aggregation | ~30 | 30min |
+| commhub-server src/vendor-pricing.ts — pricing table (all nulls + verified flag) + endpoint | ~25 | 30min |
+| Docker smoke + idempotency test (dup event → single row) | — | 45min |
+| 文档 (CHANGELOG + RFC fold-in) | — | 15min |
+| **SDK马 own (v2)**: | **~125 LOC** | **~3.5h** |
+| N站马 lane dashboard (tokens + cost split) | depends | ~1d |
 
 **Total SDK马 own**: ~3h (vs initial 2-3d framing — beat ~5-7x). N站马 parallel.
 
@@ -137,19 +198,22 @@ export const VENDOR_PRICING: Record<string, { input_per_1m: number; output_per_1
 
 token usage 是 additive feature — 旧 agent 不发字段, server 缺字段 graceful null. 0 regression risk. 跟 RFC-013 cross-version 矩阵同样 4-case 简单退化 (新+新 = 全功能, 其他 fallback null/disabled). 不要单独 cross-version matrix RFC, fold to RFC-014/015 简短 §3 inline.
 
-## 5. Open questions
+## 5. Open questions (v2 closed/redirected)
 
-1. **Vendor pricing table 来源**: 硬编码 commhub-server 还是 dashboard 远拉? 推 server-side single source of truth, 但价格变更 需 server 升级 — 也许 admin endpoint 让 user 自维护? — v0.11.0 内 推 hardcode + admin-edit-via-config-file fallback.
-2. **Delta vs running-total**: agent 发 delta (自上次 heartbeat) vs running-total (启动以来)? Delta 简单, server-side 累加; running-total 易丢 (agent 重启清零). 推 delta + server 累加, agent 重启不影响累计.
-3. **Cost = USD only**? 还是 multi-currency? — v0.11.0 推 USD only, multi-currency post-v0.11.x.
-4. **per-task granularity**: 当前 design 是 heartbeat-aggregated delta. 若 user 要看 per-task cost, 需 Option 2 (separate endpoint). — v0.11.0 推 aggregated only, per-task 后续 fold.
+1. ~~Vendor pricing table 来源~~ → **v2 closed**: server `/api/vendor_pricing` endpoint hardcoded with `verified: false` + nulls until Vincent / 工程马 confirm. Admin-edit fallback v0.11.x.
+2. ~~Delta vs running-total~~ → **v2 obsolete**: 改用 per-event flush (B1 fix), 不再 delta. `usage_event_id` 唯一键防重计 (B2 fix), running-total 由 server aggregation 算.
+3. **Cost = USD only**? → 推 USD only v0.11.0, multi-currency post-v0.11.x.
+4. ~~per-task granularity~~ → **v2 has it**: `agent_token_usage.task_id` field 支持 per-task drill-down query (no separate endpoint needed).
+5. **Vincent / 工程马 confirm pricing 时机** (new): v1 ship 时 all `null` + dashboard shows "—". 后续 PR 单独更新 pricing.ts, 无 schema 变化, server 重启即生效. 推 issue #114-followup track it.
 
 ## 6. Status
 
-✅ Audit done — agent-node 70% ready, server schema 0%, dashboard 0%.
-✅ Wire protocol picked (extend report_status, Option 1).
-⚠️ Vendor pricing table — placeholder, 等 Vincent / 工程马 confirm 真实价格.
+✅ Audit done — agent-node 70% ready (data already extracted), server schema 0%, dashboard 0%.
+✅ Wire protocol v2: per-event flush via `POST /api/agent/token_usage` (separate from heartbeat).
+✅ Idempotency: `usage_event_id` (`resume_id:turn_id:seq`) + `UNIQUE(network_id, usage_event_id)` server-side.
+✅ Cost split: tokens (always-on, ground-truth) vs pricing (lazy dashboard compute, v1 all-nulls + verified-flag).
+⚠️ Vendor pricing fill-in: tracked as #114-followup, no schema change needed.
 
-**Status**: Draft, awaiting 通信龙 ack + 通信牛 review + Vincent telegram ack. 跟 RFC-014 同 review batch.
+**Status**: Draft v2 (通信牛 first pass REVISION 3 blocker 修), awaiting 通信牛 second pass + 通信龙/Vincent ack. 跟 RFC-013 v5 + RFC-014 v2 fold-in v0.11.0 batch.
 
 **作者**: 通信SDK马 · 2026-05-17
