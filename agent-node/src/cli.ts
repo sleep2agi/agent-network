@@ -51,7 +51,7 @@ for (let i = 0; i < argv.length; i++) {
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
   --runtime <type>    claude-agent-sdk (default) | codex-sdk
-  --model <name>      AI 模型 (codex 默认: gpt-5.4, claude-agent-sdk 默认: claude-sonnet-4-6)
+  --model <name>      AI 模型 (codex 默认: gpt-5.5, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
   --max-turns <n>     每任务最大轮次 (default: 50)
@@ -860,12 +860,18 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
 
   if (!codexThread) {
     const codex = new Codex({ config: CODEX_CONFIG });
-    const codexModel = MODEL || "gpt-5.4";
+    const codexModel = MODEL || "gpt-5.5";
+    // #149 (Vincent 5448) — yolo flags now read from config.json `flags` block
+    // (written by anet wizard for codex-sdk runtime), fall back to hardcoded
+    // defaults if config flags absent. This keeps current runtime behavior
+    // identical (always yolo for codex-sdk) while making the permission
+    // posture visible + per-node overridable.
+    const cfgFlags = (fileConfig?.flags || {}) as Record<string, unknown>;
     const codexOpts = {
-      skipGitRepoCheck: true,
-      approvalPolicy: "never" as const,
+      skipGitRepoCheck: cfgFlags.skipGitRepoCheck === false ? false : true,
+      approvalPolicy: (typeof cfgFlags.approvalPolicy === "string" ? cfgFlags.approvalPolicy : "never") as any,
       model: codexModel,
-      sandboxMode: "danger-full-access" as const,
+      sandboxMode: (typeof cfgFlags.sandboxMode === "string" ? cfgFlags.sandboxMode : "danger-full-access") as any,
       modelReasoningEffort: "low" as const,
     };
     if (SESSION_ID) {
@@ -876,7 +882,7 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
     }
   }
 
-  const codexModelName = MODEL || "gpt-5.4";
+  const codexModelName = MODEL || "gpt-5.5";
   log(`[codex] model=${codexModelName} thread=${codexThread?.id || "new"}`);
   const promptText = task; // developer_instructions 已包含行为规则
   // Codex SDK 支持 structured input: text + local_image
@@ -917,7 +923,7 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
     codexThread = codex.startThread({
       skipGitRepoCheck: true,
       approvalPolicy: "never" as const,
-      model: MODEL || "gpt-5.4",
+      model: MODEL || "gpt-5.5",
       sandboxMode: "danger-full-access" as const,
       modelReasoningEffort: "low" as const,
     });
@@ -967,7 +973,7 @@ async function processWithCodexStdio(task: string, _from: string, images?: strin
     // listed, so if a future codex version renames any of these the next
     // smoke run will pinpoint exactly which one.
     const opts: Record<string, unknown> = {
-      model: MODEL || "gpt-5.4",
+      model: MODEL || "gpt-5.5",
       approvalPolicy: "on-request",
       sandboxPolicy: { type: "dangerFullAccess" },
     };
@@ -1401,7 +1407,7 @@ async function connectSSE() {
 // ── 启动 ──
 log(`启动`);
 log(`  runtime: ${RUNTIME_LABEL}`);
-log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.4" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
+log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.5" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 
 // Validate token + show user/network info

@@ -1102,7 +1102,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   // (MiniMax/DeepSeek/GLM/Kimi/Anthropic). claude-code-cli only works for Max/Pro
   // subscribers and was a poor default that left non-subscribers with broken nodes.
   const runtime = normalizeRuntime(opts.runtime || "claude-agent-sdk");
-  const defaultModel = runtime === "codex-sdk" ? "gpt-5.4" : undefined;
+  const defaultModel = runtime === "codex-sdk" ? "gpt-5.5" : undefined;
 
   const profile: Profile = {
     anet_version: "0.1.0",
@@ -1120,6 +1120,16 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       dangerouslySkipPermissions: true,
       ...(runtime === "claude-code-cli" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
       ...(opts["max-turns"] ? { maxTurns: parseInt(opts["max-turns"]) } : {}),
+      // #149 (Vincent 5448) fast/yolo mode for codex-sdk runtime. agent-node's
+      // processWithCodex already hardcodes these defaults, but writing them
+      // explicitly to config.json makes the agent's permission posture visible
+      // to the user and overridable per-node (e.g. set sandboxMode "read-only"
+      // for a read-mostly research node).
+      ...(runtime === "codex-sdk" ? {
+        approvalPolicy: "never",
+        sandboxMode: "danger-full-access",
+        skipGitRepoCheck: true,
+      } : {}),
     },
     ...(opts.session || runtime === "claude-code-cli" ? { session: opts.session || randomUUID() } : {}),
   };
@@ -1353,7 +1363,7 @@ const VENDORS: Vendor[] = [
     key: "codex", label: "Codex / GPT (海外，需 codex auth login)",
     runtime: "codex-sdk", requiresAuth: "codex",
     models: [
-      { id: "gpt-5.4", default: true },
+      { id: "gpt-5.5", default: true },
       { id: "o3" },
     ],
   },
