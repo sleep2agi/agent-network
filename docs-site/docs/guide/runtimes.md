@@ -333,7 +333,7 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 启用后 agent-node 走 `spawn('codex', ['app-server'])` + 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** `@openai/codex-sdk` `--mcp-config` HTTP transport 那条 bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family），不再受 codex-sdk breaking change 牵制。
 
-**v0.10.0 默认仍走 `@openai/codex-sdk` wrapper**（先收 preview 反馈、保 backward-compat）；v0.11.0 计划 default flip 到 stdio direct，wrapper 路径进入 deprecation warning。完整背景见 [v0.10.0 release notes](/preview/v0.10.0#新-runtime-路径-codex-direct-stdio)。
+**v0.10.x（含当前 v0.10.8 stable）默认仍走 `@openai/codex-sdk` wrapper**（先收 preview 反馈、保 backward-compat）；v0.11.0 计划 default flip 到 stdio direct，wrapper 路径进入 deprecation warning。完整背景见 [v0.10.0 release notes](/preview/v0.10.0#新-runtime-路径-codex-direct-stdio)。
 :::
 
 ---
