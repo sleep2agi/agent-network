@@ -584,7 +584,7 @@ agent 日志里出现：
 **原因**：fan-out 高并发场景下（如 [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) 的 30-agent papercope demo），vendor API 单次 latency 从基线 1.57s 拉到 17-37s，请求在 vendor 队列里堆积。
 
 **v0.9.2 起 retry-with-backoff** 行为（verify [`cli.ts:729-792`](https://github.com/sleep2agi/agent-node/src/cli.ts#L729)）：
-- 每次 attempt 独立的 abort controller + timeout window（default `CLAUDE_TIMEOUT_MS=300000` 即 300s，[R663 ship](https://github.com/sleep2agi/agent-network/issues/132)）
+- 每次 attempt 独立的 abort controller + timeout window（default `CLAUDE_TIMEOUT_MS=300000` 即 300s，[#132 ship](https://github.com/sleep2agi/agent-network/issues/132)）
 - transient error / timeout 时 backoff `4s, 8s` + 0-1s jitter（jitter 散开 herd retries 避免一窝蜂打 vendor queue）
 - 默认 `CLAUDE_MAX_RETRIES=2`（共 3 attempts 含 initial）—— 设 `0` 退回 v0.9.1 行为（no retry）
 - **auth-class 错误不 retry**（fast-fail 见上方）

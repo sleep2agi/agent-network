@@ -585,7 +585,7 @@ Or finally:
 **Cause**: under heavy fan-out (e.g. [#132 Tier 1's](https://github.com/sleep2agi/agent-network/issues/132) 30-agent papercope demo), per-request latency on the vendor API stretches from a 1.57s baseline to 17-37s as requests pile up in the vendor's queue.
 
 **Retry-with-backoff since v0.9.2** (verify [`agent-node/src/cli.ts:729-792`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L729)):
-- Each attempt has its own abort controller + timeout window (default `CLAUDE_TIMEOUT_MS=300000`, i.e. 300s — see [R663](https://github.com/sleep2agi/agent-network/issues/132))
+- Each attempt has its own abort controller + timeout window (default `CLAUDE_TIMEOUT_MS=300000`, i.e. 300s — see [#132 ship](https://github.com/sleep2agi/agent-network/issues/132))
 - On transient errors / timeouts, backoff `4s, 8s` + 0-1s jitter (the jitter spreads herd retries so the recovering vendor queue isn't slammed all at once)
 - Default `CLAUDE_MAX_RETRIES=2` (so 3 attempts total including the initial one) — set `0` to revert to v0.9.1 behavior (no retry)
 - **Auth-class errors do not retry** (fast-fail above)
