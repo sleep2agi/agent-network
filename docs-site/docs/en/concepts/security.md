@@ -165,8 +165,8 @@ flowchart TD
 - Usernames support letters, numbers, underscores, and Chinese characters
 - Login failures don't reveal whether the username or password was wrong ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally merges both errors into the same message to prevent username enumeration; aligned with the R169 chain)
 
-::: info Planned (v0.10+ / unscheduled)
-SHA-256 → Argon2id upgrade ([security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)) for stronger brute-force resistance and per-user salt (to prevent identical-hash collisions for the same password). **The v0.9.x scope (Recovery & Observability) did not address this**; the security uplift is queued for a dedicated v0.10+ security cycle. Token hashes (`hashToken` uses bare SHA-256 without a salt) do not need Argon2id — tokens are 128-bit random strings, so rainbow tables don't apply.
+::: info Planned (v0.11+ / unscheduled)
+SHA-256 → Argon2id upgrade ([security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)) for stronger brute-force resistance and per-user salt (to prevent identical-hash collisions for the same password). **Neither the v0.9.x nor any v0.10.0-8 scope addressed this**; the security uplift is queued for a dedicated v0.11+ security cycle (the warning block at the bottom of this same page has the full scope-chain enumeration across all 9 patch ships consistent with this). Token hashes (`hashToken` uses bare SHA-256 without a salt) do not need Argon2id — tokens are 128-bit random strings, so rainbow tables don't apply.
 :::
 
 ## Authorization

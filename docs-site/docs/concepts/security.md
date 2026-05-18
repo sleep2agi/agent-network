@@ -165,8 +165,8 @@ flowchart TD
 - 用户名支持字母、数字、下划线、中文
 - 登录失败不提示是用户名错还是密码错（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration；R169 chain 一致）
 
-::: info 计划中（v0.10+ / 未排期）
-SHA-256 → Argon2id 升级（[security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)），提升抗暴力破解能力 + per-user salt 防止同密码哈希碰撞。**v0.9.x scope（Recovery & Observability）未动**，留 v0.10+ 安全主题专项升级。Token 哈希（cli.ts hashToken 用纯 SHA-256 无 salt）不需要 Argon2id —— token 是 128-bit 随机字符串，rainbow table 不适用。
+::: info 计划中（v0.11+ / 未排期）
+SHA-256 → Argon2id 升级（[security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)），提升抗暴力破解能力 + per-user salt 防止同密码哈希碰撞。**v0.9.x / v0.10.0-8 scope 都未动**，留 v0.11+ 安全主题专项升级（同文件本页底部 warning block 有完整 scope chain enumeration 跨 9 个 patch ship 跟此一致）。Token 哈希（cli.ts hashToken 用纯 SHA-256 无 salt）不需要 Argon2id —— token 是 128-bit 随机字符串，rainbow table 不适用。
 :::
 
 ## 授权（Authorization）
