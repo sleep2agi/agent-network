@@ -240,11 +240,11 @@ v0.10.4 Vincent 紧急 ship 跳过 测试马 Docker smoke gate（per `feedback_n
 
 [#147](https://github.com/sleep2agi/agent-network/issues/147)（5/16 ack）+ Option C 落地：
 
-- 拓扑节点前缀标签（[节点 → group 边的 label distinguishability）实装 Option C 设计（N站马 design pass）
+- 拓扑节点前缀标签（[节点 → group 边的 label distinguishability）实装 Option C 设计（Dashboard 团队 design pass）
 - disk telemetry hover card 渲染（`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` 三字段对接 [`GET /api/server/:host/health`](/api/rest#get-api-server-host-health) 响应）
 - 100+ 轮 typography + corner-radius cascade polish（R317-R438）
 
-N站马 design pass + 4/4 verify（commit `7de97ee` + screenshot evidence，local ship `f9c83cd`）。
+Dashboard 团队 design pass + 4/4 verify（commit `7de97ee` + screenshot evidence，local ship `f9c83cd`）。
 
 ### Closed issues
 
@@ -255,9 +255,9 @@ N站马 design pass + 4/4 verify（commit `7de97ee` + screenshot evidence，loca
 
 本轮 v0.10.2 是 hotfix scope（不含 v0.11.0 系列 RFC ship），3 个 RFC artifact 保留进 v0.12.0 candidate：
 
-- [RFC-013 v5](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) rename hot-reload（通信牛 third pass 整改完）
+- [RFC-013 v5](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) rename hot-reload（third-pass review 整改完）
 - [RFC-014 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-014-daemon-phase2-host-metrics.md) daemon Phase 2 host metrics（v0.10.2 Hero A 已 ship final 10%）
-- [RFC-015 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-015-token-usage-telemetry.md) #114 token usage UI（通信牛 first pass REVISION 完）
+- [RFC-015 v2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-015-token-usage-telemetry.md) #114 token usage UI（first-pass REVISION 完）
 
 ### Upgrade
 
