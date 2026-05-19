@@ -119,7 +119,7 @@ Agent 不需要直接调任何 `telegram_*` MCP tool —— **没有这种 tool 
 
 Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接生成文本**作为 reply，不需要懂 Telegram API。
 
-::: warning R258 校准：fictional `telegram_*` tool 列表已删
+::: warning fictional `telegram_*` tool 列表已删
 旧 doc 列过 `telegram_reply` / `telegram_edit_message` / `telegram_react` 3 个 MCP tool —— **全 source grep 0 hit**（cli.ts / commhub-channel.ts / node-server.ts 没有任何 `telegram_*` server.tool 注册）。Agent 实际是写 reply 文本，agent-node 内部 handler 自动 sendMessage。
 :::
 
@@ -198,7 +198,7 @@ anet channel add telegram 指挥室 --bot-token <tok> --allow <user-id>
 anet node start 指挥室
 ```
 
-Agent 收到消息时，通过 `<channel source="...">` 标签区分来源（`commhub` / `telegram` 等）。**Agent 只需直接生成 reply 文本** —— agent-node 的内部 handler 根据 `source` 自动路由到对应平台（telegram 走 `telegramSend(tg, chatId, text)`，commhub 走 SSE `send_reply`）。Agent 不需要懂 Telegram API / commhub MCP `send_reply` 调用细节（R258 chain 一致）。
+Agent 收到消息时，通过 `<channel source="...">` 标签区分来源（`commhub` / `telegram` 等）。**Agent 只需直接生成 reply 文本** —— agent-node 的内部 handler 根据 `source` 自动路由到对应平台（telegram 走 `telegramSend(tg, chatId, text)`，commhub 走 SSE `send_reply`）。Agent 不需要懂 Telegram API / commhub MCP `send_reply` 调用细节。
 
 ## Channel Plugin 技术实现
 
@@ -217,7 +217,7 @@ Channel 插件是一个 MCP Server（stdio 模式），提供消息接收和回�
 ```
 
 ::: tip 文件名是 `.js` 不是 `.ts`
-落盘到项目目录的文件是 `.anet/node-server.js`（[`cli.ts:1644 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1644) 自动复制 npm 包 `dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底，但最终落盘统一为 `.js`）。R216/R221 chain 一致。
+落盘到项目目录的文件是 `.anet/node-server.js`（[`cli.ts:1644 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1644) 自动复制 npm 包 `dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底，但最终落盘统一为 `.js`）。
 :::
 
 Channel 插件做的事（v0.8 实际能力）：
@@ -227,7 +227,7 @@ Channel 插件做的事（v0.8 实际能力）：
 3. 将消息注入到 Agent 上下文（XML `<channel source="...">` tag）
 4. **agent-node 内部 handler 自动转发** agent reply 到对应平台（commhub 走 `send_reply` MCP；telegram 走 [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper）
 
-::: warning R258 chain 校准
+::: warning Mermaid 图 `reply()` 路径修正
 原版 mermaid 图画 `AGENT → reply() → TOOLS → TG/WX/FS` —— 实际没有 agent-facing `reply()` / `telegram_reply()` MCP tool 给 agent 调。Agent 只生成 reply 文本，agent-node handler 根据 `source` 自动路由到对应平台。
 :::
 

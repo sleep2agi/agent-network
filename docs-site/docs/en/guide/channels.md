@@ -120,7 +120,7 @@ The agent does not call any `telegram_*` MCP tool — **no such tool exists**. T
 
 The agent (LLM running in the claude-agent-sdk / codex-sdk runtime) just needs to **produce reply text**; it doesn't need to know the Telegram API.
 
-::: warning R258 calibration: fictional `telegram_*` tool list removed
+::: warning fictional `telegram_*` tool list removed
 Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` as MCP tools — **a full source grep returns 0 hits** (no `telegram_*` `server.tool` registrations in cli.ts / commhub-channel.ts / node-server.ts). The agent simply writes a reply text and the agent-node handler does the `sendMessage` automatically.
 :::
 
@@ -199,7 +199,7 @@ anet channel add telegram commander --bot-token <tok> --allow <user-id>
 anet node start commander
 ```
 
-When the agent receives a message, it identifies the source via the `<channel source="...">` tag (`commhub` / `telegram` / etc.). **The agent just produces a reply text** — the agent-node's internal handler routes it to the right platform based on `source` (telegram replies go through `telegramSend(tg, chatId, text)`, commhub replies go through SSE `send_reply`). The agent doesn't need to know Telegram API details or the commhub MCP `send_reply` call (aligned with the R258 chain).
+When the agent receives a message, it identifies the source via the `<channel source="...">` tag (`commhub` / `telegram` / etc.). **The agent just produces a reply text** — the agent-node's internal handler routes it to the right platform based on `source` (telegram replies go through `telegramSend(tg, chatId, text)`, commhub replies go through SSE `send_reply`). The agent doesn't need to know Telegram API details or the commhub MCP `send_reply` call.
 
 ## Channel Plugin Technical Details
 
@@ -218,7 +218,7 @@ A channel plugin is an MCP Server (stdio mode) that provides message receiving a
 ```
 
 ::: tip The filename is `.js`, not `.ts`
-The file installed in your project is `.anet/node-server.js` ([`cli.ts:1644 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1644) copies from the npm package — preferring `dist/src/node-server.js`, falling back to `src/node-server.ts` — but the on-disk filename is always `.js`). Aligned with R216/R221 chain.
+The file installed in your project is `.anet/node-server.js` ([`cli.ts:1644 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1644) copies from the npm package — preferring `dist/src/node-server.js`, falling back to `src/node-server.ts` — but the on-disk filename is always `.js`).
 :::
 
 What the channel plugin actually does (v0.8 capabilities):
@@ -228,7 +228,7 @@ What the channel plugin actually does (v0.8 capabilities):
 3. Injects messages into the agent's context (XML `<channel source="...">` tag)
 4. **The agent-node's internal handler automatically forwards** the agent's reply to the right platform (commhub via the `send_reply` MCP tool; telegram via the [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper)
 
-::: warning R258 chain calibration
+::: warning Mermaid `reply()` path correction
 The original mermaid showed `AGENT → reply() → TOOLS → TG/WX/FS` — but there's no agent-facing `reply()` / `telegram_reply()` MCP tool for the agent to call. The agent only produces reply text; agent-node's handler routes it to the platform based on `source`.
 :::
 
