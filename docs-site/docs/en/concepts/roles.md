@@ -24,7 +24,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | List agents (`anet status`) | ✅ | ✅ | ✅ | ✅ |
 | Read messages / completions | ✅ | ✅ | ✅ | ✅ |
 | View audit log (your own rows only) | ✅ | ✅ | ✅ | ✅ |
-| View audit log (other users' rows) | Only **system-level** `users.role='admin'` (**not** network admin; R262 chain) | | | |
+| View audit log (other users' rows) | Only **system-level** `users.role='admin'` (**not** network admin) | | | |
 | **Agent lifecycle** | | | | |
 | Create agent (`anet node create`) | ❌ | ✅ | ✅ | ✅ |
 | Start / stop / delete agent (`anet node start/stop/delete`) | Not gated by network role — see note ※ below | | | |
@@ -42,15 +42,15 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 | Delete network | ❌ | ❌ | ❌ | ✅ |
 | **Hub-global** (system-level `users.role` gate, **not** network role) | | | | |
 | `/api/audit-log` — your own rows | ✅ | ✅ | ✅ | ✅ |
-| `/api/audit-log` — all rows | Only `users.role='admin'` (R262 chain; verified at [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086)) | | | |
+| `/api/audit-log` — all rows | Only `users.role='admin'` (verified at [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086)) | | | |
 | `/api/users` (list users) | Only `users.role='admin'` (same system-level gate) | | | |
 | `/api/server-logs` (debug console) | Only `users.role='admin'` | | | |
 | `/api/admin/wipe-db` (and similar) | Only `users.role='admin'` | | | |
 | `anet hub admin reset-user` (reset any user's password) | Local-only CLI command on the hub host, not role-gated (the hub owner just needs local shell access) | | | |
 
-> ※ R449 calibration: `anet node start / stop / delete` are **pure local CLI operations** — they read/write the local `.anet/nodes/<alias>/` directory directly, and `startCommand` / `deleteCommand` have **no network-role / owner / per-creator check** whatsoever. Whoever has that node config on their machine can start/stop/delete it, regardless of their network role. The only network-role-gated lifecycle op is `anet node create` (it requests an `ntok_` from the hub, and `canWrite` blocks viewer).
+> ※ `anet node start / stop / delete` are **pure local CLI operations** — they read/write the local `.anet/nodes/<alias>/` directory directly, and `startCommand` / `deleteCommand` have **no network-role / owner / per-creator check** whatsoever. Whoever has that node config on their machine can start/stop/delete it, regardless of their network role. The only network-role-gated lifecycle op is `anet node create` (it requests an `ntok_` from the hub, and `canWrite` blocks viewer).
 
-> R309 calibration: the three MCP write tools `send_task` / `cancel_task` / `reassign_task` pass through **a single [`canWrite` gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)** (`role !== "viewer"` — owner/admin/member all pass) with **no per-task ownership check** — a member can cancel / reassign **any** task in the network, not just ones they dispatched. Renaming a network is owner-only ([`auth.ts:218 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L218) `if (net.owner_id !== userId)`), same as deleting it — admin cannot rename.
+> the three MCP write tools `send_task` / `cancel_task` / `reassign_task` pass through **a single [`canWrite` gate](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L24)** (`role !== "viewer"` — owner/admin/member all pass) with **no per-task ownership check** — a member can cancel / reassign **any** task in the network, not just ones they dispatched. Renaming a network is owner-only ([`auth.ts:218 renameNetwork`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L218) `if (net.owner_id !== userId)`), same as deleting it — admin cannot rename.
 
 ---
 
@@ -60,7 +60,7 @@ Agent Network has 4 roles: `owner` / `admin` / `member` / `viewer`. **The role e
 
 For interns, auditors, read-only integrations.
 
-- **Can**: any read endpoint (tasks, agent status, messages, completions), browse dashboard, **view their own audit log rows** (R262 chain).
+- **Can**: any read endpoint (tasks, agent status, messages, completions), browse dashboard, **view their own audit log rows** .
 - **Cannot**: any **network-level write op** (dispatch / `cancel_task` / `reassign_task` / `anet node create` — all blocked by the `canWrite` gate); read **other users'** `/api/audit-log` rows (cross-user access needs system-level `users.role='admin'`).
 
   > Note: `anet node start / stop / delete` are **pure local CLI operations**, not gated by network role (see note ※ on the permission matrix above) — a viewer can still start/stop/delete an existing node on their own machine. Only `anet node create` is network-role-gated (it requests an `ntok_` from the hub).
@@ -90,7 +90,7 @@ For team leads, trusted operators, anyone who needs to manage members.
 - **Can**: everything member can; invite new members + remove non-owner members (invite [`index.ts:695`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L695) / remove [`index.ts:681`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L681): `["owner","admin"]` gate).
 
   > Note: `anet node start / stop / delete` / editing config are **not** admin network-role privileges — they're pure local CLI operations (see note ※ on the permission matrix above), available to whoever holds the node config on their machine, regardless of network role. An admin **cannot** remotely start/stop an agent on someone else's machine.
-- **Cannot**: **change an existing member's role** — `PUT /api/networks/:id/members/:user_id` is **owner-only** ([`index.ts:674`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L674) `if (callerRole !== "owner")` → 403); admin can only invite / remove, not re-role existing members. Also cannot: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin; R262 chain). A network admin sees only their own audit log rows, same as members and viewers.
+- **Cannot**: **change an existing member's role** — `PUT /api/networks/:id/members/:user_id` is **owner-only** ([`index.ts:674`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L674) `if (callerRole !== "owner")` → 403); admin can only invite / remove, not re-role existing members. Also cannot: delete the network itself; remove an owner or promote anyone to owner; **read other users' `/api/audit-log` rows** — admin-only endpoints are gated by **system-level** `users.role='admin'` (**not** network admin). A network admin sees only their own audit log rows, same as members and viewers.
 
 Become an admin:
 ```bash
@@ -127,7 +127,7 @@ The 4 roles above are scoped to a single network. There is also a **hub-global a
 | Operation | network admin | hub-global admin (`admin` user) |
 |---|---|---|
 | `/api/audit-log` — own rows | ✅ | ✅ |
-| `/api/audit-log` — all rows | ❌ (server auto-filters `WHERE user_id = self`) | ✅ (R262 chain; index.ts:1086-1089) |
+| `/api/audit-log` — all rows | ❌ (server auto-filters `WHERE user_id = self`) | ✅ (index.ts:1086-1089) |
 | `anet hub admin reset-user` (reset any user's password) | ❌ | ✅ (local-only) |
 | Create new users | ❌ | ✅ |
 | See all networks on the hub | ❌ (only ones they're a member of) | ✅ |
