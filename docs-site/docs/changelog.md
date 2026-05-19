@@ -34,13 +34,13 @@ Vincent 5560 实测 catch（附 dashboard 截图）：Servers 面板对每台 hu
 文案精准反映"该 hub 此刻未上报"语义，不再 imply 版本不够。新增 `data-server-agents-missing` / `data-server-disk-missing` Playwright 钩子供下一轮 e2e 验证 hub-side telemetry coverage。
 
 ::: info Root cause #2 + #3 已定位但 defer
-- **#2**（v0.10.9 候选）：同 hostname 多实例时 dedupe 缺失，可能 double-count 服务器 —— N 站牛 fix backed up `/tmp/.../fix2-dedupe-v0.10.9.patch`
+- **#2**（v0.10.9 候选）：同 hostname 多实例时 dedupe 缺失，可能 double-count 服务器 —— Dashboard 团队修复方案已就位，待 v0.10.9 ship
 - **#3**（v0.11.0 候选）：`status=offline` 与 telemetry 报告 mismatch（telemetry 仍上报但 SSE last_seen 超时）—— 系统级 status 协调
 :::
 
 ### Polish fold-in — TopoGraph density tier（R502，纯 additive）
 
-N 站马 commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) （0.5.3-preview.16）—— Canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface。Tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 R109 dense-layout collapse gate 对齐。**纯 additive，无 UX 改变**，配 R469 numeric counts 提供 e2e selector 完整 canvas state snapshot 能力。
+Dashboard 团队 commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) （0.5.3-preview.16）—— Canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface。Tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 R109 dense-layout collapse gate 对齐。**纯 additive，无 UX 改变**，配 R469 numeric counts 提供 e2e selector 完整 canvas state snapshot 能力。
 
 ### Quality gates + lessons
 

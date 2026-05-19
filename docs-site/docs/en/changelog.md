@@ -34,7 +34,7 @@ Vincent 5560 caught this in real testing (with dashboard screenshot): the Server
 The new copy accurately says "this hub didn't report it right now" instead of implying the hub version is too old. The new `data-server-agents-missing` / `data-server-disk-missing` Playwright hooks enable the next e2e round to validate hub-side telemetry coverage.
 
 ::: info Root causes #2 + #3 located, deferred
-- **#2** (v0.10.9 candidate): missing dedupe when one hostname appears multiple times can double-count servers — the dashboard team's fix is backed up at `/tmp/.../fix2-dedupe-v0.10.9.patch`.
+- **#2** (v0.10.9 candidate): missing dedupe when one hostname appears multiple times can double-count servers — the dashboard team's fix is queued for v0.10.9 ship.
 - **#3** (v0.11.0 candidate): `status=offline` vs telemetry mismatch (telemetry still reports but SSE `last_seen` has timed out) — needs system-level status reconciliation.
 :::
 
