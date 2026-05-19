@@ -44,7 +44,7 @@ Dashboard 团队 commit [`3f73810`](https://github.com/sleep2agi/agent-network-d
 
 ### Quality gates + lessons
 
-- **Source-grep verify**：通信龙 `grep -rh "not reported by hub"` 命中 + 旧文案只在 JSDoc 注释 ✅
+- **Source-grep verify**：`grep -rh "not reported by hub"` 命中 + 旧文案只在 JSDoc 注释 ✅
 - **Docker preview 实测**：`docker run --rm node:24-slim sh -c "npm install -g @sleep2agi/agent-network-dashboard@0.5.3-preview.15 && grep..."` ✅
 - **沿用 [[feedback_dist_obfuscated_use_source_grep]]**：JSX 文案 verify 在 `app/components/ServersDrawer.tsx` source level，不依赖 `.next/server` bundled output
 - **v0.10.x patch density 单日 8 patch** 验证 audit-first cadence 可持续
@@ -103,7 +103,7 @@ Source-of-truth helper：single-node path（`cli.ts:1146`）+ batch path（`cli.
 
 ### Quality gates + lessons
 
-- **Source-grep verify**（[[feedback_dist_obfuscated_use_source_grep]] precedent）：通信龙 `grep -n` 对 `bin/cli.ts` HEAD 5 sites 全 PASS（helper + 2 call sites + wiring + field）
+- **Source-grep verify**（[[feedback_dist_obfuscated_use_source_grep]] precedent）：`grep -n` 对 `bin/cli.ts` HEAD 5 sites 全 PASS（helper + 2 call sites + wiring + field）
 - **Docker container smoke**：Cell A `anet login` setup failed（test infra blocker, not a fix bug）→ Gate 2 source-grep evidence accepted as substitute per v0.10.6 precedent
 - **`feedback_docker_smoke_login_flow`**（本 cycle 新增）—— Docker smoke entry script 用 `curl` direct API call `/api/auth/register` + `/api/auth/login` 写 token，**不要** interactive `anet login`（在 non-TTY container 容易 stall，hub login 调用阻塞）
 
@@ -361,7 +361,7 @@ agent-node 每次 `commhub_report_status` 心跳带上 `process_telemetry`：`rs
 随包附 **19+ 轮 typography + 圆角级联 polish**（R317-R337+，4 typography family + corner radius cascade 系统化重整）。dashboard `0.5.0` 已通过 npm `latest` tag promote，跟随 v0.10.0 Phase 2 docs sync 落地。
 
 **E. 发布前轻量级测试 playbook（release-gate Phase 1+2）**
-[`docs/tests/release-gate-playbook.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/release-gate-playbook.md) — 通信测试马 lead 维护，覆盖 hub / dashboard / login / node lifecycle / runtime smoke / vendor verify 等关键路径。本次 v0.10.0 ship 是首次完整跑通该 playbook 的 release，为后续每次 latest promote 卡 release-gate。
+[`docs/tests/release-gate-playbook.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/release-gate-playbook.md) — 测试团队 lead 维护，覆盖 hub / dashboard / login / node lifecycle / runtime smoke / vendor verify 等关键路径。本次 v0.10.0 ship 是首次完整跑通该 playbook 的 release，为后续每次 latest promote 卡 release-gate。
 
 ### Breaking changes / Migration
 
@@ -393,7 +393,7 @@ agent-node 每次 `commhub_report_status` 心跳带上 `process_telemetry`：`rs
 ### 5 P0 fix chain
 
 **1. [#129](https://github.com/sleep2agi/agent-network/issues/129) Vendor API auth 快速失败 + vendor-specific URL hint**（[`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3)）
-Vincent telegram 4991 / 通信龙 dispatch 46fd553f：intern key 过期时 agent-node 之前默默等 120s 才报「claude-agent-sdk 调用超时」通用错误。现在 `isAuthError(msg)` 启发式正则覆盖 Anthropic 标准（401/403、`invalid_api_key`、`authentication_error`）+ intern A02xx 系列（user_token_expired）+ 通用 OpenAI-compat 401 envelope（`unauthorized` / `expired_token`），命中后**短路 retry loop**（用同一个坏 key 重试只是浪费 backoff window）并按 `ANTHROPIC_BASE_URL` 域名 print **vendor-specific URL hint**（intern → `chat.intern-ai.org.cn`、minimax → `platform.minimaxi.com`、anthropic → `console.anthropic.com`、其他 → generic）。从 v0.9.1 之前的 15min 缩到 **<5s** 拿到具体修复 URL。详见 [troubleshooting → Vendor API auth 失败](/troubleshooting#vendor-api-auth-失败401-invalid_api_key-expired_token-intern-a02xx-user_token_expired)。
+起因：intern key 过期时 agent-node 之前默默等 120s 才报「claude-agent-sdk 调用超时」通用错误。现在 `isAuthError(msg)` 启发式正则覆盖 Anthropic 标准（401/403、`invalid_api_key`、`authentication_error`）+ intern A02xx 系列（user_token_expired）+ 通用 OpenAI-compat 401 envelope（`unauthorized` / `expired_token`），命中后**短路 retry loop**（用同一个坏 key 重试只是浪费 backoff window）并按 `ANTHROPIC_BASE_URL` 域名 print **vendor-specific URL hint**（intern → `chat.intern-ai.org.cn`、minimax → `platform.minimaxi.com`、anthropic → `console.anthropic.com`、其他 → generic）。从 v0.9.1 之前的 15min 缩到 **<5s** 拿到具体修复 URL。详见 [troubleshooting → Vendor API auth 失败](/troubleshooting#vendor-api-auth-失败401-invalid_api_key-expired_token-intern-a02xx-user_token_expired)。
 
 **2. [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) Fan-out timeout + retry-with-backoff**（同 commit [`9840cf3`](https://github.com/sleep2agi/agent-network/commit/9840cf3)）
 [SDK concurrency investigation Phase 3](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md)：30-agent papercope fan-out demo 下 intern API per-request latency 拉到 17-37s（10-20× 单 agent 1.57s 基线），老 120s timeout 中途 abort 让 25/30 子 agent 静默 fail。两件事：
