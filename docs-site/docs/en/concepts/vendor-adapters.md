@@ -110,7 +110,7 @@ Aligned with the follow-up gaps listed in [#130's engineering code trace](https:
 
 | Vendor | Status | Channel |
 |---|---|---|
-| InternLM | 🟡 As of 2026-05-16, Vincent has reached out to the InternLM team to push an upstream fix (have `tool_choice: auto` emit standard Anthropic `tool_use` content blocks by default) | Vincent's private contacts |
+| InternLM | 🟡 As of 2026-05-16, the anet team has reached out to the InternLM team to push an upstream fix (have `tool_choice: auto` emit standard Anthropic `tool_use` content blocks by default) | anet team contacts |
 
 **Adapter retirement conditions** (either is sufficient to remove the vendor adapter layer):
 - After an intern endpoint update, a direct curl A/B with `tool_choice: auto` emits a `tool_use` block by itself (no system-prompt bias needed)

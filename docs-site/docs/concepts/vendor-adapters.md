@@ -110,7 +110,7 @@ anet node start my-intern-agent --prompt "你是一个谨慎的代码 reviewer�
 
 | 厂商 | 状态 | 跟进通道 |
 |---|---|---|
-| InternLM 书生 | 🟡 Vincent 2026-05-16 已联系 intern 团队推上游 fix（让 `tool_choice:auto` 默认 emit 标准 Anthropic `tool_use` content blocks） | 通过 Vincent 私下渠道 |
+| InternLM 书生 | 🟡 2026-05-16 anet 团队已联系 intern 团队推上游 fix（让 `tool_choice:auto` 默认 emit 标准 Anthropic `tool_use` content blocks） | 通过 anet 团队渠道 |
 
 **Adapter 退役条件**（任一满足即可去掉 vendor adapter 层）：
 - intern endpoint 升级后 curl A/B 跑 `tool_choice:auto` 直接 emit `tool_use` block（不需要 system-prompt bias）
