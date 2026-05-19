@@ -53,17 +53,18 @@ NET_B=$(echo "$B_RESP" | jq -r '.network_id // empty')
 [[ "$UTOK_B" == utok_* && "$NTOK_B" == ntok_* && -n "$NET_B" ]] || { echo "FAIL: user B registration"; echo "$B_RESP"; exit 1; }
 [[ "$NET_A" != "$NET_B" ]] || { echo "FAIL: networks should differ"; exit 1; }
 
-echo "[2] report three agents, two sharing one physical host in network A"
+echo "[2] report four agents, three sharing one physical host in network A"
 ARG_A1=$(jq -nc --arg net "$NET_A" '{resume_id:"119-a-1",alias:"agent-a1",status:"idle",network_id:$net,host:{hostname:"box-a",ip:"10.0.0.10",cpu_load_1min:0.4,cpu_cores:8,mem_total_gb:32.0,mem_used_gb:8.0,mem_avail_gb:24.0}}')
 ARG_A2=$(jq -nc --arg net "$NET_A" '{resume_id:"119-a-2",alias:"agent-a2",status:"working",network_id:$net,host:{hostname:"box-a",ip:"10.0.0.10",cpu_load_1min:1.2,cpu_cores:8,mem_total_gb:32.0,mem_used_gb:10.5,mem_avail_gb:21.5}}')
 ARG_A3=$(jq -nc --arg net "$NET_A" '{resume_id:"119-a-3",alias:"agent-a3",status:"idle",network_id:$net,host:{hostname:"box-b",ip:"10.0.0.11",cpu_load_1min:null,cpu_cores:4,mem_total_gb:16.0,mem_used_gb:2.0,mem_avail_gb:14.0}}')
+ARG_A4=$(jq -nc --arg net "$NET_A" '{resume_id:"119-a-4",alias:"agent-a4",status:"idle",network_id:$net,host:{hostname:"box-a",ip:"127.0.0.1",cpu_load_1min:null,cpu_cores:null,mem_total_gb:null,mem_used_gb:null,mem_avail_gb:null}}')
 for args in "$ARG_A1"; do
   out=$(mcp_call "$NTOK_A" report_status "$args")
   echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status A: $out"; exit 1; }
 done
 # Ensure "latest host metrics" has a deterministic timestamp newer than A1.
 sleep 1.1
-for args in "$ARG_A2" "$ARG_A3"; do
+for args in "$ARG_A2" "$ARG_A3" "$ARG_A4"; do
   out=$(mcp_call "$NTOK_A" report_status "$args")
   echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status A: $out"; exit 1; }
 done
@@ -76,7 +77,7 @@ echo "$out" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status B: $
 echo "[4] /api/servers aggregates network A only"
 SERVERS_A=$(curl -fsS "$HUB_BASE/api/servers?network_id=$NET_A" -H "Authorization: Bearer $UTOK_A")
 echo "$SERVERS_A" | jq -e 'type == "array" and length == 2' >/dev/null || { echo "FAIL: expected two server groups for A"; echo "$SERVERS_A"; exit 1; }
-echo "$SERVERS_A" | jq -e '.[] | select(.hostname=="box-a" and .ip=="10.0.0.10" and .agent_count==2 and .cpu_load_1min==1.2 and .cpu_cores==8 and .mem_used_gb==10.5 and .mem_avail_gb==21.5)' >/dev/null || {
+echo "$SERVERS_A" | jq -e '.[] | select(.hostname=="box-a" and .ip=="10.0.0.10" and .agent_count==3 and .cpu_load_1min==1.2 and .cpu_cores==8 and .mem_used_gb==10.5 and .mem_avail_gb==21.5)' >/dev/null || {
   echo "FAIL: box-a aggregate/latest telemetry wrong"
   echo "$SERVERS_A"
   exit 1

@@ -988,13 +988,38 @@ Bun.serve({
         last_seen: string | null;
       }>();
 
+      const preferDisplayIp = (current: string, next: string) => {
+        const isWeak = (ip: string) => !ip || ip === "unknown" || ip === "127.0.0.1" || ip === "::1";
+        if (isWeak(current) && !isWeak(next)) return next;
+        return current;
+      };
+      const hasHostTelemetry = (row: any) =>
+        row.cpu_load_1min != null || row.cpu_cores != null || row.mem_avail_gb != null || row.mem_used_gb != null;
+
       for (const row of db.all<any>(sql, ...params)) {
         const hostname = row.hostname || "unknown";
         const ip = row.ip || "unknown";
-        const key = `${hostname}\u0000${ip}`;
+        // Group primarily by hostname. A single host can report both a
+        // routable/container IP and loopback (127.0.0.1); splitting those
+        // into separate cards makes the dashboard show one useful load row
+        // plus one "n/a" duplicate. Unknown hostnames still fall back to IP.
+        const key = hostname !== "unknown" ? `host:${hostname}` : `ip:${ip}`;
         const existing = grouped.get(key);
         if (existing) {
           existing.agent_count += 1;
+          existing.ip = preferDisplayIp(existing.ip, ip);
+          if (parseSqliteTime(row.last_seen) > parseSqliteTime(existing.last_seen)) existing.last_seen = row.last_seen ?? existing.last_seen;
+          if (hasHostTelemetry(row) && (
+            existing.cpu_load_1min == null ||
+            existing.cpu_cores == null ||
+            existing.mem_avail_gb == null ||
+            existing.mem_used_gb == null
+          )) {
+            existing.cpu_load_1min = row.cpu_load_1min ?? existing.cpu_load_1min;
+            existing.cpu_cores = row.cpu_cores ?? existing.cpu_cores;
+            existing.mem_avail_gb = row.mem_avail_gb ?? existing.mem_avail_gb;
+            existing.mem_used_gb = row.mem_used_gb ?? existing.mem_used_gb;
+          }
           continue;
         }
         grouped.set(key, {
