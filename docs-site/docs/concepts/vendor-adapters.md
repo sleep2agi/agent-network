@@ -3,7 +3,7 @@
 > ⚠ **从 v0.9.1 起新增**（agent-node v2.3.9-preview.0+，hotfix [#130](https://github.com/sleep2agi/agent-network/issues/130) 引入）
 
 ::: warning ⏳ Interim workaround，非永久方案
-**本 adapter 是 interim 补丁，不是 anet 的 vendor-specific lock-in 路线**。Vincent（2026-05-16 telegram 5021）已联系 InternLM 团队推上游修复 —— 等 intern-s2-preview endpoint 默认 emit 标准 Anthropic `tool_use` content blocks 后，这一层 adapter 就**可以下线**。
+**本 adapter 是 interim 补丁，不是 anet 的 vendor-specific lock-in 路线**。anet 已联系 InternLM 团队推上游修复 —— 等 intern-s2-preview endpoint 默认 emit 标准 Anthropic `tool_use` content blocks 后，这一层 adapter 就**可以下线**。
 
 加这层是为了**立即 unblock** 用户跑 intern + 多 Agent 协作（v0.9.0 promote 前 intern tool calling 完全卡死），不是 anet 愿意长期承担「贴近某家厂商行为」这种维护成本。Upstream coordination 进度见 [§5 Future polish — Upstream coordination status](#future-polish未完成-gap)。
 :::

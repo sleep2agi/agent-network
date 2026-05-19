@@ -3,7 +3,7 @@
 > ⚠ **New since v0.9.1** (agent-node v2.3.9-preview.0+, introduced by hotfix [#130](https://github.com/sleep2agi/agent-network/issues/130))
 
 ::: warning ⏳ Interim workaround — not a permanent design
-**This adapter is an interim patch, not anet's vendor-specific lock-in roadmap**. Vincent (2026-05-16 telegram 5021) has reached out to the InternLM team to push an upstream fix — once intern-s2-preview emits standard Anthropic `tool_use` content blocks by default, **this adapter can be retired**.
+**This adapter is an interim patch, not anet's vendor-specific lock-in roadmap**. anet has reached out to the InternLM team to push an upstream fix — once intern-s2-preview emits standard Anthropic `tool_use` content blocks by default, **this adapter can be retired**.
 
 We added this layer to **unblock users immediately** for intern + multi-agent coordination (before v0.9.0 promote, intern tool calling was completely broken). It's not because anet wants to take on the long-term maintenance cost of "hugging some vendor's specific behavior." See [§5 Future polish — Upstream coordination status](#upstream-coordination-status) for tracking.
 :::

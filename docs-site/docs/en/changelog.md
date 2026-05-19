@@ -412,7 +412,7 @@ Vincent 5101 catch: the old vendor-first selector enumerated only claude-agent-s
 Backward-compatible: explicit `--runtime <X>` still skips the picker; demo / batch / scripted callers that already inject credentials via `--env` are unaffected.
 
 **4. [#136](https://github.com/sleep2agi/agent-network/issues/136) Revert v0.9.0 #122 default-detached-tmux** ([`a3a3fd4`](https://github.com/sleep2agi/agent-network/commit/a3a3fd4))
-Vincent telegram 5158/5159/5161: detached tmux + bun claude-code-cli calling `setRawMode` triggers `errno 5 (EIO)` on macOS — the detached child's stdio is not a real PTY. Reverts the brief v0.9.0 four-condition wrap matrix:
+Background: detached tmux + bun claude-code-cli calling `setRawMode` triggers `errno 5 (EIO)` on macOS — the detached child's stdio is not a real PTY. Reverts the brief v0.9.0 four-condition wrap matrix:
 - `anet node start <alias>` → **foreground by default** (fixes the macOS bug)
 - `anet node start <alias> --tmux` → `tmux new -As <alias>` in **attached** mode (keeps the PTY chain intact, no setRawMode bug)
 

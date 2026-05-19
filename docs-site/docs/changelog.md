@@ -412,7 +412,7 @@ Vincent 5101 catch：老 vendor-first selector 只 enum claude-agent-sdk vendors
 backward-compat：显式 `--runtime <X>` 仍 skip picker；demo / batch / 已 `--env` 注入 credential 的 scripted 调用路径不变。
 
 **4. [#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 v0.9.0 #122 默认 detached tmux**（[`a3a3fd4`](https://github.com/sleep2agi/agent-network/commit/a3a3fd4)）
-Vincent telegram 5158/5159/5161：detached tmux + bun claude-code-cli 调 `setRawMode` 在 macOS 触发 `errno 5 (EIO)` —— detached child 的 stdio 不是 real PTY。回退 v0.9.0 短暂引入的 4 条件 wrap 矩阵：
+起因：detached tmux + bun claude-code-cli 调 `setRawMode` 在 macOS 触发 `errno 5 (EIO)` —— detached child 的 stdio 不是 real PTY。回退 v0.9.0 短暂引入的 4 条件 wrap 矩阵：
 - `anet node start <alias>` → **默认前台**（修 macOS bug）
 - `anet node start <alias> --tmux` → `tmux new -As <alias>` **attached** 模式（PTY chain 保持完整不再触发 setRawMode bug）
 
