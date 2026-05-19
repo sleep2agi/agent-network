@@ -98,7 +98,7 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 | **Models** | Codex SDK model (set with `--model`; see OpenAI Codex docs for the current model id) |
 | **Prerequisites** | `codex auth login` |
 | **Strengths** | Strong code generation, flexible tool use |
-| **Tools** | Codex CLI ships with Read / Write / Edit / Bash / Glob / Grep / WebSearch baked in (**does not honor `--tools`** — aligned with R243 chain) |
+| **Tools** | Codex CLI ships with Read / Write / Edit / Bash / Glob / Grep / WebSearch baked in (**does not honor `--tools`**) |
 
 ```bash
 npx @sleep2agi/agent-node \
@@ -308,7 +308,7 @@ Plus the 17 MCP tools on the hub side (`commhub_send_task` / `commhub_reply` / .
 
 ### Three `--tools` modes (only for `claude-agent-sdk`)
 
-The `--tools` flag only affects the `claude-agent-sdk` runtime — the `codex-sdk` toolset is baked into the codex CLI (`Read/Write/Edit/Bash/Grep/Glob/WebSearch`, **does not honor** `--tools`); the `claude-code-cli` runtime shares the host's Claude Code toolset and also doesn't go through this flag (R243 chain).
+The `--tools` flag only affects the `claude-agent-sdk` runtime — the `codex-sdk` toolset is baked into the codex CLI (`Read/Write/Edit/Bash/Grep/Glob/WebSearch`, **does not honor** `--tools`); the `claude-code-cli` runtime shares the host's Claude Code toolset and also doesn't go through this flag.
 
 | Input | Effect | Verify |
 |------|---------|--------|
@@ -427,7 +427,7 @@ On SIGINT (Ctrl+C) or SIGTERM:
 2. Close SSE connection
 3. Exit process
 
-If the process crashes (no time to report), CommHub detects via heartbeat timeout and marks the agent offline after **10 minutes** (verified at [`server/src/index.ts:816-821`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L816) `Date.now() - 10 * 60 * 1000` cutoff, lazily triggered on `/api/status` calls; aligned with the R219 chain).
+If the process crashes (no time to report), CommHub detects via heartbeat timeout and marks the agent offline after **10 minutes** (verified at [`server/src/index.ts:816-821`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L816) `Date.now() - 10 * 60 * 1000` cutoff, lazily triggered on `/api/status` calls).
 
 ## Environment Variables
 
@@ -440,7 +440,7 @@ Only the env vars that agent-node actually reads from `process.env` (verified at
 | `COMMHUB_ALIAS` / `ALIAS` | `--alias` / `config.alias` | Agent alias — both env var names work (cli.ts:109) |
 | `RUNTIME` | `--runtime` / `config.runtime` | Runtime engine, defaults to `claude-agent-sdk` |
 | `MODEL` | `--model` / `config.model` | AI model |
-| `LOG_LEVEL` | `--log-level` / `config.logLevel` (**top-level**, not under `flags`) | `debug` / `info` / `warn` / `error` — aligned with R211 chain |
+| `LOG_LEVEL` | `--log-level` / `config.logLevel` (**top-level**, not under `flags`) | `debug` / `info` / `warn` / `error` |
 | `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | Network ID fallback (typically inferred from `ntok_`; cli.ts:356) |
 | `TELEGRAM_BOT_TOKEN` | channel `.env` / `config.env.TELEGRAM_BOT_TOKEN` | Bot token for the Telegram channel — agent-node reads it directly in the telegram channel startup path (cli.ts:259); the allowlist comes from `access.json`, not env (see [Channel — Telegram](/en/guide/channels#telegram-channel)) |
 | `CLAUDE_TIMEOUT_MS` | `--claude-timeout-ms` / `config.flags.claudeTimeoutMs` / `config.claudeTimeoutMs` | Per-query timeout (ms) for the `claude-agent-sdk` runtime, default **`300000` (300s)** (raised from 120s in v0.9.2 by [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) — the [SDK concurrency investigation](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md) measured intern API per-request latency stretching to 17-37s under heavy fan-out, so the old 120s ceiling fired mid-stream and 25/30 sub-agents silently failed); on timeout it aborts and returns an error suggesting you check `ANTHROPIC_BASE_URL` reachability. Verify [`agent-node/src/cli.ts:241-243`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L241) |
@@ -451,7 +451,7 @@ Only the env vars that agent-node actually reads from `process.env` (verified at
 | `ANTHROPIC_API_KEY` | `config.env.ANTHROPIC_API_KEY` | Model API key — **only for direct api.anthropic.com**; don't reuse it for third-party endpoint keys (see [runtimes — claude-agent-sdk pitfalls](/en/guide/runtimes#claude-agent-sdk)) |
 
 ::: warning `TOOLS` / `SYSTEM_PROMPT` env vars do not exist
-R242 calibration: the previously listed `TOOLS` and `SYSTEM_PROMPT` env vars are **not read** by agent-node (verified: cli.ts:161 `toolsRaw = opts.tools || fileConfig.tools` has no `process.env.TOOLS`; cli.ts:180 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` has no env reading). To set tools, use the `--tools` CLI flag or `config.json`'s `tools` field; for the system prompt, use the `--prompt` flag or `config.json`'s `systemPrompt` field.
+The previously listed `TOOLS` and `SYSTEM_PROMPT` env vars are **not read** by agent-node (verified: cli.ts:161 `toolsRaw = opts.tools || fileConfig.tools` has no `process.env.TOOLS`; cli.ts:180 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` has no env reading). To set tools, use the `--tools` CLI flag or `config.json`'s `tools` field; for the system prompt, use the `--prompt` flag or `config.json`'s `systemPrompt` field.
 :::
 
 ::: tip Docker Usage

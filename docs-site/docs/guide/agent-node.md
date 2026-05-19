@@ -98,7 +98,7 @@ npx @sleep2agi/agent-node \
 | **模型** | Codex SDK 模型（通过 `--model` 指定；具体 model id 查 OpenAI Codex 文档） |
 | **前置** | `codex auth login` |
 | **特点** | 代码生成强、工具调用灵活 |
-| **工具** | Codex CLI 内置 Read / Write / Edit / Bash / Glob / Grep / WebSearch（baked in，**不接受 `--tools` 自定义**；R243 chain 一致） |
+| **工具** | Codex CLI 内置 Read / Write / Edit / Bash / Glob / Grep / WebSearch（baked in，**不接受 `--tools` 自定义**） |
 
 ```bash
 npx @sleep2agi/agent-node \
@@ -308,7 +308,7 @@ Agent Node 只对 `task` 类型消息触发 AI 处理：
 
 ### 三种 `--tools` 行为（仅 `claude-agent-sdk` runtime）
 
-`--tools` flag 只控制 `claude-agent-sdk` runtime —— `codex-sdk` 的工具集由 codex CLI baked in（`Read/Write/Edit/Bash/Grep/Glob/WebSearch`，**不接受** `--tools`）；`claude-code-cli` 共享本机 Claude Code 工具集，也不通过这个 flag 选（R243 chain）。
+`--tools` flag 只控制 `claude-agent-sdk` runtime —— `codex-sdk` 的工具集由 codex CLI baked in（`Read/Write/Edit/Bash/Grep/Glob/WebSearch`，**不接受** `--tools`）；`claude-code-cli` 共享本机 Claude Code 工具集，也不通过这个 flag 选。
 
 | 输入 | 实际效果 | verify |
 |------|---------|--------|
@@ -427,7 +427,7 @@ SSE 断连后自动重连，使用指数退避策略：
 2. 关闭 SSE 连接
 3. 退出进程
 
-如果进程崩溃（来不及上报），CommHub 通过心跳超时检测，**10 分钟**后自动标记 offline（verify [`server/src/index.ts:816-821`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L816) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时；R219 chain 一致）。
+如果进程崩溃（来不及上报），CommHub 通过心跳超时检测，**10 分钟**后自动标记 offline（verify [`server/src/index.ts:816-821`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L816) `Date.now() - 10 * 60 * 1000` cutoff，惰性触发于 `/api/status` 调用时）。
 
 ## 环境变量
 
@@ -440,7 +440,7 @@ SSE 断连后自动重连，使用指数退避策略：
 | `COMMHUB_ALIAS` / `ALIAS` | `--alias` / `config.alias` | Agent 别名，两个 env 名都接受（cli.ts:109） |
 | `RUNTIME` | `--runtime` / `config.runtime` | 运行时引擎，默认 `claude-agent-sdk` |
 | `MODEL` | `--model` / `config.model` | AI 模型 |
-| `LOG_LEVEL` | `--log-level` / `config.logLevel`（**top-level**，不在 `flags` 里） | `debug` / `info` / `warn` / `error`，R211 chain 一致 |
+| `LOG_LEVEL` | `--log-level` / `config.logLevel`（**top-level**，不在 `flags` 里） | `debug` / `info` / `warn` / `error` |
 | `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | network ID 兜底（多数情况靠 ntok_ 推断，不需手填；cli.ts:356） |
 | `TELEGRAM_BOT_TOKEN` | channel `.env` / `config.env.TELEGRAM_BOT_TOKEN` | Telegram channel 的 bot token —— agent-node 在 telegram channel 启动路径直接读（cli.ts:259）；白名单走 `access.json` 不走 env（见 [Channel — Telegram](/guide/channels#telegram-channel)） |
 | `CLAUDE_TIMEOUT_MS` | `--claude-timeout-ms` / `config.flags.claudeTimeoutMs` / `config.claudeTimeoutMs` | `claude-agent-sdk` runtime 单次 query 超时（毫秒），默认 **`300000`（300s）**（[#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) v0.9.2 起从 120s 提升 —— [SDK concurrency investigation](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md) 实测 fan-out 高并发场景 intern API 单次 latency 拉到 17-37s，120s 老 ceiling 中途触发 abort 导致 25/30 子 agent 失败）；超时 abort + 返回错误，提示检查 `ANTHROPIC_BASE_URL` 是否可达。verify [`agent-node/src/cli.ts:241-243`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L241) |
@@ -451,7 +451,7 @@ SSE 断连后自动重连，使用指数退避策略：
 | `ANTHROPIC_API_KEY` | `config.env.ANTHROPIC_API_KEY` | 模型 API Key —— **api.anthropic.com 直连专用**，不要拿来传第三方 endpoint key（详见 [runtimes — claude-agent-sdk 常见坑](/guide/runtimes#claude-agent-sdk)） |
 
 ::: warning `TOOLS` / `SYSTEM_PROMPT` env vars 不存在
-R242 校准：旧 doc 列的 `TOOLS` / `SYSTEM_PROMPT` 这两个 env var **agent-node 不读**（verify cli.ts:161 `toolsRaw = opts.tools || fileConfig.tools` 没 `process.env.TOOLS`；cli.ts:180 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` 没 env）。要设置 tools 用 `--tools` CLI flag 或 `config.json` 的 `tools` 字段；系统提示词用 `--prompt` flag 或 `config.json` 的 `systemPrompt` 字段。
+旧 doc 列的 `TOOLS` / `SYSTEM_PROMPT` 这两个 env var **agent-node 不读**（verify cli.ts:161 `toolsRaw = opts.tools || fileConfig.tools` 没 `process.env.TOOLS`；cli.ts:180 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` 没 env）。要设置 tools 用 `--tools` CLI flag 或 `config.json` 的 `tools` 字段；系统提示词用 `--prompt` flag 或 `config.json` 的 `systemPrompt` 字段。
 :::
 
 ::: tip Docker 使用
