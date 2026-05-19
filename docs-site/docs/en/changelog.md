@@ -18,7 +18,7 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 
 ### Fix — [#157](https://github.com/sleep2agi/agent-network/issues/157) Dashboard Servers panel UI copy fix (Root cause #1)
 
-Vincent 5560 caught this in real testing (with dashboard screenshot): the Servers panel was rendering `agent rollup pending hub ≥ 0.8.2-preview` / `disk metric pending hub ≥ 0.8.2-preview` for every hub, even though every production hub is already at `≥ 0.8.2`. **The copy was outdated and misleading** — for a moment Vincent thought the version dashboard data was completely broken.
+Vincent caught this in real testing (with dashboard screenshot): the Servers panel was rendering `agent rollup pending hub ≥ 0.8.2-preview` / `disk metric pending hub ≥ 0.8.2-preview` for every hub, even though every production hub is already at `≥ 0.8.2`. **The copy was outdated and misleading** — for a moment Vincent thought the version dashboard data was completely broken.
 
 **Root cause #1 (this patch)**: ServersDrawer UI carried placeholder text introduced during the 0.8.2 upgrade window. 0.8.2 has long since shipped, but the placeholder text was never removed, so it kept rendering "pending" for `≥ 0.8.2` hubs and led users to believe the hub data was missing.
 
@@ -53,7 +53,7 @@ Dashboard team commit [`3f73810`](https://github.com/sleep2agi/agent-network-das
 
 - **18 cumulative `@latest` publishes** (v0.9.0 → v0.10.8): 0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 v0.10.x same-day ships**: v0.10.1-8 = **8 ships in ~11 hours** (audit-first cadence)
-- Vincent 5560 catch + Vincent [#158 LOCKED directive](https://github.com/sleep2agi/agent-network/issues/158) closed out in the same cycle
+- Vincent catch + Vincent [#158 LOCKED directive](https://github.com/sleep2agi/agent-network/issues/158) closed out in the same cycle
 
 See the [v0.10.8 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.8).
 
@@ -69,7 +69,7 @@ See the [v0.10.8 release notes](https://github.com/sleep2agi/agent-network/relea
 
 ### Fix — [#156](https://github.com/sleep2agi/agent-network/issues/156) codex-sdk batch path yolo flags parity
 
-Vincent 5526+5527+5531 catch: "fast 也要开新一下默认 / codex 默认 fast 啊" (codex needs `fast` mode by default in the batch path too).
+Vincent catch: "fast 也要开新一下默认 / codex 默认 fast 啊" (codex needs `fast` mode by default in the batch path too).
 
 **Pre-fix vs Post-fix matrix**:
 
@@ -138,13 +138,13 @@ From the next release onward (e.g. 2.2.6+), `anet upgrade` will **auto detached-
 
 ### Fixes
 
-- **[#154](https://github.com/sleep2agi/agent-network/issues/154) `anet upgrade` Option B detached spawn enabled by default** (Vincent 5489+5490 catch): users saw `anet (self): skipped (would replace the running CLI).` + `[anet] Done.` and assumed success, but the anet binary never actually upgraded (chicken-and-egg deadlock — a Node process can't in-place replace its own binary). `bin/cli.ts:3873-3874` now does `spawn(forkScript, [], { stdio: "inherit", detached: true })` + `child.unref()` + main process `process.exit(0)`; the detached child runs `npm install` in the background. The new version takes effect 1-2 min later — no `--self` flag needed.
-- **[#155](https://github.com/sleep2agi/agent-network/issues/155) `anet create --batch` wizard silent-exit fix** (Vincent 5493 catch): after the workdir-mode `select()`, `process.stdin` state changes and the readline-based `ask()` helper returns at EOF immediately → the entire wizard **silently exits** at the `Node prefix` prompt (same root cause as [#137 in v0.9.2 preview.5 anet create regression](https://github.com/sleep2agi/agent-network/issues/137), recurring in a different code path). Fix: migrate all post-select prompts to `inquirer.input()` so stdin handling stays uniform with the preceding select; the catch fallback retains the legacy `ask()` for non-TTY / no-inquirer environments.
+- **[#154](https://github.com/sleep2agi/agent-network/issues/154) `anet upgrade` Option B detached spawn enabled by default** (Vincent catch): users saw `anet (self): skipped (would replace the running CLI).` + `[anet] Done.` and assumed success, but the anet binary never actually upgraded (chicken-and-egg deadlock — a Node process can't in-place replace its own binary). `bin/cli.ts:3873-3874` now does `spawn(forkScript, [], { stdio: "inherit", detached: true })` + `child.unref()` + main process `process.exit(0)`; the detached child runs `npm install` in the background. The new version takes effect 1-2 min later — no `--self` flag needed.
+- **[#155](https://github.com/sleep2agi/agent-network/issues/155) `anet create --batch` wizard silent-exit fix** (Vincent catch): after the workdir-mode `select()`, `process.stdin` state changes and the readline-based `ask()` helper returns at EOF immediately → the entire wizard **silently exits** at the `Node prefix` prompt (same root cause as [#137 in v0.9.2 preview.5 anet create regression](https://github.com/sleep2agi/agent-network/issues/137), recurring in a different code path). Fix: migrate all post-select prompts to `inquirer.input()` so stdin handling stays uniform with the preceding select; the catch fallback retains the legacy `ask()` for non-TTY / no-inquirer environments.
 
 ### Quality gates + lessons
 
-- **`feedback_no_skip_smoke_gate`** (Vincent 5493): the v0.10.4 emergency trust path is **SUSPENDED** — the Docker smoke gate is never bypassed again.
-- **`feedback_no_host_test_nodes`** (Vincent 5499-5502): red-line — all test nodes go in Docker, must never connect to a host hub.
+- **`feedback_no_skip_smoke_gate`** (Vincent): the v0.10.4 emergency trust path is **SUSPENDED** — the Docker smoke gate is never bypassed again.
+- **`feedback_no_host_test_nodes`** (Vincent): red-line — all test nodes go in Docker, must never connect to a host hub.
 - **`feedback_dist_obfuscated_use_source_grep`** (new this cycle): `dist/bin/cli.js` is esbuild bundled + obfuscated (rotating string table, mangled identifiers, encoded string literals) — static grep on dist is useless. Code-path verification must grep `bin/cli.ts` source (HEAD = the preview build source).
 
 ### Cycle 11 stats
@@ -167,8 +167,8 @@ See the [v0.10.6 release notes](https://github.com/sleep2agi/agent-network/relea
 
 ### Fixes
 
-- **[#152](https://github.com/sleep2agi/agent-network/issues/152) `anet create --batch` wizard now prompts for workdir mode** (Vincent 5477 push): the `--workdir-mode <shared|separate>` flag has shipped since [#55](https://github.com/sleep2agi/agent-network/issues/55), but the interactive wizard never prompted — users had to know the flag name to change the default `separate`. `createBatchWizardCommand` now adds an inquirer select (`separate` default / `shared` co-cwd), TTY-aware (flag set / non-TTY both fall back to `separate` with an INFO hint). agent-node / server / dashboard untouched — purely CLI wizard UX.
-- **[#153](https://github.com/sleep2agi/agent-network/issues/153) codex-sdk / claude-code-cli runtime selection no longer falsely prompts for `ANTHROPIC_AUTH_TOKEN`** (Vincent 5481+5485 push): the runtime-first wizard ([#133](https://github.com/sleep2agi/agent-network/issues/133)) called `selectVendorAndModel()` even when codex-sdk / claude-code-cli was picked (only claude-agent-sdk needs an API key). The wizard now skips the API key prompt for those runtimes and prints a one-line `codex auth login` / `claude auth login` hint instead.
+- **[#152](https://github.com/sleep2agi/agent-network/issues/152) `anet create --batch` wizard now prompts for workdir mode** (Vincent push): the `--workdir-mode <shared|separate>` flag has shipped since [#55](https://github.com/sleep2agi/agent-network/issues/55), but the interactive wizard never prompted — users had to know the flag name to change the default `separate`. `createBatchWizardCommand` now adds an inquirer select (`separate` default / `shared` co-cwd), TTY-aware (flag set / non-TTY both fall back to `separate` with an INFO hint). agent-node / server / dashboard untouched — purely CLI wizard UX.
+- **[#153](https://github.com/sleep2agi/agent-network/issues/153) codex-sdk / claude-code-cli runtime selection no longer falsely prompts for `ANTHROPIC_AUTH_TOKEN`** (Vincent push): the runtime-first wizard ([#133](https://github.com/sleep2agi/agent-network/issues/133)) called `selectVendorAndModel()` even when codex-sdk / claude-code-cli was picked (only claude-agent-sdk needs an API key). The wizard now skips the API key prompt for those runtimes and prints a one-line `codex auth login` / `claude auth login` hint instead.
 
 See the [v0.10.5 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.5).
 
@@ -184,11 +184,11 @@ See the [v0.10.5 release notes](https://github.com/sleep2agi/agent-network/relea
 
 ### Fixes
 
-- **[#151](https://github.com/sleep2agi/agent-network/issues/151) `anet upgrade` self-skip warning is now explicit** (Vincent 5462+5472 push): the prior `anet (self) — self-skip` row didn't spell out **why** or **how**; users walked the plan and didn't realize their own version wasn't bumped. Now adds an explicit warning + guides toward the `--self` flag.
-- **[#150](https://github.com/sleep2agi/agent-network/issues/150) Dashboard topology orphan nodes now collected into an "Others" cluster box** (Vincent 5453 push): previously, orphan nodes (no prefix group) were scattered across the canvas and hard to find; they now collect into an "Others" cluster box rendered alongside the other groups.
+- **[#151](https://github.com/sleep2agi/agent-network/issues/151) `anet upgrade` self-skip warning is now explicit** (Vincent push): the prior `anet (self) — self-skip` row didn't spell out **why** or **how**; users walked the plan and didn't realize their own version wasn't bumped. Now adds an explicit warning + guides toward the `--self` flag.
+- **[#150](https://github.com/sleep2agi/agent-network/issues/150) Dashboard topology orphan nodes now collected into an "Others" cluster box** (Vincent push): previously, orphan nodes (no prefix group) were scattered across the canvas and hard to find; they now collect into an "Others" cluster box rendered alongside the other groups.
 
 ::: warning Vincent emergency trust path
-v0.10.4 was shipped via Vincent's emergency trust path, skipping the test-lead Docker smoke gate (per `feedback_no_test_on_prod` not exempt, but Vincent 5462 lead-scope trust path). Docker smoke is still the release-gate playbook standard checkpoint, unchanged.
+v0.10.4 was shipped via Vincent's emergency trust path, skipping the test-lead Docker smoke gate (per `feedback_no_test_on_prod` not exempt, but Vincent lead-scope trust path). Docker smoke is still the release-gate playbook standard checkpoint, unchanged.
 :::
 
 See the [v0.10.4 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.4).
@@ -205,7 +205,7 @@ See the [v0.10.4 release notes](https://github.com/sleep2agi/agent-network/relea
 
 ### Fixes
 
-- **[#149](https://github.com/sleep2agi/agent-network/issues/149) codex-sdk default model fix + yolo flags written into config** (Vincent 5447+5448 catch):
+- **[#149](https://github.com/sleep2agi/agent-network/issues/149) codex-sdk default model fix + yolo flags written into config** (Vincent catch):
   - cli.ts codex vendor preset default model placeholder `gpt-5.4` → real `gpt-5.5`
   - codex-sdk runtime gains `yolo: true` flags (same concept as the Claude Code preset's `dangerouslySkipPermissions` + `teammateMode`) — skips the permission-prompt for multi-agent batch runs
   - Flags are persisted in `config.json` rather than as an ephemeral runtime arg, so users can inspect / edit them
@@ -348,7 +348,7 @@ Dashboard integration lands in Phase 2 ([#119](https://github.com/sleep2agi/agen
 agent-node now embeds `process_telemetry` in every `commhub_report_status` heartbeat: `rss` / `cpu_pct` / `uptime_seconds` / `in_flight_count`. Zero sysmon dependency, zero privilege. commhub-server schema is aligned on the wire (commit [`209cac7`](https://github.com/sleep2agi/agent-network/commit/209cac7)); the dashboard hover-card rendering ships in Phase 2 ([#119](https://github.com/sleep2agi/agent-network/issues/119) sibling). Sibling to [#119](https://github.com/sleep2agi/agent-network/issues/119) host fields (host step 1 ✅ earlier; agent step 2 ships in this release).
 
 **D. Dashboard network/node front-end surface upgrade (Hero 3 — 8/8 surfaces complete, dashboard `0.5.0`)**
-- §3.A prefix-group fix (Vincent 5304 #1 catch)
+- §3.A prefix-group fix (Vincent #1 catch)
 - §3.B sweep retire (legacy sweep path merged into grid)
 - §3.C recent-panel hide
 - §3.D grid default view
@@ -373,7 +373,7 @@ Ships alongside **19+ rounds of typography + corner-radius cascade polish** (R31
 
 - ~~**Phase 2 dashboard `0.5.0` promote**~~ ✅ shipped (dashboard `0.5.0` landed with this v0.10.0 Phase 2 docs sync — 8/8 Hero 3 surfaces complete + 19+ rounds of polish)
 - **Close evidence for #102 / #103 hang** — Phase 1.5 in the preview chain already plans the regression replay against the new stdio path; we'll close them once the latest opt-in path passes the regression.
-- **Sessions NETWORK column display bug** (Vincent 5212 catch) — deferred to a v0.10.x patch or v0.11.0.
+- **Sessions NETWORK column display bug** (Vincent catch) — deferred to a v0.10.x patch or v0.11.0.
 - **#117 `anet project up` detached-tmux follow-up** (macOS bun `setRawMode` already fixed by #136, but detached-mode follow-up still pending) — to be done with the v0.11.0 control layer.
 
 Release flow follows the [v0.9.0 split-brain lessons #126](https://github.com/sleep2agi/agent-network/issues/126) two-phase publish SOP: publish each tarball with `--tag preview` first, curl-verify HTTP 200, then `npm dist-tag add @<v> latest`. Phase 1 three-package (agent-network / agent-node / commhub-server) clean-semver promote is complete; dashboard Phase 2 is pending §3.D/F/G.
@@ -403,7 +403,7 @@ The [SDK concurrency investigation Phase 3](https://github.com/sleep2agi/agent-n
 Set `CLAUDE_MAX_RETRIES=0` to revert to the v0.9.1 no-retry behavior.
 
 **3. [#133](https://github.com/sleep2agi/agent-network/issues/133) `anet node create` runtime-first wizard** ([`29fd290`](https://github.com/sleep2agi/agent-network/commit/29fd290))
-Vincent 5101 catch: the old vendor-first selector enumerated only claude-agent-sdk vendors (intern / MiniMax / Claude / GLM / ...), leaving users who want `claude-code-cli` (Anthropic Max plan + local `claude` CLI login) or `codex-sdk` (OpenAI `codex auth login`) **implicitly stuck** — they had to know to pass `--runtime codex-sdk` to skip the vendor picker. New flow:
+Vincent catch: the old vendor-first selector enumerated only claude-agent-sdk vendors (intern / MiniMax / Claude / GLM / ...), leaving users who want `claude-code-cli` (Anthropic Max plan + local `claude` CLI login) or `codex-sdk` (OpenAI `codex auth login`) **implicitly stuck** — they had to know to pass `--runtime codex-sdk` to skip the vendor picker. New flow:
 1. `selectRuntime()` 3-way picker: `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`
 2. `claude-agent-sdk` → continues into `selectVendorAndModel()` (existing flow)
 3. `claude-code-cli` → prints `claude auth login` hint, skips vendor
@@ -499,7 +499,7 @@ The full **zero-keystroke recovery loop** for 22-node reboots + transparent defa
 ### New features — Runtime default-behavior transparency
 
 - **`claude-agent-sdk` default = Claude Code preset** (issue [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B) — root-cause fix: with no `tools` field in `config.json`, agent-node was passing the SDK `options.tools = undefined`, giving the agent zero built-in tools and producing hallucinated "network restricted" responses. Now agent-node falls back to the SDK `{ type: 'preset', preset: 'claude_code' }` sentinel — every agent gets WebFetch / WebSearch / Bash / Read / Write / Edit / Glob / Grep / Task / NotebookEdit by default. `--tools "all"` routes to the same preset (replaces the old hardcoded 8-tool list as the single source of truth).
-- **Behavior-disclosure banner** ([#101](https://github.com/sleep2agi/agent-network/issues/101), per Vincent 4927) — `anet node create` prints a banner with the built-in tools + MCP tools + `dangerouslySkipPermissions=true` warning + restrict-tools / disable-auto-skip / inspect-current-set hints. `anet info <alias>` displays `tools:` + `flags:` lines for ad-hoc audits.
+- **Behavior-disclosure banner** ([#101](https://github.com/sleep2agi/agent-network/issues/101), per Vincent) — `anet node create` prints a banner with the built-in tools + MCP tools + `dangerouslySkipPermissions=true` warning + restrict-tools / disable-auto-skip / inspect-current-set hints. `anet info <alias>` displays `tools:` + `flags:` lines for ad-hoc audits.
 - **`anet ls -v` / `--verbose`** (companion to [#101](https://github.com/sleep2agi/agent-network/issues/101)) — prints a second line per node with `tools=...  permGate=on/off`.
 
 ### New features — Security hardening

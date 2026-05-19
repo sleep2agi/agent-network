@@ -26,7 +26,7 @@ Shipped alongside the [v0.10.2 release](/en/changelog):
 :::
 
 ::: info v0.10.8 dashboard `0.5.3` — Servers panel UI copy fix + TopoGraph density tier
-Shipped alongside the [v0.10.8 release](/en/changelog) ([#157](https://github.com/sleep2agi/agent-network/issues/157) Fix #1, caught by Vincent 5560):
+Shipped alongside the [v0.10.8 release](/en/changelog) ([#157](https://github.com/sleep2agi/agent-network/issues/157) Fix #1, caught by Vincent):
 
 - **Servers panel "not reported" copy made accurate**: the early placeholder strings `agent rollup pending hub ≥ 0.8.2-preview` / `disk metric pending hub ≥ 0.8.2-preview` were buried during the 0.8.2 upgrade window. After every hub already became ≥ 0.8.2, they still rendered (**misleading users into thinking their hub version was too old**). Now `agent rollup not reported by hub` / `disk metric not reported by hub` — accurately conveying "this hub didn't report it right now".
 - **`data-server-{agents,disk}-missing="true"` Playwright hooks**: new since dashboard 0.5.3, available for e2e validation of hub-side telemetry coverage.

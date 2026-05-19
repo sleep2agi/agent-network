@@ -26,7 +26,7 @@ Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务�
 :::
 
 ::: info v0.10.8 dashboard `0.5.3` — Servers 面板 UI 文案修 + TopoGraph density tier
-跟随 [v0.10.8 release](/changelog) ship（[#157](https://github.com/sleep2agi/agent-network/issues/157) Fix #1, Vincent 5560 catch）：
+跟随 [v0.10.8 release](/changelog) ship（[#157](https://github.com/sleep2agi/agent-network/issues/157) Fix #1, Vincent catch）：
 
 - **Servers 面板"未上报"文案精准化**：早期为 0.8.2 升级 window 而埋的占位文字 `agent rollup pending hub ≥ 0.8.2-preview` / `disk metric pending hub ≥ 0.8.2-preview` 在 hub 全部 ≥ 0.8.2 后仍显示（**误导用户认为版本不够**），改 `agent rollup not reported by hub` / `disk metric not reported by hub` —— 精准反映"该 hub 此刻未上报"语义。
 - **`data-server-{agents,disk}-missing="true"` Playwright 钩子**：dashboard 0.5.3 起新增，供 e2e 验证 hub-side telemetry coverage。

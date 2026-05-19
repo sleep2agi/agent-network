@@ -263,7 +263,7 @@ anet node create <name> [options]
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--runtime` | 不传则走交互式 **runtime-first wizard**（v0.9.2+ 起 [#133](https://github.com/sleep2agi/agent-network/issues/133) Vincent 5101 改成 runtime-first：先 3-way 选 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`，**只有** `claude-agent-sdk` 才继续走 vendor picker；`claude-code-cli` print `claude auth login` hint 跳过 vendor，`codex-sdk` print `codex auth login` hint 跳过 vendor）| `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `--runtime` | 不传则走交互式 **runtime-first wizard**（v0.9.2+ 起 [#133](https://github.com/sleep2agi/agent-network/issues/133) Vincent 改成 runtime-first：先 3-way 选 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`，**只有** `claude-agent-sdk` 才继续走 vendor picker；`claude-code-cli` print `claude auth login` hint 跳过 vendor，`codex-sdk` print `codex auth login` hint 跳过 vendor）| `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `--model` | (按 runtime 默认) | 模型名称 |
 
 **示例**：
