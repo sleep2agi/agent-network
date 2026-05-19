@@ -342,6 +342,7 @@ const TaskSchema = z.object({
   priority: z.enum(["high", "normal", "low"]).default("normal"),
   from: z.string().max(200).optional(),
   network_id: z.string().max(200).optional(),
+  parent_task_id: z.string().max(200).optional(),
 });
 
 const BroadcastSchema = z.object({
@@ -1177,9 +1178,9 @@ Bun.serve({
           [id, body.alias, body.priority, body.task, fromSession, taskNetId]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7)`,
-          [id, fromSession, body.alias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId]
+          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id)
+           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8)`,
+          [id, fromSession, body.alias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId, body.parent_task_id ?? null]
         );
         // Touch session row so the dashboard reflects "task in flight"
         // immediately, without waiting for the agent's report_status to
@@ -1200,7 +1201,7 @@ Bun.serve({
       if (taskNetId) { sessionSql += " AND network_id = ?2"; sessionParams.push(taskNetId); }
       const targetSession = db.get<any>(sessionSql, ...sessionParams);
       if (targetSession) pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession }, taskNetId);
-      return withCors(req, Response.json({ ok: true, message_id: id }));
+      return withCors(req, Response.json({ ok: true, task_id: id, message_id: id }));
     }
 
     // ── REST: broadcast ──
@@ -1458,6 +1459,21 @@ Bun.serve({
       sql += " ORDER BY updated_at DESC";
       const rows = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
+    }
+
+    // ── REST: single task lookup (V2) ──
+    const taskPathMatch = url.pathname.match(/^\/api\/tasks?\/([^/]+)$/);
+    if (taskPathMatch && req.method === "GET") {
+      const taskId = decodeURIComponent(taskPathMatch[1] ?? "");
+      const params: any[] = [taskId];
+      let sql = "SELECT * FROM tasks WHERE task_id = ?1";
+      sql = addNetworkScope(sql, params, restScope);
+      sql += " LIMIT 1";
+      const task = db.get(sql, ...params);
+      if (!task) {
+        return withCors(req, Response.json({ ok: false, error: "task_not_found", task_id: taskId }, { status: 404 }));
+      }
+      return withCors(req, Response.json({ ok: true, task }));
     }
 
     // ── REST: tasks table (V2) ──
