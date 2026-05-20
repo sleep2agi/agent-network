@@ -74,7 +74,7 @@ block-beta
 | From | 发送者别名 |
 | To | 接收者别名 |
 | Priority | 优先级（high / normal / low） |
-| Status | 状态（`created` / `delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired` 共 **8 个状态**；verify [`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`；R230 chain 已校准 cancel_task 4 个 cancellable 状态含 `created`；完整状态机见 [Task 生命周期](/concepts/task-lifecycle)） |
+| Status | 状态（`created` / `delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired` 共 **8 个状态**；verify [`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`；`cancel_task` 4 个 cancellable 状态含 `created`；完整状态机见 [Task 生命周期](/concepts/task-lifecycle)） |
 | Content | 任务内容预览 |
 | Created | 创建时间 |
 | Duration | 从创建到完成的耗时 |
@@ -185,17 +185,17 @@ sequenceDiagram
 ### Admin（管理面板）
 
 ::: warning 仅**系统级** admin 可见
-Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** role（首位注册用户自动获得），**不是** network 内的 admin 角色（`network_members.role='admin'`）。R262/R263 chain 已统一这点：网络级 admin 跟其他角色一样**只能看自己**的 `/api/audit-log` row，看全部需要系统级 admin。
+Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** role（首位注册用户自动获得），**不是** network 内的 admin 角色（`network_members.role='admin'`）。网络级 admin 跟其他角色一样**只能看自己**的 `/api/audit-log` row，看全部需要系统级 admin。
 :::
 
 管理功能包括：
 
 - **用户管理** -- 查看所有注册用户（`/api/users` 仅系统级 admin）；修改角色当前走 REST `PUT /api/networks/:id/members/:user_id`（owner only，详见 [API — PUT members](/api/rest#put-api-networks-id-members-user-id)），CLI 暂无 `promote` / `demote` 子命令（排在 v0.9+）
-- **网络管理** -- 查看所有网络、成员（配额体系 v0.8 **部分启用**：`createNetwork` 仍 enforces `max_networks_owned`，其他 quota 项 dormant；详见 [networks 配额限制](/concepts/networks#quota-limits) + R208/R226 chain）
+- **网络管理** -- 查看所有网络、成员（配额体系 v0.8 **部分启用**：`createNetwork` 仍 enforces `max_networks_owned`，其他 quota 项 dormant；详见 [networks 配额限制](/concepts/networks#quota-limits)）
 - **系统统计** -- 服务器负载、数据库大小、连接数
-- **审计日志** -- 所有操作的详细记录（`/api/audit-log` 端点 + Dashboard 0.4.2 Audit Log 页；系统级 admin 看全部，其他角色看自己 row，R262/R263 chain）
+- **审计日志** -- 所有操作的详细记录（`/api/audit-log` 端点 + Dashboard 0.4.2 Audit Log 页；系统级 admin 看全部，其他角色看自己 row）
 
-审计日志示例（按 R195 chain — 实际 19 个 action，R283 → R485 校准）：
+审计日志示例（实际 19 个 action）：
 
 | 时间 | 用户 | 操作 | 详情 |
 |------|------|------|------|
@@ -204,7 +204,7 @@ Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** 
 | 10:00:10 | alice | `network_renamed` | dev → development |
 | 10:00:15 | alice | `member_added` | u_bob_xxx as member |
 
-R264 校准：原 doc 示例「`create_network`」action **不存在**。verify R195 chain 已在 [`security.md` 审计日志](/concepts/security#审计日志) 校准 —— [`POST /api/networks` (index.ts:635-647)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635) **不调** `logAudit`，所以 audit_log 里**不会**有 `create_network` 或 `network_created` 行。实际 19 个 action（R283 → R485 校准 — RFC-010 节点改名加了 3 个 `node_rename_*` action；18 个通过 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447) + 1 个 `password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT）: `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / node_rename_prepared / node_rename_committed / node_rename_aborted / invite_created`。
+原 doc 示例「`create_network`」action **不存在**。[`security.md` 审计日志](/concepts/security#审计日志) 已校准 —— [`POST /api/networks` (index.ts:635-647)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635) **不调** `logAudit`，所以 audit_log 里**不会**有 `create_network` 或 `network_created` 行。实际 19 个 action（RFC-010 节点改名加了 3 个 `node_rename_*` action；18 个通过 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447) + 1 个 `password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT）: `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / node_rename_prepared / node_rename_committed / node_rename_aborted / invite_created`。
 
 ### Settings（设置）
 

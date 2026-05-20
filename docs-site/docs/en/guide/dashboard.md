@@ -74,7 +74,7 @@ The task management page displays the full lifecycle of all tasks:
 | From | Sender alias |
 | To | Recipient alias |
 | Priority | Priority level (high / normal / low) |
-| Status | Status (`created` / `delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired` — **8 states total**; verified at [`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`; the R230 chain calibrated `cancel_task` to cover 4 cancellable states including `created`; full state machine: [Task lifecycle](/en/concepts/task-lifecycle)) |
+| Status | Status (`created` / `delivered` / `acked` / `running` / `replied` / `failed` / `cancelled` / `expired` — **8 states total**; verified at [`server/src/db.ts:94`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L94) `status TEXT NOT NULL DEFAULT 'created'`; `cancel_task` covers 4 cancellable states including `created`; full state machine: [Task lifecycle](/en/concepts/task-lifecycle)) |
 | Content | Task content preview |
 | Created | Creation time |
 | Duration | Time from creation to completion |
@@ -185,17 +185,17 @@ sequenceDiagram
 ### Admin
 
 ::: warning Only **system-level** admins
-The Admin panel is visible to users with `users.role='admin'` — that's a **system-level** role (granted automatically to the first registered user), **not** a `network_members.role='admin'` (per-network role). Aligned with the R262/R263 chain: a network-level admin can only see their own `/api/audit-log` rows like any other role; reading all rows requires the system-level admin.
+The Admin panel is visible to users with `users.role='admin'` — that's a **system-level** role (granted automatically to the first registered user), **not** a `network_members.role='admin'` (per-network role). A network-level admin can only see their own `/api/audit-log` rows like any other role; reading all rows requires the system-level admin.
 :::
 
 Admin features include:
 
 - **User Management** -- View all registered users (`/api/users` — system-level admin only); role changes currently go through REST `PUT /api/networks/:id/members/:user_id` (owner only — see [API — PUT members](/en/api/rest#put-api-networks-id-members-user-id)). CLI has no `promote` / `demote` sub-command yet (queued for v0.9+).
-- **Network Management** -- View all networks, members (plan-quota is **partially enforced** in v0.8: `createNetwork` still enforces `max_networks_owned`; other quota items are dormant — see [networks — quota limits](/en/concepts/networks#quota-limits) + R208/R226 chain)
+- **Network Management** -- View all networks, members (plan-quota is **partially enforced** in v0.8: `createNetwork` still enforces `max_networks_owned`; other quota items are dormant — see [networks — quota limits](/en/concepts/networks#quota-limits))
 - **System Statistics** -- Server load, database size, connection count
-- **Audit Log** -- Detailed records of all operations (`/api/audit-log` endpoint + Dashboard 0.4.2 Audit Log page; system-level admin sees everything, other roles only see their own rows — R262/R263 chain)
+- **Audit Log** -- Detailed records of all operations (`/api/audit-log` endpoint + Dashboard 0.4.2 Audit Log page; system-level admin sees everything, other roles only see their own rows)
 
-Audit log example (R195 chain — actual **19** actions; R283 → R485 calibration):
+Audit log example (actual **19** actions):
 
 | Time | User | Action | Details |
 |------|------|------|------|
@@ -204,7 +204,7 @@ Audit log example (R195 chain — actual **19** actions; R283 → R485 calibrati
 | 10:00:10 | alice | `network_renamed` | dev → development |
 | 10:00:15 | alice | `member_added` | u_bob_xxx as member |
 
-R264 calibration: the older example listed `create_network` as an audit action — **it does not exist**. R195 chain already calibrated [`security.md` audit log](/en/concepts/security#audit-log): [`POST /api/networks` (index.ts:635-647)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635) does **not** call `logAudit`, so the `audit_log` table never contains `create_network` or `network_created` rows. The actual **19** actions are (R283 → R485 calibration — RFC-010 node-rename added 3 `node_rename_*` actions; 18 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447) + 1 (`password_reset_by_admin`) goes via direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294)): `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / node_rename_prepared / node_rename_committed / node_rename_aborted / invite_created`.
+The older example listed `create_network` as an audit action — **it does not exist**. [`security.md` audit log](/en/concepts/security#audit-log) already documents this: [`POST /api/networks` (index.ts:635-647)](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L635) does **not** call `logAudit`, so the `audit_log` table never contains `create_network` or `network_created` rows. The actual **19** actions are (RFC-010 node-rename added 3 `node_rename_*` actions; 18 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447) + 1 (`password_reset_by_admin`) goes via direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294)): `register / login / login_failed / login_rate_limited / password_changed / password_reset_by_admin / network_renamed / network_deleted / network_joined / member_added / member_role_changed / member_removed / token_created / token_revoked / node_token_created / node_rename_prepared / node_rename_committed / node_rename_aborted / invite_created`.
 
 ### Settings
 
