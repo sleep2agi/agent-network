@@ -35,7 +35,7 @@ stateDiagram-v2
     expired --> [*]
 ```
 
-::: warning R266 calibration: `created` is essentially invisible on the production path
+::: warning `created` is essentially invisible on the production path
 The diagram's `[*] → created → delivered` reflects the **schema default** ([`server/src/db.ts:95`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L95) `status TEXT NOT NULL DEFAULT 'created'`), but **no code path UPDATEs `created` to `delivered`**: [`server/src/tools.ts:509-510`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L509) `send_task` inserts with `VALUES (..., 'delivered', ...)` directly, bypassing the default. So through normal API flows you'll **never observe** a task in `created` state.
 
 `created` still appears in three WHERE clauses defensively:
@@ -47,7 +47,7 @@ The diagram's `[*] → created → delivered` reflects the **schema default** ([
 | Expiration patrol | `created` / `delivered` | [index.ts:291-293](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L291) |
 | `ack_inbox` (Agent tool) | `delivered` (**only 1**) | [tools.ts:354](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354) |
 
-R279 calibration: the R266 chain originally treated `ack_inbox` and `send_ack` as one row, but their WHERE clauses differ — `ack_inbox` (agent-side tool, L354) accepts only `delivered`, while `send_ack` (hub-side tool, L679) accepts `created` / `delivered`. The "4 cancellable states" R230 chain calibration is exactly the `cancel_task` row. The state diagram above doesn't draw `created`'s outgoing edges for simplicity; SQL allows them, but the only way a row enters the `created` state is a direct DB INSERT that omits the status column — no REST/MCP entry point does that.
+`ack_inbox` and `send_ack` have different WHERE clauses — `ack_inbox` (agent-side tool, L354) accepts only `delivered`, while `send_ack` (hub-side tool, L679) accepts `created` / `delivered`. The "4 cancellable states" are exactly the `cancel_task` row. The state diagram above doesn't draw `created`'s outgoing edges for simplicity; SQL allows them, but the only way a row enters the `created` state is a direct DB INSERT that omits the status column — no REST/MCP entry point does that.
 :::
 
 ## Status Reference
@@ -139,7 +139,7 @@ Expired tasks can be redelivered via `retry_task`.
 expires_at = datetime('now', '+3600 seconds')
 ```
 
-::: warning R305 calibration: the expiry patrol only covers `created` / `delivered`
+::: warning The expiry patrol only covers `created` / `delivered`
 Verify [`server/src/index.ts:286-303`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L286): expiration is not real-time — a **patrol that runs every 5 minutes** UPDATEs tasks with `expires_at < now` **and `status IN ('created', 'delivered')`** to `expired`.
 
 Implications:
@@ -152,7 +152,7 @@ Implications:
 Failed, cancelled, and expired tasks can all be retried:
 
 ::: tip
-The following calls go via REST `POST /mcp` rather than the Claude Code agent's stdio channel wrapper. The channel wrapper ([`channel/commhub-channel.ts:138-196`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L138)) exposes 5 `commhub_*` tools (`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`); `cancel_task` / `retry_task` / `reassign_task` / `get_inbox` are admin / dashboard ops and not exposed to agent self-service (R206 chain aligned).
+The following calls go via REST `POST /mcp` rather than the Claude Code agent's stdio channel wrapper. The channel wrapper ([`channel/commhub-channel.ts:138-196`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L138)) exposes 5 `commhub_*` tools (`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`); `cancel_task` / `retry_task` / `reassign_task` / `get_inbox` are admin / dashboard ops and not exposed to agent self-service.
 :::
 
 ```bash
@@ -195,7 +195,7 @@ Cancellation will:
 3. Record the cancellation reason in the result field
 4. Log a task_event
 
-Cancellable statuses: `created` / `delivered` / `acked` / `running` (4 statuses — verified at [`server/src/tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) `WHERE status IN ('created', 'delivered', 'acked', 'running')`. R230 calibration: the tool's own description string only mentions 3 (missing `created`); the SQL is the source of truth with 4. Terminal states `replied` / `failed` / `cancelled` / `expired` cannot be cancelled directly — retry first, then cancel.)
+Cancellable statuses: `created` / `delivered` / `acked` / `running` (4 statuses — verified at [`server/src/tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) `WHERE status IN ('created', 'delivered', 'acked', 'running')`. The tool's own description string only mentions 3 (missing `created`); the SQL is the source of truth with 4. Terminal states `replied` / `failed` / `cancelled` / `expired` cannot be cancelled directly — retry first, then cancel.)
 
 ## Reassigning Tasks
 
@@ -256,9 +256,9 @@ Every status change is recorded in the `task_events` table (verified at [`server
 CREATE TABLE task_events (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id       TEXT NOT NULL,
-  from_status   TEXT,                                    -- R231 calibration: column is from_status, not from_state
-  to_status     TEXT NOT NULL,                           -- R231 calibration: column is to_status, not to_state
-  actor         TEXT NOT NULL DEFAULT 'system',          -- R231 calibration: NOT NULL with default 'system'
+  from_status   TEXT,                                    -- column is from_status, not from_state
+  to_status     TEXT NOT NULL,                           -- column is to_status, not to_state
+  actor         TEXT NOT NULL DEFAULT 'system',          -- NOT NULL with default 'system'
   detail        TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -272,7 +272,7 @@ curl "http://localhost:9200/api/task_events?task_id=t_xxx" \
   -H "Authorization: Bearer ntok_xxx"
 ```
 
-R231 calibration: the original doc's `anet tasks --detail t_xxx` CLI command does not exist ([`cli.ts:3059-3094 tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3059) only parses status (positional or `--status`) and `--limit` — `--detail` is silently ignored and prints `?` placeholders).
+The original doc's `anet tasks --detail t_xxx` CLI command does not exist ([`cli.ts:3059-3094 tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3059) only parses status (positional or `--status`) and `--limit` — `--detail` is silently ignored and prints `?` placeholders).
 
 Example output:
 

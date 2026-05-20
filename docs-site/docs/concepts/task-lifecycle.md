@@ -35,7 +35,7 @@ stateDiagram-v2
     expired --> [*]
 ```
 
-::: warning R266 校准：`created` 在生产路径上基本不可见
+::: warning `created` 在生产路径上基本不可见
 状态机里的 `[*] → created → delivered` 是按 schema 默认值（[`server/src/db.ts:95`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L95) `status TEXT NOT NULL DEFAULT 'created'`）画的，但 **没有任何代码路径会把 `created` UPDATE 成 `delivered`**：[`server/src/tools.ts:509-510`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L509) 的 `send_task` 在 INSERT 时就直接写 `VALUES (..., 'delivered', ...)`，跳过默认值。所以正常 API 流程里**永远观察不到** `created` 这个状态。
 
 `created` 仍然作为防御性兜底出现在三条 WHERE 子句里：
@@ -47,7 +47,7 @@ stateDiagram-v2
 | 过期巡检（patrol） | `created` / `delivered` | [index.ts:291-293](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L291) |
 | `ack_inbox`（Agent tool） | `delivered`（**仅 1 个**） | [tools.ts:354](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354) |
 
-R279 校准：R266 chain 原表把 `ack_inbox` 和 `send_ack` 当一行，但实际 WHERE 子句不同 —— `ack_inbox`（agent 端 tool，L354）只接受 `delivered`，`send_ack`（hub 端 tool，L679）接受 `created` / `delivered` 两种。R230 chain 校准的「4 个可取消状态」就是 `cancel_task` 那行；本节状态机图为简化未画 `created` 的出边，实际 SQL 允许（直接构造 DB row 走 INSERT 默认值才能进入 `created` 态，REST/MCP 没有这种入口）。
+`ack_inbox` 和 `send_ack` 的 WHERE 子句不同 —— `ack_inbox`（agent 端 tool，L354）只接受 `delivered`，`send_ack`（hub 端 tool，L679）接受 `created` / `delivered` 两种。「4 个可取消状态」就是 `cancel_task` 那行；本节状态机图为简化未画 `created` 的出边，实际 SQL 允许（直接构造 DB row 走 INSERT 默认值才能进入 `created` 态，REST/MCP 没有这种入口）。
 :::
 
 ## 状态说明
@@ -139,7 +139,7 @@ commhub_send_task(alias="代码1号", task="...", ttl_seconds=7200)  # 2 小时
 expires_at = datetime('now', '+3600 seconds')
 ```
 
-::: warning R305 校准：过期巡检只覆盖 `created` / `delivered`
+::: warning 过期巡检只覆盖 `created` / `delivered`
 verify [`server/src/index.ts:286-303`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L286)：过期不是实时的 —— 一个 **每 5 分钟跑一次的 patrol** 把 `expires_at < now` 且 **`status IN ('created', 'delivered')`** 的任务 UPDATE 成 `expired`。
 
 含义：
@@ -152,7 +152,7 @@ verify [`server/src/index.ts:286-303`](https://github.com/sleep2agi/agent-networ
 失败、取消、过期的任务都可以重试：
 
 ::: tip
-下面的调用走 REST `POST /mcp`，不是 Claude Code agent 的 stdio channel wrapper。channel wrapper（[`channel/commhub-channel.ts:138-196`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L138)）只暴露 5 个 `commhub_*` tool（`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`）；`cancel_task` / `retry_task` / `reassign_task` / `get_inbox` 属于管理 / Dashboard 操作，不对 agent self-service 开放（R206 chain 一致）。
+下面的调用走 REST `POST /mcp`，不是 Claude Code agent 的 stdio channel wrapper。channel wrapper（[`channel/commhub-channel.ts:138-196`](https://github.com/sleep2agi/agent-network/blob/main/channel/commhub-channel.ts#L138)）只暴露 5 个 `commhub_*` tool（`commhub_reply` / `commhub_report_status` / `commhub_send_task` / `commhub_send_message` / `commhub_get_all_status`）；`cancel_task` / `retry_task` / `reassign_task` / `get_inbox` 属于管理 / Dashboard 操作，不对 agent self-service 开放。
 :::
 
 ```bash
@@ -195,7 +195,7 @@ cancel_task(task_id="t_xxx", reason="不再需要")
 3. 记录取消原因到 result 字段
 4. 记录 task_event
 
-可取消的状态：`created` / `delivered` / `acked` / `running`（4 个状态，verify [`server/src/tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) `WHERE status IN ('created', 'delivered', 'acked', 'running')` —— R230 校准：server 的 tool description 字符串只列 3 个少一个 `created`，实际 SQL 4 个；终态 `replied` / `failed` / `cancelled` / `expired` 不能直接 cancel，需先 retry 再 cancel）
+可取消的状态：`created` / `delivered` / `acked` / `running`（4 个状态，verify [`server/src/tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) `WHERE status IN ('created', 'delivered', 'acked', 'running')` —— server 的 tool description 字符串只列 3 个少一个 `created`，实际 SQL 4 个；终态 `replied` / `failed` / `cancelled` / `expired` 不能直接 cancel，需先 retry 再 cancel）
 
 ## 转移任务
 
@@ -256,9 +256,9 @@ sequenceDiagram
 CREATE TABLE task_events (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id       TEXT NOT NULL,
-  from_status   TEXT,                                    -- R231 校准: 列名是 from_status 不是 from_state
-  to_status     TEXT NOT NULL,                           -- R231 校准: 列名是 to_status 不是 to_state
-  actor         TEXT NOT NULL DEFAULT 'system',          -- R231 校准: NOT NULL + 默认 'system'
+  from_status   TEXT,                                    -- 列名是 from_status 不是 from_state
+  to_status     TEXT NOT NULL,                           -- 列名是 to_status 不是 to_state
+  actor         TEXT NOT NULL DEFAULT 'system',          -- NOT NULL + 默认 'system'
   detail        TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -272,7 +272,7 @@ curl "http://localhost:9200/api/task_events?task_id=t_xxx" \
   -H "Authorization: Bearer ntok_xxx"
 ```
 
-R231 校准：原 doc 写 `anet tasks --detail t_xxx` CLI 命令不存在（[`cli.ts:3059-3094 tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3059) 只解析 status（positional `args[1]` 或 `--status`）和 `--limit`，没 `--detail` 参数），用户跑会 hit `?` 占位输出。
+原 doc 写 `anet tasks --detail t_xxx` CLI 命令不存在（[`cli.ts:3059-3094 tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3059) 只解析 status（positional `args[1]` 或 `--status`）和 `--limit`，没 `--detail` 参数），用户跑会 hit `?` 占位输出。
 
 示例输出：
 
