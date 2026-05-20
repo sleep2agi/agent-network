@@ -90,7 +90,7 @@ anet upgrade --self
 | `self skip` | 默认不自升 anet 本身（要加 `--self`）|
 | `lookup failed` | npm registry 查不到 latest，网络/包名问题 |
 
-**特别提示 `commhub-server`**：这行永远显示 `PINNED_SERVER_VERSION = 0.8.0`（[`cli.ts:2125`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2125)）—— `anet hub start` 不管全局装的是什么版本都跑这个 pinned 版（避免 server breaking 风险）。所以即使全局 `commhub-server` 升了也没影响 hub 实际运行。
+**特别提示 `commhub-server`**：这行显示当前 `PINNED_SERVER_VERSION`（v0.10.8 stable 是 `0.8.2`，v0.10.1 PINNED chain-bump hotfix 从 `0.8.0` 升上来）—— `anet hub start` 不管全局装的是什么版本都跑这个 pinned 版（避免 server breaking 风险）。所以即使全局 `commhub-server` 升了也没影响 hub 实际运行。
 
 **升完之后**：`anet upgrade` 末尾会提示「跑过的节点要重启拿新 agent-node」，可以一键：
 
