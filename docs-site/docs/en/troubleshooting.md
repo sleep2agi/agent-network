@@ -662,7 +662,7 @@ If the codex CLI is already at latest but it still errors, please file an issue 
 
 ### Dashboard agent hover card shows `process_telemetry` as `null` (shipped since v0.10.0, dashboard 0.5.0+)
 
-The dashboard `≥ 0.5.0` §3.E hover detail card expects agent-node `≥ 2.4.0` ([#142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 — v0.10.0 ship made the agent emit `process_telemetry` on every heartbeat) plus commhub-server `≥ 0.8.2` (T2.2 schema align). Three possible causes:
+The dashboard `≥ 0.5.0` §3.E hover detail card expects agent-node `≥ 2.4.0` ([#142](https://github.com/sleep2agi/agent-network/issues/142) — v0.10.0 ship made the agent emit `process_telemetry` on every heartbeat) plus commhub-server `≥ 0.8.2` (schema align). Three possible causes:
 
 - **agent-node older than 2.4.0**: run `anet upgrade` to pull v0.10.8 latest (currently `agent-node 2.4.2`, satisfying the ≥ 2.4.0 minimum)
 - **commhub-server older than 0.8.2**: upgrade the server (`bunx @sleep2agi/commhub-server@latest`)

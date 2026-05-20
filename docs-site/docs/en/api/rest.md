@@ -890,7 +890,7 @@ curl http://localhost:9200/api/server/dev-machine/agents \
 | `agents[].raw_agent` | Original `agent` field (un-normalized), useful for debugging |
 | `agents[].health` | Health chip from `agentHealthChip(status, last_seen)` (`online` / `idle` / `offline` / etc.) |
 | `agents[].telemetry` | Full host-level + process-level telemetry the agent reports on heartbeat (reading-friendly view) |
-| `agents[].process_telemetry` | Per-agent process telemetry (`rss_bytes` / `rss_mb` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [issue #142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 shipped in `agent-node@2.4.0`, server schema T2.2 aligned in `commhub-server@0.8.2`) |
+| `agents[].process_telemetry` | Per-agent process telemetry (`rss_bytes` / `rss_mb` / `cpu_pct` / `uptime_seconds` / `in_flight_count`, [issue #142](https://github.com/sleep2agi/agent-network/issues/142) shipped in `agent-node@2.4.0`, server schema aligned in `commhub-server@0.8.2`) |
 
 **404**: `{ "ok": false, "error": "server not found" }` — no session matches this host.
 

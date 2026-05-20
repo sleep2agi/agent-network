@@ -889,7 +889,7 @@ curl http://localhost:9200/api/server/dev-machine/agents \
 | `agents[].raw_agent` | 原 `agent` 字段（未归一化），方便排查 |
 | `agents[].health` | `agentHealthChip(status, last_seen)` 健康灯（`online` / `idle` / `offline` / 等）|
 | `agents[].telemetry` | 该 agent 心跳带上的 host-level + process-level 完整 telemetry（reading-friendly 视图）|
-| `agents[].process_telemetry` | per-agent 进程 telemetry（`rss_bytes` / `rss_mb` / `cpu_pct` / `uptime_seconds` / `in_flight_count`，[issue #142](https://github.com/sleep2agi/agent-network/issues/142) T2.1 ship in `agent-node@2.4.0`，server schema T2.2 align in `commhub-server@0.8.2`）|
+| `agents[].process_telemetry` | per-agent 进程 telemetry（`rss_bytes` / `rss_mb` / `cpu_pct` / `uptime_seconds` / `in_flight_count`，[issue #142](https://github.com/sleep2agi/agent-network/issues/142) ship in `agent-node@2.4.0`，server schema align in `commhub-server@0.8.2`）|
 
 **404**：`{ "ok": false, "error": "server not found" }` —— 该 host 没匹配到任何 session。
 
