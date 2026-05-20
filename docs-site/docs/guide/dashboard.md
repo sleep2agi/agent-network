@@ -22,7 +22,7 @@ Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务�
 跟随 [v0.10.2 release](/changelog) ship：
 - **Hero D 拓扑节点前缀标签 Option C 实装**（[#147](https://github.com/sleep2agi/agent-network/issues/147) 5/16 ack + Option C design pass）—— 节点 → group 边的 label distinguishability 终落地
 - **disk telemetry hover card 渲染**（`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` 对接 [`GET /api/server/:host/health`](/api/rest#get-api-server-host-health) 响应，源 agent-node `≥ 2.4.1` host-telemetry `df -k` 采样；老 agent / Windows 渲染 `—` 不误导成 0）
-- **100+ 轮 typography + 圆角级联 polish**（R317-R438，累计 R280 起 dashboard polish chain）
+- **100+ 轮 typography + 圆角级联 polish**
 :::
 
 ::: info v0.10.8 dashboard `0.5.3` — Servers 面板 UI 文案修 + TopoGraph density tier
@@ -30,7 +30,7 @@ Dashboard 是 Agent Network 的 Web 管理界面，提供实时监控和任务�
 
 - **Servers 面板"未上报"文案精准化**：早期为 0.8.2 升级 window 而埋的占位文字 `agent rollup pending hub ≥ 0.8.2-preview` / `disk metric pending hub ≥ 0.8.2-preview` 在 hub 全部 ≥ 0.8.2 后仍显示（**误导用户认为版本不够**），改 `agent rollup not reported by hub` / `disk metric not reported by hub` —— 精准反映"该 hub 此刻未上报"语义。
 - **`data-server-{agents,disk}-missing="true"` Playwright 钩子**：dashboard 0.5.3 起新增，供 e2e 验证 hub-side telemetry coverage。
-- **R502 TopoGraph density tier polish**（纯 additive，无 UX 改变）：canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface，tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 R109 dense-layout collapse gate 对齐。
+- **TopoGraph density tier polish**（纯 additive，无 UX 改变）：canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface，tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 dense-layout collapse gate 对齐。
 
 ::: warning Root cause #2 + #3 已定位但 defer
 - **#2**（v0.10.9 候选）：同 hostname 多实例 dedupe 缺失，可能 double-count 服务器

@@ -40,7 +40,7 @@ The new copy accurately says "this hub didn't report it right now" instead of im
 
 ### Polish fold-in — TopoGraph density-tier (R502, purely additive)
 
-Dashboard team commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) (0.5.3-preview.16) — the canvas state attribute `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` exposes a 12th observable testing surface. Tier boundaries (sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+) line up with the R109 dense-layout collapse gate. **Purely additive, no UX change**. Paired with the R469 numeric counts, e2e selectors now have a complete canvas-state snapshot.
+Dashboard team commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) (0.5.3-preview.16) — the canvas state attribute `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` exposes a 12th observable testing surface. Tier boundaries (sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+) line up with the dense-layout collapse gate. **Purely additive, no UX change**. Paired with the numeric counts, e2e selectors now have a complete canvas-state snapshot.
 
 ### Quality gates + lessons
 
@@ -220,7 +220,7 @@ See the [v0.10.3 release notes](https://github.com/sleep2agi/agent-network/relea
 - `@sleep2agi/agent-network@2.2.1` *(unchanged — `PINNED_SERVER_VERSION` stays at `0.8.2`)*
 - `@sleep2agi/agent-node@2.4.1` ← `2.4.0` (Hero A disk telemetry, additive; commit [`50d25b2`](https://github.com/sleep2agi/agent-network/commit/50d25b2))
 - `@sleep2agi/commhub-server@0.8.2` *(unchanged)*
-- `@sleep2agi/agent-network-dashboard@0.5.1` ← `0.5.0` (Hero D topology prefix-label Option C + disk render + 100+ rounds of polish R317-R438)
+- `@sleep2agi/agent-network-dashboard@0.5.1` ← `0.5.0` (Hero D topology prefix-label Option C + disk render + 100+ rounds of polish)
 
 ### Hero A — agent-node disk telemetry ([#99](https://github.com/sleep2agi/agent-network/issues/99) per-server daemon Phase 2 host metrics, final 10%)
 
@@ -242,7 +242,7 @@ Test lead Docker Linux smoke 3/3 PASS (disk 299.8 GB total / 216 used / 71.5 ava
 
 - Topology node prefix labels (the node→group edge labels' distinguishability) ship with the Option C design (dashboard team design pass)
 - Disk telemetry hover-card rendering (`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` wired to the [`GET /api/server/:host/health`](/en/api/rest#get-api-server-host-health) response)
-- 100+ rounds of typography + corner-radius cascade polish (R317-R438)
+- 100+ rounds of typography + corner-radius cascade polish
 
 Dashboard team design pass + 4/4 verify (commit `7de97ee` + screenshot evidence, local ship `f9c83cd`).
 
@@ -358,7 +358,7 @@ agent-node now embeds `process_telemetry` in every `commhub_report_status` heart
 - §3.I canvas brand mark
 - *(§3.H dropped per RFC Q2 review)*
 
-Ships alongside **19+ rounds of typography + corner-radius cascade polish** (R317-R337+, four typography families + systematic corner-radius cascade rework). Dashboard `0.5.0` is now on the npm `latest` tag, landing with this v0.10.0 Phase 2 docs sync.
+Ships alongside **19+ rounds of typography + corner-radius cascade polish** (four typography families + systematic corner-radius cascade rework). Dashboard `0.5.0` is now on the npm `latest` tag, landing with this v0.10.0 Phase 2 docs sync.
 
 **E. Lightweight pre-release-gate playbook (release-gate Phase 1+2)**
 [`docs/tests/release-gate-playbook.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/release-gate-playbook.md) — maintained by the test lead. Covers hub / dashboard / login / node lifecycle / runtime smoke / vendor verify. v0.10.0 is the first release to fully exercise this playbook; future latest promotes gate on it.

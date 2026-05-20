@@ -40,7 +40,7 @@ Vincent 实测 catch（附 dashboard 截图）：Servers 面板对每台 hub 显
 
 ### Polish fold-in — TopoGraph density tier（R502，纯 additive）
 
-Dashboard 团队 commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) （0.5.3-preview.16）—— Canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface。Tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 R109 dense-layout collapse gate 对齐。**纯 additive，无 UX 改变**，配 R469 numeric counts 提供 e2e selector 完整 canvas state snapshot 能力。
+Dashboard 团队 commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) （0.5.3-preview.16）—— Canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface。Tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 dense-layout collapse gate 对齐。**纯 additive，无 UX 改变**，配 numeric counts 提供 e2e selector 完整 canvas state snapshot 能力。
 
 ### Quality gates + lessons
 
@@ -220,7 +220,7 @@ v0.10.4 Vincent 紧急 ship 跳过 测试团队 Docker smoke gate（per `feedbac
 - `@sleep2agi/agent-network@2.2.1` *(无变化，PINNED_SERVER_VERSION 仍 `0.8.2`)*
 - `@sleep2agi/agent-node@2.4.1` ← `2.4.0`（Hero A disk telemetry additive，commit [`50d25b2`](https://github.com/sleep2agi/agent-network/commit/50d25b2)）
 - `@sleep2agi/commhub-server@0.8.2` *(无变化)*
-- `@sleep2agi/agent-network-dashboard@0.5.1` ← `0.5.0`（Hero D 拓扑图前缀标签 Option C + disk render + 100+ 轮 polish R317-R438）
+- `@sleep2agi/agent-network-dashboard@0.5.1` ← `0.5.0`（Hero D 拓扑图前缀标签 Option C + disk render + 100+ 轮 polish）
 
 ### Hero A — agent-node disk telemetry（[#99](https://github.com/sleep2agi/agent-network/issues/99) 守护节点 Phase 2 host metrics 闭环 final 10%）
 
@@ -242,7 +242,7 @@ v0.10.4 Vincent 紧急 ship 跳过 测试团队 Docker smoke gate（per `feedbac
 
 - 拓扑节点前缀标签（[节点 → group 边的 label distinguishability）实装 Option C 设计（Dashboard 团队 design pass）
 - disk telemetry hover card 渲染（`disk_total_gb` / `disk_used_gb` / `disk_avail_gb` 三字段对接 [`GET /api/server/:host/health`](/api/rest#get-api-server-host-health) 响应）
-- 100+ 轮 typography + corner-radius cascade polish（R317-R438）
+- 100+ 轮 typography + corner-radius cascade polish
 
 Dashboard 团队 design pass + 4/4 verify（commit `7de97ee` + screenshot evidence，local ship `f9c83cd`）。
 
@@ -358,7 +358,7 @@ agent-node 每次 `commhub_report_status` 心跳带上 `process_telemetry`：`rs
 - §3.I canvas brand mark
 - *(§3.H 砍 per RFC Q2 review)*
 
-随包附 **19+ 轮 typography + 圆角级联 polish**（R317-R337+，4 typography family + corner radius cascade 系统化重整）。dashboard `0.5.0` 已通过 npm `latest` tag promote，跟随 v0.10.0 Phase 2 docs sync 落地。
+随包附 **19+ 轮 typography + 圆角级联 polish**（4 typography family + corner radius cascade 系统化重整）。dashboard `0.5.0` 已通过 npm `latest` tag promote，跟随 v0.10.0 Phase 2 docs sync 落地。
 
 **E. 发布前轻量级测试 playbook（release-gate Phase 1+2）**
 [`docs/tests/release-gate-playbook.md`](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/release-gate-playbook.md) — 测试团队 lead 维护，覆盖 hub / dashboard / login / node lifecycle / runtime smoke / vendor verify 等关键路径。本次 v0.10.0 ship 是首次完整跑通该 playbook 的 release，为后续每次 latest promote 卡 release-gate。
