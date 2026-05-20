@@ -216,7 +216,7 @@ A: Correct. If you want "read + occasional dispatch", grant `member`.
 
 - ✅ No master-key bypass for role checks
 - ✅ All admin ops = admin-role `utok_` + role check
-- ✅ All hub ↔ dashboard internal calls = admin user's `utok_` (Dashboard 0.4.2 is a thin cookie-proxy)
+- ✅ All hub ↔ dashboard internal calls = admin user's `utok_` (Dashboard is a thin cookie-proxy)
 
 The role system is the only auth basis going forward.
 

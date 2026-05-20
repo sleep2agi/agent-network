@@ -193,7 +193,7 @@ Admin features include:
 - **User Management** -- View all registered users (`/api/users` — system-level admin only); role changes currently go through REST `PUT /api/networks/:id/members/:user_id` (owner only — see [API — PUT members](/en/api/rest#put-api-networks-id-members-user-id)). CLI has no `promote` / `demote` sub-command yet (queued for v0.9+).
 - **Network Management** -- View all networks, members (plan-quota is **partially enforced** in v0.8: `createNetwork` still enforces `max_networks_owned`; other quota items are dormant — see [networks — quota limits](/en/concepts/networks#quota-limits))
 - **System Statistics** -- Server load, database size, connection count
-- **Audit Log** -- Detailed records of all operations (`/api/audit-log` endpoint + Dashboard 0.4.2 Audit Log page; system-level admin sees everything, other roles only see their own rows)
+- **Audit Log** -- Detailed records of all operations (`/api/audit-log` endpoint + Dashboard Audit Log page; system-level admin sees everything, other roles only see their own rows)
 
 Audit log example (actual **19** actions):
 

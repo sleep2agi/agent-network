@@ -251,7 +251,7 @@ A：对，连派 task 都不行。如果想"能看 + 偶尔派"，给 member。
 [RFC-001](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md) 已于 **v0.8.0 落地**：`COMMHUB_AUTH_TOKEN` 进入软废弃（v1.0 完全移除），**hub 鉴权完全基于本文档的 4 个 role**：
 - ✅ 没有 "master 钥匙" bypass role 检查
 - ✅ 所有 admin 操作 = admin role `utok_` + role check
-- ✅ 所有 hub ↔ dashboard 内部通信 = admin user 的 `utok_`（Dashboard 0.4.2 已切到 thin cookie-proxy）
+- ✅ 所有 hub ↔ dashboard 内部通信 = admin user 的 `utok_`（Dashboard 已是 thin cookie-proxy）
 
 这就是为啥要把 role 体系写清楚 —— 它是**唯一**的鉴权基础。
 
