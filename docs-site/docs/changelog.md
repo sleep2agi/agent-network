@@ -2,9 +2,9 @@
 
 ::: info 版本号体系说明
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
-- **2026-05 起**：采用 v0.6 → v0.7 → v0.8.x 渐进发布，对应 `commhub-server` semver
+- **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
-- **当前 stable**：v0.8.3（2026-05-14，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
+- **当前 stable**：v0.10.8（2026-05-17，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
