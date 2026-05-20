@@ -160,10 +160,10 @@ flowchart TD
 - **Password strength** — verified at [`server/src/auth.ts:24-50 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24):
   - User-chosen passwords (register / `anet passwd`): **≥ 8 chars** + rejected against [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts)
   - Bootstrap admin **register exception**: ≥ 4 chars (so the quick-start `admin / anethub` default works) — [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) only requires length ≥ 4 for the very first registered user; **`anet passwd` / `reset-user` have no such exemption**, always enforcing ≥ 8 + not in the weak-password dictionary
-  - Public deployments must rotate the password **immediately** via `anet passwd` (aligned with the R193 chain)
+  - Public deployments must rotate the password **immediately** via `anet passwd`
 
 - Usernames support letters, numbers, underscores, and Chinese characters
-- Login failures don't reveal whether the username or password was wrong ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally merges both errors into the same message to prevent username enumeration; aligned with the R169 chain)
+- Login failures don't reveal whether the username or password was wrong ([`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) intentionally merges both errors into the same message to prevent username enumeration)
 
 ::: info Planned (v0.11+ / unscheduled)
 SHA-256 → Argon2id upgrade ([security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)) for stronger brute-force resistance and per-user salt (to prevent identical-hash collisions for the same password). **Neither the v0.9.x nor any v0.10.0-8 scope addressed this**; the security uplift is queued for a dedicated v0.11+ security cycle (the warning block at the bottom of this same page has the full scope-chain enumeration across all 9 patch ships consistent with this). Token hashes (`hashToken` uses bare SHA-256 without a salt) do not need Argon2id — tokens are 128-bit random strings, so rainbow tables don't apply.
@@ -271,7 +271,7 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com,http://localhost:3000" anet 
 COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
-::: warning R295 calibration: the default is **not** `*`
+::: warning CORS default is **not** `*`
 Verify [`server/src/index.ts:256-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L256): when `COMMHUB_CORS_ORIGINS` is unset the default allowlist is `["http://localhost:3000", "http://localhost:3001"]` (**localhost dev origins only**), **not** `*`. Setting `COMMHUB_CORS_ORIGINS` (comma-separated) **fully replaces** that default.
 
 `Access-Control-Allow-Origin` echoes the request `Origin` only when it's in the allowlist, otherwise it returns an empty string (the browser then blocks the cross-origin request). No author-specific domains are hardcoded — production deployments serving the Dashboard cross-origin must set `COMMHUB_CORS_ORIGINS` explicitly.
@@ -296,7 +296,7 @@ CREATE TABLE audit_log (
 );
 ```
 
-Recorded `action` values (**19 total**; verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` — 18 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447), `password_reset_by_admin` is a direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294); R283 → R485 chain calibration):
+Recorded `action` values (**19 total**; verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` — 18 go through the [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447), `password_reset_by_admin` is a direct INSERT at [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294)):
 
 | Operation | Trigger |
 |------|---------|
@@ -337,7 +337,7 @@ db.run("SELECT * FROM sessions WHERE alias = ?1", [alias]);
 db.run(`SELECT * FROM sessions WHERE alias = '${alias}'`);
 ```
 
-All `db.run()` / `db.get()` / `db.all()` calls ([currently 150+ across `server/src/*.ts`](https://github.com/sleep2agi/agent-network/tree/main/server/src)) use parameterized binding. R252 calibration: the older "85+" figure was a v0.5-era estimate; the server codebase has roughly doubled since.
+All `db.run()` / `db.get()` / `db.all()` calls ([currently 150+ across `server/src/*.ts`](https://github.com/sleep2agi/agent-network/tree/main/server/src)) use parameterized binding. (The older "85+" figure was a v0.5-era estimate; the server codebase has roughly doubled since.)
 
 ## Database Security
 
@@ -362,11 +362,11 @@ chmod 600 ~/.commhub/commhub.db
 
 | Data | Storage method | Details |
 |------|---------|------|
-| Passwords | SHA-256 hash + static prefix salt `anet:` | [db.ts:427-429](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427); not a per-user salt — Argon2id migration plan in the [::: info above](#password-security) (R248 chain) |
+| Passwords | SHA-256 hash + static prefix salt `anet:` | [db.ts:427-429](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427); not a per-user salt — Argon2id migration plan in the [::: info above](#password-security) |
 | Tokens | SHA-256 hash (no salt) | Tokens are `crypto.randomUUID()` 128-bit random values; rainbow tables do not apply |
 | API keys | Not stored (only `process.env` / `config.env`) | Agent-node reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from env; the hub's DB does not store them |
-| Task content | Plaintext | The `tasks.content` column; on a shared hub, admins can read everything. R195 chain: `audit_log` does not contain task bodies |
-| Audit logs | Plaintext | `audit_log` has 10 columns including `user_id` / `username` / `action` / `detail` / `ip` / `network_id` (R195 chain) |
+| Task content | Plaintext | The `tasks.content` column; on a shared hub, admins can read everything. `audit_log` does not contain task bodies |
+| Audit logs | Plaintext | `audit_log` has 10 columns including `user_id` / `username` / `action` / `detail` / `ip` / `network_id` |
 
 ## Communication Security
 

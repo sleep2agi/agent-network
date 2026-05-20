@@ -160,10 +160,10 @@ flowchart TD
 - **密码强度** —— verify [`server/src/auth.ts:24-50 validatePasswordStrength`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L24):
   - 用户自选密码（register / `anet passwd`）：**≥ 8 字符** + 拒绝 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典
   - 首次 bootstrap admin **register 例外**：≥ 4 字符即可（让快速上手 `admin / anethub` 默认成立）—— [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) 检测「首位注册用户」时只校验 length ≥ 4；**`anet passwd` / `reset-user` 无此豁免**，永远强制 ≥ 8 + 非弱密码
-  - 公网部署必须**立刻** `anet passwd` 改强密码（R193 chain 一致）
+  - 公网部署必须**立刻** `anet passwd` 改强密码
 
 - 用户名支持字母、数字、下划线、中文
-- 登录失败不提示是用户名错还是密码错（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration；R169 chain 一致）
+- 登录失败不提示是用户名错还是密码错（[`auth.ts:99-100`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L99) 故意把两种错误合并成同一文案，避免 username enumeration）
 
 ::: info 计划中（v0.11+ / 未排期）
 SHA-256 → Argon2id 升级（[security report R9](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md)），提升抗暴力破解能力 + per-user salt 防止同密码哈希碰撞。**v0.9.x / v0.10.0-8 scope 都未动**，留 v0.11+ 安全主题专项升级（同文件本页底部 warning block 有完整 scope chain enumeration 跨 9 个 patch ship 跟此一致）。Token 哈希（cli.ts hashToken 用纯 SHA-256 无 salt）不需要 Argon2id —— token 是 128-bit 随机字符串，rainbow table 不适用。
@@ -271,7 +271,7 @@ COMMHUB_CORS_ORIGINS="https://dashboard.example.com,http://localhost:3000" anet 
 COMMHUB_CORS_ORIGINS="https://dashboard.example.com" anet hub start
 ```
 
-::: warning R295 校准：默认 **不是** `*`
+::: warning CORS 默认 **不是** `*`
 verify [`server/src/index.ts:256-258`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L256)：`COMMHUB_CORS_ORIGINS` 未设时默认白名单 = `["http://localhost:3000", "http://localhost:3001"]`（**仅本机 dev origin**），**不是** `*`。设了 `COMMHUB_CORS_ORIGINS`（逗号分隔）会**完全替换**这个默认值。
 
 `Access-Control-Allow-Origin` 只在请求的 `Origin` 命中白名单时回显该 origin，否则回空字符串（浏览器据此拦截跨域请求）。源码不 hardcode 任何作者域名 —— 生产部署 Dashboard 跨域必须显式设 `COMMHUB_CORS_ORIGINS`。
@@ -296,7 +296,7 @@ CREATE TABLE audit_log (
 );
 ```
 
-记录的 action 取值（**共 19 个**；verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` —— 18 个走 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447)，`password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT，R283 → R485 chain 校准）：
+记录的 action 取值（**共 19 个**；verify `grep logAudit server/src/*.ts + auth.ts:294 + cli.ts:2346` —— 18 个走 [`logAudit()` helper](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L447)，`password_reset_by_admin` 走 [`auth.ts:294`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L294) 直接 INSERT）：
 
 | 操作 | 触发场景 |
 |------|---------|
@@ -337,7 +337,7 @@ db.run("SELECT * FROM sessions WHERE alias = ?1", [alias]);
 db.run(`SELECT * FROM sessions WHERE alias = '${alias}'`);
 ```
 
-全部 `db.run()` / `db.get()` / `db.all()` 调用（[`server/src/*.ts` grep 当前 150+ 处](https://github.com/sleep2agi/agent-network/tree/main/server/src)）都已迁移到参数化方式。R252 校准：原 doc 写「85+」是 v0.5 时代估算，server 端代码量翻倍后实际 150+。
+全部 `db.run()` / `db.get()` / `db.all()` 调用（[`server/src/*.ts` grep 当前 150+ 处](https://github.com/sleep2agi/agent-network/tree/main/server/src)）都已迁移到参数化方式。（原 doc 写「85+」是 v0.5 时代估算，server 端代码量翻倍后实际 150+。）
 
 ## 数据库安全
 
@@ -362,11 +362,11 @@ chmod 600 ~/.commhub/commhub.db
 
 | 数据 | 存储方式 | 细节 |
 |------|---------|------|
-| 密码 | SHA-256 哈希 + 静态 prefix salt `anet:` | [db.ts:427-429](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427)；非 per-user salt，Argon2id 迁移见 [::: info 计划](#密码安全)（R248 chain） |
+| 密码 | SHA-256 哈希 + 静态 prefix salt `anet:` | [db.ts:427-429](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L427)；非 per-user salt，Argon2id 迁移见 [::: info 计划](#密码安全) |
 | Token | SHA-256 哈希（无 salt） | token 是 `crypto.randomUUID()` 128-bit 随机值，rainbow table 不适用 |
 | API Key | 不存储（仅 process env / config.env） | agent-node 进程内 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env，hub 端 db 不存 |
-| 任务内容 | 明文 | `tasks.content` 列；多用户共享 hub 时 admin 能看所有；R195 chain `audit_log` 不含 task body |
-| 审计日志 | 明文 | `audit_log` 10 列含 user_id / username / action / detail / ip / network_id（R195 chain） |
+| 任务内容 | 明文 | `tasks.content` 列；多用户共享 hub 时 admin 能看所有；`audit_log` 不含 task body |
+| 审计日志 | 明文 | `audit_log` 10 列含 user_id / username / action / detail / ip / network_id |
 
 ## 通信安全
 
