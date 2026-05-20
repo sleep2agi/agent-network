@@ -182,7 +182,7 @@ flowchart TD
 #    ⚠ ~/.anet/config.json                **不是自动 600**（cli.ts:77-81 saveGlobal 默认 644）—— 多用户共享 host 建议手动改：
 chmod 600 ~/.anet/config.json
 # 单用户 host 影响有限（home 目录通常已 700）；多用户机器其他本地用户可读你的 utok_。
-# v0.9 RFC 待修自动 600，详见 R223 chain。
+# v0.9 RFC 待修自动 600。
 
 # 2. .anet/ 不要提交 git
 echo ".anet/" >> .gitignore

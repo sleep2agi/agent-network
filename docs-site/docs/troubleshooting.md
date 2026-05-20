@@ -193,7 +193,7 @@ verify [`auth.ts:24-28 validatePasswordStrength()`](https://github.com/sleep2agi
 - 长度 ≥ 8 字符
 - 不在弱密码字典里（[`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 含 `"password"` / `"12345678"` / `"qwerty123"` 等 top 弱密码）
 
-**例外（仅 register 首位用户）**：[`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) 检测「首位注册的用户」时只校验 `length >= 4`（让 bootstrap `admin / anethub` 能成立）。`anet passwd` / `reset-user` **无此豁免**，永远强制 ≥ 8 + 非弱密码（跟 R193 chain 一致）。
+**例外（仅 register 首位用户）**：[`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) 检测「首位注册的用户」时只校验 `length >= 4`（让 bootstrap `admin / anethub` 能成立）。`anet passwd` / `reset-user` **无此豁免**，永远强制 ≥ 8 + 非弱密码。
 
 **解决**：
 

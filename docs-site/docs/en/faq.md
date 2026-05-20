@@ -111,7 +111,7 @@ kill <PID>
 | File | Path | Contents |
 |------|------|------|
 | Global config | `~/.anet/config.json` | Hub address, `utok_`, current active network |
-| Node config | `{cwd}/.anet/nodes/<alias>/config.json` | Runtime, model, tools, `ntok_`, env, flags (directory name is the alias, not the internal `node_id`; see [architecture R222 calibration](https://github.com/sleep2agi/agent-network/blob/main/docs/architecture.md#2-配置文件--r222-校准v08-实际-schema)) |
+| Node config | `{cwd}/.anet/nodes/<alias>/config.json` | Runtime, model, tools, `ntok_`, env, flags (directory name is the alias, not the internal `node_id`) |
 | Database | `~/.commhub/commhub.db` | Hub-side SQLite (WAL mode) |
 
 ## Agent Issues
@@ -246,7 +246,7 @@ The current v0.10.8 stable still does not expose `promote` / `demote` CLI subcom
 anet passwd                       # interactive: old password → new password ≥ 8 chars + not in weak-password dict
 ```
 
-Requirements: ≥ 8 characters + not in [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts). **`anet passwd` and `anet hub admin reset-user` have no length exemption** — only the first-time admin **register** path allows ≥ 4 chars so that the quick-start `admin / anethub` default works (aligned with the R193/R248 chain; verified at [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43)).
+Requirements: ≥ 8 characters + not in [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts). **`anet passwd` and `anet hub admin reset-user` have no length exemption** — only the first-time admin **register** path allows ≥ 4 chars so that the quick-start `admin / anethub` default works (verified at [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43)).
 
 ### 17b. Forgot my password — how to reset? (v0.8)
 
@@ -271,7 +271,7 @@ anet hub start
 ```
 
 ::: warning You must delete the marker
-R210 chain finding: `anet hub start` bootstrap is **non-interactive and idempotent**, driven by the `~/.anet/server/admin-utok.json` marker file. **Running only `DELETE FROM users` without removing the marker → hub start sees the marker and skips the register flow → admin is NOT recreated** (you'll see `✅ Admin already exists` while the DB has no admin row). See [troubleshooting → second `anet hub start` re-bootstraps admin?](/en/troubleshooting)
+`anet hub start` bootstrap is **non-interactive and idempotent**, driven by the `~/.anet/server/admin-utok.json` marker file. **Running only `DELETE FROM users` without removing the marker → hub start sees the marker and skips the register flow → admin is NOT recreated** (you'll see `✅ Admin already exists` while the DB has no admin row). See [troubleshooting → second `anet hub start` re-bootstraps admin?](/en/troubleshooting)
 :::
 
 ⚠️ Option B is a last resort and clears user records; the reset is not recorded in `audit_log`. Production should prefer Option A. See [Security design](/en/concepts/security) for details.
@@ -356,7 +356,7 @@ location /events/ {
     proxy_cache off;
 }
 
-# Also pass X-Forwarded-For on /api/* + /mcp so audit_log records the real IP (R169 / R195 chain)
+# Also pass X-Forwarded-For on /api/* + /mcp so audit_log records the real IP
 location / {
     proxy_pass http://127.0.0.1:9200;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

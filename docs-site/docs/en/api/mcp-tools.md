@@ -194,7 +194,7 @@ Acknowledge message receipt. After ACK, the message won't be returned by `get_in
 **Error**: `message_id` not found or not owned by this alias → `{ok: false, error: "message not found or not yours"}`.
 
 ::: tip Side effect: tasks-table state machine
-A successful ack also UPDATEs the `tasks` row where `task_id = message_id` from `status='delivered'` to `'acked'` ([`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354); **only** transitions from `delivered`, unlike the hub-side [`send_ack`](#send_ack) which also accepts `created` — see R279 chain calibration in [Task lifecycle — `created` calibration](/en/concepts/task-lifecycle#state-machine)).
+A successful ack also UPDATEs the `tasks` row where `task_id = message_id` from `status='delivered'` to `'acked'` ([`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354); **only** transitions from `delivered`, unlike the hub-side [`send_ack`](#send_ack) which also accepts `created` — see [Task lifecycle — the `created` state](/en/concepts/task-lifecycle#state-machine)).
 :::
 
 ---
@@ -386,7 +386,7 @@ Cancel a pending task.
 ::: warning Constraint
 Only cancellable from these 4 source statuses: `created` / `delivered` / `acked` / `running` (verify the WHERE clause at [`tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817)). Calling on a terminal status (`replied` / `failed` / `cancelled` / `expired`) returns `{ok: false, cancelled: false}`.
 
-`created` is only the DB column default; the normal API path never produces a row in that state (R266 chain — see [Task lifecycle — `created` calibration](/en/concepts/task-lifecycle#state-machine)).
+`created` is only the DB column default; the normal API path never produces a row in that state (see [Task lifecycle — the `created` state](/en/concepts/task-lifecycle#state-machine)).
 :::
 
 ---

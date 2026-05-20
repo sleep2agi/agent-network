@@ -7,7 +7,7 @@ Installing and deploying Agent Network via npm is the simplest approach.
 | Package | CLI command | Purpose | Notes |
 |------|---------|------|------|
 | `@sleep2agi/agent-network` | `anet` | CLI management + Client SDK | `dist/` ships `bin/cli.js` + `src/client.js` + `src/node-server.js` (3 entries, minified + obfuscator; for exact byte size, see the [npm package page](https://www.npmjs.com/package/@sleep2agi/agent-network)) |
-| `@sleep2agi/agent-node` | `agent-node` | Agent runtime — drives the **2 SDK runtimes**: `claude-agent-sdk` / `codex-sdk` (the `claude-code-cli` runtime does NOT go through agent-node — it spawns the local `claude` binary directly) | `@anthropic-ai/claude-agent-sdk` regular dep; `@openai/codex-sdk` optional peerDep (R212 chain) |
+| `@sleep2agi/agent-node` | `agent-node` | Agent runtime — drives the **2 SDK runtimes**: `claude-agent-sdk` / `codex-sdk` (the `claude-code-cli` runtime does NOT go through agent-node — it spawns the local `claude` binary directly) | `@anthropic-ai/claude-agent-sdk` regular dep; `@openai/codex-sdk` optional peerDep  |
 | `@sleep2agi/commhub-server` | `commhub-server` | CommHub backend (Bun required; pulled in by `anet hub start` via bunx at a pinned version) | Bun-only runtime (`engines.bun: ">=1.2.0"`) |
 | `@sleep2agi/agent-network-dashboard` | - | Next.js web UI | `anet hub dashboard` pulls it via npx (version comes from `dashboardReleaseTag()`: defaults to the `@preview` tag, overridable via the `ANET_DASHBOARD_VERSION` env var — not a hardcoded pin, see [dashboard.md](/en/guide/dashboard)); can also be deployed standalone |
 
@@ -65,13 +65,13 @@ await hub.connect();
 dist/
 ├── bin/cli.js              # CLI entry (minified + javascript-obfuscator with base64 string-array)
 ├── src/client.js           # Client SDK (minified + obfuscator)
-├── src/node-server.js      # Channel plugin (minified + obfuscator; auto-copied to project's .anet/node-server.js — R216/R221/R240 chain)
+├── src/node-server.js      # Channel plugin (minified + obfuscator; auto-copied to project's .anet/node-server.js)
 └── client.d.ts             # TypeScript type declarations
 package.json
 README.md
 ```
 
-**Key package.json fields** (verified at [agent-network/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json); aligned with the R223 chain):
+**Key package.json fields** (verified at [agent-network/package.json](https://github.com/sleep2agi/agent-network/blob/main/agent-network/package.json)):
 
 ```json
 {
@@ -90,7 +90,7 @@ README.md
 ```
 
 ::: warning Do not assume the server is in dist
-Older docs listed `src/server.ts` in `files` — that's **not present** in the current package. `commhub-server` is pulled via `anet hub start` from the separate `@sleep2agi/commhub-server` npm package at a pinned version; it does **not** ship inside `@sleep2agi/agent-network`'s dist. Aligned with the R221/R223 chain.
+Older docs listed `src/server.ts` in `files` — that's **not present** in the current package. `commhub-server` is pulled via `anet hub start` from the separate `@sleep2agi/commhub-server` npm package at a pinned version; it does **not** ship inside `@sleep2agi/agent-network`'s dist.
 :::
 
 ### @sleep2agi/agent-node

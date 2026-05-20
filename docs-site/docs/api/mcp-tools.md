@@ -194,7 +194,7 @@ report_completion({
 **错误**：`message_id` 不存在或不属于该 alias → `{ok: false, error: "message not found or not yours"}`。
 
 ::: tip 副作用：tasks 表状态机
-ack 成功还会把 `tasks` 表里 `task_id = message_id` 的行从 `status='delivered'` UPDATE 到 `'acked'`（[`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354)；**仅** `delivered` 起跳，跟 hub 端 [`send_ack`](#send_ack)（接受 `created` / `delivered`）不同 — R279 chain 校准，详见 [Task 生命周期 — `created` 校准](/concepts/task-lifecycle#状态机)）。
+ack 成功还会把 `tasks` 表里 `task_id = message_id` 的行从 `status='delivered'` UPDATE 到 `'acked'`（[`tools.ts:354`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354)；**仅** `delivered` 起跳，跟 hub 端 [`send_ack`](#send_ack)（接受 `created` / `delivered`）不同 —— 详见 [Task 生命周期 — `created` 状态](/concepts/task-lifecycle#状态机)）。
 :::
 
 ---
@@ -386,7 +386,7 @@ send_task({
 ::: warning 限制
 只能取消状态为 `created` / `delivered` / `acked` / `running` 的任务（4 个 cancellable 源状态，verify [`tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) WHERE 子句）。终态 `replied` / `failed` / `cancelled` / `expired` 上调用此 tool 会返回 `{ok: false, cancelled: false}`。
 
-`created` 实际只是 DB 默认值，正常 API 路径不会观察到（R266 chain，详见 [Task 生命周期 — `created` 校准](/concepts/task-lifecycle#状态机)）。
+`created` 实际只是 DB 默认值，正常 API 路径不会观察到（详见 [Task 生命周期 — `created` 状态](/concepts/task-lifecycle#状态机)）。
 :::
 
 ---

@@ -111,7 +111,7 @@ kill <PID>
 | 文件 | 路径 | 内容 |
 |------|------|------|
 | 全局配置 | `~/.anet/config.json` | hub 地址、`utok_`、当前激活 network |
-| 节点配置 | `{cwd}/.anet/nodes/<alias>/config.json` | runtime、model、tools、`ntok_`、env、flags（目录名是 alias，不是内部 `node_id`；详见 [architecture R222 校准](https://github.com/sleep2agi/agent-network/blob/main/docs/architecture.md#2-配置文件--r222-校准v08-实际-schema)） |
+| 节点配置 | `{cwd}/.anet/nodes/<alias>/config.json` | runtime、model、tools、`ntok_`、env、flags（目录名是 alias，不是内部 `node_id`） |
 | 数据库 | `~/.commhub/commhub.db` | hub 端 SQLite（WAL 模式） |
 
 ## Agent 问题
@@ -246,7 +246,7 @@ anet network invite --role member        # 生成邀请码（admin/member/viewer
 anet passwd                       # 交互式：输旧密码 → 输新密码 ≥ 8 字符 + 非弱密码字典
 ```
 
-要求：≥ 8 字符 + 不在 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典里。**`anet passwd` / `anet hub admin reset-user` 无任何长度豁免** —— 只有首次注册 admin（register 路径）才允许 ≥ 4，让 quick-start `admin / anethub` 默认成立（R193/R248 chain 一致；verify [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43)）。
+要求：≥ 8 字符 + 不在 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典里。**`anet passwd` / `anet hub admin reset-user` 无任何长度豁免** —— 只有首次注册 admin（register 路径）才允许 ≥ 4，让 quick-start `admin / anethub` 默认成立（verify [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43)）。
 
 ### 17b. 忘密码怎么办？（v0.8）
 
@@ -271,7 +271,7 @@ anet hub start
 ```
 
 ::: warning 必须删 marker
-R210 chain 已经发现：`anet hub start` bootstrap 是 **non-interactive 幂等**的，幂等性靠 `~/.anet/server/admin-utok.json` marker 文件。**只 `DELETE FROM users` 不删 marker → hub start 看到 marker 还在直接跳过 register flow → admin 不会重建**（输出 `✅ Admin already exists`，但 db 里其实没 admin row）。详见 [troubleshooting → 第二次 anet hub start 还重新 bootstrap admin？](/troubleshooting)
+`anet hub start` bootstrap 是 **non-interactive 幂等**的，幂等性靠 `~/.anet/server/admin-utok.json` marker 文件。**只 `DELETE FROM users` 不删 marker → hub start 看到 marker 还在直接跳过 register flow → admin 不会重建**（输出 `✅ Admin already exists`，但 db 里其实没 admin row）。详见 [troubleshooting → 第二次 anet hub start 还重新 bootstrap admin？](/troubleshooting)
 :::
 
 ⚠️ 方案 B 是兜底，会清掉用户记录 + audit_log 不记 reset 事件。生产建议方案 A。详见 [安全设计](/concepts/security)。
@@ -356,7 +356,7 @@ location /events/ {
     proxy_cache off;
 }
 
-# /api/* + /mcp 也建议透传 X-Forwarded-For 以便 audit_log 记录真实 IP（R169 / R195 chain）
+# /api/* + /mcp 也建议透传 X-Forwarded-For 以便 audit_log 记录真实 IP
 location / {
     proxy_pass http://127.0.0.1:9200;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

@@ -102,7 +102,7 @@ anet node start intern
 
 ### Xiaomi MiMo (claude-agent-sdk)
 
-Xiaomi's MiMo platform exposes an Anthropic-compatible endpoint, with a reasoning-focused lineup at competitive prices. Look up the current model ids at [platform.xiaomimimo.com](https://platform.xiaomimimo.com) — the bash example below uses one for illustration; specific ids rotate (R269 chain).
+Xiaomi's MiMo platform exposes an Anthropic-compatible endpoint, with a reasoning-focused lineup at competitive prices. Look up the current model ids at [platform.xiaomimimo.com](https://platform.xiaomimimo.com) — the bash example below uses one for illustration; specific ids rotate.
 
 ```bash
 ANTHROPIC_BASE_URL=https://token-plan-cn.xiaomimimo.com/anthropic \

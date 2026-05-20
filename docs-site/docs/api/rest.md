@@ -1294,7 +1294,7 @@ curl -X POST http://localhost:9200/api/task \
 | 403 | `access denied to requested network` | utok\_ 调用方不是 `network_id` 成员 |
 | 403 | `permission_denied` | 角色不足（viewer 不能写）|
 
-**不**写 audit log（[`/api/task` 处理函数 index.ts:845-861](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L845) 没有 `logAudit` 调用，跟 R195 chain `POST /api/networks` 的「不写」一致）；成功后给 target alias 推送 `new_task` SSE 事件。
+**不**写 audit log（[`/api/task` 处理函数 index.ts:845-861](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L845) 没有 `logAudit` 调用，跟 `POST /api/networks` 的「不写」一致）；成功后给 target alias 推送 `new_task` SSE 事件。
 
 ### POST /api/broadcast
 
@@ -1399,7 +1399,7 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 
 > 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L571) 实际 payload 只有上表中字段。
 >
-> **R275 校准**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts:1162`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1162) 显式处理它）。
+> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts:1162`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1162) 显式处理它）。
 
 **示例 SSE 数据流**：
 

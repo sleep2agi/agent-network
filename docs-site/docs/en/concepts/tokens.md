@@ -188,7 +188,7 @@ flowchart TD
 chmod 600 ~/.anet/config.json
 # Single-user hosts: limited impact (HOME is usually 700 already).
 # Multi-user machines: other local users can read your utok_.
-# v0.9 RFC will auto-fix the chmod; see R223 chain.
+# v0.9 RFC will auto-fix the chmod.
 
 # 2. Don't commit .anet/
 echo ".anet/" >> .gitignore

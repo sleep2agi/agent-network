@@ -194,7 +194,7 @@ Verify [`auth.ts:24-28 validatePasswordStrength()`](https://github.com/sleep2agi
 - Length ≥ 8 characters
 - Not in the weak-password dictionary ([`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) covers `"password"` / `"12345678"` / `"qwerty123"` and other top entries)
 
-**Exception (first registered user only)**: [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) detects the "first user" case and only enforces `length >= 4` (so the bootstrap `admin / anethub` flow works). `anet passwd` / `reset-user` have **no such exemption** — they always require ≥ 8 + non-weak (same as the R193 chain).
+**Exception (first registered user only)**: [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43) detects the "first user" case and only enforces `length >= 4` (so the bootstrap `admin / anethub` flow works). `anet passwd` / `reset-user` have **no such exemption** — they always require ≥ 8 + non-weak.
 
 **Fix**:
 

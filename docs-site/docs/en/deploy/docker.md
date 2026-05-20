@@ -296,9 +296,9 @@ If you see legacy docker-compose files still using these two variables, they're 
 | `ANTHROPIC_AUTH_TOKEN` | Third-party provider API key | Provider's key | agent-node directly |
 
 ::: info `TOOLS` / `SYSTEM_PROMPT` are Compose-entrypoint conventions
-Verified at [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh): L9 `TOOLS_ARG="${TOOLS:-}"` + L10 `PROMPT="${SYSTEM_PROMPT:-}"` capture the env vars into shell variables, then L26 `[ -n "$TOOLS_ARG" ] && CMD+=(--tools "$TOOLS_ARG")` / L51 `CMD+=(--prompt "$FULL_PROMPT")` append them to the agent-node command array — these env vars are **shell variables inside entrypoint.sh**, translated to agent-node's `--tools` / `--prompt` CLI flags. **The agent-node binary itself does not read these env vars** (calibrated in the R242 chain — see [agent-node — Environment Variables](/en/guide/agent-node)). When running outside docker-compose / entrypoint.sh (e.g., `npx @sleep2agi/agent-node`), use the `--tools` / `--prompt` CLI flags or the `tools` / `systemPrompt` fields in `config.json`.
+Verified at [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh): L9 `TOOLS_ARG="${TOOLS:-}"` + L10 `PROMPT="${SYSTEM_PROMPT:-}"` capture the env vars into shell variables, then L26 `[ -n "$TOOLS_ARG" ] && CMD+=(--tools "$TOOLS_ARG")` / L51 `CMD+=(--prompt "$FULL_PROMPT")` append them to the agent-node command array — these env vars are **shell variables inside entrypoint.sh**, translated to agent-node's `--tools` / `--prompt` CLI flags. **The agent-node binary itself does not read these env vars** (see [agent-node — Environment Variables](/en/guide/agent-node)). When running outside docker-compose / entrypoint.sh (e.g., `npx @sleep2agi/agent-node`), use the `--tools` / `--prompt` CLI flags or the `tools` / `systemPrompt` fields in `config.json`.
 
-Aligned with the R243 chain: `--tools` only affects the `claude-agent-sdk` runtime (the `codex-sdk` runtime's built-in toolset does not honor `--tools`).
+`--tools` only affects the `claude-agent-sdk` runtime (the `codex-sdk` runtime's built-in toolset does not honor `--tools`).
 :::
 
 ## Common Operations
@@ -396,7 +396,7 @@ worker-11:
     - COMMHUB_URL=http://server:9200
     # Note: codex-sdk does not honor --tools. TOOLS env is expanded by
     # entrypoint.sh into the --tools CLI flag, but codex-sdk silently
-    # ignores it (aligned with the R243/R246 chain). Only claude-agent-sdk
+    # ignores it. Only claude-agent-sdk
     # actually applies it:
     # - TOOLS=Read,Glob,Grep  # only effective when RUNTIME=claude-agent-sdk
 ```
