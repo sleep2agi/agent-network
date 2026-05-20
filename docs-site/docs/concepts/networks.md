@@ -123,7 +123,7 @@ anet network delete old-network --force
 | 查看 Agent 状态 | &check; | &check; | &check; | &check; |
 | 查看任务列表 | &check; | &check; | &check; | &check; |
 
-> R308 校准：「创建/撤销 network Token」原本标 member ❌，实际 [`auth.ts:236-242 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L236) 只挡 **viewer**（`viewer cannot create full-access network tokens`），owner / admin / member 都能建。撤销 Token 走 [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` —— 任何用户都能撤销**自己的** token，也不按网络角色门控。不带 `network_id` 的纯 user token（`utok_`）任何登录用户都能创建。
+> 「创建/撤销 network Token」原本标 member ❌，实际 [`auth.ts:236-242 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L236) 只挡 **viewer**（`viewer cannot create full-access network tokens`），owner / admin / member 都能建。撤销 Token 走 [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` —— 任何用户都能撤销**自己的** token，也不按网络角色门控。不带 `network_id` 的纯 user token（`utok_`）任何登录用户都能创建。
 
 ::: warning 审计日志权限**不**走网络角色
 旧 doc 在这里列「查看审计日志」一行 —— 实际 `/api/audit-log` 不按 owner / admin / member / viewer **网络角色**门控（verify [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086)）：
@@ -131,7 +131,7 @@ anet network delete old-network --force
 - **系统级 admin**（`users.role='admin'`，首位注册用户）：看所有人 audit_log
 - **非 admin**（`users.role='user'`）：只看自己的 audit_log（server 自动加 `WHERE user_id = self` 过滤）
 
-这是「**系统级** role」gate，跟「**网络级** role」不同（R227/R236/R237 chain whoami `Role:` 字段语义校准已统一这点）。详见 [REST API → GET /api/audit-log](/api/rest#get-api-audit-log)。
+这是「**系统级** role」gate，跟「**网络级** role」不同（`whoami` 的 `Role:` 字段也是这个系统级语义）。详见 [REST API → GET /api/audit-log](/api/rest#get-api-audit-log)。
 :::
 
 ### Dashboard 权限表现
@@ -221,7 +221,7 @@ Agent Network 有两层权限：
 
 ## 配额限制（v0.6 设计目标 — v0.8 部分启用） {#quota-limits}
 
-::: warning R226 校准（跟 R208/R224 chain 一致）
+::: warning v0.6 配额体系多数已搁置
 v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 2.0 OSS 转向后**多数项已搁置**，但 **createNetwork 仍 enforces 一项**：
 
 | 配额项 | v0.8 实际行为 |
@@ -231,7 +231,7 @@ v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 
 | 每网络 Agent 数 | ❌ |
 | 每天任务数 | ❌ |
 | Token 数 | ❌ |
-| 网络最大成员 | ❌ `networks.max_members` 字段 dormant（R178 chain） |
+| 网络最大成员 | ❌ `networks.max_members` 字段 dormant |
 
 - `anet activate <key>` 是 v0.6 legacy 命令，OSS 后**不再用作"升级"路径**
 - `users.role = 'admin'`（首位注册用户自动获得）才能突破 free 配额，详见 [troubleshooting → quota_exceeded 解决方案](/troubleshooting#quota-exceeded-max-n-networks-for-free-plan)

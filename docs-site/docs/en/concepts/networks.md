@@ -123,7 +123,7 @@ Each user has a role in each network. Four permission levels from highest to low
 | View agent status | &check; | &check; | &check; | &check; |
 | View task list | &check; | &check; | &check; | &check; |
 
-> R308 calibration: "Create/revoke network tokens" was previously marked member ❌. In fact [`auth.ts:236-242 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L236) only blocks **viewer** (`viewer cannot create full-access network tokens`) — owner / admin / member can all create them. Revoking goes through [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` — any user can revoke **their own** tokens, also not network-role-gated. Pure user tokens (`utok_`, no `network_id`) can be created by any logged-in user.
+> "Create/revoke network tokens" was previously marked member ❌. In fact [`auth.ts:236-242 createToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L236) only blocks **viewer** (`viewer cannot create full-access network tokens`) — owner / admin / member can all create them. Revoking goes through [`auth.ts revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `WHERE token_id = ? AND user_id = ?` — any user can revoke **their own** tokens, also not network-role-gated. Pure user tokens (`utok_`, no `network_id`) can be created by any logged-in user.
 
 ::: warning Audit log permission is **not** gated by network role
 The matrix used to list "View audit log" — but `/api/audit-log` is **not** gated by the network-level role (`owner` / `admin` / `member` / `viewer`). Verified at [`server/src/index.ts:1086-1089`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1086):
@@ -131,7 +131,7 @@ The matrix used to list "View audit log" — but `/api/audit-log` is **not** gat
 - **System admin** (`users.role='admin'`, the first registered user): can read everyone's audit log
 - **Non-admin** (`users.role='user'`): can only see their own audit log (the server auto-adds `WHERE user_id = self`)
 
-This is a **system-level** role gate, not a **network-level** one (aligned with the R227/R236/R237 chain calibrating the `whoami` `Role:` field semantics). See [REST API → GET /api/audit-log](/en/api/rest#get-api-audit-log).
+This is a **system-level** role gate, not a **network-level** one (the `whoami` `Role:` field carries the same system-level semantics). See [REST API → GET /api/audit-log](/en/api/rest#get-api-audit-log).
 :::
 
 ### Dashboard Permission Behavior
@@ -221,7 +221,7 @@ The two layers stack. For example: a system admin can see global data, but if th
 
 ## Quota Limits (v0.6 design — partially enforced in v0.8) {#quota-limits}
 
-::: warning R226 calibration (aligned with R208/R224 chain)
+::: warning v0.6 quota system mostly shelved
 v0.6 designed a Free / Pro / Admin three-tier quota system (table below). After the Apache 2.0 OSS pivot **most items are shelved**, but **`createNetwork` still enforces one of them**:
 
 | Quota | v0.8 actual behavior |
@@ -231,7 +231,7 @@ v0.6 designed a Free / Pro / Admin three-tier quota system (table below). After 
 | Agents per network | ❌ |
 | Tasks per day | ❌ |
 | Tokens | ❌ |
-| Max network members | ❌ The `networks.max_members` column is dormant (R178 chain) |
+| Max network members | ❌ The `networks.max_members` column is dormant |
 
 - `anet activate <key>` is a v0.6 legacy command, **no longer the "upgrade" path** after OSS
 - Only `users.role = 'admin'` (auto-granted to the first registered user) can break through the free quota — see [troubleshooting → quota_exceeded fix](/en/troubleshooting#quota-exceeded-max-n-networks-for-free-plan)
