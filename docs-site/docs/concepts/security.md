@@ -424,7 +424,7 @@ for await (const message of query({ prompt, options })) { /* ... */ }
 
 ### 工具权限（默认 Claude Code preset，user responsibility）
 
-从 [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B 起（agent-node v2.3.7-preview+），`claude-agent-sdk` runtime 的**默认 toolset 是 Claude Code preset 全集** —— 不再是空集。每个新节点 spawn 起来后就能：
+从 [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B 起（anet v0.9.0+），`claude-agent-sdk` runtime 的**默认 toolset 是 Claude Code preset 全集** —— 不再是空集。每个新节点 spawn 起来后就能：
 
 - 文件系统：`Read` / `Write` / `Edit` / `Glob` / `Grep`
 - Shell：`Bash`（受 `dangerouslySkipPermissions` 默认开启影响，不弹确认）

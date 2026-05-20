@@ -424,7 +424,7 @@ for await (const message of query({ prompt, options })) { /* ... */ }
 
 ### Tool Permissions (default = Claude Code preset, user responsibility)
 
-Since [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B (agent-node v2.3.7-preview+), the `claude-agent-sdk` runtime's **default toolset is the full Claude Code preset** — not an empty set. Every new node, right after spawn, can:
+Since [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B (anet v0.9.0+), the `claude-agent-sdk` runtime's **default toolset is the full Claude Code preset** — not an empty set. Every new node, right after spawn, can:
 
 - Filesystem: `Read` / `Write` / `Edit` / `Glob` / `Grep`
 - Shell: `Bash` (subject to `dangerouslySkipPermissions=true` on by default — no per-call confirmation)

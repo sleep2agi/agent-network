@@ -295,7 +295,7 @@ Agent Node 只对 `task` 类型消息触发 AI 处理：
 
 ### 默认 = Claude Code preset 全集（v0.9.0+，#101 Option B）
 
-从 [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B 起（agent-node v2.3.6+），`claude-agent-sdk` runtime **默认 toolset 是 Claude Code preset 全集**，不再是空集。每个节点 spawn 后立刻可调：
+从 [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B 起（anet v0.9.0+），`claude-agent-sdk` runtime **默认 toolset 是 Claude Code preset 全集**，不再是空集。每个节点 spawn 后立刻可调：
 
 - 文件系统：`Read` / `Write` / `Edit` / `Glob` / `Grep`
 - Shell：`Bash`（受 `dangerouslySkipPermissions=true` 默认开启影响，不弹确认）

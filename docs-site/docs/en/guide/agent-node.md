@@ -295,7 +295,7 @@ This design prevents message loops (A replies to B -> B replies to A -> infinite
 
 ### Default = full Claude Code preset (v0.9.0+, #101 Option B)
 
-Since [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B (agent-node v2.3.6+), the `claude-agent-sdk` runtime's **default toolset is the full Claude Code preset** — not an empty set. As soon as a node spawns, it can use:
+Since [#101](https://github.com/sleep2agi/agent-network/issues/101) Option B (anet v0.9.0+), the `claude-agent-sdk` runtime's **default toolset is the full Claude Code preset** — not an empty set. As soon as a node spawns, it can use:
 
 - Filesystem: `Read` / `Write` / `Edit` / `Glob` / `Grep`
 - Shell: `Bash` (subject to `dangerouslySkipPermissions=true`, on by default — no per-call confirmation)
