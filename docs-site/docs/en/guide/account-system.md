@@ -75,7 +75,7 @@ anet whoami
 ```
 
 ::: tip System-level role vs. network-level role
-`whoami`'s `Role:` field shows the **system-level** `users.role` (only `admin` / `user`) — it is **not** your role within the current network (`owner / admin / member / viewer`). To check the per-network role, run `anet network members` and find your own row. See [roles → FAQ](/en/concepts/roles) (R227 chain).
+`whoami`'s `Role:` field shows the **system-level** `users.role` (only `admin` / `user`) — it is **not** your role within the current network (`owner / admin / member / viewer`). To check the per-network role, run `anet network members` and find your own row. See [roles → FAQ](/en/concepts/roles).
 :::
 
 ::: tip CLI and Dashboard use the same account
@@ -117,7 +117,7 @@ Common question ([#17](https://github.com/sleep2agi/agent-network/issues/17)). F
 
 **Audit log**
 - `audit_log` records a `password_changed` row (or `password_reset_by_admin` via the reset-user path)
-- Read via REST `GET /api/audit-log` — **system-level** `users.role='admin'` sees all rows, regular users see only their own (**not** a network-level owner/admin gate; R262/R263 chain — see [API — audit-log](/en/api/rest#get-api-audit-log))
+- Read via REST `GET /api/audit-log` — **system-level** `users.role='admin'` sees all rows, regular users see only their own (**not** a network-level owner/admin gate — see [API — audit-log](/en/api/rest#get-api-audit-log))
 
 **Forgot the old password?**
 - Can't use `anet passwd` (requires old password)

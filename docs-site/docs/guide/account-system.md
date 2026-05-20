@@ -76,7 +76,7 @@ anet whoami
 ```
 
 ::: tip 系统级 role vs 网络级 role
-`whoami` 显示的 `Role:` 是 **系统级** `users.role`（仅 `admin` / `user` 两个值），**不是** 当前 network 内的 `owner / admin / member / viewer`。要查 network 内的 role，跑 `anet network members` 看自己那行。详见 [roles → FAQ](/concepts/roles)（R227 chain 一致）。
+`whoami` 显示的 `Role:` 是 **系统级** `users.role`（仅 `admin` / `user` 两个值），**不是** 当前 network 内的 `owner / admin / member / viewer`。要查 network 内的 role，跑 `anet network members` 看自己那行。详见 [roles → FAQ](/concepts/roles)。
 :::
 
 ::: tip CLI 和 Dashboard 是同一个账号
@@ -118,7 +118,7 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 
 **审计日志**
 - `audit_log` 写入一条 `password_changed`（走 reset-user 路径则是 `password_reset_by_admin`）
-- 通过 REST `GET /api/audit-log` 查看 —— **系统级** `users.role='admin'` 看全部 row，普通用户只看自己的 row（**不是**网络级 owner/admin 权限，R262/R263 chain；详见 [API — audit-log](/api/rest#get-api-audit-log)）
+- 通过 REST `GET /api/audit-log` 查看 —— **系统级** `users.role='admin'` 看全部 row，普通用户只看自己的 row（**不是**网络级 owner/admin 权限；详见 [API — audit-log](/api/rest#get-api-audit-log)）
 
 **忘记旧密码怎么办？**
 - 不能用 `anet passwd`（要求输旧密码）

@@ -177,7 +177,7 @@ anet login --hub http://10.0.0.1:9200
 ```
 如果看到 `Not logged in` 或 `Session expired`，说明登录没成功，请检查 CommHub 服务器是否在运行（`curl http://localhost:9200/health`）。
 
-**系统级 role vs 网络级 role**：`whoami` 的 `Role:` 字段是系统级 `users.role`（仅 `admin` / `user`），**不是**当前 network 内的 `owner/admin/member/viewer`。查 network role 跑 `anet network members` 看自己那行。详见 [roles → FAQ](/concepts/roles)（R227/R236 chain 一致）。
+**系统级 role vs 网络级 role**：`whoami` 的 `Role:` 字段是系统级 `users.role`（仅 `admin` / `user`），**不是**当前 network 内的 `owner/admin/member/viewer`。查 network role 跑 `anet network members` 看自己那行。详见 [roles → FAQ](/concepts/roles)。
 :::
 
 ### 2. Dashboard 登录 -- 网页登录

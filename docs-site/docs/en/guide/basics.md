@@ -176,7 +176,7 @@ After logging in, run `anet whoami`. You should see output like (verified at [`c
 ```
 If you see `Not logged in` or `Session expired`, the login didn't succeed. Check that the CommHub server is running (`curl http://localhost:9200/health`).
 
-**System-level role vs. network-level role**: `whoami`'s `Role:` field shows the system-level `users.role` (only `admin` / `user`) — it is **not** your role within the current network (`owner / admin / member / viewer`). To check the per-network role, run `anet network members` and find your own row. See [roles → FAQ](/en/concepts/roles) (R227/R236 chain).
+**System-level role vs. network-level role**: `whoami`'s `Role:` field shows the system-level `users.role` (only `admin` / `user`) — it is **not** your role within the current network (`owner / admin / member / viewer`). To check the per-network role, run `anet network members` and find your own row. See [roles → FAQ](/en/concepts/roles).
 :::
 
 ### 2. Dashboard Login -- Web Browser Login
