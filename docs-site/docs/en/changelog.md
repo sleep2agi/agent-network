@@ -40,7 +40,7 @@ The new copy accurately says "this hub didn't report it right now" instead of im
 
 ### Polish fold-in — TopoGraph density-tier (R502, purely additive)
 
-Dashboard team commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) (0.5.3-preview.16) — the canvas state attribute `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` exposes a 12th observable testing surface. Tier boundaries (sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+) line up with the dense-layout collapse gate. **Purely additive, no UX change**. Paired with the numeric counts, e2e selectors now have a complete canvas-state snapshot.
+Dashboard team commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard/commit/3f73810) (0.5.3-preview.16) — the canvas state attribute `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` exposes a 12th observable testing surface. Tier boundaries (sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+) line up with the dense-layout collapse gate. **Purely additive, no UX change**. Paired with the numeric counts, e2e selectors now have a complete canvas-state snapshot.
 
 ### Quality gates + lessons
 

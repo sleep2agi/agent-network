@@ -40,7 +40,7 @@ Vincent 实测 catch（附 dashboard 截图）：Servers 面板对每台 hub 显
 
 ### Polish fold-in — TopoGraph density tier（R502，纯 additive）
 
-Dashboard 团队 commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard) （0.5.3-preview.16）—— Canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface。Tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 dense-layout collapse gate 对齐。**纯 additive，无 UX 改变**，配 numeric counts 提供 e2e selector 完整 canvas state snapshot 能力。
+Dashboard 团队 commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard/commit/3f73810) （0.5.3-preview.16）—— Canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface。Tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 dense-layout collapse gate 对齐。**纯 additive，无 UX 改变**，配 numeric counts 提供 e2e selector 完整 canvas state snapshot 能力。
 
 ### Quality gates + lessons
 
