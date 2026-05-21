@@ -81,7 +81,7 @@ missing env var → the new process never registers.
 2. `anet node start n2node` (real agent-node) → verify `online`.
 3. Edit `n2node/config.json`: `_envRef` → `BOGUS_ENVREF_NEVER_SET`.
 4. `anet node rename n2node n2after --force`, capture full stdout.
-5. **Verdict**:
+5. **Verdict** (core):
    - CLI stdout **must NOT** contain a success line for n2after
      (`✅ … restarted + re-registered`);
    - it **must** contain the failure/warning line
@@ -90,6 +90,15 @@ missing env var → the new process never registers.
      not a clean `✅`.
    - cross-check `/api/status`: n2after has **no fresh heartbeat** (the only
      row, if any, is the relabeled ghost with a pre-restart `last_seen`).
+6. **Verdict** (recoverability — 通信龙 review add-on): a detected failure must
+   also be a *recoverable* failure —
+   - CLI stdout includes actionable recovery guidance (a `anet node start
+     <newName>` hint, or `anet logs <newName>` / `anet status` — match any
+     actionable hint, the exact wording depends on the blocker-fix's C4
+     branch);
+   - `newDir` (`.anet/nodes/n2after/`) is intact on disk with a readable
+     `config.json` → the user can fix the env and `anet node start n2after`
+     manually. (The rename *commit* succeeded; only the auto-restart failed.)
 
 ---
 
