@@ -138,7 +138,7 @@ Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接�
 | `--allow` **不增量** | 重跑 `anet channel add telegram --allow <new-uid>` 会覆盖整个 `allowFrom` 数组，前面 add 过的 user 丢 | 一次传**全部** UID，或手编 `.anet/nodes/<alias>/channels/telegram/access.json`（[walkthrough §B](/cases/telegram-bind-claude-code-cli#b-多人白名单)）|
 | Channel 改了**不热加载** | 编辑 `access.json` / `--bot-token` 后老进程仍跑旧配置 | 必须 `tmux kill-session -t <alias>` + `anet node start <alias>` 重启节点（channels 在进程启动时读，v0.10.x 含当前 v0.10.8 stable 仍是这套；hot-reload 设计跟踪 [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 third-pass review 完，候选 v0.12.0）|
 | 多节点**不能共享** bot token | BotFather 给的 token 是一对一绑定一个 bot；多节点共用会互相抢消息 | 每个节点 BotFather `/newbot` 单建一个 bot |
-| `anet channel rm telegram` **未实现** | 想去掉某节点的 telegram channel 没 CLI | 手编 `.anet/nodes/<alias>/config.json` 的 `channels` 数组删 `plugin:telegram@claude-plugins-official`，并 `rm -rf .anet/nodes/<alias>/channels/telegram`，再重启节点 |
+| `anet channel rm telegram` **未实现** | 想去掉某节点的 telegram channel 没 CLI | 手编 `.anet/nodes/<alias>/config.json` 的 `channels` 数组删掉 `telegram` 项，并 `rm -rf .anet/nodes/<alias>/channels/telegram`，再重启节点 |
 | `--allow <UID>` 也可 `--allow-user`？ | flag 命名容易记混 | 实际是 `--allow <user-id>`（verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861)），**没有** `--allow-user` |
 | 节点重启后 telegram 失联 | bot 收不到消息 / agent 不回 | 三步排查：① bot token 是否完整粘贴含 `:` ② `anet channel ls <alias>` 看 channels 是否含 telegram ③ `tmux capture-pane -t <alias> -p \| tail` 看 startup 日志有没有 `[telegram] listening` |
 
@@ -156,7 +156,7 @@ Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接�
 
 **`anet channel add` 后 `anet status` 没显示 telegram**
 - `anet channel ls <alias>` 直接确认
-- 看 `.anet/nodes/<alias>/config.json` 的 `channels` 数组里有没有 `plugin:telegram@claude-plugins-official`
+- 看 `.anet/nodes/<alias>/config.json` 的 `channels` 数组里有没有 `telegram`（config 里存的就是 `telegram`；`plugin:telegram@claude-plugins-official` 只是 anet 启动 claude-code-cli 时临时拼的 claudeArg，不写进 config）
 
 更详细的 step-by-step 调试（含 expected output 和 6 类 SSE 错误码诊断）：见 [Telegram 接入已有节点 — Claude Code CLI runtime 完整 walkthrough](/cases/telegram-bind-claude-code-cli)。
 
