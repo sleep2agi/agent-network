@@ -242,7 +242,7 @@ After the project config is loaded, [`cli.ts:123-125`](https://github.com/sleep2
 | `hub` | string | CommHub Server address override (falls back to the global `~/.anet/config.json` `hub` when unset) |
 | `token` | string | Auth token override (falls back to the global config `token` when unset) |
 | `network_id` | string | Network ID (usually inferred from `ntok_`, no need to set manually) |
-| `systemPrompt` | string | System prompt, prepended to every task (can also use the `--prompt` flag; the `SYSTEM_PROMPT` env var is **not read** — see the R242 note above) |
+| `systemPrompt` | string | System prompt, prepended to every task (can also use the `--prompt` flag; the `SYSTEM_PROMPT` env var is **not read** — see the note above) |
 
 ## Task Processing Flow
 
@@ -384,7 +384,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // passed to claude-agen
 When `SDKResultMessage.total_cost_usd` reaches `maxBudgetUsd`, claude-agent-sdk automatically ends the turn and the task moves to `error_max_budget`.
 
 ::: warning codex-sdk / claude-code-cli runtime do not support a USD budget cap
-- The `codex-sdk` path ([`cli.ts:669-755 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L669)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the R215 sdk-deep-dive chain).
+- The `codex-sdk` path ([`cli.ts:669-755 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L669)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the sdk-deep-dive chain).
 - `claude-code-cli` runs against your local Claude Code subscription, counted against subscription quota rather than USD.
 - **Cross-runtime budget control**: put a reverse proxy in front (nginx / Cloudflare / litellm proxy) and throttle by model-API call count.
 :::

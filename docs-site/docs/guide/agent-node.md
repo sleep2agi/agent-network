@@ -242,7 +242,7 @@ flowchart TD
 | `hub` | string | CommHub Server 地址覆盖（不设时 fallback 到全局 `~/.anet/config.json` 的 `hub`） |
 | `token` | string | 认证 Token 覆盖（不设时 fallback 到全局 config 的 `token`） |
 | `network_id` | string | 所属网络 ID（多数情况靠 `ntok_` 推断，不需手填） |
-| `systemPrompt` | string | 系统提示词，拼到每个任务前（也可用 `--prompt` flag；env `SYSTEM_PROMPT` **不读**，见上方 R242 注） |
+| `systemPrompt` | string | 系统提示词，拼到每个任务前（也可用 `--prompt` flag；env `SYSTEM_PROMPT` **不读**，见上方说明） |
 
 ## 任务处理流程
 
@@ -384,7 +384,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // 传给 claude-agent-s
 claude-agent-sdk 在 `SDKResultMessage.total_cost_usd` 达到 `maxBudgetUsd` 时自动结束当前 turn，task 状态走 `error_max_budget`。
 
 ::: warning codex-sdk / claude-code-cli runtime 不支持 budget cap
-- `codex-sdk` 路径（[`cli.ts:669-755 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L669)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（R215 sdk-deep-dive chain 一致）
+- `codex-sdk` 路径（[`cli.ts:669-755 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L669)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（跟 sdk-deep-dive 一致）
 - `claude-code-cli` 走本机 Claude Code 订阅，按订阅 quota 不按美金算
 - **跨 runtime 通用预算控制**：前置反向代理（nginx / Cloudflare / litellm proxy）按 model API 调用次数限流
 :::
