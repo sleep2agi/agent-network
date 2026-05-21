@@ -474,7 +474,7 @@ async function gracefulShutdown() {
   await callCommHub("report_status", {
     resume_id: RESUME_ID,
     alias: ALIAS,
-    status: "error",
+    status: "offline",
     task: "session disconnected",
   }).catch(() => {});
   process.exit(0);
