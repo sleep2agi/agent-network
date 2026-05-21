@@ -133,7 +133,7 @@ cat ~/.anet/config.json
 anet doctor --fix
 
 # Case 2: Upgrade your role
-# Have the owner (not admin — admin can't change roles, see R149 PUT members owner-only gate)
+# Have the owner (not admin — admin can't change roles; PUT members is an owner-only gate)
 # call REST to promote you (v0.10.x stable still does not expose a CLI promote subcommand — the v0.9.x and v0.10.x scopes did not touch member-role management; queued for v0.11+ / unscheduled):
 NET=$(jq -r .network_id ~/.anet/config.json)
 UTOK=$(jq -r .token ~/.anet/config.json)        # owner's own utok_
@@ -275,7 +275,7 @@ HTTP 429
 | `POST /api/auth/login` | 10/minute | `too many attempts, try again later` (also writes audit `login_rate_limited`) |
 
 ::: info Only these two endpoints have IP rate limiting in v0.8
-No other endpoint is currently IP-rate-limited. The `checkRateLimit` function's `default = 60` is a function-signature default, not actual behavior — the only call sites are register/login ([`server/src/index.ts:56`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L56); see R169 fix and [Security — Rate limiting](/en/concepts/security#rate-limiting)). If you're worried about write abuse on other endpoints, layer rate limiting at a reverse proxy (nginx / Cloudflare).
+No other endpoint is currently IP-rate-limited. The `checkRateLimit` function's `default = 60` is a function-signature default, not actual behavior — the only call sites are register/login ([`server/src/index.ts:56`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L56); see [Security — Rate limiting](/en/concepts/security#rate-limiting)). If you're worried about write abuse on other endpoints, layer rate limiting at a reverse proxy (nginx / Cloudflare).
 :::
 
 **Solution**: Wait 60 seconds before retrying. Localhost / `::1` / `unknown` IPs are exempt ([`index.ts:58`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L58)). The response has **no** `retry_after_seconds` field and **no** `Retry-After` header; the window is a fixed 60 seconds.
@@ -448,7 +448,7 @@ anet network delete <old-net> --force
 ```
 
 ::: tip Why setting `users.plan = 'admin'` is not enough
-[`auth.ts:185`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L185) actually checks `users.role === 'admin'`, not `users.plan`. A bare `UPDATE users SET plan = 'admin'` won't take effect — you must update the `role` column (the same system-admin gate that R195 documents for audit-log actions like `password_reset_by_admin`).
+[`auth.ts:185`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L185) actually checks `users.role === 'admin'`, not `users.plan`. A bare `UPDATE users SET plan = 'admin'` won't take effect — you must update the `role` column (the same system-admin gate that applies to audit-log actions like `password_reset_by_admin`).
 :::
 
 ---

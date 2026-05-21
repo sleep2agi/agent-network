@@ -132,7 +132,7 @@ cat ~/.anet/config.json
 anet doctor --fix
 
 # 情况 2：提升角色
-# 让 owner（不是 admin —— admin 改不了角色，verify R149 PUT members owner-only gate）
+# 让 owner（不是 admin —— admin 改不了角色，PUT members 是 owner-only gate）
 # 通过 REST 调用提升角色（CLI promote 子命令 v0.10.x 仍未提供 —— v0.9.x / v0.10.x scope chain 都未动 member role 管理；排到 v0.11+ / 未排期）：
 NET=$(jq -r .network_id ~/.anet/config.json)
 UTOK=$(jq -r .token ~/.anet/config.json)        # owner 自己的 utok_
@@ -274,7 +274,7 @@ HTTP 429
 | `POST /api/auth/login` | 10 次/分钟 | `too many attempts, try again later`（+ audit `login_rate_limited`） |
 
 ::: info v0.8 当前只有这两个 endpoint 做 IP rate limit
-其他 endpoint **不做 IP rate limit**（`checkRateLimit` 函数 default=60 仅函数签名 default，[`server/src/index.ts:56`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L56) 实际只在 register/login 两处调；详见 R169 修正，[安全设计 — 速率限制](/concepts/security#速率限制-rate-limiting)）。担心其他端点被写滥用，前置反向代理（nginx / Cloudflare）加 rate limit。
+其他 endpoint **不做 IP rate limit**（`checkRateLimit` 函数 default=60 仅函数签名 default，[`server/src/index.ts:56`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L56) 实际只在 register/login 两处调；详见 [安全设计 — 速率限制](/concepts/security#速率限制-rate-limiting)）。担心其他端点被写滥用，前置反向代理（nginx / Cloudflare）加 rate limit。
 :::
 
 **解决**：等 60 秒后重试。localhost / `::1` / `unknown` IP 免限制（[`index.ts:58`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L58)）。响应**无** `retry_after_seconds` 字段，**无** `Retry-After` header，窗口固定 60 秒。
@@ -447,7 +447,7 @@ anet network delete <old-net> --force
 ```
 
 ::: tip 为什么 `users.plan='admin'` 不够
-[`auth.ts:185`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L185) 实际 check 的是 `users.role === 'admin'`，不是 `users.plan`。直接 SQL `UPDATE users SET plan = 'admin'` 不生效；要走 `role` 列才有效（跟 R195 audit log action `password_reset_by_admin` 等 system-admin gate 同款）。
+[`auth.ts:185`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L185) 实际 check 的是 `users.role === 'admin'`，不是 `users.plan`。直接 SQL `UPDATE users SET plan = 'admin'` 不生效；要走 `role` 列才有效（跟 audit log action `password_reset_by_admin` 等 system-admin gate 同款）。
 :::
 
 ---
