@@ -250,7 +250,7 @@ What's solid, and what to watch out for.
 
 - `anet hub start` / `hub dashboard` / `login` / `register` / `whoami` / `logout`
 - `anet node create / start / stop / delete / ls / logs`
-- `claude-agent-sdk` with all six providers above (Docker E2E)
+- `claude-agent-sdk` — 2 providers verified end-to-end via Docker E2E: InternLM + MiniMax
 - Dashboard Chat — markdown, optimistic echo, source labels, error fallback, history persistence
 - Multi-agent peer dispatch via `get_all_status` + `send_task` + `get_task`
 - LAN-shared hub with `--host 0.0.0.0`

@@ -248,7 +248,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 
 - `anet hub start` / `hub dashboard` / `login` / `register` / `whoami` / `logout`
 - `anet node create / start / stop / delete / ls / logs`
-- `claude-agent-sdk` + 上面六家 Provider（Docker E2E）
+- `claude-agent-sdk` —— 经 Docker E2E 全链路验证 2 家 Provider：书生 Intern + MiniMax
 - Dashboard Chat —— markdown 渲染、乐观回显、来源标签、错误兜底、历史持久
 - 多 Agent 互派（`get_all_status` + `send_task` + `get_task`）
 - 局域网共用 Hub（`--host 0.0.0.0`）
