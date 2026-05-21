@@ -23,9 +23,79 @@ export interface RenameResult {
   error?: string;
 }
 
+export interface CanonicalAlias {
+  alias: string;
+  renamed: boolean;
+  renamed_from?: string;
+  chain: string[];
+}
+
 function hasWriteAccess(userId: string, networkId: string): boolean {
   const role = getUserNetworkRole(userId, networkId);
   return !!role && role !== "viewer";
+}
+
+// Resolve committed alias renames (old -> new), following short chains such
+// as A -> B -> C. This is intentionally server-side canonicalization: stale
+// clients may keep reporting/sending to an old alias after commit, and the hub
+// must not let that recreate orphan session rows (#146/#172).
+export function resolveCanonicalAlias(networkId: string | null | undefined, alias: string): CanonicalAlias {
+  if (!networkId || !alias) return { alias, renamed: false, chain: [alias] };
+
+  const chain = [alias];
+  let current = alias;
+  const seen = new Set([alias]);
+  for (let i = 0; i < 8; i++) {
+    const row = db.get<{ new_alias: string }>(
+      "SELECT new_alias FROM rename_txn WHERE network_id = ?1 AND old_alias = ?2 AND status = 'committed' ORDER BY committed_at DESC LIMIT 1",
+      networkId, current
+    );
+    if (!row?.new_alias || seen.has(row.new_alias)) break;
+    current = row.new_alias;
+    chain.push(current);
+    seen.add(current);
+  }
+
+  return {
+    alias: current,
+    renamed: current !== alias,
+    renamed_from: current !== alias ? alias : undefined,
+    chain,
+  };
+}
+
+export function canonicalAliasExists(networkId: string, alias: string, excludingResumeId?: string | null): boolean {
+  const params: any[] = [networkId, alias];
+  let sql = "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2";
+  if (excludingResumeId) {
+    sql += " AND resume_id != ?3";
+    params.push(excludingResumeId);
+  }
+  return !!db.get<any>(sql, ...params);
+}
+
+export function cleanupRenamedAliasSession(networkId: string | null | undefined, oldAlias: string, newAlias: string): void {
+  if (!networkId || oldAlias === newAlias) return;
+  const existsNew = db.get<any>(
+    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2",
+    networkId, newAlias
+  );
+  if (!existsNew) return;
+  db.run("DELETE FROM sessions WHERE network_id = ?1 AND alias = ?2", [networkId, oldAlias]);
+}
+
+export function cleanupCommittedRenameSessions(networkIds: string[] | null = null): void {
+  const params: any[] = [];
+  let sql = "SELECT network_id, old_alias, new_alias FROM rename_txn WHERE status = 'committed'";
+  if (networkIds) {
+    if (networkIds.length === 0) return;
+    const placeholders = networkIds.map((_, i) => `?${i + 1}`).join(", ");
+    sql += ` AND network_id IN (${placeholders})`;
+    params.push(...networkIds);
+  }
+  for (const row of db.all<{ network_id: string; old_alias: string; new_alias: string }>(sql, ...params)) {
+    cleanupRenamedAliasSession(row.network_id, row.old_alias, row.new_alias);
+  }
 }
 
 // PHASE 1 P3 — create a prepared rename_txn row reserving new_alias.
@@ -80,6 +150,7 @@ export function commitRename(userId: string, txnId: string): RenameResult {
   db.run(
     "UPDATE sessions SET alias = ?1, updated_at = datetime('now') WHERE network_id = ?2 AND alias = ?3",
     [txn.new_alias, txn.network_id, txn.old_alias]);
+  cleanupRenamedAliasSession(txn.network_id, txn.old_alias, txn.new_alias);
   db.run(
     "UPDATE nodes SET alias = ?1, updated_at = datetime('now') WHERE network_id = ?2 AND alias = ?3",
     [txn.new_alias, txn.network_id, txn.old_alias]);

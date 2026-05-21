@@ -5,7 +5,7 @@ import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
-import { prepareRename, commitRename, abortRename } from "./rename.js";
+import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -918,6 +918,7 @@ Bun.serve({
       let staleSql = "UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'";
       staleSql = addNetworkScope(staleSql, staleParams, restScope);
       db.run(staleSql, staleParams);
+      cleanupCommittedRenameSessions(restScope.networkId ? [restScope.networkId] : restScope.networkIds ?? null);
       const params: any[] = [];
       let sql = "SELECT * FROM sessions WHERE 1=1";
       sql = addNetworkScope(sql, params, restScope);
@@ -1188,6 +1189,8 @@ Bun.serve({
       if (!canRestWriteNetwork(restAuth, taskNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
+      const canonical = resolveCanonicalAlias(taskNetId, body.alias);
+      const targetAlias = canonical.alias;
       const id = crypto.randomUUID();
       const fromSession = body.from || "api";
       const ttlSeconds = (body as any).ttl_seconds || 3600;
@@ -1200,33 +1203,33 @@ Bun.serve({
         db.run(
           `INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response, network_id)
            VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply', ?6)`,
-          [id, body.alias, body.priority, body.task, fromSession, taskNetId]
+          [id, targetAlias, body.priority, body.task, fromSession, taskNetId]
         );
         db.run(
           `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id)
            VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8)`,
-          [id, fromSession, body.alias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId, body.parent_task_id ?? null]
+          [id, fromSession, targetAlias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId, body.parent_task_id ?? null]
         );
         // Touch session row so the dashboard reflects "task in flight"
         // immediately, without waiting for the agent's report_status to
         // arrive. Updating both `task` and `updated_at` is enough — we
         // leave `status` to the agent (idle → working → idle).
-        const touchParams: any[] = [body.task.slice(0, 200), body.alias];
+        const touchParams: any[] = [body.task.slice(0, 200), targetAlias];
         let touchSql = "UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE alias = ?2";
         if (taskNetId) { touchSql += " AND network_id = ?3"; touchParams.push(taskNetId); }
         db.run(touchSql, touchParams);
       });
       // SSE push: 秒达
-      const pendingParams: any[] = [body.alias];
+      const pendingParams: any[] = [targetAlias];
       let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
       if (taskNetId) { pendingSql += " AND network_id = ?2"; pendingParams.push(taskNetId); }
       const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
-      const sessionParams: any[] = [body.alias];
+      const sessionParams: any[] = [targetAlias];
       let sessionSql = "SELECT 1 FROM sessions WHERE alias = ?1";
       if (taskNetId) { sessionSql += " AND network_id = ?2"; sessionParams.push(taskNetId); }
       const targetSession = db.get<any>(sessionSql, ...sessionParams);
-      if (targetSession) pushEvent(body.alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession }, taskNetId);
-      return withCors(req, Response.json({ ok: true, task_id: id, message_id: id }));
+      if (targetSession) pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession, ...(canonical.renamed ? { renamed_from: body.alias } : {}) }, taskNetId);
+      return withCors(req, Response.json({ ok: true, task_id: id, message_id: id, ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}) }));
     }
 
     // ── REST: broadcast ──

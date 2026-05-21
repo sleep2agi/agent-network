@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { db, uuidv4, logTaskEvent, chainReplyToParent } from "./db.js";
 import { pushEvent } from "./push.js";
 import { getUserNetworkRole } from "./auth.js";
+import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias } from "./rename.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -149,7 +150,36 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!canWrite(effectiveNetId)) {
         return writeDeniedReply(effectiveNetId);
       }
-      console.log(`[${ts()}] ${alias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}${effectiveNetId ? " [net]" : ""}`);
+      const canonical = resolveCanonicalAlias(sessionNetId, alias);
+      let effectiveAlias = canonical.alias;
+      if (canonical.renamed) {
+        // A stale process may keep heartbeating with the old alias after a
+        // committed rename. If the new alias is already active, ignore the
+        // stale report and clean the old row instead of letting it recreate
+        // a red/orphan dashboard node (#146/#172). If not active yet, rewrite
+        // the incoming report to the canonical alias so startup can converge.
+        if (canonicalAliasExists(sessionNetId, effectiveAlias, resume_id)) {
+          cleanupRenamedAliasSession(sessionNetId, alias, effectiveAlias);
+          const pendingParams: any[] = [effectiveAlias];
+          let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
+          pendingSql = addScope(pendingSql, pendingParams, effectiveNetId);
+          const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: true,
+                resume_id,
+                alias: effectiveAlias,
+                renamed_from: alias,
+                ignored_stale_alias: true,
+                inbox_count: pending?.cnt ?? 0,
+              }),
+            }],
+          };
+        }
+      }
+      console.log(`[${ts()}] ${effectiveAlias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}${effectiveNetId ? " [net]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const trimmedOutput = output?.slice(0, 4000);
       const hostHostname = host?.hostname || hn || null;
       const hostIp = host?.ip || clientIP || null;
@@ -190,7 +220,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       db.transaction(() => {
         // Only delete same-alias sessions within the same network
-        db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [alias, resume_id, sessionNetId]);
+        db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [effectiveAlias, resume_id, sessionNetId]);
         db.run(
           `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, last_seen_at, updated_at)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, datetime('now'), datetime('now'))
@@ -219,19 +249,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              process_uptime_seconds = COALESCE(?32, sessions.process_uptime_seconds),
              process_in_flight_count = COALESCE(?33, sessions.process_in_flight_count),
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
-          [resume_id, alias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount]
+          [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, status, task ?? null, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount]
         );
         if (host || proc) {
           db.run(
             `INSERT INTO agent_telemetry (id, network_id, resume_id, alias, hostname, ip, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, datetime('now'))`,
-            [uuidv4(), sessionNetId, resume_id, alias, hostHostname, hostIp, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount]
+            [uuidv4(), sessionNetId, resume_id, effectiveAlias, hostHostname, hostIp, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount]
           );
         }
       });
-      pushEvent(alias, {
+      pushEvent(effectiveAlias, {
         type: "status_update",
-        alias,
+        alias: effectiveAlias,
+        ...(canonical.renamed ? { renamed_from: alias } : {}),
         status,
         progress: progress ?? null,
         host: statusHostTelemetry,
@@ -241,19 +272,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // V2: sync tasks table — report_status(working) → tasks.running
       if (status === "working" && task) {
         try {
-          const runParams: any[] = [alias, task];
+          const runParams: any[] = [effectiveAlias, task];
           let runSql = `UPDATE tasks SET status = 'running', started_at = datetime('now')
              WHERE to_name = ?1 AND status IN ('delivered', 'acked') AND content = ?2`;
           runSql = addScope(runSql, runParams, effectiveNetId);
           const runResult = db.run(runSql, runParams);
           if (runResult.changes > 0) {
             // Find task_id for logging
-            const findParams: any[] = [alias, task];
+            const findParams: any[] = [effectiveAlias, task];
             let findSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND content = ?2 AND status = 'running'";
             findSql = addScope(findSql, findParams, effectiveNetId);
             findSql += " ORDER BY started_at DESC LIMIT 1";
             const t = db.get<{ task_id: string }>(findSql, ...findParams);
-            if (t) logTaskEvent(t.task_id, null, "running", alias);
+            if (t) logTaskEvent(t.task_id, null, "running", effectiveAlias);
           }
         } catch {}
       }
@@ -277,13 +308,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
                hostname = COALESCE(?9, nodes.hostname),
                network_id = COALESCE(?10, nodes.network_id),
                updated_at = datetime('now')`,
-            [node_id, nn || alias, alias, nodeRuntime, mdl ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null, effectiveNetId ?? null]
+            [node_id, nn || effectiveAlias, effectiveAlias, nodeRuntime, mdl ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null, effectiveNetId ?? null]
           );
         } catch {}
       }
 
       // inbox uses alias for routing
-      const inboxParams: any[] = [alias];
+      const inboxParams: any[] = [effectiveAlias];
       let inboxSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
       inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
       const row = db.get<{ cnt: number }>(inboxSql, ...inboxParams);
@@ -295,7 +326,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             text: JSON.stringify({
               ok: true,
               resume_id,
-              alias,
+              alias: effectiveAlias,
+              ...(canonical.renamed ? { renamed_from: alias } : {}),
               inbox_count: row?.cnt ?? 0,
             }),
           },
@@ -587,7 +619,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
       }
 
-      console.log(`[${ts()}] ${from_session} → send_task → ${alias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}`);
+      const canonical = resolveCanonicalAlias(effectiveNetId, alias);
+      const targetAlias = canonical.alias;
+      console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const id = uuidv4();
       // 事务：inbox + tasks 双写 + 触碰目标 session 的 task/updated_at（让
       // dashboard 在派任务一刻就反映出"任务已下发"，不再等 agent 的
@@ -597,21 +631,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         db.run(
           `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response, network_id)
            VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply', ?7)`,
-          [id, alias, priority, task, context ?? null, from_session, effectiveNetId ?? null]
+          [id, targetAlias, priority, task, context ?? null, from_session, effectiveNetId ?? null]
         );
         db.run(
           `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id)
            VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8)`,
-          [id, from_session, alias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId]
+          [id, from_session, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId]
         );
-        const touchParams: any[] = [task.slice(0, 200), alias];
+        const touchParams: any[] = [task.slice(0, 200), targetAlias];
         let touchSql = "UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE alias = ?2";
         touchSql = addScope(touchSql, touchParams, effectiveNetId);
         db.run(touchSql, touchParams);
       });
-      logTaskEvent(id, null, "delivered", from_session, parentTaskId ? `→ ${alias} (parent=${parentTaskId.slice(0,8)})` : `→ ${alias}`);
+      logTaskEvent(id, null, "delivered", from_session, parentTaskId ? `→ ${targetAlias} (parent=${parentTaskId.slice(0,8)})` : `→ ${targetAlias}`);
 
-      const session = scopedSessionStatus(alias, effectiveNetId);
+      const session = scopedSessionStatus(targetAlias, effectiveNetId);
 
       // SSE push by alias.
       // The SSE channel is keyed by alias (subscribers connected to /events/<alias>),
@@ -620,11 +654,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // network_id=null but the sender supplied an explicit network_id (the
       // exact mismatch hit by Dashboard tasks). Push unconditionally; the
       // subscriber's own auth (ntok_) constrains who can listen.
-      const pendingParams: any[] = [alias];
+      const pendingParams: any[] = [targetAlias];
       let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
       pendingSql = addScope(pendingSql, pendingParams, effectiveNetId);
       const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
-      pushEvent(alias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session }, effectiveNetId);
+      pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
 
       return {
         content: [
@@ -633,6 +667,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             text: JSON.stringify({
               ok: true,
               message_id: id,
+              ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
               session_status: session?.status ?? "unknown",
             }),
           },
