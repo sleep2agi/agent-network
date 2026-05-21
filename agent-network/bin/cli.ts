@@ -3049,23 +3049,45 @@ anet session <command>
   }
 }
 
-// #146 — poll commhub /api/status until `alias` shows up non-offline, or
-// timeout. Used by renameCommand to confirm the restarted agent-node has
-// re-registered under the new alias before declaring the rename done
-// (SDK马 refinement — otherwise rename "succeeds" but the node is silently
-// absent). Best-effort: network hiccups just retry until the deadline.
-async function waitForNodeOnline(hub: string, token: string, alias: string, timeoutMs: number): Promise<boolean> {
+// #146 R1 — read a node's recorded PID without mutating the pidfile. Pure
+// read: renameCommand captures the OLD pid up-front so process-exit can be
+// confirmed even though the pidfile is later removed with the old config dir.
+function readNodePid(nodeId: string): number | null {
+  try {
+    const pidFile = join(nodesDir(), nodeId, ".pid");
+    if (!existsSync(pidFile)) return null;
+    const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
+    return Number.isNaN(pid) ? null : pid;
+  } catch { return null; }
+}
+
+function pidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${hub}/api/status`, { headers: authHeaders(token) }).then(r => r.json() as any);
-      const sessions = res.sessions || [];
-      const node = sessions.find((s: any) => s.alias === alias || s.node_name === alias);
-      if (node && String(node.status || "").toLowerCase() !== "offline") return true;
-    } catch {}
-    await new Promise(r => setTimeout(r, 2500));
+    if (!pidAlive(pid)) return true;
+    await new Promise(r => setTimeout(r, 250));
   }
-  return false;
+  return !pidAlive(pid);
+}
+
+// #146 R1 — terminate a node process and CONFIRM it exited. SIGTERM →
+// bounded wait → (force only) SIGKILL → bounded wait. Returns true only when
+// the process is verified dead. A surviving old process keeps heart-beating
+// and commhub's ON CONFLICT(resume_id) upsert reverts the rename (SDK马
+// Finding B), so renameCommand must NOT start the new alias if this is false.
+async function terminateNodeProcess(pid: number, force: boolean): Promise<boolean> {
+  if (!pidAlive(pid)) return true;
+  try { process.kill(pid, "SIGTERM"); } catch {}
+  if (await waitForPidExit(pid, 8000)) return true;
+  if (force) {
+    try { process.kill(pid, "SIGKILL"); } catch {}
+    if (await waitForPidExit(pid, 3000)) return true;
+  }
+  return !pidAlive(pid);
 }
 
 // #146 GOTCHA-2 — best-effort drain before a rename restart kills the agent.
@@ -3074,12 +3096,13 @@ async function waitForNodeOnline(hub: string, token: string, alias: string, time
 // on timeout (still working). Killing a working node drops the in-flight
 // task with no reply (#168 silent-lost family) — `--force` is the user's
 // acceptance that a stuck/long task may still be interrupted past this wait.
-async function waitForNodeIdle(hub: string, token: string, alias: string, timeoutMs: number): Promise<boolean> {
+async function waitForNodeIdle(hub: string, token: string, networkId: string, alias: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   let sawNode = false;
+  const url = `${hub}/api/status?network_id=${encodeURIComponent(networkId)}`;  // #146 R6
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`${hub}/api/status`, { headers: authHeaders(token) }).then(r => r.json() as any);
+      const res = await fetch(url, { headers: authHeaders(token) }).then(r => r.json() as any);
       const node = (res.sessions || []).find((s: any) => s.alias === alias || s.node_name === alias);
       if (node) {
         sawNode = true;
@@ -3094,6 +3117,38 @@ async function waitForNodeIdle(hub: string, token: string, alias: string, timeou
   return false;
 }
 
+// #146 R2 — verify the restarted agent is genuinely live under the new alias.
+// commitRename renames the hub row in place (keeps the old status/updated_at),
+// so a plain "alias=new && status!=offline" check is a false positive — true
+// even if the new process never started. Authoritative signal: the new node's
+// `.pid` is present AND alive — only a real restarted process writes that
+// pidfile; the hub row rename cannot fake a local pid. A fresh hub heartbeat
+// (last_seen/updated_at past restartStartedAt) corroborates but only annotates.
+async function verifyNodeRestarted(
+  hub: string, token: string, networkId: string, newName: string,
+  restartStartedAt: number, timeoutMs: number,
+): Promise<{ ok: boolean; reason: string }> {
+  const deadline = Date.now() + timeoutMs;
+  const url = `${hub}/api/status?network_id=${encodeURIComponent(networkId)}`;  // #146 R6
+  while (Date.now() < deadline) {
+    const pid = readNodePid(newName);
+    if (pid !== null && pidAlive(pid)) {
+      let fresh = false;
+      try {
+        const res = await fetch(url, { headers: authHeaders(token) }).then(r => r.json() as any);
+        const node = (res.sessions || []).find((s: any) => s.alias === newName || s.node_name === newName);
+        if (node) {
+          const ts = Date.parse(node.last_seen_at || node.updated_at || "") || 0;
+          fresh = ts >= restartStartedAt;
+        }
+      } catch {}
+      return { ok: true, reason: fresh ? "new process pid alive + fresh hub heartbeat" : "new process pid alive (hub heartbeat still catching up)" };
+    }
+    await new Promise(r => setTimeout(r, 2500));
+  }
+  return { ok: false, reason: `no live new-process pid within ${Math.round(timeoutMs / 1000)}s` };
+}
+
 // anet node rename — RFC-010 §4 multi-surface 2PC (issue #84 Phase 2).
 // PHASE 1 (prepare) is fully rollback-safe: copy-not-move + rename.lock +
 // commhub prepared rename_txn row, old node untouched. PHASE 2 (commit) is the
@@ -3106,11 +3161,14 @@ async function renameCommand() {
     console.log(`
 anet node rename <node-id|node-name> <new-node-name> [--force]
   --force  required to rename a running node. A running node is restarted
-           under the new alias (#146): the agent process is stopped and
-           relaunched so it re-registers with commhub under the new name.
-           A best-effort 60s drain waits for any in-flight task to finish
-           first; past that, --force means a long/stuck task may still be
-           interrupted without a reply.
+           under the new alias (#146): the agent process is stopped (its
+           exit is verified) and relaunched so it re-registers with commhub
+           under the new name.
+           - A best-effort 60s drain waits for any in-flight task to finish
+             first; past that, --force means a long/stuck task may still be
+             interrupted without a reply (the dispatcher's task stays open).
+           - Auto-restart needs tmux. Without tmux the rename still commits,
+             but the node is left stopped — start it with: anet node start.
 `);
     return;
   }
@@ -3145,13 +3203,23 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   // state check: running node needs --force (RFC-010 §4.4 active rename)
   const pidFile = join(oldDir, ".pid");
   let running = false;
+  let oldPid: number | null = null;  // #146 R1 — captured up-front; the pidfile is removed with oldDir later
   if (existsSync(pidFile)) {
     const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
-    if (!isNaN(pid)) { try { process.kill(pid, 0); running = true; } catch {} }
+    if (!isNaN(pid)) { try { process.kill(pid, 0); running = true; oldPid = pid; } catch {} }
   }
   if (running && !force) {
     console.error(`Node "${oldId}" is running. Use --force to rename a running node (active rename, RFC-010 §4.4).`);
     process.exit(1);
+  }
+  // #146 R4 — a running node must be restarted under the new alias, which
+  // needs tmux. If tmux is unavailable the rename still proceeds, but the node
+  // ends up stopped and the user must restart it by hand — surface that
+  // up-front so the success message later does not imply auto-recovery.
+  const canAutoRestart = tmuxAvailable();
+  if (running && !canAutoRestart) {
+    console.warn(`[anet] ⚠ tmux not found — the renamed node cannot be auto-restarted.`);
+    console.warn(`[anet]   The rename will still proceed; afterwards start it manually: anet node start ${shellQuote(newName)}`);
   }
 
   const gc = loadGlobal();
@@ -3163,6 +3231,17 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     process.exit(1);
   }
   const stored = loadStoredProfile(oldId) || resolved.profile;
+  // #146 R3 — a canonical node_id must exist before the 2PC. resume_id is
+  // derived as sdk-<node_id> and commhub's report_status upserts the session
+  // row ON CONFLICT(resume_id) (SDK马 Finding B); a legacy config with no
+  // node_id would let the restarted process mint an unstable id and break
+  // both the rename and continuity. Generate + persist one now so the PHASE 1
+  // cpSync carries the same id into the new dir.
+  if (!stored.node_id) {
+    stored.node_id = generateNodeId();
+    saveProfile(oldId, stored);
+    console.log(`[anet] assigned canonical node_id ${stored.node_id} to legacy config (was missing).`);
+  }
 
   // ── PHASE 1: PREPARE (copy/prepare, old node untouched — fully rollbackable) ──
   writeFileSync(lockPath, JSON.stringify({ old: oldId, new: newName, phase: "prepare", ts: Date.now() }) + "\n");
@@ -3240,6 +3319,7 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   // — the `session` field was preserved by the PHASE 1 cpSync, so the
   // Claude / agent session resumes (no context loss). RFC-013 hot-reload
   // (zero-gap alias swap) stays the v0.12.0 path; for a P0 it is too heavy.
+  let oldProcessConfirmedDead = !running;  // not running → nothing to kill, trivially "dead"
   if (running) {
     console.log(`[anet] node was running — restarting under new alias "${newName}" (#146 Option B)...`);
 
@@ -3247,13 +3327,27 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     // mid-task drops that task with no reply; wait (bounded 60s) for it to
     // go idle first. --force already signals the user accepts that a
     // stuck/long task may still be interrupted past this wait.
-    const drained = await waitForNodeIdle(hub, token, oldId, 60000);
+    const drained = await waitForNodeIdle(hub, token, networkId, oldId, 60000);
     if (!drained) {
       console.warn(`[anet] ⚠ "${oldId}" still running a task after 60s — proceeding with restart (--force).`);
       console.warn(`[anet]   An in-flight task may be interrupted without a reply (dispatcher's task stays open).`);
     }
 
-    stopNode(oldId);  // SIGTERM the old process (graceful — reports offline old-alias)
+    // #146 R1 — terminate the old process and CONFIRM it exited. A surviving
+    // old process keeps polling get_inbox + heart-beating report_status under
+    // the OLD alias; commhub's ON CONFLICT(resume_id) upsert then reverts the
+    // rename (SDK马 Finding B). stopNode() only fires SIGTERM and trusts it —
+    // here we verify: SIGTERM → 8s wait → SIGKILL (--force) → 3s wait.
+    if (oldPid !== null) {
+      oldProcessConfirmedDead = await terminateNodeProcess(oldPid, force);
+      if (!oldProcessConfirmedDead) {
+        console.error(`[anet] ✗ old agent process (pid ${oldPid}) did not exit after SIGTERM + SIGKILL.`);
+      }
+    } else {
+      // running was detected but the pid was not captured — cannot confirm.
+      oldProcessConfirmedDead = false;
+      console.error(`[anet] ✗ could not determine the old agent's pid — cannot confirm it stopped.`);
+    }
     if (tmuxSessionRunning(oldId)) killTmuxSession(oldId);
     // brief grace so the old SSE/heartbeat + final writebackSession() tear down
     await new Promise(r => setTimeout(r, 1500));
@@ -3291,32 +3385,46 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   }
   writeLegacyProjectAlias(newName);
 
-  // C4 (#146): relaunch the renamed node + verify it re-registered under the
-  // new alias before declaring success.
-  let restarted = false;
-  if (running) {
+  // C4 (#146 R2): relaunch the renamed node + verify a *real new process*
+  // came up. The restart only fires when the old process is confirmed dead
+  // (R1 — else two processes would fight over the same resume_id) and tmux is
+  // available (R4). verifyNodeRestarted keys on the new node's live .pid, not
+  // on the hub row alone — commitRename renames that row in place, so an
+  // alias-match check would pass even if the new process never started.
+  let restartFired = false;
+  let restartOutcome: { ok: boolean; reason: string } | null = null;
+  if (running && oldProcessConfirmedDead && canAutoRestart) {
+    const restartStartedAt = Date.now();
     try {
       startNodeTmuxSession(newName, newName);  // detached tmux: `anet node start <newName>`
-      restarted = true;
+      restartFired = true;
+      restartOutcome = await verifyNodeRestarted(hub, token, networkId, newName, restartStartedAt, 30000);
     } catch (e: any) {
       console.warn(`[anet] ⚠ rename committed but auto-restart failed: ${e?.message || e}`);
-      console.warn(`[anet]   Start manually: anet node start ${shellQuote(newName)}`);
     }
   }
 
   console.log(`[anet] node_id: ${stored.node_id} — unchanged (only the alias changed; ntok_ token still valid).`);
-  if (restarted) {
-    const online = await waitForNodeOnline(hub, token, newName, 30000);
-    if (online) {
-      console.log(`[anet] ✅ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — agent restarted + re-registered under the new alias.`);
-    } else {
-      console.warn(`[anet] ⚠ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — restart fired but the agent did not re-register within 30s.`);
-      console.warn(`[anet]   Check: anet logs ${shellQuote(newName)}  |  anet status`);
-    }
-  } else if (running) {
-    console.log(`[anet] ✅ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — old process stopped; start the node manually: anet node start ${shellQuote(newName)}`);
-  } else {
+  if (!running) {
     console.log(`[anet] ✅ Renamed "${oldId}" → "${newName}" (txn ${txnId}). Node was not running — next \`anet node start ${shellQuote(newName)}\` registers under the new alias.`);
+  } else if (!oldProcessConfirmedDead) {
+    // R1 — old process survived SIGTERM+SIGKILL. Starting the new alias now
+    // would let two processes heart-beat the same resume_id and revert the
+    // rename (Finding B). Stop here and hand the user a manual recovery path.
+    console.error(`[anet] ⚠ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — but the OLD agent process (pid ${oldPid}) is still alive.`);
+    console.error(`[anet]   Do NOT leave it running: its heartbeat can revert the rename. Recover manually:`);
+    console.error(`[anet]     1) kill -9 ${oldPid}`);
+    console.error(`[anet]     2) anet node start ${shellQuote(newName)}`);
+    process.exit(1);
+  } else if (!canAutoRestart) {
+    console.log(`[anet] ✅ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — old process stopped. tmux unavailable: start the node manually: anet node start ${shellQuote(newName)}`);
+  } else if (restartFired && restartOutcome?.ok) {
+    console.log(`[anet] ✅ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — agent restarted + verified live under the new alias (${restartOutcome.reason}).`);
+  } else if (restartFired) {
+    console.warn(`[anet] ⚠ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — restart fired but a live new process could not be verified (${restartOutcome?.reason ?? "unknown"}).`);
+    console.warn(`[anet]   Check: anet logs ${shellQuote(newName)}  |  anet status   — or restart: anet node start ${shellQuote(newName)}`);
+  } else {
+    console.warn(`[anet] ⚠ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — old process stopped but auto-restart did not fire. Start manually: anet node start ${shellQuote(newName)}`);
   }
 }
 
