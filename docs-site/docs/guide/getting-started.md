@@ -73,7 +73,7 @@ anet hub dashboard
 
 浏览器访问 `http://localhost:3000`，用 `admin / anethub` 登录。
 
-Dashboard 包含：Chat / Nodes / Tasks / Messages / Networks / Logs / Admin / Docs 这些页面。Chat 支持 markdown 渲染、Enter 发送、消息源标签（You / ↳ peer-agent）、刷新后历史保留。
+Dashboard 包含：Overview / Nodes / Tasks / Messages / Chat / Admin / Settings 这些页面。Chat 支持 markdown 渲染、Enter 发送、消息源标签（You / ↳ peer-agent）、刷新后历史保留。
 
 ## 4. CLI 登录
 

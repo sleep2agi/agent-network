@@ -71,7 +71,7 @@ anet hub dashboard
 
 Open `http://localhost:3000` in a browser, log in with `admin / anethub` (the default — change it via `anet passwd` after).
 
-Pages: Chat / Nodes / Tasks / Messages / Networks / Logs / Admin / Docs. The Chat page renders markdown, sends on Enter, shows source labels (`You` / `↳ peer-agent`), and persists history across reloads.
+Pages: Overview / Nodes / Tasks / Messages / Chat / Admin / Settings. The Chat page renders markdown, sends on Enter, shows source labels (`You` / `↳ peer-agent`), and persists history across reloads.
 
 ## 4. Log in via CLI
 
