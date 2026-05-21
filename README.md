@@ -44,7 +44,7 @@
 > **前置**：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings）。
 
 ```bash
-# 装一个全局包（拉 npm @latest，当前 v0.10.2 = agent-network 2.2.1）
+# 装一个全局包（拉 npm @latest，当前 v0.10.8 = agent-network 2.2.6）
 npm install -g @sleep2agi/agent-network
 
 # 终端 1 —— 起 Hub（保持开着）
@@ -74,7 +74,7 @@ curl -fsSL https://anet.sh/install.sh | bash
 ### 已装 anet？升级到最新
 
 ```bash
-anet upgrade            # 一键升 4 包 @latest（含 v0.10.1 PINNED hotfix + v0.10.2 Hero A/D）
+anet upgrade            # 一键把 4 个包升到 npm @latest（当前 v0.10.8）
 anet project restart    # 重启 cwd 节点接新版（详见 #117）
 ```
 
@@ -96,7 +96,7 @@ anet demo socialmedia --topic "AI 时代如何提升专注力" --platform xiaoho
 
 每个 demo 跑在独立 network 里，跑完自动清场，**不会污染** `default` network。
 
-> 🎬 **Demo 录屏正在准备中**（`anet demo debate` / `socialmedia` 的实跑 GIF，过两天发上来）。在那之前直接跑命令最快。
+> 🎬 **Demo 录屏制作中**（`anet demo debate` / `socialmedia` 的实跑 GIF）。在那之前直接跑命令最快。
 
 ---
 
@@ -117,7 +117,7 @@ anet demo socialmedia --topic "AI 时代如何提升专注力" --platform xiaoho
 - **八家 LLM，一个开关切换。** Anthropic / OpenAI / MiniMax / DeepSeek / 智谱 GLM / 月之暗面 Kimi / 书生 InternLM / OpenRouter —— 通过 `ANTHROPIC_BASE_URL` 一键路由。
 - **本地跑得动，跨服务器也跑得动。** Hub 默认绑 `127.0.0.1` 纯本机；改成 `0.0.0.0` 绑公网 IP，**多台云服务器 / 多个工位的 Agent 都能加入同一个 Hub**，SSE 实时双向。SQLite 数据全程在 Hub 所在那台机器，不用注册账号、不用登云、零遥测。
 - **Mesh 派活开箱即用。** Agent 之间通过 17 个 MCP 工具（`get_all_status` / `send_task` / `get_task` …）自动发现 + 互相派活，不需要你写编排逻辑。
-- **自带 Web Dashboard。** Overview / Nodes / Tasks / Messages / Chat / Admin / Settings —— Next.js 16 + 4 套主题，跑在 `localhost:3000`。
+- **自带 Web Dashboard。** Overview / Nodes / Tasks / Messages / Chat / Admin / Settings 七大页 + 实时节点拓扑图（grid / ring 双视图，连线按消息频度分级）—— Next.js 16 + 4 套主题，跑在 `localhost:3000`。
 - **和 LangGraph / AutoGen / CrewAI 不一样：** anet 是 **npm 包**，零 Python 依赖；**本地优先**而非 SaaS 框架；**多厂商不锁定**而非默认 OpenAI；**人 + Agent 同台**通过 Dashboard Chat 协作而非纯程序编排。
 
 ---
@@ -221,7 +221,7 @@ flowchart LR
 |---|---|---|
 | [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.6` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器（v0.10.7 [#156](https://github.com/sleep2agi/agent-network/issues/156) codex-sdk batch path yolo flags parity + `--no-yolo` opt-out / v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) anet upgrade Option B detached spawn 默认 + [#155](https://github.com/sleep2agi/agent-network/issues/155) batch wizard silent-exit 修 / v0.10.5 [#152](https://github.com/sleep2agi/agent-network/issues/152) batch wizard workdir mode + [#153](https://github.com/sleep2agi/agent-network/issues/153) codex/claude skip API key prompt / v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) anet upgrade UX warning / v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149) codex-sdk gpt-5.5 vendor preset / v0.10.1 hotfix `PINNED_SERVER_VERSION` bump 0.8.0 → 0.8.2，[详见 changelog](https://anet.sh/changelog)）|
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.2` | MCP + REST + SSE 通信中枢（SQLite）+ `/api/server/:host/health` + `/api/server/:host/agents` |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.3` | Web Dashboard —— Next.js 16，4 套主题 + Hero 3 网络节点前端 8/8 surface + Hero D 拓扑前缀标签 Option C + disk render（v0.10.2）+ [#150](https://github.com/sleep2agi/agent-network/issues/150) 拓扑图 orphan 节点 "其他" cluster box（v0.10.4）+ [#157](https://github.com/sleep2agi/agent-network/issues/157) Servers 面板 UI 文案修 + R502 TopoGraph density tier polish（v0.10.8）+ 100+ 轮 typography & 圆角级联 polish |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.3` | Web Dashboard —— Next.js 16，4 套主题 + Hero 3 网络节点前端 8/8 surface + Hero D 拓扑前缀标签 Option C + disk render（v0.10.2）+ [#150](https://github.com/sleep2agi/agent-network/issues/150) 拓扑图 orphan 节点 "其他" cluster box（v0.10.4）+ [#157](https://github.com/sleep2agi/agent-network/issues/157) Servers 面板 UI 文案修 + TopoGraph density tier polish（v0.10.8）+ 100+ 轮 typography & 圆角级联 polish |
 | [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.2` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry + host disk telemetry（v0.10.2 Hero A，`df -k` POSIX 标准）+ codex-sdk yolo flags（v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149)）|
 
 CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
@@ -270,7 +270,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 ---
 
 > [!IMPORTANT]
-> **当前 stable: v0.10.0**（Apache 2.0，2026-05-16 通过 npm `latest` tag 发布 Phase 1 三包 promote —— Direct Runtime + Observability Foundations（[#141](https://github.com/sleep2agi/agent-network/issues/141) codex app-server stdio direct opt-in / [#99](https://github.com/sleep2agi/agent-network/issues/99) 守护节点 Phase 1 endpoint scaffold / [#142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry / dashboard `0.5.0` Phase 2 待 §3.D/F/G ship / release-gate playbook 首次完整跑通），详见 [changelog](https://anet.sh/changelog#v0-10-0-direct-runtime-observability-foundations-2026-05-16-stable-phase-1-3-包-promote)；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)）。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
+> **当前 stable: v0.10.8**（Apache 2.0，4 个包均在 npm `latest`：agent-network `2.2.6` / agent-node `2.4.2` / commhub-server `0.8.2` / agent-network-dashboard `0.5.3`）。v0.10 系列从 v0.10.0 的 Direct Runtime + Observability Foundations（[#141](https://github.com/sleep2agi/agent-network/issues/141) codex app-server stdio 直连 opt-in / [#99](https://github.com/sleep2agi/agent-network/issues/99) 守护节点 observability endpoint / [#142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry）起，迭代了 8 个 patch —— `anet upgrade` UX、`anet create --batch` wizard、codex-sdk vendor preset、Dashboard 拓扑图与 Servers 面板 polish 等，详见 [changelog](https://anet.sh/changelog)；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
 >
 > **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
 

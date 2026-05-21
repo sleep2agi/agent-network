@@ -44,7 +44,7 @@
 > **Prereq:** Node.js ≥ 22.13.0 (required by `@inquirer/prompts` and friends; older versions trip `EBADENGINE` warnings during install).
 
 ```bash
-# Install one global package (pulls npm @latest — currently v0.10.2 = agent-network 2.2.1)
+# Install one global package (pulls npm @latest — currently v0.10.8 = agent-network 2.2.6)
 npm install -g @sleep2agi/agent-network
 
 # Terminal 1 — start the hub (keep open)
@@ -74,7 +74,7 @@ Send a task from the Dashboard's Chat panel. Spin up a second node and ask the f
 ### Already have anet? Upgrade to the latest
 
 ```bash
-anet upgrade            # bumps all four @latest packages (incl. v0.10.1 PINNED hotfix + v0.10.2 Hero A/D)
+anet upgrade            # bumps all four packages to npm @latest (currently v0.10.8)
 anet project restart    # restart cwd nodes against the new version (see #117)
 ```
 
@@ -117,7 +117,7 @@ After the 30-second quickstart:
 - **Eight LLM providers, one config switch.** Anthropic / OpenAI / MiniMax / DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / InternLM / OpenRouter — all routed through `ANTHROPIC_BASE_URL`.
 - **Local. LAN. Cross-server. Same Hub.** Hub binds to `127.0.0.1` for pure local mode; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers across the internet can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
 - **Mesh dispatch out of the box.** Agents discover each other via 17 MCP tools (`get_all_status`, `send_task`, `get_task`, …) and coordinate without you scripting the choreography.
-- **Web Dashboard included.** Overview / Nodes / Tasks / Messages / Chat / Admin / Settings — Next.js 16 app, 4 themes, runs at `localhost:3000`.
+- **Web Dashboard included.** Seven pages — Overview / Nodes / Tasks / Messages / Chat / Admin / Settings — plus a live node topology graph (grid / ring dual view, edges tiered by message frequency). Next.js 16 app, 4 themes, runs at `localhost:3000`.
 - **Different from LangGraph / AutoGen / CrewAI:** anet is an **npm package**, zero Python dependency; **local-first**, not a SaaS framework; **multi-vendor without lock-in**, not OpenAI-by-default; **human + agent on the same surface** via Dashboard Chat, not pure programmatic orchestration.
 
 ---
@@ -221,7 +221,7 @@ Stable, Apache-2.0, published to npm.
 |---|---|---|
 | [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.6` | `anet` CLI — hub / dashboard / agent / demo launcher (v0.10.7 [#156](https://github.com/sleep2agi/agent-network/issues/156) codex-sdk batch path yolo flags parity + `--no-yolo` opt-out / v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) anet upgrade Option B detached spawn enabled by default + [#155](https://github.com/sleep2agi/agent-network/issues/155) batch wizard silent-exit fix / v0.10.5 [#152](https://github.com/sleep2agi/agent-network/issues/152) batch wizard workdir mode + [#153](https://github.com/sleep2agi/agent-network/issues/153) codex/claude skip API key prompt / v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) anet upgrade UX warning / v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149) codex-sdk gpt-5.5 vendor preset / v0.10.1 hotfix `PINNED_SERVER_VERSION` bumped 0.8.0 → 0.8.2, [see changelog](https://anet.sh/en/changelog)) |
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.2` | MCP + REST + SSE hub (SQLite) + `/api/server/:host/health` + `/api/server/:host/agents` |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.3` | Web UI — Next.js 16, 4 themes + Hero 3 network/node front-end 8/8 surfaces + Hero D topology prefix-label Option C + disk render (v0.10.2) + [#150](https://github.com/sleep2agi/agent-network/issues/150) topology orphan-node "Others" cluster box (v0.10.4) + [#157](https://github.com/sleep2agi/agent-network/issues/157) Servers panel UI copy fix + R502 TopoGraph density-tier polish (v0.10.8) + 100+ rounds of typography & corner-radius cascade polish |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.3` | Web UI — Next.js 16, 4 themes + Hero 3 network/node front-end 8/8 surfaces + Hero D topology prefix-label Option C + disk render (v0.10.2) + [#150](https://github.com/sleep2agi/agent-network/issues/150) topology orphan-node "Others" cluster box (v0.10.4) + [#157](https://github.com/sleep2agi/agent-network/issues/157) Servers panel UI copy fix + TopoGraph density-tier polish (v0.10.8) + 100+ rounds of typography & corner-radius cascade polish |
 | [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.2` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry + host disk telemetry (v0.10.2 Hero A, `df -k` POSIX standard) + codex-sdk yolo flags (v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149)) |
 
 The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. You only ever globally install one package.
@@ -272,7 +272,7 @@ What's solid, and what to watch out for.
 ---
 
 > [!IMPORTANT]
-> **Current stable: v0.10.0** (Apache 2.0, shipped 2026-05-16 via npm `latest` tag, Phase 1 three-package promote — Direct Runtime + Observability Foundations ([#141](https://github.com/sleep2agi/agent-network/issues/141) codex app-server stdio direct opt-in / [#99](https://github.com/sleep2agi/agent-network/issues/99) per-server daemon Phase 1 endpoint scaffold / [#142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry / dashboard `0.5.0` Phase 2 pending §3.D/F/G ship / release-gate playbook first full run), see [changelog](https://anet.sh/en/changelog#v0-10-0-direct-runtime-observability-foundations-2026-05-16-stable-phase-1-3-package-promote); project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases)). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
+> **Current stable: v0.10.8** (Apache 2.0; all four packages at npm `latest`: agent-network `2.2.6` / agent-node `2.4.2` / commhub-server `0.8.2` / agent-network-dashboard `0.5.3`). The v0.10 line started with v0.10.0's Direct Runtime + Observability Foundations ([#141](https://github.com/sleep2agi/agent-network/issues/141) codex app-server stdio direct opt-in / [#99](https://github.com/sleep2agi/agent-network/issues/99) per-server-daemon observability endpoints / [#142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry) and has since added eight patches — `anet upgrade` UX, the `anet create --batch` wizard, the codex-sdk vendor preset, Dashboard topology-graph and Servers-panel polish, and more. See the [changelog](https://anet.sh/en/changelog); project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
 >
 > **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
 
