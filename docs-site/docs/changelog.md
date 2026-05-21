@@ -38,7 +38,7 @@ Vincent 实测 catch（附 dashboard 截图）：Servers 面板对每台 hub 显
 - **#3**（v0.11.0 候选）：`status=offline` 与 telemetry 报告 mismatch（telemetry 仍上报但 SSE last_seen 超时）—— 系统级 status 协调
 :::
 
-### Polish fold-in — TopoGraph density tier（R502，纯 additive）
+### Polish fold-in — TopoGraph density tier（纯 additive）
 
 Dashboard 团队 commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard/commit/3f73810) （0.5.3-preview.16）—— Canvas state attr `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` 暴露第 12 个 observable testing surface。Tier 边界（sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+）跟 dense-layout collapse gate 对齐。**纯 additive，无 UX 改变**，配 numeric counts 提供 e2e selector 完整 canvas state snapshot 能力。
 
@@ -111,7 +111,7 @@ Source-of-truth helper：single-node path（`cli.ts:1146`）+ batch path（`cli.
 
 - **17 累计 `@latest` publish**（v0.9.0 → v0.10.7）：0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 当日 v0.10.x**：v0.10.1-7 = **7 ships in ~10 hours**（audit-first cadence）
-- **10 Vincent telegram catch 全闭环**（5443→5531）：包括 v0.10.7 #156
+- **10 项用户反馈全闭环**：包括 v0.10.7 #156
 
 详见 [release v0.10.7](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.7)。
 
@@ -151,7 +151,7 @@ anet --version                                    # 期望 v2.2.5
 
 - **16 累计 `@latest` publish**（v0.9.0 → v0.10.6）：0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 当日 v0.10.x**: v0.10.1 + v0.10.2 + v0.10.3 + v0.10.4 + v0.10.5 + **v0.10.6** = **6 ships in ~9 hours**（audit-first cadence）
-- **9 Vincent telegram catch 全闭环**：[5444 (Install/Upgrade 分块 R697)](#) + 5447+5448 (#149) + 5453 (#150) + 5462+5472 (#151) + 5477 (#152) + 5481+5485 (#153) + 5489+5490 (#154) + 5493 (#155) + 5499-5502 (red-line SOPs)
+- **9 项用户反馈全闭环**：Install/Upgrade 文档分块 + #149 / #150 / #151 / #152 / #153 / #154 / #155 + 安全红线 SOP
 
 详见 [release v0.10.6](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.6)。
 

@@ -38,7 +38,7 @@ The new copy accurately says "this hub didn't report it right now" instead of im
 - **#3** (v0.11.0 candidate): `status=offline` vs telemetry mismatch (telemetry still reports but SSE `last_seen` has timed out) — needs system-level status reconciliation.
 :::
 
-### Polish fold-in — TopoGraph density-tier (R502, purely additive)
+### Polish fold-in — TopoGraph density-tier (purely additive)
 
 Dashboard team commit [`3f73810`](https://github.com/sleep2agi/agent-network-dashboard/commit/3f73810) (0.5.3-preview.16) — the canvas state attribute `data-topo-fleet-density-tier` ∈ `{empty, sparse, normal, dense, very-dense}` exposes a 12th observable testing surface. Tier boundaries (sparse 1-3 / normal 4-15 / dense 16-30 / very-dense 31+) line up with the dense-layout collapse gate. **Purely additive, no UX change**. Paired with the numeric counts, e2e selectors now have a complete canvas-state snapshot.
 
@@ -111,7 +111,7 @@ Single source-of-truth helper: both the single-node path (`cli.ts:1146`) and the
 
 - **17 cumulative `@latest` publishes** (v0.9.0 → v0.10.7): 0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 v0.10.x same-day ships**: v0.10.1-7 = **7 ships in ~10 hours** (audit-first cadence)
-- **10 Vincent telegram catches all closed-loop** (5443→5531): including v0.10.7 [#156](https://github.com/sleep2agi/agent-network/issues/156)
+- **10 user-feedback items all closed-loop**: including v0.10.7 [#156](https://github.com/sleep2agi/agent-network/issues/156)
 
 See the [v0.10.7 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.7).
 
@@ -151,7 +151,7 @@ From the next release onward (e.g. 2.2.6+), `anet upgrade` will **auto detached-
 
 - **16 cumulative `@latest` publishes** (v0.9.0 → v0.10.6): 0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 v0.10.x same-day ships**: v0.10.1 + v0.10.2 + v0.10.3 + v0.10.4 + v0.10.5 + **v0.10.6** = **6 ships in ~9 hours** (audit-first cadence)
-- **9 Vincent telegram catches all closed-loop**: 5444 (Install/Upgrade split R697) + 5447+5448 (#149) + 5453 (#150) + 5462+5472 (#151) + 5477 (#152) + 5481+5485 (#153) + 5489+5490 (#154) + 5493 (#155) + 5499-5502 (red-line SOPs)
+- **9 user-feedback items all closed-loop**: Install/Upgrade docs split + #149 / #150 / #151 / #152 / #153 / #154 / #155 + red-line SOPs
 
 See the [v0.10.6 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.6).
 
