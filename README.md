@@ -194,22 +194,20 @@ flowchart LR
 
 ---
 
-## 已验证 Provider
+## Provider 接入
 
-`claude-agent-sdk` 本质就是 Anthropic Messages 客户端，任何兼容 endpoint 都能跑。
+`claude-agent-sdk` 本质就是 Anthropic Messages 客户端，任何 Anthropic 兼容 endpoint 都能跑。`anet node create` 内置 `VENDORS` 供应商列表里的每一项都 **verified-with-real-call**（跑通真实 API 才进列表，#104-B 设计）；列表外的 provider 走「自定义」`custom` 接入。
 
-| Provider | 状态 | `ANTHROPIC_BASE_URL` |
+| Provider | 接入方式 | `ANTHROPIC_BASE_URL` |
 |---|---|---|
-| Anthropic | verified | `https://api.anthropic.com` |
-| MiniMax | verified | `https://api.minimaxi.com/anthropic` |
-| DeepSeek | verified | （官方 Anthropic 兼容 endpoint） |
-| 智谱 GLM | verified | （open.bigmodel.cn Anthropic 适配） |
-| 月之暗面 Kimi | verified | （platform.moonshot.cn Anthropic 兼容） |
-| 书生 InternLM | verified | `https://chat.intern-ai.org.cn/anthropic` |
-| OpenAI（通过 `codex-sdk`）| verified | n/a —— OpenAI 原生 |
-| OpenRouter / 自定义 Anthropic 兼容 | dev 跑通，无 E2E | 自填 base URL + token |
+| Anthropic Claude | 内置 vendor · verified | `https://api.anthropic.com` |
+| MiniMax | 内置 vendor · verified | `https://api.minimaxi.com/anthropic` |
+| 小米 MiMo | 内置 vendor · verified | `https://token-plan-cn.xiaomimimo.com/anthropic` |
+| 书生 Intern | 内置 vendor · verified | `https://chat.intern-ai.org.cn`（裸域名，无 `/anthropic`）|
+| OpenAI Codex（`codex-sdk`）| 内置 vendor · verified | n/a —— `codex auth login` |
+| DeepSeek / 智谱 GLM / 月之暗面 Kimi / OpenRouter / 自建 | 走 `custom` 供应商（**不在内置列表，自行验证 endpoint + model id**）| 自填 base URL + `ANTHROPIC_AUTH_TOKEN` |
 
-📖 各家 Key / 模型 / 预设 → <https://anet.sh/guide/multi-model>
+📖 各家 Key / 模型 / 接入 → <https://anet.sh/guide/multi-model>
 
 ---
 

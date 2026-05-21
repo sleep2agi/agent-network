@@ -194,22 +194,20 @@ Pick one per node. Mix freely on the same hub.
 
 ---
 
-## Verified providers
+## Providers
 
-`claude-agent-sdk` is just an Anthropic Messages client — any compatible endpoint works.
+`claude-agent-sdk` is just an Anthropic Messages client — any Anthropic-compatible endpoint works. Every entry in `anet node create`'s built-in `VENDORS` list is **verified-with-real-call** (it only lands in the list after a real API call passes — the #104-B design); providers outside the list go through the `custom` vendor.
 
-| Provider | Status | `ANTHROPIC_BASE_URL` |
+| Provider | Access | `ANTHROPIC_BASE_URL` |
 |---|---|---|
-| Anthropic | verified | `https://api.anthropic.com` |
-| MiniMax | verified | `https://api.minimaxi.com/anthropic` |
-| DeepSeek | verified | (official Anthropic-compatible endpoint) |
-| GLM 智谱 | verified | (open.bigmodel.cn Anthropic adapter) |
-| Kimi (Moonshot) | verified | (platform.moonshot.cn Anthropic-compatible) |
-| InternLM 书生 | verified | `https://chat.intern-ai.org.cn/anthropic` |
-| OpenAI (via `codex-sdk`) | verified | n/a — OpenAI native |
-| OpenRouter / custom Anthropic-compatible | works in dev, no E2E | provide base URL + token |
+| Anthropic Claude | built-in vendor · verified | `https://api.anthropic.com` |
+| MiniMax | built-in vendor · verified | `https://api.minimaxi.com/anthropic` |
+| Xiaomi MiMo | built-in vendor · verified | `https://token-plan-cn.xiaomimimo.com/anthropic` |
+| InternLM | built-in vendor · verified | `https://chat.intern-ai.org.cn` (bare domain, no `/anthropic`) |
+| OpenAI Codex (`codex-sdk`) | built-in vendor · verified | n/a — `codex auth login` |
+| DeepSeek / GLM / Kimi / OpenRouter / self-hosted | via the `custom` vendor (**not built-in — verify the endpoint + model id yourself**) | provide base URL + `ANTHROPIC_AUTH_TOKEN` |
 
-📖 Per-provider keys, models, and presets → <https://anet.sh/en/guide/multi-model>
+📖 Per-provider keys, models, and access → <https://anet.sh/en/guide/multi-model>
 
 ---
 
