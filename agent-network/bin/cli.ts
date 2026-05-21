@@ -2156,6 +2156,21 @@ async function launchAgent(id: string, forceNewSession = false) {
   }
   console.log(`[anet] Token: ${token.slice(0, 8)}...`);
 
+  // Fix 1 (#146 / RFC-018) — ensure node_id is persisted in the raw config.
+  // resume_id is derived from node_id (agent-node: sdk-<node_id>; claude-code-
+  // cli: COMMHUB_RESUME_ID=cc-<node_id>, set in the claude branch below).
+  // normalizeStoredProfile fills a missing node_id in memory only — a legacy
+  // raw config without it would let the value drift (legacyNodeId is keyed on
+  // the dir name, which a rename changes). Persist the canonical id once.
+  try {
+    const rawCfgPath = join(nodesDir(), nodeId, "config.json");
+    const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+    if (!rawCfg.node_id && profile.node_id) {
+      saveProfile(nodeId, profile);
+      console.log(`[anet] persisted canonical node_id ${profile.node_id} (legacy config had none).`);
+    }
+  } catch {}
+
   if (runtime === "codex-sdk" || runtime === "claude-agent-sdk") {
     // spawn agent-node
     const agentArgs = [
@@ -2210,6 +2225,13 @@ async function launchAgent(id: string, forceNewSession = false) {
       // no ~/.claude/settings.json pollution. Respects an explicit user override.
       CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: process.env.CLAUDE_CODE_RESUME_THRESHOLD_MINUTES || "999999999",
       ...(token ? { COMMHUB_TOKEN: token } : {}),
+      // Fix 1 (#146 / RFC-018) — pin the commhub MCP server's resume_id to a
+      // stable per-node value. Without this, node-server.ts:75 falls through
+      // to randomUUID() at every start, so every restart (rename included)
+      // mints a fresh commhub identity and orphans the old session row.
+      // cc-<node_id> mirrors agent-node's sdk-<node_id> scheme; the env is
+      // inherited by the commhub MCP stdio child the same way COMMHUB_ALIAS is.
+      ...(profile.node_id ? { COMMHUB_RESUME_ID: `cc-${profile.node_id}` } : {}),
     };
     // #125 fix (preview.3) — same envRef resolution as the agent-node spawn
     // path above, just for the claude-code-cli runtime branch.
@@ -3406,7 +3428,16 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     }
   }
 
-  console.log(`[anet] node_id: ${stored.node_id} — unchanged (only the alias changed; ntok_ token still valid).`);
+  // #146 / RFC-018 Fix 4 — runtime-accurate identity note. For claude-code-cli
+  // the commhub session row never carries node_id; its identity is the
+  // resume_id (cc-<node_id>, pinned by Fix 1). The old unconditional
+  // "node_id unchanged" line misled for that runtime (commhub shows
+  // node_id=null), so branch the message on runtime.
+  if (normalizeRuntime(stored) === "claude-code-cli") {
+    console.log(`[anet] node_id ${stored.node_id} unchanged in local config; this runtime's commhub identity is resume_id cc-${stored.node_id} — also stable across the rename. ntok_ token still valid.`);
+  } else {
+    console.log(`[anet] node_id: ${stored.node_id} — unchanged (only the alias changed; ntok_ token still valid).`);
+  }
   if (!running) {
     console.log(`[anet] ✅ Renamed "${oldId}" → "${newName}" (txn ${txnId}). Node was not running — next \`anet node start ${shellQuote(newName)}\` registers under the new alias.`);
   } else if (!oldProcessConfirmedDead) {
