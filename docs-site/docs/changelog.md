@@ -49,7 +49,7 @@ Dashboard 团队 commit [`3f73810`](https://github.com/sleep2agi/agent-network-d
 - **沿用 [[feedback_dist_obfuscated_use_source_grep]]**：JSX 文案 verify 在 `app/components/ServersDrawer.tsx` source level，不依赖 `.next/server` bundled output
 - **v0.10.x patch density 单日 8 patch** 验证 audit-first cadence 可持续
 
-### Cycle 13 stats
+### 发布统计 — v0.10.8
 
 - **18 累计 `@latest` publish**（v0.9.0 → v0.10.8）：0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 当日 v0.10.x**：v0.10.1-8 = **8 ships in ~11 hours**（audit-first cadence）
@@ -107,7 +107,7 @@ Source-of-truth helper：single-node path（`cli.ts:1146`）+ batch path（`cli.
 - **Docker container smoke**：Cell A `anet login` setup failed（test infra blocker, not a fix bug）→ Gate 2 source-grep evidence accepted as substitute per v0.10.6 precedent
 - **`feedback_docker_smoke_login_flow`**（本 cycle 新增）—— Docker smoke entry script 用 `curl` direct API call `/api/auth/register` + `/api/auth/login` 写 token，**不要** interactive `anet login`（在 non-TTY container 容易 stall，hub login 调用阻塞）
 
-### Cycle 12 stats
+### 发布统计 — v0.10.7
 
 - **17 累计 `@latest` publish**（v0.9.0 → v0.10.7）：0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 当日 v0.10.x**：v0.10.1-7 = **7 ships in ~10 hours**（audit-first cadence）
@@ -147,7 +147,7 @@ anet --version                                    # 期望 v2.2.5
 - **`feedback_no_host_test_nodes`**（Vincent）—— 红线：测试节点全 Docker，不许 connect 本机 hub。
 - **`feedback_dist_obfuscated_use_source_grep`**（本 cycle 新增）—— `dist/bin/cli.js` 是 esbuild bundled + obfuscated（rotating string-table, identifiers mangled, string literals encoded），静态 grep 对 dist 完全失效。Code-path verify 一律 grep `bin/cli.ts` source（HEAD = preview build source）。
 
-### Cycle 11 stats
+### 发布统计 — v0.10.6
 
 - **16 累计 `@latest` publish**（v0.9.0 → v0.10.6）：0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 当日 v0.10.x**: v0.10.1 + v0.10.2 + v0.10.3 + v0.10.4 + v0.10.5 + **v0.10.6** = **6 ships in ~9 hours**（audit-first cadence）

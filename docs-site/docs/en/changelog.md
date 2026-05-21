@@ -49,7 +49,7 @@ Dashboard team commit [`3f73810`](https://github.com/sleep2agi/agent-network-das
 - **Reuses [[feedback_dist_obfuscated_use_source_grep]]**: JSX copy verification works at the `app/components/ServersDrawer.tsx` source level — no dependency on the `.next/server` bundled output
 - **v0.10.x patch density of 8 patches in one day** validates that the audit-first cadence is sustainable
 
-### Cycle 13 stats
+### Release stats — v0.10.8
 
 - **18 cumulative `@latest` publishes** (v0.9.0 → v0.10.8): 0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 v0.10.x same-day ships**: v0.10.1-8 = **8 ships in ~11 hours** (audit-first cadence)
@@ -107,7 +107,7 @@ Single source-of-truth helper: both the single-node path (`cli.ts:1146`) and the
 - **Docker container smoke**: Cell A `anet login` setup failed (test infra blocker, not a fix bug) → Gate 2 source-grep evidence accepted as substitute, per v0.10.6 precedent.
 - **`feedback_docker_smoke_login_flow`** (new this cycle): Docker smoke entry scripts must use `curl` direct API calls to `/api/auth/register` + `/api/auth/login` to obtain a token; **do not** use interactive `anet login` (it stalls in non-TTY containers — the hub login call blocks).
 
-### Cycle 12 stats
+### Release stats — v0.10.7
 
 - **17 cumulative `@latest` publishes** (v0.9.0 → v0.10.7): 0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 v0.10.x same-day ships**: v0.10.1-7 = **7 ships in ~10 hours** (audit-first cadence)
@@ -147,7 +147,7 @@ From the next release onward (e.g. 2.2.6+), `anet upgrade` will **auto detached-
 - **`feedback_no_host_test_nodes`** (Vincent): red-line — all test nodes go in Docker, must never connect to a host hub.
 - **`feedback_dist_obfuscated_use_source_grep`** (new this cycle): `dist/bin/cli.js` is esbuild bundled + obfuscated (rotating string table, mangled identifiers, encoded string literals) — static grep on dist is useless. Code-path verification must grep `bin/cli.ts` source (HEAD = the preview build source).
 
-### Cycle 11 stats
+### Release stats — v0.10.6
 
 - **16 cumulative `@latest` publishes** (v0.9.0 → v0.10.6): 0 split-brain / 0 rollback / 0 retry
 - **2026-05-17 v0.10.x same-day ships**: v0.10.1 + v0.10.2 + v0.10.3 + v0.10.4 + v0.10.5 + **v0.10.6** = **6 ships in ~9 hours** (audit-first cadence)
