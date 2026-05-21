@@ -99,7 +99,7 @@ anet node start my-intern-agent --prompt "你是一个谨慎的代码 reviewer�
 
 ## Future polish（未完成 gap）
 
-跟 [#130 工程马 code trace report](https://github.com/sleep2agi/agent-network/blob/main/docs/research/intern-tool-calling-code-trace.md) 列出的 follow-up polish 一致：
+跟 [#130 code trace report](https://github.com/sleep2agi/agent-network/blob/main/docs/research/intern-tool-calling-code-trace.md) 列出的 follow-up polish 一致：
 
 - **P1** `anet info <alias>` print `bias_active: true/false` —— 让 silent injection 显式
 - **P1** `--no-vendor-bias` flag —— 不替换 system prompt 单纯关掉 bias
