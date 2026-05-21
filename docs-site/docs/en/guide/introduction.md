@@ -96,7 +96,7 @@ Agent Network consists of four npm packages, each with a distinct role:
 | `@sleep2agi/agent-network` | **anet CLI** -- config management, server control, status monitoring | `npm i -g @sleep2agi/agent-network` |
 | `@sleep2agi/agent-node` | **Agent runtime** -- AI model + tool calling + task processing | `anet node create` + `anet node start` |
 | `@sleep2agi/commhub-server` | **Communication hub** -- message routing + SSE push + task management | `anet hub start` |
-| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- visual monitoring + task management (Chat / Nodes / Tasks / Messages / Networks / Logs / Admin) | `anet hub dashboard` (auto-launched by the CLI) |
+| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- visual monitoring + task management (Overview / Nodes / Tasks / Messages / Chat / Admin / Settings) | `anet hub dashboard` (auto-launched by the CLI) |
 
 These packages can be used independently or together:
 
