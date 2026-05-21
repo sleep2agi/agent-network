@@ -1,6 +1,6 @@
 # RFC-018 — claude-code-cli rename 跨 runtime 身份一致性修复（#146）
 
-- **状态**：Proposed —— 待 通信龙 review
+- **状态**：Approved（通信龙 review 通过）—— 四 fix 已实现，待 测试马 gate + 双 review + Vincent UAT
 - **作者**：通信工程马（牵头整合）
 - **协作**：通信SDK马（B1 / node-server.ts lane）、通信牛（commhub-server lane）、通信测试马（验证）
 - **关联**：#146（P0）、RFC-010 节点生命周期（rename 2PC，已 closed）、RFC-013 rename 零间隙热重载（v0.12.0 path）
@@ -141,3 +141,22 @@ SDK马 定性：**这是 bug 不是可选项** —— gracefulShutdown 只由干
 3. **PINNED_SERVER_VERSION bump**：见 §6，需 review 拍板。
 4. **issue ③ 真实 root cause 未确认**：待 Vincent UAT 复现。
 5. **是否单开 issue 跟踪 cc-cli restart 身份稳定性**（§3）：review 决策。
+
+---
+
+## 8. 实现进度
+
+通信龙 设计 review：**APPROVE**。§7 开放问题决策：
+- Q1 prefix：用 `cc-<node_id>`（通信牛 grep 确认 commhub 无 `resume_id` 前缀语义依赖；未确认前不 block）。
+- Q2 PINNED_SERVER_VERSION bump：APPROVED —— preview 阶段 `2.2.7-preview.2` pin `0.8.3-preview.2`；promote latest 时按 Method B re-pin 到 clean server 版本。
+- Q3 单开 issue：**不单开** —— §3 影响面已记录，Fix 1 顺带根治；在 #146 closeout + CHANGELOG 写明「同时修了 cc-cli 任何 restart 的身份漂移」。
+
+| Fix | owner | 状态 | commit |
+|---|---|---|---|
+| Fix 1（CLI 稳定 resume_id + node_id backfill） | 通信工程马 | ✅ done | `0e301bf`（agent-network） |
+| Fix 2（node-server.ts gracefulShutdown error→offline） | 通信SDK马 | ✅ done | `5681081`（agent-network） |
+| Fix 3（commhub-server canonicalization） | 通信牛 | ✅ done | `81248bb`（commhub-server） |
+| Fix 4（renameCommand 成功文案 runtime 分支） | 通信工程马 | ✅ done | `0e301bf`（agent-network） |
+| issue ③（tmux-Enter） | — | follow-up，descope 到 Vincent UAT | — |
+
+四 fix 全部实现完成。下一步：测试马 3-runtime Docker gate（含 SDK 9-case 回归）→ 通信龙+通信牛 双 review 代码 → Vincent 真机 UAT（含 ③）→ Method B 协同发布（agent-network `2.2.7-preview.2` / commhub-server `0.8.3-preview.2`，PINNED bump）。
