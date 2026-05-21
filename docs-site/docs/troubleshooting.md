@@ -154,7 +154,7 @@ anet network invite --role member
 ```
 
 ::: info v0.8 起 anet 完全 Apache-2.0 OSS，没有真正的 license 销售
-这条 license gate 是 V3 时代的遗留代码，仍在 `send_task` 路径里跑（verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) `license_expired` emit；同文件 L516 `SELECT type, expires_at FROM licenses`），如果你的本地 SQLite 有过期 `licenses` 行就会触发。**v0.9.x / v0.10.x scope 都未动**（Recovery & Observability 主题为先），排到 v0.11+ / 未排期移除整段 license 检查。
+这条 license gate 是 V3 时代的遗留代码，仍在 `send_task` 路径里跑（verify [`server/src/tools.ts:616`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L616) `license_expired` emit；同文件 L611 `SELECT type, expires_at FROM licenses`），如果你的本地 SQLite 有过期 `licenses` 行就会触发。**v0.9.x / v0.10.x scope 都未动**（Recovery & Observability 主题为先），排到 v0.11+ / 未排期移除整段 license 检查。
 :::
 
 **原因**：本地 SQLite `licenses` 表里有一行 `expires_at < now()`。

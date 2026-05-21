@@ -155,7 +155,7 @@ anet network invite --role member
 ```
 
 ::: info anet is Apache-2.0 OSS since v0.8 — there is no real license to buy
-This gate is a V3-era leftover still firing in the `send_task` path (verify [`server/src/tools.ts:521`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L521) where `license_expired` is emitted; same file L516 has `SELECT type, expires_at FROM licenses`). It triggers when your local SQLite has a `licenses` row with `expires_at` in the past. **The v0.9.x and v0.10.x scopes did not touch this** (Recovery & Observability took priority); full removal is queued for v0.11+ / unscheduled.
+This gate is a V3-era leftover still firing in the `send_task` path (verify [`server/src/tools.ts:616`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L616) where `license_expired` is emitted; same file L611 has `SELECT type, expires_at FROM licenses`). It triggers when your local SQLite has a `licenses` row with `expires_at` in the past. **The v0.9.x and v0.10.x scopes did not touch this** (Recovery & Observability took priority); full removal is queued for v0.11+ / unscheduled.
 :::
 
 **Cause**: Your local SQLite `licenses` table has a row with `expires_at < now()`.
