@@ -379,7 +379,7 @@ curl -X POST http://localhost:9200/api/networks \
 | 状态 | `error` 值 | 触发条件 |
 |------|------------|---------|
 | 400 | `network name already exists` | 同一 owner 名下已有同名 network（`UNIQUE(owner_id, network_name)` 约束） |
-| 400 | `quota exceeded: max N networks for free plan` | 触发 plan quota 配额限制（v0.8 起 admin 用户豁免；free plan 默认 max_networks_owned=2，**当前 quota 仍在 `auth.ts:184-189` enforced**，跟 R178 networks 表的 `max_members` 不同：那个 dormant、这个 active） |
+| 400 | `quota exceeded: max N networks for free plan` | 触发 plan quota 配额限制（v0.8 起 admin 用户豁免；free plan 默认 max_networks_owned=2，**当前 quota 仍在 `auth.ts:184-189` enforced**，跟 networks 表的 `max_members` 不同：那个 dormant、这个 active） |
 | 401 | `token required` / `invalid token` | 未提供 / 提供了无效 utok_ |
 
 ---
@@ -1191,7 +1191,7 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
 字段名是 `logs` + `count`（**不是** `audit_log`，之前 doc 误写）。`audit_log` **表** schema 见 [`server/src/db.ts:201-212`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L201) 完整 10 列（含 `ip` + `network_id`）。**完整 action 值列表 + 触发场景**见 [安全设计 — 审计日志](/concepts/security#审计日志)。
 
 ::: warning `create_network` 不审计
-POST `/api/networks` 不调 `logAudit`，所以 audit_log 里**不会**有 `create_network` 行。看 network 创建请走 [`GET /api/networks`](#get-api-networks) 列表对比，或借 `target_type='network' + action='network_renamed'` 间接推断（R195 finding，跟 [security.md 审计](/concepts/security#审计日志) `::: info` 一致）。
+POST `/api/networks` 不调 `logAudit`，所以 audit_log 里**不会**有 `create_network` 行。看 network 创建请走 [`GET /api/networks`](#get-api-networks) 列表对比，或借 `target_type='network' + action='network_renamed'` 间接推断（跟 [security.md 审计](/concepts/security#审计日志) `::: info` 一致）。
 :::
 
 ---
@@ -1320,7 +1320,7 @@ curl -X POST http://localhost:9200/api/broadcast \
 | `filter_server` | string | | 只发给指定 `server` 字段的 session |
 | `filter_status` | string | | 只发给指定 status 的 session（如 `idle` / `working`） |
 
-> 跟 MCP [`broadcast`](mcp-tools#broadcast) 同款字段（R189 修过）；`from_session` 不是参数，server 端硬编码 `'api'`（[`index.ts:945`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L945) 跟 MCP 版的 `'hub'` 不同）。
+> 跟 MCP [`broadcast`](mcp-tools#broadcast) 同款字段；`from_session` 不是参数，server 端硬编码 `'api'`（[`index.ts:945`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L945) 跟 MCP 版的 `'hub'` 不同）。
 
 **响应**（成功）：
 
@@ -1665,7 +1665,7 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 | 400 | `cannot assign owner role` | `role` 字段传 `owner`，server 拒绝（owner 通过创建网络获得，不能后续 promote） |
 | 400 | `member not found or is owner` | 目标 `user_id` 不在网络内，或者是 owner 自己（owner 角色不可改） |
 
-写 audit log `action='member_role_changed'`，`detail` 字段记 `<user_id> → <new_role>`。R119 FAQ Q17 提到的「改角色」入口就是这个 endpoint。
+写 audit log `action='member_role_changed'`，`detail` 字段记 `<user_id> → <new_role>`。FAQ Q17 提到的「改角色」入口就是这个 endpoint。
 
 ### DELETE /api/networks/:id/members/:user_id
 

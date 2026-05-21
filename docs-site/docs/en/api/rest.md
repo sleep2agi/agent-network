@@ -379,7 +379,7 @@ curl -X POST http://localhost:9200/api/networks \
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 400 | `network name already exists` | Same owner already has a network with this name (`UNIQUE(owner_id, network_name)` constraint) |
-| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate ([`auth.ts:184-189`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184); admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column flagged in R178 |
+| 400 | `quota exceeded: max N networks for free plan` | Plan quota gate ([`auth.ts:184-189`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L184); admins are exempt; free plan default `max_networks_owned = 2`). Note this gate **is** enforced, unlike the `max_members` column, which is dormant |
 | 401 | `token required` / `invalid token` | Missing / invalid utok_ |
 
 ---
@@ -1192,7 +1192,7 @@ curl "http://localhost:9200/api/audit-log?limit=50" \
 The fields are `logs` + `count` (**not** `audit_log` — earlier doc was wrong). The `audit_log` **table** schema is in [`server/src/db.ts:201-212`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L201) — 10 columns including `ip` and `network_id`. **Full `action` value list with triggers** is in [Security — Audit log](/en/concepts/security#audit-logging).
 
 ::: warning `create_network` is NOT audited
-POST `/api/networks` does not call `logAudit`, so audit_log will **never** contain a `create_network` row. To track network creation, diff [`GET /api/networks`](#get-api-networks) or infer it from `target_type='network' + action='network_renamed'` records (R195 finding; same `::: info` lives in [security.md audit log](/en/concepts/security#audit-logging)).
+POST `/api/networks` does not call `logAudit`, so audit_log will **never** contain a `create_network` row. To track network creation, diff [`GET /api/networks`](#get-api-networks) or infer it from `target_type='network' + action='network_renamed'` records (same `::: info` lives in [security.md audit log](/en/concepts/security#audit-logging)).
 :::
 
 ---
@@ -1321,7 +1321,7 @@ curl -X POST http://localhost:9200/api/broadcast \
 | `filter_server` | string | | Only deliver to sessions whose `server` field matches |
 | `filter_status` | string | | Only deliver to sessions in the given status (e.g. `idle` / `working`) |
 
-> Same field set as the MCP [`broadcast`](mcp-tools#broadcast) tool (R189 fixed it there too). `from_session` is **not** a parameter — the server hard-codes `'api'` ([`index.ts:945`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L945); the MCP version uses `'hub'`).
+> Same field set as the MCP [`broadcast`](mcp-tools#broadcast) tool. `from_session` is **not** a parameter — the server hard-codes `'api'` ([`index.ts:945`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L945); the MCP version uses `'hub'`).
 
 **Response** (success):
 
@@ -1666,7 +1666,7 @@ curl -X PUT http://localhost:9200/api/networks/net_xxx/members/u_def456 \
 | 400 | `cannot assign owner role` | `role` is `owner` — server rejects (owner is obtained by creating the network, not by promotion) |
 | 400 | `member not found or is owner` | Target `user_id` is not in the network, or is the owner (owner role is immutable) |
 
-Writes audit log `action='member_role_changed'`; the `detail` column records `<user_id> → <new_role>`. This is the endpoint that R119 FAQ Q17 mentions for "changing roles".
+Writes audit log `action='member_role_changed'`; the `detail` column records `<user_id> → <new_role>`. This is the endpoint that FAQ Q17 mentions for "changing roles".
 
 ### DELETE /api/networks/:id/members/:user_id
 
