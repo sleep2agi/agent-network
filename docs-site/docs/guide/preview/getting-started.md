@@ -26,7 +26,7 @@ anet -v
 `anet -v` 会打印类似下面的版本号（preview 通道滚动更新，具体 `preview.N` 以 `npm view @sleep2agi/agent-network@preview version` 为准）：
 
 ```text
-anet v2.1.x-preview.N
+anet v2.2.x-preview.N
 ```
 
 `commhub-server`、`agent-node`、Dashboard 会在首次使用时自动拉取对应包，不需要提前全局安装。
