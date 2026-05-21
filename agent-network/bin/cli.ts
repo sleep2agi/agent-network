@@ -58,7 +58,7 @@ function tmuxAvailable(): boolean {
 // refetch). A `latest` agent-network release must pin a *stable* server.
 // `anet upgrade` (#88) surfaces this constant in its plan output so users
 // understand global-install version != version anet hub start actually runs.
-const PINNED_SERVER_VERSION = "0.8.3-preview.1";
+const PINNED_SERVER_VERSION = "0.8.3-preview.2";
 function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   if (!uuid) return false;
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
@@ -2225,17 +2225,18 @@ async function launchAgent(id: string, forceNewSession = false) {
       // no ~/.claude/settings.json pollution. Respects an explicit user override.
       CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: process.env.CLAUDE_CODE_RESUME_THRESHOLD_MINUTES || "999999999",
       ...(token ? { COMMHUB_TOKEN: token } : {}),
-      // Fix 1 (#146 / RFC-018) — pin the commhub MCP server's resume_id to a
-      // stable per-node value. Without this, node-server.ts:75 falls through
-      // to randomUUID() at every start, so every restart (rename included)
-      // mints a fresh commhub identity and orphans the old session row.
-      // cc-<node_id> mirrors agent-node's sdk-<node_id> scheme; the env is
-      // inherited by the commhub MCP stdio child the same way COMMHUB_ALIAS is.
-      ...(profile.node_id ? { COMMHUB_RESUME_ID: `cc-${profile.node_id}` } : {}),
     };
     // #125 fix (preview.3) — same envRef resolution as the agent-node spawn
     // path above, just for the claude-code-cli runtime branch.
     Object.assign(env, resolveProfileEnv(profile.env as any, home));
+    // Fix 1 (#146 / RFC-018) — pin the commhub MCP server's resume_id to a
+    // stable per-node value (node-server.ts:75 otherwise falls through to
+    // randomUUID() at every start, orphaning the old session row on any
+    // restart). cc-<node_id> mirrors agent-node's sdk-<node_id>; the env is
+    // inherited by the commhub MCP stdio child the same way COMMHUB_ALIAS is.
+    // Set AFTER the envRef merge so a user config.env COMMHUB_RESUME_ID cannot
+    // clobber the stable-identity invariant (#146 double-review nit N1).
+    if (profile.node_id) env.COMMHUB_RESUME_ID = `cc-${profile.node_id}`;
     if (profile.channels.includes("telegram")) {
       env.TELEGRAM_STATE_DIR = join(nodesDir(), nodeId, "channels", "telegram");
     }
