@@ -44,7 +44,7 @@ anet hub start
 ```
 
 ::: warning Change the password immediately on public deployments
-The default `admin / anethub` is for a quick local start — **not production-ready**. If you expose the hub with `anet hub start --ip 0.0.0.0` (LAN / public), run `anet passwd` right away to set a strong password (≥ 8 chars + not in the weak-password dictionary). See [troubleshooting → password strength](/en/troubleshooting).
+The default `admin / anethub` is for a quick local start — **not production-ready**. If you expose the hub with `anet hub start --host 0.0.0.0` (LAN / public), run `anet passwd` right away to set a strong password (≥ 8 chars + not in the weak-password dictionary). See [troubleshooting → password strength](/en/troubleshooting).
 :::
 
 In a second terminal, register the hub URL and log in:

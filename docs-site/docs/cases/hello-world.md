@@ -44,7 +44,7 @@ anet hub start
 ```
 
 ::: warning 公网部署立刻改密
-默认 `admin / anethub` 是快速起手，**非生产凭据**。`anet hub start --ip 0.0.0.0` 暴露 LAN/公网时必须立刻 `anet passwd` 改强密码（≥ 8 位 + 非弱密码字典），见 [troubleshooting → 密码强度](/troubleshooting)。
+默认 `admin / anethub` 是快速起手，**非生产凭据**。`anet hub start --host 0.0.0.0` 暴露 LAN/公网时必须立刻 `anet passwd` 改强密码（≥ 8 位 + 非弱密码字典），见 [troubleshooting → 密码强度](/troubleshooting)。
 :::
 
 再开一个终端，登录并设置 hub 地址：
