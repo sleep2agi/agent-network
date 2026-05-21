@@ -3231,17 +3231,19 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     process.exit(1);
   }
   const stored = loadStoredProfile(oldId) || resolved.profile;
-  // #146 R3 — a canonical node_id must exist before the 2PC. resume_id is
-  // derived as sdk-<node_id> and commhub's report_status upserts the session
-  // row ON CONFLICT(resume_id) (SDK马 Finding B); a legacy config with no
-  // node_id would let the restarted process mint an unstable id and break
-  // both the rename and continuity. Generate + persist one now so the PHASE 1
-  // cpSync carries the same id into the new dir.
-  if (!stored.node_id) {
-    stored.node_id = generateNodeId();
-    saveProfile(oldId, stored);
-    console.log(`[anet] assigned canonical node_id ${stored.node_id} to legacy config (was missing).`);
-  }
+  // #146 R3 — node_id must stay stable across the rename. loadStoredProfile →
+  // normalizeStoredProfile already fills a missing node_id in memory with the
+  // deterministic legacyNodeId(oldId), so `stored.node_id` is populated — but
+  // the raw oldDir/config.json on disk may still lack the field. PHASE 1
+  // cpSync copies that *raw* config; if node_id is absent there, the post-copy
+  // loadStoredProfile(newName) re-derives legacyNodeId(newName) — a DIFFERENT
+  // id — and resume_id (sdk-<node_id>) drifts across the rename (SDK马 Finding
+  // B — breaks the session-row upsert + continuity). So persist the canonical
+  // node_id back into the raw old config NOW, before cpSync, so the new dir
+  // inherits the same id. (通信牛 R3 review — Minimal Patch A.)
+  if (!stored.node_id) stored.node_id = generateNodeId();  // theoretical fallback — normalize always fills it
+  saveProfile(oldId, stored);  // unconditional: bakes the canonical node_id into the raw config cpSync will copy
+  console.log(`[anet] persisted canonical node_id ${stored.node_id} before rename.`);
 
   // ── PHASE 1: PREPARE (copy/prepare, old node untouched — fully rollbackable) ──
   writeFileSync(lockPath, JSON.stringify({ old: oldId, new: newName, phase: "prepare", ts: Date.now() }) + "\n");
