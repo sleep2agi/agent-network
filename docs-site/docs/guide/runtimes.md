@@ -220,7 +220,7 @@ anet node create translator \
 | 书生 InternLM | Intern-S2-Preview（默认）/ Intern-S1-Pro（查 [书生](https://chat.intern-ai.org.cn)） | `https://chat.intern-ai.org.cn`（**裸域名，无 `/anthropic` 后缀** —— 跟 MiniMax 等不同） |
 | 小米 MiMo | mimo-v2.5-pro（默认）/ v2.5 / v2-pro / v2-omni（查 [小米开放平台](https://platform.xiaomimimo.com)） | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 
-> 来源：[`cli.ts:1114-1175 VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114)。**DeepSeek / GLM / Kimi 等没跑通验证的 provider 故意不进 VENDORS 列表** —— 用「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能填 base URL + model）。
+> 来源：[`cli.ts:1336-1397 VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1336)。**DeepSeek / GLM / Kimi 等没跑通验证的 provider 故意不进 VENDORS 列表** —— 用「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能填 base URL + model）。
 
 ::: tip 模型版本号会变
 各家 LLM 厂商每隔几周升级模型，硬编码具体版本号容易过时。**到对应平台拿最新 model id**，填到 `--model` 参数即可。
@@ -395,7 +395,7 @@ anet node start coder
 
 ::: info 已验证（当前 stable 继承 v2 E2E 覆盖）
 - `claude-agent-sdk` runtime 本身 —— E2E 通过
-- vendor 维度：`anet node create` 的 [`VENDORS` 列表（cli.ts:1114-1175）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114) 里每个 provider（**Anthropic / MiniMax / 书生 Intern / 小米 MiMo**）的 `baseUrl` + model id 都是 verified-with-real-call 才进列表的
+- vendor 维度：`anet node create` 的 [`VENDORS` 列表（cli.ts:1336-1397）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1336) 里每个 provider（**Anthropic / MiniMax / 书生 Intern / 小米 MiMo**）的 `baseUrl` + model id 都是 verified-with-real-call 才进列表的
 - 多 Runtime 混搭（peer agents 通过 `get_all_status` + `send_task` + `get_task` 自治协调）
 :::
 

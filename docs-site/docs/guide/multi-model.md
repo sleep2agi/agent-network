@@ -15,7 +15,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | **书生 Intern-S1-Pro** | 书生 | `claude-agent-sdk` | chat.intern-ai.org.cn（**裸域名，无 `/anthropic`**） | 低 |
 | **小米 MiMo**（`mimo-v2.5-pro` 默认 + v2.5 / v2-pro / v2-omni） | 小米 | `claude-agent-sdk` | token-plan-cn.xiaomimimo.com/anthropic | 低 |
 
-> 验证机制（#104-B 设计调整后）：cli.ts 不再用「`MODEL_PRESETS` + `[UNVERIFIED]` 标记」那套 —— 现在统一是 [`VENDORS` 列表（cli.ts:1114-1175）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114)，**进列表 = 已 verified-with-real-call**。**DeepSeek / GLM / Kimi 等未跑通验证的 provider 故意不进列表** —— 它们走下方「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能用 `custom`）。各家 model id 到对应平台官网查（[MiniMax](https://platform.minimaxi.com) / [小米 MiMo](https://platform.xiaomimimo.com) / [DeepSeek](https://api-docs.deepseek.com) / [智谱](https://open.bigmodel.cn)）。
+> 验证机制（#104-B 设计调整后）：cli.ts 不再用「`MODEL_PRESETS` + `[UNVERIFIED]` 标记」那套 —— 现在统一是 [`VENDORS` 列表（cli.ts:1336-1397）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1336)，**进列表 = 已 verified-with-real-call**。**DeepSeek / GLM / Kimi 等未跑通验证的 provider 故意不进列表** —— 它们走下方「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能用 `custom`）。各家 model id 到对应平台官网查（[MiniMax](https://platform.minimaxi.com) / [小米 MiMo](https://platform.xiaomimimo.com) / [DeepSeek](https://api-docs.deepseek.com) / [智谱](https://open.bigmodel.cn)）。
 
 ::: tip 任何 Anthropic-compatible 提供商都能接
 上表是常用 provider，但 `claude-agent-sdk` 通过 `ANTHROPIC_BASE_URL` 接入**任何**支持 Anthropic Messages API 的服务商。没列出的服务商（自部署 vLLM / SiliconFlow / 通义千问 Anthropic 兼容端点等）也能用，只需把 `ANTHROPIC_BASE_URL` 指向对应平台的 Anthropic 兼容 endpoint，把 API Key 设到 `ANTHROPIC_AUTH_TOKEN` 即可。详见下方"配置方式"。

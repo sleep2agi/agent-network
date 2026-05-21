@@ -208,7 +208,7 @@ The table below is the `claude-agent-sdk` runtime's built-in providers from `ane
 | InternLM | Intern-S2-Preview (default) / Intern-S1-Pro (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn` (**bare hostname, no `/anthropic` suffix** — unlike MiniMax et al.) |
 | Xiaomi MiMo | mimo-v2.5-pro (default) / v2.5 / v2-pro / v2-omni (see [Xiaomi platform](https://platform.xiaomimimo.com)) | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 
-> Source: [`cli.ts:1114-1175 VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114). **Providers that haven't passed verification (DeepSeek / GLM / Kimi) are intentionally NOT in the VENDORS list** — reach them via the `custom` vendor (any Anthropic-compatible API accepts a base URL + model there).
+> Source: [`cli.ts:1336-1397 VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1336). **Providers that haven't passed verification (DeepSeek / GLM / Kimi) are intentionally NOT in the VENDORS list** — reach them via the `custom` vendor (any Anthropic-compatible API accepts a base URL + model there).
 
 ::: tip Model IDs change frequently
 Providers ship new model versions every few weeks. **Pull the latest model ID from the provider's console** and pass it to `--model`.
@@ -375,7 +375,7 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 
 ::: info Verified (current stable line inherits v2 E2E coverage)
 - The `claude-agent-sdk` runtime itself — passes E2E
-- At the vendor level: every provider in the `anet node create` [`VENDORS` list (cli.ts:1114-1175)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1114) (**Anthropic / MiniMax / InternLM / Xiaomi MiMo**) has its `baseUrl` + model ids verified-with-real-call before landing
+- At the vendor level: every provider in the `anet node create` [`VENDORS` list (cli.ts:1336-1397)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1336) (**Anthropic / MiniMax / InternLM / Xiaomi MiMo**) has its `baseUrl` + model ids verified-with-real-call before landing
 - Multi-runtime mesh (peer agents auto-coordinate via `get_all_status` + `send_task` + `get_task`)
 :::
 
