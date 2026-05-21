@@ -46,7 +46,7 @@ Dashboard team commit [`3f73810`](https://github.com/sleep2agi/agent-network-das
 
 - **Source-grep verify**: the lead's `grep -rh "not reported by hub"` hits + the legacy copy only survives in JSDoc comments ✅
 - **Docker preview smoke**: `docker run --rm node:24-slim sh -c "npm install -g @sleep2agi/agent-network-dashboard@0.5.3-preview.15 && grep..."` ✅
-- **Reuses [[feedback_dist_obfuscated_use_source_grep]]**: JSX copy verification works at the `app/components/ServersDrawer.tsx` source level — no dependency on the `.next/server` bundled output
+- **JSX copy verified at source level**: at `app/components/ServersDrawer.tsx` — no dependency on the `.next/server` bundled output
 - **v0.10.x patch density of 8 patches in one day** validates that the audit-first cadence is sustainable
 
 ### Release stats — v0.10.8
@@ -92,7 +92,7 @@ function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
 }
 ```
 
-Single source-of-truth helper: both the single-node path (`cli.ts:1146`) and the batch path (`cli.ts:6223`) call the same function — **eliminates the v0.10.6 1/4-vs-4/4 drift**. `dangerouslySkipPermissions: true` is the baseline (per [[feedback_default_flags]]) set at each call site, 1+3=4 yolo flags total.
+Single source-of-truth helper: both the single-node path (`cli.ts:1146`) and the batch path (`cli.ts:6223`) call the same function — **eliminates the v0.10.6 1/4-vs-4/4 drift**. `dangerouslySkipPermissions: true` is the baseline, set at each call site, 1+3=4 yolo flags total.
 
 ### User impact
 
@@ -103,9 +103,9 @@ Single source-of-truth helper: both the single-node path (`cli.ts:1146`) and the
 
 ### Quality gates + lessons
 
-- **Source-grep verify** ([[feedback_dist_obfuscated_use_source_grep]] precedent): `grep -n` against `bin/cli.ts` HEAD across 5 sites all PASS (helper + 2 call sites + wiring + field).
+- **Source-grep verify**: `grep -n` against `bin/cli.ts` HEAD across 5 sites all PASS (helper + 2 call sites + wiring + field).
 - **Docker container smoke**: Cell A `anet login` setup failed (test infra blocker, not a fix bug) → Gate 2 source-grep evidence accepted as substitute, per v0.10.6 precedent.
-- **`feedback_docker_smoke_login_flow`** (new this cycle): Docker smoke entry scripts must use `curl` direct API calls to `/api/auth/register` + `/api/auth/login` to obtain a token; **do not** use interactive `anet login` (it stalls in non-TTY containers — the hub login call blocks).
+- **Docker smoke gets its token via direct `curl` API calls** (new): Docker smoke entry scripts must use `curl` direct API calls to `/api/auth/register` + `/api/auth/login` to obtain a token; **do not** use interactive `anet login` (it stalls in non-TTY containers — the hub login call blocks).
 
 ### Release stats — v0.10.7
 
@@ -143,9 +143,9 @@ From the next release onward (e.g. 2.2.6+), `anet upgrade` will **auto detached-
 
 ### Quality gates + lessons
 
-- **`feedback_no_skip_smoke_gate`** (Vincent): the v0.10.4 emergency trust path is **SUSPENDED** — the Docker smoke gate is never bypassed again.
-- **`feedback_no_host_test_nodes`** (Vincent): red-line — all test nodes go in Docker, must never connect to a host hub.
-- **`feedback_dist_obfuscated_use_source_grep`** (new this cycle): `dist/bin/cli.js` is esbuild bundled + obfuscated (rotating string table, mangled identifiers, encoded string literals) — static grep on dist is useless. Code-path verification must grep `bin/cli.ts` source (HEAD = the preview build source).
+- **Docker smoke gate is never skipped** (Vincent): the v0.10.4 emergency trust path is **SUSPENDED** — the Docker smoke gate is never bypassed again.
+- **All test nodes run in Docker** (Vincent): red-line — all test nodes go in Docker, must never connect to a host hub.
+- **dist is an obfuscated bundle — verify against source** (new): `dist/bin/cli.js` is esbuild bundled + obfuscated (rotating string table, mangled identifiers, encoded string literals) — static grep on dist is useless. Code-path verification must grep `bin/cli.ts` source (HEAD = the preview build source).
 
 ### Release stats — v0.10.6
 
@@ -188,7 +188,7 @@ See the [v0.10.5 release notes](https://github.com/sleep2agi/agent-network/relea
 - **[#150](https://github.com/sleep2agi/agent-network/issues/150) Dashboard topology orphan nodes now collected into an "Others" cluster box** (Vincent push): previously, orphan nodes (no prefix group) were scattered across the canvas and hard to find; they now collect into an "Others" cluster box rendered alongside the other groups.
 
 ::: warning Vincent emergency trust path
-v0.10.4 was shipped via Vincent's emergency trust path, skipping the test-lead Docker smoke gate (per `feedback_no_test_on_prod` not exempt, but Vincent lead-scope trust path). Docker smoke is still the release-gate playbook standard checkpoint, unchanged.
+v0.10.4 was shipped via Vincent's emergency trust path, skipping the test-lead Docker smoke gate (the no-testing-on-prod rule was not waived, but Vincent took the lead-scope trust path). Docker smoke is still the release-gate playbook standard checkpoint, unchanged.
 :::
 
 See the [v0.10.4 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.4).

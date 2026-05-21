@@ -46,7 +46,7 @@ Dashboard 团队 commit [`3f73810`](https://github.com/sleep2agi/agent-network-d
 
 - **Source-grep verify**：`grep -rh "not reported by hub"` 命中 + 旧文案只在 JSDoc 注释 ✅
 - **Docker preview 实测**：`docker run --rm node:24-slim sh -c "npm install -g @sleep2agi/agent-network-dashboard@0.5.3-preview.15 && grep..."` ✅
-- **沿用 [[feedback_dist_obfuscated_use_source_grep]]**：JSX 文案 verify 在 `app/components/ServersDrawer.tsx` source level，不依赖 `.next/server` bundled output
+- **JSX 文案 verify 走 source level**：在 `app/components/ServersDrawer.tsx` source 验，不依赖 `.next/server` bundled output
 - **v0.10.x patch density 单日 8 patch** 验证 audit-first cadence 可持续
 
 ### 发布统计 — v0.10.8
@@ -92,7 +92,7 @@ function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
 }
 ```
 
-Source-of-truth helper：single-node path（`cli.ts:1146`）+ batch path（`cli.ts:6223`）都 call 同一个，**阻断 v0.10.6 1/4-vs-4/4 drift**。`dangerouslySkipPermissions: true` 是 baseline（per [[feedback_default_flags]]）在每个 call site 单独 set，1+3=4 yolo total。
+Source-of-truth helper：single-node path（`cli.ts:1146`）+ batch path（`cli.ts:6223`）都 call 同一个，**阻断 v0.10.6 1/4-vs-4/4 drift**。`dangerouslySkipPermissions: true` 是 baseline，在每个 call site 单独 set，1+3=4 yolo total。
 
 ### 用户影响
 
@@ -103,9 +103,9 @@ Source-of-truth helper：single-node path（`cli.ts:1146`）+ batch path（`cli.
 
 ### Quality gates + lessons
 
-- **Source-grep verify**（[[feedback_dist_obfuscated_use_source_grep]] precedent）：`grep -n` 对 `bin/cli.ts` HEAD 5 sites 全 PASS（helper + 2 call sites + wiring + field）
+- **Source-grep verify**：`grep -n` 对 `bin/cli.ts` HEAD 5 sites 全 PASS（helper + 2 call sites + wiring + field）
 - **Docker container smoke**：Cell A `anet login` setup failed（test infra blocker, not a fix bug）→ Gate 2 source-grep evidence accepted as substitute per v0.10.6 precedent
-- **`feedback_docker_smoke_login_flow`**（本 cycle 新增）—— Docker smoke entry script 用 `curl` direct API call `/api/auth/register` + `/api/auth/login` 写 token，**不要** interactive `anet login`（在 non-TTY container 容易 stall，hub login 调用阻塞）
+- **Docker smoke 用 curl 直调 API 拿 token**（本次新增）—— Docker smoke entry script 用 `curl` direct API call `/api/auth/register` + `/api/auth/login` 写 token，**不要** interactive `anet login`（在 non-TTY container 容易 stall，hub login 调用阻塞）
 
 ### 发布统计 — v0.10.7
 
@@ -143,9 +143,9 @@ anet --version                                    # 期望 v2.2.5
 
 ### Quality gates + lessons
 
-- **`feedback_no_skip_smoke_gate`**（Vincent）—— v0.10.4 紧急 trust path **SUSPENDED**，Docker smoke gate 永不跳。
-- **`feedback_no_host_test_nodes`**（Vincent）—— 红线：测试节点全 Docker，不许 connect 本机 hub。
-- **`feedback_dist_obfuscated_use_source_grep`**（本 cycle 新增）—— `dist/bin/cli.js` 是 esbuild bundled + obfuscated（rotating string-table, identifiers mangled, string literals encoded），静态 grep 对 dist 完全失效。Code-path verify 一律 grep `bin/cli.ts` source（HEAD = preview build source）。
+- **Docker smoke gate 永不跳过**（Vincent）—— v0.10.4 紧急 trust path **SUSPENDED**，Docker smoke gate 永不跳。
+- **测试节点全在 Docker**（Vincent）—— 红线：测试节点全 Docker，不许 connect 本机 hub。
+- **dist 是混淆 bundle、code verify 走 source**（本次新增）—— `dist/bin/cli.js` 是 esbuild bundled + obfuscated（rotating string-table, identifiers mangled, string literals encoded），静态 grep 对 dist 完全失效。Code-path verify 一律 grep `bin/cli.ts` source（HEAD = preview build source）。
 
 ### 发布统计 — v0.10.6
 
@@ -188,7 +188,7 @@ anet --version                                    # 期望 v2.2.5
 - **[#150](https://github.com/sleep2agi/agent-network/issues/150) Dashboard 拓扑图 orphan 节点收到 "其他" cluster box**（Vincent push）：之前 orphan 节点（无 prefix 分组）散落画布各处难找；现在收到统一 "其他" cluster box 跟其他 group 一起渲染。
 
 ::: warning Vincent 紧急 trust path
-v0.10.4 Vincent 紧急 ship 跳过 测试团队 Docker smoke gate（per `feedback_no_test_on_prod` 不豁免，但 Vincent lead-scope 决定 trust path）。Docker smoke 仍是 release-gate playbook 标准卡控点，不变。
+v0.10.4 Vincent 紧急 ship 跳过 测试团队 Docker smoke gate（不在生产跑测试的规矩不豁免，但 Vincent lead-scope 决定 trust path）。Docker smoke 仍是 release-gate playbook 标准卡控点，不变。
 :::
 
 详见 [release v0.10.4](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.4)。
