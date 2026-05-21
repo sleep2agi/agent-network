@@ -44,4 +44,4 @@
 **改造和扩展**：
 - [Channel 插件](/guide/channels) — 把 demo 接入 Telegram / 微信 / 飞书
 - [Agent Node 配置](/guide/agent-node) — 自己写 agent 的完整字段说明
-- [CLI 命令](/guide/cli) — 命令清单 + v0.8 新工具速查
+- [CLI 命令](/guide/cli) — 命令总览 + 逐命令详细用法

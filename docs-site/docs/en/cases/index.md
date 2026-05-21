@@ -44,4 +44,4 @@ Complete the [Getting Started guide](/en/guide/getting-started) and prepare the 
 **Customize and extend**:
 - [Channel plugins](/en/guide/channels) — wire the demo to Telegram / WeChat / Feishu
 - [Agent Node config](/en/guide/agent-node) — full field reference for writing your own agents
-- [CLI commands](/en/guide/cli) — command reference + v0.8 new tools
+- [CLI commands](/en/guide/cli) — command overview + per-command detailed usage
