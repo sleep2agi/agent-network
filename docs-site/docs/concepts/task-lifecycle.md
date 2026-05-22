@@ -36,16 +36,16 @@ stateDiagram-v2
 ```
 
 ::: warning `created` 在生产路径上基本不可见
-状态机里的 `[*] → created → delivered` 是按 schema 默认值（[`server/src/db.ts:95`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L95) `status TEXT NOT NULL DEFAULT 'created'`）画的，但 **没有任何代码路径会把 `created` UPDATE 成 `delivered`**：[`server/src/tools.ts:509-510`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L509) 的 `send_task` 在 INSERT 时就直接写 `VALUES (..., 'delivered', ...)`，跳过默认值。所以正常 API 流程里**永远观察不到** `created` 这个状态。
+状态机里的 `[*] → created → delivered` 是按 schema 默认值（[`server/src/db.ts:151`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L151) `status TEXT NOT NULL DEFAULT 'created'`）画的，但 **没有任何代码路径会把 `created` UPDATE 成 `delivered`**：[`server/src/tools.ts:637-639`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L637) 的 `send_task` 在 INSERT 时就直接写 `VALUES (..., 'delivered', ...)`，跳过默认值。所以正常 API 流程里**永远观察不到** `created` 这个状态。
 
 `created` 仍然作为防御性兜底出现在三条 WHERE 子句里：
 
 | 操作 | 接受的当前状态 | 源码 |
 |------|---------------|------|
-| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:817](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) |
-| `send_ack`（Hub tool） | `created` / `delivered` | [tools.ts:679](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L679) |
-| 过期巡检（patrol） | `created` / `delivered` | [index.ts:291-293](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L291) |
-| `ack_inbox`（Agent tool） | `delivered`（**仅 1 个**） | [tools.ts:354](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L354) |
+| `cancel_task` | `created` / `delivered` / `acked` / `running` | [tools.ts:946](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L946) |
+| `send_ack`（Hub tool） | `created` / `delivered` | [tools.ts:808](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L808) |
+| 过期巡检（patrol） | `created` / `delivered` | [index.ts:390-392](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L390) |
+| `ack_inbox`（Agent tool） | `delivered`（**仅 1 个**） | [tools.ts:480](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L480) |
 
 `ack_inbox` 和 `send_ack` 的 WHERE 子句不同 —— `ack_inbox`（agent 端 tool，L354）只接受 `delivered`，`send_ack`（hub 端 tool，L679）接受 `created` / `delivered` 两种。「4 个可取消状态」就是 `cancel_task` 那行；本节状态机图为简化未画 `created` 的出边，实际 SQL 允许（直接构造 DB row 走 INSERT 默认值才能进入 `created` 态，REST/MCP 没有这种入口）。
 :::
