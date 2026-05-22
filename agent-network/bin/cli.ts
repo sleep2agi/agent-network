@@ -429,6 +429,28 @@ function parseOpts(): Record<string, string> & { _channels: string[]; _envs: str
   return r;
 }
 
+// #173 — boolean (no-value) flags must NOT swallow the following token as a
+// value. parseOpts's heuristic ("--flag" + non-"--" token → that token is the
+// value) would otherwise read `anet node start --all foo` as all="foo".
+const BOOLEAN_FLAGS = new Set(["--all", "--tmux", "--new-session"]);
+
+// #173 — extract the bare positional operands from an argv slice, mirroring
+// parseOpts's flag/value consumption, so `--all`'s mutual exclusion with a
+// positional <alias> can be detected reliably.
+function positionalArgs(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--channel" || a === "--env") { i++; continue; }  // multi-value flags
+    if (a.startsWith("--")) {
+      if (!BOOLEAN_FLAGS.has(a) && argv[i + 1] && !argv[i + 1].startsWith("--")) i++;
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
+
 function commandExists(name: string): boolean {
   try {
     // `command` is a shell builtin; use /bin/sh -c with shell-safe quoting
@@ -861,6 +883,7 @@ anet — AI Agent Network CLI (V2)
 Node Management:
   anet node create <name>        Create a new agent node
   anet node start <name>         Start a node
+  anet node start --all          Start every node in cwd (= anet project up)
   anet node stop <name>          Stop a running node
   anet node resume <name>        Resume interrupted session
   anet node delete <name>        Delete node and config
@@ -2316,6 +2339,23 @@ async function launchAgent(id: string, forceNewSession = false) {
 // ── start (new session) ──
 
 async function startCommand() {
+  // #173 — `anet node start --all` starts every node under cwd's .anet/nodes/
+  // (skip already-running, staggered, auto-resume). It delegates to the
+  // `anet project up` implementation (projectUp) so the two stay in lockstep
+  // and share the --stagger / --only / --exclude flags + spawn model — no new
+  // detached-tmux TTY surface beyond project up's existing #311 follow-up.
+  if (args.includes("--all")) {
+    const stray = positionalArgs(args.slice(1));  // args[0] is the "start" subcommand token
+    if (stray.length > 0) {
+      console.error(`[anet] ❌ \`anet node start --all\` starts every node and takes no <alias> (got "${stray[0]}").`);
+      console.error(`[anet]    Use either:  anet node start --all          (every node in cwd)`);
+      console.error(`[anet]            or:  anet node start ${shellQuote(stray[0])}   (just that one node)`);
+      process.exit(1);
+    }
+    await projectUp("anet node start --all");
+    return;
+  }
+
   const id = args[1];
   if (!id) { showProfiles("start"); return; }
   const opts = parseOpts();
@@ -3622,14 +3662,14 @@ async function projectCommand() {
   }
 }
 
-async function projectUp() {
+async function projectUp(invokedAs = "anet project up") {
   const nodes = selectProjectNodes();
   if (nodes.length === 0) {
     console.log("[anet] No nodes match. Create some with: anet node create <name>");
     return;
   }
   const stagger = parseStaggerMs();
-  console.log(`\n[anet] anet project up — ${nodes.length} node(s) in ${process.cwd()}`);
+  console.log(`\n[anet] ${invokedAs} — ${nodes.length} node(s) in ${process.cwd()}`);
   let started = 0, alreadyUp = 0;
   const failed: { alias: string; reason: string }[] = [];
   for (let i = 0; i < nodes.length; i++) {
