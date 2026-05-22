@@ -3463,7 +3463,14 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     try {
       startNodeTmuxSession(newName, newName);  // detached tmux: `anet node start <newName>`
       restartFired = true;
-      restartOutcome = await verifyNodeRestarted(hub, token, networkId, newName, restartStartedAt, 30000);
+      // #176 / RFC-018 ③ — a claude-code-cli node restart hits Claude Code's
+      // dev-channels confirmation prompt; auto-confirm it concurrently with
+      // the liveness check so the rename stays zero-interaction.
+      const [outcome] = await Promise.all([
+        verifyNodeRestarted(hub, token, networkId, newName, restartStartedAt, 30000),
+        autoConfirmDevChannels([{ id: newName, alias: newName, profile: stored }]),
+      ]);
+      restartOutcome = outcome;
     } catch (e: any) {
       console.warn(`[anet] ⚠ rename committed but auto-restart failed: ${e?.message || e}`);
     }
