@@ -3592,7 +3592,7 @@ Stop a running agent node.
 // (CLAUDE_CODE_RESUME_THRESHOLD_MINUTES env injection inside launchAgent),
 // so `anet project up` on 22 nodes is genuinely zero-keystroke.
 
-interface ProjectNode { id: string; alias: string; profile: Profile | null; }
+interface ProjectNode { id: string; alias: string; profile: Profile | null; invalid?: string; }
 
 function printProjectUsage() {
   console.log(`
@@ -3625,7 +3625,18 @@ function selectProjectNodes(): ProjectNode[] {
     const alias = nodeDisplayName(id, profile);
     if (only && !only.has(alias) && !only.has(id)) continue;
     if (exclude && (exclude.has(alias) || exclude.has(id))) continue;
-    out.push({ id, alias, profile });
+    // #174 — flag unstartable configs up-front. These are the cases
+    // launchAgent hard-exits on before it can spawn an agent, so they must
+    // be reported as `invalid` and never counted toward `up`.
+    let invalid: string | undefined;
+    if (!profile) {
+      invalid = "config.json missing or not valid JSON";
+    } else if (!profile.token) {
+      invalid = "no token in config (run `anet doctor --fix`)";
+    } else if (profile.token.startsWith("utok_") || profile.token.startsWith("atok_")) {
+      invalid = `config has a ${profile.token.slice(0, 4)}_ token but a node needs ntok_ (run \`anet doctor --fix\`)`;
+    }
+    out.push({ id, alias, profile, invalid });
   }
   return out;
 }
@@ -3641,15 +3652,80 @@ function parseStaggerMs(): number {
   return Math.round(n * 1000);
 }
 
-function printProjectSummary(total: number, up: number, failed: { alias: string; reason: string }[]) {
+function printProjectSummary(
+  total: number,
+  up: number,
+  failed: { alias: string; reason: string }[],
+  invalid: { alias: string; reason: string }[] = [],
+) {
   console.log("\n──────────────────────────────────────────────");
-  console.log(`  ${up}/${total} up${failed.length ? ` · ${failed.length} failed` : ""}`);
+  const parts = [`${up}/${total} up`];
+  if (invalid.length) parts.push(`${invalid.length} invalid`);
+  if (failed.length) parts.push(`${failed.length} failed`);
+  console.log(`  ${parts.join(" · ")}`);
+  if (invalid.length > 0) {
+    console.log("  Invalid config (not started):");
+    for (const n of invalid) console.log(`    ⚠ ${n.alias} — ${n.reason}`);
+  }
   if (failed.length > 0) {
     console.log("  Failed:");
     for (const f of failed) console.log(`    ✗ ${f.alias} — ${f.reason}`);
     console.log("    → debug: anet logs <alias>  |  anet info <alias>");
   }
   console.log();
+}
+
+// #174 — verify a project-spawned node actually came alive. startNodeTmuxSession
+// only confirms tmux accepted the detached command; the inner `anet node start`
+// can still fail immediately (bad config, spawn error) — that used to be
+// miscounted as "up" (N/N up false report). launchAgent writes
+// .anet/nodes/<id>/.pid right after it spawns the agent child and removes it
+// when the child exits. So: poll for a live pid, then require it to survive a
+// short settle window — a child that fails fast writes .pid then has it
+// removed on exit. Pure-local, no hub dependency. (Callers clear any stale
+// .pid before spawning, so a pid seen here belongs to the fresh process.)
+async function verifyNodeUp(nodeId: string, timeoutMs: number): Promise<{ ok: boolean; reason: string }> {
+  const deadline = Date.now() + timeoutMs;
+  const settleMs = 3000;
+  let aliveSince = 0;
+  while (Date.now() < deadline) {
+    const pid = readNodePid(nodeId);
+    if (pid !== null && pidAlive(pid)) {
+      if (aliveSince === 0) aliveSince = Date.now();
+      else if (Date.now() - aliveSince >= settleMs) return { ok: true, reason: `pid ${pid} alive` };
+    } else {
+      aliveSince = 0;  // not started yet, or started then died — restart the settle clock
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  const pid = readNodePid(nodeId);
+  if (pid !== null && pidAlive(pid)) return { ok: true, reason: `pid ${pid} alive` };
+  return {
+    ok: false,
+    reason: pid === null
+      ? "no agent pid — inner `anet node start` exited before spawning (check config)"
+      : "agent process died right after starting",
+  };
+}
+
+// #174 — verify a batch of just-spawned nodes concurrently (so a slow/failed
+// node does not serialize the whole project up/restart). Pushes failures into
+// `failed`; returns the count that came up.
+async function verifySpawnedNodes(spawned: ProjectNode[], failed: { alias: string; reason: string }[]): Promise<number> {
+  if (spawned.length === 0) return 0;
+  console.log(`\n[anet] verifying ${spawned.length} node(s) came up…`);
+  const results = await Promise.all(spawned.map(n => verifyNodeUp(n.id, 20000)));
+  let up = 0;
+  spawned.forEach((n, i) => {
+    if (results[i].ok) {
+      console.log(`  ✅ ${n.alias}`);
+      up++;
+    } else {
+      console.log(`  ✗  ${n.alias} — ${results[i].reason}`);
+      failed.push({ alias: n.alias, reason: results[i].reason });
+    }
+  });
+  return up;
 }
 
 async function projectCommand() {
@@ -3670,27 +3746,45 @@ async function projectUp(invokedAs = "anet project up") {
   }
   const stagger = parseStaggerMs();
   console.log(`\n[anet] ${invokedAs} — ${nodes.length} node(s) in ${process.cwd()}`);
-  let started = 0, alreadyUp = 0;
+
+  // #174 — partition out invalid configs; they are never spawned or counted up.
+  const invalid: { alias: string; reason: string }[] = [];
+  const startable: ProjectNode[] = [];
+  for (const n of nodes) {
+    if (n.invalid) {
+      console.log(`  ⚠  ${n.alias} — invalid config: ${n.invalid}`);
+      invalid.push({ alias: n.alias, reason: n.invalid });
+    } else {
+      startable.push(n);
+    }
+  }
+
+  let alreadyUp = 0;
   const failed: { alias: string; reason: string }[] = [];
-  for (let i = 0; i < nodes.length; i++) {
-    const n = nodes[i];
+  const spawned: ProjectNode[] = [];
+  for (let i = 0; i < startable.length; i++) {
+    const n = startable[i];
     if (tmuxSessionRunning(n.alias)) {
       console.log(`  ⏭  ${n.alias} — already running`);
       alreadyUp++;
       continue;
     }
     try {
+      rmSync(join(nodesDir(), n.id, ".pid"), { force: true });  // clear stale pid so verify sees only the fresh process
       startNodeTmuxSession(n.alias, n.alias);
-      console.log(`  ▶  ${n.alias}`);
-      started++;
+      console.log(`  ▶  ${n.alias} — starting…`);
+      spawned.push(n);
     } catch (e: any) {
       const reason = (e?.stderr?.toString().trim() || e?.message || String(e)).slice(0, 200);
       console.log(`  ✗  ${n.alias} — ${reason}`);
       failed.push({ alias: n.alias, reason });
     }
-    if (stagger > 0 && i < nodes.length - 1) await new Promise(r => setTimeout(r, stagger));
+    if (stagger > 0 && i < startable.length - 1) await new Promise(r => setTimeout(r, stagger));
   }
-  printProjectSummary(nodes.length, alreadyUp + started, failed);
+
+  // #174 — only count a node `up` once its agent pid is verified alive.
+  const started = await verifySpawnedNodes(spawned, failed);
+  printProjectSummary(nodes.length, alreadyUp + started, failed, invalid);
 }
 
 async function projectRestart() {
@@ -3701,25 +3795,42 @@ async function projectRestart() {
   }
   const stagger = parseStaggerMs();
   console.log(`\n[anet] anet project restart — ${nodes.length} node(s) in ${process.cwd()}`);
-  let started = 0;
+
+  // #174 — partition out invalid configs; never spawned or counted up.
+  const invalid: { alias: string; reason: string }[] = [];
+  const startable: ProjectNode[] = [];
+  for (const n of nodes) {
+    if (n.invalid) {
+      console.log(`  ⚠  ${n.alias} — invalid config: ${n.invalid}`);
+      invalid.push({ alias: n.alias, reason: n.invalid });
+    } else {
+      startable.push(n);
+    }
+  }
+
   const failed: { alias: string; reason: string }[] = [];
-  for (let i = 0; i < nodes.length; i++) {
-    const n = nodes[i];
+  const spawned: ProjectNode[] = [];
+  for (let i = 0; i < startable.length; i++) {
+    const n = startable[i];
     const wasRunning = tmuxSessionRunning(n.alias);
     if (wasRunning) killTmuxSession(n.alias);
     stopNode(n.id);
     try {
+      rmSync(join(nodesDir(), n.id, ".pid"), { force: true });  // clear stale pid so verify sees only the fresh process
       startNodeTmuxSession(n.alias, n.alias);
-      console.log(`  ${wasRunning ? "↻" : "▶"}  ${n.alias}`);
-      started++;
+      console.log(`  ${wasRunning ? "↻" : "▶"}  ${n.alias} — starting…`);
+      spawned.push(n);
     } catch (e: any) {
       const reason = (e?.stderr?.toString().trim() || e?.message || String(e)).slice(0, 200);
       console.log(`  ✗  ${n.alias} — ${reason}`);
       failed.push({ alias: n.alias, reason });
     }
-    if (stagger > 0 && i < nodes.length - 1) await new Promise(r => setTimeout(r, stagger));
+    if (stagger > 0 && i < startable.length - 1) await new Promise(r => setTimeout(r, stagger));
   }
-  printProjectSummary(nodes.length, started, failed);
+
+  // #174 — only count a node `up` once its agent pid is verified alive.
+  const started = await verifySpawnedNodes(spawned, failed);
+  printProjectSummary(nodes.length, started, failed, invalid);
 }
 
 async function projectDown() {
