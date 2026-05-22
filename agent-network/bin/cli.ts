@@ -3728,6 +3728,50 @@ async function verifySpawnedNodes(spawned: ProjectNode[], failed: { alias: strin
   return up;
 }
 
+// #176 — auto-confirm Claude Code's dev-channels prompt for a tmux-spawned
+// claude-code-cli node. anet loads the commhub channel via
+// `claude --dangerously-load-development-channels server:commhub`, which pops an
+// interactive "WARNING: Loading development channels … (Enter to confirm)"
+// prompt on every launch — breaking zero-interaction batch starts (#176). That
+// prompt cannot be suppressed by any flag/env/settings in Claude Code 2.1.147.
+// So: watch the tmux pane and, ONLY when the prompt's exact text is detected,
+// send a single Enter to confirm it. Detection-gated — if the prompt never
+// appears (non-claude node, already past it) nothing is ever sent, so a stray
+// Enter can never land on a normal Claude UI. Best-effort.
+async function dismissDevChannelPrompt(sessionName: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let pane = "";
+    try {
+      pane = execFileSync("tmux", ["capture-pane", "-p", "-t", sessionName], { encoding: "utf-8" }).toString();
+    } catch {
+      return false;  // session gone / tmux error — nothing to confirm
+    }
+    // Both markers are unique to this exact prompt — they cannot appear
+    // incidentally in normal Claude Code UI or agent output.
+    if (pane.includes("I am using this for local development") || pane.includes("Loading development channels")) {
+      // Prompt is rendered and waiting. Settle briefly so Ink's input handler
+      // is fully attached, then confirm with a single Enter.
+      await new Promise(r => setTimeout(r, 700));
+      try { execFileSync("tmux", ["send-keys", "-t", sessionName, "Enter"], { stdio: "ignore" }); } catch {}
+      return true;
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return false;  // prompt never appeared within the window
+}
+
+// #176 — concurrently auto-confirm the dev-channels prompt for the just-spawned
+// claude-code-cli nodes (only those carry a `server:` channel and hit the
+// prompt), so `node start --all` / `project up|restart` stay zero-interaction.
+async function autoConfirmDevChannels(spawned: ProjectNode[]): Promise<void> {
+  const claudeNodes = spawned.filter(n =>
+    n.profile && normalizeRuntime(n.profile) === "claude-code-cli" &&
+    !!n.profile.channels?.some(c => c.startsWith("server:")));
+  if (claudeNodes.length === 0) return;
+  await Promise.all(claudeNodes.map(n => dismissDevChannelPrompt(n.alias, 45000)));
+}
+
 async function projectCommand() {
   const sub = args[1];
   switch (sub) {
@@ -3783,7 +3827,12 @@ async function projectUp(invokedAs = "anet project up") {
   }
 
   // #174 — only count a node `up` once its agent pid is verified alive.
-  const started = await verifySpawnedNodes(spawned, failed);
+  // #176 — concurrently auto-confirm Claude Code's dev-channels prompt for any
+  // claude-code-cli nodes so the batch start stays zero-interaction.
+  const [started] = await Promise.all([
+    verifySpawnedNodes(spawned, failed),
+    autoConfirmDevChannels(spawned),
+  ]);
   printProjectSummary(nodes.length, alreadyUp + started, failed, invalid);
 }
 
@@ -3829,7 +3878,12 @@ async function projectRestart() {
   }
 
   // #174 — only count a node `up` once its agent pid is verified alive.
-  const started = await verifySpawnedNodes(spawned, failed);
+  // #176 — concurrently auto-confirm Claude Code's dev-channels prompt for any
+  // claude-code-cli nodes so the batch restart stays zero-interaction.
+  const [started] = await Promise.all([
+    verifySpawnedNodes(spawned, failed),
+    autoConfirmDevChannels(spawned),
+  ]);
   printProjectSummary(nodes.length, started, failed, invalid);
 }
 
