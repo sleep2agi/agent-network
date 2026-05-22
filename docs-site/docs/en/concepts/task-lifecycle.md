@@ -140,7 +140,7 @@ expires_at = datetime('now', '+3600 seconds')
 ```
 
 ::: warning The expiry patrol only covers `created` / `delivered`
-Verify [`server/src/index.ts:286-303`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L286): expiration is not real-time — a **patrol that runs every 5 minutes** UPDATEs tasks with `expires_at < now` **and `status IN ('created', 'delivered')`** to `expired`.
+Verify [`server/src/index.ts:386-402`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L386): expiration is not real-time — a **patrol that runs every 5 minutes** UPDATEs tasks with `expires_at < now` **and `status IN ('created', 'delivered')`** to `expired`.
 
 Implications:
 - The actual status flip can lag `expires_at` by up to ~5 minutes
@@ -195,7 +195,7 @@ Cancellation will:
 3. Record the cancellation reason in the result field
 4. Log a task_event
 
-Cancellable statuses: `created` / `delivered` / `acked` / `running` (4 statuses — verified at [`server/src/tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) `WHERE status IN ('created', 'delivered', 'acked', 'running')`. The tool's own description string only mentions 3 (missing `created`); the SQL is the source of truth with 4. Terminal states `replied` / `failed` / `cancelled` / `expired` cannot be cancelled directly — retry first, then cancel.)
+Cancellable statuses: `created` / `delivered` / `acked` / `running` (4 statuses — verified at [`server/src/tools.ts:946`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L946) `WHERE status IN ('created', 'delivered', 'acked', 'running')`. The tool's own description string only mentions 3 (missing `created`); the SQL is the source of truth with 4. Terminal states `replied` / `failed` / `cancelled` / `expired` cannot be cancelled directly — retry first, then cancel.)
 
 ## Reassigning Tasks
 
@@ -250,7 +250,7 @@ By distinguishing types, only `task` and `broadcast` trigger processing, while `
 
 ## Task Event Log
 
-Every status change is recorded in the `task_events` table (verified at [`server/src/db.ts:134-147`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L134)):
+Every status change is recorded in the `task_events` table (verified at [`server/src/db.ts:192-200`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L192)):
 
 ```sql
 CREATE TABLE task_events (
@@ -307,7 +307,7 @@ ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, creat
 
 ## Database Table Schema
 
-Below is the schema as it actually exists in v0.8 (after all ALTER TABLE migrations). The original CREATE TABLE and migrations live in [`server/src/db.ts:88-111`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L88) (tasks, 17 original columns), [`db.ts:326-328`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L326) (V3 adds `network_id` to `tasks` and 5 other tables), and [`db.ts:415`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L415) (adds `parent_task_id`).
+Below is the schema as it actually exists in v0.8 (after all ALTER TABLE migrations). The original CREATE TABLE and migrations live in [`server/src/db.ts:144-162`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L144) (tasks, 17 original columns), [`db.ts:382-383`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L382) (V3 adds `network_id` to `tasks` and 5 other tables), and [`db.ts:491`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L491) (adds `parent_task_id`).
 
 ```sql
 -- Effective tasks schema: 19 columns (17 original + 2 migrations)

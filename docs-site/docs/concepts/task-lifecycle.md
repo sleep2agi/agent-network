@@ -140,7 +140,7 @@ expires_at = datetime('now', '+3600 seconds')
 ```
 
 ::: warning 过期巡检只覆盖 `created` / `delivered`
-verify [`server/src/index.ts:286-303`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L286)：过期不是实时的 —— 一个 **每 5 分钟跑一次的 patrol** 把 `expires_at < now` 且 **`status IN ('created', 'delivered')`** 的任务 UPDATE 成 `expired`。
+verify [`server/src/index.ts:386-402`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L386)：过期不是实时的 —— 一个 **每 5 分钟跑一次的 patrol** 把 `expires_at < now` 且 **`status IN ('created', 'delivered')`** 的任务 UPDATE 成 `expired`。
 
 含义：
 - 实际状态翻转最多比 `expires_at` 晚 ~5 分钟
@@ -195,7 +195,7 @@ cancel_task(task_id="t_xxx", reason="不再需要")
 3. 记录取消原因到 result 字段
 4. 记录 task_event
 
-可取消的状态：`created` / `delivered` / `acked` / `running`（4 个状态，verify [`server/src/tools.ts:817`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L817) `WHERE status IN ('created', 'delivered', 'acked', 'running')` —— server 的 tool description 字符串只列 3 个少一个 `created`，实际 SQL 4 个；终态 `replied` / `failed` / `cancelled` / `expired` 不能直接 cancel，需先 retry 再 cancel）
+可取消的状态：`created` / `delivered` / `acked` / `running`（4 个状态，verify [`server/src/tools.ts:946`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L946) `WHERE status IN ('created', 'delivered', 'acked', 'running')` —— server 的 tool description 字符串只列 3 个少一个 `created`，实际 SQL 4 个；终态 `replied` / `failed` / `cancelled` / `expired` 不能直接 cancel，需先 retry 再 cancel）
 
 ## 转移任务
 
@@ -250,7 +250,7 @@ sequenceDiagram
 
 ## 任务事件日志
 
-每个状态变更都记录到 `task_events` 表（verify [`server/src/db.ts:134-147`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L134)）：
+每个状态变更都记录到 `task_events` 表（verify [`server/src/db.ts:192-200`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L192)）：
 
 ```sql
 CREATE TABLE task_events (
@@ -307,7 +307,7 @@ ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, creat
 
 ## 数据库表结构
 
-下方是 v0.8 实际生效的 schema（含所有 ALTER TABLE migration 之后的字段）。CREATE TABLE 原文 + migrations 见 [`server/src/db.ts:88-111`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L88)（tasks 原 17 列）+ [`db.ts:326-328`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L326) (V3 给 `tasks` 等 6 张表加 `network_id`) + [`db.ts:415`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L415) (加 `parent_task_id`)。
+下方是 v0.8 实际生效的 schema（含所有 ALTER TABLE migration 之后的字段）。CREATE TABLE 原文 + migrations 见 [`server/src/db.ts:144-162`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L144)（tasks 原 17 列）+ [`db.ts:382-383`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L382) (V3 给 `tasks` 等 6 张表加 `network_id`) + [`db.ts:491`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L491) (加 `parent_task_id`)。
 
 ```sql
 -- 实际 tasks 表 19 列（原 17 + migration 2）
