@@ -3153,6 +3153,36 @@ async function terminateNodeProcess(pid: number, force: boolean): Promise<boolea
   return !pidAlive(pid);
 }
 
+// #146 / #180 — find a node's live agent process(es) by command line, NOT by a
+// possibly-stale .pid. A stale .pid can point to a dead pid the OS later reused
+// for an unrelated process — trusting it makes renameCommand SIGKILL an
+// innocent process AND miss the real node (it stays a ghost). launchAgent
+// always puts the node alias on the agent's argv (`claude -n <alias>` /
+// `agent-node --alias <alias>`); scanning the live process table for that exact
+// flag+alias token pair is reuse-proof.
+function findNodeProcessesByAlias(...aliases: string[]): number[] {
+  const wanted = new Set(aliases.filter(Boolean));
+  if (wanted.size === 0) return [];
+  let out = "";
+  try {
+    out = execFileSync("ps", ["-eww", "-o", "pid=", "-o", "args="], { encoding: "utf-8" }).toString();
+  } catch { return []; }
+  const pids = new Set<number>();
+  for (const line of out.split("\n")) {
+    const m = line.match(/^\s*(\d+)\s+(.+)$/);
+    if (!m) continue;
+    const pid = parseInt(m[1], 10);
+    if (isNaN(pid) || pid === process.pid) continue;
+    const cmd = m[2];
+    if (!cmd.includes("claude") && !cmd.includes("agent-node")) continue;  // agent runtimes only
+    const tok = cmd.split(/\s+/);
+    for (let i = 0; i < tok.length - 1; i++) {
+      if ((tok[i] === "-n" || tok[i] === "--alias") && wanted.has(tok[i + 1])) { pids.add(pid); break; }
+    }
+  }
+  return [...pids];
+}
+
 // #146 GOTCHA-2 — best-effort drain before a rename restart kills the agent.
 // Polls commhub /api/status: returns true once the node is NOT actively
 // running a task (idle / blocked / error / offline / fell off status), false
@@ -3263,14 +3293,17 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     console.error(`Node "${oldId}" has an in-flight rename (.anet/nodes/${oldId}/rename.lock). Resolve it first.`);
     process.exit(1);
   }
-  // state check: running node needs --force (RFC-010 §4.4 active rename)
-  const pidFile = join(oldDir, ".pid");
-  let running = false;
-  let oldPid: number | null = null;  // #146 R1 — captured up-front; the pidfile is removed with oldDir later
-  if (existsSync(pidFile)) {
-    const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
-    if (!isNaN(pid)) { try { process.kill(pid, 0); running = true; oldPid = pid; } catch {} }
-  }
+  // state check: running node needs --force (RFC-010 §4.4 active rename).
+  // #146 / #180 ship-blocker — DO NOT trust .pid for old-process identity. A
+  // stale .pid (left by an agent that exited abnormally, its exit handler never
+  // running) can point to a dead pid the OS later reused for an unrelated
+  // process; renameCommand would then SIGKILL that innocent process and leave
+  // the real node a ghost heart-beating under the old alias (Vincent UAT,
+  // N站马). Authoritative detection: scan the live process table by command
+  // line — launchAgent always puts the alias there.
+  const oldDisplay = nodeDisplayName(oldId, resolved.profile);
+  let oldSurvivors: number[] = [];  // #180 — set in C2: old agent pids that refused to die
+  const running = findNodeProcessesByAlias(oldDisplay, oldId).length > 0;
   if (running && !force) {
     console.error(`Node "${oldId}" is running. Use --force to rename a running node (active rename, RFC-010 §4.4).`);
     process.exit(1);
@@ -3398,20 +3431,22 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
       console.warn(`[anet]   An in-flight task may be interrupted without a reply (dispatcher's task stays open).`);
     }
 
-    // #146 R1 — terminate the old process and CONFIRM it exited. A surviving
-    // old process keeps polling get_inbox + heart-beating report_status under
-    // the OLD alias; commhub's ON CONFLICT(resume_id) upsert then reverts the
-    // rename (SDK马 Finding B). stopNode() only fires SIGTERM and trusts it —
-    // here we verify: SIGTERM → 8s wait → SIGKILL (--force) → 3s wait.
-    if (oldPid !== null) {
-      oldProcessConfirmedDead = await terminateNodeProcess(oldPid, force);
-      if (!oldProcessConfirmedDead) {
-        console.error(`[anet] ✗ old agent process (pid ${oldPid}) did not exit after SIGTERM + SIGKILL.`);
+    // #146 R1 / #180 — terminate every live agent process of the old node and
+    // CONFIRM exit. A surviving old process keeps polling get_inbox + heart-
+    // beating report_status under the OLD alias; commhub's ON CONFLICT(resume_id)
+    // upsert then reverts the rename (SDK马 Finding B). Re-scan by command line
+    // at kill time (reuse-proof — never trusts a stale .pid, never SIGKILLs an
+    // unrelated recycled pid). Each: SIGTERM → 8s wait → SIGKILL (--force) → 3s.
+    const livePids = findNodeProcessesByAlias(oldDisplay, oldId);
+    for (const pid of livePids) {
+      if (!(await terminateNodeProcess(pid, force))) {
+        oldSurvivors.push(pid);
+        console.error(`[anet] ✗ old agent process (pid ${pid}) did not exit after SIGTERM + SIGKILL.`);
       }
-    } else {
-      // running was detected but the pid was not captured — cannot confirm.
-      oldProcessConfirmedDead = false;
-      console.error(`[anet] ✗ could not determine the old agent's pid — cannot confirm it stopped.`);
+    }
+    oldProcessConfirmedDead = oldSurvivors.length === 0;
+    if (oldProcessConfirmedDead && livePids.length > 0) {
+      console.log(`[anet] stopped old agent process(es): ${livePids.join(", ")}`);
     }
     if (tmuxSessionRunning(oldId)) killTmuxSession(oldId);
     // brief grace so the old SSE/heartbeat + final writebackSession() tear down
@@ -3492,9 +3527,9 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     // R1 — old process survived SIGTERM+SIGKILL. Starting the new alias now
     // would let two processes heart-beat the same resume_id and revert the
     // rename (Finding B). Stop here and hand the user a manual recovery path.
-    console.error(`[anet] ⚠ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — but the OLD agent process (pid ${oldPid}) is still alive.`);
-    console.error(`[anet]   Do NOT leave it running: its heartbeat can revert the rename. Recover manually:`);
-    console.error(`[anet]     1) kill -9 ${oldPid}`);
+    console.error(`[anet] ⚠ Renamed "${oldId}" → "${newName}" (txn ${txnId}) — but old agent process(es) ${oldSurvivors.join(", ")} are still alive.`);
+    console.error(`[anet]   Do NOT leave them running: the heartbeat can revert the rename. Recover manually:`);
+    console.error(`[anet]     1) kill -9 ${oldSurvivors.join(" ")}`);
     console.error(`[anet]     2) anet node start ${shellQuote(newName)}`);
     process.exit(1);
   } else if (!canAutoRestart) {
