@@ -2,7 +2,7 @@
 
 | 字段 | 内容 |
 |---|---|
-| 状态 | **Proposed** —— 待 通信牛 review → Vincent 拍板 |
+| 状态 | **Proposed** —— 通信牛 review：APPROVE WITH NITS（6 nit 已 amend）→ 待 Vincent 拍板 |
 | 提出 | 2026-05-22 |
 | 作者 | 通信工程马 |
 | 派单 | 通信龙（Vincent telegram 5896-5900） |
@@ -91,6 +91,14 @@ anet 已有一个 `role` 概念：`anet network` 的**成员权限角色**（own
 - `Profile.role` 从 `"leader" | "worker"` 改为 `string`（软枚举）。
 - **向后兼容**：RFC-008 sci-team demo 写的 `leader` / `worker` 仍是合法 `role` 值，不破坏（G2）。demo 脚手架（`sciTeamPrompt`、`batchAliasFor`、`cli.ts:6386/6622`）可保留 leader/worker 不动，或后续单独跟进改用 `负责人` —— **不在本 RFC 范围**，本 RFC 只保证旧值合法。
 
+### 3.6 字段约束（通信牛 review amend）
+
+自由文本 ≠ 无限制。`team` / `role` 写入前规范化：
+- **trim** 首尾空白；**NFC** Unicode 规范化（与 `validateNodeName` 一致）。
+- **长度上限** 100 字符。
+- **空字符串视为 clear**（等价 `--clear`）。
+- **拒绝控制字符 / 换行**，避免污染 Dashboard 展示与日志。
+
 ## 4. CLI
 
 ### 4.1 创建时设置
@@ -110,6 +118,7 @@ anet node set-team <node-ref> --clear     # 清除归属
 - 实现：`loadStoredProfile` → 改字段 → `saveProfile`。纯本地 config 操作。
 - `anet node ls` 增列 `team` / `role`（`cli.ts:2475` 那行节点摘要）。
 - `anet info <node>` 显示 team/role。
+- **运行中修改的同步语义（通信牛 review amend）**：`set-team`/`set-role` 改的是 config（source of truth），但 running node 的 commhub 投影要到**下次重启 register** 才刷新。CLI 改完必须提示：`[anet] 已更新 — 重启节点以同步到 Dashboard：anet node start <ref>`。
 
 ### 4.3 `anet team` 命令族（只读，团队为「涌现」模型）
 
@@ -117,6 +126,8 @@ anet node set-team <node-ref> --clear     # 清除归属
 anet team ls                 # 列出所有 team + 节点数 + 角色分布
 anet team show <团队>         # 团队 roster：成员节点 + 各自 role + 在线状态
 ```
+
+**数据源（通信牛 review amend）**：本地 CLI 只能看到本机 `.anet/nodes`，看不到全 network。已登录 hub 时 `anet team ls/show` 默认读 commhub `/api/status` 聚合（全 network 视图）；离线 / 无 hub 时 fallback 到本地 `.anet/nodes` config。
 
 **设计决策 D5 —— 团队是「涌现」的，不做独立 team 注册表。** 一个 team「存在」当且仅当 ≥1 节点的 `team` 字段引用它。所以**不需要** `anet team create` / `delete` —— 无独立注册表 = 无状态、无 config↔registry 漂移。`anet team ls` 是对所有节点 `team` 字段的聚合视图。
 
@@ -128,7 +139,7 @@ anet team show <团队>         # 团队 roster：成员节点 + 各自 role + �
 
 节点注册（`report_status`）payload 增加 `team` / `role` 两字段：
 - agent-node runtime：registration 代码加 `team`/`role`（读 config）。
-- claude-code-cli runtime：`node-server.ts` 的 `report_status`（`agent-network/src/node-server.ts:437-446`）加 `team`/`role` —— 经由 launchAgent 注入 env（类似 RFC-018 的 `COMMHUB_RESUME_ID` 注入模式）或 node-server 直接读 config。
+- claude-code-cli runtime：launchAgent 给 claude 注入 `COMMHUB_TEAM` / `COMMHUB_ROLE` env（与 RFC-018 `COMMHUB_RESUME_ID` 完全同模式），`node-server.ts` 的 `report_status`（`agent-network/src/node-server.ts:437-446`）读这两个 env 写进 payload。**定死走 env，不走「node-server 直接读 config」** —— 后者要 config path、扩大面（通信牛 review amend）。
 - commhub server：sessions/nodes 行加 `team` / `role` 列，upsert 时写入。
 
 ### 5.2 查询
@@ -146,6 +157,9 @@ Dashboard 改为读 commhub status 投影里的 `team` 字段做分组键，**�
 
 - 每节点按 `role` 打标签 / 图标（软枚举表内值有内置图标；表外值显示文字标签）。
 - 喂 #170 org-chart：`team` = 分组 / 层级键；team 内 `role` 为 `负责人`（或兼容值 `leader`）的节点 = 该团队头节点，org-chart 层级的锚点；其余 role 作团队内节点的标签 + 排序。
+- **负责人冲突规则（通信牛 review amend）**：`role ∈ {负责人, leader}` 视为团队 lead。
+  - 多个 lead → 按 `alias` 排序，第一个为主负责人（org-chart 层级锚点），其余渲染为普通 lead chip。
+  - 无 lead → 用一个 synthetic 的 team-header 节点作锚点。
 
 ## 7. 迁移
 
@@ -166,9 +180,11 @@ Dashboard 改为读 commhub status 投影里的 `team` 字段做分组键，**�
 | P3 | Dashboard —— team 分组取代 hack + role 标签 + 喂 #170 org-chart |
 | P4 | `anet team ls/show` + `anet doctor --fix` 回填 |
 
-P1 先落，P2/P3/P4 可并行。每阶段独立可发。
+P1 先落，P2/P3/P4 可并行。**release 节奏（通信牛 review amend）**：P1 只写本地 config、Dashboard 看不到 —— 单独发 P1 用户感知有限。建议**最小可见闭环 = P1+P2 一起发**（节点维度真正进 commhub、可被查询），P3 Dashboard 紧跟。
 
 ## 9. 开放问题 / 待 review 决策
+
+> 通信牛 review（APPROVE WITH NITS）已确认 D1 软枚举 / D2 单值 / D3 config-truth+投影 / D5 涌现团队模型 / role 命名区分 —— 均合理通过；6 个 nit 已 amend 进上文（§3.6 / §4.2 / §4.3 / §5.1 / §6.2 / §8）。下列剩余项待 Vincent 拍板：
 
 1. **`role` 推荐角色集最终清单** —— 初版 `负责人/工程师/测试/设计/文档/运营`，待 Vincent 拍板（要不要加 产品 / 数据 / 安全 等）。
 2. **软枚举 vs 硬枚举**（D1）—— 本 RFC 推荐软枚举，请 review 确认。
