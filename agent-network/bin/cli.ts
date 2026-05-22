@@ -3158,24 +3158,36 @@ async function terminateNodeProcess(pid: number, force: boolean): Promise<boolea
 // for an unrelated process — trusting it makes renameCommand SIGKILL an
 // innocent process AND miss the real node (it stays a ghost). launchAgent
 // always puts the node alias on the agent's argv (`claude -n <alias>` /
-// `agent-node --alias <alias>`); scanning the live process table for that exact
-// flag+alias token pair is reuse-proof.
-function findNodeProcessesByAlias(...aliases: string[]): number[] {
+// `agent-node --alias <alias>`).
+// Returns the matching pids, or `null` if the process table cannot be read —
+// callers MUST fail closed on `null` (#180 R2), never treat it as "no match".
+// #180 R3 caveat: alias tokenisation assumes node names conforming to
+// validateNodeName() (no whitespace/quotes) — the entire current node
+// population. A hand-edited legacy alias containing whitespace would not match.
+function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
   const wanted = new Set(aliases.filter(Boolean));
   if (wanted.size === 0) return [];
   let out = "";
   try {
     out = execFileSync("ps", ["-eww", "-o", "pid=", "-o", "args="], { encoding: "utf-8" }).toString();
-  } catch { return []; }
+  } catch { return null; }  // #180 R2 — process table unavailable; caller fails closed
   const pids = new Set<number>();
   for (const line of out.split("\n")) {
     const m = line.match(/^\s*(\d+)\s+(.+)$/);
     if (!m) continue;
     const pid = parseInt(m[1], 10);
     if (isNaN(pid) || pid === process.pid) continue;
-    const cmd = m[2];
-    if (!cmd.includes("claude") && !cmd.includes("agent-node")) continue;  // agent runtimes only
-    const tok = cmd.split(/\s+/);
+    const tok = m[2].split(/\s+/);
+    // #180 R1 — genuine agent-process identity: an argv token must be the agent
+    // executable itself (basename claude / agent-node) or its package path —
+    // NOT a mere substring of the whole command line, which an unrelated
+    // process could carry in a path/arg and then be wrongly killed.
+    const isAgentProc = tok.some(x => {
+      const base = x.split("/").pop() || x;
+      return base === "claude" || base === "agent-node"
+        || x.includes("@anthropic-ai/claude-code") || x.includes("@sleep2agi/agent-node");
+    });
+    if (!isAgentProc) continue;
     for (let i = 0; i < tok.length - 1; i++) {
       if ((tok[i] === "-n" || tok[i] === "--alias") && wanted.has(tok[i + 1])) { pids.add(pid); break; }
     }
@@ -3303,7 +3315,15 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   // line — launchAgent always puts the alias there.
   const oldDisplay = nodeDisplayName(oldId, resolved.profile);
   let oldSurvivors: number[] = [];  // #180 — set in C2: old agent pids that refused to die
-  const running = findNodeProcessesByAlias(oldDisplay, oldId).length > 0;
+  // #180 R2 — fail closed if the process table is unreadable: a rename that
+  // cannot find/stop the old agent could ghost it or stop the wrong process.
+  const oldProcs = findNodeProcessesByAlias(oldDisplay, oldId);
+  if (oldProcs === null) {
+    console.error(`[anet] ❌ cannot inspect the process table (\`ps\` failed) — refusing the rename.`);
+    console.error(`[anet]    Rename must locate + stop the old agent; without \`ps\` it risks a ghost or stopping the wrong process.`);
+    process.exit(1);
+  }
+  const running = oldProcs.length > 0;
   if (running && !force) {
     console.error(`Node "${oldId}" is running. Use --force to rename a running node (active rename, RFC-010 §4.4).`);
     process.exit(1);
@@ -3437,7 +3457,9 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     // upsert then reverts the rename (SDK马 Finding B). Re-scan by command line
     // at kill time (reuse-proof — never trusts a stale .pid, never SIGKILLs an
     // unrelated recycled pid). Each: SIGTERM → 8s wait → SIGKILL (--force) → 3s.
-    const livePids = findNodeProcessesByAlias(oldDisplay, oldId);
+    // #180 R2 — re-scan; if `ps` now fails fall back to the detection-time set
+    // (never silently treat the old node as already stopped).
+    const livePids = findNodeProcessesByAlias(oldDisplay, oldId) ?? oldProcs;
     for (const pid of livePids) {
       if (!(await terminateNodeProcess(pid, force))) {
         oldSurvivors.push(pid);
