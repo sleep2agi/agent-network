@@ -9,6 +9,16 @@ function ts(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
+function parseMetaJson(value: unknown): unknown | null {
+  if (!value || typeof value !== "string") return null;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
+function normalizeMetaJson(meta: unknown): string | null {
+  if (!meta || typeof meta !== "object") return null;
+  try { return JSON.stringify(meta); } catch { return null; }
+}
+
 export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false) {
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
@@ -439,13 +449,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const rows0 = db.get<{ cnt: number }>(countSql, ...countParams);
       console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
       const rowsParams: any[] = [alias];
-      let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id
+      let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json
          FROM inbox WHERE session_name = ?1 AND acked = 0`;
       rowsSql = addReadScope(rowsSql, rowsParams, readScope);
       rowsSql += ` ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
          LIMIT ?${rowsParams.length + 1}`;
       rowsParams.push(limit);
-      const rows = db.all(rowsSql, ...rowsParams);
+      const rows = db.all(rowsSql, ...rowsParams).map((row: any) => ({
+        ...row,
+        meta: parseMetaJson(row.meta_json),
+      }));
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows }) }],
@@ -585,9 +598,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       ttl_seconds: z.number().min(1).max(86400).optional().describe("Task TTL in seconds (default: 3600)"),
       network_id: z.string().max(200).optional().describe("Network scope"),
       parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. When the child task replies the hub will auto-chain the answer to the parent task's originator, so the user sees the final result even if the intermediate session ends."),
+      meta: z.any().optional().describe("Optional structured task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
     },
-    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn }) => { const from_session = defaultFrom(_fromIn);
+    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta }) => { const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
+      const metaJson = normalizeMetaJson(meta);
       // Resolve parent_task_id: explicit > inferred (caller's most recent
       // delivered/started inbox task that's still open). Inference is the
       // safety net for when the LLM forgets to pass parent_task_id.
@@ -629,14 +644,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // 报告冲突）。
       db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response, network_id)
-           VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply', ?7)`,
-          [id, targetAlias, priority, task, context ?? null, from_session, effectiveNetId ?? null]
+          `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response, network_id, meta_json)
+           VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply', ?7, ?8)`,
+          [id, targetAlias, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJson]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8)`,
-          [id, from_session, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId]
+          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)
+           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8, ?9)`,
+          [id, from_session, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId, metaJson]
         );
         const touchParams: any[] = [task.slice(0, 200), targetAlias];
         let touchSql = "UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE alias = ?2";

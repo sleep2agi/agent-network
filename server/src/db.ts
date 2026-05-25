@@ -129,6 +129,7 @@ for (const col of [
   { name: "requires_response", def: "TEXT DEFAULT 'reply'" },
   { name: "expires_at", def: "TEXT" },
   { name: "scope", def: "TEXT DEFAULT 'single'" },
+  { name: "meta_json", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE inbox ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
@@ -489,6 +490,7 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_completions_network ON completions
 // admin to see the answer even if 指挥室's own session has died. The hub forwards
 // the reply up the chain via parent_task_id.
 try { db.exec("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE tasks ADD COLUMN meta_json TEXT"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)"); } catch {}
 
 // Helpers

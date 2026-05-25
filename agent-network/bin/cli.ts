@@ -58,7 +58,7 @@ function tmuxAvailable(): boolean {
 // refetch). A `latest` agent-network release must pin a *stable* server.
 // `anet upgrade` (#88) surfaces this constant in its plan output so users
 // understand global-install version != version anet hub start actually runs.
-const PINNED_SERVER_VERSION = "0.8.3-preview.2";
+const PINNED_SERVER_VERSION = "0.8.3";
 function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   if (!uuid) return false;
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));

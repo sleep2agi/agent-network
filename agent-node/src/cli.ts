@@ -1067,14 +1067,24 @@ function think(task: string, from: string, taskId: string | null, images?: strin
   return next;
 }
 
-async function processTask(task: string, from: string, taskId: string | null = null): Promise<{ text: string; failed: boolean }> {
-  log(`→ processing [${RUNTIME}]: ${task.slice(0, 80)}`);
+function extractImagePaths(msg: any): string[] {
+  const meta = msg?.meta || (() => {
+    try { return msg?.meta_json ? JSON.parse(msg.meta_json) : null; } catch { return null; }
+  })();
+  const attachments = Array.isArray(meta?.attachments) ? meta.attachments : [];
+  return attachments
+    .filter((a: any) => a && (a.type === "image" || String(a.mime || "").startsWith("image/")) && typeof a.path === "string" && a.path)
+    .map((a: any) => a.path);
+}
+
+async function processTask(task: string, from: string, taskId: string | null = null, images?: string[]): Promise<{ text: string; failed: boolean }> {
+  log(`→ processing [${RUNTIME}]${images?.length ? ` +${images.length} image(s)` : ""}: ${task.slice(0, 80)}`);
   await reportStatus("working", task.slice(0, 200)).catch(() => {});
 
   let text: string;
   let failed = false;
   try {
-    text = await think(task, from, taskId);
+    text = await think(task, from, taskId, images);
   } catch (err: any) {
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;
@@ -1145,7 +1155,8 @@ async function processInbox() {
     const from = msg.from_session || "hub";
     const content = msg.content as string;
     const msgType = msg.type || "task";
-    log(`← [${from}] (${msgType}/${msg.priority || "normal"}) ${content.slice(0, 100)}`);
+    const images = extractImagePaths(msg);
+    log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""} ${content.slice(0, 100)}`);
     await ackMessage(msg.id);
 
     // Only process task and broadcast; skip reply/message types
@@ -1157,7 +1168,7 @@ async function processInbox() {
     const skip = shouldSkipMessage(from, content, msgType);
     if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }
 
-    const { text: result, failed } = await processTask(content, from, msg.id);
+    const { text: result, failed } = await processTask(content, from, msg.id, images);
     log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
 
     // Low-value filter only applies to successful replies. Failures should
@@ -1268,7 +1279,7 @@ async function handleTelegramMessage(tg: TelegramApi, msg: any) {
 
   debug(`[TG] processing: ${prompt.slice(0, 80)}`);
   try {
-    const result = await think(prompt, from, images);
+    const result = await think(prompt, from, null, images);
     await telegramSend(tg, chatId, result, messageId);
     log(`→ [${from}] ${result.slice(0, 100)}`);
   } catch (e: any) {

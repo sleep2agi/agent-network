@@ -51,6 +51,11 @@ console.info = (...args: any[]) => { pushLog("info", args); _origConsole.info(..
 console.warn = (...args: any[]) => { pushLog("warn", args); _origConsole.warn(...args); };
 console.error = (...args: any[]) => { pushLog("error", args); _origConsole.error(...args); };
 
+function normalizeMetaJson(meta: unknown): string | null {
+  if (!meta || typeof meta !== "object") return null;
+  try { return JSON.stringify(meta); } catch { return null; }
+}
+
 // ── Rate limiter (in-memory, per IP) ──
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 function checkRateLimit(ip: string, maxPerMinute = 60): boolean {
@@ -343,6 +348,8 @@ const TaskSchema = z.object({
   from: z.string().max(200).optional(),
   network_id: z.string().max(200).optional(),
   parent_task_id: z.string().max(200).optional(),
+  ttl_seconds: z.number().min(1).max(86400).optional(),
+  meta: z.any().optional(),
 });
 
 const BroadcastSchema = z.object({
@@ -1194,6 +1201,7 @@ Bun.serve({
       const id = crypto.randomUUID();
       const fromSession = body.from || "api";
       const ttlSeconds = (body as any).ttl_seconds || 3600;
+      const metaJson = normalizeMetaJson((body as any).meta);
       // Mirror send_task MCP: write inbox + tasks rows in a single
       // transaction so the dispatch is visible to dashboard's Tasks page
       // and the parent_task_id lineage chain. Previously this endpoint
@@ -1201,14 +1209,14 @@ Bun.serve({
       // dispatched via REST (anet demo, dashboard Dispatch button, etc.).
       db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response, network_id)
-           VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply', ?6)`,
-          [id, targetAlias, body.priority, body.task, fromSession, taskNetId]
+          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response, network_id, meta_json)
+           VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply', ?6, ?7)`,
+          [id, targetAlias, body.priority, body.task, fromSession, taskNetId, metaJson]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8)`,
-          [id, fromSession, targetAlias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId, body.parent_task_id ?? null]
+          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)
+           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8, ?9)`,
+          [id, fromSession, targetAlias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId, body.parent_task_id ?? null, metaJson]
         );
         // Touch session row so the dashboard reflects "task in flight"
         // immediately, without waiting for the agent's report_status to

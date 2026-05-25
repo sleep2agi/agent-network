@@ -138,6 +138,7 @@ export async function createCommhubSdkMcpServer(
           parent_task_id: z.string().optional().describe("Parent task this dispatch is on behalf of"),
           ttl_seconds: z.number().optional(),
           context: z.string().optional(),
+          meta: z.any().optional().describe("Optional structured metadata, e.g. image attachments."),
         },
         fwd("send_task"),
       ),

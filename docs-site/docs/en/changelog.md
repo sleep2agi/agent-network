@@ -4,9 +4,43 @@
 This log runs reverse-chronologically. **The version scheme was reshuffled once**:
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
-- **Current stable**: v0.10.8 (2026-05-17, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
+- **Current stable**: v0.10.9 (2026-05-25, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
+
+## v0.10.9 — **Dashboard image sending + CommHub attachment metadata + codex-sdk image input** (2026-05-25) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.7` ← bumped (pinned server moved to `@sleep2agi/commhub-server@0.8.3`)
+- `@sleep2agi/agent-node@2.4.3` ← bumped (codex-sdk runtime consumes structured image attachments)
+- `@sleep2agi/commhub-server@0.8.3` ← bumped (`meta_json` persistence + MCP/REST attachment metadata)
+- `@sleep2agi/agent-network-dashboard@0.5.4` ← bumped (TaskChatPanel image upload/paste send path)
+
+### P0 — Dashboard command flow can send images
+
+Vincent catch: Dashboard could upload and preview images, but tasks sent to agents only carried text paths. The codex-sdk runtime never received actual image input, so screenshots, design drafts, and error images could not be dispatched from the web/mobile command surface.
+
+**Implementation**:
+- Dashboard sends structured `attachments` for uploaded/pasted images while keeping text fallback paths and preview URLs.
+- Hub `send_task` and REST `/api/task` accept `meta.attachments`, persist it to `inbox.meta_json` and `tasks.meta_json`, and return parsed `meta` from `get_inbox`.
+- agent-node extracts local image paths from `meta.attachments` and passes them into codex-sdk/studio image input.
+- Telegram image dispatch now passes image arguments in the correct position.
+
+### Rollout + Smoke
+
+- Local CommHub and Dashboard were upgraded and restarted.
+- 27 host codex-sdk agent-node processes were rolled to the new code.
+- P0 smoke sent `/tmp/anet-image-smoke.png` to `通信测试牛`; node logs showed `+1 image(s)` / `→ processing [codex] +1 image(s)`, with reply `图片通道OK`.
+
+### Known Limits
+
+- Dashboard uploads currently hand off local file paths, best suited for same-host hub/agent deployments. Cross-host object-storage delivery remains future work.
+- Existing old containers need reinstall/restart to pick up this release.
+- This release fixes delivery into the runtime; rich media history and mobile IM polish remain dashboard follow-up work.
+
+See the [v0.10.9 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.9).
+
+---
 
 ## v0.10.8 — **Dashboard Servers panel UI copy fix + TopoGraph density-tier polish** (2026-05-17) ✅ stable
 

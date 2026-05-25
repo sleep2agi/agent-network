@@ -4,9 +4,44 @@
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
-- **当前 stable**：v0.10.8（2026-05-17，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
+- **当前 stable**：v0.10.9（2026-05-25，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
+
+## v0.10.9 — **Dashboard 图片发送 + CommHub 附件元数据 + codex-sdk 图片输入**（2026-05-25）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.7` ← bumped（PINNED server 切到 `@sleep2agi/commhub-server@0.8.3`）
+- `@sleep2agi/agent-node@2.4.3` ← bumped（codex-sdk runtime 读取结构化图片附件）
+- `@sleep2agi/commhub-server@0.8.3` ← bumped（`meta_json` 持久化 + MCP/REST 附件元数据）
+- `@sleep2agi/agent-network-dashboard@0.5.4` ← bumped（TaskChatPanel 图片上传/粘贴发送）
+
+### P0 — Dashboard 指挥链路支持发送图片
+
+Vincent catch：Dashboard 聊天里已经能上传/预览图片，但任务发送到 agent 后只剩文字路径，codex-sdk runtime 没有拿到图片输入。结果是移动端/网页指挥时无法把截图、设计稿、报错图直接交给团队处理。
+
+**Implementation**：
+- Dashboard `TaskChatPanel` 上传/粘贴图片后发送结构化 `attachments`，同时保留文本中的本地路径和预览 URL 作为兼容 fallback。
+- Hub `send_task` / REST `/api/task` 接收 `meta.attachments`，写入 `inbox.meta_json` 与 `tasks.meta_json`；`get_inbox` 返回解析后的 `meta`。
+- agent-node 从 `meta.attachments` 中抽取本机可读图片路径，传给 codex-sdk/studio 的 image input。
+- 修复 Telegram 图片通道参数顺序，避免 channel image 参数被误放到 `contextFrom`。
+
+### Rollout + Smoke
+
+- 本机 CommHub 已升级并重启到 `0.8.3` 源码状态。
+- Dashboard 已升级并重启，`dm.vansin.me:3000` 对应的图片发送链路走结构化附件。
+- 27 个 host codex-sdk agent-node 进程已按新版代码滚动重启。
+- P0 smoke：向 `通信测试牛` 发送 `/tmp/anet-image-smoke.png`，节点日志显示 `+1 image(s)` / `→ processing [codex] +1 image(s)`，回执 `图片通道OK`。
+
+### Known Limits
+
+- Dashboard 上传的图片当前以同机文件路径交给 hub/agent，最适合 hub 与 agent 共享本机文件系统的部署；跨机器对象存储分发留后续版本。
+- 已运行的旧容器镜像不会自动获得本次代码，需要重新安装/重启到 latest。
+- 本 release 解决“图片能送到 agent runtime”；图片消息的富媒体历史展示、移动端 IM 化体验仍留在 dashboard 后续 issue 中推进。
+
+详见 [release v0.10.9](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.9)。
+
+---
 
 ## v0.10.8 — **Dashboard Servers 面板 UI 文案修 + TopoGraph density tier polish**（2026-05-17）✅ stable
 
