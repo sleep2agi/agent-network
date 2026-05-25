@@ -2,14 +2,14 @@
 
 本页是**新用户首次安装**当前 stable（v0.10.8）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
 
-::: tip 已经装过 anet？
-**升级**走 [升级指南](/guide/upgrade) —— 一行 `anet upgrade` 自动 picks up 4 个 npm 包 latest（含 v0.10.1 hotfix + v0.10.2 Hero A/D + v0.10.3 codex-sdk gpt-5.5 + v0.10.4 dashboard orphan-band + v0.10.5 batch wizard 双修 + v0.10.6 [#154 anet upgrade Option B detached spawn 默认开启](https://github.com/sleep2agi/agent-network/issues/154) + [#155 batch wizard silent-exit 修](https://github.com/sleep2agi/agent-network/issues/155) + v0.10.7 [#156 codex-sdk batch path yolo flags parity](https://github.com/sleep2agi/agent-network/issues/156) + `--no-yolo` opt-out + **v0.10.8 [#157 dashboard Servers 面板 UI 文案修](https://github.com/sleep2agi/agent-network/issues/157) + TopoGraph density tier polish**）+ 用 `anet project restart` 重启 cwd 节点接新版。
-
-⚠ **chicken-and-egg 注**：当前 2.2.4 及以下 binary 跑 `anet upgrade` 仍是旧 "skipped" 行为，**只需手装 1 次** `npm install -g @sleep2agi/agent-network@latest` 升到 2.2.5+，之后再升级都自动 detached spawn。详见 [升级指南 chicken-and-egg 段](/guide/upgrade)。本页是给**全新机器** / 从来没装过 anet 的用户（不受这个限制 —— 首次 `npm install -g` 直接拉 latest）。
+::: tip 你应该走哪条路径？
+- **第一次安装**：继续按本文从 0 到 10 操作。
+- **已经装过 anet**：走 [升级指南](/guide/upgrade)，通常只需要 `anet upgrade`，然后用 `anet project restart` 重启当前项目里的节点。
+- **很老的版本（2.2.4 及以下）**：先手动执行一次 `npm install -g @sleep2agi/agent-network@latest`，之后再用 `anet upgrade`。
 :::
 
-::: tip 组件职责（v0.10.8 stable）
-本页涉及 4 个 npm 包，各自的职责（具体版本号以 npm `latest` tag 为准，doc 不写死避免 stale）：
+::: details 组件职责
+本页涉及 4 个 npm 包，各自职责如下。具体版本号以 npm `latest` tag 为准，文档不写死 patch 版本，避免过期。
 
 | 包 | 用途 |
 |---|------|
@@ -201,7 +201,8 @@ anet node start remote-bot
 
 ## 已验证 vs 未验证
 
-::: info 已验证（当前 v0.10.8 stable，继承 v2 E2E 覆盖 + v0.8 新增回归 + v0.9.2 #129/#132/#136 修复链 + v0.10.0 release-gate playbook 首次跑通 + v0.10.1 PINNED_SERVER_VERSION chain-bump 修 default-path regression + v0.10.2 Hero A agent-node disk telemetry `df -k` Linux/macOS smoke 3/3 PASS + Hero D dashboard 拓扑前缀标签 Option C 4/4 verify + v0.10.3 codex-sdk gpt-5.5 vendor preset + yolo flags + v0.10.4 [#150 orphan-band](https://github.com/sleep2agi/agent-network/issues/150) + [#151 anet upgrade UX](https://github.com/sleep2agi/agent-network/issues/151) + v0.10.5 [#152 batch wizard workdir](https://github.com/sleep2agi/agent-network/issues/152) + [#153 codex/claude skip API key](https://github.com/sleep2agi/agent-network/issues/153) + v0.10.6 [#154 anet upgrade Option B detached spawn 默认](https://github.com/sleep2agi/agent-network/issues/154) + [#155 batch wizard silent-exit 修](https://github.com/sleep2agi/agent-network/issues/155) + v0.10.7 [#156 codex-sdk batch path yolo flags parity](https://github.com/sleep2agi/agent-network/issues/156) + `--no-yolo` opt-out + source-grep gate 2 verify + v0.10.8 [#157 Dashboard Servers 面板 UI 文案修 + TopoGraph density tier polish](https://github.com/sleep2agi/agent-network/issues/157)）
+::: info 已验证（当前 stable）
+以下路径进入 stable release gate；细节见 [更新日志](/changelog) 和 [测试报告](https://github.com/sleep2agi/agent-network/tree/main/docs/tests)。
 - `anet hub start` + 默认账号自动创建
 - `anet hub dashboard`
 - `anet login` / `anet register` / `anet logout` / `anet whoami`
