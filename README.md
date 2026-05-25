@@ -44,7 +44,7 @@
 > **前置**：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings）。
 
 ```bash
-# 装一个全局包（拉 npm @latest，当前 v0.10.8 = agent-network 2.2.6）
+# 装一个全局包（拉 npm @latest，当前 v0.10.9 = agent-network 2.2.7）
 npm install -g @sleep2agi/agent-network
 
 # 终端 1 —— 起 Hub（保持开着）
@@ -63,18 +63,12 @@ anet node create my-bot          # 两步交互：选 runtime → 选 provider �
 anet node start my-bot           # 等到 "SSE connected" 即就绪
 ```
 
-或一键脚本（含 admin password 等 UX 提示）：
-
-```bash
-curl -fsSL https://anet.sh/install.sh | bash
-```
-
 从 Dashboard 的 Chat 面板派任务即可。再起一个节点让第一个去派活，两个 Agent 会通过 MCP 自动发现彼此并协作。
 
 ### 已装 anet？升级到最新
 
 ```bash
-anet upgrade            # 一键把 4 个包升到 npm @latest（当前 v0.10.8）
+anet upgrade            # 一键把 4 个包升到 npm @latest（当前 v0.10.9）
 anet project restart    # 重启 cwd 节点接新版（详见 #117）
 ```
 
@@ -217,10 +211,10 @@ flowchart LR
 
 | 包 | 版本 | 角色 |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.6` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器（v0.10.7 [#156](https://github.com/sleep2agi/agent-network/issues/156) codex-sdk batch path yolo flags parity + `--no-yolo` opt-out / v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) anet upgrade Option B detached spawn 默认 + [#155](https://github.com/sleep2agi/agent-network/issues/155) batch wizard silent-exit 修 / v0.10.5 [#152](https://github.com/sleep2agi/agent-network/issues/152) batch wizard workdir mode + [#153](https://github.com/sleep2agi/agent-network/issues/153) codex/claude skip API key prompt / v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) anet upgrade UX warning / v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149) codex-sdk gpt-5.5 vendor preset / v0.10.1 hotfix `PINNED_SERVER_VERSION` bump 0.8.0 → 0.8.2，[详见 changelog](https://anet.sh/changelog)）|
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.2` | MCP + REST + SSE 通信中枢（SQLite）+ `/api/server/:host/health` + `/api/server/:host/agents` |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.3` | Web Dashboard —— Next.js 16，4 套主题 + Hero 3 网络节点前端 8/8 surface + Hero D 拓扑前缀标签 Option C + disk render（v0.10.2）+ [#150](https://github.com/sleep2agi/agent-network/issues/150) 拓扑图 orphan 节点 "其他" cluster box（v0.10.4）+ [#157](https://github.com/sleep2agi/agent-network/issues/157) Servers 面板 UI 文案修 + TopoGraph density tier polish（v0.10.8）+ 100+ 轮 typography & 圆角级联 polish |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.2` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry + host disk telemetry（v0.10.2 Hero A，`df -k` POSIX 标准）+ codex-sdk yolo flags（v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149)）|
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.7` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器（v0.10.9 PINNED server 0.8.3 + v0.10.7 [#156](https://github.com/sleep2agi/agent-network/issues/156) codex-sdk batch path yolo flags parity + `--no-yolo` opt-out，[详见 changelog](https://anet.sh/changelog)）|
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.3` | MCP + REST + SSE 通信中枢（SQLite）+ `meta.attachments` / `meta_json` 图片附件元数据 + `/api/server/:host/health` + `/api/server/:host/agents` |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.4` | Web Dashboard —— Next.js 16，图片上传/粘贴发送（v0.10.9）+ 4 套主题 + Hero 3 网络节点前端 8/8 surface + Servers 面板 polish + 100+ 轮 typography & 圆角级联 polish |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.3` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK + codex-sdk 图片输入（v0.10.9）+ per-agent process telemetry + host disk telemetry + codex-sdk yolo flags |
 
 CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
 
@@ -268,7 +262,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 ---
 
 > [!IMPORTANT]
-> **当前 stable: v0.10.8**（Apache 2.0，4 个包均在 npm `latest`：agent-network `2.2.6` / agent-node `2.4.2` / commhub-server `0.8.2` / agent-network-dashboard `0.5.3`）。v0.10 系列从 v0.10.0 的 Direct Runtime + Observability Foundations（[#141](https://github.com/sleep2agi/agent-network/issues/141) codex app-server stdio 直连 opt-in / [#99](https://github.com/sleep2agi/agent-network/issues/99) 守护节点 observability endpoint / [#142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry）起，迭代了 8 个 patch —— `anet upgrade` UX、`anet create --batch` wizard、codex-sdk vendor preset、Dashboard 拓扑图与 Servers 面板 polish 等，详见 [changelog](https://anet.sh/changelog)；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
+> **当前 stable: v0.10.9**（Apache 2.0，4 个包均在 npm `latest`：agent-network `2.2.7` / agent-node `2.4.3` / commhub-server `0.8.3` / agent-network-dashboard `0.5.4`）。本版补齐 Dashboard 图片发送链路：Dashboard 上传/粘贴图片 → CommHub `meta.attachments` 持久化 → agent-node/codex-sdk 图片输入。v0.10 系列从 v0.10.0 的 Direct Runtime + Observability Foundations 起持续迭代，详见 [changelog](https://anet.sh/changelog)；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
 >
 > **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
 
