@@ -39,7 +39,7 @@ Vincent catch：Dashboard 聊天里已经能上传/预览图片，但任务发�
 - 已运行的旧容器镜像不会自动获得本次代码，需要重新安装/重启到 latest。
 - 本 release 解决“图片能送到 agent runtime”；图片消息的富媒体历史展示、移动端 IM 化体验仍留在 dashboard 后续 issue 中推进。
 
-详见 [release v0.10.9](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.9)。
+详见 [v0.10.9 tag](https://github.com/sleep2agi/agent-network/tree/v0.10.9)。
 
 ---
 

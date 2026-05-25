@@ -38,7 +38,7 @@ Vincent catch: Dashboard could upload and preview images, but tasks sent to agen
 - Existing old containers need reinstall/restart to pick up this release.
 - This release fixes delivery into the runtime; rich media history and mobile IM polish remain dashboard follow-up work.
 
-See the [v0.10.9 release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.9).
+See the [v0.10.9 tag](https://github.com/sleep2agi/agent-network/tree/v0.10.9).
 
 ---
 
