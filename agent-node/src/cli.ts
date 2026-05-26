@@ -5,6 +5,7 @@
  * Runtime:
  *   --runtime claude-agent-sdk  → Claude Agent SDK (Claude/MiniMax)
  *   --runtime codex-sdk         → Codex SDK (GPT-5.4)
+ *   --runtime grok-build-acp    → Grok Build ACP (xAI)
  *
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
@@ -50,7 +51,7 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | codex-sdk
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk | grok-build-acp
   --model <name>      AI 模型 (codex 默认: gpt-5.5, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
@@ -66,6 +67,7 @@ for (let i = 0; i < argv.length; i++) {
 Runtime:
   claude-agent-sdk  Claude Agent SDK — Claude/MiniMax/Anthropic 兼容 API
   codex-sdk         Codex SDK — GPT-5.4，复用 codex 登录态
+  grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
 `);
     process.exit(0);
   }
@@ -194,8 +196,9 @@ const rawRuntime = opts.runtime || process.env.RUNTIME || fileConfig.runtime || 
 const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", "claude-sdk": "claude", "agent-sdk": "claude", "claude": "claude",
   "codex-sdk": "codex", "codex": "codex",
+  "grok-build-acp": "grok", "grok-build": "grok", "grok": "grok",
 };
-const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex";
+const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
@@ -253,7 +256,11 @@ const CLAUDE_MAX_RETRIES = parseInt(
   || fileConfig.flags?.claudeMaxRetries || fileConfig.claudeMaxRetries || "2"
 );
 const NEW_SESSION = opts["new-session"] === "true";
-const SESSION_ID = NEW_SESSION ? "" : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "");
+const SESSION_ID = NEW_SESSION ? "" : (
+  RUNTIME === "grok"
+    ? (opts.session || fileConfig.grokSession || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "")
+    : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "")
+);
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
 // Token priority: node config (ntok_) > global config > legacy env. Earlier
 // versions let process.env.COMMHUB_TOKEN win, which silently overrode the
@@ -301,6 +308,20 @@ function writebackSession(sessionId: string) {
     debug(`session 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
   } catch (e: any) {
     warn(`writebackSession failed: ${e.message}`);
+  }
+}
+
+function writebackGrokSession(sessionId: string) {
+  grokSessionId = sessionId;
+  if (!configFilePath || !sessionId) return;
+  try {
+    const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
+    if (cfg.grokSession === sessionId) return;
+    cfg.grokSession = sessionId;
+    writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
+    debug(`grokSession 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
+  } catch (e: any) {
+    warn(`writebackGrokSession failed: ${e.message}`);
   }
 }
 
@@ -457,7 +478,7 @@ const register = () => callCommHub("report_status", {
 const reportStatus = (status: string, task?: string) => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status, task,
   node_id: NODE_ID || undefined,
-  session_id: claudeSessionId || SESSION_ID || undefined,
+  session_id: claudeSessionId || grokSessionId || SESSION_ID || undefined,
   config_path: configFilePath || undefined,
   channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
   network_id: NETWORK_ID || undefined,
@@ -473,6 +494,7 @@ const sendReply = (target: string, message: string, taskId?: string, failed = fa
 // Claude Runtime
 // ══════════════════════════════════════
 let claudeSessionId: string | undefined = SESSION_ID || undefined;
+let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || undefined) : undefined;
 
 async function processWithClaude(task: string, from: string): Promise<string> {
   // Pre-flight: if no Claude binary is resolvable, on-the-fly install the
@@ -1028,6 +1050,42 @@ async function processWithCodexStdio(task: string, _from: string, images?: strin
 }
 
 // ══════════════════════════════════════
+// Grok Build ACP Runtime (#187 — Phase 1 minimal adapter)
+// ══════════════════════════════════════
+async function processWithGrok(task: string, _from: string, images?: string[]): Promise<string> {
+  if (images?.length) {
+    warn(`[grok] image attachments received but Grok ACP fixture reports promptCapabilities.image=false; sending text-only prompt`);
+  }
+
+  try {
+    const { execFileSync } = await import("child_process");
+    const version = execFileSync("grok", ["--version"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    debug(`[grok] ${version}`);
+  } catch {
+    throw new Error("grok CLI not found. Install Grok Build CLI and run `grok --version` before starting this node.");
+  }
+
+  const { runGrokAcpTurn } = await import("./runtime/grok-build-acp/runtime");
+  const t0 = Date.now();
+  const result = await runGrokAcpTurn({
+    prompt: task,
+    cwd: process.cwd(),
+    sessionId: grokSessionId || SESSION_ID || undefined,
+    timeoutMs: parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000"),
+    drainMs: parseInt(process.env.GROK_ACP_DRAIN_MS || fileConfig.flags?.grokAcpDrainMs || "15000"),
+    onSession: (sessionId) => writebackGrokSession(sessionId),
+    onEvent: (_event, state) => {
+      if (state.skippedReplay > 0 && state.skippedReplay % 50 === 0) {
+        debug(`[grok] skipped replay chunks=${state.skippedReplay}`);
+      }
+    },
+  });
+  const dt = Date.now() - t0;
+  log(`[grok] done | ${dt}ms | session=${result.sessionId.slice(0, 8)} | chunks=${result.state.chunks} replay_skipped=${result.state.skippedReplay}`);
+  return result.replyText.trim() || "（无回复）";
+}
+
+// ══════════════════════════════════════
 // 任务分发
 // ══════════════════════════════════════
 let thinkQueue = Promise.resolve();
@@ -1055,6 +1113,9 @@ function think(task: string, from: string, taskId: string | null, images?: strin
           return await processWithCodexStdio(task, from, images);
         }
         return await processWithCodex(task, from, images);
+      }
+      if (RUNTIME === "grok") {
+        return await processWithGrok(task, from, images);
       }
       return await processWithClaude(task, from);
     } finally {
@@ -1418,7 +1479,7 @@ async function connectSSE() {
 // ── 启动 ──
 log(`启动`);
 log(`  runtime: ${RUNTIME_LABEL}`);
-log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.5" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
+log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.5" : RUNTIME === "grok" ? "grok-build" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 
 // Validate token + show user/network info
