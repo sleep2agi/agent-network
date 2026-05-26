@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="1022" height="695" alt="Agent Network — 30 节点 mesh dashboard" src="./docs/images/hero-grid-cyber.png" />
+  <img width="1280" height="720" alt="Wire Grok Build into a 1000-agent network" src="./docs/images/grok-build-agent-network-cover.png" />
 </p>
 
 <h1 align="center">Agent Network</h1>
