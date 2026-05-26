@@ -1,0 +1,24 @@
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "models": {
+      "currentModelId": "grok-build",
+      "availableModels": [
+        {
+          "modelId": "grok-build",
+          "name": "Grok Build",
+          "description": "Best for advanced coding tasks",
+          "_meta": {
+            "totalContextTokens": 512000,
+            "agentType": "grok-build-plan"
+          }
+        }
+      ]
+    },
+    "_meta": {
+      "sessionId": "019e624e-8859-7012-8310-d5d0390a75b9",
+      "codebaseIndexed": []
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "text": "hello-from-probe",
+  "stopReason": "EndTurn",
+  "sessionId": "019e624e-73bb-7410-9d0c-11918e62fb56",
+  "requestId": "cf0a7350-c583-4d50-b4c8-09e0f426710f",
+  "thought": "The user query is: \"Read fixture.txt and reply with its exact contents.\"\nThe tool returned the contents of fixture.txt:\n"
+}

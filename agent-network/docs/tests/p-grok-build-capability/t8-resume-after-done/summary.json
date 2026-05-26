@@ -1,0 +1,310 @@
+{
+  "mode": "resume-after-done",
+  "sessionId": "019e624e-ef58-7d92-b90e-9582e1176c2c",
+  "init1": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocolVersion": 1,
+      "agentCapabilities": {
+        "loadSession": true,
+        "promptCapabilities": {
+          "image": false,
+          "audio": false,
+          "embeddedContext": true
+        },
+        "mcpCapabilities": {
+          "http": true,
+          "sse": true
+        },
+        "_meta": {
+          "x.ai/fs_notify": true
+        }
+      },
+      "authMethods": [
+        {
+          "id": "cached_token",
+          "name": "cached_token",
+          "description": "Cached token from ~/.grok/auth.json"
+        },
+        {
+          "id": "grok.com",
+          "name": "Grok",
+          "description": "Sign in with Grok"
+        }
+      ],
+      "_meta": {
+        "grokShell": true,
+        "currentWorkingDirectory": "/tmp/grok-probe",
+        "agentVersion": "0.1.219",
+        "agentId": "560051c2-2b36-57d3-8c74-5ed2714975f0",
+        "agentInstanceId": "59a8428a-a6a0-48f3-8bb4-598b69b35f95",
+        "hostname": "af94a3f095a3",
+        "modelState": {
+          "currentModelId": "grok-build",
+          "availableModels": [
+            {
+              "modelId": "grok-build",
+              "name": "Grok Build",
+              "description": "Best for advanced coding tasks",
+              "_meta": {
+                "totalContextTokens": 512000,
+                "agentType": "grok-build-plan"
+              }
+            }
+          ]
+        },
+        "mcpServers": [],
+        "mcpApps": false,
+        "metadata": null,
+        "availableCommands": [
+          {
+            "name": "compact",
+            "description": "Compress conversation history to save context window",
+            "input": {
+              "hint": "optional context about what to preserve"
+            }
+          },
+          {
+            "name": "always-approve",
+            "description": "Toggle always-approve mode (skip all permission prompts)",
+            "input": {
+              "hint": "on|off"
+            }
+          },
+          {
+            "name": "context",
+            "description": "Show context window usage and session stats",
+            "input": null
+          },
+          {
+            "name": "session-info",
+            "description": "Show session details (model, turns, context usage)",
+            "input": null
+          }
+        ],
+        "cancelRewind": true
+      }
+    }
+  },
+  "sessionNew": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "sessionId": "019e624e-ef58-7d92-b90e-9582e1176c2c",
+      "models": {
+        "currentModelId": "grok-build",
+        "availableModels": [
+          {
+            "modelId": "grok-build",
+            "name": "Grok Build",
+            "description": "Best for advanced coding tasks",
+            "_meta": {
+              "totalContextTokens": 512000,
+              "agentType": "grok-build-plan"
+            }
+          }
+        ]
+      },
+      "_meta": {
+        "currentWorkingDirectory": "/tmp/grok-probe",
+        "codebaseIndexed": [],
+        "isGitRepo": false,
+        "gitRoot": null,
+        "showNonGitWarning": false,
+        "feedbackEnabled": true
+      }
+    }
+  },
+  "firstPrompt": {
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "stopReason": "end_turn",
+        "_meta": {
+          "sessionId": "019e624e-ef58-7d92-b90e-9582e1176c2c",
+          "requestId": "340d758a-5a4f-4b6f-b5ab-74c36883970c",
+          "promptId": "340d758a-5a4f-4b6f-b5ab-74c36883970c",
+          "totalTokens": 16537,
+          "modelId": "grok-build",
+          "inputTokens": 16373,
+          "outputTokens": 164,
+          "cachedReadTokens": 16320,
+          "reasoningTokens": 158
+        }
+      }
+    },
+    "text": "FIRST_OK",
+    "eventCount": 22,
+    "promptComplete": {
+      "jsonrpc": "2.0",
+      "method": "_x.ai/session/prompt_complete",
+      "params": {
+        "sessionId": "019e624e-ef58-7d92-b90e-9582e1176c2c",
+        "stopReason": "end_turn",
+        "agentResult": null
+      }
+    },
+    "lastEvent": {
+      "jsonrpc": "2.0",
+      "id": "skills-reload",
+      "error": {
+        "code": -32601,
+        "message": "Method not found"
+      }
+    }
+  },
+  "init2": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocolVersion": 1,
+      "agentCapabilities": {
+        "loadSession": true,
+        "promptCapabilities": {
+          "image": false,
+          "audio": false,
+          "embeddedContext": true
+        },
+        "mcpCapabilities": {
+          "http": true,
+          "sse": true
+        },
+        "_meta": {
+          "x.ai/fs_notify": true
+        }
+      },
+      "authMethods": [
+        {
+          "id": "cached_token",
+          "name": "cached_token",
+          "description": "Cached token from ~/.grok/auth.json"
+        },
+        {
+          "id": "grok.com",
+          "name": "Grok",
+          "description": "Sign in with Grok"
+        }
+      ],
+      "_meta": {
+        "grokShell": true,
+        "currentWorkingDirectory": "/tmp/grok-probe",
+        "agentVersion": "0.1.219",
+        "agentId": "560051c2-2b36-57d3-8c74-5ed2714975f0",
+        "agentInstanceId": "d8de288a-01af-40e9-a292-f87b036cc807",
+        "hostname": "af94a3f095a3",
+        "modelState": {
+          "currentModelId": "grok-build",
+          "availableModels": [
+            {
+              "modelId": "grok-build",
+              "name": "Grok Build",
+              "description": "Best for advanced coding tasks",
+              "_meta": {
+                "totalContextTokens": 512000,
+                "agentType": "grok-build-plan"
+              }
+            }
+          ]
+        },
+        "mcpServers": [],
+        "mcpApps": false,
+        "metadata": null,
+        "availableCommands": [
+          {
+            "name": "compact",
+            "description": "Compress conversation history to save context window",
+            "input": {
+              "hint": "optional context about what to preserve"
+            }
+          },
+          {
+            "name": "always-approve",
+            "description": "Toggle always-approve mode (skip all permission prompts)",
+            "input": {
+              "hint": "on|off"
+            }
+          },
+          {
+            "name": "context",
+            "description": "Show context window usage and session stats",
+            "input": null
+          },
+          {
+            "name": "session-info",
+            "description": "Show session details (model, turns, context usage)",
+            "input": null
+          }
+        ],
+        "cancelRewind": true
+      }
+    }
+  },
+  "load": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "models": {
+        "currentModelId": "grok-build",
+        "availableModels": [
+          {
+            "modelId": "grok-build",
+            "name": "Grok Build",
+            "description": "Best for advanced coding tasks",
+            "_meta": {
+              "totalContextTokens": 512000,
+              "agentType": "grok-build-plan"
+            }
+          }
+        ]
+      },
+      "_meta": {
+        "sessionId": "019e624e-ef58-7d92-b90e-9582e1176c2c",
+        "codebaseIndexed": []
+      }
+    }
+  },
+  "secondPrompt": {
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "stopReason": "end_turn",
+        "_meta": {
+          "sessionId": "019e624e-ef58-7d92-b90e-9582e1176c2c",
+          "requestId": "c44eb08a-89b8-425b-955f-02a6495f9099",
+          "promptId": "c44eb08a-89b8-425b-955f-02a6495f9099",
+          "totalTokens": 16651,
+          "modelId": "grok-build",
+          "inputTokens": 16555,
+          "outputTokens": 96,
+          "cachedReadTokens": 16384,
+          "reasoningTokens": 90
+        }
+      }
+    },
+    "text": "SECOND_OK",
+    "eventCount": 32,
+    "promptComplete": {
+      "jsonrpc": "2.0",
+      "method": "_x.ai/session/prompt_complete",
+      "params": {
+        "sessionId": "019e624e-ef58-7d92-b90e-9582e1176c2c",
+        "stopReason": "end_turn",
+        "agentResult": null
+      }
+    },
+    "lastEvent": {
+      "jsonrpc": "2.0",
+      "method": "_x.ai/session_notification",
+      "params": {
+        "sessionId": "019e624e-ef58-7d92-b90e-9582e1176c2c",
+        "update": {
+          "sessionUpdate": "session_summary_generated",
+          "session_summary": "User Command to Reply Exactly with SECOND_OK"
+        }
+      }
+    }
+  }
+}

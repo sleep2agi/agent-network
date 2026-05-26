@@ -1,0 +1,6 @@
+{
+  "requested_session_id": "anet-grok-probe-1779765761",
+  "actual_session_id": "019e624e-57e0-7c40-b60e-d7079561fb7f",
+  "first": "{\n  \"text\": \"**Acknowledged.** I've noted the marker `ANET_GROK_MARKER` for this session. Let me know how you'd like to use it.\",\n  \"stopReason\": \"EndTurn\",\n  \"sessionId\": \"019e624e-57e0-7c40-b60e-d7079561fb7f\",\n  \"requestId\": \"86bec19d-8184-40f5-82e8-0e76d5e2a03f\",\n  \"thought\": \"The user query is: \\\"Remember the marker ANET_GROK_MARKER.\\\"\\n\"\n}\n",
+  "second": "{\n  \"text\": \"ANET_GROK_MARKER\",\n  \"stopReason\": \"EndTurn\",\n  \"sessionId\": \"019e624e-57e0-7c40-b60e-d7079561fb7f\",\n  \"requestId\": \"a5e0b910-f4bd-4d2a-a71c-ab06e086d9ec\",\n  \"thought\": \"The user is asking: \\\"What marker did I ask you to remember? Reply with only the marker.\\\"\\n\"\n}\n"
+}
