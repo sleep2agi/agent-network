@@ -1,0 +1,13 @@
+{
+  "status": "ok",
+  "initialized": true,
+  "authenticated": true,
+  "sessionId": "019e6225-a9a1-73d2-8704-339a93f05d07",
+  "prompted": true,
+  "updateCount": 114,
+  "assistantTextPreview": "",
+  "cwd": "/tmp/grok-acp-repo-EiUwbt",
+  "permissionRequests": 1,
+  "permissionAllowedOnce": true,
+  "readmeChanged": true
+}
