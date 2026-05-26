@@ -1,6 +1,6 @@
 # @sleep2agi/agent-node
 
-Agent runtime for Agent Network. Connects to a CommHub server, registers under an alias, and processes incoming tasks with one of three runtimes.
+Agent runtime for Agent Network. Connects to a CommHub server, registers under an alias, and processes incoming tasks with Claude, Codex, Grok Build, or compatible HTTP runtimes.
 
 The supported entry point is the `anet` CLI from `@sleep2agi/agent-network`, which writes the right `config.json`, network token, and environment variables for you.
 
@@ -39,7 +39,7 @@ CLI flags:
 |---|---|---|
 | `--alias` | required | unique name in the hub |
 | `--hub` | `http://127.0.0.1:9200` | CommHub URL |
-| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `http-api` |
+| `--runtime` | `claude-agent-sdk` | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` / `http-api` |
 | `--model` | runtime default | passed through to the SDK |
 | `--tools` | (none) | `all` or comma-separated list |
 | `--max-turns` | `50` | upper bound per task |
@@ -52,9 +52,37 @@ CLI flags:
 | `claude-agent-sdk` | [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) | verified | Anthropic-compatible API; works with MiniMax, DeepSeek, GLM, Kimi, Anthropic, OpenRouter, or custom endpoints |
 | `codex-sdk` | [@openai/codex-sdk](https://www.npmjs.com/package/@openai/codex-sdk) | unverified end-to-end | unit tests pass, no full E2E with real codex auth |
 | `claude-code-cli` | local `claude` CLI | unverified end-to-end | runs locally for Claude Pro subscribers (v0.8.2 fixed the session-resume default-loss bug; see [changelog](https://anet.sh/en/changelog)) |
+| `grok-build-acp` | local `grok agent stdio` | stable runtime, native MCP injection boundary remains preview | requires Grok Build CLI login; stable for receive/reply, session persistence, and explicit CommHub delegation handled by agent-node |
 | `http-api` | OpenAI/Anthropic-compatible HTTP | experimental | reads `ANTHROPIC_*`, `OPENAI_*`, or `MINIMAX_CODING_API_KEY` environment variables |
 
 Runtimes are loaded lazily — picking one doesn't pull the others' dependencies. `claude-code-cli` adds zero extra SDK weight.
+
+## Grok Build ACP
+
+`grok-build-acp` runs the local Grok Build CLI over Agent Client Protocol:
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+grok
+anet node create grok-demo --runtime grok-build-acp
+anet node start grok-demo
+```
+
+The runtime starts `grok agent stdio`, authenticates with the cached Grok login, opens or loads a Grok session, sends the task prompt, collects streamed ACP notifications, and writes `grokSession` back to the node config.
+
+Stable behavior:
+
+- CommHub task delivery and replies are handled by `agent-node`, not by Grok itself.
+- Plain text tasks should be answered directly by Grok.
+- Explicit delegation tasks are intercepted before Grok when they use a clear pattern such as `给 <alias> 发任务: <task>`.
+- Intercepted delegation calls CommHub directly, passes `parent_task_id`, polls `get_task`, and returns the child result.
+
+Known boundary:
+
+- Native Grok MCP tool injection is still experimental. Do not rely on Grok itself seeing `commhub_get_all_status` or `commhub_send_task`.
+- Image attachments are currently text-only because the captured Grok ACP capability reports `promptCapabilities.image=false`.
+- `grok ACP error -32603` is treated as retryable once with a fresh session; the runtime now logs JSON-RPC `error.data` when Grok provides it.
+- Grok tool-state boilerplate such as "Do not attempt to use tools from these servers yet" is stripped from final CommHub replies so users see the actual task answer.
 
 ## Provider presets (claude-agent-sdk)
 

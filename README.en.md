@@ -44,7 +44,7 @@
 > **Prereq:** Node.js ≥ 22.13.0 (required by `@inquirer/prompts` and friends; older versions trip `EBADENGINE` warnings during install).
 
 ```bash
-# Install one global package (pulls npm @latest — currently v0.10.8 = agent-network 2.2.6)
+# Install one global package (pulls npm @latest — currently agent-network 2.2.8)
 npm install -g @sleep2agi/agent-network
 
 # Terminal 1 — start the hub (keep open)
@@ -74,7 +74,7 @@ Send a task from the Dashboard's Chat panel. Spin up a second node and ask the f
 ### Already have anet? Upgrade to the latest
 
 ```bash
-anet upgrade            # bumps all four packages to npm @latest (currently v0.10.8)
+anet upgrade            # bumps all four packages to npm @latest
 anet project restart    # restart cwd nodes against the new version (see #117)
 ```
 
@@ -189,6 +189,27 @@ Pick one per node. Mix freely on the same hub.
 | `claude-code-cli` | Spawns your local `claude` CLI as a subprocess | Reusing a Claude Pro subscription, full Claude Code tool suite | `claude` already logged in |
 | `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic, MiniMax, DeepSeek, GLM, Kimi, InternLM, OpenRouter via `ANTHROPIC_BASE_URL` | API key |
 | `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex auth login` or `OPENAI_API_KEY` |
+| `grok-build-acp` | Local `grok agent stdio` over Agent Client Protocol | Joining Agent Network as a Grok Build node while reusing local Grok auth | local `grok` already logged in |
+
+### Grok Build
+
+Install and authenticate Grok Build CLI first:
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+grok
+```
+
+Then create and start a Grok node:
+
+```bash
+anet node create grok-demo --runtime grok-build-acp
+anet node start grok-demo
+```
+
+Stable support: SSE task receive, Grok ACP execution, `grokSession` persistence/resume, CommHub replies, and explicit delegation through the `agent-node` wrapper. Current boundary: native Grok-side MCP tool injection is still treated as preview; CommHub delegation is handled by the wrapper.
+
+Grok Build runtime guide → [`docs/grok-build-runtime.md`](./docs/grok-build-runtime.md)
 
 📖 Runtime deep dive → <https://anet.sh/en/guide/runtimes>
 
@@ -217,10 +238,10 @@ Stable, Apache-2.0, published to npm.
 
 | Package | Version | Role |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.6` | `anet` CLI — hub / dashboard / agent / demo launcher (v0.10.7 [#156](https://github.com/sleep2agi/agent-network/issues/156) codex-sdk batch path yolo flags parity + `--no-yolo` opt-out / v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) anet upgrade Option B detached spawn enabled by default + [#155](https://github.com/sleep2agi/agent-network/issues/155) batch wizard silent-exit fix / v0.10.5 [#152](https://github.com/sleep2agi/agent-network/issues/152) batch wizard workdir mode + [#153](https://github.com/sleep2agi/agent-network/issues/153) codex/claude skip API key prompt / v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) anet upgrade UX warning / v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149) codex-sdk gpt-5.5 vendor preset / v0.10.1 hotfix `PINNED_SERVER_VERSION` bumped 0.8.0 → 0.8.2, [see changelog](https://anet.sh/en/changelog)) |
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.2` | MCP + REST + SSE hub (SQLite) + `/api/server/:host/health` + `/api/server/:host/agents` |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.3` | Web UI — Next.js 16, 4 themes + Hero 3 network/node front-end 8/8 surfaces + Hero D topology prefix-label Option C + disk render (v0.10.2) + [#150](https://github.com/sleep2agi/agent-network/issues/150) topology orphan-node "Others" cluster box (v0.10.4) + [#157](https://github.com/sleep2agi/agent-network/issues/157) Servers panel UI copy fix + TopoGraph density-tier polish (v0.10.8) + 100+ rounds of typography & corner-radius cascade polish |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.2` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK + per-agent process telemetry + host disk telemetry (v0.10.2 Hero A, `df -k` POSIX standard) + codex-sdk yolo flags (v0.10.3 [#149](https://github.com/sleep2agi/agent-network/issues/149)) |
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.8` | `anet` CLI — hub / dashboard / agent / demo launcher + `grok-build-acp` runtime entrypoint ([see changelog](https://anet.sh/en/changelog)) |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.3` | MCP + REST + SSE hub (SQLite) + attachment metadata + `/api/server/:host/health` + `/api/server/:host/agents` |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.4` | Web UI — Next.js 16, image upload/paste, 4 themes, live topology, Servers panel polish, and Chat workflow improvements |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.5` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP + codex-sdk image input + Grok ACP stabilization and tool-state leak cleanup |
 
 The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. You only ever globally install one package.
 
@@ -270,7 +291,7 @@ What's solid, and what to watch out for.
 ---
 
 > [!IMPORTANT]
-> **Current stable: v0.10.8** (Apache 2.0; all four packages at npm `latest`: agent-network `2.2.6` / agent-node `2.4.2` / commhub-server `0.8.2` / agent-network-dashboard `0.5.3`). The v0.10 line started with v0.10.0's Direct Runtime + Observability Foundations ([#141](https://github.com/sleep2agi/agent-network/issues/141) codex app-server stdio direct opt-in / [#99](https://github.com/sleep2agi/agent-network/issues/99) per-server-daemon observability endpoints / [#142](https://github.com/sleep2agi/agent-network/issues/142) per-agent process telemetry) and has since added eight patches — `anet upgrade` UX, the `anet create --batch` wizard, the codex-sdk vendor preset, Dashboard topology-graph and Servers-panel polish, and more. See the [changelog](https://anet.sh/en/changelog); project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
+> **Current stable** (Apache 2.0; all four packages at npm `latest`: agent-network `2.2.8` / agent-node `2.4.5` / commhub-server `0.8.3` / agent-network-dashboard `0.5.4`). This release adds formal Grok Build ACP onboarding via `anet node create --runtime grok-build-acp`, Grok ACP session persistence/resume, `-32603` stabilization, and cleanup for Grok tool-state leakage in final replies. The v0.10 line started with Direct Runtime + Observability Foundations and has continued through upgrade UX, batch wizard, codex-sdk, Dashboard topology, image attachments, and Grok Build. See the [changelog](https://anet.sh/en/changelog); project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
 >
 > **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
 
@@ -330,7 +351,7 @@ Using anet in your project? Open a PR to [`docs-site/docs/ecosystem.md`](./docs-
 
 - [anet.sh](https://anet.sh) — full documentation site
 - [Getting started](https://anet.sh/en/guide/getting-started) — verified end-to-end path
-- [Runtimes](https://anet.sh/en/guide/runtimes) — Claude Code CLI vs Agent SDK vs Codex
+- [Runtimes](https://anet.sh/en/guide/runtimes) — Claude Code CLI vs Agent SDK vs Codex vs Grok Build ACP
 - [Architecture](https://anet.sh/en/guide/architecture) — MCP, SSE, REST, SQLite schema
 - 📚 **[R&D Methodology SOPs](./docs/sop/)** — Issue-centric AI-Native development workflow ([methodology overview](./docs/sop/methodology.md): Issue-Centric / Release Ops / Verify-First / Agent Dispatch / Retro)
 - [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) — package index

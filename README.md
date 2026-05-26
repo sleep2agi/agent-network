@@ -44,7 +44,7 @@
 > **前置**：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings）。
 
 ```bash
-# 装一个全局包（拉 npm @latest，当前 v0.10.9 = agent-network 2.2.7）
+# 装一个全局包（拉 npm @latest，当前 agent-network 2.2.8）
 npm install -g @sleep2agi/agent-network
 
 # 终端 1 —— 起 Hub（保持开着）
@@ -68,7 +68,7 @@ anet node start my-bot           # 等到 "SSE connected" 即就绪
 ### 已装 anet？升级到最新
 
 ```bash
-anet upgrade            # 一键把 4 个包升到 npm @latest（当前 v0.10.9）
+anet upgrade            # 一键把 4 个包升到 npm @latest
 anet project restart    # 重启 cwd 节点接新版（详见 #117）
 ```
 
@@ -107,7 +107,7 @@ anet demo socialmedia --topic "AI 时代如何提升专注力" --platform xiaoho
 
 ## 为什么用 Agent Network
 
-- **一个 CLI，三种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK 同时跑在一个 Hub 上，按角色挑最合适的。
+- **一个 CLI，四种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP 同时跑在一个 Hub 上，按角色挑最合适的。
 - **八家 LLM，一个开关切换。** Anthropic / OpenAI / MiniMax / DeepSeek / 智谱 GLM / 月之暗面 Kimi / 书生 InternLM / OpenRouter —— 通过 `ANTHROPIC_BASE_URL` 一键路由。
 - **本地跑得动，跨服务器也跑得动。** Hub 默认绑 `127.0.0.1` 纯本机；改成 `0.0.0.0` 绑公网 IP，**多台云服务器 / 多个工位的 Agent 都能加入同一个 Hub**，SSE 实时双向。SQLite 数据全程在 Hub 所在那台机器，不用注册账号、不用登云、零遥测。
 - **Mesh 派活开箱即用。** Agent 之间通过 17 个 MCP 工具（`get_all_status` / `send_task` / `get_task` …）自动发现 + 互相派活，不需要你写编排逻辑。
@@ -174,7 +174,7 @@ flowchart LR
 
 ---
 
-## 三种 Runtime
+## 四种 Runtime
 
 每个节点选一种，同一个 Hub 上自由混搭。
 
@@ -183,6 +183,27 @@ flowchart LR
 | `claude-code-cli` | spawn 本地 `claude` CLI 子进程 | 复用 Claude Pro 订阅，享 Claude Code 全套工具 | 本地 `claude` 已登录 |
 | `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter 等（通过 `ANTHROPIC_BASE_URL`） | API key |
 | `codex-sdk` | OpenAI `@openai/codex-sdk` | 写代码 / 跑命令 | `codex auth login` 或 `OPENAI_API_KEY` |
+| `grok-build-acp` | 本地 `grok agent stdio` + Agent Client Protocol | Grok Build 节点加入 Agent Network，复用本机 Grok 登录态 | 本地 `grok` 已登录 |
+
+### Grok Build 接入
+
+先安装并登录 Grok Build CLI：
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+grok
+```
+
+再创建并启动 Grok 节点：
+
+```bash
+anet node create grok-demo --runtime grok-build-acp
+anet node start grok-demo
+```
+
+稳定支持：SSE 收任务、Grok ACP 执行、`grokSession` 持久化/恢复、回复 CommHub，以及 wrapper 层显式派发任务。当前边界：Grok 原生 MCP tool injection 仍按 preview 处理，CommHub 派发由 `agent-node` wrapper 执行。
+
+📖 Grok Build 运行时说明 → [`docs/grok-build-runtime.md`](./docs/grok-build-runtime.md)
 
 📖 Runtime 详解 → <https://anet.sh/guide/runtimes>
 
@@ -211,10 +232,10 @@ flowchart LR
 
 | 包 | 版本 | 角色 |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.7` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器（v0.10.9 PINNED server 0.8.3 + v0.10.7 [#156](https://github.com/sleep2agi/agent-network/issues/156) codex-sdk batch path yolo flags parity + `--no-yolo` opt-out，[详见 changelog](https://anet.sh/changelog)）|
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.8` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 + `grok-build-acp` runtime 入口（[详见 changelog](https://anet.sh/changelog)）|
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.3` | MCP + REST + SSE 通信中枢（SQLite）+ `meta.attachments` / `meta_json` 图片附件元数据 + `/api/server/:host/health` + `/api/server/:host/agents` |
 | [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.4` | Web Dashboard —— Next.js 16，图片上传/粘贴发送（v0.10.9）+ 4 套主题 + Hero 3 网络节点前端 8/8 surface + Servers 面板 polish + 100+ 轮 typography & 圆角级联 polish |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.3` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK + codex-sdk 图片输入（v0.10.9）+ per-agent process telemetry + host disk telemetry + codex-sdk yolo flags |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.5` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP + codex-sdk 图片输入 + Grok ACP 稳定化与工具状态泄漏清洗 |
 
 CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
 
@@ -262,7 +283,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 ---
 
 > [!IMPORTANT]
-> **当前 stable: v0.10.9**（Apache 2.0，4 个包均在 npm `latest`：agent-network `2.2.7` / agent-node `2.4.3` / commhub-server `0.8.3` / agent-network-dashboard `0.5.4`）。本版补齐 Dashboard 图片发送链路：Dashboard 上传/粘贴图片 → CommHub `meta.attachments` 持久化 → agent-node/codex-sdk 图片输入。v0.10 系列从 v0.10.0 的 Direct Runtime + Observability Foundations 起持续迭代，详见 [changelog](https://anet.sh/changelog)；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
+> **当前 stable**（Apache 2.0，4 个包均在 npm `latest`：agent-network `2.2.8` / agent-node `2.4.5` / commhub-server `0.8.3` / agent-network-dashboard `0.5.4`）。本版补齐 Grok Build ACP 正式接入：`anet node create --runtime grok-build-acp`、Grok ACP session 持久化/恢复、`-32603` 稳定化、以及 Grok 工具状态泄漏清洗。v0.10 系列从 Direct Runtime + Observability Foundations 起持续迭代，详见 [changelog](https://anet.sh/changelog)；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
 >
 > **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
 
@@ -322,7 +343,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 
 - [anet.sh](https://anet.sh) —— 完整文档站
 - [上手指南](https://anet.sh/guide/getting-started) —— 已 E2E 验证的全链路
-- [节点 Runtime](https://anet.sh/guide/runtimes) —— Claude Code CLI vs Agent SDK vs Codex
+- [节点 Runtime](https://anet.sh/guide/runtimes) —— Claude Code CLI vs Agent SDK vs Codex vs Grok Build ACP
 - [架构概览](https://anet.sh/guide/architecture) —— MCP / SSE / REST / SQLite schema
 - 📚 **[研发流程 SOP](./docs/sop/)** —— 以 Issue 为中心的 AI-Native 研发迭代流程（[方法论总览](./docs/sop/methodology.md)：Issue-Centric / Release Ops / Verify-First / Agent Dispatch / Retro 5 章节）
 - [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) —— 包索引

@@ -1,65 +1,136 @@
-# @sleep2agi/agent-network
+# Agent Network (`anet`)
 
-`anet` — a single CLI to run a local AI Agent network. Launch the hub, the dashboard, and as many agent nodes as you want. Verified end-to-end on macOS / Linux / Docker via Playwright.
+Run a local network of AI agents from one CLI.
 
-Pairs with `@sleep2agi/commhub-server` 0.8.0, `@sleep2agi/agent-network-dashboard` 0.4.2, `@sleep2agi/agent-node` 2.3.0 on the current stable flow. The local flow below is the supported path; experimental commands are called out separately.
+`anet` starts a CommHub, launches the web dashboard, creates agent nodes, and lets those nodes talk to each other through MCP tools such as `send_task`, `get_task`, and `get_all_status`.
+
+## What It Is
+
+Agent Network is a local-first multi-agent runtime:
+
+- **CommHub**: MCP + REST + SSE hub for task routing, auth, networks, and status.
+- **Agent nodes**: long-running AI workers backed by Claude Code, Claude Agent SDK, Codex SDK, or Grok Build ACP.
+- **Dashboard**: browser UI for topology, chat, tasks, node health, and server telemetry.
+- **CLI**: `anet`, the single entry point for setup, auth, node lifecycle, and demos.
+
+The default path runs entirely on your machine. LAN sharing is opt-in.
+
+## Requirements
+
+- Node.js **>= 22.13.0**
+- npm **>= 10**
+- Bun **>= 1.2.0** (`anet hub start` lazy-runs the Bun-based CommHub server)
+- macOS or Linux
+
+Install Bun if needed:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
 
 ## Install
+
+Stable:
 
 ```bash
 npm install -g @sleep2agi/agent-network
 anet -v
 ```
 
-Node.js ≥ 20, npm ≥ 9. The hub and agent runtime are pulled on demand by `bunx` / `npx` — no other manual installs.
+Preview channel:
 
-## Verified flow
+```bash
+npm install -g @sleep2agi/agent-network@preview
+anet -v
+```
+
+Current npm dist-tags verified on 2026-05-26:
+
+| Package | latest | preview |
+|---|---:|---:|
+| `@sleep2agi/agent-network` | `2.2.8` | `2.2.8-preview.1` |
+| `@sleep2agi/commhub-server` | `0.8.3` | `0.8.3-preview.2` |
+| `@sleep2agi/agent-network-dashboard` | `0.5.4` | `0.5.3-preview.267` |
+| `@sleep2agi/agent-node` | `2.4.5` | `2.4.4-preview.3` |
+
+## 5-Minute Quick Start
 
 Open three terminals.
 
+### 1. Start CommHub
+
 ```bash
-# Terminal 1 — Hub
 anet hub start
-#   • http://127.0.0.1:9200
-#   • SQLite at ~/.commhub/commhub.db
-#   • Default admin account auto-created: admin / anethub
-#   • For LAN access, start with --host 0.0.0.0 and use the printed LAN URL
+```
 
-# Terminal 2 — Dashboard
+Default local URL:
+
+```text
+http://127.0.0.1:9200
+```
+
+By default the hub binds to localhost. Use `--host 0.0.0.0` only when you intentionally want LAN clients to connect.
+
+### 2. Start Dashboard
+
+```bash
 anet hub dashboard
-#   • Open http://localhost:3000, log in with admin / anethub
+```
 
-# Terminal 3 — CLI: log in, create an agent, start it
+Open:
+
+```text
+http://localhost:3000
+```
+
+### 3. Log In, Create A Node, Start It
+
+```bash
 anet login --username admin --password anethub
 anet node create my-bot
-#   Two-step picker:
-#     1) runtime → claude-agent-sdk (recommended)
-#     2) provider → MiniMax / DeepSeek / GLM / Kimi / Anthropic / OpenRouter / custom
-#   Then enter the API key for that provider.
 anet node start my-bot
-#   Look for: SSE connected
 ```
 
-Now go to the Dashboard, click `my-bot` in the Chat panel, type a message, hit Enter. The agent calls the LLM and replies with full markdown rendering.
+`anet node create` walks you through:
 
-### Multi-agent collaboration (verified)
+1. Runtime: `claude-code-cli`, `claude-agent-sdk`, `codex-sdk`, or `grok-build-acp`.
+2. Provider preset: Anthropic, MiniMax, DeepSeek, GLM, Kimi, OpenRouter, or custom Anthropic-compatible endpoint.
+3. API key and model settings.
+
+When the node starts successfully, look for:
+
+```text
+SSE connected
+```
+
+Then use the Dashboard chat panel to send `my-bot` a message.
+
+## Multi-Agent Collaboration
+
+Create a second node:
 
 ```bash
-anet node create video-bot --runtime claude-agent-sdk
-anet node start video-bot
+anet node create reviewer
+anet node start reviewer
 ```
 
-Ask `my-bot` something like *"ask video-bot what it can do"*. `my-bot` discovers `video-bot` via the commhub MCP `get_all_status` tool, dispatches the question with `send_task`, polls `get_task`, and integrates the reply. The Tasks and Messages pages show the full handshake.
+Ask `my-bot`:
 
-### LAN-shared hub
+```text
+Ask reviewer to review this plan and summarize the risks.
+```
 
-By default `anet hub start` binds to `127.0.0.1`. To accept agents from other machines on the same network, start the hub with an explicit LAN bind:
+The first agent can discover peers with `get_all_status`, delegate work with `send_task`, poll with `get_task`, and integrate the reply. The dashboard Tasks and Messages views show the chain.
+
+## LAN Hub
+
+On the hub machine:
 
 ```bash
 anet hub start --host 0.0.0.0
 ```
 
-Then on another machine:
+On another machine:
 
 ```bash
 npm install -g @sleep2agi/agent-network
@@ -69,89 +140,153 @@ anet node create remote-bot
 anet node start remote-bot
 ```
 
-## Provider presets
+Do not expose the hub directly to the public internet without a reverse proxy, HTTPS, firewall rules, and reviewed auth settings.
 
-`anet node create` second step picks a provider preset. Each preset writes the right `ANTHROPIC_BASE_URL` and a sensible default model into `.anet/nodes/<name>/config.json`, then prompts for the API key.
+## Runtimes
+
+| Runtime | Use When | Notes |
+|---|---|---|
+| `claude-code-cli` | You want Claude Code CLI sessions and channel support | Uses Claude Code process; supports stable `COMMHUB_RESUME_ID` in recent previews |
+| `claude-agent-sdk` | You want Anthropic-compatible API providers | Good default for provider presets |
+| `codex-sdk` | You want Codex-backed nodes | Useful as a backup runtime when Claude quota is constrained |
+| `grok-build-acp` | You want Grok Build through `grok agent stdio` | Requires Grok Build CLI auth; stable for receive/reply, session persistence, and explicit `send_task` delegation |
+
+### Grok Build ACP
+
+`grok-build-acp` uses the local Grok Build CLI via Agent Client Protocol (ACP). Install and authenticate Grok first:
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+grok
+```
+
+Create and start a node:
+
+```bash
+anet node create grok-demo --runtime grok-build-acp
+anet node start grok-demo
+```
+
+Look for:
+
+```text
+runtime: grok-build-acp
+SSE connected
+```
+
+Stable support:
+
+- Receive CommHub tasks through SSE.
+- Run one Grok Build ACP turn per task.
+- Persist `grokSession` into `.anet/nodes/<name>/config.json`.
+- Resume the saved Grok session on the next task.
+- Reply to the original sender through CommHub.
+- Explicit delegation such as `给 A站助手 发任务: ...` is intercepted by `agent-node`, sent through CommHub with `parent_task_id`, and polled until the child task reaches `replied` or `failed`.
+
+Current boundary:
+
+- Grok native MCP tool injection is not the stable path yet.
+- For cross-agent delegation, use explicit delegation wording so `agent-node` handles the CommHub call deterministically.
+- If Grok returns `grok ACP error -32603`, upgrade to the latest `@sleep2agi/agent-node` and restart the node; recent builds narrow ACP capabilities and include `error.data` diagnostics.
+
+Details: `docs/grok-build-runtime.md`.
+
+## Provider Presets
+
+`anet node create` writes the correct provider environment into `.anet/nodes/<name>/config.json`.
 
 | Provider | Status | Notes |
 |---|---|---|
-| Anthropic | verified | `sk-ant-...`, model passed through from `--model` or provider default |
-| MiniMax (国内 / 国际) | verified | `sk-cp-...` |
-| DeepSeek | verified | `sk-...` |
-| GLM (智谱) | verified | open.bigmodel.cn key |
-| Kimi (Moonshot) | verified | platform.moonshot.cn key |
-| OpenRouter | unverified end-to-end | `sk-or-...` works in dev, no full E2E run |
-| Custom Anthropic-compatible | unverified end-to-end | provide base URL + token manually |
+| Anthropic | verified path | Native Anthropic Messages API |
+| MiniMax | verified path | Anthropic-compatible endpoint |
+| DeepSeek | verified path | Anthropic-compatible endpoint |
+| GLM / Zhipu | verified path | Anthropic-compatible endpoint |
+| Kimi / Moonshot | verified path | Anthropic-compatible endpoint |
+| OpenRouter | available | Anthropic-compatible routing |
+| Custom | available | Provide base URL, model, and token |
 
-`claude-agent-sdk` is just an Anthropic Messages API client — any compatible endpoint works without code changes; `--model` is passed through.
-
-## Command reference
+## Common Commands
 
 ```bash
-# Hub + Dashboard
-anet hub start                     # local CommHub + auto admin/anethub  [verified]
-anet hub dashboard                 # launch the Web Dashboard            [verified]
+# Hub and dashboard
+anet hub start
+anet hub dashboard
 
 # Auth
-anet register                      # create an account                   [verified]
-anet login [--username ...]        # login, saves token to ~/.anet/config.json  [verified]
-anet logout                                                              # [verified]
-anet whoami                                                              # [verified]
-anet passwd                        # change password                     [verified]
-
-# Tokens
-anet token create <name>                                                 # [verified]
-anet token ls                                                            # [verified]
-anet token revoke <id>                                                   # [verified]
+anet register
+anet login --username <user> --password <password>
+anet logout
+anet whoami
+anet passwd
 
 # Nodes
-anet node create <name>            # two-step interactive picker         [verified]
-anet node start <name>             # connect via SSE, await tasks        [verified]
-anet node stop <name>                                                    # [verified]
-anet node delete <name>                                                  # [verified]
-anet node ls                                                             # [verified]
-anet logs <name>                   # tail the node's log file            [verified]
+anet node create <name>
+anet node start <name>
+anet node start --all
+anet node stop <name>
+anet node resume <name>
+anet node rename <old> <new> --force
+anet node delete <name>
+anet node ls
+anet info <name>
+anet logs <name>
 
-# Status
-anet status                        # network overview                    [verified]
-anet doctor                        # local sanity checks                 [verified]
+# Network status and repair
+anet status
+anet tasks [status]
+anet doctor
+anet doctor --fix
 
-# Setup helpers
-anet init [--hub <url>]            # write ~/.anet/config.json (LAN setup) [verified]
-anet init project                  # write .mcp.json + CLAUDE.md         [verified]
+# Project and session helpers
+anet init --hub <url>
+anet init project
+anet project up
+anet project restart
+anet project down
+anet session ls
+
+# Channels and upgrades
+anet channel add telegram <name> --bot-token <tok> --allow <uid>
+anet channel ls
+anet upgrade
+anet upgrade --channel preview --dry-run
+
+# Batch / demos
+anet create --batch
+anet batch list
+anet batch stop <prefix>
+anet demo sci-team
 ```
 
-## Not verified
+## Configuration Files
 
-Listed for transparency — these commands exist but are not part of the primary supported path.
+```text
+~/.anet/config.json
+  Global CLI profile: hub URL, user token, default network.
 
-- `anet license` / `anet activate` — v0.6 legacy trial / pro-license commands. **No longer needed after Apache 2.0 OSS.** Hub still keeps a SQLite `licenses` table for backward-compat (creates a 14-day trial on first run). On `license_expired`, see [troubleshooting](https://anet.sh/en/troubleshooting).
-- `anet network create` / `anet network invite` / cross-user network sharing — code is in, no full E2E.
-- `anet channel add telegram|wechat|feishu` — channel code exists; only the Telegram-oriented paths are actively exercised.
+~/.anet/server/admin-utok.json
+  Local bootstrap admin token for the hub.
 
-## Configuration files
-
-```
-~/.anet/config.json                     # global: hub URL + user token
-{cwd}/.anet/nodes/<name>/config.json    # per-node: runtime, model, provider, API key
+{project}/.anet/nodes/<name>/config.json
+  Per-node runtime, model, provider env, node token, channels, and session IDs.
 ```
 
-Field-level override: per-node config wins, missing fields fall back to global, then defaults.
-
-A typical `config.json` after `anet node create`:
+Example node config:
 
 ```json
 {
   "node_id": "n_a1b2c3d4",
   "node_name": "my-bot",
+  "alias": "my-bot",
   "hub": "http://127.0.0.1:9200",
+  "network_id": "default",
   "token": "ntok_...",
   "runtime": "claude-agent-sdk",
-  "model": "<minimax-model-id>",
+  "model": "your-model",
   "channels": ["server:commhub"],
   "tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
   "env": {
-    "ANTHROPIC_BASE_URL": "https://api.minimax.io/anthropic",
+    "ANTHROPIC_BASE_URL": "https://example.com/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "sk-..."
   },
   "flags": {
@@ -162,19 +297,64 @@ A typical `config.json` after `anet node create`:
 }
 ```
 
-## Companion packages
+Do not commit `.anet/` or provider API keys.
 
-| Package | Version | What it does |
-|---|---|---|
-| [@sleep2agi/commhub-server](https://www.npmjs.com/package/@sleep2agi/commhub-server) | 0.8.0 | MCP + REST + SSE hub |
-| [@sleep2agi/agent-network-dashboard](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | 0.4.2 | Web Dashboard |
-| [@sleep2agi/agent-node](https://www.npmjs.com/package/@sleep2agi/agent-node) | 2.3.0 | Agent runtime |
+## Security Notes
 
-## Docs
+- The hub binds to `127.0.0.1` by default.
+- LAN mode is explicit: `anet hub start --host 0.0.0.0`.
+- Node tokens are network-scoped `ntok_` tokens; user tokens are `utok_`.
+- Keep API keys in local node config or env refs; never paste real keys into issues or docs.
+- Treat tmux / terminal streaming features as local-admin tools.
 
-- https://anet.sh — full documentation site
-- https://anet.sh/en/guide/getting-started — verified local flow
-- https://github.com/sleep2agi/agent-network — source
+## What Is Stable vs Experimental
+
+Stable day-to-day path:
+
+- `anet hub start`
+- `anet hub dashboard`
+- `anet login`
+- `anet node create/start/stop/delete/rename`
+- `anet node start --all`
+- `anet project up/restart/down`
+- Dashboard chat, task list, topology, and status views
+
+Actively evolving:
+
+- IM platform integration (Feishu / Slack / WhatsApp / WeCom)
+- Telegram channel binding
+- Advanced dashboard topology edges
+- Batch orchestration and science-team demos
+- Codex runtime expansion
+- Grok Build ACP runtime
+- Cross-version rename hot-reload
+
+## Documentation
+
+- Docs site: https://anet.sh
+- Getting started: https://anet.sh/guide/getting-started
+- Preview guide: https://anet.sh/guide/preview/getting-started
+- Issues: https://github.com/sleep2agi/agent-network/issues
+
+## Repository Layout
+
+This package lives in the `agent-network/` subdirectory of the monorepo:
+
+```text
+agent-network/
+  bin/cli.ts           anet CLI
+  src/client.ts        SDK client
+  src/node-server.ts   CommHub MCP server bridge used by claude-code-cli
+  src/im/              IM integration contracts and future adapters
+```
+
+Related packages live next to it:
+
+```text
+server/                @sleep2agi/commhub-server
+agent-node/            @sleep2agi/agent-node
+docs-site/             anet.sh documentation site
+```
 
 ## License
 
