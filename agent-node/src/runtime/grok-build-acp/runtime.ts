@@ -27,6 +27,10 @@ interface SessionResponse {
   session_id?: string;
 }
 
+interface InitializeResponse {
+  authMethods?: Array<{ id?: string; name?: string }>;
+}
+
 /**
  * Run one Grok ACP prompt turn.
  *
@@ -41,6 +45,7 @@ interface SessionResponse {
 export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpTurnResult> {
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const drainMs = opts.drainMs ?? 15_000;
+  const childEnv = { ...process.env, ...opts.env };
   const client = new GrokAcpClient();
   const state = newGrokTurnState(opts.sessionId);
 
@@ -51,15 +56,17 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
   client.on("notification", onNotification);
 
   try {
-    client.start({ cwd: opts.cwd, env: opts.env, binary: opts.binary });
+    client.start({ cwd: opts.cwd, env: childEnv, binary: opts.binary });
 
-    await client.request("initialize", {
+    const init = await client.request<InitializeResponse>("initialize", {
       protocolVersion: "1",
       clientCapabilities: {
         fs: { readTextFile: true, writeTextFile: true },
         terminal: true,
       },
     }, timeoutMs);
+    const authMethod = selectAuthMethod(init, childEnv);
+    await client.request("authenticate", { methodId: authMethod, meta: { headless: true } }, timeoutMs);
 
     const session = opts.sessionId
       ? await client.request<SessionResponse>("session/load", { sessionId: opts.sessionId, cwd: opts.cwd, mcpServers: [] }, timeoutMs)
@@ -96,6 +103,13 @@ async function waitForPromptDrain(state: GrokTurnState, drainMs: number): Promis
   while (!state.promptComplete && Date.now() - started < drainMs) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+function selectAuthMethod(init: InitializeResponse, env: NodeJS.ProcessEnv): string {
+  const ids = new Set((init.authMethods ?? []).map((method) => method.id).filter((id): id is string => typeof id === "string"));
+  if (env.GROK_CODE_XAI_API_KEY && ids.has("xai.api_key")) return "xai.api_key";
+  if (ids.has("cached_token")) return "cached_token";
+  throw new Error(`Grok ACP authenticate failed: no supported non-interactive auth method (advertised=${JSON.stringify([...ids])})`);
 }
 
 function extractSessionId(value: unknown): string | undefined {

@@ -277,11 +277,12 @@ interface Profile {
   role?: "leader" | "worker";
 }
 
-type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk";
+type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk" | "grok-build-acp";
 
 function normalizeRuntime(profileOrRuntime?: Profile | string): RuntimeName {
   if (typeof profileOrRuntime === "string") {
     if (profileOrRuntime === "codex" || profileOrRuntime === "codex-sdk") return "codex-sdk";
+    if (profileOrRuntime === "grok" || profileOrRuntime === "grok-build" || profileOrRuntime === "grok-build-acp") return "grok-build-acp";
     if (profileOrRuntime === "claude" || profileOrRuntime === "claude-sdk" || profileOrRuntime === "claude-agent-sdk") return "claude-agent-sdk";
     if (profileOrRuntime === "agent-sdk") return "claude-agent-sdk";
     return "claude-code-cli";
@@ -725,6 +726,10 @@ async function setupCommand() {
         value: "codex-sdk",
       },
       {
+        name: `grok-build-acp — Grok Build ACP${isInstalled(versions.agentNode) ? "（需要 agent-node + grok CLI）" : "（需要安装 agent-node + grok CLI）"}`,
+        value: "grok-build-acp",
+      },
+      {
         name: `claude-agent-sdk — Claude Agent SDK${isInstalled(versions.agentNode) ? "（已就绪 ✅）" : "（需要安装 agent-node）"}`,
         value: "claude-agent-sdk",
       },
@@ -747,6 +752,9 @@ async function setupCommand() {
   if (runtimeSelections.includes("codex-sdk")) {
     if (!isInstalled(versions.agentNode)) addPackage("@sleep2agi/agent-node");
     if (!isInstalled(versions.codex)) addPackage("@openai/codex");
+  }
+  if (runtimeSelections.includes("grok-build-acp") && !isInstalled(versions.agentNode)) {
+    addPackage("@sleep2agi/agent-node");
   }
   if (runtimeSelections.includes("claude-agent-sdk") && !isInstalled(versions.agentNode)) {
     addPackage("@sleep2agi/agent-node");
@@ -784,7 +792,7 @@ async function setupCommand() {
   if (runtimeSelections.includes("claude-code-cli")) {
     console.log(`  ${isInstalled(verified.claude) ? "✅" : "❌"} ${formatDetectedVersion(verified.claude)}`);
   }
-  if (runtimeSelections.includes("codex-sdk") || runtimeSelections.includes("claude-agent-sdk")) {
+  if (runtimeSelections.includes("codex-sdk") || runtimeSelections.includes("claude-agent-sdk") || runtimeSelections.includes("grok-build-acp")) {
     console.log(`  ${isInstalled(verified.agentNode) ? "✅" : "❌"} ${formatDetectedVersion(verified.agentNode)}`);
   }
   if (runtimeSelections.includes("codex-sdk")) {
@@ -796,6 +804,9 @@ async function setupCommand() {
 
   if (runtimeSelections.includes("codex-sdk")) {
     console.log(`  ⚠ codex 需要登录: codex auth login`);
+  }
+  if (runtimeSelections.includes("grok-build-acp")) {
+    console.log(`  ⚠ grok 需要安装并登录: grok auth login 或 x.ai CLI 认证缓存`);
   }
   if (runtimeSelections.includes("claude-code-cli")) {
     console.log(`  ⚠ claude 需要登录: claude auth login`);
@@ -854,6 +865,10 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
   if (!commandExists("agent-node")) {
     console.warn(`[anet] Warning: agent-node not found in PATH.`);
     console.warn(`[anet] Run: anet upgrade`);
+  }
+  if (runtime === "grok-build-acp" && !commandExists("grok")) {
+    console.warn(`[anet] Warning: grok CLI not found in PATH.`);
+    console.warn(`[anet] Install/login Grok Build first: https://x.ai/cli`);
   }
 }
 
@@ -1559,7 +1574,7 @@ async function createInteractiveCommand() {
 
 This wizard creates one agent node for this project:
   - node config: .anet/nodes/<node-name>/config.json
-  - runtime: claude-code-cli / codex-sdk / claude-agent-sdk
+  - runtime: claude-code-cli / codex-sdk / claude-agent-sdk / grok-build-acp
   - optional Telegram channel: text + images from an allowlist user
 `);
 
@@ -1582,7 +1597,7 @@ This wizard creates one agent node for this project:
   // runtimes (claude-code-cli / codex-sdk) reuse their CLI's existing auth
   // and skip vendor selection entirely.
   const opts = parseOpts();
-  let pickedRuntime: "claude-agent-sdk" | "claude-code-cli" | "codex-sdk" | null = null;
+  let pickedRuntime: RuntimeName | null = null;
   try {
     const { select: sel } = await import("@inquirer/prompts");
     pickedRuntime = await sel({
@@ -1591,6 +1606,7 @@ This wizard creates one agent node for this project:
         { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
         { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
         { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+        { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
       ],
     }) as any;
   } catch (e: any) {
@@ -1604,6 +1620,9 @@ This wizard creates one agent node for this project:
   } else if (pickedRuntime === "codex-sdk") {
     opts.runtime = "codex-sdk";
     console.log(`[anet] 请确保已执行: codex auth login`);
+  } else if (pickedRuntime === "grok-build-acp") {
+    opts.runtime = "grok-build-acp";
+    console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok auth login`);
   } else {
     // claude-agent-sdk — flow continues into vendor + model picker.
     const sel = await selectVendorAndModel();
@@ -1720,7 +1739,7 @@ async function createCommand(idOverride?: string) {
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
-    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk] [--model ...] [--tools ...]");
+    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk|grok-build-acp] [--model ...] [--tools ...]");
     console.error("Or run fully interactive: anet node create");
     process.exit(1);
   }
@@ -1764,12 +1783,13 @@ async function createCommand(idOverride?: string) {
   );
   const credAlreadyProvided = !!process.env.ANTHROPIC_AUTH_TOKEN
     || !!process.env.ANTHROPIC_API_KEY || envFlagHasAuth;
-  const runtimeAlreadyExplicit = opts.runtime === "codex-sdk" || opts.runtime === "claude-code-cli";
+  const explicitRuntime = opts.runtime ? normalizeRuntime(opts.runtime) : undefined;
+  const runtimeAlreadyExplicit = explicitRuntime === "codex-sdk" || explicitRuntime === "claude-code-cli" || explicitRuntime === "grok-build-acp";
   const skipInteractive = credAlreadyProvided || runtimeAlreadyExplicit;
 
   // #133 selectRuntime — runtime-first, exported as a helper so create paths
   // (interactive single / batch wizard / sci-team demo) can share the picker.
-  const selectRuntime = async (): Promise<"claude-agent-sdk" | "claude-code-cli" | "codex-sdk" | null> => {
+  const selectRuntime = async (): Promise<RuntimeName | null> => {
     try {
       const { select: sel } = await import("@inquirer/prompts");
       const picked = await sel({
@@ -1778,6 +1798,7 @@ async function createCommand(idOverride?: string) {
           { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
           { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
           { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+          { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
         ],
       });
       return picked as any;
@@ -1790,6 +1811,8 @@ async function createCommand(idOverride?: string) {
   if (!skipInteractive && process.stdin.isTTY) {
     const runtime = await selectRuntime();
     if (runtime) opts.runtime = runtime;
+  } else if (explicitRuntime) {
+    opts.runtime = explicitRuntime;
   }
 
   // Per-runtime branching: vendor picker only for claude-agent-sdk; others skip.
@@ -1797,6 +1820,8 @@ async function createCommand(idOverride?: string) {
     console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex auth login");
+  } else if (opts.runtime === "grok-build-acp") {
+    console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok auth login");
   } else {
     // Either claude-agent-sdk (explicit / picker-default) or undefined runtime
     // — fall through to vendor selection. credAlreadyProvided also skips since
@@ -2194,7 +2219,7 @@ async function launchAgent(id: string, forceNewSession = false) {
     }
   } catch {}
 
-  if (runtime === "codex-sdk" || runtime === "claude-agent-sdk") {
+  if (runtime === "codex-sdk" || runtime === "claude-agent-sdk" || runtime === "grok-build-acp") {
     // spawn agent-node
     const agentArgs = [
       "--config", join(nodesDir(), nodeId, "config.json"),

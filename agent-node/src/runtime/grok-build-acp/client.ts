@@ -6,6 +6,8 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { EventEmitter } from "events";
+import { readFileSync, writeFileSync } from "fs";
+import { basename, relative, resolve } from "path";
 
 export interface JsonRpcRequest<P = unknown> {
   jsonrpc: "2.0";
@@ -33,6 +35,7 @@ export interface JsonRpcNotification<P = unknown> {
 }
 
 export type JsonRpcMessage =
+  | JsonRpcRequest
   | JsonRpcSuccess
   | JsonRpcError
   | JsonRpcNotification;
@@ -43,12 +46,14 @@ export class GrokAcpClient extends EventEmitter {
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private rxBuffer = "";
   private closed = false;
+  private cwd = process.cwd();
 
   start(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string } = {}): void {
     if (this.child) throw new Error("GrokAcpClient already started");
+    this.cwd = resolve(opts.cwd ?? process.cwd());
     const bin = opts.binary ?? "grok";
     this.child = spawn(bin, ["agent", "stdio"], {
-      cwd: opts.cwd,
+      cwd: this.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -127,6 +132,13 @@ export class GrokAcpClient extends EventEmitter {
   }
 
   private dispatch(msg: JsonRpcMessage): void {
+    if ("method" in msg && msg.method && "id" in msg && msg.id !== undefined && msg.id !== null) {
+      void this.handleServerRequest(msg as JsonRpcRequest).catch((error) => {
+        this.emit("server_request_error", { request: msg, error });
+      });
+      return;
+    }
+
     if ("id" in msg && msg.id !== undefined && msg.id !== null) {
       const id = typeof msg.id === "number" ? msg.id : Number(msg.id);
       const pending = this.pending.get(id);
@@ -155,4 +167,66 @@ export class GrokAcpClient extends EventEmitter {
       this.emit("malformed", msg);
     }
   }
+
+  private async handleServerRequest(req: JsonRpcRequest): Promise<void> {
+    try {
+      const result = this.resolveServerRequest(req.method, req.params);
+      this.respond(req.id, result);
+    } catch (error: any) {
+      this.respond(req.id, undefined, {
+        code: error?.code ?? -32000,
+        message: error?.message ?? String(error),
+      });
+    }
+  }
+
+  private resolveServerRequest(method: string, params: unknown): unknown {
+    const p = asRecord(params) ?? {};
+    if (method === "fs/read_text_file" || method === "fs/readTextFile") {
+      const path = typeof p.path === "string" ? p.path : "";
+      if (!path) throw new Error("fs/read_text_file missing path");
+      return { content: readFileSync(this.safePath(path), "utf8") };
+    }
+    if (method === "fs/write_text_file" || method === "fs/writeTextFile") {
+      const path = typeof p.path === "string" ? p.path : "";
+      if (!path) throw new Error("fs/write_text_file missing path");
+      const content = typeof p.content === "string" ? p.content : (typeof p.text === "string" ? p.text : "");
+      writeFileSync(this.safePath(path), content);
+      return {};
+    }
+    if (method === "session/request_permission") {
+      const options = Array.isArray(p.options) ? p.options.map(asRecord).filter(Boolean) as Record<string, unknown>[] : [];
+      const allowOnce =
+        options.find((option) => option.optionId === "allow-once")
+        ?? options.find((option) => option.kind === "allow_once")
+        ?? options.find((option) => typeof option.optionId === "string" && String(option.optionId).includes("allow"));
+      if (!allowOnce) throw new Error("session/request_permission has no allow-once option");
+      return { outcome: { outcome: "selected", optionId: allowOnce.optionId ?? "allow-once" } };
+    }
+    const err = new Error(`unsupported client method: ${method}`) as Error & { code?: number };
+    err.code = -32601;
+    throw err;
+  }
+
+  private respond(id: number | string, result?: unknown, error?: { code: number; message: string; data?: unknown }): void {
+    if (!this.child || this.closed) return;
+    const payload = error
+      ? { jsonrpc: "2.0", id, error }
+      : { jsonrpc: "2.0", id, result: result ?? {} };
+    this.child.stdin.write(JSON.stringify(payload) + "\n");
+  }
+
+  private safePath(inputPath: string): string {
+    const abs = resolve(this.cwd, inputPath);
+    const rel = relative(this.cwd, abs);
+    if (rel === "" || rel === ".." || rel.startsWith(`..${"/"}`) || rel.startsWith(`..${"\\"}`)) {
+      throw new Error(`path outside Grok runtime cwd: ${inputPath}`);
+    }
+    if (!basename(abs)) throw new Error(`invalid path: ${inputPath}`);
+    return abs;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
 }
