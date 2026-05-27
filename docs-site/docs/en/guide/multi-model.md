@@ -13,7 +13,9 @@ Agent Network supports running agents with different AI models within the same n
 | **MiniMax (latest line)** | `claude-agent-sdk` | ✅ verified — low cost, high throughput (look up the latest model id at [platform.minimaxi.com](https://platform.minimaxi.com)) | Very low |
 | **InternLM Intern-S2-Preview** (`anet node create` vendor-picker default, **only after you pick `claude-agent-sdk` runtime** — since v0.9.2 the wizard is runtime-first per [#133](https://github.com/sleep2agi/agent-network/issues/133)) | `claude-agent-sdk` | ✅ verified — domestic model, scientific reasoning; the first option in the vendor picker (`chat.intern-ai.org.cn`, bare hostname) | Low |
 | **InternLM Intern-S1-Pro** | `claude-agent-sdk` | ✅ verified — domestic model, scientific reasoning (Intern-S1-Pro is the current product line; no version suffix appended) | Low |
-| **Xiaomi MiMo** | `claude-agent-sdk` | ✅ verified — `mimo-v2.5-pro` (default) / v2.5 / v2-pro / v2-omni, low cost (Xiaomi, `token-plan-cn.xiaomimimo.com/anthropic`; look up model id at [platform.xiaomimimo.com](https://platform.xiaomimimo.com)) | Low |
+| **Xiaomi MiMo** | `claude-agent-sdk` | ✅ verified — `mimo-v2.5-pro` (default) / v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign[^mimo-tts-en], low cost (Xiaomi, `token-plan-cn.xiaomimimo.com/anthropic`; look up model id at [platform.xiaomimimo.com](https://platform.xiaomimimo.com)) | Low |
+
+[^mimo-tts-en]: `mimo-v2.5-tts-voicedesign` is a **TTS (voice-design) model** — Anthropic Messages text requests are unlikely to be supported by the vendor on that model; use one of the first four (`mimo-v2.5-pro` / `mimo-v2.5` / `mimo-v2-pro` / `mimo-v2-omni`) for chat. Since v0.10.10 the wizard ships the full 5-model preset matching Xiaomi's official lineup.
 | **OpenRouter (multi-model gateway)** | `claude-agent-sdk` | one API key, all upstream models (GPT-4 / Claude / Gemini / Llama, etc.); unified billing. Reachable via the `custom` vendor with `openrouter.ai/api/v1` + `ANTHROPIC_AUTH_TOKEN`. | Upstream pass-through |
 
 > Verification model (post-#104-B): cli.ts no longer uses the old "`MODEL_PRESETS` + `[UNVERIFIED]` tag" scheme — it's now a single [`VENDORS` list (cli.ts:1336-1397)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1336), and **being in the list means verified-with-real-call**. **Providers that haven't passed verification (DeepSeek / GLM / Kimi) are intentionally NOT in the list** — reach them via the `custom` vendor below (any Anthropic-compatible API works through `custom`). Full detail: [runtimes — Verified vs not](/en/guide/runtimes#verified-vs-not).
@@ -102,7 +104,15 @@ anet node start intern
 
 ### Xiaomi MiMo (claude-agent-sdk)
 
-Xiaomi's MiMo platform exposes an Anthropic-compatible endpoint, with a reasoning-focused lineup at competitive prices. Look up the current model ids at [platform.xiaomimimo.com](https://platform.xiaomimimo.com) — the bash example below uses one for illustration; specific ids rotate.
+Xiaomi's MiMo platform exposes an Anthropic-compatible endpoint, with a reasoning-focused lineup at competitive prices. Since **v0.10.10** the `anet node create` wizard ships the full **5-model preset** matching Xiaomi's official lineup. Look up the current model ids at [platform.xiaomimimo.com](https://platform.xiaomimimo.com).
+
+| Model id | Notes |
+|---|---|
+| `mimo-v2.5-pro` | Wizard default — pro-tier reasoning |
+| `mimo-v2.5` | Base v2.5 |
+| `mimo-v2-pro` | Previous-gen pro |
+| `mimo-v2-omni` | Multi-modal omni |
+| `mimo-v2.5-tts-voicedesign` | **TTS voice-design model** — Anthropic Messages text requests are unlikely to be supported by the vendor on this model; use one of the four above for text chat |
 
 ```bash
 ANTHROPIC_BASE_URL=https://token-plan-cn.xiaomimimo.com/anthropic \
