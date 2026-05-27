@@ -1408,6 +1408,7 @@ const VENDORS: Vendor[] = [
       { id: "mimo-v2.5" },
       { id: "mimo-v2-pro" },
       { id: "mimo-v2-omni" },
+      { id: "mimo-v2.5-tts-voicedesign" },  // #193 — included in Vincent text-callable list (TTS family kept Phase 2)
     ],
   },
   {
