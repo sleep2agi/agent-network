@@ -54,7 +54,7 @@ The `anet create --batch` wizard goes through `selectVendorAndModel()` (cli.ts `
 |--------|---------|-------|----------|
 | `intern` | `claude-agent-sdk` | intern-s2-preview (default) / intern-s1-pro | `https://chat.intern-ai.org.cn` (bare hostname) |
 | `minimax` | `claude-agent-sdk` | MiniMax-M2.7 | `https://api.minimaxi.com/anthropic` |
-| `mimo` | `claude-agent-sdk` | mimo-v2.5-pro (default) / v2.5 / v2-pro / v2-omni | `https://token-plan-cn.xiaomimimo.com/anthropic` |
+| `mimo` | `claude-agent-sdk` | mimo-v2.5-pro (default) / v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign (TTS voice-design, not for text chat) | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | `anthropic` | `claude-agent-sdk` | claude-sonnet-4-6 (default) / opus-4-6 / haiku-4-5 | Anthropic native |
 | `codex` | `codex-sdk` | gpt-5.5 (default) / o3 | (needs `codex auth login`) |
 | `claude-code` | `claude-code-cli` | uses the Claude Code subscription model | (needs a Claude subscription) |
