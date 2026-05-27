@@ -19,13 +19,13 @@ function normalizeMetaJson(meta: unknown): string | null {
   try { return JSON.stringify(meta); } catch { return null; }
 }
 
-export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false) {
+export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null) {
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
   // an agent's send_task call always claimed from='hub' and peer agents
-  // couldn't tell who actually asked them. Tool callers can still override
-  // by passing from_session explicitly.
-  const defaultFrom = (clientFrom?: string) => clientFrom || callerAlias || "hub";
+  // couldn't tell who actually asked them. Network-bound node tokens are an
+  // identity boundary: they must not spoof another node via from_session.
+  const defaultFrom = (clientFrom?: string) => (callerTokenIsNetwork && callerAlias) ? callerAlias : (clientFrom || callerAlias || "hub");
   // If enforceNetworkId is set, override any client-supplied network_id
   const getNetworkId = (clientNetId?: string | null) => enforceNetworkId ?? clientNetId ?? null;
 
@@ -190,6 +190,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
       }
       console.log(`[${ts()}] ${effectiveAlias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}${effectiveNetId ? " [net]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
+      if (callerTokenIsNetwork && callerTokenId) {
+        try {
+          db.run("UPDATE api_tokens SET name = ?1 WHERE token_id = ?2", [`node:${effectiveAlias}`, callerTokenId]);
+        } catch {}
+      }
       const trimmedOutput = output?.slice(0, 4000);
       const hostHostname = host?.hostname || hn || null;
       const hostIp = host?.ip || clientIP || null;

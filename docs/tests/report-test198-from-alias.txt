@@ -1,0 +1,26 @@
+# test198-from-alias
+
+Scope: P0 #194/#198 from_session attribution regression for Grok/native MCP tools.
+
+Docker:
+
+```bash
+sg docker -c 'docker build -f tests/test198-from-alias/Dockerfile -t anet-test198-from-alias .'
+sg docker -c 'docker run --rm anet-test198-from-alias'
+```
+
+Result:
+
+```text
+PASS: ntok minted for old alias is reconciled on report_status.
+PASS: native MCP send_message without from_session uses current registered alias.
+PASS: ntok caller cannot spoof from_session to stale alias.
+```
+
+Additional build check:
+
+```bash
+cd server && bun build src/index.ts --outdir /tmp/commhub-build --target bun
+```
+
+Result: PASS.

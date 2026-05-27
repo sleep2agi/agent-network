@@ -80,12 +80,12 @@ setInterval(() => {
 }, 300000);
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false): McpServer {
+function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null): McpServer {
   const server = new McpServer({
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork);
+  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork, callerTokenId);
   return server;
 }
 
@@ -170,12 +170,12 @@ function requireTmuxAccess(req: Request, server?: any): Response | null {
 }
 
 // Extract user + network + token-binding identity from request token.
-function resolveRequestAuth(req: Request): { userId: string; networkId: string | null; username: string; tokenName: string | null } | null {
+function resolveRequestAuth(req: Request): { userId: string; networkId: string | null; username: string; tokenName: string | null; tokenId: string | null } | null {
   const token = requestToken(req);
   if (!token) return null;
   const resolved = resolveToken(token);
   if (!resolved) return null;
-  return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName };
+  return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName, tokenId: resolved.tokenId };
 }
 
 type RestNetworkScope = {
@@ -449,7 +449,7 @@ Bun.serve({
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"));
+      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null);
       await mcpServer.connect(transport);
       const response = await transport.handleRequest(req);
       // Disconnect after response to prevent McpServer leak
