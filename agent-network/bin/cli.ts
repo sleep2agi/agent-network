@@ -1205,7 +1205,7 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
 // process.env and FATAL-fails the parent CLI when the referenced var is
 // missing — same UX as agent-node's own resolver, just earlier in the chain
 // so we don't fork into a crashing child.
-function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: string): Record<string, string> {
+function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: string, dotenvMap?: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   if (!profileEnv || typeof profileEnv !== "object") return out;
   for (const [k, v] of Object.entries(profileEnv)) {
@@ -1215,11 +1215,15 @@ function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: st
     }
     if (v && typeof v === "object" && typeof (v as any)._envRef === "string") {
       const refName = (v as any)._envRef;
-      const refVal = process.env[refName];
+      // #193 envRef Option A — priority: explicit shell env > per-node
+      // .anet/nodes/<id>/.env file. Closes the wizard-create-then-start
+      // deadlock without forcing the user to manually `export` before start;
+      // existing shell env still wins, so prior-working setups don't change.
+      const refVal = process.env[refName] ?? dotenvMap?.[refName];
       if (refVal === undefined || refVal === "") {
-        console.error(`[anet] FATAL: config.json env.${k} references env var "${refName}" but it is not set in this shell.`);
+        console.error(`[anet] FATAL: config.json env.${k} references env var "${refName}" but it is not set in this shell or in .anet/nodes/<id>/.env.`);
         console.error(`[anet]        Fix: export ${refName}=<your-value>  then re-run anet node start`);
-        console.error(`[anet]        (set the value matching the previous plain secret you migrated away from)`);
+        console.error(`[anet]        (or restore .anet/nodes/<id>/.env from your secrets manager)`);
         process.exit(1);
       }
       out[k] = refVal;
@@ -1228,6 +1232,46 @@ function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: st
     // Any other shape is ignored — env values must be string or envRef object.
   }
   return out;
+}
+
+// #193 envRef Option A — read a node's per-node secret store from
+// .anet/nodes/<id>/.env (mode 600, gitignored). Parses KEY=VALUE lines, one
+// per line, no quotes, no shell expansion. Returns {} if the file is missing
+// or unreadable. Caller logs the *key count* — never the values.
+function loadNodeDotenv(nodeId: string): Record<string, string> {
+  const path = join(nodesDir(), nodeId, ".env");
+  if (!existsSync(path)) return {};
+  try {
+    const raw = readFileSync(path, "utf-8");
+    const out: Record<string, string> = {};
+    for (const line of raw.split("\n")) {
+      const t = line.trim();
+      if (!t || t.startsWith("#")) continue;
+      const eq = t.indexOf("=");
+      if (eq <= 0) continue;
+      const key = t.slice(0, eq).trim();
+      const val = t.slice(eq + 1);  // do NOT trim — token values are taken verbatim after the first `=`
+      if (key) out[key] = val;
+    }
+    return out;
+  } catch { return {}; }
+}
+
+// #193 envRef Option A — ensure the user's project-level `.anet/.gitignore`
+// covers per-node .env secret stores. Idempotent: appends the rule only when
+// missing; never touches existing rules.
+function ensureNodeDotenvGitignore(): void {
+  try {
+    const anetDir = join(process.cwd(), ".anet");
+    if (!existsSync(anetDir)) return;  // no .anet/ yet — nothing to protect
+    const gi = join(anetDir, ".gitignore");
+    const rule = "nodes/*/.env";
+    let content = "";
+    if (existsSync(gi)) content = readFileSync(gi, "utf-8");
+    if (content.split("\n").some(l => l.trim() === rule)) return;
+    const sep = content && !content.endsWith("\n") ? "\n" : "";
+    writeFileSync(gi, content + sep + rule + "\n");
+  } catch {}
 }
 
 function saveCreatedNode(id: string, profile: Profile) {
@@ -1263,9 +1307,28 @@ function rewritePlainSecretsToEnvRef(nodeId: string, profile: Profile): void {
     if (!process.env[refName]) process.env[refName] = v;
   }
   if (rewrites.length === 0) return;
-  console.log(`\n[anet] 🔐 ${rewrites.length} secret value(s) in env have been moved out of config.json (envRef shape, #125).`);
-  console.log(`[anet]    config.json now stores only the env-var NAME; the secret stays in your shell.`);
-  console.log(`[anet]    To make this persistent across shells, append to ~/.bashrc / ~/.zshrc:`);
+
+  // #193 envRef Option A — persist the secrets to a per-node mode-600 .env
+  // file alongside the config so `anet node start` self-sources them on a
+  // fresh shell. Closes the wizard-create-then-start deadlock without
+  // forcing the user to manually `export`. Idempotent: merges with any
+  // existing keys; .gitignore is ensured so the file never leaks via git.
+  try {
+    const nodeDir = join(nodesDir(), nodeId);
+    mkdirSync(nodeDir, { recursive: true });
+    const dotenvPath = join(nodeDir, ".env");
+    const merged = loadNodeDotenv(nodeId);
+    for (const { refName, value } of rewrites) merged[refName] = value;
+    const body = Object.entries(merged).map(([k, v]) => `${k}=${v}`).join("\n") + "\n";
+    writeFileSync(dotenvPath, body, { mode: 0o600 });
+    ensureNodeDotenvGitignore();
+  } catch (e: any) {
+    console.warn(`[anet] ⚠ could not write per-node .env: ${e?.message || e} — fall back to manual export only.`);
+  }
+
+  console.log(`\n[anet] 🔐 ${rewrites.length} secret value(s) in env moved out of config.json (envRef shape, #125).`);
+  console.log(`[anet]    Persisted to .anet/nodes/${nodeId}/.env (mode 600, gitignored) — \`anet node start\` auto-loads it.`);
+  console.log(`[anet]    For cross-machine / cross-shell portability, also append to ~/.bashrc / ~/.zshrc:`);
   console.log("");
   for (const { refName, value } of rewrites) {
     const safe = value.replace(/'/g, `'\\''`);
@@ -2243,7 +2306,15 @@ async function launchAgent(id: string, forceNewSession = false) {
     // #125 fix (preview.3) — resolve envRef before spawn so the child gets a
     // plain string in env; the child's own envRef-resolver would otherwise
     // never run (parent crashes on `.replace()` of an object first).
-    Object.assign(env, resolveProfileEnv(profile.env as any, home));
+    // #193 envRef Option A — also self-source the per-node .env (mode 600,
+    // gitignored) so a wizard-create-then-start in a fresh shell works
+    // without the user having to manually export the secret first. Priority
+    // is process.env (explicit shell) > dotenv file (see resolveProfileEnv).
+    const _dotenvSDK = loadNodeDotenv(nodeId);
+    if (Object.keys(_dotenvSDK).length > 0) {
+      console.log(`[anet] loaded ${Object.keys(_dotenvSDK).length} key(s) from .anet/nodes/${nodeId}/.env`);
+    }
+    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
 
     // Try agent-node from PATH, fallback to npx
     let cmd = "agent-node";
@@ -2286,7 +2357,12 @@ async function launchAgent(id: string, forceNewSession = false) {
     };
     // #125 fix (preview.3) — same envRef resolution as the agent-node spawn
     // path above, just for the claude-code-cli runtime branch.
-    Object.assign(env, resolveProfileEnv(profile.env as any, home));
+    // #193 envRef Option A — also self-source the per-node .env.
+    const _dotenvCC = loadNodeDotenv(nodeId);
+    if (Object.keys(_dotenvCC).length > 0) {
+      console.log(`[anet] loaded ${Object.keys(_dotenvCC).length} key(s) from .anet/nodes/${nodeId}/.env`);
+    }
+    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvCC));
     // Fix 1 (#146 / RFC-018) — pin the commhub MCP server's resume_id to a
     // stable per-node value (node-server.ts:75 otherwise falls through to
     // randomUUID() at every start, orphaning the old session row on any
