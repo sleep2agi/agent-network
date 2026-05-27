@@ -1193,7 +1193,16 @@ function buildGrokCommhubPrompt(task: string, from: string): string {
     `- agent-node 已负责从 CommHub 收取任务、上报状态，并把你的最终文本回复给 ${from}。`,
     `- 你当前通过 Grok Build ACP 推理，不要声称 MCP servers 正在连接，也不要要求用户等待 MCP 工具就绪。`,
     `- 如果任务只是要求回答、总结、分析或生成文本，请直接完成任务。`,
-    `- 如果任务明确要求给某个 alias 发任务、派任务、交给、沟通或 send_task，agent-node 会在进入 Grok 前优先用 CommHub wrapper 处理；如果你仍看到该任务，说明未命中明确派发格式，请说明需要精确 alias 和子任务内容。`,
+    // #201 Layer 1 — soften defensive prompt: agent-node 的 explicit-delegation
+    // wrapper 会优先拦截派发指令，但 parser 可能漏拦（已知 long tail）。当
+    // wrapper 没拦住、你直接看到原始派发指令时，**不要拒绝任务**，主动调
+    // `commhub_send_task(alias=..., task=...)` 工具完成派发。
+    `- 如果任务要求给某个 alias 发任务、派任务、交给、沟通或调用 send_task：agent-node 会优先在进入 Grok 前用 CommHub wrapper 自动处理；若 wrapper 没拦住、你直接看到原始指令，请主动调用 \`commhub_send_task(alias="<目标>", task="<子任务内容>")\` 工具完成派发，**不要回复 "无法执行" 或要求用户重新格式化**。`,
+    // #201 Layer 3 — explicitly authorise the fallback so Grok doesn't
+    // second-guess itself. Lists the exact phrasings the wrapper now
+    // recognises (gate broadened in #201) so Grok knows wrapper-miss is
+    // edge-case and tool-call is the expected resolution.
+    `- 派发指令的常见形式包括 \`send_task X Y\`、\`给 X 发/说/沟通/打 ...\`、\`你去给 X ...\`、\`让/请 X ...\`、\`派给/转给/交给 X ...\`。这些都已在 wrapper 里覆盖；若你仍看到原文，说明属于 wrapper 漏拦边缘 case，你拥有 \`commhub_send_task\` 工具权限，请直接调用完成任务，不需要用户提供更多 "精确格式"。`,
     `- 当前任务 ID 是 ${currentTaskId}，只在用户要求你引用任务上下文时提及。`,
     ``,
     `收到来自 ${from} 的任务：`,
