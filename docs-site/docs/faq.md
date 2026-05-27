@@ -31,7 +31,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 - `anet license` / `anet activate` 是 v0.6 legacy 命令，**OSS 后不再需要**；若命中 `license_expired`（Hub 后向兼容仍创建 14 天 trial），按 [troubleshooting — license_expired](/troubleshooting#license-expired-授权过期-legacy-行为) 直接清掉 `licenses` 表即可
 
 ::: info v0.6 license 路径计划清理
-当前 server 在 `send_task` 仍跑 `licenses.expires_at` 检查（V3 遗留代码，verify [`server/src/tools.ts` `license_expired` 仍在](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)）—— **v0.9.x / v0.10.0-8 scope 都未动**（v0.9.x Recovery & Observability、v0.10.0 Direct Runtime + Observability Foundations、v0.10.1 PINNED chain-bump hotfix、v0.10.2 Hero A disk + Hero D 拓扑前缀、v0.10.3 codex preset、v0.10.4 dashboard orphan-band + `anet upgrade` UX、v0.10.5 batch wizard workdir + codex/claude skip API key、v0.10.6 `anet upgrade` Option B detached + wizard silent-exit、v0.10.7 codex-sdk batch yolo parity、v0.10.8 Servers UI 文案修 —— 主题都不在 license 路径），排到 v0.11+ 整段移除。
+当前 server 在 `send_task` 仍跑 `licenses.expires_at` 检查（V3 遗留代码，verify [`server/src/tools.ts` `license_expired` 仍在](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)）—— **v0.9.x / v0.10.0-10 scope 都未动**（v0.9.x Recovery & Observability、v0.10.0 Direct Runtime + Observability Foundations、v0.10.1 PINNED chain-bump hotfix、v0.10.2 Hero A disk + Hero D 拓扑前缀、v0.10.3 codex preset、v0.10.4 dashboard orphan-band + `anet upgrade` UX、v0.10.5 batch wizard workdir + codex/claude skip API key、v0.10.6 `anet upgrade` Option B detached + wizard silent-exit、v0.10.7 codex-sdk batch yolo parity、v0.10.8 Servers UI 文案修、v0.10.9 codex-sdk 图片输入 + commhub 附件 `meta_json`、v0.10.10 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接 —— 主题都不在 license 路径），排到 v0.11+ 整段移除。
 :::
 
 ### 4. 支持哪些 AI 模型？
