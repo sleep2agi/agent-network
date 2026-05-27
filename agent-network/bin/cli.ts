@@ -477,6 +477,7 @@ interface Semver {
   major: number;
   minor: number;
   patch: number;
+  prerelease?: string;  // #192 — optional `-preview.N` / `-rc.0` etc. for display only
 }
 
 function packageJsonPath() {
@@ -534,12 +535,18 @@ function cleanStaleNpxDashboardTemp() {
 }
 
 function parseSemver(text: string): Semver | null {
-  const match = text.match(/(?:^|[^0-9])v?(\d+)\.(\d+)\.(\d+)(?:[^0-9]|$)/);
+  // #192 — capture optional prerelease (`-preview.N` etc.) so `anet -v`
+  // Components shows the full installed version, not just major.minor.patch.
+  // compareSemver still ignores prerelease (intentional — preview ≡ release
+  // for the upgrade-check at cli.ts:4202/4321), so adding the field is
+  // display-only and does not regress the upgrade-needed logic.
+  const match = text.match(/(?:^|[^0-9])v?(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9.]+))?(?:[^0-9]|$)/);
   if (!match) return null;
   return {
     major: Number.parseInt(match[1], 10),
     minor: Number.parseInt(match[2], 10),
     patch: Number.parseInt(match[3], 10),
+    ...(match[4] ? { prerelease: match[4] } : {}),
   };
 }
 
@@ -567,7 +574,7 @@ function detectCommandVersion(commandName: string, displayName: string, source?:
     return {
       name: commandName,
       displayName,
-      version: `${parsed.major}.${parsed.minor}.${parsed.patch}`,
+      version: `${parsed.major}.${parsed.minor}.${parsed.patch}${parsed.prerelease ? `-${parsed.prerelease}` : ""}`,  // #192
       state: "ok",
       source,
     };
@@ -594,7 +601,7 @@ function detectGlobalNpmPackage(pkgName: string, displayName: string, source = "
     return {
       name: pkgName,
       displayName,
-      version: `${parsed.major}.${parsed.minor}.${parsed.patch}`,
+      version: `${parsed.major}.${parsed.minor}.${parsed.patch}${parsed.prerelease ? `-${parsed.prerelease}` : ""}`,  // #192
       state: "ok",
       source,
     };
