@@ -9,7 +9,7 @@
 |---|---|
 | 预计时间 | 5-10 分钟（含 plugin 首次安装）|
 | 前置 | 已有 `claude-code-cli` runtime 的节点（hello-world demo 用过 `claude-agent-sdk`，本案例 runtime 不同；如果没节点先看[上手指南](/guide/getting-started)）|
-| anet 版本 | latest / preview 通道任意当前版本均可（`anet channel add telegram` 自早期版本即内置；当前 v0.10.8 stable 含）|
+| anet 版本 | latest / preview 通道任意当前版本均可（`anet channel add telegram` 自早期版本即内置；当前 v0.10.10 stable 含）|
 | Claude Code CLI 版本 | ≥ 2.x（需支持 `--channels plugin:xxx@yyy` 语法）|
 
 ---

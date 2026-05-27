@@ -9,7 +9,7 @@ Wire a running `claude-code-cli` node to Telegram — you DM the bot, the bot fo
 |---|---|
 | Estimated time | 5-10 minutes (includes first-time plugin install) |
 | Prerequisite | A node running with `claude-code-cli` runtime (hello-world demo uses `claude-agent-sdk` — different runtime; if no node yet, see [Getting started](/en/guide/getting-started)) |
-| anet version | any current latest / preview build (`anet channel add telegram` has been bundled since early versions; current v0.10.8 stable includes it) |
+| anet version | any current latest / preview build (`anet channel add telegram` has been bundled since early versions; current v0.10.10 stable includes it) |
 | Claude Code CLI version | ≥ 2.x (needs `--channels plugin:xxx@yyy` syntax support) |
 
 ---
