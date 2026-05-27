@@ -1,6 +1,6 @@
 # Getting Started (first-time install)
 
-This page is the **first-time install** path for current stable (v0.10.8) — every step is Playwright + Docker E2E verified. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
+This page is the **first-time install** path for current stable (v0.10.10) — every step is Playwright + Docker E2E verified. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
 
 ::: tip Which path should you follow?
 - **First-time install**: continue with this page from step 0 to step 10.
