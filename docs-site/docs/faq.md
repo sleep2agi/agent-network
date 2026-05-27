@@ -237,7 +237,7 @@ anet network invite --role member        # 生成邀请码（admin/member/viewer
 ```
 
 ::: tip 角色变更入口
-当前 v0.10.8 stable 仍不提供 CLI `promote` / `demote` 子命令（v0.9.x scope 是 Recovery & Observability，v0.10.0 是 Direct Runtime + Observability Foundations，v0.10.1 是 PINNED chain-bump hotfix，v0.10.2-8 是 Hero A disk + Hero D 拓扑前缀 / v0.10.3 codex preset / v0.10.4 dashboard orphan-band + `anet upgrade` UX 警告 / v0.10.5 batch wizard workdir + codex/claude skip API key / v0.10.6 `anet upgrade` Option B detached + wizard silent-exit / v0.10.7 codex-sdk batch yolo parity / v0.10.8 Servers UI 文案修 —— 都未动 member role 管理）；改角色目前要通过 [REST API `/api/networks/:id/members/:user_id`](/api/rest) 调用或 Dashboard Admin 页（部分实装，[详见 Dashboard Admin](/guide/dashboard#admin-管理面板)）。完整 CLI 入口排到 v0.11+ / 未排期。
+当前 v0.10.10 stable 仍不提供 CLI `promote` / `demote` 子命令（v0.9.x scope 是 Recovery & Observability，v0.10.0 是 Direct Runtime + Observability Foundations，v0.10.1 是 PINNED chain-bump hotfix，v0.10.2-10 是 Hero A disk + Hero D 拓扑前缀 / v0.10.3 codex preset / v0.10.4 dashboard orphan-band + `anet upgrade` UX 警告 / v0.10.5 batch wizard workdir + codex/claude skip API key / v0.10.6 `anet upgrade` Option B detached + wizard silent-exit / v0.10.7 codex-sdk batch yolo parity / v0.10.8 Servers UI 文案修 / v0.10.9 codex-sdk 图片输入 + commhub 附件 `meta_json` / v0.10.10 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接 —— 都未动 member role 管理）；改角色目前要通过 [REST API `/api/networks/:id/members/:user_id`](/api/rest) 调用或 Dashboard Admin 页（部分实装，[详见 Dashboard Admin](/guide/dashboard#admin-管理面板)）。完整 CLI 入口排到 v0.11+ / 未排期。
 :::
 
 ### 17a. 怎么改密码？（v0.8）
