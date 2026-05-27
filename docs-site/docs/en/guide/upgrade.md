@@ -7,14 +7,14 @@ v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) Option A o
 
 v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) actually resolves the chicken-and-egg: it defaults to `spawn(forkScript, { detached: true })` + `child.unref()` + main-process exit, with the detached child running `npm install` in the background. **But this fix only lives in the 2.2.5+ binary.**
 
-**One-time manual install**:
+**One-time manual install** (jump straight to latest, skip intermediate versions — one install gets you all fixes):
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.2.5
-anet --version            # expect v2.2.5
+npm install -g @sleep2agi/agent-network@latest
+anet --version            # current latest v2.2.9 (v0.10.10, 2026-05-27)
 ```
 
-From the next version onward (e.g. 2.2.6+), `anet upgrade` will **auto detached-spawn**; a minute or two later `anet --version` shows the new build — no `--self` flag or manual install required.
+From any 2.2.5+ binary onward (the v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) fix lives in 2.2.5+), `anet upgrade` **auto detached-spawns**; a minute or two later `anet --version` shows the new build — no `--self` flag or manual install required.
 :::
 
 ::: tip Brand-new machine, never installed anet before?

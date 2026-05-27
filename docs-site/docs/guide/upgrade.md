@@ -7,14 +7,14 @@ v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) Option A �
 
 v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) 真解 chicken-and-egg：默认 `spawn(forkScript, { detached: true })` + `child.unref()` + 主进程 exit，detached child 后台跑 `npm install`。但**这个修复只在 2.2.5+ 的 binary 里生效**。
 
-**只需手装 1 次**：
+**只需手装 1 次**（直接 jump 到 latest，跳过中间版本，一次装到位）：
 
 ```bash
-npm install -g @sleep2agi/agent-network@2.2.5
-anet --version            # 期望 v2.2.5
+npm install -g @sleep2agi/agent-network@latest
+anet --version            # 当前 latest v2.2.9（v0.10.10，2026-05-27）
 ```
 
-之后再有新版本（e.g. 2.2.6+），直接跑 `anet upgrade` 就**自动 detached spawn**，一两分钟后 `anet --version` 已是新版，再不需要 `--self` flag 或手装。
+之后再有新版本，直接跑 `anet upgrade` 就**自动 detached spawn**（v0.10.6 `#154` 起的修，2.2.5+ binary 默认行为），一两分钟后 `anet --version` 已是新版，再不需要 `--self` flag 或手装。
 :::
 
 ::: tip 全新机器从来没装过 anet？
