@@ -25,6 +25,8 @@ After installation, the `anet` command is available globally.
 | Command | Description |
 |------|------|
 | `anet hub start` | Start CommHub Server |
+| `anet hub stop` | Stop the local hub server (SIGTERM → 3s → SIGKILL) |
+| `anet hub status` | Show hub PID + port + /health version |
 | `anet hub dashboard` | Start Dashboard UI |
 | `anet hub config` | View/change Hub config |
 | `anet hub admin reset-user --username <u>` | Locally reset a user's password |
@@ -232,6 +234,40 @@ Once admin is bootstrapped (`~/.anet/server/admin-utok.json` exists), `anet hub 
 | `COMMHUB_AUTH_TOKEN` | Legacy master token env; deprecated in v0.8 |
 | `DATABASE_URL` | PostgreSQL connection (v0.8+ product direction has pivoted to SQLite only — see [v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md); adapter kept only as a community extension point / no E2E coverage, **not recommended for mainline production**; default SQLite) |
 | `COMMHUB_CORS_ORIGINS` | CORS whitelist |
+
+### anet hub stop
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "stop" branch)
+
+Stop the local CommHub Server. Uses `lsof -t -i :<port> -sTCP:LISTEN` to find the process, sends SIGTERM for a graceful exit, and falls back to SIGKILL after a 3-second grace window if anything is still listening.
+
+```bash
+anet hub stop                # default port 9200
+anet hub stop --port 8080    # custom port
+```
+
+Works even when no foreground process is available (before v0.10.10 you had to fall back to `lsof -ti:9200 | xargs kill` by hand; #200 removed that gap).
+
+### anet hub status
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "status" branch)
+
+Show the hub's running state — listener PID, port, and the server version reported by `/health`.
+
+```bash
+anet hub status              # default port 9200
+anet hub status --port 8080  # custom port
+```
+
+Sample output:
+
+```
+[anet] hub: ✅ running on http://127.0.0.1:9200
+[anet]   pid(s):         123456
+[anet]   server version: 0.8.4-preview.0
+```
+
+If nothing is listening on the port the command prints `Hub not running on port <port>` and a hint to run `anet hub start`.
 
 ### anet passwd
 

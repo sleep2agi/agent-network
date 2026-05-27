@@ -58,7 +58,7 @@ function tmuxAvailable(): boolean {
 // refetch). A `latest` agent-network release must pin a *stable* server.
 // `anet upgrade` (#88) surfaces this constant in its plan output so users
 // understand global-install version != version anet hub start actually runs.
-const PINNED_SERVER_VERSION = "0.8.4";
+const PINNED_SERVER_VERSION = "0.8.4-preview.0";
 function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   if (!uuid) return false;
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
@@ -2733,6 +2733,17 @@ async function runCommand() {
 
 // ── server ──
 
+// #199/#200 — find PIDs listening on a given TCP port (lsof-based). Used by
+// `anet hub stop` / `anet hub status` to identify the running commhub-server
+// process when the user doesn't have it in the foreground.
+function findHubPids(port: string | number): number[] {
+  try {
+    const out = execFileSync("lsof", ["-t", "-i", `:${port}`, "-sTCP:LISTEN"], { encoding: "utf-8" }).toString().trim();
+    if (!out) return [];
+    return out.split(/\s+/).map(x => parseInt(x.trim(), 10)).filter(n => !isNaN(n));
+  } catch { return []; }
+}
+
 async function serverCommand() {
   const sub = args[1];
   if (sub === "start" || sub === "local" || !sub) {
@@ -2788,7 +2799,7 @@ async function serverCommand() {
       // Pin to a specific version (module-level constant) — see PINNED_SERVER_VERSION.
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`];
       if (devOpen) serverArgs.push("--dev-open");
-      child = spawn("bunx", serverArgs, { env, stdio: "pipe" });
+      child = spawn("bunx", serverArgs, { env, stdio: "inherit" });
 
       // Wait for server with polling
       let ready = false;
@@ -3088,11 +3099,67 @@ async function serverCommand() {
     dashChild.on("exit", (code) => process.exit(code || 0));
     process.on("SIGINT", () => { dashChild.kill(); process.exit(0); });
 
+  } else if (sub === "stop") {
+    // #200 — graceful stop: lsof -ti:<port> → SIGTERM each → 3s grace → SIGKILL leftovers.
+    const opts = parseOpts();
+    const sc = loadServerConfig();
+    const port = String(opts.port || sc.port || "9200");
+    const pids = findHubPids(port);
+    if (pids.length === 0) {
+      console.log(`[anet] No hub server listening on port ${port}.`);
+      return;
+    }
+    console.log(`[anet] stopping hub (pid ${pids.join(", ")} on port ${port})...`);
+    for (const pid of pids) {
+      try { process.kill(pid, "SIGTERM"); } catch (e: any) {
+        console.warn(`[anet] ⚠ SIGTERM ${pid} failed: ${e?.message || e}`);
+      }
+    }
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 250));
+      if (findHubPids(port).length === 0) {
+        console.log(`[anet] ✅ Stopped.`);
+        return;
+      }
+    }
+    const leftover = findHubPids(port);
+    for (const pid of leftover) {
+      try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+    await new Promise(r => setTimeout(r, 500));
+    const remaining = findHubPids(port);
+    if (remaining.length === 0) console.log(`[anet] ✅ Stopped (after SIGKILL).`);
+    else console.error(`[anet] ⚠ Hub pid(s) ${remaining.join(", ")} still on port ${port}; check manually.`);
+
+  } else if (sub === "status") {
+    // #200 — show hub running state: pid(s) on the port + /health version.
+    const opts = parseOpts();
+    const sc = loadServerConfig();
+    const port = String(opts.port || sc.port || "9200");
+    const pids = findHubPids(port);
+    if (pids.length === 0) {
+      console.log(`[anet] Hub not running on port ${port}.`);
+      console.log(`[anet]    Start: anet hub start`);
+      return;
+    }
+    let healthy = false;
+    let version = "?";
+    try {
+      const h = await fetch(`http://127.0.0.1:${port}/health`).then(r => r.json() as any);
+      if (h.ok) { healthy = true; version = h.version || "?"; }
+    } catch {}
+    console.log(`[anet] hub: ${healthy ? "✅ running" : "⚠ port held but /health not OK"} on http://127.0.0.1:${port}`);
+    console.log(`[anet]   pid(s):         ${pids.join(", ")}`);
+    console.log(`[anet]   server version: ${version}`);
+
   } else {
     console.log(`
 anet hub <command>
 
   start [options]    Start CommHub Server (bootstraps admin account; login separately)
+  stop  [--port <p>] Stop the running CommHub Server (SIGTERM → 3s grace → SIGKILL)
+  status [--port <p>] Show hub PID + port + /health version
   dashboard          Start Dashboard UI
   config [options]   Show/set server config
 

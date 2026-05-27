@@ -25,6 +25,8 @@ npm install -g @sleep2agi/agent-network
 | 命令 | 说明 |
 |------|------|
 | `anet hub start` | 启动 CommHub Server |
+| `anet hub stop` | 停掉本机正在跑的 hub server (SIGTERM → 3s → SIGKILL) |
+| `anet hub status` | 查看 hub 运行状态 (PID + 端口 + version) |
 | `anet hub dashboard` | 启动 Dashboard UI |
 | `anet hub config` | 查看/修改 Hub 配置 |
 | `anet hub admin reset-user --username <u>` | 本机重置普通用户密码 |
@@ -238,6 +240,40 @@ admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次
 | `COMMHUB_AUTH_TOKEN` | 旧 master token 兼容环境变量；v0.8 起 deprecated |
 | `DATABASE_URL` | PostgreSQL 连接（v0.8+ 产品方向已转 SQLite only，详见 [v3-postgresql-design.md banner](https://github.com/sleep2agi/agent-network/blob/main/docs/v3-postgresql-design.md)；adapter 仅作社区扩展点保留 / E2E 未验证，**主线不推荐生产使用**；默认 SQLite） |
 | `COMMHUB_CORS_ORIGINS` | CORS 白名单 |
+
+### anet hub stop
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "stop" 分支)
+
+停掉本机正在跑的 CommHub Server。用 `lsof -t -i :<port> -sTCP:LISTEN` 找进程，SIGTERM 优雅退出，3s 内没退就 SIGKILL 兜底。
+
+```bash
+anet hub stop                # 默认端口 9200
+anet hub stop --port 8080    # 自定义端口
+```
+
+无前台进程时也能干净停（v0.10.10 之前需要 `lsof -ti:9200 | xargs kill` 手动 hack，#200 之后不用了）。
+
+### anet hub status
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "status" 分支)
+
+显示 hub 运行状态：进程 PID、端口、`/health` 返回的 server version。
+
+```bash
+anet hub status              # 默认端口 9200
+anet hub status --port 8080  # 自定义端口
+```
+
+输出示例：
+
+```
+[anet] hub: ✅ running on http://127.0.0.1:9200
+[anet]   pid(s):         123456
+[anet]   server version: 0.8.4-preview.0
+```
+
+未在监听该端口时显示 `Hub not running on port <port>` + 提示 `anet hub start`。
 
 ### anet passwd
 
