@@ -73,6 +73,38 @@ Expected node config after first turn:
 }
 ```
 
+## Known Limits
+
+`grok-build-acp` is stabilizing. The behaviors below are tracked under [#189](https://github.com/sleep2agi/agent-network/issues/189) — set expectations before depending on the runtime for production traffic.
+
+### Intermittent ACP error `-32603` (R1)
+
+Some general-purpose turns sporadically return `-32603: Internal error` from the Grok ACP server. `agent-node` does not retry these; the task replies with the raw error text. The reproducer is unstable and the root cause is on the Grok server side, still under confirmation.
+
+**Workaround**: Resend the task, or route it to a `claude-agent-sdk` / `codex-sdk` node. Detailed remediation: see [Troubleshooting → `grok ACP error -32603`](#grok-acp-error--32603-internal-error) below.
+
+### MCP readiness race (R2)
+
+On a fresh `grokSession`, the first turn may surface a "CommHub MCP servers are still connecting" notice. `agent-node` strips those leakage lines via the `sanitizeGrokCommhubLeak` filter, but the user-visible reply text may still be incomplete.
+
+**Workaround**: After `anet node start`, wait 5–10 seconds for the MCP handshake to complete before sending substantive tasks. Detailed remediation: see [Troubleshooting → Grok says MCP servers are still connecting](#grok-says-mcp-servers-are-still-connecting) below.
+
+### Stale `.anet/node-server.js` / `.mcp.json` drift (R3)
+
+If the project directory carries an older `.anet/node-server.js` or `.mcp.json`, Grok may receive a stale CommHub tool schema that is missing `get_task` / `parent_task_id` — explicit delegation chains will silently break.
+
+**Workaround**: Delete the stale `.anet/node-server.js` and re-run `anet node create` so `agent-node` rewrites the latest interface.
+
+### No image input (R5)
+
+The Grok Build ACP fixture reports `promptCapabilities.image=false`. Sending a task with `attachments[].path` pointing to an image causes `agent-node` to log a warning and downgrade to a plain-text prompt.
+
+**Workaround**: Route image-bearing tasks to a `codex-sdk` or `claude-agent-sdk` node.
+
+### Explicit-delegation phrasing in flux (R4 — broadening in progress)
+
+In `agent-node` v2.4.5 and earlier, the CommHub wrapper only recognizes the literal `给 X 发任务` / `给 X 派任务` / `send_task X` phrasing for explicit delegation. **Starting in v2.4.6**, recognition broadens to mixed Chinese/English shapes such as `和 / 与 / 跟 / 找 / 让 / 交给 / 转给 X 沟通一下 / 做 / 完成 / review / ship …`. When the wrapper matches, `agent-node` intercepts the turn before it reaches Grok, runs `send_task` with the proper `parent_task_id` chain, and returns the child's reply on the parent task. See the [Delegation Contract](#delegation-contract) below for the supported workflow.
+
 ## Stable Preview Contract
 
 `grok-build-acp` is stable for the following Agent Network behavior:
