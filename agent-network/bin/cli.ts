@@ -915,6 +915,8 @@ Node Management:
   anet status                   Network overview (agents + tasks)
   anet tasks [status]           Query tasks (replied/failed/delivered)
   anet goal list [node]          List local scheduled goals
+  anet goal show <node> <id>     Show one goal in detail (progress log)
+  anet goal edit <node> <id> ... Edit a goal's interval / text / status
   anet goal cancel <node> <id>   Mark a scheduled goal cancelled
 
 Project (cwd-wide):
@@ -4761,23 +4763,101 @@ function isNodeProbablyRunning(nodeId: string, profile: Profile): boolean {
   catch { return false; }
 }
 
+// #191 Phase 1 Pillar A — parse a `--interval` flag value (CLI side, kept
+// in lockstep with agent-node/src/goals/parser.ts INTERVAL_PATTERNS so the
+// edit UX matches what a node accepts in `/goal`/`/loop`). Returns ms or
+// null when the input is empty / unrecognised / sub-minute.
+const GOAL_MIN_INTERVAL_MS = 60_000;
+function parseGoalIntervalFlag(input: string | undefined): number | null {
+  if (!input || typeof input !== "string") return null;
+  const body = input.trim();
+  if (!body) return null;
+  if (/\d+\s*(?:seconds|second|secs|sec|s)\b/i.test(body) || /\d+\s*秒/.test(body)) return null;
+  const patterns: Array<{ re: RegExp; toMs: (m: RegExpExecArray) => number }> = [
+    { re: /^\s*hourly\s*$/i, toMs: () => 60 * 60_000 },
+    { re: /^\s*daily\s*$/i, toMs: () => 24 * 60 * 60_000 },
+    { re: /^\s*每\s*小时\s*$/, toMs: () => 60 * 60_000 },
+    { re: /^\s*每\s*天\s*$/, toMs: () => 24 * 60 * 60_000 },
+    { re: /^\s*每?\s*(\d+)\s*分钟?\s*$/, toMs: (m) => parseInt(m[1], 10) * 60_000 },
+    { re: /^\s*每?\s*(\d+)\s*小时\s*$/, toMs: (m) => parseInt(m[1], 10) * 60 * 60_000 },
+    { re: /^\s*每?\s*(\d+)\s*天\s*$/, toMs: (m) => parseInt(m[1], 10) * 24 * 60 * 60_000 },
+    { re: /^\s*(\d+)\s*(?:minutes|minute|mins|min|m)\s*$/i, toMs: (m) => parseInt(m[1], 10) * 60_000 },
+    { re: /^\s*(\d+)\s*(?:hours|hour|hrs|hr|h)\s*$/i, toMs: (m) => parseInt(m[1], 10) * 60 * 60_000 },
+    { re: /^\s*(\d+)\s*(?:days|day|d)\s*$/i, toMs: (m) => parseInt(m[1], 10) * 24 * 60 * 60_000 },
+  ];
+  for (const { re, toMs } of patterns) {
+    const m = re.exec(body);
+    if (m) {
+      const ms = toMs(m);
+      if (!Number.isFinite(ms) || ms < GOAL_MIN_INTERVAL_MS) return null;
+      return ms;
+    }
+  }
+  return null;
+}
+
+const GOAL_VALID_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
+
+// #191 Phase 1 Pillar A — render one goal with progress log for `anet goal
+// show`. Compact, no color codes (consistent with `anet info`).
+function printGoalShow(goal: LocalGoal, displayName: string, path: string) {
+  console.log("");
+  console.log(`  Goal:     ${goal.goal_id}`);
+  console.log(`  Node:     ${displayName}`);
+  console.log(`  Status:   ${goal.status || "?"}`);
+  console.log(`  Text:     ${(goal.text || "").replace(/\s+/g, " ")}`);
+  console.log(`  Every:    ${formatGoalInterval(goal.interval_ms)}`);
+  console.log(`  Next:     ${formatGoalDue(goal.next_wake_at)}${goal.next_wake_at ? `  (${goal.next_wake_at})` : ""}`);
+  if (goal.last_wake_at) console.log(`  Last:     ${goal.last_wake_at}`);
+  if (goal.runtime) console.log(`  Runtime:  ${goal.runtime}`);
+  if (goal.parent_task_id) console.log(`  Parent:   ${goal.parent_task_id}`);
+  if (goal.report_to) console.log(`  ReportTo: ${goal.report_to}`);
+  console.log(`  Created:  ${goal.created_at || "-"}`);
+  console.log(`  Updated:  ${goal.updated_at || "-"}`);
+  console.log(`  File:     ${path}`);
+  const log = Array.isArray(goal.progress_log) ? goal.progress_log : [];
+  if (log.length === 0) {
+    console.log("  Progress: (none)");
+  } else {
+    console.log(`  Progress (${log.length}):`);
+    for (const entry of log.slice(-10)) {
+      const ts = (entry.ts || "").slice(0, 19).padEnd(19);
+      const st = (entry.status || "").padEnd(10);
+      const sm = (entry.summary || "").replace(/\s+/g, " ").slice(0, 80);
+      console.log(`    ${ts}  ${st}  ${sm}`);
+    }
+    if (log.length > 10) console.log(`    … ${log.length - 10} earlier entries omitted`);
+  }
+  console.log("");
+}
+
 function printGoalUsage() {
   console.log(`
 anet goal <command>
 
-  list [node]                 List scheduled goals for one node, or all nodes
-  cancel <node> <goal-id>     Mark a goal cancelled in that node's goals.json
+  list [node]                  List scheduled goals for one node, or all nodes
+  show <node> <goal-id>        Show one goal in detail (including progress log)
+  edit <node> <goal-id> ...    Edit a goal's interval / text / status
+  cancel <node> <goal-id>      Mark a goal cancelled in that node's goals.json
+
+Edit flags (at least one required):
+  --interval <5min|1h|1d|每5分钟|hourly|daily|...>
+  --text "<new goal description>"
+  --status active|paused|completed|cancelled
 
 Examples:
   anet goal list
   anet goal list 通信牛
+  anet goal show 通信牛 abcd1234
+  anet goal edit 通信牛 abcd1234 --interval 10min
+  anet goal edit 通信牛 abcd1234 --status paused
   anet goal cancel 通信牛 abcd1234
 
 Data: .anet/nodes/<node>/goals.json
 
-Note: running agent-node processes keep goal state in memory. After cancel,
-restart the node for the cancellation to take effect until live goal control is
-backed by a hub API.
+Note: running agent-node processes keep goal state in memory. After edit /
+cancel, restart the node for the change to take effect until live goal
+control is backed by a hub API.
 `);
 }
 
@@ -4863,6 +4943,126 @@ async function goalCommand() {
     saveGoalsFile(path, file);
 
     console.log(`[anet] cancelled goal ${goal.goal_id.slice(0, 8)} for ${nodeDisplayName(resolved.id, resolved.profile)}`);
+    console.log(`[anet] ${path}`);
+    if (isNodeProbablyRunning(resolved.id, resolved.profile)) {
+      console.log("[anet] node appears to be running; restart it for local goals.json changes to take effect.");
+    }
+    return;
+  }
+
+  // #191 Phase 1 Pillar A — `anet goal show <node> <goal-id>`: detailed
+  // view for one goal, including the last 10 progress_log entries. Read-only.
+  if (sub === "show") {
+    const nodeRef = args[2];
+    const goalRef = args[3];
+    if (!nodeRef || !goalRef) {
+      console.error("Usage: anet goal show <node> <goal-id>");
+      process.exit(1);
+    }
+    const resolved = resolveNodeRef(nodeRef);
+    if (!resolved) {
+      console.error(`Node "${nodeRef}" not found.`);
+      process.exit(1);
+    }
+    const { path, file } = loadGoalsFile(resolved.id);
+    const matches = file.goals.filter(g => g.goal_id === goalRef || g.goal_id.startsWith(goalRef));
+    if (matches.length === 0) {
+      console.error(`Goal "${goalRef}" not found in ${path}`);
+      process.exit(1);
+    }
+    if (matches.length > 1) {
+      console.error(`Goal prefix "${goalRef}" is ambiguous (${matches.length} matches). Use a longer id.`);
+      process.exit(1);
+    }
+    printGoalShow(matches[0], nodeDisplayName(resolved.id, resolved.profile), path);
+    return;
+  }
+
+  // #191 Phase 1 Pillar A — `anet goal edit <node> <goal-id> --interval ...
+  // --text "..." --status active|paused|completed|cancelled`. At least one
+  // mutating flag required. Atomic write (saveGoalsFile = tmp + rename).
+  // Appends a progress_log "edited" entry summarising the changed fields so
+  // the audit trail is preserved.
+  if (sub === "edit") {
+    const nodeRef = args[2];
+    const goalRef = args[3];
+    if (!nodeRef || !goalRef) {
+      console.error("Usage: anet goal edit <node> <goal-id> [--interval ...] [--text \"...\"] [--status ...]");
+      process.exit(1);
+    }
+    const opts = parseOpts();
+    const resolved = resolveNodeRef(nodeRef);
+    if (!resolved) {
+      console.error(`Node "${nodeRef}" not found.`);
+      process.exit(1);
+    }
+    const { path, file } = loadGoalsFile(resolved.id);
+    const matches = file.goals.filter(g => g.goal_id === goalRef || g.goal_id.startsWith(goalRef));
+    if (matches.length === 0) {
+      console.error(`Goal "${goalRef}" not found in ${path}`);
+      process.exit(1);
+    }
+    if (matches.length > 1) {
+      console.error(`Goal prefix "${goalRef}" is ambiguous (${matches.length} matches). Use a longer id.`);
+      process.exit(1);
+    }
+    const goal = matches[0];
+    const changes: string[] = [];
+
+    if (typeof opts.interval === "string" && opts.interval.length > 0) {
+      const ms = parseGoalIntervalFlag(opts.interval);
+      if (ms === null) {
+        console.error(`--interval value not recognised: "${opts.interval}". Try 5min / 1h / 1d / 每5分钟 / hourly / daily (sub-minute rejected).`);
+        process.exit(1);
+      }
+      if (ms !== goal.interval_ms) {
+        const prev = formatGoalInterval(goal.interval_ms);
+        goal.interval_ms = ms;
+        // Recompute next_wake_at from now + new interval so the change
+        // takes effect on the next tick rather than waiting out the old
+        // window. Live nodes still need a restart per the Note in usage.
+        goal.next_wake_at = new Date(Date.now() + ms).toISOString();
+        changes.push(`interval ${prev} → ${formatGoalInterval(ms)}`);
+      }
+    }
+
+    if (typeof opts.text === "string" && opts.text.length > 0) {
+      const next = opts.text.trim();
+      if (next && next !== goal.text) {
+        goal.text = next;
+        changes.push(`text updated (${next.length} chars)`);
+      }
+    }
+
+    if (typeof opts.status === "string" && opts.status.length > 0) {
+      const next = opts.status.trim().toLowerCase();
+      if (!GOAL_VALID_STATUS.has(next)) {
+        console.error(`--status must be one of: ${Array.from(GOAL_VALID_STATUS).join(", ")}`);
+        process.exit(1);
+      }
+      if (next !== goal.status) {
+        const prev = goal.status || "?";
+        goal.status = next as GoalStatus;
+        changes.push(`status ${prev} → ${next}`);
+      }
+    }
+
+    if (changes.length === 0) {
+      console.error("No edit flags supplied (or no effective change). Use --interval / --text / --status.");
+      process.exit(1);
+    }
+
+    goal.updated_at = new Date().toISOString();
+    goal.progress_log = Array.isArray(goal.progress_log) ? goal.progress_log : [];
+    goal.progress_log.push({
+      ts: goal.updated_at,
+      status: goal.status,
+      summary: `edited by anet goal edit: ${changes.join("; ")}`,
+    });
+    saveGoalsFile(path, file);
+
+    console.log(`[anet] edited goal ${goal.goal_id.slice(0, 8)} for ${nodeDisplayName(resolved.id, resolved.profile)}`);
+    for (const c of changes) console.log(`         ${c}`);
     console.log(`[anet] ${path}`);
     if (isNodeProbablyRunning(resolved.id, resolved.profile)) {
       console.log("[anet] node appears to be running; restart it for local goals.json changes to take effect.");
