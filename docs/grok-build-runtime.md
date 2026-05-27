@@ -95,6 +95,8 @@ If the project directory carries an older `.anet/node-server.js` or `.mcp.json`,
 
 **Workaround**: Delete the stale `.anet/node-server.js` and re-run `anet node create` so `agent-node` rewrites the latest interface.
 
+The deletion is **scoped to the current project directory's `.anet/`** — other project workdirs (`/path/to/another-project/.anet/`) and your global `~/.anet/` config are not touched. All nodes co-located in the same project directory share that one helper file, so the rebuild affects every node in that workdir at once; `anet node create` regenerates the helper with the current sanitizer and the cost is effectively zero. Node identity and CommHub credentials persist in `~/.anet/nodes/<alias>/`, so no node loses its `node_id` or token.
+
 ### No image input (R5)
 
 The Grok Build ACP fixture reports `promptCapabilities.image=false`. Sending a task with `attachments[].path` pointing to an image causes `agent-node` to log a warning and downgrade to a plain-text prompt.
