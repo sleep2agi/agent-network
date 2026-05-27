@@ -138,6 +138,19 @@ npm install -g @sleep2agi/agent-network
 | `anet channel add <type>` | 添加 Channel（telegram/wechat/feishu） |
 | `anet channel ls` | 列出 Channel |
 
+### Goal 管理（[#191](https://github.com/sleep2agi/agent-network/issues/191) / [#184](https://github.com/sleep2agi/agent-network/issues/184)）
+
+`/goal` / `/loop` 在 agent 内调度的周期任务落盘到 `.anet/nodes/<node>/goals.json`；这一组命令负责本地侧 CRUD（详见 [`anet goal`](#anet-goal)）。
+
+| 命令 | 说明 |
+|------|------|
+| `anet goal list [node]` | 列出本地 goal（不带 node 列所有节点） |
+| `anet goal show <node> <id>` | 查看单个 goal 详情 + 末 10 条 progress_log |
+| `anet goal edit <node> <id> [--interval ...] [--text "..."] [--status ...]` | 修改 interval/text/status（至少一个 flag） |
+| `anet goal cancel <node> <id>` | 标记 goal 为 `cancelled` |
+
+> 运行中的 agent-node 把 goal 状态保留在内存里跑 —— 改完 `goals.json` 需要重启该节点才会生效（live goal control 走 commhub MCP 工具，issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar C 设计中）。
+
 ### 其他
 
 | 命令 | 说明 |
@@ -636,6 +649,66 @@ anet init project
   }
 }
 ```
+
+### anet goal
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4864)
+
+本地管理 agent-node 的调度 goal（`/goal` / `/loop` 在 agent 内 spawn 出来的周期任务，issue [#184](https://github.com/sleep2agi/agent-network/issues/184) Phase 1 落盘到 `.anet/nodes/<node>/goals.json`，issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar A 把 CLI CRUD 补齐）。
+
+```bash
+anet goal <subcommand> [args] [flags]
+```
+
+子命令：
+
+| 子命令 | 用途 |
+|--------|------|
+| `list [node]` | 不带 node 列所有节点；带 node 只列那个节点。空节点跳过，全部为空时打印 `No goals found.` |
+| `show <node> <id>` | 详细视图 + 末 10 条 progress_log 时间线 + `runtime` / `parent_task_id` / `report_to` |
+| `edit <node> <id> ...` | 修改 `interval` / `text` / `status`（至少一个 flag），原子写盘（tmp + rename） |
+| `cancel <node> <id>` | 把 goal 改成 `cancelled`，并追加一条 progress_log entry |
+
+`<id>` 接受前缀匹配（一般 8 位足够，歧义则报错并提示用更长的 id）。
+
+**`edit` 接受的 flag**：
+
+| Flag | 取值 | 说明 |
+|------|------|------|
+| `--interval` | `5min` / `10min` / `1h` / `1d` / `每5分钟` / `每小时` / `hourly` / `daily` / ... | 跟 agent-node 内 `/goal` 解析器同一套规则；**sub-minute 拒绝**（`MIN_INTERVAL_MS = 60s`，避免 wake-storm）。改完后 `next_wake_at = now + new interval`，下次 tick 立即生效，不等老窗口走完。 |
+| `--text` | 任意非空字符串 | 完整替换 goal text |
+| `--status` | `active` / `paused` / `completed` / `cancelled` | 白名单校验，其他值拒绝 |
+
+至少要给一个 flag，否则报 `No edit flags supplied`。每次成功 `edit` 会自动追加一条 `progress_log` entry 写明改了哪些字段，留审计痕迹。
+
+**例子**：
+
+```bash
+# 列所有节点的本地 goal
+anet goal list
+
+# 看一个节点的 goal
+anet goal list 通信SDK马
+
+# 看一个 goal 详情
+anet goal show 通信SDK马 abcd1234
+
+# 把 interval 改成 10 分钟
+anet goal edit 通信SDK马 abcd1234 --interval 10min
+
+# 同时改 text + status
+anet goal edit 通信SDK马 abcd1234 \
+  --text "每 10 分钟检查 deploy 状态并把异常上报指挥室" \
+  --status active
+
+# 暂停一个 goal
+anet goal edit 通信SDK马 abcd1234 --status paused
+
+# 取消一个 goal
+anet goal cancel 通信SDK马 abcd1234
+```
+
+> **运行中的 node 不感知本地 `goals.json` 改动**：当前 agent-node 把 goal 状态保留在内存里。`anet goal edit/cancel` 改 file 后，CLI 会通过 `.pid` / tmux session 检测节点是否在跑，并在 stdout 提示 `node appears to be running; restart it for local goals.json changes to take effect.`。live goal control（agent 自己通过 commhub MCP 工具 CRUD goal）规划在 issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar C，等 design review。
 
 ## 常用选项
 

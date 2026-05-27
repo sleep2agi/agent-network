@@ -138,6 +138,19 @@ See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> 
 | `anet channel add <type>` | Add a channel (telegram/wechat/feishu) |
 | `anet channel ls` | List channels |
 
+### Goal Management ([#191](https://github.com/sleep2agi/agent-network/issues/191) / [#184](https://github.com/sleep2agi/agent-network/issues/184))
+
+`/goal` / `/loop` scheduled in-agent periodic tasks are persisted to `.anet/nodes/<node>/goals.json`; this group handles local-side CRUD (details under [`anet goal`](#anet-goal)).
+
+| Command | Description |
+|------|------|
+| `anet goal list [node]` | List local goals (omit node to scan all nodes) |
+| `anet goal show <node> <id>` | Show one goal in detail + last 10 progress_log entries |
+| `anet goal edit <node> <id> [--interval ...] [--text "..."] [--status ...]` | Edit interval/text/status (at least one flag) |
+| `anet goal cancel <node> <id>` | Mark a goal as `cancelled` |
+
+> A running agent-node keeps its goal state in memory — after editing `goals.json` you must restart the node for changes to take effect (live goal control via commhub MCP tools is planned in issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar C, design under review).
+
 ### Other
 
 | Command | Description |
@@ -630,6 +643,66 @@ anet init project
   }
 }
 ```
+
+### anet goal
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4864)
+
+Local management of agent-node scheduled goals (the `/goal` / `/loop` periodic tasks spawned in-agent — issue [#184](https://github.com/sleep2agi/agent-network/issues/184) Phase 1 persists them to `.anet/nodes/<node>/goals.json`; issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar A completes the CLI CRUD surface).
+
+```bash
+anet goal <subcommand> [args] [flags]
+```
+
+Subcommands:
+
+| Subcommand | Purpose |
+|------------|---------|
+| `list [node]` | Omit node to scan all nodes; pass a node to list only that one. Empty nodes are skipped; when nothing matches, prints `No goals found.` |
+| `show <node> <id>` | Detailed view + last 10 `progress_log` entries + `runtime` / `parent_task_id` / `report_to` |
+| `edit <node> <id> ...` | Edit `interval` / `text` / `status` (at least one flag), atomic write (tmp + rename) |
+| `cancel <node> <id>` | Set the goal to `cancelled` and append a progress_log entry |
+
+`<id>` accepts prefix matching (8 chars is usually enough; ambiguous prefixes are rejected with a hint to use a longer id).
+
+**`edit` flags**:
+
+| Flag | Accepted values | Notes |
+|------|-----------------|-------|
+| `--interval` | `5min` / `10min` / `1h` / `1d` / `每5分钟` / `每小时` / `hourly` / `daily` / ... | Same rule set as the agent-node's in-process `/goal` parser; **sub-minute values are rejected** (`MIN_INTERVAL_MS = 60s`, prevents wake-storms). After the change `next_wake_at = now + new interval`, so the new cadence kicks in on the next tick instead of waiting out the old window. |
+| `--text` | Any non-empty string | Replaces the goal text wholesale |
+| `--status` | `active` / `paused` / `completed` / `cancelled` | Allow-listed; other values are rejected |
+
+At least one flag is required, otherwise the command prints `No edit flags supplied`. Each successful `edit` automatically appends a `progress_log` entry summarising the changed fields, preserving the audit trail.
+
+**Examples**:
+
+```bash
+# List local goals across all nodes
+anet goal list
+
+# Filter by node
+anet goal list 通信SDK马
+
+# Inspect one goal in detail
+anet goal show 通信SDK马 abcd1234
+
+# Change interval to 10 minutes
+anet goal edit 通信SDK马 abcd1234 --interval 10min
+
+# Update text and status in one call
+anet goal edit 通信SDK马 abcd1234 \
+  --text "Check the deploy every 10 minutes and report anomalies to the room" \
+  --status active
+
+# Pause a goal
+anet goal edit 通信SDK马 abcd1234 --status paused
+
+# Cancel a goal
+anet goal cancel 通信SDK马 abcd1234
+```
+
+> **A running node does not pick up local `goals.json` edits automatically**: agent-node currently keeps goal state in memory. After `anet goal edit/cancel`, the CLI checks `.pid` / tmux for the node and prints `node appears to be running; restart it for local goals.json changes to take effect.` Live goal control (agents themselves CRUD-ing goals via commhub MCP tools) is planned as issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar C, awaiting design review.
 
 ## Common Options
 
