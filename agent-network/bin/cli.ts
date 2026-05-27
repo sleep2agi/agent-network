@@ -277,11 +277,12 @@ interface Profile {
   role?: "leader" | "worker";
 }
 
-type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk";
+type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk" | "grok-build-acp";
 
 function normalizeRuntime(profileOrRuntime?: Profile | string): RuntimeName {
   if (typeof profileOrRuntime === "string") {
     if (profileOrRuntime === "codex" || profileOrRuntime === "codex-sdk") return "codex-sdk";
+    if (profileOrRuntime === "grok" || profileOrRuntime === "grok-build" || profileOrRuntime === "grok-build-acp") return "grok-build-acp";
     if (profileOrRuntime === "claude" || profileOrRuntime === "claude-sdk" || profileOrRuntime === "claude-agent-sdk") return "claude-agent-sdk";
     if (profileOrRuntime === "agent-sdk") return "claude-agent-sdk";
     return "claude-code-cli";
@@ -725,6 +726,10 @@ async function setupCommand() {
         value: "codex-sdk",
       },
       {
+        name: `grok-build-acp — Grok Build ACP${isInstalled(versions.agentNode) ? "（需要 agent-node + grok CLI）" : "（需要安装 agent-node + grok CLI）"}`,
+        value: "grok-build-acp",
+      },
+      {
         name: `claude-agent-sdk — Claude Agent SDK${isInstalled(versions.agentNode) ? "（已就绪 ✅）" : "（需要安装 agent-node）"}`,
         value: "claude-agent-sdk",
       },
@@ -747,6 +752,9 @@ async function setupCommand() {
   if (runtimeSelections.includes("codex-sdk")) {
     if (!isInstalled(versions.agentNode)) addPackage("@sleep2agi/agent-node");
     if (!isInstalled(versions.codex)) addPackage("@openai/codex");
+  }
+  if (runtimeSelections.includes("grok-build-acp") && !isInstalled(versions.agentNode)) {
+    addPackage("@sleep2agi/agent-node");
   }
   if (runtimeSelections.includes("claude-agent-sdk") && !isInstalled(versions.agentNode)) {
     addPackage("@sleep2agi/agent-node");
@@ -784,7 +792,7 @@ async function setupCommand() {
   if (runtimeSelections.includes("claude-code-cli")) {
     console.log(`  ${isInstalled(verified.claude) ? "✅" : "❌"} ${formatDetectedVersion(verified.claude)}`);
   }
-  if (runtimeSelections.includes("codex-sdk") || runtimeSelections.includes("claude-agent-sdk")) {
+  if (runtimeSelections.includes("codex-sdk") || runtimeSelections.includes("claude-agent-sdk") || runtimeSelections.includes("grok-build-acp")) {
     console.log(`  ${isInstalled(verified.agentNode) ? "✅" : "❌"} ${formatDetectedVersion(verified.agentNode)}`);
   }
   if (runtimeSelections.includes("codex-sdk")) {
@@ -796,6 +804,9 @@ async function setupCommand() {
 
   if (runtimeSelections.includes("codex-sdk")) {
     console.log(`  ⚠ codex 需要登录: codex auth login`);
+  }
+  if (runtimeSelections.includes("grok-build-acp")) {
+    console.log(`  ⚠ grok 需要安装并登录: grok auth login 或 x.ai CLI 认证缓存`);
   }
   if (runtimeSelections.includes("claude-code-cli")) {
     console.log(`  ⚠ claude 需要登录: claude auth login`);
@@ -855,6 +866,10 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
     console.warn(`[anet] Warning: agent-node not found in PATH.`);
     console.warn(`[anet] Run: anet upgrade`);
   }
+  if (runtime === "grok-build-acp" && !commandExists("grok")) {
+    console.warn(`[anet] Warning: grok CLI not found in PATH.`);
+    console.warn(`[anet] Install/login Grok Build first: https://x.ai/cli`);
+  }
 }
 
 // ── Help ──
@@ -892,6 +907,8 @@ Node Management:
   anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
   anet tasks [status]           Query tasks (replied/failed/delivered)
+  anet goal list [node]          List local scheduled goals
+  anet goal cancel <node> <id>   Mark a scheduled goal cancelled
 
 Project (cwd-wide):
   anet project up                Start every node in cwd (skip already-running)
@@ -1559,7 +1576,7 @@ async function createInteractiveCommand() {
 
 This wizard creates one agent node for this project:
   - node config: .anet/nodes/<node-name>/config.json
-  - runtime: claude-code-cli / codex-sdk / claude-agent-sdk
+  - runtime: claude-code-cli / codex-sdk / claude-agent-sdk / grok-build-acp
   - optional Telegram channel: text + images from an allowlist user
 `);
 
@@ -1582,7 +1599,7 @@ This wizard creates one agent node for this project:
   // runtimes (claude-code-cli / codex-sdk) reuse their CLI's existing auth
   // and skip vendor selection entirely.
   const opts = parseOpts();
-  let pickedRuntime: "claude-agent-sdk" | "claude-code-cli" | "codex-sdk" | null = null;
+  let pickedRuntime: RuntimeName | null = null;
   try {
     const { select: sel } = await import("@inquirer/prompts");
     pickedRuntime = await sel({
@@ -1591,6 +1608,7 @@ This wizard creates one agent node for this project:
         { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
         { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
         { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+        { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
       ],
     }) as any;
   } catch (e: any) {
@@ -1604,6 +1622,9 @@ This wizard creates one agent node for this project:
   } else if (pickedRuntime === "codex-sdk") {
     opts.runtime = "codex-sdk";
     console.log(`[anet] 请确保已执行: codex auth login`);
+  } else if (pickedRuntime === "grok-build-acp") {
+    opts.runtime = "grok-build-acp";
+    console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok auth login`);
   } else {
     // claude-agent-sdk — flow continues into vendor + model picker.
     const sel = await selectVendorAndModel();
@@ -1720,7 +1741,7 @@ async function createCommand(idOverride?: string) {
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
-    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk] [--model ...] [--tools ...]");
+    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk|grok-build-acp] [--model ...] [--tools ...]");
     console.error("Or run fully interactive: anet node create");
     process.exit(1);
   }
@@ -1764,12 +1785,13 @@ async function createCommand(idOverride?: string) {
   );
   const credAlreadyProvided = !!process.env.ANTHROPIC_AUTH_TOKEN
     || !!process.env.ANTHROPIC_API_KEY || envFlagHasAuth;
-  const runtimeAlreadyExplicit = opts.runtime === "codex-sdk" || opts.runtime === "claude-code-cli";
+  const explicitRuntime = opts.runtime ? normalizeRuntime(opts.runtime) : undefined;
+  const runtimeAlreadyExplicit = explicitRuntime === "codex-sdk" || explicitRuntime === "claude-code-cli" || explicitRuntime === "grok-build-acp";
   const skipInteractive = credAlreadyProvided || runtimeAlreadyExplicit;
 
   // #133 selectRuntime — runtime-first, exported as a helper so create paths
   // (interactive single / batch wizard / sci-team demo) can share the picker.
-  const selectRuntime = async (): Promise<"claude-agent-sdk" | "claude-code-cli" | "codex-sdk" | null> => {
+  const selectRuntime = async (): Promise<RuntimeName | null> => {
     try {
       const { select: sel } = await import("@inquirer/prompts");
       const picked = await sel({
@@ -1778,6 +1800,7 @@ async function createCommand(idOverride?: string) {
           { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
           { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
           { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+          { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
         ],
       });
       return picked as any;
@@ -1790,6 +1813,8 @@ async function createCommand(idOverride?: string) {
   if (!skipInteractive && process.stdin.isTTY) {
     const runtime = await selectRuntime();
     if (runtime) opts.runtime = runtime;
+  } else if (explicitRuntime) {
+    opts.runtime = explicitRuntime;
   }
 
   // Per-runtime branching: vendor picker only for claude-agent-sdk; others skip.
@@ -1797,6 +1822,8 @@ async function createCommand(idOverride?: string) {
     console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex auth login");
+  } else if (opts.runtime === "grok-build-acp") {
+    console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok auth login");
   } else {
     // Either claude-agent-sdk (explicit / picker-default) or undefined runtime
     // — fall through to vendor selection. credAlreadyProvided also skips since
@@ -2194,7 +2221,7 @@ async function launchAgent(id: string, forceNewSession = false) {
     }
   } catch {}
 
-  if (runtime === "codex-sdk" || runtime === "claude-agent-sdk") {
+  if (runtime === "codex-sdk" || runtime === "claude-agent-sdk" || runtime === "grok-build-acp") {
     // spawn agent-node
     const agentArgs = [
       "--config", join(nodesDir(), nodeId, "config.json"),
@@ -4574,6 +4601,193 @@ function timeAgo(dateStr: string): string {
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
   return `${Math.floor(diff / 86400000)}d`;
+}
+
+// ── goal (local scheduled goal management) ──
+
+type GoalStatus = "active" | "paused" | "complete" | "failed" | "cancelled";
+interface LocalGoal {
+  goal_id: string;
+  text: string;
+  status: GoalStatus;
+  interval_ms: number;
+  next_wake_at?: string;
+  last_wake_at?: string;
+  last_report_at?: string;
+  parent_task_id?: string;
+  report_to?: string;
+  runtime?: string;
+  created_at?: string;
+  updated_at?: string;
+  progress_log?: Array<{ ts?: string; status?: string; summary?: string }>;
+}
+interface LocalGoalsFile { version: 1; goals: LocalGoal[]; }
+
+function goalPathForNodeId(nodeId: string): string {
+  return join(nodesDir(), nodeId, "goals.json");
+}
+
+function loadGoalsFile(nodeId: string): { path: string; file: LocalGoalsFile } {
+  const path = goalPathForNodeId(nodeId);
+  if (!existsSync(path)) return { path, file: { version: 1, goals: [] } };
+  let raw = "";
+  try {
+    raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.goals)) {
+      throw new Error("unsupported goals.json schema");
+    }
+    return { path, file: parsed };
+  } catch (e: any) {
+    throw new Error(`cannot read ${path}: ${e.message}`);
+  }
+}
+
+function saveGoalsFile(path: string, file: LocalGoalsFile) {
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(file, null, 2) + "\n");
+  renameSync(tmp, path);
+}
+
+function formatGoalInterval(ms: number): string {
+  const min = Math.round(ms / 60000);
+  if (!Number.isFinite(min) || min <= 0) return "?";
+  if (min % 1440 === 0) return `${min / 1440}d`;
+  if (min % 60 === 0) return `${min / 60}h`;
+  return `${min}min`;
+}
+
+function formatGoalDue(nextWakeAt?: string): string {
+  if (!nextWakeAt) return "-";
+  const ms = new Date(nextWakeAt).getTime();
+  if (!Number.isFinite(ms)) return nextWakeAt;
+  const delta = ms - Date.now();
+  const abs = Math.abs(delta);
+  const unit = abs < 3600000 ? `${Math.max(1, Math.round(abs / 60000))}m` :
+    abs < 86400000 ? `${Math.round(abs / 3600000)}h` : `${Math.round(abs / 86400000)}d`;
+  return delta <= 0 ? `due ${unit} ago` : `in ${unit}`;
+}
+
+function isNodeProbablyRunning(nodeId: string, profile: Profile): boolean {
+  const display = nodeDisplayName(nodeId, profile);
+  if (tmuxSessionRunning(display) || tmuxSessionRunning(nodeId)) return true;
+  const pidPath = join(nodesDir(), nodeId, ".pid");
+  if (!existsSync(pidPath)) return false;
+  try { process.kill(parseInt(readFileSync(pidPath, "utf-8"), 10), 0); return true; }
+  catch { return false; }
+}
+
+function printGoalUsage() {
+  console.log(`
+anet goal <command>
+
+  list [node]                 List scheduled goals for one node, or all nodes
+  cancel <node> <goal-id>     Mark a goal cancelled in that node's goals.json
+
+Examples:
+  anet goal list
+  anet goal list 通信牛
+  anet goal cancel 通信牛 abcd1234
+
+Data: .anet/nodes/<node>/goals.json
+
+Note: running agent-node processes keep goal state in memory. After cancel,
+restart the node for the cancellation to take effect until live goal control is
+backed by a hub API.
+`);
+}
+
+async function goalCommand() {
+  const sub = args[1];
+  if (!sub || sub === "--help" || sub === "-h") {
+    printGoalUsage();
+    return;
+  }
+
+  if (sub === "list" || sub === "ls") {
+    const nodeRef = args[2];
+    const targets = nodeRef
+      ? (() => {
+          const resolved = resolveNodeRef(nodeRef);
+          if (!resolved) {
+            console.error(`Node "${nodeRef}" not found.`);
+            process.exit(1);
+          }
+          return [resolved];
+        })()
+      : listProfileIds().map(id => {
+          const profile = loadProfile(id);
+          return profile ? { id, profile } : null;
+        }).filter(Boolean) as Array<{ id: string; profile: Profile }>;
+
+    let total = 0;
+    for (const { id, profile } of targets) {
+      const { path, file } = loadGoalsFile(id);
+      const goals = file.goals || [];
+      if (!nodeRef && goals.length === 0) continue;
+      total += goals.length;
+      const name = nodeDisplayName(id, profile);
+      console.log(`\n${name} (${id})`);
+      console.log(`  ${path}`);
+      if (goals.length === 0) {
+        console.log("  No goals.");
+        continue;
+      }
+      console.log("  ID       STATUS     EVERY   NEXT        TEXT");
+      console.log("  ──────── ────────── ─────── ─────────── ─────────────────────────────");
+      for (const g of goals) {
+        const short = g.goal_id.slice(0, 8);
+        const status = String(g.status || "?").padEnd(10);
+        const every = formatGoalInterval(g.interval_ms).padEnd(7);
+        const due = formatGoalDue(g.next_wake_at).slice(0, 11).padEnd(11);
+        const text = (g.text || "").replace(/\s+/g, " ").slice(0, 60);
+        console.log(`  ${short} ${status} ${every} ${due} ${text}`);
+      }
+    }
+    if (total === 0) console.log("\nNo goals found.\n");
+    else console.log();
+    return;
+  }
+
+  if (sub === "cancel") {
+    const nodeRef = args[2];
+    const goalRef = args[3];
+    if (!nodeRef || !goalRef) {
+      console.error("Usage: anet goal cancel <node> <goal-id>");
+      process.exit(1);
+    }
+    const resolved = resolveNodeRef(nodeRef);
+    if (!resolved) {
+      console.error(`Node "${nodeRef}" not found.`);
+      process.exit(1);
+    }
+    const { path, file } = loadGoalsFile(resolved.id);
+    const matches = file.goals.filter(g => g.goal_id === goalRef || g.goal_id.startsWith(goalRef));
+    if (matches.length === 0) {
+      console.error(`Goal "${goalRef}" not found in ${path}`);
+      process.exit(1);
+    }
+    if (matches.length > 1) {
+      console.error(`Goal prefix "${goalRef}" is ambiguous (${matches.length} matches). Use a longer id.`);
+      process.exit(1);
+    }
+    const goal = matches[0];
+    goal.status = "cancelled";
+    goal.updated_at = new Date().toISOString();
+    goal.progress_log = Array.isArray(goal.progress_log) ? goal.progress_log : [];
+    goal.progress_log.push({ ts: new Date().toISOString(), status: "cancelled", summary: "cancelled by anet goal cancel" });
+    saveGoalsFile(path, file);
+
+    console.log(`[anet] cancelled goal ${goal.goal_id.slice(0, 8)} for ${nodeDisplayName(resolved.id, resolved.profile)}`);
+    console.log(`[anet] ${path}`);
+    if (isNodeProbablyRunning(resolved.id, resolved.profile)) {
+      console.log("[anet] node appears to be running; restart it for local goals.json changes to take effect.");
+    }
+    return;
+  }
+
+  printGoalUsage();
+  process.exit(1);
 }
 
 // ── register ──
@@ -7814,6 +8028,7 @@ switch (command) {
   case "ls": case "list": await lsCommand(); break;
   case "status": await statusCommand(); break;
   case "tasks": await tasksCommand(); break;
+  case "goal": await goalCommand(); break;
   case "doctor": await doctorCommand(); break;
   case "license": await licenseCommand(); break;
   case "activate": await activateCommand(); break;

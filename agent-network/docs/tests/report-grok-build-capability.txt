@@ -1,0 +1,95 @@
+# Grok Build Capability Probe Report
+
+Date: 2026-05-26
+Runner: 通信牛
+Suite: `tests/test-grok-build-capability/`
+Artifacts: `docs/tests/p-grok-build-capability/`
+
+## Verdict
+
+PASS for Phase 0 capability probe.
+
+Grok Build is viable for the next implementation step as an ACP-first runtime candidate:
+
+- `grok agent stdio` works in Docker with host-mounted Grok auth cache.
+- ACP `initialize`, `session/new`, `session/prompt`, `session/load` fixtures were captured.
+- ACP `session/load + new prompt` works after a completed turn.
+- ACP `session/load + new prompt` works after killing the previous Grok ACP process mid-turn.
+- ACP response streaming includes `agent_thought_chunk`, `agent_message_chunk`, `_x.ai/session/prompt_complete`, token metadata, model metadata, and command/tool metadata.
+- Headless `grok -p` JSON and streaming-json paths also work as fallback smoke paths.
+
+## Auth Mode
+
+Host env token was not present. The test used host-mount auth mode:
+
+- `~/.grok/auth.json` mounted read-only.
+- `~/.grok/agent_id` mounted read-only.
+- `~/.grok/config.toml` mounted read-only.
+- Secret contents were not printed or copied into the repo.
+
+Secret scan over artifacts found no raw token patterns.
+
+## Test Matrix Result
+
+| Case | Result | Notes |
+| --- | --- | --- |
+| T0 install/version | PASS | Installed Grok `0.1.219 (c9b7cdec2)` in Docker. |
+| T1 auth | PASS | No `grok auth status`; auth proved by successful headless/ACP calls. |
+| T2 headless JSON | PASS | `grok -p ... --output-format json` completed. |
+| T3 streaming JSON | PASS | `grok -p ... --output-format streaming-json` completed. |
+| T4 session resume | PASS with caveat | Resume works using returned `sessionId`; custom `--session-id` string is not the durable ID to persist. |
+| T5 cwd isolation | PASS | `--cwd /tmp/grok-probe` read `fixture.txt` correctly. |
+| T6 ACP stdio | PASS | Full fixture captured under `p-grok-build-capability/t6-acp/`. |
+| T7 approval behavior | PASS | Tool/write prompt behavior captured; fixture saved for runtime policy design. |
+| T8 ACP resume after done | PASS | `session/load` after a finished prompt can accept a new prompt and reply. |
+| T9 ACP resume after abort | PASS | After SIGKILL mid-turn, a new process can `session/load` and complete a new prompt. |
+
+## Key ACP Fixtures
+
+- `t6-acp/init.json`: initialize response, protocol version, model, auth methods, capabilities.
+- `t6-acp/session-new.json`: session creation response.
+- `t6-acp/prompt-events.jsonl`: full streamed session updates.
+- `t6-acp/prompt-response.json`: prompt response with stop reason and token metadata.
+- `t6-acp/final.json`: extracted final text and prompt completion event.
+- `t6-acp/session-resume.json`: `session/load` response.
+- `t6-acp/cancel.json`: cancel probe result; `session/cancel` returns method-not-found in Grok 0.1.219.
+- `t8-resume-after-done/summary.json`: restart + `session/load` + second prompt after a completed turn.
+- `t9-abort-resume/summary.json`: process kill mid-turn + `session/load` + second prompt.
+
+## Runtime Design Notes
+
+1. ACP is the right Phase 1 path. It gives structured events and token metadata; headless streaming-json should remain fallback/debug only.
+2. Persist Grok's returned `sessionId`, not the requested `--session-id` string. In the probe, Grok returned a UUID-like session id and `--resume <returned-id>` worked.
+3. Final reply extraction should concatenate `session/update` events where `update.sessionUpdate === "agent_message_chunk"` and `content.type === "text"`.
+4. Turn completion should key off `_x.ai/session/prompt_complete` plus the `session/prompt` JSON-RPC response.
+5. On `session/load`, Grok may replay old `session/update` events with `_meta.isReplay === true`. Runtime reducers must ignore replay chunks for the current reply accumulator, or resumed turns can duplicate previous replies.
+6. Cancellation is not covered by `session/cancel` in 0.1.219. Phase 1 runtime can use process-level abort/respawn: T9 proved `session/load` still works after a mid-turn SIGKILL.
+7. Default tool approval behavior needs explicit policy. The T7 fixture should be reviewed before enabling unattended write/tool execution.
+
+## Commands
+
+```bash
+sg docker -c 'docker build -t anet-grok-build-capability:phase0 tests/test-grok-build-capability'
+
+sg docker -c 'docker run --rm \
+  -e HOME=/tmp/grok-home \
+  -e GROK_VERSION_EXPECTED=0.1.219 \
+  -v /home/vansin/agent-orchestra/agent-network/docs/tests/p-grok-build-capability:/artifacts \
+  --mount type=bind,src=/home/vansin/.grok/auth.json,dst=/host-grok/auth.json,ro \
+  --mount type=bind,src=/home/vansin/.grok/agent_id,dst=/host-grok/agent_id,ro \
+  --mount type=bind,src=/home/vansin/.grok/config.toml,dst=/host-grok/config.toml,ro \
+  anet-grok-build-capability:phase0'
+```
+
+## Next Step
+
+SDK牛 can implement experimental `grok-build-acp` using the captured ACP fixture set. The minimum implementation path is:
+
+1. Spawn `grok agent stdio`.
+2. Send `initialize`.
+3. Send `session/new` or `session/load`.
+4. Send `session/prompt`.
+5. Stream `agent_message_chunk` as reply text and map `agent_thought_chunk`/tool events to progress.
+6. Ignore replay events (`_meta.isReplay === true`) when accumulating the current reply.
+7. Treat `_x.ai/session/prompt_complete` as turn completion.
+8. Use process kill/respawn for cancellation until Grok exposes a stable cancel method.

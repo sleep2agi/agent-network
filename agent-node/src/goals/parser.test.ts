@@ -60,6 +60,15 @@ describe("parseGoalCommand — English intervals", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.goal.interval_ms).toBe(60 * 60_000);
   });
+
+  test("`/loop` alias", () => {
+    const r = parseGoalCommand("/loop report progress 5min");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.goal.interval_ms).toBe(5 * 60_000);
+      expect(r.goal.text).toBe("report progress");
+    }
+  });
 });
 
 describe("parseGoalCommand — Chinese intervals", () => {

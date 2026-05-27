@@ -5,16 +5,21 @@
  * Runtime:
  *   --runtime claude-agent-sdk  → Claude Agent SDK (Claude/MiniMax)
  *   --runtime codex-sdk         → Codex SDK (GPT-5.4)
+ *   --runtime grok-build-acp    → Grok Build ACP (xAI)
  *
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
 import { readFileSync, existsSync, writeFileSync, chmodSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
 import { hostname as osHostname, homedir } from "os";
 import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
+import { parseGoalCommand } from "./goals/parser";
+import { GoalStore, newGoal } from "./goals/store";
+import type { AgentGoal } from "./goals/types";
+import { extractExplicitDelegation } from "./explicit-delegation";
 
 const home = homedir();
 
@@ -50,7 +55,7 @@ for (let i = 0; i < argv.length; i++) {
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | codex-sdk
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk | grok-build-acp
   --model <name>      AI 模型 (codex 默认: gpt-5.5, claude-agent-sdk 默认: claude-sonnet-4-6)
   --hub <url>         CommHub URL
   --tools <list>      工具列表，逗号分隔 ("all" = 全部)
@@ -66,6 +71,7 @@ for (let i = 0; i < argv.length; i++) {
 Runtime:
   claude-agent-sdk  Claude Agent SDK — Claude/MiniMax/Anthropic 兼容 API
   codex-sdk         Codex SDK — GPT-5.4，复用 codex 登录态
+  grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
 `);
     process.exit(0);
   }
@@ -194,8 +200,9 @@ const rawRuntime = opts.runtime || process.env.RUNTIME || fileConfig.runtime || 
 const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", "claude-sdk": "claude", "agent-sdk": "claude", "claude": "claude",
   "codex-sdk": "codex", "codex": "codex",
+  "grok-build-acp": "grok", "grok-build": "grok", "grok": "grok",
 };
-const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex";
+const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
@@ -253,7 +260,11 @@ const CLAUDE_MAX_RETRIES = parseInt(
   || fileConfig.flags?.claudeMaxRetries || fileConfig.claudeMaxRetries || "2"
 );
 const NEW_SESSION = opts["new-session"] === "true";
-const SESSION_ID = NEW_SESSION ? "" : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "");
+const SESSION_ID = NEW_SESSION ? "" : (
+  RUNTIME === "grok"
+    ? (opts.session || fileConfig.grokSession || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "")
+    : (opts.session || fileConfig.session || fileConfig.resume || fileConfig.sessionId || "")
+);
 const SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt || "";
 // Token priority: node config (ntok_) > global config > legacy env. Earlier
 // versions let process.env.COMMHUB_TOKEN win, which silently overrode the
@@ -275,6 +286,10 @@ function reloadNodeToken(): boolean {
   return true;
 }
 const LOG_DIR = opts["log-dir"] || join(process.cwd(), ".anet", "nodes", ALIAS, "logs");
+const NODE_DIR = configFilePath ? dirname(configFilePath) : join(process.cwd(), ".anet", "nodes", ALIAS);
+const GOALS_PATH = opts["goals-path"] || fileConfig.flags?.goalsPath || fileConfig.goalsPath || join(NODE_DIR, "goals.json");
+const GOAL_TICK_MS = Math.max(10_000, parseInt(opts["goal-tick-ms"] || process.env.ANET_GOAL_TICK_MS || fileConfig.flags?.goalTickMs || "30000"));
+const goalStore = new GoalStore(GOALS_PATH);
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 const LOG_LEVEL = (LOG_LEVELS as any)[(opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info")] ?? 1;
 const channelSpecs = [
@@ -301,6 +316,34 @@ function writebackSession(sessionId: string) {
     debug(`session 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
   } catch (e: any) {
     warn(`writebackSession failed: ${e.message}`);
+  }
+}
+
+function writebackGrokSession(sessionId: string) {
+  grokSessionId = sessionId;
+  if (!configFilePath || !sessionId) return;
+  try {
+    const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
+    if (cfg.grokSession === sessionId) return;
+    cfg.grokSession = sessionId;
+    writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
+    debug(`grokSession 写回: ${configFilePath} → ${sessionId.slice(0, 8)}...`);
+  } catch (e: any) {
+    warn(`writebackGrokSession failed: ${e.message}`);
+  }
+}
+
+function clearGrokSession(reason: string) {
+  grokSessionId = undefined;
+  if (!configFilePath) return;
+  try {
+    const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
+    if (!cfg.grokSession) return;
+    delete cfg.grokSession;
+    writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
+    warn(`cleared grokSession (${reason})`);
+  } catch (e: any) {
+    warn(`clearGrokSession failed: ${e.message}`);
   }
 }
 
@@ -457,7 +500,7 @@ const register = () => callCommHub("report_status", {
 const reportStatus = (status: string, task?: string) => callCommHub("report_status", {
   resume_id: RESUME_ID, alias: ALIAS, status, task,
   node_id: NODE_ID || undefined,
-  session_id: claudeSessionId || SESSION_ID || undefined,
+  session_id: claudeSessionId || grokSessionId || SESSION_ID || undefined,
   config_path: configFilePath || undefined,
   channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
   network_id: NETWORK_ID || undefined,
@@ -469,10 +512,121 @@ const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, mess
 const sendReply = (target: string, message: string, taskId?: string, failed = false) =>
   callCommHub("send_reply", { alias: target, text: message, from_session: ALIAS, in_reply_to: taskId || undefined, status: failed ? "failed" : "replied" });
 
+function isGoalCommand(content: string): boolean {
+  return /^\s*\/(?:goal|loop)\b/i.test(content || "");
+}
+
+function formatInterval(ms: number): string {
+  const min = Math.round(ms / 60_000);
+  if (min % (24 * 60) === 0) return `${min / (24 * 60)}d`;
+  if (min % 60 === 0) return `${min / 60}h`;
+  return `${min}min`;
+}
+
+async function createScheduledGoal(content: string, from: string, taskId: string): Promise<string> {
+  const parsed = parseGoalCommand(content);
+  if (!parsed.ok) {
+    throw new Error(parsed.error);
+  }
+  const goal = newGoal({
+    text: parsed.goal.text,
+    interval_ms: parsed.goal.interval_ms,
+    runtime: RUNTIME_LABEL,
+    parent_task_id: taskId,
+    report_to: from,
+  });
+  await goalStore.upsert(goal);
+  return [
+    `已创建 loop 目标 ${goal.goal_id.slice(0, 8)}`,
+    `周期：${formatInterval(goal.interval_ms)}`,
+    `下次唤醒：${goal.next_wake_at}`,
+    `目标：${goal.text}`,
+    `状态文件：${GOALS_PATH}`,
+  ].join("\n");
+}
+
+function buildGoalWakePrompt(goal: AgentGoal): string {
+  const recent = goal.progress_log.slice(-5).map((p) => `- ${p.ts} [${p.status}] ${p.summary}`).join("\n") || "- 无";
+  return [
+    `【anet /loop 自动唤醒】`,
+    `你正在执行一个长期目标，请做一次增量推进和进度汇报。`,
+    ``,
+    `目标 ID：${goal.goal_id}`,
+    `目标：${goal.text}`,
+    `周期：${formatInterval(goal.interval_ms)}`,
+    `上次唤醒：${goal.last_wake_at || "无"}`,
+    `最近进度：`,
+    recent,
+    ``,
+    `要求：`,
+    `1. 先检查当前实际状态，不要只复述旧进度。`,
+    `2. 能推进就直接推进；需要协调其他 agent 时使用 CommHub 工具。`,
+    `3. 输出一份简短正式汇报，包含：已完成、进行中、风险、下一步。`,
+    `4. 如果目标已完成，请明确写出“目标已完成”。`,
+  ].join("\n");
+}
+
+let goalTickRunning = false;
+
+async function runGoalSchedulerTick() {
+  if (goalTickRunning) return;
+  goalTickRunning = true;
+  try {
+    const now = new Date();
+    const goals = await goalStore.list();
+    for (const goal of goals) {
+      if (goal.status !== "active") continue;
+      if (new Date(goal.next_wake_at).getTime() > now.getTime()) continue;
+
+      const prompt = buildGoalWakePrompt(goal);
+      log(`[goal] wake ${goal.goal_id.slice(0, 8)}: ${goal.text.slice(0, 80)}`);
+      await goalStore.mutate(goal.goal_id, (g) => {
+        g.last_wake_at = new Date().toISOString();
+        g.progress_log.push({ ts: new Date().toISOString(), status: "wake", summary: "scheduler tick started" });
+      });
+
+      const { text, failed } = await processTask(prompt, `goal:${goal.goal_id.slice(0, 8)}`, goal.parent_task_id || null);
+      const summary = text.replace(/\s+/g, " ").slice(0, 500);
+      const completed = /目标已完成|goal completed|completed/i.test(text);
+      const nextWakeAt = new Date(Date.now() + goal.interval_ms).toISOString();
+
+      await goalStore.mutate(goal.goal_id, (g) => {
+        g.last_report_at = new Date().toISOString();
+        g.next_wake_at = nextWakeAt;
+        if (completed) g.status = "complete";
+        g.progress_log.push({
+          ts: new Date().toISOString(),
+          status: failed ? "error" : completed ? "complete" : "report",
+          summary,
+          task_id: goal.parent_task_id,
+        });
+      });
+
+      if (goal.report_to) {
+        try {
+          await sendReply(
+            goal.report_to,
+            `[${ALIAS}] /loop ${goal.goal_id.slice(0, 8)} ${failed ? "执行失败" : completed ? "已完成" : "进度汇报"}\n\n${text.slice(0, 2000)}`,
+            goal.parent_task_id,
+            failed,
+          );
+        } catch (e: any) {
+          warn(`[goal] report send failed for ${goal.goal_id.slice(0, 8)}: ${e.message}`);
+        }
+      }
+    }
+  } catch (e: any) {
+    warn(`[goal] scheduler tick failed: ${e.message}`);
+  } finally {
+    goalTickRunning = false;
+  }
+}
+
 // ══════════════════════════════════════
 // Claude Runtime
 // ══════════════════════════════════════
 let claudeSessionId: string | undefined = SESSION_ID || undefined;
+let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || undefined) : undefined;
 
 async function processWithClaude(task: string, from: string): Promise<string> {
   // Pre-flight: if no Claude binary is resolvable, on-the-fly install the
@@ -1028,6 +1182,164 @@ async function processWithCodexStdio(task: string, _from: string, images?: strin
 }
 
 // ══════════════════════════════════════
+// Grok Build ACP Runtime (#187 — Phase 1 minimal adapter)
+// ══════════════════════════════════════
+function buildGrokCommhubPrompt(task: string, from: string): string {
+  const currentTaskId = process.env.CURRENT_TASK_ID || "(unknown)";
+  return [
+    `你是 ${ALIAS}，CommHub 网络中的 AI 节点。`,
+    ``,
+    `【Agent Network 接入边界】`,
+    `- agent-node 已负责从 CommHub 收取任务、上报状态，并把你的最终文本回复给 ${from}。`,
+    `- 你当前通过 Grok Build ACP 推理，不要声称 MCP servers 正在连接，也不要要求用户等待 MCP 工具就绪。`,
+    `- 如果任务只是要求回答、总结、分析或生成文本，请直接完成任务。`,
+    `- 如果任务明确要求给某个 alias 发任务、派任务、交给、沟通或 send_task，agent-node 会在进入 Grok 前优先用 CommHub wrapper 处理；如果你仍看到该任务，说明未命中明确派发格式，请说明需要精确 alias 和子任务内容。`,
+    `- 当前任务 ID 是 ${currentTaskId}，只在用户要求你引用任务上下文时提及。`,
+    ``,
+    `收到来自 ${from} 的任务：`,
+    task,
+  ].join("\n");
+}
+
+function sanitizeGrokCommhubLeak(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const filtered: string[] = [];
+  let dropped = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      /CommHub\s+MCP\s+状态说明/i.test(trimmed)
+      || /根据当前系统提示.*MCP\s*服务器/i.test(trimmed)
+      || /Do not attempt to use tools from these servers yet/i.test(trimmed)
+      || /commhub_(get_all_status|send_task|get_task|reply|report_status)/i.test(trimmed)
+      || /无法(调用|执行).*CommHub/i.test(trimmed)
+      || /MCP\s*服务器仍?在连接中/i.test(trimmed)
+    ) {
+      dropped++;
+      continue;
+    }
+    filtered.push(line);
+  }
+
+  const cleaned = filtered
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (dropped > 0) {
+    warn(`[grok] stripped ${dropped} leaked CommHub/MCP status line(s) from reply`);
+  }
+  if (!cleaned && dropped > 0) {
+    return "Grok 输出包含 CommHub/MCP 状态泄漏，已过滤。请用明确 alias 和子任务内容重试。";
+  }
+  return cleaned || text.trim() || "（无回复）";
+}
+
+async function processWithGrok(task: string, from: string, images?: string[]): Promise<string> {
+  if (images?.length) {
+    warn(`[grok] image attachments received but Grok ACP fixture reports promptCapabilities.image=false; sending text-only prompt`);
+  }
+
+  try {
+    const { execFileSync } = await import("child_process");
+    const version = execFileSync("grok", ["--version"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    debug(`[grok] ${version}`);
+  } catch {
+    throw new Error("grok CLI not found. Install Grok Build CLI and run `grok --version` before starting this node.");
+  }
+
+  const { runGrokAcpTurn } = await import("./runtime/grok-build-acp/runtime");
+  const runOnce = async (sessionId?: string, label = "primary") => {
+    const t0 = Date.now();
+    const result = await runGrokAcpTurn({
+      prompt: buildGrokCommhubPrompt(task, from),
+      cwd: process.cwd(),
+      sessionId,
+      timeoutMs: parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000"),
+      drainMs: parseInt(process.env.GROK_ACP_DRAIN_MS || fileConfig.flags?.grokAcpDrainMs || "15000"),
+      onSession: (newSessionId) => writebackGrokSession(newSessionId),
+      onEvent: (_event, state) => {
+        if (state.skippedReplay > 0 && state.skippedReplay % 50 === 0) {
+          debug(`[grok] skipped replay chunks=${state.skippedReplay}`);
+        }
+      },
+    });
+    const dt = Date.now() - t0;
+    log(`[grok] done ${label} | ${dt}ms | session=${result.sessionId.slice(0, 8)} | chunks=${result.state.chunks} replay_skipped=${result.state.skippedReplay}`);
+    return sanitizeGrokCommhubLeak(result.replyText.trim() || "（无回复）");
+  };
+
+  const firstSessionId = grokSessionId || SESSION_ID || undefined;
+  try {
+    return await runOnce(firstSessionId, "primary");
+  } catch (e: any) {
+    const message = String(e?.message || e);
+    if (firstSessionId && /ACP error -32603|Internal error/i.test(message)) {
+      warn(`[grok] ${message}; retrying once with a fresh session`);
+      clearGrokSession("-32603 internal error");
+      return await runOnce(undefined, "fresh-retry");
+    }
+    throw e;
+  }
+}
+
+function parseToolJson(value: any): any {
+  const text = value?.content?.[0]?.text;
+  if (typeof text === "string") {
+    try { return JSON.parse(text); } catch { return text; }
+  }
+  return value;
+}
+
+function findTaskId(value: any): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return value.task_id || value.message_id || value.id;
+}
+
+async function tryHandleExplicitDelegation(task: string, from: string, taskId: string | null): Promise<string | null> {
+  const parsed = extractExplicitDelegation(task);
+  if (!parsed || !taskId) return null;
+
+  const status = parseToolJson(await callCommHub("get_all_status", {}));
+  const statusText = JSON.stringify(status);
+  if (!statusText.includes(parsed.alias)) {
+    return `未找到目标 alias：${parsed.alias}。已查询 CommHub 在线状态，但列表中没有该精确 alias。`;
+  }
+
+  const sendRes = parseToolJson(await callCommHub("send_task", {
+    alias: parsed.alias,
+    task: parsed.childTask,
+    priority: "normal",
+    from_session: ALIAS,
+    parent_task_id: taskId,
+  }));
+  const childTaskId = findTaskId(sendRes);
+  if (!childTaskId) {
+    return `已尝试给 ${parsed.alias} 派任务，但 CommHub 未返回 task_id：${JSON.stringify(sendRes).slice(0, 1000)}`;
+  }
+
+  const deadline = Date.now() + 120_000;
+  let latest: any = null;
+  while (Date.now() < deadline) {
+    latest = parseToolJson(await callCommHub("get_task", { task_id: childTaskId }));
+    const row = latest?.task || latest;
+    const childStatus = row?.status;
+    if (childStatus === "replied" || childStatus === "failed" || childStatus === "cancelled") {
+      const result = row?.result || latest?.result || JSON.stringify(latest);
+      return [
+        `已通过 CommHub 给 ${parsed.alias} 派发子任务并等到结果。`,
+        `子任务：${childTaskId}`,
+        `状态：${childStatus}`,
+        ``,
+        String(result).slice(0, 1600),
+      ].join("\n");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  return `已给 ${parsed.alias} 派发子任务 ${childTaskId}，但 120 秒内未等到 replied/failed。最新状态：${JSON.stringify(latest).slice(0, 1000)}`;
+}
+
+// ══════════════════════════════════════
 // 任务分发
 // ══════════════════════════════════════
 let thinkQueue = Promise.resolve();
@@ -1055,6 +1367,9 @@ function think(task: string, from: string, taskId: string | null, images?: strin
           return await processWithCodexStdio(task, from, images);
         }
         return await processWithCodex(task, from, images);
+      }
+      if (RUNTIME === "grok") {
+        return await processWithGrok(task, from, images);
       }
       return await processWithClaude(task, from);
     } finally {
@@ -1084,7 +1399,8 @@ async function processTask(task: string, from: string, taskId: string | null = n
   let text: string;
   let failed = false;
   try {
-    text = await think(task, from, taskId, images);
+    text = await tryHandleExplicitDelegation(task, from, taskId)
+      || await think(task, from, taskId, images);
   } catch (err: any) {
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;
@@ -1134,8 +1450,10 @@ function isLowValueText(text: string, isReply = false): boolean {
 function shouldSkipMessage(from: string, content: string, msgType?: string): string | null {
   if (from === ALIAS) return "self";
   if (content.startsWith(`[${ALIAS}]`)) return "own-prefix";
-  // Don't cooldown tasks from hub/dashboard — humans send rapid messages
-  if (from !== "hub" && from !== "api") {
+  // Don't cooldown explicit tasks — humans often send rapid follow-ups from
+  // Dashboard, and task messages must be answered even when they arrive back
+  // to back. Apply cooldown only to non-task chatter.
+  if (msgType !== "task" && msgType !== "broadcast" && from !== "hub" && from !== "api") {
     const now = Date.now();
     if (lastReplyTime[from] && now - lastReplyTime[from] < COOLDOWN_MS) return "cooldown";
   }
@@ -1167,6 +1485,19 @@ async function processInbox() {
 
     const skip = shouldSkipMessage(from, content, msgType);
     if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }
+
+    if (isGoalCommand(content)) {
+      try {
+        const created = await createScheduledGoal(content, from, msg.id);
+        await sendReply(from, `[${ALIAS}] ${created}`, msg.id, false);
+        lastReplyTime[from] = Date.now();
+        log(`→ [${from}] goal created`);
+      } catch (e: any) {
+        await sendReply(from, `[${ALIAS}] /loop 创建失败：${e.message}`, msg.id, true);
+        log(`goal create failed: ${e.message}`);
+      }
+      continue;
+    }
 
     const { text: result, failed } = await processTask(content, from, msg.id, images);
     log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
@@ -1418,7 +1749,7 @@ async function connectSSE() {
 // ── 启动 ──
 log(`启动`);
 log(`  runtime: ${RUNTIME_LABEL}`);
-log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.5" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
+log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.5" : RUNTIME === "grok" ? "grok-build" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 
 // Validate token + show user/network info
@@ -1460,9 +1791,17 @@ log(`  tools:   ${
 log(`  channels:${TELEGRAM_CHANNELS.length ? ` telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : " (none)"}`);
 log(`  session: ${SESSION_ID || "(new)"}`);
 log(`  log-dir: ${LOG_DIR}`);
+log(`  goals:   ${GOALS_PATH}`);
+const goalsLoad = await goalStore.load();
+if (!goalsLoad.ok) warn(`  goals load recovered: ${goalsLoad.error || "unknown"}${goalsLoad.recovered ? ` (${goalsLoad.recovered})` : ""}`);
+const activeGoals = (await goalStore.list()).filter(g => g.status === "active");
+if (activeGoals.length) log(`  goals active: ${activeGoals.length}`);
 await register();
 log("已注册到 CommHub");
+processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`));
 setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
+setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
+runGoalSchedulerTick().catch(() => {});
 const shutdown = async () => { log("shutting down..."); await reportStatus("offline").catch(() => {}); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

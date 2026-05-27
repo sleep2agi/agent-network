@@ -1,4 +1,4 @@
-// Phase 1 of #184 — `/goal <text> [interval]` parser.
+// Phase 1 of #184 — `/goal` / `/loop` scheduler command parser.
 //
 // Strict per 通信牛 review #7: reject ambiguous input, no defaults. The
 // minimum interval is implicitly enforced by accepting only minutes-and-up
@@ -68,8 +68,8 @@ const SUB_MINUTE_PATTERNS = [
 export function parseGoalCommand(input: string): ParseResult {
   if (typeof input !== "string") return { ok: false, error: "input must be a string" };
 
-  // Strip leading "/goal" (case-insensitive) + whitespace
-  let body = input.replace(/^\s*\/goal\b\s*/i, "").trim();
+  // Strip leading "/goal" or "/loop" (case-insensitive) + whitespace.
+  let body = input.replace(/^\s*\/(?:goal|loop)\b\s*/i, "").trim();
   if (!body) return { ok: false, error: "goal text is empty" };
 
   // Explicit sub-minute rejection so the error message is informative.

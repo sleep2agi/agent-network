@@ -1,0 +1,29 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "sessionId": "019e624e-8859-7012-8310-d5d0390a75b9",
+    "models": {
+      "currentModelId": "grok-build",
+      "availableModels": [
+        {
+          "modelId": "grok-build",
+          "name": "Grok Build",
+          "description": "Best for advanced coding tasks",
+          "_meta": {
+            "totalContextTokens": 512000,
+            "agentType": "grok-build-plan"
+          }
+        }
+      ]
+    },
+    "_meta": {
+      "currentWorkingDirectory": "/tmp/grok-probe",
+      "codebaseIndexed": [],
+      "isGitRepo": false,
+      "gitRoot": null,
+      "showNonGitWarning": false,
+      "feedbackEnabled": true
+    }
+  }
+}

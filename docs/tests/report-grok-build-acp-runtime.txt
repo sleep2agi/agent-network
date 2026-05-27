@@ -1,0 +1,27 @@
+# Grok Build ACP runtime E2E
+- date: 2026-05-26T04:27:39+00:00
+auth: host-mount mode
+installing grok
+grok 0.1.219 (c9b7cdec2)
+build: agent-node
+
+> @sleep2agi/agent-node@2.4.3 build
+> bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk
+
+Bundled 87 modules in 48ms
+
+  cli.js  0.33 MB  (entry point)
+
+start: commhub dev-open
+auth: register test user and node token
+auth: network_id=net_1d38e2e76bf4
+start: agent-node grok-build-acp
+PASS: agent registered
+task: 77cf6de9-3a4a-4f7e-8324-62ef0d889669
+PASS: task replied
+PASS: grokSession persisted
+
+## Summary
+- result: PASS
+- task_id: 77cf6de9-3a4a-4f7e-8324-62ef0d889669
+- grokSession: 019e628a...

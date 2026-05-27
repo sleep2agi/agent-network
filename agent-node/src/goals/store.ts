@@ -218,6 +218,7 @@ export function newGoal(opts: {
   interval_ms: number;
   runtime: string;
   parent_task_id?: string;
+  report_to?: string;
 }): AgentGoal {
   const now = new Date();
   return {
@@ -227,6 +228,7 @@ export function newGoal(opts: {
     interval_ms: opts.interval_ms,
     next_wake_at: new Date(now.getTime() + opts.interval_ms).toISOString(),
     parent_task_id: opts.parent_task_id,
+    report_to: opts.report_to,
     runtime: opts.runtime,
     created_at: now.toISOString(),
     updated_at: now.toISOString(),

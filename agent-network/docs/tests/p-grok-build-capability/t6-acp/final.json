@@ -1,0 +1,25 @@
+{
+  "sessionId": "019e624e-8859-7012-8310-d5d0390a75b9",
+  "text": "GROK_ACP_OK",
+  "eventCount": 30,
+  "finalishEvent": {
+    "jsonrpc": "2.0",
+    "method": "_x.ai/session/prompt_complete",
+    "params": {
+      "sessionId": "019e624e-8859-7012-8310-d5d0390a75b9",
+      "stopReason": "end_turn",
+      "agentResult": null
+    }
+  },
+  "lastEvent": {
+    "jsonrpc": "2.0",
+    "method": "_x.ai/session_notification",
+    "params": {
+      "sessionId": "019e624e-8859-7012-8310-d5d0390a75b9",
+      "update": {
+        "sessionUpdate": "session_summary_generated",
+        "session_summary": "Reply with exactly: GROK_ACP_OK"
+      }
+    }
+  }
+}

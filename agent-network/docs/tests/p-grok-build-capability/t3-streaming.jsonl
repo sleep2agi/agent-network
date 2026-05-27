@@ -1,0 +1,65 @@
+{"type":"thought","data":"The"}
+{"type":"thought","data":" user"}
+{"type":"thought","data":" wants"}
+{"type":"thought","data":" me"}
+{"type":"thought","data":" to"}
+{"type":"thought","data":" list"}
+{"type":"thought","data":" the"}
+{"type":"thought","data":" files"}
+{"type":"thought","data":" in"}
+{"type":"thought","data":" the"}
+{"type":"thought","data":" current"}
+{"type":"thought","data":" directory"}
+{"type":"thought","data":"."}
+{"type":"thought","data":" The"}
+{"type":"thought","data":" workspace"}
+{"type":"thought","data":" path"}
+{"type":"thought","data":" is"}
+{"type":"thought","data":" /"}
+{"type":"thought","data":"tmp"}
+{"type":"thought","data":"/g"}
+{"type":"thought","data":"rok"}
+{"type":"thought","data":"-pro"}
+{"type":"thought","data":"be"}
+{"type":"thought","data":".\n"}
+{"type":"thought","data":"The"}
+{"type":"thought","data":" tool"}
+{"type":"thought","data":" returned"}
+{"type":"thought","data":" that"}
+{"type":"thought","data":" the"}
+{"type":"thought","data":" current"}
+{"type":"thought","data":" directory"}
+{"type":"thought","data":" /"}
+{"type":"thought","data":"tmp"}
+{"type":"thought","data":"/g"}
+{"type":"thought","data":"rok"}
+{"type":"thought","data":"-pro"}
+{"type":"thought","data":"be"}
+{"type":"thought","data":"/"}
+{"type":"thought","data":" contains"}
+{"type":"thought","data":" only"}
+{"type":"thought","data":" one"}
+{"type":"thought","data":" file"}
+{"type":"thought","data":":"}
+{"type":"thought","data":" fixture"}
+{"type":"thought","data":".txt"}
+{"type":"thought","data":".\n"}
+{"type":"text","data":"The"}
+{"type":"text","data":" current"}
+{"type":"text","data":" directory"}
+{"type":"text","data":" (`"}
+{"type":"text","data":"/"}
+{"type":"text","data":"tmp"}
+{"type":"text","data":"/g"}
+{"type":"text","data":"rok"}
+{"type":"text","data":"-pro"}
+{"type":"text","data":"be"}
+{"type":"text","data":"`)"}
+{"type":"text","data":" contains"}
+{"type":"text","data":":\n\n"}
+{"type":"text","data":"-"}
+{"type":"text","data":" `"}
+{"type":"text","data":"fixture"}
+{"type":"text","data":".txt"}
+{"type":"text","data":"`"}
+{"type":"end","stopReason":"EndTurn","sessionId":"019e624e-465c-7da2-8a54-175b5e1138de","requestId":"b7717262-ff03-44fe-ac46-272e1ce376a8"}

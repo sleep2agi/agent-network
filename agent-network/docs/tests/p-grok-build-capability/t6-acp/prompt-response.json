@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "stopReason": "end_turn",
+    "_meta": {
+      "sessionId": "019e624e-8859-7012-8310-d5d0390a75b9",
+      "requestId": "c6eaf6a9-60d3-4841-a3d6-7f1d4a73fcde",
+      "promptId": "c6eaf6a9-60d3-4841-a3d6-7f1d4a73fcde",
+      "totalTokens": 16583,
+      "modelId": "grok-build",
+      "inputTokens": 16377,
+      "outputTokens": 206,
+      "cachedReadTokens": 11840,
+      "reasoningTokens": 196
+    }
+  }
+}

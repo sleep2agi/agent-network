@@ -1,0 +1,70 @@
+# Grok Build Capability Probe
+
+- date: 2026-05-26T03:22:23+00:00
+- cwd: /probe
+T1 auth: host-mount mode (read-only auth files mounted; contents redacted)
+T0 install: grok missing, installing via xAI install script
+grok 0.1.219 (c9b7cdec2)
+
+## T1 auth command probe
+WARN: grok auth command unavailable; using headless smoke as auth proof
+
+## T2 headless json smoke
+PASS: headless json completed
+
+## T3 streaming-json smoke
+PASS: streaming-json completed
+
+## T4 session continue smoke
+PASS: session resume completed
+
+## T5 cwd isolation
+PASS: cwd smoke completed
+
+## T6 ACP stdio fixture
+PASS: ACP stdio probe completed
+
+## T7 approval behavior
+PASS: approval behavior captured
+
+## T8 ACP session/load after completed prompt
+PASS: ACP session/load after completed prompt works
+
+## T9 ACP process abort then session/load
+PASS: ACP process abort then session/load works
+
+## Artifact index
+- artifacts/auth-help.txt
+- artifacts/auth-mode.txt
+- artifacts/report-grok-build-capability.txt
+- artifacts/t2-json.exit
+- artifacts/t2-json.json
+- artifacts/t2-json.log
+- artifacts/t3-streaming.exit
+- artifacts/t3-streaming.jsonl
+- artifacts/t3-streaming.log
+- artifacts/t4-session-a.exit
+- artifacts/t4-session-a.log
+- artifacts/t4-session-b.exit
+- artifacts/t4-session-b.log
+- artifacts/t4-session.json
+- artifacts/t5-cwd.exit
+- artifacts/t5-cwd.json
+- artifacts/t5-cwd.log
+- artifacts/t6-acp/cancel.json
+- artifacts/t6-acp/final.json
+- artifacts/t6-acp/init.json
+- artifacts/t6-acp/prompt-events.jsonl
+- artifacts/t6-acp/prompt-response.json
+- artifacts/t6-acp/session-new.json
+- artifacts/t6-acp/session-resume.json
+- artifacts/t7-approval-behavior.txt
+- artifacts/t7-approval.exit
+- artifacts/t7-approval.log
+- artifacts/t8-resume-after-done/first.events.jsonl
+- artifacts/t8-resume-after-done/second.events.jsonl
+- artifacts/t8-resume-after-done/summary.json
+- artifacts/t9-abort-resume/first.events.jsonl
+- artifacts/t9-abort-resume/second.events.jsonl
+- artifacts/t9-abort-resume/summary.json
+- artifacts/version.txt
