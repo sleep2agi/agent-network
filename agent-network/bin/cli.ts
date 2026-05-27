@@ -907,6 +907,8 @@ Node Management:
   anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
   anet tasks [status]           Query tasks (replied/failed/delivered)
+  anet goal list [node]          List local scheduled goals
+  anet goal cancel <node> <id>   Mark a scheduled goal cancelled
 
 Project (cwd-wide):
   anet project up                Start every node in cwd (skip already-running)
@@ -4601,6 +4603,193 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diff / 86400000)}d`;
 }
 
+// ── goal (local scheduled goal management) ──
+
+type GoalStatus = "active" | "paused" | "complete" | "failed" | "cancelled";
+interface LocalGoal {
+  goal_id: string;
+  text: string;
+  status: GoalStatus;
+  interval_ms: number;
+  next_wake_at?: string;
+  last_wake_at?: string;
+  last_report_at?: string;
+  parent_task_id?: string;
+  report_to?: string;
+  runtime?: string;
+  created_at?: string;
+  updated_at?: string;
+  progress_log?: Array<{ ts?: string; status?: string; summary?: string }>;
+}
+interface LocalGoalsFile { version: 1; goals: LocalGoal[]; }
+
+function goalPathForNodeId(nodeId: string): string {
+  return join(nodesDir(), nodeId, "goals.json");
+}
+
+function loadGoalsFile(nodeId: string): { path: string; file: LocalGoalsFile } {
+  const path = goalPathForNodeId(nodeId);
+  if (!existsSync(path)) return { path, file: { version: 1, goals: [] } };
+  let raw = "";
+  try {
+    raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.goals)) {
+      throw new Error("unsupported goals.json schema");
+    }
+    return { path, file: parsed };
+  } catch (e: any) {
+    throw new Error(`cannot read ${path}: ${e.message}`);
+  }
+}
+
+function saveGoalsFile(path: string, file: LocalGoalsFile) {
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(file, null, 2) + "\n");
+  renameSync(tmp, path);
+}
+
+function formatGoalInterval(ms: number): string {
+  const min = Math.round(ms / 60000);
+  if (!Number.isFinite(min) || min <= 0) return "?";
+  if (min % 1440 === 0) return `${min / 1440}d`;
+  if (min % 60 === 0) return `${min / 60}h`;
+  return `${min}min`;
+}
+
+function formatGoalDue(nextWakeAt?: string): string {
+  if (!nextWakeAt) return "-";
+  const ms = new Date(nextWakeAt).getTime();
+  if (!Number.isFinite(ms)) return nextWakeAt;
+  const delta = ms - Date.now();
+  const abs = Math.abs(delta);
+  const unit = abs < 3600000 ? `${Math.max(1, Math.round(abs / 60000))}m` :
+    abs < 86400000 ? `${Math.round(abs / 3600000)}h` : `${Math.round(abs / 86400000)}d`;
+  return delta <= 0 ? `due ${unit} ago` : `in ${unit}`;
+}
+
+function isNodeProbablyRunning(nodeId: string, profile: Profile): boolean {
+  const display = nodeDisplayName(nodeId, profile);
+  if (tmuxSessionRunning(display) || tmuxSessionRunning(nodeId)) return true;
+  const pidPath = join(nodesDir(), nodeId, ".pid");
+  if (!existsSync(pidPath)) return false;
+  try { process.kill(parseInt(readFileSync(pidPath, "utf-8"), 10), 0); return true; }
+  catch { return false; }
+}
+
+function printGoalUsage() {
+  console.log(`
+anet goal <command>
+
+  list [node]                 List scheduled goals for one node, or all nodes
+  cancel <node> <goal-id>     Mark a goal cancelled in that node's goals.json
+
+Examples:
+  anet goal list
+  anet goal list 通信牛
+  anet goal cancel 通信牛 abcd1234
+
+Data: .anet/nodes/<node>/goals.json
+
+Note: running agent-node processes keep goal state in memory. After cancel,
+restart the node for the cancellation to take effect until live goal control is
+backed by a hub API.
+`);
+}
+
+async function goalCommand() {
+  const sub = args[1];
+  if (!sub || sub === "--help" || sub === "-h") {
+    printGoalUsage();
+    return;
+  }
+
+  if (sub === "list" || sub === "ls") {
+    const nodeRef = args[2];
+    const targets = nodeRef
+      ? (() => {
+          const resolved = resolveNodeRef(nodeRef);
+          if (!resolved) {
+            console.error(`Node "${nodeRef}" not found.`);
+            process.exit(1);
+          }
+          return [resolved];
+        })()
+      : listProfileIds().map(id => {
+          const profile = loadProfile(id);
+          return profile ? { id, profile } : null;
+        }).filter(Boolean) as Array<{ id: string; profile: Profile }>;
+
+    let total = 0;
+    for (const { id, profile } of targets) {
+      const { path, file } = loadGoalsFile(id);
+      const goals = file.goals || [];
+      if (!nodeRef && goals.length === 0) continue;
+      total += goals.length;
+      const name = nodeDisplayName(id, profile);
+      console.log(`\n${name} (${id})`);
+      console.log(`  ${path}`);
+      if (goals.length === 0) {
+        console.log("  No goals.");
+        continue;
+      }
+      console.log("  ID       STATUS     EVERY   NEXT        TEXT");
+      console.log("  ──────── ────────── ─────── ─────────── ─────────────────────────────");
+      for (const g of goals) {
+        const short = g.goal_id.slice(0, 8);
+        const status = String(g.status || "?").padEnd(10);
+        const every = formatGoalInterval(g.interval_ms).padEnd(7);
+        const due = formatGoalDue(g.next_wake_at).slice(0, 11).padEnd(11);
+        const text = (g.text || "").replace(/\s+/g, " ").slice(0, 60);
+        console.log(`  ${short} ${status} ${every} ${due} ${text}`);
+      }
+    }
+    if (total === 0) console.log("\nNo goals found.\n");
+    else console.log();
+    return;
+  }
+
+  if (sub === "cancel") {
+    const nodeRef = args[2];
+    const goalRef = args[3];
+    if (!nodeRef || !goalRef) {
+      console.error("Usage: anet goal cancel <node> <goal-id>");
+      process.exit(1);
+    }
+    const resolved = resolveNodeRef(nodeRef);
+    if (!resolved) {
+      console.error(`Node "${nodeRef}" not found.`);
+      process.exit(1);
+    }
+    const { path, file } = loadGoalsFile(resolved.id);
+    const matches = file.goals.filter(g => g.goal_id === goalRef || g.goal_id.startsWith(goalRef));
+    if (matches.length === 0) {
+      console.error(`Goal "${goalRef}" not found in ${path}`);
+      process.exit(1);
+    }
+    if (matches.length > 1) {
+      console.error(`Goal prefix "${goalRef}" is ambiguous (${matches.length} matches). Use a longer id.`);
+      process.exit(1);
+    }
+    const goal = matches[0];
+    goal.status = "cancelled";
+    goal.updated_at = new Date().toISOString();
+    goal.progress_log = Array.isArray(goal.progress_log) ? goal.progress_log : [];
+    goal.progress_log.push({ ts: new Date().toISOString(), status: "cancelled", summary: "cancelled by anet goal cancel" });
+    saveGoalsFile(path, file);
+
+    console.log(`[anet] cancelled goal ${goal.goal_id.slice(0, 8)} for ${nodeDisplayName(resolved.id, resolved.profile)}`);
+    console.log(`[anet] ${path}`);
+    if (isNodeProbablyRunning(resolved.id, resolved.profile)) {
+      console.log("[anet] node appears to be running; restart it for local goals.json changes to take effect.");
+    }
+    return;
+  }
+
+  printGoalUsage();
+  process.exit(1);
+}
+
 // ── register ──
 
 async function registerCommand() {
@@ -7839,6 +8028,7 @@ switch (command) {
   case "ls": case "list": await lsCommand(); break;
   case "status": await statusCommand(); break;
   case "tasks": await tasksCommand(); break;
+  case "goal": await goalCommand(); break;
   case "doctor": await doctorCommand(); break;
   case "license": await licenseCommand(); break;
   case "activate": await activateCommand(); break;

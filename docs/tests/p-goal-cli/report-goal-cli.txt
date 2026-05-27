@@ -1,0 +1,27 @@
+# anet goal CLI smoke
+- date: 2026-05-27T06:27:52+00:00
+- workdir: /tmp/anet-goal-cli
+
+list before cancel
+
+goalbot (goalbot)
+  /tmp/anet-goal-cli/.anet/nodes/goalbot/goals.json
+  ID       STATUS     EVERY   NEXT        TEXT
+  ──────── ────────── ─────── ─────────── ─────────────────────────────
+  abcdef12 active     1min    in 26517d   check preview smoke
+
+
+cancel
+[anet] cancelled goal abcdef12 for goalbot
+[anet] /tmp/anet-goal-cli/.anet/nodes/goalbot/goals.json
+
+list after cancel
+
+goalbot (goalbot)
+  /tmp/anet-goal-cli/.anet/nodes/goalbot/goals.json
+  ID       STATUS     EVERY   NEXT        TEXT
+  ──────── ────────── ─────── ─────────── ─────────────────────────────
+  abcdef12 cancelled  1min    in 26517d   check preview smoke
+
+
+PASS: anet goal CLI smoke
