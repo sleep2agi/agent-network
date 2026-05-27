@@ -1,0 +1,24 @@
+# test199-agent-node-from-session
+
+Purpose:
+- Verify the agent-node runtime side injects the current node alias as
+  `from_session` when an LLM calls CommHub MCP outbound tools.
+- Cover the Grok Build ACP follow-up for #194: native/runtime CommHub calls
+  should not rely on commhub-server fallback attribution.
+
+Scope:
+- `send_task` gets `from_session=<current alias>`.
+- `send_message` gets `from_session=<current alias>`.
+- stale/model-supplied `from_session` is overwritten by the runtime alias.
+- read-only calls such as `get_all_status` are not mutated.
+
+Command:
+
+```bash
+sg docker -c 'docker build -f tests/test199-agent-node-from-session/Dockerfile -t anet-test199-agent-node-from-session . && docker run --rm anet-test199-agent-node-from-session'
+```
+
+Result:
+- PASS: `bun test src/commhub-mcp.test.ts`
+- PASS: agent-node build
+

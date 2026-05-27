@@ -778,7 +778,7 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   const mcpServers: Record<string, any> = {};
   if (commhubUrl) {
     try {
-      mcpServers["commhub"] = await createCommhubSdkMcpServer(commhubUrl, commhubToken);
+      mcpServers["commhub"] = await createCommhubSdkMcpServer(commhubUrl, commhubToken, ALIAS);
     } catch (e: any) {
       log(`[claude] ⚠ commhub SDK MCP server init failed (${e?.message || e}); falling back to type:"http" (known-broken, see #102 smoke).`);
       mcpServers["commhub"] = {

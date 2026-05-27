@@ -110,6 +110,17 @@ async function forwardToCommhub(
   }
 }
 
+const OUTBOUND_FROM_TOOLS = new Set(["send_task", "send_message", "send_reply"]);
+
+export function injectAgentFromSession(toolName: string, args: unknown, agentAlias?: string): unknown {
+  const alias = agentAlias?.trim();
+  if (!alias || !OUTBOUND_FROM_TOOLS.has(toolName)) return args ?? {};
+  const base = args && typeof args === "object" && !Array.isArray(args)
+    ? args as Record<string, unknown>
+    : {};
+  return { ...base, from_session: alias };
+}
+
 // Create the in-process SDK MCP server. The tool list is the agent-facing
 // subset of commhub's 17 tools — i.e. everything an LLM legitimately needs
 // to coordinate other agents. Excluded:
@@ -119,10 +130,11 @@ async function forwardToCommhub(
 //     → admin / hub-side; not exposing them to the LLM by default
 export async function createCommhubSdkMcpServer(
   hubUrl: string, token: string | undefined,
+  agentAlias?: string,
 ): Promise<McpSdkServerConfigWithInstance> {
   const { createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
   const fwd = (name: string) =>
-    (async (args: unknown) => forwardToCommhub(hubUrl, token, name, args));
+    (async (args: unknown) => forwardToCommhub(hubUrl, token, name, injectAgentFromSession(name, args, agentAlias)));
 
   return createSdkMcpServer({
     name: "commhub",
