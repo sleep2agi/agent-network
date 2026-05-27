@@ -22,6 +22,16 @@ describe("extractExplicitDelegation", () => {
       .toEqual({ alias: "通信SDK牛", childTask: "看 Phase 1 进度" });
   });
 
+  it("matches bare 和 X 沟通一下", () => {
+    expect(extractExplicitDelegation("你和 A站助手 沟通一下"))
+      .toEqual({ alias: "A站助手", childTask: "你和 A站助手 沟通一下" });
+  });
+
+  it("matches 和 X send_task 一下", () => {
+    expect(extractExplicitDelegation("你和 通信牛 send_task 一下，确认 broaden wrapper 状态"))
+      .toEqual({ alias: "通信牛", childTask: "确认 broaden wrapper 状态" });
+  });
+
   it("matches 让 X 做", () => {
     expect(extractExplicitDelegation("让 通信牛 review #189"))
       .toEqual({ alias: "通信牛", childTask: "review #189" });

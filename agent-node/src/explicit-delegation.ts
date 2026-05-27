@@ -26,7 +26,8 @@ export function extractExplicitDelegation(task: string): ExplicitDelegation | nu
     /\b(?:mcp_commhub__send_task|commhub_send_task|send_task)\s*\(\s*["']([^"']+)["']\s*,\s*["']([\s\S]+?)["']\s*\)/i,
     /给\s+(.+?)\s*(?:发任务|派任务|send_task)(?:\s*[：:]\s*([\s\S]+))?$/i,
     /(?:派给|转给|交给|发给)\s+(.+?)\s*[：:，,]\s*([\s\S]+)$/i,
-    /(?:你\s*)?和\s*(@?[\s\S]+?)\s*沟通一下\s*[，,]?\s*([\s\S]+)$/i,
+    /(?:你\s*)?和\s*(@?[^\s，,：:。.!?！？]+)\s*(?:沟通一下|send_task(?:\s*一下)?)(?:\s*[，,：:]\s*([\s\S]+))?$/i,
+    /(?:你\s*)?和\s*(@?[\s\S]+?)\s*沟通一下\s*[，,]\s*([\s\S]+)$/i,
     /(?:让|请|麻烦)\s+(@?[^\s，,：:。.!?！？]+)\s+([\s\S]+)$/i,
   ];
 
