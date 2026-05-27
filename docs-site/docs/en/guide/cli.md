@@ -257,7 +257,7 @@ anet node create <name> [options]
 
 | Parameter | Default | Description |
 |------|--------|------|
-| `--runtime` | omit it to enter the interactive **runtime-first wizard** (since v0.9.2 [#133](https://github.com/sleep2agi/agent-network/issues/133), per Vincent's 5101 push: a 3-way picker chooses `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` first; **only** `claude-agent-sdk` continues into the vendor picker. `claude-code-cli` prints a `claude auth login` hint and skips the vendor step; `codex-sdk` prints a `codex auth login` hint and does the same) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `--runtime` | omit it to enter the interactive **runtime-first wizard** (since v0.9.2 [#133](https://github.com/sleep2agi/agent-network/issues/133): a 3-way picker chooses `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` first; **only** `claude-agent-sdk` continues into the vendor picker. `claude-code-cli` prints a `claude auth login` hint and skips the vendor step; `codex-sdk` prints a `codex auth login` hint and does the same) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
 | `--model` | (per runtime default) | Model name |
 
 **Examples**:
@@ -292,6 +292,14 @@ After creation, a config file is generated at `.anet/nodes/<node-name>/config.js
 ```
 
 The following fields are generated **conditionally** — not every node has them: `teammateMode` (only for the `claude-code-cli` runtime, default `in-process`), `session` (only for `claude-code-cli` or when `--session` is passed), `maxTurns` (only when `--max-turns` is passed), `tools` (only when `--tools` is passed).
+
+::: tip v0.10.10+ envRef wizard auto-source ([#193](https://github.com/sleep2agi/agent-network/issues/193))
+When you choose the `claude-agent-sdk` runtime + a third-party vendor (Xiaomi MiMo / MiniMax / Shusheng / GLM, etc.) and paste your API key, the wizard automatically writes the key to `.anet/nodes/<alias>/.env` (mode 0600, auto-added to `.anet/.gitignore`); `config.json.env.ANTHROPIC_AUTH_TOKEN` only stores the envRef reference `{ "_envRef": "ANTHROPIC_AUTH_TOKEN_N_<id>" }` — **secrets are no longer persisted on disk in plaintext**.
+
+When you then run `anet node start <alias>` from the same shell, the `.env` is sourced automatically before launch — **no manual `export ANTHROPIC_AUTH_TOKEN_N_<id>=...` needed**. Debug logs only print `loaded N key(s) from .anet/nodes/<alias>/.env`; key values are never echoed.
+
+Cross-machine deploy is still supported: the wizard still prints the export command once so you can copy it to another machine before running `start`.
+:::
 
 ### anet node start
 

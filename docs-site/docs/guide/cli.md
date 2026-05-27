@@ -299,6 +299,14 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 
 以下字段**按条件生成**，不是每个 node 都有：`teammateMode`（仅 `claude-code-cli` runtime，默认 `in-process`）、`session`（仅 `claude-code-cli` runtime 或传了 `--session`）、`maxTurns`（仅传了 `--max-turns`）、`tools`（仅传了 `--tools`）。
 
+::: tip v0.10.10+ envRef wizard 自动衔接（[#193](https://github.com/sleep2agi/agent-network/issues/193)）
+选 `claude-agent-sdk` runtime + 第三方 vendor（小米 MiMo / MiniMax / 书生 / GLM 等）粘贴 API key 后，wizard 自动把 key 写到 `.anet/nodes/<alias>/.env`（mode 0600，自动加入 `.anet/.gitignore`），`config.json.env.ANTHROPIC_AUTH_TOKEN` 只存 envRef 引用 `{ "_envRef": "ANTHROPIC_AUTH_TOKEN_N_<id>" }` 形式 —— **secret 不再持久化在磁盘明文里**。
+
+紧接着同一 shell 跑 `anet node start <alias>` 时，会在启动前自动 source 该 `.env`，**无需手动 `export ANTHROPIC_AUTH_TOKEN_N_<id>=...`**。debug 日志只输出 `loaded N key(s) from .anet/nodes/<alias>/.env`，不 echo key 值。
+
+跨机部署仍支持：wizard 仍 print 一次 export 命令，用户可手动 copy 到另一台机后再 `start`。
+:::
+
 ### anet node start
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2209)
