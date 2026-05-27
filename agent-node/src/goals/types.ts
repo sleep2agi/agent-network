@@ -32,6 +32,7 @@ export interface AgentGoal {
   last_wake_at?: string;
   last_report_at?: string;
   parent_task_id?: string;           // upstream task that spawned this goal
+  report_to?: string;                // CommHub alias/session to receive loop reports
   codex_thread_id?: string;          // populated on `thread.started` (Phase 2)
   runtime: string;                   // e.g. "codex-sdk" / "claude-agent-sdk"
   created_at: string;

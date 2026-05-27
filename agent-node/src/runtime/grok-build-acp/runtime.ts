@@ -62,7 +62,11 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
       protocolVersion: "1",
       clientCapabilities: {
         fs: { readTextFile: true, writeTextFile: true },
-        terminal: true,
+        // Only advertise capabilities implemented by GrokAcpClient.
+        // Claiming terminal support lets Grok send terminal/* client
+        // requests, which this adapter cannot satisfy and can surface as
+        // generic ACP -32603 internal errors.
+        terminal: false,
       },
     }, timeoutMs);
     const authMethod = selectAuthMethod(init, childEnv);

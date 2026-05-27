@@ -1,9 +1,9 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "2.4.3",
+  "version": "2.4.5",
   "description": "AI Agent runtime for CommHub networks. Supports Claude Agent SDK, Codex SDK, and OpenAI/Anthropic-compatible HTTP API.",
   "bin": {
-    "agent-node": "./dist/cli.js"
+    "agent-node": "dist/cli.js"
   },
   "type": "module",
   "files": [
@@ -32,7 +32,7 @@
   "homepage": "https://anet.sh",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sleep2agi/agent-network",
+    "url": "git+https://github.com/sleep2agi/agent-network.git",
     "directory": "agent-node"
   },
   "publishConfig": {
@@ -48,12 +48,8 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.140",
     "zod": "^4.4.3"
   },
-  "peerDependencies": {
-    "@openai/codex-sdk": ">=0.130.0"
-  },
-  "peerDependenciesMeta": {
-    "@openai/codex-sdk": {
-      "optional": true
-    }
+  "optionalDependencies": {
+    "@openai/codex": "^0.133.0",
+    "@openai/codex-sdk": "^0.133.0"
   }
 }

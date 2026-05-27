@@ -148,7 +148,7 @@ export class GrokAcpClient extends EventEmitter {
       }
       this.pending.delete(id);
       if ("error" in msg && msg.error) {
-        const err = new Error(`grok ACP error ${msg.error.code}: ${msg.error.message}`);
+        const err = new Error(formatJsonRpcError(msg.error));
         (err as Error & { code?: number; data?: unknown }).code = msg.error.code;
         (err as Error & { code?: number; data?: unknown }).data = msg.error.data;
         pending.reject(err);
@@ -229,4 +229,14 @@ export class GrokAcpClient extends EventEmitter {
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
+}
+
+function formatJsonRpcError(error: JsonRpcError["error"]): string {
+  const base = `grok ACP error ${error.code}: ${error.message}`;
+  if (error.data === undefined) return base;
+  let data: string;
+  try { data = JSON.stringify(error.data); }
+  catch { data = String(error.data); }
+  if (data.length > 1000) data = `${data.slice(0, 1000)}...`;
+  return `${base} data=${data}`;
 }
