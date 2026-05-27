@@ -4,9 +4,49 @@
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
-- **当前 stable**：v0.10.9（2026-05-25，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
+- **当前 stable**：v0.10.10（2026-05-27，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
+
+## v0.10.10 — **小米 MiMo 5 模型完整支持 + envRef wizard-to-start 自动衔接**（2026-05-27）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.9` ← bumped（envRef Option A 自动 source + `anet -v` 显示完整 prerelease 后缀 + Grok delegation parser broaden）
+- `@sleep2agi/agent-node@2.4.6` ← bumped（envRef Option A 实施 + Grok 节点延续 stabilization）
+- `@sleep2agi/commhub-server@0.8.3` ← unchanged
+- `@sleep2agi/agent-network-dashboard` ← unchanged
+
+### P0 — 小米 MiMo Vendor Preset 完整
+
+- 新增 `mimo-v2.5-tts-voicedesign`，凑齐官方 5 个模型
+- `anet node create` 选 `claude-agent-sdk` runtime → 「小米 MiMo」vendor → 5 模型任选：`mimo-v2.5-pro`（默认）/ `mimo-v2.5` / `mimo-v2-pro` / `mimo-v2-omni` / `mimo-v2.5-tts-voicedesign`
+- endpoint `https://token-plan-cn.xiaomimimo.com/anthropic` 完整对接 Anthropic Messages 协议
+- 📌 注：`voicedesign` 是 TTS 语音设计模型，Anthropic Messages 文本请求 vendor 大概率不支持；文本对话请用前 4 个模型
+
+### P0 — envRef wizard-to-start 自动衔接（[#193](https://github.com/sleep2agi/agent-network/issues/193)）
+
+**痛点**：`anet node create` 完后同 shell 立即 `anet node start` 报 FATAL `env var not set`，必须手动 `export ANTHROPIC_AUTH_TOKEN_N_<id>=...`。
+
+**现在的行为**：
+
+- wizard create 时 API key 自动写入 `.anet/nodes/<alias>/.env`（mode 0600，自动加入 `.anet/.gitignore`）
+- `anet node start` 启动前自动 source 该 `.env`，无需手动 export
+- 跨机部署仍支持（wizard 仍 print 一次 export 命令，可手动 copy 到另一台机）
+- Debug 日志只输出 `loaded N key(s) from .anet/nodes/<alias>/.env`，**不 echo key 值**
+- 向后兼容：已有 `ANTHROPIC_AUTH_TOKEN_N_*` shell export 继续 work；老节点 plain `config.json` 模式继续 work
+
+适用所有 `claude-agent-sdk` 类型节点（MiMo / MiniMax / 书生 / GLM / 任意 Anthropic Messages 兼容 vendor）。
+
+### Bug fixes
+
+- **[#192](https://github.com/sleep2agi/agent-network/issues/192)** `anet -v` 不显示完整 prerelease 后缀已修，现显示 `v2.2.9` 完整版本号（含 `-preview.N` 后缀 when applicable）
+- **[#189](https://github.com/sleep2agi/agent-network/issues/189) Grok runtime** `grok-build-acp` 全面稳定化：explicit delegation parser broaden 覆盖含「你和 X 沟通一下…」「send_task X 一下…」等无标点尾随 body 句式，跨节点 delegation 路由可靠
+
+### Known Issues
+
+`agent-network` 内部 `npx` fallback 仍 pin `@sleep2agi/agent-node@preview` 标签 —— 未来 preview 推进可能让 latest 用户拉到不稳版本。本 release 不存在 regression（preview 2.4.6-preview.2 内容接近 latest 2.4.6），但需后续 RFC-021 处理（follow-up tracking 待 issue 开）。
+
+---
 
 ## v0.10.9 — **Dashboard 图片发送 + CommHub 附件元数据 + codex-sdk 图片输入**（2026-05-25）✅ stable
 

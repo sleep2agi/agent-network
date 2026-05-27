@@ -4,9 +4,49 @@
 This log runs reverse-chronologically. **The version scheme was reshuffled once**:
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
-- **Current stable**: v0.10.9 (2026-05-25, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
+- **Current stable**: v0.10.10 (2026-05-27, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
+
+## v0.10.10 — **Xiaomi MiMo full 5-model support + envRef wizard-to-start auto-link** (2026-05-27) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.9` ← bumped (envRef Option A auto-source + `anet -v` now shows full prerelease suffix + Grok delegation parser broadened)
+- `@sleep2agi/agent-node@2.4.6` ← bumped (envRef Option A implementation + Grok runtime stabilization continued)
+- `@sleep2agi/commhub-server@0.8.3` ← unchanged
+- `@sleep2agi/agent-network-dashboard` ← unchanged
+
+### P0 — Xiaomi MiMo Vendor Preset complete
+
+- Added `mimo-v2.5-tts-voicedesign` — the full official 5-model lineup is now in the picker
+- `anet node create` → pick `claude-agent-sdk` runtime → "小米 MiMo" vendor → choose from 5 models: `mimo-v2.5-pro` (default) / `mimo-v2.5` / `mimo-v2-pro` / `mimo-v2-omni` / `mimo-v2.5-tts-voicedesign`
+- Endpoint `https://token-plan-cn.xiaomimimo.com/anthropic` speaks the Anthropic Messages protocol
+- 📌 Note: `voicedesign` is a TTS speech-design model — Anthropic Messages text requests are likely vendor-unsupported. For text dialogue, use the first 4 models.
+
+### P0 — envRef wizard-to-start auto-link ([#193](https://github.com/sleep2agi/agent-network/issues/193))
+
+**Pain point**: After `anet node create`, running `anet node start` in the same shell reported `FATAL env var not set` — you had to manually `export ANTHROPIC_AUTH_TOKEN_N_<id>=...` first.
+
+**New behavior**:
+
+- During `wizard create`, the API key is written to `.anet/nodes/<alias>/.env` (mode 0600, auto-added to `.anet/.gitignore`)
+- `anet node start` sources that `.env` file at launch — no manual `export` needed
+- Cross-machine deployment still supported (the wizard still prints the `export` command once so it can be copied to another box)
+- Debug logs emit only `loaded N key(s) from .anet/nodes/<alias>/.env` — **the key value is never echoed**
+- Backward compatible: existing `ANTHROPIC_AUTH_TOKEN_N_*` shell exports keep working; legacy plain `config.json` mode also still works
+
+Applies to every `claude-agent-sdk` node (MiMo / MiniMax / InternLM / GLM / any Anthropic-Messages-compatible vendor).
+
+### Bug fixes
+
+- **[#192](https://github.com/sleep2agi/agent-network/issues/192)** `anet -v` no longer truncates the prerelease suffix — it now shows the full version (e.g. `v2.2.9`, including any `-preview.N` suffix when applicable)
+- **[#189](https://github.com/sleep2agi/agent-network/issues/189) Grok runtime** `grok-build-acp` fully stabilized: the explicit-delegation parser was broadened to cover cases like "你和 X 沟通一下…" / "send_task X 一下…" (no-punctuation trailing body), so cross-node delegation routing is reliable.
+
+### Known Issues
+
+The internal `npx` fallback inside `agent-network` still pins `@sleep2agi/agent-node@preview` — a future preview push could expose `@latest` users to an unstable build. There's no regression in this release (preview `2.4.6-preview.2` is content-equivalent to latest `2.4.6`), but follow-up handling is queued under RFC-021 (tracking issue to be opened).
+
+---
 
 ## v0.10.9 — **Dashboard image sending + CommHub attachment metadata + codex-sdk image input** (2026-05-25) ✅ stable
 
