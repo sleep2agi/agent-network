@@ -48,6 +48,41 @@ I've generated the video as requested...
 
 A **same-machine user** (or an agent SSH'd into the grok node host) `cat`s / `open`s that absolute path.
 
+## Image-to-Video via prompt URL (SDK-verified, anet 0 LOC integration)
+
+**Mechanism**: Grok backend inspects the prompt text for an image URL — **if present, it auto-routes to the `grok-imagine-video` model** (image-to-video); otherwise it falls back to the default text-to-video pipeline. **anet needs zero changes.**
+
+**Usage** (drop the image URL directly into the dispatch prompt):
+
+```
+commhub_send_task(
+  alias="grok-marketing",
+  task="Generate a 5-second video from this image https://upload.wikimedia.org/wikipedia/commons/2/2d/PNG_transparency_demonstration_1.png — slow push-in, 16:9, 720p"
+)
+```
+
+When the Grok agent picks this up, its `video_gen` `rawInput.prompt` includes the URL verbatim. The backend parses the URL → fetches the image → routes to the image-to-video pipeline → drops the mp4 into `~/.grok/sessions/.../videos/N.mp4`. anet's `formatVideoTrailer` surfaces the path as usual.
+
+**SDK-verified** (commhub `cd497384` + ffmpeg first-frame visual check `/tmp/p205-deep/frame-old.png` matches the Wikimedia source):
+
+```json
+{
+  "prompt": "Generate a 5-second video from this image: https://upload.wikimedia.org/wikipedia/commons/2/2d/PNG_transparency_demonstration_1.png . The image shows a transparent PNG demonstration with a 3D-rendered dice composition on a checkered transparency background. [...visual description...]",
+  "duration": 5,
+  "aspect_ratio": "16:9",
+  "resolution": "720p"
+}
+```
+
+Note that `rawInput` carries `duration` / `aspect_ratio` / `resolution` fields — the backend silently accepts these hints (they are not in the explicit schema but SDK probing confirmed they work).
+
+### Prompt tips
+- **URL** is the trigger signal for image-to-video — it must be public and fetchable.
+- **Image-content description** is redundant but stabilising — Grok uses the visual description in the prompt to fine-tune motion / camera (a bare URL + "make it move" works too, but the output becomes unpredictable).
+- **Video directives** follow the text-to-video conventions (`5 seconds` / `push-in` / `16:9` / `720p` / style keywords).
+
+→ **Vincent 6512 / 6513 hint + SDK verification**: anet 0 LOC integration; the prompt-URL route IS the image-to-video entry point.
+
 ## Cross-machine distribution (P2 follow-up, out of scope here)
 
 If the receiver / upstream is on a different host, the absolute path is meaningless. This is **not solved here**. Tracked as a follow-up:

@@ -7,6 +7,19 @@
 > **作者**: 通信SDK马
 > **日期**: 2026-05-28
 
+## ⚠ Erratum (2026-05-28, post-SDK-deep-probe)
+
+本报告原 verdict 框架是 "`video_gen` text-only / 不接 image input" 的隐含假设(`rawInput` 只列 `prompt` 字段, 没显式 `image_url` 等). **实证证伪**:
+
+- **现实**: Grok backend 看 `prompt` 文本里有没有图片 URL — **有就自动路由到 `grok-imagine-video` 模型** (image-to-video pipeline), 没有走默认 text-to-video. **anet 0 LOC 改动**.
+- **修正依据**:
+  - SDK 实证 (commhub task `cd497384`) — prompt 含 Wikimedia public PNG URL, Grok video_gen `rawInput` 实际带 `duration` / `aspect_ratio` / `resolution` 多字段 (schema 没列, 但 backend 接受), 输出 mp4
+  - ffmpeg 第 1 帧视觉验证 (`/tmp/p205-deep/frame-old.png` extract) 对得上 Wikimedia 测试图源 — image-to-video pipeline 工作 ✓
+- **根因 banked**: 之前 probe 只看 `rawInput` schema (`prompt` 单字段), **没看 mp4 实际内容**. backend smarts > schema surface.
+- **新场景**: scenarios/video-gen-marketing.md (ZH+EN) "Image-to-Video via prompt URL" section 文档化用法 + prompt tips + SDK 实证 JSON.
+
+→ 后续 capability probe 都需 **content-level 验证** (ffmpeg / hash / visual diff), 不只 schema scan.
+
 ## TL;DR
 
 **Grok CLI 原生支持视频生成**,通过 LLM 自主调用 **`video_gen` tool**。**调用入参极简** (`{prompt: <text>}`),**输出落本地文件** (`~/.grok/sessions/<sessId>/videos/N.mp4`)。Vincent 现有 session 已经生成过 12s / 5.3MB 的 anet 宣传片。anet 接入只需在 Grok 节点反代 LLM reply,**artifact 路径需要 anet runtime 帮转出来给用户/上游**(否则文件锁在 session-private 目录)。

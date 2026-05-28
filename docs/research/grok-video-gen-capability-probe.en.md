@@ -7,6 +7,19 @@
 > **Author**: 通信SDK马
 > **Date**: 2026-05-28
 
+## ⚠ Erratum (2026-05-28, post-SDK-deep-probe)
+
+This report's original framing implied `video_gen` was **text-only / could not accept image input** (`rawInput` lists only the `prompt` field, no explicit `image_url`). **SDK probing falsified that:**
+
+- **Reality**: The Grok backend inspects the `prompt` text for an image URL — **if one is present, it auto-routes to the `grok-imagine-video` model** (image-to-video pipeline); otherwise it falls back to the default text-to-video pipeline. **anet needs 0 LOC of code changes.**
+- **Corroborating evidence**:
+  - SDK live probe (commhub task `cd497384`) — a prompt with a Wikimedia public PNG URL produced a Grok `video_gen` `rawInput` carrying `duration` / `aspect_ratio` / `resolution` fields (not in the schema surface, but accepted by the backend) and output an mp4.
+  - ffmpeg first-frame visual check (`/tmp/p205-deep/frame-old.png` extract) matches the Wikimedia source — image-to-video pipeline is confirmed working ✓.
+- **Root cause banked**: the original probe inspected `rawInput` schema only (`prompt`-single-field) and **did not inspect the mp4 contents**. Backend smarts > schema surface.
+- **New scenario coverage**: `scenarios/video-gen-marketing.md` (ZH+EN) now has an "Image-to-Video via prompt URL" section with usage, prompt tips, and the SDK-verified JSON.
+
+→ Future capability probes must perform **content-level verification** (ffmpeg / hash / visual diff), not just schema scans.
+
 ## TL;DR
 
 **Grok CLI natively supports video generation** via an LLM-autoregressive **`video_gen` tool**. **The input is dead-simple** (`{prompt: <text>}`); **the output is a local file** (`~/.grok/sessions/<sessId>/videos/N.mp4`). Vincent's existing session has already generated a 12 s / 5.3 MB anet promo video. anet integration only needs to **extract the artifact path from the LLM reply and copy/export the file** to a user-reachable location — otherwise the mp4 sits in a session-private 0600 directory inaccessible across machines.

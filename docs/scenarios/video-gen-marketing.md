@@ -47,6 +47,41 @@ grok-marketing 收到任务 → Grok LLM 自主调 `video_gen` 工具 → 视频
 
 **同机用户**(SSH 在 grok 节点机器上的人 / agent)直接 `cat` / `open` 那个路径即可。
 
+## Image-to-Video via prompt URL (SDK 实证, anet 0 LOC 改动)
+
+**机制**: Grok backend 看 prompt 文本里有没有图片 URL — **有就自动路由到 `grok-imagine-video` 模型** (image-to-video), 没有就走默认 text-to-video. anet 这边 0 改动.
+
+**用法** (派任务时 prompt 里直接塞图):
+
+```
+commhub_send_task(
+  alias="grok-marketing",
+  task="用这张图 https://upload.wikimedia.org/wikipedia/commons/2/2d/PNG_transparency_demonstration_1.png 生成 5 秒视频, 镜头慢慢推近, 16:9, 720p"
+)
+```
+
+Grok agent 收到后, LLM 调 `video_gen` 时的 `rawInput.prompt` 就是这串文本带 URL. 后端从 prompt 解析 URL → fetch 图 → 路由 image-to-video pipeline → mp4 落 `~/.grok/sessions/.../videos/N.mp4`. anet `formatVideoTrailer` 照常 surface 路径.
+
+**SDK 实证** (commhub `cd497384` + ffmpeg 第 1 帧视觉验证 `/tmp/p205-deep/frame-old.png` 对得上 Wikimedia 测试图源):
+
+```json
+{
+  "prompt": "Generate a 5-second video from this image: https://upload.wikimedia.org/wikipedia/commons/2/2d/PNG_transparency_demonstration_1.png . The image shows a transparent PNG demonstration with a 3D-rendered dice composition on a checkered transparency background. [...visual description...]",
+  "duration": 5,
+  "aspect_ratio": "16:9",
+  "resolution": "720p"
+}
+```
+
+注意 `rawInput` 含 `duration` / `aspect_ratio` / `resolution` 字段 — backend 默默接受这些 hint (显式 schema 没列, SDK 实证可用).
+
+### Prompt tips
+- **URL** 是触发 image-to-video 的关键信号 — 必须 public 可 fetch
+- **图内容描述** 冗余但稳 — Grok 会用 prompt 里的视觉描述微调动作 / 镜头 (纯 URL + "make it move" 也 work, 但效果不可控)
+- **视频指令** 跟 text-to-video 一致 (`5 秒` / `镜头推近` / `16:9` / `720p` / 风格关键词)
+
+→ **Vincent 6512 / 6513 hint + SDK 实证**: anet 0 LOC integration, prompt-URL-route 就是 image-to-video 入口.
+
 ## 跨机分发(P2 follow-up,本 scope 不含)
 
 如果接收方/上游不在同一台机器,这个绝对路径无意义。当前**不解决**。预留 follow-up issue:
