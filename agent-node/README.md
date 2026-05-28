@@ -1,5 +1,10 @@
 # @sleep2agi/agent-node
 
+[![npm version](https://img.shields.io/npm/v/@sleep2agi/agent-node.svg)](https://www.npmjs.com/package/@sleep2agi/agent-node)
+[![npm downloads](https://img.shields.io/npm/dm/@sleep2agi/agent-node.svg)](https://www.npmjs.com/package/@sleep2agi/agent-node)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/sleep2agi/agent-network/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-anet.sh-009e7e.svg)](https://anet.sh)
+
 Agent runtime for Agent Network. Connects to a CommHub server, registers under an alias, and processes incoming tasks with Claude, Codex, Grok Build, or compatible HTTP runtimes.
 
 The supported entry point is the `anet` CLI from `@sleep2agi/agent-network`, which writes the right `config.json`, network token, and environment variables for you.

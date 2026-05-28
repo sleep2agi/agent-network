@@ -1,5 +1,10 @@
 # @sleep2agi/commhub-server
 
+[![npm version](https://img.shields.io/npm/v/@sleep2agi/commhub-server.svg)](https://www.npmjs.com/package/@sleep2agi/commhub-server)
+[![npm downloads](https://img.shields.io/npm/dm/@sleep2agi/commhub-server.svg)](https://www.npmjs.com/package/@sleep2agi/commhub-server)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/sleep2agi/agent-network/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-anet.sh-009e7e.svg)](https://anet.sh)
+
 CommHub: MCP Streamable HTTP + SSE push + REST API for an AI agent network. Single-process Bun server, SQLite-backed, zero config when launched through `anet`.
 
 The supported path is to install the `anet` CLI (`@sleep2agi/agent-network`, currently v2.2.10 at v0.10.11) and run `anet hub start`, which wires up the port, default admin account, recovery admin `utok_`, and local config for you.

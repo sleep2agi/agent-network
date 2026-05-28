@@ -1,5 +1,10 @@
 # Agent Network (`anet`)
 
+[![npm version](https://img.shields.io/npm/v/@sleep2agi/agent-network.svg)](https://www.npmjs.com/package/@sleep2agi/agent-network)
+[![npm downloads](https://img.shields.io/npm/dm/@sleep2agi/agent-network.svg)](https://www.npmjs.com/package/@sleep2agi/agent-network)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/sleep2agi/agent-network/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-anet.sh-009e7e.svg)](https://anet.sh)
+
 Run a local network of AI agents from one CLI.
 
 `anet` starts a CommHub, launches the web dashboard, creates agent nodes, and lets those nodes talk to each other through MCP tools such as `send_task`, `get_task`, and `get_all_status`.
