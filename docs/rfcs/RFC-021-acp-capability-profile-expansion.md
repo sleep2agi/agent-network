@@ -338,13 +338,30 @@ LLM **理解任务 + 主动尝试找工具 + 找不到** — 三层证据 Path A
 - **A站负责人 R23 试跑结论照旧 hold**:Path A 不能解锁 X 搜索,fallback 继续走 ai-api.js + 智谱 mmx pipeline(他已有方案,不阻塞)
 - **#206 keep open** w/ "blocked-by Path C upstream PR" 标签 — 等 PR 合 ACP 0.5+ + Grok 升版本支持
 
-### 11.6 Path C 真 fork PR(本 RFC ship 后立即做)
+### 11.6 Path C 真 fork PR — **已 ship**
 
-Per Vincent 6440 + 通信龙 dispatch:
-1. `gh repo fork zed-industries/agent-client-protocol --clone`
-2. 加 `requestedToolCategories?: ("search" | "media-gen" | "web" | "social-search" | "code-exec" | "voice")[]` 到 `ClientCapabilities` schema(TypeScript types regenerated)
-3. PR body 含 anet/grok-build use case + abstract category rationale + #205 / #206 链接 + 本 RFC §11 negative evidence
-4. PR URL update 到本 §11.6 + commhub 报通信龙
+- **Upstream PR**: <https://github.com/agentclientprotocol/agent-client-protocol/pull/1302>
+- **RFD file**: `docs/rfds/requested-tool-categories.mdx`(在 fork 上)
+- **Fork**: <https://github.com/s2agi/agent-client-protocol>(branch `feat/requested-tool-categories`)
+
+PR 走 ACP 项目的 RFD process(per [CONTRIBUTING.md](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/CONTRIBUTING.md)):本 PR 仅落 RFD 文档(`docs/rfds/<slug>.mdx`),不直接落 Rust 实现。等 core team 有人 champion 后,Phase 2 才 feature-gated 落地到 `src/v1/client.rs` + `src/v2/client.rs`(behind `unstable_requested_tool_categories`)。
+
+**proposed schema** (per 通信牛 review gate #3 抽象 categories):
+
+```rust
+#[cfg(feature = "unstable_requested_tool_categories")]
+#[serde(default, skip_serializing_if = "Option::is_none")]
+pub requested_tool_categories: Option<Vec<RequestedToolCategory>>,
+
+#[derive(..., JsonSchema, ..., Hash)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RequestedToolCategory {
+    Search, SocialSearch, MediaGen, Web, CodeExec, Voice, // ...
+}
+```
+
+闭枚举 `#[non_exhaustive]` 保 cross-vendor 语义锚定,加扩字段走 follow-up RFD。本 RFC §11.4 负面证据(LLM 自报 + 6 次 search_tool 重试 + 0 hit)作 PR body Exhibit A 用,给 ACP maintainers 清晰 motivation。
 
 ### 11.7 Lesson banked
 
