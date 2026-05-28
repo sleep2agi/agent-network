@@ -61,6 +61,15 @@ What happens:
 The default `admin / anethub` is fine only for local quick-start. **For any `--host 0.0.0.0` / public deployment, run `anet passwd` immediately** to set a strong password (≥ 8 chars + not in the weak-password dictionary). You can also set your own credentials at bootstrap via `anet hub start --username alice --password 'your-strong-pass!'`.
 :::
 
+::: tip Stop / check status (v0.10.11+)
+```bash
+anet hub status                # Show PID / port / commhub-server version (via /health)
+anet hub stop                  # Graceful shutdown: SIGTERM → 3s grace → SIGKILL fallback
+anet hub stop --port 9201      # Specify a non-default port
+```
+No more manual `lsof -i :9200` + `kill <PID>` (the workaround users needed before v0.10.11 [#200](https://github.com/sleep2agi/agent-network/issues/200)).
+:::
+
 ## 3. Start the Dashboard
 
 Open a second terminal and **keep it open**:

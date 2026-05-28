@@ -63,6 +63,15 @@ Hub 启动后：
 默认 `admin / anethub` 仅供本机快速上手。**任何 `--host 0.0.0.0` 公网部署立刻 `anet passwd` 改强密码**（≥ 8 位 + 非弱密码字典）。也可以在 `anet hub start --username alice --password 'your-strong-pass!'` 时直接设你自己的凭证。
 :::
 
+::: tip 停止 / 查看状态（v0.10.11+）
+```bash
+anet hub status                # 显示 PID / port / commhub-server 版本 (查 /health)
+anet hub stop                  # 优雅关闭：SIGTERM → 3s grace → SIGKILL 兜底
+anet hub stop --port 9201      # 指定非默认端口
+```
+不再需要手动 `lsof -i :9200` + `kill <PID>` 那套（v0.10.11 [#200](https://github.com/sleep2agi/agent-network/issues/200) 之前用户得自己 hack）。
+:::
+
 ## 3. 启动 Dashboard
 
 再开一个终端窗口，**保持开着**：
