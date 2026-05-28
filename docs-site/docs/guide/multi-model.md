@@ -32,6 +32,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | **Claude Code** | Anthropic | `claude-code-cli` | Claude Max 订阅 | 终端交互 | 订阅制 |
 | **Codex (codex-sdk)** | OpenAI | `codex-sdk` | codex auth login | 代码生成 | 中 |
 | **OpenRouter（多模型聚合）** | OpenRouter | `claude-agent-sdk` | `ANTHROPIC_AUTH_TOKEN` | 一个 API Key 用所有模型（GPT-4 / Claude / Gemini / Llama 等），统一计费；**不在内置 `VENDORS` 列表**，走 `custom` 供应商接入（`openrouter.ai/api/v1`）| 跟随上游 |
+| **xAI Grok Build** | xAI | `grok-build-acp` | `grok` CLI auth + `XAI_API_KEY` | xAI Grok Build ACP 协议跨 agent 协作；目前只通过 `--runtime grok-build-acp` flag 启用（不在 `anet node create` wizard 3-way picker），[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md）| 中 |
 
 ## 配置方式
 
