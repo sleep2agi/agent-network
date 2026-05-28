@@ -90,7 +90,7 @@ anet upgrade --self
 | `self skip` | anet does not self-upgrade by default (pass `--self`) |
 | `lookup failed` | npm registry lookup failed — network / package name issue |
 
-**Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.2` on v0.10.8 stable — bumped from `0.8.0` by the v0.10.1 PINNED chain-bump hotfix) — `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
+**Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.3` on v0.10.10 stable — bumped from `0.8.2` by the v0.10.9 [#194 hotfix](https://github.com/sleep2agi/agent-network/issues/194); prior bump from `0.8.0` was the v0.10.1 PINNED chain-bump hotfix) — `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
 
 **After the upgrade**: `anet upgrade` prints a hint that running nodes need a restart to pick up the new agent-node:
 
@@ -147,13 +147,13 @@ anet status
 
 ## v0.7 → v0.8 Upgrade Notes (historical path) {#v0-7-v0-8-upgrade-notes-latest}
 
-::: info Current stable is v0.10.8
+::: info Current stable is v0.10.10
 This section documents **the historical path from v0.7 to v0.8**, kept as a reference for users who need to traverse v0.7 → v0.10.8 in one go. **Upgrading between v0.8 / v0.9 / v0.10.x** is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — the auth migration below is **not** required (see [changelog](/en/changelog) and read the per-release notes for v0.8 / v0.9 / v0.10).
 :::
 
 v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
 
-::: tip v0.8.x → v0.10.8 increments
+::: tip v0.8.x → v0.10.10 increments
 After the v0.8 main path, v0.8.2 / v0.8.3 / v0.9.0 / v0.9.1 / v0.9.2 / v0.10.0 / v0.10.1 / v0.10.2 / v0.10.3 / v0.10.4 / v0.10.5 / v0.10.6 / v0.10.7 / **v0.10.8** (current stable; four packages at npm `latest`: `agent-network 2.2.6` (v0.10.7 [#156 codex-sdk batch path yolo flags parity + `--no-yolo` opt-out](https://github.com/sleep2agi/agent-network/issues/156) — batch + codex-sdk users get the autonomous posture, single-node users unaffected + v0.10.6 [#154 anet upgrade Option B detached spawn default](https://github.com/sleep2agi/agent-network/issues/154) + [#155 batch wizard silent-exit fix](https://github.com/sleep2agi/agent-network/issues/155) + v0.10.3 codex preset + v0.10.4 [#151 anet upgrade UX](https://github.com/sleep2agi/agent-network/issues/151) + v0.10.5 [#152 batch workdir wizard + #153 codex/claude skip API key](https://github.com/sleep2agi/agent-network/issues/152)) / `agent-node 2.4.2` (v0.10.2 Hero A disk + v0.10.3 codex-sdk gpt-5.5 + yolo flags) / `commhub-server 0.8.2` / `agent-network-dashboard 0.5.3` (v0.10.8 [#157 Servers panel UI copy fix + TopoGraph density-tier polish](https://github.com/sleep2agi/agent-network/issues/157) + v0.10.4 [#150 orphan-band](https://github.com/sleep2agi/agent-network/issues/150) + v0.10.2 Hero D + disk render + 100+ rounds of polish)) progressively added: `anet channel add telegram` one-shot bind, `claude-code-cli` runtime session-resume fix, `anet create --batch` bulk-agent primitive, `anet demo sci-team` / `pr-review` demos, `anet login` first-login guidance, `anet doctor --fix` ntok_ repair, envRef vendor credential storage ([#125](https://github.com/sleep2agi/agent-network/issues/125)), SDK high-concurrency retry-with-backoff + 300s timeout ([#132](https://github.com/sleep2agi/agent-network/issues/132)), runtime-first wizard ([#133](https://github.com/sleep2agi/agent-network/issues/133)), `anet project up/restart/down` cwd-wide orchestration ([#117](https://github.com/sleep2agi/agent-network/issues/117)), the `codex-direct-stdio` opt-in path ([#141](https://github.com/sleep2agi/agent-network/issues/141), enable via `ANET_CODEX_STDIO_DIRECT=1`), the per-server-daemon observability endpoint family ([#99](https://github.com/sleep2agi/agent-network/issues/99) `/api/server/:host/health` + `/api/server/:host/agents`) + per-agent `process_telemetry` ([#142](https://github.com/sleep2agi/agent-network/issues/142)), dashboard Hero 3 8 surfaces, and more.
 
 These increments **keep the same upgrade path as v0.7 → v0.8 main path** (the admin bootstrap + password management is a one-time migration; later incremental upgrades carry no extra auth steps). Full per-version increments: [changelog](/en/changelog).
