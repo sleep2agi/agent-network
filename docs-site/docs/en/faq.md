@@ -24,7 +24,7 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 
 ### 3. Is it free?
 
-**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.10 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
+**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.11 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
 
 - Public repo, modifiable source
 - Business model = courses + consulting, not a forced hosted SaaS
@@ -248,7 +248,7 @@ anet network invite --role member        # Generate invite code (admin/member/vi
 ```
 
 ::: tip Role changes
-The current v0.10.10 stable still does not expose `promote` / `demote` CLI subcommands (v0.9.x was Recovery & Observability; v0.10.0 was Direct Runtime + Observability Foundations; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2-10 covered Hero A disk + Hero D topology prefix / v0.10.3 codex preset / v0.10.4 dashboard orphan-band + `anet upgrade` UX warning / v0.10.5 batch wizard workdir + codex/claude skip API key / v0.10.6 `anet upgrade` Option B detached + wizard silent-exit / v0.10.7 codex-sdk batch yolo parity / v0.10.8 Servers UI copy fix / v0.10.9 codex-sdk image input + commhub attachment `meta_json` / v0.10.10 Xiaomi MiMo 5-model preset + envRef wizard-to-start auto-source — none of them touched member-role management). To change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.11+ / unscheduled.
+The current v0.10.11 stable still does not expose `promote` / `demote` CLI subcommands (v0.9.x was Recovery & Observability; v0.10.0 was Direct Runtime + Observability Foundations; v0.10.1 was the PINNED chain-bump hotfix; v0.10.2-10 covered Hero A disk + Hero D topology prefix / v0.10.3 codex preset / v0.10.4 dashboard orphan-band + `anet upgrade` UX warning / v0.10.5 batch wizard workdir + codex/claude skip API key / v0.10.6 `anet upgrade` Option B detached + wizard silent-exit / v0.10.7 codex-sdk batch yolo parity / v0.10.8 Servers UI copy fix / v0.10.9 codex-sdk image input + commhub attachment `meta_json` / v0.10.10 Xiaomi MiMo 5-model preset + envRef wizard-to-start auto-source — none of them touched member-role management). To change roles, call [REST `/api/networks/:id/members/:user_id`](/en/api/rest) directly or use the Dashboard Admin page (partial; see [Dashboard Admin](/en/guide/dashboard#admin)). Full CLI entry is scheduled for v0.11+ / unscheduled.
 :::
 
 ### 17a. How do I change my password? (v0.8)

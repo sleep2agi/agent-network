@@ -188,7 +188,7 @@ CLI 不需要你输任何 role 信息 —— `anet login` 时 hub 把 role 写�
 
 ## 升降级一个成员的角色
 
-::: warning v0.10.10 stable 仍没有 `promote` / `demote` CLI 子命令
+::: warning v0.10.11 stable 仍没有 `promote` / `demote` CLI 子命令
 v0.9.x scope 是 Recovery & Observability，v0.10.0 是 Direct Runtime + Observability Foundations，v0.10.1 是 PINNED chain-bump hotfix，v0.10.2-10 是 Hero A disk + Hero D 拓扑前缀 / v0.10.3 codex preset / v0.10.4 dashboard orphan-band + `anet upgrade` UX 警告 / v0.10.5 batch wizard workdir + codex/claude skip API key / v0.10.6 `anet upgrade` Option B detached + wizard silent-exit / v0.10.7 codex-sdk batch yolo parity / v0.10.8 Servers UI 文案修 / v0.10.9 codex-sdk 图片输入 + commhub 附件 `meta_json` / v0.10.10 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接 —— 主题都不在 member role 管理；完整 CLI 入口排到 v0.11+ / 未排期。目前列成员可以走 CLI，**改角色 / 移除成员一律走 REST**（详见 [API — networks members](/api/rest#get-api-networks-id-members)）。
 :::
 
