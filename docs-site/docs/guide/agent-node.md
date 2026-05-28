@@ -3,10 +3,11 @@
 Agent Node 是 Agent Network 中的工作单元 -- 接收任务、调用 AI 模型处理、回报结果。
 
 ::: tip 不知道选哪个 Runtime？
-- 不确定时先用 `claude-agent-sdk`（推荐新手）。`anet node create` 交互式**先选供应商（vendor）**：内置 `VENDORS` 列表 = 书生 Intern / MiniMax / 小米 MiMo / Anthropic Claude / Codex / Claude Code CLI / 自定义（custom）—— 每个内置 vendor 都跑通过真 API 验证。**DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问等不在内置列表的 Anthropic 兼容 provider 走「自定义」**+ `ANTHROPIC_BASE_URL` env 接入（[完整 provider 表见 multi-model.md](/guide/multi-model)）
+- 不确定时先用 `claude-agent-sdk`（推荐新手）。`anet node create` 自 v0.9.2 起是**runtime-first wizard**（[#133](https://github.com/sleep2agi/agent-network/issues/133)）：先 3-way 选 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`，**只有** `claude-agent-sdk` 才继续走 vendor 选单（内置 `VENDORS` = 书生 Intern / MiniMax / 小米 MiMo / Anthropic Claude / 自定义 custom，每个跑通真 API 验证才进列表）。**DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问等不在内置列表的 Anthropic 兼容 provider 走「自定义」**+ `ANTHROPIC_BASE_URL` env 接入（[完整 provider 表见 multi-model.md](/guide/multi-model)）。`grok-build-acp` 是第 4 runtime，目前**只能通过 `--runtime grok-build-acp` flag 显式启用**（不在 wizard 3-way picker 里），[详细见 GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
 - 想让 AI **写代码 / 跑命令** --> `codex-sdk`
 - 想让 AI **写文案 / 翻译 / 分析**（编程方式调用） --> `claude-agent-sdk`
 - 想让 AI **像终端里用 Claude 一样干活** --> `claude-code-cli`
+- 想用 **xAI Grok Build** --> `grok-build-acp`（[详细见 GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)）
 - 想用**国产模型（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等）** --> `claude-agent-sdk` + `ANTHROPIC_BASE_URL`（[完整 provider 表](/guide/multi-model)）
 :::
 
@@ -172,7 +173,7 @@ npx @sleep2agi/agent-node [options]
 |------|--------|------|
 | `--alias` | (必需) | Agent 名称（在 CommHub 中的显示名） |
 | `--hub` | http://127.0.0.1:9200 | CommHub Server 地址 |
-| `--runtime` | claude-agent-sdk | 运行时引擎（`claude-agent-sdk` / `codex-sdk` / `claude-code-cli`） |
+| `--runtime` | claude-agent-sdk | 运行时引擎（`claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp`） |
 | `--model` | (按 runtime 默认) | AI 模型名称 |
 | `--tools` | (无) | 可用工具列表，逗号分隔 |
 | `--max-budget` | 0 | 每任务预算上限（美元，0 表示不启用） |
@@ -232,7 +233,7 @@ flowchart TD
 | `node_id` | string | 稳定唯一标识（n_ 前缀 + 8 位 hex） |
 | `node_name` | string | 显示名称，可 rename |
 | `alias` | string | 节点别名（`.anet/nodes/<alias>/` 目录名 + CommHub 上的显示标识；不单独设时等于 `node_name`） |
-| `runtime` | string | 运行时：`claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `runtime` | string | 运行时：`claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` |
 | `model` | string | AI 模型名称 |
 | `session` | string | session/thread ID。`claude-code-cli` runtime 下由 `anet node create` 预生成 UUID（首次 start 用 `--session-id <uuid>` 绑定，重启自动 `--resume <uuid>` 续会话；v0.8.2 修了之前默认丢 session 的 bug）；其他 runtime 是上次 session ID 用作 resume |
 | `channels` | string[] | 接入的 Channel 列表 |
@@ -474,7 +475,7 @@ SSE 断连后自动重连，使用指数退避策略：
 - [Hello World](/cases/hello-world) — 跟着 6 步建第一个 agent 集群
 
 **深入配置**：
-- [Runtimes](/guide/runtimes) — 三个 runtime（claude-agent-sdk / codex-sdk / claude-code-cli）选哪个
+- [Runtimes](/guide/runtimes) — 四个 runtime（claude-agent-sdk / codex-sdk / claude-code-cli / grok-build-acp）选哪个
 - [多模型配置](/guide/multi-model) — 用 DeepSeek / MiniMax / Kimi / Claude 等
 - [Channel 插件](/guide/channels) — agent 怎么接 Telegram / 微信 / 飞书
 

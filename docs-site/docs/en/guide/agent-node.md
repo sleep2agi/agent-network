@@ -3,10 +3,11 @@
 Agent Node is the working unit in Agent Network -- it receives tasks, invokes an AI model to process them, and reports results.
 
 ::: tip Not sure which Runtime to pick?
-- Not sure? Start with `claude-agent-sdk` (recommended for newcomers). `anet node create` is interactive and **picks the vendor first**: the built-in `VENDORS` list = InternLM / MiniMax / Xiaomi MiMo / Anthropic Claude / Codex / Claude Code CLI / Custom — every built-in vendor is verified-with-real-call. **DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen and other Anthropic-compatible providers not in the built-in list go through "Custom"** + `ANTHROPIC_BASE_URL` env ([full provider table in multi-model.md](/en/guide/multi-model)).
+- Not sure? Start with `claude-agent-sdk` (recommended for newcomers). Since v0.9.2 ([#133](https://github.com/sleep2agi/agent-network/issues/133)) `anet node create` is a **runtime-first wizard**: a 3-way picker chooses `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` first; **only** `claude-agent-sdk` then continues into the vendor picker (built-in `VENDORS` = InternLM / MiniMax / Xiaomi MiMo / Anthropic Claude / Custom — every entry verified-with-real-call). **DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen and other Anthropic-compatible providers not in the built-in list go through "Custom"** + `ANTHROPIC_BASE_URL` env ([full provider table in multi-model.md](/en/guide/multi-model)). `grok-build-acp` is the 4th runtime; today it's only available via the explicit `--runtime grok-build-acp` flag (not in the 3-way wizard picker yet) — [details on GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md).
 - Want AI to **write code / run commands** --> `codex-sdk`
 - Want AI to **write copy / translate / analyze** (programmatic API) --> `claude-agent-sdk`
 - Want AI to **work like Claude in your terminal** --> `claude-code-cli`
+- Want to use **xAI Grok Build** --> `grok-build-acp` ([details on GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - Want to use **domestic Chinese models (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter, etc.)** --> `claude-agent-sdk` + `ANTHROPIC_BASE_URL` ([full provider table](/en/guide/multi-model))
 :::
 
@@ -172,7 +173,7 @@ npx @sleep2agi/agent-node [options]
 |------|--------|------|
 | `--alias` | (required) | Agent name (display name in CommHub) |
 | `--hub` | http://127.0.0.1:9200 | CommHub Server address |
-| `--runtime` | claude-agent-sdk | Runtime engine (`claude-agent-sdk` / `codex-sdk` / `claude-code-cli`) |
+| `--runtime` | claude-agent-sdk | Runtime engine (`claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp`) |
 | `--model` | (per runtime default) | AI model name |
 | `--tools` | (none) | Available tools, comma-separated |
 | `--max-budget` | 0 | Per-task budget cap (USD; 0 means disabled) |
@@ -232,7 +233,7 @@ After the project config is loaded, [`cli.ts:123-125`](https://github.com/sleep2
 | `node_id` | string | Stable unique identifier (n_ prefix + 8-char hex) |
 | `node_name` | string | Display name, can be renamed |
 | `alias` | string | Node alias (the `.anet/nodes/<alias>/` directory name + the display identifier on CommHub; equals `node_name` when not set separately) |
-| `runtime` | string | Runtime: `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `runtime` | string | Runtime: `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` |
 | `model` | string | AI model name |
 | `session` | string | session/thread ID. For the `claude-code-cli` runtime, `anet node create` pre-generates a UUID (first `start` binds it via `--session-id <uuid>`, restarts auto-`--resume <uuid>` to continue the conversation; v0.8.2 fixed a prior default session-loss bug). For other runtimes, this is the previous session ID for resume |
 | `channels` | string[] | Connected channels list |
@@ -474,7 +475,7 @@ When running in Docker, environment variables are the most convenient configurat
 - [Hello World](/en/cases/hello-world) — 6-step walkthrough for your first agent cluster
 
 **Configure deeper**:
-- [Runtimes](/en/guide/runtimes) — picking between claude-agent-sdk / codex-sdk / claude-code-cli
+- [Runtimes](/en/guide/runtimes) — picking between claude-agent-sdk / codex-sdk / claude-code-cli / grok-build-acp
 - [Multi-model](/en/guide/multi-model) — use DeepSeek / MiniMax / Kimi / Claude
 - [Channel plugins](/en/guide/channels) — wire agents to Telegram / WeChat / Feishu
 
