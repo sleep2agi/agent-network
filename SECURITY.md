@@ -35,7 +35,7 @@ Only the latest minor version receives security updates.
 | `@sleep2agi/agent-node` | latest 2.x |
 | `@sleep2agi/agent-network-dashboard` | latest 0.x |
 
-## Known Risk Surface (v0.8.2 stable)
+## Known Risk Surface (v0.10.11 stable)
 
 If you self-host on the public internet, read [**`/en/deploy/production`**](https://anet.sh/en/deploy/production)
 before opening firewall ports. The headline items:
