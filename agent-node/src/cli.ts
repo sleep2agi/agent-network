@@ -1309,6 +1309,19 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   if (AUTH_TOKEN) commhubMcpEnv.push({ name: "COMMHUB_TOKEN", value: AUTH_TOKEN });
   if (COMMHUB_URL) commhubMcpEnv.push({ name: "COMMHUB_URL", value: COMMHUB_URL });
   if (RESUME_ID) commhubMcpEnv.push({ name: "COMMHUB_RESUME_ID", value: RESUME_ID });
+  // #204 preview.5 — defensive runtime quietening. Vincent UAT preview.4 hit
+  // "serde error expected value at line 1 column 2" — Grok's serde parser
+  // saw non-JSON-RPC bytes on the MCP subprocess's stdout. Most likely
+  // sources: bun version splash on some host setups, Node deprecation
+  // warnings, or color-escape sequences from tooling. We silence the
+  // common runtime-side leakage paths in the child env so stdout stays
+  // pure JSON-RPC even if user's bun/node prints something startup-time.
+  commhubMcpEnv.push({ name: "BUN_QUIET", value: "1" });
+  commhubMcpEnv.push({ name: "NODE_NO_WARNINGS", value: "1" });
+  commhubMcpEnv.push({ name: "NO_COLOR", value: "1" });
+  // Tag this subprocess so future diagnostic paths can distinguish ACP-
+  // spawned commhub MCP from anet's other invocations of node-server.js.
+  commhubMcpEnv.push({ name: "COMMHUB_MCP_TRANSPORT", value: "acp-stdio" });
   // preview.4 (#204 半-PASS catch) — Vincent UAT 04:41 showed schema accepted
   // but commhub tools never registered to Grok ("CommHub 通道暂不可用 工具
   // 未就绪"). Most-likely cause: Grok ACP spawns MCP subprocess with a cwd

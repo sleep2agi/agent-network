@@ -221,6 +221,39 @@ function loadServerConfig(): Record<string, any> {
   return {};
 }
 
+// #204 preview.5 — shared resolver + refresher for `.anet/node-server.js`. The
+// MCP channel plugin file lives at `<cwd>/.anet/node-server.js`; we previously
+// only wrote it when missing (`anet init project`) which let stale copies
+// linger across upgrades. Vincent's grok-build-acp UAT hit "serde error
+// expected value at line 1 column 2" when Grok ACP spawned an outdated
+// node-server.js that wrote non-JSON-RPC bytes to stdout. The refresher now
+// overwrites on demand (called from launchAgent before grok-build-acp
+// spawn) so the file matches the currently-installed agent-network version.
+function findBundledNodeServerJs(): string | null {
+  const here = new URL(".", import.meta.url).pathname;
+  const candidates = [
+    join(here, "..", "..", "dist", "src", "node-server.js"),  // installed npm package layout
+    join(here, "..", "src", "node-server.js"),
+    join(here, "..", "..", "src", "node-server.ts"),
+    join(process.argv[1], "..", "..", "dist", "src", "node-server.js"),
+    join(process.argv[1], "..", "..", "src", "node-server.ts"),
+  ];
+  for (const p of candidates) if (existsSync(p)) return p;
+  return null;
+}
+
+function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean }): "wrote" | "exists" | "no-source" {
+  const exists = existsSync(targetPath);
+  if (exists && !opts.overwrite) return "exists";
+  const src = findBundledNodeServerJs();
+  if (!src) return "no-source";
+  // Read+write rather than copyFile so .ts sources get content-substituted
+  // verbatim (we're writing to a .js path either way; bun runs .ts content
+  // under a .js extension fine, per the legacy candidates).
+  writeFileSync(targetPath, readFileSync(src, "utf-8"));
+  return "wrote";
+}
+
 function saveServerConfig(data: Record<string, any>) {
   const dir = join(home, ".anet", "server");
   const p = serverConfigPath();
@@ -1029,32 +1062,14 @@ async function initProject() {
   const anetDir = join(process.cwd(), ".anet");
   mkdirSync(anetDir, { recursive: true });
 
-  // 1. Write node-server.ts
+  // 1. Write node-server.ts (uses shared resolver below)
   const serverTs = join(anetDir, "node-server.js");
-  if (!existsSync(serverTs)) {
-    // Try multiple paths to find node-server.ts
-    const candidates = [
-      join(new URL(".", import.meta.url).pathname, "..", "..", "dist", "src", "node-server.js"),
-      join(new URL(".", import.meta.url).pathname, "..", "src", "node-server.js"),
-      join(new URL(".", import.meta.url).pathname, "..", "..", "src", "node-server.ts"),
-      join(process.argv[1], "..", "..", "dist", "src", "node-server.js"),
-      join(process.argv[1], "..", "..", "src", "node-server.ts"),
-    ];
-    let found = false;
-    for (const p of candidates) {
-      if (existsSync(p)) {
-        writeFileSync(serverTs, readFileSync(p, "utf-8"));
-        console.log(`  ✅ .anet/node-server.js`);
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      console.log(`  ❌ Cannot find node-server.ts`);
-      console.log(`  Fix: cp $(npm root -g)/@sleep2agi/agent-network/src/node-server.ts .anet/node-server.js`);
-    }
-  } else {
-    console.log("  Channel plugin: exists");
+  const refreshed = refreshNodeServerJsAt(serverTs, { overwrite: false });
+  if (refreshed === "wrote")        console.log(`  ✅ .anet/node-server.js`);
+  else if (refreshed === "exists")  console.log("  Channel plugin: exists");
+  else {
+    console.log(`  ❌ Cannot find node-server.js source`);
+    console.log(`  Fix: cp $(npm root -g)/@sleep2agi/agent-network/src/node-server.ts .anet/node-server.js`);
   }
 
   // 2. package.json for channel deps
@@ -2302,6 +2317,30 @@ async function launchAgent(id: string, forceNewSession = false) {
       "--runtime", runtime,
     ];
     if (forceNewSession) agentArgs.push("--new-session", "true");
+
+    // #204 preview.5 — refresh `.anet/node-server.js` from the *currently
+    // installed* agent-network bundle on every start. The grok-build-acp
+    // runtime spawns this file as the commhub MCP server via ACP injection
+    // (see agent-node `processWithGrok`), and a stale copy from an old
+    // `anet init project` can write non-JSON-RPC bytes to stdout, surfacing
+    // as Grok's `serde error expected value at line 1 column 2`. Cheap
+    // (read+write a few KB) and only fires for these three runtimes.
+    if (runtime === "grok-build-acp") {
+      try {
+        const anetDir = join(process.cwd(), ".anet");
+        if (!existsSync(anetDir)) mkdirSync(anetDir, { recursive: true });
+        const target = join(anetDir, "node-server.js");
+        const status = refreshNodeServerJsAt(target, { overwrite: true });
+        if (status === "wrote") {
+          console.log(`[anet] refreshed .anet/node-server.js for grok-build-acp (#204)`);
+        } else if (status === "no-source") {
+          console.warn(`[anet] ⚠ #204 — could not locate a bundled node-server.js to refresh; ` +
+            `commhub MCP for Grok may fail if the existing file is stale.`);
+        }
+      } catch (e: any) {
+        console.warn(`[anet] ⚠ #204 — refresh node-server.js failed: ${e?.message || e}`);
+      }
+    }
 
     const hub = profile.hub || loadGlobal().hub || "";
     // #203 defense — explicitly set COMMHUB_ALIAS in the agent-node spawn env
