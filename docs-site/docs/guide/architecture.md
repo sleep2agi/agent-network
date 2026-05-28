@@ -293,7 +293,7 @@ sequenceDiagram
 - Agent 每 **3 分钟** 发送心跳（`report_status`）
 - Server 每次请求更新 `last_seen_at`
 - 超过 **10 分钟** 无心跳，自动标记为 `offline`
-- SSE 断连后自动重连（指数退避 3s -> 60s）
+- SSE 断连后自动重连（v0.10.10 stable 指数退避 3s → 60s；v0.10.11 preview [#202](https://github.com/sleep2agi/agent-network/issues/202) 改 `1s → 30s` 上限 + 重连即重 register + 1h 超时放弃，[详见 agent-node](/guide/agent-node#断线重连)）
 
 ## Agent Node
 

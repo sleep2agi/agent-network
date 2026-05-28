@@ -420,7 +420,7 @@ SSE 断连后自动重连，使用指数退避策略：
 重连成功后自动恢复 online 状态。
 
 ::: tip v0.10.11 preview 改进（[#202](https://github.com/sleep2agi/agent-network/issues/202)）
-`agent-node@2.4.7-preview.X` 起两件事一起改：
+`agent-node@2.4.7-preview.X` 起三件事一起改：
 - **退避更激进**：`1s → 2s → 4s → 8s → 16s → 30s（上限）`，hub 重启后 30s 内重连
 - **重连即重 register**：以前重连只恢复 SSE 流，不重发 register —— hub 重启清空 sessions 内存后，dashboard 看不到节点要等下次 3min heartbeat 才会重建。现在重连成功立即重发 register（idempotent upsert），dashboard < 30s 恢复完整节点列表
 - **僵尸 retry 防护**：连续失败 > 1h 主动放弃 + 写 error log，不再无限重试占 CPU

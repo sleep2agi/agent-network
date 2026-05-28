@@ -293,7 +293,7 @@ sequenceDiagram
 - Agents send heartbeats (`report_status`) every **3 minutes**
 - Server updates `last_seen_at` on every request
 - After **10 minutes** without a heartbeat, agents are automatically marked `offline`
-- SSE auto-reconnects on disconnect (exponential backoff 3s -> 60s)
+- SSE auto-reconnects on disconnect (v0.10.10 stable: exponential backoff 3s → 60s; v0.10.11 preview [#202](https://github.com/sleep2agi/agent-network/issues/202) tightens to `1s → 30s` cap + re-register on reconnect + 1h zombie-retry guard — [see agent-node](/en/guide/agent-node#reconnection))
 
 ## Agent Node
 
