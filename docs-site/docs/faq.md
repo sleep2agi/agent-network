@@ -43,6 +43,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 - **书生 InternLM**（Anthropic 兼容；查 [书生](https://chat.intern-ai.org.cn)）
 - **小米 MiMo**（Anthropic 兼容；查 [小米开放平台](https://platform.xiaomimimo.com)）
 - **OpenAI Codex**（`codex-sdk` runtime；查 OpenAI Codex 文档）
+- **xAI Grok**（`grok-build-acp` runtime, ACP 协议；目前只通过 `--runtime grok-build-acp` flag 启用，[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)）
 
 未进 `VENDORS` 列表的 provider（DeepSeek / 智谱 GLM / Moonshot Kimi / OpenRouter 等）—— 用「自定义 `custom`」供应商接入：任何 Anthropic 兼容 API 都能填 base URL + model id，能用但请自己先跑通验证。
 
