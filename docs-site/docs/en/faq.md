@@ -113,6 +113,7 @@ kill <PID>
 |------|------|------|
 | Global config | `~/.anet/config.json` | Hub address, `utok_`, current active network |
 | Node config | `{cwd}/.anet/nodes/<alias>/config.json` | Runtime, model, tools, `ntok_`, env, flags (directory name is the alias, not the internal `node_id`) |
+| Node env file (v0.10.10+) | `{cwd}/.anet/nodes/<alias>/.env` | API key auto-sourced via envRef Option A (mode 0600; written by `anet node create`, auto-sourced by `anet node start` at launch; [see envRef wizard auto-source](/en/guide/cli#anet-node-create)) |
 | Database | `~/.commhub/commhub.db` | Hub-side SQLite (WAL mode) |
 
 ## Agent Issues

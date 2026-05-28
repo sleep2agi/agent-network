@@ -113,6 +113,7 @@ kill <PID>
 |------|------|------|
 | 全局配置 | `~/.anet/config.json` | hub 地址、`utok_`、当前激活 network |
 | 节点配置 | `{cwd}/.anet/nodes/<alias>/config.json` | runtime、model、tools、`ntok_`、env、flags（目录名是 alias，不是内部 `node_id`） |
+| 节点 env 文件（v0.10.10+）| `{cwd}/.anet/nodes/<alias>/.env` | envRef Option A 自动 source 的 API key（mode 0600；`anet node create` 写入，`anet node start` 启动前自动 source；[详见 envRef wizard 自动衔接](/guide/cli#anet-node-create)）|
 | 数据库 | `~/.commhub/commhub.db` | hub 端 SQLite（WAL 模式） |
 
 ## Agent 问题
