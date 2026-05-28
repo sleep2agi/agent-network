@@ -1285,12 +1285,34 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   }
 
   const { runGrokAcpTurn } = await import("./runtime/grok-build-acp/runtime");
+  // #204 — build the commhub MCP entry from this node's *current* identity
+  // (ALIAS / AUTH_TOKEN / COMMHUB_URL / RESUME_ID, already resolved at boot
+  // from --alias / config.json / env via resolveAlias). Passing this list
+  // explicitly to ACP session/new prevents Grok CLI from falling back to
+  // the cwd `.mcp.json`, which was Vincent's #204 UAT root cause — the
+  // file persists `COMMHUB_ALIAS=<old node>` from a previous `anet node
+  // start` and never refreshes, so every new grok-build-acp node mis-
+  // attributed outbound send_task. Stale-file env is now structurally
+  // impossible for this runtime.
+  const commhubMcpEnv: Record<string, string> = {};
+  if (ALIAS) commhubMcpEnv.COMMHUB_ALIAS = ALIAS;
+  if (AUTH_TOKEN) commhubMcpEnv.COMMHUB_TOKEN = AUTH_TOKEN;
+  if (COMMHUB_URL) commhubMcpEnv.COMMHUB_URL = COMMHUB_URL;
+  if (RESUME_ID) commhubMcpEnv.COMMHUB_RESUME_ID = RESUME_ID;
+  const grokMcpServers = [{
+    name: "commhub",
+    type: "stdio" as const,
+    command: "bun",
+    args: [".anet/node-server.js"],
+    env: commhubMcpEnv,
+  }];
   const runOnce = async (sessionId?: string, label = "primary") => {
     const t0 = Date.now();
     const result = await runGrokAcpTurn({
       prompt: buildGrokCommhubPrompt(task, from),
       cwd: process.cwd(),
       sessionId,
+      mcpServers: grokMcpServers,
       timeoutMs: parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000"),
       drainMs: parseInt(process.env.GROK_ACP_DRAIN_MS || fileConfig.flags?.grokAcpDrainMs || "15000"),
       onSession: (newSessionId) => writebackGrokSession(newSessionId),

@@ -2,6 +2,24 @@ import { GrokAcpClient } from "./client";
 import { newGrokTurnState, reduceGrokAcpNotification } from "./events";
 import type { GrokAcpNotification, GrokTurnState } from "./events";
 
+// #204 — ACP `session/new` / `session/load` accepts an mcpServers list. Empty
+// list lets Grok CLI fall back to reading `<cwd>/.mcp.json`, which is the
+// Vincent 5月28日 UAT bug source (file written once with `COMMHUB_ALIAS=<old>`
+// then never refreshed, so every subsequent grok-build-acp node attributes
+// outbound send_task as the *old* node). Caller now injects an explicit
+// commhub entry per-session, sourced from the current node's identity, so
+// stale-file env can't leak in.
+export interface AcpMcpServerEntry {
+  name: string;
+  // ACP wants the spawn shape (stdio); these mirror the `.mcp.json` schema.
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  // `type: "stdio"` is implied by command/args presence; included explicitly
+  // for forward-compat in case ACP starts requiring a discriminator.
+  type?: "stdio" | "http" | "sse";
+}
+
 export interface GrokAcpTurnOptions {
   prompt: string;
   cwd?: string;
@@ -10,6 +28,14 @@ export interface GrokAcpTurnOptions {
   drainMs?: number;
   binary?: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * #204 — explicit MCP server list passed verbatim to `session/new` /
+   * `session/load`. When provided, Grok CLI no longer falls back to the
+   * cwd `.mcp.json`, so per-node env (COMMHUB_ALIAS / TOKEN / URL /
+   * RESUME_ID) is always fresh. Empty list / undefined preserves the
+   * pre-#204 behaviour.
+   */
+  mcpServers?: AcpMcpServerEntry[];
   onSession?: (sessionId: string) => void | Promise<void>;
   onEvent?: (event: GrokAcpNotification, state: GrokTurnState) => void;
 }
@@ -72,9 +98,14 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     const authMethod = selectAuthMethod(init, childEnv);
     await client.request("authenticate", { methodId: authMethod, meta: { headless: true } }, timeoutMs);
 
+    // #204 — pass through the caller's mcpServers list; empty array preserves
+    // pre-#204 behaviour so existing callers that don't yet build the entry
+    // don't change shape silently. When non-empty, this overrides the cwd
+    // `.mcp.json` lookup and Grok runs with the per-session env we injected.
+    const mcpServers = opts.mcpServers ?? [];
     const session = opts.sessionId
-      ? await client.request<SessionResponse>("session/load", { sessionId: opts.sessionId, cwd: opts.cwd, mcpServers: [] }, timeoutMs)
-      : await client.request<SessionResponse>("session/new", { cwd: opts.cwd, mcpServers: [] }, timeoutMs);
+      ? await client.request<SessionResponse>("session/load", { sessionId: opts.sessionId, cwd: opts.cwd, mcpServers }, timeoutMs)
+      : await client.request<SessionResponse>("session/new", { cwd: opts.cwd, mcpServers }, timeoutMs);
 
     const sessionId = extractSessionId(session) ?? opts.sessionId;
     if (!sessionId) throw new Error("Grok ACP session response did not include sessionId");
