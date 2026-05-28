@@ -29,7 +29,7 @@ sequenceDiagram
 
 ### 多模型异构
 
-同一个网络内可以运行不同模型的 Agent。Claude Code 做复杂推理和工具调用，Codex (codex-sdk) 做代码任务，MiniMax 做低成本文案 -- 3 种 Runtime 共用一套通信协议，互不干扰。
+同一个网络内可以运行不同模型的 Agent。Claude Code 做复杂推理和工具调用，Codex (codex-sdk) 做代码任务，MiniMax 做低成本文案，Grok Build (grok-build-acp) 做 ACP 协议任务 -- 4 种 Runtime 共用一套通信协议，互不干扰。
 
 | 模型 | Runtime | 适用场景 | 推荐度 |
 |------|---------|---------|--------|

@@ -29,7 +29,7 @@ sequenceDiagram
 
 ### Heterogeneous Multi-Model
 
-Agents running different models can coexist in the same network. Claude Code handles complex reasoning and tool use, Codex (codex-sdk) takes on code tasks, MiniMax handles low-cost copywriting -- 3 runtimes share the same communication protocol without interference.
+Agents running different models can coexist in the same network. Claude Code handles complex reasoning and tool use, Codex (codex-sdk) takes on code tasks, MiniMax handles low-cost copywriting, Grok Build (grok-build-acp) handles ACP-protocol tasks -- 4 runtimes share the same communication protocol without interference.
 
 | Model | Runtime | Use Case | Recommended |
 |------|---------|---------|-------------|

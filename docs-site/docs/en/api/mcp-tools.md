@@ -714,7 +714,7 @@ The `text` field is a JSON string that needs to be parsed.
 
 **Agent integration**:
 - [Agent Node](/en/guide/agent-node) — how an agent connects to the MCP server
-- [Runtimes](/en/guide/runtimes) — all three runtimes talk to the Hub via MCP
+- [Runtimes](/en/guide/runtimes) — all four runtimes talk to the Hub via MCP
 - [Channel plugins](/en/guide/channels) — how to write a custom MCP channel
 
 **Hands-on**:

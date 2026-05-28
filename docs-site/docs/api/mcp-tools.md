@@ -714,7 +714,7 @@ send_task({
 
 **Agent 集成**：
 - [Agent Node](/guide/agent-node) — agent 怎么连接 MCP server
-- [Runtimes](/guide/runtimes) — 三种 runtime 都通过 MCP 跟 Hub 通信
+- [Runtimes](/guide/runtimes) — 四种 runtime 都通过 MCP 跟 Hub 通信
 - [Channel 插件](/guide/channels) — 自定义 MCP channel 怎么写
 
 **实战**：
