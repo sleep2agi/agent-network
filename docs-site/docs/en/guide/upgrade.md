@@ -11,7 +11,7 @@ v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) actually r
 
 ```bash
 npm install -g @sleep2agi/agent-network@latest
-anet --version            # current latest v2.2.9 (v0.10.10, 2026-05-27)
+anet --version            # current latest v2.2.10 (v0.10.11, 2026-05-28)
 ```
 
 From any 2.2.5+ binary onward (the v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) fix lives in 2.2.5+), `anet upgrade` **auto detached-spawns**; a minute or two later `anet --version` shows the new build — no `--self` flag or manual install required.
@@ -90,7 +90,7 @@ anet upgrade --self
 | `self skip` | anet does not self-upgrade by default (pass `--self`) |
 | `lookup failed` | npm registry lookup failed — network / package name issue |
 
-**Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.3` on v0.10.10 stable — bumped from `0.8.2` by the v0.10.9 [#194 hotfix](https://github.com/sleep2agi/agent-network/issues/194); prior bump from `0.8.0` was the v0.10.1 PINNED chain-bump hotfix) — `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
+**Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.4` on v0.10.11 stable — bumped from `0.8.3` by the v0.10.11 [#194 broadcast attribution hotfix](https://github.com/sleep2agi/agent-network/issues/194); the v0.10.9 attachment `meta_json` release took `0.8.2` → `0.8.3`; the prior bump from `0.8.0` → `0.8.2` was the v0.10.1 PINNED chain-bump hotfix) — `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
 
 **After the upgrade**: `anet upgrade` prints a hint that running nodes need a restart to pick up the new agent-node:
 
@@ -147,13 +147,13 @@ anet status
 
 ## v0.7 → v0.8 Upgrade Notes (historical path) {#v0-7-v0-8-upgrade-notes-latest}
 
-::: info Current stable is v0.10.10
+::: info Current stable is v0.10.11
 This section documents **the historical path from v0.7 to v0.8**, kept as a reference for users who need to traverse v0.7 → v0.10.8 in one go. **Upgrading between v0.8 / v0.9 / v0.10.x** is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — the auth migration below is **not** required (see [changelog](/en/changelog) and read the per-release notes for v0.8 / v0.9 / v0.10).
 :::
 
 v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
 
-::: tip v0.8.x → v0.10.10 increments
+::: tip v0.8.x → v0.10.11 increments
 After the v0.8 main path, v0.8.2 / v0.8.3 / v0.9.0 / v0.9.1 / v0.9.2 / v0.10.0 / v0.10.1 / v0.10.2 / v0.10.3 / v0.10.4 / v0.10.5 / v0.10.6 / v0.10.7 / v0.10.8 / v0.10.9 / **v0.10.10** (current stable; four packages at npm `latest`: `agent-network 2.2.9` (v0.10.10 Xiaomi MiMo 5-model preset + envRef wizard-to-start auto-source [#193](https://github.com/sleep2agi/agent-network/issues/193) + [#192 `anet -v` full prerelease suffix display](https://github.com/sleep2agi/agent-network/issues/192) + [#189 Grok runtime parser broaden](https://github.com/sleep2agi/agent-network/issues/189) + v0.10.9 PINNED `commhub-server` 0.8.2 → 0.8.3 [#194 hotfix](https://github.com/sleep2agi/agent-network/issues/194) + v0.10.7 [#156 codex-sdk batch path yolo flags parity + `--no-yolo` opt-out](https://github.com/sleep2agi/agent-network/issues/156) — batch + codex-sdk users get the autonomous posture, single-node users unaffected + v0.10.6 [#154 anet upgrade Option B detached spawn default](https://github.com/sleep2agi/agent-network/issues/154) + [#155 batch wizard silent-exit fix](https://github.com/sleep2agi/agent-network/issues/155) + v0.10.3 codex preset + v0.10.4 [#151 anet upgrade UX](https://github.com/sleep2agi/agent-network/issues/151) + v0.10.5 [#152 batch workdir wizard + #153 codex/claude skip API key](https://github.com/sleep2agi/agent-network/issues/152)) / `agent-node 2.4.6` (v0.10.10 envRef Option A `.env` auto-source + broaden parser cascade + v0.10.9 codex-sdk image input + v0.10.3 codex-sdk gpt-5.5 + yolo flags + v0.10.2 Hero A disk) / `commhub-server 0.8.3` (v0.10.9 attachment `meta_json`) / `agent-network-dashboard 0.5.6` (v0.10.9 image upload/paste send + v0.10.8 [#157 Servers panel UI copy fix + TopoGraph density-tier polish](https://github.com/sleep2agi/agent-network/issues/157) + v0.10.4 [#150 orphan-band](https://github.com/sleep2agi/agent-network/issues/150) + v0.10.2 Hero D + disk render + 100+ rounds of polish + 0.5.5/0.5.6 minor polish)) progressively added: `anet channel add telegram` one-shot bind, `claude-code-cli` runtime session-resume fix, `anet create --batch` bulk-agent primitive, `anet demo sci-team` / `pr-review` demos, `anet login` first-login guidance, `anet doctor --fix` ntok_ repair, envRef vendor credential storage ([#125](https://github.com/sleep2agi/agent-network/issues/125)) + envRef Option A wizard auto-source `.env` (v0.10.10 [#193](https://github.com/sleep2agi/agent-network/issues/193)), SDK high-concurrency retry-with-backoff + 300s timeout ([#132](https://github.com/sleep2agi/agent-network/issues/132)), runtime-first wizard ([#133](https://github.com/sleep2agi/agent-network/issues/133)), `anet project up/restart/down` cwd-wide orchestration ([#117](https://github.com/sleep2agi/agent-network/issues/117)), the `codex-direct-stdio` opt-in path ([#141](https://github.com/sleep2agi/agent-network/issues/141), enable via `ANET_CODEX_STDIO_DIRECT=1`), the per-server-daemon observability endpoint family ([#99](https://github.com/sleep2agi/agent-network/issues/99) `/api/server/:host/health` + `/api/server/:host/agents`) + per-agent `process_telemetry` ([#142](https://github.com/sleep2agi/agent-network/issues/142)), dashboard Hero 3 8 surfaces, Xiaomi MiMo 5-model preset (mimo-v2.5-pro default + v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign, v0.10.10), codex-sdk image input + commhub attachment `meta_json` metadata (v0.10.9), `grok-build-acp` runtime onboarding ([details ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)), and more.
 
 These increments **keep the same upgrade path as v0.7 → v0.8 main path** (the admin bootstrap + password management is a one-time migration; later incremental upgrades carry no extra auth steps). Full per-version increments: [changelog](/en/changelog).
