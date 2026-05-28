@@ -126,5 +126,5 @@ docker compose up -d --build
 
 ## Next steps
 
-- [Debate Demo](/en/cases/debate) -- Built-in 6-agent debate orchestration
-- [Examples And Demo](/en/cases/) -- Back to the overview
+- Debate Demo -- Built-in 6-agent debate orchestration
+- Examples And Demo -- Back to the overview

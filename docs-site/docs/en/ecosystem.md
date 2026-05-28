@@ -30,7 +30,6 @@ We don't require open source, a specific license, or any specific stack.
 
 **Build a project**:
 - [One-shot install](/en/guide/one-shot-install) — install anet
-- [Hello World](/en/cases/hello-world) — first demo
 - [Channel plugins](/en/guide/channels) — wire your own IM / API
 
 **Get your project listed**: open a GitHub issue with name / link / one-line description (prefix the title with "Ecosystem:").

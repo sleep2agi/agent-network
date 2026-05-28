@@ -84,7 +84,7 @@ After installation, the `anet` command is available globally.
 | `anet demo monitor [--live]` | Terminal dashboard (keeps the old `anet demo --live` alias) |
 | `anet doctor` | System diagnostics |
 
-See [Debate Demo](/en/cases/debate) for the runnable multi-agent demo.
+See Debate Demo for the runnable multi-agent demo.
 
 ### Channel Management
 

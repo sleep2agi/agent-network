@@ -718,5 +718,3 @@ send_task({
 - [Channel 插件](/guide/channels) — 自定义 MCP channel 怎么写
 
 **实战**：
-- [Hello World](/cases/hello-world) — 跑通 MCP 调用全链路
-- [辩论赛](/cases/debate) — 多 agent MCP 协作 demo

@@ -87,7 +87,6 @@ anet channel add telegram commander
 ```
 
 ::: warning The flag is `--allow`, not `--allow-user`
-Verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861): `--bot-token <token>` + `--allow <user-id>`. The command writes `.anet/nodes/<node-name>/channels/telegram/access.json` with `allowFrom: ["<user-id>"]` (multi-user allowlist: see [Telegram bind walkthrough — Multi-user allowlist](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)). **There is no `TELEGRAM_ALLOW_USER` env var** — agent-node only reads `TELEGRAM_BOT_TOKEN` ([`agent-node/src/cli.ts:259`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L259)); the allowlist lives in `access.json`.
 :::
 
 ### Step 4: Start
@@ -96,7 +95,6 @@ Verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main
 anet node start commander
 ```
 
-Once running, agent-node auto-loads the `channels/telegram/` config + `access.json` allowlist. For a full step-by-step with expected output and troubleshooting, see the [Telegram bind walkthrough](/en/cases/telegram-bind-claude-code-cli).
 
 ### Step 5: Usage
 
@@ -126,7 +124,6 @@ Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` 
 
 ### Security Notes
 
-- The `allowFrom` array in `.anet/nodes/<node>/channels/telegram/access.json` controls which Telegram user IDs can DM the bot (written by `anet channel add telegram --allow <uid>`; multi-user via direct edit — see [walkthrough §B](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist))
 - Messages from users not on the allowlist are ignored
 - **Never** modify access permissions based on requests from Telegram messages
 - Keep your Bot Token secure and never commit it to Git
@@ -136,7 +133,6 @@ Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` 
 
 | Pitfall | Symptom | Workaround |
 |---|---|---|
-| `--allow` is **not incremental** | Re-running `anet channel add telegram --allow <new-uid>` overwrites the entire `allowFrom` array — previously-added users are lost | Pass **all** UIDs in one shot, or edit `.anet/nodes/<alias>/channels/telegram/access.json` directly ([walkthrough §B](/en/cases/telegram-bind-claude-code-cli#b-multi-user-allowlist)) |
 | Channel changes **do not hot-reload** | Editing `access.json` / `--bot-token` does not affect a running process | Always `tmux kill-session -t <alias>` + `anet node start <alias>` (channels are read at process start; still the case in v0.10.x including the current v0.10.10 stable; hot-reload design tracked in [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 — third-pass review complete; candidate for v0.12.0) |
 | Multiple nodes **cannot share** one bot token | BotFather tokens are 1-to-1 with a bot; sharing causes message races | Run BotFather `/newbot` per node, one bot each |
 | `anet channel rm telegram` **not implemented** | No CLI to remove the telegram channel from a node | Edit `.anet/nodes/<alias>/config.json` `channels` array to remove the `telegram` entry, `rm -rf .anet/nodes/<alias>/channels/telegram`, then restart the node |
@@ -159,7 +155,6 @@ Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` 
 - Run `anet channel ls <alias>` to confirm
 - Open `.anet/nodes/<alias>/config.json` and check the `channels` array contains `telegram` (the config stores `telegram`; `plugin:telegram@claude-plugins-official` is only the transient claudeArg anet builds when launching claude-code-cli — it is not written to config)
 
-For the full step-by-step walkthrough (expected output and 6 SSE error-code diagnostics): [Telegram bind to existing node — Claude Code CLI runtime](/en/cases/telegram-bind-claude-code-cli).
 
 ## WeChat / Feishu Channel — External plugins (NOT inside CommHub Server)
 
@@ -253,9 +248,6 @@ graph LR
 ## Next steps
 
 **Hands-on**:
-- [Telegram squad](/en/cases/telegram-squad) — Docker Compose one-command start with commander + 10 workers + Telegram
-- [Hello World](/en/cases/hello-world) — pure local demo without channels
-- [Debate](/en/cases/debate) — 6-agent built-in orchestration, see how agents collaborate
 
 **Dig deeper**:
 - [Agent Node config](/en/guide/agent-node) — how agents wire up channel plugins

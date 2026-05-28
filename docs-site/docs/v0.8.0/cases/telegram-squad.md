@@ -126,5 +126,5 @@ docker compose up -d --build
 
 ## 下一步
 
-- [辩论赛 Demo](/cases/debate) -- 内置 6 Agent 辩论编排
-- [案例与 Demo](/cases/) -- 返回案例总览
+- 辩论赛 Demo -- 内置 6 Agent 辩论编排
+- 案例与 Demo -- 返回案例总览

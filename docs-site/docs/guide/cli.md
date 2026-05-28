@@ -131,7 +131,6 @@ npm install -g @sleep2agi/agent-network
 | `anet demo pr-review [opts]` | **代码 PR 审查室**：4 角色（安全/性能/风格 3 reviewer 并行 + judge）~2 min |
 | `anet demo sci-team [opts]` | **科研军团**：1 leader + N-1 worker（默认 10，5-50 可调）主动 fan-out 协作 |
 
-详见 [辩论赛 Demo 案例](/cases/debate)。其他 demo 用法跑 `anet demo <name> --help` 查看。
 
 ### Channel 管理
 
@@ -782,7 +781,6 @@ anet goal cancel 通信SDK马 abcd1234
 
 **手把手起步**：
 - 从零跑一遍：[一键安装与起步](/guide/one-shot-install) — 装 + 跑第一个 agent
-- 看 demo：[Hello World](/cases/hello-world) / [辩论赛](/cases/debate) / [军团编队](/cases/telegram-squad)
 
 **深入命令背后**：
 - 配置文件结构：[Agent Node](/guide/agent-node)（config.json 字段说明）

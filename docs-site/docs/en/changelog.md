@@ -666,7 +666,7 @@ See [issue #125](https://github.com/sleep2agi/agent-network/issues/125#issuecomm
 
 ### New features
 
-- **`anet channel add telegram` one-shot bind** — attaches a Telegram bot token + allow-user to an existing node, auto-generates the `channels/telegram` config (see [cases/telegram-squad](/en/cases/telegram-squad) for details).
+- **`anet channel add telegram` one-shot bind** — attaches a Telegram bot token + allow-user to an existing node, auto-generates the `channels/telegram` config (see cases/telegram-squad for details).
 
 ### Fixes
 

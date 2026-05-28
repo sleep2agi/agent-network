@@ -667,7 +667,7 @@ per v0.9.0 split-brain 教训（[issue #126](https://github.com/sleep2agi/agent-
 
 ### 新功能
 
-- **`anet channel add telegram` 一键接入** — 给已有 node 绑定 Telegram bot token + allow user，自动生成 channels/telegram 配置（细节见 [cases/telegram-squad](/cases/telegram-squad)）。
+- **`anet channel add telegram` 一键接入** — 给已有 node 绑定 Telegram bot token + allow user，自动生成 channels/telegram 配置（细节见 cases/telegram-squad）。
 
 ### 修复
 

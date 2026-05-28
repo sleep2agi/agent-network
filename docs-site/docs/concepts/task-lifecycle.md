@@ -365,5 +365,4 @@ CREATE TABLE inbox (
 
 **深入**：
 - 为什么 task 和 message 是两套：看本节顶部"任务 vs 消息"对比
-- 多 agent 协作的事件链：[案例 — 辩论赛](/cases/debate) 跑一次能看到完整 9 步驱动
 - network_id 字段怎么用：[网络与节点](/concepts/networks)

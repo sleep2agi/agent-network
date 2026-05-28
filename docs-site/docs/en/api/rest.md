@@ -1997,5 +1997,4 @@ curl -X POST http://localhost:9200/api/license/activate \
 - [v0.7 → v0.8 upgrade](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — RFC-001 Phase 2
 
 **Real-world usage**:
-- [Hello World](/en/cases/hello-world) — simple REST examples
 - [Dashboard](/en/guide/dashboard) — what REST endpoints the UI actually calls

@@ -11,9 +11,6 @@ hero:
       text: Get Started →
       link: /en/guide/getting-started
     - theme: alt
-      text: See Demo
-      link: /en/cases/
-    - theme: alt
       text: GitHub
       link: https://github.com/sleep2agi/agent-network
 ---

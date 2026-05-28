@@ -11,9 +11,6 @@ hero:
       text: 30 秒上手 →
       link: /guide/getting-started
     - theme: alt
-      text: 看 Demo
-      link: /cases/
-    - theme: alt
       text: GitHub
       link: https://github.com/sleep2agi/agent-network
 ---

@@ -1,7 +1,0 @@
-FROM oven/bun:1
-WORKDIR /app
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-COPY server/ server/
-RUN cd server && bun install
-EXPOSE 9200
-CMD ["bun", "run", "server/src/index.ts"]

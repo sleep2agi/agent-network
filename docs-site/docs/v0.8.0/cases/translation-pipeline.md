@@ -97,5 +97,5 @@ anet logs 调度员
 
 ## 下一步
 
-- [辩论赛 Demo](/cases/debate) -- 6 Agent 内置编排
-- [军团编队](/cases/telegram-squad) -- Docker 大规模编排
+- 辩论赛 Demo -- 6 Agent 内置编排
+- 军团编队 -- Docker 大规模编排

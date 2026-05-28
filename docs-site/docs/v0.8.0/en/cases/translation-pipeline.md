@@ -96,5 +96,5 @@ anet logs 调度员
 
 ## Next steps
 
-- [Debate Demo](/en/cases/debate) -- Built-in 6-agent orchestration
-- [Telegram Squad](/en/cases/telegram-squad) -- Large-scale Docker orchestration
+- Debate Demo -- Built-in 6-agent orchestration
+- Telegram Squad -- Large-scale Docker orchestration

@@ -317,7 +317,6 @@ CREATE TABLE network_invites (
 
 **Hands-on**:
 - Deploy agents across machines? See [Cross-machine deployment](#cross-machine-deployment) above -- run `anet login` + `anet node create` per machine
-- Want a real demo? [Debate](/en/cases/debate) creates an isolated network (`debate-<suffix>`) on each run for clean isolation
 - Invite others? [Account system](/en/guide/account-system) covers `anet network invite create / join`
 
 **Dig deeper**:

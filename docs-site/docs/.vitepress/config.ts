@@ -41,7 +41,6 @@ export default withMermaid(defineConfig({
         nav: [
           { text: '指南', link: '/guide/getting-started' },
           { text: 'API', link: '/api/mcp-tools' },
-          { text: '案例 / Demo', link: '/cases/' },
           { text: '生态', link: '/ecosystem' },
           { text: '社群', link: '/community' },
           {
@@ -104,18 +103,6 @@ export default withMermaid(defineConfig({
             ]
           },
           {
-            text: '案例',
-            items: [
-              { text: '案例总览', link: '/cases/' },
-              { text: '辩论赛 Demo', link: '/cases/debate' },
-              { text: 'PR 审查室', link: '/cases/pr-review-room' },
-              { text: '你好世界', link: '/cases/hello-world' },
-              { text: '翻译流水线', link: '/cases/translation-pipeline' },
-              { text: '军团编队', link: '/cases/telegram-squad' },
-              { text: 'Telegram 接入已存在节点 (claude-code-cli)', link: '/cases/telegram-bind-claude-code-cli' },
-            ]
-          },
-          {
             text: 'API 参考',
             items: [
               { text: 'MCP Tools', link: '/api/mcp-tools' },
@@ -141,7 +128,6 @@ export default withMermaid(defineConfig({
         nav: [
           { text: 'Guide', link: '/en/guide/getting-started' },
           { text: 'API', link: '/en/api/mcp-tools' },
-          { text: 'Examples / Demo', link: '/en/cases/' },
           { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
           {
@@ -200,18 +186,6 @@ export default withMermaid(defineConfig({
               { text: 'Docker', link: '/en/deploy/docker' },
               { text: 'npm', link: '/en/deploy/npm' },
               { text: 'Production / Public Internet', link: '/en/deploy/production' },
-            ]
-          },
-          {
-            text: 'Examples',
-            items: [
-              { text: 'Overview', link: '/en/cases/' },
-              { text: 'Debate Demo', link: '/en/cases/debate' },
-              { text: 'PR Review Room', link: '/en/cases/pr-review-room' },
-              { text: 'Hello World', link: '/en/cases/hello-world' },
-              { text: 'Translation Pipeline', link: '/en/cases/translation-pipeline' },
-              { text: 'Telegram Squad', link: '/en/cases/telegram-squad' },
-              { text: 'Bind Telegram to existing node (claude-code-cli)', link: '/en/cases/telegram-bind-claude-code-cli' },
             ]
           },
           {

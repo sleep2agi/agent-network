@@ -251,9 +251,6 @@ done
 ## 下一步
 
 **直接用**：
-- [Hello World](/cases/hello-world) — 用 MiniMax 跑一个最简 6 步 demo
-- [辩论赛](/cases/debate) — 6 agent + MiniMax 一条命令跑完
-- [翻译流水线](/cases/translation-pipeline) — 多模型对比同一段翻译
 
 **配置和调优**：
 - 钱花在哪儿？看 [一键安装与起步](/guide/one-shot-install) 一节的成本对比

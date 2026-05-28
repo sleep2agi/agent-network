@@ -6,10 +6,10 @@
 
 | 案例 | 运行方式 | Agent 数量 | 验证方式 | 亮点 |
 |------|----------|:---------:|----------|------|
-| [辩论赛 Demo](/cases/debate) | `anet demo debate` | 6 | Docker test27 校验 CLI help/list + 文档构建 | 内置 9 步辩论编排，自动独立 network |
-| [你好世界](/cases/hello-world) | `demos/hello-world` | 2 | Docker Compose 资产 + Docker test27 文档校验 | 最简单的两个 Agent 对话 |
-| [翻译流水线](/cases/translation-pipeline) | `demos/translation-pipeline` | 3 | Docker Compose 资产 + Docker test27 文档校验 | 中→英→日链式翻译 |
-| [军团编队](/cases/telegram-squad) | `demos/codex-telegram-squad` | 11 | Docker test23/test24 通信流 + test27 文档校验 | 1 指挥 + 10 Worker，Telegram/Dashboard |
+| 辩论赛 Demo | `anet demo debate` | 6 | Docker test27 校验 CLI help/list + 文档构建 | 内置 9 步辩论编排，自动独立 network |
+| 你好世界 | `demos/hello-world` | 2 | Docker Compose 资产 + Docker test27 文档校验 | 最简单的两个 Agent 对话 |
+| 翻译流水线 | `demos/translation-pipeline` | 3 | Docker Compose 资产 + Docker test27 文档校验 | 中→英→日链式翻译 |
+| 军团编队 | `demos/codex-telegram-squad` | 11 | Docker test23/test24 通信流 + test27 文档校验 | 1 指挥 + 10 Worker，Telegram/Dashboard |
 
 ## 已下线案例
 

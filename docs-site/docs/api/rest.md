@@ -1996,5 +1996,4 @@ curl -X POST http://localhost:9200/api/license/activate \
 - [v0.7 → v0.8 升级](/guide/upgrade#v0-7-v0-8-升级注意-最新) — RFC-001 Phase 2
 
 **实战调用**：
-- [Hello World](/cases/hello-world) — 简单 REST 调用示例
 - [Dashboard](/guide/dashboard) — 实际 UI 调用了哪些 REST 端点

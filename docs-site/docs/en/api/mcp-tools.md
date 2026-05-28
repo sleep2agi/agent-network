@@ -718,5 +718,3 @@ The `text` field is a JSON string that needs to be parsed.
 - [Channel plugins](/en/guide/channels) — how to write a custom MCP channel
 
 **Hands-on**:
-- [Hello World](/en/cases/hello-world) — full MCP call chain
-- [Debate](/en/cases/debate) — multi-agent MCP coordination demo

@@ -385,7 +385,6 @@ hub 端 register / login 端点取 `req.headers["x-forwarded-for"]?.split(",")[0
 
 **起步教程**：
 - [一键安装与起步](/guide/one-shot-install) — 装好 anet 后第一个 agent
-- [Hello World](/cases/hello-world) — 6 步建第一个 agent 集群
 - [上手指南](/guide/getting-started) — 完整安装到第一次跑
 
 **深入概念**：

@@ -88,4 +88,4 @@ anet logs 小红
 
 ## Next steps
 
-- [Translation Pipeline](/en/cases/translation-pipeline) -- Three Agents in a chain collaboration
+- Translation Pipeline -- Three Agents in a chain collaboration

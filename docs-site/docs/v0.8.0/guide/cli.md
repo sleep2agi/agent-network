@@ -90,7 +90,7 @@ npm install -g @sleep2agi/agent-network
 | `anet demo debate [opts]` | **辩论赛**：6 角色（主持/正反 4 辩/评委）一键 9 步辩论 |
 | `anet demo monitor [--live]` | 终端 Dashboard（保留兼容） |
 
-详见 [辩论赛 Demo 案例](/cases/debate)。
+详见 辩论赛 Demo 案例。
 
 ### Channel 管理
 

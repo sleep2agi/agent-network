@@ -250,8 +250,8 @@ TELEGRAM_ALLOW_USER=<your-telegram-user-id>   # 仅 demos/codex-telegram-squad/e
 MINIMAX_API_KEY=your-minimax-api-key
 ```
 
-::: info `TELEGRAM_ALLOW_USER` 仅 Compose 入口脚本用
-不像 `TELEGRAM_BOT_TOKEN`（agent-node 直接读），`TELEGRAM_ALLOW_USER` 是 [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh) 的 convention —— 容器启动时脚本把它转成 `access.json` 的 `allow` 数组。如果你不是用这个 demo（而是自己手写 docker-compose / 跑 `anet channel add telegram`），直接用 `anet channel add telegram <node> --allow <uid>` 命令落地写 access.json 即可，不需要 `TELEGRAM_ALLOW_USER` env var。详见 [Telegram 接入已有节点 walkthrough](/cases/telegram-bind-claude-code-cli)。
+::: info 关于 Telegram 白名单
+agent-node 只读 `TELEGRAM_BOT_TOKEN` env，**没有 `TELEGRAM_ALLOW_USER` env var**。白名单走 `access.json`：跑 `anet channel add telegram <node> --allow <uid>` 命令直接落地写入，详见 [Channel 接入 — Telegram](/guide/channels#telegram-channel)。
 :::
 
 ::: danger 不要 commit .env
@@ -439,10 +439,6 @@ worker-deepseek:
 **安全**：
 - [安全设计](/concepts/security) — token / 密码 / 隔离机制
 - [v0.7 → v0.8 升级](/guide/upgrade#v0-7-v0-8-升级注意-最新) — admin bootstrap / RFC-001
-
-**实战 demo（Docker Compose）**：
-- [军团编队](/cases/telegram-squad) — Docker Compose 起一套指挥室 + 10 worker + Telegram
-- [辩论赛](/cases/debate) — Hub 起来后跑 6-agent demo
 
 **故障排查**：
 - [故障排查](/troubleshooting) — 常见错误集合 + `anet doctor --fix`

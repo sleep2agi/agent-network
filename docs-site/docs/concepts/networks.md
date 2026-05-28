@@ -317,7 +317,6 @@ CREATE TABLE network_invites (
 
 **实操**：
 - 想跨机器部署 Agent？看上方 [跨机器部署](#跨机器部署) 一节 —— 每台机器单独 `anet login` + `anet node create`
-- 想看实战 demo？[辩论赛](/cases/debate) 每次跑都创建独立 network（`debate-<suffix>`）做隔离
 - 想了解邀请别人加入？[账号体系](/guide/account-system) 讲 `anet network invite create / join`
 
 **深入**：

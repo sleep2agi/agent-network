@@ -226,9 +226,6 @@ anet node start remote-bot
 ## 下一步
 
 **实战 demo**：
-- [Hello World](/cases/hello-world) — 6 步建第一个 agent 集群
-- [辩论赛](/cases/debate) — 一条命令 6 agent
-- [军团编队](/cases/telegram-squad) — Docker Compose 全栈
 
 **深入命令**：
 - [CLI 命令清单](/guide/cli) — 全部 anet 命令

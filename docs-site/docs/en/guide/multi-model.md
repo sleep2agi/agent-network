@@ -306,9 +306,6 @@ done
 ## Next steps
 
 **Use it now**:
-- [Hello World](/en/cases/hello-world) — minimal 6-step demo with MiniMax
-- [Debate](/en/cases/debate) — 6 agents + MiniMax in one command
-- [Translation pipeline](/en/cases/translation-pipeline) — compare different models on the same paragraph
 
 **Configure and tune**:
 - Where does the cost go? See the cost comparison in [One-shot install](/en/guide/one-shot-install)

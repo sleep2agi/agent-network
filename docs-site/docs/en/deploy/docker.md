@@ -251,7 +251,7 @@ MINIMAX_API_KEY=your-minimax-api-key
 ```
 
 ::: info `TELEGRAM_ALLOW_USER` is only used by the Compose entrypoint script
-Unlike `TELEGRAM_BOT_TOKEN` (which agent-node reads directly), `TELEGRAM_ALLOW_USER` is a convention from [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh) — the script translates it into the `allow` array of `access.json` at container startup. If you're not using this demo (hand-rolled docker-compose, or running `anet channel add telegram` directly), just run `anet channel add telegram <node> --allow <uid>` to write `access.json` — no `TELEGRAM_ALLOW_USER` env var needed. See the [Telegram bind walkthrough](/en/cases/telegram-bind-claude-code-cli).
+agent-node only reads `TELEGRAM_BOT_TOKEN` env — **there is no `TELEGRAM_ALLOW_USER` env var**. The allowlist lives in `access.json`: run `anet channel add telegram <node> --allow <uid>` to write it directly. See [Channel Integration — Telegram](/en/guide/channels#telegram-channel).
 :::
 
 ::: danger Don't commit `.env`
@@ -441,9 +441,6 @@ worker-deepseek:
 - [Security design](/en/concepts/security) — token / password / isolation
 - [v0.7 → v0.8 upgrade](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — admin bootstrap / RFC-001
 
-**Hands-on demos (Docker Compose)**:
-- [Telegram squad](/en/cases/telegram-squad) — Docker Compose with commander + 10 workers + Telegram
-- [Debate](/en/cases/debate) — 6-agent demo once Hub is up
 
 **Troubleshooting**:
 - [Troubleshooting](/en/troubleshooting) — common errors + `anet doctor --fix`

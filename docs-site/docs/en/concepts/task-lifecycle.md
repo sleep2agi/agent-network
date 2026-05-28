@@ -365,5 +365,4 @@ CREATE TABLE inbox (
 
 **Dig deeper**:
 - Why task and message are separate concepts: top of this page ("Task vs message")
-- Multi-agent collaboration chain: [Debate case](/en/cases/debate) — a single run walks through all 9 steps
 - How `network_id` is used: [Networks](/en/concepts/networks)

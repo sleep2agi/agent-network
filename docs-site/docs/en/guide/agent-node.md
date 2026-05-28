@@ -496,7 +496,6 @@ When running in Docker, environment variables are the most convenient configurat
 
 **Get started**:
 - [One-shot install](/en/guide/one-shot-install) — first agent in 5 minutes after install
-- [Hello World](/en/cases/hello-world) — 6-step walkthrough for your first agent cluster
 
 **Configure deeper**:
 - [Runtimes](/en/guide/runtimes) — picking between claude-agent-sdk / codex-sdk / claude-code-cli / grok-build-acp

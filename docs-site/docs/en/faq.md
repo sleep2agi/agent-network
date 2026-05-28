@@ -385,7 +385,6 @@ The hub's register / login endpoints take `req.headers["x-forwarded-for"]?.split
 
 **Getting-started tutorials**:
 - [One-shot install](/en/guide/one-shot-install) — first agent after install
-- [Hello World](/en/cases/hello-world) — 6-step walkthrough
 - [Getting started](/en/guide/getting-started) — install through first run
 
 **Dig into concepts**:

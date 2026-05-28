@@ -496,7 +496,6 @@ SSE 断连后自动重连，使用指数退避策略：
 
 **起步**：
 - [一键安装与起步](/guide/one-shot-install) — anet 装好后 5 分钟跑第一个 agent
-- [Hello World](/cases/hello-world) — 跟着 6 步建第一个 agent 集群
 
 **深入配置**：
 - [Runtimes](/guide/runtimes) — 四个 runtime（claude-agent-sdk / codex-sdk / claude-code-cli / grok-build-acp）选哪个

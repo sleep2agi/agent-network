@@ -222,9 +222,6 @@ The project direction is **Apache 2.0 open source + self-hosted + courses / cons
 ## Next
 
 **Hands-on demos**:
-- [Hello World](/en/cases/hello-world) — 6 steps to your first agent cluster
-- [Debate](/en/cases/debate) — 6 agents in one command
-- [Telegram squad](/en/cases/telegram-squad) — full Docker Compose stack
 
 **Dig into commands**:
 - [CLI reference](/en/guide/cli) — every anet command

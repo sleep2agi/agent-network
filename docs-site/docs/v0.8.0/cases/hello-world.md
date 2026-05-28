@@ -95,4 +95,4 @@ anet logs 小红
 
 ## 下一步
 
-- [翻译流水线](/cases/translation-pipeline) -- 三个 Agent 链式协作
+- 翻译流水线 -- 三个 Agent 链式协作

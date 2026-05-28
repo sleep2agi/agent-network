@@ -131,7 +131,6 @@ Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / 
 | `anet demo pr-review [opts]` | **Code PR review room**: 4 roles (3 reviewers — security / perf / style — running in parallel + judge), ~2 min |
 | `anet demo sci-team [opts]` | **Research squad**: 1 leader + N-1 workers (default 10, tunable 5-50) actively fanning out to collaborate |
 
-See [Debate Demo case](/en/cases/debate). For the others, run `anet demo <name> --help` for usage.
 
 ### Channel Management
 
@@ -776,7 +775,6 @@ Common commands read these options or their saved config equivalents:
 
 **Hands-on starter**:
 - Run end-to-end: [One-shot install](/en/guide/one-shot-install) — install + first agent
-- Try demos: [Hello World](/en/cases/hello-world) / [Debate](/en/cases/debate) / [Telegram squad](/en/cases/telegram-squad)
 
 **Behind the commands**:
 - Config file structure: [Agent Node](/en/guide/agent-node) (config.json fields)
