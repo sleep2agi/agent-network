@@ -1,19 +1,21 @@
 # 节点 Runtime
 
-每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型 / 跑工具。Agent Network 内置三种 Runtime，**同一个 Hub 上可以混搭**——一个 Claude Code CLI agent 调任务给 MiniMax agent，再让 Codex agent 写代码，结果汇总回来。
+每个 Agent Node 都有一个 **Runtime**（运行时内核），决定这个节点用什么方式调用大模型 / 跑工具。Agent Network 内置四种 Runtime，**同一个 Hub 上可以混搭**——一个 Claude Code CLI agent 调任务给 MiniMax agent，再让 Codex agent 写代码，结果汇总回来。
 
-## 三种 Runtime 对比
+## 四种 Runtime 对比
 
 | Runtime | 内核 | 适用场景 | 主推模型 | 鉴权 |
 |---|---|---|---|---|
 | `claude-code-cli` | spawn 本地 `claude` 命令 | 想"像在终端用 Claude"那样干活 | Claude Sonnet / Opus（订阅） | `claude` CLI 已登录 |
 | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | 编程式调用任何 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter | API Key |
 | `codex-sdk` | `@openai/codex-sdk` | 写代码 / 跑命令 | OpenAI Codex（gpt-5 等） | `codex auth login` |
+| `grok-build-acp` | spawn 本地 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok（grok-build 系列） | `grok` CLI 已 auth + `XAI_API_KEY` |
 
 ::: tip 不知道怎么选？
 - **想白嫖 Claude 订阅** → `claude-code-cli`
 - **写文案 / 翻译 / 分析（编程式）** → `claude-agent-sdk`
 - **写代码 / 跑命令** → `codex-sdk`
+- **用 xAI Grok Build** → `grok-build-acp`（[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)）
 - **用 MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等国产模型** → `claude-agent-sdk` + `ANTHROPIC_BASE_URL`
 - **混搭（推荐）** → 同一 Hub 全开，每个角色挑最合适的内核
 :::

@@ -1,21 +1,23 @@
 # Node Runtime
 
-Every Agent Node has a **Runtime** (engine kernel) that decides how the node calls models and runs tools. Agent Network ships three Runtimes — **and you can mix them on a single Hub**: a Claude Code CLI agent dispatches a translation task to a MiniMax agent, then asks a Codex agent to write code, and merges the results back.
+Every Agent Node has a **Runtime** (engine kernel) that decides how the node calls models and runs tools. Agent Network ships four Runtimes — **and you can mix them on a single Hub**: a Claude Code CLI agent dispatches a translation task to a MiniMax agent, then asks a Codex agent to write code, and merges the results back.
 
-## Three runtimes at a glance
+## Four runtimes at a glance
 
 | Runtime | Engine | When to pick | Default models | Auth |
 |---|---|---|---|---|
 | `claude-code-cli` | spawn local `claude` CLI | Reuse your Claude subscription | Claude Sonnet / Opus | `claude` already logged in |
 | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter | API Key |
 | `codex-sdk` | `@openai/codex-sdk` | Code writing / shell commands | OpenAI Codex (gpt-5 etc) | `codex auth login` |
+| `grok-build-acp` | spawn local `grok` ACP server | Run tasks / collaborate via xAI Grok Build | xAI Grok (grok-build series) | `grok` CLI auth'd + `XAI_API_KEY` |
 
 ::: tip Not sure which one?
 - **Want to reuse a Claude subscription** → `claude-code-cli`
 - **Writing copy / translation / analysis (programmatic)** → `claude-agent-sdk`
 - **Writing code / running commands** → `codex-sdk`
+- **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
 - **Using MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo, etc.** → `claude-agent-sdk` + `ANTHROPIC_BASE_URL`
-- **Mix-and-match (recommended)** → run all three on one Hub, pick the best engine per role
+- **Mix-and-match (recommended)** → run all four on one Hub, pick the best engine per role
 :::
 
 ---
