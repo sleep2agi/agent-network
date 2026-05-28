@@ -60,7 +60,7 @@ sudo ufw allow 9200
 
 **原因**：SSE 长连接断开，通常是网络波动。
 
-**解决**：Agent 会自动重连（指数退避 3s -> 60s），通常无需手动干预。
+**解决**：Agent 会自动重连（v0.10.10 stable 指数退避 3s → 60s；v0.10.11 preview [#202](https://github.com/sleep2agi/agent-network/issues/202) 改 `1s → 30s` 上限 + 重连即重 register + 1h zombie-retry guard，[详见 agent-node 断线重连](/guide/agent-node#断线重连)），通常无需手动干预。
 
 如果持续失败：
 
@@ -76,6 +76,16 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 # proxy_read_timeout 86400;
 # proxy_buffering off;
 ```
+
+### Hub 重启后 Dashboard 看不到节点
+
+**症状**：`anet hub stop` + `anet hub start`（或 hub 进程崩溃后重启）几秒钟后，Dashboard 看到所有节点 `offline` 或完全不在节点列表里。Agent 进程实际还活着。
+
+**原因（v0.10.10 stable）**：hub 重启会清空 sessions 内存表。`agent-node` 的 SSE 重连只恢复事件流，**不重发 register**——hub 端 sessions 表要等下次 3 分钟 heartbeat 才会重建，期间 Dashboard 看不到任何节点。
+
+**解决**：
+- **v0.10.10 stable**：等下次 heartbeat（≤ 3 min）自动恢复，或手动 `anet project restart` 强制每个节点重 boot
+- **v0.10.11 preview** ([#202](https://github.com/sleep2agi/agent-network/issues/202) `agent-node@2.4.7-preview.X`+)：结构性修复，SSE 重连成功立即重发 register（idempotent upsert），Dashboard < 30s 自动恢复完整节点列表。**无需手动 `anet project restart`**，跟 v0.10.11 `anet hub stop` / `hub status` 配套用 → hub 维护 SOP 一键完成
 
 ---
 
