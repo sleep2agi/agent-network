@@ -673,7 +673,7 @@ unset ANET_CODEX_STDIO_DIRECT
 
 dashboard `≥ 0.5.0` 的 §3.E hover detail card 期望 agent-node `≥ 2.4.0`（[#142](https://github.com/sleep2agi/agent-network/issues/142) v0.10.0 ship 起 agent 心跳带 `process_telemetry`）+ commhub-server `≥ 0.8.2`（schema align）。三种可能：
 
-- **agent-node 老于 2.4.0**：跑 `anet upgrade` 升级到 v0.10.10 latest（当前 `agent-node 2.4.6`，满足 ≥ 2.4.0 最低要求）
+- **agent-node 老于 2.4.0**：跑 `anet upgrade` 升级到 v0.10.11 latest（当前 `agent-node 2.4.7`，满足 ≥ 2.4.0 最低要求）
 - **commhub-server 老于 0.8.2**：升级 server 端（`bunx @sleep2agi/commhub-server@latest`）
 - **agent 短期还没心跳**：`process_telemetry` 跟普通 host telemetry 一样需要至少 1 次心跳；新启动节点等 ~15s
 

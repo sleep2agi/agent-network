@@ -192,7 +192,7 @@ anet hub start [options]
 ```
 anet hub start
 Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.3)
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.4)
 🔒 secured
 ✅ Admin account created
    username: admin
@@ -507,12 +507,12 @@ anet upgrade [--channel preview|latest] [--self] [--dry-run]
 **Plan 输出（per 包一行）**：
 
 ```
-  anet (self)         2.2.0                →  2.2.9                → upgrade
+  anet (self)         2.2.0                →  2.2.10               → upgrade
                       (v0.10.6 #154 起 anet upgrade 默认自动 detached spawn — self < target 不需 --self flag；
                        chicken-and-egg 注：2.2.4 及以下用户需手装 1 次 `npm install -g @sleep2agi/agent-network@latest`
                        升到 2.2.5+，之后再升级都自动 detached spawn)
-  agent-node          2.4.0                →  2.4.6                → upgrade
-  commhub-server      not installed        →  0.8.3                (lazy via npx, skipped)
+  agent-node          2.4.0                →  2.4.7                → upgrade
+  commhub-server      not installed        →  0.8.4                (lazy via npx, skipped)
                       (not installed globally — lazy-fetched via npx by `anet hub start`)
   dashboard           0.5.0                →  0.5.6                → upgrade
 ```

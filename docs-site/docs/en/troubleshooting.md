@@ -674,7 +674,7 @@ If the codex CLI is already at latest but it still errors, please file an issue 
 
 The dashboard `≥ 0.5.0` §3.E hover detail card expects agent-node `≥ 2.4.0` ([#142](https://github.com/sleep2agi/agent-network/issues/142) — v0.10.0 ship made the agent emit `process_telemetry` on every heartbeat) plus commhub-server `≥ 0.8.2` (schema align). Three possible causes:
 
-- **agent-node older than 2.4.0**: run `anet upgrade` to pull v0.10.10 latest (currently `agent-node 2.4.6`, satisfying the ≥ 2.4.0 minimum)
+- **agent-node older than 2.4.0**: run `anet upgrade` to pull v0.10.11 latest (currently `agent-node 2.4.7`, satisfying the ≥ 2.4.0 minimum)
 - **commhub-server older than 0.8.2**: upgrade the server (`bunx @sleep2agi/commhub-server@latest`)
 - **Agent hasn't reported a heartbeat yet**: `process_telemetry` rides on the same heartbeat as host telemetry — a freshly started node needs ~15s
 
