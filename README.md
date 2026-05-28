@@ -76,29 +76,10 @@ anet project restart    # 重启 cwd 节点接新版（详见 #117）
 
 ---
 
-## 一键 Demo
-
-```bash
-export MINIMAX_KEY=sk-cp-xxx
-
-# 6 角色 9 步辩论赛，约 10 分钟
-anet demo debate --topic "AI 创造的岗位是否比消灭的多"
-
-# 4 角色社媒内容工厂，约 3 分钟
-anet demo socialmedia --topic "AI 时代如何提升专注力" --platform xiaohongshu
-```
-
-每个 demo 跑在独立 network 里，跑完自动清场，**不会污染** `default` network。
-
-> 🎬 **Demo 录屏制作中**（`anet demo debate` / `socialmedia` 的实跑 GIF）。在那之前直接跑命令最快。
-
----
-
 ## 下一步
 
 跑完 30 秒上手之后：
 
-- 🎬 **跑 demo** —— `anet demo debate` 或 `anet demo socialmedia` 看多 Agent 协作真实姿态
 - 📖 **看文档** —— [anet.sh/guide/getting-started](https://anet.sh/guide/getting-started) 全链路教程 + [架构概览](https://anet.sh/guide/architecture)
 - 💚 **加微信群** —— [扫码进群](https://anet.sh/community/wechat-group.jpg) 设计讨论、版本动态、排查问题
 - ⭐ **Star 项目** —— 觉得有用就给个 Star，活跃度直接反映在 release 节奏上

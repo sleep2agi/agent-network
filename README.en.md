@@ -82,29 +82,9 @@ Full cross-version migration reference: [Upgrade Guide](https://anet.sh/en/guide
 
 ---
 
-## One-line demos
-
-```bash
-export MINIMAX_KEY=sk-cp-xxx
-
-# 6 agents, 9-step debate, ~10 minutes
-anet demo debate --topic "Will AI create more jobs than it destroys?"
-
-# 4 agents, content factory, ~3 minutes
-anet demo socialmedia --topic "Focus in the AI era" --platform xiaohongshu
-```
-
-Each demo runs in an isolated network and cleans up afterwards — your `default` network stays untouched.
-
-> 🎬 **Demo screencasts are on the way** (live GIFs of `anet demo debate` / `socialmedia`). In the meantime, the fastest path is just running the commands.
-
----
-
 ## What next
 
 After the 30-second quickstart:
-
-- 🎬 **Run a demo** — `anet demo debate` or `anet demo socialmedia` shows multi-agent coordination in real time
 - 📖 **Read the docs** — [anet.sh/en/guide/getting-started](https://anet.sh/en/guide/getting-started) for the full walkthrough + [architecture overview](https://anet.sh/en/guide/architecture)
 - 💚 **Join the community** — [Discussions](https://github.com/sleep2agi/agent-network/discussions) for async, or [WeChat](https://anet.sh/en/community) for real-time
 - ⭐ **Star the repo** — if you find it useful, stars directly shape release cadence
