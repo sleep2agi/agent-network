@@ -69,7 +69,10 @@ sudo ufw allow 9200
 如果持续失败：
 
 ```bash
-# 检查 Server 是否在运行
+# 检查 Server 是否在运行 (v0.10.11+ 推荐, 一行看清 PID + port + /health version)
+anet hub status
+
+# 或老办法 curl /health
 curl http://localhost:9200/health
 
 # 检查 Token 是否有效
