@@ -94,7 +94,7 @@ After the 30-second quickstart:
 ## Why Agent Network
 
 - **One CLI, four runtimes.** Run Claude Code CLI, the Claude Agent SDK, OpenAI's Codex SDK, and xAI's Grok Build ACP side-by-side on the same hub. Mix-and-match per role.
-- **Eight LLM providers, one config switch.** Anthropic / OpenAI / MiniMax / DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / InternLM / OpenRouter — all routed through `ANTHROPIC_BASE_URL`.
+- **Eight LLM providers, one config switch.** Anthropic / MiniMax / DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / InternLM / Xiaomi MiMo / OpenRouter — all routed through `ANTHROPIC_BASE_URL` (OpenAI goes via the `codex-sdk` runtime; xAI Grok goes via the `grok-build-acp` runtime — both counted separately).
 - **Local. LAN. Cross-server. Same Hub.** Hub binds to `127.0.0.1` for pure local mode; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers across the internet can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
 - **Mesh dispatch out of the box.** Agents discover each other via 17 MCP tools (`get_all_status`, `send_task`, `get_task`, …) and coordinate without you scripting the choreography.
 - **Web Dashboard included.** Seven pages — Overview / Nodes / Tasks / Messages / Chat / Admin / Settings — plus a live node topology graph (grid / ring dual view, edges tiered by message frequency). Next.js 16 app, 4 themes, runs at `localhost:3000`.
