@@ -20,12 +20,14 @@ anet node start my-agent
 
 ```bash
 anet hub start                  # Start Hub + bootstrap admin (admin / anethub on first run)
+anet hub status                 # Hub PID + port + /health version (v0.10.11+)
+anet hub stop                   # Stop Hub: SIGTERM → 3s grace → SIGKILL (v0.10.11+, no more lsof+kill)
 anet hub dashboard              # Web UI on localhost:3000
 anet login                      # Login (saves utok_ to ~/.anet/config.json)
 anet whoami                     # Current user
 anet passwd                     # Change password
 anet node ls                    # List nodes
-anet node create <name>         # Interactive runtime + provider picker
+anet node create <name>         # Interactive runtime + provider picker (Claude Code CLI / Claude Agent SDK / Codex / Grok Build ACP)
 anet node start <name>          # Start agent
 anet node resume <name>         # Resume previous session
 anet status                     # Network overview
@@ -34,6 +36,7 @@ anet doctor                     # System diagnostic
 anet doctor --fix               # Auto-probe expired ntok_ and reissue
 anet info <name>                # Node details
 anet logs <name>                # Node logs
+anet upgrade                    # Upgrade anet + agent-node + commhub-server to latest
 ```
 
 ## Where to go next
