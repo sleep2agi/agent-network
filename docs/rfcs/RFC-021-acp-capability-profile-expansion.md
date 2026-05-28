@@ -166,16 +166,21 @@ Phase 2 调研 grok 自己有没有 `--enable-backend-tools` 类 hidden flag / `
 - ❌ 慢 (PR review + ACP 0.5 release + Grok upgrade chain)
 - ❌ 不解决眼前 P0
 
-### 4.4 推荐策略
+### 4.4 推荐策略 (Vincent 6439 + 6440 拍板)
 
-**Phase 2 三路并行**:
-1. **A (实施主线)**: 1h `_meta` key 试探,找到 work 的 key → 5 LOC anet-side 改 + bun test + Docker smoke
-2. **B (头 30min 兜底调研)**: strings grok binary + 查 grok docs/source — 若找到 flag 比 A 更可靠就 swap
-3. **C (Phase 4 并行)**: 写一份 zed-industries PR draft 推上游, 长期保险
+**Phase 2 单路推进 — Path A 主线**(Vincent "挑最优雅的方案直接做"):
+- 1h `_meta` key 落地: 选 `x.ai/requestedBackendTools` 匹配 Grok 既有 `x.ai/*` 命名空间
+- 工具列表: `["x_keyword_search", "x_user_search", "video_gen", "web_search"]` verbatim 用 Grok backend 真实名(从我之前 27 次 X search session trace 抓的精确字符串)
+- 同时塞 `initialize._meta` + `session/new._meta` 双层,Grok 哪层认得用哪层
+- ~5 LOC anet-side + bun test + Docker smoke
 
-**若 A 和 B 都失败**(最坏):
-- 找 Grok team 直接问 (xAI 官方文档 / Discord / GitHub)
-- 或者降级方案: anet **不走 ACP-isolated mode 跑 grok-build runtime**, 走 Grok TUI exec mode(失去 isolation 但 backend tools 都在)— 这是 fallback,不推荐
+**Path B drop** — Grok 非标 flag 不要,A 已覆盖短期需求 + C 提供长期保险,B 中间地带价值不大。
+
+**Path C 延后到 §10 长期方案**(Vincent 6440 "长期方案也要写下来",不并行做):
+
+**若 Path A 失败**(最坏):
+- Phase 2 Docker smoke 验 Grok 不 honor `_meta` hint → surface 通信龙 → fallback 降级方案
+- 降级:不走 ACP-isolated 跑 grok-build,走 Grok TUI exec mode(失 isolation 保 backend tools)— 这是 fallback,不推荐
 
 ## 5. Phase 2 实施 sketch + 验收
 
@@ -234,8 +239,119 @@ A站负责人 lane 协议:
 2. **要不要并行推 ACP upstream PR (Path C)**: 慢但根治; 我倾向并行做(Phase 4 边角时间), 通信牛 决定
 3. **fallback 降级方案 OK 不 OK**: Path A/B 全失败时, 跑 Grok TUI exec 而非 ACP 该不该走
 
+## 10. 长期方案: ACP spec upstream PR (Path C, future work)
+
+Vincent 6439 拍板 A + C 并行;6440 收回 C 并行实施,改为本节"写下来"留档。**当前 RFC ship 后,Path C 暂不动**;Phase 2-4 完成 + A站负责人 试跑 PASS 后,根据这条 path A 的稳定度决定要不要真 fork upstream PR。
+
+### 10.1 动机
+
+Path A 用 `_meta.x.ai/requestedBackendTools` 是 **anet ↔ Grok 双边 vendor convention**:
+- Grok 升 agent stdio 版本可能改 `_meta` key 名(从 `x.ai/*` 到 `xai/*` 或别的)
+- 其他 ACP agent(将来 Claude / Codex 出 ACP)肯定不认 `x.ai/*` 前缀
+- spec 层没有"客户端要求服务端工具"机制是**真 gap**,不止 Grok 受影响
+
+### 10.2 PR 设计草稿(通信牛 review gate #3: 抽象 categories, **不**写 vendor-specific tool 名)
+
+向 `zed-industries/agent-client-protocol` 提扩 `ClientCapabilities`,**用抽象 capability category 而非具体 vendor tool 名**(避免锁定 Grok 私有 namespace):
+
+```jsonc
+// schema/schema.json $defs.ClientCapabilities
+{
+  "properties": {
+    "_meta": { ... },
+    "fs": { ... },
+    "terminal": { ... },
+    "requestedToolCategories": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["search", "media-gen", "web", "social-search", "code-exec", "voice"]
+      },
+      "description": "Optional capability profile hint: a list of abstract tool categories the client wants exposed to the underlying LLM. Agent MAY honour or ignore. Each agent implementation maps a category to its concrete tool set (e.g. Grok maps 'search' → x_keyword_search + x_user_search; 'media-gen' → video_gen). Backward-compatible: absent field means no hint (agent uses its default policy)."
+    }
+  }
+}
+```
+
+PR body 应含:
+- anet/grok-build use case 描述(ACP-isolated runtime 跑搜索任务 0 hit 现象)
+- **抽象 categories**(`search` / `media-gen` / `web` / `social-search` / `code-exec` / `voice`)scalable 到 Claude Code / Codex / 其他 ACP agent 将来 mode
+- 当前 spec 缺口分析(`ClientCapabilities` 无 tool-request 字段, `AgentCapabilities` 无 tool-enum 字段)
+- backward-compat 保证(字段可选, 老 agent 忽略也 OK)
+- 相关 ACP agent 用例(Claude Code SDK 将来 ACP 模式同样需求)
+- 链接本 RFC-021 + #205 + #206
+
+**短期 anet-side mapping**(本地 Phase 2 实施时,Path A 双轨同发):
+- abstract categories: `["search", "media-gen", "web"]`(放 `requestedToolCategories` 候选 key,等 spec PR landed 可用)
+- Grok vendor concrete tool names: `["x_keyword_search", "x_user_search", "video_gen", "web_search"]`(放 `x.ai/requestedBackendTools`,Phase 2 实证 work 的那个 key)
+
+### 10.3 期望时间窗
+
+- 短期(2-4 周):Vincent 觉得 Path A 跑稳后 + A站负责人 试跑 PASS,再 fork PR
+- 中期(1-3 月):看 grok agent stdio mode 是不是仍主流(若 Grok 改 protocol 或 anet 改用其他 ACP agent, Path C 价值变化)
+- 长期:ACP 0.5+ release 含 `requestedTools` 字段 → anet 切到 spec 字段, drop `_meta.x.ai/*` 兼容代码
+
+### 10.4 不并行实施的原因
+
+- Vincent 6440 train 路上 "不要总是让我选, 选个最优雅的, 长期的方案也要写下来" — 写下即可,不需 Phase 2 并行 fork PR
+- Phase 2 优先 ship 一版让 A站负责人 真试跑,验证 Path A 是否真 work
+- Path C 是保险, A 跑稳前先不投资
+
+## 11. Phase 2 HARD GATE 实证结果 (2026-05-28 16:25 北京)
+
+通信牛 review gate #5 要求 Phase 2 前 1-1.5h 必证 hint 真改变 ACP 行为。我用 host grok stdio (Vincent auth) 跑了一次 LLM probe(单次 quota tick,**不是** anet 节点,无 commhub 连接)。
+
+### 11.1 探测方法
+
+`/tmp/p205-hard-gate/smoke.ts` import `runGrokAcpTurn`,运行:
+- prompt: "请用 X 搜索过去 24 小时关于 multi-agent framework 的热门讨论,**务必使用 X 搜索工具 (XSearch / x_keyword_search)**"
+- runtime.ts 双位置 `_meta.x.ai/requestedBackendTools` hint 注入 ON
+- 捕获所有 `session/update` `tool_call` 事件,看 title
+
+### 11.2 结果(全部 ZERO_HITS)
+
+| Tool title | 调用次数 |
+|---|---|
+| `X search:` | **0** ❌ |
+| `Web search:` | **0** ❌ |
+| `video_gen` | **0** ❌ |
+| `search_tool` (Grok 内置 RAG file search,跟 X search 无关) | 6(LLM 用它**找** X search 工具,找不到) |
+
+### 11.3 LLM 自报(三层证据,verbatim quote)
+
+> "**无法完成请求。当前会话中没有连接任何 X 搜索相关的 MCP 工具**(包括 XSearch、x_keyword_search 或类似 Twitter/X 高级搜索工具)。已连接的 MCP 服务器:codex / wechat / feishu / telegram。通过多次 `search_tool` 查询(包括 'x_keyword_search'、'XSearch'、'twitter'、'X search' 等关键词),均未发现任何 X/Twitter 搜索工具。"
+
+LLM **理解任务 + 主动尝试找工具 + 找不到** — 三层证据 Path A `_meta.x.ai/requestedBackendTools` 在 Grok 0.2.3 agent stdio mode **完全无效**。**结构性**,prompt-engineering 不可绕。
+
+### 11.4 决策更新
+
+| Path | 状态 |
+|---|---|
+| **A — `_meta` 双边 convention** | ❌ **结构性失败**, Grok 不 honor 这个 key。代码 commit 作 forward-compat evidence,但**不 ship preview**。env opt-out `ANET_GROK_BACKEND_TOOLS_HINT=off` 保留 |
+| **B — Grok 非标 flag** | ❌ drop (Vincent 6439 + 通信牛 review #5) |
+| **C — ACP spec upstream PR** | ✅ **升级为唯一未来路径**, fork zed-industries/agent-client-protocol + PR `requestedToolCategories` 字段 |
+| **Fallback — TUI exec** | ⚠ opt-in only via `ANET_GROK_TUI_FALLBACK=1` env(失 #204 ACP isolation,opt-in 不自动),完整 routing 实施 deferred 到独立 Phase(非 #205) |
+
+### 11.5 用户影响(本 commit 后)
+
+- **anet 用户无可视行为变化**:agent-node 新 preview 不发布(per gate #5 不 ship speculative)。**main HEAD 的 runtime.ts 改动是 negative evidence artifact,不生效到 user**(`ANET_GROK_BACKEND_TOOLS_HINT=off` 也无差,因为 Grok 不 honor)
+- **A站负责人 R23 试跑结论照旧 hold**:Path A 不能解锁 X 搜索,fallback 继续走 ai-api.js + 智谱 mmx pipeline(他已有方案,不阻塞)
+- **#206 keep open** w/ "blocked-by Path C upstream PR" 标签 — 等 PR 合 ACP 0.5+ + Grok 升版本支持
+
+### 11.6 Path C 真 fork PR(本 RFC ship 后立即做)
+
+Per Vincent 6440 + 通信龙 dispatch:
+1. `gh repo fork zed-industries/agent-client-protocol --clone`
+2. 加 `requestedToolCategories?: ("search" | "media-gen" | "web" | "social-search" | "code-exec" | "voice")[]` 到 `ClientCapabilities` schema(TypeScript types regenerated)
+3. PR body 含 anet/grok-build use case + abstract category rationale + #205 / #206 链接 + 本 RFC §11 negative evidence
+4. PR URL update 到本 §11.6 + commhub 报通信龙
+
+### 11.7 Lesson banked
+
+**HARD GATE 真探测保 anet 不 ship speculative preview**(per `feedback_release_preview_first` + `feedback_vendor_verify_before_hardcode`)。Vincent 早期 "anet 接入零代码" 推测在 ACP-isolated 路径下失效;real probe 用 1 LLM quota tick 暴露真实结构限制 → 4-issue chain (#194 / #201 / #202 / #203 / #204) + 本 #205 全部"在见到 Grok 实际行为之前不下结论"的方法学统一,RFC-021 §11 是这条方法学的教科书反例。
+
 ---
 
-**RFC v1 draft 完成**, 等通信牛 review → Phase 2 启动。
+**RFC v1 draft 完成 + amend per Vincent 6440 + Phase 2 HARD GATE 实证 §11**, Phase 2 主线 A 死,Path C 升级为未来路径。
 
 **Author-Agent**: 通信SDK马

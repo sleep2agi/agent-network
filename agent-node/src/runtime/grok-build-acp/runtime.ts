@@ -139,7 +139,54 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
   try {
     client.start({ cwd: opts.cwd, env: childEnv, binary: opts.binary });
 
-    const init = await client.request<InitializeResponse>("initialize", {
+    // #205 RFC-021 Path A — request Grok backend tools (X search, video
+    // gen, web search/fetch) via _meta capability hint. ACP spec has no
+    // first-class "client requests these tools" field, so we use the
+    // `_meta` free-form extension point — which Grok already exercises
+    // in init responses (`_meta.grokShell:true`, `_meta.x.ai/fs_notify:true`).
+    // We send the hint on BOTH the request-level `_meta` and the nested
+    // `clientCapabilities._meta` so Grok can read it from whichever layer
+    // its server-side handler consumes (通信牛 review gate #2).
+    //
+    // Tool names are verbatim from the Grok backend (captured from real
+    // session traces; see docs/research/grok-x-search-capability-probe.md).
+    // The hint is silently ignored by any agent that doesn't recognise
+    // the `x.ai/` namespace — fail-safe per ACP `_meta` semantics.
+    //
+    // Hard-gate (per RFC-021 review gate #5): the Phase 2 Docker smoke
+    // must verify the hint actually changes Grok's tool registry
+    // behaviour (i.e. probe-prompt yields a `tool_call` with
+    // `title: "X search:"` only when hint is present), not just that
+    // Grok echoes the meta back. If gate fails, we do NOT ship.
+    //
+    // Emergency escape hatch: set `ANET_GROK_BACKEND_TOOLS_HINT=off` to
+    // suppress the hint entirely (preserves pre-#205 behaviour). Useful
+    // if a future Grok release rejects unknown `_meta` keys.
+    //
+    // #205 Phase 2 HARD GATE 实证结果 (2026-05-28): Grok 0.2.3 agent stdio
+    // **不 honor** 这个 hint。Path A 失败, 留 hint 注入作 forward-compat
+    // (将来 Grok 升版本 honor 这个 key 立即生效零代价)。RFC-021 §11
+    // records the negative evidence; do NOT advertise X-search availability
+    // to users until Path C upstream PR lands.
+    //
+    // Opt-in TUI fallback (per 通信牛 review gate #4): set
+    // `ANET_GROK_TUI_FALLBACK=1` to acknowledge the trade-off
+    // (loses #204 ACP isolation, regresses cwd/config/attribution
+    // discipline) in exchange for working backend tools. Full TUI exec
+    // routing is deferred (separate Phase, not in #205 scope) — this
+    // env var today only emits a startup warn so the user knows the
+    // flag is recognised. ACP-stdio runtime continues regardless.
+    const _hintEnabled = (childEnv.ANET_GROK_BACKEND_TOOLS_HINT ?? "on").toLowerCase() !== "off";
+    if ((childEnv.ANET_GROK_TUI_FALLBACK ?? "").toLowerCase() === "1") {
+      // Visible via opts.onStderr → cli.ts warn() — surfaces in `anet logs`.
+      opts.onStderr?.(
+        `[grok] ANET_GROK_TUI_FALLBACK=1 recognised — full TUI exec routing ` +
+        `is deferred (#205 follow-up). Continuing on ACP stdio path. To use ` +
+        `Grok's backend tools (X search / video_gen), see RFC-021 §11.`,
+      );
+    }
+    const backendToolsHint = ["x_keyword_search", "x_user_search", "video_gen", "web_search"];
+    const initParams: Record<string, unknown> = {
       protocolVersion: "1",
       clientCapabilities: {
         fs: { readTextFile: true, writeTextFile: true },
@@ -148,8 +195,11 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
         // requests, which this adapter cannot satisfy and can surface as
         // generic ACP -32603 internal errors.
         terminal: false,
+        ...(_hintEnabled ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } } : {}),
       },
-    }, timeoutMs);
+      ...(_hintEnabled ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } } : {}),
+    };
+    const init = await client.request<InitializeResponse>("initialize", initParams, timeoutMs);
     const authMethod = selectAuthMethod(init, childEnv);
     await client.request("authenticate", { methodId: authMethod, meta: { headless: true } }, timeoutMs);
 
@@ -157,10 +207,18 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     // pre-#204 behaviour so existing callers that don't yet build the entry
     // don't change shape silently. When non-empty, this overrides the cwd
     // `.mcp.json` lookup and Grok runs with the per-session env we injected.
+    //
+    // #205 RFC-021 — also tag session/new and session/load with the same
+    // backend-tools hint at the session level (second of the two slots
+    // 通信牛 review gate #2 required). Some agents consume the hint at
+    // session-create time rather than at initialize-time; we cover both.
     const mcpServers = opts.mcpServers ?? [];
+    const sessionExtra = _hintEnabled
+      ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } }
+      : {};
     const session = opts.sessionId
-      ? await client.request<SessionResponse>("session/load", { sessionId: opts.sessionId, cwd: opts.cwd, mcpServers }, timeoutMs)
-      : await client.request<SessionResponse>("session/new", { cwd: opts.cwd, mcpServers }, timeoutMs);
+      ? await client.request<SessionResponse>("session/load", { sessionId: opts.sessionId, cwd: opts.cwd, mcpServers, ...sessionExtra }, timeoutMs)
+      : await client.request<SessionResponse>("session/new", { cwd: opts.cwd, mcpServers, ...sessionExtra }, timeoutMs);
 
     const sessionId = extractSessionId(session) ?? opts.sessionId;
     if (!sessionId) throw new Error("Grok ACP session response did not include sessionId");
