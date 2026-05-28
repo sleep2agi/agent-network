@@ -78,14 +78,16 @@ FROM=$(echo "$MSG" | jq -r '.messages[0].from_session // empty')
   exit 1
 }
 
-echo "Try spoofing from_session with same ntok; server must keep current alias." >> "$REPORT"
+echo "Try spoofing from_session with same ntok; server must reject identity mismatch." >> "$REPORT"
 ST=$(mcp_call "$NTOK" "send_task" '{"alias":"总指挥","task":"spoof check","from_session":"grok测试员"}')
-echo "$ST" | jq -e '.ok == true' >/dev/null || { echo "send_task failed: $ST"; exit 1; }
+echo "$ST" | jq -e '.ok == false and .error == "from_session_identity_mismatch" and .token_alias == "grok测试4" and .requested_from_session == "grok测试员"' >/dev/null || {
+  echo "FAIL: expected identity mismatch, got: $ST"
+  exit 1
+}
 
 MSG2=$(mcp_call "$NTOK" "get_inbox" '{"alias":"总指挥","limit":5}')
-SPOOF_FROM=$(echo "$MSG2" | jq -r '.messages[] | select(.content=="spoof check") | .from_session' | head -1)
-[[ "$SPOOF_FROM" == "grok测试4" ]] || {
-  echo "FAIL: spoof check expected from_session=grok测试4, got $SPOOF_FROM"
+echo "$MSG2" | jq -e '[.messages[] | select(.content=="spoof check")] | length == 0' >/dev/null || {
+  echo "FAIL: mismatched send_task wrote an inbox row"
   echo "$MSG2"
   exit 1
 }
@@ -94,7 +96,7 @@ SPOOF_FROM=$(echo "$MSG2" | jq -r '.messages[] | select(.content=="spoof check")
   echo
   echo "PASS: ntok minted for old alias is reconciled on report_status."
   echo "PASS: native MCP send_message without from_session uses current registered alias."
-  echo "PASS: ntok caller cannot spoof from_session to stale alias."
+  echo "PASS: ntok caller cannot spoof from_session; mismatch is rejected before inbox write."
 } >> "$REPORT"
 
 cat "$REPORT"

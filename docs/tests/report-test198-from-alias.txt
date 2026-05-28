@@ -14,7 +14,7 @@ Result:
 ```text
 PASS: ntok minted for old alias is reconciled on report_status.
 PASS: native MCP send_message without from_session uses current registered alias.
-PASS: ntok caller cannot spoof from_session to stale alias.
+PASS: ntok caller cannot spoof from_session; mismatch is rejected before inbox write.
 ```
 
 Additional build check:

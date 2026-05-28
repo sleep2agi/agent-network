@@ -1,0 +1,43 @@
+# test203-server-alias-audit
+
+Scope: P0 #203 server-side audit for new Grok node alias attribution.
+
+Observed production DB state (read-only):
+- old ntok hash prefix `b8de2c725c40` → `name=node:grok测试员`
+- new ntok hash prefix `6d2f1ed20149` → `name=node:grok测试5`
+- both are in `net_399bdf86f528`
+- `sessions` and `nodes` rows for `grok测试5` point to `node_id=n_a41110c1`
+
+Timeline finding:
+- wrong inbox rows at `2026-05-28 03:34:51` and `03:38:46` had
+  `from_session=grok测试员`
+- old ntok `last_used_at=2026-05-28 03:38:55`
+- new ntok `last_used_at=2026-05-28 03:41:46`
+
+Conclusion:
+- CommHub did not resolve the new ntok to the old alias; SQLite labels for the
+  two token hashes are distinct and correct.
+- The bad write path used the old node token. Prior behavior silently rewrote
+  mismatched `from_session` to the old token-bound alias, which created a
+  confusing inbox row instead of surfacing the stale-token bug.
+
+Fix:
+- For network-bound ntok calls, if a caller supplies `from_session` that differs
+  from the token-bound alias, CommHub now rejects the write with
+  `from_session_identity_mismatch`.
+- This applies before inbox/task mutation for outbound write tools.
+
+Docker:
+
+```bash
+sg docker -c 'docker build -f tests/test198-from-alias/Dockerfile -t anet-test198-from-alias . && docker run --rm anet-test198-from-alias'
+```
+
+Result:
+
+```text
+PASS: ntok minted for old alias is reconciled on report_status.
+PASS: native MCP send_message without from_session uses current registered alias.
+PASS: ntok caller cannot spoof from_session; mismatch is rejected before inbox write.
+```
+

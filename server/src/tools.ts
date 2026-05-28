@@ -26,6 +26,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // couldn't tell who actually asked them. Network-bound node tokens are an
   // identity boundary: they must not spoof another node via from_session.
   const defaultFrom = (clientFrom?: string) => (callerTokenIsNetwork && callerAlias) ? callerAlias : (clientFrom || callerAlias || "hub");
+  const fromIdentityMismatchReply = (clientFrom?: string) => {
+    const requestedFrom = clientFrom?.trim();
+    if (!callerTokenIsNetwork || !callerAlias || !requestedFrom || requestedFrom === callerAlias) return null;
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          ok: false,
+          error: "from_session_identity_mismatch",
+          message: "network token from_session does not match token-bound node alias",
+          token_alias: callerAlias,
+          requested_from_session: requestedFrom,
+        }),
+      }],
+    };
+  };
   // If enforceNetworkId is set, override any client-supplied network_id
   const getNetworkId = (clientNetId?: string | null) => enforceNetworkId ?? clientNetId ?? null;
 
@@ -605,7 +621,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. When the child task replies the hub will auto-chain the answer to the parent task's originator, so the user sees the final result even if the intermediate session ends."),
       meta: z.any().optional().describe("Optional structured task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
     },
-    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta }) => { const from_session = defaultFrom(_fromIn);
+    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       const metaJson = normalizeMetaJson(meta);
       // Resolve parent_task_id: explicit > inferred (caller's most recent
@@ -704,7 +720,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       message: z.string().min(1).max(10000).describe("Message content"),
       from_session: z.string().max(200).optional(),
     },
-    async ({ alias, message, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
+    async ({ alias, message, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → send_message → ${alias}: ${message.slice(0, 60)}`);
@@ -745,7 +761,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       status: z.enum(["replied", "failed", "cancelled"]).optional().default("replied").describe("Task outcome"),
       from_session: z.string().max(200).optional(),
     },
-    async ({ alias, text, in_reply_to, status: replyStatus, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
+    async ({ alias, text, in_reply_to, status: replyStatus, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
@@ -820,7 +836,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to acknowledge"),
       from_session: z.string().max(200).optional(),
     },
-    async ({ task_id, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
+    async ({ task_id, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → send_ack → task ${task_id.slice(0, 8)}`);
@@ -846,7 +862,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to retry"),
       from_session: z.string().max(200).optional(),
     },
-    async ({ task_id, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
+    async ({ task_id, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → retry_task → ${task_id.slice(0, 8)}`);
@@ -957,7 +973,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       reason: z.string().max(1000).optional().describe("Cancellation reason"),
       from_session: z.string().max(200).optional(),
     },
-    async ({ task_id, reason, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
+    async ({ task_id, reason, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → cancel_task → ${task_id.slice(0, 8)}`);
@@ -989,7 +1005,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       new_alias: z.string().min(1).max(200).describe("Target agent alias"),
       from_session: z.string().max(200).optional(),
     },
-    async ({ task_id, new_alias, from_session: _fromIn }) => { const from_session = defaultFrom(_fromIn);
+    async ({ task_id, new_alias, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → reassign_task → ${task_id.slice(0, 8)} → ${new_alias}`);
