@@ -44,14 +44,14 @@ npm install -g @sleep2agi/agent-network@preview
 anet -v
 ```
 
-Current npm dist-tags verified on 2026-05-28:
+Current npm dist-tags verified on 2026-05-28 (v0.10.11 stable):
 
 | Package | latest | preview |
 |---|---:|---:|
-| `@sleep2agi/agent-network` | `2.2.9` | `2.2.10-preview.3` |
-| `@sleep2agi/commhub-server` | `0.8.3` | `0.8.4-preview.1` |
+| `@sleep2agi/agent-network` | `2.2.10` | `2.2.10-preview.3` |
+| `@sleep2agi/commhub-server` | `0.8.4` | `0.8.4-preview.1` |
 | `@sleep2agi/agent-network-dashboard` | `0.5.6` | `0.5.7-preview.2` |
-| `@sleep2agi/agent-node` | `2.4.6` | `2.4.7-preview.6` |
+| `@sleep2agi/agent-node` | `2.4.7` | `2.4.8-preview.0` |
 
 ## 5-Minute Quick Start
 
@@ -94,7 +94,7 @@ anet node start my-bot
 `anet node create` walks you through:
 
 1. Runtime: `claude-code-cli`, `claude-agent-sdk`, `codex-sdk`, or `grok-build-acp`.
-2. Provider preset: Anthropic, MiniMax, DeepSeek, GLM, Kimi, OpenRouter, or custom Anthropic-compatible endpoint.
+2. Provider preset: Anthropic, MiniMax, InternLM, Xiaomi MiMo, or `custom` (any Anthropic-compatible endpoint — used for DeepSeek / GLM / Kimi / OpenRouter etc.; codex-sdk for OpenAI Codex; grok-build-acp for xAI Grok).
 3. API key and model settings.
 
 When the node starts successfully, look for:
