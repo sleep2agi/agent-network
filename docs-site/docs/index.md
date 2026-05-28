@@ -1,11 +1,11 @@
 ---
 layout: home
 title: Agent Network
-titleTemplate: 多 Agent，一行命令
+titleTemplate: 本地优先 · 多 Agent 协作网络
 hero:
   name: Agent Network
-  text: 多 Agent，一行命令
-  tagline: 高效燃烧 Tokens 驱动 100+ Agent 军团提升你的生产力
+  text: 本地优先 · 多 Agent 协作网络
+  tagline: 一行 anet 编排 Claude · Codex · Grok Build —— 4 Runtime × 8 LLM 同台跑在你的硬件上，Apache 2.0 开源
   actions:
     - theme: brand
       text: 30 秒上手 →

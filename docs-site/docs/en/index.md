@@ -1,11 +1,11 @@
 ---
 layout: home
 title: Agent Network
-titleTemplate: Multi-Agent, One Command
+titleTemplate: Local-first multi-agent network
 hero:
   name: Agent Network
-  text: Multi-Agent, One Command
-  tagline: Burn tokens efficiently. Drive 100+ Agent armies. Multiply your productivity.
+  text: Local-first multi-agent network
+  tagline: One anet command orchestrates Claude · Codex · Grok Build — 4 runtimes × 8 LLM providers, all on your own hardware. Apache 2.0 open source.
   actions:
     - theme: brand
       text: Get Started →
