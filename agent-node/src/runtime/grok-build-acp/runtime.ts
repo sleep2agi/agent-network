@@ -23,15 +23,35 @@ export interface AcpEnvVariable {
   name: string;
   value: string;
 }
-export interface AcpMcpServerEntry {
-  // Stdio variant fields (the ones Grok currently accepts via stdio MCP).
-  // `name`, `command`, `args`, and `env` are all required by the ACP schema
-  // — `args` and `env` MUST be present even if empty arrays.
+export interface AcpHttpHeader {
   name: string;
-  command: string;
-  args: string[];
-  env: AcpEnvVariable[];
+  value: string;
 }
+// #204 preview.6 — supports both Stdio and Http McpServer variants per the
+// ACP McpServer untagged enum (schema/schema.json $defs.McpServer.anyOf).
+// Stdio path is left in place for `.mcp.json`-like setups; the preferred
+// preview.6 transport is **Http**, which avoids spawning a subprocess
+// entirely (no bun / node-server.js / framing-mismatch class of bugs that
+// preview.2 → preview.5 chain ran into) and lets commhub-server's `/mcp`
+// endpoint derive `from_session` directly from the ntok's tokenName
+// (server/src/index.ts:446 — `node:<alias>` → callerAlias, the d1d867e
+// 通信牛 hub-side bind that #194/#203/#204 all built on).
+export type AcpMcpServerEntry =
+  | {
+      // Stdio variant (legacy, kept for completeness/fallback)
+      name: string;
+      command: string;
+      args: string[];
+      env: AcpEnvVariable[];
+    }
+  | {
+      // Http variant — `type` discriminator IS required for Http/Sse per
+      // schema (because url+headers field set is shared between them).
+      type: "http";
+      name: string;
+      url: string;
+      headers: AcpHttpHeader[];
+    };
 
 export interface GrokAcpTurnOptions {
   prompt: string;

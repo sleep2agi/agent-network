@@ -1304,64 +1304,36 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   // McpServer untagged enum` validation. Schema source:
   // @zed-industries/agent-client-protocol@0.4.5 schema/schema.json
   // → $defs.McpServer.anyOf[Stdio].
-  const commhubMcpEnv: Array<{ name: string; value: string }> = [];
-  if (ALIAS) commhubMcpEnv.push({ name: "COMMHUB_ALIAS", value: ALIAS });
-  if (AUTH_TOKEN) commhubMcpEnv.push({ name: "COMMHUB_TOKEN", value: AUTH_TOKEN });
-  if (COMMHUB_URL) commhubMcpEnv.push({ name: "COMMHUB_URL", value: COMMHUB_URL });
-  if (RESUME_ID) commhubMcpEnv.push({ name: "COMMHUB_RESUME_ID", value: RESUME_ID });
-  // #204 preview.5 — defensive runtime quietening. Vincent UAT preview.4 hit
-  // "serde error expected value at line 1 column 2" — Grok's serde parser
-  // saw non-JSON-RPC bytes on the MCP subprocess's stdout. Most likely
-  // sources: bun version splash on some host setups, Node deprecation
-  // warnings, or color-escape sequences from tooling. We silence the
-  // common runtime-side leakage paths in the child env so stdout stays
-  // pure JSON-RPC even if user's bun/node prints something startup-time.
-  commhubMcpEnv.push({ name: "BUN_QUIET", value: "1" });
-  commhubMcpEnv.push({ name: "NODE_NO_WARNINGS", value: "1" });
-  commhubMcpEnv.push({ name: "NO_COLOR", value: "1" });
-  // Tag this subprocess so future diagnostic paths can distinguish ACP-
-  // spawned commhub MCP from anet's other invocations of node-server.js.
-  commhubMcpEnv.push({ name: "COMMHUB_MCP_TRANSPORT", value: "acp-stdio" });
-  // preview.4 (#204 半-PASS catch) — Vincent UAT 04:41 showed schema accepted
-  // but commhub tools never registered to Grok ("CommHub 通道暂不可用 工具
-  // 未就绪"). Most-likely cause: Grok ACP spawns MCP subprocess with a cwd
-  // that's not our process.cwd(), so the `.anet/node-server.js` relative
-  // path doesn't resolve. ACP McpServer schema has no `cwd` field — we
-  // must hand Grok absolute paths so it can spawn regardless of its own
-  // working directory. Same defensive reasoning for `bun`: Grok's PATH may
-  // not include it, so use the current bun binary's absolute path
-  // (process.execPath when agent-node itself runs under bun).
-  const { existsSync: _grokExists, statSync: _grokStat } = await import("fs");
-  const { resolve: _grokResolve } = await import("path");
-  const _cwdServer = _grokResolve(process.cwd(), ".anet/node-server.js");
-  let _serverPath = _cwdServer;
-  if (!_grokExists(_serverPath)) {
-    // Fallback: try the agent-network npm package's bundled dist (works on
-    // global npm installs that didn't run `anet init project` in the cwd).
-    try {
-      const _req = (await import("module")).createRequire(import.meta.url);
-      const _pkgServer = _req.resolve("@sleep2agi/agent-network/dist/src/node-server.js");
-      if (_grokExists(_pkgServer)) _serverPath = _pkgServer;
-    } catch { /* fall through, will warn below */ }
-  }
-  if (!_grokExists(_serverPath)) {
-    warn(`[grok] ⚠ #204 — commhub MCP server file not found at ${_cwdServer}; ` +
-         `injecting absolute path anyway, but tools will likely fail to register. ` +
-         `Run \`anet init project\` in this cwd to install .anet/node-server.js.`);
-  } else {
-    debug(`[grok] commhub MCP server resolved: ${_serverPath} (${_grokStat(_serverPath).size}B)`);
-  }
-  // process.execPath is `bun` when agent-node ran via `bun cli.ts` or `npx
-  // @sleep2agi/agent-node` (which bun-installs). Fall back to PATH lookup of
-  // "bun" otherwise — Grok's PATH may still resolve it on most user setups.
-  const _bunPath = process.execPath && /\/(?:bun|bun-node)$/.test(process.execPath)
-    ? process.execPath
-    : "bun";
+  // #204 preview.6 — switch from Stdio to **Http** MCP variant. Vincent UAT
+  // preview.2 → preview.5 chain showed the Stdio path keeps producing
+  // "serde error expected value at line 1 column 2" — Grok ACP's reader of
+  // the MCP subprocess stdout encounters non-JSON-RPC bytes even after we
+  // exhausted: clean source (no console.log), absolute paths (no cwd
+  // confusion), quietening env (no banner), fresh node-server.js
+  // (no stale copy). At that point switching transport is cheaper than
+  // continuing to chase phantom stdout bytes.
+  //
+  // commhub-server already exposes the MCP protocol over Streamable HTTP at
+  // `${COMMHUB_URL}/mcp` (server/src/index.ts:433) AND derives the calling
+  // alias from the ntok's tokenName (`node:<alias>` → callerAlias,
+  // server/src/index.ts:446). This means: Grok talks HTTP MCP directly to
+  // the hub with the node's ntok in `Authorization: Bearer <ntok>`, and
+  // the hub automatically attributes outbound send_task `from_session` to
+  // the right alias. NO subprocess, NO framing risk, NO PATH issue.
+  // Schema source: @zed-industries/agent-client-protocol@0.4.5
+  // schema/schema.json → $defs.McpServer.anyOf[Http]. Required fields:
+  // type:"http", name, url, headers ([{name,value}] array).
+  const headers: Array<{ name: string; value: string }> = [];
+  if (AUTH_TOKEN) headers.push({ name: "Authorization", value: `Bearer ${AUTH_TOKEN}` });
+  // Future-proofing: tag the call so commhub-server can log/route ACP-
+  // injected traffic distinctly if needed. Harmless extra header today.
+  headers.push({ name: "X-Commhub-MCP-Transport", value: "acp-http" });
+  if (ALIAS) headers.push({ name: "X-Commhub-Alias-Hint", value: ALIAS });
   const grokMcpServers = [{
+    type: "http" as const,
     name: "commhub",
-    command: _bunPath,
-    args: [_serverPath],
-    env: commhubMcpEnv,
+    url: `${COMMHUB_URL}/mcp`,
+    headers,
   }];
   const runOnce = async (sessionId?: string, label = "primary") => {
     const t0 = Date.now();
