@@ -102,6 +102,8 @@ When an agent node runs the `claude-agent-sdk` runtime it needs vendor API keys 
 
 **`anet node create` automatically uses envRef**: after [#125](https://github.com/sleep2agi/agent-network/issues/125), `saveCreatedNode` runs `rewritePlainSecretsToEnvRef()` before writing config.json — new nodes **never persist plain secrets**; the original value is dropped into the current shell's `process.env` (so the immediate spawn works) and `export NAME='value'` lines are printed for the user to persist into `~/.bashrc` or a secrets manager.
 
+**Since v0.10.10 — envRef Option A wizard auto-source ([#193](https://github.com/sleep2agi/agent-network/issues/193))**: in addition to the `process.env` + printed `export` behavior above, `anet node create` **also** writes the API key to `.anet/nodes/<alias>/.env` (mode 0600, auto-added to `.anet/.gitignore`). When you run `anet node start <alias>` from the same shell, the `.env` is sourced automatically before launch — **no manual `export ANTHROPIC_AUTH_TOKEN_N_<id>=...` and no copy into `~/.bashrc` needed**. Cross-machine deployment still requires copying once (the wizard still prints an `export` line for that). See [cli.md `anet node create`](/en/guide/cli#anet-node-create) — the envRef wizard auto-source ::: tip block.
+
 **Migrating existing nodes**:
 
 ```bash

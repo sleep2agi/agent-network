@@ -102,6 +102,8 @@ agent node 跑 `claude-agent-sdk` runtime 时需要厂商 API key（`ANTHROPIC_A
 
 **`anet node create` 自动用 envRef**：[#125](https://github.com/sleep2agi/agent-network/issues/125) 之后，`saveCreatedNode` 前会跑 `rewritePlainSecretsToEnvRef()` —— 新建节点的 vendor secret **永不持久化明文**，原值临时塞进当前 shell `process.env`（spawn 直接拿）+ print `export NAME='value'` 让你自己抄进 `~/.bashrc` 或 secrets manager。
 
+**v0.10.10 起 envRef Option A wizard 自动衔接（[#193](https://github.com/sleep2agi/agent-network/issues/193)）**：除了上面 `process.env` + print export 行为，`anet node create` **额外**把 API key 写入 `.anet/nodes/<alias>/.env`（mode 0600，自动加入 `.anet/.gitignore`）。同一 shell 跑 `anet node start <alias>` 时启动前自动 source 该 `.env`，**无需手动 `export ANTHROPIC_AUTH_TOKEN_N_<id>=...` 也无需抄到 `~/.bashrc`**。跨机部署仍需手动 copy 一次（`anet node create` 也会 print 一次 export 命令供 copy）。详见 [cli.md `anet node create`](/guide/cli#anet-node-create) ::: tip envRef wizard 自动衔接段。
+
 **已有节点一键迁**：
 
 ```bash
