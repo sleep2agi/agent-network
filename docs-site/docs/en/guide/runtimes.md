@@ -80,7 +80,7 @@ anet node start  →  spawn the local `claude` binary subprocess
 - On `anet node start` the anet CLI writes a `.mcp.json` into cwd ([`agent-network/bin/cli.ts:1898 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1898)) and then spawns the `claude` binary
 - The claude binary follows `.mcp.json` and starts a local bun MCP server (`.anet/node-server.js`, [source](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/node-server.ts) — uses `StdioServerTransport`)
 - That local MCP server forwards commhub tool calls to CommHub `/mcp` over HTTP internally
-- Full 3-runtime MCP path comparison + tool-name namespace differences: see [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0)
+- Full 4-runtime MCP path comparison + tool-name namespace differences: see [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0)
 
 ### When to pick
 
@@ -171,7 +171,7 @@ anet node start  →  spawn agent-node subprocess
 - The agent-node process drives the SDK to call any Anthropic-compatible API
 - Override the base URL with `ANTHROPIC_BASE_URL` to redirect to any compatible provider
 - `settingSources: []` fully isolates the agent from your local `~/.claude/` config
-- The LLM sees the SDK-namespaced commhub tool name **`mcp__commhub__send_task`** etc. (single `commhub` prefix; not the binary HTTP MCP path) — full 3-runtime MCP comparison: [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0)
+- The LLM sees the SDK-namespaced commhub tool name **`mcp__commhub__send_task`** etc. (single `commhub` prefix; not the binary HTTP MCP path) — full 4-runtime MCP comparison: [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0)
 - The vendor adapter (e.g. the InternLM system-prompt bias) is injected at this layer — see [Vendor Adapters](/en/concepts/vendor-adapters)
 
 ### When to pick
