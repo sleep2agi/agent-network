@@ -36,8 +36,8 @@ graph TB
     SQL --> AUDIT
 ```
 
-::: info Actually shipped vs design goal (v0.10.10)
-The diagram above represents the **design goal**. Current v0.10.10 reality:
+::: info Actually shipped vs design goal (v0.10.11)
+The diagram above represents the **design goal**. Current v0.10.11 reality:
 
 - ✅ **Shipped**: Rate limiting / token auth (utok_/ntok_/atok_) / CORS / 4-tier RBAC / network isolation (server-enforced) / SQL-injection guards / SHA-256 password hashing / audit log / task event log
 - ⏳ **Not fully enforced**: Token Scope (`api_tokens.scope` column exists and [`auth.ts:73-137`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L73) `createToken` writes different scope values per token type, but [`auth.ts:143-165 resolveToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L143) **does not return `scope` in its result** — RBAC decisions don't consume the written scope; security report **R12** was not addressed in v0.9.x or any v0.10.x scope (Recovery & Observability / Direct Runtime + Observability Foundations / Hero A+D / subsequent UX-fix chain themes took priority), queued for v0.11+ / unscheduled — see [security audit](https://github.com/sleep2agi/agent-network/blob/main/docs/open-source-security-risk-report.md))
