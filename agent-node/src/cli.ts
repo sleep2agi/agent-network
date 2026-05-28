@@ -1394,7 +1394,42 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
     });
     const dt = Date.now() - t0;
     log(`[grok] done ${label} | ${dt}ms | session=${result.sessionId.slice(0, 8)} | chunks=${result.state.chunks} replay_skipped=${result.state.skippedReplay}`);
-    return sanitizeGrokCommhubLeak(result.replyText.trim() || "（无回复）");
+    let replyText = sanitizeGrokCommhubLeak(result.replyText.trim() || "（无回复）");
+
+    // #205 Step 2 — post-turn artifact extraction. Grok's `video_gen` tool
+    // writes mp4 files to `~/.grok/sessions/<encoded-cwd>/<sessId>/videos/`
+    // with mode 0600 (session-private). Copy each new mp4 into the per-node
+    // artifacts dir (cwd-relative, mode 0644) so receivers can reach it,
+    // and append a trailer to the reply text listing what was generated.
+    // Idempotent across re-runs of the same Grok turn (deterministic dst
+    // names; existsSync skips re-copy).
+    try {
+      const { extractGrokArtifacts, formatArtifactTrailer } =
+        await import("./grok-artifact-extractor");
+      const { homedir: _grokHomedir } = await import("os");
+      const _grokSessId = result.sessionId;
+      // Grok stores sessions at `~/.grok/sessions/<encodeURIComponent(cwd)>/<sessId>/`.
+      // We passed `grokCwd` (#204 preview.7 isolated cwd) to ACP, so that is
+      // the cwd Grok encoded into the session path.
+      const _grokSessionDir = _grokSessId
+        ? _grokHomedir() + "/.grok/sessions/" + encodeURIComponent(grokCwd) + "/" + _grokSessId
+        : undefined;
+      const _extracted = extractGrokArtifacts({
+        nodeKey: NODE_ID || ALIAS || "default",
+        userCwd: process.cwd(),
+        grokSessionDir: _grokSessionDir,
+      });
+      if (_extracted.error) {
+        warn(`[grok] #205 artifact extract: ${_extracted.error}`);
+      } else if (_extracted.artifacts.length > 0) {
+        log(`[grok] #205 extracted ${_extracted.artifacts.length} artifact(s) to .anet/nodes/${NODE_ID || ALIAS}/artifacts/`);
+        replyText = replyText + "\n" + formatArtifactTrailer(_extracted.artifacts);
+      }
+    } catch (e: any) {
+      warn(`[grok] #205 artifact extract step skipped: ${e?.message || e}`);
+    }
+
+    return replyText;
   };
 
   const firstSessionId = grokSessionId || SESSION_ID || undefined;
