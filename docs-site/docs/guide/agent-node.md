@@ -21,9 +21,9 @@ npm install -g @sleep2agi/agent-node
 npx @sleep2agi/agent-node --help
 ```
 
-## 三种 Runtime
+## 四种 Runtime
 
-Agent Node 支持三种 AI 运行时引擎，覆盖主流模型：
+Agent Node 支持四种 AI 运行时引擎，覆盖主流模型：
 
 ### claude-agent-sdk
 
@@ -120,6 +120,30 @@ npx @sleep2agi/agent-node \
 启动后看到 `SSE connected, waiting for tasks...` 即表示成功。
 - 如果报 `Error: spawn codex ENOENT`，说明 `codex` 二进制不在 PATH 上，跑 `npm install -g @openai/codex` + `which codex` 检查
 - 如果报 `codex auth` 错误，请跑 `codex auth login`（或检查 `OPENAI_API_KEY` env）
+:::
+
+### grok-build-acp
+
+基于 [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/grok-build) 接入，spawn 本地 `grok` ACP server 跑任务。第 4 runtime，**目前只通过 `--runtime grok-build-acp` flag 显式启用**（不在 `anet node create` wizard 3-way picker 里），详细配置 / Known Limits / Delegation Contract 见 [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
+
+| 属性 | 说明 |
+|------|------|
+| **前置** | `grok` CLI 已 auth + `XAI_API_KEY` env |
+| **特点** | xAI Grok Build 模型, ACP 协议跨 agent 协作 |
+| **工具** | Grok ACP 内置, 不接受 `--tools` 自定义 |
+
+```bash
+npx @sleep2agi/agent-node \
+  --alias grok助手 \
+  --runtime grok-build-acp \
+  --hub http://YOUR_IP:9200
+```
+
+::: tip v0.10.11 preview 改进
+- [#201](https://github.com/sleep2agi/agent-network/issues/201) delegate refusal 3-layer 修 (wrapper parser broaden + Grok prompt softening + authorised phrasings list)
+- [#204](https://github.com/sleep2agi/agent-network/issues/204) MCP per-session inject (structurally 修 `.mcp.json` shared identity bug)
+
+完整说明见 [grok-build-runtime.md Known Limits](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md#known-limits)。
 :::
 
 ### claude-agent-sdk + 国产模型

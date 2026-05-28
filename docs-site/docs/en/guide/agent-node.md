@@ -23,7 +23,7 @@ npx @sleep2agi/agent-node --help
 
 ## Runtimes
 
-Agent Node supports three AI runtime engines covering all major models:
+Agent Node supports four AI runtime engines covering all major models:
 
 ### claude-agent-sdk
 
@@ -120,6 +120,30 @@ npx @sleep2agi/agent-node \
 After starting, you should see `SSE connected, waiting for tasks...`.
 - If you get `Error: spawn codex ENOENT`, the `codex` binary isn't on PATH — run `npm install -g @openai/codex` + check `which codex`
 - If you get a `codex auth` error, run `codex auth login` (or check the `OPENAI_API_KEY` env)
+:::
+
+### grok-build-acp
+
+Integrates with [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/grok-build) by spawning the local `grok` ACP server. This is the 4th runtime — **currently only enabled via the explicit `--runtime grok-build-acp` flag** (not yet in the `anet node create` wizard 3-way picker). Full configuration / Known Limits / Delegation Contract: [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md).
+
+| Field | Description |
+|------|------|
+| **Prerequisites** | `grok` CLI already authenticated + `XAI_API_KEY` env |
+| **Strengths** | xAI Grok Build models, ACP-protocol cross-agent collaboration |
+| **Tools** | Bundled with Grok ACP, **does not accept `--tools`** |
+
+```bash
+npx @sleep2agi/agent-node \
+  --alias grok-helper \
+  --runtime grok-build-acp \
+  --hub http://YOUR_IP:9200
+```
+
+::: tip v0.10.11 preview improvements
+- [#201](https://github.com/sleep2agi/agent-network/issues/201) 3-layer fix for delegate refusal (wrapper parser broaden + Grok prompt softening + authorised phrasings list)
+- [#204](https://github.com/sleep2agi/agent-network/issues/204) Per-session MCP inject (structurally fixes the `.mcp.json` shared-identity bug)
+
+See [grok-build-runtime.md Known Limits](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md#known-limits) for the full breakdown.
 :::
 
 ### claude-agent-sdk + Domestic Models
