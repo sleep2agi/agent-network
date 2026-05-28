@@ -29,7 +29,7 @@ curl http://localhost:9200/health
 ```json
 {
   "ok": true,
-  "version": "0.8.0",
+  "version": "0.8.4",
   "api_version": "v3",
   "transport": "streamable-http",
   "sessions_count": 0,
