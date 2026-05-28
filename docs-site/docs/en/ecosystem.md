@@ -9,6 +9,7 @@ Projects built on Agent Network, or projects that use Agent Network as their pro
 | 🌀 [**Agent Network**](https://github.com/sleep2agi/agent-network) | The very project you're reading about — **dogfood**: agent-network is itself developed using agent-network | claude-code-cli + Codex agents mesh-collaborate to ship code, docs, tests, graphics |
 | 📑 [**PaperScope.ai**](https://paperscope.ai) | Discover and understand AI research papers through an intelligent platform | Agent pipeline for fetching, summarizing, and tagging papers |
 | 📊 [**AI Insight**](https://ai-insight.org) | Daily AI industry intelligence — research reports + signal-rich aggregator (LLMs, Agents, frontier tech) | "AI Agent army" produces daily content, anet orchestrates the workflow |
+| 🚀 [**BlueLeap Pro**](https://blueleap.pro) | AI education and tools platform — courses, skills marketplace, and hands-on services for the AGI era | Course instruction and multi-agent demo references for hands-on AI Agent workflows |
 
 ## Want to be listed?
 

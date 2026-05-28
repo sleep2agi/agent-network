@@ -9,6 +9,7 @@
 | 🌀 [**Agent Network**](https://github.com/sleep2agi/agent-network) | 你现在看的这个项目本身 —— **dogfood**：agent-network 也是用 agent-network 开发的 | claude-code-cli + Codex 多 Agent mesh 协作迭代代码、写文档、跑测试、出图 |
 | 📑 [**PaperScope.ai**](https://paperscope.ai) | 智能 AI 论文发现与解读平台，让学术内容更易探索 | Agent 抓取 / 解读 / 摘要 / 标签流水线 |
 | 📊 [**AI Insight**](https://ai-insight.org) | 每日更新的 AI 行业研报与高信噪比资讯聚合（大模型 / Agent / 前沿技术） | "AI Agent 军团" 驱动每日内容生产，agent-network 做编排 |
+| 🚀 [**蓝色跃迁 BlueLeap Pro**](https://blueleap.pro) | AI 教育与工具平台 —— AGI 时代课程、技能商城与实战服务 | 课程教学与 AI Agent 实战 demo 多 Agent 编排参考 |
 
 ## 想加进来？
 
