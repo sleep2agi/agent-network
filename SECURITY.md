@@ -1,6 +1,6 @@
 # Security Policy
 
-> **Status (2026-05-27):** Agent Network is at **v0.10.10 stable** (Apache 2.0; project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases) at v0.8.1; v0.10.10 shipped 2026-05-27 via npm `latest` tag).
+> **Status (2026-05-28):** Agent Network is at **v0.10.11 stable** (Apache 2.0; project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases) at v0.8.1; v0.10.11 shipped 2026-05-28 via npm `latest` tag — #204 grok-build-acp per-node identity isolation + #194 commhub broadcast sender attribution hotfix).
 > The full open-source security audit is at [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md).
 > All P0 items from that report were addressed in **v0.8.0 / v0.8.1**. Remaining roadmap items
 > (Argon2id, signed releases, etc.) are tracked in the [Hardening Roadmap](#hardening-roadmap) below.

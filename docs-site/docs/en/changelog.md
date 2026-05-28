@@ -4,9 +4,71 @@
 This log runs reverse-chronologically. **The version scheme was reshuffled once**:
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
-- **Current stable**: v0.10.10 (2026-05-27, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
+- **Current stable**: v0.10.11 (2026-05-28, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
+
+## v0.10.11 — **#204 grok-build-acp per-node identity isolation + #194 commhub broadcast attribution hotfix** (2026-05-28) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-network@2.2.10` ← bumped (`anet hub stop` / `anet hub status` subcommands [#200](https://github.com/sleep2agi/agent-network/issues/200) + `anet hub start` stderr inherit [#199](https://github.com/sleep2agi/agent-network/issues/199) silent-hang fix + PINNED commhub-server `0.8.3` → `0.8.4`)
+- `@sleep2agi/agent-node@2.4.7` ← bumped ([#204](https://github.com/sleep2agi/agent-network/issues/204) grok-build-acp per-node `.anet/nodes/<alias>/runtime-cwd/` isolation + [#201](https://github.com/sleep2agi/agent-network/issues/201) Grok delegate parser 3-layer broaden)
+- `@sleep2agi/commhub-server@0.8.4` ← bumped ([#194](https://github.com/sleep2agi/agent-network/issues/194) broadcast `channel_meta_json` sender attribution hotfix — `from_session` injection no longer overrides the real LLM agent alias)
+- `@sleep2agi/agent-network-dashboard@0.5.6` ← unchanged
+
+### 🌟 Highlights
+
+#### [#204](https://github.com/sleep2agi/agent-network/issues/204) — grok-build-acp per-node isolated cwd
+
+**Problem**: `grok-build-acp` runtime nodes shared the `.mcp.json` discovery path, causing stale `.mcp.json` identity pollution — if a node's working directory carried an old `.mcp.json`, a newly started Grok node would be misidentified as that prior node.
+
+**Fix**: Every node forks an isolated cwd (`.anet/nodes/<alias>/runtime-cwd/`), decoupled from the discovery path. This eliminates stale `.mcp.json` interference.
+
+**E2E verification**: cross-node dispatch on the `grok测试6` real node — channel sender attribution correctly attributed to `grok测试6`, proving the LLM-layer attribution path is uncontaminated.
+
+#### [#194](https://github.com/sleep2agi/agent-network/issues/194) — commhub broadcast sender attribution hotfix
+
+**Problem**: On cross-node broadcast, the `channel_meta_json` sender field went through the `from_session` injection path, which overrode the real LLM agent name.
+
+**Fix**: commhub-server `0.8.4` corrects the from-name injection logic to preserve the real sender alias.
+
+### 🐛 Bugs Fixed
+
+- [#199](https://github.com/sleep2agi/agent-network/issues/199) — `anet hub start` silent-hang fix: `spawn` `stdio` changed from `"pipe"` to `"inherit"` — commhub-server bunx fetch failures are now immediately visible.
+- [#200](https://github.com/sleep2agi/agent-network/issues/200) — `anet hub stop` / `anet hub status` subcommands: users no longer need manual `lsof + kill`. Now `anet hub stop [--port <p>]` (SIGTERM → 3s grace → SIGKILL) + `anet hub status` (PID + port + `/health` version).
+- [#201](https://github.com/sleep2agi/agent-network/issues/201) — Grok runtime refusing to delegate: explicit delegation parser 3-layer wrapper broaden + prompt softening covers all cases.
+
+### 📦 Install (fresh install)
+
+```bash
+npm i -g @sleep2agi/agent-network@latest
+# Verify version
+anet -v  # Should show v2.2.10
+```
+
+`anet hub start` auto-fetches `commhub-server@0.8.4` (PINNED) + the first node start auto-fetches `agent-node@2.4.7`.
+
+### 🔄 Upgrade (existing users)
+
+```bash
+anet upgrade
+# Or manually
+npm i -g @sleep2agi/agent-network@latest
+```
+
+`anet upgrade` syncs agent-network + agent-node + commhub-server to the latest `latest` versions.
+
+### 🙏 Credits
+
+- Design + lead review: 通信龙
+- agent-node #204 fix: 通信SDK马
+- agent-network release ops + commhub-server promote: 通信工程马
+- Testing + docs: 通信测试马 / 通信文档马
+- E2E verification: `grok测试6` real node (LLM E2E attribution proof)
+
+**Full Changelog**: <https://github.com/sleep2agi/agent-network/compare/v0.10.10...v0.10.11>
+
+---
 
 ## v0.10.10 — **Xiaomi MiMo full 5-model support + envRef wizard-to-start auto-link** (2026-05-27) ✅ stable
 

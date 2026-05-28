@@ -4,9 +4,71 @@
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
-- **当前 stable**：v0.10.10（2026-05-27，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
+- **当前 stable**：v0.10.11（2026-05-28，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
+
+## v0.10.11 — **#204 grok-build-acp 节点身份隔离 + #194 commhub broadcast 归属 hotfix**（2026-05-28）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-network@2.2.10` ← bumped（`anet hub stop` / `anet hub status` 子命令 [#200](https://github.com/sleep2agi/agent-network/issues/200) + `anet hub start` stderr inherit [#199](https://github.com/sleep2agi/agent-network/issues/199) 静默挂修 + PINNED commhub-server `0.8.3` → `0.8.4`）
+- `@sleep2agi/agent-node@2.4.7` ← bumped（[#204](https://github.com/sleep2agi/agent-network/issues/204) grok-build-acp per-node `.anet/nodes/<alias>/runtime-cwd/` 隔离 + [#201](https://github.com/sleep2agi/agent-network/issues/201) Grok delegate parser 3-layer broaden）
+- `@sleep2agi/commhub-server@0.8.4` ← bumped（[#194](https://github.com/sleep2agi/agent-network/issues/194) broadcast `channel_meta_json` sender 归属 hotfix —— `from_session` 注入不再覆盖真实 LLM agent alias）
+- `@sleep2agi/agent-network-dashboard@0.5.6` ← unchanged
+
+### 🌟 Highlights
+
+#### [#204](https://github.com/sleep2agi/agent-network/issues/204) — grok-build-acp per-node isolated cwd
+
+**问题**：`grok-build-acp` runtime 节点共享 `.mcp.json` 发现路径，导致 stale `.mcp.json` identity pollution —— 一个节点的工作目录里如果存在旧的 `.mcp.json`，新启的 grok 节点会被误认成那个旧节点的身份。
+
+**修复**：每个节点 fork 独立 cwd（`.anet/nodes/<alias>/runtime-cwd/`），与发现路径解耦，彻底解决 stale `.mcp.json` 干扰。
+
+**E2E 验证**：在 `grok测试6` 真节点跑通跨节点 dispatch —— channel sender attribution 正确归属到 `grok测试6`，证实 LLM 层 attribution 链路无污染。
+
+#### [#194](https://github.com/sleep2agi/agent-network/issues/194) — commhub broadcast 发送者归属 hotfix
+
+**问题**：跨节点 broadcast 时 `channel_meta_json` 的 sender 字段经过 `from_session` 注入路径，导致 real LLM agent 名字被覆盖。
+
+**修复**：commhub-server `0.8.4` 修正 from-name 注入逻辑，保留真实 sender alias。
+
+### 🐛 Bugs Fixed
+
+- [#199](https://github.com/sleep2agi/agent-network/issues/199) — `anet hub start` 静默挂修：`spawn` 的 `stdio` 从 `"pipe"` 改为 `"inherit"`，commhub-server bunx fetch 失败时立即可见错误
+- [#200](https://github.com/sleep2agi/agent-network/issues/200) — `anet hub stop` / `anet hub status` 子命令补全：之前用户需手动 `lsof + kill`；现在 `anet hub stop [--port <p>]`（SIGTERM → 3s grace → SIGKILL）+ `anet hub status`（PID + port + `/health` version）
+- [#201](https://github.com/sleep2agi/agent-network/issues/201) — Grok runtime 拒绝 delegate：explicit delegation parser 3-layer wrapper broaden + prompt softening 全 case 覆盖
+
+### 📦 Install（全新安装）
+
+```bash
+npm i -g @sleep2agi/agent-network@latest
+# 验证版本
+anet -v  # 应显示 v2.2.10
+```
+
+`anet hub start` 会自动拉取 `commhub-server@0.8.4` (PINNED) + 首次 node 启动会自动拉取 `agent-node@2.4.7`。
+
+### 🔄 Upgrade（老用户升级）
+
+```bash
+anet upgrade
+# 或手动
+npm i -g @sleep2agi/agent-network@latest
+```
+
+`anet upgrade` 会同步 agent-network + agent-node + commhub-server 到最新 latest 版。
+
+### 🙏 Credits
+
+- 设计 + lead review: 通信龙
+- agent-node #204 fix: 通信SDK马
+- agent-network release ops + commhub-server promote: 通信工程马
+- 测试 + docs: 通信测试马 / 通信文档马
+- E2E 验证: `grok测试6` 真节点 (LLM E2E attribution proof)
+
+**Full Changelog**: <https://github.com/sleep2agi/agent-network/compare/v0.10.10...v0.10.11>
+
+---
 
 ## v0.10.10 — **小米 MiMo 5 模型完整支持 + envRef wizard-to-start 自动衔接**（2026-05-27）✅ stable
 
