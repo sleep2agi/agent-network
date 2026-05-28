@@ -315,8 +315,33 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 When enabled, agent-node runs `spawn('codex', ['app-server'])` and talks the full 67-method v2 protocol (thread / turn / item / realtime), **sidestepping** the `@openai/codex-sdk` `--mcp-config` HTTP-transport bug family ([#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause), and no longer being held hostage by codex-sdk breaking changes.
 
-**v0.10.x (including the current v0.10.10 stable) still defaults to the `@openai/codex-sdk` wrapper path** (collecting preview feedback first, preserving backward compatibility); v0.11.0 plans to flip the default to the direct stdio path, with the wrapper path moving into a deprecation warning. Full background in the [v0.10.0 release notes](/en/preview/v0.10.0#new-runtime-path-codex-direct-stdio).
+**v0.10.x (including the current v0.10.11 stable) still defaults to the `@openai/codex-sdk` wrapper path** (collecting preview feedback first, preserving backward compatibility); v0.11.0 plans to flip the default to the direct stdio path, with the wrapper path moving into a deprecation warning. Full background in the [v0.10.0 release notes](/en/preview/v0.10.0#new-runtime-path-codex-direct-stdio).
 :::
+
+---
+
+## grok-build-acp
+
+Run agents via [xAI Grok Build](https://x.ai/grok)'s local CLI — the node spawns a local `grok agent stdio` process and talks the Agent Client Protocol (ACP), reusing your host's Grok login. **Formally onboarded in v0.10.8**; **v0.10.11 latest** ([#204](https://github.com/sleep2agi/agent-network/issues/204)) adds per-node isolated cwd to eliminate multi-node identity pollution.
+
+### Prerequisites
+
+- `grok` CLI installed and `grok auth login` completed on the host
+- `XAI_API_KEY` environment variable set
+- `agent-network ≥ 2.2.10` (v0.10.11 latest) + `agent-node ≥ 2.4.7`
+
+### Start a node
+
+```bash
+anet node create my-grok --runtime grok-build-acp
+anet node start my-grok
+```
+
+### See also
+
+- [`grok-build-runtime.md` full runtime guide](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md) — Known Limits + debug + preview chain
+- [agent-node § grok-build-acp tip](/en/guide/agent-node) — v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) per-node isolated cwd details
+- [architecture § Debug tip](/en/guide/architecture) — runtime debug entry point
 
 ---
 
