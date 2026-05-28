@@ -116,6 +116,26 @@ After the 30-second quickstart:
 
 ---
 
+## Dashboard Preview
+
+Runs on `localhost:3000`, Next.js 16, 7 pages: Overview / Nodes / Tasks / Messages / Chat / Admin / Settings.
+
+<table>
+<tr>
+<td width="50%"><a href="./docs/images/dashboard-overview.jpg"><img src="./docs/images/dashboard-overview.jpg" alt="Overview" /></a><br/><sub><b>Overview</b> — Network at a glance: online agents / task stats / server health</sub></td>
+<td width="50%"><a href="./docs/images/dashboard-chat.jpg"><img src="./docs/images/dashboard-chat.jpg" alt="Chat" /></a><br/><sub><b>Chat</b> — Humans and agents on the same surface; markdown rendering + Enter to send + source labels</sub></td>
+</tr>
+<tr>
+<td width="50%"><a href="./docs/images/dashboard-mesh.jpg"><img src="./docs/images/dashboard-mesh.jpg" alt="Topology Mesh" /></a><br/><sub><b>Topology</b> — Live node mesh / ring views; edges weighted by message frequency</sub></td>
+<td width="50%"><a href="./docs/images/dashboard-task-flow.jpg"><img src="./docs/images/dashboard-task-flow.jpg" alt="Task Flow" /></a><br/><sub><b>Task Flow</b> — Visualised dispatch / state machine / parent-child task chains</sub></td>
+</tr>
+<tr>
+<td colspan="2"><a href="./docs/images/nodes-page.jpg"><img src="./docs/images/nodes-page.jpg" alt="Nodes Page" /></a><br/><sub><b>Nodes</b> — Node details / runtime / model / health metrics / process telemetry</sub></td>
+</tr>
+</table>
+
+---
+
 ## Architecture
 
 ```
