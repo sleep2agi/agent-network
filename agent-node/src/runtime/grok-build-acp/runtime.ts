@@ -9,15 +9,28 @@ import type { GrokAcpNotification, GrokTurnState } from "./events";
 // outbound send_task as the *old* node). Caller now injects an explicit
 // commhub entry per-session, sourced from the current node's identity, so
 // stale-file env can't leak in.
-export interface AcpMcpServerEntry {
+//
+// preview.3 schema correction (#204 regression): McpServer is an untagged
+// serde enum with three variants — Stdio / Http / Sse. The Stdio variant
+// has NO `type` discriminator field and uses `env: [{name,value}]` (array
+// of EnvVariable, not key→value object). preview.2 wrongly used the
+// .mcp.json file format shape (with `type: "stdio"` + object env), which
+// failed Grok's serde untagged-enum validation with `-32602 Invalid params
+// / data did not match any variant of untagged enum McpServer`. Schema
+// reference: @zed-industries/agent-client-protocol@0.4.5
+// schema/schema.json → $defs.McpServer.anyOf[Stdio].
+export interface AcpEnvVariable {
   name: string;
-  // ACP wants the spawn shape (stdio); these mirror the `.mcp.json` schema.
+  value: string;
+}
+export interface AcpMcpServerEntry {
+  // Stdio variant fields (the ones Grok currently accepts via stdio MCP).
+  // `name`, `command`, `args`, and `env` are all required by the ACP schema
+  // — `args` and `env` MUST be present even if empty arrays.
+  name: string;
   command: string;
-  args?: string[];
-  env?: Record<string, string>;
-  // `type: "stdio"` is implied by command/args presence; included explicitly
-  // for forward-compat in case ACP starts requiring a discriminator.
-  type?: "stdio" | "http" | "sse";
+  args: string[];
+  env: AcpEnvVariable[];
 }
 
 export interface GrokAcpTurnOptions {

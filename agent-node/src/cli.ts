@@ -1292,16 +1292,25 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   // the cwd `.mcp.json`, which was Vincent's #204 UAT root cause — the
   // file persists `COMMHUB_ALIAS=<old node>` from a previous `anet node
   // start` and never refreshes, so every new grok-build-acp node mis-
-  // attributed outbound send_task. Stale-file env is now structurally
-  // impossible for this runtime.
-  const commhubMcpEnv: Record<string, string> = {};
-  if (ALIAS) commhubMcpEnv.COMMHUB_ALIAS = ALIAS;
-  if (AUTH_TOKEN) commhubMcpEnv.COMMHUB_TOKEN = AUTH_TOKEN;
-  if (COMMHUB_URL) commhubMcpEnv.COMMHUB_URL = COMMHUB_URL;
-  if (RESUME_ID) commhubMcpEnv.COMMHUB_RESUME_ID = RESUME_ID;
+  // attributed outbound send_task.
+  //
+  // preview.3 schema correction (#204 regression catch): the ACP `McpServer`
+  // type is a serde *untagged* enum with three variants (Stdio / Http /
+  // Sse). The Stdio variant — which is what Grok currently uses for
+  // local-process MCP servers — has NO `type` discriminator field and
+  // requires `env` as an array of `{name, value}` EnvVariable entries
+  // (NOT a key→value object). preview.2 mirrored the .mcp.json file
+  // format shape, which fails Grok's `-32602 Invalid params /
+  // McpServer untagged enum` validation. Schema source:
+  // @zed-industries/agent-client-protocol@0.4.5 schema/schema.json
+  // → $defs.McpServer.anyOf[Stdio].
+  const commhubMcpEnv: Array<{ name: string; value: string }> = [];
+  if (ALIAS) commhubMcpEnv.push({ name: "COMMHUB_ALIAS", value: ALIAS });
+  if (AUTH_TOKEN) commhubMcpEnv.push({ name: "COMMHUB_TOKEN", value: AUTH_TOKEN });
+  if (COMMHUB_URL) commhubMcpEnv.push({ name: "COMMHUB_URL", value: COMMHUB_URL });
+  if (RESUME_ID) commhubMcpEnv.push({ name: "COMMHUB_RESUME_ID", value: RESUME_ID });
   const grokMcpServers = [{
     name: "commhub",
-    type: "stdio" as const,
     command: "bun",
     args: [".anet/node-server.js"],
     env: commhubMcpEnv,
