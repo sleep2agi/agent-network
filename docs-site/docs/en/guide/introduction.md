@@ -153,7 +153,7 @@ The Dashboard shows who's doing what, communication links, and task progress in 
 ## Tech Stack
 
 - **Server**: Bun + SQLite WAL + MCP SDK
-- **Agent**: 3 runtimes — `claude-code-cli` / `claude-agent-sdk` / `codex-sdk`
+- **Agent**: 4 runtimes — `claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp` ([see Node Runtime](/en/guide/runtimes))
 - **CLI**: TypeScript (hand-rolled command dispatch + `@inquirer/prompts` interactive wizards; no Commander or similar framework)
 - **Dashboard**: Next.js 16 + Vercel
 - **Protocol**: MCP Streamable HTTP + SSE + REST
