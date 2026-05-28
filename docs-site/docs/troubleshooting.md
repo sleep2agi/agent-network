@@ -15,7 +15,11 @@ Error: connect ECONNREFUSED 127.0.0.1:9200
 **解决**：
 
 ```bash
-# 检查 Server 是否在运行
+# 检查 Server 是否在运行 (v0.10.11+ 推荐, 一行看清 PID + port + /health version)
+anet hub status                # 默认端口 9200
+anet hub status --port 9201    # 非默认端口
+
+# 或老办法 curl /health (老版本兼容)
 curl http://localhost:9200/health
 
 # 如果没有运行，启动 Server
