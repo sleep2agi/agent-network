@@ -335,7 +335,7 @@ graph LR
 
 ### MCP 接入路径（不同 runtime 不同走法，v0.9.0+）
 
-3 个 runtime 给 LLM 暴露 commhub 工具的方式**不同**，对 LLM 看到的工具名 / 排错路径都有影响：
+4 个 runtime 给 LLM 暴露 commhub 工具的方式**不同**，对 LLM 看到的工具名 / 排错路径都有影响：
 
 ```mermaid
 flowchart LR
@@ -355,6 +355,12 @@ flowchart LR
         CODEX_PROC -.- AGENT_NODE[agent-node 父进程<br/>SSE + report_status/get_inbox/send_reply]
         AGENT_NODE -->|"HTTP /mcp"| HUB_MCP3[CommHub<br/>POST /mcp]
     end
+
+    subgraph "grok-build-acp"
+        GROK_PROC[Grok ACP server<br/>spawn 子进程]
+        GROK_PROC -->|"session/new w/<br/>mcpServers list 显式注入"| GROK_PROXY[".anet/node-server.js<br/>stdio MCP server"]
+        GROK_PROXY -->|"HTTP forward<br/>tools/call"| HUB_MCP4[CommHub<br/>POST /mcp]
+    end
 ```
 
 **`claude-agent-sdk` 走 in-process SDK MCP**（[#102](https://github.com/sleep2agi/agent-network/issues/102) Option A，agent-node `2.3.5-preview.0+`）：
@@ -370,7 +376,9 @@ flowchart LR
 
 **`codex-sdk` 不直接给 LLM 暴露 commhub 工具**：`codexOpts` 不传 `mcpServers`（[`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)），codex thread 只用 baked-in 工具（Read / Write / Edit / Bash / Glob / Grep / WebSearch）。**多 Agent 派活通过 agent-node 父进程**外部完成：agent-node 维持 SSE + `report_status` / `get_inbox` / `send_reply` 跟 commhub roundtrip，把任务文本喂给 codex thread，再把 codex 回复经 commhub 回上游。codex thread 本身**不知道** commhub 存在 —— 它只是个 LLM 工作器。
 
-> ⚠ Debug tip：LLM 调不到 commhub 工具时先确认 runtime —— `claude-agent-sdk` 节点查 `commhub-mcp.ts` 在不在 dist 里（agent-node ≥ 2.3.5-preview.0）；`claude-code-cli` 节点查 `.mcp.json` 里 commhub 是不是 `type:stdio` + `.anet/node-server.js` 路径正确；`codex-sdk` 节点**直接看 agent-node 父进程日志**（codex thread 不调 commhub）。
+**`grok-build-acp` 走 per-session mcpServers 显式注入**（v0.10.11 preview [#204](https://github.com/sleep2agi/agent-network/issues/204) commit [`4b5a657`](https://github.com/sleep2agi/agent-network/commit/4b5a657)）：agent-node 在每次 `session/new` / `session/load` 显式把 `mcpServers: [{ name: "commhub", command: "bun", args: ["<abs-path>/.anet/node-server.js"], env: { COMMHUB_ALIAS, COMMHUB_TOKEN, COMMHUB_URL, ... } }]` 列表传给 Grok ACP server。Grok spawn `.anet/node-server.js` 作为 stdio MCP subprocess, 跟 `claude-code-cli` 走法类似但**不依赖 cwd `.mcp.json` 文件 fallback**（先前 stale `.mcp.json` 共享 identity bug structurally 修）。tool names 由 `node-server.ts` 内部命名空间决定。
+
+> ⚠ Debug tip：LLM 调不到 commhub 工具时先确认 runtime —— `claude-agent-sdk` 节点查 `commhub-mcp.ts` 在不在 dist 里（agent-node ≥ 2.3.5-preview.0）；`claude-code-cli` 节点查 `.mcp.json` 里 commhub 是不是 `type:stdio` + `.anet/node-server.js` 路径正确；`codex-sdk` 节点**直接看 agent-node 父进程日志**（codex thread 不调 commhub）；`grok-build-acp` 节点查 agent-node 日志 `[grok] commhub MCP server resolved: <abs-path> (...B)` debug 行确认 mcpServers 注入成功（v0.10.11 preview agent-node@2.4.7-preview.X+）。
 
 ### 任务处理流程
 

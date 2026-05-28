@@ -335,7 +335,7 @@ Set `ANET_CODEX_STDIO_DIRECT=1` to make agent-node switch the codex runtime from
 
 ### MCP integration paths (per runtime, v0.9.0+)
 
-The three runtimes expose commhub tools to the LLM via **different** paths — this affects the tool names the LLM sees and how you debug routing problems:
+The four runtimes expose commhub tools to the LLM via **different** paths — this affects the tool names the LLM sees and how you debug routing problems:
 
 ```mermaid
 flowchart LR
@@ -355,6 +355,12 @@ flowchart LR
         CODEX_PROC -.- AGENT_NODE[agent-node parent process<br/>SSE + report_status/get_inbox/send_reply]
         AGENT_NODE -->|"HTTP /mcp"| HUB_MCP3[CommHub<br/>POST /mcp]
     end
+
+    subgraph "grok-build-acp"
+        GROK_PROC[Grok ACP server<br/>spawned subprocess]
+        GROK_PROC -->|"session/new w/<br/>mcpServers list injected"| GROK_PROXY[".anet/node-server.js<br/>stdio MCP server"]
+        GROK_PROXY -->|"HTTP forward<br/>tools/call"| HUB_MCP4[CommHub<br/>POST /mcp]
+    end
 ```
 
 **`claude-agent-sdk` uses in-process SDK MCP** ([#102](https://github.com/sleep2agi/agent-network/issues/102) Option A, agent-node `2.3.5-preview.0+`):
@@ -370,7 +376,9 @@ flowchart LR
 
 **`codex-sdk` does not expose commhub tools to the LLM**: `codexOpts` does not pass `mcpServers` ([`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)). The codex thread only sees its baked-in tools (Read / Write / Edit / Bash / Glob / Grep / WebSearch). **Multi-agent dispatch happens outside the LLM in agent-node's parent process**: agent-node maintains the SSE connection plus `report_status` / `get_inbox` / `send_reply` calls back to CommHub, feeds the task text into the codex thread, and posts the codex reply back via CommHub. The codex thread itself **does not know** commhub exists — it is just an LLM worker.
 
-> ⚠ Debug tip: if the LLM can't call a commhub tool, check the runtime first — for `claude-agent-sdk` nodes, confirm `commhub-mcp.ts` is in dist (agent-node ≥ 2.3.5-preview.0); for `claude-code-cli` nodes, check the `.mcp.json` has `type: stdio` and the `.anet/node-server.js` path is correct; for `codex-sdk` nodes, **look at the agent-node parent process logs** (the codex thread never calls commhub).
+**`grok-build-acp` uses explicit per-session `mcpServers` injection** (v0.10.11 preview [#204](https://github.com/sleep2agi/agent-network/issues/204) commit [`4b5a657`](https://github.com/sleep2agi/agent-network/commit/4b5a657)): on every `session/new` / `session/load`, agent-node explicitly passes a `mcpServers: [{ name: "commhub", command: "bun", args: ["<abs-path>/.anet/node-server.js"], env: { COMMHUB_ALIAS, COMMHUB_TOKEN, COMMHUB_URL, ... } }]` list to the Grok ACP server. Grok then spawns `.anet/node-server.js` as a stdio MCP subprocess — similar to `claude-code-cli`'s path, but **does not fall back to the cwd `.mcp.json` file** (the earlier stale-`.mcp.json` shared-identity bug is structurally fixed). Tool names live in the `node-server.ts` namespace.
+
+> ⚠ Debug tip: if the LLM can't call a commhub tool, check the runtime first — for `claude-agent-sdk` nodes, confirm `commhub-mcp.ts` is in dist (agent-node ≥ 2.3.5-preview.0); for `claude-code-cli` nodes, check the `.mcp.json` has `type: stdio` and the `.anet/node-server.js` path is correct; for `codex-sdk` nodes, **look at the agent-node parent process logs** (the codex thread never calls commhub); for `grok-build-acp` nodes, look for the `[grok] commhub MCP server resolved: <abs-path> (...B)` debug line in the agent-node log to confirm mcpServers injection succeeded (v0.10.11 preview agent-node@2.4.7-preview.X+).
 
 ### Task Processing Flow
 
