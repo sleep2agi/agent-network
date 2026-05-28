@@ -7,6 +7,29 @@
 > **Author**: 通信SDK马
 > **Date**: 2026-05-28
 
+## ⚠ Erratum (2026-05-28, post-SDK-re-audit) — 🟡 NUANCED YES
+
+The original Phase 2 verdict implied "XSearch tool fires 0 times → not supported" — narrow framing that **didn't observe what the LLM actually did.**
+
+**Corrected verdict (SDK live re-audit, commhub `56173df0`)**: 🟡 **NUANCED YES**
+- Grok backend's `XSearch` tool is **still not exposed inside the ACP session** (the original verdict was half-right; the native XSearch path remains sealed).
+- But the LLM **bypasses the ACP isolation via `run_terminal_command`**, invoking pre-existing X-fetching scripts in the user's workspace to retrieve real X data.
+- Trace evidence: web_search × 2 + run_terminal_command × 17 (including `cat ~/.claude/skills/vincent_update-news/SKILL.md`, `head -200 /home/vansin/ai-insight/auto_update_news.js`, `node auto_update_news.js --fetch-only`).
+- Content verification: `curl -I` against the surfaced URLs returns 5/5 real x.com HTTP 200s (Sam Altman / OpenAI / Anthropic / FransBakker9812 / minchoi, etc.).
+
+**Root cause banked (second occurrence of the same pattern)**: the "schema-not-artifact" blind spot — same family as the `video_gen` image-to-video Erratum (R103). The probe only inspected the tool schema surface and missed the LLM agent's actual action chain.
+
+**Key difference vs. image-to-video**:
+- video_gen image-to-video = **anet 0 LOC**, the backend auto-routes once the prompt carries an image URL.
+- X-search informant = **NOT 0 LOC integration** — the user must pre-stage an X API key (twitterapi.io / official X API) and a fetcher script (e.g. `auto_update_news.js`) in the grok node's cwd. The LLM then uses `run_terminal_command` to find and run that script.
+
+**Lessons**:
+1. ACP isolation does not equal "LLM is helpless" — `run_terminal_command` is the escape hatch.
+2. Future capability probes must perform **agent-action-level verification** (run a real LLM turn, observe the tool_call stream), not just ACP schema scans.
+3. Any "0 LOC" claim must be ship-state-qualified (Scenario 2 image-to-video = backend smarts auto-route; Scenario 1 X-search = depends on user workspace setup).
+
+**New scenario coverage**: `scenarios/x-search-informant.md` (ZH+EN) documents the "X search via user-side script" usage, setup prerequisites, and LLM action trace.
+
 ## TL;DR
 
 **Grok CLI natively supports X search** via a built-in `XSearch` tool variant with two backend-served sub-tools (`x_keyword_search` / `x_user_search`). No anet-side MCP is required — the LLM autoregressively decides to call it. anet integration only needs to ensure Grok nodes can run an ACP session normally (#204 preview.7 fix), nothing else.

@@ -7,6 +7,29 @@
 > **作者**: 通信SDK马
 > **日期**: 2026-05-28
 
+## ⚠ Erratum (2026-05-28, post-SDK-re-audit) — 🟡 NUANCED YES
+
+本报告原 Phase 2 verdict 隐含 "XSearch tool 0 次 trigger → 不支持 X 搜索" 范围窄, **错在没看 LLM 实际做了什么**.
+
+**修正 verdict (SDK 实证 commhub `56173df0` re-audit)**: 🟡 **NUANCED YES**
+- Grok backend XSearch tool 仍**不在 ACP session 中暴露** (verdict 半正确, native XSearch 路径仍 sealed)
+- 但 LLM 用 `run_terminal_command` **绕过 ACP isolation**, 调用 user workspace 里已有的 X 抓取脚本拿到真 X 数据
+- 实证 trace: web_search 2 次 + run_terminal_command 17 次 (含 `cat ~/.claude/skills/vincent_update-news/SKILL.md`, `head -200 /home/vansin/ai-insight/auto_update_news.js`, `node auto_update_news.js --fetch-only`)
+- content verification: `curl -I` 5/5 real x.com URLs HTTP 200 (Sam Altman / OpenAI / Anthropic / FransBakker9812 / minchoi 等)
+
+**根因 banked (第二次同模式)**: "schema-not-artifact" 盲区 — 跟 `video_gen` image-to-video 同型 (R103 erratum). probe 只看 tool schema surface 没看 LLM agent 实际 action chain.
+
+**关键差异跟 video_gen image-to-video**:
+- video_gen image-to-video: **anet 0 LOC**, prompt 含 URL 即触发 backend smarts
+- X search informant: **NOT 0 LOC integration** — 需用户预先在 grok 节点 cwd 准备 X API key (twitterapi.io / official X API) + 抓取 script (e.g. `auto_update_news.js`). LLM 会用 `run_terminal_command` 找该 script 跑.
+
+**经验**:
+1. ACP isolation 不等于 LLM 完全无能 — `run_terminal_command` 是兜底通道
+2. 后续 capability probe 必须 **agent-action level 验证** (跑真 LLM turn 看 tool_call 流), 不只 ACP schema scan
+3. "0 LOC" claim 必须 ship-state 区分 (Scenario 2 image-to-video = backend smarts 自动路由; Scenario 1 X-search = 依赖用户 workspace setup)
+
+**新场景覆盖**: `scenarios/x-search-informant.md` (ZH+EN) 文档化 "X search via user-side script" 用法 + setup prerequisites + LLM 行为 trace.
+
 ## TL;DR
 
 **Grok CLI 原生支持 X 搜索**,通过 **`XSearch` tool variant** + 两个 backend-served sub-tool `x_keyword_search` / `x_user_search`。无需 anet 侧补 MCP,LLM 自行触发即可。anet 接入只需保证 **Grok 节点能正常跑 ACP session** (preview.7 已修),不需要额外把搜索能力暴露给 LLM。
