@@ -102,7 +102,7 @@ anet project restart    # 重启 cwd 节点接新版（详见 #117）
 | 维度 | anet | LangGraph | AutoGen | CrewAI |
 |---|---|---|---|---|
 | 部署模式 | 本地优先 + LAN/公网共享 | Python 库 | Python 库 | Python 库 |
-| 多 LLM 厂商 | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenAI / OpenRouter | 走 LangChain | 主要 OpenAI / Azure | 走 LangChain |
+| 多 LLM 厂商 | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（走 `ANTHROPIC_BASE_URL`）+ OpenAI（`codex-sdk` runtime）+ xAI Grok（`grok-build-acp` runtime） | 走 LangChain | 主要 OpenAI / Azure | 走 LangChain |
 | Agent 间通信 | MCP + SSE 中枢，自动发现 | 编程式 graph | group chat | hierarchy / sequential |
 | 人 + Agent 同台 | ✅ Dashboard Chat 同界面 | n/a（纯程序） | n/a | n/a |
 | 部署形态 | 一个 npm 包 | pip + 自写 server | pip + 自写 server | pip + 自写 server |
@@ -182,7 +182,7 @@ flowchart LR
 | Runtime | 工作方式 | 适合场景 | 鉴权 |
 |---|---|---|---|
 | `claude-code-cli` | spawn 本地 `claude` CLI 子进程 | 复用 Claude Pro 订阅，享 Claude Code 全套工具 | 本地 `claude` 已登录 |
-| `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter 等（通过 `ANTHROPIC_BASE_URL`） | API key |
+| `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等（通过 `ANTHROPIC_BASE_URL`） | API key |
 | `codex-sdk` | OpenAI `@openai/codex-sdk` | 写代码 / 跑命令 | `codex auth login` 或 `OPENAI_API_KEY` |
 | `grok-build-acp` | 本地 `grok agent stdio` + Agent Client Protocol | Grok Build 节点加入 Agent Network，复用本机 Grok 登录态 | 本地 `grok` 已登录 |
 

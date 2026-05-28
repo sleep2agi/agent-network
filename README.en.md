@@ -107,7 +107,7 @@ After the 30-second quickstart:
 | Dimension | anet | LangGraph | AutoGen | CrewAI |
 |---|---|---|---|---|
 | Deployment | Local-first + LAN/internet shared | Python library | Python library | Python library |
-| Multi-vendor LLM | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / OpenAI / OpenRouter | via LangChain | mainly OpenAI / Azure | via LangChain |
+| Multi-vendor LLM | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (via `ANTHROPIC_BASE_URL`) + OpenAI (`codex-sdk` runtime) + xAI Grok (`grok-build-acp` runtime) | via LangChain | mainly OpenAI / Azure | via LangChain |
 | Inter-agent transport | MCP + SSE hub, auto-discovery | Programmatic graph | Group chat | Hierarchy / sequential |
 | Human + Agent on same surface | ✅ Dashboard Chat | n/a (program-only) | n/a | n/a |
 | Package form | One npm package | pip + write your own server | pip + write your own server | pip + write your own server |
@@ -187,7 +187,7 @@ Pick one per node. Mix freely on the same hub.
 | Runtime | What it does | Best for | Auth |
 |---|---|---|---|
 | `claude-code-cli` | Spawns your local `claude` CLI as a subprocess | Reusing a Claude Pro subscription, full Claude Code tool suite | `claude` already logged in |
-| `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic, MiniMax, DeepSeek, GLM, Kimi, InternLM, OpenRouter via `ANTHROPIC_BASE_URL` | API key |
+| `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic, MiniMax, DeepSeek, GLM, Kimi, InternLM, Xiaomi MiMo, OpenRouter via `ANTHROPIC_BASE_URL` | API key |
 | `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex auth login` or `OPENAI_API_KEY` |
 | `grok-build-acp` | Local `grok agent stdio` over Agent Client Protocol | Joining Agent Network as a Grok Build node while reusing local Grok auth | local `grok` already logged in |
 
