@@ -105,7 +105,16 @@ anet hub start --port 9201
 
 # Or stop the process using it
 kill <PID>
+
+# v0.10.11 preview adds an `anet hub stop` subcommand ([#200](https://github.com/sleep2agi/agent-network/issues/200), currently in @preview channel)
+# SIGTERM → 3s → SIGKILL fallback; no manual PID lookup needed
+anet hub stop          # default port 9200
+anet hub stop --port 8080
 ```
+
+::: tip Easier from v0.10.11 preview onward
+v0.10.11 preview ([#200](https://github.com/sleep2agi/agent-network/issues/200)) introduces `anet hub stop`, removing the manual `lsof + kill <PID>` step. It'll land in `@latest` for everyone once v0.10.11 is promoted. Preview users can grab it now: `npm i -g @sleep2agi/agent-network@preview`.
+:::
 
 ### 9. Where are the config files?
 
