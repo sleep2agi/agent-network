@@ -311,7 +311,7 @@ Do not commit `.anet/` or provider API keys.
 
 Stable day-to-day path:
 
-- `anet hub start`
+- `anet hub start` / `anet hub stop` / `anet hub status` (v0.10.11+: SIGTERM → 3s grace → SIGKILL stop; status shows PID + port + `/health` version — no more manual `lsof+kill`)
 - `anet hub dashboard`
 - `anet login`
 - `anet node create/start/stop/delete/rename`
