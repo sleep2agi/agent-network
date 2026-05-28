@@ -1,12 +1,12 @@
 # Video Generation — anet × Grok Build Marketing Video Scenario
 
 > **Scenario goal**: Add a video-generation **capability** to anet's `grok-build-acp` runtime nodes — one of the two flagship scenarios under [#205](https://github.com/sleep2agi/agent-network/issues/205) ([#70](https://github.com/sleep2agi/agent-network/issues/70)).
-> **Status**: Step 2 artifact pipeline implementation shipped.
+> **Current scope**: same-machine path readback (per Vincent 6420 directive). Cross-machine distribution is a P2 follow-up.
 > **Owners**: 工程马 (release ops) + 通信SDK马 (agent-node author)
 
 ## One-liner
 
-Wire Grok's native `video_gen` tool (which writes session-private mp4 files locally) into anet so that any node can dispatch a generation task via commhub to a grok-build node. The video file is **automatically extracted to the per-node artifacts directory**, and the receiver / upstream can pick up the path directly.
+Wire Grok's native `video_gen` tool into anet: any node can dispatch a generation task via commhub to a grok-build node; anet leaves the mp4 file where Grok wrote it (session-private) and **surfaces the path in the reply** so a same-machine human / agent can just `cat` / `open` the file.
 
 ## User flow (TL;DR)
 
@@ -21,7 +21,7 @@ anet node create grok-marketing --runtime grok-build-acp
 anet node start grok-marketing
 ```
 
-> Requires `@sleep2agi/agent-node` >= `2.4.7-preview.7` (which includes #204 isolated cwd + #205 Step 2 artifact extractor).
+> Requires `@sleep2agi/agent-node` with [#204 isolated cwd](https://github.com/sleep2agi/agent-network/commit/72e28fd) + [#205 Step 2](https://github.com/sleep2agi/agent-network/commit/09009a3) — i.e. `2.4.7-preview.7` or later.
 
 ### Dispatch a generation task
 
@@ -36,82 +36,83 @@ commhub_send_task(
 )
 ```
 
-`grok-marketing` receives the task → the Grok LLM autoregressively calls `video_gen` → the file lands in Grok's session-private dir → **agent-node copies it to `<cwd>/.anet/nodes/grok-marketing/artifacts/<timestamp>-1.mp4` (mode 0644)** → the reply text gets a trailer:
+`grok-marketing` receives the task → the Grok LLM autoregressively calls `video_gen` → the mp4 lands in Grok's session-private dir → **agent-node does not move the file, but surfaces the path at the end of the reply text**:
 
 ```
 [LLM natural-language summary]
 I've generated the video as requested...
 
-📹 视频已生成 / Video artifact(s):
-  - /home/user/project/.anet/nodes/grok-marketing/artifacts/2026-05-28T15-30-00Z-1.mp4  (5.30 MB)
+📹 视频文件 / Video file(s):
+  - /home/user/.grok/sessions/<encoded-cwd>/<sessId>/videos/1.mp4
 ```
 
-The receiver / upstream opens that absolute path.
+A **same-machine user** (or an agent SSH'd into the grok node host) `cat`s / `open`s that absolute path.
+
+## Cross-machine distribution (P2 follow-up, out of scope here)
+
+If the receiver / upstream is on a different host, the absolute path is meaningless. This is **not solved here**. Tracked as a follow-up:
+- Option A: agent-node base64 / multipart-stuffs the mp4 into the commhub message before sending.
+- Option B: upload to commhub's attachment store (needs hub-side support).
+- Option C: scp / rsync via user shell (zero code).
+
+We'll address it when a real need surfaces.
 
 ## Internals
 
-### Post-turn scan (not fs.watch)
+### Post-turn path surfacing (read-only)
 
-The pure helper `extractGrokArtifacts()` in `agent-node/src/grok-artifact-extractor.ts` is called **once after `runOnce` resolves** inside `processWithGrok`:
+`agent-node/src/grok-artifact-extractor.ts` exports a pure helper `listGrokVideoArtifacts(grokSessionDir?)` that returns the absolute paths of `videos/*.mp4` under a Grok session:
 
 ```ts
-// agent-node/src/cli.ts processWithGrok, after runOnce completes
-const extracted = extractGrokArtifacts({
-  nodeKey: NODE_ID || ALIAS,
-  userCwd: process.cwd(),
-  grokSessionDir: `~/.grok/sessions/${encodeURIComponent(grokCwd)}/${grokSessionId}`,
-});
-replyText += formatArtifactTrailer(extracted.artifacts);
+// agent-node/src/cli.ts processWithGrok, after runOnce resolves
+const sessionDir =
+  homedir() + "/.grok/sessions/" + encodeURIComponent(grokCwd) + "/" + result.sessionId;
+const paths = listGrokVideoArtifacts(sessionDir);
+const trailer = formatVideoTrailer(paths, replyText);
+if (trailer) replyText += "\n" + trailer;
 ```
 
-Why post-turn vs. fs.watch:
-- **Race-free**: Grok turn completed ⇒ mp4 fully fsync'd, no partial-write.
-- **Atomic**: one shot over `videos/`, no incremental dedup logic.
-- **Deterministic**: fires in lockstep with the LLM reply — never misses, never duplicates.
+**Zero fs writes** (no cp / chmod / mkdir). One readdir; silent `[]` fallback on failure.
 
-### Path conventions
+### `formatVideoTrailer` de-dups against the LLM's own reply
+
+If the LLM already mentioned the path in its natural-language summary (common — Grok's `video_gen` tool emits `"Video saved to ..."` and the LLM usually parrots that), the trailer **silently skips** those paths to avoid double-mentioning the same file. If every path is already in the reply, the trailer is empty.
+
+### Path convention (read-only — anet creates nothing)
 
 | Kind | Path |
 |---|---|
 | Grok's raw session video (mode 0600, private) | `~/.grok/sessions/<URL-encoded cwd>/<sessId>/videos/N.mp4` |
-| anet artifact copy (mode 0644, user-readable) | `<cwd>/.anet/nodes/<NODE_ID>/artifacts/<isoTs>-<originalName>.mp4` |
+| anet copies / writes | (none — per Vincent 6420 "leave the file where it is") |
 
-Same convention as anet's existing `logs/` / `goals.json`: **cwd-relative + per-NODE_ID**, with natural cross-project isolation.
-
-### Idempotent + deduplicated
-
-- Same turn re-run (frozen timestamp): deterministic dst filename + `existsSync` short-circuit → **zero duplicate copies**.
-- Cross-turn (caller-maintained set): Step 2 exposes `skipSrc?: ReadonlySet<string>`; **the current cli.ts integration does not maintain a cross-turn set** (each turn re-scans, but Grok writes a fresh `N.mp4` per call so the deterministic dst auto-dedups). **P3 follow-up**: persist already-extracted src paths in per-node state to reduce repeat `readdir` cost.
+Unlike anet's `logs/` and `goals.json` (which are anet's own state files), the video file belongs to Grok; anet only surfaces it.
 
 ### Failure modes
 
 | Failure | Behaviour |
 |---|---|
-| `grokSessionDir` unknown (no session yet) | `extractGrokArtifacts` returns `{ artifacts: [], ready: false, error: "no grokSessionDir" }`; reply returns normally without trailer |
-| `videos/` dir missing (this turn produced no video) | `ready: true, artifacts: []`; reply returns normally without trailer |
-| Target dir mkdir fails (permission / disk) | `ready: false, error: "mkdir artifacts dir failed: ..."`; cli.ts `warn()` but does NOT block the reply |
-| Single-file statSync / copyFileSync fails (broken symlink / race) | Skip that entry and continue the loop — **other successful artifacts are not blocked** |
-| Whole extractor throws (import failure etc.) | Top-level try/catch in cli.ts + warn; reply preserved as-is (no trailer) |
+| `result.sessionId` missing (no session) | sessionDir is undefined → list returns `[]` → no trailer, reply is normal |
+| `videos/` dir missing (no video this turn) | list returns `[]` → no trailer, reply is normal |
+| readdir fails (permission / path is a file) | list returns `[]` (silent try/catch) → no trailer, reply is normal |
+| Whole helper throws (import fails etc.) | top-level try/catch in cli.ts + warn; reply preserved as-is |
 
-**Core guarantee**: any #205 Step 2 error **never** blocks the Grok turn's normal reply. Grok finished the task and produced text — the artifact extract is **best-effort augmentation**.
+**Core guarantee**: any #205 Step 2 error **never** blocks the normal Grok turn reply.
 
 ## Limitations + follow-ups
 
-| ID | Type | Description | Owner |
+| ID | Type | Description | Recommended owner |
 |---|---|---|---|
-| P2 | feature | base64 / upload-URL the video into the commhub message, auto-cross-machine | 工程马 + 通信牛 (hub-side attachment store) |
-| P2 | retention | `<cwd>/.anet/nodes/<NODE_ID>/artifacts/` retains N days, auto-cleans to prevent disk fill | 工程马 |
-| P3 | feature | Extend to non-video artifacts (image / gif / audio); the `kind` field is already typed for extension | SDK马 |
-| P3 | docs | `grok-video-gen-prompt-tips.md` — how users phrase prompts to trigger video_gen + style keywords | 文档马 |
-| P3 | feature | Extend commhub `send_reply` MCP schema with a `meta_json` param so the machine-readable artifact descriptor goes structured | 通信牛 + SDK马 |
-| P3 | perf | Per-node persistent `extracted_src` set, reduce repeat `readdir` cost | SDK马 |
+| **P2** | feature | **Cross-machine artifact distribution** (mp4 base64 / hub attachment / scp script) | 工程马 + 通信牛 |
+| P3 | feature | Extend to non-video artifacts (image / gif / audio) | SDK马 |
+| P3 | docs | `grok-video-gen-prompt-tips.md` — prompt tips to trigger `video_gen` + style keywords | 文档马 |
+| P3 | feature | Extend commhub `send_reply` MCP schema with `meta_json` for structured artifact descriptors | 通信牛 + SDK马 |
 
 ## Probe + references
 
 - [Grok video_gen capability probe (ZH)](../research/grok-video-gen-capability-probe.md)
 - [Grok video_gen capability probe (EN)](../research/grok-video-gen-capability-probe.en.md)
-- [Grok X-search sibling scenario](../research/grok-x-search-capability-probe.en.md) — needs no anet-side capability code; works out of the box
-- [#204 preview.7 isolated-cwd fix](https://github.com/sleep2agi/agent-network/commit/72e28fd) — prerequisite for this scenario (without cwd isolation, Grok reads a stale `.mcp.json`)
+- [Grok X-search sibling scenario](../research/grok-x-search-capability-probe.en.md) — zero anet code, works out of the box
+- [#204 preview.7 isolated-cwd fix](https://github.com/sleep2agi/agent-network/commit/72e28fd) — prerequisite for this scenario
 - Vincent's real existing artifact (local-only, not in git): `~/.grok/sessions/%2Fhome%2Fvansin/019e6205-98b2-7fa3-8fc8-417f8c9b37ab/videos/1.mp4` (5.3 MB / 12 s anet promo)
 
 ---
