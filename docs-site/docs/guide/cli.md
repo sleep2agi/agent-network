@@ -245,6 +245,10 @@ admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "stop" 分支)
 
+::: warning v0.10.11 preview 起新增（#200）
+本命令在 `@preview` channel 已 ship（agent-network `2.2.10-preview.X`+），**`@latest` v0.10.10 stable 尚不含**。要用得先装 preview：`npm i -g @sleep2agi/agent-network@preview`。等 v0.10.11 promote latest 后所有 latest 用户自动有。
+:::
+
 停掉本机正在跑的 CommHub Server。用 `lsof -t -i :<port> -sTCP:LISTEN` 找进程，SIGTERM 优雅退出，3s 内没退就 SIGKILL 兜底。
 
 ```bash
@@ -252,11 +256,15 @@ anet hub stop                # 默认端口 9200
 anet hub stop --port 8080    # 自定义端口
 ```
 
-无前台进程时也能干净停（v0.10.10 之前需要 `lsof -ti:9200 | xargs kill` 手动 hack，#200 之后不用了）。
+无前台进程时也能干净停（v0.10.11 之前需要 `lsof -ti:9200 | xargs kill` 手动 hack，#200 之后不用了）。
 
 ### anet hub status
 
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "status" 分支)
+
+::: warning v0.10.11 preview 起新增（#199）
+本命令在 `@preview` channel 已 ship（agent-network `2.2.10-preview.X`+），**`@latest` v0.10.10 stable 尚不含**。要用得先装 preview：`npm i -g @sleep2agi/agent-network@preview`。等 v0.10.11 promote latest 后所有 latest 用户自动有。
+:::
 
 显示 hub 运行状态：进程 PID、端口、`/health` 返回的 server version。
 

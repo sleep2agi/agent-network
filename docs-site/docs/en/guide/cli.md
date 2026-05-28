@@ -239,6 +239,10 @@ Once admin is bootstrapped (`~/.anet/server/admin-utok.json` exists), `anet hub 
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "stop" branch)
 
+::: warning Added in v0.10.11 preview (#200)
+This command ships on the `@preview` channel (agent-network `2.2.10-preview.X`+); **`@latest` v0.10.10 stable does not yet include it**. Install via `npm i -g @sleep2agi/agent-network@preview` to use it now. It lands for all `@latest` users once v0.10.11 is promoted to `@latest`.
+:::
+
 Stop the local CommHub Server. Uses `lsof -t -i :<port> -sTCP:LISTEN` to find the process, sends SIGTERM for a graceful exit, and falls back to SIGKILL after a 3-second grace window if anything is still listening.
 
 ```bash
@@ -246,11 +250,15 @@ anet hub stop                # default port 9200
 anet hub stop --port 8080    # custom port
 ```
 
-Works even when no foreground process is available (before v0.10.10 you had to fall back to `lsof -ti:9200 | xargs kill` by hand; #200 removed that gap).
+Works even when no foreground process is available (before v0.10.11 you had to fall back to `lsof -ti:9200 | xargs kill` by hand; #200 removed that gap).
 
 ### anet hub status
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "status" branch)
+
+::: warning Added in v0.10.11 preview (#199)
+This command ships on the `@preview` channel (agent-network `2.2.10-preview.X`+); **`@latest` v0.10.10 stable does not yet include it**. Install via `npm i -g @sleep2agi/agent-network@preview` to use it now. It lands for all `@latest` users once v0.10.11 is promoted to `@latest`.
+:::
 
 Show the hub's running state — listener PID, port, and the server version reported by `/health`.
 
