@@ -106,14 +106,14 @@ anet hub start --port 9201
 # 或停掉占用的进程
 kill <PID>
 
-# v0.10.11 preview 起新增 anet hub stop 子命令（[#200](https://github.com/sleep2agi/agent-network/issues/200), 当前在 @preview channel）
+# v0.10.11 起新增 anet hub stop 子命令（[#200](https://github.com/sleep2agi/agent-network/issues/200), v0.10.11 latest 已 ship）
 # SIGTERM → 3s → SIGKILL 兜底, 不用手动找 PID
 anet hub stop          # 默认端口 9200
 anet hub stop --port 8080
 ```
 
-::: tip v0.10.11 preview 后更简单
-v0.10.11 preview ([#200](https://github.com/sleep2agi/agent-network/issues/200)) 加了 `anet hub stop` 命令, 不用 `lsof + kill <PID>` 手动 hack。等 v0.10.11 promote `@latest` 后所有用户自动有。preview 用户先装: `npm i -g @sleep2agi/agent-network@preview`。
+::: tip v0.10.11 起更简单
+v0.10.11 ([#200](https://github.com/sleep2agi/agent-network/issues/200)) 加了 `anet hub stop` 命令, 不用 `lsof + kill <PID>` 手动 hack。v0.10.11 latest 已 ship, 老用户 `anet upgrade` 或 `npm i -g @sleep2agi/agent-network@latest` 即得。
 :::
 
 ### 9. 配置文件在哪里？

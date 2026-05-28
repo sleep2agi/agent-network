@@ -139,9 +139,9 @@ npx @sleep2agi/agent-node \
   --hub http://YOUR_IP:9200
 ```
 
-::: tip v0.10.11 preview 改进
+::: tip v0.10.11 改进（v0.10.11 latest 已 ship）
 - [#201](https://github.com/sleep2agi/agent-network/issues/201) delegate refusal 3-layer 修 (wrapper parser broaden + Grok prompt softening + authorised phrasings list)
-- [#204](https://github.com/sleep2agi/agent-network/issues/204) MCP per-session inject — preview.2 stdio variant 结构修 `.mcp.json` shared identity bug (ACP side); **preview.6 transport 切到 HTTP** (Grok 直接 HTTP 调 commhub `/mcp` + Bearer ntok_, 跳过 subprocess / bun PATH / stdout pollution 风险); **preview.7 per-node isolated cwd** (Grok CLI 同时读 cwd `.mcp.json` + ACP injection, 两个 MCP server 共存 stale 赢 hello — fix: ACP session/new 传 `<home>/.anet/nodes/<node-id>/grok-cwd/` 镜像 user 文件但 skip `.mcp.json`)
+- [#204](https://github.com/sleep2agi/agent-network/issues/204) MCP per-session inject — preview chain 历史: preview.2 stdio variant 结构修 `.mcp.json` shared identity bug (ACP side); **preview.6 transport 切到 HTTP** (Grok 直接 HTTP 调 commhub `/mcp` + Bearer ntok_, 跳过 subprocess / bun PATH / stdout pollution 风险); **preview.7 per-node isolated cwd 收敛 final** (Grok CLI 同时读 cwd `.mcp.json` + ACP injection, 两个 MCP server 共存 stale 赢 hello — fix: ACP session/new 传节点隔离 cwd 镜像 user 文件但 skip `.mcp.json`). v0.10.11 final = preview.7 promoted.
 
 完整说明见 [grok-build-runtime.md Known Limits](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md#known-limits)。
 :::
@@ -444,13 +444,13 @@ SSE 断连后自动重连，使用指数退避策略：
 
 重连成功后自动恢复 online 状态。
 
-::: tip v0.10.11 preview 改进（[#202](https://github.com/sleep2agi/agent-network/issues/202)）
-`agent-node@2.4.7-preview.X` 起三件事一起改：
+::: tip preview channel 改进（[#202](https://github.com/sleep2agi/agent-network/issues/202)，未 promote latest）
+preview channel `agent-node` 起三件事一起改：
 - **退避更激进**：`1s → 2s → 4s → 8s → 16s → 30s（上限）`，hub 重启后 30s 内重连
 - **重连即重 register**：以前重连只恢复 SSE 流，不重发 register —— hub 重启清空 sessions 内存后，dashboard 看不到节点要等下次 3min heartbeat 才会重建。现在重连成功立即重发 register（idempotent upsert），dashboard < 30s 恢复完整节点列表
 - **僵尸 retry 防护**：连续失败 > 1h 主动放弃 + 写 error log，不再无限重试占 CPU
 
-跟 v0.10.11 preview 的 `anet hub stop` / `hub status` 命令配套用：hub 维护时 stop → start 流程后，节点自动恢复，**无需 `anet project restart`**。等 v0.10.11 promote `@latest` 后所有用户自动享受。
+跟 v0.10.11 latest 的 `anet hub stop` / `hub status` 命令（已 ship）配套用：hub 维护时 stop → start 流程后，节点自动恢复，**无需 `anet project restart`**。#202 SSE 重连即重 register 等下个 release promote `@latest` 后所有用户自动享受。
 :::
 
 ### 优雅退出

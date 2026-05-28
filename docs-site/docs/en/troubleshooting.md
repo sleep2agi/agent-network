@@ -85,7 +85,7 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 **Solution**:
 - **v0.10.11 stable**: Wait for the next heartbeat (≤ 3 min) to auto-recover, or run `anet project restart` to force each node to re-boot
-- **v0.10.11 preview** ([#202](https://github.com/sleep2agi/agent-network/issues/202) `agent-node@2.4.7-preview.X`+): structural fix — every successful SSE reconnect immediately re-fires `register` (idempotent upsert on the hub), and the Dashboard recovers the full node list in under 30s. **No `anet project restart` needed**, pair this with the new v0.10.11 `anet hub stop` / `hub status` commands to make hub maintenance a one-shot SOP
+- **preview channel** ([#202](https://github.com/sleep2agi/agent-network/issues/202), not yet promoted to latest): structural fix — every successful SSE reconnect immediately re-fires `register` (idempotent upsert on the hub), and the Dashboard recovers the full node list in under 30s. **No `anet project restart` needed**, pair this with the `anet hub stop` / `hub status` commands already in v0.10.11 latest to make hub maintenance a one-shot SOP (once #202 promotes to latest, every user gets this automatically)
 
 ---
 

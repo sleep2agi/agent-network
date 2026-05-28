@@ -139,9 +139,9 @@ npx @sleep2agi/agent-node \
   --hub http://YOUR_IP:9200
 ```
 
-::: tip v0.10.11 preview improvements
+::: tip v0.10.11 improvements (shipped to @latest)
 - [#201](https://github.com/sleep2agi/agent-network/issues/201) 3-layer fix for delegate refusal (wrapper parser broaden + Grok prompt softening + authorised phrasings list)
-- [#204](https://github.com/sleep2agi/agent-network/issues/204) Per-session MCP inject — preview.2 stdio variant structurally fixes the `.mcp.json` shared-identity bug (ACP side); **preview.6 switches transport to HTTP** (Grok calls commhub `/mcp` directly with a Bearer ntok_, bypassing subprocess / bun PATH / stdout-pollution risks entirely); **preview.7 adds per-node isolated cwd** (Grok CLI also reads cwd `.mcp.json` alongside the ACP injection — two MCP servers coexist and the stale one wins hello; fix: ACP session/new passes `<home>/.anet/nodes/<node-id>/grok-cwd/` that mirrors user files but omits `.mcp.json`)
+- [#204](https://github.com/sleep2agi/agent-network/issues/204) Per-session MCP inject — preview chain history: preview.2 stdio variant structurally fixes the `.mcp.json` shared-identity bug (ACP side); **preview.6 switches transport to HTTP** (Grok calls commhub `/mcp` directly with a Bearer ntok_, bypassing subprocess / bun PATH / stdout-pollution risks entirely); **preview.7 lands on per-node isolated cwd** (Grok CLI also reads cwd `.mcp.json` alongside the ACP injection — two MCP servers coexist and the stale one wins hello; fix: ACP session/new passes a per-node isolated cwd that mirrors user files but omits `.mcp.json`). v0.10.11 final = preview.7 promoted.
 
 See [grok-build-runtime.md Known Limits](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md#known-limits) for the full breakdown.
 :::
@@ -444,13 +444,13 @@ Retry interval (v0.10.11 stable): 3s → 6s → 12s → 24s → 48s → 60s (cap
 
 Online status is automatically restored after successful reconnection.
 
-::: tip v0.10.11 preview improvements ([#202](https://github.com/sleep2agi/agent-network/issues/202))
-Three changes ship together in `agent-node@2.4.7-preview.X`:
+::: tip preview channel improvements ([#202](https://github.com/sleep2agi/agent-network/issues/202), not yet promoted to latest)
+Three changes ship together on the preview-channel `agent-node`:
 - **Tighter backoff**: `1s → 2s → 4s → 8s → 16s → 30s (cap)` — full reconnect within 30s of hub restart
 - **Re-register on reconnect**: previously a reconnect only restored the SSE stream, not the registration — after a hub restart the dashboard wouldn't see the node until the next 3-minute heartbeat. Now every successful reconnect re-fires the node registration (idempotent upsert on the hub), so the dashboard recovers in under 30s
 - **Zombie-retry guard**: if reconnect failures continue for over 1 hour, agent-node gives up auto-retry, logs an error, and stops burning CPU
 
-Pairs with the new `anet hub stop` / `hub status` commands in v0.10.11 preview: during hub maintenance, `stop → start` no longer requires a follow-up `anet project restart` — nodes restore themselves. Once v0.10.11 is promoted to `@latest`, every user gets this automatically.
+Pairs with the `anet hub stop` / `hub status` commands in v0.10.11 latest (already shipped): during hub maintenance, `stop → start` no longer requires a follow-up `anet project restart` — nodes restore themselves. Once #202 is promoted to `@latest` in a future release, every user gets this automatically.
 :::
 
 ### Graceful Shutdown

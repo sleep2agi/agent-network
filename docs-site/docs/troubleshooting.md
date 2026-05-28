@@ -85,7 +85,7 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 **解决**：
 - **v0.10.11 stable**：等下次 heartbeat（≤ 3 min）自动恢复，或手动 `anet project restart` 强制每个节点重 boot
-- **v0.10.11 preview** ([#202](https://github.com/sleep2agi/agent-network/issues/202) `agent-node@2.4.7-preview.X`+)：结构性修复，SSE 重连成功立即重发 register（idempotent upsert），Dashboard < 30s 自动恢复完整节点列表。**无需手动 `anet project restart`**，跟 v0.10.11 `anet hub stop` / `hub status` 配套用 → hub 维护 SOP 一键完成
+- **preview channel** ([#202](https://github.com/sleep2agi/agent-network/issues/202), 未 promote latest)：结构性修复，SSE 重连成功立即重发 register（idempotent upsert），Dashboard < 30s 自动恢复完整节点列表。**无需手动 `anet project restart`**，跟 v0.10.11 latest 已 ship 的 `anet hub stop` / `hub status` 配套用 → hub 维护 SOP 一键完成（#202 promote latest 后所有用户自动享受）
 
 ---
 
