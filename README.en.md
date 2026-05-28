@@ -280,6 +280,7 @@ What's solid, and what to watch out for.
 
 - `claude-code-cli` runtime — runs locally; no automated regression yet (v0.8.2 fixed the session-resume default-loss bug, see [changelog](https://anet.sh/en/changelog))
 - `codex-sdk` runtime — unit-tested; live OAuth path not in CI
+- `grok-build-acp` runtime — formally onboarded in v0.10.8 (`anet node create --runtime grok-build-acp`), local `grok agent stdio` + Agent Client Protocol, reuses host-local Grok login; v0.10.11 preview chain continues polishing multi-node identity isolation ([#204](https://github.com/sleep2agi/agent-network/issues/204)), no E2E yet
 - `anet network create` and cross-user network sharing — code merged, no E2E
 - `anet channel add telegram | wechat | feishu` — Telegram path is exercised, others are not
 

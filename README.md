@@ -273,6 +273,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 
 - `claude-code-cli` runtime —— 本机能跑，未自动化（v0.8.2 修了 session resume 默认丢失 bug，详见 [changelog](https://anet.sh/changelog)）
 - `codex-sdk` runtime —— 单元测试通过，真实 OAuth 流程未上 CI
+- `grok-build-acp` runtime —— v0.10.8 起正式接入（`anet node create --runtime grok-build-acp`），本地 `grok agent stdio` + Agent Client Protocol，复用本机 Grok 登录态；v0.10.11 preview chain 持续 polish 多节点身份隔离（[#204](https://github.com/sleep2agi/agent-network/issues/204)），未上 E2E
 - `anet network create` + 跨用户网络共享 —— 代码已合并，未做 E2E
 - `anet channel add telegram | wechat | feishu` —— Telegram 路径已跑通，其他未跑
 
