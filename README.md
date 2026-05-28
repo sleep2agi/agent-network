@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="1280" height="720" alt="Wire Grok Build into a 1000-agent network" src="./docs/images/grok-build-agent-network-cover.png" />
+  <img width="1280" height="720" alt="Agent Network — 多 Agent，一行命令" src="./docs/images/anet-repo-cover-v2.png" />
 </p>
 
 <h1 align="center">Agent Network</h1>
