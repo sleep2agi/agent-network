@@ -2,6 +2,14 @@
 
 Agent Network 提供 Docker Compose 编排方案，一键启动完整的 Agent 军团。
 
+::: danger ⚠ 本页待重写
+本页的快速开始 + Dockerfile 详解 + docker-compose 详解原本基于 `demos/codex-telegram-squad/` 目录的实际文件，**该目录已在 v0.10.11 [#198](https://github.com/sleep2agi/agent-network/issues/198) 重写中移除**。下面的 `cd demos/codex-telegram-squad` / `COPY demos/codex-telegram-squad/...` / `demos/codex-telegram-squad/Dockerfile.*` 路径**当前在仓库内不存在**。
+
+**临时建议**：自己写 Docker Compose 时参考下面段落的 v0.8 推荐写法（agent-node 一对一节点 + 共享 ntok_ / network setup / Dockerfile pattern）—— 这些通用原则仍有效，只是 demo-tied 路径需自行替换为你的 repo 路径。
+
+**完整 Docker 部署指南重写** 排进 v0.11+ doc rework。生产 Docker 部署也可参考 [npm 部署指南](/deploy/npm) + [生产部署](/deploy/production)。
+:::
+
 ## 快速开始
 
 ```bash
@@ -140,7 +148,7 @@ CMD=(bun /app/agent-node/src/cli.ts --alias "$ALIAS" --runtime "$RUNTIME" --url 
 exec "${CMD[@]}"
 ```
 
-> 上面是精简版。完整 demo `entrypoint.sh` 还做了网络 roster 注入、Telegram channel 配置、Codex `CODEX_HOME` 隔离 —— 见 [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh)。
+> 上面是精简版。完整 demo `entrypoint.sh` 还做了网络 roster 注入、Telegram channel 配置、Codex `CODEX_HOME` 隔离 —— 见 `demos/codex-telegram-squad/entrypoint.sh`。
 
 ## docker-compose.yml 详解
 
@@ -214,7 +222,7 @@ seed:
 1. `/api/auth/register` 是**公开端点**，不需要 `Authorization` 头。早期文档展示的 `Authorization: Bearer ${COMMHUB_AUTH_TOKEN}` 是 v0.5 遗留写法 —— v0.8 起 hub 直接拒识 master token，强制走 user/network token 体系。
 2. **`SQUAD_ADMIN_PASS` 必须强密码**（≥ 8 位且不在 top-1000 弱密码字典里）。第一个 register 的用户会被认成 bootstrap admin，但 server 仍校验长度 ≥ 4。生产部署用 `openssl rand -base64 18` 生成。
 3. 不要 hardcode `password=admin123` —— 这是教程占位符，不能进 .env。
-4. ⚠ 上面是**推荐的 v0.8 写法**。当前 shipped 的 [`demos/codex-telegram-squad/docker-compose.yml`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/docker-compose.yml) seed 容器**还是 legacy 形式**（带 `Authorization: Bearer` 头 + 硬编码 `admin123`）—— demo 待按本节更新；自己部署请照本节 v0.8 写法。
+4. ⚠ 上面是**推荐的 v0.8 写法**。当前 shipped 的 `demos/codex-telegram-squad/docker-compose.yml` seed 容器**还是 legacy 形式**（带 `Authorization: Bearer` 头 + 硬编码 `admin123`）—— demo 待按本节更新；自己部署请照本节 v0.8 写法。
 :::
 
 Seed 容器是一次性的（`restart: "no"`），首次启动时运行；后续重启自动跳过。
@@ -255,7 +263,7 @@ agent-node 只读 `TELEGRAM_BOT_TOKEN` env，**没有 `TELEGRAM_ALLOW_USER` env 
 :::
 
 ::: danger 不要 commit .env
-`.env` 含明文密码 + API key，必须 `.gitignore`。仓库里只 commit `.env.example`（占位符）—— 实际 [`demos/codex-telegram-squad/.env.example`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/.env.example) 内容：
+`.env` 含明文密码 + API key，必须 `.gitignore`。仓库里只 commit `.env.example`（占位符）—— 实际 `demos/codex-telegram-squad/.env.example` 内容：
 
 ```bash
 # Copy to .env and fill in:
@@ -296,7 +304,7 @@ v0.8 起：
 | `ANTHROPIC_AUTH_TOKEN` | 第三方 provider API Key | 各 provider Key | agent-node 直读 |
 
 ::: info `TOOLS` / `SYSTEM_PROMPT` 是 Compose 路径的 convention
-verify [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh)：L9 `TOOLS_ARG="${TOOLS:-}"` + L10 `PROMPT="${SYSTEM_PROMPT:-}"` 先把 env var 捕获成 shell 变量，再 L26 `[ -n "$TOOLS_ARG" ] && CMD+=(--tools "$TOOLS_ARG")` / L51 `CMD+=(--prompt "$FULL_PROMPT")` 拼进 agent-node 命令数组 —— 这两个 env var 是 **entrypoint.sh 的 shell variable**，会被翻译成 agent-node 的 `--tools` / `--prompt` CLI flag。**agent-node 二进制本体不读这两个 env var**（详见 [agent-node — 环境变量](/guide/agent-node)）。不走 docker compose entrypoint.sh 的场景（直接 `npx @sleep2agi/agent-node`），用 `--tools` / `--prompt` CLI flag 或 `config.json` 的 `tools` / `systemPrompt` 字段。
+verify `demos/codex-telegram-squad/entrypoint.sh`：L9 `TOOLS_ARG="${TOOLS:-}"` + L10 `PROMPT="${SYSTEM_PROMPT:-}"` 先把 env var 捕获成 shell 变量，再 L26 `[ -n "$TOOLS_ARG" ] && CMD+=(--tools "$TOOLS_ARG")` / L51 `CMD+=(--prompt "$FULL_PROMPT")` 拼进 agent-node 命令数组 —— 这两个 env var 是 **entrypoint.sh 的 shell variable**，会被翻译成 agent-node 的 `--tools` / `--prompt` CLI flag。**agent-node 二进制本体不读这两个 env var**（详见 [agent-node — 环境变量](/guide/agent-node)）。不走 docker compose entrypoint.sh 的场景（直接 `npx @sleep2agi/agent-node`），用 `--tools` / `--prompt` CLI flag 或 `config.json` 的 `tools` / `systemPrompt` 字段。
 
 `--tools` 只 `claude-agent-sdk` runtime 生效（`codex-sdk` 内置工具集不接受 `--tools` 自定义）。
 :::

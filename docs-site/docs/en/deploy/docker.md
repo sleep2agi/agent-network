@@ -2,6 +2,14 @@
 
 Agent Network provides a Docker Compose orchestration solution for one-click startup of a complete agent squad.
 
+::: danger ⚠ This page is being rewritten
+The quick-start / Dockerfile breakdown / docker-compose walkthrough below was built on top of the `demos/codex-telegram-squad/` directory's actual files, **which was removed in the v0.10.11 [#198](https://github.com/sleep2agi/agent-network/issues/198) rewrite**. The references to `cd demos/codex-telegram-squad` / `COPY demos/codex-telegram-squad/...` / `demos/codex-telegram-squad/Dockerfile.*` below **do not exist in the current repo**.
+
+**Interim guidance**: when hand-rolling your own Docker Compose, refer to the v0.8 patterns below (agent-node per node + shared ntok_ / network setup / Dockerfile patterns) — the general principles still apply; you just need to swap the demo-tied paths for your own repo paths.
+
+A **full rewrite of the Docker deployment guide** is queued for the v0.11+ doc rework. For production Docker deployments you can also consult [npm deployment](/en/deploy/npm) + [production deployment](/en/deploy/production).
+:::
+
 ## Quick Start
 
 ```bash
@@ -140,7 +148,7 @@ CMD=(bun /app/agent-node/src/cli.ts --alias "$ALIAS" --runtime "$RUNTIME" --url 
 exec "${CMD[@]}"
 ```
 
-> This is the trimmed-down version. The full demo `entrypoint.sh` also injects the network roster, sets up the Telegram channel, and isolates Codex's `CODEX_HOME` — see [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh).
+> This is the trimmed-down version. The full demo `entrypoint.sh` also injects the network roster, sets up the Telegram channel, and isolates Codex's `CODEX_HOME` — see `demos/codex-telegram-squad/entrypoint.sh`.
 
 ## docker-compose.yml Details
 
@@ -214,7 +222,7 @@ seed:
 1. `/api/auth/register` is a **public endpoint** and does not need an `Authorization` header. Older docs that show `Authorization: Bearer ${COMMHUB_AUTH_TOKEN}` are v0.5 leftovers — v0.8 rejects master tokens entirely and forces user/network token auth.
 2. **`SQUAD_ADMIN_PASS` must be a strong password** (≥ 8 chars and not in the top-1000 weak-password dictionary). The first registered user is treated as bootstrap admin and the server still enforces length ≥ 4. For production, generate via `openssl rand -base64 18`.
 3. Don't hardcode `password=admin123` — that's a tutorial placeholder, never commit it to `.env`.
-4. ⚠ The block above is the **recommended v0.8 form**. The currently shipped [`demos/codex-telegram-squad/docker-compose.yml`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/docker-compose.yml) seed container is **still the legacy form** (carries an `Authorization: Bearer` header + hardcoded `admin123`) — the demo is pending an update to match this section; for your own deployment, follow the v0.8 form here.
+4. ⚠ The block above is the **recommended v0.8 form**. The currently shipped `demos/codex-telegram-squad/docker-compose.yml` seed container is **still the legacy form** (carries an `Authorization: Bearer` header + hardcoded `admin123`) — the demo is pending an update to match this section; for your own deployment, follow the v0.8 form here.
 :::
 
 The seed container is one-shot (`restart: "no"`) and only runs on first startup. Subsequent restarts skip automatically.
@@ -255,7 +263,7 @@ agent-node only reads `TELEGRAM_BOT_TOKEN` env — **there is no `TELEGRAM_ALLOW
 :::
 
 ::: danger Don't commit `.env`
-`.env` contains plaintext passwords and API keys — always add it to `.gitignore`. Commit only `.env.example` with placeholders — the actual [`demos/codex-telegram-squad/.env.example`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/.env.example):
+`.env` contains plaintext passwords and API keys — always add it to `.gitignore`. Commit only `.env.example` with placeholders — the actual `demos/codex-telegram-squad/.env.example`:
 
 ```bash
 # Copy to .env and fill in:
@@ -296,7 +304,7 @@ If you see legacy docker-compose files still using these two variables, they're 
 | `ANTHROPIC_AUTH_TOKEN` | Third-party provider API key | Provider's key | agent-node directly |
 
 ::: info `TOOLS` / `SYSTEM_PROMPT` are Compose-entrypoint conventions
-Verified at [`demos/codex-telegram-squad/entrypoint.sh`](https://github.com/sleep2agi/agent-network/blob/main/demos/codex-telegram-squad/entrypoint.sh): L9 `TOOLS_ARG="${TOOLS:-}"` + L10 `PROMPT="${SYSTEM_PROMPT:-}"` capture the env vars into shell variables, then L26 `[ -n "$TOOLS_ARG" ] && CMD+=(--tools "$TOOLS_ARG")` / L51 `CMD+=(--prompt "$FULL_PROMPT")` append them to the agent-node command array — these env vars are **shell variables inside entrypoint.sh**, translated to agent-node's `--tools` / `--prompt` CLI flags. **The agent-node binary itself does not read these env vars** (see [agent-node — Environment Variables](/en/guide/agent-node)). When running outside docker-compose / entrypoint.sh (e.g., `npx @sleep2agi/agent-node`), use the `--tools` / `--prompt` CLI flags or the `tools` / `systemPrompt` fields in `config.json`.
+Verified at `demos/codex-telegram-squad/entrypoint.sh`: L9 `TOOLS_ARG="${TOOLS:-}"` + L10 `PROMPT="${SYSTEM_PROMPT:-}"` capture the env vars into shell variables, then L26 `[ -n "$TOOLS_ARG" ] && CMD+=(--tools "$TOOLS_ARG")` / L51 `CMD+=(--prompt "$FULL_PROMPT")` append them to the agent-node command array — these env vars are **shell variables inside entrypoint.sh**, translated to agent-node's `--tools` / `--prompt` CLI flags. **The agent-node binary itself does not read these env vars** (see [agent-node — Environment Variables](/en/guide/agent-node)). When running outside docker-compose / entrypoint.sh (e.g., `npx @sleep2agi/agent-node`), use the `--tools` / `--prompt` CLI flags or the `tools` / `systemPrompt` fields in `config.json`.
 
 `--tools` only affects the `claude-agent-sdk` runtime (the `codex-sdk` runtime's built-in toolset does not honor `--tools`).
 :::
