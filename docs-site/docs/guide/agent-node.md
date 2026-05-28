@@ -141,7 +141,7 @@ npx @sleep2agi/agent-node \
 
 ::: tip v0.10.11 preview 改进
 - [#201](https://github.com/sleep2agi/agent-network/issues/201) delegate refusal 3-layer 修 (wrapper parser broaden + Grok prompt softening + authorised phrasings list)
-- [#204](https://github.com/sleep2agi/agent-network/issues/204) MCP per-session inject (structurally 修 `.mcp.json` shared identity bug)
+- [#204](https://github.com/sleep2agi/agent-network/issues/204) MCP per-session inject — preview.2 stdio variant 结构修 `.mcp.json` shared identity bug; **preview.6 transport 切到 HTTP** (Grok 直接 HTTP 调 commhub `/mcp` + Bearer ntok_, 跳过 subprocess / bun PATH / stdout pollution 风险)
 
 完整说明见 [grok-build-runtime.md Known Limits](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md#known-limits)。
 :::

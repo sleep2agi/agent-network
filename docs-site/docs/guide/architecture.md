@@ -358,8 +358,7 @@ flowchart LR
 
     subgraph "grok-build-acp"
         GROK_PROC[Grok ACP server<br/>spawn 子进程]
-        GROK_PROC -->|"session/new w/<br/>mcpServers list 显式注入"| GROK_PROXY[".anet/node-server.js<br/>stdio MCP server"]
-        GROK_PROXY -->|"HTTP forward<br/>tools/call"| HUB_MCP4[CommHub<br/>POST /mcp]
+        GROK_PROC -->|"session/new w/<br/>HTTP mcpServers + Bearer ntok_<br/>(preview.6+, abefbe8)"| HUB_MCP4[CommHub<br/>POST /mcp]
     end
 ```
 
@@ -376,9 +375,14 @@ flowchart LR
 
 **`codex-sdk` 不直接给 LLM 暴露 commhub 工具**：`codexOpts` 不传 `mcpServers`（[`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)），codex thread 只用 baked-in 工具（Read / Write / Edit / Bash / Glob / Grep / WebSearch）。**多 Agent 派活通过 agent-node 父进程**外部完成：agent-node 维持 SSE + `report_status` / `get_inbox` / `send_reply` 跟 commhub roundtrip，把任务文本喂给 codex thread，再把 codex 回复经 commhub 回上游。codex thread 本身**不知道** commhub 存在 —— 它只是个 LLM 工作器。
 
-**`grok-build-acp` 走 per-session mcpServers 显式注入**（v0.10.11 preview [#204](https://github.com/sleep2agi/agent-network/issues/204) commit [`4b5a657`](https://github.com/sleep2agi/agent-network/commit/4b5a657)）：agent-node 在每次 `session/new` / `session/load` 显式把 `mcpServers: [{ name: "commhub", command: "bun", args: ["<abs-path>/.anet/node-server.js"], env: { COMMHUB_ALIAS, COMMHUB_TOKEN, COMMHUB_URL, ... } }]` 列表传给 Grok ACP server。Grok spawn `.anet/node-server.js` 作为 stdio MCP subprocess, 跟 `claude-code-cli` 走法类似但**不依赖 cwd `.mcp.json` 文件 fallback**（先前 stale `.mcp.json` 共享 identity bug structurally 修）。tool names 由 `node-server.ts` 内部命名空间决定。
+**`grok-build-acp` 走 per-session mcpServers 显式注入 + HTTP transport**（v0.10.11 preview [#204](https://github.com/sleep2agi/agent-network/issues/204)）：
 
-> ⚠ Debug tip：LLM 调不到 commhub 工具时先确认 runtime —— `claude-agent-sdk` 节点查 `commhub-mcp.ts` 在不在 dist 里（agent-node ≥ 2.3.5-preview.0）；`claude-code-cli` 节点查 `.mcp.json` 里 commhub 是不是 `type:stdio` + `.anet/node-server.js` 路径正确；`codex-sdk` 节点**直接看 agent-node 父进程日志**（codex thread 不调 commhub）；`grok-build-acp` 节点查 agent-node 日志 `[grok] commhub MCP server resolved: <abs-path> (...B)` debug 行确认 mcpServers 注入成功（v0.10.11 preview agent-node@2.4.7-preview.X+）。
+agent-node 在每次 `session/new` / `session/load` 显式把 `mcpServers` 列表传给 Grok ACP server。preview chain 经历两阶段：
+
+- **preview.2** ([`4b5a657`](https://github.com/sleep2agi/agent-network/commit/4b5a657))：Stdio variant — `mcpServers: [{ name: "commhub", command: "bun", args: ["<abs-path>/.anet/node-server.js"], env: { COMMHUB_ALIAS, COMMHUB_TOKEN, COMMHUB_URL, ... } }]`，Grok spawn `.anet/node-server.js` 作为 stdio MCP subprocess。结构性 fix 共享 `.mcp.json` identity bug，但仍受 stdout pollution / bun PATH / framing 风险。
+- **preview.6** ([`abefbe8`](https://github.com/sleep2agi/agent-network/commit/abefbe8))：**transport 切到 HTTP** — `mcpServers: [{ type: "http", name: "commhub", url: "${COMMHUB_URL}/mcp", headers: [{ name: "Authorization", value: "Bearer ${AUTH_TOKEN}" }, ...] }]`，Grok 直接 HTTP 调 commhub `/mcp`（Grok ACP `init` response 报 `mcpCapabilities = {http: true, sse: true}` 明确支持）。commhub-server `/mcp` 已 ntok→alias 派生（[`server/src/index.ts:446-448`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L446) [`d1d867e`](https://github.com/sleep2agi/agent-network/commit/d1d867e) #194 hub-side），attribute `from_session` 自动正确。**跳过 subprocess + bun PATH + framing + stdout-pollution 全栈风险**。tool names 由 commhub-server `/mcp` JSON-RPC 返回。
+
+> ⚠ Debug tip：LLM 调不到 commhub 工具时先确认 runtime —— `claude-agent-sdk` 节点查 `commhub-mcp.ts` 在不在 dist 里（agent-node ≥ 2.3.5-preview.0）；`claude-code-cli` 节点查 `.mcp.json` 里 commhub 是不是 `type:stdio` + `.anet/node-server.js` 路径正确；`codex-sdk` 节点**直接看 agent-node 父进程日志**（codex thread 不调 commhub）；`grok-build-acp` 节点（v0.10.11 preview.6+ HTTP transport）查 agent-node 日志 `[grok] mcpServers injected: http url=...` debug 行确认 HTTP variant 注入成功，**v0.10.11 preview.5 及之前**（stdio variant）查 `[grok] commhub MCP server resolved: <abs-path>` debug 行确认 stdio variant；v0.10.10 stable (`agent-node@2.4.6`) `grok-build-acp` 走 legacy stdio + `.mcp.json` 路径，参考 [grok-build-runtime.md](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
 
 ### 任务处理流程
 

@@ -358,8 +358,7 @@ flowchart LR
 
     subgraph "grok-build-acp"
         GROK_PROC[Grok ACP server<br/>spawned subprocess]
-        GROK_PROC -->|"session/new w/<br/>mcpServers list injected"| GROK_PROXY[".anet/node-server.js<br/>stdio MCP server"]
-        GROK_PROXY -->|"HTTP forward<br/>tools/call"| HUB_MCP4[CommHub<br/>POST /mcp]
+        GROK_PROC -->|"session/new w/<br/>HTTP mcpServers + Bearer ntok_<br/>(preview.6+, abefbe8)"| HUB_MCP4[CommHub<br/>POST /mcp]
     end
 ```
 
@@ -376,9 +375,14 @@ flowchart LR
 
 **`codex-sdk` does not expose commhub tools to the LLM**: `codexOpts` does not pass `mcpServers` ([`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)). The codex thread only sees its baked-in tools (Read / Write / Edit / Bash / Glob / Grep / WebSearch). **Multi-agent dispatch happens outside the LLM in agent-node's parent process**: agent-node maintains the SSE connection plus `report_status` / `get_inbox` / `send_reply` calls back to CommHub, feeds the task text into the codex thread, and posts the codex reply back via CommHub. The codex thread itself **does not know** commhub exists — it is just an LLM worker.
 
-**`grok-build-acp` uses explicit per-session `mcpServers` injection** (v0.10.11 preview [#204](https://github.com/sleep2agi/agent-network/issues/204) commit [`4b5a657`](https://github.com/sleep2agi/agent-network/commit/4b5a657)): on every `session/new` / `session/load`, agent-node explicitly passes a `mcpServers: [{ name: "commhub", command: "bun", args: ["<abs-path>/.anet/node-server.js"], env: { COMMHUB_ALIAS, COMMHUB_TOKEN, COMMHUB_URL, ... } }]` list to the Grok ACP server. Grok then spawns `.anet/node-server.js` as a stdio MCP subprocess — similar to `claude-code-cli`'s path, but **does not fall back to the cwd `.mcp.json` file** (the earlier stale-`.mcp.json` shared-identity bug is structurally fixed). Tool names live in the `node-server.ts` namespace.
+**`grok-build-acp` uses explicit per-session `mcpServers` injection + HTTP transport** (v0.10.11 preview [#204](https://github.com/sleep2agi/agent-network/issues/204)):
 
-> ⚠ Debug tip: if the LLM can't call a commhub tool, check the runtime first — for `claude-agent-sdk` nodes, confirm `commhub-mcp.ts` is in dist (agent-node ≥ 2.3.5-preview.0); for `claude-code-cli` nodes, check the `.mcp.json` has `type: stdio` and the `.anet/node-server.js` path is correct; for `codex-sdk` nodes, **look at the agent-node parent process logs** (the codex thread never calls commhub); for `grok-build-acp` nodes, look for the `[grok] commhub MCP server resolved: <abs-path> (...B)` debug line in the agent-node log to confirm mcpServers injection succeeded (v0.10.11 preview agent-node@2.4.7-preview.X+).
+agent-node explicitly passes an `mcpServers` list to the Grok ACP server on every `session/new` / `session/load`. The preview chain went through two phases:
+
+- **preview.2** ([`4b5a657`](https://github.com/sleep2agi/agent-network/commit/4b5a657)): Stdio variant — `mcpServers: [{ name: "commhub", command: "bun", args: ["<abs-path>/.anet/node-server.js"], env: { COMMHUB_ALIAS, COMMHUB_TOKEN, COMMHUB_URL, ... } }]`; Grok spawns `.anet/node-server.js` as a stdio MCP subprocess. Structurally fixes the shared-`.mcp.json` identity bug, but still subject to stdout-pollution / bun-PATH / framing risks.
+- **preview.6** ([`abefbe8`](https://github.com/sleep2agi/agent-network/commit/abefbe8)): **transport switched to HTTP** — `mcpServers: [{ type: "http", name: "commhub", url: "${COMMHUB_URL}/mcp", headers: [{ name: "Authorization", value: "Bearer ${AUTH_TOKEN}" }, ...] }]`; Grok calls commhub `/mcp` directly over HTTP (Grok ACP `init` reports `mcpCapabilities = {http: true, sse: true}`). commhub-server `/mcp` already derives `from_session` from the bearer ntok_ ([`server/src/index.ts:446-448`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L446) [`d1d867e`](https://github.com/sleep2agi/agent-network/commit/d1d867e) #194 hub-side), so attribution is automatic. **Bypasses the subprocess + bun PATH + framing + stdout-pollution risk surface entirely.** Tool names come back from commhub `/mcp` JSON-RPC.
+
+> ⚠ Debug tip: if the LLM can't call a commhub tool, check the runtime first — for `claude-agent-sdk` nodes, confirm `commhub-mcp.ts` is in dist (agent-node ≥ 2.3.5-preview.0); for `claude-code-cli` nodes, check the `.mcp.json` has `type: stdio` and the `.anet/node-server.js` path is correct; for `codex-sdk` nodes, **look at the agent-node parent process logs** (the codex thread never calls commhub); for `grok-build-acp` nodes (v0.10.11 preview.6+ HTTP transport), look for `[grok] mcpServers injected: http url=...` in the agent-node log to confirm the HTTP variant landed; **v0.10.11 preview.5 and earlier** (stdio variant) look for `[grok] commhub MCP server resolved: <abs-path>`; v0.10.10 stable (`agent-node@2.4.6`) `grok-build-acp` follows the legacy stdio + `.mcp.json` path — see [grok-build-runtime.md](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md).
 
 ### Task Processing Flow
 
