@@ -2304,7 +2304,20 @@ async function launchAgent(id: string, forceNewSession = false) {
     if (forceNewSession) agentArgs.push("--new-session", "true");
 
     const hub = profile.hub || loadGlobal().hub || "";
-    const env: NodeJS.ProcessEnv = { ...process.env, ...(token ? { COMMHUB_TOKEN: token } : {}), ...(hub ? { COMMHUB_URL: hub } : {}) };
+    // #203 defense — explicitly set COMMHUB_ALIAS in the agent-node spawn env
+    // (mirrors what the claude-code-cli branch below already does). Without
+    // this, agent-node's child paths that fall back to process.env.COMMHUB_ALIAS
+    // could inherit a stale value from the parent shell (e.g. left over from a
+    // previous `anet node start <oldNode>` in the same terminal), causing
+    // outbound send_task/send_message to attribute to the wrong alias.
+    // `displayName` is the same value we pass as --alias above, so the two
+    // sources agree.
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      COMMHUB_ALIAS: displayName,
+      ...(token ? { COMMHUB_TOKEN: token } : {}),
+      ...(hub ? { COMMHUB_URL: hub } : {}),
+    };
     // #125 fix (preview.3) — resolve envRef before spawn so the child gets a
     // plain string in env; the child's own envRef-resolver would otherwise
     // never run (parent crashes on `.replace()` of an object first).

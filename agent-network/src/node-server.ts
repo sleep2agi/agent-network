@@ -71,7 +71,31 @@ const ANET_CONFIG = loadAnetConfig();
 
 const COMMHUB_URL = process.env.COMMHUB_URL || ANET_CONFIG.hub || "http://127.0.0.1:9200";
 const TMUX_NAME = process.env.COMMHUB_TMUX || getTmuxSessionName();
-const ALIAS = process.env.COMMHUB_ALIAS || TMUX_NAME || hostname();
+// #203 — ALIAS used to silently fall back to TMUX_NAME (the tmux session name,
+// which often outlives the node it was created for) or hostname() (a single
+// constant for the whole machine, so every node on the box would attribute to
+// the same value). Both fallbacks are the documented #203 attribution-bug
+// vector. Now: require an explicit COMMHUB_ALIAS env var; log loudly + use a
+// sentinel ("unattributed-<pid>") if missing so outbound from_session is
+// obviously broken in the message DB instead of mis-attributing to a previous
+// node. `anet node start` always sets COMMHUB_ALIAS at spawn (see
+// cli.ts:2307), so the sentinel only fires when a node-server.js is launched
+// out-of-band (rare, hand-rolled debugging scenarios).
+function resolveAlias(): string {
+  if (process.env.COMMHUB_ALIAS && process.env.COMMHUB_ALIAS.trim()) {
+    return process.env.COMMHUB_ALIAS.trim();
+  }
+  // Stay loud on stderr — claude-code MCP loop suppresses stdout but stderr
+  // surfaces in tmux pane / agent log so the operator can see this.
+  process.stderr.write(
+    `[commhub] WARN: COMMHUB_ALIAS env var is unset — outbound from_session ` +
+    `would mis-attribute. Refusing to guess from TMUX_NAME=${TMUX_NAME || "(none)"} ` +
+    `/ hostname=${hostname()}. Restart node via \`anet node start <alias>\` so ` +
+    `the env is set explicitly (#203).\n`,
+  );
+  return `unattributed-${process.pid}`;
+}
+const ALIAS = resolveAlias();
 const RESUME_ID = process.env.COMMHUB_RESUME_ID || process.env.CLAUDE_RESUME_ID || randomUUID();
 const AUTH_TOKEN = process.env.COMMHUB_TOKEN || ANET_CONFIG.token || "";
 

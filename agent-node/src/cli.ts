@@ -115,7 +115,35 @@ if (opts.config) {
   if (fc) { fileConfig = fc; configFilePath = cfgPath; console.log(`[agent-node] Config: ${cfgPath}`); }
 }
 
-const ALIAS = opts.alias || process.env.COMMHUB_ALIAS || process.env.ALIAS || fileConfig.alias;
+// #203 — alias source priority + cross-source sanity check. `--alias` (set by
+// `anet node start <name>`) is the canonical source; the env / fileConfig
+// fallbacks are kept for `npx @sleep2agi/agent-node` standalone usage. We log
+// the winning source so it's visible in `anet logs <name>` what attribution
+// the agent is using — and surface a loud warning if --alias disagrees with
+// fileConfig.alias, which is the Vincent 5月28日 #203 UAT scenario (config
+// pollution / template copy of a previous node's alias). Loud-fail beats
+// silent mis-attribution because hub-side commhub message DB persists the
+// from_session value forever.
+function resolveAlias(): { value: string; source: string } {
+  if (opts.alias) return { value: opts.alias, source: "--alias flag" };
+  if (process.env.COMMHUB_ALIAS) return { value: process.env.COMMHUB_ALIAS, source: "COMMHUB_ALIAS env" };
+  if (process.env.ALIAS) return { value: process.env.ALIAS, source: "ALIAS env" };
+  if (fileConfig.alias) return { value: fileConfig.alias, source: `config.json (${configFilePath || "?"})` };
+  return { value: "", source: "(none — will error)" };
+}
+const { value: ALIAS, source: ALIAS_SOURCE } = resolveAlias();
+if (ALIAS && fileConfig.alias && fileConfig.alias !== ALIAS) {
+  // #203 — sanity check: anet node start writes `--alias displayName` AND
+  // loads config.json. If the two disagree, the config has stale data (from
+  // a copy/template/rename mishap) and any code path that ends up trusting
+  // config.json.alias instead of the flag would mis-attribute. Loud warn
+  // + bias toward --alias (already the highest-priority source above).
+  console.warn(
+    `[agent-node] ⚠ #203 alias mismatch: --alias="${ALIAS}" but ` +
+    `${configFilePath || "config.json"}.alias="${fileConfig.alias}". ` +
+    `Using "${ALIAS}" (--alias wins). Fix the config file to silence this.`,
+  );
+}
 
 if (!opts.config && ALIAS) {
   const newPath = join(process.cwd(), ".anet", "nodes", ALIAS, "config.json");
@@ -1793,6 +1821,7 @@ async function connectSSE() {
 
 // ── 启动 ──
 log(`启动`);
+log(`  alias:   ${ALIAS || "(none!)"} [from: ${ALIAS_SOURCE}]`);  // #203 traceability
 log(`  runtime: ${RUNTIME_LABEL}`);
 log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.5" : RUNTIME === "grok" ? "grok-build" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
