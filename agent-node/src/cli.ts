@@ -1335,11 +1335,40 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
     url: `${COMMHUB_URL}/mcp`,
     headers,
   }];
+
+  // #204 preview.7 — per-node isolated cwd. preview.2 → preview.6 chain
+  // showed that even with HTTP MCP injected via ACP, Grok CLI ALSO reads
+  // the cwd `.mcp.json` and spawns a *second* commhub MCP server from
+  // there. That second instance carries whatever `COMMHUB_ALIAS=<stale>`
+  // was last written to the file (Vincent's grok-build/.mcp.json had
+  // `grok测试员` from a prior `anet node start`), and Grok's hello-
+  // message tool call routes to that stale server, breaking attribution.
+  //
+  // Fix: pass an isolated cwd to ACP `session/new` so Grok's cwd-discovery
+  // hits an empty dir (no .mcp.json) and only our ACP-injected HTTP MCP
+  // is in play. Logic extracted to `grok-isolated-cwd.ts` so it can be
+  // unit-tested without spinning up a real Grok agent (preview.7 Phase 2
+  // smoke ran into the obvious "exercising algorithm end-to-end needs
+  // real Grok + xAI auth" problem).
+  const { prepareGrokIsolatedCwd } = await import("./grok-isolated-cwd");
+  const isolatedResult = prepareGrokIsolatedCwd({
+    userCwd: process.cwd(),
+    nodeId: NODE_ID,
+    alias: ALIAS,
+    onWarn: (m) => warn(`[grok] ${m}`),
+  });
+  if (isolatedResult.isolated) {
+    log(`[grok] #204 isolated cwd: ${isolatedResult.cwd} (symlinked=${isolatedResult.symlinked}, skipped=${isolatedResult.skipped})`);
+  } else {
+    warn(`[grok] #204 isolated cwd failed: ${isolatedResult.error} — falling back to process.cwd(), may re-read project .mcp.json`);
+  }
+  const grokCwd = isolatedResult.cwd;
+
   const runOnce = async (sessionId?: string, label = "primary") => {
     const t0 = Date.now();
     const result = await runGrokAcpTurn({
       prompt: buildGrokCommhubPrompt(task, from),
-      cwd: process.cwd(),
+      cwd: grokCwd,
       sessionId,
       mcpServers: grokMcpServers,
       timeoutMs: parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000"),
