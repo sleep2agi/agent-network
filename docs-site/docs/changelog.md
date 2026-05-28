@@ -106,7 +106,7 @@ npm i -g @sleep2agi/agent-network@latest
 
 ### Known Issues
 
-`agent-network` 内部 `npx` fallback 仍 pin `@sleep2agi/agent-node@preview` 标签 —— 未来 preview 推进可能让 latest 用户拉到不稳版本。本 release 不存在 regression（preview 2.4.6-preview.2 内容接近 latest 2.4.6），但需后续 RFC-021 处理（follow-up tracking 待 issue 开）。
+`agent-network` 内部 `npx` fallback 仍 pin `@sleep2agi/agent-node@preview` 标签 —— 未来 preview 推进可能让 latest 用户拉到不稳版本。本 release 不存在 regression（preview 2.4.6-preview.2 内容接近 latest 2.4.6），但需后续 RFC 处理（follow-up tracking 待 issue 开；**与同号 [RFC-021 ACP capability profile expansion](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-021-acp-capability-profile-expansion.md) 为 X-search unlock 主题不同**）。
 
 ---
 

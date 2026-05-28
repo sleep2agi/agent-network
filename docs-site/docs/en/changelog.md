@@ -106,7 +106,7 @@ Applies to every `claude-agent-sdk` node (MiMo / MiniMax / InternLM / GLM / any 
 
 ### Known Issues
 
-The internal `npx` fallback inside `agent-network` still pins `@sleep2agi/agent-node@preview` — a future preview push could expose `@latest` users to an unstable build. There's no regression in this release (preview `2.4.6-preview.2` is content-equivalent to latest `2.4.6`), but follow-up handling is queued under RFC-021 (tracking issue to be opened).
+The internal `npx` fallback inside `agent-network` still pins `@sleep2agi/agent-node@preview` — a future preview push could expose `@latest` users to an unstable build. There's no regression in this release (preview `2.4.6-preview.2` is content-equivalent to latest `2.4.6`), but follow-up handling is queued under a future RFC (tracking issue to be opened; **distinct from the same-numbered [RFC-021 ACP capability profile expansion](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-021-acp-capability-profile-expansion.md) which targets X-search unlock**).
 
 ---
 
