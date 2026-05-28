@@ -51,6 +51,13 @@ export interface GrokAcpTurnOptions {
   mcpServers?: AcpMcpServerEntry[];
   onSession?: (sessionId: string) => void | Promise<void>;
   onEvent?: (event: GrokAcpNotification, state: GrokTurnState) => void;
+  /**
+   * #204 preview.4 — Grok agent's stderr stream (handshake errors, MCP
+   * subprocess crash logs, etc.). Caller routes this to agent-node's
+   * `debug()` / `warn()` so MCP subprocess failures surface in
+   * `anet logs <alias>` instead of being silently dropped.
+   */
+  onStderr?: (chunk: string) => void;
 }
 
 export interface GrokAcpTurnResult {
@@ -93,6 +100,21 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     opts.onEvent?.(msg, state);
   };
   client.on("notification", onNotification);
+
+  // #204 preview.4 — surface grok agent stderr (which carries MCP subprocess
+  // handshake errors) to caller so silent MCP-startup failures become
+  // visible. Buffered per-line so partial chunks don't truncate words.
+  let stderrBuffer = "";
+  const onStderr = (chunk: string) => {
+    if (!opts.onStderr) return;
+    stderrBuffer += chunk;
+    const lines = stderrBuffer.split(/\r?\n/);
+    stderrBuffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.trim()) opts.onStderr(line);
+    }
+  };
+  if (opts.onStderr) client.on("stderr", onStderr);
 
   try {
     client.start({ cwd: opts.cwd, env: childEnv, binary: opts.binary });
@@ -141,6 +163,12 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     };
   } finally {
     client.off("notification", onNotification);
+    if (opts.onStderr) {
+      client.off("stderr", onStderr);
+      // Flush trailing partial line (if any) so we don't lose the last
+      // chunk of stderr output (e.g. an error without a newline).
+      if (stderrBuffer.trim()) opts.onStderr(stderrBuffer);
+    }
     await client.close().catch(() => undefined);
   }
 }

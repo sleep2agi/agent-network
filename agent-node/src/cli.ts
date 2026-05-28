@@ -1309,10 +1309,45 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   if (AUTH_TOKEN) commhubMcpEnv.push({ name: "COMMHUB_TOKEN", value: AUTH_TOKEN });
   if (COMMHUB_URL) commhubMcpEnv.push({ name: "COMMHUB_URL", value: COMMHUB_URL });
   if (RESUME_ID) commhubMcpEnv.push({ name: "COMMHUB_RESUME_ID", value: RESUME_ID });
+  // preview.4 (#204 半-PASS catch) — Vincent UAT 04:41 showed schema accepted
+  // but commhub tools never registered to Grok ("CommHub 通道暂不可用 工具
+  // 未就绪"). Most-likely cause: Grok ACP spawns MCP subprocess with a cwd
+  // that's not our process.cwd(), so the `.anet/node-server.js` relative
+  // path doesn't resolve. ACP McpServer schema has no `cwd` field — we
+  // must hand Grok absolute paths so it can spawn regardless of its own
+  // working directory. Same defensive reasoning for `bun`: Grok's PATH may
+  // not include it, so use the current bun binary's absolute path
+  // (process.execPath when agent-node itself runs under bun).
+  const { existsSync: _grokExists, statSync: _grokStat } = await import("fs");
+  const { resolve: _grokResolve } = await import("path");
+  const _cwdServer = _grokResolve(process.cwd(), ".anet/node-server.js");
+  let _serverPath = _cwdServer;
+  if (!_grokExists(_serverPath)) {
+    // Fallback: try the agent-network npm package's bundled dist (works on
+    // global npm installs that didn't run `anet init project` in the cwd).
+    try {
+      const _req = (await import("module")).createRequire(import.meta.url);
+      const _pkgServer = _req.resolve("@sleep2agi/agent-network/dist/src/node-server.js");
+      if (_grokExists(_pkgServer)) _serverPath = _pkgServer;
+    } catch { /* fall through, will warn below */ }
+  }
+  if (!_grokExists(_serverPath)) {
+    warn(`[grok] ⚠ #204 — commhub MCP server file not found at ${_cwdServer}; ` +
+         `injecting absolute path anyway, but tools will likely fail to register. ` +
+         `Run \`anet init project\` in this cwd to install .anet/node-server.js.`);
+  } else {
+    debug(`[grok] commhub MCP server resolved: ${_serverPath} (${_grokStat(_serverPath).size}B)`);
+  }
+  // process.execPath is `bun` when agent-node ran via `bun cli.ts` or `npx
+  // @sleep2agi/agent-node` (which bun-installs). Fall back to PATH lookup of
+  // "bun" otherwise — Grok's PATH may still resolve it on most user setups.
+  const _bunPath = process.execPath && /\/(?:bun|bun-node)$/.test(process.execPath)
+    ? process.execPath
+    : "bun";
   const grokMcpServers = [{
     name: "commhub",
-    command: "bun",
-    args: [".anet/node-server.js"],
+    command: _bunPath,
+    args: [_serverPath],
     env: commhubMcpEnv,
   }];
   const runOnce = async (sessionId?: string, label = "primary") => {
@@ -1328,6 +1363,18 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
       onEvent: (_event, state) => {
         if (state.skippedReplay > 0 && state.skippedReplay % 50 === 0) {
           debug(`[grok] skipped replay chunks=${state.skippedReplay}`);
+        }
+      },
+      // #204 preview.4 — surface Grok stderr (carries MCP subprocess
+      // handshake / spawn errors). Lines tagged so `anet logs` filtering
+      // is obvious. Severity routing: lines mentioning error/fail/cannot
+      // go through warn(); everything else goes to debug() to avoid
+      // chatty noise (grok logs are verbose).
+      onStderr: (line) => {
+        if (/error|fail|cannot|denied|enoent|not found/i.test(line)) {
+          warn(`[grok-stderr] ${line}`);
+        } else {
+          debug(`[grok-stderr] ${line}`);
         }
       },
     });
