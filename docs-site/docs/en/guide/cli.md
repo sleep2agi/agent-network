@@ -192,7 +192,7 @@ What it does:
 ```
 anet hub start
 Starting CommHub Server on port 9200 (bind 127.0.0.1)...
-✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.0)
+✅ Server running on http://127.0.0.1:9200 (commhub-server v0.8.3)
 🔒 secured
 ✅ Admin account created
    username: admin
@@ -501,14 +501,14 @@ anet upgrade [--channel preview|latest] [--self] [--dry-run]
 **Plan output (one line per package)**:
 
 ```
-  anet (self)         2.2.0                →  2.2.6                → upgrade
+  anet (self)         2.2.0                →  2.2.9                → upgrade
                       (since v0.10.6 #154 anet upgrade auto-detached-spawns by default — no --self flag needed when self is < target;
                        chicken-and-egg note for users on 2.2.4 or older: one-time manual `npm install -g @sleep2agi/agent-network@latest`
                        to reach 2.2.5+, then subsequent `anet upgrade` will auto-detached-spawn)
-  agent-node          2.4.0                →  2.4.2                → upgrade
-  commhub-server      not installed        →  0.8.2                (lazy via npx, skipped)
+  agent-node          2.4.0                →  2.4.6                → upgrade
+  commhub-server      not installed        →  0.8.3                (lazy via npx, skipped)
                       (not installed globally — lazy-fetched via npx by `anet hub start`)
-  dashboard           0.5.0                →  0.5.3                → upgrade
+  dashboard           0.5.0                →  0.5.6                → upgrade
 ```
 
 | Badge | Meaning |
