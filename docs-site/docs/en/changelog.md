@@ -24,7 +24,7 @@ This log runs reverse-chronologically. **The version scheme was reshuffled once*
 
 **Fix**: Every node forks an isolated cwd (`.anet/nodes/<alias>/runtime-cwd/`), decoupled from the discovery path. This eliminates stale `.mcp.json` interference.
 
-**E2E verification**: cross-node dispatch on the `grok测试6` real node — channel sender attribution correctly attributed to `grok测试6`, proving the LLM-layer attribution path is uncontaminated.
+**E2E verification**: cross-node dispatch on a live Grok node — channel sender attribution correctly attributed to the sending node's alias, proving the LLM-layer attribution path is uncontaminated.
 
 #### [#194](https://github.com/sleep2agi/agent-network/issues/194) — commhub broadcast sender attribution hotfix
 

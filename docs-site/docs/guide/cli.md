@@ -731,24 +731,24 @@ anet goal <subcommand> [args] [flags]
 anet goal list
 
 # 看一个节点的 goal
-anet goal list 通信SDK马
+anet goal list my-coder
 
 # 看一个 goal 详情
-anet goal show 通信SDK马 abcd1234
+anet goal show my-coder abcd1234
 
 # 把 interval 改成 10 分钟
-anet goal edit 通信SDK马 abcd1234 --interval 10min
+anet goal edit my-coder abcd1234 --interval 10min
 
 # 同时改 text + status
-anet goal edit 通信SDK马 abcd1234 \
+anet goal edit my-coder abcd1234 \
   --text "每 10 分钟检查 deploy 状态并把异常上报指挥室" \
   --status active
 
 # 暂停一个 goal
-anet goal edit 通信SDK马 abcd1234 --status paused
+anet goal edit my-coder abcd1234 --status paused
 
 # 取消一个 goal
-anet goal cancel 通信SDK马 abcd1234
+anet goal cancel my-coder abcd1234
 ```
 
 > **运行中的 node 不感知本地 `goals.json` 改动**：当前 agent-node 把 goal 状态保留在内存里。`anet goal edit/cancel` 改 file 后，CLI 会通过 `.pid` / tmux session 检测节点是否在跑，并在 stdout 提示 `node appears to be running; restart it for local goals.json changes to take effect.`。live goal control（agent 自己通过 commhub MCP 工具 CRUD goal）规划在 issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar C，等 design review。

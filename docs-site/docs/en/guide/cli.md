@@ -725,24 +725,24 @@ At least one flag is required, otherwise the command prints `No edit flags suppl
 anet goal list
 
 # Filter by node
-anet goal list 通信SDK马
+anet goal list my-coder
 
 # Inspect one goal in detail
-anet goal show 通信SDK马 abcd1234
+anet goal show my-coder abcd1234
 
 # Change interval to 10 minutes
-anet goal edit 通信SDK马 abcd1234 --interval 10min
+anet goal edit my-coder abcd1234 --interval 10min
 
 # Update text and status in one call
-anet goal edit 通信SDK马 abcd1234 \
+anet goal edit my-coder abcd1234 \
   --text "Check the deploy every 10 minutes and report anomalies to the room" \
   --status active
 
 # Pause a goal
-anet goal edit 通信SDK马 abcd1234 --status paused
+anet goal edit my-coder abcd1234 --status paused
 
 # Cancel a goal
-anet goal cancel 通信SDK马 abcd1234
+anet goal cancel my-coder abcd1234
 ```
 
 > **A running node does not pick up local `goals.json` edits automatically**: agent-node currently keeps goal state in memory. After `anet goal edit/cancel`, the CLI checks `.pid` / tmux for the node and prints `node appears to be running; restart it for local goals.json changes to take effect.` Live goal control (agents themselves CRUD-ing goals via commhub MCP tools) is planned as issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar C, awaiting design review.

@@ -24,7 +24,7 @@
 
 **修复**：每个节点 fork 独立 cwd（`.anet/nodes/<alias>/runtime-cwd/`），与发现路径解耦，彻底解决 stale `.mcp.json` 干扰。
 
-**E2E 验证**：在 `grok测试6` 真节点跑通跨节点 dispatch —— channel sender attribution 正确归属到 `grok测试6`，证实 LLM 层 attribution 链路无污染。
+**E2E 验证**：在真节点跑通跨节点 dispatch —— channel sender attribution 正确归属到发送节点 alias，证实 LLM 层 attribution 链路无污染。
 
 #### [#194](https://github.com/sleep2agi/agent-network/issues/194) — commhub broadcast 发送者归属 hotfix
 
