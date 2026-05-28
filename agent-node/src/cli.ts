@@ -1705,7 +1705,18 @@ async function connectTelegram(channel: TelegramChannel) {
 
 async function connectSSE() {
   const sseUrl = `${COMMHUB_URL}/events/${encodeURIComponent(ALIAS)}`;
-  let delay = 3000;
+  // #202 — auto-reconnect after hub restart. Exponential backoff 1→2→4→8→30s
+  // (cap per issue spec). Plus: re-call `register()` on every successful
+  // (re)connect so the node reappears in dashboard within ~30s of hub coming
+  // back, rather than waiting up to one 3-minute heartbeat tick. First-boot
+  // register is still done at line 1808 to keep startup latency low; the
+  // `firstConnect` guard prevents the double-register on the initial event.
+  const BASE_DELAY_MS = 1_000;
+  const MAX_DELAY_MS = 30_000;
+  const ABANDON_AFTER_MS = 60 * 60 * 1_000;  // 1h continuous failure → give up
+  let delay = BASE_DELAY_MS;
+  let firstConnect = true;
+  let downSince: number | null = null;
   while (true) {
     debug(`SSE connecting: ${sseUrl}`);
     try {
@@ -1722,9 +1733,16 @@ async function connectSSE() {
           error(`SSE 401: ntok_ 已失效（hub DB 可能被重置或 token 被撤销）。试 \`anet doctor --fix\``);
         }
         else warn(`SSE failed: ${res.status}`);
-        await new Promise(r => setTimeout(r, delay)); delay = Math.min(delay * 1.5, 60_000); continue;
+        downSince = downSince ?? Date.now();
+        if (Date.now() - downSince > ABANDON_AFTER_MS) {
+          error(`SSE 连续 >1h 连不上 hub (${COMMHUB_URL}) — 放弃自动重连。运行 \`anet node start ${ALIAS}\` 手动恢复。`);
+          return;
+        }
+        await new Promise(r => setTimeout(r, delay));
+        delay = Math.min(delay * 2, MAX_DELAY_MS);
+        continue;
       }
-      delay = 3000;
+      delay = BASE_DELAY_MS;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -1737,7 +1755,19 @@ async function connectSSE() {
           if (!line.startsWith("data: ")) continue;
           try {
             const ev = JSON.parse(line.slice(6));
-            if (ev.type === "connected") { log("SSE connected"); continue; }
+            if (ev.type === "connected") {
+              log("SSE connected");
+              downSince = null;
+              if (!firstConnect) {
+                // #202 — hub may have restarted while we were down; resend
+                // register so dashboard `sessions` row repopulates immediately
+                // rather than waiting for the 3-min heartbeat.
+                log("re-registering after SSE reconnect");
+                register().catch((e) => warn(`re-register failed: ${e?.message || e}`));
+              }
+              firstConnect = false;
+              continue;
+            }
             if (["new_task", "broadcast"].includes(ev.type)) {
               log(`← SSE ${ev.type}`);
               await processInbox();
@@ -1749,9 +1779,15 @@ async function connectSSE() {
         }
       }
     } catch (err: any) { warn(`SSE error: ${err.message}`); }
+    // Connection dropped (read loop ended or threw) — start reconnect timer.
+    downSince = downSince ?? Date.now();
+    if (Date.now() - downSince > ABANDON_AFTER_MS) {
+      error(`SSE 连续 >1h 连不上 hub (${COMMHUB_URL}) — 放弃自动重连。运行 \`anet node start ${ALIAS}\` 手动恢复。`);
+      return;
+    }
     debug(`SSE reconnecting (${delay / 1000}s)...`);
     await new Promise(r => setTimeout(r, delay));
-    delay = Math.min(delay * 1.5, 60_000);
+    delay = Math.min(delay * 2, MAX_DELAY_MS);
   }
 }
 

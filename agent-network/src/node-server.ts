@@ -307,6 +307,34 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
 });
 
 // ── SSE Listener: subscribe to /events/:alias ─────
+// #202 — auto-reconnect after hub restart. Exponential backoff 1→2→4→8→30s
+// (per issue spec), and re-send register on every successful (re)connect so
+// the node reappears on dashboard within ~30s of hub coming back, instead of
+// waiting up to one 3-minute heartbeat tick. firstConnect guard prevents the
+// boot-time double-register (main() already fires one register at startup).
+const BASE_DELAY_MS = 1_000;
+const MAX_DELAY_MS = 30_000;
+const ABANDON_AFTER_MS = 60 * 60 * 1_000;
+
+// Re-register on reconnect. Mirrors the payload main() sends at boot.
+async function reregister(): Promise<void> {
+  try {
+    await callCommHub("report_status", {
+      resume_id: RESUME_ID,
+      alias: ALIAS,
+      status: "idle",
+      server: hostname(),
+      hostname: hostname(),
+      agent: "claude-code",
+      project_dir: process.cwd(),
+      tmux_name: TMUX_NAME || undefined,
+    });
+    log(`re-registered as "${ALIAS}" after SSE reconnect`);
+  } catch (e) {
+    log(`re-register failed: ${e}`);
+  }
+}
+
 async function connectSSE() {
   const url = `${COMMHUB_URL}/events/${encodeURIComponent(ALIAS)}`;
   const headers: Record<string, string> = {};
@@ -314,18 +342,29 @@ async function connectSSE() {
 
   log(`connecting to ${url}`);
 
+  let delay = BASE_DELAY_MS;
+  let firstConnect = true;
+  let downSince: number | null = null;
+
   while (true) {
     try {
       const res = await fetch(url, { headers });
       if (!res.ok) {
         log(`SSE error: ${res.status} ${res.statusText}`);
-        await sleep(5000);
+        downSince = downSince ?? Date.now();
+        if (Date.now() - downSince > ABANDON_AFTER_MS) {
+          log(`SSE 连续 >1h 连不上 hub (${COMMHUB_URL}) — 放弃自动重连。手动 anet node start 恢复。`);
+          return;
+        }
+        await sleep(delay);
+        delay = Math.min(delay * 2, MAX_DELAY_MS);
         continue;
       }
 
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      delay = BASE_DELAY_MS;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -342,6 +381,11 @@ async function connectSSE() {
           try {
             const event = JSON.parse(dataLine.slice(6));
             await handleSSEEvent(event);
+            if (event.type === "connected") {
+              downSince = null;
+              if (!firstConnect) await reregister();
+              firstConnect = false;
+            }
           } catch (e) {
             log(`parse error: ${e}`);
           }
@@ -353,7 +397,14 @@ async function connectSSE() {
       log(`SSE connection error: ${err}`);
     }
 
-    await sleep(3000);
+    // Read loop exited (stream ended or threw) — start the reconnect timer.
+    downSince = downSince ?? Date.now();
+    if (Date.now() - downSince > ABANDON_AFTER_MS) {
+      log(`SSE 连续 >1h 连不上 hub (${COMMHUB_URL}) — 放弃自动重连。手动 anet node start 恢复。`);
+      return;
+    }
+    await sleep(delay);
+    delay = Math.min(delay * 2, MAX_DELAY_MS);
   }
 }
 
