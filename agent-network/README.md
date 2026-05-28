@@ -51,7 +51,7 @@ Current npm dist-tags verified on 2026-05-28:
 | `@sleep2agi/agent-network` | `2.2.9` | `2.2.10-preview.3` |
 | `@sleep2agi/commhub-server` | `0.8.3` | `0.8.4-preview.1` |
 | `@sleep2agi/agent-network-dashboard` | `0.5.6` | `0.5.7-preview.2` |
-| `@sleep2agi/agent-node` | `2.4.6` | `2.4.7-preview.5` |
+| `@sleep2agi/agent-node` | `2.4.6` | `2.4.7-preview.6` |
 
 ## 5-Minute Quick Start
 
