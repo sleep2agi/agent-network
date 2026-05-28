@@ -5,11 +5,11 @@
 <h1 align="center">Agent Network</h1>
 
 <p align="center">
-  <strong>Multi-agent, one command. Let Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / InternLM / OpenRouter work together on your machine.</strong>
+  <strong>Local-first multi-agent network — 4 runtimes × 8 LLM providers, orchestrated into a single mesh with one command.</strong>
 </p>
 
 <p align="center">
-  Dev teams · content factories · research crews · debate clubs — all running on your own box.
+  Claude Code · Claude Agent SDK · Codex · Grok Build ACP running side by side; agents delegate tasks, stream context, and coordinate — all on your own hardware. Apache 2.0 open source.
 </p>
 
 <p align="center">

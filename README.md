@@ -5,11 +5,11 @@
 <h1 align="center">Agent Network</h1>
 
 <p align="center">
-  <strong>多 Agent，一行命令。让 Claude / GPT / MiniMax / DeepSeek / GLM / Kimi / 书生 / OpenRouter 在你电脑上一起干活。</strong>
+  <strong>本地优先的多 Agent 协作网络 —— 4 个 Runtime × 8 家 LLM 厂商，一行命令编排成一张 mesh。</strong>
 </p>
 
 <p align="center">
-  开发团队 · 内容工厂 · 研究小组 · 辩论赛 —— 都跑在你自己的机器上。
+  Claude Code · Claude Agent SDK · Codex · Grok Build ACP 同台运行；agent 之间互派任务、流式协作、共享上下文，全部跑在你自己的硬件上。Apache 2.0 开源。
 </p>
 
 <p align="center">
