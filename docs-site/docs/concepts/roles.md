@@ -122,7 +122,7 @@ anet network join <code>                         # 用邀请码加入
 # 方式 1：owner 创建邀请码（推荐）—— 对方用邀请码加入直接拿到 admin role
 anet network invite --role admin --uses 1
 
-# 方式 2：现有 member 升级 —— 走 REST（CLI promote 子命令 v0.10.10 仍未提供，排到 v0.11+ / 未排期）
+# 方式 2：现有 member 升级 —— 走 REST（CLI promote 子命令 v0.10.11 仍未提供，排到 v0.11+ / 未排期）
 curl -X PUT http://localhost:9200/api/networks/<net_id>/members/<user_id> \
   -H "Authorization: Bearer <owner_utok>" \
   -H "Content-Type: application/json" \
