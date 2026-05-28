@@ -44,7 +44,7 @@
 > **前置**：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings）。
 
 ```bash
-# 装一个全局包（拉 npm @latest，当前 agent-network 2.2.8）
+# 装一个全局包（拉 npm @latest，当前 agent-network 2.2.9）
 npm install -g @sleep2agi/agent-network
 
 # 终端 1 —— 起 Hub（保持开着）
@@ -232,10 +232,10 @@ anet node start grok-demo
 
 | 包 | 版本 | 角色 |
 |---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.8` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 + `grok-build-acp` runtime 入口（[详见 changelog](https://anet.sh/changelog)）|
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.9` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 + `grok-build-acp` runtime 入口 + 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接（[详见 changelog](https://anet.sh/changelog)）|
 | [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.3` | MCP + REST + SSE 通信中枢（SQLite）+ `meta.attachments` / `meta_json` 图片附件元数据 + `/api/server/:host/health` + `/api/server/:host/agents` |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.4` | Web Dashboard —— Next.js 16，图片上传/粘贴发送（v0.10.9）+ 4 套主题 + Hero 3 网络节点前端 8/8 surface + Servers 面板 polish + 100+ 轮 typography & 圆角级联 polish |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.5` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP + codex-sdk 图片输入 + Grok ACP 稳定化与工具状态泄漏清洗 |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.6` | Web Dashboard —— Next.js 16，图片上传/粘贴发送（v0.10.9）+ 4 套主题 + Hero 3 网络节点前端 8/8 surface + Servers 面板 polish + 100+ 轮 typography & 圆角级联 polish |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.6` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP + codex-sdk 图片输入 + Grok ACP 稳定化与工具状态泄漏清洗 + Grok delegate parser broaden |
 
 CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
 
@@ -283,7 +283,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 ---
 
 > [!IMPORTANT]
-> **当前 stable**（Apache 2.0，4 个包均在 npm `latest`：agent-network `2.2.8` / agent-node `2.4.5` / commhub-server `0.8.3` / agent-network-dashboard `0.5.4`）。本版补齐 Grok Build ACP 正式接入：`anet node create --runtime grok-build-acp`、Grok ACP session 持久化/恢复、`-32603` 稳定化、以及 Grok 工具状态泄漏清洗。v0.10 系列从 Direct Runtime + Observability Foundations 起持续迭代，详见 [changelog](https://anet.sh/changelog)；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
+> **当前 stable**（Apache 2.0，4 个包均在 npm `latest`：agent-network `2.2.9` / agent-node `2.4.6` / commhub-server `0.8.3` / agent-network-dashboard `0.5.6`）。**v0.10.10** 补齐小米 MiMo 5-model preset（mimo-v2.5-pro 默认 + v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign）+ envRef wizard-to-start 自动衔接（`anet node create` 完不用 export，`start` 自动 source `.env`）+ [#192](https://github.com/sleep2agi/agent-network/issues/192) `anet -v` 完整 prerelease 后缀 + [#189](https://github.com/sleep2agi/agent-network/issues/189) Grok runtime parser broaden；**v0.10.9** 加 codex-sdk 图片输入 + commhub 附件 `meta_json` 元数据；**v0.10.8** Grok Build ACP 正式接入: `anet node create --runtime grok-build-acp`、Grok ACP session 持久化/恢复、`-32603` 稳定化、以及 Grok 工具状态泄漏清洗。v0.10 系列从 Direct Runtime + Observability Foundations 起持续迭代，详见 [changelog](https://anet.sh/changelog)；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
 >
 > **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
 
