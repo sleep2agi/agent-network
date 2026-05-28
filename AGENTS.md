@@ -20,7 +20,7 @@
 
 - `server/src/` — CommHub Server (Bun + SQLite)
 - `agent-network/bin/cli.ts` — anet CLI (39 命令)
-- `agent-node/src/cli.ts` — Agent 运行时 (3 runtime)
+- `agent-node/src/cli.ts` — Agent 运行时 (4 runtime: claude-agent-sdk / claude-code-cli / codex-sdk / grok-build-acp)
 - `tests/testN-xxx/` — 独立 Docker 测试套件 (每个有 Dockerfile + run.sh)
 - `docs/` — 设计文档 + 测试报告
 

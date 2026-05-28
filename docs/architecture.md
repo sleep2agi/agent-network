@@ -28,15 +28,16 @@ agent-network/
 
 **设计原则**：client.ts 是核心（零外部依赖），server.ts 是薄包装（委托给 `../../server/src/index.ts`），cli.ts 是粘合层。
 
-### 三个 runtime
+### 四个 runtime
 
-Profile 的 `runtime` 字段有三个取值。其中 **`claude-agent-sdk` / `codex-sdk` 由 `@sleep2agi/agent-node` 驱动**（agent-node 的 `RUNTIME_MAP` 只映射这两个，见 `agent-node/src/cli.ts:151-154`）；**`claude-code-cli` 不走 agent-node** —— `anet node start` 直接 spawn 本机 `claude` 二进制：
+Profile 的 `runtime` 字段有四个取值。其中 **`claude-agent-sdk` / `codex-sdk` / `grok-build-acp` 由 `@sleep2agi/agent-node` 驱动**（agent-node 的 `RUNTIME_MAP` 见 `agent-node/src/cli.ts`）；**`claude-code-cli` 不走 agent-node** —— `anet node start` 直接 spawn 本机 `claude` 二进制：
 
 | Runtime | 说明 | 模型 |
 |------|------|------|
 | `claude-agent-sdk`（**默认**） | Anthropic Claude Agent SDK + Anthropic 兼容 API | Claude / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等（完整 provider 表见 [anet.sh / multi-model](https://anet.sh/guide/multi-model)） |
 | `codex-sdk` | OpenAI Codex SDK | OpenAI Codex（最新 model id 查官方文档） |
 | `claude-code-cli` | Claude Code CLI（要 Claude Pro 订阅） | Claude（通过本地 CLI 调用） |
+| `grok-build-acp` | xAI Grok Build ACP server（spawn 本机 `grok` 二进制 + ACP 协议） | xAI Grok（grok-build 系列；[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)） |
 
 Profile 中通过 `runtime` 字段选择。早期文档里的 `claude-code` / `codex` / `agent-sdk` 已重命名（doctor `anet doctor --fix` 自动迁移）。
 
