@@ -128,13 +128,29 @@ In `agent-node` v2.4.5 and earlier, the CommHub wrapper only recognizes the lite
 
 Native Grok MCP tool injection is not the stable path in this preview.
 
-For deterministic cross-agent delegation, use explicit wording:
+For deterministic cross-agent delegation, use explicit wording. The `agent-node` wrapper recognizes a broad set of Chinese / English phrasings — pick whichever reads naturally:
 
 ```text
+# Direct MCP-style
+send_task A站助手 用一句话介绍 A站当前情况
+
+# Verb-suffixed (most common in Chinese chat)
 给 A站助手 发任务: 用一句话介绍 A站当前情况
+给 A站助手 说一下 当前情况
+给 A站助手 沟通一下 进度
+给 A站助手 打个招呼
+让 A站助手 ship 这个 PR
+请 A站助手 review 一下
+派给 A站助手: ...
+转给 A站助手: ...
+交给 A站助手: ...
+
+# Colloquial / imperative
+你去给 A站助手 打个招呼
+你和 A站助手 沟通一下 ...
 ```
 
-When `agent-node` detects that shape, it handles the workflow before invoking Grok:
+When `agent-node` detects any of these shapes, it intercepts the turn **before** it reaches Grok and handles the workflow itself:
 
 1. `get_all_status` checks the target alias.
 2. `send_task` dispatches the child task with `parent_task_id`.
@@ -142,6 +158,14 @@ When `agent-node` detects that shape, it handles the workflow before invoking Gr
 4. The child result is returned to the original task sender.
 
 This is the supported collaboration mode for the first preview because it avoids depending on Grok native MCP tool discovery.
+
+> **v0.10.11 preview ([#201](https://github.com/sleep2agi/agent-network/issues/201) commit [`bd72e9f`](https://github.com/sleep2agi/agent-network/commit/bd72e9f))** — 3-layer hardening lands in `agent-node@2.4.7-preview.X`:
+>
+> 1. **Wrapper parser broadened** to cover `send_task X Y`, `给 X (发|说|沟通|打) [个|消息|一下|招呼…] BODY`, `你去给 X BODY`, `让/请/派给/转给/交给 X …` — typical Chinese chat phrasings that earlier preview versions missed.
+> 2. **Grok system prompt softened** — if the wrapper misses an edge-case phrasing, Grok is now instructed to **fall back to calling `commhub_send_task` directly** instead of refusing the task with "无法直接执行 / 请提供精确 alias 和子任务内容". Vincent 6229 UAT catch.
+> 3. **Authorised fallback list** — the prompt explicitly enumerates the wrapper-covered phrasings so Grok can recognize edge cases and degrade gracefully.
+>
+> On `@latest` v0.10.10 stable (`agent-node@2.4.6`), only the narrower `给 X 发任务` / `给 X 派任务` / `send_task X` literal phrasings reliably trigger the wrapper; other shapes may fall through to Grok and get refused. Once v0.10.11 is promoted to `@latest`, this caveat is gone.
 
 ## Operational Notes
 
