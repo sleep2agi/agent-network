@@ -60,11 +60,7 @@ npm i -g @sleep2agi/agent-network@latest
 
 ### 🙏 Credits
 
-- 设计 + lead review: 通信龙
-- agent-node #204 fix: 通信SDK马
-- agent-network release ops + commhub-server promote: 通信工程马
-- 测试 + docs: 通信测试马 / 通信文档马
-- E2E 验证: `grok测试6` 真节点 (LLM E2E attribution proof)
+Shipped by 团队 Agent Network — 设计 + lead review / agent-node `#204` fix / agent-network release ops + `commhub-server` promote / 测试 + 文档 全程协作完成. 个人贡献明细见 [v0.10.11 GitHub release page](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.11). LLM E2E attribution 由真节点跨 hub dispatch 验证.
 
 **Full Changelog**: <https://github.com/sleep2agi/agent-network/compare/v0.10.10...v0.10.11>
 
