@@ -354,7 +354,7 @@ vercel deploy --prebuilt --prod      # 上传 .vercel/output
 - 防火墙关闭了长连接
 - nginx `proxy_buffering` 默认 on（SSE 必须 off，否则事件被缓冲到 buffer 满才一次性送达）
 
-> **断了 agent 会自己重连**：v0.10.10 stable 指数退避 `3s → 60s`；v0.10.11 preview ([#202](https://github.com/sleep2agi/agent-network/issues/202)) 改 `1s → 30s` 上限 + 重连即重 register + 1h zombie-retry guard。如果 hub 重启了 dashboard 看不到节点，参考 [troubleshooting — Hub 重启后 Dashboard 看不到节点](/troubleshooting#hub-重启后-dashboard-看不到节点)。
+> **断了 agent 会自己重连**：v0.10.11 stable 指数退避 `3s → 60s`；preview channel ([#202](https://github.com/sleep2agi/agent-network/issues/202)) 改 `1s → 30s` 上限 + 重连即重 register + 1h zombie-retry guard（未 promote latest）。如果 hub 重启了 dashboard 看不到节点，参考 [troubleshooting — Hub 重启后 Dashboard 看不到节点](/troubleshooting#hub-重启后-dashboard-看不到节点)。
 
 Nginx 配置建议：
 

@@ -142,7 +142,7 @@ Dashboard 根据角色调整按钮可见性 / 可点击性（设计目标）：
 - **member** 看不到"管理成员"、"设置"按钮
 - **admin** 看不到"删除网络"按钮
 
-::: info Dashboard `0.5.6` 实际行为（v0.10.10 stable）
+::: info Dashboard `0.5.6` 实际行为（v0.10.11 stable）
 角色 → 按钮可见性的 UI 联动**部分实装**。即使按钮当前还显示，**Server 端会 403 拒绝**（`canWrite()` 强制 RBAC），权限本身不会绕过。完整 UI 按钮 hiding **v0.9.x + v0.10.0-10 scope 都未动**（v0.9.x Recovery & Observability、v0.10.0 Direct Runtime + Observability Foundations、v0.10.1 PINNED hotfix、v0.10.2 Hero A disk + Hero D 拓扑前缀 Option C + disk render、v0.10.3 codex preset、v0.10.4 dashboard orphan-band + `anet upgrade` UX 警告、v0.10.5 batch wizard workdir + codex/claude skip API key、v0.10.6 `anet upgrade` Option B detached + wizard silent-exit、v0.10.7 codex-sdk batch yolo parity、v0.10.8 Servers UI 文案修、v0.10.9 codex-sdk 图片输入 + commhub 附件 `meta_json`、v0.10.10 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接 —— 主题都不在 RBAC UI），排到 v0.11+ Dashboard 改造里再补。
 :::
 

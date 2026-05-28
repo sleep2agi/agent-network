@@ -238,8 +238,8 @@ Once admin is bootstrapped (`~/.anet/server/admin-utok.json` exists), `anet hub 
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "stop" branch)
 
-::: warning Added in v0.10.11 preview (#200)
-This command ships on the `@preview` channel (agent-network `2.2.10-preview.X`+); **`@latest` v0.10.10 stable does not yet include it**. Install via `npm i -g @sleep2agi/agent-network@preview` to use it now. It lands for all `@latest` users once v0.10.11 is promoted to `@latest`.
+::: tip Added in v0.10.11 ([#200](https://github.com/sleep2agi/agent-network/issues/200))
+This command shipped to `@latest` in v0.10.11 (`agent-network 2.2.10`+). If you're still on v0.10.10 or earlier, run `anet upgrade` or `npm i -g @sleep2agi/agent-network@latest` to get it.
 :::
 
 Stop the local CommHub Server. Uses `lsof -t -i :<port> -sTCP:LISTEN` to find the process, sends SIGTERM for a graceful exit, and falls back to SIGKILL after a 3-second grace window if anything is still listening.
@@ -255,8 +255,8 @@ Works even when no foreground process is available (before v0.10.11 you had to f
 
 > [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "status" branch)
 
-::: warning Added in v0.10.11 preview (#199)
-This command ships on the `@preview` channel (agent-network `2.2.10-preview.X`+); **`@latest` v0.10.10 stable does not yet include it**. Install via `npm i -g @sleep2agi/agent-network@preview` to use it now. It lands for all `@latest` users once v0.10.11 is promoted to `@latest`.
+::: tip Added in v0.10.11 ([#199](https://github.com/sleep2agi/agent-network/issues/199))
+This command shipped to `@latest` in v0.10.11 (`agent-network 2.2.10`+). If you're still on v0.10.10 or earlier, run `anet upgrade` or `npm i -g @sleep2agi/agent-network@latest` to get it.
 :::
 
 Show the hub's running state — listener PID, port, and the server version reported by `/health`.

@@ -60,7 +60,7 @@ sudo ufw allow 9200
 
 **Cause**: SSE long connection dropped, usually due to network fluctuation.
 
-**Solution**: The agent will auto-reconnect (v0.10.10 stable: exponential backoff 3s → 60s; v0.10.11 preview [#202](https://github.com/sleep2agi/agent-network/issues/202) tightens to `1s → 30s` cap + re-register on reconnect + 1h zombie-retry guard — [see agent-node reconnection](/en/guide/agent-node#reconnection)); no manual intervention usually needed.
+**Solution**: The agent will auto-reconnect (v0.10.11 stable: exponential backoff 3s → 60s; preview channel [#202](https://github.com/sleep2agi/agent-network/issues/202) tightens to `1s → 30s` cap + re-register on reconnect + 1h zombie-retry guard, not yet promoted to latest — [see agent-node reconnection](/en/guide/agent-node#reconnection)); no manual intervention usually needed.
 
 If it persists:
 
@@ -81,10 +81,10 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 **Symptom**: After `anet hub stop` + `anet hub start` (or after the hub process crashes and restarts), the Dashboard shows every node as `offline` or missing from the list entirely — even though the agent processes are still alive.
 
-**Cause (v0.10.10 stable)**: The hub restart clears its in-memory sessions table. `agent-node`'s SSE reconnect only restores the event stream; it **does not re-send `register`** — so the hub-side sessions table only rebuilds on the next 3-minute heartbeat, leaving the Dashboard blank in between.
+**Cause (v0.10.11 stable)**: The hub restart clears its in-memory sessions table. `agent-node`'s SSE reconnect only restores the event stream; it **does not re-send `register`** — so the hub-side sessions table only rebuilds on the next 3-minute heartbeat, leaving the Dashboard blank in between.
 
 **Solution**:
-- **v0.10.10 stable**: Wait for the next heartbeat (≤ 3 min) to auto-recover, or run `anet project restart` to force each node to re-boot
+- **v0.10.11 stable**: Wait for the next heartbeat (≤ 3 min) to auto-recover, or run `anet project restart` to force each node to re-boot
 - **v0.10.11 preview** ([#202](https://github.com/sleep2agi/agent-network/issues/202) `agent-node@2.4.7-preview.X`+): structural fix — every successful SSE reconnect immediately re-fires `register` (idempotent upsert on the hub), and the Dashboard recovers the full node list in under 30s. **No `anet project restart` needed**, pair this with the new v0.10.11 `anet hub stop` / `hub status` commands to make hub maintenance a one-shot SOP
 
 ---

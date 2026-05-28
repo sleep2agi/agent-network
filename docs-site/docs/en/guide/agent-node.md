@@ -439,7 +439,7 @@ The complete Agent Node lifecycle:
 SSE auto-reconnects on disconnect using exponential backoff:
 
 ```
-Retry interval (v0.10.10 stable): 3s → 6s → 12s → 24s → 48s → 60s (cap)
+Retry interval (v0.10.11 stable): 3s → 6s → 12s → 24s → 48s → 60s (cap)
 ```
 
 Online status is automatically restored after successful reconnection.
