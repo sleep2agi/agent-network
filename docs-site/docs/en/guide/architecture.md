@@ -301,7 +301,7 @@ Agent Node is the working unit in the network, responsible for receiving tasks, 
 
 **Runs on**: Client machines (can be multiple). Connects to CommHub Server over the network.
 
-### Three Runtimes
+### Four Runtimes
 
 ```mermaid
 graph LR
@@ -313,11 +313,13 @@ graph LR
         R0[claude-code-cli<br/>Local Claude CLI subscription]
         R1[claude-agent-sdk<br/>Claude / domestic-compat]
         R2[codex-sdk<br/>OpenAI Codex]
+        R3[grok-build-acp<br/>xAI Grok Build ACP]
     end
 
     CORE --> R0
     CORE --> R1
     CORE --> R2
+    CORE --> R3
 ```
 
 | Runtime | AI Engine | Use Case | Models |
@@ -325,6 +327,7 @@ graph LR
 | `claude-code-cli` | spawn local `claude` process | Reuse Claude subscription / interactive tool use | Claude Sonnet/Opus (subscription) |
 | `claude-agent-sdk` | Anthropic Claude Agent SDK | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (see [Multi-model](/en/guide/multi-model)) |
 | `codex-sdk` | OpenAI Codex SDK (v0.10.0+ can opt-in to a direct stdio path — see below) | Code generation, tool use | OpenAI Codex |
+| `grok-build-acp` | spawn local `grok` ACP server | xAI Grok Build ACP-protocol cross-agent collaboration | xAI Grok (grok-build series) ([details on GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)) |
 
 ::: tip v0.10.0 new — `codex-direct-stdio` opt-in path ([#141](https://github.com/sleep2agi/agent-network/issues/141))
 Set `ANET_CODEX_STDIO_DIRECT=1` to make agent-node switch the codex runtime from the `@openai/codex-sdk` wrapper to **`spawn('codex', ['app-server'])` + a ~155 LOC direct stdio JSON-RPC client**, getting the full 67-method v2 protocol surface (thread / turn / item / realtime) and **bypassing** the wrapper's `--mcp-config` HTTP-transport bug family ([#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause). **v0.10.x (including the current v0.10.8 stable) still defaults to the wrapper**; v0.11.0 plans to flip the default and rename the toggle to `ANET_CODEX_LEGACY_SDK=1` opt-out. The LLM-side tool surface is **unchanged** (the codex thread still uses only its baked-in tools; the commhub roundtrip is still handled by the agent-node parent process) — what changes is purely the **transport protocol** between agent-node and the codex process. Details: [runtimes — codex-sdk § codex-direct-stdio](/en/guide/runtimes#codex-sdk) + [agent-node — env vars § ANET_CODEX_STDIO_DIRECT](/en/guide/agent-node#environment-variables) + [release notes](/en/preview/v0.10.0#new-runtime-path-codex-direct-stdio).
