@@ -367,8 +367,66 @@ pub enum RequestedToolCategory {
 
 **HARD GATE 真探测保 anet 不 ship speculative preview**(per `feedback_release_preview_first` + `feedback_vendor_verify_before_hardcode`)。Vincent 早期 "anet 接入零代码" 推测在 ACP-isolated 路径下失效;real probe 用 1 LLM quota tick 暴露真实结构限制 → 4-issue chain (#194 / #201 / #202 / #203 / #204) + 本 #205 全部"在见到 Grok 实际行为之前不下结论"的方法学统一,RFC-021 §11 是这条方法学的教科书反例。
 
+## 12. Post-§11 verdict refinement (2026-05-30,SDK re-audit)
+
+§11 verdict 字面正确(`_meta.x.ai/requestedBackendTools` hint **不**让 Grok 暴露 native `XSearch` tool),但**范围太窄**。两次后续 SDK 实证(image-to-video + X-search re-audit)发现同一类盲区:**只看 ACP tool schema,没看 LLM 实际 action chain**。
+
+### 12.1 两次 erratum 触发的方法学 update
+
+| 时间 | Probe | §11 verdict 错在哪 | 真相 |
+|---|---|---|---|
+| 2026-05-28 R75 | image-to-video probe (Vincent 6512 hint) | §11 顺带说 `video_gen` 也"结构性不暴露"是基于 0 调用次数;但那次 prompt 不是要求视频 | `video_gen` 实际**在 ACP 暴露**,且 backend 通过 prompt 文本里的 URL 自动路由 image-to-video。anet 0 LOC。 |
+| 2026-05-30 R83 | X-search re-audit (通信龙 6526 push) | §11 "X search: 0 次"局限在 native `XSearch` tool;**漏看了 LLM 用 `run_terminal_command` 调 user script 拿真 X 数据** | LLM 用 `run_terminal_command` 跑 user workspace 里预设的 X API fetcher (e.g. Vincent `auto_update_news.js` + twitterapi.io key),拿到 5/5 真 x.com URL(curl 验证 HTTP 200)。**non-0 LOC** — 用户预设依赖。 |
+
+→ §11 关于 **`_meta` 双边 convention path A 不工作** 的结论**仍正确**,但 **"X-search 完全无法在 ACP 跑"** 的隐含意思**错** — LLM 用 terminal 兜底可绕。
+
+### 12.2 修订决策矩阵
+
+| Path | §11 状态 | §12 修订 |
+|---|---|---|
+| A — `_meta` 双边 convention | ❌ Grok 0.2.3 不 honor | 保持 ❌, code 留 forward-compat artifact |
+| B — Grok 非标 flag | ❌ drop | 保持 ❌ |
+| C — ACP spec upstream PR (#1302) | ✅ 唯一长期路径 | ✅ 仍是长期路径, 但**短期不是唯一选项** — LLM `run_terminal_command` 兜底也工作 |
+| **D (新)** — User-workspace setup + LLM terminal 兜底 | (§11 未列) | ✅ **短期 informant 类场景的实际路径**, 文档化至 [scenarios/x-search-informant.md](../scenarios/x-search-informant.md) |
+| Fallback — TUI exec opt-in | ⚠ opt-in 不自动 | 保持 ⚠ |
+
+### 12.3 "0 LOC" claim 必须 ship-state qualified
+
+之前 docs 笼统说"anet 接入零代码"的地方需要分场景:
+
+| 场景 | 0 LOC? | 依赖 |
+|---|---|---|
+| Scenario 2 image-to-video | ✅ YES | Grok backend smarts: prompt 里有 URL → 自动路由 grok-imagine-video |
+| Scenario 1 X-search informant | ⚠ NO | 需用户预设 X API key + fetch script 在 grok 节点 cwd 可达;LLM 用 `run_terminal_command` 找 + 跑 |
+
+文档已 amend: [docs/research/grok-x-search-capability-probe.md](../research/grok-x-search-capability-probe.md) erratum + [docs/scenarios/x-search-informant.md](../scenarios/x-search-informant.md) 新文档。
+
+### 12.4 第二次同模式 lesson (banked)
+
+"schema-not-artifact" 盲区已第二次出现:
+
+1. Phase 2 HARD GATE (R66): 看 0 次 `XSearch` tool_call,**没看 user reply 是不是有真 X URLs**
+2. R75 image-to-video probe (Vincent 6485): 看 video_gen `rawInput` 只 4 字段,**没看 mp4 视觉内容**
+3. R83 X-search re-audit (通信龙 6526): 看 `XSearch` 0 次,**没看 `run_terminal_command` 跑了 user script**
+
+→ Capability probe 必须 **content-level + agent-action-level** 双层验证:
+   - Tool schema scan (我之前默认做的) — *necessary but not sufficient*
+   - LLM reply 内容真实性 (ffmpeg / curl URL / hash 比对)
+   - `run_terminal_command` rawInput 全 trace (LLM 是不是绕 ACP 调本地 script)
+
+未来 anet runtime capability 文档化都默认按这个三层验证。
+
+### 12.5 §11 仍有效部分
+
+- Path A `_meta` hint 不工作 — 仍 confirmed,**不 ship** 这条 path
+- ACP `ClientCapabilities` 缺 `requestedTools` 是真 gap — 仍是 PR #1302 上游推动的核心 motivation
+- 跨 vendor scalable category enum (`requestedToolCategories`) 仍是长期最干净 fix
+- HARD GATE methodology (跑真 LLM tick 而非纯 schema 读) 仍 ship-blocking 标准
+
+§12 只是把 **短期路径** 从"只能等 PR #1302 merge" 扩到 "PR #1302 + workspace-setup + terminal 兜底",**没推翻 §11 任何具体技术 claim**。
+
 ---
 
-**RFC v1 draft 完成 + amend per Vincent 6440 + Phase 2 HARD GATE 实证 §11**, Phase 2 主线 A 死,Path C 升级为未来路径。
+**RFC v1 draft 完成 + amend per Vincent 6440 + Phase 2 HARD GATE 实证 §11 + post-re-audit verdict refinement §12**。Phase 2 主线 A 仍死,Path C 仍是长期路径,**短期 informant 类场景的实际可用 path 是 "User workspace setup + LLM terminal 兜底"(Path D)**。
 
 **Author-Agent**: 通信SDK马
