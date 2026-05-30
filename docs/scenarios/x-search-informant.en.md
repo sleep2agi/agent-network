@@ -1,16 +1,15 @@
 # X Search informant — anet × Grok Build X-search scenario
 
 > **Goal**: Add **X (Twitter) search informant capability** to anet `grok-build-acp` runtime nodes — one of two scenarios for [#205](https://github.com/sleep2agi/agent-network/issues/205) (tracked in [#206](https://github.com/sleep2agi/agent-network/issues/206)).
-> **Important correction (2026-05-30)**: This is a **two-tier** capability, not a single "setup required" path — schema-introspection confirmed the clean split.
+> **2026-05-30 second correction (Vincent 7031)**: The earlier "two-tier" split was over-engineered. A follow-up E2E probe showed Grok's native `web_search + allowed_domains` covers the basic ask end-to-end (5/5 curl-verified real x.com URLs). What used to be the "advanced tier" needs platform-side metadata (faves / retweets) that **X itself restricts to logged-in users and the X Premium API** — that's a platform limit, not a Grok or anet capability gap. We deliberately do **not** ship a third-party X API integration as the default demo path.
 
-## Two tiers, one line
+## One line — pure native, zero user setup
 
-- **Basic — out of the box ✅**: Find X URLs / post titles / snippets / approximate dates. **0 LOC anet, 0 user-side setup**. The LLM auto-uses ACP-exposed `web_search` with `allowed_domains=["x.com"]`.
-- **Advanced — user-side setup required ⚠**: Real-time X firehose, post metadata (faves / retweets / replies), advanced query syntax (`since:` / `min_faves:` / `mode=Latest`). **0 LOC anet, user-side setup needed**: a twitterapi.io API key + a fetcher script. The LLM invokes it through `run_terminal_command`.
+**0 anet LOC + 0 user-side cwd setup**: spin up a `grok-build-acp` node, send "find X posts by @user about <topic>", Grok auto-uses its built-in `web_search` with `allowed_domains=["x.com"]` to find X URLs, plus `web_fetch` for content/summaries. Markdown list of ~5 entries, curl-verified 5/5 HTTP 200.
 
-**Common to both**: anet itself stays **0 LOC**. The only difference is whether the user has pre-staged a twitterapi.io fetcher in the grok node's cwd.
+Evidence: [`docs/tests/p-grok-native-xsearch-e2e/report.md`](../tests/p-grok-native-xsearch-e2e/report.md) — basic prompt returned 5 real x.com/sama AGI URLs.
 
-## Basic tier — out of the box (try this first)
+## Out of the box (the user-facing path)
 
 ### Start a grok node
 
@@ -19,162 +18,113 @@
 grok login
 
 # 2. Start a grok-build-acp node (any cwd, no pre-staging needed)
-anet node create grok-search --runtime grok-build-acp
-anet node start grok-search
+anet node create grok-x --runtime grok-build-acp
+anet node start grok-x
 ```
 
-### Send a basic X search task
-
-```
-commhub_send_task(
-  alias="grok-search",
-  task="Find recent X / Twitter posts by @sama (Sam Altman) about OpenAI from the past week.
-        Return each post's https://x.com/... URL + approximate time + a short summary."
-)
-```
-
-LLM behavior (observed on 0.2.x alpha):
-
-1. `web_search` rawInput auto-fires: `{query: "@sama OpenAI site:x.com", allowed_domains: ["x.com", "twitter.com"]}`
-2. Returns X URLs + meta descriptions; LLM stitches into a markdown reply
-3. Returns ~5 x.com links; `curl -I` against them returns 5/5 HTTP 200
-
-**Use this when**: you just want to know "who's saying what on X / which posts to open", and don't need faves counts, reply counts, or sub-minute freshness.
-
-**Don't use this for**: ranking by faves, real-time tracking of just-posted tweets, Twitter Advanced Search syntax (`since:2026-05-29` / `min_faves:1000`). Those need the **advanced tier**.
-
-## Advanced tier — real-time + metadata (user-side setup)
-
-### Prereqs (anet = 0 LOC, user prepares 2 things in cwd)
-
-1. **X API key** — pick one:
-   - [twitterapi.io](https://twitterapi.io/) (third-party X data proxy, easier to obtain, low monthly cost)
-   - Official [X Developer Platform](https://developer.x.com/) (official API, requires X account approval, longer process)
-2. **Fetcher script** in the grok node's cwd that supports `node fetch-script.js --query "..."` and emits JSON
-
-Minimal template (place in grok node cwd as `x-fetch.js`):
-
-```js
-// x-fetch.js — minimal twitterapi.io X fetcher (advanced tier)
-import fs from "node:fs";
-
-const API_KEY = process.env.TWITTER_API_IO_KEY || fs.readFileSync(".env.x").toString().trim();
-const query = process.argv.slice(2).join(" ") || "AI";
-
-const url = `https://api.twitterapi.io/twitter/tweet/advanced_search?query=${encodeURIComponent(query)}&queryType=Latest`;
-const res = await fetch(url, { headers: { "x-api-key": API_KEY } });
-const data = await res.json();
-
-const top = (data.tweets || data.data || []).slice(0, 10).map(t => ({
-  handle: t.author?.userName || t.user?.screen_name,
-  text: t.text || t.full_text,
-  url: `https://x.com/${t.author?.userName || t.user?.screen_name}/status/${t.id}`,
-  faves: t.likeCount || t.favorite_count,
-  retweets: t.retweetCount,
-  replies: t.replyCount,
-  created_at: t.createdAt || t.created_at
-}));
-console.log(JSON.stringify(top, null, 2));
-```
-
-3. (Optional but boosts LLM discovery) drop an `X-FETCH.md` hint in cwd:
-
-```markdown
-# X data fetcher
-
-To pull X / Twitter posts with faves/retweets metadata, run:
-  node x-fetch.js "<query>"
-
-Args support advanced search syntax: `since:2026-05-29`, `min_faves:100`, etc.
-```
-
-### Start the node (cwd pointing at the prepped folder)
-
-```bash
-cd /path/to/your/x-fetcher-workdir   # contains x-fetch.js + .env.x + X-FETCH.md
-anet node create grok-x-pro --runtime grok-build-acp
-anet node start grok-x-pro
-```
-
-### Send an advanced X search task
+### Send an X-search task
 
 ```
 commhub_send_task(
-  alias="grok-x-pro",
-  task="Find X posts from the past 24 hours about 'multi-agent framework'.
-        Rank by faves, top 5, output markdown with handle / URL / faves / retweets / summary."
+  alias="grok-x",
+  task="Find recent X / Twitter posts by @sama about AGI.
+        For each: https://x.com/... URL + a short summary + approximate date.
+        Markdown list, around 5 items."
 )
 ```
 
-LLM behavior (observed in commhub session `56173df0`, R83 X-search re-audit):
+### LLM behavior (E2E evidence 2026-05-30, session `019e7719`)
 
-1. `run_terminal_command cat X-FETCH.md` (read hint)
-2. `run_terminal_command head -50 x-fetch.js` (verify interface)
-3. `run_terminal_command node x-fetch.js "multi-agent framework since:2026-05-29"` (run fetch)
-4. ... 17 total `run_terminal_command` calls (incl. `jq` filters) + 2 `web_search` fallbacks
-5. LLM natural-language summary reply with 5 real x.com URLs + faves counts
+15 `web_search` calls (all with `allowed_domains=["x.com"]` or `["x.com","twitter.com"]`) + 2 `web_fetch` calls (direct x.com page fetches) + 4 `read_file` (the LLM peeks at the user's `.claude/skills/`, harmless) + 1 `list_dir`.
 
-**Content verification (R83)**: `curl -I` returns HTTP 200 for 5/5 URLs (Sam Altman / OpenAI / Anthropic / FransBakker9812 / minchoi); faves counts (3855 / 383 / 154 / 98 / 91) match X ground truth.
+**Verbatim reply excerpt**:
 
-## Two-tier comparison
+```
+- 2026-05-20ish https://x.com/sama/status/2057218997503086888
+  OpenAI's three current excitements (AGI for science / AGI for the company /
+  personal AGI for everyone)...
+- 2025-10-29 https://x.com/sama/status/1983584366547829073
+  OpenAI internal target — by Sept 2026 an "automated AI research intern"
+  running on hundreds of thousands of GPUs...
+- ~2025-07-17 https://x.com/sama/status/1945901039104004467
+  Watching ChatGPT Agent operate a computer like a human — a real
+  "feel the AGI" moment...
+... (5 entries)
+```
 
-| Dimension | Basic (`web_search`) | Advanced (`run_terminal_command` + twitterapi.io) |
+**curl verify**: 5/5 HTTP 200, all real x.com URLs. Full [`basic-reply.md`](../tests/p-grok-native-xsearch-e2e/basic-reply.md) + [`basic-urls.txt`](../tests/p-grok-native-xsearch-e2e/basic-urls.txt).
+
+## Honest capability boundary (X platform policy, not a Grok limitation)
+
+| Capability | Grok native? | Why limited? |
 |---|---|---|
-| anet LOC | **0** | **0** |
-| User-side setup | **0** | twitterapi.io key + `x-fetch.js` + (optional) `X-FETCH.md` |
-| Data depth | URL + title + snippet | + faves / retweets / replies / exact timestamp |
-| Freshness | hours-to-days lag (web index) | real-time (live API) |
-| Advanced syntax | none (LLM fuzzy match) | full (`since:` / `min_faves:` / `mode=Latest`) |
-| LLM trigger | ACP-exposed `web_search` tool | `run_terminal_command` invoking user-staged fetcher under ACP isolation |
-| Recommended for | Curious browsing | X analytics / reports / KOL engagement tracking |
+| Find X URLs by keyword / handle / hashtag | ✅ | `web_search + allowed_domains=["x.com"]` |
+| Pull post content for summarization | ✅ | `web_fetch` |
+| Time-windowed search (`past 7d` / `since:date`) | ✅ | LLM rewrites into the web_search query |
+| Multilingual (CN / EN / JP / ...) | ✅ | Grok's LLM is multilingual |
+| **Real-time freshness (< 1h)** | ❌ | Web index lag, X anti-scrape |
+| **Exact faves / retweets / replies counts** | ❌ | X reserves engagement metadata for logged-in users + the Premium API |
+| **Ranking by faves / retweets** | ❌ | Same |
+| **X Advanced Search syntax (`min_faves:` / `mode=Latest`)** | ❌ | Requires logged-in session or X API |
+| **Pulling thread / reply trees** | ❌ | Same |
 
-## Difference vs Scenario 2 (video gen)
+**Important: items marked ❌ are not Grok's failures — they are X's platform-wide gating of engagement data behind logged-in / paid access**. In the advanced E2E probe, the LLM was transparent: "I cannot complete the precise-data portion of this request ... I will not fabricate any specific post's handle/URL/faves/retweets numbers ... if you have your own X API access or Premium advanced search, tell me and I can use the existing tools as helpers". See [`advanced-reply.md`](../tests/p-grok-native-xsearch-e2e/advanced-reply.md).
 
-| Dimension | Scenario 2 image-to-video | Scenario 1 X-search (basic) | Scenario 1 X-search (advanced) |
-|---|---|---|---|
-| anet LOC change | **0** ✓ | **0** ✓ | **0** ✓ |
-| User-side setup | 0 (URL goes directly into the prompt) | **0** | required (API key + fetcher) |
-| Trigger mechanism | Grok backend auto-routes prompt URL to grok-imagine-video | LLM auto-uses ACP-exposed web_search + allowed_domains | LLM runs `run_terminal_command` under ACP isolation against user-staged fetcher |
-| Verdict | 🟢 0 LOC integration | 🟢 0 LOC integration | 🟡 0 LOC anet, user-side setup required |
+**That is the desired behavior** — transparent, no fabrication, offers an alternative path.
+
+## If you genuinely need faves data
+
+**This is out of scope for anet's default demo**. If you really need faves / retweets metadata, integrate it yourself:
+
+1. The [X Developer Platform](https://developer.x.com/) (official, requires approval) or
+2. A third-party X data proxy like [twitterapi.io](https://twitterapi.io/).
+
+Integration pattern (R83 evidence):
+- Drop a fetcher script in the grok node's cwd (write your own — we don't ship a template because every team's API choice / quota model / output schema differs).
+- Drop a small hint file (something like `X-FETCH.md` with one paragraph) so the LLM finds and uses it via `list_dir` + `read_file`.
+- The LLM will invoke your fetcher via `run_terminal_command` and reason over the structured X data.
+
+See R83's full trace at [`docs/tests/p-grok-028-xsearch-acp-probe/report.md`](../tests/p-grok-028-xsearch-acp-probe/report.md) for the LLM's `run_terminal_command` walkthrough.
+
+**Why we don't ship a twitterapi.io template**: bundling one as the default demo path would frame "X commercial API integration" as "Grok integration" — that's a category mistake (Vincent 7031 pushback). X-gated data is for users to choose their own provider; anet ships no opinion.
 
 ## Prompt tips
 
-- **Basic tier**: just say "find X posts by @user / keyword, give me the URLs" — LLM will pick `web_search` with `allowed_domains=["x.com"]` automatically.
-- **Advanced tier**: say "use the project's X fetcher to pull the latest data ranked by faves" — mentioning "fetcher" steers LLM to the `run_terminal_command` path.
-- **Specify a time window** (7d / 24h) — the fetcher will apply a time filter.
-- **Ask for a markdown report at the end** — the LLM's natural-language summary will embed URLs + metadata cleanly.
-- **Don't say "use your X search capability"** — Grok's native XSearch tool is not exposed in the ACP channel (see source below). The LLM will fail to find a tool and fall back to vague web_search output.
+- Just say "find X posts by @<user> / <keyword> / #<topic>, give me URLs" — the LLM picks `web_search + allowed_domains=["x.com"]` automatically.
+- **Explicitly demand `https://x.com/<handle>/status/<id>` URL format** so the reply is curl-verifiable. Without the demand, sometimes the LLM returns "posts about X" without linkable status URLs.
+- Specify a time window (7d / 24h) — the LLM forwards it as part of the web_search query (`since:2026-05-23`).
+- Ask for a markdown list / table — anet relays the reply as raw text; markdown renders cleanly in dashboards / IM.
+- **For metadata-sensitive prompts, include "don't fabricate" guard** — Grok 0.2.x will honestly say "I can't get accurate faves data" rather than fake numbers.
+- **Don't say "use your XSearch tool"** — XSearch isn't exposed via ACP; saying so wastes a few `grep` turns and produces vague fallback output. Just say "find X posts by ..." directly.
 
-## Why does Grok have native X search, but the ACP channel can't reach it?
+## Why Grok has native X search but the ACP channel doesn't
 
-Grok's **consumer product** (grok.com Web / Grok app) has native real-time X search — that's an xAI-direct feature for consumer users.
+Grok's **consumer product** (grok.com Web / Grok app) has native real-time X search — an xAI-direct feature for consumer users.
 
 Grok's **CLI agent stdio mode (the ACP path anet uses)** does not expose it: the `available_commands_update._meta.tools` list contains no `XSearch` / `x_keyword_search` / `x_user_search`. Confirmed identical across 0.1.219 → 0.2.3 → 0.2.12 alpha.
 
-Why? Likely intentional sandboxing + third-party agent integration layering — ACP is a protocol for "arbitrary client drivers", while the Grok consumer product is xAI's own deep integration. Full schema-introspection proof: [`docs/tests/p-grok-028-xsearch-acp-probe/report.md`](../tests/p-grok-028-xsearch-acp-probe/report.md).
+Likely intentional sandboxing + third-party agent integration layering — ACP is a protocol for "arbitrary client drivers", while Grok's consumer product is xAI's own deep integration. Full schema-introspection proof: [`docs/tests/p-grok-028-xsearch-acp-probe/report.md`](../tests/p-grok-028-xsearch-acp-probe/report.md).
 
-But 0.2.x added the `web_search.allowed_domains` field — the LLM now auto-uses generic web search constrained to `x.com` and gets X URLs / titles / snippets. That's the source of the basic tier ✅.
+But 0.2.x added the `web_search.allowed_domains` field — the LLM now constrains generic web search to `x.com` and gets X URLs / titles / snippets. That's enough for the out-of-the-box ask.
 
 ## Limitations + follow-up
 
 | ID | Type | Description |
 |---|---|---|
-| **P1** | docs | Onboarding guide for users preparing a fetcher + X API key (orthogonal to anet, user-side concern) |
-| P2 | feature | anet-bundled X informant template (e.g. `anet template install x-fetcher`) — reduce advanced-tier setup friction |
-| P2 | feature | commhub `send_reply` MCP schema extension to return fetched X URL list as structured data |
-| P3 | docs | Document grok `run_terminal_command` escape hatch behavior (cross-scenario general) |
+| P3 | docs | Document the grok `run_terminal_command` escape hatch behavior (cross-scenario general — for users who truly need to integrate an external X API) |
+| P3 | feature | anet-bundled X informant template (e.g. `anet template install x-fetcher`) — **not proactive**, only build when a real user need ramps |
 
 ## Probe sources + references
 
-- [Grok X-search capability probe (ZH)](../research/grok-x-search-capability-probe.md) — includes ⚠ Erratum + schema-introspection direct proof
+- [Grok X-search capability probe (ZH)](../research/grok-x-search-capability-probe.md) — includes Erratum 1/2/3 (three rounds of correction)
 - [Grok X-search capability probe (EN)](../research/grok-x-search-capability-probe.en.md)
-- [Grok 0.2.x ACP XSearch exposure fact-check report](../tests/p-grok-028-xsearch-acp-probe/report.md) — 2026-05-30 schema-introspection across three versions
+- [Grok 0.2.x ACP XSearch schema-introspection report](../tests/p-grok-028-xsearch-acp-probe/report.md) — three-version comparison of `available_commands_update._meta.tools`
+- [Grok 0.2.12 alpha pure-native X-search E2E report](../tests/p-grok-native-xsearch-e2e/report.md) — the main evidence backing this scenario
 - [Scenario 2 video-gen-marketing.en.md](./video-gen-marketing.en.md) — sister scenario (image-to-video, 0 LOC)
-- [Demo: anet × Grok X search (two tiers)](../../demos/grok-x-search/README.md) — runnable demo
+- [Demo: anet × Grok X search](../../demos/grok-x-search/README.md) — runnable demo (pure native, twitterapi.io template removed)
 - [#205](https://github.com/sleep2agi/agent-network/issues/205) · [#206](https://github.com/sleep2agi/agent-network/issues/206) · [#204](https://github.com/sleep2agi/agent-network/issues/204) preview.7 isolated cwd prerequisite
-- Vincent's ai-insight repo (real-world advanced-tier setup, not in anet repo): `/home/vansin/ai-insight/auto_update_news.js`
 
 ---
 
-**Dispatch**: 通信龙 commhub `9e39963c` (#205 Scenario 1 docs amend) + R83 X-search re-audit + 2026-05-30 schema-introspection followup
+**Dispatch**: 通信龙 commhub `9e39963c` (#205 Scenario 1 docs amend) + R83 X-search re-audit + 2026-05-30 schema-introspection + 2026-05-30 Vincent 7031 native-only correction
 **Author-Agent**: 通信SDK马

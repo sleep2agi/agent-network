@@ -7,6 +7,29 @@
 > **作者**: 通信SDK马
 > **日期**: 2026-05-28
 
+## ⚠ Erratum 3 (2026-05-30, Vincent 7031 push → 纯 native E2E) — 单档 + 诚实边界, 删 twitterapi.io
+
+**纠正 Erratum 2 的 "两档" framing**: "高级档需 twitterapi.io 预置" 是 over-engineering, 应该是 "**单档 native + X 平台政策性墙的诚实边界**"。
+
+**触发**: Vincent 7031 直接 push back demo 引入 twitterapi.io: "谁告诉你用 twitterapi.io, 用 grok build 自带的啊"。
+
+**E2E 实证 ([`docs/tests/p-grok-native-xsearch-e2e/report.md`](../tests/p-grok-native-xsearch-e2e/report.md))**: 0.2.12 alpha host grok agent stdio, 空 cwd (无 fetcher / 无 hint / 无 MCP), 自然语言 prompt "找 @sama 最近 AGI 帖子":
+- 15 次 `web_search` (全 `allowed_domains=["x.com"]`) + 2 次 `web_fetch`
+- 返回 5 条真实 x.com URL + 中文摘要 + 时间
+- curl 5/5 HTTP 200, 完全成功
+
+Erratum 2 的"两档"分级源自 R83 trace 看 LLM 调了 17 次 `run_terminal_command` 走 user fetcher 拿 metadata, 推断 "高级档需 fetcher"。**那是 R83 cwd 里有 user fetcher 时 LLM 的优选路径**, 不是"没有 fetcher 就做不了 X 搜索"。本次 E2E 在空 cwd 跑证明: 基础 X 搜索 grok native 自己用 web_search + web_fetch 完整搞定。
+
+**高级档 "faves 排序 / 实时 metadata" 真做不到** — 但**原因是 X 平台政策性墙** (登录用户 + Premium API 才有), 不是 grok / anet 缺口。LLM advanced prompt 实测**诚实拒绝** + 列"具体做不到的能力" + offer 替代方案("帮你写 X API 脚本"), 完全不编数据。**这是理想的失败 fallback 行为**。
+
+**修正决策**:
+- ✅ 删 `demos/grok-x-search/fetcher/` + `.env.x.example` 整套 twitterapi.io 模板
+- ✅ scenario doc 改 "两档" 为 "单档 native + 诚实边界 + 如果你真要 faves 集成自己写"
+- ✅ RFC-021 §14 banked: "schema-introspection 是必要但不充分", agent-action E2E 才是 capability claim final gate (第 3 次同模式 lesson, [[feedback_schema_introspection_not_capability_proof]])
+- ❌ **不 ship 任何特定第三方 X 商业 API 适配作 anet 默认** — 用户按需自集成
+
+---
+
 ## ⚠ Erratum 2 (2026-05-30, schema-introspection 直证) — 两档 NUANCED
 
 **升级原 erratum 范围**: 不是单一 "需预置", 实际是**两档** capability:

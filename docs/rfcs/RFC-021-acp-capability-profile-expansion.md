@@ -482,8 +482,80 @@ probe 脚本 + 完整输出: [`docs/tests/p-grok-028-xsearch-acp-probe/`](../tes
 
 未来 anet runtime / vendor capability claim 都默认按本节流程跑一次 schema-introspection sanity-check (例如新 grok 版本发布、Codex CLI 新版、claude-code 新版 MCP 字段变化)。
 
+## 14. Native E2E 实证修正 §13 — Vincent 7031 catch + 第 3 次 schema-not-artifact 重犯
+
+### 14.1 触发
+
+Vincent 看到 `demos/grok-x-search/fetcher/` 里 twitterapi.io 模板, 直 push back: "谁告诉你用 twitterapi.io, 用 grok build 自带的啊"。通信龙 self-纠: twitterapi.io advanced tier 模板是 over-engineered, 应该真起 grok 节点端到端跑一遍看 LLM 自带能力到底能把基础 X 搜索做到多好, 而不是停在 schema 推断 → "需要外部 fetcher"。
+
+### 14.2 E2E 方法 (1 quota tick × 2 prompt)
+
+`/tmp/p-grok-native-xsearch-e2e/probe.mjs` (saved to [`docs/tests/p-grok-native-xsearch-e2e/probe.mjs`](../tests/p-grok-native-xsearch-e2e/probe.mjs)) 自包含 ACP driver, spawn host `grok agent --always-approve stdio` 0.2.12 alpha, 空 cwd (每次 probe 前 rm -rf 重建), 无 MCP, 无 fetcher, 无 hint file。两个 user-natural prompt:
+- **basic**: 找 @sama 最近关于 AGI 的几条帖子 → URL + 摘要 + 时间, markdown 列表 5 条
+- **advanced**: 过去 7 天 #AI 最高赞前 5, 按 faves 排, 含 retweets metadata
+
+### 14.3 结果
+
+| Stage | tool 使用 | reply | curl-verified URL |
+|---|---|---|---|
+| **basic** | 15 `web_search` (全 `allowed_domains=["x.com"]`) + 2 `web_fetch` + 4 `read_file` + 1 `list_dir` | 5 条 sama AGI 帖子 markdown 列表, 完整摘要 + 时间 | 5/5 HTTP 200 ✓ |
+| **advanced** | 3 `web_search` + 2 `web_fetch` + 1 `list_dir` + 1 `run_terminal_command` | "我无法完成精确数据部分 ... 我不会编造任何具体帖子 faves/retweets 数字" + 做不到能力清单 + 替代方案 offer | 0 (LLM 拒绝凑假数据) |
+
+→ **basic 完全 grok native + 0 用户 setup + curl 5/5 真实 URL**。advanced 透明拒绝, 不编, 给替代路径。
+
+### 14.4 修正 §13 决策
+
+§13 "两档" framing 是 schema 推断的过度延伸:
+- §13.3 "high-fidelity needs Path D fetcher" 字面对, 但**漏说 "basic 不需要 Path D"**
+- §13.5 "X 搜索基础档" 列项写了 0 LOC + 0 setup, 但 demo / scenario 误把"高级档需 twitterapi.io"作并列必演路径 → demo 里 ship 了不必要的 fetcher 模板
+
+**修正**:
+- 基础档 0 LOC + 0 setup, 完整可演 — anet 默认 demo 跑这条
+- "faves / retweets metadata" 不是 grok / anet 缺口, 是 **X 平台政策性墙** (登录用户 + Premium API 才有), 用户真要这条自己集成商业 API, anet 不内置任何特定第三方适配
+- §12 决策矩阵 Path D **不是默认 demo path**, 仅 P3 follow-up note 给真需要的用户走
+
+### 14.5 Lesson banked — 第 3 次 schema-not-artifact 重犯
+
+| # | 时间 | 场景 | 错在哪 |
+|---|---|---|---|
+| 1 | §11 (5/28) | XSearch Phase 2 HARD GATE | 看 `tool_call` 0 次, 没看 LLM reply 是不是有真 X URL |
+| 2 | R75 (5/28) | image-to-video probe | 看 video_gen rawInput schema 只 4 字段, 没看 mp4 视觉内容 |
+| 3 | R83 (5/28) | X-search re-audit | 看 XSearch 0 次, 没看 `run_terminal_command` 跑了 user script (反向: 抓到了 escape hatch, 但**这次又过度延伸 → "fetcher 是 advanced tier 必需"**) |
+| **4** | **§13 / 本节 (5/30)** | **XSearch ACP exposure fact-check** | **看 schema 不含 XSearch + 看到 R83 用 fetcher → 推断"两档"** → demo 引入 twitterapi.io 模板 — Vincent 7031 catch |
+
+第 4 次 lesson 微妙在于**已经 banked schema-not-artifact**(§12.4) **却又掉同坑**, 因为这次是 schema 推断 + **历史 trace 联想**(R83 用了 fetcher → 推断 "advanced tier 必需 fetcher") 的复合, 不是单纯 schema 看窄。
+
+**methodology update (RFC v2 候选)**:
+
+> 任何 "vendor X 在 capability Y 上的 ship 范围" claim, 必跑两层 gate:
+> 1. **Schema-introspection** (cheapest, zero quota tick): `available_commands_update._meta.tools` dump
+> 2. **Agent-action E2E on empty cwd** (1 quota tick): natural-language prompt → 抓 tool_call + reply, curl-verify content
+>
+> **只跑第 1 层不准下"能力不足"结论**。empty cwd 跑一遍才是基础下界。
+>
+> 历史 trace (R83 有 fetcher) 只能用来 inform "如果用户预置 fetcher 路径长啥样", 不能反向推 "没有 fetcher 就做不到"。
+
+Memory [[feedback_schema_introspection_not_capability_proof]] 已 banked (2026-05-30 顶部新条目)。
+
+### 14.6 §13 哪些 claim 仍 OK / 哪些被本节修正
+
+仍 OK:
+- §13.3 三档版本对比 (XSearch 不在 ACP capability advertise) — schema 事实, 不变
+- §13.4 web_search.allowed_domains 是 0.2.x 真实 delta — 事实, 不变
+- §13.6 release notes 已 land 两档 split — Vincent 看完本节 native E2E 后是否要再 amend, 由 通信龙 + Vincent 决定
+
+被修正:
+- §13.5 "高级档 走 Path D" 在 demo / scenario doc 里被错误地当作并列必演路径 — 应限定为 P3 follow-up
+- §13.2 "短期路径" 框架未明确"basic 跟 advanced 哪个是 anet 默认 demo path" — 本节明确 basic 是默认
+
+### 14.7 对 §12 决策矩阵的最终回顾
+
+§12 列了 4 path (A 死 / B drop / C 长期 / D workspace 兜底)。本节后:
+- A / B / C 不变
+- **D 限定 scope**: P3 follow-up note + 真有需求时给用户参考, **不进默认 demo / 不 ship 第三方适配模板**
+
 ---
 
-**RFC v1 draft 完成 + amend per Vincent 6440 + Phase 2 HARD GATE 实证 §11 + post-re-audit verdict refinement §12 + schema-introspection 直证 §13**。Phase 2 主线 A 仍死,Path C 仍是长期路径,**短期 informant 类场景的实际可用 path: 基础档 走 ACP `web_search` (0 LOC + 0 setup), 高级档 走 Path D "User workspace setup + LLM terminal 兜底"**。
+**RFC v1 draft 完成 + amend per Vincent 6440 + Phase 2 HARD GATE §11 + post-re-audit verdict §12 + schema-introspection 直证 §13 + native E2E 实证修正 §14**。Phase 2 主线 A 仍死, Path C 仍是长期路径, **anet 默认 demo / scenario doc 走纯 grok native (web_search + web_fetch), Path D 限定 P3 follow-up note 给真需要外部 X API 集成的用户参考**。
 
 **Author-Agent**: 通信SDK马

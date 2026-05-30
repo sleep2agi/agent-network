@@ -1,0 +1,17 @@
+{
+  "stage": "basic",
+  "sessions": [
+    "019e7719-4298-7511-bd6d-07df9c0d7a97",
+    "019e771a-618a-74d2-83fe-c99f380d2c16"
+  ],
+  "toolCallCount": 65,
+  "toolTitles": {
+    "web_search": 15,
+    "read_file": 4,
+    "list_dir": 1,
+    "web_fetch": 2
+  },
+  "replyLength": 1066,
+  "urlsFound": 5,
+  "promptDone": true
+}

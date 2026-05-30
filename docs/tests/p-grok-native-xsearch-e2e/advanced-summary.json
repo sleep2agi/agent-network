@@ -1,0 +1,16 @@
+{
+  "stage": "advanced",
+  "sessions": [
+    "019e771c-b567-7a31-971c-f9bee70df585"
+  ],
+  "toolCallCount": 23,
+  "toolTitles": {
+    "list_dir": 1,
+    "run_terminal_command": 1,
+    "web_search": 3,
+    "web_fetch": 2
+  },
+  "replyLength": 1289,
+  "urlsFound": 0,
+  "promptDone": true
+}

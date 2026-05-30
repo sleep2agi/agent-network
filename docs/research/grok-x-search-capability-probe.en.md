@@ -7,6 +7,29 @@
 > **Author**: 通信SDK马
 > **Date**: 2026-05-28
 
+## ⚠ Erratum 3 (2026-05-30, Vincent 7031 push → pure-native E2E) — SINGLE TIER + HONEST BOUNDARY, twitterapi.io DROPPED
+
+**Correcting Erratum 2's "two-tier" framing**: the "advanced tier requires twitterapi.io setup" framing was over-engineering. The right framing is "**single tier of native capability + an honest boundary at X-platform-gated metadata**".
+
+**Trigger**: Vincent 7031 push back on the demo's twitterapi.io dependency: "who said use twitterapi.io? use grok build's built-in capability."
+
+**E2E evidence ([`docs/tests/p-grok-native-xsearch-e2e/report.md`](../tests/p-grok-native-xsearch-e2e/report.md))**: 0.2.12 alpha host grok agent stdio, empty cwd (no fetcher / no hint / no MCP), natural-language prompt "find @sama's recent AGI posts":
+- 15 `web_search` calls (all with `allowed_domains=["x.com"]`) + 2 `web_fetch` calls
+- Returned 5 real x.com URLs + Chinese summaries + dates
+- curl 5/5 HTTP 200, fully successful
+
+Erratum 2's "two-tier" split came from R83's trace where the LLM made 17 `run_terminal_command` calls to use a user-staged fetcher and pulled metadata. The inference was "advanced tier requires fetcher". **That was the LLM's preferred path when the cwd contained a fetcher**, not a statement that "without fetcher, X search is unreachable". This E2E run proves the opposite on an empty cwd: basic X search is fully covered by grok's native web_search + web_fetch.
+
+**The advanced tier — "faves ranking / real-time metadata" — really is unreachable**, but **because X gates that data at the platform level** (logged-in user + Premium API). It's not a grok or anet capability gap. The LLM, faced with the advanced prompt, **declines honestly** + lists "specific capabilities I can't deliver" + offers an alternative path ("I can help write an X API script") — completely refusing to fabricate. **That is the desired failure-fallback behavior**.
+
+**Corrective decisions**:
+- ✅ Delete `demos/grok-x-search/fetcher/` + `.env.x.example` — the entire twitterapi.io template
+- ✅ Scenario doc rewritten from "two-tier" to "single native tier + honest boundary + if-you-really-need-faves-integrate-yourself"
+- ✅ RFC-021 §14 banks the lesson: "schema-introspection is necessary but not sufficient"; agent-action E2E is the final gate for capability claims (third occurrence of the same pattern, [[feedback_schema_introspection_not_capability_proof]])
+- ❌ **Do not ship any specific third-party X commercial API adapter as the anet default** — users integrate per their needs
+
+---
+
 ## ⚠ Erratum 2 (2026-05-30, schema-introspection direct proof) — TWO-TIER NUANCED
 
 **Promoting the original erratum scope**: it's not a single "setup required" verdict — there are actually **two tiers**:
