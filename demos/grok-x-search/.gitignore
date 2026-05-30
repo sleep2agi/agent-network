@@ -1,0 +1,3 @@
+# Never commit a real X API key.
+.env.x
+.env.twitterapi

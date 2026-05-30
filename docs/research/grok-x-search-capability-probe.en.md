@@ -7,6 +7,27 @@
 > **Author**: 通信SDK马
 > **Date**: 2026-05-28
 
+## ⚠ Erratum 2 (2026-05-30, schema-introspection direct proof) — TWO-TIER NUANCED
+
+**Promoting the original erratum scope**: it's not a single "setup required" verdict — there are actually **two tiers**:
+
+| Tier | anet LOC | User-side setup | Which ACP tool? |
+|---|---|---|---|
+| **Basic** (find X URL + title + snippet) | 0 | **0** ✓ | `web_search` + `allowed_domains=["x.com"]` (0.2.x added the field) |
+| **Advanced** (real-time firehose + faves/retweets metadata + advanced syntax) | 0 | twitterapi.io key + fetcher script | `run_terminal_command` invoking user-staged fetcher |
+
+**Schema-introspection direct proof (2026-05-30, `docs/tests/p-grok-028-xsearch-acp-probe/`)**: A direct dump of `grok agent stdio`'s `available_commands_update._meta.tools` LLM-side tool registry, identical across 0.1.219 → 0.2.3 → 0.2.12 alpha — **XSearch / x_keyword_search / x_user_search are not exposed** in any version; **web_search and video_gen are** in every version. Zero LLM prompt, zero quota tick.
+
+**Key implications**:
+- Grok's **consumer product** (grok.com Web / Grok app) has native real-time X search — Vincent's intuition was half right.
+- Grok's **CLI agent stdio mode (the ACP path anet uses)** does not expose it — the ACP surface is "for any third-party client driver", not the place where xAI ships its own deep X integration.
+- 0.2.x's `web_search.allowed_domains` field + improved LLM policy → **basic X URL search is 0 LOC + 0 setup** (this tier was missed in the original erratum).
+- Real-time advanced metadata still needs the user-staged fetcher — this tier was already covered.
+
+The scenario doc + release-notes wording have been split along the two tiers (see [`scenarios/x-search-informant.en.md`](../scenarios/x-search-informant.en.md)).
+
+---
+
 ## ⚠ Erratum (2026-05-28, post-SDK-re-audit) — 🟡 NUANCED YES
 
 The original Phase 2 verdict implied "XSearch tool fires 0 times → not supported" — narrow framing that **didn't observe what the LLM actually did.**

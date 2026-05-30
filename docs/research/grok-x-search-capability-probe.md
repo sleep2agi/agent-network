@@ -7,6 +7,27 @@
 > **作者**: 通信SDK马
 > **日期**: 2026-05-28
 
+## ⚠ Erratum 2 (2026-05-30, schema-introspection 直证) — 两档 NUANCED
+
+**升级原 erratum 范围**: 不是单一 "需预置", 实际是**两档** capability:
+
+| 档 | anet LOC | 用户侧 setup | 用什么 ACP 工具? |
+|---|---|---|---|
+| **基础档** (找 X URL + 标题 + 摘要) | 0 | **0** ✓ | `web_search` + `allowed_domains=["x.com"]` (0.2.x 加的字段) |
+| **高级档** (实时 firehose + faves/retweets metadata + 高级 syntax) | 0 | twitterapi.io key + fetcher script | `run_terminal_command` 调用用户预置 fetcher |
+
+**Schema-introspection 直证 (2026-05-30, `docs/tests/p-grok-028-xsearch-acp-probe/`)**: 直接抓 `grok agent stdio` 的 `available_commands_update._meta.tools` LLM-side 工具列表, 0.1.219 → 0.2.3 → 0.2.12 alpha 三个版本一致 **不暴露** `XSearch` / `x_keyword_search` / `x_user_search`。同时一致 **暴露** `web_search` + `video_gen`。零 LLM prompt, 零 quota tick。
+
+**关键含义**:
+- Grok **消费产品** (grok.com Web / Grok app) 有原生 X 实时搜索 — Vincent 直觉对一半
+- Grok **CLI agent stdio mode (anet 的 ACP 接入路径)** 不暴露这个工具 — ACP 接口是给 "任意 third-party client driver" 的, 没有 X 专属深度集成
+- 0.2.x `web_search` 加 `allowed_domains` 字段 + LLM policy 升级 → **基础 X URL 搜索能力 0 LOC + 0 setup** (这一档原 erratum 漏了)
+- 高级实时 + metadata 仍需用户 cwd 预置 fetcher — 这一档原 erratum 正确
+
+scenario doc + release notes 措辞按两档 split (见 [`scenarios/x-search-informant.md`](../scenarios/x-search-informant.md))。
+
+---
+
 ## ⚠ Erratum (2026-05-28, post-SDK-re-audit) — 🟡 NUANCED YES
 
 本报告原 Phase 2 verdict 隐含 "XSearch tool 0 次 trigger → 不支持 X 搜索" 范围窄, **错在没看 LLM 实际做了什么**.

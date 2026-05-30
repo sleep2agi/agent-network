@@ -425,8 +425,65 @@ pub enum RequestedToolCategory {
 
 §12 只是把 **短期路径** 从"只能等 PR #1302 merge" 扩到 "PR #1302 + workspace-setup + terminal 兜底",**没推翻 §11 任何具体技术 claim**。
 
+## 13. Schema-introspection 直证(2026-05-30,Vincent fact-check 后)
+
+### 13.1 触发
+
+Vincent 看到 v0.10.12 release notes "X 搜索需工作区预置" 直觉质疑 — "Grok = xAI, 本就有实时推流, 应自带 X 搜索"。通信龙 dispatch HIGH P1 fact-check (~10min budget) 验证 0.2.x alpha XSearch 是否已通过 ACP 暴露 (vs §11 在 0.2.3 上的 HARD GATE 结论)。
+
+### 13.2 方法 (零 LLM quota tick)
+
+直接对 host `grok agent stdio` (0.2.12 alpha) 跑 ACP `initialize` + `authenticate` + `session/new`,捕获 `available_commands_update._meta.tools` LLM-side 工具列表。**未发任何 prompt**,纯协议层 introspection。
+
+probe 脚本 + 完整输出: [`docs/tests/p-grok-028-xsearch-acp-probe/`](../tests/p-grok-028-xsearch-acp-probe/) (commit `42b603f`)
+
+### 13.3 三档版本对比
+
+| 工具 | 0.1.219 (May 26 fixture) | 0.2.3 (RFC-021 §11 HARD GATE) | 0.2.12 alpha (2026-05-30 直 probe) |
+|---|---|---|---|
+| `XSearch` / `x_keyword_search` / `x_user_search` | ❌ 不在 | ❌ 不在 | ❌ 仍不在 |
+| `web_search` | ✅ 在 | ✅ 在 | ✅ 在 + 0.2.x 新增 `allowed_domains` 字段 |
+| `video_gen` | ✅ 在 | ✅ 在 | ✅ 在 |
+| `spawn_subagent` | ❌ 不在 | ❌ 不在 | ✅ 0.2.x 新增 |
+
+→ **结构性结论**: XSearch 从来没在 ACP 通道暴露过, `_meta.x.ai/requestedBackendTools` hint 即便被 honor 也找不到 tool 落点。§11 verdict (Path A 死) **跨版本仍成立**。
+
+### 13.4 但 0.2.x 的真实 capability delta
+
+- `web_search` 加 `allowed_domains: string[]` 字段, R83 实证 LLM 自动用 `allowed_domains=["x.com","twitter.com"]` 拿 X URL/标题/摘要(curl 5/5 HTTP 200 verified)
+- LLM 默认 policy 也变了 — §11 在 0.2.3 LLM 自报 "未发现 X/Twitter 搜索工具" 就停; R83 在 0.2.8 alpha 上 LLM 主动用 web_search + 兜底 run_terminal_command 拿到真数据
+- 综合: **"X 搜索基础档" (URL + 标题 + 摘要) 0 LOC + 0 user setup 开箱即用**; **"X 搜索高级档" (实时 firehose + faves/retweets metadata + advanced syntax) 仍需 user 预置 fetcher**
+
+### 13.5 对 §12 决策矩阵的影响
+
+§12 列了 4 path (A 死 / B drop / C 长期 / D workspace 兜底)。13.x 没新增 path,但**细化 D**:
+
+| 数据需求 | 走哪条 path? |
+|---|---|
+| **X URL + 标题 + 摘要** (基础) | ACP 暴露的 `web_search` + `allowed_domains` — **不算 D, 这是直接 0 LOC capability** |
+| **X 实时 firehose + faves/retweets metadata** (高级) | Path D — user 预置 twitterapi.io fetcher + LLM `run_terminal_command` |
+
+→ Vincent 直觉对 50%: Grok 产品有原生 X 搜索 ✅, ACP 通道有 X URL 基础搜索 ✅ (新发现), 实时 metadata 没原生 ❌。
+
+### 13.6 对 release notes / scenario / 用户预期的影响
+
+- v0.10.12 release notes (已 land per 通信龙): 措辞已改为两档 split — 基础开箱即用 + 高级需预置
+- [`docs/scenarios/x-search-informant.md`](../scenarios/x-search-informant.md) (ZH+EN parity): 已重写为基础档 / 高级档双 section
+- [`docs/research/grok-x-search-capability-probe.md`](../research/grok-x-search-capability-probe.md) (ZH+EN parity): 顶部加 Erratum 2 引用本节直证
+- Demo (`demos/grok-x-search/`): 两档都演 — 基础档 runnable, 高级档 doc + fetcher 模板
+
+### 13.7 方法学 lesson (banked, 跟 §12.1 同类)
+
+**"Schema-introspection 是最便宜的真实性 gate"**:
+- 零 LLM quota tick (协议层 dump)
+- 跨版本一致性可直接判断 — 多版本 dump 对比比真 LLM probe 更稳
+- 跟 §12 三层(schema + content + agent-action)互补 — schema-introspection 是 schema 层最 deep, content + agent-action 是 LLM 实际行为层
+- 任何 "vendor X 是否暴露 tool Y" 问题都先 schema-introspection 排除假阳性, 再视情况走 LLM probe
+
+未来 anet runtime / vendor capability claim 都默认按本节流程跑一次 schema-introspection sanity-check (例如新 grok 版本发布、Codex CLI 新版、claude-code 新版 MCP 字段变化)。
+
 ---
 
-**RFC v1 draft 完成 + amend per Vincent 6440 + Phase 2 HARD GATE 实证 §11 + post-re-audit verdict refinement §12**。Phase 2 主线 A 仍死,Path C 仍是长期路径,**短期 informant 类场景的实际可用 path 是 "User workspace setup + LLM terminal 兜底"(Path D)**。
+**RFC v1 draft 完成 + amend per Vincent 6440 + Phase 2 HARD GATE 实证 §11 + post-re-audit verdict refinement §12 + schema-introspection 直证 §13**。Phase 2 主线 A 仍死,Path C 仍是长期路径,**短期 informant 类场景的实际可用 path: 基础档 走 ACP `web_search` (0 LOC + 0 setup), 高级档 走 Path D "User workspace setup + LLM terminal 兜底"**。
 
 **Author-Agent**: 通信SDK马
