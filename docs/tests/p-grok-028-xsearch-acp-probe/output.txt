@@ -1,0 +1,37 @@
+[init] OK protocolVersion: 1 agentCapabilities: {"loadSession":true,"promptCapabilities":{"image":false,"audio":false,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":true},"_meta":{"x.ai/fs_notify":true}} agentVersion: 0.2.12
+[auth] OK
+[session] new sessionId: 019e76d7-a632-7ce3-ae0a-0d4aa426cdc8
+[tools] AvailableCommandsUpdate tools list (LLM-side tool registry):
+[
+  "run_terminal_command",
+  "read_file",
+  "search_replace",
+  "list_dir",
+  "grep",
+  "kill_command_or_subagent",
+  "todo_write",
+  "get_command_or_subagent_output",
+  "wait_commands_or_subagents",
+  "scheduler_create",
+  "scheduler_delete",
+  "scheduler_list",
+  "monitor",
+  "search_tool",
+  "use_tool",
+  "update_goal",
+  "enter_plan_mode",
+  "exit_plan_mode",
+  "ask_user_question",
+  "web_search",
+  "web_fetch",
+  "image_gen",
+  "image_edit",
+  "video_gen",
+  "write"
+]
+
+XSearch / x_keyword_search / x_user_search hit? NO
+web_search in list? YES
+video_gen in list? YES
+
+[exit] code=143 initialized=true authed=true captured=true updates=2
