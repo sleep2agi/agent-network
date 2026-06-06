@@ -86,14 +86,19 @@ grok login           # 一次性 OAuth
 }
 ```
 
-字段规则:
+字段规则 (v2 已收紧):
 - `user` = handle 不带 `@`
 - `account` / `source` = `@<user>` (两个字段同值，保留是兼容 A站老 schema)
 - `url` = 必须是真实 `https://x.com/<user>/status/<digits>` 链接，**否则那条 tweet 被脚本静默丢弃**
 - `tweetId` = 从 url 正则抠 (`/status/(\d+)`)
-- `date` = `YYYY-MM-DD`，LLM 返 `YYYY-MM` 自动补 `-01`，全空 fallback 今天
-- `likes` / `views` = `0` (grok native 拿不到 engagement metadata，X 平台限制)
-- `imageUrl` = `""` (grok 也拿不到媒体附件，留空)
+- `date` = `YYYY-MM-DD`，**LLM 返不出真实发布日期 (非 `YYYY-MM-DD` 格式 / 日期缺失) → 那条 tweet 整条 drop**。不再 fallback 今天 — 避免老帖被伪装成新帖混进窗口
+- `date` 还做**窗口双保险校验**：`cutoff <= date <= today` 才保留，超窗 silent drop
+- `imageUrl` = LLM 返的 `media_url` 字段，**必须通过 curl HEAD 校验**：
+  - host 必须是 `pbs.twimg.com` / `video.twimg.com` / `ton.twitter.com` 之一
+  - HTTP 200 + content-type `image/*` 或 `video/*`
+  - 校验失败 → `imageUrl` 置 `""`（tweet 本身保留，只是没图）
+  - **防 LLM 幻觉假图链** — A 站全替代 pilot 的关键防线
+- `likes` / `views` = `0` (grok native 拿不到 engagement metadata，X 平台限制，诚实不编造)
 - `category` = `"行业"` 固定值
 
 ## 失败语义 (A站硬要求)
@@ -107,27 +112,36 @@ grok login           # 一次性 OAuth
 
 **绝对不塞假数据**。下游翻译看到空 tweets 应当跳过写库，按 ai-insight 现有约定。
 
-## 实测 (2026-06-07, 通信demo马)
+## 实测 (2026-06-07, 通信demo马, v2)
 
 > 命令: `./fetch_news_via_grok.js --accounts @sama,@OpenAI,@karpathy --since 72h --max-per 3 -v`
 
 ```
-[fetch-grok] accounts=3 since=72h max-per=3
+[fetch-grok] accounts=3 since=72h max-per=3 window=[2026-06-03, 2026-06-06]
 [fetch-grok] → @sama
-[fetch-grok]   ✓ 3 tweet(s)
+[fetch-grok]   ✓ 3 tweet(s) kept
 [fetch-grok] → @OpenAI
-[fetch-grok]   ✓ 3 tweet(s)
+[fetch-grok]   ✓ 3 tweet(s) kept
 [fetch-grok] → @karpathy
-[fetch-grok]   ✓ 0 tweet(s)
+[fetch-grok]   ✓ 0 tweet(s) kept
 [fetch-grok] wrote 6 tweet(s) to news.json
+[fetch-grok] summary: freshest=2026-06-05 (1d ago) | oldest=2026-06-04 | window=[2026-06-03, 2026-06-06] | media-verified=1/6
+[fetch-grok] date distribution:
+  2026-06-04: 5
+  2026-06-05: 1
+[fetch-grok] media verify: 1/1 passed (HTTP 200 + image/video content-type)
+  [@OpenAI 2062630454537424930] ✓ video/mp4
+    https://video.twimg.com/amplify_video/2062605181427339264/vid/avc1/480x270/0mV_E3qR35fCtFaE.mp4
 
-real    3m26s
+real    3m30s
 exit    0
 ```
 
-- 6/6 URL 实测真链接 (例如 `https://x.com/sama/status/2062661191969972645`, `https://x.com/OpenAI/status/2062927046448431587`)
+- 6/6 URL 实测真链接（例如 `https://x.com/sama/status/2062661191969972645`, `https://x.com/OpenAI/status/2062927046448431587`）
+- 6/6 date 都在窗口 `[2026-06-03, 2026-06-06]` 内（freshest=2026-06-05，1d ago）
 - schema 12 字段一字不差
-- 串行 (避免 `auth.json` / rate-limit 冲突)：3 账号 ~3.5min，10 账号大约 12-15min
+- LLM 返了 1 条 `video.twimg.com` 真链接，curl HEAD 验证 content-type `video/mp4` → 入库；其余 5 条 LLM 没返 `media_url`（grok 诚实地不编，行为符合预期）
+- 串行（避免 `auth.json` / rate-limit 冲突）：3 账号 ~3.5min，10 账号大约 12-15min
 
 > 命令: `./fetch_news_via_grok.js --accounts @ThisAccountDefinitelyDoesNotExistFooBar2026 --since 1h --max-per 2`
 
@@ -157,11 +171,14 @@ news.json: {"nextId": 1, "tweets": []}
 | 现象 | 原因 | 应对 |
 |------|------|------|
 | stderr 里有 `failed to watch root recursively` / `Error reading from stream: serde error` | grok-build CLI 给 `/tmp` 文件监视和流解析的告警噪音，跟实际任务无关 | 脚本只 parse stdout，stderr 全丢，正确行为 |
-| 某账号 `0 tweet(s)` 但实际有发 | LLM 用 `web_search` 索引可能滞后几小时；或 X 反爬丢 `web_fetch` | 增大 `--since` 时间窗；或重跑 |
+| 某账号 `0 tweet(s)` 但实际有发 | LLM `web_search` 索引可能滞后；或 X 反爬丢 `web_fetch`；或 LLM 拿不到真实日期被双保险丢 | 增大 `--since` 时间窗；或重跑 |
+| `WARN: freshest tweet is N days old — grok web index may be lagging` | grok 索引滞后于实时 X，A 站要 last-24h 时这条提示让你早发现 | 增大 `--since`；或调度更高频；或这个时段 grok 兜底确实拿不到当天新帖，跳过翻译入库 |
 | 某账号 grok 异常退出 (timeout / non-zero exit) | LLM 卡顿 / endpoint 5xx | 脚本静默跳过该账号，继续下一个，最后 stderr 列出失败列表 |
 | `likes` / `views` 永远 `0` | X 不向匿名 / 非 logged-in 客户端开放 engagement metadata，grok web_search 也拿不到，正确诚实地不编造 | A 站下游若需要排序请用其他信号 (如发布时间) |
-| `imageUrl` 永远 `""` | 同上，grok web_search 不会自动拉媒体附件 URL | 需要图片请用 A 站现有的 twitterapi.io 路径，grok 兜底不覆盖 |
-| LLM 返回的 `date` 字段不是 `YYYY-MM-DD` | LLM 输出非确定性 | 脚本对 `YYYY-MM` 补 `-01`，全无效 fallback 今天，永远是合法日期串 |
+| `imageUrl` 经常为 `""` | LLM 诚实地不返 `media_url`（没图 / 拿不准 host），或 `media_url` curl 校验失败被 drop | 这是**好行为**（防幻觉假图链）；如果某账号长期 0 imageUrl，可调 prompt 增强但 LLM 行为非确定，A 站可降权或回退 twitterapi.io |
+| 某条 LLM 返了 `media_url` 但 curl 校验失败 | 假链（LLM 幻觉）/ X CDN 5xx / content-type 不是 image/video | 静默丢图保 tweet（imageUrl 置 ""）；verbose 模式打 `✗ http XXX` 或 `✗ non-media content-type` |
+| 整条 tweet 因 date 缺失被 drop | LLM 没返 `date` 字段或非 `YYYY-MM-DD` 格式 — 我们拒绝把老帖伪装成新的 | 提升 prompt 严格度；或承认那条无法验证日期、跳过 |
+| 整条 tweet 因超窗被 drop | LLM 不守 cutoff 提示，给了老帖；脚本本地双保险拦截 | drops 计数 + verbose 日志会标出 `outOfWindow=N`；调短 `--since` 让 LLM 更准 |
 | 跑得慢 (10 账号 ~15min) | grok 单轮 LLM 调用 30-90s × 串行 10 次 | cron 调度别小于 30min；并发可加但要先解决 `auth.json` 锁 (本脚本未做) |
 
 ## 与 A站 现有 `auto_update_news.js` 的关系

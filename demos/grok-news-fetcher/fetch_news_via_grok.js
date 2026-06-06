@@ -165,40 +165,55 @@ function preflight() {
   }
 }
 
-function buildPrompt(handle, since, maxPer) {
-  const cleanHandle = handle.replace(/^@/, "");
-  let windowDesc;
+function computeCutoff(since) {
+  const now = new Date();
   if (/^\d+h$/i.test(since)) {
     const hours = Number.parseInt(since, 10);
-    windowDesc = `最近 ${hours} 小时`;
-  } else if (/^\d{4}-\d{2}-\d{2}$/.test(since)) {
-    windowDesc = `自 ${since} 起 (since:${since})`;
-  } else {
-    windowDesc = since;
+    const cutoff = new Date(now.getTime() - hours * 3600 * 1000);
+    return { cutoffISO: cutoff.toISOString().slice(0, 10), hours };
   }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+    return { cutoffISO: since, hours: null };
+  }
+  return { cutoffISO: now.toISOString().slice(0, 10), hours: 24 };
+}
+
+function buildPrompt(handle, since, maxPer) {
+  const cleanHandle = handle.replace(/^@/, "");
+  const today = new Date().toISOString().slice(0, 10);
+  const { cutoffISO, hours } = computeCutoff(since);
+  const windowDescZh = hours != null ? `最近 ${hours} 小时 (自 ${cutoffISO} 起)` : `自 ${cutoffISO} 起`;
+  const windowDescEn = hours != null ? `the last ${hours} hours (since ${cutoffISO})` : `since ${cutoffISO}`;
   return [
-    `找一下 X (Twitter) 上 @${cleanHandle} ${windowDesc}内的帖子, 最多 ${maxPer} 条。`,
+    `Today is ${today}. Find recent original posts on X (Twitter) from @${cleanHandle} within ${windowDescEn}, at most ${maxPer} posts.`,
+    `(中文: 今天是 ${today}, 找 @${cleanHandle} ${windowDescZh}内的原创帖, 最多 ${maxPer} 条, 不含 retweet)`,
     "",
-    "**步骤**:",
-    `1. 先用 web_search (allowed_domains=["x.com"]) 找 @${cleanHandle} 的最新原创帖子 (不含 retweet)`,
-    "2. 必要时用 web_fetch 拿正文",
-    "3. 最后只输出一个**严格 JSON 数组**, 不要 markdown, 不要解释, 不要 code fence",
+    "**Steps**:",
+    `1. Use web_search (allowed_domains=["x.com"]) to find @${cleanHandle}'s most recent original posts`,
+    "2. Use web_fetch if needed to confirm post body and publish date",
+    "3. Output ONLY a strict JSON array — no markdown, no explanation, no code fence",
     "",
-    "数组每条字段:",
-    `  user      ${cleanHandle}    (handle 不带 @)`,
-    `  name      显示名 (例: Sam Altman)`,
-    `  text      原文或忠实的中文摘要 (~80 字内)`,
-    `  url       完整的 https://x.com/${cleanHandle}/status/<id> URL (必须是真链接)`,
-    `  date      YYYY-MM-DD (拿不到精确日子用大致月份: YYYY-MM)`,
+    "Each array item fields:",
+    `  user        "${cleanHandle}"          (handle without @)`,
+    `  name        display name              (e.g. "Sam Altman")`,
+    `  text        post body or faithful summary in Chinese (~80 chars)`,
+    `  url         https://x.com/${cleanHandle}/status/<id>  (real, browser-openable)`,
+    `  date        YYYY-MM-DD  (real publish date — MUST be accurate to the day)`,
+    `  media_url   https://pbs.twimg.com/... or https://video.twimg.com/...  (real direct media link; "" if no image/video)`,
     "",
-    "硬要求:",
-    `  · url 字段必须以 "https://x.com/${cleanHandle}/status/" 开头,后接纯数字 status id`,
-    "  · 如果搜索不到任何符合时间窗的帖子,返回空数组 []",
-    "  · 绝对禁止编造 URL 或 status id",
-    "  · 绝对禁止返回 markdown / 解释文字 / code fence",
+    "**HARD RECENCY REQUIREMENTS** (post will be dropped otherwise):",
+    `  · date MUST be >= ${cutoffISO} (the cutoff). Do NOT include older posts. Do NOT pad date with today's date if you don't know the real one — drop that post instead.`,
+    "  · If unsure of the real publish date, drop the post — do NOT fabricate a recent date to pass the filter.",
+    `  · If no posts in [${cutoffISO}, ${today}] match, return empty array [].`,
     "",
-    "示例 (替换为真实数据):",
-    `[{"user":"${cleanHandle}","name":"...","text":"...","url":"https://x.com/${cleanHandle}/status/123","date":"2026-06-01"}]`,
+    "**OTHER HARD RULES**:",
+    `  · url MUST start with "https://x.com/${cleanHandle}/status/" followed by digits-only status id`,
+    `  · media_url, if non-empty, MUST be a real direct image/video link (pbs.twimg.com, video.twimg.com, or x.com/.../photo/...). Do NOT fabricate.`,
+    "  · NEVER fabricate URL / status id / media_url / date.",
+    "  · Output is JSON ONLY. No markdown, no explanation, no code fence.",
+    "",
+    "Example (replace with real data):",
+    `[{"user":"${cleanHandle}","name":"...","text":"...","url":"https://x.com/${cleanHandle}/status/123","date":"${today}","media_url":"https://pbs.twimg.com/media/abc.jpg"}]`,
   ].join("\n");
 }
 
@@ -264,42 +279,87 @@ function parseEnvelope(stdout) {
 }
 
 const URL_RE = /^https:\/\/x\.com\/([^/]+)\/status\/(\d+)/;
+const MEDIA_HOST_RE = /^https:\/\/(pbs\.twimg\.com|video\.twimg\.com|ton\.twitter\.com)\//;
 
-function normalize(raw, handle) {
+function verifyMediaUrl(mediaUrl, timeoutSecs = 8) {
+  if (!mediaUrl) return { ok: false, reason: "empty" };
+  if (!MEDIA_HOST_RE.test(mediaUrl)) {
+    return { ok: false, reason: `non-twitter media host: ${mediaUrl.slice(0, 60)}` };
+  }
+  const result = spawnSync(
+    "curl",
+    [
+      "-I", "-L", "--max-redirs", "3",
+      "-m", String(timeoutSecs),
+      "-s", "-o", "/dev/null",
+      "-w", "%{http_code}\t%{content_type}",
+      "-A", "Mozilla/5.0 (compatible; ai-insight-fetcher/1.0)",
+      mediaUrl,
+    ],
+    { encoding: "utf8", timeout: (timeoutSecs + 2) * 1000 },
+  );
+  if (result.error || result.status !== 0) {
+    return { ok: false, reason: `curl err: ${result.error?.message || `exit ${result.status}`}` };
+  }
+  const [code, ctype = ""] = (result.stdout || "").split("\t");
+  if (code !== "200") return { ok: false, reason: `http ${code}` };
+  if (!ctype.startsWith("image/") && !ctype.startsWith("video/")) {
+    return { ok: false, reason: `non-media content-type: ${ctype}` };
+  }
+  return { ok: true, contentType: ctype };
+}
+
+function normalize(raw, handle, cutoffISO, todayISO, mediaLog) {
   const cleanHandle = handle.replace(/^@/, "");
   const out = [];
+  const drops = { badUrl: 0, wrongUser: 0, emptyText: 0, badDate: 0, outOfWindow: 0, mediaVerifyFail: 0 };
   for (const t of raw) {
     if (!t || typeof t !== "object") continue;
     const url = typeof t.url === "string" ? t.url.trim() : "";
     const m = url.match(URL_RE);
-    if (!m) continue;
+    if (!m) { drops.badUrl++; continue; }
     const user = m[1];
     const tweetId = m[2];
-    if (user.toLowerCase() !== cleanHandle.toLowerCase()) continue;
+    if (user.toLowerCase() !== cleanHandle.toLowerCase()) { drops.wrongUser++; continue; }
     const text = typeof t.text === "string" ? t.text.trim() : "";
-    if (!text) continue;
+    if (!text) { drops.emptyText++; continue; }
     const dateRaw = typeof t.date === "string" ? t.date.trim() : "";
-    let date = "";
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) date = dateRaw;
-    else if (/^\d{4}-\d{2}$/.test(dateRaw)) date = `${dateRaw}-01`;
-    else date = new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) { drops.badDate++; continue; }
+    if (dateRaw < cutoffISO || dateRaw > todayISO) { drops.outOfWindow++; continue; }
     const name = typeof t.name === "string" && t.name.trim() ? t.name.trim() : cleanHandle;
+    let imageUrl = "";
+    const mediaRaw = typeof t.media_url === "string" ? t.media_url.trim() : "";
+    if (mediaRaw) {
+      const v = verifyMediaUrl(mediaRaw);
+      if (mediaLog) {
+        mediaLog.push({
+          tweetId,
+          handle: cleanHandle,
+          url: mediaRaw,
+          ok: v.ok,
+          contentType: v.contentType || "",
+          reason: v.reason || "",
+        });
+      }
+      if (v.ok) imageUrl = mediaRaw;
+      else drops.mediaVerifyFail++;
+    }
     out.push({
       account: `@${user}`,
       name,
       user,
       tweetId,
       text,
-      date,
+      date: dateRaw,
       likes: 0,
       views: 0,
       url,
       source: `@${user}`,
       category: "行业",
-      imageUrl: "",
+      imageUrl,
     });
   }
-  return out;
+  return { tweets: out, drops };
 }
 
 function dedupe(tweets) {
@@ -314,6 +374,24 @@ function dedupe(tweets) {
   return out;
 }
 
+function summarize(tweets, cutoffISO, todayISO) {
+  if (tweets.length === 0) return { line: "no tweets", byDate: {}, freshestAgeDays: null };
+  const byDate = {};
+  for (const t of tweets) byDate[t.date] = (byDate[t.date] || 0) + 1;
+  const dates = Object.keys(byDate).sort();
+  const freshest = dates[dates.length - 1];
+  const oldest = dates[0];
+  const withMedia = tweets.filter((t) => t.imageUrl).length;
+  const today = new Date(todayISO + "T00:00:00Z");
+  const f = new Date(freshest + "T00:00:00Z");
+  const ageDays = Math.round((today.getTime() - f.getTime()) / 86400000);
+  return {
+    line: `freshest=${freshest} (${ageDays}d ago) | oldest=${oldest} | window=[${cutoffISO}, ${todayISO}] | media-verified=${withMedia}/${tweets.length}`,
+    byDate,
+    freshestAgeDays: ageDays,
+  };
+}
+
 async function main() {
   const opts = parseArgs(process.argv);
   if (opts.help) {
@@ -322,13 +400,18 @@ async function main() {
   }
   preflight();
 
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const { cutoffISO } = computeCutoff(opts.since);
+
   const log = (msg) => {
     if (opts.verbose) process.stderr.write(`[fetch-grok] ${msg}\n`);
   };
-  log(`accounts=${opts.accounts.length} since=${opts.since} max-per=${opts.maxPer}`);
+  log(`accounts=${opts.accounts.length} since=${opts.since} max-per=${opts.maxPer} window=[${cutoffISO}, ${todayISO}]`);
 
   const failures = [];
   const allTweets = [];
+  const mediaLog = [];
+  const totalDrops = { badUrl: 0, wrongUser: 0, emptyText: 0, badDate: 0, outOfWindow: 0, mediaVerifyFail: 0 };
 
   for (const handle of opts.accounts) {
     log(`→ ${handle}`);
@@ -345,8 +428,10 @@ async function main() {
       log(`  ✗ ${parsed.reason}`);
       continue;
     }
-    const tweets = normalize(parsed.raw, handle);
-    log(`  ✓ ${tweets.length} tweet(s)`);
+    const { tweets, drops } = normalize(parsed.raw, handle, cutoffISO, todayISO, mediaLog);
+    for (const k of Object.keys(totalDrops)) totalDrops[k] += drops[k];
+    const dropTags = Object.entries(drops).filter(([, v]) => v > 0).map(([k, v]) => `${k}=${v}`).join(",");
+    log(`  ✓ ${tweets.length} tweet(s) kept${dropTags ? ` [drops: ${dropTags}]` : ""}`);
     allTweets.push(...tweets);
   }
 
@@ -359,6 +444,31 @@ async function main() {
   } else {
     fs.writeFileSync(opts.out, json + "\n", "utf8");
     log(`wrote ${tweets.length} tweet(s) to ${opts.out}`);
+  }
+
+  // freshness self-check — surfaces "grok index lag" early
+  const summary = summarize(tweets, cutoffISO, todayISO);
+  process.stderr.write(`[fetch-grok] summary: ${summary.line}\n`);
+  if (Object.keys(summary.byDate).length > 0) {
+    const dateLines = Object.entries(summary.byDate)
+      .sort()
+      .map(([d, n]) => `  ${d}: ${n}`)
+      .join("\n");
+    process.stderr.write(`[fetch-grok] date distribution:\n${dateLines}\n`);
+  }
+  const droppedTags = Object.entries(totalDrops).filter(([, v]) => v > 0).map(([k, v]) => `${k}=${v}`).join(", ");
+  if (droppedTags) {
+    process.stderr.write(`[fetch-grok] total drops: ${droppedTags}\n`);
+  }
+  if (mediaLog.length > 0) {
+    const kept = mediaLog.filter((m) => m.ok).length;
+    process.stderr.write(`[fetch-grok] media verify: ${kept}/${mediaLog.length} passed (HTTP 200 + image/video content-type)\n`);
+    if (opts.verbose) {
+      for (const m of mediaLog) {
+        const tag = m.ok ? `✓ ${m.contentType}` : `✗ ${m.reason}`;
+        process.stderr.write(`  [@${m.handle} ${m.tweetId}] ${tag}\n    ${m.url}\n`);
+      }
+    }
   }
 
   if (failures.length > 0) {
@@ -375,6 +485,12 @@ async function main() {
       `[fetch-grok] zero tweets aggregated — exit 1 (downstream should skip write)\n`,
     );
     process.exit(1);
+  }
+  // Freshness warning (non-fatal): A站 needs last-24h ideally, surface if grok index lagged
+  if (summary.freshestAgeDays != null && summary.freshestAgeDays > 2) {
+    process.stderr.write(
+      `[fetch-grok] WARN: freshest tweet is ${summary.freshestAgeDays} days old — grok web index may be lagging behind real-time X\n`,
+    );
   }
   process.exit(0);
 }
