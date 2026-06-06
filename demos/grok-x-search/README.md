@@ -6,7 +6,7 @@
 
 ## What you get out of the box
 
-Real X URLs + post summaries + approximate dates for any keyword / handle / topic — using only Grok's native capabilities. Verified: 5/5 `curl -I` HTTP 200 against the URLs the LLM returned for "find @sama's recent AGI posts" in the [E2E probe report](../../docs/tests/p-grok-native-xsearch-e2e/report.md).
+Real X URLs + post summaries + approximate dates for any keyword / handle / topic — using only Grok's native capabilities. The LLM returned 5 real, valid `x.com/sama/status/…` URLs for "find @sama's recent AGI posts" (see the [E2E probe report](../../docs/tests/p-grok-native-xsearch-e2e/report.md)); the URLs open in any browser. **Note (2026-06-06):** a bare `curl -I` (HEAD) against these now returns `HTTP 403` — X tightened anti-scraping on non-browser requests since the probe. That's an X-platform change, unrelated to anet/grok. This demo's reproducibility is about **the LLM finding correct, real URLs**, not about anonymous `curl` reachability.
 
 ## Run it
 
@@ -51,7 +51,7 @@ commhub_send_task(
 )
 ```
 
-That's it. The LLM uses Grok's built-in `web_search` and `web_fetch`, picks up `allowed_domains=["x.com"]` automatically, returns a clean markdown list with real, curl-verifiable URLs.
+That's it. The LLM uses Grok's built-in `web_search` and `web_fetch`, picks up `allowed_domains=["x.com"]` automatically, returns a clean markdown list with real, browser-openable URLs.
 
 A polished prompt template + sample reply lives in [`prompts/basic.md`](prompts/basic.md).
 
@@ -81,7 +81,7 @@ A polished prompt template + sample reply lives in [`prompts/basic.md`](prompts/
   自我复制的宇宙飞船(von Neumann probe)什么时候能发射升空"...
 ```
 
-All five URLs return HTTP 200 — see [`basic-urls.txt`](../../docs/tests/p-grok-native-xsearch-e2e/basic-urls.txt) for the verbatim list.
+All five are real, valid `x.com/sama/status/…` URLs that open in any browser — see [`basic-urls.txt`](../../docs/tests/p-grok-native-xsearch-e2e/basic-urls.txt) for the verbatim list. (A bare `curl -I` now returns `HTTP 403` due to X anti-scraping, as noted up top — the URLs are still real.)
 
 ## What grok native gives you
 
@@ -128,7 +128,7 @@ A previous version of this demo bundled a `twitterapi.io` fetcher as the "advanc
 1. ❌ Naive: "schema doesn't have XSearch → must integrate external" — what the previous version did.
 2. ✅ Correct: "schema doesn't have XSearch → run a real prompt and see what Grok actually does with `web_search` + reasoning".
 
-The E2E probe ([`docs/tests/p-grok-native-xsearch-e2e/report.md`](../../docs/tests/p-grok-native-xsearch-e2e/report.md)) proved Vincent right: the LLM uses native tools to satisfy the basic-tier ask completely, with curl-verifiable URLs.
+The E2E probe ([`docs/tests/p-grok-native-xsearch-e2e/report.md`](../../docs/tests/p-grok-native-xsearch-e2e/report.md)) proved Vincent right: the LLM uses native tools to satisfy the basic-tier ask completely, returning real, browser-openable URLs.
 
 This is the third "schema-not-artifact" lesson banked in the agent-action verification discipline — see RFC-021 §14.
 
