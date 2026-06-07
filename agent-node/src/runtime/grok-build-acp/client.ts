@@ -173,9 +173,21 @@ export class GrokAcpClient extends EventEmitter {
       const result = this.resolveServerRequest(req.method, req.params);
       this.respond(req.id, result);
     } catch (error: any) {
+      // JSON-RPC error.code MUST be an i32. Node's fs errors carry string
+      // codes like "ENOENT" / "EACCES"; passing those through verbatim
+      // makes Grok's serde parser reject the whole response with
+      // `invalid type: string "ENOENT", expected i32 at line 1 column 48`,
+      // which silently desynchronises the request/response pairing and
+      // hangs the next `session/prompt` until its 300s timeout (see
+      // ai-insight A站Grok 2026-06-07 19:50–19:55 incident).
+      const rawCode = error?.code;
+      const numCode = typeof rawCode === "number" && Number.isInteger(rawCode) ? rawCode : -32000;
       this.respond(req.id, undefined, {
-        code: error?.code ?? -32000,
+        code: numCode,
         message: error?.message ?? String(error),
+        ...(rawCode !== undefined && rawCode !== numCode
+          ? { data: { originalCode: rawCode } }
+          : {}),
       });
     }
   }
