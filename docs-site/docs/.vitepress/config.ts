@@ -47,10 +47,7 @@ export default withMermaid(defineConfig({
             text: 'v0.10.11 ▾',
             items: [
               { text: 'v0.10.11（latest）', link: '/' },
-              { text: 'v0.10.0 release notes', link: '/preview/v0.10.0' },
-              { text: 'preview channel（pre-release）', link: '/guide/preview/getting-started' },
-              { text: 'v0.9.0 → v0.10.11 changelog', link: '/changelog' },
-              { text: 'v0.8.0（归档）', link: '/v0.8.0/' },
+              { text: '更新日志（全部版本）', link: '/changelog' },
               { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
             ]
           },
@@ -62,7 +59,6 @@ export default withMermaid(defineConfig({
               { text: '基本概念', link: '/guide/basics' },
               { text: '简介', link: '/guide/introduction' },
               { text: '上手指南', link: '/guide/getting-started' },
-              { text: 'Preview 快速开始', link: '/guide/preview/getting-started' },
               { text: '一键安装 (多 Agent + tmux)', link: '/guide/one-shot-install' },
               { text: '架构概览', link: '/guide/architecture' },
             ]
@@ -134,10 +130,7 @@ export default withMermaid(defineConfig({
             text: 'v0.10.11 ▾',
             items: [
               { text: 'v0.10.11 (latest)', link: '/en/' },
-              { text: 'v0.10.0 release notes', link: '/en/preview/v0.10.0' },
-              { text: 'preview channel (pre-release)', link: '/guide/preview/getting-started' },
-              { text: 'v0.9.0 → v0.10.11 changelog', link: '/en/changelog' },
-              { text: 'v0.8.0 (archive)', link: '/v0.8.0/' },
+              { text: 'Changelog (all versions)', link: '/en/changelog' },
               { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
             ]
           },
