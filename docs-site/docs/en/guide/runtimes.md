@@ -315,7 +315,7 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 When enabled, agent-node runs `spawn('codex', ['app-server'])` and talks the full 67-method v2 protocol (thread / turn / item / realtime), **sidestepping** the `@openai/codex-sdk` `--mcp-config` HTTP-transport bug family ([#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause), and no longer being held hostage by codex-sdk breaking changes.
 
-**v0.10.x (including the current v0.10.11 stable) still defaults to the `@openai/codex-sdk` wrapper path** (collecting preview feedback first, preserving backward compatibility); v0.11.0 plans to flip the default to the direct stdio path, with the wrapper path moving into a deprecation warning. Full background in the [v0.10.0 release notes](/en/preview/v0.10.0#new-runtime-path-codex-direct-stdio).
+**v0.10.x (including the current v0.10.13 stable) still defaults to the `@openai/codex-sdk` wrapper path** (collecting preview feedback first, preserving backward compatibility); v0.11.0 plans to flip the default to the direct stdio path, with the wrapper path moving into a deprecation warning. Full background in the [v0.10.0 release notes](/en/preview/v0.10.0#new-runtime-path-codex-direct-stdio).
 :::
 
 ---

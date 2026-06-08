@@ -24,7 +24,7 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 
 ### 3. Is it free?
 
-**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.11 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
+**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.13 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
 
 - Public repo, modifiable source
 - Business model = courses + consulting, not a forced hosted SaaS

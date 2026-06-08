@@ -24,7 +24,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 ### 3. 免费吗？
 
-**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.10.11 stable 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
+**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.10.13 stable 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
 
 - 仓库公开、源码可改
 - 商业模式 = 卖课 + 卖服务咨询，不依赖强制官方 SaaS
