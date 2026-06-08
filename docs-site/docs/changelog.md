@@ -4,9 +4,114 @@
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
-- **当前 stable**：v0.10.11（2026-05-28，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
+- **当前 stable**：v0.10.13（2026-06-08，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
+
+## v0.10.13 — **grok-build-acp `session/prompt` 300s timeout 卡死修复（P0 hotfix）**（2026-06-08）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-node@2.4.9` ← bumped（[#210](https://github.com/sleep2agi/agent-network/issues/210) / #204 runtime — ACP `handleServerRequest` 非整数错误码 coerce 修复）
+- `@sleep2agi/agent-network@2.2.10` ← unchanged
+- `@sleep2agi/commhub-server@0.8.4` ← unchanged（PINNED）
+
+### 🌟 Highlights
+
+#### `grok-build-acp` 节点 hang 至 `session/prompt timed out after 300000ms` 根因 + 修复
+
+**症状**：`grok-build-acp` runtime 节点接到第二个 task 后 hang ≈5 min，最终 agent-node 报 `grok ACP request 'session/prompt' timed out after 300000ms` —— ai-insight 用户 `A站Grok`（grok 0.2.29 alpha）2026-06-07 19:53:09 抓到的精确日志：
+
+```text
+ERROR failed to parse incoming message: invalid type: string 'ENOENT',
+expected i32 at line 1 column 48.
+Raw: {'jsonrpc':'2.0','id':5,
+      'error':{'code':'ENOENT',
+               'message':'ENOENT: no such file or directory, open ...'}}
+```
+
+**根因**：ACP server-request 响应（比如 `read_file` 失败）携带 JS-native 字符串错误码 `'ENOENT'`，但 Grok agent 端 protocol 要求 `code` 字段必须 i32 整数。旧 agent-node 直传 → Grok agent 解析失败 → 进入未定义状态 → hang 直到 client-side 300 s 超时。
+
+**修复**（commit [`4818776`](https://github.com/sleep2agi/agent-network/commit/4818776)）：`client.ts:handleServerRequest` 加 `Number.isInteger(rawCode)` 守卫。非整数 code → coerce 成 `-32000`（JSON-RPC 标准 reserved range），原 code 字符串保留到 `data.originalCode` 不丢信息。
+
+**新增回归测试**：+2 cases，bun test 89/89 pass。
+
+**实战验证**（通信龙本机，2026-06-07 19:50–19:55）：
+- 同型 `read_file` 失败重试：立返结构化 `code: -32000` + `data.originalCode: "ENOENT"`
+- grok turn 继续不 hang，任务正常 done/failed（47 s 完成，不到 300 s 超时门）
+- ai-insight `A站Grok` 节点全局装 `2.4.9-preview.0` 后 UAT 通过
+
+### 🐛 Bugs Fixed
+
+- [#210](https://github.com/sleep2agi/agent-network/issues/210) / #204 runtime — `grok-build-acp` ACP server-request 响应携带非整数错误码（如 `ENOENT`）致 Grok agent 解析失败 hang 至 300 s timeout
+
+### 📦 Install（全新安装）
+
+```bash
+npm i -g @sleep2agi/agent-network@latest @sleep2agi/agent-node@latest
+# 验证版本
+anet --version          # agent-network v2.2.10（未变）
+agent-node --version    # agent-node v2.4.9 ⬆
+```
+
+`anet hub start` 自动拉取 `commhub-server@0.8.4`（PINNED, 未变）。
+
+### 🔄 Upgrade（老用户升级）
+
+**最窄路径**（推荐 — 仅此 hotfix 必需）：
+
+```bash
+npm i -g @sleep2agi/agent-node@2.4.9
+# 重启所有 grok-build-acp 节点
+cd <your-anet-workdir>
+anet node stop <grok-node-alias> && anet node start <grok-node-alias>
+```
+
+**全包升级**（一并刷 README / metadata）：
+
+```bash
+anet upgrade
+```
+
+⚠️ Node 版本：agent-node 兼容 Node ≥ 18；本 hotfix 在 Node 20.20 / 24.16 双跑 Docker smoke 通过。
+
+详细排错入口见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)。
+
+### 🙏 Credits
+
+bug 复现 + root cause + UAT：本机活体抓 19:53:09 日志 + Vincent `A站Grok` 47 s pilot；fix 实现：commit `4818776` + 2 回归测试；release ops：Method B 两阶段 + Install/Upgrade 分块 release notes。
+
+**Full Changelog**: <https://github.com/sleep2agi/agent-network/compare/v0.10.12...v0.10.13>
+
+---
+
+## v0.10.12 — **Grok-build runtime 场景化能力 + 0.2.8 alpha 回归验证**（2026-05-30）✅ stable
+
+**版本同步**（npm `latest` tag）：
+- `@sleep2agi/agent-node@2.4.8` ← bumped（场景化文档 + 0.2.8 alpha 回归基线 tag）
+- `@sleep2agi/agent-network@2.2.10` ← unchanged
+- `@sleep2agi/commhub-server@0.8.4` ← unchanged
+
+### 主要内容
+
+- **视频生成场景（0 改动可用）**：给 Grok 节点发送带图片 URL 的任务，后端自动路由到 `grok-imagine-video` 模型，产出 mp4。anet 端零代码改动，已用 ffmpeg 第一帧视觉验证。详见 [research/grok-video-gen-capability-probe.md](https://github.com/sleep2agi/agent-network/blob/main/docs/research/grok-video-gen-capability-probe.md)（含 Erratum）+ [scenarios/video-gen-marketing.md](https://github.com/sleep2agi/agent-network/blob/main/docs/scenarios/video-gen-marketing.md)。
+- **基础 X 搜索（开箱即用）**：按 keyword / handle 找 X URL + 标题 + 摘要 —— LLM 自动用 `web_search` + `allowed_domains=["x.com"]` 命中，无需预置。
+- **实时 X 高级搜索（需工作区预置）**：实时推流 + 帖子 faves/retweets/replies metadata + `since:` / `min_faves:` 高级语法 —— 需用户预置 twitterapi.io API key + fetcher 脚本，LLM 用 `run_terminal_command` 调。详见 [scenarios/x-search-informant.md](https://github.com/sleep2agi/agent-network/blob/main/docs/scenarios/x-search-informant.md)。
+- **0.2.8 alpha 回归验证**：87/87 bun 单元测试通过，#201 委派识别 + #204 `.mcp.json` 隔离修复在 Grok 0.2.8 alpha 上确认无回归。详见 [tests/p-grok-028-regression-verify/report.md](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/p-grok-028-regression-verify/report.md)。
+- **RFC-021 §12 / §13**：ACP 能力档案补充 Path D（工作区预置 + 终端兜底）+ XSearch ACP 暴露实测（XSearch 后端工具在 0.1.219 → 0.2.12 alpha 一致不通过 ACP 暴露，属结构性，长期解在 xAI 上游 PR #1302）。
+
+### 📦 Install / 🔄 Upgrade
+
+升级无破坏性，0.2.8 alpha 回归已过，可安全升级：
+
+```bash
+anet upgrade
+```
+
+或手动单包：`npm i -g @sleep2agi/agent-node@2.4.8`
+
+**Full Changelog**: <https://github.com/sleep2agi/agent-network/compare/v0.10.11...v0.10.12>
+
+---
 
 ## v0.10.11 — **#204 grok-build-acp 节点身份隔离 + #194 commhub broadcast 归属 hotfix**（2026-05-28）✅ stable
 

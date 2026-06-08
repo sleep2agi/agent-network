@@ -4,9 +4,114 @@
 This log runs reverse-chronologically. **The version scheme was reshuffled once**:
 - **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
-- **Current stable**: v0.10.11 (2026-05-28, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
+- **Current stable**: v0.10.13 (2026-06-08, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
+
+## v0.10.13 — **`grok-build-acp` `session/prompt` 300s timeout hang fix (P0 hotfix)** (2026-06-08) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-node@2.4.9` ← bumped ([#210](https://github.com/sleep2agi/agent-network/issues/210) / #204 runtime — ACP `handleServerRequest` non-integer error-code coerce fix)
+- `@sleep2agi/agent-network@2.2.10` ← unchanged
+- `@sleep2agi/commhub-server@0.8.4` ← unchanged (PINNED)
+
+### 🌟 Highlights
+
+#### Root cause + fix for `grok-build-acp` nodes hanging at `session/prompt timed out after 300000ms`
+
+**Symptom**: A `grok-build-acp` runtime node accepts a second task, hangs for ≈5 min, then agent-node reports `grok ACP request 'session/prompt' timed out after 300000ms`. ai-insight's `A站Grok` node (grok 0.2.29 alpha) captured the exact 2026-06-07 19:53:09 log:
+
+```text
+ERROR failed to parse incoming message: invalid type: string 'ENOENT',
+expected i32 at line 1 column 48.
+Raw: {'jsonrpc':'2.0','id':5,
+      'error':{'code':'ENOENT',
+               'message':'ENOENT: no such file or directory, open ...'}}
+```
+
+**Root cause**: ACP server-request responses (e.g. a failed `read_file`) carry a JS-native string error code like `'ENOENT'`, but the Grok agent's protocol requires `code` to be an i32 integer. The old agent-node passed the string straight through → Grok agent parse failure → undefined state → hang until the client-side 300 s timeout.
+
+**Fix** (commit [`4818776`](https://github.com/sleep2agi/agent-network/commit/4818776)): `client.ts:handleServerRequest` adds a `Number.isInteger(rawCode)` guard. Non-integer codes are coerced to `-32000` (the JSON-RPC standard reserved range); the original string is preserved on `data.originalCode` so no information is lost.
+
+**New regression tests**: +2 cases, bun test 89/89 pass.
+
+**Live verification** (in-house, 2026-06-07 19:50–19:55):
+- Same-shape `read_file` failure retried: returns structured `code: -32000` + `data.originalCode: "ENOENT"` immediately
+- The grok turn continues without hanging; the task completes normally (47 s, well under the 300 s timeout)
+- ai-insight's `A站Grok` node passed UAT after installing `2.4.9-preview.0` globally
+
+### 🐛 Bugs Fixed
+
+- [#210](https://github.com/sleep2agi/agent-network/issues/210) / #204 runtime — `grok-build-acp` ACP server-request responses carrying non-integer error codes (e.g. `ENOENT`) caused the Grok agent to fail to parse and hang until the 300 s timeout
+
+### 📦 Install (fresh install)
+
+```bash
+npm i -g @sleep2agi/agent-network@latest @sleep2agi/agent-node@latest
+# Verify versions
+anet --version          # agent-network v2.2.10 (unchanged)
+agent-node --version    # agent-node v2.4.9 ⬆
+```
+
+`anet hub start` auto-fetches `commhub-server@0.8.4` (PINNED, unchanged).
+
+### 🔄 Upgrade (existing users)
+
+**Narrow path** (recommended — only this package needs the hotfix):
+
+```bash
+npm i -g @sleep2agi/agent-node@2.4.9
+# Restart every grok-build-acp node
+cd <your-anet-workdir>
+anet node stop <grok-node-alias> && anet node start <grok-node-alias>
+```
+
+**Full sweep** (also refreshes READMEs / metadata):
+
+```bash
+anet upgrade
+```
+
+⚠️ Node version note: agent-node supports Node ≥ 18; this hotfix's Docker smoke ran clean on both Node 20.20 and 24.16.
+
+For the full troubleshooting entry see [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603).
+
+### 🙏 Credits
+
+Bug repro + root cause + UAT: live 19:53:09 capture + Vincent's `A站Grok` 47 s pilot; fix implementation: commit `4818776` + 2 regression tests; release ops: Method B two-phase + dual Install/Upgrade release notes sections.
+
+**Full Changelog**: <https://github.com/sleep2agi/agent-network/compare/v0.10.12...v0.10.13>
+
+---
+
+## v0.10.12 — **Grok-build runtime scenario enablement + 0.2.8 alpha regression verify** (2026-05-30) ✅ stable
+
+**Version alignment** (npm `latest` tag):
+- `@sleep2agi/agent-node@2.4.8` ← bumped (scenario docs + 0.2.8 alpha regression baseline tag)
+- `@sleep2agi/agent-network@2.2.10` ← unchanged
+- `@sleep2agi/commhub-server@0.8.4` ← unchanged
+
+### Highlights
+
+- **Video-generation scenario (0 LOC)**: Send a Grok node a task carrying an image URL; the backend auto-routes to the `grok-imagine-video` model and returns mp4. Anet itself ships zero code changes — verified via ffmpeg first-frame visual check. See [research/grok-video-gen-capability-probe.md](https://github.com/sleep2agi/agent-network/blob/main/docs/research/grok-video-gen-capability-probe.md) (with Erratum) + [scenarios/video-gen-marketing.en.md](https://github.com/sleep2agi/agent-network/blob/main/docs/scenarios/video-gen-marketing.en.md).
+- **Basic X search (out-of-the-box)**: Find X URL + title + excerpt by keyword / handle — the LLM does it via `web_search` + `allowed_domains=["x.com"]`. No pre-setup required.
+- **Live X advanced search (workspace setup required)**: Live streaming + per-post faves / retweets / replies metadata + `since:` / `min_faves:` operators — requires the user to pre-stage a twitterapi.io API key + fetcher script that the LLM drives via `run_terminal_command`. See [scenarios/x-search-informant.en.md](https://github.com/sleep2agi/agent-network/blob/main/docs/scenarios/x-search-informant.en.md).
+- **0.2.8 alpha regression verify**: 87 / 87 bun unit tests pass; the #201 delegation detection + #204 `.mcp.json` isolation fixes hold on Grok 0.2.8 alpha. Detail: [tests/p-grok-028-regression-verify/report.md](https://github.com/sleep2agi/agent-network/blob/main/docs/tests/p-grok-028-regression-verify/report.md).
+- **RFC-021 §12 / §13**: ACP capability dossier updated with Path D (workspace setup + terminal bypass) + XSearch ACP exposure test (XSearch's backend tool is structurally not exposed via ACP on 0.1.219 → 0.2.12 alpha; long-term resolution sits in the upstream xAI PR #1302).
+
+### Install / Upgrade
+
+Non-breaking; 0.2.8 alpha regression verified, safe to upgrade:
+
+```bash
+anet upgrade
+```
+
+Or single-package: `npm i -g @sleep2agi/agent-node@2.4.8`
+
+**Full Changelog**: <https://github.com/sleep2agi/agent-network/compare/v0.10.11...v0.10.12>
+
+---
 
 ## v0.10.11 — **#204 grok-build-acp per-node identity isolation + #194 commhub broadcast attribution hotfix** (2026-05-28) ✅ stable
 
