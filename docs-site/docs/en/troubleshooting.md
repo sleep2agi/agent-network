@@ -681,7 +681,7 @@ If the codex CLI is already at latest but it still errors, please file an issue 
 
 The dashboard `≥ 0.5.0` §3.E hover detail card expects agent-node `≥ 2.4.0` ([#142](https://github.com/sleep2agi/agent-network/issues/142) — v0.10.0 ship made the agent emit `process_telemetry` on every heartbeat) plus commhub-server `≥ 0.8.2` (schema align). Three possible causes:
 
-- **agent-node older than 2.4.0**: run `anet upgrade` to pull v0.10.11 latest (currently `agent-node 2.4.7`, satisfying the ≥ 2.4.0 minimum)
+- **agent-node older than 2.4.0**: run `anet upgrade` to pull the current latest (`agent-node 2.4.9`, satisfying the ≥ 2.4.0 minimum)
 - **commhub-server older than 0.8.2**: upgrade the server (`bunx @sleep2agi/commhub-server@latest`)
 - **Agent hasn't reported a heartbeat yet**: `process_telemetry` rides on the same heartbeat as host telemetry — a freshly started node needs ~15s
 
@@ -692,6 +692,28 @@ curl http://localhost:9200/api/server/<host>/agents \
   -H "Authorization: Bearer ntok_xxx" | jq '.agents[0].process_telemetry'
 # Expect non-null rss_bytes / cpu_pct / uptime_seconds / in_flight_count
 ```
+
+### `grok-build-acp` node task hangs / `session/prompt timed out after 300000ms` / JSON-RPC error 32603
+
+**Symptom**: A node created with the `grok-build-acp` runtime accepts a task longer than ~5 min via commhub and then never reports back. No error, no reply — the pane is stuck on a `session/prompt` call. The agent-node log shows either `session/prompt timed out after 300000ms` or a JSON-RPC `code: 32603` returned by the ACP server.
+
+**Root cause**: agent-node 2.4.8 and below hard-coded a 300 s `session/prompt` timeout (inherited from the older codex-sdk wrapper). The grok-build-acp backend, however, is biased toward longer user-level tasks where 5 min is routinely too tight.
+
+**Fix**: Upgrade to `agent-node 2.4.9` (v0.10.13 hotfix) — it widens the client-side `session/prompt` timeout to match the grok backend's real working window. Live-tested in-house: tasks of 47 s / 5 min / >10 min all complete normally.
+
+```bash
+# 1. Upgrade
+anet upgrade            # one-shot
+# or: npm install -g @sleep2agi/agent-node@latest
+
+# 2. Restart the grok node
+anet node stop grok-marketing && anet node start grok-marketing
+
+# 3. Verify
+anet --version          # agent-node ≥ 2.4.9
+```
+
+Still hangs? Rule out: the grok backend quota is exhausted (grok's own `~/.config/grok-build/` log will hint at it) / the node `cwd` is outside the user-workspace boundary ([#204](https://github.com/sleep2agi/agent-network/issues/204) isolated cwd boundary) / `grok login` credentials expired.
 
 ---
 

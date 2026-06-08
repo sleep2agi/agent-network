@@ -143,7 +143,7 @@ Dashboard 根据角色调整按钮可见性 / 可点击性（设计目标）：
 - **admin** 看不到"删除网络"按钮
 
 ::: info Dashboard `0.5.6` 实际行为（v0.10.11 stable）
-角色 → 按钮可见性的 UI 联动**部分实装**。即使按钮当前还显示，**Server 端会 403 拒绝**（`canWrite()` 强制 RBAC），权限本身不会绕过。完整 UI 按钮 hiding **v0.9.x + v0.10.0-10 scope 都未动**（v0.9.x Recovery & Observability、v0.10.0 Direct Runtime + Observability Foundations、v0.10.1 PINNED hotfix、v0.10.2 Hero A disk + Hero D 拓扑前缀 Option C + disk render、v0.10.3 codex preset、v0.10.4 dashboard orphan-band + `anet upgrade` UX 警告、v0.10.5 batch wizard workdir + codex/claude skip API key、v0.10.6 `anet upgrade` Option B detached + wizard silent-exit、v0.10.7 codex-sdk batch yolo parity、v0.10.8 Servers UI 文案修、v0.10.9 codex-sdk 图片输入 + commhub 附件 `meta_json`、v0.10.10 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接 —— 主题都不在 RBAC UI），排到 v0.11+ Dashboard 改造里再补。
+角色 → 按钮可见性的 UI 联动**部分实装**。即使按钮当前还显示，**Server 端会 403 拒绝**（`canWrite()` 强制 RBAC），权限本身不会绕过。完整 UI 按钮 hiding **v0.9.x / v0.10.x 整条 stable 线都未动**（每个 release 的具体改动见 [changelog](/changelog)），排到 v0.11+ Dashboard 改造里再补。
 :::
 
 ## 加入网络
@@ -236,7 +236,7 @@ v0.6 时代设计过 Free / Pro / Admin 三档配额体系（下表），Apache 
 - `anet activate <key>` 是 v0.6 legacy 命令，OSS 后**不再用作"升级"路径**
 - `users.role = 'admin'`（首位注册用户自动获得）才能突破 free 配额，详见 [troubleshooting → quota_exceeded 解决方案](/troubleshooting#quota-exceeded-max-n-networks-for-free-plan)
 
-下表保留为自部署管理员**手动设置软配额**的设计参考（v0.9.x / v0.10.0-10 都未实现 —— v0.9.x Recovery & Observability、v0.10.0 Direct Runtime + Observability Foundations、v0.10.1 PINNED hotfix、v0.10.2 Hero A disk + Hero D 拓扑前缀、v0.10.3 codex preset、v0.10.4 dashboard orphan-band + `anet upgrade` UX、v0.10.5 batch wizard workdir + codex/claude skip API key、v0.10.6 `anet upgrade` Option B detached + wizard silent-exit、v0.10.7 codex-sdk batch yolo parity、v0.10.8 Servers UI 文案修、v0.10.9 codex-sdk 图片输入 + commhub 附件 `meta_json`、v0.10.10 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接 scope 都不在 quota 管理；排到 v0.11+ / 未排期）。
+下表保留为自部署管理员**手动设置软配额**的设计参考（v0.9.x / v0.10.x 整条 stable 线都未实现 — 每个 release 的具体改动见 [changelog](/changelog)；排到 v0.11+ / 未排期）。
 :::
 
 | 配额项 | Free（v0.6 设计） | Pro（v0.6 设计） | Admin |

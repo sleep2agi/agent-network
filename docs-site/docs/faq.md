@@ -31,7 +31,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 - `anet license` / `anet activate` 是 v0.6 legacy 命令，**OSS 后不再需要**；若命中 `license_expired`（Hub 后向兼容仍创建 14 天 trial），按 [troubleshooting — license_expired](/troubleshooting#license-expired-授权过期-legacy-行为) 直接清掉 `licenses` 表即可
 
 ::: info v0.6 license 路径计划清理
-当前 server 在 `send_task` 仍跑 `licenses.expires_at` 检查（V3 遗留代码，verify [`server/src/tools.ts` `license_expired` 仍在](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)）—— **v0.9.x / v0.10.0-10 scope 都未动**（v0.9.x Recovery & Observability、v0.10.0 Direct Runtime + Observability Foundations、v0.10.1 PINNED chain-bump hotfix、v0.10.2 Hero A disk + Hero D 拓扑前缀、v0.10.3 codex preset、v0.10.4 dashboard orphan-band + `anet upgrade` UX、v0.10.5 batch wizard workdir + codex/claude skip API key、v0.10.6 `anet upgrade` Option B detached + wizard silent-exit、v0.10.7 codex-sdk batch yolo parity、v0.10.8 Servers UI 文案修、v0.10.9 codex-sdk 图片输入 + commhub 附件 `meta_json`、v0.10.10 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接 —— 主题都不在 license 路径），排到 v0.11+ 整段移除。
+当前 server 在 `send_task` 仍跑 `licenses.expires_at` 检查（V3 遗留代码，verify [`server/src/tools.ts` `license_expired` 仍在](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts)）—— **v0.9.x / v0.10.x 整条 stable 线都未动 license 路径**（每个 release 的具体改动见 [changelog](/changelog)），排到 v0.11+ 整段移除。
 :::
 
 ### 4. 支持哪些 AI 模型？
@@ -248,10 +248,10 @@ anet network invite --role member        # 生成邀请码（admin/member/viewer
 ```
 
 ::: tip 角色变更入口
-当前 v0.10.11 stable 仍不提供 CLI `promote` / `demote` 子命令（v0.9.x scope 是 Recovery & Observability，v0.10.0 是 Direct Runtime + Observability Foundations，v0.10.1 是 PINNED chain-bump hotfix，v0.10.2-10 是 Hero A disk + Hero D 拓扑前缀 / v0.10.3 codex preset / v0.10.4 dashboard orphan-band + `anet upgrade` UX 警告 / v0.10.5 batch wizard workdir + codex/claude skip API key / v0.10.6 `anet upgrade` Option B detached + wizard silent-exit / v0.10.7 codex-sdk batch yolo parity / v0.10.8 Servers UI 文案修 / v0.10.9 codex-sdk 图片输入 + commhub 附件 `meta_json` / v0.10.10 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接 —— 都未动 member role 管理）；改角色目前要通过 [REST API `/api/networks/:id/members/:user_id`](/api/rest) 调用或 Dashboard Admin 页（部分实装，[详见 Dashboard Admin](/guide/dashboard#admin-管理面板)）。完整 CLI 入口排到 v0.11+ / 未排期。
+当前 v0.10.x stable 线仍不提供 CLI `promote` / `demote` 子命令（[changelog](/changelog) 整条线都未触碰 member role 管理）。改角色目前要通过 [REST API `/api/networks/:id/members/:user_id`](/api/rest) 调用或 Dashboard Admin 页（部分实装，[详见 Dashboard Admin](/guide/dashboard#admin-管理面板)）。完整 CLI 入口排到 v0.11+ / 未排期。
 :::
 
-### 17a. 怎么改密码？（v0.8）
+### 17a. 怎么改密码？
 
 ```bash
 anet passwd                       # 交互式：输旧密码 → 输新密码 ≥ 8 字符 + 非弱密码字典
@@ -259,7 +259,7 @@ anet passwd                       # 交互式：输旧密码 → 输新密码 �
 
 要求：≥ 8 字符 + 不在 [`password-dict.ts WEAK_PASSWORDS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/password-dict.ts) 字典里。**`anet passwd` / `anet hub admin reset-user` 无任何长度豁免** —— 只有首次注册 admin（register 路径）才允许 ≥ 4，让 quick-start `admin / anethub` 默认成立（verify [`auth.ts:43-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L43)）。
 
-### 17b. 忘密码怎么办？（v0.8）
+### 17b. 忘密码怎么办？
 
 **方案 A（推荐）**：在 Hub 所在机器跑 admin reset：
 

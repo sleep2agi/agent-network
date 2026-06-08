@@ -348,7 +348,7 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 - 本机已装 `grok` CLI 并 `grok auth login` 完成
 - 环境变量 `XAI_API_KEY` 已设
-- `agent-network ≥ 2.2.10`（v0.10.11 latest）+ `agent-node ≥ 2.4.7`
+- `agent-network ≥ 2.2.10`（v0.10.11 latest）+ `agent-node ≥ 2.4.9`（v0.10.13 hotfix 修了 `session/prompt` 300s 超时 — 早一点的 agent-node 跑 grok 长任务会卡死，详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
 
 ### 起节点
 

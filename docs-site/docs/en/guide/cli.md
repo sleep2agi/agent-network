@@ -505,7 +505,7 @@ anet upgrade [--channel preview|latest] [--self] [--dry-run]
                       (since v0.10.6 #154 anet upgrade auto-detached-spawns by default — no --self flag needed when self is < target;
                        chicken-and-egg note for users on 2.2.4 or older: one-time manual `npm install -g @sleep2agi/agent-network@latest`
                        to reach 2.2.5+, then subsequent `anet upgrade` will auto-detached-spawn)
-  agent-node          2.4.0                →  2.4.7                → upgrade
+  agent-node          2.4.0                →  2.4.9                → upgrade
   commhub-server      not installed        →  0.8.4                (lazy via npx, skipped)
                       (not installed globally — lazy-fetched via npx by `anet hub start`)
   dashboard           0.5.0                →  0.5.6                → upgrade

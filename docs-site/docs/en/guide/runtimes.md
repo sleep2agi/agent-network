@@ -328,7 +328,7 @@ Run agents via [xAI Grok Build](https://x.ai/grok)'s local CLI — the node spaw
 
 - `grok` CLI installed and `grok auth login` completed on the host
 - `XAI_API_KEY` environment variable set
-- `agent-network ≥ 2.2.10` (v0.10.11 latest) + `agent-node ≥ 2.4.7`
+- `agent-network ≥ 2.2.10` (v0.10.11 latest) + `agent-node ≥ 2.4.9` (the v0.10.13 hotfix widened the `session/prompt` 300 s timeout — earlier agent-node hangs on long grok tasks; see [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603))
 
 ### Start a node
 

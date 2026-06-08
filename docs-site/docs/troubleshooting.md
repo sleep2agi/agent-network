@@ -680,7 +680,7 @@ unset ANET_CODEX_STDIO_DIRECT
 
 dashboard `≥ 0.5.0` 的 §3.E hover detail card 期望 agent-node `≥ 2.4.0`（[#142](https://github.com/sleep2agi/agent-network/issues/142) v0.10.0 ship 起 agent 心跳带 `process_telemetry`）+ commhub-server `≥ 0.8.2`（schema align）。三种可能：
 
-- **agent-node 老于 2.4.0**：跑 `anet upgrade` 升级到 v0.10.11 latest（当前 `agent-node 2.4.7`，满足 ≥ 2.4.0 最低要求）
+- **agent-node 老于 2.4.0**：跑 `anet upgrade` 升级到当前 latest（`agent-node 2.4.9`，满足 ≥ 2.4.0 最低要求）
 - **commhub-server 老于 0.8.2**：升级 server 端（`bunx @sleep2agi/commhub-server@latest`）
 - **agent 短期还没心跳**：`process_telemetry` 跟普通 host telemetry 一样需要至少 1 次心跳；新启动节点等 ~15s
 
@@ -691,6 +691,28 @@ curl http://localhost:9200/api/server/<host>/agents \
   -H "Authorization: Bearer ntok_xxx" | jq '.agents[0].process_telemetry'
 # 期望非 null 的 rss_bytes / cpu_pct / uptime_seconds / in_flight_count
 ```
+
+### `grok-build-acp` 节点任务挂死 / `session/prompt timed out after 300000ms` / JSON-RPC error 32603
+
+**症状**：用 `grok-build-acp` runtime 创建的节点，commhub 给它派一个稍长一点（> 5min）的任务，节点不报错也不回复，pane 卡在 `session/prompt` 调用上；agent-node 日志里能看到 `session/prompt timed out after 300000ms` 或 ACP server 回了 JSON-RPC `code: 32603`。
+
+**根因**：agent-node 2.4.8 及以下对 ACP `session/prompt` 写死了 300 s 超时（沿用 codex-sdk wrapper 的旧值），但 grok-build-acp 后端是用户级长任务为主，5 min 是常态偏短。
+
+**修复**：升到 `agent-node 2.4.9`（v0.10.13 hotfix）— 把 `session/prompt` 的 client-side 超时拉宽到 grok 后端的实际工作窗口，本机活体节点 47s / 5min / >10min 的任务都能正常完成。
+
+```bash
+# 1. 升级
+anet upgrade            # 一键
+# 或：npm install -g @sleep2agi/agent-node@latest
+
+# 2. 重启 grok 节点
+anet node stop grok-marketing && anet node start grok-marketing
+
+# 3. 验证
+anet --version          # agent-node ≥ 2.4.9
+```
+
+仍卡死，先排除：grok backend 端 quota 用尽（grok 自己的 `~/.config/grok-build/` log 会有提示）/ 节点 cwd 不在 user workspace 边界内（[#204](https://github.com/sleep2agi/agent-network/issues/204) isolated cwd 边界）/ `grok login` 凭据过期。
 
 ---
 
