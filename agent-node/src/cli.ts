@@ -27,6 +27,11 @@ import {
   type PendingReply,
 } from "./reply-reliability";
 import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
+import {
+  defaultNpmInstall,
+  loadCodexSdk,
+  resolveAgentNodeDir,
+} from "./runtime/codex-dep-loader";
 
 const home = homedir();
 
@@ -1140,10 +1145,26 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
   } catch {}
 
   let Codex: any;
-  try {
-    ({ Codex } = await import("@openai/codex-sdk"));
-  } catch {
-    throw new Error("@openai/codex-sdk not installed. Run: npm install -g @openai/codex-sdk @openai/codex");
+  {
+    // #186 — when `@openai/codex-sdk` is missing (optionalDependencies
+    // didn't install, custom prefix, stale agent-node), lazily install
+    // into agent-node's own node_modules and retry. On terminal failure
+    // the user gets a single copy-pasteable npm command + the actual
+    // module-root path agent-node is running from — no more "install
+    // globally and hope" guidance that doesn't actually fix anything
+    // on npx / custom-prefix nodes (see #186 incident on the
+    // 视频牛 1-5 fleet).
+    const { execSync } = await import("child_process");
+    const { module: sdkMod } = await loadCodexSdk(
+      {
+        importCodexSdk: () => import("@openai/codex-sdk"),
+        npmInstall: defaultNpmInstall(execSync),
+        log,
+        warn,
+      },
+      resolveAgentNodeDir(__dirname),
+    );
+    Codex = sdkMod.Codex;
   }
 
   if (!codexThread) {
