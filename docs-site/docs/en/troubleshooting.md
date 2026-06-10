@@ -728,6 +728,10 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 
 Full detail: [runtimes → Long-task timeout tuning](/en/guide/runtimes#long-task-timeout-tuning-flags-grokacptimeoutms).
 
+::: warning v0.10.13 doesn't echo timeoutMs in startup log
+agent-node startup logs **do not print** `timeoutMs=<new value>` — the value is read but not surfaced in `anet node start` output. If you set it and tasks still time out, the config is likely in the wrong file or the env-var name has a typo. Please [open an issue](https://github.com/sleep2agi/agent-network/issues/new) — a startup log line is planned for the next release (tracked via #214 dim 5 Batch A finding).
+:::
+
 **Still hangs?** Rule out: the grok backend quota is exhausted (grok's own `~/.config/grok-build/` log will hint at it) / the node `cwd` is outside the user-workspace boundary ([#204](https://github.com/sleep2agi/agent-network/issues/204) isolated cwd boundary) / `grok login` credentials expired.
 
 ### Hub box load is abnormally high / new claude sessions are slow / piles of zombie `bun` processes

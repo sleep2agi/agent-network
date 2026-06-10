@@ -240,7 +240,7 @@ The project direction is **Apache 2.0 open source + self-hosted + courses / cons
 
 ```bash
 anet demo                  # list available demos
-anet demo sci-team         # 4-role research team (PI / engineer / reviewer / doc-writer)
+anet demo sci-team         # 1 leader + N-1 workers (default 10, tunable 5-50; Phase 1 scaffold — leader is a placeholder echo, real fan-out queued for RFC-008 Phase 2)
 anet demo pr-review        # 3-role PR review squad
 ```
 

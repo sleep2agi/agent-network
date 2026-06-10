@@ -244,7 +244,7 @@ anet node start remote-bot
 
 ```bash
 anet demo                  # 列出可用 demo
-anet demo sci-team         # 4 角色科研团队（PI / 工程师 / 评审 / 文档）
+anet demo sci-team         # 1 leader + N-1 worker（默认 10，5-50 可调；Phase 1 scaffold — leader 当前是 placeholder echo, 真 fan-out 排 RFC-008 Phase 2）
 anet demo pr-review        # 3 角色 PR 评审小组
 ```
 

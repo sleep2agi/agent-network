@@ -378,7 +378,11 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 }
 ```
 
-> 取舍：调大可以让真长任务跑完，但 hang 类问题（agent 真的卡住、不是慢）会更晚被发现；遇到误超时再调，别盲目设很大值。验证 [`agent-node/src/cli.ts:1374` `timeoutMs: parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000")`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1374)。
+> 取舍：调大可以让真长任务跑完，但 hang 类问题（agent 真的卡住、不是慢）会更晚被发现；遇到误超时再调，别盲目设很大值。
+
+::: warning v0.10.13 latest 暂无 startup log 直接验证
+v0.10.13 的 agent-node 启动时**不打 `timeoutMs=...` log 行**——值确实读到了 [`agent-node/src/cli.ts:1374` 源码](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1374) (`parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000")`)，但你无法用 `anet node start` 输出直接确认。如果跑了一个**确定 > 5 min** 的任务仍在 300 s 卡住，多半是 `flags.grokAcpTimeoutMs` 没被读到 (config 写错位置 / env 字段名 typo)；可以开 [issue](https://github.com/sleep2agi/agent-network/issues/new) 上报，我们计划在下一版给 grok runtime 启动加 `[grok] session/prompt timeoutMs=...` 一行 (#214 维度 5 Batch A finding 跟踪)。
+:::
 
 ### 详见
 
