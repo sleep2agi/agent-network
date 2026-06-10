@@ -13,6 +13,17 @@ hero:
     - theme: alt
       text: GitHub
       link: https://github.com/sleep2agi/agent-network
+
+features:
+  - icon: 🖥️
+    title: Local-first
+    details: Hub, nodes, and data all run on your own hardware — single-file SQLite storage, no hosted service required.
+  - icon: 🤖
+    title: 4 runtimes × 8+ LLMs
+    details: Claude Code · Claude Agent SDK · Codex · Grok Build working side by side, with plug-and-play model vendors.
+  - icon: 📖
+    title: Apache 2.0 open source
+    details: Fully open code, free for commercial use, issue-driven iteration — contributions welcome.
 ---
 
 <section class="trust-row">

@@ -107,11 +107,11 @@ export default withMermaid(defineConfig({
             ]
           },
           {
-            text: '更多',
+            text: '帮助',
             items: [
+              { text: '故障排查', link: '/troubleshooting' },
               { text: 'FAQ', link: '/faq' },
               { text: '更新日志', link: '/changelog' },
-              { text: '故障排查', link: '/troubleshooting' },
             ]
           },
         ],
@@ -191,11 +191,11 @@ export default withMermaid(defineConfig({
             ]
           },
           {
-            text: 'More',
+            text: 'Help',
             items: [
+              { text: 'Troubleshooting', link: '/en/troubleshooting' },
               { text: 'FAQ', link: '/en/faq' },
               { text: 'Changelog', link: '/en/changelog' },
-              { text: 'Troubleshooting', link: '/en/troubleshooting' },
             ]
           },
         ],

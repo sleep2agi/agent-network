@@ -8,11 +8,22 @@ hero:
   tagline: 一行 anet 编排 Claude · Codex · Grok Build —— 4 Runtime × 8 LLM 同台跑在你的硬件上，Apache 2.0 开源
   actions:
     - theme: brand
-      text: 30 秒上手 →
+      text: 快速上手 →
       link: /guide/getting-started
     - theme: alt
       text: GitHub
       link: https://github.com/sleep2agi/agent-network
+
+features:
+  - icon: 🖥️
+    title: 本地优先
+    details: Hub、节点、数据全跑在你自己的硬件上，SQLite 单文件存储，不依赖任何托管服务。
+  - icon: 🤖
+    title: 4 Runtime × 8+ LLM
+    details: Claude Code · Claude Agent SDK · Codex · Grok Build 同台协作，多家模型厂商即插即用。
+  - icon: 📖
+    title: Apache 2.0 开源
+    details: 代码全部开放，自由商用，issue 驱动迭代，欢迎共建。
 ---
 
 <section class="trust-row">
