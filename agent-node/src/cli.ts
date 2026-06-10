@@ -26,6 +26,7 @@ import {
   PendingReplyQueue,
   type PendingReply,
 } from "./reply-reliability";
+import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
 
 const home = homedir();
 
@@ -1476,8 +1477,16 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
       cwd: grokCwd,
       sessionId,
       mcpServers: grokMcpServers,
-      timeoutMs: parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000"),
-      drainMs: parseInt(process.env.GROK_ACP_DRAIN_MS || fileConfig.flags?.grokAcpDrainMs || "15000"),
+      timeoutMs: resolveGrokAcpTimeout({
+        envValue: process.env.GROK_ACP_TIMEOUT_MS,
+        flagValue: fileConfig.flags?.grokAcpTimeoutMs,
+        defaultMs: 300000,
+      }).valueMs,
+      drainMs: resolveGrokAcpTimeout({
+        envValue: process.env.GROK_ACP_DRAIN_MS,
+        flagValue: fileConfig.flags?.grokAcpDrainMs,
+        defaultMs: 15000,
+      }).valueMs,
       onSession: (newSessionId) => writebackGrokSession(newSessionId),
       onEvent: (_event, state) => {
         if (state.skippedReplay > 0 && state.skippedReplay % 50 === 0) {
@@ -2117,6 +2126,24 @@ log(`  alias:   ${ALIAS || "(none!)"} [from: ${ALIAS_SOURCE}]`);  // #203 tracea
 log(`  runtime: ${RUNTIME_LABEL}`);
 log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.5" : RUNTIME === "grok" ? "grok-build" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
+// #214 维度 5 A6 — surface the grok ACP idle-timeout resolution so the
+// operator can see at a glance whether their `flags.grokAcpTimeoutMs`
+// setting actually took effect, or whether the runtime fell back to the
+// 300 s default. Only logged when the grok runtime is in use; the value
+// is the same one runGrokAcpTurn() will use for its session/prompt
+// activity-based timeout (#211).
+if (RUNTIME === "grok") {
+  const t = resolveGrokAcpTimeout({
+    envValue: process.env.GROK_ACP_TIMEOUT_MS,
+    flagValue: fileConfig.flags?.grokAcpTimeoutMs,
+    defaultMs: 300000,
+  });
+  const sourceLabel =
+    t.source === "flags" ? "flags.grokAcpTimeoutMs" :
+    t.source === "env" ? "env GROK_ACP_TIMEOUT_MS" :
+    "default";
+  log(`  [grok] session/prompt idle timeout = ${t.valueMs}ms (source: ${sourceLabel})`);
+}
 
 // Validate token + show user/network info
 if (AUTH_TOKEN) {
