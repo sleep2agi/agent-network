@@ -90,7 +90,7 @@ anet upgrade --self
 | `self skip` | anet does not self-upgrade by default (pass `--self`) |
 | `lookup failed` | npm registry lookup failed — network / package name issue |
 
-**Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.4` on v0.10.11 stable — bumped from `0.8.3` by the v0.10.11 [#194 broadcast attribution hotfix](https://github.com/sleep2agi/agent-network/issues/194); the v0.10.9 attachment `meta_json` release took `0.8.2` → `0.8.3`; the prior bump from `0.8.0` → `0.8.2` was the v0.10.1 PINNED chain-bump hotfix) — `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
+**Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.4` on v0.10.13 stable; historical chain detail in the [changelog](/en/changelog) `commhub-server` rows). `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
 
 **After the upgrade**: `anet upgrade` prints a hint that running nodes need a restart to pick up the new agent-node:
 
