@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-network",
-  "version": "2.2.11-preview.1",
+  "version": "2.2.11-preview.2",
   "description": "AI Agent Network CLI \u2014 Local-first multi-agent orchestration across 4 runtimes (Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP) and 8+ LLM providers (Anthropic / OpenAI / xAI Grok / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter). Apache 2.0.",
   "type": "module",
   "main": "dist/src/client.js",
