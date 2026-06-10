@@ -4,6 +4,7 @@ import { db, uuidv4, logTaskEvent, chainReplyToParent } from "./db.js";
 import { pushEvent } from "./push.js";
 import { getUserNetworkRole } from "./auth.js";
 import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias } from "./rename.js";
+import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -657,6 +658,27 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const canonical = resolveCanonicalAlias(effectiveNetId, alias);
       const targetAlias = canonical.alias;
+
+      // #212 dedup guardrail. If this exact (from, to, content) has already
+      // been delivered within COMMHUB_SEND_DEDUP_WINDOW_MS (default 5 min)
+      // we refuse the call and surface a structured `duplicate_send`
+      // error. The LLM receives the Chinese hint inside details.message
+      // and can act on it (rewrite the task or wait). See A站Grok #212
+      // incident: 50+ identical dispatches across 5 LLM turns ignored
+      // three STOP replies — the LLM cannot be trusted to debounce
+      // itself, so the runtime layer must.
+      const dedup = sharedSendDedup.check(from_session, targetAlias, task);
+      if (dedup.duplicate) {
+        const payload = buildDuplicateSendPayload({
+          from: from_session,
+          to: targetAlias,
+          ageMs: dedup.ageMs,
+          windowMs: sharedSendDedup.windowMs,
+        });
+        console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: DROPPED duplicate (age=${dedup.ageMs}ms, window=${sharedSendDedup.windowMs}ms)`);
+        return { content: [{ type: "text" as const, text: JSON.stringify(payload) }] };
+      }
+
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const id = uuidv4();
       // 事务：inbox + tasks 双写 + 触碰目标 session 的 task/updated_at（让
@@ -680,6 +702,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         db.run(touchSql, touchParams);
       });
       logTaskEvent(id, null, "delivered", from_session, parentTaskId ? `→ ${targetAlias} (parent=${parentTaskId.slice(0,8)})` : `→ ${targetAlias}`);
+      // Only stamp the dedup index after the inbox/tasks transaction
+      // succeeds, so a failed insert never silently shadows a legitimate
+      // retry.
+      sharedSendDedup.record(from_session, targetAlias, task);
 
       const session = scopedSessionStatus(targetAlias, effectiveNetId);
 

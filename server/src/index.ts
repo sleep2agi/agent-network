@@ -6,6 +6,7 @@ import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
+import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -1202,6 +1203,24 @@ Bun.serve({
       const fromSession = body.from || "api";
       const ttlSeconds = (body as any).ttl_seconds || 3600;
       const metaJson = normalizeMetaJson((body as any).meta);
+
+      // #212 dedup guardrail. Mirrors the MCP `send_task` tool: same
+      // (from_session, target_alias, task) within COMMHUB_SEND_DEDUP_WINDOW_MS
+      // is rejected with a structured `duplicate_send` error so dashboard
+      // dispatch buttons and scripted REST callers get the same guarantee
+      // as agent-driven MCP traffic.
+      const dedup = sharedSendDedup.check(fromSession, targetAlias, body.task);
+      if (dedup.duplicate) {
+        const payload = buildDuplicateSendPayload({
+          from: fromSession,
+          to: targetAlias,
+          ageMs: dedup.ageMs,
+          windowMs: sharedSendDedup.windowMs,
+        });
+        console.log(`[/api/task] ${fromSession} → ${targetAlias}: DROPPED duplicate (age=${dedup.ageMs}ms, window=${sharedSendDedup.windowMs}ms)`);
+        return withCors(req, Response.json(payload, { status: 429 }));
+      }
+
       // Mirror send_task MCP: write inbox + tasks rows in a single
       // transaction so the dispatch is visible to dashboard's Tasks page
       // and the parent_task_id lineage chain. Previously this endpoint
@@ -1237,6 +1256,10 @@ Bun.serve({
       if (taskNetId) { sessionSql += " AND network_id = ?2"; sessionParams.push(taskNetId); }
       const targetSession = db.get<any>(sessionSql, ...sessionParams);
       if (targetSession) pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession, ...(canonical.renamed ? { renamed_from: body.alias } : {}) }, taskNetId);
+      // #212 — stamp the dedup index only after the inbox/tasks insert
+      // succeeds. Mirrors the MCP `send_task` path so a failed write
+      // never shadows a legitimate retry.
+      sharedSendDedup.record(fromSession, targetAlias, body.task);
       return withCors(req, Response.json({ ok: true, task_id: id, message_id: id, ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}) }));
     }
 
