@@ -32,6 +32,10 @@ import {
   loadCodexSdk,
   resolveAgentNodeDir,
 } from "./runtime/codex-dep-loader";
+import {
+  buildResumeHint,
+  fetchUnresolvedOutbound,
+} from "./runtime/grok-build-acp/resume-hint";
 
 const home = homedir();
 
@@ -767,6 +771,16 @@ async function runGoalSchedulerTick() {
 let claudeSessionId: string | undefined = SESSION_ID || undefined;
 let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || undefined) : undefined;
 
+// #213 — track whether the current process resumed a pre-existing grok
+// session (truthy SESSION_ID at boot) so we can prepend the un-closed-loop
+// outbound-task hint exactly once, on the very first processWithGrok call.
+// First-ever start has no SESSION_ID, so the hint is skipped naturally; a
+// process that resumes prints the hint only on its inaugural turn,
+// because subsequent turns within the same process don't need it — the
+// LLM already has the hint in its conversational context.
+const HAD_GROK_SESSION_AT_BOOT = RUNTIME === "grok" && !!SESSION_ID;
+let grokResumeHintFired = false;
+
 async function processWithClaude(task: string, from: string): Promise<string> {
   // Pre-flight: if no Claude binary is resolvable, on-the-fly install the
   // glibc one. SDK ships musl-only by default on Linux x64 which fails on
@@ -1491,10 +1505,44 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   }
   const grokCwd = isolatedResult.cwd;
 
+  // #213 — On the very first processWithGrok call after a resume, prepend
+  // a hint listing un-closed-loop outbound tasks so the LLM sees its
+  // own dispatch history honestly (the session/load replay carries the
+  // "I sent task X" lines but NOT the replies that arrived after the
+  // node stopped). Without this nudge the LLM tends to interpret the
+  // replayed dispatch lines as "still to do" and re-send — exactly the
+  // #212 storm shape, just driven from inside the model's context
+  // rather than from inbox replay. Wrapped in a tight 3 s timeout +
+  // catch-all so a sick hub never blocks the grok turn from running.
+  let promptPrefix = "";
+  if (HAD_GROK_SESSION_AT_BOOT && !grokResumeHintFired) {
+    grokResumeHintFired = true; // fire-once regardless of fetch outcome
+    try {
+      const fetchWithTimeout = async (params: { from_name: string; limit: number }) => {
+        return await Promise.race([
+          callCommHub("list_tasks", params, 0), // retries=0; we either get a fast answer or we move on
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("list_tasks timeout 3s")), 3000),
+          ),
+        ]);
+      };
+      const outstanding = await fetchUnresolvedOutbound(ALIAS, fetchWithTimeout, { topN: 10 });
+      const hint = buildResumeHint(outstanding);
+      if (hint) {
+        log(`[grok] resume hint: ${outstanding.length} un-closed-loop outbound task(s) prepended to first prompt`);
+        promptPrefix = hint + "\n\n";
+      } else {
+        debug(`[grok] resume hint: no un-closed-loop outbound tasks — nothing to prepend`);
+      }
+    } catch (e: any) {
+      warn(`[grok] resume hint skipped (non-fatal): ${e?.message ?? e}`);
+    }
+  }
+
   const runOnce = async (sessionId?: string, label = "primary") => {
     const t0 = Date.now();
     const result = await runGrokAcpTurn({
-      prompt: buildGrokCommhubPrompt(task, from),
+      prompt: promptPrefix + buildGrokCommhubPrompt(task, from),
       cwd: grokCwd,
       sessionId,
       mcpServers: grokMcpServers,
