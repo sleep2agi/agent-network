@@ -360,8 +360,8 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 
 > Trade-off: raising the cap lets genuinely long jobs finish, but real hangs (the agent is actually stuck, not slow) get caught later. Bump only when a specific job is hitting the wall; don't blindly raise.
 
-::: warning No startup-log confirmation in v0.10.13 latest
-v0.10.13 agent-node **does not print a `timeoutMs=...` log line at startup** — the value is genuinely read from [`agent-node/src/cli.ts:1374` source](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1374) (`parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000")`), but `anet node start` output doesn't reflect it. If you set this and a task **known to take > 5 min** still times out at 300 s, your `flags.grokAcpTimeoutMs` likely isn't being read (config in the wrong file / env-var name typo). Please open an [issue](https://github.com/sleep2agi/agent-network/issues/new) — a `[grok] session/prompt timeoutMs=...` startup log line is planned for the next release (tracked via #214 dim 5 Batch A finding).
+::: warning No startup-log confirmation in current latest (agent-node 2.4.10)
+The current latest agent-node (`2.4.10`) **does not print a `timeoutMs=...` log line at startup** — the value is genuinely read from [`agent-node/src/cli.ts:1374` source](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1374) (`parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000")`), but `anet node start` output doesn't reflect it. If you set this and a task **known to take > 5 min** still times out at 300 s, your `flags.grokAcpTimeoutMs` likely isn't being read (config in the wrong file / env-var name typo). Please open an [issue](https://github.com/sleep2agi/agent-network/issues/new). **From the next agent-node release onward**, the grok node will print the effective idle-timeout value and its source at startup ([already on main](https://github.com/sleep2agi/agent-network/commit/21b0aa2), will land with the next release — tracked via #214 dim 5 Batch A finding).
 :::
 
 ### See also

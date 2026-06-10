@@ -727,8 +727,8 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 
 完整说明见 [runtimes → 长任务超时调整](/guide/runtimes#长任务超时调整-flags-grokacptimeoutms)。
 
-::: warning v0.10.13 不打 timeoutMs startup log
-agent-node 启动日志**不打** `timeoutMs=<新值>` —— 值确实读到了但无法用 `anet node start` 输出直接确认。如果设了仍超时, 多半是 config 写错位置或 env 字段名 typo. [开 issue](https://github.com/sleep2agi/agent-network/issues/new) 上报, 下一版会加 startup log (跟踪 #214 dim 5 Batch A finding).
+::: warning 当前 latest (agent-node 2.4.10) 不打 timeoutMs startup log
+agent-node 启动日志**不打** `timeoutMs=<新值>` —— 值确实读到了但无法用 `anet node start` 输出直接确认。如果设了仍超时, 多半是 config 写错位置或 env 字段名 typo. [开 issue](https://github.com/sleep2agi/agent-network/issues/new) 上报. **下一个 agent-node 发版起**, grok 节点启动时会显示 idle timeout 生效值及来源 ([main 已 land](https://github.com/sleep2agi/agent-network/commit/21b0aa2), 等发版带出; 跟踪 #214 dim 5 Batch A finding).
 :::
 
 **仍卡死**，先排除：grok backend 端 quota 用尽（grok 自己的 `~/.config/grok-build/` log 会有提示）/ 节点 cwd 不在 user workspace 边界内（[#204](https://github.com/sleep2agi/agent-network/issues/204) isolated cwd 边界）/ `grok login` 凭据过期。
