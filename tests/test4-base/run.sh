@@ -292,7 +292,8 @@ echo ""
 # 20. send_reply to non-existent task (graceful)
 echo "20. Testing reply to non-existent task..."
 GHOST_REPLY=$(mcp_call "send_reply" '{"alias":"e2e-agent","text":"ghost reply","in_reply_to":"non-existent-id","from_session":"tester"}')
-echo "$GHOST_REPLY" | grep -q 'ok' && pass "reply to non-existent task (graceful)" || fail "ghost reply crashed"
+echo "$GHOST_REPLY" | jq -e '.ok == false and .error == "reply_task_not_found"' >/dev/null \
+  && pass "reply to non-existent task returns structured error" || fail "ghost reply contract broken"
 echo ""
 
 # 21. tasks REST with multiple filters

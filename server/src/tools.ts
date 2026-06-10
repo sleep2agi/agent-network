@@ -112,11 +112,74 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     return sql;
   };
 
+  type DeliveryTarget =
+    | { state: "online"; alias: string; session: any }
+    | { state: "offline"; alias: string; session: any; message: string }
+    | { state: "not_found"; alias: string; message: string };
+
   const scopedSessionStatus = (alias: string, networkId?: string | null) => {
     const params: any[] = [alias];
-    let sql = "SELECT status FROM sessions WHERE alias = ?1";
+    let sql = "SELECT status, updated_at, last_seen_at FROM sessions WHERE alias = ?1";
     sql = addScope(sql, params, networkId);
     return db.get<any>(sql, ...params);
+  };
+
+  const resolveDeliveryTarget = (alias: string, networkId?: string | null): DeliveryTarget => {
+    const session = scopedSessionStatus(alias, networkId);
+    if (!session) {
+      return {
+        state: "not_found",
+        alias,
+        message: `alias not found: ${alias}`,
+      };
+    }
+    const lastSeen = session.last_seen_at || session.updated_at;
+    const lastSeenAt = lastSeen ? new Date(String(lastSeen).replace(" ", "T") + "Z").getTime() : 0;
+    const stale = !lastSeenAt || Date.now() - lastSeenAt > 5 * 60 * 1000;
+    if (String(session.status || "").toLowerCase() === "offline" || stale) {
+      return {
+        state: "offline",
+        alias,
+        session,
+        message: `alias is offline; message queued in inbox: ${alias}`,
+      };
+    }
+    return { state: "online", alias, session };
+  };
+
+  const deliveryTargetReply = (target: DeliveryTarget, ids: Record<string, string> = {}) => {
+    if (target.state === "not_found") {
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            ok: false,
+            error: "alias_not_found",
+            message: target.message,
+            alias: target.alias,
+            queued: false,
+            ...ids,
+          }),
+        }],
+      };
+    }
+    if (target.state === "offline") {
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            ok: false,
+            error: "alias_offline",
+            message: target.message,
+            alias: target.alias,
+            queued: true,
+            session_status: target.session.status ?? "offline",
+            ...ids,
+          }),
+        }],
+      };
+    }
+    return null;
   };
   // ═══════════════════════════════════════════
   //  Child Agent Tools (4)
@@ -658,6 +721,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const canonical = resolveCanonicalAlias(effectiveNetId, alias);
       const targetAlias = canonical.alias;
+      const target = resolveDeliveryTarget(targetAlias, effectiveNetId);
+      if (target.state === "not_found") return deliveryTargetReply(target)!;
 
       // #212 dedup guardrail. If this exact (from, to, content) has already
       // been delivered within COMMHUB_SEND_DEDUP_WINDOW_MS (default 5 min)
@@ -707,8 +772,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // retry.
       sharedSendDedup.record(from_session, targetAlias, task);
 
-      const session = scopedSessionStatus(targetAlias, effectiveNetId);
-
       // SSE push by alias.
       // The SSE channel is keyed by alias (subscribers connected to /events/<alias>),
       // not by network_id. Earlier we gated the push on a network-scoped session
@@ -720,7 +783,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
       pendingSql = addScope(pendingSql, pendingParams, effectiveNetId);
       const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
-      pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
+      if (target.state === "online") {
+        pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority, from: from_session, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
+      }
+
+      if (target.state === "offline") {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "alias_offline",
+              message: target.message,
+              alias: targetAlias,
+              queued: true,
+              task_id: id,
+              message_id: id,
+              session_status: target.session.status ?? "offline",
+              ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
+            }),
+          }],
+        };
+      }
 
       return {
         content: [
@@ -730,7 +814,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               ok: true,
               message_id: id,
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
-              session_status: session?.status ?? "unknown",
+              session_status: target.session?.status ?? "unknown",
             }),
           },
         ],
@@ -749,6 +833,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ alias, message, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
+      const target = resolveDeliveryTarget(alias, effectiveNetId);
+      if (target.state === "not_found") return deliveryTargetReply(target)!;
       console.log(`[${ts()}] ${from_session} → send_message → ${alias}: ${message.slice(0, 60)}`);
       const id = uuidv4();
       db.run(
@@ -757,9 +843,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         [id, alias, message, from_session, effectiveNetId ?? null]
       );
 
-      const session = scopedSessionStatus(alias, effectiveNetId);
+      if (target.state === "online") {
+        pushEvent(alias, { type: "new_message", from: from_session, message_id: id }, effectiveNetId);
+      }
 
-      pushEvent(alias, { type: "new_message", from: from_session, message_id: id }, effectiveNetId);
+      const offlineReply = deliveryTargetReply(target, { message_id: id });
+      if (offlineReply) return offlineReply;
 
       return {
         content: [
@@ -768,7 +857,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             text: JSON.stringify({
               ok: true,
               message_id: id,
-              session_status: session?.status ?? "unknown",
+              session_status: target.session?.status ?? "unknown",
             }),
           },
         ],
@@ -792,6 +881,42 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → send_reply (${replyStatus}) → ${alias}: ${text.slice(0, 60)}`);
       const id = uuidv4();
+      let taskBefore: { status: string } | null = null;
+      if (in_reply_to) {
+        const taskParams: any[] = [in_reply_to];
+        let taskSql = "SELECT status FROM tasks WHERE task_id = ?1";
+        taskSql = addScope(taskSql, taskParams, effectiveNetId);
+        taskBefore = db.get<{ status: string }>(taskSql, ...taskParams) ?? null;
+        if (!taskBefore) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: false,
+                error: "reply_task_not_found",
+                message: `cannot apply reply: task not found (${in_reply_to})`,
+                in_reply_to,
+                reply_queued: false,
+              }),
+            }],
+          };
+        }
+        if (!["created", "delivered", "acked", "running"].includes(taskBefore.status)) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: false,
+                error: "reply_task_terminal",
+                message: `cannot apply reply: task is already terminal (${taskBefore.status})`,
+                in_reply_to,
+                task_status: taskBefore.status,
+                reply_queued: false,
+              }),
+            }],
+          };
+        }
+      }
       const replyLogged = db.transaction(() => {
         db.run(
           `INSERT INTO inbox (id, session_name, type, priority, content, from_session, in_reply_to, requires_response, network_id)
@@ -814,6 +939,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
         return false;
       });
+
+      if (in_reply_to && !replyLogged) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "reply_not_applied",
+              message: "reply was not applied to task",
+              in_reply_to,
+              reply_queued: false,
+            }),
+          }],
+        };
+      }
 
       // Log event after commit (outside transaction)
       if (replyLogged && in_reply_to) logTaskEvent(in_reply_to, null, replyStatus, from_session, text.slice(0, 200));

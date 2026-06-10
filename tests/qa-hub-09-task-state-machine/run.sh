@@ -142,15 +142,14 @@ INBOX=$(mcp_call "$NTOK" "get_inbox" "$ARG")
 LEAK=$(echo "$INBOX" | jq -r '[.messages[] | select(.content=="task-cancelled")] | length')
 [[ "$LEAK" -eq 0 ]] || { echo "FAIL: cancelled task still in inbox (count=$LEAK)"; echo "$INBOX" | head -20; exit 1; }
 
-# ─────────────── TERMINAL-STATE NO-OP CONTRACT ───────────────
-echo "[7] PIN: send_reply on already-replied task is SILENT no-op"
+# ─────────────── TERMINAL-STATE REJECT CONTRACT ───────────────
+echo "[7] PIN: send_reply on already-replied task returns structured error"
 # R6 抠出的 contract：tools.ts L613-614 WHERE status IN ('created','delivered','acked','running')
-# 终态再来 send_reply：response.ok=false 但 DB 不变
+# 终态再来 send_reply：response.ok=false 且 DB 不变
 ARG=$(jq -nc --arg t "$T_REP" '{alias:"admin",text:"NEW reply trying to overwrite",in_reply_to:$t,status:"replied",from_session:"agent-09"}')
 SR2=$(mcp_call "$NTOK" "send_reply" "$ARG")
-# send_reply doesn't error visibly — it just inserts inbox row and returns... let's check
-# Actually looking at the tool code, it does still log + insert reply inbox row.
-# The KEY assertion is that the TASK row's result/status didn't change.
+echo "$SR2" | jq -e '.ok == false and .error == "reply_task_terminal" and .reply_queued == false' >/dev/null \
+  || { echo "FAIL: terminal send_reply should return structured error, got: $SR2"; exit 1; }
 sleep 0.2
 [[ "$(task_field "$UTOK" "$NET_ID" "$T_REP" result)" == "OK reply" ]] || \
   { echo "FAIL: terminal task.result was overwritten on second send_reply!"; exit 1; }

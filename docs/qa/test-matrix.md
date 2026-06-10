@@ -31,7 +31,8 @@
 | HUB-06b | utok 跨用户隔离 / IDOR 边界 | ✅ | [qa-hub-06b](../../tests/qa-hub-06b-cross-user-isolation/) R17 PASS（~10s）— bob 偷不到 alice 的 network/task/status/messages，显式 IDOR + cross-tenant inject + mint 全拒 |
 | HUB-07 | SSE 断线后重连不丢消息 | ✅ | [qa-hub-07](../../tests/qa-hub-07-sse-reconnect/) R9 PASS（~12s）— pin fire-and-forget + get_inbox backlog 契约 |
 | HUB-08 | hub 重启不丢状态（sessions + tasks + ntok + SSE 重订） | ✅ | [qa-hub-08](../../tests/qa-hub-08-restart-persistence/) R11 PASS（~10s）— NODE-04 的 hub-side 半边 |
-| HUB-09 | task 状态机 delivered→replied/failed/cancelled + terminal no-op | ✅ | [qa-hub-09](../../tests/qa-hub-09-task-state-machine/) R14 PASS（~12s）— 3 分支 + cancelled inbox auto-ack + send_reply terminal silent no-op + cancel_task terminal ok:false |
+| HUB-09 | task 状态机 delivered→replied/failed/cancelled + terminal reply hard reject | ✅ | [qa-hub-09](../../tests/qa-hub-09-task-state-machine/) — 3 分支 + cancelled inbox auto-ack + send_reply terminal structured error + cancel_task terminal ok:false |
+| HUB-18 | send/reply delivery semantics: missing alias vs offline queue vs bad reply | ✅ | [qa-hub-18](../../tests/qa-hub-18-delivery-semantics/) Wave 1 PASS — `alias_not_found` 不入库，`alias_offline` 入 inbox/tasks 但明确 queued，bad `send_reply` 返回结构化错误 |
 
 ## agent-node 矩阵（persona: runtime adapter）
 
