@@ -1,0 +1,25 @@
+FROM node:24-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl jq sqlite3 procps expect tmux unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://bun.sh/install | bash && \
+    cp /root/.bun/bin/bun /usr/local/bin/bun && \
+    chmod +x /usr/local/bin/bun && \
+    ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+ENV PATH="/usr/local/bin:${PATH}"
+
+COPY fake-grok /usr/local/bin/fake-grok
+RUN chmod +x /usr/local/bin/fake-grok && ln -sf /usr/local/bin/fake-grok /usr/local/bin/grok
+
+# Dim 2: install old agent-network (v0.10.7 era)
+RUN npm install -g @sleep2agi/agent-network@2.2.6 --omit=optional --no-audit --no-fund 2>&1 | tail -5
+
+COPY entry-dim2.sh /entry-dim2.sh
+RUN chmod +x /entry-dim2.sh
+
+RUN mkdir -p /artifacts && chmod 0777 /artifacts
+WORKDIR /work
+
+CMD ["/entry-dim2.sh"]

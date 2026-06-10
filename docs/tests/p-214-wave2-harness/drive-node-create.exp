@@ -1,0 +1,40 @@
+#!/usr/bin/expect -f
+# Drive `anet node create my-bot` partway to capture the wizard's actual UX
+# vs getting-started.md §5 doc claim ("先选供应商、再选模型").
+#
+# Doc says:
+#   1. 选供应商 (vendor) — list: 书生 Intern / MiniMax / 小米 MiMo / Anthropic Claude / Codex / Claude Code CLI / 自定义
+#   2. 选模型 — after vendor pick
+#   3. (then base URL inject + API key prompt — we BAIL here, no real key)
+#
+# We capture: did wizard show vendor list first? did it accept arrow keys / digit?
+# what's the actual vendor list?
+
+set timeout 30
+log_file -a /artifacts/wizard-trace.txt
+
+spawn anet node create my-bot
+expect {
+  -re "(?i)(provider|vendor|供应商)" {
+    send_user "\n## DOC-MATCH: vendor prompt shown\n"
+  }
+  -re "(?i)(model|模型)" {
+    send_user "\n## DOC-MISMATCH: model asked before vendor\n"
+  }
+  -re "(?i)(runtime)" {
+    send_user "\n## DOC-MISMATCH: runtime asked instead of vendor\n"
+  }
+  timeout {
+    send_user "\n## TIMEOUT — no prompt within 30s\n"
+    exit 2
+  }
+  eof {
+    send_user "\n## EARLY EOF before prompt\n"
+    exit 3
+  }
+}
+
+# Let it print full vendor list — sleep 1.5s then capture
+sleep 1.5
+send "\003"   ;# Ctrl-C to abort cleanly
+expect eof

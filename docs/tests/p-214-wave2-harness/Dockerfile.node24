@@ -1,0 +1,29 @@
+FROM node:24-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl jq sqlite3 procps expect tmux unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# bun system-wide
+RUN curl -fsSL https://bun.sh/install | bash && \
+    cp /root/.bun/bin/bun /usr/local/bin/bun && \
+    chmod +x /usr/local/bin/bun && \
+    ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+ENV PATH="/usr/local/bin:${PATH}"
+
+# Fake grok for runtime exercise (no xAI key needed)
+COPY fake-grok /usr/local/bin/fake-grok
+RUN chmod +x /usr/local/bin/fake-grok && ln -sf /usr/local/bin/fake-grok /usr/local/bin/grok
+
+# Step 1 from getting-started.md: only install agent-network globally
+# (commhub-server + agent-node auto-fetched via bunx / npx on first use, per doc step 0)
+RUN npm install -g @sleep2agi/agent-network@2.2.12-preview.0 --omit=optional --no-audit --no-fund 2>&1 | tail -5
+
+COPY entry-dim1.sh /entry-dim1.sh
+COPY drive-node-create.exp /usr/local/bin/drive-node-create.exp
+RUN chmod +x /entry-dim1.sh /usr/local/bin/drive-node-create.exp
+
+RUN mkdir -p /artifacts && chmod 0777 /artifacts
+WORKDIR /work
+
+CMD ["/entry-dim1.sh"]

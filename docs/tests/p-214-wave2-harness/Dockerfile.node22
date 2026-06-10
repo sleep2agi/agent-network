@@ -1,0 +1,25 @@
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl jq sqlite3 procps expect tmux unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://bun.sh/install | bash && \
+    cp /root/.bun/bin/bun /usr/local/bin/bun && \
+    chmod +x /usr/local/bin/bun && \
+    ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+ENV PATH="/usr/local/bin:${PATH}"
+
+COPY fake-grok /usr/local/bin/fake-grok
+RUN chmod +x /usr/local/bin/fake-grok && ln -sf /usr/local/bin/fake-grok /usr/local/bin/grok
+
+RUN npm install -g @sleep2agi/agent-network@latest --omit=optional --no-audit --no-fund 2>&1 | tail -5
+
+COPY entry-dim1.sh /entry-dim1.sh
+COPY drive-node-create.exp /usr/local/bin/drive-node-create.exp
+RUN chmod +x /entry-dim1.sh /usr/local/bin/drive-node-create.exp
+
+RUN mkdir -p /artifacts && chmod 0777 /artifacts
+WORKDIR /work
+
+CMD ["/entry-dim1.sh"]

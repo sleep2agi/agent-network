@@ -1,0 +1,43 @@
+spawn anet node create my-bot
+? 选择 runtime:
+❯ claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax /
+Claude / GLM / ...)
+  claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态
+  codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态
+  grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态
+
+↑↓ navigate • ⏎ select[?25l[23G
+## DOC-MATCH: vendor prompt shown
+
+[G[?25h[anet] ⚠ Runtime selector unavailable: User force closed the prompt with SIGINT
+? 选择供应商 (vendor):
+❯ 上海 AI Lab 书生 (Intern)
+  MiniMax (国内直连，低成本)
+  小米 MiMo
+  Anthropic Claude (官方 API)
+  Codex / GPT (海外，需 codex auth login)
+  Claude Code CLI (需 Claude Pro/Team/Max 订阅)
+  自定义 — 任何 Anthropic 兼容 API (DeepSeek/GLM/Kimi/OpenRouter/自建)
+
+↑↓ navigate • ⏎ select[?25l[23Gspawn anet node create my-bot
+? 选择 runtime:
+❯ claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax /
+Claude / GLM / ...)
+  claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态
+  codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态
+  grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态
+
+↑↓ navigate • ⏎ select[?25l[23G
+## DOC-MATCH: vendor prompt shown
+
+[G[?25h[anet] ⚠ Runtime selector unavailable: User force closed the prompt with SIGINT
+? 选择供应商 (vendor):
+❯ 上海 AI Lab 书生 (Intern)
+  MiniMax (国内直连，低成本)
+  小米 MiMo
+  Anthropic Claude (官方 API)
+  Codex / GPT (海外，需 codex auth login)
+  Claude Code CLI (需 Claude Pro/Team/Max 订阅)
+  自定义 — 任何 Anthropic 兼容 API (DeepSeek/GLM/Kimi/OpenRouter/自建)
+
+↑↓ navigate • ⏎ select[?25l[23G
