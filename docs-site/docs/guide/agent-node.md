@@ -139,7 +139,7 @@ npx @sleep2agi/agent-node \
   --hub http://YOUR_IP:9200
 ```
 
-::: tip v0.10.11 改进（v0.10.11 latest 已 ship）
+::: tip v0.10.11 改进（v0.10.13 latest 已 ship）
 - [#201](https://github.com/sleep2agi/agent-network/issues/201) delegate refusal 3-layer 修 (wrapper parser broaden + Grok prompt softening + authorised phrasings list)
 - [#204](https://github.com/sleep2agi/agent-network/issues/204) MCP per-session inject — preview chain 历史: preview.2 stdio variant 结构修 `.mcp.json` shared identity bug (ACP side); **preview.6 transport 切到 HTTP** (Grok 直接 HTTP 调 commhub `/mcp` + Bearer ntok_, 跳过 subprocess / bun PATH / stdout pollution 风险); **preview.7 per-node isolated cwd 收敛 final** (Grok CLI 同时读 cwd `.mcp.json` + ACP injection, 两个 MCP server 共存 stale 赢 hello — fix: ACP session/new 传节点隔离 cwd 镜像 user 文件但 skip `.mcp.json`). v0.10.11 final = preview.7 promoted.
 
@@ -439,19 +439,16 @@ Agent Node 的完整生命周期：
 SSE 断连后自动重连，使用指数退避策略：
 
 ```
-重连间隔（v0.10.11 stable）: 3s → 6s → 12s → 24s → 48s → 60s (上限)
+重连间隔（v0.10.13 latest，v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起）: 指数退避 `1s → 2s → 4s → 8s → 16s → 30s (上限)`
 ```
 
-重连成功后自动恢复 online 状态。
+重连成功后自动恢复 online 状态。三件事一起改：
 
-::: tip preview channel 改进（[#202](https://github.com/sleep2agi/agent-network/issues/202)，未 promote latest）
-preview channel `agent-node` 起三件事一起改：
-- **退避更激进**：`1s → 2s → 4s → 8s → 16s → 30s（上限）`，hub 重启后 30s 内重连
-- **重连即重 register**：以前重连只恢复 SSE 流，不重发 register —— hub 重启清空 sessions 内存后，dashboard 看不到节点要等下次 3min heartbeat 才会重建。现在重连成功立即重发 register（idempotent upsert），dashboard < 30s 恢复完整节点列表
-- **僵尸 retry 防护**：连续失败 > 1h 主动放弃 + 写 error log，不再无限重试占 CPU
+- **退避更激进**：`1s → 30s` 上限，hub 重启后 30s 内重连
+- **重连即重 register**：重连成功立即重发 register（idempotent upsert），dashboard 30s 内恢复完整节点列表（之前老路径要等下次 3min heartbeat）
+- **失败放弃保护**：连续失败 > 1h 主动放弃 + 写 error log，不再无限重试占 CPU
 
-跟 v0.10.11 latest 的 `anet hub stop` / `hub status` 命令（已 ship）配套用：hub 维护时 stop → start 流程后，节点自动恢复，**无需 `anet project restart`**。#202 SSE 重连即重 register 等下个 release promote `@latest` 后所有用户自动享受。
-:::
+跟 v0.10.13 latest 的 `anet hub stop` / `hub status` 命令配套用：hub 维护时 stop → start 流程后，节点自动恢复，**无需 `anet project restart`**。如果你 agent-node 还停留在 v0.10.10 及以前，跑 `anet upgrade` 升上去即享受。
 
 ### 优雅退出
 

@@ -439,19 +439,16 @@ The complete Agent Node lifecycle:
 SSE auto-reconnects on disconnect using exponential backoff:
 
 ```
-Retry interval (v0.10.11 stable): 3s → 6s → 12s → 24s → 48s → 60s (cap)
+Retry interval (v0.10.13 latest, since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202)): exponential backoff `1s → 2s → 4s → 8s → 16s → 30s (cap)`
 ```
 
-Online status is automatically restored after successful reconnection.
+Online status is automatically restored after successful reconnection. Three changes ship together:
 
-::: tip preview channel improvements ([#202](https://github.com/sleep2agi/agent-network/issues/202), not yet promoted to latest)
-Three changes ship together on the preview-channel `agent-node`:
-- **Tighter backoff**: `1s → 2s → 4s → 8s → 16s → 30s (cap)` — full reconnect within 30s of hub restart
-- **Re-register on reconnect**: previously a reconnect only restored the SSE stream, not the registration — after a hub restart the dashboard wouldn't see the node until the next 3-minute heartbeat. Now every successful reconnect re-fires the node registration (idempotent upsert on the hub), so the dashboard recovers in under 30s
-- **Zombie-retry guard**: if reconnect failures continue for over 1 hour, agent-node gives up auto-retry, logs an error, and stops burning CPU
+- **Tighter backoff**: `1s → 30s` cap — full reconnect within 30s of hub restart
+- **Re-register on reconnect**: every successful reconnect re-fires the node registration (idempotent upsert on the hub), so the dashboard recovers in under 30s (previously a reconnect only restored the SSE stream and the dashboard waited for the next 3-minute heartbeat)
+- **Give-up guard**: if reconnect failures continue for over 1 hour, agent-node gives up auto-retry, logs an error, and stops burning CPU
 
-Pairs with the `anet hub stop` / `hub status` commands in v0.10.11 latest (already shipped): during hub maintenance, `stop → start` no longer requires a follow-up `anet project restart` — nodes restore themselves. Once #202 is promoted to `@latest` in a future release, every user gets this automatically.
-:::
+Pairs with the `anet hub stop` / `hub status` commands in v0.10.13 latest: during hub maintenance, `stop → start` no longer requires a follow-up `anet project restart` — nodes restore themselves. If you're still on v0.10.10 or earlier, run `anet upgrade` to pick up the fix.
 
 ### Graceful Shutdown
 

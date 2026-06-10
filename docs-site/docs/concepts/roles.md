@@ -122,7 +122,7 @@ anet network join <code>                         # 用邀请码加入
 # 方式 1：owner 创建邀请码（推荐）—— 对方用邀请码加入直接拿到 admin role
 anet network invite --role admin --uses 1
 
-# 方式 2：现有 member 升级 —— 走 REST（CLI promote 子命令 v0.10.11 仍未提供，排到 v0.11+ / 未排期）
+# 方式 2：现有 member 升级 —— 走 REST（CLI promote 子命令 v0.10.13 仍未提供，排到 v0.11+ / 未排期）
 curl -X PUT http://localhost:9200/api/networks/<net_id>/members/<user_id> \
   -H "Authorization: Bearer <owner_utok>" \
   -H "Content-Type: application/json" \
@@ -188,7 +188,7 @@ CLI 不需要你输任何 role 信息 —— `anet login` 时 hub 把 role 写�
 
 ## 升降级一个成员的角色
 
-::: warning v0.10.11 stable 仍没有 `promote` / `demote` CLI 子命令
+::: warning v0.10.13 stable 仍没有 `promote` / `demote` CLI 子命令
 v0.9.x / v0.10.x 整条 stable 线都未触碰 member role 管理（每个 release 的具体改动见 [changelog](/changelog)）；完整 CLI 入口排到 v0.11+ / 未排期。目前列成员可以走 CLI，**改角色 / 移除成员一律走 REST**（详见 [API — networks members](/api/rest#get-api-networks-id-members)）。
 :::
 

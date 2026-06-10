@@ -64,7 +64,7 @@ sudo ufw allow 9200
 
 **Cause**: SSE long connection dropped, usually due to network fluctuation.
 
-**Solution**: The agent will auto-reconnect (v0.10.11 stable: exponential backoff 3s → 60s; preview channel [#202](https://github.com/sleep2agi/agent-network/issues/202) tightens to `1s → 30s` cap + re-register on reconnect + 1h zombie-retry guard, not yet promoted to latest — [see agent-node reconnection](/en/guide/agent-node#reconnection)); no manual intervention usually needed.
+**Solution**: The agent will auto-reconnect (since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202), already in v0.10.13 latest: exponential backoff `1s → 30s` cap + re-register on every successful (re)connect + give up after 1h continuous failure — [see agent-node reconnection](/en/guide/agent-node#reconnection)); no manual intervention usually needed.
 
 If it persists:
 
@@ -88,11 +88,9 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 **Symptom**: After `anet hub stop` + `anet hub start` (or after the hub process crashes and restarts), the Dashboard shows every node as `offline` or missing from the list entirely — even though the agent processes are still alive.
 
-**Cause (v0.10.11 stable)**: The hub restart clears its in-memory sessions table. `agent-node`'s SSE reconnect only restores the event stream; it **does not re-send `register`** — so the hub-side sessions table only rebuilds on the next 3-minute heartbeat, leaving the Dashboard blank in between.
+**Cause (v0.10.10 and earlier)**: The hub restart clears its in-memory sessions table. Older `agent-node` versions only restored the event stream on reconnect; they **did not re-send `register`** — so the hub-side sessions table only rebuilt on the next 3-minute heartbeat, leaving the Dashboard blank in between.
 
-**Solution**:
-- **v0.10.11 stable**: Wait for the next heartbeat (≤ 3 min) to auto-recover, or run `anet project restart` to force each node to re-boot
-- **preview channel** ([#202](https://github.com/sleep2agi/agent-network/issues/202), not yet promoted to latest): structural fix — every successful SSE reconnect immediately re-fires `register` (idempotent upsert on the hub), and the Dashboard recovers the full node list in under 30s. **No `anet project restart` needed**, pair this with the `anet hub stop` / `hub status` commands already in v0.10.11 latest to make hub maintenance a one-shot SOP (once #202 promotes to latest, every user gets this automatically)
+**Solution (v0.10.13 latest)**: Since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202), every successful SSE reconnect immediately re-fires `register` (idempotent upsert on the hub), and the Dashboard recovers the full node list within ~30s. **No `anet project restart` needed**; pair this with the `anet hub stop` / `hub status` commands for a one-shot maintenance SOP. If you're still on v0.10.10 or earlier, run `anet upgrade` to pick up the fix.
 
 ---
 
@@ -713,7 +711,62 @@ anet node stop grok-marketing && anet node start grok-marketing
 anet --version          # agent-node ≥ 2.4.9
 ```
 
-Still hangs? Rule out: the grok backend quota is exhausted (grok's own `~/.config/grok-build/` log will hint at it) / the node `cwd` is outside the user-workspace boundary ([#204](https://github.com/sleep2agi/agent-network/issues/204) isolated cwd boundary) / `grok login` credentials expired.
+**Genuinely long jobs still hit the cap (video generation / large X searches)**: the 300 s default in v0.10.13 is still too tight for some video or batch workloads. Bump it via `flags.grokAcpTimeoutMs` (config) or `GROK_ACP_TIMEOUT_MS` (env, takes precedence):
+
+```bash
+# Per-shell (export before starting the grok node)
+GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
+```
+
+```json
+// Persistent (in .anet/nodes/<alias>/config.json)
+{
+  "runtime": "grok-build-acp",
+  "flags": { "grokAcpTimeoutMs": 900000 }
+}
+```
+
+Full detail: [runtimes → Long-task timeout tuning](/en/guide/runtimes#long-task-timeout-tuning-flags-grokacptimeoutms).
+
+**Still hangs?** Rule out: the grok backend quota is exhausted (grok's own `~/.config/grok-build/` log will hint at it) / the node `cwd` is outside the user-workspace boundary ([#204](https://github.com/sleep2agi/agent-network/issues/204) isolated cwd boundary) / `grok login` credentials expired.
+
+### Hub box load is abnormally high / new claude sessions are slow / piles of zombie `bun` processes
+
+**Symptom**: The machine hosting the hub shows a sustained high load average (>10× the CPU core count). Opening new claude / agent sessions feels slow, and commhub MCP calls occasionally time out. `top` shows lots of `bun ... server.ts` processes that look like they're doing nothing.
+
+**Root cause**: A plugin directory or agent workdir was renamed or deleted while older `bun` child processes still held its now-`deleted` cwd. Every new session forks another zombie on top, and they accumulate until they saturate the CPU. **Real-world repro**: 86 zombie `bun` processes, load average 92.
+
+**Detect** (one-liner):
+
+```bash
+for pid in $(pgrep -f "bun.*server.ts"); do readlink /proc/$pid/cwd; done | grep deleted | wc -l
+```
+
+`>5` means something is wrong. To see exactly which PIDs:
+
+```bash
+for pid in $(pgrep -f "bun.*server.ts"); do
+  cwd=$(readlink /proc/$pid/cwd 2>/dev/null)
+  [[ "$cwd" == *deleted* ]] && echo "PID $pid → $cwd"
+done
+```
+
+**Fix**:
+
+```bash
+# Kill every bun process whose cwd points to a deleted dir
+for pid in $(pgrep -f "bun.*server.ts"); do
+  cwd=$(readlink /proc/$pid/cwd 2>/dev/null)
+  [[ "$cwd" == *deleted* ]] && kill -9 $pid
+done
+
+# Or, if you know what you're killing, blow the whole pgrep set away
+pkill -9 -f "bun.*server.ts"
+```
+
+Then restart whatever agent / hub processes you needed.
+
+**Prevent**: Kill the corresponding `bun` child process **first** (`anet node stop <name>` or a manual `kill`) before renaming / deleting a plugin directory or agent workdir.
 
 ---
 

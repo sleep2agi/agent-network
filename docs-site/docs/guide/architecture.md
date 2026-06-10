@@ -293,7 +293,7 @@ sequenceDiagram
 - Agent 每 **3 分钟** 发送心跳（`report_status`）
 - Server 每次请求更新 `last_seen_at`
 - 超过 **10 分钟** 无心跳，自动标记为 `offline`
-- SSE 断连后自动重连（v0.10.11 stable 指数退避 3s → 60s；preview channel [#202](https://github.com/sleep2agi/agent-network/issues/202) 改 `1s → 30s` 上限 + 重连即重 register + 1h 超时放弃, 未 promote latest，[详见 agent-node](/guide/agent-node#断线重连)）
+- SSE 断连后自动重连（v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起，v0.10.13 latest 已包含：指数退避 `1s → 30s` 上限 + 重连即重 register + 1h 失败放弃，[详见 agent-node](/guide/agent-node#断线重连)）
 
 ## Agent Node
 
@@ -383,7 +383,7 @@ agent-node 在每次 `session/new` / `session/load` 显式把 `mcpServers` 列�
 - **preview.6** ([`abefbe8`](https://github.com/sleep2agi/agent-network/commit/abefbe8))：**transport 切到 HTTP** — `mcpServers: [{ type: "http", name: "commhub", url: "${COMMHUB_URL}/mcp", headers: [{ name: "Authorization", value: "Bearer ${AUTH_TOKEN}" }, ...] }]`，Grok 直接 HTTP 调 commhub `/mcp`（Grok ACP `init` response 报 `mcpCapabilities = {http: true, sse: true}` 明确支持）。commhub-server `/mcp` 已 ntok→alias 派生（[`server/src/index.ts:446-448`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L446) [`d1d867e`](https://github.com/sleep2agi/agent-network/commit/d1d867e) #194 hub-side），attribute `from_session` 自动正确。**跳过 subprocess + bun PATH + framing + stdout-pollution 全栈风险**。tool names 由 commhub-server `/mcp` JSON-RPC 返回。
 - **preview.7** ([`72e28fd`](https://github.com/sleep2agi/agent-network/commit/72e28fd))：**per-node isolated cwd**。Vincent UAT 仍 `from=` 错 alias root cause: Grok CLI **同时**读 cwd `.mcp.json` + ACP `session/new` mcpServers 注入 — 两个 commhub MCP server 共存, stale stdio one 赢 LLM hello。fix: ACP `session/new` 显式传 `cwd: <home>/.anet/nodes/<node-id>/grok-cwd/`，该 dir symlink 镜像 top-level user 文件（LLM `Read('./*')` 仍 work）但 skip `.mcp.json` —— Grok CLI cwd discovery 找不到, 无 stdio fallback。Multi-node concurrent-spawn safe by construction。
 
-> ⚠ Debug tip：LLM 调不到 commhub 工具时先确认 runtime —— `claude-agent-sdk` 节点查 `commhub-mcp.ts` 在不在 dist 里（agent-node ≥ 2.3.5-preview.0）；`claude-code-cli` 节点查 `.mcp.json` 里 commhub 是不是 `type:stdio` + `.anet/node-server.js` 路径正确；`codex-sdk` 节点**直接看 agent-node 父进程日志**（codex thread 不调 commhub）；`grok-build-acp` 节点（v0.10.11 stable，`agent-node@2.4.7`+，[#204](https://github.com/sleep2agi/agent-network/issues/204) per-node isolated cwd）查 agent-node 日志 `[grok] commhub MCP server resolved: <abs-path>` debug 行 + 节点隔离 cwd 路径见 `.anet/nodes/<alias>/` 子目录；v0.10.10 及之前（`agent-node@2.4.6`）`grok-build-acp` 走 legacy 共享 cwd 路径（有 stale `.mcp.json` 身份污染风险，#204 修），完整 chain 参考 [grok-build-runtime.md](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
+> ⚠ Debug tip：LLM 调不到 commhub 工具时先确认 runtime —— `claude-agent-sdk` 节点查 `commhub-mcp.ts` 在不在 dist 里（agent-node ≥ 2.3.5-preview.0）；`claude-code-cli` 节点查 `.mcp.json` 里 commhub 是不是 `type:stdio` + `.anet/node-server.js` 路径正确；`codex-sdk` 节点**直接看 agent-node 父进程日志**（codex thread 不调 commhub）；`grok-build-acp` 节点（v0.10.13 stable，`agent-node@2.4.9`+，[#204](https://github.com/sleep2agi/agent-network/issues/204) per-node isolated cwd）查 agent-node 日志 `[grok] commhub MCP server resolved: <abs-path>` debug 行 + 节点隔离 cwd 路径见 `.anet/nodes/<alias>/` 子目录；v0.10.10 及之前（`agent-node@2.4.8`）`grok-build-acp` 走 legacy 共享 cwd 路径（有 stale `.mcp.json` 身份污染风险，#204 修），完整 chain 参考 [grok-build-runtime.md](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
 
 ### 任务处理流程
 

@@ -147,13 +147,13 @@ anet status
 
 ## v0.7 → v0.8 升级注意（历史路径） {#v0-7-v0-8-升级注意-最新}
 
-::: info 当前 stable 是 v0.10.11
-本节是**从 v0.7 升 v0.8 的历史路径**，保留作 v0.7 → v0.10.11 跨版本升级时的关键节点参考。**从 v0.8 / v0.9 / v0.10.x 之间升级**直接 `anet upgrade` 或 `npm install -g @sleep2agi/agent-network@latest` 即可，无须重做下方 v0.7→v0.8 鉴权迁移（详见 [changelog](/changelog)，按 v0.8 / v0.9 / v0.10 各 release 段查行为变化）。
+::: info 当前 stable 是 v0.10.13
+本节是**从 v0.7 升 v0.8 的历史路径**，保留作 v0.7 → v0.10.13 跨版本升级时的关键节点参考。**从 v0.8 / v0.9 / v0.10.x 之间升级**直接 `anet upgrade` 或 `npm install -g @sleep2agi/agent-network@latest` 即可，无须重做下方 v0.7→v0.8 鉴权迁移（详见 [changelog](/changelog)，按 v0.8 / v0.9 / v0.10 各 release 段查行为变化）。
 :::
 
 v0.8 落地了 [RFC-001 第二阶段](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)，对**鉴权和密码**有新行为：
 
-::: tip v0.8.x → v0.10.11 增量升级
+::: tip v0.8.x → v0.10.13 增量升级
 v0.8 主路径之后，v0.8.x / v0.9.x / v0.10.x 整条 stable 线累积加入了 `anet channel`、`anet create --batch`、`anet demo`、`anet doctor --fix`、`anet project up/restart/down`、envRef vendor 凭据、SDK 高并发 retry、runtime-first wizard、`codex-direct-stdio` opt-in、守护节点 observability、小米 MiMo 5-model preset、codex-sdk 图片输入、commhub 附件元数据、`grok-build-acp` runtime 等大量增量。
 
 **升级路径跟 v0.7 → v0.8 主路径一致** — admin bootstrap + 密码管理一次性迁移完，后续 incremental upgrade 无额外鉴权步骤。完整逐版改动见 [changelog](/changelog)。

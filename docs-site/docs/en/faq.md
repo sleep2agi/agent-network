@@ -354,7 +354,7 @@ Possible causes:
 - Firewall closing long connections
 - nginx `proxy_buffering` left at the default `on` (must be `off` for SSE, otherwise events sit in the buffer until it fills)
 
-> **The agent reconnects on its own when the stream drops**: v0.10.11 stable uses exponential backoff `3s → 60s`; preview channel ([#202](https://github.com/sleep2agi/agent-network/issues/202)) tightens to `1s → 30s` cap + re-register on reconnect + 1h zombie-retry guard, not yet promoted to latest. If the hub restarted and the dashboard can no longer see your nodes, see [troubleshooting — Dashboard shows no nodes after a hub restart](/en/troubleshooting#dashboard-shows-no-nodes-after-a-hub-restart).
+> **The agent reconnects on its own when the stream drops**: since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) (already in v0.10.13 latest), agent-node uses exponential backoff `1s → 30s` cap + re-register on every successful (re)connect + give up after 1h continuous failure. If the hub restarted and the dashboard can no longer see your nodes, see [troubleshooting — Dashboard shows no nodes after a hub restart](/en/troubleshooting#dashboard-shows-no-nodes-after-a-hub-restart).
 
 Nginx configuration recommendation:
 

@@ -348,7 +348,7 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 - 本机已装 `grok` CLI 并 `grok auth login` 完成
 - 环境变量 `XAI_API_KEY` 已设
-- `agent-network ≥ 2.2.10`（v0.10.11 latest）+ `agent-node ≥ 2.4.9`（v0.10.13 hotfix 修了 `session/prompt` 300s 超时 — 早一点的 agent-node 跑 grok 长任务会卡死，详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
+- `agent-network ≥ 2.2.10`（v0.10.13 latest）+ `agent-node ≥ 2.4.9`（v0.10.13 hotfix 修了 `session/prompt` 300s 超时 — 早一点的 agent-node 跑 grok 长任务会卡死，详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
 
 ### 起节点
 
@@ -357,10 +357,34 @@ anet node create my-grok --runtime grok-build-acp
 anet node start my-grok
 ```
 
+### 长任务超时调整（`flags.grokAcpTimeoutMs`）
+
+v0.10.13 latest 行为：agent-node 给每个 `session/prompt` 调用设一个**整体硬超时**，默认 **300000 ms（5 分钟）**。视频生成 / 大型 X 搜索 / 多轮 batch 工具调用这种长任务跑超 5min 时，agent-node 会主动 reject 整个请求并把 task 标 `failed`。
+
+调大上限有两条路（任选其一，env 变量优先）：
+
+```bash
+# 1) 临时调（启 grok 节点前 export）
+GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
+```
+
+```json
+// 2) 长期调（写进 .anet/nodes/<alias>/config.json）
+{
+  "runtime": "grok-build-acp",
+  "flags": {
+    "grokAcpTimeoutMs": 900000
+  }
+}
+```
+
+> 取舍：调大可以让真长任务跑完，但 hang 类问题（agent 真的卡住、不是慢）会更晚被发现；遇到误超时再调，别盲目设很大值。验证 [`agent-node/src/cli.ts:1374` `timeoutMs: parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000")`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1374)。
+
 ### 详见
 
 - [`grok-build-runtime.md` 完整 runtime 指南](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md) — Known Limits + debug + preview chain
 - [agent-node § grok-build-acp tip](/guide/agent-node#claude-code-cli) — v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) per-node isolated cwd 细节
+- [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603) — `session/prompt` 超时排错入口
 - [architecture § Debug tip](/guide/architecture) — runtime debug 入口
 
 ---

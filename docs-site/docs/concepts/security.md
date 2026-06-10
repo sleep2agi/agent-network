@@ -512,5 +512,5 @@ npx @sleep2agi/agent-node --alias my-agent --max-budget 0.1
 - [Docker 部署](/deploy/docker) — 容器化最佳实践
 
 ::: warning 当前阶段
-v0.10.11 stable 密码哈希仍是 SHA-256（verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)）。**Argon2id 迁移 v0.9.x / v0.10.x 整条 stable 线都未动**（每个 release 的具体改动见 [changelog](/changelog)）；security report **R9** 排到 v0.11+ / 未排期 — 搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)，如果没 tracking issue 欢迎开一个。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
+v0.10.13 stable 密码哈希仍是 SHA-256（verify [`db.ts:503-505 hashPassword`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts#L503)）。**Argon2id 迁移 v0.9.x / v0.10.x 整条 stable 线都未动**（每个 release 的具体改动见 [changelog](/changelog)）；security report **R9** 排到 v0.11+ / 未排期 — 搜索 [开放 issue: Argon2id](https://github.com/sleep2agi/agent-network/issues?q=is%3Aissue+Argon2id)，如果没 tracking issue 欢迎开一个。生产环境必须配合：强密码 + TLS + 防火墙 + 定期备份。
 :::

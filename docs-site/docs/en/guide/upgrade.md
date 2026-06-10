@@ -11,7 +11,7 @@ v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) actually r
 
 ```bash
 npm install -g @sleep2agi/agent-network@latest
-anet --version            # current latest v2.2.10 (v0.10.11, 2026-05-28)
+anet --version            # current latest v2.2.10 (v0.10.13, 2026-06-08)
 ```
 
 From any 2.2.5+ binary onward (the v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) fix lives in 2.2.5+), `anet upgrade` **auto detached-spawns**; a minute or two later `anet --version` shows the new build — no `--self` flag or manual install required.
@@ -147,13 +147,13 @@ anet status
 
 ## v0.7 → v0.8 Upgrade Notes (historical path) {#v0-7-v0-8-upgrade-notes-latest}
 
-::: info Current stable is v0.10.11
+::: info Current stable is v0.10.13
 This section documents **the historical path from v0.7 to v0.8**, kept as a reference for users who need to traverse v0.7 → v0.10.8 in one go. **Upgrading between v0.8 / v0.9 / v0.10.x** is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — the auth migration below is **not** required (see [changelog](/en/changelog) and read the per-release notes for v0.8 / v0.9 / v0.10).
 :::
 
 v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
 
-::: tip v0.8.x → v0.10.11 incremental upgrade
+::: tip v0.8.x → v0.10.13 incremental upgrade
 After the v0.8 main path, the v0.8.x / v0.9.x / v0.10.x stable line progressively added `anet channel`, `anet create --batch`, `anet demo`, `anet doctor --fix`, `anet project up/restart/down`, envRef vendor credentials, SDK high-concurrency retry, runtime-first wizard, `codex-direct-stdio` opt-in, per-daemon observability, the Xiaomi MiMo 5-model preset, codex-sdk image input, commhub attachment metadata, the `grok-build-acp` runtime, and many other increments.
 
 **The upgrade path matches the v0.7 → v0.8 main path** — the admin bootstrap + password management is a one-time migration, and later incremental upgrades carry no extra auth steps. Full per-version increments: [changelog](/en/changelog).

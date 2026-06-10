@@ -328,7 +328,7 @@ Run agents via [xAI Grok Build](https://x.ai/grok)'s local CLI — the node spaw
 
 - `grok` CLI installed and `grok auth login` completed on the host
 - `XAI_API_KEY` environment variable set
-- `agent-network ≥ 2.2.10` (v0.10.11 latest) + `agent-node ≥ 2.4.9` (the v0.10.13 hotfix widened the `session/prompt` 300 s timeout — earlier agent-node hangs on long grok tasks; see [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603))
+- `agent-network ≥ 2.2.10` (v0.10.13 latest) + `agent-node ≥ 2.4.9` (the v0.10.13 hotfix widened the `session/prompt` 300 s timeout — earlier agent-node hangs on long grok tasks; see [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603))
 
 ### Start a node
 
@@ -337,10 +337,34 @@ anet node create my-grok --runtime grok-build-acp
 anet node start my-grok
 ```
 
+### Long-task timeout tuning (`flags.grokAcpTimeoutMs`)
+
+v0.10.13 latest behavior: agent-node applies a **hard, overall timeout** to every `session/prompt` call — default **300000 ms (5 minutes)**. Long-running workloads (video generation, large X searches, multi-turn batch tool calls) that exceed 5 min will be rejected client-side and the task gets marked `failed`.
+
+Two ways to raise the cap (env wins over config):
+
+```bash
+# 1) Per-shell (export before starting the grok node)
+GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
+```
+
+```json
+// 2) Persistent (in .anet/nodes/<alias>/config.json)
+{
+  "runtime": "grok-build-acp",
+  "flags": {
+    "grokAcpTimeoutMs": 900000
+  }
+}
+```
+
+> Trade-off: raising the cap lets genuinely long jobs finish, but real hangs (the agent is actually stuck, not slow) get caught later. Bump only when a specific job is hitting the wall; don't blindly raise. Verify [`agent-node/src/cli.ts:1374` `timeoutMs: parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000")`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1374).
+
 ### See also
 
 - [`grok-build-runtime.md` full runtime guide](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md) — Known Limits + debug + preview chain
 - [agent-node § grok-build-acp tip](/en/guide/agent-node) — v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) per-node isolated cwd details
+- [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603) — `session/prompt` timeout troubleshooting
 - [architecture § Debug tip](/en/guide/architecture) — runtime debug entry point
 
 ---
