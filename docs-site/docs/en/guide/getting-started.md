@@ -1,6 +1,6 @@
 # Getting Started (first-time install)
 
-This page is the **first-time install** path for current stable (v0.10.11) — every step is Playwright + Docker E2E verified. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
+This page is the **first-time install** path for current stable (v0.10.13) — every step is Playwright + Docker E2E verified. The flow follows the v2/v3 Docker + Playwright E2E path: install CLI, start Hub, start Dashboard, log in, create a node, start it.
 
 ::: tip Which path should you follow?
 - **First-time install**: continue with this page from step 0 to step 10.
@@ -163,10 +163,16 @@ anet project restart
 anet project down
 ```
 
-**Two coupled features** make 22-node reboot recovery **zero-keystroke**:
+Two coupled features make 22-node reboot recovery **zero-keystroke**:
 
-- `anet project up` internally spawns each node in a detached tmux session via `startNodeTmuxSession()` ([#117](https://github.com/sleep2agi/agent-network/issues/117)) — when you run `anet node start <alias>` **directly**, v0.9.2 defaults to **foreground** ([#136](https://github.com/sleep2agi/agent-network/issues/136) reverted the brief v0.9.0 #122 default-detached behavior because macOS bun triggered `setRawMode errno 5`). For tmux, use `anet node start <alias> --tmux` (attached mode)
-- Startup auto-injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` ([#115](https://github.com/sleep2agi/agent-network/issues/115)) to skip Claude Code's default "Resume from summary / full" prompt — no per-node keystroke
+- `anet project up` spawns each node in a detached tmux session; running `anet node start <alias>` directly defaults to foreground (add `--tmux` for attached mode)
+- Startup auto-skips Claude Code's "Resume from summary / full" prompt — no per-node keystroke
+
+::: details Why / historical detail
+- `anet project up` calls `startNodeTmuxSession()` internally to spawn each node detached ([#117](https://github.com/sleep2agi/agent-network/issues/117))
+- Direct `anet node start <alias>` foregrounds since v0.9.2 ([#136](https://github.com/sleep2agi/agent-network/issues/136) reverted the brief v0.9.0 #122 default-detached behavior because macOS bun triggered `setRawMode errno 5`)
+- Startup injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` ([#115](https://github.com/sleep2agi/agent-network/issues/115)) so Claude Code skips the resume prompt
+:::
 
 Common options:
 
@@ -230,7 +236,13 @@ The project direction is **Apache 2.0 open source + self-hosted + courses / cons
 
 ## Next
 
-**Hands-on demos**:
+**Hands-on demos** (one command spins up a ready-made agent team):
+
+```bash
+anet demo                  # list available demos
+anet demo sci-team         # 4-role research team (PI / engineer / reviewer / doc-writer)
+anet demo pr-review        # 3-role PR review squad
+```
 
 **Dig into commands**:
 - [CLI reference](/en/guide/cli) — every anet command
@@ -241,4 +253,4 @@ The project direction is **Apache 2.0 open source + self-hosted + courses / cons
 - [Dashboard guide](/en/guide/dashboard) — Web UI monitoring
 - [Architecture](/en/guide/architecture) — system design
 - [Production deployment](/en/deploy/production) — TLS / firewall / backups
-- [v0.7 → v0.8 upgrade](/en/guide/upgrade#v0-7-v0-8-upgrade-notes-latest) — behavior changes and migration
+- [Upgrade guide](/en/guide/upgrade) — any older release → latest via one `anet upgrade`

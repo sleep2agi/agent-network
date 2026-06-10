@@ -139,11 +139,18 @@ npx @sleep2agi/agent-node \
   --hub http://YOUR_IP:9200
 ```
 
-::: tip v0.10.11 improvements (shipped to @latest)
-- [#201](https://github.com/sleep2agi/agent-network/issues/201) 3-layer fix for delegate refusal (wrapper parser broaden + Grok prompt softening + authorised phrasings list)
-- [#204](https://github.com/sleep2agi/agent-network/issues/204) Per-session MCP inject — preview chain history: preview.2 stdio variant structurally fixes the `.mcp.json` shared-identity bug (ACP side); **preview.6 switches transport to HTTP** (Grok calls commhub `/mcp` directly with a Bearer ntok_, bypassing subprocess / bun PATH / stdout-pollution risks entirely); **preview.7 lands on per-node isolated cwd** (Grok CLI also reads cwd `.mcp.json` alongside the ACP injection — two MCP servers coexist and the stale one wins hello; fix: ACP session/new passes a per-node isolated cwd that mirrors user files but omits `.mcp.json`). v0.10.11 final = preview.7 promoted.
+::: tip grok-build-acp improvements since v0.10.11 (included in v0.10.13 latest)
+- [#201](https://github.com/sleep2agi/agent-network/issues/201) — 3-layer fix for delegate refusal: parser broaden + prompt softening + authorised-phrasings list
+- [#204](https://github.com/sleep2agi/agent-network/issues/204) — per-session MCP inject + per-node cwd isolation to prevent `.mcp.json` identity pollution
 
 See [grok-build-runtime.md Known Limits](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md#known-limits) for the full breakdown.
+
+::: details preview chain history (how it converged on preview.7)
+- **preview.2 stdio variant**: structurally fixes the `.mcp.json` shared-identity bug (ACP side)
+- **preview.6 — transport switched to HTTP**: Grok calls commhub `/mcp` directly with a Bearer `ntok_`, bypassing subprocess / bun PATH / stdout-pollution risks entirely
+- **preview.7 — per-node isolated cwd (final)**: Grok CLI was reading the cwd `.mcp.json` alongside the ACP injection — two MCP servers coexist and the stale one wins hello. Fix: ACP `session/new` passes a per-node isolated cwd that mirrors user files but omits `.mcp.json`
+- v0.10.11 final = preview.7 promoted
+:::
 :::
 
 ### claude-agent-sdk + Domestic Models

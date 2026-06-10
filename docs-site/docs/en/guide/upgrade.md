@@ -2,22 +2,30 @@
 
 This guide covers how **existing users** upgrade Agent Network to the latest version, plus migration notes between major versions.
 
-::: warning v0.10.6 chicken-and-egg — current binary at 2.2.4 or older needs a one-time manual install to reach 2.2.5+
-v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) Option A only updated the verbiage in `anet upgrade` (displaying "⚠️ NEEDS MANUAL UPGRADE"), **but the chicken-and-egg deadlock remained** — a Node process can't in-place replace its own binary. **Your current 2.2.2 / 2.2.3 / 2.2.4 binary running `anet upgrade` still falls back to the old "skipped" behavior** (that logic is frozen in the npm tarball).
+::: tip Most cases: one line
+```bash
+anet upgrade          # bumps agent-network / agent-node and prints a restart hint (in 1–2 min `anet -v` shows the new version)
+```
 
-v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) actually resolves the chicken-and-egg: it defaults to `spawn(forkScript, { detached: true })` + `child.unref()` + main-process exit, with the detached child running `npm install` in the background. **But this fix only lives in the 2.2.5+ binary.**
+Then `anet project restart` to re-spawn the cwd's nodes against the new agent-node and you're done. The sections below cover edge cases.
+:::
 
-**One-time manual install** (jump straight to latest, skip intermediate versions — one install gets you all fixes):
+::: details I'm on a v0.10.6-pre binary (2.2.4 or older)
+Only relevant if `anet -v` shows `2.2.4` or older — anything `2.2.5+` can skip this.
+
+v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) actually resolves the chicken-and-egg (defaults to `spawn(forkScript, { detached: true })` + `child.unref()` + main-process exit, detached child runs `npm install` in the background). That fix only lives in the `2.2.5+` binary; v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) only rephrased the message without solving the deadlock.
+
+**One-time manual install** — jump straight to latest:
 
 ```bash
 npm install -g @sleep2agi/agent-network@latest
 anet --version            # current latest v2.2.10 (v0.10.13, 2026-06-08)
 ```
 
-From any 2.2.5+ binary onward (the v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) fix lives in 2.2.5+), `anet upgrade` **auto detached-spawns**; a minute or two later `anet --version` shows the new build — no `--self` flag or manual install required.
+From there on, `anet upgrade` auto-detached-spawns and `anet -v` reflects the new build a minute or two later.
 :::
 
-::: tip Brand-new machine, never installed anet before?
+::: details Brand-new machine, never installed anet
 **First-time install** goes through the [Getting Started guide](/en/guide/getting-started), or in one shell line:
 
 ```bash
@@ -147,17 +155,12 @@ anet status
 
 ## v0.7 → v0.8 Upgrade Notes (historical path) {#v0-7-v0-8-upgrade-notes-latest}
 
-::: info Current stable is v0.10.13
-This section documents **the historical path from v0.7 to v0.8**, kept as a reference for users who need to traverse v0.7 → v0.10.8 in one go. **Upgrading between v0.8 / v0.9 / v0.10.x** is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — the auth migration below is **not** required (see [changelog](/en/changelog) and read the per-release notes for v0.8 / v0.9 / v0.10).
+::: info Fewer and fewer people need this section
+Current stable is v0.10.13. Upgrading between v0.8 / v0.9 / v0.10.x is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — **the auth migration below is NOT required**. Full per-version increments: [changelog](/en/changelog). Kept here as a reference for users who need to traverse v0.7 → v0.10.13 in one go.
 :::
 
+::: details v0.7 → v0.8 auth / password migration detail
 v0.8 ships [RFC-001 Phase 2](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md), which changes **auth and password** behavior:
-
-::: tip v0.8.x → v0.10.13 incremental upgrade
-After the v0.8 main path, the v0.8.x / v0.9.x / v0.10.x stable line progressively added `anet channel`, `anet create --batch`, `anet demo`, `anet doctor --fix`, `anet project up/restart/down`, envRef vendor credentials, SDK high-concurrency retry, runtime-first wizard, `codex-direct-stdio` opt-in, per-daemon observability, the Xiaomi MiMo 5-model preset, codex-sdk image input, commhub attachment metadata, the `grok-build-acp` runtime, and many other increments.
-
-**The upgrade path matches the v0.7 → v0.8 main path** — the admin bootstrap + password management is a one-time migration, and later incremental upgrades carry no extra auth steps. Full per-version increments: [changelog](/en/changelog).
-:::
 
 ### Behavior changes
 
@@ -178,7 +181,7 @@ npm install -g @sleep2agi/agent-network@latest
 npm install -g @sleep2agi/agent-node@latest
 
 # commhub-server isn't installed separately — `anet hub start` runs it via bunx
-# at a PINNED version (verify agent-network/bin/cli.ts:2125 PINNED_SERVER_VERSION;
+# at a PINNED version (verify agent-network/bin/cli.ts PINNED_SERVER_VERSION;
 # the pin bumps along with the anet release).
 # ⚠ commhub-server is bun-shebang TypeScript — install Bun first:
 #   curl -fsSL https://bun.sh/install | bash
@@ -209,6 +212,7 @@ anet hub admin reset-user <username>
 ```
 
 See [security model](/en/concepts/security) for details.
+:::
 
 ---
 

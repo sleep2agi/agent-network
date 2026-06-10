@@ -1,6 +1,6 @@
 # 上手指南（首次安装）
 
-本页是**新用户首次安装**当前 stable（v0.10.11）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
+本页是**新用户首次安装**当前 stable（v0.10.13）端到端跑通的最小路径。每一步都经过 Playwright + Docker E2E 验证，照着敲就能走通。
 
 ::: tip 你应该走哪条路径？
 - **第一次安装**：继续按本文从 0 到 10 操作。
@@ -167,10 +167,16 @@ anet project restart
 anet project down
 ```
 
-**联动两件事**让 22 节点 reboot 是**零键盘恢复**：
+两件事联动让 22 节点 reboot 是**零键盘恢复**：
 
-- `anet project up` 内部按 `startNodeTmuxSession()` 起每个节点的 detached tmux session（[#117](https://github.com/sleep2agi/agent-network/issues/117)）—— 你直接 `anet node start <alias>` 时**v0.9.2 起默认前台**（[#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 v0.9.0 短暂的 #122 默认 detached 行为，因为 macOS bun 触发 `setRawMode errno 5`）；想 tmux 用 `anet node start <alias> --tmux` 走 attached 模式
-- 启动时自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999`（[#115](https://github.com/sleep2agi/agent-network/issues/115)）跳过 Claude Code 默认的 "Resume from summary / full" 交互弹窗 —— 不用一个个按键确认
+- `anet project up` 给每个节点起 detached tmux session；`anet node start <alias>` 单独跑则默认前台（要 tmux 加 `--tmux`）
+- 启动自动跳过 Claude Code 的「Resume from summary / full」交互弹窗，不用一个个按键确认
+
+::: details 为什么 / 历史细节
+- `anet project up` 内部用 `startNodeTmuxSession()` 起每个节点的 detached tmux session（[#117](https://github.com/sleep2agi/agent-network/issues/117)）
+- 直接 `anet node start <alias>` v0.9.2 起默认前台（[#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 v0.9.0 短暂的 #122 默认 detached 行为，因为 macOS bun 触发 `setRawMode errno 5`）
+- 启动时注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999`（[#115](https://github.com/sleep2agi/agent-network/issues/115)）让 Claude Code 跳过 "Resume from summary / full" 弹窗
+:::
 
 常用选项：
 
@@ -234,7 +240,13 @@ anet node start remote-bot
 
 ## 下一步
 
-**实战 demo**：
+**实战 demo**（一行命令起一组配好的 agent）：
+
+```bash
+anet demo                  # 列出可用 demo
+anet demo sci-team         # 4 角色科研团队（PI / 工程师 / 评审 / 文档）
+anet demo pr-review        # 3 角色 PR 评审小组
+```
 
 **深入命令**：
 - [CLI 命令清单](/guide/cli) — 全部 anet 命令
@@ -245,4 +257,4 @@ anet node start remote-bot
 - [Dashboard 用法](/guide/dashboard) — Web UI 监控
 - [架构概览](/guide/architecture) — 整体设计
 - [生产部署](/deploy/production) — TLS / 防火墙 / 备份
-- [v0.7 → v0.8 升级](/guide/upgrade#v0-7-v0-8-升级注意-最新) — 行为变化和迁移
+- [升级指南](/guide/upgrade) — 任意旧版本 → latest 一键 `anet upgrade`

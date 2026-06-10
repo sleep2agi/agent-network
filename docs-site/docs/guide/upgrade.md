@@ -2,22 +2,30 @@
 
 本文介绍**老用户**将 Agent Network 升级到最新版本的步骤，以及主要版本之间的迁移注意事项。
 
-::: warning v0.10.6 chicken-and-egg — 当前 binary 2.2.4 及以下需手装 1 次升到 2.2.5+
-v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) Option A 只改了 `anet upgrade` 的 verbiage（显示 "⚠️ NEEDS MANUAL UPGRADE"），**chicken-and-egg deadlock 仍在** —— Node 进程无法 in-place 替换自己的 binary。**你当前 2.2.2 / 2.2.3 / 2.2.4 binary 跑 `anet upgrade` 还是旧 "skipped" 行为**（这条逻辑 frozen 在 npm 上的老 tarball 里）。
+::: tip 大部分情况：一句话
+```bash
+anet upgrade          # 自动升 agent-network / agent-node / 重启提示（一两分钟后 anet -v 已是新版）
+```
 
-v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) 真解 chicken-and-egg：默认 `spawn(forkScript, { detached: true })` + `child.unref()` + 主进程 exit，detached child 后台跑 `npm install`。但**这个修复只在 2.2.5+ 的 binary 里生效**。
+升完跑 `anet project restart` 重启 cwd 下的节点把新 agent-node 吃进去就完事了。下面分章节是「需要细看」的场景。
+:::
 
-**只需手装 1 次**（直接 jump 到 latest，跳过中间版本，一次装到位）：
+::: details 我装的是 v0.10.6 以前的旧版（binary 2.2.4 及以下）
+这条只对 binary `2.2.4` 及以下的人有用 —— `anet -v` 看到 `2.2.5` 或更新的可以跳过整段。
+
+v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) 才真解 chicken-and-egg（默认 `spawn(forkScript, { detached: true })` + `child.unref()` + 主进程 exit，detached child 后台跑 `npm install`）。该修复只在 `2.2.5+` 的 binary 里生效；v0.10.4 [#151](https://github.com/sleep2agi/agent-network/issues/151) 只改了文案没解 deadlock。
+
+**只需手装 1 次**直接 jump 到 latest：
 
 ```bash
 npm install -g @sleep2agi/agent-network@latest
-anet --version            # 当前 latest v2.2.10（v0.10.11，2026-05-28）
+anet --version            # 当前 latest v2.2.10（v0.10.13，2026-06-08）
 ```
 
-之后再有新版本，直接跑 `anet upgrade` 就**自动 detached spawn**（v0.10.6 `#154` 起的修，2.2.5+ binary 默认行为），一两分钟后 `anet --version` 已是新版，再不需要 `--self` flag 或手装。
+之后再有新版本，跑 `anet upgrade` 即自动 detached spawn，一两分钟后 `anet -v` 是新版。
 :::
 
-::: tip 全新机器从来没装过 anet？
+::: details 全新机器从未装过 anet
 **首次安装**走 [上手指南](/guide/getting-started) 或一行 shell：
 
 ```bash
@@ -147,17 +155,12 @@ anet status
 
 ## v0.7 → v0.8 升级注意（历史路径） {#v0-7-v0-8-升级注意-最新}
 
-::: info 当前 stable 是 v0.10.13
-本节是**从 v0.7 升 v0.8 的历史路径**，保留作 v0.7 → v0.10.13 跨版本升级时的关键节点参考。**从 v0.8 / v0.9 / v0.10.x 之间升级**直接 `anet upgrade` 或 `npm install -g @sleep2agi/agent-network@latest` 即可，无须重做下方 v0.7→v0.8 鉴权迁移（详见 [changelog](/changelog)，按 v0.8 / v0.9 / v0.10 各 release 段查行为变化）。
+::: info 看这节的人应该越来越少
+当前 stable 是 v0.10.13。从 v0.8 / v0.9 / v0.10.x 之间升级直接 `anet upgrade` 或 `npm install -g @sleep2agi/agent-network@latest` 即可，**无须重做下方 v0.7→v0.8 鉴权迁移**。完整逐版改动见 [changelog](/changelog)。本节保留作 v0.7 → v0.10.13 跨版本升级时的关键节点参考。
 :::
 
+::: details v0.7 → v0.8 鉴权 / 密码管理迁移细节
 v0.8 落地了 [RFC-001 第二阶段](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-001-deprecate-commhub-auth-token.md)，对**鉴权和密码**有新行为：
-
-::: tip v0.8.x → v0.10.13 增量升级
-v0.8 主路径之后，v0.8.x / v0.9.x / v0.10.x 整条 stable 线累积加入了 `anet channel`、`anet create --batch`、`anet demo`、`anet doctor --fix`、`anet project up/restart/down`、envRef vendor 凭据、SDK 高并发 retry、runtime-first wizard、`codex-direct-stdio` opt-in、守护节点 observability、小米 MiMo 5-model preset、codex-sdk 图片输入、commhub 附件元数据、`grok-build-acp` runtime 等大量增量。
-
-**升级路径跟 v0.7 → v0.8 主路径一致** — admin bootstrap + 密码管理一次性迁移完，后续 incremental upgrade 无额外鉴权步骤。完整逐版改动见 [changelog](/changelog)。
-:::
 
 ### 行为变化
 
@@ -178,7 +181,7 @@ npm install -g @sleep2agi/agent-network@latest
 npm install -g @sleep2agi/agent-node@latest
 
 # commhub-server 不用单独装 —— anet hub start 会用 bunx 拉一个 PINNED 版本
-# (verify agent-network/bin/cli.ts:2125 PINNED_SERVER_VERSION; anet 升级时这个版本号会跟着升)
+# (verify agent-network/bin/cli.ts PINNED_SERVER_VERSION; anet 升级时这个版本号会跟着升)
 # ⚠ commhub-server 是 bun shebang TypeScript，必须先装 Bun: curl -fsSL https://bun.sh/install | bash
 
 # 2. 重启 Hub（首次自动 bootstrap admin，无 prompt）
@@ -207,6 +210,7 @@ anet hub admin reset-user <username>
 ```
 
 详细机制见 [安全模型](/concepts/security)。
+:::
 
 ---
 
