@@ -8395,6 +8395,17 @@ async function doctorCommand() {
 // fixes (process.exit in createInteractiveCommand / dispatch end) didn't
 // help because they don't change the module's top-level await profile.
 async function main() {
+// #215 (P0) — universal --help / -h intercept: never let a subcommand's
+// `--help` argv slip into business logic. Without this, `anet token create
+// --help` SIGNS a real token, `anet run --help` STARTS a real SSE listener
+// on :9200, `anet hub start --help` STARTS the hub. Convention everywhere
+// else (cargo, git, npm, docker) is "see help, no side effect" — match it.
+// Per-subcommand inline help is polish (tracked in #214 F7-01 follow-ups);
+// here we hard-stop with global help, which is correct minimum.
+if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
+  printHelp();
+  process.exit(0);
+}
 switch (command) {
   case "init":
     if (args[1] === "project") initProject();
