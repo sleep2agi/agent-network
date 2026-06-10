@@ -496,6 +496,41 @@ function commandExists(name: string): boolean {
   }
 }
 
+// #214 F7-02 / F7-10 / F7-11 — Levenshtein distance for did-you-mean
+// suggestions on typo'd commands. Pure function, ≤30 LOC, no deps.
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const m = a.length, n = b.length;
+  const dp: number[] = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1]
+        ? prev
+        : 1 + Math.min(prev, dp[j - 1], dp[j]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+// Return the closest candidate within Levenshtein distance ≤ 2, or null
+// if nothing is close enough. Used for "Did you mean ...?" hints.
+function suggestSimilar(input: string, candidates: string[]): string | null {
+  const lower = input.toLowerCase();
+  let best: { name: string; dist: number } | null = null;
+  for (const c of candidates) {
+    const d = levenshtein(lower, c.toLowerCase());
+    if (d <= 2 && (!best || d < best.dist)) best = { name: c, dist: d };
+  }
+  return best ? best.name : null;
+}
+
 type VersionState = "ok" | "unknown" | "not-installed";
 
 interface DetectedVersion {
@@ -902,9 +937,13 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
     if (phase === "start") printClaudeCodeNotice();
     return;
   }
-  if (!commandExists("agent-node")) {
-    console.warn(`[anet] Warning: agent-node not found in PATH.`);
-    console.warn(`[anet] Run: anet upgrade`);
+  // #214 P2.5 — agent-node is *intentionally* lazy-fetched via npx by
+  // `anet node start` (see bin/cli.ts:~2378). Showing a scary "not found"
+  // warning during the create wizard misleads first-time users into thinking
+  // setup is broken. Suppress for first-time scenarios and only emit a
+  // neutral nudge when start phase actually runs without it cached.
+  if (phase === "start" && !commandExists("agent-node")) {
+    console.log(`[anet] note: agent-node will be lazy-fetched via npx on first start (this is normal).`);
   }
   if (runtime === "grok-build-acp" && !commandExists("grok")) {
     console.warn(`[anet] Warning: grok CLI not found in PATH.`);
@@ -3143,6 +3182,10 @@ async function serverCommand() {
     const tag = dashboardReleaseTag();
     cleanStaleNpxDashboardTemp(); // #89 — self-heal npx cache before spawn
     console.log(`[anet] spawning dashboard @${tag} (anet ${getAnetVersion() || "unknown"})`);
+    // #214 P2.6 — first launch compiles Next.js routes on demand and can
+    // take 30-60s on cold caches. Users mistook the silence for a hang and
+    // killed the spawn. Surface the expectation up-front.
+    console.log(`[anet] note: first launch compiles Next.js routes — expect 30-60s before http://${dashHost}:${dashPort} responds.`);
     const dashChild = spawn("npx", ["-y", `@sleep2agi/agent-network-dashboard@${tag}`], { env, stdio: "inherit" });
     dashChild.on("error", () => {
       console.error(`[anet] Dashboard package not found. Install manually:`);
@@ -3185,25 +3228,58 @@ async function serverCommand() {
     else console.error(`[anet] ⚠ Hub pid(s) ${remaining.join(", ")} still on port ${port}; check manually.`);
 
   } else if (sub === "status") {
-    // #200 — show hub running state: pid(s) on the port + /health version.
+    // #200 + #214 维度 1 / F7-04 — show hub running state.
+    //
+    // 通信工程马 rewrite: previously this command keyed off `lsof` PIDs first
+    // and said "Hub not running" if the lookup returned empty. In containers
+    // where lsof is missing or returns odd output (e.g. node:24-slim
+    // without procps), users saw false "not running" reports even when
+    // /health was 200. lsof on alpine also sometimes streamed an
+    // unbounded series of integers that join(", ") rendered as
+    // "1, 0, 1, 1, 1, 2, 1, 10, ..." (#214 F7-04).
+    //
+    // New shape: /health is the source of truth. PIDs are best-effort and
+    // sanity-filtered. Output gives users a clear next-step regardless of
+    // the host environment.
     const opts = parseOpts();
     const sc = loadServerConfig();
     const port = String(opts.port || sc.port || "9200");
-    const pids = findHubPids(port);
-    if (pids.length === 0) {
-      console.log(`[anet] Hub not running on port ${port}.`);
-      console.log(`[anet]    Start: anet hub start`);
-      return;
-    }
+
     let healthy = false;
     let version = "?";
     try {
       const h = await fetch(`http://127.0.0.1:${port}/health`).then(r => r.json() as any);
       if (h.ok) { healthy = true; version = h.version || "?"; }
     } catch {}
-    console.log(`[anet] hub: ${healthy ? "✅ running" : "⚠ port held but /health not OK"} on http://127.0.0.1:${port}`);
-    console.log(`[anet]   pid(s):         ${pids.join(", ")}`);
-    console.log(`[anet]   server version: ${version}`);
+
+    // Sanity-filter: dedup + drop implausible PIDs (Linux PID_MAX_LIMIT ≤
+    // 2^22 = 4194304). Some lsof builds emit fd numbers interleaved with
+    // PIDs when the format string is unexpected; the filter limits visible
+    // damage even if the env returns garbage.
+    const pidsRaw = findHubPids(port);
+    const pids = [...new Set(pidsRaw)].filter(p => Number.isInteger(p) && p > 0 && p < 4_194_304);
+    // A real commhub-server is 1 process. If lsof reports >5 distinct PIDs
+    // on the same port, the environment's lsof (e.g. busybox on alpine) is
+    // streaming garbage; show only a hint of the count instead of a
+    // misleading list.
+    const pidsDisplay = pids.length > 5
+      ? `${pids.slice(0, 3).join(", ")}, ... (+${pids.length - 3} more — lsof in this environment may be returning extra fd numbers)`
+      : pids.join(", ");
+
+    if (healthy) {
+      console.log(`[anet] ✅ hub running on http://127.0.0.1:${port}`);
+      console.log(`[anet]   server version: commhub-server v${version}`);
+      if (pids.length > 0) console.log(`[anet]   pid(s):         ${pidsDisplay}`);
+      else console.log(`[anet]   pid(s):         (lsof unavailable in this environment — health check is authoritative)`);
+    } else if (pids.length > 0) {
+      console.log(`[anet] ⚠ port ${port} held but /health not OK on http://127.0.0.1:${port}`);
+      console.log(`[anet]   pid(s):         ${pidsDisplay}`);
+      console.log(`[anet]   server version: ? (port held by non-CommHub process or stale)`);
+      console.log(`[anet]   Hint:           anet hub stop  # graceful, then anet hub start`);
+    } else {
+      console.log(`[anet] Hub not running on port ${port}.`);
+      console.log(`[anet]    Start: anet hub start`);
+    }
 
   } else {
     console.log(`
@@ -4074,7 +4150,19 @@ async function projectCommand() {
     case "up": return projectUp();
     case "restart": return projectRestart();
     case "down": return projectDown();
-    default: printProjectUsage();
+    case "ls": case "list": {
+      // F7-08 — users expect `project list` for "what nodes belong to this
+      // project" which is exactly `anet node ls`. Alias instead of dump
+      // project help.
+      return lsCommand();
+    }
+    default: {
+      if (sub) {
+        const suggestion = suggestSimilar(sub, ["up", "restart", "down", "ls"]);
+        if (suggestion) console.log(`Unknown project subcommand "${sub}". Did you mean: anet project ${suggestion}?`);
+      }
+      printProjectUsage();
+    }
   }
 }
 
@@ -4442,7 +4530,14 @@ function selfUpgradeDetached(channel: ReleaseChannel): never {
   const cmd = `npm install -g @sleep2agi/agent-network@${channel} 2>${shellQuote(errLog)} && anet -v`;
   console.log(`\n[anet] ⚙️  auto self-upgrade: detaching npm install (this shell will exit).`);
   console.log(`[anet]   Log: ${errLog}`);
-  console.log(`[anet]   When npm finishes, run \`anet --version\` in a NEW shell to verify ${channel}.`);
+  console.log(`[anet]   When npm finishes, open a NEW terminal (or 'source ~/.bashrc') and run \`anet --version\` to verify ${channel}.`);
+  console.log(`[anet]   The current shell's \`anet\` binary will keep pointing at the old version until you do.`);
+  if (!commandExists("bun")) {
+    // #214 P2.7 — anet hub start needs bun (commhub-server is bun-only).
+    // Surface this now so users don't hit it on next `anet hub start`.
+    console.log(`[anet]   note: bun is not installed; \`anet hub start\` will fail without it.`);
+    console.log(`[anet]         Install: curl -fsSL https://bun.sh/install | bash`);
+  }
   console.log(`[anet]   (Use \`anet upgrade --no-auto-self\` next time if you prefer to manage the install yourself.)`);
   try {
     const child = spawn("sh", ["-c", cmd], { stdio: "ignore", detached: true });
@@ -4494,6 +4589,14 @@ async function upgradeCommand() {
   const anetVersion = getAnetVersion();
   const detected = detectChannel(anetVersion || "");
   const channelFlag = opts._channels[0];
+  // F7-09 — bare `--channel` (no value) used to silently fall through to
+  // detected channel, leaving the user thinking they switched when they
+  // didn't. parseOpts records the bare form as opts.channel = "true";
+  // catch and reject explicitly, mirroring the wrong-value branch below.
+  if (!channelFlag && opts.channel === "true") {
+    console.error(`[anet] ❌ --channel requires a value (preview|latest)`);
+    process.exit(1);
+  }
   let channel: ReleaseChannel;
   if (channelFlag === "preview" || channelFlag === "latest") {
     channel = channelFlag;
@@ -8041,33 +8144,42 @@ async function migrateTokenToEnvRefCommand() {
 // ── license ──
 
 async function licenseCommand() {
+  // #214 P2.8 — Agent Network is open source under Apache-2.0. Earlier
+  // versions of this command printed a hub-reported "license type"
+  // (PRO/STARTER/EXPIRED) and per-tier soft limits, which conflicted with
+  // the actual OSS reality and misled users into thinking this was
+  // commercial software. New shape: lead with the truth, then surface any
+  // self-hosted hub's license info as a secondary, opt-in detail.
+  console.log(`
+  License: Apache-2.0 (open source)
+  Source:  https://github.com/sleep2agi/agent-network
+  Docs:    https://anet.sh/
+
+  Agent Network is fully open source. No commercial tier, no usage limits
+  enforced by the CLI, no telemetry.
+`);
+
   const gc = loadGlobal();
-  const hub = gc.hub;
-  if (!hub) { console.error("Run 'anet init' first."); return; }
-
+  if (!gc.hub) {
+    console.log(`  (no hub configured — run 'anet init' to set one if you want hub-side license info)\n`);
+    return;
+  }
   try {
-    const res = await fetch(`${hub}/api/license`, { headers: authHeaders() }).then(r => r.json() as any);
-    if (!res.ok) { console.error("Failed to get license info."); return; }
-    const lic = res.license;
-    const lim = res.limits;
-
-    console.log(`\n  License: ${lic.type.toUpperCase()}`);
-    if (lic.expires_at) {
-      console.log(`  Expires: ${lic.expires_at}${lic.expired ? " (EXPIRED)" : ""}`);
-      if (lic.days_left !== null) console.log(`  Days left: ${lic.days_left}`);
+    const res = await fetch(`${gc.hub}/api/license`, { headers: authHeaders() }).then(r => r.json() as any);
+    if (res && res.ok && res.license) {
+      const lic = res.license;
+      const lim = res.limits;
+      console.log(`  Hub (${gc.hub}) license info:`);
+      console.log(`    Type:    ${String(lic.type || "?").toUpperCase()}`);
+      if (lic.expires_at) console.log(`    Expires: ${lic.expires_at}${lic.expired ? " (EXPIRED)" : ""}`);
+      if (lim) console.log(`    Soft limits: agents=${lim.max_agents}, networks=${lim.max_networks}, tasks/day=${lim.max_tasks_day}`);
+      console.log(`  (Self-hosted hub license data — informational only; the OSS code itself is unrestricted.)\n`);
+    } else {
+      console.log(`  (hub does not report license info)\n`);
     }
-    console.log(`\n  Limits:`);
-    console.log(`    Agents:    ${lim.max_agents}`);
-    console.log(`    Networks:  ${lim.max_networks}`);
-    console.log(`    Tasks/day: ${lim.max_tasks_day}`);
-
-    if (lic.expired) {
-      console.log(`\n  ⚠ License expired! Options:`);
-      console.log(`    anet activate <key>    Activate a license key`);
-      console.log(`    anet init --hub https://hub.sleep2agi.com  Use free hosted`);
-    }
-    console.log();
-  } catch (e: any) { console.error(friendlyError(e)); }
+  } catch {
+    console.log(`  (hub unreachable — check 'anet doctor' if you expected hub-side license info)\n`);
+  }
 }
 
 async function activateCommand() {
@@ -8424,8 +8536,25 @@ switch (command) {
       case "delete": args.splice(0, 1); await deleteCommand(); break;
       case "rename": args.splice(0, 1); await renameCommand(); break;
       case "ls": case "list": await lsCommand(); break;
+      case "restart": {
+        // #173 / F7-03 — node restart = stop + start, alias for symmetry
+        // with `anet project restart` and `anet batch restart`. We splice off
+        // the "restart" verb so stopCommand/startCommand see args[1] as alias.
+        args.splice(0, 1);
+        await stopCommand();
+        await startCommand();
+        break;
+      }
       case "migrate-token-to-envref": args.splice(0, 1); await migrateTokenToEnvRefCommand(); break;
-      default: console.log(`Usage: anet node <create|start|stop|resume|delete|ls|rename|migrate-token-to-envref> [name]`); break;
+      default: {
+        const sub = args[1];
+        if (sub) {
+          const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename"]);
+          if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
+        }
+        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|migrate-token-to-envref> [name]`);
+        break;
+      }
     }
     break;
   case "project": await projectCommand(); break;  // #117 — cwd-wide orchestration
@@ -8472,14 +8601,31 @@ switch (command) {
   case "whoami": await whoamiCommand(); break;
   case "network": await networkCommand(); break;
   case "run": await runCommand(); break;
-  case "-v": case "--version": case "version": {
+  case "-v": case "-V": case "--version": case "version": {
+    // F7-05 / #192 — accept "-V" (cargo/git convention) as alias for -v.
     printVersionReport();
     break;
   }
-  case "--help": case "-h": case undefined: printHelp(); break;
+  case "--help": case "-h": case "help": case undefined: printHelp(); break;
   default:
     if (resolveNodeRef(command)) { args.unshift("start"); await startCommand(); }
-    else { console.error(`Unknown: ${command}`); printHelp(); process.exit(1); }
+    else {
+      // F7-02 / F7-10 — did-you-mean for typo'd top-level commands. List is
+      // hand-maintained to avoid scanning the switch at runtime; keep in
+      // sync if new top-level commands are added.
+      const TOP_COMMANDS = [
+        "init", "create", "server", "hub", "node", "project", "start", "resume",
+        "rename", "stop", "delete", "import", "channel", "setup", "upgrade",
+        "session", "ls", "list", "status", "tasks", "goal", "doctor", "license",
+        "activate", "passwd", "token", "demo", "batch", "logs", "info", "config",
+        "login", "register", "logout", "whoami", "network", "run", "version", "help",
+      ];
+      const suggestion = suggestSimilar(command, TOP_COMMANDS);
+      if (suggestion) console.error(`Unknown command "${command}". Did you mean: anet ${suggestion}?`);
+      else console.error(`Unknown: ${command}`);
+      printHelp();
+      process.exit(1);
+    }
 }
 }  // end async function main
 
