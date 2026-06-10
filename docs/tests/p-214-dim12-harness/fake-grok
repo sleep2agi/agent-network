@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+/* Fake `grok` for #214 dim1 E2E. Handles `grok agent stdio` only.
+ * No xAI key needed. Clean replies. Mocks the registrar path so
+ * `anet node start` reaches "SSE connected" + processes a task.
+ */
+const args = process.argv.slice(2);
+if (args[0] !== 'agent' || args[1] !== 'stdio') {
+  if (args.includes('--version')) { console.log('grok 0.1.219-fake (#214 dim1)'); process.exit(0); }
+  console.error('fake-grok: only `agent stdio` is implemented');
+  process.exit(2);
+}
+const sessions = new Map();
+let activeSession = null;
+const newSessionId = () => 'sess_' + Math.random().toString(36).slice(2, 14);
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+const elog = (m) => process.stderr.write(`[fake-grok ${process.pid}] ${m}\n`);
+
+function emitStream(sid, prompt, replay) {
+  const text = "Got it: " + String(prompt).slice(0, 60);
+  const upd = { jsonrpc:'2.0', method:'session/update', params:{ sessionId: sid, update:{ sessionUpdate:'agent_message_chunk', content:{ type:'text', text } } } };
+  if (replay) upd.params._meta = { isReplay: true };
+  send(upd);
+  send({ jsonrpc:'2.0', method:'_x.ai/session/prompt_complete', params:{ sessionId: sid } });
+}
+
+let buf = '';
+process.stdin.on('data', c => {
+  buf += c.toString();
+  let nl;
+  while ((nl = buf.indexOf('\n')) >= 0) {
+    const line = buf.slice(0, nl).trim();
+    buf = buf.slice(nl+1);
+    if (!line) continue;
+    let req; try { req = JSON.parse(line); } catch { continue; }
+    handle(req);
+  }
+});
+process.stdin.on('end', () => process.exit(0));
+
+function handle(req) {
+  const { id, method, params } = req;
+  elog('recv ' + method);
+  if (method === 'initialize') {
+    send({ jsonrpc:'2.0', id, result:{ protocolVersion:1, capabilities:{ promptCapabilities:{ audio:false, image:false, embeddedContext:true } }, authMethods:[{ id:'xai.api_key', name:'xAI API key' }] } });
+    return;
+  }
+  if (method === 'authenticate') { send({ jsonrpc:'2.0', id, result:{} }); return; }
+  if (method === 'session/new') {
+    const sid = newSessionId(); activeSession = sid; sessions.set(sid, []);
+    send({ jsonrpc:'2.0', id, result:{ sessionId: sid } });
+    return;
+  }
+  if (method === 'session/load') {
+    const sid = params?.sessionId;
+    if (!sid) { send({ jsonrpc:'2.0', id, error:{ code:-32602, message:'missing sessionId' } }); return; }
+    if (!sessions.has(sid)) sessions.set(sid, []);
+    activeSession = sid;
+    send({ jsonrpc:'2.0', id, result:{ sessionId: sid, replayed: 0 } });
+    return;
+  }
+  if (method === 'session/prompt') {
+    const sid = params?.sessionId || activeSession;
+    const prompt = params?.prompt?.[0]?.text || params?.prompt || '';
+    emitStream(sid, prompt, false);
+    send({ jsonrpc:'2.0', id, result:{ stopReason:'end_turn' } });
+    return;
+  }
+  if (method === 'session/cancel') { send({ jsonrpc:'2.0', id, error:{ code:-32601, message:'Method not found' } }); return; }
+  send({ jsonrpc:'2.0', id, error:{ code:-32601, message:'unknown method '+method } });
+}
+elog('fake-grok ready');

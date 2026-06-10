@@ -1,0 +1,1 @@
+维度2/B.upgrade default/级别 P2/anet upgrade 只升 agent-network，commhub-server + agent-node 仍 'missing' on npm -g。Doc 没说 upgrade 是否会预拉这两个；用户期待'三包同升'，实际只升 1。
