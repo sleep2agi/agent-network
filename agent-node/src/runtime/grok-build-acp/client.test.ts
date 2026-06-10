@@ -101,6 +101,96 @@ rl.on("line", (line) => {
     expect(result.errorEcho.data?.originalCode).toBe("ENOENT");
   });
 
+  // Regression: #211 long-running session/prompt false-timeout.
+  // A genuinely streaming request (the fake agent emits notifications
+  // every 80 ms for ~700 ms total) must NOT trip an idle threshold of
+  // 250 ms — each incoming frame resets the timer. Without this
+  // behaviour, anet would falsely fail batch tool runs (e.g. video
+  // generation) the moment they crossed the configured deadline,
+  // exactly the misreport observed on A站Grok in #211.
+  test("requestWithIdleTimeout does not fire while agent is streaming notifications", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "grok-acp-streaming-"));
+
+    const fake = join(cwd, "fake-acp-server.js");
+    writeFileSync(fake, `#!/usr/bin/env node
+const readline = require("readline");
+const rl = readline.createInterface({ input: process.stdin });
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+rl.on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "session/prompt") {
+    let n = 0;
+    const tick = () => {
+      n++;
+      if (n <= 8) {
+        send({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "tick " + n + " " } } } });
+        setTimeout(tick, 80);
+      } else {
+        send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+        setTimeout(() => process.exit(0), 10);
+      }
+    };
+    setTimeout(tick, 80);
+  }
+});
+`);
+    chmodSync(fake, 0o755);
+
+    const client = new GrokAcpClient();
+    client.start({ cwd, binary: fake });
+    const startedAt = Date.now();
+    // Idle threshold (250 ms) deliberately shorter than the total
+    // streaming run (~700 ms) — a hard deadline would have fired by
+    // ~250 ms, but idle behaviour should keep it alive across each
+    // 80 ms tick.
+    const result = await client.requestWithIdleTimeout<{ stopReason: string }>("session/prompt", { sessionId: "s1" }, 250);
+    const elapsed = Date.now() - startedAt;
+    await client.close();
+
+    expect(result.stopReason).toBe("end_turn");
+    expect(elapsed).toBeGreaterThan(600);
+  });
+
+  // Regression: #211 — when the agent IS genuinely silent past the
+  // idle threshold (no notifications, no response), the timer must
+  // fire. The error message must (a) name the request, (b) carry the
+  // idle threshold for debuggability, and (c) carry the two
+  // operator-facing hints (the work may still be running in the
+  // background; raise flags.grokAcpTimeoutMs for genuinely long runs).
+  test("requestWithIdleTimeout fires when agent goes silent past threshold", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "grok-acp-silent-"));
+
+    const fake = join(cwd, "fake-acp-server.js");
+    writeFileSync(fake, `#!/usr/bin/env node
+const readline = require("readline");
+const rl = readline.createInterface({ input: process.stdin });
+rl.on("line", (line) => {
+  // Receive the request, do nothing — simulate a stuck agent.
+});
+// Keep the process alive long enough for the idle timer to fire.
+setTimeout(() => process.exit(0), 5000);
+`);
+    chmodSync(fake, 0o755);
+
+    const client = new GrokAcpClient();
+    client.start({ cwd, binary: fake });
+
+    let caught: Error | undefined;
+    try {
+      await client.requestWithIdleTimeout("session/prompt", { sessionId: "s1" }, 200);
+    } catch (e: any) {
+      caught = e;
+    }
+    await client.close();
+
+    expect(caught).toBeDefined();
+    expect(caught?.message).toContain("session/prompt");
+    expect(caught?.message).toContain("idle");
+    expect(caught?.message).toContain("200ms");
+    expect(caught?.message).toContain("background");
+    expect(caught?.message).toContain("flags.grokAcpTimeoutMs");
+  });
+
   // Integer error codes (e.g. JSON-RPC standard -32601 from
   // resolveServerRequest's unsupported-method fallback) pass through
   // unchanged. Only non-numeric codes get coerced.

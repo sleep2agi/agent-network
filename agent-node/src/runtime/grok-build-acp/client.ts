@@ -47,6 +47,21 @@ export class GrokAcpClient extends EventEmitter {
   private rxBuffer = "";
   private closed = false;
   private cwd = process.cwd();
+  // #211 — Activity heartbeat. Every successfully parsed JSON-RPC frame on
+  // stdout (notification, response, or server-to-client request) bumps
+  // this. `requestWithIdleTimeout()` reads it to decide whether the request
+  // is genuinely silent or merely long-running while still streaming.
+  private lastIncomingAt = Date.now();
+
+  /**
+   * Wall-clock timestamp (ms since epoch) of the last successfully parsed
+   * JSON-RPC frame received from the agent on stdout. Updated by
+   * `onStdout`. Exposed read-only for tests and consumers that want to
+   * implement their own activity-based heartbeats around `request()`.
+   */
+  get lastActivityAt(): number {
+    return this.lastIncomingAt;
+  }
 
   start(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string } = {}): void {
     if (this.child) throw new Error("GrokAcpClient already started");
@@ -94,6 +109,91 @@ export class GrokAcpClient extends EventEmitter {
     });
   }
 
+  /**
+   * Issue a JSON-RPC request and treat the supplied `idleTimeoutMs` as an
+   * **idle threshold** rather than a hard deadline (#211).
+   *
+   * Any successfully parsed JSON-RPC frame received from the agent on
+   * stdout — streamed `session/update` chunks, `tool_call` events,
+   * server-to-client requests, intermediate notifications — resets the
+   * timer. The request only times out when the agent goes genuinely
+   * silent for longer than `idleTimeoutMs`.
+   *
+   * Use this for streaming requests (notably `session/prompt`) whose
+   * total wall-clock duration is unbounded but whose silent periods
+   * indicate a real stall. Quick handshake requests (`initialize`,
+   * `authenticate`, `session/new`) should keep using `request()` with
+   * a hard deadline.
+   *
+   * Backward compatibility: callers that previously passed a hard
+   * deadline (e.g. the runtime's old `client.request("session/prompt",
+   * ..., timeoutMs)` plumbing) can swap to this with the same numeric
+   * value and get a strictly more forgiving behaviour — the timer only
+   * fires when the agent is genuinely stalled.
+   */
+  async requestWithIdleTimeout<R = unknown, P = unknown>(
+    method: string,
+    params?: P,
+    idleTimeoutMs = 300_000,
+  ): Promise<R> {
+    if (!this.child || this.closed) throw new Error("GrokAcpClient not started or already exited");
+    const id = this.nextId++;
+    const payload: JsonRpcRequest<P> = { jsonrpc: "2.0", id, method, ...(params !== undefined ? { params } : {}) };
+    const startedAt = Date.now();
+    // Reset the heartbeat baseline so a long-quiet preamble before this
+    // request does not count against us.
+    this.lastIncomingAt = startedAt;
+
+    return new Promise<R>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      const settle = (action: () => void) => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        this.pending.delete(id);
+        action();
+      };
+
+      const tick = () => {
+        const sinceActivity = Date.now() - this.lastIncomingAt;
+        if (sinceActivity >= idleTimeoutMs) {
+          const totalMs = Date.now() - startedAt;
+          settle(() =>
+            reject(
+              new Error(
+                `grok ACP request '${method}' (id=${id}) idle for ${sinceActivity}ms ` +
+                  `(threshold ${idleTimeoutMs}ms, total elapsed ${totalMs}ms). ` +
+                  `The task may still be running in the background — check the Grok session ` +
+                  `directory under ~/.grok/sessions/ for partial outputs. ` +
+                  `If your task is genuinely long-running (e.g. batch video generation), ` +
+                  `raise flags.grokAcpTimeoutMs in your node config (it now controls ` +
+                  `the idle threshold, not a hard deadline).`,
+              ),
+            ),
+          );
+          return;
+        }
+        // Reschedule for the remaining idle budget. Reading
+        // `lastIncomingAt` again at the next tick is what gives this its
+        // activity-resetting behaviour.
+        timer = setTimeout(tick, idleTimeoutMs - sinceActivity);
+      };
+
+      this.pending.set(id, {
+        resolve: (v) => settle(() => resolve(v as R)),
+        reject: (e) => settle(() => reject(e)),
+      });
+
+      this.child!.stdin.write(JSON.stringify(payload) + "\n", (err) => {
+        if (err) settle(() => reject(err));
+      });
+
+      timer = setTimeout(tick, idleTimeoutMs);
+    });
+  }
+
   notify<P = unknown>(method: string, params?: P): void {
     if (!this.child || this.closed) throw new Error("GrokAcpClient not started or already exited");
     const payload: JsonRpcNotification<P> = { jsonrpc: "2.0", method, ...(params !== undefined ? { params } : {}) };
@@ -127,6 +227,12 @@ export class GrokAcpClient extends EventEmitter {
       let msg: JsonRpcMessage;
       try { msg = JSON.parse(line) as JsonRpcMessage; }
       catch (e) { this.emit("parse_error", { line, error: e }); continue; }
+      // #211 — Treat any successfully parsed JSON-RPC frame as a sign of
+      // life. This is what `requestWithIdleTimeout` consumes to reset its
+      // timer. Streamed `session/update` chunks (the common case during
+      // long batch jobs), server-to-client requests, and final responses
+      // all count — the only thing that doesn't count is genuine silence.
+      this.lastIncomingAt = Date.now();
       this.dispatch(msg);
     }
   }

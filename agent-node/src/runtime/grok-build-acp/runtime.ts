@@ -226,7 +226,16 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     state.sessionId = sessionId;
     await opts.onSession?.(sessionId);
 
-    const promptResponse = await client.request("session/prompt", {
+    // #211 — session/prompt is the only unbounded request in this flow
+    // (the agent streams `session/update` chunks for the entire duration
+    // of the LLM turn, which for batch tool runs like video generation
+    // can comfortably exceed five minutes of wall clock). Treat the
+    // configured `timeoutMs` as an idle threshold rather than a hard
+    // deadline: any streamed frame resets the timer, so long-running
+    // turns no longer get falsely killed mid-flight, but a genuinely
+    // stuck agent (no frames for `timeoutMs`) still surfaces an error
+    // with a hint that the work may still be running in the background.
+    const promptResponse = await client.requestWithIdleTimeout("session/prompt", {
       sessionId,
       prompt: [{ type: "text", text: opts.prompt }],
     }, timeoutMs);
