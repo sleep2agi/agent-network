@@ -82,7 +82,7 @@ CI 真实抓 race ≥4 次（每次都是新 hub-bootstrap 后 auth race，固�
 | 1 | R5 (HUB-06) | utok reset-user **不级联** ntok（`auth.ts L267` 只 DELETE network_id IS NULL）| 设计还是 bug 待 Vincent 评 |
 | 2 | R6 (NODE-02) | `/api/networks` POST 响应 shape 因 caller 异（admin top-level vs 普通 nested）| 统一 shape |
 | 3 | R6 (NODE-02) | admin login 在 /health 200 后短暂 401（bootstrap race）| doc + retry 写进 SDK examples |
-| 4 | R14 (HUB-09) | send_reply terminal silent no-op vs cancel_task terminal ok:false（不一致）| 一致化（都 silent 或都 hard reject）|
+| 4 | R14 (HUB-09) | send_reply terminal silent no-op vs cancel_task terminal ok:false（不一致）| Wave 1 改为 send_reply terminal structured error；cancel_task 保持 ok:false |
 | 5 | R5 (HUB-06) | POST `/api/auth/node-token` 响应缺 `token_id`，SDK 撤销自己 mint 的 ntok 要绕路 | 加 token_id 字段 |
 | 6 | R5 (HUB-06) | `register()` 自动建 default network + ntok，新用户有 3 token 不是 2 | doc 明确 |
 | 7 | R14 (HUB-09) | `cancel_task` 需 NTOK，admin UTOK 无干净取消路径 | hub 加 UTOK + network_id 路径 |

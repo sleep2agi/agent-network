@@ -34,6 +34,20 @@ TOKEN=$(echo "$RESP" | jq -r '.token // empty')
 NET=$(echo "$RESP" | jq -r '.network_id // empty')
 [[ "$TOKEN" == utok_* && -n "$NET" ]] || { echo "FAIL: registration did not return token/network"; echo "$RESP"; exit 1; }
 
+echo "[1b] register target-agent session"
+NTOK=$(curl -fsS -X POST "$HUB_BASE/api/auth/node-token" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"network_id\":\"$NET\",\"node_name\":\"target-agent\"}" | jq -r '.token // empty')
+[[ "$NTOK" == ntok_* ]] || { echo "FAIL: node-token"; exit 1; }
+BODY=$(jq -nc --arg net "$NET" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"report_status",arguments:{resume_id:"qa16-target-agent",alias:"target-agent",status:"idle",network_id:$net}}}')
+RS=$(curl -fsS -X POST "$HUB_BASE/mcp" \
+  -H "Authorization: Bearer $NTOK" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-03-26' \
+  -d "$BODY" | sed -n 's/^data: //p' | head -1 | jq -r '.result.content[0].text // empty')
+echo "$RS" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status target-agent: $RS"; exit 1; }
+
 echo "[2] send REST task with parent_task_id"
 PARENT_ID="parent-probe-001"
 SEND=$(jq -n --arg alias "target-agent" --arg task "rest fallback probe" --arg from "qa-probe" --arg net "$NET" --arg parent "$PARENT_ID" \

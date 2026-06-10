@@ -341,6 +341,36 @@ function canRestWriteNetwork(authCtx: { userId: string; networkId: string | null
   return !!role && role !== "viewer";
 }
 
+type RestDeliveryTarget =
+  | { state: "online"; alias: string; session: any }
+  | { state: "offline"; alias: string; session: any; message: string }
+  | { state: "not_found"; alias: string; message: string };
+
+function resolveRestDeliveryTarget(alias: string, networkId: string | null): RestDeliveryTarget {
+  const params: any[] = [alias];
+  let sql = "SELECT status, updated_at, last_seen_at FROM sessions WHERE alias = ?1";
+  if (networkId) {
+    sql += " AND network_id = ?2";
+    params.push(networkId);
+  }
+  const session = db.get<any>(sql, ...params);
+  if (!session) {
+    return { state: "not_found", alias, message: `alias not found: ${alias}` };
+  }
+  const lastSeen = session.last_seen_at || session.updated_at;
+  const lastSeenAt = lastSeen ? new Date(String(lastSeen).replace(" ", "T") + "Z").getTime() : 0;
+  const stale = !lastSeenAt || Date.now() - lastSeenAt > 5 * 60 * 1000;
+  if (String(session.status || "").toLowerCase() === "offline" || stale) {
+    return {
+      state: "offline",
+      alias,
+      session,
+      message: `alias is offline; task queued in inbox: ${alias}`,
+    };
+  }
+  return { state: "online", alias, session };
+}
+
 // ── REST input schema ───────────────────────────────
 const TaskSchema = z.object({
   alias: z.string().min(1).max(200),
@@ -1199,6 +1229,17 @@ Bun.serve({
       }
       const canonical = resolveCanonicalAlias(taskNetId, body.alias);
       const targetAlias = canonical.alias;
+      const target = resolveRestDeliveryTarget(targetAlias, taskNetId);
+      if (target.state === "not_found") {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "alias_not_found",
+          message: target.message,
+          alias: targetAlias,
+          queued: false,
+          ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
+        }, { status: 404 }));
+      }
       const id = crypto.randomUUID();
       const fromSession = body.from || "api";
       const ttlSeconds = (body as any).ttl_seconds || 3600;
@@ -1251,15 +1292,26 @@ Bun.serve({
       let pendingSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
       if (taskNetId) { pendingSql += " AND network_id = ?2"; pendingParams.push(taskNetId); }
       const pending = db.get<{ cnt: number }>(pendingSql, ...pendingParams);
-      const sessionParams: any[] = [targetAlias];
-      let sessionSql = "SELECT 1 FROM sessions WHERE alias = ?1";
-      if (taskNetId) { sessionSql += " AND network_id = ?2"; sessionParams.push(taskNetId); }
-      const targetSession = db.get<any>(sessionSql, ...sessionParams);
-      if (targetSession) pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession, ...(canonical.renamed ? { renamed_from: body.alias } : {}) }, taskNetId);
+      if (target.state === "online") {
+        pushEvent(targetAlias, { type: "new_task", inbox_count: pending?.cnt ?? 1, priority: body.priority, from: fromSession, ...(canonical.renamed ? { renamed_from: body.alias } : {}) }, taskNetId);
+      }
       // #212 — stamp the dedup index only after the inbox/tasks insert
       // succeeds. Mirrors the MCP `send_task` path so a failed write
       // never shadows a legitimate retry.
       sharedSendDedup.record(fromSession, targetAlias, body.task);
+      if (target.state === "offline") {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "alias_offline",
+          message: target.message,
+          alias: targetAlias,
+          queued: true,
+          task_id: id,
+          message_id: id,
+          session_status: target.session.status ?? "offline",
+          ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
+        }, { status: 202 }));
+      }
       return withCors(req, Response.json({ ok: true, task_id: id, message_id: id, ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}) }));
     }
 

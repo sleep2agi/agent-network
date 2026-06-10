@@ -22,10 +22,10 @@ Contracts pinned:
    cancel_task always writes 'cancelled'
    Future new terminal (e.g. 'timeout') needs enum + state-machine update.
 
-2. Terminal-state non-reversibility (with quirk):
-   - send_reply on terminal: silent no-op (response.ok=true, task unchanged)
+2. Terminal-state non-reversibility:
+   - send_reply on terminal: structured error (response.ok=false,
+     error=reply_task_terminal), task unchanged
    - cancel_task on terminal: ok:false (changes=0 path)
-   Inconsistent behavior pinned for maintainer to decide later.
 
 3. Cancelled inbox auto-acked:
    cancel_task also runs `UPDATE inbox SET acked=1 WHERE id=task_id`
