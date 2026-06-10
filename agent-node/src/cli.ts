@@ -20,6 +20,12 @@ import { parseGoalCommand } from "./goals/parser";
 import { GoalStore, newGoal } from "./goals/store";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
+import {
+  CommHubError,
+  classifyCommHubResponse,
+  PendingReplyQueue,
+  type PendingReply,
+} from "./reply-reliability";
 
 const home = homedir();
 
@@ -461,6 +467,11 @@ const warn = (msg: string) => _log("warn", 2, msg);
 const error = (msg: string) => _log("error", 3, msg);
 
 // ── CommHub MCP 调用 (with retry) ──
+//
+// #168 RC-B1 + RC-B2 fix. Error classification + payload parsing lives
+// in ./reply-reliability.ts so it can be unit-tested without spinning up
+// agent-node. This wrapper drives the classifier through the actual HTTP
+// transport with exponential backoff.
 async function callCommHub(method: string, params: Record<string, unknown>, retries = 3) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -481,17 +492,32 @@ async function callCommHub(method: string, params: Record<string, unknown>, retr
           params: { name: method, arguments: params },
         }),
       });
-      if (!res.ok && attempt < retries) {
-        lastErr = new Error(`HTTP ${res.status}`);
-        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
-        continue;
+      if (!res.ok) {
+        if (attempt < retries) {
+          lastErr = new Error(`HTTP ${res.status}`);
+          debug(`callCommHub(${method}) HTTP ${res.status}, retrying...`);
+          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+          continue;
+        }
+        throw new CommHubError(`callCommHub(${method}) HTTP ${res.status} after ${retries} retries`, { code: res.status });
       }
       const raw = await res.text();
       const match = raw.match(/data: (.+)/);
       const data = match ? JSON.parse(match[1]) : JSON.parse(raw);
-      const text = data?.result?.content?.[0]?.text;
-      return text ? JSON.parse(text) : data;
+      const classified = classifyCommHubResponse(data);
+      if (classified.kind === "ok") return classified.payload;
+      if (classified.kind === "appLevel") throw classified.error;
+      // Retryable failure — backoff and try again.
+      if (attempt < retries) {
+        lastErr = classified.error;
+        debug(`callCommHub(${method}) ${classified.error.message}, retrying...`);
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        continue;
+      }
+      throw classified.error;
     } catch (e: any) {
+      // App-level CommHubError is non-retryable; propagate immediately.
+      if (e instanceof CommHubError && e.appLevel) throw e;
       lastErr = e;
       if (attempt < retries) {
         debug(`callCommHub(${method}) attempt ${attempt + 1} failed: ${e.message}, retrying...`);
@@ -537,8 +563,87 @@ const reportStatus = (status: string, task?: string) => callCommHub("report_stat
 });
 const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 20 }))?.messages || [];
 const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
-const sendReply = (target: string, message: string, taskId?: string, failed = false) =>
-  callCommHub("send_reply", { alias: target, text: message, from_session: ALIAS, in_reply_to: taskId || undefined, status: failed ? "failed" : "replied" });
+
+// #168 RC-B1 + RC-B2 + RC-C fix: structured sendReply.
+//
+// Returns { delivered: true, reply_id } on success; throws otherwise. The
+// throw lets `processInbox()` distinguish "the reply went through" from
+// "we need to escalate to the retry-queue" — the prior fire-and-forget
+// shape resolved to undefined in both cases and silently lost reply
+// failures (see #168 paste from designer-poster incident 2026-05-21).
+async function sendReply(
+  target: string,
+  message: string,
+  taskId?: string,
+  failed = false,
+): Promise<{ delivered: true; reply_id?: string; payload: any }> {
+  const result = await callCommHub("send_reply", {
+    alias: target,
+    text: message,
+    from_session: ALIAS,
+    in_reply_to: taskId || undefined,
+    status: failed ? "failed" : "replied",
+  });
+  // callCommHub now throws on every failure shape (transport, JSON-RPC
+  // error envelope, MCP isError, app-level ok:false). Reaching here means
+  // the server accepted the reply. Surface the message id so the caller
+  // can log it for traceability.
+  return { delivered: true, reply_id: result?.message_id, payload: result };
+}
+
+// #168 RC-B1 retry-queue. When sendReply fails after retries we DO NOT
+// want the LLM to re-run the task (that would create the #212 storm
+// shape on a different axis), so we persist the *reply attempt* to disk
+// and drain it on the next SSE reconnect / process restart. The inbox
+// gets acked once the task is done; the queued reply takes over the
+// reliability contract from that point on.
+//
+// Queue + classifier live in ./reply-reliability.ts so they can be
+// unit-tested in isolation (see reply-reliability.test.ts).
+const PENDING_REPLIES_PATH = configFilePath
+  ? join(dirname(configFilePath), "pending-replies.json")
+  : "";
+const pendingReplies: PendingReplyQueue | null = PENDING_REPLIES_PATH
+  ? new PendingReplyQueue(PENDING_REPLIES_PATH)
+  : null;
+
+function persistPendingReply(entry: Omit<PendingReply, "attempts">): void {
+  if (!pendingReplies) return;
+  try {
+    pendingReplies.persist(entry);
+  } catch (e: any) {
+    error(`pending-replies: persist failed (${e.message})`);
+  }
+}
+
+function clearPendingReply(to: string, taskId?: string): void {
+  if (!pendingReplies || !taskId) return;
+  try {
+    pendingReplies.clear(to, taskId);
+  } catch (e: any) {
+    warn(`pending-replies: clear failed (${e.message})`);
+  }
+}
+
+async function drainPendingReplies(): Promise<void> {
+  if (!pendingReplies) return;
+  const items = pendingReplies.load();
+  if (!items.length) return;
+  debug(`pending-replies: draining ${items.length} entry/ies`);
+  const { delivered, dropped, requeued } = await pendingReplies.drain(async (entry) => {
+    await sendReply(entry.to, entry.text, entry.taskId, entry.failed);
+    log(`pending-replies: re-delivered to ${entry.to}${entry.taskId ? ` (task ${entry.taskId.slice(0, 8)})` : ""} after ${entry.attempts + 1} attempt(s)`);
+  });
+  if (dropped > 0) warn(`pending-replies: dropped ${dropped} entry/ies — server-side app-level rejection`);
+  if (requeued > 0) debug(`pending-replies: ${requeued} still queued for next drain`);
+}
+
+// #168 inflight guard — prevents `processInbox()` re-entering for the same
+// message id across SSE-rapid-fire events. Without this, two new_task
+// pushes inside the same processInbox tick can both pull the same row
+// from `get_inbox` (it's only marked acked when ack_inbox lands) and
+// trigger the LLM twice.
+const inflightMessageIds = new Set<string>();
 
 function isGoalCommand(content: string): boolean {
   return /^\s*\/(?:goal|loop)\b/i.test(content || "");
@@ -1621,55 +1726,124 @@ function shouldSkipMessage(from: string, content: string, msgType?: string): str
 }
 
 // ── Inbox + SSE ──
+//
+// #168 — Reliable reply flow:
+//   1. Drain any queued pending replies first (carried over from a prior
+//      restart / SSE reconnect).
+//   2. Fetch fresh inbox.
+//   3. For each message:
+//      a. Inflight guard — skip if another tick is already handling this id.
+//      b. Run processTask (the side effect — LLM turn).
+//      c. Persist the would-be reply to disk FIRST. If we crash between
+//         here and step (e), restart will retry from the queue, not the
+//         inbox (which would re-run the LLM turn).
+//      d. Ack the inbox row. Done from the inbox's POV.
+//      e. Try sendReply. On success, clear from the queue. On transient
+//         failure, leave queued for the next drain. On app-level
+//         rejection (e.g. target offline, task closed), drop with a
+//         loud warn — retrying would not help.
 async function processInbox() {
+  // (1) Drain leftovers from previous runs.
+  await drainPendingReplies();
+
   const messages = await getInbox();
   if (!messages.length) return;
   for (const msg of messages) {
-    const from = msg.from_session || "hub";
-    const content = msg.content as string;
-    const msgType = msg.type || "task";
-    const images = extractImagePaths(msg);
-    log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""} ${content.slice(0, 100)}`);
-    await ackMessage(msg.id);
-
-    // Only process task and broadcast; skip reply/message types
-    if (msgType !== "task" && msgType !== "broadcast") {
-      debug(`skip non-task message: type=${msgType}`);
+    // (3a) Inflight guard.
+    if (inflightMessageIds.has(msg.id)) {
+      debug(`skip inflight message ${msg.id.slice(0, 8)}`);
       continue;
     }
-
-    const skip = shouldSkipMessage(from, content, msgType);
-    if (skip) { debug(`skip message from ${from}: ${skip}`); continue; }
-
-    if (isGoalCommand(content)) {
-      try {
-        const created = await createScheduledGoal(content, from, msg.id);
-        await sendReply(from, `[${ALIAS}] ${created}`, msg.id, false);
-        lastReplyTime[from] = Date.now();
-        log(`→ [${from}] goal created`);
-      } catch (e: any) {
-        await sendReply(from, `[${ALIAS}] /loop 创建失败：${e.message}`, msg.id, true);
-        log(`goal create failed: ${e.message}`);
-      }
-      continue;
-    }
-
-    const { text: result, failed } = await processTask(content, from, msg.id, images);
-    log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
-
-    // Low-value filter only applies to successful replies. Failures should
-    // ALWAYS be reported back so the user sees the actual error, not silence.
-    if (!failed && isLowValueText(result, true)) {
-      log(`skip reply: low-value (${result.slice(0, 30)})`);
-      continue;
-    }
-
+    inflightMessageIds.add(msg.id);
     try {
-      log(`sending reply to ${from} (task ${msg.id.slice(0, 8)}, status=${failed ? "failed" : "replied"})...`);
-      await sendReply(from, `[${ALIAS}] ${result.slice(0, 2000)}`, msg.id, failed);
-      lastReplyTime[from] = Date.now();
-      log(`→ [${from}] ${result.slice(0, 100)}`);
-    } catch (e: any) { warn(`reply failed: ${e.message}`); }
+      const from = msg.from_session || "hub";
+      const content = msg.content as string;
+      const msgType = msg.type || "task";
+      const images = extractImagePaths(msg);
+      log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""} ${content.slice(0, 100)}`);
+
+      // Non-task / non-broadcast: ack and move on, nothing to reply to.
+      if (msgType !== "task" && msgType !== "broadcast") {
+        debug(`skip non-task message: type=${msgType}`);
+        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for non-task ${msg.id.slice(0, 8)}: ${e.message}`));
+        continue;
+      }
+
+      const skip = shouldSkipMessage(from, content, msgType);
+      if (skip) {
+        debug(`skip message from ${from}: ${skip}`);
+        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for skipped ${msg.id.slice(0, 8)}: ${e.message}`));
+        continue;
+      }
+
+      if (isGoalCommand(content)) {
+        let replyText: string;
+        let goalFailed = false;
+        try {
+          const created = await createScheduledGoal(content, from, msg.id);
+          replyText = `[${ALIAS}] ${created}`;
+        } catch (e: any) {
+          replyText = `[${ALIAS}] /loop 创建失败：${e.message}`;
+          goalFailed = true;
+        }
+        await deliverReplyReliably(from, replyText, msg.id, goalFailed);
+        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for goal ${msg.id.slice(0, 8)}: ${e.message}`));
+        continue;
+      }
+
+      // (3b) Run the LLM turn.
+      const { text: result, failed } = await processTask(content, from, msg.id, images);
+      log(`processTask returned: "${result.slice(0, 80)}" (${result.length} chars, failed=${failed})`);
+
+      // Low-value successful replies are dropped (preserve previous
+      // behaviour — codex / claude often emit "done." / "✅" for trivial
+      // confirmations). Failures ALWAYS surface so the dispatcher sees
+      // the real error instead of silence.
+      if (!failed && isLowValueText(result, true)) {
+        log(`skip reply: low-value (${result.slice(0, 30)})`);
+        await ackMessage(msg.id).catch((e: any) => warn(`ack failed for low-value ${msg.id.slice(0, 8)}: ${e.message}`));
+        continue;
+      }
+
+      // (3c-e) Persist + ack + try send.
+      const replyBody = `[${ALIAS}] ${result.slice(0, 2000)}`;
+      await deliverReplyReliably(from, replyBody, msg.id, failed);
+      await ackMessage(msg.id).catch((e: any) => warn(`ack failed for ${msg.id.slice(0, 8)}: ${e.message}`));
+    } finally {
+      inflightMessageIds.delete(msg.id);
+    }
+  }
+}
+
+// Helper used by both the goal-command path and the LLM-driven task path.
+// Wraps the "persist → try send → clear-or-leave-queued" sequence into a
+// single call. Always persists FIRST so a crash between persist and the
+// actual send still results in eventual delivery on the next drain.
+async function deliverReplyReliably(
+  target: string,
+  body: string,
+  taskId: string,
+  failed: boolean,
+): Promise<void> {
+  // Persist BEFORE attempting — crash safety. Attempts=0 means "not yet
+  // tried"; drainPendingReplies increments on each failed retry.
+  persistPendingReply({ to: target, text: body, taskId, failed, queuedAt: Date.now() });
+  log(`sending reply to ${target} (task ${taskId.slice(0, 8)}, status=${failed ? "failed" : "replied"})...`);
+  try {
+    await sendReply(target, body, taskId, failed);
+    clearPendingReply(target, taskId);
+    lastReplyTime[target] = Date.now();
+    log(`→ [${target}] ${body.slice(0, 100)}`);
+  } catch (e: any) {
+    if (e instanceof CommHubError && e.appLevel) {
+      // Server told us "no" with a structured reason. Drop and log
+      // loudly so the operator can see it.
+      warn(`reply rejected by server for ${target} (task ${taskId.slice(0, 8)}): ${e.message}`);
+      clearPendingReply(target, taskId);
+      return;
+    }
+    // Transient — leave in queue, drainPendingReplies will retry.
+    warn(`reply failed for ${target} (task ${taskId.slice(0, 8)}): ${e.message} — queued for retry`);
   }
 }
 
