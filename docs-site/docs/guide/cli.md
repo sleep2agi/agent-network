@@ -159,8 +159,8 @@ npm install -g @sleep2agi/agent-network
 | `anet config` | **只读**查看 `~/.anet/config.json` 内容（`anet config path` 打印路径，`anet config json` 输出 raw JSON）。修改走 `anet login` / `anet init` / `anet network use`，不是 `anet config --set`。verify [`cli.ts:5670-5702 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5670) |
 | `anet upgrade` | 打印升级计划（self-upgrade 默认关闭，避免升级中替换正在运行的 CLI 进程；给出手动步骤）。完整指南见 [升级指南](/guide/upgrade) |
 | `anet create --batch` / `anet batch <verb>` | 批量起 N 个 agent（prefix 自动编号 + 独立 workdir/config/tmux），再用 `anet batch list/start/stop/restart/cleanup` 统一管 lifecycle。详见 [批量 Agent](/guide/batch) |
-| `anet license` | v0.6 legacy 命令，查看 trial / license 状态。**Apache 2.0 OSS 后不再需要**；Hub 仍保留 `licenses` 表 + `send_task` 14 天 trial 检查做后向兼容 |
-| `anet activate <key>` | v0.6 legacy，写入 pro license key。**Apache 2.0 OSS 后不再需要**；用于命中 `license_expired` 兜底，见 [troubleshooting](/troubleshooting) |
+| `anet license` | v0.6 legacy。**Apache 2.0 OSS 用户无需操作**：命令仍存在并会返回类似 `License: PRO / Expires <date>`，那只是 Hub 端 v0.6 trial 表 14 天滚动续期的后向兼容回显，**跟你 OSS 用法无关**，可直接忽略（清理排在 v0.11+）|
+| `anet activate <key>` | v0.6 legacy。**Apache 2.0 OSS 用户无需操作**；写 pro license key 用，仅用于命中 `license_expired` 时的兜底, 见 [troubleshooting](/troubleshooting)。|
 | `anet session ls` | 列出当前项目下的 Claude Code session（`claude-code-cli` runtime 用） |
 | `anet import [alias]` | 从 CommHub 把 claude-code agent 的 session 导入为本地 `.anet/nodes/<alias>/config.json`（不传 alias 则导入全部） |
 | `anet run` | 用 Client SDK 起一个**极简 standalone SSE agent**：连 hub、监听 task、自动 echo「收到」回复 —— **不跑 LLM**。需 `--alias`，可选 `--hub`。跟 `anet node start`（跑真实 AI runtime）不同，`anet run` 只是最小连通性 demo。verify [`cli.ts:2044 runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2044) |
@@ -371,6 +371,12 @@ anet node create 翻译官 --runtime claude-agent-sdk --model <minimax-model-id>
 
 > v0.9.0 短暂引入过「默认 detached tmux」行为（[#122](https://github.com/sleep2agi/agent-network/issues/122)），v0.9.2 通过 [#136](https://github.com/sleep2agi/agent-network/issues/136) 回退 —— detached tmux 触发了 macOS bun `setRawMode errno 5`（detached child 的 stdio 不是 real PTY，claude-code-cli setRawMode 调用失败）。现在的 `--tmux` 走 **attached** 模式（`tmux new -As`），PTY chain 保持完整不再触发 bug。
 
+::: tip 想 re-attach 到已跑的 tmux 节点？
+当前没有顶层 `anet attach <alias>` 子命令（[#121](https://github.com/sleep2agi/agent-network/issues/121) 计划中, 未实施）。re-attach 用：
+- `tmux a -t <alias>` —— 直接 tmux 命令
+- 或 `anet node start <alias> --tmux` —— `--tmux` flag 用 `tmux new -As`, session 已存在直接 attach
+:::
+
 ```bash
 anet node start <name> [options]
 ```
@@ -556,12 +562,6 @@ anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y
 **联动 #115**：每个内层 `anet node start` spawn 跑 [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35)，env 自动注入 `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` 跳过 Claude Code resume prompt —— 22 节点 reboot 后 `anet project up` 是真正的**零键盘恢复**。
 
 > ⚠ v0.9.2 起 `anet node start` 默认前台（[#136](https://github.com/sleep2agi/agent-network/issues/136)）。`anet project up` 仍走 detached tmux 起 N 个节点的内层 `anet node start <alias>`，在 macOS bun 下可能再触发 `setRawMode errno 5`（同 #136 根因）—— 受影响用户改用 `tmux new -s mybox` 然后顺序 `anet node start <alias> --tmux` 起每个节点。批量 detached 路径的修复跟进见 #136 follow-up。
-
-### anet attach
-
-> ⏳ **状态：[#121](https://github.com/sleep2agi/agent-network/issues/121) 待实施**（P2，预计 v0.9.x post-release 补）
-
-设计目标：`anet attach <alias>` = 一行命令 attach 到 alias 对应的 detached tmux session，等价于 `tmux attach -t <alias>` 但带 alias→tmux session 名解析（处理 `node_id` 引用 / 别名规范化）。当前请直接用 `tmux a -t <alias>` 或 `anet node start <alias> --tmux`（v0.9.2 起的 `--tmux` flag 用 `tmux new -As`，已存在 session 直接 attach；见 [#136](https://github.com/sleep2agi/agent-network/issues/136)）。
 
 ### anet network invite
 

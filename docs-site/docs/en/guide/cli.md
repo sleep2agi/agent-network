@@ -159,8 +159,8 @@ Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / 
 | `anet config` | **Read-only** view of `~/.anet/config.json` (`anet config path` prints the path, `anet config json` prints raw JSON). To modify config, use `anet login` / `anet init` / `anet network use` — there is no `anet config --set`. Verified at [`cli.ts:5670-5702 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5670). |
 | `anet upgrade` | Prints an upgrade plan (self-upgrade is disabled by default to avoid replacing the running CLI process mid-run; gives manual steps). Full guide: [Upgrade Guide](/en/guide/upgrade) |
 | `anet create --batch` / `anet batch <verb>` | Spin up N agents in bulk (auto-numbered prefix + separate workdir/config/tmux), then manage their lifecycle with `anet batch list/start/stop/restart/cleanup`. See [Batch Agents](/en/guide/batch) |
-| `anet license` | v0.6 legacy: view trial / license status. **No longer needed after Apache 2.0 OSS**; Hub keeps the `licenses` table + `send_task` 14-day trial check for backward-compat |
-| `anet activate <key>` | v0.6 legacy: write a pro license key. **No longer needed after Apache 2.0 OSS**; last-resort fix for `license_expired` — see [troubleshooting](/en/troubleshooting) |
+| `anet license` | v0.6 legacy. **Apache 2.0 OSS users don't need to do anything here**: the command still exists and returns something like `License: PRO / Expires <date>`, but that's just the Hub-side v0.6 trial-table rolling 14-day renewal echoing back for backward-compat — **it has nothing to do with your OSS usage**, ignore it (full cleanup queued for v0.11+). |
+| `anet activate <key>` | v0.6 legacy. **Apache 2.0 OSS users don't need to do anything here**; only used to write a pro license key as a last-resort fix when you hit `license_expired` — see [troubleshooting](/en/troubleshooting). |
 | `anet session ls` | List Claude Code sessions in the current project (for the `claude-code-cli` runtime) |
 | `anet import [alias]` | Import claude-code agent sessions from CommHub into local `.anet/nodes/<alias>/config.json` (imports all if no alias is given) |
 | `anet run` | Starts a **minimal standalone SSE agent** via the Client SDK: connects to the hub, listens for tasks, and auto-echoes a "received" reply — **no LLM**. Requires `--alias`, `--hub` optional. Unlike `anet node start` (which runs a real AI runtime), `anet run` is just a minimal connectivity demo. Verify [`cli.ts:2044 runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2044) |
@@ -365,6 +365,12 @@ Start an agent node. **Default is foreground** (stdio inherits the current termi
 
 > v0.9.0 briefly introduced an "auto-wrap into detached tmux" default ([#122](https://github.com/sleep2agi/agent-network/issues/122)). v0.9.2 reverts it via [#136](https://github.com/sleep2agi/agent-network/issues/136) — detached tmux triggered `setRawMode errno 5` on macOS bun (the detached child's stdio isn't a real PTY, claude-code-cli's setRawMode call failed). The new `--tmux` path is **attached** (`tmux new -As`), keeping the PTY chain intact so setRawMode works everywhere.
 
+::: tip Want to re-attach to a running tmux node?
+There is no top-level `anet attach <alias>` subcommand today ([#121](https://github.com/sleep2agi/agent-network/issues/121) is planned, not yet implemented). To re-attach:
+- `tmux a -t <alias>` — direct tmux command
+- or `anet node start <alias> --tmux` — the `--tmux` flag uses `tmux new -As`, which attaches if the session already exists
+:::
+
 ```bash
 anet node start <name> [options]
 ```
@@ -550,12 +556,6 @@ anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y
 **Pairs with #115**: every inner `anet node start` is spawned by [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35); `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` is auto-injected to skip Claude Code's resume prompt — recovering 22 nodes after reboot via `anet project up` is genuine **zero-keystroke recovery**.
 
 > ⚠ Since v0.9.2 `anet node start` defaults to foreground ([#136](https://github.com/sleep2agi/agent-network/issues/136)). `anet project up` still spawns each node into a detached tmux session as before, which can re-trigger `setRawMode errno 5` on macOS bun (same root cause as #136) — affected users should pre-create a `tmux new -s mybox` then sequentially run `anet node start <alias> --tmux` per node. Tracking issue for the bulk-detached path: #136 follow-up.
-
-### anet attach
-
-> ⏳ **Status: [#121](https://github.com/sleep2agi/agent-network/issues/121) not yet implemented** (P2; expected v0.9.x post-release)
-
-Design goal: `anet attach <alias>` = single-command attach to the detached tmux session for that alias — equivalent to `tmux attach -t <alias>` but with alias→tmux-session-name resolution (handles `node_id` references / alias normalization). For now use `tmux a -t <alias>` directly, or `anet node start <alias> --tmux` (the v0.9.2 `--tmux` flag uses `tmux new -As` which attaches if the session already exists — see [#136](https://github.com/sleep2agi/agent-network/issues/136)).
 
 ### anet network invite
 
