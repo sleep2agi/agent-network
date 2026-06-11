@@ -29,10 +29,26 @@ export type OutboundTaskRow = {
   content: string;
   status?: string;
   created_at?: string;
+  /** #146 PR-4 — populated by PR-1 servers (commit 2dc166c, ≥ 0.8.6-preview.0).
+   * Older servers omit this field. The client-side filter prefers this
+   * over `from_name` when both are available so a renamed node still
+   * recognises its own pre-rename outbound rows. */
+  from_node_id?: string;
+  /** Pre-existing field. Used by the client-side filter when
+   * `from_node_id` is absent (older server) and as a tertiary fallback
+   * elsewhere. */
+  from_name?: string;
 };
 
 export type ListTasksHook = (params: {
-  from_name: string;
+  // #146 PR-4 — prefer from_node_id (immutable) so a rename of this node
+  // doesn't make the resume hint miss old-alias-period dispatches. The
+  // commhub-server `list_tasks` MCP tool accepts both filters since PR #224
+  // (2dc166c); for callers running against an older server that only
+  // knows `from_name`, we keep `from_name` in the param shape so the
+  // request falls back gracefully when from_node_id is absent.
+  from_node_id?: string;
+  from_name?: string;
   limit: number;
 }) => Promise<{ tasks?: OutboundTaskRow[] } | null | undefined>;
 
@@ -47,6 +63,20 @@ export type FetchOptions = {
   topN?: number;
   /** Max rows to fetch from `list_tasks` before client-side filter. */
   limit?: number;
+  /**
+   * #146 PR-4 二审 — capability gate for the `from_node_id` filter.
+   * When `true`, send `from_node_id` (PR-1 / commit 2dc166c on the
+   * server, server version ≥ 0.8.6-preview.0). When `false` or
+   * `undefined`, fall back to `from_name` to avoid the old-server
+   * gotcha where an unknown query param is silently ignored and the
+   * tasks list comes back unfiltered, polluting the hint with foreign
+   * sender rows.
+   *
+   * Regardless of this flag, every returned row is double-checked
+   * client-side against the caller's identity — defence in depth
+   * against a server bug or a future schema change.
+   */
+  serverSupportsFromNodeId?: boolean;
 };
 
 /**
@@ -58,15 +88,55 @@ export type FetchOptions = {
  * run normally.
  */
 export async function fetchUnresolvedOutbound(
-  selfAlias: string,
+  selfIdentity: { nodeId?: string | null; alias: string },
   listTasks: ListTasksHook,
   opts: FetchOptions = {},
 ): Promise<OutboundTaskRow[]> {
   const limit = Math.max(1, Math.min(100, opts.limit ?? 100));
   const topN = Math.max(1, Math.min(50, opts.topN ?? 10));
   try {
-    const resp = await listTasks({ from_name: selfAlias, limit });
+    // #146 PR-4 二审 — server-version-gated parameter selection.
+    //   * Use `from_node_id` ONLY when the server explicitly advertises
+    //     support for it (capability probe at boot, see cli.ts /health
+    //     version check). Without the probe, the param flows through
+    //     to a pre-PR-1 server which silently ignores unknown query
+    //     params and returns ALL of this user's outbound tasks — the
+    //     resume hint would then pollute the LLM context with other
+    //     nodes' outbound traffic.
+    //   * On the alias path we still rely on `from_name`. We never
+    //     send both filters together — that would AND-filter
+    //     server-side, missing pre-rename rows whose from_name is the
+    //     old alias.
+    const canUseNodeId =
+      opts.serverSupportsFromNodeId === true && !!selfIdentity.nodeId;
+    const params = canUseNodeId
+      ? { from_node_id: selfIdentity.nodeId!, limit }
+      : { from_name: selfIdentity.alias, limit };
+    const resp = await listTasks(params);
     const tasks = Array.isArray(resp?.tasks) ? resp!.tasks! : [];
+
+    // Client-side filter — defense in depth (per 通信牛 二审 amend).
+    //
+    // Even when we sent `from_node_id`, a server bug, a misconfigured
+    // schema cache, or a stale build might return unrelated rows. So
+    // we re-check every row against our own identity:
+    //   - If the server populated `from_node_id`, demand it match ours.
+    //   - Otherwise (older server), demand `from_name` match our
+    //     current alias (the same string we'd be sending anyway).
+    // Anything that fails this check is dropped LOUDLY — but we
+    // can't loudly warn from a pure module, so the caller's wrapper
+    // (cli.ts processWithGrok onWarn) catches it through the discard
+    // count.
+    const matchesIdentity = (row: OutboundTaskRow): boolean => {
+      const rowNode = typeof row.from_node_id === "string" ? row.from_node_id : "";
+      const rowAlias = typeof row.from_name === "string" ? row.from_name : "";
+      if (rowNode && selfIdentity.nodeId) return rowNode === selfIdentity.nodeId;
+      if (rowAlias) return rowAlias === selfIdentity.alias;
+      // Row has neither a populated from_node_id NOR from_name — be
+      // conservative and DROP it, we can't prove it's ours.
+      return false;
+    };
+
     return tasks
       .filter(
         (t): t is OutboundTaskRow =>
@@ -75,6 +145,7 @@ export async function fetchUnresolvedOutbound(
           typeof t.to_name === "string" &&
           (t.status === "delivered" || t.status === "started"),
       )
+      .filter(matchesIdentity)
       .slice(0, topN);
   } catch {
     return [];

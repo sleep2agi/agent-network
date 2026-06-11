@@ -23,23 +23,27 @@ import {
   type OutboundTaskRow,
 } from "./resume-hint";
 
+// Default factory rows ARE ours so the client-side identity filter
+// (added in PR-4 二审) lets them through; tests that exercise the
+// filter override `from_node_id` / `from_name` explicitly.
 const row = (over: Partial<OutboundTaskRow>): OutboundTaskRow => ({
   task_id: "tsk_default00000000",
   to_name: "alice",
   content: "default content",
   status: "delivered",
   created_at: "2026-06-10 09:00:00",
+  from_name: "self",
   ...over,
 });
 
 describe("fetchUnresolvedOutbound", () => {
   test("returns empty array when the hub has no outbound rows for this sender", async () => {
-    const result = await fetchUnresolvedOutbound("self", async () => ({ tasks: [] }));
+    const result = await fetchUnresolvedOutbound({ alias: "self" }, async () => ({ tasks: [] }));
     expect(result).toEqual([]);
   });
 
   test("filters to only delivered/started status", async () => {
-    const result = await fetchUnresolvedOutbound("self", async () => ({
+    const result = await fetchUnresolvedOutbound({ alias: "self" }, async () => ({
       tasks: [
         row({ task_id: "tsk_a", status: "delivered" }),
         row({ task_id: "tsk_b", status: "started" }),
@@ -55,33 +59,108 @@ describe("fetchUnresolvedOutbound", () => {
     const tasks = Array.from({ length: 25 }, (_, i) =>
       row({ task_id: `tsk_${i.toString().padStart(2, "0")}`, status: "delivered" }),
     );
-    const result = await fetchUnresolvedOutbound("self", async () => ({ tasks }), { topN: 5 });
+    const result = await fetchUnresolvedOutbound({ alias: "self" }, async () => ({ tasks }), { topN: 5 });
     expect(result).toHaveLength(5);
     expect(result.map((r) => r.task_id)).toEqual(["tsk_00", "tsk_01", "tsk_02", "tsk_03", "tsk_04"]);
   });
 
-  test("forwards the sender alias and a sane limit to the listTasks hook", async () => {
+  test("forwards the sender alias and a sane limit to the listTasks hook (no node_id fallback path)", async () => {
     let seen: any = null;
-    await fetchUnresolvedOutbound("通信SDK马", async (params) => {
+    await fetchUnresolvedOutbound({ alias: "通信SDK马" }, async (params) => {
       seen = params;
       return { tasks: [] };
     });
     expect(seen.from_name).toBe("通信SDK马");
+    expect(seen.from_node_id).toBeUndefined(); // alias-only path
     expect(seen.limit).toBeGreaterThan(0);
     expect(seen.limit).toBeLessThanOrEqual(100);
   });
 
+  test("#146 PR-4 二审 — sends from_node_id ONLY when probe confirmed server supports it", async () => {
+    let seen: any = null;
+    await fetchUnresolvedOutbound(
+      { nodeId: "node-immutable-x", alias: "current-alias" },
+      async (params) => {
+        seen = params;
+        return { tasks: [] };
+      },
+      { serverSupportsFromNodeId: true },
+    );
+    expect(seen.from_node_id).toBe("node-immutable-x");
+    // We intentionally DO NOT send from_name when from_node_id is set —
+    // sending both would AND-filter on the server side, missing
+    // pre-rename rows whose from_name was the old alias.
+    expect(seen.from_name).toBeUndefined();
+    expect(seen.limit).toBeGreaterThan(0);
+  });
+
+  test("#146 PR-4 二审 — without probe confirmation, never sends from_node_id (old-server safety)", async () => {
+    let seen: any = null;
+    // Same identity tuple, but no `serverSupportsFromNodeId: true` opt.
+    // A pre-PR-1 commhub silently ignores unknown query params and
+    // returns the full user-scoped tasks list, so sending from_node_id
+    // would let foreign rows into the resume hint. Default to the
+    // safe legacy alias path.
+    await fetchUnresolvedOutbound(
+      { nodeId: "node-x", alias: "current-alias" },
+      async (params) => {
+        seen = params;
+        return { tasks: [] };
+      },
+    );
+    expect(seen.from_node_id).toBeUndefined();
+    expect(seen.from_name).toBe("current-alias");
+  });
+
+  test("#146 PR-4 二审 — when probe explicitly returned false, falls back even with node_id available", async () => {
+    let seen: any = null;
+    await fetchUnresolvedOutbound(
+      { nodeId: "node-x", alias: "current-alias" },
+      async (params) => {
+        seen = params;
+        return { tasks: [] };
+      },
+      { serverSupportsFromNodeId: false },
+    );
+    expect(seen.from_node_id).toBeUndefined();
+    expect(seen.from_name).toBe("current-alias");
+  });
+
+  test("#146 PR-4 — empty / null nodeId falls back to from_name path", async () => {
+    let seen: any = null;
+    await fetchUnresolvedOutbound(
+      { nodeId: "", alias: "self" },
+      async (params) => {
+        seen = params;
+        return { tasks: [] };
+      },
+    );
+    expect(seen.from_node_id).toBeUndefined();
+    expect(seen.from_name).toBe("self");
+
+    seen = null;
+    await fetchUnresolvedOutbound(
+      { nodeId: null, alias: "self" },
+      async (params) => {
+        seen = params;
+        return { tasks: [] };
+      },
+    );
+    expect(seen.from_node_id).toBeUndefined();
+    expect(seen.from_name).toBe("self");
+  });
+
   test("graceful fallback when list_tasks throws — returns empty, does not propagate", async () => {
-    const result = await fetchUnresolvedOutbound("self", async () => {
+    const result = await fetchUnresolvedOutbound({ alias: "self" }, async () => {
       throw new Error("hub unreachable, ECONNREFUSED");
     });
     expect(result).toEqual([]);
   });
 
   test("graceful fallback for malformed payloads — non-array tasks", async () => {
-    const result1 = await fetchUnresolvedOutbound("self", async () => ({ tasks: "not an array" as any }));
-    const result2 = await fetchUnresolvedOutbound("self", async () => null);
-    const result3 = await fetchUnresolvedOutbound("self", async () => undefined);
+    const result1 = await fetchUnresolvedOutbound({ alias: "self" }, async () => ({ tasks: "not an array" as any }));
+    const result2 = await fetchUnresolvedOutbound({ alias: "self" }, async () => null);
+    const result3 = await fetchUnresolvedOutbound({ alias: "self" }, async () => undefined);
     expect(result1).toEqual([]);
     expect(result2).toEqual([]);
     expect(result3).toEqual([]);
@@ -89,11 +168,95 @@ describe("fetchUnresolvedOutbound", () => {
 
   test("clamps absurd opts: topN > 50 is capped, limit > 100 is capped", async () => {
     let seen: any = null;
-    await fetchUnresolvedOutbound("self", async (p) => {
+    await fetchUnresolvedOutbound({ alias: "self" }, async (p: any) => {
       seen = p;
       return { tasks: [] };
     }, { topN: 9999, limit: 9999 });
     expect(seen.limit).toBe(100);
+  });
+
+  // ── #146 PR-4 二审 — client-side identity filter (defence in depth) ──
+  //
+  // Even with the capability probe in place, a buggy server / a future
+  // schema change / a stale build could return rows whose sender is
+  // NOT us. The resume hint MUST filter those out client-side or the
+  // LLM context gets polluted with foreign outbound traffic (which
+  // would then trigger the #212 dedup against the wrong target, etc.).
+
+  test("二审 — drops rows whose from_node_id does not match ours (server bug defence)", async () => {
+    const result = await fetchUnresolvedOutbound(
+      { nodeId: "ours-x", alias: "our-alias" },
+      async () => ({
+        tasks: [
+          row({ task_id: "tsk_ours", from_node_id: "ours-x", from_name: "our-alias", status: "delivered" }),
+          row({ task_id: "tsk_other", from_node_id: "someone-elses-node", from_name: "other-alias", status: "delivered" }),
+          row({ task_id: "tsk_third", from_node_id: "third-node", from_name: "third", status: "delivered" }),
+        ],
+      }),
+      { serverSupportsFromNodeId: true },
+    );
+    expect(result.map((r) => r.task_id)).toEqual(["tsk_ours"]);
+  });
+
+  test("二审 — when row has no from_node_id, falls back to from_name match", async () => {
+    const result = await fetchUnresolvedOutbound(
+      { nodeId: "ours-x", alias: "our-alias" },
+      async () => ({
+        tasks: [
+          row({ task_id: "tsk_ours_oldserver", from_name: "our-alias", status: "delivered" }),
+          row({ task_id: "tsk_foreign_oldserver", from_name: "other-alias", status: "delivered" }),
+        ],
+      }),
+      { serverSupportsFromNodeId: false },
+    );
+    expect(result.map((r) => r.task_id)).toEqual(["tsk_ours_oldserver"]);
+  });
+
+  test("二审 — drops rows with NEITHER from_node_id nor from_name (conservative)", async () => {
+    const result = await fetchUnresolvedOutbound(
+      { nodeId: "ours-x", alias: "our-alias" },
+      async () => ({
+        tasks: [
+          // Both identifiers missing — can't prove ownership, drop.
+          row({ task_id: "tsk_unidentified", from_node_id: undefined as any, from_name: undefined as any, status: "delivered" }),
+          // Just ours, kept.
+          row({ task_id: "tsk_ours", from_node_id: "ours-x", from_name: "our-alias", status: "delivered" }),
+        ],
+      }),
+      { serverSupportsFromNodeId: true },
+    );
+    expect(result.map((r) => r.task_id)).toEqual(["tsk_ours"]);
+  });
+
+  test("二审 — prefers from_node_id over from_name when both present (handles rename correctly)", async () => {
+    // After rename: from_node_id is still ours-x, from_name is the
+    // OLD alias (server hasn't backfilled or this row predates
+    // rename). The row IS ours.
+    const result = await fetchUnresolvedOutbound(
+      { nodeId: "ours-x", alias: "new-alias" },
+      async () => ({
+        tasks: [
+          row({ task_id: "tsk_prerename_ours", from_node_id: "ours-x", from_name: "old-alias", status: "delivered" }),
+        ],
+      }),
+      { serverSupportsFromNodeId: true },
+    );
+    expect(result.map((r) => r.task_id)).toEqual(["tsk_prerename_ours"]);
+  });
+
+  test("二审 — when WE have no nodeId, identity check uses from_name only", async () => {
+    // Pre-PR-3 environment: COMMHUB_NODE_ID env not set, so our nodeId
+    // is empty. We can only assert identity by alias matching.
+    const result = await fetchUnresolvedOutbound(
+      { nodeId: null, alias: "lonely-alias" },
+      async () => ({
+        tasks: [
+          row({ task_id: "tsk_ours", from_name: "lonely-alias", status: "delivered" }),
+          row({ task_id: "tsk_other", from_name: "someone", status: "delivered" }),
+        ],
+      }),
+    );
+    expect(result.map((r) => r.task_id)).toEqual(["tsk_ours"]);
   });
 });
 
