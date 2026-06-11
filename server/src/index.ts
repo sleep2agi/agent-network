@@ -7,6 +7,22 @@ import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
+import {
+  FILE_ID_REGEX,
+  MAX_REQUEST_CONTENT_LENGTH,
+  MAX_UPLOAD_BYTES,
+  buildStoragePath,
+  generateFileId,
+  getUploadsRoot,
+  indexEntryPath,
+  isPathInsideUploadsRoot,
+  sanitizeExt,
+  sharedUploadRateLimiter,
+  validateAttachments,
+  validateIndexEntry,
+} from "./uploads.js";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "fs";
+import { dirname as pathDirname } from "path";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -380,6 +396,10 @@ const TaskSchema = z.object({
   network_id: z.string().max(200).optional(),
   parent_task_id: z.string().max(200).optional(),
   ttl_seconds: z.number().min(1).max(86400).optional(),
+  // #221 — top-level attachments mirror the MCP send_task tool. They are
+  // merged into `meta.attachments` for persistence so the on-disk shape
+  // stays unified regardless of transport (REST or MCP).
+  attachments: z.any().optional(),
   meta: z.any().optional(),
 });
 
@@ -443,6 +463,13 @@ Bun.serve({
   port: PORT,
   hostname: HOST,
   idleTimeout: 255, // max value: keep SSE connections alive (seconds)
+  // #221 — defense-in-depth cap on the raw request body. The /api/upload
+  // handler also pre-checks Content-Length and post-checks parsed size
+  // against the documented 12 MiB cap (MAX_UPLOAD_BYTES); this knob
+  // simply guarantees Bun's own buffer won't grow past 13 MiB on any
+  // route. Default Bun ceiling is 128 MiB which is too permissive for
+  // a hub now exposed to the public internet.
+  maxRequestBodySize: MAX_REQUEST_CONTENT_LENGTH,
 
   async fetch(req, server) {
     const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -1197,6 +1224,222 @@ Bun.serve({
       }));
     }
 
+    // ── REST: file upload (#221) ──
+    // POST multipart/form-data with a single `file` field. Bearer auth.
+    // 12 MiB cap (two-stage: Content-Length pre-check + post-parse size
+    // verify). Returns { ok, file_id, path, url, size, mime }. The
+    // file_id is server-generated (crypto.randomUUID with hyphens
+    // stripped) so a client-supplied filename never enters the storage
+    // path. The download URL `/api/files/<file_id>` requires the same
+    // Bearer auth and forces Content-Disposition: attachment +
+    // X-Content-Type-Options: nosniff so uploaded files can never be
+    // executed or served as HTML.
+    if (url.pathname === "/api/upload" && req.method === "POST") {
+      const authErr = requireAuth(req);
+      if (authErr) return withCors(req, authErr);
+
+      // Rate-limit key prefers the token id (so 60/h is per-token, not
+      // per-IP); falls back to IP for legacy or anonymous-but-dev-open.
+      const authCtx = resolveRequestAuth(req);
+      const rateKey = authCtx?.tokenId ?? `ip:${getClientIP(req, server)}`;
+      const rate = sharedUploadRateLimiter.check(rateKey);
+      if (!rate.allowed) {
+        const headers: Record<string, string> = {
+          "X-RateLimit-Limit": String(60),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(Math.floor(rate.resetAt / 1000)),
+        };
+        if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
+        return withCors(req, new Response(
+          JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
+          { status: 429, headers: { ...headers, "Content-Type": "application/json" } },
+        ));
+      }
+
+      // Two-stage size cap per 通信龙 dispatch c38de7a9:
+      //   stage 1 — reject before reading body when Content-Length
+      //             exceeds the cap (saves bandwidth, fails fast)
+      //   stage 2 — re-verify the parsed File.size after Bun has parsed
+      //             the multipart envelope (defends against a missing
+      //             or lied Content-Length header)
+      const contentLength = req.headers.get("Content-Length");
+      if (!contentLength) {
+        return withCors(req, Response.json(
+          { ok: false, error: "length_required", message: "Content-Length header is required for /api/upload" },
+          { status: 411 },
+        ));
+      }
+      const declaredBytes = Number(contentLength);
+      if (!Number.isFinite(declaredBytes) || declaredBytes < 0) {
+        return withCors(req, Response.json({ ok: false, error: "bad_content_length" }, { status: 400 }));
+      }
+      if (declaredBytes > MAX_REQUEST_CONTENT_LENGTH) {
+        return withCors(req, Response.json(
+          { ok: false, error: "payload_too_large", message: `Upload exceeds the ${MAX_UPLOAD_BYTES} byte limit`, limit_bytes: MAX_UPLOAD_BYTES },
+          { status: 413 },
+        ));
+      }
+
+      const contentType = req.headers.get("Content-Type") ?? "";
+      if (!/^multipart\/form-data/i.test(contentType)) {
+        return withCors(req, Response.json(
+          { ok: false, error: "unsupported_media_type", message: "Use multipart/form-data with a 'file' field" },
+          { status: 415 },
+        ));
+      }
+
+      let form: FormData;
+      try {
+        form = await req.formData();
+      } catch (e: any) {
+        return withCors(req, Response.json(
+          { ok: false, error: "multipart_parse_failed", message: e?.message?.slice(0, 200) ?? "multipart parse failed" },
+          { status: 400 },
+        ));
+      }
+      const file = form.get("file");
+      if (!file || typeof file === "string") {
+        return withCors(req, Response.json(
+          { ok: false, error: "missing_file", message: "Expected a 'file' field with binary content" },
+          { status: 400 },
+        ));
+      }
+
+      // Stage 2 — re-verify parsed size against the documented cap.
+      if (file.size > MAX_UPLOAD_BYTES) {
+        return withCors(req, Response.json(
+          { ok: false, error: "payload_too_large", message: `Upload exceeds the ${MAX_UPLOAD_BYTES} byte limit`, limit_bytes: MAX_UPLOAD_BYTES, observed_bytes: file.size },
+          { status: 413 },
+        ));
+      }
+
+      const fileId = generateFileId();
+      const ext = sanitizeExt(file.name);
+      let storage;
+      try {
+        storage = buildStoragePath(fileId, ext);
+      } catch (e: any) {
+        // Should be unreachable — we generated the id ourselves — but
+        // surface as 500 if our own primitives reject our own input.
+        console.error("[/api/upload] buildStoragePath rejected:", e?.message);
+        return withCors(req, Response.json({ ok: false, error: "internal_path_error" }, { status: 500 }));
+      }
+
+      try {
+        mkdirSync(pathDirname(storage.absolutePath), { recursive: true });
+        const buf = Buffer.from(await file.arrayBuffer());
+        writeFileSync(storage.absolutePath, buf);
+        // Defense-in-depth: after writing, confirm the path still sits
+        // inside the uploads root (catches a symlink swap or root env
+        // poisoning across processes).
+        if (!isPathInsideUploadsRoot(storage.absolutePath)) {
+          // Refuse to acknowledge a write that landed outside the root.
+          // Don't try to clean up — better to keep evidence on disk than
+          // chase a symlink for cleanup.
+          console.error("[/api/upload] write escaped uploads root:", storage.absolutePath);
+          return withCors(req, Response.json({ ok: false, error: "internal_path_escape" }, { status: 500 }));
+        }
+
+        // Persist the index entry so /api/files/<file_id> can do an
+        // O(1) lookup without scanning every date bucket.
+        const idxPath = indexEntryPath(fileId);
+        if (idxPath) {
+          mkdirSync(pathDirname(idxPath), { recursive: true });
+          writeFileSync(idxPath, JSON.stringify({
+            file_id: fileId,
+            date_bucket: storage.dateBucket,
+            ext: storage.ext,
+            name: typeof file.name === "string" ? file.name.slice(0, 255) : "",
+            mime: typeof file.type === "string" ? file.type.slice(0, 100) : "application/octet-stream",
+            size: file.size,
+            owner: authCtx?.username ?? null,
+            owner_id: authCtx?.userId ?? null,
+            uploaded_at: new Date().toISOString(),
+          }, null, 2));
+        }
+      } catch (e: any) {
+        console.error("[/api/upload] write failed:", e?.message);
+        return withCors(req, Response.json({ ok: false, error: "write_failed", message: e?.message?.slice(0, 200) ?? "write failed" }, { status: 500 }));
+      }
+
+      return withCors(req, Response.json({
+        ok: true,
+        file_id: fileId,
+        path: storage.absolutePath,
+        url: `/api/files/${fileId}`,
+        size: file.size,
+        mime: typeof file.type === "string" ? file.type : "application/octet-stream",
+      }));
+    }
+
+    // ── REST: file download (#221) ──
+    // GET /api/files/:file_id with Bearer auth. Always forces
+    // Content-Disposition: attachment + X-Content-Type-Options: nosniff
+    // so the served file can never be executed or rendered as HTML.
+    // The file_id is validated against the same strict regex used at
+    // generation time before any filesystem access.
+    const fileMatch = url.pathname.match(/^\/api\/files\/(.+)$/);
+    if (fileMatch && req.method === "GET") {
+      const authErr = requireAuth(req);
+      if (authErr) return withCors(req, authErr);
+
+      const fileId = decodeURIComponent(fileMatch[1]);
+      if (!FILE_ID_REGEX.test(fileId)) {
+        return withCors(req, Response.json({ ok: false, error: "bad_file_id" }, { status: 400 }));
+      }
+
+      const idxPath = indexEntryPath(fileId);
+      if (!idxPath || !existsSync(idxPath)) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+
+      let entry: any;
+      try { entry = JSON.parse(readFileSync(idxPath, "utf-8")); } catch {
+        return withCors(req, Response.json({ ok: false, error: "index_corrupt" }, { status: 500 }));
+      }
+      if (!validateIndexEntry(entry)) {
+        return withCors(req, Response.json({ ok: false, error: "index_invalid" }, { status: 500 }));
+      }
+
+      let storage;
+      try {
+        storage = buildStoragePath(entry.file_id, entry.ext);
+      } catch {
+        return withCors(req, Response.json({ ok: false, error: "index_invalid" }, { status: 500 }));
+      }
+      if (!isPathInsideUploadsRoot(storage.absolutePath)) {
+        // Defence: should be unreachable since buildStoragePath rejected
+        // malformed inputs, but a poisoned index could try to fool us.
+        return withCors(req, Response.json({ ok: false, error: "path_escape" }, { status: 500 }));
+      }
+      if (!existsSync(storage.absolutePath)) {
+        return withCors(req, Response.json({ ok: false, error: "blob_missing" }, { status: 404 }));
+      }
+
+      // Defence: verify the on-disk size matches what the index claims
+      // before serving — a tampered index could otherwise mislead the
+      // caller about file integrity.
+      const st = statSync(storage.absolutePath);
+      if (st.size !== entry.size) {
+        console.error("[/api/files] size mismatch:", { fileId, indexed: entry.size, onDisk: st.size });
+        return withCors(req, Response.json({ ok: false, error: "size_mismatch" }, { status: 500 }));
+      }
+
+      const safeFilename = (entry.name && /^[\x20-\x7e]+$/.test(entry.name))
+        ? entry.name
+        : `${fileId}${entry.ext}`;
+      const blob = Bun.file(storage.absolutePath);
+      const responseHeaders: Record<string, string> = {
+        ...corsHeaders(req),
+        "Content-Type": "application/octet-stream", // always opaque; nosniff prevents the client from re-deciding
+        "Content-Length": String(entry.size),
+        "Content-Disposition": `attachment; filename="${safeFilename.replace(/"/g, "")}"`,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+      };
+      return new Response(blob, { status: 200, headers: responseHeaders });
+    }
+
     // ── REST: send task ──
     if (url.pathname === "/api/task" && req.method === "POST") {
       let raw: unknown;
@@ -1243,7 +1486,20 @@ Bun.serve({
       const id = crypto.randomUUID();
       const fromSession = body.from || "api";
       const ttlSeconds = (body as any).ttl_seconds || 3600;
-      const metaJson = normalizeMetaJson((body as any).meta);
+      // #221 — fold top-level `attachments` into `meta.attachments` so
+      // the REST and MCP send_task transports produce identical
+      // tasks.meta_json shape downstream. Top-level wins over any
+      // duplicate `meta.attachments` the client supplied. Validation
+      // matches the MCP-side schema (max 20 entries, file_id regex,
+      // size cap, etc.).
+      const attachmentsResult = validateAttachments((body as any).attachments ?? (body as any).meta?.attachments);
+      if (!attachmentsResult.ok) {
+        return withCors(req, Response.json({ ok: false, error: "bad_attachments", message: attachmentsResult.error }, { status: 400 }));
+      }
+      const mergedMeta = attachmentsResult.attachments.length
+        ? { ...((body as any).meta && typeof (body as any).meta === "object" ? (body as any).meta : {}), attachments: attachmentsResult.attachments }
+        : (body as any).meta;
+      const metaJson = normalizeMetaJson(mergedMeta);
 
       // #212 dedup guardrail. Mirrors the MCP `send_task` tool: same
       // (from_session, target_alias, task) within COMMHUB_SEND_DEDUP_WINDOW_MS
