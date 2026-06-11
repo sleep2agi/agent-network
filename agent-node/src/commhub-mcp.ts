@@ -130,18 +130,30 @@ export function injectAgentFromSession(toolName: string, args: unknown, agentAli
 //     → admin / hub-side; not exposing them to the LLM by default
 export async function createCommhubSdkMcpServer(
   hubUrl: string, token: string | undefined,
-  // #146 PR-4 — accept either a static string (legacy callers) or a
-  // getter function (the live-alias resolver path). The getter is
-  // called on every tool invocation so a rename committed on the
-  // server propagates to every commhub_send_task / commhub_send_message
-  // dispatched by the LLM, without needing to rebuild the MCP server.
-  agentAliasOrGetter?: string | (() => string),
+  // #146 PR-4 — accept three forms:
+  //   - undefined         (test / legacy callers without identity)
+  //   - static string     (legacy callers; alias never changes)
+  //   - sync getter       () => string (cache-only read, legacy)
+  //   - async getter      () => Promise<string> (the live-alias path)
+  // For an unbounded-staleness-safe path the caller should pass the
+  // async getter (e.g. cli.ts wires `() => aliasResolver.refresh()` so
+  // every tool invocation revalidates the cache against the server
+  // within the 30 s window). 通信牛 PR #228 二审 catch — without this
+  // a long LLM turn that doesn't fire any sender-side commhub call
+  // could read a permanently stale closure-captured alias.
+  agentAliasOrGetter?: string | (() => string) | (() => Promise<string>),
 ): Promise<McpSdkServerConfigWithInstance> {
   const { createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
-  const resolveAlias = (): string | undefined =>
-    typeof agentAliasOrGetter === "function" ? agentAliasOrGetter() : agentAliasOrGetter;
+  const resolveAlias = async (): Promise<string | undefined> => {
+    if (agentAliasOrGetter === undefined) return undefined;
+    if (typeof agentAliasOrGetter !== "function") return agentAliasOrGetter;
+    const value = agentAliasOrGetter();
+    return value && typeof (value as any).then === "function"
+      ? await (value as Promise<string>)
+      : (value as string);
+  };
   const fwd = (name: string) =>
-    (async (args: unknown) => forwardToCommhub(hubUrl, token, name, injectAgentFromSession(name, args, resolveAlias())));
+    (async (args: unknown) => forwardToCommhub(hubUrl, token, name, injectAgentFromSession(name, args, await resolveAlias())));
 
   return createSdkMcpServer({
     name: "commhub",
