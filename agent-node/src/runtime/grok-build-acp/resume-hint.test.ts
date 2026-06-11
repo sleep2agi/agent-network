@@ -34,12 +34,12 @@ const row = (over: Partial<OutboundTaskRow>): OutboundTaskRow => ({
 
 describe("fetchUnresolvedOutbound", () => {
   test("returns empty array when the hub has no outbound rows for this sender", async () => {
-    const result = await fetchUnresolvedOutbound("self", async () => ({ tasks: [] }));
+    const result = await fetchUnresolvedOutbound({ alias: "self" }, async () => ({ tasks: [] }));
     expect(result).toEqual([]);
   });
 
   test("filters to only delivered/started status", async () => {
-    const result = await fetchUnresolvedOutbound("self", async () => ({
+    const result = await fetchUnresolvedOutbound({ alias: "self" }, async () => ({
       tasks: [
         row({ task_id: "tsk_a", status: "delivered" }),
         row({ task_id: "tsk_b", status: "started" }),
@@ -55,33 +55,75 @@ describe("fetchUnresolvedOutbound", () => {
     const tasks = Array.from({ length: 25 }, (_, i) =>
       row({ task_id: `tsk_${i.toString().padStart(2, "0")}`, status: "delivered" }),
     );
-    const result = await fetchUnresolvedOutbound("self", async () => ({ tasks }), { topN: 5 });
+    const result = await fetchUnresolvedOutbound({ alias: "self" }, async () => ({ tasks }), { topN: 5 });
     expect(result).toHaveLength(5);
     expect(result.map((r) => r.task_id)).toEqual(["tsk_00", "tsk_01", "tsk_02", "tsk_03", "tsk_04"]);
   });
 
-  test("forwards the sender alias and a sane limit to the listTasks hook", async () => {
+  test("forwards the sender alias and a sane limit to the listTasks hook (no node_id fallback path)", async () => {
     let seen: any = null;
-    await fetchUnresolvedOutbound("通信SDK马", async (params) => {
+    await fetchUnresolvedOutbound({ alias: "通信SDK马" }, async (params) => {
       seen = params;
       return { tasks: [] };
     });
     expect(seen.from_name).toBe("通信SDK马");
+    expect(seen.from_node_id).toBeUndefined(); // alias-only path
     expect(seen.limit).toBeGreaterThan(0);
     expect(seen.limit).toBeLessThanOrEqual(100);
   });
 
+  test("#146 PR-4 — prefers from_node_id when nodeId is available, never sends both", async () => {
+    let seen: any = null;
+    await fetchUnresolvedOutbound(
+      { nodeId: "node-immutable-x", alias: "current-alias" },
+      async (params) => {
+        seen = params;
+        return { tasks: [] };
+      },
+    );
+    expect(seen.from_node_id).toBe("node-immutable-x");
+    // We intentionally DO NOT send from_name when from_node_id is set —
+    // sending both would AND-filter on the server side, missing
+    // pre-rename rows whose from_name was the old alias.
+    expect(seen.from_name).toBeUndefined();
+    expect(seen.limit).toBeGreaterThan(0);
+  });
+
+  test("#146 PR-4 — empty / null nodeId falls back to from_name path", async () => {
+    let seen: any = null;
+    await fetchUnresolvedOutbound(
+      { nodeId: "", alias: "self" },
+      async (params) => {
+        seen = params;
+        return { tasks: [] };
+      },
+    );
+    expect(seen.from_node_id).toBeUndefined();
+    expect(seen.from_name).toBe("self");
+
+    seen = null;
+    await fetchUnresolvedOutbound(
+      { nodeId: null, alias: "self" },
+      async (params) => {
+        seen = params;
+        return { tasks: [] };
+      },
+    );
+    expect(seen.from_node_id).toBeUndefined();
+    expect(seen.from_name).toBe("self");
+  });
+
   test("graceful fallback when list_tasks throws — returns empty, does not propagate", async () => {
-    const result = await fetchUnresolvedOutbound("self", async () => {
+    const result = await fetchUnresolvedOutbound({ alias: "self" }, async () => {
       throw new Error("hub unreachable, ECONNREFUSED");
     });
     expect(result).toEqual([]);
   });
 
   test("graceful fallback for malformed payloads — non-array tasks", async () => {
-    const result1 = await fetchUnresolvedOutbound("self", async () => ({ tasks: "not an array" as any }));
-    const result2 = await fetchUnresolvedOutbound("self", async () => null);
-    const result3 = await fetchUnresolvedOutbound("self", async () => undefined);
+    const result1 = await fetchUnresolvedOutbound({ alias: "self" }, async () => ({ tasks: "not an array" as any }));
+    const result2 = await fetchUnresolvedOutbound({ alias: "self" }, async () => null);
+    const result3 = await fetchUnresolvedOutbound({ alias: "self" }, async () => undefined);
     expect(result1).toEqual([]);
     expect(result2).toEqual([]);
     expect(result3).toEqual([]);
@@ -89,7 +131,7 @@ describe("fetchUnresolvedOutbound", () => {
 
   test("clamps absurd opts: topN > 50 is capped, limit > 100 is capped", async () => {
     let seen: any = null;
-    await fetchUnresolvedOutbound("self", async (p) => {
+    await fetchUnresolvedOutbound({ alias: "self" }, async (p: any) => {
       seen = p;
       return { tasks: [] };
     }, { topN: 9999, limit: 9999 });

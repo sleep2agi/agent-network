@@ -32,7 +32,14 @@ export type OutboundTaskRow = {
 };
 
 export type ListTasksHook = (params: {
-  from_name: string;
+  // #146 PR-4 — prefer from_node_id (immutable) so a rename of this node
+  // doesn't make the resume hint miss old-alias-period dispatches. The
+  // commhub-server `list_tasks` MCP tool accepts both filters since PR #224
+  // (2dc166c); for callers running against an older server that only
+  // knows `from_name`, we keep `from_name` in the param shape so the
+  // request falls back gracefully when from_node_id is absent.
+  from_node_id?: string;
+  from_name?: string;
   limit: number;
 }) => Promise<{ tasks?: OutboundTaskRow[] } | null | undefined>;
 
@@ -58,14 +65,22 @@ export type FetchOptions = {
  * run normally.
  */
 export async function fetchUnresolvedOutbound(
-  selfAlias: string,
+  selfIdentity: { nodeId?: string | null; alias: string },
   listTasks: ListTasksHook,
   opts: FetchOptions = {},
 ): Promise<OutboundTaskRow[]> {
   const limit = Math.max(1, Math.min(100, opts.limit ?? 100));
   const topN = Math.max(1, Math.min(50, opts.topN ?? 10));
   try {
-    const resp = await listTasks({ from_name: selfAlias, limit });
+    // #146 PR-4 — prefer querying by from_node_id (immutable). If the
+    // node has no node_id yet (e.g. first boot before PR-3 propagation),
+    // fall back to the alias query. We never send both — sending both
+    // would AND-filter on the server side, missing pre-rename rows
+    // whose from_name is the old alias.
+    const params = selfIdentity.nodeId
+      ? { from_node_id: selfIdentity.nodeId, limit }
+      : { from_name: selfIdentity.alias, limit };
+    const resp = await listTasks(params);
     const tasks = Array.isArray(resp?.tasks) ? resp!.tasks! : [];
     return tasks
       .filter(

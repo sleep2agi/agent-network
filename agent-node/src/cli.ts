@@ -36,6 +36,7 @@ import {
   buildResumeHint,
   fetchUnresolvedOutbound,
 } from "./runtime/grok-build-acp/resume-hint";
+import { CurrentAliasResolver } from "./runtime/current-alias";
 
 const home = homedir();
 
@@ -538,41 +539,124 @@ async function callCommHub(method: string, params: Record<string, unknown>, retr
   throw lastErr || new Error(`callCommHub(${method}) failed after ${retries} retries`);
 }
 
-const NODE_ID = fileConfig.node_id || "";
+// #146 PR-4 — prefer the COMMHUB_NODE_ID env that PR-3 (e0aa4d8) sets on
+// every launched node, fall back to the config field for back-compat with
+// nodes started before PR-3 landed. The env wins because the launcher
+// always knows the canonical node id; a stale config file would mislead.
+const NODE_ID = process.env.COMMHUB_NODE_ID || fileConfig.node_id || "";
 const NODE_NAME = fileConfig.node_name || "";
 const NETWORK_ID = fileConfig.network_id || process.env.ANET_NETWORK_ID || globalConfig.network_id || "";
 const RESUME_ID = NODE_ID ? `sdk-${NODE_ID}` : `sdk-${ALIAS}-${Date.now().toString(36)}`;
+
+// #146 PR-4 — single resolver instance backing every sender-side commhub
+// call (register / reportStatus / sendReply / inbox-poll / send_task
+// MCP tool factory). Synchronous current() returns the cached value for
+// log lines and file paths; async refresh() hits commhub with a 30 s
+// cache when callers care about staleness. Fetches the canonical alias
+// from the server's GET /api/status endpoint scoped to this node_id.
+const aliasResolver = new CurrentAliasResolver({
+  initialAlias: ALIAS,
+  nodeId: NODE_ID || null,
+  cacheTtlMs: 30_000,
+  fetchCanonicalAlias: async (nodeId: string) => {
+    try {
+      const headers: Record<string, string> = { Accept: "application/json" };
+      if (AUTH_TOKEN) headers["Authorization"] = `Bearer ${AUTH_TOKEN}`;
+      const url = `${COMMHUB_URL}/api/status${NETWORK_ID ? `?network_id=${encodeURIComponent(NETWORK_ID)}` : ""}`;
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 2500);
+      try {
+        const res = await fetch(url, { headers, signal: ctl.signal });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { sessions?: Array<{ node_id?: string; alias?: string }> };
+        const match = body.sessions?.find((s) => s.node_id === nodeId);
+        return match?.alias ?? null;
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      return null;
+    }
+  },
+  onDrift: (oldAlias, newAlias, source) => {
+    warn(`[alias-drift] ${oldAlias} → ${newAlias} (source: ${source})`);
+  },
+  warn: (m) => debug(m),
+});
+
+/**
+ * Synchronous alias accessor for hot paths (log lines, file paths,
+ * commhub tool factory closure). Returns the last-known alias without
+ * I/O — never waits.
+ */
+function currentAlias(): string {
+  return aliasResolver.current();
+}
+
+/**
+ * Async alias accessor for sender-side commhub calls where staleness
+ * causes the #146 family of routing bugs. Hits commhub with a 30 s
+ * cache; on fetch failure, returns the cached value (graceful fallback,
+ * task still runs).
+ */
+function liveAlias(): Promise<string> {
+  return aliasResolver.refresh();
+}
 // #119: host telemetry attached to every report_status. Commhub server-side
 // schema lacks `host` for now (通信牛 step 2 follow-up); Zod's default object
 // mode silently drops unknown keys, so sending it here is safe — once
 // commhub-server adds the field to the schema the payload starts flowing
 // straight through without a coordinated release of both sides.
-const register = () => callCommHub("report_status", {
-  resume_id: RESUME_ID, alias: ALIAS, status: "idle",
-  server: osHostname(), hostname: osHostname(),
-  agent: `agent-node:${RUNTIME}`, project_dir: process.cwd(),
-  node_id: NODE_ID || undefined,
-  node_name: NODE_NAME || undefined,
-  session_id: SESSION_ID || undefined,
-  config_path: configFilePath || undefined,
-  channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
-  model: MODEL || undefined,
-  network_id: NETWORK_ID || undefined,
-  host: getHostTelemetry(),
-  process_telemetry: getProcessTelemetry(),
-});
-const reportStatus = (status: string, task?: string) => callCommHub("report_status", {
-  resume_id: RESUME_ID, alias: ALIAS, status, task,
-  node_id: NODE_ID || undefined,
-  session_id: claudeSessionId || grokSessionId || SESSION_ID || undefined,
-  config_path: configFilePath || undefined,
-  channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
-  network_id: NETWORK_ID || undefined,
-  host: getHostTelemetry(),
-  process_telemetry: getProcessTelemetry(),
-});
-const getInbox = async () => (await callCommHub("get_inbox", { alias: ALIAS, limit: 20 }))?.messages || [];
-const ackMessage = (id: string) => callCommHub("ack_inbox", { alias: ALIAS, message_id: id });
+// #146 PR-4 — all sender-side commhub calls read the live alias via
+// liveAlias() (30 s LRU + post-register canonical drift detection)
+// rather than the frozen ALIAS const, so a rename committed on the
+// server propagates to outbound traffic within one cache window
+// instead of requiring a node restart.
+const register = async () => {
+  const alias = await liveAlias();
+  const result = await callCommHub("report_status", {
+    resume_id: RESUME_ID, alias, status: "idle",
+    server: osHostname(), hostname: osHostname(),
+    agent: `agent-node:${RUNTIME}`, project_dir: process.cwd(),
+    node_id: NODE_ID || undefined,
+    node_name: NODE_NAME || undefined,
+    session_id: SESSION_ID || undefined,
+    config_path: configFilePath || undefined,
+    channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
+    model: MODEL || undefined,
+    network_id: NETWORK_ID || undefined,
+    host: getHostTelemetry(),
+    process_telemetry: getProcessTelemetry(),
+  });
+  // Server is authoritative: if it told us a canonical alias different
+  // from what we just sent, treat that as a snapshot update so the
+  // resolver doesn't wait another 30 s to reflect it.
+  if (typeof result?.alias === "string" && result.alias) {
+    aliasResolver.set(result.alias);
+  }
+  return result;
+};
+const reportStatus = async (status: string, task?: string) => {
+  const alias = await liveAlias();
+  return callCommHub("report_status", {
+    resume_id: RESUME_ID, alias, status, task,
+    node_id: NODE_ID || undefined,
+    session_id: claudeSessionId || grokSessionId || SESSION_ID || undefined,
+    config_path: configFilePath || undefined,
+    channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
+    network_id: NETWORK_ID || undefined,
+    host: getHostTelemetry(),
+    process_telemetry: getProcessTelemetry(),
+  });
+};
+const getInbox = async () => {
+  const alias = await liveAlias();
+  return (await callCommHub("get_inbox", { alias, limit: 20 }))?.messages || [];
+};
+const ackMessage = async (id: string) => {
+  const alias = await liveAlias();
+  return callCommHub("ack_inbox", { alias, message_id: id });
+};
 
 // #168 RC-B1 + RC-B2 + RC-C fix: structured sendReply.
 //
@@ -587,10 +671,14 @@ async function sendReply(
   taskId?: string,
   failed = false,
 ): Promise<{ delivered: true; reply_id?: string; payload: any }> {
+  // #146 PR-4 — fresh alias on the wire so a rename mid-flight doesn't
+  // attribute this reply to the old name (which a post-rename inbox
+  // viewer would see as an orphaned reply from a non-existent sender).
+  const fromAlias = await liveAlias();
   const result = await callCommHub("send_reply", {
     alias: target,
     text: message,
-    from_session: ALIAS,
+    from_session: fromAlias,
     in_reply_to: taskId || undefined,
     status: failed ? "failed" : "replied",
   });
@@ -931,7 +1019,10 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   const mcpServers: Record<string, any> = {};
   if (commhubUrl) {
     try {
-      mcpServers["commhub"] = await createCommhubSdkMcpServer(commhubUrl, commhubToken, ALIAS);
+      // #146 PR-4 — pass a getter, not the const, so every LLM-driven
+      // commhub_send_task tool call reads the live alias at invocation
+      // time rather than the closure-captured startup value.
+      mcpServers["commhub"] = await createCommhubSdkMcpServer(commhubUrl, commhubToken, currentAlias);
     } catch (e: any) {
       log(`[claude] ⚠ commhub SDK MCP server init failed (${e?.message || e}); falling back to type:"http" (known-broken, see #102 smoke).`);
       mcpServers["commhub"] = {
@@ -1526,7 +1617,15 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
           ),
         ]);
       };
-      const outstanding = await fetchUnresolvedOutbound(ALIAS, fetchWithTimeout, { topN: 10 });
+      // #146 PR-4 — prefer querying by node_id so a rename of this node
+      // doesn't cause the resume hint to miss pre-rename outbound rows
+      // (whose tasks.from_name is the old alias). Falls back to alias
+      // when node_id is unavailable on older configs.
+      const outstanding = await fetchUnresolvedOutbound(
+        { nodeId: NODE_ID || null, alias: currentAlias() },
+        fetchWithTimeout,
+        { topN: 10 },
+      );
       const hint = buildResumeHint(outstanding);
       if (hint) {
         log(`[grok] resume hint: ${outstanding.length} un-closed-loop outbound task(s) prepended to first prompt`);
@@ -1643,11 +1742,13 @@ async function tryHandleExplicitDelegation(task: string, from: string, taskId: s
     return `未找到目标 alias：${parsed.alias}。已查询 CommHub 在线状态，但列表中没有该精确 alias。`;
   }
 
+  // #146 PR-4 — fresh alias on the explicit-delegation wrapper path.
+  const fromAlias = await liveAlias();
   const sendRes = parseToolJson(await callCommHub("send_task", {
     alias: parsed.alias,
     task: parsed.childTask,
     priority: "normal",
-    from_session: ALIAS,
+    from_session: fromAlias,
     parent_task_id: taskId,
   }));
   const childTaskId = findTaskId(sendRes);
