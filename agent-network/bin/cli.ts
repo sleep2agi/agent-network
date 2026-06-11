@@ -2390,9 +2390,14 @@ async function launchAgent(id: string, forceNewSession = false) {
     // outbound send_task/send_message to attribute to the wrong alias.
     // `displayName` is the same value we pass as --alias above, so the two
     // sources agree.
+    // PR-3 (#146 family) — also propagate COMMHUB_NODE_ID so PR-4's identity
+    // getter can resolve `node_id → canonical alias` server-side without
+    // relying on the mutable COMMHUB_ALIAS. The runtime can fall back to
+    // COMMHUB_ALIAS today; once PR-4 lands, the getter prefers NODE_ID.
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       COMMHUB_ALIAS: displayName,
+      ...(profile.node_id ? { COMMHUB_NODE_ID: profile.node_id } : {}),
       ...(token ? { COMMHUB_TOKEN: token } : {}),
       ...(hub ? { COMMHUB_URL: hub } : {}),
     };
@@ -2437,9 +2442,16 @@ async function launchAgent(id: string, forceNewSession = false) {
     });
   } else {
     // spawn claude CLI
+    // PR-3 (#146 family) — single-source on displayName (was profile.alias).
+    // displayName falls through node_name → name → alias → nodeId, matching
+    // the agent-node branch above and the `-n` flag below; using
+    // profile.alias here could diverge if the config is hand-edited or if
+    // a rename only updated node_name without alias. Also propagate
+    // COMMHUB_NODE_ID for PR-4's identity getter.
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      COMMHUB_ALIAS: profile.alias,
+      COMMHUB_ALIAS: displayName,
+      ...(profile.node_id ? { COMMHUB_NODE_ID: profile.node_id } : {}),
       // #115 — suppress Claude Code's "Resume from summary / full session"
       // interactive prompt so restarting a batch of nodes is zero-interaction.
       // The prompt is gated by a session-age threshold (default 70min); a very
@@ -3490,10 +3502,17 @@ function findNodeProcessesByAlias(...aliases: string[]): number[] | null {
     // executable itself (basename claude / agent-node) or its package path —
     // NOT a mere substring of the whole command line, which an unrelated
     // process could carry in a path/arg and then be wrongly killed.
+    // PR-3 (#146 family) — also recognise codex / grok standalone CLIs so a
+    // rename on a node started via those binaries can match its real process.
+    // Without this gap-fill, rename --force on a codex-sdk or grok-build-acp
+    // node that was launched via the standalone CLI (not the agent-node
+    // bridge) would silently fail to find the old process.
     const isAgentProc = tok.some(x => {
       const base = x.split("/").pop() || x;
       return base === "claude" || base === "agent-node"
-        || x.includes("@anthropic-ai/claude-code") || x.includes("@sleep2agi/agent-node");
+        || base === "codex" || base === "grok"
+        || x.includes("@anthropic-ai/claude-code") || x.includes("@sleep2agi/agent-node")
+        || x.includes("@openai/codex") || x.includes("@openai/codex-sdk");
     });
     if (!isAgentProc) continue;
     for (let i = 0; i < tok.length - 1; i++) {
@@ -3671,7 +3690,7 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
 
   // ── PHASE 1: PREPARE (copy/prepare, old node untouched — fully rollbackable) ──
   writeFileSync(lockPath, JSON.stringify({ old: oldId, new: newName, phase: "prepare", ts: Date.now() }) + "\n");
-  let txnId = "";
+  let txnId: string | null = "";
   try {
     // P2: copy (not move) old → new + update config.alias
     cpSync(oldDir, newDir, { recursive: true });
@@ -3693,12 +3712,42 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
       headers: { "Content-Type": "application/json", ...authHeaders(token) },
       body: JSON.stringify({ network_id: networkId, old_alias: oldId, new_alias: newName }),
     }).then(r => r.json() as any);
-    if (!prep.ok) throw new Error(`commhub prepare-rename: ${prep.error}`);
-    txnId = prep.txn_id;
+    if (!prep.ok) {
+      // PR-3 (#110) — purely-created nodes (`anet node create` without ever
+      // running `anet node start`) have no commhub `sessions` row, so
+      // server-side prepareRename rejects with "node not found in this
+      // network". RFC-010 §4.1 lists `created` as a recommended rename path,
+      // so falling out here contradicts the spec. Detect this case and fall
+      // back to a local-only rename: the local config dir + alias rename
+      // happens, and there's nothing on the server to coordinate yet.
+      //
+      // Two error shapes are tolerated:
+      //   1. PR-2 (server-side) future contract: `error: "node_local_only"`
+      //   2. Current main: `error` string contains "not found in this network"
+      const errStr = String(prep.error || "");
+      const isLocalOnly = prep.error === "node_local_only"
+        || /not found in this network/i.test(errStr)
+        || /node .* not found/i.test(errStr);
+      if (isLocalOnly) {
+        console.log(`[anet] note: "${oldId}" has no server registration yet (never started). Performing local-only rename — no commhub 2PC needed.`);
+        // Strip lock + drop the local-only flag for PHASE 2 commit path
+        if (existsSync(lockPath)) {
+          const lockData = JSON.parse(readFileSync(lockPath, "utf-8"));
+          lockData.local_only = true;
+          writeFileSync(lockPath, JSON.stringify(lockData));
+        }
+        txnId = null;  // signal no server txn to PHASE 2 commit / rollback
+      } else {
+        throw new Error(`commhub prepare-rename: ${prep.error}`);
+      }
+    } else {
+      txnId = prep.txn_id;
+    }
   } catch (e: any) {
     // ── PHASE 1 失败回滚: old 原封不动 ──
     console.error(`[anet] rename PHASE 1 failed: ${e.message} — rolling back`);
     if (existsSync(newDir)) rmSync(newDir, { recursive: true, force: true });
+    // PR-3 (#110) — txnId is null for local-only renames; no server abort needed.
     if (txnId) {
       await fetch(`${hub}/api/node-rename/abort`, {
         method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(token) },
@@ -3711,19 +3760,27 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
   }
 
   // ── PHASE 2: COMMIT (顺序敏感: commhub 路由 → tmux → 删 old) ──
-  // C1: commhub commit-rename — C1 之前仍可回滚, C1 之后转 forward-fix
-  const commit = await fetch(`${hub}/api/node-rename/commit`, {
-    method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(token) },
-    body: JSON.stringify({ txn_id: txnId }),
-  }).then(r => r.json() as any).catch((e: any) => ({ ok: false, error: String(e?.message || e) }));
+  // PR-3 (#110) — local-only rename skips server C1 (no txn to commit; the
+  // purely-created node had no commhub side to coordinate). Fall through
+  // directly to the local cutover (kill old / tmux / dir delete / restart).
+  const localOnly = txnId === null;
+  const commit = localOnly
+    ? { ok: true }
+    : await fetch(`${hub}/api/node-rename/commit`, {
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(token) },
+        body: JSON.stringify({ txn_id: txnId }),
+      }).then(r => r.json() as any).catch((e: any) => ({ ok: false, error: String(e?.message || e) }));
   if (!commit.ok) {
     // C1 失败: commhub 路由未切, 仍可干净回滚
     console.error(`[anet] rename PHASE 2 C1 (commhub commit) failed: ${commit.error} — rolling back`);
     if (existsSync(newDir)) rmSync(newDir, { recursive: true, force: true });
-    await fetch(`${hub}/api/node-rename/abort`, {
-      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      body: JSON.stringify({ txn_id: txnId }),
-    }).catch(() => {});
+    // PR-3 (#110) — txnId is null for local-only path; nothing to abort server-side.
+    if (txnId) {
+      await fetch(`${hub}/api/node-rename/abort`, {
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeaders(token) },
+        body: JSON.stringify({ txn_id: txnId }),
+      }).catch(() => {});
+    }
     if (existsSync(lockPath)) rmSync(lockPath, { force: true });
     console.error(`[anet] rollback complete — "${oldId}" unchanged.`);
     process.exit(1);
