@@ -18,6 +18,17 @@ run_suite() {
   PASS=$(echo "$OUTPUT" | grep -oP '\d+(?= passed)' | tail -1)
   FAIL=$(echo "$OUTPUT" | grep -oP '\d+(?= failed)' | tail -1)
   PASS=${PASS:-0}; FAIL=${FAIL:-0}
+  # #65 sanity guard: 0 pass + 0 fail = suite crashed or never reached Results line,
+  # not a real green. Count as a failure to surface the silent skip.
+  TOTAL_RUN=$((PASS + FAIL))
+  if [ "$TOTAL_RUN" -eq 0 ]; then
+    STATUS="⚠️"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    SUITES+=("$STATUS $NAME: SKIPPED/CRASHED (0 ran — Results line missing, suite likely exited early)")
+    echo "  $STATUS WARNING: 0 ran (suite crashed or Results line missing)"
+    echo ""
+    return
+  fi
   TOTAL_PASS=$((TOTAL_PASS + PASS))
   TOTAL_FAIL=$((TOTAL_FAIL + FAIL))
   STATUS="✅"
