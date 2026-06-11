@@ -1,0 +1,31 @@
+Rename server PR-1+2 verification
+Date: 2026-06-11
+Branch: fix/rename-server-pr1-pr2
+
+Scope:
+- send_message canonical alias routing after rename
+- SSE client map rekey on rename-committed internal event
+- inbox/tasks node_id columns and migration backfill log
+- list_tasks from_node_id filter with from_name compatibility
+- prepareRename node_local_only soft signal
+
+Commands:
+- COMMHUB_DB=/tmp/commhub-rename-push-test.db bun test src/push.test.ts
+- sg docker -c 'docker build -f tests/qa-hub-17-rename-canonicalization/Dockerfile -t anet-qa-hub-17-rename-canonicalization .'
+- sg docker -c 'docker run --rm anet-qa-hub-17-rename-canonicalization'
+- sg docker -c 'docker build -f tests/qa-hub-16-rest-task-api/Dockerfile -t anet-qa-hub-16-rest-task-api .'
+- sg docker -c 'docker run --rm anet-qa-hub-16-rest-task-api'
+- sg docker -c 'docker build -f tests/qa-hub-18-delivery-semantics/Dockerfile -t anet-qa-hub-18-delivery-semantics .'
+- sg docker -c 'docker run --rm anet-qa-hub-18-delivery-semantics'
+
+Results:
+- PASS: src/push.test.ts, 2/2 tests
+- PASS: qa-hub-17-rename-canonicalization
+- PASS: qa-hub-16-rest-task-api
+- PASS: qa-hub-18-delivery-semantics
+
+Notes:
+- Full local `bun test` was not used as the merge gate in this worktree because
+  this isolated worktree does not carry installed server dependencies; Docker
+  fixtures run `bun install` inside containers and are the required validation
+  path for this change.

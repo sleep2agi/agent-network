@@ -364,7 +364,7 @@ type RestDeliveryTarget =
 
 function resolveRestDeliveryTarget(alias: string, networkId: string | null): RestDeliveryTarget {
   const params: any[] = [alias];
-  let sql = "SELECT status, updated_at, last_seen_at FROM sessions WHERE alias = ?1";
+  let sql = "SELECT status, updated_at, last_seen_at, node_id FROM sessions WHERE alias = ?1";
   if (networkId) {
     sql += " AND network_id = ?2";
     params.push(networkId);
@@ -385,6 +385,13 @@ function resolveRestDeliveryTarget(alias: string, networkId: string | null): Res
     };
   }
   return { state: "online", alias, session };
+}
+
+function resolveRestNodeIdForAlias(alias: string, networkId: string | null): string | null {
+  if (!alias || alias === "hub" || alias === "api") return null;
+  const canonical = resolveCanonicalAlias(networkId, alias);
+  const target = resolveRestDeliveryTarget(canonical.alias, networkId);
+  return target.state === "not_found" ? null : (target.session?.node_id ?? null);
 }
 
 // ── REST input schema ───────────────────────────────
@@ -706,7 +713,7 @@ Bun.serve({
         }
         const result = prepareRename(resolved.user.user_id, body.network_id, body.old_alias, body.new_alias);
         if (result.ok) logAudit(resolved.user.user_id, resolved.user.username, "node_rename_prepared", "node", body.old_alias, body.new_alias);
-        return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+        return withCors(req, Response.json(result, { status: result.ok || result.code === "node_local_only" ? 200 : 400 }));
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
       }
@@ -1486,6 +1493,8 @@ Bun.serve({
       const id = crypto.randomUUID();
       const fromSession = body.from || "api";
       const ttlSeconds = (body as any).ttl_seconds || 3600;
+      const fromNodeId = resolveRestNodeIdForAlias(fromSession, taskNetId);
+      const targetNodeId = target.session?.node_id ?? null;
       // #221 — fold top-level `attachments` into `meta.attachments` so
       // the REST and MCP send_task transports produce identical
       // tasks.meta_json shape downstream. Top-level wins over any
@@ -1525,14 +1534,14 @@ Bun.serve({
       // dispatched via REST (anet demo, dashboard Dispatch button, etc.).
       db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response, network_id, meta_json)
-           VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply', ?6, ?7)`,
-          [id, targetAlias, body.priority, body.task, fromSession, taskNetId, metaJson]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
+           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7, ?8)`,
+          [id, targetAlias, targetNodeId, body.priority, body.task, fromSession, taskNetId, metaJson]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8, ?9)`,
-          [id, fromSession, targetAlias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId, body.parent_task_id ?? null, metaJson]
+          `INSERT INTO tasks (task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'delivered', ?7, 'reply', datetime('now'), datetime('now'), datetime('now', ?8), ?9, ?10, ?11)`,
+          [id, fromNodeId, fromSession, targetNodeId, targetAlias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId, body.parent_task_id ?? null, metaJson]
         );
         // Touch session row so the dashboard reflects "task in flight"
         // immediately, without waiting for the agent's report_status to
@@ -1590,19 +1599,19 @@ Bun.serve({
       if (!canRestWriteNetwork(restAuth, restScope.networkId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
-      let sql = "SELECT alias, network_id FROM sessions WHERE alias IS NOT NULL";
+      let sql = "SELECT alias, node_id, network_id FROM sessions WHERE alias IS NOT NULL";
       const params: any[] = [];
       sql = addNetworkScope(sql, params, restScope);
       if (body.filter_server) { sql += " AND server = ?"; params.push(body.filter_server); }
       if (body.filter_status) { sql += " AND status = ?"; params.push(body.filter_status); }
-      const targets = db.all<{ alias: string; network_id: string | null }>(sql, ...params);
+      const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
       const ids: string[] = [];
       for (const t of targets) {
         const id = crypto.randomUUID();
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, network_id)
-           VALUES (?1, ?2, 'broadcast', 'normal', ?3, 'api', ?4)`,
-          [id, t.alias, body.message, t.network_id]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
+           VALUES (?1, ?2, ?3, 'broadcast', 'normal', ?4, 'api', ?5)`,
+          [id, t.alias, t.node_id ?? null, body.message, t.network_id]
         );
         ids.push(id);
       }
