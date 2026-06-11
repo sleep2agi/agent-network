@@ -236,6 +236,7 @@ memory `feedback_vendor_verify_before_hardcode.md`：不许 byte-identical fabri
 | 不访问生产数据库 | `feedback_no_prod_db_access.md` |
 | commit/push 在 main 直接 push | `feedback_push_workflow.md` |
 | internal task vs GitHub issue 编号空间独立 | `feedback_internal_vs_github_tasks.md` |
+| **公开渠道(issue/PR/docs/截图)不写真实 hub 域名,一律 `<hub-domain>` 占位** | Vincent 2026-06-11 tg 752;同 token/私IP/路径禁令一族 |
 
 ### 7.1 Preview 版本号规则（重要，OSS-facing）
 
