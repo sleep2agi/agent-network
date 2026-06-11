@@ -7,6 +7,7 @@ import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
+import { sharedLoginFailureLockout, sharedLoginIpRateLimiter } from "./auth_login_guard.js";
 import {
   FILE_ID_REGEX,
   MAX_REQUEST_CONTENT_LENGTH,
@@ -613,15 +614,36 @@ Bun.serve({
 
     if (url.pathname === "/api/auth/login" && req.method === "POST") {
       const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-      if (!checkRateLimit(clientIP, 10)) {
+      const ipRate = sharedLoginIpRateLimiter.check(clientIP || "unknown");
+      if (!ipRate.allowed) {
         logAudit(null, null, "login_rate_limited", "auth", undefined, clientIP);
-        return withCors(req, Response.json({ ok: false, error: "too many attempts, try again later" }, { status: 429 }));
+        return withCors(req, Response.json(
+          { ok: false, error: "rate_limited", message: "Too many login attempts. Try again later.", retry_after_ms: ipRate.retryAfterMs },
+          { status: 429, headers: { "Retry-After": String(Math.ceil((ipRate.retryAfterMs ?? 1000) / 1000)) } }
+        ));
       }
       try {
         const body = await req.json() as any;
+        const lock = sharedLoginFailureLockout.check(body.username);
+        if (lock.locked) {
+          logAudit(null, body.username, "login_locked", "auth", undefined, `retry_after_ms=${lock.retryAfterMs ?? 0}`);
+          return withCors(req, Response.json(
+            { ok: false, error: "login_locked", message: "Too many failed login attempts. Try again later.", retry_after_ms: lock.retryAfterMs },
+            { status: 429, headers: { "Retry-After": String(Math.ceil((lock.retryAfterMs ?? 1000) / 1000)) } }
+          ));
+        }
         const result = login(body.username, body.password);
-        if (result.ok) logAudit(result.user!.user_id, body.username, "login", "user", result.user!.user_id);
-        else logAudit(null, body.username, "login_failed", "user", undefined, "invalid credentials");
+        if (result.ok) {
+          sharedLoginFailureLockout.recordSuccess(body.username);
+          logAudit(result.user!.user_id, body.username, "login", "user", result.user!.user_id);
+        } else {
+          const failure = sharedLoginFailureLockout.recordFailure(body.username);
+          if (failure.locked) {
+            const safeUsername = String(body.username ?? "").replace(/[\r\n\t]/g, " ").slice(0, 80);
+            console.warn(`[auth] login locked for username=${safeUsername} failures=${failure.failures} retry_after_ms=${failure.lockMs}`);
+          }
+          logAudit(null, body.username, "login_failed", "user", undefined, "invalid credentials");
+        }
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 401 }));
       } catch (e: any) {
         return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
