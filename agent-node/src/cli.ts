@@ -37,6 +37,7 @@ import {
   fetchUnresolvedOutbound,
 } from "./runtime/grok-build-acp/resume-hint";
 import { CurrentAliasResolver } from "./runtime/current-alias";
+import { delegationTargetExists } from "./runtime/delegation-precheck";
 
 const home = homedir();
 
@@ -1843,9 +1844,21 @@ async function tryHandleExplicitDelegation(task: string, from: string, taskId: s
   const parsed = extractExplicitDelegation(task);
   if (!parsed || !taskId) return null;
 
+  // #230 — alias-equality + self-exclusion precheck.
+  //
+  // The previous precheck did a substring scan across the entire
+  // get_all_status JSON, which silently self-reflected via the
+  // calling node's own `task` field (we just wrote the inbound task
+  // body into it via reportStatus("working", task.slice(0, 200))).
+  // A descriptive task body containing the parsed alias as a
+  // substring would sail through the precheck, the real send_task
+  // would fire against a non-existent alias, and the server-side
+  // `alias_not_found` would surface as a hard task failure via the
+  // post-#168 client classifier.
   const status = parseToolJson(await callCommHub("get_all_status", {}));
-  const statusText = JSON.stringify(status);
-  if (!statusText.includes(parsed.alias)) {
+  const sessions = (status?.sessions ?? null) as Array<{ alias?: string }> | null;
+  const check = delegationTargetExists(sessions, parsed.alias, currentAlias());
+  if (!check.exists) {
     return `未找到目标 alias：${parsed.alias}。已查询 CommHub 在线状态，但列表中没有该精确 alias。`;
   }
 
