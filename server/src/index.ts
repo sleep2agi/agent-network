@@ -7,7 +7,7 @@ import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
-import { sharedLoginFailureLockout, sharedLoginIpRateLimiter } from "./auth_login_guard.js";
+import { getLoginClientIp, sharedLoginFailureLockout, sharedLoginIpRateLimiter } from "./auth_login_guard.js";
 import {
   FILE_ID_REGEX,
   MAX_REQUEST_CONTENT_LENGTH,
@@ -613,7 +613,7 @@ Bun.serve({
     }
 
     if (url.pathname === "/api/auth/login" && req.method === "POST") {
-      const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+      const clientIP = getLoginClientIp(req);
       const ipRate = sharedLoginIpRateLimiter.check(clientIP || "unknown");
       if (!ipRate.allowed) {
         logAudit(null, null, "login_rate_limited", "auth", undefined, clientIP);

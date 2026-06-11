@@ -5,6 +5,7 @@ import {
   LOGIN_LOCK_MAX_MS,
   LOGIN_IP_MAX_PER_WINDOW,
   LOGIN_IP_WINDOW_MS,
+  getLoginClientIp,
   LoginFailureLockout,
   LoginIpRateLimiter,
   normalizeLoginUsername,
@@ -24,6 +25,24 @@ describe("LoginIpRateLimiter", () => {
   test("default public IP limit is 10/min", () => {
     expect(LOGIN_IP_WINDOW_MS).toBe(60_000);
     expect(LOGIN_IP_MAX_PER_WINDOW).toBe(10);
+  });
+
+  test("evicts expired entries before enforcing the cap", () => {
+    const lim = new LoginIpRateLimiter(100, 10, 2);
+    expect(lim.check("192.0.2.1", 0).allowed).toBe(true);
+    expect(lim.check("192.0.2.2", 0).allowed).toBe(true);
+    expect(lim.check("192.0.2.3", 101).allowed).toBe(true);
+
+    expect(lim.check("192.0.2.1", 102).remaining).toBe(9);
+  });
+
+  test("evicts the oldest active entry when the cap is full", () => {
+    const lim = new LoginIpRateLimiter(60_000, 1, 2);
+    expect(lim.check("192.0.2.1", 0).allowed).toBe(true);
+    expect(lim.check("192.0.2.2", 1).allowed).toBe(true);
+    expect(lim.check("192.0.2.3", 2).allowed).toBe(true);
+
+    expect(lim.check("192.0.2.1", 3).allowed).toBe(true);
   });
 });
 
@@ -66,11 +85,46 @@ describe("LoginFailureLockout", () => {
     expect(LOGIN_LOCK_BASE_MS).toBe(30_000);
     expect(LOGIN_LOCK_MAX_MS).toBe(15 * 60_000);
   });
+
+  test("evicts expired failure entries before enforcing the cap", () => {
+    const lockout = new LoginFailureLockout(2, 100, 1000, 2);
+    expect(lockout.recordFailure("alice", 0).locked).toBe(false);
+    expect(lockout.recordFailure("bob", 0).locked).toBe(false);
+    expect(lockout.recordFailure("carol", 1).locked).toBe(false);
+
+    expect(lockout.recordFailure("alice", 2).locked).toBe(false);
+  });
+
+  test("evicts the oldest active failure entry when the cap is full", () => {
+    const lockout = new LoginFailureLockout(2, 1000, 1000, 2);
+    expect(lockout.recordFailure("alice", 0).locked).toBe(false);
+    expect(lockout.recordFailure("bob", 1).locked).toBe(false);
+    expect(lockout.recordFailure("carol", 2).locked).toBe(false);
+
+    expect(lockout.recordFailure("alice", 3).locked).toBe(false);
+  });
 });
 
 describe("normalizeLoginUsername", () => {
   test("normalizes for case-insensitive lockout keys", () => {
     expect(normalizeLoginUsername(" Alice ")).toBe("alice");
     expect(normalizeLoginUsername(undefined)).toBe("");
+  });
+});
+
+describe("getLoginClientIp", () => {
+  test("uses the last x-forwarded-for hop so spoofed first hops do not bypass login rate limits", () => {
+    const req = new Request("http://127.0.0.1/api/auth/login", {
+      headers: { "x-forwarded-for": "198.51.100.99, 203.0.113.10" },
+    });
+    expect(getLoginClientIp(req)).toBe("203.0.113.10");
+  });
+
+  test("falls back to x-real-ip, then unknown", () => {
+    const withRealIp = new Request("http://127.0.0.1/api/auth/login", {
+      headers: { "x-real-ip": "203.0.113.20" },
+    });
+    expect(getLoginClientIp(withRealIp)).toBe("203.0.113.20");
+    expect(getLoginClientIp(new Request("http://127.0.0.1/api/auth/login"))).toBe("unknown");
   });
 });

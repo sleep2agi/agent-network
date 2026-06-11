@@ -44,12 +44,12 @@ curl -fsS -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' 
 BOOT_TOKEN=$(jq -r '.token' /tmp/register.json)
 [[ "$BOOT_TOKEN" == utok_* ]] || { echo "FAIL: register token"; cat /tmp/register.json; exit 1; }
 
-echo "[2] IP login rate limit: 10/min allowed, 11th returns 429 + Retry-After"
+echo "[2] IP login rate limit: 10/min allowed, 11th returns 429 + Retry-After (XFF last-hop keyed)"
 for i in $(seq 1 10); do
-  code=$(post_login "198.51.100.10" "guarduser" "StrongPassw0rd" "/tmp/ip-$i.json")
+  code=$(post_login "198.51.100.$i, 203.0.113.10" "guarduser" "StrongPassw0rd" "/tmp/ip-$i.json")
   [[ "$code" == "200" ]] || { echo "FAIL: login attempt $i expected 200 got $code"; cat "/tmp/ip-$i.json"; exit 1; }
 done
-code=$(post_login "198.51.100.10" "guarduser" "StrongPassw0rd" /tmp/ip-11.json)
+code=$(post_login "198.51.100.99, 203.0.113.10" "guarduser" "StrongPassw0rd" /tmp/ip-11.json)
 [[ "$code" == "429" ]] || { echo "FAIL: 11th login expected 429 got $code"; cat /tmp/ip-11.json; exit 1; }
 jq -e '.ok == false and .error == "rate_limited" and (.retry_after_ms > 0)' /tmp/ip-11.json >/dev/null
 grep -qi '^Retry-After:' /tmp/ip-11.json.headers || { echo "FAIL: missing Retry-After header"; cat /tmp/ip-11.json.headers; exit 1; }

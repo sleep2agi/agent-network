@@ -4,14 +4,16 @@ Branch: fix/login-rate-limit
 
 Scope:
 - POST /api/auth/login per-IP 10/min rate limit
+- login IP key uses the last X-Forwarded-For hop so spoofed first hops do not bypass the limit
+- login guard in-memory maps cap at 50k entries and prune expired entries before oldest-entry eviction
 - per-username failure lockout after 5 wrong passwords
 - exponential lockout curve with 30s base and 15min cap
 - successful login clears username failure state
 - bearer token API/MCP/SSE paths are not rate-limited by this guard
 
 Commands:
-- COMMHUB_DB=/tmp/commhub-login-guard-unit.db bun test src/auth_login_guard.test.ts
-- COMMHUB_DB=/tmp/commhub-login-guard-upload-unit.db bun test src/uploads.test.ts src/auth_login_guard.test.ts
+- COMMHUB_DB=/tmp/commhub-login-guard-unit-2.db bun test src/auth_login_guard.test.ts
+- COMMHUB_DB=/tmp/commhub-login-guard-upload-unit-2.db bun test src/uploads.test.ts src/auth_login_guard.test.ts
 - sg docker -c 'docker build -f tests/qa-hub-19-login-guard/Dockerfile -t anet-qa-hub-19-login-guard .'
 - sg docker -c 'docker run --rm anet-qa-hub-19-login-guard'
 - sg docker -c 'docker build -f tests/test5-auth/Dockerfile -t anet-test5-auth-login-guard .'
@@ -23,9 +25,9 @@ Commands:
 - git diff --check
 
 Results:
-- PASS: auth_login_guard unit, 6/6 tests
-- PASS: uploads + auth_login_guard unit, 37/37 tests
-- PASS: qa-hub-19-login-guard
+- PASS: auth_login_guard unit, 12/12 tests
+- PASS: uploads + auth_login_guard unit, 43/43 tests
+- PASS: qa-hub-19-login-guard, including XFF spoof-first / fixed-last-hop login rate-limit coverage
 - PASS: test5-auth, 25/25
 - PASS: qa-dash-07-auth-boundary
 - PASS: qa-hub-18-delivery-semantics
