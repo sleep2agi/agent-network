@@ -17,6 +17,7 @@ echo ""
 cd /app/server && bun run src/index.ts &
 sleep 3
 mkdir -p /tmp/cfg-test && cd /tmp/cfg-test
+mkdir -p /root/.anet  # #65: prevent `echo > /root/.anet/config.json` write failure under set -e
 
 # 1. Global config baseline
 echo "1. Global hub fallback..."
