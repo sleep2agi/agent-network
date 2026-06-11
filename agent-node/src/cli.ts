@@ -1709,7 +1709,15 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   if (HAD_GROK_SESSION_AT_BOOT && !grokResumeHintFired) {
     grokResumeHintFired = true; // fire-once regardless of fetch outcome
     try {
-      const fetchWithTimeout = async (params: { from_name: string; limit: number }) => {
+      // #229 follow-up (通信牛 non-blocking note) — widen the params shape to
+      // match `ListTasksHook` from resume-hint.ts. Post #146 PR-4 #228 the
+      // caller picks `from_node_id` (preferred) or `from_name` (fallback) per
+      // server capability; the narrower `{ from_name: string }` here would
+      // reject either call shape at typecheck time once the call-site
+      // started picking between them.
+      const fetchWithTimeout = async (
+        params: { from_node_id?: string; from_name?: string; limit: number },
+      ) => {
         return await Promise.race([
           callCommHub("list_tasks", params, 0), // retries=0; we either get a fast answer or we move on
           new Promise<never>((_, reject) =>

@@ -1178,6 +1178,32 @@ commhub_report_status(status="working", task="正在做什么")
 commhub_get_all_status()
 \`\`\`
 
+### 给用户发文件/图片
+
+❌ **不要把服务器本地路径（\`/home/...\` / \`/tmp/...\`）直接发到回复正文** — 用户的 APP / 浏览器 / 手机都打不开服务器本地路径，发了等于没发。
+
+✅ 正确流程：先上传到 hub，再用 markdown 引用 \`/api/files/<file_id>\`：
+
+\`\`\`bash
+# 1. 上传到 hub（地址 / token 走 env，不硬编码）
+curl -F "file=@<本地路径>" \\
+  -H "Authorization: Bearer \$COMMHUB_TOKEN" \\
+  "\$COMMHUB_URL/api/upload"
+
+# 响应：{"ok":true,"file_id":"<32 hex>","url":"/api/files/<32 hex>", ...}
+\`\`\`
+
+\`\`\`markdown
+<!-- 2. 在回复正文里用 markdown 引用 file_id -->
+这是给你的报表：[周报.xlsx](/api/files/<file_id>)
+\`\`\`
+
+规范：
+- 图片用 **PNG / JPG**（SVG 客户端渲染不了）
+- 单文件 ≤ **12 MiB**
+- 地址 / token 用 \`\$COMMHUB_URL\` / \`\$COMMHUB_TOKEN\` env（节点 spawn 时已注入），**不硬编码**
+- 引用必须是 \`/api/files/<file_id>\` 格式，**不要**把本地路径塞进 markdown link target
+
 ## 收到消息
 
 来自 CommHub 的消息会以 \`<channel source="commhub" sender="..." task_id="...">\` 格式出现在对话中。收到后：
@@ -1190,6 +1216,7 @@ commhub_get_all_status()
 - 收到任务必须回应：确认→执行→汇报
 - 回复指挥室用 commhub_send_task（不是 commhub_reply，reply 不推送）
 - 不要猜 alias，用 get_all_status 查
+- **给用户发文件先 \`curl -F\` 上传 → markdown 引用 \`/api/files/<id>\`，不要发服务器本地路径**
 `);
     console.log(`CLAUDE.md: created`);
   } else {
