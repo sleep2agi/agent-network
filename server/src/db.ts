@@ -123,13 +123,14 @@ db.exec(`
     ON agent_telemetry(network_id, alias, created_at);
 `);
 
-// inbox: add in_reply_to, requires_response, expires_at, scope
+// inbox: add in_reply_to, requires_response, expires_at, scope, node identity
 for (const col of [
   { name: "in_reply_to", def: "TEXT" },
   { name: "requires_response", def: "TEXT DEFAULT 'reply'" },
   { name: "expires_at", def: "TEXT" },
   { name: "scope", def: "TEXT DEFAULT 'single'" },
   { name: "meta_json", def: "TEXT" },
+  { name: "node_id", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE inbox ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
@@ -138,6 +139,7 @@ for (const col of [
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_type ON inbox(type)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_from ON inbox(from_session)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_reply ON inbox(in_reply_to)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_node ON inbox(node_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_node ON sessions(node_id)"); } catch {}
 
 // tasks table (V2)
@@ -384,6 +386,185 @@ for (const table of ["sessions", "nodes", "tasks", "inbox", "task_events", "comp
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN network_id TEXT`); } catch {}
 }
 
+// PR-1 (#146): durable node identity on historical inbox/tasks rows. Some
+// existing databases created `tasks` before from_node_id/to_node_id were in the
+// CREATE TABLE statement, so keep these ALTERs explicit and idempotent.
+for (const col of [
+  { table: "tasks", name: "from_node_id", def: "TEXT" },
+  { table: "tasks", name: "to_node_id", def: "TEXT" },
+  { table: "inbox", name: "node_id", def: "TEXT" },
+]) {
+  try { db.exec(`ALTER TABLE ${col.table} ADD COLUMN ${col.name} ${col.def}`); } catch {}
+}
+
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_from_node ON tasks(from_node_id)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_to_node ON tasks(to_node_id)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_node ON inbox(node_id)"); } catch {}
+
+function backfillMessageNodeIds() {
+  let inboxDirect = 0;
+  let inboxRenamed = 0;
+  let tasksToDirect = 0;
+  let tasksToRenamed = 0;
+  let tasksFromDirect = 0;
+  let tasksFromRenamed = 0;
+
+  try {
+    inboxDirect = db.run(`
+      UPDATE inbox
+      SET node_id = (
+        SELECT s.node_id FROM sessions s
+        WHERE s.node_id IS NOT NULL
+          AND s.alias = inbox.session_name
+          AND COALESCE(s.network_id, 'default') = COALESCE(inbox.network_id, 'default')
+        ORDER BY s.updated_at DESC
+        LIMIT 1
+      )
+      WHERE node_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM sessions s
+          WHERE s.node_id IS NOT NULL
+            AND s.alias = inbox.session_name
+            AND COALESCE(s.network_id, 'default') = COALESCE(inbox.network_id, 'default')
+        )
+    `).changes;
+  } catch {}
+
+  try {
+    inboxRenamed = db.run(`
+      UPDATE inbox
+      SET node_id = (
+        SELECT s.node_id FROM rename_txn r
+        JOIN sessions s
+          ON s.alias = r.new_alias
+         AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
+        WHERE s.node_id IS NOT NULL
+          AND r.status = 'committed'
+          AND r.old_alias = inbox.session_name
+          AND COALESCE(r.network_id, 'default') = COALESCE(inbox.network_id, 'default')
+        ORDER BY r.committed_at DESC
+        LIMIT 1
+      )
+      WHERE node_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM rename_txn r
+          JOIN sessions s
+            ON s.alias = r.new_alias
+           AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
+          WHERE s.node_id IS NOT NULL
+            AND r.status = 'committed'
+            AND r.old_alias = inbox.session_name
+            AND COALESCE(r.network_id, 'default') = COALESCE(inbox.network_id, 'default')
+        )
+    `).changes;
+  } catch {}
+
+  try {
+    tasksToDirect = db.run(`
+      UPDATE tasks
+      SET to_node_id = (
+        SELECT s.node_id FROM sessions s
+        WHERE s.node_id IS NOT NULL
+          AND s.alias = tasks.to_name
+          AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
+        ORDER BY s.updated_at DESC
+        LIMIT 1
+      )
+      WHERE to_node_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM sessions s
+          WHERE s.node_id IS NOT NULL
+            AND s.alias = tasks.to_name
+            AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
+        )
+    `).changes;
+  } catch {}
+
+  try {
+    tasksToRenamed = db.run(`
+      UPDATE tasks
+      SET to_node_id = (
+        SELECT s.node_id FROM rename_txn r
+        JOIN sessions s
+          ON s.alias = r.new_alias
+         AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
+        WHERE s.node_id IS NOT NULL
+          AND r.status = 'committed'
+          AND r.old_alias = tasks.to_name
+          AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
+        ORDER BY r.committed_at DESC
+        LIMIT 1
+      )
+      WHERE to_node_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM rename_txn r
+          JOIN sessions s
+            ON s.alias = r.new_alias
+           AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
+          WHERE s.node_id IS NOT NULL
+            AND r.status = 'committed'
+            AND r.old_alias = tasks.to_name
+            AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
+        )
+    `).changes;
+  } catch {}
+
+  try {
+    tasksFromDirect = db.run(`
+      UPDATE tasks
+      SET from_node_id = (
+        SELECT s.node_id FROM sessions s
+        WHERE s.node_id IS NOT NULL
+          AND s.alias = tasks.from_name
+          AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
+        ORDER BY s.updated_at DESC
+        LIMIT 1
+      )
+      WHERE from_node_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM sessions s
+          WHERE s.node_id IS NOT NULL
+            AND s.alias = tasks.from_name
+            AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
+        )
+    `).changes;
+  } catch {}
+
+  try {
+    tasksFromRenamed = db.run(`
+      UPDATE tasks
+      SET from_node_id = (
+        SELECT s.node_id FROM rename_txn r
+        JOIN sessions s
+          ON s.alias = r.new_alias
+         AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
+        WHERE s.node_id IS NOT NULL
+          AND r.status = 'committed'
+          AND r.old_alias = tasks.from_name
+          AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
+        ORDER BY r.committed_at DESC
+        LIMIT 1
+      )
+      WHERE from_node_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM rename_txn r
+          JOIN sessions s
+            ON s.alias = r.new_alias
+           AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
+          WHERE s.node_id IS NOT NULL
+            AND r.status = 'committed'
+            AND r.old_alias = tasks.from_name
+            AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
+        )
+    `).changes;
+  } catch {}
+
+  const total = inboxDirect + inboxRenamed + tasksToDirect + tasksToRenamed + tasksFromDirect + tasksFromRenamed;
+  console.log(`[commhub] node_id backfill: inbox=${inboxDirect + inboxRenamed}, tasks.to=${tasksToDirect + tasksToRenamed}, tasks.from=${tasksFromDirect + tasksFromRenamed}, total=${total}`);
+}
+
+backfillMessageNodeIds();
+
 // ── P0: sessions alias uniqueness is network-scoped.
 // Older SQLite databases created `alias TEXT UNIQUE`, which prevents the same
 // agent alias from existing in two networks. SQLite cannot drop a UNIQUE
@@ -588,10 +769,14 @@ export function chainReplyToParent(childTaskId: string, replyText: string, reply
     if (parent.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
       try {
         const notifyId = `chain_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+        const notifyNode = db.get<{ node_id: string | null }>(
+          "SELECT node_id FROM sessions WHERE alias = ?1 AND COALESCE(network_id, 'default') = COALESCE(?2, 'default') ORDER BY updated_at DESC LIMIT 1",
+          [parent.from_name, parent.network_id ?? null]
+        );
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, in_reply_to, requires_response, network_id)
-           VALUES (?1, ?2, 'reply', 'normal', ?3, ?4, ?5, 'none', ?6)`,
-          [notifyId, parent.from_name, `[${childAlias} 子任务完成]\n${currentReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
+           VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7)`,
+          [notifyId, parent.from_name, notifyNode?.node_id ?? null, `[${childAlias} 子任务完成]\n${currentReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
         );
       } catch {}
     }

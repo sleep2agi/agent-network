@@ -119,9 +119,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   const scopedSessionStatus = (alias: string, networkId?: string | null) => {
     const params: any[] = [alias];
-    let sql = "SELECT status, updated_at, last_seen_at FROM sessions WHERE alias = ?1";
+    let sql = "SELECT status, updated_at, last_seen_at, node_id FROM sessions WHERE alias = ?1";
     sql = addScope(sql, params, networkId);
     return db.get<any>(sql, ...params);
+  };
+
+  const resolveNodeIdForAlias = (alias: string, networkId?: string | null): string | null => {
+    if (!alias || alias === "hub" || alias === "api") return null;
+    const canonical = resolveCanonicalAlias(networkId, alias);
+    const session = scopedSessionStatus(canonical.alias, networkId);
+    return session?.node_id ?? null;
   };
 
   const resolveDeliveryTarget = (alias: string, networkId?: string | null): DeliveryTarget => {
@@ -746,20 +753,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const id = uuidv4();
+      const fromNodeId = resolveNodeIdForAlias(from_session, effectiveNetId);
+      const targetNodeId = target.session?.node_id ?? null;
       // 事务：inbox + tasks 双写 + 触碰目标 session 的 task/updated_at（让
       // dashboard 在派任务一刻就反映出"任务已下发"，不再等 agent 的
       // report_status 心跳；status 字段交给 agent，避免与 working/idle
       // 报告冲突）。
       db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, context, from_session, requires_response, network_id, meta_json)
-           VALUES (?1, ?2, 'task', ?3, ?4, ?5, ?6, 'reply', ?7, ?8)`,
-          [id, targetAlias, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJson]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, context, from_session, requires_response, network_id, meta_json)
+           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, ?7, 'reply', ?8, ?9)`,
+          [id, targetAlias, targetNodeId, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJson]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)
-           VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, 'reply', datetime('now'), datetime('now'), datetime('now', ?6), ?7, ?8, ?9)`,
-          [id, from_session, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId, metaJson]
+          `INSERT INTO tasks (task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'delivered', ?7, 'reply', datetime('now'), datetime('now'), datetime('now', ?8), ?9, ?10, ?11)`,
+          [id, fromNodeId, from_session, targetNodeId, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId, metaJson]
         );
         const touchParams: any[] = [task.slice(0, 200), targetAlias];
         let touchSql = "UPDATE sessions SET task = ?1, updated_at = datetime('now') WHERE alias = ?2";
@@ -833,22 +842,31 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ alias, message, from_session: _fromIn }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(null);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
-      const target = resolveDeliveryTarget(alias, effectiveNetId);
+      const canonical = resolveCanonicalAlias(effectiveNetId, alias);
+      const targetAlias = canonical.alias;
+      const target = resolveDeliveryTarget(targetAlias, effectiveNetId);
       if (target.state === "not_found") return deliveryTargetReply(target)!;
-      console.log(`[${ts()}] ${from_session} → send_message → ${alias}: ${message.slice(0, 60)}`);
+      console.log(`[${ts()}] ${from_session} → send_message → ${targetAlias}: ${message.slice(0, 60)}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const id = uuidv4();
       db.run(
-        `INSERT INTO inbox (id, session_name, type, priority, content, from_session, network_id)
-         VALUES (?1, ?2, 'message', 'normal', ?3, ?4, ?5)`,
-        [id, alias, message, from_session, effectiveNetId ?? null]
+        `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
+         VALUES (?1, ?2, ?3, 'message', 'normal', ?4, ?5, ?6)`,
+        [id, targetAlias, target.session?.node_id ?? null, message, from_session, effectiveNetId ?? null]
       );
 
       if (target.state === "online") {
-        pushEvent(alias, { type: "new_message", from: from_session, message_id: id }, effectiveNetId);
+        pushEvent(targetAlias, { type: "new_message", from: from_session, message_id: id, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
       }
 
       const offlineReply = deliveryTargetReply(target, { message_id: id });
-      if (offlineReply) return offlineReply;
+      if (offlineReply) {
+        const payload = JSON.parse(offlineReply.content[0].text);
+        offlineReply.content[0].text = JSON.stringify({
+          ...payload,
+          ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
+        });
+        return offlineReply;
+      }
 
       return {
         content: [
@@ -857,6 +875,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             text: JSON.stringify({
               ok: true,
               message_id: id,
+              ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
               session_status: target.session?.status ?? "unknown",
             }),
           },
@@ -917,11 +936,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           };
         }
       }
+      const replyTargetNodeId = resolveNodeIdForAlias(alias, effectiveNetId);
       const replyLogged = db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, in_reply_to, requires_response, network_id)
-           VALUES (?1, ?2, 'reply', 'normal', ?3, ?4, ?5, 'none', ?6)`,
-          [id, alias, text, from_session, in_reply_to ?? null, effectiveNetId ?? null]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
+           VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7)`,
+          [id, alias, replyTargetNodeId, text, from_session, in_reply_to ?? null, effectiveNetId ?? null]
         );
 
         // 更新 tasks 表
@@ -1053,9 +1073,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // Re-queue in inbox with new ID (original ID may already exist)
         const retryInboxId = uuidv4();
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response, network_id)
-           VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply', ?6)`,
-          [retryInboxId, task.to_name, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id)
+           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7)`,
+          [retryInboxId, task.to_name, task.to_node_id ?? resolveNodeIdForAlias(task.to_name, effectiveNetId ?? task.network_id ?? null), task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]
         );
       });
       logTaskEvent(task_id, task.status, "delivered", from_session, "retry");
@@ -1098,18 +1118,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       alias: z.string().max(200).optional().describe("Filter by to_name (target agent)"),
       status: z.string().max(50).optional().describe("Filter by status"),
       from_name: z.string().max(200).optional().describe("Filter by sender"),
+      from_node_id: z.string().max(200).optional().describe("Filter by immutable sender node_id"),
       network_id: z.string().max(200).optional().describe("Filter by network"),
       limit: z.number().min(1).max(100).optional().default(20),
     },
-    async ({ alias, status, from_name, network_id: netId, limit }) => {
+    async ({ alias, status, from_name, from_node_id, network_id: netId, limit }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
-      let sql = "SELECT task_id, from_name, to_name, priority, status, content, result, created_at, completed_at FROM tasks WHERE 1=1";
+      let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
       sql = addReadScope(sql, params, readScope);
       if (alias) { sql += ` AND to_name = ?${params.length + 1}`; params.push(alias); }
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
+      if (from_node_id) { sql += ` AND from_node_id = ?${params.length + 1}`; params.push(from_node_id); }
       sql += ` ORDER BY created_at DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
       const tasks = db.all(sql, ...params);
@@ -1184,6 +1206,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: `task is terminal (${task.status})` }) }] };
       }
       const oldAlias = task.to_name;
+      const canonical = resolveCanonicalAlias(effectiveNetId ?? task.network_id ?? null, new_alias);
+      const reassignedAlias = canonical.alias;
+      const target = resolveDeliveryTarget(reassignedAlias, effectiveNetId ?? task.network_id ?? null);
+      const newNodeId = target.state === "not_found" ? null : (target.session?.node_id ?? null);
       db.transaction(() => {
         // Ack old inbox to prevent original agent from picking it up
         const inboxParams: any[] = [task_id];
@@ -1191,18 +1217,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
         db.run(inboxSql, inboxParams);
 
-        const updateParams: any[] = [new_alias, task_id];
-        let updateSql = "UPDATE tasks SET to_name = ?1, status = 'delivered', started_at = NULL, delivered_at = datetime('now') WHERE task_id = ?2";
+        const updateParams: any[] = [reassignedAlias, newNodeId, task_id];
+        let updateSql = "UPDATE tasks SET to_name = ?1, to_node_id = ?2, status = 'delivered', started_at = NULL, delivered_at = datetime('now') WHERE task_id = ?3";
         updateSql = addScope(updateSql, updateParams, effectiveNetId);
         db.run(updateSql, updateParams);
 
         const newInboxId = uuidv4();
-        db.run("INSERT INTO inbox (id, session_name, type, priority, content, from_session, requires_response, network_id) VALUES (?1, ?2, 'task', ?3, ?4, ?5, 'reply', ?6)",
-          [newInboxId, new_alias, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]);
+        db.run("INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id) VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7)",
+          [newInboxId, reassignedAlias, newNodeId, task.priority, task.content, from_session, effectiveNetId ?? task.network_id ?? null]);
       });
-      logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${new_alias}`);
-      pushEvent(new_alias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session }, effectiveNetId ?? task.network_id ?? null);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: new_alias }) }] };
+      logTaskEvent(task_id, task.status, "delivered", from_session, `reassign: ${oldAlias} → ${reassignedAlias}`);
+      pushEvent(reassignedAlias, { type: "new_task", inbox_count: 1, priority: task.priority, from: from_session, ...(canonical.renamed ? { renamed_from: new_alias } : {}) }, effectiveNetId ?? task.network_id ?? null);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, task_id, reassigned_from: oldAlias, reassigned_to: reassignedAlias, ...(canonical.renamed ? { renamed_from: new_alias, renamed_to: reassignedAlias } : {}) }) }] };
     }
   );
 
@@ -1219,21 +1245,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] hub → broadcast: ${message.slice(0, 60)}${effectiveNetId ? " [net=" + effectiveNetId.slice(0, 12) + "]" : ""}`);
-      let sql = "SELECT alias, network_id FROM sessions WHERE alias IS NOT NULL";
+      let sql = "SELECT alias, node_id, network_id FROM sessions WHERE alias IS NOT NULL";
       const params: any[] = [];
       sql = addScope(sql, params, effectiveNetId);
       if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
       if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
 
-      const targets = db.all<{ alias: string; network_id: string | null }>(sql, ...params);
+      const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
       const ids: string[] = [];
 
       for (const t of targets) {
         const id = uuidv4();
         db.run(
-          `INSERT INTO inbox (id, session_name, type, priority, content, from_session, network_id)
-           VALUES (?1, ?2, 'broadcast', 'normal', ?3, 'hub', ?4)`,
-          [id, t.alias, message, effectiveNetId ?? t.network_id ?? null]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
+           VALUES (?1, ?2, ?3, 'broadcast', 'normal', ?4, 'hub', ?5)`,
+          [id, t.alias, t.node_id ?? null, message, effectiveNetId ?? t.network_id ?? null]
         );
         ids.push(id);
       }

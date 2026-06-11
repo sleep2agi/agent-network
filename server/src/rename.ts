@@ -16,11 +16,14 @@ import { randomUUID } from "crypto";
 import { db } from "./db";
 import { getUserNetworkRole, getNetworkMembers } from "./auth";
 import { pushEvent } from "./push";
+import { eventBus } from "./event_bus";
 
 export interface RenameResult {
   ok: boolean;
   txn_id?: string;
   error?: string;
+  code?: string;
+  suggested?: string;
 }
 
 export interface CanonicalAlias {
@@ -111,7 +114,14 @@ export function prepareRename(
   // old-alias must exist as a session in this network
   const oldSession = db.get<any>(
     "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2", networkId, oldAlias);
-  if (!oldSession) return { ok: false, error: `node "${oldAlias}" not found in this network` };
+  if (!oldSession) {
+    return {
+      ok: false,
+      code: "node_local_only",
+      error: `node "${oldAlias}" has no server session in this network`,
+      suggested: "rename locally",
+    };
+  }
 
   // new-alias must not be taken — in sessions OR reserved by another prepared txn
   const newInSessions = db.get<any>(
@@ -147,19 +157,32 @@ export function commitRename(userId: string, txnId: string): RenameResult {
     "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2", txn.network_id, txn.new_alias);
   if (conflict) return { ok: false, error: `alias "${txn.new_alias}" was taken since prepare` };
 
-  db.run(
-    "UPDATE sessions SET alias = ?1, updated_at = datetime('now') WHERE network_id = ?2 AND alias = ?3",
-    [txn.new_alias, txn.network_id, txn.old_alias]);
-  cleanupRenamedAliasSession(txn.network_id, txn.old_alias, txn.new_alias);
-  db.run(
-    "UPDATE nodes SET alias = ?1, updated_at = datetime('now') WHERE network_id = ?2 AND alias = ?3",
-    [txn.new_alias, txn.network_id, txn.old_alias]);
-  db.run(
-    "UPDATE api_tokens SET name = ?1 WHERE network_id = ?2 AND name = ?3",
-    [`node:${txn.new_alias}`, txn.network_id, `node:${txn.old_alias}`]);
-  db.run(
-    "UPDATE rename_txn SET status = 'committed', committed_at = datetime('now') WHERE txn_id = ?1",
-    [txnId]);
+  const renamedNode = db.transaction(() => {
+    db.run(
+      "UPDATE sessions SET alias = ?1, updated_at = datetime('now') WHERE network_id = ?2 AND alias = ?3",
+      [txn.new_alias, txn.network_id, txn.old_alias]);
+    cleanupRenamedAliasSession(txn.network_id, txn.old_alias, txn.new_alias);
+    db.run(
+      "UPDATE nodes SET alias = ?1, updated_at = datetime('now') WHERE network_id = ?2 AND alias = ?3",
+      [txn.new_alias, txn.network_id, txn.old_alias]);
+    db.run(
+      "UPDATE api_tokens SET name = ?1 WHERE network_id = ?2 AND name = ?3",
+      [`node:${txn.new_alias}`, txn.network_id, `node:${txn.old_alias}`]);
+    db.run(
+      "UPDATE rename_txn SET status = 'committed', committed_at = datetime('now') WHERE txn_id = ?1",
+      [txnId]);
+    const node = db.get<{ node_id: string | null }>(
+      "SELECT node_id FROM sessions WHERE network_id = ?1 AND alias = ?2",
+      [txn.network_id, txn.new_alias]
+    );
+    eventBus.emit("rename-committed", {
+      networkId: txn.network_id,
+      old_alias: txn.old_alias,
+      new_alias: txn.new_alias,
+      node_id: node?.node_id ?? null,
+    });
+    return node;
+  });
 
   // RFC-010 §4.2.1 C4 — broadcast node.renamed SSE. (#84 实施补漏: the Server
   // surface originally missed C4; N站马's dashboard slice needs this event.)
@@ -174,9 +197,11 @@ export function commitRename(userId: string, txnId: string): RenameResult {
     txn_id: txnId,
     alias: txn.new_alias,
     network_id: txn.network_id,
+    node_id: renamedNode?.node_id ?? null,
     data: {
       old_alias: txn.old_alias,
       new_alias: txn.new_alias,
+      node_id: renamedNode?.node_id ?? null,
       surfaces_updated: ["config", "tmux", "commhub", "dashboard", "batch_prefix", "session_resume"],
       history_policy: "preserve",
     },

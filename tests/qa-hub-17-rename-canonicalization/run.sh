@@ -83,7 +83,7 @@ NET_ID=$(post_json "/api/networks" "$USER_TOKEN" '{"name":"rename-canon"}' | jso
 NTOK=$(post_json "/api/auth/node-token" "$USER_TOKEN" "{\"network_id\":\"$NET_ID\",\"node_name\":\"old-agent\"}" | json_get token)
 
 echo "1. Old alias reports online"
-mcp_call "$NTOK" "report_status" "{\"resume_id\":\"resume-old\",\"alias\":\"old-agent\",\"status\":\"idle\"}" >/tmp/report-old.json
+mcp_call "$NTOK" "report_status" "{\"resume_id\":\"resume-old\",\"alias\":\"old-agent\",\"status\":\"idle\",\"node_id\":\"node-rename-17\",\"node_name\":\"old-agent\"}" >/tmp/report-old.json
 STATUS=$(curl -fsS -H "Authorization: Bearer $USER_TOKEN" "$BASE/api/status?network_id=$NET_ID")
 assert_contains "$STATUS" '"alias":"old-agent"' "old-agent should exist before rename"
 
@@ -94,7 +94,7 @@ COMMIT=$(post_json "/api/node-rename/commit" "$USER_TOKEN" "{\"txn_id\":\"$TXN_I
 assert_contains "$COMMIT" '"ok":true' "commit rename should succeed"
 
 echo "3. New process reports under new alias"
-mcp_call "$NTOK" "report_status" "{\"resume_id\":\"resume-new\",\"alias\":\"new-agent\",\"status\":\"idle\"}" >/tmp/report-new.json
+mcp_call "$NTOK" "report_status" "{\"resume_id\":\"resume-new\",\"alias\":\"new-agent\",\"status\":\"idle\",\"node_id\":\"node-rename-17\",\"node_name\":\"new-agent\"}" >/tmp/report-new.json
 STATUS=$(curl -fsS -H "Authorization: Bearer $USER_TOKEN" "$BASE/api/status?network_id=$NET_ID")
 assert_contains "$STATUS" '"alias":"new-agent"' "new-agent should exist after rename"
 assert_not_contains "$STATUS" '"alias":"old-agent"' "old-agent should be absent after new report"
@@ -116,13 +116,43 @@ MCP_TASK=$(mcp_call "$USER_TOKEN" "send_task" "{\"alias\":\"old-agent\",\"task\"
 assert_contains "$MCP_TASK" 'renamed_from' "MCP send_task response should include renamed_from"
 assert_contains "$MCP_TASK" 'renamed_to' "MCP send_task response should include renamed_to"
 
-echo "7. Task/inbox rows only target canonical alias"
+echo "7. MCP send_message to old alias redirects to new alias"
+OLD_MSG=$(mcp_call "$NTOK" "send_message" "{\"alias\":\"old-agent\",\"message\":\"old alias message\"}")
+assert_contains "$OLD_MSG" 'renamed_from' "MCP send_message old alias response should include renamed_from"
+assert_contains "$OLD_MSG" 'renamed_to' "MCP send_message old alias response should include renamed_to"
+
+echo "8. MCP send_message to new alias succeeds without redirect"
+NEW_MSG=$(mcp_call "$NTOK" "send_message" "{\"alias\":\"new-agent\",\"message\":\"new alias message\"}")
+assert_contains "$NEW_MSG" 'message_id' "MCP send_message new alias should succeed"
+assert_not_contains "$NEW_MSG" 'renamed_from' "MCP send_message new alias should not redirect"
+
+echo "9. Task/inbox rows only target canonical alias"
 TASKS=$(curl -fsS -H "Authorization: Bearer $USER_TOKEN" "$BASE/api/tasks?network_id=$NET_ID")
 assert_contains "$TASKS" '"to_name":"new-agent"' "tasks should target new-agent"
 assert_not_contains "$TASKS" '"to_name":"old-agent"' "tasks should not target old-agent"
+INBOX=$(mcp_call "$NTOK" "get_inbox" "{\"alias\":\"new-agent\",\"limit\":20}")
+assert_contains "$INBOX" 'old alias message' "old alias send_message should land in new-agent inbox"
+assert_contains "$INBOX" 'new alias message' "new alias send_message should land in new-agent inbox"
+assert_not_contains "$INBOX" '"session_name":"old-agent"' "inbox rows should not target old-agent"
+
+echo "10. list_tasks supports from_node_id while from_name remains compatible"
+FROM_NODE_TASK=$(mcp_call "$NTOK" "send_task" "{\"alias\":\"new-agent\",\"task\":\"from node id probe\"}")
+assert_contains "$FROM_NODE_TASK" 'message_id' "send_task from renamed node should succeed"
+LIST_BY_NODE=$(mcp_call "$NTOK" "list_tasks" "{\"from_node_id\":\"node-rename-17\",\"limit\":20}")
+assert_contains "$LIST_BY_NODE" 'from node id probe' "list_tasks from_node_id should find task"
+assert_contains "$LIST_BY_NODE" 'node-rename-17' "list_tasks should return from_node_id"
+LIST_BY_NAME=$(mcp_call "$NTOK" "list_tasks" "{\"from_name\":\"new-agent\",\"limit\":20}")
+assert_contains "$LIST_BY_NAME" 'from node id probe' "list_tasks from_name compatibility should still work"
+
+echo "11. prepareRename missing sessions row returns node_local_only soft signal"
+LOCAL_ONLY=$(post_json "/api/node-rename/prepare" "$USER_TOKEN" "{\"network_id\":\"$NET_ID\",\"old_alias\":\"never-started\",\"new_alias\":\"never-started-new\"}")
+assert_contains "$LOCAL_ONLY" '"ok":false' "local-only prepare should not succeed server 2PC"
+assert_contains "$LOCAL_ONLY" 'node_local_only' "local-only prepare should return node_local_only code"
+assert_contains "$LOCAL_ONLY" 'rename locally' "local-only prepare should include local rename suggestion"
 
 STATUS=$(curl -fsS -H "Authorization: Bearer $USER_TOKEN" "$BASE/api/status?network_id=$NET_ID")
 assert_contains "$STATUS" '"total":1' "status summary should only include one canonical session"
 assert_not_contains "$STATUS" '"alias":"old-agent"' "final status should not show old-agent"
+assert_contains "$(cat "$LOG")" 'node_id backfill' "migration log should include node_id backfill summary"
 
-echo "PASS: rename canonicalization blocks stale report_status and redirects send_task/REST task"
+echo "PASS: rename canonicalization blocks stale report_status and redirects send_task/send_message/REST task"

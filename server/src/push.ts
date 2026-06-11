@@ -2,6 +2,8 @@
 // Agent 连 GET /events/:session → 保持 SSE 长连接
 // send_task 写 inbox 后 → pushEvent() → 秒达
 
+import { eventBus, type RenameCommittedEvent } from "./event_bus";
+
 type SSEClient = {
   controller: ReadableStreamDefaultController;
   encoder: TextEncoder;
@@ -72,6 +74,28 @@ function clientKey(sessionName: string, networkId?: string | null): string {
   return `${networkId || "global"}:${sessionName}`;
 }
 
+function rekeyClient(oldSessionName: string, newSessionName: string, networkId?: string | null): number {
+  if (!oldSessionName || !newSessionName || oldSessionName === newSessionName) return 0;
+  const oldKey = clientKey(oldSessionName, networkId);
+  const newKey = clientKey(newSessionName, networkId);
+  const oldClients = clients.get(oldKey);
+  if (!oldClients || oldClients.length === 0) return 0;
+
+  const existing = clients.get(newKey) || [];
+  clients.set(newKey, existing.concat(oldClients));
+  clients.delete(oldKey);
+  console.log(`[${ts()}] SSE ↔ rekey ${oldKey} → ${newKey} (${oldClients.length} clients)`);
+  return oldClients.length;
+}
+
+eventBus.on("rename-committed", (event: RenameCommittedEvent) => {
+  try {
+    rekeyClient(event.old_alias, event.new_alias, event.networkId);
+  } catch (e: any) {
+    console.log(`[${ts()}] SSE rekey failed: ${e?.message || e}`);
+  }
+});
+
 /** 推送事件给指定 session 的所有 SSE 连接 */
 export function pushEvent(sessionName: string, event: Record<string, unknown>, networkId?: string | null): void {
   const arr = clients.get(clientKey(sessionName, networkId ?? (event.network_id as string | null | undefined)));
@@ -93,6 +117,10 @@ export function pushEvent(sessionName: string, event: Record<string, unknown>, n
     arr.splice(dead[i], 1);
   }
   if (arr.length === 0) clients.delete(clientKey(sessionName, networkId ?? (event.network_id as string | null | undefined)));
+}
+
+export function __resetSSEClientsForTest(): void {
+  clients.clear();
 }
 
 /** 获取当前 SSE 连接统计 */
