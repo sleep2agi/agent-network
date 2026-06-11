@@ -37,6 +37,7 @@ import {
   fetchUnresolvedOutbound,
 } from "./runtime/grok-build-acp/resume-hint";
 import { CurrentAliasResolver } from "./runtime/current-alias";
+import { delegationTargetExists } from "./runtime/delegation-precheck";
 
 const home = homedir();
 
@@ -1851,21 +1852,64 @@ async function tryHandleExplicitDelegation(task: string, from: string, taskId: s
   const parsed = extractExplicitDelegation(task);
   if (!parsed || !taskId) return null;
 
+  // #230 — alias-equality + self-exclusion precheck.
+  //
+  // The previous precheck did a substring scan across the entire
+  // get_all_status JSON, which silently self-reflected via the
+  // calling node's own `task` field (we just wrote the inbound task
+  // body into it via reportStatus("working", task.slice(0, 200))).
+  // A descriptive task body containing the parsed alias as a
+  // substring would sail through the precheck, the real send_task
+  // would fire against a non-existent alias, and the server-side
+  // `alias_not_found` would surface as a hard task failure via the
+  // post-#168 client classifier.
   const status = parseToolJson(await callCommHub("get_all_status", {}));
-  const statusText = JSON.stringify(status);
-  if (!statusText.includes(parsed.alias)) {
-    return `未找到目标 alias：${parsed.alias}。已查询 CommHub 在线状态，但列表中没有该精确 alias。`;
+  const sessions = (status?.sessions ?? null) as Array<{ alias?: string }> | null;
+  const check = delegationTargetExists(sessions, parsed.alias, currentAlias());
+  if (!check.exists) {
+    // #230 — fall through to the LLM instead of short-circuiting with
+    // a polite-string failure. A parser miss on descriptive text
+    // ("...刚才发给 X 的 Y...") is exactly the case where the LLM
+    // can handle the original task correctly; returning null hands
+    // it back to `processTask` so `think()` runs the normal turn.
+    // The previous behaviour rendered the entire task untouchable
+    // whenever the parser tripped on description-rather-than-
+    // imperative wording.
+    const reason = check.reason === "self_only"
+      ? "self-only match (parsed alias equals our own)"
+      : check.reason === "empty_sessions"
+        ? "commhub status returned empty sessions"
+        : check.reason === "no_sessions_field"
+          ? "commhub status missing sessions field"
+          : "not online";
+    debug(`[explicit-delegation] precheck miss for "${parsed.alias}" (${reason}); falling through to LLM`);
+    return null;
   }
 
   // #146 PR-4 — fresh alias on the explicit-delegation wrapper path.
   const fromAlias = await liveAlias();
-  const sendRes = parseToolJson(await callCommHub("send_task", {
-    alias: parsed.alias,
-    task: parsed.childTask,
-    priority: "normal",
-    from_session: fromAlias,
-    parent_task_id: taskId,
-  }));
+  let sendRes: any;
+  try {
+    sendRes = parseToolJson(await callCommHub("send_task", {
+      alias: parsed.alias,
+      task: parsed.childTask,
+      priority: "normal",
+      from_session: fromAlias,
+      parent_task_id: taskId,
+    }));
+  } catch (e: any) {
+    // #230 — if the real send_task still gets rejected by the server
+    // (e.g. a TOCTOU race where the precheck saw the session but it
+    // went offline before our dispatch, or a future server rejection
+    // we don't anticipate), fall through to the LLM rather than
+    // bubbling up as a hard task failure. Matches the precheck-miss
+    // policy above so the two failure shapes have one behavior.
+    if (e?.name === "CommHubError" && e?.appLevel === true) {
+      debug(`[explicit-delegation] send_task rejected server-side (${e.message}); falling through to LLM`);
+      return null;
+    }
+    throw e;
+  }
   const childTaskId = findTaskId(sendRes);
   if (!childTaskId) {
     return `已尝试给 ${parsed.alias} 派任务，但 CommHub 未返回 task_id：${JSON.stringify(sendRes).slice(0, 1000)}`;
