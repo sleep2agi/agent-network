@@ -11,13 +11,22 @@
     "build": "vitepress build docs",
     "preview": "vitepress preview docs"
   },
-  "keywords": ["agent-network", "documentation", "vitepress"],
+  "keywords": [
+    "agent-network",
+    "documentation",
+    "vitepress"
+  ],
   "author": "sleep2agi",
   "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {
-    "mermaid": "^11.14.0",
+    "esbuild": "^0.25.12",
+    "mermaid": "^11.15.0",
     "vitepress": "^1.6.4",
     "vitepress-plugin-mermaid": "^2.0.17"
+  },
+  "overrides": {
+    "vite": "^6.4.2",
+    "qs": "^6.15.2"
   }
 }
