@@ -313,7 +313,7 @@ anet node create <name> [options]
 
 | Parameter | Default | Description |
 |------|--------|------|
-| `--runtime` | omit it to enter the interactive **runtime-first wizard** ([#133](https://github.com/sleep2agi/agent-network/issues/133) since v0.9.2): a 4-way picker chooses `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`. **Only `claude-agent-sdk` continues into the vendor picker + model selection + API-key prompt**; the other three runtimes print the matching `auth login` hint and skip the vendor step (`claude-code-cli` prints `claude auth login`; `codex-sdk` prints `codex auth login`; `grok-build-acp` prints `grok auth login` + `XAI_API_KEY` reminder). For the full wizard order, see [Getting Started §5](/en/guide/getting-started#_5-create-an-agent). | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` |
+| `--runtime` | omit it to enter the interactive **runtime-first wizard** ([#133](https://github.com/sleep2agi/agent-network/issues/133) since v0.9.2): a 4-way picker chooses `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`. **Only `claude-agent-sdk` continues into the vendor picker + model selection + API-key prompt**; the other three runtimes print the matching `auth login` hint and skip the vendor step (`claude-code-cli` prints `claude auth login`; `codex-sdk` prints `codex auth login`; `grok-build-acp` prints `grok auth login` (this runtime also needs the `XAI_API_KEY` env — see [runtimes](/en/guide/runtimes))). For the full wizard order, see [Getting Started §5](/en/guide/getting-started#_5-create-an-agent). | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` |
 | `--model` | (per runtime default) | Model name |
 
 **Examples**:
