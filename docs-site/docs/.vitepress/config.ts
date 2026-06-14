@@ -94,6 +94,7 @@ export default withMermaid(defineConfig({
           {
             text: '部署',
             items: [
+              { text: '干净服务器从零部署', link: '/deploy/clean-server' },
               { text: 'Docker 部署', link: '/deploy/docker' },
               { text: 'npm 部署', link: '/deploy/npm' },
               { text: '生产部署 / 公网部署安全', link: '/deploy/production' },
@@ -178,6 +179,7 @@ export default withMermaid(defineConfig({
           {
             text: 'Deployment',
             items: [
+              { text: 'Fresh Server From Scratch', link: '/en/deploy/clean-server' },
               { text: 'Docker', link: '/en/deploy/docker' },
               { text: 'npm', link: '/en/deploy/npm' },
               { text: 'Production / Public Internet', link: '/en/deploy/production' },

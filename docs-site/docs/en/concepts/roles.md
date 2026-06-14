@@ -97,7 +97,7 @@ Become an admin:
 # Option 1 (recommended): owner issues an admin invite — recipient joins directly with admin role
 anet network invite --role admin --uses 1
 
-# Option 2: promote an existing member via REST (v0.10.13 stable still has no CLI promote subcommand; queued for v0.11+ / unscheduled)
+# Option 2: promote an existing member via REST (v0.10.15 stable still has no CLI promote subcommand; queued for v0.11+ / unscheduled)
 curl -X PUT http://localhost:9200/api/networks/<net_id>/members/<user_id> \
   -H "Authorization: Bearer <owner_utok>" \
   -H "Content-Type: application/json" \

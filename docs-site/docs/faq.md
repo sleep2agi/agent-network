@@ -24,7 +24,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 ### 3. 免费吗？
 
-**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.10.13 stable 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
+**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.10.15 stable 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
 
 - 仓库公开、源码可改
 - 商业模式 = 卖课 + 卖服务咨询，不依赖强制官方 SaaS
@@ -354,7 +354,7 @@ vercel deploy --prebuilt --prod      # 上传 .vercel/output
 - 防火墙关闭了长连接
 - nginx `proxy_buffering` 默认 on（SSE 必须 off，否则事件被缓冲到 buffer 满才一次性送达）
 
-> **断了 agent 会自己重连**：v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起（v0.10.13 latest 已包含）指数退避 `1s → 30s` 上限 + 重连即重 register + 1h 失败放弃。如果 hub 重启了 dashboard 看不到节点，参考 [troubleshooting — Hub 重启后 Dashboard 看不到节点](/troubleshooting#hub-重启后-dashboard-看不到节点)。
+> **断了 agent 会自己重连**：v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起（v0.10.15 latest 已包含）指数退避 `1s → 30s` 上限 + 重连即重 register + 1h 失败放弃。如果 hub 重启了 dashboard 看不到节点，参考 [troubleshooting — Hub 重启后 Dashboard 看不到节点](/troubleshooting#hub-重启后-dashboard-看不到节点)。
 
 Nginx 配置建议：
 

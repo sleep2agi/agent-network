@@ -211,12 +211,12 @@ The older example listed `create_network` as an audit action — **it does not e
 The settings page manages personal configuration:
 
 - **Profile** -- Edit display name, email
-- **Password** -- Change login password (current v0.10.13 stable Dashboard `0.5.6` UI not yet shipped; use CLI `anet passwd` — see [account-system / Change Password](/en/guide/account-system#change-password))
+- **Password** -- Change login password (current v0.10.15 stable Dashboard `0.5.6` UI not yet shipped; use CLI `anet passwd` — see [account-system / Change Password](/en/guide/account-system#change-password))
 - **Token Management** -- Create / view / revoke API tokens
 - **Network Settings** -- Current network config (owner/admin only)
   - Rename network
   - Create invite codes
-  - Manage member roles (current v0.10.13 stable Dashboard `0.5.6` partial; CLI has `anet network invite` but **no** `promote` / `demote` sub-commands — role changes currently go through REST [`PUT /api/networks/:id/members/:user_id`](/en/api/rest#put-api-networks-id-members-user-id). CLI sub-commands queued for v0.11+ / unscheduled.)
+  - Manage member roles (current v0.10.15 stable Dashboard `0.5.6` partial; CLI has `anet network invite` but **no** `promote` / `demote` sub-commands — role changes currently go through REST [`PUT /api/networks/:id/members/:user_id`](/en/api/rest#put-api-networks-id-members-user-id). CLI sub-commands queued for v0.11+ / unscheduled.)
   - Delete network
 
 Token management interface:

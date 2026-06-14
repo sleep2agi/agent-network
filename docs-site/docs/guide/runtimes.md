@@ -335,7 +335,7 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 启用后 agent-node 走 `spawn('codex', ['app-server'])` + 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** `@openai/codex-sdk` `--mcp-config` HTTP transport 那条 bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family），不再受 codex-sdk breaking change 牵制。
 
-**v0.10.x（含当前 v0.10.13 stable）默认仍走 `@openai/codex-sdk` wrapper**（先收 preview 反馈、保 backward-compat）；v0.11.0 计划 default flip 到 stdio direct，wrapper 路径进入 deprecation warning。完整背景见 [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0)。
+**v0.10.x（含当前 v0.10.15 stable）默认仍走 `@openai/codex-sdk` wrapper**（先收 preview 反馈、保 backward-compat）；v0.11.0 计划 default flip 到 stdio direct，wrapper 路径进入 deprecation warning。完整背景见 [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0)。
 :::
 
 ---
@@ -348,7 +348,7 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 - 本机已装 `grok` CLI 并 `grok auth login` 完成
 - 环境变量 `XAI_API_KEY` 已设
-- `agent-network ≥ 2.2.10`（v0.10.13 latest）+ `agent-node ≥ 2.4.9`（v0.10.13 hotfix 修了 `session/prompt` 300s 超时 — 早一点的 agent-node 跑 grok 长任务会卡死，详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
+- `agent-network ≥ 2.2.10`（v0.10.15 latest）+ `agent-node ≥ 2.4.9`（v0.10.13 hotfix 修了 `session/prompt` 300s 超时 — 早一点的 agent-node 跑 grok 长任务会卡死，详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
 
 ### 起节点
 
@@ -359,7 +359,7 @@ anet node start my-grok
 
 ### 长任务超时调整（`flags.grokAcpTimeoutMs`）
 
-v0.10.13 latest 行为：agent-node 给每个 `session/prompt` 调用设一个**整体硬超时**，默认 **300000 ms（5 分钟）**。视频生成 / 大型 X 搜索 / 多轮 batch 工具调用这种长任务跑超 5min 时，agent-node 会主动 reject 整个请求并把 task 标 `failed`。
+v0.10.15 latest 行为：agent-node 给每个 `session/prompt` 调用设一个**整体硬超时**，默认 **300000 ms（5 分钟）**。视频生成 / 大型 X 搜索 / 多轮 batch 工具调用这种长任务跑超 5min 时，agent-node 会主动 reject 整个请求并把 task 标 `failed`。
 
 调大上限有两条路（任选其一，env 变量优先）：
 

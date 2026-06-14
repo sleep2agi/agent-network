@@ -19,7 +19,7 @@ v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) actually r
 
 ```bash
 npm install -g @sleep2agi/agent-network@latest
-anet --version            # current latest v2.2.10 (v0.10.13, 2026-06-08)
+anet --version            # current latest v2.2.12 (v0.10.15, 2026-06-14)
 ```
 
 From there on, `anet upgrade` auto-detached-spawns and `anet -v` reflects the new build a minute or two later.
@@ -98,7 +98,7 @@ anet upgrade --self
 | `self skip` | anet does not self-upgrade by default (pass `--self`) |
 | `lookup failed` | npm registry lookup failed — network / package name issue |
 
-**Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.4` on v0.10.13 stable; historical chain detail in the [changelog](/en/changelog) `commhub-server` rows). `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
+**Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.4` on v0.10.15 stable; historical chain detail in the [changelog](/en/changelog) `commhub-server` rows). `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
 
 **After the upgrade**: `anet upgrade` prints a hint that running nodes need a restart to pick up the new agent-node:
 

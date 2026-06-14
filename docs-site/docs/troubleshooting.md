@@ -64,7 +64,7 @@ sudo ufw allow 9200
 
 **原因**：SSE 长连接断开，通常是网络波动。
 
-**解决**：Agent 会自动重连（v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起，v0.10.13 latest 已包含：指数退避 `1s → 30s` 上限 + 重连即重 register + 1h 失败放弃，[详见 agent-node 断线重连](/guide/agent-node#断线重连)），通常无需手动干预。
+**解决**：Agent 会自动重连（v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起，v0.10.15 latest 已包含：指数退避 `1s → 30s` 上限 + 重连即重 register + 1h 失败放弃，[详见 agent-node 断线重连](/guide/agent-node#断线重连)），通常无需手动干预。
 
 如果持续失败：
 
@@ -90,7 +90,7 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 **原因（v0.10.10 及以前）**：hub 重启会清空 sessions 内存表。老版本 `agent-node` 的 SSE 重连只恢复事件流，**不重发 register**——hub 端 sessions 表要等下次 3 分钟 heartbeat 才会重建，期间 Dashboard 看不到任何节点。
 
-**解决（v0.10.13 latest）**：v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起结构性修复，SSE 重连成功立即重发 register（idempotent upsert），Dashboard 30s 内自动恢复完整节点列表。**无需手动 `anet project restart`**，跟 `anet hub stop` / `hub status` 配套用 → hub 维护 SOP 一键完成。如果你 agent-node 还停留在 v0.10.10 及以前，跑 `anet upgrade` 升到 latest 即享受。
+**解决（v0.10.15 latest）**：v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起结构性修复，SSE 重连成功立即重发 register（idempotent upsert），Dashboard 30s 内自动恢复完整节点列表。**无需手动 `anet project restart`**，跟 `anet hub stop` / `hub status` 配套用 → hub 维护 SOP 一键完成。如果你 agent-node 还停留在 v0.10.10 及以前，跑 `anet upgrade` 升到 latest 即享受。
 
 ---
 
@@ -710,7 +710,7 @@ anet node stop grok-marketing && anet node start grok-marketing
 anet --version          # agent-node ≥ 2.4.9
 ```
 
-**真长任务仍超时（视频生成 / 大型 X 搜索）**：v0.10.13 的 300 s 默认上限对一些视频或大批量场景仍偏短。用 `flags.grokAcpTimeoutMs`（config）或 `GROK_ACP_TIMEOUT_MS`（env，优先）调大：
+**真长任务仍超时（视频生成 / 大型 X 搜索）**：v0.10.15 的 300 s 默认上限对一些视频或大批量场景仍偏短。用 `flags.grokAcpTimeoutMs`（config）或 `GROK_ACP_TIMEOUT_MS`（env，优先）调大：
 
 ```bash
 # 临时（启 grok 节点前 export）

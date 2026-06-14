@@ -64,7 +64,7 @@ sudo ufw allow 9200
 
 **Cause**: SSE long connection dropped, usually due to network fluctuation.
 
-**Solution**: The agent will auto-reconnect (since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202), already in v0.10.13 latest: exponential backoff `1s → 30s` cap + re-register on every successful (re)connect + give up after 1h continuous failure — [see agent-node reconnection](/en/guide/agent-node#reconnection)); no manual intervention usually needed.
+**Solution**: The agent will auto-reconnect (since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202), already in v0.10.15 latest: exponential backoff `1s → 30s` cap + re-register on every successful (re)connect + give up after 1h continuous failure — [see agent-node reconnection](/en/guide/agent-node#reconnection)); no manual intervention usually needed.
 
 If it persists:
 
@@ -90,7 +90,7 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 **Cause (v0.10.10 and earlier)**: The hub restart clears its in-memory sessions table. Older `agent-node` versions only restored the event stream on reconnect; they **did not re-send `register`** — so the hub-side sessions table only rebuilt on the next 3-minute heartbeat, leaving the Dashboard blank in between.
 
-**Solution (v0.10.13 latest)**: Since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202), every successful SSE reconnect immediately re-fires `register` (idempotent upsert on the hub), and the Dashboard recovers the full node list within ~30s. **No `anet project restart` needed**; pair this with the `anet hub stop` / `hub status` commands for a one-shot maintenance SOP. If you're still on v0.10.10 or earlier, run `anet upgrade` to pick up the fix.
+**Solution (v0.10.15 latest)**: Since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202), every successful SSE reconnect immediately re-fires `register` (idempotent upsert on the hub), and the Dashboard recovers the full node list within ~30s. **No `anet project restart` needed**; pair this with the `anet hub stop` / `hub status` commands for a one-shot maintenance SOP. If you're still on v0.10.10 or earlier, run `anet upgrade` to pick up the fix.
 
 ---
 
@@ -711,7 +711,7 @@ anet node stop grok-marketing && anet node start grok-marketing
 anet --version          # agent-node ≥ 2.4.9
 ```
 
-**Genuinely long jobs still hit the cap (video generation / large X searches)**: the 300 s default in v0.10.13 is still too tight for some video or batch workloads. Bump it via `flags.grokAcpTimeoutMs` (config) or `GROK_ACP_TIMEOUT_MS` (env, takes precedence):
+**Genuinely long jobs still hit the cap (video generation / large X searches)**: the 300 s default in v0.10.15 is still too tight for some video or batch workloads. Bump it via `flags.grokAcpTimeoutMs` (config) or `GROK_ACP_TIMEOUT_MS` (env, takes precedence):
 
 ```bash
 # Per-shell (export before starting the grok node)

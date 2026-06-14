@@ -19,7 +19,7 @@ v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) 才真解 
 
 ```bash
 npm install -g @sleep2agi/agent-network@latest
-anet --version            # 当前 latest v2.2.10（v0.10.13，2026-06-08）
+anet --version            # 当前 latest v2.2.12（v0.10.15，2026-06-14）
 ```
 
 之后再有新版本，跑 `anet upgrade` 即自动 detached spawn，一两分钟后 `anet -v` 是新版。
@@ -98,7 +98,7 @@ anet upgrade --self
 | `self skip` | 默认不自升 anet 本身（要加 `--self`）|
 | `lookup failed` | npm registry 查不到 latest，网络/包名问题 |
 
-**特别提示 `commhub-server`**：这行显示当前 `PINNED_SERVER_VERSION`（v0.10.13 stable 是 `0.8.4`，历史 chain 见 [changelog](/changelog) `commhub-server` 段）—— `anet hub start` 不管全局装的是什么版本都跑这个 pinned 版（避免 server breaking 风险）。所以即使全局 `commhub-server` 升了也没影响 hub 实际运行。
+**特别提示 `commhub-server`**：这行显示当前 `PINNED_SERVER_VERSION`（v0.10.15 stable 是 `0.8.4`，历史 chain 见 [changelog](/changelog) `commhub-server` 段）—— `anet hub start` 不管全局装的是什么版本都跑这个 pinned 版（避免 server breaking 风险）。所以即使全局 `commhub-server` 升了也没影响 hub 实际运行。
 
 **升完之后**：`anet upgrade` 末尾会提示「跑过的节点要重启拿新 agent-node」，可以一键：
 

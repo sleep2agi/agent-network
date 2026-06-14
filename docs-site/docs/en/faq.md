@@ -24,7 +24,7 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 
 ### 3. Is it free?
 
-**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.13 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
+**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.15 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
 
 - Public repo, modifiable source
 - Business model = courses + consulting, not a forced hosted SaaS
@@ -354,7 +354,7 @@ Possible causes:
 - Firewall closing long connections
 - nginx `proxy_buffering` left at the default `on` (must be `off` for SSE, otherwise events sit in the buffer until it fills)
 
-> **The agent reconnects on its own when the stream drops**: since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) (already in v0.10.13 latest), agent-node uses exponential backoff `1s → 30s` cap + re-register on every successful (re)connect + give up after 1h continuous failure. If the hub restarted and the dashboard can no longer see your nodes, see [troubleshooting — Dashboard shows no nodes after a hub restart](/en/troubleshooting#dashboard-shows-no-nodes-after-a-hub-restart).
+> **The agent reconnects on its own when the stream drops**: since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) (already in v0.10.15 latest), agent-node uses exponential backoff `1s → 30s` cap + re-register on every successful (re)connect + give up after 1h continuous failure. If the hub restarted and the dashboard can no longer see your nodes, see [troubleshooting — Dashboard shows no nodes after a hub restart](/en/troubleshooting#dashboard-shows-no-nodes-after-a-hub-restart).
 
 Nginx configuration recommendation:
 

@@ -139,7 +139,7 @@ npx @sleep2agi/agent-node \
   --hub http://YOUR_IP:9200
 ```
 
-::: tip v0.10.11 起的 grok-build-acp 改进（v0.10.13 latest 已包含）
+::: tip v0.10.11 起的 grok-build-acp 改进（v0.10.15 latest 已包含）
 - [#201](https://github.com/sleep2agi/agent-network/issues/201) — delegate refusal 3-layer 修：parser broaden + prompt softening + 授权措辞表
 - [#204](https://github.com/sleep2agi/agent-network/issues/204) — MCP per-session inject + 节点 cwd 隔离，防 `.mcp.json` 身份污染
 
@@ -446,7 +446,7 @@ Agent Node 的完整生命周期：
 SSE 断连后自动重连，使用指数退避策略：
 
 ```
-重连间隔（v0.10.13 latest，v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起）: 指数退避 `1s → 2s → 4s → 8s → 16s → 30s (上限)`
+重连间隔（v0.10.15 latest，v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起）: 指数退避 `1s → 2s → 4s → 8s → 16s → 30s (上限)`
 ```
 
 重连成功后自动恢复 online 状态。三件事一起改：
@@ -455,7 +455,7 @@ SSE 断连后自动重连，使用指数退避策略：
 - **重连即重 register**：重连成功立即重发 register（idempotent upsert），dashboard 30s 内恢复完整节点列表（之前老路径要等下次 3min heartbeat）
 - **失败放弃保护**：连续失败 > 1h 主动放弃 + 写 error log，不再无限重试占 CPU
 
-跟 v0.10.13 latest 的 `anet hub stop` / `hub status` 命令配套用：hub 维护时 stop → start 流程后，节点自动恢复，**无需 `anet project restart`**。如果你 agent-node 还停留在 v0.10.10 及以前，跑 `anet upgrade` 升上去即享受。
+跟 v0.10.15 latest 的 `anet hub stop` / `hub status` 命令配套用：hub 维护时 stop → start 流程后，节点自动恢复，**无需 `anet project restart`**。如果你 agent-node 还停留在 v0.10.10 及以前，跑 `anet upgrade` 升上去即享受。
 
 ### 优雅退出
 
@@ -483,7 +483,7 @@ SSE 断连后自动重连，使用指数退避策略：
 | `TELEGRAM_BOT_TOKEN` | channel `.env` / `config.env.TELEGRAM_BOT_TOKEN` | Telegram channel 的 bot token —— agent-node 在 telegram channel 启动路径直接读（cli.ts:259）；白名单走 `access.json` 不走 env（见 [Channel — Telegram](/guide/channels#telegram-channel)） |
 | `CLAUDE_TIMEOUT_MS` | `--claude-timeout-ms` / `config.flags.claudeTimeoutMs` / `config.claudeTimeoutMs` | `claude-agent-sdk` runtime 单次 query 超时（毫秒），默认 **`300000`（300s）**（[#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) v0.9.2 起从 120s 提升 —— [SDK concurrency investigation](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md) 实测 fan-out 高并发场景 intern API 单次 latency 拉到 17-37s，120s 老 ceiling 中途触发 abort 导致 25/30 子 agent 失败）；超时 abort + 返回错误，提示检查 `ANTHROPIC_BASE_URL` 是否可达。verify [`agent-node/src/cli.ts:241-243`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L241) |
 | `CLAUDE_MAX_RETRIES` | `--claude-max-retries` / `config.flags.claudeMaxRetries` / `config.claudeMaxRetries` | `claude-agent-sdk` runtime 单 query 失败时的重试次数，默认 **`2`**（共 3 attempts 含 initial）。每次 attempt 跑满 `CLAUDE_TIMEOUT_MS` window；transient error / timeout backoff `4s, 8s + 0-1s jitter`（jitter 散开 herd retries 防一窝蜂打 vendor queue）。**auth-class 错误不 retry**（[#129 fast-fail](https://github.com/sleep2agi/agent-network/issues/129)：`isAuthError` regex 命中 401 / 403 / `invalid_api_key` / intern A02xx 等直接 FATAL 返回 vendor-specific URL hint）。设 `0` 退回 v0.9.1 行为（no retry）。[#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) v0.9.2 起引入。verify [`agent-node/src/cli.ts:250-253`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L250) + retry loop [`cli.ts:729-792`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L729) |
-| `ANET_CODEX_STDIO_DIRECT` | env only（无 CLI flag / config 字段；per-spawn 注入）| **v0.10.0 起，仅 `runtime=codex` 时生效**（claude-agent-sdk / claude-code-cli 忽略）。设 `=1` 把 codex runtime 从 `@openai/codex-sdk` wrapper 切到**直 stdio JSON-RPC 客户端**路径：agent-node `spawn('codex', ['app-server'])` + ~155 LOC stdio client + 完整 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** wrapper `--mcp-config` HTTP transport bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family）。v0.10.x（含当前 v0.10.13 stable）**默认仍走 wrapper**（preview 反馈窗口 + backward compat）；v0.11.0 计划 default flip，届时 toggle 改成 `ANET_CODEX_LEGACY_SDK=1` opt-out 反向开关（per [`agent-node/src/cli.ts:1043-1048` 注释](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1043)）。[#141](https://github.com/sleep2agi/agent-network/issues/141) v0.10.0 起引入。verify [`agent-node/src/cli.ts:1048` `if (process.env.ANET_CODEX_STDIO_DIRECT === "1")`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1048) |
+| `ANET_CODEX_STDIO_DIRECT` | env only（无 CLI flag / config 字段；per-spawn 注入）| **v0.10.0 起，仅 `runtime=codex` 时生效**（claude-agent-sdk / claude-code-cli 忽略）。设 `=1` 把 codex runtime 从 `@openai/codex-sdk` wrapper 切到**直 stdio JSON-RPC 客户端**路径：agent-node `spawn('codex', ['app-server'])` + ~155 LOC stdio client + 完整 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** wrapper `--mcp-config` HTTP transport bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family）。v0.10.x（含当前 v0.10.15 stable）**默认仍走 wrapper**（preview 反馈窗口 + backward compat）；v0.11.0 计划 default flip，届时 toggle 改成 `ANET_CODEX_LEGACY_SDK=1` opt-out 反向开关（per [`agent-node/src/cli.ts:1043-1048` 注释](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1043)）。[#141](https://github.com/sleep2agi/agent-network/issues/141) v0.10.0 起引入。verify [`agent-node/src/cli.ts:1048` `if (process.env.ANET_CODEX_STDIO_DIRECT === "1")`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1048) |
 | `ANTHROPIC_BASE_URL` | `config.env.ANTHROPIC_BASE_URL` | 模型 API 地址（接第三方 Anthropic 兼容 endpoint 时必填） |
 | `ANTHROPIC_AUTH_TOKEN` | `config.env.ANTHROPIC_AUTH_TOKEN` | 模型 API Key —— **第三方 Anthropic 兼容 endpoint**（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter / vLLM 等）走这个 |
 | `ANTHROPIC_API_KEY` | `config.env.ANTHROPIC_API_KEY` | 模型 API Key —— **api.anthropic.com 直连专用**，不要拿来传第三方 endpoint key（详见 [runtimes — claude-agent-sdk 常见坑](/guide/runtimes#claude-agent-sdk)） |
