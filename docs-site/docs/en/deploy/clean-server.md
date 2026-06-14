@@ -123,13 +123,21 @@ ss -tlnp | grep 9200
 # Change to a different port
 anet hub start --port 9201
 
-# Or stop the old hub manually
-# (anet 2.2.12 latest does not ship an `anet hub stop` subcommand — use this instead)
+# Or gracefully stop the old hub (preferred)
+anet hub stop                  # default port 9200, SIGTERM → 3s grace → SIGKILL fallback
+anet hub stop --port 9201      # non-default port
+anet hub status                # show current PID / port / commhub-server version
+
+# Fallback if the above somehow doesn't work
 HUB_PID=$(ss -tlnp | grep ':9200' | sed -E 's/.*pid=([0-9]+).*/\1/' | head -1)
-kill "$HUB_PID"                # Graceful stop
+kill "$HUB_PID"
 # Or if your hub runs under tmux, attach and Ctrl+C
 tmux a -t anet-hub             # Then Ctrl+C to stop, Ctrl+B D to keep the tmux session
 ```
+
+::: tip `anet hub --help` doesn't list stop/status yet?
+On v2.2.12 latest, `anet hub --help` **does not list** the `stop` / `status` subcommands (display bug, tracked in [#240](https://github.com/sleep2agi/agent-network/issues/240), fix in [PR #241](https://github.com/sleep2agi/agent-network/pull/241), shipping with v0.10.16); **the commands themselves work** — running `anet hub status` returns `hub running / vX.Y.Z / pid N`.
+:::
 :::
 
 ## 3. CLI Login

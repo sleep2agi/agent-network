@@ -123,13 +123,21 @@ ss -tlnp | grep 9200
 # 换端口
 anet hub start --port 9201
 
-# 或手动停旧 hub
-# (anet 2.2.12 latest 没有 `anet hub stop` 子命令, 用下面这套)
+# 或优雅停掉旧 hub (推荐)
+anet hub stop                  # 默认端口 9200, SIGTERM → 3s grace → SIGKILL 兜底
+anet hub stop --port 9201      # 非默认端口
+anet hub status                # 看当前 PID / 端口 / commhub-server 版本
+
+# 万一以上不可用, 兜底手动停
 HUB_PID=$(ss -tlnp | grep ':9200' | sed -E 's/.*pid=([0-9]+).*/\1/' | head -1)
-kill "$HUB_PID"                # 优雅停
+kill "$HUB_PID"
 # 或如果你的 hub 跑在 tmux 里, 直接 attach + Ctrl+C
 tmux a -t anet-hub             # 然后按 Ctrl+C 停, Ctrl+B D 留 tmux 会话
 ```
+
+::: tip `anet hub --help` 暂时看不到 stop/status?
+v2.2.12 latest 的 `anet hub --help` **不列出** `stop` / `status` 子命令(显示 bug, [#240](https://github.com/sleep2agi/agent-network/issues/240) 跟踪, [PR #241](https://github.com/sleep2agi/agent-network/pull/241) 修, 下版 v0.10.16 自然带出); **但命令本身可用** — 跑 `anet hub status` 直接返 `hub running / vX.Y.Z / pid N`.
+:::
 :::
 
 ## 3. CLI 登录
