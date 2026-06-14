@@ -76,7 +76,7 @@ npm install -g @sleep2agi/agent-network
 | `anet logs <name>` | 查看 Agent 日志（加 `--follow` 实时 tail） |
 | `anet node rename <old> <new>` | 重命名 Agent —— ⚠ **节点必须至少 `anet node start` 启动过一次**（在 commhub server 端留下 sessions 行）。从未 start 过的 purely-created 节点 rename 会在 `prepareRename` 阶段 fail 报 `node not found in network`，[#110](https://github.com/sleep2agi/agent-network/issues/110)。Workaround：先 `anet node start <old>` 跑一次让 server 端注册，再 stop 后 rename。失败安全（PHASE 1 rollback，老节点完好）|
 | `anet node migrate-token-to-envref <name>` | 把节点 `config.json` 里的明文 secret（按 key 后缀 `_TOKEN`/`_KEY`/`_SECRET`/`AUTH` 或值前缀 `sk-`/`utok_`/`ntok_`/`atok_`/`ak-`/`gsk_`/`key-`/`Bearer ` 识别）迁移到 envRef 形式 `{ _envRef: "<KEY>_<NODE_SUFFIX>" }`，secret 不再持久化在磁盘 —— 写 `config.json.bak-<ts>` 备份原文件、打印需要 `export` 的 env 变量列表。详见 [安全设计 — Vendor 凭据存储 envRef 模式](/concepts/security#vendor-凭据存储envref-模式v0-9-0) + [Token 体系 — envRef](/concepts/tokens) ([#125](https://github.com/sleep2agi/agent-network/issues/125)) |
-| `anet node delete <name>` | 删除 Agent（默认交互式确认；加 `--force` 或 `--yes` 跳过；**不自动撤销 ntok_** — 要彻底清干净加 `anet token revoke <id>`，详见 [Token 生命周期](/concepts/tokens#token-生命周期对照)） |
+| `anet node delete <name>` | 删除 Agent. **两步式**: 第一次跑只打印 will-delete 预览 + 提示 "Run again with `--force` to confirm"; 第二次跑加 `--force` 才真删. **不自动撤销 ntok_** — 要彻底清干净再加 `anet token revoke <id>`, 详见 [Token 生命周期](/concepts/tokens#token-生命周期对照). |
 
 ### Session 绑定（`claude-code-cli` runtime）
 
@@ -319,7 +319,7 @@ anet node create <name> [options]
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--runtime` | 不传则走交互式 **runtime-first wizard**（v0.9.2+ 起 [#133](https://github.com/sleep2agi/agent-network/issues/133) Vincent 改成 runtime-first：先 3-way 选 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`，**只有** `claude-agent-sdk` 才继续走 vendor picker；`claude-code-cli` print `claude auth login` hint 跳过 vendor，`codex-sdk` print `codex auth login` hint 跳过 vendor）| `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `--runtime` | 不传则走交互式 **runtime-first wizard** ([#133](https://github.com/sleep2agi/agent-network/issues/133) v0.9.2 起): 4-way 选 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`. **只有 `claude-agent-sdk` 才继续走 vendor picker + model 选择 + API Key**; 其他三个 runtime print 对应 CLI 的 auth login hint 然后跳过 vendor (`claude-code-cli` 提示 `claude auth login` / `codex-sdk` 提示 `codex auth login` / `grok-build-acp` 提示 `grok auth login` + `XAI_API_KEY`). 详细 wizard 顺序见 [上手指南 §5](/guide/getting-started#_5-创建-agent-节点). | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` |
 | `--model` | (按 runtime 默认) | 模型名称 |
 
 **示例**：

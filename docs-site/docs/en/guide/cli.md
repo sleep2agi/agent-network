@@ -76,7 +76,7 @@ After installation, the `anet` command is available globally.
 | `anet logs <name>` | View agent logs (add `--follow` to tail in real time) |
 | `anet node rename <old> <new>` | Rename an agent — ⚠ **The node must have been `anet node start`ed at least once** (so a sessions row exists on the commhub server). Purely-created nodes that have never started will fail at the `prepareRename` step with `node not found in network`, [#110](https://github.com/sleep2agi/agent-network/issues/110). Workaround: run `anet node start <old>` once so the server registers it, then `stop` and rename. Fail-safe (PHASE 1 rollback — the old node stays intact) |
 | `anet node migrate-token-to-envref <name>` | Migrate plain-secret env values in this node's `config.json` (detected by key suffix `_TOKEN`/`_KEY`/`_SECRET`/`AUTH` or value prefix `sk-`/`utok_`/`ntok_`/`atok_`/`ak-`/`gsk_`/`key-`/`Bearer `) to the envRef shape `{ _envRef: "<KEY>_<NODE_SUFFIX>" }`, so secrets no longer persist on disk. Writes a `config.json.bak-<ts>` backup and prints the `export` lines you need to set the env variables. See [Security — Vendor Credential Storage envRef mode](/en/concepts/security#vendor-credential-storage-envref-mode-v0-9-0) + [Tokens — envRef](/en/concepts/tokens) ([#125](https://github.com/sleep2agi/agent-network/issues/125)) |
-| `anet node delete <name>` | Delete an agent (interactive confirm by default; add `--force` or `--yes` to skip; **does not auto-revoke the `ntok_`** — pair with `anet token revoke <id>` for full cleanup, see [Token lifecycle](/en/concepts/tokens#token-lifecycle-matrix)) |
+| `anet node delete <name>` | Delete an agent. **Two-step pattern**: the first run only prints a will-delete preview + the message "Run again with `--force` to confirm"; the second run, with `--force`, actually deletes. **Does not auto-revoke the `ntok_`** — pair with `anet token revoke <id>` for full cleanup, see [Token lifecycle](/en/concepts/tokens#token-lifecycle-matrix). |
 
 ### Session binding (`claude-code-cli` runtime)
 
@@ -313,7 +313,7 @@ anet node create <name> [options]
 
 | Parameter | Default | Description |
 |------|--------|------|
-| `--runtime` | omit it to enter the interactive **runtime-first wizard** (since v0.9.2 [#133](https://github.com/sleep2agi/agent-network/issues/133): a 3-way picker chooses `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` first; **only** `claude-agent-sdk` continues into the vendor picker. `claude-code-cli` prints a `claude auth login` hint and skips the vendor step; `codex-sdk` prints a `codex auth login` hint and does the same) | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` |
+| `--runtime` | omit it to enter the interactive **runtime-first wizard** ([#133](https://github.com/sleep2agi/agent-network/issues/133) since v0.9.2): a 4-way picker chooses `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`. **Only `claude-agent-sdk` continues into the vendor picker + model selection + API-key prompt**; the other three runtimes print the matching `auth login` hint and skip the vendor step (`claude-code-cli` prints `claude auth login`; `codex-sdk` prints `codex auth login`; `grok-build-acp` prints `grok auth login` + `XAI_API_KEY` reminder). For the full wizard order, see [Getting Started §5](/en/guide/getting-started#_5-create-an-agent). | `claude-agent-sdk` / `codex-sdk` / `claude-code-cli` / `grok-build-acp` |
 | `--model` | (per runtime default) | Model name |
 
 **Examples**:

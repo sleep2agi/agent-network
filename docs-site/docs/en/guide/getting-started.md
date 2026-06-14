@@ -98,14 +98,41 @@ Credentials are saved to `~/.anet/config.json`. Subsequent `anet node ...` comma
 anet node create my-bot
 ```
 
-You'll get an interactive picker — **vendor first, then model**:
+The wizard asks the following, in order:
 
-1. **Pick the vendor** — choose from the built-in `VENDORS` list: InternLM / MiniMax / Xiaomi MiMo / Anthropic Claude / Codex / Claude Code CLI / custom. **The runtime is derived from the vendor** (InternLM / MiniMax / Xiaomi / Anthropic → `claude-agent-sdk`; Codex → `codex-sdk`; Claude Code → `claude-code-cli`).
-2. **Pick the model** — once a vendor is chosen, the CLI lists that vendor's available models (vendors with a single model are auto-selected; Claude Code CLI uses the subscription's model, so no model picker). The CLI then auto-injects the matching `ANTHROPIC_BASE_URL` and prompts for the API key. The `custom` vendor asks you for the base URL + model id — DeepSeek / GLM / Kimi / OpenRouter and other providers not in the built-in list go through `custom`; see [Multi-model](/en/guide/multi-model) for the full endpoint table.
+```text
+node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth
+```
 
-::: details Other runtimes
-- `codex-sdk` — passes unit tests; **no full E2E** with real codex auth.
-- `claude-code-cli` — works locally for Claude Pro subscribers; **not E2E tested**.
+**Runtime is the first fork — a 4-way pick** that decides whether you'll be asked for a vendor and what dependencies you'll need:
+
+1. **Pick a runtime** — 4 options, **default highlight is the first one (`claude-agent-sdk`)**:
+   - `claude-agent-sdk` — uses an Anthropic-compatible API; continues into the vendor submenu
+   - `claude-code-cli` — reuses your already-logged-in `claude` subscription; skips vendor / model / API key (**simplest for first-time users**)
+   - `codex-sdk` — uses the OpenAI Codex CLI login; skips vendor
+   - `grok-build-acp` — uses the xAI Grok Build CLI login + `XAI_API_KEY`; skips vendor
+
+   ::: tip First-time users: manually pick `claude-code-cli`
+   The wizard **defaults the highlight to `claude-agent-sdk`** — pressing Enter all the way lands you on the vendor + API-key path. If you've already run `claude auth login`, manually picking `claude-code-cli` is the zero-config fastest path.
+   :::
+
+2. **(claude-agent-sdk only) Pick a vendor** — from the built-in `VENDORS` list: InternLM / MiniMax / Xiaomi MiMo / Anthropic Claude / Codex (actually the codex-sdk runtime entry) / Claude Code CLI (actually the claude-code-cli runtime entry) / custom (any Anthropic-compatible endpoint — DeepSeek / GLM / Kimi / OpenRouter all go here; full endpoint table at [Multi-model](/en/guide/multi-model)).
+
+3. **(claude-agent-sdk only) Pick a model + paste the API key** — after the vendor is chosen, the CLI lists that vendor's available models (vendors with a single model are auto-selected). It then auto-injects the matching `ANTHROPIC_BASE_URL` and prompts for the API key. The `custom` vendor asks for the base URL + model id.
+
+::: warning Ctrl+C mid-vendor-selection can leave a half-baked node behind
+If you hit Ctrl+C inside the vendor submenu, the CLI may have already written a half-baked `.anet/nodes/<alias>/config.json` (no vendor, no key) to disk. Use this bare-command pair to clean it up and start over (verified on v2.2.12 latest):
+
+```bash
+anet node delete <alias>          # Step 1: prints a "will delete" preview + "Run again with --force to confirm" message
+anet node delete <alias> --force  # Step 2: actually deletes
+```
+
+[#237 issue 3](https://github.com/sleep2agi/agent-network/issues/237) tracks the wizard default + Ctrl+C rollback product improvements; this doc will be updated when they ship.
+:::
+
+::: warning The wizard does **not** ask about Telegram — don't be misled by the intro line
+After the 3 steps above the wizard **ends** and **never asks for a Telegram bot token or allow-list UID**, even though the opening line of `anet node create` mentions "optional Telegram channel". Telegram is attached after node creation using the separate command `anet channel add telegram <node> --bot-token <tok> --allow <uid>` — see [Telegram channel setup](/en/deploy/clean-server#_6-configure-the-telegram-channel-optional) for the full recipe ([#237 issue 4](https://github.com/sleep2agi/agent-network/issues/237) tracks the copy-vs-behavior fix).
 :::
 
 The node config is written to:

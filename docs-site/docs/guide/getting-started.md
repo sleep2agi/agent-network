@@ -102,14 +102,41 @@ anet login --username admin --password anethub
 anet node create my-bot
 ```
 
-这会进入交互式选择，**先选供应商、再选模型**：
+向导按这个顺序问你：
 
-1. **选供应商 (vendor)**：从内置 `VENDORS` 列表挑 —— 书生 Intern / MiniMax / 小米 MiMo / Anthropic Claude / Codex / Claude Code CLI / 自定义（custom）。**runtime 由供应商决定**（书生 / MiniMax / 小米 / Anthropic → `claude-agent-sdk`；Codex → `codex-sdk`；Claude Code → `claude-code-cli`）。
-2. **选模型**：选定供应商后，CLI 列出该供应商的可用 model 让你挑（只有 1 个 model 的供应商自动选定；Claude Code CLI 用订阅模型，没有 model 选单）。然后 CLI 自动注入对应的 `ANTHROPIC_BASE_URL`，让你输入 API Key。`custom` 供应商需手填 base URL + model id —— DeepSeek / GLM / Kimi / OpenRouter 等不在内置列表的 provider 走这里，完整 endpoint 见 [多模型配置](/guide/multi-model)。
+```text
+节点名 → runtime → (仅 claude-agent-sdk 才弹) vendor → model → API Key / 鉴权
+```
 
-::: details 其他 Runtime
-- `codex-sdk` —— 单元测试通过，**端到端未验证**（缺真实 codex 鉴权回归）。
-- `claude-code-cli` —— 复用本地 `claude` 订阅，本地能跑但**未做端到端验证**。
+**runtime 是第一道分叉, 4 选 1**, 决定后面要不要配 vendor:
+
+1. **选 runtime** —— 4 个选项, **默认高亮第一项 `claude-agent-sdk`**:
+   - `claude-agent-sdk` —— 接 Anthropic 兼容 API, 走 vendor 子菜单
+   - `claude-code-cli` —— 复用本机已 `claude auth login` 的订阅, 跳过 vendor / model / API key (**新手最省事**)
+   - `codex-sdk` —— 用 OpenAI Codex CLI 登录态, 跳过 vendor
+   - `grok-build-acp` —— 用 xAI Grok Build CLI 登录态 + `XAI_API_KEY`, 跳过 vendor
+
+   ::: tip 新手强烈建议手动选 `claude-code-cli`
+   向导**默认高亮 `claude-agent-sdk`**, 一路 Enter 会落到要选 vendor + 填 API Key 的复杂路径. 如果你已经 `claude auth login` 了, 手动选 `claude-code-cli` 是 0 配置最快路径.
+   :::
+
+2. **(仅 claude-agent-sdk) 选 vendor** —— 从内置 `VENDORS` 列表挑: 书生 Intern / MiniMax / 小米 MiMo / Anthropic Claude / Codex (实为 codex-sdk runtime 入口) / Claude Code CLI (实为 claude-code-cli runtime 入口) / 自定义 (custom, 任意 Anthropic 兼容 endpoint, DeepSeek / GLM / Kimi / OpenRouter 全走这里, 完整 endpoint 见 [多模型配置](/guide/multi-model))
+
+3. **(仅 claude-agent-sdk) 选 model + 填 API Key** —— 选定 vendor 后, CLI 列该 vendor 的可用 model (只 1 个 model 的自动选定). 然后自动注入对应的 `ANTHROPIC_BASE_URL`, 让你粘贴 API Key. `custom` vendor 需手填 base URL + model id.
+
+::: warning vendor 选择中段 Ctrl+C 可能留半成品节点
+如果在 vendor 子菜单按 Ctrl+C, CLI 可能已经写了一个半成品 `.anet/nodes/<alias>/config.json` (no vendor / no key) 到磁盘. 用下面这条裸命令清掉重来 (2.2.12 latest 验过):
+
+```bash
+anet node delete <alias>          # 第一步: 打印 will delete 预览 + 提示 "Run again with --force to confirm"
+anet node delete <alias> --force  # 第二步: 真删
+```
+
+[#237 坑 3](https://github.com/sleep2agi/agent-network/issues/237) 跟踪向导默认项 + Ctrl+C 半成品回滚的产品改进, 改完这里同步更新.
+:::
+
+::: warning 向导**不**问 Telegram, 别被开头宣传误导
+向导跑完上面 3 步就**结束**, **不会问你要 Telegram bot token / 白名单 UID**, 哪怕 `anet node create` 命令开头打了 "optional Telegram channel" 那一行. Telegram 是建完节点后**用单独命令** `anet channel add telegram <node> --bot-token <tok> --allow <uid>` 加上去, 完整步骤见 [Telegram channel 配置](/deploy/clean-server#_6-配-telegram-channel-可选) ([#237 坑 4](https://github.com/sleep2agi/agent-network/issues/237) 跟踪文案修正).
 :::
 
 完成后节点配置会写到当前目录下：
