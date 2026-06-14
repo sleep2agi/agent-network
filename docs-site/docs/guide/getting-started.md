@@ -108,13 +108,13 @@ anet node create my-bot
 节点名 → runtime → (仅 claude-agent-sdk 才弹) vendor → model → API Key / 鉴权
 ```
 
-**runtime 是第一道分叉, 4 选 1**, 决定后面要不要配 vendor:
+**runtime 是第一道分叉, 4 选 1**, 决定后面要不要配 vendor (npm 包 / 主推模型 / 详细 wizard 行为对照见 [runtimes — 四种 Runtime 对比 (canonical)](/guide/runtimes#四种-runtime-对比-canonical-表)):
 
 1. **选 runtime** —— 4 个选项, **默认高亮第一项 `claude-agent-sdk`**:
    - `claude-agent-sdk` —— 接 Anthropic 兼容 API, 走 vendor 子菜单
    - `claude-code-cli` —— 复用本机已 `claude auth login` 的订阅, 跳过 vendor / model / API key (**新手最省事**)
    - `codex-sdk` —— 用 OpenAI Codex CLI 登录态, 跳过 vendor
-   - `grok-build-acp` —— 用 xAI Grok Build CLI 登录态 + `XAI_API_KEY`, 跳过 vendor
+   - `grok-build-acp` —— 用 xAI Grok Build CLI 登录态 (该 runtime **另需** `XAI_API_KEY` env), 跳过 vendor
 
    ::: tip 新手强烈建议手动选 `claude-code-cli`
    向导**默认高亮 `claude-agent-sdk`**, 一路 Enter 会落到要选 vendor + 填 API Key 的复杂路径. 如果你已经 `claude auth login` 了, 手动选 `claude-code-cli` 是 0 配置最快路径.

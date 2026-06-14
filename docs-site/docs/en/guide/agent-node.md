@@ -3,12 +3,13 @@
 Agent Node is the working unit in Agent Network -- it receives tasks, invokes an AI model to process them, and reports results.
 
 ::: tip Not sure which Runtime to pick?
-- Not sure? Start with `claude-agent-sdk` (recommended for newcomers). Since v0.9.2 ([#133](https://github.com/sleep2agi/agent-network/issues/133)) `anet node create` is a **runtime-first wizard**: a 3-way picker chooses `claude-agent-sdk` / `claude-code-cli` / `codex-sdk` first; **only** `claude-agent-sdk` then continues into the vendor picker (built-in `VENDORS` = InternLM / MiniMax / Xiaomi MiMo / Anthropic Claude / Custom — every entry verified-with-real-call). **DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen and other Anthropic-compatible providers not in the built-in list go through "Custom"** + `ANTHROPIC_BASE_URL` env ([full provider table in multi-model.md](/en/guide/multi-model)). `grok-build-acp` is the 4th runtime; today it's only available via the explicit `--runtime grok-build-acp` flag (not in the 3-way wizard picker yet) — [details on GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md).
-- Want AI to **write code / run commands** --> `codex-sdk`
-- Want AI to **write copy / translate / analyze** (programmatic API) --> `claude-agent-sdk`
-- Want AI to **work like Claude in your terminal** --> `claude-code-cli`
-- Want to use **xAI Grok Build** --> `grok-build-acp` ([details on GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
-- Want to use **domestic Chinese models (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter, etc.)** --> `claude-agent-sdk` + `ANTHROPIC_BASE_URL` ([full provider table](/en/guide/multi-model))
+- **Reuse a Claude subscription / smoothest first-time path** → `claude-code-cli` (zero config after `claude auth login`)
+- **Writing copy / translation / analysis (programmatic) / using a domestic Chinese model** → `claude-agent-sdk` + pick the matching vendor in the wizard
+- **Writing code / running commands** → `codex-sdk`
+- **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
+- **Reach a vendor that's NOT in the built-in list** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
+
+**Authoritative comparison** of the 4 runtimes × npm package × wizard behavior × prereq auth: [runtimes — canonical table](/en/guide/runtimes#four-runtimes-canonical-table). Full `anet node create` wizard order (`node-name → runtime → ...`): [Getting Started §5](/en/guide/getting-started#_5-create-an-agent).
 :::
 
 ## Installation

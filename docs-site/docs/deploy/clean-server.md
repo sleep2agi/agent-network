@@ -166,7 +166,7 @@ anet node create my-bot
 节点名 → runtime → (仅 claude-agent-sdk 才弹) vendor → model → API Key / 鉴权
 ```
 
-**runtime 是第一道分叉, 4 选 1, 决定后面要不要配 vendor + 配什么依赖**：
+**runtime 是第一道分叉, 4 选 1, 决定后面要不要配 vendor + 配什么依赖** (npm 包 / 主推模型 / 详细 wizard 行为对照见 [runtimes — 四种 Runtime 对比 (canonical)](/guide/runtimes#四种-runtime-对比-canonical-表)):
 
 | Runtime | 复杂度 | 适合 | wizard 后续 | 额外依赖 |
 |---|---|---|---|---|

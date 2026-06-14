@@ -104,13 +104,13 @@ The wizard asks the following, in order:
 node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth
 ```
 
-**Runtime is the first fork — a 4-way pick** that decides whether you'll be asked for a vendor and what dependencies you'll need:
+**Runtime is the first fork — a 4-way pick** that decides whether you'll be asked for a vendor and what dependencies you'll need (npm package / default models / detailed wizard behavior: see [runtimes — canonical table](/en/guide/runtimes#four-runtimes-canonical-table)):
 
 1. **Pick a runtime** — 4 options, **default highlight is the first one (`claude-agent-sdk`)**:
    - `claude-agent-sdk` — uses an Anthropic-compatible API; continues into the vendor submenu
    - `claude-code-cli` — reuses your already-logged-in `claude` subscription; skips vendor / model / API key (**simplest for first-time users**)
    - `codex-sdk` — uses the OpenAI Codex CLI login; skips vendor
-   - `grok-build-acp` — uses the xAI Grok Build CLI login + `XAI_API_KEY`; skips vendor
+   - `grok-build-acp` — uses the xAI Grok Build CLI login (this runtime **also needs** the `XAI_API_KEY` env); skips vendor
 
    ::: tip First-time users: manually pick `claude-code-cli`
    The wizard **defaults the highlight to `claude-agent-sdk`** — pressing Enter all the way lands you on the vendor + API-key path. If you've already run `claude auth login`, manually picking `claude-code-cli` is the zero-config fastest path.

@@ -3,12 +3,13 @@
 Agent Node 是 Agent Network 中的工作单元 -- 接收任务、调用 AI 模型处理、回报结果。
 
 ::: tip 不知道选哪个 Runtime？
-- 不确定时先用 `claude-agent-sdk`（推荐新手）。`anet node create` 自 v0.9.2 起是**runtime-first wizard**（[#133](https://github.com/sleep2agi/agent-network/issues/133)）：先 3-way 选 `claude-agent-sdk` / `claude-code-cli` / `codex-sdk`，**只有** `claude-agent-sdk` 才继续走 vendor 选单（内置 `VENDORS` = 书生 Intern / MiniMax / 小米 MiMo / Anthropic Claude / 自定义 custom，每个跑通真 API 验证才进列表）。**DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问等不在内置列表的 Anthropic 兼容 provider 走「自定义」**+ `ANTHROPIC_BASE_URL` env 接入（[完整 provider 表见 multi-model.md](/guide/multi-model)）。`grok-build-acp` 是第 4 runtime，目前**只能通过 `--runtime grok-build-acp` flag 显式启用**（不在 wizard 3-way picker 里），[详细见 GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
-- 想让 AI **写代码 / 跑命令** --> `codex-sdk`
-- 想让 AI **写文案 / 翻译 / 分析**（编程方式调用） --> `claude-agent-sdk`
-- 想让 AI **像终端里用 Claude 一样干活** --> `claude-code-cli`
-- 想用 **xAI Grok Build** --> `grok-build-acp`（[详细见 GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)）
-- 想用**国产模型（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等）** --> `claude-agent-sdk` + `ANTHROPIC_BASE_URL`（[完整 provider 表](/guide/multi-model)）
+- **想白嫖 Claude 订阅 / 新手最省事** → `claude-code-cli` (`claude auth login` 后 0 配置)
+- **写文案 / 翻译 / 分析 (编程式) / 接国产模型** → `claude-agent-sdk` + 在 wizard 里选对应 vendor
+- **写代码 / 跑命令** → `codex-sdk`
+- **用 xAI Grok Build** → `grok-build-acp` ([详细见 GitHub ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
+- **接国产 / 非内置 vendor** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等) → `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
+
+**4 runtime × npm 包 × wizard 行为 × 前置 auth 的权威对照**: 见 [runtimes — 四种 Runtime 对比 (canonical)](/guide/runtimes#四种-runtime-对比-canonical-表). `anet node create` wizard 完整顺序 (`节点名 → runtime → ... `): [上手指南 §5](/guide/getting-started#_5-创建-agent-节点).
 :::
 
 ## 安装

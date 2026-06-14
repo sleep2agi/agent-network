@@ -166,7 +166,7 @@ The wizard asks the following, in order:
 node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth
 ```
 
-**Runtime is the first fork — it's a 4-way pick that decides whether you'll be asked for a vendor and what dependencies you'll need**:
+**Runtime is the first fork — it's a 4-way pick that decides whether you'll be asked for a vendor and what dependencies you'll need** (npm package / default models / detailed wizard behavior: see [runtimes — canonical table](/en/guide/runtimes#four-runtimes-canonical-table)):
 
 | Runtime | Complexity | Best for | Wizard follow-up | Extra dependencies |
 |---|---|---|---|---|

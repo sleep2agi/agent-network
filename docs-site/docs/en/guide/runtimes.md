@@ -2,22 +2,28 @@
 
 Every Agent Node has a **Runtime** (engine kernel) that decides how the node calls models and runs tools. Agent Network ships four Runtimes — **and you can mix them on a single Hub**: a Claude Code CLI agent dispatches a translation task to a MiniMax agent, then asks a Codex agent to write code, and merges the results back.
 
-## Four runtimes at a glance
+## Four runtimes — canonical table
 
-| Runtime | Engine | When to pick | Default models | Auth |
-|---|---|---|---|---|
-| `claude-code-cli` | spawn local `claude` CLI | Reuse your Claude subscription | Claude Sonnet / Opus | `claude` already logged in |
-| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | Programmatic access to any Anthropic-compatible API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter | API Key |
-| `codex-sdk` | `@openai/codex-sdk` | Code writing / shell commands | OpenAI Codex (gpt-5 etc) | `codex auth login` |
-| `grok-build-acp` | spawn local `grok` ACP server | Run tasks / collaborate via xAI Grok Build | xAI Grok (grok-build series) | `grok` CLI auth'd + `XAI_API_KEY` |
+> This table is the **single source of truth** for the 4 runtimes across the entire site. Other pages (`cli` / `agent-node` / `getting-started` / `clean-server`) reference it — they do not duplicate the full table.
+
+| Runtime | npm package / engine | When to pick | Default models | Prereq auth | Wizard behavior (`anet node create`) |
+|---|---|---|---|---|---|
+| `claude-code-cli` | spawn local `claude` CLI | "Just use Claude in the terminal" — **zero config if you already have the Claude subscription** | Claude Sonnet / Opus (subscription) | `claude auth login` done | Wizard ends right after pick, **skips vendor / model / API-key** |
+| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` (bundled with agent-node) | Programmatic access to any Anthropic-compatible API | Anthropic direct / MiniMax / InternLM / Xiaomi MiMo / DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen / ... ([full table](/en/guide/multi-model)) | API key | **The only runtime that pops the vendor submenu → pick vendor → pick model → enter API key** |
+| `codex-sdk` | `@openai/codex-sdk` (bundled with agent-node) | Writing code / running shell commands | OpenAI Codex (gpt-5 etc) | `codex auth login` done ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | Wizard prints `codex auth login` hint, **skips vendor** |
+| `grok-build-acp` | spawn local `grok` ACP server | Run tasks / collaborate via xAI Grok Build | xAI Grok (grok-build series) | `grok auth login` done + `XAI_API_KEY` env (this runtime **also needs** the env — it's a runtime prereq, not a wizard output) | Wizard prints `grok auth login` hint, **skips vendor** |
 
 ::: tip Not sure which one?
-- **Want to reuse a Claude subscription** → `claude-code-cli`
-- **Writing copy / translation / analysis (programmatic)** → `claude-agent-sdk`
+- **Reuse a Claude subscription / smoothest first-time path** → `claude-code-cli` (zero config after `claude auth login`)
+- **Writing copy / translation / analysis (programmatic) / using a domestic Chinese model** → `claude-agent-sdk` + pick the matching vendor in the wizard
 - **Writing code / running commands** → `codex-sdk`
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
-- **Using MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo, etc.** → `claude-agent-sdk` + `ANTHROPIC_BASE_URL`
-- **Mix-and-match (recommended)** → run all four on one Hub, pick the best engine per role
+- **Reach a vendor that's NOT in the built-in list** (DeepSeek / GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
+- **Mix and match (recommended)** → run all four on one Hub, pick the best engine per role
+:::
+
+::: tip Wizard order at a glance
+The real wizard order: `node-name → runtime → (only if claude-agent-sdk) vendor → model → API key / auth`. The 4-way runtime menu **defaults the highlight to `claude-agent-sdk`** (the most complex path: vendor + key required); first-time users should manually pick `claude-code-cli`. Full step-by-step at [Getting Started §5](/en/guide/getting-started#_5-create-an-agent).
 :::
 
 ---
