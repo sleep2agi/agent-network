@@ -17,7 +17,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 
 [^mimo-tts]: `mimo-v2.5-tts-voicedesign` 是 **TTS 语音设计模型**，Anthropic Messages 文本请求大概率 vendor 不支持；文本对话请用前 4 个 model（`mimo-v2.5-pro` / `mimo-v2.5` / `mimo-v2-pro` / `mimo-v2-omni`）。v0.10.10 起 wizard 凑齐官方 5 model preset。
 
-> 验证机制（#104-B 设计调整后）：cli.ts 不再用「`MODEL_PRESETS` + `[UNVERIFIED]` 标记」那套 —— 现在统一是 [`VENDORS` 列表（cli.ts:1336-1397）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1336)，**进列表 = 已 verified-with-real-call**。**DeepSeek / GLM / Kimi 等未跑通验证的 provider 故意不进列表** —— 它们走下方「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能用 `custom`）。各家 model id 到对应平台官网查（[MiniMax](https://platform.minimaxi.com) / [小米 MiMo](https://platform.xiaomimimo.com) / [DeepSeek](https://api-docs.deepseek.com) / [智谱](https://open.bigmodel.cn)）。
+> 验证机制（#104-B 设计调整后）：cli.ts 不再用「`MODEL_PRESETS` + `[UNVERIFIED]` 标记」那套 —— 现在统一是 [`VENDORS` 列表（在 cli.ts 里 grep `const VENDORS`）](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)，**进列表 = 已 verified-with-real-call**。**DeepSeek / GLM / Kimi 等未跑通验证的 provider 故意不进列表** —— 它们走下方「自定义」`custom` 供应商接入（任何 Anthropic 兼容 API 都能用 `custom`）。各家 model id 到对应平台官网查（[MiniMax](https://platform.minimaxi.com) / [小米 MiMo](https://platform.xiaomimimo.com) / [DeepSeek](https://api-docs.deepseek.com) / [智谱](https://open.bigmodel.cn)）。
 
 ::: tip 任何 Anthropic-compatible 提供商都能接
 上表是常用 provider，但 `claude-agent-sdk` 通过 `ANTHROPIC_BASE_URL` 接入**任何**支持 Anthropic Messages API 的服务商。没列出的服务商（自部署 vLLM / SiliconFlow / 通义千问 Anthropic 兼容端点等）也能用，只需把 `ANTHROPIC_BASE_URL` 指向对应平台的 Anthropic 兼容 endpoint，把 API Key 设到 `ANTHROPIC_AUTH_TOKEN` 即可。详见下方"配置方式"。
@@ -32,7 +32,7 @@ Agent Network 支持在同一个网络中运行不同 AI 模型的 Agent。所�
 | **Claude Code** | Anthropic | `claude-code-cli` | Claude Max 订阅 | 终端交互 | 订阅制 |
 | **Codex (codex-sdk)** | OpenAI | `codex-sdk` | codex auth login | 代码生成 | 中 |
 | **OpenRouter（多模型聚合）** | OpenRouter | `claude-agent-sdk` | `ANTHROPIC_AUTH_TOKEN` | 一个 API Key 用所有模型（GPT-4 / Claude / Gemini / Llama 等），统一计费；**不在内置 `VENDORS` 列表**，走 `custom` 供应商接入（`openrouter.ai/api/v1`）| 跟随上游 |
-| **xAI Grok Build** | xAI | `grok-build-acp` | `grok` CLI auth + `XAI_API_KEY` | xAI Grok Build ACP 协议跨 agent 协作；目前只通过 `--runtime grok-build-acp` flag 启用（不在 `anet node create` wizard 3-way picker），[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md）| 中 |
+| **xAI Grok Build** | xAI | `grok-build-acp` | `grok auth login` + `XAI_API_KEY`（runtime 前置） | xAI Grok Build ACP 协议跨 agent 协作；`anet node create` 4-way runtime picker 可选（v0.10.8 / v0.10.11 起），[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md）| 中 |
 
 ## 配置方式
 
