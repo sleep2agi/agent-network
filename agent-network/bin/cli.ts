@@ -897,10 +897,16 @@ function assertStartCompatibility(runtime: RuntimeName) {
   const requiredAgentNode = parseSemver("1.0.0")!;
   const requiredCommhub = parseSemver("0.4.0")!;
 
+  // #237 P0 #5 — agent-node is intentionally lazy-fetched via npx by the
+  // spawn path in launchAgent (cli.ts:~2417 `npx -y @sleep2agi/agent-node@preview`).
+  // Previously this blocked startup when no global install existed, forcing a
+  // manual `anet upgrade` even though the npx fallback would have pulled and
+  // run the package fine. Treat "not installed globally" as OK and let the
+  // spawn path handle the fetch; only the semver check below fails on a stale
+  // GLOBAL install that would actively shadow / block the runtime.
   if (versions.agentNode.state !== "ok" || !versions.agentNode.version) {
-    console.error(`[anet] agent-node is not installed or cannot report a version.`);
-    console.error(`[anet] Run: anet upgrade`);
-    process.exit(1);
+    console.log(`[anet] note: agent-node not installed globally — will lazy-fetch via npx on spawn (this is normal for fresh installs).`);
+    return;  // skip the semver check; npx will fetch a current version
   }
 
   const agentNodeVersion = parseSemver(versions.agentNode.version);
@@ -2509,9 +2515,11 @@ async function launchAgent(id: string, forceNewSession = false) {
 
     const claudeArgs: string[] = [];
     if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
+    let hasDevChannels = false;
     for (const ch of profile.channels) {
       if (ch.startsWith("server:")) {
         claudeArgs.push("--dangerously-load-development-channels", ch);
+        hasDevChannels = true;
       } else if (ch === "telegram") {
         claudeArgs.push("--channels", "plugin:telegram@claude-plugins-official");
       } else {
@@ -2519,6 +2527,22 @@ async function launchAgent(id: string, forceNewSession = false) {
       }
     }
     if (profile.flags.teammateMode) claudeArgs.push("--teammate-mode", profile.flags.teammateMode);
+
+    // #237 P0 #6 — Claude Code's `--dangerously-load-development-channels`
+    // pops an interactive confirm box ("I am using this for local
+    // development / Exit") that needs an Enter keystroke. In tmux/project
+    // batch paths anet auto-confirms via autoConfirmDevChannels() (uses
+    // capture-pane → send-keys). In a plain foreground `anet node start
+    // <alias>` from a non-TTY shell (ssh detached, scripted bootstrap,
+    // systemd unit before user attach), no one types Enter → node hangs
+    // offline indefinitely with no signal that it's waiting on the user.
+    // Friendly preflight: warn loud and suggest the escape hatch.
+    if (hasDevChannels && !process.stdin.isTTY) {
+      console.warn(`[anet] ⚠ claude-code-cli with --dangerously-load-development-channels needs an interactive TTY to confirm Claude Code's dev-channels prompt.`);
+      console.warn(`[anet]   This shell's stdin is not a TTY → the spawned claude process will hang on the confirm box and the node will stay offline.`);
+      console.warn(`[anet]   Fix: re-run with \`anet node start ${shellQuote(nodeId)} --tmux\` (anet auto-confirms in tmux mode via capture-pane).`);
+      console.warn(`[anet]   Or attach a TTY (interactive ssh) and run again, then hit Enter on the prompt.`);
+    }
 
     if (!profile.session) {
       profile.session = randomUUID();
