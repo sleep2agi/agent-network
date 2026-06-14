@@ -54,15 +54,26 @@ anet -v
 期望输出（版本号以 npm `latest` 为准）：
 
 ```text
-anet v2.2.11
+anet v2.2.12
 Components (auto-fetched on first use, you don't need to install them manually):
   ✓ agent-node v2.4.10
     └ @anthropic-ai/claude-agent-sdk v0.2.x
     └ @openai/codex-sdk v0.x.x
   ○ commhub-server — not installed yet (will fetch via npx on first use)
+
+Optional runtimes (install only what you'll use):
+  ✓ claude CLI v2.1.x        # 已装 + auth login
+  ✓ codex CLI v0.x.x         # 已装 + auth login
+  ...                        # 没装的 runtime 这里不显示, 用到再装 (见 §5)
+
+Nothing is broken — components are fetched the first time you run:
+  anet hub start          # bootstraps commhub-server
+  anet node start <name>  # bootstraps agent-node
+
+Docs: https://anet.sh/guide/getting-started
 ```
 
-`anet -v` 自动告诉你 `agent-node` 装没装、`commhub-server` 拉没拉。这是后面任何启动出错时的**第一查点**。
+`anet -v` 自动告诉你 `agent-node` 装没装、`commhub-server` 拉没拉、可选的 `claude` / `codex` CLI 装没装。这是后面任何启动出错时的**第一查点**。
 
 ## 2. 起 Hub（推荐 tmux 挂着）
 
@@ -106,15 +117,18 @@ anet passwd          # 交互改强密码（≥ 8 位 + 非弱密码字典）
 
 ::: details 端口被占？换端口或停旧 hub
 ```bash
-# 查看谁占了
+# 查看谁占了端口
 ss -tlnp | grep 9200
 
 # 换端口
 anet hub start --port 9201
 
-# 或优雅停掉旧 hub（v0.10.11+ 起）
-anet hub stop                # 默认端口 9200
-anet hub status              # 看当前 PID / 端口 / commhub-server 版本
+# 或手动停旧 hub
+# (anet 2.2.12 latest 没有 `anet hub stop` 子命令, 用下面这套)
+HUB_PID=$(ss -tlnp | grep ':9200' | sed -E 's/.*pid=([0-9]+).*/\1/' | head -1)
+kill "$HUB_PID"                # 优雅停
+# 或如果你的 hub 跑在 tmux 里, 直接 attach + Ctrl+C
+tmux a -t anet-hub             # 然后按 Ctrl+C 停, Ctrl+B D 留 tmux 会话
 ```
 :::
 
@@ -138,21 +152,27 @@ anet whoami          # 确认身份
 anet node create my-bot
 ```
 
-向导会问你**节点名 → runtime → vendor → model → API Key**。Runtime 4 选 1，选什么直接决定你后面要不要配额外依赖：
+向导会按这个顺序问你：
 
-| Runtime | 复杂度 | 适合 | 额外依赖 |
-|---|---|---|---|
-| **`claude-code-cli`**（推荐入门） | ⭐ | 已经在用 Claude Code，想白嫖订阅 | 本机已 `claude auth login` |
-| `claude-agent-sdk` | ⭐⭐ | 程序化用 Anthropic 兼容 API（MiniMax / 书生 / 小米 MiMo 等国产模型走这里） | API Key |
-| `codex-sdk` | ⭐⭐⭐ | 写代码 / 跑命令，用 OpenAI Codex | agent-node + codex CLI + `codex auth login` |
-| `grok-build-acp` | ⭐⭐⭐ | 用 xAI Grok Build 跑任务 | grok CLI + `grok auth login` + `XAI_API_KEY` |
+```text
+节点名 → runtime → (仅 claude-agent-sdk 才弹) vendor → model → API Key / 鉴权
+```
+
+**runtime 是第一道分叉, 4 选 1, 决定后面要不要配 vendor + 配什么依赖**：
+
+| Runtime | 复杂度 | 适合 | wizard 后续 | 额外依赖 |
+|---|---|---|---|---|
+| **`claude-code-cli`**（推荐入门） | ⭐ | 已经在用 Claude Code，想白嫖订阅 | 跳过 vendor + model, 直接走本机 claude 登录态 | 本机已 `claude auth login` |
+| `claude-agent-sdk` | ⭐⭐ | 程序化用 Anthropic 兼容 API（MiniMax / 书生 / 小米 MiMo 等国产模型走这里） | **弹 vendor 子菜单** → 选 vendor → 选 model → 填 API Key | API Key |
+| `codex-sdk` | ⭐⭐⭐ | 写代码 / 跑命令，用 OpenAI Codex | 跳过 vendor, 走 codex 登录态 | agent-node + codex CLI + `codex auth login` |
+| `grok-build-acp` | ⭐⭐⭐ | 用 xAI Grok Build 跑任务 | 跳过 vendor, 走 grok 登录态 + `XAI_API_KEY` | grok CLI + `grok auth login` + `XAI_API_KEY` |
 
 ::: warning runtime 默认项注意
 向导**默认高亮第一项**（当前是 `claude-agent-sdk`），新手一路按 Enter 会落到这条要配 vendor + API Key 的路径上。**建议手动选 `claude-code-cli`** 入门最快（[#237 坑 3](https://github.com/sleep2agi/agent-network/issues/237) 已知 UX 痛点，将来 wizard 默认会调整）。
 :::
 
 ::: warning 向导**不**问 Telegram
-建节点向导 = 名字 → runtime → session → 结束。**全程不会问你要 Telegram bot token / 白名单 UID**。Telegram 是建完节点后**用单独命令** `anet channel add telegram` 加上去（[第 6 节](#_6-配-telegram-channel-可选)）。
+建节点向导走完 (上表所有步骤) 就**结束**, **全程不会问你要 Telegram bot token / 白名单 UID**. Telegram 是建完节点后**用单独命令** `anet channel add telegram` 加上去（[第 6 节](#_6-配-telegram-channel-可选)）。
 
 如果你看到 `anet create` 开头的提示说"optional Telegram channel"那一行，不要被误导以为向导会顺便配 —— 实际不会（[#237 坑 4](https://github.com/sleep2agi/agent-network/issues/237) 已知文案不一致）。
 :::
@@ -185,6 +205,7 @@ agent-node --version    # 期望 v2.4.10 或更新
 codex-sdk runtime 还要装 codex CLI 并登录：
 
 ```bash
+# 注意是 @openai/codex (CLI 工具), 跟 @openai/codex-sdk (codex-sdk runtime 拉的 SDK 库) 是两个 npm 包
 npm i -g @openai/codex
 codex auth login        # 浏览器 OAuth
 
