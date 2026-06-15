@@ -1,0 +1,62 @@
+#!/usr/bin/env node
+/* Fake grok agent stdio for PR-5 14-case matrix. Identical pattern to
+ * docs/tests/p-214-dim12-harness/fake-grok and p-tmcode-web harness.
+ * No xAI key needed. Clean ACK reply.
+ */
+const args = process.argv.slice(2);
+if (args[0] !== 'agent' || args[1] !== 'stdio') {
+  if (args.includes('--version')) { console.log('grok 0.1.219-fake (PR-5)'); process.exit(0); }
+  console.error('fake-grok: only `agent stdio` is implemented');
+  process.exit(2);
+}
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+const sessions = new Map();
+let active = null;
+const newSid = () => 'sess_' + Math.random().toString(36).slice(2, 14);
+
+function emit(sid, prompt) {
+  send({ jsonrpc:'2.0', method:'session/update', params:{
+    sessionId: sid, update:{ sessionUpdate:'agent_message_chunk', content:{ type:'text', text:'ACK: ' + String(prompt).slice(0,60) } } } });
+  send({ jsonrpc:'2.0', method:'_x.ai/session/prompt_complete', params:{ sessionId: sid } });
+}
+
+let buf='';
+process.stdin.on('data', c => {
+  buf += c.toString();
+  let nl;
+  while ((nl = buf.indexOf('\n')) >= 0) {
+    const line = buf.slice(0, nl).trim();
+    buf = buf.slice(nl + 1);
+    if (!line) continue;
+    let req; try { req = JSON.parse(line); } catch { continue; }
+    handle(req);
+  }
+});
+process.stdin.on('end', () => process.exit(0));
+
+function handle(req) {
+  const { id, method, params } = req;
+  if (method === 'initialize') {
+    return send({ jsonrpc:'2.0', id, result:{ protocolVersion:1, capabilities:{ promptCapabilities:{ audio:false, image:false, embeddedContext:true } }, authMethods:[{ id:'xai.api_key', name:'xAI API key' }] } });
+  }
+  if (method === 'authenticate') return send({ jsonrpc:'2.0', id, result:{} });
+  if (method === 'session/new') {
+    const sid = newSid(); active = sid; sessions.set(sid, []);
+    return send({ jsonrpc:'2.0', id, result:{ sessionId: sid } });
+  }
+  if (method === 'session/load') {
+    const sid = params?.sessionId;
+    if (!sid) return send({ jsonrpc:'2.0', id, error:{ code:-32602, message:'missing sessionId' } });
+    if (!sessions.has(sid)) sessions.set(sid, []);
+    active = sid;
+    return send({ jsonrpc:'2.0', id, result:{ sessionId: sid, replayed: 0 } });
+  }
+  if (method === 'session/prompt') {
+    const sid = params?.sessionId || active;
+    const prompt = params?.prompt?.[0]?.text || params?.prompt || '';
+    emit(sid, prompt);
+    return send({ jsonrpc:'2.0', id, result:{ stopReason:'end_turn' } });
+  }
+  if (method === 'session/cancel') return send({ jsonrpc:'2.0', id, error:{ code:-32601, message:'Method not found' } });
+  send({ jsonrpc:'2.0', id, error:{ code:-32601, message:'unknown method '+method } });
+}
