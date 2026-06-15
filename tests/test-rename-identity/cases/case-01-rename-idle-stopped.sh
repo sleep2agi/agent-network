@@ -43,13 +43,26 @@ NB_PID=$!
 for i in $(seq 1 30); do grep -q 'SSE connected' "$ART_DIR/start-b.log" 2>/dev/null && break; sleep 1; done
 grep -q 'SSE connected' "$ART_DIR/start-b.log" && record_check "node-b post-rename SSE up" PASS "SSE connected seen" || record_check "node-b post-rename SSE up" FAIL "no SSE connected in 30s"
 
-# Send_task to NEW alias node-b — should route + land in inbox
+# Send_task to NEW alias node-b — assert routing (observable contract),
+# not inbox-row (implementation detail — SSE-connected nodes get push, no
+# inbox insert). Per 通信龙 裁定 7f89b60d.
 NONCE="C1-$(date +%s%N)"
-H=$(send_task_rest "node-b" "$NONCE rename-routing-check" "tester" "$UTOK" | head -c 200)
-LOG "send_task → $(echo $H | mask | head -c 120)"
-sleep 2
-ROW=$(sqlite_inbox_grep "$NONCE")
-echo "$ROW" | grep -q '"session_name":"node-b"' && record_check "inbox row session_name=node-b" PASS "row landed at canonical new alias" || record_check "inbox row session_name=node-b" FAIL "row=$(echo $ROW | mask | head -c 120)"
+RESP=$(send_task_rest "node-b" "$NONCE rename-routing-check" "tester" "$UTOK")
+LOG "send_task → $(echo $RESP | mask | head -c 150)"
+echo "$RESP" | grep -q '"ok":true' && record_check "send_task accepted (HTTP 200 + ok:true)" PASS "routing accepted at new alias" || record_check "send_task accepted" FAIL "resp=$(echo $RESP | mask | head -c 150)"
+TASK_ID=$(echo "$RESP" | jq -r '.task_id // empty' 2>/dev/null)
+[ -n "$TASK_ID" ] && record_check "task_id assigned" PASS "task_id=${TASK_ID:0:12}…" || record_check "task_id assigned" FAIL "no task_id in resp"
+# Tasks table row for the new alias (canonical routing target)
+sleep 1
+DB=$(db_path)
+if [ -n "$DB" ] && [ -n "$TASK_ID" ]; then
+  TASK_ROW=$(sqlite3 -json "$DB" "SELECT to_name, COALESCE(to_node_id,'') as to_node_id, status FROM tasks WHERE task_id='$TASK_ID' LIMIT 1;" 2>/dev/null)
+  LOG "tasks row: $(echo $TASK_ROW | mask | head -c 200)"
+  echo "$TASK_ROW" | grep -q '"to_name":"node-b"' && record_check "tasks row to_name=node-b (canonical)" PASS "task routed at new alias" || record_check "tasks row to_name=node-b (canonical)" FAIL "row=$(echo $TASK_ROW | mask | head -c 150)"
+fi
+# Server response also returns the rejection if alias not found — proven by
+# absence of "alias_not_found"
+assert_not_contains "no 'alias_not_found' in send_task response" "alias_not_found" "$RESP"
 
 # Cleanup
 kill -TERM "$NB_PID" 2>/dev/null
