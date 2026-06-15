@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Fake grok agent stdio for PR-5 14-case matrix. Identical pattern to
- * docs/tests/p-214-dim12-harness/fake-grok and p-tmcode-web harness.
+ * docs/tests/p-214-dim12-harness/fake-grok.
  * No xAI key needed. Clean ACK reply.
  */
 const args = process.argv.slice(2);
