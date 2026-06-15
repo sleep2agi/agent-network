@@ -1,0 +1,3 @@
+event: message
+data: {"result":{"content":[{"type":"text","text":"{\"ok\":true,\"message_id\":\"3c837ff6-25d5-4396-9b77-df519d80fcf2\",\"session_status\":\"idle\"}"}]},"jsonrpc":"2.0","id":2}
+

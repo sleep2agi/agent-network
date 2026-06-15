@@ -36,7 +36,7 @@ LOG "tasks columns: $COLS"
 echo "$COLS" | grep -q 'from_node_id' && record_check "tasks.from_node_id column exists" PASS "schema includes PR-1 column" || record_check "tasks.from_node_id column exists" FAIL "schema missing from_node_id (PR-1 schema migration not applied?)"
 
 # Verify the outbound has from_node_id populated
-FNID=$(sqlite3 "$DB" "SELECT COALESCE(from_node_id,'') FROM tasks WHERE task_text LIKE '%$NONCE%' OR content LIKE '%$NONCE%' LIMIT 1;" 2>/dev/null)
+FNID=$(sqlite3 "$DB" "SELECT COALESCE(from_node_id,'') FROM tasks WHERE content LIKE '%$NONCE%' LIMIT 1;" 2>/dev/null)
 LOG "outbound from_node_id col value = '$FNID'"
 if [ -n "$FNID" ]; then
   record_check "outbound has from_node_id populated" PASS "from_node_id=$FNID"
