@@ -1,6 +1,6 @@
 # RFC-023 — Destructive-command guardrail for agent-node bash tool
 
-**Status**: Sketch (Vincent-gate, SDK马 lane implementation)
+**Status**: Sketch (Vincent + 通信龙 gate; 通信工程马 implementation lane)
 **Author**: 通信工程马
 **Date**: 2026-06-16
 **Drives from**: incident retro `docs/troubleshooting/rm-rf-incident-2026-06-16.md`
@@ -92,10 +92,12 @@ Every refusal logs a `bash_guard_refuse` event to commhub. Operators can see whi
 
 | Phase | Owner | ETA | Gate |
 |---|---|---|---|
-| 1 (string pattern) | SDK马 | ~2h | 通信龙 review |
-| 2 (resolved target) | SDK马 | ~4h | 通信龙 review + soak |
-| 3 (opt-in allow-list) | SDK马 | ~2h | After Phase 2 |
-| 4 (telemetry) | SDK马 + 通信牛 | ~3h (server side) | After Phase 1 |
+| 1 (string pattern) | 通信工程马 | ~2h | 通信龙 review |
+| 2 (resolved target) | 通信工程马 | ~4h | 通信龙 review + soak |
+| 3 (opt-in allow-list) | 通信工程马 | ~2h | After Phase 2 |
+| 4 (telemetry) | 通信工程马 (client) + 通信牛 (server side) | ~3h | After Phase 1 |
+
+**Owner clarification (per 通信龙 dispatch `41c09736`)**: RFC-023 is anet security infrastructure. TMCode 负责人 lane is tmcode-only (CLI + desktop) and does not touch anet. The agent-node Bash tool destructive-command guardrail is 通信工程马's responsibility, gated by Vincent + 通信龙. The original sketch (commit `f16d6b9`) defaulted the implementation column to SDK马 — that was the wrong default-assignment heuristic ("runtime change → SDK马"); corrected here.
 
 ## Refs
 
