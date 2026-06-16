@@ -3,8 +3,14 @@
 # row at new alias (sanity baseline for case 6's canonical-redirect logic).
 # Uses separate sender node per PR-4 #203 identity enforcement (bf564fb).
 set -u
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lib/safe-rm.sh"
 . /harness/lib/helpers.sh
-WORK="/work/case-07"; rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
+WORK="/work/case-07"; safe_rm_rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 
 start_hub "$ART_DIR/hub.log" || exit 1
 bootstrap_admin || exit 2

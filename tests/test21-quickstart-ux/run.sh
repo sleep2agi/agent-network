@@ -8,6 +8,12 @@ AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}"
 PASS=0
 FAIL=0
 
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 record() {
   local n="$1"
   local title="$2"
@@ -68,7 +74,7 @@ SERVER1_PID=$(start_source_server 9200)
 
 QSHOME=/tmp/test21-qs-home
 QSPROJ=/tmp/test21-qs-proj
-rm -rf "$QSHOME" "$QSPROJ"
+safe_rm_rf "$QSHOME" "$QSPROJ"
 mkdir -p "$QSPROJ"
 
 QS_CMD="anet quickstart --username qs1 --password pass123456 --agent qs-agent"
@@ -115,7 +121,7 @@ kill "$SERVER1_PID" >/dev/null 2>&1
 wait "$SERVER1_PID" >/dev/null 2>&1
 
 LOCALHOME=/tmp/test21-local-home
-rm -rf "$LOCALHOME"
+safe_rm_rf "$LOCALHOME"
 LOCAL_CMD="anet hub start --username local1 --password pass123456"
 HOME="$LOCALHOME" $ANET server local --username local1 --password pass123456 >/tmp/test21-server-local.out 2>&1 &
 LOCAL_PID=$!

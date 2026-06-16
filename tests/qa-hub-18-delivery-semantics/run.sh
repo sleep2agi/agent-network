@@ -7,6 +7,12 @@ HUB_PORT=9218
 HUB_BASE="http://127.0.0.1:$HUB_PORT"
 REPORT="/app/docs/tests/report-qa-hub-18-delivery-semantics.md"
 
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 cleanup() {
   [[ -n "${HUB_PID:-}" ]] && kill "$HUB_PID" 2>/dev/null || true
 }
@@ -60,7 +66,7 @@ task_result() {
 }
 
 echo "[0] start local hub"
-rm -rf "$HOME/.commhub" "$HOME/.anet/server" "$COMMHUB_DB"
+safe_rm_rf "$HOME/.commhub" "$HOME/.anet/server" "$COMMHUB_DB"
 cd /app/server
 HOST=127.0.0.1 PORT="$HUB_PORT" bun run src/index.ts >/tmp/hub.log 2>&1 &
 HUB_PID=$!

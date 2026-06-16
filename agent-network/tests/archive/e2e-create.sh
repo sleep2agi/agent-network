@@ -2,6 +2,12 @@
 # E2E test: anet create with params (non-interactive)
 set -e
 TMPDIR=$(mktemp -d)
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../tests/lib/safe-rm.sh"
 cd "$TMPDIR"
 mkdir -p .anet
 
@@ -42,5 +48,5 @@ grep -Eq "\"node_id\": \"$NODE_ID\"" .anet/nodes/新测试牛/config.json && ech
 
 echo ""
 echo "=== Cleanup ==="
-rm -rf "$TMPDIR"
+safe_rm_rf "$TMPDIR"
 echo "Done."

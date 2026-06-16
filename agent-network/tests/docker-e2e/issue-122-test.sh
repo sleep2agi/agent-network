@@ -16,6 +16,12 @@
 #  12. --help advertises --foreground / --no-tmux / --attach
 set -eu
 PASS=0; FAIL=0
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../tests/lib/safe-rm.sh"
 ok()  { PASS=$((PASS+1)); echo "  ✅ $1"; }
 bad() { FAIL=$((FAIL+1)); echo "  ❌ $1"; }
 
@@ -162,7 +168,7 @@ OUT7=$(PATH="$TMPDIR:$HOME/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 # Reset cache state by spawning a new node process — already done via timeout.
 echo "$OUT7" | grep -q "tmux not installed"        && ok "tmux-missing warn printed"      || bad "no warn on missing tmux: $OUT7"
 echo "$OUT7" | grep -q "starting in foreground"    && ok "warn mentions foreground fallback" || bad "warn missing foreground note"
-rm -rf "$TMPDIR"
+safe_rm_rf "$TMPDIR"
 
 # ── Test 8: anet node stop also kills tmux ─────────────────────────
 echo "── Test 8: anet node stop also kills tmux session ──"

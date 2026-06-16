@@ -5,6 +5,12 @@ BASE="http://127.0.0.1:9200"
 ANET="bun run /app/agent-network/bin/cli.ts"
 AUTH_TOKEN="${COMMHUB_AUTH_TOKEN:-test-auth-token}"
 
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 echo "# Test 18: Error Paths"
 echo ""
 echo "目标：模拟真实用户常见错误路径，记录错误消息并评价友好度。"
@@ -66,7 +72,7 @@ start_server
 kill "$SERVER_PID" >/dev/null 2>&1
 wait "$SERVER_PID" >/dev/null 2>&1
 HOME1=/tmp/test18-home1
-rm -rf "$HOME1"
+safe_rm_rf "$HOME1"
 make_cfg_without_server "$HOME1"
 OUT1=$(HOME="$HOME1" $ANET register --username offlineuser --password pass123456 2>&1)
 write_case \
@@ -81,7 +87,7 @@ start_server
 
 # 2. No init then login
 HOME2=/tmp/test18-home2
-rm -rf "$HOME2"
+safe_rm_rf "$HOME2"
 OUT2=$(HOME="$HOME2" $ANET login --username noinit --password whatever 2>&1)
 write_case \
   "没 anet init 就 anet login" \
@@ -92,7 +98,7 @@ write_case \
 
 # 3. Wrong password
 HOME3=/tmp/test18-home3
-rm -rf "$HOME3"
+safe_rm_rf "$HOME3"
 init_home "$HOME3"
 HOME="$HOME3" $ANET register --username wrongpass --password pass123456 >/tmp/test18-r3-register.out 2>&1
 OUT3=$(HOME="$HOME3" $ANET login --username wrongpass --password wrong 2>&1)
@@ -105,7 +111,7 @@ write_case \
 
 # 4. Duplicate register
 HOME4=/tmp/test18-home4
-rm -rf "$HOME4"
+safe_rm_rf "$HOME4"
 init_home "$HOME4"
 HOME="$HOME4" $ANET register --username dupuser --password pass123456 >/tmp/test18-r4-register1.out 2>&1
 OUT4=$(HOME="$HOME4" $ANET register --username dupuser --password pass123456 2>&1)
@@ -119,7 +125,7 @@ write_case \
 # 5. anet node create duplicate name
 HOME5=/tmp/test18-home5
 PROJ5=/tmp/test18-proj5
-rm -rf "$HOME5" "$PROJ5"
+safe_rm_rf "$HOME5" "$PROJ5"
 mkdir -p "$PROJ5"
 init_home "$HOME5"
 (cd "$PROJ5" && HOME="$HOME5" $ANET register --username nodeuser --password pass123456 >/tmp/test18-r5-register.out 2>&1)
@@ -134,7 +140,7 @@ write_case \
 
 # 6. network delete without --force
 HOME6=/tmp/test18-home6
-rm -rf "$HOME6"
+safe_rm_rf "$HOME6"
 init_home "$HOME6"
 HOME="$HOME6" $ANET register --username netdel --password pass123456 >/tmp/test18-r6-register.out 2>&1
 HOME="$HOME6" $ANET network create delete-me >/tmp/test18-r6-create.out 2>&1
@@ -149,7 +155,7 @@ write_case \
 # 7. start non-existent node
 HOME7=/tmp/test18-home7
 PROJ7=/tmp/test18-proj7
-rm -rf "$HOME7" "$PROJ7"
+safe_rm_rf "$HOME7" "$PROJ7"
 mkdir -p "$PROJ7"
 init_home "$HOME7"
 OUT7=$(cd "$PROJ7" && HOME="$HOME7" $ANET start ghost-node 2>&1)
@@ -171,7 +177,7 @@ write_case \
 
 # 9. Empty password register
 HOME9=/tmp/test18-home9
-rm -rf "$HOME9"
+safe_rm_rf "$HOME9"
 init_home "$HOME9"
 OUT9=$(HOME="$HOME9" $ANET register --username emptypw --password "" 2>&1)
 write_case \
@@ -183,7 +189,7 @@ write_case \
 
 # 10. Overlong username register
 HOME10=/tmp/test18-home10
-rm -rf "$HOME10"
+safe_rm_rf "$HOME10"
 init_home "$HOME10"
 LONG_USER=$(python3 - <<'PY'
 print("u" * 260)

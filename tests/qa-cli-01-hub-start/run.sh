@@ -12,6 +12,12 @@
 set -euo pipefail
 
 export HOME=/tmp/anethome
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 mkdir -p "$HOME" /tmp/work
 cd /tmp/work
 
@@ -32,7 +38,7 @@ npm install -g @sleep2agi/agent-network@preview >/tmp/npm-install.log 2>&1
 anet -v >/dev/null
 
 echo "[0] fresh state — no ~/.anet, no ~/.commhub"
-rm -rf "$HOME/.anet" "$HOME/.commhub"
+safe_rm_rf "$HOME/.anet" "$HOME/.commhub"
 
 echo "[1] start hub in background, capture banner"
 anet hub start --host 127.0.0.1 --port "$HUB_PORT" --username admin --password "$ADMIN_PW" >/tmp/hub.log 2>&1 &

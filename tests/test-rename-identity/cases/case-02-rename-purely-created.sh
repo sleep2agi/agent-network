@@ -2,8 +2,14 @@
 # Case 2 — #110: rename a purely-created node (never started, no sessions row).
 # Per PR-1+2: server returns node_local_only, CLI takes local-only path.
 set -u
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lib/safe-rm.sh"
 . /harness/lib/helpers.sh
-WORK="/work/case-02"; rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
+WORK="/work/case-02"; safe_rm_rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 
 start_hub "$ART_DIR/hub.log" || exit 1
 bootstrap_admin || exit 2

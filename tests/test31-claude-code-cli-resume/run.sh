@@ -9,6 +9,12 @@ NODE_DIR="$WORK/.anet/nodes/claude-bot"
 CONFIG="$NODE_DIR/config.json"
 ARGS_LOG=/tmp/claude-args.log
 
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 # P0 guardrail (2026-06-16 incident retro) — destructive rm -rf must NEVER
 # touch anything outside /tmp/*. The `export HOME=/tmp/anethome` above is
 # the intended sandbox, but if that line is ever removed / accidentally
@@ -23,7 +29,7 @@ for _path in "$HOME" "$WORK" /tmp/fake-bin "$ARGS_LOG"; do
   esac
 done
 
-rm -rf "$HOME" "$WORK" /tmp/fake-bin "$ARGS_LOG"
+safe_rm_rf "$HOME" "$WORK" /tmp/fake-bin "$ARGS_LOG"
 mkdir -p "$HOME" "$WORK" /tmp/fake-bin "$NODE_DIR"
 
 cat >/tmp/fake-bin/claude <<'SH'

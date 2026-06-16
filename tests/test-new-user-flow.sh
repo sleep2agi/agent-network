@@ -6,6 +6,12 @@ PASS=0; FAIL=0
 pass() { echo "  ✅ $1"; PASS=$((PASS+1)); }
 fail() { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
 
+
+# P0 guardrail (2026-06-16 incident) — refuse rm -rf outside /tmp/*.
+# safe_rm_rf checks every path prefix against $SAFE_RM_ALLOW_PREFIXES
+# (default "/tmp/"); refuses + exit 99 on anything else. See
+# tests/lib/safe-rm.sh for the helper definition.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/safe-rm.sh"
 echo ""
 echo "========================================="
 echo "  New User Flow E2E Test"
@@ -97,7 +103,7 @@ NOHUB_OUT=$(HOME=$NOHUB_HOME timeout 5s bun run bin/cli.ts node create whatever 
 cd /tmp
 echo "$NOHUB_OUT" | grep -qE "未找到 CommHub|hub|init" && pass "anet create fails fast when no hub" || fail "anet create did not fail without hub: $NOHUB_OUT"
 cd /app/agent-network
-rm -rf $NOHUB_HOME
+safe_rm_rf $NOHUB_HOME
 
 echo ""
 echo "10. agent-node missing → npx fallback (no crash)..."
@@ -108,11 +114,11 @@ ln -sf $(which node) $FAKE_PATH/node
 ln -sf $(which bun) $FAKE_PATH/bun 2>/dev/null || true
 NPX_OUT=$(PATH=$FAKE_PATH timeout 3s bun run bin/cli.ts node start test-agent 2>&1 || true)
 echo "$NPX_OUT" | grep -qE "ReferenceError" && fail "node start crashed without agent-node: $NPX_OUT" || pass "node start handles missing agent-node gracefully"
-rm -rf $FAKE_PATH
+safe_rm_rf $FAKE_PATH
 
 # Cleanup
 kill $HUB_PID 2>/dev/null || true
-rm -rf $HOME
+safe_rm_rf $HOME
 
 echo ""
 echo "========================================="
