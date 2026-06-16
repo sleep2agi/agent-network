@@ -4524,6 +4524,20 @@ Example:
     console.log(`   ${channelDir}/`);
     console.log(`   config.json updated`);
 
+    // #245 — if the node is already running, the channel MCP server was spawned
+    // at session start (before this channel existed) and will NOT pick up the
+    // new token until the session restarts. `anet resume` does not reconnect a
+    // channel that was absent/failed at first launch. Without this warning,
+    // `add` looks like a silent success but messages never arrive (real
+    // hour-long "added but receives nothing" detour, 2026-06-16).
+    const addPid = readNodePid(nodeId);
+    if (addPid != null && pidAlive(addPid)) {
+      console.log(`\n⚠ 节点 "${nodeDisplayName(nodeId, profile)}" 正在运行 (pid ${addPid})。`);
+      console.log(`  新加的 ${type} 通道**不会立即生效** —— 通道的 MCP server 在会话启动时就拉起了，`);
+      console.log(`  现在才加 token，且 anet resume 不会重连首次缺失/失败的通道。`);
+      console.log(`  → 生效方式：anet node stop ${nodeId} && anet node start ${nodeId}`);
+    }
+
   } else if (sub === "ls") {
     const nodeRef = args[2];
     const resolved = nodeRef ? resolveNodeRef(nodeRef) : null;
