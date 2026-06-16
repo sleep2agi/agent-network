@@ -1,0 +1,49 @@
+# Repo-wide bash lint — destructive-rm guardrail
+#
+# Runs `tests/scripts/lint-no-bare-rm-rf.sh` on every PR and main push.
+# Fails the build if any test script under `tests/` or `agent-network/tests/`
+# contains an unguarded `rm -rf $VAR` / `rm -rf "$VAR/..."` pattern.
+#
+# Why this workflow exists
+# ========================
+# 2026-06-16 incident: a test script ran `rm -rf $HOME` where $HOME had
+# fallen back to the real /home/<user>; ai-insight / blueleap / paper
+# directories wiped (cloud-snapshot restored). 40 scripts were rewritten
+# to use `safe_rm_rf` (commit 826c8a7) and a linter (commit f16d6b9) was
+# added. This workflow enforces the linter on PRs so no future commit
+# can re-introduce the same class of bug.
+#
+# See: docs/troubleshooting/rm-rf-incident-2026-06-16.md
+#      docs/rfcs/RFC-023-destructive-command-guardrail.md
+#      tests/lib/safe-rm.sh
+#      tests/scripts/lint-no-bare-rm-rf.sh
+
+name: lint (destructive-rm guard)
+
+on:
+  pull_request:
+    paths:
+      - 'tests/**'
+      - 'agent-network/tests/**'
+      - '.github/workflows/lint.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tests/**'
+      - 'agent-network/tests/**'
+      - '.github/workflows/lint.yml'
+
+concurrency:
+  group: lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  bare-rm-rf:
+    name: no bare rm -rf $VAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run lint-no-bare-rm-rf.sh
+        run: bash tests/scripts/lint-no-bare-rm-rf.sh
