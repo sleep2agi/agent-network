@@ -2278,7 +2278,7 @@ function ensureMcpJson(profile: Profile) {
     console.warn(`[anet] Fix: npm install -g @sleep2agi/agent-network@latest`);
   }
 
-  // Ensure .anet/package.json + deps
+  // Ensure .anet/package.json exists
   const pkgJson = join(anetDir, "package.json");
   if (!existsSync(pkgJson)) {
     mkdirSync(anetDir, { recursive: true });
@@ -2286,9 +2286,40 @@ function ensureMcpJson(profile: Profile) {
       "private": true,
       "dependencies": { "@modelcontextprotocol/sdk": "^1.12.0" }
     }, null, 2) + "\n");
+  }
+
+  // #245 — commhub MCP dependency integrity self-heal.
+  // node-server.js imports @modelcontextprotocol/sdk subpaths at startup. A
+  // partial/corrupt install (e.g. only dist/ present, subpath exports missing —
+  // a disk-cleanup / node_modules corruption side-effect) crashes the MCP server
+  // BEFORE any tool registers: the node looks alive but ALL commhub_* tools
+  // silently vanish. The old code only installed when package.json was absent,
+  // so a corrupt node_modules went unrepaired, and the install error was
+  // swallowed. Probe the real import every start; reinstall if broken; fail
+  // LOUD (not silent) if still broken.
+  const sdkImportable = (): boolean => {
     try {
-      execSync("bun install", { cwd: anetDir, stdio: "pipe" });
-    } catch {}
+      execSync(
+        `bun -e "import('@modelcontextprotocol/sdk/server/index.js').then(()=>process.exit(0)).catch(()=>process.exit(3))"`,
+        { cwd: anetDir, stdio: "pipe", timeout: 15000 },
+      );
+      return true;
+    } catch { return false; }
+  };
+  if (!sdkImportable()) {
+    console.warn(`[anet] commhub MCP dependency missing or partial — repairing (bun install in .anet) ...`);
+    try {
+      execSync("bun install", { cwd: anetDir, stdio: "pipe", timeout: 120000 });
+    } catch (e: any) {
+      console.error(`[anet] ⚠ bun install in .anet failed: ${e?.message || e}`);
+    }
+    if (sdkImportable()) {
+      console.log(`[anet] ✓ commhub MCP dependency repaired.`);
+    } else {
+      console.error(`[anet] ❌ commhub MCP dependency (@modelcontextprotocol/sdk) still broken in .anet/node_modules.`);
+      console.error(`[anet]    → The commhub channel will NOT load (no commhub_* tools). Other features still work.`);
+      console.error(`[anet]    → Fix manually:  cd "${anetDir}" && bun install   (then restart the node)`);
+    }
   }
 
   // 只在没有 commhub 配置时才写 .mcp.json
