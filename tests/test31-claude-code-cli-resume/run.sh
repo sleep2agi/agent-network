@@ -9,6 +9,20 @@ NODE_DIR="$WORK/.anet/nodes/claude-bot"
 CONFIG="$NODE_DIR/config.json"
 ARGS_LOG=/tmp/claude-args.log
 
+# P0 guardrail (2026-06-16 incident retro) — destructive rm -rf must NEVER
+# touch anything outside /tmp/*. The `export HOME=/tmp/anethome` above is
+# the intended sandbox, but if that line is ever removed / accidentally
+# unset / overridden by a parent shell, the unguarded rm below would wipe
+# the real /home/<user> directory (per the test-new-user-flow.sh incident
+# that lost ai-insight / blueleap / paper repos before cloud snapshot
+# restore). Refuse to proceed if any rm target is outside /tmp/*.
+for _path in "$HOME" "$WORK" /tmp/fake-bin "$ARGS_LOG"; do
+  case "$_path" in
+    /tmp/*) ;;
+    *) echo "[run.sh] REFUSE: refusing to rm -rf '$_path' (outside /tmp/*). HOME=$HOME WORK=$WORK ARGS_LOG=$ARGS_LOG" >&2; exit 99 ;;
+  esac
+done
+
 rm -rf "$HOME" "$WORK" /tmp/fake-bin "$ARGS_LOG"
 mkdir -p "$HOME" "$WORK" /tmp/fake-bin "$NODE_DIR"
 
