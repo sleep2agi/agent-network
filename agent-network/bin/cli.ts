@@ -8663,6 +8663,37 @@ async function doctorCommand() {
     info("Telegram channel env", "not configured (no telegram bot token)");
   }
 
+  // 7. #245 — CommHub MCP dependency integrity (the silent "all commhub_* tools
+  // vanished" outage) + per-node telegram channel state, so these surface here
+  // instead of forcing a dig through ~/.cache MCP logs.
+  const anetDir = join(process.cwd(), ".anet");
+  if (existsSync(join(anetDir, "node-server.js"))) {
+    let sdkOk = false;
+    try {
+      execSync(`bun -e "import('@modelcontextprotocol/sdk/server/index.js').then(()=>process.exit(0)).catch(()=>process.exit(3))"`, { cwd: anetDir, stdio: "pipe", timeout: 15000 });
+      sdkOk = true;
+    } catch {}
+    if (sdkOk) check("CommHub MCP dependency", true, "@modelcontextprotocol/sdk importable from .anet");
+    else check("CommHub MCP dependency", false, `@modelcontextprotocol/sdk missing/partial in .anet — commhub_* tools won't load. Fix: cd "${anetDir}" && bun install`);
+  }
+
+  const tgNodeIds = ids.filter(id => existsSync(join(nodesDir(), id, "channels", "telegram", "access.json")));
+  if (tgNodeIds.length) {
+    info("Telegram channels", `${tgNodeIds.length} node(s) — run 'anet channel status' for resolved paths`);
+    for (const id of tgNodeIds) {
+      const name = nodeDisplayName(id, loadProfile(id));
+      const accessPath = join(nodesDir(), id, "channels", "telegram", "access.json");
+      try {
+        const a = JSON.parse(readFileSync(accessPath, "utf-8"));
+        const allow = Array.isArray(a.allowFrom) ? a.allowFrom.length : 0;
+        const pending = a.pending && typeof a.pending === "object" ? Object.keys(a.pending).length : 0;
+        info(`    ↳ ${name}`, `allowFrom: ${allow}, pending: ${pending}, policy: ${a.dmPolicy || "?"}`);
+      } catch (e: any) {
+        warning(`    ↳ ${name}`, `access.json unreadable: ${e?.message || e}`);
+      }
+    }
+  }
+
   console.log(`\n  Result: ${ok} ok, ${warn} warnings, ${fail} errors\n`);
 }
 
