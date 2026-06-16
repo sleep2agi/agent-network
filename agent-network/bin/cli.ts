@@ -4556,12 +4556,56 @@ Example:
     if (!found) console.log("No channels. Add one: anet channel add telegram <node-id>");
     console.log();
 
+  } else if (sub === "status") {
+    // #245 — show the RESOLVED telegram access.json path + allowlist + pending
+    // pairings. The running node reads exactly this file (TELEGRAM_STATE_DIR →
+    // .anet/nodes/<id>/channels/telegram/); editing any other access.json is a
+    // no-op. Not surfacing the resolved path + pending caused a real hour-long
+    // "not allowlisted / pairing not found" debugging detour (2026-06-16).
+    const nodeRef = args[2];
+    const resolved = nodeRef ? resolveNodeRef(nodeRef) : null;
+    if (nodeRef && !resolved) {
+      console.error(`Node "${nodeRef}" not found.`);
+      process.exit(1);
+    }
+    const ids = resolved ? [resolved.id] : listProfileIds();
+    let any = false;
+    for (const id of ids) {
+      const tgDir = join(nodesDir(), id, "channels", "telegram");
+      const accessPath = join(tgDir, "access.json");
+      if (!existsSync(accessPath)) continue;
+      any = true;
+      const profile = loadProfile(id);
+      const label = profile ? `${id} (${nodeDisplayName(id, profile)})` : id;
+      console.log(`\n● ${label} — telegram`);
+      console.log(`  TELEGRAM_STATE_DIR : ${tgDir}`);
+      console.log(`  access.json        : ${accessPath}`);
+      let access: any = {};
+      try { access = JSON.parse(readFileSync(accessPath, "utf-8")); }
+      catch (e: any) { console.log(`  ⚠ access.json 读不了: ${e?.message || e}`); continue; }
+      const allow = Array.isArray(access.allowFrom) ? access.allowFrom : [];
+      const pending = access.pending && typeof access.pending === "object" ? Object.keys(access.pending) : [];
+      const groups = access.groups && typeof access.groups === "object" ? Object.keys(access.groups) : [];
+      console.log(`  dmPolicy           : ${access.dmPolicy || "(unset)"}`);
+      console.log(`  allowFrom          : ${allow.length ? allow.join(", ") : "(none — 还没人能私聊这个节点)"}`);
+      console.log(`  pending pairings   : ${pending.length ? pending.join(", ") : "(none)"}`);
+      console.log(`  groups             : ${groups.length ? groups.join(", ") : "(none)"}`);
+    }
+    if (!any) {
+      console.log(nodeRef
+        ? `No telegram channel for "${nodeRef}". Add one: anet channel add telegram ${nodeRef}`
+        : `No telegram channels configured. Add one: anet channel add telegram <node-id>`);
+    } else {
+      console.log(`\n提示：节点运行时读的就是上面这个 access.json，改对它再重启节点即可；改别处无效。\n`);
+    }
+
   } else {
     console.log(`
 anet channel <command>
 
   add <type> <node-id>          Add channel to a node
   ls [node-id]                  List channels
+  status [node-id]              Show resolved access.json path + allowlist + pending pairings
 
 Data: .anet/nodes/<node-id>/channels/<type>/
 `);
