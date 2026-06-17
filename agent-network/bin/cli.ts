@@ -2231,7 +2231,24 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
 // ── ensure .mcp.json has commhub server ──
 
 function ensureMcpJson(profile: Profile) {
-  if (normalizeRuntime(profile) !== "claude-code-cli") return;
+  // #245 codex-sdk fix — widened gate (was claude-code-cli only).
+  //
+  // Both claude-code-cli and codex-sdk runtimes need `.anet/node-server.js`
+  // (the in-process commhub MCP stdio server) refreshed + the @modelcontextprotocol/sdk
+  // dependency self-healed. The difference is the discovery mechanism:
+  //   * claude-code-cli reads cwd `.mcp.json` and finds commhub there
+  //   * codex-sdk reads `~/.codex/config.toml [mcp_servers.*]` and CANNOT use
+  //     `.mcp.json` (TMCode负责人 459d1b6c diagnostic confirmed). For codex-sdk
+  //     anet-node passes a `mcp_servers.commhub` override via the Codex SDK's
+  //     `CodexOptions.config` (per-instance, in-memory) — see agent-node/src/cli.ts
+  //     `CODEX_CONFIG.mcp_servers` block. That override points at the same
+  //     `.anet/node-server.js`, so we still need to keep it fresh on this side.
+  //
+  // claude-agent-sdk and grok-build-acp do NOT use cwd .anet/node-server.js
+  // (they inject in-process via createCommhubSdkMcpServer at agent-node), so
+  // they keep the early-return.
+  const runtime = normalizeRuntime(profile);
+  if (runtime !== "claude-code-cli" && runtime !== "codex-sdk") return;
   if (!profile.channels?.some(ch => ch.includes("commhub"))) return;
 
   const mcpJsonPath = join(process.cwd(), ".mcp.json");
@@ -2322,28 +2339,25 @@ function ensureMcpJson(profile: Profile) {
     }
   }
 
-  // 只在没有 commhub 配置时才写 .mcp.json
-  // 用户可能手动配了指向开发源码(commhub-channel.ts)，不能覆盖
-  mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-  const hasCommhub = Object.keys(mcpConfig.mcpServers).some(k => k.includes("commhub"));
-  if (!hasCommhub) {
-    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.js"] };
-    writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
-    console.log(`[anet] .mcp.json: added commhub`);
-  }
-
-  // Write .anet/.env (hub URL + token)
+  // Write .anet/.env (hub URL + token) — both runtimes need this; node-server.js
+  // reads COMMHUB_URL / COMMHUB_TOKEN from this file when spawned as a stdio MCP.
   const anetEnvPath = join(anetDir, ".env");
   const token = profile.token || "";
   let envContent = `COMMHUB_URL=${profile.hub || "http://127.0.0.1:9200"}\n`;
   if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
   writeFileSync(anetEnvPath, envContent);
 
-  // Write .mcp.json
-  mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-  mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.js"] };
-  writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
-  console.log(`[anet] .mcp.json: added commhub channel server`);
+  // #245 codex-sdk fix — only write `.mcp.json` for claude-code-cli. codex-sdk
+  // does not read cwd `.mcp.json`; it reads `~/.codex/config.toml [mcp_servers.*]`
+  // (or accepts a `CodexOptions.config` override from agent-node, which is the
+  // path this fix uses). Writing `.mcp.json` for codex-sdk would be a silent
+  // no-op + confuse anyone reading the file expecting it to work.
+  if (runtime === "claude-code-cli") {
+    mcpConfig.mcpServers = mcpConfig.mcpServers || {};
+    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.js"] };
+    writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+    console.log(`[anet] .mcp.json: added commhub channel server`);
+  }
 }
 
 // ── launch helper (shared by start + resume) ──
