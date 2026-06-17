@@ -5,30 +5,29 @@
 <h1 align="center">Agent Network</h1>
 
 <p align="center">
-  <strong>本地优先的多 Agent 协作网络 —— 4 个 Runtime × 8 家 LLM 厂商，一行命令编排成一张 mesh。</strong>
+  <strong>把你的 Claude、Codex、Grok 拉进同一张网 —— 一行命令，互相派活。</strong>
 </p>
 
 <p align="center">
-  Claude Code · Claude Agent SDK · Codex · Grok Build ACP 同台运行；agent 之间互派任务、流式协作、共享上下文，全部跑在你自己的硬件上。Apache 2.0 开源。
+  4 个 Runtime × 8 家 LLM 厂商，本地优先，跑在你自己的硬件上。Agent 之间通过 MCP 自动发现、流式协作、共享上下文。Apache 2.0 开源。
 </p>
 
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-network.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-network.svg?label=anet" alt="anet npm version"></a>
+  <a href="https://www.npmjs.com/package/@sleep2agi/agent-node"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-node.svg?label=agent-node" alt="agent-node npm version"></a>
+  <a href="https://www.npmjs.com/package/@sleep2agi/commhub-server"><img src="https://img.shields.io/npm/v/@sleep2agi/commhub-server.svg?label=commhub-server" alt="commhub-server npm version"></a>
+  <a href="https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-network-dashboard.svg?label=dashboard" alt="dashboard npm version"></a>
   <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/dm/@sleep2agi/agent-network.svg" alt="npm downloads"></a>
   <a href="https://anet.sh"><img src="https://img.shields.io/badge/docs-anet.sh-009e7e.svg" alt="Docs"></a>
   <a href="https://anet.sh/changelog"><img src="https://img.shields.io/badge/changelog-anet.sh-blue.svg" alt="Changelog"></a>
   <a href="https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml"><img src="https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml/badge.svg?branch=main" alt="anet QA (v0)"></a>
-  <a href="https://github.com/sleep2agi/agent-network/commits/main"><img src="https://img.shields.io/github/last-commit/sleep2agi/agent-network" alt="last commit"></a>
-  <a href="https://github.com/sleep2agi/agent-network/commits/main"><img src="https://img.shields.io/github/commit-activity/m/sleep2agi/agent-network" alt="commits per month"></a>
-  <a href="https://github.com/sleep2agi/agent-network/releases"><img src="https://img.shields.io/github/release-date/sleep2agi/agent-network" alt="release date"></a>
   <a href="https://github.com/sleep2agi/agent-network"><img src="https://img.shields.io/github/stars/sleep2agi/agent-network?style=social" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
   <strong><a href="https://anet.sh">📖 文档</a></strong> ·
   <strong><a href="https://www.npmjs.com/org/sleep2agi">📦 NPM</a></strong> ·
-  <strong><a href="https://github.com/sleep2agi/agent-network">⭐ GitHub</a></strong> ·
   <strong><a href="https://github.com/sleep2agi/agent-network/discussions">💬 Discussions</a></strong> ·
   <strong><a href="https://anet.sh/community">💚 微信群</a></strong>
 </p>
@@ -39,19 +38,16 @@
 
 ---
 
-## 30 秒上手（首次安装）
-
-> **前置**：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings）。
+## 30 秒上手
 
 ```bash
-# 装一个全局包（拉 npm @latest，当前 agent-network 2.2.10）
+# 装一个全局包
 npm install -g @sleep2agi/agent-network
 
 # 终端 1 —— 起 Hub（保持开着）
 anet hub start
-#   监听 http://127.0.0.1:9200
-#   SQLite 在 ~/.commhub/commhub.db
-#   自动创建默认账号：admin / anethub
+#   监听 http://127.0.0.1:9200，SQLite 在 ~/.commhub/commhub.db
+#   自动创建默认账号：admin / anethub（公网部署务必先 anet passwd）
 
 # 终端 2 —— 起 Dashboard（保持开着）
 anet hub dashboard
@@ -59,41 +55,33 @@ anet hub dashboard
 
 # 终端 3 —— 登录 + 创建 + 启动 Agent
 anet login --username admin --password anethub
-anet node create my-bot          # 两步交互：选 runtime → 选 provider → 填 API key
+anet node create my-bot          # 交互式：选 runtime → 选 provider → 填 API key
 anet node start my-bot           # 等到 "SSE connected" 即就绪
 ```
 
-从 Dashboard 的 Chat 面板派任务即可。再起一个节点让第一个去派活，两个 Agent 会通过 MCP 自动发现彼此并协作。
+打开 Dashboard 的 Chat 面板派任务即可。再起一个节点让第一个去派活，两个 Agent 会通过 MCP 自动发现彼此并协作。
 
-### 已装 anet？升级到最新
+### 已装过 anet？升级到最新
 
 ```bash
 anet upgrade            # 一键把 4 个包升到 npm @latest
-anet project restart    # 重启 cwd 节点接新版（详见 #117）
+anet project restart    # 重启 cwd 节点接新版
 ```
 
 完整跨版本迁移参考 [升级指南](https://anet.sh/guide/upgrade)。
 
----
-
-## 下一步
-
-跑完 30 秒上手之后：
-
-- 📖 **看文档** —— [anet.sh/guide/getting-started](https://anet.sh/guide/getting-started) 全链路教程 + [架构概览](https://anet.sh/guide/architecture)
-- 💚 **加微信群** —— [扫码进群](https://anet.sh/community/wechat-group.jpg) 设计讨论、版本动态、排查问题
-- ⭐ **Star 项目** —— 觉得有用就给个 Star，活跃度直接反映在 release 节奏上
+<sub>前置：Node.js ≥ 22.13.0（`@inquirer/prompts` 等依赖要求；老版本会触发 `EBADENGINE` warnings，不影响安装）。</sub>
 
 ---
 
 ## 为什么用 Agent Network
 
-- **一个 CLI，四种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP 同时跑在一个 Hub 上，按角色挑最合适的。
-- **八家 LLM，一个开关切换。** Anthropic / MiniMax / DeepSeek / 智谱 GLM / 月之暗面 Kimi / 书生 InternLM / 小米 MiMo / OpenRouter —— 通过 `ANTHROPIC_BASE_URL` 一键路由（OpenAI 走 `codex-sdk` runtime、xAI Grok 走 `grok-build-acp` runtime, 另算）。
-- **本地跑得动，跨服务器也跑得动。** Hub 默认绑 `127.0.0.1` 纯本机；改成 `0.0.0.0` 绑公网 IP，**多台云服务器 / 多个工位的 Agent 都能加入同一个 Hub**，SSE 实时双向。SQLite 数据全程在 Hub 所在那台机器，不用注册账号、不用登云、零遥测。
-- **Mesh 派活开箱即用。** Agent 之间通过 17 个 MCP 工具（`get_all_status` / `send_task` / `get_task` …）自动发现 + 互相派活，不需要你写编排逻辑。
-- **自带 Web Dashboard。** Overview / Nodes / Tasks / Messages / Chat / Admin / Settings 七大页 + 实时节点拓扑图（grid / ring 双视图，连线按消息频度分级）—— Next.js 16 + 4 套主题，跑在 `localhost:3000`。
-- **和 LangGraph / AutoGen / CrewAI 不一样：** anet 是 **npm 包**，零 Python 依赖；**本地优先**而非 SaaS 框架；**多厂商不锁定**而非默认 OpenAI；**人 + Agent 同台**通过 Dashboard Chat 协作而非纯程序编排。
+- **一个 CLI，四种 Runtime。** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP 同台运行，按角色挑最合适的。
+- **八家 LLM，一个开关切换。** Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 InternLM / 小米 MiMo / OpenRouter 走 `ANTHROPIC_BASE_URL` 一键路由；OpenAI 走 `codex-sdk`、xAI Grok 走 `grok-build-acp`。
+- **本地跑，跨服务器也跑。** Hub 默认绑 `127.0.0.1`；改 `0.0.0.0` 绑公网 IP，**多台云服务器 / 多个工位的 Agent 都能加入同一个 Hub**。SQLite 全程在 Hub 那台机，不用注册账号、不用登云、零遥测。
+- **Mesh 派活开箱即用。** Agent 之间通过 17 个 MCP 工具自动发现 + 互相派活，不用写编排逻辑。
+- **自带 Web Dashboard。** 7 大页（Overview / Nodes / Tasks / Messages / Chat / Admin / Settings）+ 实时节点拓扑图，跑在 `localhost:3000`。
+- **和 LangGraph / AutoGen / CrewAI 不一样：** anet 是 **npm 包**，零 Python 依赖；**本地优先**而非 SaaS；**多厂商不锁定**而非默认 OpenAI；**人 + Agent 同台**通过 Dashboard Chat 协作。
 
 ---
 
@@ -102,12 +90,12 @@ anet project restart    # 重启 cwd 节点接新版（详见 #117）
 | 维度 | anet | LangGraph | AutoGen | CrewAI |
 |---|---|---|---|---|
 | 部署模式 | 本地优先 + LAN/公网共享 | Python 库 | Python 库 | Python 库 |
-| 多 LLM 厂商 | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（走 `ANTHROPIC_BASE_URL`）+ OpenAI（`codex-sdk` runtime）+ xAI Grok（`grok-build-acp` runtime） | 走 LangChain | 主要 OpenAI / Azure | 走 LangChain |
+| 多 LLM 厂商 | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（走 `ANTHROPIC_BASE_URL`）+ OpenAI（`codex-sdk`）+ xAI Grok（`grok-build-acp`） | 走 LangChain | 主要 OpenAI / Azure | 走 LangChain |
 | Agent 间通信 | MCP + SSE 中枢，自动发现 | 编程式 graph | group chat | hierarchy / sequential |
 | 人 + Agent 同台 | ✅ Dashboard Chat 同界面 | n/a（纯程序） | n/a | n/a |
 | 部署形态 | 一个 npm 包 | pip + 自写 server | pip + 自写 server | pip + 自写 server |
 
-<sub>以 2026-05 各项目公开文档对照，不构成性能 benchmark，仅说明定位差异。</sub>
+<sub>对照各项目公开文档，不构成性能 benchmark，仅说明定位差异。</sub>
 
 ---
 
@@ -118,7 +106,7 @@ anet project restart    # 重启 cwd 节点接新版（详见 #117）
 <table>
 <tr>
 <td width="50%"><a href="./docs/images/dashboard-overview.jpg"><img src="./docs/images/dashboard-overview.jpg" alt="Overview" /></a><br/><sub><b>Overview</b> — 网络概览：在线 Agent / 任务统计 / 服务器健康</sub></td>
-<td width="50%"><a href="./docs/images/dashboard-chat.jpg"><img src="./docs/images/dashboard-chat.jpg" alt="Chat" /></a><br/><sub><b>Chat</b> — 人和 Agent 同台对话，markdown 渲染 + Enter 发送 + 来源标签</sub></td>
+<td width="50%"><a href="./docs/images/dashboard-chat.jpg"><img src="./docs/images/dashboard-chat.jpg" alt="Chat" /></a><br/><sub><b>Chat</b> — 人和 Agent 同台对话，markdown 渲染 + Enter 发送 + 来源标签 + 乐观回显</sub></td>
 </tr>
 <tr>
 <td width="50%"><a href="./docs/images/dashboard-mesh.jpg"><img src="./docs/images/dashboard-mesh.jpg" alt="Topology Mesh" /></a><br/><sub><b>拓扑图</b> — 实时节点 mesh / ring 视图，连线按消息频度分级</sub></td>
@@ -169,7 +157,7 @@ flowchart LR
 - **MCP Streamable HTTP**（`/mcp`）—— Agent / Claude Code / Codex 接入点
 - **SSE 推送**（`/events/:alias`）—— Hub 实时把任务推给 Agent
 - **REST API**（`/api/*`）—— Dashboard、管理、监控、审计日志
-- **17 个 MCP 工具** —— `send_task`、`get_task`、`send_reply`、`report_status`、`get_all_status`、…
+- **17 个 MCP 工具** —— `send_task` / `get_task` / `send_reply` / `report_status` / `get_all_status` / …
 
 📖 架构详解 → <https://anet.sh/guide/architecture>
 
@@ -182,7 +170,7 @@ flowchart LR
 | Runtime | 工作方式 | 适合场景 | 鉴权 |
 |---|---|---|---|
 | `claude-code-cli` | spawn 本地 `claude` CLI 子进程 | 复用 Claude Pro 订阅，享 Claude Code 全套工具 | 本地 `claude` 已登录 |
-| `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter 等（通过 `ANTHROPIC_BASE_URL`） | API key |
+| `claude-agent-sdk` | 编程式调 Anthropic 兼容 API | Anthropic / MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter（通过 `ANTHROPIC_BASE_URL`） | API key |
 | `codex-sdk` | OpenAI `@openai/codex-sdk` | 写代码 / 跑命令 | `codex auth login` 或 `OPENAI_API_KEY` |
 | `grok-build-acp` | 本地 `grok agent stdio` + Agent Client Protocol | Grok Build 节点加入 Agent Network，复用本机 Grok 登录态 | 本地 `grok` 已登录 |
 
@@ -212,7 +200,7 @@ anet node start grok-demo
 
 ## Provider 接入
 
-`claude-agent-sdk` 本质就是 Anthropic Messages 客户端，任何 Anthropic 兼容 endpoint 都能跑。`anet node create` 内置 `VENDORS` 供应商列表里的每一项都 **verified-with-real-call**（跑通真实 API 才进列表，#104-B 设计）；列表外的 provider 走「自定义」`custom` 接入。
+`claude-agent-sdk` 本质就是 Anthropic Messages 客户端，任何 Anthropic 兼容 endpoint 都能跑。`anet node create` 内置 `VENDORS` 供应商列表里的每一项都 **verified-with-real-call**（跑通真实 API 才进列表）；列表外的 provider 走「自定义」`custom` 接入。
 
 | Provider | 接入方式 | `ANTHROPIC_BASE_URL` |
 |---|---|---|
@@ -229,16 +217,16 @@ anet node start grok-demo
 
 ## 套件包
 
-稳定版，Apache-2.0，已发 npm。
+Apache-2.0，已发 npm。`anet upgrade` 一键全升 `latest`。
 
-| 包 | 版本 | 角色 |
-|---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.10` | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 + `anet hub stop` / `anet hub status` 子命令（v0.10.11 [#200](https://github.com/sleep2agi/agent-network/issues/200)）+ `anet hub start` stderr inherit（[#199](https://github.com/sleep2agi/agent-network/issues/199) 静默挂修）+ `grok-build-acp` per-node isolated cwd（[#204](https://github.com/sleep2agi/agent-network/issues/204) 身份隔离）+ 小米 MiMo 5-model preset + envRef wizard-to-start 自动衔接（[详见 changelog](https://anet.sh/changelog)）|
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.4` | MCP + REST + SSE 通信中枢（SQLite）+ broadcast `channel_meta_json` sender 归属修（[#194](https://github.com/sleep2agi/agent-network/issues/194) hotfix）+ `meta.attachments` / `meta_json` 图片附件元数据 + `/api/server/:host/health` + `/api/server/:host/agents` |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.6` | Web Dashboard —— Next.js 16，图片上传/粘贴发送（v0.10.9）+ 4 套主题 + Hero 3 网络节点前端 8/8 surface + Servers 面板 polish + 100+ 轮 typography & 圆角级联 polish |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.7` | Agent 运行时 —— Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP + grok-build-acp 节点身份隔离（[#204](https://github.com/sleep2agi/agent-network/issues/204) per-node `.anet/nodes/<alias>/runtime-cwd/`）+ codex-sdk 图片输入 + Grok ACP 稳定化与工具状态泄漏清洗 + Grok delegate parser broaden |
+| 包 | 角色 |
+|---|---|
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `anet` CLI —— Hub / Dashboard / Agent / Demo 启动器 |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | Agent 运行时 —— 4 种 runtime 适配层 |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | MCP + REST + SSE 通信中枢（SQLite 持久化） |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | Web Dashboard —— Next.js 16，7 大面板 |
 
-CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉取包，你只需要全局装一个。
+CLI 第一次用到 hub 和 node 时会自动用 `bunx` / `npx` 拉对应包，全局只需装一个 `agent-network`。Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard)。
 
 ---
 
@@ -254,11 +242,11 @@ docs/            设计文档 / RFC / 演进日志
 tests/           Docker 测试矩阵
 ```
 
-Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard)。
-
 ---
 
 ## 状态 & 已知限制
+
+4 个包均 Apache 2.0，**Stable on npm `latest`**，发布节奏与 changelog 见 [anet.sh/changelog](https://anet.sh/changelog)。次要版本之间 API 仍可能变动，请固定依赖版本。项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)，作者每天自用、持续打磨。
 
 **已稳定 + E2E 通过**
 
@@ -269,25 +257,22 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 - 多 Agent 互派（`get_all_status` + `send_task` + `get_task`）
 - 局域网共用 Hub（`--host 0.0.0.0`）
 
-**能跑但缺 E2E 回归**
+**能跑但缺 E2E 自动化回归**
 
-- `claude-code-cli` runtime —— 本机能跑，未自动化（v0.8.2 修了 session resume 默认丢失 bug，详见 [changelog](https://anet.sh/changelog)）
+- `claude-code-cli` runtime —— 本机能跑，未自动化
 - `codex-sdk` runtime —— 单元测试通过，真实 OAuth 流程未上 CI
-- `grok-build-acp` runtime —— v0.10.8 起正式接入（`anet node create --runtime grok-build-acp`），本地 `grok agent stdio` + Agent Client Protocol，复用本机 Grok 登录态；v0.10.11 preview chain 持续 polish 多节点身份隔离（[#204](https://github.com/sleep2agi/agent-network/issues/204)），未上 E2E
+- `grok-build-acp` runtime —— 正式接入，本地 `grok agent stdio` + Agent Client Protocol，复用本机 Grok 登录态；未上 E2E
 - `anet network create` + 跨用户网络共享 —— 代码已合并，未做 E2E
 - `anet channel add telegram | wechat | feishu` —— Telegram 路径已跑通，其他未跑
 
-**未实现**
+**未实现 / Legacy**
 
-- `anet license` / `anet activate` —— v0.6 legacy 命令，Apache 2.0 OSS 后**不再需要**；Hub 后向兼容仍创建 14 天 trial，命中 `license_expired` 见 [troubleshooting](https://anet.sh/troubleshooting)
+- `anet license` / `anet activate` —— v0.6 legacy 命令，Apache 2.0 OSS 后**不再需要**；命中 `license_expired` 见 [troubleshooting](https://anet.sh/troubleshooting)
 - **没有官方托管 Hub** —— 产品方向是 Apache 2.0 + 自部署 + 课程 / 服务咨询，不做 SaaS；生产部署走 [Docker](https://anet.sh/deploy/docker) 或 [生产部署](https://anet.sh/deploy/production)
 
----
+**安全提示** —— 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理，用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
 
-> [!IMPORTANT]
-> **当前 stable**（Apache 2.0，4 个包均在 npm `latest`：agent-network `2.2.10` / agent-node `2.4.7` / commhub-server `0.8.4` / agent-network-dashboard `0.5.6`）。**v0.10.11** 补齐 `anet hub stop` / `anet hub status` 子命令（[#200](https://github.com/sleep2agi/agent-network/issues/200)，SIGTERM → 3s → SIGKILL 兜底，不用手动 `lsof+kill`）+ `anet hub start` stderr inherit（[#199](https://github.com/sleep2agi/agent-network/issues/199) 静默挂修）+ `grok-build-acp` per-node isolated cwd（[#204](https://github.com/sleep2agi/agent-network/issues/204) 节点身份隔离，跨节点 dispatch attribution 不再污染）+ commhub-server `channel_meta_json` broadcast sender 归属修（[#194](https://github.com/sleep2agi/agent-network/issues/194) hotfix）+ Grok delegate parser 3-layer broaden（[#201](https://github.com/sleep2agi/agent-network/issues/201)）；**v0.10.10** 补齐小米 MiMo 5-model preset（mimo-v2.5-pro 默认 + v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign）+ envRef wizard-to-start 自动衔接（`anet node create` 完不用 export，`start` 自动 source `.env`）；**v0.10.9** 加 codex-sdk 图片输入 + commhub 附件 `meta_json` 元数据；**v0.10.8** Grok Build ACP 正式接入: `anet node create --runtime grok-build-acp`、Grok ACP session 持久化/恢复、`-32603` 稳定化、以及 Grok 工具状态泄漏清洗。v0.10 系列从 Direct Runtime + Observability Foundations 起持续迭代，详见 [changelog](https://anet.sh/changelog)；项目 [2026-05-11 开源](https://github.com/sleep2agi/agent-network/releases)。作者每天自用、持续打磨，欢迎试用 + 提意见。次要版本之间 API 仍可能变动，请固定依赖版本。
->
-> **安全提示。** 每个 Agent 节点默认带 `dangerouslySkipPermissions: true` 启动，调工具不会跳确认。请把 Agent 当成不可信代码处理 —— 用一次性工作目录跑，**别在 `$HOME` 下直接跑**。详见 [SECURITY.md](./SECURITY.md)。
+---
 
 > [!WARNING]
 > **公网自部署有风险，先看完这一段再开放安全组。**
@@ -297,7 +282,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 > 3. **多租户隔离依赖 network scope** —— v0.8 起已强制用户 / 节点按 network 访问；仍不要把互不信任的人放进同一个 network
 > 4. **tmux 控制面** —— 默认关闭；只有显式 `COMMHUB_ENABLE_TMUX=1` 才启用，生产环境必须配 admin 鉴权、反代 TLS 和最小暴露面
 >
-> 完整安全审计 + 修复清单：[`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md)（v0.8.0 / v0.8.1 已修掉 P0）
+> 完整安全审计 + 修复清单：[`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md)
 
 ---
 
@@ -341,20 +326,7 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 
 ---
 
-## 资源
-
-- [anet.sh](https://anet.sh) —— 完整文档站
-- [上手指南](https://anet.sh/guide/getting-started) —— 已 E2E 验证的全链路
-- [节点 Runtime](https://anet.sh/guide/runtimes) —— Claude Code CLI vs Agent SDK vs Codex vs Grok Build ACP
-- [架构概览](https://anet.sh/guide/architecture) —— MCP / SSE / REST / SQLite schema
-- 📚 **[研发流程 SOP](./docs/sop/)** —— 以 Issue 为中心的 AI-Native 研发迭代流程（[方法论总览](./docs/sop/methodology.md)：Issue-Centric / Release Ops / Verify-First / Agent Dispatch / Retro 5 章节）
-- [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) —— 包索引
-- [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) —— 问答 / 想法
-- [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) —— bug 反馈
-
----
-
-## 加入社群 / Join us
+## 加入社群
 
 扫码加入 **Agent Network 社区交流群** —— 设计讨论、排查问题、版本动态：
 
@@ -365,6 +337,15 @@ Dashboard 是独立 repo：[sleep2agi/agent-network-dashboard](https://github.co
 > 二维码每 7 天轮换一次，过期了到 <https://anet.sh/community/wechat-group.jpg> 拿最新版（地址不变）。
 
 英文 / 异步用户：[GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions)。
+
+---
+
+## 资源
+
+- [anet.sh](https://anet.sh) —— 完整文档站 · [上手指南](https://anet.sh/guide/getting-started) · [架构概览](https://anet.sh/guide/architecture) · [Runtime](https://anet.sh/guide/runtimes) · [Changelog](https://anet.sh/changelog)
+- 📚 [研发流程 SOP](./docs/sop/) —— 以 Issue 为中心的 AI-Native 研发迭代流程
+- [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) —— 包索引
+- [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [Issues](https://github.com/sleep2agi/agent-network/issues)
 
 ---
 

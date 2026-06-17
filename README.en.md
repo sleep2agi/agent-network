@@ -5,30 +5,29 @@
 <h1 align="center">Agent Network</h1>
 
 <p align="center">
-  <strong>Local-first multi-agent network — 4 runtimes × 8 LLM providers, orchestrated into a single mesh with one command.</strong>
+  <strong>Pull your Claude, Codex & Grok into one network — one command, and they start delegating to each other.</strong>
 </p>
 
 <p align="center">
-  Claude Code · Claude Agent SDK · Codex · Grok Build ACP running side by side; agents delegate tasks, stream context, and coordinate — all on your own hardware. Apache 2.0 open source.
+  4 runtimes × 8 LLM providers, local-first, running on your own hardware. Agents discover each other over MCP, stream context, and coordinate. Apache 2.0 open source.
 </p>
 
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-network.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-network.svg?label=anet" alt="anet npm version"></a>
+  <a href="https://www.npmjs.com/package/@sleep2agi/agent-node"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-node.svg?label=agent-node" alt="agent-node npm version"></a>
+  <a href="https://www.npmjs.com/package/@sleep2agi/commhub-server"><img src="https://img.shields.io/npm/v/@sleep2agi/commhub-server.svg?label=commhub-server" alt="commhub-server npm version"></a>
+  <a href="https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard"><img src="https://img.shields.io/npm/v/@sleep2agi/agent-network-dashboard.svg?label=dashboard" alt="dashboard npm version"></a>
   <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img src="https://img.shields.io/npm/dm/@sleep2agi/agent-network.svg" alt="npm downloads"></a>
   <a href="https://anet.sh"><img src="https://img.shields.io/badge/docs-anet.sh-009e7e.svg" alt="Docs"></a>
   <a href="https://anet.sh/en/changelog"><img src="https://img.shields.io/badge/changelog-anet.sh-blue.svg" alt="Changelog"></a>
   <a href="https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml"><img src="https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml/badge.svg?branch=main" alt="anet QA (v0)"></a>
-  <a href="https://github.com/sleep2agi/agent-network/commits/main"><img src="https://img.shields.io/github/last-commit/sleep2agi/agent-network" alt="last commit"></a>
-  <a href="https://github.com/sleep2agi/agent-network/commits/main"><img src="https://img.shields.io/github/commit-activity/m/sleep2agi/agent-network" alt="commits per month"></a>
-  <a href="https://github.com/sleep2agi/agent-network/releases"><img src="https://img.shields.io/github/release-date/sleep2agi/agent-network" alt="release date"></a>
   <a href="https://github.com/sleep2agi/agent-network"><img src="https://img.shields.io/github/stars/sleep2agi/agent-network?style=social" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
   <strong><a href="https://anet.sh">📖 Docs</a></strong> ·
   <strong><a href="https://www.npmjs.com/org/sleep2agi">📦 NPM</a></strong> ·
-  <strong><a href="https://github.com/sleep2agi/agent-network">⭐ GitHub</a></strong> ·
   <strong><a href="https://github.com/sleep2agi/agent-network/discussions">💬 Discussions</a></strong> ·
   <strong><a href="https://anet.sh/en/community">💚 WeChat</a></strong>
 </p>
@@ -39,19 +38,16 @@
 
 ---
 
-## 30-second quickstart (first-time install)
-
-> **Prereq:** Node.js ≥ 22.13.0 (required by `@inquirer/prompts` and friends; older versions trip `EBADENGINE` warnings during install).
+## 30-second quickstart
 
 ```bash
-# Install one global package (pulls npm @latest — currently agent-network 2.2.10)
+# Install one global package
 npm install -g @sleep2agi/agent-network
 
 # Terminal 1 — start the hub (keep open)
 anet hub start
-#   listens on http://127.0.0.1:9200
-#   SQLite at ~/.commhub/commhub.db
-#   default account auto-created: admin / anethub
+#   listens on http://127.0.0.1:9200, SQLite at ~/.commhub/commhub.db
+#   default account auto-created: admin / anethub (run `anet passwd` before any public deploy)
 
 # Terminal 2 — start the dashboard (keep open)
 anet hub dashboard
@@ -59,46 +55,33 @@ anet hub dashboard
 
 # Terminal 3 — log in, create + start an agent
 anet login --username admin --password anethub
-anet node create my-bot          # two-step picker: runtime → provider → API key
+anet node create my-bot          # interactive: runtime → provider → API key
 anet node start my-bot           # waits for "SSE connected"
 ```
 
-Or via the one-shot installer (handles admin-password prompts and other UX):
-
-```bash
-curl -fsSL https://anet.sh/install.sh | bash
-```
-
-Send a task from the Dashboard's Chat panel. Spin up a second node and ask the first to delegate — the agents will discover each other and coordinate via MCP. That's it.
+Send a task from the Dashboard's Chat panel. Spin up a second node and ask the first to delegate — the two agents discover each other over MCP and coordinate. That's it.
 
 ### Already have anet? Upgrade to the latest
 
 ```bash
 anet upgrade            # bumps all four packages to npm @latest
-anet project restart    # restart cwd nodes against the new version (see #117)
+anet project restart    # restart cwd nodes against the new version
 ```
 
 Full cross-version migration reference: [Upgrade Guide](https://anet.sh/en/guide/upgrade).
 
----
-
-## What next
-
-After the 30-second quickstart:
-- 📖 **Read the docs** — [anet.sh/en/guide/getting-started](https://anet.sh/en/guide/getting-started) for the full walkthrough + [architecture overview](https://anet.sh/en/guide/architecture)
-- 💚 **Join the community** — [Discussions](https://github.com/sleep2agi/agent-network/discussions) for async, or [WeChat](https://anet.sh/en/community) for real-time
-- ⭐ **Star the repo** — if you find it useful, stars directly shape release cadence
+<sub>Prereq: Node.js ≥ 22.13.0 (required by `@inquirer/prompts` and friends; older versions trip `EBADENGINE` warnings during install but still work).</sub>
 
 ---
 
 ## Why Agent Network
 
-- **One CLI, four runtimes.** Run Claude Code CLI, the Claude Agent SDK, OpenAI's Codex SDK, and xAI's Grok Build ACP side-by-side on the same hub. Mix-and-match per role.
-- **Eight LLM providers, one config switch.** Anthropic / MiniMax / DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / InternLM / Xiaomi MiMo / OpenRouter — all routed through `ANTHROPIC_BASE_URL` (OpenAI goes via the `codex-sdk` runtime; xAI Grok goes via the `grok-build-acp` runtime — both counted separately).
-- **Local. LAN. Cross-server. Same Hub.** Hub binds to `127.0.0.1` for pure local mode; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers across the internet can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
-- **Mesh dispatch out of the box.** Agents discover each other via 17 MCP tools (`get_all_status`, `send_task`, `get_task`, …) and coordinate without you scripting the choreography.
-- **Web Dashboard included.** Seven pages — Overview / Nodes / Tasks / Messages / Chat / Admin / Settings — plus a live node topology graph (grid / ring dual view, edges tiered by message frequency). Next.js 16 app, 4 themes, runs at `localhost:3000`.
-- **Different from LangGraph / AutoGen / CrewAI:** anet is an **npm package**, zero Python dependency; **local-first**, not a SaaS framework; **multi-vendor without lock-in**, not OpenAI-by-default; **human + agent on the same surface** via Dashboard Chat, not pure programmatic orchestration.
+- **One CLI, four runtimes.** Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP run side-by-side on the same hub. Pick per role.
+- **Eight LLM providers, one config switch.** Anthropic / MiniMax / DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / InternLM / Xiaomi MiMo / OpenRouter all route through `ANTHROPIC_BASE_URL`; OpenAI goes via `codex-sdk`, xAI Grok goes via `grok-build-acp`.
+- **Local. LAN. Cross-server.** Hub binds to `127.0.0.1` for pure local; switch to `0.0.0.0` and **agents on other laptops, cloud VMs, or any servers can join the same Hub** over real-time SSE. SQLite stays on whichever box runs the Hub. No cloud account, no telemetry, no signup.
+- **Mesh dispatch out of the box.** Agents discover each other via 17 MCP tools (`get_all_status`, `send_task`, `get_task`, …) — no choreography to script.
+- **Web Dashboard included.** 7 pages (Overview / Nodes / Tasks / Messages / Chat / Admin / Settings) + a live node topology graph, on `localhost:3000`.
+- **Different from LangGraph / AutoGen / CrewAI:** anet is an **npm package**, zero Python; **local-first**, not SaaS; **multi-vendor without lock-in**, not OpenAI-by-default; **human + agent on the same surface** via Dashboard Chat, not pure programmatic orchestration.
 
 ---
 
@@ -107,23 +90,23 @@ After the 30-second quickstart:
 | Dimension | anet | LangGraph | AutoGen | CrewAI |
 |---|---|---|---|---|
 | Deployment | Local-first + LAN/internet shared | Python library | Python library | Python library |
-| Multi-vendor LLM | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (via `ANTHROPIC_BASE_URL`) + OpenAI (`codex-sdk` runtime) + xAI Grok (`grok-build-acp` runtime) | via LangChain | mainly OpenAI / Azure | via LangChain |
+| Multi-vendor LLM | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter (via `ANTHROPIC_BASE_URL`) + OpenAI (`codex-sdk`) + xAI Grok (`grok-build-acp`) | via LangChain | mainly OpenAI / Azure | via LangChain |
 | Inter-agent transport | MCP + SSE hub, auto-discovery | Programmatic graph | Group chat | Hierarchy / sequential |
 | Human + Agent on same surface | ✅ Dashboard Chat | n/a (program-only) | n/a | n/a |
 | Package form | One npm package | pip + write your own server | pip + write your own server | pip + write your own server |
 
-<sub>Cross-referenced against the public documentation of each project as of 2026-05; not a performance benchmark — a positioning comparison.</sub>
+<sub>Cross-referenced against the public docs of each project; not a performance benchmark — a positioning comparison.</sub>
 
 ---
 
-## Dashboard Preview
+## Dashboard preview
 
 Runs on `localhost:3000`, Next.js 16, 7 pages: Overview / Nodes / Tasks / Messages / Chat / Admin / Settings.
 
 <table>
 <tr>
 <td width="50%"><a href="./docs/images/dashboard-overview.jpg"><img src="./docs/images/dashboard-overview.jpg" alt="Overview" /></a><br/><sub><b>Overview</b> — Network at a glance: online agents / task stats / server health</sub></td>
-<td width="50%"><a href="./docs/images/dashboard-chat.jpg"><img src="./docs/images/dashboard-chat.jpg" alt="Chat" /></a><br/><sub><b>Chat</b> — Humans and agents on the same surface; markdown rendering + Enter to send + source labels</sub></td>
+<td width="50%"><a href="./docs/images/dashboard-chat.jpg"><img src="./docs/images/dashboard-chat.jpg" alt="Chat" /></a><br/><sub><b>Chat</b> — Humans and agents on the same surface; markdown + Enter-to-send + source labels + optimistic echo</sub></td>
 </tr>
 <tr>
 <td width="50%"><a href="./docs/images/dashboard-mesh.jpg"><img src="./docs/images/dashboard-mesh.jpg" alt="Topology Mesh" /></a><br/><sub><b>Topology</b> — Live node mesh / ring views; edges weighted by message frequency</sub></td>
@@ -171,10 +154,10 @@ flowchart LR
     C4 --> C5[SSE connected ✓ online]
 ```
 
-- **MCP Streamable HTTP** at `/mcp` — agents and Claude Code / Codex connect here
+- **MCP Streamable HTTP** at `/mcp` — agent and Claude Code / Codex connect point
 - **SSE Push** at `/events/:alias` — server pushes tasks to agents in real time
-- **REST** at `/api/*` — Dashboard, admin, monitoring, audit log
-- **17 MCP tools** — `send_task`, `get_task`, `send_reply`, `report_status`, `get_all_status`, …
+- **REST API** at `/api/*` — Dashboard, admin, monitoring, audit log
+- **17 MCP tools** — `send_task` / `get_task` / `send_reply` / `report_status` / `get_all_status` / …
 
 📖 Architecture deep dive → <https://anet.sh/en/guide/architecture>
 
@@ -187,9 +170,9 @@ Pick one per node. Mix freely on the same hub.
 | Runtime | What it does | Best for | Auth |
 |---|---|---|---|
 | `claude-code-cli` | Spawns your local `claude` CLI as a subprocess | Reusing a Claude Pro subscription, full Claude Code tool suite | `claude` already logged in |
-| `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic, MiniMax, DeepSeek, GLM, Kimi, InternLM, Xiaomi MiMo, OpenRouter via `ANTHROPIC_BASE_URL` | API key |
+| `claude-agent-sdk` | Programmatic Anthropic-compatible client | Anthropic / MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter via `ANTHROPIC_BASE_URL` | API key |
 | `codex-sdk` | OpenAI's `@openai/codex-sdk` | Code generation, shell-heavy work | `codex auth login` or `OPENAI_API_KEY` |
-| `grok-build-acp` | Local `grok agent stdio` over Agent Client Protocol | Joining Agent Network as a Grok Build node while reusing local Grok auth | local `grok` already logged in |
+| `grok-build-acp` | Local `grok agent stdio` over Agent Client Protocol | Joining Agent Network as a Grok Build node, reusing host-local Grok auth | local `grok` already logged in |
 
 ### Grok Build
 
@@ -209,7 +192,7 @@ anet node start grok-demo
 
 Stable support: SSE task receive, Grok ACP execution, `grokSession` persistence/resume, CommHub replies, and explicit delegation through the `agent-node` wrapper. Current boundary: native Grok-side MCP tool injection is still treated as preview; CommHub delegation is handled by the wrapper.
 
-Grok Build runtime guide → [`docs/grok-build-runtime.md`](./docs/grok-build-runtime.md)
+📖 Grok Build runtime guide → [`docs/grok-build-runtime.md`](./docs/grok-build-runtime.md)
 
 📖 Runtime deep dive → <https://anet.sh/en/guide/runtimes>
 
@@ -217,7 +200,7 @@ Grok Build runtime guide → [`docs/grok-build-runtime.md`](./docs/grok-build-ru
 
 ## Providers
 
-`claude-agent-sdk` is just an Anthropic Messages client — any Anthropic-compatible endpoint works. Every entry in `anet node create`'s built-in `VENDORS` list is **verified-with-real-call** (it only lands in the list after a real API call passes — the #104-B design); providers outside the list go through the `custom` vendor.
+`claude-agent-sdk` is just an Anthropic Messages client — any Anthropic-compatible endpoint works. Every entry in `anet node create`'s built-in `VENDORS` list is **verified-with-real-call** (only lands in the list after a real API call passes); providers outside the list go through the `custom` vendor.
 
 | Provider | Access | `ANTHROPIC_BASE_URL` |
 |---|---|---|
@@ -226,7 +209,7 @@ Grok Build runtime guide → [`docs/grok-build-runtime.md`](./docs/grok-build-ru
 | Xiaomi MiMo | built-in vendor · verified | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 | InternLM | built-in vendor · verified | `https://chat.intern-ai.org.cn` (bare domain, no `/anthropic`) |
 | OpenAI Codex (`codex-sdk`) | built-in vendor · verified | n/a — `codex auth login` |
-| DeepSeek / GLM / Kimi / OpenRouter / self-hosted | via the `custom` vendor (**not built-in — verify the endpoint + model id yourself**) | provide base URL + `ANTHROPIC_AUTH_TOKEN` |
+| DeepSeek / GLM (Zhipu) / Kimi (Moonshot) / OpenRouter / self-hosted | via the `custom` vendor (**not built-in — verify the endpoint + model id yourself**) | provide base URL + `ANTHROPIC_AUTH_TOKEN` |
 
 📖 Per-provider keys, models, and access → <https://anet.sh/en/guide/multi-model>
 
@@ -234,16 +217,16 @@ Grok Build runtime guide → [`docs/grok-build-runtime.md`](./docs/grok-build-ru
 
 ## Packages
 
-Stable, Apache-2.0, published to npm.
+Apache-2.0, published to npm. `anet upgrade` bumps all four to `latest`.
 
-| Package | Version | Role |
-|---|---|---|
-| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `2.2.10` | `anet` CLI — hub / dashboard / agent / demo launcher + `anet hub stop` / `anet hub status` subcommands (v0.10.11 [#200](https://github.com/sleep2agi/agent-network/issues/200)) + `anet hub start` stderr inherit ([#199](https://github.com/sleep2agi/agent-network/issues/199) silent-hang fix) + `grok-build-acp` per-node isolated cwd ([#204](https://github.com/sleep2agi/agent-network/issues/204) identity isolation) + Xiaomi MiMo 5-model preset + envRef wizard-to-start auto-source ([see changelog](https://anet.sh/en/changelog)) |
-| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | `0.8.4` | MCP + REST + SSE hub (SQLite) + broadcast `channel_meta_json` sender attribution fix ([#194](https://github.com/sleep2agi/agent-network/issues/194) hotfix) + attachment metadata + `/api/server/:host/health` + `/api/server/:host/agents` |
-| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | `0.5.6` | Web UI — Next.js 16, image upload/paste, 4 themes, live topology, Servers panel polish, and Chat workflow improvements |
-| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | `2.4.7` | Agent runtime — Claude Code CLI / Claude Agent SDK / Codex SDK / Grok Build ACP + grok-build-acp per-node identity isolation ([#204](https://github.com/sleep2agi/agent-network/issues/204) per-node `.anet/nodes/<alias>/runtime-cwd/`) + codex-sdk image input + Grok ACP stabilization and tool-state leak cleanup + Grok delegate parser broaden |
+| Package | Role |
+|---|---|
+| [`@sleep2agi/agent-network`](https://www.npmjs.com/package/@sleep2agi/agent-network) | `anet` CLI — hub / dashboard / agent / demo launcher |
+| [`@sleep2agi/agent-node`](https://www.npmjs.com/package/@sleep2agi/agent-node) | Agent runtime — adapters for all 4 runtimes |
+| [`@sleep2agi/commhub-server`](https://www.npmjs.com/package/@sleep2agi/commhub-server) | MCP + REST + SSE hub (SQLite-backed) |
+| [`@sleep2agi/agent-network-dashboard`](https://www.npmjs.com/package/@sleep2agi/agent-network-dashboard) | Web Dashboard — Next.js 16, 7 panels |
 
-The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`. You only ever globally install one package.
+The CLI auto-fetches the hub and node packages on first use via `bunx` / `npx`; you only ever globally install one. The Dashboard lives in a separate repo: [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard).
 
 ---
 
@@ -259,42 +242,37 @@ docs/            design notes, RFCs, evolution log
 tests/           Docker test matrix
 ```
 
-The Dashboard lives in a separate repo: [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard).
-
 ---
 
 ## Status & known limitations
 
-What's solid, and what to watch out for.
+All four packages Apache 2.0, **Stable on npm `latest`**. Release cadence and full changelog → [anet.sh/en/changelog](https://anet.sh/en/changelog). APIs may still shift between minor versions — pin your dependencies. [Open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases); the maintainer uses it daily and keeps polishing.
 
-**Stable and E2E-tested**
+**Stable + E2E-tested**
 
 - `anet hub start` / `hub dashboard` / `login` / `register` / `whoami` / `logout`
 - `anet node create / start / stop / delete / ls / logs`
 - `claude-agent-sdk` — 2 providers verified end-to-end via Docker E2E: InternLM + MiniMax
 - Dashboard Chat — markdown, optimistic echo, source labels, error fallback, history persistence
-- Multi-agent peer dispatch via `get_all_status` + `send_task` + `get_task`
-- LAN-shared hub with `--host 0.0.0.0`
+- Multi-agent peer dispatch (`get_all_status` + `send_task` + `get_task`)
+- LAN-shared hub (`--host 0.0.0.0`)
 
-**Works, but not yet covered by full E2E**
+**Works, but no automated E2E regression yet**
 
-- `claude-code-cli` runtime — runs locally; no automated regression yet (v0.8.2 fixed the session-resume default-loss bug, see [changelog](https://anet.sh/en/changelog))
+- `claude-code-cli` runtime — runs locally, not automated
 - `codex-sdk` runtime — unit-tested; live OAuth path not in CI
-- `grok-build-acp` runtime — formally onboarded in v0.10.8 (`anet node create --runtime grok-build-acp`), local `grok agent stdio` + Agent Client Protocol, reuses host-local Grok login; v0.10.11 preview chain continues polishing multi-node identity isolation ([#204](https://github.com/sleep2agi/agent-network/issues/204)), no E2E yet
+- `grok-build-acp` runtime — formally onboarded, local `grok agent stdio` + Agent Client Protocol, reuses host-local Grok login; no E2E yet
 - `anet network create` and cross-user network sharing — code merged, no E2E
 - `anet channel add telegram | wechat | feishu` — Telegram path is exercised, others are not
 
-**Not yet implemented**
+**Not yet implemented / Legacy**
 
-- `anet license` / `anet activate` — v0.6 legacy commands, **no longer needed after Apache 2.0 OSS**. The Hub still keeps a SQLite `licenses` table for backward-compat (14-day trial on first run). On `license_expired`, see [troubleshooting](https://anet.sh/en/troubleshooting).
+- `anet license` / `anet activate` — v0.6 legacy commands, **no longer needed after Apache 2.0 OSS**. On `license_expired`, see [troubleshooting](https://anet.sh/en/troubleshooting).
 - **No official hosted Hub** — the product direction is Apache 2.0 + self-host + courses / consulting, **no SaaS**. For production go through [Docker](https://anet.sh/en/deploy/docker) or [production deployment](https://anet.sh/en/deploy/production).
 
----
+**Safety disclaimer** — each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, **not your `$HOME`**. See [SECURITY.md](./SECURITY.md).
 
-> [!IMPORTANT]
-> **Current stable** (Apache 2.0; all four packages at npm `latest`: agent-network `2.2.10` / agent-node `2.4.7` / commhub-server `0.8.4` / agent-network-dashboard `0.5.6`). **v0.10.11** adds `anet hub stop` / `anet hub status` subcommands ([#200](https://github.com/sleep2agi/agent-network/issues/200), SIGTERM → 3s → SIGKILL, no more manual `lsof+kill`) + `anet hub start` stderr inherit ([#199](https://github.com/sleep2agi/agent-network/issues/199) silent-hang fix) + `grok-build-acp` per-node isolated cwd ([#204](https://github.com/sleep2agi/agent-network/issues/204) node identity isolation; cross-node dispatch attribution no longer contaminates) + commhub-server `channel_meta_json` broadcast sender attribution fix ([#194](https://github.com/sleep2agi/agent-network/issues/194) hotfix) + Grok delegate parser 3-layer broaden ([#201](https://github.com/sleep2agi/agent-network/issues/201)). **v0.10.10** adds the Xiaomi MiMo 5-model preset (mimo-v2.5-pro default + v2.5 / v2-pro / v2-omni / v2.5-tts-voicedesign) + envRef wizard-to-start auto-source (after `anet node create` you no longer need to `export` — `start` sources `.env` automatically). **v0.10.9** ships codex-sdk image input + commhub attachment `meta_json` metadata. **v0.10.8** formalised Grok Build ACP: `anet node create --runtime grok-build-acp`, Grok ACP session persistence/resume, `-32603` stabilization, and cleanup for Grok tool-state leakage in final replies. The v0.10 line started with Direct Runtime + Observability Foundations and has continued through upgrade UX, batch wizard, codex-sdk, Dashboard topology, image attachments, and Grok Build. See the [changelog](https://anet.sh/en/changelog); project [open-sourced 2026-05-11](https://github.com/sleep2agi/agent-network/releases). The maintainer uses it daily and keeps polishing it — feedback and issues are very welcome. APIs may still shift between minor versions — pin your dependencies.
->
-> **Safety disclaimer.** Each agent node runs with `dangerouslySkipPermissions: true` by default so it can call tools without prompting. Treat agents as untrusted code — run them in disposable working directories, not your `$HOME`. See [SECURITY.md](./SECURITY.md).
+---
 
 > [!WARNING]
 > **Self-hosting on the public internet has real risks. Read this before opening firewall ports.**
@@ -304,7 +282,7 @@ What's solid, and what to watch out for.
 > 3. **Multi-tenant isolation relies on network scope** — v0.8 enforces user/node access by network; still do not place mutually untrusted users in the same network
 > 4. **The tmux control plane** — disabled by default; only enabled with `COMMHUB_ENABLE_TMUX=1`, and public deployments must require admin auth, reverse-proxy TLS, and minimal exposure
 >
-> Full security audit + fix list: [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md) (v0.8.0 / v0.8.1 closed the P0 items)
+> Full security audit + fix list: [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md)
 
 ---
 
@@ -318,7 +296,7 @@ The fastest way to help right now: try the [30-second quickstart](#30-second-qui
 
 ## Security
 
-Found a vulnerability? Please **don't** open a public issue. Use [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) instead. See [SECURITY.md](./SECURITY.md) for the disclosure policy and threat model notes (especially around `dangerouslySkipPermissions` and LAN-exposed hubs).
+Found a vulnerability? Please **don't** open a public issue. Use [GitHub Security Advisories](https://github.com/sleep2agi/agent-network/security/advisories/new) instead. See [SECURITY.md](./SECURITY.md) for the disclosure policy and threat model (especially around `dangerouslySkipPermissions` and LAN-exposed hubs).
 
 ---
 
@@ -348,22 +326,9 @@ Using anet in your project? Open a PR to [`docs-site/docs/ecosystem.md`](./docs-
 
 ---
 
-## Resources
+## Community
 
-- [anet.sh](https://anet.sh) — full documentation site
-- [Getting started](https://anet.sh/en/guide/getting-started) — verified end-to-end path
-- [Runtimes](https://anet.sh/en/guide/runtimes) — Claude Code CLI vs Agent SDK vs Codex vs Grok Build ACP
-- [Architecture](https://anet.sh/en/guide/architecture) — MCP, SSE, REST, SQLite schema
-- 📚 **[R&D Methodology SOPs](./docs/sop/)** — Issue-centric AI-Native development workflow ([methodology overview](./docs/sop/methodology.md): Issue-Centric / Release Ops / Verify-First / Agent Dispatch / Retro)
-- [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) — package index
-- [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) — questions, ideas
-- [GitHub Issues](https://github.com/sleep2agi/agent-network/issues) — bug reports
-
----
-
-## Join us / 加入社群
-
-Scan the QR code to join the **Agent Network 社区交流群** on WeChat — design discussions, troubleshooting, weekly updates.
+Scan the QR code to join the **Agent Network 社区交流群** on WeChat — design discussions, troubleshooting, weekly updates:
 
 <p align="center">
   <img src="https://anet.sh/community/wechat-group.jpg" alt="Agent Network WeChat group" width="320">
@@ -372,6 +337,15 @@ Scan the QR code to join the **Agent Network 社区交流群** on WeChat — des
 > The QR rotates every 7 days. If it's expired, the freshest one is always at <https://anet.sh/community/wechat-group.jpg>.
 
 Prefer English / async? Use [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions).
+
+---
+
+## Resources
+
+- [anet.sh](https://anet.sh) — full documentation site · [Getting started](https://anet.sh/en/guide/getting-started) · [Architecture](https://anet.sh/en/guide/architecture) · [Runtimes](https://anet.sh/en/guide/runtimes) · [Changelog](https://anet.sh/en/changelog)
+- 📚 [R&D methodology SOPs](./docs/sop/) — Issue-centric AI-Native development workflow
+- [@sleep2agi on npm](https://www.npmjs.com/org/sleep2agi) — package index
+- [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [Issues](https://github.com/sleep2agi/agent-network/issues)
 
 ---
 
