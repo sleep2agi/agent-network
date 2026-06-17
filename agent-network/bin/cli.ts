@@ -2348,6 +2348,77 @@ function ensureMcpJson(profile: Profile) {
 
 // ── launch helper (shared by start + resume) ──
 
+// #245 task E — detect channel plugin failures in the latest node log and
+// surface an actionable warning before launchAgent re-spawns claude. The
+// channel-plugin lifecycle is entirely inside Claude Code (anet only passes
+// `--channels ...` args); a failed plugin caches its failure in the running
+// claude process's in-memory state, and `--resume <uuid>` inherits that
+// cache instead of re-attempting the channel. Only a full process restart
+// (anet node stop && start) clears the cache; --resume <uuid> on the fresh
+// process still loads conversation history from disk.
+//
+// This warn is diagnostic-only: it does NOT block launch, change args, or
+// alter Claude's session UUID. It just tells the user "if you're confused
+// why your telegram channel still isn't connecting after `anet channel add`,
+// here's why and here's the fix."
+function maybeWarnChannelResumeBlocker(
+  nodeId: string,
+  profile: Profile,
+): void {
+  try {
+    // Only relevant when the profile declares telegram (the only
+    // currently-shipped plugin channel; if more land, extend this list).
+    if (!profile.channels.includes("telegram")) return;
+
+    // Tail the most recent log; if it shows a channel-plugin failure
+    // pattern, the user is the failure-window user the warn targets.
+    const logsDir = join(nodesDir(), nodeId, "logs");
+    if (!existsSync(logsDir)) return;
+    const logs = readdirSync(logsDir)
+      .filter((f) => f.endsWith(".log"))
+      .map((f) => ({ name: f, mtime: statSync(join(logsDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    if (logs.length === 0) return;
+    const latestLog = join(logsDir, logs[0].name);
+
+    // Tail ~200 lines (cheap, bounded).
+    const content = readFileSync(latestLog, "utf-8");
+    const tail = content.split("\n").slice(-200).join("\n");
+    const FAILURE_PATTERNS = [
+      /TELEGRAM_BOT_TOKEN required/i,
+      /TELEGRAM_BOT_TOKEN.*missing/i,
+      /channel.*failed to (?:start|load|attach)/i,
+      /plugin.*exited/i,
+      /MCP server.*exited/i,
+    ];
+    const failureHit = FAILURE_PATTERNS.some((p) => p.test(tail));
+    if (!failureHit) return;
+
+    // Additional signal: user has since added the token (otherwise the
+    // warn would suggest stop+start that would just fail the same way).
+    // Check both possible token locations: per-node .env and the channel
+    // access.json (anet channel add writes one or both).
+    const nodeEnv = join(nodesDir(), nodeId, ".env");
+    const channelDir = join(nodesDir(), nodeId, "channels", "telegram");
+    const hasNodeEnv = existsSync(nodeEnv) &&
+      /TELEGRAM_BOT_TOKEN=/.test(readFileSync(nodeEnv, "utf-8"));
+    const hasChannelState = existsSync(channelDir);
+    if (!hasNodeEnv && !hasChannelState) return;
+
+    console.warn(`[anet] ⚠ telegram channel 上次启动失败 — resume 不会重连`);
+    console.warn(`[anet]   Claude Code 把 channel plugin 启动失败缓存在当前进程的内存里, --resume 同 session 会继承这个缓存, 不会再 attempt 这个 channel.`);
+    console.warn(`[anet]`);
+    console.warn(`[anet]   修复 (conversation history 完整保留):`);
+    console.warn(`[anet]     anet node stop ${shellQuote(nodeId)} && anet node start ${shellQuote(nodeId)}`);
+    console.warn(`[anet]`);
+    console.warn(`[anet]   新 Claude 进程会从头 attempt 每个 channel, 同时 --resume <session-uuid> 加载已有 conversation 不丢.`);
+    console.warn(`[anet]   (failure pattern matched in ${logs[0].name}; see \`anet channel status ${shellQuote(nodeId)}\` for state.)`);
+  } catch {
+    // Pure diagnostic — if anything throws (missing log, permission denied,
+    // etc.), silently skip. Never let the warn path block a launch.
+  }
+}
+
 async function launchAgent(id: string, forceNewSession = false) {
   const resolved = resolveNodeRef(id);
   if (!resolved) {
@@ -2537,6 +2608,34 @@ async function launchAgent(id: string, forceNewSession = false) {
     if (profile.channels.includes("telegram")) {
       env.TELEGRAM_STATE_DIR = join(nodesDir(), nodeId, "channels", "telegram");
     }
+
+    // #245 task E — "channel previously failed, resume cannot retry" warn.
+    //
+    // When a channel plugin (telegram in particular) fails its stdio MCP
+    // server at session start — e.g. TELEGRAM_BOT_TOKEN was missing because
+    // the user ran `anet channel add` AFTER `anet node start` — Claude Code
+    // caches the failure in the running process's in-memory state. A
+    // subsequent `anet node resume` (or `anet node start` while the old
+    // claude process is still alive) inherits that cached failure and
+    // silently skips the channel forever. The only working escape is a
+    // full process restart: `anet node stop && anet node start` kills the
+    // claude process (clears the in-memory cache); the relaunch passes
+    // `--resume <uuid>` so the conversation history is preserved while
+    // every channel is re-attempted from scratch.
+    //
+    // anet itself has no hook into Claude's channel lifecycle (channel
+    // plugin spawn is fully internal to claude). So this is a diagnostic
+    // warning, not a fix: detect the failure pattern from the latest log,
+    // surface the actionable fix to the user before the spawn proceeds.
+    // launch is NOT blocked — user may have already fixed (e.g. via prior
+    // stop+start) and the new log will not have the pattern; the warn is
+    // a one-shot guidance for the failure window.
+    //
+    // Pairs with already-shipped #245 commits:
+    //   - 2cc0020 (anet channel add warns if node already running)
+    //   - a70caea (anet channel status — surfaces resolved telegram state)
+    //   - this commit (anet node start/resume — surfaces failure + escape)
+    maybeWarnChannelResumeBlocker(nodeId, profile);
 
     const claudeArgs: string[] = [];
     if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
