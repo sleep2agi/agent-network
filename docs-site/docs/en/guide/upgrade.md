@@ -19,7 +19,7 @@ v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) actually r
 
 ```bash
 npm install -g @sleep2agi/agent-network@latest
-anet --version            # current latest v2.2.10 (v0.10.13, 2026-06-08)
+anet --version            # confirm you are on npm latest
 ```
 
 From there on, `anet upgrade` auto-detached-spawns and `anet -v` reflects the new build a minute or two later.
@@ -98,7 +98,7 @@ anet upgrade --self
 | `self skip` | anet does not self-upgrade by default (pass `--self`) |
 | `lookup failed` | npm registry lookup failed — network / package name issue |
 
-**Note on `commhub-server`**: that row shows the current `PINNED_SERVER_VERSION` (`0.8.4` on v0.10.13 stable; historical chain detail in the [changelog](/en/changelog) `commhub-server` rows). `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
+**Note on `commhub-server`**: that row shows the `PINNED_SERVER_VERSION` from the current CLI source; historical chain detail lives in the [changelog](/en/changelog) `commhub-server` rows. `anet hub start` runs that pinned version regardless of what's globally installed (to avoid server-breaking churn). So even if you upgrade the global `commhub-server`, it doesn't change what your hub actually runs.
 
 **After the upgrade**: `anet upgrade` prints a hint that running nodes need a restart to pick up the new agent-node:
 
@@ -156,7 +156,7 @@ anet status
 ## v0.7 → v0.8 Upgrade Notes (historical path) {#v0-7-v0-8-upgrade-notes-latest}
 
 ::: info Fewer and fewer people need this section
-Current stable is v0.10.13. Upgrading between v0.8 / v0.9 / v0.10.x is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — **the auth migration below is NOT required**. Full per-version increments: [changelog](/en/changelog). Kept here as a reference for users who need to traverse v0.7 → v0.10.13 in one go.
+Current stable follows npm `latest` and the [changelog](/en/changelog). Upgrading between v0.8 / v0.9 / v0.10.x is a straight `anet upgrade` or `npm install -g @sleep2agi/agent-network@latest` — **the auth migration below is NOT required**. Kept here as a reference for users who need to traverse v0.7 → the current release in one go.
 :::
 
 ::: details v0.7 → v0.8 auth / password migration detail

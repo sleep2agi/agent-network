@@ -94,6 +94,13 @@ anet channel add telegram 指挥室
 anet node start 指挥室
 ```
 
+如果 channel 配置有问题，新版本 `anet node start` / `anet node resume` 会在启动日志里明确 warning。启动前也可以先检查：
+
+```bash
+anet channel status 指挥室
+```
+
+它会显示 Telegram `access.json` 的真实路径、allowlist、pending 配对状态和 bot token 配置状态。
 
 ### Step 5: 使用
 
@@ -132,7 +139,7 @@ Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接�
 
 | 坑 | 现象 | Workaround |
 |---|---|---|
-| Channel 改了**不热加载** | 编辑 `access.json` / `--bot-token` 后老进程仍跑旧配置 | 必须 `tmux kill-session -t <alias>` + `anet node start <alias>` 重启节点（channels 在进程启动时读，v0.10.x 含当前 v0.10.13 stable 仍是这套；hot-reload 设计跟踪 [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 third-pass review 完，候选 v0.12.0）|
+| Channel 改了**不热加载** | 编辑 `access.json` / `--bot-token` 后老进程仍跑旧配置 | 必须 `tmux kill-session -t <alias>` + `anet node start <alias>` 重启节点（channels 在进程启动时读；hot-reload 设计跟踪 [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md)）|
 | 多节点**不能共享** bot token | BotFather 给的 token 是一对一绑定一个 bot；多节点共用会互相抢消息 | 每个节点 BotFather `/newbot` 单建一个 bot |
 | `anet channel rm telegram` **未实现** | 想去掉某节点的 telegram channel 没 CLI | 手编 `.anet/nodes/<alias>/config.json` 的 `channels` 数组删掉 `telegram` 项，并 `rm -rf .anet/nodes/<alias>/channels/telegram`，再重启节点 |
 | `--allow <UID>` 也可 `--allow-user`？ | flag 命名容易记混 | 实际是 `--allow <user-id>`（verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861)），**没有** `--allow-user` |
@@ -148,11 +155,15 @@ Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接�
 **Agent 不回 telegram 消息**
 - `anet status` 看节点 status 是否 `idle / ●`，不是的话 `tmux capture-pane -t <alias> -p | tail` 看实际 pane
 - UID 是否真在 `access.json` 的 `allowFrom` 里
+- `anet channel status <alias>` 看 CLI 实际读取的是不是你编辑的那个 `access.json`
 - agent 是不是 busy 在 commhub 长任务（telegram 跟 commhub 是两条独立 channel，但 LLM 一次只处理一条消息）
 
 **`anet channel add` 后 `anet status` 没显示 telegram**
 - `anet channel ls <alias>` 直接确认
+- `anet channel status <alias>` 查看真实 channel 配置路径和 allowlist
 - 看 `.anet/nodes/<alias>/config.json` 的 `channels` 数组里有没有 `telegram`（config 里存的就是 `telegram`；`plugin:telegram@claude-plugins-official` 只是 anet 启动 claude-code-cli 时临时拼的 claudeArg，不写进 config）
+
+更多连接、Channel、MCP 工具注入问题见 [连接 / Channel / MCP 排障](/troubleshooting/connectivity-channels-mcp)。
 
 
 ## 微信 / 飞书 Channel — 外部插件（不在 CommHub Server 内）

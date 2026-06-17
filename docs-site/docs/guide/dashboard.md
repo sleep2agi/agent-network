@@ -211,12 +211,12 @@ Admin 面板对 `users.role='admin'` 的用户可见 —— 这是**系统级** 
 设置页面管理用户个人配置：
 
 - **个人信息** -- 修改显示名、邮箱
-- **密码修改** -- 修改登录密码（当前 v0.10.13 stable Dashboard `0.5.6` 仍未实装该 UI；当前请用 CLI `anet passwd`，见 [account-system 修改密码](/guide/account-system#修改密码)）
+- **密码修改** -- 修改登录密码（如果当前 Dashboard 没有该 UI，请用 CLI `anet passwd`，见 [account-system 修改密码](/guide/account-system#修改密码)）
 - **Token 管理** -- 创建 / 查看 / 撤销 API Token
 - **网络设置** -- 当前网络的配置（仅 owner/admin）
   - 重命名网络
   - 创建邀请码
-  - 管理成员角色（当前 v0.10.13 stable Dashboard `0.5.6` 部分功能未上 UI；CLI 有 `anet network invite` 但**无** `promote` / `demote` 子命令，改角色目前走 REST [`PUT /api/networks/:id/members/:user_id`](/api/rest#put-api-networks-id-members-user-id)；CLI 子命令排在 v0.11+ / 未排期）
+  - 管理成员角色（如果当前 Dashboard 没有对应 UI；CLI 有 `anet network invite`，角色修改目前走 REST [`PUT /api/networks/:id/members/:user_id`](/api/rest#put-api-networks-id-members-user-id)；CLI 子命令以 changelog 为准）
   - 删除网络
 
 Token 管理界面：
@@ -305,7 +305,7 @@ Dashboard 通过三类数据面保持更新：
 ```bash
 # 升级 CLI 到 preview
 npm i -g @sleep2agi/agent-network@preview
-anet -v                                    # 应显示 2.2.x 或 2.2.x-preview.N（preview channel 跟 latest 同步时即 2.2.10 stable）
+anet -v                                    # 应显示当前 npm latest 或 preview 版本
 anet hub dashboard                          # 自动 npx 拉当前 preview 版本
 ```
 

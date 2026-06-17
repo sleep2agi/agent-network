@@ -211,12 +211,12 @@ The older example listed `create_network` as an audit action — **it does not e
 The settings page manages personal configuration:
 
 - **Profile** -- Edit display name, email
-- **Password** -- Change login password (current v0.10.13 stable Dashboard `0.5.6` UI not yet shipped; use CLI `anet passwd` — see [account-system / Change Password](/en/guide/account-system#change-password))
+- **Password** -- Change login password (if the current Dashboard does not expose this UI, use CLI `anet passwd` — see [account-system / Change Password](/en/guide/account-system#change-password))
 - **Token Management** -- Create / view / revoke API tokens
 - **Network Settings** -- Current network config (owner/admin only)
   - Rename network
   - Create invite codes
-  - Manage member roles (current v0.10.13 stable Dashboard `0.5.6` partial; CLI has `anet network invite` but **no** `promote` / `demote` sub-commands — role changes currently go through REST [`PUT /api/networks/:id/members/:user_id`](/en/api/rest#put-api-networks-id-members-user-id). CLI sub-commands queued for v0.11+ / unscheduled.)
+  - Manage member roles (if the current Dashboard does not expose this UI; CLI has `anet network invite`, and role changes currently go through REST [`PUT /api/networks/:id/members/:user_id`](/en/api/rest#put-api-networks-id-members-user-id). CLI sub-commands follow the changelog.)
   - Delete network
 
 Token management interface:
@@ -305,7 +305,7 @@ Try it:
 ```bash
 # Upgrade CLI to preview
 npm i -g @sleep2agi/agent-network@preview
-anet -v                                    # should show 2.2.x or 2.2.x-preview.N (when preview channel tracks latest you'll see 2.2.10 stable)
+anet -v                                    # should show the current npm latest or preview version
 anet hub dashboard                          # npx auto-pulls the current preview version
 ```
 

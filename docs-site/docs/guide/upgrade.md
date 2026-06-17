@@ -19,7 +19,7 @@ v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) 才真解 
 
 ```bash
 npm install -g @sleep2agi/agent-network@latest
-anet --version            # 当前 latest v2.2.10（v0.10.13，2026-06-08）
+anet --version            # 确认已升级到 npm latest
 ```
 
 之后再有新版本，跑 `anet upgrade` 即自动 detached spawn，一两分钟后 `anet -v` 是新版。
@@ -98,7 +98,7 @@ anet upgrade --self
 | `self skip` | 默认不自升 anet 本身（要加 `--self`）|
 | `lookup failed` | npm registry 查不到 latest，网络/包名问题 |
 
-**特别提示 `commhub-server`**：这行显示当前 `PINNED_SERVER_VERSION`（v0.10.13 stable 是 `0.8.4`，历史 chain 见 [changelog](/changelog) `commhub-server` 段）—— `anet hub start` 不管全局装的是什么版本都跑这个 pinned 版（避免 server breaking 风险）。所以即使全局 `commhub-server` 升了也没影响 hub 实际运行。
+**特别提示 `commhub-server`**：这行显示当前 CLI 源码里的 `PINNED_SERVER_VERSION`，历史 chain 见 [changelog](/changelog) `commhub-server` 段。`anet hub start` 不管全局装的是什么版本都跑这个 pinned 版（避免 server breaking 风险）。所以即使全局 `commhub-server` 升了也没影响 hub 实际运行。
 
 **升完之后**：`anet upgrade` 末尾会提示「跑过的节点要重启拿新 agent-node」，可以一键：
 
@@ -156,7 +156,7 @@ anet status
 ## v0.7 → v0.8 升级注意（历史路径） {#v0-7-v0-8-升级注意-最新}
 
 ::: info 看这节的人应该越来越少
-当前 stable 是 v0.10.13。从 v0.8 / v0.9 / v0.10.x 之间升级直接 `anet upgrade` 或 `npm install -g @sleep2agi/agent-network@latest` 即可，**无须重做下方 v0.7→v0.8 鉴权迁移**。完整逐版改动见 [changelog](/changelog)。本节保留作 v0.7 → v0.10.13 跨版本升级时的关键节点参考。
+当前 stable 以 npm `latest` 和 [changelog](/changelog) 为准。从 v0.8 / v0.9 / v0.10.x 之间升级直接 `anet upgrade` 或 `npm install -g @sleep2agi/agent-network@latest` 即可，**无须重做下方 v0.7→v0.8 鉴权迁移**。本节保留作 v0.7 → 当前版本跨版本升级时的关键节点参考。
 :::
 
 ::: details v0.7 → v0.8 鉴权 / 密码管理迁移细节

@@ -2,6 +2,8 @@
 
 按错误信息快速定位问题和解决方案。
 
+如果问题集中在 `anet doctor`、Telegram channel、MCP 工具注入、codex-sdk 主动 `send_task`，优先看专项 runbook：[连接 / Channel / MCP 排障](/troubleshooting/connectivity-channels-mcp)。
+
 ## 连接类错误
 
 ### `ECONNREFUSED` -- 连接被拒绝
@@ -64,7 +66,7 @@ sudo ufw allow 9200
 
 **原因**：SSE 长连接断开，通常是网络波动。
 
-**解决**：Agent 会自动重连（v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起，v0.10.13 latest 已包含：指数退避 `1s → 30s` 上限 + 重连即重 register + 1h 失败放弃，[详见 agent-node 断线重连](/guide/agent-node#断线重连)），通常无需手动干预。
+**解决**：Agent 会自动重连（[#202](https://github.com/sleep2agi/agent-network/issues/202) 起：指数退避 `1s → 30s` 上限 + 重连即重 register + 1h 失败放弃，[详见 agent-node 断线重连](/guide/agent-node#断线重连)），通常无需手动干预。建议升级到 npm `latest`。
 
 如果持续失败：
 
@@ -90,7 +92,7 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 **原因（v0.10.10 及以前）**：hub 重启会清空 sessions 内存表。老版本 `agent-node` 的 SSE 重连只恢复事件流，**不重发 register**——hub 端 sessions 表要等下次 3 分钟 heartbeat 才会重建，期间 Dashboard 看不到任何节点。
 
-**解决（v0.10.13 latest）**：v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起结构性修复，SSE 重连成功立即重发 register（idempotent upsert），Dashboard 30s 内自动恢复完整节点列表。**无需手动 `anet project restart`**，跟 `anet hub stop` / `hub status` 配套用 → hub 维护 SOP 一键完成。如果你 agent-node 还停留在 v0.10.10 及以前，跑 `anet upgrade` 升到 latest 即享受。
+**解决**：[#202](https://github.com/sleep2agi/agent-network/issues/202) 起结构性修复，SSE 重连成功立即重发 register（idempotent upsert），Dashboard 30s 内自动恢复完整节点列表。**无需手动 `anet project restart`**，跟 `anet hub stop` / `hub status` 配套用 → hub 维护 SOP 一键完成。跑 `anet upgrade` 升到 latest 即享受。
 
 ---
 
@@ -696,7 +698,7 @@ curl http://localhost:9200/api/server/<host>/agents \
 
 **根因**：agent-node 2.4.8 及以下对 ACP `session/prompt` 写死了 300 s 超时（沿用 codex-sdk wrapper 的旧值），但 grok-build-acp 后端是用户级长任务为主，5 min 是常态偏短。
 
-**修复**：升到 `agent-node 2.4.9`（v0.10.13 hotfix）— 把 `session/prompt` 的 client-side 超时拉宽到 grok 后端的实际工作窗口，本机活体节点 47s / 5min / >10min 的任务都能正常完成。
+**修复**：升级到 npm `latest` 的 `agent-node` — `session/prompt` 的 client-side 超时已拉宽到 grok 后端的实际工作窗口，历史验证里 47s / 5min / >10min 的任务都能正常完成。
 
 ```bash
 # 1. 升级
@@ -710,7 +712,7 @@ anet node stop grok-marketing && anet node start grok-marketing
 anet --version          # agent-node ≥ 2.4.9
 ```
 
-**真长任务仍超时（视频生成 / 大型 X 搜索）**：v0.10.13 的 300 s 默认上限对一些视频或大批量场景仍偏短。用 `flags.grokAcpTimeoutMs`（config）或 `GROK_ACP_TIMEOUT_MS`（env，优先）调大：
+**真长任务仍超时（视频生成 / 大型 X 搜索）**：默认 300 s 上限对一些视频或大批量场景仍偏短。用 `flags.grokAcpTimeoutMs`（config）或 `GROK_ACP_TIMEOUT_MS`（env，优先）调大：
 
 ```bash
 # 临时（启 grok 节点前 export）

@@ -273,6 +273,7 @@ anet node start  →  spawn agent-node subprocess
          agent-node imports @openai/codex-sdk and starts a codex thread
                  ↓
          the codex thread uses baked-in tools only (Read/Write/Edit/Bash/Grep/Glob/WebSearch)
+         + agent-node injects per-node CommHub tools
                  ↓
          agent-node's parent process handles SSE + report_status / get_inbox / send_reply
 ```
@@ -280,7 +281,7 @@ anet node start  →  spawn agent-node subprocess
 - Driven by the official `@openai/codex-sdk` package, run as a codex thread
 - Supports Read / Write / Edit / Bash / Glob / Grep / WebSearch (baked into the codex CLI)
 - Auth via `codex auth login` (OAuth) or `OPENAI_API_KEY`
-- **The codex thread does not call commhub MCP tools directly** (`codexOpts` does not pass `mcpServers`, [`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)) — multi-agent dispatch happens externally in agent-node's parent process. See [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0).
+- Each codex node now receives per-node CommHub tools, so it can actively call `get_all_status`, `send_task`, and `get_task` instead of only waiting for parent-process inbox polling. If a codex node cannot delegate, run `anet doctor` and check [Connectivity / Channels / MCP](/en/troubleshooting/connectivity-channels-mcp).
 
 ### When to pick
 
@@ -299,7 +300,7 @@ anet node create coder \
 ```
 
 ::: warning codex-sdk ignores `tools`
-The `codex-sdk` runtime **silently ignores** the `--tools` flag and the `config.json` `tools` field (verify [`agent-node/src/cli.ts:690-696`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L690) — `codexOpts` has no `tools` field). The tool set is baked into the `codex` CLI binary, not configured via anet. `--tools` only takes effect for the `claude-agent-sdk` runtime.
+The `codex-sdk` runtime **silently ignores** the `--tools` flag and the `config.json` `tools` field for Codex's built-in file/shell/search tools. CommHub tools are injected by agent-node per node and are not controlled by `--tools`.
 :::
 
 ::: warning Verification status
@@ -315,7 +316,7 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 When enabled, agent-node runs `spawn('codex', ['app-server'])` and talks the full 67-method v2 protocol (thread / turn / item / realtime), **sidestepping** the `@openai/codex-sdk` `--mcp-config` HTTP-transport bug family ([#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause), and no longer being held hostage by codex-sdk breaking changes.
 
-**v0.10.x (including the current v0.10.13 stable) still defaults to the `@openai/codex-sdk` wrapper path** (collecting preview feedback first, preserving backward compatibility); v0.11.0 plans to flip the default to the direct stdio path, with the wrapper path moving into a deprecation warning. Full background in the [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0).
+The current default path is tracked in source and release notes. Full background in the [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0).
 :::
 
 ---
@@ -328,7 +329,7 @@ Run agents via [xAI Grok Build](https://x.ai/grok)'s local CLI — the node spaw
 
 - `grok` CLI installed and `grok auth login` completed on the host
 - `XAI_API_KEY` environment variable set
-- `agent-network ≥ 2.2.10` (v0.10.13 latest) + `agent-node ≥ 2.4.9` (the v0.10.13 hotfix widened the `session/prompt` 300 s timeout — earlier agent-node hangs on long grok tasks; see [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603))
+- npm `latest` `agent-network` + `agent-node` (includes the grok `session/prompt` timeout fix; see [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603))
 
 ### Start a node
 
@@ -339,7 +340,7 @@ anet node start my-grok
 
 ### Long-task timeout tuning (`flags.grokAcpTimeoutMs`)
 
-v0.10.13 latest behavior: agent-node applies a **hard, overall timeout** to every `session/prompt` call — default **300000 ms (5 minutes)**. Long-running workloads (video generation, large X searches, multi-turn batch tool calls) that exceed 5 min will be rejected client-side and the task gets marked `failed`.
+Current behavior: agent-node applies a **hard, overall timeout** to every `session/prompt` call — default **300000 ms (5 minutes)**. Long-running workloads (video generation, large X searches, multi-turn batch tool calls) that exceed 5 min will be rejected client-side and the task gets marked `failed`.
 
 Two ways to raise the cap (env wins over config):
 

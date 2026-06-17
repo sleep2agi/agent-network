@@ -95,6 +95,13 @@ anet channel add telegram commander
 anet node start commander
 ```
 
+If channel configuration fails, recent `anet node start` / `anet node resume` prints an explicit warning in startup logs. You can also inspect the channel before starting:
+
+```bash
+anet channel status commander
+```
+
+It shows the real Telegram `access.json` path, allowlist, pending pairing state, and bot-token configuration state.
 
 ### Step 5: Usage
 
@@ -133,7 +140,7 @@ Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` 
 
 | Pitfall | Symptom | Workaround |
 |---|---|---|
-| Channel changes **do not hot-reload** | Editing `access.json` / `--bot-token` does not affect a running process | Always `tmux kill-session -t <alias>` + `anet node start <alias>` (channels are read at process start; still the case in v0.10.x including the current v0.10.13 stable; hot-reload design tracked in [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 — third-pass review complete; candidate for v0.12.0) |
+| Channel changes **do not hot-reload** | Editing `access.json` / `--bot-token` does not affect a running process | Always `tmux kill-session -t <alias>` + `anet node start <alias>` (channels are read at process start; hot-reload design tracked in [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md)) |
 | Multiple nodes **cannot share** one bot token | BotFather tokens are 1-to-1 with a bot; sharing causes message races | Run BotFather `/newbot` per node, one bot each |
 | `anet channel rm telegram` **not implemented** | No CLI to remove the telegram channel from a node | Edit `.anet/nodes/<alias>/config.json` `channels` array to remove the `telegram` entry, `rm -rf .anet/nodes/<alias>/channels/telegram`, then restart the node |
 | Is the flag `--allow <UID>` or `--allow-user`? | Easy to mis-remember | It's `--allow <user-id>` (verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861)). `--allow-user` does **not** exist |
@@ -149,11 +156,15 @@ Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` 
 **Agent doesn't reply to Telegram messages**
 - `anet status` — is the node `idle / ●`? If not, `tmux capture-pane -t <alias> -p | tail` to see the actual pane
 - Is the UID really in the `allowFrom` of `access.json`?
+- Does `anet channel status <alias>` show the same `access.json` you edited?
 - Is the agent busy on a long commhub task? (Telegram and commhub are independent channels, but the LLM only processes one message at a time)
 
 **`anet channel add` succeeded but `anet status` doesn't show telegram**
 - Run `anet channel ls <alias>` to confirm
+- Run `anet channel status <alias>` to inspect the real channel config path and allowlist
 - Open `.anet/nodes/<alias>/config.json` and check the `channels` array contains `telegram` (the config stores `telegram`; `plugin:telegram@claude-plugins-official` is only the transient claudeArg anet builds when launching claude-code-cli — it is not written to config)
+
+For broader connectivity, channel, and MCP tool injection issues, see [Connectivity / Channels / MCP Troubleshooting](/en/troubleshooting/connectivity-channels-mcp).
 
 
 ## WeChat / Feishu Channel — External plugins (NOT inside CommHub Server)

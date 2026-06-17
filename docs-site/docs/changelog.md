@@ -4,7 +4,7 @@
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
 - **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
-- **当前 stable**：v0.10.13（2026-06-08，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
+- **当前 stable**：以 npm `latest` tag 和 GitHub Releases 为准；v0.8.1 是 Apache 2.0 OSS 首发版本
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
 
@@ -35,7 +35,7 @@ Raw: {'jsonrpc':'2.0','id':5,
 
 **新增回归测试**：+2 cases，bun test 89/89 pass。
 
-**实战验证**（通信龙本机，2026-06-07 19:50–19:55）：
+**实战验证**（维护者本机，2026-06-07 19:50–19:55）：
 - 同型 `read_file` 失败重试：立返结构化 `code: -32000` + `data.originalCode: "ENOENT"`
 - grok turn 继续不 hang，任务正常 done/failed（47 s 完成，不到 300 s 超时门）
 - ai-insight `A站Grok` 节点全局装 `2.4.9-preview.0` 后 UAT 通过

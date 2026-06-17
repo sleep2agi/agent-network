@@ -44,12 +44,12 @@ export default withMermaid(defineConfig({
           { text: '生态', link: '/ecosystem' },
           { text: '社群', link: '/community' },
           {
-            text: 'v0.10.13 ▾',
+            text: 'latest ▾',
             items: [
-              { text: 'v0.10.13（latest）', link: '/' },
-              { text: 'v0.10.13 release notes', link: '/changelog' },
+              { text: '当前 stable（npm latest）', link: '/' },
+              { text: 'Release notes', link: '/changelog' },
               { text: '更新日志（全部版本）', link: '/changelog' },
-              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases/tag/v0.10.13' },
+              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
             ]
           },
         ],
@@ -110,6 +110,7 @@ export default withMermaid(defineConfig({
             text: '帮助',
             items: [
               { text: '故障排查', link: '/troubleshooting' },
+              { text: '连接 / Channel / MCP 排障', link: '/troubleshooting/connectivity-channels-mcp' },
               { text: 'FAQ', link: '/faq' },
               { text: '更新日志', link: '/changelog' },
             ]
@@ -128,12 +129,12 @@ export default withMermaid(defineConfig({
           { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
           {
-            text: 'v0.10.13 ▾',
+            text: 'latest ▾',
             items: [
-              { text: 'v0.10.13 (latest)', link: '/en/' },
-              { text: 'v0.10.13 release notes', link: '/en/changelog' },
+              { text: 'Current stable (npm latest)', link: '/en/' },
+              { text: 'Release notes', link: '/en/changelog' },
               { text: 'Changelog (all versions)', link: '/en/changelog' },
-              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases/tag/v0.10.13' },
+              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
             ]
           },
         ],
@@ -194,6 +195,7 @@ export default withMermaid(defineConfig({
             text: 'Help',
             items: [
               { text: 'Troubleshooting', link: '/en/troubleshooting' },
+              { text: 'Connectivity / Channels / MCP', link: '/en/troubleshooting/connectivity-channels-mcp' },
               { text: 'FAQ', link: '/en/faq' },
               { text: 'Changelog', link: '/en/changelog' },
             ]
