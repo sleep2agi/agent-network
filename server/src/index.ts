@@ -1013,37 +1013,60 @@ Bun.serve({
       staleSql = addNetworkScope(staleSql, staleParams, restScope);
       db.run(staleSql, staleParams);
       cleanupCommittedRenameSessions(restScope.networkId ? [restScope.networkId] : restScope.networkIds ?? null);
+      // `?light=1` returns a narrow projection (alias / status / agent / task /
+      // server / updated_at + runtime + network_id) — used by the mobile APP
+      // list view, where pulling 30+ fields × 150 agents was making cold open
+      // take 12s+ on flaky cellular (Vincent tg, #220 PWA). Default response
+      // is unchanged so the dashboard / scripts that read full telemetry are
+      // unaffected.
+      const isLight = url.searchParams.get("light") === "1";
       const params: any[] = [];
-      let sql = "SELECT * FROM sessions WHERE 1=1";
+      let sql = isLight
+        ? "SELECT alias, status, agent, task, server, updated_at, network_id FROM sessions WHERE 1=1"
+        : "SELECT * FROM sessions WHERE 1=1";
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC";
       // `model` comes straight from the sessions row (SELECT *); `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
       // that never reported a model — the dashboard falls back to a placeholder.
-      const sessions = db.all(sql, ...params).map((s: any) => ({
-        ...s,
-        model: s.model ?? null,
-        runtime: normalizeRuntime(s.agent),
-        host: {
-          hostname: s.hostname ?? null,
-          ip: s.ip ?? null,
-          cpu_load_1min: s.cpu_load_1min ?? null,
-          cpu_cores: s.cpu_cores ?? null,
-          mem_total_gb: s.mem_total_gb ?? null,
-          mem_used_gb: s.mem_used_gb ?? null,
-          mem_avail_gb: s.mem_avail_gb ?? null,
-          disk_total_gb: s.disk_total_gb ?? null,
-          disk_used_gb: s.disk_used_gb ?? null,
-          disk_avail_gb: s.disk_avail_gb ?? null,
-        },
-        process_telemetry: {
-          rss_bytes: s.process_rss_bytes ?? null,
-          rss_mb: s.process_rss_mb ?? null,
-          cpu_pct: s.process_cpu_pct ?? null,
-          uptime_seconds: s.process_uptime_seconds ?? null,
-          in_flight_count: s.process_in_flight_count ?? null,
-        },
-      }));
+      const sessions = db.all(sql, ...params).map((s: any) => {
+        if (isLight) {
+          return {
+            alias: s.alias,
+            status: s.status,
+            agent: s.agent ?? null,
+            task: s.task ?? null,
+            server: s.server ?? null,
+            updated_at: s.updated_at ?? null,
+            runtime: normalizeRuntime(s.agent),
+            network_id: s.network_id ?? null,
+          };
+        }
+        return {
+          ...s,
+          model: s.model ?? null,
+          runtime: normalizeRuntime(s.agent),
+          host: {
+            hostname: s.hostname ?? null,
+            ip: s.ip ?? null,
+            cpu_load_1min: s.cpu_load_1min ?? null,
+            cpu_cores: s.cpu_cores ?? null,
+            mem_total_gb: s.mem_total_gb ?? null,
+            mem_used_gb: s.mem_used_gb ?? null,
+            mem_avail_gb: s.mem_avail_gb ?? null,
+            disk_total_gb: s.disk_total_gb ?? null,
+            disk_used_gb: s.disk_used_gb ?? null,
+            disk_avail_gb: s.disk_avail_gb ?? null,
+          },
+          process_telemetry: {
+            rss_bytes: s.process_rss_bytes ?? null,
+            rss_mb: s.process_rss_mb ?? null,
+            cpu_pct: s.process_cpu_pct ?? null,
+            uptime_seconds: s.process_uptime_seconds ?? null,
+            in_flight_count: s.process_in_flight_count ?? null,
+          },
+        };
+      });
       const summary = sessions.reduce((acc: any, session: any) => {
         const raw = String(session.status || "").toLowerCase();
         if (raw === "offline") acc.offline++;
