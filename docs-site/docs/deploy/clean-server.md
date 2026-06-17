@@ -3,7 +3,7 @@
 ::: tip 这一页是写给谁的
 你刚拿到一台**全新 Ubuntu / Debian 服务器**（云主机、自己电脑装的虚拟机、公司内网机器都算），想从零跑起 anet hub + 一两个节点 + Telegram 接入，端到端跑通。
 
-本页按通信龙在干净机器上**实测踩过一遍的路径**写：每步带验证命令 + 常见报错对照表（[报错速查](#故障排查表-8-坑-mapping)）。
+本页按维护者在干净机器上**实测踩过一遍的路径**写：每步带验证命令 + 常见报错对照表（[报错速查](#故障排查表-8-坑-mapping)）。
 
 不是给已经装好 anet 的人看的 —— 那个走 [上手指南](/guide/getting-started) 或 [升级指南](/guide/upgrade)。
 :::
@@ -56,7 +56,7 @@ anet -v
 ```text
 anet v2.2.12
 Components (auto-fetched on first use, you don't need to install them manually):
-  ✓ agent-node v2.4.10
+  ✓ agent-node current latest
     └ @anthropic-ai/claude-agent-sdk v0.2.x
     └ @openai/codex-sdk v0.x.x
   ○ commhub-server — not installed yet (will fetch via npx on first use)
@@ -207,7 +207,7 @@ anet node ls         # 应列出 my-bot
 npm i -g @sleep2agi/agent-node
 
 # 验证
-agent-node --version    # 期望 v2.4.10 或更新
+agent-node --version    # 期望当前 latest 或更新
 ```
 
 codex-sdk runtime 还要装 codex CLI 并登录：
@@ -290,7 +290,7 @@ anet node start my-bot
 - 每个节点: `tmux new -s anet-<alias>` + `anet node start <alias>`
 - 重启脚本可以 stuff 进 `@reboot` crontab，但 PATH / nvm 这些非交互 shell 问题要先解决（见 [第 0 节 nvm 提示](#_0-前置)）
 
-工程马的 systemd 模板出来后，本节会更新真正的 unit 文件示例 + 开机自启步骤。
+systemd 模板出来后，本节会更新真正的 unit 文件示例 + 开机自启步骤。
 :::
 
 ## 故障排查表（8 坑 mapping）

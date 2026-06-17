@@ -2,6 +2,8 @@
 
 Quickly identify problems and solutions based on error messages.
 
+For `anet doctor`, Telegram channel setup, MCP tool injection, or codex-sdk active `send_task`, start with the dedicated runbook: [Connectivity / Channels / MCP](/en/troubleshooting/connectivity-channels-mcp).
+
 ## Connection Errors
 
 ### `ECONNREFUSED` -- Connection Refused

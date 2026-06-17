@@ -111,6 +111,7 @@ export default withMermaid(defineConfig({
             text: '帮助',
             items: [
               { text: '故障排查', link: '/troubleshooting' },
+              { text: '连接 / Channel / MCP 排障', link: '/troubleshooting/connectivity-channels-mcp' },
               { text: 'FAQ', link: '/faq' },
               { text: '更新日志', link: '/changelog' },
             ]
@@ -196,6 +197,7 @@ export default withMermaid(defineConfig({
             text: 'Help',
             items: [
               { text: 'Troubleshooting', link: '/en/troubleshooting' },
+              { text: 'Connectivity / Channels / MCP', link: '/en/troubleshooting/connectivity-channels-mcp' },
               { text: 'FAQ', link: '/en/faq' },
               { text: 'Changelog', link: '/en/changelog' },
             ]

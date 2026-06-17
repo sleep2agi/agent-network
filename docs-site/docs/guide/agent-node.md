@@ -100,7 +100,7 @@ npx @sleep2agi/agent-node \
 | **模型** | Codex SDK 模型（通过 `--model` 指定；具体 model id 查 OpenAI Codex 文档） |
 | **前置** | `codex auth login` |
 | **特点** | 代码生成强、工具调用灵活 |
-| **工具** | Codex CLI 内置 Read / Write / Edit / Bash / Glob / Grep / WebSearch（baked in，**不接受 `--tools` 自定义**） |
+| **工具** | Codex CLI 内置 Read / Write / Edit / Bash / Glob / Grep / WebSearch（不接受 `--tools` 自定义）+ agent-node 按节点注入 CommHub 工具 |
 
 ```bash
 npx @sleep2agi/agent-node \
@@ -108,7 +108,8 @@ npx @sleep2agi/agent-node \
   --runtime codex-sdk \
   --model <codex-model-id> \
   --hub http://YOUR_IP:9200
-# 注：codex-sdk 不接受 --tools flag（静默忽略）。工具集由 codex CLI 二进制 baked in
+# 注：codex-sdk 不接受 --tools flag。Codex 内建工具由 codex CLI 二进制提供；
+# CommHub 工具由 agent-node 按节点注入，可主动 get_all_status / send_task / get_task。
 ```
 
 ::: details 你需要准备
@@ -125,7 +126,7 @@ npx @sleep2agi/agent-node \
 
 ### grok-build-acp
 
-基于 [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/grok-build) 接入，spawn 本地 `grok` ACP server 跑任务。第 4 runtime，**目前只通过 `--runtime grok-build-acp` flag 显式启用**（不在 `anet node create` wizard 3-way picker 里），详细配置 / Known Limits / Delegation Contract 见 [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
+基于 [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/grok-build) 接入，spawn 本地 `grok` ACP server 跑任务。第 4 runtime，已可在 `anet node create` wizard 里选择，也可用 `--runtime grok-build-acp` 显式指定。详细配置 / Known Limits / Delegation Contract 见 [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)。
 
 | 属性 | 说明 |
 |------|------|
@@ -140,7 +141,7 @@ npx @sleep2agi/agent-node \
   --hub http://YOUR_IP:9200
 ```
 
-::: tip v0.10.11 起的 grok-build-acp 改进（v0.10.15 latest 已包含）
+::: tip grok-build-acp 改进
 - [#201](https://github.com/sleep2agi/agent-network/issues/201) — delegate refusal 3-layer 修：parser broaden + prompt softening + 授权措辞表
 - [#204](https://github.com/sleep2agi/agent-network/issues/204) — MCP per-session inject + 节点 cwd 隔离，防 `.mcp.json` 身份污染
 
@@ -447,7 +448,7 @@ Agent Node 的完整生命周期：
 SSE 断连后自动重连，使用指数退避策略：
 
 ```
-重连间隔（v0.10.15 latest，v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起）: 指数退避 `1s → 2s → 4s → 8s → 16s → 30s (上限)`
+重连间隔（[#202](https://github.com/sleep2agi/agent-network/issues/202) 起）: 指数退避 `1s → 2s → 4s → 8s → 16s → 30s (上限)`
 ```
 
 重连成功后自动恢复 online 状态。三件事一起改：
@@ -456,7 +457,7 @@ SSE 断连后自动重连，使用指数退避策略：
 - **重连即重 register**：重连成功立即重发 register（idempotent upsert），dashboard 30s 内恢复完整节点列表（之前老路径要等下次 3min heartbeat）
 - **失败放弃保护**：连续失败 > 1h 主动放弃 + 写 error log，不再无限重试占 CPU
 
-跟 v0.10.15 latest 的 `anet hub stop` / `hub status` 命令配套用：hub 维护时 stop → start 流程后，节点自动恢复，**无需 `anet project restart`**。如果你 agent-node 还停留在 v0.10.10 及以前，跑 `anet upgrade` 升上去即享受。
+跟 `anet hub stop` / `hub status` 命令配套用：hub 维护时 stop → start 流程后，节点自动恢复，**无需 `anet project restart`**。跑 `anet upgrade` 升到 latest 即可获得当前修复。
 
 ### 优雅退出
 

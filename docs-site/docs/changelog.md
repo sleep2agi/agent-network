@@ -35,7 +35,7 @@ Raw: {'jsonrpc':'2.0','id':5,
 
 **新增回归测试**：+2 cases，bun test 89/89 pass。
 
-**实战验证**（通信龙本机，2026-06-07 19:50–19:55）：
+**实战验证**（维护者本机，2026-06-07 19:50–19:55）：
 - 同型 `read_file` 失败重试：立返结构化 `code: -32000` + `data.originalCode: "ENOENT"`
 - grok turn 继续不 hang，任务正常 done/failed（47 s 完成，不到 300 s 超时门）
 - ai-insight `A站Grok` 节点全局装 `2.4.9-preview.0` 后 UAT 通过

@@ -334,7 +334,7 @@ Run agents via [xAI Grok Build](https://x.ai/grok)'s local CLI — the node spaw
 
 - `grok` CLI installed and `grok auth login` completed on the host
 - `XAI_API_KEY` environment variable set
-- `agent-network ≥ 2.2.10` (v0.10.15 latest) + `agent-node ≥ 2.4.9` (the v0.10.13 hotfix widened the `session/prompt` 300 s timeout — earlier agent-node hangs on long grok tasks; see [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603))
+- npm `latest` `agent-network` + `agent-node` (includes the grok `session/prompt` timeout fix; see [troubleshooting → grok-build-acp node task hangs](/en/troubleshooting#grok-build-acp-node-task-hangs-session-prompt-timed-out-after-300000ms-json-rpc-error-32603))
 
 ### Start a node
 
@@ -345,7 +345,7 @@ anet node start my-grok
 
 ### Long-task timeout tuning (`flags.grokAcpTimeoutMs`)
 
-v0.10.15 latest behavior: agent-node applies a **hard, overall timeout** to every `session/prompt` call — default **300000 ms (5 minutes)**. Long-running workloads (video generation, large X searches, multi-turn batch tool calls) that exceed 5 min will be rejected client-side and the task gets marked `failed`.
+Current behavior: agent-node applies a **hard, overall timeout** to every `session/prompt` call — default **300000 ms (5 minutes)**. Long-running workloads (video generation, large X searches, multi-turn batch tool calls) that exceed 5 min will be rejected client-side and the task gets marked `failed`.
 
 Two ways to raise the cap (env wins over config):
 
@@ -366,8 +366,8 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 
 > Trade-off: raising the cap lets genuinely long jobs finish, but real hangs (the agent is actually stuck, not slow) get caught later. Bump only when a specific job is hitting the wall; don't blindly raise.
 
-::: warning No startup-log confirmation in current latest (agent-node 2.4.10)
-The current latest agent-node (`2.4.10`) **does not print a `timeoutMs=...` log line at startup** — the value is genuinely read from [`agent-node/src/cli.ts:1374` source](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1374) (`parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000")`), but `anet node start` output doesn't reflect it. If you set this and a task **known to take > 5 min** still times out at 300 s, your `flags.grokAcpTimeoutMs` likely isn't being read (config in the wrong file / env-var name typo). Please open an [issue](https://github.com/sleep2agi/agent-network/issues/new). **From the next agent-node release onward**, the grok node will print the effective idle-timeout value and its source at startup ([already on main](https://github.com/sleep2agi/agent-network/commit/21b0aa2), will land with the next release — tracked via #214 dim 5 Batch A finding).
+::: warning Startup log follows the current latest
+Older agent-node versions **do not print a `timeoutMs=...` log line at startup** — the value is read from [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts), but `anet node start` output may not reflect it. If you set this and a task **known to take > 5 min** still times out at 300 s, your `flags.grokAcpTimeoutMs` likely isn't being read (config in the wrong file / env-var name typo). Upgrade to npm `latest` first, then open an [issue](https://github.com/sleep2agi/agent-network/issues/new).
 :::
 
 ### See also
