@@ -100,7 +100,7 @@ Based on the [OpenAI Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk)
 | **Models** | Codex SDK model (set with `--model`; see OpenAI Codex docs for the current model id) |
 | **Prerequisites** | `codex auth login` |
 | **Strengths** | Strong code generation, flexible tool use |
-| **Tools** | Codex CLI ships with Read / Write / Edit / Bash / Glob / Grep / WebSearch baked in (**does not honor `--tools`**) |
+| **Tools** | Codex CLI ships with Read / Write / Edit / Bash / Glob / Grep / WebSearch baked in (**does not honor `--tools`**) + agent-node injects per-node CommHub tools |
 
 ```bash
 npx @sleep2agi/agent-node \
@@ -108,7 +108,8 @@ npx @sleep2agi/agent-node \
   --runtime codex-sdk \
   --model <codex-model-id> \
   --hub http://YOUR_IP:9200
-# Note: codex-sdk silently ignores --tools. The toolset is baked into the codex CLI binary.
+# Note: codex-sdk does not honor --tools. Codex built-in tools come from the codex CLI binary;
+# CommHub tools are injected by agent-node per node, so codex nodes can actively get_all_status / send_task / get_task.
 ```
 
 ::: details Prerequisites checklist
@@ -125,7 +126,7 @@ After starting, you should see `SSE connected, waiting for tasks...`.
 
 ### grok-build-acp
 
-Integrates with [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/grok-build) by spawning the local `grok` ACP server. This is the 4th runtime — **currently only enabled via the explicit `--runtime grok-build-acp` flag** (not yet in the `anet node create` wizard 3-way picker). Full configuration / Known Limits / Delegation Contract: [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md).
+Integrates with [xAI Grok Build ACP (Agent Communication Protocol)](https://docs.x.ai/docs/grok-build) by spawning the local `grok` ACP server. This is the 4th runtime; it is available in the `anet node create` wizard and can also be selected explicitly with `--runtime grok-build-acp`. Full configuration / Known Limits / Delegation Contract: [grok-build-runtime.md ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md).
 
 | Field | Description |
 |------|------|
@@ -140,7 +141,7 @@ npx @sleep2agi/agent-node \
   --hub http://YOUR_IP:9200
 ```
 
-::: tip grok-build-acp improvements since v0.10.11 (included in v0.10.15 latest)
+::: tip grok-build-acp improvements
 - [#201](https://github.com/sleep2agi/agent-network/issues/201) — 3-layer fix for delegate refusal: parser broaden + prompt softening + authorised-phrasings list
 - [#204](https://github.com/sleep2agi/agent-network/issues/204) — per-session MCP inject + per-node cwd isolation to prevent `.mcp.json` identity pollution
 
@@ -447,7 +448,7 @@ The complete Agent Node lifecycle:
 SSE auto-reconnects on disconnect using exponential backoff:
 
 ```
-Retry interval (v0.10.15 latest, since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202)): exponential backoff `1s → 2s → 4s → 8s → 16s → 30s (cap)`
+Retry interval ([#202](https://github.com/sleep2agi/agent-network/issues/202)): exponential backoff `1s → 2s → 4s → 8s → 16s → 30s (cap)`
 ```
 
 Online status is automatically restored after successful reconnection. Three changes ship together:
@@ -456,7 +457,7 @@ Online status is automatically restored after successful reconnection. Three cha
 - **Re-register on reconnect**: every successful reconnect re-fires the node registration (idempotent upsert on the hub), so the dashboard recovers in under 30s (previously a reconnect only restored the SSE stream and the dashboard waited for the next 3-minute heartbeat)
 - **Give-up guard**: if reconnect failures continue for over 1 hour, agent-node gives up auto-retry, logs an error, and stops burning CPU
 
-Pairs with the `anet hub stop` / `hub status` commands in v0.10.15 latest: during hub maintenance, `stop → start` no longer requires a follow-up `anet project restart` — nodes restore themselves. If you're still on v0.10.10 or earlier, run `anet upgrade` to pick up the fix.
+Pairs with the `anet hub stop` / `hub status` commands: during hub maintenance, `stop → start` no longer requires a follow-up `anet project restart` — nodes restore themselves. Run `anet upgrade` to pick up the latest fix.
 
 ### Graceful Shutdown
 

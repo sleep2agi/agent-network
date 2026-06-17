@@ -3,7 +3,7 @@
 ::: tip Who is this page for?
 You just got hold of a **brand-new Ubuntu / Debian server** (cloud VM, local VM, internal box — all fine) and want to bring up anet hub + a node or two + Telegram from zero, end-to-end.
 
-This page follows the path 通信龙 walked through on a real fresh machine: every step has a verify command + a common-error lookup ([troubleshooting table](#troubleshooting-table-8-坑-mapping)).
+This page follows a maintainer-verified fresh-machine setup path: every step has a verify command + a common-error lookup ([troubleshooting table](#troubleshooting-table-8-坑-mapping)).
 
 It is **not** for users who already have anet installed — that's [Getting Started](/en/guide/getting-started) or [Upgrade Guide](/en/guide/upgrade).
 :::
@@ -56,7 +56,7 @@ Expected output (version numbers track npm `latest`):
 ```text
 anet v2.2.12
 Components (auto-fetched on first use, you don't need to install them manually):
-  ✓ agent-node v2.4.10
+  ✓ agent-node current latest
     └ @anthropic-ai/claude-agent-sdk v0.2.x
     └ @openai/codex-sdk v0.x.x
   ○ commhub-server — not installed yet (will fetch via npx on first use)
@@ -207,7 +207,7 @@ The reliable fallback: **install it once manually**:
 npm i -g @sleep2agi/agent-node
 
 # Verify
-agent-node --version    # expect v2.4.10 or newer
+agent-node --version    # expect current latest or newer
 ```
 
 The `codex-sdk` runtime additionally needs the codex CLI installed + logged in:
@@ -290,7 +290,7 @@ Short-term workaround:
 - each node: `tmux new -s anet-<alias>` + `anet node start <alias>`
 - A restart script can sit in `@reboot` crontab, but you have to solve the non-interactive-shell PATH / nvm problem first (see [§0 nvm caveat](#_0-prerequisites))
 
-Once 工程马's systemd template lands, this section will be updated with the actual unit-file example + autostart steps.
+Once the systemd template lands, this section will be updated with the actual unit-file example + autostart steps.
 :::
 
 ## Troubleshooting table (8 坑 mapping)

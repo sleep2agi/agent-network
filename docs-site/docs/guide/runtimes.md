@@ -354,7 +354,7 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 - 本机已装 `grok` CLI 并 `grok auth login` 完成
 - 环境变量 `XAI_API_KEY` 已设
-- `agent-network ≥ 2.2.10`（v0.10.15 latest）+ `agent-node ≥ 2.4.9`（v0.10.13 hotfix 修了 `session/prompt` 300s 超时 — 早一点的 agent-node 跑 grok 长任务会卡死，详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
+- npm `latest` 的 `agent-network` + `agent-node`（包含 grok `session/prompt` 超时修复；详见 [troubleshooting → grok-build-acp 节点任务挂死](/troubleshooting#grok-build-acp-节点任务挂死-session-prompt-timed-out-after-300000ms-json-rpc-error-32603)）
 
 ### 起节点
 
@@ -365,7 +365,7 @@ anet node start my-grok
 
 ### 长任务超时调整（`flags.grokAcpTimeoutMs`）
 
-v0.10.15 latest 行为：agent-node 给每个 `session/prompt` 调用设一个**整体硬超时**，默认 **300000 ms（5 分钟）**。视频生成 / 大型 X 搜索 / 多轮 batch 工具调用这种长任务跑超 5min 时，agent-node 会主动 reject 整个请求并把 task 标 `failed`。
+当前行为：agent-node 给每个 `session/prompt` 调用设一个**整体硬超时**，默认 **300000 ms（5 分钟）**。视频生成 / 大型 X 搜索 / 多轮 batch 工具调用这种长任务跑超 5min 时，agent-node 会主动 reject 整个请求并把 task 标 `failed`。
 
 调大上限有两条路（任选其一，env 变量优先）：
 
@@ -386,8 +386,8 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 
 > 取舍：调大可以让真长任务跑完，但 hang 类问题（agent 真的卡住、不是慢）会更晚被发现；遇到误超时再调，别盲目设很大值。
 
-::: warning 当前 latest (agent-node 2.4.10) 暂无 startup log 直接验证
-当前 latest 的 agent-node (`2.4.10`) 启动时**不打 `timeoutMs=...` log 行**——值确实读到了 [`agent-node/src/cli.ts:1374` 源码](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1374) (`parseInt(process.env.GROK_ACP_TIMEOUT_MS || fileConfig.flags?.grokAcpTimeoutMs || "300000")`)，但你无法用 `anet node start` 输出直接确认。如果跑了一个**确定 > 5 min** 的任务仍在 300 s 卡住，多半是 `flags.grokAcpTimeoutMs` 没被读到 (config 写错位置 / env 字段名 typo)；可以开 [issue](https://github.com/sleep2agi/agent-network/issues/new) 上报。**下一个 agent-node 发版起**，grok 节点启动时会显示 idle timeout 生效值及来源（[main 已 land](https://github.com/sleep2agi/agent-network/commit/21b0aa2), 等发版自然带出, #214 维度 5 Batch A finding 跟踪）。
+::: warning startup log 以当前 latest 为准
+旧版本 agent-node 启动时**不打 `timeoutMs=...` log 行**——值会从 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 读取，但 `anet node start` 输出不一定反映。如果跑了一个**确定 > 5 min** 的任务仍在 300 s 卡住，多半是 `flags.grokAcpTimeoutMs` 没被读到 (config 写错位置 / env 字段名 typo)；请先升级到 npm `latest`，再开 [issue](https://github.com/sleep2agi/agent-network/issues/new) 上报。
 :::
 
 ### 详见

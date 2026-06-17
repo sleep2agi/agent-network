@@ -2,6 +2,8 @@
 
 按错误信息快速定位问题和解决方案。
 
+如果问题集中在 `anet doctor`、Telegram channel、MCP 工具注入、codex-sdk 主动 `send_task`，优先看专项 runbook：[连接 / Channel / MCP 排障](/troubleshooting/connectivity-channels-mcp)。
+
 ## 连接类错误
 
 ### `ECONNREFUSED` -- 连接被拒绝
