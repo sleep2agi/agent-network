@@ -1334,10 +1334,47 @@ const CODEX_INSTRUCTIONS = SYSTEM_PROMPT || [
   `你的最终回复会被系统自动 send_reply 给任务发起者。`,
 ].join("\n");
 
-const CODEX_CONFIG = {
-  model_auto_compact_token_limit: 200000,
-  developer_instructions: CODEX_INSTRUCTIONS,
-};
+// #245 codex-sdk fix — inject commhub MCP server config so codex-sdk nodes
+// get the full commhub_send_task / get_all_status / etc. tool set, with
+// per-node identity (alias / token) inherited from this agent-node process.
+//
+// Vincent retro 2026-06-17: "新成员都用不了 send_task" — new nodes default to
+// codex-sdk runtime (per [[feedback_new_node_codex_default]]); for claude-
+// agent-sdk runtime agent-node injects commhub via an in-process McpServer
+// (createCommhubSdkMcpServer at line 1126); for codex-sdk no equivalent
+// in-process channel exists, and CODEX_CONFIG had ZERO mcp_servers field —
+// so codex inherited only whatever was in `~/.codex/config.toml` (a stale,
+// limited "commhub-proxy" pointing at a separate script that got rm-rf'd
+// in the 06-16 incident).
+//
+// Fix: the Codex SDK's `CodexOptions.config` accepts a JSON object that gets
+// flattened to `--config key=value` TOML literal overrides — per-Codex-
+// instance, in-memory, no mutation of `~/.codex/config.toml`. We point
+// `mcp_servers.commhub` at `.anet/node-server.js` (the bun stdio commhub
+// MCP server that agent-network's ensureMcpJson refreshes on every start —
+// also patched in this fix to widen its runtime gate to codex-sdk). codex
+// CLI subprocess inherits parent agent-node's env (COMMHUB_ALIAS / TOKEN /
+// URL set by anet launchAgent per-node), so node-server.js runs with the
+// correct per-node identity.
+function buildCodexConfig(workdir: string): Record<string, any> {
+  const nodeServerPath = join(workdir, ".anet", "node-server.js");
+  return {
+    model_auto_compact_token_limit: 200000,
+    developer_instructions: CODEX_INSTRUCTIONS,
+    mcp_servers: {
+      commhub: {
+        command: "bun",
+        args: [nodeServerPath],
+        // env intentionally omitted: codex CLI subprocess inherits this
+        // agent-node parent process's env, which includes the per-node
+        // COMMHUB_ALIAS / COMMHUB_TOKEN / COMMHUB_URL that anet's
+        // launchAgent already sets. Hard-coding env here would re-introduce
+        // the global-alias bug the 06-17 incident exposed.
+      },
+    },
+  };
+}
+const CODEX_CONFIG = buildCodexConfig(process.cwd());
 
 async function processWithCodex(task: string, from: string, images?: string[]): Promise<string> {
   // Ensure system-installed codex binary is found (npm global bin)

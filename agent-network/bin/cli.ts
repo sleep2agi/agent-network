@@ -2231,7 +2231,24 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
 // ── ensure .mcp.json has commhub server ──
 
 function ensureMcpJson(profile: Profile) {
-  if (normalizeRuntime(profile) !== "claude-code-cli") return;
+  // #245 codex-sdk fix — widened gate (was claude-code-cli only).
+  //
+  // Both claude-code-cli and codex-sdk runtimes need `.anet/node-server.js`
+  // (the in-process commhub MCP stdio server) refreshed + the @modelcontextprotocol/sdk
+  // dependency self-healed. The difference is the discovery mechanism:
+  //   * claude-code-cli reads cwd `.mcp.json` and finds commhub there
+  //   * codex-sdk reads `~/.codex/config.toml [mcp_servers.*]` and CANNOT use
+  //     `.mcp.json` (TMCode负责人 459d1b6c diagnostic confirmed). For codex-sdk
+  //     anet-node passes a `mcp_servers.commhub` override via the Codex SDK's
+  //     `CodexOptions.config` (per-instance, in-memory) — see agent-node/src/cli.ts
+  //     `CODEX_CONFIG.mcp_servers` block. That override points at the same
+  //     `.anet/node-server.js`, so we still need to keep it fresh on this side.
+  //
+  // claude-agent-sdk and grok-build-acp do NOT use cwd .anet/node-server.js
+  // (they inject in-process via createCommhubSdkMcpServer at agent-node), so
+  // they keep the early-return.
+  const runtime = normalizeRuntime(profile);
+  if (runtime !== "claude-code-cli" && runtime !== "codex-sdk") return;
   if (!profile.channels?.some(ch => ch.includes("commhub"))) return;
 
   const mcpJsonPath = join(process.cwd(), ".mcp.json");
@@ -2278,7 +2295,7 @@ function ensureMcpJson(profile: Profile) {
     console.warn(`[anet] Fix: npm install -g @sleep2agi/agent-network@latest`);
   }
 
-  // Ensure .anet/package.json + deps
+  // Ensure .anet/package.json exists
   const pkgJson = join(anetDir, "package.json");
   if (!existsSync(pkgJson)) {
     mkdirSync(anetDir, { recursive: true });
@@ -2286,36 +2303,135 @@ function ensureMcpJson(profile: Profile) {
       "private": true,
       "dependencies": { "@modelcontextprotocol/sdk": "^1.12.0" }
     }, null, 2) + "\n");
+  }
+
+  // #245 — commhub MCP dependency integrity self-heal.
+  // node-server.js imports @modelcontextprotocol/sdk subpaths at startup. A
+  // partial/corrupt install (e.g. only dist/ present, subpath exports missing —
+  // a disk-cleanup / node_modules corruption side-effect) crashes the MCP server
+  // BEFORE any tool registers: the node looks alive but ALL commhub_* tools
+  // silently vanish. The old code only installed when package.json was absent,
+  // so a corrupt node_modules went unrepaired, and the install error was
+  // swallowed. Probe the real import every start; reinstall if broken; fail
+  // LOUD (not silent) if still broken.
+  const sdkImportable = (): boolean => {
     try {
-      execSync("bun install", { cwd: anetDir, stdio: "pipe" });
-    } catch {}
+      execSync(
+        `bun -e "import('@modelcontextprotocol/sdk/server/index.js').then(()=>process.exit(0)).catch(()=>process.exit(3))"`,
+        { cwd: anetDir, stdio: "pipe", timeout: 15000 },
+      );
+      return true;
+    } catch { return false; }
+  };
+  if (!sdkImportable()) {
+    console.warn(`[anet] commhub MCP dependency missing or partial — repairing (bun install in .anet) ...`);
+    try {
+      execSync("bun install", { cwd: anetDir, stdio: "pipe", timeout: 120000 });
+    } catch (e: any) {
+      console.error(`[anet] ⚠ bun install in .anet failed: ${e?.message || e}`);
+    }
+    if (sdkImportable()) {
+      console.log(`[anet] ✓ commhub MCP dependency repaired.`);
+    } else {
+      console.error(`[anet] ❌ commhub MCP dependency (@modelcontextprotocol/sdk) still broken in .anet/node_modules.`);
+      console.error(`[anet]    → The commhub channel will NOT load (no commhub_* tools). Other features still work.`);
+      console.error(`[anet]    → Fix manually:  cd "${anetDir}" && bun install   (then restart the node)`);
+    }
   }
 
-  // 只在没有 commhub 配置时才写 .mcp.json
-  // 用户可能手动配了指向开发源码(commhub-channel.ts)，不能覆盖
-  mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-  const hasCommhub = Object.keys(mcpConfig.mcpServers).some(k => k.includes("commhub"));
-  if (!hasCommhub) {
-    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.js"] };
-    writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
-    console.log(`[anet] .mcp.json: added commhub`);
-  }
-
-  // Write .anet/.env (hub URL + token)
+  // Write .anet/.env (hub URL + token) — both runtimes need this; node-server.js
+  // reads COMMHUB_URL / COMMHUB_TOKEN from this file when spawned as a stdio MCP.
   const anetEnvPath = join(anetDir, ".env");
   const token = profile.token || "";
   let envContent = `COMMHUB_URL=${profile.hub || "http://127.0.0.1:9200"}\n`;
   if (token) envContent += `COMMHUB_TOKEN=${token}\n`;
   writeFileSync(anetEnvPath, envContent);
 
-  // Write .mcp.json
-  mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-  mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.js"] };
-  writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
-  console.log(`[anet] .mcp.json: added commhub channel server`);
+  // #245 codex-sdk fix — only write `.mcp.json` for claude-code-cli. codex-sdk
+  // does not read cwd `.mcp.json`; it reads `~/.codex/config.toml [mcp_servers.*]`
+  // (or accepts a `CodexOptions.config` override from agent-node, which is the
+  // path this fix uses). Writing `.mcp.json` for codex-sdk would be a silent
+  // no-op + confuse anyone reading the file expecting it to work.
+  if (runtime === "claude-code-cli") {
+    mcpConfig.mcpServers = mcpConfig.mcpServers || {};
+    mcpConfig.mcpServers.commhub = { type: "stdio", command: "bun", args: [".anet/node-server.js"] };
+    writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+    console.log(`[anet] .mcp.json: added commhub channel server`);
+  }
 }
 
 // ── launch helper (shared by start + resume) ──
+
+// #245 task E — detect channel plugin failures in the latest node log and
+// surface an actionable warning before launchAgent re-spawns claude. The
+// channel-plugin lifecycle is entirely inside Claude Code (anet only passes
+// `--channels ...` args); a failed plugin caches its failure in the running
+// claude process's in-memory state, and `--resume <uuid>` inherits that
+// cache instead of re-attempting the channel. Only a full process restart
+// (anet node stop && start) clears the cache; --resume <uuid> on the fresh
+// process still loads conversation history from disk.
+//
+// This warn is diagnostic-only: it does NOT block launch, change args, or
+// alter Claude's session UUID. It just tells the user "if you're confused
+// why your telegram channel still isn't connecting after `anet channel add`,
+// here's why and here's the fix."
+function maybeWarnChannelResumeBlocker(
+  nodeId: string,
+  profile: Profile,
+): void {
+  try {
+    // Only relevant when the profile declares telegram (the only
+    // currently-shipped plugin channel; if more land, extend this list).
+    if (!profile.channels.includes("telegram")) return;
+
+    // Tail the most recent log; if it shows a channel-plugin failure
+    // pattern, the user is the failure-window user the warn targets.
+    const logsDir = join(nodesDir(), nodeId, "logs");
+    if (!existsSync(logsDir)) return;
+    const logs = readdirSync(logsDir)
+      .filter((f) => f.endsWith(".log"))
+      .map((f) => ({ name: f, mtime: statSync(join(logsDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    if (logs.length === 0) return;
+    const latestLog = join(logsDir, logs[0].name);
+
+    // Tail ~200 lines (cheap, bounded).
+    const content = readFileSync(latestLog, "utf-8");
+    const tail = content.split("\n").slice(-200).join("\n");
+    const FAILURE_PATTERNS = [
+      /TELEGRAM_BOT_TOKEN required/i,
+      /TELEGRAM_BOT_TOKEN.*missing/i,
+      /channel.*failed to (?:start|load|attach)/i,
+      /plugin.*exited/i,
+      /MCP server.*exited/i,
+    ];
+    const failureHit = FAILURE_PATTERNS.some((p) => p.test(tail));
+    if (!failureHit) return;
+
+    // Additional signal: user has since added the token (otherwise the
+    // warn would suggest stop+start that would just fail the same way).
+    // Check both possible token locations: per-node .env and the channel
+    // access.json (anet channel add writes one or both).
+    const nodeEnv = join(nodesDir(), nodeId, ".env");
+    const channelDir = join(nodesDir(), nodeId, "channels", "telegram");
+    const hasNodeEnv = existsSync(nodeEnv) &&
+      /TELEGRAM_BOT_TOKEN=/.test(readFileSync(nodeEnv, "utf-8"));
+    const hasChannelState = existsSync(channelDir);
+    if (!hasNodeEnv && !hasChannelState) return;
+
+    console.warn(`[anet] ⚠ telegram channel 上次启动失败 — resume 不会重连`);
+    console.warn(`[anet]   Claude Code 把 channel plugin 启动失败缓存在当前进程的内存里, --resume 同 session 会继承这个缓存, 不会再 attempt 这个 channel.`);
+    console.warn(`[anet]`);
+    console.warn(`[anet]   修复 (conversation history 完整保留):`);
+    console.warn(`[anet]     anet node stop ${shellQuote(nodeId)} && anet node start ${shellQuote(nodeId)}`);
+    console.warn(`[anet]`);
+    console.warn(`[anet]   新 Claude 进程会从头 attempt 每个 channel, 同时 --resume <session-uuid> 加载已有 conversation 不丢.`);
+    console.warn(`[anet]   (failure pattern matched in ${logs[0].name}; see \`anet channel status ${shellQuote(nodeId)}\` for state.)`);
+  } catch {
+    // Pure diagnostic — if anything throws (missing log, permission denied,
+    // etc.), silently skip. Never let the warn path block a launch.
+  }
+}
 
 async function launchAgent(id: string, forceNewSession = false) {
   const resolved = resolveNodeRef(id);
@@ -2506,6 +2622,34 @@ async function launchAgent(id: string, forceNewSession = false) {
     if (profile.channels.includes("telegram")) {
       env.TELEGRAM_STATE_DIR = join(nodesDir(), nodeId, "channels", "telegram");
     }
+
+    // #245 task E — "channel previously failed, resume cannot retry" warn.
+    //
+    // When a channel plugin (telegram in particular) fails its stdio MCP
+    // server at session start — e.g. TELEGRAM_BOT_TOKEN was missing because
+    // the user ran `anet channel add` AFTER `anet node start` — Claude Code
+    // caches the failure in the running process's in-memory state. A
+    // subsequent `anet node resume` (or `anet node start` while the old
+    // claude process is still alive) inherits that cached failure and
+    // silently skips the channel forever. The only working escape is a
+    // full process restart: `anet node stop && anet node start` kills the
+    // claude process (clears the in-memory cache); the relaunch passes
+    // `--resume <uuid>` so the conversation history is preserved while
+    // every channel is re-attempted from scratch.
+    //
+    // anet itself has no hook into Claude's channel lifecycle (channel
+    // plugin spawn is fully internal to claude). So this is a diagnostic
+    // warning, not a fix: detect the failure pattern from the latest log,
+    // surface the actionable fix to the user before the spawn proceeds.
+    // launch is NOT blocked — user may have already fixed (e.g. via prior
+    // stop+start) and the new log will not have the pattern; the warn is
+    // a one-shot guidance for the failure window.
+    //
+    // Pairs with already-shipped #245 commits:
+    //   - 2cc0020 (anet channel add warns if node already running)
+    //   - a70caea (anet channel status — surfaces resolved telegram state)
+    //   - this commit (anet node start/resume — surfaces failure + escape)
+    maybeWarnChannelResumeBlocker(nodeId, profile);
 
     const claudeArgs: string[] = [];
     if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
@@ -4493,6 +4637,20 @@ Example:
     console.log(`   ${channelDir}/`);
     console.log(`   config.json updated`);
 
+    // #245 — if the node is already running, the channel MCP server was spawned
+    // at session start (before this channel existed) and will NOT pick up the
+    // new token until the session restarts. `anet resume` does not reconnect a
+    // channel that was absent/failed at first launch. Without this warning,
+    // `add` looks like a silent success but messages never arrive (real
+    // hour-long "added but receives nothing" detour, 2026-06-16).
+    const addPid = readNodePid(nodeId);
+    if (addPid != null && pidAlive(addPid)) {
+      console.log(`\n⚠ 节点 "${nodeDisplayName(nodeId, profile)}" 正在运行 (pid ${addPid})。`);
+      console.log(`  新加的 ${type} 通道**不会立即生效** —— 通道的 MCP server 在会话启动时就拉起了，`);
+      console.log(`  现在才加 token，且 anet resume 不会重连首次缺失/失败的通道。`);
+      console.log(`  → 生效方式：anet node stop ${nodeId} && anet node start ${nodeId}`);
+    }
+
   } else if (sub === "ls") {
     const nodeRef = args[2];
     const resolved = nodeRef ? resolveNodeRef(nodeRef) : null;
@@ -4525,12 +4683,56 @@ Example:
     if (!found) console.log("No channels. Add one: anet channel add telegram <node-id>");
     console.log();
 
+  } else if (sub === "status") {
+    // #245 — show the RESOLVED telegram access.json path + allowlist + pending
+    // pairings. The running node reads exactly this file (TELEGRAM_STATE_DIR →
+    // .anet/nodes/<id>/channels/telegram/); editing any other access.json is a
+    // no-op. Not surfacing the resolved path + pending caused a real hour-long
+    // "not allowlisted / pairing not found" debugging detour (2026-06-16).
+    const nodeRef = args[2];
+    const resolved = nodeRef ? resolveNodeRef(nodeRef) : null;
+    if (nodeRef && !resolved) {
+      console.error(`Node "${nodeRef}" not found.`);
+      process.exit(1);
+    }
+    const ids = resolved ? [resolved.id] : listProfileIds();
+    let any = false;
+    for (const id of ids) {
+      const tgDir = join(nodesDir(), id, "channels", "telegram");
+      const accessPath = join(tgDir, "access.json");
+      if (!existsSync(accessPath)) continue;
+      any = true;
+      const profile = loadProfile(id);
+      const label = profile ? `${id} (${nodeDisplayName(id, profile)})` : id;
+      console.log(`\n● ${label} — telegram`);
+      console.log(`  TELEGRAM_STATE_DIR : ${tgDir}`);
+      console.log(`  access.json        : ${accessPath}`);
+      let access: any = {};
+      try { access = JSON.parse(readFileSync(accessPath, "utf-8")); }
+      catch (e: any) { console.log(`  ⚠ access.json 读不了: ${e?.message || e}`); continue; }
+      const allow = Array.isArray(access.allowFrom) ? access.allowFrom : [];
+      const pending = access.pending && typeof access.pending === "object" ? Object.keys(access.pending) : [];
+      const groups = access.groups && typeof access.groups === "object" ? Object.keys(access.groups) : [];
+      console.log(`  dmPolicy           : ${access.dmPolicy || "(unset)"}`);
+      console.log(`  allowFrom          : ${allow.length ? allow.join(", ") : "(none — 还没人能私聊这个节点)"}`);
+      console.log(`  pending pairings   : ${pending.length ? pending.join(", ") : "(none)"}`);
+      console.log(`  groups             : ${groups.length ? groups.join(", ") : "(none)"}`);
+    }
+    if (!any) {
+      console.log(nodeRef
+        ? `No telegram channel for "${nodeRef}". Add one: anet channel add telegram ${nodeRef}`
+        : `No telegram channels configured. Add one: anet channel add telegram <node-id>`);
+    } else {
+      console.log(`\n提示：节点运行时读的就是上面这个 access.json，改对它再重启节点即可；改别处无效。\n`);
+    }
+
   } else {
     console.log(`
 anet channel <command>
 
   add <type> <node-id>          Add channel to a node
   ls [node-id]                  List channels
+  status [node-id]              Show resolved access.json path + allowlist + pending pairings
 
 Data: .anet/nodes/<node-id>/channels/<type>/
 `);
@@ -8572,6 +8774,37 @@ async function doctorCommand() {
     }
   } else {
     info("Telegram channel env", "not configured (no telegram bot token)");
+  }
+
+  // 7. #245 — CommHub MCP dependency integrity (the silent "all commhub_* tools
+  // vanished" outage) + per-node telegram channel state, so these surface here
+  // instead of forcing a dig through ~/.cache MCP logs.
+  const anetDir = join(process.cwd(), ".anet");
+  if (existsSync(join(anetDir, "node-server.js"))) {
+    let sdkOk = false;
+    try {
+      execSync(`bun -e "import('@modelcontextprotocol/sdk/server/index.js').then(()=>process.exit(0)).catch(()=>process.exit(3))"`, { cwd: anetDir, stdio: "pipe", timeout: 15000 });
+      sdkOk = true;
+    } catch {}
+    if (sdkOk) check("CommHub MCP dependency", true, "@modelcontextprotocol/sdk importable from .anet");
+    else check("CommHub MCP dependency", false, `@modelcontextprotocol/sdk missing/partial in .anet — commhub_* tools won't load. Fix: cd "${anetDir}" && bun install`);
+  }
+
+  const tgNodeIds = ids.filter(id => existsSync(join(nodesDir(), id, "channels", "telegram", "access.json")));
+  if (tgNodeIds.length) {
+    info("Telegram channels", `${tgNodeIds.length} node(s) — run 'anet channel status' for resolved paths`);
+    for (const id of tgNodeIds) {
+      const name = nodeDisplayName(id, loadProfile(id));
+      const accessPath = join(nodesDir(), id, "channels", "telegram", "access.json");
+      try {
+        const a = JSON.parse(readFileSync(accessPath, "utf-8"));
+        const allow = Array.isArray(a.allowFrom) ? a.allowFrom.length : 0;
+        const pending = a.pending && typeof a.pending === "object" ? Object.keys(a.pending).length : 0;
+        info(`    ↳ ${name}`, `allowFrom: ${allow}, pending: ${pending}, policy: ${a.dmPolicy || "?"}`);
+      } catch (e: any) {
+        warning(`    ↳ ${name}`, `access.json unreadable: ${e?.message || e}`);
+      }
+    }
   }
 
   console.log(`\n  Result: ${ok} ok, ${warn} warnings, ${fail} errors\n`);
