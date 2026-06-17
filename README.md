@@ -99,23 +99,11 @@ anet project restart    # 重启 cwd 节点接新版
 
 ---
 
-## Dashboard 预览
+## Dashboard
 
-跑在 `localhost:3000`，Next.js 16，7 大页面：Overview / Nodes / Tasks / Messages / Chat / Admin / Settings。
+跑在 `localhost:3000`（Next.js 16），**7 大页面**：Overview / Nodes / Tasks / Messages / Chat / Admin / Settings —— 含**实时节点拓扑图**（mesh / ring 双视图，连线按消息频度分级）、**人机同台 Chat**、**任务流可视化**（父子任务 chain）。
 
-<table>
-<tr>
-<td width="50%"><a href="./docs/images/dashboard-overview.jpg"><img src="./docs/images/dashboard-overview.jpg" alt="Overview" /></a><br/><sub><b>Overview</b> — 网络概览：在线 Agent / 任务统计 / 服务器健康</sub></td>
-<td width="50%"><a href="./docs/images/dashboard-chat.jpg"><img src="./docs/images/dashboard-chat.jpg" alt="Chat" /></a><br/><sub><b>Chat</b> — 人和 Agent 同台对话，markdown 渲染 + Enter 发送 + 来源标签 + 乐观回显</sub></td>
-</tr>
-<tr>
-<td width="50%"><a href="./docs/images/dashboard-mesh.jpg"><img src="./docs/images/dashboard-mesh.jpg" alt="Topology Mesh" /></a><br/><sub><b>拓扑图</b> — 实时节点 mesh / ring 视图，连线按消息频度分级</sub></td>
-<td width="50%"><a href="./docs/images/dashboard-task-flow.jpg"><img src="./docs/images/dashboard-task-flow.jpg" alt="Task Flow" /></a><br/><sub><b>Task Flow</b> — 任务派发 / 状态机 / 父子任务 chain 可视化</sub></td>
-</tr>
-<tr>
-<td colspan="2"><a href="./docs/images/nodes-page.jpg"><img src="./docs/images/nodes-page.jpg" alt="Nodes Page" /></a><br/><sub><b>Nodes</b> — 节点详情 / runtime / model / 健康指标 / process telemetry</sub></td>
-</tr>
-</table>
+启动后浏览器打开 `localhost:3000` 即见；完整截图与交互演示 → <https://anet.sh>。
 
 ---
 
