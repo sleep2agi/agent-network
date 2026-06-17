@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/commhub-server",
-  "version": "0.8.6-preview.1",
+  "version": "0.8.6",
   "description": "CommHub Server — AI Agent communication hub with MCP protocol, multi-network isolation, user auth, and 17 MCP tools.",
   "type": "module",
   "main": "src/index.ts",
