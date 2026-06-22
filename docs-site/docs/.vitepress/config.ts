@@ -44,12 +44,12 @@ export default withMermaid(defineConfig({
           { text: '生态', link: '/ecosystem' },
           { text: '社群', link: '/community' },
           {
-            text: 'v0.10.13 ▾',
+            text: 'latest ▾',
             items: [
-              { text: 'v0.10.13（latest）', link: '/' },
-              { text: 'v0.10.13 release notes', link: '/changelog' },
-              { text: '更新日志（全部版本）', link: '/changelog' },
-              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases/tag/v0.10.13' },
+              { text: '当前 stable（npm latest）', link: '/' },
+              { text: 'Release notes', link: '/changelog' },
+              { text: '版本号体系', link: '/guide/versioning' },
+              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
             ]
           },
         ],
@@ -78,6 +78,7 @@ export default withMermaid(defineConfig({
               { text: 'Channel 接入', link: '/guide/channels' },
               { text: '多模型配置', link: '/guide/multi-model' },
               { text: '升级指南', link: '/guide/upgrade' },
+              { text: '版本号体系', link: '/guide/versioning' },
             ]
           },
           {
@@ -130,12 +131,12 @@ export default withMermaid(defineConfig({
           { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
           {
-            text: 'v0.10.13 ▾',
+            text: 'latest ▾',
             items: [
-              { text: 'v0.10.13 (latest)', link: '/en/' },
-              { text: 'v0.10.13 release notes', link: '/en/changelog' },
-              { text: 'Changelog (all versions)', link: '/en/changelog' },
-              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases/tag/v0.10.13' },
+              { text: 'Current stable (npm latest)', link: '/en/' },
+              { text: 'Release notes', link: '/en/changelog' },
+              { text: 'Versioning', link: '/en/guide/versioning' },
+              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
             ]
           },
         ],
@@ -164,6 +165,7 @@ export default withMermaid(defineConfig({
               { text: 'Channel Integration', link: '/en/guide/channels' },
               { text: 'Multi-Model Config', link: '/en/guide/multi-model' },
               { text: 'Upgrade Guide', link: '/en/guide/upgrade' },
+              { text: 'Versioning', link: '/en/guide/versioning' },
             ]
           },
           {

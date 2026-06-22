@@ -66,7 +66,7 @@ sudo ufw allow 9200
 
 **原因**：SSE 长连接断开，通常是网络波动。
 
-**解决**：Agent 会自动重连（v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起，v0.10.15 latest 已包含：指数退避 `1s → 30s` 上限 + 重连即重 register + 1h 失败放弃，[详见 agent-node 断线重连](/guide/agent-node#断线重连)），通常无需手动干预。
+**解决**：Agent 会自动重连（[#202](https://github.com/sleep2agi/agent-network/issues/202) 起：指数退避 `1s → 30s` 上限 + 重连即重 register + 1h 失败放弃，[详见 agent-node 断线重连](/guide/agent-node#断线重连)），通常无需手动干预。
 
 如果持续失败：
 
@@ -92,7 +92,7 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 **原因（v0.10.10 及以前）**：hub 重启会清空 sessions 内存表。老版本 `agent-node` 的 SSE 重连只恢复事件流，**不重发 register**——hub 端 sessions 表要等下次 3 分钟 heartbeat 才会重建，期间 Dashboard 看不到任何节点。
 
-**解决（v0.10.15 latest）**：v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202) 起结构性修复，SSE 重连成功立即重发 register（idempotent upsert），Dashboard 30s 内自动恢复完整节点列表。**无需手动 `anet project restart`**，跟 `anet hub stop` / `hub status` 配套用 → hub 维护 SOP 一键完成。如果你 agent-node 还停留在 v0.10.10 及以前，跑 `anet upgrade` 升到 latest 即享受。
+**解决**：[#202](https://github.com/sleep2agi/agent-network/issues/202) 起结构性修复，SSE 重连成功立即重发 register（idempotent upsert），Dashboard 30s 内自动恢复完整节点列表。**无需手动 `anet project restart`**，跟 `anet hub stop` / `hub status` 配套用 → hub 维护 SOP 一键完成。如果你 agent-node 较旧，跑 `anet upgrade` 升到 npm latest 即享受。
 
 ---
 
@@ -729,8 +729,8 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 
 完整说明见 [runtimes → 长任务超时调整](/guide/runtimes#长任务超时调整-flags-grokacptimeoutms)。
 
-::: warning 当前 latest (agent-node 2.4.10) 不打 timeoutMs startup log
-agent-node 启动日志**不打** `timeoutMs=<新值>` —— 值确实读到了但无法用 `anet node start` 输出直接确认。如果设了仍超时, 多半是 config 写错位置或 env 字段名 typo. [开 issue](https://github.com/sleep2agi/agent-network/issues/new) 上报. **下一个 agent-node 发版起**, grok 节点启动时会显示 idle timeout 生效值及来源 ([main 已 land](https://github.com/sleep2agi/agent-network/commit/21b0aa2), 等发版带出; 跟踪 #214 dim 5 Batch A finding).
+::: warning startup log 以当前 latest 为准
+旧版本 agent-node 启动日志**不打** `timeoutMs=<新值>` —— 值会读到但 `anet node start` 输出不一定反映。如果设了仍超时，多半是 config 写错位置或 env 字段名 typo；请先升级到 npm `latest`，再 [开 issue](https://github.com/sleep2agi/agent-network/issues/new) 上报。
 :::
 
 **仍卡死**，先排除：grok backend 端 quota 用尽（grok 自己的 `~/.config/grok-build/` log 会有提示）/ 节点 cwd 不在 user workspace 边界内（[#204](https://github.com/sleep2agi/agent-network/issues/204) isolated cwd 边界）/ `grok login` 凭据过期。
