@@ -66,7 +66,7 @@ sudo ufw allow 9200
 
 **Cause**: SSE long connection dropped, usually due to network fluctuation.
 
-**Solution**: The agent will auto-reconnect (since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202), already in v0.10.15 latest: exponential backoff `1s → 30s` cap + re-register on every successful (re)connect + give up after 1h continuous failure — [see agent-node reconnection](/en/guide/agent-node#reconnection)); no manual intervention usually needed.
+**Solution**: The agent will auto-reconnect (since [#202](https://github.com/sleep2agi/agent-network/issues/202): exponential backoff `1s → 30s` cap + re-register on every successful (re)connect + give up after 1h continuous failure — [see agent-node reconnection](/en/guide/agent-node#reconnection)); no manual intervention usually needed.
 
 If it persists:
 
@@ -92,7 +92,7 @@ curl -H "Authorization: Bearer ntok_xxx" http://localhost:9200/api/status
 
 **Cause (v0.10.10 and earlier)**: The hub restart clears its in-memory sessions table. Older `agent-node` versions only restored the event stream on reconnect; they **did not re-send `register`** — so the hub-side sessions table only rebuilt on the next 3-minute heartbeat, leaving the Dashboard blank in between.
 
-**Solution (v0.10.15 latest)**: Since v0.10.11 [#202](https://github.com/sleep2agi/agent-network/issues/202), every successful SSE reconnect immediately re-fires `register` (idempotent upsert on the hub), and the Dashboard recovers the full node list within ~30s. **No `anet project restart` needed**; pair this with the `anet hub stop` / `hub status` commands for a one-shot maintenance SOP. If you're still on v0.10.10 or earlier, run `anet upgrade` to pick up the fix.
+**Solution**: Since [#202](https://github.com/sleep2agi/agent-network/issues/202), every successful SSE reconnect immediately re-fires `register` (idempotent upsert on the hub), and the Dashboard recovers the full node list within ~30s. **No `anet project restart` needed**; pair this with the `anet hub stop` / `hub status` commands for a one-shot maintenance SOP. If you're on an older agent-node, run `anet upgrade` to pick up the fix on npm `latest`.
 
 ---
 
@@ -730,8 +730,8 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 
 Full detail: [runtimes → Long-task timeout tuning](/en/guide/runtimes#long-task-timeout-tuning-flags-grokacptimeoutms).
 
-::: warning Current latest (agent-node 2.4.10) doesn't echo timeoutMs in startup log
-agent-node startup logs **do not print** `timeoutMs=<new value>` — the value is read but not surfaced in `anet node start` output. If you set it and tasks still time out, the config is likely in the wrong file or the env-var name has a typo. Please [open an issue](https://github.com/sleep2agi/agent-network/issues/new). **From the next agent-node release onward**, the grok node will print the effective idle-timeout value and its source at startup ([already on main](https://github.com/sleep2agi/agent-network/commit/21b0aa2), will land with the next release — tracked via #214 dim 5 Batch A finding).
+::: warning Startup log follows the current latest
+Older agent-node versions **do not print** `timeoutMs=<new value>` at startup — the value is read but not surfaced in `anet node start` output. If you set it and tasks still time out, the config is likely in the wrong file or the env-var name has a typo; upgrade to npm `latest` first, then [open an issue](https://github.com/sleep2agi/agent-network/issues/new).
 :::
 
 **Still hangs?** Rule out: the grok backend quota is exhausted (grok's own `~/.config/grok-build/` log will hint at it) / the node `cwd` is outside the user-workspace boundary ([#204](https://github.com/sleep2agi/agent-network/issues/204) isolated cwd boundary) / `grok login` credentials expired.

@@ -54,9 +54,9 @@ anet -v
 Expected output (version numbers track npm `latest`):
 
 ```text
-anet v2.2.12
+anet <current latest>
 Components (auto-fetched on first use, you don't need to install them manually):
-  ✓ agent-node current latest
+  ✓ agent-node <current latest>
     └ @anthropic-ai/claude-agent-sdk v0.2.x
     └ @openai/codex-sdk v0.x.x
   ○ commhub-server — not installed yet (will fetch via npx on first use)
@@ -88,7 +88,7 @@ tmux new -s anet-hub
 anet hub start --host 0.0.0.0 --port 9200
 
 # Look for output like this — that's success:
-# CommHub MCP Server v0.8.5
+# CommHub MCP Server <current latest>
 # REST:   http://0.0.0.0:9200/api
 # ✅ Admin account created
 # username: admin
@@ -101,7 +101,7 @@ Verify the hub is up (from another terminal):
 
 ```bash
 curl -s http://127.0.0.1:9200/health | head -5
-# Expect something like {"ok":true,"version":"0.8.5",...}
+# Expect something like {"ok":true,"version":"<current>",...}
 ```
 
 ::: danger Public-internet deploy: change the password immediately
