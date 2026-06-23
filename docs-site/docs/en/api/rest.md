@@ -1854,7 +1854,7 @@ body `{ txn_id }` is required (missing → 400).
 ## Tmux Debug Endpoints (opt-in)
 
 ::: warning Off by default
-Only available when the hub is started with `COMMHUB_ENABLE_TMUX=1` ([`index.ts:14`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L14)). **Otherwise all paths return 404 `tmux disabled`**. Even when enabled, you still need (a) the caller IP to be inside `COMMHUB_TMUX_ALLOWLIST` (comma-separated, defaults to localhost only; verify [`index.ts:17`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L17)) and (b) `users.role = 'admin'` system-admin auth. Intended use: expose tmux sessions running agents on the hub machine to local devs / Dashboard. **Never expose on the public internet.**
+Only available when the hub is started with `COMMHUB_ENABLE_TMUX=1` ([`index.ts:14`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L14)). **Otherwise all paths return 404 `tmux disabled`**. Even when enabled, you still need (a) the caller IP to be inside `COMMHUB_TMUX_ALLOWLIST` (comma-separated, defaults to localhost only; verify [`index.ts:17`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L17)) and (b) `users.role = 'admin'` system-admin auth. Intended use: expose tmux sessions running agents on the hub machine to local devs / Dashboard. **Never expose on the public internet.** Public-deploy hardening: [Production §5 Verify tmux control plane is off](/en/deploy/production#_5-verify-the-tmux-control-plane-is-off).
 :::
 
 ### GET /api/tmux/:name
