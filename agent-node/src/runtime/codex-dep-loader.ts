@@ -168,7 +168,14 @@ export function defaultNpmInstall(
   execSync: (cmd: string, opts?: any) => any,
 ): CodexLoaderHooks["npmInstall"] {
   return async (prefix, packages) => {
-    const cmd = `npm install --no-save --prefix ${shellQuote(prefix)} ${packages.join(" ")}`;
+    // shellQuote every spec — internal call sites currently pass clean
+    // `name@semver` strings so there is no real injection surface today,
+    // but a future caller could legitimately want to install a package
+    // from a tarball path with a space in it, or a scoped name with
+    // characters the unquoted shell would resplit. Defending here is one
+    // line and keeps the code's contract independent of caller hygiene.
+    const quoted = packages.map(shellQuote).join(" ");
+    const cmd = `npm install --no-save --prefix ${shellQuote(prefix)} ${quoted}`;
     execSync(cmd, { stdio: "pipe", timeout: 90_000 });
   };
 }
