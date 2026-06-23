@@ -1,11 +1,11 @@
 ---
 layout: home
 title: Agent Network
-titleTemplate: Local-first multi-agent network
+titleTemplate: Build your AI agent army
 hero:
   name: Agent Network
-  text: Local-first multi-agent network
-  tagline: One anet command orchestrates Claude · Codex · Grok Build — 4 runtimes · any mainstream LLM, all on your own hardware. Apache 2.0 open source.
+  text: Build your AI agent army
+  tagline: Orchestrate Claude · Codex · Grok with one command into a coordinated AI team you direct. 4 runtimes · any mainstream LLM · local-first · Apache 2.0 open source
   actions:
     - theme: brand
       text: Get Started →

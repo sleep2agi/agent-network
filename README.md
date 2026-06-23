@@ -1,15 +1,15 @@
 <p align="center">
-  <img width="1280" height="720" alt="Agent Network — 多 Agent，一行命令" src="./docs/images/anet-repo-cover-v2.png" />
+  <img width="1280" height="720" alt="Agent Network — 助力搭建你的数字 AI 员工军团" src="./docs/images/anet-repo-cover-v3.png" />
 </p>
 
 <h1 align="center">Agent Network</h1>
 
 <p align="center">
-  <strong>把你的 Claude、Codex、Grok 拉进同一张网 —— 一行命令，互相派活。</strong>
+  <strong>助力搭建你的数字 AI 员工军团</strong>
 </p>
 
 <p align="center">
-  4 个 Runtime × 8 家 LLM 厂商，本地优先，跑在你自己的硬件上。Agent 之间通过 MCP 自动发现、流式协作、共享上下文。Apache 2.0 开源。
+  把 Claude、Codex、Grok 拉进同一张网，一行命令编成你指挥的协作团队。4 个 Runtime × 8 家 LLM 厂商 · MCP 自动发现 · 流式协作 · 本地优先 · Apache 2.0 开源。
 </p>
 
 <p align="center">
