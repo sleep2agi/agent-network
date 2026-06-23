@@ -4,6 +4,10 @@
 
 如果问题集中在 `anet doctor`、Telegram channel、MCP 工具注入、codex-sdk 主动 `send_task`，优先看专项 runbook：[连接 / Channel / MCP 排障](/troubleshooting/connectivity-channels-mcp)。
 
+::: tip 不是故障，只是想了解版本？
+看 [版本号体系](/guide/versioning) 理清 npm 包版（`anet -v` 那几行）和 `v0.10.x` bundle release 的对应关系；想升级走 [升级指南](/guide/upgrade)。
+:::
+
 ## 连接类错误
 
 ### `ECONNREFUSED` -- 连接被拒绝

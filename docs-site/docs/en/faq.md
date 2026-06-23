@@ -2,6 +2,12 @@
 
 Frequently asked questions and answers.
 
+::: tip First time using anet?
+- Want to run your first agent → [Getting Started](/en/guide/getting-started) (install + dispatch in 30 seconds)
+- Wondering about version numbers → [Versioning](/en/guide/versioning) (npm package versions vs `v0.10.x` bundle releases)
+- Didn't find your answer → [Troubleshooting](/en/troubleshooting) / [Discussions](https://github.com/sleep2agi/agent-network/discussions)
+:::
+
 ## Basics
 
 ### 1. What is Agent Network? How does it differ from LangChain / CrewAI?

@@ -2,6 +2,12 @@
 
 常见问题解答。
 
+::: tip 第一次用 anet?
+- 想跑通第一个 agent → [上手指南](/guide/getting-started) (30 秒装好 + 派任务)
+- 想知道版本号含义 → [版本号体系](/guide/versioning) (npm 包版 vs `v0.10.x` bundle release)
+- 没找到答案 → [故障排查](/troubleshooting) / [Discussions](https://github.com/sleep2agi/agent-network/discussions)
+:::
+
 ## 基础问题
 
 ### 1. Agent Network 是什么？和 LangChain / CrewAI 有什么区别？
