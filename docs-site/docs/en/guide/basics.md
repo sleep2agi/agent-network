@@ -1,22 +1,8 @@
-# Key Concepts
+# Core Concepts
 
 ::: tip Who is this page for?
-If this is your first time using Agent Network, or if terms like "CLI", "Server", and "Token" feel unclear, spend 3 minutes here. The rest of the docs will make much more sense afterward.
+If terms like "CLI", "Server", "Token", or "MCP" feel unclear, spend 3 minutes here. The rest of the docs will make much more sense afterward. For the high-level pitch see [5-Minute Intro to anet](/en/guide/introduction).
 :::
-
-## Agent Network in One Sentence
-
-Agent Network is like a **group chat for AI agents**:
-
-- **CommHub** = the chat server (routes messages)
-- **Agent Node** = a member in the group (an AI that does work)
-- **Network** = the group itself (an isolated workspace)
-- **Token** = your login credential (proves you are you)
-- **anet CLI** = the management tool (you type commands in your terminal to control everything)
-
-Let's explain each one.
-
----
 
 ## What is MCP?
 

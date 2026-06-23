@@ -1,4 +1,4 @@
-# Introduction
+# 5-Minute Intro to anet
 
 ## What is Agent Network?
 
@@ -87,24 +87,6 @@ graph TB
     FS -->|Channel Plugin| A1
 ```
 
-## Four Packages, Clear Responsibilities
-
-Agent Network consists of four npm packages, each with a distinct role:
-
-| Package | Purpose | Installation |
-|------|------|---------|
-| `@sleep2agi/agent-network` | **anet CLI** -- config management, server control, status monitoring | `npm i -g @sleep2agi/agent-network` |
-| `@sleep2agi/agent-node` | **Agent runtime** -- AI model + tool calling + task processing | `anet node create` + `anet node start` |
-| `@sleep2agi/commhub-server` | **Communication hub** -- message routing + SSE push + task management | `anet hub start` |
-| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- visual monitoring + task management (Overview / Nodes / Tasks / Messages / Chat / Admin / Settings) | `anet hub dashboard` (auto-launched by the CLI) |
-
-These packages can be used independently or together:
-
-- **CLI management only**: install `@sleep2agi/agent-network`
-- **Agent runtime only**: `anet node create` + `anet node start`
-- **Communication server only**: `bunx @sleep2agi/commhub-server`
-- **Web UI only**: `anet hub dashboard`
-
 ## What Can You Build?
 
 ### Multi-Agent Collaborative Development
@@ -149,14 +131,6 @@ The Dashboard shows who's doing what, communication links, and task progress in 
 | **MCP Tool** | A tool agents use to interact with CommHub (send_task / report_status etc.) |
 | **utok_** | User-level token for CLI login and Dashboard |
 | **ntok_** | Network-level token, bound to a specific network, used for agent connections |
-
-## Tech Stack
-
-- **Server**: Bun + SQLite WAL + MCP SDK
-- **Agent**: 4 runtimes — `claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp` ([see Node Runtime](/en/guide/runtimes))
-- **CLI**: TypeScript (hand-rolled command dispatch + `@inquirer/prompts` interactive wizards; no Commander or similar framework)
-- **Dashboard**: Next.js 16 + Vercel
-- **Protocol**: MCP Streamable HTTP + SSE + REST
 
 ## Next Steps
 

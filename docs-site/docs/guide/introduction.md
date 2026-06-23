@@ -1,4 +1,4 @@
-# 简介
+# 5 分钟懂 anet
 
 ## 什么是 Agent Network?
 
@@ -87,24 +87,6 @@ graph TB
     FS -->|Channel Plugin| A1
 ```
 
-## 四个包，各司其职
-
-Agent Network 由四个 npm 包组成，职责清晰：
-
-| 包名 | 用途 | 安装方式 |
-|------|------|---------|
-| `@sleep2agi/agent-network` | **anet CLI** -- 配置管理、启动服务、状态监控 | `npm i -g @sleep2agi/agent-network` |
-| `@sleep2agi/agent-node` | **Agent 运行时** -- AI 模型 + 工具调用 + 任务处理 | `anet node create` + `anet node start` |
-| `@sleep2agi/commhub-server` | **通信中枢** -- 消息路由 + SSE 推送 + 任务管理 | `anet hub start` |
-| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- 可视化监控 + 任务管理（Overview / Nodes / Tasks / Messages / Chat / Admin / Settings）| `anet hub dashboard`（CLI 自动拉起）|
-
-这些包可以独立使用，也可以配合使用：
-
-- **只需 CLI 管控**：安装 `@sleep2agi/agent-network`
-- **只需 Agent 运行时**：`anet node create` + `anet node start`
-- **只需通信服务**：`bunx @sleep2agi/commhub-server`
-- **只需 Web 界面**：`anet hub dashboard`
-
 ## 能拿来干什么？
 
 ### 多 Agent 协作开发
@@ -149,14 +131,6 @@ Dashboard 实时展示谁在干什么、通信连线、任务进度 -- 像作战
 | **MCP Tool** | Agent 调用 CommHub 的工具（send_task / report_status 等） |
 | **utok_** | 用户级 Token，用于 CLI 登录和 Dashboard |
 | **ntok_** | 网络级 Token，绑定特定网络，用于 Agent 连接 |
-
-## 技术栈
-
-- **Server**: Bun + SQLite WAL + MCP SDK
-- **Agent**: 4 种 Runtime —— `claude-code-cli` / `claude-agent-sdk` / `codex-sdk` / `grok-build-acp`（[详见 节点 Runtime](/guide/runtimes)）
-- **CLI**: TypeScript（手写命令分发 + `@inquirer/prompts` 交互式向导，无 Commander 等框架）
-- **Dashboard**: Next.js 16 + Vercel
-- **协议**: MCP Streamable HTTP + SSE + REST
 
 ## 下一步
 

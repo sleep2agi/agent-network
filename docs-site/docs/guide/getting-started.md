@@ -44,6 +44,19 @@ npm install -g @sleep2agi/agent-network
 anet -v
 ```
 
+### 1.5 一键安装（advanced）
+
+如果你想在一台空 Ubuntu/Debian 服务器上**一行命令**起完整 Agent Network（hub + dashboard + 多个 agent，每个进程一个独立 tmux session），用 `setup-anet.sh`：
+
+```bash
+curl -fsSL https://anet.sh/setup-anet.sh \
+  | MINIMAX_KEY=sk-cp-你的key bash
+```
+
+适合云服务器整套部署 / 团队 multi-agent 演示 / 本地 LAN 多机测试。完整环境变量、自定义节点列表、已验证场景、限制清单见 [一键安装详解 →](/guide/one-shot-install)。
+
+跑完直接看 §7 派任务；下面的 §2-§6 手动步骤可以跳过。
+
 ## 2. 启动 Hub Server
 
 打开一个终端窗口，**保持开着**：
