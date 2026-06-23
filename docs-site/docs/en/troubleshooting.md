@@ -4,6 +4,10 @@ Quickly identify problems and solutions based on error messages.
 
 For `anet doctor`, Telegram channel setup, MCP tool injection, or codex-sdk active `send_task`, start with the dedicated runbook: [Connectivity / Channels / MCP](/en/troubleshooting/connectivity-channels-mcp).
 
+::: tip Not a failure — just curious about versions?
+See [Versioning](/en/guide/versioning) to map the npm-package versions printed by `anet -v` onto `v0.10.x` bundle releases. To upgrade, follow the [Upgrade Guide](/en/guide/upgrade).
+:::
+
 ## Connection Errors
 
 ### `ECONNREFUSED` -- Connection Refused
