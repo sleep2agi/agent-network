@@ -129,7 +129,7 @@ Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / 
 | `anet demo debate [opts]` | **Debate**: 6-role (host / pro × 2 / con × 2 / judge) one-command 9-step debate |
 | `anet demo socialmedia [opts]` | **Social media content factory**: 4 roles (topic / copy / image / reviewer), ~3 min |
 | `anet demo pr-review [opts]` | **Code PR review room**: 4 roles (3 reviewers — security / perf / style — running in parallel + judge), ~2 min |
-| `anet demo sci-team [opts]` | **Research squad**: 1 leader + N-1 workers (default 10, tunable 5-50). **Phase 1 scaffold** — the leader is currently a placeholder echo; real intelligent fan-out is queued for [RFC-008](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-008-sci-team-fanout.md) Phase 2 |
+| `anet demo sci-team [opts]` | **Research squad**: 1 leader + N-1 workers (default 10, tunable 5-50). **Phase 1 scaffold** — the leader is currently a placeholder echo; real intelligent fan-out is queued for [RFC-008](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-008-multi-agent-team-convention.md) Phase 2 (RFC status: Proposed; tracked in [#51](https://github.com/sleep2agi/agent-network/issues/51)) |
 
 
 ### Channel Management
