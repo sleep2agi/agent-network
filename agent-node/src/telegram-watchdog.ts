@@ -86,6 +86,10 @@ export function startTelegramWatchdog(
 
   let deadSinceMs = 0;
   let lastRestartMs = 0;
+  // Re-entrancy guard — if a previous tick is still awaiting the
+  // 10 s pre-restart grace, skip this tick to avoid overlapping
+  // restart fires (defensive; timing makes it unlikely but cheap).
+  let ticking = false;
 
   const pollerAlive = (): boolean => {
     if (!existsSync(PID_FILE)) return false;
@@ -160,11 +164,20 @@ export function startTelegramWatchdog(
     // `setsid` puts the helper in its own session so the parent kill chain
     // can't reach it. `nohup` would also work but `setsid` is cleaner about
     // tty detachment and matches the pattern used for other anet helpers.
+    //
+    // `--accept-dev-channels` is REQUIRED here (#176). Default `anet node
+    // start` runs claude in foreground and hangs on the dev-channels
+    // confirmation prompt waiting for an Enter that nobody can press in
+    // this detached/headless context. The flag spawns claude in a detached
+    // tmux session (so it gets a PTY) and auto-confirms the prompt via
+    // the same side-channel that `anet project up` uses. Without it the
+    // restart would deadlock and the watchdog would make the outage
+    // worse, not better — per 通信龙 a4d1836b code-review catch.
     const cmd =
       `setsid sh -c 'sleep 5 && ` +
       `anet node stop ${JSON.stringify(cfg.alias)} >> /tmp/telegram-watchdog-${cfg.alias}.log 2>&1 && ` +
       `sleep 2 && ` +
-      `anet node start ${JSON.stringify(cfg.alias)} >> /tmp/telegram-watchdog-${cfg.alias}.log 2>&1` +
+      `anet node start ${JSON.stringify(cfg.alias)} --accept-dev-channels >> /tmp/telegram-watchdog-${cfg.alias}.log 2>&1` +
       `' >> /tmp/telegram-watchdog-${cfg.alias}.log 2>&1 < /dev/null &`;
 
     const child = spawn("bash", ["-c", cmd], {
@@ -180,6 +193,19 @@ export function startTelegramWatchdog(
   };
 
   const tick = async (): Promise<void> => {
+    if (ticking) {
+      log("tick skipped — previous tick still in flight (pre-restart grace)");
+      return;
+    }
+    ticking = true;
+    try {
+      await tickInner();
+    } finally {
+      ticking = false;
+    }
+  };
+
+  const tickInner = async (): Promise<void> => {
     const now = Date.now();
 
     if (pollerAlive()) {

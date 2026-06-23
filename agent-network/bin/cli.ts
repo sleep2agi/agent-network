@@ -2759,9 +2759,70 @@ async function startCommand() {
   // detach with `Ctrl-B D` per normal tmux behavior.
   const wantTmux = opts.tmux === "true";
 
-  if (!wantTmux) {
+  // #176 — headless / no-TTY start with automatic dev-channels prompt
+  // dismissal. Default `startCommand` and `--tmux` both assume an attached
+  // TTY: claude-code-cli pops "WARNING: Loading development channels …
+  // (Enter to confirm)" on every launch and waits for keyboard input. From
+  // a watchdog / cron / CI / `setsid`-detached caller there is no TTY to
+  // press Enter, so the process hangs forever and the node never comes up
+  // (broken telegram → broken whole node — strictly worse than the
+  // problem any auto-restart is trying to solve, per 通信龙 a4d1836b).
+  //
+  // `--accept-dev-channels` spawns the node in a DETACHED tmux session
+  // (so claude gets a real PTY from the tmux client/server pair) and runs
+  // the existing `dismissDevChannelPrompt` watcher in parallel to confirm
+  // the prompt the moment it appears. Same mechanism that `anet project
+  // up` already uses (autoConfirmDevChannels at line ~4220) — just made
+  // available to single-node `anet node start` for the watchdog +
+  // headless re-attach use cases. Closes #176 for the single-node path.
+  const wantAcceptDevChannels = opts["accept-dev-channels"] === "true";
+
+  if (!wantTmux && !wantAcceptDevChannels) {
     // Default: spawn the agent runtime in this terminal.
     await launchAgent(id, forceNewSession);
+    return;
+  }
+
+  if (wantAcceptDevChannels) {
+    const resolved = resolveNodeRef(id);
+    if (!resolved) {
+      console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
+      process.exit(1);
+    }
+    const alias = nodeDisplayName(resolved.id, resolved.profile);
+    if (!tmuxAvailable()) {
+      console.error(`[anet] ❌ --accept-dev-channels requires tmux (used for PTY + prompt-dismiss side-channel).`);
+      process.exit(1);
+    }
+    // tmux already running for this alias — assume it's the live session,
+    // do NOT re-spawn (would `-As` attach and confuse callers expecting a
+    // fresh start).
+    if (tmuxSessionRunning(alias)) {
+      console.log(`[anet] tmux session "${alias}" already running — skipping spawn (use \`anet node stop\` first if you intended a fresh start).`);
+      return;
+    }
+    const inner = forceNewSession
+      ? `anet node start ${shellQuote(alias)} --new-session`
+      : `anet node start ${shellQuote(alias)}`;
+    try {
+      execFileSync(
+        "tmux",
+        ["new-session", "-d", "-s", alias, "-c", process.cwd(), inner],
+        { stdio: "ignore" },
+      );
+    } catch (e: any) {
+      console.error(`[anet] ❌ tmux detached spawn failed: ${e?.message || e}`);
+      process.exit(1);
+    }
+    // Concurrently watch the new tmux pane and send Enter when the
+    // dev-channels prompt appears. Returns false if the prompt never
+    // shows within the window — that's a non-claude node or a node that
+    // came up past the prompt already; either way we're done.
+    const dismissed = await dismissDevChannelPrompt(alias, 45_000);
+    console.log(
+      `[anet] ✅ node "${alias}" started detached (tmux session live; ` +
+        `dev-channels prompt ${dismissed ? "auto-confirmed" : "did not appear within 45 s"}).`,
+    );
     return;
   }
 

@@ -18,6 +18,7 @@ import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { parseGoalCommand } from "./goals/parser";
 import { GoalStore, newGoal } from "./goals/store";
+import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import {
@@ -2583,20 +2584,23 @@ if (fileConfig.telegram?.watchdog === true) {
         "watchdog cannot locate bot.pid. Either unset telegram.watchdog or add env.TELEGRAM_STATE_DIR.",
     );
   } else {
-    import("./telegram-watchdog.js")
-      .then((mod) => {
-        mod.startTelegramWatchdog(
-          {
-            stateDir,
-            alias: ALIAS,
-            commhubUrl: COMMHUB_URL,
-            commhubToken: AUTH_TOKEN,
-          },
-          (msg: string) => log(`[telegram-watchdog] ${msg}`),
-        );
-      })
-      .catch((e: any) => {
-        warn(`telegram-watchdog start failed: ${e?.message ?? String(e)}`);
-      });
+    try {
+      // Static import (top of file) so bun build bundles the module into
+      // dist/cli.js — dynamic import('./telegram-watchdog.js') would not be
+      // resolvable post-bundle. Opt-in flag still gates runtime startup,
+      // so non-telegram nodes pay only the bundle-size cost (~few KB),
+      // not any runtime cost.
+      startTelegramWatchdog(
+        {
+          stateDir,
+          alias: ALIAS,
+          commhubUrl: COMMHUB_URL,
+          commhubToken: AUTH_TOKEN,
+        },
+        (msg: string) => log(`[telegram-watchdog] ${msg}`),
+      );
+    } catch (e: any) {
+      warn(`telegram-watchdog start failed: ${e?.message ?? String(e)}`);
+    }
   }
 }
