@@ -6,7 +6,7 @@ Dashboard is Agent Network's web management interface, providing real-time monit
 
 | Start Mode | Tech Stack | Default URL | Notes |
 |------|--------|------|------|
-| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI starts `@sleep2agi/agent-network-dashboard@${tag}` via npx; `tag` comes from [`dashboardReleaseTag()` (cli.ts:347)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L347): defaults to `@preview`, overridable via the `ANET_DASHBOARD_VERSION` env var (no hardcoded version pin — see [Preview channel](#preview-channel-next-stable-wip) below). Thin cookie-proxy mode (no service token) |
+| `anet hub dashboard` | Next.js 16 | `http://localhost:3000` | CLI starts `@sleep2agi/agent-network-dashboard@${tag}` via npx; `tag` comes from [`dashboardReleaseTag()` (cli.ts)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts): defaults to `@preview`, overridable via the `ANET_DASHBOARD_VERSION` env var (no hardcoded version pin — see [Preview channel](#preview-channel-next-stable-wip) below). Thin cookie-proxy mode (no service token) |
 | Standalone deploy | Next.js 16 | Custom | Configure it with the CommHub URL |
 
 ::: tip

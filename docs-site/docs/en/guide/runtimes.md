@@ -83,7 +83,7 @@ anet node start  →  spawn the local `claude` binary subprocess
          node-server.ts internally forwards tool calls to CommHub /mcp over HTTP
 ```
 
-- On `anet node start` the anet CLI writes a `.mcp.json` into cwd ([`agent-network/bin/cli.ts:1898 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1898)) and then spawns the `claude` binary
+- On `anet node start` the anet CLI writes a `.mcp.json` into cwd ([`agent-network/bin/cli.ts ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)) and then spawns the `claude` binary
 - The claude binary follows `.mcp.json` and starts a local bun MCP server (`.anet/node-server.js`, [source](https://github.com/sleep2agi/agent-network/blob/main/agent-network/src/node-server.ts) — uses `StdioServerTransport`)
 - That local MCP server forwards commhub tool calls to CommHub `/mcp` over HTTP internally
 - Full 4-runtime MCP path comparison + tool-name namespace differences: see [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0)
@@ -216,7 +216,7 @@ The table below is the `claude-agent-sdk` runtime's built-in providers from `ane
 | InternLM | Intern-S2-Preview (default) / Intern-S1-Pro (see [InternLM](https://chat.intern-ai.org.cn)) | `https://chat.intern-ai.org.cn` (**bare hostname, no `/anthropic` suffix** — unlike MiniMax et al.) |
 | Xiaomi MiMo | mimo-v2.5-pro (default) / v2.5 / v2-pro / v2-omni (see [Xiaomi platform](https://platform.xiaomimimo.com)) | `https://token-plan-cn.xiaomimimo.com/anthropic` |
 
-> Source: [`cli.ts:1336-1397 VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1336). **Providers that haven't passed verification (DeepSeek / GLM / Kimi) are intentionally NOT in the VENDORS list** — reach them via the `custom` vendor (any Anthropic-compatible API accepts a base URL + model there).
+> Source: [`cli.ts VENDORS`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts). **Providers that haven't passed verification (DeepSeek / GLM / Kimi) are intentionally NOT in the VENDORS list** — reach them via the `custom` vendor (any Anthropic-compatible API accepts a base URL + model there).
 
 ::: tip Model IDs change frequently
 Providers ship new model versions every few weeks. **Pull the latest model ID from the provider's console** and pass it to `--model`.
@@ -286,7 +286,7 @@ anet node start  →  spawn agent-node subprocess
 - Driven by the official `@openai/codex-sdk` package, run as a codex thread
 - Supports Read / Write / Edit / Bash / Glob / Grep / WebSearch (baked into the codex CLI)
 - Auth via `codex auth login` (OAuth) or `OPENAI_API_KEY`
-- **The codex thread does not call commhub MCP tools directly** (`codexOpts` does not pass `mcpServers`, [`agent-node/src/cli.ts:797`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L797)) — multi-agent dispatch happens externally in agent-node's parent process. See [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0).
+- **The codex thread does not call commhub MCP tools directly** (`codexOpts` does not pass `mcpServers`, [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)) — multi-agent dispatch happens externally in agent-node's parent process. See [Architecture → MCP integration paths](/en/guide/architecture#mcp-integration-paths-per-runtime-v0-9-0).
 
 ### When to pick
 
@@ -305,7 +305,7 @@ anet node create coder \
 ```
 
 ::: warning codex-sdk ignores `tools`
-The `codex-sdk` runtime **silently ignores** the `--tools` flag and the `config.json` `tools` field (verify [`agent-node/src/cli.ts:690-696`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L690) — `codexOpts` has no `tools` field). The tool set is baked into the `codex` CLI binary, not configured via anet. `--tools` only takes effect for the `claude-agent-sdk` runtime.
+The `codex-sdk` runtime **silently ignores** the `--tools` flag and the `config.json` `tools` field (verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) — `codexOpts` has no `tools` field). The tool set is baked into the `codex` CLI binary, not configured via anet. `--tools` only takes effect for the `claude-agent-sdk` runtime.
 :::
 
 ::: warning Verification status
@@ -436,7 +436,7 @@ The whole flow is visible in real time on the Tasks / Messages dashboard pages.
 
 ::: info Verified (current stable line inherits v2 E2E coverage)
 - The `claude-agent-sdk` runtime itself — passes E2E
-- At the vendor level: every provider in the `anet node create` [`VENDORS` list (cli.ts:1336-1397)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1336) (**Anthropic / MiniMax / InternLM / Xiaomi MiMo**) has its `baseUrl` + model ids verified-with-real-call before landing
+- At the vendor level: every provider in the `anet node create` [`VENDORS` list (cli.ts)](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (**Anthropic / MiniMax / InternLM / Xiaomi MiMo**) has its `baseUrl` + model ids verified-with-real-call before landing
 - Multi-runtime mesh (peer agents auto-coordinate via `get_all_status` + `send_task` + `get_task`)
 :::
 

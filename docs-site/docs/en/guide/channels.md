@@ -73,7 +73,7 @@ The intended UX would be: user DMs the bot `/pair` → bot replies with a 6-digi
 
 ### Step 3: Bind the channel to an existing node
 
-Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts:2844 channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2844)):
+Run `anet channel add telegram <node-name>` once to bind the bot + allowlist (verify [`cli.ts channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)):
 
 ```bash
 # Assumes you already have a claude-code-cli node 'commander'
@@ -114,7 +114,7 @@ The agent does not call any `telegram_*` MCP tool — **no such tool exists**. T
 
 1. Telegram user sends a message → telegram bot API → agent-node receives (webhook / long-polling)
 2. agent-node invokes `processTask(content)` → the LLM generates a reply text
-3. agent-node's internal [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper sends the reply back via `sendMessage` (auto-splits at 4096 chars and sets `reply_to_message_id` on the first chunk)
+3. agent-node's internal [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) helper sends the reply back via `sendMessage` (auto-splits at 4096 chars and sets `reply_to_message_id` on the first chunk)
 
 The agent (LLM running in the claude-agent-sdk / codex-sdk runtime) just needs to **produce reply text**; it doesn't need to know the Telegram API.
 
@@ -136,7 +136,7 @@ Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` 
 | Channel changes **do not hot-reload** | Editing `access.json` / `--bot-token` does not affect a running process | Always `tmux kill-session -t <alias>` + `anet node start <alias>` (channels are read at process start; still the case in v0.10.x including the current v0.10.15 stable; hot-reload design tracked in [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 — third-pass review complete; candidate for v0.12.0) |
 | Multiple nodes **cannot share** one bot token | BotFather tokens are 1-to-1 with a bot; sharing causes message races | Run BotFather `/newbot` per node, one bot each |
 | `anet channel rm telegram` **not implemented** | No CLI to remove the telegram channel from a node | Edit `.anet/nodes/<alias>/config.json` `channels` array to remove the `telegram` entry, `rm -rf .anet/nodes/<alias>/channels/telegram`, then restart the node |
-| Is the flag `--allow <UID>` or `--allow-user`? | Easy to mis-remember | It's `--allow <user-id>` (verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861)). `--allow-user` does **not** exist |
+| Is the flag `--allow <UID>` or `--allow-user`? | Easy to mis-remember | It's `--allow <user-id>` (verify [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)). `--allow-user` does **not** exist |
 | Node restarts and Telegram goes silent | Bot doesn't receive / agent doesn't reply | Three-step check: ① bot token fully pasted with the `:`; ② `anet channel ls <alias>` shows telegram in the list; ③ `tmux capture-pane -t <alias> -p \| tail` shows a `[telegram] listening` line at startup |
 
 ### Troubleshooting
@@ -213,7 +213,7 @@ A channel plugin is an MCP Server (stdio mode) that provides message receiving a
 ```
 
 ::: tip The filename is `.js`, not `.ts`
-The file installed in your project is `.anet/node-server.js` ([`cli.ts:1644 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1644) copies from the npm package — preferring `dist/src/node-server.js`, falling back to `src/node-server.ts` — but the on-disk filename is always `.js`).
+The file installed in your project is `.anet/node-server.js` ([`cli.ts ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) copies from the npm package — preferring `dist/src/node-server.js`, falling back to `src/node-server.ts` — but the on-disk filename is always `.js`).
 :::
 
 What the channel plugin actually does (v0.8 capabilities):
@@ -221,7 +221,7 @@ What the channel plugin actually does (v0.8 capabilities):
 1. Maintains an SSE long connection to CommHub (receives new_task / new_message / new_reply / broadcast events)
 2. Listens to the Telegram Bot API (webhook / long-polling) — Telegram is the only natively supported external channel in v0.8
 3. Injects messages into the agent's context (XML `<channel source="...">` tag)
-4. **The agent-node's internal handler automatically forwards** the agent's reply to the right platform (commhub via the `send_reply` MCP tool; telegram via the [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper)
+4. **The agent-node's internal handler automatically forwards** the agent's reply to the right platform (commhub via the `send_reply` MCP tool; telegram via the [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) helper)
 
 ::: warning Mermaid `reply()` path correction
 The original mermaid showed `AGENT → reply() → TOOLS → TG/WX/FS` — but there's no agent-facing `reply()` / `telegram_reply()` MCP tool for the agent to call. The agent only produces reply text; agent-node's handler routes it to the platform based on `source`.

@@ -54,7 +54,7 @@ anet 当前内置四个 Runtime，其中两个是 SDK adapter；其他两个（`
 **session 写回机制**
 
 ```ts
-// cli.ts:598-605
+// cli.ts
 for await (const message of query({ prompt, options })) {
   const m = message as any;
   if (m.type === "system" && m.subtype === "init") {
@@ -85,7 +85,7 @@ for await (const message of query({ prompt, options })) {
 **session 写回机制**
 
 ```ts
-// cli.ts:714-735
+// cli.ts
 const { events } = await codexThread.runStreamed(input);
 for await (const ev of events) {
   if (ev.type === "turn.completed") usage = ev.usage;
@@ -105,16 +105,16 @@ if (codexThread?.id) writebackSession(codexThread.id);   // 写 config.json
 ```
                    inbox / SSE / Telegram 进 task
                               ↓
-                          think()  ← cli.ts:762
+                          think()  ← cli.ts
                               ↓
                   ┌───────────┴───────────┐
                   ↓                       ↓
             processWithClaude        processWithCodex
-              (cli.ts:388)             (cli.ts:669)
+              (cli.ts)             (cli.ts)
                   ↓                       ↓
               SDK query()         thread.runStreamed()
                   ↓                       ↓
-            writebackSession(session_id) ← 统一 cli.ts:217
+            writebackSession(session_id) ← 统一 cli.ts
                   ↓
                 config.json 持久化
                   ↓
@@ -143,7 +143,7 @@ if (codexThread?.id) writebackSession(codexThread.id);   // 写 config.json
 ### Step 1：声明 runtime 名 + map
 
 ```ts
-// cli.ts:151-158 附近
+// cli.ts 附近
 const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", /* ... */
   "codex-sdk": "codex",
@@ -187,7 +187,7 @@ async function processWithGemini(task: string, from: string): Promise<string> {
 ### Step 3：think() 调度分支
 
 ```ts
-// cli.ts:831 附近
+// cli.ts 附近
 if (RUNTIME === "gemini") return await processWithGemini(task, from);
 ```
 

@@ -73,7 +73,7 @@ DM 任一以下 bot 都能秒拿自己的 UID：
 
 ### Step 3: 绑定 Channel 到已有节点
 
-跑 `anet channel add telegram <node-name>` 命令一次性绑定 bot + allowlist（verify [`cli.ts:2844` `channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2844)）：
+跑 `anet channel add telegram <node-name>` 命令一次性绑定 bot + allowlist（verify [`cli.ts` `channelCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)）：
 
 ```bash
 # 假设你已有 claude-code-cli 节点 '指挥室'（没有就先 anet node create 指挥室 --runtime claude-code-cli）
@@ -113,7 +113,7 @@ Agent 不需要直接调任何 `telegram_*` MCP tool —— **没有这种 tool 
 
 1. Telegram user 发消息 → telegram bot API → agent-node 收到（webhook / long-polling）
 2. agent-node 调 `processTask(content)` → LLM 生成回复文本
-3. agent-node 内部 [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper 把回复 sendMessage 到原 chat（自动分 4096 char chunks + 自动 reply_to_message_id 关联首段）
+3. agent-node 内部 [`telegramSend(tg, chatId, text)`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) helper 把回复 sendMessage 到原 chat（自动分 4096 char chunks + 自动 reply_to_message_id 关联首段）
 
 Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接生成文本**作为 reply，不需要懂 Telegram API。
 
@@ -135,7 +135,7 @@ Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接�
 | Channel 改了**不热加载** | 编辑 `access.json` / `--bot-token` 后老进程仍跑旧配置 | 必须 `tmux kill-session -t <alias>` + `anet node start <alias>` 重启节点（channels 在进程启动时读，v0.10.x 含当前 v0.10.15 stable 仍是这套；hot-reload 设计跟踪 [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 third-pass review 完，候选 v0.12.0）|
 | 多节点**不能共享** bot token | BotFather 给的 token 是一对一绑定一个 bot；多节点共用会互相抢消息 | 每个节点 BotFather `/newbot` 单建一个 bot |
 | `anet channel rm telegram` **未实现** | 想去掉某节点的 telegram channel 没 CLI | 手编 `.anet/nodes/<alias>/config.json` 的 `channels` 数组删掉 `telegram` 项，并 `rm -rf .anet/nodes/<alias>/channels/telegram`，再重启节点 |
-| `--allow <UID>` 也可 `--allow-user`？ | flag 命名容易记混 | 实际是 `--allow <user-id>`（verify [`cli.ts:2861-2862`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2861)），**没有** `--allow-user` |
+| `--allow <UID>` 也可 `--allow-user`？ | flag 命名容易记混 | 实际是 `--allow <user-id>`（verify [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)），**没有** `--allow-user` |
 | 节点重启后 telegram 失联 | bot 收不到消息 / agent 不回 | 三步排查：① bot token 是否完整粘贴含 `:` ② `anet channel ls <alias>` 看 channels 是否含 telegram ③ `tmux capture-pane -t <alias> -p \| tail` 看 startup 日志有没有 `[telegram] listening` |
 
 ### 故障排查
@@ -212,7 +212,7 @@ Channel 插件是一个 MCP Server（stdio 模式），提供消息接收和回�
 ```
 
 ::: tip 文件名是 `.js` 不是 `.ts`
-落盘到项目目录的文件是 `.anet/node-server.js`（[`cli.ts:1644 ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1644) 自动复制 npm 包 `dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底，但最终落盘统一为 `.js`）。
+落盘到项目目录的文件是 `.anet/node-server.js`（[`cli.ts ensureMcpJson`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) 自动复制 npm 包 `dist/src/node-server.js` 优先 / `src/node-server.ts` 兜底，但最终落盘统一为 `.js`）。
 :::
 
 Channel 插件做的事（v0.8 实际能力）：
@@ -220,7 +220,7 @@ Channel 插件做的事（v0.8 实际能力）：
 1. 维护 SSE 长连接到 CommHub（receive new_task / new_message / new_reply / broadcast events）
 2. 监听 Telegram Bot API（webhook / long-polling）—— Telegram 是 v0.8 唯一原生支持的外部 channel
 3. 将消息注入到 Agent 上下文（XML `<channel source="...">` tag）
-4. **agent-node 内部 handler 自动转发** agent reply 到对应平台（commhub 走 `send_reply` MCP；telegram 走 [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L925) helper）
+4. **agent-node 内部 handler 自动转发** agent reply 到对应平台（commhub 走 `send_reply` MCP；telegram 走 [`telegramSend`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) helper）
 
 ::: warning Mermaid 图 `reply()` 路径修正
 原版 mermaid 图画 `AGENT → reply() → TOOLS → TG/WX/FS` —— 实际没有 agent-facing `reply()` / `telegram_reply()` MCP tool 给 agent 调。Agent 只生成 reply 文本，agent-node handler 根据 `source` 自动路由到对应平台。
