@@ -533,6 +533,8 @@ Bun.serve({
       const token = requestToken(req);
       const authCtx = resolveRequestAuth(req);
       const scopedNetId = authCtx?.networkId || url.searchParams.get("network_id");
+
+      // ── Path 1: legacy AUTH_TOKEN (master token) — unchanged ──
       if (!authCtx && isLegacyAuthToken(req)) {
         if (scopedNetId) {
           const session = db.get<any>(
@@ -543,17 +545,74 @@ Bun.serve({
         }
         return createSSEStream(sessionName, scopedNetId);
       }
-      if (!token?.startsWith("ntok_") || !authCtx || !scopedNetId) {
-        return withCors(req, Response.json({ ok: false, error: "network-scoped token required for SSE" }, { status: 403 }));
+
+      // ── Path 2: ntok_ (network-bound agent token) — pre-#247 behavior preserved ──
+      if (token?.startsWith("ntok_")) {
+        if (!authCtx || !scopedNetId) {
+          return withCors(req, Response.json({ ok: false, error: "network-scoped token required for SSE" }, { status: 403 }));
+        }
+        const role = getUserNetworkRole(authCtx.userId, scopedNetId);
+        if (!role) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+        const session = db.get<any>(
+          "SELECT 1 FROM sessions WHERE alias = ?1 AND network_id = ?2",
+          sessionName, scopedNetId
+        );
+        if (!session && authCtx.networkId !== scopedNetId) {
+          return withCors(req, Response.json({ ok: false, error: "session not in requested network" }, { status: 403 }));
+        }
+        return createSSEStream(sessionName, scopedNetId);
       }
-      const role = getUserNetworkRole(authCtx.userId, scopedNetId);
-      if (!role) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
-      const session = db.get<any>(
+
+      // ── Path 3 (#247): utok_ (user token, dashboard SSE path) — 4 gates ──
+      //
+      // Pre-#247 the only V3 path required `ntok_` and rejected `utok_` outright,
+      // which locked the dashboard out of SSE (the dashboard proxy authenticates
+      // with the user's `utok_`). That broke real-time chat updates — replies
+      // were persisted but never live-pushed to the UI.
+      //
+      // Auth-scoping rules (all four must pass — see #247 design):
+      //   gate 1: token resolves to a valid user context (authCtx non-null)
+      //   gate 2: network scope is explicit — `utok_` has no implicit network,
+      //           so the caller must pass `?network_id=<id>`
+      //   gate 3: user is a member of that network (any role: owner / admin / member)
+      //   gate 4: channel-ownership — one of:
+      //           (a) sessionName === own username (the dashboard's default channel —
+      //               `send_reply` pushes to the original sender's alias which equals
+      //               the dashboard user's username; NO `sessions` row required for
+      //               this branch since the dashboard user is not a registered agent)
+      //           (b) sessionName is an existing agent alias in `scopedNetId`
+      //               (lets members monitor agents within their network)
+      //
+      // Security: rule 4(a) uses strict equality, so a `utok_` user cannot subscribe
+      // to another user's username channel (no cross-user eavesdrop). Rule 4(b) is
+      // scoped to `scopedNetId` + gate 3 membership, so cross-network eavesdrop is
+      // blocked too. There is intentionally NO org-admin bypass — even users with
+      // global `admin` role must be a member of the network they want to listen on.
+      if (!authCtx) {
+        return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 403 }));
+      }
+      if (!scopedNetId) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "network_id required (utok has no implicit network; pass ?network_id=<id>)"
+        }, { status: 403 }));
+      }
+      const utokRole = getUserNetworkRole(authCtx.userId, scopedNetId);
+      if (!utokRole) {
+        return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      }
+      if (sessionName === authCtx.username) {
+        return createSSEStream(sessionName, scopedNetId);
+      }
+      const utokSession = db.get<any>(
         "SELECT 1 FROM sessions WHERE alias = ?1 AND network_id = ?2",
         sessionName, scopedNetId
       );
-      if (!session && authCtx.networkId !== scopedNetId) {
-        return withCors(req, Response.json({ ok: false, error: "session not in requested network" }, { status: 403 }));
+      if (!utokSession) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "channel not allowed: must be your username or an existing agent in your network"
+        }, { status: 403 }));
       }
       return createSSEStream(sessionName, scopedNetId);
     }
