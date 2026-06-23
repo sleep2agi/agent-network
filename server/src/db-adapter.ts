@@ -216,6 +216,25 @@ export class PgAdapter implements DbAdapter {
  * Create the appropriate adapter based on environment.
  * - DATABASE_URL starts with "postgres://" → PgAdapter
  * - Otherwise → SQLiteAdapter with COMMHUB_DB or default path
+ *
+ * Test-default-prod GUARD: when `NODE_ENV === "test"` (set automatically by
+ * `bun test`) AND `COMMHUB_DB` is unset, we REFUSE to fall through to the
+ * default `~/.commhub/commhub.db` path. Several modules (notably
+ * `server/src/auth.ts register()`) write into the configured database at
+ * import-time-side-effect granularity; running their tests against the
+ * production hub DB silently created spurious users / networks / tokens
+ * on 2026-06-23 (4u / 4net / 8tok by one `bun -e` probe + an unknown
+ * pre-existing history of test pollution in the same DB). The guard makes
+ * the failure mode loud + actionable instead of silent + destructive.
+ *
+ * The guard does NOT fire when:
+ *   - COMMHUB_DB is set (the test runner's documented contract); or
+ *   - NODE_ENV is unset (production server) or any non-"test" value.
+ *
+ * Operators who run `bun -e` snippets that touch the DB are expected to
+ * `COMMHUB_DB=/tmp/...` themselves — `bun -e` doesn't set NODE_ENV, so the
+ * guard can't catch that case. The rule is documented in CLAUDE.md /
+ * memory ([[feedback_no_prod_db_access.md]]).
  */
 export function createAdapter(): DbAdapter {
   const dbUrl = process.env.DATABASE_URL;
@@ -226,6 +245,18 @@ export function createAdapter(): DbAdapter {
   // Default: SQLite
   const { mkdirSync } = require("fs");
   const { dirname } = require("path");
+
+  // Test-default-prod GUARD (see docblock above).
+  if (process.env.NODE_ENV === "test" && !process.env.COMMHUB_DB) {
+    throw new Error(
+      "[commhub] REFUSING to open the default SQLite database under NODE_ENV=test.\n" +
+      "  Tests must explicitly set COMMHUB_DB to a throwaway path so they don't\n" +
+      "  pollute the production hub DB. Run tests via:\n" +
+      "    COMMHUB_DB=/tmp/test-$$.db bun test src/\n" +
+      "  (or use the `npm run test` script which sets this for you)."
+    );
+  }
+
   const dbPath = process.env.COMMHUB_DB || `${process.env.HOME}/.commhub/commhub.db`;
   mkdirSync(dirname(dbPath), { recursive: true });
   console.log(`[commhub] database: ${dbPath}`);
