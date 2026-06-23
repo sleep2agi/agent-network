@@ -77,7 +77,7 @@ Docs: https://anet.sh/guide/getting-started
 
 ## 2. Start the Hub (recommended: under tmux)
 
-CommHub is a long-running process — **closing the terminal stops it**. For production you'd configure systemd ([§7 Persistence](#_7-persistence-systemd-template-pending)); for a quick verify, use tmux:
+CommHub is a long-running process — **closing the terminal stops it**. For production you'd configure systemd ([§7 Persistence](#_7-persistence-systemd-tmux)); for a quick verify, use tmux:
 
 ```bash
 # Install tmux (if not present)
@@ -280,18 +280,78 @@ When you see `SSE connected`, the node is online — back on the hub side, `anet
 
 `Ctrl+B D` to detach the tmux session.
 
-## 7. Persistence (systemd template pending)
+## 7. Persistence (systemd / tmux)
 
-::: warning Use tmux for now — systemd template not yet shipped
-anet does **not yet ship an official `--daemon` flag or systemd unit template** ([#237 坑 8](https://github.com/sleep2agi/agent-network/issues/237) tracked). Both the hub and every node live in tmux sessions, so **a machine reboot drops everything** — you'd have to manually re-attach and restart.
+anet does not ship an official `--daemon` flag today. Two options below: tmux for quick / dev use, systemd units for production / autostart.
 
-Short-term workaround:
+### 7.1 tmux (dev / quick verify)
+
+A machine reboot drops everything — you re-attach by hand:
+
 - hub: `tmux new -s anet-hub` + `anet hub start --host 0.0.0.0`
 - each node: `tmux new -s anet-<alias>` + `anet node start <alias>`
-- A restart script can sit in `@reboot` crontab, but you have to solve the non-interactive-shell PATH / nvm problem first (see [§0 nvm caveat](#_0-prerequisites))
+- An `@reboot` crontab line can replace the manual step, but you'll need to solve the non-interactive-shell PATH / nvm problem first (see [§0 nvm caveat](#_0-prerequisites))
 
-Once the systemd template lands, this section will be updated with the actual unit-file example + autostart steps.
-:::
+### 7.2 systemd units (production / autostart)
+
+The unit files below are **not officially tested** — swap in your real `node` binary path (from `which anet`) and the user you run anet under, then `systemctl daemon-reload` + `enable --now`.
+
+**Hub** `/etc/systemd/system/anet-hub.service`:
+
+```ini
+[Unit]
+Description=Agent Network Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/home/youruser
+# Replace with the absolute path from `which anet` ↓
+ExecStart=/home/youruser/.nvm/versions/node/v22.13.0/bin/anet hub start --host 0.0.0.0 --port 9200
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Node** (templated — one unit runs N nodes) `/etc/systemd/system/anet-node@.service`:
+
+```ini
+[Unit]
+Description=Agent Network Node %i
+After=anet-hub.service
+Requires=anet-hub.service
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/home/youruser
+ExecStart=/home/youruser/.nvm/versions/node/v22.13.0/bin/anet node start %i
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now anet-hub
+sudo systemctl enable --now anet-node@my-bot
+sudo systemctl status anet-hub anet-node@my-bot
+```
+
+**Gotchas**:
+
+- `ExecStart` must be the **absolute path** to `anet` (`which anet`); systemd does not read nvm's `~/.bashrc`
+- `User=` should be the everyday user that owns the anet install; **don't use root**
+- The `claude-code-cli` runtime pops a dev-channels confirmation on first run ([§5.5 fallback](#_5-5-claude-code-cli-runtime-dev-channels-prompt-fallback)); answer it once under a foreground tmux before handing off to systemd
+- Want an official unit / improvements to the template above? PRs welcome, or open a thread on [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions)
 
 ## Troubleshooting table (8 坑 mapping)
 
@@ -306,7 +366,7 @@ In the order they hit you on a real fresh machine — **symptom → cause → fi
 | 5 | `anet node start` (codex-sdk / claude-agent-sdk) → `agent-node is not installed or cannot report a version` | npx lazy-load didn't actually pull `@sleep2agi/agent-node` | `npm i -g @sleep2agi/agent-node`; then `agent-node --version` should produce output |
 | 6 | `claude-code-cli` node starts but stays offline / pane is stuck on the confirmation prompt | Claude Code's `--dangerously-load-development-channels` prompt is waiting for an Enter | Run it once in foreground tmux and press `1` + Enter; subsequent launches don't pop it |
 | 7 | systemd / cron / a different user launch produces a string of `command not found` errors | nvm + Bun each install per user; non-interactive shells don't load them | Symlink node/npm/bun into `/usr/local/bin/`, or have the launch script explicitly `source ~/.nvm/nvm.sh` |
-| 8 | Machine reboot drops everything | Hub + nodes all rely on manual tmux sessions | Today's only option is a manual restart; systemd / pm2 template pending ([#237 坑 8](https://github.com/sleep2agi/agent-network/issues/237)) |
+| 8 | Machine reboot drops everything | Hub + nodes all rely on manual tmux sessions | Configure autostart via systemd — see the template in [§7.2 systemd units](#_7-2-systemd-units-production-autostart) |
 
 ---
 

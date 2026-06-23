@@ -77,7 +77,7 @@ Docs: https://anet.sh/guide/getting-started
 
 ## 2. 起 Hub（推荐 tmux 挂着）
 
-CommHub 是常驻进程，**关终端就停**。生产场景配 systemd（[#7 持久化](#_7-持久化-systemd-模板待补)），快速验证用 tmux：
+CommHub 是常驻进程，**关终端就停**。生产场景配 systemd（[§7 持久化](#_7-持久化-systemd-tmux)），快速验证用 tmux：
 
 ```bash
 # 装 tmux（如果没装）
@@ -280,18 +280,78 @@ anet node start my-bot
 
 按 `Ctrl+B D` 把 tmux 断开保活。
 
-## 7. 持久化（systemd 模板待补）
+## 7. 持久化（systemd / tmux）
 
-::: warning 暂用 tmux，systemd 模板待 ship
-当前 anet **没有官方 `--daemon` 或 systemd unit 模板**（[#237 坑 8](https://github.com/sleep2agi/agent-network/issues/237) 跟进中）。hub + 每个节点都靠 tmux 挂着，**机器重启全部掉线**得手动 attach + 重起。
+anet 暂未 ship 官方 `--daemon` flag，下面给两条可选路径：tmux 临时挂、systemd 单元长期跑。
 
-短期 workaround：
+### 7.1 tmux 临时挂（开发 / 验证）
+
+机器重启会丢，**手动重起**：
+
 - hub: `tmux new -s anet-hub` + `anet hub start --host 0.0.0.0`
 - 每个节点: `tmux new -s anet-<alias>` + `anet node start <alias>`
-- 重启脚本可以 stuff 进 `@reboot` crontab，但 PATH / nvm 这些非交互 shell 问题要先解决（见 [第 0 节 nvm 提示](#_0-前置)）
+- 想接 `@reboot` crontab 也行，但 PATH / nvm 这些非交互 shell 问题要先解决（见 [第 0 节 nvm 提示](#_0-前置)）
 
-systemd 模板出来后，本节会更新真正的 unit 文件示例 + 开机自启步骤。
-:::
+### 7.2 systemd unit（生产 / 开机自启）
+
+下面这套 unit 文件**未经官方测试**、按你的实际 `node` 路径（`which anet`）+ 运行用户改一下就能用。改完跑 `systemctl daemon-reload` + `enable --now`。
+
+**Hub** `/etc/systemd/system/anet-hub.service`：
+
+```ini
+[Unit]
+Description=Agent Network Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/home/youruser
+# 用 which anet 拿到真实绝对路径替换 ↓
+ExecStart=/home/youruser/.nvm/versions/node/v22.13.0/bin/anet hub start --host 0.0.0.0 --port 9200
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Node**（templated，一份 unit 跑 N 个节点）`/etc/systemd/system/anet-node@.service`：
+
+```ini
+[Unit]
+Description=Agent Network Node %i
+After=anet-hub.service
+Requires=anet-hub.service
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/home/youruser
+ExecStart=/home/youruser/.nvm/versions/node/v22.13.0/bin/anet node start %i
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启用：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now anet-hub
+sudo systemctl enable --now anet-node@my-bot
+sudo systemctl status anet-hub anet-node@my-bot
+```
+
+**踩坑提醒**：
+
+- `ExecStart` 必须填 `anet` 的**绝对路径**（`which anet`），systemd 不会读 nvm `~/.bashrc`
+- `User=` 用你日常装 anet 的那个用户，不要用 `root`
+- `claude-code-cli` runtime 首次跑会弹 dev-channels 确认框（[§5.5 兜底](#_5-5-claude-code-cli-runtime-的-dev-channels-确认框)），systemd 接管前先 tmux 前台跑一次按掉
+- 想官方 unit / 改进上面这份？欢迎 PR 或来 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 提
 
 ## 故障排查表（8 坑 mapping）
 
@@ -306,7 +366,7 @@ systemd 模板出来后，本节会更新真正的 unit 文件示例 + 开机自
 | 5 | `anet node start` (codex-sdk / claude-agent-sdk) → `agent-node is not installed or cannot report a version` | npx 懒加载没拉到 `@sleep2agi/agent-node` | `npm i -g @sleep2agi/agent-node`；然后 `agent-node --version` 应输出 |
 | 6 | `claude-code-cli` 节点起来后卡 offline / pane 卡在确认框 | Claude Code 的 `--dangerously-load-development-channels` 确认框等人按 Enter | 用 tmux 前台跑一次手动按 `1` + Enter；后续就不弹了 |
 | 7 | systemd / cron / 新用户启动报一连串 `command not found` | nvm + Bun 各自按用户装，非交互 shell 不加载 | 把 node/npm/bun 软链到 `/usr/local/bin/`，或启动脚本里显式 `source ~/.nvm/nvm.sh` |
-| 8 | 机器重启全部掉线 | hub + 节点都靠手动 tmux 挂着 | 当前只能手动重启；systemd / pm2 模板待 ship（[#237 坑 8](https://github.com/sleep2agi/agent-network/issues/237)） |
+| 8 | 机器重启全部掉线 | hub + 节点都靠手动 tmux 挂着 | 配 systemd 开机自启，参考 [§7.2 systemd unit](#_7-2-systemd-unit-生产-开机自启) 里的模板 |
 
 ---
 
