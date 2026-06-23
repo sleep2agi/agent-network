@@ -14,7 +14,7 @@
 //      serialises mutating callers so the scheduler tick (Phase 2) cannot
 //      race with `/goal cancel` / `/goal complete` from the inbox loop.
 
-import { readFileSync, writeFileSync, renameSync, existsSync, copyFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, copyFileSync, mkdirSync, unlinkSync } from "fs";
 import { dirname } from "path";
 import { randomUUID } from "crypto";
 import type { AgentGoal, GoalStatus, GoalsFile } from "./types";
@@ -204,8 +204,18 @@ export class GoalStore {
     const dir = dirname(this.filePath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const tmp = `${this.filePath}.tmp.${process.pid}.${randomUUID()}`;
-    writeFileSync(tmp, JSON.stringify(payload, null, 2) + "\n");
-    renameSync(tmp, this.filePath);
+    // If renameSync throws (cross-filesystem, EACCES on dest, etc.) the
+    // tmp file would otherwise be left behind — uuid in the name keeps
+    // it from colliding with future flushes, but the litter accumulates
+    // forever. Best-effort unlink on failure so a broken flush doesn't
+    // silently grow the directory.
+    try {
+      writeFileSync(tmp, JSON.stringify(payload, null, 2) + "\n");
+      renameSync(tmp, this.filePath);
+    } catch (e) {
+      try { unlinkSync(tmp); } catch { /* ignore — tmp may not exist if writeFileSync threw */ }
+      throw e;
+    }
   }
 }
 
