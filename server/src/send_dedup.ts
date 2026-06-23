@@ -44,13 +44,20 @@ export type DedupConfig = {
 };
 
 export function readDedupConfig(env: NodeJS.ProcessEnv = process.env): DedupConfig {
-  const rawWindow = env.COMMHUB_SEND_DEDUP_WINDOW_MS;
-  const windowMs = rawWindow !== undefined ? Math.max(0, Number(rawWindow)) : 300_000;
-  const rawMax = env.COMMHUB_SEND_DEDUP_MAX_KEYS;
-  const maxKeys = rawMax !== undefined ? Math.max(64, Number(rawMax)) : 4096;
+  // Parse-then-validate-then-clamp: `Number("abc")` is NaN and `Math.max(0, NaN)`
+  // is ALSO NaN per spec, so the old inline `Math.max(0, Number(rawWindow))`
+  // relied on the later `Number.isFinite` fallback to repair the result.
+  // Hoisting the validity check first makes the intent explicit and removes
+  // the risk that a future refactor drops the `isFinite` rescue.
+  const parseClamped = (raw: string | undefined, min: number, fallback: number): number => {
+    if (raw === undefined) return fallback;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, n);
+  };
   return {
-    windowMs: Number.isFinite(windowMs) ? windowMs : 300_000,
-    maxKeys: Number.isFinite(maxKeys) ? maxKeys : 4096,
+    windowMs: parseClamped(env.COMMHUB_SEND_DEDUP_WINDOW_MS, 0, 300_000),
+    maxKeys: parseClamped(env.COMMHUB_SEND_DEDUP_MAX_KEYS, 64, 4096),
   };
 }
 
@@ -133,8 +140,16 @@ export class SendDedup {
   private evictOldest(): void {
     const target = Math.max(64, Math.floor(this.cfg.maxKeys * 0.9));
     if (this.last.size <= target) return;
+    // CACHE toDelete BEFORE the deletion loop. Previously the loop bound
+    // was `i < this.last.size - target`, which is re-evaluated every
+    // iteration — and `this.last.size` shrinks by 1 per delete. The result
+    // was that we only evicted ~half of the intended count (size landed
+    // around 95 % of maxKeys instead of the documented ~90 %). The map
+    // stayed bounded so this was efficiency-only, not a leak, but the
+    // documented contract was being violated.
+    const toDelete = this.last.size - target;
     const entries = Array.from(this.last.entries()).sort((a, b) => a[1] - b[1]);
-    for (let i = 0; i < this.last.size - target; i++) this.last.delete(entries[i][0]);
+    for (let i = 0; i < toDelete; i++) this.last.delete(entries[i][0]);
   }
 }
 

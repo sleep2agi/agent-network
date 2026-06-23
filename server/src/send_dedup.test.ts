@@ -117,6 +117,24 @@ describe("SendDedup", () => {
     expect(d.size).toBeGreaterThan(0);
   });
 
+  it("evictOldest drops to exactly floor(maxKeys * 0.9) on the first trigger", () => {
+    // Regression guard for the size-during-loop bug fixed in the
+    // robustness pass. Insert exactly maxKeys+1 records to fire exactly
+    // ONE evictOldest call, then snapshot size before any further inserts
+    // can re-grow it. With the bug, the loop bound
+    // `i < this.last.size - target` shrunk each iteration and only
+    // ~half the intended deletions ran (e.g. 14 of 27 for maxKeys=256,
+    // landing size at ~243 instead of 230). After the fix size lands at
+    // the documented target = floor(maxKeys * 0.9).
+    const maxKeys = 256;
+    const target = Math.floor(maxKeys * 0.9); // 230
+    const d = new SendDedup({ windowMs: 600_000, maxKeys });
+    for (let i = 0; i <= maxKeys; i++) {
+      d.record(`from-${i}`, "bob", `content-${i}`, 1_000 + i);
+    }
+    expect(d.size).toBe(target);
+  });
+
   it("hashes content rather than holding the raw bytes", () => {
     // The key function is the public surface that proves we don't keep
     // raw content in memory between sends — the map keys themselves are
