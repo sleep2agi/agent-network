@@ -109,8 +109,14 @@ export function startTelegramWatchdog(
     lastSeenMs: number | null;
   } | null> => {
     try {
+      // 5 s ceiling — this is the watchdog's *own* fetch, fired every
+      // pollIntervalMs (default 60 s). A hung hub socket would stall the
+      // watchdog's own tick loop, which is the exact failure mode the
+      // watchdog exists to protect against. /api/status?light=1 is sub-100
+      // ms in steady state so 5 s is two orders of magnitude of headroom.
       const res = await fetch(`${cfg.commhubUrl}/api/status?light=1`, {
         headers: { Authorization: `Bearer ${cfg.commhubToken}` },
+        signal: AbortSignal.timeout(5_000),
       });
       if (!res.ok) return null;
       const data = (await res.json()) as {
@@ -129,6 +135,10 @@ export function startTelegramWatchdog(
 
   const sendAdminMessage = async (text: string): Promise<void> => {
     try {
+      // 8 s ceiling — MCP send_message round-trip vs the 10 s pre-restart
+      // grace in fireRestart(). If the admin-notify hangs past 8 s we'd
+      // rather log it and proceed to the restart than block the only
+      // recovery action this watchdog has.
       await fetch(`${cfg.commhubUrl}/mcp`, {
         method: "POST",
         headers: {
@@ -148,6 +158,7 @@ export function startTelegramWatchdog(
             },
           },
         }),
+        signal: AbortSignal.timeout(8_000),
       });
     } catch (e: any) {
       log(`admin notify failed: ${e?.message ?? String(e)}`);
