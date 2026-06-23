@@ -7,6 +7,10 @@ import { eventBus, type RenameCommittedEvent } from "./event_bus";
 type SSEClient = {
   controller: ReadableStreamDefaultController;
   encoder: TextEncoder;
+  // 30s keepalive interval — stored so cancel() can clear it without
+  // relying on stringly-typed any-cast. Set in start(), cleared in cancel()
+  // or by the interval itself on enqueue failure.
+  keepalive?: ReturnType<typeof setInterval>;
 };
 
 // 一个 session 可能有多个 SSE 连接（重连时短暂并存）
@@ -44,7 +48,7 @@ export function createSSEStream(sessionName: string, networkId?: string | null):
           clearInterval(keepalive);
         }
       }, 30_000);
-      (client as any)._keepalive = keepalive;
+      client.keepalive = keepalive;
     },
     cancel() {
       // 断线清理
@@ -52,7 +56,7 @@ export function createSSEStream(sessionName: string, networkId?: string | null):
       if (arr) {
         const idx = arr.findIndex(c => c.controller === ctrl);
         if (idx !== -1) {
-          clearInterval((arr[idx] as any)._keepalive);
+          if (arr[idx].keepalive) clearInterval(arr[idx].keepalive);
           arr.splice(idx, 1);
         }
         if (arr.length === 0) clients.delete(key);
@@ -98,7 +102,12 @@ eventBus.on("rename-committed", (event: RenameCommittedEvent) => {
 
 /** 推送事件给指定 session 的所有 SSE 连接 */
 export function pushEvent(sessionName: string, event: Record<string, unknown>, networkId?: string | null): void {
-  const arr = clients.get(clientKey(sessionName, networkId ?? (event.network_id as string | null | undefined)));
+  // Resolve the key once — both lookup and post-cleanup `clients.delete` MUST
+  // use the same key, otherwise an emptied bucket would leak (the explicit
+  // arg wins over event.network_id, falling back so legacy callers that pass
+  // network_id inside `event` still hit the right bucket).
+  const key = clientKey(sessionName, networkId ?? (event.network_id as string | null | undefined));
+  const arr = clients.get(key);
   if (!arr || arr.length === 0) return;
 
   const data = `data: ${JSON.stringify(event)}\n\n`;
@@ -112,11 +121,16 @@ export function pushEvent(sessionName: string, event: Record<string, unknown>, n
     }
   }
 
-  // 清理死连接
+  // 清理死连接 — also clear their keepalive timers so the dead client doesn't
+  // keep an interval handle alive past its controller (small leak previously
+  // bounded by the next failed enqueue catching itself, but cleanup-on-detect
+  // is cheaper than waiting 30s).
   for (let i = dead.length - 1; i >= 0; i--) {
+    const c = arr[dead[i]];
+    if (c.keepalive) clearInterval(c.keepalive);
     arr.splice(dead[i], 1);
   }
-  if (arr.length === 0) clients.delete(clientKey(sessionName, networkId ?? (event.network_id as string | null | undefined)));
+  if (arr.length === 0) clients.delete(key);
 }
 
 export function __resetSSEClientsForTest(): void {
