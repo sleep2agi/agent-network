@@ -168,6 +168,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tasks_from ON tasks(from_name);
   CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
   CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
+  -- #248 — composite index for the dashboard chat-panel history query
+  -- (/api/tasks?to_name=X&limit=30 ORDER BY created_at DESC). Without it
+  -- SQLite walks every row for the alias via idx_tasks_to and sorts in
+  -- memory; on an active node with thousands of tasks that's O(N log N)
+  -- per panel open. The composite ordered DESC lets the planner stop
+  -- after LIMIT rows — O(log N + LIMIT). Idempotent migration; safe to
+  -- ship — existing single-column idx_tasks_to is kept (other paths
+  -- use it and we don't need the risk of dropping it).
+  CREATE INDEX IF NOT EXISTS idx_tasks_to_created ON tasks(to_name, created_at DESC);
 `);
 
 // nodes table (V2 Sprint 2) — persistent node identity, separate from runtime sessions
