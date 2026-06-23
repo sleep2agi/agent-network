@@ -19,7 +19,7 @@ v0.10.6 [#154](https://github.com/sleep2agi/agent-network/issues/154) 才真解 
 
 ```bash
 npm install -g @sleep2agi/agent-network@latest
-anet --version            # 当前 latest v2.2.12（v0.10.15，2026-06-14）
+anet --version            # 看输出的版本号即当前装的 npm latest
 ```
 
 之后再有新版本，跑 `anet upgrade` 即自动 detached spawn，一两分钟后 `anet -v` 是新版。

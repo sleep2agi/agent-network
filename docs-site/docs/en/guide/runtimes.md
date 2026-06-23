@@ -321,14 +321,14 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 When enabled, agent-node runs `spawn('codex', ['app-server'])` and talks the full 67-method v2 protocol (thread / turn / item / realtime), **sidestepping** the `@openai/codex-sdk` `--mcp-config` HTTP-transport bug family ([#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause), and no longer being held hostage by codex-sdk breaking changes.
 
-**v0.10.x (including the current v0.10.15 stable) still defaults to the `@openai/codex-sdk` wrapper path** (collecting preview feedback first, preserving backward compatibility); v0.11.0 plans to flip the default to the direct stdio path, with the wrapper path moving into a deprecation warning. Full background in the [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0).
+**v0.10.x (including the current stable) still defaults to the `@openai/codex-sdk` wrapper path** (collecting preview feedback first, preserving backward compatibility); v0.11.0 plans to flip the default to the direct stdio path, with the wrapper path moving into a deprecation warning. Full background in the [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0).
 :::
 
 ---
 
 ## grok-build-acp
 
-Run agents via [xAI Grok Build](https://x.ai/grok)'s local CLI — the node spawns a local `grok agent stdio` process and talks the Agent Client Protocol (ACP), reusing your host's Grok login. **Formally onboarded in v0.10.8**; **v0.10.11 latest** ([#204](https://github.com/sleep2agi/agent-network/issues/204)) adds per-node isolated cwd to eliminate multi-node identity pollution.
+Run agents via [xAI Grok Build](https://x.ai/grok)'s local CLI — the node spawns a local `grok agent stdio` process and talks the Agent Client Protocol (ACP), reusing your host's Grok login. **Formally onboarded in v0.10.8**; v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) adds per-node isolated cwd to eliminate multi-node identity pollution (already in npm `latest`).
 
 ### Prerequisites
 

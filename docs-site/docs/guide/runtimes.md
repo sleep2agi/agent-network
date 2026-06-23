@@ -341,14 +341,14 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 启用后 agent-node 走 `spawn('codex', ['app-server'])` + 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** `@openai/codex-sdk` `--mcp-config` HTTP transport 那条 bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family），不再受 codex-sdk breaking change 牵制。
 
-**v0.10.x（含当前 v0.10.15 stable）默认仍走 `@openai/codex-sdk` wrapper**（先收 preview 反馈、保 backward-compat）；v0.11.0 计划 default flip 到 stdio direct，wrapper 路径进入 deprecation warning。完整背景见 [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0)。
+**v0.10.x（含当前 stable）默认仍走 `@openai/codex-sdk` wrapper**（先收 preview 反馈、保 backward-compat）；v0.11.0 计划 default flip 到 stdio direct，wrapper 路径进入 deprecation warning。完整背景见 [v0.10.0 GitHub release notes](https://github.com/sleep2agi/agent-network/releases/tag/v0.10.0)。
 :::
 
 ---
 
 ## grok-build-acp
 
-用 [xAI Grok Build](https://x.ai/grok) 本地 CLI 跑 agent —— 节点 spawn 本地 `grok agent stdio` 进程 + Agent Client Protocol (ACP) 协议交互，复用本机 Grok 登录态。**v0.10.8 起正式接入**，**v0.10.11 latest** ([#204](https://github.com/sleep2agi/agent-network/issues/204)) 加 per-node isolated cwd 解决多节点身份污染。
+用 [xAI Grok Build](https://x.ai/grok) 本地 CLI 跑 agent —— 节点 spawn 本地 `grok agent stdio` 进程 + Agent Client Protocol (ACP) 协议交互，复用本机 Grok 登录态。**v0.10.8 起正式接入**；v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) 加 per-node isolated cwd 解决多节点身份污染（已在 npm `latest`）。
 
 ### 前置
 

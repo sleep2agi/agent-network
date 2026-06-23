@@ -713,7 +713,7 @@ anet node stop grok-marketing && anet node start grok-marketing
 anet --version          # agent-node ≥ 2.4.9
 ```
 
-**Genuinely long jobs still hit the cap (video generation / large X searches)**: the 300 s default in v0.10.15 is still too tight for some video or batch workloads. Bump it via `flags.grokAcpTimeoutMs` (config) or `GROK_ACP_TIMEOUT_MS` (env, takes precedence):
+**Genuinely long jobs still hit the cap (video generation / large X searches)**: the 300 s default in the current latest is still too tight for some video or batch workloads. Bump it via `flags.grokAcpTimeoutMs` (config) or `GROK_ACP_TIMEOUT_MS` (env, takes precedence):
 
 ```bash
 # Per-shell (export before starting the grok node)

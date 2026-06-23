@@ -24,7 +24,7 @@ Agent Network 是一个 **多 Agent 通信基础设施**，而不是 Agent 框�
 
 ### 3. 免费吗？
 
-**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 v0.10.15 stable 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
+**Apache-2.0 开源、self-hosted。** 代码和仓库许可证不要求购买 license，没有官方 SaaS 托管；但当前 stable 代码里仍保留 legacy trial/pro-license 表和 `send_task` 过期检查。
 
 - 仓库公开、源码可改
 - 商业模式 = 卖课 + 卖服务咨询，不依赖强制官方 SaaS
@@ -106,14 +106,14 @@ anet hub start --port 9201
 # 或停掉占用的进程
 kill <PID>
 
-# v0.10.11 起新增 anet hub stop 子命令（[#200](https://github.com/sleep2agi/agent-network/issues/200), v0.10.11 latest 已 ship）
+# anet hub stop 子命令（[#200](https://github.com/sleep2agi/agent-network/issues/200) v0.10.11 起 ship，已在 npm latest）
 # SIGTERM → 3s → SIGKILL 兜底, 不用手动找 PID
 anet hub stop          # 默认端口 9200
 anet hub stop --port 8080
 ```
 
 ::: tip v0.10.11 起更简单
-v0.10.11 ([#200](https://github.com/sleep2agi/agent-network/issues/200)) 加了 `anet hub stop` 命令, 不用 `lsof + kill <PID>` 手动 hack。v0.10.11 latest 已 ship, 老用户 `anet upgrade` 或 `npm i -g @sleep2agi/agent-network@latest` 即得。
+v0.10.11 ([#200](https://github.com/sleep2agi/agent-network/issues/200)) 加了 `anet hub stop` 命令, 不用 `lsof + kill <PID>` 手动 hack。已在 npm `latest`，老用户跑 `anet upgrade` 即得。
 :::
 
 ### 9. 配置文件在哪里？

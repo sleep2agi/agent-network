@@ -24,7 +24,7 @@ Agent Network is a **multi-agent communication infrastructure**, not an agent fr
 
 ### 3. Is it free?
 
-**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current v0.10.15 stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
+**Apache-2.0 open source and fully self-hosted.** The repository license does not require purchasing a product license and there is no official hosted SaaS, but the current stable server code still contains a legacy trial/pro-license table plus a `send_task` expiry check.
 
 - Public repo, modifiable source
 - Business model = courses + consulting, not a forced hosted SaaS
@@ -106,14 +106,14 @@ anet hub start --port 9201
 # Or stop the process using it
 kill <PID>
 
-# v0.10.11 adds an `anet hub stop` subcommand ([#200](https://github.com/sleep2agi/agent-network/issues/200), shipped to @latest)
+# anet hub stop subcommand ([#200](https://github.com/sleep2agi/agent-network/issues/200), shipped v0.10.11, already in @latest)
 # SIGTERM → 3s → SIGKILL fallback; no manual PID lookup needed
 anet hub stop          # default port 9200
 anet hub stop --port 8080
 ```
 
 ::: tip Easier from v0.10.11 onward
-v0.10.11 ([#200](https://github.com/sleep2agi/agent-network/issues/200)) introduces `anet hub stop`, removing the manual `lsof + kill <PID>` step. Already shipped to `@latest`; existing users run `anet upgrade` or `npm i -g @sleep2agi/agent-network@latest` to get it.
+v0.10.11 ([#200](https://github.com/sleep2agi/agent-network/issues/200)) introduces `anet hub stop`, removing the manual `lsof + kill <PID>` step. Already in `@latest`; existing users just run `anet upgrade`.
 :::
 
 ### 9. Where are the config files?
