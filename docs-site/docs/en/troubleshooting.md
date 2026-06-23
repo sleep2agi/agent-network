@@ -699,7 +699,7 @@ curl http://localhost:9200/api/server/<host>/agents \
 
 ### `grok-build-acp` node task hangs / `session/prompt timed out after 300000ms` / JSON-RPC error 32603
 
-**Symptom**: A node created with the `grok-build-acp` runtime accepts a task longer than ~5 min via commhub and then never reports back. No error, no reply — the pane is stuck on a `session/prompt` call. The agent-node log shows either `session/prompt timed out after 300000ms` or a JSON-RPC `code: 32603` returned by the ACP server.
+**Symptom**: A node created with the `grok-build-acp` runtime accepts a task longer than ~5 min via CommHub and then never reports back. No error, no reply — the pane is stuck on a `session/prompt` call. The agent-node log shows either `session/prompt timed out after 300000ms` or a JSON-RPC `code: 32603` returned by the ACP server.
 
 **Root cause**: agent-node 2.4.8 and below hard-coded a 300 s `session/prompt` timeout (inherited from the older codex-sdk wrapper). The grok-build-acp backend, however, is biased toward longer user-level tasks where 5 min is routinely too tight.
 
@@ -742,7 +742,7 @@ Older agent-node versions **do not print** `timeoutMs=<new value>` at startup �
 
 ### Hub box load is abnormally high / new claude sessions are slow / piles of zombie `bun` processes
 
-**Symptom**: The machine hosting the hub shows a sustained high load average (>10× the CPU core count). Opening new claude / agent sessions feels slow, and commhub MCP calls occasionally time out. `top` shows lots of `bun ... server.ts` processes that look like they're doing nothing.
+**Symptom**: The machine hosting the hub shows a sustained high load average (>10× the CPU core count). Opening new claude / agent sessions feels slow, and CommHub MCP calls occasionally time out. `top` shows lots of `bun ... server.ts` processes that look like they're doing nothing.
 
 **Root cause**: A plugin directory or agent workdir was renamed or deleted while older `bun` child processes still held its now-`deleted` cwd. Every new session forks another zombie on top, and they accumulate until they saturate the CPU. **Real-world repro**: 86 zombie `bun` processes, load average 92.
 

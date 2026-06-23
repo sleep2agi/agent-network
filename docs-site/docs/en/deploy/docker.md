@@ -42,7 +42,7 @@ A containerized version is just steps 1–5 split across different services / co
 - **`bunx` pulling `commhub-server` is slow on first boot**: the first `anet hub start` fetches a PINNED `commhub-server` from npm — first-time container startup can be 30–60s slower than host (cache lives at `$HOME/.bun/install/cache`). Pinning a base image and pre-warming the cache helps a lot
 - **Dashboard container must reach Hub**: the Dashboard uses REST + SSE against hub `:9200` — either share a docker network across containers or publish hub's port to the host
 - **Persist per-node cwd**: `anet node start` writes state under cwd `.anet/nodes/<alias>/` — mount cwd as a volume if you want it to survive container restart
-- **Don't run the agent as PID 1**: wrap it with `tini` or similar; otherwise SIGTERM hits the agent directly and bypasses the commhub offline notification
+- **Don't run the agent as PID 1**: wrap it with `tini` or similar; otherwise SIGTERM hits the agent directly and bypasses the CommHub offline notification
 
 ## Next
 

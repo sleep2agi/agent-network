@@ -149,7 +149,7 @@ See [grok-build-runtime.md Known Limits](https://github.com/sleep2agi/agent-netw
 
 ::: details preview chain history (how it converged on preview.7)
 - **preview.2 stdio variant**: structurally fixes the `.mcp.json` shared-identity bug (ACP side)
-- **preview.6 — transport switched to HTTP**: Grok calls commhub `/mcp` directly with a Bearer `ntok_`, bypassing subprocess / bun PATH / stdout-pollution risks entirely
+- **preview.6 — transport switched to HTTP**: Grok calls CommHub `/mcp` directly with a Bearer `ntok_`, bypassing subprocess / bun PATH / stdout-pollution risks entirely
 - **preview.7 — per-node isolated cwd (final)**: Grok CLI was reading the cwd `.mcp.json` alongside the ACP injection — two MCP servers coexist and the stale one wins hello. Fix: ACP `session/new` passes a per-node isolated cwd that mirrors user files but omits `.mcp.json`
 - v0.10.11 final = preview.7 promoted
 :::

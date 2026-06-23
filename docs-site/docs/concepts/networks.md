@@ -189,7 +189,7 @@ config 里的 `node_id` 是 `anet node create` 时**本地随机生成**的稳�
 
 如果一定要把 config 从 A 机器移到 B 机器（而不是新建），用 `anet node rename` 或在 B 上重新 `anet node create`。
 
-> ⚠ `anet node rename` 的已知 gap（[#110](https://github.com/sleep2agi/agent-network/issues/110)）：节点必须**至少 `anet node start` 过一次**才能 rename（否则 commhub server 端没 sessions 行，`prepareRename` 失败）。复制 config 后第一步先 start 一次让 server 注册，再 rename。失败安全（PHASE 1 rollback 老节点完好）。
+> ⚠ `anet node rename` 的已知 gap（[#110](https://github.com/sleep2agi/agent-network/issues/110)）：节点必须**至少 `anet node start` 过一次**才能 rename（否则 CommHub Server 端没 sessions 行，`prepareRename` 失败）。复制 config 后第一步先 start 一次让 server 注册，再 rename。失败安全（PHASE 1 rollback 老节点完好）。
 :::
 
 ### 方式三：公开网络
