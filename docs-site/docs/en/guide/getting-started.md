@@ -253,7 +253,7 @@ The following paths are covered by the stable release gate. For details, see the
 ::: warning Not verified (treat as experimental)
 - `codex-sdk` runtime end-to-end.
 - `claude-code-cli` runtime end-to-end.
-- `anet license` / `anet activate` — v0.6 legacy trial commands. **OSS users don't need to touch these**. v2.2.12 latest `anet license` now prints `License: Apache-2.0 (open source)` and a few related lines directly (earlier versions misleadingly printed `License: PRO / Expires <date>` — since corrected). On `license_expired` see [troubleshooting](/en/troubleshooting).
+- `anet license` / `anet activate` — v0.6 legacy trial commands. **OSS users don't need to touch these.** On `license_expired` see [troubleshooting — `license_expired`](/en/troubleshooting#license-expired-legacy-behavior).
 - `anet network create` and cross-user network sharing — V3 multi-network code is in but not E2E regressed.
 :::
 

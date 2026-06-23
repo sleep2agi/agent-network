@@ -159,8 +159,7 @@ npm install -g @sleep2agi/agent-network
 | `anet config` | **只读**查看 `~/.anet/config.json` 内容（`anet config path` 打印路径，`anet config json` 输出 raw JSON）。修改走 `anet login` / `anet init` / `anet network use`，不是 `anet config --set`。verify [`cli.ts:5670-5702 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5670) |
 | `anet upgrade` | 打印升级计划（self-upgrade 默认关闭，避免升级中替换正在运行的 CLI 进程；给出手动步骤）。完整指南见 [升级指南](/guide/upgrade) |
 | `anet create --batch` / `anet batch <verb>` | 批量起 N 个 agent（prefix 自动编号 + 独立 workdir/config/tmux），再用 `anet batch list/start/stop/restart/cleanup` 统一管 lifecycle。详见 [批量 Agent](/guide/batch) |
-| `anet license` | v0.6 legacy。**OSS 用户无需操作**：v2.2.12 latest 直接返 `License: Apache-2.0 (open source) / Source: github / Docs: anet.sh` 三行（早期版本曾返误导性的 `License: PRO / Expires <date>`，那是 v0.6 trial 表后向兼容回显，现已改正）|
-| `anet activate <key>` | v0.6 legacy。**Apache 2.0 OSS 用户无需操作**；写 pro license key 用，仅用于命中 `license_expired` 时的兜底, 见 [troubleshooting](/troubleshooting)。|
+| `anet license` / `anet activate <key>` | v0.6 legacy 命令，**OSS 用户无需操作**。`anet license` 当前返 `License: Apache-2.0 (open source)` 三行。`anet activate` 仅在命中 `license_expired` 时作兜底用。详见 [troubleshooting — `license_expired`](/troubleshooting#license-expired-授权过期-legacy-行为) |
 | `anet session ls` | 列出当前项目下的 Claude Code session（`claude-code-cli` runtime 用） |
 | `anet import [alias]` | 从 CommHub 把 claude-code agent 的 session 导入为本地 `.anet/nodes/<alias>/config.json`（不传 alias 则导入全部） |
 | `anet run` | 用 Client SDK 起一个**极简 standalone SSE agent**：连 hub、监听 task、自动 echo「收到」回复 —— **不跑 LLM**。需 `--alias`，可选 `--hub`。跟 `anet node start`（跑真实 AI runtime）不同，`anet run` 只是最小连通性 demo。verify [`cli.ts:2044 runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2044) |
