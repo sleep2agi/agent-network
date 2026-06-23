@@ -84,18 +84,18 @@ Only the `claude-code-cli` runtime touches Claude Code sessions (`~/.claude/proj
 
 | Command | Description |
 |------|------|
-| `anet node create <name> --resume <id>` | Create a node bound to a **specific session** (errors out and exits if the id is unknown, [`cli.ts:1629-1634`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1629)) |
-| `anet node create <name> --resume-latest` | Create a node bound to the **most recent session** (`listClaudeSessions()[0]`, [`cli.ts:1637-1644`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1637)) |
-| `anet node create <name>` | Interactive picker on TTY (age / size / 60-char first-line preview, [`cli.ts:1645-1651`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1645)); non-TTY falls back to a random session id |
+| `anet node create <name> --resume <id>` | Create a node bound to a **specific session** (errors out and exits if the id is unknown, [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)) |
+| `anet node create <name> --resume-latest` | Create a node bound to the **most recent session** (`listClaudeSessions()[0]`, [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)) |
+| `anet node create <name>` | Interactive picker on TTY (age / size / 60-char first-line preview, [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)); non-TTY falls back to a random session id |
 | `anet node start <name> --new-session` | Force a **fresh** session (overrides `profile.session`) |
 | `anet node resume <name> [--session <id>]` | Resume a session (see [anet node resume](#anet-node-resume)) |
-| `anet session ls` | List Claude Code sessions in the current cwd (the picker and `ls` share [`listClaudeSessions()` cli.ts:103](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L103)) |
+| `anet session ls` | List Claude Code sessions in the current cwd (the picker and `ls` share [`listClaudeSessions()` cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)) |
 
-> **Zero-keystroke recovery:** since #115, `anet node start` injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` ([`cli.ts:1960`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1960)) into the `claude` spawn env, skipping Claude Code's default 70-minute session-age threshold for the "Resume from summary / full / Don't ask again" interactive prompt — so **restarting a batch of nodes needs no per-node keypress**. The injection is per-spawn, does not touch `~/.claude/settings.json`, and respects an explicit user override. Resume restores the **full session** as-is (no per-invocation flag forces a compact summary; per the #115 commit message, restart-recovery is safer without unexpected compaction).
+> **Zero-keystroke recovery:** since #115, `anet node start` injects `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` ([`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)) into the `claude` spawn env, skipping Claude Code's default 70-minute session-age threshold for the "Resume from summary / full / Don't ask again" interactive prompt — so **restarting a batch of nodes needs no per-node keypress**. The injection is per-spawn, does not touch `~/.claude/settings.json`, and respects an explicit user override. Resume restores the **full session** as-is (no per-invocation flag forces a compact summary; per the #115 commit message, restart-recovery is safer without unexpected compaction).
 
 ### Project-wide (cwd)
 
-Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / stops them as a batch. See [issue #117](https://github.com/sleep2agi/agent-network/issues/117) and verify [`cli.ts:3000 projectCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3000).
+Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / stops them as a batch. See [issue #117](https://github.com/sleep2agi/agent-network/issues/117) and verify [`cli.ts projectCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts).
 
 | Command | Description |
 |------|------|
@@ -111,7 +111,7 @@ Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / 
 | `--only a,b,c` | — | Operate only on these aliases or node IDs |
 | `--exclude x,y` | — | Skip these aliases or node IDs |
 
-> **`down` caps the hub-offline notify at a 2-second timeout** (cli.ts:3085-3088) — this command is commonly used in the "hub itself crashed" scenario, where serially fetching offline notifications for 22 nodes would hang on 44 timeouts and deadlock the teardown; the 2 s race guarantees a fast worst-case teardown.
+> **`down` caps the hub-offline notify at a 2-second timeout** (cli.ts) — this command is commonly used in the "hub itself crashed" scenario, where serially fetching offline notifications for 22 nodes would hang on 44 timeouts and deadlock the teardown; the 2 s race guarantees a fast worst-case teardown.
 
 ### Monitoring
 
@@ -156,13 +156,13 @@ Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / 
 
 | Command | Description |
 |------|------|
-| `anet config` | **Read-only** view of `~/.anet/config.json` (`anet config path` prints the path, `anet config json` prints raw JSON). To modify config, use `anet login` / `anet init` / `anet network use` — there is no `anet config --set`. Verified at [`cli.ts:5670-5702 configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5670). |
+| `anet config` | **Read-only** view of `~/.anet/config.json` (`anet config path` prints the path, `anet config json` prints raw JSON). To modify config, use `anet login` / `anet init` / `anet network use` — there is no `anet config --set`. Verified at [`cli.ts configShowCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts). |
 | `anet upgrade` | Prints an upgrade plan (self-upgrade is disabled by default to avoid replacing the running CLI process mid-run; gives manual steps). Full guide: [Upgrade Guide](/en/guide/upgrade) |
 | `anet create --batch` / `anet batch <verb>` | Spin up N agents in bulk (auto-numbered prefix + separate workdir/config/tmux), then manage their lifecycle with `anet batch list/start/stop/restart/cleanup`. See [Batch Agents](/en/guide/batch) |
 | `anet license` / `anet activate <key>` | v0.6 legacy commands. **OSS users don't need to touch these.** `anet license` now prints `License: Apache-2.0 (open source)` plus a couple of related lines. `anet activate` only matters as a fallback when you hit `license_expired`. Full detail: [troubleshooting — `license_expired`](/en/troubleshooting#license-expired-legacy-behavior). |
 | `anet session ls` | List Claude Code sessions in the current project (for the `claude-code-cli` runtime) |
 | `anet import [alias]` | Import claude-code agent sessions from CommHub into local `.anet/nodes/<alias>/config.json` (imports all if no alias is given) |
-| `anet run` | Starts a **minimal standalone SSE agent** via the Client SDK: connects to the hub, listens for tasks, and auto-echoes a "received" reply — **no LLM**. Requires `--alias`, `--hub` optional. Unlike `anet node start` (which runs a real AI runtime), `anet run` is just a minimal connectivity demo. Verify [`cli.ts:2044 runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2044) |
+| `anet run` | Starts a **minimal standalone SSE agent** via the Client SDK: connects to the hub, listens for tasks, and auto-echoes a "received" reply — **no LLM**. Requires `--alias`, `--hub` optional. Unlike `anet node start` (which runs a real AI runtime), `anet run` is just a minimal connectivity demo. Verify [`cli.ts runCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) |
 
 ---
 
@@ -170,7 +170,7 @@ Scans every node under the current cwd's `.anet/nodes/` and starts / restarts / 
 
 ### anet hub start
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2068)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Start the CommHub communication server.
 
@@ -277,7 +277,7 @@ If nothing is listening on the port the command prints `Hub not running on port 
 
 ### anet passwd
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3608)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Change the current logged-in user's password. By default it prompts for old password, new password, and confirmation. Scripts may pass `--old` / `--new`.
 
@@ -290,7 +290,7 @@ On success the hub returns a fresh `utok_`; CLI saves it back to `~/.anet/config
 
 ### anet hub admin reset-user
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2318)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Local hub-host recovery command. It bypasses HTTP and reads SQLite directly.
 
@@ -302,7 +302,7 @@ It generates a random password, revokes all user `utok_`, issues a fresh `utok_`
 
 ### anet node create
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1391) (`createCommand`)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`createCommand`)
 
 Create a new agent node.
 
@@ -358,7 +358,7 @@ Cross-machine deploy is still supported: the wizard still prints the export comm
 
 ### anet node start
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2209)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Start an agent node. **Default is foreground** (stdio inherits the current terminal); pass `--tmux` to launch the node inside a new tmux session and attach.
 
@@ -404,7 +404,7 @@ anet node start <name> --tmux
 
 ### anet status
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2995)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 View network status overview.
 
@@ -435,7 +435,7 @@ Tasks: 42 replied, 3 running, 0 failed
 
 ### anet tasks
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3059)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 View task list.
 
@@ -463,7 +463,7 @@ anet tasks --limit 5
 
 ### anet doctor
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5917)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 System diagnostics.
 
@@ -472,12 +472,12 @@ anet doctor              # Diagnose only; prints ✅ / ❌ per check with fix hi
 anet doctor --fix        # Auto-repair: (a) migrateNode converts V2 legacy fields (alias/resume/legacy_runtime_name) to v0.8 schema (b) probes expired ntok_ and re-issues them via the hub, writing back to .anet/nodes/<name>/config.json
 ```
 
-Checks (in actual order per [`cli.ts:5917-6082 doctorCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5917)):
+Checks (in actual order per [`cli.ts doctorCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)):
 
 1. Global config (`~/.anet/config.json` — has `hub` / `token`?)
 2. Auth token presence
 3. Hub reachability (GET `/health` — shows sessions / SSE / license / multi-network info)
-4. Local node configs + per-node process status + legacy-field diagnosis ([`diagnoseNode` cli.ts:5842](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L5842) detects 8 issue kinds: legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id)
+4. Local node configs + per-node process status + legacy-field diagnosis ([`diagnoseNode` cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) detects 8 issue kinds: legacy_alias_field / legacy_resume_field / legacy_runtime_name / stale_dev_hub / missing_token / user_token / untyped_token / missing_node_id)
 5. Dependencies: `claude --version` / `codex --version` / `bun --version`
 6. Current project `.mcp.json` commhub config
 7. Telegram channel env (`~/.claude/channels/telegram/.env` silently empty? — known token-loss foot-gun for `/telegram:configure`)
@@ -488,7 +488,7 @@ Pre-v0.7, an expired `ntok_` required a manual `anet node delete` + recreate. Si
 
 ### anet upgrade
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3522)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Print / execute the upgrade plan — covers 4 packages (`anet self` / `agent-node` / `commhub-server` / `agent-network-dashboard`) across two channels (preview / latest, auto-detected or overridden via `--channel`). Rewritten in [#88](https://github.com/sleep2agi/agent-network/issues/88) for v0.9.0+; the old behavior covered only 2/3 packages and **silently downgraded** preview-channel users to `@latest`.
 
@@ -534,9 +534,9 @@ Full upgrade walkthrough: [Upgrade Guide](/en/guide/upgrade).
 
 ### anet project
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3163)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
-Cwd-wide node orchestration, introduced in [#117](https://github.com/sleep2agi/agent-network/issues/117) (v0.9.0+, on npm `latest` since v0.10.0, verify [`agent-network/bin/cli.ts:7137` `case "project"`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L7137)).
+Cwd-wide node orchestration, introduced in [#117](https://github.com/sleep2agi/agent-network/issues/117) (v0.9.0+, on npm `latest` since v0.10.0, verify [`agent-network/bin/cli.ts` `case "project"`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)).
 
 ```bash
 anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y]
@@ -548,17 +548,17 @@ anet project <up|restart|down> [--stagger <seconds>] [--only a,b] [--exclude x,y
 | `anet project restart` | Kill each node's existing tmux session, then start fresh (↻ restarted / ▶ started) |
 | `anet project down` | Stop every node + notify hub offline (⏹ stopped) |
 
-**`down`'s 2 s offline-notify timeout** ([`cli.ts:3085-3088`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3085)): this command is commonly used when the hub itself has crashed; serially fetching offline notifications for 22 nodes would hang on 44 timeouts and deadlock the teardown. `Promise.race + setTimeout(2000)` guarantees a fast worst-case teardown.
+**`down`'s 2 s offline-notify timeout** ([`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)): this command is commonly used when the hub itself has crashed; serially fetching offline notifications for 22 nodes would hang on 44 timeouts and deadlock the teardown. `Promise.race + setTimeout(2000)` guarantees a fast worst-case teardown.
 
 **Node selection**: `--only` / `--exclude` take aliases or node IDs (comma-separated, parsed via `splitCsv`).
 
-**Pairs with #115**: every inner `anet node start` is spawned by [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L35); `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` is auto-injected to skip Claude Code's resume prompt — recovering 22 nodes after reboot via `anet project up` is genuine **zero-keystroke recovery**.
+**Pairs with #115**: every inner `anet node start` is spawned by [`startNodeTmuxSession`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts); `CLAUDE_CODE_RESUME_THRESHOLD_MINUTES=999999999` is auto-injected to skip Claude Code's resume prompt — recovering 22 nodes after reboot via `anet project up` is genuine **zero-keystroke recovery**.
 
 > ⚠ Since v0.9.2 `anet node start` defaults to foreground ([#136](https://github.com/sleep2agi/agent-network/issues/136)). `anet project up` still spawns each node into a detached tmux session as before, which can re-trigger `setRawMode errno 5` on macOS bun (same root cause as #136) — affected users should pre-create a `tmux new -s mybox` then sequentially run `anet node start <alias> --tmux` per node. Tracking issue for the bulk-detached path: #136 follow-up.
 
 ### anet network invite
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3432)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Create a network invite code.
 
@@ -590,7 +590,7 @@ anet network invite --role viewer --expires 7
 
 ### anet token create
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3555)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Create an API token.
 
@@ -611,7 +611,7 @@ The created token is displayed only once. Store it securely. If lost, you'll nee
 
 ### anet node resume
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1875)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Resume a previously interrupted agent session. When an agent crashes, is manually stopped, or exits unexpectedly, use this command to restore context without losing conversation history.
 
@@ -651,7 +651,7 @@ anet node resume worker --session abc123
 
 ### anet init project
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L825)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Initialize a Claude Code project with automatic MCP and CLAUDE.md configuration.
 
@@ -688,7 +688,7 @@ anet init project
 
 ### anet goal
 
-> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L4864)
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)
 
 Local management of agent-node scheduled goals (the `/goal` / `/loop` periodic tasks spawned in-agent — issue [#184](https://github.com/sleep2agi/agent-network/issues/184) Phase 1 persists them to `.anet/nodes/<node>/goals.json`; issue [#191](https://github.com/sleep2agi/agent-network/issues/191) Phase 1 Pillar A completes the CLI CRUD surface).
 
@@ -764,7 +764,7 @@ Common commands read these options or their saved config equivalents:
 |------|------|--------|
 | `COMMHUB_URL` | CommHub Server address | env > config file (CLI `--hub` is highest) |
 | `COMMHUB_ALIAS` | Agent alias | env > config file (CLI `--alias` is highest) |
-| `COMMHUB_TOKEN` | Auth token | **agent-node: lowest** — node config (`ntok_`) > global config > this env, and if the env conflicts with the node config it is **ignored + a warning is logged** ([`agent-node/src/cli.ts:187-190`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L187), to stop a leftover export from routing replies to the wrong network). In the `anet` CLI it's env > global config instead. |
+| `COMMHUB_TOKEN` | Auth token | **agent-node: lowest** — node config (`ntok_`) > global config > this env, and if the env conflicts with the node config it is **ignored + a warning is logged** ([`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts), to stop a leftover export from routing replies to the wrong network). In the `anet` CLI it's env > global config instead. |
 | `COMMHUB_AUTH_TOKEN` | **Server-side** legacy master token (v0.8 soft-deprecated, removed in v1.0) — read by the hub process, not an agent-connection priority variable | server-side |
 | `ANTHROPIC_BASE_URL` | Model API URL (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter and other third-party Anthropic-compatible endpoints; full provider list in [multi-model](/en/guide/multi-model)) | - |
 | `ANTHROPIC_AUTH_TOKEN` | Model API key — for **third-party Anthropic-compatible endpoints** | - |
