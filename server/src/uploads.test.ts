@@ -187,6 +187,26 @@ describe("UploadRateLimiter", () => {
     }
     expect(lim.check("token-y", 1000).allowed).toBe(false);
   });
+
+  test("caps in-memory state by evicting oldest entries past maxEntries", () => {
+    // A small maxEntries lets us drive the eviction path deterministically.
+    // Without this cap the limiter would grow unbounded under an IP-flood
+    // (public-facing hub, IPv6 rotation makes each request a "new" key).
+    const lim = new UploadRateLimiter(60_000, 5, 4);
+    const t0 = 1_700_000_000_000;
+    // Fill to cap with non-expired entries — eviction should fire on insert 5.
+    for (let i = 0; i < 4; i++) {
+      lim.check(`key-${i}`, t0);
+    }
+    expect(lim.size()).toBe(4);
+    lim.check("key-new", t0 + 100);
+    expect(lim.size()).toBeLessThanOrEqual(4);
+    // Hitting an EXISTING key while at cap must NOT trigger an eviction
+    // (an attacker hitting the same key shouldn't push out other callers).
+    const beforeSize = lim.size();
+    lim.check("key-new", t0 + 200);
+    expect(lim.size()).toBe(beforeSize);
+  });
 });
 
 describe("validateAttachments", () => {

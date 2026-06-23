@@ -37,6 +37,12 @@ export const MAX_REQUEST_CONTENT_LENGTH = MAX_UPLOAD_BYTES + 1024 * 1024;
 // the source of truth; resets on restart).
 export const UPLOAD_RATE_WINDOW_MS = 60 * 60 * 1000;
 export const UPLOAD_RATE_MAX_PER_WINDOW = 60;
+// Cap the in-memory rate-limit map so a public-facing hub can't be
+// pushed to OOM by a flood of unique IPs / token ids (the call site
+// uses IP-as-key for legacy auth, which is rotatable cheaply over IPv6).
+// Matches LOGIN_GUARD_MAX_ENTRIES in auth_login_guard.ts for symmetric
+// behaviour across the two in-memory limiters this hub maintains.
+export const UPLOAD_RATE_MAX_ENTRIES = 50_000;
 
 // Strict file_id regex. Generated server-side via crypto.randomUUID()
 // with hyphens stripped, so the natural output is 32 hex chars. The
@@ -159,6 +165,7 @@ export class UploadRateLimiter {
   constructor(
     private readonly windowMs: number = UPLOAD_RATE_WINDOW_MS,
     private readonly maxPerWindow: number = UPLOAD_RATE_MAX_PER_WINDOW,
+    private readonly maxEntries: number = UPLOAD_RATE_MAX_ENTRIES,
   ) {}
 
   /**
@@ -169,6 +176,14 @@ export class UploadRateLimiter {
    * Window is rolling on first touch (not aligned to wall-clock hours).
    */
   check(key: string, nowMs: number = Date.now()): { allowed: boolean; remaining: number; resetAt: number; retryAfterMs?: number } {
+    // Before inserting a brand-new key into a full map, sweep expired
+    // entries and (if still over cap) evict the oldest by insertion order.
+    // Existing-key updates skip the eviction path so an attacker who
+    // keeps hitting the same key can't push out other callers.
+    if (this.state.size >= this.maxEntries && !this.state.has(key)) {
+      this.pruneExpired(nowMs);
+      this.evictOldestUntilBelowCap();
+    }
     const entry = this.state.get(key);
     if (!entry || nowMs >= entry.resetAt) {
       const resetAt = nowMs + this.windowMs;
@@ -190,6 +205,20 @@ export class UploadRateLimiter {
   /** Visible for tests — current bucket count. */
   size(): number {
     return this.state.size;
+  }
+
+  private pruneExpired(nowMs: number): void {
+    for (const [key, entry] of this.state) {
+      if (nowMs >= entry.resetAt) this.state.delete(key);
+    }
+  }
+
+  private evictOldestUntilBelowCap(): void {
+    while (this.state.size >= this.maxEntries) {
+      const oldest = this.state.keys().next().value as string | undefined;
+      if (!oldest) return;
+      this.state.delete(oldest);
+    }
   }
 }
 
