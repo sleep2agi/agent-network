@@ -257,7 +257,7 @@ anet node start remote-bot
 ::: warning 未验证（请自行评估）
 - `codex-sdk` runtime 的端到端流程
 - `claude-code-cli` runtime 的端到端流程
-- `anet license` / `anet activate` —— v0.6 legacy trial 命令，**OSS 用户无需操作**。v2.2.12 latest `anet license` 直接返 `License: Apache-2.0 (open source)` 等三行（早期版本曾返误导性的 `License: PRO / Expires <date>`，已修正）。命中 `license_expired` 见 [troubleshooting](/troubleshooting)
+- `anet license` / `anet activate` —— v0.6 legacy trial 命令，**OSS 用户无需操作**。命中 `license_expired` 见 [troubleshooting — `license_expired`](/troubleshooting#license-expired-授权过期-legacy-行为)
 - `anet network create` 与跨用户网络共享 —— V3 多网络代码已合并但未做 E2E 回归
 :::
 
