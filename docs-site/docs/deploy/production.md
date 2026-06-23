@@ -95,6 +95,10 @@ anet hub start --host 0.0.0.0
 v0.7 / V2 时代的部署脚本经常带 `COMMHUB_ENABLE_TMUX=1`（当时默认开启），公网部署生效后等于把 tmux HTTP/WS 端点暴露 —— 即使有 admin auth + IP allowlist，多一层 attack surface 不必要。**确认 `--host 0.0.0.0` 公网部署的 hub 没在 env / systemd unit / docker-compose 里设 `COMMHUB_ENABLE_TMUX=1`**（启动 banner 应显示 `Tmux: DISABLED`）。
 :::
 
+::: tip 想用 tmux 控制面 (本机 dev / dashboard 调试)
+endpoint 详情见 [REST API — Tmux 控制面](/api/rest#tmux-控制面)，三个端点 (`GET /api/tmux/list` / `GET /api/tmux/:name` / `WebSocket /api/tmux/:name/stream`) 共用同一 auth 门控 (`COMMHUB_ENABLE_TMUX=1` + `COMMHUB_TMUX_ALLOWLIST` IP 白名单 + `users.role='admin'`)。
+:::
+
 ### 6. 备份 SQLite 数据
 
 ```bash

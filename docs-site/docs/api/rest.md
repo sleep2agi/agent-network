@@ -1853,7 +1853,7 @@ body `{ txn_id }` 必填（缺则 400）。
 ## Tmux 调试端点（opt-in）
 
 ::: warning 默认关闭
-仅在 `COMMHUB_ENABLE_TMUX=1` 启动 hub 时启用（[`index.ts:14`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L14)）。**默认全部返回 404 `tmux disabled`**。启用后还需 (a) 调用方 IP 在 `COMMHUB_TMUX_ALLOWLIST` 允许范围（逗号分隔，默认仅 localhost；verify [`index.ts:17`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L17)）+ (b) `users.role='admin'` system-admin auth。设计意图：让 hub 主机上的 agent tmux session 暴露给同机的 dev / dashboard 调试，**绝不要在公网开**。
+仅在 `COMMHUB_ENABLE_TMUX=1` 启动 hub 时启用（[`index.ts:14`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L14)）。**默认全部返回 404 `tmux disabled`**。启用后还需 (a) 调用方 IP 在 `COMMHUB_TMUX_ALLOWLIST` 允许范围（逗号分隔，默认仅 localhost；verify [`index.ts:17`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L17)）+ (b) `users.role='admin'` system-admin auth。设计意图：让 hub 主机上的 agent tmux session 暴露给同机的 dev / dashboard 调试，**绝不要在公网开**。公网部署 hardening 步骤见 [生产部署 §5 tmux 控制面已关闭](/deploy/production#_5-确认-tmux-控制面已关闭)。
 :::
 
 ### GET /api/tmux/:name
