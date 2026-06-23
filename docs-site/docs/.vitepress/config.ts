@@ -57,10 +57,8 @@ export default withMermaid(defineConfig({
           {
             text: '快速开始',
             items: [
-              { text: '基本概念', link: '/guide/basics' },
-              { text: '简介', link: '/guide/introduction' },
-              { text: '上手指南', link: '/guide/getting-started' },
-              { text: '一键安装 (多 Agent + tmux)', link: '/guide/one-shot-install' },
+              { text: '5 分钟懂 anet', link: '/guide/introduction' },
+              { text: '30 秒上手', link: '/guide/getting-started' },
               { text: '架构概览', link: '/guide/architecture' },
             ]
           },
@@ -84,6 +82,7 @@ export default withMermaid(defineConfig({
           {
             text: '核心概念',
             items: [
+              { text: '核心概念（基础）', link: '/guide/basics' },
               { text: 'Token 体系', link: '/concepts/tokens' },
               { text: '角色与权限', link: '/concepts/roles' },
               { text: '网络隔离', link: '/concepts/networks' },
@@ -144,10 +143,8 @@ export default withMermaid(defineConfig({
           {
             text: 'Getting Started',
             items: [
-              { text: 'Key Concepts', link: '/en/guide/basics' },
-              { text: 'Introduction', link: '/en/guide/introduction' },
-              { text: 'Getting Started', link: '/en/guide/getting-started' },
-              { text: 'One-Shot Install (Multi-Agent + tmux)', link: '/en/guide/one-shot-install' },
+              { text: '5-Minute Intro to anet', link: '/en/guide/introduction' },
+              { text: '30-Second Quickstart', link: '/en/guide/getting-started' },
               { text: 'Architecture', link: '/en/guide/architecture' },
             ]
           },
@@ -171,6 +168,7 @@ export default withMermaid(defineConfig({
           {
             text: 'Core Concepts',
             items: [
+              { text: 'Core Concepts (Basics)', link: '/en/guide/basics' },
               { text: 'Token System', link: '/en/concepts/tokens' },
               { text: 'Roles & Permissions', link: '/en/concepts/roles' },
               { text: 'Network Isolation', link: '/en/concepts/networks' },

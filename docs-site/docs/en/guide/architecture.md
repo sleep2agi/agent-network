@@ -121,6 +121,26 @@ graph TB
     AUTH --> DB
 ```
 
+## Four npm Packages
+
+Agent Network ships as four npm packages with clear responsibilities:
+
+| Package | Purpose | How to install / run |
+|------|------|---------|
+| `@sleep2agi/agent-network` | **anet CLI** -- config management, service launcher, status monitoring | `npm i -g @sleep2agi/agent-network` |
+| `@sleep2agi/agent-node` | **Agent runtime** -- AI model + tool calls + task handling | `anet node create` + `anet node start` |
+| `@sleep2agi/commhub-server` | **Communication hub** -- message routing + SSE push + task management | `anet hub start` |
+| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- visual monitoring + task management (Overview / Nodes / Tasks / Messages / Chat / Admin / Settings) | `anet hub dashboard` (CLI auto-fetches) |
+
+They can be used independently or composed:
+
+- **Just need CLI control**: install `@sleep2agi/agent-network`
+- **Just need the agent runtime**: `anet node create` + `anet node start`
+- **Just need the comm hub**: `bunx @sleep2agi/commhub-server`
+- **Just need the Web UI**: `anet hub dashboard`
+
+Full version scheme (independent semver per npm package vs the `v0.10.x` bundle-release anchor) is documented in [Versioning](/en/guide/versioning).
+
 ## CommHub Server
 
 CommHub Server is the core of the entire system, responsible for message routing, state management, and task tracking.

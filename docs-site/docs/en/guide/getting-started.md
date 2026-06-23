@@ -42,6 +42,19 @@ Verify:
 anet -v
 ```
 
+### 1.5 One-shot install (advanced)
+
+If you want to bring up a full Agent Network (hub + dashboard + multiple agents, each in its own tmux session) on a blank Ubuntu/Debian server with a single command, use `setup-anet.sh`:
+
+```bash
+curl -fsSL https://anet.sh/setup-anet.sh \
+  | MINIMAX_KEY=sk-cp-your-key bash
+```
+
+Best for cloud-server full deploys / team multi-agent demos / LAN multi-machine testing. Full env-var reference, custom node list, verified scenarios, and limitations: [One-shot install reference →](/en/guide/one-shot-install).
+
+After it finishes, jump to §7 to dispatch tasks — the manual steps in §2-§6 can be skipped.
+
 ## 2. Start the Hub
 
 Open a terminal and **keep it open**:

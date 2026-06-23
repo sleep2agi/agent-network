@@ -121,6 +121,26 @@ graph TB
     AUTH --> DB
 ```
 
+## 四个 npm 包
+
+Agent Network 由四个 npm 包组成，职责清晰：
+
+| 包名 | 用途 | 安装方式 |
+|------|------|---------|
+| `@sleep2agi/agent-network` | **anet CLI** -- 配置管理、启动服务、状态监控 | `npm i -g @sleep2agi/agent-network` |
+| `@sleep2agi/agent-node` | **Agent 运行时** -- AI 模型 + 工具调用 + 任务处理 | `anet node create` + `anet node start` |
+| `@sleep2agi/commhub-server` | **通信中枢** -- 消息路由 + SSE 推送 + 任务管理 | `anet hub start` |
+| `@sleep2agi/agent-network-dashboard` | **Web Dashboard** -- 可视化监控 + 任务管理（Overview / Nodes / Tasks / Messages / Chat / Admin / Settings） | `anet hub dashboard`（CLI 自动拉起）|
+
+这些包可以独立使用，也可以配合使用：
+
+- **只需 CLI 管控**：安装 `@sleep2agi/agent-network`
+- **只需 Agent 运行时**：`anet node create` + `anet node start`
+- **只需通信服务**：`bunx @sleep2agi/commhub-server`
+- **只需 Web 界面**：`anet hub dashboard`
+
+完整版本号体系（npm 包独立 semver vs `v0.10.x` bundle release 锚点）见 [版本号体系](/guide/versioning)。
+
 ## CommHub Server
 
 CommHub Server 是整个系统的核心，负责消息路由、状态管理、任务追踪。
