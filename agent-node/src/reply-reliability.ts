@@ -21,7 +21,7 @@
 // "persist before send, ack after deliver" ordering so a crash, an SSE
 // drop, or a transient hub outage never silently loses a reply.
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "fs";
 
 export class CommHubError extends Error {
   code?: number | string;
@@ -190,7 +190,26 @@ export class PendingReplyQueue {
   }
 
   save(items: PendingReply[]): void {
-    writeFileSync(this.filePath, JSON.stringify(items, null, 2));
+    // Atomic write: serialise to a sibling tmp file, then rename onto
+    // filePath. Rename is atomic on POSIX (and on Win32 if the dest
+    // exists, which it always does after the first save). Previously a
+    // direct writeFileSync was used — if the process crashed mid-write
+    // (or the disk filled mid-flush), the next load() would JSON.parse
+    // a truncated file, fall through the catch, and return an empty
+    // queue, silently losing every pending reply. The disk-backed
+    // contract of this queue ("a crash, an SSE drop, or a transient
+    // hub outage never silently loses a reply") was being violated by
+    // its own persistence layer.
+    const tmp = `${this.filePath}.tmp`;
+    try {
+      writeFileSync(tmp, JSON.stringify(items, null, 2));
+      renameSync(tmp, this.filePath);
+    } catch (e) {
+      // Best-effort cleanup of the tmp file on rename failure so we
+      // don't litter a sibling .tmp next to the queue.
+      try { unlinkSync(tmp); } catch { /* ignore */ }
+      throw e;
+    }
   }
 
   /**
