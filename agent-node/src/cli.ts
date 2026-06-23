@@ -18,6 +18,7 @@ import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { parseGoalCommand } from "./goals/parser";
 import { GoalStore, newGoal } from "./goals/store";
+import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import {
@@ -2566,3 +2567,40 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 for (const channel of TELEGRAM_CHANNELS) connectTelegram(channel);
 connectSSE();
+
+// #246 — opt-in telegram plugin watchdog. Reads
+// `fileConfig.telegram.watchdog === true` (default false). When enabled,
+// monitors the plugin's `bot.pid` under TELEGRAM_STATE_DIR; if the poller
+// dies, gates on (a) agent idle long enough, OR (b) dead-for-20-min force
+// fallback, then fires `anet node stop && anet node start` via a detached
+// helper so a node-side restart can survive killing this very process.
+// Thrash-capped to 1 restart per 30 min. See
+// `agent-node/src/telegram-watchdog.ts` for the full contract.
+if (fileConfig.telegram?.watchdog === true) {
+  const stateDir = fileConfig.env?.TELEGRAM_STATE_DIR;
+  if (!stateDir) {
+    warn(
+      "telegram.watchdog enabled but TELEGRAM_STATE_DIR not set in config.env — " +
+        "watchdog cannot locate bot.pid. Either unset telegram.watchdog or add env.TELEGRAM_STATE_DIR.",
+    );
+  } else {
+    try {
+      // Static import (top of file) so bun build bundles the module into
+      // dist/cli.js — dynamic import('./telegram-watchdog.js') would not be
+      // resolvable post-bundle. Opt-in flag still gates runtime startup,
+      // so non-telegram nodes pay only the bundle-size cost (~few KB),
+      // not any runtime cost.
+      startTelegramWatchdog(
+        {
+          stateDir,
+          alias: ALIAS,
+          commhubUrl: COMMHUB_URL,
+          commhubToken: AUTH_TOKEN,
+        },
+        (msg: string) => log(`[telegram-watchdog] ${msg}`),
+      );
+    } catch (e: any) {
+      warn(`telegram-watchdog start failed: ${e?.message ?? String(e)}`);
+    }
+  }
+}
