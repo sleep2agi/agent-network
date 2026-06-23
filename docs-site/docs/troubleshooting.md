@@ -712,7 +712,7 @@ anet node stop grok-marketing && anet node start grok-marketing
 anet --version          # agent-node ≥ 2.4.9
 ```
 
-**真长任务仍超时（视频生成 / 大型 X 搜索）**：v0.10.15 的 300 s 默认上限对一些视频或大批量场景仍偏短。用 `flags.grokAcpTimeoutMs`（config）或 `GROK_ACP_TIMEOUT_MS`（env，优先）调大：
+**真长任务仍超时（视频生成 / 大型 X 搜索）**：当前 latest 的 300 s 默认上限对一些视频或大批量场景仍偏短。用 `flags.grokAcpTimeoutMs`（config）或 `GROK_ACP_TIMEOUT_MS`（env，优先）调大：
 
 ```bash
 # 临时（启 grok 节点前 export）

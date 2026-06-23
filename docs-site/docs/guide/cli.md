@@ -244,7 +244,7 @@ admin 已经 bootstrap 过（`~/.anet/server/admin-utok.json` 存在），再次
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "stop" 分支)
 
 ::: tip v0.10.11 起新增（[#200](https://github.com/sleep2agi/agent-network/issues/200)）
-本命令在 v0.10.11 latest（`agent-network 2.2.10`+）已 ship。如果你装的还是 v0.10.10 及之前, 跑 `anet upgrade` 或 `npm i -g @sleep2agi/agent-network@latest` 升上去就有了。
+本命令 v0.10.11 起 ship，已在 npm `latest`。如果你装的还是 v0.10.10 及之前，跑 `anet upgrade` 即得。
 :::
 
 停掉本机正在跑的 CommHub Server。用 `lsof -t -i :<port> -sTCP:LISTEN` 找进程，SIGTERM 优雅退出，3s 内没退就 SIGKILL 兜底。
@@ -261,7 +261,7 @@ anet hub stop --port 8080    # 自定义端口
 > [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) (`serverCommand` "status" 分支)
 
 ::: tip v0.10.11 起新增（[#199](https://github.com/sleep2agi/agent-network/issues/199)）
-本命令在 v0.10.11 latest（`agent-network 2.2.10`+）已 ship。如果你装的还是 v0.10.10 及之前, 跑 `anet upgrade` 或 `npm i -g @sleep2agi/agent-network@latest` 升上去就有了。
+本命令 v0.10.11 起 ship，已在 npm `latest`。如果你装的还是 v0.10.10 及之前，跑 `anet upgrade` 即得。
 :::
 
 显示 hub 运行状态：进程 PID、端口、`/health` 返回的 server version。

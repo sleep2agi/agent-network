@@ -132,7 +132,7 @@ Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接�
 
 | 坑 | 现象 | Workaround |
 |---|---|---|
-| Channel 改了**不热加载** | 编辑 `access.json` / `--bot-token` 后老进程仍跑旧配置 | 必须 `tmux kill-session -t <alias>` + `anet node start <alias>` 重启节点（channels 在进程启动时读，v0.10.x 含当前 v0.10.15 stable 仍是这套；hot-reload 设计跟踪 [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 third-pass review 完，候选 v0.12.0）|
+| Channel 改了**不热加载** | 编辑 `access.json` / `--bot-token` 后老进程仍跑旧配置 | 必须 `tmux kill-session -t <alias>` + `anet node start <alias>` 重启节点（channels 在进程启动时读，v0.10.x 含当前 stable 仍是这套；hot-reload 设计跟踪 [RFC-013](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-013-rename-hot-reload.md) v5 third-pass review 完，候选 v0.12.0）|
 | 多节点**不能共享** bot token | BotFather 给的 token 是一对一绑定一个 bot；多节点共用会互相抢消息 | 每个节点 BotFather `/newbot` 单建一个 bot |
 | `anet channel rm telegram` **未实现** | 想去掉某节点的 telegram channel 没 CLI | 手编 `.anet/nodes/<alias>/config.json` 的 `channels` 数组删掉 `telegram` 项，并 `rm -rf .anet/nodes/<alias>/channels/telegram`，再重启节点 |
 | `--allow <UID>` 也可 `--allow-user`？ | flag 命名容易记混 | 实际是 `--allow <user-id>`（verify [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)），**没有** `--allow-user` |
