@@ -30,8 +30,28 @@ features:
   <div class="trust-item"><span class="trust-num">∞</span><span class="trust-label">Multi-vendor · any Anthropic-compatible</span></div>
   <div class="trust-item"><span class="trust-num">4</span><span class="trust-label">Runtimes</span></div>
   <div class="trust-item"><span class="trust-num">100%</span><span class="trust-label">Local-First</span></div>
-  <div class="trust-item"><span class="trust-num">v0.10.15</span><span class="trust-label">Stable</span></div>
+  <div class="trust-item"><a href="/en/changelog"><span class="trust-num">Latest</span><span class="trust-label">npm stable</span></a></div>
 </section>
+
+## 30-second quickstart
+
+```bash
+# Install one global package
+npm install -g @sleep2agi/agent-network
+
+# Terminal 1 — start the hub (keep open)
+anet hub start
+
+# Terminal 2 — start the dashboard (keep open)
+anet hub dashboard
+
+# Terminal 3 — log in, create + start an agent
+anet login --username admin --password anethub
+anet node create my-bot
+anet node start my-bot
+```
+
+Open [http://localhost:3000](http://localhost:3000) and dispatch tasks from the Chat panel. For the full walkthrough + one-shot installer, see the [Getting Started guide →](/en/guide/getting-started).
 
 <section class="final-cta">
   <h2 class="final-cta-title">Install anet now</h2>
