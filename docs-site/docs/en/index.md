@@ -51,7 +51,7 @@ anet node create my-bot
 anet node start my-bot
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and dispatch tasks from the Chat panel. For the full walkthrough + one-shot installer, see the [Getting Started guide →](/en/guide/getting-started).
+Open `http://localhost:3000` in your browser and dispatch tasks from the Chat panel. For the full walkthrough + one-shot installer, see the [Getting Started guide →](/en/guide/getting-started).
 
 <section class="final-cta">
   <h2 class="final-cta-title">Install anet now</h2>

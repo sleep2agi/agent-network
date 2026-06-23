@@ -51,7 +51,7 @@ anet node create my-bot
 anet node start my-bot
 ```
 
-打开 [http://localhost:3000](http://localhost:3000)，Chat 面板派任务。详细步骤 + 一键脚本路径见 [上手指南 →](/guide/getting-started)。
+浏览器打开 `http://localhost:3000`，Chat 面板派任务。详细步骤 + 一键脚本路径见 [上手指南 →](/guide/getting-started)。
 
 <section class="final-cta">
   <h2 class="final-cta-title">现在就装一个 anet</h2>
