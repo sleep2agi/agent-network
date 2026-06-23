@@ -219,7 +219,7 @@ The auth token is supplied via the `token` field in `.anet/nodes/<name>/config.j
 
 ## Configuration Files
 
-Agent Node supports multiple configuration methods, from highest to lowest priority (verified at [`agent-node/src/cli.ts:100-128`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)):
+Agent Node supports multiple configuration methods, from highest to lowest priority (verified at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)):
 
 ```mermaid
 flowchart TD
@@ -232,7 +232,7 @@ flowchart TD
 ```
 
 ::: tip Global `~/.anet/config.json` fallback
-After the project config is loaded, [`cli.ts:123-125`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L123) fills in the missing `hub` and `token` fields from the global `~/.anet/config.json`. **Only these two fields fall back across projects** — `runtime` / `model` / `tools` / `env` must be set via project `config.json` / CLI / env; global config does not cover them. Aligned with the [feedback_config_priority] memory ("project config overrides global at the field level; missing fields fall back to global").
+After the project config is loaded, [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) fills in the missing `hub` and `token` fields from the global `~/.anet/config.json`. **Only these two fields fall back across projects** — `runtime` / `model` / `tools` / `env` must be set via project `config.json` / CLI / env; global config does not cover them. Aligned with the [feedback_config_priority] memory ("project config overrides global at the field level; missing fields fall back to global").
 :::
 
 ### Full config.json Fields
@@ -346,11 +346,11 @@ The `--tools` flag only affects the `claude-agent-sdk` runtime — the `codex-sd
 
 | Input | Effect | Verify |
 |------|---------|--------|
-| `--tools all` | Full SDK preset (same as above) — single source of truth | [`cli.ts:219`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L219) |
-| `--tools Read,Glob,Grep` | Explicit allowlist (string array), bypasses preset — strict sandbox | [`cli.ts:217,220`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L217) |
-| Absent / empty string | **Falls back to full preset** (the #101 fix; previously left as `undefined` → empty set) | [`cli.ts:216,221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L216) |
+| `--tools all` | Full SDK preset (same as above) — single source of truth | [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
+| `--tools Read,Glob,Grep` | Explicit allowlist (string array), bypasses preset — strict sandbox | [`cli.ts,220`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
+| Absent / empty string | **Falls back to full preset** (the #101 fix; previously left as `undefined` → empty set) | [`cli.ts,221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
 
-Actual logic from source ([`agent-node/src/cli.ts:210-221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L210)):
+Actual logic from source ([`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)):
 
 ```ts
 const TOOLS_PRESET = { type: "preset" as const, preset: "claude_code" as const };
@@ -363,7 +363,7 @@ let TOOLS: string[] | typeof TOOLS_PRESET =
   toolsRaw === "all" ? TOOLS_PRESET
   : (TOOLS_EXPLICIT && TOOLS_EXPLICIT.length) ? TOOLS_EXPLICIT
   : TOOLS_PRESET;
-// ... cli.ts:653: tools: TOOLS  ← passed to claude-agent-sdk query options (preset or string[])
+// ... cli.ts: tools: TOOLS  ← passed to claude-agent-sdk query options (preset or string[])
 ```
 
 ```bash
@@ -410,7 +410,7 @@ npx @sleep2agi/agent-node --alias coder --max-budget 0.1
 npx @sleep2agi/agent-node --alias reasoner --max-budget 1.0
 ```
 
-Verified at [`agent-node/src/cli.ts:580`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L580):
+Verified at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts):
 ```ts
 if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // passed to claude-agent-sdk query options
 ```
@@ -418,7 +418,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // passed to claude-agen
 When `SDKResultMessage.total_cost_usd` reaches `maxBudgetUsd`, claude-agent-sdk automatically ends the turn and the task moves to `error_max_budget`.
 
 ::: warning codex-sdk / claude-code-cli runtime do not support a USD budget cap
-- The `codex-sdk` path ([`cli.ts:669-755 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L669)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the sdk-deep-dive chain).
+- The `codex-sdk` path ([`cli.ts processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)) does not read `MAX_BUDGET`; **`--max-budget` is silently ignored**. Codex-sdk only reports token counts (`TurnCompletedEvent.usage`), not USD — you have to derive cost from your own model→price table (aligned with the sdk-deep-dive chain).
 - `claude-code-cli` runs against your local Claude Code subscription, counted against subscription quota rather than USD.
 - **Cross-runtime budget control**: put a reverse proxy in front (nginx / Cloudflare / litellm proxy) and throttle by model-API call count.
 :::
@@ -471,27 +471,27 @@ If the process crashes (no time to report), CommHub detects via heartbeat timeou
 
 ## Environment Variables
 
-Only the env vars that agent-node actually reads from `process.env` (verified at [`agent-node/src/cli.ts:100-260`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)):
+Only the env vars that agent-node actually reads from `process.env` (verified at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)):
 
 | Variable | Equivalent CLI flag / config field | Description |
 |------|------------------------------|------|
-| `COMMHUB_URL` | `--hub` / `--url` / `config.hub` | CommHub Server address (cli.ts:158) |
-| `COMMHUB_TOKEN` | `config.token` / `globalConfig.token` | Auth token (cli.ts:186; **no CLI flag accepted**) |
-| `COMMHUB_ALIAS` / `ALIAS` | `--alias` / `config.alias` | Agent alias — both env var names work (cli.ts:109) |
+| `COMMHUB_URL` | `--hub` / `--url` / `config.hub` | CommHub Server address (cli.ts) |
+| `COMMHUB_TOKEN` | `config.token` / `globalConfig.token` | Auth token (cli.ts; **no CLI flag accepted**) |
+| `COMMHUB_ALIAS` / `ALIAS` | `--alias` / `config.alias` | Agent alias — both env var names work (cli.ts) |
 | `RUNTIME` | `--runtime` / `config.runtime` | Runtime engine, defaults to `claude-agent-sdk` |
 | `MODEL` | `--model` / `config.model` | AI model |
 | `LOG_LEVEL` | `--log-level` / `config.logLevel` (**top-level**, not under `flags`) | `debug` / `info` / `warn` / `error` |
-| `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | Network ID fallback (typically inferred from `ntok_`; cli.ts:356) |
-| `TELEGRAM_BOT_TOKEN` | channel `.env` / `config.env.TELEGRAM_BOT_TOKEN` | Bot token for the Telegram channel — agent-node reads it directly in the telegram channel startup path (cli.ts:259); the allowlist comes from `access.json`, not env (see [Channel — Telegram](/en/guide/channels#telegram-channel)) |
-| `CLAUDE_TIMEOUT_MS` | `--claude-timeout-ms` / `config.flags.claudeTimeoutMs` / `config.claudeTimeoutMs` | Per-query timeout (ms) for the `claude-agent-sdk` runtime, default **`300000` (300s)** (raised from 120s in v0.9.2 by [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) — the [SDK concurrency investigation](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md) measured intern API per-request latency stretching to 17-37s under heavy fan-out, so the old 120s ceiling fired mid-stream and 25/30 sub-agents silently failed); on timeout it aborts and returns an error suggesting you check `ANTHROPIC_BASE_URL` reachability. Verify [`agent-node/src/cli.ts:241-243`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L241) |
-| `CLAUDE_MAX_RETRIES` | `--claude-max-retries` / `config.flags.claudeMaxRetries` / `config.claudeMaxRetries` | Retry count for `claude-agent-sdk` runtime queries that fail. Default **`2`** (3 attempts total including the initial). Each attempt runs its own `CLAUDE_TIMEOUT_MS` window; on transient errors / timeouts, backs off `4s, 8s + 0-1s jitter` (the jitter spreads herd retries so a recovering vendor queue isn't slammed). **Auth-class errors do not retry** ([#129 fast-fail](https://github.com/sleep2agi/agent-network/issues/129): the `isAuthError` regex matches 401 / 403 / `invalid_api_key` / intern A02xx etc. and returns a FATAL with the vendor-specific URL hint). Set `0` to revert to v0.9.1 behavior (no retry). Introduced in v0.9.2 via [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132). Verify [`agent-node/src/cli.ts:250-253`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L250) + retry loop [`cli.ts:729-792`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L729) |
-| `ANET_CODEX_STDIO_DIRECT` | env only (no CLI flag / config field; per-spawn injection) | **v0.10.0+, only takes effect when `runtime=codex`** (claude-agent-sdk / claude-code-cli ignore it). Set `=1` to switch the codex runtime from the `@openai/codex-sdk` wrapper to the **direct stdio JSON-RPC client** path: agent-node runs `spawn('codex', ['app-server'])` with a ~155 LOC stdio client and the full 67-method v2 protocol surface (thread / turn / item / realtime), **bypassing** the wrapper's `--mcp-config` HTTP-transport bug family ([#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause). v0.10.x (including the current v0.10.15 stable) **still defaults to the wrapper** (preview-feedback window + backward compat); v0.11.0 plans to flip the default, at which point the toggle becomes `ANET_CODEX_LEGACY_SDK=1` opt-out (per [`agent-node/src/cli.ts:1043-1048` comments](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1043)). Introduced in v0.10.0 via [#141](https://github.com/sleep2agi/agent-network/issues/141). Verify [`agent-node/src/cli.ts:1048` `if (process.env.ANET_CODEX_STDIO_DIRECT === "1")`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1048) |
+| `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | Network ID fallback (typically inferred from `ntok_`; cli.ts) |
+| `TELEGRAM_BOT_TOKEN` | channel `.env` / `config.env.TELEGRAM_BOT_TOKEN` | Bot token for the Telegram channel — agent-node reads it directly in the telegram channel startup path (cli.ts); the allowlist comes from `access.json`, not env (see [Channel — Telegram](/en/guide/channels#telegram-channel)) |
+| `CLAUDE_TIMEOUT_MS` | `--claude-timeout-ms` / `config.flags.claudeTimeoutMs` / `config.claudeTimeoutMs` | Per-query timeout (ms) for the `claude-agent-sdk` runtime, default **`300000` (300s)** (raised from 120s in v0.9.2 by [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) — the [SDK concurrency investigation](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md) measured intern API per-request latency stretching to 17-37s under heavy fan-out, so the old 120s ceiling fired mid-stream and 25/30 sub-agents silently failed); on timeout it aborts and returns an error suggesting you check `ANTHROPIC_BASE_URL` reachability. Verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
+| `CLAUDE_MAX_RETRIES` | `--claude-max-retries` / `config.flags.claudeMaxRetries` / `config.claudeMaxRetries` | Retry count for `claude-agent-sdk` runtime queries that fail. Default **`2`** (3 attempts total including the initial). Each attempt runs its own `CLAUDE_TIMEOUT_MS` window; on transient errors / timeouts, backs off `4s, 8s + 0-1s jitter` (the jitter spreads herd retries so a recovering vendor queue isn't slammed). **Auth-class errors do not retry** ([#129 fast-fail](https://github.com/sleep2agi/agent-network/issues/129): the `isAuthError` regex matches 401 / 403 / `invalid_api_key` / intern A02xx etc. and returns a FATAL with the vendor-specific URL hint). Set `0` to revert to v0.9.1 behavior (no retry). Introduced in v0.9.2 via [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132). Verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) + retry loop [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
+| `ANET_CODEX_STDIO_DIRECT` | env only (no CLI flag / config field; per-spawn injection) | **v0.10.0+, only takes effect when `runtime=codex`** (claude-agent-sdk / claude-code-cli ignore it). Set `=1` to switch the codex runtime from the `@openai/codex-sdk` wrapper to the **direct stdio JSON-RPC client** path: agent-node runs `spawn('codex', ['app-server'])` with a ~155 LOC stdio client and the full 67-method v2 protocol surface (thread / turn / item / realtime), **bypassing** the wrapper's `--mcp-config` HTTP-transport bug family ([#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause). v0.10.x (including the current v0.10.15 stable) **still defaults to the wrapper** (preview-feedback window + backward compat); v0.11.0 plans to flip the default, at which point the toggle becomes `ANET_CODEX_LEGACY_SDK=1` opt-out (per [`agent-node/src/cli.ts` comments](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)). Introduced in v0.10.0 via [#141](https://github.com/sleep2agi/agent-network/issues/141). Verify [`agent-node/src/cli.ts` `if (process.env.ANET_CODEX_STDIO_DIRECT === "1")`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
 | `ANTHROPIC_BASE_URL` | `config.env.ANTHROPIC_BASE_URL` | Model API URL (required when targeting a third-party Anthropic-compatible endpoint) |
 | `ANTHROPIC_AUTH_TOKEN` | `config.env.ANTHROPIC_AUTH_TOKEN` | Model API key — **for third-party Anthropic-compatible endpoints** (MiniMax / DeepSeek / GLM / Kimi / InternLM / Xiaomi MiMo / OpenRouter / vLLM, etc.) |
 | `ANTHROPIC_API_KEY` | `config.env.ANTHROPIC_API_KEY` | Model API key — **only for direct api.anthropic.com**; don't reuse it for third-party endpoint keys (see [runtimes — claude-agent-sdk pitfalls](/en/guide/runtimes#claude-agent-sdk)) |
 
 ::: warning `TOOLS` / `SYSTEM_PROMPT` env vars do not exist
-The previously listed `TOOLS` and `SYSTEM_PROMPT` env vars are **not read** by agent-node (verified: cli.ts:161 `toolsRaw = opts.tools || fileConfig.tools` has no `process.env.TOOLS`; cli.ts:180 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` has no env reading). To set tools, use the `--tools` CLI flag or `config.json`'s `tools` field; for the system prompt, use the `--prompt` flag or `config.json`'s `systemPrompt` field.
+The previously listed `TOOLS` and `SYSTEM_PROMPT` env vars are **not read** by agent-node (verified: cli.ts `toolsRaw = opts.tools || fileConfig.tools` has no `process.env.TOOLS`; cli.ts `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` has no env reading). To set tools, use the `--tools` CLI flag or `config.json`'s `tools` field; for the system prompt, use the `--prompt` flag or `config.json`'s `systemPrompt` field.
 :::
 
 ::: tip Docker Usage

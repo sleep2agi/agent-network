@@ -219,7 +219,7 @@ token 由 `.anet/nodes/<name>/config.json` 的 `token` 字段或 `COMMHUB_TOKEN`
 
 ## 配置文件
 
-Agent Node 支持多种配置方式，优先级从高到低（verify [`agent-node/src/cli.ts:100-128`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)）：
+Agent Node 支持多种配置方式，优先级从高到低（verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）：
 
 ```mermaid
 flowchart TD
@@ -232,7 +232,7 @@ flowchart TD
 ```
 
 ::: tip 全局 `~/.anet/config.json` fallback
-[`cli.ts:123-125`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L123) 在加载完项目 config 后会用全局 `~/.anet/config.json` 的 `hub` 和 `token` 字段填空缺。**只有这两个字段会跨项目 fallback**——`runtime` / `model` / `tools` / `env` 等都必须在项目 `config.json` / CLI / env 提供，全局 config 不接管。跟 [feedback_config_priority] memory 一致（项目字段级覆盖全局，缺失字段 fallback 到全局）。
+[`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 在加载完项目 config 后会用全局 `~/.anet/config.json` 的 `hub` 和 `token` 字段填空缺。**只有这两个字段会跨项目 fallback**——`runtime` / `model` / `tools` / `env` 等都必须在项目 `config.json` / CLI / env 提供，全局 config 不接管。跟 [feedback_config_priority] memory 一致（项目字段级覆盖全局，缺失字段 fallback 到全局）。
 :::
 
 ### config.json 完整字段
@@ -346,11 +346,11 @@ Agent Node 只对 `task` 类型消息触发 AI 处理：
 
 | 输入 | 实际效果 | verify |
 |------|---------|--------|
-| `--tools all` | SDK preset 全集（同上）—— 单一 source-of-truth | [`cli.ts:219`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L219) |
-| `--tools Read,Glob,Grep` | 显式 allowlist（字符串数组），跳过 preset —— 严格 sandbox 用 | [`cli.ts:217,220`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L217) |
-| 未传 / 空字符串 | **fallback 到 preset 全集**（#101 fix；老版本是 `undefined` → 空集） | [`cli.ts:216,221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L216) |
+| `--tools all` | SDK preset 全集（同上）—— 单一 source-of-truth | [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
+| `--tools Read,Glob,Grep` | 显式 allowlist（字符串数组），跳过 preset —— 严格 sandbox 用 | [`cli.ts,220`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
+| 未传 / 空字符串 | **fallback 到 preset 全集**（#101 fix；老版本是 `undefined` → 空集） | [`cli.ts,221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
 
-源码实际逻辑（[`agent-node/src/cli.ts:210-221`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L210)）：
+源码实际逻辑（[`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）：
 
 ```ts
 const TOOLS_PRESET = { type: "preset" as const, preset: "claude_code" as const };
@@ -363,7 +363,7 @@ let TOOLS: string[] | typeof TOOLS_PRESET =
   toolsRaw === "all" ? TOOLS_PRESET
   : (TOOLS_EXPLICIT && TOOLS_EXPLICIT.length) ? TOOLS_EXPLICIT
   : TOOLS_PRESET;
-// ... cli.ts:653: tools: TOOLS  ← 传给 claude-agent-sdk query options（preset 或 string[]）
+// ... cli.ts: tools: TOOLS  ← 传给 claude-agent-sdk query options（preset 或 string[]）
 ```
 
 ```bash
@@ -410,7 +410,7 @@ npx @sleep2agi/agent-node --alias 代码 --max-budget 0.1
 npx @sleep2agi/agent-node --alias 推理 --max-budget 1.0
 ```
 
-verify [`agent-node/src/cli.ts:580`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L580):
+verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts):
 ```ts
 if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // 传给 claude-agent-sdk query options
 ```
@@ -418,7 +418,7 @@ if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;  // 传给 claude-agent-s
 claude-agent-sdk 在 `SDKResultMessage.total_cost_usd` 达到 `maxBudgetUsd` 时自动结束当前 turn，task 状态走 `error_max_budget`。
 
 ::: warning codex-sdk / claude-code-cli runtime 不支持 budget cap
-- `codex-sdk` 路径（[`cli.ts:669-755 processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L669)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（跟 sdk-deep-dive 一致）
+- `codex-sdk` 路径（[`cli.ts processWithCodex`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）没读 `MAX_BUDGET`，**`--max-budget` 静默忽略**；codex-sdk 仅返 token 数（`TurnCompletedEvent.usage`）不返美金，预算控制要你自己跟价表算（跟 sdk-deep-dive 一致）
 - `claude-code-cli` 走本机 Claude Code 订阅，按订阅 quota 不按美金算
 - **跨 runtime 通用预算控制**：前置反向代理（nginx / Cloudflare / litellm proxy）按 model API 调用次数限流
 :::
@@ -471,27 +471,27 @@ SSE 断连后自动重连，使用指数退避策略：
 
 ## 环境变量
 
-仅列 agent-node 实际从 `process.env` 读的字段（verify [`agent-node/src/cli.ts:100-260`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L100)）：
+仅列 agent-node 实际从 `process.env` 读的字段（verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）：
 
 | 变量 | 等价 CLI flag / config 字段 | 说明 |
 |------|------------------------------|------|
-| `COMMHUB_URL` | `--hub` / `--url` / `config.hub` | CommHub Server 地址（cli.ts:158） |
-| `COMMHUB_TOKEN` | `config.token` / `globalConfig.token` | 认证 Token（cli.ts:186；**不接受 CLI flag**） |
-| `COMMHUB_ALIAS` / `ALIAS` | `--alias` / `config.alias` | Agent 别名，两个 env 名都接受（cli.ts:109） |
+| `COMMHUB_URL` | `--hub` / `--url` / `config.hub` | CommHub Server 地址（cli.ts） |
+| `COMMHUB_TOKEN` | `config.token` / `globalConfig.token` | 认证 Token（cli.ts；**不接受 CLI flag**） |
+| `COMMHUB_ALIAS` / `ALIAS` | `--alias` / `config.alias` | Agent 别名，两个 env 名都接受（cli.ts） |
 | `RUNTIME` | `--runtime` / `config.runtime` | 运行时引擎，默认 `claude-agent-sdk` |
 | `MODEL` | `--model` / `config.model` | AI 模型 |
 | `LOG_LEVEL` | `--log-level` / `config.logLevel`（**top-level**，不在 `flags` 里） | `debug` / `info` / `warn` / `error` |
-| `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | network ID 兜底（多数情况靠 ntok_ 推断，不需手填；cli.ts:356） |
-| `TELEGRAM_BOT_TOKEN` | channel `.env` / `config.env.TELEGRAM_BOT_TOKEN` | Telegram channel 的 bot token —— agent-node 在 telegram channel 启动路径直接读（cli.ts:259）；白名单走 `access.json` 不走 env（见 [Channel — Telegram](/guide/channels#telegram-channel)） |
-| `CLAUDE_TIMEOUT_MS` | `--claude-timeout-ms` / `config.flags.claudeTimeoutMs` / `config.claudeTimeoutMs` | `claude-agent-sdk` runtime 单次 query 超时（毫秒），默认 **`300000`（300s）**（[#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) v0.9.2 起从 120s 提升 —— [SDK concurrency investigation](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md) 实测 fan-out 高并发场景 intern API 单次 latency 拉到 17-37s，120s 老 ceiling 中途触发 abort 导致 25/30 子 agent 失败）；超时 abort + 返回错误，提示检查 `ANTHROPIC_BASE_URL` 是否可达。verify [`agent-node/src/cli.ts:241-243`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L241) |
-| `CLAUDE_MAX_RETRIES` | `--claude-max-retries` / `config.flags.claudeMaxRetries` / `config.claudeMaxRetries` | `claude-agent-sdk` runtime 单 query 失败时的重试次数，默认 **`2`**（共 3 attempts 含 initial）。每次 attempt 跑满 `CLAUDE_TIMEOUT_MS` window；transient error / timeout backoff `4s, 8s + 0-1s jitter`（jitter 散开 herd retries 防一窝蜂打 vendor queue）。**auth-class 错误不 retry**（[#129 fast-fail](https://github.com/sleep2agi/agent-network/issues/129)：`isAuthError` regex 命中 401 / 403 / `invalid_api_key` / intern A02xx 等直接 FATAL 返回 vendor-specific URL hint）。设 `0` 退回 v0.9.1 行为（no retry）。[#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) v0.9.2 起引入。verify [`agent-node/src/cli.ts:250-253`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L250) + retry loop [`cli.ts:729-792`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L729) |
-| `ANET_CODEX_STDIO_DIRECT` | env only（无 CLI flag / config 字段；per-spawn 注入）| **v0.10.0 起，仅 `runtime=codex` 时生效**（claude-agent-sdk / claude-code-cli 忽略）。设 `=1` 把 codex runtime 从 `@openai/codex-sdk` wrapper 切到**直 stdio JSON-RPC 客户端**路径：agent-node `spawn('codex', ['app-server'])` + ~155 LOC stdio client + 完整 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** wrapper `--mcp-config` HTTP transport bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family）。v0.10.x（含当前 v0.10.15 stable）**默认仍走 wrapper**（preview 反馈窗口 + backward compat）；v0.11.0 计划 default flip，届时 toggle 改成 `ANET_CODEX_LEGACY_SDK=1` opt-out 反向开关（per [`agent-node/src/cli.ts:1043-1048` 注释](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1043)）。[#141](https://github.com/sleep2agi/agent-network/issues/141) v0.10.0 起引入。verify [`agent-node/src/cli.ts:1048` `if (process.env.ANET_CODEX_STDIO_DIRECT === "1")`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1048) |
+| `ANET_NETWORK_ID` | `config.network_id` / `globalConfig.network_id` | network ID 兜底（多数情况靠 ntok_ 推断，不需手填；cli.ts） |
+| `TELEGRAM_BOT_TOKEN` | channel `.env` / `config.env.TELEGRAM_BOT_TOKEN` | Telegram channel 的 bot token —— agent-node 在 telegram channel 启动路径直接读（cli.ts）；白名单走 `access.json` 不走 env（见 [Channel — Telegram](/guide/channels#telegram-channel)） |
+| `CLAUDE_TIMEOUT_MS` | `--claude-timeout-ms` / `config.flags.claudeTimeoutMs` / `config.claudeTimeoutMs` | `claude-agent-sdk` runtime 单次 query 超时（毫秒），默认 **`300000`（300s）**（[#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) v0.9.2 起从 120s 提升 —— [SDK concurrency investigation](https://github.com/sleep2agi/agent-network/blob/main/docs/research/sdk-concurrency-investigation.md) 实测 fan-out 高并发场景 intern API 单次 latency 拉到 17-37s，120s 老 ceiling 中途触发 abort 导致 25/30 子 agent 失败）；超时 abort + 返回错误，提示检查 `ANTHROPIC_BASE_URL` 是否可达。verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
+| `CLAUDE_MAX_RETRIES` | `--claude-max-retries` / `config.flags.claudeMaxRetries` / `config.claudeMaxRetries` | `claude-agent-sdk` runtime 单 query 失败时的重试次数，默认 **`2`**（共 3 attempts 含 initial）。每次 attempt 跑满 `CLAUDE_TIMEOUT_MS` window；transient error / timeout backoff `4s, 8s + 0-1s jitter`（jitter 散开 herd retries 防一窝蜂打 vendor queue）。**auth-class 错误不 retry**（[#129 fast-fail](https://github.com/sleep2agi/agent-network/issues/129)：`isAuthError` regex 命中 401 / 403 / `invalid_api_key` / intern A02xx 等直接 FATAL 返回 vendor-specific URL hint）。设 `0` 退回 v0.9.1 行为（no retry）。[#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) v0.9.2 起引入。verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) + retry loop [`cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
+| `ANET_CODEX_STDIO_DIRECT` | env only（无 CLI flag / config 字段；per-spawn 注入）| **v0.10.0 起，仅 `runtime=codex` 时生效**（claude-agent-sdk / claude-code-cli 忽略）。设 `=1` 把 codex runtime 从 `@openai/codex-sdk` wrapper 切到**直 stdio JSON-RPC 客户端**路径：agent-node `spawn('codex', ['app-server'])` + ~155 LOC stdio client + 完整 67-method v2 protocol surface（thread / turn / item / realtime），**绕开** wrapper `--mcp-config` HTTP transport bug 链（[#102](https://github.com/sleep2agi/agent-network/issues/102) hang root cause family）。v0.10.x（含当前 v0.10.15 stable）**默认仍走 wrapper**（preview 反馈窗口 + backward compat）；v0.11.0 计划 default flip，届时 toggle 改成 `ANET_CODEX_LEGACY_SDK=1` opt-out 反向开关（per [`agent-node/src/cli.ts` 注释](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）。[#141](https://github.com/sleep2agi/agent-network/issues/141) v0.10.0 起引入。verify [`agent-node/src/cli.ts` `if (process.env.ANET_CODEX_STDIO_DIRECT === "1")`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) |
 | `ANTHROPIC_BASE_URL` | `config.env.ANTHROPIC_BASE_URL` | 模型 API 地址（接第三方 Anthropic 兼容 endpoint 时必填） |
 | `ANTHROPIC_AUTH_TOKEN` | `config.env.ANTHROPIC_AUTH_TOKEN` | 模型 API Key —— **第三方 Anthropic 兼容 endpoint**（MiniMax / DeepSeek / GLM / Kimi / 书生 / 小米 MiMo / OpenRouter / vLLM 等）走这个 |
 | `ANTHROPIC_API_KEY` | `config.env.ANTHROPIC_API_KEY` | 模型 API Key —— **api.anthropic.com 直连专用**，不要拿来传第三方 endpoint key（详见 [runtimes — claude-agent-sdk 常见坑](/guide/runtimes#claude-agent-sdk)） |
 
 ::: warning `TOOLS` / `SYSTEM_PROMPT` env vars 不存在
-旧 doc 列的 `TOOLS` / `SYSTEM_PROMPT` 这两个 env var **agent-node 不读**（verify cli.ts:161 `toolsRaw = opts.tools || fileConfig.tools` 没 `process.env.TOOLS`；cli.ts:180 `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` 没 env）。要设置 tools 用 `--tools` CLI flag 或 `config.json` 的 `tools` 字段；系统提示词用 `--prompt` flag 或 `config.json` 的 `systemPrompt` 字段。
+旧 doc 列的 `TOOLS` / `SYSTEM_PROMPT` 这两个 env var **agent-node 不读**（verify cli.ts `toolsRaw = opts.tools || fileConfig.tools` 没 `process.env.TOOLS`；cli.ts `SYSTEM_PROMPT = opts.prompt || fileConfig.systemPrompt` 没 env）。要设置 tools 用 `--tools` CLI flag 或 `config.json` 的 `tools` 字段；系统提示词用 `--prompt` flag 或 `config.json` 的 `systemPrompt` 字段。
 :::
 
 ::: tip Docker 使用
