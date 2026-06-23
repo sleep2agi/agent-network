@@ -94,7 +94,14 @@ export class CurrentAliasResolver {
     // stale so the first refresh() always hits the server even when
     // called at logical time 0 (which would otherwise look fresh under
     // a naive `nowMs - 0 < ttl` check).
-    if (this.cacheTtlMs > 0 && this.cachedAt > 0 && nowMs - this.cachedAt < this.cacheTtlMs) {
+    //
+    // `nowMs - cachedAt >= 0` guards against backward wall-clock skew
+    // (NTP step, VM live-migrate). Without it, a negative delta is
+    // < cacheTtlMs and we'd serve the cached alias forever even when
+    // the rename-driven /api/status update is overdue. Re-fetching on
+    // skew costs at most one extra round-trip.
+    const delta = nowMs - this.cachedAt;
+    if (this.cacheTtlMs > 0 && this.cachedAt > 0 && delta >= 0 && delta < this.cacheTtlMs) {
       return this.cachedAlias;
     }
     if (this.fetchInFlight) return this.fetchInFlight;
@@ -145,13 +152,20 @@ export class CurrentAliasResolver {
     return this.opts.nodeId;
   }
 
-  /** Milliseconds since the last cache touch. Useful for assertions on TTL behaviour. */
+  /** Milliseconds since the last cache touch. Useful for assertions on TTL behaviour.
+   *  Returns 0 (not negative) under backward wall-clock skew so callers
+   *  reasoning about "how old" don't see nonsensical negative ages. */
   ageMs(nowMs: number = Date.now()): number {
-    return this.cachedAt === 0 ? Number.POSITIVE_INFINITY : nowMs - this.cachedAt;
+    if (this.cachedAt === 0) return Number.POSITIVE_INFINITY;
+    return Math.max(0, nowMs - this.cachedAt);
   }
 
-  /** Whether the cache currently considers itself fresh. */
+  /** Whether the cache currently considers itself fresh.
+   *  Backward skew invalidates the cache (treats it as stale) so we don't
+   *  serve a stale value across an NTP step or VM live-migrate. */
   isFresh(nowMs: number = Date.now()): boolean {
-    return this.cachedAt !== 0 && nowMs - this.cachedAt < this.cacheTtlMs;
+    if (this.cachedAt === 0) return false;
+    const delta = nowMs - this.cachedAt;
+    return delta >= 0 && delta < this.cacheTtlMs;
   }
 }
