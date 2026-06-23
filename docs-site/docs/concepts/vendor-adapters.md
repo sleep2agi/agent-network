@@ -1,6 +1,6 @@
 # Vendor Adapters（厂商适配层）
 
-> ⚠ **从 v0.9.1 起新增**（agent-node v2.3.9-preview.0+，hotfix [#130](https://github.com/sleep2agi/agent-network/issues/130) 引入）
+> ⚠ **v0.9.1 起新增**（hotfix [#130](https://github.com/sleep2agi/agent-network/issues/130) 引入，已在 npm `latest`）
 
 ::: warning ⏳ Interim workaround，非永久方案
 **本 adapter 是 interim 补丁，不是 anet 的 vendor-specific lock-in 路线**。anet 已联系 InternLM 团队推上游修复 —— 等 intern-s2-preview endpoint 默认 emit 标准 Anthropic `tool_use` content blocks 后，这一层 adapter 就**可以下线**。
@@ -27,7 +27,7 @@ agent-node 的 `claude-agent-sdk` runtime 是 Anthropic Messages API 客户端�
 
 **效果对照**（直 curl 验证，详见 [research report](https://github.com/sleep2agi/agent-network/blob/main/docs/research/intern-tool-calling-investigation.md)）：
 
-| 维度 | 无 adapter（agent-node ≤ 2.3.8）| 有 adapter（v2.3.9-preview.0+）|
+| 维度 | 无 adapter（v0.9.1 之前）| 有 adapter（v0.9.1+，已在 npm `latest`）|
 |---|---|---|
 | `stop_reason` | `max_tokens`（自由文本撞顶被截）| `tool_use`（干净停止）|
 | `output_tokens` | 1024（拉满）| 122（精炼）|
