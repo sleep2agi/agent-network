@@ -698,7 +698,7 @@ curl http://localhost:9200/api/server/<host>/agents \
 
 ### `grok-build-acp` 节点任务挂死 / `session/prompt timed out after 300000ms` / JSON-RPC error 32603
 
-**症状**：用 `grok-build-acp` runtime 创建的节点，commhub 给它派一个稍长一点（> 5min）的任务，节点不报错也不回复，pane 卡在 `session/prompt` 调用上；agent-node 日志里能看到 `session/prompt timed out after 300000ms` 或 ACP server 回了 JSON-RPC `code: 32603`。
+**症状**：用 `grok-build-acp` runtime 创建的节点，CommHub 给它派一个稍长一点（> 5min）的任务，节点不报错也不回复，pane 卡在 `session/prompt` 调用上；agent-node 日志里能看到 `session/prompt timed out after 300000ms` 或 ACP server 回了 JSON-RPC `code: 32603`。
 
 **根因**：agent-node 2.4.8 及以下对 ACP `session/prompt` 写死了 300 s 超时（沿用 codex-sdk wrapper 的旧值），但 grok-build-acp 后端是用户级长任务为主，5 min 是常态偏短。
 
@@ -741,7 +741,7 @@ GROK_ACP_TIMEOUT_MS=900000 anet node start my-grok
 
 ### 服务器负载异常 / claude session 越开越卡 / 一堆 zombie bun 占满 CPU
 
-**症状**：服务器（hub 所在机）load average 持续偏高（>10×CPU 核心数），开新 claude / agent session 越来越慢、commhub MCP 调用偶发超时。`top` 里看到一堆 `bun ... server.ts` 进程一直在跑，看起来"什么也没干"。
+**症状**：服务器（hub 所在机）load average 持续偏高（>10×CPU 核心数），开新 claude / agent session 越来越慢、CommHub MCP 调用偶发超时。`top` 里看到一堆 `bun ... server.ts` 进程一直在跑，看起来"什么也没干"。
 
 **根因**：插件目录 / agent workdir 被改名或删除后，老的 `bun` 子进程仍然死握着已经 `deleted` 状态的 cwd，每开一个新 session 就再 fork 一个 zombie。累积起来吃满 CPU。**生产实测**：86 个 zombie bun，load 92。
 

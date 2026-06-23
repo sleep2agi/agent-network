@@ -42,7 +42,7 @@
 - **`bunx` 拉 `commhub-server` 慢**：第一次 `anet hub start` 会从 npm registry 拉一个 PINNED 版本 `commhub-server` —— 容器内首次启动可能比 host 慢 30-60s（cache 在 `$HOME/.bun/install/cache`）。固定基础镜像 + 预热 cache 可显著提速
 - **Dashboard 容器要能反向调 Hub**：Dashboard 走 REST + SSE 调 hub `:9200` —— 容器间通信要在同一 docker network，或者把 hub 端口 publish 到 host
 - **节点 cwd 持久化**：`anet node start` 把状态写到 cwd 下 `.anet/nodes/<alias>/`，容器重启要保留这份就得把 cwd 挂出来当 volume
-- **agent 进程不要 PID 1**：用 `tini` 之类的 init 包一层，否则 SIGTERM 直接送到 agent 进程会跳过 commhub 的 offline 通知
+- **agent 进程不要 PID 1**：用 `tini` 之类的 init 包一层，否则 SIGTERM 直接送到 agent 进程会跳过 CommHub 的 offline 通知
 
 ## 下一步
 

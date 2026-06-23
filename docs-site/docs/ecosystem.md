@@ -22,7 +22,7 @@
 ## 收录标准
 
 - 项目可访问（线上 / 开源 repo / npm 包都行，**至少有一个公开入口**）
-- 真的在用 Agent Network（用其中任一 runtime / commhub / dashboard）
+- 真的在用 Agent Network（用其中任一 runtime / CommHub / Dashboard）
 - 一句话能讲清"做什么"
 
 不要求开源、不要求 license、不要求复杂技术栈。
