@@ -36,6 +36,16 @@ function authHeaders(token?: string): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// Per-request timeouts. The initialize handshake is cheap (just opens an
+// MCP session) so 10 s is generous; the tools/call may queue server-side
+// (db insert, SSE push) but the entire LLM-facing operation should still
+// resolve well under 30 s. Without these, a hung commhub HTTP socket
+// would pin the LLM tool call indefinitely — the LLM never sees an error,
+// the agent looks "stuck mid-think", and the inbox loop can't progress.
+// AbortSignal.timeout requires Node 17.3+ / Bun, both already required.
+const COMMHUB_INIT_TIMEOUT_MS = 10_000;
+const COMMHUB_CALL_TIMEOUT_MS = 30_000;
+
 // One JSON-RPC initialize + tools/call against commhub /mcp per LLM tool
 // invocation. Stateless: each call gets a fresh MCP session (commhub-server
 // has no per-session sticky state for tool calls). Slight overhead (2 HTTP
@@ -64,6 +74,7 @@ async function forwardToCommhub(
           clientInfo: { name: "agent-node-mcp-proxy", version: "1.0" },
         },
       }),
+      signal: AbortSignal.timeout(COMMHUB_INIT_TIMEOUT_MS),
     });
     if (!initRes.ok) {
       const t = await initRes.text().catch(() => "");
@@ -78,6 +89,7 @@ async function forwardToCommhub(
         jsonrpc: "2.0", id: 2, method: "tools/call",
         params: { name: toolName, arguments: args ?? {} },
       }),
+      signal: AbortSignal.timeout(COMMHUB_CALL_TIMEOUT_MS),
     });
     const raw = await callRes.text();
     // commhub's response may be SSE-framed (text/event-stream) or plain JSON.
@@ -106,7 +118,12 @@ async function forwardToCommhub(
     }
     return { content: [{ type: "text", text: JSON.stringify(result ?? envelope) }] };
   } catch (e: any) {
-    return { isError: true, content: [{ type: "text", text: `commhub MCP transport error: ${e?.message || String(e)}` }] };
+    // AbortError surfaces with name "TimeoutError" from AbortSignal.timeout
+    // (or "AbortError" in some runtimes); name the timeout case so the LLM
+    // can reason about retrying versus surfacing to the operator.
+    const isTimeout = e?.name === "TimeoutError" || e?.name === "AbortError";
+    const label = isTimeout ? "commhub MCP timeout" : "commhub MCP transport error";
+    return { isError: true, content: [{ type: "text", text: `${label}: ${e?.message || String(e)}` }] };
   }
 }
 
