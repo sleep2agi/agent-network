@@ -1,6 +1,6 @@
 # Vendor Adapters
 
-> ⚠ **New since v0.9.1** (agent-node v2.3.9-preview.0+, introduced by hotfix [#130](https://github.com/sleep2agi/agent-network/issues/130))
+> ⚠ **New since v0.9.1** (hotfix [#130](https://github.com/sleep2agi/agent-network/issues/130); already in npm `latest`)
 
 ::: warning ⏳ Interim workaround — not a permanent design
 **This adapter is an interim patch, not anet's vendor-specific lock-in roadmap**. anet has reached out to the InternLM team to push an upstream fix — once intern-s2-preview emits standard Anthropic `tool_use` content blocks by default, **this adapter can be retired**.
@@ -27,7 +27,7 @@ To stop users getting stuck on "the same prompt works on MiniMax but not on Inte
 
 **Effect** (verified by direct curl; full data in the [research report](https://github.com/sleep2agi/agent-network/blob/main/docs/research/intern-tool-calling-investigation.md)):
 
-| Dimension | Without adapter (agent-node ≤ 2.3.8) | With adapter (v2.3.9-preview.0+) |
+| Dimension | Without adapter (pre-v0.9.1) | With adapter (v0.9.1+, already in npm `latest`) |
 |---|---|---|
 | `stop_reason` | `max_tokens` (free text capped at limit) | `tool_use` (clean stop) |
 | `output_tokens` | 1024 (saturated) | 122 (concise) |
