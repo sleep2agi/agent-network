@@ -1963,6 +1963,12 @@ Bun.serve({
       const toName = url.searchParams.get("to_name");
       const fromName = url.searchParams.get("from_name");
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
+      // #248 — opt-out of the stats GROUP-BY scan. The dashboard chat panel
+      // never consumes `stats`; it's a global per-status table scan that
+      // dominates the request time on a large DB (270 MB / many tasks).
+      // Existing callers that don't pass `skip_stats=1` get the same
+      // {ok, tasks, count, stats} shape — backwards-compatible.
+      const skipStats = url.searchParams.get("skip_stats") === "1";
 
       let sql = "SELECT * FROM tasks WHERE 1=1";
       const params: any[] = [];
@@ -1975,6 +1981,9 @@ Bun.serve({
       params.push(limit);
 
       const rows = db.all(sql, ...params);
+      if (skipStats) {
+        return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length }));
+      }
       const statsParams: any[] = [];
       let statsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
       statsSql = addNetworkScope(statsSql, statsParams, restScope);
