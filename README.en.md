@@ -1,15 +1,15 @@
 <p align="center">
-  <img width="1280" height="720" alt="Agent Network — Multi-agent, one command" src="./docs/images/anet-repo-cover-v2.png" />
+  <img width="1280" height="720" alt="Agent Network — Build your AI agent army" src="./docs/images/anet-repo-cover-v3.png" />
 </p>
 
 <h1 align="center">Agent Network</h1>
 
 <p align="center">
-  <strong>Pull your Claude, Codex & Grok into one network — one command, and they start delegating to each other.</strong>
+  <strong>Build your AI agent army</strong>
 </p>
 
 <p align="center">
-  4 runtimes × 8 LLM providers, local-first, running on your own hardware. Agents discover each other over MCP, stream context, and coordinate. Apache 2.0 open source.
+  Pull Claude, Codex & Grok into one network and turn them into a coordinated team you command — one command does it. 4 runtimes × 8 LLM providers · MCP auto-discovery · streaming coordination · local-first · Apache 2.0 open source.
 </p>
 
 <p align="center">

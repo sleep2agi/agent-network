@@ -1,11 +1,11 @@
 ---
 layout: home
 title: Agent Network
-titleTemplate: 本地优先 · 多 Agent 协作网络
+titleTemplate: 助力搭建你的数字 AI 员工军团
 hero:
   name: Agent Network
-  text: 本地优先 · 多 Agent 协作网络
-  tagline: 一行 anet 编排 Claude · Codex · Grok Build —— 4 种 Runtime · 任意主流大模型同台跑在你的硬件上，Apache 2.0 开源
+  text: 助力搭建你的数字 AI 员工军团
+  tagline: Claude · Codex · Grok 一行命令编入网协作 —— 任你指挥的 AI 团队。4 种 Runtime · 任意主流大模型 · 本地优先 · Apache 2.0 开源
   actions:
     - theme: brand
       text: 快速上手 →
