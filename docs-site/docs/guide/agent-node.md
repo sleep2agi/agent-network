@@ -381,7 +381,7 @@ npx @sleep2agi/agent-node --alias 代码 --runtime codex-sdk
 # codex 内置 Read/Write/Edit/Bash/Grep/Glob/WebSearch 全套, 无法剥离
 ```
 
-### `anet node create` 行为披露 banner（Vincent push）
+### `anet node create` 行为披露 banner（Vincent push, [#101](https://github.com/sleep2agi/agent-network/issues/101)）
 
 `anet node create <alias>` 成功后 print **行为披露 banner**：built-in tools 清单（具体 list 或 `all (Claude Code preset)`）+ MCP tools + 当前 flags（`dangerouslySkipPermissions=true` / `teammateMode=true`）+ 一行 "agent 可读写文件、跑 shell、访问网络"。banner 在 [agent-network/bin/cli.ts](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) `createCommand` 末尾打印 —— 让你**看清你创建了一个能干啥的 agent**，主动决定 sandboxing。
 
