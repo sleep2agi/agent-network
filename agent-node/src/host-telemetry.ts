@@ -151,7 +151,14 @@ function cpuCores(): number | null {
 
 export function getHostTelemetry(): HostTelemetry {
   const now = Date.now();
-  if (_cache && now - _cache.ts < CACHE_MS) return _cache.value;
+  // `delta >= 0` guard: NTP step / VM live-migrate can jump the wall clock
+  // backward. Without this, `now - _cache.ts` goes negative and we'd serve
+  // a stale value forever (until the clock catches back up past CACHE_MS).
+  // Re-sampling on backward skew costs at most one extra /proc read + df.
+  if (_cache) {
+    const delta = now - _cache.ts;
+    if (delta >= 0 && delta < CACHE_MS) return _cache.value;
+  }
   const mem = readMemoryStats();
   const disk = readDiskStats();
   const value: HostTelemetry = {
