@@ -272,7 +272,7 @@ curl "http://localhost:9200/api/task_events?task_id=t_xxx" \
   -H "Authorization: Bearer ntok_xxx"
 ```
 
-The original doc's `anet tasks --detail t_xxx` CLI command does not exist ([`cli.ts:3059-3094 tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L3059) only parses status (positional or `--status`) and `--limit` — `--detail` is silently ignored and prints `?` placeholders).
+The original doc's `anet tasks --detail t_xxx` CLI command does not exist ([`cli.ts tasksCommand`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) only parses status (positional or `--status`) and `--limit` — `--detail` is silently ignored and prints `?` placeholders).
 
 Example output:
 

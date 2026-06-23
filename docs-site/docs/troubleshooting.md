@@ -237,7 +237,7 @@ anet passwd                    # 改成强密码
 第一次 `anet hub start` 已经建了 admin，再启动还输出 `Admin account created`？
 
 ::: tip bootstrap 是**非交互**的，没有 "Set up admin account" prompt
-verify [`agent-network/bin/cli.ts:2192-2233`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2192)：`anet hub start` 默认直接 POST `/api/auth/register` username=`admin` password=`anethub`（除非传 `--username` / `--password`）。**没有任何交互 prompt**，所以「反复 prompt」描述是旧 doc，已删。
+verify [`agent-network/bin/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)：`anet hub start` 默认直接 POST `/api/auth/register` username=`admin` password=`anethub`（除非传 `--username` / `--password`）。**没有任何交互 prompt**，所以「反复 prompt」描述是旧 doc，已删。
 
 幂等性靠 `~/.anet/server/admin-utok.json` 作 marker —— 文件在就跳过 register flow（输出 `✅ Admin already exists`），文件丢了就再跑 register（hub 端会因 `username already taken` 而返 `ℹ Admin account "admin" already exists`，不会重建）。
 :::
@@ -477,7 +477,7 @@ anet network delete <old-net> --force
 Node "代码1号" already exists: .anet/nodes/代码1号/config.json
 ```
 
-verify [`agent-network/bin/cli.ts:1316`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1316) + [`agent-network/bin/cli.ts:1407`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1407)：`anet node create` 在交互式 / 非交互式两条路径都用 `resolveNodeRef(id)` 检查本地 `.anet/nodes/<alias>/config.json` 是否已存在；命中就直接 `process.exit(1)` 不连 hub。
+verify [`agent-network/bin/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) + [`agent-network/bin/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts)：`anet node create` 在交互式 / 非交互式两条路径都用 `resolveNodeRef(id)` 检查本地 `.anet/nodes/<alias>/config.json` 是否已存在；命中就直接 `process.exit(1)` 不连 hub。
 
 **原因**：当前项目目录 `.anet/nodes/` 下已有同名 node config 子目录。这是**本地文件冲突**，跟 hub 端 session 状态无关。
 
@@ -557,7 +557,7 @@ agent 日志里出现：
 
 **原因**：上游 vendor LLM API 返回 auth-class 错误（401/403、`invalid_api_key`、`authentication_error`、intern `A02xx` 系列码、OpenAI-compat `expired_token` / `unauthorized` 等）。
 
-**v0.9.2 起 fast-fail 行为**（[#129](https://github.com/sleep2agi/agent-network/issues/129)，verify [`agent-node/src/cli.ts:717-775`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L717)）：
+**v0.9.2 起 fast-fail 行为**（[#129](https://github.com/sleep2agi/agent-network/issues/129)，verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）：
 - agent-node 用 `isAuthError(msg)` 启发式（正则：`(401|403)\b|invalid[_\s]?api[_\s]?key|authentication[_\s]?error|expired[_\s]?token|unauthor(iz|is)ed|A02\d{2}|user[_\s]?token[_\s]?expired`）检测到 auth 错误
 - **短路 retry loop**（避免拿同一个坏 key 浪费 backoff window）—— v0.9.1 之前会跑满 3 attempts × 5min 一共 15min 才报错，v0.9.2 起 **<5s** 就 FATAL 返回
 - 按 `ANTHROPIC_BASE_URL` 域名匹配出 **vendor-specific remediation hint**：
@@ -600,7 +600,7 @@ agent 日志里出现：
 
 **原因**：fan-out 高并发场景下（如 [#132 Tier 1](https://github.com/sleep2agi/agent-network/issues/132) 的 30-agent papercope demo），vendor API 单次 latency 从基线 1.57s 拉到 17-37s，请求在 vendor 队列里堆积。
 
-**v0.9.2 起 retry-with-backoff** 行为（verify [`agent-node/src/cli.ts:729-792`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L729)）：
+**v0.9.2 起 retry-with-backoff** 行为（verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)）：
 - 每次 attempt 独立的 abort controller + timeout window（default `CLAUDE_TIMEOUT_MS=300000` 即 300s，[#132 ship](https://github.com/sleep2agi/agent-network/issues/132)）
 - transient error / timeout 时 backoff `4s, 8s` + 0-1s jitter（jitter 散开 herd retries 避免一窝蜂打 vendor queue）
 - 默认 `CLAUDE_MAX_RETRIES=2`（共 3 attempts 含 initial）—— 设 `0` 退回 v0.9.1 行为（no retry）
@@ -867,7 +867,7 @@ Agent Node 支持调整日志级别（**top-level 字段，不在 `flags` 里**�
 }
 ```
 
-verify [`agent-node/src/cli.ts:202`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L202)：`LOG_LEVEL` 从 `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` 取，**只认 top-level `logLevel`**，写在 `flags.logLevel` 不生效。
+verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)：`LOG_LEVEL` 从 `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` 取，**只认 top-level `logLevel`**，写在 `flags.logLevel` 不生效。
 
 也可以走环境变量或命令行：
 

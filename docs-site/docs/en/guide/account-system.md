@@ -64,7 +64,7 @@ anet login
 
 # Verify login status
 anet whoami
-# Actual output (verified at cli.ts:3281-3302):
+# Actual output (verified at cli.ts):
 #   User: yourname (u_xxxxxx)
 #   Role: admin             ← System-level users.role ('admin' / 'user'), NOT a network role
 #   Hub:  http://127.0.0.1:9200

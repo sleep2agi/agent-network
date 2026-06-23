@@ -238,7 +238,7 @@ anet passwd                    # rotate to a strong password
 The first `anet hub start` created admin, but a second start still prints `Admin account created`?
 
 ::: tip Bootstrap is **non-interactive** — there is no "Set up admin account" prompt
-Verified at [`agent-network/bin/cli.ts:2192-2233`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2192): `anet hub start` simply POSTs `/api/auth/register` with username=`admin` and password=`anethub` (unless overridden by `--username` / `--password`). **No interactive prompt is involved**, so the older "repeating prompt" framing in this doc is stale and has been removed.
+Verified at [`agent-network/bin/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts): `anet hub start` simply POSTs `/api/auth/register` with username=`admin` and password=`anethub` (unless overridden by `--username` / `--password`). **No interactive prompt is involved**, so the older "repeating prompt" framing in this doc is stale and has been removed.
 
 Idempotency is driven by `~/.anet/server/admin-utok.json` as a marker — if it exists, the register flow is skipped (output: `✅ Admin already exists`). If it's missing, the register call re-runs; if the user row already exists, the hub returns `username already taken` and the CLI prints `ℹ Admin account "admin" already exists` (no duplicate is created).
 :::
@@ -478,7 +478,7 @@ anet network delete <old-net> --force
 Node "coder-1" already exists: .anet/nodes/coder-1/config.json
 ```
 
-Verified at [`agent-network/bin/cli.ts:1316`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1316) + [`agent-network/bin/cli.ts:1407`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L1407): both the interactive and non-interactive paths of `anet node create` call `resolveNodeRef(id)` to check whether `.anet/nodes/<alias>/config.json` already exists; if so, they `process.exit(1)` without ever contacting the hub.
+Verified at [`agent-network/bin/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) + [`agent-network/bin/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts): both the interactive and non-interactive paths of `anet node create` call `resolveNodeRef(id)` to check whether `.anet/nodes/<alias>/config.json` already exists; if so, they `process.exit(1)` without ever contacting the hub.
 
 **Cause**: a subdirectory with the same alias already exists under `.anet/nodes/` in the current project directory. This is a **local filesystem collision** — it has nothing to do with the hub-side session state.
 
@@ -558,7 +558,7 @@ You see this in the agent log:
 
 **Cause**: The upstream vendor LLM API returned an auth-class error (401/403, `invalid_api_key`, `authentication_error`, intern's `A02xx` code family, OpenAI-compat `expired_token` / `unauthorized`, etc.).
 
-**Fast-fail behavior since v0.9.2** ([#129](https://github.com/sleep2agi/agent-network/issues/129); verify [`agent-node/src/cli.ts:717-775`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L717)):
+**Fast-fail behavior since v0.9.2** ([#129](https://github.com/sleep2agi/agent-network/issues/129); verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)):
 - agent-node uses the `isAuthError(msg)` heuristic (regex: `(401|403)\b|invalid[_\s]?api[_\s]?key|authentication[_\s]?error|expired[_\s]?token|unauthor(iz|is)ed|A02\d{2}|user[_\s]?token[_\s]?expired`)
 - **Short-circuits the retry loop** (no point retrying with the same bad key, wasting the backoff window) — before v0.9.1 you'd wait 3 attempts × 5min = 15 minutes before getting a useful error; v0.9.2+ returns **FATAL in under 5 seconds**
 - Picks a **vendor-specific remediation hint** by `ANTHROPIC_BASE_URL` host match:
@@ -601,7 +601,7 @@ Or finally:
 
 **Cause**: under heavy fan-out (e.g. [#132 Tier 1's](https://github.com/sleep2agi/agent-network/issues/132) 30-agent papercope demo), per-request latency on the vendor API stretches from a 1.57s baseline to 17-37s as requests pile up in the vendor's queue.
 
-**Retry-with-backoff since v0.9.2** (verify [`agent-node/src/cli.ts:729-792`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L729)):
+**Retry-with-backoff since v0.9.2** (verify [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)):
 - Each attempt has its own abort controller + timeout window (default `CLAUDE_TIMEOUT_MS=300000`, i.e. 300s — see [#132 ship](https://github.com/sleep2agi/agent-network/issues/132))
 - On transient errors / timeouts, backoff `4s, 8s` + 0-1s jitter (the jitter spreads herd retries so the recovering vendor queue isn't slammed all at once)
 - Default `CLAUDE_MAX_RETRIES=2` (so 3 attempts total including the initial one) — set `0` to revert to v0.9.1 behavior (no retry)
@@ -869,7 +869,7 @@ Agent Node supports adjustable log levels (**top-level field — not nested unde
 }
 ```
 
-Verified at [`agent-node/src/cli.ts:202`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L202): `LOG_LEVEL` is read from `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` — it **only honors the top-level `logLevel`**. Putting `logLevel` inside `flags` has no effect.
+Verified at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts): `LOG_LEVEL` is read from `opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info"` — it **only honors the top-level `logLevel`**. Putting `logLevel` inside `flags` has no effect.
 
 You can also set it via environment variable or CLI flag:
 

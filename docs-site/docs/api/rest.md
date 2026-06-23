@@ -949,7 +949,7 @@ curl "http://localhost:9200/api/messages?limit=100" \
 字段对照 server SELECT ([`server/src/index.ts:1013`](https://github.com/sleep2agi/agent-network/blob/main/server/src/index.ts#L1013)) `id, session_name as to_alias, from_session as from_alias, type, priority, content, created_at, network_id` —— 主键字段是 `id` 不是 `message_id`，含 `priority` + `network_id` 两个之前 doc 漏掉的字段。
 
 ::: info 当前 schema 限制
-SELECT 暂未包含 `in_reply_to` 字段；轮询匹配回复消息时按 `from_alias` + `type='reply'` + recency 启发式匹配（详见 `cli.ts:3827` 注释）。
+SELECT 暂未包含 `in_reply_to` 字段；轮询匹配回复消息时按 `from_alias` + `type='reply'` + recency 启发式匹配（详见 `cli.ts` 注释）。
 :::
 
 ---
@@ -1399,7 +1399,7 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 
 > 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts:571 + 911`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts#L571) 实际 payload 只有上表中字段。
 >
-> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts:1162`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts#L1162) 显式处理它）。
+> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts:38-44`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L38) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
 
 **示例 SSE 数据流**：
 

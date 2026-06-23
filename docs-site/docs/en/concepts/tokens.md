@@ -151,7 +151,7 @@ A: Not today. TTL + revoke-all is on the v0.9 roadmap. `utok_` rotates on passwo
 | Log in | A new one is issued (old one stays valid until revoked) | Unchanged |
 | Change password | Current device gets a new `utok_`; other devices' `utok_` are invalidated ([full 5 side effects](/en/api/rest#post-api-auth-password)) | Unchanged |
 | Create node | Unchanged | One created, bound to the node × network |
-| Delete node (`anet node delete`) | Unchanged | **Not auto-revoked** — the `api_tokens` row stays on the hub ([`cli.ts:2725` `notifyServerOffline`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts#L2725) only sends `report_status` offline; it does not delete the token). Use `anet token revoke <id>` separately to fully clean up. |
+| Delete node (`anet node delete`) | Unchanged | **Not auto-revoked** — the `api_tokens` row stays on the hub ([`cli.ts` `notifyServerOffline`](https://github.com/sleep2agi/agent-network/blob/main/agent-network/bin/cli.ts) only sends `report_status` offline; it does not delete the token). Use `anet token revoke <id>` separately to fully clean up. |
 | Manual revoke | `anet token revoke <id>` | Same |
 
 ### Authorization decision (how the hub decides)
@@ -182,9 +182,9 @@ flowchart TD
 
 ```bash
 # 1. Config-file permissions audit
-#    ✅ ~/.anet/server/admin-utok.json    auto 600 (cli.ts:105-111 saveAdminUtok)
-#    ✅ ~/.anet/server/config.json        auto 600 (cli.ts:89-95 saveServerConfig)
-#    ⚠ ~/.anet/config.json                **NOT auto-600** (cli.ts:77-81 saveGlobal uses the default 644) — on shared multi-user hosts, fix manually:
+#    ✅ ~/.anet/server/admin-utok.json    auto 600 (cli.ts saveAdminUtok)
+#    ✅ ~/.anet/server/config.json        auto 600 (cli.ts saveServerConfig)
+#    ⚠ ~/.anet/config.json                **NOT auto-600** (cli.ts saveGlobal uses the default 644) — on shared multi-user hosts, fix manually:
 chmod 600 ~/.anet/config.json
 # Single-user hosts: limited impact (HOME is usually 700 already).
 # Multi-user machines: other local users can read your utok_.

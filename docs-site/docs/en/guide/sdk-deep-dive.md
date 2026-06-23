@@ -54,7 +54,7 @@ All `agent-node/src/cli.ts:NNN` line numbers below are calibrated against GitHub
 **Session writeback mechanic**
 
 ```ts
-// cli.ts:598-605
+// cli.ts
 for await (const message of query({ prompt, options })) {
   const m = message as any;
   if (m.type === "system" && m.subtype === "init") {
@@ -85,7 +85,7 @@ On the next call to `processWithClaude()`, the module-level `claudeSessionId` is
 **Session writeback mechanic**
 
 ```ts
-// cli.ts:714-735
+// cli.ts
 const { events } = await codexThread.runStreamed(input);
 for await (const ev of events) {
   if (ev.type === "turn.completed") usage = ev.usage;
@@ -105,16 +105,16 @@ The architecture in `agent-node/src/cli.ts` boils down to "two SDKs, one schedul
 ```
                    inbox / SSE / Telegram inbound task
                               ↓
-                          think()  ← cli.ts:762
+                          think()  ← cli.ts
                               ↓
                   ┌───────────┴───────────┐
                   ↓                       ↓
             processWithClaude        processWithCodex
-              (cli.ts:388)             (cli.ts:669)
+              (cli.ts)             (cli.ts)
                   ↓                       ↓
               SDK query()         thread.runStreamed()
                   ↓                       ↓
-            writebackSession(session_id) ← shared cli.ts:217
+            writebackSession(session_id) ← shared cli.ts
                   ↓
                 config.json persisted
                   ↓
@@ -143,7 +143,7 @@ then plugging it in is roughly 5 steps, modeled on the `processWithCodex()` bran
 ### Step 1: register the runtime name + map
 
 ```ts
-// near cli.ts:151-158
+// near cli.ts
 const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", /* ... */
   "codex-sdk": "codex",
@@ -187,7 +187,7 @@ async function processWithGemini(task: string, from: string): Promise<string> {
 ### Step 3: think() branch
 
 ```ts
-// near cli.ts:831
+// near cli.ts
 if (RUNTIME === "gemini") return await processWithGemini(task, from);
 ```
 
