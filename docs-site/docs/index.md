@@ -30,8 +30,28 @@ features:
   <div class="trust-item"><span class="trust-num">∞</span><span class="trust-label">多厂商接入 · 任意 Anthropic 兼容</span></div>
   <div class="trust-item"><span class="trust-num">4</span><span class="trust-label">Runtime</span></div>
   <div class="trust-item"><span class="trust-num">100%</span><span class="trust-label">本地优先</span></div>
-  <div class="trust-item"><span class="trust-num">v0.10.15</span><span class="trust-label">Stable</span></div>
+  <div class="trust-item"><a href="/changelog"><span class="trust-num">Latest</span><span class="trust-label">npm stable</span></a></div>
 </section>
+
+## 30 秒上手
+
+```bash
+# 装一个全局包
+npm install -g @sleep2agi/agent-network
+
+# 终端 1 —— 起 Hub（保持开着）
+anet hub start
+
+# 终端 2 —— 起 Dashboard（保持开着）
+anet hub dashboard
+
+# 终端 3 —— 登录 + 创节点 + 启动
+anet login --username admin --password anethub
+anet node create my-bot
+anet node start my-bot
+```
+
+打开 [http://localhost:3000](http://localhost:3000)，Chat 面板派任务。详细步骤 + 一键脚本路径见 [上手指南 →](/guide/getting-started)。
 
 <section class="final-cta">
   <h2 class="final-cta-title">现在就装一个 anet</h2>
