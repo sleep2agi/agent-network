@@ -19,6 +19,7 @@ import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./pro
 import { parseGoalCommand } from "./goals/parser";
 import { GoalStore, newGoal, runtimeBucket, decideStartupAction } from "./goals/store";
 import { decideTickWork } from "./goals/scheduler";
+import { runCodexWakeForGoal, type CodexWakeDeps } from "./goals/codex-wake";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
@@ -922,7 +923,35 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
     return;
   }
 
-  const { text, failed } = await processTask(prompt, `goal:${idShort}`, goal.parent_task_id || null);
+  // P1b /loop SDK — per-goal codex thread isolation.
+  //
+  // codex runtime: spawn / resume a goal-owned thread via the codex
+  // wake helper so multiple goals don't pollute each other's working
+  // context. The wake prompt (buildGoalWakePrompt) already embeds the
+  // goal text + last 5 progress entries, so a rebuilt thread (after
+  // resume-fail) can pick up from `progress_log` without depending on
+  // the LLM-side thread history we just lost.
+  //
+  // grok / claude runtimes: fall through to processTask (claude is
+  // already blocked at scheduler-startup via the P0 runtime gate;
+  // grok wake gets its own per-goal isolation in P2).
+  let text: string;
+  let failed: boolean;
+  let codexThreadIdCaptured: string | undefined;
+  let codexThreadRebuilt = false;
+  let codexRebuildReason: string | undefined;
+  if (RUNTIME === "codex") {
+    const result = await runCodexWakeForGoal(goal, prompt, buildCodexWakeDeps());
+    text = result.text;
+    failed = result.failed;
+    codexThreadIdCaptured = result.threadId;
+    codexThreadRebuilt = result.threadRebuilt;
+    codexRebuildReason = result.rebuildReason;
+  } else {
+    const r = await processTask(prompt, `goal:${idShort}`, goal.parent_task_id || null);
+    text = r.text;
+    failed = r.failed;
+  }
   const summary = text.replace(/\s+/g, " ").slice(0, 500);
   const completed = /目标已完成|goal completed|completed/i.test(text);
   const nextWakeAt = new Date(Date.now() + goal.interval_ms).toISOString();
@@ -936,6 +965,20 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
       g.last_report_at = new Date().toISOString();
       g.next_wake_at = nextWakeAt;
       if (completed) g.status = "complete";
+      // Persist (possibly rotated) codex thread id so the next wake
+      // resumes the right thread. Only write when the helper actually
+      // produced one — undefined means the SDK didn't expose it yet.
+      if (codexThreadIdCaptured && g.codex_thread_id !== codexThreadIdCaptured) {
+        g.codex_thread_id = codexThreadIdCaptured;
+      }
+      if (codexThreadRebuilt) {
+        g.progress_log.push({
+          ts: new Date().toISOString(),
+          status: "thread-rebuilt",
+          summary: `codex thread rebuilt — ${codexRebuildReason ?? "resume failed"}`,
+          task_id: g.parent_task_id,
+        });
+      }
       g.progress_log.push({
         ts: new Date().toISOString(),
         status: failed ? "error" : completed ? "complete" : "report",
@@ -959,6 +1002,51 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
       warn(`[goal] report send failed for ${idShort}: ${e.message}`);
     }
   }
+}
+
+// P1b — Codex wake deps factory. Lazy-loads the codex SDK once (same
+// path processWithCodex uses for normal tasks), then builds a fresh
+// Codex client per wake so per-goal threads stay isolated. The SDK
+// module is module-level cached after first wake; subsequent wakes
+// hit the cache without re-walking the npm-install fallback path.
+let _codexSdkModuleCache: any | null = null;
+async function loadCodexSdkModule(): Promise<any> {
+  if (_codexSdkModuleCache) return _codexSdkModuleCache;
+  const { execSync } = await import("child_process");
+  const { module: sdkMod } = await loadCodexSdk(
+    {
+      importCodexSdk: () => import("@openai/codex-sdk"),
+      npmInstall: defaultNpmInstall(execSync),
+      log,
+      warn,
+    },
+    resolveAgentNodeDir(__dirname),
+  );
+  _codexSdkModuleCache = sdkMod;
+  return sdkMod;
+}
+
+function buildCodexWakeDeps(): CodexWakeDeps {
+  return {
+    newCodex: async () => {
+      const sdkMod = await loadCodexSdkModule();
+      return new sdkMod.Codex({ config: CODEX_CONFIG });
+    },
+    buildOpts: () => {
+      // Mirror cli.ts:1417-1424 normal-task codex opts so wake behavior
+      // matches the operator's runtime config (yolo flags, model, etc.).
+      const cfgFlags = (fileConfig?.flags || {}) as Record<string, unknown>;
+      return {
+        skipGitRepoCheck: cfgFlags.skipGitRepoCheck === false ? false : true,
+        approvalPolicy: typeof cfgFlags.approvalPolicy === "string" ? cfgFlags.approvalPolicy : "never",
+        model: MODEL || "gpt-5.5",
+        sandboxMode: typeof cfgFlags.sandboxMode === "string" ? cfgFlags.sandboxMode : "danger-full-access",
+        modelReasoningEffort: "low" as const,
+      };
+    },
+    log,
+    warn,
+  };
 }
 
 async function runGoalSchedulerTick() {
