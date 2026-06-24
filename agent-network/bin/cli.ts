@@ -1492,6 +1492,33 @@ function writeTelegramChannelConfig(nodeId: string, botToken: string, allowId: s
   return channelDir;
 }
 
+/**
+ * Feishu channel config writer (RFC-020 §5.2 — #179 M4).
+ * Mirrors writeTelegramChannelConfig but with the Feishu schema:
+ *   - .env: FEISHU_APP_ID + FEISHU_APP_SECRET (chmod 600, .gitignore'd)
+ *   - access.json: { allowFrom: [open_id, ...], allowChats: [chat_id, ...] }
+ */
+function writeFeishuChannelConfig(
+  nodeId: string,
+  appId: string,
+  appSecret: string,
+  allowOpenId: string,
+  allowChatId?: string,
+): string {
+  const channelDir = join(nodesDir(), nodeId, "channels", "feishu");
+  mkdirSync(channelDir, { recursive: true });
+
+  const envPath = join(channelDir, ".env");
+  writeFileSync(envPath, `FEISHU_APP_ID=${appId}\nFEISHU_APP_SECRET=${appSecret}\n`);
+  try { chmodSync(envPath, 0o600); } catch {}
+
+  writeFileSync(join(channelDir, "access.json"), JSON.stringify({
+    allowFrom: allowOpenId ? [allowOpenId] : [],
+    allowChats: allowChatId ? [allowChatId] : [],
+  }, null, 2) + "\n");
+  return channelDir;
+}
+
 async function askChoice<T extends string>(title: string, choices: { label: string; value: T; description?: string }[]): Promise<T> {
   closeRL();
   return await select<T>({
@@ -4690,27 +4717,34 @@ async function channelCommand() {
   const opts = parseOpts();
 
   if (sub === "add") {
-    const type = args[2]; // P0: telegram
+    const type = args[2];
     const nodeRef = args[3];
 
     if (!type || !nodeRef) {
       console.log(`
 anet channel add <type> <node-id> [options]
 
-Types:  telegram
+Types:  telegram, feishu
 
-Options:
-  --bot-token <token>   Bot token
-  --allow <user-id>     Allow user ID
+Options (telegram):
+  --bot-token <token>     Bot token
+  --allow <user-id>       Allow user ID
 
-Example:
+Options (feishu, RFC-020 #179):
+  --app-id <id>           Feishu app ID
+  --app-secret <secret>   Feishu app secret
+  --allow <open-id>       Allow Feishu open_id (DM)
+  --allow-chat <chat-id>  Allow Feishu chat_id (group, optional)
+
+Examples:
   anet channel add telegram 指挥室 --bot-token 123:ABC --allow <your-numeric-uid>
-  anet channel add telegram 指挥室     # 交互式
+  anet channel add feishu  指挥室 --app-id cli_xxx --app-secret yyy --allow ou_zzz
+  anet channel add feishu  指挥室                # 交互式
 `);
       return;
     }
-    if (type !== "telegram") {
-      console.error(`P0 only supports telegram channels. Unsupported type: ${type}`);
+    if (type !== "telegram" && type !== "feishu") {
+      console.error(`Unsupported channel type: ${type}. Supported: telegram, feishu`);
       process.exit(1);
     }
 
@@ -4723,20 +4757,47 @@ Example:
     }
     const storedProfile = loadStoredProfile(nodeId) || profile;
 
-    let botToken = opts["bot-token"];
-    let allowId = opts.allow;
-    if (!botToken) botToken = await ask(`${type} Bot Token`);
-    if (!allowId) allowId = await ask("Allow User ID (发 @userinfobot 获取数字ID)", "");
-    closeRL();
+    let channelDir: string;
 
-    if (!botToken || !allowId) {
-      console.error("Error: bot-token and allow required");
-      process.exit(1);
+    if (type === "telegram") {
+      let botToken = opts["bot-token"];
+      let allowId = opts.allow;
+      if (!botToken) botToken = await ask(`${type} Bot Token`);
+      if (!allowId) allowId = await ask("Allow User ID (发 @userinfobot 获取数字ID)", "");
+      closeRL();
+
+      if (!botToken || !allowId) {
+        console.error("Error: bot-token and allow required");
+        process.exit(1);
+      }
+
+      channelDir = writeTelegramChannelConfig(nodeId, botToken, allowId);
+      attachChannel(storedProfile, "telegram");
+    } else {
+      // type === "feishu" — RFC-020 §3.1 / §5.1 (#179)
+      let appId = opts["app-id"];
+      let appSecret = opts["app-secret"];
+      let allowOpenId = opts.allow;
+      const allowChatId = opts["allow-chat"] || "";
+
+      if (!appId) appId = await ask("Feishu App ID (开放平台「企业自建应用」凭证)");
+      if (!appSecret) appSecret = await ask("Feishu App Secret");
+      if (!allowOpenId) allowOpenId = await ask("Allow Feishu open_id (DM 白名单，可空)", "");
+      closeRL();
+
+      if (!appId || !appSecret) {
+        console.error("Error: --app-id and --app-secret required");
+        process.exit(1);
+      }
+      if (!allowOpenId && !allowChatId) {
+        console.error("Error: at least one of --allow <open-id> or --allow-chat <chat-id> required");
+        process.exit(1);
+      }
+
+      channelDir = writeFeishuChannelConfig(nodeId, appId, appSecret, allowOpenId, allowChatId);
+      attachChannel(storedProfile, "feishu");
     }
 
-    const channelDir = writeTelegramChannelConfig(nodeId, botToken, allowId);
-
-    attachChannel(storedProfile, "telegram");
     await ensureNodeToken(storedProfile, nodeId);
     saveProfile(nodeId, storedProfile);
 
