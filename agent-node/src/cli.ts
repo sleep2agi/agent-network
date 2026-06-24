@@ -18,6 +18,7 @@ import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { parseGoalCommand } from "./goals/parser";
 import { GoalStore, newGoal, runtimeBucket, decideStartupAction } from "./goals/store";
+import { decideTickWork } from "./goals/scheduler";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
@@ -895,50 +896,100 @@ function buildGoalWakePrompt(goal: AgentGoal): string {
 
 let goalTickRunning = false;
 
+// P1a /loop SDK hardening — per-goal wake isolated into its own
+// try/catch so one bad goal (a corrupted record, a hung processTask, a
+// mutate that fails because the store file got chmod'd by something
+// external) cannot abort the tick and starve the other goals. Each
+// failure writes a `progress_log` "tick-error" entry so the operator
+// can see why a goal isn't waking instead of staring at silent skips.
+async function runOneGoalWake(goal: AgentGoal): Promise<void> {
+  const idShort = goal.goal_id.slice(0, 8);
+  const prompt = buildGoalWakePrompt(goal);
+  log(`[goal] wake ${idShort}: ${goal.text.slice(0, 80)}`);
+
+  // Phase 1 of the wake: mark the goal as woken before we touch the
+  // LLM. If THIS mutate throws (rare — file permission flip / disk
+  // full), the wake stops here and the tick continues with the next
+  // goal. Without this isolation, the surrounding tick-wide try/catch
+  // would eat the error AND swallow every later goal in the same tick.
+  try {
+    await goalStore.mutate(goal.goal_id, (g) => {
+      g.last_wake_at = new Date().toISOString();
+      g.progress_log.push({ ts: new Date().toISOString(), status: "wake", summary: "scheduler tick started" });
+    });
+  } catch (e: any) {
+    warn(`[goal] ${idShort} pre-wake mutate failed: ${e?.message || e} — skipping this tick`);
+    return;
+  }
+
+  const { text, failed } = await processTask(prompt, `goal:${idShort}`, goal.parent_task_id || null);
+  const summary = text.replace(/\s+/g, " ").slice(0, 500);
+  const completed = /目标已完成|goal completed|completed/i.test(text);
+  const nextWakeAt = new Date(Date.now() + goal.interval_ms).toISOString();
+
+  // Phase 2: writeback. If THIS mutate throws, the wake's LLM work
+  // already happened — surface the writeback failure loudly so the
+  // operator knows the next_wake_at didn't advance (the goal will
+  // wake again on the very next tick).
+  try {
+    await goalStore.mutate(goal.goal_id, (g) => {
+      g.last_report_at = new Date().toISOString();
+      g.next_wake_at = nextWakeAt;
+      if (completed) g.status = "complete";
+      g.progress_log.push({
+        ts: new Date().toISOString(),
+        status: failed ? "error" : completed ? "complete" : "report",
+        summary,
+        task_id: goal.parent_task_id,
+      });
+    });
+  } catch (e: any) {
+    warn(`[goal] ${idShort} post-wake mutate failed: ${e?.message || e} — next_wake_at NOT advanced; goal will re-wake on next tick`);
+  }
+
+  if (goal.report_to) {
+    try {
+      await sendReply(
+        goal.report_to,
+        `[${ALIAS}] /loop ${idShort} ${failed ? "执行失败" : completed ? "已完成" : "进度汇报"}\n\n${text.slice(0, 2000)}`,
+        goal.parent_task_id,
+        failed,
+      );
+    } catch (e: any) {
+      warn(`[goal] report send failed for ${idShort}: ${e.message}`);
+    }
+  }
+}
+
 async function runGoalSchedulerTick() {
   if (goalTickRunning) return;
   goalTickRunning = true;
   try {
-    const now = new Date();
     const goals = await goalStore.list();
-    for (const goal of goals) {
-      if (goal.status !== "active") continue;
-      if (new Date(goal.next_wake_at).getTime() > now.getTime()) continue;
-
-      const prompt = buildGoalWakePrompt(goal);
-      log(`[goal] wake ${goal.goal_id.slice(0, 8)}: ${goal.text.slice(0, 80)}`);
-      await goalStore.mutate(goal.goal_id, (g) => {
-        g.last_wake_at = new Date().toISOString();
-        g.progress_log.push({ ts: new Date().toISOString(), status: "wake", summary: "scheduler tick started" });
-      });
-
-      const { text, failed } = await processTask(prompt, `goal:${goal.goal_id.slice(0, 8)}`, goal.parent_task_id || null);
-      const summary = text.replace(/\s+/g, " ").slice(0, 500);
-      const completed = /目标已完成|goal completed|completed/i.test(text);
-      const nextWakeAt = new Date(Date.now() + goal.interval_ms).toISOString();
-
-      await goalStore.mutate(goal.goal_id, (g) => {
-        g.last_report_at = new Date().toISOString();
-        g.next_wake_at = nextWakeAt;
-        if (completed) g.status = "complete";
-        g.progress_log.push({
-          ts: new Date().toISOString(),
-          status: failed ? "error" : completed ? "complete" : "report",
-          summary,
-          task_id: goal.parent_task_id,
-        });
-      });
-
-      if (goal.report_to) {
+    const work = decideTickWork(goals, new Date());
+    if (work.due.length === 0) return;
+    log(`[goal] tick: ${work.due.length} due (active=${work.active}, pending=${work.pending}, skipped=${work.skipped})`);
+    for (const goal of work.due) {
+      try {
+        await runOneGoalWake(goal);
+      } catch (e: any) {
+        // P1a hardening: one bad wake cannot starve the rest of the
+        // tick. Catch + log + record + move on. The goal stays in
+        // `active` with the same `next_wake_at`, so it'll be tried
+        // again next tick — we don't auto-cancel a failing goal here.
+        const idShort = goal.goal_id.slice(0, 8);
+        warn(`[goal] ${idShort} wake threw: ${e?.message || e}`);
         try {
-          await sendReply(
-            goal.report_to,
-            `[${ALIAS}] /loop ${goal.goal_id.slice(0, 8)} ${failed ? "执行失败" : completed ? "已完成" : "进度汇报"}\n\n${text.slice(0, 2000)}`,
-            goal.parent_task_id,
-            failed,
-          );
-        } catch (e: any) {
-          warn(`[goal] report send failed for ${goal.goal_id.slice(0, 8)}: ${e.message}`);
+          await goalStore.mutate(goal.goal_id, (g) => {
+            g.progress_log.push({
+              ts: new Date().toISOString(),
+              status: "error",
+              summary: `tick-error: ${(e?.message || String(e)).slice(0, 400)}`,
+              task_id: g.parent_task_id,
+            });
+          });
+        } catch (mutateErr: any) {
+          warn(`[goal] ${idShort} could not even record the tick-error: ${mutateErr?.message || mutateErr}`);
         }
       }
     }
