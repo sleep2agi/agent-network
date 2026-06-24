@@ -15,6 +15,10 @@
  *       + group @bot detection refined to match the bot's own open_id.
  */
 import * as lark from "@larksuiteoapi/node-sdk";
+import crypto from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { Readable } from "node:stream";
 
 import type {
   IMAdapter,
@@ -44,6 +48,8 @@ export class FeishuAdapter implements IMAdapter {
    * naive `mentions.length > 0` check.
    */
   private botOpenId: string | null = null;
+  /** Where to persist downloaded inbound media (M5c). */
+  private mediaDir: string | null = null;
 
   private health_: IMAdapterHealth = {
     connected: false,
@@ -74,6 +80,10 @@ export class FeishuAdapter implements IMAdapter {
     // open_id. Failure degrades the check to naive `mentions.length > 0`
     // — we still want the bridge to start.
     this.botOpenId = await fetchBotOpenId(this.client);
+    // Configure the media drop-zone for inbound image downloads. If the
+    // config did not carry a channelDir, image downloads are disabled but
+    // text flow is unaffected.
+    this.mediaDir = fc.channelDir ? join(fc.channelDir, "media") : null;
   }
 
   async start(onEvent: OnEventHandler): Promise<void> {
@@ -83,6 +93,8 @@ export class FeishuAdapter implements IMAdapter {
     const { appId, appSecret, access } = this.feishuConfig;
     const connectionName = this.connectionName;
     const botOpenId = this.botOpenId;
+    const mediaDir = this.mediaDir;
+    const client = this.client;
 
     const dispatcher = new lark.EventDispatcher({});
     dispatcher.register({
@@ -91,6 +103,11 @@ export class FeishuAdapter implements IMAdapter {
           this.health_ = { ...this.health_, lastEventAt: Date.now() };
           const normalized = normalizeMessageEvent(rawEvent, connectionName, botOpenId);
           if (!normalized) return; // unsupported message_type
+
+          // M5c: attach downloaded image paths for image-type messages.
+          // Failure-tolerant — text flow proceeds even when download fails.
+          await maybeAttachImages(rawEvent, normalized, client, mediaDir);
+
           if (!isAccessAllowed(normalized, access)) {
             auditLog("deny", normalized, "not in allowFrom / allowChats");
             return;
@@ -127,14 +144,30 @@ export class FeishuAdapter implements IMAdapter {
     if (!this.client) {
       throw new Error("FeishuAdapter.send: call init() first");
     }
-    const text = message.text ?? message.markdown;
-    if (!text) {
-      // M5 will add image / file / card variants.
-      throw new Error(
-        "FeishuAdapter.send: M3 supports text only (image/card land in M5)",
-      );
+
+    // Decide payload — image takes precedence when imagePath is provided
+    // (caller's choice), otherwise text/markdown.
+    let msgType: "text" | "image";
+    let content: string;
+    if (message.imagePath) {
+      const imageKey = await uploadImage(this.client, message.imagePath);
+      if (!imageKey) {
+        throw new Error(
+          `FeishuAdapter.send: image upload failed for ${message.imagePath}`,
+        );
+      }
+      msgType = "image";
+      content = JSON.stringify({ image_key: imageKey });
+    } else {
+      const text = message.text ?? message.markdown;
+      if (!text) {
+        throw new Error(
+          "FeishuAdapter.send: requires text, markdown, or imagePath",
+        );
+      }
+      msgType = "text";
+      content = JSON.stringify({ text });
     }
-    const content = JSON.stringify({ text });
 
     // Threaded reply when the message references an upstream message_id.
     // im.message.reply preserves the thread context (Feishu root_id).
@@ -142,7 +175,7 @@ export class FeishuAdapter implements IMAdapter {
     if (replyTo) {
       const resp = await this.client.im.message.reply({
         path: { message_id: replyTo },
-        data: { msg_type: "text", content },
+        data: { msg_type: msgType, content },
       });
       const messageId = resp?.data?.message_id;
       if (!messageId) {
@@ -157,7 +190,7 @@ export class FeishuAdapter implements IMAdapter {
       params: { receive_id_type },
       data: {
         receive_id: message.target.conversationId,
-        msg_type: "text",
+        msg_type: msgType,
         content,
       },
     });
@@ -290,6 +323,95 @@ function normalizeMessageEvent(
     // RFC-020 §4.4: `${platform}:${connectionId}:${messageId}`
     idempotencyKey: `feishu:${connectionId}:${message.message_id}`,
   };
+}
+
+// ── Internals: image up/down (RFC-020 §3.1 / #179 M5c) ──────────────────
+
+/**
+ * Best-effort: when the inbound message is an image, download it via
+ * `im.messageResource.get` and attach the local file path to `event.content
+ * .images`. Failure is non-fatal — the text flow proceeds and the event
+ * carries an empty images array.
+ *
+ * `mediaDir` of null disables downloads (e.g. when the channel config didn't
+ * carry a channelDir). `client` of null does the same.
+ */
+async function maybeAttachImages(
+  rawEvent: unknown,
+  normalized: NormalizedIMEvent,
+  client: lark.Client | null,
+  mediaDir: string | null,
+): Promise<void> {
+  if (!client || !mediaDir) return;
+  const raw = rawEvent as FeishuRawEvent | undefined;
+  const message = raw?.message;
+  if (!message || message.message_type !== "image") return;
+  let imageKey: string | undefined;
+  try {
+    imageKey = (JSON.parse(message.content) as { image_key?: string }).image_key;
+  } catch {
+    return;
+  }
+  if (!imageKey || !message.message_id) return;
+  const localPath = await downloadImage(
+    client,
+    message.message_id,
+    imageKey,
+    mediaDir,
+  );
+  if (localPath) {
+    normalized.content = { ...normalized.content, images: [localPath] };
+  }
+}
+
+async function downloadImage(
+  client: lark.Client,
+  messageId: string,
+  imageKey: string,
+  mediaDir: string,
+): Promise<string | null> {
+  try {
+    const resp = await client.im.messageResource.get({
+      path: { message_id: messageId, file_key: imageKey },
+      params: { type: "image" },
+    });
+    if (!resp) return null;
+    const stream = resp as unknown as Readable;
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      stream.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      stream.on("end", () => resolve());
+      stream.on("error", (err: Error) => reject(err));
+    });
+    mkdirSync(mediaDir, { recursive: true });
+    const filename = `img_${Date.now()}_${crypto.randomBytes(4).toString("hex")}.png`;
+    const filepath = join(mediaDir, filename);
+    writeFileSync(filepath, Buffer.concat(chunks));
+    return filepath;
+  } catch {
+    return null;
+  }
+}
+
+async function uploadImage(
+  client: lark.Client,
+  imagePath: string,
+): Promise<string | null> {
+  try {
+    if (!existsSync(imagePath)) return null;
+    const buf = readFileSync(imagePath);
+    const stream = Readable.from(buf);
+    const resp = await client.im.image.create({
+      data: {
+        image_type: "message",
+        // lark's typing wants a Readable but the runtime accepts any Readable.
+        image: stream as unknown as never,
+      },
+    });
+    return resp?.image_key ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Internals: bot identity resolution (RFC-020 §4.3 / #179 M5b) ────────

@@ -34,6 +34,12 @@ export interface FeishuChannelConfig {
   auditRaw: boolean;
   /** Per-task timeout in ms; default 5 min (RFC-020 §4.5). */
   taskTimeoutMs: number;
+  /**
+   * Absolute path to the channel directory. The adapter writes downloaded
+   * inbound media to `<channelDir>/media/` (M5c). Populated by the loader so
+   * callers do not have to thread it separately.
+   */
+  channelDir: string;
 }
 
 /**
@@ -58,6 +64,7 @@ export function loadFeishuChannelConfig(channelDir: string): FeishuChannelConfig
     ackPlaceholder: true,
     auditRaw: false,
     taskTimeoutMs: 5 * 60 * 1000,
+    channelDir,
   };
 }
 
