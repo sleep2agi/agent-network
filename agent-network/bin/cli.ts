@@ -1269,6 +1269,14 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     env: envMap,
     flags: {
       dangerouslySkipPermissions: true,
+      // permissionMode (Vincent ask 2026-06-24) — read by agent-node's
+      // claude-agent-sdk runtime. New nodes default to "auto" (softer than
+      // bypass, escalates only when needed). Bridge in agent-node honours
+      // the legacy `dangerouslySkipPermissions: true` field above for
+      // existing nodes (no behaviour change there), but for new nodes the
+      // explicit `permissionMode: "auto"` wins. Other runtimes
+      // (claude-code-cli / codex-sdk / grok-build-acp) ignore this field.
+      permissionMode: "auto",
       ...(runtime === "claude-code-cli" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
       ...(opts["max-turns"] ? { maxTurns: parseInt(opts["max-turns"]) } : {}),
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
@@ -2217,6 +2225,10 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
     env: envMap,
     flags: {
       dangerouslySkipPermissions: true,
+      // permissionMode default for the interactive `anet node create`
+      // wizard — same Vincent 2026-06-24 ask, same auto-default + legacy
+      // bridge as the non-interactive path above. Other runtimes ignore it.
+      permissionMode: "auto",
       ...(teammateMode ? { teammateMode } : {}),
     },
   };

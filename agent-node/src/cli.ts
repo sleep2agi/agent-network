@@ -1305,14 +1305,48 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     } catch { return undefined; }
   })();
 
+  // permissionMode resolution (Vincent ask via 通信龙 2026-06-24):
+  //
+  // SDK PermissionMode is a single enum slot — 'default' | 'acceptEdits' |
+  // 'bypassPermissions' | 'plan' | 'dontAsk' | 'auto'. 'auto' and
+  // 'bypassPermissions' are mutually exclusive values, not co-traveling
+  // flags. 'auto' is "softer" — escalating but can still pop a prompt in
+  // some cases, so a non-interactive (anet node start) process under 'auto'
+  // could hang on a prompt that nobody can answer.
+  //
+  // Resolution order:
+  //   1. `flags.permissionMode` explicit value (new config field, e.g. "auto",
+  //      "bypassPermissions", "acceptEdits", ...) → used verbatim.
+  //   2. Legacy bridge: `flags.dangerouslySkipPermissions === true` AND no
+  //      explicit `flags.permissionMode` → resolves to 'bypassPermissions'
+  //      so existing nodes (which only carry the legacy field) keep their
+  //      "no prompts ever" posture across this change — zero behaviour
+  //      change for the 67 already-running agents.
+  //   3. Default: 'auto'. This is what `anet node create` writes into
+  //      new node configs going forward; it's also the resolved value
+  //      when neither config field is present.
+  //
+  // allowDangerouslySkipPermissions is the SDK's safety-unlock for
+  // permissionMode='bypassPermissions' (per sdk.d.ts) — required there,
+  // not relevant for any other mode. Conditional inclusion keeps it
+  // tightly bound to the mode that actually needs it.
+  const resolvedPermissionMode: string =
+    (typeof fileConfig.flags?.permissionMode === "string" && fileConfig.flags.permissionMode)
+      ? fileConfig.flags.permissionMode
+      : (fileConfig.flags?.dangerouslySkipPermissions === true
+          ? "bypassPermissions"
+          : "auto");
+
   const options: any = {
     model: MODEL || undefined,
     // #101 fix: TOOLS is now either an explicit allowlist (string[]) or the
     // SDK's "give me the full Claude Code preset" sentinel — never undefined.
     tools: TOOLS,
     maxTurns: MAX_TURNS,
-    permissionMode: "bypassPermissions",
-    allowDangerouslySkipPermissions: true,
+    permissionMode: resolvedPermissionMode,
+    ...(resolvedPermissionMode === "bypassPermissions"
+      ? { allowDangerouslySkipPermissions: true }
+      : {}),
     settingSources: [],
     // mcpServers active when no claudePath (forced above for URL-type MCP).
     // This gives the agent commhub_send_task / get_all_status / etc. so it
