@@ -37,6 +37,13 @@ export class FeishuAdapter implements IMAdapter {
   private connectionName = "";
   private client: lark.Client | null = null;
   private wsClient: lark.WSClient | null = null;
+  /**
+   * The bot's own open_id, resolved at init() via /open-apis/bot/v3/info.
+   * Used to detect real @bot mentions (vs any mention) in group messages.
+   * Falls back to null on lookup failure — `mentioned` then degrades to the
+   * naive `mentions.length > 0` check.
+   */
+  private botOpenId: string | null = null;
 
   private health_: IMAdapterHealth = {
     connected: false,
@@ -63,6 +70,10 @@ export class FeishuAdapter implements IMAdapter {
       appSecret: fc.appSecret,
       disableTokenCache: false,
     });
+    // Resolve bot identity so group @ detection compares against the real
+    // open_id. Failure degrades the check to naive `mentions.length > 0`
+    // — we still want the bridge to start.
+    this.botOpenId = await fetchBotOpenId(this.client);
   }
 
   async start(onEvent: OnEventHandler): Promise<void> {
@@ -71,13 +82,14 @@ export class FeishuAdapter implements IMAdapter {
     }
     const { appId, appSecret, access } = this.feishuConfig;
     const connectionName = this.connectionName;
+    const botOpenId = this.botOpenId;
 
     const dispatcher = new lark.EventDispatcher({});
     dispatcher.register({
       "im.message.receive_v1": async (rawEvent: unknown): Promise<unknown> => {
         try {
           this.health_ = { ...this.health_, lastEventAt: Date.now() };
-          const normalized = normalizeMessageEvent(rawEvent, connectionName);
+          const normalized = normalizeMessageEvent(rawEvent, connectionName, botOpenId);
           if (!normalized) return; // unsupported message_type
           if (!isAccessAllowed(normalized, access)) {
             auditLog("deny", normalized, "not in allowFrom / allowChats");
@@ -212,13 +224,15 @@ interface FeishuRawEvent {
  * Translate raw `im.message.receive_v1` payload into NormalizedIMEvent.
  * Returns null for unsupported message types so the caller skips them.
  *
- * `mentioned` is detected naively in M2 as `mentions.length > 0`. M5 refines
- * by comparing each mention's `id.open_id` against the bot's own open_id
- * (requires an API round-trip at init time to resolve the bot identity).
+ * `mentioned` precision: when `botOpenId` is non-null (resolved at init via
+ * /open-apis/bot/v3/info, M5b) the function compares mentions[].id.open_id
+ * to the bot's actual open_id. When null (init lookup failed), it falls back
+ * to the M2 naive check `mentions.length > 0` so the bridge still functions.
  */
 function normalizeMessageEvent(
   raw: unknown,
   connectionName: string,
+  botOpenId: string | null,
 ): NormalizedIMEvent | null {
   const event = raw as FeishuRawEvent | undefined;
   const message = event?.message;
@@ -252,8 +266,10 @@ function normalizeMessageEvent(
 
   const conversationType: "dm" | "group" =
     message.chat_type === "group" ? "group" : "dm";
-  const mentioned =
-    Array.isArray(message.mentions) && message.mentions.length > 0;
+  const mentions = Array.isArray(message.mentions) ? message.mentions : [];
+  const mentioned = botOpenId
+    ? mentions.some((m) => m?.id?.open_id === botOpenId)
+    : mentions.length > 0;
   const connectionId = `${connectionName}#feishu`;
 
   return {
@@ -274,6 +290,27 @@ function normalizeMessageEvent(
     // RFC-020 §4.4: `${platform}:${connectionId}:${messageId}`
     idempotencyKey: `feishu:${connectionId}:${message.message_id}`,
   };
+}
+
+// ── Internals: bot identity resolution (RFC-020 §4.3 / #179 M5b) ────────
+
+/**
+ * Resolve the bot's own open_id via the Feishu /open-apis/bot/v3/info endpoint.
+ * Returns null on failure so the adapter can degrade to naive mention
+ * detection rather than refusing to start.
+ */
+async function fetchBotOpenId(client: lark.Client): Promise<string | null> {
+  try {
+    const resp = (await client.request({
+      method: "GET",
+      url: "/open-apis/bot/v3/info",
+    })) as unknown;
+    // Lark's untyped request envelope; bot info lives at .bot.open_id.
+    const r = resp as { bot?: { open_id?: string }; data?: { bot?: { open_id?: string } } };
+    return r?.bot?.open_id ?? r?.data?.bot?.open_id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Internals: access whitelist (RFC-020 §4.1 / §5.1) ────────────────────
