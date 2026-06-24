@@ -2686,7 +2686,34 @@ async function launchAgent(id: string, forceNewSession = false) {
     maybeWarnChannelResumeBlocker(nodeId, profile);
 
     const claudeArgs: string[] = [];
-    if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
+    // permissionMode resolver for claude-code-cli — mirror of the SDK-side
+    // resolver in agent-node/src/cli.ts. Three layers (top to bottom):
+    //   1. root override → 'auto' (Vincent 2026-06-24 toodadev2 incident:
+    //      Claude Code rejects --dangerously-skip-permissions when running
+    //      as root; 'auto' is the softer CC-accepted alternative).
+    //   2. Explicit `profile.flags.permissionMode` — used verbatim. This
+    //      is the new field `anet node create` writes from today onward;
+    //      symmetric with the SDK side.
+    //   3. Legacy `profile.flags.dangerouslySkipPermissions: true` →
+    //      'bypassPermissions' (= the historical --dangerously-skip-
+    //      permissions flag). Existing non-root nodes that only carry the
+    //      legacy field keep their pre-fix behaviour — zero regression.
+    //   4. Default 'default' → no permission flag added at all (CC's own
+    //      built-in default prompts).
+    const ccIsRoot = typeof process.getuid === "function" && process.getuid() === 0;
+    const ccResolvedMode: string = ccIsRoot
+      ? "auto"
+      : ((typeof profile.flags?.permissionMode === "string" && profile.flags.permissionMode)
+          ? profile.flags.permissionMode
+          : (profile.flags?.dangerouslySkipPermissions === true ? "bypassPermissions" : "default"));
+    if (ccIsRoot && profile.flags?.dangerouslySkipPermissions) {
+      console.log("[anet] running as root — using --permission-mode auto (CC rejects --dangerously-skip-permissions as root)");
+    }
+    if (ccResolvedMode === "bypassPermissions") {
+      claudeArgs.push("--dangerously-skip-permissions");
+    } else if (ccResolvedMode !== "default") {
+      claudeArgs.push("--permission-mode", ccResolvedMode);
+    }
     for (const ch of profile.channels) {
       if (ch.startsWith("server:")) {
         claudeArgs.push("--dangerously-load-development-channels", ch);

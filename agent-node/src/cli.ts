@@ -1151,21 +1151,16 @@ async function processWithClaude(task: string, from: string): Promise<string> {
     ].join("\n");
   }
 
-  // Claude Code refuses --dangerously-skip-permissions when running as root
-  // (security policy). Without that flag, every tool call would block on
-  // human approval → 永远卡住. Detect early and return a clear error.
+  // Root-safety log (was a hard-fail before 2026-06-24 — see Vincent toodadev2
+  // incident). Claude Code's security policy rejects `--dangerously-skip-
+  // permissions` when running as root, so the old "bypass permissions" path
+  // was unreachable on root. Earlier today's commit landed `permissionMode:
+  // 'auto'` as a softer alternative that CC DOES accept under root; the
+  // resolver below force-uses 'auto' when isRoot regardless of legacy
+  // `dangerouslySkipPermissions: true` config. Surface the fallback via
+  // log so operators see why their bypass-permissions request was downgraded.
   if (typeof process.getuid === "function" && process.getuid() === 0) {
-    return [
-      "claude 错误: 当前以 root 用户运行,Claude Code 拒绝 --dangerously-skip-permissions。",
-      "解决方案 (推荐 1):",
-      "  1. 建非 root 用户后再启动:",
-      "       useradd -m anet-agent",
-      "       su - anet-agent",
-      "       anet login --hub <URL> --username <user> --password <pass>",
-      "       anet node start <name>",
-      "  2. 或切换 runtime 为 codex-sdk (root 下可运行,需 codex auth login):",
-      "       anet node delete <name> && anet node create <name> --runtime codex-sdk",
-    ].join("\n");
+    log("[claude] running as root — Claude Code rejects --dangerously-skip-permissions as root; using permissionMode='auto' (softer, CC-accepted alternative)");
   }
 
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
@@ -1330,12 +1325,22 @@ async function processWithClaude(task: string, from: string): Promise<string> {
   // permissionMode='bypassPermissions' (per sdk.d.ts) — required there,
   // not relevant for any other mode. Conditional inclusion keeps it
   // tightly bound to the mode that actually needs it.
-  const resolvedPermissionMode: string =
-    (typeof fileConfig.flags?.permissionMode === "string" && fileConfig.flags.permissionMode)
-      ? fileConfig.flags.permissionMode
-      : (fileConfig.flags?.dangerouslySkipPermissions === true
-          ? "bypassPermissions"
-          : "auto");
+  //
+  // 2026-06-24 root-safety: if running as root, force 'auto' regardless
+  // of config. Claude Code rejects --dangerously-skip-permissions /
+  // permissionMode='bypassPermissions' as root (security policy), and
+  // 'auto' is the softer alternative CC accepts there. The override
+  // runs ABOVE the bridge so legacy `dangerouslySkipPermissions: true`
+  // configs don't trap a root user back into the broken path. Non-root
+  // users see the pre-fix resolution exactly — zero regression.
+  const isRootSdk = typeof process.getuid === "function" && process.getuid() === 0;
+  const resolvedPermissionMode: string = isRootSdk
+    ? "auto"
+    : ((typeof fileConfig.flags?.permissionMode === "string" && fileConfig.flags.permissionMode)
+        ? fileConfig.flags.permissionMode
+        : (fileConfig.flags?.dangerouslySkipPermissions === true
+            ? "bypassPermissions"
+            : "auto"));
 
   const options: any = {
     model: MODEL || undefined,
