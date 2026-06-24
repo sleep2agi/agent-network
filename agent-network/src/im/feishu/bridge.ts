@@ -64,7 +64,14 @@ export interface BridgeReplyEnvelope {
   text: string;
 }
 
-const REPLY_PENDING_TTL_MS = 5 * 60 * 1000;
+/** Default outbound-correlation TTL when channelConfig.taskTimeoutMs is unset.
+ *  Bumped to 15min per 通信牛 review 必改3 — covers 95% of real think durations.
+ *  Override via .anet/nodes/<n>/channels/feishu/config.json `taskTimeoutMs`. */
+const DEFAULT_REPLY_PENDING_TTL_MS = 15 * 60 * 1000;
+
+/** Idempotency dedup window — drop repeat events that arrive within this
+ *  span (socket-reconnect replay). Independent of the outbound TTL above. */
+const DEDUP_WINDOW_MS = 2 * 60 * 1000;
 
 /**
  * Wire and start the Feishu bridge. Resolves once the underlying WSClient is
@@ -87,16 +94,48 @@ export async function startFeishuBridge(
     platformConfig: channelConfig as unknown as Record<string, unknown>,
   });
 
-  const onEvent = opts.onEvent ?? selectDefaultEventHandler(adapter);
-  await adapter.start(onEvent);
+  const ttlMs = channelConfig.taskTimeoutMs || DEFAULT_REPLY_PENDING_TTL_MS;
+  const onEvent =
+    opts.onEvent ?? selectDefaultEventHandler(adapter, ttlMs);
+  await adapter.start(withDedup(onEvent));
   return adapter;
+}
+
+/**
+ * Dedup wrapper — drops repeat events that arrive within DEDUP_WINDOW_MS
+ * (RFC-020 §4.4 / 通信牛 review). Protects against socket-reconnect replay.
+ * Sits in front of any other handler so the dropped event never reaches
+ * IPC / think / send.
+ */
+function withDedup(
+  inner: (event: NormalizedIMEvent) => Promise<void>,
+): (event: NormalizedIMEvent) => Promise<void> {
+  const seen = new Map<string, number>();
+  return async (event: NormalizedIMEvent) => {
+    const now = Date.now();
+    // Lightweight GC — only when the map grows, sweep stale entries.
+    if (seen.size > 200) {
+      for (const [k, ts] of seen) {
+        if (now - ts > DEDUP_WINDOW_MS) seen.delete(k);
+      }
+    }
+    if (seen.has(event.idempotencyKey)) {
+      process.stderr.write(
+        `[feishu:bridge] dedup drop ${event.idempotencyKey}\n`,
+      );
+      return;
+    }
+    seen.set(event.idempotencyKey, now);
+    await inner(event);
+  };
 }
 
 function selectDefaultEventHandler(
   adapter: FeishuAdapter,
+  ttlMs: number,
 ): (event: NormalizedIMEvent) => Promise<void> {
   if (typeof process.send === "function") {
-    return createIPCEventHandler(adapter);
+    return createIPCEventHandler(adapter, ttlMs);
   }
   return defaultEventLogger;
 }
@@ -105,9 +144,16 @@ function selectDefaultEventHandler(
  * IPC handler — forwards inbound events to the parent agent-node and routes
  * the parent's reply back to Feishu via the adapter. The parent contract is
  * a single round-trip per event keyed on `idempotencyKey`.
+ *
+ * On TTL expiry without reply (per 通信牛 review 必改3-b — never silent-drop)
+ * the bridge sends a user-visible "[处理超时]" notice into the originating
+ * conversation before evicting the pending entry. If the agent's real reply
+ * arrives later, bridge's reply-envelope lookup will miss (entry already
+ * evicted) and the late reply is dropped — the user already knows.
  */
 function createIPCEventHandler(
   adapter: FeishuAdapter,
+  ttlMs: number,
 ): (event: NormalizedIMEvent) => Promise<void> {
   if (typeof process.send !== "function") {
     throw new Error(
@@ -142,7 +188,30 @@ function createIPCEventHandler(
 
   return async (event: NormalizedIMEvent) => {
     pending.set(event.idempotencyKey, event);
-    setTimeout(() => pending.delete(event.idempotencyKey), REPLY_PENDING_TTL_MS);
+    setTimeout(() => {
+      // If pending entry still here, parent never sent a reply within ttl.
+      // Surface a user-visible timeout instead of silently evicting.
+      if (!pending.has(event.idempotencyKey)) return;
+      pending.delete(event.idempotencyKey);
+      void (async () => {
+        try {
+          await adapter.send({
+            target: event.conversation,
+            text: "[处理超时，任务可能仍在后台运行]",
+            replyToMessageId: event.messageId,
+            correlation: { taskId: event.idempotencyKey },
+          });
+          process.stderr.write(
+            `[feishu:bridge] timeout-notify sent for ${event.idempotencyKey} after ${ttlMs}ms\n`,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(
+            `[feishu:bridge] timeout-notify send failed: ${msg}\n`,
+          );
+        }
+      })();
+    }, ttlMs);
     const envelope: BridgeIncomingEnvelope = { type: "event", event };
     process.send!(envelope);
   };
