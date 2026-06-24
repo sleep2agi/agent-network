@@ -447,7 +447,37 @@ function initTelegramChannel(spec: { type: string; path?: string; raw: string })
 }
 
 const TELEGRAM_CHANNELS = CHANNELS.filter(ch => ch.type === "telegram").map(initTelegramChannel);
-const UNSUPPORTED_CHANNEL = CHANNELS.find(ch => ch.type !== "telegram");
+
+// ── Feishu channel (RFC-020 §3.1 / #179 M5a) ─────────────────────────────
+// Feishu bridge runs in a forked worker (src/im/feishu/worker.ts from the
+// agent-network package). agent-node owns the IPC parent side: receives
+// inbound events from the bridge and routes replies back. think() integration
+// lands in M5b — M5a sends a clear placeholder reply so the full round-trip
+// is demoable end-to-end.
+
+interface FeishuChannel {
+  type: "feishu";
+  dir: string;
+}
+
+function initFeishuChannel(spec: { type: string; path?: string; raw: string }): FeishuChannel {
+  const dir = spec.path || defaultChannelDir("feishu");
+  if (!existsSync(join(dir, ".env"))) {
+    console.error(`[agent-node] feishu channel needs .env with FEISHU_APP_ID + FEISHU_APP_SECRET in ${dir}`);
+    process.exit(1);
+  }
+  if (!existsSync(join(dir, "access.json"))) {
+    console.error(`[agent-node] feishu channel needs access.json in ${dir}`);
+    process.exit(1);
+  }
+  // .env 权限加固
+  try { chmodSync(join(dir, ".env"), 0o600); } catch {}
+  return { type: "feishu", dir };
+}
+
+const FEISHU_CHANNELS = CHANNELS.filter(ch => ch.type === "feishu").map(initFeishuChannel);
+
+const UNSUPPORTED_CHANNEL = CHANNELS.find(ch => ch.type !== "telegram" && ch.type !== "feishu");
 if (UNSUPPORTED_CHANNEL) {
   console.error(`[agent-node] unsupported channel: ${UNSUPPORTED_CHANNEL.raw}`);
   process.exit(1);
@@ -2507,6 +2537,112 @@ async function handleTelegramMessage(tg: TelegramApi, msg: any) {
   }
 }
 
+// ── Feishu bridge worker fork + IPC handler (#179 M5a) ──────────────────────
+
+interface FeishuBridgeEnvelope {
+  type: "event";
+  event: {
+    idempotencyKey: string;
+    sender?: { id?: string };
+    conversation?: { conversationType?: string; conversationId?: string };
+    content?: { text?: string };
+    mentioned?: boolean;
+  };
+}
+
+/**
+ * Locate the agent-network feishu worker script. Search order:
+ *   1. `ANET_FEISHU_WORKER_PATH` env override (explicit).
+ *   2. Dev sibling checkout: agent-node and agent-network laid out as siblings.
+ *   3. Installed npm package layout (worker lives in @sleep2agi/agent-network).
+ */
+function resolveFeishuWorkerPath(): string | null {
+  const candidates: string[] = [];
+  if (process.env.ANET_FEISHU_WORKER_PATH) {
+    candidates.push(process.env.ANET_FEISHU_WORKER_PATH);
+  }
+  const here = new URL(".", import.meta.url).pathname;
+  candidates.push(
+    // dev sibling: ../../agent-network/{dist|src}/src/im/feishu/worker.{js|ts}
+    join(here, "..", "..", "agent-network", "dist", "src", "im", "feishu", "worker.js"),
+    join(here, "..", "..", "agent-network", "src", "im", "feishu", "worker.ts"),
+    // installed npm package (agent-network and agent-node share node_modules root)
+    join(here, "..", "..", "..", "@sleep2agi", "agent-network", "dist", "src", "im", "feishu", "worker.js"),
+    // global npm prefix layout
+    join(here, "..", "..", "..", "..", "@sleep2agi", "agent-network", "dist", "src", "im", "feishu", "worker.js"),
+  );
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return null;
+}
+
+async function connectFeishu(channel: FeishuChannel): Promise<void> {
+  const workerPath = resolveFeishuWorkerPath();
+  if (!workerPath) {
+    warn(
+      `[feishu] worker path not found — skipping feishu channel setup. ` +
+        `Override with ANET_FEISHU_WORKER_PATH, or install @sleep2agi/agent-network so dist/src/im/feishu/worker.js is reachable.`,
+    );
+    return;
+  }
+
+  const { spawn } = await import("node:child_process");
+  const child = spawn(
+    process.execPath,
+    [workerPath, "--channel-dir", channel.dir, "--node-alias", ALIAS],
+    { stdio: ["ignore", "inherit", "inherit", "ipc"] },
+  );
+
+  child.on("message", (raw: unknown) => {
+    if (!isFeishuIncomingEnvelope(raw)) return;
+    const ev = raw.event;
+    log(
+      `[feishu] event from=${ev.sender?.id ?? "?"} ` +
+        `conv=${ev.conversation?.conversationType ?? "?"}:${ev.conversation?.conversationId ?? "?"} ` +
+        `mentioned=${ev.mentioned ?? false} text="${(ev.content?.text ?? "").slice(0, 80)}"`,
+    );
+
+    // M5a: placeholder reply so the full inbound→IPC→outbound round-trip is
+    // exercisable end-to-end before think() integration lands in M5b.
+    // M5b will replace this with claude-agent-sdk query() invocation routing
+    // (or the project's existing inbox → think → reply pipeline).
+    if (typeof child.send === "function") {
+      try {
+        child.send({
+          type: "reply",
+          eventKey: ev.idempotencyKey,
+          text: "[agent-node M5a placeholder — think() integration follows in M5b]",
+        });
+      } catch (e: any) {
+        warn(`[feishu] reply send failed: ${e?.message || e}`);
+      }
+    }
+  });
+
+  child.on("exit", (code, signal) => {
+    warn(`[feishu] worker exited code=${code} signal=${signal} dir=${channel.dir}`);
+  });
+
+  child.on("error", (err) => {
+    warn(`[feishu] worker error: ${err?.message || err}`);
+  });
+
+  log(`[feishu] forked worker (pid ${child.pid}) for ${channel.dir} via ${workerPath}`);
+}
+
+function isFeishuIncomingEnvelope(raw: unknown): raw is FeishuBridgeEnvelope {
+  if (!raw || typeof raw !== "object") return false;
+  const r = raw as Record<string, unknown>;
+  if (r["type"] !== "event") return false;
+  const ev = r["event"];
+  return (
+    !!ev &&
+    typeof ev === "object" &&
+    typeof (ev as Record<string, unknown>)["idempotencyKey"] === "string"
+  );
+}
+
 async function connectTelegram(channel: TelegramChannel) {
   const tg: TelegramApi = {
     channel,
@@ -2731,7 +2867,10 @@ log(`  tools:   ${
     ? (TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)")
     : "all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)"
 }`);
-log(`  channels:${TELEGRAM_CHANNELS.length ? ` telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : " (none)"}`);
+log(`  channels:${[
+  TELEGRAM_CHANNELS.length ? `telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : "",
+  FEISHU_CHANNELS.length ? `feishu(${FEISHU_CHANNELS.map(ch => ch.dir).join(",")})` : "",
+].filter(s => s).join(" ") || " (none)"}`);
 log(`  session: ${SESSION_ID || "(new)"}`);
 log(`  log-dir: ${LOG_DIR}`);
 log(`  goals:   ${GOALS_PATH}`);
@@ -2784,6 +2923,7 @@ const shutdown = async () => { log("shutting down..."); await reportStatus("offl
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 for (const channel of TELEGRAM_CHANNELS) connectTelegram(channel);
+for (const channel of FEISHU_CHANNELS) void connectFeishu(channel);
 connectSSE();
 
 // #246 — opt-in telegram plugin watchdog. Reads
