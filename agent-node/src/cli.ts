@@ -1134,7 +1134,24 @@ let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || unde
 const HAD_GROK_SESSION_AT_BOOT = RUNTIME === "grok" && !!SESSION_ID;
 let grokResumeHintFired = false;
 
-async function processWithClaude(task: string, from: string): Promise<string> {
+async function processWithClaude(task: string, from: string, images?: string[]): Promise<string> {
+  // #179 M5b 必改2-C (2026-06-24, 通信龙 ack): mirror the Grok runtime
+  // pattern — accept images in the signature so callers (commhub-inbox
+  // attachments, feishu channel content.images, /loop wakes carrying
+  // images, etc.) pass them through symmetrically, but for now emit a
+  // single warn line and downgrade to text-only.
+  //
+  // Real multimodal wiring (build AsyncIterable<SDKUserMessage> with
+  // {type:"image", source:{type:"base64",...}} content blocks) is a
+  // follow-up: blast radius is all claude-agent-sdk callers (not just
+  // feishu) and would need a cross-runtime regression + verification
+  // that the configured vendor's Anthropic-compat endpoint (e.g.
+  // deepseek-v4-pro via /anthropic) actually accepts image blocks.
+  // Track in the per-runtime multimodal issue.
+  if (images?.length) {
+    warn(`[claude] image attachments (${images.length}) received but claude-agent-sdk runtime currently sends text-only prompts; images remain on disk for future runs. Real multimodal wiring is tracked in a follow-up issue.`);
+  }
+
   // Pre-flight: if no Claude binary is resolvable, on-the-fly install the
   // glibc one. SDK ships musl-only by default on Linux x64 which fails on
   // Debian/Ubuntu/RHEL hosts. Auto-install means the user doesn't need to
@@ -2215,7 +2232,7 @@ function think(task: string, from: string, taskId: string | null, images?: strin
       if (RUNTIME === "grok") {
         return await processWithGrok(task, from, images);
       }
-      return await processWithClaude(task, from);
+      return await processWithClaude(task, from, images);
     } finally {
       if (prev !== undefined) process.env.CURRENT_TASK_ID = prev; else delete process.env.CURRENT_TASK_ID;
       decrementInFlight();
