@@ -20,6 +20,7 @@ import { parseGoalCommand } from "./goals/parser";
 import { GoalStore, newGoal, runtimeBucket, decideStartupAction } from "./goals/store";
 import { decideTickWork } from "./goals/scheduler";
 import { runCodexWakeForGoal, type CodexWakeDeps } from "./goals/codex-wake";
+import { isGoalCompleteSentinel } from "./goals/completion-detect";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
@@ -890,8 +891,8 @@ function buildGoalWakePrompt(goal: AgentGoal): string {
     `要求：`,
     `1. 先检查当前实际状态，不要只复述旧进度。`,
     `2. 能推进就直接推进；需要协调其他 agent 时使用 CommHub 工具。`,
-    `3. 输出一份简短正式汇报，包含：已完成、进行中、风险、下一步。`,
-    `4. 如果目标已完成，请明确写出“目标已完成”。`,
+    `3. 输出一份简短正式汇报，包含：本轮已完成（只列本轮新进展）、进行中、风险、下一步。`,
+    `4. 完成判定：仅当**整个目标**已彻底完成、不再需要后续唤醒时，在汇报**最后单独一行**输出哨兵 \`GOAL_COMPLETE\`（或中文 \`目标已完成\` 独占一行）。其他情况（本轮某些子项 completed 也算）**绝不**写这一行——一旦写了, /loop 调度器会把此 goal 标 complete 并永久跳过, loop 停止。`,
   ].join("\n");
 }
 
@@ -953,7 +954,7 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
     failed = r.failed;
   }
   const summary = text.replace(/\s+/g, " ").slice(0, 500);
-  const completed = /目标已完成|goal completed|completed/i.test(text);
+  const completed = isGoalCompleteSentinel(text);
   const nextWakeAt = new Date(Date.now() + goal.interval_ms).toISOString();
 
   // Phase 2: writeback. If THIS mutate throws, the wake's LLM work
