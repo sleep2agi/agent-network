@@ -20,12 +20,15 @@
  * — tracked in #182.
  *
  * Milestones:
- *   M1 (this file): worker entry scaffold.
- *   M2: load config + instantiate adapter + WSClient.
+ *   M1: worker entry scaffold.
+ *   M2 (this file): adapter + WSClient wiring with a noop event handler that
+ *                   logs received events. Useful by itself for debugging the
+ *                   inbound path without an agent attached.
  *   M3: parent-IPC contract for think() round-trip, outbound send.
  *   M4: agent-node spawn integration (fork(this) wired by agent-node).
- *   M5: group @bot trigger, image up/down, Docker smoke.
+ *   M5: group @bot trigger refinement, image up/down, Docker smoke.
  */
+import type { NormalizedIMEvent } from "../types.js";
 import { FeishuAdapter } from "./adapter.js";
 import { loadFeishuChannelConfig } from "./config.js";
 
@@ -34,33 +37,54 @@ export interface FeishuBridgeOptions {
   channelDir: string;
   /** Node alias — used for audit log + IPC framing. */
   nodeAlias: string;
+  /**
+   * Optional inbound event sink for tests and the M3 think() bridge. Defaults
+   * to a stderr logger so a bare bridge process can be observed end-to-end.
+   */
+  onEvent?: (event: NormalizedIMEvent) => Promise<void>;
 }
 
 /**
  * Wire and start the Feishu bridge. Resolves once the underlying WSClient is
  * connected and the EventDispatcher is registered.
  *
- * Intended to be the worker's `main()` — agent-node will spawn this file as a
- * child process and pass `FeishuBridgeOptions` through CLI args or env.
+ * Intended to be the worker's `main()` — agent-node spawns this file as a
+ * child process and passes `FeishuBridgeOptions` through CLI args or env.
  */
 export async function startFeishuBridge(
-  _opts: FeishuBridgeOptions,
-): Promise<void> {
-  // M2 outline:
-  //   const config = loadFeishuChannelConfig(_opts.channelDir);
-  //   const adapter = new FeishuAdapter();
-  //   await adapter.init({ platform: "feishu", connectionName: _opts.nodeAlias,
-  //                        ingressMode: "socket", platformConfig: config });
-  //   await adapter.start(async (event) => {
-  //     if (!isAllowed(event, config.access)) return;            // §4.1 access gate
-  //     const reply = await thinkViaParent(event);                // M3 IPC
-  //     await adapter.send(buildReply(event, reply));             // §4.2 outbound
-  //   });
-  void FeishuAdapter; // keep import live until M2 wires it
-  void loadFeishuChannelConfig;
-  throw new Error("startFeishuBridge: pending M2 (adapter + WSClient wiring)");
+  opts: FeishuBridgeOptions,
+): Promise<FeishuAdapter> {
+  const channelConfig = loadFeishuChannelConfig(opts.channelDir);
+
+  const adapter = new FeishuAdapter();
+  await adapter.init({
+    platform: "feishu",
+    connectionName: opts.nodeAlias,
+    ingressMode: "socket",
+    groupPolicy: channelConfig.groupPolicy,
+    ackPlaceholder: channelConfig.ackPlaceholder,
+    auditRaw: channelConfig.auditRaw,
+    taskTimeoutMs: channelConfig.taskTimeoutMs,
+    platformConfig: channelConfig as unknown as Record<string, unknown>,
+  });
+
+  const onEvent = opts.onEvent ?? defaultEventLogger;
+  await adapter.start(onEvent);
+  return adapter;
+}
+
+async function defaultEventLogger(event: NormalizedIMEvent): Promise<void> {
+  process.stderr.write(
+    `[feishu:bridge] event from=${event.sender.id} ` +
+      `conv=${event.conversation.conversationType}:${event.conversation.conversationId} ` +
+      `mentioned=${event.mentioned} text=${(event.content.text ?? "").slice(0, 80)}\n`,
+  );
 }
 
 export { FeishuAdapter } from "./adapter.js";
 export { loadFeishuChannelConfig } from "./config.js";
-export type { FeishuAccessList, FeishuChannelConfig, FeishuChannelEnv } from "./config.js";
+export type {
+  FeishuAccessList,
+  FeishuChannelConfig,
+  FeishuChannelEnv,
+} from "./config.js";

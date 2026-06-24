@@ -63,7 +63,8 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.4.3"
+    "@inquirer/prompts": "^8.4.3",
+    "@larksuiteoapi/node-sdk": "^1.42.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
