@@ -17,7 +17,7 @@ import { createCommhubSdkMcpServer } from "./commhub-mcp";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, incrementInFlight, decrementInFlight } from "./process-telemetry";
 import { parseGoalCommand } from "./goals/parser";
-import { GoalStore, newGoal } from "./goals/store";
+import { GoalStore, newGoal, runtimeBucket, decideStartupAction } from "./goals/store";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
@@ -2152,7 +2152,12 @@ async function processInbox() {
         continue;
       }
 
-      if (isGoalCommand(content)) {
+      // P0 /loop SDK gate (v0.4 §3.4): on claude runtime, anet does NOT
+      // intercept /loop or /goal — let the message flow through to the
+      // claude SDK turn so Claude Code's native /loop skill handles it.
+      // The early-return is the entire hands-off contract; no parse, no
+      // wrap, no forward layer in between.
+      if (RUNTIME !== "claude" && isGoalCommand(content)) {
         let replyText: string;
         let goalFailed = false;
         try {
@@ -2554,14 +2559,49 @@ log(`  log-dir: ${LOG_DIR}`);
 log(`  goals:   ${GOALS_PATH}`);
 const goalsLoad = await goalStore.load();
 if (!goalsLoad.ok) warn(`  goals load recovered: ${goalsLoad.error || "unknown"}${goalsLoad.recovered ? ` (${goalsLoad.recovered})` : ""}`);
-const activeGoals = (await goalStore.list()).filter(g => g.status === "active");
+const allGoals = await goalStore.list();
+const activeGoals = allGoals.filter(g => g.status === "active");
 if (activeGoals.length) log(`  goals active: ${activeGoals.length}`);
+
+// P0 /loop SDK runtime gate (v0.4 §3.4). Decide whether this process can
+// run the anet scheduler at all given the runtime it booted under and the
+// goals already on disk. Pure-function decision; we only act on the
+// verdict here.
+const startupBucket = runtimeBucket(RUNTIME);
+const startupAction = decideStartupAction(startupBucket, allGoals);
+let goalsSchedulerEnabled = startupAction.runScheduler;
+
+switch (startupAction.kind) {
+  case "ok":
+    log(`  goals scheduler: enabled (runtime=${startupBucket})`);
+    break;
+  case "skip":
+    log(`  goals scheduler: skipped — ${startupAction.reason}`);
+    break;
+  case "archive": {
+    warn(`  goals scheduler: ${startupAction.reason}`);
+    const archived = await goalStore.archiveAndClear(startupAction.reason);
+    if (archived) {
+      warn(`  goals archived → ${archived}`);
+    } else {
+      warn(`  goals archive skipped — no file to back up`);
+    }
+    break;
+  }
+  case "fatal":
+    warn(`  goals scheduler: FATAL — ${startupAction.reason}`);
+    warn(`  goals path: ${GOALS_PATH}`);
+    process.exit(1);
+}
+
 await register();
 log("已注册到 CommHub");
 processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`));
 setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
-setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
-runGoalSchedulerTick().catch(() => {});
+if (goalsSchedulerEnabled) {
+  setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
+  runGoalSchedulerTick().catch(() => {});
+}
 const shutdown = async () => { log("shutting down..."); await reportStatus("offline").catch(() => {}); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

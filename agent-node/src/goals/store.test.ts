@@ -6,10 +6,18 @@
 // concurrent upserts (#1+#3).
 
 import { expect, test, describe, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { GoalStore, newGoal } from "./store";
+import {
+  GoalStore,
+  newGoal,
+  assertNonClaudeRuntime,
+  isClaudeRuntime,
+  runtimeBucket,
+  decideStartupAction,
+} from "./store";
+import type { AgentGoal } from "./types";
 
 function tmpPath(): { dir: string; path: string } {
   const dir = mkdtempSync(join(tmpdir(), "anet-goals-test-"));
@@ -164,6 +172,234 @@ describe("GoalStore — corruption recovery (#2)", () => {
     const r = await s.load();
     expect(r.ok).toBe(false);
     expect(r.recovered).toBeDefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// P0 /loop SDK runtime gate (v0.4 §3.4) — the heart of "claude hands-off".
+// ─────────────────────────────────────────────────────────────────────
+
+describe("P0 runtime gate — name resolution", () => {
+  test("isClaudeRuntime accepts every claude alias", () => {
+    for (const name of ["claude", "claude-agent-sdk", "claude-sdk", "agent-sdk"]) {
+      expect(isClaudeRuntime(name)).toBe(true);
+    }
+  });
+
+  test("isClaudeRuntime rejects codex / grok / unknown / empty", () => {
+    for (const name of ["codex", "codex-sdk", "grok", "grok-build-acp", "grok-build", "weird", "", null, undefined]) {
+      expect(isClaudeRuntime(name as any)).toBe(false);
+    }
+  });
+
+  test("runtimeBucket maps to canonical buckets", () => {
+    expect(runtimeBucket("claude-agent-sdk")).toBe("claude");
+    expect(runtimeBucket("claude")).toBe("claude");
+    expect(runtimeBucket("codex-sdk")).toBe("codex");
+    expect(runtimeBucket("codex")).toBe("codex");
+    expect(runtimeBucket("grok-build-acp")).toBe("grok");
+    expect(runtimeBucket("grok-build")).toBe("grok");
+    expect(runtimeBucket("grok")).toBe("grok");
+    expect(runtimeBucket("mystery")).toBe("unknown");
+    expect(runtimeBucket(null)).toBe("unknown");
+    expect(runtimeBucket(undefined)).toBe("unknown");
+    expect(runtimeBucket("")).toBe("unknown");
+  });
+});
+
+describe("P0 runtime gate — assertNonClaudeRuntime", () => {
+  test("throws on every claude alias", () => {
+    for (const name of ["claude", "claude-agent-sdk", "claude-sdk", "agent-sdk"]) {
+      expect(() => assertNonClaudeRuntime(name)).toThrow(/claude runtime/);
+    }
+  });
+
+  test("passes for codex / grok / unknown labels (gate only blocks claude)", () => {
+    for (const name of ["codex-sdk", "codex", "grok-build-acp", "grok", "future-sdk"]) {
+      expect(() => assertNonClaudeRuntime(name)).not.toThrow();
+    }
+  });
+
+  test("newGoal({runtime: 'claude'}) throws — no claude-runtime goal ever lands", () => {
+    expect(() =>
+      newGoal({ text: "should not exist", interval_ms: 60_000, runtime: "claude-agent-sdk" }),
+    ).toThrow(/claude runtime/);
+  });
+
+  test("newGoal succeeds for codex / grok runtimes", () => {
+    const c = newGoal({ text: "codex goal", interval_ms: 60_000, runtime: "codex-sdk" });
+    const g = newGoal({ text: "grok goal", interval_ms: 60_000, runtime: "grok-build-acp" });
+    expect(c.runtime).toBe("codex-sdk");
+    expect(g.runtime).toBe("grok-build-acp");
+  });
+
+  test("GoalStore.upsert refuses claude-runtime goal (defence in depth)", async () => {
+    const { dir, path } = (() => {
+      const d = mkdtempSync(join(tmpdir(), "anet-goals-test-"));
+      return { dir: d, path: join(d, "goals.json") };
+    })();
+    try {
+      const s = new GoalStore(path);
+      await s.load();
+      // Build a goal via the legitimate factory then mutate runtime to
+      // simulate a corrupted on-disk record being re-upserted by some
+      // future code path.
+      const g = newGoal({ text: "smuggle", interval_ms: 60_000, runtime: "codex-sdk" });
+      g.runtime = "claude-agent-sdk";
+      await expect(s.upsert(g)).rejects.toThrow(/claude runtime/);
+      expect(await s.list()).toEqual([]);  // store stayed clean
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("P0 runtime gate — archiveAndClear", () => {
+  let dir: string, path: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "anet-goals-test-"));
+    path = join(dir, "goals.json");
+  });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  test("with live goals: backup file created, store emptied, reload sees empty", async () => {
+    const s1 = new GoalStore(path);
+    await s1.load();
+    await s1.upsert(newGoal({ text: "a", interval_ms: 60_000, runtime: "codex-sdk" }));
+    await s1.upsert(newGoal({ text: "b", interval_ms: 60_000, runtime: "grok-build-acp" }));
+    expect(await s1.list()).toHaveLength(2);
+
+    const backup = await s1.archiveAndClear("runtime-switched-to-claude");
+    expect(backup).toBeDefined();
+    expect(backup).toMatch(/\.runtime-switched\./);
+    expect(existsSync(backup!)).toBe(true);
+
+    // Backup contents = exactly what was on disk before clear.
+    const backupParsed = JSON.parse(readFileSync(backup!, "utf-8"));
+    expect(backupParsed.goals).toHaveLength(2);
+    expect(backupParsed.goals.map((g: AgentGoal) => g.text).sort()).toEqual(["a", "b"]);
+
+    // Live store now empty in-memory + on-disk.
+    expect(await s1.list()).toEqual([]);
+    const s2 = new GoalStore(path);
+    await s2.load();
+    expect(await s2.list()).toEqual([]);
+  });
+
+  test("with no live file: returns undefined, no throw, store still flushes empty", async () => {
+    const s = new GoalStore(path);
+    await s.load();
+    // No upsert before archive — nothing was ever written.
+    const backup = await s.archiveAndClear("nothing to lose");
+    expect(backup).toBeUndefined();
+    // Post-archive an empty goals.json exists on disk (we always flush).
+    expect(existsSync(path)).toBe(true);
+    expect(await s.list()).toEqual([]);
+  });
+
+  test("backup filenames are unique across rapid calls", async () => {
+    const s = new GoalStore(path);
+    await s.load();
+    await s.upsert(newGoal({ text: "one", interval_ms: 60_000, runtime: "codex-sdk" }));
+    const b1 = await s.archiveAndClear("first");
+    await s.upsert(newGoal({ text: "two", interval_ms: 60_000, runtime: "codex-sdk" }));
+    // Ensure timestamp tick so the second backup filename differs.
+    await new Promise(r => setTimeout(r, 10));
+    const b2 = await s.archiveAndClear("second");
+    expect(b1).toBeDefined();
+    expect(b2).toBeDefined();
+    expect(b1).not.toBe(b2);
+    const archives = readdirSync(dir).filter(f => f.includes("runtime-switched"));
+    expect(archives).toHaveLength(2);
+  });
+});
+
+describe("P0 runtime gate — decideStartupAction (v0.4 §3.4 matrix)", () => {
+  function activeGoal(runtime: string): AgentGoal {
+    return newGoal({ text: "x", interval_ms: 60_000, runtime });
+  }
+  function inactiveGoal(runtime: string, status: AgentGoal["status"]): AgentGoal {
+    const g = newGoal({ text: "x", interval_ms: 60_000, runtime });
+    g.status = status;
+    return g;
+  }
+
+  test("row 1: claude + empty → skip, scheduler off", () => {
+    const a = decideStartupAction("claude", []);
+    expect(a.kind).toBe("skip");
+    expect(a.runScheduler).toBe(false);
+  });
+
+  test("row 2: claude + active codex/grok goals → archive verdict", () => {
+    const a = decideStartupAction("claude", [
+      activeGoal("codex-sdk"),
+      activeGoal("grok-build-acp"),
+    ]);
+    expect(a.kind).toBe("archive");
+    expect(a.runScheduler).toBe(false);
+    if (a.kind === "archive") {
+      expect(a.foreignCount).toBe(2);
+      expect(a.foreignBuckets.sort()).toEqual(["codex", "grok"]);
+    }
+  });
+
+  test("row 2 ignores non-active leftover claude-side (no archive triggered)", () => {
+    const a = decideStartupAction("claude", [
+      inactiveGoal("codex-sdk", "complete"),
+      inactiveGoal("grok-build-acp", "cancelled"),
+    ]);
+    expect(a.kind).toBe("skip");
+  });
+
+  test("row 3a: codex bucket + grok-active leftover → fatal", () => {
+    const a = decideStartupAction("codex", [activeGoal("grok-build-acp")]);
+    expect(a.kind).toBe("fatal");
+    expect(a.runScheduler).toBe(false);
+    if (a.kind === "fatal") {
+      expect(a.foreignCount).toBe(1);
+      expect(a.foreignBuckets).toEqual(["grok"]);
+    }
+  });
+
+  test("row 3b: grok bucket + codex-active leftover → fatal", () => {
+    const a = decideStartupAction("grok", [activeGoal("codex-sdk")]);
+    expect(a.kind).toBe("fatal");
+    if (a.kind === "fatal") expect(a.foreignBuckets).toEqual(["codex"]);
+  });
+
+  test("row 3 ignores non-active foreign goals (resolved/cancelled don't block)", () => {
+    const a = decideStartupAction("codex", [
+      inactiveGoal("grok-build-acp", "complete"),
+      activeGoal("codex-sdk"),
+    ]);
+    expect(a.kind).toBe("ok");
+  });
+
+  test("row 4: codex bucket + only codex goals → ok, scheduler on", () => {
+    const a = decideStartupAction("codex", [
+      activeGoal("codex-sdk"),
+      activeGoal("codex-sdk"),
+    ]);
+    expect(a.kind).toBe("ok");
+    expect(a.runScheduler).toBe(true);
+  });
+
+  test("row 4: grok bucket + only grok goals → ok, scheduler on", () => {
+    const a = decideStartupAction("grok", [activeGoal("grok-build-acp")]);
+    expect(a.kind).toBe("ok");
+    expect(a.runScheduler).toBe(true);
+  });
+
+  test("row 4: codex bucket + empty store → ok (fresh node)", () => {
+    const a = decideStartupAction("codex", []);
+    expect(a.kind).toBe("ok");
+    expect(a.runScheduler).toBe(true);
+  });
+
+  test("unknown bucket → skip with warning text (no scheduler, no auto-archive)", () => {
+    const a = decideStartupAction("unknown", [activeGoal("codex-sdk")]);
+    expect(a.kind).toBe("skip");
+    expect(a.runScheduler).toBe(false);
   });
 });
 
