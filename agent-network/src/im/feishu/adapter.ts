@@ -111,22 +111,72 @@ export class FeishuAdapter implements IMAdapter {
     this.feishuConfig = null;
   }
 
-  async send(_message: NormalizedIMMessage): Promise<{ messageId: string }> {
-    // M3: client.im.message.create({
-    //       params: { receive_id_type: dm ? "open_id" : "chat_id" },
-    //       data: { receive_id, msg_type, content }
-    //     })
-    throw new Error("FeishuAdapter.send: pending M3 (im.message.create wiring)");
+  async send(message: NormalizedIMMessage): Promise<{ messageId: string }> {
+    if (!this.client) {
+      throw new Error("FeishuAdapter.send: call init() first");
+    }
+    const text = message.text ?? message.markdown;
+    if (!text) {
+      // M5 will add image / file / card variants.
+      throw new Error(
+        "FeishuAdapter.send: M3 supports text only (image/card land in M5)",
+      );
+    }
+    const content = JSON.stringify({ text });
+
+    // Threaded reply when the message references an upstream message_id.
+    // im.message.reply preserves the thread context (Feishu root_id).
+    const replyTo = message.replyToMessageId ?? message.target.threadRootId;
+    if (replyTo) {
+      const resp = await this.client.im.message.reply({
+        path: { message_id: replyTo },
+        data: { msg_type: "text", content },
+      });
+      const messageId = resp?.data?.message_id;
+      if (!messageId) {
+        throw new Error("FeishuAdapter.send: reply returned no message_id");
+      }
+      return { messageId };
+    }
+
+    const receive_id_type =
+      message.target.conversationType === "dm" ? "open_id" : "chat_id";
+    const resp = await this.client.im.message.create({
+      params: { receive_id_type },
+      data: {
+        receive_id: message.target.conversationId,
+        msg_type: "text",
+        content,
+      },
+    });
+    const messageId = resp?.data?.message_id;
+    if (!messageId) {
+      throw new Error("FeishuAdapter.send: create returned no message_id");
+    }
+    return { messageId };
   }
 
   async edit(
     _target: IMConversationRef,
-    _messageId: string,
-    _message: NormalizedIMMessage,
+    messageId: string,
+    message: NormalizedIMMessage,
   ): Promise<void> {
-    // M3+: client.im.message.update — Feishu supports edit up to 20 times per msg.
-    // Used to promote the "⏳ 处理中…" placeholder into the final reply.
-    throw new Error("FeishuAdapter.edit: pending M3+ (im.message.update wiring)");
+    if (!this.client) {
+      throw new Error("FeishuAdapter.edit: call init() first");
+    }
+    const text = message.text ?? message.markdown;
+    if (!text) {
+      throw new Error("FeishuAdapter.edit: M3 supports text only");
+    }
+    // Feishu allows up to 20 edits per message — caller is responsible for
+    // budgeting. Used to promote a "⏳ 处理中…" placeholder into the final reply.
+    await this.client.im.message.update({
+      path: { message_id: messageId },
+      data: {
+        msg_type: "text",
+        content: JSON.stringify({ text }),
+      },
+    });
   }
 
   health(): IMAdapterHealth {

@@ -21,10 +21,11 @@
  *
  * Milestones:
  *   M1: worker entry scaffold.
- *   M2 (this file): adapter + WSClient wiring with a noop event handler that
- *                   logs received events. Useful by itself for debugging the
- *                   inbound path without an agent attached.
- *   M3: parent-IPC contract for think() round-trip, outbound send.
+ *   M2: adapter + WSClient wiring with a noop event handler.
+ *   M3 (this file): IPC contract for the think() round-trip — when running
+ *                   as a forked child the bridge auto-uses `process.send` /
+ *                   `process.on("message")`; standalone, it falls back to a
+ *                   stderr logger so the inbound path stays observable.
  *   M4: agent-node spawn integration (fork(this) wired by agent-node).
  *   M5: group @bot trigger refinement, image up/down, Docker smoke.
  */
@@ -38,18 +39,36 @@ export interface FeishuBridgeOptions {
   /** Node alias — used for audit log + IPC framing. */
   nodeAlias: string;
   /**
-   * Optional inbound event sink for tests and the M3 think() bridge. Defaults
-   * to a stderr logger so a bare bridge process can be observed end-to-end.
+   * Optional inbound event sink for tests or custom integrations. When omitted
+   * the bridge picks an automatic strategy:
+   *   - IPC handler when `process.send` exists (i.e. running as a forked
+   *     child of agent-node).
+   *   - stderr logger otherwise (standalone smoke debugging).
    */
   onEvent?: (event: NormalizedIMEvent) => Promise<void>;
 }
 
+// ── IPC contract with the agent-node parent (M3) ─────────────────────────
+
+/** Bridge → parent: inbound IM event ready for think(). */
+export interface BridgeIncomingEnvelope {
+  type: "event";
+  event: NormalizedIMEvent;
+}
+
+/** Parent → bridge: agent reply text for a previously-forwarded event. */
+export interface BridgeReplyEnvelope {
+  type: "reply";
+  /** Echoes the originating event's idempotencyKey. */
+  eventKey: string;
+  text: string;
+}
+
+const REPLY_PENDING_TTL_MS = 5 * 60 * 1000;
+
 /**
  * Wire and start the Feishu bridge. Resolves once the underlying WSClient is
  * connected and the EventDispatcher is registered.
- *
- * Intended to be the worker's `main()` — agent-node spawns this file as a
- * child process and passes `FeishuBridgeOptions` through CLI args or env.
  */
 export async function startFeishuBridge(
   opts: FeishuBridgeOptions,
@@ -68,9 +87,75 @@ export async function startFeishuBridge(
     platformConfig: channelConfig as unknown as Record<string, unknown>,
   });
 
-  const onEvent = opts.onEvent ?? defaultEventLogger;
+  const onEvent = opts.onEvent ?? selectDefaultEventHandler(adapter);
   await adapter.start(onEvent);
   return adapter;
+}
+
+function selectDefaultEventHandler(
+  adapter: FeishuAdapter,
+): (event: NormalizedIMEvent) => Promise<void> {
+  if (typeof process.send === "function") {
+    return createIPCEventHandler(adapter);
+  }
+  return defaultEventLogger;
+}
+
+/**
+ * IPC handler — forwards inbound events to the parent agent-node and routes
+ * the parent's reply back to Feishu via the adapter. The parent contract is
+ * a single round-trip per event keyed on `idempotencyKey`.
+ */
+function createIPCEventHandler(
+  adapter: FeishuAdapter,
+): (event: NormalizedIMEvent) => Promise<void> {
+  if (typeof process.send !== "function") {
+    throw new Error(
+      "createIPCEventHandler: parent process.send unavailable (not forked)",
+    );
+  }
+
+  const pending = new Map<string, NormalizedIMEvent>();
+
+  process.on("message", (raw: unknown) => {
+    if (!isReplyEnvelope(raw)) return;
+    const event = pending.get(raw.eventKey);
+    if (!event) return;
+    pending.delete(raw.eventKey);
+
+    const replyText = raw.text;
+    const eventKey = raw.eventKey;
+    void (async () => {
+      try {
+        await adapter.send({
+          target: event.conversation,
+          text: replyText,
+          replyToMessageId: event.messageId,
+          correlation: { taskId: eventKey },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[feishu:bridge] reply send failed: ${msg}\n`);
+      }
+    })();
+  });
+
+  return async (event: NormalizedIMEvent) => {
+    pending.set(event.idempotencyKey, event);
+    setTimeout(() => pending.delete(event.idempotencyKey), REPLY_PENDING_TTL_MS);
+    const envelope: BridgeIncomingEnvelope = { type: "event", event };
+    process.send!(envelope);
+  };
+}
+
+function isReplyEnvelope(raw: unknown): raw is BridgeReplyEnvelope {
+  if (!raw || typeof raw !== "object") return false;
+  const r = raw as Record<string, unknown>;
+  return (
+    r["type"] === "reply" &&
+    typeof r["eventKey"] === "string" &&
+    typeof r["text"] === "string"
+  );
 }
 
 async function defaultEventLogger(event: NormalizedIMEvent): Promise<void> {
