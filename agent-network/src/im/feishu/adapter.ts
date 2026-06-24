@@ -90,7 +90,7 @@ export class FeishuAdapter implements IMAdapter {
     if (!this.feishuConfig || !this.client) {
       throw new Error("FeishuAdapter.start: call init() first");
     }
-    const { appId, appSecret, access } = this.feishuConfig;
+    const { appId, appSecret, access, groupPolicy } = this.feishuConfig;
     const connectionName = this.connectionName;
     const botOpenId = this.botOpenId;
     const mediaDir = this.mediaDir;
@@ -108,8 +108,9 @@ export class FeishuAdapter implements IMAdapter {
           // Failure-tolerant — text flow proceeds even when download fails.
           await maybeAttachImages(rawEvent, normalized, client, mediaDir);
 
-          if (!isAccessAllowed(normalized, access)) {
-            auditLog("deny", normalized, "not in allowFrom / allowChats");
+          const verdict = checkAccess(normalized, access, groupPolicy);
+          if (!verdict.allow) {
+            auditLog("deny", normalized, verdict.reason);
             return;
           }
           await onEvent(normalized);
@@ -435,20 +436,47 @@ async function fetchBotOpenId(client: lark.Client): Promise<string | null> {
   }
 }
 
-// ── Internals: access whitelist (RFC-020 §4.1 / §5.1) ────────────────────
+// ── Internals: access whitelist (RFC-020 §4.1 / §4.3 / §5.1) ─────────────
 
-function isAccessAllowed(
+/**
+ * Two-stage access check (RFC-020 §4.3 — 通信牛 review 必改1):
+ *   1. Whitelist gate: sender or chat must be in the configured allowlist.
+ *   2. Group policy gate: in non-DM conversations, the configured groupPolicy
+ *      decides whether to trigger even when whitelisted.
+ *        - "all"      → trigger on every whitelisted-chat message
+ *        - "mention"  → require event.mentioned (default; M5b real bot open_id match)
+ *        - "command"  → reserved for slash-prefix triggers; behaves as "mention"
+ *                       until a command parser lands. TODO post-M5.
+ *        - "observe"  → never trigger (chat is whitelisted for sidecar visibility
+ *                       only — keeps the door open for future audit / Dashboard)
+ *
+ * Returns { allow, reason } so the audit log surfaces *why* a message was denied
+ * (helps Vincent triage "I sent a message and got nothing" cases).
+ */
+function checkAccess(
   event: NormalizedIMEvent,
   access: FeishuAccessList,
-): boolean {
-  if (access.allowFrom.includes(event.sender.id)) return true;
-  if (
-    event.conversation.conversationType === "group" &&
-    access.allowChats.includes(event.conversation.conversationId)
-  ) {
-    return true;
+  groupPolicy: FeishuChannelConfig["groupPolicy"],
+): { allow: boolean; reason: string } {
+  if (event.conversation.conversationType === "dm") {
+    return access.allowFrom.includes(event.sender.id)
+      ? { allow: true, reason: "" }
+      : { allow: false, reason: "sender not in allowFrom (dm)" };
   }
-  return false;
+  // group / channel / thread share the same whitelist + policy semantics.
+  if (!access.allowChats.includes(event.conversation.conversationId)) {
+    return { allow: false, reason: "chat not in allowChats" };
+  }
+  if (groupPolicy === "all") return { allow: true, reason: "" };
+  if (groupPolicy === "observe") {
+    return { allow: false, reason: "groupPolicy=observe — chat in allowChats but no trigger" };
+  }
+  // mention | command
+  if (event.mentioned) return { allow: true, reason: "" };
+  return {
+    allow: false,
+    reason: `groupPolicy=${groupPolicy} requires @bot mention (not mentioned)`,
+  };
 }
 
 function auditLog(
