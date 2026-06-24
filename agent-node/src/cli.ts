@@ -448,7 +448,37 @@ function initTelegramChannel(spec: { type: string; path?: string; raw: string })
 }
 
 const TELEGRAM_CHANNELS = CHANNELS.filter(ch => ch.type === "telegram").map(initTelegramChannel);
-const UNSUPPORTED_CHANNEL = CHANNELS.find(ch => ch.type !== "telegram");
+
+// ── Feishu channel (RFC-020 §3.1 / #179 M5a) ─────────────────────────────
+// Feishu bridge runs in a forked worker (src/im/feishu/worker.ts from the
+// agent-network package). agent-node owns the IPC parent side: receives
+// inbound events from the bridge and routes replies back. think() integration
+// lands in M5b — M5a sends a clear placeholder reply so the full round-trip
+// is demoable end-to-end.
+
+interface FeishuChannel {
+  type: "feishu";
+  dir: string;
+}
+
+function initFeishuChannel(spec: { type: string; path?: string; raw: string }): FeishuChannel {
+  const dir = spec.path || defaultChannelDir("feishu");
+  if (!existsSync(join(dir, ".env"))) {
+    console.error(`[agent-node] feishu channel needs .env with FEISHU_APP_ID + FEISHU_APP_SECRET in ${dir}`);
+    process.exit(1);
+  }
+  if (!existsSync(join(dir, "access.json"))) {
+    console.error(`[agent-node] feishu channel needs access.json in ${dir}`);
+    process.exit(1);
+  }
+  // .env 权限加固
+  try { chmodSync(join(dir, ".env"), 0o600); } catch {}
+  return { type: "feishu", dir };
+}
+
+const FEISHU_CHANNELS = CHANNELS.filter(ch => ch.type === "feishu").map(initFeishuChannel);
+
+const UNSUPPORTED_CHANNEL = CHANNELS.find(ch => ch.type !== "telegram" && ch.type !== "feishu");
 if (UNSUPPORTED_CHANNEL) {
   console.error(`[agent-node] unsupported channel: ${UNSUPPORTED_CHANNEL.raw}`);
   process.exit(1);
@@ -1105,7 +1135,24 @@ let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || unde
 const HAD_GROK_SESSION_AT_BOOT = RUNTIME === "grok" && !!SESSION_ID;
 let grokResumeHintFired = false;
 
-async function processWithClaude(task: string, from: string): Promise<string> {
+async function processWithClaude(task: string, from: string, images?: string[]): Promise<string> {
+  // #179 M5b 必改2-C (2026-06-24, 通信龙 ack): mirror the Grok runtime
+  // pattern — accept images in the signature so callers (commhub-inbox
+  // attachments, feishu channel content.images, /loop wakes carrying
+  // images, etc.) pass them through symmetrically, but for now emit a
+  // single warn line and downgrade to text-only.
+  //
+  // Real multimodal wiring (build AsyncIterable<SDKUserMessage> with
+  // {type:"image", source:{type:"base64",...}} content blocks) is a
+  // follow-up: blast radius is all claude-agent-sdk callers (not just
+  // feishu) and would need a cross-runtime regression + verification
+  // that the configured vendor's Anthropic-compat endpoint (e.g.
+  // deepseek-v4-pro via /anthropic) actually accepts image blocks.
+  // Track in the per-runtime multimodal issue.
+  if (images?.length) {
+    warn(`[claude] image attachments (${images.length}) received but claude-agent-sdk runtime currently sends text-only prompts; images remain on disk for future runs. Real multimodal wiring is tracked in a follow-up issue.`);
+  }
+
   // Pre-flight: if no Claude binary is resolvable, on-the-fly install the
   // glibc one. SDK ships musl-only by default on Linux x64 which fails on
   // Debian/Ubuntu/RHEL hosts. Auto-install means the user doesn't need to
@@ -2186,7 +2233,7 @@ function think(task: string, from: string, taskId: string | null, images?: strin
       if (RUNTIME === "grok") {
         return await processWithGrok(task, from, images);
       }
-      return await processWithClaude(task, from);
+      return await processWithClaude(task, from, images);
     } finally {
       if (prev !== undefined) process.env.CURRENT_TASK_ID = prev; else delete process.env.CURRENT_TASK_ID;
       decrementInFlight();
@@ -2508,6 +2555,163 @@ async function handleTelegramMessage(tg: TelegramApi, msg: any) {
   }
 }
 
+// ── Feishu bridge worker fork + IPC handler (#179 M5a) ──────────────────────
+
+interface FeishuBridgeEnvelope {
+  type: "event";
+  event: {
+    idempotencyKey: string;
+    sender?: { id?: string };
+    conversation?: { conversationType?: string; conversationId?: string };
+    content?: { text?: string };
+    mentioned?: boolean;
+  };
+}
+
+/**
+ * Locate the agent-network feishu worker script. Search order:
+ *   1. `ANET_FEISHU_WORKER_PATH` env override (explicit).
+ *   2. Dev sibling checkout: agent-node and agent-network laid out as siblings.
+ *   3. Installed npm package layout (worker lives in @sleep2agi/agent-network).
+ */
+function resolveFeishuWorkerPath(): string | null {
+  const candidates: string[] = [];
+  if (process.env.ANET_FEISHU_WORKER_PATH) {
+    candidates.push(process.env.ANET_FEISHU_WORKER_PATH);
+  }
+  const here = new URL(".", import.meta.url).pathname;
+  candidates.push(
+    // dev sibling: ../../agent-network/{dist|src}/src/im/feishu/worker.{js|ts}
+    join(here, "..", "..", "agent-network", "dist", "src", "im", "feishu", "worker.js"),
+    join(here, "..", "..", "agent-network", "src", "im", "feishu", "worker.ts"),
+    // installed npm package (agent-network and agent-node share node_modules root)
+    join(here, "..", "..", "..", "@sleep2agi", "agent-network", "dist", "src", "im", "feishu", "worker.js"),
+    // global npm prefix layout
+    join(here, "..", "..", "..", "..", "@sleep2agi", "agent-network", "dist", "src", "im", "feishu", "worker.js"),
+  );
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return null;
+}
+
+async function connectFeishu(channel: FeishuChannel): Promise<void> {
+  const workerPath = resolveFeishuWorkerPath();
+  if (!workerPath) {
+    warn(
+      `[feishu] worker path not found — skipping feishu channel setup. ` +
+        `Override with ANET_FEISHU_WORKER_PATH, or install @sleep2agi/agent-network so dist/src/im/feishu/worker.js is reachable.`,
+    );
+    return;
+  }
+
+  const { spawn } = await import("node:child_process");
+  const child = spawn(
+    process.execPath,
+    [workerPath, "--channel-dir", channel.dir, "--node-alias", ALIAS],
+    { stdio: ["ignore", "inherit", "inherit", "ipc"] },
+  );
+
+  child.on("message", (raw: unknown) => {
+    if (!isFeishuIncomingEnvelope(raw)) return;
+    const ev = raw.event;
+    const convId = ev.conversation?.conversationId ?? "?";
+    log(
+      `[feishu] event from=${ev.sender?.id ?? "?"} ` +
+        `conv=${ev.conversation?.conversationType ?? "?"}:${convId} ` +
+        `mentioned=${ev.mentioned ?? false} text="${(ev.content?.text ?? "").slice(0, 80)}"`,
+    );
+
+    // M5b (2026-06-24): real think() integration via the existing
+    // processTask → think() → thinkQueue pipeline. The placeholder reply
+    // M5a shipped is replaced; this path now drives the same LLM turn
+    // commhub-inbox messages and /loop wakes run through.
+    //
+    // Concurrency: `thinkQueue` (cli.ts ~2189) process-wide-serialises
+    // every think() call. Feishu inbound thus serialises with commhub
+    // SSE inbox + /loop wakes — strictly stronger than IM马's per-
+    // conversation ordering requirement (per-conv ⊆ process-wide).
+    // Cross-conversation parallelism is a #182 / RFC-020 §4.4 follow-up;
+    // the first-cut bottleneck is acceptable + avoids unverified
+    // concurrent-SDK behaviour.
+    //
+    // 5-min TTL: the bridge drops the reply if think() exceeds
+    // REPLY_PENDING_TTL_MS (5 min, src/im/feishu/bridge.ts). Long-task
+    // (>5 min) reply DROP is a known M5b limitation; progress-ack via
+    // adapter.edit OR a bumped TTL is the M5c follow-up choice (per
+    // 通信龙 ack). Vincent's M5b UAT is bounded to simple tasks <5min.
+    //
+    // Error handling (per IM马 #5 — never silent-drop):
+    //   - think success         → reply with raw text
+    //   - think failed=true     → reply with "[agent-node 处理失败]" prefix
+    //   - think threw           → reply with "[agent-node 异常]" + message
+    // Same-eventKey-second-reply is ignored by the bridge per IM马 #6;
+    // the try/catch around each branch guarantees exactly-one outbound.
+    (async () => {
+      const content = ev.content?.text ?? "";
+      const images = Array.isArray(ev.content?.images) ? ev.content?.images : undefined;
+      const from = `feishu:${convId}`;
+
+      let replyText: string;
+      if (!content.trim() && !(images && images.length > 0)) {
+        // Bridge would have filtered most empty events, but defend
+        // against zero-content + no-image edge (sticker / unsupported
+        // message kind) — send a brief reply so the user sees that we
+        // heard them but had nothing actionable.
+        replyText = "[agent-node] 收到事件但没有可处理的文本/图片内容。";
+      } else {
+        try {
+          const result = await processTask(content, from, null, images);
+          replyText = result.failed
+            ? `[agent-node 处理失败] ${result.text}`
+            : result.text;
+        } catch (e: any) {
+          warn(`[feishu] think() threw: ${e?.message ?? e}`);
+          replyText = `[agent-node 异常] ${e?.message ?? String(e)}`;
+        }
+      }
+
+      if (typeof child.send !== "function") return;
+      try {
+        child.send({
+          type: "reply",
+          eventKey: ev.idempotencyKey,
+          text: replyText,
+        });
+      } catch (e: any) {
+        warn(`[feishu] reply send failed: ${e?.message || e}`);
+      }
+    })().catch((e: any) => {
+      // Belt-and-braces — the inner try/catch already swallows think()
+      // errors, but if something between them (e.g. JSON.stringify) throws,
+      // log it instead of crashing the IPC handler.
+      warn(`[feishu] message handler outer error: ${e?.message ?? e}`);
+    });
+  });
+
+  child.on("exit", (code, signal) => {
+    warn(`[feishu] worker exited code=${code} signal=${signal} dir=${channel.dir}`);
+  });
+
+  child.on("error", (err) => {
+    warn(`[feishu] worker error: ${err?.message || err}`);
+  });
+
+  log(`[feishu] forked worker (pid ${child.pid}) for ${channel.dir} via ${workerPath}`);
+}
+
+function isFeishuIncomingEnvelope(raw: unknown): raw is FeishuBridgeEnvelope {
+  if (!raw || typeof raw !== "object") return false;
+  const r = raw as Record<string, unknown>;
+  if (r["type"] !== "event") return false;
+  const ev = r["event"];
+  return (
+    !!ev &&
+    typeof ev === "object" &&
+    typeof (ev as Record<string, unknown>)["idempotencyKey"] === "string"
+  );
+}
+
 async function connectTelegram(channel: TelegramChannel) {
   const tg: TelegramApi = {
     channel,
@@ -2732,7 +2936,10 @@ log(`  tools:   ${
     ? (TOOLS.length ? `[${TOOLS.join(",")}]` : "(none)")
     : "all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)"
 }`);
-log(`  channels:${TELEGRAM_CHANNELS.length ? ` telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : " (none)"}`);
+log(`  channels:${[
+  TELEGRAM_CHANNELS.length ? `telegram(${TELEGRAM_CHANNELS.map(ch => ch.dir).join(",")})` : "",
+  FEISHU_CHANNELS.length ? `feishu(${FEISHU_CHANNELS.map(ch => ch.dir).join(",")})` : "",
+].filter(s => s).join(" ") || " (none)"}`);
 log(`  session: ${SESSION_ID || "(new)"}`);
 log(`  log-dir: ${LOG_DIR}`);
 log(`  goals:   ${GOALS_PATH}`);
@@ -2785,6 +2992,7 @@ const shutdown = async () => { log("shutting down..."); await reportStatus("offl
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 for (const channel of TELEGRAM_CHANNELS) connectTelegram(channel);
+for (const channel of FEISHU_CHANNELS) void connectFeishu(channel);
 connectSSE();
 
 // #246 — opt-in telegram plugin watchdog. Reads

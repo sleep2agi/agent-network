@@ -252,6 +252,7 @@ anet session ls
 
 # Channels and upgrades
 anet channel add telegram <name> --bot-token <tok> --allow <uid>
+anet channel add feishu   <name> --app-id <id> --app-secret <secret> --allow <open-id>   # see docs/feishu-quickstart.md
 anet channel ls
 anet upgrade
 anet upgrade --channel preview --dry-run
