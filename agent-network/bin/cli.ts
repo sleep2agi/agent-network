@@ -1268,15 +1268,19 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     channels: opts._channels.length > 0 ? opts._channels : ["server:commhub"],
     env: envMap,
     flags: {
-      dangerouslySkipPermissions: true,
-      // permissionMode (Vincent ask 2026-06-24) — read by agent-node's
-      // claude-agent-sdk runtime. New nodes default to "auto" (softer than
-      // bypass, escalates only when needed). Bridge in agent-node honours
-      // the legacy `dangerouslySkipPermissions: true` field above for
-      // existing nodes (no behaviour change there), but for new nodes the
-      // explicit `permissionMode: "auto"` wins. Other runtimes
-      // (claude-code-cli / codex-sdk / grok-build-acp) ignore this field.
-      permissionMode: "auto",
+      // Per-runtime default flags (Vincent ask 2026-06-24 via 通信龙):
+      //   - claude-agent-sdk: writes ONLY `permissionMode: "auto"` (DSP is
+      //     redundant — the SDK resolver in agent-node prefers permissionMode
+      //     over the legacy DSP field, so writing both produced visible
+      //     "two-flag" clutter Vincent flagged as redundant).
+      //   - claude-code-cli: keeps writing `dangerouslySkipPermissions: true`
+      //     ONLY (Vincent's "cli 不用改" + [[feedback_default_flags]] —
+      //     CC reads DSP directly, not permissionMode).
+      //   - codex-sdk / grok-build-acp: keep DSP for back-compat (legacy
+      //     consumers may read it).
+      ...(runtime === "claude-agent-sdk"
+        ? { permissionMode: "auto" }
+        : { dangerouslySkipPermissions: true }),
       ...(runtime === "claude-code-cli" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
       ...(opts["max-turns"] ? { maxTurns: parseInt(opts["max-turns"]) } : {}),
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
@@ -2246,11 +2250,14 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
     channels,
     env: envMap,
     flags: {
-      dangerouslySkipPermissions: true,
-      // permissionMode default for the interactive `anet node create`
-      // wizard — same Vincent 2026-06-24 ask, same auto-default + legacy
-      // bridge as the non-interactive path above. Other runtimes ignore it.
-      permissionMode: "auto",
+      // Per-runtime defaults — same split as the non-interactive path above
+      // (Vincent 2026-06-24 via 通信龙: agent-sdk = permissionMode only,
+      // others = dangerouslySkipPermissions only). The interactive wizard
+      // uses a short alias type ("agent-sdk") for `runtime` here, not the
+      // canonical "claude-agent-sdk" the non-interactive path sees.
+      ...(runtime === "agent-sdk"
+        ? { permissionMode: "auto" }
+        : { dangerouslySkipPermissions: true }),
       ...(teammateMode ? { teammateMode } : {}),
     },
   };
@@ -2686,34 +2693,12 @@ async function launchAgent(id: string, forceNewSession = false) {
     maybeWarnChannelResumeBlocker(nodeId, profile);
 
     const claudeArgs: string[] = [];
-    // permissionMode resolver for claude-code-cli — mirror of the SDK-side
-    // resolver in agent-node/src/cli.ts. Three layers (top to bottom):
-    //   1. root override → 'auto' (Vincent 2026-06-24 toodadev2 incident:
-    //      Claude Code rejects --dangerously-skip-permissions when running
-    //      as root; 'auto' is the softer CC-accepted alternative).
-    //   2. Explicit `profile.flags.permissionMode` — used verbatim. This
-    //      is the new field `anet node create` writes from today onward;
-    //      symmetric with the SDK side.
-    //   3. Legacy `profile.flags.dangerouslySkipPermissions: true` →
-    //      'bypassPermissions' (= the historical --dangerously-skip-
-    //      permissions flag). Existing non-root nodes that only carry the
-    //      legacy field keep their pre-fix behaviour — zero regression.
-    //   4. Default 'default' → no permission flag added at all (CC's own
-    //      built-in default prompts).
-    const ccIsRoot = typeof process.getuid === "function" && process.getuid() === 0;
-    const ccResolvedMode: string = ccIsRoot
-      ? "auto"
-      : ((typeof profile.flags?.permissionMode === "string" && profile.flags.permissionMode)
-          ? profile.flags.permissionMode
-          : (profile.flags?.dangerouslySkipPermissions === true ? "bypassPermissions" : "default"));
-    if (ccIsRoot && profile.flags?.dangerouslySkipPermissions) {
-      console.log("[anet] running as root — using --permission-mode auto (CC rejects --dangerously-skip-permissions as root)");
-    }
-    if (ccResolvedMode === "bypassPermissions") {
-      claudeArgs.push("--dangerously-skip-permissions");
-    } else if (ccResolvedMode !== "default") {
-      claudeArgs.push("--permission-mode", ccResolvedMode);
-    }
+    // claude-code-cli: byte-identical to pre-2026-06-24 (Vincent ask via
+    // 通信龙 — "cli 不用改"). The root-fix added in 2.2.20 was reverted
+    // in 2.2.21 because Vincent's preferred root path is claude-agent-sdk,
+    // not claude-code-cli; CC users should stay on a known-working flag
+    // surface and not be moved to permission-mode without explicit ask.
+    if (profile.flags.dangerouslySkipPermissions) claudeArgs.push("--dangerously-skip-permissions");
     for (const ch of profile.channels) {
       if (ch.startsWith("server:")) {
         claudeArgs.push("--dangerously-load-development-channels", ch);
