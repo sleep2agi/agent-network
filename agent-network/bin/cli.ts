@@ -1509,10 +1509,19 @@ async function askChoice<T extends string>(title: string, choices: { label: stri
 // Vincent 4677+4679: "先选供应商，然后再选模型" — the create wizard is vendor-first.
 //
 // Every entry's baseUrl + model ids are verified-with-real-call before
-// landing (feedback_vendor_verify_before_hardcode). Unverified providers
-// (DeepSeek / GLM / Kimi) are intentionally NOT in this list — the `custom`
-// vendor is the honest home for not-yet-verified Anthropic-compatible APIs
-// (通信龙 decision on #104-B design pass).
+// landing on @latest (feedback_vendor_verify_before_hardcode). The bar
+// is "no unverified vendor reaches @latest users", not "no unverified
+// vendor lands in source" — preview-first + UAT-before-promote means
+// the verify step can happen during Vincent UAT on @preview, as long
+// as it happens BEFORE promote to @latest.
+//
+// 2026-06-24 (通信龙 decision): DeepSeek added here on Vincent's request.
+// Verify mode = UAT-before-promote (Vincent's UAT on his deepseek setup
+// is the real-call verification). The verify-before-LATEST contract is
+// still held — promote latest is gated on Vincent confirming the
+// endpoint + both model ids respond. Previously-unverified GLM / Kimi
+// remain in the `custom` vendor's catch-all until a similar UAT path
+// covers them.
 
 type VendorEnvKey = "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
 
@@ -1551,6 +1560,19 @@ const VENDORS: Vendor[] = [
     runtime: "claude-agent-sdk", baseUrl: "https://api.minimaxi.com/anthropic",
     envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.minimaxi.com",
     models: [{ id: "MiniMax-M2.7", default: true }],
+  },
+  {
+    // /anthropic suffix; Vincent 2026-06-24 ask, envKey + baseUrl pattern
+    // mirrors MiniMax. Verified during UAT-before-promote (see header note);
+    // a model-id correction (model-not-found at runtime) is a one-line
+    // VENDORS edit if needed.
+    key: "deepseek", label: "DeepSeek (国内直连，Anthropic 兼容)",
+    runtime: "claude-agent-sdk", baseUrl: "https://api.deepseek.com/anthropic",
+    envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.deepseek.com",
+    models: [
+      { id: "deepseek-v4-pro", default: true },
+      { id: "deepseek-v4-flash" },
+    ],
   },
   {
     // /anthropic suffix; verified by 通信SDK马 real-call 2026-05-15 (#104).
