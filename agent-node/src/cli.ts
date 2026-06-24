@@ -2597,27 +2597,78 @@ async function connectFeishu(channel: FeishuChannel): Promise<void> {
   child.on("message", (raw: unknown) => {
     if (!isFeishuIncomingEnvelope(raw)) return;
     const ev = raw.event;
+    const convId = ev.conversation?.conversationId ?? "?";
     log(
       `[feishu] event from=${ev.sender?.id ?? "?"} ` +
-        `conv=${ev.conversation?.conversationType ?? "?"}:${ev.conversation?.conversationId ?? "?"} ` +
+        `conv=${ev.conversation?.conversationType ?? "?"}:${convId} ` +
         `mentioned=${ev.mentioned ?? false} text="${(ev.content?.text ?? "").slice(0, 80)}"`,
     );
 
-    // M5a: placeholder reply so the full inbound→IPC→outbound round-trip is
-    // exercisable end-to-end before think() integration lands in M5b.
-    // M5b will replace this with claude-agent-sdk query() invocation routing
-    // (or the project's existing inbox → think → reply pipeline).
-    if (typeof child.send === "function") {
+    // M5b (2026-06-24): real think() integration via the existing
+    // processTask → think() → thinkQueue pipeline. The placeholder reply
+    // M5a shipped is replaced; this path now drives the same LLM turn
+    // commhub-inbox messages and /loop wakes run through.
+    //
+    // Concurrency: `thinkQueue` (cli.ts ~2189) process-wide-serialises
+    // every think() call. Feishu inbound thus serialises with commhub
+    // SSE inbox + /loop wakes — strictly stronger than IM马's per-
+    // conversation ordering requirement (per-conv ⊆ process-wide).
+    // Cross-conversation parallelism is a #182 / RFC-020 §4.4 follow-up;
+    // the first-cut bottleneck is acceptable + avoids unverified
+    // concurrent-SDK behaviour.
+    //
+    // 5-min TTL: the bridge drops the reply if think() exceeds
+    // REPLY_PENDING_TTL_MS (5 min, src/im/feishu/bridge.ts). Long-task
+    // (>5 min) reply DROP is a known M5b limitation; progress-ack via
+    // adapter.edit OR a bumped TTL is the M5c follow-up choice (per
+    // 通信龙 ack). Vincent's M5b UAT is bounded to simple tasks <5min.
+    //
+    // Error handling (per IM马 #5 — never silent-drop):
+    //   - think success         → reply with raw text
+    //   - think failed=true     → reply with "[agent-node 处理失败]" prefix
+    //   - think threw           → reply with "[agent-node 异常]" + message
+    // Same-eventKey-second-reply is ignored by the bridge per IM马 #6;
+    // the try/catch around each branch guarantees exactly-one outbound.
+    (async () => {
+      const content = ev.content?.text ?? "";
+      const images = Array.isArray(ev.content?.images) ? ev.content?.images : undefined;
+      const from = `feishu:${convId}`;
+
+      let replyText: string;
+      if (!content.trim() && !(images && images.length > 0)) {
+        // Bridge would have filtered most empty events, but defend
+        // against zero-content + no-image edge (sticker / unsupported
+        // message kind) — send a brief reply so the user sees that we
+        // heard them but had nothing actionable.
+        replyText = "[agent-node] 收到事件但没有可处理的文本/图片内容。";
+      } else {
+        try {
+          const result = await processTask(content, from, null, images);
+          replyText = result.failed
+            ? `[agent-node 处理失败] ${result.text}`
+            : result.text;
+        } catch (e: any) {
+          warn(`[feishu] think() threw: ${e?.message ?? e}`);
+          replyText = `[agent-node 异常] ${e?.message ?? String(e)}`;
+        }
+      }
+
+      if (typeof child.send !== "function") return;
       try {
         child.send({
           type: "reply",
           eventKey: ev.idempotencyKey,
-          text: "[agent-node M5a placeholder — think() integration follows in M5b]",
+          text: replyText,
         });
       } catch (e: any) {
         warn(`[feishu] reply send failed: ${e?.message || e}`);
       }
-    }
+    })().catch((e: any) => {
+      // Belt-and-braces — the inner try/catch already swallows think()
+      // errors, but if something between them (e.g. JSON.stringify) throws,
+      // log it instead of crashing the IPC handler.
+      warn(`[feishu] message handler outer error: ${e?.message ?? e}`);
+    });
   });
 
   child.on("exit", (code, signal) => {
