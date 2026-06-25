@@ -1281,6 +1281,14 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       ...(runtime === "claude-agent-sdk"
         ? { permissionMode: "auto" }
         : { dangerouslySkipPermissions: true }),
+      // #259 Y (2026-06-25): plumb vendor-known image capability down so
+      // agent-node's claude-agent-sdk runtime can pick the structured-prompt
+      // path. Only written when the chosen model is explicitly verified
+      // image-capable (MiniMax-M3 / claude-sonnet-4-6 etc); other vendors
+      // get the warn-only fallthrough at runtime.
+      ...(runtime === "claude-agent-sdk" && isModelImageCapable(opts.model || defaultModel)
+        ? { modelImageCapable: true }
+        : {}),
       ...(runtime === "claude-code-cli" ? { teammateMode: opts["teammate-mode"] || "in-process" } : {}),
       ...(opts["max-turns"] ? { maxTurns: parseInt(opts["max-turns"]) } : {}),
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
@@ -1560,6 +1568,14 @@ interface VendorModel {
   id: string;        // exact API model id (case-sensitive — the vendor's /v1/models is authoritative)
   label?: string;    // display label in the model picker; defaults to id
   default?: boolean; // preselected in the model picker
+  // #259 Y (2026-06-25, real-call verified): true → model accepts image
+  // content blocks via its Anthropic-compat endpoint. Wizard reads this
+  // when writing the new node's config so the agent-node claude-agent-sdk
+  // runtime knows whether to build the structured (AsyncIterable<
+  // SDKUserMessage>) prompt with image blocks vs the warn-only fallthrough.
+  // Defaults to false (legacy = text-only) for any model not explicitly
+  // marked — verify-before-hardcode.
+  imageCapable?: boolean;
 }
 
 interface Vendor {
@@ -1572,6 +1588,25 @@ interface Vendor {
   requiresAuth?: "claude" | "codex"; // runtime needs an external login instead of an API key
   models: VendorModel[];        // [] = freeform: ask the user for a model id (custom), or none (claude-code)
   freeformBaseUrl?: boolean;    // custom only: ask the user for the base URL
+}
+
+/**
+ * Returns true when `modelId` matches a VENDORS entry marked
+ * `imageCapable: true`. Used by the create wizard to plumb the
+ * capability into a node's `flags.modelImageCapable` so agent-node's
+ * claude-agent-sdk runtime knows whether to build the structured
+ * AsyncIterable<SDKUserMessage> prompt with image content blocks
+ * (vs the text-only warn-only fallthrough). Conservative default:
+ * unknown / missing model → false. #259 Y.
+ */
+function isModelImageCapable(modelId: string | undefined): boolean {
+  if (!modelId) return false;
+  for (const v of VENDORS) {
+    for (const m of v.models) {
+      if (m.id === modelId) return m.imageCapable === true;
+    }
+  }
+  return false;
 }
 
 const VENDORS: Vendor[] = [
@@ -1587,10 +1622,18 @@ const VENDORS: Vendor[] = [
     ],
   },
   {
+    // MiniMax-M3 image content block support verified real-call 2026-06-25 via
+    // api.minimaxi.com/anthropic (returned correct color identification on an
+    // 8×8 red PNG test, input_tokens=98 with cache_read=114 confirming the
+    // image went through the vision pipeline — not silently dropped). M2.x
+    // series is text-only per MiniMax docs; left in place as legacy option.
     key: "minimax", label: "MiniMax (国内直连，低成本)",
     runtime: "claude-agent-sdk", baseUrl: "https://api.minimaxi.com/anthropic",
     envKey: "ANTHROPIC_AUTH_TOKEN", signupUrl: "https://platform.minimaxi.com",
-    models: [{ id: "MiniMax-M2.7", default: true }],
+    models: [
+      { id: "MiniMax-M3", label: "MiniMax-M3 (vision-capable, 默认)", default: true, imageCapable: true },
+      { id: "MiniMax-M2.7", label: "MiniMax-M2.7 (text-only, legacy)" },
+    ],
   },
   {
     // /anthropic suffix; Vincent 2026-06-24 ask, envKey + baseUrl pattern
@@ -1619,13 +1662,16 @@ const VENDORS: Vendor[] = [
     ],
   },
   {
+    // All Claude 4.x family supports image content blocks natively on the
+    // Anthropic API — well-known capability, no separate real-call verify
+    // needed beyond the upstream Anthropic spec.
     key: "anthropic", label: "Anthropic Claude (官方 API)",
     runtime: "claude-agent-sdk", envKey: "ANTHROPIC_API_KEY",
     signupUrl: "https://console.anthropic.com",
     models: [
-      { id: "claude-sonnet-4-6", default: true },
-      { id: "claude-opus-4-6" },
-      { id: "claude-haiku-4-5" },
+      { id: "claude-sonnet-4-6", default: true, imageCapable: true },
+      { id: "claude-opus-4-6", imageCapable: true },
+      { id: "claude-haiku-4-5", imageCapable: true },
     ],
   },
   {
@@ -2285,6 +2331,10 @@ async function interactiveCreateProfile(id: string): Promise<Profile> {
       ...(runtime === "agent-sdk"
         ? { permissionMode: "auto" }
         : { dangerouslySkipPermissions: true }),
+      // #259 Y — same image-capable plumbing as the non-interactive path.
+      ...(runtime === "agent-sdk" && isModelImageCapable(model)
+        ? { modelImageCapable: true }
+        : {}),
       ...(teammateMode ? { teammateMode } : {}),
     },
   };

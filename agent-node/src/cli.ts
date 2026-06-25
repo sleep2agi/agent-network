@@ -1136,21 +1136,29 @@ const HAD_GROK_SESSION_AT_BOOT = RUNTIME === "grok" && !!SESSION_ID;
 let grokResumeHintFired = false;
 
 async function processWithClaude(task: string, from: string, images?: string[]): Promise<string> {
-  // #179 M5b 必改2-C (2026-06-24, 通信龙 ack): mirror the Grok runtime
-  // pattern — accept images in the signature so callers (commhub-inbox
-  // attachments, feishu channel content.images, /loop wakes carrying
-  // images, etc.) pass them through symmetrically, but for now emit a
-  // single warn line and downgrade to text-only.
+  // #259 Y (2026-06-25, 通信龙 GO after MiniMax-M3 real-call verified):
+  // image capability is per-MODEL (not per-vendor) — the create wizard
+  // writes `flags.modelImageCapable: true` when the picked model is on
+  // the verified-image-capable list (MiniMax-M3 + claude-sonnet-4-6 /
+  // opus-4-6 / haiku-4-5 today; deepseek/M2.x/mimo/intern explicitly
+  // NOT — their /anthropic endpoint either rejects or silently drops
+  // image blocks per real-call verify).
   //
-  // Real multimodal wiring (build AsyncIterable<SDKUserMessage> with
-  // {type:"image", source:{type:"base64",...}} content blocks) is a
-  // follow-up: blast radius is all claude-agent-sdk callers (not just
-  // feishu) and would need a cross-runtime regression + verification
-  // that the configured vendor's Anthropic-compat endpoint (e.g.
-  // deepseek-v4-pro via /anthropic) actually accepts image blocks.
-  // Track in the per-runtime multimodal issue.
-  if (images?.length) {
-    warn(`[claude] image attachments (${images.length}) received but claude-agent-sdk runtime currently sends text-only prompts; images remain on disk for future runs. Real multimodal wiring is tracked in a follow-up issue.`);
+  // Three branches from here, in order:
+  //   1. images empty                       → current text-only path (string prompt),
+  //                                            zero behaviour change (red line).
+  //   2. images non-empty + imageCapable    → switch prompt to AsyncIterable<
+  //                                            SDKUserMessage> carrying both an
+  //                                            image content block per file AND
+  //                                            the existing text prompt. Real
+  //                                            multimodal turn.
+  //   3. images non-empty + NOT imageCapable → warn-only fallthrough (matches
+  //                                            the Grok runtime pattern; images
+  //                                            remain on disk, not sent).
+  const modelImageCapable = fileConfig.flags?.modelImageCapable === true;
+  const hasImages = !!(images?.length);
+  if (hasImages && !modelImageCapable) {
+    warn(`[claude] image attachments (${images!.length}) received but resolved model is NOT marked imageCapable (flags.modelImageCapable !== true); sending text-only. Set modelImageCapable=true via anet node create with a vision-capable model (MiniMax-M3 / claude-sonnet-4-6 / etc).`);
   }
 
   // Pre-flight: if no Claude binary is resolvable, on-the-fly install the
@@ -1271,9 +1279,59 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     ``,
     `执行完后简要汇报结果。`,
   ].join("\n");
-  const prompt = SYSTEM_PROMPT
+  const promptText = SYSTEM_PROMPT
     ? `${SYSTEM_PROMPT}\n\n${toolCapabilityGuidance}\n\n${commhubToolGuidance}\n\n收到来自 ${from} 的任务：\n\n${task}`
     : defaultPrompt;
+
+  // #259 Y prompt construction — string path (red-line zero-regression for
+  // text-only) vs structured AsyncIterable path (image content blocks).
+  //
+  // Path A — text-only (the historical path):
+  //   `prompt: promptText` (string) → SDK builds a single user message
+  //   with one text block. Byte-identical to pre-#259 behaviour.
+  //
+  // Path B — multimodal (new for #259):
+  //   `prompt: AsyncIterable<SDKUserMessage>` → one user message with N
+  //   image content blocks (one per file) followed by the text block.
+  //   Each image is base64-encoded from disk; media_type inferred from
+  //   the file extension. A read failure on an individual image is
+  //   logged and that image is skipped (the turn still runs, with one
+  //   fewer attachment) — better than aborting the whole turn.
+  let prompt: any;
+  if (hasImages && modelImageCapable) {
+    const { readFileSync: rf } = await import("fs");
+    const imageBlocks: Array<{ type: "image"; source: { type: "base64"; media_type: string; data: string } }> = [];
+    for (const imgPath of images!) {
+      try {
+        const ext = (imgPath.split(".").pop() || "").toLowerCase();
+        const mime =
+          ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
+          ext === "png" ? "image/png" :
+          ext === "gif" ? "image/gif" :
+          ext === "webp" ? "image/webp" :
+          "image/png"; // sane default; vendor typically accepts the four above
+        const data = rf(imgPath).toString("base64");
+        imageBlocks.push({
+          type: "image",
+          source: { type: "base64", media_type: mime, data },
+        });
+      } catch (e: any) {
+        warn(`[claude] image attach skip ${imgPath}: ${e?.message || e}`);
+      }
+    }
+    log(`[claude] multimodal: ${imageBlocks.length}/${images!.length} image(s) attached (modelImageCapable=true)`);
+    const content = [...imageBlocks, { type: "text" as const, text: promptText }];
+    async function* msgs() {
+      yield {
+        type: "user" as const,
+        message: { role: "user" as const, content } as any,
+        parent_tool_use_id: null,
+      };
+    }
+    prompt = msgs();
+  } else {
+    prompt = promptText;
+  }
   // Inject CommHub as MCP server so Claude can use send_task/get_all_status etc.
   //
   // #102 Option A (post-smoke): use the SDK-instance MCP path, NOT type:"http".
