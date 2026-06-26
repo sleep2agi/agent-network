@@ -156,27 +156,36 @@ Older docs listed `telegram_reply` / `telegram_edit_message` / `telegram_react` 
 - Open `.anet/nodes/<alias>/config.json` and check the `channels` array contains `telegram` (the config stores `telegram`; `plugin:telegram@claude-plugins-official` is only the transient claudeArg anet builds when launching claude-code-cli — it is not written to config)
 
 
-## WeChat / Feishu Channel — External plugins (NOT inside CommHub Server)
+## Feishu Channel — Built-in (preview)
+
+::: tip Feishu is built in — no more external plugin
+`anet channel add feishu <node>` is a native anet channel as of preview `2.2.22-preview.2` / `2.4.15-preview.2`. The `claude-agent-sdk` runtime supports DMs + group `@bot` + text + images.
+:::
+
+Full setup (Docker one-command + manual paths) → **[Feishu Channel Integration Guide](/en/guide/feishu)**
+
+Design + roadmap: [RFC-020 IM Integration Layer](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-020-im-platform-integration.md) / [#179](https://github.com/sleep2agi/agent-network/issues/179).
+
+## WeChat Channel — External plugin (NOT inside CommHub Server)
 
 ::: warning Planned, not yet in the CLI main path
-**Today `anet channel add` only supports `telegram`, which is the only channel type CommHub natively understands.**
+**`anet channel add wechat` has not shipped yet.**
 
-WeChat / Feishu integrations live in **external plugins** (not in `@sleep2agi/commhub-server`):
+WeChat integration lives in an **external plugin** (not in `@sleep2agi/commhub-server`):
 
 - `mcp__wechat__wechat_reply` / `mcp__wechat__wechat_reply_image` — maintainer's self-hosted WeChat ClawBot plugin
-- `mcp__feishu__feishu_reply` / `mcp__feishu__feishu_reply_image` — Feishu Bot plugin
 
-These plugins talk to ClawBot / Feishu Bot **directly**, not via CommHub Server. **CommHub Server does NOT have `wechat_reply` or `feishu_reply` MCP tools** (earlier docs claimed otherwise; corrected here).
+This plugin talks to ClawBot **directly**, not via CommHub Server. **CommHub Server does NOT have a `wechat_reply` MCP tool**.
 
 ### Workarounds available today
 
 - **Telegram**: natively supported by CommHub, wired up via `anet channel add telegram`
+- **Feishu**: see above / [full integration guide](/en/guide/feishu)
 - **WeChat community in the Hub**: use the [self-hosted WeChat community](/en/community) for human-only discussion (no agent in the group)
-- **Feishu webhook**: write a thin adapter (model after `agent-network/src/node-server.ts`'s Telegram path) that calls the Feishu Bot webhook URL
 
 ### Roadmap
 
-Full `anet channel add wechat|feishu` is on the v0.11+ roadmap (v0.9.x / v0.10.x didn't ship it — those scopes were Recovery & Observability / Direct Runtime + Observability Foundations / Hero A disk + Hero D UX, with no channel-extension surface; still not scheduled). If you need it urgently, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) to discuss sponsoring the work.
+`anet channel add wechat` is on the future roadmap (not scheduled). If you need it urgently, open a [GitHub Discussion](https://github.com/sleep2agi/agent-network/discussions) to discuss sponsoring the work.
 :::
 
 ## Multi-Channel Integration
