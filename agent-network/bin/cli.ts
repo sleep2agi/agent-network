@@ -1482,6 +1482,23 @@ function attachChannel(profile: Profile, channel: string) {
   if (!profile.channels.includes(channel)) profile.channels.push(channel);
 }
 
+/**
+ * Atomic JSON write for channel access files (and similar small-state JSON
+ * files). Writes to `<path>.tmp.<pid>.<ts>` then renameSync → guaranteed
+ * atomic replace on POSIX when both files share the same filesystem.
+ *
+ * Per 通信牛 review 2026-06-26 必改3: direct writeFileSync can leave a
+ * truncated access.json on Ctrl-C / disk-full / concurrent write, which
+ * makes the channel un-startable. This helper closes that hole.
+ *
+ * Mirrors the existing saveGoalsFile pattern in this file.
+ */
+function writeAccessJsonAtomic(path: string, data: unknown): void {
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
+  renameSync(tmp, path);
+}
+
 function writeTelegramChannelConfig(nodeId: string, botToken: string, allowId: string): string {
   const channelDir = join(nodesDir(), nodeId, "channels", "telegram");
   mkdirSync(channelDir, { recursive: true });
@@ -1491,12 +1508,12 @@ function writeTelegramChannelConfig(nodeId: string, botToken: string, allowId: s
   writeFileSync(envPath, `TELEGRAM_BOT_TOKEN=${botToken}\n`);
   try { chmodSync(envPath, 0o600); } catch {}
 
-  writeFileSync(join(channelDir, "access.json"), JSON.stringify({
+  writeAccessJsonAtomic(join(channelDir, "access.json"), {
     dmPolicy: "allowlist",
     allowFrom: [allowId],
     groups: {},
     pending: {},
-  }, null, 2) + "\n");
+  });
   return channelDir;
 }
 
@@ -1520,10 +1537,10 @@ function writeFeishuChannelConfig(
   writeFileSync(envPath, `FEISHU_APP_ID=${appId}\nFEISHU_APP_SECRET=${appSecret}\n`);
   try { chmodSync(envPath, 0o600); } catch {}
 
-  writeFileSync(join(channelDir, "access.json"), JSON.stringify({
+  writeAccessJsonAtomic(join(channelDir, "access.json"), {
     allowFrom: allowOpenId ? [allowOpenId] : [],
     allowChats: allowChatId ? [allowChatId] : [],
-  }, null, 2) + "\n");
+  });
   return channelDir;
 }
 
@@ -4927,10 +4944,12 @@ Examples:
     const nodeRef = args[3];
     if (!type || !nodeRef) {
       console.log(`
-anet channel allow <type> <node-id> [--add-from <id>] [--add-chat <id>] [--rm-from <id>] [--rm-chat <id>]
+anet channel allow feishu <node-id> [--add-from <id>] [--add-chat <id>] [--rm-from <id>] [--rm-chat <id>]
 
-Manage allowlists in .anet/nodes/<node>/channels/<type>/access.json.
-Multiple --add-* / --rm-* flags may be combined.
+Manage allowlists in .anet/nodes/<node>/channels/feishu/access.json.
+Each --add-* / --rm-* flag is repeatable to handle multiple ids in one
+command. Telegram channels use a different schema; use
+\`anet channel add telegram\` --allow there.
 
 Examples:
   anet channel allow feishu 指挥室 --add-from ou_xxx
@@ -4941,8 +4960,12 @@ Note: changes take effect on next \`anet node start\` (no hot-reload yet).
 `);
       return;
     }
-    if (type !== "feishu" && type !== "telegram") {
-      console.error(`Unsupported channel type: ${type}. Supported: telegram, feishu`);
+    // 通信牛 review 建议#2 — keep `allow` feishu-only for now. Telegram has its
+    // own access management (dmPolicy / groups / pending) under `channel add
+    // telegram --allow`; reusing this subcommand on telegram would scribble
+    // `allowChats` into telegram's access.json which it doesn't read.
+    if (type !== "feishu") {
+      console.error(`channel allow currently supports feishu only. Telegram uses 'anet channel add telegram --allow' instead.`);
       process.exit(1);
     }
     const resolved = resolveNodeRef(nodeRef);
@@ -4981,10 +5004,22 @@ Note: changes take effect on next \`anet node start\` (no hot-reload yet).
       return n;
     };
 
-    const nAddFrom = applyOp(allowFrom, opts["add-from"] as any, "add");
-    const nAddChat = applyOp(allowChats, opts["add-chat"] as any, "add");
-    const nRmFrom  = applyOp(allowFrom, opts["rm-from"]  as any, "rm");
-    const nRmChat  = applyOp(allowChats, opts["rm-chat"] as any, "rm");
+    // 通信牛 review 建议#1 — parseOpts is single-value (last-write-wins) for
+    // ad-hoc flags. To make --add-from / --rm-* etc. genuinely repeatable as
+    // the help text claims, collect multi-occurrences locally from argv.
+    const collectFlag = (flag: string): string[] => {
+      const out: string[] = [];
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === flag && args[i + 1] && !args[i + 1].startsWith("--")) {
+          out.push(args[++i]);
+        }
+      }
+      return out;
+    };
+    const nAddFrom = applyOp(allowFrom, collectFlag("--add-from"), "add");
+    const nAddChat = applyOp(allowChats, collectFlag("--add-chat"), "add");
+    const nRmFrom  = applyOp(allowFrom, collectFlag("--rm-from"),  "rm");
+    const nRmChat  = applyOp(allowChats, collectFlag("--rm-chat"), "rm");
 
     if (nAddFrom + nAddChat + nRmFrom + nRmChat === 0) {
       console.log("Nothing to do (no add/rm operands matched).");
@@ -4995,7 +5030,7 @@ Note: changes take effect on next \`anet node start\` (no hot-reload yet).
     // Preserve any extra fields the schema may have grown (e.g. telegram's
     // dmPolicy / groups / pending) by spreading the original parsed object.
     const next = { ...parsed, allowFrom: [...allowFrom], allowChats: [...allowChats] };
-    writeFileSync(accessPath, JSON.stringify(next, null, 2) + "\n");
+    writeAccessJsonAtomic(accessPath, next);
     console.log(`✅ ${type} access updated for "${nodeDisplayName(resolved.id, resolved.profile)}"`);
     if (nAddFrom) console.log(`   +from: ${nAddFrom}`);
     if (nAddChat) console.log(`   +chat: ${nAddChat}`);

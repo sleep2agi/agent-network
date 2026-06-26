@@ -181,7 +181,8 @@ const TIMEOUT_NOTICE_TEXT = "[处理超时，任务可能仍在后台运行]";
  * arrives later, bridge's reply-envelope lookup will miss (entry already
  * evicted) and the late reply is dropped — the user already knows.
  */
-function createIPCEventHandler(
+/** @internal exported for test harness; not intended for production callers. */
+export function createIPCEventHandler(
   adapter: FeishuAdapter,
   ttlMs: number,
   ackPlaceholder: boolean,
@@ -204,8 +205,13 @@ function createIPCEventHandler(
     const eventKey = raw.eventKey;
     const { event, placeholderMessageId } = entry;
     void (async () => {
-      try {
-        if (placeholderMessageId && adapter.edit) {
+      // 必改1 (通信牛 review 2026-06-26): if the edit-by-placeholder path
+      // fails, do NOT silently drop — fall back to a fresh adapter.send so
+      // the user never sees an orphaned "⏳ 处理中…". The previous logic
+      // already evicted pending above, so without this fallback the reply
+      // would be lost forever.
+      if (placeholderMessageId && adapter.edit) {
+        try {
           await adapter.edit(event.conversation, placeholderMessageId, {
             target: event.conversation,
             text: replyText,
@@ -214,17 +220,25 @@ function createIPCEventHandler(
           process.stderr.write(
             `[feishu:bridge] reply edited (placeholder=${placeholderMessageId}) for ${eventKey}\n`,
           );
-        } else {
-          const { messageId } = await adapter.send({
-            target: event.conversation,
-            text: replyText,
-            replyToMessageId: event.messageId,
-            correlation: { taskId: eventKey },
-          });
+          return;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
           process.stderr.write(
-            `[feishu:bridge] reply sent (messageId=${messageId}) for ${eventKey}\n`,
+            `[feishu:bridge] reply edit failed (placeholder=${placeholderMessageId}): ${msg} — falling back to adapter.send\n`,
           );
+          // fall through to send below
         }
+      }
+      try {
+        const { messageId } = await adapter.send({
+          target: event.conversation,
+          text: replyText,
+          replyToMessageId: event.messageId,
+          correlation: { taskId: eventKey },
+        });
+        process.stderr.write(
+          `[feishu:bridge] reply sent (messageId=${messageId}) for ${eventKey}\n`,
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(`[feishu:bridge] reply delivery failed: ${msg}\n`);
@@ -244,35 +258,42 @@ function createIPCEventHandler(
       pending.delete(event.idempotencyKey);
       const { placeholderMessageId } = entry;
       void (async () => {
-        try {
-          if (placeholderMessageId && adapter.edit) {
-            await adapter.edit(
-              event.conversation,
-              placeholderMessageId,
-              {
-                target: event.conversation,
-                text: TIMEOUT_NOTICE_TEXT,
-                correlation: { taskId: event.idempotencyKey },
-              },
-            );
-            process.stderr.write(
-              `[feishu:bridge] timeout-edit (placeholder=${placeholderMessageId}) for ${event.idempotencyKey} after ${ttlMs}ms\n`,
-            );
-          } else {
-            await adapter.send({
+        // 必改2 (通信牛 review 2026-06-26): symmetric with 必改1 — if the
+        // timeout-edit fails, fall back to a fresh adapter.send so the user
+        // is never left with a "⏳ 处理中…" placeholder that never resolves.
+        if (placeholderMessageId && adapter.edit) {
+          try {
+            await adapter.edit(event.conversation, placeholderMessageId, {
               target: event.conversation,
               text: TIMEOUT_NOTICE_TEXT,
-              replyToMessageId: event.messageId,
               correlation: { taskId: event.idempotencyKey },
             });
             process.stderr.write(
-              `[feishu:bridge] timeout-notify sent for ${event.idempotencyKey} after ${ttlMs}ms\n`,
+              `[feishu:bridge] timeout-edit (placeholder=${placeholderMessageId}) for ${event.idempotencyKey} after ${ttlMs}ms\n`,
             );
+            return;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            process.stderr.write(
+              `[feishu:bridge] timeout edit failed (placeholder=${placeholderMessageId}): ${msg} — falling back to adapter.send\n`,
+            );
+            // fall through to send below
           }
+        }
+        try {
+          await adapter.send({
+            target: event.conversation,
+            text: TIMEOUT_NOTICE_TEXT,
+            replyToMessageId: event.messageId,
+            correlation: { taskId: event.idempotencyKey },
+          });
+          process.stderr.write(
+            `[feishu:bridge] timeout-notify sent for ${event.idempotencyKey} after ${ttlMs}ms\n`,
+          );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           process.stderr.write(
-            `[feishu:bridge] timeout handling failed: ${msg}\n`,
+            `[feishu:bridge] timeout-notify send failed: ${msg}\n`,
           );
         }
       })();

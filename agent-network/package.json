@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test:feishu-bridge": "bun tests/feishu-bridge-ackplaceholder.test.ts",
     "build": "bun build src/client.ts --outdir dist/src --target node --minify && bun build bin/cli.ts --outdir dist/bin --target node --minify --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' && bun build src/node-server.ts --outdir dist/src --target node --minify --external @modelcontextprotocol/sdk && bun build src/im/feishu/worker.ts --outdir dist/src/im/feishu --target node --minify --external @larksuiteoapi/node-sdk && tsc --emitDeclarationOnly --declaration --outDir dist && npx javascript-obfuscator dist/bin/cli.js --output dist/bin/cli.js --compact true --string-array true --string-array-encoding base64 && npx javascript-obfuscator dist/src/client.js --output dist/src/client.js --compact true --string-array true && npx javascript-obfuscator dist/src/node-server.js --output dist/src/node-server.js --compact true --string-array true",
     "prepublishOnly": "npm run build"
   },
