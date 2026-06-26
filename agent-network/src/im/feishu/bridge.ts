@@ -73,6 +73,16 @@ const DEFAULT_REPLY_PENDING_TTL_MS = 15 * 60 * 1000;
  *  span (socket-reconnect replay). Independent of the outbound TTL above. */
 const DEDUP_WINDOW_MS = 2 * 60 * 1000;
 
+// Rate-limit knobs (Vincent 2026-06-26 — paired with wildcard allowlist so
+// open-bot deployments still have abuse protection).
+const DM_RATE_LIMIT_COUNT = 3;
+const DM_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const GROUP_RATE_LIMIT_COUNT = 2;
+const GROUP_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const FLOOD_AUDIT_THRESHOLD = 3;
+const FLOOD_AUDIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_NOTICE_TEXT = "处理频率超出限制，请稍后重试";
+
 /**
  * Wire and start the Feishu bridge. Resolves once the underlying WSClient is
  * connected and the EventDispatcher is registered.
@@ -98,7 +108,11 @@ export async function startFeishuBridge(
   const onEvent =
     opts.onEvent ??
     selectDefaultEventHandler(adapter, ttlMs, channelConfig.ackPlaceholder);
-  await adapter.start(withDedup(onEvent));
+  // Middleware order: dedup → rate-limit → think.
+  // Dedup runs first so socket-replay events don't burn rate-limit quota.
+  // Rate-limit runs before `onEvent` (IPC handoff to think) so over-limit
+  // events never hit the LLM at all.
+  await adapter.start(withDedup(withRateLimit(onEvent, adapter)));
   return adapter;
 }
 
@@ -108,7 +122,8 @@ export async function startFeishuBridge(
  * Sits in front of any other handler so the dropped event never reaches
  * IPC / think / send.
  */
-function withDedup(
+/** @internal exported for test harness. */
+export function withDedup(
   inner: (event: NormalizedIMEvent) => Promise<void>,
 ): (event: NormalizedIMEvent) => Promise<void> {
   const seen = new Map<string, number>();
@@ -128,6 +143,105 @@ function withDedup(
     }
     seen.set(event.idempotencyKey, now);
     await inner(event);
+  };
+}
+
+/**
+ * Rate-limit wrapper — caps event arrival per-sender (DM) and per-chat
+ * (group). Over-limit events get a user-visible "处理频率超出限制，请稍后重试"
+ * message back via adapter.send (Vincent 2026-06-26 "never silent-drop").
+ * Persistent abusers (≥ FLOOD_AUDIT_THRESHOLD denials in
+ * FLOOD_AUDIT_WINDOW_MS) trigger an `[feishu:audit] flood ...` stderr line
+ * so ops can grep for incidents.
+ *
+ * Sits AFTER withDedup so socket-replay events don't consume rate-limit
+ * quota, and BEFORE the IPC handoff to think — over-limit events never
+ * reach the LLM.
+ *
+ * @internal exported for test harness.
+ */
+export function withRateLimit(
+  inner: (event: NormalizedIMEvent) => Promise<void>,
+  adapter: FeishuAdapter,
+): (event: NormalizedIMEvent) => Promise<void> {
+  // Sliding-window timestamp lists per identity. Trimmed lazily on each
+  // call so a burst-then-quiet pattern doesn't leak memory.
+  const dmTimes = new Map<string, number[]>();
+  const groupTimes = new Map<string, number[]>();
+  // Flood counter resets when its 60s window rolls over.
+  const floodCounts = new Map<string, { count: number; windowStart: number }>();
+
+  function trimWindow(times: number[], now: number, windowMs: number): number[] {
+    const cutoff = now - windowMs;
+    return times.filter((t) => t >= cutoff);
+  }
+
+  return async (event: NormalizedIMEvent) => {
+    const now = Date.now();
+    let overLimit = false;
+
+    if (event.conversation.conversationType === "dm") {
+      const senderId = event.sender.id;
+      const trimmed = trimWindow(dmTimes.get(senderId) ?? [], now, DM_RATE_LIMIT_WINDOW_MS);
+      if (trimmed.length >= DM_RATE_LIMIT_COUNT) {
+        overLimit = true;
+        dmTimes.set(senderId, trimmed);
+      } else {
+        trimmed.push(now);
+        dmTimes.set(senderId, trimmed);
+      }
+    } else {
+      // group / channel / thread — gate by chat id (after access check and
+      // groupPolicy=mention have already qualified the message).
+      const chatId = event.conversation.conversationId;
+      const trimmed = trimWindow(groupTimes.get(chatId) ?? [], now, GROUP_RATE_LIMIT_WINDOW_MS);
+      if (trimmed.length >= GROUP_RATE_LIMIT_COUNT) {
+        overLimit = true;
+        groupTimes.set(chatId, trimmed);
+      } else {
+        trimmed.push(now);
+        groupTimes.set(chatId, trimmed);
+      }
+    }
+
+    if (!overLimit) {
+      await inner(event);
+      return;
+    }
+
+    // Flood audit — count how many times this sender has been rate-limited.
+    const senderId = event.sender.id;
+    const existing = floodCounts.get(senderId);
+    let flood: { count: number; windowStart: number };
+    if (!existing || now - existing.windowStart > FLOOD_AUDIT_WINDOW_MS) {
+      flood = { count: 1, windowStart: now };
+    } else {
+      flood = { count: existing.count + 1, windowStart: existing.windowStart };
+    }
+    floodCounts.set(senderId, flood);
+    if (flood.count >= FLOOD_AUDIT_THRESHOLD) {
+      process.stderr.write(
+        `[feishu:audit] flood from=${senderId} conv=${event.conversation.conversationType}:${event.conversation.conversationId} — ${flood.count} rate-limit denies in ${Math.round((now - flood.windowStart) / 1000)}s window\n`,
+      );
+    }
+
+    // Surface a user-visible notice (not silent — Vincent 2026-06-26 lock).
+    try {
+      await adapter.send({
+        target: event.conversation,
+        text: RATE_LIMIT_NOTICE_TEXT,
+        replyToMessageId: event.messageId,
+        correlation: { taskId: event.idempotencyKey },
+      });
+      process.stderr.write(
+        `[feishu:bridge] rate-limited (${event.conversation.conversationType}) from=${senderId} for ${event.idempotencyKey}\n`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `[feishu:bridge] rate-limit notice send failed: ${msg}\n`,
+      );
+    }
   };
 }
 
