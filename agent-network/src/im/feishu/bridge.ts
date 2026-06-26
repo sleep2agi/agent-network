@@ -96,7 +96,8 @@ export async function startFeishuBridge(
 
   const ttlMs = channelConfig.taskTimeoutMs || DEFAULT_REPLY_PENDING_TTL_MS;
   const onEvent =
-    opts.onEvent ?? selectDefaultEventHandler(adapter, ttlMs);
+    opts.onEvent ??
+    selectDefaultEventHandler(adapter, ttlMs, channelConfig.ackPlaceholder);
   await adapter.start(withDedup(onEvent));
   return adapter;
 }
@@ -133,20 +134,49 @@ function withDedup(
 function selectDefaultEventHandler(
   adapter: FeishuAdapter,
   ttlMs: number,
+  ackPlaceholder: boolean,
 ): (event: NormalizedIMEvent) => Promise<void> {
   if (typeof process.send === "function") {
-    return createIPCEventHandler(adapter, ttlMs);
+    return createIPCEventHandler(adapter, ttlMs, ackPlaceholder);
   }
   return defaultEventLogger;
 }
+
+interface PendingEntry {
+  event: NormalizedIMEvent;
+  /**
+   * Message id of the "⏳ 处理中…" placeholder sent at event-arrival time.
+   * Populated only when ackPlaceholder is true AND adapter.send succeeded.
+   * When set, the reply / timeout handlers prefer adapter.edit over send.
+   */
+  placeholderMessageId?: string;
+}
+
+const ACK_PLACEHOLDER_TEXT = "⏳ 处理中…";
+const TIMEOUT_NOTICE_TEXT = "[处理超时，任务可能仍在后台运行]";
 
 /**
  * IPC handler — forwards inbound events to the parent agent-node and routes
  * the parent's reply back to Feishu via the adapter. The parent contract is
  * a single round-trip per event keyed on `idempotencyKey`.
  *
+ * ackPlaceholder behavior (RFC-020 §4.2, Vincent ask 2026-06-26):
+ *   - On event arrival, bridge sends a "⏳ 处理中…" placeholder into the
+ *     originating thread BEFORE forwarding the IPC envelope. The placeholder
+ *     send is awaited so the reply handler can edit it rather than racing
+ *     with a possible early reply.
+ *   - On reply IPC, if a placeholder exists, bridge calls adapter.edit to
+ *     replace it with the agent's reply. Otherwise (placeholder send failed,
+ *     or ackPlaceholder=false), bridge falls back to the original
+ *     adapter.send path.
+ *   - On TTL expiry, bridge edits the placeholder to "[处理超时…]" instead
+ *     of sending a separate timeout notice. Without a placeholder, it falls
+ *     back to send-new-message (same as 必改3-b behavior).
+ *   - All success paths log to stderr so the round-trip is observable from
+ *     the agent-node.log (closes Vincent's silent-success blindspot).
+ *
  * On TTL expiry without reply (per 通信牛 review 必改3-b — never silent-drop)
- * the bridge sends a user-visible "[处理超时]" notice into the originating
+ * the bridge surfaces a user-visible "[处理超时]" notice into the originating
  * conversation before evicting the pending entry. If the agent's real reply
  * arrives later, bridge's reply-envelope lookup will miss (entry already
  * evicted) and the late reply is dropped — the user already knows.
@@ -154,6 +184,7 @@ function selectDefaultEventHandler(
 function createIPCEventHandler(
   adapter: FeishuAdapter,
   ttlMs: number,
+  ackPlaceholder: boolean,
 ): (event: NormalizedIMEvent) => Promise<void> {
   if (typeof process.send !== "function") {
     throw new Error(
@@ -161,57 +192,119 @@ function createIPCEventHandler(
     );
   }
 
-  const pending = new Map<string, NormalizedIMEvent>();
+  const pending = new Map<string, PendingEntry>();
 
   process.on("message", (raw: unknown) => {
     if (!isReplyEnvelope(raw)) return;
-    const event = pending.get(raw.eventKey);
-    if (!event) return;
+    const entry = pending.get(raw.eventKey);
+    if (!entry) return;
     pending.delete(raw.eventKey);
 
     const replyText = raw.text;
     const eventKey = raw.eventKey;
+    const { event, placeholderMessageId } = entry;
     void (async () => {
       try {
-        await adapter.send({
-          target: event.conversation,
-          text: replyText,
-          replyToMessageId: event.messageId,
-          correlation: { taskId: eventKey },
-        });
+        if (placeholderMessageId && adapter.edit) {
+          await adapter.edit(event.conversation, placeholderMessageId, {
+            target: event.conversation,
+            text: replyText,
+            correlation: { taskId: eventKey },
+          });
+          process.stderr.write(
+            `[feishu:bridge] reply edited (placeholder=${placeholderMessageId}) for ${eventKey}\n`,
+          );
+        } else {
+          const { messageId } = await adapter.send({
+            target: event.conversation,
+            text: replyText,
+            replyToMessageId: event.messageId,
+            correlation: { taskId: eventKey },
+          });
+          process.stderr.write(
+            `[feishu:bridge] reply sent (messageId=${messageId}) for ${eventKey}\n`,
+          );
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`[feishu:bridge] reply send failed: ${msg}\n`);
+        process.stderr.write(`[feishu:bridge] reply delivery failed: ${msg}\n`);
       }
     })();
   });
 
   return async (event: NormalizedIMEvent) => {
-    pending.set(event.idempotencyKey, event);
+    // Register pending FIRST so a fast reply path can find the entry even if
+    // the placeholder send hasn't completed yet.
+    pending.set(event.idempotencyKey, { event });
+
+    // TTL — edits the placeholder when one exists, else sends a new notice.
     setTimeout(() => {
-      // If pending entry still here, parent never sent a reply within ttl.
-      // Surface a user-visible timeout instead of silently evicting.
-      if (!pending.has(event.idempotencyKey)) return;
+      const entry = pending.get(event.idempotencyKey);
+      if (!entry) return; // reply already arrived
       pending.delete(event.idempotencyKey);
+      const { placeholderMessageId } = entry;
       void (async () => {
         try {
-          await adapter.send({
-            target: event.conversation,
-            text: "[处理超时，任务可能仍在后台运行]",
-            replyToMessageId: event.messageId,
-            correlation: { taskId: event.idempotencyKey },
-          });
-          process.stderr.write(
-            `[feishu:bridge] timeout-notify sent for ${event.idempotencyKey} after ${ttlMs}ms\n`,
-          );
+          if (placeholderMessageId && adapter.edit) {
+            await adapter.edit(
+              event.conversation,
+              placeholderMessageId,
+              {
+                target: event.conversation,
+                text: TIMEOUT_NOTICE_TEXT,
+                correlation: { taskId: event.idempotencyKey },
+              },
+            );
+            process.stderr.write(
+              `[feishu:bridge] timeout-edit (placeholder=${placeholderMessageId}) for ${event.idempotencyKey} after ${ttlMs}ms\n`,
+            );
+          } else {
+            await adapter.send({
+              target: event.conversation,
+              text: TIMEOUT_NOTICE_TEXT,
+              replyToMessageId: event.messageId,
+              correlation: { taskId: event.idempotencyKey },
+            });
+            process.stderr.write(
+              `[feishu:bridge] timeout-notify sent for ${event.idempotencyKey} after ${ttlMs}ms\n`,
+            );
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           process.stderr.write(
-            `[feishu:bridge] timeout-notify send failed: ${msg}\n`,
+            `[feishu:bridge] timeout handling failed: ${msg}\n`,
           );
         }
       })();
     }, ttlMs);
+
+    // Optional placeholder — await so reply handler can prefer edit over send.
+    // Failure is non-fatal; pending stays without a placeholderMessageId and
+    // the reply / timeout handlers fall back to adapter.send.
+    if (ackPlaceholder) {
+      try {
+        const { messageId } = await adapter.send({
+          target: event.conversation,
+          text: ACK_PLACEHOLDER_TEXT,
+          replyToMessageId: event.messageId,
+          correlation: { taskId: event.idempotencyKey },
+        });
+        const entry = pending.get(event.idempotencyKey);
+        if (entry) {
+          entry.placeholderMessageId = messageId;
+          process.stderr.write(
+            `[feishu:bridge] placeholder sent (messageId=${messageId}) for ${event.idempotencyKey}\n`,
+          );
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[feishu:bridge] placeholder send failed: ${msg} — fallback to new-message on reply\n`,
+        );
+      }
+    }
+
+    // Forward to parent for think().
     const envelope: BridgeIncomingEnvelope = { type: "event", event };
     process.send!(envelope);
   };
