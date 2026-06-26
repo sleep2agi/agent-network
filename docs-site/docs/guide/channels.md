@@ -155,27 +155,36 @@ Agent（LLM 跑在 claude-agent-sdk / codex-sdk runtime 内）只需要**直接�
 - 看 `.anet/nodes/<alias>/config.json` 的 `channels` 数组里有没有 `telegram`（config 里存的就是 `telegram`；`plugin:telegram@claude-plugins-official` 只是 anet 启动 claude-code-cli 时临时拼的 claudeArg，不写进 config）
 
 
-## 微信 / 飞书 Channel — 外部插件（不在 CommHub Server 内）
+## 飞书 Channel — 内置（preview 起 ship）
+
+::: tip 飞书已内置, 不再走外部插件
+`anet channel add feishu <node>` 是 anet 原生 channel（preview `2.2.22-preview.2` / `2.4.15-preview.2` 起），`claude-agent-sdk` runtime 私聊 + 群 @bot + 文本 + 图片可用。
+:::
+
+完整接入步骤（Docker 一键 + 手动两条路径） → **[飞书 channel 接入指南](/guide/feishu)**
+
+设计 + roadmap：[RFC-020 IM 兼容层](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-020-im-platform-integration.md) / [#179](https://github.com/sleep2agi/agent-network/issues/179)。
+
+## 微信 Channel — 外部插件（不在 CommHub Server 内）
 
 ::: warning Planned，未在 CLI 主路径
-**当前 `anet channel add` 只支持 `telegram`，这是 CommHub 原生理解的唯一 channel 类型。**
+**`anet channel add wechat` 暂未 ship。**
 
-WeChat / Feishu 集成存在于**外部插件**中（不在 `@sleep2agi/commhub-server` 里）：
+WeChat 集成存在于**外部插件**中（不在 `@sleep2agi/commhub-server` 里）：
 
 - `mcp__wechat__wechat_reply` / `mcp__wechat__wechat_reply_image` — 维护者自建的 WeChat ClawBot 插件
-- `mcp__feishu__feishu_reply` / `mcp__feishu__feishu_reply_image` — Feishu Bot 插件
 
-这些插件**直接**和 ClawBot / Feishu Bot 通信，不经过 CommHub Server。**CommHub Server 没有 `wechat_reply` 或 `feishu_reply` MCP tools**（之前版本的文档误写过，已更正）。
+这些插件**直接**和 ClawBot 通信，不经过 CommHub Server。**CommHub Server 没有 `wechat_reply` MCP tool**。
 
 ### 当前能用的替代方案
 
 - **Telegram**：CommHub 原生支持，用 `anet channel add telegram` 一键接入
+- **飞书**：见上 / [完整接入指南](/guide/feishu)
 - **微信群消息进 Hub**：用 [维护者自建的 WeChat 微信群入口](/community) 让人加群讨论，不接 Agent
-- **飞书 webhook**：自己写一个 thin adapter（参考 `agent-network/src/node-server.ts` 里 Telegram 的写法）调用 Feishu Bot Webhook
 
 ### Roadmap
 
-完整 `anet channel add wechat|feishu` 排在 v0.11+ 路线图上（v0.9.x / v0.10.x 都未做，scope 是 Recovery & Observability / Direct Runtime + Observability Foundations / Hero A disk + Hero D UX，未触 channel 扩展；暂未排期）。如果你急用，开 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 谈赞助优先级。
+`anet channel add wechat` 排在后续路线图（未排期）。如果你急用，开 [GitHub Discussions](https://github.com/sleep2agi/agent-network/discussions) 谈赞助优先级。
 :::
 
 ## 多 Channel 接入
