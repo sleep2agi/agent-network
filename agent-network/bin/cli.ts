@@ -5095,7 +5095,8 @@ Note: changes take effect on next \`anet node start\` (no hot-reload yet).
 anet channel <command>
 
   add <type> <node-id>          Add channel to a node
-  ls [node-id]                  List channels
+  allow feishu <node-id>        Manage feishu allowFrom / allowChats (--add-from/--add-chat/--rm-from/--rm-chat; repeatable)
+  ls [node-id]                  List channels (shows allowFrom + allowChats for feishu)
   status [node-id]              Show resolved access.json path + allowlist + pending pairings
 
 Data: .anet/nodes/<node-id>/channels/<type>/
