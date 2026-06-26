@@ -1,0 +1,71 @@
+# Feishu agent — single-service compose.
+#
+# Default usage (BYOH — Bring Your Own Hub):
+#   cd docker/feishu/
+#   cp .env.example .env && $EDITOR .env       # fill the values
+#   docker compose up -d
+#   docker compose logs -f feishu-agent        # tail bring-up + agent logs
+#
+# The `hub` service below is OPT-IN (profile: local-hub) — only starts when
+# explicitly enabled, for self-test against a throwaway local hub:
+#   docker compose --profile local-hub up -d
+#   # then set HUB_URL=http://hub:9200 in .env first
+#
+# Production users with their own hub keep HUB_URL=https://your-hub in
+# .env and `docker compose up -d` runs only the agent service.
+#
+# Hard volume constraint per 通信龙 (blast-radius limit): only the
+# `./data/` SUBDIRECTORY (a child of cwd) is mounted. The agent's
+# Bash/full-tool capabilities cannot reach anywhere else on the host
+# — not even sibling directories of the compose file. All writes land
+# under `./data/.anet/`.
+
+services:
+  feishu-agent:
+    image: anet-feishu:latest
+    container_name: anet-feishu
+    build:
+      context: ../..
+      dockerfile: docker/feishu/Dockerfile
+      args:
+        # Pinned to exact preview versions (per 通信龙 — reproducible
+        # builds, not floating @preview). Override via shell env to
+        # rebuild against a different version:
+        #   ANET_VERSION=2.2.23-preview.0 docker compose build
+        ANET_VERSION: ${ANET_VERSION:-2.2.22-preview.2}
+        ANET_NODE_VERSION: ${ANET_NODE_VERSION:-2.4.15-preview.2}
+    env_file: .env
+    restart: unless-stopped
+    # Hard blast-radius limit: only ./ from the host, mapped to /work.
+    # The agent runs `cd /work` and writes all state under /work/.anet,
+    # so persistence works (survives container recreate) but nothing
+    # the agent does can touch the host outside the cwd it was launched
+    # from. Per 通信龙 hard constraint (2026-06-26).
+    volumes:
+      # `./data/` (a SUBDIRECTORY of cwd) maps to /work in the container.
+      # Tighter than `./:/work` — even the compose file and .env stay
+      # outside the agent's reach. Auto-created on first up.
+      - ./data:/work
+    # No `ports:` by default — the agent connects OUTBOUND to HUB_URL,
+    # nothing inbound is needed. (If you enable the local-hub profile
+    # below and want to reach the hub from your host, that service
+    # exposes its own port.)
+
+  # OPT-IN local hub for self-test (NOT default). Enable with:
+  #   docker compose --profile local-hub up -d
+  # In that mode, set HUB_URL=http://hub:9200 in your .env so the
+  # agent talks to this container instead of an external hub.
+  hub:
+    profiles: ["local-hub"]
+    image: node:24-alpine
+    container_name: anet-feishu-hub
+    command: >-
+      sh -c "npm install -g --no-audit --no-fund @sleep2agi/commhub-server@preview
+      && commhub-server --dev-open"
+    ports:
+      - "9200:9200"
+    restart: unless-stopped
+    volumes:
+      # Hub state under ./hub-data on the host (not inside ./ so the
+      # agent's /work mount can't accidentally touch hub DB).
+      - ./hub-data:/root/.commhub

@@ -1,0 +1,71 @@
+# Feishu Agent — Docker 一键启动
+
+Run a feishu-enabled agent in Docker against your own commhub-server hub. One file (`.env`) + one command (`docker compose up -d`).
+
+## 3-step quickstart
+
+```bash
+cd docker/feishu/
+cp .env.example .env && $EDITOR .env       # fill the values (see below)
+docker compose up -d                       # builds image first time (~2 min)
+docker compose logs -f feishu-agent        # tail bring-up + agent logs
+```
+
+The container's entrypoint runs the full bring-up chain automatically: hub init → login → node create → channel add feishu → start. Idempotent — restart the container any time, prior state is preserved under `./data/.anet/`.
+
+## `.env` essentials
+
+```bash
+HUB_URL=https://your-hub.example.com       # your own commhub-server URL
+HUB_USER=your-username                     # account on that hub
+HUB_PASSWORD=your-password                 # login is non-interactive via --username/--password
+
+FEISHU_APP_ID=cli_xxxx                     # from https://open.feishu.cn → your app
+FEISHU_APP_SECRET=xxxx
+
+ANET_MODEL=deepseek-v4-pro                 # or MiniMax-M3 (vision) / claude-sonnet-4-6 / etc.
+ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+ANTHROPIC_AUTH_TOKEN=sk-xxxx
+```
+
+Optional whitelist (recommended for prod — keeps bot from being triggered by random users):
+```bash
+FEISHU_ALLOW_FROM=ou_xxx,ou_yyy            # sender open_id allowlist (DM)
+FEISHU_ALLOW_CHATS=oc_xxx,oc_yyy           # chat_id allowlist (group)
+```
+
+See `.env.example` for the full annotated list (verified vendor + model combos, NODE_ALIAS override, etc.).
+
+## Troubleshooting (5 lines)
+
+| log line | what's wrong |
+|----------|--------------|
+| `HUB_URL: missing — set HUB_URL=...` | a required `.env` var is empty/missing; fix `.env`, re-up |
+| `❌ Cannot reach hub: Cannot connect to CommHub server` | `HUB_URL` is wrong or hub is down — verify `curl $HUB_URL/health` from your host |
+| `❌ Login failed: invalid username or password` | `HUB_USER` / `HUB_PASSWORD` don't match the hub's account — try `anet login` from a host shell first |
+| `[claude] image attachments (N) received but ... text-only` | the picked `ANET_MODEL` isn't on the vision-capable list — switch to MiniMax-M3 or a Claude-native model to send images |
+| container restart-loops without entering `[start] exec agent-node` | one of the bring-up steps fails fast (env / login / etc.) — `docker compose logs feishu-agent` shows which step |
+
+## Where state lives
+
+Only the `./data/` subdirectory is mounted into the container (hard volume constraint per agent-network maintainers — limits the agent's blast radius to that subdir). The agent writes its node config, logs, goals, and per-channel `.env` / `access.json` under `./data/.anet/`. Everything else on your host is unreachable from inside the agent.
+
+## Versions
+
+Image pins exact preview versions of `@sleep2agi/agent-network` + `@sleep2agi/agent-node` via Docker `ARG`. To rebuild against a newer preview:
+```bash
+ANET_VERSION=2.2.23-preview.0 ANET_NODE_VERSION=2.4.16-preview.0 docker compose build
+docker compose up -d
+```
+
+Promoted-to-latest support comes once the preview UAT cycle settles; until then this template tracks the verified preview chain. See the Dockerfile header for the currently-pinned versions.
+
+## Self-test (optional)
+
+Spin up a throwaway local hub alongside the agent for an isolated smoke test (does NOT touch your real hub):
+
+```bash
+HUB_URL=http://hub:9200 HUB_USER=admin HUB_PASSWORD=anethub docker compose --profile local-hub up -d
+```
+
+(`local-hub` is a compose profile — opt-in only. Default `docker compose up` does NOT start the test hub.)
