@@ -1,27 +1,31 @@
 #!/usr/bin/env node
-// Test harness for the Feishu bridge ackPlaceholder + edit-fallback paths.
-// Validates the "real user path" through createIPCEventHandler that
-// commhub_send_task cannot exercise (commhub bypasses the bridge entirely).
+// Test harness for the Feishu bridge ackPlaceholder + new-reply-message
+// design (Vincent 2026-06-26: no edit-in-place — every final reply is a
+// brand-new in-thread message so the user gets a second push notification).
 //
-// Covers per 通信牛 review 2026-06-26:
-//   1. Happy path: placeholder send → reply IPC → adapter.edit replaces it.
-//   2. 必改1: placeholder + reply edit FAILS → fallback adapter.send fires
-//      (no lost reply, no orphan "⏳ 处理中…").
-//   3. Placeholder send fails → reply IPC → adapter.send fallback fires
-//      (no edit attempt; user sees the reply as a new message).
-//   4. ackPlaceholder=false → no placeholder send → reply IPC → adapter.send.
-//   5. TTL expiry with placeholder → adapter.edit timeout notice.
-//   6. 必改2: TTL expiry with placeholder + edit FAILS → fallback adapter.send
-//      timeout notice (no orphan placeholder).
-//   7. TTL expiry without placeholder → adapter.send timeout notice.
-//   8. Concurrent multiple events → each tracked independently (no cross-talk).
-//   9. Pending Map cleanup: after reply, the entry is evicted (a second
-//      reply with the same eventKey is a no-op).
+// Locks in:
+//   - adapter.edit is NEVER called from the IPC path (editCalls.length === 0
+//     in every case). adapter.edit stays on the IMAdapter surface but is
+//     reserved for future use.
+//   - placeholder still fires on event arrival when ackPlaceholder=true.
+//   - reply / timeout always go through adapter.send.
 //
-// Usage:
+// Cases:
+//   1. Happy path: placeholder send → reply IPC → reply send (new message).
+//   2. Reply send fails (after placeholder) → "reply delivery failed" log,
+//      no retry (pending was evicted; matches the IPC contract).
+//   3. Placeholder send fails → reply IPC → reply send still fires.
+//   4. ackPlaceholder=false → no placeholder; reply IPC → reply send.
+//   5. TTL expiry with placeholder → timeout-notify send (new message).
+//   6. TTL timeout-notify send fails → "timeout-notify send failed" log.
+//   7. TTL expiry without placeholder → timeout-notify send.
+//   8. Concurrent multiple events → tracked independently (no cross-talk).
+//   9. Pending Map cleanup: duplicate reply is a no-op after the first wins.
+//
+// Usage (bun runs .ts natively — no build step):
 //   cd agent-network
-//   npm run build       # produces dist/src/im/feishu/bridge.js (worker bundle)
-//   node tests/feishu-bridge-ackplaceholder.test.mjs
+//   npm run test:feishu-bridge
+//   # = bun tests/feishu-bridge-ackplaceholder.test.ts
 //
 // Exits with non-zero status on any failure (CI gate).
 
@@ -53,39 +57,31 @@ if (typeof createIPCEventHandler !== "function") {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function makeMockAdapter({
-  sendThrowsOnce = false,
-  sendAlwaysThrows = false,
-  editThrowsOnce = false,
-  editAlwaysThrows = false,
-} = {}) {
-  const sendCalls = [];
-  const editCalls = [];
-  let sendThrowCounter = sendThrowsOnce ? 1 : 0;
-  let editThrowCounter = editThrowsOnce ? 1 : 0;
+function makeMockAdapter(
+  {
+    sendThrowsOnCall = [] as number[],
+  }: { sendThrowsOnCall?: number[] } = {},
+) {
+  const sendCalls: unknown[] = [];
+  const editCalls: unknown[] = [];
   const adapter = {
     sendCalls,
     editCalls,
-    async send(message) {
+    async send(message: { text?: string }) {
       sendCalls.push(message);
-      if (sendAlwaysThrows) {
-        throw new Error("mock adapter.send always-throws");
-      }
-      if (sendThrowCounter > 0) {
-        sendThrowCounter--;
-        throw new Error("mock adapter.send throws-once");
+      if (sendThrowsOnCall.includes(sendCalls.length)) {
+        throw new Error(`mock adapter.send throws on call #${sendCalls.length}`);
       }
       return { messageId: `mock-send-${sendCalls.length}` };
     },
-    async edit(target, messageId, message) {
+    // adapter.edit stays on the interface but should NEVER be called by the
+    // current bridge logic. Any call here is a regression for Vincent's
+    // 2026-06-26 design lock.
+    async edit(target: unknown, messageId: string, message: unknown) {
       editCalls.push({ target, messageId, message });
-      if (editAlwaysThrows) {
-        throw new Error("mock adapter.edit always-throws");
-      }
-      if (editThrowCounter > 0) {
-        editThrowCounter--;
-        throw new Error("mock adapter.edit throws-once");
-      }
+      throw new Error(
+        "REGRESSION: adapter.edit was called — Vincent 2026-06-26 design lock requires reply/timeout to send NEW messages, never edit",
+      );
     },
   };
   return adapter;
@@ -153,61 +149,72 @@ async function test(name, fn) {
 
 // ── Cases ──────────────────────────────────────────────────────────────────
 
-await test("1. happy path: placeholder → reply → edit replaces", async () => {
+await test("1. happy path: placeholder send → reply IPC → reply send (new message)", async () => {
   const adapter = makeMockAdapter();
   const onEvent = createIPCEventHandler(adapter, 10_000, /*ackPlaceholder*/ true);
   const evt = makeEvent("1");
   await onEvent(evt);
-  assert.equal(adapter.sendCalls.length, 1, "placeholder send must have fired");
-  assert.equal(adapter.sendCalls[0].text, "⏳ 处理中…");
-  assert.equal(sentEnvelopes.length, 1, "IPC envelope must be sent to parent");
-  assert.equal(sentEnvelopes[0].type, "event");
+  assert.equal(adapter.sendCalls.length, 1, "placeholder send fires first");
+  assert.equal((adapter.sendCalls[0] as { text: string }).text, "⏳ 处理中…");
+  assert.equal(sentEnvelopes.length, 1, "IPC envelope sent to parent");
 
   triggerReply(evt.idempotencyKey, "real reply");
   await flush();
 
-  assert.equal(adapter.editCalls.length, 1, "reply must trigger edit (placeholder present)");
-  assert.equal(adapter.editCalls[0].messageId, "mock-send-1");
-  assert.equal(adapter.editCalls[0].message.text, "real reply");
-  assert.equal(adapter.sendCalls.length, 1, "no extra send after edit");
-  assert.ok(stderrLog.join("").includes("reply edited (placeholder=mock-send-1)"));
+  assert.equal(adapter.editCalls.length, 0, "design lock — no edit-in-place");
+  assert.equal(adapter.sendCalls.length, 2, "reply must be a NEW send, not an edit");
+  assert.equal((adapter.sendCalls[1] as { text: string }).text, "real reply");
+  const log = stderrLog.join("");
+  assert.ok(log.includes("placeholder sent (messageId=mock-send-1)"));
+  assert.ok(
+    log.includes("reply sent (messageId=mock-send-2) (after placeholder=mock-send-1)"),
+    "reply log must include 'after placeholder' note",
+  );
 });
 
-await test("2. 必改1: edit fails → fallback adapter.send fires", async () => {
-  const adapter = makeMockAdapter({ editAlwaysThrows: true });
+await test("2. reply send fails (after placeholder) → 'reply delivery failed' logged, no retry", async () => {
+  const adapter = makeMockAdapter({ sendThrowsOnCall: [2] });
   const onEvent = createIPCEventHandler(adapter, 10_000, true);
   const evt = makeEvent("2");
   await onEvent(evt);
-  assert.equal(adapter.sendCalls.length, 1, "placeholder send fires");
+  assert.equal(adapter.sendCalls.length, 1, "placeholder ok");
 
-  triggerReply(evt.idempotencyKey, "real reply 2");
+  triggerReply(evt.idempotencyKey, "doomed reply");
   await flush();
 
-  assert.equal(adapter.editCalls.length, 1, "edit was attempted");
-  assert.equal(adapter.sendCalls.length, 2, "fallback send must have fired after edit failed");
-  assert.equal(adapter.sendCalls[1].text, "real reply 2");
+  assert.equal(adapter.editCalls.length, 0);
+  assert.equal(adapter.sendCalls.length, 2, "reply send attempted (and threw)");
   const log = stderrLog.join("");
-  assert.ok(log.includes("reply edit failed"), "edit-failure log must be present");
-  assert.ok(log.includes("reply sent"), "fallback send-success log must be present");
+  assert.ok(log.includes("reply delivery failed"), "failure must be logged");
+  assert.ok(
+    !log.includes("reply sent (messageId=mock-send-2)"),
+    "no success log when send threw",
+  );
 });
 
-await test("3. placeholder send fails → reply → fallback send (no edit attempt)", async () => {
-  const adapter = makeMockAdapter({ sendThrowsOnce: true });
+await test("3. placeholder send fails → reply IPC → reply send still fires", async () => {
+  const adapter = makeMockAdapter({ sendThrowsOnCall: [1] });
   const onEvent = createIPCEventHandler(adapter, 10_000, true);
   const evt = makeEvent("3");
   await onEvent(evt);
-  assert.equal(adapter.sendCalls.length, 1, "placeholder send was attempted");
+  assert.equal(adapter.sendCalls.length, 1, "placeholder attempted (and threw)");
   assert.ok(stderrLog.join("").includes("placeholder send failed"));
 
   triggerReply(evt.idempotencyKey, "real reply 3");
   await flush();
 
-  assert.equal(adapter.editCalls.length, 0, "no edit because no placeholderMessageId");
-  assert.equal(adapter.sendCalls.length, 2, "reply send fires");
-  assert.equal(adapter.sendCalls[1].text, "real reply 3");
+  assert.equal(adapter.editCalls.length, 0);
+  assert.equal(adapter.sendCalls.length, 2, "reply send still fires");
+  assert.equal((adapter.sendCalls[1] as { text: string }).text, "real reply 3");
+  // No placeholderMessageId on the pending entry, so the log line should
+  // NOT include "(after placeholder=...)".
+  assert.ok(
+    !stderrLog.join("").includes("after placeholder="),
+    "reply log must omit the placeholder note when placeholder failed",
+  );
 });
 
-await test("4. ackPlaceholder=false → no placeholder; reply → adapter.send", async () => {
+await test("4. ackPlaceholder=false → no placeholder; reply IPC → reply send", async () => {
   const adapter = makeMockAdapter();
   const onEvent = createIPCEventHandler(adapter, 10_000, /*ackPlaceholder*/ false);
   const evt = makeEvent("4");
@@ -218,37 +225,40 @@ await test("4. ackPlaceholder=false → no placeholder; reply → adapter.send",
   await flush();
 
   assert.equal(adapter.editCalls.length, 0);
-  assert.equal(adapter.sendCalls.length, 1, "reply send fires (new message)");
-  assert.equal(adapter.sendCalls[0].text, "real reply 4");
+  assert.equal(adapter.sendCalls.length, 1, "reply send fires");
+  assert.equal((adapter.sendCalls[0] as { text: string }).text, "real reply 4");
 });
 
-await test("5. TTL with placeholder → edit timeout notice", async () => {
+await test("5. TTL with placeholder → timeout-notify send (new message)", async () => {
   const adapter = makeMockAdapter();
   const onEvent = createIPCEventHandler(adapter, 50, true);
   const evt = makeEvent("5");
   await onEvent(evt);
-  assert.equal(adapter.sendCalls.length, 1, "placeholder send");
+  assert.equal(adapter.sendCalls.length, 1, "placeholder ok");
   await wait(80);
-  assert.equal(adapter.editCalls.length, 1, "TTL must edit placeholder");
-  assert.equal(adapter.editCalls[0].message.text, "[处理超时，任务可能仍在后台运行]");
-  assert.equal(adapter.sendCalls.length, 1, "no extra send");
+  assert.equal(adapter.editCalls.length, 0, "no edit even on TTL");
+  assert.equal(adapter.sendCalls.length, 2, "timeout-notify must be a new send");
+  assert.equal(
+    (adapter.sendCalls[1] as { text: string }).text,
+    "[处理超时，任务可能仍在后台运行]",
+  );
+  assert.ok(
+    stderrLog.join("").includes("timeout-notify sent (after placeholder=mock-send-1)"),
+  );
 });
 
-await test("6. 必改2: TTL with placeholder + edit fails → fallback send", async () => {
-  const adapter = makeMockAdapter({ editAlwaysThrows: true });
+await test("6. TTL timeout-notify send fails → 'timeout-notify send failed' logged", async () => {
+  const adapter = makeMockAdapter({ sendThrowsOnCall: [2] });
   const onEvent = createIPCEventHandler(adapter, 50, true);
   const evt = makeEvent("6");
   await onEvent(evt);
   await wait(80);
-  assert.equal(adapter.editCalls.length, 1, "TTL edit attempted");
-  assert.equal(adapter.sendCalls.length, 2, "fallback send fires after edit failure");
-  assert.equal(adapter.sendCalls[1].text, "[处理超时，任务可能仍在后台运行]");
-  const log = stderrLog.join("");
-  assert.ok(log.includes("timeout edit failed"));
-  assert.ok(log.includes("timeout-notify sent"));
+  assert.equal(adapter.editCalls.length, 0);
+  assert.equal(adapter.sendCalls.length, 2, "TTL send attempted (and threw)");
+  assert.ok(stderrLog.join("").includes("timeout-notify send failed"));
 });
 
-await test("7. TTL without placeholder → adapter.send", async () => {
+await test("7. TTL without placeholder → timeout-notify send", async () => {
   const adapter = makeMockAdapter();
   const onEvent = createIPCEventHandler(adapter, 50, /*ackPlaceholder*/ false);
   const evt = makeEvent("7");
@@ -256,7 +266,10 @@ await test("7. TTL without placeholder → adapter.send", async () => {
   await wait(80);
   assert.equal(adapter.editCalls.length, 0);
   assert.equal(adapter.sendCalls.length, 1, "single timeout-notify send");
-  assert.equal(adapter.sendCalls[0].text, "[处理超时，任务可能仍在后台运行]");
+  assert.equal(
+    (adapter.sendCalls[0] as { text: string }).text,
+    "[处理超时，任务可能仍在后台运行]",
+  );
 });
 
 await test("8. concurrent events tracked independently", async () => {
@@ -268,20 +281,19 @@ await test("8. concurrent events tracked independently", async () => {
   assert.equal(adapter.sendCalls.length, 2, "two placeholder sends");
   assert.equal(sentEnvelopes.length, 2, "two IPC envelopes");
 
-  // Reply to second event first — must edit the correct placeholder.
+  // Reply to second event first.
   triggerReply(e2.idempotencyKey, "reply 8b");
   await flush();
-  assert.equal(adapter.editCalls.length, 1);
-  // Placeholder messageId for e2 is "mock-send-2" (second send call).
-  assert.equal(adapter.editCalls[0].messageId, "mock-send-2");
-  assert.equal(adapter.editCalls[0].message.text, "reply 8b");
+  assert.equal(adapter.editCalls.length, 0);
+  assert.equal(adapter.sendCalls.length, 3, "e2 reply send fired");
+  assert.equal((adapter.sendCalls[2] as { text: string }).text, "reply 8b");
 
-  // Reply to first.
+  // Then the first.
   triggerReply(e1.idempotencyKey, "reply 8a");
   await flush();
-  assert.equal(adapter.editCalls.length, 2);
-  assert.equal(adapter.editCalls[1].messageId, "mock-send-1");
-  assert.equal(adapter.editCalls[1].message.text, "reply 8a");
+  assert.equal(adapter.editCalls.length, 0);
+  assert.equal(adapter.sendCalls.length, 4, "e1 reply send fired");
+  assert.equal((adapter.sendCalls[3] as { text: string }).text, "reply 8a");
 });
 
 await test("9. pending evicted after reply (duplicate reply is no-op)", async () => {
@@ -291,13 +303,14 @@ await test("9. pending evicted after reply (duplicate reply is no-op)", async ()
   await onEvent(evt);
   triggerReply(evt.idempotencyKey, "reply 9");
   await flush();
-  assert.equal(adapter.editCalls.length, 1);
+  assert.equal(adapter.editCalls.length, 0);
+  assert.equal(adapter.sendCalls.length, 2, "placeholder + reply send");
 
-  // Send the same reply again — must be a no-op (pending already evicted).
+  // Send the same reply again — pending was evicted by the first reply.
   triggerReply(evt.idempotencyKey, "reply 9 again");
   await flush();
-  assert.equal(adapter.editCalls.length, 1, "duplicate reply must not trigger another edit");
-  assert.equal(adapter.sendCalls.length, 1, "no extra send either");
+  assert.equal(adapter.editCalls.length, 0);
+  assert.equal(adapter.sendCalls.length, 2, "duplicate reply must not trigger another send");
 });
 
 // ── Summary ────────────────────────────────────────────────────────────────

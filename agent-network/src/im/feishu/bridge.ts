@@ -163,23 +163,20 @@ const TIMEOUT_NOTICE_TEXT = "[处理超时，任务可能仍在后台运行]";
  * ackPlaceholder behavior (RFC-020 §4.2, Vincent ask 2026-06-26):
  *   - On event arrival, bridge sends a "⏳ 处理中…" placeholder into the
  *     originating thread BEFORE forwarding the IPC envelope. The placeholder
- *     send is awaited so the reply handler can edit it rather than racing
- *     with a possible early reply.
- *   - On reply IPC, if a placeholder exists, bridge calls adapter.edit to
- *     replace it with the agent's reply. Otherwise (placeholder send failed,
- *     or ackPlaceholder=false), bridge falls back to the original
- *     adapter.send path.
- *   - On TTL expiry, bridge edits the placeholder to "[处理超时…]" instead
- *     of sending a separate timeout notice. Without a placeholder, it falls
- *     back to send-new-message (same as 必改3-b behavior).
+ *     is sent so the user gets an immediate push notification ("the bot saw
+ *     my message"). The placeholder send is awaited so logs stay in order.
+ *   - On reply IPC, bridge ALWAYS calls adapter.send for the final reply —
+ *     a new message in the same thread, NOT an in-place edit of the
+ *     placeholder. Vincent rejected the edit-in-place pattern 2026-06-26:
+ *     pushing a fresh message gives him a second notification ("the bot
+ *     replied") that an edit silently misses on most IM clients.
+ *   - On TTL expiry without reply, bridge similarly send a NEW
+ *     "[处理超时…]" message in-thread, never edits the placeholder.
+ *   - adapter.edit remains in the IMAdapter interface for future use but is
+ *     not called from this path. Tests in tests/feishu-bridge-* assert
+ *     editCalls.length === 0 to lock that behavior in.
  *   - All success paths log to stderr so the round-trip is observable from
- *     the agent-node.log (closes Vincent's silent-success blindspot).
- *
- * On TTL expiry without reply (per 通信牛 review 必改3-b — never silent-drop)
- * the bridge surfaces a user-visible "[处理超时]" notice into the originating
- * conversation before evicting the pending entry. If the agent's real reply
- * arrives later, bridge's reply-envelope lookup will miss (entry already
- * evicted) and the late reply is dropped — the user already knows.
+ *     the agent-node.log (closes the prior silent-success blindspot).
  */
 /** @internal exported for test harness; not intended for production callers. */
 export function createIPCEventHandler(
@@ -205,30 +202,10 @@ export function createIPCEventHandler(
     const eventKey = raw.eventKey;
     const { event, placeholderMessageId } = entry;
     void (async () => {
-      // 必改1 (通信牛 review 2026-06-26): if the edit-by-placeholder path
-      // fails, do NOT silently drop — fall back to a fresh adapter.send so
-      // the user never sees an orphaned "⏳ 处理中…". The previous logic
-      // already evicted pending above, so without this fallback the reply
-      // would be lost forever.
-      if (placeholderMessageId && adapter.edit) {
-        try {
-          await adapter.edit(event.conversation, placeholderMessageId, {
-            target: event.conversation,
-            text: replyText,
-            correlation: { taskId: eventKey },
-          });
-          process.stderr.write(
-            `[feishu:bridge] reply edited (placeholder=${placeholderMessageId}) for ${eventKey}\n`,
-          );
-          return;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          process.stderr.write(
-            `[feishu:bridge] reply edit failed (placeholder=${placeholderMessageId}): ${msg} — falling back to adapter.send\n`,
-          );
-          // fall through to send below
-        }
-      }
+      // Vincent 2026-06-26 design lock — always send a NEW message for the
+      // reply (no adapter.edit). The placeholderMessageId is logged for
+      // traceability but is not used to mutate the placeholder. Users get
+      // a second push notification when the reply lands.
       try {
         const { messageId } = await adapter.send({
           target: event.conversation,
@@ -236,8 +213,11 @@ export function createIPCEventHandler(
           replyToMessageId: event.messageId,
           correlation: { taskId: eventKey },
         });
+        const note = placeholderMessageId
+          ? ` (after placeholder=${placeholderMessageId})`
+          : "";
         process.stderr.write(
-          `[feishu:bridge] reply sent (messageId=${messageId}) for ${eventKey}\n`,
+          `[feishu:bridge] reply sent (messageId=${messageId})${note} for ${eventKey}\n`,
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -251,35 +231,13 @@ export function createIPCEventHandler(
     // the placeholder send hasn't completed yet.
     pending.set(event.idempotencyKey, { event });
 
-    // TTL — edits the placeholder when one exists, else sends a new notice.
+    // TTL — sends a NEW timeout notice (no edit, per Vincent 2026-06-26).
     setTimeout(() => {
       const entry = pending.get(event.idempotencyKey);
       if (!entry) return; // reply already arrived
       pending.delete(event.idempotencyKey);
       const { placeholderMessageId } = entry;
       void (async () => {
-        // 必改2 (通信牛 review 2026-06-26): symmetric with 必改1 — if the
-        // timeout-edit fails, fall back to a fresh adapter.send so the user
-        // is never left with a "⏳ 处理中…" placeholder that never resolves.
-        if (placeholderMessageId && adapter.edit) {
-          try {
-            await adapter.edit(event.conversation, placeholderMessageId, {
-              target: event.conversation,
-              text: TIMEOUT_NOTICE_TEXT,
-              correlation: { taskId: event.idempotencyKey },
-            });
-            process.stderr.write(
-              `[feishu:bridge] timeout-edit (placeholder=${placeholderMessageId}) for ${event.idempotencyKey} after ${ttlMs}ms\n`,
-            );
-            return;
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            process.stderr.write(
-              `[feishu:bridge] timeout edit failed (placeholder=${placeholderMessageId}): ${msg} — falling back to adapter.send\n`,
-            );
-            // fall through to send below
-          }
-        }
         try {
           await adapter.send({
             target: event.conversation,
@@ -287,8 +245,11 @@ export function createIPCEventHandler(
             replyToMessageId: event.messageId,
             correlation: { taskId: event.idempotencyKey },
           });
+          const note = placeholderMessageId
+            ? ` (after placeholder=${placeholderMessageId})`
+            : "";
           process.stderr.write(
-            `[feishu:bridge] timeout-notify sent for ${event.idempotencyKey} after ${ttlMs}ms\n`,
+            `[feishu:bridge] timeout-notify sent${note} for ${event.idempotencyKey} after ${ttlMs}ms\n`,
           );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -299,9 +260,10 @@ export function createIPCEventHandler(
       })();
     }, ttlMs);
 
-    // Optional placeholder — await so reply handler can prefer edit over send.
-    // Failure is non-fatal; pending stays without a placeholderMessageId and
-    // the reply / timeout handlers fall back to adapter.send.
+    // Optional placeholder — gives the user an immediate push notification
+    // ("bot saw my message"). Awaited so logs stay chronological. Failure
+    // is non-fatal; pending stays without a placeholderMessageId and the
+    // reply / timeout handlers proceed as new-message sends regardless.
     if (ackPlaceholder) {
       try {
         const { messageId } = await adapter.send({
@@ -320,7 +282,7 @@ export function createIPCEventHandler(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(
-          `[feishu:bridge] placeholder send failed: ${msg} — fallback to new-message on reply\n`,
+          `[feishu:bridge] placeholder send failed: ${msg} — reply will still send as a new message\n`,
         );
       }
     }
