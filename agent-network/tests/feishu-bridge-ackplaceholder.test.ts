@@ -452,6 +452,83 @@ await test("14. rate-limit notice send failure logged (not silent)", async () =>
   );
 });
 
+await test("16. rate-limit Maps hard cap evicts oldest when sweep can't drop anything (defense-in-depth)", async () => {
+  // Simulates a synchronous flood of >10k unique senders inside one window
+  // (the worst case the lazy GC can't address — nothing is stale yet).
+  // The hard cap should force the oldest entries out until size <= cap.
+  const adapter = makeMockAdapter();
+  const wrapped = withRateLimit(async () => {}, adapter);
+
+  // Use the real clock — all events land effectively at the same instant,
+  // which is exactly the scenario the hard cap is meant for.
+  const FLOOD_SIZE = 10_010; // 10 over the cap
+  for (let i = 1; i <= FLOOD_SIZE; i++) {
+    await wrapped(makeEvent(`f-${i}`, { senderId: `ou_flood-${i}` }));
+  }
+  const state = wrapped.__getState();
+  // The cap enforcement runs at the start of each call, then the call adds
+  // its own entry — so steady-state size can transiently sit at cap+1
+  // between two arrivals. The spec is bounded growth, not a strict
+  // equality at any one instant.
+  assert.ok(
+    state.dmKeyCount <= 10_001,
+    `dmTimes must respect hard cap (≤ cap+1 transient); got ${state.dmKeyCount}`,
+  );
+  // Sanity: at least most of the 10_010 events were evicted (vs. naïve
+  // unbounded growth which would leave size at 10_010).
+  assert.ok(
+    state.dmKeyCount < 10_010,
+    `hard cap must have evicted entries; size remained at ${state.dmKeyCount}`,
+  );
+});
+
+await test("15. rate-limit Maps lazy-GC stale entries (no unbounded growth on wildcard allowlist) — preview.3 blocker fix", async () => {
+  // 通信牛 review 2026-06-26 — without sweep, each unique open_id leaves a
+  // Map entry forever. After `allowFrom: ["*"]` opens the bot to the org,
+  // unique-sender count is unbounded → memory leak. This case proves the
+  // lazy sweep evicts stale entries past the window.
+  const adapter = makeMockAdapter();
+  const wrapped = withRateLimit(async () => {}, adapter);
+
+  // Mock Date.now to drive the sliding window deterministically.
+  const realNow = Date.now;
+  let mockNow = realNow();
+  // @ts-expect-error — overwriting Date.now for the test
+  Date.now = () => mockNow;
+
+  try {
+    // 60 unique senders, each 1 DM (under per-sender quota of 3, so each
+    // reaches inner). Past the GC threshold of 50, so sweep is eligible.
+    for (let i = 1; i <= 60; i++) {
+      await wrapped(makeEvent(`u-${i}`, { senderId: `ou_unique-${i}` }));
+    }
+    let state = wrapped.__getState();
+    assert.equal(
+      state.dmKeyCount,
+      60,
+      "no stale entries to sweep yet — Map at 60",
+    );
+    assert.equal(adapter.sendCalls.length, 0, "no rate-limit messages");
+
+    // Jump past the 60s window — every existing entry is now stale.
+    mockNow += 70_000;
+
+    // One more event from a brand-new sender. The lazy sweep at the top of
+    // the call should evict all 60 stale entries; only the new sender's
+    // single timestamp remains.
+    await wrapped(makeEvent("u-61", { senderId: "ou_unique-61" }));
+    state = wrapped.__getState();
+    assert.equal(
+      state.dmKeyCount,
+      1,
+      "sweep must have evicted all stale entries; only the fresh sender remains",
+    );
+  } finally {
+    // @ts-expect-error — restore real Date.now
+    Date.now = realNow;
+  }
+});
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 originalStderrWrite(

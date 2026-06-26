@@ -163,7 +163,7 @@ export function withDedup(
 export function withRateLimit(
   inner: (event: NormalizedIMEvent) => Promise<void>,
   adapter: FeishuAdapter,
-): (event: NormalizedIMEvent) => Promise<void> {
+): WithRateLimitHandle {
   // Sliding-window timestamp lists per identity. Trimmed lazily on each
   // call so a burst-then-quiet pattern doesn't leak memory.
   const dmTimes = new Map<string, number[]>();
@@ -176,8 +176,72 @@ export function withRateLimit(
     return times.filter((t) => t >= cutoff);
   }
 
-  return async (event: NormalizedIMEvent) => {
+  // 通信牛 review 2026-06-26 preview.3 blocker — without this sweep, each
+  // unique open_id / chat_id leaves a permanent entry in the Map. After
+  // wildcard allowlist opens the bot to the org, unique-sender count is
+  // unbounded → memory leak. Lazy GC fires whenever the Map grows past
+  // RATE_LIMIT_GC_THRESHOLD entries; stale entries (no timestamp inside
+  // the active window) get evicted. Mirrors withDedup's lazy-sweep
+  // pattern.
+  function sweepStale(
+    map: Map<string, number[]>,
+    now: number,
+    windowMs: number,
+  ): void {
+    if (map.size <= RATE_LIMIT_GC_THRESHOLD) return;
+    for (const [k, times] of map) {
+      // entry is stale if every timestamp is outside the window
+      const latest = times[times.length - 1] ?? 0;
+      if (now - latest > windowMs) map.delete(k);
+    }
+  }
+  function sweepStaleFlood(
+    map: Map<string, { count: number; windowStart: number }>,
+    now: number,
+  ): void {
+    if (map.size <= RATE_LIMIT_GC_THRESHOLD) return;
+    for (const [k, entry] of map) {
+      if (now - entry.windowStart > FLOOD_AUDIT_WINDOW_MS) map.delete(k);
+    }
+  }
+
+  // Defense-in-depth (通信牛 review 2026-06-26 — preview.3 ship gate): if the
+  // lazy GC didn't fire (or ran but the burst was so wide that every entry is
+  // still in-window), evict the OLDEST entries until size <= cap. Caps the
+  // worst-case Map footprint regardless of traffic shape.
+  function enforceHardCapTimes(map: Map<string, number[]>, cap: number): void {
+    if (map.size <= cap) return;
+    const sorted: Array<[string, number]> = [];
+    for (const [k, times] of map) sorted.push([k, times[times.length - 1] ?? 0]);
+    sorted.sort((a, b) => a[1] - b[1]); // oldest first
+    const drop = map.size - cap;
+    for (let i = 0; i < drop; i++) map.delete(sorted[i][0]);
+  }
+  function enforceHardCapFlood(
+    map: Map<string, { count: number; windowStart: number }>,
+    cap: number,
+  ): void {
+    if (map.size <= cap) return;
+    const sorted: Array<[string, number]> = [];
+    for (const [k, entry] of map) sorted.push([k, entry.windowStart]);
+    sorted.sort((a, b) => a[1] - b[1]);
+    const drop = map.size - cap;
+    for (let i = 0; i < drop; i++) map.delete(sorted[i][0]);
+  }
+
+  const wrapped = async (event: NormalizedIMEvent) => {
     const now = Date.now();
+    // Lazy GC — runs at start so the current event's writes don't undercount.
+    sweepStale(dmTimes, now, DM_RATE_LIMIT_WINDOW_MS);
+    sweepStale(groupTimes, now, GROUP_RATE_LIMIT_WINDOW_MS);
+    sweepStaleFlood(floodCounts, now);
+    // Defense-in-depth — if lazy GC found nothing to evict but the Map is
+    // huge anyway (e.g., a synchronous flood of unique senders inside one
+    // window), force eviction of the oldest keys.
+    enforceHardCapTimes(dmTimes, RATE_LIMIT_HARD_CAP);
+    enforceHardCapTimes(groupTimes, RATE_LIMIT_HARD_CAP);
+    enforceHardCapFlood(floodCounts, RATE_LIMIT_HARD_CAP);
+
     let overLimit = false;
 
     if (event.conversation.conversationType === "dm") {
@@ -201,6 +265,21 @@ export function withRateLimit(
       } else {
         trimmed.push(now);
         groupTimes.set(chatId, trimmed);
+      }
+    }
+
+    // Inline cleanup — if the current sender / chat's list went empty after
+    // trim and we're NOT pushing a new timestamp (over-limit case), drop the
+    // key. The under-limit branch always pushes, so it stays.
+    if (overLimit) {
+      const senderId = event.sender.id;
+      const chatId = event.conversation.conversationId;
+      if (event.conversation.conversationType === "dm") {
+        const t = dmTimes.get(senderId);
+        if (t && t.length === 0) dmTimes.delete(senderId);
+      } else {
+        const t = groupTimes.get(chatId);
+        if (t && t.length === 0) groupTimes.delete(chatId);
       }
     }
 
@@ -243,7 +322,38 @@ export function withRateLimit(
       );
     }
   };
+
+  // @internal — exposes Map sizes for the leak-regression test. Production
+  // callers should not depend on this; the production type is just the
+  // handler function.
+  (wrapped as WithRateLimitHandle).__getState = () => ({
+    dmKeyCount: dmTimes.size,
+    groupKeyCount: groupTimes.size,
+    floodKeyCount: floodCounts.size,
+  });
+  return wrapped as WithRateLimitHandle;
 }
+
+/** @internal — wrapped handler with state-inspection escape hatch for tests. */
+export type WithRateLimitHandle = {
+  (event: NormalizedIMEvent): Promise<void>;
+  __getState(): {
+    dmKeyCount: number;
+    groupKeyCount: number;
+    floodKeyCount: number;
+  };
+};
+
+/** Trigger threshold for the rate-limit Map lazy GC sweep
+ *  (mirrors withDedup's pattern — sweep when size grows). */
+const RATE_LIMIT_GC_THRESHOLD = 50;
+
+/** Hard cap on rate-limit Map size — defense in depth (通信牛 review
+ *  preview.3 gate). When the lazy GC sweep doesn't dent the Map because the
+ *  burst is wide enough that every entry is still in-window, evict the
+ *  oldest entries until size <= cap. Bounds worst-case memory at ~10k
+ *  open_ids / chat_ids each holding a short timestamp list. */
+const RATE_LIMIT_HARD_CAP = 10_000;
 
 function selectDefaultEventHandler(
   adapter: FeishuAdapter,
