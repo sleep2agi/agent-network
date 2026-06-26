@@ -4889,17 +4889,128 @@ Examples:
       if (!found) { console.log("\nNode Channels:\n"); found = true; }
       for (const t of types) {
         const accessPath = join(channelsDir, t, "access.json");
-        let allow = "";
+        let allowFrom: string[] = [];
+        let allowChats: string[] = [];
         if (existsSync(accessPath)) {
-          try { allow = JSON.parse(readFileSync(accessPath, "utf-8")).allowFrom?.join(", ") || ""; } catch {}
+          try {
+            const a = JSON.parse(readFileSync(accessPath, "utf-8"));
+            if (Array.isArray(a.allowFrom)) allowFrom = a.allowFrom.map(String);
+            if (Array.isArray(a.allowChats)) allowChats = a.allowChats.map(String);
+          } catch {}
         }
         const profile = loadProfile(id);
         const label = profile ? `${id} (${nodeDisplayName(id, profile)})` : id;
-        console.log(`  ${label.padEnd(20)} ${t.padEnd(12)} allow: ${allow || "(none)"}`);
+        const fromStr = allowFrom.length ? allowFrom.join(", ") : "(none)";
+        // Show allowChats inline when populated; suppress when empty so
+        // existing telegram nodes (which don't use it) stay clean.
+        const chatsStr =
+          allowChats.length > 0 ? `  chats: ${allowChats.join(", ")}` : "";
+        console.log(
+          `  ${label.padEnd(20)} ${t.padEnd(12)} from: ${fromStr}${chatsStr}`,
+        );
       }
     }
     if (!found) console.log("No channels. Add one: anet channel add telegram <node-id>");
     console.log();
+
+  } else if (sub === "allow") {
+    // #179 — manage feishu (and other channel-type) allowFrom / allowChats
+    // lists without hand-editing access.json. Mirrors the schema that
+    // writeFeishuChannelConfig produces; telegram-style access (groups/dmPolicy)
+    // is not affected by this subcommand.
+    //
+    // Examples:
+    //   anet channel allow feishu 指挥室 --add-from ou_xxx
+    //   anet channel allow feishu 指挥室 --add-chat oc_yyy
+    //   anet channel allow feishu 指挥室 --rm-from  ou_xxx --rm-chat oc_yyy
+    const type = args[2];
+    const nodeRef = args[3];
+    if (!type || !nodeRef) {
+      console.log(`
+anet channel allow <type> <node-id> [--add-from <id>] [--add-chat <id>] [--rm-from <id>] [--rm-chat <id>]
+
+Manage allowlists in .anet/nodes/<node>/channels/<type>/access.json.
+Multiple --add-* / --rm-* flags may be combined.
+
+Examples:
+  anet channel allow feishu 指挥室 --add-from ou_xxx
+  anet channel allow feishu 指挥室 --add-chat oc_yyy
+  anet channel allow feishu 指挥室 --rm-from ou_xxx --rm-chat oc_yyy
+
+Note: changes take effect on next \`anet node start\` (no hot-reload yet).
+`);
+      return;
+    }
+    if (type !== "feishu" && type !== "telegram") {
+      console.error(`Unsupported channel type: ${type}. Supported: telegram, feishu`);
+      process.exit(1);
+    }
+    const resolved = resolveNodeRef(nodeRef);
+    if (!resolved) {
+      console.error(`Node "${nodeRef}" not found.`);
+      process.exit(1);
+    }
+    const accessPath = join(nodesDir(), resolved.id, "channels", type, "access.json");
+    if (!existsSync(accessPath)) {
+      console.error(`No ${type} channel on "${nodeRef}". Add it first: anet channel add ${type} ${nodeRef} ...`);
+      process.exit(1);
+    }
+
+    type AccessFile = { allowFrom?: string[]; allowChats?: string[] } & Record<string, unknown>;
+    let parsed: AccessFile;
+    try {
+      parsed = JSON.parse(readFileSync(accessPath, "utf-8")) as AccessFile;
+    } catch (e: any) {
+      console.error(`Failed to read ${accessPath}: ${e?.message || e}`);
+      process.exit(1);
+    }
+    const allowFrom = new Set<string>(Array.isArray(parsed.allowFrom) ? parsed.allowFrom : []);
+    const allowChats = new Set<string>(Array.isArray(parsed.allowChats) ? parsed.allowChats : []);
+
+    // Apply ops. Multi-occurrence flags supported via parseOpts() collecting strings.
+    const applyOp = (set: Set<string>, value: string | string[] | undefined, op: "add" | "rm") => {
+      if (!value) return 0;
+      const vals = Array.isArray(value) ? value : [value];
+      let n = 0;
+      for (const v of vals) {
+        const t = v.trim();
+        if (!t) continue;
+        if (op === "add" && !set.has(t)) { set.add(t); n++; }
+        if (op === "rm" && set.has(t))  { set.delete(t); n++; }
+      }
+      return n;
+    };
+
+    const nAddFrom = applyOp(allowFrom, opts["add-from"] as any, "add");
+    const nAddChat = applyOp(allowChats, opts["add-chat"] as any, "add");
+    const nRmFrom  = applyOp(allowFrom, opts["rm-from"]  as any, "rm");
+    const nRmChat  = applyOp(allowChats, opts["rm-chat"] as any, "rm");
+
+    if (nAddFrom + nAddChat + nRmFrom + nRmChat === 0) {
+      console.log("Nothing to do (no add/rm operands matched).");
+      console.log(`Current state: allowFrom=[${[...allowFrom].join(", ")}] allowChats=[${[...allowChats].join(", ")}]`);
+      return;
+    }
+
+    // Preserve any extra fields the schema may have grown (e.g. telegram's
+    // dmPolicy / groups / pending) by spreading the original parsed object.
+    const next = { ...parsed, allowFrom: [...allowFrom], allowChats: [...allowChats] };
+    writeFileSync(accessPath, JSON.stringify(next, null, 2) + "\n");
+    console.log(`✅ ${type} access updated for "${nodeDisplayName(resolved.id, resolved.profile)}"`);
+    if (nAddFrom) console.log(`   +from: ${nAddFrom}`);
+    if (nAddChat) console.log(`   +chat: ${nAddChat}`);
+    if (nRmFrom)  console.log(`   -from: ${nRmFrom}`);
+    if (nRmChat)  console.log(`   -chat: ${nRmChat}`);
+    console.log(`   allowFrom: [${[...allowFrom].join(", ")}]`);
+    console.log(`   allowChats: [${[...allowChats].join(", ")}]`);
+
+    // #245 / hot-reload caveat — bridge captures access at init, no watcher yet.
+    const allowPid = readNodePid(resolved.id);
+    if (allowPid != null && pidAlive(allowPid)) {
+      console.log(`\n⚠ 节点 "${nodeDisplayName(resolved.id, resolved.profile)}" 正在运行 (pid ${allowPid})。`);
+      console.log(`  当前 ${type} bridge 启动时一次性读 access.json，**不会热加载**。`);
+      console.log(`  → 生效方式：anet node stop ${resolved.id} && anet node start ${resolved.id}`);
+    }
 
   } else if (sub === "status") {
     // #245 — show the RESOLVED telegram access.json path + allowlist + pending
