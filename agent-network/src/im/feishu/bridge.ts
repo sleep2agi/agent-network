@@ -147,7 +147,10 @@ interface PendingEntry {
   /**
    * Message id of the "⏳ 处理中…" placeholder sent at event-arrival time.
    * Populated only when ackPlaceholder is true AND adapter.send succeeded.
-   * When set, the reply / timeout handlers prefer adapter.edit over send.
+   * Per Vincent 2026-06-26 design lock, the reply / timeout handlers do
+   * NOT mutate this message — they always send a fresh in-thread message.
+   * The field is kept for traceability (success logs cite it as
+   * "(after placeholder=<id>)").
    */
   placeholderMessageId?: string;
 }
