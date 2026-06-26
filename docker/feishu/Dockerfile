@@ -24,7 +24,13 @@
 #   cp .env.example .env && $EDITOR .env       # fill HUB_USER/PASSWORD + FEISHU_* + ANET_MODEL + ANTHROPIC_*
 #   docker compose up -d                       # connects to your own hub (HUB_URL in .env)
 
-FROM node:22-bookworm-slim
+# Non-slim variant: ships with `ca-certificates` preinstalled, which is
+# required to fetch the apt URIs over HTTPS on the very first
+# `apt-get update`. `bookworm-slim` strips ca-certs → chicken-and-egg
+# (need certs to fetch certs over HTTPS). Image is ~250 MB bigger, but
+# that's the cost of letting the build work inside enterprise networks
+# where HTTP apt traffic is DPI-blocked (TM门户运维 2026-06-26).
+FROM node:22-bookworm
 
 # Pinned exact preview versions for reproducible images (per 通信龙
 # 2026-06-26 — avoid the floating @preview tag). Bump these on the
@@ -32,7 +38,31 @@ FROM node:22-bookworm-slim
 ARG ANET_VERSION=2.2.22-preview.2
 ARG ANET_NODE_VERSION=2.4.15-preview.2
 
+# Optional apt mirror swap — defaults keep the upstream `deb.debian.org`
+# but use HTTPS (works fine, supported upstream + survives the
+# enterprise DPI proxies that drop HTTP apt traffic — TM门户运维 hit
+# `Clearsigned file isn't valid, got 'NOSPLIT'` on the all-HTTP default).
+# Build-time override for mainland-China hosts:
+#   docker build --build-arg APT_MIRROR_URL=https://mirrors.aliyun.com/debian \
+#                --build-arg APT_SECURITY_URL=https://mirrors.aliyun.com/debian-security \
+#                ...
+# (`URIs:` in the deb822 file is rewritten verbatim — supply the full
+# scheme://host/path. Default values are the standard HTTPS upstream.)
+ARG APT_MIRROR_URL=https://deb.debian.org/debian
+ARG APT_SECURITY_URL=https://deb.debian.org/debian-security
+
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Flip the default `http://deb.debian.org/...` URIs (the bookworm-slim
+# image ships with all-HTTP sources via /etc/apt/sources.list.d/
+# debian.sources in deb822 format) → HTTPS upstream OR the configured
+# mirror. ca-certificates is preinstalled in the base image so HTTPS
+# works on the first apt-get update; we install the rest right after.
+RUN sed -i \
+      -e "s|^URIs:.*http://deb\\.debian\\.org/debian\\s*\$|URIs: ${APT_MIRROR_URL}|" \
+      -e "s|^URIs:.*http://deb\\.debian\\.org/debian-security\\s*\$|URIs: ${APT_SECURITY_URL}|" \
+      /etc/apt/sources.list.d/debian.sources \
+    && grep '^URIs:' /etc/apt/sources.list.d/debian.sources
 
 # Core runtime deps:
 #   - build-essential + python3 → node-gyp builds (node-pty etc.)
