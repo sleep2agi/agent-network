@@ -459,12 +459,23 @@ function checkAccess(
   groupPolicy: FeishuChannelConfig["groupPolicy"],
 ): { allow: boolean; reason: string } {
   if (event.conversation.conversationType === "dm") {
-    return access.allowFrom.includes(event.sender.id)
-      ? { allow: true, reason: "" }
-      : { allow: false, reason: "sender not in allowFrom (dm)" };
+    // Wildcard "*" in allowFrom opens DMs to all senders (Vincent 2026-06-26
+    // request — internal-org bot served to whole company). Specific id match
+    // path kept as-is. Pair with rate-limit at the bridge layer to prevent
+    // token-budget abuse (RATE_LIMIT_TEXT in bridge.ts).
+    if (
+      access.allowFrom.includes("*") ||
+      access.allowFrom.includes(event.sender.id)
+    ) {
+      return { allow: true, reason: "" };
+    }
+    return { allow: false, reason: "sender not in allowFrom (dm)" };
   }
   // group / channel / thread share the same whitelist + policy semantics.
-  if (!access.allowChats.includes(event.conversation.conversationId)) {
+  const chatAllowed =
+    access.allowChats.includes("*") ||
+    access.allowChats.includes(event.conversation.conversationId);
+  if (!chatAllowed) {
     return { allow: false, reason: "chat not in allowChats" };
   }
   if (groupPolicy === "all") return { allow: true, reason: "" };

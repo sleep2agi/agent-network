@@ -43,15 +43,23 @@ process.send = (msg: unknown) => {
 
 // Source import — bun handles .ts directly, no build required.
 const bridge = await import("../src/im/feishu/bridge.js");
-const { createIPCEventHandler } = bridge as {
+const { createIPCEventHandler, withRateLimit } = bridge as {
   createIPCEventHandler: (
     adapter: unknown,
     ttlMs: number,
     ackPlaceholder: boolean,
   ) => (event: unknown) => Promise<void>;
+  withRateLimit: (
+    inner: (event: unknown) => Promise<void>,
+    adapter: unknown,
+  ) => (event: unknown) => Promise<void>;
 };
 if (typeof createIPCEventHandler !== "function") {
   console.error("[harness] createIPCEventHandler not exported by bridge.ts");
+  process.exit(2);
+}
+if (typeof withRateLimit !== "function") {
+  console.error("[harness] withRateLimit not exported by bridge.ts");
   process.exit(2);
 }
 
@@ -87,16 +95,21 @@ function makeMockAdapter(
   return adapter;
 }
 
-function makeEvent(suffix = "1") {
+function makeEvent(
+  suffix = "1",
+  opts: { senderId?: string; chatId?: string; conversationType?: "dm" | "group" } = {},
+) {
+  const conversationType = opts.conversationType ?? "dm";
+  const chatId = opts.chatId ?? "oc_X";
   return {
     platform: "feishu",
     connectionId: "test#feishu",
     conversation: {
       platform: "feishu",
-      conversationId: "oc_X",
-      conversationType: "dm",
+      conversationId: chatId,
+      conversationType,
     },
-    sender: { id: "ou_Y" },
+    sender: { id: opts.senderId ?? "ou_Y" },
     messageId: `om_${suffix}`,
     mentioned: false,
     content: { text: `hi ${suffix}` },
@@ -311,6 +324,132 @@ await test("9. pending evicted after reply (duplicate reply is no-op)", async ()
   await flush();
   assert.equal(adapter.editCalls.length, 0);
   assert.equal(adapter.sendCalls.length, 2, "duplicate reply must not trigger another send");
+});
+
+// ── Rate-limit cases (Vincent 2026-06-26 wildcard + abuse defense) ──────
+
+await test("10. DM rate limit: 4th event from same sender gets RATE_LIMIT_NOTICE_TEXT, never reaches inner", async () => {
+  const adapter = makeMockAdapter();
+  const innerCalls: string[] = [];
+  const inner = async (e: { idempotencyKey: string }) =>
+    void innerCalls.push(e.idempotencyKey);
+  const wrapped = withRateLimit(inner, adapter);
+
+  // 3 DM events from same sender — all pass
+  for (let i = 1; i <= 3; i++) {
+    await wrapped(makeEvent(`dm-${i}`, { senderId: "ou_burst" }));
+  }
+  assert.equal(innerCalls.length, 3, "first 3 events reach inner");
+  assert.equal(adapter.sendCalls.length, 0, "no rate-limit message sent yet");
+
+  // 4th — rate limited
+  await wrapped(makeEvent("dm-4", { senderId: "ou_burst" }));
+  assert.equal(innerCalls.length, 3, "4th event must NOT reach inner");
+  assert.equal(adapter.sendCalls.length, 1, "rate-limit notice sent");
+  assert.equal(
+    (adapter.sendCalls[0] as { text: string }).text,
+    "处理频率超出限制，请稍后重试",
+  );
+  assert.ok(
+    stderrLog.join("").includes("rate-limited (dm) from=ou_burst"),
+    "rate-limit stderr log",
+  );
+});
+
+await test("11. Group rate limit: 3rd event from same chat gets RATE_LIMIT_NOTICE_TEXT", async () => {
+  const adapter = makeMockAdapter();
+  const innerCalls: string[] = [];
+  const inner = async (e: { idempotencyKey: string }) =>
+    void innerCalls.push(e.idempotencyKey);
+  const wrapped = withRateLimit(inner, adapter);
+
+  // 2 group events from same chat — both pass
+  for (let i = 1; i <= 2; i++) {
+    await wrapped(
+      makeEvent(`grp-${i}`, {
+        senderId: `ou_member-${i}`,
+        chatId: "oc_room",
+        conversationType: "group",
+      }),
+    );
+  }
+  assert.equal(innerCalls.length, 2);
+  assert.equal(adapter.sendCalls.length, 0);
+
+  // 3rd — rate limited regardless of which sender (group quota is per chat)
+  await wrapped(
+    makeEvent("grp-3", {
+      senderId: "ou_member-3",
+      chatId: "oc_room",
+      conversationType: "group",
+    }),
+  );
+  assert.equal(innerCalls.length, 2, "3rd group event must NOT reach inner");
+  assert.equal(adapter.sendCalls.length, 1);
+  assert.equal(
+    (adapter.sendCalls[0] as { text: string }).text,
+    "处理频率超出限制，请稍后重试",
+  );
+  assert.ok(stderrLog.join("").includes("rate-limited (group)"));
+});
+
+await test("12. different senders / chats keep independent quotas", async () => {
+  const adapter = makeMockAdapter();
+  const innerCalls: string[] = [];
+  const inner = async (e: { idempotencyKey: string }) =>
+    void innerCalls.push(e.idempotencyKey);
+  const wrapped = withRateLimit(inner, adapter);
+
+  // 3 DMs from sender A — fills A's quota
+  for (let i = 1; i <= 3; i++) {
+    await wrapped(makeEvent(`a-${i}`, { senderId: "ou_A" }));
+  }
+  // 1 DM from sender B — B has its own quota, should pass
+  await wrapped(makeEvent("b-1", { senderId: "ou_B" }));
+  assert.equal(innerCalls.length, 4, "B's first DM should pass despite A's quota full");
+  assert.equal(adapter.sendCalls.length, 0, "no rate-limit messages yet");
+
+  // 4th DM from A — rate limited
+  await wrapped(makeEvent("a-4", { senderId: "ou_A" }));
+  assert.equal(innerCalls.length, 4);
+  assert.equal(adapter.sendCalls.length, 1);
+});
+
+await test("13. flood audit fires after 3+ rate-limit denies from same sender", async () => {
+  const adapter = makeMockAdapter();
+  const wrapped = withRateLimit(async () => {}, adapter);
+
+  // Burn DM quota (3 events).
+  for (let i = 1; i <= 3; i++) {
+    await wrapped(makeEvent(`q-${i}`, { senderId: "ou_flood" }));
+  }
+  // Trigger 3 rate-limit denies (events 4, 5, 6).
+  for (let i = 4; i <= 6; i++) {
+    await wrapped(makeEvent(`q-${i}`, { senderId: "ou_flood" }));
+  }
+  assert.equal(adapter.sendCalls.length, 3, "3 rate-limit notices sent");
+  const log = stderrLog.join("");
+  // Audit fires when flood count reaches threshold (3).
+  assert.ok(
+    log.includes("[feishu:audit] flood from=ou_flood"),
+    "flood audit must be logged at 3+ denies",
+  );
+});
+
+await test("14. rate-limit notice send failure logged (not silent)", async () => {
+  const adapter = makeMockAdapter({ sendThrowsOnCall: [1] });
+  const wrapped = withRateLimit(async () => {}, adapter);
+  // Fill DM quota.
+  for (let i = 1; i <= 3; i++) {
+    await wrapped(makeEvent(`s-${i}`, { senderId: "ou_S" }));
+  }
+  // Trigger rate-limit; adapter.send throws on first call (the rate-limit notice).
+  await wrapped(makeEvent("s-4", { senderId: "ou_S" }));
+  const log = stderrLog.join("");
+  assert.ok(
+    log.includes("rate-limit notice send failed"),
+    "send-failure log must surface",
+  );
 });
 
 // ── Summary ────────────────────────────────────────────────────────────────
