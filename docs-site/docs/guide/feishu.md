@@ -22,10 +22,17 @@
    - `im:message:send_as_bot` — bot 发消息
    - `im:message` — 收消息
    - `im:resource` — 上传图片
-2. **事件订阅**：选 **WebSocket 模式**，订阅 `im.message.receive_v1`（仅此一个）。
+2. **事件订阅**：在「事件订阅 → 配置方式」选 **「使用长连接」**（**不是** 「使用 Webhook URL」），然后在事件列表订阅 **「接收消息 - `im.message.receive_v1`」**（仅此一个）。
    - 不需要公网 IP / webhook URL / Encrypt Key
 3. **发布版本** + 等管理员 approve
 4. 复制 **App ID** + **App Secret**（凭证 & 基本信息页）
+
+::: warning ⚠️ 真坑（用户实战卡过的）
+1. **配置方式必须选「使用长连接」** —— 不是「使用 Webhook URL」。飞书后台菜单原话是「长连接」，不叫「WebSocket」，找不到「WebSocket」按钮就是选错段了。
+2. **事件订阅别选成「用户进入会话（`bot_p2p_chat_entered`）」** —— 看到列表里其他叫「会话」「消息」的事件不要勾选，只勾「接收消息 `im.message.receive_v1`」这一条。多勾会触发非预期路径。
+3. **网络可达性**：bot 跑的机器要能连 `api.feishu.cn`（长连接事件走这域名，**不是** `open.feishu.cn`）。如果 agent-node 日志反复 `[ws] ws connect failed` 又零事件 → 多半是公司网/DPI 只放行 `open.feishu.cn` 挡了 `api.feishu.cn`，换可达网络部署（或加白名单）。
+4. **群聊先把 bot 拉进群** —— bot 没在群里你 @ 也 @ 不出来。群管理员在群设置 → 群机器人 → 添加机器人 → 选你刚发布的自建应用。后续 §6 还会强调 group `chat_id` 也要加白名单。
+:::
 
 ## 3. 🚀 Docker 一键（推荐）
 
