@@ -22,10 +22,17 @@ In the [Feishu Open Platform](https://open.feishu.cn), create an **enterprise se
    - `im:message:send_as_bot` — bot sends messages
    - `im:message` — bot receives messages
    - `im:resource` — upload images
-2. **Event subscription**: pick **WebSocket mode**, subscribe to `im.message.receive_v1` (only this one).
+2. **Event subscription**: under "Event Subscription → Delivery mode" pick **"Long-lived connection / 使用长连接"** (**NOT** "Webhook URL"), then in the event list subscribe to **"Receive message — `im.message.receive_v1`"** (only this one).
    - No public IP / webhook URL / Encrypt Key needed
 3. **Publish a version** + wait for admin approval
 4. Copy the **App ID** + **App Secret** (Credentials & basic info page)
+
+::: warning ⚠️ Real-world gotchas (users have hit all four)
+1. **Delivery mode MUST be "Long-lived connection / 使用长连接"** — not "Webhook URL". The Feishu admin labels it "长连接", not "WebSocket"; if you can't find a "WebSocket" button you're looking in the wrong section.
+2. **Don't subscribe `bot_p2p_chat_entered` ("User entered chat") by mistake** — the event list shows other "session" / "message"-flavored events. Tick **only** "Receive message `im.message.receive_v1`". Extra subscriptions trigger unintended paths.
+3. **Network reachability**: the bot host must be able to reach `api.feishu.cn` (the long-lived connection events flow through that domain — **not** `open.feishu.cn`). If agent-node logs keep printing `[ws] ws connect failed` with zero events delivered → most likely a corporate / DPI network is whitelisting only `open.feishu.cn` and blocking `api.feishu.cn`. Deploy from a network that can reach `api.feishu.cn` (or whitelist it).
+4. **Add the bot to the group first** — if the bot isn't a group member, no one can `@` it. A group admin needs to go to Group Settings → Group Bots → Add Bot → pick the self-built app you just published. §6 below also requires the group's `chat_id` to be on the allowlist.
+:::
 
 ## 3. 🚀 Docker one-command (recommended)
 
