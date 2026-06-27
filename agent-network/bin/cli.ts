@@ -3343,6 +3343,7 @@ async function serverCommand() {
     const existingAdmin = loadAdminUtok();
     let defaultUser = opts.username || opts.user || "";
     let defaultPass = opts.password || opts.pass || "";
+    let defaultPassIsRandom = false;  // #261 P0-2 — true when we generated the random anet-XX pwd, drives the must_change_password flag + warn line
     let defaultAccountReady = false;
     let skippedBootstrap = false;
     if (existingAdmin.token) {
@@ -3351,11 +3352,28 @@ async function serverCommand() {
       defaultUser = existingAdmin.username || defaultUser;
       console.log(`  ✅ Admin already exists (admin-utok.json found, user=${existingAdmin.username || "?"})`);
     } else {
-      // Quick-start defaults: admin / anethub. User is expected to rotate the
-      // password via `anet passwd` after first login. Override with
-      // --username / --password flags.
+      // #261 P0-2 (2026-06-28): random-by-default bootstrap password.
+      // Pre-fix used the well-known `anethub` literal — a public hub
+      // could be system-takeover'd with a single curl. Now: explicit
+      // --password / --pass flag wins (operator-supplied = trusted, NOT
+      // flagged for forced rotation); env ANET_HUB_BOOTSTRAP_PASSWORD
+      // wins next (for CI / unattended deploys); otherwise generate
+      // `anet-<22 random hex chars>` — printed once, never echoed
+      // again, flagged in DB as must_change_password=1 so the operator
+      // gets a prominent "rotate now" warn on their first
+      // `anet login`. Operator can switch the flag off by passing
+      // `--password` / env explicitly even when reusing the same
+      // string the random generator would have produced.
       if (!defaultUser) defaultUser = "admin";
-      if (!defaultPass) defaultPass = "anethub";
+      if (!defaultPass) {
+        if (process.env.ANET_HUB_BOOTSTRAP_PASSWORD) {
+          defaultPass = process.env.ANET_HUB_BOOTSTRAP_PASSWORD;
+          // env-supplied: caller picked it, don't force rotation
+        } else {
+          defaultPass = `anet-${randomUUID().replace(/-/g, "").slice(0, 22)}`;
+          defaultPassIsRandom = true;
+        }
+      }
     }
     if (!skippedBootstrap) {
       try {
@@ -3374,10 +3392,26 @@ async function serverCommand() {
               created_at: new Date().toISOString(),
             });
           }
+          // #261 P0-2 — if we generated a random bootstrap password, flip
+          // must_change_password=1 in the DB via direct SQLite UPDATE.
+          // The hub is local (we just started it), DB path resolved from
+          // env / config; failure is non-fatal (op already has the
+          // password and `anet passwd` works regardless of the flag).
+          if (defaultPassIsRandom && reg.user?.user_id) {
+            try {
+              const sql = `UPDATE users SET must_change_password = 1 WHERE user_id = '${reg.user.user_id.replace(/'/g, "''")}'`;
+              execFileSync("bun", ["-e", `import { Database } from "bun:sqlite"; const db = new Database(process.env.COMMHUB_DB || (process.env.HOME + "/.commhub/commhub.db")); db.run(${JSON.stringify(sql)});`], { encoding: "utf-8", env: process.env });
+            } catch (e: any) {
+              console.log(`  ⚠ must_change_password flag not set (non-fatal): ${e?.message || e}`);
+            }
+          }
           console.log(`  ✅ Admin account created`);
           console.log(`     username: ${defaultUser}`);
           console.log(`     password: ${defaultPass}`);
           console.log(`     Store this password now; it will not be shown again.`);
+          if (defaultPassIsRandom) {
+            console.log(`     ⚠ This is a random bootstrap password — you'll be asked to change it on first login.`);
+          }
           if (reg.token) console.log(`     Admin token saved to ~/.anet/server/admin-utok.json`);
         } else if (reg.error?.includes("already taken")) {
           defaultAccountReady = true;
@@ -6078,6 +6112,22 @@ async function loginCommand() {
     gc.token = res.token;
     gc.user = res.user;
     console.log(`✅ Logged in as ${res.user.username}`);
+
+    // #261 P0-2 (2026-06-28) — bootstrap-default-password nudge. Server
+    // sets `must_change_password: true` on the login response when the
+    // user is still using the random bootstrap pwd `anet hub start`
+    // generated. NOT a login-blocker (back-compat: old `admin/anethub`
+    // deployments simply never get this flag, so they don't see this
+    // message); just a prominent warn + the exact next command. Old
+    // server builds don't include the field → undefined → no warn,
+    // also back-compat.
+    if (res.must_change_password === true) {
+      console.log(``);
+      console.log(`⚠ Your password is the BOOTSTRAP DEFAULT and must be changed.`);
+      console.log(`     A public hub with a default password = full takeover risk.`);
+      console.log(`     Change it now:  anet passwd`);
+      console.log(``);
+    }
 
     // Fetch networks and let user choose
     const nets = await fetch(`${hub}/api/networks`, { headers: { Authorization: `Bearer ${res.token}` } }).then(r => r.json() as any);
