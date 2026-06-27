@@ -2710,12 +2710,25 @@ async function connectFeishu(channel: FeishuChannel): Promise<void> {
 
     // Block until the child exits — the `await` here is what makes the
     // outer while-loop a supervisor instead of a fire-and-forget spawn.
+    // BOTH `exit` AND `error` must resolve the promise: a failed spawn
+    // (ENOENT for a missing worker path, EACCES on permissions, EMFILE,
+    // etc.) emits `error` WITHOUT a matching `exit` — pre-fix the await
+    // would block forever and the supervisor itself would dead-lock,
+    // never re-forking, never backing off (通信牛 PR #263 review catch).
+    // `settled` guards against the exit+error double-fire case the
+    // Node child_process docs warn about: only the first resolution
+    // wins, second is dropped silently.
+    let settled = false;
     const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-      child.once("exit", (code, signal) => resolve({ code, signal }));
-      child.once("error", (err) => {
-        // `error` typically precedes `exit` (failed spawn). Surface for
-        // operator visibility; the upcoming `exit` resolves the promise.
+      const done = (v: { code: number | null; signal: NodeJS.Signals | null }) => {
+        if (settled) return;
+        settled = true;
+        resolve(v);
+      };
+      child.once("exit", (code, signal) => done({ code, signal }));
+      child.once("error", (err: any) => {
         warn(`[feishu] worker error: ${err?.message || err}`);
+        done({ code: null, signal: null });
       });
     });
 
