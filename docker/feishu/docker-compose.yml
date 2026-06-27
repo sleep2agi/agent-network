@@ -36,6 +36,23 @@ services:
         ANET_NODE_VERSION: ${ANET_NODE_VERSION:-2.4.15-preview.2}
     env_file: .env
     restart: unless-stopped
+    # #261 P0-1 (2026-06-28) — bridge-liveness healthcheck. Pre-fix, a
+    # dead worker left the container Up with no visible signal — operators
+    # only noticed when users stopped getting replies. The healthcheck
+    # looks for the worker process directly; combined with the agent-node-
+    # side supervised re-fork (cli.ts ~2680), a missing worker means we're
+    # either between re-fork backoff attempts OR the supervisor itself
+    # crashed (the only path that turns the container unhealthy).
+    # Compose marks the container UNHEALTHY when this consistently fails
+    # — `docker ps` surfaces it; some orchestrators auto-restart on
+    # unhealthy. compose itself does not, but the agent-node in-process
+    # supervisor is the primary recovery; this healthcheck is observability.
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'src/im/feishu/worker.js' >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     # Hard blast-radius limit: only ./ from the host, mapped to /work.
     # The agent runs `cd /work` and writes all state under /work/.anet,
     # so persistence works (survives container recreate) but nothing
@@ -57,10 +74,14 @@ services:
   # agent talks to this container instead of an external hub.
   hub:
     profiles: ["local-hub"]
-    image: node:24-alpine
+    # `commhub-server` binary's shebang is `#!/usr/bin/env bun` — node:alpine
+    # base lacks bun → exit 127 / "can't execute 'bun': No such file" on
+    # every start. Use oven/bun base + apk-add nodejs/npm for the npm install.
+    image: oven/bun:1-alpine
     container_name: anet-feishu-hub
     command: >-
-      sh -c "npm install -g --no-audit --no-fund @sleep2agi/commhub-server@preview
+      sh -c "apk add --no-cache nodejs npm
+      && npm install -g --no-audit --no-fund @sleep2agi/commhub-server@preview
       && commhub-server --dev-open"
     ports:
       - "9200:9200"
