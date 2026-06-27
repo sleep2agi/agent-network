@@ -2653,6 +2653,28 @@ function resolveFeishuWorkerPath(): string | null {
   return null;
 }
 
+// #261 P0-1 (2026-06-28): supervise the feishu worker. Pre-fix, a single
+// `spawn()` at startup + an `exit` handler that only `warn()`ed meant
+// any worker death (SIGTERM, crash, OOM, host hiccup, deploy restart of
+// the worker but not us) silently killed the bridge forever — today's
+// recurring "vAgent goes mute on prod" root cause.
+//
+// Supervise = mirror the connectSSE pattern (~2900 in this file):
+//   1. Loop until module-level `feishuShuttingDown` flag goes true.
+//   2. Each iteration spawns the worker, awaits its exit, then either:
+//      - shuttingDown → log + break (clean shutdown, no re-fork)
+//      - else → sleep with exponential backoff + jitter, then re-fork.
+//   3. Backoff: 1s → 2s → 4s … → cap 30s. Reset to 1s after the worker
+//      stays alive 30s (proxy for "stable") so a long-running worker
+//      that eventually crashes doesn't wait 30s for its first re-fork.
+//   4. shutdown() (this file ~3049) is updated in this PR to:
+//      - set `feishuShuttingDown = true`
+//      - SIGTERM every tracked child, SIGKILL fallback at 500ms
+//      so we don't leak workers (or worse, end up with 2 workers each
+//      WS-connected → double-reply to the same feishu event).
+let feishuShuttingDown = false;
+const feishuChildren = new Set<ReturnType<typeof import("node:child_process").spawn>>();
+
 async function connectFeishu(channel: FeishuChannel): Promise<void> {
   const workerPath = resolveFeishuWorkerPath();
   if (!workerPath) {
@@ -2664,12 +2686,78 @@ async function connectFeishu(channel: FeishuChannel): Promise<void> {
   }
 
   const { spawn } = await import("node:child_process");
-  const child = spawn(
-    process.execPath,
-    [workerPath, "--channel-dir", channel.dir, "--node-alias", ALIAS],
-    { stdio: ["ignore", "inherit", "inherit", "ipc"] },
-  );
 
+  const BASE_DELAY_MS = 1_000;
+  const MAX_DELAY_MS = 30_000;
+  const STABLE_RESET_MS = 30_000;  // worker stays alive this long → backoff back to BASE
+  let delay = BASE_DELAY_MS;
+
+  while (!feishuShuttingDown) {
+    const child = spawn(
+      process.execPath,
+      [workerPath, "--channel-dir", channel.dir, "--node-alias", ALIAS],
+      { stdio: ["ignore", "inherit", "inherit", "ipc"] },
+    );
+    feishuChildren.add(child);
+
+    // Stable-uptime timer — if the worker survives STABLE_RESET_MS without
+    // exiting, treat the backoff as recovered (reset to BASE_DELAY_MS).
+    const stableTimer = setTimeout(() => { delay = BASE_DELAY_MS; }, STABLE_RESET_MS);
+
+    wireFeishuChildHandlers(child, channel);
+
+    log(`[feishu] forked worker (pid ${child.pid}) for ${channel.dir} via ${workerPath}`);
+
+    // Block until the child exits — the `await` here is what makes the
+    // outer while-loop a supervisor instead of a fire-and-forget spawn.
+    // BOTH `exit` AND `error` must resolve the promise: a failed spawn
+    // (ENOENT for a missing worker path, EACCES on permissions, EMFILE,
+    // etc.) emits `error` WITHOUT a matching `exit` — pre-fix the await
+    // would block forever and the supervisor itself would dead-lock,
+    // never re-forking, never backing off (通信牛 PR #263 review catch).
+    // `settled` guards against the exit+error double-fire case the
+    // Node child_process docs warn about: only the first resolution
+    // wins, second is dropped silently.
+    let settled = false;
+    const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+      const done = (v: { code: number | null; signal: NodeJS.Signals | null }) => {
+        if (settled) return;
+        settled = true;
+        resolve(v);
+      };
+      child.once("exit", (code, signal) => done({ code, signal }));
+      child.once("error", (err: any) => {
+        warn(`[feishu] worker error: ${err?.message || err}`);
+        done({ code: null, signal: null });
+      });
+    });
+
+    clearTimeout(stableTimer);
+    feishuChildren.delete(child);
+    warn(`[feishu] worker exited code=${exitInfo.code} signal=${exitInfo.signal} dir=${channel.dir}`);
+
+    if (feishuShuttingDown) {
+      log(`[feishu] worker exited during shutdown — not re-forking`);
+      break;
+    }
+
+    // Jittered exponential backoff (±25%).
+    const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+    const waitMs = Math.max(100, Math.round(delay + jitter));
+    warn(`[feishu] re-fork worker in ${waitMs}ms (backoff=${delay}ms, jittered)`);
+    await new Promise((r) => setTimeout(r, waitMs));
+    delay = Math.min(delay * 2, MAX_DELAY_MS);
+  }
+}
+
+// Wires the IPC `message` (think round-trip) + `exit`/`error` log handlers
+// onto a freshly-spawned worker child. Extracted from the original
+// connectFeishu body so the supervisor loop above can re-call it on each
+// re-fork without duplicating the entire handler body.
+function wireFeishuChildHandlers(
+  child: ReturnType<typeof import("node:child_process").spawn>,
+  channel: FeishuChannel,
+): void {
   child.on("message", (raw: unknown) => {
     if (!isFeishuIncomingEnvelope(raw)) return;
     const ev = raw.event;
@@ -2747,15 +2835,11 @@ async function connectFeishu(channel: FeishuChannel): Promise<void> {
     });
   });
 
-  child.on("exit", (code, signal) => {
-    warn(`[feishu] worker exited code=${code} signal=${signal} dir=${channel.dir}`);
-  });
-
-  child.on("error", (err) => {
-    warn(`[feishu] worker error: ${err?.message || err}`);
-  });
-
-  log(`[feishu] forked worker (pid ${child.pid}) for ${channel.dir} via ${workerPath}`);
+  // NOTE: exit/error handlers are now wired by the supervisor loop in
+  // `connectFeishu` above (via `child.once("exit", ...)` / `once("error",
+  // ...)`) so the loop can `await` the exit and decide whether to re-fork
+  // or break (per `feishuShuttingDown`). Don't add them here — that would
+  // double-fire warnings on every legitimate restart.
 }
 
 function isFeishuIncomingEnvelope(raw: unknown): raw is FeishuBridgeEnvelope {
@@ -3046,7 +3130,26 @@ if (goalsSchedulerEnabled) {
   setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
   runGoalSchedulerTick().catch(() => {});
 }
-const shutdown = async () => { log("shutting down..."); await reportStatus("offline").catch(() => {}); process.exit(0); };
+const shutdown = async () => {
+  log("shutting down...");
+  // #261 P0-1 — gate the feishu supervisor loop so it stops re-forking
+  // on the soon-to-arrive child exit. SIGTERM each tracked worker (give
+  // it 500 ms to exit gracefully), then SIGKILL holdouts. Without this,
+  // workers either keep running orphaned OR the supervisor races a
+  // re-fork between our exit and Docker's container teardown — both
+  // produce zombie processes / double-WS / double-reply.
+  feishuShuttingDown = true;
+  for (const ch of feishuChildren) {
+    try { ch.kill("SIGTERM"); } catch { /* already dead */ }
+  }
+  setTimeout(() => {
+    for (const ch of feishuChildren) {
+      try { ch.kill("SIGKILL"); } catch { /* already dead */ }
+    }
+  }, 500);
+  await reportStatus("offline").catch(() => {});
+  process.exit(0);
+};
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 for (const channel of TELEGRAM_CHANNELS) connectTelegram(channel);
