@@ -480,6 +480,14 @@ const NODE_DIR = configFilePath ? dirname(configFilePath) : join(process.cwd(), 
 const GOALS_PATH = opts["goals-path"] || fileConfig.flags?.goalsPath || fileConfig.goalsPath || join(NODE_DIR, "goals.json");
 const GOAL_TICK_MS = Math.max(10_000, parseInt(opts["goal-tick-ms"] || process.env.ANET_GOAL_TICK_MS || fileConfig.flags?.goalTickMs || "30000"));
 const goalStore = new GoalStore(GOALS_PATH);
+
+// RFC-025 M1e — per-process state for the self-loop tools' safety
+// 防线. Lives at module scope so the SAME counters are shared across
+// every claude SDK query() invocation in this agent-node process
+// (otherwise the batch-cancel threshold reset every wake and the防线
+// would be a no-op).
+const loopsCancelTimestamps: number[] = [];
+const loopsConfirmTokens: Set<string> = new Set();
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 const LOG_LEVEL = (LOG_LEVELS as any)[(opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info")] ?? 1;
 const channelSpecs = [
@@ -1574,6 +1582,29 @@ async function processWithClaude(task: string, from: string, images?: string[]):
         headers: commhubToken ? { "Authorization": `Bearer ${commhubToken}` } : undefined,
       };
     }
+  }
+
+  // RFC-025 M1e — agent loop self-management tools (6 self-scoped
+  // handlers: list/create/edit/reschedule/complete/cancel_my_loop).
+  // By construction self-scoped: the ctx binds THIS node's goalStore
+  // + runtime + tz; no `alias` arg in any tool schema, so the LLM
+  // physically cannot address another node's goals. claude-code-cli
+  // runtime is excluded by where this wire-up lives (we're in
+  // processWithClaude, RUNTIME='claude' bucket = claude-agent-sdk
+  // path; CC-CLI is its own standalone session).
+  try {
+    const { createLoopsMcpServer } = await import("./goals/loops-mcp");
+    const maxGoalsEnv = parseInt(process.env.COMMHUB_MAX_GOALS_PER_NODE || "", 10);
+    mcpServers["loops"] = await createLoopsMcpServer({
+      store: goalStore,
+      runtime: RUNTIME_LABEL,
+      defaultTz: (fileConfig?.flags?.timezone as string) || "Asia/Shanghai",
+      maxActiveGoals: Number.isFinite(maxGoalsEnv) && maxGoalsEnv > 0 ? maxGoalsEnv : undefined,
+      recentCancels: loopsCancelTimestamps,
+      pendingConfirmTokens: loopsConfirmTokens,
+    });
+  } catch (e: any) {
+    warn(`[claude] loops SDK MCP server init failed (${e?.message || e}); self-loop tools unavailable for this agent`);
   }
 
   // ALWAYS resolve a working binary. Earlier we returned undefined when
