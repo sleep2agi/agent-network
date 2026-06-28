@@ -1,7 +1,13 @@
 # RFC-028 — Provider & Model Registry + 连通性矩阵
 
 **作者**: 通信工程马
-**状态**: Draft v3 (通信牛 安全审 CHANGE_REQ → 3 F1 SSRF 残留修, 待二次复判)
+**状态**: Draft v4 (通信牛 二次复判 — R1/R2 闭合 ✅, R3 doc 不一致补完)
+**v4 变更说明**: 通信牛 二次复判 (通信龙 转 task 385b7316) — R1 redirect manual + R2 undici SNI pin **闭合 ✅**, 但 R3 文档自相矛盾必修:
+- **§2.2 probe_results table** v3 留了 `error_message TEXT` (daemon-submittable 含义), v4 重命名为 `error_label` 并 schema-comment 明标「HUB-DERIVED ONLY, daemon CANNOT submit」, 加 §4.4.4 `deriveErrorLabel(ack)` 派生表 (从 status enum + raw_status_code 映射到 UI 文案)
+- **§2.3 ack_probe_request 工具签名** v3 留了 `error_message?` 参数, v4 删除, 改成 `(probe_id, status, latency_ms, raw_status_code?)` + 注 white-list schema + 指向 §4.4.4 ProbeAckPayload zod 强制
+- **impl 不变量**: grep `error_message` 在任何 daemon code path / hub code path 均应 0 命中 (字段重命名 + ack schema zod-validate 强制)
+
+**v3 变更说明** (历史): 通信牛 SEC verdict (通信龙 转 [task 191eb7cb](https://github.com/sleep2agi/agent-network/pull/303)) — vault lazy gate / role gate / SEC-1 通过, **但 F1 SSRF 还有 3 处真实现坑**:
 **v3 变更说明**: 通信牛 SEC verdict (通信龙 转 [task 191eb7cb](https://github.com/sleep2agi/agent-network/pull/303)) — vault lazy gate / role gate / SEC-1 通过, **但 F1 SSRF 还有 3 处真实现坑**:
 - **R1 (redirect SSRF)**: v2 `fetch()` 默认 follow 30x — vendor 返 `Location: http://169.254.169.254/` 绕过 allowlist + IP check。修: `redirect:"manual"` + 3xx 一律 fail (probe minimal 不该需 redirect) (详 §4.4.2)
 - **R2 (HTTPS pin 实现不成立)**: v2 `fetch("https://<pinned-ip>/", headers:{Host:...})` 错——HTTPS SNI/cert validation 用 URL hostname (= IP), 不是 Host header; 必 cert mismatch (或 worse: 误关 TLS check 反而通过) 修: 用 undici/Bun dispatcher + customLookup, **URL 保留 vendor hostname** (SNI + cert 校验正确), 网络 connect 走 pin IP; 显式 ban `NODE_TLS_REJECT_UNAUTHORIZED=0` / insecure TLS fallback (详 §4.4.2)
@@ -177,9 +183,18 @@ CREATE TABLE probe_results (
   model_name      TEXT NOT NULL,
   daemon_node_id  TEXT NOT NULL,           -- 哪台 server 上跑的
   network_id      TEXT NOT NULL,
-  status          TEXT NOT NULL,           -- pending/ok/timeout/auth_fail/quota/network_error/other
+  -- v3 R3: status is one of a fixed enum (see §4.4.4 ProbeAckPayload).
+  -- daemon NEVER submits a raw error string; hub derives the human label
+  -- from (status, raw_status_code) and stores it as a frozen view.
+  status          TEXT NOT NULL,           -- pending/ok/auth_fail/quota/rate_limit/network_error/timeout/redirect_forbidden/vendor_5xx/other_4xx/tls_error
   latency_ms      INTEGER,
-  error_message   TEXT,                    -- 截断到 500 字, 不含 secret
+  -- error_label is HUB-DERIVED ONLY, mapped from (status, raw_status_code)
+  -- via a static lookup table (§4.6 error catalog row → UI 文案 column).
+  -- daemon CANNOT submit this; hub fills it. Naming changed from
+  -- v2's `error_message` to make the "no daemon-submittable string"
+  -- invariant impossible to misread. Grep `error_message` in impl-time
+  -- source should yield 0 hits in any daemon-facing code path.
+  error_label     TEXT,
   probed_at       INTEGER NOT NULL,
   probed_by_user  TEXT,                    -- audit
   raw_status_code INTEGER                  -- 200/401/403/429/500 etc, audit
@@ -201,7 +216,7 @@ CREATE INDEX idx_probe_matrix ON probe_results(network_id, provider_id, model_na
 **daemon-side (hub-facing)** (新增 RFC-026 工具集):
 
 7. `get_probe_request(probe_id)` — daemon pulls full spec + ephemeral secret + base_url
-8. `ack_probe_request(probe_id, status, latency_ms, error_message?, raw_status_code?)`
+8. `ack_probe_request(probe_id, status, latency_ms, raw_status_code?)` — **v3 R3 white-list schema**, NO arbitrary string field (no `error_message` / `error` / `detail` / `vendor_text`). See §4.4.4 `ProbeAckPayload` for the canonical zod schema; hub `rejectIfSecretLeaked` enforces.
 
 `probe_provider_model` 把任务派给 daemon (SSE doorbell type=`probe_provider`)，daemon 在本机用 `fetch(base_url, ...)` 真发一次 minimal probe 请求（hello / `/models` GET / vendor-specific tiny call），返结果。**daemon 永远不存 key**，只在本次 fetch 时内存里用一次。
 
@@ -526,7 +541,7 @@ async function safelyFetchProbe(baseUrl: string, env: NodeJS.ProcessEnv): Promis
 - **timeout 强制 ≤ 30s**: `AbortSignal.timeout(30_000)` 已在 §4.4.2 fetch 内强制
 - **rate limit per provider**: hub-side 每 (provider_id, model_id, daemon_node_id) 三元组 60 req/min 上限 (反向防 DoS 给 vendor + 防滥点 §7.2 烧 token 风险)
 
-**4.4.4 error_message — daemon 白名单 ack + hub 二层 redact (v3 R3)**
+**4.4.4 error 路径 — daemon 白名单 ack + hub 二层 redact + hub-derived error_label (v3 R3)**
 
 v2 写「hub 端全文 replace match secret 值」**还不够硬**——通信牛 catch:
 - URL-encoded 变体: vendor 错误可能编码 `Invalid API key: sk%2Dant%2Dabc...`
@@ -577,6 +592,30 @@ function classifyProbeResponse(resp: Response, latencyMs: number, vendor: string
 ```
 
 `network_error` / `timeout` / `tls_error` 由 try/catch 包 fetch 异常映射, **从不**传 vendor 字符串。
+
+**hub-side `error_label` derivation (v3 R3 — daemon-text-free path)**:
+
+`probe_results.error_label` 字段 (§2.2) 是**纯 hub-derived**, 从 `(status, raw_status_code)` 经 static lookup 算出, daemon 永不提交。impl-time hub-only 函数:
+
+```ts
+// hub-side ONLY — runs in ack_probe_request handler after rejectIfSecretLeaked passes
+function deriveErrorLabel(ack: ProbeAckPayload): string | null {
+  switch (ack.status) {
+    case "ok":                   return null;
+    case "auth_fail":            return `API key 校验失败 (HTTP ${ack.raw_status_code ?? "?"})`;
+    case "quota":                return "API 额度用尽 (429)";
+    case "rate_limit":           return "我方 rate limit (60req/min/provider) 触发";
+    case "network_error":        return "网络不可达 (connect/DNS fail)";
+    case "timeout":              return "连通性测试超时 (>30s)";
+    case "redirect_forbidden":   return "vendor 返回 30x redirect, P1 一律拒";
+    case "vendor_5xx":           return `vendor 服务端错 (HTTP ${ack.raw_status_code ?? "5xx"})`;
+    case "other_4xx":            return `vendor 客户端错 (HTTP ${ack.raw_status_code ?? "4xx"})`;
+    case "tls_error":            return "TLS 证书校验失败";
+  }
+}
+```
+
+**impl 不变量**: `INSERT INTO probe_results (error_label, ...) VALUES (deriveErrorLabel(ack), ...)`; daemon-facing schema 永不接 `error_message` 类字段。impl-time grep `error_message` 在 daemon code path 应 0 命中, 在 hub code path 也应 0 命中 (字段名已重命名为 `error_label` + 明文 hub-derived only)。
 
 **hub-side 二层 redact (作 belt-and-suspenders, P1 已挡, P2 加更猛 redact when audit need raw)**:
 
@@ -747,13 +786,18 @@ dashboard admin-only audit page 直查 (P2)。
 - [x] vault lazy / role gate / SEC-1 — 通过 ✅
 - [⚠️] **F1** SSRF 三层 — 通信牛 catch 3 真实现坑 → v3 R1/R2/R3 修
 
-### v3 加项 verdict (待二次复判)
-- [ ] **R1** redirect SSRF: `redirect: "manual"` + 3xx 一律 fail (`probe_redirect_forbidden`); probe minimal 不该需 redirect, 合法 vendor redirect 留 P3 per-vendor explicit allow + Location 重跑 validate
-- [ ] **R2** undici Agent dispatcher + customLookup pin IP, URL 保留 vendor hostname (SNI + cert SAN 校验正确), `rejectUnauthorized:true` 显式, minVersion TLSv1.2; daemon boot `assertSecureTlsEnv` 检 `NODE_TLS_REJECT_UNAUTHORIZED=0` 等 env, throw `probe_tls_insecure_disabled`; CI lint guard 检源码 `rejectUnauthorized:.*false` / `checkServerIdentity.*noop` = 0 命中
-- [ ] **R3** daemon ack 白名单 enum schema (status enum + raw_status_code + latency_ms, **无任意字符串字段**); hub 二层 `rejectIfSecretLeaked` 检 secret 值/url-encoded/12-char 短窗 substring → `ack_secret_leak` audit + drop ack (daemon impl bug catch)
-- [ ] §4.6 error +3 (`probe_redirect_forbidden` / `probe_tls_insecure_disabled` / `ack_secret_leak`)
+### v3 加项 verdict (通信牛 二次复判)
+- [x] **R1** redirect manual + 3xx fail — 闭合 ✅
+- [x] **R2** undici Agent + customLookup pin + SNI preserved + insecure TLS boot ban — 闭合 ✅
+- [⚠️] **R3** daemon ack 白名单 enum — 设计闭合 ✅ 但 doc 自相矛盾 (§2.2 error_message / §2.3 error_message?) → v4 修
+
+### v4 加项 verdict (待终批)
+- [ ] **§2.2** `probe_results.error_message` → 重命名 `error_label` + schema-comment HUB-DERIVED ONLY
+- [ ] **§2.3** `ack_probe_request` 签名删 `error_message?`, 改 `(probe_id, status, latency_ms, raw_status_code?)`
+- [ ] **§4.4.4** 加 `deriveErrorLabel(ack)` hub-side 派生表 (status enum + raw_status_code → 文案)
+- [ ] impl 不变量: grep `error_message` 在 daemon + hub code path = 0 命中
 
 ---
 
 **作者**: 通信工程马 · 2026-06-29
-**Review 路径**: v1 通信龙 first-pass PASS ✅ → v2 折 F1-F5 + §7 lock ✅ → v3 修通信牛 F1 残留 R1/R2/R3 (本) → **通信牛 二次复判** → Vincent 拍 → 派工 P1 MVP (~3-4d)
+**Review 路径**: v1 通信龙 first-pass PASS ✅ → v2 折 F1-F5 + §7 lock ✅ → v3 修通信牛 F1 残留 R1/R2 闭 ✅ + R3 设计闭 ✅ → v4 修 R3 doc 一致性 (本) → **通信牛 终批** → Vincent 拍 → 派工 P1 MVP (~3-4d)
