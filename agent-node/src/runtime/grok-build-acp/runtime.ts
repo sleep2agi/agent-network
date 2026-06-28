@@ -58,6 +58,15 @@ export interface GrokAcpTurnOptions {
   cwd?: string;
   sessionId?: string;
   timeoutMs?: number;
+  /**
+   * #261 P1 redirect (2026-06-28) — handshake deadline (initialize +
+   * authenticate + session/new|load). Decoupled from `timeoutMs` so a
+   * stuck handshake fails fast (~45s) instead of hiding behind the
+   * 300s prompt deadline. Defaults to min(45_000, timeoutMs) so a
+   * caller that sets a tight `timeoutMs` doesn't accidentally get a
+   * loose handshake deadline.
+   */
+  handshakeTimeoutMs?: number;
   drainMs?: number;
   binary?: string;
   env?: NodeJS.ProcessEnv;
@@ -110,6 +119,11 @@ interface InitializeResponse {
  */
 export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpTurnResult> {
   const timeoutMs = opts.timeoutMs ?? 120_000;
+  // #261 P1 redirect — handshake (init+auth+session) is a separate
+  // class of operation from the unbounded prompt stream and must fail
+  // fast. Defaults to min(45s, timeoutMs) so legacy callers that only
+  // set a tight `timeoutMs` still get a coherent (≤ timeoutMs) deadline.
+  const handshakeTimeoutMs = opts.handshakeTimeoutMs ?? Math.min(45_000, timeoutMs);
   const drainMs = opts.drainMs ?? 15_000;
   const childEnv = { ...process.env, ...opts.env };
   const client = new GrokAcpClient();
@@ -199,9 +213,15 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
       },
       ...(_hintEnabled ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } } : {}),
     };
-    const init = await client.request<InitializeResponse>("initialize", initParams, timeoutMs);
+    // #261 P1 redirect (2026-06-28) — handshake (initialize / authenticate
+    // / session/new|load) now uses `handshakeTimeoutMs` (default 45s),
+    // decoupled from the long-running `session/prompt` deadline. Pre-fix
+    // all three handshake requests inherited the 300s prompt timeout, so
+    // a wedged `initialize` would burn the full prompt window before the
+    // operator saw a failure signal.
+    const init = await client.request<InitializeResponse>("initialize", initParams, handshakeTimeoutMs);
     const authMethod = selectAuthMethod(init, childEnv);
-    await client.request("authenticate", { methodId: authMethod, meta: { headless: true } }, timeoutMs);
+    await client.request("authenticate", { methodId: authMethod, meta: { headless: true } }, handshakeTimeoutMs);
 
     // #204 — pass through the caller's mcpServers list; empty array preserves
     // pre-#204 behaviour so existing callers that don't yet build the entry
@@ -217,8 +237,8 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
       ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } }
       : {};
     const session = opts.sessionId
-      ? await client.request<SessionResponse>("session/load", { sessionId: opts.sessionId, cwd: opts.cwd, mcpServers, ...sessionExtra }, timeoutMs)
-      : await client.request<SessionResponse>("session/new", { cwd: opts.cwd, mcpServers, ...sessionExtra }, timeoutMs);
+      ? await client.request<SessionResponse>("session/load", { sessionId: opts.sessionId, cwd: opts.cwd, mcpServers, ...sessionExtra }, handshakeTimeoutMs)
+      : await client.request<SessionResponse>("session/new", { cwd: opts.cwd, mcpServers, ...sessionExtra }, handshakeTimeoutMs);
 
     const sessionId = extractSessionId(session) ?? opts.sessionId;
     if (!sessionId) throw new Error("Grok ACP session response did not include sessionId");
