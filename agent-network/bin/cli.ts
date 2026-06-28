@@ -3264,6 +3264,27 @@ async function serverCommand() {
     } catch {}
 
     if (!serverAlreadyRunning) {
+      // #235 — Preflight bun/bunx presence BEFORE spawn. commhub-server is
+      // bun-only (Bun.serve + bun:sqlite, no Node equivalent), so a missing
+      // bunx in PATH is a hard prerequisite failure, not a recoverable
+      // runtime hiccup. Without this check, `spawn("bunx", ...)` emits an
+      // ENOENT 'error' event with no listener → Node crashes with an
+      // unhandled exception and a 10-line internal stack — user-hostile and
+      // misdirects troubleshooting toward Node internals instead of the
+      // actual missing dependency.
+      //
+      // The post-spawn 15s /health poll then a Bun-missing check (see
+      // ~30 lines down) cannot rescue this — spawn ENOENT throws before
+      // the poll loop ever runs.
+      if (!commandExists("bunx") && !commandExists("bun")) {
+        console.error(`\n  ❌ anet hub start requires the Bun runtime (commhub-server is bun-only — uses Bun.serve + bun:sqlite, no Node fallback).`);
+        console.error(`\n     Install Bun first:`);
+        console.error(`       curl -fsSL https://bun.sh/install | bash`);
+        console.error(`       # restart your shell so PATH picks up ~/.bun/bin`);
+        console.error(`\n     Then re-run: anet hub start`);
+        console.error(`\n     More info: https://bun.sh/install\n`);
+        process.exit(1);
+      }
       console.log(`  Starting CommHub Server on port ${port} (bind ${host})...`);
       const env: Record<string, string> = {
         ...process.env as any,
@@ -3275,6 +3296,21 @@ async function serverCommand() {
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${PINNED_SERVER_VERSION}`];
       if (devOpen) serverArgs.push("--dev-open");
       child = spawn("bunx", serverArgs, { env, stdio: "inherit" });
+      // #235 — Belt-and-braces: even with the preflight above, race
+      // conditions (PATH being modified mid-process, partial install) can
+      // still produce an async ENOENT 'error' event. Without this handler
+      // Node would crash with "Unhandled 'error' event" — defeat the
+      // preflight's UX promise. Log + exit gracefully.
+      child.on("error", (err: any) => {
+        if (err?.code === "ENOENT") {
+          console.error(`\n  ❌ Failed to spawn bunx — it disappeared from PATH after the preflight check.`);
+          console.error(`     This usually means Bun was uninstalled or PATH changed mid-process.`);
+          console.error(`     Try: which bunx && bunx --version`);
+        } else {
+          console.error(`\n  ❌ commhub-server spawn error: ${err?.message || err}`);
+        }
+        process.exit(1);
+      });
 
       // Wait for server with polling
       let ready = false;
