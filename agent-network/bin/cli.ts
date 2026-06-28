@@ -496,6 +496,47 @@ function commandExists(name: string): boolean {
   }
 }
 
+// #237 — Friendly classification of Node `fetch` errors. Node's fetch throws
+// a bare `TypeError: fetch failed` with the real cause hidden in `err.cause`
+// (e.g. `{ code: 'ECONNREFUSED', address: '127.0.0.1', port: 9200 }`). Without
+// classification the user sees only the Node stack and has no idea whether
+// the hub is down, the URL is wrong, the network is broken, or DNS is failing.
+function classifyFetchError(err: any, url?: string): string {
+  const cause = err?.cause;
+  const code = cause?.code || err?.code;
+  const address = cause?.address;
+  const port = cause?.port;
+  const target = url ? `URL: ${url}` : (address ? `${address}:${port}` : "");
+  const isLoopback = url?.includes("127.0.0.1") || url?.includes("localhost") || address === "127.0.0.1" || address === "::1";
+  if (code === "ECONNREFUSED") {
+    if (isLoopback) {
+      return `连不上本地 hub (${target}). 请先在另一终端: anet hub start  然后重试.`;
+    }
+    return `连不上 ${target}. 服务可能未启动 — 检查目标主机/端口, 或网络/代理.`;
+  }
+  if (code === "ENOTFOUND") {
+    return `DNS 解析失败 (${target}). 检查网络/DNS/代理设置.`;
+  }
+  if (code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT") {
+    return `连接超时 (${target}). 网络不稳定或目标无响应 — 检查防火墙/代理.`;
+  }
+  if (code === "ECONNRESET") {
+    return `连接被对端重置 (${target}). 服务可能在启动中或异常退出.`;
+  }
+  return `fetch 失败: ${err?.message || err}${target ? ` (${target})` : ""}`;
+}
+
+// #237 — Detect whether an arbitrary error came from a fetch call. Used by
+// the top-level FATAL handler so a bare TypeError surfaces as a friendly
+// classified message instead of an undecorated Node stack.
+function isFetchError(err: any): boolean {
+  if (!err) return false;
+  if (err instanceof TypeError && /fetch failed/i.test(err.message || "")) return true;
+  const cause = err?.cause;
+  if (cause && typeof cause === "object" && (cause.code || cause.syscall === "connect")) return true;
+  return false;
+}
+
 // #214 F7-02 / F7-10 / F7-11 — Levenshtein distance for did-you-mean
 // suggestions on typo'd commands. Pure function, ≤30 LOC, no deps.
 function levenshtein(a: string, b: string): number {
@@ -9454,6 +9495,19 @@ switch (command) {
 main().then(
   () => { if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0); },
   (err: any) => {
+    // #237 — Friendly classification for unhandled fetch errors. Replaces
+    // the bare "FATAL: TypeError: fetch failed + 10-line Node stack" output
+    // Vincent hit on a clean machine where the hub was unreachable. Falls
+    // through to the legacy FATAL handler for everything else.
+    if (isFetchError(err)) {
+      console.error(`[anet] ❌ ${classifyFetchError(err)}`);
+      if (process.env.DEBUG || process.env.ANET_DEBUG) {
+        console.error(err?.stack || err);
+      } else {
+        console.error(`[anet]    (set ANET_DEBUG=1 to see the underlying Node stack)`);
+      }
+      process.exit(1);
+    }
     console.error("[anet] FATAL:", err?.stack || err?.message || err);
     process.exit(1);
   },
