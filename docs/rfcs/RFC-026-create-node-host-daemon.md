@@ -1,8 +1,15 @@
 # RFC-026 — Dashboard 远程创建节点 + Host-Daemon
 
 **作者**: 通信工程马
-**状态**: Draft v2 (通信龙 first-pass PASS + F1/F2/F3 fold-in)
-**v2 变更说明**: 通信龙 [comment](https://github.com/sleep2agi/agent-network/pull/297) 3 amends 全折：
+**状态**: Draft v3 (通信牛 v2 安全终审 CHANGE_REQ → 5 不变量折入, 待复判)
+**v3 变更说明**: 通信牛 v2 安全终审 5 must-fold (通信龙 转 task `609da9ef`)：F1/F2/F3 主方向 PASS，但加 5 条**设计不变量**才是可开工规格。每条同时是 §5 P1 test plan 的新 scenario G-K。Vincent 「充分测试」要求与之对齐。
+- **C1 (env_refs 严格校验)** — §4.4.7 新加 + scenario G: key regex / 去重 / count/size 上限 / vault-presence / daemon allowlist / `.env.local` safe serializer
+- **C2 (get/ack 绑 daemon node_id)** — §4.1.4 新加 + scenario H: 同 network 同 role 的 daemonA 也不能 get/ack daemonB 的 request
+- **C3 (ANET_BIN 绝对路径不走 PATH)** — §4.2.6 新加 + scenario I: 启动一次 `which` resolve + pin；`minimalEnv.PATH` 固定，PATH 投毒不影响 fork
+- **C4 (mint-stream-evict 失败语义 + orphan ntok revoke)** — §4.4 case-table + scenario J: hub-crash-before-get vs daemon-crash-after-get-before-ack 都 terminal failed/expired + child ntok 一律 revoke
+- **C5 (P1 channels fail-closed)** — §3.3 + §4.2.5 + scenario K: non-empty channels hub/daemon 均拒，P3 再上 schema
+
+**v2 变更说明** (历史)：通信龙 [v1 review](https://github.com/sleep2agi/agent-network/pull/297) 3 amends 全折：
 - **F1 (重要·安全)**: env_blob 永不入 hub DB，改 `mint-stream-evict`——内存按 `request_id` keyed, daemon 拉取时现取现传, ack 后 evict; 表里只存 `env_keys` 做 audit（详 §2.5 step 2 + §4.4）
 - **F2 (安全·加固)**: 删 `FORK_ARGS_PATTERN` regex-on-rebuilt-string（误导，像留 shell 路径）；改逐字段 enum + 类型校验 + `execFile` 数组，永不拼 shell 串（详 §4.2.2）
 - **F3 (minor)**: 装机脚本 utok 走 env var (`ANET_ADMIN_TOKEN`) 或交互 prompt，不上 argv 避免 `ps`/shell history 暴露（详 §2.3）
@@ -198,7 +205,7 @@ curl -fsSL https://anet.sh/install-daemon | bash -s -- \
        "runtime": "claude-agent-sdk",
        "model": "claude-opus-4-6",
        "flags": {"permissionMode": "default", "maxTurns": 50, ...},
-       "channels": [],                     // 可选；P3 才接
+       "channels": [],                     // P1 强制空数组 (fail-closed, 见 §4.2.6); 非空 hub+daemon 双层拒
        "env_refs": ["ANTHROPIC_API_KEY"]   // 仅传引用，hub 端解 envRef
      },
      "network_id": "net_xxx"
@@ -318,6 +325,33 @@ daemon 配置 `allowed_runtimes`、`max_concurrent_children`、`allowed_secret_k
 
 daemon 注册时绑定 1 个 `network_id`，hub 派任务前必须验证「调用者 utok 当前 network == daemon 的 network」（RFC-024 SEC-1 相同的防护带模式）。
 
+**4.1.4 get_create_request / ack_create_request 强绑 daemon node_id（v3 C2 新加）**：
+
+仅仅校验「daemon-ntok role=host_supervisor + 同 network」**不够**——同一 network 可能有未来 multi-daemon 场景（虽然 §6.5 锁定 P1 每 host 1 daemon，但 token 层防御要假设最坏）。每次 `get_create_request(request_id)` / `ack_create_request(request_id, ...)` 调用必须额外检查：
+
+```ts
+// hub-side enforce, MCP tool 入口
+function handleGetCreateRequest(callerNtok: Token, request_id: string) {
+  const callerNodeId = callerNtok.node_id;     // ntok 绑定的 node_id
+  if (callerNtok.role !== "host_supervisor") throw forbidden("not_daemon");
+
+  const req = pendingCreateRequests.get(request_id);
+  // ↑ DB row not Map; Map 是 env_blob ephemeral 存储, request 元数据在表
+  if (!req) throw notFound();
+
+  if (req.daemon_node_id !== callerNodeId) {
+    // 同 network 同 role 的 daemonA 也不能拿 daemonB 的 request
+    auditLog("cross_daemon_request_access_denied", { caller: callerNodeId, target: req.daemon_node_id });
+    throw forbidden("not_your_request");
+  }
+  // ...通过后取 env_blob from Map + evict
+}
+```
+
+理由：daemon-ntok 是「在那台机器起进程的能力」，daemonA 偷拿 daemonB 的 request 等于「在 B 机器派工的事被 A 机器接走 + secret 流到 A」——即使两 daemon 都属同 admin，物理隔离也必须由 token-bound `node_id` 守住。
+
+`ack_create_request` 同模式：先 SELECT daemon_node_id WHERE request_id = ? → 比 caller_node_id → 不等直接 403。
+
 ### 4.2 Daemon 防被滥用「在你机器上起任意进程」
 
 **4.2.1 daemon-ntok 权限最小化**：
@@ -384,6 +418,64 @@ daemon 的 `WORK_DIR = ~/.anet/daemon/workspaces/<network_id>/` 固定；fork �
 
 daemon 配置 `max_concurrent_children`（默认 20）+ 每子进程 systemd-style cgroup（v2 P2 加）；超限 reject。理由：阻止「用 daemon 当 cryptominer 拉起器」攻击。
 
+**4.2.5 channels fail-closed in P1（v3 C5 新加）**：
+
+`node_spec.channels` 在 P1 必须是空数组 `[]`。hub 在 MCP 工具入口拒非空：
+
+```ts
+if (Array.isArray(spec.channels) && spec.channels.length > 0) {
+  throw new ValidationError("channels_not_supported_in_p1", {
+    received: spec.channels.length,
+    p3_tracker: "RFC-026 §5 P3",
+  });
+}
+```
+
+daemon 在 fork 前**再次**校验同款（双层）。**P3** 才上 channel schema（参数 / 鉴权 / 绑定流程），届时整体跟 RFC-020 IM 集成对齐。
+
+理由：channel 绑定 = 「子节点能从外部接收消息」= 攻击面骤增；P1 守住「daemon 只起进程，进程默认无入口」的纯净边界。fail-closed 比 fail-open 安全：未支持的字段一律拒，不 silent ignore（避免 dashboard 以为绑了但实际没绑）。
+
+**4.2.6 ANET_BIN 绝对路径 pin + minimalEnv.PATH 固定（v3 C3 新加）**：
+
+`execFile("anet", [...])` 走 `$PATH` 解析有路径投毒攻击面——如果 daemon 进程的 PATH 被任何方式（hub 派的 env、本机攻击者 `~/.bashrc`、子进程继承的环境）注入了一个早于真 anet 的 `/tmp/bin/anet`（恶意脚本），fork 会去那个假 binary。
+
+修法：
+
+```ts
+// daemon 启动时, 一次性 resolve, pin 绝对路径
+import { execFileSync } from "node:child_process";
+const ANET_BIN_ABS = (() => {
+  try {
+    // 用 daemon 自己的安装时 PATH (systemd unit / install script
+    // 控制), 一次 resolve, 之后不再依赖 PATH
+    const p = execFileSync("which", ["anet"], { encoding: "utf-8" }).trim();
+    if (!p || !p.startsWith("/")) throw new Error(`anet not absolute: ${p}`);
+    return p;  // e.g. "/usr/local/bin/anet"
+  } catch (e) {
+    throw new Error(`daemon boot: cannot resolve anet binary: ${e.message}`);
+  }
+})();
+
+// fork 时永远用绝对路径 + 固定 PATH
+const SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+function minimalEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return {
+    PATH: SAFE_PATH,                     // 固定, 不继承 daemon 的 PATH
+    HOME: process.env.HOME!,              // 子进程要用 ~/.anet/
+    LANG: process.env.LANG || "C.UTF-8",
+    // 故意 ❌ 不带: LD_PRELOAD, NODE_OPTIONS, npm_*, 任何 hub-controlled env
+    ...extra,                             // 仅白名单 env_blob 的 key
+  };
+}
+
+execFileSync(ANET_BIN_ABS, args, { cwd: WORK_DIR, env: minimalEnv(envBlob) });
+```
+
+**约束**：
+- daemon 启动失败的代价是少跑 1 台机器，**优于**「跑了但 fork 到假 binary」——`which anet` resolve 失败 = 进程 exit
+- hub 派进来的 `node_spec` **永不可影响** PATH / LD_PRELOAD / NODE_OPTIONS / 任何 dynamic loader env
+- env_blob 的 key 已经穿过 §4.4.7 的 ENV_KEY_RE（大写起头 / 不含点），自然不能命名为 `LD_PRELOAD` / `PATH`——双重 belt-and-suspenders
+
 ### 4.3 跨租户隔离（SEC-1 等价）
 
 - daemon 注册绑死 1 个 network；不允许跨 network 创建
@@ -420,6 +512,93 @@ daemon 配置 `max_concurrent_children`（默认 20）+ 每子进程 systemd-sty
 
 6. **「禁止用户在 dashboard 输入裸 secret」**：UI 只暴露 secret picker（从 vault 选 key），不提供 textfield 写入；硬要写入只能走单独的 secret-vault 管理页（独立 endpoint，独立 audit）
 
+### 4.4.7 env_refs 严格校验（v3 C1 新加）
+
+每条 `env_refs` 进 hub 必须穿过 6 层 gate：
+
+```ts
+const ENV_KEY_RE = /^[A-Z][A-Z0-9_]{0,63}$/;       // 大写起头 / 字母数字下划线 / ≤64
+const MAX_ENV_KEYS_PER_NODE = 32;
+const MAX_ENV_VALUE_BYTES   = 16 * 1024;
+
+function validateEnvRefs(
+  refs: string[],
+  callerNetworkId: string,
+  daemonAllowList: string[],
+): void {
+  // ① regex
+  for (const k of refs) {
+    if (typeof k !== "string" || !ENV_KEY_RE.test(k)) {
+      throw new ValidationError("env_key_invalid", { key: k });
+    }
+  }
+  // ② 去重 + ③ 数量上限 (校验在去重后, 防"重复填满 32")
+  const uniq = Array.from(new Set(refs));
+  if (uniq.length !== refs.length) throw new ValidationError("env_key_duplicate");
+  if (uniq.length > MAX_ENV_KEYS_PER_NODE) throw new ValidationError("env_key_too_many");
+  // ④ 必须属 caller network 的 vault
+  for (const k of uniq) {
+    const v = networkSecretsGet(callerNetworkId, k);
+    if (v === undefined) throw new ValidationError("secret_not_in_vault", { key: k });
+    // ⑤ value 大小上限
+    if (Buffer.byteLength(v, "utf8") > MAX_ENV_VALUE_BYTES) {
+      throw new ValidationError("secret_too_large", { key: k });
+    }
+  }
+  // ⑥ 必须在 daemon 的 allowed_secret_keys 白名单
+  // (daemon 注册时声明它的本机管理员允许下放哪些 key, 即使 vault 里有别的 secret
+  //  也不能流到这台机器。最小权限。)
+  for (const k of uniq) {
+    if (!daemonAllowList.includes(k)) {
+      throw new ValidationError("secret_not_in_daemon_allowlist", { key: k });
+    }
+  }
+}
+```
+
+**`.env.local` safe serializer**（防 newline/quote 注入污染相邻 key 或逃逸引号）：
+
+```ts
+// ❌ 错: `KEY=${value}\n` — value 含 \n 或 " 都会污染下一行
+// ❌ 错: 用 shell-style export, 即使 quote 也得 escape
+//
+// ✅ 用 dotenv "double-quoted with escape" 规范:
+function serializeEnvLocal(env: Record<string, string>): string {
+  return Object.entries(env).map(([k, v]) => {
+    // 1) 反斜杠先 escape (必须最先, 不然会 unescape 后续 escape)
+    // 2) 双引号 escape
+    // 3) 实际换行符 → \n 字面量
+    // 4) 实际回车 → \r 字面量
+    const esc = String(v)
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r");
+    return `${k}="${esc}"`;
+  }).join("\n") + "\n";
+}
+```
+
+写盘：`writeFileSync(path, content, { mode: 0o600 })`。daemon 内存里 zero-fill source buffer。
+
+### 4.4.8 mint-stream-evict 失败语义 + orphan ntok revoke（v3 C4 新加）
+
+mint-stream-evict 是 happy-path 设计；失败路径必须**永不留可用的 orphan 资源**。两种 failure case：
+
+| Case | 时序 | 风险 | 处置 |
+|---|---|---|---|
+| **F-1**: hub crash before daemon get | hub mint child-ntok → 写 Map + 表 → SSE 推 daemon → **hub 进程 OOM/重启** | child-ntok 已发牌但永无 daemon 来取；hub 重启后 Map 空, 表里那行 status=pending; 那个 ntok 仍可被持有者用 | hub 启动后跑 boot-time sweeper：扫 `tokens WHERE role=child AND created_at < now-2*TTL AND never_used_at IS NULL AND request_id IN (SELECT request_id FROM node_create_requests WHERE status='pending' OR status='expired')` → 一律 `revokeToken()`，对应 request 标 `status='failed', error='hub_crash_before_delivery'`，audit log 记 |
+| **F-2**: daemon get OK, daemon crash before ack | hub 已 evict Map → daemon 拿到 env_blob + child_ntok → daemon **进程死掉**（OOM、SIGKILL、电源拔）→ ack 永不到 | 表里 status 还是 `pending`（不是 `received`）；child-ntok 已在 daemon 进程内存（已死），磁盘 `.env.local` 可能写了一半也可能没写；child-ntok 理论上没人持有但 hub 不知道 | 复用 RFC-024 reaper 逻辑：扫 `node_create_requests WHERE status IN ('pending', 'received') AND age > REAPER_TTL` (默认 60s) → 标 `status='expired'` + `revokeToken(child_ntok)` + audit log 记 `daemon_crash_or_timeout` |
+
+**关键不变量**：
+1. **child-ntok 永远是「一次性单飞」**——成功路径上 daemon 收到后立刻给子进程；失败路径上 sweeper revoke。**永不存在「mint 了但既没人用又没 revoke」的 token**
+2. **revoke 必须先于 status update**——SQL transaction 内 `BEGIN; revokeToken(); UPDATE status; COMMIT;`，避免 status 标了 expired 但 token 还活
+3. **F-1 sweeper 跑频率** = hub boot 一次 + 每 30s 一次（cheap，SQL index on (status, age)）
+4. **「never_used_at IS NULL」判断 token 是否被领过**：hub 给每个 token 加 `last_used_at` 字段，daemon 任何调用都 update。boot 扫到的 token 若 `last_used_at` 已 set 但 request 还是 pending = case F-2，仍 revoke（因 ack 没来 = daemon 死了或被持有者私吞）
+
+**why not 让 child-ntok 自带短 expires_at**：可以，但 expires_at 是 client-side 检查，server-side 不强制；revoke 是 server-side ground truth，更可靠。两者可叠加（child-ntok TTL=300s + sweeper），但 sweeper 是必须项。
+
+
 ### 4.5 Audit
 
 每次 `create_node` 必写 audit log（hub 已有 `audit_log` 表）：
@@ -444,6 +623,15 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 | `child_register_timeout` | hub | 「子进程已起但 30s 内未注册回 hub，请到服务器查日志」 |
 | `cross_network_node` | hub | 「无权限：该服务器不在你的 network」 |
 | `daemon_internal` | daemon | 「daemon 执行失败：<redacted>」（详情仅写 audit log） |
+| `not_your_request` (v3 C2) | hub | 「不能跨 daemon 取/确认 request」（daemon ↔ hub 内部错；UI 不直接暴露给用户） |
+| `env_key_invalid` (v3 C1) | hub | 「环境变量名格式非法：必须大写字母开头」 |
+| `env_key_duplicate` (v3 C1) | hub | 「环境变量名重复」 |
+| `env_key_too_many` (v3 C1) | hub | 「环境变量数量超过上限 (32)」 |
+| `secret_not_in_vault` (v3 C1) | hub | 「该 network 未配置 secret: <key>，请先在 secret vault 添加」（同 `secret_not_found`，保持一致命名） |
+| `secret_not_in_daemon_allowlist` (v3 C1) | hub | 「该服务器未启用 secret: <key>」 |
+| `secret_too_large` (v3 C1) | hub | 「secret 值超过 16KB 上限」 |
+| `channels_not_supported_in_p1` (v3 C5) | hub | 「P1 不支持 channel 绑定 (P3 接入)，请先不带 channel 创建」 |
+| `daemon_path_resolve_failed` (v3 C3) | daemon (boot) | daemon 启动 fail-fast (`which anet` 无果)；管理员控制台报错，dashboard 不参与 |
 
 ---
 
@@ -454,10 +642,35 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 **目标**：证 chain 通；不做选择 UI；只能在「跑 dashboard 的本机」起节点。
 
 - agent-node 加 `role=host_supervisor` config + `create_local_node` MCP 工具
-- hub 加 `create_node` 工具 + `node_create_requests` 表 + 派单 + content-match 终态
+- hub 加 `create_node` 工具 + `node_create_requests` 表（**无 env_blob 字段**，C1 F1 锁死）+ 派单 + content-match 终态
+- agent-node 子进程首次 `report_status` → hub content-match → request status `succeeded`
 - dashboard 加 1 个「在本机创建节点」按钮（写死本机 daemon，绕过选服务器 UI）
-- §4.1 / 4.2 / 4.3 / 4.5 全开（4.4 简化：用 NETWORK_SECRETS 表直接传 plaintext via TLS，**不上 ECDH**——单机够用）
-- Docker e2e：scenario 1 创建成功 + scenario 2 SEC role-gate 挡 member + scenario 3 daemon_max_children 挡
+- §4.1 / 4.2 / 4.3 / 4.5 全开（4.4 简化：用 NETWORK_SECRETS 表直接传 plaintext via TLS，**不上 ECDH**——单机够用，C4 sweeper 仍开）
+
+#### P1 Docker e2e test plan — 11 scenarios (test-first, 安全 critical)
+
+> 全部在 docker container 内跑（独立 namespace、`COMMHUB_DB=/tmp/...`），不碰本机/生产。每条都要真起进程、真 register、真验数据库 + 文件 + token revoke 状态。fail-fast 过≠能 think；子节点必须 real `think()` smoke。
+
+| # | Scenario | 验什么 | 覆盖的设计 |
+|---|---|---|---|
+| **A** | admin 创建成功端到端 | curl create_node → daemon SSE → fork → child 真 register → request 表 status=succeeded | §2.5 happy path |
+| **B** | member/viewer role 挡 | non-admin utok 调 create_node → 403 `insufficient_role_for_create_node`；daemon 永不收到 SSE | §4.1.1 |
+| **C** | 跨租户挡 | netA admin 不能在 netB daemon 创建；hub-side payload 注入 cross-net spec 也被 SEC-1 防护带拒；F3 子节点 mint 出的 ntok scope = caller_net 不可跨 net send_task | §4.3 |
+| **D** | secret 不落库 | dry-run 创建后 `sqlite3 commhub.db "SELECT * FROM node_create_requests"` → env_keys 字段是 `["ANTHROPIC_API_KEY"]` 名字；无 env_blob 字段；hub 进程内 Map 在 daemon get 后立刻 evict (验 `tools/call get_create_request` 二次返 not_found) | §4.4 F1 |
+| **E** | name/flag 注入挡 | `node_spec.name = "; rm -rf /"` / `runtime = "bash"` / `flags.maxTurns = "DROP TABLE"` 全被结构化 validateName/Runtime/FlagValue 拒；hub 拒一遍, daemon 拒一遍 (双层) | §4.2.2 F2 |
+| **F** | daemon_max_children 挡 | 先连发 N 个 create 把 daemon 撑到 max → 第 N+1 个 hub-side 即拒 (从 nodes 表读 daemon current_children) + daemon-side 兜底拒 | §4.2.4 |
+| **G** | env_refs 严格校验 (5 sub-case) | G1 bad key regex (`"lowercase"`) / G2 dup (`["K","K"]`) / G3 越 max count / G4 not-in-vault / G5 not-in-daemon-allowlist → 5 个独立 error code；G6 vault 里 secret 值含 `\n + "evil=KEY2"` → safe serializer escape 成 `\\n + \"evil=KEY2\"` 字面量不污染下一行 | §4.4.7 C1 |
+| **H** | daemon 间隔离 | 同 network 起 2 个 daemon (daemonA / daemonB)；create_node 派给 daemonA → daemonB 的 ntok 调 `get_create_request(request_id)` 应 403 `not_your_request`；ack 同样拒 | §4.1.4 C2 |
+| **I** | ANET_BIN PATH 投毒 | 准备 `/tmp/evil-bin/anet` (sleep 9999 假 binary) → 修改 daemon 启动时 PATH 前缀含 `/tmp/evil-bin` → daemon `which anet` resolve 应是 daemon 装的真 binary 绝对路径 (`/usr/local/bin/anet`)；fork 后子进程实际跑的 binary 必须是 pin 的路径而非 `/tmp/evil-bin/anet` (用 child cmdline + 完成时间判定) | §4.2.6 C3 |
+| **J** | mint-evict 失败 → orphan revoke | J1 sim hub crash before daemon get → boot-time sweeper 跑 → 验 child-ntok 被 revoke + request status=failed；J2 sim daemon get OK 但 crash before ack (通过 `kill -9 daemon-pid`) → reaper 60s 后跑 → 验 child-ntok 被 revoke + request status=expired | §4.4.8 C4 |
+| **K** | channels fail-closed | `node_spec.channels = ["telegram"]` 或 `[null]` 或 `[{}]` → hub-side validate 拒 `channels_not_supported_in_p1` + daemon-side 二次拒 | §4.2.5 C5 |
+
+**testing matrix 不变量**：
+- 每条 scenario 独立 hub DB + 独立 daemon 配置 (不交叉污染)
+- 安全相关 scenario (B/C/D/E/G/H/I/J/K) 必须验「错误码 + 副作用零 + audit log 记录」三件事 (不只验 reject)
+- A scenario 子节点必须 real `think()` smoke (类似 RFC-024 e2e)，证 fork 出的不是哑炮
+
+**ship 门**：11 scenarios 全 ✅ + 单元测试 (validators / mint-stream-evict / sweeper) ≥30 cases，通信牛 code review PASS → ship
 
 **ship**：作为 v0.12-preview.X 发，docs 标 EXPERIMENTAL。
 
@@ -471,12 +684,24 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 
 **ship**：v0.13-preview.X
 
-### P3 — 一整套配置 + 反向操作
+### P3 — 一整套配置 + 反向操作（含 stop/delete，Vincent 全生命周期 scope）
 
 - channel 绑定（Telegram / Feishu）
 - per-secret picker + per-node env override
 - dashboard 「停 / 删 / 重启」节点 → 反向走 daemon
 - 一键模板（demo bot / monitor bot / ...）
+
+**stop/delete 安全设计 hook（深化留 P3 单独 RFC）**：
+
+Vincent 2026-06-28 把范围扩成节点全生命周期 (create / edit / restart / delete)。edit + restart 已是 RFC-024 (config-apply + restart_node)；**stop + delete 延伸到本 RFC**——daemon 同样负责"代为停止 + 清理"。本节预占设计 anchor，**不展开细节**（通信龙 排单独深化）：
+
+| 动作 | hub 工具 (新) | daemon 工具 (新) | 安全敏感点 |
+|---|---|---|---|
+| stop_node | `request_stop_node(child_node_id)` | `stop_local_node(node_id)` | 仅 daemon 自身管理的子节点可停（同 §4.1.4 daemon_node_id 强绑模式）；非己出子节点 403 |
+| delete_node | `request_delete_node(child_node_id, also_delete_config)` | `delete_local_node(node_id, also_delete_config)` | 同 stop；额外 `also_delete_config` 默认 false（先停再删 config 是两个动作）；删除路径白名单 `~/.anet/daemon/workspaces/<network_id>/<node_name>/` 内，**绝不接受任意 path** |
+| 共同 | 复用 §4.4.8 reaper / §4.1 role gate / §4.2 双层校验 / §4.5 audit | 同 | 反向操作的破坏性 ≥ 创建，audit 要更严，每次 delete 留可恢复 backup |
+
+P3 详细设计**等创建 P1 闭环跑通后**单独 RFC（RFC-027 候选），本节仅占位以让 §4 设计点可向前兼容。
 
 **ship**：v0.14-preview.X
 
@@ -514,9 +739,19 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 - [x] §5 P1 MVP scope —— **合适**
 - [x] §6 五未决 verdict —— 通信龙 v1 全确认我的倾向，本节升级为「锁定」
 
-**待**: 通信牛 安全终审（§4.1/4.2/4.3 链）→ Vincent 拍 → 派工实施
+**待**: 通信牛 v3 复判（5 invariants C1-C5 闭合性）→ 通信龙 final → Vincent 拍 → 派工 P1 MVP impl
+
+### v3 加项 verdict（待复判）
+
+- [ ] C1 env_refs 6 层 + safe serializer (§4.4.7 + scenario G)
+- [ ] C2 daemon node_id 强绑 (§4.1.4 + scenario H)
+- [ ] C3 ANET_BIN absolute + minimalEnv.PATH (§4.2.6 + scenario I)
+- [ ] C4 mint-evict 失败 sweeper + orphan revoke (§4.4.8 + scenario J)
+- [ ] C5 channels fail-closed (§4.2.5 + §3.3 + scenario K)
+- [ ] 整体 11-scenario test plan + ship 门（§5 P1）
+- [ ] P3 stop/delete hook 占位是否合理（§5 P3）
 
 ---
 
 **作者**: 通信工程马 · 2026-06-28
-**Review 路径**: 通信龙 first-pass v1 PASS ✅ → 本 v2 折 F1/F2/F3 → 通信牛 安全终审 → Vincent 拍 → 派工 P1 MVP
+**Review 路径**: v1 通信龙 first-pass PASS ✅ → v2 折 F1/F2/F3 ✅ → v3 折通信牛 C1-C5 (本) → 通信牛 复判 → 通信龙 final → Vincent 拍 → 派工 P1 MVP impl + Phase 0 test scaffold (11 scenarios)
