@@ -16,6 +16,7 @@ import { homedir } from "os";
 import { spawn, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { checkbox, confirm, select } from "@inquirer/prompts";
+import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -1148,6 +1149,11 @@ async function initProject() {
   const anetDir = join(process.cwd(), ".anet");
   mkdirSync(anetDir, { recursive: true });
 
+  // v0.11 security — first action after creating .anet/ is to make
+  // sure git won't sweep it. See ensureAnetInRootGitignore() for the
+  // incident background.
+  ensureAnetInRootGitignore();
+
   // 1. Write node-server.ts (uses shared resolver below)
   const serverTs = join(anetDir, "node-server.js");
   const refreshed = refreshNodeServerJsAt(serverTs, { overwrite: false });
@@ -1408,23 +1414,46 @@ function loadNodeDotenv(nodeId: string): Record<string, string> {
 }
 
 // #193 envRef Option A — ensure the user's project-level `.anet/.gitignore`
-// covers per-node .env secret stores. Idempotent: appends the rule only when
-// missing; never touches existing rules.
+// covers per-node .env secret stores. Idempotent.
 function ensureNodeDotenvGitignore(): void {
   try {
     const anetDir = join(process.cwd(), ".anet");
     if (!existsSync(anetDir)) return;  // no .anet/ yet — nothing to protect
-    const gi = join(anetDir, ".gitignore");
-    const rule = "nodes/*/.env";
-    let content = "";
-    if (existsSync(gi)) content = readFileSync(gi, "utf-8");
-    if (content.split("\n").some(l => l.trim() === rule)) return;
-    const sep = content && !content.endsWith("\n") ? "\n" : "";
-    writeFileSync(gi, content + sep + rule + "\n");
+    ensureGitignoreRule(join(anetDir, ".gitignore"), "nodes/*/.env");
   } catch {}
 }
 
+// v0.11 security — ensure the *project-root* .gitignore ignores the whole
+// `.anet/` tree. Without this, `git stash -u` or `git clean -fd` in the
+// project root sweeps the untracked `.anet/` directory and silently
+// destroys configs + access.json + per-node secret stores (the 2026-06
+// incident shape that motivated the v0.11 security pass). Idempotent.
+function ensureAnetInRootGitignore(): void {
+  try {
+    const gitignorePath = join(process.cwd(), ".gitignore");
+    const outcome = ensureGitignoreRule(gitignorePath, ".anet/");
+    if (outcome === "created") {
+      console.log(`[anet] 🔒 Created ./.gitignore and added '.anet/' rule (protects against \`git stash -u\` / \`git clean -fd\`).`);
+    } else if (outcome === "appended") {
+      console.log(`[anet] 🔒 Added '.anet/' to ./.gitignore (protects against \`git stash -u\` / \`git clean -fd\`).`);
+    }
+    // 'already-present' is silent — the rule was already there, nothing to surface.
+  } catch (e: any) {
+    // Non-fatal: a CI runner may have a read-only fs, or there's no
+    // .gitignore-writable parent. Surface as a warn so the operator can
+    // add the rule manually but don't block create / init.
+    console.warn(`[anet] ⚠ could not update ./.gitignore with '.anet/' rule: ${e?.message || e}`);
+    console.warn(`[anet]    Add '.anet/' to your project's .gitignore manually to avoid \`git clean\` sweeping configs+access.json.`);
+  }
+}
+
 function saveCreatedNode(id: string, profile: Profile) {
+  // v0.11 security — node create writes to .anet/nodes/<id>/ which carries
+  // access.json + per-node tokens. Make sure project-root .gitignore covers
+  // .anet/ before we drop any secret state into it. Idempotent; silent
+  // when already present.
+  ensureAnetInRootGitignore();
+
   // #125 fix: rewrite plain-secret env values to the envRef shape **at create
   // time**, before the config first hits disk. Keeps secrets out of git
   // history, dashboard, anet ls -v, etc. User sees a banner with `export …`
