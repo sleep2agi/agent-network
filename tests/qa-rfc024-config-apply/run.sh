@@ -21,7 +21,11 @@
 #
 # Or via the harness pattern used by other qa-* tests.
 
-set -euo pipefail
+# set -u (unset-var check) + treat pipe failures as failures, but NOT
+# `set -e` — the e2e uses explicit per-scenario if-tests, so an
+# expected non-zero (e.g. jq parse on an absent field) shouldn't
+# abort the whole suite. PASS/FAIL/SKIP counters are the truth.
+set -uo pipefail
 
 # safe_rm_rf guards against rm -rf $UNDEFINED (the 2026-06-16 incident).
 # Source from one of the standard helper paths. Hard-fail if not found
@@ -70,44 +74,82 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# MCP tool-call helper. Wraps the JSON-RPC envelope + the
-# Streamable-HTTP response shape (data-prefixed SSE chunk).
+# MCP tool-call helper. Handles BOTH transport shapes:
+#   - SSE-streamed: response lines prefixed with `data: `
+#   - plain JSON-RPC: bare body (some hub versions don't stream a
+#     single-message turn)
+# Falls back from SSE-strip to raw body when no `data:` prefix found.
+# Initialize the MCP session first (per the spec) — the streamable-HTTP
+# transport rejects tools/call before initialize on some hub versions.
+MCP_SESSION_INITED=""
+mcp_init_once() {
+  [[ -n "$MCP_SESSION_INITED" ]] && return 0
+  curl -sS -X POST "$HUB_BASE/mcp" \
+    -H "Authorization: Bearer $1" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2025-03-26' \
+    -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"qa-rfc024","version":"1"}}}' \
+    >/dev/null 2>&1 || true
+  MCP_SESSION_INITED=1
+}
 mcp_call() {
   local tok="$1" name="$2" args_json="$3"
-  local body
+  mcp_init_once "$tok"
+  local body raw data
   body=$(jq -nc --arg n "$name" --argjson a "$args_json" \
     '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:$n,arguments:$a}}')
-  curl -sS -X POST "$HUB_BASE/mcp" \
+  raw=$(curl -sS -X POST "$HUB_BASE/mcp" \
     -H "Authorization: Bearer $tok" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -H 'MCP-Protocol-Version: 2025-03-26' \
-    -d "$body" \
-    | sed -n 's/^data: //p' | head -1 \
-    | jq -r '.result.content[0].text // empty'
+    -d "$body")
+  data=$(echo "$raw" | sed -n 's/^data: //p' | head -1)
+  [[ -z "$data" ]] && data="$raw"
+  # Try parsing first. If it fails, dump raw to stderr for debug + return empty.
+  local parsed
+  parsed=$(echo "$data" | jq -r '.result.content[0].text // empty' 2>/dev/null)
+  if [[ -z "$parsed" && -n "$raw" ]]; then
+    # Surface the raw for diagnostic when invocation didn't produce
+    # the expected result shape. ~200 chars truncated so logs stay
+    # readable on big SSE batches.
+    echo "[mcp_call:diag] tool=$name raw=${raw:0:200}" >&2
+  fi
+  echo "$parsed"
 }
 
 # ── 0. Boot hub ──────────────────────────────────────────────────────
-note "0. Hub boot + admin bootstrap"
+note "0. Hub boot (LOCAL server source under test, env-config'd port)"
+# server/src/index.ts reads PORT + HOST from process.env (NOT --port
+# CLI flags); we set them in the spawn environment. The bare
+# `bun run src/index.ts` doesn't bootstrap an admin user — we do that
+# via the REST /api/auth/register endpoint after boot (first user
+# becomes admin automatically per the server's register handler).
 cd /app/server
-NODE_ENV=test bun run src/index.ts \
-  --port "$HUB_PORT" --host 127.0.0.1 \
-  --username admin --password "$ADMIN_PW" \
+PORT="$HUB_PORT" HOST=127.0.0.1 NODE_ENV=test bun run src/index.ts \
   >/tmp/hub.log 2>&1 &
 HUB_PID=$!
 for i in {1..60}; do curl -fsS "$HUB_BASE/health" >/dev/null 2>&1 && break; sleep 0.5; done
-curl -fsS "$HUB_BASE/health" >/dev/null && ok "hub /health 200" || { bad "hub did not start"; tail -50 /tmp/hub.log; exit 1; }
+curl -fsS "$HUB_BASE/health" >/dev/null && ok "hub /health 200 on port $HUB_PORT" || { bad "hub did not start on $HUB_PORT"; tail -50 /tmp/hub.log; exit 1; }
 
-note "1. login admin → utok_"
-UTOK=""
-for i in {1..20}; do
-  RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/login" -H 'Content-Type: application/json' \
-    -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PW\"}")
-  UTOK=$(echo "$RESP" | jq -r '.token // empty')
-  [[ "$UTOK" == utok_* ]] && break
-  sleep 0.5
-done
-[[ "$UTOK" == utok_* ]] && ok "admin utok minted" || { bad "no utok"; echo "$RESP"; exit 1; }
+note "1. register admin user + login → utok_"
+# First user to register becomes admin automatically (per server impl).
+ADMIN_USER="rfc024admin"
+REG_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/register" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PW\",\"email\":\"rfc024@test.local\"}")
+# Register may directly return utok (depending on server version), or we may need to login.
+UTOK=$(echo "$REG_RESP" | jq -r '.token // empty')
+if [[ "$UTOK" != utok_* ]]; then
+  for i in {1..20}; do
+    RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/login" -H 'Content-Type: application/json' \
+      -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PW\"}")
+    UTOK=$(echo "$RESP" | jq -r '.token // empty')
+    [[ "$UTOK" == utok_* ]] && break
+    sleep 0.5
+  done
+fi
+[[ "$UTOK" == utok_* ]] && ok "admin utok minted (first-user becomes admin)" || { bad "no utok"; echo "REG=$REG_RESP"; echo "LOGIN=$RESP"; exit 1; }
 
 # Resolve the admin's default network for SEC-1 scoping.
 NET_ID=$(curl -sS "$HUB_BASE/api/auth/me" -H "Authorization: Bearer $UTOK" \
@@ -117,13 +159,20 @@ ok "default network = $NET_ID"
 # Create a node row + mint its ntok so the agent-node can register.
 note "2. Mint ntok_ for a test node"
 NODE_NAME="qa-rfc024-node-1"
-NTOK_RESP=$(curl -sS -X POST "$HUB_BASE/api/networks/$NET_ID/tokens" \
+# Correct endpoint per server source: POST /api/auth/node-token with
+# body { network_id, node_name } returns { ok, token } where token =
+# `ntok_<hex>`. The earlier code path used a non-existent
+# /api/networks/<id>/tokens which fell through to the homepage banner.
+NTOK_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/node-token" \
   -H "Authorization: Bearer $UTOK" \
   -H 'Content-Type: application/json' \
-  -d "{\"name\":\"node:$NODE_NAME\",\"description\":\"qa rfc024 node\"}")
+  -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"$NODE_NAME\"}")
 NTOK=$(echo "$NTOK_RESP" | jq -r '.token // empty')
-NODE_ID=$(echo "$NTOK_RESP" | jq -r '.node_id // .token_id // empty')
-[[ "$NTOK" == ntok_* ]] && ok "ntok minted ($NTOK | node_id=$NODE_ID)" || { bad "no ntok"; echo "$NTOK_RESP"; exit 1; }
+# node_id may be the deterministic node_<…> the server mints from
+# node_name; the actual id used by config-apply is what report_status
+# sends, so we'll synthesize one locally and let the upsert path pick it up.
+NODE_ID="node_rfc024_$(date +%s%N | sha256sum | head -c 12)"
+[[ "$NTOK" == ntok_* ]] && ok "ntok minted (node_id pre-assigned: $NODE_ID)" || { bad "no ntok"; echo "$NTOK_RESP"; exit 1; }
 
 # ── 3. Scenario: POST bad patch → reject (no node needed) ───────────
 note "3. SEC contract: bad patch → invalid_patch reject (no node start needed)"
@@ -279,11 +328,20 @@ for i in $(seq 1 30); do
 done
 
 if [[ -z "$REGISTERED" ]]; then
-  # Node didn't register — likely a missing dep or auth issue. Don't
-  # bad-fail since this is an integration smoke; surface as skip with
-  # the agent log so the operator can see what happened.
-  skip "restart-finalize positive" "agent-node did not register within 30s — see /tmp/agent-node-pos.log"
+  # Per 通信龙 C BLOCKER catch — register-timeout MUST hard-fail, not
+  # skip. The whole point of this scenario is to prove the W1 +
+  # restart-finalize chain actually runs end-to-end; if `anet node
+  # start` can't even register the node, every assertion below would
+  # be vacuously skipped and the suite would falsely pass.
+  bad "restart-finalize positive — agent-node FAILED to register within 30s; the W1 + finalize chain DID NOT run"
+  echo "[diag] agent-node log tail:"
+  tail -80 /tmp/agent-node-pos.log || true
+  echo "[diag] which agent-node:"
+  which agent-node 2>&1 | head -3
+  echo "[diag] anet --version:"
+  anet --version 2>&1 | head -5
   kill "$AGENT_PID" 2>/dev/null || true
+  pkill -P "$AGENT_PID" 2>/dev/null || true
 else
   ok "agent-node registered ($NODE_NAME / $NODE_ID)"
 
