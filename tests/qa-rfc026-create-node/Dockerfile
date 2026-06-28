@@ -25,7 +25,11 @@ COPY agent-node /app/agent-node
 COPY agent-network /app/agent-network
 COPY tests/lib /app/tests/lib
 COPY tests/qa-rfc026-create-node/run.sh /app/tests/qa-rfc026-create-node/run.sh
-RUN chmod +x /app/tests/qa-rfc026-create-node/run.sh
+COPY tests/qa-rfc026-create-node/nvm-sendtask-smoke.sh /app/tests/qa-rfc026-create-node/nvm-sendtask-smoke.sh
+COPY tests/qa-rfc026-create-node/test-all.sh /app/tests/qa-rfc026-create-node/test-all.sh
+RUN chmod +x /app/tests/qa-rfc026-create-node/run.sh \
+             /app/tests/qa-rfc026-create-node/nvm-sendtask-smoke.sh \
+             /app/tests/qa-rfc026-create-node/test-all.sh
 
 RUN cd /app/server && bun install --silent
 RUN cd /app/agent-node && bun install --silent && bun run build
@@ -40,4 +44,4 @@ RUN cd /app/agent-network \
 
 RUN anet --version && which anet && which agent-node
 
-CMD ["/app/tests/qa-rfc026-create-node/run.sh"]
+CMD ["/app/tests/qa-rfc026-create-node/test-all.sh"]
