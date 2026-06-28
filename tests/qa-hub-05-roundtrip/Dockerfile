@@ -6,6 +6,7 @@ ENV PATH="/root/.bun/bin:${PATH}"
 
 WORKDIR /app
 COPY tests/qa-hub-05-roundtrip/run.sh /app/run.sh
+COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
 RUN chmod +x /app/run.sh
 
 CMD ["/app/run.sh"]
