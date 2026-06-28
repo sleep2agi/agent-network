@@ -12,9 +12,9 @@ Vincent greenlight: dashboard 节点设置面板里改 `model` + 6 个 flags 必
 设计核心 (沿用 #260 v2 + 通信龙 2026-06-28 关键纠正):
 1. **节点自有配置 + hub 门铃 + 节点自应用** — 不新造控制通道, 复用 SSE doorbell + MCP pull
 2. **Supervisor-wrapper + sentinel-exit** 取代 Node execve-self (后者 fragile) — 复用刚 ship 的 `superviseChild()` helper (PR #284)
-3. **分级 apply 降重启面**: `maxTurns/budget/timeout` 热重载 (零重启), `model/permissionMode/DSP/teammateMode` restart-required (sentinel re-spawn)
+3. **分级 apply 降重启面**: `maxTurns/budget` 热重载 (零重启), `model/permissionMode/DSP/timeout` restart-required (sentinel re-spawn)
 4. **多层守护**: 两层 schema 校验 + 原子写 + .prev 备份 + crash-loop guard + boot self-heal
-5. **范围 P1**: model + 6 flags only; channel binding (A) / ops button (D) / runtime / hub 留 P2
+5. **范围 P1**: model + 5 flags only (teammateMode dropped — see §4 note). channel binding (A) / ops button (D) / runtime / hub 留 P2
 
 doc-only PR ETA 出后等 review → Vincent confirm re-exec 时序 → impl 拆 backend hub + node + frontend swap 三组并行.
 
@@ -155,7 +155,7 @@ Migration 跟现有 `must_change_password` (P0-2 PR #264) 同 pattern — `try {
 | `model` | claude SDK options 启动时一次, codex Codex.startThread, grok runtime args | **restart-required** | sentinel re-spawn | `member` (运行成本影响, 不是提权) | SDK 实例已 bound 到 model, 切换需新进程 |
 | `flags.permissionMode` | claude SDK options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** ✅ decided (通信龙 per Vincent autonomy 2026-06-28) | SDK options 不可热改 |
 | `flags.dangerouslySkipPermissions` | claude SDK / codex Codex options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** ✅ decided (同上) | 同上 |
-| `flags.teammateMode` | claude SDK options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** ✅ decided (同上) | 同上 |
+| ~~`flags.teammateMode`~~ | **DROPPED from P1 (#290 review 2026-06-28)** — only consumed by `claude-code-cli` runtime via `agent-network/bin/cli.ts` `--teammate-mode` arg; agent-node-driven runtimes don't consume it. Including silently ack'd no-op changes (same class as B2). | — | — | — | P2: add claude-code-cli config-apply path |
 | `flags.maxTurns` | per-think SDK options (option.maxTurns 每次 query 传) | **hot-reloadable** | 写文件 + in-process reload | `member` (用量节流) | 已 per-call 读, 改 mutable obj 即可热 |
 | `flags.budget` | per-think 计数 (agent-node 本地节流, 非 SDK) | **hot-reloadable** | 同上 | `member` (用量节流) | 同上 |
 | `flags.timeout` | resolveTimeoutMs 启动时 read env/flag; CLAUDE_TIMEOUT_MS 是 module-level const | **restart-required** (今天) | sentinel re-spawn | `member` (vendor 响应等待) | 现有 const 读不可热. (P2: 改成 per-think 读后转 hot) |
