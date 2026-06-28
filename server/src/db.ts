@@ -117,11 +117,40 @@ db.exec(`
     created_at              TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
-  CREATE INDEX IF NOT EXISTS idx_agent_telemetry_host_time
-    ON agent_telemetry(network_id, hostname, ip, created_at);
   CREATE INDEX IF NOT EXISTS idx_agent_telemetry_alias_time
     ON agent_telemetry(network_id, alias, created_at);
 `);
+
+// Round-2/4 review ② — server-health index split.
+//
+// The /api/server-health/:host query (index.ts) filters
+//   WHERE (hostname = ?1 OR ip = ?2) AND created_at >= ?3
+// The old combined index (network_id, hostname, ip, created_at) only
+// covers an equality on hostname AND ip (not OR), so SQLite couldn't
+// use it for the disjunction and fell back to a full scan of
+// agent_telemetry on every server-health page load. At a 30s heartbeat
+// × N agents, the table grows fast and the scan dominates.
+//
+// Split into two narrow indexes so SQLite's OR optimizer can run an
+// index UNION on (hostname-path ∪ ip-path), each path covered by an
+// index that also lets the created_at range be range-scanned on the
+// tail.
+//
+// Drop the old composite first so we don't pay write-amp for an
+// unused index (every agent_telemetry insert maintained 3 indexes
+// before; now it's 2: alias-time + ip-time, plus the new
+// hostname-time). Net write-amp is unchanged at 3 indexes maintained
+// per insert (alias + hostname + ip), but each is narrower (3 cols
+// vs the old 4-col composite), and the query plan is much better.
+try { db.exec("DROP INDEX IF EXISTS idx_agent_telemetry_host_time"); } catch {}
+try {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_telemetry_hostname_time
+           ON agent_telemetry(network_id, hostname, created_at)`);
+} catch {}
+try {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_telemetry_ip_time
+           ON agent_telemetry(network_id, ip, created_at)`);
+} catch {}
 
 // inbox: add in_reply_to, requires_response, expires_at, scope, node identity
 for (const col of [

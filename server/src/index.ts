@@ -24,6 +24,7 @@ import {
 } from "./uploads.js";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "fs";
 import { dirname as pathDirname } from "path";
+import { startRetentionSweeper } from "./retention.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -2105,9 +2106,20 @@ Security: ${SECURITY_LABEL}
   },
 });
 
+// Round-2/4 review ② — periodic retention sweep + incremental VACUUM.
+// Sweeps every hour by default. Operators can disable any single table
+// by setting COMMHUB_RETENTION_*_DAYS to a negative value, or shorten
+// the sweep window via COMMHUB_RETENTION_SWEEP_MINUTES.
+const sweepIntervalMinutes = Number(process.env.COMMHUB_RETENTION_SWEEP_MINUTES);
+const sweepIntervalMs = Number.isFinite(sweepIntervalMinutes) && sweepIntervalMinutes > 0
+  ? sweepIntervalMinutes * 60 * 1000
+  : 60 * 60 * 1000;
+const retentionSweeperTimer = startRetentionSweeper(sweepIntervalMs);
+
 // ── Graceful shutdown ───────────────────────────────
 function shutdown() {
   console.log("[commhub] shutting down...");
+  clearInterval(retentionSweeperTimer);
   db.close();
   process.exit(0);
 }
