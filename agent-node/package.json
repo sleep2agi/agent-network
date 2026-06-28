@@ -51,6 +51,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.140",
+    "undici": "^8.5.0",
     "zod": "^4.4.3"
   },
   "optionalDependencies": {
