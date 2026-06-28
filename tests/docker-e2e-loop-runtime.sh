@@ -22,6 +22,25 @@
 #     avoid). The wake log fires BEFORE the SDK call.
 
 set -e
+
+# Safe-rm guardrail per the 2026-06-16 incident — refuses to `rm -rf`
+# anything outside /tmp/*. Drop-in `safe_rm_rf` replaces every bare
+# `rm -rf "$VAR"` in this script. lint guard enforces this on PR.
+SAFE_RM_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/safe-rm.sh"
+if [ -f "$SAFE_RM_LIB" ]; then
+  source "$SAFE_RM_LIB"
+else
+  # Fallback for Docker runs where the script is mounted standalone
+  # (the lib lives at /app/tests/lib/ when copied via Dockerfile).
+  for cand in /app/tests/lib/safe-rm.sh /app/lib/safe-rm.sh; do
+    [ -f "$cand" ] && source "$cand" && break
+  done
+fi
+type safe_rm_rf > /dev/null 2>&1 || {
+  echo "FATAL: safe-rm.sh not found — refusing to run with bare rm -rf"
+  exit 99
+}
+
 PASS=0
 FAIL=0
 
@@ -80,7 +99,7 @@ echo "2. claude-agent-sdk runtime — full CLI → parser → goal → wake fire
 
 ALIAS_CLAUDE="loop-test-claude"
 WORKDIR_CLAUDE="/tmp/loop-test-claude"
-rm -rf "$WORKDIR_CLAUDE"
+safe_rm_rf "$WORKDIR_CLAUDE"
 mkdir -p "$WORKDIR_CLAUDE/.anet/nodes/$ALIAS_CLAUDE"
 cat > "$WORKDIR_CLAUDE/.anet/nodes/$ALIAS_CLAUDE/config.json" <<EOF
 {
@@ -232,7 +251,7 @@ echo "3. codex-sdk runtime — startup enable + CLI loop + wake fire..."
 
 ALIAS_CODEX="loop-test-codex"
 WORKDIR_CODEX="/tmp/loop-test-codex"
-rm -rf "$WORKDIR_CODEX"
+safe_rm_rf "$WORKDIR_CODEX"
 mkdir -p "$WORKDIR_CODEX/.anet/nodes/$ALIAS_CODEX"
 cat > "$WORKDIR_CODEX/.anet/nodes/$ALIAS_CODEX/config.json" <<EOF
 {
@@ -332,7 +351,7 @@ echo "4. Channel /loop slash path (commhub_send_task)..."
 
 ALIAS_CH="loop-test-channel"
 WORKDIR_CH="/tmp/loop-test-channel"
-rm -rf "$WORKDIR_CH"
+safe_rm_rf "$WORKDIR_CH"
 mkdir -p "$WORKDIR_CH/.anet/nodes/$ALIAS_CH"
 cat > "$WORKDIR_CH/.anet/nodes/$ALIAS_CH/config.json" <<EOF
 {
@@ -458,7 +477,7 @@ echo "6b. grok-build-acp runtime — startup enable + goal fire..."
 
 ALIAS_GROK="loop-test-grok"
 WORKDIR_GROK="/tmp/loop-test-grok"
-rm -rf "$WORKDIR_GROK"
+safe_rm_rf "$WORKDIR_GROK"
 mkdir -p "$WORKDIR_GROK/.anet/nodes/$ALIAS_GROK"
 cat > "$WORKDIR_GROK/.anet/nodes/$ALIAS_GROK/config.json" <<EOF
 {
@@ -536,7 +555,7 @@ echo "6c. Multi-cycle wake — verify the scheduler fires the SAME goal repeated
 
 ALIAS_MULTI="loop-test-multi"
 WORKDIR_MULTI="/tmp/loop-test-multi"
-rm -rf "$WORKDIR_MULTI"
+safe_rm_rf "$WORKDIR_MULTI"
 mkdir -p "$WORKDIR_MULTI/.anet/nodes/$ALIAS_MULTI"
 cat > "$WORKDIR_MULTI/.anet/nodes/$ALIAS_MULTI/config.json" <<EOF
 {
@@ -584,7 +603,8 @@ MULTI_PID=$!
 # ~60s interval). 130s window gives generous margin.
 DEADLINE=$(($(date +%s) + 130))
 while [ $(date +%s) -lt $DEADLINE ]; do
-  WAKE_COUNT=$(grep -c "\[goal\] wake ${MULTI_GOAL:0:8}" /tmp/multi-agent.log 2>/dev/null || echo 0)
+  WAKE_COUNT=$( { grep -c "\[goal\] wake ${MULTI_GOAL:0:8}" /tmp/multi-agent.log 2>/dev/null || true; } | head -1)
+  WAKE_COUNT=${WAKE_COUNT:-0}
   if [ "$WAKE_COUNT" -ge 2 ]; then break; fi
   sleep 5
 done
@@ -599,6 +619,81 @@ else
   fail "multi-cycle: only $WAKE_COUNT wake(s) observed in 130s window (expected ≥2)"
   echo "  --- multi-agent log tail ---"
   tail -25 /tmp/multi-agent.log
+fi
+
+# 6d. Multi-cycle wake on **claude-agent-sdk** specifically
+#
+# 通信龙 spot-check tighten: the existing multi-cycle test (6c) ran
+# on codex. Scheduler is runtime-agnostic shared code, but claude
+# is Vincent's personally-tested runtime — pin its multi-cycle
+# behaviour rather than relying on transitive inference from codex.
+echo ""
+echo "6d. Multi-cycle wake — claude-agent-sdk (Vincent's runtime)..."
+
+ALIAS_CMULTI="loop-test-claude-multi"
+WORKDIR_CMULTI="/tmp/loop-test-claude-multi"
+safe_rm_rf "$WORKDIR_CMULTI"
+mkdir -p "$WORKDIR_CMULTI/.anet/nodes/$ALIAS_CMULTI"
+cat > "$WORKDIR_CMULTI/.anet/nodes/$ALIAS_CMULTI/config.json" <<EOF
+{
+  "alias": "$ALIAS_CMULTI",
+  "runtime": "claude-agent-sdk",
+  "hub": "http://127.0.0.1:9210",
+  "model": "claude-sonnet-4-6",
+  "token": "$NET_TOKEN",
+  "network_id": "$NET_ID",
+  "flags": { "dangerouslySkipPermissions": true, "teammateMode": true, "goalTickMs": "5000" }
+}
+EOF
+
+CMULTI_GOAL="$(python3 -c "import uuid;print(uuid.uuid4())")"
+cat > "$WORKDIR_CMULTI/.anet/nodes/$ALIAS_CMULTI/goals.json" <<EOF
+{
+  "version": 1,
+  "goals": [
+    {
+      "goal_id": "$CMULTI_GOAL",
+      "text": "claude multi-cycle probe",
+      "status": "active",
+      "interval_ms": 60000,
+      "next_wake_at": "$PAST",
+      "runtime": "claude-agent-sdk",
+      "created_at": "$NOW",
+      "updated_at": "$NOW",
+      "progress_log": []
+    }
+  ]
+}
+EOF
+
+cd "$WORKDIR_CMULTI"
+ANTHROPIC_API_KEY="test-no-real-call" \
+  timeout 140 agent-node \
+  --alias "$ALIAS_CMULTI" \
+  --config "$WORKDIR_CMULTI/.anet/nodes/$ALIAS_CMULTI/config.json" \
+  > /tmp/cmulti-agent.log 2>&1 &
+CMULTI_PID=$!
+
+# Same 130s window as 6c codex test.
+DEADLINE=$(($(date +%s) + 130))
+while [ $(date +%s) -lt $DEADLINE ]; do
+  CMULTI_WAKE_COUNT=$( { grep -c "\[goal\] wake ${CMULTI_GOAL:0:8}" /tmp/cmulti-agent.log 2>/dev/null || true; } | head -1)
+  CMULTI_WAKE_COUNT=${CMULTI_WAKE_COUNT:-0}
+  if [ "$CMULTI_WAKE_COUNT" -ge 2 ]; then break; fi
+  sleep 5
+done
+
+kill $CMULTI_PID 2>/dev/null || true
+wait $CMULTI_PID 2>/dev/null || true
+
+CMULTI_WAKE_COUNT=$( { grep -c "\[goal\] wake ${CMULTI_GOAL:0:8}" /tmp/cmulti-agent.log 2>/dev/null || true; } | head -1)
+CMULTI_WAKE_COUNT=${CMULTI_WAKE_COUNT:-0}
+if [ "$CMULTI_WAKE_COUNT" -ge 2 ]; then
+  pass "claude multi-cycle: scheduler fired same goal $CMULTI_WAKE_COUNT times (Vincent's runtime ✓ not inference)"
+else
+  fail "claude multi-cycle: only $CMULTI_WAKE_COUNT wake(s) observed in 130s window (expected ≥2)"
+  echo "  --- claude-multi log tail ---"
+  tail -25 /tmp/cmulti-agent.log
 fi
 
 # 7. Offline node behavior — CLI polls + times out cleanly
@@ -623,6 +718,9 @@ echo ""
 echo "========================================="
 echo "  Summary: $PASS pass, $FAIL fail"
 echo "========================================="
+# Also emit the format test-all.sh's run_suite parses
+# (`\d+(?= passed)` and `\d+(?= failed)`).
+echo "Results: $PASS passed, $FAIL failed"
 
 if [ $FAIL -eq 0 ]; then
   echo "🎉 All loop-runtime checks pass"

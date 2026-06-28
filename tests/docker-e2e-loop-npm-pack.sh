@@ -17,6 +17,21 @@
 #      end-to-end against a freshly-installed-from-tgz environment
 
 set -e
+
+# Safe-rm guardrail per the 2026-06-16 incident. lint guard enforces.
+SAFE_RM_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/safe-rm.sh"
+if [ -f "$SAFE_RM_LIB" ]; then
+  source "$SAFE_RM_LIB"
+else
+  for cand in /app/tests/lib/safe-rm.sh /app/lib/safe-rm.sh; do
+    [ -f "$cand" ] && source "$cand" && break
+  done
+fi
+type safe_rm_rf > /dev/null 2>&1 || {
+  echo "FATAL: safe-rm.sh not found — refusing to run with bare rm -rf"
+  exit 99
+}
+
 PASS=0
 FAIL=0
 
@@ -104,7 +119,7 @@ NET_ID=$(echo "$REG" | python3 -c "import sys,json;print(json.load(sys.stdin).ge
 
 ALIAS="pack-test-claude"
 WORKDIR="/tmp/pack-test-claude"
-rm -rf "$WORKDIR"
+safe_rm_rf "$WORKDIR"
 mkdir -p "$WORKDIR/.anet/nodes/$ALIAS"
 cat > "$WORKDIR/.anet/nodes/$ALIAS/config.json" <<EOF
 {
@@ -170,6 +185,8 @@ echo ""
 echo "========================================="
 echo "  npm-pack smoke: $PASS pass, $FAIL fail"
 echo "========================================="
+# Format for test-all.sh's run_suite regex.
+echo "Results: $PASS passed, $FAIL failed"
 
 if [ $FAIL -eq 0 ]; then
   echo "🎉 npm-pack install path verified — user install will work"
