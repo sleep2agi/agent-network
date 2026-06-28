@@ -32,11 +32,23 @@ export const RESTART_SENTINEL = 75;
 
 /** Defense-in-depth local validation. Same allowlist as hub but
  * intentionally duplicated — if hub validator drifts loose, the node
- * still refuses anything outside this set. */
+ * still refuses anything outside this set.
+ *
+ * NB on teammateMode (dropped from P1 scope per #290 review):
+ *   The dashboard schema in RFC-024 §4 originally listed teammateMode
+ *   as one of the 6 dashboard-editable flags. Investigation found
+ *   teammateMode is ONLY consumed by `claude-code-cli` runtime via
+ *   agent-network/bin/cli.ts (passed as --teammate-mode CLI arg at
+ *   spawn). The agent-node-driven runtimes (claude-agent-sdk /
+ *   codex-sdk / grok-build-acp) that PR B's config-apply runtime
+ *   targets do NOT consume it. Including it in the allowlist would
+ *   silently ack `applied` for changes that have zero effect — same
+ *   class of issue as BLOCKER 2 (budget/timeout schema mismatch).
+ *   P2 to add a claude-code-cli config-apply path.
+ */
 const ALLOWED_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
-  "teammateMode",
   "maxTurns",
   "budget",
   "timeout",
@@ -45,7 +57,6 @@ const ALLOWED_FLAGS = new Set<string>([
 const RESTART_REQUIRED_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
-  "teammateMode",
   "timeout",
 ]);
 
@@ -87,7 +98,6 @@ export function validateLocalPatch(patch: ConfigPatch): ValidationResult {
         }
         break;
       case "dangerouslySkipPermissions":
-      case "teammateMode":
         if (typeof val !== "boolean") return { field: `flags.${key}`, reason: "must be boolean" };
         break;
       case "maxTurns":
@@ -128,11 +138,25 @@ export function computeApplyMode(patch: ConfigPatch): ApplyMode {
 /** Atomic JSON write — temp + rename. Mirrors writeAccessJsonAtomic
  * in agent-network/bin/cli.ts (PR #261 P0-1 catch). Crash-safe; on
  * Ctrl-C / disk-full / concurrent write the target file is never
- * left half-written. */
+ * left half-written.
+ *
+ * Cleans up the tmp file on either write or rename failure so a
+ * disk-full event doesn't leak `.tmp.<pid>.<ts>` litter every retry
+ * (caught by cross-agent review on PR B).
+ */
 export function atomicWriteJson(path: string, data: unknown): void {
   const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
-  renameSync(tmp, path);
+  try {
+    writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
+    renameSync(tmp, path);
+  } catch (e) {
+    // Best-effort cleanup; ignore if tmp doesn't exist or unlink fails.
+    try {
+      const { unlinkSync } = require("node:fs");
+      if (existsSync(tmp)) unlinkSync(tmp);
+    } catch { /* swallow */ }
+    throw e;
+  }
 }
 
 /** Copy the current config to a .prev sidecar so a restart can roll

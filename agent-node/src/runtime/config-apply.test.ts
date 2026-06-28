@@ -83,8 +83,10 @@ describe("computeApplyMode — tier classifier", () => {
   test("dangerouslySkipPermissions → restart", () => {
     expect(computeApplyMode({ flags: { dangerouslySkipPermissions: true } })).toBe("restart");
   });
-  test("teammateMode → restart", () => {
-    expect(computeApplyMode({ flags: { teammateMode: false } })).toBe("restart");
+  test("teammateMode no longer in allowlist → ignored by classifier (returns hot since no restart-required flag matches)", () => {
+    // teammateMode dropped from P1 schema per #290 review — not consumed
+    // by agent-node runtimes. classifier no longer keys on it.
+    expect(computeApplyMode({ flags: { teammateMode: false } as any })).toBe("hot");
   });
   test("timeout → restart", () => {
     expect(computeApplyMode({ flags: { timeout: 60000 } })).toBe("restart");
@@ -210,6 +212,26 @@ describe("mergePatch — patch + existing → new config (no mutation)", () => {
     const next = mergePatch(existing, {});
     expect(next).toEqual(existing);
     expect(next).not.toBe(existing);  // deep clone, not alias
+  });
+});
+
+describe("validateLocalPatch — teammateMode dropped (#290 review)", () => {
+  // teammateMode no longer in ALLOWED_FLAGS for agent-node runtimes
+  // (consumer only exists in agent-network's claude-code-cli spawn,
+  // not in agent-node). Patch should now be rejected as not-in-allowlist.
+  test("teammateMode rejected (was: allowed boolean; now: not-in-allowlist)", () => {
+    const r = validateLocalPatch({ flags: { teammateMode: true } as any });
+    expect(r?.field).toBe("flags.teammateMode");
+    expect(r?.reason).toMatch(/allowlist/i);
+  });
+});
+
+describe("computeApplyMode — teammateMode is no longer restart-required (#290 review)", () => {
+  test("teammateMode-only patch → hot (no longer in RESTART_REQUIRED_FLAGS)", () => {
+    // Note: validatePatch would reject this before computeApplyMode
+    // ever sees it; this test just pins the classifier's behaviour
+    // for the case where teammateMode somehow slipped past the gate.
+    expect(computeApplyMode({ flags: { teammateMode: false } as any })).toBe("hot");
   });
 });
 

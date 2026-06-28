@@ -57,6 +57,7 @@ import {
   computeApplyMode as computeConfigApplyMode,
   atomicWriteJson,
   backupConfigPrev,
+  loadConfigWithSelfHeal,
   mergePatch,
   buildConfigSnapshot,
   RESTART_SENTINEL,
@@ -160,8 +161,29 @@ let currentConfigRevision = 0;
 
 if (opts.config) {
   const cfgPath = opts.config.startsWith("/") ? opts.config : join(process.cwd(), opts.config);
-  const fc = loadJson(cfgPath);
-  if (fc) { fileConfig = fc; configFilePath = cfgPath; console.log(`[agent-node] Config: ${cfgPath}`); }
+  // RFC-024 — boot self-heal. If the primary config is corrupt / missing,
+  // restore from the .prev sidecar that processConfigUpdate writes
+  // before every restart-required apply. Without this wire-up, a node
+  // whose latest apply wrote a config the runtime can't parse would
+  // boot with empty fileConfig (no token / no hub / no alias) and never
+  // recover. We try self-heal first; on hard failure (primary parses
+  // AND no .prev fallback) fall back to the old loadJson semantics so
+  // a fresh-install (no .prev) still boots with whatever we have.
+  try {
+    const outcome = loadConfigWithSelfHeal(cfgPath);
+    fileConfig = outcome.config;
+    configFilePath = cfgPath;
+    if (outcome.source === "prev") {
+      console.warn(`[agent-node] ⚠ RFC-024 self-heal — primary config ${cfgPath} unparseable (${outcome.primaryError || "?"}); restored from .prev sidecar`);
+    }
+    console.log(`[agent-node] Config: ${cfgPath} (source=${outcome.source})`);
+  } catch (e: any) {
+    // No usable config (no primary + no .prev). Fall back to the
+    // pre-RFC-024 behaviour: try a plain loadJson, accept null.
+    const fc = loadJson(cfgPath);
+    if (fc) { fileConfig = fc; configFilePath = cfgPath; console.log(`[agent-node] Config: ${cfgPath} (plain load)`); }
+    else { console.warn(`[agent-node] ⚠ config not loaded: ${e?.message || e}`); }
+  }
 }
 
 // #203 — alias source priority + cross-source sanity check. `--alias` (set by
@@ -308,8 +330,29 @@ let TOOLS: string[] | typeof TOOLS_PRESET =
 // uses one turn per tool roundtrip, so any task that uses commhub MCP or
 // reads files burns through 5 turns instantly and fails with
 // "Reached maximum number of turns (5)" — which is what Vincent saw.
-const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "50");
-const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
+//
+// RFC-024 BLOCKER 2 fix: maxTurns / maxBudgetUsd must be re-read at think
+// time from the (possibly hot-updated) fileConfig, NOT cached as module
+// consts at init. Pre-fix: dashboard hot-apply maxTurns wrote the file +
+// bumped revision + ack'd applied, but the next think still used the
+// init-time MAX_TURNS const → silent no-op. Read accessors below are
+// invoked per-think; --max-turns CLI flag still wins as override.
+const MAX_TURNS_CLI = opts["max-turns"] ? parseInt(opts["max-turns"]) : undefined;
+const MAX_BUDGET_CLI = opts["max-budget"] ? parseFloat(opts["max-budget"]) : undefined;
+function currentMaxTurns(): number {
+  if (MAX_TURNS_CLI !== undefined) return MAX_TURNS_CLI;
+  const f = fileConfig.flags?.maxTurns ?? fileConfig.maxTurns ?? "50";
+  const n = typeof f === "number" ? f : parseInt(String(f));
+  return Number.isFinite(n) ? n : 50;
+}
+function currentMaxBudget(): number {
+  if (MAX_BUDGET_CLI !== undefined) return MAX_BUDGET_CLI;
+  // Dashboard sends `flags.budget` per RFC-024 schema; legacy config files
+  // use `flags.maxBudgetUsd`. Read both, prefer the new canonical key.
+  const f = fileConfig.flags?.budget ?? fileConfig.flags?.maxBudgetUsd ?? fileConfig.maxBudgetUsd ?? "0";
+  const n = typeof f === "number" ? f : parseFloat(String(f));
+  return Number.isFinite(n) ? n : 0;
+}
 // Wall-clock guard for the claude-agent-sdk query(). The SDK has no HTTP-level
 // timeout: a custom ANTHROPIC_BASE_URL endpoint that accepts the connection but
 // never streams a valid response leaves query() hanging forever and the agent
@@ -323,10 +366,28 @@ const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetU
 // fired mid-stream before the vendor's queue drained, swallowing the real
 // cause. 300s covers the observed tail (37s) with 8× headroom and lets
 // claude-agent-sdk's own 429/5xx retry chain engage.
-const CLAUDE_TIMEOUT_MS = parseInt(
-  opts["claude-timeout-ms"] || process.env.CLAUDE_TIMEOUT_MS
-  || fileConfig.flags?.claudeTimeoutMs || fileConfig.claudeTimeoutMs || "300000"
-);
+// RFC-024 BLOCKER 2 fix — read accessor (not init-time const) so a
+// dashboard-driven restart-required apply that writes a new
+// `flags.timeout` (RFC-024 canonical key) takes effect immediately
+// after re-spawn. Legacy `flags.claudeTimeoutMs` kept as fallback for
+// pre-RFC-024 config files. CLI flag wins as override.
+const CLAUDE_TIMEOUT_MS_CLI = opts["claude-timeout-ms"]
+  ? parseInt(opts["claude-timeout-ms"]) : (process.env.CLAUDE_TIMEOUT_MS
+  ? parseInt(process.env.CLAUDE_TIMEOUT_MS) : undefined);
+function currentClaudeTimeoutMs(): number {
+  if (CLAUDE_TIMEOUT_MS_CLI !== undefined) return CLAUDE_TIMEOUT_MS_CLI;
+  const v = fileConfig.flags?.timeout
+    ?? fileConfig.flags?.claudeTimeoutMs
+    ?? fileConfig.claudeTimeoutMs
+    ?? "300000";
+  const n = typeof v === "number" ? v : parseInt(String(v));
+  return Number.isFinite(n) ? n : 300_000;
+}
+// Back-compat shim — old call sites referenced CLAUDE_TIMEOUT_MS as a
+// const value, so for sites that genuinely want one-shot at-init read
+// we keep this const. Hot-apply-aware sites should call
+// currentClaudeTimeoutMs() instead.
+const CLAUDE_TIMEOUT_MS = currentClaudeTimeoutMs();
 // v0.9.2 (#129 + #132): retry count for transient LLM-call errors.
 // Auth-error class (401 / invalid_api_key / A0211) short-circuits retry —
 // retrying with the same bad credential just wastes 12s before failing
@@ -341,11 +402,21 @@ const CLAUDE_MAX_RETRIES = parseInt(
 // Mirror CLAUDE_TIMEOUT_MS shape but default 300s, settable via env /
 // flag for the parity flags listed in docs/runbooks/. resolveTimeoutMs
 // honours `0` as "disabled" so power users can opt out.
-const CODEX_TIMEOUT_MS = resolveTimeoutMs({
-  envValue: opts["codex-timeout-ms"] || process.env.CODEX_TIMEOUT_MS,
-  flagValue: typeof fileConfig.flags?.codexTimeoutMs === "number" ? fileConfig.flags.codexTimeoutMs : undefined,
-  defaultMs: 300_000,
-}).valueMs;
+// RFC-024 — same canonical-key (flags.timeout) read precedence as
+// claude. Pre-RFC-024 callers passed flags.codexTimeoutMs; that's kept
+// as a fallback.
+function currentCodexTimeoutMs(): number {
+  return resolveTimeoutMs({
+    envValue: opts["codex-timeout-ms"] || process.env.CODEX_TIMEOUT_MS,
+    flagValue: typeof fileConfig.flags?.timeout === "number"
+      ? fileConfig.flags.timeout
+      : (typeof fileConfig.flags?.codexTimeoutMs === "number"
+          ? fileConfig.flags.codexTimeoutMs : undefined),
+    defaultMs: 300_000,
+  }).valueMs;
+}
+const CODEX_TIMEOUT_MS = currentCodexTimeoutMs();  // back-compat shim
+
 // Grok handshake (initialize + authenticate + session/new) is decoupled
 // from the prompt timeout. Pre-redirect both shared the same 300s knob,
 // so a stuck handshake hid behind the prompt deadline.
@@ -1531,7 +1602,7 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     // #101 fix: TOOLS is now either an explicit allowlist (string[]) or the
     // SDK's "give me the full Claude Code preset" sentinel — never undefined.
     tools: TOOLS,
-    maxTurns: MAX_TURNS,
+    maxTurns: currentMaxTurns(),  // RFC-024 — re-read per think for hot-apply
     permissionMode: resolvedPermissionMode,
     ...(resolvedPermissionMode === "bypassPermissions"
       ? { allowDangerouslySkipPermissions: true }
@@ -1552,7 +1623,8 @@ async function processWithClaude(task: string, from: string, images?: string[]):
       }] }],
     },
   };
-  if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;
+  const budget = currentMaxBudget();  // RFC-024 — re-read per think for hot-apply
+  if (budget > 0) options.maxBudgetUsd = budget;
   // #130 hotfix — intern-s2-preview emits Anthropic-spec `tool_use` content
   // blocks only when biased by a system prompt; the default tool_choice:auto
   // behaviour is verbose "Thinking Process" text-only output with tool calls
@@ -2434,7 +2506,22 @@ async function tryHandleExplicitDelegation(task: string, from: string, taskId: s
 // ══════════════════════════════════════
 let thinkQueue = Promise.resolve();
 
+// RFC-024 — set by drainInFlightThink() before exit(75). Blocks new
+// think() calls so the supervisor exit can't race a fresh task that
+// reassigns thinkQueue under it. Without this, a task arriving during
+// drain would chain onto a new thinkQueue, the drain's race awaits the
+// OLD thinkQueue ref, and the new task is killed by exit(75) mid-flight.
+let configApplyDraining = false;
+
 function think(task: string, from: string, taskId: string | null, images?: string[]): Promise<string> {
+  if (configApplyDraining) {
+    // Don't accept new work during a restart drain. The error string
+    // is intentionally explicit so the upstream caller (inbox handler,
+    // IM channel, etc.) doesn't silently retry — the node is going
+    // down. Hub will redeliver / re-poll naturally once the new child
+    // is up.
+    return Promise.resolve(`执行出错: agent-node 重启中（config-apply drain），任务暂不处理，请稍后重发`);
+  }
   const run = async () => {
     // Expose CURRENT_TASK_ID for runtime processes (Claude SDK / Codex)
     // so the LLM can pass it as parent_task_id when delegating sub-tasks.
@@ -3104,7 +3191,10 @@ async function connectTelegram(channel: TelegramChannel) {
 // capped at 60s per §8 confirm; we don't try to "warm-handoff" the
 // running think (out of v0.11 scope). Sets configApplyDraining BEFORE
 // awaiting thinkQueue so new tasks are rejected at queue-time — otherwise
-// a fresh task could reassign thinkQueue under us and slip past exit(75).
+// a fresh task could reassign thinkQueue under us, our race would await
+// the OLD reference, and the new task would slip past and get killed
+// by exit(75). The draining flag in think() (cli.ts) intercepts new
+// calls and returns a "node restarting" string instead.
 async function drainInFlightThink(hardCapMs = 60_000): Promise<void> {
   configApplyDraining = true;
   const start = Date.now();
