@@ -84,13 +84,16 @@ GET  /api/anet/node-config?apply_id=<id>
 
 Payload-free per #260 v2 (节点 pull 拿完整 patch). 复用现有 `pushEvent(alias, event, networkId)` — 零新基础设施.
 
-### 2.2 MCP tools (新 3 个)
+### 2.2 MCP tools (新 4 个 — 含 Vincent restart_node 增量)
 
 | Tool | Caller | 入参 | 出参 | 鉴权门 (network-scoped, **每条都必查**) |
 |---|---|---|---|---|
 | `update_node_config` | utok_ (dashboard) | `{ node_id, base_revision, patch: {model?, flags?} }` | `{ update_id, revision: number }` 或 409 | (a) caller utok_ 有效 + (b) **`node.network_id == caller.effectiveNetId`** (同 #275 防护带, 即使 dashboard 已 enforce 也必再查 — dashboard 可绕过) + (c) role gate (role≠viewer 起步; 安全敏感 flag 见 §4 「min role」列) + (d) base_revision 匹配当前 (else 409 revision_conflict) + (e) flag allowlist + (f) enum/range validate + (g) 单飞 (同 node 已有 pending → 409 update_in_flight) |
 | `get_config_update` | ntok_ (node 自己) | `{}` | `{ update_id, patch, apply_mode, base_revision } \| null` | (a) caller ntok_ 解析出 callerAlias + (b) **拉的 update.node_id ↔ callerAlias 必匹配** (节点拉不到别 network 节点的 update) + (c) update.network_id 也必匹配, 防 SQL JOIN 跑偏 |
 | `ack_config_update` | ntok_ | `{ update_id, status: "applied"\|"rejected"\|"restarting"\|"timeout", new_revision?, error? }` | `{ ok }` | (a) caller ntok_ → callerAlias + (b) **update.node_id ↔ callerAlias 匹配** (别 network 节点不能 ack 它的 update) + (c) update_id 仍为当前 pending (else stale ignored, 不报错) |
+| **`restart_node`** (Vincent 2026-06-28 增量) | utok_ (dashboard) | `{ node_id }` | `{ update_id }` | (a) SEC-1: `node.network_id == caller.effectiveNetId`, 跨网 reject 403 `cross_network_node` + (b) role gate: **`member+`** (重启是 lifecycle ops 非提权, 跟 stop/start CLI 同 role; **无 SEC-2 admin gate**) + (c) 单飞 (同 node 已有 pending update → 409 `update_in_flight` 或 supersede pending config-apply) |
+
+**`restart_node` 跟 `update_node_config` 区别**: 不写 desired_config, 仅创建一个 `apply_mode="restart_only"` 的 update record (patch_json = `{}`); doorbell `{type:"restart", update_id}`. 节点 handler 跳过 validate/write/.prev 步骤, 直接走 drain → exit 75 → parent re-spawn (同 config). 复用 apply-status 状态机让 dashboard 看到 restarting → applied 进度.
 
 **SEC-1 (cross-tenant write 防护带)**: 上面 (b) 每条都必须 hub-side 校验. 不可仅靠 dashboard `/api/anet/node-config` 路由先做一次 — 浏览器侧可被绕 (curl 直接打 hub MCP endpoint). 这条跟 #275 跨租户 `parent_task_id` 写防护带同源, **每个新工具都必须独立 re-check**.
 
@@ -227,6 +230,12 @@ Dashboard              hub (commhub-server)              agent-node (parent supe
    │◀─────────────────────────│                                       │                                  │
    │ toast: ✓ 配置已生效      │                                       │                                  │
 ```
+
+### 5.1b Restart-only path (`restart_node` Vincent 2026-06-28 增量)
+
+跟 §5.1 完全一样, 跳过 validate/atomic write/.prev 步骤. 节点收到 `{type:"restart", update_id}` doorbell → `get_config_update` 拉到 `apply_mode="restart_only"` + 空 patch → 直接 `triggerRestart()` (drain in-flight → ack restarting → process.exit(75)) → parent superviseChild re-spawn 同 config → new child online → ack applied.
+
+复用 §5.1 同 30s stable-timer + crash-loop guard (新 child 30s 内崩 → 父告警, 不 rollback 因为 config 没变). 复用 apply-status 状态机让 dashboard 看到 saving → restarting → applied / timeout.
 
 ### 5.2 Hot path (maxTurns / budget)
 
@@ -384,6 +393,7 @@ tests/docker-e2e/config-apply.test.ts (新):
 | **Hot vs restart 分类** | 见 §4 矩阵 | model 是否可热? 当前判否, 求证 |
 | **Bare 节点行为** | hub reject + dashboard 提示 | 给 daemon-less 节点降级一个 "guidance" 提示 |
 | **dashboard apply timeout** | 30s ceiling | 跟 hub poll 同 / 长一些 |
+| **谁能 `restart_node`** (Vincent 增量) | **member+** (lifecycle ops, 跟 stop/start CLI 同 role; 无 SEC-2 admin gate) | admin-only? owner-only? |
 | **SEC-2 — 谁能远程改 security-sensitive flag** (`permissionMode` / `dangerouslySkipPermissions` / `teammateMode`) | `admin` role 起步 | `owner` only? 完全禁远程 (CLI-only)? |
 | **SEC-1 — network 跨边界例外** | 严禁 (即使 owner 跨 network 也拒) | owner 可跨网 (信任顶 role)? |
 | **`model` 是否算 security flag** | 不算 (运行成本影响, 不提权) | 也算 (能引上无审 vendor 也算风险面)? |
@@ -402,6 +412,7 @@ tests/docker-e2e/config-apply.test.ts (新):
 | B4 | `pushEvent(alias, {type:"config_update", update_id})` 接 B1 | server/src/index.ts:~1900 (跟 new_task pushEvent 同) | ~5 |
 | B5 | `/api/nodes/<id>/config` GET (dashboard 读 snapshot) | server/src/index.ts | ~30 |
 | B6 | `report_status` 扩展带 config_snapshot | server/src/tools.ts | ~15 |
+| **B-restart** | `restart_node` MCP tool (Vincent 增量, 复用 update record + doorbell `{type:"restart"}`, SEC-1 强校, member+ role) | server/src/tools.ts | ~30 |
 
 ### Agent-node
 
@@ -413,6 +424,7 @@ tests/docker-e2e/config-apply.test.ts (新):
 | N4 | Atomic write + .prev backup + boot self-heal | agent-node/src/runtime/config-apply.ts | (in N2) |
 | N5 | Sentinel exit 75 path | agent-node/src/cli.ts shutdown extend | ~15 |
 | N6 | `config_snapshot` build (masked) — report_status 上报 | agent-node/src/cli.ts (reportStatus) | ~25 |
+| **N-restart** | SSE handler 加 `restart` 分支 → 直接调 `triggerRestart()` (skip validate/write/.prev, 仅 drain + exit 75) | agent-node/src/cli.ts + runtime/config-apply.ts | ~30 |
 
 ### Frontend (mock → live swap)
 
