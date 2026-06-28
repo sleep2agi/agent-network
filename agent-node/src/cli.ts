@@ -22,6 +22,7 @@ import { decideTickWork } from "./goals/scheduler";
 import { runCodexWakeForGoal, type CodexWakeDeps } from "./goals/codex-wake";
 import { isGoalCompleteSentinel } from "./goals/completion-detect";
 import { computeNextWakeAt } from "./goals/schedule";
+import { formatSelfLoopsBlock } from "./goals/format";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
@@ -2624,11 +2625,29 @@ async function processTask(task: string, from: string, taskId: string | null = n
   log(`→ processing [${RUNTIME}]${images?.length ? ` +${images.length} image(s)` : ""}: ${task.slice(0, 80)}`);
   await reportStatus("working", task.slice(0, 200)).catch(() => {});
 
+  // RFC-025 M1c P0b — context injection.
+  // Prepend a self-loop block so the agent knows what it's currently
+  // looping. Pure formatter; empty when no active/paused goals.
+  // Read goals fresh every turn (no cache) so M1d edits / new loops
+  // show up immediately on the next think.
+  let augmentedTask = task;
+  try {
+    const myGoals = await goalStore.list();
+    const block = formatSelfLoopsBlock(myGoals);
+    if (block) {
+      augmentedTask = block + "\n" + task;
+    }
+  } catch (e: any) {
+    // Defensive: a bad goalStore read MUST NOT block normal task
+    // processing. Log and continue with the original task.
+    warn(`[goals/format] inject failed: ${e?.message ?? e} (task continues without block)`);
+  }
+
   let text: string;
   let failed = false;
   try {
-    text = await tryHandleExplicitDelegation(task, from, taskId)
-      || await think(task, from, taskId, images);
+    text = await tryHandleExplicitDelegation(augmentedTask, from, taskId)
+      || await think(augmentedTask, from, taskId, images);
   } catch (err: any) {
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;
