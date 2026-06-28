@@ -501,20 +501,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // round5 F2: pass caller's effectiveNetId so the chain refuses
       // to write across tenants if some upstream parent links to a
       // foreign network.
+      //
+      // round5 follow-up (通信牛 SSE leak catch): gate the SSE push on
+      // `result.chained` — if the chain refused (cross-network), the
+      // subsequent SELECT of `parent.from_name` + `pushEvent(...,
+      // parent.task_id)` would leak the foreign parent's task_id into
+      // the caller's network via the SSE payload. Skip the push when
+      // the chain didn't actually write.
       if (updatedTaskId) {
         try {
-          chainReplyToParent(updatedTaskId, result, "replied", 5, effectiveNetId);
-          const parentChain = db.get<{ parent_task_id: string | null }>(
-            "SELECT parent_task_id FROM tasks WHERE task_id = ?1",
-            [updatedTaskId]
-          );
-          if (parentChain?.parent_task_id) {
-            const parent = db.get<{ from_name: string; task_id: string }>(
-              "SELECT from_name, task_id FROM tasks WHERE task_id = ?1",
-              [parentChain.parent_task_id]
+          const chainResult = chainReplyToParent(updatedTaskId, result, "replied", 5, effectiveNetId);
+          if (chainResult.chained) {
+            const parentChain = db.get<{ parent_task_id: string | null }>(
+              "SELECT parent_task_id FROM tasks WHERE task_id = ?1",
+              [updatedTaskId]
             );
-            if (parent?.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
-              pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: updatedTaskId, child_alias: alias }, effectiveNetId);
+            if (parentChain?.parent_task_id) {
+              const parent = db.get<{ from_name: string; task_id: string }>(
+                "SELECT from_name, task_id FROM tasks WHERE task_id = ?1",
+                [parentChain.parent_task_id]
+              );
+              if (parent?.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
+                pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: updatedTaskId, child_alias: alias }, effectiveNetId);
+              }
             }
           }
         } catch (e: any) {
@@ -698,6 +707,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       const metaJson = normalizeMetaJson(meta);
+
+      // Role check FIRST — round5 follow-up (通信牛 oracle catch):
+      // the explicit-parent verification below distinguishes
+      // `cross_network_parent` from `permission_denied`. If we ran the
+      // parent lookup before canWrite, a viewer role could probe parent
+      // existence + ownership of foreign parents via the difference in
+      // error codes. Run canWrite first so a viewer ALWAYS gets the
+      // same `permission_denied` regardless of parent state.
+      if (!canWrite(effectiveNetId)) {
+        return writeDeniedReply(effectiveNetId, "send_task");
+      }
+
       // Resolve parent_task_id: explicit > inferred (caller's most recent
       // delivered/started inbox task that's still open). Inference is the
       // safety net for when the LLM forgets to pass parent_task_id.
@@ -741,11 +762,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             message: "parent_task_id belongs to a different network",
           }) }] };
         }
-      }
-
-      // Role check: viewer cannot send tasks
-      if (!canWrite(effectiveNetId)) {
-        return writeDeniedReply(effectiveNetId, "send_task");
       }
 
       // License check
@@ -1017,21 +1033,26 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // round5 F2: pass caller's effectiveNetId so the chain refuses
       // to write across tenants if some upstream parent links to a
       // foreign network.
+      //
+      // round5 follow-up (通信牛 SSE leak catch): gate the SSE push on
+      // `result.chained`. See report_completion path above for the
+      // full reasoning — same leak, same gate.
       if (replyLogged && in_reply_to) {
         try {
-          chainReplyToParent(in_reply_to, text, replyStatus, 5, effectiveNetId);
-          // Push SSE event for parent originator if there is a chain.
-          const parentChain = db.get<{ parent_task_id: string | null; from_name: string }>(
-            "SELECT parent_task_id, from_name FROM tasks WHERE task_id = ?1",
-            [in_reply_to]
-          );
-          if (parentChain?.parent_task_id) {
-            const parent = db.get<{ from_name: string; task_id: string }>(
-              "SELECT from_name, task_id FROM tasks WHERE task_id = ?1",
-              [parentChain.parent_task_id]
+          const chainResult = chainReplyToParent(in_reply_to, text, replyStatus, 5, effectiveNetId);
+          if (chainResult.chained) {
+            const parentChain = db.get<{ parent_task_id: string | null; from_name: string }>(
+              "SELECT parent_task_id, from_name FROM tasks WHERE task_id = ?1",
+              [in_reply_to]
             );
-            if (parent?.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
-              pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: in_reply_to, child_alias: alias }, effectiveNetId);
+            if (parentChain?.parent_task_id) {
+              const parent = db.get<{ from_name: string; task_id: string }>(
+                "SELECT from_name, task_id FROM tasks WHERE task_id = ?1",
+                [parentChain.parent_task_id]
+              );
+              if (parent?.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
+                pushEvent(parent.from_name, { type: "chained_reply", parent_task_id: parent.task_id, child_task_id: in_reply_to, child_alias: alias }, effectiveNetId);
+              }
             }
           }
         } catch (e: any) {

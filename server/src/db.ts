@@ -762,17 +762,39 @@ export function logAudit(userId: string | null, username: string | null, action:
  * (e.g. server-internal bookkeeping that doesn't have a tenant
  * context) can omit `callerNetId`, but every MCP tool path MUST
  * supply it.
+ *
+ * Returns `{ chained, stoppedReason? }` so the caller can gate its
+ * follow-up SSE push on whether the chain actually wrote (round-2
+ * fix per #275 follow-up, 通信牛 catch): even when the WRITE was
+ * refused, callers were still running `SELECT parent.from_name;
+ * pushEvent(parent.from_name, { parent_task_id }, callerNetId)` —
+ * leaking the foreign parent's task_id into the caller's network
+ * via the SSE payload. Now the caller checks `result.chained` before
+ * pushing the chained_reply event.
  */
+export type ChainReplyResult = {
+  /** True iff this call actually wrote into at least one parent row.
+   *  When false, callers MUST NOT push SSE events for parent
+   *  listeners — the chain would otherwise leak the foreign parent's
+   *  identifiers into the caller's network. */
+  chained: boolean;
+  /** Optional reason the chain stopped short. Today the only enforced
+   *  reason is `cross_network`; future reasons (max-depth, parent-
+   *  archived, etc.) can land here without breaking callers. */
+  stoppedReason?: "cross_network";
+};
+
 export function chainReplyToParent(
   childTaskId: string,
   replyText: string,
   replyStatus: "replied" | "failed" | "cancelled" = "replied",
   maxDepth = 5,
   callerNetId?: string | null,
-): void {
+): ChainReplyResult {
   let currentChildId: string | null = childTaskId;
   let currentReply = replyText;
   let depth = 0;
+  let chained = false;
   // Normalize so undefined ("don't enforce") stays distinct from
   // null ("explicit default network"). Caller passes undefined to
   // opt out of the cross-tenant check; null to require the parent
@@ -788,12 +810,12 @@ export function chainReplyToParent(
       "SELECT parent_task_id, to_name, from_name, content FROM tasks WHERE task_id = ?1",
       currentChildId
     );
-    if (!child?.parent_task_id) return;
+    if (!child?.parent_task_id) return { chained };
     const parent: ParentRow | null = db.get<ParentRow>(
       "SELECT task_id, from_name, to_name, status, result, network_id, parent_task_id FROM tasks WHERE task_id = ?1",
       child.parent_task_id
     );
-    if (!parent) return;
+    if (!parent) return { chained };
 
     // round5 F2 fix: refuse to write into a parent that lives in a
     // different network than the caller. Stops chain-reply being a
@@ -803,7 +825,7 @@ export function chainReplyToParent(
       const parentNet = parent.network_id ?? null;
       if (parentNet !== callerNorm) {
         console.log(`[commhub] 🚫 chainReplyToParent cross-network blocked: parent=${parent.task_id.slice(0, 8)} parent-net=${parentNet ?? "null"} caller-net=${callerNorm ?? "null"}`);
-        return;
+        return { chained, stoppedReason: "cross_network" };
       }
     }
 
@@ -844,10 +866,16 @@ export function chainReplyToParent(
       } catch {}
     }
 
+    // This iteration actually wrote a parent row (and possibly an
+    // inbox notification). Record that so the caller can gate its
+    // SSE push on a real chain.
+    chained = true;
+
     // Recurse up the chain.
     currentChildId = parent.task_id;
     currentReply = newResult;
   }
+  return { chained };
 }
 
 export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {
