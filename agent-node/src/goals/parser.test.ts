@@ -164,3 +164,80 @@ describe("parseGoalCommand — defence-in-depth", () => {
     if (r.ok) expect(r.goal.interval_ms).toBe(60_000);
   });
 });
+
+describe("parseGoalCommand — #144 round-6 single-letter units (CLI parity)", () => {
+  // `anet node loop <alias> "<task>" --every 5m` emits a slash command
+  // shaped exactly like the strings below. Pre-fix the parser ONLY
+  // matched word-form ("min/minute/hour/day"), so `5m` / `2h` / `1d`
+  // all fell through to "no recognised interval" and the CLI silently
+  // succeeded at /api/task enqueue while the goal never landed. These
+  // tests pin parity with the CLI's `--every` format.
+
+  test("`5m` parses to 5 × 60_000 ms (the canonical CLI emission)", () => {
+    const r = parseGoalCommand("/loop 5m monitor PR #271");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.goal.interval_ms).toBe(5 * 60_000);
+      expect(r.goal.text).toBe("monitor PR #271");
+    }
+  });
+
+  test("`30m` / `90m` arbitrary minutes parse correctly", () => {
+    const a = parseGoalCommand("/loop 30m scan twitter");
+    const b = parseGoalCommand("/loop 90m long task");
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    if (a.ok) expect(a.goal.interval_ms).toBe(30 * 60_000);
+    if (b.ok) expect(b.goal.interval_ms).toBe(90 * 60_000);
+  });
+
+  test("`2h` parses to 2 hours", () => {
+    const r = parseGoalCommand("/loop 2h morning sync");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.goal.interval_ms).toBe(2 * 60 * 60_000);
+  });
+
+  test("`1d` parses to 24 hours", () => {
+    const r = parseGoalCommand("/loop 1d nightly cleanup");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.goal.interval_ms).toBe(24 * 60 * 60_000);
+  });
+
+  test("single-letter and word-form yield the same interval (no semantic drift)", () => {
+    const single = parseGoalCommand("/loop 5m do thing");
+    const word = parseGoalCommand("/loop 5min do thing");
+    expect(single.ok).toBe(true);
+    expect(word.ok).toBe(true);
+    if (single.ok && word.ok) {
+      expect(single.goal.interval_ms).toBe(word.goal.interval_ms);
+      expect(single.goal.text).toBe(word.goal.text);
+    }
+  });
+
+  test("`5min` still wins over `5m` (longest-prefix declaration order)", () => {
+    // Pre-fix `5min` was the only thing that worked; ensure we don't
+    // regress that by accidentally matching `5m` first and treating
+    // `in` as leftover goal text.
+    const r = parseGoalCommand("/loop 5min check the deploy");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.goal.interval_ms).toBe(5 * 60_000);
+      expect(r.goal.text).toBe("check the deploy"); // NOT "in check the deploy"
+    }
+  });
+
+  test("single-letter inside a larger word is NOT swallowed (lookahead guard)", () => {
+    // `5min` should match the word-form rule, not the single-letter
+    // rule with `in` as leftover. Pinned above. Conversely, a stray
+    // `2m2` in the text should not be picked up — there's no clean
+    // single-letter form here, so it must NOT parse.
+    const r = parseGoalCommand("/loop check status 5MOM"); // looks suggestive
+    expect(r.ok).toBe(false); // no valid interval
+  });
+
+  test("`30s` is rejected with sub-minute error (parser + CLI aligned)", () => {
+    const r = parseGoalCommand("/loop 30s ping");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/shorter than 60s|seconds/i);
+  });
+});
