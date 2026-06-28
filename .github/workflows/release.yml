@@ -1,0 +1,403 @@
+# Release gate — npm-tarball install + functional smoke + version-pin audit
+#
+# Tracked in https://github.com/sleep2agi/agent-network/issues/261 (P1)
+#
+# WHY THIS EXISTS
+# ===============
+# Up to v0.10.x we shipped via a manual "Method B" SOP that lived in
+# docs/tests/release-gate-playbook.md. Several real ship-blockers slipped
+# past it because each check ran on the publisher's local machine, not
+# a clean environment, and the "remember to grep PINNED_* / split Install
+# vs Upgrade in the release notes" steps depended on a human reading the
+# playbook every time:
+#
+#   - v0.10.0 PINNED_SERVER_VERSION mismatch — caught last-minute, would
+#     have user-side regressed announced functionality if shipped
+#   - v0.10.2 release notes only contained `anet upgrade` instructions —
+#     new users had no install path
+#   - #136 preview.4 wizard silent exit — host typecheck/build was green
+#     but `npm install -g` into a fresh container exposed an install-path break
+#   - #137 wizard rc=0 with no UI — host non-TTY drive let a regression
+#     through that real-TTY drive caught
+#
+# This workflow encodes the manual SOP as automated gates that run on
+# every tag push and any workflow_dispatch invocation. It is **report-only
+# by design** (does not block `npm publish` itself) — the publisher decides
+# whether to proceed. The goal is to make the checks impossible to skip.
+#
+# WHAT IT GATES
+# =============
+# Triggered on tag push (v*.*.* and v*.*.*-preview.*) for either
+# @sleep2agi/agent-network or @sleep2agi/agent-node, or on manual dispatch
+# (target package + version supplied as inputs).
+#
+# Gate 1 — install-path smoke (node:24-slim, no globals leaked in)
+#   - `npm install -g <tarball>` from the built artifact (NOT from npm,
+#     so we catch broken bundles BEFORE they're published)
+#   - `anet --version` matches the tag
+#   - `anet hub --help` shows the expected subcommands
+#   - `anet hub start` boots + /health 200 + admin-utok.json mode 600
+#   - `anet login --hub http://127.0.0.1:9200 --username admin --password ...`
+#   - `anet node create` reaches the wizard's first prompt under expect-driven
+#     real-TTY (catches non-TTY-silent-exit regressions)
+#
+# Gate 2 — PINNED_*_VERSION audit
+#   - greps `agent-network/bin/cli.ts` for `PINNED_SERVER_VERSION` /
+#     `PINNED_NODE_VERSION` / `PINNED_DASHBOARD_VERSION`
+#   - asserts each pin matches what `npm view <package> versions` actually
+#     exposes (preview chain pins must include the `-preview.N` suffix)
+#   - prevents the v0.10.0 / #194 class of ship-blockers (anet hub start
+#     silently hangs when PINNED_SERVER_VERSION points at a non-published
+#     version)
+#
+# Gate 3 — release notes shape
+#   - asserts the most-recent release notes file (docs/tests/release-*.md
+#     or the GitHub release body) contains BOTH a "## Install" section
+#     (new-user `npm install -g @sleep2agi/agent-network@X.Y.Z`) AND an
+#     "## Upgrade" section (existing-user `anet upgrade`)
+#   - prevents the v0.10.2 class of "new users can't install" misses
+#
+# WHAT IT DOES NOT DO
+# ===================
+# - Does NOT publish to npm. Publishing remains a manual `npm publish` step
+#   on the maintainer's machine. This workflow runs against the locally
+#   built tarball + tag metadata, then reports verdict.
+# - Does NOT run the full v0.11 onboarding 5-scenario suite from
+#   /tmp/p-v0.11-onboarding (that's the contract-test layer). Release gate
+#   is a smaller, faster confidence check focused on install-path + version
+#   pin + release-notes hygiene.
+# - Does NOT block merge. If a gate fails on a tag, the publisher reverts
+#   the tag and re-tags after fixing — the workflow does not gate the
+#   tarball that's already on disk.
+
+name: release-gate (v0)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-preview.*'
+      - 'agent-network@v*'
+      - 'agent-node@v*'
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package to gate (agent-network / agent-node)'
+        required: true
+        default: 'agent-network'
+        type: choice
+        options:
+          - agent-network
+          - agent-node
+      version:
+        description: 'Version to gate (e.g. 2.2.22-preview.4 or 2.2.21)'
+        required: true
+        type: string
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: false  # never cancel — even superseded runs surface a verdict
+
+jobs:
+  build-tarball:
+    name: build tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      package: ${{ steps.resolve.outputs.package }}
+      version: ${{ steps.resolve.outputs.version }}
+      tarball: ${{ steps.pack.outputs.tarball }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Resolve target package + version
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = 'workflow_dispatch' ]; then
+            pkg='${{ inputs.package }}'
+            ver='${{ inputs.version }}'
+          else
+            tag='${{ github.ref_name }}'
+            case "$tag" in
+              agent-node@v*)    pkg=agent-node;    ver="${tag#agent-node@v}" ;;
+              agent-network@v*) pkg=agent-network; ver="${tag#agent-network@v}" ;;
+              v*)               pkg=agent-network; ver="${tag#v}" ;;
+              *)                echo "::error::unknown tag shape: $tag"; exit 1 ;;
+            esac
+          fi
+          echo "package=$pkg" >> "$GITHUB_OUTPUT"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "Gating $pkg @ $ver"
+
+      - name: Install + build target package
+        working-directory: ${{ steps.resolve.outputs.package }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Pack tarball
+        id: pack
+        working-directory: ${{ steps.resolve.outputs.package }}
+        run: |
+          set -euo pipefail
+          # npm pack honors prepublishOnly + .npmignore, exactly what `npm publish` would ship
+          tarball=$(npm pack --json | bun -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a[0].filename)')
+          echo "tarball=${{ steps.resolve.outputs.package }}/$tarball" >> "$GITHUB_OUTPUT"
+          ls -la "$tarball"
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: gated-tarball
+          path: ${{ steps.pack.outputs.tarball }}
+          retention-days: 7
+
+  gate-1-install-smoke:
+    name: gate 1 — install-path smoke (real TTY)
+    needs: build-tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: gated-tarball
+          path: ./tarball
+
+      - name: Verify --version, --help, hub start, login, node-create wizard
+        env:
+          GATED_PKG: ${{ needs.build-tarball.outputs.package }}
+          GATED_VER: ${{ needs.build-tarball.outputs.version }}
+        run: |
+          set -euo pipefail
+          tarball=$(ls ./tarball/*.tgz)
+          echo "Gating tarball: $tarball"
+
+          # Real TTY drive via `script -qc` — captures the wizard's interactive
+          # prompts that a plain shell `< /dev/null` would silently skip.
+          # The harness installs the tarball as the LOCAL agent-network into a
+          # clean slim image (no globals leaked in) and exercises 5 cases.
+          # node:24-slim chosen over alpine to match real user environment
+          # (glibc vs musl): alpine masked a feishu-image agent-runtime regression
+          # last cycle — staying on slim keeps glibc-only binaries in scope.
+          docker run --rm \
+            -v "$PWD/tarball:/tarball:ro" \
+            -e GATED_PKG -e GATED_VER \
+            node:24-slim bash -c '
+              set -euo pipefail
+              apt-get update -qq && apt-get install -y --no-install-recommends \
+                bash curl ca-certificates jq expect util-linux procps > /dev/null
+              rm -rf /var/lib/apt/lists/*
+
+              # bun is required by anet hub start (commhub-server is bun-only)
+              curl -fsSL https://bun.sh/install | bash > /dev/null
+              export PATH="/root/.bun/bin:$PATH"
+
+              # Install from local tarball — proves the published bundle works,
+              # not just the source tree (catches missing dist files / broken
+              # postinstall / wrong "files" array in package.json).
+              npm install -g /tarball/*.tgz > /tmp/install.log 2>&1 \
+                || { echo "::error::npm install -g failed"; cat /tmp/install.log; exit 1; }
+
+              # case 1 — version matches tag
+              ver=$(anet --version | tr -d "v\n ")
+              echo "anet --version → $ver (expected $GATED_VER)"
+              [ "$ver" = "$GATED_VER" ] \
+                || { echo "::error::version mismatch — anet says $ver, gating $GATED_VER"; exit 1; }
+
+              # case 2 — hub --help routes correctly + lists stop/status/start
+              anet hub --help > /tmp/hub-help.log 2>&1
+              for sub in start stop status; do
+                grep -q "\\b$sub\\b" /tmp/hub-help.log \
+                  || { echo "::error::anet hub --help missing subcommand: $sub"; exit 1; }
+              done
+
+              # case 3 — anet hub start brings up /health and creates admin-utok.json mode 600
+              # We pass an explicit --password so login (case 4) is deterministic;
+              # since 3e4e190 (#261 P0-2) the bootstrap password is random when not
+              # supplied, and it is printed to stdout but never persisted into
+              # admin-utok.json (which holds only username/user_id/token/created_at).
+              # Operator-supplied --password takes precedence over the random path,
+              # so this is the supported way to drive a non-interactive smoke.
+              export HOME=/tmp/anethome; mkdir -p "$HOME"
+              # Finite upstream pipeline (head reads 32 bytes then closes) so
+              # SIGPIPE under `set -o pipefail` cannot kill the inner command.
+              GATE_PW="ReleaseGate-$(head -c 32 /dev/urandom | sha256sum | head -c 16)"
+              nohup anet hub start --host 127.0.0.1 --port 9200 \
+                --username admin --password "$GATE_PW" > /tmp/hub.log 2>&1 &
+              for i in $(seq 1 30); do
+                curl -sf http://127.0.0.1:9200/health > /dev/null && break
+                sleep 1
+              done
+              curl -sf http://127.0.0.1:9200/health > /dev/null \
+                || { echo "::error::/health did not respond 2xx"; cat /tmp/hub.log; exit 1; }
+              mode=$(stat -c %a "$HOME/.anet/server/admin-utok.json")
+              [ "$mode" = "600" ] \
+                || { echo "::error::admin-utok.json mode $mode (expected 600)"; exit 1; }
+
+              # case 4 — login resolves (uses the explicit --password we passed
+              # to hub start above)
+              anet login --hub http://127.0.0.1:9200 --username admin --password "$GATE_PW" > /tmp/login.log 2>&1 \
+                || { echo "::error::anet login failed"; cat /tmp/login.log; exit 1; }
+              grep -q "Logged in" /tmp/login.log \
+                || { echo "::error::login output missing success marker"; cat /tmp/login.log; exit 1; }
+
+              # case 5 — node create wizard reaches first prompt under real TTY drive.
+              # The expect script is built with printf (no heredoc) so the YAML
+              # parser stays happy — heredoc EOF markers at column 1 collide with
+              # YAML mapping syntax inside a `run: |` block.
+              {
+                printf "set timeout 30\n"
+                printf "spawn anet node create r-node\n"
+                printf "expect {\n"
+                printf "  -re \"(vendor|runtime|provider).*\\\\?\" { puts \"[wizard] reached first prompt\"; exit 0 }\n"
+                printf "  timeout { puts \"[wizard] TIMEOUT — no prompt within 30s\"; exit 2 }\n"
+                printf "  eof { puts \"[wizard] EOF before prompt — silent exit regression\"; exit 3 }\n"
+                printf "}\n"
+              } > /tmp/wizard.exp
+              script -qc "expect /tmp/wizard.exp" /tmp/wizard.log
+              grep -q "reached first prompt" /tmp/wizard.log \
+                || { echo "::error::wizard did not reach first prompt under real TTY"; cat /tmp/wizard.log; exit 1; }
+
+              echo "✅ Gate 1 — install-path + 5 smoke cases PASS"
+            '
+
+  gate-2-pinned-audit:
+    name: gate 2 — PINNED_* version pin audit
+    needs: build-tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Grep PINNED_* + assert npm has those versions
+        env:
+          GATED_PKG: ${{ needs.build-tarball.outputs.package }}
+        run: |
+          set -euo pipefail
+
+          # Walk every PINNED_*_VERSION assignment that *actually exists* in
+          # cli.ts. Pattern:
+          #   const PINNED_SERVER_VERSION = "0.8.2";
+          #   const PINNED_NODE_VERSION = "2.4.8-preview.0";
+          # If a given PINNED_*_VERSION isn't in cli.ts (e.g. dashboard is
+          # Vercel-deployed, not pinned in CLI), the loop simply doesn't emit
+          # an entry for it — Gate 2 audits *only what's wired in*, no false
+          # "missing PINNED_DASHBOARD" alarms.
+          # If any *existing* pin points at a version that's not on npm,
+          # anet hub start will silently hang (#194 class of bug). Fail loud.
+          cli="$GATED_PKG/bin/cli.ts"
+          [ -f "$cli" ] || { echo "::error::no $cli — cannot audit pins"; exit 1; }
+
+          missing=0
+          while IFS=$'\t' read -r var ver; do
+            case "$var" in
+              PINNED_SERVER_VERSION)    pkg='@sleep2agi/commhub-server' ;;
+              PINNED_NODE_VERSION)      pkg='@sleep2agi/agent-node' ;;
+              PINNED_DASHBOARD_VERSION) pkg='@sleep2agi/agent-network-dashboard' ;;
+              *) continue ;;
+            esac
+            echo "audit $var=$ver → $pkg"
+            if ! npm view "$pkg@$ver" version > /dev/null 2>&1; then
+              echo "::error::$var=$ver not published on npm for $pkg"
+              missing=$((missing+1))
+            fi
+          done < <(grep -E 'PINNED_(SERVER|NODE|DASHBOARD)_VERSION\s*=' "$cli" \
+                   | sed -E 's/.*PINNED_(SERVER|NODE|DASHBOARD)_VERSION[^"]*"([^"]+)".*/PINNED_\1_VERSION\t\2/')
+
+          [ "$missing" -eq 0 ] || { echo "::error::$missing PINNED_* pin(s) point at unpublished versions"; exit 1; }
+          echo "✅ Gate 2 — all PINNED_* versions exist on npm"
+
+  gate-3-release-notes:
+    name: gate 3 — release notes shape (Install + Upgrade)
+    needs: build-tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert release notes have both Install and Upgrade sections
+        env:
+          GATED_VER: ${{ needs.build-tarball.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # ── Source A — docs/tests/release-vX.Y.Z*.md convention ────────────
+          # Convention: release notes land at docs/tests/release-vX.Y.Z*.md.
+          # Try prefix match first, then grep fallback inside that dir.
+          notes_body=""
+          src=""
+          notes_file=$(ls docs/tests/release-v"$GATED_VER"*.md 2>/dev/null | head -1 || true)
+          if [ -z "$notes_file" ]; then
+            notes_file=$(grep -rl "v$GATED_VER" docs/tests/release-*.md 2>/dev/null | head -1 || true)
+          fi
+          if [ -n "$notes_file" ]; then
+            notes_body=$(cat "$notes_file")
+            src="file:$notes_file"
+          fi
+
+          # ── Source B (fallback) — GitHub release body for this tag ────────
+          # If the file convention was missed (notes pasted only into the
+          # GitHub release), fall back to `gh release view`. This is the
+          # double-safety net 通信龙 asked for: location can drift without
+          # silently passing Gate 3.
+          # workflow_dispatch has no tag → only file source is available.
+          if [ -z "$notes_body" ] && [ "${{ github.event_name }}" = 'push' ]; then
+            tag='${{ github.ref_name }}'
+            if release_body=$(gh release view "$tag" --json body --jq .body 2>/dev/null); then
+              notes_body="$release_body"
+              src="gh-release:$tag"
+            fi
+          fi
+
+          [ -n "$notes_body" ] || {
+            echo "::error::no release notes for v$GATED_VER — looked in docs/tests/release-v*.md and gh release view"
+            exit 1
+          }
+          echo "release notes source: $src"
+
+          # ── The hygiene checks — both sections must exist ─────────────────
+          # v0.10.2 shipped without ## Install and new users had no install
+          # path. v0.10.7 had stale @version in Install section.
+          echo "$notes_body" | grep -qE '^## Install\b' \
+            || { echo "::error::$src missing '## Install' section (new-user install path)"; exit 1; }
+          echo "$notes_body" | grep -qE '^## Upgrade\b' \
+            || { echo "::error::$src missing '## Upgrade' section (existing-user upgrade path)"; exit 1; }
+
+          # Spot-check that Install section actually contains the gated version
+          # — catches stale notes where someone copied an old file but forgot
+          # to bump the version inside.
+          install_block=$(echo "$notes_body" | awk '/^## Install/,/^## /' | head -50)
+          echo "$install_block" | grep -qE "@$GATED_VER\b" \
+            || { echo "::error::'## Install' section in $src does not mention @$GATED_VER"; exit 1; }
+
+          echo "✅ Gate 3 — release notes contain both Install + Upgrade for v$GATED_VER ($src)"
+
+  verdict:
+    name: verdict (aggregate)
+    needs: [gate-1-install-smoke, gate-2-pinned-audit, gate-3-release-notes]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Summarize
+        run: |
+          set -e
+          g1='${{ needs.gate-1-install-smoke.result }}'
+          g2='${{ needs.gate-2-pinned-audit.result }}'
+          g3='${{ needs.gate-3-release-notes.result }}'
+          echo "Gate 1 (install smoke):  $g1"
+          echo "Gate 2 (PINNED audit):   $g2"
+          echo "Gate 3 (release notes):  $g3"
+          if [ "$g1" = success ] && [ "$g2" = success ] && [ "$g3" = success ]; then
+            echo "✅ RELEASE GATE CLEAN — safe to npm publish (or promote to @latest)"
+          else
+            echo "::warning::release gate has at least one failure — review before publishing"
+            # Non-blocking: report-only by design (see header). Maintainer decides.
+            exit 0
+          fi
