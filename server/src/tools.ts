@@ -498,9 +498,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (updatedTaskId) logTaskEvent(updatedTaskId, null, "replied", alias, "report_completion");
 
       // Auto-chain to parent lineage (mirror of send_reply path).
+      // round5 F2: pass caller's effectiveNetId so the chain refuses
+      // to write across tenants if some upstream parent links to a
+      // foreign network.
       if (updatedTaskId) {
         try {
-          chainReplyToParent(updatedTaskId, result, "replied");
+          chainReplyToParent(updatedTaskId, result, "replied", 5, effectiveNetId);
           const parentChain = db.get<{ parent_task_id: string | null }>(
             "SELECT parent_task_id FROM tasks WHERE task_id = ?1",
             [updatedTaskId]
@@ -698,15 +701,46 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Resolve parent_task_id: explicit > inferred (caller's most recent
       // delivered/started inbox task that's still open). Inference is the
       // safety net for when the LLM forgets to pass parent_task_id.
+      //
+      // round5 F1 fix: the inference SELECT MUST be network-scoped. Without
+      // it, a caller in network B can pick up the parent_task_id of a
+      // network A dispatch and chain-reply into the wrong tenant. The
+      // explicit-parent path is verified below in F2.
       let parentTaskId: string | null = parentIn ?? null;
       if (!parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
         try {
-          const recent = db.get<{ task_id: string }>(
-            "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered','started') ORDER BY created_at DESC LIMIT 1",
-            [from_session]
-          );
+          const recentParams: any[] = [from_session];
+          let recentSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered','started')";
+          recentSql = addScope(recentSql, recentParams, effectiveNetId);
+          recentSql += " ORDER BY created_at DESC LIMIT 1";
+          const recent = db.get<{ task_id: string }>(recentSql, ...recentParams);
           if (recent?.task_id) parentTaskId = recent.task_id;
         } catch {}
+      }
+
+      // round5 F2 fix: an explicit parent_task_id must belong to the
+      // caller's network. Otherwise a malicious caller in network B can
+      // hand us a parent id from network A and have chainReplyToParent
+      // (db.ts) write back into A's task result + inbox — cross-tenant
+      // write. Verify ownership, reject on mismatch.
+      if (parentIn) {
+        const parentRow = db.get<{ network_id: string | null }>(
+          "SELECT network_id FROM tasks WHERE task_id = ?1",
+          [parentIn]
+        );
+        if (!parentRow) {
+          // Parent doesn't exist (LLM hallucination, race with retention
+          // sweep, etc.). Drop the link silently so the dispatch can
+          // still proceed; the LLM may have meant to dispatch fresh.
+          console.log(`[${ts()}] ⚠ send_task: parent_task_id=${parentIn.slice(0, 8)} not found, dropping parent link`);
+          parentTaskId = null;
+        } else if ((parentRow.network_id ?? null) !== (effectiveNetId ?? null)) {
+          console.log(`[${ts()}] 🚫 send_task: cross-network parent rejected, parent=${parentIn.slice(0, 8)} parent-net=${parentRow.network_id ?? "null"} caller-net=${effectiveNetId ?? "null"}`);
+          return { content: [{ type: "text" as const, text: JSON.stringify({
+            ok: false, error: "cross_network_parent",
+            message: "parent_task_id belongs to a different network",
+          }) }] };
+        }
       }
 
       // Role check: viewer cannot send tasks
@@ -980,9 +1014,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       // Auto-chain reply up to parent task lineage so admin sees the final
       // answer even if the intermediate session has died.
+      // round5 F2: pass caller's effectiveNetId so the chain refuses
+      // to write across tenants if some upstream parent links to a
+      // foreign network.
       if (replyLogged && in_reply_to) {
         try {
-          chainReplyToParent(in_reply_to, text, replyStatus);
+          chainReplyToParent(in_reply_to, text, replyStatus, 5, effectiveNetId);
           // Push SSE event for parent originator if there is a chain.
           const parentChain = db.get<{ parent_task_id: string | null; from_name: string }>(
             "SELECT parent_task_id, from_name FROM tasks WHERE task_id = ?1",
