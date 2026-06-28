@@ -311,6 +311,62 @@ stateDiagram-v2
     GoOffline --> [*]: report_status(offline)
 ```
 
+### Recurring tasks / the `/loop` scheduler
+
+Starting with v0.11, **every runtime** (claude-agent-sdk / codex-sdk / grok-build-acp) supports anet's built-in /loop scheduler. Send an agent a `/loop <interval> <task>` message and the node persists it to its own `goals.json`; the scheduler then wakes the agent on the chosen interval, asks for an incremental advance, and reports progress.
+
+#### One-liner CLI (recommended)
+
+```bash
+# Check on PR #271 every 5 minutes
+anet node loop my-codex "monitor PR #271" --every 5m
+
+# Sweep Twitter every 30 minutes
+anet node loop researcher "scan twitter for grok updates" --every 30m
+
+# Post a morning summary every 2 hours
+anet node loop daily-bot "post the morning summary" --every 2h
+```
+
+Interval format: `30s` / `5m` / `2h` / `1d` (unit suffix required). `--every` defaults to `5m` when omitted.
+
+#### Or send a `/loop` message directly
+
+You can equivalently use `commhub_send_task` or the Dashboard to send a message that starts with `/loop`:
+
+```
+/loop 5m monitor PR #271
+/loop 30s check if the feishu bot is alive
+/loop 1d wrap up yesterday's release work
+```
+
+`/goal` is an alias of `/loop` and behaves identically.
+
+#### claude-agent-sdk can loop too (since v0.11)
+
+Between v0.4 and v0.10 the claude-agent-sdk runtime [could not /loop](#144) because of an incorrect design assumption (the gate assumed the SDK-spawned `claude` subprocess had its own native /loop; in fact the SDK is a one-shot `query()` Promise — the process exits after each call). v0.11 (#144) makes every runtime use anet's own scheduler:
+
+```bash
+# claude-agent-sdk nodes can now loop (v0.11+)
+anet node loop my-claude "check ANTHROPIC quota once a day" --every 1d
+```
+
+#### Inspect / cancel
+
+```bash
+# List loops on a node (drop the alias to list all nodes)
+anet goal list my-codex
+
+# Cancel by goal id (first 8 chars are enough — auto-unique-matched)
+anet goal cancel my-codex 3f8a2b1c
+```
+
+Goals are persisted in `~/.anet/nodes/<alias>/goals.json` and restored automatically after a restart.
+
+#### Tick interval
+
+Scheduler tick frequency is controlled by `ANET_GOAL_TICK_MS` (env) or `flags.goalTickMs` in config.json, default 30 seconds. A goal's `interval_ms` can never be more precise than the tick — a 5-second interval still effectively wakes every 30s. Lower the tick if you need finer granularity.
+
 ### Message Type Filtering
 
 Agent Node only triggers AI processing for `task` type messages:
