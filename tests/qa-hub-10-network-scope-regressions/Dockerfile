@@ -11,6 +11,7 @@ COPY server/src ./src
 
 WORKDIR /app
 COPY tests/qa-hub-10-network-scope-regressions/run.sh /app/run.sh
+COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
 RUN chmod +x /app/run.sh
 
 CMD ["/app/run.sh"]
