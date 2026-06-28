@@ -312,23 +312,10 @@ interface Profile {
   role?: "leader" | "worker";
 }
 
-type RuntimeName = "claude-code-cli" | "codex-sdk" | "claude-agent-sdk" | "grok-build-acp";
-
-function normalizeRuntime(profileOrRuntime?: Profile | string): RuntimeName {
-  if (typeof profileOrRuntime === "string") {
-    if (profileOrRuntime === "codex" || profileOrRuntime === "codex-sdk") return "codex-sdk";
-    if (profileOrRuntime === "grok" || profileOrRuntime === "grok-build" || profileOrRuntime === "grok-build-acp") return "grok-build-acp";
-    if (profileOrRuntime === "claude" || profileOrRuntime === "claude-sdk" || profileOrRuntime === "claude-agent-sdk") return "claude-agent-sdk";
-    if (profileOrRuntime === "agent-sdk") return "claude-agent-sdk";
-    return "claude-code-cli";
-  }
-  const p = profileOrRuntime;
-  if (!p) return "claude-code-cli";
-  if (p.runtime === "agent-sdk") {
-    return p.codexRuntime === "codex" ? "codex-sdk" : "claude-agent-sdk";
-  }
-  return normalizeRuntime(p.runtime || "claude-code-cli");
-}
+// Re-export from the pure helper module (src/normalize-runtime.ts) so
+// unit tests can import without dragging in CLI side-effects.
+import { normalizeRuntime, type RuntimeName } from "../src/normalize-runtime";
+export { normalizeRuntime, type RuntimeName };
 
 function nodeDisplayName(id: string, profile?: Profile | null): string {
   return profile?.node_name || profile?.name || profile?.alias || id;
@@ -3185,7 +3172,7 @@ async function resumeCommand() {
 
   if (!resolved) validateNodeName(nodeId);
   if (!profile) {
-    const createOpts = { ...opts, session: sessionId, runtime: opts.runtime || "claude-code-cli" } as unknown as ReturnType<typeof parseOpts>;
+    const createOpts = { ...opts, session: sessionId, runtime: opts.runtime || "claude-agent-sdk" } as unknown as ReturnType<typeof parseOpts>;
     profile = await ensureNodeToken(createProfileFromOpts(nodeId, createOpts), nodeId);
     saveProfile(nodeId, profile);
     console.log(`[anet] Created node "${nodeId}"`);
