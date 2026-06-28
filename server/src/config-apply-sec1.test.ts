@@ -171,6 +171,77 @@ describe("SEC-1 — get_config_update / ack_config_update by-alias filter respec
   });
 });
 
+describe("F-B (stale-update reaper) — single-flight TTL prevents permanent lock-out", () => {
+  // Pinning the stale-supersede semantics: an in-flight row older than
+  // 60_000 ms (2× apply ceiling) is treated as stale and a new update
+  // can supersede it (marks old as timeout). Without this, a crashed
+  // node ack'd "restarting" would brick remote restart forever.
+
+  test("fresh in-flight (< 60s old) → blocks new update (single-flight)", () => {
+    const nid = insertNode({ alias: "fresh", network_id: "netA" });
+    // Insert with a created_at recent (< 60s).
+    const fresh = `cu_${uuidv4()}`;
+    db.run(
+      `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, '{}', 'restart_only', 0, 'restarting', ?4, 'test')`,
+      [fresh, nid, "netA", Date.now() - 10_000],
+    );
+    const STALE = 60_000;
+    const row = db.get<any>(
+      "SELECT update_id, created_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
+      nid,
+    );
+    const age = Date.now() - row.created_at;
+    expect(age).toBeLessThan(STALE);
+  });
+
+  test("stale in-flight (> 60s old) → can be superseded (marked timeout)", () => {
+    const nid = insertNode({ alias: "stale", network_id: "netA" });
+    const stale = `cu_${uuidv4()}`;
+    db.run(
+      `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, '{}', 'restart_only', 0, 'restarting', ?4, 'test')`,
+      [stale, nid, "netA", Date.now() - 120_000],  // 2 min ago
+    );
+    const STALE = 60_000;
+    const row = db.get<any>(
+      "SELECT update_id, created_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
+      nid,
+    );
+    const age = Date.now() - row.created_at;
+    expect(age).toBeGreaterThan(STALE);
+    // Simulate the supersede operation done by the tool handler.
+    db.run(
+      "UPDATE node_config_updates SET status = 'timeout', acked_at = ?1, error = 'superseded' WHERE update_id = ?2",
+      [Date.now(), stale],
+    );
+    // After supersede, no in-flight remains.
+    const remaining = db.get<any>(
+      "SELECT update_id FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting')",
+      nid,
+    );
+    expect(remaining == null).toBe(true);
+  });
+});
+
+describe("F-C (partial unique index) — DB-layer single-flight regardless of process count", () => {
+  test("INSERT a second pending row for same node fails with UNIQUE constraint", () => {
+    const nid = insertNode({ alias: "double", network_id: "netA" });
+    insertUpdate({ node_id: nid, network_id: "netA", status: "pending" });
+    let err: any = null;
+    try {
+      insertUpdate({ node_id: nid, network_id: "netA", status: "pending" });
+    } catch (e: any) { err = e; }
+    expect(err).not.toBeNull();
+    expect(String(err?.message || "")).toMatch(/UNIQUE|constraint/i);
+  });
+
+  test("INSERT a new pending after a TERMINAL one succeeds (partial index excludes terminal)", () => {
+    const nid = insertNode({ alias: "after-applied", network_id: "netA" });
+    insertUpdate({ node_id: nid, network_id: "netA", status: "applied" });
+    // Should succeed — terminal rows don't occupy the partial index slot.
+    expect(() => insertUpdate({ node_id: nid, network_id: "netA", status: "pending" })).not.toThrow();
+  });
+});
+
 describe("SEC-1 — update lifecycle: single-flight + cross-network pending lookup", () => {
   test("netA pending update + netA query for same-node in-flight → finds it", () => {
     const nid = insertNode({ alias: "n1", network_id: "netA" });

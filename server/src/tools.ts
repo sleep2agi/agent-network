@@ -1527,22 +1527,41 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         };
       }
 
-      // Single-flight: reject if this node already has a non-terminal update.
-      const inFlight = db.get<{ update_id: string }>(
-        "SELECT update_id FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting')",
+      // F-B (CHANGE_REQ): single-flight with stale-update reaper.
+      // Without TTL, a node that ack'd "restarting" then crashed (lost
+      // power, OOM, killed) leaves a non-terminal row forever — every
+      // subsequent update_node_config / restart_node returns
+      // update_in_flight and the node is admin-bricked.
+      //
+      // Stale threshold = 60_000 ms (2× the §8-confirmed 30s apply ceiling,
+      // chosen so a slow-but-alive node within its own deadline never
+      // false-positives as stale). Stale rows are marked timeout +
+      // superseded by the new update.
+      const STALE_THRESHOLD_MS = 60_000;
+      const inFlight = db.get<{ update_id: string; created_at: number }>(
+        "SELECT update_id, created_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
         nodeId,
       );
       if (inFlight) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              ok: false,
-              error: "update_in_flight",
-              existing_update_id: inFlight.update_id,
-            }),
-          }],
-        };
+        const age = Date.now() - inFlight.created_at;
+        if (age <= STALE_THRESHOLD_MS) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: false,
+                error: "update_in_flight",
+                existing_update_id: inFlight.update_id,
+                age_ms: age,
+              }),
+            }],
+          };
+        }
+        // Stale — supersede.
+        db.run(
+          "UPDATE node_config_updates SET status = 'timeout', acked_at = ?1, error = ?2 WHERE update_id = ?3",
+          [Date.now(), `superseded by new update after ${age}ms stale (> ${STALE_THRESHOLD_MS}ms threshold)`, inFlight.update_id],
+        );
       }
 
       // Compute apply_mode + persist + push doorbell.
@@ -1571,15 +1590,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Node pulls its pending config update (called from agent-node when SSE config_update doorbell arrives). RFC-024.",
     {},
     async () => {
-      // ntok_ context: callerAlias is the bound node's alias. Pull the
-      // node row by alias + network (SEC-1: never return another network's update).
+      // F-A (CHANGE_REQ): require ntok_ + non-null enforceNetworkId.
+      // Mirror report_status's guard (tools.ts:251-253) — utok_ has
+      // enforceNetworkId=null and callerAlias=username, so without
+      // this gate a utok_ whose username happens to match a node alias
+      // could pull that node's pending update across network scope
+      // (network filter would be silently dropped, since old code had
+      // a conditional WHERE). Hub doesn't trust upstream gates — every
+      // node-private tool must independently require a network-bound
+      // token.
+      if (!callerTokenIsNetwork || !enforceNetworkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "network_token_required" }) }] };
+      }
       if (!callerAlias) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "alias_required" }) }] };
       }
-      const networkId = enforceNetworkId || null;
+      // Unconditional network_id filter (was previously conditional on
+      // enforceNetworkId being set; the new ntok guard above guarantees
+      // it's non-null so the filter is always applied).
       const node = db.get<any>(
-        "SELECT node_id, network_id FROM nodes WHERE alias = ?1" + (networkId ? " AND network_id = ?2" : ""),
-        ...(networkId ? [callerAlias, networkId] : [callerAlias]),
+        "SELECT node_id, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
+        callerAlias,
+        enforceNetworkId,
       );
       if (!node) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, update: null }) }] };
@@ -1620,15 +1652,23 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       error: z.string().max(2000).optional(),
     },
     async ({ update_id: updateId, status, new_revision: newRev, error: ackError }) => {
+      // F-A (CHANGE_REQ): same ntok_ guard as get_config_update. Without
+      // this, a utok_ whose username matches a node alias could ack
+      // arbitrary updates within the alias-collision; the new ntok guard
+      // closes that.
+      if (!callerTokenIsNetwork || !enforceNetworkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "network_token_required" }) }] };
+      }
       if (!callerAlias) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "alias_required" }) }] };
       }
       // Cross-tenant guard: the ack-er must own the update being acked.
-      // Resolve node by caller's alias, compare to update.node_id.
-      const networkId = enforceNetworkId || null;
+      // Resolve node by caller's alias under the enforced network.
+      // Network filter is unconditional (guard above guarantees non-null).
       const node = db.get<any>(
-        "SELECT node_id FROM nodes WHERE alias = ?1" + (networkId ? " AND network_id = ?2" : ""),
-        ...(networkId ? [callerAlias, networkId] : [callerAlias]),
+        "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2",
+        callerAlias,
+        enforceNetworkId,
       );
       if (!node) {
         // Silently ignore stale ack — return ok so the node doesn't retry forever.
@@ -1683,12 +1723,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!sec1Ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
       }
-      const inFlight = db.get<{ update_id: string }>(
-        "SELECT update_id FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting')",
+      // F-B reaper: same stale-supersede semantics as update_node_config.
+      const STALE_THRESHOLD_MS_R = 60_000;
+      const inFlight = db.get<{ update_id: string; created_at: number }>(
+        "SELECT update_id, created_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
         nodeId,
       );
       if (inFlight) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "update_in_flight", existing_update_id: inFlight.update_id }) }] };
+        const age = Date.now() - inFlight.created_at;
+        if (age <= STALE_THRESHOLD_MS_R) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "update_in_flight", existing_update_id: inFlight.update_id, age_ms: age }) }] };
+        }
+        db.run(
+          "UPDATE node_config_updates SET status = 'timeout', acked_at = ?1, error = ?2 WHERE update_id = ?3",
+          [Date.now(), `superseded by restart_node after ${age}ms stale`, inFlight.update_id],
+        );
       }
       const updateId = `cu_${uuidv4()}`;
       const networkId = node.network_id || "default";

@@ -297,6 +297,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ncu_network ON node_config_updates(network_id);
 `);
 
+// F-C (CHANGE_REQ): partial unique index on non-terminal rows. The
+// single-flight check in tools.ts is an app-level check-then-INSERT —
+// safe under single-process Bun, but two hub workers could race and
+// double-insert. This index makes that race impossible at the DB
+// layer regardless of process count. Wrapped in try/catch because
+// SQLite < 3.8.0 doesn't support partial indexes (rare on modern
+// systems; if missing, app-level check is the fallback).
+try {
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_ncu_node_inflight ON node_config_updates(node_id) WHERE status IN ('pending', 'restarting')`);
+} catch (e: any) {
+  // Older SQLite — fall back to app-level single-flight only.
+  console.warn(`[commhub] partial unique index uniq_ncu_node_inflight skipped: ${e?.message || e}`);
+}
+
 // ── V3: networks table ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS networks (
