@@ -44,12 +44,17 @@ export default withMermaid(defineConfig({
           { text: '生态', link: '/ecosystem' },
           { text: '社群', link: '/community' },
           {
+            text: '更新日志',
+            items: [
+              { text: 'Changelog（全部版本）', link: '/changelog' },
+              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
+            ]
+          },
+          {
             text: 'latest ▾',
             items: [
-              { text: '当前 stable（npm latest）', link: '/' },
-              { text: 'Release notes', link: '/changelog' },
-              { text: '版本号体系', link: '/guide/versioning' },
-              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
+              { text: 'latest（稳定版 · npm latest）', link: '/' },
+              { text: 'preview（2.3.0-preview.1）', link: '/preview/' },
             ]
           },
         ],
@@ -131,12 +136,17 @@ export default withMermaid(defineConfig({
           { text: 'Ecosystem', link: '/en/ecosystem' },
           { text: 'Community', link: '/en/community' },
           {
+            text: 'Changelog',
+            items: [
+              { text: 'Changelog (all versions)', link: '/en/changelog' },
+              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
+            ]
+          },
+          {
             text: 'latest ▾',
             items: [
-              { text: 'Current stable (npm latest)', link: '/en/' },
-              { text: 'Release notes', link: '/en/changelog' },
-              { text: 'Versioning', link: '/en/guide/versioning' },
-              { text: 'GitHub releases', link: 'https://github.com/sleep2agi/agent-network/releases' },
+              { text: 'latest (stable · npm latest)', link: '/en/' },
+              { text: 'preview (2.3.0-preview.1)', link: '/en/preview/' },
             ]
           },
         ],

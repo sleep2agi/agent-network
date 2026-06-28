@@ -2,11 +2,80 @@
 
 ::: info Versioning note
 This log runs reverse-chronologically. **The version scheme was reshuffled once**:
-- **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
+- **From 2026-05 onward**: gradual v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 releases; the `v0.X.Y` format mirrors `commhub-server`'s `0.X.Y` semver style.
 - **Before 2026-04**: used `v1.0.0-preview.N` / `v2.1` style version numbers that overpromised. Deprecated.
-- **Current stable**: v0.10.13 (2026-06-08, shipped via npm `latest` tag; v0.8.1 was the first Apache 2.0 OSS release).
+- **Current stable**: whatever npm's `latest` tag points to (see [Versioning](/en/guide/versioning) — npm `latest` is authoritative); v0.8.1 was the first Apache 2.0 OSS release.
+- **Current preview**: v0.11-preview2 (first entry below; shipped via npm `@preview` tag; not yet promoted to `@latest`).
 - Older entries kept for git-blame continuity — see v1.0.0-preview / v2.1 / v0.x sections below.
 :::
+
+## v0.11-preview2 — **`/loop` works for every runtime + security batch + RFC-024 hub config-apply foundation** (2026-06-28) 🟡 preview
+
+**Version alignment** (npm `@preview` tag, three packages in sync):
+- `@sleep2agi/agent-network@2.3.0-preview.1` ← bumped (CLI: new `anet node loop` subcommand)
+- `@sleep2agi/agent-node@2.5.0-preview.1` ← bumped (runtime: `/loop` works across all runtimes)
+- `@sleep2agi/commhub-server@0.9.0-preview.1` ← bumped (hub: security batch + RFC-024 PR A)
+
+`PINNED_SERVER_VERSION` updated to `0.9.0-preview.1` — `anet hub start` lazy-fetches the matching hub binary automatically.
+
+### 🌟 Highlights
+
+#### `/loop` now works for every runtime
+
+Before preview2, the `/loop` self-scheduler only ran for the `claude-code-cli` runtime; agent-node-driven runtimes (`claude-agent-sdk` / `codex-sdk` / `grok-build-acp`) **silently skipped** goal ticks. preview2 removes that runtime-bucket skip — every runtime can now drive a `/loop` goal end-to-end.
+
+Plus: **new `anet node loop` CLI** to manage goals from outside the agent — set / list / cancel a node's running `/loop` jobs without entering an interactive session.
+
+```bash
+anet node loop my-codex "monitor PR #271" --every 5m
+anet node loop researcher "scan twitter for grok updates" --every 30m
+anet node loop daily-bot "post the morning summary" --every 2h
+```
+
+Full usage + trigger mechanics: [Agent Node — Loop scheduler](/en/guide/agent-node#loop-scheduler) (ZH + EN parity).
+
+### 🔒 Security batch
+
+Four cross-tenant / data-integrity gaps closed for public-hub multi-user / multi-network deployments:
+
+- **Cross-tenant write防护带** ([#287](https://github.com/sleep2agi/agent-network/issues/287), RFC-024 PR A): 4 new MCP tools (`update_node_config` / `get_config_update` / `ack_config_update` / `restart_node`) gate every write by `node.network_id == caller.effectiveNetId`, mirroring the [#275](https://github.com/sleep2agi/agent-network/issues/275) pattern. `report_status` upsert no longer lets a node row cross networks. SQL-layer trust root protected by the `upsertNodeWithSec1Guard` helper + 5 real-driver regression tests + 6 inline-mirror tests
+- **`retention sweep` + incremental VACUUM** ([#282](https://github.com/sleep2agi/agent-network/issues/282)): hub sweeps old task / inbox rows on a background schedule; the `agent_telemetry` index is split so the periodic READ doesn't write-amp. Multi-tenant deployments see steadier CPU
+- **Read-path stale-marker fix** ([#283](https://github.com/sleep2agi/agent-network/issues/283)): sessions stale-mark moved off the read path to a single background sweeper — `/api/status` is no longer a write-amp call
+- **Password KDF strengthening** ([#285](https://github.com/sleep2agi/agent-network/issues/285)): scrypt path gets a verified-modern parameter set, backwards-compatible (existing hashes still verify; new hashes use the stronger params)
+
+### Engineering hardening
+
+- **`superviseChild()` shared helper** ([#284](https://github.com/sleep2agi/agent-network/issues/284)): the `connectFeishu` + `connectSSE` supervisor logic (while-loop respawn + jittered backoff + stable-uptime reset + shutdown gate + abandon-after-timeout) extracted into one helper. Two intentional `connectSSE` improvements landed alongside (±25% jitter to defend against thundering-herd reconnects after a hub restart; backoff no longer resets on a raw HTTP 200 — only on the SSE `"connected"` event — fixes a hot ~1s reconnect loop)
+- **RFC-024 hub config-apply foundation** ([#287](https://github.com/sleep2agi/agent-network/issues/287)): the 4 MCP tools + schema (`nodes.config_revision` / `nodes.config_snapshot` / `node_config_updates` table) land in preview2. Dashboard 改配置真生效 is the consumer side (PR B + PR C); those merge in a follow-up preview2.x / preview3
+
+### Not in preview2 yet
+
+- RFC-024 PR B (agent-node config-apply runtime + W1 supervisor) — separate [PR #290](https://github.com/sleep2agi/agent-network/pull/290), depends on PR A (which IS in preview2). Queued for preview2.x / preview3
+- Dashboard 改配置 end-to-end — PR C is a 1-line constant swap in `sleep2agi/agent-network-dashboard`; fires after PR B merges
+
+### Install / Upgrade
+
+**Clean install (new user)**:
+```bash
+npm install -g @sleep2agi/agent-network@2.3.0-preview.1
+npm install -g @sleep2agi/agent-node@2.5.0-preview.1
+npm install -g @sleep2agi/commhub-server@0.9.0-preview.1
+```
+
+**Upgrade (existing user tracking the preview channel)**:
+```bash
+anet upgrade --channel preview
+```
+
+Restart any running nodes so they pick up the new runtime:
+```bash
+anet node stop <alias>
+anet node start <alias>
+```
+
+Full upgrade workflow + cross-version migration → [Upgrade Guide](/en/guide/upgrade).
+
+---
 
 ## v0.10.13 — **`grok-build-acp` `session/prompt` 300s timeout hang fix (P0 hotfix)** (2026-06-08) ✅ stable
 

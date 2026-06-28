@@ -2,11 +2,80 @@
 
 ::: info 版本号体系说明
 本日志按时间倒序排列，**版本号经历过一次重新规划**：
-- **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
+- **2026-05 起**：采用 v0.6 → v0.7 → v0.8 → v0.9 → v0.10 → v0.11 渐进发布，`v0.X.Y` 格式对齐 `commhub-server` 的 `0.X.Y` semver 风格
 - **2026-04 之前**：曾使用 `v1.0.0-preview.N` / `v2.1` 等过度承诺型版本号，已废弃
-- **当前 stable**：v0.10.13（2026-06-08，通过 npm `latest` tag 发布；v0.8.1 是 Apache 2.0 OSS 首发版本）
+- **当前 stable**：npm `latest` tag（按 [版本号体系](/guide/versioning) 查 npm latest 即为权威）；v0.8.1 是 Apache 2.0 OSS 首发版本
+- **当前 preview**：v0.11-preview2（见下方第一条；通过 npm `@preview` tag 发布；尚未 promote 到 `@latest`）
 - 旧版历史保留作 git blame 完整性，详见下方 v1.0.0-preview / v2.1 / v0.x 段落
 :::
+
+## v0.11-preview2 — **`/loop` 全 runtime 通 + 安全批 + RFC-024 hub config-apply foundation**（2026-06-28）🟡 preview
+
+**版本同步**（npm `@preview` tag, 三包齐发）：
+- `@sleep2agi/agent-network@2.3.0-preview.1` ← bumped (CLI: 加 `anet node loop` 子命令)
+- `@sleep2agi/agent-node@2.5.0-preview.1` ← bumped (runtime: /loop 全 runtime 通)
+- `@sleep2agi/commhub-server@0.9.0-preview.1` ← bumped (hub: 安全批 + RFC-024 PR A)
+
+`PINNED_SERVER_VERSION` 同步到 `0.9.0-preview.1`，`anet hub start` 自动 lazy-fetch 匹配 hub 二进制。
+
+### 🌟 Highlights
+
+#### `/loop` 现在所有 runtime 都能跑
+
+preview2 之前 `/loop` 自调度只在 `claude-code-cli` runtime 工作；agent-node 驱动的 runtime（`claude-agent-sdk` / `codex-sdk` / `grok-build-acp`）会**静默跳过** goal tick。preview2 拿掉那个 runtime-bucket skip，每个 runtime 都能把 `/loop` 任务端到端跑完。
+
+加：**新 `anet node loop` CLI**，从节点外管理 goals — set / list / cancel 一个节点正在跑的 `/loop` jobs，不用进交互 session。
+
+```bash
+anet node loop my-codex "监控 PR #271 进展" --every 5m
+anet node loop researcher "扫一遍 twitter 上 grok 的最新进展" --every 30m
+anet node loop daily-bot "发布今日早报" --every 2h
+```
+
+完整用法 + 触发机制见 [Agent Node — 循环任务](/guide/agent-node#循环任务-loop-调度器)（ZH + EN parity）。
+
+### 🔒 安全批
+
+公网 hub 多用户 / 多 network 部署的 4 个 cross-tenant / data-integrity gap 修了：
+
+- **cross-tenant 写防护带**（[#287](https://github.com/sleep2agi/agent-network/issues/287)，RFC-024 PR A）：4 个新 MCP tool（`update_node_config` / `get_config_update` / `ack_config_update` / `restart_node`）每个写操作都 gate `node.network_id == caller.effectiveNetId`，对齐 [#275](https://github.com/sleep2agi/agent-network/issues/275) 模式。`report_status` upsert 不再让节点 row 跨 network 漂移。SQL 层信任根用 `upsertNodeWithSec1Guard` helper 保护 + 5 个 real-driver regression + 6 个 inline-mirror 回归
+- **`retention sweep` + incremental VACUUM**（[#282](https://github.com/sleep2agi/agent-network/issues/282)）：hub 后台周期性 sweep 旧 task / inbox row，`agent_telemetry` index 拆开防 READ write-amp。多租户部署 CPU 更稳
+- **read-path stale-marker 修**（[#283](https://github.com/sleep2agi/agent-network/issues/283)）：sessions stale-mark 从 read path 挪到单一后台 sweeper，`/api/status` 不再 write-amp
+- **password KDF 强化**（[#285](https://github.com/sleep2agi/agent-network/issues/285)）：scrypt 参数升 verified-modern, 向后兼容（老 hash 仍可 verify, 新 hash 用强参数）
+
+### Engineering hardening
+
+- **`superviseChild()` 共用 helper**（[#284](https://github.com/sleep2agi/agent-network/issues/284)）：`connectFeishu` + `connectSSE` 的 supervisor 逻辑（while-loop 重生 + jittered backoff + stable-uptime reset + shutdown gate + abandon-after-timeout）抽到一个 helper。同期加 2 个 connectSSE 改进：±25% jitter 防 hub 重启 thundering-herd / backoff 不在裸 HTTP 200 重置 (只认 SSE `"connected"` 事件)，修热 ~1s 重连循环
+- **RFC-024 hub config-apply foundation**（[#287](https://github.com/sleep2agi/agent-network/issues/287)）：4 MCP tool + schema (`nodes.config_revision` / `nodes.config_snapshot` / `node_config_updates` table) 在 preview2 落地。Dashboard 改配置真生效是消费侧 (PR B + PR C)，跟在 preview2.x / preview3 后续 land
+
+### 不在 preview2 里
+
+- RFC-024 PR B（agent-node config-apply runtime + W1 supervisor）— 独立 [PR #290](https://github.com/sleep2agi/agent-network/pull/290)，依赖 PR A (在 preview2 里)。排 preview2.x / preview3
+- Dashboard 改配置真生效 end-to-end — PR C 是 sleep2agi/agent-network-dashboard 里 1 行 const swap，PR B merge 后跟进
+
+### 安装 / 升级
+
+**Clean install (新用户)**：
+```bash
+npm install -g @sleep2agi/agent-network@2.3.0-preview.1
+npm install -g @sleep2agi/agent-node@2.5.0-preview.1
+npm install -g @sleep2agi/commhub-server@0.9.0-preview.1
+```
+
+**升级 (现有用户跟 preview channel)**：
+```bash
+anet upgrade --channel preview
+```
+
+升级后重启正在跑的节点接新版：
+```bash
+anet node stop <alias>
+anet node start <alias>
+```
+
+详细 upgrade 流程 + 跨版本迁移 → [升级指南](/guide/upgrade)。
+
+---
 
 ## v0.10.13 — **grok-build-acp `session/prompt` 300s timeout 卡死修复（P0 hotfix）**（2026-06-08）✅ stable
 
