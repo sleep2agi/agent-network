@@ -311,6 +311,62 @@ stateDiagram-v2
     下线 --> [*]: report_status(offline)
 ```
 
+### 循环任务 / `/loop` 调度器
+
+从 v0.11 起，**所有 runtime**（claude-agent-sdk / codex-sdk / grok-build-acp）都支持 anet 内置的 /loop 调度器。给 agent 发一个 `/loop <间隔> <任务>` 消息，节点会持久化到自己的 `goals.json`，按间隔自动唤醒、做一次增量推进、汇报进度。
+
+#### 一行命令调度（推荐）
+
+```bash
+# 每 5 分钟监控一次 PR #271
+anet node loop my-codex "监控 PR #271 进展" --every 5m
+
+# 每 30 分钟扫一次 Twitter
+anet node loop researcher "扫一遍 twitter 上 grok 的最新进展" --every 30m
+
+# 每 2 小时发一次晨报
+anet node loop daily-bot "发布今日早报" --every 2h
+```
+
+间隔格式：`30s` / `5m` / `2h` / `1d`（必须带单位）。命令在 `--every` 省略时默认 `5m`。
+
+#### 直接发 /loop 消息
+
+也可以用 `commhub_send_task` 或 dashboard 发一条以 `/loop` 开头的消息，效果等价：
+
+```
+/loop 5m 监控 #271 PR 进展
+/loop 30s 检查飞书 bot 是否在线
+/loop 1d 整理昨天的发布工作
+```
+
+`/goal` 是 `/loop` 的别名，效果一样。
+
+#### claude-agent-sdk 也能 loop（v0.11 起）
+
+v0.4–v0.10 期间 claude-agent-sdk runtime 因为 [设计前提错](#144) 不能 /loop（错误假设 SDK spawn 的 claude 子进程有自带 native /loop；实际 SDK 是单次 `query()` Promise，进程发完即退）。v0.11 (#144) 起所有 runtime 都走 anet 自己的调度器：
+
+```bash
+# claude-agent-sdk 节点也能 loop（v0.11+）
+anet node loop my-claude "每天检查一次 ANTHROPIC quota 余额" --every 1d
+```
+
+#### 查看 / 取消 loop
+
+```bash
+# 列出某节点所有 loop（也可以 anet goal ls 看全部节点）
+anet goal list my-codex
+
+# 按 goal id 取消（id 用前 8 位即可，会自动唯一匹配）
+anet goal cancel my-codex 3f8a2b1c
+```
+
+持久化文件在 `~/.anet/nodes/<alias>/goals.json`，节点重启自动恢复。
+
+#### 间隔 + 频率
+
+调度器 tick 间隔由 `ANET_GOAL_TICK_MS` 环境变量或 config.json `flags.goalTickMs` 控制，默认 30 秒。任何 goal 的 `interval_ms` 不会比 tick 间隔更精确——一个 5 秒间隔的 goal 实际上还是按 30 秒 tick 唤醒，按需调小 tick。
+
 ### 消息类型过滤
 
 Agent Node 只对 `task` 类型消息触发 AI 处理：
