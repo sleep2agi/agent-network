@@ -4236,11 +4236,27 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
       // back to a local-only rename: the local config dir + alias rename
       // happens, and there's nothing on the server to coordinate yet.
       //
-      // Two error shapes are tolerated:
-      //   1. PR-2 (server-side) future contract: `error: "node_local_only"`
-      //   2. Current main: `error` string contains "not found in this network"
+      // Three error shapes are tolerated:
+      //   1. PR-2 (server-side, landed): `{ ok:false, code:"node_local_only",
+      //      error:"node 'X' has no server session in this network", suggested:"rename locally" }`
+      //      — `code` field carries the type; `error` is the human-readable msg.
+      //   2. Legacy `error` field containing the literal "node_local_only" string
+      //      (kept for any older server build that conflated the two fields).
+      //   3. Pre-PR-2 servers: `error` substring match on whatever wording the
+      //      server used ("has no server session" or "not found in this network").
+      //
+      // The original PR-3 (#225 / commit f28ffd9) only checked shapes 2+3 with
+      // a regex that didn't match server's actual wording — 测试马's PR-5
+      // Case 2 caught it: server returned the new shape (1), CLI fell through
+      // to throw, rename hard-failed for purely-created nodes (regressing the
+      // exact case #110 was meant to fix). Switch to checking `prep.code` as
+      // the primary signal (matches the server contract) and widen the regex
+      // fallback to include the server's actual "has no server session" phrase.
       const errStr = String(prep.error || "");
-      const isLocalOnly = prep.error === "node_local_only"
+      const isLocalOnly = prep.code === "node_local_only"
+        || prep.error === "node_local_only"
+        || /node_local_only/i.test(errStr)
+        || /has no server session/i.test(errStr)
         || /not found in this network/i.test(errStr)
         || /node .* not found/i.test(errStr);
       if (isLocalOnly) {
