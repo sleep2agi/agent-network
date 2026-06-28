@@ -13,11 +13,19 @@
 export const ALLOWED_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
-  "teammateMode",
   "maxTurns",
   "budget",
   "timeout",
 ]);
+// NB on teammateMode (dropped from P1 scope per #290 cross-agent
+// review): teammateMode is consumed ONLY by the claude-code-cli
+// spawn path in agent-network/bin/cli.ts (passed as --teammate-mode
+// CLI arg). The agent-node-driven runtimes (claude-agent-sdk /
+// codex-sdk / grok-build-acp) that the config-apply pipeline targets
+// do NOT consume it. Including it in the allowlist would silently
+// ack `applied` for changes that have zero effect — same class as
+// the BLOCKER 2 schema-mismatch issue. P2: add a claude-code-cli
+// config-apply path that respawns the CLI process.
 
 /**
  * Security-sensitive flags — remote changes are privilege-elevation
@@ -35,7 +43,6 @@ export const ALLOWED_FLAGS = new Set<string>([
 export const SECURITY_SENSITIVE_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
-  "teammateMode",
 ]);
 
 /**
@@ -47,7 +54,6 @@ export const SECURITY_SENSITIVE_FLAGS = new Set<string>([
 export const RESTART_REQUIRED_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
-  "teammateMode",
   "timeout",
 ]);
 
@@ -140,7 +146,6 @@ export function validatePatch(
         }
         break;
       case "dangerouslySkipPermissions":
-      case "teammateMode":
         if (typeof val !== "boolean") {
           return { field: `flags.${key}`, reason: "must be boolean" };
         }

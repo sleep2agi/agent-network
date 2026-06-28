@@ -15,24 +15,29 @@ import {
 } from "./config-apply-validate";
 
 describe("ALLOWED_FLAGS — exact contract (no silent extension)", () => {
-  test("contains exactly the 6 fields from RFC-024 §4", () => {
+  test("contains exactly the 5 fields from RFC-024 §4 (teammateMode dropped per #290 review)", () => {
+    // teammateMode was originally listed in the 6-flag scope but
+    // investigation found it's only consumed by the claude-code-cli
+    // spawn path (agent-network/bin/cli.ts), NOT by the agent-node-
+    // driven runtimes the config-apply pipeline targets. Including it
+    // would silently ack `applied` for no-op changes — same class as
+    // the BLOCKER 2 schema-mismatch issue. P2 to add a claude-code-cli
+    // config-apply path.
     expect([...ALLOWED_FLAGS].sort()).toEqual([
       "budget",
       "dangerouslySkipPermissions",
       "maxTurns",
       "permissionMode",
-      "teammateMode",
       "timeout",
     ]);
   });
 });
 
 describe("SECURITY_SENSITIVE_FLAGS — privilege-elevation surface", () => {
-  test("contains the 3 privilege-elevation flags", () => {
+  test("contains the 2 privilege-elevation flags (teammateMode dropped — see ALLOWED_FLAGS comment)", () => {
     expect([...SECURITY_SENSITIVE_FLAGS].sort()).toEqual([
       "dangerouslySkipPermissions",
       "permissionMode",
-      "teammateMode",
     ]);
   });
 
@@ -61,8 +66,11 @@ describe("isAllowedToChangeFlag — SEC-2 admin-gate (final policy 2026-06-28)",
     expect(isAllowedToChangeFlag("admin", { permissionMode: "default" })).toBeNull();
   });
 
-  test("admin role + teammateMode → pass", () => {
-    expect(isAllowedToChangeFlag("admin", { teammateMode: true })).toBeNull();
+  test("teammateMode dropped from schema (P1 scope) — no role check fires for it", () => {
+    // teammateMode no longer in SECURITY_SENSITIVE_FLAGS, so SEC-2 gate
+    // doesn't fire. The patch-allowlist gate (validatePatch) rejects it
+    // separately as "not in allowlist", which is the correct surface.
+    expect(isAllowedToChangeFlag("admin", { teammateMode: true } as any)).toBeNull();
   });
 
   test("owner role + permissionMode → pass (owner is higher than admin in anet RBAC)", () => {
@@ -78,12 +86,8 @@ describe("isAllowedToChangeFlag — SEC-2 admin-gate (final policy 2026-06-28)",
     expect(isAllowedToChangeFlag("owner", { dangerouslySkipPermissions: true })).toBeNull();
   });
 
-  test("owner role + teammateMode → pass", () => {
-    expect(isAllowedToChangeFlag("owner", { teammateMode: false })).toBeNull();
-  });
-
   test("viewer role + any security flag → reject", () => {
-    expect(isAllowedToChangeFlag("viewer", { teammateMode: true })).not.toBeNull();
+    expect(isAllowedToChangeFlag("viewer", { dangerouslySkipPermissions: true })).not.toBeNull();
   });
 
   test("null role (no network membership) + any security flag → reject", () => {
@@ -91,7 +95,7 @@ describe("isAllowedToChangeFlag — SEC-2 admin-gate (final policy 2026-06-28)",
   });
 
   test("member role + mixed bag with security flag → reject (checks every flag, not just first)", () => {
-    const r = isAllowedToChangeFlag("member", { teammateMode: false, dangerouslySkipPermissions: true });
+    const r = isAllowedToChangeFlag("member", { permissionMode: "default", dangerouslySkipPermissions: true });
     expect(r).not.toBeNull();
   });
 
@@ -132,8 +136,11 @@ describe("computeApplyMode — tier classifier (RFC-024 §4)", () => {
     expect(computeApplyMode(undefined, { dangerouslySkipPermissions: true })).toBe("restart");
   });
 
-  test("flags.teammateMode alone → restart", () => {
-    expect(computeApplyMode(undefined, { teammateMode: false })).toBe("restart");
+  test("teammateMode dropped from RESTART_REQUIRED_FLAGS (no longer in scope)", () => {
+    // teammateMode no longer in RESTART_REQUIRED_FLAGS. computeApplyMode
+    // sees only unknown-to-tier-table flags → returns "hot" by default.
+    // The patch-allowlist gate (validatePatch) rejects it separately.
+    expect(computeApplyMode(undefined, { teammateMode: false } as any)).toBe("hot");
   });
 
   test("flags.timeout alone → restart (per RFC-024 §4 — module-level const today)", () => {
@@ -210,9 +217,13 @@ describe("validatePatch — per-flag enum / range", () => {
     expect(validatePatch(undefined, { dangerouslySkipPermissions: "true" } as any)?.field).toBe("flags.dangerouslySkipPermissions");
     expect(validatePatch(undefined, { dangerouslySkipPermissions: 1 } as any)?.field).toBe("flags.dangerouslySkipPermissions");
   });
-  test("teammateMode must be boolean", () => {
-    expect(validatePatch(undefined, { teammateMode: true })).toBeNull();
-    expect(validatePatch(undefined, { teammateMode: "yes" } as any)?.field).toBe("flags.teammateMode");
+  test("teammateMode rejected as not-in-allowlist (dropped from P1 scope)", () => {
+    // teammateMode was originally allowed but dropped per #290 review
+    // (no consumer in agent-node runtimes). validatePatch now rejects
+    // it the same way it rejects any unknown flag.
+    const r = validatePatch(undefined, { teammateMode: true } as any);
+    expect(r?.field).toBe("flags.teammateMode");
+    expect(r?.reason).toMatch(/allowlist/);
   });
   test("maxTurns must be integer in [0, 10000]", () => {
     expect(validatePatch(undefined, { maxTurns: 0 })).toBeNull();
