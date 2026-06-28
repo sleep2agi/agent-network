@@ -64,6 +64,116 @@ beforeEach(() => {
 // fix, the function refuses to traverse and writes nothing.
 // ─────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────
+// Round-5 follow-up — chainReplyToParent return value gates SSE push
+//
+// 通信牛 catch on #275: the DB write is refused on cross-network, but
+// the post-call code in tools.ts was still running:
+//
+//   SELECT parent_task_id, from_name FROM tasks WHERE task_id = ?
+//   SELECT from_name, task_id ... WHERE task_id = ?
+//   pushEvent(parent.from_name, { parent_task_id: <netA-id>, ... },
+//             effectiveNetId)
+//
+// That pushEvent leaks the foreign parent's task_id into the caller's
+// network via SSE payload. The fix: chainReplyToParent now returns
+// `{ chained, stoppedReason? }` so callers can skip the follow-up
+// push when the chain didn't actually write. These tests pin the
+// return contract directly. The SSE-gate is exercised at the call
+// sites in tools.ts; pinning the contract here ensures the call-site
+// behaviour can't drift back if someone refactors db.ts.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("chainReplyToParent — return value gates SSE push (round5 follow-up)", () => {
+  test("cross-network refusal returns { chained: false, stoppedReason: 'cross_network' }", () => {
+    const parentA = insertTask({
+      from_name: "admin-a",
+      to_name: "worker-a",
+      network_id: "net-A",
+      status: "delivered",
+    });
+    const childB = insertTask({
+      from_name: "attacker-b",
+      to_name: "victim-b",
+      network_id: "net-B",
+      status: "replied",
+      parent_task_id: parentA,
+    });
+
+    const result = chainReplyToParent(childB, "payload", "replied", 5, "net-B");
+
+    expect(result.chained).toBe(false);
+    expect(result.stoppedReason).toBe("cross_network");
+  });
+
+  test("legitimate same-network chain returns { chained: true } (no stoppedReason)", () => {
+    const parentB = insertTask({
+      from_name: "admin-b",
+      to_name: "worker-b",
+      network_id: "net-B",
+      status: "delivered",
+    });
+    const childB = insertTask({
+      from_name: "child-b",
+      to_name: "leaf-b",
+      network_id: "net-B",
+      status: "replied",
+      parent_task_id: parentB,
+    });
+
+    const result = chainReplyToParent(childB, "ok", "replied", 5, "net-B");
+
+    expect(result.chained).toBe(true);
+    expect(result.stoppedReason).toBeUndefined();
+  });
+
+  test("child with no parent returns { chained: false } (no stoppedReason)", () => {
+    const orphan = insertTask({
+      from_name: "x",
+      to_name: "y",
+      network_id: "net-B",
+      status: "replied",
+    });
+
+    const result = chainReplyToParent(orphan, "ok", "replied", 5, "net-B");
+
+    expect(result.chained).toBe(false);
+    expect(result.stoppedReason).toBeUndefined();
+  });
+
+  test("3-level chain: same-net parent writes, foreign grandparent halts → chained=true, stoppedReason='cross_network'", () => {
+    const grandparent = insertTask({
+      from_name: "gp-admin",
+      to_name: "gp-worker",
+      network_id: "net-A",
+      status: "delivered",
+    });
+    const parent = insertTask({
+      from_name: "p-admin",
+      to_name: "p-worker",
+      network_id: "net-B",
+      status: "delivered",
+      parent_task_id: grandparent,
+    });
+    const child = insertTask({
+      from_name: "c",
+      to_name: "leaf",
+      network_id: "net-B",
+      status: "replied",
+      parent_task_id: parent,
+    });
+
+    const result = chainReplyToParent(child, "ok", "replied", 5, "net-B");
+
+    // We DID write into the same-net parent before the chain halted
+    // at the foreign grandparent. `chained: true` lets callers push
+    // SSE for the legitimate parent; `stoppedReason` makes it visible
+    // in logs/metrics that the chain didn't run to completion.
+    expect(result.chained).toBe(true);
+    expect(result.stoppedReason).toBe("cross_network");
+  });
+});
+
 describe("chainReplyToParent — cross-network rejection (round5 F2 #3)", () => {
   test("blocks chain when parent.network_id != callerNetId", () => {
     // Network A: a task that should NEVER receive a foreign reply.
