@@ -136,6 +136,37 @@ done
 if [[ -n "$SUCCEEDED" ]]; then
   STATUS=$(sqlite3 "$HUB_DB" "SELECT status FROM node_create_requests WHERE request_id='$REQUEST_ID';" 2>/dev/null)
   [[ "$STATUS" == "succeeded" ]] && ok "request status = succeeded" || bad "status='$STATUS' (want succeeded)"
+
+  # N站马 N#19 联调 (通信龙 5149126c) — register ≠ alive.
+  # Permanent survival check: after create, wait ≥10s + verify the
+  # child process AND its starter (anet node start) are both still
+  # alive. Catches the regression class where daemon spawn "looks
+  # detached" but child dies post-register (e.g. inherited fd / SIGHUP
+  # / insta-crash on first vendor call / etc).
+  CHILD_PID_LINE=$(grep -oE "spawned child .$CHILD_NAME. pid=[0-9]+" /tmp/daemon.log 2>/dev/null | tail -1)
+  CHILD_PID=$(echo "$CHILD_PID_LINE" | grep -oE "[0-9]+$")
+  if [[ -n "$CHILD_PID" ]]; then
+    ok "daemon log records child pid=$CHILD_PID"
+    sleep 12   # ≥10s window for daemon-spawn fragility to surface
+    if kill -0 "$CHILD_PID" 2>/dev/null; then
+      ok "child starter pid=$CHILD_PID still alive after 12s (register≠alive guard pass)"
+    else
+      bad "child starter pid=$CHILD_PID DEAD within 12s of create — spawn regression"
+    fi
+    # Spot-check the grandchild (actual agent-node process) is also alive
+    GRANDCHILD_PID=$(ps auxf 2>/dev/null | grep -E "agent-node.*$CHILD_NAME" | grep -v grep | awk '{print $2}' | head -1)
+    if [[ -n "$GRANDCHILD_PID" ]]; then
+      if kill -0 "$GRANDCHILD_PID" 2>/dev/null; then
+        ok "child agent-node grandchild pid=$GRANDCHILD_PID alive (full process tree intact)"
+      else
+        bad "grandchild agent-node $GRANDCHILD_PID died"
+      fi
+    else
+      bad "grandchild agent-node process for $CHILD_NAME not found in ps tree"
+    fi
+  else
+    bad "daemon log missing 'spawned child' line — spawn never ran"
+  fi
 fi
 
 # ── B. role gate ──────────────────────────────────────────────────
