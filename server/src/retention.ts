@@ -131,13 +131,25 @@ export function sweepRetention(cfg: RetentionConfig = readRetentionConfig()): Sw
   // delivered / acked / running / replied) are still observable on
   // the dashboard and may be the parent of an in-flight chain.
   //
-  // Why include 'replied' as active? A replied task can still be the
-  // ancestor of a chain hop; better to err on the side of keeping
-  // for the full retention window even after reply.
+  // **Time field**: use COALESCE(completed_at, created_at) — terminal
+  // status means the server set `completed_at` at the reply/fail/
+  // cancel/expire moment. If we sweep on `created_at` alone, a task
+  // that was created 60d ago but only completed today would be
+  // purged the instant it enters terminal state — operators get zero
+  // post-terminal retention window. The COALESCE falls back to
+  // created_at for legacy rows that pre-date the completed_at column
+  // (back-compat with old DBs).
+  //
+  // **`replied` deliberately excluded from terminal sweep**: a
+  // replied task may still be the ancestor of an in-flight chain hop
+  // (chainReplyToParent walks upstream). Reaping it could orphan the
+  // chain. Out-of-scope for this round; revisit with a child-ref-
+  // aware delete in a follow-up (delete only `replied` rows whose
+  // children are all in terminal status too).
   const tasks = sweepOne(
     `DELETE FROM tasks
      WHERE status IN ('completed', 'cancelled', 'failed', 'expired')
-       AND created_at < datetime('now', ?1)`,
+       AND COALESCE(completed_at, created_at) < datetime('now', ?1)`,
     [`-${cfg.terminalTasksDays} days`],
     cfg.terminalTasksDays,
   );

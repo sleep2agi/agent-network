@@ -47,13 +47,31 @@ function insertInbox(opts: { acked: 0 | 1; daysAgo: number }): string {
   return id;
 }
 
-function insertTask(opts: { status: string; daysAgo: number }): string {
+function insertTask(opts: {
+  status: string;
+  daysAgo: number;
+  completedDaysAgo?: number | null; // null = explicit NULL (legacy row)
+}): string {
   const id = uuidv4();
-  db.run(
-    `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at)
-     VALUES (?1, 'a', 'b', 'normal', ?2, 'x', 'reply', datetime('now', ?3))`,
-    [id, opts.status, `-${opts.daysAgo} days`]
-  );
+  if (opts.completedDaysAgo === undefined) {
+    // Default: created N days ago, no completed_at set (the historical
+    // shape pre-completed_at column).
+    db.run(
+      `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at)
+       VALUES (?1, 'a', 'b', 'normal', ?2, 'x', 'reply', datetime('now', ?3))`,
+      [id, opts.status, `-${opts.daysAgo} days`]
+    );
+  } else {
+    const completedClause = opts.completedDaysAgo === null
+      ? null
+      : `datetime('now', '-${opts.completedDaysAgo} days')`;
+    db.run(
+      `INSERT INTO tasks
+         (task_id, from_name, to_name, priority, status, content, requires_response, created_at, completed_at)
+       VALUES (?1, 'a', 'b', 'normal', ?2, 'x', 'reply', datetime('now', ?3), ${completedClause === null ? "NULL" : completedClause})`,
+      [id, opts.status, `-${opts.daysAgo} days`]
+    );
+  }
   return id;
 }
 
@@ -191,6 +209,67 @@ describe("sweepRetention — tasks (terminal status only)", () => {
 
     expect(r.deletes.tasks).toBe(4);
     expect(count("tasks")).toBe(4);
+  });
+
+  // 通信牛 #282 CHANGE_REQ regression — terminal-task sweep MUST use
+  // COALESCE(completed_at, created_at), not created_at alone. A task
+  // that was created long ago but completed today should survive the
+  // full retention window after completion. Sweeping by created_at
+  // alone reaps it the instant it enters terminal state → operators
+  // get zero post-terminal retention.
+  test("60d-old created task completed today is KEPT (uses completed_at, not created_at)", () => {
+    insertTask({
+      status: "completed",
+      daysAgo: 60,           // created 60 days ago (way past horizon)
+      completedDaysAgo: 0,   // completed today (within horizon)
+    });
+
+    const r = sweepRetention(STRICT_CFG);
+
+    expect(r.deletes.tasks).toBe(0);
+    expect(count("tasks")).toBe(1);
+  });
+
+  test("legacy row with NULL completed_at falls back to created_at (back-compat)", () => {
+    // Old DB rows that pre-date the completed_at column. The COALESCE
+    // gracefully falls back so we don't permanently leak legacy data.
+    insertTask({
+      status: "completed",
+      daysAgo: 60,             // way past 30d horizon
+      completedDaysAgo: null,  // explicit NULL (legacy)
+    });
+
+    const r = sweepRetention(STRICT_CFG);
+
+    expect(r.deletes.tasks).toBe(1);
+    expect(count("tasks")).toBe(0);
+  });
+
+  test("recently-completed but past-horizon-completion gets reaped", () => {
+    insertTask({
+      status: "completed",
+      daysAgo: 60,
+      completedDaysAgo: 35, // completed 35d ago — past 30d horizon
+    });
+
+    const r = sweepRetention(STRICT_CFG);
+
+    expect(r.deletes.tasks).toBe(1);
+    expect(count("tasks")).toBe(0);
+  });
+
+  // `replied` is deliberately out-of-scope for this round per 通信牛
+  // discussion — chain-ancestor safety requires child-ref-aware
+  // delete. Pin the intentional behaviour so a well-meaning future
+  // edit doesn't silently start reaping replied rows.
+  test("replied tasks are NEVER swept regardless of age (chain-ancestor safety)", () => {
+    insertTask({ status: "replied", daysAgo: 365, completedDaysAgo: 365 });
+    insertTask({ status: "replied", daysAgo: 100, completedDaysAgo: 100 });
+
+    const r = sweepRetention(STRICT_CFG);
+
+    expect(r.deletes.tasks).toBe(0);
+    expect(count("tasks")).toBe(2);
   });
 });
 
