@@ -86,9 +86,9 @@ mcp_call "$ALICE_NTOK" "report_status" "$ARG" | jq -e '.ok == true' >/dev/null \
   || { echo "FAIL: alice report_status"; exit 1; }
 # dispatch + reply (so /api/completions gets a row)
 ARG=$(jq -nc --arg net "$ALICE_NET" \
-  '{alias:"alice-secret-agent",task:"alice-confidential-task",priority:"normal",network_id:$net,from_session:"alice"}')
+  '{alias:"alice-secret-agent",task:"alice-confidential-task",priority:"normal",network_id:$net,from_session:"alice-secret-agent"}')
 TASK_ID=$(mcp_call "$ALICE_NTOK" "send_task" "$ARG" | jq -r '.message_id')
-[[ -n "$TASK_ID" ]] || { echo "FAIL: no task id"; exit 1; }
+[[ -n "$TASK_ID" && "$TASK_ID" != "null" ]] || { echo "FAIL: no task id"; exit 1; }
 ARG=$(jq -nc --arg t "$TASK_ID" \
   '{alias:"alice",text:"alice-private-reply-text",in_reply_to:$t,status:"replied",from_session:"alice-secret-agent"}')
 mcp_call "$ALICE_NTOK" "send_reply" "$ARG" | jq -e '.ok == true' >/dev/null \
