@@ -21,6 +21,8 @@ import { GoalStore, newGoal, runtimeBucket, decideStartupAction } from "./goals/
 import { decideTickWork } from "./goals/scheduler";
 import { runCodexWakeForGoal, type CodexWakeDeps } from "./goals/codex-wake";
 import { isGoalCompleteSentinel } from "./goals/completion-detect";
+import { computeNextWakeAt } from "./goals/schedule";
+import { formatSelfLoopsBlock } from "./goals/format";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
@@ -478,6 +480,14 @@ const NODE_DIR = configFilePath ? dirname(configFilePath) : join(process.cwd(), 
 const GOALS_PATH = opts["goals-path"] || fileConfig.flags?.goalsPath || fileConfig.goalsPath || join(NODE_DIR, "goals.json");
 const GOAL_TICK_MS = Math.max(10_000, parseInt(opts["goal-tick-ms"] || process.env.ANET_GOAL_TICK_MS || fileConfig.flags?.goalTickMs || "30000"));
 const goalStore = new GoalStore(GOALS_PATH);
+
+// RFC-025 M1e — per-process state for the self-loop tools' safety
+// 防线. Lives at module scope so the SAME counters are shared across
+// every claude SDK query() invocation in this agent-node process
+// (otherwise the batch-cancel threshold reset every wake and the防线
+// would be a no-op).
+const loopsCancelTimestamps: number[] = [];
+const loopsConfirmTokens: Set<string> = new Set();
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 const LOG_LEVEL = (LOG_LEVELS as any)[(opts["log-level"] || process.env.LOG_LEVEL || fileConfig.logLevel || "info")] ?? 1;
 const channelSpecs = [
@@ -1169,7 +1179,22 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
   }
   const summary = text.replace(/\s+/g, " ").slice(0, 500);
   const completed = isGoalCompleteSentinel(text);
-  const nextWakeAt = new Date(Date.now() + goal.interval_ms).toISOString();
+  // RFC-025 M1b: cron-lite aware advancement. When goal has schedule
+  // field (time_of_day / weekday / new-format interval), use the pure
+  // computeNextWakeAt to pick the next wall-clock instant. When schedule
+  // is absent (legacy interval-only goals — every goals.json on disk
+  // pre-M1b), fall back to "now + interval_ms" — EXACTLY the pre-M1b
+  // path. Back-compat regression锁 by goals/schedule.test.ts.
+  //
+  // Default TZ comes from node config flags.timezone, falling back to
+  // Asia/Shanghai (Vincent/团队主时区, per RFC-025 §11.8 resolved).
+  const goalDefaultTz: string = (fileConfig?.flags?.timezone as string) || "Asia/Shanghai";
+  const nextWakeAt = computeNextWakeAt(
+    goal.schedule,
+    new Date(),
+    goalDefaultTz,
+    { fallback_interval_ms: goal.interval_ms },
+  ).toISOString();
 
   // Phase 2: writeback. If THIS mutate throws, the wake's LLM work
   // already happened — surface the writeback failure loudly so the
@@ -1557,6 +1582,29 @@ async function processWithClaude(task: string, from: string, images?: string[]):
         headers: commhubToken ? { "Authorization": `Bearer ${commhubToken}` } : undefined,
       };
     }
+  }
+
+  // RFC-025 M1e — agent loop self-management tools (6 self-scoped
+  // handlers: list/create/edit/reschedule/complete/cancel_my_loop).
+  // By construction self-scoped: the ctx binds THIS node's goalStore
+  // + runtime + tz; no `alias` arg in any tool schema, so the LLM
+  // physically cannot address another node's goals. claude-code-cli
+  // runtime is excluded by where this wire-up lives (we're in
+  // processWithClaude, RUNTIME='claude' bucket = claude-agent-sdk
+  // path; CC-CLI is its own standalone session).
+  try {
+    const { createLoopsMcpServer } = await import("./goals/loops-mcp");
+    const maxGoalsEnv = parseInt(process.env.COMMHUB_MAX_GOALS_PER_NODE || "", 10);
+    mcpServers["loops"] = await createLoopsMcpServer({
+      store: goalStore,
+      runtime: RUNTIME_LABEL,
+      defaultTz: (fileConfig?.flags?.timezone as string) || "Asia/Shanghai",
+      maxActiveGoals: Number.isFinite(maxGoalsEnv) && maxGoalsEnv > 0 ? maxGoalsEnv : undefined,
+      recentCancels: loopsCancelTimestamps,
+      pendingConfirmTokens: loopsConfirmTokens,
+    });
+  } catch (e: any) {
+    warn(`[claude] loops SDK MCP server init failed (${e?.message || e}); self-loop tools unavailable for this agent`);
   }
 
   // ALWAYS resolve a working binary. Earlier we returned undefined when
@@ -2608,11 +2656,29 @@ async function processTask(task: string, from: string, taskId: string | null = n
   log(`→ processing [${RUNTIME}]${images?.length ? ` +${images.length} image(s)` : ""}: ${task.slice(0, 80)}`);
   await reportStatus("working", task.slice(0, 200)).catch(() => {});
 
+  // RFC-025 M1c P0b — context injection.
+  // Prepend a self-loop block so the agent knows what it's currently
+  // looping. Pure formatter; empty when no active/paused goals.
+  // Read goals fresh every turn (no cache) so M1d edits / new loops
+  // show up immediately on the next think.
+  let augmentedTask = task;
+  try {
+    const myGoals = await goalStore.list();
+    const block = formatSelfLoopsBlock(myGoals);
+    if (block) {
+      augmentedTask = block + "\n" + task;
+    }
+  } catch (e: any) {
+    // Defensive: a bad goalStore read MUST NOT block normal task
+    // processing. Log and continue with the original task.
+    warn(`[goals/format] inject failed: ${e?.message ?? e} (task continues without block)`);
+  }
+
   let text: string;
   let failed = false;
   try {
-    text = await tryHandleExplicitDelegation(task, from, taskId)
-      || await think(task, from, taskId, images);
+    text = await tryHandleExplicitDelegation(augmentedTask, from, taskId)
+      || await think(augmentedTask, from, taskId, images);
   } catch (err: any) {
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;

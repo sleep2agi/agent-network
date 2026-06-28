@@ -23,11 +23,43 @@ export interface GoalProgressEntry {
   task_id?: string;  // optional link to the commhub task this entry came from
 }
 
+// RFC-025 M1 — cron-lite schedule for wall-clock cadences ("每天 9 点",
+// 每周一 etc.). Backward compatible: existing goals with only
+// `interval_ms` continue to work unchanged (schedule = undefined →
+// scheduler falls back to interval_ms + last next_wake_at math, which
+// is what it already does).
+//
+// Union members:
+//   - `interval` — pure cadence ("every N ms"). Equivalent to legacy
+//     interval_ms; provided for new-format consistency.
+//   - `time_of_day` — fires at a specific clock time each day (e.g.
+//     "09:00"). Uses node's `flags.timezone` (default Asia/Shanghai
+//     per RFC-025 §11.8).
+//   - `weekday` — same as time_of_day but on specific weekdays only
+//     (e.g. "mon 09:00" or "mon,wed,fri 18:30").
+export type AgentGoalSchedule =
+  | { type: "interval"; interval_ms: number }
+  | { type: "time_of_day"; time: string /* "HH:MM" */; timezone?: string }
+  | { type: "weekday"; days: string[] /* ["mon","wed","fri"] */; time: string; timezone?: string };
+
 export interface AgentGoal {
   goal_id: string;                   // UUID, stable across renames + restarts
   text: string;                      // goal body (parsed from /goal command)
   status: GoalStatus;
-  interval_ms: number;               // wake cadence; minimum enforced by parser
+  // **Legacy load-bearing**: every existing goal in goals.json across
+  // the install base has `interval_ms`. RFC-025 keeps this field
+  // required so the parser, scheduler, and store all stay
+  // back-compat. New cron-lite schedule modes (time_of_day /
+  // weekday) populate `schedule` AND set interval_ms to the natural
+  // cadence (e.g. 24h for daily, 7d for weekly) — that way any
+  // code path that only reads interval_ms still sees something
+  // reasonable.
+  interval_ms: number;
+  // Optional cron-lite schedule (RFC-025 M1, P0a). `undefined` =
+  // legacy interval-only behaviour (scheduler uses interval_ms).
+  // Present = scheduler uses computeNextWakeAt(schedule, now) for
+  // next_wake_at calculation.
+  schedule?: AgentGoalSchedule;
   next_wake_at: string;              // ISO-8601 timestamp
   last_wake_at?: string;
   last_report_at?: string;

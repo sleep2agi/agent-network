@@ -330,16 +330,36 @@ export function newGoal(opts: {
   runtime: string;
   parent_task_id?: string;
   report_to?: string;
+  // RFC-025 M1b — optional cron-lite schedule. When present, the
+  // scheduler uses it (via computeNextWakeAt) to advance next_wake_at
+  // every wake; when absent, behaviour falls back to interval_ms (the
+  // pre-RFC-025 path) — existing goals.json files keep working unchanged.
+  schedule?: import("./types").AgentGoalSchedule;
+  // Optional node-default timezone for schedule.time_of_day / weekday
+  // when the schedule itself didn't specify one. Caller passes the
+  // resolved value (e.g. config.flags.timezone || 'Asia/Shanghai').
+  default_tz?: string;
 }): AgentGoal {
   // #144: no runtime gate. Pre-#144 this asserted the runtime was non-claude
   // on the (incorrect) premise that claude-agent-sdk had a native /loop.
   const now = new Date();
+  // computeNextWakeAt: lazy import to keep `newGoal` zero-dep at module
+  // load (store.ts already exports newGoal early). The pure schedule.ts
+  // module has no transitive side-effects, so this require is safe.
+  const { computeNextWakeAt } = require("./schedule") as typeof import("./schedule");
+  const next = computeNextWakeAt(
+    opts.schedule,
+    now,
+    opts.default_tz || "Asia/Shanghai",
+    { fallback_interval_ms: opts.interval_ms },
+  );
   return {
     goal_id: randomUUID(),
     text: opts.text,
     status: "active",
     interval_ms: opts.interval_ms,
-    next_wake_at: new Date(now.getTime() + opts.interval_ms).toISOString(),
+    ...(opts.schedule ? { schedule: opts.schedule } : {}),
+    next_wake_at: next.toISOString(),
     parent_task_id: opts.parent_task_id,
     report_to: opts.report_to,
     runtime: opts.runtime,
