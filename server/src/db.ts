@@ -246,6 +246,57 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// RFC-024 (2026-06-28): node config-apply foundation.
+//
+// `nodes` table gains two columns:
+//   - `config_revision`: monotonically-incrementing per-node revision
+//     that gates write conflicts (dashboard sends base_revision, hub
+//     rejects 409 if it doesn't match current). Promoted by hub when
+//     the node ACKs `applied` from a successful apply.
+//   - `config_snapshot`: masked JSON of the node's current effective
+//     config, posted by the node via report_status. Dashboard reads
+//     this for the GET snapshot path (never touches per-node files).
+//
+// Both ALTERs wrapped in try/catch for the same reason as
+// must_change_password above (no IF NOT EXISTS on SQLite < 3.35).
+try {
+  db.exec(`ALTER TABLE nodes ADD COLUMN config_revision INTEGER DEFAULT 0`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+try {
+  db.exec(`ALTER TABLE nodes ADD COLUMN config_snapshot TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
+// `node_config_updates` — pending + history. One row per dashboard write.
+// At most one row per node may be in a non-terminal state at a time
+// (single-flight enforced at the tool layer; this table just stores).
+//
+// network_id is denormalized from nodes(network_id) at insert time so
+// queries don't need to JOIN through nodes every time + so a node
+// deletion doesn't orphan the history (audit retention).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS node_config_updates (
+    update_id        TEXT PRIMARY KEY,
+    node_id          TEXT NOT NULL,
+    network_id       TEXT NOT NULL,
+    patch_json       TEXT NOT NULL,
+    apply_mode       TEXT NOT NULL,
+    base_revision    INTEGER NOT NULL,
+    status           TEXT NOT NULL,
+    error            TEXT,
+    created_at       INTEGER NOT NULL,
+    created_by_token TEXT NOT NULL,
+    acked_at         INTEGER,
+    new_revision     INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ncu_node_status ON node_config_updates(node_id, status);
+  CREATE INDEX IF NOT EXISTS idx_ncu_network ON node_config_updates(network_id);
+`);
+
 // ── V3: networks table ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS networks (

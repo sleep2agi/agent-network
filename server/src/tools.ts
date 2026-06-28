@@ -4,6 +4,13 @@ import { db, uuidv4, logTaskEvent, chainReplyToParent } from "./db.js";
 import { pushEvent } from "./push.js";
 import { getUserNetworkRole } from "./auth.js";
 import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias } from "./rename.js";
+import {
+  ALLOWED_FLAGS,
+  SECURITY_SENSITIVE_FLAGS,
+  computeApplyMode,
+  validatePatch,
+  isAllowedToChangeFlag,
+} from "./config-apply-validate.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 
 function ts(): string {
@@ -237,8 +244,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         uptime_seconds: z.number().nullable().optional(),
         in_flight_count: z.number().nullable().optional(),
       }).optional().describe("Per-agent process telemetry reported by agent-node"),
+      // RFC-024 B6 — masked snapshot of the node's effective config
+      // (model + 6 dashboard-editable flags). Secrets ARE NOT in this
+      // shape (env._envRef stays on host); the dashboard reads this
+      // verbatim for the snapshot path without touching node files.
+      // config_update_capable signals whether the node runs under a
+      // supervisor wrapper that honours the sentinel-75 restart path
+      // (W1) — bare-spawned agent-nodes set this to false so dashboard
+      // can grey out remote-restart for them.
+      config_snapshot: z.object({
+        model: z.string().max(200).optional().nullable(),
+        flags: z.record(z.unknown()).optional(),
+        config_revision: z.number().int().min(0).optional(),
+        config_update_capable: z.boolean().optional(),
+      }).optional().describe("RFC-024 — masked node config snapshot"),
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, config_snapshot: cfgSnap }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -412,6 +433,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
                updated_at = datetime('now')`,
             [node_id, nn || effectiveAlias, effectiveAlias, nodeRuntime, mdl ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null, effectiveNetId ?? null]
           );
+          // RFC-024 B6 — write the masked config_snapshot if provided. Stored
+          // as JSON text on nodes.config_snapshot so the dashboard GET path
+          // (B5) can return it without joining other tables. Only update
+          // when the report carries a snapshot — bare reports preserve the
+          // last good value.
+          if (cfgSnap) {
+            db.run(
+              `UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`,
+              [JSON.stringify(cfgSnap), node_id],
+            );
+          }
         } catch {}
       }
 
@@ -1369,5 +1401,303 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, completions: rows }) }],
       };
     }
+  );
+
+  // ──────────────────────────────────────────────────────────────────
+  // RFC-024 (2026-06-28) — node config-apply MCP tools.
+  //
+  // Three contract tools (update / get / ack) + one lifecycle tool
+  // (restart_node, Vincent 2026-06-28 increment). All four enforce
+  // SEC-1 (network-scoped, never trust upstream dashboard routing —
+  // every tool re-checks caller→token→network. Mirrors the #275
+  // cross-tenant write防护带 pattern). update_node_config additionally
+  // enforces SEC-2 — security-sensitive flags (permissionMode,
+  // dangerouslySkipPermissions, teammateMode) are fail-CLOSED pending
+  // Vincent's policy decision (see SECURITY_SENSITIVE_FLAGS below).
+  //
+  // See docs/rfcs/RFC-024-dashboard-node-config-apply.md for the
+  // contract + sequence diagrams + guards.
+  // ──────────────────────────────────────────────────────────────────
+
+  // Helpers — ALLOWED_FLAGS, SECURITY_SENSITIVE_FLAGS, computeApplyMode,
+  // validatePatch, isAllowedToChangeFlag live in
+  // ./config-apply-validate.ts so the contract is unit-testable without
+  // standing up an MCP server.
+
+  /**
+   * Resolve the node row that update_node_config / restart_node targets.
+   * Returns the row + the SEC-1 verdict (network match against caller).
+   * Network mismatch is the cross-tenant write防护带 from #275 — every
+   * tool re-checks this even if dashboard already did, because curl
+   * can talk directly to /mcp.
+   */
+  const resolveTargetNode = (
+    nodeId: string,
+    callerNetworkId: string | null,
+  ): { row: any | null; sec1Ok: boolean } => {
+    const row = db.get<any>(
+      "SELECT node_id, alias, network_id, config_revision FROM nodes WHERE node_id = ?1",
+      nodeId,
+    );
+    if (!row) return { row: null, sec1Ok: false };
+    const nodeNet = row.network_id || "default";
+    const callerNet = callerNetworkId || "default";
+    return { row, sec1Ok: nodeNet === callerNet };
+  };
+
+  server.tool(
+    "update_node_config",
+    "Set the desired per-node config (model + flags) and push a doorbell to the node. The node pulls + validates + applies (hot or restart per field tier). RFC-024.",
+    {
+      node_id: z.string().min(1).max(200).describe("Target node ID (not alias). Must be in caller's network."),
+      base_revision: z.number().int().min(0).describe("Current revision per the dashboard's last GET — 409 if hub's current revision differs."),
+      patch: z.object({
+        model: z.string().max(200).optional(),
+        flags: z.record(z.unknown()).optional(),
+      }).describe("Fields to update. Empty patch → no-op (use restart_node for that)."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id: nodeId, base_revision: baseRev, patch, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+
+      const { row: node, sec1Ok } = resolveTargetNode(nodeId, effectiveNetId);
+      if (!node) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_found", node_id: nodeId }) }] };
+      }
+      if (!sec1Ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node", message: "node belongs to another network" }) }] };
+      }
+
+      const model = typeof patch.model === "string" ? patch.model : undefined;
+      const flags = (patch.flags && typeof patch.flags === "object") ? patch.flags as Record<string, unknown> : {};
+
+      // SEC-2 placeholder — delegated to isAllowedToChangeFlag in
+      // config-apply-validate.ts. Today: any security-sensitive flag
+      // → fail-CLOSED for all roles (member/admin/owner). After Vincent
+      // confirms the policy, edit isAllowedToChangeFlag to permit
+      // admin+ (or whichever role is chosen) and update tests.
+      const callerRole = enforceUserId && effectiveNetId
+        ? getUserNetworkRole(enforceUserId, effectiveNetId)
+        : null;
+      const secCheck = isAllowedToChangeFlag(callerRole, flags);
+      if (secCheck) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "security_flag_locked",
+              field: secCheck.field,
+              message: secCheck.reason,
+            }),
+          }],
+        };
+      }
+
+      const validationFail = validatePatch(model, flags);
+      if (validationFail) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "invalid_patch",
+              field: validationFail.field,
+              reason: validationFail.reason,
+            }),
+          }],
+        };
+      }
+
+      // Revision conflict.
+      if ((node.config_revision || 0) !== baseRev) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "revision_conflict",
+              current_revision: node.config_revision || 0,
+              base_revision: baseRev,
+            }),
+          }],
+        };
+      }
+
+      // Single-flight: reject if this node already has a non-terminal update.
+      const inFlight = db.get<{ update_id: string }>(
+        "SELECT update_id FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting')",
+        nodeId,
+      );
+      if (inFlight) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "update_in_flight",
+              existing_update_id: inFlight.update_id,
+            }),
+          }],
+        };
+      }
+
+      // Compute apply_mode + persist + push doorbell.
+      const updateId = `cu_${uuidv4()}`;
+      const applyMode = computeApplyMode(model, flags);
+      const patchJson = JSON.stringify({ ...(model !== undefined ? { model } : {}), flags });
+      const networkId = node.network_id || "default";
+      db.run(
+        `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8)`,
+        [updateId, nodeId, networkId, patchJson, applyMode, baseRev, Date.now(), callerTokenId || "unknown"],
+      );
+
+      pushEvent(node.alias, { type: "config_update", update_id: updateId }, networkId);
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ ok: true, update_id: updateId, apply_mode: applyMode }),
+        }],
+      };
+    },
+  );
+
+  server.tool(
+    "get_config_update",
+    "Node pulls its pending config update (called from agent-node when SSE config_update doorbell arrives). RFC-024.",
+    {},
+    async () => {
+      // ntok_ context: callerAlias is the bound node's alias. Pull the
+      // node row by alias + network (SEC-1: never return another network's update).
+      if (!callerAlias) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "alias_required" }) }] };
+      }
+      const networkId = enforceNetworkId || null;
+      const node = db.get<any>(
+        "SELECT node_id, network_id FROM nodes WHERE alias = ?1" + (networkId ? " AND network_id = ?2" : ""),
+        ...(networkId ? [callerAlias, networkId] : [callerAlias]),
+      );
+      if (!node) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, update: null }) }] };
+      }
+      const update = db.get<any>(
+        "SELECT update_id, patch_json, apply_mode, base_revision FROM node_config_updates WHERE node_id = ?1 AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+        node.node_id,
+      );
+      if (!update) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, update: null }) }] };
+      }
+      let patch: any = {};
+      try { patch = JSON.parse(update.patch_json); } catch { patch = {}; }
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            ok: true,
+            update: {
+              update_id: update.update_id,
+              patch,
+              apply_mode: update.apply_mode,
+              base_revision: update.base_revision,
+            },
+          }),
+        }],
+      };
+    },
+  );
+
+  server.tool(
+    "ack_config_update",
+    "Node acknowledges a config update — applied / rejected / restarting / timeout. RFC-024.",
+    {
+      update_id: z.string().min(1).max(200),
+      status: z.enum(["applied", "rejected", "restarting", "timeout"]),
+      new_revision: z.number().int().min(0).optional(),
+      error: z.string().max(2000).optional(),
+    },
+    async ({ update_id: updateId, status, new_revision: newRev, error: ackError }) => {
+      if (!callerAlias) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "alias_required" }) }] };
+      }
+      // Cross-tenant guard: the ack-er must own the update being acked.
+      // Resolve node by caller's alias, compare to update.node_id.
+      const networkId = enforceNetworkId || null;
+      const node = db.get<any>(
+        "SELECT node_id FROM nodes WHERE alias = ?1" + (networkId ? " AND network_id = ?2" : ""),
+        ...(networkId ? [callerAlias, networkId] : [callerAlias]),
+      );
+      if (!node) {
+        // Silently ignore stale ack — return ok so the node doesn't retry forever.
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "alias_unknown" }) }] };
+      }
+      const update = db.get<any>(
+        "SELECT update_id, node_id, status FROM node_config_updates WHERE update_id = ?1",
+        updateId,
+      );
+      if (!update || update.node_id !== node.node_id) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "unknown_or_foreign_update" }) }] };
+      }
+      // Reject ack for already-terminal updates (idempotency).
+      if (update.status === "applied" || update.status === "rejected" || update.status === "timeout") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ignored: "already_terminal", current_status: update.status }) }] };
+      }
+
+      const ackedAt = Date.now();
+      if (status === "applied") {
+        // Promote the node's config_revision to the new revision, atomically.
+        const nextRev = (typeof newRev === "number" && newRev > 0) ? newRev : ((db.get<{ config_revision: number }>("SELECT config_revision FROM nodes WHERE node_id = ?1", node.node_id)?.config_revision || 0) + 1);
+        db.run(
+          `UPDATE node_config_updates SET status = 'applied', acked_at = ?1, new_revision = ?2 WHERE update_id = ?3`,
+          [ackedAt, nextRev, updateId],
+        );
+        db.run(`UPDATE nodes SET config_revision = ?1 WHERE node_id = ?2`, [nextRev, node.node_id]);
+      } else {
+        db.run(
+          `UPDATE node_config_updates SET status = ?1, acked_at = ?2, error = ?3 WHERE update_id = ?4`,
+          [status, ackedAt, ackError || null, updateId],
+        );
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
+    },
+  );
+
+  server.tool(
+    "restart_node",
+    "Trigger a node restart without changing config. RFC-024 Vincent 2026-06-28 increment. Network-scoped (SEC-1); member+ role suffices (lifecycle ops are not privilege elevation).",
+    {
+      node_id: z.string().min(1).max(200),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id: nodeId, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+
+      const { row: node, sec1Ok } = resolveTargetNode(nodeId, effectiveNetId);
+      if (!node) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_found", node_id: nodeId }) }] };
+      }
+      if (!sec1Ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
+      }
+      const inFlight = db.get<{ update_id: string }>(
+        "SELECT update_id FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting')",
+        nodeId,
+      );
+      if (inFlight) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "update_in_flight", existing_update_id: inFlight.update_id }) }] };
+      }
+      const updateId = `cu_${uuidv4()}`;
+      const networkId = node.network_id || "default";
+      db.run(
+        `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, '{}', 'restart_only', ?4, 'pending', ?5, ?6)`,
+        [updateId, nodeId, networkId, node.config_revision || 0, Date.now(), callerTokenId || "unknown"],
+      );
+      pushEvent(node.alias, { type: "restart", update_id: updateId }, networkId);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, update_id: updateId, apply_mode: "restart_only" }) }],
+      };
+    },
   );
 }
