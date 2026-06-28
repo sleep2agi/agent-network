@@ -124,6 +124,43 @@ export function minimalEnv(extra: Record<string, string> = {}): NodeJS.ProcessEn
 const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 const MODEL_RE = /^[a-zA-Z0-9._:\-]+$/;
 const VALID_RUNTIMES = new Set(["claude-agent-sdk", "codex-sdk", "grok-build-acp"]);
+const PERMISSION_MODES = new Set(["default", "acceptEdits", "plan", "bypassPermissions"]);
+
+// §4.2.2 daemon-side flag VALUE validator — defense in depth, mirrors
+// hub-side validateFlagValue (server/src/create-node-validate.ts). A
+// compromised hub or mid-flight tampering could smuggle `maxTurns:
+// "DROP TABLE"` or `dangerouslySkipPermissions: "true"` (string!) past
+// hub's check; daemon catches it before the value reaches child config
+// or fork argv. Per 通信牛 PR #299 BLOCKER #2.
+export function validateFlagValueDaemon(k: string, v: unknown): void {
+  switch (k) {
+    case "permissionMode":
+      if (typeof v !== "string" || !PERMISSION_MODES.has(v)) {
+        throw new Error(`flag_value_invalid:${k}:must be default/acceptEdits/plan/bypassPermissions`);
+      }
+      return;
+    case "dangerouslySkipPermissions":
+      if (typeof v !== "boolean") throw new Error(`flag_value_invalid:${k}:must be boolean`);
+      return;
+    case "maxTurns":
+      if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 9999) {
+        throw new Error(`flag_value_invalid:${k}:must be integer 1..9999`);
+      }
+      return;
+    case "budget":
+      if (typeof v !== "number" || !Number.isFinite(v) || (v as number) < 0 || (v as number) > 1000) {
+        throw new Error(`flag_value_invalid:${k}:must be number 0..1000`);
+      }
+      return;
+    case "timeout":
+      if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 86400) {
+        throw new Error(`flag_value_invalid:${k}:must be integer 1..86400`);
+      }
+      return;
+    default:
+      throw new Error(`flag_key_unknown:${k}`);
+  }
+}
 
 export interface DaemonNodeSpec {
   name: string;
@@ -145,8 +182,11 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
     if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout"].includes(k)) {
       throw new Error(`flag_key_unknown:${k}`);
     }
-    // value type validation is hub-side responsibility; we still
-    // coerce + push as array (no shell).
+    // §4.2.2 daemon double-layer: defense in depth (per 通信牛 PR
+    // #299 BLOCKER #2). hub already filters, but a compromised hub
+    // could smuggle `maxTurns: "DROP TABLE"` etc; we type/range
+    // check before String() coerces into argv.
+    validateFlagValueDaemon(k, v);
     args.push(`--${kebab(k)}`, String(v));
   }
   return args;
