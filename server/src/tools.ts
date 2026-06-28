@@ -24,6 +24,22 @@ import {
   auditCreateNode,
   resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
 } from "./create-node.js";
+import {
+  vaultUpsert, vaultGet, vaultListKeys, vaultDelete,
+  VaultError,
+} from "./vault.js";
+import {
+  validateBaseUrl as _validateBaseUrl,
+  SUPPORTED_VENDORS,
+  ProbeValidationError,
+} from "./probe-validate.js";
+import {
+  putPendingProbeSecret,
+  newProbeId,
+  finalizeProbeAck,
+  startPendingProbeGcTimer,
+  startProbeSweeperTimer,
+} from "./probe.js";
 import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias } from "./rename.js";
 import {
   ALLOWED_FLAGS,
@@ -2126,6 +2142,305 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         [status, ackError || null, ackedAt, request_id],
       );
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
+    },
+  );
+
+  // ── RFC-028 P1 — Provider & Model Registry + connectivity probe ──
+  // Background timers (probe GC + sweeper) idempotent; safe to call
+  // per registerTools.
+  startPendingProbeGcTimer();
+  startProbeSweeperTimer();
+
+  // Helper: zod to JSON-RPC reply for ProbeValidationError + VaultError
+  const probeFailReply = (e: unknown) => {
+    if (e instanceof ProbeValidationError) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: e.code, ...(e.detail || {}) }) }] };
+    }
+    if (e instanceof VaultError) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: e.code, message: e.message }) }] };
+    }
+    throw e;
+  };
+
+  // §2.3.4 — upsert_network_secret (OWNER-ONLY; vault write).
+  server.tool(
+    "upsert_network_secret",
+    "Write or replace a secret value in the network's vault (AES-GCM encrypted at rest). OWNER-only. RFC-028.",
+    {
+      key: z.string().min(1).max(64).regex(/^[A-Z][A-Z0-9_]{0,63}$/),
+      value: z.string().min(1).max(16 * 1024),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ key, value, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+      const callerRole = enforceUserId && effectiveNetId
+        ? getUserNetworkRole(enforceUserId, effectiveNetId)
+        : null;
+      if (callerRole !== "owner") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "secret_owner_only", required_role: "owner", caller_role: callerRole }) }] };
+      }
+      try {
+        vaultUpsert(effectiveNetId || "default", key, value);
+        auditCreateNode({
+          action: "create_node_dispatched",  // reusing audit_log shape (provider follow-up logs)
+          user_id: enforceUserId, network_id: effectiveNetId, target_id: null,
+          detail: { op: "vault_upsert", key, network_id: effectiveNetId },
+        });
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, key }) }] };
+      } catch (e) {
+        return probeFailReply(e);
+      }
+    },
+  );
+
+  // §2.3.4b — list_network_secrets (key names only; viewer+).
+  server.tool(
+    "list_network_secrets",
+    "List vault key NAMES (NEVER values) for a network. RFC-028.",
+    { network_id: z.string().max(200).optional() },
+    async ({ network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId) && enforceUserId) {
+        // viewer-level: allow if caller has any role in network
+        const role = getUserNetworkRole(enforceUserId, effectiveNetId || "default");
+        if (!role) return writeDeniedReply(effectiveNetId, "read");
+      }
+      const keys = vaultListKeys(effectiveNetId || "default");
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, keys }) }] };
+    },
+  );
+
+  // §2.3.1 — upsert_provider (admin+).
+  server.tool(
+    "upsert_provider",
+    "Create or update a provider (vendor + base_url + secret_key_ref + initial models). Admin+. RFC-028.",
+    {
+      name: z.string().min(1).max(100),
+      vendor: z.string().min(1).max(64),
+      base_url: z.string().min(1).max(500),
+      secret_key_ref: z.string().min(1).max(64),
+      models: z.array(z.object({
+        model_name: z.string().min(1).max(100),
+        display_name: z.string().max(100).optional(),
+        context_window: z.number().int().min(0).optional(),
+        supports_vision: z.boolean().optional(),
+      })).optional(),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ name, vendor, base_url, secret_key_ref, models, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+      const callerRole = enforceUserId && effectiveNetId
+        ? getUserNetworkRole(enforceUserId, effectiveNetId)
+        : null;
+      if (callerRole !== "admin" && callerRole !== "owner") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_provider", required_role: "admin", caller_role: callerRole }) }] };
+      }
+      try {
+        _validateBaseUrl(vendor, base_url);
+      } catch (e) {
+        return probeFailReply(e);
+      }
+      // Verify vault key exists (best-effort; just lists names)
+      const vaultKeys = vaultListKeys(effectiveNetId || "default");
+      if (!vaultKeys.includes(secret_key_ref)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "secret_not_in_vault", key: secret_key_ref, hint: "upsert_network_secret first" }) }] };
+      }
+      const providerId = `prov_${uuidv4()}`;
+      try {
+        db.run(
+          `INSERT INTO providers (provider_id, network_id, name, vendor, base_url, secret_key_ref, created_at, created_by, enabled)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)`,
+          [providerId, effectiveNetId || "default", name, vendor, base_url, secret_key_ref, Date.now(), enforceUserId || "unknown"],
+        );
+      } catch (e: any) {
+        if (/UNIQUE constraint failed/.test(e?.message || "")) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "provider_name_conflict", name }) }] };
+        }
+        throw e;
+      }
+      const modelIds: string[] = [];
+      if (models) {
+        for (const m of models) {
+          const mid = `pm_${uuidv4()}`;
+          db.run(
+            `INSERT INTO provider_models (model_id, provider_id, model_name, display_name, context_window, supports_vision, enabled, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)`,
+            [mid, providerId, m.model_name, m.display_name ?? null, m.context_window ?? null, m.supports_vision ? 1 : 0, Date.now()],
+          );
+          modelIds.push(mid);
+        }
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, provider_id: providerId, model_ids: modelIds }) }] };
+    },
+  );
+
+  // §2.3.3 — list_providers (viewer+; never returns secret VALUES).
+  server.tool(
+    "list_providers",
+    "List providers + models in the caller's network. Never returns secret VALUES. RFC-028.",
+    { network_id: z.string().max(200).optional() },
+    async ({ network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      // viewer access: caller must be member of network (read access)
+      if (enforceUserId) {
+        const role = getUserNetworkRole(enforceUserId, effectiveNetId || "default");
+        if (!role) return writeDeniedReply(effectiveNetId, "read");
+      }
+      const providers = db.all<any>(
+        `SELECT provider_id, name, vendor, base_url, secret_key_ref, enabled FROM providers WHERE network_id = ?1 AND enabled = 1 ORDER BY name`,
+        effectiveNetId || "default",
+      );
+      const out = providers.map(p => {
+        const models = db.all<any>(
+          `SELECT model_id, model_name, display_name, context_window, supports_vision, enabled FROM provider_models WHERE provider_id = ?1 AND enabled = 1 ORDER BY model_name`,
+          p.provider_id,
+        );
+        return { ...p, in_vault: true, models };  // in_vault: true since we required it on upsert
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, providers: out }) }] };
+    },
+  );
+
+  // §2.3.5 — probe_provider_model (admin+; dispatches to daemon).
+  server.tool(
+    "probe_provider_model",
+    "Dispatch a connectivity probe to a daemon. Mints ephemeral secret blob; daemon pulls via get_probe_request. Admin+. RFC-028.",
+    {
+      provider_id: z.string().min(1).max(200),
+      model_name: z.string().min(1).max(100),
+      daemon_node_id: z.string().min(1).max(200),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ provider_id, model_name, daemon_node_id, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+      const callerRole = enforceUserId && effectiveNetId
+        ? getUserNetworkRole(enforceUserId, effectiveNetId)
+        : null;
+      if (callerRole !== "admin" && callerRole !== "owner") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_probe", required_role: "admin", caller_role: callerRole }) }] };
+      }
+      // Resolve provider + model (network-scoped)
+      const provider = db.get<any>(
+        `SELECT provider_id, vendor, base_url, secret_key_ref FROM providers WHERE provider_id = ?1 AND network_id = ?2 AND enabled = 1`,
+        provider_id, effectiveNetId || "default",
+      );
+      if (!provider) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "provider_not_found", provider_id }) }] };
+      const model = db.get<any>(
+        `SELECT model_id, model_name FROM provider_models WHERE provider_id = ?1 AND model_name = ?2 AND enabled = 1`,
+        provider_id, model_name,
+      );
+      if (!model) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "model_not_found", model_name }) }] };
+      // Resolve daemon (must be in caller network)
+      const { row: daemon, sec1Ok } = resolveTargetNode(daemon_node_id, effectiveNetId);
+      if (!daemon) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "daemon_not_found" }) }] };
+      if (!sec1Ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
+      // Vault decrypt the API key (may throw VaultError)
+      let apiKey: string;
+      try {
+        const v = vaultGet(effectiveNetId || "default", provider.secret_key_ref);
+        if (!v) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "secret_not_in_vault", key: provider.secret_key_ref }) }] };
+        apiKey = v;
+      } catch (e) { return probeFailReply(e); }
+      // Mint probe row + stash ephemeral blob
+      const probeId = newProbeId();
+      db.run(
+        `INSERT INTO probe_results (probe_id, provider_id, model_name, daemon_node_id, network_id, status, probed_at, probed_by_user)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)`,
+        [probeId, provider_id, model_name, daemon_node_id, effectiveNetId || "default", Date.now(), enforceUserId || null],
+      );
+      putPendingProbeSecret({
+        probe_id: probeId,
+        daemon_node_id,
+        provider_id,
+        vendor: provider.vendor,
+        base_url: provider.base_url,
+        model_name,
+        api_key: apiKey,
+        network_id: effectiveNetId || "default",
+      });
+      pushEvent(daemon.alias, { type: "probe_provider", probe_id: probeId }, daemon.network_id || effectiveNetId || "default");
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, probe_id: probeId }) }] };
+    },
+  );
+
+  // §2.3.6 — get_probe_results (viewer+; matrix renderer source).
+  server.tool(
+    "get_probe_results",
+    "Query probe history (optionally filtered by provider/model/daemon). Used by dashboard reachability matrix. RFC-028.",
+    {
+      provider_id: z.string().max(200).optional(),
+      model_name: z.string().max(100).optional(),
+      daemon_node_id: z.string().max(200).optional(),
+      limit: z.number().int().min(1).max(500).optional(),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ provider_id, model_name, daemon_node_id, limit, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (enforceUserId) {
+        const role = getUserNetworkRole(enforceUserId, effectiveNetId || "default");
+        if (!role) return writeDeniedReply(effectiveNetId, "read");
+      }
+      const where: string[] = ["network_id = ?1"];
+      const params: any[] = [effectiveNetId || "default"];
+      if (provider_id)    { where.push(`provider_id = ?${params.length + 1}`); params.push(provider_id); }
+      if (model_name)     { where.push(`model_name = ?${params.length + 1}`); params.push(model_name); }
+      if (daemon_node_id) { where.push(`daemon_node_id = ?${params.length + 1}`); params.push(daemon_node_id); }
+      const sql = `SELECT probe_id, provider_id, model_name, daemon_node_id, status, latency_ms, error_label, probed_at, raw_status_code FROM probe_results WHERE ${where.join(" AND ")} ORDER BY probed_at DESC LIMIT ${limit ?? 100}`;
+      const rows = db.all<any>(sql, ...params);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, results: rows }) }] };
+    },
+  );
+
+  // §2.3.7 daemon-facing — get_probe_request.
+  server.tool(
+    "get_probe_request",
+    "Daemon pulls a pending probe request (called when SSE probe_provider doorbell arrives). RFC-028.",
+    { probe_id: z.string().min(1).max(200) },
+    async ({ probe_id }) => {
+      const callerDaemon = _resolveCallerDaemonTokenBound({ callerTokenIsNetwork, callerTokenId, enforceNetworkId });
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      // takePendingProbeSecret enforces daemon binding + evicts
+      const blob = (await import("./probe.js")).takePendingProbeSecret(probe_id, callerDaemon.daemonNodeId);
+      if (!blob) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "probe_request_unavailable", reason: "not_found_or_wrong_daemon_or_expired" }) }] };
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        probe_id: blob.probe_id,
+        vendor: blob.vendor,
+        base_url: blob.base_url,
+        model_name: blob.model_name,
+        api_key: blob.api_key,        // ephemeral; daemon writes to .env.local or in-memory only
+      }) }] };
+    },
+  );
+
+  // §2.3.8 daemon-facing — ack_probe_request (STRICT whitelist via zod).
+  server.tool(
+    "ack_probe_request",
+    "Daemon acks a probe. Schema is STRICT whitelist (no error_message; v3 R3 LOCK). RFC-028.",
+    {
+      probe_id: z.string().min(1).max(200),
+      status: z.enum(["ok", "auth_fail", "quota", "rate_limit", "network_error", "timeout", "redirect_forbidden", "vendor_5xx", "other_4xx", "tls_error"]),
+      raw_status_code: z.number().int().min(100).max(599).optional(),
+      latency_ms: z.number().int().min(0).max(60_000),
+    },
+    async (args) => {
+      const callerDaemon = _resolveCallerDaemonTokenBound({ callerTokenIsNetwork, callerTokenId, enforceNetworkId });
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      try {
+        const r = finalizeProbeAck(args, { network_id: callerDaemon.networkId, daemon_node_id: callerDaemon.daemonNodeId });
+        return { content: [{ type: "text" as const, text: JSON.stringify(r) }] };
+      } catch (e) {
+        return probeFailReply(e);
+      }
     },
   );
 }
