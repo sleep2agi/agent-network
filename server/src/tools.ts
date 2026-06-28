@@ -642,21 +642,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${readScope.networkId ? " net=" + readScope.networkId.slice(0, 12) : ""}`);
 
-      const sessions = db.transaction(() => {
-        const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
-        const staleParams: any[] = [cutoff];
-        let staleSql = "UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'";
-        staleSql = addReadScope(staleSql, staleParams, readScope);
-        db.run(staleSql, staleParams);
-
-        let sql = "SELECT * FROM sessions WHERE 1=1";
-        const params: any[] = [];
-        sql = addReadScope(sql, params, readScope);
-        if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
-        if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
-        sql += " ORDER BY updated_at DESC";
-        return db.all(sql, ...params);
-      });
+      // Round-2/4 review ③: stale-marking moved to startStaleSessionSweeper()
+      // (background timer, ~60s cadence). Read path no longer fires UPDATE.
+      let sql = "SELECT * FROM sessions WHERE 1=1";
+      const params: any[] = [];
+      sql = addReadScope(sql, params, readScope);
+      if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
+      if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
+      sql += " ORDER BY updated_at DESC";
+      const sessions = db.all(sql, ...params);
 
       const summaryParams: any[] = [];
       let summarySql = "SELECT status, COUNT(*) as count FROM sessions WHERE 1=1";
