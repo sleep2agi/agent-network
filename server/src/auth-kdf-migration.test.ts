@@ -206,6 +206,75 @@ describe("register() — new users always start in new format (bootstrap admin)"
   });
 });
 
+describe("login — username enumeration timing-oracle close (round-6 A1 hardening)", () => {
+  // Independent pre-review on #285: post-A1 the user-exists +
+  // wrong-password path runs ~50ms scrypt, the user-not-found path
+  // returns sub-ms — that's a web-measurable oracle for "is this
+  // username registered". Fix: run a throwaway verifyPassword
+  // against a module-constant dummy hash on the not-found branch
+  // so wall-clock cost is comparable on both paths.
+  //
+  // The test asserts ORDER-OF-MAGNITUDE timing parity, not exact
+  // equality — scrypt timings have natural jitter and we don't
+  // want a flaky test that hammers CI on busy hosts. The check
+  // is "both paths are slow" (both > some floor), proving the
+  // dummy-verify codepath actually runs on the not-found branch.
+  test("not-found user takes scrypt-class time (not sub-ms early-return)", () => {
+    register("real-user-z", "RealUserZ123");
+
+    // Warm the JIT + paging on both paths so the first call's
+    // amortized cost doesn't skew the comparison.
+    login("real-user-z", "wrong");
+    login("does-not-exist-warmup", "wrong");
+
+    // Sample multiple times and take the median so single-call
+    // jitter doesn't dominate.
+    const sample = (fn: () => void): number => {
+      const N = 5;
+      const xs: number[] = [];
+      for (let i = 0; i < N; i++) {
+        const start = performance.now();
+        fn();
+        xs.push(performance.now() - start);
+      }
+      xs.sort((a, b) => a - b);
+      return xs[Math.floor(N / 2)];
+    };
+
+    const tExists = sample(() => { login("real-user-z", "wrong"); });
+    const tMissing = sample(() => { login("nobody-here-" + Math.random(), "wrong"); });
+
+    // The fix's load-bearing claim: BOTH paths run scrypt. At test
+    // N=10 (~5ms per scrypt), an early-return path would be < 1ms.
+    // Loose lower bound of 1ms catches an "early return" regression
+    // without being flaky on slow CI runners.
+    expect(tExists).toBeGreaterThan(1);
+    expect(tMissing).toBeGreaterThan(1);
+
+    // Ratio: both paths should be the same order of magnitude.
+    // 5x is a generous bound to avoid CI flakiness from
+    // co-scheduled scrypt workloads or paging. Pre-fix this would
+    // be 50x+ trivially.
+    const ratio = Math.max(tExists, tMissing) / Math.max(0.1, Math.min(tExists, tMissing));
+    expect(ratio).toBeLessThan(5);
+  });
+
+  test("not-found user still returns the generic error string (no info leak)", () => {
+    register("user-exists", "ExistsP@ss1");
+
+    const a = login("user-exists", "wrong");
+    const b = login("user-does-not-exist", "wrong");
+
+    expect(a.ok).toBe(false);
+    expect(b.ok).toBe(false);
+    // Both must return EXACTLY the same error string. If they
+    // diverge, the username-enumeration oracle reopens at the
+    // string-comparison layer regardless of timing.
+    expect(a.error).toBe(b.error);
+    expect(a.error).toBe("invalid username or password");
+  });
+});
+
 describe("ordering invariant — single login transition (round-6 spec)", () => {
   // The dispatch's load-bearing post-condition: "post-upgrade 旧串
   // 不再存在 in DB". One concise pin.

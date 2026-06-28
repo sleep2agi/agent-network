@@ -4,6 +4,30 @@
 import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js";
 import { WEAK_PASSWORDS } from "./password-dict.js";
 
+// Round-6 A1 hardening — dummy hash for username-enumeration timing
+// close. We compute ONE scrypt hash of a throwaway password and reuse
+// it on every `!user` branch in login. The verify call against this
+// dummy always fails the timingSafeEqual (the candidate password is
+// unrelated), but the wall-clock cost of the scrypt() invocation is
+// identical to the user-exists path — closing the ~50ms username-
+// exists oracle that opened up when we moved off SHA-256 to scrypt.
+//
+// **Lazy** (memoized) rather than module-load constant: COMMHUB_SCRYPT_N
+// may be set after this module loads (tests do this), and the dummy
+// MUST match the current N so its scrypt cost matches the cost of
+// verifying a real stored hash. Computing on first use captures the
+// env-current N. After that it's a single fixed string for the
+// process lifetime — one scrypt per process, not per request.
+let _enumerationDummyHash: string | null = null;
+function getEnumerationDummyHash(): string {
+  if (_enumerationDummyHash === null) {
+    _enumerationDummyHash = hashPassword(
+      "agent-network::enumeration-oracle-close::do-not-match"
+    );
+  }
+  return _enumerationDummyHash;
+}
+
 export interface AuthUser {
   user_id: string;
   username: string;
@@ -104,7 +128,20 @@ export function login(username: string, password: string): AuthResult {
     "SELECT user_id, username, password_hash, display_name, email, role, must_change_password FROM users WHERE username = ?1",
     username);
 
-  if (!user) return { ok: false, error: "invalid username or password" };
+  if (!user) {
+    // Round-6 A1 hardening (timing-oracle close): pre-A1 the user-
+    // exists vs user-doesn't-exist branches both ran a µs-scale
+    // SHA-256, so wall-clock difference was lost in noise. Post-A1
+    // the user-exists path runs ~50ms scrypt while user-doesn't
+    // returns sub-ms — that ~50ms gap is web-measurable and turns
+    // login into a username-enumeration oracle (rate limiter only
+    // partially mitigates). Equalize by running scrypt against a
+    // module-constant dummy hash on the not-found path. Dummy is
+    // pre-generated at module load (not per call) so we don't burn
+    // a fresh scryptSync on every miss.
+    verifyPassword(password, getEnumerationDummyHash());
+    return { ok: false, error: "invalid username or password" };
+  }
   // Round-6 A1: verifyPassword accepts both new scrypt format and
   // legacy bare-sha256. On successful legacy verify, lazy-upgrade the
   // stored hash in place (zero downtime, no forced password change).
