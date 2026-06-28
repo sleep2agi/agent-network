@@ -161,6 +161,21 @@ export async function handleCreateMyLoop(args: any, ctx: SelfLoopCtx): Promise<S
   } catch (e: any) {
     return fail("invalid_schedule", e.message);
   }
+  // #302 round-2 (通信牛 catch): structured schedule shape may be
+  // syntactically valid (time matches HH:MM, type is allowed) but
+  // semantically broken — e.g. bogus IANA timezone "Bad/Zone" that
+  // Intl.DateTimeFormat rejects. Without this preflight, such a
+  // schedule lands in goals.json, then every scheduler tick throws
+  // in computeNextWakeAt → goal stays active+due → self-lock wake
+  // storm. Catch here BEFORE the write so the goal never reaches
+  // disk and existing goals are untouched.
+  try {
+    computeNextWakeAt(parsed.schedule, new Date(nowOf(ctx)), ctx.defaultTz, {
+      fallback_interval_ms: parsed.interval_ms,
+    });
+  } catch (e: any) {
+    return fail("invalid_schedule", `schedule fails compute: ${e?.message || e}`);
+  }
   const g = newGoal({
     text: args.task.trim(),
     interval_ms: parsed.interval_ms,
@@ -203,6 +218,18 @@ export async function handleEditMyLoop(args: any, ctx: SelfLoopCtx): Promise<Sel
       newSchedule = parsed.schedule ?? null; // null = clear schedule field
     } catch (e: any) {
       return fail("invalid_schedule", e.message);
+    }
+    // #302 round-2 (通信牛 catch) — preflight computeNextWakeAt so a
+    // semantically-bad-but-shape-valid schedule (e.g. invalid timezone)
+    // is rejected BEFORE we overwrite the existing goal. Otherwise
+    // edit + bad TZ corrupts the existing healthy goal into a
+    // self-locking one.
+    try {
+      computeNextWakeAt(newSchedule ?? undefined, new Date(now), ctx.defaultTz, {
+        fallback_interval_ms: newIntervalMs ?? g.interval_ms,
+      });
+    } catch (e: any) {
+      return fail("invalid_schedule", `schedule fails compute: ${e?.message || e}`);
     }
   }
   const updated = await ctx.store.mutate(args.goal_id, (current) => {

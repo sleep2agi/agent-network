@@ -270,6 +270,109 @@ describe("cancel_my_loop", () => {
   });
 });
 
+describe("#302 round-2 — preflight computeNextWakeAt (self-lock prevention)", () => {
+  // 通信牛 catch: structured schedule that passes shape validation
+  // but throws at computeNextWakeAt-time (bad IANA timezone, etc.)
+  // would land in goals.json, and every scheduler tick would throw
+  // → goal stays active+due → self-locking wake storm.
+  //
+  // Pin: create/edit MUST preflight computeNextWakeAt and reject
+  // with invalid_schedule BEFORE writing. Existing goals must be
+  // untouched if the edit is rejected.
+
+  test("create_my_loop: bad timezone in schedule → invalid_schedule, NOT written", async () => {
+    const before = (await store.list()).length;
+    const r = await handleCreateMyLoop(
+      {
+        task: "morning",
+        schedule: { type: "time_of_day", time: "09:00", timezone: "Bad/Zone" },
+      },
+      mkCtx(store),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toBe("invalid_schedule");
+      expect(r.message).toMatch(/Bad\/Zone|invalid time zone/i);
+    }
+    // load fresh from disk to verify it didn't sneak in
+    expect((await store.list()).length).toBe(before);
+  });
+
+  test("create_my_loop: bad weekday → invalid_schedule, NOT written", async () => {
+    const before = (await store.list()).length;
+    const r = await handleCreateMyLoop(
+      {
+        task: "bad",
+        schedule: { type: "weekday", days: ["funday"], time: "09:00" },
+      },
+      mkCtx(store),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("invalid_schedule");
+    expect((await store.list()).length).toBe(before);
+  });
+
+  test("create_my_loop: bad time format → invalid_schedule, NOT written", async () => {
+    const before = (await store.list()).length;
+    const r = await handleCreateMyLoop(
+      {
+        task: "bad",
+        schedule: { type: "time_of_day", time: "25:99" },
+      },
+      mkCtx(store),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("invalid_schedule");
+    expect((await store.list()).length).toBe(before);
+  });
+
+  test("edit_my_loop: bad timezone on edit → invalid_schedule, EXISTING goal untouched", async () => {
+    // Seed a healthy goal with status=active + interval cadence
+    const healthy = newGoal({ text: "healthy", interval_ms: 5 * 60_000, runtime: "claude-agent-sdk" });
+    await store.upsert(healthy);
+    const beforeStored = await store.get(healthy.goal_id);
+    const beforeIso = beforeStored!.updated_at;
+    const beforeNext = beforeStored!.next_wake_at;
+    const beforeStatus = beforeStored!.status;
+    const beforeText = beforeStored!.text;
+
+    const future = Date.now() + 60_000;
+    const r = await handleEditMyLoop(
+      {
+        goal_id: healthy.goal_id,
+        schedule: { type: "time_of_day", time: "09:00", timezone: "Mars/Phobos" },
+        task: "should not change either", // even other fields must not slip through
+      },
+      mkCtx(store, { now: () => future }),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("invalid_schedule");
+
+    // Verify EXISTING goal completely untouched
+    const after = await store.get(healthy.goal_id);
+    expect(after!.text).toBe(beforeText);
+    expect(after!.status).toBe(beforeStatus);
+    expect(after!.next_wake_at).toBe(beforeNext);
+    expect(after!.updated_at).toBe(beforeIso);
+    expect(after!.schedule).toBeUndefined(); // no schedule corruption
+  });
+
+  test("create_my_loop: VALID structured schedule still works (regression)", async () => {
+    // Sanity check — the preflight must not over-reject good schedules.
+    const r = await handleCreateMyLoop(
+      {
+        task: "valid morning",
+        schedule: { type: "time_of_day", time: "09:00", timezone: "Asia/Shanghai" },
+      },
+      mkCtx(store),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect((r.data as any).cadence.type).toBe("time_of_day");
+    }
+  });
+});
+
 describe("SELF_LOOP_TOOL_SPECS — registration table", () => {
   test("exports 6 tools with stable names", () => {
     const names = SELF_LOOP_TOOL_SPECS.map((s) => s.name);
