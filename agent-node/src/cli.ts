@@ -52,6 +52,18 @@ import {
 } from "./runtime/classify-result";
 import { withTimeout, TimeoutError, resolveTimeoutMs } from "./util/timeout";
 import { superviseChild } from "./util/supervise-child";
+import {
+  validateLocalPatch,
+  computeApplyMode as computeConfigApplyMode,
+  atomicWriteJson,
+  backupConfigPrev,
+  loadConfigWithSelfHeal,
+  mergePatch,
+  buildConfigSnapshot,
+  RESTART_SENTINEL,
+  type ConfigUpdate,
+  type ConfigPatch,
+} from "./runtime/config-apply";
 
 const home = homedir();
 
@@ -140,11 +152,38 @@ function loadJson(path: string): Record<string, any> | null {
 
 let fileConfig: Record<string, any> = {};
 let configFilePath = "";  // 用于 session 写回
+// RFC-024 — last-known revision of fileConfig (the hub-promoted
+// config_revision after the most recent applied update). Bumped by
+// processConfigUpdate after a successful apply ack; reported to hub
+// via report_status.config_snapshot.config_revision so dashboard sees
+// it bump in real time.
+let currentConfigRevision = 0;
 
 if (opts.config) {
   const cfgPath = opts.config.startsWith("/") ? opts.config : join(process.cwd(), opts.config);
-  const fc = loadJson(cfgPath);
-  if (fc) { fileConfig = fc; configFilePath = cfgPath; console.log(`[agent-node] Config: ${cfgPath}`); }
+  // RFC-024 — boot self-heal. If the primary config is corrupt / missing,
+  // restore from the .prev sidecar that processConfigUpdate writes
+  // before every restart-required apply. Without this wire-up, a node
+  // whose latest apply wrote a config the runtime can't parse would
+  // boot with empty fileConfig (no token / no hub / no alias) and never
+  // recover. We try self-heal first; on hard failure (primary parses
+  // AND no .prev fallback) fall back to the old loadJson semantics so
+  // a fresh-install (no .prev) still boots with whatever we have.
+  try {
+    const outcome = loadConfigWithSelfHeal(cfgPath);
+    fileConfig = outcome.config;
+    configFilePath = cfgPath;
+    if (outcome.source === "prev") {
+      console.warn(`[agent-node] ⚠ RFC-024 self-heal — primary config ${cfgPath} unparseable (${outcome.primaryError || "?"}); restored from .prev sidecar`);
+    }
+    console.log(`[agent-node] Config: ${cfgPath} (source=${outcome.source})`);
+  } catch (e: any) {
+    // No usable config (no primary + no .prev). Fall back to the
+    // pre-RFC-024 behaviour: try a plain loadJson, accept null.
+    const fc = loadJson(cfgPath);
+    if (fc) { fileConfig = fc; configFilePath = cfgPath; console.log(`[agent-node] Config: ${cfgPath} (plain load)`); }
+    else { console.warn(`[agent-node] ⚠ config not loaded: ${e?.message || e}`); }
+  }
 }
 
 // #203 — alias source priority + cross-source sanity check. `--alias` (set by
@@ -291,8 +330,29 @@ let TOOLS: string[] | typeof TOOLS_PRESET =
 // uses one turn per tool roundtrip, so any task that uses commhub MCP or
 // reads files burns through 5 turns instantly and fails with
 // "Reached maximum number of turns (5)" — which is what Vincent saw.
-const MAX_TURNS = parseInt(opts["max-turns"] || fileConfig.flags?.maxTurns || fileConfig.maxTurns || "50");
-const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetUsd || fileConfig.maxBudgetUsd || "0");
+//
+// RFC-024 BLOCKER 2 fix: maxTurns / maxBudgetUsd must be re-read at think
+// time from the (possibly hot-updated) fileConfig, NOT cached as module
+// consts at init. Pre-fix: dashboard hot-apply maxTurns wrote the file +
+// bumped revision + ack'd applied, but the next think still used the
+// init-time MAX_TURNS const → silent no-op. Read accessors below are
+// invoked per-think; --max-turns CLI flag still wins as override.
+const MAX_TURNS_CLI = opts["max-turns"] ? parseInt(opts["max-turns"]) : undefined;
+const MAX_BUDGET_CLI = opts["max-budget"] ? parseFloat(opts["max-budget"]) : undefined;
+function currentMaxTurns(): number {
+  if (MAX_TURNS_CLI !== undefined) return MAX_TURNS_CLI;
+  const f = fileConfig.flags?.maxTurns ?? fileConfig.maxTurns ?? "50";
+  const n = typeof f === "number" ? f : parseInt(String(f));
+  return Number.isFinite(n) ? n : 50;
+}
+function currentMaxBudget(): number {
+  if (MAX_BUDGET_CLI !== undefined) return MAX_BUDGET_CLI;
+  // Dashboard sends `flags.budget` per RFC-024 schema; legacy config files
+  // use `flags.maxBudgetUsd`. Read both, prefer the new canonical key.
+  const f = fileConfig.flags?.budget ?? fileConfig.flags?.maxBudgetUsd ?? fileConfig.maxBudgetUsd ?? "0";
+  const n = typeof f === "number" ? f : parseFloat(String(f));
+  return Number.isFinite(n) ? n : 0;
+}
 // Wall-clock guard for the claude-agent-sdk query(). The SDK has no HTTP-level
 // timeout: a custom ANTHROPIC_BASE_URL endpoint that accepts the connection but
 // never streams a valid response leaves query() hanging forever and the agent
@@ -306,10 +366,28 @@ const MAX_BUDGET = parseFloat(opts["max-budget"] || fileConfig.flags?.maxBudgetU
 // fired mid-stream before the vendor's queue drained, swallowing the real
 // cause. 300s covers the observed tail (37s) with 8× headroom and lets
 // claude-agent-sdk's own 429/5xx retry chain engage.
-const CLAUDE_TIMEOUT_MS = parseInt(
-  opts["claude-timeout-ms"] || process.env.CLAUDE_TIMEOUT_MS
-  || fileConfig.flags?.claudeTimeoutMs || fileConfig.claudeTimeoutMs || "300000"
-);
+// RFC-024 BLOCKER 2 fix — read accessor (not init-time const) so a
+// dashboard-driven restart-required apply that writes a new
+// `flags.timeout` (RFC-024 canonical key) takes effect immediately
+// after re-spawn. Legacy `flags.claudeTimeoutMs` kept as fallback for
+// pre-RFC-024 config files. CLI flag wins as override.
+const CLAUDE_TIMEOUT_MS_CLI = opts["claude-timeout-ms"]
+  ? parseInt(opts["claude-timeout-ms"]) : (process.env.CLAUDE_TIMEOUT_MS
+  ? parseInt(process.env.CLAUDE_TIMEOUT_MS) : undefined);
+function currentClaudeTimeoutMs(): number {
+  if (CLAUDE_TIMEOUT_MS_CLI !== undefined) return CLAUDE_TIMEOUT_MS_CLI;
+  const v = fileConfig.flags?.timeout
+    ?? fileConfig.flags?.claudeTimeoutMs
+    ?? fileConfig.claudeTimeoutMs
+    ?? "300000";
+  const n = typeof v === "number" ? v : parseInt(String(v));
+  return Number.isFinite(n) ? n : 300_000;
+}
+// Back-compat shim — old call sites referenced CLAUDE_TIMEOUT_MS as a
+// const value, so for sites that genuinely want one-shot at-init read
+// we keep this const. Hot-apply-aware sites should call
+// currentClaudeTimeoutMs() instead.
+const CLAUDE_TIMEOUT_MS = currentClaudeTimeoutMs();
 // v0.9.2 (#129 + #132): retry count for transient LLM-call errors.
 // Auth-error class (401 / invalid_api_key / A0211) short-circuits retry —
 // retrying with the same bad credential just wastes 12s before failing
@@ -324,11 +402,21 @@ const CLAUDE_MAX_RETRIES = parseInt(
 // Mirror CLAUDE_TIMEOUT_MS shape but default 300s, settable via env /
 // flag for the parity flags listed in docs/runbooks/. resolveTimeoutMs
 // honours `0` as "disabled" so power users can opt out.
-const CODEX_TIMEOUT_MS = resolveTimeoutMs({
-  envValue: opts["codex-timeout-ms"] || process.env.CODEX_TIMEOUT_MS,
-  flagValue: typeof fileConfig.flags?.codexTimeoutMs === "number" ? fileConfig.flags.codexTimeoutMs : undefined,
-  defaultMs: 300_000,
-}).valueMs;
+// RFC-024 — same canonical-key (flags.timeout) read precedence as
+// claude. Pre-RFC-024 callers passed flags.codexTimeoutMs; that's kept
+// as a fallback.
+function currentCodexTimeoutMs(): number {
+  return resolveTimeoutMs({
+    envValue: opts["codex-timeout-ms"] || process.env.CODEX_TIMEOUT_MS,
+    flagValue: typeof fileConfig.flags?.timeout === "number"
+      ? fileConfig.flags.timeout
+      : (typeof fileConfig.flags?.codexTimeoutMs === "number"
+          ? fileConfig.flags.codexTimeoutMs : undefined),
+    defaultMs: 300_000,
+  }).valueMs;
+}
+const CODEX_TIMEOUT_MS = currentCodexTimeoutMs();  // back-compat shim
+
 // Grok handshake (initialize + authenticate + session/new) is decoupled
 // from the prompt timeout. Pre-redirect both shared the same 300s knob,
 // so a stuck handshake hid behind the prompt deadline.
@@ -825,6 +913,36 @@ const reportStatus = async (status: string, task?: string) => {
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
+    // RFC-024 N6 — masked snapshot of effective model+flags so dashboard
+    // can show the current state without touching per-node files.
+    // config_update_capable signals whether this process runs under a
+    // supervisor wrapper that honours the sentinel-75 restart path (W1)
+    // — when false (bare-spawn agent-node), dashboard greys out remote-
+    // restart. Set via env var ANET_CONFIG_UPDATE_CAPABLE=1 by the W1
+    // wrapper at spawn time (default false to be safe for bare runs).
+    //
+    // PREMATURE-FINALIZE GUARD (#290 final, 通信龙 catch 2026-06-28):
+    // Hub uses content-match on this snapshot to finalize pending
+    // restart-required updates. During the drain window of a
+    // restart-required apply, the old child has ALREADY written the
+    // new config file but is still running the old in-memory config —
+    // if its heartbeat fires here with the new snapshot, hub would
+    // false-finalize before the new child even spawns. The
+    // configApplyDraining flag is set by drainInFlightThink BEFORE
+    // exit(75); we omit the snapshot for the rest of this process's
+    // life. After exit, the new child boots with configApplyDraining
+    // = false (fresh module init), and its first report_status sends
+    // a real snapshot → hub finalizes. Heartbeats still fire (so the
+    // node doesn't look offline during drain), they just don't carry
+    // the snapshot field. Same guard covers boot-failure-rollback:
+    // new child boots .prev → reports OLD snapshot → content-match
+    // fails → update stays pending → reaper timeouts → dashboard sees
+    // timeout (NOT false ✓).
+    config_snapshot: configApplyDraining ? undefined : buildConfigSnapshot(
+      fileConfig,
+      process.env.ANET_CONFIG_UPDATE_CAPABLE === "1",
+      currentConfigRevision,
+    ),
   });
 };
 const getInbox = async () => {
@@ -1502,7 +1620,7 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     // #101 fix: TOOLS is now either an explicit allowlist (string[]) or the
     // SDK's "give me the full Claude Code preset" sentinel — never undefined.
     tools: TOOLS,
-    maxTurns: MAX_TURNS,
+    maxTurns: currentMaxTurns(),  // RFC-024 — re-read per think for hot-apply
     permissionMode: resolvedPermissionMode,
     ...(resolvedPermissionMode === "bypassPermissions"
       ? { allowDangerouslySkipPermissions: true }
@@ -1523,7 +1641,8 @@ async function processWithClaude(task: string, from: string, images?: string[]):
       }] }],
     },
   };
-  if (MAX_BUDGET > 0) options.maxBudgetUsd = MAX_BUDGET;
+  const budget = currentMaxBudget();  // RFC-024 — re-read per think for hot-apply
+  if (budget > 0) options.maxBudgetUsd = budget;
   // #130 hotfix — intern-s2-preview emits Anthropic-spec `tool_use` content
   // blocks only when biased by a system prompt; the default tool_choice:auto
   // behaviour is verbose "Thinking Process" text-only output with tool calls
@@ -2405,7 +2524,22 @@ async function tryHandleExplicitDelegation(task: string, from: string, taskId: s
 // ══════════════════════════════════════
 let thinkQueue = Promise.resolve();
 
+// RFC-024 — set by drainInFlightThink() before exit(75). Blocks new
+// think() calls so the supervisor exit can't race a fresh task that
+// reassigns thinkQueue under it. Without this, a task arriving during
+// drain would chain onto a new thinkQueue, the drain's race awaits the
+// OLD thinkQueue ref, and the new task is killed by exit(75) mid-flight.
+let configApplyDraining = false;
+
 function think(task: string, from: string, taskId: string | null, images?: string[]): Promise<string> {
+  if (configApplyDraining) {
+    // Don't accept new work during a restart drain. The error string
+    // is intentionally explicit so the upstream caller (inbox handler,
+    // IM channel, etc.) doesn't silently retry — the node is going
+    // down. Hub will redeliver / re-poll naturally once the new child
+    // is up.
+    return Promise.resolve(`执行出错: agent-node 重启中（config-apply drain），任务暂不处理，请稍后重发`);
+  }
   const run = async () => {
     // Expose CURRENT_TASK_ID for runtime processes (Claude SDK / Codex)
     // so the LLM can pass it as parent_task_id when delegating sub-tasks.
@@ -3071,6 +3205,142 @@ async function connectTelegram(channel: TelegramChannel) {
   }
 }
 
+// RFC-024 — drain in-flight think for a restart-required apply. Hard-
+// capped at 60s per §8 confirm; we don't try to "warm-handoff" the
+// running think (out of v0.11 scope). Sets configApplyDraining BEFORE
+// awaiting thinkQueue so new tasks are rejected at queue-time — otherwise
+// a fresh task could reassign thinkQueue under us, our race would await
+// the OLD reference, and the new task would slip past and get killed
+// by exit(75). The draining flag in think() (cli.ts) intercepts new
+// calls and returns a "node restarting" string instead.
+async function drainInFlightThink(hardCapMs = 60_000): Promise<void> {
+  configApplyDraining = true;
+  const start = Date.now();
+  try {
+    await Promise.race([
+      thinkQueue,
+      new Promise<void>((r) => setTimeout(r, hardCapMs)),
+    ]);
+  } catch {
+    // thinkQueue may have rejected — drain semantics only care that
+    // it settled (success or failure).
+  }
+  const dt = Date.now() - start;
+  log(`[config-apply] drained in-flight think (${dt}ms${dt >= hardCapMs ? `, hard-cap ${hardCapMs}ms hit` : ""})`);
+}
+
+// RFC-024 — pull, validate, route, write, ack. Called from the SSE
+// config_update doorbell handler. Any failure path → ack rejected
+// (with reason) so dashboard sees the failure quickly rather than
+// waiting for the 30s apply timeout.
+async function processConfigUpdate(): Promise<void> {
+  let updateId = "";
+  try {
+    const pull = await callCommHub("get_config_update", {});
+    const update = pull?.update as ConfigUpdate | null | undefined;
+    if (!update) {
+      debug(`[config-apply] no pending update for this node`);
+      return;
+    }
+    updateId = update.update_id;
+    log(`[config-apply] pulled ${updateId} mode=${update.apply_mode}`);
+
+    // restart_only — no validate/write, just drain + exit 75. The ack
+    // is wrapped so an ack throw cannot strand us pre-exit; the F-B
+    // reaper on the hub side handles the missed-ack case.
+    if (update.apply_mode === "restart_only") {
+      try {
+        await callCommHub("ack_config_update", { update_id: updateId, status: "restarting" });
+      } catch (ackErr: any) {
+        warn(`[config-apply] restart_only ack restarting failed (continuing to exit): ${ackErr?.message || ackErr}`);
+      }
+      await drainInFlightThink();
+      log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor`);
+      process.exit(RESTART_SENTINEL);
+    }
+
+    // Defense-in-depth local validation (hub validator drift guard).
+    const localFail = validateLocalPatch(update.patch);
+    if (localFail) {
+      warn(`[config-apply] local validate rejected ${updateId}: ${localFail.field}=${localFail.reason}`);
+      await callCommHub("ack_config_update", {
+        update_id: updateId,
+        status: "rejected",
+        error: `local validate: ${localFail.field}=${localFail.reason}`,
+      });
+      return;
+    }
+
+    const localMode = computeConfigApplyMode(update.patch);
+    if (localMode !== update.apply_mode) {
+      warn(`[config-apply] mode mismatch hub=${update.apply_mode} local=${localMode}; trusting local for safety`);
+    }
+    const mode = localMode;
+
+    if (!configFilePath) {
+      warn(`[config-apply] no configFilePath (node started without --config); rejecting ${updateId}`);
+      await callCommHub("ack_config_update", {
+        update_id: updateId,
+        status: "rejected",
+        error: "no config file path on this node — start with --config to enable remote apply",
+      });
+      return;
+    }
+    const backup = backupConfigPrev(configFilePath);
+    const merged = mergePatch(fileConfig, update.patch);
+    atomicWriteJson(configFilePath, merged);
+    log(`[config-apply] wrote ${configFilePath} (.prev backedUp=${backup.backedUp})`);
+
+    if (mode === "hot") {
+      // Replace the mutable fileConfig reference; per-think accessors
+      // (currentMaxTurns / currentMaxBudget / currentClaudeTimeoutMs /
+      // currentCodexTimeoutMs) read this new value on the next call.
+      fileConfig = merged;
+      currentConfigRevision += 1;
+      await callCommHub("ack_config_update", {
+        update_id: updateId,
+        status: "applied",
+        new_revision: currentConfigRevision,
+      });
+      log(`[config-apply] HOT applied ${updateId} → revision=${currentConfigRevision}`);
+      return;
+    }
+
+    // Restart path — drain + ack restarting + exit. W1 parent supervisor
+    // sees exit 75 and respawns; the new child reads the new config at
+    // boot and ack's applied from there. Ack wrapped for the same reason
+    // as the restart_only branch above.
+    try {
+      await callCommHub("ack_config_update", { update_id: updateId, status: "restarting" });
+    } catch (ackErr: any) {
+      warn(`[config-apply] restart ack restarting failed (continuing to exit): ${ackErr?.message || ackErr}`);
+    }
+    await drainInFlightThink();
+    log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor`);
+    process.exit(RESTART_SENTINEL);
+  } catch (err: any) {
+    error(`[config-apply] failed: ${err?.message || err}`);
+    if (updateId) {
+      try {
+        await callCommHub("ack_config_update", {
+          update_id: updateId,
+          status: "rejected",
+          error: `apply runtime: ${String(err?.message || err).slice(0, 500)}`,
+        });
+      } catch (ackErr: any) {
+        warn(`[config-apply] ack rejected failed: ${ackErr?.message || ackErr}`);
+      }
+    }
+  }
+}
+
+// RFC-024 — restart_node-triggered SSE doorbell. Restart_node creates
+// an apply_mode=restart_only update; processConfigUpdate's restart_only
+// branch handles it. So we just delegate.
+async function processRestartOnly(): Promise<void> {
+  await processConfigUpdate();
+}
+
 // #202 — auto-reconnect after hub restart. Exponential backoff 1→2→4→8→30s
 // (cap per issue spec). Plus: re-call `register()` on every successful
 // (re)connect so the node reappears in dashboard within ~30s of hub coming
@@ -3162,6 +3432,23 @@ async function connectSSE() {
             }
             if (ev.type === "new_reply") {
               log(`← SSE reply from ${ev.from || "?"}${ev.in_reply_to ? ` (task ${ev.in_reply_to.slice(0, 8)})` : ""}`);
+            }
+            // RFC-024 N1 — config-apply doorbell. Hub posted a desired-
+            // config patch for this node; pull + validate + apply.
+            // restart doorbell is the lifecycle ops shortcut (no config
+            // write, just drain + exit 75). Errors logged but never
+            // propagated up — supervisor stays connected.
+            if (ev.type === "config_update") {
+              log(`← SSE config_update ${ev.update_id || ""}`);
+              processConfigUpdate().catch((e: any) =>
+                warn(`config-apply failed: ${e?.message || e}`),
+              );
+            }
+            if (ev.type === "restart") {
+              log(`← SSE restart ${ev.update_id || ""}`);
+              processRestartOnly().catch((e: any) =>
+                warn(`restart-apply failed: ${e?.message || e}`),
+              );
             }
           } catch {}
         }
@@ -3280,6 +3567,14 @@ switch (startupAction.kind) {
 await register();
 log("已注册到 CommHub");
 processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`));
+// RFC-024 — fire a reportStatus immediately on startup so the
+// config_snapshot reaches the hub right after register(), instead of
+// waiting up to 3 minutes for the periodic timer below to fire. Hub
+// uses the snapshot to finalize pending restart-required updates via
+// `finalizePendingMatchingUpdates` — without this immediate post-
+// register report, dashboard would see `restarting` for up to 3min
+// after a restart instead of ✓ within a few seconds.
+reportStatus("idle").catch((e: any) => warn(`initial reportStatus failed: ${e?.message || e}`));
 setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
 if (goalsSchedulerEnabled) {
   setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
