@@ -1537,13 +1537,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // chosen so a slow-but-alive node within its own deadline never
       // false-positives as stale). Stale rows are marked timeout +
       // superseded by the new update.
+      //
+      // Age anchor = COALESCE(acked_at, created_at) per 通信龙 polish:
+      // a healthy-but-slow restart (drain 60s + respawn time) could
+      // exceed the threshold if anchored on created_at alone (drain
+      // cap and reaper threshold are both 60s — overlap). Anchoring
+      // on acked_at means a node that ack'd "restarting" refreshes
+      // the liveness clock, so an in-progress restart isn't falsely
+      // reaped.
       const STALE_THRESHOLD_MS = 60_000;
-      const inFlight = db.get<{ update_id: string; created_at: number }>(
-        "SELECT update_id, created_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
+      const inFlight = db.get<{ update_id: string; created_at: number; acked_at: number | null }>(
+        "SELECT update_id, created_at, acked_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
         nodeId,
       );
       if (inFlight) {
-        const age = Date.now() - inFlight.created_at;
+        const ageAnchor = inFlight.acked_at ?? inFlight.created_at;
+        const age = Date.now() - ageAnchor;
         if (age <= STALE_THRESHOLD_MS) {
           return {
             content: [{
@@ -1723,14 +1732,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!sec1Ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
       }
-      // F-B reaper: same stale-supersede semantics as update_node_config.
+      // F-B reaper: same stale-supersede semantics as update_node_config,
+      // with same acked_at-anchored liveness clock (see update_node_config
+      // for the 通信龙 polish reasoning).
       const STALE_THRESHOLD_MS_R = 60_000;
-      const inFlight = db.get<{ update_id: string; created_at: number }>(
-        "SELECT update_id, created_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
+      const inFlight = db.get<{ update_id: string; created_at: number; acked_at: number | null }>(
+        "SELECT update_id, created_at, acked_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
         nodeId,
       );
       if (inFlight) {
-        const age = Date.now() - inFlight.created_at;
+        const ageAnchor = inFlight.acked_at ?? inFlight.created_at;
+        const age = Date.now() - ageAnchor;
         if (age <= STALE_THRESHOLD_MS_R) {
           return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "update_in_flight", existing_update_id: inFlight.update_id, age_ms: age }) }] };
         }

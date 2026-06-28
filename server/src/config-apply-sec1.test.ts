@@ -222,6 +222,69 @@ describe("F-B (stale-update reaper) — single-flight TTL prevents permanent loc
   });
 });
 
+describe("F-B polish — reaper anchors on COALESCE(acked_at, created_at), not created_at", () => {
+  // 通信龙 catch: reaper threshold = 60s and drain hard-cap = 60s overlap.
+  // A healthy-but-slow restart (drain 60s + respawn time) could exceed
+  // the threshold if anchored on created_at alone. Anchoring on acked_at
+  // means "node ack'd restarting → liveness clock refreshes" so an
+  // in-progress restart isn't falsely reaped.
+
+  test("row with old created_at + recent acked_at → fresh (age from acked_at)", () => {
+    const nid = insertNode({ alias: "slow-restart", network_id: "netA" });
+    const uid = `cu_${uuidv4()}`;
+    const ancientCreatedAt = Date.now() - 120_000;  // 2 min ago
+    const recentAckedAt = Date.now() - 30_000;       // 30s ago
+    db.run(
+      `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token, acked_at) VALUES (?1, ?2, ?3, '{}', 'restart_only', 0, 'restarting', ?4, 'test', ?5)`,
+      [uid, nid, "netA", ancientCreatedAt, recentAckedAt],
+    );
+    const STALE = 60_000;
+    const row = db.get<any>(
+      "SELECT update_id, created_at, acked_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
+      nid,
+    );
+    const anchor = row.acked_at ?? row.created_at;
+    const age = Date.now() - anchor;
+    // age is from acked_at (~30s), NOT from created_at (~120s).
+    expect(age).toBeLessThan(STALE);
+    expect(age).toBeGreaterThan(20_000);  // sanity: roughly 30s
+  });
+
+  test("row with no acked_at + old created_at → stale (falls back to created_at)", () => {
+    const nid = insertNode({ alias: "never-acked", network_id: "netA" });
+    const uid = `cu_${uuidv4()}`;
+    db.run(
+      `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, '{}', 'restart_only', 0, 'pending', ?4, 'test')`,
+      [uid, nid, "netA", Date.now() - 120_000],
+    );
+    const STALE = 60_000;
+    const row = db.get<any>(
+      "SELECT update_id, created_at, acked_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
+      nid,
+    );
+    const anchor = row.acked_at ?? row.created_at;
+    const age = Date.now() - anchor;
+    expect(age).toBeGreaterThan(STALE);  // no ack → falls back to created_at
+  });
+
+  test("row with old acked_at (node ack'd then crashed) → stale", () => {
+    const nid = insertNode({ alias: "crashed-after-ack", network_id: "netA" });
+    const uid = `cu_${uuidv4()}`;
+    db.run(
+      `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token, acked_at) VALUES (?1, ?2, ?3, '{}', 'restart_only', 0, 'restarting', ?4, 'test', ?5)`,
+      [uid, nid, "netA", Date.now() - 200_000, Date.now() - 90_000],
+    );
+    const STALE = 60_000;
+    const row = db.get<any>(
+      "SELECT update_id, created_at, acked_at FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at DESC LIMIT 1",
+      nid,
+    );
+    const anchor = row.acked_at ?? row.created_at;
+    const age = Date.now() - anchor;
+    expect(age).toBeGreaterThan(STALE);  // ack'd 90s ago > 60s threshold
+  });
+});
+
 describe("F-C (partial unique index) — DB-layer single-flight regardless of process count", () => {
   test("INSERT a second pending row for same node fails with UNIQUE constraint", () => {
     const nid = insertNode({ alias: "double", network_id: "netA" });
