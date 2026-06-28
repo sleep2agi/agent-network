@@ -3567,6 +3567,14 @@ switch (startupAction.kind) {
 await register();
 log("已注册到 CommHub");
 processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`));
+// RFC-024 — fire a reportStatus immediately on startup so the
+// config_snapshot reaches the hub right after register(), instead of
+// waiting up to 3 minutes for the periodic timer below to fire. Hub
+// uses the snapshot to finalize pending restart-required updates via
+// `finalizePendingMatchingUpdates` — without this immediate post-
+// register report, dashboard would see `restarting` for up to 3min
+// after a restart instead of ✓ within a few seconds.
+reportStatus("idle").catch((e: any) => warn(`initial reportStatus failed: ${e?.message || e}`));
 setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
 if (goalsSchedulerEnabled) {
   setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
