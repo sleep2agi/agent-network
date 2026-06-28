@@ -412,37 +412,78 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         } catch {}
       }
 
-      // V2: upsert nodes table for persistent node identity
+      // V2: upsert nodes table for persistent node identity.
+      //
+      // PR A SEC follow-up (#287 cross-tenant trust-root catch by 通信牛
+      // 2026-06-28): node_id is caller-supplied; if a netA ntok_ knows
+      // / guesses a netB node_id, the old `ON CONFLICT DO UPDATE` re-
+      // homed the row by writing the caller's effectiveNetId into
+      // nodes.network_id. resolveTargetNode() in the config-apply tools
+      // reads exactly that field to authorize writes — so an attacker
+      // could re-home a row, then become "authorized" to flip its
+      // config. The cross-tenant防护带 SEC-1 depends on this row being
+      // owned by the network that originally claimed the node_id.
+      //
+      // Fix: SELECT-then-decide. On node_id conflict:
+      //   - If existing.network_id is unset (legacy row pre-network_id
+      //     migration), claim it (bootstrap).
+      //   - If existing.network_id matches caller's enforceNetworkId
+      //     (incl. default/null both sides), update normally.
+      //   - Otherwise, SILENTLY SKIP the upsert (and the snapshot
+      //     write below). report_status is a periodic heartbeat — a
+      //     loud error would log-flood. The caller eventually notices
+      //     when its own writes to its own node_id don't take effect,
+      //     and dashboard's GET /api/nodes/{id}/config (network-scoped)
+      //     never surfaces the foreign row.
       if (node_id) {
         try {
           // Extract runtime from agent field (e.g., "agent-node:codex" → "codex-sdk")
           const nodeRuntime = ag?.includes(":") ? ag.split(":")[1] + "-sdk" : ag ?? null;
-          db.run(
-            `INSERT INTO nodes (node_id, node_name, alias, runtime, model, config_path, channels, server, hostname, network_id, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'))
-             ON CONFLICT(node_id) DO UPDATE SET
-               node_name = COALESCE(?2, nodes.node_name),
-               alias = COALESCE(?3, nodes.alias),
-               runtime = COALESCE(?4, nodes.runtime),
-               model = COALESCE(?5, nodes.model),
-               config_path = COALESCE(?6, nodes.config_path),
-               channels = COALESCE(?7, nodes.channels),
-               server = COALESCE(?8, nodes.server),
-               hostname = COALESCE(?9, nodes.hostname),
-               network_id = COALESCE(?10, nodes.network_id),
-               updated_at = datetime('now')`,
-            [node_id, nn || effectiveAlias, effectiveAlias, nodeRuntime, mdl ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null, effectiveNetId ?? null]
+          const callerNet = effectiveNetId ?? null;
+          const existing = db.get<{ network_id: string | null }>(
+            "SELECT network_id FROM nodes WHERE node_id = ?1",
+            node_id,
           );
-          // RFC-024 B6 — write the masked config_snapshot if provided. Stored
-          // as JSON text on nodes.config_snapshot so the dashboard GET path
-          // (B5) can return it without joining other tables. Only update
-          // when the report carries a snapshot — bare reports preserve the
-          // last good value.
-          if (cfgSnap) {
-            db.run(
-              `UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`,
-              [JSON.stringify(cfgSnap), node_id],
+          const norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
+          const sec1Ok = !existing
+            || existing.network_id === null
+            || existing.network_id === undefined
+            || norm(existing.network_id) === norm(callerNet);
+
+          if (!sec1Ok) {
+            // Cross-tenant attempt — refuse to mutate but allow the
+            // rest of the heartbeat (sessions/inbox below) to run as
+            // normal so the caller's own observable state is unaffected.
+            console.warn(
+              `[commhub] 🚫 report_status cross-network node upsert refused: caller-net=${callerNet ?? "default"} existing-net=${existing!.network_id} node_id=${node_id}`,
             );
+          } else {
+            db.run(
+              `INSERT INTO nodes (node_id, node_name, alias, runtime, model, config_path, channels, server, hostname, network_id, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'))
+               ON CONFLICT(node_id) DO UPDATE SET
+                 node_name = COALESCE(?2, nodes.node_name),
+                 alias = COALESCE(?3, nodes.alias),
+                 runtime = COALESCE(?4, nodes.runtime),
+                 model = COALESCE(?5, nodes.model),
+                 config_path = COALESCE(?6, nodes.config_path),
+                 channels = COALESCE(?7, nodes.channels),
+                 server = COALESCE(?8, nodes.server),
+                 hostname = COALESCE(?9, nodes.hostname),
+                 network_id = COALESCE(?10, nodes.network_id),
+                 updated_at = datetime('now')`,
+              [node_id, nn || effectiveAlias, effectiveAlias, nodeRuntime, mdl ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null, effectiveNetId ?? null]
+            );
+            // RFC-024 B6 — write the masked config_snapshot if provided.
+            // Same SEC-1 gate: only writes when the node row is owned by
+            // the caller's network (the sec1Ok guard above already
+            // gated this whole block).
+            if (cfgSnap) {
+              db.run(
+                `UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`,
+                [JSON.stringify(cfgSnap), node_id],
+              );
+            }
           }
         } catch {}
       }

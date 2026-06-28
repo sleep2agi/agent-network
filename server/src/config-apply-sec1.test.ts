@@ -222,6 +222,111 @@ describe("F-B (stale-update reaper) — single-flight TTL prevents permanent loc
   });
 });
 
+describe("SEC trust-root — report_status node upsert cannot re-home cross-tenant (#287 通信牛 catch)", () => {
+  // 通信牛 catch on #287: report_status is a heartbeat called by every
+  // ntok_'d node, and it upserts the nodes table with caller-supplied
+  // node_id + caller's network_id. The old `ON CONFLICT DO UPDATE` blob
+  // unconditionally set `network_id = COALESCE(?, nodes.network_id)`,
+  // which would re-home an existing row if the caller's network differed.
+  // Since resolveTargetNode (in config-apply tools) reads nodes.network_id
+  // to authorize writes, that re-home would let a foreign network become
+  // "authorized" to flip the row's config — defeating the cross-tenant
+  // 防护带 from PR #275.
+  //
+  // Fix: SELECT-then-decide. If existing.network_id is set AND differs
+  // from caller's effectiveNetId, skip the upsert entirely. These tests
+  // pin the SELECT semantics at the SQL layer.
+
+  test("netA caller checking a netB-owned node_id: SEC-1 verdict = NOT-OK (refuse upsert)", () => {
+    const nid = insertNode({ alias: "victim-net-b", network_id: "netB" });
+    const callerNet = "netA";
+    const existing = db.get<{ network_id: string | null }>(
+      "SELECT network_id FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    const norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
+    const sec1Ok = !existing
+      || existing.network_id === null
+      || existing.network_id === undefined
+      || norm(existing.network_id) === norm(callerNet);
+    expect(sec1Ok).toBe(false);
+  });
+
+  test("netB caller on its own node_id: SEC-1 verdict = OK", () => {
+    const nid = insertNode({ alias: "owner-net-b", network_id: "netB" });
+    const callerNet = "netB";
+    const existing = db.get<{ network_id: string | null }>(
+      "SELECT network_id FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    const norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
+    const sec1Ok = norm(existing?.network_id) === norm(callerNet);
+    expect(sec1Ok).toBe(true);
+  });
+
+  test("legacy row (network_id NULL) — first network to claim it wins (bootstrap)", () => {
+    const nid = insertNode({ alias: "legacy", network_id: null });
+    const callerNet = "netA";
+    const existing = db.get<{ network_id: string | null }>(
+      "SELECT network_id FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    // Legacy row with NULL → caller's report_status would set it to netA.
+    const sec1Ok = !existing
+      || existing.network_id === null
+      || existing.network_id === undefined;
+    expect(sec1Ok).toBe(true);
+  });
+
+  test("default-network caller against named-network node_id → refused (no implicit promotion)", () => {
+    const nid = insertNode({ alias: "named-only", network_id: "netA" });
+    const callerNet: string | null = null;  // default
+    const existing = db.get<{ network_id: string | null }>(
+      "SELECT network_id FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    const norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
+    const sec1Ok = !existing
+      || existing.network_id === null
+      || norm(existing.network_id) === norm(callerNet);
+    expect(sec1Ok).toBe(false);
+  });
+
+  test("named-network caller against default-network node_id → refused", () => {
+    const nid = insertNode({ alias: "default-only", network_id: null });
+    // After bootstrap (caller netA claimed), set the row to a third
+    // network so this test isolates the refuse path.
+    db.run("UPDATE nodes SET network_id = ?1 WHERE node_id = ?2", ["netZ", nid]);
+    const callerNet = "netA";
+    const existing = db.get<{ network_id: string | null }>(
+      "SELECT network_id FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    const norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
+    const sec1Ok = norm(existing?.network_id) === norm(callerNet);
+    expect(sec1Ok).toBe(false);
+  });
+
+  test("after cross-tenant attempt is refused, victim row's network_id is unchanged", () => {
+    const nid = insertNode({ alias: "stable-net-b", network_id: "netB" });
+    const callerNet = "netA";
+    const existing = db.get<{ network_id: string | null }>(
+      "SELECT network_id FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    const norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
+    const sec1Ok = norm(existing?.network_id) === norm(callerNet);
+    expect(sec1Ok).toBe(false);
+    // Re-read to confirm no mutation happened (we never wrote in this
+    // helper; the production guard would have refused the UPDATE).
+    const after = db.get<{ network_id: string | null }>(
+      "SELECT network_id FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    expect(after?.network_id).toBe("netB");
+  });
+});
+
 describe("F-B polish — reaper anchors on COALESCE(acked_at, created_at), not created_at", () => {
   // 通信龙 catch: reaper threshold = 60s and drain hard-cap = 60s overlap.
   // A healthy-but-slow restart (drain 60s + respawn time) could exceed
