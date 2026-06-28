@@ -369,7 +369,12 @@ daemon 内部 fork **永不构造命令字符串**，永不过 shell。所有参
 
 ```ts
 // 字段级白名单 + 类型 (在 daemon 端 + hub 端各自独立校验, 双层防护)
-const ANET_BIN = "anet";  // 唯一允许的 binary
+//
+// NB: binary 引用一律用 §4.2.6 install-time pin 的 ANET_BIN_ABS
+// 绝对路径. v3 之前这里写过 `const ANET_BIN = "anet"` 字面量是
+// 过时的示意, 实际 fork 必须用 ANET_BIN_ABS (避免 runtime which/
+// PATH lookup, 防 scenario I PATH 投毒). impl 直接 import:
+//   import { ANET_BIN_ABS } from "./bin-pin";  // 见 §4.2.6
 const VERBS = ["create", "start", "delete"] as const;
 const RUNTIMES = ["claude-agent-sdk", "codex-sdk", "grok-build-acp"] as const;
 const FLAG_KEYS = ["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout"] as const;
@@ -404,12 +409,13 @@ function buildAnetArgs(spec: NodeSpec): string[] {
   return args;
 }
 
-execFileSync(ANET_BIN, buildAnetArgs(spec), { cwd: WORK_DIR, env: minimalEnv() });
-//                                          ^ 数组传参, 不过 shell
+execFileSync(ANET_BIN_ABS, buildAnetArgs(spec), { cwd: WORK_DIR, env: minimalEnv(envBlob) });
+//             ↑ install-time pin (§4.2.6), runtime 永不 which lookup
+//             ↑ buildAnetArgs 返回数组, 不过 shell
 ```
 
 **关键不变量**：
-1. binary 路径硬编码 `anet`，**不接受 hub 派进来的 path** 字段
+1. binary 路径 = `ANET_BIN_ABS`（§4.2.6 install-time pin），**不接受 hub 派进来的 path** 字段
 2. 第一个 arg 必须是 `node`，第二个必须在 VERBS enum
 3. **不重建命令字符串去 regex match**——任何「先拼成字符串再 regex 验」的模式都暗示 shell 路径存在; v1 草稿里那段 `FORK_ARGS_PATTERN` 已删
 4. 子进程 cwd 强制 `WORK_DIR`，env 用 `minimalEnv()` 白名单（PATH / HOME / `.env.local` 路径），不继承 daemon 的全部环境
