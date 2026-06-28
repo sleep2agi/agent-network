@@ -169,6 +169,8 @@ if [[ -n "$SUCCEEDED" ]]; then
   fi
 fi
 
+# nvm-sim scenario runs at end (after K) — see "A.nvm" block below.
+
 # ── B. role gate ──────────────────────────────────────────────────
 note "B. member/viewer role gate (hub-side)"
 BODY=$(build_create_node_body "$DAEMON_NODE_ID" "b-noop-child" "claude-agent-sdk" "claude-opus-x" "$NET_ID")
@@ -368,8 +370,82 @@ RESP=$(mcp_call "$UTOK" "$BODY")
 ERR=$(echo "$RESP" | jq -r .error 2>/dev/null)
 [[ "$ERR" == "channels_not_supported_in_p1" ]] && ok "K channels rejected: $ERR" || bad "K channels NOT rejected: $RESP"
 
-# ── cleanup ──────────────────────────────────────────────────────
+# ── A.nvm — issue #301 minimalEnv PATH fix真验 (after B-K to avoid disturbing existing daemon) ──
+# Simulates nvm-style install: daemon's own node lives OUTSIDE SAFE_PATH
+# (/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin).
+# Pre-fix: spawned child's `#!/usr/bin/env node` shebang can't find node
+#         under nvm/Bun/pnpm → insta-die <1s before any register.
+# Post-fix: minimalEnv prepends dirname(process.execPath) so spawned
+#          children can resolve env node → child真 register + survives.
+note "A.nvm — issue #301 PATH fix真验 (nvm-style install + register+survive complete-loop)"
+# Kill the existing daemon-rfc028 daemon (used by A-K).
 kill "$DAEMON_PID" 2>/dev/null || true
+sleep 2
+SYS_NODE=$(realpath -e "$(which node 2>/dev/null)" 2>/dev/null || echo "")
+AGENT_NODE_BIN=$(realpath -e "$(which agent-node 2>/dev/null)" 2>/dev/null || echo "")
+if [[ -z "$SYS_NODE" ]] || ! [[ "$SYS_NODE" =~ ^(/usr/local/sbin|/usr/local/bin|/usr/sbin|/usr/bin|/sbin|/bin)/ ]]; then
+  stub "A.nvm" "system node not in SAFE_PATH or missing — nvm-sim setup needs repositioning, skipping"
+elif [[ -z "$AGENT_NODE_BIN" ]]; then
+  stub "A.nvm" "agent-node binary missing — skipping"
+else
+  # Stage nvm-sim: MOVE node out of SAFE_PATH so SAFE_PATH lookup fails
+  # (faithful nvm-style — pre-fix child shebang `#!/usr/bin/env node`
+  # cannot resolve node via SAFE_PATH; post-fix the daemon prepends
+  # dirname(process.execPath) which IS where node now lives)
+  mkdir -p /opt/anet-nvm-sim/bin
+  mv "$SYS_NODE" /opt/anet-nvm-sim/bin/node
+  ok "nvm-sim: MOVED node $SYS_NODE → /opt/anet-nvm-sim/bin/node (SAFE_PATH lookup of node now fails — faithful nvm)"
+  # Cleanup hook restores node so subsequent steps don't break
+  trap "cp /opt/anet-nvm-sim/bin/node $SYS_NODE 2>/dev/null; rm -rf /opt/anet-nvm-sim 2>/dev/null" EXIT
+  NVM_CHILD_NAME="demo-nvm-child"
+  cd "$WORK"
+  # Start daemon explicitly under nvm-sim node (process.execPath becomes /opt/anet-nvm-sim/bin/node)
+  ANET_BIN_ABS=$(realpath -e "$(which anet)") \
+    nohup /opt/anet-nvm-sim/bin/node "$AGENT_NODE_BIN" \
+      --config "$WORK/.anet/nodes/$DAEMON_NAME/config.json" \
+      --alias "$DAEMON_NAME" --runtime claude-agent-sdk \
+      > /tmp/daemon-nvm.log 2>&1 &
+  NVM_DAEMON_PID=$!
+  sleep 5
+  if ! kill -0 "$NVM_DAEMON_PID" 2>/dev/null; then
+    bad "nvm-sim daemon failed to start"; tail -30 /tmp/daemon-nvm.log
+  else
+    ok "nvm-sim daemon alive pid=$NVM_DAEMON_PID (process.execPath=/opt/anet-nvm-sim/bin/node, NOT in SAFE_PATH)"
+    BODY=$(build_create_node_body "$DAEMON_NODE_ID" "$NVM_CHILD_NAME" "claude-agent-sdk" "claude-opus-nvm-test" "$NET_ID")
+    RESP=$(mcp_call "$UTOK" "$BODY")
+    NVM_REQ_ID=$(echo "$RESP" | jq -r .request_id 2>/dev/null)
+    if [[ "$NVM_REQ_ID" != cr_* ]]; then
+      bad "nvm-sim: create_node dispatch failed: $RESP"
+    else
+      ok "nvm-sim: create_node dispatched request_id=$NVM_REQ_ID"
+      NVM_REGISTERED=""; NVM_REG_ITER=""
+      for i in $(seq 1 30); do
+        sleep 1
+        R=$(curl -sS "$HUB_BASE/api/nodes?alias=$NVM_CHILD_NAME" -H "Authorization: Bearer $UTOK")
+        if echo "$R" | jq -e ".nodes[0].alias == \"$NVM_CHILD_NAME\"" >/dev/null 2>&1; then
+          NVM_REGISTERED=yes; NVM_REG_ITER=$i; break
+        fi
+      done
+      if [[ -z "$NVM_REGISTERED" ]]; then
+        bad "nvm-sim: child NEVER registered — issue #301 fix DIDN'T TAKE (child shebang likely insta-died)"
+        tail -30 /tmp/daemon-nvm.log
+      else
+        ok "nvm-sim: child registered in ${NVM_REG_ITER}s (env node resolved via daemon's PATH prepend — #301 修后 register OK)"
+        # Full-loop survival check (register + alive ≥12s — complete loop per 通信龙)
+        sleep 12
+        NVM_CHILD_PID=$(grep -oE "spawned child .$NVM_CHILD_NAME. pid=[0-9]+" /tmp/daemon-nvm.log 2>/dev/null | tail -1 | grep -oE "[0-9]+$")
+        if [[ -n "$NVM_CHILD_PID" ]] && kill -0 "$NVM_CHILD_PID" 2>/dev/null; then
+          ok "nvm-sim: child pid=$NVM_CHILD_PID alive after 12s — FULL LOOP (register + survive complete; #301 真 fix landed)"
+        else
+          bad "nvm-sim: child pid=$NVM_CHILD_PID DEAD within 12s — #301 fix incomplete (registered then died)"
+        fi
+      fi
+    fi
+    kill "$NVM_DAEMON_PID" 2>/dev/null || true
+  fi
+fi
+
+# ── cleanup ──────────────────────────────────────────────────────
 kill "$HUB_PID" 2>/dev/null || true
 
 printf "\n────────────────────────────────────────────\n"
