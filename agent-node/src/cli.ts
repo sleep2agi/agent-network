@@ -1659,9 +1659,9 @@ const CODEX_INSTRUCTIONS = SYSTEM_PROMPT || [
 // get the full commhub_send_task / get_all_status / etc. tool set, with
 // per-node identity (alias / token) inherited from this agent-node process.
 //
-// Vincent retro 2026-06-17: "新成员都用不了 send_task" — new nodes default to
-// codex-sdk runtime (per [[feedback_new_node_codex_default]]); for claude-
-// agent-sdk runtime agent-node injects commhub via an in-process McpServer
+// Vincent retro 2026-06-17: "新成员都用不了 send_task" — new nodes default
+// to the codex-sdk runtime; for the claude-agent-sdk runtime agent-node
+// injects commhub via an in-process McpServer
 // (createCommhubSdkMcpServer at line 1126); for codex-sdk no equivalent
 // in-process channel exists, and CODEX_CONFIG had ZERO mcp_servers field —
 // so codex inherited only whatever was in `~/.codex/config.toml` (a stale,

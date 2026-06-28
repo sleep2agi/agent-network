@@ -1,0 +1,59 @@
+# Block internal memory-slug references from leaking into public OSS files.
+#
+# Runs the Python grep guard in .github/scripts/check-no-memory-slugs.py
+# on every PR + main push. Fails the build on any unexpected
+# `[[feedback_*]]` / `[[project_*]]` / `[[reference_*]]` / `[[user_*]]`
+# reference in source / docs (with a tree-prefix allowlist for the
+# legacy documentation areas tracked under a separate backlog issue —
+# see the script for the current allowlist).
+#
+# Python (not in-yml bash sed loop) per the team's CI-guard pattern:
+# multi-pattern scans on large repos can run pathologically slow under
+# bash on Windows runners; a small Python script is portable and easy
+# to extend.
+
+name: lint (no internal memory-slug leak)
+
+on:
+  pull_request:
+    paths:
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.js'
+      - '**/*.jsx'
+      - '**/*.mjs'
+      - '**/*.cjs'
+      - '**/*.md'
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '.github/scripts/check-no-memory-slugs.py'
+      - '.github/workflows/no-memory-slugs.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.js'
+      - '**/*.jsx'
+      - '**/*.mjs'
+      - '**/*.cjs'
+      - '**/*.md'
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '.github/scripts/check-no-memory-slugs.py'
+      - '.github/workflows/no-memory-slugs.yml'
+
+concurrency:
+  group: lint-slugs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  no-memory-slugs:
+    name: no internal [[feedback_*]] slug references
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run check-no-memory-slugs.py
+        run: python3 .github/scripts/check-no-memory-slugs.py .
