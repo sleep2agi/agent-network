@@ -1921,23 +1921,51 @@ const CODEX_INSTRUCTIONS = SYSTEM_PROMPT || [
 // correct per-node identity.
 function buildCodexConfig(workdir: string): Record<string, any> {
   const nodeServerPath = join(workdir, ".anet", "node-server.js");
+  const mcp_servers: Record<string, any> = {
+    commhub: {
+      command: "bun",
+      args: [nodeServerPath],
+      // env intentionally omitted: codex CLI subprocess inherits this
+      // agent-node parent process's env, which includes the per-node
+      // COMMHUB_ALIAS / COMMHUB_TOKEN / COMMHUB_URL that anet's
+      // launchAgent already sets. Hard-coding env here would re-introduce
+      // the global-alias bug the 06-17 incident exposed.
+    },
+  };
+  // RFC-025 M2 — loops MCP server (streamable HTTP, localhost-bound,
+  // bearer-token-protected). Wired in only when the parent agent-node
+  // has actually started the HTTP server (env LOOPS_MCP_URL set by
+  // startup). codex CLI reads bearer from env LOOPS_MCP_TOKEN. The
+  // token is generated fresh per agent-node process and never leaves
+  // env (no log, no disk). Codex CLI's MCP "Bearer token" shape was
+  // verified 2026-06-29 via `codex mcp add --url ... --bearer-token-env-var`.
+  if (process.env.LOOPS_MCP_URL && process.env.LOOPS_MCP_TOKEN) {
+    mcp_servers.loops = {
+      url: process.env.LOOPS_MCP_URL,
+      bearer_token_env_var: "LOOPS_MCP_TOKEN",
+    };
+  }
   return {
     model_auto_compact_token_limit: 200000,
     developer_instructions: CODEX_INSTRUCTIONS,
-    mcp_servers: {
-      commhub: {
-        command: "bun",
-        args: [nodeServerPath],
-        // env intentionally omitted: codex CLI subprocess inherits this
-        // agent-node parent process's env, which includes the per-node
-        // COMMHUB_ALIAS / COMMHUB_TOKEN / COMMHUB_URL that anet's
-        // launchAgent already sets. Hard-coding env here would re-introduce
-        // the global-alias bug the 06-17 incident exposed.
-      },
-    },
+    mcp_servers,
   };
 }
-const CODEX_CONFIG = buildCodexConfig(process.cwd());
+// Defer CODEX_CONFIG materialization to first use so the loops MCP
+// startup (which sets LOOPS_MCP_URL/TOKEN in env) has a chance to run.
+let CODEX_CONFIG_CACHED: Record<string, any> | null = null;
+function getCodexConfig(): Record<string, any> {
+  if (!CODEX_CONFIG_CACHED) CODEX_CONFIG_CACHED = buildCodexConfig(process.cwd());
+  return CODEX_CONFIG_CACHED;
+}
+// Preserve the original eager binding for callers that still want a
+// static reference (read at first Codex new(); the loops env vars
+// are set before the first task arrives).
+const CODEX_CONFIG = new Proxy({} as Record<string, any>, {
+  get: (_t, prop) => (getCodexConfig() as any)[prop],
+  ownKeys: () => Reflect.ownKeys(getCodexConfig()),
+  getOwnPropertyDescriptor: (_t, prop) => Object.getOwnPropertyDescriptor(getCodexConfig(), prop),
+});
 
 async function processWithCodex(task: string, from: string, images?: string[]): Promise<string> {
   // Ensure system-installed codex binary is found (npm global bin)
@@ -3698,6 +3726,40 @@ if (goalsSchedulerEnabled) {
   setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
   runGoalSchedulerTick().catch(() => {});
 }
+
+// RFC-025 M2 — loops HTTP MCP server for codex-sdk runtime.
+// Always start (independent of runtime) so the SAME goalStore +
+// cooldown + confirm-token state is shared with codex tools. claude
+// path uses in-process SDK McpServer; this HTTP server is the codex
+// equivalent. localhost-bound + random bearer token (only handed to
+// codex subprocess via env). For non-codex runtimes the server runs
+// but is unused — no security exposure since 127.0.0.1 + bearer.
+let loopsHttpServerHandle: import("./goals/loops-http-server").LoopsHttpServerStarted | null = null;
+if (RUNTIME === "codex") {
+  try {
+    const { startLoopsHttpServer } = await import("./goals/loops-http-server");
+    const maxGoalsEnv = parseInt(process.env.COMMHUB_MAX_GOALS_PER_NODE || "", 10);
+    loopsHttpServerHandle = await startLoopsHttpServer({
+      ctx: {
+        store: goalStore,
+        runtime: RUNTIME_LABEL,
+        defaultTz: (fileConfig?.flags?.timezone as string) || "Asia/Shanghai",
+        maxActiveGoals: Number.isFinite(maxGoalsEnv) && maxGoalsEnv > 0 ? maxGoalsEnv : undefined,
+        recentCancels: loopsCancelTimestamps,
+        pendingConfirmTokens: loopsConfirmTokens,
+      },
+    });
+    // Hand token to codex CLI subprocess via env (no log, no disk).
+    // The buildCodexConfig adds mcp_servers.loops referencing this
+    // URL + bearer-token-env-var = LOOPS_MCP_TOKEN.
+    process.env.LOOPS_MCP_TOKEN = loopsHttpServerHandle.token;
+    process.env.LOOPS_MCP_URL = loopsHttpServerHandle.url;
+    log(`[loops] HTTP MCP server bound to ${loopsHttpServerHandle.url} (codex self-loop tools)`);
+  } catch (e: any) {
+    warn(`[loops] HTTP MCP server failed to start (${e?.message ?? e}); codex self-loop tools unavailable`);
+  }
+}
+
 const shutdown = async () => {
   log("shutting down...");
   // #261 P0-1 — gate the feishu supervisor loop so it stops re-forking
@@ -3715,6 +3777,9 @@ const shutdown = async () => {
       try { ch.kill("SIGKILL"); } catch { /* already dead */ }
     }
   }, 500);
+  // M2 — close loops HTTP MCP server (release port + token state).
+  // Synchronous; fast.
+  try { await loopsHttpServerHandle?.close(); } catch { /* already closed */ }
   await reportStatus("offline").catch(() => {});
   process.exit(0);
 };
