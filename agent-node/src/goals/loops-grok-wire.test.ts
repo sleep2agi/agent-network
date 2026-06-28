@@ -1,51 +1,11 @@
 // RFC-025 M3 — grok ACP MCP injection wire tests.
 //
-// The grok injection is a 2-line addition to the existing
-// `grokMcpServers` array in cli.ts (see L2308-ish post-edit). This
-// file pins the SHAPE the array gets when env LOOPS_MCP_URL/TOKEN
-// are set vs absent, so a future refactor that breaks the wire is
-// loudly caught.
-//
-// We don't exercise cli.ts directly (CLI side-effects on load); we
-// inline the same array-building logic and verify the shape.
+// Post-M4-extraction these tests import the REAL `buildGrokMcpServers`
+// export (was pre-extraction an inline mirror of cli.ts logic — which
+// silently drifted any time cli.ts was edited; 通信龙 #306 nit caught).
 
-import { describe, expect, test, beforeEach } from "bun:test";
-
-// Mirror cli.ts's grokMcpServers construction (post-M3 edit).
-function buildGrokMcpServers(opts: {
-  commhubUrl: string;
-  alias: string;
-  authToken?: string;
-  loopsUrl?: string;
-  loopsToken?: string;
-}) {
-  const commhubHeaders: Array<{ name: string; value: string }> = [];
-  if (opts.authToken) commhubHeaders.push({ name: "Authorization", value: `Bearer ${opts.authToken}` });
-  commhubHeaders.push({ name: "X-Commhub-MCP-Transport", value: "acp-http" });
-  if (opts.alias) commhubHeaders.push({ name: "X-Commhub-Alias-Hint", value: opts.alias });
-
-  const servers: Array<{
-    type: "http";
-    name: string;
-    url: string;
-    headers: Array<{ name: string; value: string }>;
-  }> = [{ type: "http", name: "commhub", url: `${opts.commhubUrl}/mcp`, headers: commhubHeaders }];
-
-  if (opts.loopsUrl && opts.loopsToken) {
-    const loopHeaders: Array<{ name: string; value: string }> = [
-      { name: "Authorization", value: `Bearer ${opts.loopsToken}` },
-      { name: "X-Commhub-MCP-Transport", value: "acp-http-loops" },
-    ];
-    if (opts.alias) loopHeaders.push({ name: "X-Commhub-Alias-Hint", value: opts.alias });
-    servers.push({
-      type: "http",
-      name: "loops",
-      url: opts.loopsUrl,
-      headers: loopHeaders,
-    });
-  }
-  return servers;
-}
+import { describe, expect, test } from "bun:test";
+import { buildGrokMcpServers } from "./loops-grok-wire";
 
 describe("grok ACP MCP injection — RFC-025 M3 wire", () => {
   test("when LOOPS env unset, only commhub server (back-compat)", () => {

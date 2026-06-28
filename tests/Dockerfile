@@ -27,8 +27,9 @@ COPY tests/docker-e2e-auth.sh /app/test-auth.sh
 COPY tests/docker-e2e-networks.sh /app/test-networks.sh
 COPY tests/docker-e2e-loop-runtime.sh /app/test-loop-runtime.sh
 COPY tests/docker-e2e-loop-npm-pack.sh /app/test-loop-npm-pack.sh
+COPY tests/docker-e2e-loop-self-mgmt.sh /app/test-loop-self-mgmt.sh
 COPY tests/lib /app/lib
-RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh /app/test-game.sh /app/test-config.sh /app/test-minimax.sh /app/test-all.sh /app/demo.sh /app/test-auth.sh /app/test-networks.sh /app/test-loop-runtime.sh /app/test-loop-npm-pack.sh
+RUN chmod +x /app/test.sh /app/test-codex.sh /app/test-claude.sh /app/test-game.sh /app/test-config.sh /app/test-minimax.sh /app/test-all.sh /app/demo.sh /app/test-auth.sh /app/test-networks.sh /app/test-loop-runtime.sh /app/test-loop-npm-pack.sh /app/test-loop-self-mgmt.sh
 RUN cd /app/server && bun install
 
 # Install local agent-node globally (build from source)

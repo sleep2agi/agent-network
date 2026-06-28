@@ -110,6 +110,12 @@ run_suite "Config Priority (16)" "/app/test-config.sh 2>&1"
 # above suites that use :9200. No reset_server needed before these.
 run_suite "Loop runtime e2e (20)" "/app/test-loop-runtime.sh 2>&1"
 run_suite "Loop npm-pack install (12)" "/app/test-loop-npm-pack.sh 2>&1"
+# RFC-025 M4 — agent loop self-management cross-runtime safety防线
+# e2e. Owns its own hub on :9220 with isolated COMMHUB_DB; coexists
+# with the prior suites (:9200) and #144 loop suites (:9210). Drives
+# real codex+grok nodes through the 5 防线 test groups via the
+# localhost loops HTTP MCP, plus a claude structural smoke.
+run_suite "Loop self-mgmt e2e (41)" "/app/test-loop-self-mgmt.sh 2>&1"
 
 echo ""
 echo "╔══════════════════════════════════════════════════╗"

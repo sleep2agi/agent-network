@@ -2327,46 +2327,19 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   // Schema source: @zed-industries/agent-client-protocol@0.4.5
   // schema/schema.json → $defs.McpServer.anyOf[Http]. Required fields:
   // type:"http", name, url, headers ([{name,value}] array).
-  const headers: Array<{ name: string; value: string }> = [];
-  if (AUTH_TOKEN) headers.push({ name: "Authorization", value: `Bearer ${AUTH_TOKEN}` });
-  // Future-proofing: tag the call so commhub-server can log/route ACP-
-  // injected traffic distinctly if needed. Harmless extra header today.
-  headers.push({ name: "X-Commhub-MCP-Transport", value: "acp-http" });
-  if (ALIAS) headers.push({ name: "X-Commhub-Alias-Hint", value: ALIAS });
-  const grokMcpServers: Array<{
-    type: "http";
-    name: string;
-    url: string;
-    headers: Array<{ name: string; value: string }>;
-  }> = [{
-    type: "http",
-    name: "commhub",
-    url: `${COMMHUB_URL}/mcp`,
-    headers,
-  }];
-
-  // RFC-025 M3 — register the loops HTTP MCP server (started at
-  // agent-node boot, see startLoopsHttpServer wire below). Same ACP
-  // schema as commhub: type:"http" + headers array. The bearer token
-  // is read from process.env.LOOPS_MCP_TOKEN (parent process state),
-  // not surfaced in logs/disk per 通信龙 M2 security constraints.
-  //
-  // localhost-bound + per-process random token: a misbehaving peer on
-  // the same machine can't address THIS agent's loops without the
-  // ephemeral token, which only this agent-node process possesses.
-  if (process.env.LOOPS_MCP_URL && process.env.LOOPS_MCP_TOKEN) {
-    const loopHeaders: Array<{ name: string; value: string }> = [
-      { name: "Authorization", value: `Bearer ${process.env.LOOPS_MCP_TOKEN}` },
-      { name: "X-Commhub-MCP-Transport", value: "acp-http-loops" },
-    ];
-    if (ALIAS) loopHeaders.push({ name: "X-Commhub-Alias-Hint", value: ALIAS });
-    grokMcpServers.push({
-      type: "http",
-      name: "loops",
-      url: process.env.LOOPS_MCP_URL,
-      headers: loopHeaders,
-    });
-  }
+  // RFC-025 M3 — grok ACP MCP server list construction extracted to
+  // pure `buildGrokMcpServers` so unit tests in loops-grok-wire.test.ts
+  // assert the REAL export instead of mirroring inline (pre-extraction
+  // a cli.ts edit would silently drift past the wire tests). All env/
+  // ALIAS/AUTH_TOKEN/COMMHUB_URL reads stay here; the helper is pure.
+  const { buildGrokMcpServers } = await import("./goals/loops-grok-wire");
+  const grokMcpServers = buildGrokMcpServers({
+    commhubUrl: COMMHUB_URL,
+    alias: ALIAS,
+    authToken: AUTH_TOKEN || undefined,
+    loopsUrl: process.env.LOOPS_MCP_URL,
+    loopsToken: process.env.LOOPS_MCP_TOKEN,
+  });
 
   // #204 preview.7 — per-node isolated cwd. preview.2 → preview.6 chain
   // showed that even with HTTP MCP injected via ACP, Grok CLI ALSO reads
@@ -3771,6 +3744,12 @@ if (RUNTIME === "codex" || RUNTIME === "grok") {
   try {
     const { startLoopsHttpServer } = await import("./goals/loops-http-server");
     const maxGoalsEnv = parseInt(process.env.COMMHUB_MAX_GOALS_PER_NODE || "", 10);
+    // RFC-025 M4 e2e — accept pre-set LOOPS_MCP_TOKEN so test
+    // harness can drive the HTTP MCP without scraping /proc/<pid>/
+    // environ (which only reflects exec-time env, not post-startup
+    // process.env mutations). Production never sets this; left
+    // unset, the server generates its own random token as before.
+    const preSetToken = process.env.LOOPS_MCP_TOKEN || undefined;
     loopsHttpServerHandle = await startLoopsHttpServer({
       ctx: {
         store: goalStore,
@@ -3780,6 +3759,7 @@ if (RUNTIME === "codex" || RUNTIME === "grok") {
         recentCancels: loopsCancelTimestamps,
         pendingConfirmTokens: loopsConfirmTokens,
       },
+      token: preSetToken,
     });
     // Hand token to codex CLI / grok ACP subprocess via env (no log,
     // no disk). buildCodexConfig adds mcp_servers.loops referencing
