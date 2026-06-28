@@ -335,16 +335,20 @@ CLI / inbox 的 spec 文字（`docs-site/docs/guide/agent-node.md` 已写）补�
 
 Total: ~720 LOC, 5-7 working hours impl + 3-4h 测. (上调 from 600 LOC: cron-lite 加 120 + confirm-back 加 30 + multi-loop e2e 加 30)
 
-## 11. Open questions (等 review 拍)
+## 11. Resolved decisions (通信龙 lead-level 裁定 2026-06-28, 待 Vincent 产品级拍)
 
-1. **`list_my_loops` 返结构 vs 字符串?** 倾向: 返结构化 `{goals: [...]}`, 让 LLM 自己渲染给 user 看。
-2. **`reschedule_my_loop` 跟 `edit_my_loop(interval)` 是否合并?** 倾向: 分开 — `reschedule` 不改 interval 只改 next_wake (一次性 skip-ahead/delay), `edit` 改 interval (周期性). 语义清晰。
-3. **paused → active 是否需要重新校验 interval?** 倾向: 不需要, paused 时 interval 没变, 直接复活。
-4. **context-injection block 放 system prompt 还是 user-message preamble?** 倾向: system prompt (agent 把它当"我自身状态"而非"用户告诉我"). claude-agent-sdk 走 `systemPrompt` option, codex/grok 各 adapter 自己拼。
-5. **20 个 goals 上限是否需 env 可调?** 倾向: 加 `COMMHUB_MAX_GOALS_PER_NODE` env, 默认 20。
-6. **§3.2 #1 cron-lite (A) vs 显式拒 (B)?** 倾向 (A) — Vincent 例子「每天9点」太常见, 静默近似太危险, 加 cron-lite 80 LOC 解决一类需求。需 review 拍 (A 增数据模型字段 + scheduler 改, 但收益高).
-7. **§3.2 #2 confirm-back 阈值** — 3 次/30s 窗口合理吗? 太严会卡正常批量管理, 太松失去防线意义。
-8. **时区处理** — `time_of_day '09:00'` 跟哪个时区对齐? 服务器 TZ / 节点 config 显式声明 / 用户首次设时让 agent 问? 倾向: 节点 config 加 `flags.timezone`, agent create 时落, 工具用此. 默认 `Asia/Shanghai` (Vincent / 团队主时区).
+| # | Question | Resolution | Rationale |
+|---|----------|-----------|-----------|
+| 1 | `list_my_loops` 返结构 vs 字符串 | **结构化 `{goals: [...]}`** | agent + dashboard 都能渲染 + 程序可读 |
+| 2 | `reschedule_my_loop` vs `edit_my_loop(interval)` 合并/分? | **分开** | 语义不同: reschedule=一次性下次唤醒 (ScheduleWakeup 范式动态自调度), edit(interval)=改循环周期. 分开是优雅核心. |
+| 3 | paused→active 是否重新校验 interval? | **重新校验** | resume 时重验 interval/schedule 仍合法 (防 paused 期间 cap/规则变了) |
+| 4 | context-injection 放 system 还是 user prompt? | **system prompt** | agent 当前 loop 状态属"它自己配置/状态", 不放 user prompt |
+| 5 | 20 cap env 可调? | **`COMMHUB_MAX_GOALS_PER_NODE` env + 默认 20** | env 配置 + sane default |
+| 6 | §3.2 #1 cron-lite (A) vs 显式拒 (B)? | **(A) 加 schedule field union** | Vincent「每天9点」必须支持, B 会阉割功能. schedule = interval \| time_of_day \| weekday 联合类型, 干净 |
+| 7 | §3.2 #2 confirm-back 阈值? | **3 cancels/30s 作默认 + env 可调** | 不太严不太松, 操作员能调 |
+| 8 | 时区处理? | **节点 config `flags.timezone`, 默认 `Asia/Shanghai`** | 尊重节点配置, fallback 用 Vincent/团队主时区. `time_of_day` 调度按节点时区算 |
+
+**全部 resolved**. Vincent 产品级 review 通过后接 impl P0a-P5.
 
 ## 12. Non-goals (本 RFC 不涵盖, 留 follow-up)
 
