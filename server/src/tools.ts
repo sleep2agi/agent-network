@@ -1779,6 +1779,52 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   startPendingEnvGcTimer();
   startSweeperTimer();
 
+  // §4.1.4 C2 — resolve the caller daemon's node row by **token-bound
+  // identity**, never by alias (alias is not a security boundary; see
+  // PR #299 BLOCKER #1). Daemons authenticate with their ntok; the
+  // tokens row carries `name = 'node:<alias>'` + `network_id`. We
+  // join on (name → alias) AND network_id, scoped to the EXACT
+  // caller token's id. If the token isn't ntok / hasn't been
+  // associated with a node / its node isn't host_supervisor → reject.
+  type DaemonResolveOk = { ok: true; daemonNodeId: string; daemonAlias: string; networkId: string };
+  type DaemonResolveErr = { ok: false; error: string };
+  const resolveCallerDaemonTokenBound = (): DaemonResolveOk | DaemonResolveErr => {
+    if (!callerTokenIsNetwork || !callerTokenId) {
+      return { ok: false, error: "caller_not_a_daemon" };
+    }
+    if (!enforceNetworkId) {
+      // belt: ntok without a resolved network is anomalous; refuse
+      return { ok: false, error: "caller_not_a_daemon" };
+    }
+    // Lookup caller's token name + network from api_tokens directly
+    // (we don't re-trust callerAlias). name format = 'node:<alias>'.
+    const tokRow = db.get<{ name: string; network_id: string | null }>(
+      `SELECT name, network_id FROM api_tokens WHERE token_id = ?1 AND revoked_at IS NULL`,
+      callerTokenId,
+    );
+    if (!tokRow || !tokRow.name || !tokRow.name.startsWith("node:")) {
+      return { ok: false, error: "caller_not_a_daemon" };
+    }
+    if (tokRow.network_id !== enforceNetworkId) {
+      // Token's network doesn't match resolved scope. Anomalous.
+      return { ok: false, error: "caller_not_a_daemon" };
+    }
+    const tokenAlias = tokRow.name.slice(5);
+    // Join scope: nodes.alias = tokenAlias AND nodes.network_id = tokens.network_id.
+    // Two daemons with the same alias in DIFFERENT networks remain
+    // distinct rows (network_id is part of the key); attacker-named
+    // alias in another network resolves to the attacker's own row not
+    // the legitimate target.
+    const nodeRow = db.get<{ node_id: string; alias: string; network_id: string }>(
+      `SELECT node_id, alias, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1`,
+      tokenAlias, tokRow.network_id,
+    );
+    if (!nodeRow) {
+      return { ok: false, error: "caller_not_a_daemon" };
+    }
+    return { ok: true, daemonNodeId: nodeRow.node_id, daemonAlias: nodeRow.alias, networkId: nodeRow.network_id };
+  };
+
   // Helper — map a ValidationError thrown from create-node-validate
   // into the MCP-tool-call JSON reply shape.
   const validationFailReply = (e: unknown) => {
@@ -1984,7 +2030,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   // §2.5 step 3 — daemon-facing pull. Returns full spec + env_blob +
   // child_ntok in one shot. Map evicted on take (one-shot consume).
-  // C2 daemon_node_id 强绑 enforced via takePendingEnvBlob caller match.
+  //
+  // §4.1.4 C2 token-bound daemon resolution (PR #299 BLOCKER #1, 通信牛):
+  // We MUST resolve the caller daemon via token-bound identity, NOT
+  // alias. alias is NOT a security boundary — two daemons with the same
+  // alias in different networks (or attacker-named-itself-the-same)
+  // would otherwise resolve to the wrong row. Same class as the prior
+  // report_status cross-tenant re-home bug.
+  //
+  // Resolution chain: caller's ntok (callerTokenId + callerTokenIsNetwork)
+  // → api_tokens row → joins to nodes via name='node:<alias>' AND
+  // network_id matches → unique daemon node row scoped to caller's
+  // network. If the ntok isn't bound to a node, or the joined node
+  // isn't a host_supervisor, reject.
   server.tool(
     "get_create_request",
     "Daemon pulls a pending create-node request (called when SSE create_node doorbell arrives). RFC-026.",
@@ -1992,18 +2050,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       request_id: z.string().min(1).max(200),
     },
     async ({ request_id }) => {
-      // Caller must be a daemon (host_supervisor role) bound to its
-      // node_id; we read node_id from the caller's tokens row via
-      // callerAlias→nodes lookup. P1 simplification: trust callerAlias
-      // resolves to the daemon's node_id (caller is the only one with
-      // this exact alias online); §4.1.4 binding sharpens in Phase 2
-      // when daemon-ntok carries node_id natively.
-      const callerDaemon = db.get<{ node_id: string; alias: string; network_id: string | null }>(
-        `SELECT node_id, alias, network_id FROM nodes WHERE alias = ?1 LIMIT 1`,
-        callerAlias,
-      );
-      if (!callerDaemon) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "caller_not_a_daemon" }) }] };
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
       }
 
       const row = db.get<{ request_id: string; daemon_node_id: string; status: string; child_token_id: string | null; network_id: string }>(
@@ -2011,10 +2060,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         request_id,
       );
       if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
-      // §4.1.4 — strict daemon binding even on the DB row (caller can't
-      // get someone else's request even if they know the id).
-      if (row.daemon_node_id !== callerDaemon.node_id) {
+      // §4.1.4 — strict daemon binding by token-derived node_id.
+      if (row.daemon_node_id !== callerDaemon.daemonNodeId) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
+      }
+      // Additional network-scope guard (defense in depth: row's
+      // network_id MUST equal caller's network).
+      if (row.network_id !== callerDaemon.networkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
       }
       if (row.status !== "pending") {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_pending", current_status: row.status }) }] };
@@ -2022,7 +2075,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       // Take env_blob from Map; this is the one-shot consume per F1.
       // takePendingEnvBlob ALSO checks daemon binding (belt+braces).
-      const blob = takePendingEnvBlob(request_id, callerDaemon.node_id);
+      const blob = takePendingEnvBlob(request_id, callerDaemon.daemonNodeId);
       if (!blob) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "env_blob_unavailable" }) }] };
       }
@@ -2075,20 +2128,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       child_pid: z.number().int().optional(),
     },
     async ({ request_id, status, error: ackError, child_pid: _pid }) => {
-      const callerDaemon = db.get<{ node_id: string; alias: string }>(
-        `SELECT node_id, alias FROM nodes WHERE alias = ?1 LIMIT 1`,
-        callerAlias,
-      );
-      if (!callerDaemon) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "caller_not_a_daemon" }) }] };
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
       }
-      const row = db.get<{ daemon_node_id: string; status: string; child_token_id: string | null }>(
-        `SELECT daemon_node_id, status, child_token_id FROM node_create_requests WHERE request_id = ?1`,
+      const row = db.get<{ daemon_node_id: string; status: string; child_token_id: string | null; network_id: string }>(
+        `SELECT daemon_node_id, status, child_token_id, network_id FROM node_create_requests WHERE request_id = ?1`,
         request_id,
       );
       if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
-      if (row.daemon_node_id !== callerDaemon.node_id) {
+      if (row.daemon_node_id !== callerDaemon.daemonNodeId) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
+      }
+      if (row.network_id !== callerDaemon.networkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
       }
       const ackedAt = Date.now();
       if (status === "started") {

@@ -201,6 +201,69 @@ describe("§4.4.8 C4 orphan sweeper — runOrphanSweepOnce (covers J F-1 + F-2)"
   });
 });
 
+describe("§4.1.4 C2 token-bound daemon resolution regression (PR #299 BLOCKER #1)", () => {
+  // The BLOCKER #1 root cause was `SELECT ... WHERE alias = ?1` in
+  // daemon-facing MCP tools. The new resolveCallerDaemonTokenBound
+  // helper joins on (api_tokens.token_id → name='node:<alias>' →
+  // nodes.alias AND nodes.network_id = tokens.network_id), so two
+  // daemons with the SAME alias in DIFFERENT networks resolve to
+  // distinct rows. Below we model the SQL invariant directly: insert
+  // two nodes with same alias under different networks, confirm the
+  // network-scoped SELECT returns the caller's own row only.
+  test("two daemons same alias different networks: SELECT correctly scopes by network_id", () => {
+    db.run("DELETE FROM nodes WHERE alias IN ('daemon-shared', 'daemon-other')");
+    // daemonA in netA
+    db.run(
+      `INSERT INTO nodes (node_id, node_name, alias, runtime, model, network_id, updated_at)
+       VALUES ('node_test_daemonA', 'daemon-shared', 'daemon-shared', 'claude-agent-sdk', 'm', 'net_test_A', datetime('now'))`,
+    );
+    // daemonB in netB — SAME alias
+    db.run(
+      `INSERT INTO nodes (node_id, node_name, alias, runtime, model, network_id, updated_at)
+       VALUES ('node_test_daemonB', 'daemon-shared', 'daemon-shared', 'claude-agent-sdk', 'm', 'net_test_B', datetime('now'))`,
+    );
+
+    // Token-bound resolution: a caller bound to netA must get node_test_daemonA
+    const a = db.get<{ node_id: string; network_id: string }>(
+      `SELECT node_id, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1`,
+      "daemon-shared", "net_test_A",
+    );
+    expect(a?.node_id).toBe("node_test_daemonA");
+
+    const b = db.get<{ node_id: string; network_id: string }>(
+      `SELECT node_id, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1`,
+      "daemon-shared", "net_test_B",
+    );
+    expect(b?.node_id).toBe("node_test_daemonB");
+
+    // Contrast with the pre-blocker buggy form: alias-only SELECT
+    // returns whichever row sqlite happened to scan first — could
+    // be daemonB even when caller is netA.
+    const all = db.all<{ node_id: string; network_id: string }>(
+      `SELECT node_id, network_id FROM nodes WHERE alias = ?1`,
+      "daemon-shared",
+    );
+    expect(all.length).toBe(2);  // proves alias alone is ambiguous
+
+    db.run("DELETE FROM nodes WHERE node_id IN ('node_test_daemonA', 'node_test_daemonB')");
+  });
+
+  test("daemon B cannot take/ack daemon A's request even with same alias (Map-level guard)", () => {
+    const id = newRequestId();
+    putPendingEnvBlob({
+      request_id: id,
+      daemon_node_id: "node_legit_daemonA",
+      env_blob: { ANTHROPIC_API_KEY: "s" },
+      child_token: "ntok_a",
+      child_token_id: "tok_a",
+    });
+    // daemonB-token resolves to node_id = node_attacker (different node_id)
+    expect(takePendingEnvBlob(id, "node_attacker")).toBeNull();
+    // Original entry still there for daemonA
+    expect(takePendingEnvBlob(id, "node_legit_daemonA")).not.toBeNull();
+  });
+});
+
 describe("finalizeCreateOnFirstRegister — content-match on child register", () => {
   test("matching child_name + network_id flips status='succeeded' + stamps child_node_id", () => {
     const reqId = `cr_test_${Date.now()}_finalize`;
