@@ -153,9 +153,9 @@ Migration 跟现有 `must_change_password` (P0-2 PR #264) 同 pattern — `try {
 | 字段 | 当前如何使用 | 类别 | 应用路径 | **Min role to change** | Reasoning |
 |---|---|---|---|---|---|
 | `model` | claude SDK options 启动时一次, codex Codex.startThread, grok runtime args | **restart-required** | sentinel re-spawn | `member` (运行成本影响, 不是提权) | SDK 实例已 bound 到 model, 切换需新进程 |
-| `flags.permissionMode` | claude SDK options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** (提权 — 决定 agent 跟工具/文件如何交互) | SDK options 不可热改 |
-| `flags.dangerouslySkipPermissions` | claude SDK / codex Codex options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** (从远程把节点开成 skip-permissions = 提权红线; 必须最严 role) | 同上 |
-| `flags.teammateMode` | claude SDK options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** (改 agent 主动 dispatch 边界, 跨 agent 触达面影响) | 同上 |
+| `flags.permissionMode` | claude SDK options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** ✅ decided (通信龙 per Vincent autonomy 2026-06-28) | SDK options 不可热改 |
+| `flags.dangerouslySkipPermissions` | claude SDK / codex Codex options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** ✅ decided (同上) | 同上 |
+| `flags.teammateMode` | claude SDK options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** ✅ decided (同上) | 同上 |
 | `flags.maxTurns` | per-think SDK options (option.maxTurns 每次 query 传) | **hot-reloadable** | 写文件 + in-process reload | `member` (用量节流) | 已 per-call 读, 改 mutable obj 即可热 |
 | `flags.budget` | per-think 计数 (agent-node 本地节流, 非 SDK) | **hot-reloadable** | 同上 | `member` (用量节流) | 同上 |
 | `flags.timeout` | resolveTimeoutMs 启动时 read env/flag; CLAUDE_TIMEOUT_MS 是 module-level const | **restart-required** (今天) | sentinel re-spawn | `member` (vendor 响应等待) | 现有 const 读不可热. (P2: 改成 per-think 读后转 hot) |
@@ -394,7 +394,7 @@ tests/docker-e2e/config-apply.test.ts (新):
 | **Bare 节点行为** | hub reject + dashboard 提示 | 给 daemon-less 节点降级一个 "guidance" 提示 |
 | **dashboard apply timeout** | 30s ceiling | 跟 hub poll 同 / 长一些 |
 | **谁能 `restart_node`** (Vincent 增量) | **member+** (lifecycle ops, 跟 stop/start CLI 同 role; 无 SEC-2 admin gate) | admin-only? owner-only? |
-| **SEC-2 — 谁能远程改 security-sensitive flag** (`permissionMode` / `dangerouslySkipPermissions` / `teammateMode`) | `admin` role 起步 | `owner` only? 完全禁远程 (CLI-only)? |
+| **SEC-2 — 谁能远程改 security-sensitive flag** | ✅ **DECIDED 2026-06-28** (通信龙 per Vincent autonomy grant): `role === "admin"` on caller's network; non-admin → 403 `insufficient_role_for_security_flag`; cross-network blocked by SEC-1 even for admin/owner | — |
 | **SEC-1 — network 跨边界例外** | 严禁 (即使 owner 跨 network 也拒) | owner 可跨网 (信任顶 role)? |
 | **`model` 是否算 security flag** | 不算 (运行成本影响, 不提权) | 也算 (能引上无审 vendor 也算风险面)? |
 
