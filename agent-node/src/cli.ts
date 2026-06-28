@@ -920,7 +920,25 @@ const reportStatus = async (status: string, task?: string) => {
     // — when false (bare-spawn agent-node), dashboard greys out remote-
     // restart. Set via env var ANET_CONFIG_UPDATE_CAPABLE=1 by the W1
     // wrapper at spawn time (default false to be safe for bare runs).
-    config_snapshot: buildConfigSnapshot(
+    //
+    // PREMATURE-FINALIZE GUARD (#290 final, 通信龙 catch 2026-06-28):
+    // Hub uses content-match on this snapshot to finalize pending
+    // restart-required updates. During the drain window of a
+    // restart-required apply, the old child has ALREADY written the
+    // new config file but is still running the old in-memory config —
+    // if its heartbeat fires here with the new snapshot, hub would
+    // false-finalize before the new child even spawns. The
+    // configApplyDraining flag is set by drainInFlightThink BEFORE
+    // exit(75); we omit the snapshot for the rest of this process's
+    // life. After exit, the new child boots with configApplyDraining
+    // = false (fresh module init), and its first report_status sends
+    // a real snapshot → hub finalizes. Heartbeats still fire (so the
+    // node doesn't look offline during drain), they just don't carry
+    // the snapshot field. Same guard covers boot-failure-rollback:
+    // new child boots .prev → reports OLD snapshot → content-match
+    // fails → update stays pending → reaper timeouts → dashboard sees
+    // timeout (NOT false ✓).
+    config_snapshot: configApplyDraining ? undefined : buildConfigSnapshot(
       fileConfig,
       process.env.ANET_CONFIG_UPDATE_CAPABLE === "1",
       currentConfigRevision,

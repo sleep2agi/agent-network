@@ -215,6 +215,27 @@ describe("mergePatch — patch + existing → new config (no mutation)", () => {
   });
 });
 
+describe("buildConfigSnapshot — pure helper contract (#290 final, drain-omit guard)", () => {
+  // The premature-finalize fix in cli.ts.reportStatus omits
+  // config_snapshot from the report payload when configApplyDraining
+  // is true. buildConfigSnapshot itself stays pure (no global state
+  // reads) so this test verifies the snapshot is always shape-valid
+  // and the caller is the only place that decides whether to send
+  // it. If anyone tries to fold drain detection into the builder, the
+  // pure-helper signature changes and this test forces a re-think.
+  test("buildConfigSnapshot returns a valid snapshot regardless of caller drain state (pure)", () => {
+    const s = buildConfigSnapshot(
+      { model: "m", flags: { maxTurns: 50 } },
+      true,
+      3,
+    );
+    expect(s.model).toBe("m");
+    expect(s.flags.maxTurns).toBe(50);
+    expect(s.config_revision).toBe(3);
+    expect(s.config_update_capable).toBe(true);
+  });
+});
+
 describe("validateLocalPatch — teammateMode dropped (#290 review)", () => {
   // teammateMode no longer in ALLOWED_FLAGS for agent-node runtimes
   // (consumer only exists in agent-network's claude-code-cli spawn,
