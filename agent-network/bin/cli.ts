@@ -4919,6 +4919,101 @@ async function projectDown() {
   console.log(`\n  ${stopped}/${nodes.length} stopped${alreadyDown ? ` · ${alreadyDown} were not running` : ""}\n`);
 }
 
+// ── loop ── (#144 round-6)
+//
+// `anet node loop <alias> "<task>" --every 5m`
+//
+// One-liner UX wrapper for the inbox `/loop <interval> <task>` slash
+// command. POSTs a task to commhub via /api/task; the receiving node's
+// inbox handler parses the `/loop` prefix and calls createScheduledGoal,
+// which persists the goal in goals.json + the scheduler tick fires it.
+//
+// Why a CLI wrapper instead of just "send the slash text directly"?
+// Vincent's "使用简单" priority — a non-interactive node operator
+// shouldn't need to memorize slash-command syntax or run a separate
+// `send_task` call. One line, one verb, one task.
+
+async function nodeLoopCommand() {
+  const aliasRef = args[1];
+  const taskText = args[2];
+  if (!aliasRef || !taskText) {
+    console.log(`
+anet node loop <alias> "<task>" --every <interval>
+
+  Schedule a recurring task on a running node. The node will be woken at
+  the chosen interval and asked to make an incremental advance on the
+  task, reporting back each cycle.
+
+Examples:
+  anet node loop my-codex "monitor #271 PR" --every 5m
+  anet node loop researcher "scan twitter for grok updates" --every 30m
+  anet node loop daily-bot "post the morning summary" --every 2h
+
+Interval format: 30s / 5m / 2h / 1d (s/m/h/d suffix required).
+Use 'anet goal list <alias>' to see scheduled loops; 'anet goal cancel'
+to stop one.
+`);
+    process.exit(aliasRef ? 1 : 0);
+  }
+
+  // Default 5m if --every omitted (matches Vincent's example cadence
+  // and is the most common cron-style "check periodically" interval).
+  const everyIdx = args.indexOf("--every");
+  const everyRaw = everyIdx >= 0 ? args[everyIdx + 1] : "5m";
+  if (!everyRaw || !/^\d+[smhd]$/.test(everyRaw)) {
+    console.error(`Invalid --every value "${everyRaw}". Use formats like 30s, 5m, 2h, 1d.`);
+    process.exit(1);
+  }
+
+  const resolved = resolveNodeRef(aliasRef);
+  if (!resolved) {
+    console.error(`Node "${aliasRef}" not found. Run 'anet node ls' to see registered nodes.`);
+    process.exit(1);
+  }
+
+  const profile = resolved.profile;
+  const displayName = nodeDisplayName(resolved.id, profile);
+  const gc = loadGlobal();
+  const hub = profile.hub || gc.hub || "http://127.0.0.1:9200";
+  const networkId = profile.network_id || gc.network_id || null;
+
+  // The inbox parser at agent-node/src/goals/parser.ts accepts
+  // `/loop <interval> <text>` (and `/goal` as an alias). We assemble
+  // the slash form and POST it as a normal task — the node's inbox
+  // handler routes /loop tasks to createScheduledGoal regardless of
+  // runtime (post-#144 the claude-bucket carve-out is gone).
+  const slashCmd = `/loop ${everyRaw} ${taskText}`;
+  const body = JSON.stringify({
+    alias: displayName,
+    task: slashCmd,
+    priority: "normal",
+    from: "api",
+    network_id: networkId || undefined,
+  });
+
+  try {
+    const res = await fetch(`${hub}/api/task`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body,
+    });
+    const j: any = await res.json();
+    if (!j?.ok) {
+      console.error(`Failed to schedule loop: ${JSON.stringify(j)}`);
+      process.exit(1);
+    }
+    console.log(`✅ Scheduled loop on ${displayName}`);
+    console.log(`   every: ${everyRaw}`);
+    console.log(`   task:  ${taskText}`);
+    console.log(`   sent as: ${slashCmd}`);
+    console.log(`\nUse 'anet goal list ${displayName}' to inspect; 'anet goal cancel ${displayName} <goal-id>' to stop.`);
+  } catch (e: any) {
+    console.error(`Failed to reach hub ${hub}: ${e?.message ?? e}`);
+    console.error(`Is the hub running? Try: anet hub start`);
+    process.exit(1);
+  }
+}
+
 // ── delete ──
 
 async function deleteCommand() {
@@ -9438,6 +9533,7 @@ switch (command) {
       case "resume": args.splice(0, 1); await resumeCommand(); break;
       case "delete": args.splice(0, 1); await deleteCommand(); break;
       case "rename": args.splice(0, 1); await renameCommand(); break;
+      case "loop": args.splice(0, 1); await nodeLoopCommand(); break;
       case "ls": case "list": await lsCommand(); break;
       case "restart": {
         // #173 / F7-03 — node restart = stop + start, alias for symmetry
@@ -9452,10 +9548,10 @@ switch (command) {
       default: {
         const sub = args[1];
         if (sub) {
-          const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename"]);
+          const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename", "loop"]);
           if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
         }
-        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|migrate-token-to-envref> [name]`);
+        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|loop|migrate-token-to-envref> [name]`);
         break;
       }
     }

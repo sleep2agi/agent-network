@@ -20,17 +20,29 @@ import { randomUUID } from "crypto";
 import type { AgentGoal, GoalStatus, GoalsFile } from "./types";
 import { GOALS_SCHEMA_VERSION } from "./types";
 
-// P0 of /loop SDK plan v0.4 §3.4 — runtime gate.
+// #144 round-6 — runtime bucket mapping (no more "claude is special" gate).
 //
-// anet /loop scheduler ONLY serves codex / grok runtimes. claude-agent-sdk
-// agents use Claude Code's native /loop (CronCreate + ScheduleWakeup skill)
-// which the harness handles inside the spawned `claude` binary; anet must
-// stay hands-off there or the two schedulers double-fire the same goal.
+// History: v0.4 §3.4 P0 (#184 commit 45c7909) introduced a runtime gate
+// that rejected the claude bucket entirely, on the assumption that
+// claude-agent-sdk agents use Claude Code's native /loop (CronCreate +
+// ScheduleWakeup skill). That assumption is FALSE for SDK-spawned claude:
+// `processWithClaude` invokes `query()` from @anthropic-ai/claude-agent-sdk
+// which is a one-shot Promise — not a long-running interactive REPL — so
+// the native /loop machinery (which requires a persistent CC session) has
+// no host to fire from. The result was: claude-agent-sdk users sent /loop
+// commands that were silently rejected at the inbox gate and never wired
+// to anything; "loop doesn't fire" for that runtime.
 //
-// Any name a user might write in `--runtime` / `RUNTIME` env / config that
-// resolves to the claude runtime is rejected at the schema layer so a stray
-// `newGoal({runtime: "claude"})` or a corrupted on-disk record can't slip
-// through the gate. See cli.ts:244-251 for the canonical name→bucket map.
+// Refined-B (this PR): no per-bucket scheduler skip. ALL recognized
+// runtimes get the anet scheduler. The bucket helpers stay for the
+// remaining concern that's still real — codex thread IDs are NOT
+// translatable to grok and vice versa, so a node that switches SDK
+// runtime mid-life shouldn't silently re-feed old thread IDs across
+// SDK boundaries. The cross-bucket recovery is now "archive + skip"
+// (formerly hostile-UX `fatal exit(1)` that crashed the node without
+// guidance).
+//
+// Recognized names mirror cli.ts:280 RUNTIME_MAP.
 const CLAUDE_RUNTIME_NAMES = new Set([
   "claude",
   "claude-agent-sdk",
@@ -62,15 +74,6 @@ export function runtimeBucket(rt: string | undefined | null): RuntimeBucket {
 
 export function isClaudeRuntime(rt: string | undefined | null): boolean {
   return runtimeBucket(rt) === "claude";
-}
-
-export function assertNonClaudeRuntime(rt: string): void {
-  if (isClaudeRuntime(rt)) {
-    throw new Error(
-      `anet goal scheduler does not serve claude runtime (got "${rt}") — ` +
-      `use Claude Code native /loop (CronCreate / ScheduleWakeup) instead`,
-    );
-  }
 }
 
 // Promise-chain mutex. Every `lock()` waits for the previous one to
@@ -192,12 +195,12 @@ export class GoalStore {
    * Insert or replace a goal. Bumps `updated_at` and flushes to disk
    * atomically before returning.
    *
-   * P0 runtime gate: rejects any goal whose `runtime` resolves to the
-   * claude bucket. This catches both fresh `newGoal()` mistakes and
-   * upserts of records re-hydrated from corrupted on-disk state.
+   * #144: no runtime gate. The pre-#144 `assertNonClaudeRuntime(goal.runtime)`
+   * check was removed because the claude-bucket "skip" premise was false
+   * (SDK-spawned claude has no native /loop host — see runtimeBucket
+   * comment above for the full rationale).
    */
   async upsert(goal: AgentGoal): Promise<void> {
-    assertNonClaudeRuntime(goal.runtime);
     return this.mutex.lock(async () => {
       goal.updated_at = new Date().toISOString();
       this.goals.set(goal.goal_id, goal);
@@ -328,7 +331,8 @@ export function newGoal(opts: {
   parent_task_id?: string;
   report_to?: string;
 }): AgentGoal {
-  assertNonClaudeRuntime(opts.runtime);
+  // #144: no runtime gate. Pre-#144 this asserted the runtime was non-claude
+  // on the (incorrect) premise that claude-agent-sdk had a native /loop.
   const now = new Date();
   return {
     goal_id: randomUUID(),
@@ -346,36 +350,38 @@ export function newGoal(opts: {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// P0 startup runtime-switch dispatch (v0.4 §3.4 row matrix).
+// #144 round-6 — startup runtime dispatch (refined-B matrix).
 //
 // At agent-node boot, after `goalStore.load()`, the host inspects which
-// runtime bucket it is starting under and what — if anything — is already
-// in `goals.json`. The result drives one of four actions:
+// runtime bucket it is starting under and what — if anything — is in
+// `goals.json`. The result drives one of three actions:
 //
-//   - `ok`           : current runtime matches every persisted goal — boot
-//                      normally, run the scheduler tick.
-//   - `skip`         : claude runtime + empty store — boot normally but
-//                      don't start the scheduler tick (claude uses its
-//                      own /loop).
-//   - `archive`      : claude runtime + non-claude goals leftover (alias
-//                      was previously running under codex/grok and
-//                      switched). Caller archives + clears the store + skips
-//                      the scheduler so the two /loop systems don't double-
-//                      wake. Goals are recoverable from the archive file.
-//   - `fatal`        : codex runtime + grok-leftover goals (or vice versa).
-//                      Mixing thread/session IDs across SDKs is unsafe
-//                      enough that we refuse to boot — the operator must
-//                      cancel or archive the foreign goals first.
+//   - `ok`      : current runtime matches every persisted goal (or the
+//                 store is empty). Boot normally, run the scheduler.
+//                 This is the new claude-bucket behaviour too — see
+//                 runtimeBucket comment above for why removing the
+//                 claude skip is safe (SDK-spawned claude has no native
+//                 /loop host).
+//   - `archive` : current bucket can run, but goals.json holds goals
+//                 for a DIFFERENT bucket (the alias was previously
+//                 running under another SDK runtime). Caller archives +
+//                 clears the store + boots clean, so we don't try to
+//                 reuse thread/session IDs across incompatible SDKs.
+//                 (Pre-#144 this was `fatal exit(1)` for codex↔grok,
+//                 which crashed the user's node without guidance —
+//                 hostile UX. Now: log + archive + continue.)
+//   - `skip`    : unknown runtime bucket — refuse to schedule without
+//                 a clear name → bucket mapping. Operator should check
+//                 --runtime / RUNTIME env / config.runtime.
 //
-// This is a pure function over (current bucket, goal list) so it has full
-// unit coverage; the cli.ts side just dispatches on the verdict.
+// This is a pure function over (current bucket, goal list); cli.ts
+// dispatches on the verdict. Fully unit-covered.
 // ─────────────────────────────────────────────────────────────────────
 
 export type StartupAction =
   | { kind: "ok"; runScheduler: true }
   | { kind: "skip"; runScheduler: false; reason: string }
-  | { kind: "archive"; runScheduler: false; reason: string; foreignCount: number; foreignBuckets: RuntimeBucket[] }
-  | { kind: "fatal"; runScheduler: false; reason: string; foreignCount: number; foreignBuckets: RuntimeBucket[] };
+  | { kind: "archive"; runScheduler: true; reason: string; foreignCount: number; foreignBuckets: RuntimeBucket[] };
 
 /**
  * Decide what to do at startup given the runtime the host is booting under
@@ -385,50 +391,44 @@ export function decideStartupAction(
   currentBucket: RuntimeBucket,
   goals: AgentGoal[],
 ): StartupAction {
+  // Unknown runtime label — refuse to schedule. Don't auto-archive
+  // either; we don't know what bucket this is, so we can't safely
+  // judge what's "foreign".
+  if (currentBucket === "unknown") {
+    return {
+      kind: "skip",
+      runScheduler: false,
+      reason: `unknown runtime bucket — anet scheduler refuses to run; check --runtime / RUNTIME env / config.runtime`,
+    };
+  }
+
   // Only `active` goals matter — `complete` / `cancelled` / `failed` /
-  // `paused` will not wake regardless of runtime, so they're not a threat.
+  // `paused` will not wake regardless of runtime, so they're not a
+  // foreign-bucket concern.
   const activeGoals = goals.filter((g) => g.status === "active");
 
-  if (currentBucket === "claude") {
-    if (activeGoals.length === 0) {
-      return { kind: "skip", runScheduler: false, reason: "claude runtime — native /loop in use" };
-    }
-    const foreignBuckets = uniqueBuckets(activeGoals);
+  // Any active goal whose runtime resolves to a DIFFERENT recognized
+  // bucket is "foreign". An unknown-bucket goal (legacy / future SDK
+  // label) is left alone — we already refuse to schedule unknown
+  // buckets above, and an unknown-bucket goal in a known-bucket store
+  // is harmless (it just won't have a matching runtime to dispatch).
+  const foreign = activeGoals.filter((g) => {
+    const b = runtimeBucket(g.runtime);
+    return b !== currentBucket && b !== "unknown";
+  });
+
+  if (foreign.length > 0) {
+    const foreignBuckets = uniqueBuckets(foreign);
     return {
       kind: "archive",
-      runScheduler: false,
-      reason: `claude runtime started with ${activeGoals.length} non-claude goal(s) (${foreignBuckets.join(",")}) — archive + skip scheduler so anet doesn't double-fire alongside Claude Code's native /loop`,
-      foreignCount: activeGoals.length,
+      runScheduler: true,
+      reason: `${currentBucket} runtime started but goals.json holds ${foreign.length} ${foreignBuckets.join("/")} goal(s) — archiving + clearing so we don't reuse thread/session IDs across SDK boundaries. Backup recoverable on disk.`,
+      foreignCount: foreign.length,
       foreignBuckets,
     };
   }
 
-  if (currentBucket === "codex" || currentBucket === "grok") {
-    const wrongBucket = activeGoals.filter((g) => {
-      const b = runtimeBucket(g.runtime);
-      return b !== currentBucket && b !== "unknown";
-    });
-    if (wrongBucket.length > 0) {
-      const foreignBuckets = uniqueBuckets(wrongBucket);
-      return {
-        kind: "fatal",
-        runScheduler: false,
-        reason: `${currentBucket} runtime started but goals.json holds ${wrongBucket.length} ${foreignBuckets.join("/")} goal(s) — thread / session IDs cannot be re-used across SDK runtimes. Cancel or archive the foreign goals before relaunching.`,
-        foreignCount: wrongBucket.length,
-        foreignBuckets,
-      };
-    }
-    return { kind: "ok", runScheduler: true };
-  }
-
-  // unknown bucket — runtime label we don't recognise. Refuse to run the
-  // scheduler rather than guess; do not auto-archive (we don't know what
-  // bucket this even is, so we can't claim leftover goals are "foreign").
-  return {
-    kind: "skip",
-    runScheduler: false,
-    reason: `unknown runtime bucket — anet scheduler refuses to run; check --runtime / RUNTIME env / config.runtime`,
-  };
+  return { kind: "ok", runScheduler: true };
 }
 
 function uniqueBuckets(goals: AgentGoal[]): RuntimeBucket[] {
