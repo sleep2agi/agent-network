@@ -21,6 +21,7 @@ import {
   finalizeCreateOnFirstRegister,
   startPendingEnvGcTimer,
   startSweeperTimer,
+  auditCreateNode,
 } from "./create-node.js";
 import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias } from "./rename.js";
 import {
@@ -1958,6 +1959,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // Payload carries ONLY request_id (no secret); daemon current
       // SSE handler resolves the rest via MCP call.
       pushEvent(daemon.alias, { type: "create_node", request_id: requestId }, networkIdForChild);
+
+      // §4.5 audit — dispatch succeeded
+      auditCreateNode({
+        action: "create_node_dispatched",
+        user_id: enforceUserId,
+        network_id: networkIdForChild,
+        target_id: requestId,
+        detail: {
+          daemon_node_id,
+          child_name: node_spec.name,
+          runtime: node_spec.runtime,
+          model: node_spec.model,
+          flag_keys: Object.keys(node_spec.flags || {}),
+          env_keys: envKeys,
+        },
+      });
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId }) }],

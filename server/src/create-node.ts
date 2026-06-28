@@ -135,6 +135,10 @@ export function runOrphanSweepOnce(now = Date.now()): { swept: number; revoked: 
   }
   if (swept > 0) {
     console.log(`[commhub] ✓ create-node sweeper: swept ${swept} stale request(s), revoked ${revoked} child-ntok(s)`);
+    auditCreateNode({
+      action: "create_node_sweeper_revoked",
+      detail: { swept, revoked, sweeper_run_at_ms: now },
+    });
   }
   return { swept, revoked };
 }
@@ -189,10 +193,45 @@ export function finalizeCreateOnFirstRegister(
     );
     matchedIds.push(row.request_id);
     console.log(`[commhub] ✓ create-node finalize: request=${row.request_id} child=${incoming.alias} (${incoming.node_id}) daemon=${row.daemon_node_id}`);
+    auditCreateNode({
+      action: "create_node_succeeded",
+      network_id: net,
+      target_id: row.request_id,
+      detail: { child_node_id: incoming.node_id, child_alias: incoming.alias, daemon_node_id: row.daemon_node_id },
+    });
   }
   return { finalized: matchedIds.length, matchedIds };
 }
 
 export function newRequestId(): string {
   return `cr_${uuidv4()}`;
+}
+
+// RFC-026 §4.5 — append a row to audit_log for every create_node
+// lifecycle event. Best-effort: never throw out (calling tool should
+// continue even if audit insert fails for any reason).
+export function auditCreateNode(input: {
+  action: "create_node_dispatched" | "create_node_rejected" | "create_node_succeeded" | "create_node_sweeper_revoked";
+  user_id?: string | null;
+  username?: string | null;
+  network_id?: string | null;
+  target_id?: string | null;   // request_id
+  detail: Record<string, unknown>;
+}): void {
+  try {
+    db.run(
+      `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
+       VALUES (?1, ?2, ?3, 'node_create_request', ?4, ?5, ?6)`,
+      [
+        input.user_id || null,
+        input.username || null,
+        input.action,
+        input.target_id || null,
+        JSON.stringify(input.detail),
+        input.network_id || null,
+      ],
+    );
+  } catch (e: any) {
+    console.warn(`[commhub] audit_log insert (create_node) failed: ${e?.message || e}`);
+  }
 }

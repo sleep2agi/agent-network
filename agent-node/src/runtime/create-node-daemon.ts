@@ -176,6 +176,12 @@ export interface CreateNodeDeps {
   log: (msg: string) => void;
   warn: (msg: string) => void;
   serializeEnvLocal: (env: Record<string, string>) => string;
+  // §4.2 belt-and-suspenders: hub already filters runtime via the
+  // daemon_capabilities.allowed_runtimes snapshot, but daemon repeats
+  // the check using its own config — if hub is compromised or stale,
+  // daemon still refuses runtimes the host operator hasn't whitelisted.
+  // null/empty = accept any in the global enum (P1 default).
+  allowedRuntimes?: ReadonlyArray<string> | null;
 }
 
 /** §2.5 step 3 helper — ensure $HOME/.anet/config.json carries the
@@ -212,6 +218,17 @@ export async function handleCreateNodeDoorbell(
     deps.warn(`[create-node] get_create_request failed: ${req?.error || "unknown"}`);
     await deps.callCommHub("ack_create_request", {
       request_id, status: "failed", error: req?.error || "get_failed",
+    }).catch(() => {});
+    return;
+  }
+
+  // §4.2 daemon-side runtime allowlist fallback (belt-and-suspenders;
+  // hub already enforces, this catches hub-bypass / compromised-hub).
+  if (deps.allowedRuntimes && deps.allowedRuntimes.length > 0 &&
+      !deps.allowedRuntimes.includes(req.node_spec.runtime)) {
+    deps.warn(`[create-node] runtime '${req.node_spec.runtime}' not in daemon's allowed_runtimes: [${deps.allowedRuntimes.join(",")}]`);
+    await deps.callCommHub("ack_create_request", {
+      request_id, status: "rejected", error: `runtime_not_in_local_allowlist: ${req.node_spec.runtime}`,
     }).catch(() => {});
     return;
   }

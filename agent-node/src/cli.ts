@@ -3463,9 +3463,12 @@ async function connectSSE() {
                     hubUrl: COMMHUB_URL,
                     log: (m: string) => log(m),
                     warn: (m: string) => warn(m),
-                    // P1 — duplicate of the hub serializer; same escape
-                    // rules apply (see RFC-026 §4.4.7).
                     serializeEnvLocal: serializeEnvLocalDaemon,
+                    // §4.2 belt-and-suspenders: read host operator's
+                    // local allowed_runtimes from daemon config.
+                    // null/empty = accept any in global enum.
+                    allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
+                      ? fileConfig.allowed_runtimes : null,
                   },
                 ).catch((e: any) => warn(`create-node-daemon failed: ${e?.message || e}`));
               }).catch((e: any) => warn(`create-node-daemon import failed: ${e?.message || e}`));
