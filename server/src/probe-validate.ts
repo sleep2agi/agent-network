@@ -117,6 +117,10 @@ export const PROBE_STATUS_ENUM = [
   "vendor_5xx",
   "other_4xx",
   "tls_error",
+  // SSRF guards surface their own statuses so dashboard can show the
+  // exact reason; deriveErrorLabel maps to UI text.
+  "probe_resolve_unsafe_ip",
+  "probe_target_forbidden",
 ] as const;
 export type ProbeStatus = typeof PROBE_STATUS_ENUM[number];
 
@@ -142,6 +146,8 @@ export function deriveErrorLabel(ack: ProbeAckPayload): string | null {
     case "vendor_5xx":           return `vendor 服务端错 (HTTP ${ack.raw_status_code ?? "5xx"})`;
     case "other_4xx":            return `vendor 客户端错 (HTTP ${ack.raw_status_code ?? "4xx"})`;
     case "tls_error":            return "TLS 证书校验失败";
+    case "probe_resolve_unsafe_ip": return "SSRF 拒: base_url 解析到禁用 IP 段 (私网/metadata)";
+    case "probe_target_forbidden":  return "SSRF 拒: base_url host 不在 vendor allowlist";
   }
 }
 

@@ -12,7 +12,7 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash curl ca-certificates jq unzip procps \
     build-essential python3 \
-    sqlite3 \
+    sqlite3 openssl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://bun.sh/install | bash
@@ -25,6 +25,8 @@ COPY agent-node /app/agent-node
 COPY agent-network /app/agent-network
 COPY tests/lib /app/tests/lib
 COPY tests/qa-rfc028-provider-probe/run.sh /app/tests/qa-rfc028-provider-probe/run.sh
+COPY tests/qa-rfc028-provider-probe/mock-vendor.js /app/tests/qa-rfc028-provider-probe/mock-vendor.js
+COPY tests/qa-rfc028-provider-probe/canary.js /app/tests/qa-rfc028-provider-probe/canary.js
 RUN chmod +x /app/tests/qa-rfc028-provider-probe/run.sh
 
 RUN cd /app/server && bun install --silent

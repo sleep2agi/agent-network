@@ -2426,7 +2426,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Daemon acks a probe. Schema is STRICT whitelist (no error_message; v3 R3 LOCK). RFC-028.",
     {
       probe_id: z.string().min(1).max(200),
-      status: z.enum(["ok", "auth_fail", "quota", "rate_limit", "network_error", "timeout", "redirect_forbidden", "vendor_5xx", "other_4xx", "tls_error"]),
+      status: z.enum(["ok", "auth_fail", "quota", "rate_limit", "network_error", "timeout", "redirect_forbidden", "vendor_5xx", "other_4xx", "tls_error", "probe_resolve_unsafe_ip", "probe_target_forbidden"]),
       raw_status_code: z.number().int().min(100).max(599).optional(),
       latency_ms: z.number().int().min(0).max(60_000),
     },
