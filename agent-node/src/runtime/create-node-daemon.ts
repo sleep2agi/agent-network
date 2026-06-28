@@ -366,20 +366,53 @@ export async function handleCreateNodeDoorbell(
     }
   }
 
-  // Step 3 — anet node start <name> in background (detached)
-  // Child will register on its own; hub will content-match against the
-  // pending request and finalize succeeded.
+  // Step 3 — anet node start <name> in background (detached).
+  //
+  // N站马 N#19 联调 (通信龙 5149126c) — spawn hardening + immediate
+  // kill-0 self-verify. Docker repro shows the chain stays alive
+  // across daemon SIGTERM, but additive defenses for env-specific
+  // edge cases (interactive terminal SIGHUP, inherited fd lifecycle,
+  // child insta-crash post-spawn):
+  //   - explicit stdio array [ignore, ignore, ignore] (no chance of
+  //     ipc/inherit fd lifecycle coupling)
+  //   - detached: true (Linux setsid; child becomes new session leader,
+  //     immune to terminal SIGHUP + parent death by signal)
+  //   - close any returned stream handles (belt — should be null
+  //     under stdio:"ignore" array, harmless if not)
+  //   - child.unref() removes child from this process's event loop
+  //   - kill-0 self-verify: if child crashed in the few ms since spawn
+  //     return, process.kill(pid, 0) throws ESRCH and we ack 'failed'
+  //     rather than 'started' (catches N站马's "registered then dead"
+  //     symptom if the real cause is insta-crash on first vendor call /
+  //     missing API key / config issue)
   let childPid = -1;
   try {
     const child = spawn(anetBin, ["node", "start", req.node_spec.name], {
       cwd: deps.workDir,
       env: minimalEnv(),
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "ignore"],
       detached: true,
     });
-    child.unref();
     childPid = child.pid || -1;
+    try { child.stdin?.destroy(); } catch { /* ok */ }
+    try { child.stdout?.destroy(); } catch { /* ok */ }
+    try { child.stderr?.destroy(); } catch { /* ok */ }
+    child.unref();
     deps.log(`[create-node] spawned child '${req.node_spec.name}' pid=${childPid}`);
+
+    if (childPid > 0) {
+      try {
+        process.kill(childPid, 0);
+        deps.log(`[create-node] post-spawn kill-0 verify OK: pid=${childPid} alive`);
+      } catch (kerr: any) {
+        const msg = `child died immediately after spawn: ${kerr?.message || kerr}`;
+        deps.warn(`[create-node] ${msg}`);
+        await deps.callCommHub("ack_create_request", {
+          request_id, status: "failed", error: msg,
+        }).catch(() => {});
+        return;
+      }
+    }
   } catch (e: any) {
     const msg = (e?.message || String(e)).slice(0, 800);
     deps.warn(`[create-node] fork (start) failed: ${msg}`);
