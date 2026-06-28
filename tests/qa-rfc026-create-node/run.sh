@@ -169,6 +169,8 @@ if [[ -n "$SUCCEEDED" ]]; then
   fi
 fi
 
+# nvm-sim scenario runs at end (after K) — see "A.nvm" block below.
+
 # ── B. role gate ──────────────────────────────────────────────────
 note "B. member/viewer role gate (hub-side)"
 BODY=$(build_create_node_body "$DAEMON_NODE_ID" "b-noop-child" "claude-agent-sdk" "claude-opus-x" "$NET_ID")
@@ -368,8 +370,137 @@ RESP=$(mcp_call "$UTOK" "$BODY")
 ERR=$(echo "$RESP" | jq -r .error 2>/dev/null)
 [[ "$ERR" == "channels_not_supported_in_p1" ]] && ok "K channels rejected: $ERR" || bad "K channels NOT rejected: $RESP"
 
+# ── A.nvm — issue #301 minimalEnv PATH fix真验 ───────────────────
+# Simulates nvm-style install: daemon's own node lives OUTSIDE SAFE_PATH.
+# Pre-fix: spawned child's `#!/usr/bin/env node` shebang fails → insta-die.
+# Post-fix: minimalEnv prepends dirname(process.execPath) → child survives.
+#
+# v2 RACE FIX (Codex catch on commit 84545b4): the prior version killed
+# `$DAEMON_PID` (the `nohup anet node start` wrapper) but left the
+# wrapper-spawned `agent-node` grandchild alive. Two daemons (the
+# survivor + the nvm-sim new daemon) shared the same `daemon_node_id` →
+# raced for the same one-shot `pendingEnvBlobs` consume → POST-FIX
+# outcome non-deterministic (luck-of-the-pull). New design avoids the
+# race entirely by registering the nvm-sim daemon under a DISTINCT
+# identity (own ntok + own node_id + own alias). hub C2 token-bound
+# routing pushes `create_node` only to the target daemon_node_id, so
+# the original `daemon-rfc026` keeps running harmlessly but never
+# receives the nvm probe doorbell.
+note "A.nvm — issue #301 PATH fix真验 (isolated daemon identity, no race; complete-loop register+survive)"
+SYS_NODE=$(realpath -e "$(which node 2>/dev/null)" 2>/dev/null || echo "")
+AGENT_NODE_BIN=$(realpath -e "$(which agent-node 2>/dev/null)" 2>/dev/null || echo "")
+if [[ -z "$SYS_NODE" ]] || ! [[ "$SYS_NODE" =~ ^(/usr/local/sbin|/usr/local/bin|/usr/sbin|/usr/bin|/sbin|/bin)/ ]]; then
+  stub "A.nvm" "system node not in SAFE_PATH or missing — nvm-sim setup needs repositioning, skipping"
+elif [[ -z "$AGENT_NODE_BIN" ]]; then
+  stub "A.nvm" "agent-node binary missing — skipping"
+else
+  # Stage nvm-sim: MOVE node out of SAFE_PATH so SAFE_PATH lookup of
+  # `node` fails (faithful nvm). cleanup trap restores node so any
+  # cleanup steps continue to work.
+  mkdir -p /opt/anet-nvm-sim/bin
+  mv "$SYS_NODE" /opt/anet-nvm-sim/bin/node
+  ok "nvm-sim: MOVED node $SYS_NODE → /opt/anet-nvm-sim/bin/node (SAFE_PATH lookup of node now fails — faithful nvm)"
+  trap "cp /opt/anet-nvm-sim/bin/node $SYS_NODE 2>/dev/null; rm -rf /opt/anet-nvm-sim 2>/dev/null" EXIT
+
+  # Mint NEW daemon identity (isolated from daemon-rfc026 used by B-K)
+  NVM_DAEMON_NAME="daemon-rfc026-nvm"
+  NVM_DAEMON_NTOK_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/node-token" \
+    -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' \
+    -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"$NVM_DAEMON_NAME\"}")
+  NVM_DAEMON_NTOK=$(echo "$NVM_DAEMON_NTOK_RESP" | jq -r .token)
+  [[ "$NVM_DAEMON_NTOK" == ntok_* ]] && ok "nvm daemon ntok minted (isolated identity)" || { bad "nvm ntok mint: $NVM_DAEMON_NTOK_RESP"; }
+  NVM_DAEMON_NODE_ID="node_daemon_nvm_$(date +%s%N | sha256sum | head -c 12)"
+  mkdir -p "$WORK/.anet/nodes/$NVM_DAEMON_NAME"
+  cat > "$WORK/.anet/nodes/$NVM_DAEMON_NAME/config.json" <<EOF2
+{"node_id":"$NVM_DAEMON_NODE_ID","node_name":"$NVM_DAEMON_NAME","alias":"$NVM_DAEMON_NAME","role":"host_supervisor",
+ "runtime":"claude-agent-sdk","model":"claude-opus-original",
+ "hub":"$HUB_BASE","token":"$NVM_DAEMON_NTOK"}
+EOF2
+  cd "$WORK"
+  # Start nvm daemon under /opt/anet-nvm-sim/bin/node (process.execPath becomes that path)
+  ANET_BIN_ABS=$(realpath -e "$(which anet)") \
+    nohup /opt/anet-nvm-sim/bin/node "$AGENT_NODE_BIN" \
+      --config "$WORK/.anet/nodes/$NVM_DAEMON_NAME/config.json" \
+      --alias "$NVM_DAEMON_NAME" --runtime claude-agent-sdk \
+      > /tmp/daemon-nvm.log 2>&1 &
+  NVM_DAEMON_PID=$!
+  sleep 5
+  if ! kill -0 "$NVM_DAEMON_PID" 2>/dev/null; then
+    bad "nvm-sim daemon failed to start"; tail -30 /tmp/daemon-nvm.log
+  else
+    # Verify execPath真 = nvm-sim path (the daemon's process.execPath
+    # determines what dirname() prepends in computeChildPath; if it
+    # happened to be the original system node, our修 wouldn't be exercising)
+    NVM_EXEC=$(readlink -f /proc/$NVM_DAEMON_PID/exe 2>/dev/null || echo "?")
+    if [[ "$NVM_EXEC" == "/opt/anet-nvm-sim/bin/node" ]]; then
+      ok "nvm-sim daemon execPath=$NVM_EXEC (真 outside SAFE_PATH — fix is exercising)"
+    else
+      bad "nvm-sim daemon execPath=$NVM_EXEC ≠ /opt/anet-nvm-sim/bin/node (fix not exercising)"
+    fi
+
+    # Wait for nvm daemon to register
+    NVM_REG=""
+    for i in $(seq 1 30); do
+      sleep 1
+      R=$(curl -sS "$HUB_BASE/api/nodes?node_id=$NVM_DAEMON_NODE_ID" -H "Authorization: Bearer $UTOK")
+      if echo "$R" | jq -e ".nodes[0].node_id == \"$NVM_DAEMON_NODE_ID\"" >/dev/null 2>&1; then NVM_REG=yes; break; fi
+    done
+    [[ -n "$NVM_REG" ]] && ok "nvm-sim daemon registered ($NVM_DAEMON_NAME / $NVM_DAEMON_NODE_ID)" || { bad "nvm daemon never registered"; tail -20 /tmp/daemon-nvm.log; }
+
+    # Stage 3.5 — pre-dispatch topology audit (race self-guard, mirrors nvm-sendtask-smoke.sh)
+    # If anyone later changes this harness in a way that leaves a stale
+    # daemon for $NVM_DAEMON_NAME running, this assertion catches it on
+    # the spot — race-prevention becomes self-checking, not implicit.
+    HSP_COUNT=$(pgrep -af "agent-node.*--alias $NVM_DAEMON_NAME" | grep -v grep | wc -l)
+    ALL_PIDS=$(pgrep -af "agent-node " | grep -v grep | awk '{print $1}' | tr '\n' ',' || echo "")
+    echo "    nvm-sim daemon PID:        $NVM_DAEMON_PID"
+    echo "    pgrep nvm-daemon matches:  $HSP_COUNT"
+    echo "    all agent-node PIDs:       [${ALL_PIDS}]"
+    if [[ "$HSP_COUNT" -eq 1 ]]; then
+      ok "single-daemon topology — only nvm-sim daemon owns alias=$NVM_DAEMON_NAME (HSP_COUNT=1 ASSERT PASS — race-free hard guard)"
+    else
+      bad "HSP_COUNT=$HSP_COUNT for alias=$NVM_DAEMON_NAME (expected exactly 1) — RACE RISK: harness regression, leftover daemon would steal create_request"
+      pgrep -af agent-node || true
+    fi
+
+    NVM_CHILD_NAME="demo-nvm-child"
+    # Dispatch create_node targeting the NEW daemon_node_id (hub
+    # C2 token-bound routing → only this daemon receives the SSE
+    # doorbell; original daemon-rfc026 keeps running harmlessly).
+    BODY=$(build_create_node_body "$NVM_DAEMON_NODE_ID" "$NVM_CHILD_NAME" "claude-agent-sdk" "claude-opus-nvm-test" "$NET_ID")
+    RESP=$(mcp_call "$UTOK" "$BODY")
+    NVM_REQ_ID=$(echo "$RESP" | jq -r .request_id 2>/dev/null)
+    if [[ "$NVM_REQ_ID" != cr_* ]]; then
+      bad "nvm-sim: create_node dispatch failed: $RESP"
+    else
+      ok "nvm-sim: create_node dispatched to ISOLATED daemon (request_id=$NVM_REQ_ID, 0 race possible)"
+      NVM_REGISTERED=""; NVM_REG_ITER=""
+      for i in $(seq 1 30); do
+        sleep 1
+        R=$(curl -sS "$HUB_BASE/api/nodes?alias=$NVM_CHILD_NAME" -H "Authorization: Bearer $UTOK")
+        if echo "$R" | jq -e ".nodes[0].alias == \"$NVM_CHILD_NAME\"" >/dev/null 2>&1; then
+          NVM_REGISTERED=yes; NVM_REG_ITER=$i; break
+        fi
+      done
+      if [[ -z "$NVM_REGISTERED" ]]; then
+        bad "nvm-sim: child NEVER registered — #301 fix DIDN'T TAKE (child shebang likely insta-died)"
+        tail -30 /tmp/daemon-nvm.log
+      else
+        ok "nvm-sim: child registered in ${NVM_REG_ITER}s (env node resolved via daemon PATH prepend — #301 修后 register OK)"
+        sleep 12
+        NVM_CHILD_PID=$(grep -oE "spawned child .$NVM_CHILD_NAME. pid=[0-9]+" /tmp/daemon-nvm.log 2>/dev/null | tail -1 | grep -oE "[0-9]+$")
+        if [[ -n "$NVM_CHILD_PID" ]] && kill -0 "$NVM_CHILD_PID" 2>/dev/null; then
+          ok "nvm-sim: child pid=$NVM_CHILD_PID alive after 12s — FULL LOOP (register + survive; #301 真 fix landed, isolated daemon, no race)"
+        else
+          bad "nvm-sim: child pid=$NVM_CHILD_PID DEAD within 12s — #301 fix incomplete"
+        fi
+      fi
+    fi
+    kill "$NVM_DAEMON_PID" 2>/dev/null || true
+  fi
+fi
+
 # ── cleanup ──────────────────────────────────────────────────────
-kill "$DAEMON_PID" 2>/dev/null || true
 kill "$HUB_PID" 2>/dev/null || true
 
 printf "\n────────────────────────────────────────────\n"

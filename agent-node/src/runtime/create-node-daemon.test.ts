@@ -220,21 +220,51 @@ describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER 
 });
 
 describe("minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable)", () => {
-  test("happy path: no extra → fixed PATH/HOME/LANG only", () => {
+  test("happy path: no extra → PATH includes daemon's own node bin dir + SAFE_PATH (issue #301 nvm fix)", () => {
     const env = minimalEnv();
-    expect(env.PATH).toBe("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    // PATH now starts with daemon's process.execPath dirname so spawned
+    // children's `#!/usr/bin/env node` shebang can find node under nvm /
+    // pnpm / Bun installs. SAFE_PATH follows; if execDir is already a
+    // canonical SAFE_PATH entry (e.g. /usr/local/bin), no duplicate.
+    const SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    const execDir = require("node:path").dirname(process.execPath);
+    if (SAFE_PATH.split(":").includes(execDir)) {
+      expect(env.PATH).toBe(SAFE_PATH);
+    } else {
+      expect(env.PATH).toBe(`${execDir}:${SAFE_PATH}`);
+      // Critically: execDir is FIRST so spawned child's env node resolves
+      // to daemon's own node (anti shebang-fail in nvm context).
+      expect(env.PATH!.startsWith(execDir)).toBe(true);
+    }
     expect(env.HOME).toBeDefined();
     expect(env.LANG).toBeDefined();
   });
-  test("legitimate extra key passes + fixed keys still last", () => {
+  test("legitimate extra key passes + fixed PATH keeps execPath prepend (issue #301)", () => {
     const env = minimalEnv({ ANTHROPIC_API_KEY: "x" });
     expect(env.ANTHROPIC_API_KEY).toBe("x");
-    expect(env.PATH).toBe("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    // PATH still includes SAFE_PATH segment
+    expect(env.PATH).toContain("/usr/local/bin");
+    expect(env.PATH).toContain("/usr/bin");
   });
   test("THROWS on reserved key in extra (LD_PRELOAD smuggled by attacker)", () => {
     expect(() => minimalEnv({ LD_PRELOAD: "/tmp/evil.so" })).toThrow(/reserved env key/);
   });
-  test("THROWS on fixed key in extra (PATH smuggled)", () => {
+  test("THROWS on fixed key in extra (PATH smuggled — caller cannot override the trust-root execPath prepend)", () => {
     expect(() => minimalEnv({ PATH: "/tmp/evil-bin" })).toThrow(/reserved env key|fixed env key/);
+  });
+  test("C1 invariant — issue #301 fix does NOT widen attacker surface: PATH source is process.execPath (daemon's already-resolved node), NOT env.PATH (attacker C1 surface)", () => {
+    // We do NOT read process.env.PATH; we use process.execPath.
+    // Sanity proof: read the source file, confirm no env.PATH reference
+    // in computeChildPath / minimalEnv code path.
+    const src = require("node:fs").readFileSync(
+      require("node:path").join(__dirname, "create-node-daemon.ts"), "utf-8",
+    );
+    // Extract computeChildPath function body
+    const m = src.match(/function computeChildPath\(\)[\s\S]+?\n\}/);
+    expect(m).toBeTruthy();
+    if (m) {
+      expect(m[0]).toContain("process.execPath");
+      expect(m[0]).not.toMatch(/process\.env\.PATH/);   // explicit anti-C1 invariant
+    }
   });
 });

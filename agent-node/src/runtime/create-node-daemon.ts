@@ -106,8 +106,32 @@ export function getAnetBinAbs(): string {
 export function _resetAnetBinAbsForTest(): void { _anetBinAbs = null; }
 
 // ── §4.2.6 B1 — minimalEnv (filter + fixed-keys-last + throw-on-collision) ──
+import { dirname } from "node:path";
+
 const SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const FIXED_ENV_KEYS = new Set(["PATH", "HOME", "LANG"]);
+
+/** #301 nvm fix (issue: spawned child shebang `#!/usr/bin/env node`
+ *  finds no node when daemon runs under nvm / pnpm / Bun / custom
+ *  installs where node is not in SAFE_PATH). Prepend daemon's own
+ *  node bin dir to PATH for spawned children.
+ *
+ *  Trust root: process.execPath is daemon's own already-resolved
+ *  node binary path (boot-time canonicalize, attacker can't change
+ *  the running process's own argv0 dirname). NOT trusting env.PATH
+ *  (that's C1 attacker surface). So no C1 / PATH-poison regression:
+ *  hub-side validateEnvRefs still rejects env_refs:["PATH"] /
+ *  ["LD_PRELOAD"] (G7/G8 invariant unchanged) — the only thing we
+ *  add is a fixed dir name that the daemon process itself defines.
+ */
+function computeChildPath(): string {
+  const execDir = dirname(process.execPath);
+  // Skip prepend if execDir is already an early SAFE_PATH entry
+  // (avoid duplicate path; canonical SAFE_PATH wins).
+  const safeParts = SAFE_PATH.split(":");
+  if (safeParts.includes(execDir)) return SAFE_PATH;
+  return `${execDir}:${SAFE_PATH}`;
+}
 
 export function minimalEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const filtered: Record<string, string> = {};
@@ -122,7 +146,7 @@ export function minimalEnv(extra: Record<string, string> = {}): NodeJS.ProcessEn
   }
   return {
     ...filtered,
-    PATH: SAFE_PATH,
+    PATH: computeChildPath(),
     HOME: process.env.HOME!,
     LANG: process.env.LANG || "C.UTF-8",
   };
