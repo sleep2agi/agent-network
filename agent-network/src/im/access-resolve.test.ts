@@ -124,6 +124,36 @@ describe("resolveTelegramAccess — explicit id / username matching", () => {
     });
     expect(d.allow).toBe(true);
   });
+
+  // Production-shape regression (通信牛 #276 round-2 review).
+  // Real telegram payloads put `msg.from.username` WITHOUT the @ prefix
+  // ("vansin", not "@vansin"). Existing tests used "@vansin" on both
+  // sides which let a buggy resolver still pass. Pin the bare-name shape
+  // so an operator who writes `allowFrom:["vansin"]` (the obvious one)
+  // gets matched against the real telegram payload.
+  test("production-shape: bare username (no @) in allowFrom matches bare msg.from.username", () => {
+    const d = resolveTelegramAccess({
+      allowFrom: ["vansin"],         // operator types name without @
+      senderId: "12345",
+      senderUsername: "vansin",      // telegram payload shape: no @
+    });
+    expect(d.allow).toBe(true);
+    expect(d.kind).toBe("explicit-allow");
+  });
+
+  test("production-shape mismatch: @vansin in allowFrom does NOT match bare vansin payload", () => {
+    // Operator wrote @vansin (looking at telegram UI which shows @)
+    // but real payload is "vansin" — must reject so the operator gets
+    // a clear "your config doesn't match what arrives" signal instead
+    // of silent fail-open.
+    const d = resolveTelegramAccess({
+      allowFrom: ["@vansin"],
+      senderId: "12345",
+      senderUsername: "vansin",      // no @ in real payload
+    });
+    expect(d.allow).toBe(false);
+    expect(d.kind).toBe("denied");
+  });
 });
 
 describe("resolveFeishuAccess — DM path mirrors telegram fail-closed", () => {
