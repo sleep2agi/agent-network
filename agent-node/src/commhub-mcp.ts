@@ -199,16 +199,26 @@ export async function createCommhubSdkMcpServer(
         },
         fwd("send_message"),
       ),
-      tool(
-        "send_reply",
-        "Send a reply to a task. Linked to task_id via in_reply_to. Does NOT trigger agent re-processing.",
-        {
-          task_id: z.string().describe("Task to reply to"),
-          text: z.string().describe("Reply content"),
-          status: z.enum(["replied", "failed", "cancelled"]).optional(),
-        },
-        fwd("send_reply"),
-      ),
+      // NOTE: `send_reply` tool removed (2026-06-28, 通信龙 dispatch).
+      //
+      // The agent-facing schema declared `{task_id, text, status}` but the
+      // server's send_reply MCP tool expects `{alias, in_reply_to, text,
+      // status}`. The forwarder (`injectAgentFromSession`) only injects
+      // `from_session` — it doesn't remap `task_id → in_reply_to` or
+      // synthesize the required `alias` arg. So every agent invocation
+      // bounced with JSON-RPC -32602 "Invalid arguments" before reaching
+      // any server-side code path. Dead-on-arrival since 2026-05-15.
+      //
+      // The agent does NOT need this tool: every task it receives is
+      // auto-replied via cli.ts:806 `sendReply()` (the runtime calls the
+      // server-side send_reply with the correct shape after `processTask`
+      // returns). For peer-to-peer dispatch chaining the agent uses
+      // `send_task` (which IS wired correctly). CLAUDE.md already
+      // documents this. Keeping the broken tool only confused LLMs into
+      // failing tool calls.
+      //
+      // Server-side send_reply (server/src/tools.ts) is UNCHANGED — the
+      // auto-reply path uses it and works.
       tool(
         "get_all_status",
         "Get status of all sessions in the current network (or globally for admin tokens). Use this to see who is online before send_task.",
