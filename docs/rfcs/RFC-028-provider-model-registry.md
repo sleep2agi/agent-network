@@ -1,7 +1,14 @@
 # RFC-028 — Provider & Model Registry + 连通性矩阵
 
 **作者**: 通信工程马
-**状态**: Draft v2 (通信龙 first-pass PASS + F1/F2/F3/F4/F5 fold-in, 待通信牛 安全审)
+**状态**: Draft v3 (通信牛 安全审 CHANGE_REQ → 3 F1 SSRF 残留修, 待二次复判)
+**v3 变更说明**: 通信牛 SEC verdict (通信龙 转 [task 191eb7cb](https://github.com/sleep2agi/agent-network/pull/303)) — vault lazy gate / role gate / SEC-1 通过, **但 F1 SSRF 还有 3 处真实现坑**:
+- **R1 (redirect SSRF)**: v2 `fetch()` 默认 follow 30x — vendor 返 `Location: http://169.254.169.254/` 绕过 allowlist + IP check。修: `redirect:"manual"` + 3xx 一律 fail (probe minimal 不该需 redirect) (详 §4.4.2)
+- **R2 (HTTPS pin 实现不成立)**: v2 `fetch("https://<pinned-ip>/", headers:{Host:...})` 错——HTTPS SNI/cert validation 用 URL hostname (= IP), 不是 Host header; 必 cert mismatch (或 worse: 误关 TLS check 反而通过) 修: 用 undici/Bun dispatcher + customLookup, **URL 保留 vendor hostname** (SNI + cert 校验正确), 网络 connect 走 pin IP; 显式 ban `NODE_TLS_REJECT_UNAUTHORIZED=0` / insecure TLS fallback (详 §4.4.2)
+- **R3 (redact 还不够硬)**: v2 全文 replace 漏 URL-encoded (`sk%2Dant%2D...`) / 分段 / prefix-only echo 修: **daemon ack 只回白名单化 summary** (canonical_reason enum + status code, 不含 vendor 任意字符串字段); hub 二层 full-value + 常见 encoding 变体兜底 (详 §4.4.4)
+- **vault lazy / role / SEC-1**: 通信牛 PASS 不动
+
+**v2 变更说明** (历史): 通信龙 first-pass [task bbb9b3de](https://github.com/sleep2agi/agent-network/pull/303) PASS 方向 + 5 finding 全折:
 **v2 变更说明**: 通信龙 first-pass [task bbb9b3de](https://github.com/sleep2agi/agent-network/pull/303) PASS 方向 + 5 finding 全折:
 - **F1 (critical · SSRF)**: §4.4 「probe 不能任意 URL」措辞模糊 — base_url 主机 admin 自由填 = SSRF feature。三层堵: per-vendor host allowlist + daemon probe pre-fetch 私 IP 段拒 + DNS resolve 后再校验 IP (防 rebinding)。详 §4.4 重写 + §4.6 加 `probe_target_forbidden` / `probe_resolve_unsafe_ip`
 - **F2 (重要 · 迁移)**: §4.1 master key 不能 hub-boot 无条件 require, 现有 hub 升 preview.3 即 boot fail 砸生产。改 lazy gate — vault 表空时 env 可缺失; 首次 upsert_secret OR 检测 providers 行时才 require + 清晰 migration 错。详 §4.1
@@ -419,32 +426,93 @@ function isLoopbackHost(host: string): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
+// v3 R1+R2 — boot-time guard: explicitly forbid insecure TLS env. If
+// any of these are set when daemon starts, exit with anet_tls_insecure_disabled.
+function assertSecureTlsEnv(env: NodeJS.ProcessEnv): void {
+  if (env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
+    throw new Error("probe_tls_insecure_disabled: NODE_TLS_REJECT_UNAUTHORIZED=0 forbidden — TLS cert validation must be ON for SSRF defense");
+  }
+  // Other insecure TLS vectors we explicitly check: --insecure-tls / Bun's TLS bypass; impl note: add CI lint
+  // 'grep "rejectUnauthorized:.*false"' across daemon source = 0 hits.
+}
+
+// v3 R2 — custom DNS lookup pins to pre-validated IP; URL keeps the
+// original vendor hostname so SNI + TLS cert validation see the vendor's
+// name (not the raw IP). undici Agent dispatcher + connect.lookup is the
+// portable hook (Bun fetch is undici-compatible).
+import { Agent, fetch as undiciFetch } from "undici";
+
 async function safelyFetchProbe(baseUrl: string, env: NodeJS.ProcessEnv): Promise<Response> {
+  assertSecureTlsEnv(env);
   const u = new URL(baseUrl);
+
   // ① resolve all A/AAAA records (anti single-record cherry-pick)
   const addrs = await dns.lookup(u.hostname, { all: true });
-  if (addrs.length === 0) throw new ValidationError("probe_resolve_unsafe_ip", { host: u.hostname, reason: "no records" });
+  if (addrs.length === 0) {
+    throw new ValidationError("probe_resolve_unsafe_ip", { host: u.hostname, reason: "no records" });
+  }
   // ② every resolved IP must pass forbidden-check
   for (const a of addrs) {
     if (isForbiddenIp(a.address)) {
-      // dev loopback exception only via explicit env
       if (isLoopbackHost(u.hostname) && env.ANET_DAEMON_PROBE_ALLOW_LOOPBACK === "1") continue;
       throw new ValidationError("probe_resolve_unsafe_ip", { host: u.hostname, ip: a.address });
     }
   }
-  // ③ anti-rebinding: lock fetch to the first resolved IP (replace host with IP literal +
-  //    pass original host via Host header), so a DNS rebind between resolve→fetch
-  //    can't slip a different IP in
   const pinIp = addrs[0].address;
-  const family = addrs[0].family;
-  const pinHost = family === 6 ? `[${pinIp}]` : pinIp;
-  const pinnedUrl = `${u.protocol}//${pinHost}${u.port ? ":" + u.port : ""}${u.pathname}${u.search}`;
-  return fetch(pinnedUrl, {
-    headers: { Host: u.hostname /* TLS SNI uses original */ },
-    signal: AbortSignal.timeout(30_000),
+  const pinFamily = addrs[0].family;
+
+  // ③ R2 — undici dispatcher with custom lookup. URL stays
+  //    https://api.anthropic.com/... so the TLS layer sees the vendor's
+  //    hostname (SNI + cert SAN/CN validation correct); the network
+  //    connection actually goes to pinIp (anti DNS-rebinding).
+  //
+  //    CRITICAL: dispatcher uses ONLY OUR pinned lookup; system DNS is
+  //    never re-consulted between this point and fetch send.
+  const pinnedDispatcher = new Agent({
+    connect: {
+      lookup(_hostname: string, _opts: any, cb: (err: Error | null, addr: string, family: number) => void) {
+        cb(null, pinIp, pinFamily);
+      },
+      // Hardened TLS: minimum TLS 1.2, no insecure ciphers, explicit
+      // rejectUnauthorized=true (not opt-out)
+      rejectUnauthorized: true,
+      minVersion: "TLSv1.2",
+    },
+    bodyTimeout: 30_000,
+    headersTimeout: 30_000,
   });
+
+  // ④ R1 — manual redirect handling. fetch() default follows 3xx silently,
+  //    letting vendor return `Location: http://169.254.169.254/` bypass our
+  //    allowlist + IP check. P1: 3xx is a hard fail (probe minimal call
+  //    should never redirect; if a future vendor adapter genuinely needs
+  //    redirect, it gets per-vendor explicit allow + re-runs full validate
+  //    on Location URL).
+  const resp = await undiciFetch(baseUrl, {
+    method: "POST",                         // vendor adapter decides; here illustrative
+    headers: { /* vendor adapter sets auth + body */ },
+    redirect: "manual",                     // NEVER follow auto
+    dispatcher: pinnedDispatcher,
+    signal: AbortSignal.timeout(30_000),
+  }) as unknown as Response;
+
+  if (resp.status >= 300 && resp.status < 400) {
+    const loc = resp.headers.get("location") || "(no header)";
+    throw new ValidationError("probe_redirect_forbidden", {
+      status: resp.status,
+      location_truncated: loc.slice(0, 100),  // truncated for log safety
+    });
+  }
+  return resp;
 }
 ```
+
+**关键不变量** (v3):
+- URL hostname **永远是 vendor 域名**, TLS SNI + cert SAN validation 正常
+- 网络连接 **永远走 pin IP** (custom lookup), DNS rebinding window = 0 (lookup 只调用一次, 之后用 dispatcher 内 cache 直连)
+- `redirect: "manual"`, 3xx 一律 fail (`probe_redirect_forbidden`)
+- `rejectUnauthorized: true` 显式 set (不靠 default); TLS 最低 1.2
+- daemon boot 时 `assertSecureTlsEnv` 检 `NODE_TLS_REJECT_UNAUTHORIZED=0` 等环境变量, 见到 exit; **CI lint guard** 检 daemon 源码 `rejectUnauthorized:.*false` / `tls.checkServerIdentity.*noop` / 等 pattern = 0 命中
 
 **关键不变量**:
 - DNS 解析 → 校验 IP → 用 IP 直连 fetch 三步原子, **rebinding window 为 0** (解析后立即固定 IP)
@@ -458,35 +526,88 @@ async function safelyFetchProbe(baseUrl: string, env: NodeJS.ProcessEnv): Promis
 - **timeout 强制 ≤ 30s**: `AbortSignal.timeout(30_000)` 已在 §4.4.2 fetch 内强制
 - **rate limit per provider**: hub-side 每 (provider_id, model_id, daemon_node_id) 三元组 60 req/min 上限 (反向防 DoS 给 vendor + 防滥点 §7.2 烧 token 风险)
 
-**4.4.4 error_message redact (v2 F3 修)**
+**4.4.4 error_message — daemon 白名单 ack + hub 二层 redact (v3 R3)**
 
-> v1 写「redactSecrets(text, knownKeysFromVault)」错: vendor 错误回的是 secret **值** (e.g. `Invalid API key: sk-ant-abc123...`), 不是 key 名。redact 必须 match **解密后的真值**全文替换。
+v2 写「hub 端全文 replace match secret 值」**还不够硬**——通信牛 catch:
+- URL-encoded 变体: vendor 错误可能编码 `Invalid API key: sk%2Dant%2Dabc...`
+- 分段 echo: 错误信息可能拆开 (`Got "sk-ant-" prefix but expected... abc... suffix doesn't match`)
+- prefix/suffix-only echo: `Invalid API key starting with sk-ant- (last 4: abc1)` —— 部分明文照样可拼回
+
+正解: **daemon ack 一开始就不传 vendor raw text 给 hub**。
+
+**daemon 侧 `ack_probe_request` payload schema (P1 严格白名单)**:
 
 ```ts
-// hub-side, ack_probe_request 入口跑 — daemon 不持密, daemon 知道得不全
-function redactSecretsInError(
-  text: string,
-  networkId: string,
-  knownProviderIds: string[],   // 范围限定: 本次 probe 涉及的 provider
-): string {
-  if (!text) return text;
-  let out = text;
-  for (const pid of knownProviderIds) {
-    const provider = db.get(`SELECT secret_key_ref FROM providers WHERE provider_id = ?1 AND network_id = ?2`, pid, networkId);
-    if (!provider) continue;
-    const plaintext = vaultGet(networkId, provider.secret_key_ref);  // 临时解密
-    if (!plaintext) continue;
-    // 全文 replace 该 secret 值为 `***REDACTED***`; case-sensitive (key 通常 ASCII 严格)
-    if (plaintext.length >= 8) {  // 太短 (<8) 跳过避免误杀 (e.g. "test")
-      out = out.split(plaintext).join("***REDACTED***");
-    }
-    // zero-fill plaintext
-  }
-  return out.slice(0, 500);  // 仍然截 500
+// daemon-side — what daemon sends to hub. No `error: string` 字段
+// 任意字符串. Only canonical enum + numeric code + duration.
+interface ProbeAckPayload {
+  probe_id: string;
+  status: "ok"
+        | "auth_fail"          // HTTP 401 / 403 with vendor auth-like wording
+        | "quota"              // HTTP 429
+        | "rate_limit"         // 429 from our pinned dispatcher (rare)
+        | "network_error"      // connect/DNS/TLS fail (NOT vendor 5xx)
+        | "timeout"            // 30s ceiling hit
+        | "redirect_forbidden" // 30x — locked
+        | "vendor_5xx"         // 500-599 from vendor (allowlist'd host so safe to label)
+        | "other_4xx"          // 400/404/etc — vendor-specific but no secret
+        | "tls_error";         // cert validation fail (post-dispatcher)
+  raw_status_code?: number;    // numeric only, e.g. 401/429/500
+  latency_ms: number;
+  // NB: NO `error_message` string field. NO `response_body`. NO
+  // `response_headers`. NO `url`. daemon classifies via response shape
+  // (status + content-type + tiny canonical-string match) and discards
+  // raw text before sending.
+}
+
+// daemon-side classifier — vendor adapter maps real response shape →
+// enum. Only allowlisted classification strings get touched (not echoed):
+function classifyProbeResponse(resp: Response, latencyMs: number, vendor: string): ProbeAckPayload {
+  const code = resp.status;
+  let status: ProbeAckPayload["status"];
+  if (code === 200 || code === 201) status = "ok";
+  else if (code === 401 || code === 403) status = "auth_fail";
+  else if (code === 429) status = "quota";
+  else if (code >= 300 && code < 400) status = "redirect_forbidden";
+  else if (code >= 500 && code < 600) status = "vendor_5xx";
+  else if (code >= 400) status = "other_4xx";
+  else status = "network_error";  // shouldn't happen post-dispatcher OK
+  return { probe_id, status, raw_status_code: code, latency_ms: latencyMs };
 }
 ```
 
-audit_log 写时也走 redact (双层)。
+`network_error` / `timeout` / `tls_error` 由 try/catch 包 fetch 异常映射, **从不**传 vendor 字符串。
+
+**hub-side 二层 redact (作 belt-and-suspenders, P1 已挡, P2 加更猛 redact when audit need raw)**:
+
+`ack_create_request` 入口的 ProbeAckPayload **schema-validate** (zod), 拒任何额外字段 (避免攻击者 client 偷塞 `error_message` 字段进 hub log/DB)。审计需要更细的失败原因时, P2 加一个 daemon-side opt-in `verbose=admin-only` mode (返一个**预先 redacted 的 hash** 而非 raw text); P1 暂不需要 (status + raw_status_code 足够 dashboard 渲染矩阵).
+
+**hub-side full-value redact (P1 兜底, 防 daemon 实现 bug)**:
+
+```ts
+// hub-side, processing ack — even though daemon doesn't send raw text,
+// we run a guard: if any string field of ack contains a secret value
+// (or its url-encoded / short-window variant), reject + audit. Daemon
+// implementation bug catch.
+function rejectIfSecretLeaked(ack: any, knownSecrets: string[]): void {
+  const json = JSON.stringify(ack);
+  for (const s of knownSecrets) {
+    if (s.length < 8) continue;  // avoid false positive
+    if (json.includes(s)) throw new Error("ack_secret_leak: daemon ack contained secret value (denied)");
+    if (json.includes(encodeURIComponent(s))) throw new Error("ack_secret_leak: ack contained URL-encoded secret (denied)");
+    // short-window: any 12-char substring of secret in payload = suspect
+    if (s.length >= 16) {
+      for (let i = 0; i <= s.length - 12; i++) {
+        if (json.includes(s.slice(i, i + 12))) throw new Error("ack_secret_leak: ack contained secret substring (denied)");
+      }
+    }
+  }
+}
+```
+
+triggered = audit_log `secret_leak_from_daemon` row + drop ack (probe row stays `pending` until reaper). P1 此 guard 跑在 hub 处理 ack 第一步。
+
+audit_log 写时仍用 status + raw_status_code (无 raw text), 永不存 vendor 输出原文。
 
 **4.4.5 daemon 不接受任意 endpoint path / arbitrary HTTP method**
 
@@ -519,6 +640,9 @@ dashboard admin-only audit page 直查 (P2)。
 | `probe_resolve_unsafe_ip` (v2 F1) | daemon | 「base_url 解析到禁用 IP 段 (私网/metadata): <ip>」 |
 | `vault_master_key_missing` (v2 F2, lazy) | hub (lazy gate) | 「ANET_HUB_SECRET_VAULT_KEY 未配置, 但本 hub 已有 vault 数据 — 请配置后重启」 |
 | `vault_master_key_invalid` (v2 F2) | hub | 「ANET_HUB_SECRET_VAULT_KEY 必须 32 bytes hex (`openssl rand -hex 32`)」 |
+| `probe_redirect_forbidden` (v3 R1) | daemon | 「probe 收到 3xx redirect, P1 一律拒绝 (location 已截断 100 字)」 |
+| `probe_tls_insecure_disabled` (v3 R2) | daemon boot | daemon 启动 fail-fast: 检测到 NODE_TLS_REJECT_UNAUTHORIZED=0 等不安全 TLS env |
+| `ack_secret_leak` (v3 R3) | hub | daemon ack 含 secret 值/编码变体/短窗 substring → 拒 + audit (daemon impl bug 信号) |
 
 ---
 
@@ -613,17 +737,23 @@ dashboard admin-only audit page 直查 (P2)。
 - [x] §6 与 RFC-026 §4.4 vault 接管关系 — 清楚
 - [x] §7 6 未决 → v2 全锁
 
-### v2 加项 verdict (待通信牛 安全审)
-- [ ] **F1** SSRF 三层: §4.4.1 per-vendor host allowlist (anthropic/openai/zai/openrouter/deepseek/qwen) + §4.4.2 daemon probe pre-fetch 私 IP 段拒 (10/127/172.16-31/192.168/169.254/CGNAT/IPv4-mapped-v6) + DNS resolve 后用 IP 直连 fetch (anti-rebinding, 0 window) + loopback dev exception 须 explicit env
-- [ ] **F2** vault master key lazy gate: hub boot 不 require; 首次 upsert_secret/upsert_provider 才 throw `vault_master_key_missing` (migration 安全, 现有 hub 升级不砸)
-- [ ] **F3** `redactSecretsInError` 改成拿**解密后 secret 值**全文 replace (hub 端 ack_probe_request 入口跑, daemon 不持密知道得不全; vendor 错误回 key 值实例 `Invalid API key: sk-...` 真挡)
-- [ ] **F4** model 下拉三态 (✓/⚠️/✗) + 新建节点页打开时后台 auto-probe 该 daemon, 未验仍可选带 warning, 失败需勾「强制使用」
-- [ ] **F5** §7.1 master key doc: 轮换 = re-encrypt 所有 secret (P3); env 永不进 log/ProcessTitle/crash dump/core dump; systemd Environment= (避免 ps 暴露); .env chmod 600
-- [ ] §4.4.5 daemon 不接受任意 endpoint path (per-vendor adapter 硬编码 method/path/body, hub 不传)
-- [ ] §3.1 matrix UI 三态 + cost label 「[Probe all] 每次 ≈ $X」(防 admin 滥点)
-- [ ] §4.6 error catalog +4 (probe_target_forbidden / probe_resolve_unsafe_ip / vault_master_key_missing/invalid)
+### v2 加项 verdict (通信牛 SEC 复判结果)
+- [x] **F2** vault lazy gate — 通过 ✅
+- [x] **F3** redact match value (v2) — v3 R3 升级为白名单 ack
+- [x] **F4** 三态 model 下拉 — 通过 ✅
+- [x] **F5** master key doc — 通过 ✅
+- [x] §4.4.5 daemon 硬编码 path — 通过 ✅
+- [x] §3.1 cost label — 通过 ✅
+- [x] vault lazy / role gate / SEC-1 — 通过 ✅
+- [⚠️] **F1** SSRF 三层 — 通信牛 catch 3 真实现坑 → v3 R1/R2/R3 修
+
+### v3 加项 verdict (待二次复判)
+- [ ] **R1** redirect SSRF: `redirect: "manual"` + 3xx 一律 fail (`probe_redirect_forbidden`); probe minimal 不该需 redirect, 合法 vendor redirect 留 P3 per-vendor explicit allow + Location 重跑 validate
+- [ ] **R2** undici Agent dispatcher + customLookup pin IP, URL 保留 vendor hostname (SNI + cert SAN 校验正确), `rejectUnauthorized:true` 显式, minVersion TLSv1.2; daemon boot `assertSecureTlsEnv` 检 `NODE_TLS_REJECT_UNAUTHORIZED=0` 等 env, throw `probe_tls_insecure_disabled`; CI lint guard 检源码 `rejectUnauthorized:.*false` / `checkServerIdentity.*noop` = 0 命中
+- [ ] **R3** daemon ack 白名单 enum schema (status enum + raw_status_code + latency_ms, **无任意字符串字段**); hub 二层 `rejectIfSecretLeaked` 检 secret 值/url-encoded/12-char 短窗 substring → `ack_secret_leak` audit + drop ack (daemon impl bug catch)
+- [ ] §4.6 error +3 (`probe_redirect_forbidden` / `probe_tls_insecure_disabled` / `ack_secret_leak`)
 
 ---
 
 **作者**: 通信工程马 · 2026-06-29
-**Review 路径**: v1 通信龙 first-pass PASS ✅ → v2 折 F1-F5 + §7 lock (本) → **通信牛 安全审 (碰 vault + SSRF 强制)** → Vincent 拍 → 派工 P1 MVP (~3-4d)
+**Review 路径**: v1 通信龙 first-pass PASS ✅ → v2 折 F1-F5 + §7 lock ✅ → v3 修通信牛 F1 残留 R1/R2/R3 (本) → **通信牛 二次复判** → Vincent 拍 → 派工 P1 MVP (~3-4d)
