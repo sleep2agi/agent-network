@@ -66,7 +66,8 @@ bad()  { echo "  ✗ $1" >&2; FAIL=$((FAIL+1)); }
 skip() { echo "  ⊘ $1 (skipped — $2)"; SKIP=$((SKIP+1)); }
 
 cleanup() {
-  kill "${HUB_PID:-0}" "${NODE_PID:-0}" 2>/dev/null || true
+  [[ -n "${HUB_PID:-}" ]] && kill "$HUB_PID" 2>/dev/null || true
+  [[ -n "${AGENT_PID:-}" ]] && kill "$AGENT_PID" 2>/dev/null || true
   echo
   echo "── Result ──"
   echo "  PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"

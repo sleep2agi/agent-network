@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "2.5.0-preview.1",
+  "version": "2.5.0-preview.2",
   "description": "AI Agent runtime for CommHub networks. Supports 4 runtimes: Claude Code CLI, Claude Agent SDK, Codex SDK, and Grok Build ACP.",
   "bin": {
     "agent-node": "dist/cli.js"
