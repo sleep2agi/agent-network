@@ -1928,6 +1928,38 @@ Bun.serve({
       }));
     }
 
+    // ── REST: single node config snapshot (RFC-024 B5) ──
+    // Dashboard calls this for the snapshot path. Returns the masked
+    // {model, flags, config_revision} the node last posted via
+    // report_status (B6). NEVER reads per-node files. Network-scoped
+    // via addNetworkScope so a netA viewer can't read a netB node.
+    const nodeConfigMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/config$/);
+    if (nodeConfigMatch && req.method === "GET") {
+      const nodeId = decodeURIComponent(nodeConfigMatch[1] ?? "");
+      const params: any[] = [nodeId];
+      let sql = "SELECT node_id, alias, network_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1";
+      sql = addNetworkScope(sql, params, restScope);
+      sql += " LIMIT 1";
+      const node = db.get<any>(sql, ...params);
+      if (!node) {
+        return withCors(req, Response.json({ ok: false, error: "node_not_found", node_id: nodeId }, { status: 404 }));
+      }
+      let snapshot: any = {};
+      if (node.config_snapshot) {
+        try { snapshot = JSON.parse(node.config_snapshot); } catch { snapshot = {}; }
+      }
+      return withCors(req, Response.json({
+        ok: true,
+        node_id: node.node_id,
+        alias: node.alias,
+        network_id: node.network_id,
+        config_revision: node.config_revision || 0,
+        model: snapshot.model ?? null,
+        flags: snapshot.flags ?? {},
+        config_update_capable: snapshot.config_update_capable ?? false,
+      }));
+    }
+
     // ── REST: nodes table (V2 Sprint 2) ──
     if (url.pathname === "/api/nodes") {
       const nodeId = url.searchParams.get("node_id");
