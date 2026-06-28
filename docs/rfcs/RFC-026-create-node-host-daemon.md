@@ -1,8 +1,13 @@
 # RFC-026 — Dashboard 远程创建节点 + Host-Daemon
 
 **作者**: 通信工程马
-**状态**: Draft v3 (通信牛 v2 安全终审 CHANGE_REQ → 5 不变量折入, 待复判)
-**v3 变更说明**: 通信牛 v2 安全终审 5 must-fold (通信龙 转 task `609da9ef`)：F1/F2/F3 主方向 PASS，但加 5 条**设计不变量**才是可开工规格。每条同时是 §5 P1 test plan 的新 scenario G-K。Vincent 「充分测试」要求与之对齐。
+**状态**: Draft v4 (通信牛 v3 复判 CHANGE_REQ → 2 blocker 修, 待二次复判)
+**v4 变更说明**: 通信牛 v3 [comment](https://github.com/sleep2agi/agent-network/pull/297)（task `732335d5`）C2/C4/C5/F1 闭合 ✅，但 C1/C3 有 2 个真安全洞，impl 前必修：
+- **B1 (env-key 覆盖 — C1/C3 矛盾 → LD_PRELOAD 注入)**：`ENV_KEY_RE` 仍接受 `PATH`/`LD_PRELOAD`/`NODE_OPTIONS`/`BUN_*`/`npm_*`；`minimalEnv()` 又用 `{PATH:SAFE_PATH, HOME, LANG, ...extra}` spread 把 extra 放后面 → 取名 `PATH` 的 env secret 覆盖 SAFE_PATH。**修**：加 `RESERVED_ENV_KEYS_EXACT` + `RESERVED_ENV_PREFIXES` denylist (hub + daemon 双层 enforce) + minimalEnv 防御式组装 (固定键最后 set 胜出 + collision throw)。scenario G7/G8 + I-sub 验。详 §4.4.7 / §4.2.6
+- **B2 (PATH 解析仍走 daemon 启动期 PATH — C3 没真满足 scenario I)**：boot 时 `which anet`，scenario I PATH 前置 evil-bin → which 解析的就是 evil。**修**：install-time canonicalize anet 绝对路径 → 写 `/etc/anet-daemon/path.conf` 或 systemd `Environment=ANET_BIN_ABS=...`；daemon boot 从 conf 读 + 校验「绝对路径 + 非 user/world-writable + 非 symlink-to-tmp + (option) hash 对得上 install-time」；runtime fork 永不再 `which` lookup。详 §4.2.6
+- **C4 impl 注意 (通信牛 提醒, 不算 blocker)**：token 行带 `request_id` + `token_id` 元数据，不碰明文 token 即可 revoke。已加 §4.4.8 impl note
+
+**v3 变更说明** (历史): 通信牛 v2 安全终审 5 must-fold (通信龙 转 task `609da9ef`)：F1/F2/F3 主方向 PASS，但加 5 条**设计不变量**才是可开工规格。每条同时是 §5 P1 test plan 的新 scenario G-K。Vincent 「充分测试」要求与之对齐。
 - **C1 (env_refs 严格校验)** — §4.4.7 新加 + scenario G: key regex / 去重 / count/size 上限 / vault-presence / daemon allowlist / `.env.local` safe serializer
 - **C2 (get/ack 绑 daemon node_id)** — §4.1.4 新加 + scenario H: 同 network 同 role 的 daemonA 也不能 get/ack daemonB 的 request
 - **C3 (ANET_BIN 绝对路径不走 PATH)** — §4.2.6 新加 + scenario I: 启动一次 `which` resolve + pin；`minimalEnv.PATH` 固定，PATH 投毒不影响 fork
@@ -435,46 +440,110 @@ daemon 在 fork 前**再次**校验同款（双层）。**P3** 才上 channel sc
 
 理由：channel 绑定 = 「子节点能从外部接收消息」= 攻击面骤增；P1 守住「daemon 只起进程，进程默认无入口」的纯净边界。fail-closed 比 fail-open 安全：未支持的字段一律拒，不 silent ignore（避免 dashboard 以为绑了但实际没绑）。
 
-**4.2.6 ANET_BIN 绝对路径 pin + minimalEnv.PATH 固定（v3 C3 新加）**：
+**4.2.6 ANET_BIN install-time 绝对路径 pin + minimalEnv 防御式组装（v4 重写, B1+B2 一并修）**：
 
-`execFile("anet", [...])` 走 `$PATH` 解析有路径投毒攻击面——如果 daemon 进程的 PATH 被任何方式（hub 派的 env、本机攻击者 `~/.bashrc`、子进程继承的环境）注入了一个早于真 anet 的 `/tmp/bin/anet`（恶意脚本），fork 会去那个假 binary。
+v3 的 `daemon boot 时 which anet pin` 仍有洞：scenario I 攻击者在 daemon 启动**前**把 `/tmp/evil-bin` 加进 daemon 的启动期 PATH（例如改 `~/.bashrc`、改 systemd unit、注入 env），`which anet` 解析的就是 evil；boot pin 把 evil 绑死了一辈子（更糟）。
 
-修法：
+修法：**install-time canonicalize**——把信任根从「daemon 启动期 PATH」上移到「装机时」。
 
 ```ts
-// daemon 启动时, 一次性 resolve, pin 绝对路径
-import { execFileSync } from "node:child_process";
-const ANET_BIN_ABS = (() => {
-  try {
-    // 用 daemon 自己的安装时 PATH (systemd unit / install script
-    // 控制), 一次 resolve, 之后不再依赖 PATH
-    const p = execFileSync("which", ["anet"], { encoding: "utf-8" }).trim();
-    if (!p || !p.startsWith("/")) throw new Error(`anet not absolute: ${p}`);
-    return p;  // e.g. "/usr/local/bin/anet"
-  } catch (e) {
-    throw new Error(`daemon boot: cannot resolve anet binary: ${e.message}`);
-  }
-})();
+// === install 期 (一键脚本里, 不是 daemon 进程) ===
+// install 脚本跑 (在受控环境，PATH 由 root 控制):
+//   1) resolve: ANET_BIN_RAW=$(command -v anet)
+//   2) canonicalize: ANET_BIN_ABS=$(realpath -e "$ANET_BIN_RAW")
+//   3) safety check:
+//      - 绝对路径 (开头 /)
+//      - 文件存在 + 可执行 (test -x)
+//      - 非 symlink-to-/tmp / 非 symlink-to-$HOME / 非 user-writable
+//        (stat -c '%U %a' 检查 owner=root + perm 不含 group/other write)
+//      - (option) 算 sha256 hash 留底
+//   4) 写: /etc/anet-daemon/path.conf  (root:root, mode 0640)
+//      或 systemd unit Environment=ANET_BIN_ABS=/usr/local/bin/anet
+//   5) hash 也写进 conf 作 install-time witness
+//
+// 写出来的 path.conf 示例:
+//   ANET_BIN_ABS=/usr/local/bin/anet
+//   ANET_BIN_SHA256=abc123...
+//   INSTALLED_AT=2026-06-28T14:30:00Z
+//   INSTALLED_BY_UID=0
 
-// fork 时永远用绝对路径 + 固定 PATH
+// === daemon boot (运行时) ===
+import { statSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+
+function loadAndVerifyAnetBin(): string {
+  // 来源固定: /etc/anet-daemon/path.conf 或环境变量 ANET_BIN_ABS
+  // (二选一, 取决于 systemd / launchd / 容器 install 路径)
+  const confPath = process.env.ANET_DAEMON_PATH_CONF || "/etc/anet-daemon/path.conf";
+  const conf = parseConf(readFileSync(confPath, "utf-8"));    // 简单 KEY=VALUE 解析
+  const abs = conf.ANET_BIN_ABS;
+  const expectedHash = conf.ANET_BIN_SHA256;
+
+  // 1) 必须绝对路径
+  if (!abs || !abs.startsWith("/")) {
+    throw new Error("daemon boot: ANET_BIN_ABS not absolute");
+  }
+  // 2) 路径中不含 symlink 到 /tmp / $HOME / 可写区 (defense in depth, install 已查)
+  const real = realpathSync(abs);
+  if (real !== abs) throw new Error(`daemon boot: ANET_BIN_ABS contains symlink: ${abs} → ${real}`);
+  // 3) 文件 stat 校验: owner=root + 非 group/other writable + executable
+  const st = statSync(abs);
+  if (st.uid !== 0) throw new Error(`daemon boot: ANET_BIN owner not root (uid=${st.uid})`);
+  if ((st.mode & 0o022) !== 0) {
+    throw new Error(`daemon boot: ANET_BIN writable by group/other (mode=${st.mode.toString(8)})`);
+  }
+  if ((st.mode & 0o111) === 0) throw new Error(`daemon boot: ANET_BIN not executable`);
+  // 4) hash 校验 (防 install 后被换)
+  if (expectedHash) {
+    const actual = createHash("sha256").update(readFileSync(abs)).digest("hex");
+    if (actual !== expectedHash) {
+      throw new Error(`daemon boot: ANET_BIN hash mismatch (install-time vs now)`);
+    }
+  }
+  return abs;
+}
+
+const ANET_BIN_ABS = loadAndVerifyAnetBin();    // 启动期失败 = exit, 不带病上岗
+
+// === runtime fork ===
 const SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const FIXED_ENV_KEYS = ["PATH", "HOME", "LANG"];   // 永远由 daemon 决定, 不可被 extra 覆盖
+
 function minimalEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  // v4 B1: 防御式组装 — denylist 已挡, 这是 second 防线.
+  // (1) 先 filter extra (避开 reserved keys; 应已被 validateEnvRefs 挡, 兜底再拒)
+  const filtered: Record<string, string> = {};
+  for (const [k, v] of Object.entries(extra)) {
+    if (isReservedEnvKey(k)) {
+      // 走到这里说明 §4.4.7 漏了 — 必须 throw, 不能 silent drop
+      throw new Error(`minimalEnv: reserved env key ${k} reached fork (denylist gap)`);
+    }
+    if (FIXED_ENV_KEYS.includes(k)) {
+      // 同样 throw — 即使没在 reserved set 里 (双 list 漂移防御)
+      throw new Error(`minimalEnv: fixed env key ${k} reached fork`);
+    }
+    filtered[k] = v;
+  }
+  // (2) 组装顺序: filtered 先, 固定键 最后 set —— 即使 (1) 漏检, 固定键也必胜
   return {
-    PATH: SAFE_PATH,                     // 固定, 不继承 daemon 的 PATH
-    HOME: process.env.HOME!,              // 子进程要用 ~/.anet/
+    ...filtered,
+    PATH: SAFE_PATH,                    // 永远是 SAFE_PATH, 不可覆盖
+    HOME: process.env.HOME!,             // daemon 自己的 HOME (~/.anet/)
     LANG: process.env.LANG || "C.UTF-8",
-    // 故意 ❌ 不带: LD_PRELOAD, NODE_OPTIONS, npm_*, 任何 hub-controlled env
-    ...extra,                             // 仅白名单 env_blob 的 key
+    // 故意 ❌ 不带: LD_PRELOAD, NODE_OPTIONS, npm_*, 任何 dynamic loader env
   };
 }
 
 execFileSync(ANET_BIN_ABS, args, { cwd: WORK_DIR, env: minimalEnv(envBlob) });
+//             ↑ install-time pin, runtime 永不 which
 ```
 
-**约束**：
-- daemon 启动失败的代价是少跑 1 台机器，**优于**「跑了但 fork 到假 binary」——`which anet` resolve 失败 = 进程 exit
-- hub 派进来的 `node_spec` **永不可影响** PATH / LD_PRELOAD / NODE_OPTIONS / 任何 dynamic loader env
-- env_blob 的 key 已经穿过 §4.4.7 的 ENV_KEY_RE（大写起头 / 不含点），自然不能命名为 `LD_PRELOAD` / `PATH`——双重 belt-and-suspenders
+**约束**（v4 强化）：
+1. **信任根 = 装机时的 root + /etc/anet-daemon/path.conf**，不是 daemon 启动时的 PATH。攻击者要污染必须先拿 root 写 `/etc`——已超出 daemon-level 攻击面。
+2. **runtime 永不再 PATH lookup**：grep 整个 daemon 代码不应再出现 `which` / `command -v` / `execFile` 用相对名字。lint 规则 (CI guard) 检查 `execFile.*"[^/]` pattern。
+3. **boot 校验四重**：绝对路径 + 无 symlink + owner=root + perm 排他 + (option) hash 对得上 install。任一条 fail = exit。比「fork 假 binary 再发现」省太多。
+4. **minimalEnv 防御式组装 (通信龙 emphasis ②)**：filter + 固定键最后 set。即使 §4.4.7 denylist 漏了 `PATH`，fork 时仍以 SAFE_PATH 为准。`isReservedEnvKey` 调用兜底，但 throw 而非 silent drop（让 denylist 漂移立刻暴露）。**throw 必须发生在 fork 之前**：`minimalEnv()` 是纯函数，返回 env object 才调 `execFileSync`；throw 在函数体内同步抛出，fork 一字节都没起 → 0 attack surface。impl 跑 unit test 验「`reserved key 进 extra → minimalEnv throw，execFileSync 永不被调」（用 spy/mock 验调用计数 = 0）。
+5. **hub-side `node_spec` 永不可影响** PATH / LD_PRELOAD / NODE_OPTIONS / 任何 dynamic loader env，三层 belt-and-suspenders。
 
 ### 4.3 跨租户隔离（SEC-1 等价）
 
@@ -521,6 +590,29 @@ const ENV_KEY_RE = /^[A-Z][A-Z0-9_]{0,63}$/;       // 大写起头 / 字母数�
 const MAX_ENV_KEYS_PER_NODE = 32;
 const MAX_ENV_VALUE_BYTES   = 16 * 1024;
 
+// v4 B1: reserved denylist — env_refs 永远不能命名为系统/进程模型敏感 key,
+// 否则会污染子进程的 PATH/LD_PRELOAD/NODE_OPTIONS 等, 实质等于任意代码执行.
+// 即使 ENV_KEY_RE 通过, 还要穿过这层 denylist (hub + daemon 双层 enforce).
+const RESERVED_ENV_KEYS_EXACT = new Set<string>([
+  "PATH", "HOME", "LANG", "LC_ALL", "SHELL", "USER", "LOGNAME",
+  "NODE_OPTIONS", "IFS", "PS1", "PS4", "ENV", "BASH_ENV",
+  "CDPATH", "PROMPT_COMMAND", "TMPDIR",
+]);
+const RESERVED_ENV_PREFIXES = [
+  "LD_",        // LD_PRELOAD / LD_LIBRARY_PATH / LD_AUDIT (Linux dynamic loader)
+  "DYLD_",      // macOS dynamic loader (DYLD_INSERT_LIBRARIES, etc.)
+  "BUN_",       // bun runtime env (BUN_INSTALL / BUN_RUNTIME_TRANSPILER_CACHE_PATH)
+  "NPM_",       // npm config (NPM_CONFIG_*, NPM_TOKEN, ...)
+  "NPM_CONFIG_",
+  "NODE_",      // NODE_PATH / NODE_REPL_HISTORY / NODE_TLS_REJECT_UNAUTHORIZED ...
+];
+
+function isReservedEnvKey(k: string): boolean {
+  if (RESERVED_ENV_KEYS_EXACT.has(k)) return true;
+  for (const p of RESERVED_ENV_PREFIXES) if (k.startsWith(p)) return true;
+  return false;
+}
+
 function validateEnvRefs(
   refs: string[],
   callerNetworkId: string,
@@ -532,20 +624,28 @@ function validateEnvRefs(
       throw new ValidationError("env_key_invalid", { key: k });
     }
   }
-  // ② 去重 + ③ 数量上限 (校验在去重后, 防"重复填满 32")
+  // ② reserved denylist (v4 B1)
+  // 在 regex 后, 在所有 vault 查询前 —— 避免「合法 regex + vault 里恰好有
+  // PATH 这个 key (用户失手或攻击者建)」绕过.
+  for (const k of refs) {
+    if (isReservedEnvKey(k)) {
+      throw new ValidationError("env_key_reserved", { key: k });
+    }
+  }
+  // ③ 去重 + ④ 数量上限 (校验在去重后, 防"重复填满 32")
   const uniq = Array.from(new Set(refs));
   if (uniq.length !== refs.length) throw new ValidationError("env_key_duplicate");
   if (uniq.length > MAX_ENV_KEYS_PER_NODE) throw new ValidationError("env_key_too_many");
-  // ④ 必须属 caller network 的 vault
+  // ⑤ 必须属 caller network 的 vault
   for (const k of uniq) {
     const v = networkSecretsGet(callerNetworkId, k);
     if (v === undefined) throw new ValidationError("secret_not_in_vault", { key: k });
-    // ⑤ value 大小上限
+    // ⑥ value 大小上限
     if (Buffer.byteLength(v, "utf8") > MAX_ENV_VALUE_BYTES) {
       throw new ValidationError("secret_too_large", { key: k });
     }
   }
-  // ⑥ 必须在 daemon 的 allowed_secret_keys 白名单
+  // ⑦ 必须在 daemon 的 allowed_secret_keys 白名单
   // (daemon 注册时声明它的本机管理员允许下放哪些 key, 即使 vault 里有别的 secret
   //  也不能流到这台机器。最小权限。)
   for (const k of uniq) {
@@ -555,6 +655,15 @@ function validateEnvRefs(
   }
 }
 ```
+
+**双层 enforce + drift guard（v4，通信龙 emphasis ①）**: hub 在 `create_node` RPC 入口跑一次 `validateEnvRefs`，daemon 在 `get_create_request` 收到后再跑一次。即使 hub 被攻破或 RPC 中间人改包，daemon 仍然挡。
+
+**denylist 必须 hub + daemon 逐字一致**——若一边漏一个 key（比如 hub 加了 `NPM_TOKEN` 但 daemon 忘了），attacker 专走漏的那层。两个落地姿势二选一：
+
+- **首选**：把 `RESERVED_ENV_KEYS_EXACT` + `RESERVED_ENV_PREFIXES` 抽到 `shared/reserved-env.ts`，hub + daemon 都从同一个 module import（不允许各自硬编码副本）
+- **fallback**（如果两个项目共享 module 有打包/对齐成本）：两边各硬编码 + **CI test 强制断言两份集合 set-equal**（`assert(hubReserved === daemonReserved && hubPrefixes === daemonPrefixes)`）
+
+scenario G 增加 G9：CI test 跑 — 在 PR 改了一边没改另一边 → CI 红，merge blocked。impl 锁这条 invariant：**denylist 永远只有 1 个 source of truth**。
 
 **`.env.local` safe serializer**（防 newline/quote 注入污染相邻 key 或逃逸引号）：
 
@@ -598,6 +707,32 @@ mint-stream-evict 是 happy-path 设计；失败路径必须**永不留可用的
 
 **why not 让 child-ntok 自带短 expires_at**：可以，但 expires_at 是 client-side 检查，server-side 不强制；revoke 是 server-side ground truth，更可靠。两者可叠加（child-ntok TTL=300s + sweeper），但 sweeper 是必须项。
 
+**impl note (v4，通信牛 C4 提醒)**：sweeper 不需要碰明文 token 即可 revoke。`tokens` 表行带 `request_id` + `token_id` 元数据：
+
+```sql
+-- mint 时 (在 create_node 工具 handler 内):
+INSERT INTO tokens (token_id, token_hash, role, network_id, request_id, never_used_at, created_at)
+  VALUES (?, ?, 'child', ?, ?, datetime('now'), datetime('now'));
+
+-- sweeper (boot + 每 30s):
+BEGIN;
+  UPDATE tokens
+     SET revoked_at = datetime('now')
+   WHERE role = 'child'
+     AND revoked_at IS NULL
+     AND request_id IN (
+       SELECT request_id FROM node_create_requests
+        WHERE status IN ('pending', 'expired', 'failed')
+          AND age > ?
+     );
+  UPDATE node_create_requests
+     SET status = 'failed', error = 'sweeper_revoked_orphan_ntok'
+   WHERE status = 'pending' AND age > ?;
+COMMIT;
+```
+
+revoke 只更新 `revoked_at` 列；后续 token 校验 (resolveToken) 看到 `revoked_at IS NOT NULL` 一律拒。**不需要任何明文 token**，安全 + 简单。
+
 
 ### 4.5 Audit
 
@@ -631,7 +766,9 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 | `secret_not_in_daemon_allowlist` (v3 C1) | hub | 「该服务器未启用 secret: <key>」 |
 | `secret_too_large` (v3 C1) | hub | 「secret 值超过 16KB 上限」 |
 | `channels_not_supported_in_p1` (v3 C5) | hub | 「P1 不支持 channel 绑定 (P3 接入)，请先不带 channel 创建」 |
-| `daemon_path_resolve_failed` (v3 C3) | daemon (boot) | daemon 启动 fail-fast (`which anet` 无果)；管理员控制台报错，dashboard 不参与 |
+| `daemon_path_resolve_failed` (v3 C3) | daemon (boot) | daemon 启动 fail-fast (path.conf 缺/坏)；管理员控制台报错，dashboard 不参与 |
+| `env_key_reserved` (v4 B1) | hub + daemon | 「环境变量名 <key> 是系统保留字 (如 PATH/LD_PRELOAD/NODE_OPTIONS), 不可下放」 |
+| `anet_bin_unsafe_path` (v4 B2) | daemon (boot) | daemon 启动 fail-fast: ANET_BIN_ABS 非绝对/含 symlink/owner≠root/world-writable/hash 不对 |
 
 ---
 
@@ -659,9 +796,9 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 | **D** | secret 不落库 | dry-run 创建后 `sqlite3 commhub.db "SELECT * FROM node_create_requests"` → env_keys 字段是 `["ANTHROPIC_API_KEY"]` 名字；无 env_blob 字段；hub 进程内 Map 在 daemon get 后立刻 evict (验 `tools/call get_create_request` 二次返 not_found) | §4.4 F1 |
 | **E** | name/flag 注入挡 | `node_spec.name = "; rm -rf /"` / `runtime = "bash"` / `flags.maxTurns = "DROP TABLE"` 全被结构化 validateName/Runtime/FlagValue 拒；hub 拒一遍, daemon 拒一遍 (双层) | §4.2.2 F2 |
 | **F** | daemon_max_children 挡 | 先连发 N 个 create 把 daemon 撑到 max → 第 N+1 个 hub-side 即拒 (从 nodes 表读 daemon current_children) + daemon-side 兜底拒 | §4.2.4 |
-| **G** | env_refs 严格校验 (5 sub-case) | G1 bad key regex (`"lowercase"`) / G2 dup (`["K","K"]`) / G3 越 max count / G4 not-in-vault / G5 not-in-daemon-allowlist → 5 个独立 error code；G6 vault 里 secret 值含 `\n + "evil=KEY2"` → safe serializer escape 成 `\\n + \"evil=KEY2\"` 字面量不污染下一行 | §4.4.7 C1 |
+| **G** | env_refs 严格校验 (9 sub-case, v4 加 G7-G9) | G1 bad key regex (`"lowercase"`) / G2 dup (`["K","K"]`) / G3 越 max count / G4 not-in-vault / G5 not-in-daemon-allowlist → 5 个独立 error code；G6 vault 里 secret 值含 `\n + "evil=KEY2"` → safe serializer escape；**G7** `env_refs:["PATH"]` → `env_key_reserved` (exact denylist); **G8** `env_refs:["LD_PRELOAD"]` / `["DYLD_INSERT_LIBRARIES"]` / `["NPM_CONFIG_REGISTRY"]` → `env_key_reserved` (prefix denylist); **G9** CI test 跑「hub denylist set === daemon denylist set」(drift guard) — PR 改一边没改另一边 → CI 红 merge blocked | §4.4.7 C1+B1 |
 | **H** | daemon 间隔离 | 同 network 起 2 个 daemon (daemonA / daemonB)；create_node 派给 daemonA → daemonB 的 ntok 调 `get_create_request(request_id)` 应 403 `not_your_request`；ack 同样拒 | §4.1.4 C2 |
-| **I** | ANET_BIN PATH 投毒 | 准备 `/tmp/evil-bin/anet` (sleep 9999 假 binary) → 修改 daemon 启动时 PATH 前缀含 `/tmp/evil-bin` → daemon `which anet` resolve 应是 daemon 装的真 binary 绝对路径 (`/usr/local/bin/anet`)；fork 后子进程实际跑的 binary 必须是 pin 的路径而非 `/tmp/evil-bin/anet` (用 child cmdline + 完成时间判定) | §4.2.6 C3 |
+| **I** | ANET_BIN install-time pin + PATH 投毒 (v4 B2 重写, 3 sub-case) | **I1** install 期受控环境跑 → `path.conf` 记 `/usr/local/bin/anet` + hash + perm 校验通过；daemon boot 从 conf 读绝对路径 + 四重校验（绝对/无 symlink/owner=root/非 world-writable）+ hash 对得上；**I2** 攻击者在 daemon 启动**前** PATH 前置 `/tmp/evil-bin/anet` → daemon 不再 `which` 直接读 conf → 不受影响（boot succeeds, ANET_BIN_ABS 仍是真）；**I3** runtime hub 派 env_blob 含 reserved key 已被 G7/G8 挡，但即使绕过 (mock 直接 inject) → minimalEnv 防御式组装 throw, fork 计数 = 0 (unit test 验); 子进程 cmdline + `cat /proc/<pid>/environ` 确认无 evil-bin, 无 LD_PRELOAD | §4.2.6 C3+B2 |
 | **J** | mint-evict 失败 → orphan revoke | J1 sim hub crash before daemon get → boot-time sweeper 跑 → 验 child-ntok 被 revoke + request status=failed；J2 sim daemon get OK 但 crash before ack (通过 `kill -9 daemon-pid`) → reaper 60s 后跑 → 验 child-ntok 被 revoke + request status=expired | §4.4.8 C4 |
 | **K** | channels fail-closed | `node_spec.channels = ["telegram"]` 或 `[null]` 或 `[{}]` → hub-side validate 拒 `channels_not_supported_in_p1` + daemon-side 二次拒 | §4.2.5 C5 |
 
@@ -739,19 +876,27 @@ P3 详细设计**等创建 P1 闭环跑通后**单独 RFC（RFC-027 候选），
 - [x] §5 P1 MVP scope —— **合适**
 - [x] §6 五未决 verdict —— 通信龙 v1 全确认我的倾向，本节升级为「锁定」
 
-**待**: 通信牛 v3 复判（5 invariants C1-C5 闭合性）→ 通信龙 final → Vincent 拍 → 派工 P1 MVP impl
+**待**: 通信牛 v4 二次复判（B1+B2 闭合性）→ 通信龙 final → Vincent 拍 → 派工 P1 MVP impl
 
-### v3 加项 verdict（待复判）
+### v3 加项 verdict（通信牛 v3 复判结果）
 
-- [ ] C1 env_refs 6 层 + safe serializer (§4.4.7 + scenario G)
-- [ ] C2 daemon node_id 强绑 (§4.1.4 + scenario H)
-- [ ] C3 ANET_BIN absolute + minimalEnv.PATH (§4.2.6 + scenario I)
-- [ ] C4 mint-evict 失败 sweeper + orphan revoke (§4.4.8 + scenario J)
-- [ ] C5 channels fail-closed (§4.2.5 + §3.3 + scenario K)
-- [ ] 整体 11-scenario test plan + ship 门（§5 P1）
-- [ ] P3 stop/delete hook 占位是否合理（§5 P3）
+- [x] **C2** daemon node_id 强绑 (§4.1.4 + scenario H) — 闭合 ✅
+- [x] **C4** mint-evict 失败 sweeper + orphan revoke (§4.4.8 + scenario J) — 闭合 ✅ (impl note 加 token-row 元数据)
+- [x] **C5** channels fail-closed (§4.2.5 + §3.3 + scenario K) — 闭合 ✅
+- [x] **F1** mint-stream-evict (§2.5 + §4.4) — 闭合 ✅
+- [⚠️] **C1** env_refs 严格 (§4.4.7 + scenario G) — v4 B1 修: 加 reserved denylist + 双层 enforce + drift guard test
+- [⚠️] **C3** ANET_BIN pin + minimalEnv (§4.2.6 + scenario I) — v4 B2 修: install-time canonicalize + boot 四重校验 + runtime 永不 which lookup
+- [ ] 整体 11-scenario test plan + ship 门（§5 P1）— 通信牛 v3 未异议, 留 v4 复判 confirm
+- [ ] P3 stop/delete hook 占位是否合理（§5 P3）— 同上
+
+### v4 加项 verdict（待二次复判）
+
+- [ ] **B1** denylist (RESERVED_EXACT + RESERVED_PREFIXES) + 双层 enforce (hub + daemon) + drift guard (shared module OR CI test) + minimalEnv 防御式组装 (fork 前 throw, 0 attack surface)
+- [ ] **B2** install-time canonicalize → `/etc/anet-daemon/path.conf` (或 systemd Environment) + boot 四重校验 (绝对/无 symlink/owner=root/非 world-writable + hash) + runtime 0 PATH lookup (CI lint guard)
+- [ ] **C4 impl note** token-row 元数据 (`request_id` + `token_id`) → sweeper 不碰明文 revoke
+- [ ] scenario G7/G8/G9 + I1/I2/I3 子用例覆盖
 
 ---
 
 **作者**: 通信工程马 · 2026-06-28
-**Review 路径**: v1 通信龙 first-pass PASS ✅ → v2 折 F1/F2/F3 ✅ → v3 折通信牛 C1-C5 (本) → 通信牛 复判 → 通信龙 final → Vincent 拍 → 派工 P1 MVP impl + Phase 0 test scaffold (11 scenarios)
+**Review 路径**: v1 通信龙 first-pass PASS ✅ → v2 折 F1/F2/F3 ✅ → v3 折通信牛 C1-C5 ✅ → v4 修 B1/B2 (本) → 通信牛 二次复判 → 通信龙 final → Vincent 拍 → 派工 P1 MVP impl + Phase 0 test scaffold (11 scenarios)
