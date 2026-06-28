@@ -1,7 +1,13 @@
 # RFC-026 — Dashboard 远程创建节点 + Host-Daemon
 
 **作者**: 通信工程马
-**状态**: Draft v1（design-first，待 通信龙 review → Vincent 拍）
+**状态**: Draft v2 (通信龙 first-pass PASS + F1/F2/F3 fold-in)
+**v2 变更说明**: 通信龙 [comment](https://github.com/sleep2agi/agent-network/pull/297) 3 amends 全折：
+- **F1 (重要·安全)**: env_blob 永不入 hub DB，改 `mint-stream-evict`——内存按 `request_id` keyed, daemon 拉取时现取现传, ack 后 evict; 表里只存 `env_keys` 做 audit（详 §2.5 step 2 + §4.4）
+- **F2 (安全·加固)**: 删 `FORK_ARGS_PATTERN` regex-on-rebuilt-string（误导，像留 shell 路径）；改逐字段 enum + 类型校验 + `execFile` 数组，永不拼 shell 串（详 §4.2.2）
+- **F3 (minor)**: 装机脚本 utok 走 env var (`ANET_ADMIN_TOKEN`) 或交互 prompt，不上 argv 避免 `ps`/shell history 暴露（详 §2.3）
+- **§6 五未决 verdict 全锁**：①子进程 PINNED ②dashboard 不能改 daemon 自身配置 ③host telemetry admin-only 详情 member 脱敏 ④secret rotation 复用 restart_node ⑤每 host 1 daemon
+- **§4.1.1 加一行**：daemon **首次装机 mint daemon-ntok 限 admin+**（信任根）；之后日常 create_node admin 即可
 **关联**: #260（dashboard 真生效系列）、RFC-024（config-apply，本 RFC 的姐妹）、RFC-014（host telemetry，本 RFC 的复用底座）
 **目标 ship**: P1 MVP `v0.12-preview.X` 单机闭环；P2/P3 后续
 **长度承诺**: 该 RFC 限定 design，**任何代码改动不在本 RFC 内**
@@ -124,24 +130,37 @@ agent-node 启动后即向 hub `register()` + `reportStatus("idle")`，**完全�
 **目标用户**：管理员在「希望被 dashboard 列入候选服务器」的机器上跑 1 次
 
 ```bash
-# 一键脚本（本 RFC 设计；P1 提供）
+# 一键脚本（v2 F3：utok 不进 argv，避免 ps/shell history 泄漏）
+# 方式 1 — env var（CI / 自动化推荐）
+export ANET_ADMIN_TOKEN=utok_admin_xxx
 curl -fsSL https://anet.sh/install-daemon | bash -s -- \
     --hub https://hub.example.com \
-    --token utok_admin_xxx \           # 管理员 utok，**仅用于现场 mint 一个 daemon-only ntok**
-    --network net_xxx \                # 此 daemon 服务哪个 network
+    --network net_xxx \
     --hostname-alias my-server-01      # 可选；默认用 os.hostname()
+unset ANET_ADMIN_TOKEN                  # 立即清掉
+
+# 方式 2 — 交互 prompt（人手装机推荐）
+curl -fsSL https://anet.sh/install-daemon | bash -s -- \
+    --hub https://hub.example.com \
+    --network net_xxx
+# 脚本里: read -s -p "Admin utok: " ANET_ADMIN_TOKEN
+#         ↑ -s 不回显; 仅本次 bash 进程内存; 不入 history
 
 # 脚本内部：
-# 1) 校验 npm/node 版本（>= node 22）
-# 2) npm i -g @sleep2agi/agent-node (复用 RFC-024 已发版的)
-# 3) 调 hub /api/auth/node-token 现场 mint 一个 ntok（标 role=daemon, scope=host_supervisor）
-#    → 然后**销毁原 utok 输入**（不持久化）
-# 4) 写 ~/.anet/daemon/config.json （ntok + role=host_supervisor + hub + alias=daemon-<host>）
-# 5) 启动 systemd unit `anet-host-daemon.service`（或 launchd / NSSM 跨平台 fallback）
-# 6) 进程内自动 `anet node start daemon-<host>`（普通节点的代码路径）
+# 1) 从 $ANET_ADMIN_TOKEN env / read -s 取 utok; 校验非空; **永不打印 / log**
+# 2) 校验 npm/node 版本（>= node 22）
+# 3) npm i -g @sleep2agi/agent-node (复用 RFC-024 已发版的)
+# 4) 调 hub /api/auth/node-token 现场 mint 一个 ntok（标 role=daemon, scope=host_supervisor）
+#    → 然后 `unset ANET_ADMIN_TOKEN` + bash 退出（不持久化）
+# 5) 写 ~/.anet/daemon/config.json （ntok + role=host_supervisor + hub + alias=daemon-<host>，权限 600）
+# 6) 启动 systemd unit `anet-host-daemon.service`（或 launchd / NSSM 跨平台 fallback）
+# 7) 进程内自动 `anet node start daemon-<host>`（普通节点的代码路径）
 ```
 
-**关键点**：管理员的 utok 只在这一次 mint daemon-ntok 时用一次，**不写盘**。daemon 之后跟 hub 通信全凭 daemon-ntok（只能创建节点 + 心跳，不能代用户调任何业务工具）。
+**关键点**：
+- 管理员的 utok 永不出现在 `ps auxww`、永不入 `~/.bash_history`、永不写盘
+- daemon 之后跟 hub 通信全凭 daemon-ntok（只能创建节点 + 心跳，不能代用户调任何业务工具）
+- **mint daemon-ntok 这一步需要 admin+ 角色（信任根）**——之后日常 create_node admin 即可，但首次发牌必须 admin/owner（一旦发出，daemon 就有了在该 network 创建节点的能力，门槛与日常操作一档）
 
 ### 2.4 Daemon ↔ Hub 的注册与发现
 
@@ -190,14 +209,18 @@ curl -fsSL https://anet.sh/install-daemon | bash -s -- \
    - SEC-2 检查（详见 §4）：调用者 role ≥ admin？目标 daemon 在调用者 network？请求的 runtime 在 daemon allowed_runtimes 里？
    - 单飞检查（复用 RFC-024 reaper 模式）：同 daemon + 同 child name 不能并发
    - 现场 mint child-ntok：`createNetworkTokenForNode(network_id, name)` → 拿 `ntok_xxx`
-   - envRef 解：把 `env_refs: ["KEY1"]` 从 network 级 secret vault 取出真值，组装 `env_blob = {KEY1: "..."}`（**只在这一次内存里，不入 hub 日志**）
-   - 写 `node_create_requests` 表（status=pending）+ pushEvent doorbell to daemon
+   - envRef 解 + **mint-stream-evict**（v2 F1）：从 network 级 secret vault 取真值组装 `env_blob = {KEY1: "..."}`，**只放进 hub 进程内 `pendingEnvBlobs: Map<request_id, {env_blob, child_ntok, expires_at}>`，不入任何持久表**。短 TTL（默认 60s），到点 GC 清掉。
+   - 写 `node_create_requests` 表（status=pending）：**仅写 metadata** —— `request_id / daemon_node_id / child_name / runtime / model / flags_json / env_keys (仅名字, ["KEY1"]) / network_id / status / created_at`；**不写 env_blob, 不写 child_ntok**
+   - pushEvent doorbell to daemon: `{type: "create_node", request_id}`（**payload 不含 secret**，daemon 现场拉）
 
 3. **Daemon** 收 SSE `{type: "create_node", request_id: ...}` → 内部循环：
    ```ts
    const { request_id } = sseEvent;
+   // get_create_request 现场从 hub 内存 pendingEnvBlobs 取走 env_blob + child_ntok
+   // (hub 端：取后立即 evict 该 request_id 的 entry, 一次性消费)
    const req = await mcpCall("get_create_request", { request_id });
    // req = { node_spec, child_ntok, env_blob, expires_at }
+   // env_blob 此刻只在 daemon 进程内存 + hub 已 evict; DB 里永远没存过
    if (Date.now() > req.expires_at) { ack({status: "expired"}); return; }
    if (!ALLOWED_RUNTIMES.includes(req.node_spec.runtime)) {
      ack({status: "rejected", error: "runtime_not_in_local_allowlist"}); return;
@@ -301,14 +324,57 @@ daemon 注册时绑定 1 个 `network_id`，hub 派任务前必须验证「调�
 
 daemon-ntok 在 hub `tokens` 表标 `role=host_supervisor` + `scope=daemon-only`。**它只能调** `register / report_status / get_create_request / ack_create_request`，**调任何业务工具一律 403**（hub 端 tool registration 强制 role check）。即使 daemon 进程被入侵，劫持者拿 daemon-ntok 也不能 send_task / 创建任意 task / 看别人 inbox。
 
-**4.2.2 fork-exec 命令固定**：
+**4.2.2 fork-exec 命令固定 — 结构化字段校验 + execFile 数组, 0 shell 拼接（v2 F2 锁）**：
 
-daemon 内部 fork 走的命令是**硬编码白名单**：
+daemon 内部 fork **永不构造命令字符串**，永不过 shell。所有参数逐字段白名单 + 类型校验 + 直接 `execFile` 数组传参：
+
 ```ts
-const FORK_WHITELIST = new Set(["anet"]);
-const FORK_ARGS_PATTERN = /^node (create|start|delete) [a-z0-9_-]+( --[a-z-]+(=[a-zA-Z0-9_-]+)?)*$/;
+// 字段级白名单 + 类型 (在 daemon 端 + hub 端各自独立校验, 双层防护)
+const ANET_BIN = "anet";  // 唯一允许的 binary
+const VERBS = ["create", "start", "delete"] as const;
+const RUNTIMES = ["claude-agent-sdk", "codex-sdk", "grok-build-acp"] as const;
+const FLAG_KEYS = ["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout"] as const;
+
+function validateName(s: unknown): asserts s is string {
+  if (typeof s !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/.test(s)) throw new Error("bad name");
+}
+function validateModel(s: unknown): asserts s is string {
+  // 允许字母数字 `.` `-` `_` `:` —— 覆盖 "claude-opus-4-6" / "claude-opus-4.6" / "gpt-4o" / "vendor:model" 等
+  if (typeof s !== "string" || s.length > 100 || !/^[a-zA-Z0-9._:-]+$/.test(s)) throw new Error("bad model");
+}
+function validateFlagValue(k: string, v: unknown) {
+  switch (k) {
+    case "permissionMode": if (!["default", "acceptEdits", "plan", "bypassPermissions"].includes(v as string)) throw 0; break;
+    case "dangerouslySkipPermissions": if (typeof v !== "boolean") throw 0; break;
+    case "maxTurns": if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 9999) throw 0; break;
+    case "budget":   if (typeof v !== "number" || !Number.isFinite(v) || (v as number) < 0 || (v as number) > 1000) throw 0; break;  // 允许小数, 如 5.5
+    case "timeout":  if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 86400) throw 0; break;
+  }
+}
+
+function buildAnetArgs(spec: NodeSpec): string[] {
+  validateName(spec.name);
+  if (!RUNTIMES.includes(spec.runtime as any)) throw new Error("bad runtime");
+  validateModel(spec.model);
+  const args = ["node", "create", spec.name, "--runtime", spec.runtime, "--model", spec.model];
+  for (const [k, v] of Object.entries(spec.flags || {})) {
+    if (!FLAG_KEYS.includes(k as any)) throw new Error("bad flag key");
+    validateFlagValue(k, v);
+    args.push(`--${kebabCase(k)}`, String(v));  // value 已类型校验, String() 安全
+  }
+  return args;
+}
+
+execFileSync(ANET_BIN, buildAnetArgs(spec), { cwd: WORK_DIR, env: minimalEnv() });
+//                                          ^ 数组传参, 不过 shell
 ```
-hub 派进来的 `node_spec.name` 严格 `/^[a-z][a-z0-9_-]{0,63}$/`，runtime / model / flag 都白名单 enum 校验。**不存在任意 shell 字符串拼接**。
+
+**关键不变量**：
+1. binary 路径硬编码 `anet`，**不接受 hub 派进来的 path** 字段
+2. 第一个 arg 必须是 `node`，第二个必须在 VERBS enum
+3. **不重建命令字符串去 regex match**——任何「先拼成字符串再 regex 验」的模式都暗示 shell 路径存在; v1 草稿里那段 `FORK_ARGS_PATTERN` 已删
+4. 子进程 cwd 强制 `WORK_DIR`，env 用 `minimalEnv()` 白名单（PATH / HOME / `.env.local` 路径），不继承 daemon 的全部环境
+5. **校验在 daemon 和 hub 端各做一遍**（防御深度）——hub 拒在 RPC 层，daemon 拒在 fork 前；任一层挂都不会执行越权命令
 
 **4.2.3 工作目录隔离**：
 
@@ -336,17 +402,23 @@ daemon 配置 `max_concurrent_children`（默认 20）+ 每子进程 systemd-sty
 
 1. **hub 端 secret vault**（已有 `network_secrets` 表，本 RFC 复用）：每 network 一份；admin 通过单独 endpoint `POST /api/networks/<id>/secrets` 写入；hub 内存级解密后立刻 zero-fill key buffer
 
-2. **dashboard 不传 secret 值，只传 key 名**：`env_refs: ["ANTHROPIC_API_KEY"]`。hub 在派单时从 vault 取真值，组装一次性 `env_blob` 
+2. **dashboard 不传 secret 值，只传 key 名**：`env_refs: ["ANTHROPIC_API_KEY"]`。hub 在派单时从 vault 取真值，组装一次性 `env_blob`
 
-3. **`env_blob` 经 short-lived encrypted SSE 帧到 daemon**：
-   - 复用现有 SSE 鉴权（Bearer daemon-ntok over TLS）
-   - 额外在 hub <-> daemon 之间 ECDH 协商一个 ephemeral session key（首次 daemon 注册时 hub 推 hub-pub-key，daemon 反推 daemon-pub-key），用该 key 把 env_blob AES-GCM 加密
-   - daemon 解密 → 写入子节点 `.env.local`（chmod 600）→ 内存 zero-fill
-   - 数据库里 `node_create_requests.env_blob` 字段加密存储；request ack 后立即删
+3. **mint-stream-evict（v2 F1，本节关键）—— env_blob 永不入 hub DB**：
+   - hub 进程内 `pendingEnvBlobs: Map<request_id, {env_blob, child_ntok, expires_at}>`，TTL 60s
+   - `node_create_requests` 表里**只**写 `env_keys: ["KEY1"]`（仅名字）做 audit；不写 env_blob，不写 child_ntok
+   - daemon `get_create_request(request_id)` → hub 从 Map 取出 + **立即 evict 该 entry**（一次性消费）→ stream 给 daemon
+   - daemon 收到后写子节点 `.env.local`（chmod 600）→ daemon 进程内立即 zero-fill
+   - 超时 GC：到 TTL 仍未取走 → drop + 在 audit_log 标 `secret_dispatch_timeout`
+   - **原因**：哪怕 short-lived，secret 入生产 hub DB（即使加密）= 比传输更大的暴露面。hub DB 备份/快照/oplog 都可能携带。
 
-4. **日志脱敏**：hub log + daemon log 对 `env_blob` 字段一律 redact 成 `<env-blob redacted, keys=[K1,K2]>`
+4. **传输加密**：
+   - **P1**: 复用现有 SSE 鉴权（Bearer daemon-ntok over TLS）+ hub-daemon 强制 HTTPS（dev 本机回环 HTTP 例外）。env_blob 仅在 TLS payload 内明文出现一次（hub → daemon），不入任何日志、任何 DB
+   - **P2**: 额外上 ECDH ephemeral session key（首次 daemon 注册时 hub 推 hub-pub-key，daemon 反推 daemon-pub-key），把 env_blob 在 TLS 之上再 AES-GCM 加密，**hub TLS 中间人即使在 hub 进程外抓包也看不到 secret**
 
-5. **「禁止用户在 dashboard 输入裸 secret」**：UI 只暴露 secret picker（从 vault 选 key），不提供 textfield 写入；硬要写入只能走单独的 secret-vault 管理页（独立 endpoint，独立 audit）
+5. **日志脱敏**：hub log + daemon log 对 `env_blob` 字段一律 redact 成 `<env-blob redacted, keys=[K1,K2]>`。redact 在 callsite 而非 sink，避免 logger plugin 漏过
+
+6. **「禁止用户在 dashboard 输入裸 secret」**：UI 只暴露 secret picker（从 vault 选 key），不提供 textfield 写入；硬要写入只能走单独的 secret-vault 管理页（独立 endpoint，独立 audit）
 
 ### 4.5 Audit
 
@@ -410,13 +482,17 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 
 ---
 
-## 6. 未决问题（待 review 拍）
+## 6. 五个原未决 — 通信龙 v1 review 全锁
 
-1. **daemon 升级语义**：daemon 自我升级（`npm i -g @sleep2agi/agent-node@latest`）会不会顺带把子进程的二进制也换掉？子进程 W1 respawn 是否吃新版本？建议：子进程 PINNED 到 spawn 时的 npm 版本，避免「daemon 升级当晚所有子进程一起换」。
-2. **daemon 自身的 SEC-2 配置如何被改**：dashboard 上能不能改 daemon 的 `max_concurrent_children`？倾向**不能**——daemon 自身配置只能本机管理员手动改 + `systemctl restart`，dashboard 只能读不能写（同 §4.2.1 最小权限原则）。
-3. **anet hub 把 host telemetry 暴露在公网 dashboard 上是否泄漏**：服务器 hostname / IP / 资源用量给所有 network member 看的话，可能泄漏内网拓扑。建议默认只对 admin/owner 可见，member 看脱敏版（host 名 + green/yellow/red 不见 IP / 数字资源）。
-4. **secret rotation**：daemon 长跑下 vault secret 轮换，子进程是否需要重启吃新值？倾向：复用 RFC-024 config-apply restart 链路，secret 轮换 → hub 给每个用到该 secret 的子节点派 restart_node。
-5. **daemon 之间的隔离**：同 host 多个 daemon（多 network 服务）是否允许？建议：**每 host 最多 1 个 daemon**（多 network 用 daemon role 升级支持 multi-network 注册，避免端口/PID 文件竞争）。
+| # | 决策 | 锁定理由 |
+|---|---|---|
+| 1 | **子进程 PINNED 到 spawn 时的 npm 版本** | daemon 升级（`npm i -g @latest`）不应顺带换所有子进程；子进程在 spawn 时把当前 npm 解析的 binary 路径 PINNED，W1 respawn 走同一 path；要换版本必须显式 `restart_node`（复用 RFC-024）|
+| 2 | **dashboard 不能改 daemon 自身配置** | daemon 的 `max_concurrent_children` / `allowed_runtimes` / `allowed_secret_keys` 只能本机管理员手动改 + `systemctl restart`；dashboard 只能 GET 不能 POST。最小权限 §4.2.1 同源 |
+| 3 | **host telemetry**: admin/owner 看详情 / member 看脱敏 | member 视图：host 别名 + green/yellow/red + daemon online; 不见 IP / cpu/mem 数字 / 节点数。避免泄漏内网拓扑 |
+| 4 | **secret rotation 复用 RFC-024 restart_node** | network admin POST `/api/networks/<id>/secrets` 覆盖 → hub 找到所有引用该 key 的运行中子节点 → 逐个 `restart_node`（apply_mode=restart_only）→ 子进程 respawn 时通过 daemon mint-stream-evict 拿新 env_blob 写新 `.env.local` |
+| 5 | **每 host 最多 1 个 daemon** | 多 network 用 daemon role 升级支持 multi-network 注册（daemon-ntok 标记可服务的 network 列表）。物理上 1 个进程 = 1 个 systemd unit = 1 份 PID 文件，避免端口/PID 竞争 |
+
+通信龙 v1 review 五条全确认上述倾向（task `3d9350b1`），本节从「未决」升级为「锁定」。
 
 ---
 
@@ -429,16 +505,18 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 
 ---
 
-## 8. Review checklist（给 reviewer）
+## 8. Review checklist — v1 通信龙 first-pass 结论
 
-- [ ] §2.2 daemon = 特殊节点 vs 独立 binary 选择是否同意
-- [ ] §4.1 role gate 三层是否够（admin 是不是太松？要不要 owner-only?）
-- [ ] §4.2 fork-exec 白名单 + WORK_DIR 隔离是否够（还需不需要 chroot/container?）
-- [ ] §4.4 ECDH 在 P2 才上是否可接受（P1 单机不上对吗？）
-- [ ] §5 P1 MVP scope 是否合适（再砍还是再加？）
-- [ ] §6 未决 5 点 reviewer 各拍 1 个 verdict
+- [x] §2.2 daemon = 特殊节点 vs 独立 binary —— **PASS**（同意，不另起 binary 对）
+- [x] §4.1 role gate 三层 —— **PASS**（admin OK；daemon-side allowlist 是真兜底；owner-only 太死违「数字员工军团」易用定位；**首次装机 mint daemon-ntok 限 admin+ 信任根** 已加 §2.3）
+- [x] §4.2 fork-exec 白名单 + WORK_DIR —— v2 折 F2: 删 regex-on-rebuilt-string，改逐字段 enum + execFile 数组（chroot/container P1 不需要，cgroup P2 加）
+- [x] §4.4 secrets —— v2 折 F1: mint-stream-evict（env_blob 永不入 hub DB，哪怕加密），P1 不上 ECDH 可接受
+- [x] §5 P1 MVP scope —— **合适**
+- [x] §6 五未决 verdict —— 通信龙 v1 全确认我的倾向，本节升级为「锁定」
+
+**待**: 通信牛 安全终审（§4.1/4.2/4.3 链）→ Vincent 拍 → 派工实施
 
 ---
 
 **作者**: 通信工程马 · 2026-06-28
-**Review 期望**: 通信龙 first pass → Vincent 拍 → 派工实施
+**Review 路径**: 通信龙 first-pass v1 PASS ✅ → 本 v2 折 F1/F2/F3 → 通信牛 安全终审 → Vincent 拍 → 派工 P1 MVP
