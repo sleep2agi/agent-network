@@ -225,7 +225,9 @@ jobs:
               # Operator-supplied --password takes precedence over the random path,
               # so this is the supported way to drive a non-interactive smoke.
               export HOME=/tmp/anethome; mkdir -p "$HOME"
-              GATE_PW="ReleaseGate-$(head -c 16 /dev/urandom | xxd -p)"
+              # Finite upstream pipeline (head reads 32 bytes then closes) so
+              # SIGPIPE under `set -o pipefail` cannot kill the inner command.
+              GATE_PW="ReleaseGate-$(head -c 32 /dev/urandom | sha256sum | head -c 16)"
               nohup anet hub start --host 127.0.0.1 --port 9200 \
                 --username admin --password "$GATE_PW" > /tmp/hub.log 2>&1 &
               for i in $(seq 1 30); do
