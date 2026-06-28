@@ -1,0 +1,240 @@
+import { describe, expect, test } from "bun:test";
+import {
+  validateFlagValueDaemon,
+  buildAnetArgsDaemon,
+  minimalEnv,
+  loadAndVerifyAnetBin,
+} from "./create-node-daemon.js";
+import { writeFileSync, mkdirSync, symlinkSync, chmodSync, unlinkSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+
+describe("§4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth)", () => {
+  test("permissionMode enum", () => {
+    expect(() => validateFlagValueDaemon("permissionMode", "default")).not.toThrow();
+    expect(() => validateFlagValueDaemon("permissionMode", "plan")).not.toThrow();
+    expect(() => validateFlagValueDaemon("permissionMode", "bogus")).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("permissionMode", 123)).toThrow(/flag_value_invalid/);
+  });
+  test("dangerouslySkipPermissions boolean (string 'true' must be rejected)", () => {
+    expect(() => validateFlagValueDaemon("dangerouslySkipPermissions", true)).not.toThrow();
+    expect(() => validateFlagValueDaemon("dangerouslySkipPermissions", false)).not.toThrow();
+    expect(() => validateFlagValueDaemon("dangerouslySkipPermissions", "true")).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("dangerouslySkipPermissions", 1)).toThrow(/flag_value_invalid/);
+  });
+  test("maxTurns integer range — 'DROP TABLE' / float / out-of-range rejected", () => {
+    expect(() => validateFlagValueDaemon("maxTurns", 50)).not.toThrow();
+    expect(() => validateFlagValueDaemon("maxTurns", 1)).not.toThrow();
+    expect(() => validateFlagValueDaemon("maxTurns", 9999)).not.toThrow();
+    expect(() => validateFlagValueDaemon("maxTurns", "DROP TABLE")).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("maxTurns", 0)).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("maxTurns", 10000)).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("maxTurns", 5.5)).toThrow(/flag_value_invalid/);
+  });
+  test("budget number with decimals allowed; out-of-range rejected", () => {
+    expect(() => validateFlagValueDaemon("budget", 0)).not.toThrow();
+    expect(() => validateFlagValueDaemon("budget", 5.5)).not.toThrow();
+    expect(() => validateFlagValueDaemon("budget", 1000)).not.toThrow();
+    expect(() => validateFlagValueDaemon("budget", -1)).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("budget", 1001)).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("budget", "free")).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("budget", Infinity)).toThrow(/flag_value_invalid/);
+  });
+  test("timeout integer range", () => {
+    expect(() => validateFlagValueDaemon("timeout", 600)).not.toThrow();
+    expect(() => validateFlagValueDaemon("timeout", 1)).not.toThrow();
+    expect(() => validateFlagValueDaemon("timeout", 86400)).not.toThrow();
+    expect(() => validateFlagValueDaemon("timeout", 0)).toThrow(/flag_value_invalid/);
+    expect(() => validateFlagValueDaemon("timeout", 86401)).toThrow(/flag_value_invalid/);
+  });
+  test("unknown key rejected", () => {
+    expect(() => validateFlagValueDaemon("evilKey", true)).toThrow(/flag_key_unknown/);
+  });
+});
+
+describe("buildAnetArgsDaemon now reaches flag value validation", () => {
+  test("happy path with mixed flags", () => {
+    const args = buildAnetArgsDaemon({
+      name: "x", runtime: "claude-agent-sdk", model: "claude-opus-4.6",
+      flags: { maxTurns: 50, budget: 5.5, permissionMode: "plan" },
+    });
+    expect(args).toContain("--max-turns");
+    expect(args[args.indexOf("--max-turns") + 1]).toBe("50");
+    expect(args[args.indexOf("--budget") + 1]).toBe("5.5");
+    expect(args[args.indexOf("--permission-mode") + 1]).toBe("plan");
+  });
+  test("smuggled string maxTurns rejected by daemon even if hub missed", () => {
+    expect(() => buildAnetArgsDaemon({
+      name: "x", runtime: "claude-agent-sdk", model: "x",
+      flags: { maxTurns: "DROP TABLE" as any },
+    })).toThrow(/flag_value_invalid/);
+  });
+  test("smuggled string dangerouslySkipPermissions rejected", () => {
+    expect(() => buildAnetArgsDaemon({
+      name: "x", runtime: "claude-agent-sdk", model: "x",
+      flags: { dangerouslySkipPermissions: "true" as any },
+    })).toThrow(/flag_value_invalid/);
+  });
+  test("name shell-metachar still rejected (existing validateName, F2)", () => {
+    expect(() => buildAnetArgsDaemon({
+      name: ";rm -rf /", runtime: "claude-agent-sdk", model: "x",
+    })).toThrow(/node_name_invalid/);
+  });
+  test("runtime enum still enforced", () => {
+    expect(() => buildAnetArgsDaemon({
+      name: "x", runtime: "bash", model: "x",
+    })).toThrow(/runtime_invalid/);
+  });
+  test("channels non-empty rejected (P1 fail-closed)", () => {
+    expect(() => buildAnetArgsDaemon({
+      name: "x", runtime: "claude-agent-sdk", model: "x",
+      channels: ["telegram"] as any,
+    })).toThrow(/channels_not_supported_in_p1/);
+  });
+});
+
+describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened)", () => {
+  const FIXTURE_DIR = "/tmp/anet-bin-test-fixtures";
+
+  function setup(name: string, body = "#!/bin/sh\necho real"): string {
+    mkdirSync(FIXTURE_DIR, { recursive: true });
+    const p = join(FIXTURE_DIR, name);
+    writeFileSync(p, body, { mode: 0o755 });
+    return p;
+  }
+  function cleanup() {
+    try { rmSync(FIXTURE_DIR, { recursive: true, force: true }); } catch { /* ok */ }
+  }
+
+  test("happy path with hash witness", () => {
+    cleanup();
+    const p = setup("good", "fake-binary-bytes");
+    const expectedHash = createHash("sha256").update("fake-binary-bytes").digest("hex");
+    const got = loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_BIN_SHA256: expectedHash,
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",  // test runs as non-root
+    });
+    expect(got).toBe(p);
+    cleanup();
+  });
+
+  test("REJECT: no ANET_BIN_ABS at all", () => {
+    expect(() => loadAndVerifyAnetBin({
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toThrow(/anet_bin_unsafe_path.*no ANET_BIN_ABS/);
+  });
+
+  test("REJECT: relative path", () => {
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: "anet",
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toThrow(/anet_bin_unsafe_path.*not absolute/);
+  });
+
+  test("REJECT: symlink (contains symlink component)", () => {
+    cleanup();
+    const realBin = setup("real", "real-content");
+    const symlinkPath = join(FIXTURE_DIR, "via-symlink");
+    try { unlinkSync(symlinkPath); } catch { /* ok */ }
+    symlinkSync(realBin, symlinkPath);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: symlinkPath,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*symlink/);
+    cleanup();
+  });
+
+  test("REJECT: world-writable (mode 0o777)", () => {
+    cleanup();
+    const p = setup("world-writable");
+    chmodSync(p, 0o777);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
+    cleanup();
+  });
+
+  test("REJECT: group-writable (mode 0o775)", () => {
+    cleanup();
+    const p = setup("group-writable");
+    chmodSync(p, 0o775);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
+    cleanup();
+  });
+
+  test("REJECT: not executable (mode 0o644)", () => {
+    cleanup();
+    const p = setup("not-exec");
+    chmodSync(p, 0o644);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*not executable/);
+    cleanup();
+  });
+
+  test("REJECT: owner not root (no opt-out)", () => {
+    cleanup();
+    const p = setup("non-root-owner");
+    // test runs as non-root by default; owner=current uid (not 0)
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      // ANET_DAEMON_ALLOW_NON_ROOT_BIN intentionally NOT set
+    })).toThrow(/anet_bin_unsafe_path.*owner not root/);
+    cleanup();
+  });
+
+  test("ACCEPT: owner not root WHEN ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 (explicit opt-out)", () => {
+    cleanup();
+    const p = setup("explicit-non-root");
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).not.toThrow();
+    cleanup();
+  });
+
+  test("REJECT: sha256 mismatch with install witness", () => {
+    cleanup();
+    const p = setup("hash-changed", "current-bytes");
+    const installTimeHash = createHash("sha256").update("install-time-bytes-different").digest("hex");
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_BIN_SHA256: installTimeHash,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*sha256 mismatch/);
+    cleanup();
+  });
+});
+
+describe("minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable)", () => {
+  test("happy path: no extra → fixed PATH/HOME/LANG only", () => {
+    const env = minimalEnv();
+    expect(env.PATH).toBe("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    expect(env.HOME).toBeDefined();
+    expect(env.LANG).toBeDefined();
+  });
+  test("legitimate extra key passes + fixed keys still last", () => {
+    const env = minimalEnv({ ANTHROPIC_API_KEY: "x" });
+    expect(env.ANTHROPIC_API_KEY).toBe("x");
+    expect(env.PATH).toBe("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+  });
+  test("THROWS on reserved key in extra (LD_PRELOAD smuggled by attacker)", () => {
+    expect(() => minimalEnv({ LD_PRELOAD: "/tmp/evil.so" })).toThrow(/reserved env key/);
+  });
+  test("THROWS on fixed key in extra (PATH smuggled)", () => {
+    expect(() => minimalEnv({ PATH: "/tmp/evil-bin" })).toThrow(/reserved env key|fixed env key/);
+  });
+});

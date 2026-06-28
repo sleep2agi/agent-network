@@ -376,6 +376,66 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tokens_user ON api_tokens(user_id);
 `);
 
+// RFC-026 v4 §4.4.8 C4 — api_tokens metadata so sweeper can revoke
+// orphan child-ntoks without ever touching plaintext tokens. ALTER in
+// try/catch (idempotent for already-migrated DBs).
+//   request_id  — links a child token to the create_node request that
+//                 minted it; sweeper joins on this
+//   revoked_at  — explicit revoke; resolveToken treats non-NULL as
+//                 invalid even before expiry
+for (const ddl of [
+  "ALTER TABLE api_tokens ADD COLUMN request_id TEXT",
+  "ALTER TABLE api_tokens ADD COLUMN revoked_at TEXT",
+  "ALTER TABLE api_tokens ADD COLUMN role TEXT",
+]) {
+  try { db.exec(ddl); }
+  catch (e: any) {
+    if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+  }
+}
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_request ON api_tokens(request_id)`); }
+catch (e: any) { /* index may already exist */ void e; }
+
+// RFC-026 v4 §2.5 + §4.4 — node_create_requests. Metadata only;
+// env_blob NEVER lives in this table (F1 mint-stream-evict — secret
+// blob is in-memory Map keyed by request_id, drained on daemon get,
+// TTL 60s GC).
+//
+// env_keys is a JSON array of secret KEY NAMES only (for audit). The
+// actual values flow through pendingEnvBlobs Map and never touch
+// disk.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS node_create_requests (
+    request_id        TEXT PRIMARY KEY,
+    daemon_node_id    TEXT NOT NULL,
+    child_name        TEXT NOT NULL,
+    network_id        TEXT NOT NULL,
+    runtime           TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    flags_json        TEXT NOT NULL,
+    env_keys          TEXT NOT NULL,
+    status            TEXT NOT NULL,
+    error             TEXT,
+    child_token_id    TEXT,
+    created_at        INTEGER NOT NULL,
+    created_by_token  TEXT NOT NULL,
+    delivered_at      INTEGER,
+    acked_at          INTEGER,
+    child_node_id     TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ncr_daemon_status ON node_create_requests(daemon_node_id, status);
+  CREATE INDEX IF NOT EXISTS idx_ncr_network ON node_create_requests(network_id);
+  CREATE INDEX IF NOT EXISTS idx_ncr_child_name ON node_create_requests(child_name);
+`);
+try {
+  // Single-flight per (daemon, child_name) — prevents racing dashboard
+  // create on same name. Mirrors RFC-024 uniq_ncu_node_inflight.
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_ncr_inflight ON node_create_requests(daemon_node_id, child_name) WHERE status IN ('pending', 'delivered')`);
+} catch (e: any) {
+  console.warn(`[commhub] partial unique index uniq_ncr_inflight skipped: ${e?.message || e}`);
+}
+
 // ── V3: audit_log table ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS audit_log (

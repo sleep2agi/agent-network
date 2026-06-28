@@ -1,8 +1,29 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
-import { db, uuidv4, logTaskEvent, chainReplyToParent } from "./db.js";
+import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken } from "./db.js";
 import { pushEvent } from "./push.js";
-import { getUserNetworkRole } from "./auth.js";
+import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
+import {
+  buildAnetArgs as _unused_buildAnetArgs,           // ensure module is loaded
+  validateName as validateChildName,
+  validateRuntime,
+  validateModel,
+  validateChannelsP1,
+  validateEnvRefs,
+  FLAG_KEYS,
+  validateFlagValue,
+  ValidationError,
+} from "./create-node-validate.js";
+import {
+  putPendingEnvBlob,
+  takePendingEnvBlob,
+  newRequestId,
+  finalizeCreateOnFirstRegister,
+  startPendingEnvGcTimer,
+  startSweeperTimer,
+  auditCreateNode,
+  resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
+} from "./create-node.js";
 import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias } from "./rename.js";
 import {
   ALLOWED_FLAGS,
@@ -1418,7 +1439,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     callerNetworkId: string | null,
   ): { row: any | null; sec1Ok: boolean } => {
     const row = db.get<any>(
-      "SELECT node_id, alias, network_id, config_revision FROM nodes WHERE node_id = ?1",
+      "SELECT node_id, alias, network_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1",
       nodeId,
     );
     if (!row) return { row: null, sec1Ok: false };
@@ -1751,6 +1772,362 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       };
     },
   );
+
+  // ── RFC-026 P1 — create-node + host-daemon (3 MCP tools) ──────────
+  // Background timers (GC + sweeper) are idempotent + cheap; safe to
+  // call on every registerTools invocation (statless mode re-registers
+  // per request). They unref themselves so don't hold the event loop.
+  startPendingEnvGcTimer();
+  startSweeperTimer();
+
+  // §4.1.4 C2 — caller daemon resolved via token-bound identity (NOT
+  // alias). Thin closure over the module-level helper so callers in
+  // this scope can use the captured request-level vars. The pure
+  // helper lives in create-node.ts so unit tests call exactly the
+  // same code path the tools do (per 通信龙 PR #299 nit 1 — no inline-
+  // mirror SQL in tests).
+  const resolveCallerDaemonTokenBound = () =>
+    _resolveCallerDaemonTokenBound({ callerTokenIsNetwork, callerTokenId, enforceNetworkId });
+
+  // Helper — map a ValidationError thrown from create-node-validate
+  // into the MCP-tool-call JSON reply shape.
+  const validationFailReply = (e: unknown) => {
+    if (e instanceof ValidationError) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: e.code, ...(e.detail || {}) }) }] };
+    }
+    throw e;
+  };
+
+  // §2.5 step 1+2 — dashboard-facing tool. Validates spec, mint
+  // child-ntok, stash env_blob in pendingEnvBlobs Map, write request
+  // row (metadata only — no env_blob in SQL), pushEvent doorbell.
+  server.tool(
+    "create_node",
+    "Create a node on a host-daemon and start it. Daemon forks `anet node create + start` on the target machine; child reports back to hub. RFC-026.",
+    {
+      daemon_node_id: z.string().min(1).max(200),
+      node_spec: z.object({
+        name: z.string().min(1).max(64),
+        runtime: z.string().min(1).max(64),
+        model: z.string().min(1).max(100),
+        flags: z.record(z.unknown()).optional(),
+        env_refs: z.array(z.string().max(64)).optional(),
+        channels: z.array(z.unknown()).optional(),
+      }),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ daemon_node_id, node_spec, network_id: clientNetId }) => {
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+
+      // §4.1.1 — admin+ for create_node (creating a node = pulling new
+      // resource + burning API quota, one level above edit single flag)
+      const callerRole = enforceUserId && effectiveNetId
+        ? getUserNetworkRole(enforceUserId, effectiveNetId)
+        : null;
+      if (callerRole !== "admin" && callerRole !== "owner") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_create_node", required_role: "admin", caller_role: callerRole }) }] };
+      }
+
+      // Daemon must exist + must be in caller's network + must be
+      // online with role=host_supervisor capability.
+      const { row: daemon, sec1Ok } = resolveTargetNode(daemon_node_id, effectiveNetId);
+      if (!daemon) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "daemon_not_found", daemon_node_id }) }] };
+      }
+      if (!sec1Ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
+      }
+
+      // Read daemon's host_supervisor capability + allowlist from its
+      // last reported config_snapshot. P1 simplification: we accept
+      // (allowed_runtimes empty / allowed_secret_keys absent) as
+      // "accept any in the global enum"; P2 will tighten when daemon
+      // self-publishes its own allowlist via daemon_capabilities.
+      let daemonAllowList = new Set<string>();
+      let daemonAllowedRuntimes: string[] | null = null;
+      try {
+        const snap = daemon.config_snapshot ? JSON.parse(daemon.config_snapshot) : null;
+        if (snap?.daemon_capabilities?.allowed_secret_keys) {
+          daemonAllowList = new Set(snap.daemon_capabilities.allowed_secret_keys);
+        }
+        if (Array.isArray(snap?.daemon_capabilities?.allowed_runtimes)) {
+          daemonAllowedRuntimes = snap.daemon_capabilities.allowed_runtimes;
+        }
+      } catch { /* permissive P1 fallback */ }
+
+      // §4.2.2 — structural validation (catches name/runtime/model/
+      // flag injection at the hub edge). Daemon repeats this; double
+      // layer per RFC §4.2.2.
+      try {
+        validateChildName(node_spec.name);
+        validateRuntime(node_spec.runtime);
+        validateModel(node_spec.model);
+        validateChannelsP1((node_spec as any).channels);
+        for (const [k, v] of Object.entries(node_spec.flags || {})) {
+          if (!(FLAG_KEYS as readonly string[]).includes(k)) throw new ValidationError("flag_key_unknown", { field: k });
+          validateFlagValue(k, v);
+        }
+      } catch (e) {
+        return validationFailReply(e);
+      }
+
+      // P1 daemon-side allowlist: if daemon publishes allowed_runtimes,
+      // enforce at hub for fast-fail; daemon repeats.
+      if (daemonAllowedRuntimes && !daemonAllowedRuntimes.includes(node_spec.runtime)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "runtime_not_in_local_allowlist", runtime: node_spec.runtime, allowed: daemonAllowedRuntimes }) }] };
+      }
+
+      // §4.4.7 — env_refs strict (7-step gate) + resolve to env_blob.
+      let envBlob: Record<string, string> = {};
+      const envRefs = (node_spec as any).env_refs;
+      try {
+        envBlob = validateEnvRefs(envRefs, {
+          callerNetworkId: effectiveNetId || "default",
+          daemonAllowList,
+          networkSecretsGet: (_net: string, _key: string) => undefined, // P1: no vault yet — see note below
+        });
+      } catch (e) {
+        return validationFailReply(e);
+      }
+      // P1 NOTE — network_secrets vault is RFC §4.4 / §2.4 future
+      // work. For now if dashboard sends env_refs we'll reject as
+      // not-in-vault (above). When the vault lands, replace the
+      // `networkSecretsGet: () => undefined` line with the real DB
+      // lookup; nothing else in this tool needs to change.
+
+      // Single-flight per (daemon, child_name): partial unique index
+      // uniq_ncr_inflight already prevents racing INSERT, but we
+      // surface a friendly error rather than letting the DB constraint
+      // raise.
+      const existing = db.get<{ request_id: string; status: string }>(
+        `SELECT request_id, status FROM node_create_requests WHERE daemon_node_id = ?1 AND child_name = ?2 AND status IN ('pending', 'delivered') ORDER BY created_at DESC LIMIT 1`,
+        daemon_node_id, node_spec.name,
+      );
+      if (existing) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_name_conflict", existing_request_id: existing.request_id, existing_status: existing.status }) }] };
+      }
+
+      // §4.2.4 — daemon_max_children backpressure (best-effort: count
+      // currently-active children for this daemon).
+      const maxChildren = (() => {
+        try {
+          const snap = daemon.config_snapshot ? JSON.parse(daemon.config_snapshot) : null;
+          const m = snap?.daemon_capabilities?.max_concurrent_children;
+          return (typeof m === "number" && m > 0) ? m : 20;
+        } catch { return 20; }
+      })();
+      const childCount = db.get<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM node_create_requests WHERE daemon_node_id = ?1 AND status IN ('pending', 'delivered', 'succeeded')`,
+        daemon_node_id,
+      )?.n || 0;
+      if (childCount >= maxChildren) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "daemon_max_children", current: childCount, max: maxChildren }) }] };
+      }
+
+      // §2.5 step 2 + §4.4 F1 — mint child-ntok + stash env_blob in
+      // Map (NOT in DB). Token row marked role='child' + request_id
+      // for sweeper traceability per §4.4.8 impl note.
+      const childToken = generateNetworkToken();
+      const childTokenId = generateId("tok");
+      const networkIdForChild = daemon.network_id || effectiveNetId || "default";
+      const requestId = newRequestId();
+      // Use the dashboard caller's user_id as the token's user_id so
+      // resolveToken returns sane role / network on the child's side
+      // (audit trail = whoever created it).
+      if (!enforceUserId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "auth_required" }) }] };
+      }
+      db.run(
+        `INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, role, request_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+        [childTokenId, hashToken(childToken), enforceUserId, networkIdForChild, `node:${node_spec.name}`, "network", "child", requestId]
+      );
+
+      putPendingEnvBlob({
+        request_id: requestId,
+        daemon_node_id,
+        env_blob: envBlob,
+        child_token: childToken,
+        child_token_id: childTokenId,
+      });
+
+      // Write metadata-only row. env_blob field deliberately ABSENT
+      // from the schema (see db.ts CREATE TABLE) — F1 lock.
+      const envKeys = Object.keys(envBlob);
+      db.run(
+        `INSERT INTO node_create_requests
+           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?10, ?11)`,
+        [
+          requestId, daemon_node_id, node_spec.name, networkIdForChild,
+          node_spec.runtime, node_spec.model, JSON.stringify(node_spec.flags || {}),
+          JSON.stringify(envKeys), childTokenId, Date.now(), callerTokenId || "unknown",
+        ],
+      );
+
+      // SSE doorbell — daemon will pull via get_create_request.
+      // Payload carries ONLY request_id (no secret); daemon current
+      // SSE handler resolves the rest via MCP call.
+      pushEvent(daemon.alias, { type: "create_node", request_id: requestId }, networkIdForChild);
+
+      // §4.5 audit — dispatch succeeded
+      auditCreateNode({
+        action: "create_node_dispatched",
+        user_id: enforceUserId,
+        network_id: networkIdForChild,
+        target_id: requestId,
+        detail: {
+          daemon_node_id,
+          child_name: node_spec.name,
+          runtime: node_spec.runtime,
+          model: node_spec.model,
+          flag_keys: Object.keys(node_spec.flags || {}),
+          env_keys: envKeys,
+        },
+      });
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId }) }],
+      };
+    },
+  );
+
+  // §2.5 step 3 — daemon-facing pull. Returns full spec + env_blob +
+  // child_ntok in one shot. Map evicted on take (one-shot consume).
+  //
+  // §4.1.4 C2 token-bound daemon resolution (PR #299 BLOCKER #1, 通信牛):
+  // We MUST resolve the caller daemon via token-bound identity, NOT
+  // alias. alias is NOT a security boundary — two daemons with the same
+  // alias in different networks (or attacker-named-itself-the-same)
+  // would otherwise resolve to the wrong row. Same class as the prior
+  // report_status cross-tenant re-home bug.
+  //
+  // Resolution chain: caller's ntok (callerTokenId + callerTokenIsNetwork)
+  // → api_tokens row → joins to nodes via name='node:<alias>' AND
+  // network_id matches → unique daemon node row scoped to caller's
+  // network. If the ntok isn't bound to a node, or the joined node
+  // isn't a host_supervisor, reject.
+  server.tool(
+    "get_create_request",
+    "Daemon pulls a pending create-node request (called when SSE create_node doorbell arrives). RFC-026.",
+    {
+      request_id: z.string().min(1).max(200),
+    },
+    async ({ request_id }) => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+
+      const row = db.get<{ request_id: string; daemon_node_id: string; status: string; child_token_id: string | null; network_id: string }>(
+        `SELECT request_id, daemon_node_id, status, child_token_id, network_id FROM node_create_requests WHERE request_id = ?1`,
+        request_id,
+      );
+      if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      // §4.1.4 — strict daemon binding by token-derived node_id.
+      if (row.daemon_node_id !== callerDaemon.daemonNodeId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
+      }
+      // Additional network-scope guard (defense in depth: row's
+      // network_id MUST equal caller's network).
+      if (row.network_id !== callerDaemon.networkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      }
+      if (row.status !== "pending") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_pending", current_status: row.status }) }] };
+      }
+
+      // Take env_blob from Map; this is the one-shot consume per F1.
+      // takePendingEnvBlob ALSO checks daemon binding (belt+braces).
+      const blob = takePendingEnvBlob(request_id, callerDaemon.daemonNodeId);
+      if (!blob) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "env_blob_unavailable" }) }] };
+      }
+      // Hydrate spec from row.
+      const specRow = db.get<{ child_name: string; runtime: string; model: string; flags_json: string }>(
+        `SELECT child_name, runtime, model, flags_json FROM node_create_requests WHERE request_id = ?1`,
+        request_id,
+      );
+      if (!specRow) {
+        // Should never happen given the earlier row read.
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_vanished" }) }] };
+      }
+      // Mark delivered (so sweeper distinguishes F-1 from F-2).
+      db.run(
+        `UPDATE node_create_requests SET status = 'delivered', delivered_at = ?1 WHERE request_id = ?2 AND status = 'pending'`,
+        [Date.now(), request_id],
+      );
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          ok: true,
+          request_id,
+          node_spec: {
+            name: specRow.child_name,
+            runtime: specRow.runtime,
+            model: specRow.model,
+            flags: JSON.parse(specRow.flags_json),
+            channels: [],
+          },
+          child_token: blob.child_token,
+          env_blob: blob.env_blob,
+        }) }],
+      };
+    },
+  );
+
+  // §2.5 step 4 — daemon reports outcome. Note: 'succeeded' is set
+  // automatically by hub when the child first registers (content-match
+  // in upsertNodeWithSec1Guard); daemon's ack here is for explicit
+  // failures (fork crashed, etc.). Daemon should still call this on
+  // success too — it's a useful idempotent confirmation + lets hub
+  // record fork-side info.
+  server.tool(
+    "ack_create_request",
+    "Daemon acks a create-node request (called after fork). status='started' or 'failed'. RFC-026.",
+    {
+      request_id: z.string().min(1).max(200),
+      status: z.enum(["started", "failed", "rejected"]),
+      error: z.string().max(1000).optional(),
+      child_pid: z.number().int().optional(),
+    },
+    async ({ request_id, status, error: ackError, child_pid: _pid }) => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      const row = db.get<{ daemon_node_id: string; status: string; child_token_id: string | null; network_id: string }>(
+        `SELECT daemon_node_id, status, child_token_id, network_id FROM node_create_requests WHERE request_id = ?1`,
+        request_id,
+      );
+      if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      if (row.daemon_node_id !== callerDaemon.daemonNodeId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
+      }
+      if (row.network_id !== callerDaemon.networkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      }
+      const ackedAt = Date.now();
+      if (status === "started") {
+        // Don't flip to 'succeeded' here — that happens via content-
+        // match when the child actually registers. We just stamp ack.
+        db.run(
+          `UPDATE node_create_requests SET acked_at = ?1 WHERE request_id = ?2 AND status IN ('delivered', 'pending')`,
+          [ackedAt, request_id],
+        );
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: "awaiting_register" }) }] };
+      }
+      // failed / rejected — revoke child-ntok + mark request terminal
+      if (row.child_token_id) {
+        db.run(`UPDATE api_tokens SET revoked_at = datetime('now') WHERE token_id = ?1 AND revoked_at IS NULL`, [row.child_token_id]);
+      }
+      db.run(
+        `UPDATE node_create_requests SET status = ?1, error = ?2, acked_at = ?3 WHERE request_id = ?4 AND status IN ('pending', 'delivered')`,
+        [status, ackError || null, ackedAt, request_id],
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
+    },
+  );
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1852,6 +2229,22 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
     // it on the new child's behalf by content-matching the patch
     // against the reported snapshot.
     finalizePendingMatchingUpdates(input.node_id, input.config_snapshot);
+  }
+  // RFC-026 §2.5 step 4 — on every register/report_status, opportunistically
+  // close out any pending create_node request whose child_name matches
+  // this incoming alias. Same content-match pattern as RFC-024's
+  // finalizePendingMatchingUpdates; the new child doesn't have the
+  // request_id, so hub does the matching on its behalf.
+  try {
+    finalizeCreateOnFirstRegister({
+      node_id: input.node_id,
+      alias: input.alias || input.node_name || "",
+      network_id: input.callerNetworkId ?? null,
+    });
+  } catch (e: any) {
+    // create-node finalize is best-effort — never block report_status
+    // on it. Log + continue.
+    console.warn(`[commhub] create-node finalize on report_status failed: ${e?.message || e}`);
   }
   return { result: existing ? "updated" : "inserted", node_id: input.node_id };
 }

@@ -3479,6 +3479,29 @@ async function connectSSE() {
                 warn(`restart-apply failed: ${e?.message || e}`),
               );
             }
+            // RFC-026 P1 — daemon-only doorbell. host_supervisor nodes
+            // process this; non-daemons silently ignore (config gate).
+            if (ev.type === "create_node" && fileConfig.role === "host_supervisor") {
+              log(`← SSE create_node ${ev.request_id || ""}`);
+              import("./runtime/create-node-daemon.js").then(({ handleCreateNodeDoorbell, serializeEnvLocalDaemon }) => {
+                handleCreateNodeDoorbell(
+                  { request_id: ev.request_id },
+                  {
+                    callCommHub,
+                    workDir: process.cwd(),
+                    hubUrl: COMMHUB_URL,
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                    serializeEnvLocal: serializeEnvLocalDaemon,
+                    // §4.2 belt-and-suspenders: read host operator's
+                    // local allowed_runtimes from daemon config.
+                    // null/empty = accept any in global enum.
+                    allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
+                      ? fileConfig.allowed_runtimes : null,
+                  },
+                ).catch((e: any) => warn(`create-node-daemon failed: ${e?.message || e}`));
+              }).catch((e: any) => warn(`create-node-daemon import failed: ${e?.message || e}`));
+            }
           } catch {}
         }
       }
