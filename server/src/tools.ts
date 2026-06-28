@@ -22,6 +22,7 @@ import {
   startPendingEnvGcTimer,
   startSweeperTimer,
   auditCreateNode,
+  resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
 } from "./create-node.js";
 import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias } from "./rename.js";
 import {
@@ -1779,51 +1780,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   startPendingEnvGcTimer();
   startSweeperTimer();
 
-  // §4.1.4 C2 — resolve the caller daemon's node row by **token-bound
-  // identity**, never by alias (alias is not a security boundary; see
-  // PR #299 BLOCKER #1). Daemons authenticate with their ntok; the
-  // tokens row carries `name = 'node:<alias>'` + `network_id`. We
-  // join on (name → alias) AND network_id, scoped to the EXACT
-  // caller token's id. If the token isn't ntok / hasn't been
-  // associated with a node / its node isn't host_supervisor → reject.
-  type DaemonResolveOk = { ok: true; daemonNodeId: string; daemonAlias: string; networkId: string };
-  type DaemonResolveErr = { ok: false; error: string };
-  const resolveCallerDaemonTokenBound = (): DaemonResolveOk | DaemonResolveErr => {
-    if (!callerTokenIsNetwork || !callerTokenId) {
-      return { ok: false, error: "caller_not_a_daemon" };
-    }
-    if (!enforceNetworkId) {
-      // belt: ntok without a resolved network is anomalous; refuse
-      return { ok: false, error: "caller_not_a_daemon" };
-    }
-    // Lookup caller's token name + network from api_tokens directly
-    // (we don't re-trust callerAlias). name format = 'node:<alias>'.
-    const tokRow = db.get<{ name: string; network_id: string | null }>(
-      `SELECT name, network_id FROM api_tokens WHERE token_id = ?1 AND revoked_at IS NULL`,
-      callerTokenId,
-    );
-    if (!tokRow || !tokRow.name || !tokRow.name.startsWith("node:")) {
-      return { ok: false, error: "caller_not_a_daemon" };
-    }
-    if (tokRow.network_id !== enforceNetworkId) {
-      // Token's network doesn't match resolved scope. Anomalous.
-      return { ok: false, error: "caller_not_a_daemon" };
-    }
-    const tokenAlias = tokRow.name.slice(5);
-    // Join scope: nodes.alias = tokenAlias AND nodes.network_id = tokens.network_id.
-    // Two daemons with the same alias in DIFFERENT networks remain
-    // distinct rows (network_id is part of the key); attacker-named
-    // alias in another network resolves to the attacker's own row not
-    // the legitimate target.
-    const nodeRow = db.get<{ node_id: string; alias: string; network_id: string }>(
-      `SELECT node_id, alias, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1`,
-      tokenAlias, tokRow.network_id,
-    );
-    if (!nodeRow) {
-      return { ok: false, error: "caller_not_a_daemon" };
-    }
-    return { ok: true, daemonNodeId: nodeRow.node_id, daemonAlias: nodeRow.alias, networkId: nodeRow.network_id };
-  };
+  // §4.1.4 C2 — caller daemon resolved via token-bound identity (NOT
+  // alias). Thin closure over the module-level helper so callers in
+  // this scope can use the captured request-level vars. The pure
+  // helper lives in create-node.ts so unit tests call exactly the
+  // same code path the tools do (per 通信龙 PR #299 nit 1 — no inline-
+  // mirror SQL in tests).
+  const resolveCallerDaemonTokenBound = () =>
+    _resolveCallerDaemonTokenBound({ callerTokenIsNetwork, callerTokenId, enforceNetworkId });
 
   // Helper — map a ValidationError thrown from create-node-validate
   // into the MCP-tool-call JSON reply shape.

@@ -110,11 +110,27 @@ export function runOrphanSweepOnce(now = Date.now()): { swept: number; revoked: 
       // revoke (request never made it that far) but still mark
       // failed.
       if (row.child_token_id) {
+        // db.run returns the SQLite adapter's RunResult (changes counter
+        // if driver-supported). Only count a revoke when the UPDATE
+        // actually touched a row — under the bun:sqlite adapter the
+        // changes prop is reliable; on adapters returning undefined we
+        // fall back to a post-UPDATE SELECT to confirm revoked_at IS
+        // NOT NULL (DB is ground truth). Avoids over-counting when
+        // child_token_id is stale or already revoked. (通信龙 nit 2)
         const r = db.run(
           `UPDATE api_tokens SET revoked_at = datetime('now') WHERE token_id = ?1 AND revoked_at IS NULL`,
           [row.child_token_id],
         );
-        if ((r as any)?.changes > 0 || r === undefined) revoked++;
+        const changes = (r as any)?.changes;
+        if (typeof changes === "number") {
+          if (changes > 0) revoked++;
+        } else {
+          // Adapter didn't report; verify via SELECT
+          const after = db.get<{ revoked_at: string | null }>(
+            `SELECT revoked_at FROM api_tokens WHERE token_id = ?1`, row.child_token_id,
+          );
+          if (after?.revoked_at) revoked++;
+        }
       }
       const newStatus = row.status === "pending" ? "failed" : "expired";
       const err = row.status === "pending" ? "sweeper_revoked_before_delivery" : "sweeper_revoked_after_delivery_no_ack";
@@ -205,6 +221,52 @@ export function finalizeCreateOnFirstRegister(
 
 export function newRequestId(): string {
   return `cr_${uuidv4()}`;
+}
+
+// §4.1.4 C2 — resolve the caller daemon's node row by **token-bound
+// identity** (PR #299 BLOCKER #1). Module-level so unit tests can
+// import + call directly (per 通信龙 nit 1 — don't inline-mirror SQL
+// in tests; that's exactly the helper-drift anti-pattern the tools.ts
+// comment warns against).
+export type DaemonResolveResult =
+  | { ok: true; daemonNodeId: string; daemonAlias: string; networkId: string }
+  | { ok: false; error: string };
+
+export function resolveCallerDaemonTokenBound(opts: {
+  callerTokenIsNetwork: boolean;
+  callerTokenId: string | null | undefined;
+  enforceNetworkId: string | null | undefined;
+}): DaemonResolveResult {
+  if (!opts.callerTokenIsNetwork || !opts.callerTokenId) {
+    return { ok: false, error: "caller_not_a_daemon" };
+  }
+  if (!opts.enforceNetworkId) {
+    return { ok: false, error: "caller_not_a_daemon" };
+  }
+  const tokRow = db.get<{ name: string; network_id: string | null }>(
+    `SELECT name, network_id FROM api_tokens WHERE token_id = ?1 AND revoked_at IS NULL`,
+    opts.callerTokenId,
+  );
+  if (!tokRow || !tokRow.name || !tokRow.name.startsWith("node:")) {
+    return { ok: false, error: "caller_not_a_daemon" };
+  }
+  if (tokRow.network_id !== opts.enforceNetworkId) {
+    return { ok: false, error: "caller_not_a_daemon" };
+  }
+  const tokenAlias = tokRow.name.slice(5);
+  const nodeRow = db.get<{ node_id: string; alias: string; network_id: string }>(
+    `SELECT node_id, alias, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1`,
+    tokenAlias, tokRow.network_id,
+  );
+  if (!nodeRow) {
+    return { ok: false, error: "caller_not_a_daemon" };
+  }
+  return {
+    ok: true,
+    daemonNodeId: nodeRow.node_id,
+    daemonAlias: nodeRow.alias,
+    networkId: nodeRow.network_id,
+  };
 }
 
 // RFC-026 §4.5 — append a row to audit_log for every create_node

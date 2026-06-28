@@ -15,7 +15,9 @@ import {
   finalizeCreateOnFirstRegister,
   newRequestId,
   stopBackgroundTimersForTest,
+  resolveCallerDaemonTokenBound,
 } from "./create-node.js";
+import { hashToken } from "./db.js";
 
 // ── helpers ────────────────────────────────────────────────────────
 function freshFixtures() {
@@ -202,16 +204,15 @@ describe("§4.4.8 C4 orphan sweeper — runOrphanSweepOnce (covers J F-1 + F-2)"
 });
 
 describe("§4.1.4 C2 token-bound daemon resolution regression (PR #299 BLOCKER #1)", () => {
-  // The BLOCKER #1 root cause was `SELECT ... WHERE alias = ?1` in
-  // daemon-facing MCP tools. The new resolveCallerDaemonTokenBound
-  // helper joins on (api_tokens.token_id → name='node:<alias>' →
-  // nodes.alias AND nodes.network_id = tokens.network_id), so two
-  // daemons with the SAME alias in DIFFERENT networks resolve to
-  // distinct rows. Below we model the SQL invariant directly: insert
-  // two nodes with same alias under different networks, confirm the
-  // network-scoped SELECT returns the caller's own row only.
-  test("two daemons same alias different networks: SELECT correctly scopes by network_id", () => {
-    db.run("DELETE FROM nodes WHERE alias IN ('daemon-shared', 'daemon-other')");
+  // Calls the REAL resolveCallerDaemonTokenBound helper exported from
+  // create-node.ts — same code path the daemon-facing MCP tools take
+  // (per 通信龙 PR #299 nit 1, no inline-mirror SQL: anti-pattern that
+  // would let helper-drift slip past). Setup: two daemons same alias
+  // in different networks; two ntoks bound to each; confirm each
+  // ntok's resolution returns ITS OWN node row (not the other).
+  test("two daemons same alias different networks: helper resolves token to correct node", () => {
+    db.run("DELETE FROM nodes WHERE alias = 'daemon-shared'");
+    db.run("DELETE FROM api_tokens WHERE token_id IN ('tok_test_A', 'tok_test_B')");
     // daemonA in netA
     db.run(
       `INSERT INTO nodes (node_id, node_name, alias, runtime, model, network_id, updated_at)
@@ -222,30 +223,74 @@ describe("§4.1.4 C2 token-bound daemon resolution regression (PR #299 BLOCKER #
       `INSERT INTO nodes (node_id, node_name, alias, runtime, model, network_id, updated_at)
        VALUES ('node_test_daemonB', 'daemon-shared', 'daemon-shared', 'claude-agent-sdk', 'm', 'net_test_B', datetime('now'))`,
     );
-
-    // Token-bound resolution: a caller bound to netA must get node_test_daemonA
-    const a = db.get<{ node_id: string; network_id: string }>(
-      `SELECT node_id, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1`,
-      "daemon-shared", "net_test_A",
+    // ntok rows bound to each daemon (name='node:daemon-shared'; network_id distinguishes)
+    db.run(
+      `INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope)
+       VALUES ('tok_test_A', ?1, 'u_test_creator', 'net_test_A', 'node:daemon-shared', 'network')`,
+      [hashToken("ntok_test_A")],
     );
-    expect(a?.node_id).toBe("node_test_daemonA");
-
-    const b = db.get<{ node_id: string; network_id: string }>(
-      `SELECT node_id, network_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1`,
-      "daemon-shared", "net_test_B",
+    db.run(
+      `INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope)
+       VALUES ('tok_test_B', ?1, 'u_test_creator', 'net_test_B', 'node:daemon-shared', 'network')`,
+      [hashToken("ntok_test_B")],
     );
-    expect(b?.node_id).toBe("node_test_daemonB");
 
-    // Contrast with the pre-blocker buggy form: alias-only SELECT
-    // returns whichever row sqlite happened to scan first — could
-    // be daemonB even when caller is netA.
-    const all = db.all<{ node_id: string; network_id: string }>(
-      `SELECT node_id, network_id FROM nodes WHERE alias = ?1`,
-      "daemon-shared",
+    // ntok A → must resolve to node_test_daemonA (NOT daemonB)
+    const resA = resolveCallerDaemonTokenBound({
+      callerTokenIsNetwork: true,
+      callerTokenId: "tok_test_A",
+      enforceNetworkId: "net_test_A",
+    });
+    expect(resA.ok).toBe(true);
+    if (resA.ok) {
+      expect(resA.daemonNodeId).toBe("node_test_daemonA");
+      expect(resA.networkId).toBe("net_test_A");
+    }
+
+    // ntok B → must resolve to node_test_daemonB
+    const resB = resolveCallerDaemonTokenBound({
+      callerTokenIsNetwork: true,
+      callerTokenId: "tok_test_B",
+      enforceNetworkId: "net_test_B",
+    });
+    expect(resB.ok).toBe(true);
+    if (resB.ok) expect(resB.daemonNodeId).toBe("node_test_daemonB");
+
+    // Pre-blocker buggy form (alias only) would be ambiguous —
+    // confirm there really ARE 2 rows so the SQL was un-scoped before.
+    const all = db.all<{ node_id: string }>(
+      `SELECT node_id FROM nodes WHERE alias = ?1`, "daemon-shared",
     );
-    expect(all.length).toBe(2);  // proves alias alone is ambiguous
+    expect(all.length).toBe(2);
+
+    // Mismatched scope: tok_test_A presented with enforceNetworkId=B
+    // (compromised caller trying to pivot to wrong net) → reject.
+    const resCross = resolveCallerDaemonTokenBound({
+      callerTokenIsNetwork: true,
+      callerTokenId: "tok_test_A",
+      enforceNetworkId: "net_test_B",
+    });
+    expect(resCross.ok).toBe(false);
+
+    // utok (callerTokenIsNetwork=false) → reject as not-a-daemon
+    const resUtok = resolveCallerDaemonTokenBound({
+      callerTokenIsNetwork: false,
+      callerTokenId: "tok_test_A",
+      enforceNetworkId: "net_test_A",
+    });
+    expect(resUtok.ok).toBe(false);
+
+    // Revoked token → reject
+    db.run("UPDATE api_tokens SET revoked_at = datetime('now') WHERE token_id = 'tok_test_A'");
+    const resRevoked = resolveCallerDaemonTokenBound({
+      callerTokenIsNetwork: true,
+      callerTokenId: "tok_test_A",
+      enforceNetworkId: "net_test_A",
+    });
+    expect(resRevoked.ok).toBe(false);
 
     db.run("DELETE FROM nodes WHERE node_id IN ('node_test_daemonA', 'node_test_daemonB')");
+    db.run("DELETE FROM api_tokens WHERE token_id IN ('tok_test_A', 'tok_test_B')");
   });
 
   test("daemon B cannot take/ack daemon A's request even with same alias (Map-level guard)", () => {
