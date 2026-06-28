@@ -104,18 +104,27 @@ describe("hashToken — deterministic sha256", () => {
   });
 });
 
-describe("hashPassword — sha256('anet:' + password)", () => {
-  it("returns 64-char lowercase hex", () => {
-    expect(hashPassword("StrongPassw0rd")).toMatch(HEX_RE(64));
+describe("hashPassword — salted scrypt (round-6 A1)", () => {
+  it("returns scrypt$N$salt$hash self-describing format", () => {
+    const stored = hashPassword("StrongPassw0rd");
+    expect(stored).toMatch(/^scrypt\$\d+\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/);
   });
-  it("deterministic", () => {
-    expect(hashPassword("foo")).toBe(hashPassword("foo"));
+
+  it("NON-deterministic — same password produces different salts (the whole point)", () => {
+    // The pre-A1 hashPassword was deterministic SHA-256 — rainbow-
+    // table vulnerable. Salted scrypt MUST produce different output
+    // for repeated calls. If this fails, the salt isn't random.
+    const a = hashPassword("foo");
+    const b = hashPassword("foo");
+    expect(a).not.toBe(b);
   });
-  it("uses 'anet:' salt → different from hashToken on same input", () => {
-    // This pins the 'anet:' prefix — if someone drops it, this fails,
-    // and existing user password hashes will silently stop matching.
+
+  it("does not collide with hashToken's surface (separate concerns)", () => {
+    // Pin the separation. Pre-A1 had hashPassword("foo") === hashToken("anet:foo"),
+    // which was an accidental coincidence of unsalted hashes; post-A1 the
+    // password hash carries randomness and never equals a token hash.
     expect(hashPassword("foo")).not.toBe(hashToken("foo"));
-    expect(hashPassword("foo")).toBe(hashToken("anet:foo"));
+    expect(hashPassword("foo")).not.toBe(hashToken("anet:foo"));
   });
 });
 
