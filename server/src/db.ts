@@ -707,8 +707,138 @@ export function generateId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
-export function hashPassword(password: string): string {
-  return new Bun.CryptoHasher("sha256").update(`anet:${password}`).digest("hex");
+// ──────────────────────────────────────────────────────────────────
+// Round-6 A1 — Password hashing: salted scrypt with lazy migration
+//
+// Format: `scrypt$<N>$<salt-b64>$<hash-b64>`
+//   N        = log2(cost). E.g. 14 → 2^14 = 16384 (~50ms on modern hw).
+//   salt-b64 = base64 of 16 random bytes.
+//   hash-b64 = base64 of 64-byte scrypt output.
+//
+// Why scrypt: Node built-in crypto.scryptSync — zero new deps.
+//   Memory-hard, ASIC-resistant. Better than bcrypt under modern GPU
+//   attack. argon2id would be marginally better but pulls a native
+//   dep (argon2 npm package) we don't want on the hub.
+//
+// Why "$" delimiter: legacy hashes are bare hex (0-9a-f only). Any
+//   "$" in stored hash means new format. Trivial detect with zero
+//   false-positives.
+//
+// Lazy migration:
+//   - register/bootstrap/changePassword/resetUserPassword always
+//     write the new format.
+//   - login + changePassword (old-verify) accept BOTH formats.
+//   - on successful login against a legacy hash, the caller rehashes
+//     in place. Zero downtime, no forced password change.
+//
+// See feedback_assume_unit_before_threshold.md: explicit-set
+// crypto parameters; don't rely on library defaults.
+// ──────────────────────────────────────────────────────────────────
+
+import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
+
+// Default cost parameter (N = 2^14 = 16384). Tunable via env for
+// test suites that don't want to spend ~50ms per scrypt call.
+//   N=10 → 2^10 = 1024 iter, ~5ms (test-only)
+//   N=14 → 2^14 = 16384 iter, ~50ms (production)
+//   N=15 → 2^15 = 32768 iter, ~100ms (if hw improves and ops want headroom)
+const DEFAULT_SCRYPT_N = 14;
+const SCRYPT_R = 8;
+const SCRYPT_P = 1;
+const SCRYPT_KEYLEN = 64;
+const SCRYPT_SALT_BYTES = 16;
+// Bun's scrypt defaults maxmem to ~32 MiB which is too tight for
+// N ≥ 14 (128 * r * 2^N = ~16 MiB at r=8, N=14; default has no
+// headroom for the internal buffers). Set explicitly so a higher-N
+// upgrade later doesn't suddenly throw at runtime.
+const SCRYPT_MAXMEM = 128 * 1024 * 1024; // 128 MiB
+
+function getScryptN(): number {
+  const raw = process.env.COMMHUB_SCRYPT_N;
+  if (!raw) return DEFAULT_SCRYPT_N;
+  const n = parseInt(raw, 10);
+  // Bound: 8 (way-too-weak, only for unit tests) — 20 (DoS risk).
+  if (!Number.isFinite(n) || n < 8 || n > 20) return DEFAULT_SCRYPT_N;
+  return n;
+}
+
+export function hashPassword(plain: string): string {
+  const N = getScryptN();
+  const salt = randomBytes(SCRYPT_SALT_BYTES);
+  const hash = scryptSync(plain, salt, SCRYPT_KEYLEN, {
+    N: 1 << N,
+    r: SCRYPT_R,
+    p: SCRYPT_P,
+    maxmem: SCRYPT_MAXMEM,
+  });
+  return `scrypt$${N}$${salt.toString("base64")}$${hash.toString("base64")}`;
+}
+
+/**
+ * Verify a plaintext password against the stored hash. Accepts BOTH
+ * the new scrypt format and the legacy bare-hex SHA-256 format
+ * (back-compat for pre-A1 deployments).
+ *
+ * Returns:
+ *   ok           — true iff the password matches.
+ *   needsRehash  — true iff the stored hash was legacy format AND the
+ *                  password matched. The caller MUST rehash and write
+ *                  the new format back to disk so the legacy hash
+ *                  stops existing. Returned false for already-new
+ *                  hashes (no rehash needed even on N upgrade —
+ *                  follow-up if/when we bump default N).
+ */
+export function verifyPassword(plain: string, stored: string): { ok: boolean; needsRehash: boolean } {
+  // Format detection: new format always contains "$". Legacy bare
+  // sha256 hex never does (0-9a-f only).
+  if (stored.includes("$")) {
+    const parts = stored.split("$");
+    if (parts.length !== 4 || parts[0] !== "scrypt") {
+      // Unknown new-style scheme — be conservative, reject.
+      return { ok: false, needsRehash: false };
+    }
+    const N = parseInt(parts[1], 10);
+    if (!Number.isFinite(N) || N < 8 || N > 20) return { ok: false, needsRehash: false };
+    let saltBuf: Buffer;
+    let expectedBuf: Buffer;
+    try {
+      saltBuf = Buffer.from(parts[2], "base64");
+      expectedBuf = Buffer.from(parts[3], "base64");
+    } catch {
+      return { ok: false, needsRehash: false };
+    }
+    if (expectedBuf.length === 0) return { ok: false, needsRehash: false };
+    let actualBuf: Buffer;
+    try {
+      actualBuf = scryptSync(plain, saltBuf, expectedBuf.length, {
+        N: 1 << N,
+        r: SCRYPT_R,
+        p: SCRYPT_P,
+        maxmem: SCRYPT_MAXMEM,
+      });
+    } catch {
+      return { ok: false, needsRehash: false };
+    }
+    // timingSafeEqual requires equal-length buffers; we sized actual
+    // to expected.length above so this is safe.
+    const ok = timingSafeEqual(actualBuf, expectedBuf);
+    return { ok, needsRehash: false };
+  }
+
+  // Legacy bare-hex SHA-256 format (pre-A1).
+  const legacy = new Bun.CryptoHasher("sha256").update(`anet:${plain}`).digest("hex");
+  // Use timingSafeEqual on byte buffers (hex strings would be
+  // compared via JS === which is variable-time on first-differing
+  // char — the timing leak is tiny for fixed-format hex but pin the
+  // habit). Both are exactly 64 hex chars when sha256 produced.
+  if (stored.length !== legacy.length) return { ok: false, needsRehash: false };
+  let ok = false;
+  try {
+    ok = timingSafeEqual(Buffer.from(stored, "hex"), Buffer.from(legacy, "hex"));
+  } catch {
+    return { ok: false, needsRehash: false };
+  }
+  return { ok, needsRehash: ok };
 }
 
 export function hashToken(token: string): string {

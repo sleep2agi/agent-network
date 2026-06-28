@@ -1,7 +1,7 @@
 /**
  * V3 Auth module — user registration, login, token management
  */
-import { db, generateId, hashPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js";
+import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js";
 import { WEAK_PASSWORDS } from "./password-dict.js";
 
 export interface AuthUser {
@@ -105,7 +105,24 @@ export function login(username: string, password: string): AuthResult {
     username);
 
   if (!user) return { ok: false, error: "invalid username or password" };
-  if (user.password_hash !== hashPassword(password)) return { ok: false, error: "invalid username or password" };
+  // Round-6 A1: verifyPassword accepts both new scrypt format and
+  // legacy bare-sha256. On successful legacy verify, lazy-upgrade the
+  // stored hash in place (zero downtime, no forced password change).
+  const verify = verifyPassword(password, user.password_hash);
+  if (!verify.ok) return { ok: false, error: "invalid username or password" };
+  if (verify.needsRehash) {
+    try {
+      const upgraded = hashPassword(password);
+      db.run(
+        "UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2",
+        [upgraded, user.user_id]
+      );
+    } catch (e: any) {
+      // Don't fail the login if the rehash write hits a transient
+      // error — the user authenticated, we'll try again next login.
+      console.log(`[commhub auth] lazy-rehash failed for user ${user.user_id}: ${e?.message ?? e}`);
+    }
+  }
 
   // Issue a NEW user token — do NOT rotate/invalidate existing ones. Each
   // login (cli, dashboard, second machine) gets its own row so they don't
@@ -287,7 +304,11 @@ export function changePassword(userId: string, oldPassword: string, newPassword:
   if (passwordError) return { ok: false, error: passwordError };
   const user = db.get<any>("SELECT password_hash FROM users WHERE user_id = ?1", userId);
   if (!user) return { ok: false, error: "user not found" };
-  if (user.password_hash !== hashPassword(oldPassword)) return { ok: false, error: "incorrect current password" };
+  // Round-6 A1: verifyPassword accepts both formats. No need to
+  // lazy-rehash here separately because we're about to overwrite
+  // password_hash with the new password's scrypt hash below anyway.
+  const verify = verifyPassword(oldPassword, user.password_hash);
+  if (!verify.ok) return { ok: false, error: "incorrect current password" };
   // #261 P0-2 — clearing must_change_password as a side-effect of a real
   // password change. If the user changes via `anet passwd`, the bootstrap
   // nudge goes away on next login. SET to 0 explicitly (rather than skip)
