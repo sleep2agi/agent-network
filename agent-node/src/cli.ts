@@ -51,6 +51,7 @@ import {
   formatClassificationError,
 } from "./runtime/classify-result";
 import { withTimeout, TimeoutError, resolveTimeoutMs } from "./util/timeout";
+import { superviseChild } from "./util/supervise-child";
 
 const home = homedir();
 
@@ -2827,67 +2828,57 @@ async function connectFeishu(channel: FeishuChannel): Promise<void> {
 
   const { spawn } = await import("node:child_process");
 
-  const BASE_DELAY_MS = 1_000;
-  const MAX_DELAY_MS = 30_000;
   const STABLE_RESET_MS = 30_000;  // worker stays alive this long → backoff back to BASE
-  let delay = BASE_DELAY_MS;
 
-  while (!feishuShuttingDown) {
-    const child = spawn(
-      process.execPath,
-      [workerPath, "--channel-dir", channel.dir, "--node-alias", ALIAS],
-      { stdio: ["ignore", "inherit", "inherit", "ipc"] },
-    );
-    feishuChildren.add(child);
+  await superviseChild({
+    label: "feishu",
+    shutdownGate: () => feishuShuttingDown,
+    onRetryWait: (waitMs, backoffMs) =>
+      warn(`[feishu] re-fork worker in ${waitMs}ms (backoff=${backoffMs}ms, jittered)`),
+    runOnce: async (ctrl) => {
+      const child = spawn(
+        process.execPath,
+        [workerPath, "--channel-dir", channel.dir, "--node-alias", ALIAS],
+        { stdio: ["ignore", "inherit", "inherit", "ipc"] },
+      );
+      feishuChildren.add(child);
 
-    // Stable-uptime timer — if the worker survives STABLE_RESET_MS without
-    // exiting, treat the backoff as recovered (reset to BASE_DELAY_MS).
-    const stableTimer = setTimeout(() => { delay = BASE_DELAY_MS; }, STABLE_RESET_MS);
+      // Stable-uptime trigger — if the worker survives STABLE_RESET_MS,
+      // tell the supervisor the iteration counts as "actually working"
+      // so the backoff resets to base. Mirrors the pre-helper behaviour
+      // (`setTimeout(() => { delay = BASE_DELAY_MS; }, STABLE_RESET_MS)`).
+      const stableTimer = setTimeout(() => ctrl.markStable(), STABLE_RESET_MS);
 
-    wireFeishuChildHandlers(child, channel);
+      wireFeishuChildHandlers(child, channel);
+      log(`[feishu] forked worker (pid ${child.pid}) for ${channel.dir} via ${workerPath}`);
 
-    log(`[feishu] forked worker (pid ${child.pid}) for ${channel.dir} via ${workerPath}`);
-
-    // Block until the child exits — the `await` here is what makes the
-    // outer while-loop a supervisor instead of a fire-and-forget spawn.
-    // BOTH `exit` AND `error` must resolve the promise: a failed spawn
-    // (ENOENT for a missing worker path, EACCES on permissions, EMFILE,
-    // etc.) emits `error` WITHOUT a matching `exit` — pre-fix the await
-    // would block forever and the supervisor itself would dead-lock,
-    // never re-forking, never backing off (通信牛 PR #263 review catch).
-    // `settled` guards against the exit+error double-fire case the
-    // Node child_process docs warn about: only the first resolution
-    // wins, second is dropped silently.
-    let settled = false;
-    const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-      const done = (v: { code: number | null; signal: NodeJS.Signals | null }) => {
-        if (settled) return;
-        settled = true;
-        resolve(v);
-      };
-      child.once("exit", (code, signal) => done({ code, signal }));
-      child.once("error", (err: any) => {
-        warn(`[feishu] worker error: ${err?.message || err}`);
-        done({ code: null, signal: null });
+      // Block until the child exits or errors. settled-guard mirrors
+      // the original — exit + error can both fire (Node docs); a failed
+      // spawn emits error without a matching exit and would otherwise
+      // wedge the supervisor (通信牛 PR #263 review catch).
+      let settled = false;
+      const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+        const done = (v: { code: number | null; signal: NodeJS.Signals | null }) => {
+          if (settled) return;
+          settled = true;
+          resolve(v);
+        };
+        child.once("exit", (code, signal) => done({ code, signal }));
+        child.once("error", (err: any) => {
+          warn(`[feishu] worker error: ${err?.message || err}`);
+          done({ code: null, signal: null });
+        });
       });
-    });
 
-    clearTimeout(stableTimer);
-    feishuChildren.delete(child);
-    warn(`[feishu] worker exited code=${exitInfo.code} signal=${exitInfo.signal} dir=${channel.dir}`);
+      clearTimeout(stableTimer);
+      feishuChildren.delete(child);
+      warn(`[feishu] worker exited code=${exitInfo.code} signal=${exitInfo.signal} dir=${channel.dir}`);
 
-    if (feishuShuttingDown) {
-      log(`[feishu] worker exited during shutdown — not re-forking`);
-      break;
-    }
-
-    // Jittered exponential backoff (±25%).
-    const jitter = delay * 0.25 * (Math.random() * 2 - 1);
-    const waitMs = Math.max(100, Math.round(delay + jitter));
-    warn(`[feishu] re-fork worker in ${waitMs}ms (backoff=${delay}ms, jittered)`);
-    await new Promise((r) => setTimeout(r, waitMs));
-    delay = Math.min(delay * 2, MAX_DELAY_MS);
-  }
+      if (feishuShuttingDown) {
+        log(`[feishu] worker exited during shutdown — not re-forking`);
+      }
+    },
+  });
 }
 
 // Wires the IPC `message` (think round-trip) + `exit`/`error` log handlers
@@ -3078,23 +3069,45 @@ async function connectTelegram(channel: TelegramChannel) {
   }
 }
 
+// #202 — auto-reconnect after hub restart. Exponential backoff 1→2→4→8→30s
+// (cap per issue spec). Plus: re-call `register()` on every successful
+// (re)connect so the node reappears in dashboard within ~30s of hub coming
+// back, rather than waiting up to one 3-minute heartbeat tick. First-boot
+// register is still done at line 1808 to keep startup latency low; the
+// `firstConnect` guard prevents the double-register on the initial event.
+//
+// Theme3 migration (PR #284) — two SSE-specific behaviour changes vs the
+// pre-refactor connectSSE, both INTENTIONAL improvements (not zero-change):
+//
+//   1. Jittered backoff (±25%). Pre-refactor SSE had no jitter, so N nodes
+//      reconnecting to the same hub after a restart all fired their retries
+//      on the same wall-clock tick (thundering herd). The shared helper's
+//      default `jitterRatio: 0.25` spreads herd retries — important now
+//      that multi-node deployments are common.
+//
+//   2. Backoff no longer resets on a raw HTTP 200 — only on the SSE
+//      `"connected"` event (via `ctrl.markStable()`). Pre-refactor a hub
+//      that 200s + immediately drops the stream produced a hot ~1s
+//      reconnect loop instead of progressive backoff; the new behaviour
+//      treats "200 then drop without connected" as failed and lets the
+//      backoff double. Test `runOnce that returns cleanly without
+//      markStable → backoff doubles` in supervise-child.test.ts pins
+//      this contract so a future patch can't re-introduce the hot loop.
 async function connectSSE() {
   const sseUrl = `${COMMHUB_URL}/events/${encodeURIComponent(ALIAS)}`;
-  // #202 — auto-reconnect after hub restart. Exponential backoff 1→2→4→8→30s
-  // (cap per issue spec). Plus: re-call `register()` on every successful
-  // (re)connect so the node reappears in dashboard within ~30s of hub coming
-  // back, rather than waiting up to one 3-minute heartbeat tick. First-boot
-  // register is still done at line 1808 to keep startup latency low; the
-  // `firstConnect` guard prevents the double-register on the initial event.
-  const BASE_DELAY_MS = 1_000;
-  const MAX_DELAY_MS = 30_000;
   const ABANDON_AFTER_MS = 60 * 60 * 1_000;  // 1h continuous failure → give up
-  let delay = BASE_DELAY_MS;
   let firstConnect = true;
-  let downSince: number | null = null;
-  while (true) {
-    debug(`SSE connecting: ${sseUrl}`);
-    try {
+
+  await superviseChild({
+    label: "sse",
+    shutdownGate: () => false,  // no in-process shutdown gate for SSE; abandon-after-1h is the bail
+    abandonAfterMs: ABANDON_AFTER_MS,
+    onAbandon: () =>
+      error(`SSE 连续 >1h 连不上 hub (${COMMHUB_URL}) — 放弃自动重连。运行 \`anet node start ${ALIAS}\` 手动恢复。`),
+    onRetryWait: (waitMs) => debug(`SSE reconnecting (${(waitMs / 1000).toFixed(1)}s)...`),
+    onError: (err: any) => warn(`SSE error: ${err?.message || err}`),
+    runOnce: async (ctrl) => {
+      debug(`SSE connecting: ${sseUrl}`);
       const sseHeaders: Record<string, string> = { Accept: "text/event-stream", "Cache-Control": "no-cache" };
       if (AUTH_TOKEN) sseHeaders["Authorization"] = `Bearer ${AUTH_TOKEN}`;
       const res = await fetch(sseUrl, { headers: sseHeaders });
@@ -3102,22 +3115,19 @@ async function connectSSE() {
         if (res.status === 401) {
           if (reloadNodeToken()) {
             warn(`SSE 401: ntok_ 已刷新，正在用 .anet/nodes/${ALIAS}/config.json 里的新 token 重试`);
-            await new Promise(r => setTimeout(r, 500));
-            continue;
+            // Treat as a stable iteration so the supervisor resets the
+            // backoff (rapid retry with the new token, not progressive
+            // backoff). Match pre-helper behaviour which `continue`'d
+            // with a 500 ms sleep and an unchanged delay accumulator.
+            ctrl.markStable();
+            return;
           }
           error(`SSE 401: ntok_ 已失效（hub DB 可能被重置或 token 被撤销）。试 \`anet doctor --fix\``);
+        } else {
+          warn(`SSE failed: ${res.status}`);
         }
-        else warn(`SSE failed: ${res.status}`);
-        downSince = downSince ?? Date.now();
-        if (Date.now() - downSince > ABANDON_AFTER_MS) {
-          error(`SSE 连续 >1h 连不上 hub (${COMMHUB_URL}) — 放弃自动重连。运行 \`anet node start ${ALIAS}\` 手动恢复。`);
-          return;
-        }
-        await new Promise(r => setTimeout(r, delay));
-        delay = Math.min(delay * 2, MAX_DELAY_MS);
-        continue;
+        return;  // fall through to supervisor backoff
       }
-      delay = BASE_DELAY_MS;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -3132,7 +3142,8 @@ async function connectSSE() {
             const ev = JSON.parse(line.slice(6));
             if (ev.type === "connected") {
               log("SSE connected");
-              downSince = null;
+              // Connection is real — reset backoff + downtime counter.
+              ctrl.markStable();
               if (!firstConnect) {
                 // #202 — hub may have restarted while we were down; resend
                 // register so dashboard `sessions` row repopulates immediately
@@ -3153,17 +3164,11 @@ async function connectSSE() {
           } catch {}
         }
       }
-    } catch (err: any) { warn(`SSE error: ${err.message}`); }
-    // Connection dropped (read loop ended or threw) — start reconnect timer.
-    downSince = downSince ?? Date.now();
-    if (Date.now() - downSince > ABANDON_AFTER_MS) {
-      error(`SSE 连续 >1h 连不上 hub (${COMMHUB_URL}) — 放弃自动重连。运行 \`anet node start ${ALIAS}\` 手动恢复。`);
-      return;
-    }
-    debug(`SSE reconnecting (${delay / 1000}s)...`);
-    await new Promise(r => setTimeout(r, delay));
-    delay = Math.min(delay * 2, MAX_DELAY_MS);
-  }
+      // Stream ended cleanly — iteration done. If markStable already
+      // fired (the "connected" event arrived at least once), the
+      // supervisor resets backoff; otherwise it doubles.
+    },
+  });
 }
 
 // ── 启动 ──
