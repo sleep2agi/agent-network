@@ -52,6 +52,17 @@ import {
 } from "./runtime/classify-result";
 import { withTimeout, TimeoutError, resolveTimeoutMs } from "./util/timeout";
 import { superviseChild } from "./util/supervise-child";
+import {
+  validateLocalPatch,
+  computeApplyMode as computeConfigApplyMode,
+  atomicWriteJson,
+  backupConfigPrev,
+  mergePatch,
+  buildConfigSnapshot,
+  RESTART_SENTINEL,
+  type ConfigUpdate,
+  type ConfigPatch,
+} from "./runtime/config-apply";
 
 const home = homedir();
 
@@ -140,6 +151,12 @@ function loadJson(path: string): Record<string, any> | null {
 
 let fileConfig: Record<string, any> = {};
 let configFilePath = "";  // 用于 session 写回
+// RFC-024 — last-known revision of fileConfig (the hub-promoted
+// config_revision after the most recent applied update). Bumped by
+// processConfigUpdate after a successful apply ack; reported to hub
+// via report_status.config_snapshot.config_revision so dashboard sees
+// it bump in real time.
+let currentConfigRevision = 0;
 
 if (opts.config) {
   const cfgPath = opts.config.startsWith("/") ? opts.config : join(process.cwd(), opts.config);
@@ -825,6 +842,18 @@ const reportStatus = async (status: string, task?: string) => {
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
+    // RFC-024 N6 — masked snapshot of effective model+flags so dashboard
+    // can show the current state without touching per-node files.
+    // config_update_capable signals whether this process runs under a
+    // supervisor wrapper that honours the sentinel-75 restart path (W1)
+    // — when false (bare-spawn agent-node), dashboard greys out remote-
+    // restart. Set via env var ANET_CONFIG_UPDATE_CAPABLE=1 by the W1
+    // wrapper at spawn time (default false to be safe for bare runs).
+    config_snapshot: buildConfigSnapshot(
+      fileConfig,
+      process.env.ANET_CONFIG_UPDATE_CAPABLE === "1",
+      currentConfigRevision,
+    ),
   });
 };
 const getInbox = async () => {
@@ -3071,6 +3100,139 @@ async function connectTelegram(channel: TelegramChannel) {
   }
 }
 
+// RFC-024 — drain in-flight think for a restart-required apply. Hard-
+// capped at 60s per §8 confirm; we don't try to "warm-handoff" the
+// running think (out of v0.11 scope). Sets configApplyDraining BEFORE
+// awaiting thinkQueue so new tasks are rejected at queue-time — otherwise
+// a fresh task could reassign thinkQueue under us and slip past exit(75).
+async function drainInFlightThink(hardCapMs = 60_000): Promise<void> {
+  configApplyDraining = true;
+  const start = Date.now();
+  try {
+    await Promise.race([
+      thinkQueue,
+      new Promise<void>((r) => setTimeout(r, hardCapMs)),
+    ]);
+  } catch {
+    // thinkQueue may have rejected — drain semantics only care that
+    // it settled (success or failure).
+  }
+  const dt = Date.now() - start;
+  log(`[config-apply] drained in-flight think (${dt}ms${dt >= hardCapMs ? `, hard-cap ${hardCapMs}ms hit` : ""})`);
+}
+
+// RFC-024 — pull, validate, route, write, ack. Called from the SSE
+// config_update doorbell handler. Any failure path → ack rejected
+// (with reason) so dashboard sees the failure quickly rather than
+// waiting for the 30s apply timeout.
+async function processConfigUpdate(): Promise<void> {
+  let updateId = "";
+  try {
+    const pull = await callCommHub("get_config_update", {});
+    const update = pull?.update as ConfigUpdate | null | undefined;
+    if (!update) {
+      debug(`[config-apply] no pending update for this node`);
+      return;
+    }
+    updateId = update.update_id;
+    log(`[config-apply] pulled ${updateId} mode=${update.apply_mode}`);
+
+    // restart_only — no validate/write, just drain + exit 75. The ack
+    // is wrapped so an ack throw cannot strand us pre-exit; the F-B
+    // reaper on the hub side handles the missed-ack case.
+    if (update.apply_mode === "restart_only") {
+      try {
+        await callCommHub("ack_config_update", { update_id: updateId, status: "restarting" });
+      } catch (ackErr: any) {
+        warn(`[config-apply] restart_only ack restarting failed (continuing to exit): ${ackErr?.message || ackErr}`);
+      }
+      await drainInFlightThink();
+      log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor`);
+      process.exit(RESTART_SENTINEL);
+    }
+
+    // Defense-in-depth local validation (hub validator drift guard).
+    const localFail = validateLocalPatch(update.patch);
+    if (localFail) {
+      warn(`[config-apply] local validate rejected ${updateId}: ${localFail.field}=${localFail.reason}`);
+      await callCommHub("ack_config_update", {
+        update_id: updateId,
+        status: "rejected",
+        error: `local validate: ${localFail.field}=${localFail.reason}`,
+      });
+      return;
+    }
+
+    const localMode = computeConfigApplyMode(update.patch);
+    if (localMode !== update.apply_mode) {
+      warn(`[config-apply] mode mismatch hub=${update.apply_mode} local=${localMode}; trusting local for safety`);
+    }
+    const mode = localMode;
+
+    if (!configFilePath) {
+      warn(`[config-apply] no configFilePath (node started without --config); rejecting ${updateId}`);
+      await callCommHub("ack_config_update", {
+        update_id: updateId,
+        status: "rejected",
+        error: "no config file path on this node — start with --config to enable remote apply",
+      });
+      return;
+    }
+    const backup = backupConfigPrev(configFilePath);
+    const merged = mergePatch(fileConfig, update.patch);
+    atomicWriteJson(configFilePath, merged);
+    log(`[config-apply] wrote ${configFilePath} (.prev backedUp=${backup.backedUp})`);
+
+    if (mode === "hot") {
+      // Replace the mutable fileConfig reference; per-think accessors
+      // (currentMaxTurns / currentMaxBudget / currentClaudeTimeoutMs /
+      // currentCodexTimeoutMs) read this new value on the next call.
+      fileConfig = merged;
+      currentConfigRevision += 1;
+      await callCommHub("ack_config_update", {
+        update_id: updateId,
+        status: "applied",
+        new_revision: currentConfigRevision,
+      });
+      log(`[config-apply] HOT applied ${updateId} → revision=${currentConfigRevision}`);
+      return;
+    }
+
+    // Restart path — drain + ack restarting + exit. W1 parent supervisor
+    // sees exit 75 and respawns; the new child reads the new config at
+    // boot and ack's applied from there. Ack wrapped for the same reason
+    // as the restart_only branch above.
+    try {
+      await callCommHub("ack_config_update", { update_id: updateId, status: "restarting" });
+    } catch (ackErr: any) {
+      warn(`[config-apply] restart ack restarting failed (continuing to exit): ${ackErr?.message || ackErr}`);
+    }
+    await drainInFlightThink();
+    log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor`);
+    process.exit(RESTART_SENTINEL);
+  } catch (err: any) {
+    error(`[config-apply] failed: ${err?.message || err}`);
+    if (updateId) {
+      try {
+        await callCommHub("ack_config_update", {
+          update_id: updateId,
+          status: "rejected",
+          error: `apply runtime: ${String(err?.message || err).slice(0, 500)}`,
+        });
+      } catch (ackErr: any) {
+        warn(`[config-apply] ack rejected failed: ${ackErr?.message || ackErr}`);
+      }
+    }
+  }
+}
+
+// RFC-024 — restart_node-triggered SSE doorbell. Restart_node creates
+// an apply_mode=restart_only update; processConfigUpdate's restart_only
+// branch handles it. So we just delegate.
+async function processRestartOnly(): Promise<void> {
+  await processConfigUpdate();
+}
+
 // #202 — auto-reconnect after hub restart. Exponential backoff 1→2→4→8→30s
 // (cap per issue spec). Plus: re-call `register()` on every successful
 // (re)connect so the node reappears in dashboard within ~30s of hub coming
@@ -3162,6 +3324,23 @@ async function connectSSE() {
             }
             if (ev.type === "new_reply") {
               log(`← SSE reply from ${ev.from || "?"}${ev.in_reply_to ? ` (task ${ev.in_reply_to.slice(0, 8)})` : ""}`);
+            }
+            // RFC-024 N1 — config-apply doorbell. Hub posted a desired-
+            // config patch for this node; pull + validate + apply.
+            // restart doorbell is the lifecycle ops shortcut (no config
+            // write, just drain + exit 75). Errors logged but never
+            // propagated up — supervisor stays connected.
+            if (ev.type === "config_update") {
+              log(`← SSE config_update ${ev.update_id || ""}`);
+              processConfigUpdate().catch((e: any) =>
+                warn(`config-apply failed: ${e?.message || e}`),
+              );
+            }
+            if (ev.type === "restart") {
+              log(`← SSE restart ${ev.update_id || ""}`);
+              processRestartOnly().catch((e: any) =>
+                warn(`restart-apply failed: ${e?.message || e}`),
+              );
             }
           } catch {}
         }
