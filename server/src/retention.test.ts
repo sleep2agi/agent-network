@@ -195,20 +195,20 @@ describe("sweepRetention — inbox (acked only)", () => {
 });
 
 describe("sweepRetention — tasks (terminal status only)", () => {
-  test("deletes only terminal-status tasks older than horizon", () => {
-    insertTask({ status: "completed", daysAgo: 35 });  // delete
-    insertTask({ status: "cancelled", daysAgo: 35 });  // delete
-    insertTask({ status: "failed",    daysAgo: 35 });  // delete
-    insertTask({ status: "expired",   daysAgo: 35 });  // delete
+  test("deletes terminal-status tasks older than horizon (replied with no child also reaped)", () => {
+    insertTask({ status: "completed", daysAgo: 35 });  // delete (safe-terminal)
+    insertTask({ status: "cancelled", daysAgo: 35 });  // delete (safe-terminal)
+    insertTask({ status: "failed",    daysAgo: 35 });  // delete (safe-terminal)
+    insertTask({ status: "expired",   daysAgo: 35 });  // delete (safe-terminal)
     insertTask({ status: "completed", daysAgo: 10 });  // young — keep
     insertTask({ status: "running",   daysAgo: 365 }); // active — KEEP
     insertTask({ status: "delivered", daysAgo: 365 }); // active — KEEP
-    insertTask({ status: "replied",   daysAgo: 365 }); // could be chain ancestor — KEEP
+    insertTask({ status: "replied",   daysAgo: 365 }); // replied + no children → delete (round-2 fix)
 
     const r = sweepRetention(STRICT_CFG);
 
-    expect(r.deletes.tasks).toBe(4);
-    expect(count("tasks")).toBe(4);
+    expect(r.deletes.tasks).toBe(5);
+    expect(count("tasks")).toBe(3);
   });
 
   // 通信牛 #282 CHANGE_REQ regression — terminal-task sweep MUST use
@@ -258,18 +258,85 @@ describe("sweepRetention — tasks (terminal status only)", () => {
     expect(count("tasks")).toBe(0);
   });
 
-  // `replied` is deliberately out-of-scope for this round per 通信牛
-  // discussion — chain-ancestor safety requires child-ref-aware
-  // delete. Pin the intentional behaviour so a well-meaning future
-  // edit doesn't silently start reaping replied rows.
-  test("replied tasks are NEVER swept regardless of age (chain-ancestor safety)", () => {
-    insertTask({ status: "replied", daysAgo: 365, completedDaysAgo: 365 });
-    insertTask({ status: "replied", daysAgo: 100, completedDaysAgo: 100 });
+  // Independent reviewer flag on #282: the original PR excluded
+  // `replied` entirely from the sweep, which missed the goal. Every
+  // fulfilled task lives at status='replied' (no code path writes
+  // 'completed'), so the tasks table's main growth source would
+  // never be reclaimed. Fix: child-ref-aware delete — reap old
+  // replied rows that no other task references as parent_task_id.
+  //
+  // These three tests pin the corrected behaviour.
+
+  test("replied with active child task is KEPT (chain ancestor safety)", () => {
+    const parent = insertTask({
+      status: "replied",
+      daysAgo: 365,
+      completedDaysAgo: 365,
+    });
+    // Active child still references parent via parent_task_id —
+    // chainReplyToParent could walk through parent at any moment.
+    db.run(
+      `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, parent_task_id)
+       VALUES (?1, 'a', 'b', 'normal', 'delivered', 'x', 'reply', datetime('now', '-365 days'), ?2)`,
+      [uuidv4(), parent]
+    );
 
     const r = sweepRetention(STRICT_CFG);
 
     expect(r.deletes.tasks).toBe(0);
     expect(count("tasks")).toBe(2);
+  });
+
+  test("replied with NO child references AND past horizon is DELETED", () => {
+    insertTask({ status: "replied", daysAgo: 365, completedDaysAgo: 60 });
+
+    const r = sweepRetention(STRICT_CFG);
+
+    expect(r.deletes.tasks).toBe(1);
+    expect(count("tasks")).toBe(0);
+  });
+
+  test("replied with NO child references AND within horizon is KEPT", () => {
+    // Just-completed replied with no children — needs to live for
+    // the full retention window in case dashboard/audit wants to see
+    // recent activity.
+    insertTask({ status: "replied", daysAgo: 5, completedDaysAgo: 5 });
+
+    const r = sweepRetention(STRICT_CFG);
+
+    expect(r.deletes.tasks).toBe(0);
+    expect(count("tasks")).toBe(1);
+  });
+
+  test("replied with child that's been ITSELF swept stays sweepable next round", () => {
+    // Two-round scenario: parent + terminal child. Round 1: child
+    // (cancelled, past horizon) gets reaped → parent now has no
+    // children. Round 2: parent (replied, past horizon, no children)
+    // gets reaped. Idempotent + composable.
+    const parent = insertTask({
+      status: "replied",
+      daysAgo: 365,
+      completedDaysAgo: 60,
+    });
+    db.run(
+      `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, completed_at, parent_task_id)
+       VALUES (?1, 'a', 'b', 'normal', 'cancelled', 'x', 'reply', datetime('now', '-365 days'), datetime('now', '-60 days'), ?2)`,
+      [uuidv4(), parent]
+    );
+
+    const r1 = sweepRetention(STRICT_CFG);
+    // Round 1: only the cancelled child can be reaped (parent still
+    // has it as a referencing row at the time the DELETE NOT EXISTS
+    // is evaluated). DELETE order in SQLite is single-statement, so
+    // the child DELETE happens first (terminal-safe pass), then the
+    // replied pass sees no children → parent goes too.
+    // Conservative assertion: at minimum the child is gone.
+    expect(r1.deletes.tasks).toBeGreaterThanOrEqual(1);
+
+    // Re-run: should converge with zero rows regardless of whether
+    // round 1 took both or just the child.
+    sweepRetention(STRICT_CFG);
+    expect(count("tasks")).toBe(0);
   });
 });
 

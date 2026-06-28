@@ -133,15 +133,17 @@ db.exec(`
 //
 // Split into two narrow indexes so SQLite's OR optimizer can run an
 // index UNION on (hostname-path ∪ ip-path), each path covered by an
-// index that also lets the created_at range be range-scanned on the
-// tail.
+// index that also lets the created_at range be range-scanned.
 //
-// Drop the old composite first so we don't pay write-amp for an
-// unused index (every agent_telemetry insert maintained 3 indexes
-// before; now it's 2: alias-time + ip-time, plus the new
-// hostname-time). Net write-amp is unchanged at 3 indexes maintained
-// per insert (alias + hostname + ip), but each is narrower (3 cols
-// vs the old 4-col composite), and the query plan is much better.
+// **Honest trade-off** (corrected after reviewer flag): secondary
+// index count goes from 2 (host_time + alias_time) to 3 (hostname_time
+// + ip_time + alias_time). Every agent_telemetry insert now maintains
+// ONE MORE B-tree, so per-insert write-amp is +50%. The trade-off is
+// deliberate: write-amp is bounded by the heartbeat cadence (30s ×
+// N agents) and is small in absolute terms, while the read-path win
+// is going from O(n) full-scan-per-dashboard-poll to O(log n) two-
+// branch index union. For the public-facing hub's expected load
+// shape (many readers, few writers), that's a clear net gain.
 try { db.exec("DROP INDEX IF EXISTS idx_agent_telemetry_host_time"); } catch {}
 try {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_telemetry_hostname_time

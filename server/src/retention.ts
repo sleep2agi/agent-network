@@ -127,44 +127,70 @@ export function sweepRetention(cfg: RetentionConfig = readRetentionConfig()): Sw
     [`-${cfg.ackedInboxDays} days`],
     cfg.ackedInboxDays,
   );
-  // Only sweep tasks in terminal status — active tasks (created /
-  // delivered / acked / running / replied) are still observable on
-  // the dashboard and may be the parent of an in-flight chain.
+  // Terminal-task sweep — split into two DELETEs:
   //
-  // **Time field**: use COALESCE(completed_at, created_at) — terminal
-  // status means the server set `completed_at` at the reply/fail/
-  // cancel/expire moment. If we sweep on `created_at` alone, a task
-  // that was created 60d ago but only completed today would be
-  // purged the instant it enters terminal state — operators get zero
-  // post-terminal retention window. The COALESCE falls back to
-  // created_at for legacy rows that pre-date the completed_at column
-  // (back-compat with old DBs).
+  // (a) "safe terminals": cancelled / failed / expired / (theoretical)
+  //     completed have no chain-ancestor risk and are safe to reap
+  //     unconditionally past the horizon. NOTE: as of this writing
+  //     'completed' is dead code — no code path sets it (every reply
+  //     uses 'replied'/'failed'/'cancelled' via send_reply or
+  //     chainReplyToParent). Kept in the IN-list as a forward guard:
+  //     if someone introduces a 'completed' write later, the sweep
+  //     picks it up without code changes.
   //
-  // **`replied` deliberately excluded from terminal sweep**: a
-  // replied task may still be the ancestor of an in-flight chain hop
-  // (chainReplyToParent walks upstream). Reaping it could orphan the
-  // chain. Out-of-scope for this round; revisit with a child-ref-
-  // aware delete in a follow-up (delete only `replied` rows whose
-  // children are all in terminal status too).
-  const tasks = sweepOne(
+  // (b) "replied" — was excluded entirely in the original PR, which
+  //     missed the goal: every fulfilled task lives at 'replied'
+  //     status, so the tasks table's MAIN GROWTH SOURCE would never
+  //     be reclaimed. Reviewer caught this. Fix: child-ref-aware
+  //     delete — reap an old replied row ONLY IF no other task
+  //     references it as parent_task_id. A row with no children is
+  //     not a chain ancestor and is safe to drop.
+  //
+  // **Time field** (both DELETEs): use COALESCE(completed_at, created_at).
+  // Terminal status means the server set `completed_at` at the
+  // reply/fail/cancel moment. Sweeping on `created_at` alone would
+  // reap a task created 60d ago but completed today the instant it
+  // entered terminal state — zero post-terminal retention. The
+  // COALESCE falls back to created_at for legacy rows that pre-date
+  // the completed_at column (back-compat).
+  const tasksSafeTerminal = sweepOne(
     `DELETE FROM tasks
      WHERE status IN ('completed', 'cancelled', 'failed', 'expired')
        AND COALESCE(completed_at, created_at) < datetime('now', ?1)`,
     [`-${cfg.terminalTasksDays} days`],
     cfg.terminalTasksDays,
   );
+  const tasksRepliedChildSafe = sweepOne(
+    `DELETE FROM tasks
+     WHERE status = 'replied'
+       AND COALESCE(completed_at, created_at) < datetime('now', ?1)
+       AND NOT EXISTS (
+         SELECT 1 FROM tasks AS child
+         WHERE child.parent_task_id = tasks.task_id
+       )`,
+    [`-${cfg.terminalTasksDays} days`],
+    cfg.terminalTasksDays,
+  );
+  const tasks = tasksSafeTerminal + tasksRepliedChildSafe;
   const auditLog = sweepOne(
     `DELETE FROM audit_log WHERE created_at < datetime('now', ?1)`,
     [`-${cfg.auditLogDays} days`],
     cfg.auditLogDays,
   );
 
-  // VACUUM: SQLite never reclaims freed pages without VACUUM. After a
-  // big DELETE the file size stays the same; only future inserts can
-  // reuse the freed pages. wal_checkpoint(TRUNCATE) trims the WAL
-  // file; PRAGMA incremental_vacuum reclaims pages on tables that had
-  // auto_vacuum=INCREMENTAL set at creation time (won't error on
-  // databases without it, but won't free pages either).
+  // VACUUM:
+  //   - wal_checkpoint(TRUNCATE): trims the WAL file. Works on every
+  //     SQLite DB regardless of auto_vacuum setting. Useful after
+  //     big DELETEs so the WAL doesn't stay bloated until the next
+  //     natural checkpoint.
+  //   - incremental_vacuum: ONLY reclaims main-DB pages on databases
+  //     created with `PRAGMA auto_vacuum = INCREMENTAL`. On legacy
+  //     DBs (the default mode 0) this is a no-op and the main file
+  //     does NOT shrink — freed pages stay in the freelist for
+  //     future inserts. Operators who want disk reclamation on old
+  //     DBs must run a one-time blocking `VACUUM` themselves (out of
+  //     scope for the sweeper, which deliberately stays non-
+  //     blocking).
   let walCheckpointPagesMoved: number | null = null;
   let incrementalFreedPages: number | null = null;
   let errored = false;
