@@ -55,6 +55,32 @@ anet node start <alias>
 
 Full upgrade workflow + cross-version migration: [Upgrade Guide](/en/guide/upgrade).
 
+## Quickstart — try `/loop` in 60 seconds
+
+Want to try the headline preview2 feature (`/loop` works for every runtime) right after upgrading? Follow these 6 steps:
+
+```bash
+anet upgrade --channel preview                              # 1. Upgrade to the preview channel
+anet --version                                              # 2. Confirm 2.3.0-preview.1
+anet node start <alias>                                     # 3. Make sure the node is online
+anet node loop <alias> "what time is it now" --every 5m     # 4. Schedule a recurring task (every 5 min)
+anet goal list <alias>                                      # 5. List the node's running loops
+anet goal cancel <goal-id>                                  # 6. Cancel a specific loop
+```
+
+**Channel-equivalent form** (works inside the node's interactive prompt / Dashboard Chat / Feishu `@bot` etc. — same effect):
+
+```
+/loop 5m what time is it now
+```
+
+**Notes**:
+
+- Starting in preview2, all 4 runtimes (`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`) can run `/loop`; previously only `claude-code-cli` did
+- Interval units: `60s` / `5m` / `30m` / `2h` / `1d`, **minimum 60s**
+- Replace `<alias>` with your node alias (`anet node ls`); get `<goal-id>` from `anet goal list <alias>`
+- Full command reference + persistence + restart behavior: [Agent Node — Loop scheduler](/en/guide/agent-node#loop-scheduler)
+
 ## preview2 highlights (with deep links)
 
 ### 🌟 `/loop` works for every runtime + `anet node loop` CLI
