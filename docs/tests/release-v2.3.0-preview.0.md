@@ -1,5 +1,6 @@
 # v0.11-preview1 — release notes
 
+**Tags**: `agent-network@v2.3.0-preview.0` · `agent-node@v2.5.0-preview.0` · server v0.9.0-preview.0
 **Channel**: `@preview` (use `--tag preview` semantics; not promoted to `@latest`)
 **Date**: 2026-06-28
 **Packages**:
@@ -14,7 +15,7 @@
 
 ---
 
-## Install
+## Install · `@sleep2agi/agent-network@2.3.0-preview.0` · `@sleep2agi/agent-node@2.5.0-preview.0` · `@sleep2agi/commhub-server@0.9.0-preview.0`
 
 **New user — clean install of the v0.11-preview1 channel.**
 
