@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   assertSecureTlsEnv,
   classifyProbeResponse,
+  handleProbeDoorbell,
   safelyFetchProbe,
 } from "./probe-daemon.js";
 
@@ -98,5 +99,104 @@ describe("safelyFetchProbe — SSRF guards (per 通信龙 spot-check c)", () => 
     );
     expect(r.errorKind).toBe("tls_error");
     expect(r.errorDetail).toContain("probe_tls_insecure_disabled");
+  });
+});
+
+// ── handleProbeDoorbell — daemon-level validateBaseUrl re-check ──
+// Fold-in #1 (通信龙 spot-check non-blocking note): even if hub returns
+// a fabricated probe spec (compromised hub, hub regression, on-wire
+// injection), the daemon re-runs validateBaseUrl(vendor, base_url)
+// before doing any fetch. Reject paths:
+//   - unknown vendor → daemon_recheck_vendor_not_supported
+//   - non-allowlist host for the vendor → daemon_recheck_probe_target_forbidden
+//   - bad URL → daemon_recheck_probe_base_url_invalid
+// All collapse to ack.status = "probe_target_forbidden" + zero network call.
+describe("handleProbeDoorbell — daemon validateBaseUrl re-check (compromised-hub defense)", () => {
+  function mkDeps(getProbeReq: any) {
+    const calls: any[] = [];
+    const warns: string[] = [];
+    const logs: string[] = [];
+    return {
+      deps: {
+        callCommHub: async (tool: string, args: any) => {
+          calls.push({ tool, args });
+          if (tool === "get_probe_request") return getProbeReq;
+          if (tool === "ack_probe_request") return { ok: true };
+          throw new Error(`unexpected tool ${tool}`);
+        },
+        log: (m: string) => logs.push(m),
+        warn: (m: string) => warns.push(m),
+      },
+      calls, warns, logs,
+    };
+  }
+
+  test("non-allowlist host for anthropic → daemon-level reject + ack probe_target_forbidden, no fetch", async () => {
+    // Hub claims api.anthropic.com but actually wrote example.com (compromised-hub scenario)
+    const { deps, calls, warns } = mkDeps({
+      ok: true,
+      vendor: "anthropic",
+      base_url: "https://example.com/v1",
+      model_name: "claude-x",
+      api_key: "sk-fake-not-used",
+    });
+    const t0 = Date.now();
+    await handleProbeDoorbell({ probe_id: "pr_attack_1" }, deps);
+    const elapsed = Date.now() - t0;
+    // No fetch should have happened — elapsed must be tiny (sync validateBaseUrl + ack only)
+    expect(elapsed).toBeLessThan(500);
+    const ackCall = calls.find(c => c.tool === "ack_probe_request");
+    expect(ackCall).toBeTruthy();
+    expect(ackCall.args.status).toBe("probe_target_forbidden");
+    expect(ackCall.args.probe_id).toBe("pr_attack_1");
+    // Warning emitted naming the reason code
+    expect(warns.some(w => /daemon re-check.*code=probe_target_forbidden/.test(w))).toBe(true);
+  });
+
+  test("unknown vendor → daemon rejects, ack probe_target_forbidden", async () => {
+    const { deps, calls } = mkDeps({
+      ok: true,
+      vendor: "evil-vendor",
+      base_url: "https://api.anthropic.com/v1",
+      model_name: "claude-x",
+      api_key: "sk-fake",
+    });
+    await handleProbeDoorbell({ probe_id: "pr_attack_2" }, deps);
+    const ackCall = calls.find(c => c.tool === "ack_probe_request");
+    expect(ackCall.args.status).toBe("probe_target_forbidden");
+  });
+
+  test("bad URL (not parseable) → daemon rejects, ack probe_target_forbidden", async () => {
+    const { deps, calls } = mkDeps({
+      ok: true,
+      vendor: "anthropic",
+      base_url: "://not-a-url",
+      model_name: "claude-x",
+      api_key: "sk-fake",
+    });
+    await handleProbeDoorbell({ probe_id: "pr_attack_3" }, deps);
+    const ackCall = calls.find(c => c.tool === "ack_probe_request");
+    expect(ackCall.args.status).toBe("probe_target_forbidden");
+  });
+
+  test("plain HTTP scheme on non-loopback host → daemon rejects, ack probe_target_forbidden", async () => {
+    const { deps, calls } = mkDeps({
+      ok: true,
+      vendor: "anthropic",
+      base_url: "http://api.anthropic.com/v1",   // http, not https — even with allowlist match, must reject
+      model_name: "claude-x",
+      api_key: "sk-fake",
+    });
+    await handleProbeDoorbell({ probe_id: "pr_attack_4" }, deps);
+    const ackCall = calls.find(c => c.tool === "ack_probe_request");
+    expect(ackCall.args.status).toBe("probe_target_forbidden");
+  });
+
+  test("get_probe_request returns ok:false → no ack pushed (hub sweeper handles)", async () => {
+    const { deps, calls, warns } = mkDeps({ ok: false, error: "probe_not_found" });
+    await handleProbeDoorbell({ probe_id: "pr_missing" }, deps);
+    const ackCall = calls.find(c => c.tool === "ack_probe_request");
+    expect(ackCall).toBeUndefined();
+    expect(warns.some(w => /get_probe_request failed/.test(w))).toBe(true);
   });
 });
