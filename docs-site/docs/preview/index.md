@@ -55,6 +55,32 @@ anet node start <alias>
 
 完整升级流程 + 跨版本迁移见 [升级指南](/guide/upgrade)。
 
+## 快速试用 — 60 秒跑通 `/loop`
+
+升级后想立刻试 preview2 的招牌新功能（`/loop` 全 runtime 通），按这套 6 步走：
+
+```bash
+anet upgrade --channel preview                              # 1. 升级到 preview 通道
+anet --version                                              # 2. 确认 2.3.0-preview.1
+anet node start <alias>                                     # 3. 确保节点在线
+anet node loop <alias> "报一下现在几点" --every 5m          # 4. 下循环任务（5 分钟一次）
+anet goal list <alias>                                      # 5. 查看节点的循环
+anet goal cancel <goal-id>                                  # 6. 停止某个循环
+```
+
+**频道等价用法**（在节点交互窗口 / Dashboard Chat / 飞书 @bot 等场景，效果一致）：
+
+```
+/loop 5m 报一下现在几点
+```
+
+**说明**：
+
+- preview2 起，4 个 runtime（`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`）都能跑 `/loop`，之前只有 `claude-code-cli` 行
+- 间隔单位支持 `60s` / `5m` / `30m` / `2h` / `1d`，**最小 60s**
+- `<alias>` 换成你的节点别名（`anet node ls` 查），`<goal-id>` 用 `anet goal list <alias>` 拿
+- 完整命令 + 持久化 + 重启行为见 [Agent Node — 循环任务](/guide/agent-node#循环任务-loop-调度器)
+
 ## preview2 亮点 (跳到详细文档)
 
 ### 🌟 `/loop` 全 runtime 通 + `anet node loop` CLI
