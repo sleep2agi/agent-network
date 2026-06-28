@@ -16,6 +16,7 @@
 
 import { describe, expect, test, beforeEach } from "bun:test";
 import { db, uuidv4 } from "./db.js";
+import { upsertNodeWithSec1Guard } from "./tools.js";
 
 function insertNode(opts: { node_id?: string; alias: string; network_id: string | null }): string {
   const id = opts.node_id ?? uuidv4();
@@ -324,6 +325,123 @@ describe("SEC trust-root — report_status node upsert cannot re-home cross-tena
       nid,
     );
     expect(after?.network_id).toBe("netB");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Real-driven regression test (per 通信龙 test-quality finding 2026-06-28):
+// the 6 SEC trust-root tests above mirror the gate inline (cheap to write,
+// zero protection against guard drift). This block calls the SAME helper
+// that production report_status delegates to — if anyone weakens or
+// deletes the gate, this fails.
+// ─────────────────────────────────────────────────────────────────────
+describe("SEC trust-root — REAL driver via upsertNodeWithSec1Guard (catches guard drift)", () => {
+  test("netA caller cannot mutate netB-owned node row (production path)", () => {
+    const nid = insertNode({ alias: "victim", network_id: "netB" });
+    // Pre-state: row owned by netB.
+    const pre = db.get<any>(
+      "SELECT alias, network_id, config_snapshot FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    expect(pre.network_id).toBe("netB");
+    expect(pre.alias).toBe("victim");
+    expect(pre.config_snapshot).toBeNull();
+
+    // Attack: netA caller (effectiveNetId="netA") tries to upsert with
+    // a different alias + a forged config snapshot.
+    const outcome = upsertNodeWithSec1Guard({
+      node_id: nid,
+      callerNetworkId: "netA",
+      alias: "attacker-alias",
+      model: "attacker-model",
+      config_snapshot: { model: "attacker", flags: { dangerouslySkipPermissions: true } },
+    });
+
+    // Production path returns refused (NOT inserted/updated).
+    expect(outcome.result).toBe("refused");
+    if (outcome.result === "refused") {
+      expect(outcome.reason).toBe("cross_network");
+      expect(outcome.existingNet).toBe("netB");
+      expect(outcome.callerNet).toBe("netA");
+    }
+
+    // End-state: row IS UNCHANGED — same alias, same network, no
+    // forged snapshot leaked in. If the gate were removed, alias would
+    // be "attacker-alias", model would be "attacker-model", and
+    // config_snapshot would be the forged payload. This is the
+    // assertion that drift would break.
+    const post = db.get<any>(
+      "SELECT alias, network_id, model, config_snapshot FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    expect(post.network_id).toBe("netB");
+    expect(post.alias).toBe("victim");
+    expect(post.model).toBeNull();
+    expect(post.config_snapshot).toBeNull();
+  });
+
+  test("netB caller updating its own node row → production path returns updated", () => {
+    const nid = insertNode({ alias: "owner-self", network_id: "netB" });
+    const outcome = upsertNodeWithSec1Guard({
+      node_id: nid,
+      callerNetworkId: "netB",
+      alias: "owner-self",
+      model: "new-model",
+      config_snapshot: { model: "new-model", flags: { maxTurns: 99 } },
+    });
+    expect(outcome.result).toBe("updated");
+    const post = db.get<any>(
+      "SELECT alias, network_id, model, config_snapshot FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    expect(post.network_id).toBe("netB");
+    expect(post.model).toBe("new-model");
+    expect(post.config_snapshot).toContain("maxTurns");
+  });
+
+  test("legacy NULL row → first caller claims (bootstrap, production path)", () => {
+    const nid = insertNode({ alias: "legacy-row", network_id: null });
+    const outcome = upsertNodeWithSec1Guard({
+      node_id: nid,
+      callerNetworkId: "netA",
+      alias: "legacy-row",
+    });
+    // sec1Ok is true (existing.network_id === null) → updated.
+    expect(outcome.result).toBe("updated");
+    const post = db.get<{ network_id: string | null }>(
+      "SELECT network_id FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    expect(post?.network_id).toBe("netA");
+  });
+
+  test("first write of a new node_id → inserted (callerNet becomes owner)", () => {
+    const nid = `node_${uuidv4()}`;
+    const outcome = upsertNodeWithSec1Guard({
+      node_id: nid,
+      callerNetworkId: "netC",
+      alias: "freshman",
+    });
+    expect(outcome.result).toBe("inserted");
+    const post = db.get<any>(
+      "SELECT network_id, alias FROM nodes WHERE node_id = ?1",
+      nid,
+    );
+    expect(post.network_id).toBe("netC");
+    expect(post.alias).toBe("freshman");
+  });
+
+  test("default-network caller against named-network node → refused (no implicit promotion)", () => {
+    const nid = insertNode({ alias: "named-only", network_id: "netA" });
+    const outcome = upsertNodeWithSec1Guard({
+      node_id: nid,
+      callerNetworkId: null,  // default
+      alias: "implicit-promote-attempt",
+    });
+    expect(outcome.result).toBe("refused");
+    const post = db.get<any>("SELECT network_id, alias FROM nodes WHERE node_id = ?1", nid);
+    expect(post.network_id).toBe("netA");
+    expect(post.alias).toBe("named-only");
   });
 });
 

@@ -412,79 +412,26 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         } catch {}
       }
 
-      // V2: upsert nodes table for persistent node identity.
-      //
-      // PR A SEC follow-up (#287 cross-tenant trust-root catch by 通信牛
-      // 2026-06-28): node_id is caller-supplied; if a netA ntok_ knows
-      // / guesses a netB node_id, the old `ON CONFLICT DO UPDATE` re-
-      // homed the row by writing the caller's effectiveNetId into
-      // nodes.network_id. resolveTargetNode() in the config-apply tools
-      // reads exactly that field to authorize writes — so an attacker
-      // could re-home a row, then become "authorized" to flip its
-      // config. The cross-tenant防护带 SEC-1 depends on this row being
-      // owned by the network that originally claimed the node_id.
-      //
-      // Fix: SELECT-then-decide. On node_id conflict:
-      //   - If existing.network_id is unset (legacy row pre-network_id
-      //     migration), claim it (bootstrap).
-      //   - If existing.network_id matches caller's enforceNetworkId
-      //     (incl. default/null both sides), update normally.
-      //   - Otherwise, SILENTLY SKIP the upsert (and the snapshot
-      //     write below). report_status is a periodic heartbeat — a
-      //     loud error would log-flood. The caller eventually notices
-      //     when its own writes to its own node_id don't take effect,
-      //     and dashboard's GET /api/nodes/{id}/config (network-scoped)
-      //     never surfaces the foreign row.
+      // V2: upsert nodes table for persistent node identity. SEC-1
+      // gate (PR A #287 follow-up, 通信牛 catch 2026-06-28): delegate
+      // to upsertNodeWithSec1Guard so production + test exercise the
+      // exact same code path. See helper below registerTools.
       if (node_id) {
         try {
-          // Extract runtime from agent field (e.g., "agent-node:codex" → "codex-sdk")
           const nodeRuntime = ag?.includes(":") ? ag.split(":")[1] + "-sdk" : ag ?? null;
-          const callerNet = effectiveNetId ?? null;
-          const existing = db.get<{ network_id: string | null }>(
-            "SELECT network_id FROM nodes WHERE node_id = ?1",
+          upsertNodeWithSec1Guard({
             node_id,
-          );
-          const norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
-          const sec1Ok = !existing
-            || existing.network_id === null
-            || existing.network_id === undefined
-            || norm(existing.network_id) === norm(callerNet);
-
-          if (!sec1Ok) {
-            // Cross-tenant attempt — refuse to mutate but allow the
-            // rest of the heartbeat (sessions/inbox below) to run as
-            // normal so the caller's own observable state is unaffected.
-            console.warn(
-              `[commhub] 🚫 report_status cross-network node upsert refused: caller-net=${callerNet ?? "default"} existing-net=${existing!.network_id} node_id=${node_id}`,
-            );
-          } else {
-            db.run(
-              `INSERT INTO nodes (node_id, node_name, alias, runtime, model, config_path, channels, server, hostname, network_id, updated_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'))
-               ON CONFLICT(node_id) DO UPDATE SET
-                 node_name = COALESCE(?2, nodes.node_name),
-                 alias = COALESCE(?3, nodes.alias),
-                 runtime = COALESCE(?4, nodes.runtime),
-                 model = COALESCE(?5, nodes.model),
-                 config_path = COALESCE(?6, nodes.config_path),
-                 channels = COALESCE(?7, nodes.channels),
-                 server = COALESCE(?8, nodes.server),
-                 hostname = COALESCE(?9, nodes.hostname),
-                 network_id = COALESCE(?10, nodes.network_id),
-                 updated_at = datetime('now')`,
-              [node_id, nn || effectiveAlias, effectiveAlias, nodeRuntime, mdl ?? null, config_path ?? null, channels ?? null, srv ?? null, hn ?? null, effectiveNetId ?? null]
-            );
-            // RFC-024 B6 — write the masked config_snapshot if provided.
-            // Same SEC-1 gate: only writes when the node row is owned by
-            // the caller's network (the sec1Ok guard above already
-            // gated this whole block).
-            if (cfgSnap) {
-              db.run(
-                `UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`,
-                [JSON.stringify(cfgSnap), node_id],
-              );
-            }
-          }
+            callerNetworkId: effectiveNetId ?? null,
+            node_name: nn || effectiveAlias,
+            alias: effectiveAlias,
+            runtime: nodeRuntime,
+            model: mdl ?? null,
+            config_path: config_path ?? null,
+            channels: channels ?? null,
+            server: srv ?? null,
+            hostname: hn ?? null,
+            config_snapshot: cfgSnap ?? null,
+          });
         } catch {}
       }
 
@@ -1481,8 +1428,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       nodeId,
     );
     if (!row) return { row: null, sec1Ok: false };
-    const nodeNet = row.network_id || "default";
-    const callerNet = callerNetworkId || "default";
+    // Use the same null/undefined → "default" normalization as the
+    // report_status upsert guard (norm() helper) — `||` would also
+    // coerce `""` to "default", which is unreachable in the V3 model
+    // today but better aligned to avoid drift if any future migration
+    // ever introduces empty-string network_ids. Single source of
+    // truth: nullish-only.
+    const nodeNet = row.network_id === null || row.network_id === undefined ? "default" : row.network_id;
+    const callerNet = callerNetworkId === null || callerNetworkId === undefined ? "default" : callerNetworkId;
     return { row, sec1Ok: nodeNet === callerNet };
   };
 
@@ -1804,4 +1757,98 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       };
     },
   );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// PR A SEC follow-up (#287 cross-tenant trust-root catch, 通信牛
+// 2026-06-28) — exported so the production report_status path AND
+// the regression test in config-apply-sec1.test.ts exercise the SAME
+// code. Per 通信龙 test-quality finding: an inline-mirror test that
+// re-implements the gate inside the test body provides zero
+// protection against guard drift. By forcing both code paths through
+// this single helper, deleting / weakening the gate fails the test.
+//
+// Returns a discriminated outcome so callers can log/route the refused
+// case (production: silent skip + console.warn; tests: assertion).
+// ────────────────────────────────────────────────────────────────────
+export interface UpsertNodeWithSec1GuardInput {
+  node_id: string;
+  callerNetworkId: string | null;
+  node_name?: string | null;
+  alias?: string | null;
+  runtime?: string | null;
+  model?: string | null;
+  config_path?: string | null;
+  channels?: string | null;
+  server?: string | null;
+  hostname?: string | null;
+  config_snapshot?: unknown | null;
+}
+export type UpsertNodeOutcome =
+  | { result: "inserted" | "updated"; node_id: string }
+  | { result: "refused"; reason: "cross_network"; existingNet: string | null; callerNet: string | null }
+  | { result: "skipped"; reason: "missing_node_id" };
+
+const _norm = (x: string | null | undefined) => (x === null || x === undefined ? "default" : x);
+
+export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): UpsertNodeOutcome {
+  if (!input.node_id) return { result: "skipped", reason: "missing_node_id" };
+  const existing = db.get<{ network_id: string | null }>(
+    "SELECT network_id FROM nodes WHERE node_id = ?1",
+    input.node_id,
+  );
+  const callerNet = input.callerNetworkId;
+
+  // Legacy / first-write paths: row missing OR network_id NULL → claim.
+  const isLegacy = !existing
+    || existing.network_id === null
+    || existing.network_id === undefined;
+  const sec1Ok = isLegacy || _norm(existing.network_id) === _norm(callerNet);
+
+  if (!sec1Ok) {
+    console.warn(
+      `[commhub] 🚫 report_status cross-network node upsert refused: caller-net=${callerNet ?? "default"} existing-net=${existing!.network_id} node_id=${input.node_id}`,
+    );
+    return {
+      result: "refused",
+      reason: "cross_network",
+      existingNet: existing!.network_id,
+      callerNet,
+    };
+  }
+
+  db.run(
+    `INSERT INTO nodes (node_id, node_name, alias, runtime, model, config_path, channels, server, hostname, network_id, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'))
+     ON CONFLICT(node_id) DO UPDATE SET
+       node_name = COALESCE(?2, nodes.node_name),
+       alias = COALESCE(?3, nodes.alias),
+       runtime = COALESCE(?4, nodes.runtime),
+       model = COALESCE(?5, nodes.model),
+       config_path = COALESCE(?6, nodes.config_path),
+       channels = COALESCE(?7, nodes.channels),
+       server = COALESCE(?8, nodes.server),
+       hostname = COALESCE(?9, nodes.hostname),
+       network_id = COALESCE(?10, nodes.network_id),
+       updated_at = datetime('now')`,
+    [
+      input.node_id,
+      input.node_name ?? input.alias ?? null,
+      input.alias ?? null,
+      input.runtime ?? null,
+      input.model ?? null,
+      input.config_path ?? null,
+      input.channels ?? null,
+      input.server ?? null,
+      input.hostname ?? null,
+      callerNet ?? null,
+    ],
+  );
+  if (input.config_snapshot) {
+    db.run(
+      `UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`,
+      [JSON.stringify(input.config_snapshot), input.node_id],
+    );
+  }
+  return { result: existing ? "updated" : "inserted", node_id: input.node_id };
 }
