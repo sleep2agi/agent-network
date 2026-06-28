@@ -9,6 +9,7 @@ import {
   resolveFeishuAccess,
   normalizeAllowFrom,
   buildEmptyAllowlistWarn,
+  loadTelegramAccess,
 } from "./access-resolve";
 
 describe("normalizeAllowFrom — input shapes", () => {
@@ -298,6 +299,122 @@ describe("buildEmptyAllowlistWarn — boot-time visibility", () => {
       allowFrom: ["*"],
     });
     expect(w).toBeNull();
+  });
+});
+
+describe("loadTelegramAccess + resolver — wiring regression (CHANGE_REQ on #276)", () => {
+  // Background: `initTelegramChannel` used to normalise allowFrom via
+  // `Array.isArray(...) ? .map(String) : []`. For an access.json shape
+  // of `{allowFrom: [123]}`, the result was `["123"]` — a non-empty
+  // string list that the resolver then treats as a valid allowlist.
+  // The fail-closed flip was bypassed for any caller whose id stringified
+  // to a member of that list. These tests pin the fix at the wiring
+  // layer (loader → channel state → resolver) so a future "convenience"
+  // cleanup cannot re-introduce the bypass.
+
+  test("loader stores raw allowFrom verbatim — no normalization at load time", () => {
+    // Subtle but important: the loader MUST pass `allowFromRaw`
+    // through unchanged. Any cleanup / coercion at this layer
+    // re-introduces the bypass class.
+    const loaded = loadTelegramAccess({
+      channelDir: "/tmp/x",
+      parsedAccess: { allowFrom: [123, null, { foo: "bar" }, "@vansin"] as any },
+    });
+    expect(loaded.allowFromRaw).toEqual([123, null, { foo: "bar" }, "@vansin"]);
+  });
+
+  test("loader emits boot-warn when allowFrom is missing", () => {
+    const loaded = loadTelegramAccess({ channelDir: "/tmp/x", parsedAccess: {} });
+    expect(loaded.bootWarn).not.toBeNull();
+  });
+
+  test("loader emits boot-warn when allowFrom is malformed (non-array)", () => {
+    const loaded = loadTelegramAccess({ channelDir: "/tmp/x", parsedAccess: { allowFrom: "wrong" as any } });
+    expect(loaded.bootWarn).not.toBeNull();
+    expect(loaded.bootWarn).toMatch(/malformed/);
+  });
+
+  test("loader is silent when allowFrom has at least one entry (even if numeric)", () => {
+    // The boot-warn fires on EMPTY (after normalization) — `[123]` is
+    // empty after filter-non-strings, so the warn SHOULD fire. This
+    // test pins that contract.
+    const loaded = loadTelegramAccess({ channelDir: "/tmp/x", parsedAccess: { allowFrom: [123] as any } });
+    expect(loaded.bootWarn).not.toBeNull();
+  });
+
+  test("[123] alone (numeric sender id from a misformatted access.json) → loader+resolver fail-closed", () => {
+    // The exact bypass shape from the CHANGE_REQ on #276. A misformatted
+    // access.json with numeric ids would, pre-fix, normalize to ["123"]
+    // and the resolver would happily allow sender id "123".
+    const loaded = loadTelegramAccess({ channelDir: "/d", parsedAccess: { allowFrom: [123] as any } });
+    const decision = resolveTelegramAccess({
+      allowFrom: loaded.allowFromRaw,
+      senderId: "123",
+    });
+    expect(decision.allow).toBe(false);
+    expect(decision.kind).toBe("empty-fail-closed");
+  });
+
+  test("[null] (corrupted access.json) → loader+resolver fail-closed", () => {
+    const loaded = loadTelegramAccess({ channelDir: "/d", parsedAccess: { allowFrom: [null] as any } });
+    const decision = resolveTelegramAccess({
+      allowFrom: loaded.allowFromRaw,
+      senderId: "anyone",
+    });
+    expect(decision.allow).toBe(false);
+    expect(decision.kind).toBe("empty-fail-closed");
+  });
+
+  test("[{}] (object instead of id string) → loader+resolver fail-closed", () => {
+    const loaded = loadTelegramAccess({ channelDir: "/d", parsedAccess: { allowFrom: [{}] as any } });
+    const decision = resolveTelegramAccess({
+      allowFrom: loaded.allowFromRaw,
+      senderId: "anyone",
+    });
+    expect(decision.allow).toBe(false);
+    expect(decision.kind).toBe("empty-fail-closed");
+  });
+
+  test("[123, '@vansin'] (mixed) → '@vansin' still allowed, numeric '123' rejected", () => {
+    // Mixed list keeps the valid string entries — `@vansin` should still
+    // be allowed, but a sender that happens to stringify to "123" must
+    // still be denied (no implicit number → string coercion at lookup).
+    const loaded = loadTelegramAccess({ channelDir: "/d", parsedAccess: { allowFrom: [123, "@vansin"] as any } });
+    const allowVansin = resolveTelegramAccess({
+      allowFrom: loaded.allowFromRaw,
+      senderId: "999",
+      senderUsername: "@vansin",
+    });
+    expect(allowVansin.allow).toBe(true);
+    expect(allowVansin.kind).toBe("explicit-allow");
+
+    const denyNumericSender = resolveTelegramAccess({
+      allowFrom: loaded.allowFromRaw,
+      senderId: "123",
+      senderUsername: undefined,
+    });
+    expect(denyNumericSender.allow).toBe(false);
+    expect(denyNumericSender.kind).toBe("denied");
+  });
+
+  test("[null, '*'] (mixed wildcard) → wildcard wins despite garbage entries", () => {
+    // The valid `"*"` entry MUST still open the channel — garbage entries
+    // shouldn't poison wildcard handling either.
+    const loaded = loadTelegramAccess({ channelDir: "/d", parsedAccess: { allowFrom: [null, "*"] as any } });
+    const d = resolveTelegramAccess({
+      allowFrom: loaded.allowFromRaw,
+      senderId: "anyone",
+    });
+    expect(d.allow).toBe(true);
+    expect(d.kind).toBe("wildcard-allow");
+  });
+
+  test("missing access.json entirely (loader gets null) → fail-closed", () => {
+    const loaded = loadTelegramAccess({ channelDir: "/d", parsedAccess: null });
+    expect(loaded.allowFromRaw).toBeUndefined();
+    const d = resolveTelegramAccess({ allowFrom: loaded.allowFromRaw, senderId: "x" });
+    expect(d.allow).toBe(false);
+    expect(d.kind).toBe("empty-fail-closed");
   });
 });
 

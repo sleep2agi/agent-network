@@ -64,7 +64,7 @@ import {
   type ConfigUpdate,
   type ConfigPatch,
 } from "./runtime/config-apply";
-import { resolveTelegramAccess, buildEmptyAllowlistWarn } from "./util/access-resolve";
+import { resolveTelegramAccess, buildEmptyAllowlistWarn, loadTelegramAccess } from "./util/access-resolve";
 
 const home = homedir();
 
@@ -558,7 +558,12 @@ interface TelegramChannel {
   dir: string;
   inboxDir: string;
   token: string;
-  allowFrom: string[];
+  // Raw value from access.json. Stored unprocessed so resolveTelegramAccess
+  // is the single source of truth for normalization. The previous
+  // `.map(String)` shape at init time silently rewrote [123] → ["123"],
+  // which bypassed the fail-closed check at message time because the
+  // resolver saw a "valid" non-empty string list.
+  allowFromRaw: unknown;
 }
 
 function initTelegramChannel(spec: { type: string; path?: string; raw: string }): TelegramChannel {
@@ -580,18 +585,19 @@ function initTelegramChannel(spec: { type: string; path?: string; raw: string })
   // allowFrom is empty / malformed so operators see the fail-closed
   // posture immediately, rather than discovering it the first time a
   // message gets denied. Wildcard ["*"] / non-empty lists are silent.
-  const warning = buildEmptyAllowlistWarn({
-    channel: "telegram",
-    channelDir: dir,
-    allowFrom: access.allowFrom,
-  });
-  if (warning) console.warn(warning);
+  //
+  // loadTelegramAccess returns the raw allowFrom value verbatim so the
+  // resolver is the single source of truth for normalisation — the
+  // previous `.map(String)` shape silently rewrote [123] into ["123"]
+  // and bypassed the fail-closed check at message time.
+  const loaded = loadTelegramAccess({ channelDir: dir, parsedAccess: access });
+  if (loaded.bootWarn) console.warn(loaded.bootWarn);
   return {
     type: "telegram",
     dir,
     inboxDir,
     token,
-    allowFrom: Array.isArray(access.allowFrom) ? access.allowFrom.map(String) : [],
+    allowFromRaw: loaded.allowFromRaw,
   };
 }
 
@@ -2825,7 +2831,7 @@ function telegramAllowed(channel: TelegramChannel, msg: any): boolean {
   // any Telegram user. Resolution is delegated to the shared helper
   // so feishu / future channels share the same fail-mode.
   const decision = resolveTelegramAccess({
-    allowFrom: channel.allowFrom,
+    allowFrom: channel.allowFromRaw,
     senderId: telegramUserId(msg),
     senderUsername: msg.from?.username ? String(msg.from.username) : null,
   });

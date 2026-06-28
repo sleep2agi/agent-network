@@ -31,6 +31,40 @@
 // is observed.
 
 /**
+ * Tiny loader that mirrors what `initTelegramChannel` does at boot —
+ * read the parsed access.json blob and produce both the raw allowFrom
+ * payload (handed to the resolver verbatim) AND a boot-time warning
+ * string for the empty / malformed case.
+ *
+ * Extracted so wiring-level regression tests (e.g. "channel state
+ * built from `{allowFrom: [123]}` MUST fail-closed when a message
+ * arrives") run without spinning up a real telegram channel + fs
+ * mocks. The previous bug — `.map(String)` rewriting [123] into
+ * ["123"] at init time — slipped past resolver-only unit tests
+ * because the resolver never saw the offending shape; the channel
+ * state did.
+ */
+export interface LoadedTelegramAccess {
+  /** Raw value from access.json — handed verbatim to resolveTelegramAccess. */
+  allowFromRaw: unknown;
+  /** Boot-time warning string when allowFrom is empty / malformed; null otherwise. */
+  bootWarn: string | null;
+}
+
+export function loadTelegramAccess(opts: {
+  channelDir: string;
+  parsedAccess: { allowFrom?: unknown } | null | undefined;
+}): LoadedTelegramAccess {
+  const allowFromRaw = opts.parsedAccess?.allowFrom;
+  const bootWarn = buildEmptyAllowlistWarn({
+    channel: "telegram",
+    channelDir: opts.channelDir,
+    allowFrom: allowFromRaw,
+  });
+  return { allowFromRaw, bootWarn };
+}
+
+/**
  * Discriminated reason for an access decision. Callers can switch on
  * `kind` for routing (e.g. `empty-fail-closed` warrants a louder boot
  * warning than a simple `denied` mid-stream).
