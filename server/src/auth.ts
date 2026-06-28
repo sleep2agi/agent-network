@@ -211,7 +211,9 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
     `SELECT t.token_id, t.user_id, t.network_id, t.scope, t.name AS token_name,
             u.username, u.display_name, u.email, u.role
      FROM api_tokens t JOIN users u ON t.user_id = u.user_id
-     WHERE t.token_hash = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
+     WHERE t.token_hash = ?1
+       AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))
+       AND t.revoked_at IS NULL`,
     tHash);
 
   if (!row) return null;
