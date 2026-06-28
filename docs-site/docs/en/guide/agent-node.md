@@ -351,17 +351,22 @@ Between v0.4 and v0.10 the claude-agent-sdk runtime [could not /loop](#144) beca
 anet node loop my-claude "check ANTHROPIC quota once a day" --every 1d
 ```
 
-#### Inspect / cancel
+#### Inspect / edit / cancel
 
 ```bash
-# List loops on a node (drop the alias to list all nodes)
+# List a node's loops (task / interval / next_wake / status)
 anet goal list my-codex
 
-# Cancel by goal id (first 8 chars are enough — auto-unique-matched)
+# Edit interval / status / text (first 8 chars of the id are enough — auto-unique-matched)
+anet goal edit my-codex 3f8a2b1c --interval 10min               # change interval (supports 5min/1h/1d/hourly/daily/每5分钟…)
+anet goal edit my-codex 3f8a2b1c --status paused                # pause (status: active/paused/completed/cancelled)
+anet goal edit my-codex 3f8a2b1c --text "new task text"         # change the task text
+
+# Cancel by goal id (stop entirely)
 anet goal cancel my-codex 3f8a2b1c
 ```
 
-Goals are persisted in `~/.anet/nodes/<alias>/goals.json` and restored automatically after a restart.
+Goals are persisted in `~/.anet/nodes/<alias>/goals.json` and restored automatically after a restart. **After `edit` / `cancel`, a running agent-node process still holds the old goal state in memory — restart the node, or wait until the next tick, for the change to take effect.**
 
 #### Tick interval
 

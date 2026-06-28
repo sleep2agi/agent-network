@@ -64,8 +64,12 @@ anet upgrade --channel preview                              # 1. Upgrade to the 
 anet --version                                              # 2. Confirm 2.3.0-preview.1
 anet node start <alias>                                     # 3. Make sure the node is online
 anet node loop <alias> "what time is it now" --every 5m     # 4. Schedule a recurring task (every 5 min)
-anet goal list <alias>                                      # 5. List the node's running loops
-anet goal cancel <goal-id>                                  # 6. Cancel a specific loop
+
+# Manage loops ↓
+anet goal list <alias>                                      # 5a. List loops (task/interval/next_wake/status)
+anet goal edit <alias> <goal-id> --interval 10min           # 5b. Change the interval
+anet goal edit <alias> <goal-id> --status paused            # 5c. Pause (status: active/paused/completed/cancelled)
+anet goal cancel <alias> <goal-id>                          # 5d. Cancel
 ```
 
 **Channel-equivalent form** (works inside the node's interactive prompt / Dashboard Chat / Feishu `@bot` etc. — same effect):
