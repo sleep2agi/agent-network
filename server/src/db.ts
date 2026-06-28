@@ -831,14 +831,55 @@ export function verifyPassword(plain: string, stored: string): { ok: boolean; ne
   // compared via JS === which is variable-time on first-differing
   // char — the timing leak is tiny for fixed-format hex but pin the
   // habit). Both are exactly 64 hex chars when sha256 produced.
-  if (stored.length !== legacy.length) return { ok: false, needsRehash: false };
+  if (stored.length !== legacy.length) {
+    // Length mismatch is itself indistinguishable from a parse miss
+    // — but we still pay the scrypt to keep this branch's timing
+    // peer to the verify branches below.
+    burnEqualTimeScrypt(plain);
+    return { ok: false, needsRehash: false };
+  }
   let ok = false;
   try {
     ok = timingSafeEqual(Buffer.from(stored, "hex"), Buffer.from(legacy, "hex"));
   } catch {
+    burnEqualTimeScrypt(plain);
     return { ok: false, needsRehash: false };
   }
+  // Timing-oracle close (round-6 round-2 — independent reviewer flag):
+  // legacy-OK   path callers (auth.ts:login) do `hashPassword(password)`
+  //             immediately after to rehash → one scrypt cost on top of
+  //             this function's return. ~50ms.
+  // legacy-WRONG path callers reject and return → ZERO additional cost.
+  //
+  // That asymmetry leaks "is this user on the legacy hash" via wall-
+  // clock difference (sub-ms wrong vs ~50ms ok). To close it, burn an
+  // equal-time scrypt on the wrong-password branch too. Now both
+  // legacy paths cost SHA-256 + one scrypt, matching new-format paths
+  // and the missing-user dummy-scrypt path.
+  if (!ok) {
+    burnEqualTimeScrypt(plain);
+  }
   return { ok, needsRehash: ok };
+}
+
+// Round-6 round-2 hardening — throwaway scrypt to equalize timing on
+// failure paths. Burns the same wall-clock cost as a real
+// hashPassword() call. Result discarded; salt is a fresh random so
+// the work is real (not optimised away). Cost ~N=14 → 50ms,
+// COMMHUB_SCRYPT_N controlled like the real path.
+function burnEqualTimeScrypt(plain: string): void {
+  try {
+    const N = getScryptN();
+    scryptSync(plain, randomBytes(SCRYPT_SALT_BYTES), SCRYPT_KEYLEN, {
+      N: 1 << N,
+      r: SCRYPT_R,
+      p: SCRYPT_P,
+      maxmem: SCRYPT_MAXMEM,
+    });
+  } catch {
+    // Even on failure to scrypt (shouldn't happen), don't surface —
+    // this is a timing pacer, not a correctness path.
+  }
 }
 
 export function hashToken(token: string): string {

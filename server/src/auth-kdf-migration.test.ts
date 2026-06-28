@@ -275,6 +275,87 @@ describe("login — username enumeration timing-oracle close (round-6 A1 hardeni
   });
 });
 
+describe("login — timing parity across all 3 failure paths (round-6 round-2)", () => {
+  // Independent reviewer's round-2 catch on #285: the round-1 dummy-
+  // scrypt fix only equalized the !user (missing) path. legacy-user-
+  // wrong-password still ran SHA-256 only (sub-ms) while new-format-
+  // user-wrong-password ran scrypt (~50ms). That ~50x gap let an
+  // attacker distinguish "this username exists on a legacy hash" from
+  // "this username has been migrated" or "doesn't exist". Fix: burn
+  // an equal-time scrypt on the legacy-wrong-password path so all
+  // three failure paths cost SHA-256 + 1 scrypt.
+  //
+  // The test asserts ORDER-OF-MAGNITUDE timing parity (max/min ratio
+  // < 5x) — generous to avoid CI flake but pre-fix would be 50x+.
+  test("all 3 wrong-password paths take comparable scrypt-class time", () => {
+    // Setup: one user with new-format hash, one with legacy SHA-256
+    // seeded directly.
+    register("new-user", "NewUserP@ss1");
+
+    const legacyUserId = "usr_legacy_oracle";
+    const legacyHashed = new Bun.CryptoHasher("sha256").update("anet:LegacyP@ss1").digest("hex");
+    db.run(
+      `INSERT INTO users (user_id, username, password_hash, role) VALUES (?1, ?2, ?3, 'user')`,
+      [legacyUserId, "legacy-user", legacyHashed]
+    );
+
+    // Warm JIT + scrypt code paths
+    login("new-user", "wrong");
+    login("legacy-user", "wrong");
+    login("nobody-here-warmup", "wrong");
+
+    const sample = (fn: () => void): number => {
+      const N = 5;
+      const xs: number[] = [];
+      for (let i = 0; i < N; i++) {
+        const start = performance.now();
+        fn();
+        xs.push(performance.now() - start);
+      }
+      xs.sort((a, b) => a - b);
+      return xs[Math.floor(N / 2)];
+    };
+
+    const tNewWrong = sample(() => { login("new-user", "wrong"); });
+    const tLegacyWrong = sample(() => { login("legacy-user", "wrong"); });
+    const tMissing = sample(() => { login("nobody-here-" + Math.random(), "wrong"); });
+
+    // All three must run scrypt (> 1ms floor — early returns are sub-ms)
+    expect(tNewWrong).toBeGreaterThan(1);
+    expect(tLegacyWrong).toBeGreaterThan(1);
+    expect(tMissing).toBeGreaterThan(1);
+
+    // Order-of-magnitude parity. Pre-fix tLegacyWrong vs tNewWrong
+    // would be 50x+. Generous 5x cap absorbs CI scheduling jitter.
+    const maxT = Math.max(tNewWrong, tLegacyWrong, tMissing);
+    const minT = Math.max(0.1, Math.min(tNewWrong, tLegacyWrong, tMissing));
+    expect(maxT / minT).toBeLessThan(5);
+  });
+
+  test("legacy-wrong-password returns the same generic error string as the other paths", () => {
+    const legacyUserId = "usr_legacy_str";
+    const legacyHashed = new Bun.CryptoHasher("sha256").update("anet:Pw1").digest("hex");
+    db.run(
+      `INSERT INTO users (user_id, username, password_hash, role) VALUES (?1, ?2, ?3, 'user')`,
+      [legacyUserId, "legacy-str", legacyHashed]
+    );
+    register("new-str", "NewP@ss1");
+
+    const a = login("legacy-str", "wrong");
+    const b = login("new-str", "wrong");
+    const c = login("does-not-exist", "wrong");
+
+    expect(a.ok).toBe(false);
+    expect(b.ok).toBe(false);
+    expect(c.ok).toBe(false);
+    // All three must say EXACTLY the same thing or the oracle reopens
+    // at the response-body layer.
+    expect(a.error).toBe("invalid username or password");
+    expect(b.error).toBe(a.error);
+    expect(c.error).toBe(a.error);
+  });
+});
+
 describe("ordering invariant — single login transition (round-6 spec)", () => {
   // The dispatch's load-bearing post-condition: "post-upgrade 旧串
   // 不再存在 in DB". One concise pin.
