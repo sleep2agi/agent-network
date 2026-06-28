@@ -7,12 +7,20 @@
 // post-parse as a defence-in-depth check.
 //
 // Accepted forms (case-insensitive on ASCII; locale-sensitive on CJK):
-//   English: `5min`, `5 min`, `5 minute`, `5 minutes`, `1h`, `1 hour`,
-//            `2 hours`, `hourly`, `daily`, `1 day`
-//   Chinese: `5分钟`, `每5分钟`, `1小时`, `每小时`, `每天`
+//   Single-letter: `5m`, `2h`, `1d` (matches what `anet node loop --every`
+//                  emits — keep parser and CLI in lockstep).
+//   English:       `5min`, `5 min`, `5 minute`, `5 minutes`,
+//                  `1h`, `1 hour`, `2 hours`, `hourly`, `daily`, `1 day`
+//   Chinese:       `5分钟`, `每5分钟`, `1小时`, `每小时`, `每天`
 //
 // Rejected: sub-minute units (`5s`, `30秒`), no interval at all, bare
 // numbers without units (`/goal 5 check` — unit-free 5 is ambiguous).
+//
+// #144 round-6 (this fix): added single-letter `m`/`h`/`d` so that
+// `anet node loop <alias> "<task>" --every 5m` actually creates a goal
+// instead of silent-failing. The CLI emits `5m` / `30s` / `2h` / `1d`
+// straight from `--every` and previously the parser rejected all of them
+// because INTERVAL_PATTERNS only matched word-form unit names.
 
 export const MIN_INTERVAL_MS = 60_000;
 
@@ -56,6 +64,17 @@ const INTERVAL_PATTERNS: Array<{
   { re: /(\d+)\s*(?:minutes|minute|mins|min)\b/i, toMs: (m) => parseInt(m[1], 10) * 60_000 },
   { re: /(\d+)\s*(?:hours|hour|hrs|hr)\b/i, toMs: (m) => parseInt(m[1], 10) * 60 * 60_000 },
   { re: /(\d+)\s*(?:days|day)\b/i, toMs: (m) => parseInt(m[1], 10) * 24 * 60 * 60_000 },
+
+  // Single-letter units — matches `anet node loop --every 5m` shape.
+  // Anchored so `5m` isn't accidentally swallowed by `5min` / `5mins`
+  // (those patterns above run FIRST per declaration order and use
+  // `\b` to terminate, so `5m` here only matches when not part of a
+  // word like `5min`). Lookahead `(?![a-zA-Z])` prevents `5min` from
+  // matching the `5m` rule. Lookbehind `(?<!\w)` prevents `pm5h`-like
+  // surprises (no digit/letter immediately before the number).
+  { re: /(?<!\w)(\d+)m(?![a-zA-Z])/i,   toMs: (m) => parseInt(m[1], 10) * 60_000 },
+  { re: /(?<!\w)(\d+)h(?![a-zA-Z])/i,   toMs: (m) => parseInt(m[1], 10) * 60 * 60_000 },
+  { re: /(?<!\w)(\d+)d(?![a-zA-Z])/i,   toMs: (m) => parseInt(m[1], 10) * 24 * 60 * 60_000 },
 ];
 
 // Patterns we recognise as *invalid* (sub-minute units) — surface a clear

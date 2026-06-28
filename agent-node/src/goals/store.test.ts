@@ -12,7 +12,6 @@ import { tmpdir } from "os";
 import {
   GoalStore,
   newGoal,
-  assertNonClaudeRuntime,
   isClaudeRuntime,
   runtimeBucket,
   decideStartupAction,
@@ -207,50 +206,50 @@ describe("P0 runtime gate — name resolution", () => {
   });
 });
 
-describe("P0 runtime gate — assertNonClaudeRuntime", () => {
-  test("throws on every claude alias", () => {
-    for (const name of ["claude", "claude-agent-sdk", "claude-sdk", "agent-sdk"]) {
-      expect(() => assertNonClaudeRuntime(name)).toThrow(/claude runtime/);
+describe("#144 round-6 — claude runtime gate REMOVED, scheduler is universal", () => {
+  // History: pre-#144 a `assertNonClaudeRuntime` gate threw on any
+  // claude alias. The premise (claude-agent-sdk has a native /loop) was
+  // false — SDK is one-shot query(), no persistent CC REPL to host
+  // CronCreate/ScheduleWakeup. Loop silently didn't fire for claude
+  // users. These tests pin the post-#144 universal behaviour: every
+  // recognized runtime (incl. claude) creates + persists goals.
+
+  test("newGoal({runtime: 'claude-agent-sdk'}) succeeds (was the load-bearing bug)", () => {
+    const g = newGoal({ text: "claude loop", interval_ms: 60_000, runtime: "claude-agent-sdk" });
+    expect(g.runtime).toBe("claude-agent-sdk");
+    expect(g.status).toBe("active");
+  });
+
+  test("newGoal succeeds for every recognized runtime alias (no per-bucket carve-out)", () => {
+    for (const rt of [
+      "claude", "claude-agent-sdk", "claude-sdk", "agent-sdk",
+      "codex", "codex-sdk",
+      "grok", "grok-build", "grok-build-acp",
+    ]) {
+      const g = newGoal({ text: "x", interval_ms: 60_000, runtime: rt });
+      expect(g.runtime).toBe(rt);
     }
   });
 
-  test("passes for codex / grok / unknown labels (gate only blocks claude)", () => {
-    for (const name of ["codex-sdk", "codex", "grok-build-acp", "grok", "future-sdk"]) {
-      expect(() => assertNonClaudeRuntime(name)).not.toThrow();
-    }
-  });
-
-  test("newGoal({runtime: 'claude'}) throws — no claude-runtime goal ever lands", () => {
-    expect(() =>
-      newGoal({ text: "should not exist", interval_ms: 60_000, runtime: "claude-agent-sdk" }),
-    ).toThrow(/claude runtime/);
-  });
-
-  test("newGoal succeeds for codex / grok runtimes", () => {
-    const c = newGoal({ text: "codex goal", interval_ms: 60_000, runtime: "codex-sdk" });
-    const g = newGoal({ text: "grok goal", interval_ms: 60_000, runtime: "grok-build-acp" });
-    expect(c.runtime).toBe("codex-sdk");
-    expect(g.runtime).toBe("grok-build-acp");
-  });
-
-  test("GoalStore.upsert refuses claude-runtime goal (defence in depth)", async () => {
-    const { dir, path } = (() => {
-      const d = mkdtempSync(join(tmpdir(), "anet-goals-test-"));
-      return { dir: d, path: join(d, "goals.json") };
-    })();
+  test("GoalStore.upsert accepts a claude-runtime goal end-to-end", async () => {
+    const d = mkdtempSync(join(tmpdir(), "anet-goals-test-"));
+    const path = join(d, "goals.json");
     try {
       const s = new GoalStore(path);
       await s.load();
-      // Build a goal via the legitimate factory then mutate runtime to
-      // simulate a corrupted on-disk record being re-upserted by some
-      // future code path.
-      const g = newGoal({ text: "smuggle", interval_ms: 60_000, runtime: "codex-sdk" });
-      g.runtime = "claude-agent-sdk";
-      await expect(s.upsert(g)).rejects.toThrow(/claude runtime/);
-      expect(await s.list()).toEqual([]);  // store stayed clean
+      const g = newGoal({ text: "claude e2e", interval_ms: 60_000, runtime: "claude-agent-sdk" });
+      await s.upsert(g);
+      expect(await s.list()).toHaveLength(1);
+      const loaded = (await s.list())[0];
+      expect(loaded.runtime).toBe("claude-agent-sdk");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true });
     }
+  });
+
+  test("isClaudeRuntime still classifies (kept for cross-bucket detection, not gating)", () => {
+    expect(isClaudeRuntime("claude-agent-sdk")).toBe(true);
+    expect(isClaudeRuntime("codex-sdk")).toBe(false);
   });
 });
 
@@ -314,7 +313,7 @@ describe("P0 runtime gate — archiveAndClear", () => {
   });
 });
 
-describe("P0 runtime gate — decideStartupAction (v0.4 §3.4 matrix)", () => {
+describe("#144 round-6 — decideStartupAction (refined-B matrix)", () => {
   function activeGoal(runtime: string): AgentGoal {
     return newGoal({ text: "x", interval_ms: 60_000, runtime });
   }
@@ -324,50 +323,75 @@ describe("P0 runtime gate — decideStartupAction (v0.4 §3.4 matrix)", () => {
     return g;
   }
 
-  test("row 1: claude + empty → skip, scheduler off", () => {
+  // ── claude bucket: no longer a special case ──
+
+  test("claude + empty → ok (scheduler runs; was 'skip' pre-#144)", () => {
     const a = decideStartupAction("claude", []);
-    expect(a.kind).toBe("skip");
-    expect(a.runScheduler).toBe(false);
+    expect(a.kind).toBe("ok");
+    expect(a.runScheduler).toBe(true);
   });
 
-  test("row 2: claude + active codex/grok goals → archive verdict", () => {
+  test("claude + only claude-active goals → ok (scheduler runs)", () => {
+    const a = decideStartupAction("claude", [
+      activeGoal("claude-agent-sdk"),
+      activeGoal("claude-agent-sdk"),
+    ]);
+    expect(a.kind).toBe("ok");
+    expect(a.runScheduler).toBe(true);
+  });
+
+  // ── codex / grok: same-bucket happy path ──
+
+  test("codex + empty → ok", () => {
+    const a = decideStartupAction("codex", []);
+    expect(a.kind).toBe("ok");
+    expect(a.runScheduler).toBe(true);
+  });
+
+  test("codex + only codex goals → ok", () => {
+    const a = decideStartupAction("codex", [activeGoal("codex-sdk")]);
+    expect(a.kind).toBe("ok");
+  });
+
+  test("grok + only grok goals → ok", () => {
+    const a = decideStartupAction("grok", [activeGoal("grok-build-acp")]);
+    expect(a.kind).toBe("ok");
+  });
+
+  // ── cross-bucket: archive (NOT fatal) ──
+
+  test("claude + active codex/grok goals → archive + runScheduler=true (recover after archive)", () => {
     const a = decideStartupAction("claude", [
       activeGoal("codex-sdk"),
       activeGoal("grok-build-acp"),
     ]);
     expect(a.kind).toBe("archive");
-    expect(a.runScheduler).toBe(false);
+    expect(a.runScheduler).toBe(true); // ← new: was false pre-#144
     if (a.kind === "archive") {
       expect(a.foreignCount).toBe(2);
       expect(a.foreignBuckets.sort()).toEqual(["codex", "grok"]);
     }
   });
 
-  test("row 2 ignores non-active leftover claude-side (no archive triggered)", () => {
-    const a = decideStartupAction("claude", [
-      inactiveGoal("codex-sdk", "complete"),
-      inactiveGoal("grok-build-acp", "cancelled"),
-    ]);
-    expect(a.kind).toBe("skip");
-  });
-
-  test("row 3a: codex bucket + grok-active leftover → fatal", () => {
+  test("codex + grok-active leftover → archive (NOT fatal exit anymore)", () => {
     const a = decideStartupAction("codex", [activeGoal("grok-build-acp")]);
-    expect(a.kind).toBe("fatal");
-    expect(a.runScheduler).toBe(false);
-    if (a.kind === "fatal") {
+    expect(a.kind).toBe("archive");
+    expect(a.runScheduler).toBe(true); // ← was kind=fatal, runScheduler=false pre-#144
+    if (a.kind === "archive") {
       expect(a.foreignCount).toBe(1);
       expect(a.foreignBuckets).toEqual(["grok"]);
     }
   });
 
-  test("row 3b: grok bucket + codex-active leftover → fatal", () => {
+  test("grok + codex-active leftover → archive", () => {
     const a = decideStartupAction("grok", [activeGoal("codex-sdk")]);
-    expect(a.kind).toBe("fatal");
-    if (a.kind === "fatal") expect(a.foreignBuckets).toEqual(["codex"]);
+    expect(a.kind).toBe("archive");
+    expect(a.runScheduler).toBe(true);
   });
 
-  test("row 3 ignores non-active foreign goals (resolved/cancelled don't block)", () => {
+  // ── non-active foreign goals don't trigger archive ──
+
+  test("inactive foreign-bucket goals do NOT trigger archive (only `active` counts)", () => {
     const a = decideStartupAction("codex", [
       inactiveGoal("grok-build-acp", "complete"),
       activeGoal("codex-sdk"),
@@ -375,28 +399,17 @@ describe("P0 runtime gate — decideStartupAction (v0.4 §3.4 matrix)", () => {
     expect(a.kind).toBe("ok");
   });
 
-  test("row 4: codex bucket + only codex goals → ok, scheduler on", () => {
-    const a = decideStartupAction("codex", [
-      activeGoal("codex-sdk"),
-      activeGoal("codex-sdk"),
+  test("claude with only inactive foreign leftover → ok (just cleanup pending)", () => {
+    const a = decideStartupAction("claude", [
+      inactiveGoal("codex-sdk", "complete"),
+      inactiveGoal("grok-build-acp", "cancelled"),
     ]);
     expect(a.kind).toBe("ok");
-    expect(a.runScheduler).toBe(true);
   });
 
-  test("row 4: grok bucket + only grok goals → ok, scheduler on", () => {
-    const a = decideStartupAction("grok", [activeGoal("grok-build-acp")]);
-    expect(a.kind).toBe("ok");
-    expect(a.runScheduler).toBe(true);
-  });
+  // ── unknown bucket: still skip (defensive) ──
 
-  test("row 4: codex bucket + empty store → ok (fresh node)", () => {
-    const a = decideStartupAction("codex", []);
-    expect(a.kind).toBe("ok");
-    expect(a.runScheduler).toBe(true);
-  });
-
-  test("unknown bucket → skip with warning text (no scheduler, no auto-archive)", () => {
+  test("unknown bucket → skip (no scheduler, no auto-archive)", () => {
     const a = decideStartupAction("unknown", [activeGoal("codex-sdk")]);
     expect(a.kind).toBe("skip");
     expect(a.runScheduler).toBe(false);

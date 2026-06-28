@@ -4919,6 +4919,167 @@ async function projectDown() {
   console.log(`\n  ${stopped}/${nodes.length} stopped${alreadyDown ? ` · ${alreadyDown} were not running` : ""}\n`);
 }
 
+// ── loop ── (#144 round-6)
+//
+// `anet node loop <alias> "<task>" --every 5m`
+//
+// One-liner UX wrapper for the inbox `/loop <interval> <task>` slash
+// command. POSTs a task to commhub via /api/task; the receiving node's
+// inbox handler parses the `/loop` prefix and calls createScheduledGoal,
+// which persists the goal in goals.json + the scheduler tick fires it.
+//
+// Why a CLI wrapper instead of just "send the slash text directly"?
+// Vincent's "使用简单" priority — a non-interactive node operator
+// shouldn't need to memorize slash-command syntax or run a separate
+// `send_task` call. One line, one verb, one task.
+
+async function nodeLoopCommand() {
+  const aliasRef = args[1];
+  const taskText = args[2];
+  if (!aliasRef || !taskText) {
+    console.log(`
+anet node loop <alias> "<task>" --every <interval>
+
+  Schedule a recurring task on a running node. The node will be woken at
+  the chosen interval and asked to make an incremental advance on the
+  task, reporting back each cycle.
+
+Examples:
+  anet node loop my-codex "monitor #271 PR" --every 5m
+  anet node loop researcher "scan twitter for grok updates" --every 30m
+  anet node loop daily-bot "post the morning summary" --every 2h
+  anet node loop nightly-bot "rotate logs"                  --every 1d
+
+Interval format: 5m / 2h / 1d (m/h/d suffix required, integer ≥ 1).
+Sub-minute intervals (e.g. 30s) are not accepted — the scheduler tick
+runs at ~30s cadence so a sub-minute goal would not actually fire any
+faster and risks wake-storm load on the runtime.
+
+Use 'anet goal list <alias>' to see scheduled loops; 'anet goal cancel'
+to stop one.
+`);
+    process.exit(aliasRef ? 1 : 0);
+  }
+
+  // Default 5m if --every omitted (matches Vincent's example cadence
+  // and is the most common cron-style "check periodically" interval).
+  const everyIdx = args.indexOf("--every");
+  const everyRaw = everyIdx >= 0 ? args[everyIdx + 1] : "5m";
+  // CLI mirrors agent-node/src/goals/parser.ts: single-letter m/h/d only,
+  // integer ≥ 1. Sub-minute is rejected by both layers (MIN_INTERVAL_MS
+  // = 60s in the parser); reject here too so the user sees the error
+  // before we POST a doomed task. The previous /^\d+[smhd]$/ pattern
+  // accepted `30s` at the CLI layer but the parser rejected it server-
+  // side → silent fail (CLI printed "Scheduled" but no goal was created).
+  if (!everyRaw || !/^[1-9]\d*[mhd]$/.test(everyRaw)) {
+    console.error(`Invalid --every value "${everyRaw}". Use formats like 5m, 30m, 2h, 1d (sub-minute not allowed).`);
+    process.exit(1);
+  }
+
+  const resolved = resolveNodeRef(aliasRef);
+  if (!resolved) {
+    console.error(`Node "${aliasRef}" not found. Run 'anet node ls' to see registered nodes.`);
+    process.exit(1);
+  }
+
+  const profile = resolved.profile;
+  const displayName = nodeDisplayName(resolved.id, profile);
+  const gc = loadGlobal();
+  const hub = profile.hub || gc.hub || "http://127.0.0.1:9200";
+  const networkId = profile.network_id || gc.network_id || null;
+
+  // The inbox parser at agent-node/src/goals/parser.ts accepts
+  // `/loop <interval> <text>` (and `/goal` as an alias). We assemble
+  // the slash form and POST it as a normal task — the node's inbox
+  // handler routes /loop tasks to createScheduledGoal regardless of
+  // runtime (post-#144 the claude-bucket carve-out is gone).
+  const slashCmd = `/loop ${everyRaw} ${taskText}`;
+  const body = JSON.stringify({
+    alias: displayName,
+    task: slashCmd,
+    priority: "normal",
+    from: "api",
+    network_id: networkId || undefined,
+  });
+
+  let taskId: string;
+  try {
+    const res = await fetch(`${hub}/api/task`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body,
+    });
+    const j: any = await res.json();
+    if (!j?.ok) {
+      console.error(`Failed to enqueue /loop task: ${JSON.stringify(j)}`);
+      process.exit(1);
+    }
+    taskId = j.message_id;
+  } catch (e: any) {
+    console.error(`Failed to reach hub ${hub}: ${e?.message ?? e}`);
+    console.error(`Is the hub running? Try: anet hub start`);
+    process.exit(1);
+  }
+
+  // #144 round-6 hardening — don't claim success until the node has
+  // ACTUALLY created the goal. Previously the CLI printed "✅ Scheduled
+  // loop" the instant /api/task enqueued the task; if the parser
+  // downstream rejected it (e.g. `5m` not matching the old word-only
+  // patterns) the failure reply went back to `from:"api"` and was
+  // invisible to the user — silent fail. Now we poll for the node's
+  // reply and surface what actually happened.
+  console.log(`→ Sent /loop to ${displayName} (task ${taskId.slice(0, 8)}); waiting for node confirmation...`);
+
+  const POLL_DEADLINE_MS = 15_000;
+  const POLL_INTERVAL_MS = 1_000;
+  const started = Date.now();
+  let taskRow: any = null;
+  // Poll `/api/tasks?task_id=<id>` for the task row. After the node
+  // handles the /loop slash command it writes the reply text into
+  // tasks.result + sets status='replied' (or 'failed'). This is the
+  // robust signal — /api/messages doesn't carry in_reply_to in its
+  // SELECT (existing comment at cli.ts:7053), so we can't reliably
+  // match a reply back to our task there.
+  while (Date.now() - started < POLL_DEADLINE_MS) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+    try {
+      const r: any = await fetch(`${hub}/api/tasks?task_id=${encodeURIComponent(taskId)}`, { headers: authHeaders() }).then(x => x.json());
+      const t = (r?.tasks || [])[0];
+      if (t && (t.status === "replied" || t.status === "failed" || t.status === "cancelled") && t.result) {
+        taskRow = t;
+        break;
+      }
+    } catch {
+      // network blip; keep polling
+    }
+  }
+
+  if (!taskRow) {
+    console.error(`⚠ Node ${displayName} did not confirm goal creation within 15s.`);
+    console.error(`  Possible causes: node offline / agent crashed / parser rejected the interval.`);
+    console.error(`  Verify with: anet goal list ${displayName}`);
+    console.error(`  Or inspect node logs at ~/.anet/nodes/${resolved.id}/logs/`);
+    process.exit(1);
+  }
+
+  const replyText = String(taskRow.result || "");
+  // The node's reply text is set by agent-node/src/cli.ts:createScheduledGoal
+  // wrapping success as "已创建 loop 目标 <id>..." or, on failure,
+  // "/loop 创建失败：<reason>".
+  if (taskRow.status === "failed" || (/创建失败|failed/i.test(replyText) && !/已创建 loop 目标/.test(replyText))) {
+    console.error(`❌ Node rejected the /loop command:`);
+    console.error(`   ${replyText.replace(/^\[[^\]]+\]\s*/, "").trim()}`);
+    process.exit(1);
+  }
+
+  console.log(`✅ Scheduled loop on ${displayName}`);
+  console.log(`   every: ${everyRaw}`);
+  console.log(`   task:  ${taskText}`);
+  console.log(`   sent as: ${slashCmd}`);
+  console.log(`\n${replyText.replace(/^\[[^\]]+\]\s*/, "").trim()}`);
+  console.log(`\nUse 'anet goal list ${displayName}' to inspect; 'anet goal cancel ${displayName} <goal-id>' to stop.`);
+}
+
 // ── delete ──
 
 async function deleteCommand() {
@@ -9414,7 +9575,22 @@ if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
       printProjectUsage();
       break;
     case "node":
-      console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|migrate-token-to-envref> [name]`);
+      // #144 — if it's `anet node loop --help` specifically, delegate
+      // to nodeLoopCommand so the user sees the loop-specific help
+      // (examples + interval format) rather than the generic node
+      // subcommand list. Other `anet node <sub> --help` calls still
+      // get the generic node usage.
+      if (args[1] === "loop") {
+        args.splice(0, 1); // drop "node" so nodeLoopCommand sees args[1] as alias slot (no alias → prints loop help)
+        // strip --help so it's not treated as an alias literal
+        const hi = args.indexOf("--help");
+        if (hi >= 0) args.splice(hi, 1);
+        const hi2 = args.indexOf("-h");
+        if (hi2 >= 0) args.splice(hi2, 1);
+        await nodeLoopCommand();
+        process.exit(0);
+      }
+      console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|loop|migrate-token-to-envref> [name]`);
       break;
     default:
       printHelp();
@@ -9438,6 +9614,7 @@ switch (command) {
       case "resume": args.splice(0, 1); await resumeCommand(); break;
       case "delete": args.splice(0, 1); await deleteCommand(); break;
       case "rename": args.splice(0, 1); await renameCommand(); break;
+      case "loop": args.splice(0, 1); await nodeLoopCommand(); break;
       case "ls": case "list": await lsCommand(); break;
       case "restart": {
         // #173 / F7-03 — node restart = stop + start, alias for symmetry
@@ -9452,10 +9629,10 @@ switch (command) {
       default: {
         const sub = args[1];
         if (sub) {
-          const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename"]);
+          const suggestion = suggestSimilar(sub, ["create", "start", "stop", "restart", "resume", "delete", "ls", "rename", "loop"]);
           if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
         }
-        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|migrate-token-to-envref> [name]`);
+        console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|loop|migrate-token-to-envref> [name]`);
         break;
       }
     }

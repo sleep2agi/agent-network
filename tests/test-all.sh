@@ -77,6 +77,13 @@ run_suite "V3 Networks (22)" "/app/test-networks.sh 2>&1"
 reset_server
 run_suite "Config Priority (16)" "/app/test-config.sh 2>&1"
 
+# #144 round-6 — loop runtime gate + universal /loop scheduler
+# regression coverage. Each suite spins its OWN hub on a non-standard
+# port (9210, 9211) with isolated COMMHUB_DB, so they coexist with the
+# above suites that use :9200. No reset_server needed before these.
+run_suite "Loop runtime e2e (20)" "/app/test-loop-runtime.sh 2>&1"
+run_suite "Loop npm-pack install (12)" "/app/test-loop-npm-pack.sh 2>&1"
+
 echo ""
 echo "╔══════════════════════════════════════════════════╗"
 echo "║   Final Report                                    ║"

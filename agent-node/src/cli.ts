@@ -2577,12 +2577,14 @@ async function processInbox() {
         continue;
       }
 
-      // P0 /loop SDK gate (v0.4 §3.4): on claude runtime, anet does NOT
-      // intercept /loop or /goal — let the message flow through to the
-      // claude SDK turn so Claude Code's native /loop skill handles it.
-      // The early-return is the entire hands-off contract; no parse, no
-      // wrap, no forward layer in between.
-      if (RUNTIME !== "claude" && isGoalCommand(content)) {
+      // #144 round-6: anet /loop is universal — all recognized runtimes
+      // (claude / codex / grok) route /loop and /goal commands to the
+      // scheduler. The pre-#144 `RUNTIME !== "claude"` carve-out was
+      // removed because the underlying premise (claude-agent-sdk has a
+      // native /loop) was false: the SDK is one-shot per-task, no
+      // persistent CC REPL to fire CronCreate/ScheduleWakeup from. See
+      // goals/store.ts runtimeBucket comment for full rationale.
+      if (isGoalCommand(content)) {
         let replyText: string;
         let goalFailed = false;
         try {
@@ -3245,10 +3247,12 @@ const allGoals = await goalStore.list();
 const activeGoals = allGoals.filter(g => g.status === "active");
 if (activeGoals.length) log(`  goals active: ${activeGoals.length}`);
 
-// P0 /loop SDK runtime gate (v0.4 §3.4). Decide whether this process can
-// run the anet scheduler at all given the runtime it booted under and the
-// goals already on disk. Pure-function decision; we only act on the
-// verdict here.
+// #144 round-6 — startup runtime dispatch. Pure-function decision over
+// (current runtime bucket, persisted goals); we just act on the verdict.
+// "archive" no longer crashes — pre-#144 the codex↔grok cross-bucket
+// case did `exit(1)` which was hostile UX (silently killing the user's
+// node without recovery guidance). It now archives + clears + continues
+// so the scheduler runs against an empty store.
 const startupBucket = runtimeBucket(RUNTIME);
 const startupAction = decideStartupAction(startupBucket, allGoals);
 let goalsSchedulerEnabled = startupAction.runScheduler;
@@ -3268,12 +3272,9 @@ switch (startupAction.kind) {
     } else {
       warn(`  goals archive skipped — no file to back up`);
     }
+    log(`  goals scheduler: enabled (runtime=${startupBucket}, fresh store)`);
     break;
   }
-  case "fatal":
-    warn(`  goals scheduler: FATAL — ${startupAction.reason}`);
-    warn(`  goals path: ${GOALS_PATH}`);
-    process.exit(1);
 }
 
 await register();
