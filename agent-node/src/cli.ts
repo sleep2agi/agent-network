@@ -64,6 +64,7 @@ import {
   type ConfigUpdate,
   type ConfigPatch,
 } from "./runtime/config-apply";
+import { resolveTelegramAccess, buildEmptyAllowlistWarn } from "./util/access-resolve";
 
 const home = homedir();
 
@@ -575,6 +576,16 @@ function initTelegramChannel(spec: { type: string; path?: string; raw: string })
   const access = loadJson(join(dir, "access.json")) || {};
   const inboxDir = join(dir, "inbox");
   try { mkdirSync(inboxDir, { recursive: true }); } catch {}
+  // v0.11 security change: emit a loud one-shot warn at boot when
+  // allowFrom is empty / malformed so operators see the fail-closed
+  // posture immediately, rather than discovering it the first time a
+  // message gets denied. Wildcard ["*"] / non-empty lists are silent.
+  const warning = buildEmptyAllowlistWarn({
+    channel: "telegram",
+    channelDir: dir,
+    allowFrom: access.allowFrom,
+  });
+  if (warning) console.warn(warning);
   return {
     type: "telegram",
     dir,
@@ -2806,10 +2817,22 @@ function telegramUserLabel(msg: any): string {
 }
 
 function telegramAllowed(channel: TelegramChannel, msg: any): boolean {
-  if (channel.allowFrom.length === 0) return true;
-  const id = telegramUserId(msg);
-  const username = msg.from?.username ? String(msg.from.username) : "";
-  return channel.allowFrom.includes(id) || (!!username && channel.allowFrom.includes(username));
+  // v0.11 security change: fail-closed. Empty / missing / malformed
+  // allowFrom now denies (was: allowed all). Combined with the default
+  // dangerouslySkipPermissions in flags.json, the previous fail-open
+  // default was a remote-execution vector — an `access.json` truncated
+  // by git-stash-u / git-clean-fd would silently accept commands from
+  // any Telegram user. Resolution is delegated to the shared helper
+  // so feishu / future channels share the same fail-mode.
+  const decision = resolveTelegramAccess({
+    allowFrom: channel.allowFrom,
+    senderId: telegramUserId(msg),
+    senderUsername: msg.from?.username ? String(msg.from.username) : null,
+  });
+  if (!decision.allow) {
+    debug(`[telegram] DENY: ${decision.reason}`);
+  }
+  return decision.allow;
 }
 
 async function telegramJson(tg: TelegramApi, method: string, body: Record<string, unknown>) {

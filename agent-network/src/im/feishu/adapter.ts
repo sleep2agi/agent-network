@@ -30,6 +30,7 @@ import type {
   NormalizedIMMessage,
 } from "../types.js";
 import type { FeishuAccessList, FeishuChannelConfig } from "./config.js";
+import { resolveFeishuAccess } from "../access-resolve.js";
 
 type OnEventHandler = (event: NormalizedIMEvent) => Promise<void>;
 
@@ -458,31 +459,28 @@ function checkAccess(
   access: FeishuAccessList,
   groupPolicy: FeishuChannelConfig["groupPolicy"],
 ): { allow: boolean; reason: string } {
-  if (event.conversation.conversationType === "dm") {
-    // Wildcard "*" in allowFrom opens DMs to all senders (Vincent 2026-06-26
-    // request — internal-org bot served to whole company). Specific id match
-    // path kept as-is. Pair with rate-limit at the bridge layer to prevent
-    // token-budget abuse (RATE_LIMIT_TEXT in bridge.ts).
-    if (
-      access.allowFrom.includes("*") ||
-      access.allowFrom.includes(event.sender.id)
-    ) {
-      return { allow: true, reason: "" };
-    }
-    return { allow: false, reason: "sender not in allowFrom (dm)" };
-  }
-  // group / channel / thread share the same whitelist + policy semantics.
-  const chatAllowed =
-    access.allowChats.includes("*") ||
-    access.allowChats.includes(event.conversation.conversationId);
-  if (!chatAllowed) {
-    return { allow: false, reason: "chat not in allowChats" };
-  }
+  // v0.11 — delegate the whitelist + group-policy decision to the shared
+  // resolver so telegram + feishu have one fail-mode contract (mirror at
+  // src/im/access-resolve.ts; canonical at agent-node/src/util/access-
+  // resolve.ts). Mention-gate logic stays here because it depends on
+  // event.mentioned, which is a feishu-specific concept the generic
+  // resolver does not model.
+  const decision = resolveFeishuAccess({
+    conversationType: event.conversation.conversationType,
+    allowFrom: access.allowFrom,
+    allowChats: access.allowChats,
+    senderId: event.sender.id,
+    conversationId: event.conversation.conversationId,
+    groupPolicy: groupPolicy === "command" ? "mention" : groupPolicy,
+  });
+
+  // DM, observe, fail-closed cases are fully decided by the resolver.
+  if (event.conversation.conversationType === "dm") return { allow: decision.allow, reason: decision.reason };
+  if (!decision.allow) return { allow: false, reason: decision.reason };
   if (groupPolicy === "all") return { allow: true, reason: "" };
-  if (groupPolicy === "observe") {
-    return { allow: false, reason: "groupPolicy=observe — chat in allowChats but no trigger" };
-  }
-  // mention | command
+
+  // groupPolicy = "mention" | "command" — resolver said chat is allowed,
+  // but trigger needs the bot to actually be @-mentioned in the message.
   if (event.mentioned) return { allow: true, reason: "" };
   return {
     allow: false,
