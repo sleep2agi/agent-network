@@ -13,14 +13,12 @@
 #
 #   - v0.10.0 PINNED_SERVER_VERSION mismatch — caught last-minute, would
 #     have user-side regressed announced functionality if shipped
-#     (memory: [[feedback_pinned_chain_bump_verify]])
 #   - v0.10.2 release notes only contained `anet upgrade` instructions —
-#     new users had no install path (memory: [[feedback_release_notes_install_upgrade_split]])
+#     new users had no install path
 #   - #136 preview.4 wizard silent exit — host typecheck/build was green
-#     but `npm install -g` into a fresh container exposed install-path break
-#     (memory: [[feedback_docker_smoke_gate_before_ship]])
+#     but `npm install -g` into a fresh container exposed an install-path break
 #   - #137 wizard rc=0 with no UI — host non-TTY drive let a regression
-#     through that real-TTY drive caught (memory: [[feedback_docker_smoke_real_tty]])
+#     through that real-TTY drive caught
 #
 # This workflow encodes the manual SOP as automated gates that run on
 # every tag push and any workflow_dispatch invocation. It is **report-only
@@ -33,7 +31,7 @@
 # @sleep2agi/agent-network or @sleep2agi/agent-node, or on manual dispatch
 # (target package + version supplied as inputs).
 #
-# Gate 1 — install-path smoke (node:24-alpine, no globals leaked in)
+# Gate 1 — install-path smoke (node:24-slim, no globals leaked in)
 #   - `npm install -g <tarball>` from the built artifact (NOT from npm,
 #     so we catch broken bundles BEFORE they're published)
 #   - `anet --version` matches the tag
@@ -220,20 +218,29 @@ jobs:
               done
 
               # case 3 — anet hub start brings up /health and creates admin-utok.json mode 600
+              # We pass an explicit --password so login (case 4) is deterministic;
+              # since 3e4e190 (#261 P0-2) the bootstrap password is random when not
+              # supplied, and it is printed to stdout but never persisted into
+              # admin-utok.json (which holds only username/user_id/token/created_at).
+              # Operator-supplied --password takes precedence over the random path,
+              # so this is the supported way to drive a non-interactive smoke.
               export HOME=/tmp/anethome; mkdir -p "$HOME"
-              nohup anet hub start > /tmp/hub.log 2>&1 &
-              sleep 5
+              GATE_PW="ReleaseGate-$(head -c 16 /dev/urandom | xxd -p)"
+              nohup anet hub start --host 127.0.0.1 --port 9200 \
+                --username admin --password "$GATE_PW" > /tmp/hub.log 2>&1 &
+              for i in $(seq 1 30); do
+                curl -sf http://127.0.0.1:9200/health > /dev/null && break
+                sleep 1
+              done
               curl -sf http://127.0.0.1:9200/health > /dev/null \
                 || { echo "::error::/health did not respond 2xx"; cat /tmp/hub.log; exit 1; }
               mode=$(stat -c %a "$HOME/.anet/server/admin-utok.json")
               [ "$mode" = "600" ] \
                 || { echo "::error::admin-utok.json mode $mode (expected 600)"; exit 1; }
 
-              # case 4 — login resolves (uses the per-install random admin pwd
-              # from server/admin-utok.json metadata, see commit 3e4e190)
-              pw=$(jq -r .bootstrap_password "$HOME/.anet/server/admin-utok.json" 2>/dev/null \
-                   || echo anethub)
-              anet login --hub http://127.0.0.1:9200 --username admin --password "$pw" > /tmp/login.log 2>&1 \
+              # case 4 — login resolves (uses the explicit --password we passed
+              # to hub start above)
+              anet login --hub http://127.0.0.1:9200 --username admin --password "$GATE_PW" > /tmp/login.log 2>&1 \
                 || { echo "::error::anet login failed"; cat /tmp/login.log; exit 1; }
               grep -q "Logged in" /tmp/login.log \
                 || { echo "::error::login output missing success marker"; cat /tmp/login.log; exit 1; }
