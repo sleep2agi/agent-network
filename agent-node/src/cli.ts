@@ -3744,6 +3744,12 @@ if (RUNTIME === "codex" || RUNTIME === "grok") {
   try {
     const { startLoopsHttpServer } = await import("./goals/loops-http-server");
     const maxGoalsEnv = parseInt(process.env.COMMHUB_MAX_GOALS_PER_NODE || "", 10);
+    // RFC-025 M4 e2e — accept pre-set LOOPS_MCP_TOKEN so test
+    // harness can drive the HTTP MCP without scraping /proc/<pid>/
+    // environ (which only reflects exec-time env, not post-startup
+    // process.env mutations). Production never sets this; left
+    // unset, the server generates its own random token as before.
+    const preSetToken = process.env.LOOPS_MCP_TOKEN || undefined;
     loopsHttpServerHandle = await startLoopsHttpServer({
       ctx: {
         store: goalStore,
@@ -3753,6 +3759,7 @@ if (RUNTIME === "codex" || RUNTIME === "grok") {
         recentCancels: loopsCancelTimestamps,
         pendingConfirmTokens: loopsConfirmTokens,
       },
+      token: preSetToken,
     });
     // Hand token to codex CLI / grok ACP subprocess via env (no log,
     // no disk). buildCodexConfig adds mcp_servers.loops referencing
