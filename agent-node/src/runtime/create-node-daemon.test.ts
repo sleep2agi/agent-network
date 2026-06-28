@@ -3,7 +3,11 @@ import {
   validateFlagValueDaemon,
   buildAnetArgsDaemon,
   minimalEnv,
+  loadAndVerifyAnetBin,
 } from "./create-node-daemon.js";
+import { writeFileSync, mkdirSync, symlinkSync, chmodSync, unlinkSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 describe("§4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth)", () => {
   test("permissionMode enum", () => {
@@ -86,6 +90,132 @@ describe("buildAnetArgsDaemon now reaches flag value validation", () => {
       name: "x", runtime: "claude-agent-sdk", model: "x",
       channels: ["telegram"] as any,
     })).toThrow(/channels_not_supported_in_p1/);
+  });
+});
+
+describe("§4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened)", () => {
+  const FIXTURE_DIR = "/tmp/anet-bin-test-fixtures";
+
+  function setup(name: string, body = "#!/bin/sh\necho real"): string {
+    mkdirSync(FIXTURE_DIR, { recursive: true });
+    const p = join(FIXTURE_DIR, name);
+    writeFileSync(p, body, { mode: 0o755 });
+    return p;
+  }
+  function cleanup() {
+    try { rmSync(FIXTURE_DIR, { recursive: true, force: true }); } catch { /* ok */ }
+  }
+
+  test("happy path with hash witness", () => {
+    cleanup();
+    const p = setup("good", "fake-binary-bytes");
+    const expectedHash = createHash("sha256").update("fake-binary-bytes").digest("hex");
+    const got = loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_BIN_SHA256: expectedHash,
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",  // test runs as non-root
+    });
+    expect(got).toBe(p);
+    cleanup();
+  });
+
+  test("REJECT: no ANET_BIN_ABS at all", () => {
+    expect(() => loadAndVerifyAnetBin({
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toThrow(/anet_bin_unsafe_path.*no ANET_BIN_ABS/);
+  });
+
+  test("REJECT: relative path", () => {
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: "anet",
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+    })).toThrow(/anet_bin_unsafe_path.*not absolute/);
+  });
+
+  test("REJECT: symlink (contains symlink component)", () => {
+    cleanup();
+    const realBin = setup("real", "real-content");
+    const symlinkPath = join(FIXTURE_DIR, "via-symlink");
+    try { unlinkSync(symlinkPath); } catch { /* ok */ }
+    symlinkSync(realBin, symlinkPath);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: symlinkPath,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*symlink/);
+    cleanup();
+  });
+
+  test("REJECT: world-writable (mode 0o777)", () => {
+    cleanup();
+    const p = setup("world-writable");
+    chmodSync(p, 0o777);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
+    cleanup();
+  });
+
+  test("REJECT: group-writable (mode 0o775)", () => {
+    cleanup();
+    const p = setup("group-writable");
+    chmodSync(p, 0o775);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*writable by group\/other/);
+    cleanup();
+  });
+
+  test("REJECT: not executable (mode 0o644)", () => {
+    cleanup();
+    const p = setup("not-exec");
+    chmodSync(p, 0o644);
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*not executable/);
+    cleanup();
+  });
+
+  test("REJECT: owner not root (no opt-out)", () => {
+    cleanup();
+    const p = setup("non-root-owner");
+    // test runs as non-root by default; owner=current uid (not 0)
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      // ANET_DAEMON_ALLOW_NON_ROOT_BIN intentionally NOT set
+    })).toThrow(/anet_bin_unsafe_path.*owner not root/);
+    cleanup();
+  });
+
+  test("ACCEPT: owner not root WHEN ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 (explicit opt-out)", () => {
+    cleanup();
+    const p = setup("explicit-non-root");
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).not.toThrow();
+    cleanup();
+  });
+
+  test("REJECT: sha256 mismatch with install witness", () => {
+    cleanup();
+    const p = setup("hash-changed", "current-bytes");
+    const installTimeHash = createHash("sha256").update("install-time-bytes-different").digest("hex");
+    expect(() => loadAndVerifyAnetBin({
+      ANET_BIN_ABS: p,
+      ANET_BIN_SHA256: installTimeHash,
+      ANET_DAEMON_PATH_CONF: "/nonexistent",
+      ANET_DAEMON_ALLOW_NON_ROOT_BIN: "1",
+    })).toThrow(/anet_bin_unsafe_path.*sha256 mismatch/);
+    cleanup();
   });
 });
 

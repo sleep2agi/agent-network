@@ -44,6 +44,13 @@ function readPathConf(path: string): PathPin | null {
   } catch { return null; }
 }
 
+/** §4.2.6 B2 hardened — install-time pin + 5-check (PR #299 BLOCKER #3).
+ *  All five gates throw `anet_bin_unsafe_path:<reason>` and fail-fast
+ *  the daemon on boot (RFC: better to lose 1 host than fork a poisoned
+ *  binary). owner=root is enforced unless an explicit opt-out env var
+ *  ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 is set (containers/CI escape hatch
+ *  for environments where the binary lives under /usr/local owned by
+ *  a non-root user — must be deliberate, not silent). */
 export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): string {
   let pin: PathPin | null = null;
   const confPath = env.ANET_DAEMON_PATH_CONF || "/etc/anet-daemon/path.conf";
@@ -63,17 +70,21 @@ export function loadAndVerifyAnetBin(env: NodeJS.ProcessEnv = process.env): stri
   if (real !== pin.abs) {
     throw new Error(`anet_bin_unsafe_path: contains symlink: ${pin.abs} → ${real}`);
   }
-  // ③ stat: owner=root + not group/other writable + executable
+  // ③ stat: owner=root (enforced unless explicit opt-out)
   const st = statSync(pin.abs);
-  // owner check is best-effort on containers where uid=0 is default;
-  // we still enforce non-world-writable.
+  const allowNonRoot = env.ANET_DAEMON_ALLOW_NON_ROOT_BIN === "1";
+  if (st.uid !== 0 && !allowNonRoot) {
+    throw new Error(`anet_bin_unsafe_path: owner not root (uid=${st.uid}; set ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 to bypass for non-root install)`);
+  }
+  // ④ not group/other writable
   if ((st.mode & 0o022) !== 0) {
     throw new Error(`anet_bin_unsafe_path: writable by group/other (mode=${(st.mode & 0o777).toString(8)})`);
   }
+  // ⑤ executable
   if ((st.mode & 0o111) === 0) {
     throw new Error(`anet_bin_unsafe_path: not executable`);
   }
-  // ④ hash match install-time witness (optional but recommended)
+  // hash match install-time witness (when provided, REQUIRED to match)
   if (pin.sha256) {
     const actual = createHash("sha256").update(readFileSync(pin.abs)).digest("hex");
     if (actual !== pin.sha256) {

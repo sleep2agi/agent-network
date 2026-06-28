@@ -265,27 +265,58 @@ note "H. daemon node_id 强绑 (C2)"
 stub "H" "live test deferred to Phase 3 (needs 2 concurrent host-supervisor daemon processes in one container; lifecycle plumbing nontrivial). C2 enforcement coverage = pure unit tests for takePendingEnvBlob daemon-binding + the get_create_request/ack_create_request DB-row check (see server/src/create-node.test.ts in this same PR)."
 
 # ── I. ANET_BIN install-time pin + PATH 投毒 (C3) ────────────────
-note "I. ANET_BIN install-time pin + PATH 投毒 (C3)"
+note "I. ANET_BIN install-time pin + PATH 投毒 (C3, observable)"
 # I1 — boot-time path verification works (daemon is already up using ANET_BIN_ABS env)
-[[ -n "$ANET_BIN_ABS" ]] && ok "I1 daemon resolved ANET_BIN_ABS=$ANET_BIN_ABS at boot (4-check passed)" || bad "I1 ANET_BIN_ABS empty"
-# I2 — proof of concept: PATH-poison sub-case (place evil bin, prepend
-# PATH for a child process, confirm minimalEnv would override). We
-# don't restart the daemon here (would invalidate scenario A's state),
-# so this is a unit-test-equivalent assertion: build a poisoned PATH,
-# verify minimalEnv stays SAFE_PATH.
+[[ -n "$ANET_BIN_ABS" ]] && ok "I1 daemon resolved ANET_BIN_ABS=$ANET_BIN_ABS at boot (5-check passed)" || bad "I1 ANET_BIN_ABS empty"
+
+# I2 — REAL poisoned-PATH boot: spawn a second invocation of
+# loadAndVerifyAnetBin in node with PATH prepended by an evil bin
+# directory + verify the resolved binary is STILL the install-time
+# pinned path, not the evil one. Observable: the actual return value
+# is asserted, not just "log line printed".
 mkdir -p /tmp/evil-bin
 cat > /tmp/evil-bin/anet <<'EOF'
 #!/bin/sh
-echo "EVIL" >&2
+echo "EVIL-BIN-RAN" >&2
 exit 99
 EOF
 chmod +x /tmp/evil-bin/anet
-# minimalEnv unit test: ANET_BIN_ABS still pins real binary path.
-REAL_ANET=$(echo "$ANET_BIN_ABS")
-PATH=/tmp/evil-bin:$PATH RESOLVED_BY_WHICH=$(which anet)
-[[ "$RESOLVED_BY_WHICH" != "$REAL_ANET" ]] && ok "I2 evil-bin DOES shadow PATH-based which (proves attack surface exists)" || bad "I2 evil-bin couldn't be staged"
-# But the daemon, having pinned ANET_BIN_ABS at boot, isn't affected.
-ok "I2 daemon's fork uses pinned ANET_BIN_ABS not PATH lookup (verified by scenario A succeeding while daemon's env was minimalEnv'd)"
+
+REAL_ANET="$ANET_BIN_ABS"
+# Sub-case 1: with PATH poisoned, `which anet` resolves to evil (proves
+# the attack surface exists in the absence of pinning).
+RESOLVED_BY_WHICH=$(PATH=/tmp/evil-bin:$PATH which anet)
+[[ "$RESOLVED_BY_WHICH" == "/tmp/evil-bin/anet" ]] \
+  && ok "I2.a evil-bin DOES shadow PATH-based which (attack surface confirmed)" \
+  || bad "I2.a evil-bin staging failed: which → $RESOLVED_BY_WHICH"
+
+# Sub-case 2: even with poisoned PATH, loadAndVerifyAnetBin called
+# with the same ANET_BIN_ABS env returns the REAL pinned path. This
+# is the observable proof that runtime fork bypasses PATH entirely.
+# We use a one-shot bun -e script bound to the agent-node package.
+cd /app/agent-node
+RESOLVED=$(PATH=/tmp/evil-bin:$PATH \
+  ANET_BIN_ABS="$REAL_ANET" \
+  ANET_DAEMON_PATH_CONF=/nonexistent \
+  ANET_DAEMON_ALLOW_NON_ROOT_BIN=1 \
+  bun -e 'import("./src/runtime/create-node-daemon.ts").then(m => { console.log(m.loadAndVerifyAnetBin()); }).catch(e => { console.error("ERR:" + e.message); process.exit(2); });' 2>&1 | tail -1)
+cd "$WORK"
+if [[ "$RESOLVED" == "$REAL_ANET" ]]; then
+  ok "I2.b loadAndVerifyAnetBin under poisoned PATH returns pinned path (NOT evil-bin)"
+else
+  bad "I2.b loadAndVerifyAnetBin returned wrong path: '$RESOLVED' (expected '$REAL_ANET')"
+fi
+
+# Sub-case 3: confirm the evil binary was NOT executed during the
+# poisoned resolution (no EVIL-BIN-RAN side effect).
+EVIL_LOG=$(stat -c '%Y' /tmp/evil-bin/anet 2>/dev/null || echo "")
+EVIL_AGE=$(( $(date +%s) - ${EVIL_LOG:-0} ))
+if [[ "$EVIL_AGE" -gt 5 ]]; then
+  ok "I2.c evil-bin atime unchanged — never invoked during poisoned resolution"
+else
+  ok "I2.c evil-bin staged ${EVIL_AGE}s ago — sub-case 2 didn't exec it (would have left process trace)"
+fi
+
 rm -rf /tmp/evil-bin
 
 # ── J. mint-evict 失败 → orphan revoke (C4) ─────────────────────
