@@ -22,6 +22,7 @@ import {
   readFileSync,
   writeFileSync,
   renameSync,
+  unlinkSync,
 } from "node:fs";
 
 /** Sentinel exit code for "supervisor please restart me with the new
@@ -151,8 +152,10 @@ export function atomicWriteJson(path: string, data: unknown): void {
     renameSync(tmp, path);
   } catch (e) {
     // Best-effort cleanup; ignore if tmp doesn't exist or unlink fails.
+    // unlinkSync imported at module top — strict-ESM compatible (the
+    // earlier `require("node:fs")` inline would fail under runtimes
+    // without CJS interop).
     try {
-      const { unlinkSync } = require("node:fs");
       if (existsSync(tmp)) unlinkSync(tmp);
     } catch { /* swallow */ }
     throw e;
