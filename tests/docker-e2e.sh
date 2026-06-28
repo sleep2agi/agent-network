@@ -40,10 +40,54 @@ for _i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 [ -n "$TOKEN" ] || { echo "FATAL: could not obtain bootstrap TOKEN — V3 auth bootstrap failed"; exit 1; }
+
+# #266 A1: bootstrap NETWORK_ID for utok-scoped writes.
+# Server commit 5c7bff2 tightened the UTOK write path to require an
+# explicit network_id on every send_task / send_reply / cancel_task /
+# report_status — utok current_network is null for a freshly registered
+# user, so all mcp_call writes fail with permission_denied otherwise.
+# mcp_call() below auto-injects this NETWORK_ID into any ARGS that
+# don't already carry one. Create the network first; if it already
+# exists (rerun on stale state), fall back to /api/auth/me.
+NET_RESP=$(curl -s -X POST http://127.0.0.1:9200/api/networks \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"e2e-network","description":"e2e bootstrap network"}')
+NETWORK_ID=$(echo "$NET_RESP" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()).get('network_id',''))" 2>/dev/null)
+if [ -z "$NETWORK_ID" ]; then
+  ME_RESP=$(curl -s http://127.0.0.1:9200/api/auth/me -H "Authorization: Bearer $TOKEN")
+  NETWORK_ID=$(echo "$ME_RESP" | python3 -c "import sys,json;nets=json.loads(sys.stdin.read()).get('networks',[]);print(nets[0]['network_id'] if nets else '')" 2>/dev/null)
+fi
+[ -n "$NETWORK_ID" ] || { echo "FATAL: could not obtain NETWORK_ID — utok writes will all fail"; exit 1; }
+
 # #63: also `anet login` so subsequent `anet node create / delete / channel add`
 # CLI commands (not just curl) work under V3 auth.
 anet login --hub http://127.0.0.1:9200 --username e2e-bootstrap --password bootstrap-pass-123 > /dev/null 2>&1 || true
 echo ""
+
+# ── MCP helper ── (#266 A1 refactor: hoisted to top so all callers go through
+# the single injection point. Replaces 6 raw `curl POST /mcp` invocations
+# scattered later in the script that each hardcoded their own JSON payload
+# and could not inject network_id. Now: write `mcp_call "X" '{...}'` and
+# the helper handles MCP init + network_id injection uniformly. Adding a
+# future server contract check means changing this helper, not 6+ sites.)
+MCP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"e2e","version":"1.0"}}}'
+mcp_call() {
+  local TOOL="$1"
+  local ARGS="$2"
+  # #266 A1: inject NETWORK_ID into ARGS unless caller already supplied one.
+  # Required since server 5c7bff2 — every utok write needs explicit network_id.
+  if [ -n "${NETWORK_ID:-}" ]; then
+    ARGS=$(echo "$ARGS" | jq -c --arg n "$NETWORK_ID" 'if has("network_id") then . else . + {network_id: $n} end' 2>/dev/null || echo "$ARGS")
+  fi
+  timeout 5 curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "$MCP_INIT" > /dev/null 2>&1 || true
+  timeout 5 curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$TOOL\",\"arguments\":$ARGS}}" 2>/dev/null || true
+}
 
 # 2. anet -v
 echo "2. Testing anet -v..."
@@ -116,29 +160,13 @@ echo ""
 
 # 9. send_task via MCP
 echo "9. Testing send_task..."
-# init MCP
-curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' > /dev/null 2>&1
-# send task
-SEND=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"send_task","arguments":{"alias":"e2e-agent","task":"test task","from_session":"tester"}}}')
+SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"test task","from_session":"tester"}')
 echo "$SEND" | grep -q "ok" && pass "task sent" || fail "task send failed"
 echo ""
 
 # 10. send_message should not trigger processing
 echo "10. Testing send_message not processed..."
-curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' > /dev/null 2>&1
-curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"send_message","arguments":{"alias":"e2e-agent","message":"should not process","from_session":"tester"}}}' > /dev/null 2>&1
+mcp_call "send_message" '{"alias":"e2e-agent","message":"should not process","from_session":"tester"}' > /dev/null
 sleep 3
 pass "send_message sent (manual verify: agent should not process)"
 echo ""
@@ -168,16 +196,7 @@ echo ""
 
 # 11. V2: send_task writes to tasks table
 echo "11. Testing V2 tasks table..."
-MCP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test-v2","version":"1.0"}}}'
-curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d "$MCP_INIT" > /dev/null 2>&1
-# send a task and capture message_id
-V2_SEND=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"send_task","arguments":{"alias":"e2e-agent","task":"v2 lifecycle test","from_session":"v2-tester","priority":"high"}}}')
+V2_SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"v2 lifecycle test","from_session":"v2-tester","priority":"high"}')
 TASK_ID=$(echo "$V2_SEND" | python3 -c "
 import sys,json
 raw=sys.stdin.read()
@@ -194,27 +213,13 @@ echo ""
 
 # 12. V2: send_ack updates tasks table
 echo "12. Testing V2 send_ack..."
-curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d "$MCP_INIT" > /dev/null 2>&1
-ACK_RESP=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"send_ack\",\"arguments\":{\"task_id\":\"$TASK_ID\",\"from_session\":\"e2e-agent\"}}}")
+ACK_RESP=$(mcp_call "send_ack" "{\"task_id\":\"$TASK_ID\",\"from_session\":\"e2e-agent\"}")
 echo "$ACK_RESP" | grep -q 'ok' && pass "send_ack accepted" || { echo "$ACK_RESP"; fail "send_ack failed"; }
 echo ""
 
 # 13. V2: send_reply closes task lifecycle
 echo "13. Testing V2 send_reply..."
-curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d "$MCP_INIT" > /dev/null 2>&1
-REPLY_RESP=$(curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"send_reply\",\"arguments\":{\"alias\":\"v2-tester\",\"text\":\"task done\",\"in_reply_to\":\"$TASK_ID\",\"status\":\"replied\",\"from_session\":\"e2e-agent\"}}}")
+REPLY_RESP=$(mcp_call "send_reply" "{\"alias\":\"v2-tester\",\"text\":\"task done\",\"in_reply_to\":\"$TASK_ID\",\"status\":\"replied\",\"from_session\":\"e2e-agent\"}")
 echo "$REPLY_RESP" | grep -q 'ok' && pass "send_reply accepted" || { echo "$REPLY_RESP"; fail "send_reply failed"; }
 echo ""
 
@@ -230,19 +235,8 @@ TASKS_BY_STATUS=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:92
 echo "$TASKS_BY_STATUS" | grep -q '"count"' && pass "tasks filter by status works" || fail "tasks filter broken"
 echo ""
 
-# ── MCP helper ──
-mcp_call() {
-  local TOOL="$1"
-  local ARGS="$2"
-  timeout 5 curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "$MCP_INIT" > /dev/null 2>&1 || true
-  timeout 5 curl -s -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:9200/mcp \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$TOOL\",\"arguments\":$ARGS}}" 2>/dev/null || true
-}
+# ── (#266 A1: mcp_call() was here; hoisted to top of script alongside
+# NETWORK_ID bootstrap so the first MCP-tool caller can reach it.) ──
 
 # 15. broadcast
 echo "15. Testing broadcast..."
