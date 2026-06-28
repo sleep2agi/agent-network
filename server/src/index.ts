@@ -1950,10 +1950,25 @@ Bun.serve({
     }
 
     // ── REST: nodes table (V2 Sprint 2) ──
+    // Explicit column list — NOT `SELECT *`. Two reasons:
+    //   1. `SELECT *` silently broadcasts any column added later to the
+    //      response (RFC-024 added config_revision/config_snapshot which
+    //      the dashboard's GET /api/nodes/:id/config endpoint owns;
+    //      RFC-028 will add more vault-flavored columns). Tests asserting
+    //      response shape break on every ALTER; integrations that key
+    //      off Object.keys() can pick up internals.
+    //   2. The list endpoint and the per-node config snapshot endpoint
+    //      have different consumer contracts; this list should be the
+    //      stable, dashboard-facing fields only.
+    // Add a new column to this list explicitly when a real client needs
+    // it; do NOT switch back to SELECT *.
     if (url.pathname === "/api/nodes") {
       const nodeId = url.searchParams.get("node_id");
       const alias = url.searchParams.get("alias");
-      let sql = "SELECT * FROM nodes WHERE 1=1";
+      let sql = `SELECT node_id, node_name, alias, runtime, model,
+                        config_path, channels, server, hostname,
+                        network_id, created_at, updated_at
+                 FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addNetworkScope(sql, params, restScope);
       if (nodeId) { sql += ` AND node_id = ?${params.length + 1}`; params.push(nodeId); }
