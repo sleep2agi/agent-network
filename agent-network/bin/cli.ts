@@ -17,6 +17,7 @@ import { spawn, execSync, execFileSync } from "child_process";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
+import { superviseChild } from "../src/supervise-child";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -2775,25 +2776,89 @@ async function launchAgent(id: string, forceNewSession = false) {
       cmd = "npx";
       commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
     }
-    // #138 fix — same fa08eb4 (#135) regression as the claude-code-cli
-    // branch below: parent must stay alive while child runs, otherwise
-    // main() resolves, fa08eb4 wrap fires process.exit(0), and the agent-
-    // node child is orphaned mid-spawn.
-    await new Promise<void>((resolve) => {
-      const child = spawn(cmd, commandArgs, { env, stdio: "inherit" });
-      const pidFile = join(nodesDir(), nodeId, ".pid");
-      if (child.pid) writeFileSync(pidFile, String(child.pid));
-      child.on("exit", (code) => {
+    // W1 supervisor wrap (RFC-024, #284 superviseChild) — handle the
+    // sentinel exit code 75 (BSD EX_TEMPFAIL, agent-node's "config-apply
+    // says please respawn me with the new config" signal) by re-spawning
+    // the child in-place. Other exit codes propagate up like before
+    // (parent exits with the same code). Stable-uptime threshold (30 s)
+    // resets the backoff if the child stays alive that long — a long-
+    // running node that eventually crashes doesn't wait 30 s for its
+    // first re-fork.
+    //
+    // `ANET_CONFIG_UPDATE_CAPABLE=1` flag tells the child it's running
+    // under a sentinel-aware supervisor → reportStatus will include
+    // `config_update_capable: true` in the masked snapshot so the
+    // dashboard can show the remote-restart button enabled. Bare-spawn
+    // agent-nodes (running outside `anet node start`) inherit the unset
+    // env and default to `false` per buildConfigSnapshot.
+    const childEnv = { ...env, ANET_CONFIG_UPDATE_CAPABLE: "1" };
+    const pidFile = join(nodesDir(), nodeId, ".pid");
+
+    // Sentinel code agent-node uses to request re-spawn. Must stay in
+    // lockstep with RESTART_SENTINEL in agent-node/src/runtime/config-apply.ts.
+    const RESTART_SENTINEL = 75;
+    let lastNonRestartCode: number | null = null;
+
+    await superviseChild({
+      label: "agent-node",
+      // shutdownGate fires when the child exits with a non-sentinel
+      // code → record the code and tell the supervisor to stop. The
+      // post-loop code below propagates it to the parent process.
+      shutdownGate: () => lastNonRestartCode !== null,
+      // The agent-node SIGINT/SIGTERM contract is the parent's: don't
+      // jitter, don't backoff hard — re-spawn quickly after a sentinel
+      // exit (the config-apply restart path drained in-flight already).
+      jitterRatio: 0,
+      baseDelayMs: 500,
+      maxDelayMs: 5_000,
+      runOnce: async (ctrl) => {
+        // Stable timer — child survives 30s → reset backoff to base.
+        // Mirrors the connectFeishu supervisor pattern from PR #263.
+        const stableTimer = setTimeout(() => ctrl.markStable(), 30_000);
+        const child = spawn(cmd, commandArgs, { env: childEnv, stdio: "inherit" });
+        if (child.pid) writeFileSync(pidFile, String(child.pid));
+
+        let settled = false;
+        const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+          (resolve) => {
+            const done = (v: { code: number | null; signal: NodeJS.Signals | null }) => {
+              if (settled) return;
+              settled = true;
+              resolve(v);
+            };
+            child.once("exit", (code, signal) => done({ code, signal }));
+            child.once("error", (err) => {
+              console.error(`[anet] ❌ spawn ${cmd} failed: ${err.message || err}`);
+              done({ code: null, signal: null });
+            });
+          },
+        );
+        clearTimeout(stableTimer);
+
+        // Always remove the .pid before deciding the next step — the
+        // next spawn writes a fresh one. Without this, a momentary
+        // window between exit and re-spawn would show a stale PID.
         try { rmSync(pidFile, { force: true }); } catch {}
-        if (code && code !== 0) process.exit(code);
-        resolve();
-      });
-      child.on("error", (err) => {
-        try { rmSync(pidFile, { force: true }); } catch {}
-        console.error(`[anet] ❌ spawn ${cmd} failed: ${err.message || err}`);
-        resolve();
-      });
+
+        if (exitInfo.code === RESTART_SENTINEL) {
+          console.log(
+            `[anet] agent-node requested restart (exit ${RESTART_SENTINEL}); re-spawning`,
+          );
+          return;  // loop iteration ends; supervisor calls runOnce again
+        }
+        // Any other exit code: stop the loop. shutdownGate reads
+        // `lastNonRestartCode` so superviseChild will not schedule the
+        // next iteration.
+        lastNonRestartCode = exitInfo.code ?? 0;
+      },
     });
+
+    // If the child exited with a non-zero, non-sentinel code, propagate
+    // it as the parent's exit so `anet node start <name>` still surfaces
+    // failures the way it always has (e.g. invalid CLI args → exit 1).
+    if (lastNonRestartCode !== null && lastNonRestartCode !== 0) {
+      process.exit(lastNonRestartCode);
+    }
   } else {
     // spawn claude CLI
     // PR-3 (#146 family) — single-source on displayName (was profile.alias).
