@@ -79,7 +79,7 @@ mcp_call "$NTOK" "report_status" "$ARG" | jq -e '.ok == true' >/dev/null \
 do_send() {
   local text="$1"
   ARG=$(jq -nc --arg net "$NET_ID" --arg t "$text" \
-    '{alias:"dash10-agent",task:$t,priority:"normal",network_id:$net,from_session:"admin"}')
+    '{alias:"dash10-agent",task:$t,priority:"normal",network_id:$net,from_session:"dash10-agent"}')
   mcp_call "$NTOK" "send_task" "$ARG" | jq -r '.message_id'
 }
 

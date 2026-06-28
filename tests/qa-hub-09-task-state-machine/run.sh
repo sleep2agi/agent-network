@@ -128,7 +128,7 @@ echo "[5] BRANCH cancelled: send → cancel_task"
 T_CXL=$(send_task "$UTOK" "$NET_ID" "agent-09" "task-cancelled")
 [[ "$(task_field "$UTOK" "$NET_ID" "$T_CXL" status)" == "delivered" ]] || \
   { echo "FAIL: cancel PRE != delivered"; exit 1; }
-ARG=$(jq -nc --arg t "$T_CXL" '{task_id:$t,reason:"user changed mind",from_session:"admin"}')
+ARG=$(jq -nc --arg t "$T_CXL" '{task_id:$t,reason:"user changed mind",from_session:"agent-09"}')
 # cancel_task needs a network-scoped writer (canWrite). Use NTOK (which is
 # bound to NET_ID) — agent-09 cancelling a task targeted at itself.
 CXL_RESP=$(mcp_call "$NTOK" "cancel_task" "$ARG")
@@ -163,7 +163,7 @@ sleep 0.2
   { echo "FAIL: terminal task.status changed on second send_reply"; exit 1; }
 
 echo "[8] PIN: cancel_task on already-cancelled task returns ok:false"
-ARG=$(jq -nc --arg t "$T_CXL" '{task_id:$t,reason:"again",from_session:"admin"}')
+ARG=$(jq -nc --arg t "$T_CXL" '{task_id:$t,reason:"again",from_session:"agent-09"}')
 CXL2=$(mcp_call "$NTOK" "cancel_task" "$ARG")
 # cancel_task's WHERE excludes terminal states → changes=0 → ok:false
 echo "$CXL2" | jq -e '.ok == false' >/dev/null \

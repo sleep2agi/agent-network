@@ -94,7 +94,7 @@ mcp_call "$ALICE_NTOK" "report_status" "$ARG" | jq -e '.ok == true' >/dev/null \
 
 echo "[3] alice sends a 'top-secret-alice' task to alice-agent"
 ARG=$(jq -nc --arg a "alice-agent" --arg t "top-secret-alice-payload" --arg net "$ALICE_NET" \
-  '{alias:$a,task:$t,priority:"normal",network_id:$net,from_session:"alice"}')
+  '{alias:$a,task:$t,priority:"normal",network_id:$net,from_session:"alice-agent"}')
 mcp_call "$ALICE_NTOK" "send_task" "$ARG" | jq -e '.message_id' >/dev/null \
   || { echo "FAIL: alice send_task"; exit 1; }
 
