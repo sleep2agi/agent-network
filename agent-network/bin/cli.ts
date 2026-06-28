@@ -3760,7 +3760,16 @@ async function serverCommand() {
     }
 
   } else {
-    console.log(`
+    printHubHelp();
+  }
+}
+
+// #240 — Extracted from serverCommand's else branch so the #215 universal
+// --help intercept can route `anet hub --help` here instead of bouncing to
+// global printHelp() (which hid stop/status entirely — looked like a
+// regression even though the routes were still wired).
+function printHubHelp() {
+  console.log(`
 anet hub <command>
 
   start [options]    Start CommHub Server (bootstraps admin account; login separately)
@@ -3787,7 +3796,6 @@ Example:
   anet hub start --port 8080         # Custom port
   anet hub config                    # Show config
 `);
-  }
 }
 
 // ── import ──
@@ -9304,10 +9312,27 @@ async function main() {
 // --help` SIGNS a real token, `anet run --help` STARTS a real SSE listener
 // on :9200, `anet hub start --help` STARTS the hub. Convention everywhere
 // else (cargo, git, npm, docker) is "see help, no side effect" — match it.
-// Per-subcommand inline help is polish (tracked in #214 F7-01 follow-ups);
-// here we hard-stop with global help, which is correct minimum.
+//
+// #240 — Original #215 always bounced to global printHelp(), which made
+// `anet hub --help` hide hub/stop/status (regression that read like the
+// routes had been removed even though they were still wired). Route to
+// per-subcommand help printer when one exists; fall back to global for the
+// rest (preserves #215 safety against side-effects in token/run/etc.).
 if (args.slice(1).some((a) => a === "--help" || a === "-h")) {
-  printHelp();
+  switch (command) {
+    case "hub":
+    case "server":
+      printHubHelp();
+      break;
+    case "project":
+      printProjectUsage();
+      break;
+    case "node":
+      console.log(`Usage: anet node <create|start|stop|restart|resume|delete|ls|rename|migrate-token-to-envref> [name]`);
+      break;
+    default:
+      printHelp();
+  }
   process.exit(0);
 }
 switch (command) {
