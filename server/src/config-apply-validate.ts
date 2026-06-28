@@ -58,25 +58,32 @@ export const RESTART_REQUIRED_FLAGS = new Set<string>([
  * payload shape matches the tool handler's error envelope so the
  * caller can forward it without re-shaping.
  *
- * Policy (final):
- *   - security-sensitive flags → caller role MUST be `admin`
+ * Policy (final, 2026-06-28):
+ *   - security-sensitive flags → caller role MUST be admin-or-above
+ *     (admin OR owner; owner > admin in the anet RBAC, per auth.ts
+ *     network_members hierarchy — viewer < member < admin < owner)
  *   - harmless flags → handled by upstream `canWrite` (role !== viewer);
  *     this helper passes them through (no per-flag gate beyond
  *     allowlist/range validation)
  *
  * Caller must pass the role string resolved from the user's
- * network_members row (not the token's bearer-level role).
+ * network_members row (not the token's bearer-level role). Owners
+ * are NOT included via "admin ⊇ owner" inheritance — they're a
+ * distinct higher tier; the check is explicit OR so any future role
+ * (e.g. "super_admin") needs an explicit allowlist update.
  */
+const SECURITY_ADMIN_ROLES = new Set<string>(["admin", "owner"]);
+
 export function isAllowedToChangeFlag(
   role: string | null,
   patchFlags: Record<string, unknown>,
 ): { field: string; reason: string } | null {
   for (const key of Object.keys(patchFlags)) {
     if (SECURITY_SENSITIVE_FLAGS.has(key)) {
-      if (role !== "admin") {
+      if (!role || !SECURITY_ADMIN_ROLES.has(role)) {
         return {
           field: `flags.${key}`,
-          reason: "remote change of security-sensitive flags requires admin role on this network",
+          reason: "remote change of security-sensitive flags requires admin or owner role on this network",
         };
       }
     }

@@ -50,7 +50,7 @@ describe("isAllowedToChangeFlag — SEC-2 admin-gate (final policy 2026-06-28)",
     const r = isAllowedToChangeFlag("member", { dangerouslySkipPermissions: true });
     expect(r).not.toBeNull();
     expect(r?.field).toBe("flags.dangerouslySkipPermissions");
-    expect(r?.reason).toMatch(/admin role/i);
+    expect(r?.reason).toMatch(/admin or owner/i);
   });
 
   test("admin role + dangerouslySkipPermissions → pass (allowed)", () => {
@@ -65,15 +65,21 @@ describe("isAllowedToChangeFlag — SEC-2 admin-gate (final policy 2026-06-28)",
     expect(isAllowedToChangeFlag("admin", { teammateMode: true })).toBeNull();
   });
 
-  test("owner role + permissionMode → reject (only admin is admin; owner is a different role string)", () => {
-    // Pin: the policy is strict admin-equality, not "admin or owner".
-    // Owners typically also have admin somewhere in their network
-    // membership stack — but THIS gate uses the network_members.role
-    // string, which is one of {viewer, member, admin, owner}. owner is
-    // not admin; if Vincent later wants owner+ to also flip security
-    // flags, the loosen path is `["admin", "owner"].includes(role)`.
-    const r = isAllowedToChangeFlag("owner", { permissionMode: "default" });
-    expect(r).not.toBeNull();
+  test("owner role + permissionMode → pass (owner is higher than admin in anet RBAC)", () => {
+    // owner > admin in the network_members hierarchy (auth.ts line 354
+    // explicitly treats owner as the highest tier; updateMemberRole
+    // refuses to assign owner). The SEC-2 gate uses an admin-or-above
+    // semantic so the highest-privilege user isn't accidentally locked
+    // out of a permission their subordinates can use.
+    expect(isAllowedToChangeFlag("owner", { permissionMode: "default" })).toBeNull();
+  });
+
+  test("owner role + dangerouslySkipPermissions → pass", () => {
+    expect(isAllowedToChangeFlag("owner", { dangerouslySkipPermissions: true })).toBeNull();
+  });
+
+  test("owner role + teammateMode → pass", () => {
+    expect(isAllowedToChangeFlag("owner", { teammateMode: false })).toBeNull();
   });
 
   test("viewer role + any security flag → reject", () => {

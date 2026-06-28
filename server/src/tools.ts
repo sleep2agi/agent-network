@@ -1490,7 +1490,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               ok: false,
               error: "insufficient_role_for_security_flag",
               field: secCheck.field,
-              required_role: "admin",
+              required_role: "admin",  // or owner — both satisfy
               message: secCheck.reason,
             }),
           }],
