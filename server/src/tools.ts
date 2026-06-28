@@ -1472,11 +1472,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const model = typeof patch.model === "string" ? patch.model : undefined;
       const flags = (patch.flags && typeof patch.flags === "object") ? patch.flags as Record<string, unknown> : {};
 
-      // SEC-2 placeholder — delegated to isAllowedToChangeFlag in
-      // config-apply-validate.ts. Today: any security-sensitive flag
-      // → fail-CLOSED for all roles (member/admin/owner). After Vincent
-      // confirms the policy, edit isAllowedToChangeFlag to permit
-      // admin+ (or whichever role is chosen) and update tests.
+      // SEC-2 (final policy 2026-06-28) — security-sensitive flags
+      // (permissionMode / dangerouslySkipPermissions / teammateMode)
+      // require admin role on this network. Other flags fall through
+      // to per-field validation. hub-side enforced (dashboard's UI
+      // gate is not trusted; curl direct to /mcp is the attack
+      // vector). See isAllowedToChangeFlag for the policy details.
       const callerRole = enforceUserId && effectiveNetId
         ? getUserNetworkRole(enforceUserId, effectiveNetId)
         : null;
@@ -1487,8 +1488,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             type: "text" as const,
             text: JSON.stringify({
               ok: false,
-              error: "security_flag_locked",
+              error: "insufficient_role_for_security_flag",
               field: secCheck.field,
+              required_role: "admin",
               message: secCheck.reason,
             }),
           }],

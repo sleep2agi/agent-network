@@ -41,40 +41,56 @@ describe("SECURITY_SENSITIVE_FLAGS — privilege-elevation surface", () => {
   });
 });
 
-describe("isAllowedToChangeFlag — SEC-2 fail-CLOSED (pending Vincent policy)", () => {
-  // Until Vincent confirms the policy, every role MUST be rejected for
-  // patches containing security-sensitive flags. These tests pin the
-  // fail-closed default so PR A can't silently re-open the door.
+describe("isAllowedToChangeFlag — SEC-2 admin-gate (final policy 2026-06-28)", () => {
+  // Security-sensitive flags require admin role on the caller's
+  // network. Any non-admin role is rejected. Harmless flags fall
+  // through (`canWrite` upstream handles role !== viewer).
 
   test("member role + dangerouslySkipPermissions → reject", () => {
     const r = isAllowedToChangeFlag("member", { dangerouslySkipPermissions: true });
     expect(r).not.toBeNull();
     expect(r?.field).toBe("flags.dangerouslySkipPermissions");
-    expect(r?.reason).toMatch(/pending policy/i);
+    expect(r?.reason).toMatch(/admin role/i);
   });
 
-  test("admin role + dangerouslySkipPermissions → reject (NOT relaxed yet)", () => {
-    const r = isAllowedToChangeFlag("admin", { dangerouslySkipPermissions: false });
-    expect(r).not.toBeNull();
+  test("admin role + dangerouslySkipPermissions → pass (allowed)", () => {
+    expect(isAllowedToChangeFlag("admin", { dangerouslySkipPermissions: false })).toBeNull();
   });
 
-  test("owner role + permissionMode → reject (every role locked)", () => {
+  test("admin role + permissionMode → pass", () => {
+    expect(isAllowedToChangeFlag("admin", { permissionMode: "default" })).toBeNull();
+  });
+
+  test("admin role + teammateMode → pass", () => {
+    expect(isAllowedToChangeFlag("admin", { teammateMode: true })).toBeNull();
+  });
+
+  test("owner role + permissionMode → reject (only admin is admin; owner is a different role string)", () => {
+    // Pin: the policy is strict admin-equality, not "admin or owner".
+    // Owners typically also have admin somewhere in their network
+    // membership stack — but THIS gate uses the network_members.role
+    // string, which is one of {viewer, member, admin, owner}. owner is
+    // not admin; if Vincent later wants owner+ to also flip security
+    // flags, the loosen path is `["admin", "owner"].includes(role)`.
     const r = isAllowedToChangeFlag("owner", { permissionMode: "default" });
     expect(r).not.toBeNull();
   });
 
-  test("member role + teammateMode → reject", () => {
-    const r = isAllowedToChangeFlag("member", { teammateMode: true });
+  test("viewer role + any security flag → reject", () => {
+    expect(isAllowedToChangeFlag("viewer", { teammateMode: true })).not.toBeNull();
+  });
+
+  test("null role (no network membership) + any security flag → reject", () => {
+    expect(isAllowedToChangeFlag(null, { dangerouslySkipPermissions: true })).not.toBeNull();
+  });
+
+  test("member role + mixed bag with security flag → reject (checks every flag, not just first)", () => {
+    const r = isAllowedToChangeFlag("member", { teammateMode: false, dangerouslySkipPermissions: true });
     expect(r).not.toBeNull();
   });
 
-  test("admin role + mixed (model is not a flag here, but security flag inside) → reject", () => {
-    // model isn't in this helper's input (helper only takes flags); but a
-    // patch with BOTH model and dangerouslySkipPermissions is rejected
-    // because the flag bag contains DSP. Pinning that the helper looks
-    // at every flag, not just the first.
-    const r = isAllowedToChangeFlag("admin", { teammateMode: false, dangerouslySkipPermissions: true });
-    expect(r).not.toBeNull();
+  test("admin role + mixed bag (security + harmless) → pass", () => {
+    expect(isAllowedToChangeFlag("admin", { dangerouslySkipPermissions: true, maxTurns: 50 })).toBeNull();
   });
 
   test("member role + only harmless flags (maxTurns) → pass", () => {
@@ -87,6 +103,7 @@ describe("isAllowedToChangeFlag — SEC-2 fail-CLOSED (pending Vincent policy)",
 
   test("any role + empty flag bag → pass (no flags to gate)", () => {
     expect(isAllowedToChangeFlag(null, {})).toBeNull();
+    expect(isAllowedToChangeFlag("viewer", {})).toBeNull();
     expect(isAllowedToChangeFlag("member", {})).toBeNull();
     expect(isAllowedToChangeFlag("admin", {})).toBeNull();
   });

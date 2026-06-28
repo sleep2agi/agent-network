@@ -21,17 +21,16 @@ export const ALLOWED_FLAGS = new Set<string>([
 
 /**
  * Security-sensitive flags — remote changes are privilege-elevation
- * operations. Fail-CLOSED until Vincent confirms the policy:
+ * operations. Final policy (decided 2026-06-28 by 通信龙 per Vincent
+ * autonomy grant): **caller role must equal `admin` to flip these
+ * flags remotely.** Non-admin requests are rejected with
+ * `insufficient_role_for_security_flag`. Cross-network requests are
+ * also blocked but via SEC-1 (network scope), not this gate.
  *
- *   - Current PR A default: REJECT for EVERY role (member / admin /
- *     owner) with `security_flag_locked`.
- *
- *   - Vincent's pending decision: admin-only? CLI-only? The current
- *     reject-everyone keeps the door shut so PR A can merge safely
- *     without opening a privilege-escalation window.
- *
- * To loosen post-Vincent: edit `isAllowedToChangeFlag` below to
- * permit admin/owner for this set and update the regression tests.
+ * Dashboard is expected to grey out these inputs for non-admin
+ * sessions, but hub does NOT trust the dashboard's UI gate — every
+ * tool call is re-checked here. `curl` direct to `/mcp` is a real
+ * attack vector.
  */
 export const SECURITY_SENSITIVE_FLAGS = new Set<string>([
   "permissionMode",
@@ -56,23 +55,30 @@ export const RESTART_REQUIRED_FLAGS = new Set<string>([
  * Role-gate for the patch's flag set. SEC-2 enforcement lives here.
  *
  * Returns null on pass, or `{ field, reason }` on reject. The reject
- * payload format matches the tool handler's error envelope so the
+ * payload shape matches the tool handler's error envelope so the
  * caller can forward it without re-shaping.
  *
- * Today's policy: any patch containing a security-sensitive flag is
- * rejected regardless of role. Switch to role-based gate after Vincent
- * confirms.
+ * Policy (final):
+ *   - security-sensitive flags → caller role MUST be `admin`
+ *   - harmless flags → handled by upstream `canWrite` (role !== viewer);
+ *     this helper passes them through (no per-flag gate beyond
+ *     allowlist/range validation)
+ *
+ * Caller must pass the role string resolved from the user's
+ * network_members row (not the token's bearer-level role).
  */
 export function isAllowedToChangeFlag(
-  _role: string | null,
+  role: string | null,
   patchFlags: Record<string, unknown>,
 ): { field: string; reason: string } | null {
   for (const key of Object.keys(patchFlags)) {
     if (SECURITY_SENSITIVE_FLAGS.has(key)) {
-      return {
-        field: `flags.${key}`,
-        reason: "remote change of security-sensitive flags is pending policy decision; use CLI for now",
-      };
+      if (role !== "admin") {
+        return {
+          field: `flags.${key}`,
+          reason: "remote change of security-sensitive flags requires admin role on this network",
+        };
+      }
     }
   }
   return null;
