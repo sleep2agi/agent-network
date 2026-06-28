@@ -16,7 +16,7 @@
 
 import { describe, expect, test, beforeEach } from "bun:test";
 import { db, uuidv4 } from "./db.js";
-import { upsertNodeWithSec1Guard } from "./tools.js";
+import { upsertNodeWithSec1Guard, finalizePendingMatchingUpdates } from "./tools.js";
 
 function insertNode(opts: { node_id?: string; alias: string; network_id: string | null }): string {
   const id = opts.node_id ?? uuidv4();
@@ -442,6 +442,168 @@ describe("SEC trust-root — REAL driver via upsertNodeWithSec1Guard (catches gu
     const post = db.get<any>("SELECT network_id, alias FROM nodes WHERE node_id = ?1", nid);
     expect(post.network_id).toBe("netA");
     expect(post.alias).toBe("named-only");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// finalizePendingMatchingUpdates — Option A restart-finalize matcher
+// (通信牛 #290 final CHANGE_REQ 2026-06-28). Real-driver tests: drive
+// the helper that production report_status delegates to + assert on
+// the persisted state. Same single-source-of-truth pattern as
+// upsertNodeWithSec1Guard (prevents inline-mirror test drift).
+// ─────────────────────────────────────────────────────────────────────
+describe("finalizePendingMatchingUpdates — Option A restart-finalize via content match", () => {
+  function insertPendingUpdate(opts: {
+    update_id?: string;
+    node_id: string;
+    network_id: string;
+    patch: any;
+    apply_mode: "hot" | "restart" | "restart_only";
+    status?: "pending" | "restarting";
+  }): string {
+    const id = opts.update_id ?? `cu_${uuidv4()}`;
+    db.run(
+      `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, 'test')`,
+      [id, opts.node_id, opts.network_id, JSON.stringify(opts.patch), opts.apply_mode, opts.status ?? "pending", Date.now()],
+    );
+    return id;
+  }
+
+  test("empty patch (restart_only) → finalizes on ANY snapshot (restart itself = goal)", () => {
+    const nid = insertNode({ alias: "n1", network_id: "netA" });
+    const uid = insertPendingUpdate({
+      node_id: nid, network_id: "netA", patch: {}, apply_mode: "restart_only", status: "restarting",
+    });
+    const r = finalizePendingMatchingUpdates(nid, { model: "any", flags: {} });
+    expect(r.finalizedCount).toBe(1);
+    expect(r.finalizedIds).toContain(uid);
+    const row = db.get<any>("SELECT status, new_revision FROM node_config_updates WHERE update_id = ?1", uid);
+    expect(row.status).toBe("applied");
+    expect(row.new_revision).toBe(1);
+    const node = db.get<any>("SELECT config_revision FROM nodes WHERE node_id = ?1", nid);
+    expect(node.config_revision).toBe(1);
+  });
+
+  test("model patch + snapshot.model matches → finalized", () => {
+    const nid = insertNode({ alias: "n2", network_id: "netA" });
+    const uid = insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { model: "claude-opus-4-new", flags: {} },
+      apply_mode: "restart",
+    });
+    const r = finalizePendingMatchingUpdates(nid, {
+      model: "claude-opus-4-new", flags: { maxTurns: 50 },
+    });
+    expect(r.finalizedCount).toBe(1);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("applied");
+  });
+
+  test("model patch + snapshot.model DIFFERENT → NOT finalized (left pending)", () => {
+    const nid = insertNode({ alias: "n3", network_id: "netA" });
+    const uid = insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { model: "claude-opus-4-new", flags: {} },
+      apply_mode: "restart",
+    });
+    const r = finalizePendingMatchingUpdates(nid, {
+      model: "claude-sonnet-3-old", flags: {},
+    });
+    expect(r.finalizedCount).toBe(0);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("pending");
+  });
+
+  test("flags patch + every flag matches snapshot → finalized", () => {
+    const nid = insertNode({ alias: "n4", network_id: "netA" });
+    const uid = insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { flags: { maxTurns: 99, budget: 500 } },
+      apply_mode: "hot",
+    });
+    const r = finalizePendingMatchingUpdates(nid, {
+      flags: { maxTurns: 99, budget: 500, dangerouslySkipPermissions: true },
+    });
+    expect(r.finalizedCount).toBe(1);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("applied");
+  });
+
+  test("flags patch + ONE flag mismatch → NOT finalized (any field absent = no match)", () => {
+    const nid = insertNode({ alias: "n5", network_id: "netA" });
+    const uid = insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { flags: { maxTurns: 99, budget: 500 } },
+      apply_mode: "hot",
+    });
+    const r = finalizePendingMatchingUpdates(nid, {
+      flags: { maxTurns: 99, budget: 999 },  // budget wrong
+    });
+    expect(r.finalizedCount).toBe(0);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("pending");
+  });
+
+  test("flags patch + flag absent from snapshot → NOT finalized", () => {
+    const nid = insertNode({ alias: "n6", network_id: "netA" });
+    const uid = insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { flags: { permissionMode: "auto" } },
+      apply_mode: "restart",
+    });
+    const r = finalizePendingMatchingUpdates(nid, {
+      flags: { maxTurns: 50 },  // permissionMode missing entirely
+    });
+    expect(r.finalizedCount).toBe(0);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("pending");
+  });
+
+  test("no pending update → no-op (idempotent on routine heartbeats)", () => {
+    const nid = insertNode({ alias: "n7", network_id: "netA" });
+    const r = finalizePendingMatchingUpdates(nid, { model: "x", flags: { maxTurns: 50 } });
+    expect(r.finalizedCount).toBe(0);
+  });
+
+  test("restarting status finalizes too (not just pending)", () => {
+    const nid = insertNode({ alias: "n8", network_id: "netA" });
+    const uid = insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { model: "new" },
+      apply_mode: "restart",
+      status: "restarting",
+    });
+    const r = finalizePendingMatchingUpdates(nid, { model: "new", flags: {} });
+    expect(r.finalizedCount).toBe(1);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("applied");
+  });
+
+  test("two nodes with separate pending updates → finalize only matching one", () => {
+    const nidA = insertNode({ alias: "match-this", network_id: "netA" });
+    const nidB = insertNode({ alias: "leave-alone", network_id: "netA" });
+    const uidA = insertPendingUpdate({
+      node_id: nidA, network_id: "netA",
+      patch: { model: "matched-model" },
+      apply_mode: "restart",
+    });
+    const uidB = insertPendingUpdate({
+      node_id: nidB, network_id: "netA",
+      patch: { model: "different-model" },
+      apply_mode: "restart",
+    });
+    finalizePendingMatchingUpdates(nidA, { model: "matched-model", flags: {} });
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uidA).status).toBe("applied");
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uidB).status).toBe("pending");
+  });
+
+  test("config_revision bumps to base+1 for single finalize (multi-pending blocked by F-C index)", () => {
+    // F-C partial unique index (db.ts) prevents two non-terminal updates
+    // for the same node, so the multi-finalize scenario is unreachable
+    // at the DB layer. This test pins that ONE pending finalize → revision = base + 1.
+    const nid = insertNode({ alias: "n10", network_id: "netA" });
+    insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { model: "v1" },
+      apply_mode: "restart",
+    });
+    const r = finalizePendingMatchingUpdates(nid, { model: "v1", flags: {} });
+    expect(r.finalizedCount).toBe(1);
+    expect(db.get<any>("SELECT config_revision FROM nodes WHERE node_id = ?1", nid).config_revision).toBe(1);
   });
 });
 

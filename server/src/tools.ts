@@ -1843,6 +1843,101 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
       `UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`,
       [JSON.stringify(input.config_snapshot), input.node_id],
     );
+    // RFC-024 — finalize any pending/restarting update whose target
+    // patch is now reflected in the snapshot. Closes the
+    // restart-required-never-reaches-applied gap that 通信牛 caught:
+    // the old child acks `restarting` + exits 75; the new child boots,
+    // reads the new config, reports status — but never had the
+    // update_id to call ack_config_update(applied) itself. Hub does
+    // it on the new child's behalf by content-matching the patch
+    // against the reported snapshot.
+    finalizePendingMatchingUpdates(input.node_id, input.config_snapshot);
   }
   return { result: existing ? "updated" : "inserted", node_id: input.node_id };
+}
+
+/**
+ * RFC-024 restart-finalize (Option A per 通信牛 final review).
+ *
+ * Called from `upsertNodeWithSec1Guard` after writing a fresh
+ * `config_snapshot` for the node. For each pending/restarting update
+ * row, parse the patch and compare every field against the snapshot.
+ * If everything in the patch is now reflected in the live snapshot,
+ * mark the update applied + bump `nodes.config_revision`. The new
+ * child doesn't need to know the update_id — content-matching against
+ * the live state IS the proof that the apply landed.
+ *
+ * Edge cases:
+ *   - Empty patch (apply_mode=restart_only from `restart_node` tool) →
+ *     ANY snapshot matches (the restart itself was the goal).
+ *   - Patch field absent from snapshot → not a match (snapshot
+ *     post-dates the apply only when every requested field shows up).
+ *   - Multiple concurrent pending rows → impossible by single-flight,
+ *     but defensive: finalize OLDEST first so the chain stays linear.
+ *
+ * Pure-ish: takes a snapshot blob (TS shape, see config-snapshot type)
+ * and runs only db.run / db.get. No external IO.
+ */
+export function finalizePendingMatchingUpdates(
+  nodeId: string,
+  snapshot: any,
+): { finalizedCount: number; finalizedIds: string[] } {
+  const pending = db.all<{
+    update_id: string;
+    patch_json: string;
+    apply_mode: string;
+    base_revision: number;
+  }>(
+    "SELECT update_id, patch_json, apply_mode, base_revision FROM node_config_updates WHERE node_id = ?1 AND status IN ('pending', 'restarting') ORDER BY created_at ASC",
+    nodeId,
+  );
+  if (pending.length === 0) return { finalizedCount: 0, finalizedIds: [] };
+
+  const snapModel: string | null | undefined = snapshot?.model;
+  const snapFlags: Record<string, unknown> = (snapshot?.flags && typeof snapshot.flags === "object") ? snapshot.flags : {};
+
+  const finalizedIds: string[] = [];
+
+  for (const row of pending) {
+    let patch: any = {};
+    try { patch = JSON.parse(row.patch_json); } catch { continue; }
+
+    let matches = true;
+    // restart_only / empty patch → any snapshot proves the restart
+    // happened, finalize unconditionally.
+    if (row.apply_mode !== "restart_only") {
+      if (patch.model !== undefined) {
+        if (snapModel !== patch.model) { matches = false; }
+      }
+      if (matches && patch.flags && typeof patch.flags === "object") {
+        for (const [k, v] of Object.entries(patch.flags as Record<string, unknown>)) {
+          // Canonical-key fallback for legacy aliases. The dashboard
+          // schema uses `budget` and `timeout`; node-side config may
+          // also carry the older `maxBudgetUsd` / `claudeTimeoutMs` /
+          // `codexTimeoutMs` keys. agent-node's buildConfigSnapshot
+          // only reports the canonical key, so we just compare on `k`.
+          if (snapFlags[k] !== v) { matches = false; break; }
+        }
+      }
+    }
+
+    if (!matches) continue;
+
+    // Promote nodes.config_revision atomically with the update row.
+    const nextRev = (db.get<{ config_revision: number }>(
+      "SELECT config_revision FROM nodes WHERE node_id = ?1",
+      nodeId,
+    )?.config_revision || 0) + 1;
+    db.run(
+      "UPDATE node_config_updates SET status = 'applied', acked_at = ?1, new_revision = ?2 WHERE update_id = ?3 AND status IN ('pending', 'restarting')",
+      [Date.now(), nextRev, row.update_id],
+    );
+    db.run("UPDATE nodes SET config_revision = ?1 WHERE node_id = ?2", [nextRev, nodeId]);
+    finalizedIds.push(row.update_id);
+    console.log(
+      `[commhub] ✓ finalize update ${row.update_id} via report_status content-match: node=${nodeId} new_revision=${nextRev} apply_mode=${row.apply_mode}`,
+    );
+  }
+
+  return { finalizedCount: finalizedIds.length, finalizedIds };
 }
