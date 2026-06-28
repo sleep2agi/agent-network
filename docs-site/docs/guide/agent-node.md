@@ -351,17 +351,22 @@ v0.4–v0.10 期间 claude-agent-sdk runtime 因为 [设计前提错](#144) 不�
 anet node loop my-claude "每天检查一次 ANTHROPIC quota 余额" --every 1d
 ```
 
-#### 查看 / 取消 loop
+#### 查看 / 改 / 取消 loop
 
 ```bash
-# 列出某节点所有 loop（也可以 anet goal ls 看全部节点）
+# 列出某节点所有 loop（看 task / interval / next_wake / status）
 anet goal list my-codex
 
-# 按 goal id 取消（id 用前 8 位即可，会自动唯一匹配）
+# 改间隔 / 暂停 / 改任务文本（id 用前 8 位即可，会自动唯一匹配）
+anet goal edit my-codex 3f8a2b1c --interval 10min                # 间隔改 10 分钟（支持 5min/1h/1d/每5分钟/hourly/daily 等）
+anet goal edit my-codex 3f8a2b1c --status paused                 # 暂停（status: active/paused/completed/cancelled）
+anet goal edit my-codex 3f8a2b1c --text "新的任务文案"           # 改文本
+
+# 按 goal id 取消（彻底停掉）
 anet goal cancel my-codex 3f8a2b1c
 ```
 
-持久化文件在 `~/.anet/nodes/<alias>/goals.json`，节点重启自动恢复。
+持久化文件在 `~/.anet/nodes/<alias>/goals.json`，节点重启自动恢复。**改完 `edit`/`cancel` 后，running agent-node 进程内仍持旧 goal 状态——重启节点或下次 tick 后才生效**。
 
 #### 间隔 + 频率
 

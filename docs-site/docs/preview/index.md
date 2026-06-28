@@ -64,8 +64,12 @@ anet upgrade --channel preview                              # 1. 升级到 previ
 anet --version                                              # 2. 确认 2.3.0-preview.1
 anet node start <alias>                                     # 3. 确保节点在线
 anet node loop <alias> "报一下现在几点" --every 5m          # 4. 下循环任务（5 分钟一次）
-anet goal list <alias>                                      # 5. 查看节点的循环
-anet goal cancel <goal-id>                                  # 6. 停止某个循环
+
+# 管理循环 ↓
+anet goal list <alias>                                      # 5a. 看有哪些循环（task/interval/next_wake/status）
+anet goal edit <alias> <goal-id> --interval 10min           # 5b. 改间隔
+anet goal edit <alias> <goal-id> --status paused            # 5c. 暂停（status: active/paused/completed/cancelled）
+anet goal cancel <alias> <goal-id>                          # 5d. 停止
 ```
 
 **频道等价用法**（在节点交互窗口 / Dashboard Chat / 飞书 @bot 等场景，效果一致）：
