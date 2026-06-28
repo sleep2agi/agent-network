@@ -23,18 +23,25 @@
 
 set -euo pipefail
 
-# safe_rm_rf guards against rm -rf $UNDEFINED (the 2026-06-16 incident)
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh" 2>/dev/null || {
-  # Fallback for direct script run: copy the safe helper inline
-  safe_rm_rf() {
-    local p
-    for p in "$@"; do
-      [[ -z "$p" ]] && { echo "safe_rm_rf: empty path"; return 99; }
-      [[ "$p" != /tmp/* && "$p" != /app/* ]] && { echo "safe_rm_rf: refusing $p"; return 99; }
-      rm -rf "$p"
-    done
-  }
-}
+# safe_rm_rf guards against rm -rf $UNDEFINED (the 2026-06-16 incident).
+# Source from one of the standard helper paths. Hard-fail if not found
+# so we don't silently fall back to an inline impl that the lint guard
+# (tests/scripts/lint-no-bare-rm-rf.sh) would flag as a regression.
+for _safe_rm_candidate in \
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh" \
+  /app/tests/lib/safe-rm.sh \
+  /lib/safe-rm.sh \
+; do
+  if [[ -f "$_safe_rm_candidate" ]]; then
+    # shellcheck source=/dev/null
+    source "$_safe_rm_candidate"
+    break
+  fi
+done
+if ! command -v safe_rm_rf >/dev/null 2>&1; then
+  echo "FATAL: safe_rm_rf helper not found — expected at tests/lib/safe-rm.sh" >&2
+  exit 99
+fi
 
 # ── Setup ────────────────────────────────────────────────────────────
 export HOME=/tmp/anethome

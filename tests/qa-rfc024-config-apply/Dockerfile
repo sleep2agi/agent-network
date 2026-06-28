@@ -23,12 +23,14 @@ WORKDIR /app
 # we drive `bun run agent-node/src/cli.ts` directly).
 COPY server /app/server
 COPY agent-node /app/agent-node
+# Mirror the repo tree layout so the run.sh relative source-path
+# `../lib/safe-rm.sh` resolves cleanly.
 COPY tests/lib /app/tests/lib
-COPY tests/qa-rfc024-config-apply/run.sh /app/run.sh
-RUN chmod +x /app/run.sh
+COPY tests/qa-rfc024-config-apply/run.sh /app/tests/qa-rfc024-config-apply/run.sh
+RUN chmod +x /app/tests/qa-rfc024-config-apply/run.sh
 
 # Install bun deps so first-run isn't slow + caches into the image layer.
 RUN cd /app/server && bun install --silent || true
 RUN cd /app/agent-node && bun install --silent || true
 
-CMD ["/app/run.sh"]
+CMD ["/app/tests/qa-rfc024-config-apply/run.sh"]
