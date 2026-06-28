@@ -42,6 +42,11 @@ import {
 } from "./runtime/grok-build-acp/resume-hint";
 import { CurrentAliasResolver } from "./runtime/current-alias";
 import { delegationTargetExists } from "./runtime/delegation-precheck";
+import {
+  isRateLimitOrQuotaError,
+  isEmptyResultSoftFailure,
+  quotaRemediationHint,
+} from "./runtime/claude-error-classify";
 
 const home = homedir();
 
@@ -1541,9 +1546,25 @@ async function processWithClaude(task: string, from: string, images?: string[]):
           const dt = Date.now() - t0;
           const u = m.usage || {};
           log(`[claude] ${m.subtype} | ${dt}ms | $${m.total_cost_usd?.toFixed(4) || "?"} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}${attempt > 0 ? ` | attempt=${attempt + 1}` : ""}`);
-          result = m.subtype === "success"
-            ? m.result || "任务完成"
-            : `执行出错: ${m.error || m.result || "未知错误"}`;
+          if (m.subtype === "success") {
+            // #261 P1-① (2026-06-28) — empty-result soft-failure gate.
+            // Pre-fix `m.result || "任务完成"` silently rebranded an
+            // empty vendor reply as "task complete" — root cause of the
+            // M3 incident where a silent rate-limit produced 0 output
+            // tokens but the upstream caller saw "任务完成" and moved on.
+            // Now: classifier surfaces the empty reply as a soft fail
+            // with a vendor-specific hint, so the next hop / operator
+            // sees the truth.
+            if (isEmptyResultSoftFailure(m)) {
+              const hint = quotaRemediationHint(process.env.ANTHROPIC_BASE_URL);
+              log(`[claude] ✗ vendor returned EMPTY result despite success subtype (in=${u.input_tokens || 0}, out=${u.output_tokens || 0}, result.len=${String(m.result || "").length}) — treating as soft fail`);
+              result = `执行出错: vendor 返回空响应 (in=${u.input_tokens || 0} out=${u.output_tokens || 0}) — 疑似 vendor 静默限流/配额. ${hint}`;
+            } else {
+              result = m.result;
+            }
+          } else {
+            result = `执行出错: ${m.error || m.result || "未知错误"}`;
+          }
         }
       }
       if (timer) clearTimeout(timer);
@@ -1559,6 +1580,21 @@ async function processWithClaude(task: string, from: string, images?: string[]):
         log(`[anet] FATAL: Vendor API auth failed — ${msg.slice(0, 100)}`);
         log(`[anet]        ${remediationHint(msg)}`);
         return `执行出错: vendor API auth failed (${msg.slice(0, 80)}) — refresh API key and re-export ENV var; see agent-node log for vendor-specific URL`;
+      }
+
+      // #261 P1-① — fast-fail on vendor rate-limit / quota / overload.
+      // Pre-fix these would burn the full retry chain (4s + 8s backoff
+      // each, 3 attempts × per-attempt timeout — up to ~15min of futile
+      // retries before returning the generic "claude-agent-sdk 调用超时"
+      // string). The operator action (raise quota / lower concurrency /
+      // wait for window reset) is unblocked only by an explicit
+      // classifier message; spending 15min on backoff doesn't help.
+      // Mirror the auth-error fast-fail pattern.
+      if (isRateLimitOrQuotaError(msg)) {
+        const hint = quotaRemediationHint(process.env.ANTHROPIC_BASE_URL);
+        log(`[claude] ✗ vendor rate-limit/quota: ${msg.slice(0, 150)}`);
+        log(`[anet]        ${hint}`);
+        return `执行出错: vendor 限流/配额耗尽 (${msg.slice(0, 80)}) — ${hint}`;
       }
 
       lastErr = msg;
