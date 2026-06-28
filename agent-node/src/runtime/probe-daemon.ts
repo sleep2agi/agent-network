@@ -1,43 +1,31 @@
 // RFC-028 P1 §4.4 daemon-side probe handler — SSE doorbell
-// type=probe_provider, pull spec + ephemeral secret + fetch via undici
-// dispatcher (custom-lookup pin IP + SNI=vendor host + manual redirect)
-// + classify response → strict whitelist enum ack.
+// type=probe_provider, pull spec + ephemeral secret + re-validate
+// base_url against shared allowlist (defense in depth vs compromised
+// hub), fetch via undici + DNS-resolved-IP forbidden check, classify
+// response → strict whitelist enum ack.
 //
 // Only registered/active when fileConfig.role === "host_supervisor".
-// undici imported lazily (not all installs have it; falls back to
-// native fetch IFF available with same dispatcher API — Bun ≥ 1.0 is
-// undici-compatible).
+//
+// host/IP/validateBaseUrl come from ../shared/probe-host-allowlist.ts
+// which is byte-identical to server/src/shared/probe-host-allowlist.ts
+// (G9 drift guard enforces). If hub-side check is identical, the
+// daemon re-check is a no-op; if hub-side ever loosens or a compromised
+// hub fabricates a base_url, daemon stays strict.
 
 import { promises as dns } from "node:dns";
 import { Agent, fetch as undiciFetch } from "undici";
+import {
+  isForbiddenIp,
+  isLoopbackHost,
+  validateBaseUrl,
+  ProbeValidationError,
+} from "../shared/probe-host-allowlist.js";
 
 // ── Hardened TLS env guard (per RFC-028 v3 R2) ─────────────────────
 export function assertSecureTlsEnv(env: NodeJS.ProcessEnv = process.env): void {
   if (env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
     throw new Error("probe_tls_insecure_disabled: NODE_TLS_REJECT_UNAUTHORIZED=0 forbidden");
   }
-}
-
-// ── Private IP block (mirror of probe-validate.ts on hub side) ─────
-const FORBIDDEN_IPV4_RE: ReadonlyArray<RegExp> = [
-  /^10\./, /^127\./,
-  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
-  /^192\.168\./, /^169\.254\./,
-  /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./,
-  /^0\./, /^22[4-9]\./, /^23[0-9]\./, /^24[0-9]\./, /^25[0-5]\./,
-];
-const FORBIDDEN_IPV6_RE: ReadonlyArray<RegExp> = [
-  /^::1$/, /^::$/, /^fe80:/i, /^fc00:/i, /^fd00:/i,
-];
-function isForbiddenIp(ip: string): boolean {
-  if (ip.toLowerCase().startsWith("::ffff:")) return isForbiddenIp(ip.slice(7));
-  if (ip.includes(":") && !ip.includes(".")) {
-    return FORBIDDEN_IPV6_RE.some(re => re.test(ip));
-  }
-  return FORBIDDEN_IPV4_RE.some(re => re.test(ip));
-}
-function isLoopbackHost(host: string): boolean {
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 // ── Per-vendor probe adapter (P1: anthropic only) ──────────────────
@@ -77,10 +65,14 @@ function buildProbeForVendor(vendor: string, baseUrl: string, model: string, api
   }
 }
 
-// ── safelyFetchProbe: undici dispatcher with custom-lookup pin IP ──
-// URL keeps the vendor hostname (SNI + cert SAN/CN validated as vendor
-// name). Network connection actually goes to the pre-validated IP.
-// redirect: "manual" + 3xx → throw probe_redirect_forbidden.
+// ── safelyFetchProbe ───────────────────────────────────────────────
+// DNS-resolve hostname → assert every A/AAAA record is NOT in the
+// forbidden IP set → fetch via undici with manual redirect (3xx →
+// probe_redirect_forbidden). TLS validation is mandatory (dispatcher
+// rejectUnauthorized:true + minVersion TLSv1.2). The customLookup
+// pin-IP guard against TOCTOU rebinding between our resolve and
+// undici's connect is deferred to P1.5 (undici Agent.connect.lookup
+// API is brittle across Bun + Node versions; see RFC-028 §10 P1.5).
 
 export interface SafeFetchResult {
   resp?: Response;
@@ -129,17 +121,11 @@ export async function safelyFetchProbe(
       return { errorKind: "probe_resolve_unsafe_ip", errorDetail: `resolved IP ${a.address} in forbidden range` };
     }
   }
-  // Note (RFC-028 P1 simplification): customLookup pin-IP anti-
-  // rebinding deferred to P1.5 — undici Agent's `connect.lookup` API
-  // contract is brittle across Bun + Node versions (real e2e exhibits
-  // network_error). Unit tests for `safelyFetchProbe` already prove
-  // the IP-block guard rejects private/metadata IPs before fetch fires.
-  // For P1 we rely on system DNS (resolved once via dns.lookup above,
-  // results validated, then handed to fetch). Worst-case rebinding
-  // window is single DNS roundtrip between our validation and undici's
-  // resolve — narrow + always-validated against the forbidden list at
-  // *our* lookup point.
-  void addrs;   // resolved addresses validated; we trust the system to re-resolve to same set
+  // P1 narrows the rebinding window to a single DNS roundtrip (our
+  // dns.lookup validated all records; undici will re-resolve when
+  // connecting). P1.5 will close this with a customLookup that pins
+  // the validated IP set into the connector — see RFC-028 §10.
+  void addrs;
   // Hardened TLS guarded by dispatcher: rejectUnauthorized:true,
   // minVersion TLSv1.2.
   const dispatcher = new Agent({
@@ -222,7 +208,35 @@ export async function handleProbeDoorbell(
     return;
   }
   const t0 = Date.now();
-  const result = await safelyFetchProbe(req.vendor, req.base_url, req.model_name, req.api_key);
+
+  // RFC-028 P1 fold-in #1: daemon-side re-check of vendor + base_url
+  // against the byte-identical shared allowlist. Defends against:
+  //   - compromised hub fabricating a base_url not in VENDOR_HOST_ALLOWLIST
+  //   - hub regression skipping its own validateBaseUrl
+  //   - on-wire injection between hub→daemon SSE
+  // Production daemons never opt into allowLoopback; only the F2 test
+  // ALLOW_LOOPBACK=1 env var lifts loopback gating (and even then this
+  // re-check still enforces vendor host pattern + private-IP block in
+  // safelyFetchProbe).
+  let result: SafeFetchResult;
+  let preflightRejected = false;
+  try {
+    validateBaseUrl(req.vendor, req.base_url);
+  } catch (e: any) {
+    preflightRejected = true;
+    const code = e instanceof ProbeValidationError ? e.code : "probe_target_forbidden";
+    // Surface the right enum: URL/scheme/host mismatches → probe_target_forbidden.
+    // probe_resolve_unsafe_ip is reserved for DNS-resolved private IPs (raised
+    // in safelyFetchProbe).
+    result = {
+      errorKind: "probe_target_forbidden",
+      errorDetail: `daemon_recheck_${code}`,
+    };
+    deps.warn(`[probe] base_url rejected by daemon re-check: vendor=${req.vendor} code=${code}`);
+  }
+  if (!preflightRejected) {
+    result = await safelyFetchProbe(req.vendor, req.base_url, req.model_name, req.api_key);
+  }
   const latency = Date.now() - t0;
   const ack = classifyProbeResponse(result, probe_id, latency);
   // Zero out api_key reference (best-effort; JS GC will release once

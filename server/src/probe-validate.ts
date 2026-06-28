@@ -1,97 +1,23 @@
 // RFC-028 P1 §4.4 — probe path validators (pure, no I/O).
-// Used by hub-side upsert_provider (validates base_url against vendor
-// allowlist) + daemon-side get_probe_request (re-validates, defense in
-// depth) + daemon-side safelyFetchProbe (DNS resolve → IP check →
-// pin) + hub-side ack_probe_request (deriveErrorLabel + rejectIfSecretLeaked).
+// Host allowlist + IP block + validateBaseUrl extracted into
+// shared/probe-host-allowlist.ts (mirror of agent-node/src/shared/, G9
+// drift guard enforces byte-identical). This module re-exports them so
+// existing hub call sites keep working, and adds hub-only bits:
+// PROBE_STATUS_ENUM + ProbeAckPayloadSchema + deriveErrorLabel +
+// rejectIfSecretLeaked + assertSecureTlsEnv.
 
 import { z } from "zod/v4";
+export {
+  VENDOR_HOST_ALLOWLIST,
+  SUPPORTED_VENDORS,
+  ProbeValidationError,
+  validateBaseUrl,
+  isLoopbackHost,
+  isForbiddenIp,
+} from "./shared/probe-host-allowlist.js";
+import { ProbeValidationError } from "./shared/probe-host-allowlist.js";
 
-// ── §4.4.1 per-vendor host allowlist (P1: anthropic only) ─────────
-// P2 will extend: openai/zai/openrouter/deepseek/qwen. Each vendor
-// has ONE OR MORE allowed hostnames (regex anchored). custom vendor
-// requires admin to explicitly allowlist per-host (P3).
-
-export const VENDOR_HOST_ALLOWLIST: Record<string, ReadonlyArray<RegExp>> = {
-  anthropic:  [/^api\.anthropic\.com$/],
-  // P2:
-  // openai:     [/^api\.openai\.com$/],
-  // zai:        [/^api\.z\.ai$/, /^open\.bigmodel\.cn$/],
-  // openrouter: [/^openrouter\.ai$/],
-  // deepseek:   [/^api\.deepseek\.com$/],
-  // qwen:       [/^dashscope(-intl)?\.aliyuncs\.com$/],
-};
-export const SUPPORTED_VENDORS = Object.keys(VENDOR_HOST_ALLOWLIST);
-
-export class ProbeValidationError extends Error {
-  constructor(public code: string, public detail?: Record<string, unknown>) {
-    super(`${code}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
-    this.name = "ProbeValidationError";
-  }
-}
-
-/** Boot-time / pre-fetch validation of provider base_url. Both hub
- *  (upsert_provider) and daemon (get_probe_request) run this. */
-export function validateBaseUrl(vendor: string, baseUrl: string, opts: { allowLoopback?: boolean } = {}): void {
-  let u: URL;
-  try { u = new URL(baseUrl); }
-  catch { throw new ProbeValidationError("probe_base_url_invalid", { reason: "not a valid URL", baseUrl: baseUrl.slice(0, 100) }); }
-
-  if (u.protocol !== "https:") {
-    // Loopback HTTP only allowed when explicit dev opt-in
-    if (!opts.allowLoopback || !isLoopbackHost(u.hostname) || u.protocol !== "http:") {
-      throw new ProbeValidationError("probe_base_url_invalid", { reason: "must be https (or http+loopback with dev opt-in)" });
-    }
-  }
-  const allowed = VENDOR_HOST_ALLOWLIST[vendor];
-  if (!allowed) {
-    throw new ProbeValidationError("vendor_not_supported", { vendor, supported: SUPPORTED_VENDORS });
-  }
-  if (!allowed.some(re => re.test(u.hostname))) {
-    throw new ProbeValidationError("probe_target_forbidden", {
-      vendor, host: u.hostname, allowed: allowed.map(r => r.source),
-    });
-  }
-}
-
-// ── §4.4.2 private/reserved IP block (anti SSRF) ──────────────────
-// Used by daemon's safelyFetchProbe after dns.lookup. Every resolved
-// IP must NOT be in these ranges (else probe_resolve_unsafe_ip).
-// Loopback exception requires ANET_DAEMON_PROBE_ALLOW_LOOPBACK=1.
-
-const FORBIDDEN_IPV4_RE: ReadonlyArray<RegExp> = [
-  /^10\./,
-  /^127\./,
-  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
-  /^192\.168\./,
-  /^169\.254\./,           // link-local + 169.254.169.254 cloud metadata
-  /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./,  // CGNAT
-  /^0\./,
-  /^22[4-9]\./, /^23[0-9]\./,  // multicast
-  /^24[0-9]\./, /^25[0-5]\./,  // experimental
-];
-const FORBIDDEN_IPV6_RE: ReadonlyArray<RegExp> = [
-  /^::1$/,
-  /^::$/,
-  /^fe80:/i, /^fc00:/i, /^fd00:/i,
-];
-
-export function isLoopbackHost(host: string): boolean {
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
-}
-
-export function isForbiddenIp(ip: string): boolean {
-  // IPv4-mapped IPv6: ::ffff:10.0.0.1 — recurse on inner v4
-  if (ip.toLowerCase().startsWith("::ffff:")) {
-    return isForbiddenIp(ip.slice(7));
-  }
-  // Simple v4/v6 distinction by presence of '.' / ':'
-  if (ip.includes(":") && !ip.includes(".")) {
-    return FORBIDDEN_IPV6_RE.some(re => re.test(ip));
-  }
-  return FORBIDDEN_IPV4_RE.some(re => re.test(ip));
-}
-
-// ── §4.4.3 boot-time TLS env guard (assert before any probe runs) ──
+// ── §4.4.5 boot-time TLS env guard (assert before any probe runs) ──
 
 export function assertSecureTlsEnv(env: NodeJS.ProcessEnv = process.env): void {
   if (env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {

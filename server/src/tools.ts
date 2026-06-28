@@ -2421,16 +2421,30 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   );
 
   // §2.3.8 daemon-facing — ack_probe_request (STRICT whitelist via zod).
-  server.tool(
+  // R3 LOCK (RFC-028 v3): ack payload has EXACTLY 4 keys. We pass a
+  // ZodObject with .strict() so the MCP SDK's validateToolInput surfaces
+  // any extra field (e.g. an attacker smuggling `error_message` to leak a
+  // secret) as a -32602 Invalid params error at the protocol boundary
+  // BEFORE our handler runs. The SDK invokes z.object(shape) by default
+  // which is strip-mode; passing a fully-constructed strict object
+  // bypasses that and enforces unknownKeys='strict'.
+  server.registerTool(
     "ack_probe_request",
-    "Daemon acks a probe. Schema is STRICT whitelist (no error_message; v3 R3 LOCK). RFC-028.",
     {
-      probe_id: z.string().min(1).max(200),
-      status: z.enum(["ok", "auth_fail", "quota", "rate_limit", "network_error", "timeout", "redirect_forbidden", "vendor_5xx", "other_4xx", "tls_error", "probe_resolve_unsafe_ip", "probe_target_forbidden"]),
-      raw_status_code: z.number().int().min(100).max(599).optional(),
-      latency_ms: z.number().int().min(0).max(60_000),
+      description: "Daemon acks a probe. Schema is STRICT whitelist (no error_message; v3 R3 LOCK). RFC-028.",
+      // Strict-mode ZodObject so the MCP SDK's validateToolInput surfaces
+      // any extra field as a -32602 Invalid params error BEFORE the
+      // handler runs. server.tool() accepts only ZodRawShape (default
+      // strip-mode); registerTool() accepts a constructed ZodObject and
+      // honors its unknownKeys policy.
+      inputSchema: z.object({
+        probe_id: z.string().min(1).max(200),
+        status: z.enum(["ok", "auth_fail", "quota", "rate_limit", "network_error", "timeout", "redirect_forbidden", "vendor_5xx", "other_4xx", "tls_error", "probe_resolve_unsafe_ip", "probe_target_forbidden"]),
+        raw_status_code: z.number().int().min(100).max(599).optional(),
+        latency_ms: z.number().int().min(0).max(60_000),
+      }).strict() as any,
     },
-    async (args) => {
+    async (args: any) => {
       const callerDaemon = _resolveCallerDaemonTokenBound({ callerTokenIsNetwork, callerTokenId, enforceNetworkId });
       if (!callerDaemon.ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };

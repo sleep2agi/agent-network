@@ -239,51 +239,117 @@ else
   tail -5 /tmp/canary.log
 fi
 
-# ── Scenario F — SSRF private-IP 真验 ─────────────────────────────
-note "F. SSRF — daemon真拒 private/metadata IP (169.254.169.254)"
-# Bypass hub validateBaseUrl by direct DB insert (simulates compromised hub)
-sqlite3 "$HUB_DB" "INSERT INTO providers (provider_id, network_id, name, vendor, base_url, secret_key_ref, created_at, created_by, enabled) VALUES ('prov_evil_metadata', '$NET_ID', 'Evil Metadata', 'anthropic', 'https://169.254.169.254/v1', 'ANTHROPIC_API_KEY', $(date +%s%N | head -c 13), '$ADMIN_USER', 1);"
-sqlite3 "$HUB_DB" "INSERT INTO provider_models (model_id, provider_id, model_name, enabled, created_at) VALUES ('pm_evil', 'prov_evil_metadata', 'claude-x', 1, $(date +%s%N | head -c 13));"
-ok "raw SQL inserted malicious provider (bypassing hub allowlist, simulating compromised hub)"
+# ── Scenario F — SSRF private-IP 真验 (DNS-resolves-to-metadata) ──
+# v2 (fold-in #2): use ISOLATED daemon WITHOUT ALLOW_LOOPBACK so the
+# private-IP block真 fires, then attack via /etc/hosts override so
+# the host passes validateBaseUrl (which only checks the regex) but
+# dns.lookup returns 169.254.169.254 (cloud metadata IP). Assert
+# ack.status == "probe_resolve_unsafe_ip" STRICTLY (no fallback enum).
+note "F. SSRF — DNS-resolves-to-metadata IP rejected (isolated daemon, no ALLOW_LOOPBACK, strict status)"
 
-# Restart mock in normal mode so probe gets a chance to dispatch
+# Mint isolated daemon identity (separate from main daemon — that one
+# has ALLOW_LOOPBACK=1 for the mock vendor; we need a clean one to
+# prove the IP block真 fires when not bypassed)
+F_DAEMON_NAME="daemon-rfc028-f"
+F_DAEMON_NTOK_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/node-token" \
+  -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' \
+  -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"$F_DAEMON_NAME\"}")
+F_DAEMON_NTOK=$(echo "$F_DAEMON_NTOK_RESP" | jq -r .token)
+F_DAEMON_NODE_ID="node_daemon_rfc028_f_$(date +%s%N | sha256sum | head -c 12)"
+mkdir -p "$WORK/.anet/nodes/$F_DAEMON_NAME"
+cat > "$WORK/.anet/nodes/$F_DAEMON_NAME/config.json" <<EOF2
+{"node_id":"$F_DAEMON_NODE_ID","node_name":"$F_DAEMON_NAME","alias":"$F_DAEMON_NAME","role":"host_supervisor",
+ "runtime":"claude-agent-sdk","model":"claude-opus-original",
+ "hub":"$HUB_BASE","token":"$F_DAEMON_NTOK"}
+EOF2
+# Start without ALLOW_LOOPBACK. NODE_EXTRA_CA_CERTS still needed in
+# case TLS handshake fires (it shouldn't — DNS check should reject
+# before fetch, but harmless to keep).
+NODE_EXTRA_CA_CERTS=/tmp/anet-mock-cert.pem \
+  nohup anet node start "$F_DAEMON_NAME" > /tmp/daemon-f.log 2>&1 &
+F_DAEMON_PID=$!
+for i in $(seq 1 30); do
+  sleep 1
+  R=$(curl -sS "$HUB_BASE/api/nodes?node_id=$F_DAEMON_NODE_ID" -H "Authorization: Bearer $UTOK")
+  if echo "$R" | jq -e ".nodes[0].node_id == \"$F_DAEMON_NODE_ID\"" >/dev/null 2>&1; then break; fi
+done
+ok "F daemon registered (isolated, ALLOW_LOOPBACK NOT set — IP block真 fires)"
+
+# Insert a provider that passes hub validateBaseUrl (host matches allowlist
+# regex ^api\.anthropic\.com$) — bypass simulates either a benign-looking
+# attacker or DNS rebinding. The attack vector is the DNS layer.
+sqlite3 "$HUB_DB" "INSERT INTO providers (provider_id, network_id, name, vendor, base_url, secret_key_ref, created_at, created_by, enabled) VALUES ('prov_dns_attack', '$NET_ID', 'DNS Attack', 'anthropic', 'https://api.anthropic.com/v1', 'ANTHROPIC_API_KEY', $(date +%s%N | head -c 13), '$ADMIN_USER', 1);"
+sqlite3 "$HUB_DB" "INSERT INTO provider_models (model_id, provider_id, model_name, enabled, created_at) VALUES ('pm_dns_attack', 'prov_dns_attack', 'claude-x', 1, $(date +%s%N | head -c 13));"
+ok "F provider inserted (host=api.anthropic.com, passes hub allowlist)"
+
+# /etc/hosts override: point api.anthropic.com → 169.254.169.254 (cloud
+# metadata) so dns.lookup in safelyFetchProbe returns the forbidden IP.
+# Save original to restore after test.
+cp /etc/hosts /tmp/hosts.bak
+echo "169.254.169.254 api.anthropic.com" >> /etc/hosts
+ok "F /etc/hosts override: api.anthropic.com → 169.254.169.254 (DNS attack staged)"
+
+# Restart mock in normal mode for any side-effect
 kill $MOCK_PID 2>/dev/null; wait $MOCK_PID 2>/dev/null
 node /app/tests/qa-rfc028-provider-probe/mock-vendor.js >>/tmp/mock-vendor.stdout 2>&1 &
 MOCK_PID=$!
 sleep 1
 
+# Dispatch probe targeting the ISOLATED daemon (so the main daemon with
+# ALLOW_LOOPBACK doesn't process it — C2 token-bound routing per RFC-026)
 BODY='{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"probe_provider_model","arguments":{
-  "provider_id":"prov_evil_metadata","model_name":"claude-x","daemon_node_id":"'$DAEMON_NODE_ID'","network_id":"'$NET_ID'"}}}'
+  "provider_id":"prov_dns_attack","model_name":"claude-x","daemon_node_id":"'$F_DAEMON_NODE_ID'","network_id":"'$NET_ID'"}}}'
 RESP=$(mcp_call "$UTOK" "$BODY")
 PROBE_ID_F=$(echo "$RESP" | jq -r .probe_id 2>/dev/null)
 for i in {1..20}; do sleep 1; ST=$(sqlite3 "$HUB_DB" "SELECT status FROM probe_results WHERE probe_id='$PROBE_ID_F';" 2>/dev/null); [[ "$ST" != "pending" && -n "$ST" ]] && break; done
-# daemon should classify as probe_resolve_unsafe_ip → maps to one of network_error / tls_error since it's not a direct
-# enum status. Looking at safelyFetchProbe: SafeFetchResult.errorKind = "probe_resolve_unsafe_ip" passes through to ack.
-# Hub schema enum doesn't include "probe_resolve_unsafe_ip" though — daemon would fail zod parse, ack falls through.
-# Practical outcome: probe stays "pending" → sweeper marks "timeout" OR daemon never sends ack.
-# For test purposes, accept either: ack with non-ok status, OR timeout via sweeper.
-if [[ "$ST" == "probe_resolve_unsafe_ip" || "$ST" == "timeout" || "$ST" == "network_error" ]]; then
-  ok "SSRF private-IP daemon blocked (status=$ST; 169.254 never reached)"
-else
-  bad "private-IP not blocked? status=$ST"
-fi
-# Also explicitly check: mock vendor log shows NO connection from this probe
-# (daemon never tried to talk to 169.254 — pre-fetch IP check fires)
-# Note: 169.254.169.254 won't hit our mock vendor at 127.0.0.1 either way;
-# the real verify is that the daemon ack status carries the SSRF rejection.
 
-# ── Scenario G — secret-no-leak (zod .strict() + rejectIfSecretLeaked) ──
-note "G. secret-no-leak — daemon ack with smuggled extra field (zod .strict)"
+# STRICT assertion — must be exactly "probe_resolve_unsafe_ip", not a fallback enum
+if [[ "$ST" == "probe_resolve_unsafe_ip" ]]; then
+  ok "F STRICT: ack.status == probe_resolve_unsafe_ip (DNS layer blocked metadata IP, no fetch fired)"
+else
+  bad "F STRICT FAIL: ack.status='$ST' expected exactly 'probe_resolve_unsafe_ip' — DNS guard miss or daemon bypass"
+  echo "--- daemon-f.log tail ---"; tail -20 /tmp/daemon-f.log 2>/dev/null
+fi
+
+# Restore /etc/hosts + cleanup F daemon (don't disturb subsequent scenarios)
+cp /tmp/hosts.bak /etc/hosts && rm -f /tmp/hosts.bak && ok "F /etc/hosts restored"
+kill "$F_DAEMON_PID" 2>/dev/null || true
+
+# ── Scenario G — secret-no-leak (zod .strict() via JSON-parsed error code) ──
+note "G. secret-no-leak — daemon ack with smuggled extra field (zod .strict, JSON error.code=-32602)"
 # Send raw ack_probe_request via curl with extra field; zod rejects.
-# Use daemon's own ntok to call.
+# Use daemon's own ntok to call. Then JSON-parse the response and assert
+# error.code === -32602 (MCP "Invalid params") — substring match was
+# too loose (any "error" in the payload would have passed).
 BODY='{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"ack_probe_request","arguments":{
   "probe_id":"pr_fake","status":"ok","latency_ms":100,
   "error_message":"sk-good-mock-vendor-test-key-12345"}}}'
 RESP=$(curl -sS -X POST "$HUB_BASE/mcp" -H "Authorization: Bearer $DAEMON_NTOK" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -H 'MCP-Protocol-Version: 2025-03-26' -d "$BODY")
-# Either zod rejects at MCP boundary (Invalid arguments) OR our error catch surfaces
-echo "$RESP" | grep -qiE "invalid|error|extra|strict|unknown" && ok "ack_probe_request with smuggled error_message rejected (zod .strict)" || bad "ack with extra field NOT rejected: $RESP"
+# Strip SSE 'data: ' prefix if present and JSON-parse
+RESP_JSON=$(echo "$RESP" | grep -oP '(?<=data: ).+' | head -1)
+[[ -z "$RESP_JSON" ]] && RESP_JSON="$RESP"
+# MCP SDK can surface a validation error in two shapes:
+#  (a) top-level JSON-RPC: { "error": { "code": -32602, ... } }
+#  (b) tool-result form: { "result": { "isError": true, "content":[{"text":"MCP error -32602: ..."}] } }
+# Accept either; parse strictly.
+G_ERR_CODE=$(echo "$RESP_JSON" | jq -r '.error.code // empty' 2>/dev/null)
+G_RESULT_ISERR=$(echo "$RESP_JSON" | jq -r '.result.isError // empty' 2>/dev/null)
+G_RESULT_TEXT=$(echo "$RESP_JSON" | jq -r '.result.content[0].text // empty' 2>/dev/null)
+if [[ "$G_ERR_CODE" == "-32602" ]]; then
+  ok "ack_probe_request rejected — top-level JSON-RPC error.code=-32602 (zod .strict at MCP boundary)"
+elif [[ "$G_RESULT_ISERR" == "true" ]] && [[ "$G_RESULT_TEXT" =~ -32602 ]] && [[ "$G_RESULT_TEXT" =~ unrecognized_keys|Unrecognized\ key|error_message ]]; then
+  ok "ack_probe_request rejected — tool-result isError with -32602 + unrecognized_keys for 'error_message' (zod .strict surfaced)"
+else
+  bad "G FAIL: expected -32602 with 'unrecognized_keys/error_message' marker; got code='$G_ERR_CODE' isErr='$G_RESULT_ISERR' text='${G_RESULT_TEXT:0:200}'"
+fi
+# Belt: assert daemon-leaked key value NOT in response body (zod stripped it before any logging)
+if echo "$RESP" | grep -q "sk-good-mock-vendor-test-key-12345"; then
+  bad "G LEAK: smuggled key value appears in error response — error path leaked the supposedly-rejected field"
+else
+  ok "G no-leak: smuggled key value NOT echoed in error response"
+fi
 
 # ── Cleanup hub for F2 test ───────────────────────────────────────
 kill "$DAEMON_PID" 2>/dev/null || true
