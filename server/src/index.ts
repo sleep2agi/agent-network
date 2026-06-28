@@ -25,6 +25,7 @@ import {
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "fs";
 import { dirname as pathDirname } from "path";
 import { startRetentionSweeper } from "./retention.js";
+import { startStaleSessionSweeper } from "./stale-sweeper.js";
 
 const PORT = Number(process.env.PORT) || 9200;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -1067,11 +1068,9 @@ Bun.serve({
 
     // ── REST: all sessions status ──
     if (url.pathname === "/api/status") {
-      const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
-      const staleParams: any[] = [cutoff];
-      let staleSql = "UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'";
-      staleSql = addNetworkScope(staleSql, staleParams, restScope);
-      db.run(staleSql, staleParams);
+      // Round-2/4 review ③: stale-marking moved to startStaleSessionSweeper()
+      // (background timer, ~60s cadence). Read paths no longer fire UPDATE.
+      // Per-request UPDATE was a write-amp vector — see stale-sweeper.ts.
       cleanupCommittedRenameSessions(restScope.networkId ? [restScope.networkId] : restScope.networkIds ?? null);
       // `?light=1` returns a narrow projection (alias / status / agent / task /
       // server / updated_at + runtime + network_id) — used by the mobile APP
@@ -1139,12 +1138,7 @@ Bun.serve({
 
     // ── REST: aggregate agents by physical server ──
     if (url.pathname === "/api/servers") {
-      const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
-      const staleParams: any[] = [cutoff];
-      let staleSql = "UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'";
-      staleSql = addNetworkScope(staleSql, staleParams, restScope);
-      db.run(staleSql, staleParams);
-
+      // Round-2/4 review ③: stale-marking moved to background sweeper.
       const params: any[] = [];
       let sql = `
         SELECT hostname, ip, cpu_load_1min, cpu_cores, mem_avail_gb, mem_used_gb,
@@ -1221,12 +1215,7 @@ Bun.serve({
       const detailKind = serverDetailMatch[2];
       if (!host) return withCors(req, Response.json({ ok: false, error: "host required" }, { status: 400 }));
 
-      const cutoff = sqliteTime(new Date(Date.now() - 10 * 60 * 1000));
-      const staleParams: any[] = [cutoff];
-      let staleSql = "UPDATE sessions SET status = 'offline' WHERE updated_at < ?1 AND status != 'offline'";
-      staleSql = addNetworkScope(staleSql, staleParams, restScope);
-      db.run(staleSql, staleParams);
-
+      // Round-2/4 review ③: stale-marking moved to background sweeper.
       if (detailKind === "agents") {
         const params: any[] = [host, host];
         let sql = `
@@ -2148,10 +2137,21 @@ const sweepIntervalMs = Number.isFinite(sweepIntervalMinutes) && sweepIntervalMi
   : 60 * 60 * 1000;
 const retentionSweeperTimer = startRetentionSweeper(sweepIntervalMs);
 
+// Round-2/4 review ③ — stale session sweeper (coexists with the
+// retention sweeper above; different concerns + different cadences).
+// Replaces the per-request UPDATE in GET /api/status (+ /api/servers,
+// /api/server-detail/*, MCP get_all_status). Each of those endpoints
+// used to run UPDATE on the sessions table just to maintain the
+// derived `offline` status; with the dashboard polling fast that was
+// 99% no-op write-amp under hot read paths. Now done globally once
+// every COMMHUB_STALE_SWEEP_SECONDS (default 60s).
+const staleSweeperTimer = startStaleSessionSweeper();
+
 // ── Graceful shutdown ───────────────────────────────
 function shutdown() {
   console.log("[commhub] shutting down...");
   clearInterval(retentionSweeperTimer);
+  clearInterval(staleSweeperTimer);
   db.close();
   process.exit(0);
 }
