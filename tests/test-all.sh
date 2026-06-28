@@ -49,22 +49,49 @@ run_suite() {
 # Suites that don't start their own server (Base E2E, V3 Auth) rely on
 # reset_server() to put one up for them. Suites that DO start their own
 # (V3 Networks, Config Priority) get a free :9200 to bind to.
+# CI-robust variant (PR #266 follow-up): explicit PID capture +
+# kill -KILL + wait, no dependency on pkill/grep or bash's /dev/tcp.
+# Originally this used `pkill -f 'bun.*src/index.ts'` + `/dev/tcp`
+# probe — both work locally but neither survives GHA's runner Docker
+# environment (V3 Networks regressed from local 19/3 to CI "0 ran"
+# in run 28308477515 on 912d642). pkill/grep can miss the bun process
+# depending on argv exposure, and `(exec 3<>/dev/tcp/...)` may behave
+# differently under the runner's process model. The PID-capture form
+# below is deterministic regardless.
+SERVER_PID=""
 reset_server() {
-  pkill -f 'bun.*src/index.ts' 2>/dev/null || true
-  # Wait for :9200 to actually free up — pkill is async; binding before
-  # the old process releases would re-trigger the EADDRINUSE we just fixed.
-  for _ in $(seq 1 30); do
-    if ! (exec 3<>/dev/tcp/127.0.0.1/9200) 2>/dev/null; then break; fi
-    exec 3>&- 2>/dev/null || true
-    sleep 0.25
-  done
+  # 1. Kill the previous server by exact PID (recorded last time we
+  # started one). `kill -KILL` is signal 9 — immediate, no signal mask.
+  if [ -n "$SERVER_PID" ]; then
+    kill -KILL "$SERVER_PID" 2>/dev/null || true
+    # `wait` reaps the zombie + blocks until the process actually exits.
+    # Skip if SERVER_PID isn't our child (wait returns 127 — fine).
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+
+  # 2. Brief settle for the kernel to release the listening socket.
+  # `kill -KILL` + `wait` is synchronous on the process, but the
+  # socket TIME_WAIT / TCP shutdown clears asynchronously. 0.5s is
+  # generous; the new server's /health poll below catches any slip.
+  sleep 0.5
+
+  # 3. Wipe per-suite state. Absolute paths only — never $VAR (lint
+  # guard would reject; see tests/lib/safe-rm.sh).
   rm -rf /root/.commhub /root/.anet 2>/dev/null || true
-  cd /app/server && bun run src/index.ts &>/dev/null &
+
+  # 4. Start the new server in a subshell so `cd` doesn't pollute
+  # the test-all.sh cwd, and capture its PID for next reset.
+  (cd /app/server && exec bun run src/index.ts) &>/dev/null &
+  SERVER_PID=$!
+
+  # 5. Poll /health until ready (max 15s). Surface clearly if it
+  # doesn't come up — the next suite would fail with confusing
+  # connection errors otherwise.
   for _ in $(seq 1 30); do
     curl -sf http://127.0.0.1:9200/health > /dev/null && return 0
     sleep 0.5
   done
-  echo "::warning::reset_server: server did not respond to /health within 15s" >&2
+  echo "::warning::reset_server: server (PID $SERVER_PID) did not respond to /health within 15s" >&2
   return 1
 }
 
