@@ -95,7 +95,7 @@ export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 
 ## E2E smoke checklist（测试派单用）
 
-> 测试一律 Docker mock + 派测试号（[[feedback_no_host_test_nodes]] / [[feedback_delegate_testing]]），不连本机 hub、不碰生产 db。Vincent 凭证活体 E2E 由通信龙调度。
+> 测试一律在 Docker mock 容器内由专用测试节点执行：不连本机 hub、不碰生产 db。Vincent 凭证活体 E2E 由项目负责人统一调度。
 
 - [ ] **L0 环境** — Docker 容器内安装 `@sleep2agi/agent-network` + `@sleep2agi/agent-node`；mock 飞书 WSClient server 可达。
 - [ ] **L1 配置** — `anet channel add feishu <test-node>` 落盘 `.env` + `access.json`，`.env` 权限 = 600，`config.json` `channels` 含 `"feishu"`。

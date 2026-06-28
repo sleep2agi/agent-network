@@ -233,8 +233,8 @@ export class PgAdapter implements DbAdapter {
  *
  * Operators who run `bun -e` snippets that touch the DB are expected to
  * `COMMHUB_DB=/tmp/...` themselves — `bun -e` doesn't set NODE_ENV, so the
- * guard can't catch that case. The rule is documented in CLAUDE.md /
- * memory ([[feedback_no_prod_db_access.md]]).
+ * guard can't catch that case. The rule (never read or write the
+ * production hub database) is documented in CLAUDE.md.
  */
 export function createAdapter(): DbAdapter {
   const dbUrl = process.env.DATABASE_URL;

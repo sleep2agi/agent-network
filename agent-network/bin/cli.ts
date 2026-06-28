@@ -1321,8 +1321,8 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       //     over the legacy DSP field, so writing both produced visible
       //     "two-flag" clutter Vincent flagged as redundant).
       //   - claude-code-cli: keeps writing `dangerouslySkipPermissions: true`
-      //     ONLY (Vincent's "cli 不用改" + [[feedback_default_flags]] —
-      //     CC reads DSP directly, not permissionMode).
+      //     ONLY (Vincent's "cli 不用改" — Claude Code reads DSP directly,
+      //     not permissionMode).
       //   - codex-sdk / grok-build-acp: keep DSP for back-compat (legacy
       //     consumers may read it).
       ...(runtime === "claude-agent-sdk"
@@ -8194,9 +8194,9 @@ function sciTeamLifecycle(opts: { dir: string; restart: boolean; cleanup: boolea
 // finally block.
 //
 // Vendor presets must stay in sync with the Vincent-verified list at
-// cli.ts L1116+ (1bc03c0 chain): adding a new preset here requires
-// per-vendor verify-with-real-call, not byte-copy (see
-// [[feedback_vendor_verify_before_hardcode]]).
+// cli.ts L1116+ (1bc03c0 chain): adding a new preset here requires a
+// real end-to-end API call against the vendor — do not copy parameters
+// from another vendor's preset.
 
 interface BatchOptions {
   prefix: string;                // alias 前缀, e.g. "工程师" → 工程师1号..工程师N号
