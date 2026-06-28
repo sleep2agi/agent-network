@@ -4,6 +4,9 @@
 # stubs (timing/multi-daemon setup, follow-up commit).
 
 set -uo pipefail
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/../lib/safe-rm.sh"
 
 HUB_PORT=9235
 HUB_BASE="http://127.0.0.1:$HUB_PORT"
@@ -58,7 +61,7 @@ JSON
 
 # ── 0. boot hub + admin user ──────────────────────────────────────
 note "0. boot hub + admin user + utok"
-rm -rf "$WORK" 2>/dev/null
+safe_rm_rf "$WORK" 2>/dev/null || true
 rm -f "$HUB_DB" "${HUB_DB}-shm" "${HUB_DB}-wal" 2>/dev/null
 mkdir -p "$WORK"
 cd /app/server
@@ -259,7 +262,7 @@ DIFF=$(diff /app/server/src/shared/reserved-env.ts /app/agent-node/src/shared/re
 
 # ── H. daemon node_id 强绑 (C2) ──────────────────────────────────
 note "H. daemon node_id 强绑 (C2)"
-stub "H" "needs 2 daemons same network — Phase 3 multi-daemon harness work; scenario H requires a second host-supervisor agent-node binary running concurrently in this container which complicates lifecycle. C2 enforcement is unit-tested (takePendingEnvBlob + DB-row check), follow-up live test in Phase 3"
+stub "H" "live test deferred to Phase 3 (needs 2 concurrent host-supervisor daemon processes in one container; lifecycle plumbing nontrivial). C2 enforcement coverage = pure unit tests for takePendingEnvBlob daemon-binding + the get_create_request/ack_create_request DB-row check (see server/src/create-node.test.ts in this same PR)."
 
 # ── I. ANET_BIN install-time pin + PATH 投毒 (C3) ────────────────
 note "I. ANET_BIN install-time pin + PATH 投毒 (C3)"
@@ -287,7 +290,7 @@ rm -rf /tmp/evil-bin
 
 # ── J. mint-evict 失败 → orphan revoke (C4) ─────────────────────
 note "J. mint-evict 失败 → orphan revoke (C4)"
-stub "J" "needs hub-crash sim (F-1) + daemon-kill-9 sim (F-2) with timing-coordinated reaper — Phase 3 follow-up. Sweeper logic is unit-testable (runOrphanSweepOnce) and tests in create-node.test.ts cover both code paths"
+stub "J" "live test deferred to Phase 3 (needs hub-crash sim F-1 + daemon-kill-9 sim F-2, timing-coordinated with reaper TTL). C4 enforcement coverage = pure unit tests for runOrphanSweepOnce — asserts api_tokens.revoked_at populated + node_create_requests.status terminal-transition (see server/src/create-node.test.ts in this same PR)."
 
 # ── K. channels fail-closed (C5) ─────────────────────────────────
 note "K. channels fail-closed (C5)"
