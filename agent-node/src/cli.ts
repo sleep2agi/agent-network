@@ -21,6 +21,7 @@ import { GoalStore, newGoal, runtimeBucket, decideStartupAction } from "./goals/
 import { decideTickWork } from "./goals/scheduler";
 import { runCodexWakeForGoal, type CodexWakeDeps } from "./goals/codex-wake";
 import { isGoalCompleteSentinel } from "./goals/completion-detect";
+import { computeNextWakeAt } from "./goals/schedule";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
@@ -1169,7 +1170,22 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
   }
   const summary = text.replace(/\s+/g, " ").slice(0, 500);
   const completed = isGoalCompleteSentinel(text);
-  const nextWakeAt = new Date(Date.now() + goal.interval_ms).toISOString();
+  // RFC-025 M1b: cron-lite aware advancement. When goal has schedule
+  // field (time_of_day / weekday / new-format interval), use the pure
+  // computeNextWakeAt to pick the next wall-clock instant. When schedule
+  // is absent (legacy interval-only goals — every goals.json on disk
+  // pre-M1b), fall back to "now + interval_ms" — EXACTLY the pre-M1b
+  // path. Back-compat regression锁 by goals/schedule.test.ts.
+  //
+  // Default TZ comes from node config flags.timezone, falling back to
+  // Asia/Shanghai (Vincent/团队主时区, per RFC-025 §11.8 resolved).
+  const goalDefaultTz: string = (fileConfig?.flags?.timezone as string) || "Asia/Shanghai";
+  const nextWakeAt = computeNextWakeAt(
+    goal.schedule,
+    new Date(),
+    goalDefaultTz,
+    { fallback_interval_ms: goal.interval_ms },
+  ).toISOString();
 
   // Phase 2: writeback. If THIS mutate throws, the wake's LLM work
   // already happened — surface the writeback failure loudly so the
