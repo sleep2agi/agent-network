@@ -749,10 +749,37 @@ export function logAudit(userId: string | null, username: string | null, action:
 // 'replied' if it's still open, and post an inbox notification to the parent's
 // originator (so an upstream agent or the dashboard sees the chained answer).
 // Recurse up the chain (in case of N hops).
-export function chainReplyToParent(childTaskId: string, replyText: string, replyStatus: "replied" | "failed" | "cancelled" = "replied", maxDepth = 5): void {
+/**
+ * Auto-chain a sub-task reply up to the parent task lineage.
+ *
+ * `callerNetId` (round5 F2 fix): the network the *caller* (send_reply
+ * / report_completion) is operating in. When supplied, the chain
+ * refuses to traverse into a parent whose `network_id` doesn't match —
+ * blocks cross-tenant write where network B replies to a task they've
+ * named as parent but which actually lives in network A.
+ *
+ * Callers that legitimately need the legacy network-blind behavior
+ * (e.g. server-internal bookkeeping that doesn't have a tenant
+ * context) can omit `callerNetId`, but every MCP tool path MUST
+ * supply it.
+ */
+export function chainReplyToParent(
+  childTaskId: string,
+  replyText: string,
+  replyStatus: "replied" | "failed" | "cancelled" = "replied",
+  maxDepth = 5,
+  callerNetId?: string | null,
+): void {
   let currentChildId: string | null = childTaskId;
   let currentReply = replyText;
   let depth = 0;
+  // Normalize so undefined ("don't enforce") stays distinct from
+  // null ("explicit default network"). Caller passes undefined to
+  // opt out of the cross-tenant check; null to require the parent
+  // also live in the default (null) network.
+  const enforce = callerNetId !== undefined;
+  const callerNorm = callerNetId ?? null;
+
   while (currentChildId && depth < maxDepth) {
     depth++;
     type ChildRow = { parent_task_id: string | null; to_name: string; from_name: string; content: string };
@@ -767,6 +794,18 @@ export function chainReplyToParent(childTaskId: string, replyText: string, reply
       child.parent_task_id
     );
     if (!parent) return;
+
+    // round5 F2 fix: refuse to write into a parent that lives in a
+    // different network than the caller. Stops chain-reply being a
+    // cross-tenant write primitive. Logs once per attempt so ops can
+    // see the rejection in the access log.
+    if (enforce) {
+      const parentNet = parent.network_id ?? null;
+      if (parentNet !== callerNorm) {
+        console.log(`[commhub] 🚫 chainReplyToParent cross-network blocked: parent=${parent.task_id.slice(0, 8)} parent-net=${parentNet ?? "null"} caller-net=${callerNorm ?? "null"}`);
+        return;
+      }
+    }
 
     const childAlias = child.to_name;
     const marker = `\n\n[via ${childAlias} 子任务结果]\n${currentReply}`;
