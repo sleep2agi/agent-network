@@ -19,6 +19,14 @@ export interface AuthResult {
   token?: string;           // user token (utok_)
   network_token?: string;   // network token (ntok_) for default network
   network_id?: string;
+  // #261 P0-2 (2026-06-28): true when the logged-in user still has the
+  // bootstrap-default password. The CLI client uses this to print a
+  // prominent "must change password" warning after login succeeds. NOT
+  // a login-blocker — we don't lock out anyone whose deployment ran on
+  // the old `admin/anethub` default (back-compat per 通信龙 spec). The
+  // field is intentionally absent (rather than `false`) on the normal
+  // case so old clients don't even see it.
+  must_change_password?: boolean;
 }
 
 function validatePasswordStrength(password: string, label = "password"): string | null {
@@ -93,7 +101,7 @@ export function register(username: string, password: string, email?: string, dis
 
 export function login(username: string, password: string): AuthResult {
   const user = db.get<any>(
-    "SELECT user_id, username, password_hash, display_name, email, role FROM users WHERE username = ?1",
+    "SELECT user_id, username, password_hash, display_name, email, role, must_change_password FROM users WHERE username = ?1",
     username);
 
   if (!user) return { ok: false, error: "invalid username or password" };
@@ -123,6 +131,9 @@ export function login(username: string, password: string): AuthResult {
     user: { user_id: user.user_id, username: user.username, display_name: user.display_name, email: user.email, role: user.role },
     token,
     network_id: networkId,
+    // #261 P0-2 — only include field when truthy (back-compat; old clients
+    // don't see this field at all unless their account is flagged).
+    ...(user.must_change_password === 1 ? { must_change_password: true } : {}),
   };
 }
 
@@ -277,9 +288,26 @@ export function changePassword(userId: string, oldPassword: string, newPassword:
   const user = db.get<any>("SELECT password_hash FROM users WHERE user_id = ?1", userId);
   if (!user) return { ok: false, error: "user not found" };
   if (user.password_hash !== hashPassword(oldPassword)) return { ok: false, error: "incorrect current password" };
-  db.run("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);
+  // #261 P0-2 — clearing must_change_password as a side-effect of a real
+  // password change. If the user changes via `anet passwd`, the bootstrap
+  // nudge goes away on next login. SET to 0 explicitly (rather than skip)
+  // so a future flag flip can't drift the state.
+  db.run("UPDATE users SET password_hash = ?1, must_change_password = 0, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);
   const revoked = revokeOtherUserTokens(userId, currentTokenId);
   return { ok: true, revoked };
+}
+
+/**
+ * #261 P0-2 — mark a user as needing to change their password on first
+ * login. Called by the hub-bootstrap path (`anet hub start`) AFTER it
+ * auto-registers the admin with a random bootstrap password. Idempotent.
+ * Returns true if a row was affected (i.e. the user exists), false
+ * otherwise. NOT exposed via any HTTP endpoint — internal-only, called
+ * via direct module import or a local-process SQLite handle.
+ */
+export function markMustChangePassword(userId: string): boolean {
+  const r = db.run("UPDATE users SET must_change_password = 1 WHERE user_id = ?1", [userId]);
+  return r.changes > 0;
 }
 
 export function resetUserPassword(targetUsername: string, callerIsHubAdmin: boolean): { ok: boolean; error?: string; username?: string; user_id?: string; password?: string; token?: string; token_id?: string; revoked?: number } {

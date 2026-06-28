@@ -231,6 +231,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 `);
 
+// #261 P0-2 (2026-06-28): must_change_password flag. Added via ALTER
+// (not in the CREATE block above) so it's a no-op on fresh DBs that
+// already get the column via the CREATE path's full definition AND a
+// pure additive migration on existing prod DBs — column defaults 0
+// for every existing row, so old `admin/anethub` deployments are NOT
+// locked or nudged on upgrade (back-compat per 通信龙 spec). Wrapped
+// in try/catch because SQLite throws "duplicate column" if the column
+// already exists on subsequent restarts (no IF NOT EXISTS syntax for
+// ALTER ADD COLUMN until SQLite 3.35+, can't assume that everywhere).
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
 // ── V3: networks table ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS networks (
