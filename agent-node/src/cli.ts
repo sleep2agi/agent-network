@@ -2333,12 +2333,40 @@ async function processWithGrok(task: string, from: string, images?: string[]): P
   // injected traffic distinctly if needed. Harmless extra header today.
   headers.push({ name: "X-Commhub-MCP-Transport", value: "acp-http" });
   if (ALIAS) headers.push({ name: "X-Commhub-Alias-Hint", value: ALIAS });
-  const grokMcpServers = [{
-    type: "http" as const,
+  const grokMcpServers: Array<{
+    type: "http";
+    name: string;
+    url: string;
+    headers: Array<{ name: string; value: string }>;
+  }> = [{
+    type: "http",
     name: "commhub",
     url: `${COMMHUB_URL}/mcp`,
     headers,
   }];
+
+  // RFC-025 M3 — register the loops HTTP MCP server (started at
+  // agent-node boot, see startLoopsHttpServer wire below). Same ACP
+  // schema as commhub: type:"http" + headers array. The bearer token
+  // is read from process.env.LOOPS_MCP_TOKEN (parent process state),
+  // not surfaced in logs/disk per 通信龙 M2 security constraints.
+  //
+  // localhost-bound + per-process random token: a misbehaving peer on
+  // the same machine can't address THIS agent's loops without the
+  // ephemeral token, which only this agent-node process possesses.
+  if (process.env.LOOPS_MCP_URL && process.env.LOOPS_MCP_TOKEN) {
+    const loopHeaders: Array<{ name: string; value: string }> = [
+      { name: "Authorization", value: `Bearer ${process.env.LOOPS_MCP_TOKEN}` },
+      { name: "X-Commhub-MCP-Transport", value: "acp-http-loops" },
+    ];
+    if (ALIAS) loopHeaders.push({ name: "X-Commhub-Alias-Hint", value: ALIAS });
+    grokMcpServers.push({
+      type: "http",
+      name: "loops",
+      url: process.env.LOOPS_MCP_URL,
+      headers: loopHeaders,
+    });
+  }
 
   // #204 preview.7 — per-node isolated cwd. preview.2 → preview.6 chain
   // showed that even with HTTP MCP injected via ACP, Grok CLI ALSO reads
@@ -3727,15 +3755,19 @@ if (goalsSchedulerEnabled) {
   runGoalSchedulerTick().catch(() => {});
 }
 
-// RFC-025 M2 — loops HTTP MCP server for codex-sdk runtime.
-// Always start (independent of runtime) so the SAME goalStore +
-// cooldown + confirm-token state is shared with codex tools. claude
-// path uses in-process SDK McpServer; this HTTP server is the codex
-// equivalent. localhost-bound + random bearer token (only handed to
-// codex subprocess via env). For non-codex runtimes the server runs
-// but is unused — no security exposure since 127.0.0.1 + bearer.
+// RFC-025 M2/M3 — loops HTTP MCP server for codex-sdk + grok-build-acp.
+// Both runtimes connect to a localhost-bound HTTP MCP server in the
+// parent agent-node, so the 6 self-loop handlers run against the SAME
+// goalStore + cooldown + confirm-token state as the claude path.
+// Safety防线 stays cross-runtime — they are NOT per-process counters.
+//
+// Security (per 通信龙 M2 hard constraints, applies identically here):
+//   - localhost-only bind (127.0.0.1)
+//   - random bearer token (crypto.randomBytes 16B) per agent-node
+//     process, only handed to subprocess via env var (no log, no disk)
+//   - auth no-bypass — wrong/missing token → 401
 let loopsHttpServerHandle: import("./goals/loops-http-server").LoopsHttpServerStarted | null = null;
-if (RUNTIME === "codex") {
+if (RUNTIME === "codex" || RUNTIME === "grok") {
   try {
     const { startLoopsHttpServer } = await import("./goals/loops-http-server");
     const maxGoalsEnv = parseInt(process.env.COMMHUB_MAX_GOALS_PER_NODE || "", 10);
@@ -3749,14 +3781,16 @@ if (RUNTIME === "codex") {
         pendingConfirmTokens: loopsConfirmTokens,
       },
     });
-    // Hand token to codex CLI subprocess via env (no log, no disk).
-    // The buildCodexConfig adds mcp_servers.loops referencing this
-    // URL + bearer-token-env-var = LOOPS_MCP_TOKEN.
+    // Hand token to codex CLI / grok ACP subprocess via env (no log,
+    // no disk). buildCodexConfig adds mcp_servers.loops referencing
+    // LOOPS_MCP_URL + bearer_token_env_var='LOOPS_MCP_TOKEN'; the
+    // grok ACP injection in processWithGrok adds a parallel ACP
+    // HTTP MCP entry pointing to the same URL+token.
     process.env.LOOPS_MCP_TOKEN = loopsHttpServerHandle.token;
     process.env.LOOPS_MCP_URL = loopsHttpServerHandle.url;
-    log(`[loops] HTTP MCP server bound to ${loopsHttpServerHandle.url} (codex self-loop tools)`);
+    log(`[loops] HTTP MCP server bound to ${loopsHttpServerHandle.url} (${RUNTIME} self-loop tools)`);
   } catch (e: any) {
-    warn(`[loops] HTTP MCP server failed to start (${e?.message ?? e}); codex self-loop tools unavailable`);
+    warn(`[loops] HTTP MCP server failed to start (${e?.message ?? e}); ${RUNTIME} self-loop tools unavailable`);
   }
 }
 
