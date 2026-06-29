@@ -284,3 +284,44 @@ describe("custom token override (for tests)", () => {
     expect(r.status).toBe(200);
   });
 });
+
+describe("path routing — exact pathname (通信牛 hardening nit)", () => {
+  // Prior impl used `req.url.startsWith("/mcp")`, which routed
+  // /mcpXYZ, /mcp.foo, /mcp-anything to the JSON-RPC handler. Bearer
+  // auth still gated execution, but widened surface unnecessarily.
+  // Tightened to exact pathname == "/mcp" (query string OK).
+  const base = () => server.url.replace(/\/mcp$/, "");
+  const authHdr = () => ({ "content-type": "application/json", "authorization": `Bearer ${server.token}` });
+  const initBody = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+
+  test("/mcp (exact) accepted → 200", async () => {
+    const r = await fetch(`${base()}/mcp`, { method: "POST", headers: authHdr(), body: initBody });
+    expect(r.status).toBe(200);
+  });
+
+  test("/mcp?foo=bar (with query string) accepted → 200", async () => {
+    const r = await fetch(`${base()}/mcp?foo=bar`, { method: "POST", headers: authHdr(), body: initBody });
+    expect(r.status).toBe(200);
+  });
+
+  test("/mcpXYZ (suffix) rejected → 404 (not auth-checked)", async () => {
+    const r = await fetch(`${base()}/mcpXYZ`, { method: "POST", headers: authHdr(), body: initBody });
+    expect(r.status).toBe(404);
+    expect(await r.text()).toBe("not found");
+  });
+
+  test("/mcp/ (trailing slash) rejected → 404", async () => {
+    const r = await fetch(`${base()}/mcp/`, { method: "POST", headers: authHdr(), body: initBody });
+    expect(r.status).toBe(404);
+  });
+
+  test("/mcp-leak (dash suffix) rejected → 404", async () => {
+    const r = await fetch(`${base()}/mcp-leak`, { method: "POST", headers: authHdr(), body: initBody });
+    expect(r.status).toBe(404);
+  });
+
+  test("/ (root) rejected → 404", async () => {
+    const r = await fetch(`${base()}/`, { method: "POST", headers: authHdr(), body: initBody });
+    expect(r.status).toBe(404);
+  });
+});

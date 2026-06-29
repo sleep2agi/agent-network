@@ -150,7 +150,12 @@ export async function startLoopsHttpServer(opts: StartOpts): Promise<LoopsHttpSe
   const token = opts.token ?? randomBytes(16).toString("base64url");
 
   const server = createServer(async (req, res) => {
-    if (!req.url || req.method !== "POST" || !req.url.startsWith("/mcp")) {
+    // Exact-pathname match. `req.url.startsWith("/mcp")` (prior impl)
+    // accepted "/mcpXYZ", "/mcp-anything", etc. — even with bearer guard
+    // it widens the routable surface unnecessarily. Strip query string
+    // and compare pathname exactly to "/mcp".
+    const pathname = req.url?.split("?")[0];
+    if (!pathname || req.method !== "POST" || pathname !== "/mcp") {
       res.statusCode = 404;
       res.end("not found");
       return;
