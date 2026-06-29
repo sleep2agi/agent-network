@@ -1465,6 +1465,31 @@ async function processWithClaude(task: string, from: string, images?: string[]):
   // commhub prefix, NOT the double `mcp__commhub__commhub_<bare>` the v1 fix
   // taught (the double came from a different MCP host's configuration that
   // is not what the SDK in-process server produces). Names updated below.
+  // RFC-020 §15 — feishu turn outbound-file convention. Only injected when
+  // the current turn originates from the feishu channel; commhub / /loop /
+  // telegram replies don't need this (the marker is bridge-specific).
+  // 2026-06-29 Vincent UAT root cause: agent generated a PDF + wrote it to
+  // disk, then text-replied "I don't know how to send this" — no protocol
+  // taught it the `[[send-file:/abs/path]]` marker. Bridge worker now
+  // parses these markers, strips them from the user-visible text, and
+  // dispatches each file (magic-byte routes image_key vs file_key).
+  const feishuOutboundFileGuidance = isFeishuChannelTurn(from)
+    ? [
+        `【给用户发文件 — 飞书】`,
+        `想把生成/找到的文件（PDF、图片、音频、视频、任意文件）发给用户时：`,
+        `1. 先把文件写到 \`/work/feishu-attachments/<connection>/<conv>/<filename>\` 这条会话的目录（你的 Bash/Write 有该目录的权限）。`,
+        `2. 在回复末尾**另起一行**，每个要发的文件写一行：\`[[send-file:/绝对路径]]\``,
+        `3. 回复正文 + 标记一起发就行——bridge 会自动 strip 标记、上传文件、按图片/文件路由分发，用户看不到标记本身。`,
+        ``,
+        `示例（写完 PDF 之后）：`,
+        `> 报告做好了，要点如下：A / B / C。`,
+        `> [[send-file:/work/feishu-attachments/feishu-local/oc_xxx/report.pdf]]`,
+        ``,
+        `不要因为不确定怎么发，就**问用户**"系统会不会自动当附件发"——直接用标记就发了。一条回复多个文件就写多个标记，每行一个。`,
+        `路径必须在 \`/work/feishu-attachments/<connection>/<conv>/\` 下，否则会被 bridge 拒绝；用 ls 看看当前会话目录在哪。`,
+      ].join("\n")
+    : "";
+
   const commhubToolGuidance = [
     `【多 agent 协作 — CommHub 工具】`,
     `你已接入 CommHub 通信网络，可主动用以下 MCP 工具协调其他 agent（这些工具已 registered，直接调用即可）：`,
@@ -1488,6 +1513,8 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     ``,
     commhubToolGuidance,
     ``,
+    // Only present on feishu turns; empty string elsewhere.
+    feishuOutboundFileGuidance,
     `【禁止】`,
     `- 不要给自己（${ALIAS}）发任务（死循环）。`,
     `- 不要回复"收到""ok""明白了"等无内容确认。`,
@@ -1497,7 +1524,9 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     `执行完后简要汇报结果。`,
   ].join("\n");
   const promptText = SYSTEM_PROMPT
-    ? `${SYSTEM_PROMPT}\n\n${toolCapabilityGuidance}\n\n${commhubToolGuidance}\n\n收到来自 ${from} 的任务：\n\n${task}`
+    ? `${SYSTEM_PROMPT}\n\n${toolCapabilityGuidance}\n\n${commhubToolGuidance}${
+        feishuOutboundFileGuidance ? `\n\n${feishuOutboundFileGuidance}` : ""
+      }\n\n收到来自 ${from} 的任务：\n\n${task}`
     : defaultPrompt;
 
   // #259 Y prompt construction — string path (red-line zero-regression for

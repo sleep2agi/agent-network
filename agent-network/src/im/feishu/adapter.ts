@@ -44,7 +44,7 @@ export class FeishuAdapter implements IMAdapter {
   readonly ingressMode: IMIngressMode = "socket";
 
   private feishuConfig: FeishuChannelConfig | null = null;
-  private connectionName = "";
+  private connectionName_ = "";
   private client: lark.Client | null = null;
   private wsClient: lark.WSClient | null = null;
   /**
@@ -77,6 +77,15 @@ export class FeishuAdapter implements IMAdapter {
     return this.feishuConfig?.access?.allowFrom ?? [];
   }
 
+  /**
+   * Read-only accessor used by bridge to resolve per-connection paths
+   * (RFC-020 §15 outbound-marker validation needs the connection name
+   * to build the allowed per-conversation directory prefix).
+   */
+  get connectionName(): string {
+    return this.connectionName_;
+  }
+
   async init(config: IMChannelConfig): Promise<void> {
     if (config.platform !== "feishu") {
       throw new Error(
@@ -90,7 +99,7 @@ export class FeishuAdapter implements IMAdapter {
       );
     }
     this.feishuConfig = fc as FeishuChannelConfig;
-    this.connectionName = config.connectionName;
+    this.connectionName_ = config.connectionName;
     this.client = new lark.Client({
       appId: fc.appId,
       appSecret: fc.appSecret,
@@ -112,9 +121,9 @@ export class FeishuAdapter implements IMAdapter {
     // paths), downloads are disabled.
     const overrideBase = process.env.ANET_FEISHU_MEDIA_DIR?.trim();
     if (overrideBase) {
-      this.mediaDir = join(overrideBase, this.connectionName);
+      this.mediaDir = join(overrideBase, this.connectionName_);
     } else if (fc.channelDir) {
-      this.mediaDir = `/work/feishu-attachments/${this.connectionName}`;
+      this.mediaDir = `/work/feishu-attachments/${this.connectionName_}`;
     } else {
       this.mediaDir = null;
     }
@@ -125,7 +134,7 @@ export class FeishuAdapter implements IMAdapter {
       throw new Error("FeishuAdapter.start: call init() first");
     }
     const { appId, appSecret, access, groupPolicy } = this.feishuConfig;
-    const connectionName = this.connectionName;
+    const connectionName = this.connectionName_;
     const botOpenId = this.botOpenId;
     const mediaDir = this.mediaDir;
     const client = this.client;

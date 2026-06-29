@@ -32,6 +32,13 @@
 import type { NormalizedIMEvent } from "../types.js";
 import { FeishuAdapter } from "./adapter.js";
 import { loadFeishuChannelConfig } from "./config.js";
+import {
+  parseOutboundMarkers,
+  validateOutboundPath,
+  sniffFileKind,
+  ALL_FILES_FAILED_FALLBACK,
+} from "./outbound-marker.js";
+import * as fs from "node:fs";
 
 export interface FeishuBridgeOptions {
   /** Absolute path to `.anet/nodes/<node>/channels/feishu/`. */
@@ -456,19 +463,139 @@ export function createIPCEventHandler(
       // reply (no adapter.edit). The placeholderMessageId is logged for
       // traceability but is not used to mutate the placeholder. Users get
       // a second push notification when the reply lands.
-      try {
-        const { messageId } = await adapter.send({
-          target: event.conversation,
-          text: replyText,
-          replyToMessageId: event.messageId,
-          correlation: { taskId: eventKey },
+      //
+      // RFC-020 §15 (Vincent UAT 2026-06-29 PDF case): parse outbound
+      // `[[send-file:/abs/path]]` markers, strip from visible text, validate
+      // paths per-conversation, and dispatch each file as its own message
+      // (text first if non-empty, then files in source order). adapter.send()
+      // takes one payload at a time — this loop is the multi-dispatch site.
+      const { cleanedText, files: markerRequests } = parseOutboundMarkers(replyText);
+      // convKey: open_chat_id for groups, open_id (sender) for DMs. The
+      // /work/feishu-attachments/<connection>/<convKey>/ directory is the
+      // single allowed outbound root the agent can write into.
+      // convKey: open_id (sender) for DMs, open_chat_id (conversationId) for
+      // groups. Mirrors the per-conversation drop-zone the inbound image
+      // downloader uses, so the agent's Read access (Layer B allow list)
+      // and outbound dispatch share one directory tree.
+      const convKey =
+        event.conversation.conversationType === "dm"
+          ? event.sender.id
+          : event.conversation.conversationId || event.sender.id;
+      // connectionId is `<node>#<platform>:<connectionName>` — pull the
+      // last `:` segment. Fall back to adapter's own copy if the event
+      // shape ever drifts.
+      const connectionName =
+        event.connectionId?.split(":").pop() ||
+        adapter.connectionName ||
+        "feishu";
+      // Validate every marker request; collect successes + failures.
+      const validFiles: Array<{ path: string; kind: "image" | "file" }> = [];
+      const failureReasons: string[] = [];
+      for (const req of markerRequests) {
+        const reason = validateOutboundPath({
+          p: req.normalized,
+          convKey,
+          connectionName,
         });
-        const note = placeholderMessageId
-          ? ` (after placeholder=${placeholderMessageId})`
-          : "";
-        process.stderr.write(
-          `[feishu:bridge] reply sent (messageId=${messageId})${note} for ${eventKey}\n`,
-        );
+        if (reason) {
+          process.stderr.write(
+            `[feishu:bridge] outbound-marker rejected ${req.normalized} for ${eventKey}: ${reason}\n`,
+          );
+          failureReasons.push(reason);
+          continue;
+        }
+        // Read first 16 bytes to magic-byte sniff the kind.
+        let kind: "image" | "file" = "file";
+        try {
+          const fd = fs.openSync(req.normalized, "r");
+          try {
+            const head = Buffer.alloc(16);
+            const n = fs.readSync(fd, head, 0, 16, 0);
+            kind = sniffFileKind(head.subarray(0, n));
+          } finally {
+            fs.closeSync(fd);
+          }
+        } catch (e: any) {
+          process.stderr.write(
+            `[feishu:bridge] outbound-marker sniff failed for ${req.normalized}: ${e?.message ?? e}\n`,
+          );
+          failureReasons.push("[文件附件未发送] 读取文件失败");
+          continue;
+        }
+        validFiles.push({ path: req.normalized, kind });
+      }
+
+      const note = placeholderMessageId
+        ? ` (after placeholder=${placeholderMessageId})`
+        : "";
+
+      // If the agent produced ONLY markers + no surrounding text AND every
+      // marker failed validation, we still owe the user a friendly reply
+      // (silent drop is the worst outcome — user thinks bot is hung).
+      const haveAnyOutbound = validFiles.length > 0 || cleanedText.length > 0;
+      let textToSend = cleanedText;
+      if (!haveAnyOutbound) {
+        textToSend = failureReasons[0] || ALL_FILES_FAILED_FALLBACK;
+      } else if (
+        !cleanedText &&
+        validFiles.length > 0 &&
+        failureReasons.length > 0
+      ) {
+        // Some files dispatched, some failed — let the user know.
+        textToSend = `(${failureReasons[0]})`;
+      }
+
+      try {
+        // Send text first if non-empty (puts the file in context for the user).
+        if (textToSend) {
+          const { messageId } = await adapter.send({
+            target: event.conversation,
+            text: textToSend,
+            replyToMessageId: event.messageId,
+            correlation: { taskId: eventKey },
+          });
+          process.stderr.write(
+            `[feishu:bridge] reply text sent (messageId=${messageId})${note} for ${eventKey}\n`,
+          );
+        }
+        // Then each file as its own outbound message — magic-byte routing
+        // decides image_key vs file_key.
+        for (const f of validFiles) {
+          try {
+            const filename = f.path.split("/").pop() || "file";
+            const sendArgs: any = {
+              target: event.conversation,
+              replyToMessageId: event.messageId,
+              correlation: { taskId: eventKey },
+            };
+            if (f.kind === "image") {
+              sendArgs.imagePath = f.path;
+            } else {
+              sendArgs.files = [{ path: f.path, name: filename }];
+            }
+            const { messageId } = await adapter.send(sendArgs);
+            process.stderr.write(
+              `[feishu:bridge] outbound ${f.kind} sent (messageId=${messageId}, path=${f.path}) for ${eventKey}\n`,
+            );
+          } catch (e: any) {
+            const msg = e instanceof Error ? e.message : String(e);
+            process.stderr.write(
+              `[feishu:bridge] outbound file send failed (${f.path}): ${msg}\n`,
+            );
+            // Friendly fallback: don't surface the raw vendor error.
+            try {
+              await adapter.send({
+                target: event.conversation,
+                text: `[文件附件发送失败] ${f.path.split("/").pop()} — 稍后再试`,
+                replyToMessageId: event.messageId,
+                correlation: { taskId: eventKey },
+              });
+            } catch {
+              // If even the friendly fallback fails, give up silently;
+              // we've already logged the underlying error.
+            }
+          }
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(`[feishu:bridge] reply delivery failed: ${msg}\n`);
