@@ -294,6 +294,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         flags: z.record(z.unknown()).optional(),
         config_revision: z.number().int().min(0).optional(),
         config_update_capable: z.boolean().optional(),
+        // RFC-026 P2 / #338 — daemon role surfaced for hub /api/nodes
+        // discovery (#337 extracts this field). "host_supervisor" =
+        // anet daemon. Default-stripping zod would drop this otherwise.
+        role: z.string().max(64).optional().nullable(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
     },
     async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, config_snapshot: cfgSnap }) => {

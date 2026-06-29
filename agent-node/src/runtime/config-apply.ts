@@ -223,12 +223,18 @@ export function mergePatch(existing: any, patch: ConfigPatch): any {
 /** Build the masked config snapshot the node reports via
  * report_status's `config_snapshot` field. Strips secrets — env
  * `_envRef` placeholders stay opaque; nothing from `env` block at all
- * is included. Only model + the 6 dashboard-editable flags. */
+ * is included. Only model + the 6 dashboard-editable flags + role
+ * (daemon discovery, see issue #338 / RFC-026 P2). */
 export interface MaskedSnapshot {
   model?: string | null;
   flags: Record<string, unknown>;
   config_revision?: number;
   config_update_capable: boolean;
+  /** Node role surfaced to hub /api/nodes for daemon discovery (#337).
+   * "host_supervisor" = anet daemon (receives create_node dispatches);
+   * undefined / other values = regular agent-node. Read from config.json's
+   * `role` field, narrow-typed (only string passes). */
+  role?: string | null;
 }
 export function buildConfigSnapshot(
   fileConfig: any,
@@ -240,6 +246,7 @@ export function buildConfigSnapshot(
     flags: {},
     config_revision: revision,
     config_update_capable: configUpdateCapable,
+    role: typeof fileConfig?.role === "string" ? fileConfig.role : null,
   };
   const f = (fileConfig?.flags || {}) as Record<string, unknown>;
   for (const k of ALLOWED_FLAGS) {
