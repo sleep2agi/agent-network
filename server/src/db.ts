@@ -436,6 +436,76 @@ try {
   console.warn(`[commhub] partial unique index uniq_ncr_inflight skipped: ${e?.message || e}`);
 }
 
+// RFC-028 P1 v4 §2.2 — providers + provider_models + network_secrets +
+// probe_results. All 4 tables idempotent CREATE TABLE IF NOT EXISTS. F2
+// lazy gate: tables created on hub boot regardless; vault master key
+// (ANET_HUB_SECRET_VAULT_KEY env) only required when these tables get
+// their first non-empty row (lazy in vault.ts). Empty tables = hub
+// boots fine without env (critical for existing prod hub升级 不 brick).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS providers (
+    provider_id     TEXT PRIMARY KEY,
+    network_id      TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    vendor          TEXT NOT NULL,
+    base_url        TEXT NOT NULL,
+    secret_key_ref  TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    created_by      TEXT NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(network_id, name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_providers_network ON providers(network_id);
+`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS provider_models (
+    model_id        TEXT PRIMARY KEY,
+    provider_id     TEXT NOT NULL,
+    model_name      TEXT NOT NULL,
+    display_name    TEXT,
+    context_window  INTEGER,
+    supports_vision INTEGER NOT NULL DEFAULT 0,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    created_at      INTEGER NOT NULL,
+    UNIQUE(provider_id, model_name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_models_provider ON provider_models(provider_id);
+`);
+// network_secrets — encrypted-at-rest vault. ciphertext + iv + tag are
+// AES-GCM output; plaintext NEVER touches this table. master key from
+// ANET_HUB_SECRET_VAULT_KEY env (lazy gate in vault.ts).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_secrets (
+    network_id   TEXT NOT NULL,
+    key          TEXT NOT NULL,
+    ciphertext   BLOB NOT NULL,
+    iv           BLOB NOT NULL,
+    tag          BLOB NOT NULL,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    PRIMARY KEY (network_id, key)
+  );
+`);
+// probe_results — connectivity matrix history. v3 R3 lock: error_label
+// is HUB-DERIVED ONLY from (status, raw_status_code) — daemon CANNOT
+// submit arbitrary error string. status enum mirrors ProbeAckPayload.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS probe_results (
+    probe_id        TEXT PRIMARY KEY,
+    provider_id     TEXT NOT NULL,
+    model_name      TEXT NOT NULL,
+    daemon_node_id  TEXT NOT NULL,
+    network_id      TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    latency_ms      INTEGER,
+    error_label     TEXT,
+    probed_at       INTEGER NOT NULL,
+    probed_by_user  TEXT,
+    raw_status_code INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_probe_matrix ON probe_results(network_id, provider_id, model_name, daemon_node_id, probed_at DESC);
+`);
+
 // ── V3: audit_log table ──
 db.exec(`
   CREATE TABLE IF NOT EXISTS audit_log (

@@ -3597,6 +3597,20 @@ async function connectSSE() {
                 ).catch((e: any) => warn(`create-node-daemon failed: ${e?.message || e}`));
               }).catch((e: any) => warn(`create-node-daemon import failed: ${e?.message || e}`));
             }
+            // RFC-028 P1 — provider probe daemon doorbell (host_supervisor only).
+            if (ev.type === "probe_provider" && fileConfig.role === "host_supervisor") {
+              log(`← SSE probe_provider ${ev.probe_id || ""}`);
+              import("./runtime/probe-daemon.js").then(({ handleProbeDoorbell }) => {
+                handleProbeDoorbell(
+                  { probe_id: ev.probe_id },
+                  {
+                    callCommHub,
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                  },
+                ).catch((e: any) => warn(`probe-daemon failed: ${e?.message || e}`));
+              }).catch((e: any) => warn(`probe-daemon import failed: ${e?.message || e}`));
+            }
           } catch {}
         }
       }

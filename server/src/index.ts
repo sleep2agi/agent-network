@@ -2185,3 +2185,22 @@ console.log(`
 ║   Health: http://${HOST}:${PORT}/health               ║
 ╚══════════════════════════════════════════════════╝
 `);
+
+// RFC-028 P1 boot banner — vault key configuration status.
+// F2 invariant: hub MUST boot regardless of vault state. This is
+// banner-only (informational); errors are raised lazily at vault op
+// time. needsKeyToOp=true means the operator should set
+// ANET_HUB_SECRET_VAULT_KEY before vault/provider features will work.
+try {
+  const { vaultStatusForBoot } = await import("./vault.js");
+  const s = vaultStatusForBoot();
+  if (s.needsKeyToOp) {
+    console.warn("[rfc-028 vault] ⚠️  network_secrets/providers have data BUT ANET_HUB_SECRET_VAULT_KEY is unset — vault ops will throw vault_master_key_missing until you set the env. Generate one: `openssl rand -hex 32` (must match the key used at write time).");
+  } else if (s.configured) {
+    console.log(`[rfc-028 vault] master key configured (tables_have_data=${s.tablesHaveData})`);
+  } else {
+    console.log("[rfc-028 vault] master key not set + no vault rows — vault gating is lazy; boot OK. Set ANET_HUB_SECRET_VAULT_KEY when enabling provider/secret features.");
+  }
+} catch (e: any) {
+  console.warn(`[rfc-028 vault] boot banner skipped (${e?.message || e})`);
+}
