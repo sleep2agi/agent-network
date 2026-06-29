@@ -27,6 +27,7 @@ import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
+import { checkFeishuToolDeny, isFeishuChannelTurn } from "./feishu-tool-deny";
 import {
   CommHubError,
   classifyCommHubResponse,
@@ -1698,20 +1699,41 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     mcpServers: Object.keys(mcpServers).length ? mcpServers : undefined,
     pathToClaudeCodeExecutable: claudePath,
     // Layer A of feishu hardening (RFC-020 §13 — Vincent UAT 2026-06-29
-    // catch): strip operator secrets (FEISHU_APP_SECRET / ntok_ / utok_ /
-    // GH_TOKEN / SLACK_TOKEN / TELEGRAM_TOKEN / etc.) from the env handed
-    // to the claude-agent-sdk child process. The LLM running inside the
-    // binary has Bash + Read + Glob tools and was caught reading these
-    // values out of `env` and echoing them back to the IM user. Vendor
-    // keys (ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY / etc.) and FEISHU_APP_ID
-    // (public identifier) pass through — claude binary genuinely needs
-    // them. See src/secret-mask.ts for the full allowlist + rationale.
+    // catch): strip operator secrets (FEISHU_APP_SECRET / FEISHU_APP_ID /
+    // ntok_ / utok_ / atok_ / GH_TOKEN / SLACK_TOKEN / COMMHUB_TOKEN /
+    // etc.) from the env handed to the claude-agent-sdk child process.
+    // ANTHROPIC_AUTH_TOKEN and vendor keys deliberately pass through —
+    // the binary needs them — their in-LLM exfil protection is Layer B
+    // (PreToolUse denylist below). See src/secret-mask.ts for the full
+    // allowlist + rationale.
     env: maskedEnv(process.env),
     cwd: process.cwd(),
     stderr: (data: string) => { if (data.trim()) log(`[stderr] ${data.trim().slice(0, 300)}`); },
     hooks: {
+      // Layer B of feishu hardening (RFC-020 §13). On every PreToolUse
+      // for a feishu-channel turn, deny:
+      //   - Read/Glob over /work/.anet/** + .env + ~/.ssh + /root/.claude
+      //     + /proc/*/environ (covers ANTHROPIC_AUTH_TOKEN exfil that
+      //     Layer A intentionally kept in env);
+      //   - Write/Edit/MultiEdit/NotebookEdit over node access.json +
+      //     config.json + goals.json + all read-denied paths (the bot
+      //     Edit'ing its own access.json on a legit-seeming DM was a
+      //     real attack vector caught on 2026-06-29);
+      //   - Bash containing env / printenv / /proc/*/environ /
+      //     `grep TOKEN` / `$VAR_OF_SECRET` patterns, OR redirecting
+      //     to a write-denied path via > / >> / tee / cp / mv.
+      // Other channels (commhub, /loop, telegram) keep full tool access
+      // — they're operator-trusted surfaces. Decision lives in
+      // src/feishu-tool-deny.ts.
       PreToolUse: [{ hooks: [async (input: any) => {
         log(`[tool] ${input.tool_name}(${JSON.stringify(input.tool_input).slice(0, 80)})`);
+        if (isFeishuChannelTurn(from)) {
+          const decision = checkFeishuToolDeny(input.tool_name, input.tool_input);
+          if (decision.deny) {
+            log(`[tool] DENIED (feishu channel): ${decision.reason}`);
+            return { continue: false, stopReason: decision.reason };
+          }
+        }
         return { continue: true };
       }] }],
     },

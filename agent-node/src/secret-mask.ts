@@ -39,9 +39,15 @@
  *   ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL
  *   OPENAI_API_KEY / DEEPSEEK_API_KEY / MINIMAX_API_KEY / INTERN_S1_API_KEY
  *     — the active vendor key for the resolved model. Could be tightened
- *       per-model but cross-cuts model selection logic; defer.
- *   FEISHU_APP_ID  — public identifier, not a secret (visible to anyone
- *                    who opens the bot in Feishu).
+ *       per-model but cross-cuts model selection logic; defer. In-LLM
+ *       exfil protection for these moves to Layer B (tool-layer Bash/Read
+ *       denylist) — Layer A's job is "strip what isn't needed for boot",
+ *       and the binary genuinely needs to read its own ANTHROPIC_* values.
+ *
+ * NOTE: FEISHU_APP_ID is in SECRET_KEYS (defense-in-depth, 通信龙 round 2).
+ * It's a public identifier, but the claude binary has no use for it — only
+ * the feishu worker (separate process) does, and that worker gets its own
+ * env table. No reason to expose it on the LLM tool surface.
  *
  * NOTE: this masks env passed to the LLM subprocess. It does NOT mask the
  * agent-node parent's own process.env, which is still the source of truth
