@@ -98,6 +98,33 @@ const md = new MarkdownIt({
   typographer: false,
 });
 
+// SSRF defense (通信牛 #329 round 1 blocker 1): markdown image syntax
+// `![alt](http://169.254.169.254/...)` would render to `<img src=URL>` and
+// chromium would fetch that URL during the screenshot — turning the
+// renderer into an SSRF / metadata-service beacon. The renderer doesn't
+// need to load ANY external resource (we control the HTML + system fonts
+// only), so:
+//   1. Disable markdown's `image` rule so `![]()` becomes literal text
+//      (no `<img>` tag is ever emitted).
+//   2. (defense-in-depth) puppeteer page.setRequestInterception aborts
+//      every non-`data:` and non-`about:` request before it goes out.
+md.disable("image");
+// Belt-and-braces: even though the `image` rule is disabled, a stray
+// `<img>` from some markdown-it plugin we add later wouldn't fire if
+// the renderer's `image` callback also returns empty. Override the
+// renderer slot to a no-op so any internal call paths produce nothing.
+md.renderer.rules.image = () => "";
+// Also override `html_inline` and `html_block` to drop literal `<img>`
+// strings in case agent emits `<img src=...>` despite `html:false`
+// (markdown-it with html:false escapes them, but extra cheap defense).
+const _passthru = (tokens: any[], idx: number) => {
+  const content = tokens[idx].content || "";
+  // Strip `<img ...>` tags from any raw HTML that somehow made it through
+  return content.replace(/<img\b[^>]*>/gi, "");
+};
+md.renderer.rules.html_inline = _passthru;
+md.renderer.rules.html_block = _passthru;
+
 /**
  * HTML/CSS template for rendered markdown. CSS targets a clean, IM-
  * friendly look: Feishu-ish width, system font stack with CJK fonts
@@ -215,6 +242,35 @@ export async function renderMarkdownToPng(text: string): Promise<Buffer> {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
+    // SSRF defense layer 2 (通信牛 #329 round 1 blocker 1): even though
+    // markdown's image rule is disabled and `<img>` strings are stripped,
+    // intercept every outbound HTTP/HTTPS request the page makes and
+    // abort it. Only same-document `data:`/`about:`/page-internal navigation
+    // is allowed. This catches any future feature regression (a markdown
+    // plugin that emits `<link href=>` or CSS `background-image: url()`,
+    // etc.). The renderer doesn't need any external resource — system
+    // fonts come from chromium's font config, no network needed.
+    await page.setRequestInterception(true);
+    page.on("request", (req: any) => {
+      const url = req.url();
+      // Allow same-doc loads + chromium internals.
+      if (
+        url.startsWith("data:") ||
+        url.startsWith("about:") ||
+        url.startsWith("chrome:") ||
+        url.startsWith("chrome-extension:")
+      ) {
+        req.continue();
+        return;
+      }
+      // Everything else — including file://, http(s)://, ws(s):// — abort.
+      // Audit log so operator can spot agent-emitted attempts.
+      process.stderr.write(
+        `[markdown-render] aborted external request: ${url.slice(0, 200)}\n`,
+      );
+      req.abort();
+    });
+
     await page.setViewport({ width: 800, height: 600, deviceScaleFactor: 2 });
     await page.setContent(html, { waitUntil: "domcontentloaded" });
     // Give CJK font loader a brief moment after layout (chromium may
