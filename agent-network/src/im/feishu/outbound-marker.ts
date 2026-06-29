@@ -55,12 +55,15 @@ export interface MarkerParseResult {
 }
 
 /**
- * Matches one `[[send-file:<path>]]` token. Path bytes are
- * non-`]` characters; the closing `]]` is required. Anchored to either
- * a line boundary or another marker to keep prose containing `[[…]]`
- * safe (Markdown wiki-link style etc.).
+ * Matches one `[[send-file:<path>]]` token. Path bytes are non-`]` and
+ * non-newline characters; the closing `]]` is required. Captures the
+ * path bytes as group 1.
  *
- * Captures the path bytes (group 1).
+ * Not line-anchored — the marker can appear inline (`Hi! [[send-file:...]]
+ * cheers.`) and works at any position. The exclusion of `\n` inside the
+ * path bytes prevents one marker from swallowing a line break and the
+ * following content; multiple markers on adjacent lines each match
+ * separately.
  */
 const MARKER_RE = /\[\[send-file:([^\]\n]+)\]\]/g;
 
@@ -132,17 +135,12 @@ export function parseOutboundMarkers(reply: string | null | undefined): MarkerPa
   return { cleanedText: cleaned, files };
 }
 
-/**
- * The single allowed outbound root for files the agent wants to send.
- * Each conversation gets its own subdirectory under this root; the
- * agent's Write permission on this tree is granted by Layer B (config
- * paths like `access.json` / `config.json` are denied, attachments
- * dir is allowed).
- *
- * `<conv>` is the open_chat_id (group) or open_id (DM). Bridge fills
- * the placeholder per-event when validating.
- */
-export const OUTBOUND_ROOT = "/work/feishu-attachments";
+// Re-export OUTBOUND_ROOT from the shared paths helper. Two places must
+// agree on the root: cli.ts (system prompt injection — what we tell the
+// agent) and bridge.ts (whitelist enforcement — what we accept). Single
+// source: `./outbound-paths.ts`.
+export { OUTBOUND_ROOT, feishuConvKey, feishuOutboundDir } from "./outbound-paths.js";
+import { feishuOutboundDir } from "./outbound-paths.js";
 
 /**
  * Validate a normalized absolute path against the per-conversation
@@ -152,27 +150,44 @@ export const OUTBOUND_ROOT = "/work/feishu-attachments";
  *
  * Filesystem-touching — bridge calls this AFTER `parseOutboundMarkers`.
  *
+ * Two API shapes accepted (overload):
+ *
+ *   1. **Preferred**: caller passes `expectedDir` — the precomputed
+ *      `/work/feishu-attachments/<connectionName>/<convKey>/` value
+ *      from `feishuOutboundDir`. This guarantees what the agent was
+ *      TOLD to use (via cli.ts prompt injection) matches what we
+ *      ACCEPT here — no second algorithm.
+ *
+ *   2. **Legacy**: caller passes `connectionName` + `convKey`. We
+ *      compute the prefix here via the same helper. Kept for the
+ *      single-arg unit-test ergonomics + backwards-compat (the old
+ *      bridge wire-up shape).
+ *
  * Params:
  *   - p: normalized absolute path candidate
- *   - convKey: per-conversation directory name (open_chat_id / open_id)
+ *   - expectedDir: precomputed whitelist directory (trailing `/`)
+ *     OR
+ *   - convKey + connectionName: legacy two-piece form
  *   - statFn: optional override for tests (defaults to fs.statSync)
  *   - realpathFn: optional override for tests (defaults to fs.realpathSync)
  *
- * Note: `convKey` may include characters Feishu accepts but are unusual
- * for file paths (open_id starts with `ou_`, open_chat_id with `oc_`).
- * The whitelist check uses the literal substring + path.posix.dirname
- * walk so symlink redirects don't bypass it — the realpath form must
- * also fall under `OUTBOUND_ROOT/<connection>/<convKey>/`.
+ * The whitelist check uses literal `.startsWith(expectedDir)` — the
+ * trailing slash on `expectedDir` ensures `oc_abc/` doesn't accept
+ * paths under `oc_abc_evil/`.
  */
 export interface ValidateOpts {
   p: string;
-  convKey: string;
-  connectionName: string;
+  /** Precomputed prefix (with trailing `/`). Preferred over convKey+connectionName. */
+  expectedDir?: string;
+  convKey?: string;
+  connectionName?: string;
   statFn?: (p: string) => { size: number };
   realpathFn?: (p: string) => string;
 }
 export function validateOutboundPath(opts: ValidateOpts): string | null {
-  const expectedPrefix = `${OUTBOUND_ROOT}/${opts.connectionName}/${opts.convKey}/`;
+  const expectedPrefix =
+    opts.expectedDir ??
+    feishuOutboundDir(opts.connectionName || "feishu", opts.convKey || "");
   if (!opts.p.startsWith(expectedPrefix)) {
     return `[文件附件未发送] 路径不在允许的会话目录内 (必须在 ${expectedPrefix} 下)`;
   }

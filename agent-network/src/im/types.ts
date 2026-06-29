@@ -124,6 +124,14 @@ export interface NormalizedIMMessage {
   replyToMessageId?: string;
   /** Ephemeral / visible-to-sender-only. Slack only; others ignore. */
   ephemeral?: boolean;
+  /** Caption-mode hint (RFC-020 §15.2): bypass markdown-card / markdown→PNG
+   *  rendering and send as plain text. Set by the bridge when the same
+   *  dispatch loop is also sending one or more attachment files — the text
+   *  is a caption ("here's the report"), not the deliverable. Without this
+   *  hint, Vincent's "make me a PDF" UAT had the bot's accompanying
+   *  description heading + bullet list rendered to PNG via #329, which
+   *  read as "you sent another image" instead of "you sent my file". */
+  forceTextOnly?: boolean;
   /** Tie back to the commhub task that produced this message. */
   correlation: {
     taskId: string;
