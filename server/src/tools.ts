@@ -2276,6 +2276,153 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
 
+  // §2.3.2 — update_provider (admin+; patch semantics). RFC-028 P1.5.
+  // Single tool for editing existing providers — patch model: name/base_url/
+  // models/enabled all optional, at least one required. Vendor and
+  // secret_key_ref are IMMUTABLE via this tool (vendor change = create+delete;
+  // secret change goes through upsert_network_secret first). network_id is
+  // immutable (cross-tenant move forbidden).
+  //
+  // base_url change re-runs validateBaseUrl with vendor read from DB row
+  // (NOT from patch) — defends against trying to widen host allowlist by
+  // smuggling a new vendor name. zod .strict() on the wrapping object
+  // surfaces extras as -32602 at MCP boundary (R3 lock, same as
+  // ack_probe_request per #308 fold-in).
+  //
+  // Audit: every successful update writes audit_log with before/after diff
+  // of the changed fields ONLY (no secret values — secret isn't a patch
+  // field, no leak path).
+  server.registerTool(
+    "update_provider",
+    {
+      description: "Edit existing provider (name/base_url/models/enabled). Patch semantics — at least one field. Vendor/secret/network_id immutable. Admin+. RFC-028 P1.5.",
+      inputSchema: z.object({
+        provider_id: z.string().regex(/^prov_[a-zA-Z0-9_-]+$/).max(200),
+        network_id: z.string().max(200).optional(),
+        patch: z.object({
+          name: z.string().min(1).max(100).optional(),
+          base_url: z.string().min(1).max(500).optional(),
+          models: z.array(z.object({
+            model_name: z.string().min(1).max(100),
+            display_name: z.string().max(100).optional(),
+            context_window: z.number().int().min(0).optional(),
+            supports_vision: z.boolean().optional(),
+          })).optional(),
+          enabled: z.boolean().optional(),
+        }).strict(),
+      }).strict() as any,
+    },
+    async (args: any) => {
+      const { provider_id, network_id: clientNetId, patch } = args;
+      const effectiveNetId = getNetworkId(clientNetId);
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
+      const callerRole = enforceUserId && effectiveNetId
+        ? getUserNetworkRole(enforceUserId, effectiveNetId)
+        : null;
+      if (callerRole !== "admin" && callerRole !== "owner") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_provider", required_role: "admin", caller_role: callerRole }) }] };
+      }
+
+      // Empty patch — surface noop_no_changes (don't silently succeed)
+      const patchKeys = Object.keys(patch || {});
+      if (patchKeys.length === 0) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "noop_no_changes", hint: "patch must include at least one of: name, base_url, models, enabled" }) }] };
+      }
+
+      // SEC-1: row must exist within caller's network (SQL-level enforcement)
+      const row = db.get<{ provider_id: string; vendor: string; name: string; base_url: string; enabled: number }>(
+        `SELECT provider_id, vendor, name, base_url, enabled FROM providers WHERE provider_id = ?1 AND network_id = ?2`,
+        provider_id, effectiveNetId || "default",
+      );
+      if (!row) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "provider_not_found", provider_id }) }] };
+      }
+
+      // base_url change → re-run validateBaseUrl with vendor from DB (not patch)
+      if (patch.base_url !== undefined && patch.base_url !== row.base_url) {
+        try {
+          _validateBaseUrl(row.vendor, patch.base_url);
+        } catch (e) {
+          return probeFailReply(e);
+        }
+      }
+
+      // Diff staging — collect before/after for audit (NO secret values; secret
+      // isn't a patch field). Skip fields that didn't actually change.
+      const diff: Record<string, { before: unknown; after: unknown }> = {};
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      let paramIdx = 1;
+      if (patch.name !== undefined && patch.name !== row.name) {
+        sets.push(`name = ?${paramIdx++}`); params.push(patch.name);
+        diff.name = { before: row.name, after: patch.name };
+      }
+      if (patch.base_url !== undefined && patch.base_url !== row.base_url) {
+        sets.push(`base_url = ?${paramIdx++}`); params.push(patch.base_url);
+        diff.base_url = { before: row.base_url, after: patch.base_url };
+      }
+      if (patch.enabled !== undefined) {
+        const newEnabled = patch.enabled ? 1 : 0;
+        if (newEnabled !== row.enabled) {
+          sets.push(`enabled = ?${paramIdx++}`); params.push(newEnabled);
+          diff.enabled = { before: row.enabled === 1, after: patch.enabled };
+        }
+      }
+
+      // Replace models list (if supplied) atomically with the providers UPDATE
+      const willReplaceModels = patch.models !== undefined;
+      const newModelIds: string[] = [];
+
+      try {
+        db.exec("BEGIN");
+        if (sets.length > 0) {
+          params.push(provider_id);
+          try {
+            db.run(`UPDATE providers SET ${sets.join(", ")} WHERE provider_id = ?${paramIdx}`, params);
+          } catch (e: any) {
+            if (/UNIQUE constraint failed/.test(e?.message || "")) {
+              db.exec("ROLLBACK");
+              return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "provider_name_conflict", name: patch.name }) }] };
+            }
+            throw e;
+          }
+        }
+        if (willReplaceModels) {
+          db.run(`DELETE FROM provider_models WHERE provider_id = ?1`, [provider_id]);
+          for (const m of patch.models) {
+            const mid = `pm_${uuidv4()}`;
+            db.run(
+              `INSERT INTO provider_models (model_id, provider_id, model_name, display_name, context_window, supports_vision, enabled, created_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)`,
+              [mid, provider_id, m.model_name, m.display_name ?? null, m.context_window ?? null, m.supports_vision ? 1 : 0, Date.now()],
+            );
+            newModelIds.push(mid);
+          }
+          diff.models = { before: "(prior list)", after: `${patch.models.length} models replaced` };
+        }
+        db.run(
+          `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
+           VALUES (?1, ?2, 'update_provider', 'provider', ?3, ?4, ?5)`,
+          [enforceUserId || null, callerAlias || null, provider_id, JSON.stringify({ diff, fields_changed: Object.keys(diff) }), effectiveNetId || null],
+        );
+        db.exec("COMMIT");
+      } catch (e: any) {
+        try { db.exec("ROLLBACK"); } catch { /* ok */ }
+        throw e;
+      }
+
+      if (Object.keys(diff).length === 0 && !willReplaceModels) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, provider_id, no_changes: true, hint: "patch fields matched existing row, no-op" }) }] };
+      }
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true, provider_id,
+        fields_changed: Object.keys(diff),
+        models_replaced: willReplaceModels ? newModelIds.length : null,
+      }) }] };
+    },
+  );
+
   // §2.3.3 — list_providers (viewer+; never returns secret VALUES).
   server.tool(
     "list_providers",
@@ -2322,12 +2469,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (callerRole !== "admin" && callerRole !== "owner") {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_probe", required_role: "admin", caller_role: callerRole }) }] };
       }
-      // Resolve provider + model (network-scoped)
+      // Resolve provider + model (network-scoped). Distinguish "not found"
+      // from "disabled" so the dashboard can render the right error
+      // (P1.5 dashboard编辑/停用 needs this to explain why probe rejected).
       const provider = db.get<any>(
-        `SELECT provider_id, vendor, base_url, secret_key_ref FROM providers WHERE provider_id = ?1 AND network_id = ?2 AND enabled = 1`,
+        `SELECT provider_id, vendor, base_url, secret_key_ref, enabled FROM providers WHERE provider_id = ?1 AND network_id = ?2`,
         provider_id, effectiveNetId || "default",
       );
       if (!provider) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "provider_not_found", provider_id }) }] };
+      if (provider.enabled !== 1) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "provider_disabled", provider_id, hint: "update_provider with enabled:true to re-enable" }) }] };
       const model = db.get<any>(
         `SELECT model_id, model_name FROM provider_models WHERE provider_id = ?1 AND model_name = ?2 AND enabled = 1`,
         provider_id, model_name,
