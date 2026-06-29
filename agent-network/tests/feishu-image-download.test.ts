@@ -18,6 +18,7 @@
 import { mkdirSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { Readable } from "node:stream";
 
 // ── tiny test harness (mirrors feishu-bridge-ackplaceholder.test.ts style) ──
 
@@ -240,16 +241,6 @@ expect("aug: multiple paths all listed", aug3.includes("/a.png") && aug3.include
 const aug4 = augmentPromptWithImages("just text", []);
 expect("aug: empty images list → no augmentation", aug4 === "just text");
 
-// ── Summary ─────────────────────────────────────────────────────────────────
-
-const failed = results.filter((r) => !r.pass);
-console.log(`\n${results.length - failed.length}/${results.length} feishu-image-download tests passed.`);
-if (failed.length > 0) {
-  console.log("\nfailures:");
-  for (const f of failed) console.log(`  - ${f.name}: ${f.detail}`);
-  process.exit(1);
-}
-
 // ── 6. lark SDK response shape regression (added 2026-06-29 after Vincent UAT) ─
 
 // The lark @larksuiteoapi/node-sdk wraps `messageResource.get` HTTP response
@@ -258,10 +249,14 @@ if (failed.length > 0) {
 // assumption so a future refactor that goes back to `resp.on('data')` will
 // fail loudly instead of silently breaking at runtime (the original
 // regression — caught by #322 trace logging).
+//
+// 通信牛 review (PR #324 round 1) caught these assertions were appended
+// AFTER the summary/exit block — they ran but did NOT gate the harness
+// exit code, so a failing assertion would still exit 0 (verified by him
+// inserting a deliberate-fail and observing HARNESS_EXIT=0). Moved BEFORE
+// the summary so any future SDK-shape drift now fails CI loudly.
 
 // Mock the lark resp shape and verify our consumer uses the right method.
-import { Readable } from "node:stream";
-
 function makeLarkResp(body: Buffer) {
   return {
     getReadableStream: () => Readable.from([body]),
@@ -304,5 +299,12 @@ expect("raw Readable cast to lark resp → null (no getReadableStream)",
   "guard prevents q.on style misuse"
 );
 
-// Final summary already printed above; print one more pass tag.
-console.log("(+3 lark SDK shape assertions)");
+// ── Summary (gates exit code — MUST be last) ────────────────────────────────
+
+const failed = results.filter((r) => !r.pass);
+console.log(`\n${results.length - failed.length}/${results.length} feishu-image-download tests passed.`);
+if (failed.length > 0) {
+  console.log("\nfailures:");
+  for (const f of failed) console.log(`  - ${f.name}: ${f.detail}`);
+  process.exit(1);
+}
