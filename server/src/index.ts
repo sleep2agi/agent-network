@@ -1965,16 +1965,37 @@ Bun.serve({
     if (url.pathname === "/api/nodes") {
       const nodeId = url.searchParams.get("node_id");
       const alias = url.searchParams.get("alias");
+      // `config_snapshot` SELECTed ONLY to extract the daemon `role` field
+      // for dashboard discovery — full snapshot is NOT broadcast (would
+      // re-introduce the #312 SELECT * fragility). Mapping step pulls
+      // `role` out then drops `config_snapshot` from the response row.
       let sql = `SELECT node_id, node_name, alias, runtime, model,
                         config_path, channels, server, hostname,
-                        network_id, created_at, updated_at
+                        network_id, created_at, updated_at,
+                        config_snapshot
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addNetworkScope(sql, params, restScope);
       if (nodeId) { sql += ` AND node_id = ?${params.length + 1}`; params.push(nodeId); }
       if (alias) { sql += ` AND alias = ?${params.length + 1}`; params.push(alias); }
       sql += " ORDER BY updated_at DESC";
-      const rows = db.all(sql, ...params);
+      const rawRows = db.all<Record<string, any>>(sql, ...params);
+      // Add a single new field `role: string | null` per row, extracted from
+      // config_snapshot JSON. Daemon nodes that posted role='host_supervisor'
+      // via report_status surface here; dashboard uses this for daemon
+      // discovery (replacing the prior `node_daemon_` prefix heuristic).
+      // RFC-026 P1 P2 §9 will supersede this REST proxy with the
+      // `list_host_supervisors` MCP tool.
+      const rows = rawRows.map(r => {
+        let role: string | null = null;
+        const snap = r.config_snapshot;
+        if (snap) {
+          try { role = (typeof snap === "string" ? JSON.parse(snap) : snap)?.role ?? null; }
+          catch { /* malformed snapshot — leave role null */ }
+        }
+        const { config_snapshot, ...rest } = r;
+        return { ...rest, role };
+      });
       return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
     }
 
