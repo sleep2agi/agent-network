@@ -68,7 +68,8 @@ if (typeof withRateLimit !== "function") {
 function makeMockAdapter(
   {
     sendThrowsOnCall = [] as number[],
-  }: { sendThrowsOnCall?: number[] } = {},
+    allowFrom = [] as string[],
+  }: { sendThrowsOnCall?: number[]; allowFrom?: string[] } = {},
 ) {
   const sendCalls: unknown[] = [];
   const editCalls: unknown[] = [];
@@ -90,6 +91,15 @@ function makeMockAdapter(
       throw new Error(
         "REGRESSION: adapter.edit was called — Vincent 2026-06-26 design lock requires reply/timeout to send NEW messages, never edit",
       );
+    },
+    // 2026-06-29: bridge's withRateLimit needs to read the current
+    // access.allowFrom list to exempt operator-vouched explicit users
+    // from the DM flood limit (Vincent's multi-turn heavy work was
+    // tripping 3/60s). Test default is [] (no exemption — keeps the
+    // pre-existing 16 case behavior identical); tests for the new
+    // exemption pass an explicit allowFrom override.
+    getAllowFrom(): readonly string[] {
+      return allowFrom;
     },
   };
   return adapter;
@@ -527,6 +537,107 @@ await test("15. rate-limit Maps lazy-GC stale entries (no unbounded growth on wi
     // @ts-expect-error — restore real Date.now
     Date.now = realNow;
   }
+});
+
+// ── allowFrom-explicit DM exemption (2026-06-29 Vincent flood-limit catch) ──
+
+await test("17. DM rate limit exempts sender on access.allowFrom explicit list (Vincent flood-limit fix)", async () => {
+  // Vincent's open_id is on the access.json allowFrom explicit list. He
+  // does multi-turn heavy work (each turn 20-70s) and was tripping the
+  // 3-msg/60s DM limit. Explicit-listed users are operator-vouched and
+  // should NOT be flood-limited.
+  const VINCENT_OID = "ou_vincent_explicit";
+  const adapter = makeMockAdapter({ allowFrom: [VINCENT_OID, "ou_someone_else"] });
+  const innerCalls: string[] = [];
+  const inner = async (e: { idempotencyKey: string }) =>
+    void innerCalls.push(e.idempotencyKey);
+  const wrapped = withRateLimit(inner, adapter);
+
+  // 10 DM events from Vincent — all must pass (no limit applied)
+  for (let i = 1; i <= 10; i++) {
+    await wrapped(makeEvent(`vincent-${i}`, { senderId: VINCENT_OID }));
+  }
+  assert.equal(innerCalls.length, 10, "all 10 explicit-allow events reached inner");
+
+  // No rate-limit notice was sent (no `RATE_LIMIT_NOTICE_TEXT` in adapter.send)
+  const sentTexts = adapter.sendCalls.map((c) => (c as { text?: string }).text);
+  assert.equal(
+    sentTexts.filter((t) => t && t.includes("超出限制")).length,
+    0,
+    "explicit-allow user never sees rate-limit notice",
+  );
+
+  // dmTimes Map remains empty for Vincent (he skipped the limit machinery)
+  const state = wrapped.__getState();
+  assert.equal(state.dmKeyCount, 0, "explicit-allow path bypasses dmTimes Map writes");
+});
+
+await test("18. wildcard allowFrom=['*'] does NOT exempt (public channel still rate-limited)", async () => {
+  // The public-channel shape `allowFrom: ["*"]` accepts any open_id but
+  // does NOT vouch for any specific user — flood protection MUST still
+  // apply (otherwise a public bot is an instant abuse vector).
+  const adapter = makeMockAdapter({ allowFrom: ["*"] });
+  const innerCalls: string[] = [];
+  const inner = async (e: { idempotencyKey: string }) =>
+    void innerCalls.push(e.idempotencyKey);
+  const wrapped = withRateLimit(inner, adapter);
+
+  for (let i = 1; i <= 5; i++) {
+    await wrapped(makeEvent(`pub-${i}`, { senderId: "ou_anyone" }));
+  }
+  assert.equal(
+    innerCalls.length,
+    3,
+    "public-wildcard channel still applies DM_RATE_LIMIT_COUNT=3",
+  );
+  // 4th + 5th events trigger the notice send
+  const notices = adapter.sendCalls
+    .map((c) => (c as { text?: string }).text)
+    .filter((t) => t && t.includes("超出限制"));
+  assert.equal(notices.length, 2, "wildcard sender sees rate-limit notice on 4th + 5th");
+});
+
+await test("19. Group rate limit applies even for allowFrom-explicit user (group-side gate by chat)", async () => {
+  // Group conversations gate by chat_id (not sender), so an exemption
+  // would let one user starve the group. Explicit allowFrom does NOT
+  // bypass group-side rate-limit; this test locks the boundary.
+  const VINCENT_OID = "ou_vincent_explicit";
+  const adapter = makeMockAdapter({ allowFrom: [VINCENT_OID] });
+  const innerCalls: string[] = [];
+  const inner = async (e: { idempotencyKey: string }) =>
+    void innerCalls.push(e.idempotencyKey);
+  const wrapped = withRateLimit(inner, adapter);
+
+  for (let i = 1; i <= 4; i++) {
+    await wrapped(
+      makeEvent(`grp-${i}`, {
+        senderId: VINCENT_OID,
+        chatId: "oc_shared_group",
+        conversationType: "group",
+      }),
+    );
+  }
+  assert.equal(
+    innerCalls.length,
+    2,
+    "group still applies GROUP_RATE_LIMIT_COUNT=2 even for allowFrom-explicit sender",
+  );
+});
+
+await test("20. allowFrom=[] (no explicit list, no wildcard) treats every DM sender as non-exempt", async () => {
+  // Edge: access.json with empty allowFrom (initial state before operator
+  // configures). Every DM sender is non-exempt — matches the pre-2026-06-29
+  // behavior, so no regression for not-yet-configured channels.
+  const adapter = makeMockAdapter({ allowFrom: [] });
+  const innerCalls: string[] = [];
+  const inner = async (e: { idempotencyKey: string }) =>
+    void innerCalls.push(e.idempotencyKey);
+  const wrapped = withRateLimit(inner, adapter);
+
+  for (let i = 1; i <= 5; i++) {
+    await wrapped(makeEvent(`empty-${i}`, { senderId: "ou_any" }));
+  }
+  assert.equal(innerCalls.length, 3, "empty allowFrom: DM limit still applies");
 });
 
 // ── Summary ────────────────────────────────────────────────────────────────

@@ -58,6 +58,20 @@ export class FeishuAdapter implements IMAdapter {
     lastError: null,
   };
 
+  /**
+   * Snapshot of the current `access.allowFrom` list (from access.json).
+   * Used by the bridge's rate-limiter to exempt operator-vouched explicit
+   * sender ids from the DM flood limit (2026-06-29: Vincent's multi-turn
+   * heavy work was tripping the 3-msg/60s DM limit; explicit-listed
+   * users are already operator-trusted via the access whitelist, no
+   * need to also flood-limit them). Returns `[]` before `init()`. The
+   * wildcard `["*"]` allowlist does NOT count as "explicit" — that's
+   * the public-channel shape and still needs flood protection.
+   */
+  getAllowFrom(): readonly string[] {
+    return this.feishuConfig?.access?.allowFrom ?? [];
+  }
+
   async init(config: IMChannelConfig): Promise<void> {
     if (config.platform !== "feishu") {
       throw new Error(
@@ -163,7 +177,7 @@ export class FeishuAdapter implements IMAdapter {
 
     // Decide payload — image takes precedence when imagePath is provided
     // (caller's choice), otherwise text/markdown.
-    let msgType: "text" | "image";
+    let msgType: "text" | "image" | "interactive";
     let content: string;
     if (message.imagePath) {
       const imageKey = await uploadImage(this.client, message.imagePath);
@@ -181,8 +195,22 @@ export class FeishuAdapter implements IMAdapter {
           "FeishuAdapter.send: requires text, markdown, or imagePath",
         );
       }
-      msgType = "text";
-      content = JSON.stringify({ text });
+      // Markdown auto-render (Vincent 2026-06-29): when reply text contains
+      // markdown syntax (table / heading / fenced code / bold / list / link
+      // / inline code), upgrade to an interactive card with a single
+      // `markdown` element so Feishu renders properly instead of showing
+      // raw `|` and `**` as text. Plain text replies keep the existing
+      // msg_type:"text" path — no behavior change.
+      if (looksLikeMarkdown(text)) {
+        msgType = "interactive";
+        content = JSON.stringify({
+          config: { wide_screen_mode: true },
+          elements: [{ tag: "markdown", content: text }],
+        });
+      } else {
+        msgType = "text";
+        content = JSON.stringify({ text });
+      }
     }
 
     // Threaded reply when the message references an upstream message_id.
@@ -339,6 +367,51 @@ function normalizeMessageEvent(
     // RFC-020 §4.4: `${platform}:${connectionId}:${messageId}`
     idempotencyKey: `feishu:${connectionId}:${message.message_id}`,
   };
+}
+
+// ── Internals: markdown render auto-detect (RFC-020 §14, Vincent 2026-06-29) ──
+
+/**
+ * Heuristic — does this text look like it contains markdown syntax that
+ * Feishu's plain-text `msg_type:"text"` would render as literal source?
+ * Catches the patterns Vincent's heavy work produces: tables (`|...|`
+ * + separator row), fenced code blocks (`` ``` ``), ATX headings (`#`),
+ * bold/italic (`**text**` / `*text*`), unordered/ordered lists, inline
+ * code (`` `code` ``), markdown links (`[label](url)`).
+ *
+ * Returns true for at least one match; the adapter then upgrades to
+ * `msg_type:"interactive"` with a `markdown` element. Returns false for
+ * plain prose so the text path stays untouched (no perf cost, no
+ * behavior change for non-markdown replies).
+ *
+ * Conservative — single-character matches (e.g., a `|` in prose, one
+ * `*` for emphasis-of-one-word that Feishu would render OK as text)
+ * are NOT enough to trigger. We want false-positives < false-negatives
+ * (a false-positive upgrade renders fine; a false-negative shows raw
+ * `|` and `**`).
+ */
+export function looksLikeMarkdown(text: string): boolean {
+  if (!text || typeof text !== "string") return false;
+  // Fenced code block — `` ``` `` anywhere.
+  if (/```/.test(text)) return true;
+  // ATX heading at start of line.
+  if (/(^|\n)#{1,6}\s/.test(text)) return true;
+  // Table: a row of `|...|` followed by a separator row `|---|` / `|:--|`.
+  // `(^|\n)` left-anchor catches tables at literal position 0 too
+  // (通信牛 #328 round 1 blocker 2 — was `\n\|...` which missed
+  // replies starting directly with a header row).
+  if (/(^|\n)\|[^\n]*\|\n\|[\s:|-]+\|/.test(text)) return true;
+  // Bold marker — `**text**` (at least one non-empty inner).
+  if (/\*\*[^*\s][^*]*\*\*/.test(text)) return true;
+  // Unordered list at start of line (`- ` / `* ` / `+ `), at least 1 item.
+  if (/(^|\n)[-*+]\s+\S/.test(text)) return true;
+  // Ordered list at start of line (`1. `).
+  if (/(^|\n)\d+\.\s+\S/.test(text)) return true;
+  // Markdown link `[label](url)`.
+  if (/\[[^\]\n]+\]\([^)\n]+\)/.test(text)) return true;
+  // Inline code (single backtick run, not the fenced case caught above).
+  if (/`[^`\n]+`/.test(text)) return true;
+  return false;
 }
 
 // ── Internals: image up/down (RFC-020 §3.1 / #179 M5c) ──────────────────
