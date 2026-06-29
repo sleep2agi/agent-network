@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>RFC-026 P2 — Create Node Wizard (responsive)</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 24px;
+    font: 14px/1.6 -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+    background: #0b0b0d; color: #e5e7eb;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; color: #d1d5db; }
+  .sub { color: #6b7280; font-size: 12px; margin-bottom: 32px; }
+
+  /* === SHARED ELEMENTS === */
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .dot.green  { background: #34d399; }
+  .dot.yellow { background: #fbbf24; }
+  .dot.gray   { background: #4b5563; }
+
+  /* form bits used in both layouts */
+  .field { margin-bottom: 18px; }
+  .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+  .input, .pick {
+    width: 100%; padding: 10px 12px;
+    background: #161618; color: #e5e7eb;
+    border: 1px solid #2a2a30; border-radius: 8px; font: inherit;
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer;
+  }
+  .input { cursor: text; }
+  .pick.open { border-color: #3b82f6; }
+  .caret { color: #6b7280; }
+  .menu { background: #161618; border: 1px solid #3b82f6; border-radius: 8px;
+          margin-top: 6px; overflow: hidden; }
+  .item { padding: 9px 12px; font-size: 13px; cursor: pointer;
+          display: flex; align-items: center; justify-content: space-between; }
+  .item.on { background: #1e293b; color: #93c5fd; }
+  .item.dis { color: #4b5563; cursor: not-allowed; }
+  .item + .item { border-top: 1px solid #1f1f24; }
+  .item .why { font-size: 11px; color: #6b7280; }
+  .adv { color: #6b7280; font-size: 13px; margin-top: 6px; cursor: pointer; user-select: none; }
+
+  .actions { margin-top: 28px; display: flex; gap: 10px; justify-content: flex-end; }
+  .btn { padding: 9px 18px; border-radius: 8px; border: 1px solid #3b82f6;
+         background: #3b82f6; color: white; font: inherit; cursor: pointer; }
+  .btn.ghost { background: transparent; color: #9ca3af; border-color: #2a2a30; }
+
+  /* === DESKTOP (≥ 800px) — 3-column horizontal === */
+  @media (min-width: 800px) {
+    body { padding: 40px; }
+    .wrap { max-width: none; }
+    .single { display: none; }     /* hide mobile single-form view */
+    .triple { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+    .panel {
+      background: #161618; border: 1px solid #1f1f24; border-radius: 14px;
+      padding: 24px;
+    }
+    .step { color: #6b7280; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; margin-bottom: 8px; }
+    .step-title { font-size: 15px; font-weight: 600; margin-bottom: 20px; }
+    /* server cards (kept simple from v2) */
+    .srv { display: flex; align-items: center; gap: 12px;
+           padding: 14px; border-radius: 10px;
+           border: 1px solid #2a2a30; margin-bottom: 8px; cursor: pointer; }
+    .srv.on { border-color: #3b82f6; background: #1e293b22; }
+    .srv.off { opacity: 0.45; cursor: not-allowed; }
+    .srv-name { font-weight: 600; font-size: 14px; }
+    .srv-hint { font-size: 12px; color: #6b7280; margin-top: 2px; }
+    .options { display: flex; flex-direction: column; gap: 2px; }
+    .opt { display: flex; align-items: center; gap: 10px;
+           padding: 6px 4px; color: #d1d5db; font-size: 13px; cursor: pointer; }
+    .opt.dis { color: #4b5563; cursor: not-allowed; }
+    .opt .why { margin-left: auto; font-size: 11px; color: #6b7280; }
+    .summary { font-size: 14px; line-height: 1.9; color: #d1d5db; }
+    .summary b { color: #93c5fd; font-weight: 600; }
+    .summary .check { color: #34d399; font-size: 11px; margin-left: 6px; }
+  }
+
+  /* === MOBILE (< 800px) — single-screen form === */
+  @media (max-width: 799.9px) {
+    body { padding: 48px 24px; }
+    .triple { display: none; }   /* hide desktop 3-col view */
+    .single {
+      max-width: 480px; margin: 0 auto;
+    }
+    .single h2 { font-size: 22px; font-weight: 600; margin: 0 0 32px; }
+  }
+</style>
+</head>
+<body>
+<h1>Create Node — 响应式 (v3 locked)</h1>
+<div class="sub">桌面横排 (≥ 800px 三栏) / 手机竖排 (< 800px 单屏)。共用同一组数据 + D1-D6 决策。</div>
+
+<!-- ============ DESKTOP 3-COL VIEW ============ -->
+<div class="triple">
+
+  <!-- Step 1 — 选服务器 -->
+  <div class="panel">
+    <div class="step">1 / 3</div>
+    <div class="step-title">选服务器</div>
+
+    <div class="srv on">
+      <span class="dot green"></span>
+      <div>
+        <div class="srv-name">my-server-01</div>
+        <div class="srv-hint">上海 · 支持 3 种 runtime</div>
+      </div>
+    </div>
+    <div class="srv">
+      <span class="dot yellow"></span>
+      <div>
+        <div class="srv-name">my-server-02</div>
+        <div class="srv-hint">北京 · 支持 1 种 runtime</div>
+      </div>
+    </div>
+    <div class="srv off">
+      <span class="dot gray"></span>
+      <div>
+        <div class="srv-name">my-laptop</div>
+        <div class="srv-hint">offline</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn">下一步</button>
+    </div>
+  </div>
+
+  <!-- Step 2 — 配置 -->
+  <div class="panel">
+    <div class="step">2 / 3</div>
+    <div class="step-title">配置节点</div>
+
+    <div class="field">
+      <div class="label">名字</div>
+      <input class="input" type="text" value="demo-bot">
+    </div>
+
+    <div class="field">
+      <div class="label">Runtime</div>
+      <div class="options">
+        <label class="opt"><input type="radio" checked> claude-agent-sdk</label>
+        <label class="opt"><input type="radio"> codex-sdk</label>
+        <label class="opt dis"><input type="radio" disabled> grok-build-acp <span class="why">未支持</span></label>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="label">Model</div>
+      <div class="menu">
+        <div class="item on">claude-opus-4-7</div>
+        <div class="item">claude-sonnet-4-6</div>
+        <div class="item dis">gpt-5-turbo <span class="why">不可达</span></div>
+        <div class="item dis">deepseek-v4-pro <span class="why">不可达</span></div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn ghost">上一步</button>
+      <button class="btn">下一步</button>
+    </div>
+  </div>
+
+  <!-- Step 3 — 确认 -->
+  <div class="panel">
+    <div class="step">3 / 3</div>
+    <div class="step-title">确认</div>
+
+    <div class="summary">
+      在 <b>my-server-01</b> 上创建
+      <br><b>demo-bot</b>
+      <br><span style="color:#9ca3af">claude-agent-sdk · claude-opus-4-7</span>
+      <br><span class="check">✓ 服务器可达模型</span>
+    </div>
+
+    <div class="actions">
+      <button class="btn ghost">取消</button>
+      <button class="btn">创建</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============ MOBILE SINGLE-SCREEN VIEW ============ -->
+<div class="single">
+  <h2>创建节点</h2>
+
+  <div class="field">
+    <div class="label">服务器</div>
+    <div class="pick">
+      <span><span class="dot green"></span> my-server-01 · 上海</span>
+      <span class="caret">▾</span>
+    </div>
+  </div>
+
+  <div class="field">
+    <div class="label">名字</div>
+    <input class="input" type="text" value="demo-bot">
+  </div>
+
+  <div class="field">
+    <div class="label">Runtime</div>
+    <div class="pick">
+      <span>claude-agent-sdk</span>
+      <span class="caret">▾</span>
+    </div>
+  </div>
+
+  <div class="field">
+    <div class="label">Model</div>
+    <div class="pick open">
+      <span>claude-opus-4-7</span>
+      <span class="caret">▴</span>
+    </div>
+    <div class="menu">
+      <div class="item on">claude-opus-4-7</div>
+      <div class="item">claude-sonnet-4-6</div>
+      <div class="item dis">gpt-5-turbo <span class="why">不可达</span></div>
+      <div class="item dis">deepseek-v4-pro <span class="why">不可达</span></div>
+    </div>
+  </div>
+
+  <div class="adv">▸ 高级</div>
+
+  <div class="actions">
+    <button class="btn ghost">取消</button>
+    <button class="btn">创建</button>
+  </div>
+</div>
+
+</body>
+</html>
