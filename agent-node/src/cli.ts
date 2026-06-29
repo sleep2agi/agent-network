@@ -27,6 +27,7 @@ import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
+import { isVendorErrorForUser, VENDOR_ERROR_REPLACEMENT } from "./vendor-error";
 import {
   CommHubError,
   classifyCommHubResponse,
@@ -2741,10 +2742,14 @@ async function processTask(task: string, from: string, taskId: string | null = n
   // `invalid_union` and the raw `ZodError` JSON / vendor envelope fell
   // through to the user-facing reply. Catch those shapes and replace with
   // a clean message; the raw error stays in process stderr for operators).
-  // 通信龙 d37e4a21 lock.
-  if (text && VENDOR_ERROR_PATTERNS.some((p) => p.test(text))) {
+  // 通信龙 d37e4a21 lock + 通信牛 #330 round 1 refinement: gating logic
+  // tightened so legitimate technical replies that just MENTION error
+  // terms (e.g. "ZodError 是 Zod 校验库抛出的异常") aren't mis-sanitized.
+  // Predicate lives in src/vendor-error.ts so it can be unit-tested
+  // without dragging cli.ts's network side-effects into the test bun.
+  if (text && isVendorErrorForUser(text, failed)) {
     const raw = text;
-    text = "[模型暂时异常] vendor 返回非预期格式，请稍后重发或重试。";
+    text = VENDOR_ERROR_REPLACEMENT;
     failed = true;
     process.stderr.write(
       `[vendor-error] sanitized for user; raw: ${raw.slice(0, 400).replace(/\n/g, " ")}\n`,
@@ -2752,29 +2757,6 @@ async function processTask(task: string, from: string, taskId: string | null = n
   }
   return { text, failed };
 }
-
-/**
- * Vendor-error shapes whose raw bytes should never reach the user-facing
- * IM reply. Each match triggers replacement with a clean Chinese message.
- * Add new patterns here as new vendors / SDK validators surface in
- * production logs.
- */
-const VENDOR_ERROR_PATTERNS: RegExp[] = [
-  // claude-agent-sdk zod schema failure shape (the SDK throws / surfaces a
-  // ZodError JSON when vendor response doesn't match Anthropic shape).
-  /ZodError/,
-  /invalid_union/i,
-  /"validation":\s*\{/,
-  // MiniMax / generic vendor envelope (`base_resp:{status_code:N}`).
-  // Tolerant on the JSON separators — `"base_resp":{"status_code":1000}`
-  // and `base_resp: { status_code : 1 }` both hit.
-  /"?base_resp"?[\s:]*\{[^}]*"?status_code"?[\s:]*[1-9]/i,
-  /\bunknown error,?\s*\d+/i,
-  // OpenAI-style top-level error envelope ("error":{"type":"..."}).
-  /"error"\s*:\s*\{\s*"(message|type|code)"\s*:/i,
-  // null `choices` array (no usable completion).
-  /"choices"\s*:\s*null/i,
-];
 
 // ── 防循环 + 低价值消息过滤 ──
 const lastReplyTime: Record<string, number> = {};
