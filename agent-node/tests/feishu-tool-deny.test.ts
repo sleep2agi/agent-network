@@ -585,7 +585,8 @@ expect(
 // ── 21. Literal secret deny in Bash (round 2 spec, follow-up of d111fe6e) ──
 
 // All fixtures use OBVIOUSLY-FAKE patterns that hit the regex shape but
-// can never be valid live tokens — see [[feedback_no_real_secrets_in_test_fixtures]].
+// can never be valid live tokens — per team rule: no real secret values
+// in test fixtures (GitHub Secret Scanning will block the push otherwise).
 // For the Slack `xoxb-` shape, GitHub Secret Scanning matches the literal
 // regardless of content (the pattern is the rule). Build it at runtime
 // via array.join so the source file never contains the full literal —
