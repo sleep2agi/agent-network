@@ -2406,6 +2406,24 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     delete_config: boolean;
     confirm_alias?: string;
   };
+  // RFC-027 PR2 prereq — auto-resolve daemon_node_id from child_node_id.
+  // The dashboard (and most callers of stop_node / delete_node) shouldn't
+  // need to track the daemon→child mapping themselves; the hub has it on
+  // node_create_requests at child creation time. Returns null when no
+  // creation record exists (orphan node row OR pre-RFC-026 node) — caller
+  // must then pass daemon_node_id explicitly. node_id derivation:
+  // `node_${request_id.replace(/^cr_/,"")}` (see create-node-daemon.ts
+  // and PR1 BLOCKER-1 fix), so we reverse it: `cr_${node_id.slice(5)}`.
+  const resolveDaemonForChild = (child_node_id: string): string | null => {
+    if (!child_node_id.startsWith("node_")) return null;
+    const requestId = `cr_${child_node_id.slice(5)}`;
+    const row = db.get<{ daemon_node_id: string }>(
+      `SELECT daemon_node_id FROM node_create_requests WHERE request_id = ?1`,
+      requestId,
+    );
+    return row?.daemon_node_id ?? null;
+  };
+
   const dispatchStopOrDelete = (args: DispatchArgs, clientNetId?: string | null) => {
     // §4.1 — SEC-1 trust-root join: resolve target node row WITHIN the
     // caller's scope. resolveReadScope returns 'denied' if the caller
@@ -2605,17 +2623,27 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "stop_node",
-    "Stop the agent-node child process; keep config dir intact. Reversible via restart_node. RFC-027 §2.2.",
+    "Stop the agent-node child process; keep config dir intact. Reversible via restart_node. RFC-027 §2.2. daemon_node_id is auto-resolved from child_node_id when omitted (looked up in node_create_requests).",
     {
       child_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
-      daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      // PR2 prereq: dashboard rarely knows daemon_node_id directly.
+      // When omitted, hub resolves from the original creation record
+      // (node_create_requests.daemon_node_id keyed by this child).
+      daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/).optional(),
       force: z.boolean().optional().default(false),
       grace_seconds: z.number().int().min(5).max(60).optional().default(10),
       network_id: z.string().max(200).optional(),
     },
     async ({ child_node_id, daemon_node_id, force, grace_seconds, network_id: clientNetId }) => {
+      const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id);
+      if (!resolved) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: false, error: "daemon_not_resolvable",
+          message: "no node_create_requests row found for this child_node_id; pass daemon_node_id explicitly",
+        }) }] };
+      }
       const r = dispatchStopOrDelete(
-        { action: "stop", child_node_id, daemon_node_id, force: force ?? false,
+        { action: "stop", child_node_id, daemon_node_id: resolved, force: force ?? false,
           grace_seconds: grace_seconds ?? 10, delete_config: false },
         clientNetId,
       );
@@ -2625,10 +2653,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "delete_node",
-    "Stop child + revoke ntok + delete hub row + (default) backup config to ~/.anet/deleted/<ts>-<alias>/ for 30d. confirm_alias must equal the node's alias. RFC-027 §2.2.",
+    "Stop child + revoke ntok + delete hub row + (default) backup config to ~/.anet/deleted/<ts>-<alias>/ for 30d. confirm_alias must equal the node's alias. daemon_node_id is auto-resolved when omitted. RFC-027 §2.2.",
     {
       child_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
-      daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/).optional(),
       confirm_alias: z.string().min(1).max(200),
       force: z.boolean().optional().default(false),
       grace_seconds: z.number().int().min(5).max(60).optional().default(10),
@@ -2636,8 +2664,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional(),
     },
     async ({ child_node_id, daemon_node_id, confirm_alias, force, grace_seconds, delete_config, network_id: clientNetId }) => {
+      const resolved = daemon_node_id ?? resolveDaemonForChild(child_node_id);
+      if (!resolved) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: false, error: "daemon_not_resolvable",
+          message: "no node_create_requests row found for this child_node_id; pass daemon_node_id explicitly",
+        }) }] };
+      }
       const r = dispatchStopOrDelete(
-        { action: "delete", child_node_id, daemon_node_id, force: force ?? false,
+        { action: "delete", child_node_id, daemon_node_id: resolved, force: force ?? false,
           grace_seconds: grace_seconds ?? 10, delete_config: delete_config ?? true, confirm_alias },
         clientNetId,
       );
