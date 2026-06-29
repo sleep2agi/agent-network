@@ -1962,6 +1962,103 @@ Bun.serve({
     //      stable, dashboard-facing fields only.
     // Add a new column to this list explicitly when a real client needs
     // it; do NOT switch back to SELECT *.
+    // ── REST: list host_supervisor daemons (RFC-026 §9.2.2 / #338 PR2) ──
+    // Mirror of the `list_host_supervisors` MCP tool for non-MCP callers.
+    // Same SQL + role-extract + member-脱敏 logic; SEC-1 scoped via REST
+    // auth pipeline (restScope). Returns {ok, daemons:[...], count}.
+    if (url.pathname === "/api/host-supervisors") {
+      const netParam = url.searchParams.get("network_id");
+      const effectiveNetId = restScope.networkId ?? netParam ?? null;
+      if (!effectiveNetId) {
+        return withCors(req, Response.json({ ok: false, error: "missing_network_id" }, { status: 400 }));
+      }
+      // Role for member-脱敏 (admin/owner = full host_telemetry, others = masked)
+      let isPrivileged = false;
+      if (restAuth?.userId) {
+        const role = getUserNetworkRole(restAuth.userId, effectiveNetId);
+        isPrivileged = role === "admin" || role === "owner";
+      } else {
+        // Network-token caller (no user) — treat as privileged within its network
+        isPrivileged = true;
+      }
+
+      const sqlRows = db.all<Record<string, any>>(`
+        SELECT
+          n.node_id, n.alias, n.hostname, n.network_id,
+          n.runtimes_supported, n.allowed_secret_keys,
+          n.created_at, n.updated_at,
+          s.last_seen_at AS session_last_seen,
+          s.cpu_cores AS session_cpu_cores,
+          s.mem_total_gb AS session_mem_total_gb,
+          s.ip AS session_ip,
+          n.config_snapshot
+        FROM nodes n
+        LEFT JOIN sessions s ON s.alias = n.alias AND (s.network_id = n.network_id OR s.network_id IS NULL)
+        LEFT JOIN api_tokens t ON t.network_id = n.network_id
+                              AND t.name = 'node:' || n.alias
+        WHERE n.network_id = ?1
+          AND (t.revoked_at IS NULL OR t.token_id IS NULL)
+        ORDER BY n.updated_at DESC
+      `, effectiveNetId);
+
+      const nowMs = Date.now();
+      const ONLINE_MS = 60_000;
+      const daemons = sqlRows
+        .map(r => {
+          let snapRole: string | null = null;
+          if (r.config_snapshot) {
+            try {
+              const parsed = typeof r.config_snapshot === "string" ? JSON.parse(r.config_snapshot) : r.config_snapshot;
+              snapRole = typeof parsed?.role === "string" ? parsed.role : null;
+            } catch { /* malformed */ }
+          }
+          return { row: r, role: snapRole };
+        })
+        .filter(({ role }) => role === "host_supervisor")
+        .map(({ row: r }) => {
+          let online = false;
+          let lastSeenAt: string | null = null;
+          if (r.session_last_seen) {
+            lastSeenAt = r.session_last_seen;
+            const t = Date.parse(r.session_last_seen);
+            if (!isNaN(t)) online = (nowMs - t) <= ONLINE_MS;
+          }
+          let runtimes: string[] = [];
+          let secrets: string[] = [];
+          try {
+            if (r.runtimes_supported) {
+              const parsed = JSON.parse(r.runtimes_supported);
+              runtimes = Array.isArray(parsed) ? parsed.filter((s: unknown) => typeof s === "string") : [];
+            }
+          } catch {}
+          try {
+            if (r.allowed_secret_keys) {
+              const parsed = JSON.parse(r.allowed_secret_keys);
+              secrets = Array.isArray(parsed) ? parsed.filter((s: unknown) => typeof s === "string") : [];
+            }
+          } catch {}
+          const telemetry: Record<string, unknown> = {
+            alert_level: online ? "green" : "gray",
+          };
+          if (isPrivileged) {
+            telemetry.cpu_cores = r.session_cpu_cores ?? null;
+            telemetry.mem_gb = r.session_mem_total_gb ?? null;
+            telemetry.ip_internal = r.session_ip ?? null;
+          }
+          return {
+            daemon_node_id: r.node_id,
+            alias: r.alias,
+            hostname: r.hostname,
+            online,
+            last_seen_at: lastSeenAt,
+            runtimes_supported: runtimes,
+            allowed_secret_keys: secrets,
+            host_telemetry: telemetry,
+          };
+        });
+      return withCors(req, Response.json({ ok: true, daemons, count: daemons.length }));
+    }
+
     if (url.pathname === "/api/nodes") {
       const nodeId = url.searchParams.get("node_id");
       const alias = url.searchParams.get("alias");

@@ -160,7 +160,39 @@ for i in {1..30}; do
 done
 [[ -n "$ONESHOT_REG" ]] && ok "daemon up registered 'oneshot-daemon' end-to-end" || { bad "oneshot never registered"; tail -30 /tmp/oneshot.log; }
 
+# ── I — list_host_supervisors MCP tool returns the daemons (PR2)
+note "I. list_host_supervisors MCP tool (RFC-026 §9.2.1 / #338 PR2)"
+# MCP requires an initialize handshake first
+curl -sS -X POST "$HUB_BASE/mcp" -H "Authorization: Bearer $UTOK" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-03-26' \
+  -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"e2e","version":"0"}}}' >/dev/null 2>&1
+LHS_BODY='{"jsonrpc":"2.0","id":50,"method":"tools/call","params":{"name":"list_host_supervisors","arguments":{"network_id":"'$NET'"}}}'
+LHS_RESP=$(curl -sS -X POST "$HUB_BASE/mcp" -H "Authorization: Bearer $UTOK" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-03-26' -d "$LHS_BODY")
+LHS_INNER=$(echo "$LHS_RESP" | grep -oP '(?<=data: ).+' | head -1 | jq -r '.result.content[0].text' 2>/dev/null)
+[[ -z "$LHS_INNER" || "$LHS_INNER" == "null" ]] && LHS_INNER=$(echo "$LHS_RESP" | jq -r '.result.content[0].text' 2>/dev/null)
+LHS_COUNT=$(echo "$LHS_INNER" | jq -r '.count' 2>/dev/null)
+[[ "$LHS_COUNT" -ge 1 ]] && ok "list_host_supervisors returns count >= 1 (got $LHS_COUNT)" || bad "MCP list_host_supervisors failed: $LHS_INNER"
+LHS_FIRST_ALIAS=$(echo "$LHS_INNER" | jq -r '.daemons[0].alias' 2>/dev/null)
+[[ -n "$LHS_FIRST_ALIAS" && "$LHS_FIRST_ALIAS" != "null" ]] && ok "first daemon alias surfaced: $LHS_FIRST_ALIAS" || bad "daemons[0].alias missing"
+LHS_FIRST_RUNTIMES=$(echo "$LHS_INNER" | jq -r '.daemons[0].runtimes_supported | join(",")' 2>/dev/null)
+[[ "$LHS_FIRST_RUNTIMES" =~ claude-agent-sdk ]] && ok "runtimes_supported populated from daemon's snapshot" || bad "runtimes_supported missing: $LHS_FIRST_RUNTIMES"
+LHS_FIRST_TELEMETRY=$(echo "$LHS_INNER" | jq -r '.daemons[0].host_telemetry.alert_level' 2>/dev/null)
+[[ "$LHS_FIRST_TELEMETRY" == "green" || "$LHS_FIRST_TELEMETRY" == "gray" ]] && ok "host_telemetry.alert_level surfaces ($LHS_FIRST_TELEMETRY)" || bad "alert_level missing/bad: $LHS_FIRST_TELEMETRY"
+
+# ── J — REST /api/host-supervisors mirror returns same shape
+note "J. GET /api/host-supervisors REST mirror"
+REST_RESP=$(curl -sS "$HUB_BASE/api/host-supervisors?network_id=$NET" -H "Authorization: Bearer $UTOK")
+REST_COUNT=$(echo "$REST_RESP" | jq -r '.count' 2>/dev/null)
+[[ "$REST_COUNT" -ge 1 ]] && ok "REST returns count >= 1 (got $REST_COUNT)" || bad "REST endpoint failed: $REST_RESP"
+REST_KEYS=$(echo "$REST_RESP" | jq -r '.daemons[0] | keys_unsorted | join(",")' 2>/dev/null)
+echo "$REST_KEYS" | grep -q "runtimes_supported" && ok "REST daemon row has runtimes_supported field" || bad "REST keys missing runtimes_supported: $REST_KEYS"
+REST_NO_CFG_SNAP=$(echo "$REST_RESP" | jq -r '.daemons[0] | has("config_snapshot")' 2>/dev/null)
+[[ "$REST_NO_CFG_SNAP" == "false" ]] && ok "REST does NOT leak config_snapshot (post-#312 invariant preserved)" || bad "REST leaked config_snapshot"
+
 printf "\n────────────────────────────────────────────\n"
-printf "anet daemon CLI e2e — PASS=%d FAIL=%d\n" "$PASS" "$FAIL"
+printf "anet daemon CLI + list_host_supervisors e2e — PASS=%d FAIL=%d\n" "$PASS" "$FAIL"
 printf "────────────────────────────────────────────\n"
 [[ "$FAIL" -eq 0 ]]

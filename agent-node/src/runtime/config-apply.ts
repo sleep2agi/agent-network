@@ -235,6 +235,15 @@ export interface MaskedSnapshot {
    * undefined / other values = regular agent-node. Read from config.json's
    * `role` field, narrow-typed (only string passes). */
   role?: string | null;
+  /** RFC-026 §9.3 daemon self-declare — list of runtimes this daemon
+   * advertises support for. Hub promotes to nodes.runtimes_supported
+   * column (#338 PR2) for indexed dashboard discovery. Empty array OK
+   * (regular non-daemon nodes leave this absent). */
+  runtimes_supported?: string[];
+  /** RFC-026 §9.3 daemon self-declare — env-var keys this daemon is
+   * willing to accept in env_blob (fail-closed default per §9.7).
+   * Hub promotes to nodes.allowed_secret_keys (#338 PR2). */
+  allowed_secret_keys?: string[];
 }
 export function buildConfigSnapshot(
   fileConfig: any,
@@ -248,6 +257,16 @@ export function buildConfigSnapshot(
     config_update_capable: configUpdateCapable,
     role: typeof fileConfig?.role === "string" ? fileConfig.role : null,
   };
+  // Self-declare arrays — only emit when valid; narrow with typeof per
+  // [[feedback_typeof_narrow_extracted_fields]] (don't trust user JSON).
+  const rt = fileConfig?.runtimes_supported;
+  if (Array.isArray(rt) && rt.every((s: unknown) => typeof s === "string")) {
+    out.runtimes_supported = rt;
+  }
+  const ask = fileConfig?.allowed_secret_keys;
+  if (Array.isArray(ask) && ask.every((s: unknown) => typeof s === "string")) {
+    out.allowed_secret_keys = ask;
+  }
   const f = (fileConfig?.flags || {}) as Record<string, unknown>;
   for (const k of ALLOWED_FLAGS) {
     if (k in f) out.flags[k] = f[k];
