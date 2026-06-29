@@ -311,8 +311,44 @@ else
   echo "--- daemon-f.log tail ---"; tail -20 /tmp/daemon-f.log 2>/dev/null
 fi
 
-# Restore /etc/hosts + cleanup F daemon (don't disturb subsequent scenarios)
-cp /tmp/hosts.bak /etc/hosts && rm -f /tmp/hosts.bak && ok "F /etc/hosts restored"
+# Restore /etc/hosts before staging the DeepSeek DNS-attack variant
+cp /tmp/hosts.bak /etc/hosts && ok "F /etc/hosts restored after anthropic variant"
+
+# ── Scenario F.deepseek — verify IP-block fires for newly-allowlisted host ──
+# RFC-028 SSRF allowlist extension (PR following N站马 e2e): anthropic
+# vendor now also accepts api.deepseek.com / api.minimax.{chat,io}.
+# Critical security invariant per 通信龙: host whitelist is layer 1,
+# DNS-resolved IP block is layer 2 — both MUST fire for every host on
+# the list. F (above) proves it for api.anthropic.com; this variant
+# proves it for api.deepseek.com (same code path, but locks the new
+# host gets BOTH guards).
+note "F.deepseek — IP-block真 fires for api.deepseek.com (extended allowlist)"
+
+# Insert a provider on the SAME isolated F daemon (no need to restart it),
+# now with host=api.deepseek.com (which passes hub validateBaseUrl after
+# the allowlist extension)
+sqlite3 "$HUB_DB" "INSERT INTO providers (provider_id, network_id, name, vendor, base_url, secret_key_ref, created_at, created_by, enabled) VALUES ('prov_ds_attack', '$NET_ID', 'DeepSeek DNS Attack', 'anthropic', 'https://api.deepseek.com/v1', 'ANTHROPIC_API_KEY', $(date +%s%N | head -c 13), '$ADMIN_USER', 1);"
+sqlite3 "$HUB_DB" "INSERT INTO provider_models (model_id, provider_id, model_name, enabled, created_at) VALUES ('pm_ds_attack', 'prov_ds_attack', 'claude-x', 1, $(date +%s%N | head -c 13));"
+ok "F.deepseek provider inserted (host=api.deepseek.com, passes new allowlist)"
+
+# /etc/hosts override: point api.deepseek.com → 169.254.169.254
+echo "169.254.169.254 api.deepseek.com" >> /etc/hosts
+ok "F.deepseek /etc/hosts override: api.deepseek.com → 169.254.169.254"
+
+BODY='{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"probe_provider_model","arguments":{
+  "provider_id":"prov_ds_attack","model_name":"claude-x","daemon_node_id":"'$F_DAEMON_NODE_ID'","network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+PROBE_ID_FDS=$(echo "$RESP" | jq -r .probe_id 2>/dev/null)
+for i in {1..20}; do sleep 1; ST=$(sqlite3 "$HUB_DB" "SELECT status FROM probe_results WHERE probe_id='$PROBE_ID_FDS';" 2>/dev/null); [[ "$ST" != "pending" && -n "$ST" ]] && break; done
+
+if [[ "$ST" == "probe_resolve_unsafe_ip" ]]; then
+  ok "F.deepseek STRICT: ack.status == probe_resolve_unsafe_ip (allowlist passes host; IP-guard still rejects metadata IP — both layers active for extended hosts)"
+else
+  bad "F.deepseek STRICT FAIL: ack.status='$ST' expected exactly 'probe_resolve_unsafe_ip' — IP guard miss for new allowlist host (SSRF regression)"
+fi
+
+# Restore /etc/hosts + cleanup F daemon
+cp /tmp/hosts.bak /etc/hosts && rm -f /tmp/hosts.bak && ok "F.deepseek /etc/hosts restored"
 kill "$F_DAEMON_PID" 2>/dev/null || true
 
 # ── Scenario G — secret-no-leak (zod .strict() via JSON-parsed error code) ──

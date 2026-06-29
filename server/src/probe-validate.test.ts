@@ -33,6 +33,40 @@ describe("validateBaseUrl (§4.4.1 vendor host allowlist)", () => {
   test("P1 SUPPORTED_VENDORS only contains anthropic", () => {
     expect(SUPPORTED_VENDORS).toEqual(["anthropic"]);
   });
+
+  // ── RFC-028 P1.5+ — Anthropic-compatible 3rd-party hosts on `anthropic` vendor.
+  // Whitelist semantics preserved; new entries require PR + security review.
+  // Host allowlist passes here; IP-level guard still fires at fetch time
+  // (covered by safelyFetchProbe + docker scenarios qa-rfc028 F + M.ssrf).
+  test("anthropic + api.deepseek.com → ok (Anthropic-compatible /v1/messages)", () => {
+    expect(() => validateBaseUrl("anthropic", "https://api.deepseek.com/v1")).not.toThrow();
+  });
+  test("anthropic + api.minimax.chat → ok (MiniMax legacy domain)", () => {
+    expect(() => validateBaseUrl("anthropic", "https://api.minimax.chat/v1")).not.toThrow();
+  });
+  test("anthropic + api.minimax.io → ok (MiniMax new domain, Vincent live)", () => {
+    expect(() => validateBaseUrl("anthropic", "https://api.minimax.io/v1")).not.toThrow();
+  });
+  test("subdomain of allowed host NOT accepted (regex anchored)", () => {
+    expect(() => validateBaseUrl("anthropic", "https://attacker.api.deepseek.com/v1")).toThrow(/probe_target_forbidden/);
+    expect(() => validateBaseUrl("anthropic", "https://api.minimax.io.attacker.example/v1")).toThrow(/probe_target_forbidden/);
+  });
+  test("homograph / look-alike host rejected (regex anchored)", () => {
+    expect(() => validateBaseUrl("anthropic", "https://api.deepseek.com.attacker/v1")).toThrow(/probe_target_forbidden/);
+    expect(() => validateBaseUrl("anthropic", "https://api-deepseek.com/v1")).toThrow(/probe_target_forbidden/);
+  });
+  test("VENDOR_HOST_ALLOWLIST.anthropic curated list = exactly 4 entries", () => {
+    // Lock the curated set — adding a 5th host MUST go through a PR
+    // bump this assertion (forces conscious security review).
+    expect(VENDOR_HOST_ALLOWLIST.anthropic.length).toBe(4);
+    const sources = VENDOR_HOST_ALLOWLIST.anthropic.map(r => r.source).sort();
+    expect(sources).toEqual([
+      "^api\\.anthropic\\.com$",
+      "^api\\.deepseek\\.com$",
+      "^api\\.minimax\\.chat$",
+      "^api\\.minimax\\.io$",
+    ]);
+  });
 });
 
 describe("isForbiddenIp (§4.4.2 private/reserved IP block — anti SSRF)", () => {

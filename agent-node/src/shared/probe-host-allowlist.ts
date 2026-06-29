@@ -24,17 +24,33 @@ export class ProbeValidationError extends Error {
   }
 }
 
-// ── §4.4.1 per-vendor host allowlist (P1: anthropic only) ─────────
-// P2 will extend: openai/zai/openrouter/deepseek/qwen. Each vendor
-// has ONE OR MORE allowed hostnames (regex anchored). custom vendor
-// requires admin to explicitly allowlist per-host (P3).
+// ── §4.4.1 per-vendor host allowlist ──────────────────────────────
+// `anthropic` vendor accepts Anthropic + curated 3rd-party Anthropic-
+// compatible endpoints that Vincent / N站马 ship live providers
+// against (DeepSeek + MiniMax both expose `/v1/messages` with the
+// Anthropic protocol surface). Whitelist semantics preserved — NOT
+// allow-any. New entries land here via PR with security review
+// (network-admin-configurable allowlist is backlog: needs strong
+// IP-range / shape guard before admins can edit).
+//
+// Per 通信龙 (RFC-028 P1.5+): the host whitelist is defense layer 1;
+// layer 2 is the DNS-resolved IP block (FORBIDDEN_IPV{4,6}_RE below),
+// applied AFTER allowlist passes. Any new host gets BOTH layers
+// automatically — host in allowlist + DNS resolves to private/metadata
+// IP still surfaces `probe_resolve_unsafe_ip`.
+//
+// P2 will add vendors (openai/zai/openrouter/qwen) as separate keys.
 export const VENDOR_HOST_ALLOWLIST: Record<string, ReadonlyArray<RegExp>> = {
-  anthropic:  [/^api\.anthropic\.com$/],
+  anthropic:  [
+    /^api\.anthropic\.com$/,
+    /^api\.deepseek\.com$/,     // Anthropic-compatible /v1/messages
+    /^api\.minimax\.chat$/,     // MiniMax legacy domain
+    /^api\.minimax\.io$/,       // MiniMax new domain (Vincent live use)
+  ],
   // P2:
   // openai:     [/^api\.openai\.com$/],
   // zai:        [/^api\.z\.ai$/, /^open\.bigmodel\.cn$/],
   // openrouter: [/^openrouter\.ai$/],
-  // deepseek:   [/^api\.deepseek\.com$/],
   // qwen:       [/^dashscope(-intl)?\.aliyuncs\.com$/],
 };
 export const SUPPORTED_VENDORS = Object.keys(VENDOR_HOST_ALLOWLIST);
