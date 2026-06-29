@@ -20,7 +20,12 @@
  * Run: `bun tests/vendor-error-sanitize.test.ts`
  */
 
-import { isVendorErrorForUser, VENDOR_ERROR_REPLACEMENT } from "../src/vendor-error";
+import {
+  isVendorErrorForUser,
+  isTransientVendorError,
+  VENDOR_ERROR_REPLACEMENT,
+  VENDOR_RETRY_PROFILE,
+} from "../src/vendor-error";
 
 const results: Array<{ name: string; pass: boolean; detail?: string }> = [];
 function expect(name: string, pred: boolean, detail = ""): void {
@@ -158,6 +163,84 @@ expect("replacement does NOT contain ZodError", !REPLACE.includes("ZodError"));
 expect("replacement does NOT contain base_resp", !REPLACE.includes("base_resp"));
 expect("replacement does NOT contain status_code", !REPLACE.includes("status_code"));
 expect("replacement is Chinese-readable", REPLACE.includes("请稍后重发"));
+
+// ── 8. isTransientVendorError — retry-worthy gate (Vincent UAT 2026-06-29) ──
+
+// MiniMax 1000 / unknown error / choices:null — all transient, retry-able
+const TRANSIENT_CASES: Array<[string, string, boolean]> = [
+  [
+    "MiniMax 1000 envelope (Vincent UAT)",
+    'claude 错误: ZodError [{"code":"invalid_union"}] vendor returned {"base_resp":{"status_code":1000},"choices":null}',
+    true,
+  ],
+  ["choices:null + ZodError", '{"choices":null,"name":"ZodError"}', false],
+  ["base_resp + unknown error", '{"base_resp":{"status_code":1001}} unknown error, 999', false],
+  ["just unknown error after SDK throw", "claude 错误: unknown error, 200", true],
+];
+for (const [name, text, failed] of TRANSIENT_CASES) {
+  expect(`transient: ${name}`, isTransientVendorError(text, failed), `text: ${text.slice(0, 80)}`);
+}
+
+// NON-transient — auth/quota/rate-limit. These DO trigger sanitize (via
+// isVendorErrorForUser) but should NOT retry.
+const NON_TRANSIENT_CASES: Array<[string, string, boolean]> = [
+  // Multi-signal vendor error WITH 401 token → not retryable
+  ['401 unauthorized + zod context', 'ZodError invalid_union "choices":null 401 unauthorized', true],
+  ['403 forbidden + base_resp', 'claude 错误: 403 forbidden {"base_resp":{"status_code":1}}', true],
+  ['quota exceeded + zod', 'ZodError invalid_union choices:null insufficient_quota', true],
+  ['rate limit 429', 'claude 错误: ZodError invalid_union choices:null too many requests 429', true],
+  ['rate_limit text', 'ZodError invalid_union "choices":null rate limit hit', true],
+];
+for (const [name, text, failed] of NON_TRANSIENT_CASES) {
+  expect(
+    `non-transient (sanitize but no retry): ${name}`,
+    !isTransientVendorError(text, failed),
+    `expected !transient. text: ${text.slice(0, 80)}`,
+  );
+  // Sanity: these should still be vendor errors (just non-retryable)
+  expect(
+    `non-transient cases are still vendor errors: ${name}`,
+    isVendorErrorForUser(text, failed),
+    `text: ${text.slice(0, 80)}`,
+  );
+}
+
+// NOT a vendor error at all — should NOT be transient either
+for (const [name, text] of NIU_CASES) {
+  // failed=false + single signal: NOT vendor error → NOT transient
+  expect(
+    `NIU counter (failed=false, NOT vendor error, NOT transient): ${name}`,
+    !isTransientVendorError(text, false),
+    text,
+  );
+}
+
+// Plain text — not transient
+expect("plain text not transient", !isTransientVendorError("你好世界", false));
+expect("empty not transient", !isTransientVendorError("", true));
+
+// ── 9. VENDOR_RETRY_PROFILE shape lock ─────────────────────────────────────
+
+expect(
+  "VENDOR_RETRY_PROFILE.maxRetries >= 1",
+  typeof VENDOR_RETRY_PROFILE.maxRetries === "number" && VENDOR_RETRY_PROFILE.maxRetries >= 1,
+);
+expect(
+  "VENDOR_RETRY_PROFILE.maxRetries <= 5 (sanity — runaway retry guard)",
+  VENDOR_RETRY_PROFILE.maxRetries <= 5,
+);
+expect(
+  "VENDOR_RETRY_PROFILE.backoffMs is array",
+  Array.isArray(VENDOR_RETRY_PROFILE.backoffMs) && VENDOR_RETRY_PROFILE.backoffMs.length >= 1,
+);
+expect(
+  "VENDOR_RETRY_PROFILE.backoffMs values are positive ms",
+  VENDOR_RETRY_PROFILE.backoffMs.every((n) => typeof n === "number" && n > 0 && n <= 30_000),
+);
+expect(
+  "VENDOR_RETRY_PROFILE backoff total wall-clock ≤ 30s",
+  VENDOR_RETRY_PROFILE.backoffMs.reduce((a, b) => a + b, 0) <= 30_000,
+);
 
 // ── Summary (gates exit — MUST be last) ────────────────────────────────────
 

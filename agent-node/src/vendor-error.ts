@@ -75,3 +75,51 @@ export function isVendorErrorForUser(
   if (failed) return true; // failure context + ≥1 signal → sanitize
   return matchCount >= 2; // success context: need ≥2 correlated signals
 }
+
+/**
+ * Vincent UAT 2026-06-29 实测: MiniMax `status_code:1000` / `unknown error`
+ * / `choices:null` are TRANSIENT — the very next turn (72s later) returned
+ * a valid response without operator intervention. Sanitizing on first hit
+ * means a clean retry path goes to waste; the user sees "暂时异常 请重发"
+ * for what should have just been a one-second retry.
+ *
+ * `isTransientVendorError(text, failed)` returns true ONLY when the error
+ * is BOTH (a) a vendor-error per `isVendorErrorForUser` AND (b) reasonably
+ * likely to succeed on retry. Excludes:
+ *   - auth-class errors (401 / 403 / unauthorized / quota / insufficient
+ *     credit) — these won't recover on retry; operator must rotate
+ *     credentials / top up.
+ *   - rate-limit (429, too many requests) — caller might decide to retry
+ *     with longer backoff, but the default short backoff isn't enough.
+ *
+ * 通信龙 65e59373 lock: retry transient 1-2 times with short backoff
+ * BEFORE sanitization, so Vincent's image+text replies don't sanitize on
+ * a single-shot 1000 when the retry would've worked.
+ */
+export function isTransientVendorError(
+  text: string,
+  failed: boolean,
+): boolean {
+  if (!isVendorErrorForUser(text, failed)) return false;
+  // Auth-class errors won't recover on retry — don't waste round-trips.
+  if (/\b401\b|\b403\b|unauthorized|forbidden/i.test(text)) return false;
+  if (/quota|insufficient[_\s]?(credit|balance|funds|tokens?)/i.test(text)) return false;
+  // Explicit rate-limit signal — caller-level backoff needed, not our short retry.
+  if (/\b429\b|too[_\s]?many[_\s]?requests|rate[_\s]?limit/i.test(text)) return false;
+  // Everything else looks transient (vendor 1000 / unknown error / choices null
+  // / SDK zod fail on malformed response / OpenAI-style 5xx envelopes).
+  return true;
+}
+
+/**
+ * Configurable retry profile — exported so callers (cli.ts) and tests can
+ * align without hard-coding magic numbers in two places.
+ */
+export const VENDOR_RETRY_PROFILE = {
+  /** Total retry attempts after the initial think() call. 2 = up to 3
+   *  total attempts (initial + 2 retries). */
+  maxRetries: 2,
+  /** Backoff schedule per retry attempt (ms). Length should match
+   *  maxRetries; missing entries fall back to last entry. */
+  backoffMs: [1500, 3000],
+} as const;
