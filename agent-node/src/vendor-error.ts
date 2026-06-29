@@ -63,17 +63,38 @@ export const VENDOR_ERROR_REPLACEMENT =
  * Decide whether `text` is the raw bytes of a vendor / SDK failure
  * envelope that must NOT reach the user-facing IM reply.
  *
- * See module docstring for the correlation rules.
+ * Single unified gate (通信牛 #331 round 1):
+ *   sanitize / retry ONLY when BOTH conditions hold:
+ *     (a) `failed === true`  — the SDK threw or processWithClaude already
+ *                              wrapped the result in a `<runtime> 错误:`
+ *                              prefix (real failure context, not just
+ *                              an LLM reply discussing error formats).
+ *     (b) `matchCount >= 2`  — at least two DISTINCT vendor-envelope
+ *                              signals correlate. A single broad pattern
+ *                              like `ZodError` or `base_resp` could
+ *                              appear in a normal Q&A — the signature
+ *                              of a real failure envelope is multiple
+ *                              correlated terms (e.g. zod issue + null
+ *                              choices + status_code != 0).
+ *
+ * Trade-off accepted: a rare SDK-throw whose error text contains only
+ * one signal (e.g. `claude 错误: ZodError: cannot parse`) slips through
+ * un-sanitized. User sees the raw line. Stricter than ideal but
+ * eliminates false-positives on technical discussion that quotes
+ * multiple error terms in success context.
+ *
+ * Both `isVendorErrorForUser` (sanitize gate) and `isTransientVendorError`
+ * (retry gate) use this same predicate as their base — single source of
+ * truth, no drift.
  */
 export function isVendorErrorForUser(
   text: string,
   failed: boolean,
 ): boolean {
   if (!text || typeof text !== "string") return false;
+  if (!failed) return false; // success context: never sanitize
   const matchCount = VENDOR_ERROR_PATTERNS.filter((p) => p.test(text)).length;
-  if (matchCount === 0) return false;
-  if (failed) return true; // failure context + ≥1 signal → sanitize
-  return matchCount >= 2; // success context: need ≥2 correlated signals
+  return matchCount >= 2; // failure + ≥2 distinct signals
 }
 
 /**

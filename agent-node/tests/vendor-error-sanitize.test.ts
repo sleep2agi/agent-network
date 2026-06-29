@@ -8,14 +8,26 @@
  * reply. cli.ts now scrubs known vendor-error shapes and replaces with
  * clean Chinese message; raw stays in stderr for operators.
  *
- * 通信牛 #330 round 1 refinement: single-pattern matches like `ZodError`
- * would false-positive on legitimate technical replies discussing error
- * formats. The new `isVendorErrorForUser(text, failed)` predicate combines
- * `failed` context with multi-signal correlation so normal Q&A about
- * Zod / OpenAI errors / base_resp passes through untouched.
+ * 通信牛 #331 round 1 contract — single unified gate:
+ *   sanitize / retry ONLY when BOTH conditions hold:
+ *     (a) `failed === true`  — SDK threw / `<runtime> 错误:` prefix
+ *                              (real failure context, not LLM prose
+ *                              discussing error formats).
+ *     (b) `matchCount >= 2`  — at least two DISTINCT vendor-envelope
+ *                              signals correlate. A single broad term
+ *                              ("ZodError", "base_resp") could appear
+ *                              in a normal reply; correlation is the
+ *                              signature of a real envelope leak.
  *
- * This test imports the SAME `isVendorErrorForUser` production exports —
- * no regex duplication. Any change in cli.ts is visible here.
+ * Trade-off accepted: a rare SDK-throw whose error text has only ONE
+ * signal slips through un-sanitized; user sees raw `claude 错误:
+ * ZodError: ...`. Stricter, but eliminates false-positives on
+ * legitimate technical replies (success context with multi-signal
+ * prose). Operator can still see raw via stderr.
+ *
+ * This test imports the SAME `isVendorErrorForUser` production export —
+ * no regex duplication. Any change in cli.ts is visible here. Both
+ * sanitize and retry gates use a single predicate; no drift between them.
  *
  * Run: `bun tests/vendor-error-sanitize.test.ts`
  */
@@ -34,6 +46,11 @@ function expect(name: string, pred: boolean, detail = ""): void {
 }
 
 // ── 1. Vincent UAT real shape — failed=true + multi-signal → sanitize ────
+//
+// The actual Vincent UAT envelope (MiniMax 1000) contains ZodError +
+// invalid_union + base_resp(non-zero status_code) + "choices":null — at
+// least 4 distinct signals. With failed=true (SDK threw, processWithClaude
+// wrapped in `claude 错误:` prefix), this MUST trigger sanitize.
 
 const VINCENT_UAT_SHAPE = `claude 错误: ZodError: [
   {
@@ -49,17 +66,22 @@ expect(
   "Vincent UAT shape + failed=true → sanitize",
   isVendorErrorForUser(VINCENT_UAT_SHAPE, true),
 );
-// Even if `failed` accidentally false, the multi-signal correlation
-// still catches it.
+
+// Same shape but failed=false (LLM happened to echo this in a reply — eg.
+// "show me what the error looked like"): MUST NOT sanitize. failed-context
+// is the load-bearing signal; raw envelope in a successful think() output
+// is the LLM faithfully quoting an error format the user asked about.
 expect(
-  "Vincent UAT shape + failed=false → still sanitize (multi-signal correlation)",
-  isVendorErrorForUser(VINCENT_UAT_SHAPE, false),
+  "Vincent UAT shape + failed=false → NOT sanitize (no failure context)",
+  !isVendorErrorForUser(VINCENT_UAT_SHAPE, false),
 );
 
-// ── 2. 通信牛 #330 round 1 counterexamples — MUST NOT sanitize ─────────────
+// ── 2. 通信牛 #330+#331 counter-examples — single-signal prose ─────────────
+// These are the false-positives that the OLD `failed=true + ≥1 signal`
+// gate misfired on. Under the new gate, single-signal text in either
+// success or failure context passes through untouched.
 
-// (a) Plain technical discussion of ZodError term (failed=false, single signal)
-const NIU_CASES: Array<[string, string]> = [
+const NIU_COUNTER_CASES: Array<[string, string]> = [
   ["ZodError discussion", "ZodError 是 Zod 校验库抛出的异常，常见于 schema mismatch。"],
   ["invalid_union discussion", "如果 union 不匹配，Zod 可能返回 invalid_union。"],
   [
@@ -71,48 +93,98 @@ const NIU_CASES: Array<[string, string]> = [
     '正常讨论 base_resp：{"base_resp":{"status_code":1001}} 表示上游失败',
   ],
 ];
-for (const [name, text] of NIU_CASES) {
+for (const [name, text] of NIU_COUNTER_CASES) {
+  // success context, single signal — pass through
   expect(
-    `通信牛-counter (failed=false, single signal) NOT sanitized: ${name}`,
+    `counter (failed=false, single signal) → NOT sanitize: ${name}`,
     !isVendorErrorForUser(text, false),
+    `text: ${text.slice(0, 80)}`,
+  );
+  // failure context, single signal — also pass through under the new
+  // gate. The user sees the raw single-signal error line, which is the
+  // accepted trade-off vs misfiring on success-context discussion.
+  expect(
+    `counter (failed=true, single signal) → NOT sanitize: ${name}`,
+    !isVendorErrorForUser(text, true),
     `text: ${text.slice(0, 80)}`,
   );
 }
 
-// But if the LLM REALLY threw on these AND we're in failed=true context,
-// sanitize is correct (operator-visible raw error wrapped in failure path).
-// Pure-prose case is rare enough that failed=true context is itself a
-// strong signal.
-for (const [name, text] of NIU_CASES) {
-  expect(
-    `${name} + failed=true → sanitize (SDK threw, single signal OK in failure context)`,
-    isVendorErrorForUser(text, true),
-  );
-}
+// ── 3. Success-context multi-signal — NOT sanitize (no failure context) ──
+// The OLD gate's `failed=false + ≥2 signals` branch misfired on legit
+// technical replies that happened to discuss multiple error terms (eg.
+// my own gate-verify prompt to feishu-local, which mentioned both
+// ZodError and base_resp in the same prompt — the bot's faithful echo
+// was sanitized in preview.8 prod). Under the new gate, success context
+// never sanitizes regardless of signal count.
 
-// ── 3. Multi-signal correlation cases (failed=false but ≥2 signals) ───────
-
-const MULTI_SIGNAL = [
-  // ZodError + invalid_union — both common in zod error JSON output
-  ['{"name":"ZodError","issues":[{"code":"invalid_union","path":["x"]}]}'],
-  // base_resp + choices:null — MiniMax envelope shape
-  ['{"base_resp":{"status_code":1000},"choices":null}'],
-  // unknown error + choices:null
-  ['Got: unknown error, 999 — "choices":null in response'],
-  // error envelope + choices:null
-  ['{"error":{"message":"bad","type":"x"}} caused "choices":null'],
+const SUCCESS_MULTI_SIGNAL_CASES: Array<[string, string]> = [
+  [
+    "ZodError + invalid_union prose",
+    'ZodError 抛 invalid_union 时，看 union 分支的 issues 数组',
+  ],
+  [
+    "base_resp + choices:null in docs prose",
+    'MiniMax 的 base_resp:{status_code:1} 表示失败；如果 choices:null 通常说明 vendor 拒绝了请求',
+  ],
+  [
+    "unknown error + choices:null docs",
+    'unknown error, 999 是 vendor 内部异常；伴随 "choices":null 时可重试',
+  ],
+  [
+    'OpenAI envelope + "choices":null example',
+    '示例：{"error":{"message":"bad","type":"x"}} 会让 "choices":null',
+  ],
 ];
-for (const [text] of MULTI_SIGNAL) {
+for (const [name, text] of SUCCESS_MULTI_SIGNAL_CASES) {
   expect(
-    `multi-signal (failed=false, ≥2 signals) → sanitize: ${text.slice(0, 60)}`,
-    isVendorErrorForUser(text, false),
+    `success-context multi-signal → NOT sanitize: ${name}`,
+    !isVendorErrorForUser(text, false),
     text,
   );
 }
 
-// ── 4. Single-signal + failed=true → sanitize (SDK-threw context) ─────────
+// ── 4. Failure-context multi-signal — sanitize ───────────────────────────
+// The ONLY combination that triggers sanitize: `failed=true + matchCount ≥ 2`.
 
-const SINGLE_FAILED = [
+const FAILED_MULTI_SIGNAL_CASES: Array<[string, string]> = [
+  [
+    "ZodError + invalid_union after SDK throw",
+    'claude 错误: ZodError: [{"code":"invalid_union","path":["choices"]}]',
+  ],
+  [
+    "base_resp + choices:null after SDK throw",
+    'claude 错误: vendor returned {"base_resp":{"status_code":1000},"choices":null}',
+  ],
+  [
+    "unknown error + ZodError after SDK throw",
+    'agent-node 错误: ZodError on response; vendor said unknown error, 999',
+  ],
+  [
+    "OpenAI envelope + choices:null after SDK throw",
+    'claude 错误: {"error":{"message":"bad","type":"x"}} → "choices":null',
+  ],
+];
+for (const [name, text] of FAILED_MULTI_SIGNAL_CASES) {
+  expect(
+    `failure-context multi-signal → sanitize: ${name}`,
+    isVendorErrorForUser(text, true),
+    text,
+  );
+  // Sanity: same text WITHOUT failure context → NOT sanitize.
+  expect(
+    `same text without failure context → NOT sanitize: ${name}`,
+    !isVendorErrorForUser(text, false),
+    text,
+  );
+}
+
+// ── 5. Single-signal + failed=true — NOT sanitize (new contract) ─────────
+// These were locked in the OLD #330 test as "sanitize=true". Under #331
+// the gate is stricter; user sees raw line in this rare case, operator
+// has stderr trace. Accepted trade-off.
+
+const SINGLE_SIGNAL_FAILED_CASES: Array<[string, string]> = [
   ["only ZodError after SDK throw", "claude 错误: ZodError: cannot parse response"],
   ["only invalid_union after SDK throw", "agent-node 错误: invalid_union at path .choices"],
   [
@@ -124,15 +196,15 @@ const SINGLE_FAILED = [
     'agent-node 错误: parser failed on "choices":null',
   ],
 ];
-for (const [name, text] of SINGLE_FAILED) {
+for (const [name, text] of SINGLE_SIGNAL_FAILED_CASES) {
   expect(
-    `failed=true + single signal → sanitize: ${name}`,
-    isVendorErrorForUser(text, true),
+    `single-signal + failed=true → NOT sanitize (new contract): ${name}`,
+    !isVendorErrorForUser(text, true),
     text,
   );
 }
 
-// ── 5. Zero signals — never sanitize ──────────────────────────────────────
+// ── 6. Zero signals — never sanitize ──────────────────────────────────────
 
 const NO_SIGNAL = [
   ["plain answer", "你好，今天天气很好。"],
@@ -144,18 +216,16 @@ const NO_SIGNAL = [
 ];
 for (const [name, text] of NO_SIGNAL) {
   expect(`zero signals + failed=false: ${name}`, !isVendorErrorForUser(text, false), text);
-  // Even failed=true with zero signals doesn't sanitize — leave operator's
-  // generic error text alone.
   expect(`zero signals + failed=true: ${name}`, !isVendorErrorForUser(text, true), text);
 }
 
-// ── 6. Defensive — bad input ──────────────────────────────────────────────
+// ── 7. Defensive — bad input ──────────────────────────────────────────────
 
 expect("null text", !isVendorErrorForUser(null as any, true));
 expect("undefined text", !isVendorErrorForUser(undefined as any, true));
 expect("non-string", !isVendorErrorForUser(42 as any, true));
 
-// ── 7. Sanitization replacement text (imported from production, regression-locked) ──
+// ── 8. Sanitization replacement text (regression-locked) ──────────────────
 
 const REPLACE = VENDOR_ERROR_REPLACEMENT;
 expect("replacement starts with [模型暂时异常]", REPLACE.startsWith("[模型暂时异常]"));
@@ -164,32 +234,50 @@ expect("replacement does NOT contain base_resp", !REPLACE.includes("base_resp"))
 expect("replacement does NOT contain status_code", !REPLACE.includes("status_code"));
 expect("replacement is Chinese-readable", REPLACE.includes("请稍后重发"));
 
-// ── 8. isTransientVendorError — retry-worthy gate (Vincent UAT 2026-06-29) ──
+// ── 9. isTransientVendorError — retry gate uses SAME base predicate ──────
+// `isTransientVendorError` MUST be a strict subset of `isVendorErrorForUser`:
+// retry only when (a) the predicate fires AND (b) the error isn't auth /
+// quota / 429. No second judgement of its own.
 
-// MiniMax 1000 / unknown error / choices:null — all transient, retry-able
+// Multi-signal + failed=true + no auth-class signal → transient
 const TRANSIENT_CASES: Array<[string, string, boolean]> = [
   [
-    "MiniMax 1000 envelope (Vincent UAT)",
+    "MiniMax 1000 envelope (Vincent UAT real shape)",
     'claude 错误: ZodError [{"code":"invalid_union"}] vendor returned {"base_resp":{"status_code":1000},"choices":null}',
     true,
   ],
-  ["choices:null + ZodError", '{"choices":null,"name":"ZodError"}', false],
-  ["base_resp + unknown error", '{"base_resp":{"status_code":1001}} unknown error, 999', false],
-  ["just unknown error after SDK throw", "claude 错误: unknown error, 200", true],
+  [
+    "ZodError + invalid_union after SDK throw",
+    'claude 错误: ZodError: [{"code":"invalid_union","path":["choices"]}]',
+    true,
+  ],
+  [
+    "base_resp + choices:null after SDK throw",
+    'agent-node 错误: vendor returned {"base_resp":{"status_code":1001},"choices":null}',
+    true,
+  ],
+  [
+    "unknown error + ZodError after SDK throw",
+    'claude 错误: ZodError on response; vendor said unknown error, 999',
+    true,
+  ],
 ];
 for (const [name, text, failed] of TRANSIENT_CASES) {
-  expect(`transient: ${name}`, isTransientVendorError(text, failed), `text: ${text.slice(0, 80)}`);
+  expect(
+    `transient (failure-context multi-signal, no auth): ${name}`,
+    isTransientVendorError(text, failed),
+    `text: ${text.slice(0, 80)}`,
+  );
 }
 
 // NON-transient — auth/quota/rate-limit. These DO trigger sanitize (via
-// isVendorErrorForUser) but should NOT retry.
+// isVendorErrorForUser, since multi-signal + failed=true) but should NOT retry.
 const NON_TRANSIENT_CASES: Array<[string, string, boolean]> = [
-  // Multi-signal vendor error WITH 401 token → not retryable
-  ['401 unauthorized + zod context', 'ZodError invalid_union "choices":null 401 unauthorized', true],
-  ['403 forbidden + base_resp', 'claude 错误: 403 forbidden {"base_resp":{"status_code":1}}', true],
-  ['quota exceeded + zod', 'ZodError invalid_union choices:null insufficient_quota', true],
-  ['rate limit 429', 'claude 错误: ZodError invalid_union choices:null too many requests 429', true],
-  ['rate_limit text', 'ZodError invalid_union "choices":null rate limit hit', true],
+  ['401 unauthorized + zod + choices:null', 'claude 错误: ZodError invalid_union "choices":null 401 unauthorized', true],
+  ['403 forbidden + base_resp + choices:null', 'claude 错误: 403 forbidden {"base_resp":{"status_code":1}} "choices":null', true],
+  ['quota exceeded + zod multi-signal', 'claude 错误: ZodError invalid_union "choices":null insufficient_quota', true],
+  ['rate limit 429 multi-signal', 'claude 错误: ZodError invalid_union "choices":null too many requests 429', true],
+  ['rate_limit prose multi-signal', 'agent-node 错误: ZodError invalid_union "choices":null rate limit hit', true],
 ];
 for (const [name, text, failed] of NON_TRANSIENT_CASES) {
   expect(
@@ -197,19 +285,38 @@ for (const [name, text, failed] of NON_TRANSIENT_CASES) {
     !isTransientVendorError(text, failed),
     `expected !transient. text: ${text.slice(0, 80)}`,
   );
-  // Sanity: these should still be vendor errors (just non-retryable)
+  // Sanity: these still hit the sanitize predicate (multi-signal + failure context).
   expect(
-    `non-transient cases are still vendor errors: ${name}`,
+    `non-transient still triggers sanitize: ${name}`,
     isVendorErrorForUser(text, failed),
     `text: ${text.slice(0, 80)}`,
   );
 }
 
-// NOT a vendor error at all — should NOT be transient either
-for (const [name, text] of NIU_CASES) {
-  // failed=false + single signal: NOT vendor error → NOT transient
+// Single-signal + failed=true → NOT vendor error → NOT transient (new contract)
+const SINGLE_FAILED_NOT_TRANSIENT: Array<[string, string]> = [
+  ["only ZodError after SDK throw", "claude 错误: ZodError: cannot parse response"],
+  ["only unknown error after SDK throw", "claude 错误: unknown error, 200"],
+];
+for (const [name, text] of SINGLE_FAILED_NOT_TRANSIENT) {
   expect(
-    `NIU counter (failed=false, NOT vendor error, NOT transient): ${name}`,
+    `single-signal + failed=true → NOT transient (slips through, no retry): ${name}`,
+    !isTransientVendorError(text, true),
+    text,
+  );
+}
+
+// Success context — never transient
+for (const [name, text] of NIU_COUNTER_CASES) {
+  expect(
+    `counter (failed=false, single signal) → NOT transient: ${name}`,
+    !isTransientVendorError(text, false),
+    text,
+  );
+}
+for (const [name, text] of SUCCESS_MULTI_SIGNAL_CASES) {
+  expect(
+    `success-context multi-signal → NOT transient: ${name}`,
     !isTransientVendorError(text, false),
     text,
   );
@@ -219,14 +326,14 @@ for (const [name, text] of NIU_CASES) {
 expect("plain text not transient", !isTransientVendorError("你好世界", false));
 expect("empty not transient", !isTransientVendorError("", true));
 
-// ── 9. VENDOR_RETRY_PROFILE shape lock ─────────────────────────────────────
+// ── 10. VENDOR_RETRY_PROFILE shape lock ────────────────────────────────────
 
 expect(
   "VENDOR_RETRY_PROFILE.maxRetries >= 1",
   typeof VENDOR_RETRY_PROFILE.maxRetries === "number" && VENDOR_RETRY_PROFILE.maxRetries >= 1,
 );
 expect(
-  "VENDOR_RETRY_PROFILE.maxRetries <= 5 (sanity — runaway retry guard)",
+  "VENDOR_RETRY_PROFILE.maxRetries <= 5 (runaway retry guard)",
   VENDOR_RETRY_PROFILE.maxRetries <= 5,
 );
 expect(
@@ -241,6 +348,30 @@ expect(
   "VENDOR_RETRY_PROFILE backoff total wall-clock ≤ 30s",
   VENDOR_RETRY_PROFILE.backoffMs.reduce((a, b) => a + b, 0) <= 30_000,
 );
+
+// ── 11. Gate symmetry — both helpers share base predicate ─────────────────
+// Every text where isTransientVendorError(t, f) === true MUST also have
+// isVendorErrorForUser(t, f) === true. (Retry without sanitize would mean
+// retry on text that gets through unchanged.) Negative direction is allowed:
+// auth/quota/429 sanitize-but-don't-retry.
+
+const SYMMETRY_PROBES: Array<[string, boolean]> = [
+  [VINCENT_UAT_SHAPE, true],
+  ['claude 错误: ZodError: [{"code":"invalid_union"}] "choices":null', true],
+  ['claude 错误: ZodError: [{"code":"invalid_union"}] "choices":null 401', true],
+  [VINCENT_UAT_SHAPE, false],
+  ["你好世界", true],
+  ["", false],
+  ["only ZodError", true],
+];
+for (const [t, f] of SYMMETRY_PROBES) {
+  if (isTransientVendorError(t, f)) {
+    expect(
+      `symmetry: transient ⊆ sanitize for: ${t.slice(0, 40)}|failed=${f}`,
+      isVendorErrorForUser(t, f),
+    );
+  }
+}
 
 // ── Summary (gates exit — MUST be last) ────────────────────────────────────
 
