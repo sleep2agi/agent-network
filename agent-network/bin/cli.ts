@@ -3920,6 +3920,241 @@ Example:
 `);
 }
 
+// ── daemon (RFC-026 P2 / issue #338 lane①) ──
+//
+// `anet daemon` = zero-config-edit `host_supervisor` node provisioning.
+// The Vincent friction this kills: pre-RFC-026 P2, registering a machine
+// as a schedulable host_supervisor required manually editing
+// `.anet/nodes/<name>/config.json` to add `"role": "host_supervisor"`.
+// `anet node create` had no role concept; users hit `no_host_supervisor_daemon`
+// from dashboard with no path forward except vim-and-restart.
+//
+// Surface:
+//   anet daemon init <name>   create config.json with role + defaults
+//   anet daemon start <name>  start daemon (delegates to startCommand)
+//   anet daemon up [<name>]   init+start one-shot (default name: "daemon")
+//   anet daemon list          list locally-configured daemons
+//
+// Idempotence (init):
+//   - profile exists with role=host_supervisor → no-op + success log
+//   - profile exists with different/no role → REFUSE unless --force
+//   - profile absent → mint ntok + write config + log next step
+//
+// Defaults (matching RFC-026 §9.3 daemon-self-declare scaffolding —
+// PR3 will land the schema for `runtimes_supported` / `allowed_secret_keys`
+// to be reported via report_status; we already write the fields so
+// the daemon ships ready for the next PR's hub-side wiring):
+//   role: "host_supervisor"
+//   runtime: "claude-agent-sdk"  (lightest, just the SSE doorbell loop)
+//   runtimes_supported: [claude-agent-sdk, codex-sdk, grok-build-acp]
+//     (declares; PR3 daemon-side fail-fast catches binary-missing at spawn)
+//   allowed_secret_keys: []
+//     (fail-closed; operator adds via `anet daemon init --allow-secret KEY`
+//     or by hand-editing — strict-by-default per RFC-026 §9.7)
+//   flags: { dangerouslySkipPermissions: true, teammateMode: true }
+//     (standard daemon flags, same defaults [[feedback_default_flags]])
+//   node_id prefix `node_daemon_` preserved for backwards-compat with
+//   pre-#337 dashboard discovery heuristic (no-op cost on post-#337 hubs).
+
+const DAEMON_DEFAULT_NAME = "daemon";
+
+async function daemonCommand() {
+  const sub = args[1];
+  if (!sub || sub === "help" || sub === "-h" || sub === "--help") {
+    console.log(`Usage: anet daemon <subcommand> [name] [options]
+
+Subcommands:
+  init <name>          Create a host_supervisor daemon node (role + defaults)
+  start <name>         Start a daemon (delegates to anet node start; verifies role)
+  up [<name>]          init + start one-shot (default name: "${DAEMON_DEFAULT_NAME}")
+  list                 List locally-configured daemon nodes
+
+Options:
+  --force              Overwrite an existing non-daemon config (init only)
+  --allow-secret KEY   Pre-populate allowed_secret_keys (repeatable; init only)
+
+A "daemon" is an agent-node with role:host_supervisor — receives create_node
+dispatches from the hub/dashboard and forks child agent-nodes on demand.
+Run \`anet hub start\` first if you don't yet have a CommHub.`);
+    return;
+  }
+  switch (sub) {
+    case "init":  args.splice(0, 1); await daemonInitCommand(); break;
+    case "start": args.splice(0, 1); await daemonStartCommand(); break;
+    case "up":    args.splice(0, 1); await daemonUpCommand(); break;
+    case "list": case "ls": await daemonListCommand(); break;
+    default: {
+      const suggestion = suggestSimilar(sub, ["init", "start", "up", "list"]);
+      if (suggestion) console.log(`Unknown daemon subcommand "${sub}". Did you mean: anet daemon ${suggestion}?`);
+      console.log(`Usage: anet daemon <init|start|up|list> [name]`);
+      process.exit(1);
+    }
+  }
+}
+
+async function daemonInitCommand() {
+  const opts = parseOpts();
+  const id = args[1] && !args[1].startsWith("--") ? args[1] : DAEMON_DEFAULT_NAME;
+  validateNodeName(id);
+
+  // Idempotence — preserve existing token/node_id when re-running init on a
+  // healthy daemon; surface conflict when the profile exists with a non-
+  // daemon role unless --force.
+  const existing = loadProfile(id);
+  if (existing) {
+    if ((existing as any).role === "host_supervisor" && !opts.force) {
+      console.log(`[anet daemon] ✓ "${id}" already a host_supervisor daemon`);
+      console.log(`              config: .anet/nodes/${id}/config.json`);
+      console.log(`              start:  anet daemon start ${id}`);
+      return;
+    }
+    if ((existing as any).role !== "host_supervisor" && !opts.force) {
+      console.error(`Error: node "${id}" exists with role="${(existing as any).role || "(none)"}", not "host_supervisor".`);
+      console.error(`Use --force to overwrite (re-mints token, keeps node_id), or pick a different name.`);
+      process.exit(1);
+    }
+    // --force: fall through; we'll overwrite below, preserving node_id when present
+  }
+
+  // Hub gate (mirrors createCommand)
+  const gc = loadGlobal();
+  if (!gc.hub) {
+    try {
+      const h = await fetch("http://127.0.0.1:9200/health").then(r => r.json() as any);
+      if (h.ok) { gc.hub = "http://127.0.0.1:9200"; saveGlobal(gc); console.log(`[anet] 检测到本地 CommHub: ${gc.hub}`); }
+    } catch { /* not reachable */ }
+  }
+  if (!gc.hub) {
+    console.error("未找到 CommHub Server。请先运行:\n  anet hub start\n\n或手动配置:\n  anet init --hub http://YOUR_IP:9200");
+    process.exit(1);
+  }
+  if (!gc.token || !gc.network_id) {
+    console.error("未登录或缺少 network_id。请运行:\n  anet login");
+    process.exit(1);
+  }
+
+  // Collect --allow-secret repeatables (parseOpts only knows --channel/--env;
+  // walk argv manually for --allow-secret to avoid touching the shared parser).
+  const allowedSecretKeys: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--allow-secret" && args[i + 1]) {
+      const k = args[++i];
+      if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(k)) {
+        console.error(`Error: --allow-secret value "${k}" must match ^[A-Z][A-Z0-9_]{0,63}$ (uppercase env-var name)`);
+        process.exit(1);
+      }
+      allowedSecretKeys.push(k);
+    }
+  }
+
+  // Mint a network token via existing helper. Preserve node_id when re-init
+  // with --force on an existing daemon (avoid orphaning child references).
+  const preservedNodeId = existing && (existing as any).node_id;
+  const nodeIdToUse = preservedNodeId || `node_daemon_${randomBytes(6).toString("hex")}`;
+  const stubProfile: any = {
+    node_id: nodeIdToUse,
+    node_name: id,
+    hub: gc.hub,
+    network_id: gc.network_id,
+  };
+  let mintedToken: string;
+  try {
+    mintedToken = await requestNodeToken(stubProfile as any, id);
+  } catch (e: any) {
+    console.error(`Failed to mint node-token from hub ${gc.hub}: ${e?.message || e}`);
+    process.exit(1);
+  }
+
+  // Write config.json directly (not via saveProfile) — saveProfile's
+  // normalize+whitelist pipeline strips the RFC-026 §9.3 daemon-self-declare
+  // fields (runtimes_supported / allowed_secret_keys / max_concurrent_children).
+  // The daemon config shape is small + explicit; direct write keeps all the
+  // fields on disk so agent-node's report_status can include them in its
+  // config_snapshot for the post-#337 hub role extraction to pick up.
+  const daemonConfig = {
+    anet_version: 1,
+    node_id: nodeIdToUse,
+    node_name: id,
+    alias: id,
+    runtime: "claude-agent-sdk",
+    role: "host_supervisor",
+    hub: gc.hub,
+    token: mintedToken,
+    network_id: gc.network_id,
+    runtimes_supported: ["claude-agent-sdk", "codex-sdk", "grok-build-acp"],
+    allowed_secret_keys: allowedSecretKeys,
+    max_concurrent_children: 20,
+    channels: [],
+    env: {},
+    flags: { dangerouslySkipPermissions: true, teammateMode: true },
+  };
+  const dir = join(nodesDir(), id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "config.json"), JSON.stringify(daemonConfig, null, 2) + "\n");
+
+  console.log(`[anet daemon] ✓ ${existing ? "re-initialized" : "created"} host_supervisor daemon "${id}"`);
+  console.log(`              config:     .anet/nodes/${id}/config.json`);
+  console.log(`              node_id:    ${nodeIdToUse}`);
+  if (allowedSecretKeys.length) {
+    console.log(`              secret keys allowed: ${allowedSecretKeys.join(", ")}`);
+  } else {
+    console.log(`              secret keys allowed: (none — add with: anet daemon init ${id} --force --allow-secret KEY)`);
+  }
+  console.log(``);
+  console.log(`Next: start it`);
+  console.log(`  anet daemon start ${id}    (or anet daemon up ${id} to init+start in one go)`);
+}
+
+async function daemonStartCommand() {
+  const id = args[1];
+  if (!id || id.startsWith("--")) {
+    console.error("Usage: anet daemon start <name>");
+    process.exit(1);
+  }
+  const profile = loadProfile(id);
+  if (!profile) {
+    console.error(`Daemon "${id}" not found. Create it first:`);
+    console.error(`  anet daemon init ${id}`);
+    process.exit(1);
+  }
+  if ((profile as any).role !== "host_supervisor") {
+    console.error(`Error: node "${id}" exists but role="${(profile as any).role || "(none)"}", not "host_supervisor".`);
+    console.error(`Re-init as daemon: anet daemon init ${id} --force`);
+    process.exit(1);
+  }
+  // Delegate to existing startCommand — it reads args[1] for the node name,
+  // which is what we have after the `daemon start` splice in daemonCommand.
+  await startCommand();
+}
+
+async function daemonUpCommand() {
+  // Inject default name into args if user said `anet daemon up` with no name
+  if (!args[1] || args[1].startsWith("--")) {
+    args.splice(1, 0, DAEMON_DEFAULT_NAME);
+  }
+  await daemonInitCommand();
+  // After init, args[1] is still the name; startCommand reads args[1].
+  await startCommand();
+}
+
+async function daemonListCommand() {
+  const ids = listProfileIds();
+  const daemons = ids
+    .map(id => ({ id, profile: loadProfile(id) }))
+    .filter(({ profile }) => profile && (profile as any).role === "host_supervisor");
+  if (daemons.length === 0) {
+    console.log("No host_supervisor daemons configured locally.");
+    console.log("Create one: anet daemon init <name>");
+    return;
+  }
+  console.log(`Local host_supervisor daemons (${daemons.length}):`);
+  for (const { id, profile } of daemons) {
+    const nid = (profile as any)?.node_id || "(missing)";
+    const runtimes = ((profile as any)?.runtimes_supported || []).join(",") || "(default)";
+    console.log(`  ${id.padEnd(24)} node_id=${nid}  runtimes=[${runtimes}]`);
+  }
+}
+
 // ── import ──
 
 async function importCommand() {
@@ -9689,6 +9924,7 @@ switch (command) {
       }
     }
     break;
+  case "daemon": await daemonCommand(); break; // RFC-026 P2 / #338 — host_supervisor one-cmd
   case "project": await projectCommand(); break;  // #117 — cwd-wide orchestration
   case "start": await startCommand(); break;   // backward compat
   case "resume": await resumeCommand(); break; // backward compat
