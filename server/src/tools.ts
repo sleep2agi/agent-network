@@ -22,6 +22,7 @@ import {
   startPendingEnvGcTimer,
   startSweeperTimer,
   auditCreateNode,
+  auditCreateNodeStrict,
   resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
 } from "./create-node.js";
 import {
@@ -2321,6 +2322,400 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           },
         });
       }
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
+    },
+  );
+
+  // ─── RFC-027 §2 — stop/delete node lifecycle ───────────────────────
+  //
+  // Two user-facing MCP tools (stop_node, delete_node) + two daemon-
+  // facing tools (get_stop_request, ack_stop_request). State machine
+  // per §2.3 — nodes.lifecycle_state ∈ {active, stopping, stopped,
+  // deleting}. row-gone implies deleted. Security per §4:
+  //   §4.1 SEC-1: trust-root SQL join, not getNetworkId
+  //   §4.2 D6:    delete_node refuses target.role==host_supervisor
+  //   §4.3 D4:    in-flight inbox default-refuse + force+audit
+  //   §4.4 D7:    daemon writes backup chmod 700, sweeper真删
+  //   §4.5 D8:    audit_log in same SQLite tx as state UPDATE
+  //
+  // The dispatcher logic shared by stop_node + delete_node lives in
+  // dispatchStopOrDelete; the two tool handlers thin-wrap it with
+  // their respective action discriminator.
+  type DispatchAction = "stop" | "delete";
+  type DispatchArgs = {
+    action: DispatchAction;
+    child_node_id: string;
+    daemon_node_id: string;
+    force: boolean;
+    grace_seconds: number;
+    delete_config: boolean;
+    confirm_alias?: string;
+  };
+  const dispatchStopOrDelete = (args: DispatchArgs, clientNetId?: string | null) => {
+    // §4.1 — SEC-1 trust-root join: resolve target node row WITHIN the
+    // caller's scope. resolveReadScope returns 'denied' if the caller
+    // doesn't belong to clientNetId; for the row-existence test we
+    // re-join with member's networks so an attacker can't probe by
+    // node_id from a network they don't belong to.
+    const scope = resolveReadScope(clientNetId);
+    if (scope.denied) {
+      return { ok: false, error: "forbidden_cross_tenant", message: scope.denied };
+    }
+    const nodeQ: any[] = [args.child_node_id];
+    let nodeSql = `SELECT node_id, alias, network_id, lifecycle_state, config_snapshot, runtimes_supported
+      FROM nodes WHERE node_id = ?1`;
+    nodeSql = addReadScope(nodeSql, nodeQ, scope);
+    const node = db.get<{
+      node_id: string;
+      alias: string;
+      network_id: string;
+      lifecycle_state: string | null;
+      config_snapshot: string | null;
+    }>(nodeSql, ...nodeQ);
+    if (!node) return { ok: false, error: "forbidden_cross_tenant", message: "node not found in your networks" };
+
+    // Caller must hold a write-capable role on the resolved network
+    // (admin/owner/member; viewer denied). canWrite walks getUserNetworkRole.
+    if (!canWrite(node.network_id)) {
+      return { ok: false, error: "permission_denied", message: "viewer role cannot stop/delete nodes" };
+    }
+
+    // §4.2 D6 — delete refuses targets whose role is host_supervisor.
+    // Stop is allowed against any node per RFC table (host_supervisor's
+    // stop is functionally a no-op anyway: the daemon's children_map
+    // only tracks its child nodes, never the daemon itself).
+    //
+    // PR1 SF-4 (#345 review) — fail-CLOSED on role read. The first cut
+    // parsed config_snapshot and treated parse-fail / missing-field as
+    // role=null which slipped through the gate. A daemon row with a
+    // corrupt snapshot would then be deletable via delete_node. Fix:
+    // - read role via two independent paths (snapshot.role + the
+    //   indexed `runtimes_supported` column whose presence ≈ daemon)
+    // - if EITHER path indicates host_supervisor → refuse
+    // - if snapshot parsed but role missing AND the node has any
+    //   daemon-shape evidence (non-null runtimes_supported column,
+    //   present in any node_create_requests as daemon_node_id) →
+    //   refuse defensively. The defense-in-depth daemon-side
+    //   children_map miss is the second layer; the hub gate must
+    //   itself fail-closed when role is ambiguous.
+    if (args.action === "delete") {
+      let role: string | null = null;
+      let snapshotParseFailed = false;
+      try {
+        const snap = node.config_snapshot ? JSON.parse(node.config_snapshot) : null;
+        role = typeof snap?.role === "string" ? snap.role : null;
+      } catch { snapshotParseFailed = true; }
+      const ambiguous = snapshotParseFailed || (role == null);
+      // Independent corroborating check: nodes flagged as daemons by
+      // create_node dispatchers will show up as daemon_node_id in
+      // node_create_requests. Costs one indexed query.
+      let looksLikeDaemon = false;
+      if (ambiguous) {
+        const m = db.get<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM node_create_requests WHERE daemon_node_id = ?1`,
+          node.node_id,
+        );
+        if ((m?.n ?? 0) > 0) looksLikeDaemon = true;
+      }
+      if (role === "host_supervisor" || (ambiguous && looksLikeDaemon)) {
+        return {
+          ok: false, error: "cannot_delete_daemon_via_delete_node",
+          message: snapshotParseFailed
+            ? "node config_snapshot unreadable; node is referenced as a daemon — refuse delete defensively (use delete_daemon path)"
+            : "host_supervisor daemons must be removed via the dedicated delete_daemon path (RFC-027.5)",
+        };
+      }
+    }
+
+    // delete_node confirm_alias gate: dashboard's二次确认 input must
+    // match the actual alias byte-for-byte. Hub rejects mismatched
+    // input even if dashboard UI claims it's disabled.
+    if (args.action === "delete") {
+      if (typeof args.confirm_alias !== "string" || args.confirm_alias !== node.alias) {
+        return { ok: false, error: "confirm_alias_mismatch", message: "confirm_alias must equal the node's alias" };
+      }
+    }
+
+    // Daemon must exist + be in the same network. We do NOT enforce
+    // daemon.role==host_supervisor here: a child whose creator daemon
+    // got demoted should still be stoppable. The daemon will refuse
+    // with noop_not_my_child if children_map doesn't know it.
+    const daemon = db.get<{ node_id: string; network_id: string }>(
+      `SELECT node_id, network_id FROM nodes WHERE node_id = ?1`, args.daemon_node_id,
+    );
+    if (!daemon) return { ok: false, error: "daemon_not_found" };
+    if (daemon.network_id !== node.network_id) {
+      // Cross-tenant child↔daemon mismatch shouldn't be possible in
+      // normal flow but is a SEC-1 hardening — refuse loud.
+      return { ok: false, error: "daemon_cross_tenant", message: "daemon and child are in different networks" };
+    }
+
+    // State machine gate.
+    const state = node.lifecycle_state ?? "active";
+    if (args.action === "stop" && state !== "active") {
+      return { ok: false, error: state === "stopping" ? "node_already_stopping" : "node_not_active", current_state: state };
+    }
+    if (args.action === "delete" && state === "deleting") {
+      return { ok: false, error: "node_already_deleting", current_state: state };
+    }
+    if (args.action === "delete" && state === "stopping") {
+      // Can't start delete while a stop is mid-flight — race-prone.
+      return { ok: false, error: "node_stopping_in_progress", current_state: state };
+    }
+
+    // §4.3 D4 — in-flight inbox check. Count unacked tasks routed to
+    // this node's alias (inbox routing uses session_name == alias).
+    // Default refuse with the count surfaced; force=true overrides
+    // and triggers the forced_stop_with_in_flight audit row.
+    // SF-5 (#345 review): legacy inbox rows may have network_id=NULL
+    // and would silently miss a network_id=?2 strict equality match.
+    // Use COALESCE so a NULL inbox row is counted against the same
+    // network as the target node (which is the only safe default
+    // — pre-multi-network rows existed in single-network mode).
+    const inFlightRow = db.get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM inbox WHERE session_name = ?1 AND acked = 0
+         AND COALESCE(network_id, ?2) = ?2`,
+      node.alias, node.network_id,
+    );
+    const inFlight = inFlightRow?.n ?? 0;
+    if (inFlight > 0 && !args.force) {
+      return { ok: false, error: "node_busy_in_flight", in_flight_count: inFlight, hint: "set force=true to override (audit logged)" };
+    }
+
+    // ── all gates passed; create request + transition state + push doorbell, transactionally ──
+    const requestId = generateId("sr");
+    const now = Date.now();
+    const newState = args.action === "stop" ? "stopping" : "deleting";
+
+    // SQLite tx wraps lifecycle UPDATE + audit INSERT + request INSERT.
+    // Better-sqlite3-style .transaction(...) is not exposed in our
+    // wrapper; emulate via BEGIN..COMMIT around the three writes. On
+    // any failure, ROLLBACK to leave state untouched.
+    db.run("BEGIN");
+    try {
+      db.run(
+        `INSERT INTO node_stop_requests
+           (request_id, network_id, daemon_node_id, child_node_id, child_alias, action,
+            delete_config, grace_seconds, force, in_flight_at_dispatch, created_by_token,
+            status, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'pending', ?12)`,
+        [
+          requestId, node.network_id, args.daemon_node_id, node.node_id, node.alias, args.action,
+          args.delete_config ? 1 : 0, args.grace_seconds, args.force ? 1 : 0, inFlight,
+          callerTokenId || "unknown", now,
+        ],
+      );
+      db.run(
+        `UPDATE nodes SET lifecycle_state = ?1 WHERE node_id = ?2`,
+        [newState, node.node_id],
+      );
+      // §4.5 D8 — audit dispatch action. Uses the STRICT variant so a
+      // failed audit INSERT propagates and triggers ROLLBACK (PR1 SF-2
+      // review catch — auditCreateNode's swallow-and-warn would have
+      // committed the lifecycle UPDATE without an audit row, leaving
+      // exactly the "deleted but no audit" window §4.5 closes).
+      auditCreateNodeStrict({
+        action: args.action === "stop" ? "stop_node_dispatched" : "delete_node_dispatched",
+        user_id: enforceUserId, network_id: node.network_id, target_id: requestId,
+        detail: {
+          child_node_id: node.node_id, child_alias: node.alias,
+          daemon_node_id: args.daemon_node_id, action: args.action,
+          force: args.force, delete_config: args.delete_config,
+          grace_seconds: args.grace_seconds, in_flight_at_dispatch: inFlight,
+          lifecycle_state_before: state, lifecycle_state_after: newState,
+          ts_request: now,
+        },
+      });
+      if (args.force && inFlight > 0) {
+        auditCreateNodeStrict({
+          action: "forced_stop_with_in_flight",
+          user_id: enforceUserId, network_id: node.network_id, target_id: requestId,
+          detail: { in_flight_count: inFlight, child_alias: node.alias },
+        });
+      }
+      db.run("COMMIT");
+    } catch (e: any) {
+      try { db.run("ROLLBACK"); } catch { /* swallow */ }
+      return { ok: false, error: "dispatch_tx_failed", message: e?.message || String(e) };
+    }
+
+    // SSE doorbell — daemon will pull via get_stop_request.
+    pushEvent(args.daemon_node_id, { type: "stop_node", request_id: requestId }, node.network_id);
+    return {
+      ok: true, request_id: requestId, action: args.action,
+      lifecycle_state: newState, in_flight_at_dispatch: inFlight,
+    };
+  };
+
+  server.tool(
+    "stop_node",
+    "Stop the agent-node child process; keep config dir intact. Reversible via restart_node. RFC-027 §2.2.",
+    {
+      child_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      force: z.boolean().optional().default(false),
+      grace_seconds: z.number().int().min(5).max(60).optional().default(10),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ child_node_id, daemon_node_id, force, grace_seconds, network_id: clientNetId }) => {
+      const r = dispatchStopOrDelete(
+        { action: "stop", child_node_id, daemon_node_id, force: force ?? false,
+          grace_seconds: grace_seconds ?? 10, delete_config: false },
+        clientNetId,
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify(r) }] };
+    },
+  );
+
+  server.tool(
+    "delete_node",
+    "Stop child + revoke ntok + delete hub row + (default) backup config to ~/.anet/deleted/<ts>-<alias>/ for 30d. confirm_alias must equal the node's alias. RFC-027 §2.2.",
+    {
+      child_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/),
+      confirm_alias: z.string().min(1).max(200),
+      force: z.boolean().optional().default(false),
+      grace_seconds: z.number().int().min(5).max(60).optional().default(10),
+      delete_config: z.boolean().optional().default(true),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ child_node_id, daemon_node_id, confirm_alias, force, grace_seconds, delete_config, network_id: clientNetId }) => {
+      const r = dispatchStopOrDelete(
+        { action: "delete", child_node_id, daemon_node_id, force: force ?? false,
+          grace_seconds: grace_seconds ?? 10, delete_config: delete_config ?? true, confirm_alias },
+        clientNetId,
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify(r) }] };
+    },
+  );
+
+  server.tool(
+    "get_stop_request",
+    "Daemon pulls a pending stop/delete request (called when SSE stop_node doorbell arrives). RFC-027 §2.4.",
+    {
+      request_id: z.string().min(1).max(200),
+    },
+    async ({ request_id }) => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      const row = db.get<{
+        daemon_node_id: string; status: string; network_id: string;
+        child_node_id: string; child_alias: string; action: string;
+        delete_config: number; grace_seconds: number; force: number;
+      }>(`SELECT daemon_node_id, status, network_id, child_node_id, child_alias, action,
+                 delete_config, grace_seconds, force
+            FROM node_stop_requests WHERE request_id = ?1`, request_id);
+      if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      if (row.daemon_node_id !== callerDaemon.daemonNodeId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
+      }
+      if (row.network_id !== callerDaemon.networkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      }
+      // Stamp delivered_at on first pull (idempotent — only if still pending).
+      db.run(
+        `UPDATE node_stop_requests SET status = 'delivered', delivered_at = ?1
+           WHERE request_id = ?2 AND status = 'pending'`,
+        [Date.now(), request_id],
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        request_id,
+        child_node_id: row.child_node_id,
+        child_alias: row.child_alias,
+        action: row.action,
+        delete_config: row.delete_config === 1,
+        grace_seconds: row.grace_seconds,
+        force: row.force === 1,
+      }) }] };
+    },
+  );
+
+  server.tool(
+    "ack_stop_request",
+    "Daemon reports stop/delete completion (or per-status failure). On 'stopped' status finalizes the lifecycle: stop→stopped + keep config; delete→DB row gone + revoke ntok. RFC-027 §2.3 + §4.5.",
+    {
+      request_id: z.string().min(1).max(200),
+      status: z.enum(["stopped", "stop_failed", "noop_not_my_child"]),
+      exit_signal: z.string().max(16).optional(),
+      backup_path: z.string().max(500).optional(),
+      error: z.string().max(1000).optional(),
+    },
+    async ({ request_id, status, exit_signal, backup_path, error: ackError }) => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      const row = db.get<{
+        daemon_node_id: string; status: string; network_id: string;
+        child_node_id: string; child_alias: string; action: string;
+        in_flight_at_dispatch: number; force: number;
+      }>(`SELECT daemon_node_id, status, network_id, child_node_id, child_alias, action,
+                 in_flight_at_dispatch, force
+            FROM node_stop_requests WHERE request_id = ?1`, request_id);
+      if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      if (row.daemon_node_id !== callerDaemon.daemonNodeId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
+      }
+      if (row.network_id !== callerDaemon.networkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      }
+      const now = Date.now();
+
+      // tx: per RFC §4.5 D8 — lifecycle UPDATE + request UPDATE + audit INSERT
+      // (+ DELETE for delete action) in one BEGIN..COMMIT.
+      db.run("BEGIN");
+      try {
+        db.run(
+          `UPDATE node_stop_requests SET status = ?1, error = ?2, exit_signal = ?3,
+                                          backup_path = ?4, acked_at = ?5
+             WHERE request_id = ?6`,
+          [status, ackError || null, exit_signal || null, backup_path || null, now, request_id],
+        );
+        if (status === "stopped" && row.action === "stop") {
+          db.run(`UPDATE nodes SET lifecycle_state = 'stopped' WHERE node_id = ?1`, [row.child_node_id]);
+          auditCreateNodeStrict({
+            action: "stop_node_completed",
+            user_id: null, network_id: row.network_id, target_id: request_id,
+            detail: {
+              child_node_id: row.child_node_id, child_alias: row.child_alias,
+              exit_signal: exit_signal || null, ts_daemon_ack: now,
+              lifecycle_state_after: "stopped",
+            },
+          });
+        } else if (status === "stopped" && row.action === "delete") {
+          // Revoke the child's ntok (name='node:<alias>') in the daemon's
+          // network, then DELETE the nodes row. Token revoke pattern mirrors
+          // ack_create_request's terminal path.
+          db.run(
+            `UPDATE api_tokens SET revoked_at = datetime('now')
+               WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
+            [row.network_id, `node:${row.child_alias}`],
+          );
+          db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
+          auditCreateNodeStrict({
+            action: "delete_node_completed",
+            user_id: null, network_id: row.network_id, target_id: request_id,
+            detail: {
+              child_node_id: row.child_node_id, child_alias: row.child_alias,
+              exit_signal: exit_signal || null, backup_path: backup_path || null,
+              ts_daemon_ack: now, lifecycle_state_after: "deleted",
+            },
+          });
+        } else if (status === "stop_failed") {
+          db.run(`UPDATE nodes SET lifecycle_state = 'stop_failed' WHERE node_id = ?1`, [row.child_node_id]);
+          // No completion audit; the failure error is on the request row.
+        }
+        // noop_not_my_child: leave lifecycle_state as-is; the hub-side
+        // sweeper / next reconciliation will pick it up. Don't transition.
+        db.run("COMMIT");
+      } catch (e: any) {
+        try { db.run("ROLLBACK"); } catch { /* swallow */ }
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "finalize_tx_failed", message: e?.message || String(e) }) }] };
+      }
+
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
     },
   );

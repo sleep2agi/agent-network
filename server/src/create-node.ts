@@ -272,13 +272,55 @@ export function resolveCallerDaemonTokenBound(opts: {
 // RFC-026 §4.5 — append a row to audit_log for every create_node
 // lifecycle event. Best-effort: never throw out (calling tool should
 // continue even if audit insert fails for any reason).
+/** RFC-027 §4.5 D8 — tx-aware variant. Identical SQL to auditCreateNode
+ *  but RE-THROWS on failure so a BEGIN..COMMIT around lifecycle UPDATE +
+ *  audit INSERT can ROLLBACK if the audit row would have been lost.
+ *  Required for the "no audit-but state changed" window that §4.5 / D8
+ *  explicitly closes (PR1 SF-2 review catch — auditCreateNode's
+ *  swallow-and-warn defeats atomicity).
+ *
+ *  Callers in a non-transaction context should keep using auditCreateNode
+ *  (best-effort, never throws). */
+export function auditCreateNodeStrict(input: {
+  action: Parameters<typeof auditCreateNode>[0]["action"];
+  user_id?: string | null;
+  username?: string | null;
+  network_id?: string | null;
+  target_id?: string | null;
+  detail: Record<string, unknown>;
+}): void {
+  db.run(
+    `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
+     VALUES (?1, ?2, ?3, 'node_create_request', ?4, ?5, ?6)`,
+    [
+      input.user_id || null,
+      input.username || null,
+      input.action,
+      input.target_id || null,
+      JSON.stringify(input.detail),
+      input.network_id || null,
+    ],
+  );
+}
+
 export function auditCreateNode(input: {
   action:
     | "create_node_dispatched"
     | "create_node_rejected"
     | "create_node_succeeded"
     | "create_node_sweeper_revoked"
-    | "daemon_capability_lied";   // RFC-026 §9.3 D2 — daemon declared runtime support, child died before serving
+    | "daemon_capability_lied"                  // RFC-026 §9.3 D2 — daemon declared runtime support, child died before serving
+    // RFC-027 §4.5 — stop/delete lifecycle audit action enum extension.
+    // Re-using auditCreateNode is fine: the action column carries the
+    // discriminator; target_type stays 'node_create_request' which is a
+    // misnomer for stop/delete rows but updating the schema would force a
+    // wider migration (see P1.1 issue).
+    | "stop_node_dispatched"
+    | "stop_node_completed"
+    | "delete_node_dispatched"
+    | "delete_node_completed"
+    | "forced_stop_with_in_flight"
+    | "backup_purged";
   user_id?: string | null;
   username?: string | null;
   network_id?: string | null;
