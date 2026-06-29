@@ -301,6 +301,29 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// RFC-026 §9 / #338 PR2 — daemon self-declare fields promoted from
+// config_snapshot to first-class indexable columns. The hub
+// `list_host_supervisors` MCP tool reads these directly without parsing
+// the snapshot JSON on every list call.
+//
+// Both fields are JSON arrays of strings:
+//   runtimes_supported    e.g. ["claude-agent-sdk","codex-sdk","grok-build-acp"]
+//   allowed_secret_keys   e.g. ["ANTHROPIC_API_KEY","OPENAI_API_KEY"]
+//
+// Stored as TEXT (JSON-encoded) — SQLite has no native array type and
+// the wrapper code is small. Both nullable for pre-PR2 daemons; the
+// list endpoint falls back to [] when null.
+try {
+  db.exec(`ALTER TABLE nodes ADD COLUMN runtimes_supported TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+try {
+  db.exec(`ALTER TABLE nodes ADD COLUMN allowed_secret_keys TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
 // `node_config_updates` — pending + history. One row per dashboard write.
 // At most one row per node may be in a non-terminal state at a time
 // (single-flight enforced at the tool layer; this table just stores).

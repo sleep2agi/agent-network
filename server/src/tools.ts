@@ -298,6 +298,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // discovery (#337 extracts this field). "host_supervisor" =
         // anet daemon. Default-stripping zod would drop this otherwise.
         role: z.string().max(64).optional().nullable(),
+        // RFC-026 §9.3 — daemon self-declare. Promoted to first-class
+        // columns by PR2 so list_host_supervisors reads them directly
+        // (no per-call snapshot JSON parse). Soft caps avoid abuse.
+        runtimes_supported: z.array(z.string().max(64)).max(16).optional(),
+        allowed_secret_keys: z.array(z.string().max(64)).max(64).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
     },
     async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, config_snapshot: cfgSnap }) => {
@@ -1818,6 +1823,140 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     throw e;
   };
 
+  // RFC-026 §9.2.1 / #338 PR2 — list_host_supervisors.
+  // Surfaces host_supervisor daemons in the caller's network with
+  // online flag + declared capabilities. Replaces the prior `node_daemon_`
+  // prefix heuristic (dashboard /api/anet/node-create) + the role-extract
+  // path on /api/nodes (#337). Member脱敏 strips host_telemetry IP /
+  // cpu / mem (per RFC-026 §6 #3 — daemons can leak internal topology
+  // to non-admin readers). Revoked daemon ntoks filtered out via
+  // join on api_tokens.revoked_at.
+  server.tool(
+    "list_host_supervisors",
+    "List host_supervisor daemon nodes in the caller's network (online status + runtimes_supported + allowed_secret_keys + telemetry; member-脱敏). RFC-026 §9.2.1.",
+    {
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ network_id: clientNetId }) => {
+      // SEC-1 — use resolveReadScope, NOT getNetworkId. getNetworkId is
+      // for write-tool helpers and pairs with `canWrite`; READ tools that
+      // bypass canWrite and trust getNetworkId leak across tenants
+      // (PR2 v1 BLOCKER per 通信龙 audit — utok_ caller with
+      // enforceNetworkId=null could pass any network_id and read daemon
+      // names + allowed_secret_keys for tenants they're not a member of).
+      // resolveReadScope checks network_members for the user + denies
+      // on non-membership, mirroring REST resolveRestNetworkScope.
+      const readScope = resolveReadScope(clientNetId);
+      if (readScope.denied) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
+      }
+      // Caller role for 脱敏 decision (admin/owner = full, others = masked).
+      // Use the resolved scope's networkId (the verified one), not the
+      // unchecked clientNetId.
+      const scopedNetId = readScope.networkId ?? null;
+      const callerRole = enforceUserId && scopedNetId
+        ? getUserNetworkRole(enforceUserId, scopedNetId)
+        : null;
+      // Network-bound tokens get full telemetry within their bound network
+      // (already gate-locked by enforceNetworkId path of resolveReadScope).
+      const isPrivileged = callerRole === "admin" || callerRole === "owner" || (!enforceUserId);
+
+      // Pull candidate daemons. Active-token EXISTS subquery handles BOTH
+      // revoked daemon ntoks (revoked_at set) AND DELETEd token rows
+      // (the standard revokeToken path deletes the row, not flagging
+      // revoked_at — PR2 v1 SHOULD-FIX per 通信龙 audit). EXISTS naturally
+      // dedupes if a daemon ever had multiple tokens (e.g. rotation; nit ⚪).
+      let sql = `
+        SELECT
+          n.node_id, n.alias, n.hostname, n.network_id,
+          n.runtimes_supported, n.allowed_secret_keys,
+          n.created_at, n.updated_at,
+          s.last_seen_at AS session_last_seen,
+          s.status AS session_status,
+          s.cpu_cores AS session_cpu_cores,
+          s.mem_total_gb AS session_mem_total_gb,
+          s.ip AS session_ip,
+          n.config_snapshot
+        FROM nodes n
+        LEFT JOIN sessions s ON s.alias = n.alias AND (s.network_id = n.network_id OR s.network_id IS NULL)
+        WHERE EXISTS (
+          SELECT 1 FROM api_tokens t
+          WHERE t.network_id = n.network_id
+            AND t.name = 'node:' || n.alias
+            AND t.revoked_at IS NULL
+        )
+      `;
+      const sqlParams: any[] = [];
+      sql = addReadScope(sql, sqlParams, readScope, "n.network_id");
+      sql += ` ORDER BY n.updated_at DESC`;
+      const rows = db.all<Record<string, any>>(sql, ...sqlParams);
+
+      // Filter to role=host_supervisor (read from config_snapshot;
+      // schema-promoted columns runtimes_supported/allowed_secret_keys
+      // are pre-extracted but role isn't a first-class column).
+      const nowMs = Date.now();
+      const ONLINE_MS = 60_000;
+      const daemons = rows
+        .map(r => {
+          let snapRole: string | null = null;
+          if (r.config_snapshot) {
+            try {
+              const parsed = typeof r.config_snapshot === "string" ? JSON.parse(r.config_snapshot) : r.config_snapshot;
+              snapRole = typeof parsed?.role === "string" ? parsed.role : null;
+            } catch { /* malformed snapshot — role stays null */ }
+          }
+          return { row: r, role: snapRole };
+        })
+        .filter(({ role }) => role === "host_supervisor")
+        .map(({ row: r }) => {
+          // online = sessions.last_seen_at within ONLINE_MS
+          let online = false;
+          let lastSeenAt: string | null = null;
+          if (r.session_last_seen) {
+            lastSeenAt = r.session_last_seen;
+            const t = Date.parse(r.session_last_seen);
+            if (!isNaN(t)) online = (nowMs - t) <= ONLINE_MS;
+          }
+          // Parse self-declare arrays (default to [] for pre-PR2 daemons)
+          let runtimes: string[] = [];
+          let secrets: string[] = [];
+          try {
+            if (r.runtimes_supported) {
+              const parsed = JSON.parse(r.runtimes_supported);
+              runtimes = Array.isArray(parsed) ? parsed.filter((s: unknown) => typeof s === "string") : [];
+            }
+          } catch { /* malformed — empty */ }
+          try {
+            if (r.allowed_secret_keys) {
+              const parsed = JSON.parse(r.allowed_secret_keys);
+              secrets = Array.isArray(parsed) ? parsed.filter((s: unknown) => typeof s === "string") : [];
+            }
+          } catch { /* malformed — empty */ }
+          // host_telemetry — member脱敏 drops IP/cpu/mem
+          const telemetry: Record<string, unknown> = {
+            alert_level: online ? "green" : "gray",
+          };
+          if (isPrivileged) {
+            telemetry.cpu_cores = r.session_cpu_cores ?? null;
+            telemetry.mem_gb = r.session_mem_total_gb ?? null;
+            telemetry.ip_internal = r.session_ip ?? null;
+          }
+          return {
+            daemon_node_id: r.node_id,
+            alias: r.alias,
+            hostname: r.hostname,
+            online,
+            last_seen_at: lastSeenAt,
+            runtimes_supported: runtimes,
+            allowed_secret_keys: secrets,
+            host_telemetry: telemetry,
+          };
+        });
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, daemons, count: daemons.length }) }] };
+    },
+  );
+
   // §2.5 step 1+2 — dashboard-facing tool. Validates spec, mint
   // child-ntok, stash env_blob in pendingEnvBlobs Map, write request
   // row (metadata only — no env_blob in SQL), pushEvent doorbell.
@@ -2699,9 +2838,25 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
     ],
   );
   if (input.config_snapshot) {
+    // RFC-026 §9.3 / #338 PR2 — promote daemon self-declare fields to
+    // first-class indexable columns alongside the snapshot blob. The
+    // snapshot stays the source of truth for non-list reads; the columns
+    // exist so `list_host_supervisors` doesn't JSON.parse on every call.
+    // typeof-narrow the array fields (don't trust shape per
+    // [[feedback_typeof_narrow_extracted_fields]]; zod has already
+    // narrowed, but the input.config_snapshot type is `unknown` here).
+    const snap = input.config_snapshot as Record<string, unknown> | null;
+    const runtimesRaw = snap?.runtimes_supported;
+    const allowedRaw = snap?.allowed_secret_keys;
+    const runtimesJson = Array.isArray(runtimesRaw) && runtimesRaw.every(s => typeof s === "string")
+      ? JSON.stringify(runtimesRaw)
+      : null;
+    const allowedJson = Array.isArray(allowedRaw) && allowedRaw.every(s => typeof s === "string")
+      ? JSON.stringify(allowedRaw)
+      : null;
     db.run(
-      `UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`,
-      [JSON.stringify(input.config_snapshot), input.node_id],
+      `UPDATE nodes SET config_snapshot = ?1, runtimes_supported = ?2, allowed_secret_keys = ?3 WHERE node_id = ?4`,
+      [JSON.stringify(input.config_snapshot), runtimesJson, allowedJson, input.node_id],
     );
     // RFC-024 — finalize any pending/restarting update whose target
     // patch is now reflected in the snapshot. Closes the
