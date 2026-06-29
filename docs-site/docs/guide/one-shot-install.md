@@ -1,5 +1,13 @@
 # 一键安装（多 Agent + tmux）
 
+::: warning ⚠️ 实验性 — 未经端到端验证, 用前自审
+**Vincent 2026-06-29 反馈**: `setup-anet.sh` **未经维护者端到端验证**——脚本文件挂在 `https://anet.sh/setup-anet.sh` 可下载（且语法上完整），但没有在干净 Ubuntu/Debian 上跑通的可复现 smoke 报告。`MINIMAX_KEY=sk-cp-你的key` 这个 vendor key 形式也可能跟 MiniMax 当前 API 不符——以 [多模型配置](/guide/multi-model) 里 verified-with-real-call 的 vendor 为准。
+
+**推荐路径**: 跟 [上手指南](/guide/getting-started)（已验证 5 终端手动流程）+ [干净服务器从零部署](/deploy/clean-server)（含 systemd 模板）。
+
+下面内容**保留作脚本作者参考**，但用前请自行审计 + 在隔离环境试跑。
+:::
+
 如果你想在一台空 Ubuntu/Debian 服务器上**一行命令**起完整 Agent Network（hub + dashboard + 多个 agent，每个进程一个独立 tmux session），用 `setup-anet.sh`。
 
 ## 适用场景
