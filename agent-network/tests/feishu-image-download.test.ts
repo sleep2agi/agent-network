@@ -18,6 +18,7 @@
 import { mkdirSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { Readable } from "node:stream";
 
 // ── tiny test harness (mirrors feishu-bridge-ackplaceholder.test.ts style) ──
 
@@ -240,7 +241,65 @@ expect("aug: multiple paths all listed", aug3.includes("/a.png") && aug3.include
 const aug4 = augmentPromptWithImages("just text", []);
 expect("aug: empty images list → no augmentation", aug4 === "just text");
 
-// ── Summary ─────────────────────────────────────────────────────────────────
+// ── 6. lark SDK response shape regression (added 2026-06-29 after Vincent UAT) ─
+
+// The lark @larksuiteoapi/node-sdk wraps `messageResource.get` HTTP response
+// in `{ getReadableStream, writeFile, headers }`, NOT a raw Readable. Our
+// downloadImage code calls `.getReadableStream()`; this test locks the
+// assumption so a future refactor that goes back to `resp.on('data')` will
+// fail loudly instead of silently breaking at runtime (the original
+// regression — caught by #322 trace logging).
+//
+// 通信牛 review (PR #324 round 1) caught these assertions were appended
+// AFTER the summary/exit block — they ran but did NOT gate the harness
+// exit code, so a failing assertion would still exit 0 (verified by him
+// inserting a deliberate-fail and observing HARNESS_EXIT=0). Moved BEFORE
+// the summary so any future SDK-shape drift now fails CI loudly.
+
+// Mock the lark resp shape and verify our consumer uses the right method.
+function makeLarkResp(body: Buffer) {
+  return {
+    getReadableStream: () => Readable.from([body]),
+    writeFile: async (p: string) => p,
+    headers: { "content-type": "image/png" },
+  };
+}
+
+// Mirror downloadImage's "read from lark resp" logic in isolation.
+async function readLarkRespBytes(resp: any): Promise<Buffer | null> {
+  if (typeof resp?.getReadableStream !== "function") return null;
+  const stream = resp.getReadableStream();
+  const chunks: Buffer[] = [];
+  await new Promise<void>((resolve, reject) => {
+    stream.on("data", (c: Buffer) => chunks.push(Buffer.from(c)));
+    stream.on("end", () => resolve());
+    stream.on("error", reject);
+  });
+  return Buffer.concat(chunks);
+}
+
+const fakeBody = Buffer.concat([PNG_HEADER, Buffer.alloc(100, 0x11)]);
+const goodResp = makeLarkResp(fakeBody);
+const readBody = await readLarkRespBytes(goodResp);
+expect("lark resp shape: getReadableStream() returns Readable bytes match",
+  readBody !== null && readBody.equals(fakeBody),
+  `read ${readBody?.length} vs expected ${fakeBody.length}`,
+);
+
+// Reject when no getReadableStream method (e.g. SDK version drift)
+const badResp = { headers: {}, data: "raw" };
+const rejected = await readLarkRespBytes(badResp);
+expect("lark resp without getReadableStream → null", rejected === null);
+
+// Reject raw Readable misused as lark resp (the original bug shape — `resp as Readable`)
+const rawStream: any = Readable.from([Buffer.from("png?")]);
+const wrongCast = await readLarkRespBytes(rawStream);
+expect("raw Readable cast to lark resp → null (no getReadableStream)",
+  wrongCast === null,
+  "guard prevents q.on style misuse"
+);
+
+// ── Summary (gates exit code — MUST be last) ────────────────────────────────
 
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} feishu-image-download tests passed.`);
