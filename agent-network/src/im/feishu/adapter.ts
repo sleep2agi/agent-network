@@ -358,17 +358,30 @@ async function maybeAttachImages(
   client: lark.Client | null,
   mediaDir: string | null,
 ): Promise<void> {
-  if (!client || !mediaDir) return;
+  const msgId = normalized.messageId;
+  if (!client) {
+    process.stderr.write(`[feishu:image] ${msgId} skip: no lark client\n`);
+    return;
+  }
+  if (!mediaDir) {
+    process.stderr.write(`[feishu:image] ${msgId} skip: no mediaDir configured\n`);
+    return;
+  }
   const raw = rawEvent as FeishuRawEvent | undefined;
   const message = raw?.message;
-  if (!message || message.message_type !== "image") return;
+  if (!message || message.message_type !== "image") return; // not an image — silent (event is text)
   let imageKey: string | undefined;
   try {
     imageKey = (JSON.parse(message.content) as { image_key?: string }).image_key;
-  } catch {
+  } catch (e: any) {
+    process.stderr.write(`[feishu:image] ${msgId} skip: content not JSON (${e?.message ?? e})\n`);
     return;
   }
-  if (!imageKey || !message.message_id) return;
+  if (!imageKey || !message.message_id) {
+    process.stderr.write(`[feishu:image] ${msgId} skip: no image_key/message_id (key=${imageKey})\n`);
+    return;
+  }
+  process.stderr.write(`[feishu:image] ${msgId} download begin (key=${imageKey.slice(0, 16)}…, dir=${mediaDir})\n`);
   const localPath = await downloadImage(
     client,
     message.message_id,
@@ -377,7 +390,10 @@ async function maybeAttachImages(
     normalized.conversation?.conversationId,
   );
   if (localPath) {
+    process.stderr.write(`[feishu:image] ${msgId} download ok → ${localPath}\n`);
     normalized.content = { ...normalized.content, images: [localPath] };
+  } else {
+    process.stderr.write(`[feishu:image] ${msgId} download FAILED (see downloadImage stderr above)\n`);
   }
 }
 
@@ -433,7 +449,10 @@ async function downloadImage(
       path: { message_id: messageId, file_key: imageKey },
       params: { type: "image" },
     });
-    if (!resp) return null;
+    if (!resp) {
+      process.stderr.write(`[feishu:image] ${messageId} messageResource.get returned falsy (no stream)\n`);
+      return null;
+    }
     const stream = resp as unknown as Readable;
     const chunks: Buffer[] = [];
     await new Promise<void>((resolve, reject) => {
@@ -442,11 +461,16 @@ async function downloadImage(
       stream.on("error", (err: Error) => reject(err));
     });
     const body = Buffer.concat(chunks);
+    process.stderr.write(`[feishu:image] ${messageId} stream collected ${body.length} bytes\n`);
     // Magic-byte mime whitelist — reject non-image payloads even if the
     // server marked them as images. Defends against extension confusion +
     // accidental binary delivery.
     const detected = detectImageMime(body);
-    if (!detected) return null;
+    if (!detected) {
+      const head = body.slice(0, 16).toString("hex");
+      process.stderr.write(`[feishu:image] ${messageId} mime rejected (head hex: ${head})\n`);
+      return null;
+    }
     // Path layout: `<mediaDir>/<conversationId-or-_>/<msg_id>.<ext>` —
     // conversationId subdir keeps a chat's attachments together (easier
     // for an operator to spot-check + GC). msg_id is unique enough across
@@ -460,7 +484,13 @@ async function downloadImage(
     const filepath = join(subdir, `${safeMsgId}.${detected.ext}`);
     writeFileSync(filepath, body);
     return filepath;
-  } catch {
+  } catch (e: any) {
+    // Surface the lark/HTTP error so operators can act (99991672 scope,
+    // 99992354 invalid id, network, disk-full, etc.) instead of staring
+    // at a silent "no image processed".
+    const errMsg = e?.message ?? String(e);
+    const errCode = e?.response?.data?.code ?? e?.code ?? "";
+    process.stderr.write(`[feishu:image] ${messageId} downloadImage threw: code=${errCode} msg=${errMsg}\n`);
     return null;
   }
 }
