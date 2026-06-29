@@ -58,20 +58,28 @@
 
 export const SECRET_KEYS = new Set<string>([
   "FEISHU_APP_SECRET",
+  "FEISHU_APP_ID", // public identifier but the claude binary doesn't need it (defense-in-depth, 通信龙 8378d987)
   "FEISHU_VERIFICATION_TOKEN",
   "FEISHU_ENCRYPT_KEY",
   "GH_TOKEN",
   "GITHUB_TOKEN",
   "HUB_PASSWORD",
+  // Hub token env var names (通信牛 #326 round 1 — common operator-chosen names
+  // for the anet network token that aren't caught by value pattern if the
+  // value happens to not match ntok_/utok_/atok_ shape).
+  "COMMHUB_TOKEN",
+  "ANET_HUB_TOKEN",
+  "AUTH_TOKEN",
   "SLACK_TOKEN",
   "TELEGRAM_TOKEN",
   "TELEGRAM_BOT_TOKEN",
 ]);
 
 const SECRET_VALUE_PATTERNS: RegExp[] = [
-  /^ntok_[a-zA-Z0-9_-]{8,}/, // anet network token
-  /^utok_[a-zA-Z0-9_-]{8,}/, // anet user token
-  /^github_pat_[A-Z0-9_]{20,}/, // GitHub fine-grained PAT
+  /^ntok_[a-zA-Z0-9_-]{8,}/, // anet network token (current)
+  /^utok_[a-zA-Z0-9_-]{8,}/, // anet user token (current)
+  /^atok_[a-zA-Z0-9_-]{8,}/, // anet admin/legacy token (still accepted by product per 通信牛 #326 round 1)
+  /^github_pat_[a-zA-Z0-9_]{20,}/, // GitHub fine-grained PAT (mixed-case — corrected from [A-Z0-9_] which missed real-world casing per 通信牛 review)
   /^ghp_[a-zA-Z0-9]{36}/, // GitHub classic PAT
   /^xoxb-[a-zA-Z0-9-]{20,}/, // Slack bot token
 ];

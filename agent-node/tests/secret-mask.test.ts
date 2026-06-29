@@ -20,11 +20,16 @@ function expect(name: string, pred: boolean, detail = ""): void {
 
 const env1 = {
   FEISHU_APP_SECRET: "real-secret-xyz",
+  FEISHU_APP_ID: "cli_EXAMPLEEXAMPLEXX", // 通信龙 8378d987 — public identifier but claude binary doesn't need it
   FEISHU_VERIFICATION_TOKEN: "verif-aaa",
   FEISHU_ENCRYPT_KEY: "enc-bbb",
   GH_TOKEN: "ghp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
   GITHUB_TOKEN: "github_pat_HEAD_abc123_TAIL",
   HUB_PASSWORD: "live123",
+  // 通信牛 #326 round 1 — common operator-named hub token vars must also mask
+  COMMHUB_TOKEN: "atok_EXAMPLEEXAMPLEEXAMPLE",
+  ANET_HUB_TOKEN: "any-custom-value-could-be-here",
+  AUTH_TOKEN: "any-vendor-style-token",
   SLACK_TOKEN: "xoxb-fake",
   TELEGRAM_TOKEN: "tg-fake",
   TELEGRAM_BOT_TOKEN: "tg-bot-fake",
@@ -36,6 +41,14 @@ for (const k of Object.keys(env1)) {
 
 // ── 2. Claude binary essentials preserved ──────────────────────────────────
 
+// claude-agent-sdk REQUIRES vendor credentials + ANTHROPIC_BASE_URL to boot
+// — masking those here would kill the LLM call. ANTHROPIC_AUTH_TOKEN's
+// protection from in-LLM exfil moves to Layer B (tool-layer Bash/Read
+// denylist on `env` / `/proc/*/environ`) per 通信龙 8378d987 +
+// 通信牛 #326 review clarification: Layer A's job is "strip what isn't
+// needed". Vendor tokens that the binary itself reads can't be masked
+// here without killing the agent (would be哑炮 — silent crash with no
+// auth header on the API call).
 const env2 = {
   ANTHROPIC_AUTH_TOKEN: "sk-ant-fake-vendor-key",
   ANTHROPIC_API_KEY: "sk-ant-fake-vendor-key-2",
@@ -49,15 +62,18 @@ const env2 = {
   USER: "root",
   NODE_ENV: "production",
   LANG: "C.UTF-8",
-  FEISHU_APP_ID: "cli_aab9eabbceba9cca",
 };
 const masked2 = maskedEnv(env2);
 for (const k of Object.keys(env2)) {
   expect(`preserve claude-essential ${k}`, masked2[k] === env2[k], `got "${masked2[k]}"`);
 }
 
-// Special-case explicit: FEISHU_APP_ID is public identifier, must NOT mask.
-expect("FEISHU_APP_ID is NOT in SECRET_KEYS (public id)", !SECRET_KEYS.has("FEISHU_APP_ID"));
+// Hub token names are NOW in SECRET_KEYS (通信牛 round 1)
+for (const k of ["COMMHUB_TOKEN", "ANET_HUB_TOKEN", "AUTH_TOKEN"]) {
+  expect(`SECRET_KEYS includes hub-name ${k}`, SECRET_KEYS.has(k));
+}
+// FEISHU_APP_ID is NOW in SECRET_KEYS (通信龙 round 2 — defense-in-depth: claude binary doesn't need it)
+expect("FEISHU_APP_ID is in SECRET_KEYS (claude binary doesn't need)", SECRET_KEYS.has("FEISHU_APP_ID"));
 
 // ── 3. Value-pattern catch-all (unknown key name, secret-like value) ───────
 
@@ -66,8 +82,12 @@ const env3 = {
   RANDOMLY_NAMED_VAR_1: "ntok_EXAMPLEEXAMPLEEXAMPLE",
   // anet user token — value pattern
   ANOTHER_VAR: "utok_EXAMPLEEXAMPLEEXAMPLE",
-  // GitHub fine-grained PAT
+  // anet legacy/admin token — also still product-accepted (通信牛 round 1 catch)
+  ANY_OPERATOR_NAME: "atok_EXAMPLEEXAMPLEEXAMPLE",
+  // GitHub fine-grained PAT (uppercase only — was the only shape my round 1 regex matched)
   CUSTOM_GH_VAR: "github_pat_HEAD_LONG_PART_LONG_PART_TAIL",
+  // GitHub fine-grained PAT (mixed-case — 通信牛 round 1 catch — round 1 `[A-Z0-9_]` missed this)
+  MIXED_CASE_PAT: "github_pat_abcDEF1234567890_abcDEF1234567890",
   // GitHub classic PAT
   YET_ANOTHER: "ghp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
   // Slack bot token
@@ -143,25 +163,55 @@ const realisticEnv = {
   ANTHROPIC_BASE_URL: "https://api.minimax.chat/anthropic",
   ANTHROPIC_AUTH_TOKEN: "sk-ant-real-vendor-key-xyz",
   ANET_MODEL: "MiniMax-M3",
-  FEISHU_APP_ID: "cli_aab9eabbceba9cca",
+  FEISHU_APP_ID: "cli_EXAMPLEEXAMPLEXX", // public id but masked defense-in-depth (round 2)
   FEISHU_APP_SECRET: "VERY_REAL_SECRET_DO_NOT_LEAK",
   HUB_URL: "http://172.18.0.1:9200",
   HUB_USER: "admin",
   HUB_PASSWORD: "admin-password-123",
-  // From config.json reading
+  // Hub token under common operator-chosen var names (round 1 catch)
+  COMMHUB_TOKEN: "atok_EXAMPLEEXAMPLEEXAMPLE",
+  ANET_HUB_TOKEN: "any-custom-format-could-be",
+  // From config.json reading (custom var name — caught by value pattern)
   ANET_HUB_TOKEN_FROM_SOMEWHERE: "ntok_EXAMPLEEXAMPLEEXAMPLE",
   GH_PAT_VINCENT: "ghp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
 };
 const realMasked = maskedEnv(realisticEnv);
 
 // Must mask
-for (const k of ["FEISHU_APP_SECRET", "HUB_PASSWORD", "ANET_HUB_TOKEN_FROM_SOMEWHERE", "GH_PAT_VINCENT"]) {
+for (const k of [
+  "FEISHU_APP_ID",
+  "FEISHU_APP_SECRET",
+  "HUB_PASSWORD",
+  "COMMHUB_TOKEN",
+  "ANET_HUB_TOKEN",
+  "ANET_HUB_TOKEN_FROM_SOMEWHERE",
+  "GH_PAT_VINCENT",
+]) {
   expect(`realistic: ${k} masked`, realMasked[k] === MASK_PLACEHOLDER, `got "${realMasked[k]}"`);
 }
 // Must keep
-for (const k of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANET_MODEL", "FEISHU_APP_ID", "HUB_URL", "HUB_USER", "PATH", "HOME"]) {
+for (const k of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANET_MODEL", "HUB_URL", "HUB_USER", "PATH", "HOME"]) {
   expect(`realistic: ${k} preserved`, realMasked[k] === realisticEnv[k], `got "${realMasked[k]}"`);
 }
+
+// ── 9. 通信牛 #326 round-1 exact counterexample regression ─────────────────
+
+// He pasted this exact JSON and showed the round-1 mask passed several values
+// through. After the round-2 fixes (atok_ pattern + COMMHUB_TOKEN/AUTH_TOKEN/
+// ANET_HUB_TOKEN keys + mixed-case PAT regex), all four entries should land
+// in the mask. ANTHROPIC_AUTH_TOKEN deliberately stays (Layer A scope per
+// 通信龙 8378d987 — protection moves to Layer B tool denylist).
+const niuExample = {
+  ANTHROPIC_AUTH_TOKEN: "sk-ant-live-example",
+  COMMHUB_TOKEN: "atok_1234567890abcdef1234567890abcdef",
+  ANET_HUB_TOKEN: "custom-secret",
+  LOWER_PAT: "github_pat_abcDEF1234567890_abcDEF1234567890",
+};
+const niuMasked = maskedEnv(niuExample);
+expect("通信牛-counter: ANTHROPIC_AUTH_TOKEN preserved (Layer A intent)", niuMasked.ANTHROPIC_AUTH_TOKEN === "sk-ant-live-example");
+expect("通信牛-counter: COMMHUB_TOKEN masked (SECRET_KEYS)", niuMasked.COMMHUB_TOKEN === MASK_PLACEHOLDER);
+expect("通信牛-counter: ANET_HUB_TOKEN masked (SECRET_KEYS)", niuMasked.ANET_HUB_TOKEN === MASK_PLACEHOLDER);
+expect("通信牛-counter: LOWER_PAT (mixed-case PAT) masked (regex fix)", niuMasked.LOWER_PAT === MASK_PLACEHOLDER);
 
 // Critical regression: realMasked must NOT contain the secret string anywhere
 const serialized = JSON.stringify(realMasked);
