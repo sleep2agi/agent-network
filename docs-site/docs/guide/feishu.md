@@ -87,22 +87,10 @@ docker compose logs -f feishu-agent         # 跟启动 + 运行日志
 
 > 🧪 **`--profile local-hub` 是自测用**，跑一个一次性本地 hub 容器配合 agent，做隔离 smoke。**默认不启用**，需要时显式 `docker compose --profile local-hub up -d` 且把 `.env` 里 `HUB_URL=http://hub:9200`。日常忽略即可。
 
-### 安全边界（卷只挂 `./data`）
+### 安全边界 + 版本钉死
 
-`docker-compose.yml` 只把 cwd 的 `./data` 子目录映射进容器的 `/work`（而不是整个 cwd）。agent 的 Bash / 完整工具能力**只能写 `./data/` 里**，碰不到主机上的 compose 文件、`.env`、或同级别其他目录——blast radius 严格限定。`.anet/`、节点 channels、SQLite 全部落在 `./data/.anet/`，重建容器状态不丢。
-
-### 版本钉死 + 升级
-
-镜像通过 Docker `ARG` 钉死 preview 版本号（当前 `agent-network 2.2.22-preview.2` + `agent-node 2.4.15-preview.2`），不浮动 `@preview` tag，保证可复现。要换更新的 preview：
-
-```bash
-ANET_VERSION=2.2.23-preview.0 \
-ANET_NODE_VERSION=2.4.16-preview.0 \
-  docker compose build
-docker compose up -d
-```
-
-正式 latest 发版后这里会同步切换。
+- **卷只挂 `./data`**：`docker-compose.yml` 只把 cwd 的 `./data` 子目录映射进容器, agent 的 Bash 能力只能写 `./data/` 里, 碰不到主机上的 compose / `.env` / 同级目录。`.anet/`、节点 channels、SQLite 全在 `./data/.anet/`, 重建容器状态不丢。
+- **镜像钉版本**：通过 Docker `ARG` 钉死 preview 版本号 (当前 `agent-network 2.2.22-preview.2` + `agent-node 2.4.15-preview.2`), 不浮动 `@preview` tag。要换更新的 preview, 改 `ANET_VERSION=...` + `ANET_NODE_VERSION=...` 重 build, 详见 [`docker/feishu/README.md`](https://github.com/sleep2agi/agent-network/blob/main/docker/feishu/README.md#versions)。
 
 ### 启动验证 / 故障排查（5 行表）
 
@@ -144,33 +132,12 @@ docker compose up -d
 
 bridge 不接受全网消息——必须在 `access.json` 里把允许的 **人**（`open_id`）和 **群**（`chat_id`）显式列出。
 
-**Docker 路径**（推荐）：通过 `.env` 配置（待 compose 草稿补完整字段名），改完 `docker compose restart` 即生效。
+**Docker 路径**（推荐）：改 `.env` 里 `FEISHU_ALLOW_FROM` / `FEISHU_ALLOW_CHATS`（逗号分隔多个）+ `docker compose restart`。
 
-**手动 anet 路径**：用 CLI 增删：
-
-```bash
-# 加一个允许私聊的人
-anet channel allow feishu <node> --add-from ou_<your-open-id>
-
-# 加一个允许群聊的群
-anet channel allow feishu <node> --add-chat oc_<group-chat-id>
-
-# 删除
-anet channel allow feishu <node> --rm-from ou_<your-open-id>
-anet channel allow feishu <node> --rm-chat oc_<group-chat-id>
-```
-
-flags 是 **repeatable** 的（一次 `--add-from a --add-from b` 加多个），也支持 `--add-from a,b,c` 逗号语法。
-
-查看当前白名单：
-
-```bash
-anet channel ls
-# 会列出每个 node 的 channels + allowFrom + allowChats
-```
+**手动 anet 路径**：`anet channel allow feishu <node> --add-from|--add-chat|--rm-from|--rm-chat <id>`（flags repeatable, 也支持逗号语法）。查看用 `anet channel ls`。详见 §8 进阶。
 
 ::: warning 改完必须 restart 节点
-`access.json` **不热加载**——改完一定要 `anet node stop <node>` + `anet node start <node>`（Docker 路径下 `docker compose restart <node-service>`）。bridge 启动时一次性把 access.json 读进内存。
+`access.json` **不热加载** —— 改完一定要 restart（`anet node stop && start` 或 `docker compose restart`）。bridge 启动时一次性把 access.json 读进内存。
 :::
 
 ## 6. 群 @ 机制
@@ -207,76 +174,27 @@ bot 的 reply 会跟着原消息的 `root_id` 进**同一条线程**，不会污
 
 ## 8. 进阶：手动 anet node 配置（非 Docker）
 
-如果你不想用 Docker，或想直接装在宿主机：
-
-### 8.1 安装 preview
+不用 Docker / 直接装宿主机的话, 走这条：
 
 ```bash
-npm install -g \
-  @sleep2agi/agent-network@2.2.22-preview.2 \
-  @sleep2agi/agent-node@2.4.15-preview.2
-# 或装当前 preview tag：
-# npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
-```
+# 1. 装 preview
+npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
 
-> 飞书 channel 仍在 preview 通道；待 `latest` 升级后会同步更新本页。
-
-### 8.2 创建节点 + 绑定飞书
-
-需要节点已存在；如未创建：
-
-```bash
+# 2. 建节点 (claude-agent-sdk runtime)
 anet node create <node-name> --runtime claude-agent-sdk
-```
 
-绑定飞书 channel：
-
-```bash
+# 3. 绑飞书 channel (不带 flags 走交互模式)
 anet channel add feishu <node-name> \
   --app-id     cli_xxxxxxxxxxxxxx \
   --app-secret yyyyyyyyyyyyyyyyy \
-  --allow      ou_<your-open-id>          # 允许私聊的 open_id
-  --allow-chat oc_<group-chat-id>         # 可选：允许群聊的 chat_id
-```
+  --allow      ou_<your-open-id> \
+  --allow-chat oc_<group-chat-id>
 
-不带 flags 进交互模式：
-
-```bash
-anet channel add feishu <node-name>
-```
-
-写入 `.anet/nodes/<node-name>/channels/feishu/`：
-
-| 文件 | 内容 | 权限 |
-|---|---|---|
-| `.env` | `FEISHU_APP_ID` + `FEISHU_APP_SECRET` | `chmod 600` |
-| `access.json` | `{allowFrom: [open_id...], allowChats: [chat_id...]}` | `chmod 644` |
-
-### 8.3 启动节点
-
-```bash
+# 4. 启动
 anet node start <node-name>
 ```
 
-启动 log 应出现：
-
-```
-[agent-node] channels: feishu(/path/.anet/nodes/<node-name>/channels/feishu)
-[agent-node] [feishu] forked worker (pid 12345) for ... via ...
-[feishu:worker] bridge online — node=<node-name> dir=... ipc=yes
-```
-
-worker 路径默认 `dist/src/im/feishu/worker.js`（`@sleep2agi/agent-network` 安装后即有）。如需覆盖：
-
-```bash
-export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
-```
-
-### 8.4 触发策略 sanity
-
-- **私聊**：`sender.open_id ∈ allowFrom` 才触发；不在白名单 → bridge stderr 出 `[feishu:audit] deny from=...`，不派 IPC
-- **群聊**：群 `chat_id ∈ allowChats` **且** 消息 @bot 才触发；不 @ bot → 静默忽略
-- **线程**：bot reply 跟 `root_id` 进同一线程
+启动 log 应见 `[feishu:worker] bridge online`. worker 路径默认 `dist/src/im/feishu/worker.js`, 自定义用 `ANET_FEISHU_WORKER_PATH` env. 配置文件落盘 `.anet/nodes/<node-name>/channels/feishu/{.env (chmod 600), access.json}`. 触发策略 + 行为完全跟 §3 Docker 路径一致 (DM allowFrom / 群 allowChats + @bot)。
 
 ## 9. 故障排查
 

@@ -87,22 +87,10 @@ The `.env.example` file ships annotated comments with verified vendor + model co
 
 > 🧪 **`--profile local-hub` is self-test only.** It runs a throwaway local hub container alongside the agent for an isolated smoke test. **Off by default** — you have to explicitly `docker compose --profile local-hub up -d` and set `HUB_URL=http://hub:9200` in `.env`. Ignore it for daily use.
 
-### Safety boundary (volume mount is `./data` only)
+### Safety boundary + pinned versions
 
-`docker-compose.yml` mounts **only the `./data` subdirectory** of cwd into the container's `/work` (not the entire cwd). The agent's Bash / full tool capabilities **can only write under `./data/`** — the compose file itself, the `.env` file, and sibling directories on the host are all unreachable. Blast radius is strictly bounded. The node config, logs, goals, and per-channel `.env` / `access.json` all live under `./data/.anet/`, so persistence survives container recreate but the agent cannot escape.
-
-### Pinned versions + upgrades
-
-The image pins exact preview versions via Docker `ARG` (currently `agent-network 2.2.22-preview.2` + `agent-node 2.4.15-preview.2`) — no floating `@preview` tag, so builds are reproducible. To rebuild against a newer preview:
-
-```bash
-ANET_VERSION=2.2.23-preview.0 \
-ANET_NODE_VERSION=2.4.16-preview.0 \
-  docker compose build
-docker compose up -d
-```
-
-Once a `latest` release ships, this guide will switch over in lockstep.
+- **Volume mount is `./data` only**: `docker-compose.yml` mounts only the `./data` subdirectory of cwd into the container; the agent's Bash capabilities can only write under `./data/` — the host's compose file, `.env`, and sibling directories are unreachable. The node config, channels, and SQLite all live under `./data/.anet/`, so state survives container recreate.
+- **Pinned versions**: the image pins exact preview versions via Docker `ARG` (currently `agent-network 2.2.22-preview.2` + `agent-node 2.4.15-preview.2`) — no floating `@preview` tag. To rebuild against a newer preview, override `ANET_VERSION` / `ANET_NODE_VERSION` and rebuild — see [`docker/feishu/README.md`](https://github.com/sleep2agi/agent-network/blob/main/docker/feishu/README.md#versions).
 
 ### Startup verification / troubleshooting (5 lines)
 
@@ -144,33 +132,12 @@ When the picked backend doesn't support images and Feishu delivers an image mess
 
 The bridge does **not** accept messages from the entire network — you must explicitly list allowed **users** (`open_id`) and **groups** (`chat_id`) in `access.json`.
 
-**Docker path** (recommended): edit `.env` (the `FEISHU_ALLOW_FROM` / `FEISHU_ALLOW_CHATS` variables get pushed through to `access.json` during bring-up). Run `docker compose restart` for changes to take effect.
+**Docker path** (recommended): edit `.env` `FEISHU_ALLOW_FROM` / `FEISHU_ALLOW_CHATS` (comma-separated for multiple), then `docker compose restart`.
 
-**Manual `anet` path**: use the CLI to add / remove entries:
-
-```bash
-# Allow a user to DM the bot
-anet channel allow feishu <node> --add-from ou_<your-open-id>
-
-# Allow the bot in a group
-anet channel allow feishu <node> --add-chat oc_<group-chat-id>
-
-# Remove
-anet channel allow feishu <node> --rm-from ou_<your-open-id>
-anet channel allow feishu <node> --rm-chat oc_<group-chat-id>
-```
-
-The flags are **repeatable** (one invocation can carry multiple `--add-from a --add-from b`) and also accept comma-separated lists (`--add-from a,b,c`).
-
-Inspect the current whitelist:
-
-```bash
-anet channel ls
-# Lists every node's channels + allowFrom + allowChats
-```
+**Manual `anet` path**: `anet channel allow feishu <node> --add-from|--add-chat|--rm-from|--rm-chat <id>` (flags are repeatable; comma-separated lists work too). Inspect with `anet channel ls`. See §8 below.
 
 ::: warning Restart the node after every change
-`access.json` is **not hot-reloaded** — after every edit you must `anet node stop <node>` + `anet node start <node>` (for the Docker path, `docker compose restart <node-service>`). The bridge reads `access.json` into memory once at startup.
+`access.json` is **not hot-reloaded** — after every edit you must restart (`anet node stop && start`, or `docker compose restart`). The bridge reads `access.json` into memory once at startup.
 :::
 
 ## 6. Group `@bot` mechanics
@@ -207,76 +174,27 @@ The timeout notice (`TIMEOUT_NOTICE_TEXT`) follows the same path — also a fres
 
 ## 8. Advanced: manual `anet node` setup (non-Docker)
 
-If you'd rather not use Docker, or want to install directly on the host:
-
-### 8.1 Install preview
+If you'd rather not use Docker / want to install directly on the host:
 
 ```bash
-npm install -g \
-  @sleep2agi/agent-network@2.2.22-preview.2 \
-  @sleep2agi/agent-node@2.4.15-preview.2
-# Or pull the current preview tag:
-# npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
-```
+# 1. Install preview
+npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
 
-> The Feishu channel is still on the preview track; this page will be updated in lockstep once it promotes to `latest`.
-
-### 8.2 Create a node + bind Feishu
-
-You need an existing node. To create one:
-
-```bash
+# 2. Create a node (claude-agent-sdk runtime)
 anet node create <node-name> --runtime claude-agent-sdk
-```
 
-Bind the Feishu channel:
-
-```bash
+# 3. Bind the Feishu channel (omit flags for interactive mode)
 anet channel add feishu <node-name> \
   --app-id     cli_xxxxxxxxxxxxxx \
   --app-secret yyyyyyyyyyyyyyyyy \
-  --allow      ou_<your-open-id>          # open_id of someone allowed to DM
-  --allow-chat oc_<group-chat-id>         # optional: chat_id of an allowed group
-```
+  --allow      ou_<your-open-id> \
+  --allow-chat oc_<group-chat-id>
 
-Without flags it falls into interactive mode:
-
-```bash
-anet channel add feishu <node-name>
-```
-
-Writes under `.anet/nodes/<node-name>/channels/feishu/`:
-
-| File | Contents | Mode |
-|---|---|---|
-| `.env` | `FEISHU_APP_ID` + `FEISHU_APP_SECRET` | `chmod 600` |
-| `access.json` | `{allowFrom: [open_id...], allowChats: [chat_id...]}` | `chmod 644` |
-
-### 8.3 Start the node
-
-```bash
+# 4. Start
 anet node start <node-name>
 ```
 
-The startup log should contain:
-
-```
-[agent-node] channels: feishu(/path/.anet/nodes/<node-name>/channels/feishu)
-[agent-node] [feishu] forked worker (pid 12345) for ... via ...
-[feishu:worker] bridge online — node=<node-name> dir=... ipc=yes
-```
-
-The worker path defaults to `dist/src/im/feishu/worker.js` (shipped with `@sleep2agi/agent-network`). To override:
-
-```bash
-export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
-```
-
-### 8.4 Trigger policy sanity-check
-
-- **DM**: triggers only when `sender.open_id ∈ allowFrom`; off-whitelist senders log `[feishu:audit] deny from=...` on stderr and the IPC envelope is not dispatched
-- **Group**: requires both `chat_id ∈ allowChats` **and** an actual `@bot` mention; without the mention, silently ignored
-- **Threading**: replies follow `root_id` into the original thread
+The startup log should show `[feishu:worker] bridge online`. The worker path defaults to `dist/src/im/feishu/worker.js`; override with the `ANET_FEISHU_WORKER_PATH` env var. Config files land under `.anet/nodes/<node-name>/channels/feishu/{.env (chmod 600), access.json}`. Trigger policy + behavior are identical to §3 Docker (DM allowFrom / group allowChats + @bot).
 
 ## 9. Troubleshooting
 
