@@ -1023,6 +1023,15 @@ daemon 不能仅凭 `runtimes_supported` 声明就报 success。
 
 ### 9.4 Wizard 三态流
 
+**Mockup (count ≥ 2 路径, 三步并排)**:
+
+![RFC-026 P2 Create Node Wizard Mockup](./assets/rfc-026-p2-wizard-mockup.png)
+
+源: [`assets/rfc-026-p2-wizard-mockup.html`](./assets/rfc-026-p2-wizard-mockup.html) (静态 HTML, 浏览器直接打开; PNG 是 1400×900 headless 渲染)。
+
+`count = 0` / `count = 1` 路径文字流见下:
+
+
 ```
 [Pre-flight] 调 GET /api/host-supervisors?network_id=net_xxx
   ↓
