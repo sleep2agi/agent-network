@@ -27,6 +27,7 @@ import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
+import { checkFeishuToolDeny, isFeishuChannelTurn } from "./feishu-tool-deny";
 import {
   isVendorErrorForUser,
   isTransientVendorError,
@@ -1718,6 +1719,26 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     hooks: {
       PreToolUse: [{ hooks: [async (input: any) => {
         log(`[tool] ${input.tool_name}(${JSON.stringify(input.tool_input).slice(0, 80)})`);
+        // Layer B of feishu hardening (RFC-020 §13): on feishu turns only,
+        // deny tool calls that reach secret-bearing paths, run secret-
+        // extracting Bash patterns, or call commhub MCP (bridge replies
+        // travel back via the worker, not commhub — every commhub call
+        // on a feishu turn is at minimum noise, at worst a horizontal
+        // send_task to an arbitrary alias). The `from` closure captures
+        // the turn's channel origin set by processTask before invoking
+        // processWithClaude. Non-feishu channels (commhub, /loop,
+        // telegram) keep full tool access — operator-trusted surfaces.
+        if (isFeishuChannelTurn(from)) {
+          const decision = checkFeishuToolDeny(input.tool_name, input.tool_input);
+          if (decision.deny) {
+            log(`[tool-deny] feishu turn rejected ${input.tool_name}: ${decision.reason}`);
+            // Returning { continue: false, stopReason } shows the agent
+            // a tool-denied message instead of throwing, so it can
+            // explain to the user that it can't do X. Far better UX
+            // than a silent worker crash.
+            return { continue: false, stopReason: decision.reason };
+          }
+        }
         return { continue: true };
       }] }],
     },
