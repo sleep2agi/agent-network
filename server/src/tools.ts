@@ -1838,18 +1838,35 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional(),
     },
     async ({ network_id: clientNetId }) => {
-      const effectiveNetId = getNetworkId(clientNetId);
-      // Caller role for 脱敏 decision (admin/owner = full, others = masked)
-      const callerRole = enforceUserId && effectiveNetId
-        ? getUserNetworkRole(enforceUserId, effectiveNetId)
+      // SEC-1 — use resolveReadScope, NOT getNetworkId. getNetworkId is
+      // for write-tool helpers and pairs with `canWrite`; READ tools that
+      // bypass canWrite and trust getNetworkId leak across tenants
+      // (PR2 v1 BLOCKER per 通信龙 audit — utok_ caller with
+      // enforceNetworkId=null could pass any network_id and read daemon
+      // names + allowed_secret_keys for tenants they're not a member of).
+      // resolveReadScope checks network_members for the user + denies
+      // on non-membership, mirroring REST resolveRestNetworkScope.
+      const readScope = resolveReadScope(clientNetId);
+      if (readScope.denied) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
+      }
+      // Caller role for 脱敏 decision (admin/owner = full, others = masked).
+      // Use the resolved scope's networkId (the verified one), not the
+      // unchecked clientNetId.
+      const scopedNetId = readScope.networkId ?? null;
+      const callerRole = enforceUserId && scopedNetId
+        ? getUserNetworkRole(enforceUserId, scopedNetId)
         : null;
-      const isPrivileged = callerRole === "admin" || callerRole === "owner";
+      // Network-bound tokens get full telemetry within their bound network
+      // (already gate-locked by enforceNetworkId path of resolveReadScope).
+      const isPrivileged = callerRole === "admin" || callerRole === "owner" || (!enforceUserId);
 
-      // Pull candidate daemons: nodes with role=host_supervisor in their
-      // last-reported config_snapshot, scoped to caller's network (SEC-1
-      // SQL-level enforcement). LEFT JOIN sessions for online flag +
-      // telemetry. LEFT JOIN api_tokens to drop revoked daemon ntoks.
-      const sql = `
+      // Pull candidate daemons. Active-token EXISTS subquery handles BOTH
+      // revoked daemon ntoks (revoked_at set) AND DELETEd token rows
+      // (the standard revokeToken path deletes the row, not flagging
+      // revoked_at — PR2 v1 SHOULD-FIX per 通信龙 audit). EXISTS naturally
+      // dedupes if a daemon ever had multiple tokens (e.g. rotation; nit ⚪).
+      let sql = `
         SELECT
           n.node_id, n.alias, n.hostname, n.network_id,
           n.runtimes_supported, n.allowed_secret_keys,
@@ -1862,13 +1879,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           n.config_snapshot
         FROM nodes n
         LEFT JOIN sessions s ON s.alias = n.alias AND (s.network_id = n.network_id OR s.network_id IS NULL)
-        LEFT JOIN api_tokens t ON t.network_id = n.network_id
-                              AND t.name = 'node:' || n.alias
-        WHERE n.network_id = ?1
-          AND (t.revoked_at IS NULL OR t.token_id IS NULL)
-        ORDER BY n.updated_at DESC
+        WHERE EXISTS (
+          SELECT 1 FROM api_tokens t
+          WHERE t.network_id = n.network_id
+            AND t.name = 'node:' || n.alias
+            AND t.revoked_at IS NULL
+        )
       `;
-      const rows = db.all<Record<string, any>>(sql, effectiveNetId || "default");
+      const sqlParams: any[] = [];
+      sql = addReadScope(sql, sqlParams, readScope, "n.network_id");
+      sql += ` ORDER BY n.updated_at DESC`;
+      const rows = db.all<Record<string, any>>(sql, ...sqlParams);
 
       // Filter to role=host_supervisor (read from config_snapshot;
       // schema-promoted columns runtimes_supported/allowed_secret_keys

@@ -1982,6 +1982,10 @@ Bun.serve({
         isPrivileged = true;
       }
 
+      // EXISTS subquery handles BOTH revoked_at SET and DELETEd token
+      // rows (revokeToken DELETEs the row in production — PR2 v1
+      // SHOULD-FIX per 通信龙 audit). EXISTS naturally dedupes daemons
+      // with rotated tokens.
       const sqlRows = db.all<Record<string, any>>(`
         SELECT
           n.node_id, n.alias, n.hostname, n.network_id,
@@ -1994,10 +1998,13 @@ Bun.serve({
           n.config_snapshot
         FROM nodes n
         LEFT JOIN sessions s ON s.alias = n.alias AND (s.network_id = n.network_id OR s.network_id IS NULL)
-        LEFT JOIN api_tokens t ON t.network_id = n.network_id
-                              AND t.name = 'node:' || n.alias
         WHERE n.network_id = ?1
-          AND (t.revoked_at IS NULL OR t.token_id IS NULL)
+          AND EXISTS (
+            SELECT 1 FROM api_tokens t
+            WHERE t.network_id = n.network_id
+              AND t.name = 'node:' || n.alias
+              AND t.revoked_at IS NULL
+          )
         ORDER BY n.updated_at DESC
       `, effectiveNetId);
 
