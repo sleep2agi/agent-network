@@ -10,6 +10,12 @@
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
+// MUST be the first import — installs Node <22.4 polyfill for
+// worker_threads.markAsUncloneable BEFORE any module that loads undici.
+// Skipping this lets RFC-028 probe-daemon import undici → crash on
+// Node 20.x users. See compat/uncloneable-shim.ts for rationale.
+import "./compat/uncloneable-shim.js";
+
 import { readFileSync, existsSync, writeFileSync, chmodSync } from "fs";
 import { dirname, join } from "path";
 import { hostname as osHostname, homedir } from "os";

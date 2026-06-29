@@ -47,7 +47,7 @@
     "url": "https://github.com/sleep2agi/agent-network/issues"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.4.0"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.140",
