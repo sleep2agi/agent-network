@@ -73,7 +73,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential python3 \
       curl ca-certificates unzip \
       tini \
+      chromium \
+      fonts-noto-cjk fonts-noto-mono \
     && rm -rf /var/lib/apt/lists/*
+
+# Tell puppeteer-core where to find the system chromium so it doesn't
+# try to download its own. Vincent 2026-06-29: Feishu card can't render
+# headings or tables — bot renders structured markdown replies to PNG
+# via puppeteer-core + this binary. CJK fonts above cover Chinese
+# glyphs (without them chromium renders CJK as blank boxes).
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install bun (required by agent-network + agent-node tooling paths).
 RUN curl -fsSL https://bun.sh/install | bash && \
