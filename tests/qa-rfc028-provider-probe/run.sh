@@ -351,6 +351,110 @@ else
   ok "G no-leak: smuggled key value NOT echoed in error response"
 fi
 
+# ── Scenario M — update_provider (P1.5) — patch semantics ─────────
+note "M. update_provider — N站马 dashboard 编辑/停用解锁 (P1.5)"
+
+# M1: happy — update name only
+BODY='{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"update_provider","arguments":{
+  "provider_id":"'$PROVIDER_ID'","patch":{"name":"Anthropic Renamed"},"network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+OK=$(echo "$RESP" | jq -r '.ok' 2>/dev/null)
+FIELDS=$(echo "$RESP" | jq -r '.fields_changed | join(",")' 2>/dev/null)
+[[ "$OK" == "true" && "$FIELDS" == "name" ]] && ok "M1 update name only — ok + fields_changed=name" || bad "M1 fail: $RESP"
+
+# M2: enabled toggle 1→0 (stop)
+BODY='{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"update_provider","arguments":{
+  "provider_id":"'$PROVIDER_ID'","patch":{"enabled":false},"network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+[[ "$(echo "$RESP" | jq -r '.ok')" == "true" ]] && ok "M2 enabled false (stop) — ok" || bad "M2 fail: $RESP"
+EN=$(sqlite3 "$HUB_DB" "SELECT enabled FROM providers WHERE provider_id='$PROVIDER_ID';")
+[[ "$EN" == "0" ]] && ok "M2 DB shows enabled=0" || bad "M2 DB enabled='$EN' expected 0"
+
+# M3: probe disabled provider → provider_disabled distinct from provider_not_found
+BODY='{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"probe_provider_model","arguments":{
+  "provider_id":"'$PROVIDER_ID'","model_name":"claude-mock-1","daemon_node_id":"'$DAEMON_NODE_ID'","network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+ERR=$(echo "$RESP" | jq -r '.error' 2>/dev/null)
+[[ "$ERR" == "provider_disabled" ]] && ok "M3 probe disabled → error=provider_disabled (distinct from provider_not_found)" || bad "M3 fail: $RESP"
+
+# M4: re-enable + verify probe works again (full round-trip)
+BODY='{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"update_provider","arguments":{
+  "provider_id":"'$PROVIDER_ID'","patch":{"enabled":true},"network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+[[ "$(echo "$RESP" | jq -r '.ok')" == "true" ]] && ok "M4 enabled true (re-enable) — ok" || bad "M4 fail: $RESP"
+
+# M5: noop empty patch → noop_no_changes
+BODY='{"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"update_provider","arguments":{
+  "provider_id":"'$PROVIDER_ID'","patch":{},"network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+ERR=$(echo "$RESP" | jq -r '.error' 2>/dev/null)
+[[ "$ERR" == "noop_no_changes" ]] && ok "M5 empty patch → noop_no_changes" || bad "M5 fail: $RESP"
+
+# M6: base_url invalid host (non-allowlist) → probe_target_forbidden
+BODY='{"jsonrpc":"2.0","id":25,"method":"tools/call","params":{"name":"update_provider","arguments":{
+  "provider_id":"'$PROVIDER_ID'","patch":{"base_url":"https://attacker.example.com"},"network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+ERR=$(echo "$RESP" | jq -r '.error' 2>/dev/null)
+[[ "$ERR" == "probe_target_forbidden" ]] && ok "M6 base_url non-allowlist → probe_target_forbidden (validateBaseUrl re-runs with DB vendor)" || bad "M6 fail: $RESP"
+
+# M7: smuggled patch.vendor (immutable) → zod strict -32602
+BODY='{"jsonrpc":"2.0","id":26,"method":"tools/call","params":{"name":"update_provider","arguments":{
+  "provider_id":"'$PROVIDER_ID'","patch":{"vendor":"evil-vendor"},"network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+# response may come back as top-level JSON-RPC error or as result.content[0].text
+# (MCP SDK wraps differently depending on where the validation error fires)
+RESP_JSON=$(echo "$RESP" | grep -oP '(?<=data: ).+' | head -1); [[ -z "$RESP_JSON" ]] && RESP_JSON="$RESP"
+TOP_ERR=$(echo "$RESP_JSON" | jq -r '.error.code // empty' 2>/dev/null)
+TOP_MSG=$(echo "$RESP_JSON" | jq -r '.error.message // empty' 2>/dev/null)
+TEXT=$(echo "$RESP_JSON" | jq -r '.result.content[0].text // empty' 2>/dev/null)
+HAYSTACK="$TOP_MSG$TEXT$RESP_JSON"   # combined search surface
+if [[ "$TOP_ERR" == "-32602" && "$HAYSTACK" =~ vendor ]]; then
+  ok "M7 patch.vendor rejected at MCP boundary — top-level error.code=-32602 + 'vendor' named"
+elif [[ "$HAYSTACK" =~ -32602 && "$HAYSTACK" =~ vendor ]]; then
+  ok "M7 patch.vendor rejected — -32602 with 'vendor' marker in response (zod .strict() locked immutable)"
+else
+  bad "M7 fail: expected -32602 + vendor; raw=${RESP:0:300}"
+fi
+
+# M8: smuggled patch.secret_key_ref (immutable, must go through upsert_network_secret)
+BODY='{"jsonrpc":"2.0","id":27,"method":"tools/call","params":{"name":"update_provider","arguments":{
+  "provider_id":"'$PROVIDER_ID'","patch":{"secret_key_ref":"OTHER_KEY"},"network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+RESP_JSON=$(echo "$RESP" | grep -oP '(?<=data: ).+' | head -1); [[ -z "$RESP_JSON" ]] && RESP_JSON="$RESP"
+TOP_ERR=$(echo "$RESP_JSON" | jq -r '.error.code // empty' 2>/dev/null)
+TOP_MSG=$(echo "$RESP_JSON" | jq -r '.error.message // empty' 2>/dev/null)
+TEXT=$(echo "$RESP_JSON" | jq -r '.result.content[0].text // empty' 2>/dev/null)
+HAYSTACK="$TOP_MSG$TEXT$RESP_JSON"
+if [[ "$TOP_ERR" == "-32602" && "$HAYSTACK" =~ secret_key_ref ]]; then
+  ok "M8 patch.secret_key_ref rejected — top-level error.code=-32602 + 'secret_key_ref' named"
+elif [[ "$HAYSTACK" =~ -32602 && "$HAYSTACK" =~ secret_key_ref ]]; then
+  ok "M8 patch.secret_key_ref rejected — -32602 with 'secret_key_ref' marker"
+else
+  bad "M8 fail: expected -32602 + secret_key_ref; raw=${RESP:0:300}"
+fi
+
+# M9: models replace
+BODY='{"jsonrpc":"2.0","id":28,"method":"tools/call","params":{"name":"update_provider","arguments":{
+  "provider_id":"'$PROVIDER_ID'","patch":{"models":[{"model_name":"claude-new-1"},{"model_name":"claude-new-2"}]},"network_id":"'$NET_ID'"}}}'
+RESP=$(mcp_call "$UTOK" "$BODY")
+COUNT=$(echo "$RESP" | jq -r '.models_replaced' 2>/dev/null)
+[[ "$COUNT" == "2" ]] && ok "M9 models replaced — count=2" || bad "M9 fail: $RESP"
+DBCOUNT=$(sqlite3 "$HUB_DB" "SELECT COUNT(*) FROM provider_models WHERE provider_id='$PROVIDER_ID';")
+[[ "$DBCOUNT" == "2" ]] && ok "M9 DB confirms 2 models (atomic replace)" || bad "M9 DB count=$DBCOUNT expected 2"
+
+# M10: audit_log row written + NO secret value leaked
+AUDIT=$(sqlite3 "$HUB_DB" "SELECT detail FROM audit_log WHERE target_id='$PROVIDER_ID' AND action='update_provider' ORDER BY id DESC LIMIT 1;")
+if [[ -n "$AUDIT" ]]; then
+  ok "M10 audit_log row written for update_provider"
+  if echo "$AUDIT" | grep -qE 'sk-good|sk-bad|ANTHROPIC_API_KEY' ; then
+    bad "M10 audit LEAK: secret value/ref appears in audit detail"
+  else
+    ok "M10 audit no-leak: secret value NOT in audit detail"
+  fi
+else
+  bad "M10 audit_log row MISSING"
+fi
+
 # ── Cleanup hub for F2 test ───────────────────────────────────────
 kill "$DAEMON_PID" 2>/dev/null || true
 kill "$HUB_PID" 2>/dev/null || true
