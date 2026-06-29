@@ -755,7 +755,9 @@ Vincent telegram 5947 把 §12 拍板权下放给主笔（通信IM马），通�
 - agent 看不懂 prompt 里的 Read 提示 → 弱模型可能漏 Read。系统 prompt 软约束 + 用户后续追问可补救；P2 加 system prompt 强约束（per-channel）。
 - 图片"语义"丢失（agent 没 Read 就回 fallback）— 不致命，用户重发 / 加文字提示即可。
 
-**Implementation status**：preview.4 已包含 adapter 下载 + bridge IPC + agent-node 接收 image array 全链路（commit `ada2227` + `1eaaf62`）；2026-06-29 patch 改 `mediaDir` 默认基址至 `/work/feishu-attachments/**`、加 magic-byte mime 白名单、把 path append 到 IPC handler 的 prompt 文本（commit pending）。Vincent 端须加 `im:resource:download` 飞书 scope + 发版。
+**Implementation status**：preview.4 已包含 adapter 下载 + bridge IPC + agent-node 接收 image array 全链路（commit `ada2227` + `1eaaf62`）；2026-06-29 patch 改 `mediaDir` 默认基址至 `/work/feishu-attachments/**`、加 magic-byte mime 白名单、把 path append 到 IPC handler 的 prompt 文本（PR #321）。
+
+**Scope 状态**：live probe 确认 `im.messageResource.get` 走 `im:message` wide scope，Vincent 已加 → **图片输入方向无需额外飞书后台操作**。反向 `POST /im/v1/images` upload（bot→user 发图）仍缺 `im:resource:upload`，未来 bot 主动发图回复 / image generation 流派工时再补。
 
 ---
 

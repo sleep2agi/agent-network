@@ -90,9 +90,11 @@ Vincent 2026-06-29 简化方案：用户给 bot 发图，bot **不强制走** vi
 - 可审计 —— 文件留在磁盘，operator 能 spot-check + GC
 - 安全 —— 路径 `/work/feishu-attachments/**` 显式**在** hardening 文件读 denylist 外（denylist 守护的是 `/work/.anet/**` 等 secret 区），不冲突
 
-**飞书后台必加 scope**：
-- `im:resource:download`（或 wide `im:resource`）— 否则 `messageResource.get` 401，adapter 静默失败 content.images 永远为空
-- mime 白名单（magic-byte 检）：PNG / JPEG / WebP / GIF，其余拒收
+**飞书 scope 状态**（2026-06-29 live probe 确认）：
+- ✅ `messageResource.get` (image download，本流必走的 API) 已在 `im:message` wide scope 范围内 — **无需额外加 scope**
+- ❌ `POST /im/v1/images` (bot 反向发图给用户) 仍需 `im:resource:upload`（或 wide `im:resource`），但该方向属反向输出，不影响本节图片输入
+
+**Adapter 层 mime 白名单**（magic-byte 检）：PNG / JPEG / WebP / GIF，其余（PDF / ZIP / 脚本 / HTML / ELF / 截断 / 偏移 RIFF）拒收不落盘
 
 **目录布局**：
 ```
