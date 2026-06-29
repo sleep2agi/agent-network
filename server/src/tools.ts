@@ -2513,8 +2513,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // daemon.role==host_supervisor here: a child whose creator daemon
     // got demoted should still be stoppable. The daemon will refuse
     // with noop_not_my_child if children_map doesn't know it.
-    const daemon = db.get<{ node_id: string; network_id: string }>(
-      `SELECT node_id, network_id FROM nodes WHERE node_id = ?1`, args.daemon_node_id,
+    //
+    // PR1.2 e2e catch (BLOCKER): pushEvent keys SSE by clientKey ≈
+    // `${networkId}:${sessionName}`, and agent-node registers its SSE
+    // connection under its ALIAS (not its node_id). The create_node
+    // doorbell at line ~2197 correctly pushes via `daemon.alias`;
+    // stop_node was pushing via `daemon_node_id` so every doorbell
+    // missed every SSE client → daemon never woke up → request_id
+    // stayed 'pending' forever → child never reaped. The 24 unit tests
+    // in stop-delete-node.test.ts all mock pushEvent and inject the
+    // post-doorbell handler call directly, so single-unit coverage
+    // couldn't surface this — exactly the failure class 通信龙 said
+    // the docker e2e gate exists to catch (BLOCKER-1 同源). Load the
+    // alias along with node_id + network_id and dispatch to the alias.
+    const daemon = db.get<{ node_id: string; alias: string; network_id: string }>(
+      `SELECT node_id, alias, network_id FROM nodes WHERE node_id = ?1`, args.daemon_node_id,
     );
     if (!daemon) return { ok: false, error: "daemon_not_found" };
     if (daemon.network_id !== node.network_id) {
@@ -2614,7 +2627,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     }
 
     // SSE doorbell — daemon will pull via get_stop_request.
-    pushEvent(args.daemon_node_id, { type: "stop_node", request_id: requestId }, node.network_id);
+    // PR1.2 e2e fix: route by daemon.alias (see SELECT above for the
+    // BLOCKER explanation). Mirrors create_node's pushEvent target at
+    // line ~2197.
+    pushEvent(daemon.alias, { type: "stop_node", request_id: requestId }, node.network_id);
     return {
       ok: true, request_id: requestId, action: args.action,
       lifecycle_state: newState, in_flight_at_dispatch: inFlight,

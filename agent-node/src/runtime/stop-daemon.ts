@@ -166,24 +166,63 @@ export async function handleStopDoorbell(
   }
 
   // SIGTERM → grace → SIGKILL
+  //
+  // PR1.2 e2e BLOCKER catch (#348 docker run-3 2026-06-30): the
+  // recorded `entry.pid` is the `anet node start` wrapper, which
+  // create-node-daemon.ts spawns with `detached: true` (setsid →
+  // wrapper becomes its own session leader, pgid == pid). The wrapper
+  // then spawns an `agent-node --alias <name>` grandchild as a regular
+  // child of the wrapper. When we SIGTERM only the wrapper PID, the
+  // grandchild gets reparented to PID 1 and continues running — pgrep
+  // still finds it, so the child is "stopped" in the hub's eyes but
+  // still draining vendor calls / mutating /work. The 24 unit tests
+  // all mock signalProcess and treat the single PID as authoritative,
+  // so this couldn't surface in single-unit coverage.
+  //
+  // Fix: send signals to the negative-PID (process group) instead of
+  // the bare PID. POSIX kill(-pgid, sig) delivers to every process in
+  // the pgid, which is exactly what we want — the wrapper + every
+  // descendant (grandchild agent-node, any helper processes the
+  // wrapper itself spawned). Fall back to bare-PID on EPERM /
+  // platforms where negative-PID isn't supported. The kill-0 liveness
+  // check stays bare-PID since the wrapper PID's existence is the
+  // authoritative "is the chain still up" signal.
+  const sendGroupSignal = (pid: number, sig: NodeJS.Signals | 0) => {
+    try {
+      signalProcess(-pid, sig);
+    } catch (e: any) {
+      if (e?.code === "ESRCH") return;     // group gone — caller will see via isAlive
+      if (e?.code === "EPERM" || e?.code === "EINVAL") {
+        // No process group leader / negative-PID unsupported. Fall
+        // back to single-PID signal — better than silently failing.
+        try { signalProcess(pid, sig); } catch (e2: any) {
+          if (e2?.code !== "ESRCH") throw e2;
+        }
+        return;
+      }
+      throw e;
+    }
+  };
   let exit_signal: string = "UNKNOWN";
   try {
     if (isAlive(entry.pid, signalProcess)) {
-      signalProcess(entry.pid, "SIGTERM");
+      sendGroupSignal(entry.pid, "SIGTERM");
       exit_signal = "SIGTERM";
-      deps.log(`[stop-daemon] sent SIGTERM to pid=${entry.pid} alias=${entry.alias} grace=${grace_seconds}s`);
+      deps.log(`[stop-daemon] sent SIGTERM to pgid=${entry.pid} alias=${entry.alias} grace=${grace_seconds}s (covers wrapper + agent-node grandchild)`);
       const reaped = await waitForExit(entry.pid, grace_seconds * 1000, signalProcess, sleep, now);
       if (!reaped) {
-        try { signalProcess(entry.pid, "SIGKILL"); } catch (e: any) {
-          if (e?.code !== "ESRCH") throw e;
-        }
+        sendGroupSignal(entry.pid, "SIGKILL");
         exit_signal = "SIGKILL";
-        deps.warn(`[stop-daemon] grace exceeded, sent SIGKILL to pid=${entry.pid} alias=${entry.alias}`);
+        deps.warn(`[stop-daemon] grace exceeded, sent SIGKILL to pgid=${entry.pid} alias=${entry.alias}`);
         await waitForExit(entry.pid, 5_000, signalProcess, sleep, now);
       }
     } else {
       exit_signal = "ALREADY_DEAD";
       deps.log(`[stop-daemon] pid=${entry.pid} alias=${entry.alias} already dead before SIGTERM`);
+      // Defense-in-depth: the wrapper may have died (crash / external
+      // kill) while the detached grandchild kept running. Sweep any
+      // stray agent-node process matching this alias and SIGTERM it.
+      await sweepOrphansForAlias(entry.alias, signalProcess, deps, "wrapper was already dead");
     }
   } catch (e: any) {
     if (e?.code === "ESRCH") {
@@ -223,6 +262,15 @@ export async function handleStopDoorbell(
     }
   }
 
+  // PR1.2 e2e defense-in-depth: even after pgid signaling, sweep any
+  // residual agent-node process matching this alias. Catches the case
+  // where a grandchild might have called its own setsid() and escaped
+  // the wrapper's pgid (current agent-node doesn't, but the supervisor
+  // path could change in the future and this assertion would still
+  // hold). Verifies via /proc/<pid>/cmdline argv-adjacency to avoid
+  // PR1.1's alias-substring footgun.
+  await sweepOrphansForAlias(entry.alias, signalProcess, deps, "post-pgid-signal residual sweep");
+
   childrenMap.delete(child_node_id);
 
   await deps.callCommHub("ack_stop_request", {
@@ -230,6 +278,54 @@ export async function handleStopDoorbell(
   }).catch((e: any) => {
     deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`);
   });
+}
+
+/** PR1.2 e2e helper — find any running agent-node process whose argv
+ * has `--alias <alias>` (token-exact, NOT substring) AND whose binary
+ * is `agent-node` or `cli.js`, and send SIGTERM. Used as a safety net
+ * in handleStopDoorbell on two paths:
+ *   1. wrapper-already-dead branch (grandchild may have been
+ *      reparented to PID 1 by the wrapper's prior death)
+ *   2. post-pgid-signal residual sweep (catches any future setsid'd
+ *      grandchild that escaped the pgid)
+ * Excludes self-pid + the daemon's own pid (the daemon itself is
+ * `agent-node --alias <daemon-alias>` so we mustn't reach it). The
+ * call site already passes the CHILD's alias, not the daemon's, but
+ * we double-check by excluding self-pid as an extra belt — if anyone
+ * ever calls this with the daemon's own alias by mistake, the
+ * self-pid guard keeps it harmless.
+ */
+async function sweepOrphansForAlias(
+  alias: string,
+  signalProcess: (pid: number, sig: NodeJS.Signals | 0) => void,
+  deps: StopDoorbellDeps,
+  reason: string,
+): Promise<void> {
+  try {
+    const { execSync, readFileSync } = await import("node:child_process") as any as { execSync: (cmd: string, opts: any) => string };
+    const fs = await import("node:fs");
+    // PR1.1 cmdlineMatchesAlias-style verification: regex pgrep first
+    // (cheap shortlist), then /proc/<pid>/cmdline argv-adjacency
+    // check to filter substring-collision false positives.
+    let out: string;
+    try {
+      out = execSync(`pgrep -af 'agent-node' || true`, { encoding: "utf8" });
+    } catch {
+      return;
+    }
+    const candidates = out.split(/\r?\n/)
+      .map(l => parseInt(l.trim().split(/\s+/)[0] || "0", 10))
+      .filter(p => Number.isFinite(p) && p > 0 && p !== process.pid);
+    for (const p of candidates) {
+      let cmdline: string | null = null;
+      try { cmdline = fs.readFileSync(`/proc/${p}/cmdline`, "utf8"); } catch { continue; }
+      if (!cmdlineMatchesAlias(cmdline, alias)) continue;
+      deps.warn(`[stop-daemon] sweeping orphan pid=${p} alias=${alias} (${reason})`);
+      try { signalProcess(p, "SIGTERM"); } catch { /* may already be dead */ }
+    }
+  } catch (e: any) {
+    deps.warn(`[stop-daemon] orphan sweep skipped (${reason}): ${e?.message || e}`);
+  }
 }
 
 // ─── RFC-027 PR1.1 — rebuildChildrenMapOnBoot ─────────────────────────
