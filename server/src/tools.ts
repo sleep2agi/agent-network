@@ -298,11 +298,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // discovery (#337 extracts this field). "host_supervisor" =
         // anet daemon. Default-stripping zod would drop this otherwise.
         role: z.string().max(64).optional().nullable(),
-        // RFC-026 §9.3 — daemon self-declare. Promoted to first-class
-        // columns by PR2 so list_host_supervisors reads them directly
-        // (no per-call snapshot JSON parse). Soft caps avoid abuse.
-        runtimes_supported: z.array(z.string().max(64)).max(16).optional(),
-        allowed_secret_keys: z.array(z.string().max(64)).max(64).optional(),
+        // RFC-026 §9.3 / #338 PR3 — daemon self-declare nested under
+        // `daemon_capabilities` (canonical shape per existing hub reads
+        // at tools.ts:2010/2075 — PR1/PR2 placed these top-level, hub
+        // never saw them, max_concurrent_children stayed default + the
+        // allowlists stayed unenforced. PR3 nit ① per 通信龙).
+        // Soft caps avoid abuse via attacker daemon.
+        daemon_capabilities: z.object({
+          runtimes_supported: z.array(z.string().max(64)).max(16).optional(),
+          allowed_secret_keys: z.array(z.string().max(64)).max(64).optional(),
+          max_concurrent_children: z.number().int().min(1).max(1000).optional(),
+        }).optional(),
       }).optional().describe("RFC-024 — masked node config snapshot"),
     },
     async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, config_snapshot: cfgSnap }) => {
@@ -1999,21 +2005,24 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       // Read daemon's host_supervisor capability + allowlist from its
-      // last reported config_snapshot. P1 simplification: we accept
-      // (allowed_runtimes empty / allowed_secret_keys absent) as
-      // "accept any in the global enum"; P2 will tighten when daemon
-      // self-publishes its own allowlist via daemon_capabilities.
+      // last reported config_snapshot.
+      // PR3 (#338): canonical key is `daemon_capabilities.runtimes_supported`
+      // (RFC-026 §9.3); legacy `daemon_capabilities.allowed_runtimes`
+      // also honored for back-compat with pre-PR3 daemons.
       let daemonAllowList = new Set<string>();
       let daemonAllowedRuntimes: string[] | null = null;
       try {
         const snap = daemon.config_snapshot ? JSON.parse(daemon.config_snapshot) : null;
-        if (snap?.daemon_capabilities?.allowed_secret_keys) {
-          daemonAllowList = new Set(snap.daemon_capabilities.allowed_secret_keys);
+        const caps = snap?.daemon_capabilities;
+        if (caps?.allowed_secret_keys) {
+          daemonAllowList = new Set(caps.allowed_secret_keys);
         }
-        if (Array.isArray(snap?.daemon_capabilities?.allowed_runtimes)) {
-          daemonAllowedRuntimes = snap.daemon_capabilities.allowed_runtimes;
-        }
-      } catch { /* permissive P1 fallback */ }
+        // Prefer new canonical name; fall back to legacy.
+        const rt = Array.isArray(caps?.runtimes_supported) ? caps.runtimes_supported
+                 : Array.isArray(caps?.allowed_runtimes)   ? caps.allowed_runtimes
+                 : null;
+        if (rt) daemonAllowedRuntimes = rt;
+      } catch { /* permissive fallback */ }
 
       // §4.2.2 — structural validation (catches name/runtime/model/
       // flag injection at the hub edge). Daemon repeats this; double
@@ -2838,16 +2847,23 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
     ],
   );
   if (input.config_snapshot) {
-    // RFC-026 §9.3 / #338 PR2 — promote daemon self-declare fields to
-    // first-class indexable columns alongside the snapshot blob. The
-    // snapshot stays the source of truth for non-list reads; the columns
-    // exist so `list_host_supervisors` doesn't JSON.parse on every call.
-    // typeof-narrow the array fields (don't trust shape per
-    // [[feedback_typeof_narrow_extracted_fields]]; zod has already
-    // narrowed, but the input.config_snapshot type is `unknown` here).
+    // RFC-026 §9.3 / #338 PR2+PR3 — promote daemon self-declare fields
+    // to first-class indexable columns alongside the snapshot blob.
+    // The snapshot stays the source of truth for non-list reads; the
+    // columns exist so `list_host_supervisors` doesn't JSON.parse on
+    // every call. typeof-narrow per
+    // [[feedback_typeof_narrow_extracted_fields]] — zod narrowed but
+    // input.config_snapshot is typed `unknown` here.
+    //
+    // PR3 nit ①: read from nested `daemon_capabilities.*` (canonical
+    // per RFC §9.3 + matches existing hub create_node reads at
+    // tools.ts:2010/2075). PR2 ate from top-level keys, which the
+    // hub create_node path never read → max_concurrent_children
+    // backpressure was dead config + allowlist enforcement bypassed.
     const snap = input.config_snapshot as Record<string, unknown> | null;
-    const runtimesRaw = snap?.runtimes_supported;
-    const allowedRaw = snap?.allowed_secret_keys;
+    const caps = (snap?.daemon_capabilities ?? null) as Record<string, unknown> | null;
+    const runtimesRaw = caps?.runtimes_supported;
+    const allowedRaw = caps?.allowed_secret_keys;
     const runtimesJson = Array.isArray(runtimesRaw) && runtimesRaw.every(s => typeof s === "string")
       ? JSON.stringify(runtimesRaw)
       : null;

@@ -225,6 +225,19 @@ export function mergePatch(existing: any, patch: ConfigPatch): any {
  * `_envRef` placeholders stay opaque; nothing from `env` block at all
  * is included. Only model + the 6 dashboard-editable flags + role
  * (daemon discovery, see issue #338 / RFC-026 P2). */
+export interface DaemonCapabilities {
+  /** RFC-026 §9.3 — list of runtimes this daemon advertises support
+   * for (declaration only; D2 spawn fail-fast catches "declared but
+   * binary missing" at create-time). */
+  runtimes_supported?: string[];
+  /** RFC-026 §9.3 — env-var keys this daemon accepts in env_blob
+   * (fail-closed default per §9.7). */
+  allowed_secret_keys?: string[];
+  /** RFC-026 §9 — hub backpressure cap (tools.ts daemon_max_children).
+   * Daemon-side enforcement also uses this. Default 20 if unset. */
+  max_concurrent_children?: number;
+}
+
 export interface MaskedSnapshot {
   model?: string | null;
   flags: Record<string, unknown>;
@@ -235,15 +248,14 @@ export interface MaskedSnapshot {
    * undefined / other values = regular agent-node. Read from config.json's
    * `role` field, narrow-typed (only string passes). */
   role?: string | null;
-  /** RFC-026 §9.3 daemon self-declare — list of runtimes this daemon
-   * advertises support for. Hub promotes to nodes.runtimes_supported
-   * column (#338 PR2) for indexed dashboard discovery. Empty array OK
-   * (regular non-daemon nodes leave this absent). */
-  runtimes_supported?: string[];
-  /** RFC-026 §9.3 daemon self-declare — env-var keys this daemon is
-   * willing to accept in env_blob (fail-closed default per §9.7).
-   * Hub promotes to nodes.allowed_secret_keys (#338 PR2). */
-  allowed_secret_keys?: string[];
+  /** Daemon-self-declare bundle. Nested under `daemon_capabilities`
+   * because the hub's `create_node` tool already reads
+   * `snapshot.daemon_capabilities.allowed_runtimes / .max_concurrent_children`
+   * (tools.ts:2010/2075). PR1+PR2 mistakenly put the fields at the
+   * top level → hub never saw them → max_concurrent_children stayed
+   * the hardcoded 20 default + allowlist enforcement was bypassed.
+   * 通信龙 nit ① decision: nest, don't delete. */
+  daemon_capabilities?: DaemonCapabilities;
 }
 export function buildConfigSnapshot(
   fileConfig: any,
@@ -257,15 +269,24 @@ export function buildConfigSnapshot(
     config_update_capable: configUpdateCapable,
     role: typeof fileConfig?.role === "string" ? fileConfig.role : null,
   };
-  // Self-declare arrays — only emit when valid; narrow with typeof per
-  // [[feedback_typeof_narrow_extracted_fields]] (don't trust user JSON).
+  // Self-declare nested under daemon_capabilities — only emit fields
+  // when valid (typeof + Array.isArray narrow per
+  // [[feedback_typeof_narrow_extracted_fields]]; don't trust user JSON).
+  const caps: DaemonCapabilities = {};
   const rt = fileConfig?.runtimes_supported;
   if (Array.isArray(rt) && rt.every((s: unknown) => typeof s === "string")) {
-    out.runtimes_supported = rt;
+    caps.runtimes_supported = rt;
   }
   const ask = fileConfig?.allowed_secret_keys;
   if (Array.isArray(ask) && ask.every((s: unknown) => typeof s === "string")) {
-    out.allowed_secret_keys = ask;
+    caps.allowed_secret_keys = ask;
+  }
+  const mc = fileConfig?.max_concurrent_children;
+  if (typeof mc === "number" && Number.isFinite(mc) && mc > 0) {
+    caps.max_concurrent_children = mc;
+  }
+  if (Object.keys(caps).length > 0) {
+    out.daemon_capabilities = caps;
   }
   const f = (fileConfig?.flags || {}) as Record<string, unknown>;
   for (const k of ALLOWED_FLAGS) {

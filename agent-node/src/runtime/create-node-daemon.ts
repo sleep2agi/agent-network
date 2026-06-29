@@ -446,6 +446,41 @@ export async function handleCreateNodeDoorbell(
     return;
   }
 
+  // RFC-026 §9.3 D2 / #338 PR3 — capability fail-fast.
+  // Survives-5-seconds is the real "started" signal: the existing kill-0
+  // catches insta-die (binary missing / spawn-exec fail / SIGSEGV), but
+  // a daemon that declared `runtimes_supported: ["codex-sdk"]` without
+  // the codex binary or `OPENAI_API_KEY` configured produces a child
+  // that starts OK then dies mid-bootstrap (vendor adapter init throws).
+  // 通信龙 §9.3 nit: "declared ≠ guarantee" — declare is for dashboard
+  // candidate filtering, spawn is the truth check.
+  //
+  // Wait 5s + re-kill-0. Dashboard's create flow tolerates ≤30s.
+  // If dead → ack `runtime_capability_check_failed` so hub marks the
+  // request failed with the right reason (audit_log "daemon_capability_lied"
+  // surfaces the gap between declaration and reality).
+  const FAIL_FAST_MS = 5_000;
+  await new Promise<void>(resolve => setTimeout(resolve, FAIL_FAST_MS));
+  let stillAlive = false;
+  if (childPid > 0) {
+    try {
+      process.kill(childPid, 0);
+      stillAlive = true;
+      deps.log(`[create-node] +${FAIL_FAST_MS}ms capability check OK: pid=${childPid} still alive`);
+    } catch (kerr: any) {
+      const msg = `child died within ${FAIL_FAST_MS}ms post-spawn (likely missing runtime binary or auth for runtime='${req.node_spec.runtime}'): ${kerr?.message || kerr}`;
+      deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
+      await deps.callCommHub("ack_create_request", {
+        request_id,
+        status: "runtime_capability_check_failed",
+        error: msg.slice(0, 800),
+        runtime: req.node_spec.runtime,
+      }).catch(() => {});
+      return;
+    }
+  }
+  void stillAlive;
+
   // Step 4 — ack 'started' (success path; hub flips to 'succeeded' on
   // child's first report_status content-match)
   await deps.callCommHub("ack_create_request", {

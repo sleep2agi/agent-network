@@ -268,3 +268,48 @@ describe("minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable)",
     }
   });
 });
+
+// PR3 #338 / RFC-026 §9.3 D2 — fail-fast spawn detection primitive.
+// 通信龙 mandate: "真起子进程测——按你说的需要真 binary / Docker 就走 Docker，
+// 别 mock 糊弄". claimAndSpawnChild's full path is wired through hub MCP +
+// SSE doorbell; that's covered by the integration test fixture. These two
+// tests pin the BEHAVIORAL PRIMITIVE my new 5s window relies on, using real
+// `node` subprocesses (no mocks): kill-0 raises ESRCH if pid is dead, succeeds
+// if alive. If Node's child_process / process.kill semantics ever drift, the
+// fail-fast code silently breaks — these tests catch that.
+describe("FAIL_FAST_MS primitive — real subprocess kill-0 lifecycle", () => {
+  test("child that exits within window → process.kill(pid, 0) raises ESRCH after wait", async () => {
+    const { spawn } = await import("node:child_process");
+    // Real Node subprocess; exits ~50ms after spawn.
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(1), 50)"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      detached: true,
+    });
+    const pid = child.pid!;
+    expect(pid).toBeGreaterThan(0);
+    child.unref();
+    // Wait 500ms — well past the 50ms child exit.
+    await new Promise(r => setTimeout(r, 500));
+    // kill-0 must raise (child is dead → ESRCH).
+    let threw = false;
+    try { process.kill(pid, 0); } catch { threw = true; }
+    expect(threw).toBe(true);
+  });
+
+  test("child that survives window → process.kill(pid, 0) succeeds", async () => {
+    const { spawn } = await import("node:child_process");
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 10000)"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      detached: true,
+    });
+    const pid = child.pid!;
+    expect(pid).toBeGreaterThan(0);
+    child.unref();
+    // 200ms wait — child still in its 10s sleep.
+    await new Promise(r => setTimeout(r, 200));
+    // kill-0 must succeed (child alive).
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    // cleanup so the test doesn't leave a child running 10s post-suite.
+    try { process.kill(pid, "SIGKILL"); } catch { /* may already exit */ }
+  });
+});

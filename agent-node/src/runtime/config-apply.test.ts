@@ -286,3 +286,115 @@ describe("buildConfigSnapshot — masked report (no secrets)", () => {
     expect(snap.config_update_capable).toBe(false);
   });
 });
+
+// PR3 #338 nit ④ — buildConfigSnapshot role + daemon_capabilities wire-format
+// lock. PR1 added `role`, PR2 added daemon self-declare at top level, neither
+// asserted on the output shape. Hub side reads daemon_capabilities.* canonically
+// (tools.ts:2010/2075) so any drift here silently breaks daemon discovery +
+// allowlist enforcement.
+describe("buildConfigSnapshot — role (PR1 #338)", () => {
+  test("role: host_supervisor passes through (string)", () => {
+    expect(buildConfigSnapshot({ role: "host_supervisor" }, false, 0).role).toBe("host_supervisor");
+  });
+
+  test("role: member passes through", () => {
+    expect(buildConfigSnapshot({ role: "member" }, false, 0).role).toBe("member");
+  });
+
+  test("role: missing → null (not undefined; dashboard distinguishes)", () => {
+    expect(buildConfigSnapshot({}, false, 0).role).toBeNull();
+  });
+
+  test("role: non-string narrowed to null (typeof guard)", () => {
+    expect(buildConfigSnapshot({ role: 42 }, false, 0).role).toBeNull();
+    expect(buildConfigSnapshot({ role: { evil: "obj" } }, false, 0).role).toBeNull();
+    expect(buildConfigSnapshot({ role: ["leader"] }, false, 0).role).toBeNull();
+    expect(buildConfigSnapshot({ role: null }, false, 0).role).toBeNull();
+  });
+});
+
+describe("buildConfigSnapshot — daemon_capabilities (PR3 #338 nit ①)", () => {
+  test("nests runtimes_supported + allowed_secret_keys + max_concurrent_children", () => {
+    const snap = buildConfigSnapshot({
+      runtimes_supported: ["claude-agent-sdk", "codex-sdk"],
+      allowed_secret_keys: ["ANTHROPIC_API_KEY"],
+      max_concurrent_children: 50,
+    }, false, 0);
+    expect(snap.daemon_capabilities).toEqual({
+      runtimes_supported: ["claude-agent-sdk", "codex-sdk"],
+      allowed_secret_keys: ["ANTHROPIC_API_KEY"],
+      max_concurrent_children: 50,
+    });
+  });
+
+  test("matches hub canonical path snap.daemon_capabilities.* — NOT at top level", () => {
+    // tools.ts:2075 reads exactly `snap?.daemon_capabilities?.max_concurrent_children`.
+    // PR1+PR2 mistakenly put fields at top level → hub fell back to the hardcoded
+    // 20 default + allowlist enforcement was bypassed. This test pins the location.
+    const snap = buildConfigSnapshot({
+      runtimes_supported: ["X"],
+      allowed_secret_keys: ["Y"],
+      max_concurrent_children: 99,
+    }, false, 0);
+    expect(snap.daemon_capabilities?.max_concurrent_children).toBe(99);
+    expect(snap.daemon_capabilities?.runtimes_supported).toEqual(["X"]);
+    expect(snap.daemon_capabilities?.allowed_secret_keys).toEqual(["Y"]);
+    // The PR1/PR2 misplacement guard:
+    expect((snap as any).max_concurrent_children).toBeUndefined();
+    expect((snap as any).runtimes_supported).toBeUndefined();
+    expect((snap as any).allowed_secret_keys).toBeUndefined();
+  });
+
+  test("partial declare: only runtimes_supported emits, others omitted", () => {
+    const snap = buildConfigSnapshot({ runtimes_supported: ["claude-agent-sdk"] }, false, 0);
+    expect(snap.daemon_capabilities).toEqual({ runtimes_supported: ["claude-agent-sdk"] });
+    expect(snap.daemon_capabilities?.allowed_secret_keys).toBeUndefined();
+    expect(snap.daemon_capabilities?.max_concurrent_children).toBeUndefined();
+  });
+
+  test("missing → daemon_capabilities undefined (regular non-daemon node)", () => {
+    expect(buildConfigSnapshot({}, false, 0).daemon_capabilities).toBeUndefined();
+  });
+
+  test("typeof narrow: non-array runtimes_supported dropped silently", () => {
+    expect(buildConfigSnapshot({ runtimes_supported: "claude-agent-sdk" }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+    expect(buildConfigSnapshot({ runtimes_supported: 42 }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+    expect(buildConfigSnapshot({ runtimes_supported: null }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+  });
+
+  test("typeof narrow: array with non-string element dropped silently", () => {
+    expect(buildConfigSnapshot({ runtimes_supported: ["claude-agent-sdk", 42] }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+    expect(buildConfigSnapshot({ allowed_secret_keys: ["KEY", null] }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+  });
+
+  test("typeof narrow: max_concurrent_children non-finite or non-positive dropped", () => {
+    expect(buildConfigSnapshot({ max_concurrent_children: 0 }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+    expect(buildConfigSnapshot({ max_concurrent_children: -5 }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+    expect(buildConfigSnapshot({ max_concurrent_children: "20" }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+    expect(buildConfigSnapshot({ max_concurrent_children: NaN }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+    expect(buildConfigSnapshot({ max_concurrent_children: Infinity }, false, 0)
+      .daemon_capabilities).toBeUndefined();
+  });
+
+  test("partial valid + partial invalid: only valid fields included", () => {
+    const snap = buildConfigSnapshot({
+      runtimes_supported: ["claude-agent-sdk"],   // valid
+      allowed_secret_keys: "not-array",            // invalid → dropped
+      max_concurrent_children: 30,                 // valid
+    }, false, 0);
+    expect(snap.daemon_capabilities).toEqual({
+      runtimes_supported: ["claude-agent-sdk"],
+      max_concurrent_children: 30,
+    });
+    expect(snap.daemon_capabilities?.allowed_secret_keys).toBeUndefined();
+  });
+});

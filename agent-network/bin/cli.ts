@@ -60,7 +60,7 @@ function tmuxAvailable(): boolean {
 // refetch). A `latest` agent-network release must pin a *stable* server.
 // `anet upgrade` (#88) surfaces this constant in its plan output so users
 // understand global-install version != version anet hub start actually runs.
-const PINNED_SERVER_VERSION = "0.9.0-preview.6";
+const PINNED_SERVER_VERSION = "0.9.0-preview.7";
 function sessionFileExists(uuid: string, cwd: string = process.cwd()): boolean {
   if (!uuid) return false;
   return existsSync(join(homedir(), ".claude", "projects", encodeCwd(cwd), `${uuid}.jsonl`));
@@ -309,7 +309,14 @@ interface Profile {
   // Team-scale demo metadata (issue #51 / RFC-008). Read by Phase 2 leader
   // fan-out logic — set by `anet demo sci-team` scaffold.
   team?: string;
-  role?: "leader" | "worker";
+  // Node role. PR1+PR3 widen the union beyond RFC-008's leader/worker:
+  //   - "host_supervisor" = anet daemon (RFC-026, set by `anet daemon init`)
+  //   - "leader" / "worker" = RFC-008 team scaffold
+  //   - "member" = explicit non-daemon (some external configs use this)
+  // string fallback keeps forward-compat with future roles without
+  // forcing `as any` casts at every call site (PR1 had to use `as any`
+  // because the union didn't include host_supervisor — 通信龙 nit ②).
+  role?: "leader" | "worker" | "host_supervisor" | "member" | string;
 }
 
 // Re-export from the pure helper module (src/normalize-runtime.ts) so
@@ -4002,14 +4009,14 @@ async function daemonInitCommand() {
   // daemon role unless --force.
   const existing = loadProfile(id);
   if (existing) {
-    if ((existing as any).role === "host_supervisor" && !opts.force) {
+    if (existing.role === "host_supervisor" && !opts.force) {
       console.log(`[anet daemon] ✓ "${id}" already a host_supervisor daemon`);
       console.log(`              config: .anet/nodes/${id}/config.json`);
       console.log(`              start:  anet daemon start ${id}`);
       return;
     }
-    if ((existing as any).role !== "host_supervisor" && !opts.force) {
-      console.error(`Error: node "${id}" exists with role="${(existing as any).role || "(none)"}", not "host_supervisor".`);
+    if (existing.role !== "host_supervisor" && !opts.force) {
+      console.error(`Error: node "${id}" exists with role="${existing.role || "(none)"}", not "host_supervisor".`);
       console.error(`Use --force to overwrite (re-mints token, keeps node_id), or pick a different name.`);
       process.exit(1);
     }
@@ -4049,7 +4056,7 @@ async function daemonInitCommand() {
 
   // Mint a network token via existing helper. Preserve node_id when re-init
   // with --force on an existing daemon (avoid orphaning child references).
-  const preservedNodeId = existing && (existing as any).node_id;
+  const preservedNodeId = existing?.node_id;
   const nodeIdToUse = preservedNodeId || `node_daemon_${randomBytes(6).toString("hex")}`;
   const stubProfile: any = {
     node_id: nodeIdToUse,
@@ -4100,6 +4107,18 @@ async function daemonInitCommand() {
   } else {
     console.log(`              secret keys allowed: (none — add with: anet daemon init ${id} --force --allow-secret KEY)`);
   }
+  // PR3 nit ③ — daemons spawn arbitrary anet child nodes via the
+  // create_node SSE doorbell, which is a significantly higher-privilege
+  // capability than a regular agent-node. Surface the perm posture so
+  // operators don't ship a daemon to a multi-tenant machine assuming
+  // it's locked down.
+  console.log(``);
+  console.log(`[anet daemon] ⚠ Permission posture:`);
+  console.log(`              flags.dangerouslySkipPermissions = true  (no per-call confirmation)`);
+  console.log(`              flags.teammateMode = true`);
+  console.log(`              role = host_supervisor                   (can fork child agent-nodes via hub)`);
+  console.log(`              → Run daemons only on machines you trust to act on your behalf.`);
+  console.log(`              → Edit .anet/nodes/${id}/config.json to disable individual flags.`);
   console.log(``);
   console.log(`Next: start it`);
   console.log(`  anet daemon start ${id}    (or anet daemon up ${id} to init+start in one go)`);
@@ -4117,8 +4136,8 @@ async function daemonStartCommand() {
     console.error(`  anet daemon init ${id}`);
     process.exit(1);
   }
-  if ((profile as any).role !== "host_supervisor") {
-    console.error(`Error: node "${id}" exists but role="${(profile as any).role || "(none)"}", not "host_supervisor".`);
+  if (profile.role !== "host_supervisor") {
+    console.error(`Error: node "${id}" exists but role="${profile.role || "(none)"}", not "host_supervisor".`);
     console.error(`Re-init as daemon: anet daemon init ${id} --force`);
     process.exit(1);
   }
@@ -4141,7 +4160,7 @@ async function daemonListCommand() {
   const ids = listProfileIds();
   const daemons = ids
     .map(id => ({ id, profile: loadProfile(id) }))
-    .filter(({ profile }) => profile && (profile as any).role === "host_supervisor");
+    .filter(({ profile }) => profile && profile.role === "host_supervisor");
   if (daemons.length === 0) {
     console.log("No host_supervisor daemons configured locally.");
     console.log("Create one: anet daemon init <name>");
