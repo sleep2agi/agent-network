@@ -1023,22 +1023,27 @@ daemon 不能仅凭 `runtimes_supported` 声明就报 success。
 
 ### 9.4 Wizard 三态流
 
-**Mockup (v3 ultra-minimal, Vincent: 「尽可能简洁」)**:
+**Mockup (响应式 — locked, Vincent: 「v3 感觉可以」+「之前横的也挺好」)**:
 
-![RFC-026 P2 Create Node Wizard Mockup](./assets/rfc-026-p2-wizard-mockup.png)
+最终方案是响应式 — desktop 走 3-栏横排 (v2 layout), mobile 走单屏竖排 (v3 layout),CSS `@media (min-width: 800px)` 断点自动切,**一份 HTML / 一组数据 / 一套 D1-D6 决策**。
 
-源: [`assets/rfc-026-p2-wizard-mockup.html`](./assets/rfc-026-p2-wizard-mockup.html) (静态 HTML, 浏览器直接打开; PNG 是 560×820 mobile-shape 渲染)。
+**桌面横排 (≥ 800px,3 栏并列)**:
 
-视觉精简到极致 (v3):
+![RFC-026 P2 — Desktop](./assets/rfc-026-p2-wizard-mockup-desktop.png)
 
-- **三步合并成一屏**——不再分 Step 1/2/3,服务器+名字+runtime+model 一个 form 全填,scroll 不到一屏就完。
-- **选服务器 = 下拉,不是卡片**——「服务器 [● my-server-01 ▾]」一行,下拉项里带状态点 + `name · 地点` 一句。
-- **核心 4 字段**:服务器 / 名字 / runtime / model。其余 flags/budget/timeout 全收进底部 **「▸ 高级」** 折叠区,默认不展。
-- **Model 灰掉不可达 + 单词「不可达」**——核心价值保留,详细原因点击展开看,默认不展。
-- **底部一行 footnote**: 把 count=1 / count=0 三态用文字交代,不画三套图。
-- 整体目标:**「填几个项,点创建」**——「一眼就会、几下填完」。
+**手机竖排 (< 800px,单屏 form)**:
 
-D1-D6 设计 + 6 决策锁定 + RFC-028 联动皆不变,只视觉浓缩。
+![RFC-026 P2 — Mobile](./assets/rfc-026-p2-wizard-mockup-mobile.png)
+
+源: [`assets/rfc-026-p2-wizard-mockup.html`](./assets/rfc-026-p2-wizard-mockup.html) (单文件响应式 HTML, 浏览器直接打开;PNG 是 1400×820 桌面态 + 560×820 手机态 headless 渲染)。
+
+两态共享原则:
+
+- **桌面横排** (v2): Step 1 选服务器 (卡片列, name + 状态点 + 一句话「支持 N 种 runtime」) | Step 2 配置 (名字 / Runtime radio / Model dropdown) | Step 3 确认。
+- **手机单屏** (v3): 4 字段竖排 (服务器 dropdown / 名字 / Runtime dropdown / Model dropdown) + 「▸ 高级」 折叠 + 取消/创建。
+- **共有**: Model dropdown 灰掉不可达项 + 「不可达」单词标注 (Vincent「不同服务器网络环境不一样」答案的核心 — 两态都保留)。
+- **共有**: count = 0 → 整页换装 daemon 引导; count = 1 → 服务器自动选 + 桌面 skip Step 1 / 手机 dropdown 预填; count ≥ 2 → 桌面 Step 1 必选 / 手机 dropdown 可选。
+- **共有 D1-D6 决策锁定**: passive 发现 / self-declare + fail-fast 兜底 / 三态 / SEC-1 / per-daemon env / RFC-028 联动。
 
 
 ```
