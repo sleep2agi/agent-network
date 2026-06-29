@@ -3782,6 +3782,26 @@ async function connectSSE() {
                 ).catch((e: any) => warn(`create-node-daemon failed: ${e?.message || e}`));
               }).catch((e: any) => warn(`create-node-daemon import failed: ${e?.message || e}`));
             }
+            // RFC-027 §2.4 — stop/delete doorbell. host_supervisor daemons
+            // process this; non-daemons silently ignore (config gate). The
+            // handler runs SIGTERM→grace→SIGKILL on the recorded child PID
+            // and (for delete) moves child workdir to ~/.anet/deleted/
+            // with chmod 700 per D7. childrenMap is populated by
+            // create-node-daemon on successful spawn (RFC-026 P1 path);
+            // an unrecognized child_node_id acks 'noop_not_my_child'.
+            if (ev.type === "stop_node" && fileConfig.role === "host_supervisor") {
+              log(`← SSE stop_node ${ev.request_id || ""}`);
+              import("./runtime/stop-daemon.js").then(({ handleStopDoorbell }) => {
+                handleStopDoorbell(
+                  { request_id: ev.request_id },
+                  {
+                    callCommHub,
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                  },
+                ).catch((e: any) => warn(`stop-daemon failed: ${e?.message || e}`));
+              }).catch((e: any) => warn(`stop-daemon import failed: ${e?.message || e}`));
+            }
             // RFC-028 P1 — provider probe daemon doorbell (host_supervisor only).
             if (ev.type === "probe_provider" && fileConfig.role === "host_supervisor") {
               log(`← SSE probe_provider ${ev.probe_id || ""}`);

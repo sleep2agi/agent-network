@@ -278,7 +278,18 @@ export function auditCreateNode(input: {
     | "create_node_rejected"
     | "create_node_succeeded"
     | "create_node_sweeper_revoked"
-    | "daemon_capability_lied";   // RFC-026 §9.3 D2 — daemon declared runtime support, child died before serving
+    | "daemon_capability_lied"                  // RFC-026 §9.3 D2 — daemon declared runtime support, child died before serving
+    // RFC-027 §4.5 — stop/delete lifecycle audit action enum extension.
+    // Re-using auditCreateNode is fine: the action column carries the
+    // discriminator; target_type stays 'node_create_request' which is a
+    // misnomer for stop/delete rows but updating the schema would force a
+    // wider migration (see P1.1 issue).
+    | "stop_node_dispatched"
+    | "stop_node_completed"
+    | "delete_node_dispatched"
+    | "delete_node_completed"
+    | "forced_stop_with_in_flight"
+    | "backup_purged";
   user_id?: string | null;
   username?: string | null;
   network_id?: string | null;

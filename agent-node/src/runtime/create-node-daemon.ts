@@ -481,6 +481,21 @@ export async function handleCreateNodeDoorbell(
   }
   void stillAlive;
 
+  // RFC-027 §2.4 — record the spawned child in the daemon's children_map
+  // so a later SSE stop_node doorbell knows which PID to signal. Lazy
+  // import keeps create-node-daemon's startup cost flat (stop-daemon
+  // module is only needed once a child exists). Lookup key is the
+  // hub-assigned child_node_id; alias is the operator-friendly handle.
+  if (childPid > 0 && typeof req.node_spec.name === "string") {
+    try {
+      const child_node_id = (req as any).child_node_id || `node_${req.node_spec.name}`;
+      const { recordSpawnedChild } = await import("./stop-daemon.js");
+      recordSpawnedChild(child_node_id, req.node_spec.name, childPid);
+    } catch (e: any) {
+      deps.warn(`[create-node] childrenMap record failed (stop-daemon won't see this child): ${e?.message || e}`);
+    }
+  }
+
   // Step 4 — ack 'started' (success path; hub flips to 'succeeded' on
   // child's first report_status content-match)
   await deps.callCommHub("ack_create_request", {

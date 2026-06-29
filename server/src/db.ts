@@ -324,6 +324,49 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// RFC-027 §2.3 — state machine for stop/delete (D5). 'active' default
+// matches pre-RFC behavior for every existing row. Transitions:
+//   active → stopping → stopped → (back to active via restart_node)
+//   active → deleting → (row gone)
+//   stopped → deleting → (row gone)
+// Used as the inbox-enqueue gate per §2.3 race-free invariant:
+// pushEvent / INSERT INTO inbox must refuse a non-active target so the
+// SIGTERM-in-flight window never gets a new task.
+try {
+  db.exec(`ALTER TABLE nodes ADD COLUMN lifecycle_state TEXT DEFAULT 'active'`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
+// RFC-027 §2 — stop/delete request envelope. Mirrors
+// node_create_requests structure so the daemon-side pull/ack pattern
+// is symmetric with create_node. action='stop'|'delete' picks which
+// branch (delete adds backup_path + revokes ntok on ack).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS node_stop_requests (
+    request_id TEXT PRIMARY KEY,
+    network_id TEXT NOT NULL,
+    daemon_node_id TEXT NOT NULL,
+    child_node_id TEXT NOT NULL,
+    child_alias TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('stop', 'delete')),
+    delete_config INTEGER NOT NULL DEFAULT 1,
+    grace_seconds INTEGER NOT NULL DEFAULT 10,
+    force INTEGER NOT NULL DEFAULT 0,
+    in_flight_at_dispatch INTEGER NOT NULL DEFAULT 0,
+    created_by_token TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error TEXT,
+    backup_path TEXT,
+    exit_signal TEXT,
+    created_at INTEGER NOT NULL,
+    delivered_at INTEGER,
+    acked_at INTEGER
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_stop_req_daemon ON node_stop_requests(daemon_node_id, status)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_stop_req_child ON node_stop_requests(child_node_id)`);
+
 // `node_config_updates` — pending + history. One row per dashboard write.
 // At most one row per node may be in a non-terminal state at a time
 // (single-flight enforced at the tool layer; this table just stores).
