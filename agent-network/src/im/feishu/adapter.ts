@@ -36,6 +36,7 @@ import {
   shouldRenderAsImage,
   closeBrowser as closeMarkdownBrowser,
 } from "./markdown-image-renderer.js";
+import { feishuConvKey } from "./outbound-paths.js";
 
 type OnEventHandler = (event: NormalizedIMEvent) => Promise<void>;
 
@@ -237,7 +238,14 @@ export class FeishuAdapter implements IMAdapter {
         );
       }
 
-      if (shouldRenderAsImage(text)) {
+      // Caption mode (RFC-020 §15.2): when the bridge is sending sibling
+      // attachment files in the same dispatch, this text is a caption —
+      // skip the heavy markdown→PNG render path so the user doesn't see
+      // "another picture" alongside the actual file.
+      if (message.forceTextOnly) {
+        msgType = "text";
+        content = JSON.stringify({ text });
+      } else if (shouldRenderAsImage(text)) {
         // Heading / table / long content — Feishu card markdown element
         // can't render these. Render to PNG via headless chromium and
         // send through the image API (needs im:resource:upload scope).
@@ -766,8 +774,10 @@ async function downloadImage(
     // for an operator to spot-check + GC). msg_id is unique enough across
     // a single conversation; the random suffix in the filename is dropped
     // because msg_id IS the dedup key (idempotencyKey). Collision-safe.
+    // Shared with bridge.ts outbound dispatch (RFC-020 §15.1) so inbound
+    // download dir == outbound whitelist dir, with zero algorithm drift.
     const subdir = conversationId
-      ? join(mediaDir, conversationId.replace(/[^a-zA-Z0-9_-]/g, "_"))
+      ? join(mediaDir, feishuConvKey(conversationId))
       : mediaDir;
     mkdirSync(subdir, { recursive: true });
     const safeMsgId = messageId.replace(/[^a-zA-Z0-9_-]/g, "_");

@@ -38,6 +38,7 @@ import {
   sniffFileKind,
   ALL_FILES_FAILED_FALLBACK,
 } from "./outbound-marker.js";
+import { feishuOutboundDir } from "./outbound-paths.js";
 import * as fs from "node:fs";
 
 export interface FeishuBridgeOptions {
@@ -61,6 +62,13 @@ export interface FeishuBridgeOptions {
 export interface BridgeIncomingEnvelope {
   type: "event";
   event: NormalizedIMEvent;
+  /** Canonical outbound directory for this conversation (RFC-020 §15.1).
+   *  Single source of truth — the agent-node injects this verbatim into
+   *  the system prompt's "save files here" instruction, and the bridge
+   *  whitelist accepts files only under this directory. Computed by the
+   *  bridge from `event.conversation.conversationId` + `adapter
+   *  .connectionName`. Trailing slash included. */
+  outboundDir?: string;
 }
 
 /** Parent → bridge: agent reply text for a previously-forwarded event. */
@@ -473,29 +481,32 @@ export function createIPCEventHandler(
       // convKey: open_chat_id for groups, open_id (sender) for DMs. The
       // /work/feishu-attachments/<connection>/<convKey>/ directory is the
       // single allowed outbound root the agent can write into.
-      // convKey: open_id (sender) for DMs, open_chat_id (conversationId) for
-      // groups. Mirrors the per-conversation drop-zone the inbound image
-      // downloader uses, so the agent's Read access (Layer B allow list)
-      // and outbound dispatch share one directory tree.
-      const convKey =
-        event.conversation.conversationType === "dm"
-          ? event.sender.id
-          : event.conversation.conversationId || event.sender.id;
-      // connectionId is `<node>#<platform>:<connectionName>` — pull the
-      // last `:` segment. Fall back to adapter's own copy if the event
-      // shape ever drifts.
-      const connectionName =
-        event.connectionId?.split(":").pop() ||
-        adapter.connectionName ||
-        "feishu";
+      // 2026-06-29 Vincent UAT path-unify fix: use the SAME directory
+      // helper as inbound downloads (adapter.ts → downloadImage) and the
+      // system-prompt path the agent is taught (cli.ts injection). One
+      // function, one input shape — eliminates the inbound/outbound
+      // divergence that rejected every PDF Vincent's bot produced.
+      //
+      // Inputs:
+      //   - connectionName: adapter.connectionName (raw, no `#feishu` suffix
+      //     — that suffix lives on the IDEMPOTENCY KEY, not the directory
+      //     name).
+      //   - rawConvId: event.conversation.conversationId — the open_chat_id
+      //     Feishu assigns. Present for both DMs and group chats. Always
+      //     used, NEVER the sender.id (sender.id is per-user, not per-
+      //     conversation, and inbound downloads never used it).
+      const connectionName = adapter.connectionName || "feishu";
+      const expectedDir = feishuOutboundDir(
+        connectionName,
+        event.conversation.conversationId,
+      );
       // Validate every marker request; collect successes + failures.
       const validFiles: Array<{ path: string; kind: "image" | "file" }> = [];
       const failureReasons: string[] = [];
       for (const req of markerRequests) {
         const reason = validateOutboundPath({
           p: req.normalized,
-          convKey,
-          connectionName,
+          expectedDir,
         });
         if (reason) {
           process.stderr.write(
@@ -547,12 +558,17 @@ export function createIPCEventHandler(
 
       try {
         // Send text first if non-empty (puts the file in context for the user).
+        // Caption-mode (RFC-020 §15.2): when there's at least one valid
+        // attachment in THIS dispatch, the text is a caption — skip the
+        // markdown→PNG renderer (looks like "the bot sent another image"
+        // instead of "the bot sent my file") + skip markdown-card render.
         if (textToSend) {
           const { messageId } = await adapter.send({
             target: event.conversation,
             text: textToSend,
             replyToMessageId: event.messageId,
             correlation: { taskId: eventKey },
+            forceTextOnly: validFiles.length > 0,
           });
           process.stderr.write(
             `[feishu:bridge] reply text sent (messageId=${messageId})${note} for ${eventKey}\n`,
@@ -664,8 +680,14 @@ export function createIPCEventHandler(
       }
     }
 
-    // Forward to parent for think().
-    const envelope: BridgeIncomingEnvelope = { type: "event", event };
+    // Forward to parent for think(). Include the canonical outboundDir
+    // so cli.ts injects the SAME path into the agent prompt that the
+    // reply-side whitelist will accept (RFC-020 §15.1 unification).
+    const outboundDir = feishuOutboundDir(
+      adapter.connectionName || "feishu",
+      event.conversation.conversationId,
+    );
+    const envelope: BridgeIncomingEnvelope = { type: "event", event, outboundDir };
     process.send!(envelope);
   };
 }

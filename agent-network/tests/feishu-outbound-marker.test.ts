@@ -186,14 +186,24 @@ expect("normalize: only `~` → empty (not abs)", normalizeMarkerPath("~/x") ===
   // hand-rolling a fake `/work/feishu-attachments/feishu-local/oc_test/...`
   // and providing mock stat + realpath functions.
   const candidate = "/work/feishu-attachments/feishu-local/oc_test/report.pdf";
+  // Preferred shape: caller passes precomputed expectedDir
   const reason = validateOutboundPath({
+    p: candidate,
+    expectedDir: "/work/feishu-attachments/feishu-local/oc_test/",
+    realpathFn: () => candidate,
+    statFn: () => ({ size: 100 }),
+  });
+  expect("validate happy path (expectedDir) → null", reason === null, `got: ${reason}`);
+
+  // Legacy shape: caller passes connectionName + convKey, helper computes prefix
+  const reasonLegacy = validateOutboundPath({
     p: candidate,
     convKey: "oc_test",
     connectionName: "feishu-local",
     realpathFn: () => candidate,
     statFn: () => ({ size: 100 }),
   });
-  expect("validate happy path → null", reason === null, `got: ${reason}`);
+  expect("validate happy path (legacy) → null", reasonLegacy === null, `got: ${reasonLegacy}`);
 
   fs.rmSync(tmpdir, { recursive: true, force: true });
 }
