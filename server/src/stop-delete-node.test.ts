@@ -44,6 +44,12 @@ function cleanup() {
     try { db.run("DELETE FROM network_members WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM networks WHERE network_id = ?1", [n]); } catch {}
   }
+  // SF-5 test plants a NULL-network inbox row keyed by alias — clean
+  // by alias too so it doesn't pollute later tests that use the same
+  // CHILD_A_ALIAS.
+  for (const alias of [CHILD_A_ALIAS, DAEMON_A_ALIAS]) {
+    try { db.run("DELETE FROM inbox WHERE session_name = ?1", [alias]); } catch {}
+  }
   try { db.run("DELETE FROM users WHERE user_id IN (?1, ?2)", [USER_A_ID, USER_B_ID]); } catch {}
 }
 
@@ -532,5 +538,137 @@ describe("SF-5 — in-flight COALESCE for legacy inbox rows", () => {
     expect(r.ok).toBe(false);
     expect(r.error).toBe("node_busy_in_flight");
     expect(r.in_flight_count).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ─── RFC-027 PR1.1 — D8 atomicity failure-injection (real teeth) ──
+//
+// PR1's SF-2 fix introduced auditCreateNodeStrict (re-throws inside tx
+// callback). The PR1 v3 test only verified happy path: both rows
+// present after success. 通信龙's #345 ack flagged that as a shape-pin
+// — could pass even if the strict variant were silently reverted. This
+// PR1.1 test injects a real failure (monkey-patch db.run to throw at
+// the audit_log INSERT moment) and asserts BOTH rollback halves:
+//   1. nodes.lifecycle_state UNCHANGED (didn't transition to 'stopping')
+//   2. node_stop_requests row absent (INSERT rolled back too)
+describe("SF-2 D8 atomicity — REAL failure injection forces ROLLBACK", () => {
+  test("audit_log table dropped → audit INSERT throws inside tx → ROLLBACK leaves nodes + request untouched", async () => {
+    setupAlphaNetwork();
+    const tools = buildHandlers(USER_A_ID);
+    // Real failure injection: drop audit_log so the strict audit
+    // INSERT inside the tx throws a real SQLite "no such table"
+    // error. The whole tx must roll back per §4.5 D8. (Patching
+    // adapter.db.run via property overwrite proved unreliable under
+    // bun:sqlite's transaction wrapper in earlier draft; dropping
+    // the table is the simplest way to make the failure REAL — the
+    // error originates inside the SQL engine, not a JS mock.)
+    db.exec("DROP TABLE IF EXISTS audit_log_BACKUP");
+    db.exec("ALTER TABLE audit_log RENAME TO audit_log_BACKUP");
+    let r: Reply;
+    try {
+      r = await call(tools.stop_node, {
+        child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A,
+      });
+    } finally {
+      // Restore so subsequent tests + cleanup work.
+      db.exec("DROP TABLE IF EXISTS audit_log");
+      db.exec("ALTER TABLE audit_log_BACKUP RENAME TO audit_log");
+    }
+    expect(r.ok).toBe(false);
+    // dispatch_tx_failed is the expected error. Print the actual reply
+    // if we got something else so the failure mode is diagnosable.
+    if (r.error !== "dispatch_tx_failed") {
+      console.error("[SF-2 unexpected reply]", JSON.stringify(r));
+    }
+    expect(r.error).toBe("dispatch_tx_failed");
+
+    // ROLLBACK observable:
+    // (a) lifecycle_state did NOT transition out of 'active'
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
+    // (b) no node_stop_requests row exists for this child
+    const reqs = db.all<{ request_id: string }>(
+      `SELECT request_id FROM node_stop_requests WHERE child_node_id = ?1`, [CHILD_A_ID],
+    );
+    expect(reqs.length).toBe(0);
+    // (c) no audit row was written
+    expect(readAudit("stop_node_dispatched", NET_A).length).toBe(0);
+  });
+});
+
+// ─── RFC-027 PR1.1 — inbox-enqueue lifecycle guard at routing layer ──
+//
+// 6 inbox INSERT sites in tools.ts (send_task / send_message / reply /
+// retry_task / reassign_task / broadcast) now pre-check the target
+// alias's nodes.lifecycle_state. Anything other than `active` refuses
+// with `node_not_active`. Sample the highest-traffic path (send_task)
+// for a stopping target — this catches the routing-after-SIGTERM
+// window that RFC §2.3 explicitly closes.
+describe("inbox-enqueue lifecycle_state guard (RFC-027 §2.3 race-free)", () => {
+  test("send_task to a stopping node → refused with node_not_active", async () => {
+    setupAlphaNetwork();
+    // Caller + target sessions rows (send_task's resolveDeliveryTarget
+    // looks up the target in sessions, not just nodes).
+    db.run(
+      `INSERT INTO sessions (resume_id, alias, network_id, last_seen_at, status, cpu_cores, mem_total_gb, ip)
+       VALUES (?1, ?2, ?3, datetime('now'), 'idle', 4, 8, '10.0.0.99')`,
+      [`s_caller_${Date.now()}`, "sender-x", NET_A],
+    );
+    db.run(
+      `INSERT INTO sessions (resume_id, alias, network_id, last_seen_at, status, cpu_cores, mem_total_gb, ip)
+       VALUES (?1, ?2, ?3, datetime('now'), 'idle', 4, 8, '10.0.0.5')`,
+      [`s_child_${Date.now()}`, CHILD_A_ALIAS, NET_A],
+    );
+    // Move target into stopping (mid-flight stop_node race window).
+    db.run(`UPDATE nodes SET lifecycle_state = 'stopping' WHERE node_id = ?1`, [CHILD_A_ID]);
+
+    const tools = buildHandlers(USER_A_ID);
+    const r = await call(tools.send_task, {
+      alias: CHILD_A_ALIAS,
+      task: "racey post-SIGTERM task",
+      from_session: "sender-x",
+      network_id: NET_A,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_not_active");
+    expect(r.lifecycle_state).toBe("stopping");
+    // Inbox unchanged (no row inserted for this alias post-stopping).
+    const inboxRows = db.all<{ id: string }>(
+      `SELECT id FROM inbox WHERE session_name = ?1 AND network_id = ?2`,
+      [CHILD_A_ALIAS, NET_A],
+    );
+    expect(inboxRows.length).toBe(0);
+  });
+});
+
+// ─── list_my_children (PR1.1 hub support for rebuild) ────────────
+describe("list_my_children HANDLER (RFC-027 PR1.1)", () => {
+  test("daemon-bound caller gets its children list", async () => {
+    setupAlphaNetwork();
+    // Plant a create-request row simulating that DAEMON_A has spawned
+    // CHILD_A previously (the daemon's child must be in this table).
+    db.run(
+      `INSERT INTO node_create_requests
+         (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token)
+       VALUES ('cr_lmc_test', ?1, ?2, ?3, 'claude-agent-sdk', 'x', '{}', '[]', 'succeeded', NULL, ?4, 'tok_test')`,
+      [DAEMON_A_ID, CHILD_A_ALIAS, NET_A, Date.now()],
+    );
+    // The child's nodes row must exist (setupAlphaNetwork seeds it),
+    // and the canonical child_node_id needs to match `node_${request_id.slice(3)}`
+    // We update the existing child row's id so the LEFT JOIN matches.
+    db.run(`UPDATE nodes SET node_id = 'node_lmc_test' WHERE alias = ?1 AND network_id = ?2`, [CHILD_A_ALIAS, NET_A]);
+
+    const daemonTools = buildHandlers(USER_A_ID, true, DAEMON_A_TOK, NET_A);
+    const r = await call(daemonTools.list_my_children, {});
+    expect(r.ok).toBe(true);
+    expect(Array.isArray(r.children)).toBe(true);
+    const aliases = (r.children as Array<{ alias: string }>).map(c => c.alias);
+    expect(aliases).toContain(CHILD_A_ALIAS);
+  });
+
+  test("non-daemon caller (utok) refused", async () => {
+    setupAlphaNetwork();
+    const userTools = buildHandlers(USER_A_ID);   // utok, not daemon-bound
+    const r = await call(userTools.list_my_children, {});
+    expect(r.ok).toBe(false);
   });
 });
