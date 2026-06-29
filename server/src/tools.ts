@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken } from "./db.js";
 import { pushEvent } from "./push.js";
+import { assertNodeActive } from "./lifecycle-guard.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import {
   buildAnetArgs as _unused_buildAnetArgs,           // ensure module is loaded
@@ -142,32 +143,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     return { networkId: null, networkIds: getReadableNetworkIds() };
   };
 
-  // RFC-027 §2.3 race-free invariant — assert target node is `active`
-  // before any inbox INSERT routes to it. Without this, the SIGTERM
-  // is in flight but new tasks keep landing in inbox for a dying
-  // child (and after `stopped`/`deleting` would persist forever).
-  // PR1.1 (#345 follow-up) wires this helper into all 6 inbox-enqueue
-  // sites in this file.
-  //
-  // Returns `{ ok: true }` when the target either (a) has no nodes row
-  // (brand-new alias, allowed), or (b) is in `active` state. Anything
-  // else (`stopping`/`stopped`/`deleting`/`stop_failed`) refuses with
-  // a structured reply the calling handler can return directly.
-  const assertNodeActive = (sessionAlias: string, networkId: string | null):
-    | { ok: true }
-    | { ok: false; error: string; lifecycle_state: string; alias: string } => {
-    if (!sessionAlias) return { ok: true };
-    const row = db.get<{ lifecycle_state: string | null }>(
-      networkId
-        ? `SELECT lifecycle_state FROM nodes WHERE alias = ?1 AND COALESCE(network_id, ?2) = ?2 LIMIT 1`
-        : `SELECT lifecycle_state FROM nodes WHERE alias = ?1 LIMIT 1`,
-      ...(networkId ? [sessionAlias, networkId] : [sessionAlias]),
-    );
-    if (!row) return { ok: true };
-    const st = row.lifecycle_state ?? "active";
-    if (st === "active") return { ok: true };
-    return { ok: false, error: "node_not_active", lifecycle_state: st, alias: sessionAlias };
-  };
+  // RFC-027 §2.3 race-free invariant — assertNodeActive lives in
+  // server/src/lifecycle-guard.ts so REST handlers in server/src/index.ts
+  // can use the SAME code path. PR1.1 had it inline here; PR1.2a
+  // (#346 review catch) extracted because the closure scope made it
+  // unreachable from REST and left the §2.3 race open on dashboard
+  // Dispatch (POST /api/task + /api/broadcast). Per
+  // [[feedback_grep_all_sites_before_apply_guard]].
 
   const addReadScope = (sql: string, params: any[], scope: ReadScope, column = "network_id"): string => {
     if (scope.networkId) {
@@ -1853,10 +1835,24 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       const updateId = `cu_${uuidv4()}`;
       const networkId = node.network_id || "default";
-      db.run(
-        `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, '{}', 'restart_only', ?4, 'pending', ?5, ?6)`,
-        [updateId, nodeId, networkId, node.config_revision || 0, Date.now(), callerTokenId || "unknown"],
-      );
+      // RFC-027 PR1.2a latent fix (#346 ack): restart_node must reset
+      // lifecycle_state to 'active'. Otherwise a node that was previously
+      // stop_node'd → 'stopped' would, after restart, stay marked
+      // 'stopped' in the nodes table → the 6 MCP + 2 REST inbox guards
+      // would refuse every routing attempt → node silently unreachable
+      // (no error to operator, just no traffic). Pair the schema flip
+      // with the config_updates INSERT inside one tx so we don't
+      // half-commit if the dispatch INSERT throws.
+      db.transaction(() => {
+        db.run(
+          `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, '{}', 'restart_only', ?4, 'pending', ?5, ?6)`,
+          [updateId, nodeId, networkId, node.config_revision || 0, Date.now(), callerTokenId || "unknown"],
+        );
+        db.run(
+          `UPDATE nodes SET lifecycle_state = 'active' WHERE node_id = ?1`,
+          [nodeId],
+        );
+      });
       pushEvent(node.alias, { type: "restart", update_id: updateId }, networkId);
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ ok: true, update_id: updateId, apply_mode: "restart_only" }) }],

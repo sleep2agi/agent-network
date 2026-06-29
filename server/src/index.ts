@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit } from "./db.js";
 import { createSSEStream, pushEvent, getSSEStats } from "./push.js";
+import { assertNodeActive } from "./lifecycle-guard.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
@@ -1621,6 +1622,18 @@ Bun.serve({
         return withCors(req, Response.json(payload, { status: 429 }));
       }
 
+      // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.2a REST site
+      // 1/2 — paired with the 6 MCP sites guarded in tools.ts at PR1.1).
+      // Dashboard's "Dispatch" button hits this endpoint, so without
+      // the guard a stopping/stopped/deleting node still got tasks
+      // routed through REST. Returns 409 with the same structured
+      // payload the MCP handlers use.
+      {
+        const lc = assertNodeActive(targetAlias, taskNetId ?? null);
+        if (!lc.ok) {
+          return withCors(req, Response.json(lc, { status: 409 }));
+        }
+      }
       // Mirror send_task MCP: write inbox + tasks rows in a single
       // transaction so the dispatch is visible to dashboard's Tasks page
       // and the parent_task_id lineage chain. Previously this endpoint
@@ -1701,6 +1714,12 @@ Bun.serve({
       const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
       const ids: string[] = [];
       for (const t of targets) {
+        // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.2a REST site
+        // 2/2). Broadcast skips non-active recipients silently per its
+        // best-effort semantics — mirrors the MCP broadcast handler
+        // in tools.ts (PR1.1 site 6/6).
+        const lc = assertNodeActive(t.alias, t.network_id ?? null);
+        if (!lc.ok) continue;
         const id = crypto.randomUUID();
         db.run(
           `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)

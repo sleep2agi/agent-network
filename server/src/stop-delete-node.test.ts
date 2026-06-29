@@ -38,6 +38,9 @@ function cleanup() {
     try { db.run("DELETE FROM node_stop_requests WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM audit_log WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM inbox WHERE network_id = ?1", [n]); } catch {}
+    // PR1.2a restart_node tests leave node_config_updates rows; clear
+    // so the next test's restart_node doesn't see them as in_flight.
+    try { db.run("DELETE FROM node_config_updates WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM nodes WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM sessions WHERE network_id = ?1", [n]); } catch {}
     try { db.run("DELETE FROM api_tokens WHERE network_id = ?1", [n]); } catch {}
@@ -670,5 +673,48 @@ describe("list_my_children HANDLER (RFC-027 PR1.1)", () => {
     const userTools = buildHandlers(USER_A_ID);   // utok, not daemon-bound
     const r = await call(userTools.list_my_children, {});
     expect(r.ok).toBe(false);
+  });
+});
+
+// ─── PR1.2a — restart_node resets lifecycle_state ──────────────────
+//
+// 通信龙 #346 ack latent: without this, a stopped node restart-ed via
+// restart_node would still have lifecycle_state='stopped' in the
+// nodes table → the 6 MCP + 2 REST inbox guards would refuse all
+// routing → node silently unreachable until manual DB fix. Asserts
+// the dispatch + state flip happen atomically (tx).
+describe("RFC-027 PR1.2a — restart_node resets lifecycle_state to 'active'", () => {
+  test("restart_node on a stopped node → lifecycle_state flips back to 'active' + dispatch row created", async () => {
+    setupAlphaNetwork();
+    // Move the child to 'stopped' (simulating prior stop_node completion).
+    db.run(`UPDATE nodes SET lifecycle_state = 'stopped' WHERE node_id = ?1`, [CHILD_A_ID]);
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("stopped");
+
+    const tools = buildHandlers(USER_A_ID);
+    const r = await call(tools.restart_node, {
+      node_id: CHILD_A_ID,
+      network_id: NET_A,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.apply_mode).toBe("restart_only");
+
+    // State flipped back.
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
+    // node_config_updates row exists (the dispatch).
+    const rows = db.all<{ update_id: string; status: string }>(
+      `SELECT update_id, status FROM node_config_updates WHERE node_id = ?1 ORDER BY created_at DESC LIMIT 1`,
+      [CHILD_A_ID],
+    );
+    expect(rows.length).toBe(1);
+    expect(rows[0].status).toBe("pending");
+  });
+
+  test("restart_node on an active node → still resets to active (idempotent, no-op state-wise)", async () => {
+    setupAlphaNetwork();
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
+    const tools = buildHandlers(USER_A_ID);
+    const r = await call(tools.restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(true);
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
   });
 });
