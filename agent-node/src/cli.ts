@@ -27,7 +27,12 @@ import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
-import { isVendorErrorForUser, VENDOR_ERROR_REPLACEMENT } from "./vendor-error";
+import {
+  isVendorErrorForUser,
+  isTransientVendorError,
+  VENDOR_ERROR_REPLACEMENT,
+  VENDOR_RETRY_PROFILE,
+} from "./vendor-error";
 import {
   CommHubError,
   classifyCommHubResponse,
@@ -2736,6 +2741,54 @@ async function processTask(task: string, from: string, taskId: string | null = n
     failed = true;
   }
 
+  // Vendor-error transient retry (Vincent 2026-06-29 UAT — 通信龙 65e59373):
+  // MiniMax `status_code:1000` / `unknown error` / `choices:null` are
+  // transient; Vincent's logs show the very next turn (72s later) succeeded.
+  // Retry the SAME prompt up to `VENDOR_RETRY_PROFILE.maxRetries` times
+  // with short backoff (1.5s / 3s by default) BEFORE letting the
+  // sanitization layer replace the text. This makes image+text replies
+  // actually answer on transient blip rather than showing "暂时异常"
+  // after one shot.
+  //
+  // `isTransientVendorError` excludes 401/403/quota/429 so we don't waste
+  // round-trips on errors that won't recover. Auth/quota → sanitize
+  // immediately on the existing layer below.
+  for (
+    let retryAttempt = 1;
+    retryAttempt <= VENDOR_RETRY_PROFILE.maxRetries &&
+    text &&
+    isTransientVendorError(text, failed);
+    retryAttempt++
+  ) {
+    const backoff =
+      VENDOR_RETRY_PROFILE.backoffMs[retryAttempt - 1] ??
+      VENDOR_RETRY_PROFILE.backoffMs[VENDOR_RETRY_PROFILE.backoffMs.length - 1] ??
+      1500;
+    warn(
+      `[vendor-retry] transient error detected, retrying in ${backoff}ms (attempt ${retryAttempt}/${VENDOR_RETRY_PROFILE.maxRetries})`,
+    );
+    await new Promise((r) => setTimeout(r, backoff));
+    try {
+      const retried = await think(augmentedTask, from, taskId, images);
+      text = retried;
+      failed = false;
+      // Re-apply the API-error detection on the retry result (consistency
+      // with the first-attempt path; without this a retried "API error"
+      // message would slip through as `failed=false`).
+      if (
+        /(API 错误|API error|需要设置.*KEY|missing.*key|issue with the selected model|may not have access|may not exist|model.+not.+(found|available))/i.test(
+          text,
+        )
+      ) {
+        failed = true;
+      }
+    } catch (err: any) {
+      text = `${RUNTIME} 错误: ${err.message}`;
+      failed = true;
+      warn(`[vendor-retry] retry attempt ${retryAttempt} threw: ${err?.message ?? err}`);
+    }
+  }
+
   // Vendor-response sanitize (Vincent 2026-06-29 catch — MiniMax /anthropic
   // endpoint returned `base_resp:{status_code:1000,"unknown error, 999"}`
   // + `choices:null`; claude-agent-sdk's zod schema rejected it with an
@@ -2747,12 +2800,15 @@ async function processTask(task: string, from: string, taskId: string | null = n
   // terms (e.g. "ZodError 是 Zod 校验库抛出的异常") aren't mis-sanitized.
   // Predicate lives in src/vendor-error.ts so it can be unit-tested
   // without dragging cli.ts's network side-effects into the test bun.
+  // The retry loop above gave us up to N additional attempts for transient
+  // errors; we sanitize here only if those all also failed (or the error
+  // is non-transient like 401/quota).
   if (text && isVendorErrorForUser(text, failed)) {
     const raw = text;
     text = VENDOR_ERROR_REPLACEMENT;
     failed = true;
     process.stderr.write(
-      `[vendor-error] sanitized for user; raw: ${raw.slice(0, 400).replace(/\n/g, " ")}\n`,
+      `[vendor-error] sanitized for user (after retries exhausted); raw: ${raw.slice(0, 400).replace(/\n/g, " ")}\n`,
     );
   }
   return { text, failed };

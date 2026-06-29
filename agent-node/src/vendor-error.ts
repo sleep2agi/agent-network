@@ -63,15 +63,84 @@ export const VENDOR_ERROR_REPLACEMENT =
  * Decide whether `text` is the raw bytes of a vendor / SDK failure
  * envelope that must NOT reach the user-facing IM reply.
  *
- * See module docstring for the correlation rules.
+ * Single unified gate (通信牛 #331 round 1):
+ *   sanitize / retry ONLY when BOTH conditions hold:
+ *     (a) `failed === true`  — the SDK threw or processWithClaude already
+ *                              wrapped the result in a `<runtime> 错误:`
+ *                              prefix (real failure context, not just
+ *                              an LLM reply discussing error formats).
+ *     (b) `matchCount >= 2`  — at least two DISTINCT vendor-envelope
+ *                              signals correlate. A single broad pattern
+ *                              like `ZodError` or `base_resp` could
+ *                              appear in a normal Q&A — the signature
+ *                              of a real failure envelope is multiple
+ *                              correlated terms (e.g. zod issue + null
+ *                              choices + status_code != 0).
+ *
+ * Trade-off accepted: a rare SDK-throw whose error text contains only
+ * one signal (e.g. `claude 错误: ZodError: cannot parse`) slips through
+ * un-sanitized. User sees the raw line. Stricter than ideal but
+ * eliminates false-positives on technical discussion that quotes
+ * multiple error terms in success context.
+ *
+ * Both `isVendorErrorForUser` (sanitize gate) and `isTransientVendorError`
+ * (retry gate) use this same predicate as their base — single source of
+ * truth, no drift.
  */
 export function isVendorErrorForUser(
   text: string,
   failed: boolean,
 ): boolean {
   if (!text || typeof text !== "string") return false;
+  if (!failed) return false; // success context: never sanitize
   const matchCount = VENDOR_ERROR_PATTERNS.filter((p) => p.test(text)).length;
-  if (matchCount === 0) return false;
-  if (failed) return true; // failure context + ≥1 signal → sanitize
-  return matchCount >= 2; // success context: need ≥2 correlated signals
+  return matchCount >= 2; // failure + ≥2 distinct signals
 }
+
+/**
+ * Vincent UAT 2026-06-29 实测: MiniMax `status_code:1000` / `unknown error`
+ * / `choices:null` are TRANSIENT — the very next turn (72s later) returned
+ * a valid response without operator intervention. Sanitizing on first hit
+ * means a clean retry path goes to waste; the user sees "暂时异常 请重发"
+ * for what should have just been a one-second retry.
+ *
+ * `isTransientVendorError(text, failed)` returns true ONLY when the error
+ * is BOTH (a) a vendor-error per `isVendorErrorForUser` AND (b) reasonably
+ * likely to succeed on retry. Excludes:
+ *   - auth-class errors (401 / 403 / unauthorized / quota / insufficient
+ *     credit) — these won't recover on retry; operator must rotate
+ *     credentials / top up.
+ *   - rate-limit (429, too many requests) — caller might decide to retry
+ *     with longer backoff, but the default short backoff isn't enough.
+ *
+ * 通信龙 65e59373 lock: retry transient 1-2 times with short backoff
+ * BEFORE sanitization, so Vincent's image+text replies don't sanitize on
+ * a single-shot 1000 when the retry would've worked.
+ */
+export function isTransientVendorError(
+  text: string,
+  failed: boolean,
+): boolean {
+  if (!isVendorErrorForUser(text, failed)) return false;
+  // Auth-class errors won't recover on retry — don't waste round-trips.
+  if (/\b401\b|\b403\b|unauthorized|forbidden/i.test(text)) return false;
+  if (/quota|insufficient[_\s]?(credit|balance|funds|tokens?)/i.test(text)) return false;
+  // Explicit rate-limit signal — caller-level backoff needed, not our short retry.
+  if (/\b429\b|too[_\s]?many[_\s]?requests|rate[_\s]?limit/i.test(text)) return false;
+  // Everything else looks transient (vendor 1000 / unknown error / choices null
+  // / SDK zod fail on malformed response / OpenAI-style 5xx envelopes).
+  return true;
+}
+
+/**
+ * Configurable retry profile — exported so callers (cli.ts) and tests can
+ * align without hard-coding magic numbers in two places.
+ */
+export const VENDOR_RETRY_PROFILE = {
+  /** Total retry attempts after the initial think() call. 2 = up to 3
+   *  total attempts (initial + 2 retries). */
+  maxRetries: 2,
+  /** Backoff schedule per retry attempt (ms). Length should match
+   *  maxRetries; missing entries fall back to last entry. */
+  backoffMs: [1500, 3000],
+} as const;
