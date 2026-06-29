@@ -31,6 +31,11 @@ import type {
 } from "../types.js";
 import type { FeishuAccessList, FeishuChannelConfig } from "./config.js";
 import { resolveFeishuAccess } from "../access-resolve.js";
+import {
+  renderMarkdownToPng,
+  shouldRenderAsImage,
+  closeBrowser as closeMarkdownBrowser,
+} from "./markdown-image-renderer.js";
 
 type OnEventHandler = (event: NormalizedIMEvent) => Promise<void>;
 
@@ -168,6 +173,8 @@ export class FeishuAdapter implements IMAdapter {
     this.wsClient = null;
     this.client = null;
     this.feishuConfig = null;
+    // Drop the shared chromium for clean shutdown (image-render path).
+    await closeMarkdownBrowser().catch(() => {});
   }
 
   async send(message: NormalizedIMMessage): Promise<{ messageId: string }> {
@@ -175,11 +182,17 @@ export class FeishuAdapter implements IMAdapter {
       throw new Error("FeishuAdapter.send: call init() first");
     }
 
-    // Decide payload — image takes precedence when imagePath is provided
-    // (caller's choice), otherwise text/markdown.
-    let msgType: "text" | "image" | "interactive";
+    // Hybrid render route (Vincent 2026-06-29 lock, 通信龙 3f70044c):
+    //   - explicit imagePath/files → file/image upload paths (existing)
+    //   - markdown with heading/table/long → render PNG, send msg_type:image
+    //   - markdown without heading/table (short bold/list/link) → schema 1.0 card
+    //     `markdown` element (text stays copyable — preview.7 path)
+    //   - plain text → msg_type:text (existing)
+    let msgType: "text" | "image" | "interactive" | "file";
     let content: string;
+
     if (message.imagePath) {
+      // Caller-supplied image path takes precedence over text/markdown.
       const imageKey = await uploadImage(this.client, message.imagePath);
       if (!imageKey) {
         throw new Error(
@@ -188,26 +201,67 @@ export class FeishuAdapter implements IMAdapter {
       }
       msgType = "image";
       content = JSON.stringify({ image_key: imageKey });
+    } else if (
+      message.files &&
+      message.files.length > 0 &&
+      message.files[0]?.path
+    ) {
+      // Caller-supplied file path → upload + send msg_type:file
+      // (Vincent "给用户发文件" use case, 通信龙 3f70044c).
+      const file = message.files[0];
+      if (!file.path) {
+        throw new Error("FeishuAdapter.send: files[0].path required");
+      }
+      const fileKey = await uploadFile(this.client, file.path, file.name);
+      if (!fileKey) {
+        throw new Error(
+          `FeishuAdapter.send: file upload failed for ${file.path}`,
+        );
+      }
+      msgType = "file";
+      content = JSON.stringify({ file_key: fileKey });
     } else {
       const text = message.text ?? message.markdown;
       if (!text) {
         throw new Error(
-          "FeishuAdapter.send: requires text, markdown, or imagePath",
+          "FeishuAdapter.send: requires text, markdown, imagePath, or files",
         );
       }
-      // Markdown auto-render (Vincent 2026-06-29): when reply text contains
-      // markdown syntax (table / heading / fenced code / bold / list / link
-      // / inline code), upgrade to an interactive card with a single
-      // `markdown` element so Feishu renders properly instead of showing
-      // raw `|` and `**` as text. Plain text replies keep the existing
-      // msg_type:"text" path — no behavior change.
-      if (looksLikeMarkdown(text)) {
+
+      if (shouldRenderAsImage(text)) {
+        // Heading / table / long content — Feishu card markdown element
+        // can't render these. Render to PNG via headless chromium and
+        // send through the image API (needs im:resource:upload scope).
+        try {
+          const png = await renderMarkdownToPng(text);
+          const imageKey = await uploadImageBuffer(this.client, png);
+          if (!imageKey) {
+            throw new Error("uploadImageBuffer returned null");
+          }
+          msgType = "image";
+          content = JSON.stringify({ image_key: imageKey });
+        } catch (e: any) {
+          // Fallback to schema 1.0 card if rendering or upload fails —
+          // user still sees the text, just without true table render.
+          process.stderr.write(
+            `[feishu:adapter] markdown-image render failed, falling back to card: ${e?.message ?? e}\n`,
+          );
+          msgType = "interactive";
+          content = JSON.stringify({
+            config: { wide_screen_mode: true },
+            elements: [{ tag: "markdown", content: text }],
+          });
+        }
+      } else if (looksLikeMarkdown(text)) {
+        // Short markdown — keep text copyable via schema 1.0 card
+        // `markdown` element. preview.7 path.
         msgType = "interactive";
         content = JSON.stringify({
           config: { wide_screen_mode: true },
           elements: [{ tag: "markdown", content: text }],
         });
       } else {
+        // Plain text — existing path, no behavior change.
         msgType = "text";
         content = JSON.stringify({ text });
       }
@@ -597,16 +651,86 @@ async function uploadImage(
   try {
     if (!existsSync(imagePath)) return null;
     const buf = readFileSync(imagePath);
+    return uploadImageBuffer(client, buf);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Upload a raw buffer as an im.image. Used by the markdown-render path
+ * (Vincent 2026-06-29) which produces PNG bytes in memory and never
+ * lands them on disk. Same lark scope (`im:resource:upload`) as the
+ * path-based uploadImage.
+ */
+async function uploadImageBuffer(
+  client: lark.Client,
+  buf: Buffer,
+): Promise<string | null> {
+  try {
     const stream = Readable.from(buf);
     const resp = await client.im.image.create({
       data: {
         image_type: "message",
-        // lark's typing wants a Readable but the runtime accepts any Readable.
         image: stream as unknown as never,
       },
     });
     return resp?.image_key ?? null;
-  } catch {
+  } catch (e: any) {
+    process.stderr.write(
+      `[feishu:adapter] uploadImageBuffer failed: ${e?.message ?? e}\n`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Upload a file from disk via `im.file.create`. Caller chooses the
+ * `file_name` (Feishu shows this in the chat) and we infer the
+ * `file_type` from the filename extension. Returns the lark `file_key`
+ * for use in `msg_type:"file"` send. Same `im:resource:upload` scope.
+ *
+ * Lark accepts file_type enum: `stream` (generic), `doc`, `xls`, `ppt`,
+ * `pdf`, `mp4`, `opus`. Extension-to-type mapping is conservative — when
+ * in doubt, fall back to `stream`.
+ */
+async function uploadFile(
+  client: lark.Client,
+  filePath: string,
+  fileName?: string,
+): Promise<string | null> {
+  try {
+    if (!existsSync(filePath)) return null;
+    const buf = readFileSync(filePath);
+    const stream = Readable.from(buf);
+    const name = fileName || filePath.split("/").pop() || "file";
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    const fileType: "stream" | "doc" | "xls" | "ppt" | "pdf" | "mp4" | "opus" =
+      ext === "pdf"
+        ? "pdf"
+        : ext === "doc" || ext === "docx"
+          ? "doc"
+          : ext === "xls" || ext === "xlsx"
+            ? "xls"
+            : ext === "ppt" || ext === "pptx"
+              ? "ppt"
+              : ext === "mp4"
+                ? "mp4"
+                : ext === "opus"
+                  ? "opus"
+                  : "stream";
+    const resp = await client.im.file.create({
+      data: {
+        file_type: fileType,
+        file_name: name,
+        file: stream as unknown as never,
+      },
+    });
+    return resp?.file_key ?? null;
+  } catch (e: any) {
+    process.stderr.write(
+      `[feishu:adapter] uploadFile failed (${filePath}): ${e?.message ?? e}\n`,
+    );
     return null;
   }
 }
