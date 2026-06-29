@@ -2,253 +2,196 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>RFC-026 P2 — Create Node Wizard Mockup</title>
+<title>RFC-026 P2 — Create Node Wizard Mockup (v2 simplified)</title>
 <style>
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 32px;
-    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+    margin: 0; padding: 40px;
+    font: 14px/1.6 -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
     background: #0b0b0d; color: #e5e7eb;
   }
-  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
-  .subtitle { color: #6b7280; font-size: 12px; margin-bottom: 24px; }
-  .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 4px; color: #d1d5db; }
+  .sub { color: #6b7280; font-size: 12px; margin-bottom: 40px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 28px; }
   .panel {
-    background: #161618; border: 1px solid #26262b; border-radius: 12px;
-    padding: 18px;
+    background: #161618; border: 1px solid #1f1f24; border-radius: 14px;
+    padding: 28px 24px;
   }
-  .step-label {
-    color: #9ca3af; font-size: 11px; font-weight: 600;
-    letter-spacing: 0.05em; text-transform: uppercase;
-    margin-bottom: 12px;
+  .step {
+    color: #6b7280; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.08em; margin-bottom: 8px;
   }
-  .step-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
-  /* Server card */
-  .server-card {
-    border: 1px solid #2a2a30; border-radius: 8px; padding: 14px;
-    margin-bottom: 10px; cursor: pointer; transition: border-color .15s;
+  .step-title { font-size: 16px; font-weight: 600; margin-bottom: 24px; }
+
+  /* Server pick — minimal cards */
+  .srv {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 14px; border-radius: 10px;
+    border: 1px solid #2a2a30; margin-bottom: 10px;
+    cursor: pointer; transition: border-color .15s;
   }
-  .server-card:hover { border-color: #3b82f6; }
-  .server-card.selected { border-color: #3b82f6; background: #1e293b22; }
-  .server-card.dim { opacity: 0.5; cursor: not-allowed; }
-  .server-name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
-  .chip {
-    font-size: 11px; padding: 1px 7px; border-radius: 999px;
-    border: 1px solid;
+  .srv:hover { border-color: #4b5563; }
+  .srv.on { border-color: #3b82f6; background: #1e293b22; }
+  .srv.off { opacity: 0.45; cursor: not-allowed; }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    flex-shrink: 0;
   }
-  .chip.green { color: #34d399; border-color: #34d39955; background: #064e3b22; }
-  .chip.yellow { color: #fbbf24; border-color: #fbbf2455; background: #78350f22; }
-  .chip.gray { color: #9ca3af; border-color: #4b5563; background: #1f2937; }
-  .server-meta { font-size: 12px; color: #9ca3af; margin-top: 6px; }
-  .runtime-list { font-size: 12px; color: #d1d5db; margin-top: 8px; }
-  .runtime-list .ok { color: #34d399; }
-  .runtime-list .bad { color: #6b7280; }
+  .dot.green  { background: #34d399; }
+  .dot.yellow { background: #fbbf24; }
+  .dot.gray   { background: #4b5563; }
+  .srv-body { flex: 1; min-width: 0; }
+  .srv-name { font-weight: 600; font-size: 14px; }
+  .srv-hint { font-size: 12px; color: #6b7280; margin-top: 2px; }
+
   /* Form */
-  label { display: block; font-size: 12px; color: #9ca3af; margin: 12px 0 4px; }
+  label.fld { display: block; font-size: 12px; color: #6b7280; margin: 20px 0 8px; }
   input[type=text], select {
-    width: 100%; padding: 8px 10px;
+    width: 100%; padding: 10px 12px;
     background: #0b0b0d; color: #e5e7eb;
-    border: 1px solid #2a2a30; border-radius: 6px;
-    font: inherit;
+    border: 1px solid #2a2a30; border-radius: 8px; font: inherit;
   }
-  .radio-group { display: flex; flex-direction: column; gap: 6px; }
-  .radio-group label.opt {
-    display: flex; align-items: center; gap: 8px; cursor: pointer;
-    padding: 6px 8px; border-radius: 6px;
-    color: #e5e7eb; font-size: 13px; margin: 0;
+
+  .options { display: flex; flex-direction: column; gap: 4px; }
+  .opt {
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    padding: 8px 4px; color: #d1d5db; font-size: 13px;
   }
-  .radio-group label.opt.disabled {
-    color: #4b5563; cursor: not-allowed;
+  .opt.dis { color: #4b5563; cursor: not-allowed; }
+  .why { font-size: 11px; color: #6b7280; margin-left: auto; }
+
+  .models {
+    border: 1px solid #2a2a30; border-radius: 8px; background: #0b0b0d;
+    overflow: hidden;
   }
-  .tooltip { font-size: 11px; color: #6b7280; margin-left: 4px; font-style: italic; }
-  /* Model dropdown opened state */
-  .dropdown {
-    border: 1px solid #2a2a30; border-radius: 6px; background: #0b0b0d;
-    margin-top: 4px; max-height: 180px; overflow: hidden;
+  .m {
+    padding: 10px 14px; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between;
   }
-  .dropdown .item {
-    padding: 8px 12px; font-size: 13px; cursor: pointer; display: flex;
-    align-items: center; justify-content: space-between;
-  }
-  .dropdown .item.selected { background: #1e293b; }
-  .dropdown .item.disabled { color: #4b5563; cursor: not-allowed; background: #1115; }
-  .dropdown .item .reach-note {
-    font-size: 11px; color: #ef4444;
-  }
-  /* Confirm */
+  .m.on { background: #1e293b; color: #93c5fd; }
+  .m.dis { color: #4b5563; cursor: not-allowed; }
+  .m + .m { border-top: 1px solid #1f1f24; }
+  .m .reason { font-size: 11px; color: #6b7280; }
+
+  /* Step 3 confirm */
   .summary {
-    font-size: 13px; background: #0b0b0d; border: 1px solid #2a2a30;
-    border-radius: 6px; padding: 14px; line-height: 1.7;
+    font-size: 14px; line-height: 1.9; color: #d1d5db;
   }
-  .summary b { color: #93c5fd; }
-  .btns { margin-top: 18px; display: flex; gap: 10px; justify-content: flex-end; }
+  .summary b { color: #93c5fd; font-weight: 600; }
+  .summary .check {
+    color: #34d399; font-size: 11px; margin-left: 6px;
+  }
+
+  .btns {
+    margin-top: 28px; display: flex; gap: 12px; justify-content: flex-end;
+  }
   .btn {
-    padding: 8px 16px; border-radius: 6px; border: 1px solid #3b82f6;
+    padding: 9px 18px; border-radius: 8px; border: 1px solid #3b82f6;
     background: #3b82f6; color: white; font: inherit; cursor: pointer;
   }
-  .btn.secondary { background: transparent; color: #9ca3af; border-color: #3b82f6; }
-  /* annotations */
-  .annot {
-    margin-top: 28px; font-size: 12px; color: #9ca3af;
-    background: #161618; border: 1px dashed #3b82f6; border-radius: 8px;
-    padding: 14px; line-height: 1.7;
+  .btn.ghost {
+    background: transparent; color: #9ca3af; border-color: #2a2a30;
   }
-  .annot b { color: #93c5fd; }
-  .annot code {
-    background: #0b0b0d; border: 1px solid #2a2a30; padding: 1px 5px;
-    border-radius: 4px; font-size: 11px; color: #fbbf24;
+
+  .note {
+    margin-top: 40px; font-size: 12px; color: #6b7280;
+    text-align: center;
   }
+  .note b { color: #93c5fd; }
 </style>
 </head>
 <body>
-<h1>RFC-026 P2 — Create Node Wizard (Multi-Daemon)</h1>
-<div class="subtitle">
-  count = 2 (≥2) 路径 — 必选 Step 1 → Step 2 按所选 daemon filter runtime/model/envRef → Step 3 确认
-</div>
+<h1>Create Node — 选服务器 (3 步)</h1>
+<div class="sub">count ≥ 2 路径示意。count = 1 自动选 + skip Step 1; count = 0 显示装 daemon 引导。</div>
 
 <div class="row">
 
   <!-- ============== STEP 1 ============== -->
   <div class="panel">
-    <div class="step-label">Step 1 / 3</div>
+    <div class="step">1 / 3</div>
     <div class="step-title">选服务器</div>
 
-    <div class="server-card selected">
-      <div class="server-name">
-        ● my-server-01
-        <span class="chip green">green</span>
-      </div>
-      <div class="server-meta">
-        上海 · 8c / 16GB · 3 / 20 nodes
-      </div>
-      <div class="runtime-list">
-        <span class="ok">✓ claude-agent-sdk</span> ·
-        <span class="ok">✓ codex-sdk</span> ·
-        <span class="bad">✗ grok-build-acp</span>
-      </div>
-      <div class="server-meta">
-        secrets: ANTHROPIC_API_KEY, OPENAI_API_KEY
+    <div class="srv on">
+      <span class="dot green"></span>
+      <div class="srv-body">
+        <div class="srv-name">my-server-01</div>
+        <div class="srv-hint">上海 · 支持 3 种 runtime</div>
       </div>
     </div>
 
-    <div class="server-card">
-      <div class="server-name">
-        ○ my-server-02
-        <span class="chip yellow">yellow</span>
-      </div>
-      <div class="server-meta">
-        北京 · 4c / 8GB · 18 / 20 nodes
-      </div>
-      <div class="runtime-list">
-        <span class="ok">✓ claude-agent-sdk</span> ·
-        <span class="bad">✗ codex-sdk</span> ·
-        <span class="bad">✗ grok-build-acp</span>
-      </div>
-      <div class="server-meta">
-        secrets: ANTHROPIC_API_KEY
+    <div class="srv">
+      <span class="dot yellow"></span>
+      <div class="srv-body">
+        <div class="srv-name">my-server-02</div>
+        <div class="srv-hint">北京 · 支持 1 种 runtime</div>
       </div>
     </div>
 
-    <div class="server-card dim">
-      <div class="server-name">
-        ○ my-laptop
-        <span class="chip gray">offline</span>
-      </div>
-      <div class="server-meta">
-        last seen 3h ago — daemon 未在线
+    <div class="srv off">
+      <span class="dot gray"></span>
+      <div class="srv-body">
+        <div class="srv-name">my-laptop</div>
+        <div class="srv-hint">offline</div>
       </div>
     </div>
 
     <div class="btns">
-      <button class="btn">下一步 →</button>
+      <button class="btn">下一步</button>
     </div>
   </div>
 
   <!-- ============== STEP 2 ============== -->
   <div class="panel">
-    <div class="step-label">Step 2 / 3</div>
-    <div class="step-title">配置节点 <span style="font-size:12px;color:#6b7280">(在 my-server-01 上)</span></div>
+    <div class="step">2 / 3</div>
+    <div class="step-title">配置节点</div>
 
-    <label>名字</label>
+    <label class="fld">名字</label>
     <input type="text" value="demo-bot">
 
-    <label>Runtime</label>
-    <div class="radio-group">
+    <label class="fld">Runtime</label>
+    <div class="options">
       <label class="opt"><input type="radio" checked> claude-agent-sdk</label>
       <label class="opt"><input type="radio"> codex-sdk</label>
-      <label class="opt disabled">
-        <input type="radio" disabled> grok-build-acp
-        <span class="tooltip">— 服务器声明不支持</span>
-      </label>
+      <label class="opt dis"><input type="radio" disabled> grok-build-acp <span class="why">未支持</span></label>
     </div>
 
-    <label>Model</label>
-    <div class="dropdown">
-      <div class="item selected">
-        claude-opus-4-7
-        <span class="chip green" style="font-size:10px">reachable</span>
-      </div>
-      <div class="item">
-        claude-sonnet-4-6
-        <span class="chip green" style="font-size:10px">reachable</span>
-      </div>
-      <div class="item disabled">
-        gpt-5-turbo
-        <span class="reach-note">— 该服务器 30min 前探测失败 (auth_fail)</span>
-      </div>
-      <div class="item disabled">
-        deepseek-v4-pro
-        <span class="reach-note">— 该服务器探测不到 provider (network_error)</span>
-      </div>
-    </div>
-
-    <label>Secrets (envRef)</label>
-    <div class="radio-group">
-      <label class="opt"><input type="checkbox" checked> ANTHROPIC_API_KEY <span class="tooltip">— 该 network 已配 + 服务器允许</span></label>
-      <label class="opt"><input type="checkbox"> OPENAI_API_KEY <span class="tooltip">— 该 network 已配 + 服务器允许</span></label>
-      <label class="opt disabled">
-        <input type="checkbox" disabled> XAI_API_KEY
-        <span class="tooltip">— 服务器未在 allowed_secret_keys 列表</span>
-      </label>
+    <label class="fld">Model</label>
+    <div class="models">
+      <div class="m on">claude-opus-4-7</div>
+      <div class="m">claude-sonnet-4-6</div>
+      <div class="m dis">gpt-5-turbo <span class="reason">不可达</span></div>
+      <div class="m dis">deepseek-v4-pro <span class="reason">不可达</span></div>
     </div>
 
     <div class="btns">
-      <button class="btn secondary">← 上一步</button>
-      <button class="btn">下一步 →</button>
+      <button class="btn ghost">上一步</button>
+      <button class="btn">下一步</button>
     </div>
   </div>
 
   <!-- ============== STEP 3 ============== -->
   <div class="panel">
-    <div class="step-label">Step 3 / 3</div>
+    <div class="step">3 / 3</div>
     <div class="step-title">确认</div>
 
     <div class="summary">
-      在 <b>my-server-01</b> 上以 <b>admin</b> 身份创建子节点 <b>demo-bot</b>:
-      <br>· runtime = claude-agent-sdk
-      <br>· model = claude-opus-4-7 <span style="color:#34d399">(已确认该服务器可达 Anthropic)</span>
-      <br>· flags = permissionMode default, maxTurns 50
-      <br>· envRef = ANTHROPIC_API_KEY <span style="color:#34d399">(network vault + 服务器 allowlist 已确认)</span>
-      <br>· network = net_ab12 (本人 admin)
+      在 <b>my-server-01</b> 上创建
+      <br><b>demo-bot</b>
+      <br><span style="color:#9ca3af">claude-agent-sdk · claude-opus-4-7</span>
+      <br><span class="check">✓ 服务器可达模型</span>
     </div>
 
     <div class="btns">
-      <button class="btn secondary">取消</button>
-      <button class="btn">创建并启动</button>
+      <button class="btn ghost">取消</button>
+      <button class="btn">创建</button>
     </div>
   </div>
 
 </div>
 
-<div class="annot">
-  <b>设计要点对照 RFC-026 §9</b>:
-  <br>① <b>Step 1 服务器卡片</b> 列出 list_host_supervisors 返回的所有候选 daemon (§9.2):
-     绿/黄/灰 alert chip 复用 RFC-014 host telemetry; 显示 declared runtimes + allowed_secret_keys (member 视图脱敏掉 IP/cpu/mem 数字, §6 #3)。
-  <br>② <b>Step 2 Runtime radio</b> grey 掉所选 daemon 声明不支持的项 (§9.3 D2: 候选过滤; <b>真 spawn 时再 fail-fast 兜底</b>, 不当保证)。
-  <br>③ <b>Step 2 Model 下拉</b> grey 掉所选 daemon 探测不到的 provider 对应 model — 直接答 Vincent「不同服务器网络环境不一样」(§9.5 D6: <code>providers.reachable_from_daemons</code> jsonb, RFC-028 probe 同步 upsert)。
-  <br>④ <b>Step 2 Secrets</b> grey 掉所选 daemon 不在 <code>allowed_secret_keys</code> 列表的 key (§9.3 D5: per-daemon env allowlist, daemon-side validate-on-pull 兜底, 仍可拒 <code>daemon_env_key_missing</code>)。
-  <br>⑤ <b>三态切换</b>: count=0 → 替换整 wizard 成空状态 + 装 daemon 命令; count=1 → 自动选第一个 + skip Step 1 直接 Step 2 (保 P1 quick path); count≥2 → 必选 Step 1 (本图所示)。详 §9.4。
-  <br>⑥ <b>失败兜底</b>: 选 daemon 后 mid-dispatch offline → hub fail-fast + sweeper revoke; daemon 声明 runtime 但 spawn 挂 → <code>runtime_capability_check_failed</code> 显式报错。详 §9.6。
+<div class="note">
+  设计要点 (RFC-026 §9): 服务器名 + 状态点 + 一句话能力概要 → 详情 hover/点击展开。
+  <br>不可达 model 灰 + <b>「不可达」</b> 单词标注（点击看具体原因, 不默认展全）。
 </div>
 
 </body>

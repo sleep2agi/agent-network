@@ -1023,11 +1023,18 @@ daemon 不能仅凭 `runtimes_supported` 声明就报 success。
 
 ### 9.4 Wizard 三态流
 
-**Mockup (count ≥ 2 路径, 三步并排)**:
+**Mockup (count ≥ 2 路径, 三步并排, v2 精简版)**:
 
 ![RFC-026 P2 Create Node Wizard Mockup](./assets/rfc-026-p2-wizard-mockup.png)
 
 源: [`assets/rfc-026-p2-wizard-mockup.html`](./assets/rfc-026-p2-wizard-mockup.html) (静态 HTML, 浏览器直接打开; PNG 是 1400×900 headless 渲染)。
+
+视觉精简原则 (v2, Vincent: 「搞的简洁点」):
+
+- **服务器卡 = 名 + 状态点 + 一句话能力概要** (「支持 N 种 runtime」), 详情 hover/点击展开,不默认全摊。telemetry IP/cpu/mem 移到二级 (admin 视图)。
+- **Model 不可达 = 灰 + 「不可达」单词标注**, 详细原因 (auth_fail/network_error/timeout) 点击或 hover 展开。
+- **留白多 + 元素少**, 三栏在手机看自动堆叠 (CSS grid-template-columns 退化 `1fr 1fr 1fr` → `1fr`)。
+- **底栏 affordance hint**: 一行设计要点说明默认折叠/展开的关系。
 
 `count = 0` / `count = 1` 路径文字流见下:
 
