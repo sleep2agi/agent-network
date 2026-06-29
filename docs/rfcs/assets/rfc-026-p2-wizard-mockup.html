@@ -2,197 +2,135 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>RFC-026 P2 — Create Node Wizard Mockup (v2 simplified)</title>
+<title>RFC-026 P2 — Create Node (v3 ultra-minimal)</title>
 <style>
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 40px;
-    font: 14px/1.6 -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+    margin: 0; padding: 56px 24px;
+    font: 15px/1.6 -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
     background: #0b0b0d; color: #e5e7eb;
+    min-height: 100vh;
   }
-  h1 { font-size: 16px; font-weight: 600; margin: 0 0 4px; color: #d1d5db; }
-  .sub { color: #6b7280; font-size: 12px; margin-bottom: 40px; }
-  .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 28px; }
-  .panel {
-    background: #161618; border: 1px solid #1f1f24; border-radius: 14px;
-    padding: 28px 24px;
+  .wrap {
+    max-width: 480px; margin: 0 auto;
   }
-  .step {
-    color: #6b7280; font-size: 11px; font-weight: 600;
-    letter-spacing: 0.08em; margin-bottom: 8px;
+  h1 {
+    font-size: 22px; font-weight: 600; margin: 0 0 32px;
   }
-  .step-title { font-size: 16px; font-weight: 600; margin-bottom: 24px; }
-
-  /* Server pick — minimal cards */
-  .srv {
-    display: flex; align-items: center; gap: 12px;
-    padding: 16px 14px; border-radius: 10px;
-    border: 1px solid #2a2a30; margin-bottom: 10px;
-    cursor: pointer; transition: border-color .15s;
+  .field { margin-bottom: 20px; }
+  .label {
+    font-size: 12px; color: #6b7280; margin-bottom: 6px;
   }
-  .srv:hover { border-color: #4b5563; }
-  .srv.on { border-color: #3b82f6; background: #1e293b22; }
-  .srv.off { opacity: 0.45; cursor: not-allowed; }
-  .dot {
-    width: 10px; height: 10px; border-radius: 50%;
-    flex-shrink: 0;
-  }
-  .dot.green  { background: #34d399; }
-  .dot.yellow { background: #fbbf24; }
-  .dot.gray   { background: #4b5563; }
-  .srv-body { flex: 1; min-width: 0; }
-  .srv-name { font-weight: 600; font-size: 14px; }
-  .srv-hint { font-size: 12px; color: #6b7280; margin-top: 2px; }
-
-  /* Form */
-  label.fld { display: block; font-size: 12px; color: #6b7280; margin: 20px 0 8px; }
-  input[type=text], select {
-    width: 100%; padding: 10px 12px;
-    background: #0b0b0d; color: #e5e7eb;
-    border: 1px solid #2a2a30; border-radius: 8px; font: inherit;
-  }
-
-  .options { display: flex; flex-direction: column; gap: 4px; }
-  .opt {
-    display: flex; align-items: center; gap: 10px; cursor: pointer;
-    padding: 8px 4px; color: #d1d5db; font-size: 13px;
-  }
-  .opt.dis { color: #4b5563; cursor: not-allowed; }
-  .why { font-size: 11px; color: #6b7280; margin-left: auto; }
-
-  .models {
-    border: 1px solid #2a2a30; border-radius: 8px; background: #0b0b0d;
-    overflow: hidden;
-  }
-  .m {
-    padding: 10px 14px; font-size: 13px; cursor: pointer;
+  .input, .pick {
+    width: 100%; padding: 12px 14px;
+    background: #161618; color: #e5e7eb;
+    border: 1px solid #2a2a30; border-radius: 10px;
+    font: inherit; cursor: pointer;
     display: flex; align-items: center; justify-content: space-between;
   }
-  .m.on { background: #1e293b; color: #93c5fd; }
-  .m.dis { color: #4b5563; cursor: not-allowed; }
-  .m + .m { border-top: 1px solid #1f1f24; }
-  .m .reason { font-size: 11px; color: #6b7280; }
-
-  /* Step 3 confirm */
-  .summary {
-    font-size: 14px; line-height: 1.9; color: #d1d5db;
+  .input:focus, .pick:focus { outline: none; border-color: #3b82f6; }
+  .pick.open { border-color: #3b82f6; }
+  .caret { color: #6b7280; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%; margin-right: 8px;
+    display: inline-block; flex-shrink: 0;
   }
-  .summary b { color: #93c5fd; font-weight: 600; }
-  .summary .check {
-    color: #34d399; font-size: 11px; margin-left: 6px;
-  }
+  .dot.green { background: #34d399; }
+  .dot.yellow { background: #fbbf24; }
 
-  .btns {
-    margin-top: 28px; display: flex; gap: 12px; justify-content: flex-end;
+  /* Dropdown items (shown for Model to demonstrate reachability) */
+  .menu {
+    background: #161618; border: 1px solid #3b82f6; border-radius: 10px;
+    margin-top: 6px; overflow: hidden;
+  }
+  .item {
+    padding: 11px 14px; font-size: 14px; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .item:hover { background: #1e293b22; }
+  .item.on { background: #1e293b; color: #93c5fd; }
+  .item.dis {
+    color: #4b5563; cursor: not-allowed; background: transparent;
+  }
+  .item.dis:hover { background: transparent; }
+  .item .why {
+    font-size: 11px; color: #6b7280;
+  }
+  .item + .item { border-top: 1px solid #1f1f24; }
+
+  .adv {
+    color: #6b7280; font-size: 13px; margin-top: 8px; cursor: pointer;
+    user-select: none;
+  }
+  .adv:hover { color: #9ca3af; }
+
+  .actions {
+    margin-top: 36px;
+    display: flex; gap: 12px; justify-content: flex-end;
   }
   .btn {
-    padding: 9px 18px; border-radius: 8px; border: 1px solid #3b82f6;
+    padding: 11px 22px; border-radius: 10px; border: 1px solid #3b82f6;
     background: #3b82f6; color: white; font: inherit; cursor: pointer;
   }
   .btn.ghost {
     background: transparent; color: #9ca3af; border-color: #2a2a30;
   }
 
-  .note {
-    margin-top: 40px; font-size: 12px; color: #6b7280;
-    text-align: center;
+  .footnote {
+    color: #4b5563; font-size: 11px; text-align: center;
+    margin-top: 56px;
   }
-  .note b { color: #93c5fd; }
 </style>
 </head>
 <body>
-<h1>Create Node — 选服务器 (3 步)</h1>
-<div class="sub">count ≥ 2 路径示意。count = 1 自动选 + skip Step 1; count = 0 显示装 daemon 引导。</div>
+<div class="wrap">
+  <h1>创建节点</h1>
 
-<div class="row">
-
-  <!-- ============== STEP 1 ============== -->
-  <div class="panel">
-    <div class="step">1 / 3</div>
-    <div class="step-title">选服务器</div>
-
-    <div class="srv on">
-      <span class="dot green"></span>
-      <div class="srv-body">
-        <div class="srv-name">my-server-01</div>
-        <div class="srv-hint">上海 · 支持 3 种 runtime</div>
-      </div>
-    </div>
-
-    <div class="srv">
-      <span class="dot yellow"></span>
-      <div class="srv-body">
-        <div class="srv-name">my-server-02</div>
-        <div class="srv-hint">北京 · 支持 1 种 runtime</div>
-      </div>
-    </div>
-
-    <div class="srv off">
-      <span class="dot gray"></span>
-      <div class="srv-body">
-        <div class="srv-name">my-laptop</div>
-        <div class="srv-hint">offline</div>
-      </div>
-    </div>
-
-    <div class="btns">
-      <button class="btn">下一步</button>
+  <div class="field">
+    <div class="label">服务器</div>
+    <div class="pick">
+      <span><span class="dot green"></span> my-server-01 · 上海</span>
+      <span class="caret">▾</span>
     </div>
   </div>
 
-  <!-- ============== STEP 2 ============== -->
-  <div class="panel">
-    <div class="step">2 / 3</div>
-    <div class="step-title">配置节点</div>
+  <div class="field">
+    <div class="label">名字</div>
+    <input class="input" type="text" value="demo-bot" style="cursor: text;">
+  </div>
 
-    <label class="fld">名字</label>
-    <input type="text" value="demo-bot">
-
-    <label class="fld">Runtime</label>
-    <div class="options">
-      <label class="opt"><input type="radio" checked> claude-agent-sdk</label>
-      <label class="opt"><input type="radio"> codex-sdk</label>
-      <label class="opt dis"><input type="radio" disabled> grok-build-acp <span class="why">未支持</span></label>
-    </div>
-
-    <label class="fld">Model</label>
-    <div class="models">
-      <div class="m on">claude-opus-4-7</div>
-      <div class="m">claude-sonnet-4-6</div>
-      <div class="m dis">gpt-5-turbo <span class="reason">不可达</span></div>
-      <div class="m dis">deepseek-v4-pro <span class="reason">不可达</span></div>
-    </div>
-
-    <div class="btns">
-      <button class="btn ghost">上一步</button>
-      <button class="btn">下一步</button>
+  <div class="field">
+    <div class="label">Runtime</div>
+    <div class="pick">
+      <span>claude-agent-sdk</span>
+      <span class="caret">▾</span>
     </div>
   </div>
 
-  <!-- ============== STEP 3 ============== -->
-  <div class="panel">
-    <div class="step">3 / 3</div>
-    <div class="step-title">确认</div>
-
-    <div class="summary">
-      在 <b>my-server-01</b> 上创建
-      <br><b>demo-bot</b>
-      <br><span style="color:#9ca3af">claude-agent-sdk · claude-opus-4-7</span>
-      <br><span class="check">✓ 服务器可达模型</span>
+  <div class="field">
+    <div class="label">Model</div>
+    <div class="pick open">
+      <span>claude-opus-4-7</span>
+      <span class="caret">▴</span>
     </div>
-
-    <div class="btns">
-      <button class="btn ghost">取消</button>
-      <button class="btn">创建</button>
+    <div class="menu">
+      <div class="item on">claude-opus-4-7</div>
+      <div class="item">claude-sonnet-4-6</div>
+      <div class="item dis">gpt-5-turbo <span class="why">不可达</span></div>
+      <div class="item dis">deepseek-v4-pro <span class="why">不可达</span></div>
     </div>
   </div>
 
+  <div class="adv">▸ 高级</div>
+
+  <div class="actions">
+    <button class="btn ghost">取消</button>
+    <button class="btn">创建</button>
+  </div>
+
+  <div class="footnote">
+    count = 1 路径同此 (服务器已自动填) · count = 0 整页换成「装 daemon」引导
+  </div>
 </div>
-
-<div class="note">
-  设计要点 (RFC-026 §9): 服务器名 + 状态点 + 一句话能力概要 → 详情 hover/点击展开。
-  <br>不可达 model 灰 + <b>「不可达」</b> 单词标注（点击看具体原因, 不默认展全）。
-</div>
-
 </body>
 </html>

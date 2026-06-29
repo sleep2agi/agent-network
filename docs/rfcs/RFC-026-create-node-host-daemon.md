@@ -1023,20 +1023,22 @@ daemon 不能仅凭 `runtimes_supported` 声明就报 success。
 
 ### 9.4 Wizard 三态流
 
-**Mockup (count ≥ 2 路径, 三步并排, v2 精简版)**:
+**Mockup (v3 ultra-minimal, Vincent: 「尽可能简洁」)**:
 
 ![RFC-026 P2 Create Node Wizard Mockup](./assets/rfc-026-p2-wizard-mockup.png)
 
-源: [`assets/rfc-026-p2-wizard-mockup.html`](./assets/rfc-026-p2-wizard-mockup.html) (静态 HTML, 浏览器直接打开; PNG 是 1400×900 headless 渲染)。
+源: [`assets/rfc-026-p2-wizard-mockup.html`](./assets/rfc-026-p2-wizard-mockup.html) (静态 HTML, 浏览器直接打开; PNG 是 560×820 mobile-shape 渲染)。
 
-视觉精简原则 (v2, Vincent: 「搞的简洁点」):
+视觉精简到极致 (v3):
 
-- **服务器卡 = 名 + 状态点 + 一句话能力概要** (「支持 N 种 runtime」), 详情 hover/点击展开,不默认全摊。telemetry IP/cpu/mem 移到二级 (admin 视图)。
-- **Model 不可达 = 灰 + 「不可达」单词标注**, 详细原因 (auth_fail/network_error/timeout) 点击或 hover 展开。
-- **留白多 + 元素少**, 三栏在手机看自动堆叠 (CSS grid-template-columns 退化 `1fr 1fr 1fr` → `1fr`)。
-- **底栏 affordance hint**: 一行设计要点说明默认折叠/展开的关系。
+- **三步合并成一屏**——不再分 Step 1/2/3,服务器+名字+runtime+model 一个 form 全填,scroll 不到一屏就完。
+- **选服务器 = 下拉,不是卡片**——「服务器 [● my-server-01 ▾]」一行,下拉项里带状态点 + `name · 地点` 一句。
+- **核心 4 字段**:服务器 / 名字 / runtime / model。其余 flags/budget/timeout 全收进底部 **「▸ 高级」** 折叠区,默认不展。
+- **Model 灰掉不可达 + 单词「不可达」**——核心价值保留,详细原因点击展开看,默认不展。
+- **底部一行 footnote**: 把 count=1 / count=0 三态用文字交代,不画三套图。
+- 整体目标:**「填几个项,点创建」**——「一眼就会、几下填完」。
 
-`count = 0` / `count = 1` 路径文字流见下:
+D1-D6 设计 + 6 决策锁定 + RFC-028 联动皆不变,只视觉浓缩。
 
 
 ```
