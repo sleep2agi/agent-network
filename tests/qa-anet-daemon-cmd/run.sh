@@ -192,7 +192,61 @@ echo "$REST_KEYS" | grep -q "runtimes_supported" && ok "REST daemon row has runt
 REST_NO_CFG_SNAP=$(echo "$REST_RESP" | jq -r '.daemons[0] | has("config_snapshot")' 2>/dev/null)
 [[ "$REST_NO_CFG_SNAP" == "false" ]] && ok "REST does NOT leak config_snapshot (post-#312 invariant preserved)" || bad "REST leaked config_snapshot"
 
+# ── K — ack_create_request runtime_capability_check_failed cross-component
+# Real MCP call against the live hub using the daemon's bound ntok. Catches
+# the PR3 v1 regression: hub zod enum rejected the new status + audit_log
+# action wasn't in the enum. Both must be wired end-to-end for the D2
+# fail-fast path to actually work in production.
+note "K. ack_create_request runtime_capability_check_failed end-to-end (#338 PR3 B1+B2)"
+
+# Resolve daemon ntok + node_id from the oneshot daemon we registered in H.
+DAEMON_TOK=$(jq -r '.token' "$WORK/.anet/nodes/oneshot-daemon/config.json")
+[[ "$DAEMON_TOK" == ntok_* ]] && ok "fetched oneshot-daemon ntok" || { bad "no daemon ntok found"; exit 1; }
+DAEMON_NID=$(curl -sS "$HUB_BASE/api/nodes?alias=oneshot-daemon" -H "Authorization: Bearer $UTOK" | jq -r '.nodes[0].node_id')
+[[ -n "$DAEMON_NID" && "$DAEMON_NID" != "null" ]] && ok "fetched oneshot-daemon node_id" || { bad "no daemon node_id"; exit 1; }
+
+# Inject a pretend node_create_request row that the daemon will ack. Use
+# sqlite3 directly against the hub's DB — fixture setup, not a leak path.
+REQ_ID="cr_qak_$(date +%s%N)"
+sqlite3 "$HUB_DB" <<SQL
+INSERT INTO node_create_requests
+  (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token)
+VALUES
+  ('$REQ_ID', '$DAEMON_NID', 'qak-child', '$NET', 'codex-sdk', 'x', '{}', '[]', 'delivered', NULL, $(date +%s)000, 'fixture');
+SQL
+
+# Call ack_create_request via MCP with the NEW status (was zod-rejected pre-fix).
+# MCP requires init handshake first.
+curl -sS -X POST "$HUB_BASE/mcp" -H "Authorization: Bearer $DAEMON_TOK" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-03-26' \
+  -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"qak","version":"0"}}}' >/dev/null 2>&1
+ACK_BODY='{"jsonrpc":"2.0","id":60,"method":"tools/call","params":{"name":"ack_create_request","arguments":{"request_id":"'$REQ_ID'","status":"runtime_capability_check_failed","error":"child died within 5000ms post-spawn","runtime":"codex-sdk"}}}'
+ACK_RESP=$(curl -sS -X POST "$HUB_BASE/mcp" -H "Authorization: Bearer $DAEMON_TOK" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-03-26' -d "$ACK_BODY")
+ACK_INNER=$(echo "$ACK_RESP" | grep -oP '(?<=data: ).+' | head -1 | jq -r '.result.content[0].text' 2>/dev/null)
+[[ -z "$ACK_INNER" || "$ACK_INNER" == "null" ]] && ACK_INNER=$(echo "$ACK_RESP" | jq -r '.result.content[0].text' 2>/dev/null)
+ACK_OK=$(echo "$ACK_INNER" | jq -r '.ok' 2>/dev/null)
+[[ "$ACK_OK" == "true" ]] && ok "hub accepts runtime_capability_check_failed status (B1 zod schema fix真)" || { bad "ack rejected: $ACK_INNER (B1 still broken)"; exit 1; }
+ACK_STATUS=$(echo "$ACK_INNER" | jq -r '.status' 2>/dev/null)
+[[ "$ACK_STATUS" == "runtime_capability_check_failed" ]] && ok "hub returns status=runtime_capability_check_failed in reply" || bad "wrong reply status: $ACK_STATUS"
+
+# DB verify: request row flipped to terminal status, audit_log row written.
+DB_STATUS=$(sqlite3 "$HUB_DB" "SELECT status FROM node_create_requests WHERE request_id='$REQ_ID'")
+[[ "$DB_STATUS" == "runtime_capability_check_failed" ]] && ok "DB: node_create_requests.status flipped to terminal runtime_capability_check_failed" || bad "DB status='$DB_STATUS'"
+DB_ACKED=$(sqlite3 "$HUB_DB" "SELECT acked_at FROM node_create_requests WHERE request_id='$REQ_ID'")
+[[ -n "$DB_ACKED" && "$DB_ACKED" != "" ]] && ok "DB: acked_at stamped" || bad "DB acked_at empty"
+
+# B2 — audit_log row exists with action='daemon_capability_lied' + runtime in detail.
+AUDIT_CNT=$(sqlite3 "$HUB_DB" "SELECT COUNT(*) FROM audit_log WHERE action='daemon_capability_lied' AND target_id='$REQ_ID'")
+[[ "$AUDIT_CNT" -ge 1 ]] && ok "audit_log: 1 daemon_capability_lied row written (B2 wired真)" || { bad "audit_log missing — count=$AUDIT_CNT (B2 still fabricated)"; exit 1; }
+AUDIT_DETAIL=$(sqlite3 "$HUB_DB" "SELECT detail FROM audit_log WHERE action='daemon_capability_lied' AND target_id='$REQ_ID' LIMIT 1")
+echo "$AUDIT_DETAIL" | jq -e '.runtime == "codex-sdk"' >/dev/null 2>&1 && ok "audit detail.runtime='codex-sdk' surfaced" || bad "audit detail missing runtime: $AUDIT_DETAIL"
+echo "$AUDIT_DETAIL" | jq -e --arg nid "$DAEMON_NID" '.daemon_node_id == $nid' >/dev/null 2>&1 && ok "audit detail.daemon_node_id matches lying daemon" || bad "audit daemon_node_id wrong: $AUDIT_DETAIL"
+echo "$AUDIT_DETAIL" | jq -e '.error | contains("child died within 5000ms")' >/dev/null 2>&1 && ok "audit detail.error preserved (truncated to 500ch)" || bad "audit error missing/wrong: $AUDIT_DETAIL"
+
 printf "\n────────────────────────────────────────────\n"
-printf "anet daemon CLI + list_host_supervisors e2e — PASS=%d FAIL=%d\n" "$PASS" "$FAIL"
+printf "anet daemon CLI + list_host_supervisors + ack capability-fail e2e — PASS=%d FAIL=%d\n" "$PASS" "$FAIL"
 printf "────────────────────────────────────────────\n"
 [[ "$FAIL" -eq 0 ]]

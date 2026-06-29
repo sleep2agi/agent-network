@@ -2005,23 +2005,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       // Read daemon's host_supervisor capability + allowlist from its
-      // last reported config_snapshot.
-      // PR3 (#338): canonical key is `daemon_capabilities.runtimes_supported`
-      // (RFC-026 §9.3); legacy `daemon_capabilities.allowed_runtimes`
-      // also honored for back-compat with pre-PR3 daemons.
+      // last reported config_snapshot. PR3 (#338) canonical path is
+      // `daemon_capabilities.runtimes_supported` (RFC-026 §9.3).
+      // Pre-PR3 daemons (preview.10 and earlier) place these at the
+      // TOP level of the snapshot rather than nested — those reads
+      // return undefined here and `daemonAllowedRuntimes` stays null
+      // (permissive — no allowlist enforcement); they fall back to
+      // §4.2.2 structural validation only, identical to pre-PR3
+      // behavior. No regression on in-flight daemons.
       let daemonAllowList = new Set<string>();
       let daemonAllowedRuntimes: string[] | null = null;
       try {
         const snap = daemon.config_snapshot ? JSON.parse(daemon.config_snapshot) : null;
         const caps = snap?.daemon_capabilities;
-        if (caps?.allowed_secret_keys) {
+        if (Array.isArray(caps?.allowed_secret_keys)) {
           daemonAllowList = new Set(caps.allowed_secret_keys);
         }
-        // Prefer new canonical name; fall back to legacy.
-        const rt = Array.isArray(caps?.runtimes_supported) ? caps.runtimes_supported
-                 : Array.isArray(caps?.allowed_runtimes)   ? caps.allowed_runtimes
-                 : null;
-        if (rt) daemonAllowedRuntimes = rt;
+        if (Array.isArray(caps?.runtimes_supported)) {
+          daemonAllowedRuntimes = caps.runtimes_supported;
+        }
       } catch { /* permissive fallback */ }
 
       // §4.2.2 — structural validation (catches name/runtime/model/
@@ -2252,14 +2254,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // record fork-side info.
   server.tool(
     "ack_create_request",
-    "Daemon acks a create-node request (called after fork). status='started' or 'failed'. RFC-026.",
+    "Daemon acks a create-node request (called after fork). status='started' | 'failed' | 'rejected' | 'runtime_capability_check_failed'. RFC-026 §9.3 D2.",
     {
       request_id: z.string().min(1).max(200),
-      status: z.enum(["started", "failed", "rejected"]),
+      // RFC-026 §9.3 D2 — runtime_capability_check_failed signals the
+      // daemon spawned the child OK but it died within FAIL_FAST_MS
+      // (5s in agent-node v2.5.0-preview.11+), indicating a
+      // declaration↔reality gap on this daemon's runtimes_supported.
+      // Treated terminal like 'failed' but fires a distinct audit_log
+      // action so dashboards can highlight "lying daemons" separately
+      // from generic spawn failures.
+      status: z.enum(["started", "failed", "rejected", "runtime_capability_check_failed"]),
       error: z.string().max(1000).optional(),
       child_pid: z.number().int().optional(),
+      runtime: z.string().max(64).optional(),   // populated by daemon when status=runtime_capability_check_failed
     },
-    async ({ request_id, status, error: ackError, child_pid: _pid }) => {
+    async ({ request_id, status, error: ackError, child_pid: _pid, runtime: ackRuntime }) => {
       const callerDaemon = resolveCallerDaemonTokenBound();
       if (!callerDaemon.ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
@@ -2285,7 +2295,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         );
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: "awaiting_register" }) }] };
       }
-      // failed / rejected — revoke child-ntok + mark request terminal
+      // failed / rejected / runtime_capability_check_failed — revoke
+      // child-ntok + mark request terminal.
       if (row.child_token_id) {
         db.run(`UPDATE api_tokens SET revoked_at = datetime('now') WHERE token_id = ?1 AND revoked_at IS NULL`, [row.child_token_id]);
       }
@@ -2293,6 +2304,23 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         `UPDATE node_create_requests SET status = ?1, error = ?2, acked_at = ?3 WHERE request_id = ?4 AND status IN ('pending', 'delivered')`,
         [status, ackError || null, ackedAt, request_id],
       );
+      // RFC-026 §9.3 D2 — surface declaration↔reality gap on a
+      // distinct audit_log action so dashboards / operators can spot
+      // chronically-lying daemons separate from generic spawn-failed.
+      if (status === "runtime_capability_check_failed") {
+        auditCreateNode({
+          action: "daemon_capability_lied",
+          user_id: null,
+          network_id: row.network_id,
+          target_id: request_id,
+          detail: {
+            daemon_node_id: row.daemon_node_id,
+            runtime: ackRuntime || null,
+            error: ackError ? ackError.slice(0, 500) : null,
+            acked_at: ackedAt,
+          },
+        });
+      }
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
     },
   );

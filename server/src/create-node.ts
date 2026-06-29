@@ -273,7 +273,12 @@ export function resolveCallerDaemonTokenBound(opts: {
 // lifecycle event. Best-effort: never throw out (calling tool should
 // continue even if audit insert fails for any reason).
 export function auditCreateNode(input: {
-  action: "create_node_dispatched" | "create_node_rejected" | "create_node_succeeded" | "create_node_sweeper_revoked";
+  action:
+    | "create_node_dispatched"
+    | "create_node_rejected"
+    | "create_node_succeeded"
+    | "create_node_sweeper_revoked"
+    | "daemon_capability_lied";   // RFC-026 §9.3 D2 — daemon declared runtime support, child died before serving
   user_id?: string | null;
   username?: string | null;
   network_id?: string | null;
