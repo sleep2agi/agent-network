@@ -26,6 +26,7 @@ import { formatSelfLoopsBlock } from "./goals/format";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
+import { maskedEnv } from "./secret-mask";
 import {
   CommHubError,
   classifyCommHubResponse,
@@ -1696,7 +1697,16 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     // can actually talk to other agents in the network.
     mcpServers: Object.keys(mcpServers).length ? mcpServers : undefined,
     pathToClaudeCodeExecutable: claudePath,
-    env: process.env,
+    // Layer A of feishu hardening (RFC-020 §13 — Vincent UAT 2026-06-29
+    // catch): strip operator secrets (FEISHU_APP_SECRET / ntok_ / utok_ /
+    // GH_TOKEN / SLACK_TOKEN / TELEGRAM_TOKEN / etc.) from the env handed
+    // to the claude-agent-sdk child process. The LLM running inside the
+    // binary has Bash + Read + Glob tools and was caught reading these
+    // values out of `env` and echoing them back to the IM user. Vendor
+    // keys (ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY / etc.) and FEISHU_APP_ID
+    // (public identifier) pass through — claude binary genuinely needs
+    // them. See src/secret-mask.ts for the full allowlist + rationale.
+    env: maskedEnv(process.env),
     cwd: process.cwd(),
     stderr: (data: string) => { if (data.trim()) log(`[stderr] ${data.trim().slice(0, 300)}`); },
     hooks: {
