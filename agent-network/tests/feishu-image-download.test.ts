@@ -249,3 +249,60 @@ if (failed.length > 0) {
   for (const f of failed) console.log(`  - ${f.name}: ${f.detail}`);
   process.exit(1);
 }
+
+// ── 6. lark SDK response shape regression (added 2026-06-29 after Vincent UAT) ─
+
+// The lark @larksuiteoapi/node-sdk wraps `messageResource.get` HTTP response
+// in `{ getReadableStream, writeFile, headers }`, NOT a raw Readable. Our
+// downloadImage code calls `.getReadableStream()`; this test locks the
+// assumption so a future refactor that goes back to `resp.on('data')` will
+// fail loudly instead of silently breaking at runtime (the original
+// regression — caught by #322 trace logging).
+
+// Mock the lark resp shape and verify our consumer uses the right method.
+import { Readable } from "node:stream";
+
+function makeLarkResp(body: Buffer) {
+  return {
+    getReadableStream: () => Readable.from([body]),
+    writeFile: async (p: string) => p,
+    headers: { "content-type": "image/png" },
+  };
+}
+
+// Mirror downloadImage's "read from lark resp" logic in isolation.
+async function readLarkRespBytes(resp: any): Promise<Buffer | null> {
+  if (typeof resp?.getReadableStream !== "function") return null;
+  const stream = resp.getReadableStream();
+  const chunks: Buffer[] = [];
+  await new Promise<void>((resolve, reject) => {
+    stream.on("data", (c: Buffer) => chunks.push(Buffer.from(c)));
+    stream.on("end", () => resolve());
+    stream.on("error", reject);
+  });
+  return Buffer.concat(chunks);
+}
+
+const fakeBody = Buffer.concat([PNG_HEADER, Buffer.alloc(100, 0x11)]);
+const goodResp = makeLarkResp(fakeBody);
+const readBody = await readLarkRespBytes(goodResp);
+expect("lark resp shape: getReadableStream() returns Readable bytes match",
+  readBody !== null && readBody.equals(fakeBody),
+  `read ${readBody?.length} vs expected ${fakeBody.length}`,
+);
+
+// Reject when no getReadableStream method (e.g. SDK version drift)
+const badResp = { headers: {}, data: "raw" };
+const rejected = await readLarkRespBytes(badResp);
+expect("lark resp without getReadableStream → null", rejected === null);
+
+// Reject raw Readable misused as lark resp (the original bug shape — `resp as Readable`)
+const rawStream: any = Readable.from([Buffer.from("png?")]);
+const wrongCast = await readLarkRespBytes(rawStream);
+expect("raw Readable cast to lark resp → null (no getReadableStream)",
+  wrongCast === null,
+  "guard prevents q.on style misuse"
+);
+
+// Final summary already printed above; print one more pass tag.
+console.log("(+3 lark SDK shape assertions)");

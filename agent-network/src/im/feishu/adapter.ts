@@ -453,7 +453,29 @@ async function downloadImage(
       process.stderr.write(`[feishu:image] ${messageId} messageResource.get returned falsy (no stream)\n`);
       return null;
     }
-    const stream = resp as unknown as Readable;
+    // @larksuiteoapi/node-sdk wraps the HTTP response in an object exposing
+    // `getReadableStream()` and `writeFile(path)`, NOT a raw `Readable`.
+    // The previous `resp as unknown as Readable` cast made `resp.on(...)`
+    // throw `q.on is not a function` (Vincent UAT 2026-06-29 trace caught
+    // it after #322 observability ship). Real shape (verified in
+    // node_modules/@larksuiteoapi/node-sdk/lib/index.js L398-413):
+    //   { writeFile: (p) => Promise<string>,
+    //     getReadableStream: () => Readable,
+    //     headers: {...} }
+    // We use getReadableStream() so the existing mime-check + magic-byte
+    // path stays intact (writeFile would land bytes on disk before we
+    // can verify they're really an image — defeats the whitelist).
+    const respObj = resp as unknown as {
+      getReadableStream?: () => Readable;
+      writeFile?: (path: string) => Promise<string>;
+    };
+    if (typeof respObj.getReadableStream !== "function") {
+      process.stderr.write(
+        `[feishu:image] ${messageId} resp shape unexpected — no getReadableStream() method (lark SDK version drift?)\n`,
+      );
+      return null;
+    }
+    const stream = respObj.getReadableStream();
     const chunks: Buffer[] = [];
     await new Promise<void>((resolve, reject) => {
       stream.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
