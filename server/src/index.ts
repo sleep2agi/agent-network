@@ -2092,10 +2092,16 @@ Bun.serve({
       // for dashboard discovery — full snapshot is NOT broadcast (would
       // re-introduce the #312 SELECT * fragility). Mapping step pulls
       // `role` out then drops `config_snapshot` from the response row.
+      // RFC-027 PR2 dashboard prereq: lifecycle_state is needed
+      // client-side to drive the ⋮ menu (active → "停止/删除";
+      // stopped → "重启/删除"). Hub schema gained the column at PR1
+      // (#345) but /api/nodes never SELECTed it. Following #312
+      // "explicit SELECT" discipline — extend the projection here,
+      // do NOT switch to SELECT *.
       let sql = `SELECT node_id, node_name, alias, runtime, model,
                         config_path, channels, server, hostname,
                         network_id, created_at, updated_at,
-                        config_snapshot
+                        config_snapshot, lifecycle_state
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addNetworkScope(sql, params, restScope);
