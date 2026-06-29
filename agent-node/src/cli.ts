@@ -3942,6 +3942,21 @@ processInbox().catch((e: any) => warn(`initial inbox scan failed: ${e.message}`)
 // after a restart instead of ✓ within a few seconds.
 reportStatus("idle").catch((e: any) => warn(`initial reportStatus failed: ${e?.message || e}`));
 setInterval(() => reportStatus("idle").catch(() => {}), 3 * 60 * 1000);
+
+// RFC-027 §2.5 / §4.4 D7 — 30d backup sweeper, host_supervisor only.
+// Runs once at boot (catches accumulated junk from long down-periods),
+// then daily. Sweeper unref's its interval so it never blocks process
+// exit. Logs only the top-level <ts>-<alias> dir name on purge — never
+// any file inside, per D7 nit ("不 log 文件名, 避免 secret 名字漏进 log").
+if (fileConfig.role === "host_supervisor") {
+  import("./runtime/deleted-sweeper.js").then(({ startDeletedSweeper }) => {
+    startDeletedSweeper({
+      log: (m: string) => log(m),
+      warn: (m: string) => warn(m),
+    });
+    log("[deleted-sweeper] started (every 24h, retention 30d)");
+  }).catch((e: any) => warn(`deleted-sweeper import failed: ${e?.message || e}`));
+}
 if (goalsSchedulerEnabled) {
   setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
   runGoalSchedulerTick().catch(() => {});
