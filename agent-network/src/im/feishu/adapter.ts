@@ -390,8 +390,23 @@ function normalizeMessageEvent(
   } else if (message.message_type === "image") {
     // M5: download via im.messageResource.get + populate content.images.
     text = undefined;
+  } else if (message.message_type === "post") {
+    // Feishu 图文混排 rich-text (Vincent 2026-06-29 catch: a message with
+    // both image and text in a single send arrives as message_type="post"
+    // and was silently dropped by the previous `return null` fallthrough).
+    // The post content is a nested structure (title + array of paragraphs,
+    // each paragraph is an array of segments with tag: text/img/a/at/
+    // emotion). We flatten it to plain text + collect image_keys.
+    try {
+      text = parsePostContent(message.content);
+    } catch (e: any) {
+      process.stderr.write(
+        `[feishu:adapter] post content parse failed: ${e?.message ?? e}\n`,
+      );
+      text = "[post message with unparseable content]";
+    }
   } else {
-    // unsupported types (audio / video / post / share_chat / ...) — skip
+    // unsupported types (audio / video / share_chat / file / ...) — skip
     return null;
   }
 
@@ -496,31 +511,148 @@ async function maybeAttachImages(
   }
   const raw = rawEvent as FeishuRawEvent | undefined;
   const message = raw?.message;
-  if (!message || message.message_type !== "image") return; // not an image — silent (event is text)
-  let imageKey: string | undefined;
-  try {
-    imageKey = (JSON.parse(message.content) as { image_key?: string }).image_key;
-  } catch (e: any) {
-    process.stderr.write(`[feishu:image] ${msgId} skip: content not JSON (${e?.message ?? e})\n`);
-    return;
-  }
-  if (!imageKey || !message.message_id) {
-    process.stderr.write(`[feishu:image] ${msgId} skip: no image_key/message_id (key=${imageKey})\n`);
-    return;
-  }
-  process.stderr.write(`[feishu:image] ${msgId} download begin (key=${imageKey.slice(0, 16)}…, dir=${mediaDir})\n`);
-  const localPath = await downloadImage(
-    client,
-    message.message_id,
-    imageKey,
-    mediaDir,
-    normalized.conversation?.conversationId,
-  );
-  if (localPath) {
-    process.stderr.write(`[feishu:image] ${msgId} download ok → ${localPath}\n`);
-    normalized.content = { ...normalized.content, images: [localPath] };
+  if (!message || !message.message_id) return;
+
+  // Collect image_keys from the message content. Two shapes supported:
+  //   message_type: "image" → content.image_key (single key)
+  //   message_type: "post"  → content.content[][] segments with tag:"img",
+  //                          each has its own image_key (N keys, Vincent
+  //                          2026-06-29 图文混排 fix)
+  let imageKeys: string[] = [];
+  if (message.message_type === "image") {
+    try {
+      const parsed = JSON.parse(message.content) as { image_key?: string };
+      if (parsed.image_key) imageKeys = [parsed.image_key];
+    } catch (e: any) {
+      process.stderr.write(`[feishu:image] ${msgId} skip: content not JSON (${e?.message ?? e})\n`);
+      return;
+    }
+  } else if (message.message_type === "post") {
+    imageKeys = extractPostImageKeys(message.content);
   } else {
-    process.stderr.write(`[feishu:image] ${msgId} download FAILED (see downloadImage stderr above)\n`);
+    return; // other types (text/file/sticker) — silent
+  }
+
+  if (imageKeys.length === 0) {
+    // No image to download — silent (a text-only post still works,
+    // text was already populated by normalizeMessageEvent's post branch).
+    return;
+  }
+
+  process.stderr.write(
+    `[feishu:image] ${msgId} download begin (${imageKeys.length} key(s), dir=${mediaDir})\n`,
+  );
+  const localPaths: string[] = [];
+  for (const key of imageKeys) {
+    const path = await downloadImage(
+      client,
+      message.message_id,
+      key,
+      mediaDir,
+      normalized.conversation?.conversationId,
+    );
+    if (path) {
+      process.stderr.write(`[feishu:image] ${msgId} download ok → ${path}\n`);
+      localPaths.push(path);
+    } else {
+      process.stderr.write(
+        `[feishu:image] ${msgId} download FAILED for key=${key.slice(0, 16)}… (see downloadImage stderr above)\n`,
+      );
+    }
+  }
+  if (localPaths.length > 0) {
+    normalized.content = { ...normalized.content, images: localPaths };
+  }
+}
+
+/**
+ * Parse Feishu `message_type: "post"` content into plain text. Post
+ * content is a nested structure:
+ *
+ *   { title?: string,
+ *     content: Array<Array<{ tag: "text"|"img"|"a"|"at"|"emotion", ... }>>
+ *   }
+ *
+ * Each top-level array entry is a paragraph; each paragraph is an array
+ * of typed segments. We flatten by:
+ *   - prepending title (if present) as `<title>\n\n`
+ *   - joining paragraphs with `\n\n`
+ *   - joining segments within a paragraph in order
+ *   - tag=text → emit segment.text as-is
+ *   - tag=a    → emit `[label](href)` (markdown link)
+ *   - tag=at   → emit `@user_name` (fallback to `@<user_id>` if no name)
+ *   - tag=img  → emit `[图片]` placeholder (actual download via maybeAttachImages)
+ *   - tag=emotion → emit `[emoji]`
+ *   - unknown tag → skip
+ *
+ * @internal exported for unit tests.
+ */
+export function parsePostContent(rawJson: string): string {
+  const parsed = JSON.parse(rawJson) as {
+    title?: string;
+    content?: unknown;
+  };
+  const out: string[] = [];
+  if (parsed.title && parsed.title.trim().length > 0) {
+    out.push(parsed.title);
+  }
+  const paragraphs = Array.isArray(parsed.content) ? parsed.content : [];
+  for (const p of paragraphs) {
+    if (!Array.isArray(p)) continue;
+    let buf = "";
+    for (const seg of p) {
+      if (!seg || typeof seg !== "object") continue;
+      const tag = (seg as { tag?: string }).tag;
+      if (tag === "text") {
+        buf += String((seg as { text?: string }).text ?? "");
+      } else if (tag === "a") {
+        const a = seg as { text?: string; href?: string };
+        const label = a.text ?? a.href ?? "";
+        const href = a.href ?? "";
+        if (href) buf += `[${label}](${href})`;
+        else if (label) buf += label;
+      } else if (tag === "at") {
+        const at = seg as { user_name?: string; user_id?: string };
+        const name = at.user_name ?? at.user_id ?? "user";
+        buf += `@${name}`;
+      } else if (tag === "img") {
+        buf += "[图片]";
+      } else if (tag === "emotion") {
+        buf += "[emoji]";
+      }
+      // unknown tag → skip silently
+    }
+    if (buf.length > 0) out.push(buf);
+  }
+  return out.join("\n\n");
+}
+
+/**
+ * Walk a Feishu `post` content JSON and collect all `image_key` values
+ * from `tag: "img"` segments. Used by `maybeAttachImages` to schedule
+ * downloads for every image in a 图文混排 message.
+ *
+ * @internal exported for unit tests.
+ */
+export function extractPostImageKeys(rawJson: string): string[] {
+  try {
+    const parsed = JSON.parse(rawJson) as { content?: unknown };
+    const paragraphs = Array.isArray(parsed.content) ? parsed.content : [];
+    const keys: string[] = [];
+    for (const p of paragraphs) {
+      if (!Array.isArray(p)) continue;
+      for (const seg of p) {
+        if (!seg || typeof seg !== "object") continue;
+        const tag = (seg as { tag?: string }).tag;
+        if (tag === "img") {
+          const key = (seg as { image_key?: string }).image_key;
+          if (typeof key === "string" && key.length > 0) keys.push(key);
+        }
+      }
+    }
+    return keys;
+  } catch {
+    return [];
   }
 }
 

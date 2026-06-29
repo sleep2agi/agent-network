@@ -27,6 +27,7 @@ import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
+import { isVendorErrorForUser, VENDOR_ERROR_REPLACEMENT } from "./vendor-error";
 import {
   CommHubError,
   classifyCommHubResponse,
@@ -2733,6 +2734,26 @@ async function processTask(task: string, from: string, taskId: string | null = n
   // "may not have access" / "may not exist").
   if (!failed && /(API 错误|API error|需要设置.*KEY|missing.*key|issue with the selected model|may not have access|may not exist|model.+not.+(found|available))/i.test(text)) {
     failed = true;
+  }
+
+  // Vendor-response sanitize (Vincent 2026-06-29 catch — MiniMax /anthropic
+  // endpoint returned `base_resp:{status_code:1000,"unknown error, 999"}`
+  // + `choices:null`; claude-agent-sdk's zod schema rejected it with an
+  // `invalid_union` and the raw `ZodError` JSON / vendor envelope fell
+  // through to the user-facing reply. Catch those shapes and replace with
+  // a clean message; the raw error stays in process stderr for operators).
+  // 通信龙 d37e4a21 lock + 通信牛 #330 round 1 refinement: gating logic
+  // tightened so legitimate technical replies that just MENTION error
+  // terms (e.g. "ZodError 是 Zod 校验库抛出的异常") aren't mis-sanitized.
+  // Predicate lives in src/vendor-error.ts so it can be unit-tested
+  // without dragging cli.ts's network side-effects into the test bun.
+  if (text && isVendorErrorForUser(text, failed)) {
+    const raw = text;
+    text = VENDOR_ERROR_REPLACEMENT;
+    failed = true;
+    process.stderr.write(
+      `[vendor-error] sanitized for user; raw: ${raw.slice(0, 400).replace(/\n/g, " ")}\n`,
+    );
   }
   return { text, failed };
 }
