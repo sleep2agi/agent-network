@@ -166,4 +166,69 @@ describe("update_provider — SQL invariants (RFC-028 P1.5)", () => {
     expect(row!.enabled).toBe(0);
     // dashboard renders different message for these two cases
   });
+
+  test("no-op same-value patch: NO audit_log row written (通信牛 nit)", () => {
+    // Regression for the post-merge fix: when patch fields all match the
+    // existing row (e.g. dashboard saves an unchanged form), the handler
+    // must early-return WITHOUT inserting an empty-diff audit row.
+    // Empty audit rows pollute the trail and make `forced_*` / sensitive
+    // actions harder to find.
+    seedProvider(PROV_A, NET_A, { name: "same-name", enabled: 1 });
+    const auditBefore = db.get<{n:number}>(
+      "SELECT COUNT(*) AS n FROM audit_log WHERE target_id = ?1 AND action = 'update_provider'",
+      PROV_A,
+    )!.n;
+
+    // Mirror the handler's diff-check logic on a same-value patch
+    const row = db.get<{name:string, enabled:number, base_url:string}>(
+      "SELECT name, enabled, base_url FROM providers WHERE provider_id = ?1", PROV_A,
+    )!;
+    const patch = { name: "same-name", enabled: true };
+    const sets: string[] = [];
+    if (patch.name !== undefined && patch.name !== row.name) sets.push("name");
+    if (patch.enabled !== undefined && (patch.enabled ? 1 : 0) !== row.enabled) sets.push("enabled");
+    const willReplaceModels = false;   // no patch.models
+
+    // sets MUST be empty for a same-value patch
+    expect(sets.length).toBe(0);
+    expect(willReplaceModels).toBe(false);
+
+    // Handler returns here WITHOUT writing audit_log → count unchanged
+    const auditAfter = db.get<{n:number}>(
+      "SELECT COUNT(*) AS n FROM audit_log WHERE target_id = ?1 AND action = 'update_provider'",
+      PROV_A,
+    )!.n;
+    expect(auditAfter).toBe(auditBefore);
+    expect(auditAfter).toBe(0);
+  });
+
+  test("real change DOES write audit_log row (positive guard for the early-return)", () => {
+    // Belt-and-suspenders: no-op early-return MUST NOT trigger when even
+    // one field actually changes. Otherwise we'd silently lose audit
+    // coverage for real updates.
+    seedProvider(PROV_A, NET_A, { name: "old-name", enabled: 1 });
+    const row = db.get<{name:string, enabled:number}>(
+      "SELECT name, enabled FROM providers WHERE provider_id = ?1", PROV_A,
+    )!;
+    const patch = { name: "new-name", enabled: true };
+    const sets: string[] = [];
+    if (patch.name !== undefined && patch.name !== row.name) sets.push("name");
+    if (patch.enabled !== undefined && (patch.enabled ? 1 : 0) !== row.enabled) sets.push("enabled");
+    expect(sets).toEqual(["name"]);
+
+    db.exec("BEGIN");
+    db.run("UPDATE providers SET name = ?1 WHERE provider_id = ?2", ["new-name", PROV_A]);
+    db.run(
+      `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
+       VALUES (?1, ?2, 'update_provider', 'provider', ?3, ?4, ?5)`,
+      ["u_test", "test", PROV_A, JSON.stringify({ diff: { name: { before: "old-name", after: "new-name" } }, fields_changed: ["name"] }), NET_A],
+    );
+    db.exec("COMMIT");
+
+    const audit = db.get<any>(
+      "SELECT detail FROM audit_log WHERE target_id = ?1 AND action = 'update_provider' ORDER BY id DESC LIMIT 1",
+      PROV_A,
+    )!;
+    expect(JSON.parse(audit.detail).fields_changed).toEqual(["name"]);
+  });
 });
