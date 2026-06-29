@@ -2734,8 +2734,47 @@ async function processTask(task: string, from: string, taskId: string | null = n
   if (!failed && /(API 错误|API error|需要设置.*KEY|missing.*key|issue with the selected model|may not have access|may not exist|model.+not.+(found|available))/i.test(text)) {
     failed = true;
   }
+
+  // Vendor-response sanitize (Vincent 2026-06-29 catch — MiniMax /anthropic
+  // endpoint returned `base_resp:{status_code:1000,"unknown error, 999"}`
+  // + `choices:null`; claude-agent-sdk's zod schema rejected it with an
+  // `invalid_union` and the raw `ZodError` JSON / vendor envelope fell
+  // through to the user-facing reply. Catch those shapes and replace with
+  // a clean message; the raw error stays in process stderr for operators).
+  // 通信龙 d37e4a21 lock.
+  if (text && VENDOR_ERROR_PATTERNS.some((p) => p.test(text))) {
+    const raw = text;
+    text = "[模型暂时异常] vendor 返回非预期格式，请稍后重发或重试。";
+    failed = true;
+    process.stderr.write(
+      `[vendor-error] sanitized for user; raw: ${raw.slice(0, 400).replace(/\n/g, " ")}\n`,
+    );
+  }
   return { text, failed };
 }
+
+/**
+ * Vendor-error shapes whose raw bytes should never reach the user-facing
+ * IM reply. Each match triggers replacement with a clean Chinese message.
+ * Add new patterns here as new vendors / SDK validators surface in
+ * production logs.
+ */
+const VENDOR_ERROR_PATTERNS: RegExp[] = [
+  // claude-agent-sdk zod schema failure shape (the SDK throws / surfaces a
+  // ZodError JSON when vendor response doesn't match Anthropic shape).
+  /ZodError/,
+  /invalid_union/i,
+  /"validation":\s*\{/,
+  // MiniMax / generic vendor envelope (`base_resp:{status_code:N}`).
+  // Tolerant on the JSON separators — `"base_resp":{"status_code":1000}`
+  // and `base_resp: { status_code : 1 }` both hit.
+  /"?base_resp"?[\s:]*\{[^}]*"?status_code"?[\s:]*[1-9]/i,
+  /\bunknown error,?\s*\d+/i,
+  // OpenAI-style top-level error envelope ("error":{"type":"..."}).
+  /"error"\s*:\s*\{\s*"(message|type|code)"\s*:/i,
+  // null `choices` array (no usable completion).
+  /"choices"\s*:\s*null/i,
+];
 
 // ── 防循环 + 低价值消息过滤 ──
 const lastReplyTime: Record<string, number> = {};
