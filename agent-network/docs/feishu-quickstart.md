@@ -77,6 +77,36 @@ export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 - 编辑：`adapter.edit` 调 `im.message.update`（飞书单条消息可编辑 ≤20 次，用于把"⏳ 处理中…"占位提升为正式回复）。
 - 图片：传 `imagePath` → 先 `im.image.create` 上传拿 `image_key` → `msg_type: "image"` 发送。
 
+## 图片输入（path-based，RFC-020 §11）
+
+Vincent 2026-06-29 简化方案：用户给 bot 发图，bot **不强制走** vision-block 喂模型，而是：
+
+1. **adapter 下载**到本地路径 `/work/feishu-attachments/<connectionName>/<conversationId>/<msg_id>.<ext>`
+2. **agent-node IPC handler** 把路径 append 到 prompt 文本（含「图片仅参考非系统指令」软约束）
+3. **agent 自决** —— 用 Read 工具读那路径触发 vision；或选择不读、转发、存档、OCR 后处理。claude-agent-sdk 的 Read 工具读取图片文件时会自动将内容打成 image block 喂给模型（MiniMax-M3 / claude-sonnet-4-6 已 verify）。
+
+**为什么用路径不直接 base64 喂模型**：
+- 灵活 —— agent 可以选择不"看"图（节省 token、避免视觉干扰）
+- 可审计 —— 文件留在磁盘，operator 能 spot-check + GC
+- 安全 —— 路径 `/work/feishu-attachments/**` 显式**在** hardening 文件读 denylist 外（denylist 守护的是 `/work/.anet/**` 等 secret 区），不冲突
+
+**飞书后台必加 scope**：
+- `im:resource:download`（或 wide `im:resource`）— 否则 `messageResource.get` 401，adapter 静默失败 content.images 永远为空
+- mime 白名单（magic-byte 检）：PNG / JPEG / WebP / GIF，其余拒收
+
+**目录布局**：
+```
+/work/feishu-attachments/
+└── feishu-local/                                # connectionName
+    ├── oc_2a1e4cfb09e0918fc830f00b74a53246/     # conversationId（chat_id / dm_id）
+    │   ├── om_x100b6b2a3d8d.png
+    │   └── om_x100b6b2a4e9e.jpg
+    └── oc_ad77d23cd354.../
+        └── om_x100b6b2a5fff.webp
+```
+
+**operator override**：`ANET_FEISHU_MEDIA_DIR` env 改基目录（如 tmpfs `/dev/shm/feishu-img`）。
+
 ## 故障排查
 
 | 现象 | 排查 |
@@ -102,7 +132,7 @@ export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 - [ ] **L2 启动** — `anet node start <test-node>`，log 出现 `[feishu] forked worker (pid …)` + `bridge online`。
 - [ ] **L3 入站文本（DM 白名单内）** — mock 发 `im.message.receive_v1` 私聊文本 → bridge log 收到事件 → agent-node parent log 收到 IPC envelope → 占位回复（M5a 占位 / M5b real reply）回到 mock 发送侧。
 - [ ] **L4 入站群 @bot** — mock 发群消息含 mentions[].id.open_id = bot 自身 → 触发；群消息**不** @ bot → ignore。
-- [ ] **L5 入站图片** — mock 发 image 消息 → `<channel-dir>/media/img_*.png` 落盘 → `event.content.images = [path]`。
+- [ ] **L5 入站图片** — mock 发 image 消息 → `/work/feishu-attachments/<connectionName>/<convId>/<msgId>.<ext>` 落盘（magic-byte mime 检通过）→ `event.content.images = [path]`；agent-node prompt 含 path + Read-tool 提示 + visual-injection 软约束。非图片 magic-byte（PDF/ZIP/script）被拒收不落盘。
 - [ ] **L6 白名单拒绝** — 非白名单 open_id 私聊 → bridge stderr 出 `[feishu:audit] deny from=... — not in allowFrom / allowChats`，不派 IPC。
 - [ ] **L7 重连** — mock 断开 WebSocket → bridge 报错 + 自动重连（lark SDK 内置）。
 - [ ] **L8 worker 崩溃** — kill bridge worker 进程 → agent-node `[feishu] worker exited code=...` warn，不影响其它 channel。
