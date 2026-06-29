@@ -231,6 +231,29 @@ export function withRateLimit(
 
   const wrapped = async (event: NormalizedIMEvent) => {
     const now = Date.now();
+
+    // Operator-vouched explicit-allow DM exemption (Vincent 2026-06-29
+    // catch — his multi-turn heavy work was tripping the 3-msg/60s DM
+    // limit). If access.json `allowFrom` is a finite list (NOT wildcard
+    // "*") AND the current sender is in it, skip rate-limit + flood-audit
+    // entirely. Rationale: an explicit allowFrom name means the operator
+    // already vouched for the user; flood-limiting them is paternalistic
+    // and breaks legitimate heavy work. Wildcard ["*"] is the public-
+    // channel shape — flood protection MUST still apply there.
+    //
+    // Group conversations: NOT exempt. Even an allowFrom-explicit user
+    // can spam a shared group, and the group-side limit gates by chat
+    // id (not sender), so an exemption would let one user starve others.
+    if (event.conversation.conversationType === "dm") {
+      const allowFrom = adapter.getAllowFrom();
+      const isWildcard = allowFrom.includes("*");
+      const isExplicit = !isWildcard && allowFrom.includes(event.sender.id);
+      if (isExplicit) {
+        await inner(event);
+        return;
+      }
+    }
+
     // Lazy GC — runs at start so the current event's writes don't undercount.
     sweepStale(dmTimes, now, DM_RATE_LIMIT_WINDOW_MS);
     sweepStale(groupTimes, now, GROUP_RATE_LIMIT_WINDOW_MS);
