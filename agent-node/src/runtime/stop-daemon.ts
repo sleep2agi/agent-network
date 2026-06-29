@@ -19,9 +19,13 @@
 //     before rebuildChildrenMapOnBoot lands is the common cause. Hub-side
 //     sweeper / reconciliation picks up the row eventually.
 
-import { chmodSync, mkdirSync, renameSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
 
 // Module-level child map. Filled by recordSpawnedChild when create-node-
 // daemon successfully spawns a child; consumed by handleStopDoorbell to
@@ -227,3 +231,173 @@ export async function handleStopDoorbell(
     deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`);
   });
 }
+
+// ─── RFC-027 PR1.1 — rebuildChildrenMapOnBoot ─────────────────────────
+//
+// On daemon process restart the in-memory childrenMap is empty. Without
+// rebuild, every stop/delete dispatch for a still-running child no-ops
+// with `noop_not_my_child` (same failure shape as PR1's BLOCKER-1) →
+// hub never finalizes → user sees stop hang. The fix:
+//
+// 1. Pull this daemon's owned child aliases from hub via list_my_children
+//    (PR1.1 MCP tool — returns {child_node_id, alias, lifecycle_state}
+//    tuples scoped by the daemon's bound token + network).
+// 2. For each alias, run `pgrep` to find the running process. Hardening
+//    per 通信龙 proactive notes:
+//      a. alias substring collisions ("bot" matching "bot2") — pgrep
+//         pattern uses an explicit boundary (`--alias <alias>` followed
+//         by EOL or whitespace), and we re-check via /proc/<pid>/cmdline
+//         token-exact equality before trusting the match.
+//      b. self-match / other daemon's children — intersect pgrep result
+//         with the hub-supplied alias set; pgrep is the noisy candidate
+//         source, hub is the authority.
+//      c. defunct / zombie pids — /proc/<pid>/stat State=Z gets skipped.
+//      d. hub-says-active but no matching pid → log a warn (operator
+//         signal) but don't try to nudge hub state from here. P3 may add
+//         a "report dead child" tool; PR1.1 just surfaces.
+
+interface MyChild { child_node_id: string; alias: string; lifecycle_state: string; }
+
+export interface RebuildDeps {
+  callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
+  log: (msg: string) => void;
+  warn: (msg: string) => void;
+  // Injectable for tests: returns candidate pids matching the pgrep
+  // pattern for an alias.
+  pgrepAlias?: (alias: string) => Promise<number[]>;
+  // Injectable for tests: returns the /proc/<pid>/cmdline buffer (or
+  // null if the pid disappeared mid-read).
+  readProcCmdline?: (pid: number) => string | null;
+  // Injectable for tests: returns the /proc/<pid>/stat State char
+  // (e.g. "R", "S", "Z"). Null if pid gone.
+  readProcStatState?: (pid: number) => string | null;
+}
+
+/** Default pgrep wrapper. Pattern explicitly boundary-anchored so
+ *  alias "bot" doesn't match "bot2" / "bot-test". */
+async function defaultPgrepAlias(alias: string): Promise<number[]> {
+  const safe = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = `agent-node.*--alias ${safe}($|[[:space:]])`;
+  try {
+    const { stdout } = await execFileP("pgrep", ["-f", pattern], { timeout: 5000 });
+    return stdout.split(/\s+/).filter(Boolean).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n));
+  } catch (e: any) {
+    // pgrep exits 1 when no match — treat as empty result, not error.
+    if (e?.code === 1) return [];
+    throw e;
+  }
+}
+
+function defaultReadProcCmdline(pid: number): string | null {
+  try {
+    // /proc/<pid>/cmdline is NUL-separated; we want the raw bytes
+    // and will split on NUL to get individual argv tokens.
+    return readFileSync(`/proc/${pid}/cmdline`, "utf-8");
+  } catch { return null; }
+}
+
+function defaultReadProcStatState(pid: number): string | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf-8");
+    // /proc/<pid>/stat format: "PID (comm) STATE ...". comm may
+    // contain spaces+parens so we slice after the closing paren.
+    const close = stat.lastIndexOf(")");
+    if (close < 0) return null;
+    const tail = stat.slice(close + 1).trim().split(/\s+/);
+    return tail[0] || null;
+  } catch { return null; }
+}
+
+/** Check that a /proc/<pid>/cmdline argv contains BOTH `agent-node`
+ *  AND `--alias <alias>` as adjacent tokens. Defends against
+ *  alias substring collisions (pgrep matches the pattern but the
+ *  actual argv has alias as a suffix of another token). */
+function cmdlineMatchesAlias(cmdline: string | null, alias: string): boolean {
+  if (!cmdline) return false;
+  const argv = cmdline.split("\0").filter(Boolean);
+  const aliasIdx = argv.findIndex((tok, i) => tok === "--alias" && argv[i + 1] === alias);
+  if (aliasIdx < 0) return false;
+  // Belt: ensure agent-node is in argv (process name or path).
+  return argv.some(t => t === "agent-node" || t.endsWith("/agent-node") || t.endsWith("/cli.js"));
+}
+
+export interface RebuildResult {
+  total_children_from_hub: number;
+  recovered: number;        // children whose pid was found and registered
+  missing: string[];        // hub-active alias with no matching live pid (warn-only)
+  ambiguous: string[];      // alias with >1 candidate pid after cmdline verify (skipped)
+  zombies: string[];        // alias whose pid was in defunct state (skipped)
+}
+
+export async function rebuildChildrenMapOnBoot(deps: RebuildDeps): Promise<RebuildResult> {
+  const result: RebuildResult = { total_children_from_hub: 0, recovered: 0, missing: [], ambiguous: [], zombies: [] };
+  const pgrepAlias = deps.pgrepAlias ?? defaultPgrepAlias;
+  const readCmdline = deps.readProcCmdline ?? defaultReadProcCmdline;
+  const readState = deps.readProcStatState ?? defaultReadProcStatState;
+
+  let children: MyChild[];
+  try {
+    const r = await deps.callCommHub("list_my_children", {});
+    if (!r?.ok || !Array.isArray(r.children)) {
+      deps.warn(`[rebuild] list_my_children failed: ${r?.error || "unknown"}`);
+      return result;
+    }
+    children = r.children;
+  } catch (e: any) {
+    deps.warn(`[rebuild] list_my_children threw: ${e?.message || e}`);
+    return result;
+  }
+  result.total_children_from_hub = children.length;
+
+  const selfPid = process.pid;
+
+  for (const c of children) {
+    if (!c.alias || !c.child_node_id) continue;
+    let pids: number[];
+    try {
+      pids = await pgrepAlias(c.alias);
+    } catch (e: any) {
+      deps.warn(`[rebuild] pgrep failed for alias=${c.alias}: ${e?.message || e}`);
+      continue;
+    }
+
+    // Filter out self + non-matching cmdline + defunct zombies.
+    const verified: number[] = [];
+    for (const pid of pids) {
+      if (pid === selfPid) continue;
+      const state = readState(pid);
+      if (state === "Z") {
+        result.zombies.push(c.alias);
+        continue;
+      }
+      const cmd = readCmdline(pid);
+      if (!cmdlineMatchesAlias(cmd, c.alias)) continue;
+      verified.push(pid);
+    }
+
+    if (verified.length === 0) {
+      // Hub says this alias is active but no live process found.
+      // Warn-only per PR1.1 scope; nudging hub state is a follow-up.
+      result.missing.push(c.alias);
+      deps.warn(`[rebuild] hub-active alias=${c.alias} has no matching pid (crashed without cleanup?)`);
+      continue;
+    }
+    if (verified.length > 1) {
+      // Multiple matching pids — refuse to guess, log + skip. Operator
+      // intervention required.
+      result.ambiguous.push(c.alias);
+      deps.warn(`[rebuild] alias=${c.alias} matched ${verified.length} pids ${verified.join(",")} after cmdline filter — skipping`);
+      continue;
+    }
+    recordSpawnedChild(c.child_node_id, c.alias, verified[0]);
+    result.recovered++;
+    deps.log(`[rebuild] recovered alias=${c.alias} → pid=${verified[0]}`);
+  }
+
+  deps.log(`[rebuild] done: total=${result.total_children_from_hub} recovered=${result.recovered} missing=${result.missing.length} ambiguous=${result.ambiguous.length} zombies=${result.zombies.length}`);
+  return result;
+}
+
+// Exported for unit tests so they can exercise cmdlineMatchesAlias
+// without spawning real processes.
+export const _internals = { cmdlineMatchesAlias };

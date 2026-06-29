@@ -3956,6 +3956,26 @@ if (fileConfig.role === "host_supervisor") {
     });
     log("[deleted-sweeper] started (every 24h, retention 30d)");
   }).catch((e: any) => warn(`deleted-sweeper import failed: ${e?.message || e}`));
+
+  // RFC-027 PR1.1 — rebuild stop-daemon childrenMap from hub +
+  // pgrep at boot. Without this, daemon restart silently drops every
+  // tracked child and subsequent stop/delete dispatches no-op (same
+  // failure-shape as PR1 BLOCKER-1, but triggered by restart instead
+  // of bad key derivation). Hardening: pgrep + /proc cmdline token-
+  // exact verify + zombie skip + ambiguous-pid skip. Logs warn for
+  // hub-active-but-no-pid (crashed-without-cleanup) — no auto-nudge.
+  // Delay a bit after register so list_my_children sees the daemon
+  // itself as authenticated (resolveCallerDaemonTokenBound uses our
+  // ntok which is hot from register).
+  setTimeout(() => {
+    import("./runtime/stop-daemon.js").then(({ rebuildChildrenMapOnBoot }) => {
+      rebuildChildrenMapOnBoot({
+        callCommHub,
+        log: (m: string) => log(m),
+        warn: (m: string) => warn(m),
+      }).catch((e: any) => warn(`rebuildChildrenMapOnBoot failed: ${e?.message || e}`));
+    }).catch((e: any) => warn(`stop-daemon import for rebuild failed: ${e?.message || e}`));
+  }, 3_000);
 }
 if (goalsSchedulerEnabled) {
   setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);

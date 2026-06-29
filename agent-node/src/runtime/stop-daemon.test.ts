@@ -252,3 +252,201 @@ describe("handleStopDoorbell — real subprocess primitive (no mocks)", () => {
     expect(reaped).toBe(true);
   });
 });
+
+// ─── RFC-027 PR1.1 — rebuildChildrenMapOnBoot tests ────────────────
+// Cover: happy recover, alias substring collision rejection (cmdline
+// verify), zombie skip, ambiguous multi-pid skip, missing-pid warn,
+// self-pid exclusion. Plus a "real subprocess primitive" test that
+// spawns a fake child + pgrep + cmdline match exercise on this host
+// (per 通信龙 explicit "真子进程测给 rebuild 上真牙").
+describe("rebuildChildrenMapOnBoot (RFC-027 PR1.1)", () => {
+  test("happy: hub returns 2 children + each has unique matching pid → both recovered", async () => {
+    _resetChildrenMapForTest();
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const r = await rebuildChildrenMapOnBoot({
+      callCommHub: async (tool) => {
+        if (tool === "list_my_children") return {
+          ok: true, count: 2,
+          children: [
+            { child_node_id: "node_alpha", alias: "alpha", lifecycle_state: "active" },
+            { child_node_id: "node_beta",  alias: "beta",  lifecycle_state: "active" },
+          ],
+        };
+        return { ok: false };
+      },
+      log: () => {}, warn: () => {},
+      pgrepAlias: async (a) => a === "alpha" ? [1001] : a === "beta" ? [2002] : [],
+      readProcCmdline: (pid) =>
+        pid === 1001 ? "agent-node\0--alias\0alpha\0" :
+        pid === 2002 ? "agent-node\0--alias\0beta\0" : null,
+      readProcStatState: () => "S",
+    });
+    expect(r.recovered).toBe(2);
+    expect(r.missing.length).toBe(0);
+    expect(getChildrenSnapshot().map(c => c.alias).sort()).toEqual(["alpha", "beta"]);
+    _resetChildrenMapForTest();
+  });
+
+  test("alias substring collision: pgrep finds 'bot2' for alias 'bot' but cmdline argv exact-match rejects", async () => {
+    _resetChildrenMapForTest();
+    const { rebuildChildrenMapOnBoot, _internals } = await import("./stop-daemon");
+    // Validate the underlying argv check first.
+    expect(_internals.cmdlineMatchesAlias("agent-node\0--alias\0bot2\0", "bot")).toBe(false);
+    expect(_internals.cmdlineMatchesAlias("agent-node\0--alias\0bot\0",  "bot")).toBe(true);
+    expect(_internals.cmdlineMatchesAlias("agent-node\0--alias\0bot",     "bot")).toBe(true);
+    const r = await rebuildChildrenMapOnBoot({
+      callCommHub: async () => ({ ok: true, children: [{ child_node_id: "node_bot", alias: "bot", lifecycle_state: "active" }] }),
+      log: () => {}, warn: () => {},
+      pgrepAlias: async () => [9999],   // candidate pid (e.g. would match "bot2")
+      readProcCmdline: () => "agent-node\0--alias\0bot2\0",  // argv has bot2 not bot
+      readProcStatState: () => "S",
+    });
+    // No verified match — alias goes into missing.
+    expect(r.recovered).toBe(0);
+    expect(r.missing).toContain("bot");
+    expect(getChildrenSnapshot().length).toBe(0);
+    _resetChildrenMapForTest();
+  });
+
+  test("zombie pid skipped (state=Z)", async () => {
+    _resetChildrenMapForTest();
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const r = await rebuildChildrenMapOnBoot({
+      callCommHub: async () => ({ ok: true, children: [{ child_node_id: "node_z", alias: "zomb", lifecycle_state: "active" }] }),
+      log: () => {}, warn: () => {},
+      pgrepAlias: async () => [4040],
+      readProcCmdline: () => "agent-node\0--alias\0zomb\0",
+      readProcStatState: () => "Z",   // defunct
+    });
+    expect(r.recovered).toBe(0);
+    expect(r.zombies).toContain("zomb");
+    _resetChildrenMapForTest();
+  });
+
+  test("ambiguous: multiple verified pids → skipped (operator intervention)", async () => {
+    _resetChildrenMapForTest();
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const r = await rebuildChildrenMapOnBoot({
+      callCommHub: async () => ({ ok: true, children: [{ child_node_id: "node_dup", alias: "dup", lifecycle_state: "active" }] }),
+      log: () => {}, warn: () => {},
+      pgrepAlias: async () => [5050, 6060],
+      // Both legit cmdlines — likely operator started a duplicate.
+      readProcCmdline: () => "agent-node\0--alias\0dup\0",
+      readProcStatState: () => "S",
+    });
+    expect(r.recovered).toBe(0);
+    expect(r.ambiguous).toContain("dup");
+    expect(getChildrenSnapshot().length).toBe(0);
+    _resetChildrenMapForTest();
+  });
+
+  test("hub-active but pgrep finds nothing → missing (warn, don't auto-nudge)", async () => {
+    _resetChildrenMapForTest();
+    const warns: string[] = [];
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const r = await rebuildChildrenMapOnBoot({
+      callCommHub: async () => ({ ok: true, children: [{ child_node_id: "node_g", alias: "ghost", lifecycle_state: "active" }] }),
+      log: () => {}, warn: (m) => warns.push(m),
+      pgrepAlias: async () => [],
+      readProcCmdline: () => null,
+      readProcStatState: () => null,
+    });
+    expect(r.recovered).toBe(0);
+    expect(r.missing).toContain("ghost");
+    expect(warns.some(w => w.includes("ghost"))).toBe(true);
+    _resetChildrenMapForTest();
+  });
+
+  test("daemon's own pid is excluded from candidates", async () => {
+    _resetChildrenMapForTest();
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const r = await rebuildChildrenMapOnBoot({
+      callCommHub: async () => ({ ok: true, children: [{ child_node_id: "node_self", alias: "myself", lifecycle_state: "active" }] }),
+      log: () => {}, warn: () => {},
+      pgrepAlias: async () => [process.pid],   // collides with daemon itself
+      readProcCmdline: () => "agent-node\0--alias\0myself\0",
+      readProcStatState: () => "S",
+    });
+    expect(r.recovered).toBe(0);
+    expect(r.missing).toContain("myself");
+    _resetChildrenMapForTest();
+  });
+
+  test("list_my_children failure → safe empty result (no throw, no map mutation)", async () => {
+    _resetChildrenMapForTest();
+    recordSpawnedChild("node_preserve", "preserve", 12345);
+    const { rebuildChildrenMapOnBoot } = await import("./stop-daemon");
+    const r = await rebuildChildrenMapOnBoot({
+      callCommHub: async () => ({ ok: false, error: "auth_failed" }),
+      log: () => {}, warn: () => {},
+    });
+    expect(r.recovered).toBe(0);
+    expect(r.total_children_from_hub).toBe(0);
+    // Existing map untouched.
+    expect(getChildrenSnapshot().length).toBe(1);
+    expect(getChildrenSnapshot()[0].alias).toBe("preserve");
+    _resetChildrenMapForTest();
+  });
+});
+
+describe("rebuildChildrenMapOnBoot — real subprocess primitive (no pgrep mocks, no proc mocks)", () => {
+  // Per 通信龙 PR1.1 dispatch + #345 review lesson: "真子进程测给
+  // rebuildOnBoot 上真牙这点尤其对". Spawn a real fake "child" that
+  // sets its argv to look like agent-node + alias, let the real
+  // defaultPgrepAlias + /proc readers find it, verify recovery.
+  // We can't easily fake argv[0] from inside JS so we spawn with
+  // a shell exec that sets the title via process.argv inline.
+  // pgrep -f matches on the full /proc/<pid>/cmdline so we need our
+  // fake to write a cmdline that contains `agent-node` + `--alias <name>`
+  // as adjacent NUL-separated tokens.
+  // Per 通信龙 lesson on label honesty (PR1.1 dispatch + #345 review):
+  // "shape-pin/happy-path 测目前是即使把 fix 回退它们也会过". Calling
+  // this a full "end-to-end rebuild" would oversell.
+  //
+  // What this DOES test: spawn a real subprocess whose argv contains
+  // `--alias <test-alias>`, then drive the real cmdlineMatchesAlias
+  // helper against that pid's real /proc/<pid>/cmdline. Proves the
+  // matcher correctly walks NUL-separated argv from a live kernel.
+  //
+  // What this does NOT test (deferred to PR1.2 Docker e2e):
+  //  - the real pgrep wrapper finding the process by binary name
+  //    (test child runs `node`, not `agent-node`, so the default
+  //    pgrep pattern misses; PR1.2 spawns a real agent-node container
+  //    where the pattern truly matches end-to-end)
+  //  - the recovery decision integrating pgrep + /proc end-to-end
+  test("matcher accepts a real subprocess whose argv contains --alias <token>", async () => {
+    const { spawn } = await import("node:child_process");
+    const { _internals } = await import("./stop-daemon");
+    const { readFileSync } = await import("node:fs");
+    // Spawn `node --title=...` is not portable; instead spawn `bash -c
+    // "exec -a 'agent-node --alias FAKE-PRIM' node -e ...'"` so /proc/
+    // <pid>/cmdline records our pretend argv.
+    // exec -a replaces argv[0]; we still need --alias to appear as a
+    // SEPARATE NUL token, so include it in the exec -a string with
+    // a literal NUL won't work. Workaround: invoke node directly with
+    // sentinel args so /proc/<pid>/cmdline naturally separates.
+    const alias = "FAKE-MATCH-" + Math.floor(Math.random() * 1e6);
+    const child = spawn(
+      process.execPath,
+      ["-e", "setInterval(()=>{},5000)", "--alias", alias],
+      { stdio: ["ignore", "ignore", "ignore"], detached: true },
+    );
+    const pid = child.pid!;
+    expect(pid).toBeGreaterThan(0);
+    child.unref();
+    try {
+      await new Promise(r => setTimeout(r, 200));
+      // Read REAL /proc/<pid>/cmdline from a live process.
+      const realCmdline = readFileSync(`/proc/${pid}/cmdline`, "utf-8");
+      // Real cmdline doesn't contain `agent-node` (we spawned `node`),
+      // so prepend the production binary token to confirm the matcher
+      // walks the real argv data correctly when the binary IS present.
+      const cmdlineWithAgentNode = "agent-node\0" + realCmdline;
+      expect(_internals.cmdlineMatchesAlias(cmdlineWithAgentNode, alias)).toBe(true);
+      // And rejects a collision alias (substring of ours).
+      expect(_internals.cmdlineMatchesAlias(cmdlineWithAgentNode, alias.slice(0, -1))).toBe(false);
+    } finally {
+      try { process.kill(pid, "SIGKILL"); } catch { /* already exited */ }
+    }
+  });
+});

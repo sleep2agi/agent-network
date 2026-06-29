@@ -142,6 +142,33 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     return { networkId: null, networkIds: getReadableNetworkIds() };
   };
 
+  // RFC-027 §2.3 race-free invariant — assert target node is `active`
+  // before any inbox INSERT routes to it. Without this, the SIGTERM
+  // is in flight but new tasks keep landing in inbox for a dying
+  // child (and after `stopped`/`deleting` would persist forever).
+  // PR1.1 (#345 follow-up) wires this helper into all 6 inbox-enqueue
+  // sites in this file.
+  //
+  // Returns `{ ok: true }` when the target either (a) has no nodes row
+  // (brand-new alias, allowed), or (b) is in `active` state. Anything
+  // else (`stopping`/`stopped`/`deleting`/`stop_failed`) refuses with
+  // a structured reply the calling handler can return directly.
+  const assertNodeActive = (sessionAlias: string, networkId: string | null):
+    | { ok: true }
+    | { ok: false; error: string; lifecycle_state: string; alias: string } => {
+    if (!sessionAlias) return { ok: true };
+    const row = db.get<{ lifecycle_state: string | null }>(
+      networkId
+        ? `SELECT lifecycle_state FROM nodes WHERE alias = ?1 AND COALESCE(network_id, ?2) = ?2 LIMIT 1`
+        : `SELECT lifecycle_state FROM nodes WHERE alias = ?1 LIMIT 1`,
+      ...(networkId ? [sessionAlias, networkId] : [sessionAlias]),
+    );
+    if (!row) return { ok: true };
+    const st = row.lifecycle_state ?? "active";
+    if (st === "active") return { ok: true };
+    return { ok: false, error: "node_not_active", lifecycle_state: st, alias: sessionAlias };
+  };
+
   const addReadScope = (sql: string, params: any[], scope: ReadScope, column = "network_id"): string => {
     if (scope.networkId) {
       sql += ` AND ${column} = ?${params.length + 1}`;
@@ -868,6 +895,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         return { content: [{ type: "text" as const, text: JSON.stringify(payload) }] };
       }
 
+      // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 1/6).
+      {
+        const lc = assertNodeActive(targetAlias, effectiveNetId ?? null);
+        if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
+      }
+
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const id = uuidv4();
       const fromNodeId = resolveNodeIdForAlias(from_session, effectiveNetId);
@@ -963,6 +996,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const targetAlias = canonical.alias;
       const target = resolveDeliveryTarget(targetAlias, effectiveNetId);
       if (target.state === "not_found") return deliveryTargetReply(target)!;
+      // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 2/6).
+      {
+        const lc = assertNodeActive(targetAlias, effectiveNetId ?? null);
+        if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
+      }
       console.log(`[${ts()}] ${from_session} → send_message → ${targetAlias}: ${message.slice(0, 60)}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const id = uuidv4();
       db.run(
@@ -1054,6 +1092,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
       }
       const replyTargetNodeId = resolveNodeIdForAlias(alias, effectiveNetId);
+      // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 3/6).
+      {
+        const lc = assertNodeActive(alias, effectiveNetId ?? null);
+        if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
+      }
       const replyLogged = db.transaction(() => {
         db.run(
           `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
@@ -1187,6 +1230,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       if (!["failed", "expired", "cancelled"].includes(task.status)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: `task status is ${task.status}, not retryable` }) }] };
+      }
+      // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 4/6).
+      {
+        const lc = assertNodeActive(task.to_name, effectiveNetId ?? task.network_id ?? null);
+        if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       db.transaction(() => {
         // Reset task status
@@ -1335,6 +1383,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const reassignedAlias = canonical.alias;
       const target = resolveDeliveryTarget(reassignedAlias, effectiveNetId ?? task.network_id ?? null);
       const newNodeId = target.state === "not_found" ? null : (target.session?.node_id ?? null);
+      // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 5/6).
+      {
+        const lc = assertNodeActive(reassignedAlias, effectiveNetId ?? task.network_id ?? null);
+        if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
+      }
       db.transaction(() => {
         // Ack old inbox to prevent original agent from picking it up
         const inboxParams: any[] = [task_id];
@@ -1380,6 +1433,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const ids: string[] = [];
 
       for (const t of targets) {
+        // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 6/6).
+        // Broadcast skips non-active recipients silently rather than
+        // failing the entire send — broadcast semantics are best-effort
+        // per-recipient and a stopped node simply gets nothing.
+        const lc = assertNodeActive(t.alias, effectiveNetId ?? t.network_id ?? null);
+        if (!lc.ok) continue;
         const id = uuidv4();
         db.run(
           `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
@@ -2487,12 +2546,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const now = Date.now();
     const newState = args.action === "stop" ? "stopping" : "deleting";
 
-    // SQLite tx wraps lifecycle UPDATE + audit INSERT + request INSERT.
-    // Better-sqlite3-style .transaction(...) is not exposed in our
-    // wrapper; emulate via BEGIN..COMMIT around the three writes. On
-    // any failure, ROLLBACK to leave state untouched.
-    db.run("BEGIN");
+    // §4.5 D8 — lifecycle UPDATE + audit INSERTs + request INSERT atomic.
+    // PR1.1: use db.transaction() (SQLiteAdapter wraps better-sqlite3's
+    // native transaction; PgAdapter ships a real BEGIN/COMMIT/ROLLBACK
+    // shim). Lets us drop the open-coded BEGIN/COMMIT + makes the
+    // SF-2 failure-injection test (mock db.run throw inside callback)
+    // reliable across both backends.
     try {
+      db.transaction(() => {
       db.run(
         `INSERT INTO node_stop_requests
            (request_id, network_id, daemon_node_id, child_node_id, child_alias, action,
@@ -2533,9 +2594,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           detail: { in_flight_count: inFlight, child_alias: node.alias },
         });
       }
-      db.run("COMMIT");
+      });   // end db.transaction
     } catch (e: any) {
-      try { db.run("ROLLBACK"); } catch { /* swallow */ }
       return { ok: false, error: "dispatch_tx_failed", message: e?.message || String(e) };
     }
 
@@ -2664,59 +2724,107 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       const now = Date.now();
 
-      // tx: per RFC §4.5 D8 — lifecycle UPDATE + request UPDATE + audit INSERT
-      // (+ DELETE for delete action) in one BEGIN..COMMIT.
-      db.run("BEGIN");
+      // §4.5 D8 — lifecycle UPDATE + request UPDATE + audit INSERT
+      // (+ DELETE for delete action) atomic via db.transaction().
+      // PR1.1: replaces hand-rolled BEGIN..COMMIT so PG adapter and
+      // SQLite both get correct rollback semantics from one code path.
       try {
-        db.run(
-          `UPDATE node_stop_requests SET status = ?1, error = ?2, exit_signal = ?3,
-                                          backup_path = ?4, acked_at = ?5
-             WHERE request_id = ?6`,
-          [status, ackError || null, exit_signal || null, backup_path || null, now, request_id],
-        );
-        if (status === "stopped" && row.action === "stop") {
-          db.run(`UPDATE nodes SET lifecycle_state = 'stopped' WHERE node_id = ?1`, [row.child_node_id]);
-          auditCreateNodeStrict({
-            action: "stop_node_completed",
-            user_id: null, network_id: row.network_id, target_id: request_id,
-            detail: {
-              child_node_id: row.child_node_id, child_alias: row.child_alias,
-              exit_signal: exit_signal || null, ts_daemon_ack: now,
-              lifecycle_state_after: "stopped",
-            },
-          });
-        } else if (status === "stopped" && row.action === "delete") {
-          // Revoke the child's ntok (name='node:<alias>') in the daemon's
-          // network, then DELETE the nodes row. Token revoke pattern mirrors
-          // ack_create_request's terminal path.
+        db.transaction(() => {
           db.run(
-            `UPDATE api_tokens SET revoked_at = datetime('now')
-               WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
-            [row.network_id, `node:${row.child_alias}`],
+            `UPDATE node_stop_requests SET status = ?1, error = ?2, exit_signal = ?3,
+                                            backup_path = ?4, acked_at = ?5
+               WHERE request_id = ?6`,
+            [status, ackError || null, exit_signal || null, backup_path || null, now, request_id],
           );
-          db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
-          auditCreateNodeStrict({
-            action: "delete_node_completed",
-            user_id: null, network_id: row.network_id, target_id: request_id,
-            detail: {
-              child_node_id: row.child_node_id, child_alias: row.child_alias,
-              exit_signal: exit_signal || null, backup_path: backup_path || null,
-              ts_daemon_ack: now, lifecycle_state_after: "deleted",
-            },
-          });
-        } else if (status === "stop_failed") {
-          db.run(`UPDATE nodes SET lifecycle_state = 'stop_failed' WHERE node_id = ?1`, [row.child_node_id]);
-          // No completion audit; the failure error is on the request row.
-        }
-        // noop_not_my_child: leave lifecycle_state as-is; the hub-side
-        // sweeper / next reconciliation will pick it up. Don't transition.
-        db.run("COMMIT");
+          if (status === "stopped" && row.action === "stop") {
+            db.run(`UPDATE nodes SET lifecycle_state = 'stopped' WHERE node_id = ?1`, [row.child_node_id]);
+            auditCreateNodeStrict({
+              action: "stop_node_completed",
+              user_id: null, network_id: row.network_id, target_id: request_id,
+              detail: {
+                child_node_id: row.child_node_id, child_alias: row.child_alias,
+                exit_signal: exit_signal || null, ts_daemon_ack: now,
+                lifecycle_state_after: "stopped",
+              },
+            });
+          } else if (status === "stopped" && row.action === "delete") {
+            // Revoke the child's ntok (name='node:<alias>') in the daemon's
+            // network, then DELETE the nodes row. Token revoke pattern mirrors
+            // ack_create_request's terminal path.
+            db.run(
+              `UPDATE api_tokens SET revoked_at = datetime('now')
+                 WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
+              [row.network_id, `node:${row.child_alias}`],
+            );
+            db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
+            auditCreateNodeStrict({
+              action: "delete_node_completed",
+              user_id: null, network_id: row.network_id, target_id: request_id,
+              detail: {
+                child_node_id: row.child_node_id, child_alias: row.child_alias,
+                exit_signal: exit_signal || null, backup_path: backup_path || null,
+                ts_daemon_ack: now, lifecycle_state_after: "deleted",
+              },
+            });
+          } else if (status === "stop_failed") {
+            db.run(`UPDATE nodes SET lifecycle_state = 'stop_failed' WHERE node_id = ?1`, [row.child_node_id]);
+            // No completion audit; the failure error is on the request row.
+          }
+          // noop_not_my_child: leave lifecycle_state as-is; the hub-side
+          // sweeper / next reconciliation will pick it up. Don't transition.
+        });
       } catch (e: any) {
-        try { db.run("ROLLBACK"); } catch { /* swallow */ }
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "finalize_tx_failed", message: e?.message || String(e) }) }] };
       }
 
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
+    },
+  );
+
+  // RFC-027 PR1.1 — list_my_children: daemon-only query. Returns the
+  // {child_node_id, alias, lifecycle_state} tuples for nodes whose
+  // active create-request has this daemon as daemon_node_id. Used at
+  // daemon boot to rebuild the in-memory childrenMap (PR1 dropped
+  // every entry on daemon restart → stop/delete silently no-op'd).
+  //
+  // Network-scope is the daemon's own (resolveCallerDaemonTokenBound
+  // already binds tokenIsNetwork to a single network). No SEC-1 leak:
+  // returns ONLY children whose request landed under this daemon's
+  // token + network.
+  server.tool(
+    "list_my_children",
+    "Daemon pulls the alias + node_id list of children it spawned (for childrenMap rebuild after restart). RFC-027 PR1.1.",
+    {},
+    async () => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      // node_create_requests carries the canonical authoritative
+      // child→daemon mapping (the row id IS the request, and the
+      // child node_id derives from it deterministically via
+      // `node_${request_id.replace(/^cr_/, "")}`). Filter to children
+      // that completed registration (have a nodes row) so we don't
+      // ask the daemon to pgrep for children that never came up.
+      const rows = db.all<{ request_id: string; child_name: string; child_node_id: string; lifecycle_state: string | null }>(
+        `SELECT ncr.request_id, ncr.child_name,
+                ('node_' || substr(ncr.request_id, 4)) AS child_node_id,
+                n.lifecycle_state
+           FROM node_create_requests ncr
+           LEFT JOIN nodes n ON n.node_id = ('node_' || substr(ncr.request_id, 4))
+          WHERE ncr.daemon_node_id = ?1
+            AND ncr.network_id = ?2
+            AND ncr.status IN ('succeeded', 'delivered')
+            AND n.node_id IS NOT NULL
+            AND COALESCE(n.lifecycle_state, 'active') NOT IN ('stopped', 'stop_failed')`,
+        callerDaemon.daemonNodeId, callerDaemon.networkId,
+      );
+      const children = rows.map(r => ({
+        child_node_id: r.child_node_id,
+        alias: r.child_name,
+        lifecycle_state: r.lifecycle_state ?? "active",
+      }));
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, count: children.length, children }) }] };
     },
   );
 
