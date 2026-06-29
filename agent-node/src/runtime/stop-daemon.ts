@@ -61,11 +61,13 @@ export interface StopDoorbellDeps {
   // can override to a temp dir.
   workdirRoot?: string;       // <home>/.anet/nodes — where child config dirs live
   deletedRoot?: string;       // <home>/.anet/deleted — backup target
-  // Allow tests to inject a fake kill / sleep / rename so we can drive
-  // the state machine without spawning real subprocesses. Production
-  // wires these to node:process / setTimeout / node:fs.
+  // Allow tests to inject a fake kill / sleep / rename / clock so we
+  // can drive the state machine without burning real wall-clock or
+  // spawning real subprocesses. Production wires these to node:process
+  // / setTimeout / Date.now / node:fs.
   signalProcess?: (pid: number, signal: NodeJS.Signals | 0) => void;
   sleep?: (ms: number) => Promise<void>;
+  now?: () => number;          // virtual clock for tests; defaults to Date.now
   renameDir?: (src: string, dst: string) => void;
   ensureDir?: (path: string, mode: number) => void;
   chmod?: (path: string, mode: number) => void;
@@ -98,15 +100,22 @@ function isAlive(pid: number, signalProcess: (pid: number, signal: NodeJS.Signal
   }
 }
 
-/** Wait up to `timeoutMs` for the PID to die. Polls every 200ms. */
+/** Wait up to `timeoutMs` for the PID to die. Polls every 200ms.
+ * `now` is injectable so tests can drive a virtual clock instead of
+ * burning real wall-clock (PR1 SF-1 #345 review catch: the SIGKILL
+ * escalation test was timing out at the default 5s bun-test budget
+ * because the real Date.now was used; under the fake sleep the loop
+ * could never advance).
+ */
 async function waitForExit(
   pid: number,
   timeoutMs: number,
   signalProcess: (pid: number, signal: NodeJS.Signals | 0) => void,
   sleep: (ms: number) => Promise<void>,
+  now: () => number = Date.now,
 ): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
     if (!isAlive(pid, signalProcess)) return true;
     await sleep(200);
   }
@@ -120,6 +129,7 @@ export async function handleStopDoorbell(
   const { request_id } = event;
   const signalProcess = deps.signalProcess ?? ((pid, sig) => { process.kill(pid, sig); });
   const sleep = deps.sleep ?? defaultSleep;
+  const now = deps.now ?? Date.now;
   const renameDir = deps.renameDir ?? ((src, dst) => renameSync(src, dst));
   const ensureDir = deps.ensureDir ?? ((p, mode) => { mkdirSync(p, { recursive: true, mode }); });
   const chmod = deps.chmod ?? ((p, mode) => chmodSync(p, mode));
@@ -158,14 +168,14 @@ export async function handleStopDoorbell(
       signalProcess(entry.pid, "SIGTERM");
       exit_signal = "SIGTERM";
       deps.log(`[stop-daemon] sent SIGTERM to pid=${entry.pid} alias=${entry.alias} grace=${grace_seconds}s`);
-      const reaped = await waitForExit(entry.pid, grace_seconds * 1000, signalProcess, sleep);
+      const reaped = await waitForExit(entry.pid, grace_seconds * 1000, signalProcess, sleep, now);
       if (!reaped) {
         try { signalProcess(entry.pid, "SIGKILL"); } catch (e: any) {
           if (e?.code !== "ESRCH") throw e;
         }
         exit_signal = "SIGKILL";
         deps.warn(`[stop-daemon] grace exceeded, sent SIGKILL to pid=${entry.pid} alias=${entry.alias}`);
-        await waitForExit(entry.pid, 5_000, signalProcess, sleep);
+        await waitForExit(entry.pid, 5_000, signalProcess, sleep, now);
       }
     } else {
       exit_signal = "ALREADY_DEAD";

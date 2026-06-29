@@ -36,11 +36,13 @@ function makeDeps(opts: {
 } = {}) {
   const acks = opts.acks ?? [];
   let aliveCalls = 0;
+  let virtualNow = 1_700_000_000_000;   // arbitrary epoch; sleep() advances it
   const fakeSignals: Array<{ pid: number; sig: any }> = [];
   return {
     acks,
     fakeSignals,
     deps: {
+      now: () => virtualNow,
       callCommHub: async (tool: string, args: any) => {
         if (tool === "get_stop_request") {
           return opts.getStopReturn ?? { ok: false, error: "no_fixture" };
@@ -77,15 +79,15 @@ function makeDeps(opts: {
           // pre-SIGTERM kill-0 → alive (no throw).
         }
       },
-      // Fake sleep that advances Date.now via a stub timeout. We can't
-      // easily mock Date in Bun without monkey-patching; instead sleep
-      // resolves on the next macrotask AND the test relies on
-      // grace_seconds=5 + 25 max polls = 5s wall-clock with the real
-      // Date.now still moving. To avoid 5s test runtime we let the
-      // fake also tick Date forward by setting a virtual clock — but
-      // that needs more plumbing. Simpler: sleep is real, grace=5s
-      // means test takes ~5s. We bump test timeout instead.
-      sleep: async (ms: number) => new Promise(r => setTimeout(r, Math.min(ms, 50))),
+      // SF-1 (#345 review): use a virtual clock so the SIGKILL test
+      // doesn't burn real wall-clock. `now` is injectable via deps
+      // (stop-daemon.ts threads it into waitForExit). sleep advances
+      // the virtual clock by the asked-for ms; setTimeout(0) just
+      // yields the event loop so async branches resolve.
+      sleep: async (ms: number) => {
+        virtualNow += ms;
+        return new Promise(r => setTimeout(r, 0));
+      },
     },
   };
 }

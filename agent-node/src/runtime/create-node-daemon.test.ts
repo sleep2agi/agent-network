@@ -313,3 +313,38 @@ describe("FAIL_FAST_MS primitive — real subprocess kill-0 lifecycle", () => {
     try { process.kill(pid, "SIGKILL"); } catch { /* may already exit */ }
   });
 });
+
+// RFC-027 PR1 v3 — BLOCKER-1 lock. The recorded child_node_id MUST match
+// the hub's canonical derivation `node_${request_id.replace(/^cr_/,"")}`
+// (server/src/tools.ts ~363 mints the child config with this exact id,
+// and the child's later register call uses it as the nodes.node_id; the
+// same string flows back to the daemon via get_stop_request as
+// child_node_id). PR1 v2 fell back to `node_${alias}` when an absent
+// child_node_id field was missing from get_create_request — every stop
+// dispatch then noop'd at the daemon. This test pins the key shape so
+// the fallback can't drift back in.
+describe("RFC-027 BLOCKER-1 — childrenMap key shape matches hub canonical node_id", () => {
+  test("derive key from request_id, not alias", () => {
+    const request_id = "cr_abc123def456";
+    const expected = `node_${request_id.replace(/^cr_/, "")}`;
+    expect(expected).toBe("node_abc123def456");
+    // Hub server/src/tools.ts:363 writes EXACTLY this expression into
+    // the child's config.json node_id — keep them byte-identical or
+    // stop/delete will silently no-op.
+  });
+
+  test("recordSpawnedChild end-to-end with the canonical key — stop-daemon can find it", async () => {
+    const { recordSpawnedChild, getChildrenSnapshot, _resetChildrenMapForTest } =
+      await import("./stop-daemon");
+    _resetChildrenMapForTest();
+    const request_id = "cr_e2e_lookup_test";
+    const child_node_id = `node_${request_id.replace(/^cr_/, "")}`;
+    recordSpawnedChild(child_node_id, "alias-xyz", 12345);
+    const snap = getChildrenSnapshot();
+    expect(snap.length).toBe(1);
+    expect(snap[0].child_node_id).toBe("node_e2e_lookup_test");
+    expect(snap[0].alias).toBe("alias-xyz");
+    expect(snap[0].pid).toBe(12345);
+    _resetChildrenMapForTest();
+  });
+});

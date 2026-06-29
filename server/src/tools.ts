@@ -22,6 +22,7 @@ import {
   startPendingEnvGcTimer,
   startSweeperTimer,
   auditCreateNode,
+  auditCreateNodeStrict,
   resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
 } from "./create-node.js";
 import {
@@ -2383,16 +2384,45 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // Stop is allowed against any node per RFC table (host_supervisor's
     // stop is functionally a no-op anyway: the daemon's children_map
     // only tracks its child nodes, never the daemon itself).
+    //
+    // PR1 SF-4 (#345 review) — fail-CLOSED on role read. The first cut
+    // parsed config_snapshot and treated parse-fail / missing-field as
+    // role=null which slipped through the gate. A daemon row with a
+    // corrupt snapshot would then be deletable via delete_node. Fix:
+    // - read role via two independent paths (snapshot.role + the
+    //   indexed `runtimes_supported` column whose presence ≈ daemon)
+    // - if EITHER path indicates host_supervisor → refuse
+    // - if snapshot parsed but role missing AND the node has any
+    //   daemon-shape evidence (non-null runtimes_supported column,
+    //   present in any node_create_requests as daemon_node_id) →
+    //   refuse defensively. The defense-in-depth daemon-side
+    //   children_map miss is the second layer; the hub gate must
+    //   itself fail-closed when role is ambiguous.
     if (args.action === "delete") {
       let role: string | null = null;
+      let snapshotParseFailed = false;
       try {
         const snap = node.config_snapshot ? JSON.parse(node.config_snapshot) : null;
         role = typeof snap?.role === "string" ? snap.role : null;
-      } catch { /* fall through */ }
-      if (role === "host_supervisor") {
+      } catch { snapshotParseFailed = true; }
+      const ambiguous = snapshotParseFailed || (role == null);
+      // Independent corroborating check: nodes flagged as daemons by
+      // create_node dispatchers will show up as daemon_node_id in
+      // node_create_requests. Costs one indexed query.
+      let looksLikeDaemon = false;
+      if (ambiguous) {
+        const m = db.get<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM node_create_requests WHERE daemon_node_id = ?1`,
+          node.node_id,
+        );
+        if ((m?.n ?? 0) > 0) looksLikeDaemon = true;
+      }
+      if (role === "host_supervisor" || (ambiguous && looksLikeDaemon)) {
         return {
           ok: false, error: "cannot_delete_daemon_via_delete_node",
-          message: "host_supervisor daemons must be removed via the dedicated delete_daemon path (RFC-027.5)",
+          message: snapshotParseFailed
+            ? "node config_snapshot unreadable; node is referenced as a daemon — refuse delete defensively (use delete_daemon path)"
+            : "host_supervisor daemons must be removed via the dedicated delete_daemon path (RFC-027.5)",
         };
       }
     }
@@ -2437,8 +2467,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // this node's alias (inbox routing uses session_name == alias).
     // Default refuse with the count surfaced; force=true overrides
     // and triggers the forced_stop_with_in_flight audit row.
+    // SF-5 (#345 review): legacy inbox rows may have network_id=NULL
+    // and would silently miss a network_id=?2 strict equality match.
+    // Use COALESCE so a NULL inbox row is counted against the same
+    // network as the target node (which is the only safe default
+    // — pre-multi-network rows existed in single-network mode).
     const inFlightRow = db.get<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM inbox WHERE session_name = ?1 AND acked = 0 AND network_id = ?2`,
+      `SELECT COUNT(*) AS n FROM inbox WHERE session_name = ?1 AND acked = 0
+         AND COALESCE(network_id, ?2) = ?2`,
       node.alias, node.network_id,
     );
     const inFlight = inFlightRow?.n ?? 0;
@@ -2473,8 +2509,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         `UPDATE nodes SET lifecycle_state = ?1 WHERE node_id = ?2`,
         [newState, node.node_id],
       );
-      // §4.5 — audit dispatch action.
-      auditCreateNode({
+      // §4.5 D8 — audit dispatch action. Uses the STRICT variant so a
+      // failed audit INSERT propagates and triggers ROLLBACK (PR1 SF-2
+      // review catch — auditCreateNode's swallow-and-warn would have
+      // committed the lifecycle UPDATE without an audit row, leaving
+      // exactly the "deleted but no audit" window §4.5 closes).
+      auditCreateNodeStrict({
         action: args.action === "stop" ? "stop_node_dispatched" : "delete_node_dispatched",
         user_id: enforceUserId, network_id: node.network_id, target_id: requestId,
         detail: {
@@ -2487,7 +2527,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         },
       });
       if (args.force && inFlight > 0) {
-        auditCreateNode({
+        auditCreateNodeStrict({
           action: "forced_stop_with_in_flight",
           user_id: enforceUserId, network_id: node.network_id, target_id: requestId,
           detail: { in_flight_count: inFlight, child_alias: node.alias },
@@ -2636,7 +2676,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         );
         if (status === "stopped" && row.action === "stop") {
           db.run(`UPDATE nodes SET lifecycle_state = 'stopped' WHERE node_id = ?1`, [row.child_node_id]);
-          auditCreateNode({
+          auditCreateNodeStrict({
             action: "stop_node_completed",
             user_id: null, network_id: row.network_id, target_id: request_id,
             detail: {
@@ -2655,7 +2695,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             [row.network_id, `node:${row.child_alias}`],
           );
           db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
-          auditCreateNode({
+          auditCreateNodeStrict({
             action: "delete_node_completed",
             user_id: null, network_id: row.network_id, target_id: request_id,
             detail: {

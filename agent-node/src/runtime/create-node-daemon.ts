@@ -482,13 +482,26 @@ export async function handleCreateNodeDoorbell(
   void stillAlive;
 
   // RFC-027 §2.4 — record the spawned child in the daemon's children_map
-  // so a later SSE stop_node doorbell knows which PID to signal. Lazy
-  // import keeps create-node-daemon's startup cost flat (stop-daemon
-  // module is only needed once a child exists). Lookup key is the
-  // hub-assigned child_node_id; alias is the operator-friendly handle.
+  // so a later SSE stop_node doorbell knows which PID to signal.
+  //
+  // Lookup key MUST exactly match the hub's canonical child node_id.
+  // The hub mints it from request_id at child config write time (line
+  // 363 above: `node_${request_id.replace(/^cr_/, "")}`); when the
+  // child later calls register, that's the node_id row inserted in
+  // `nodes`, and the same string flows back to the daemon via
+  // get_stop_request as child_node_id (server/src/tools.ts ~2586).
+  //
+  // PR1 v2 BLOCKER-1 catch (通信龙 deep review): I previously fell back
+  // to `node_${req.node_spec.name}` when (req as any).child_node_id was
+  // absent — but get_create_request never carries child_node_id at all,
+  // so the fallback ALWAYS fired and the recorded key never matched
+  // the hub's. Every stop/delete dispatch then noop'd at the daemon
+  // ("noop_not_my_child"), the hub never finalized state, and the
+  // child process kept running. The fix is to mint the same string the
+  // hub uses — request_id is in scope here.
   if (childPid > 0 && typeof req.node_spec.name === "string") {
     try {
-      const child_node_id = (req as any).child_node_id || `node_${req.node_spec.name}`;
+      const child_node_id = `node_${request_id.replace(/^cr_/, "")}`;
       const { recordSpawnedChild } = await import("./stop-daemon.js");
       recordSpawnedChild(child_node_id, req.node_spec.name, childPid);
     } catch (e: any) {

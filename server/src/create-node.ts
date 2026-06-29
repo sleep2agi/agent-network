@@ -272,6 +272,37 @@ export function resolveCallerDaemonTokenBound(opts: {
 // RFC-026 §4.5 — append a row to audit_log for every create_node
 // lifecycle event. Best-effort: never throw out (calling tool should
 // continue even if audit insert fails for any reason).
+/** RFC-027 §4.5 D8 — tx-aware variant. Identical SQL to auditCreateNode
+ *  but RE-THROWS on failure so a BEGIN..COMMIT around lifecycle UPDATE +
+ *  audit INSERT can ROLLBACK if the audit row would have been lost.
+ *  Required for the "no audit-but state changed" window that §4.5 / D8
+ *  explicitly closes (PR1 SF-2 review catch — auditCreateNode's
+ *  swallow-and-warn defeats atomicity).
+ *
+ *  Callers in a non-transaction context should keep using auditCreateNode
+ *  (best-effort, never throws). */
+export function auditCreateNodeStrict(input: {
+  action: Parameters<typeof auditCreateNode>[0]["action"];
+  user_id?: string | null;
+  username?: string | null;
+  network_id?: string | null;
+  target_id?: string | null;
+  detail: Record<string, unknown>;
+}): void {
+  db.run(
+    `INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail, network_id)
+     VALUES (?1, ?2, ?3, 'node_create_request', ?4, ?5, ?6)`,
+    [
+      input.user_id || null,
+      input.username || null,
+      input.action,
+      input.target_id || null,
+      JSON.stringify(input.detail),
+      input.network_id || null,
+    ],
+  );
+}
+
 export function auditCreateNode(input: {
   action:
     | "create_node_dispatched"

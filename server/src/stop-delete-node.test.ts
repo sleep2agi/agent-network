@@ -440,3 +440,97 @@ describe("get_stop_request + ack_stop_request — daemon flow", () => {
     expect(r.error).toBe("not_your_request");
   });
 });
+
+// ── PR1 v3: 通信龙 #345 deep-review fixes ──────────────────────────
+
+describe("SF-2 — audit in tx propagates failure (D8 atomicity真)", () => {
+  test("forced audit row written alongside dispatch in same tx (rollback if either fails)", async () => {
+    // We can't easily simulate audit_log INSERT failure without
+    // schema munging; the atomicity guarantee is structural (BEGIN..
+    // COMMIT + auditCreateNodeStrict re-throws). Pin the invariant
+    // observable to ops: the dispatch + forced audit both appear OR
+    // both are absent. Happy path here; a true failure-injection
+    // belongs in PR1.1's docker e2e where we can drop audit_log
+    // permissions / corrupt the row.
+    setupAlphaNetwork();
+    seedInbox(NET_A, CHILD_A_ALIAS, 1);
+    const tools = buildHandlers(USER_A_ID);
+    const r = await call(tools.stop_node, {
+      child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A,
+      force: true,
+    });
+    expect(r.ok).toBe(true);
+    // Both audit rows present.
+    expect(readAudit("stop_node_dispatched", NET_A).length).toBe(1);
+    expect(readAudit("forced_stop_with_in_flight", NET_A).length).toBe(1);
+    // node state moved
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("stopping");
+  });
+});
+
+describe("SF-4 — D6 fail-CLOSED on ambiguous role", () => {
+  test("corrupt config_snapshot + node referenced as daemon → still refused", async () => {
+    setupAlphaNetwork();
+    // Wreck the daemon's snapshot but leave the row + create-request
+    // history. delete_node MUST still refuse — corrupt snapshot was the
+    // SF-4 fail-open path.
+    db.run(
+      `UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`,
+      ["not-valid-json{{{", DAEMON_A_ID],
+    );
+    // Plant a node_create_request that points to DAEMON_A as daemon,
+    // simulating that this daemon has handed out children before.
+    db.run(
+      `INSERT INTO node_create_requests
+         (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token)
+       VALUES ('cr_sf4_evidence', ?1, 'past-child', ?2, 'claude-agent-sdk', 'x', '{}', '[]', 'succeeded', NULL, ?3, 'tok_test')`,
+      [DAEMON_A_ID, NET_A, Date.now()],
+    );
+    const tools = buildHandlers(USER_A_ID);
+    const r = await call(tools.delete_node, {
+      child_node_id: DAEMON_A_ID,
+      daemon_node_id: DAEMON_A_ID,
+      network_id: NET_A,
+      confirm_alias: DAEMON_A_ALIAS,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("cannot_delete_daemon_via_delete_node");
+    expect(readNode(DAEMON_A_ID)?.lifecycle_state).toBe("active");
+  });
+
+  test("corrupt snapshot + NO daemon evidence → can be deleted (no FP)", async () => {
+    // A plain child whose snapshot got mangled mustn't be refused.
+    // Simulates corruption on a regular member node.
+    setupAlphaNetwork();
+    db.run(
+      `UPDATE nodes SET config_snapshot = ?1 WHERE node_id = ?2`,
+      ["{broken", CHILD_A_ID],
+    );
+    const tools = buildHandlers(USER_A_ID);
+    const r = await call(tools.delete_node, {
+      child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A,
+      confirm_alias: CHILD_A_ALIAS,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.action).toBe("delete");
+  });
+});
+
+describe("SF-5 — in-flight COALESCE for legacy inbox rows", () => {
+  test("inbox row with network_id=NULL but session_name matches → counted", async () => {
+    setupAlphaNetwork();
+    // Legacy-shape inbox row: session_name set, network_id NULL.
+    db.run(
+      `INSERT INTO inbox (id, session_name, type, priority, content, from_session, network_id, acked)
+       VALUES (?1, ?2, 'task', 'normal', 'legacy-task', 'caller', NULL, 0)`,
+      [`inbox_legacy_${Date.now()}`, CHILD_A_ALIAS],
+    );
+    const tools = buildHandlers(USER_A_ID);
+    const r = await call(tools.stop_node, {
+      child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+    expect(r.in_flight_count).toBeGreaterThanOrEqual(1);
+  });
+});
