@@ -1,5 +1,13 @@
 # One-Shot Install (Multi-Agent + tmux)
 
+::: warning ⚠️ Experimental — not end-to-end verified, audit before use
+**Vincent feedback (2026-06-29)**: `setup-anet.sh` has **not been end-to-end verified by the maintainers**. The script file is reachable at `https://anet.sh/setup-anet.sh` (and syntactically complete), but there is no reproducible smoke report of it running through on a clean Ubuntu/Debian host. The `MINIMAX_KEY=sk-cp-your-key` vendor-key form may also not match MiniMax's current API — use the verified-with-real-call vendors listed in [Multi-Model Config](/en/guide/multi-model).
+
+**Recommended path**: follow the [Getting Started guide](/en/guide/getting-started) (verified 5-terminal manual flow) + [Fresh Server From Scratch](/en/deploy/clean-server) (includes a systemd template).
+
+The contents below are **kept for script-author reference**, but please audit and dry-run in an isolated environment before using.
+:::
+
 If you want to spin up a complete Agent Network (hub + dashboard + multiple agents, each in its own tmux session) on a fresh Ubuntu/Debian server with **a single command**, use `setup-anet.sh`.
 
 ## When to use this
