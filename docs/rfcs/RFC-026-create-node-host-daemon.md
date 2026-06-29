@@ -817,13 +817,18 @@ dashboard 一个 admin-only 页直接查 audit。理由：远程拉起进程是�
 
 **ship**：作为 v0.12-preview.X 发，docs 标 EXPERIMENTAL。
 
-### P2 — 多机选服务器（ETA ~1w）
+### P2 — 多机选服务器（详细见 §9，~1w）
 
+P1 闭环后 Vincent 看向导问「为什么没有第一步选哪台服务器」——P2 正式落地选服务器：
 - daemon 安装脚本 + systemd unit + 跨平台 fallback
 - dashboard Step 1 服务器列表 + alert chip + runtime 过滤
-- §4.4 升级到 ECDH ephemeral session key
+- 新 hub 接口 `list_host_supervisors` (MCP) + `GET /api/host-supervisors` (REST)
+- daemon self-declare `runtimes_supported`（候选过滤）+ daemon-side fail-fast 兜底（声明 ≠ 真能跑）
+- RFC-028 connectivity matrix 联动 (`providers.reachable_from_daemons`) —— 选服务器后 filter 该 daemon 可达 model
 - per-host audit page
-- e2e: 跨 host network-scope 防护带 + secret 不明文流转测试
+- e2e: 跨 host network-scope 防护带 + secret 不明文流转 + per-daemon capability filter
+
+详细设计 + 决策 + test plan 见 **§9**。
 
 **ship**：v0.13-preview.X
 
@@ -905,4 +910,243 @@ P3 详细设计**等创建 P1 闭环跑通后**单独 RFC（RFC-027 候选），
 ---
 
 **作者**: 通信工程马 · 2026-06-28
-**Review 路径**: v1 通信龙 first-pass PASS ✅ → v2 折 F1/F2/F3 ✅ → v3 折通信牛 C1-C5 ✅ → v4 修 B1/B2 (本) → 通信牛 二次复判 → 通信龙 final → Vincent 拍 → 派工 P1 MVP impl + Phase 0 test scaffold (11 scenarios)
+**Review 路径**: v1 通信龙 first-pass PASS ✅ → v2 折 F1/F2/F3 ✅ → v3 折通信牛 C1-C5 ✅ → v4 修 B1/B2 ✅ → 通信牛 二次复判 ✅ → 通信龙 final ✅ → Vincent 拍 ✅ → P1 MVP impl + 11 e2e scenarios ✅ → preview2 ship ✅
+
+**v5 (P2 选服务器)**: 2026-06-29 Vincent 看 P1 向导确认页问「为什么没有第一步选哪台服务器」+「不同服务器网络环境不一样」→ 通信龙 派 P2 设计 → 详见 **§9**
+
+---
+
+## 9. P2 — 选服务器 (Multi-Daemon Discovery + Dispatch)
+
+> Vincent 2026-06-29: 「为什么没有第一步选哪台服务器？」+「不同服务器网络环境不一样」。P1 把向导第一步绕过了（默认本机 daemon），P2 正式落地。
+
+### 9.1 背景 + 决策
+
+P1 contract 已经为多 daemon 留好钩：`create_node.daemon_node_id` 是显式字段，hub C2 token-bound 路由按该 id 推 SSE。P1 默认填本机 daemon 的 node_id（向导 Step 1 直接 skip 文案「P1: 创建在本机 daemon，绕过选服务器」）。P2 = 让向导真选 + 后端真支持发现/过滤/失败兜底。
+
+通信龙 v5 review 一次性锁了 6 个决策（task `8c3d8cdd`，全 ack 倾向 + 一个 nit）：
+
+| # | 决策 | 锁定 |
+|---|---|---|
+| D1 | **Daemon 发现 = passive** | hub 从 `nodes` 表 `role=host_supervisor` × `sessions` 在线 join 派生候选列表；不引入显式 `register_daemon` tool。0 daemon-side 改动，复用 RFC-026 现有 role 字段 + RFC-014 host telemetry 在线信号 |
+| D2 | **Capability daemon-self-declare + fail-fast 兜底** | daemon 的 `config.json` 加 `runtimes_supported` 字符串数组 → `report_status` 上报到 hub `nodes.runtimes_supported` 列。 **关键 nit (通信龙)**: self-declare ≠ 真能跑（binary 缺失 / auth fail / GPU 缺 / Bun 版本不兼容都可能让声明的 runtime spawn 时挂）→ self-declare 只用于**候选过滤**（dashboard 灰掉不支持的 runtime），daemon 真创建时再做一次 capability check + fail-fast 兜底。「声明」不当「保证」 |
+| D3 | **向导默认 UX** | 候选 daemon 数 ∈ {0, 1, ≥2} 三态：`0` → 显式错误「该 network 无可用 host_supervisor，引导启 daemon」并贴一键安装命令；`1` → 自动选 + skip Step 1（保 P1 quick path 体感）；`≥2` → 必选 Step 1 不可跳 |
+| D4 | **跨 daemon 安全** | 选他 network 的 daemon = SEC-1 拒（复用 RFC-026 §4.3）；daemon mid-dispatch offline → hub 检测 SSE 推失败 → fail-fast 标 `request.status=failed` + 复用 §4.4.8 sweeper revoke pendingEnvBlob + child-ntok |
+| D5 | **Per-daemon env validate-on-pull** | daemon 在 `get_create_request` 拉到 spec 时校验 `env_keys` 中每个 key 是否在 `allowed_secret_keys` 内（daemon-side `config.json`），不在则 `ack({status: rejected, error: "daemon_env_key_missing", key: K})`，复用 §4.2.2 双层 enforce 模式 |
+| D6 | **RFC-028 connectivity matrix 联动** | provider 表加 `reachable_from_daemons` JSON 字段（probe per-daemon 结果汇总）。向导 Step 1 选 daemon 后，Step 2 Model 下拉只显示该 daemon 可达的 model（unreachable model 灰掉 + tooltip 解释「该服务器探测不到 provider」）。**这条直接答 Vincent「不同服务器网络环境不一样」**，是 P2 最关键产品价值 |
+
+### 9.2 新 Hub-side 接口
+
+#### 9.2.1 MCP tool: `list_host_supervisors`
+
+```jsonc
+// request
+{
+  "method": "tools/call",
+  "params": {
+    "name": "list_host_supervisors",
+    "arguments": { "network_id": "net_xxx" }
+  }
+}
+// response (text content JSON)
+{
+  "ok": true,
+  "daemons": [
+    {
+      "daemon_node_id": "node_daemon_alpha",
+      "alias": "daemon-my-server-01",
+      "hostname": "my-server-01",
+      "online": true,
+      "last_seen_at": "2026-07-04T03:00:00Z",
+      "runtimes_supported": ["claude-agent-sdk", "codex-sdk", "grok-build-acp"],
+      "current_children": 3,
+      "max_concurrent_children": 20,
+      "allowed_secret_keys": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
+      "host_telemetry": {              // 复用 RFC-014, member 见脱敏 (§6 #3)
+        "alert_level": "green",
+        "cpu_cores": 8,                // admin only
+        "mem_gb": 16,                  // admin only
+        "ip_internal": "10.0.0.5"      // admin only (member 见 null)
+      }
+    },
+    { ... }
+  ]
+}
+```
+
+- **caller scope**: 只列调用者所属 network 的 daemon（SEC-1）。caller 是 admin/owner 则带详尽 host_telemetry；caller 是 member 则脱敏（§6 #3）。
+- **online 判定**: `sessions.last_seen_at > now() - 60s`（复用 RFC-014 在线门）
+- **过滤**: 排除 `revoked_at IS NOT NULL` 的 daemon ntok（RFC-026 §4.4.8 sweeper 标的 orphan daemon row）
+
+#### 9.2.2 REST mirror: `GET /api/host-supervisors`
+
+```http
+GET /api/host-supervisors?network_id=net_xxx
+Authorization: Bearer utok_xxx
+```
+
+Dashboard 用这个，返回 shape 同 MCP tool。**显式 column 列表**（按 #312 学到的 SELECT * 教训），不广播 daemon 内部字段。
+
+### 9.3 Daemon-side self-declare
+
+Daemon `config.json` 加两字段：
+
+```jsonc
+{
+  "node_id": "node_daemon_alpha",
+  "alias": "daemon-my-server-01",
+  "role": "host_supervisor",
+  "runtime": "claude-agent-sdk",          // daemon 自身跑什么 runtime
+  // P2 新增：
+  "runtimes_supported": [                  // daemon 能 spawn 的 runtime 列表
+    "claude-agent-sdk",
+    "codex-sdk",
+    "grok-build-acp"
+  ],
+  "allowed_secret_keys": [                 // daemon 接受的 env_blob key 白名单
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY"
+  ],
+  "max_concurrent_children": 20,
+  ...
+}
+```
+
+Daemon 的 `report_status` payload 加这两字段 → hub `upsertNodeRow` 写到 `nodes.runtimes_supported` (TEXT JSON) + `nodes.allowed_secret_keys` (TEXT JSON)。
+
+**D2 nit 兜底**: daemon 在 `handle create_node`（§2.5 step 3）的现有 runtime allowlist check 之外，**仍**保留 spawn 后 fail-fast 检测：
+- claude-agent-sdk: spawn 后 5s 内子进程死亡 → ack failed, error=`runtime_capability_check_failed`，附 stderr 前 200 字节
+- codex-sdk: 同上 + 额外查 OPENAI_API_KEY 是否拒 401
+- grok-build-acp: 同上 + 额外查 grok auth
+
+daemon 不能仅凭 `runtimes_supported` 声明就报 success。
+
+### 9.4 Wizard 三态流
+
+```
+[Pre-flight] 调 GET /api/host-supervisors?network_id=net_xxx
+  ↓
+┌─ count = 0 ──────────────────────────────────────────────┐
+│ 显式空状态:                                                │
+│   ⚠️ 该 network 内无可用 host_supervisor                  │
+│   要在某台服务器上创建节点, 先安装 daemon:                  │
+│   [复制安装命令] ← 同 RFC-026 §2.3 install-time           │
+│   $ curl -fsSL https://anet.sh/install-daemon | sh ...    │
+│   装完 daemon 自动 register, 30s 内刷新本页                │
+└──────────────────────────────────────────────────────────┘
+
+┌─ count = 1 ──────────────────────────────────────────────┐
+│ 自动选, skip Step 1, 直接 Step 2 配置节点:                │
+│   ℹ️ 当前只有 my-server-01 (本机) 可用, 已自动选择        │
+│ [向导照旧 Step 2 → Step 3]                                 │
+│ (保 P1 quick-path 体感: 单 daemon 用户不被打扰)            │
+└──────────────────────────────────────────────────────────┘
+
+┌─ count ≥ 2 ──────────────────────────────────────────────┐
+│ Step 1 — 选服务器 (必选, 不可跳)                           │
+│ ┌──────────────────────┬──────────────────────┐         │
+│ │ ● my-server-01 (上海) │ ○ my-server-02 (北京) │         │
+│ │   green · 8c/16GB     │   yellow · 4c/8GB     │         │
+│ │   3/20 nodes          │   18/20 nodes         │         │
+│ │   ✓ claude ✓ codex    │   ✓ claude            │         │
+│ │   ✓ ANTHROPIC_API_KEY │   ✗ OPENAI_API_KEY   │         │
+│ └──────────────────────┴──────────────────────┘         │
+│                                                            │
+│ Step 2 — 配置节点                                          │
+│   Runtime: grey 掉所选 daemon 不支持的                     │
+│   Model: 调 RFC-028 reachable_from_daemons,                │
+│          grey 掉所选 daemon 不可达 provider 的 model       │
+│   envRef: grey 掉所选 daemon 不在 allowed_secret_keys 的   │
+│                                                            │
+│ Step 3 — 确认                                              │
+│   「在 my-server-01 上以 admin 身份创建 demo-bot ...」     │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 9.5 RFC-028 联动 — `reachable_from_daemons`
+
+RFC-028 P1 probe 已经按 (provider, model, daemon) 三元组打 `probe_results`。P2 扩展：
+
+- `providers` 表加 `reachable_from_daemons TEXT` (JSON `{daemon_node_id: {last_probe_at, status}}`)
+- RFC-028 hub `finalizeProbeAck` 在写 `probe_results` 时**同时** upsert `providers.reachable_from_daemons[daemon_node_id] = {last_probe_at, status}`
+- `list_host_supervisors` 响应 join providers，附 `reachable_providers: [provider_id, ...]` 给 dashboard 用于 Model 下拉过滤
+- Dashboard 选 daemon 后 Model 下拉显示 unreachable 项时灰掉 + tooltip：「该服务器最近一次探测 provider 'X' 返回 timeout/auth_fail/network_error」
+
+**新鲜度**：probe 默认 6h cache，dashboard Step 2 选 daemon 后可点「重新探测」触发实时 probe。
+
+### 9.6 失败模式 + 兜底
+
+| 失败 | 触发点 | 兜底 |
+|---|---|---|
+| 选错 network 的 daemon | hub `create_node` SEC-1 check | 拒 `forbidden_network_id`, dashboard 不应该让用户看到他 network 的 daemon (REST endpoint 已 scope) |
+| 选了的 daemon mid-dispatch offline | hub pushEvent SSE 失败 / daemon ack 60s 未到 | hub 标 `request.status=failed` + sweeper (§4.4.8) revoke pendingEnvBlob + child-ntok。dashboard 报「服务器响应超时, 请选另一台或稍后重试」 |
+| daemon 声明 runtime 但 spawn 挂 | daemon spawn 后 fail-fast check (§9.3) | ack `runtime_capability_check_failed` + 附 stderr。hub 记 audit `daemon_capability_lied` 事件。 dashboard 报「服务器声明支持 X runtime 但实际跑不起来, 请检查服务器配置」 |
+| daemon 不持有用户 envRef key | daemon `get_create_request` validate-on-pull | ack `daemon_env_key_missing`, 附 key 名。dashboard 报「服务器未配置 X，请联系管理员或选另一台」 |
+| daemon current_children = max | daemon §2.5 step 3 max_children 检查 | ack `max_children_exceeded`，dashboard 显示该 daemon 不可选并解释 |
+
+### 9.7 Backwards compat — P1 quick path
+
+P2 不应该破坏 P1 quick path 体感：
+
+- `create_node` 仍接受 `daemon_node_id` 是必填 — dashboard 客户端在 wizard count=1 case 自动填上唯一可用 daemon
+- 老 dashboard 版本（不 query host-supervisors）继续传本机 daemon node_id 就一直能用
+- daemon `config.json` 不带 `runtimes_supported` → hub upsert 时默认 `[daemon.runtime]`（向后兼容现有 P1 daemon）
+- daemon `config.json` 不带 `allowed_secret_keys` → 默认空数组 = 严格 fail-closed（每个 env_key 都要显式声明）
+
+### 9.8 Schema 扩展
+
+```sql
+-- nodes 表 (现有, ALTER ADD COLUMN 幂等 try/catch 模式)
+ALTER TABLE nodes ADD COLUMN runtimes_supported TEXT;     -- JSON array, P1 fallback = [runtime]
+ALTER TABLE nodes ADD COLUMN allowed_secret_keys TEXT;    -- JSON array, P1 fallback = []
+
+-- providers 表 (RFC-028) 加
+ALTER TABLE providers ADD COLUMN reachable_from_daemons TEXT;  -- JSON {daemon_node_id: {last_probe_at, status}}
+```
+
+**注意**：不再用 `SELECT *` 暴露 nodes 行——P2 修改 GET /api/nodes 显式列表时**不带** `runtimes_supported` / `allowed_secret_keys`（这俩属于 daemon 视角字段，list_host_supervisors 专管），仍走 #312 explicit-columns 模式。
+
+### 9.9 P2 Test plan（mirror P1 e2e 风格）
+
+| # | 场景 | 期望 |
+|---|---|---|
+| P2-A | 两 daemon online，admin 调 list_host_supervisors，返回两个，online=true | ✓ count=2 + runtimes_supported populated |
+| P2-B | one daemon online，one offline (last_seen > 60s)，返回两个但 online flag 区分 | ✓ |
+| P2-C | member 调 list_host_supervisors，host_telemetry IP/cpu/mem null 脱敏 | ✓ |
+| P2-D | 调用者 network = netA，netB daemon 不出现在列表（SEC-1） | ✓ |
+| P2-E | wizard count=0 → dashboard 显式空状态 + 安装命令 | ✓ |
+| P2-F | wizard count=1 → skip Step 1，向 daemon_node_id 自动填唯一 daemon | ✓ |
+| P2-G | wizard count≥2 → 必选 Step 1，未选不能进 Step 2 | ✓ |
+| P2-H | 选 daemon A，create_node 真路由到 A 不漏到 B（C2 token-bound 复用） | ✓ |
+| P2-I | 选 daemon mid-dispatch offline → hub failed + sweeper revoke pendingEnvBlob | ✓ |
+| P2-J | daemon 声明 codex-sdk runtimes_supported 但 binary 缺 → spawn 后 fail-fast，ack runtime_capability_check_failed + dashboard 报错 | ✓ |
+| P2-K | daemon 不在 allowed_secret_keys 列表 → daemon ack daemon_env_key_missing，hub failed，dashboard 报「servers 未配置 X」 | ✓ |
+| P2-L | RFC-028 联动：provider 在 daemon A reachable，daemon B unreachable → Model 下拉 B 灰掉 + tooltip | ✓ |
+
+每场景独立 docker 容器 + isolated hub port + 独立 commhub DB（同 P1 e2e 风格，per [[feedback_no_test_on_prod]]）。
+
+### 9.10 ETA + ship
+
+- **设计** (本节): v1 ~3h → v2 折通信龙 nit ~1h → v3 折 Vincent 反馈 ~30min → lock ~4h 净
+- **impl** P2: hub 侧 ~2d (新 tool + REST + schema ALTER + RFC-028 联动 + capability fail-fast 兜底)、dashboard 侧 ~2d (wizard 三态 + Model 过滤 UI + 错误文案)、e2e ~1d (P2-A..L 12 scenario)、总 ~1w
+- **ship**: v0.13-preview.X（preview3 channel，跟 RFC-028 P1 一起切）
+
+### 9.11 不在 P2 范围（延 P3 或单独 RFC）
+
+- 反向操作 stop/delete（§5 P3 / RFC-027 候选）
+- daemon 安装一键 systemd unit 脚本（独立工具 RFC，不阻塞 P2 设计）
+- ECDH ephemeral session key（§4.4 升级，P2 mint-stream-evict 60s TTL 够用）
+- 跨 host 节点迁移（§7 明确不做）
+- per-host UI alert page（P3 audit 扩展）
+
+### 9.12 Review checklist — v1 草稿
+
+- [ ] §9.1 6 决策 — 通信龙 已 ack 全部倾向 (task `8c3d8cdd`)，待 v2 fold「self-declare ≠ 保证」nit 落地到 §9.3 ✓ (已写入)
+- [ ] §9.2 `list_host_supervisors` MCP tool + REST 显式列表 — 待通信牛 spot-check (member 脱敏字段范围 + revoked daemon 过滤)
+- [ ] §9.3 daemon-self-declare + fail-fast 兜底 — 待通信牛 verdict（D2 nit 落实是否够）
+- [ ] §9.4 wizard 三态 — 待 Vincent 看 mockup 决定 count=0 空状态文案 + count=1 是否要确认「已自动选」
+- [ ] §9.5 RFC-028 联动 — 待 RFC-028 P2 owner 同意 reachable_from_daemons 字段方案 (probe ack 同时 upsert)
+- [ ] §9.6 失败模式 — 待通信牛 spot-check「daemon 声明 lied」是否要审计 + alert
+- [ ] §9.9 12 scenarios test plan — 与 P1 e2e 共用 Dockerfile 框架，待通信牛 cover review
+
+---
