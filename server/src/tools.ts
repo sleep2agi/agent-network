@@ -2553,6 +2553,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const willReplaceModels = patch.models !== undefined;
       const newModelIds: string[] = [];
 
+      // No-op early return (通信牛 nit): all patch fields matched the
+      // existing row values + no models supplied → no real change to
+      // persist. Returning here means we don't write an empty-diff
+      // audit row (audit noise). Audit_log INSERT must only fire when
+      // something actually changed.
+      if (sets.length === 0 && !willReplaceModels) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, provider_id, no_changes: true, hint: "patch fields matched existing row, no-op" }) }] };
+      }
+
       try {
         db.exec("BEGIN");
         if (sets.length > 0) {
@@ -2589,10 +2598,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       } catch (e: any) {
         try { db.exec("ROLLBACK"); } catch { /* ok */ }
         throw e;
-      }
-
-      if (Object.keys(diff).length === 0 && !willReplaceModels) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, provider_id, no_changes: true, hint: "patch fields matched existing row, no-op" }) }] };
       }
 
       return { content: [{ type: "text" as const, text: JSON.stringify({
