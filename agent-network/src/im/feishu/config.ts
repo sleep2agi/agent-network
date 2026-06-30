@@ -22,6 +22,32 @@ export interface FeishuAccessList {
   allowChats: string[];
 }
 
+/**
+ * Outbound text-reply rendering mode (RFC-020 §16). Controls how
+ * `adapter.send` handles a text/markdown payload that doesn't already
+ * carry an `imagePath` / `files[]` (those upload routes are unaffected).
+ *
+ *  - "plain" (DEFAULT): always send `msg_type:text`. Bot replies are
+ *    fully copy-pasteable in Feishu; long replies are chunked into
+ *    multiple text messages instead of being PNG-rendered. This is the
+ *    correct default for issue/code/CLI bot replies where users want
+ *    to grab the text. Vincent 2026-06-30 explicit ask: "issue 发文字".
+ *
+ *  - "card": short markdown (bold, list, link, inline code) goes via
+ *    schema 1.0 interactive card with `markdown` element — text stays
+ *    copy-friendly + gets bolds/bullets styled. Heading/table/long
+ *    fall back to plain text (no PNG). Suited to operators who want
+ *    light formatting without losing copy.
+ *
+ *  - "auto": preserve the pre-2026-06-30 behavior — markdown with
+ *    headings / tables / >2000 chars is rendered to PNG via headless
+ *    chromium (#329 path), short markdown goes to schema 1.0 card,
+ *    plain text goes to msg_type:text. Highest fidelity at the cost
+ *    of copy-paste. Opt-in for operators who genuinely need rendered
+ *    tables / heading hierarchy in chat.
+ */
+export type OutboundRenderMode = "plain" | "card" | "auto";
+
 export interface FeishuChannelConfig {
   appId: string;
   appSecret: string;
@@ -34,6 +60,12 @@ export interface FeishuChannelConfig {
   auditRaw: boolean;
   /** Per-task timeout in ms; default 5 min (RFC-020 §4.5). */
   taskTimeoutMs: number;
+  /**
+   * RFC-020 §16 outbound rendering mode for text replies. Default `"plain"`.
+   * See `OutboundRenderMode` for per-mode semantics. Channels that omit
+   * the field get `"plain"` — Vincent's "issue 发文字" default.
+   */
+  outboundRender: OutboundRenderMode;
   /**
    * Absolute path to the channel directory. The adapter writes downloaded
    * inbound media to `<channelDir>/media/` (M5c). Populated by the loader so
@@ -56,6 +88,16 @@ export function loadFeishuChannelConfig(channelDir: string): FeishuChannelConfig
     );
   }
   const access = readAccessFile(join(channelDir, "access.json"));
+  // Outbound render mode: prefer access.json `outboundRender`, fall back
+  // to env `FEISHU_OUTBOUND_RENDER`, default "plain". The access.json
+  // field is the operator-facing knob (committed to a node's config dir);
+  // the env override is for one-off testing without editing files.
+  const raw =
+    (typeof access?.outboundRender === "string" && access.outboundRender) ||
+    (typeof env.FEISHU_OUTBOUND_RENDER === "string" && env.FEISHU_OUTBOUND_RENDER) ||
+    "plain";
+  const outboundRender: OutboundRenderMode =
+    raw === "card" || raw === "auto" ? raw : "plain";
   return {
     appId,
     appSecret,
@@ -64,6 +106,7 @@ export function loadFeishuChannelConfig(channelDir: string): FeishuChannelConfig
     ackPlaceholder: true,
     auditRaw: false,
     taskTimeoutMs: 5 * 60 * 1000,
+    outboundRender,
     channelDir,
   };
 }
@@ -83,13 +126,22 @@ function parseEnvFile(path: string): Record<string, string> {
   return out;
 }
 
-function readAccessFile(path: string): FeishuAccessList {
+interface AccessFileShape extends FeishuAccessList {
+  /** Optional outbound render mode (RFC-020 §16). Mirrors the same field
+   *  on FeishuChannelConfig; loaded here so operators can set it in the
+   *  per-channel access.json without touching code. */
+  outboundRender?: string;
+}
+
+function readAccessFile(path: string): AccessFileShape {
   if (!existsSync(path)) return { allowFrom: [], allowChats: [] };
   try {
-    const data = JSON.parse(readFileSync(path, "utf-8")) as Partial<FeishuAccessList>;
+    const data = JSON.parse(readFileSync(path, "utf-8")) as Partial<AccessFileShape>;
     return {
       allowFrom: Array.isArray(data.allowFrom) ? data.allowFrom : [],
       allowChats: Array.isArray(data.allowChats) ? data.allowChats : [],
+      outboundRender:
+        typeof data.outboundRender === "string" ? data.outboundRender : undefined,
     };
   } catch {
     return { allowFrom: [], allowChats: [] };
