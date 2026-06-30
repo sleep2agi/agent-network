@@ -116,3 +116,30 @@ Distilled into a tree that narrows through three layers — connection → subsc
 2. **Minimal reproduction first.** A standalone script that bypasses the whole product stack often splits the problem in half instantly (platform/network vs. your own code).
 3. **Reduce the environment to a single variable first.** Multiple orphan connections and leftover configs make symptoms drift and mislead diagnosis.
 4. **Proactively grep for "denied by ourselves" logs like `deny`.** "No reaction" can mean "not received" *or* "received but rejected" — two completely different directions.
+
+## Companion Case: The Bot Can't See Images
+
+A few days later, a trap with **similar symptoms and the same disciplines** — worth keeping alongside.
+
+**Symptom**: send the bot an image and it replies "`[agent-node] received the event but no processable text/image content`". Text messages work fine; only images fail.
+
+**Three wrong diagnoses again** (same bad habit): first "the user is forwarding a card, not a direct image", then "the app lacks image-download permission", then "the model doesn't support vision" — all guesses from symptoms, no evidence.
+
+**The decisive diagnosis**:
+1. A sole-connection probe captured the **raw event**: `msg_type=image` with a valid `image_key` — **it's a direct image, refuting the first two guesses**.
+2. The key move: the worker's download function was `catch { return null }`, **swallowing every download error**, so the log showed nothing. After **injecting one error-log line** into that catch and resending, it surfaced instantly:
+
+```
+[feishu:image] … downloadImage threw: X.on is not a function
+```
+
+**Root cause**: the Feishu SDK (lark node-sdk v1.68) `im.messageResource.get()` returns a **wrapper object** (with `.getReadableStream()` / `.writeFile()` methods), **not** a raw stream you can `.on("data")` directly. The old worker called `.on()` on the wrapper → threw → swallowed by the catch → no image bytes → treated as "no content".
+
+**The fix**: `const stream = resp.getReadableStream()` then `stream.on("data", …)`. A one-line difference — and exactly what the official [PR #324](https://github.com/sleep2agi/agent-network/pull/324) (`fix(#179 image): downloadImage SDK misuse`) already fixed. The affected container was running a build from **before #324** (e.g. `2.2.22-preview.2`); upgrading to a preview with the fix resolves it. After the fix, verified end-to-end: image written to disk → `multimodal: 1/1 image(s) attached` → model vision `success` (a 2000+ token reply describing the image) → reply delivered.
+
+**Two disciplines this case adds**:
+
+5. **A silent `catch { return null }` is a prime-suspect anti-pattern.** It hides the real error and leaves you staring at "no reaction". For this class of bug, **step one is to add a log line to the catch** and let the error speak — here, one resend after that pinpointed it.
+6. **When behavior doesn't match the latest code, suspect version drift first.** The same bug may already be fixed upstream while your deployment runs an old build. Compare `cat node_modules/<pkg>/package.json` version against `npm view <pkg>@preview version` — often a one-second giveaway.
+
+**Image-recognition checklist**: ① a vision-capable model (MiniMax-M3 / Claude Sonnet / …); ② the node's `flags.modelImageCapable=true`; ③ an agent-network version that includes the [#324](https://github.com/sleep2agi/agent-network/pull/324) download fix (use a recent enough preview). With all three, images are recognized on send.

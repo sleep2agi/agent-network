@@ -116,3 +116,30 @@
 2. **最小可复现优先。** 一段绕开整个产品栈的独立脚本，往往一下就把范围劈成两半（是平台/网络问题，还是自己代码问题）。
 3. **先把环境清到「只有一个变量」。** 多个孤儿连接、多份残留配置会让现象漂移、误导判断。
 4. **`deny` 这类「被自己拒掉」的日志，要主动去 grep。** 「没反应」既可能是「没收到」，也可能是「收到了被拒」，两者排查方向完全不同。
+
+## 同源案例：图片识别不了
+
+几天后又踩一个**症状相似、纪律相通**的坑，值得一起记。
+
+**现象**：给 bot 发图片，它回「`[agent-node] 收到事件但没有可处理的文本/图片内容`」。文字消息一切正常，唯独图片不认。
+
+**又是三次误判**（同样的毛病）：先怀疑「用户发的是转发卡片不是直接图」，再怀疑「app 缺图片下载权限」，再怀疑「模型不支持 vision」——全凭症状猜，没有证据。
+
+**决定性诊断**：
+1. 用独占连接的探针抓飞书**原始事件**，确认 `msg_type=image`、带合法 `image_key` ——**是直接图片，前两个猜测推翻**。
+2. 关键一步：worker 的图片下载函数是 `catch { return null }`，**把所有下载错误都吞了**，所以日志里什么都看不到。给这个 `catch` **注入一行错误日志**后再发图，立刻抓到：
+
+```
+[feishu:image] … downloadImage threw: X.on is not a function
+```
+
+**根因**：飞书 SDK（lark node-sdk v1.68）的 `im.messageResource.get()` 返回的是一个**包装对象**（有 `.getReadableStream()` / `.writeFile()` 方法），**不是**可以直接 `.on("data")` 的原始流。旧版 worker 直接对它调 `.on()` → 抛错 → 被 `catch` 吞掉 → 图片字节读不出 → 当成「没有内容」。
+
+**修复**：`const stream = resp.getReadableStream()` 再 `stream.on("data", …)`。一行之差。这正是官方 [PR #324](https://github.com/sleep2agi/agent-network/pull/324)（`fix(#179 image): downloadImage SDK misuse`）已经修过的——**踩坑的容器跑的是 #324 之前的旧版本**（如 `2.2.22-preview.2`）。升级到含修复的 preview 即根治。修后实测：图片落盘 → `multimodal: 1/1 image(s) attached` → 模型 vision 推理 `success`（出 2000+ token 的看图回复）→ 回复送达，全链路通。
+
+**这个案例补充的两条纪律**：
+
+5. **静默的 `catch { return null }` 是元凶级反模式。** 它把真正的错误藏起来，让你只能盯着「没反应」干瞪眼。排查这类问题，**第一步就是给 catch 加一行日志**，让错误自己说话——本例加完一次发图就定位了。
+6. **行为跟最新代码不符时，先怀疑「版本漂移」。** 同一个 bug 可能官方早修了，你的部署却跑着旧版本。`cat node_modules/<pkg>/package.json` 的 version 跟 `npm view <pkg>@preview version` 对一下，往往一秒看穿。
+
+**图片识别 checklist**：① 模型是 vision-capable（MiniMax-M3 / Claude Sonnet 等）；② 节点 `flags.modelImageCapable=true`；③ agent-network 版本含 [#324](https://github.com/sleep2agi/agent-network/pull/324) 下载修复（用够新的 preview）。三者齐备，发图即识别。
