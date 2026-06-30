@@ -87,9 +87,16 @@ docker compose logs -f feishu-agent         # 跟启动 + 运行日志
 
 > 🧪 **`--profile local-hub` 是自测用**，跑一个一次性本地 hub 容器配合 agent，做隔离 smoke。**默认不启用**，需要时显式 `docker compose --profile local-hub up -d` 且把 `.env` 里 `HUB_URL=http://hub:9200`。日常忽略即可。
 
-### 安全边界（卷只挂 `./data`）
+### 卷映射 + 安全边界（两个子目录）
 
-`docker-compose.yml` 只把 cwd 的 `./data` 子目录映射进容器的 `/work`（而不是整个 cwd）。agent 的 Bash / 完整工具能力**只能写 `./data/` 里**，碰不到主机上的 compose 文件、`.env`、或同级别其他目录——blast radius 严格限定。`.anet/`、节点 channels、SQLite 全部落在 `./data/.anet/`，重建容器状态不丢。
+`docker-compose.yml` 只映射 cwd 的**两个子目录**（不是整个 cwd），blast radius 严格限定——agent 的 Bash / 完整工具碰不到主机上的 compose 文件、`.env`、或其他目录：
+
+| 宿主（cwd 子目录） | 容器 | 装什么 |
+|---|---|---|
+| `./data` | `/work` | 节点配置、channels（`.env` + `access.json`）、logs、SQLite，全在 `./data/.anet/` |
+| `./claude` | `/root/.claude` | claude-agent-sdk **对话历史** `projects/-work/<session>.jsonl` |
+
+两个都重要：`config.json` 里的 `session` 只是 **resume id**（在 `./data`），真正的**对话记录**在 `/root/.claude`（不在 `/work`）。**不挂 `./claude` 的话，重建容器对话历史就丢了 → SDK 没法 resume，报「No conversation found」、bot 忘记之前上下文。** 挂上后，重建 / 升级容器 bot 都能接着之前的记忆聊。两个目录首次 `up` 自动创建。
 
 ### 版本钉死 + 升级
 

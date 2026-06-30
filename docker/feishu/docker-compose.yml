@@ -63,6 +63,15 @@ services:
       # Tighter than `./:/work` — even the compose file and .env stay
       # outside the agent's reach. Auto-created on first up.
       - ./data:/work
+      # `./claude/` persists the claude-agent-sdk conversation history
+      # (~/.claude/projects/-work/<session>.jsonl). The node's resume id
+      # lives in /work/.anet/.../config.json (persisted above), but the
+      # actual conversation transcript lives under /root/.claude — NOT
+      # under /work. Without this mount, recreating the container loses
+      # the transcript: the SDK can't resume → "No conversation found" and
+      # the bot forgets prior context. Sibling subdir of cwd, so the
+      # blast-radius limit still holds (no host escape). Auto-created.
+      - ./claude:/root/.claude
     # No `ports:` by default — the agent connects OUTBOUND to HUB_URL,
     # nothing inbound is needed. (If you enable the local-hub profile
     # below and want to reach the hub from your host, that service
