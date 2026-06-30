@@ -37,6 +37,10 @@ import {
   closeBrowser as closeMarkdownBrowser,
 } from "./markdown-image-renderer.js";
 import { feishuConvKey } from "./outbound-paths.js";
+import {
+  uploadFilesToHubConcurrent,
+  type HubUploadResult,
+} from "./hub-upload.js";
 
 type OnEventHandler = (event: NormalizedIMEvent) => Promise<void>;
 
@@ -682,7 +686,79 @@ async function maybeAttachImages(
     }
   }
   if (localPaths.length > 0) {
-    normalized.content = { ...normalized.content, images: localPaths };
+    // RFC-020 §17 — populate BOTH `images` (legacy string[] paths; old
+    // agent-node workers still read this on a rolling upgrade) AND
+    // `attachments[]` (richer descriptors with `file_id` when the hub
+    // upload succeeded; new agent-node workers prefer this for cross-
+    // machine delegation). Duplication is intentional — IPC two ends
+    // can be at different versions during a deploy window.
+    //
+    // Hub upload is optional: env `COMMHUB_URL` + Bearer token must be
+    // set on the worker process (inherited from the agent-node parent).
+    // When absent / fails / file >12 MiB → descriptor degrades to
+    // path-only and the bridge keeps moving; single-host Read on the
+    // local path still works (no regression). Concurrency capped at 4
+    // so a single message with many images doesn't burst-bomb the hub
+    // rate limit.
+    const hubUrl = process.env.COMMHUB_URL || process.env.ANET_HUB_URL || "";
+    const authToken =
+      process.env.ANET_HUB_TOKEN ||
+      process.env.AUTH_TOKEN ||
+      process.env.COMMHUB_TOKEN ||
+      "";
+    let uploads: (HubUploadResult | null)[] = new Array(localPaths.length).fill(null);
+    if (hubUrl && authToken) {
+      try {
+        uploads = await uploadFilesToHubConcurrent(localPaths, {
+          hubUrl,
+          authToken,
+        });
+      } catch (e: any) {
+        // uploadFilesToHubConcurrent catches per-file failures internally;
+        // a throw at this layer means something more fundamental
+        // (the fetch primitive itself broke). Log + path-only fallback.
+        process.stderr.write(
+          `[feishu:image] ${msgId} hub-upload batch threw: ${e?.message ?? e} (path-only fallback)\n`,
+        );
+      }
+    } else {
+      process.stderr.write(
+        `[feishu:image] ${msgId} hub-upload skipped: COMMHUB_URL or auth token unset (path-only)\n`,
+      );
+    }
+    const attachments = localPaths.map((path, i) => {
+      const up = uploads[i];
+      const out: {
+        type: "image";
+        path: string;
+        file_id?: string;
+        mime?: string;
+        name?: string;
+        size?: number;
+      } = { type: "image", path };
+      if (up) {
+        if (up.file_id) out.file_id = up.file_id;
+        if (up.mime) out.mime = up.mime;
+        if (up.name) out.name = up.name;
+        if (typeof up.size === "number") out.size = up.size;
+      }
+      return out;
+    });
+    // RFC-020 §17 observability — log per-attachment file_id status so
+    // operators can monitor v1 cross-machine reliability (does the agent
+    // actually carry file_id through commhub_send_task?). One line per
+    // image keeps grepping trivial.
+    for (let i = 0; i < attachments.length; i++) {
+      const a = attachments[i];
+      process.stderr.write(
+        `[feishu:image] ${msgId} attachment[${i}] path=${a.path} file_id=${a.file_id || "(none)"} size=${a.size ?? "?"}B\n`,
+      );
+    }
+    normalized.content = {
+      ...normalized.content,
+      images: localPaths, // legacy string[] — DO NOT REMOVE
+      attachments,        // RFC-020 §17 — new field, additive
+    };
   }
 }
 
