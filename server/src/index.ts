@@ -20,6 +20,7 @@ import {
   isPathInsideUploadsRoot,
   sanitizeExt,
   sharedUploadRateLimiter,
+  stripHostLocalPathsForCrossHostSafe,
   validateAttachments,
   validateIndexEntry,
 } from "./uploads.js";
@@ -74,7 +75,12 @@ console.error = (...args: any[]) => { pushLog("error", args); _origConsole.error
 
 function normalizeMetaJson(meta: unknown): string | null {
   if (!meta || typeof meta !== "object") return null;
-  try { return JSON.stringify(meta); } catch { return null; }
+  // #222 cross-host safety — same sanitization as tools.ts so REST
+  // /api/task and MCP send_task produce identical meta_json shapes.
+  // Conditional: only strips `path` when `file_id` is also present
+  // (preserves single-host feishu fallback per [[feedback_assume_unit_before_threshold]]
+  // discipline of not breaking other call sites).
+  try { return JSON.stringify(stripHostLocalPathsForCrossHostSafe(meta)); } catch { return null; }
 }
 
 // ── Rate limiter (in-memory, per IP) ──

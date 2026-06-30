@@ -30,6 +30,7 @@ import {
   vaultUpsert, vaultGet, vaultListKeys, vaultDelete,
   VaultError,
 } from "./vault.js";
+import { stripHostLocalPathsForCrossHostSafe } from "./uploads.js";
 import {
   validateBaseUrl as _validateBaseUrl,
   SUPPORTED_VENDORS,
@@ -63,7 +64,12 @@ function parseMetaJson(value: unknown): unknown | null {
 
 function normalizeMetaJson(meta: unknown): string | null {
   if (!meta || typeof meta !== "object") return null;
-  try { return JSON.stringify(meta); } catch { return null; }
+  // #222 cross-host safety — strip `path` from meta.attachments[] when
+  // `file_id` is also present. Shared helper lives in uploads.ts so the
+  // REST handler in index.ts can apply the identical sanitization
+  // (otherwise REST and MCP transports would have different meta_json
+  // shapes for the same send).
+  try { return JSON.stringify(stripHostLocalPathsForCrossHostSafe(meta)); } catch { return null; }
 }
 
 export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null) {

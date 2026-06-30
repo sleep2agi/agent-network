@@ -2737,14 +2737,49 @@ function think(task: string, from: string, taskId: string | null, images?: strin
   return next;
 }
 
-function extractImagePaths(msg: any): string[] {
+/** #222 cross-host attachment resolution — replaces the legacy
+ *  sync `extractImagePaths`. For each attachment, prefer file_id
+ *  (fetch via hub /api/files/<id>, cache locally, hand temp path
+ *  to LLM); fall back to host-local `path` for single-host setups.
+ *  Drops attachments that fail to resolve (with warn) so a partial
+ *  failure doesn't crash the whole message processing path.
+ *  Filter logic preserved: only image attachments are surfaced
+ *  (matched by `type === "image"` OR `mime` starting "image/").
+ *  Non-image attachments (PDF/docx/etc) are still silently dropped
+ *  today — broader file-type support is a follow-up. */
+async function extractImagePaths(msg: any): Promise<string[]> {
   const meta = msg?.meta || (() => {
     try { return msg?.meta_json ? JSON.parse(msg.meta_json) : null; } catch { return null; }
   })();
   const attachments = Array.isArray(meta?.attachments) ? meta.attachments : [];
-  return attachments
-    .filter((a: any) => a && (a.type === "image" || String(a.mime || "").startsWith("image/")) && typeof a.path === "string" && a.path)
-    .map((a: any) => a.path);
+  const imageAttachments = attachments.filter(
+    (a: any) =>
+      a && typeof a === "object" &&
+      (a.type === "image" || String(a.mime || "").startsWith("image/")) &&
+      (typeof a.file_id === "string" || typeof a.path === "string"),
+  );
+  if (imageAttachments.length === 0) return [];
+  const { resolveAttachmentToLocalPath } = await import("./runtime/fetch-attachment.js");
+  // Cache lives under the user's home, keyed by alias — mirrors
+  // ~/.anet/deleted root chosen by RFC-027 D7 (host-level scope, not
+  // per-cwd, so a node started from a different cwd still hits the
+  // same cache). chmod 700 + chmod 600 enforced in fetch-attachment.ts.
+  const cacheDir = join(home, ".anet", "cache", "attachments", ALIAS || "default");
+  const resolved: string[] = [];
+  for (const a of imageAttachments) {
+    const r = await resolveAttachmentToLocalPath(a, {
+      hubUrl: COMMHUB_URL,
+      authToken: AUTH_TOKEN,
+      cacheDir,
+    });
+    if (r.ok) {
+      log(`[attachment] resolved file_id=${a.file_id || "(none)"} → ${r.localPath} (${r.cached ? "cache hit" : "fetched"} ${r.bytes}B)`);
+      resolved.push(r.localPath);
+    } else {
+      warn(`[attachment] resolve failed (code=${r.code}): ${r.error} — dropping image (file_id=${a.file_id || "?"} path=${a.path || "?"})`);
+    }
+  }
+  return resolved;
 }
 
 async function processTask(task: string, from: string, taskId: string | null = null, images?: string[]): Promise<{ text: string; failed: boolean }> {
@@ -2943,7 +2978,7 @@ async function processInbox() {
       const from = msg.from_session || "hub";
       const content = msg.content as string;
       const msgType = msg.type || "task";
-      const images = extractImagePaths(msg);
+      const images = await extractImagePaths(msg);
       log(`← [${from}] (${msgType}/${msg.priority || "normal"})${images.length ? ` +${images.length} image(s)` : ""} ${content.slice(0, 100)}`);
 
       // Non-task / non-broadcast: ack and move on, nothing to reply to.
@@ -3977,6 +4012,20 @@ if (fileConfig.role === "host_supervisor") {
     }).catch((e: any) => warn(`stop-daemon import for rebuild failed: ${e?.message || e}`));
   }, 3_000);
 }
+// #222 cross-host attachment cache sweeper. Runs on EVERY agent-node
+// (not just host_supervisor) — any agent receiving inbound attachments
+// builds the cache. Idempotent, hourly tick, 24h TTL. unref'd so it
+// never blocks process exit.
+import("./runtime/fetch-attachment.js").then(({ startAttachmentCacheSweeper }) => {
+  const cacheDir = join(home, ".anet", "cache", "attachments", ALIAS || "default");
+  startAttachmentCacheSweeper({
+    cacheDir,
+    log: (m: string) => log(m),
+    warn: (m: string) => warn(m),
+  });
+  log(`[attachment-cache] sweeper started (hourly tick, 24h TTL, dir=${cacheDir})`);
+}).catch((e: any) => warn(`attachment-cache sweeper import failed: ${e?.message || e}`));
+
 if (goalsSchedulerEnabled) {
   setInterval(() => runGoalSchedulerTick().catch(() => {}), GOAL_TICK_MS);
   runGoalSchedulerTick().catch(() => {});
