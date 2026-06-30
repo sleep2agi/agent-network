@@ -17,7 +17,10 @@
 import {
   FEISHU_TEXT_SINGLE_LIMIT,
   splitTextForFeishu,
+  looksLikeMarkdown,
 } from "../src/im/feishu/adapter";
+import { resolveOutboundRoute } from "../src/im/feishu/outbound-route";
+import { shouldRenderAsImage } from "../src/im/feishu/markdown-image-renderer";
 
 const results: Array<{ name: string; pass: boolean; detail?: string }> = [];
 function expect(name: string, pred: boolean, detail = ""): void {
@@ -25,21 +28,14 @@ function expect(name: string, pred: boolean, detail = ""): void {
   if (!pred) console.log(`  ✗ ${name}: ${detail}`);
 }
 
-// ── Helper: build a fake adapter that captures send-route decisions ───────
-// The decision branch lives inside `FeishuAdapter.send`; we simulate the
-// SAME 3-mode switch in a pure function to lock the contract without
-// pulling in the lark SDK + chromium dependency.
+// RFC-020 §16.1 test-teeth hardening: bind the REAL `resolveOutboundRoute`
+// helper (extracted from adapter.ts). The pre-extraction version of this
+// test had a sibling `pickRoute` copy that would silently drift if the
+// production decision tree changed — bind to the real one so changes
+// trip a red test.
 //
-// IMPORTANT: this fake mirrors adapter.ts:240-326 line-for-line on the
-// branch conditions. Any change in the production switch must be reflected
-// here AND the in-container UAT (separate, post-deploy) must continue to
-// pass. See PR body for the post-deploy probe plan.
-
-import { looksLikeMarkdown } from "../src/im/feishu/adapter";
-
-// Re-import shouldRenderAsImage indirectly via what adapter.ts imports.
-import { shouldRenderAsImage } from "../src/im/feishu/markdown-image-renderer";
-
+// `pickRoute` is now a thin adapter that maps the real helper's route
+// enum to the legacy `msgType` shape the test assertions key on.
 type Decision =
   | { msgType: "text"; reason: string }
   | { msgType: "interactive"; reason: string }
@@ -53,28 +49,28 @@ function pickRoute(opts: {
   forceTextOnly?: boolean;
   mode: "plain" | "card" | "auto";
 }): Decision {
-  // Step 0: attachment priority (always wins over text-render mode).
-  if (opts.imagePath) return { msgType: "image", reason: "imagePath upload" };
-  if (opts.files && opts.files.length > 0 && opts.files[0].path) {
-    return { msgType: "file", reason: "files[0] upload" };
+  const d = resolveOutboundRoute({
+    text: opts.text,
+    imagePath: opts.imagePath,
+    files: opts.files,
+    forceTextOnly: opts.forceTextOnly,
+    mode: opts.mode,
+  });
+  // Map the route enum to the msgType the existing assertions use.
+  // image_upload → "image", file_upload → "file", text → "text",
+  // card_short_md → "interactive", image_render → "image" (PNG path
+  // still produces msg_type:image at the API level).
+  switch (d.route) {
+    case "image_upload":
+    case "image_render":
+      return { msgType: "image", reason: d.reason };
+    case "file_upload":
+      return { msgType: "file", reason: d.reason };
+    case "card_short_md":
+      return { msgType: "interactive", reason: d.reason };
+    case "text":
+      return { msgType: "text", reason: d.reason };
   }
-  const text = opts.text ?? "";
-  // Step 1: caption-mode override.
-  if (opts.forceTextOnly) return { msgType: "text", reason: "forceTextOnly hint" };
-  // Step 2: mode switch.
-  if (opts.mode === "plain") {
-    return { msgType: "text", reason: "plain mode → text always" };
-  }
-  if (opts.mode === "card") {
-    if (looksLikeMarkdown(text) && !shouldRenderAsImage(text)) {
-      return { msgType: "interactive", reason: "card mode + short markdown → schema 1.0 card" };
-    }
-    return { msgType: "text", reason: "card mode + heading/table/long → plain text (NOT PNG)" };
-  }
-  // auto
-  if (shouldRenderAsImage(text)) return { msgType: "image", reason: "auto + heading/table/long → PNG" };
-  if (looksLikeMarkdown(text)) return { msgType: "interactive", reason: "auto + short markdown → card" };
-  return { msgType: "text", reason: "auto + plain → text" };
 }
 
 // ── 1. Default mode is "plain" — Vincent's UAT case ────────────────────────

@@ -31,9 +31,19 @@ function expect(name: string, pred: boolean, detail = ""): void {
   if (!pred) console.log(`  ✗ ${name}: ${detail}`);
 }
 
-// Mirror the parsing logic in agent-node/src/cli.ts feishu IPC handler.
-// Any change to that logic MUST be reflected here AND the live in-container
-// probe (post-deploy). Keep these two in lockstep.
+// RFC-020 §17.1 test-teeth: bind the REAL helper extracted from
+// agent-node/src/cli.ts. The function lives at
+// `agent-node/src/runtime/feishu-envelope.ts` and is shared by the
+// production IPC handler. A test reaching across the package boundary
+// is a pragmatic choice — the alternative (publishing
+// agent-node/runtime as a separate subpackage just for tests) is
+// over-engineered for one helper. The dev-time monorepo layout makes
+// the import path stable.
+import { buildAttachmentDescriptors } from "../../agent-node/src/runtime/feishu-envelope";
+
+// `IncomingEnvelopeShape` matches the wire shape the helper accepts.
+// Kept here in test-only form so callers don't need to import the
+// envelope type AND the helper.
 interface IncomingEnvelopeShape {
   content?: {
     text?: string;
@@ -49,29 +59,10 @@ interface IncomingEnvelopeShape {
   };
 }
 
-function buildAttachmentDescriptors(ev: IncomingEnvelopeShape): Array<{
-  path: string;
-  file_id?: string;
-  mime?: string;
-  name?: string;
-  size?: number;
-}> {
-  const fromAttachments = Array.isArray(ev.content?.attachments)
-    ? ev.content.attachments
-        .filter((a: any) => a && typeof a.path === "string" && a.path.length > 0)
-        .map((a: any) => ({
-          path: a.path as string,
-          file_id: typeof a.file_id === "string" ? a.file_id : undefined,
-          mime: typeof a.mime === "string" ? a.mime : undefined,
-          name: typeof a.name === "string" ? a.name : undefined,
-          size: typeof a.size === "number" ? a.size : undefined,
-        }))
-    : [];
-  if (fromAttachments.length > 0) return fromAttachments;
-  const legacy = Array.isArray(ev.content?.images) ? ev.content.images : [];
-  return legacy
-    .filter((p: any): p is string => typeof p === "string" && p.length > 0)
-    .map((p: string) => ({ path: p }));
+// Adapter to keep the existing test shape — helper now accepts the
+// `content` object directly, so unwrap `ev.content` for callers.
+function buildAttachmentDescriptorsFromEvent(ev: IncomingEnvelopeShape) {
+  return buildAttachmentDescriptors(ev.content);
 }
 
 // ── 1. Legacy envelope (old bridge): `images: string[]` only ──────────────
@@ -84,7 +75,7 @@ function buildAttachmentDescriptors(ev: IncomingEnvelopeShape): Array<{
       images: ["/work/feishu-attachments/feishu-local/oc_x/y.jpg"],
     },
   };
-  const desc = buildAttachmentDescriptors(env);
+  const desc = buildAttachmentDescriptorsFromEvent(env);
   expect("legacy: 1 descriptor", desc.length === 1);
   expect("legacy: path preserved", desc[0].path === "/work/feishu-attachments/feishu-local/oc_x/y.jpg");
   expect("legacy: no file_id (older worker can't compute it)", desc[0].file_id === undefined);
@@ -110,7 +101,7 @@ function buildAttachmentDescriptors(ev: IncomingEnvelopeShape): Array<{
       ],
     },
   };
-  const desc = buildAttachmentDescriptors(env);
+  const desc = buildAttachmentDescriptorsFromEvent(env);
   expect("new-only: 1 descriptor", desc.length === 1);
   expect("new-only: file_id present", desc[0].file_id === "abc123def456");
   expect("new-only: mime present", desc[0].mime === "image/jpeg");
@@ -138,7 +129,7 @@ function buildAttachmentDescriptors(ev: IncomingEnvelopeShape): Array<{
       ],
     },
   };
-  const desc = buildAttachmentDescriptors(env);
+  const desc = buildAttachmentDescriptorsFromEvent(env);
   expect("both: 1 descriptor (from attachments, not duplicated)", desc.length === 1);
   expect("both: file_id from attachments takes precedence", desc[0].file_id === "abc123def456");
   expect("both: mime from attachments", desc[0].mime === "image/jpeg");
@@ -168,7 +159,7 @@ function buildAttachmentDescriptors(ev: IncomingEnvelopeShape): Array<{
       ],
     },
   };
-  const desc = buildAttachmentDescriptors(env);
+  const desc = buildAttachmentDescriptorsFromEvent(env);
   expect("partial: 2 descriptors", desc.length === 2);
   expect("partial: first has file_id", desc[0].file_id === "good1");
   expect("partial: second missing file_id (graceful)", desc[1].file_id === undefined);
@@ -179,13 +170,13 @@ function buildAttachmentDescriptors(ev: IncomingEnvelopeShape): Array<{
 
 {
   const env: IncomingEnvelopeShape = { content: { text: "hi" } };
-  const desc = buildAttachmentDescriptors(env);
+  const desc = buildAttachmentDescriptorsFromEvent(env);
   expect("empty content: 0 descriptors", desc.length === 0);
 }
 
 {
   const env: IncomingEnvelopeShape = {};
-  const desc = buildAttachmentDescriptors(env);
+  const desc = buildAttachmentDescriptorsFromEvent(env);
   expect("missing content: 0 descriptors", desc.length === 0);
 }
 
@@ -204,7 +195,7 @@ function buildAttachmentDescriptors(ev: IncomingEnvelopeShape): Array<{
       ],
     },
   };
-  const desc = buildAttachmentDescriptors(env);
+  const desc = buildAttachmentDescriptorsFromEvent(env);
   expect("malformed-filter: 2 valid descriptors", desc.length === 2);
   expect("malformed-filter: first /valid/path", desc[0].path === "/valid/path");
   expect("malformed-filter: second /valid/another with file_id", desc[1].file_id === "ok123abc");
@@ -218,7 +209,7 @@ function buildAttachmentDescriptors(ev: IncomingEnvelopeShape): Array<{
       images: ["/valid/path", null as any, "" as any, 42 as any, "/other/path"],
     },
   };
-  const desc = buildAttachmentDescriptors(env);
+  const desc = buildAttachmentDescriptorsFromEvent(env);
   expect("legacy-filter: 2 valid", desc.length === 2);
   expect("legacy-filter: order preserved", desc[0].path === "/valid/path" && desc[1].path === "/other/path");
 }
@@ -234,7 +225,7 @@ function buildAttachmentDescriptors(ev: IncomingEnvelopeShape): Array<{
       ],
     },
   };
-  const desc = buildAttachmentDescriptors(env);
+  const desc = buildAttachmentDescriptorsFromEvent(env);
   expect("mixed types: 2 descriptors (file + image)", desc.length === 2);
   expect("mixed types: file_id preserved on both", desc[0].file_id === "i1234567" && desc[1].file_id === "f1234567");
 }
@@ -279,7 +270,7 @@ const SCENARIOS = [
 ];
 
 for (const s of SCENARIOS) {
-  const desc = buildAttachmentDescriptors(s.env);
+  const desc = buildAttachmentDescriptorsFromEvent(s.env);
   expect(
     `${s.label}: path resolved`,
     JSON.stringify(desc.map((d) => d.path)) === JSON.stringify(s.expectPaths),

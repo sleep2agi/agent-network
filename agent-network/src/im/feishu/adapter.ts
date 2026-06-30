@@ -41,6 +41,7 @@ import {
   uploadFilesToHubConcurrent,
   type HubUploadResult,
 } from "./hub-upload.js";
+import { resolveOutboundRoute } from "./outbound-route.js";
 
 type OnEventHandler = (event: NormalizedIMEvent) => Promise<void>;
 
@@ -205,9 +206,29 @@ export class FeishuAdapter implements IMAdapter {
     let msgType: "text" | "image" | "interactive" | "file";
     let content: string;
 
-    if (message.imagePath) {
+    // RFC-020 §16.1 — decision tree extracted into `resolveOutboundRoute`
+    // (pure helper). Single source of truth for choosing image_upload /
+    // file_upload / text / card_short_md / image_render. The route is
+    // decided here; the side-effects (lark uploads / chromium render /
+    // JSON shape) live below, keyed on the route.
+    //
+    // CALLER CONTRACT: any change to the decision tree goes in
+    // `outbound-route.ts`. The unit tests bind against that helper
+    // directly (no more mirror copy in the test file — they'd drift
+    // silently).
+    const renderMode = this.feishuConfig?.outboundRender ?? "plain";
+    const candidateText = message.text ?? message.markdown ?? "";
+    const decision = resolveOutboundRoute({
+      text: candidateText,
+      imagePath: message.imagePath,
+      files: message.files,
+      forceTextOnly: message.forceTextOnly,
+      mode: renderMode,
+    });
+
+    if (decision.route === "image_upload") {
       // Caller-supplied image path takes precedence over text/markdown.
-      const imageKey = await uploadImage(this.client, message.imagePath);
+      const imageKey = await uploadImage(this.client, message.imagePath!);
       if (!imageKey) {
         throw new Error(
           `FeishuAdapter.send: image upload failed for ${message.imagePath}`,
@@ -215,18 +236,9 @@ export class FeishuAdapter implements IMAdapter {
       }
       msgType = "image";
       content = JSON.stringify({ image_key: imageKey });
-    } else if (
-      message.files &&
-      message.files.length > 0 &&
-      message.files[0]?.path
-    ) {
-      // Caller-supplied file path → upload + send msg_type:file
-      // (Vincent "给用户发文件" use case, 通信龙 3f70044c).
-      const file = message.files[0];
-      if (!file.path) {
-        throw new Error("FeishuAdapter.send: files[0].path required");
-      }
-      const fileKey = await uploadFile(this.client, file.path, file.name);
+    } else if (decision.route === "file_upload") {
+      const file = message.files![0];
+      const fileKey = await uploadFile(this.client, file.path!, file.name);
       if (!fileKey) {
         throw new Error(
           `FeishuAdapter.send: file upload failed for ${file.path}`,
@@ -235,100 +247,50 @@ export class FeishuAdapter implements IMAdapter {
       msgType = "file";
       content = JSON.stringify({ file_key: fileKey });
     } else {
-      const text = message.text ?? message.markdown;
-      if (!text) {
+      // Text-derived routes (text / card_short_md / image_render) all
+      // require `candidateText` to be non-empty.
+      if (!candidateText) {
         throw new Error(
           "FeishuAdapter.send: requires text, markdown, imagePath, or files",
         );
       }
-
-      // RFC-020 §16 outbound render mode + caption-mode priority. Three
-      // decision branches, in priority order (top wins):
-      //   1. `forceTextOnly` (caption-mode, set by bridge when this is
-      //      a caption alongside attachments) → plain text, always.
-      //   2. config `outboundRender` mode:
-      //      - "plain"  (DEFAULT) → always msg_type:text, chunked if long.
-      //                Vincent 2026-06-30 ask: "issue 发文字"; default
-      //                value when access.json / env unset.
-      //      - "card"   → schema 1.0 card iff text looks like short
-      //                markdown, plain text otherwise. Never PNG.
-      //      - "auto"   → pre-2026-06-30 behavior preserved byte-identical
-      //                (heading/table/>2000 → PNG; short markdown → card;
-      //                else text). Highest fidelity, opt-in only.
-      //   3. (else, default-default) plain text. Cannot be reached given
-      //      step 2's exhaustive enum, but kept as a safety floor.
-      const renderMode = this.feishuConfig?.outboundRender ?? "plain";
-
-      // Step 1: caption-mode override (always plain regardless of mode).
-      if (message.forceTextOnly) {
+      if (decision.route === "text") {
         msgType = "text";
-        content = JSON.stringify({ text });
-      } else if (renderMode === "plain") {
-        // Step 2a: plain mode — ALWAYS msg_type:text. If text exceeds
-        // a conservative chunk size the bridge would have to chunk
-        // multiple sends; for the first cut we send a single message
-        // because Feishu's text content limit is generous (~30 KB JSON,
-        // ~10 KB practical) and is well above typical agent replies.
-        // Truncation never falls back to PNG — that would defeat the
-        // mode's whole point. Length monitoring + chunking is the next
-        // step if a real reply hits the limit.
-        msgType = "text";
-        content = JSON.stringify({ text });
-      } else if (renderMode === "card") {
-        // Step 2b: card mode — short markdown via schema 1.0 `markdown`
-        // element (bold/list/link/inline-code render, text stays
-        // copyable). Heading/table/long fall back to PLAIN TEXT — never
-        // PNG. Operator opted out of fidelity, kept light formatting.
-        if (looksLikeMarkdown(text) && !shouldRenderAsImage(text)) {
-          msgType = "interactive";
-          content = JSON.stringify({
-            config: { wide_screen_mode: true },
-            elements: [{ tag: "markdown", content: text }],
-          });
-        } else {
-          msgType = "text";
-          content = JSON.stringify({ text });
-        }
-      } else if (renderMode === "auto") {
-        // Step 2c: auto mode — preserves the pre-2026-06-30 behavior
-        // byte-identical so opt-in operators get the #329 fidelity path.
-        // DO NOT TUNE without bumping the mode's contract.
-        if (shouldRenderAsImage(text)) {
-          try {
-            const png = await renderMarkdownToPng(text);
-            const imageKey = await uploadImageBuffer(this.client, png);
-            if (!imageKey) {
-              throw new Error("uploadImageBuffer returned null");
-            }
-            msgType = "image";
-            content = JSON.stringify({ image_key: imageKey });
-          } catch (e: any) {
-            // Fallback to schema 1.0 card if rendering or upload fails —
-            // user still sees the text, just without true table render.
-            process.stderr.write(
-              `[feishu:adapter] markdown-image render failed, falling back to card: ${e?.message ?? e}\n`,
-            );
-            msgType = "interactive";
-            content = JSON.stringify({
-              config: { wide_screen_mode: true },
-              elements: [{ tag: "markdown", content: text }],
-            });
+        content = JSON.stringify({ text: candidateText });
+      } else if (decision.route === "card_short_md") {
+        msgType = "interactive";
+        content = JSON.stringify({
+          config: { wide_screen_mode: true },
+          elements: [{ tag: "markdown", content: candidateText }],
+        });
+      } else if (decision.route === "image_render") {
+        // #329 fidelity path — render markdown to PNG via headless
+        // chromium and send through Feishu's image API. Fallback to
+        // schema 1.0 card on render / upload failure so the user
+        // still sees the text just without true table render.
+        try {
+          const png = await renderMarkdownToPng(candidateText);
+          const imageKey = await uploadImageBuffer(this.client, png);
+          if (!imageKey) {
+            throw new Error("uploadImageBuffer returned null");
           }
-        } else if (looksLikeMarkdown(text)) {
+          msgType = "image";
+          content = JSON.stringify({ image_key: imageKey });
+        } catch (e: any) {
+          process.stderr.write(
+            `[feishu:adapter] markdown-image render failed, falling back to card: ${e?.message ?? e}\n`,
+          );
           msgType = "interactive";
           content = JSON.stringify({
             config: { wide_screen_mode: true },
-            elements: [{ tag: "markdown", content: text }],
+            elements: [{ tag: "markdown", content: candidateText }],
           });
-        } else {
-          msgType = "text";
-          content = JSON.stringify({ text });
         }
       } else {
-        // Default-default (unreachable given outboundRender enum). Plain
-        // text is the safest floor — copy-friendly, no chromium burden.
+        // Defensive — resolveOutboundRoute's enum is exhaustive but
+        // a future addition that isn't wired here would land in `text`.
         msgType = "text";
-        content = JSON.stringify({ text });
+        content = JSON.stringify({ text: candidateText });
       }
     }
 

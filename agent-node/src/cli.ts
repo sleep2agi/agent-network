@@ -28,6 +28,7 @@ import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
 import { checkFeishuToolDeny, isFeishuChannelTurn } from "./feishu-tool-deny";
+import { buildAttachmentDescriptors } from "./runtime/feishu-envelope";
 import {
   isVendorErrorForUser,
   isTransientVendorError,
@@ -3393,36 +3394,13 @@ function wireFeishuChildHandlers(
     // the try/catch around each branch guarantees exactly-one outbound.
     (async () => {
       const baseContent = ev.content?.text ?? "";
-      // RFC-020 §17 — prefer the new `attachments` field (carries file_id
-      // for cross-machine delegation) over the legacy `images` field.
-      // Both are populated by current bridges; older bridges only ship
-      // `images` (string[] of paths). Build a unified descriptor list
-      // here so the prompt builder is single-shape.
-      const attachmentDescriptors: Array<{
-        path: string;
-        file_id?: string;
-        mime?: string;
-        name?: string;
-        size?: number;
-      }> = (() => {
-        const fromAttachments = Array.isArray(ev.content?.attachments)
-          ? ev.content.attachments
-              .filter((a: any) => a && typeof a.path === "string" && a.path.length > 0)
-              .map((a: any) => ({
-                path: a.path as string,
-                file_id: typeof a.file_id === "string" ? a.file_id : undefined,
-                mime: typeof a.mime === "string" ? a.mime : undefined,
-                name: typeof a.name === "string" ? a.name : undefined,
-                size: typeof a.size === "number" ? a.size : undefined,
-              }))
-          : [];
-        if (fromAttachments.length > 0) return fromAttachments;
-        // Older bridge (legacy worker): fall back to `images: string[]`.
-        const legacy = Array.isArray(ev.content?.images) ? ev.content.images : [];
-        return legacy
-          .filter((p: any): p is string => typeof p === "string" && p.length > 0)
-          .map((p: string) => ({ path: p }));
-      })();
+      // RFC-020 §17.1 test-teeth extract: single source of truth in
+      // `runtime/feishu-envelope.ts`. The helper prefers the new
+      // `attachments[]` shape (carries file_id) over legacy
+      // `images: string[]` and filters malformed entries defensively.
+      // Unit test binds the same function — change the helper, the
+      // test runs against the change.
+      const attachmentDescriptors = buildAttachmentDescriptors(ev.content);
       const images = attachmentDescriptors.length > 0
         ? attachmentDescriptors.map((a) => a.path)
         : undefined;
