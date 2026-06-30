@@ -173,6 +173,14 @@ anet channel ls
 `access.json` is **not hot-reloaded** — after every edit you must `anet node stop <node>` + `anet node start <node>` (for the Docker path, `docker compose restart <node-service>`). The bridge reads `access.json` into memory once at startup.
 :::
 
+::: danger Switching Feishu apps — a guaranteed trap: open_id / chat_id are per-app
+Feishu's `open_id` (user identity) and `chat_id` (conversation) are **scoped per app** — **the same person has a completely different `open_id` under a different app.** So after switching apps, the old IDs in `access.json` **all become invalid**, and every message hits "sender not in allowlist" and is silently denied.
+
+When switching apps, update **all three** places: ① `FEISHU_APP_ID` / `FEISHU_APP_SECRET` in the node env / deployment ② the channel `.env` ③ **`allowFrom` / `allowChats` in `access.json`** (most often missed).
+
+Classic symptom of missing the third: **`client ready` is fine, events arrive, yet the user's messages get "no reaction."** Full post-mortem → [Case Study: Feishu Silent Deny](/en/troubleshooting/case-feishu-silent-deny).
+:::
+
 ## 6. Group `@bot` mechanics
 
 Two steps for the bot to work in a group:
@@ -287,7 +295,10 @@ export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 | WSClient can't connect to Feishu | App not approved / wrong credentials / network issue — the bridge auto-reconnects; check stderr |
 | Bot doesn't reply in a group | 1) Bot is added to the group with send permissions 2) `access.json` `allowChats` includes the target `chat_id` 3) `/open-apis/bot/v3/info` is returning a valid `open_id` 4) After editing `access.json`, did you restart the node? (Not hot-reloaded — see §5) |
 | Bot doesn't reply in a DM | Verify the sender's `open_id` is in `allowFrom` (run `anet channel ls`) |
+| **Connected, events arrive, but messages get "no reaction"** | **grep the bridge stderr for `deny` / `allowFrom`**: message received but sender not in allowlist. **Most common after switching apps** (`open_id` changed per app — see the §5 danger note) |
 | Bot replies seem wrong / errors out on an image | The backend isn't vision-capable (§4) — switch to a vision-capable model |
+
+Diagnostic mnemonic (narrow by layer): ① no `client ready` in the log = can't reach the Feishu long-connection domain → change network; ② `client ready` but zero events = console event subscription not wired (missing `im.message.receive_v1` / not long-connection mode / version not published); ③ `client ready`, events arrive, but no reply = denied at the application layer, grep `deny` / `allowFrom`. Full post-mortem → [Case Study: Feishu Silent Deny](/en/troubleshooting/case-feishu-silent-deny).
 
 ## 10. Known limitations (preview scope)
 
