@@ -302,7 +302,11 @@ async function sweepOrphansForAlias(
   reason: string,
 ): Promise<void> {
   try {
-    const { execSync, readFileSync } = await import("node:child_process") as any as { execSync: (cmd: string, opts: any) => string };
+    // SHOULD-FIX nit (PR #349 ack): drop the unused `readFileSync` from
+    // this destructure — it's exported by node:fs, not node:child_process,
+    // and the actual reads go through `fs.readFileSync` from the
+    // separate import on the next line. Was a copy-paste leftover.
+    const { execSync } = await import("node:child_process") as any as { execSync: (cmd: string, opts: any) => string };
     const fs = await import("node:fs");
     // PR1.1 cmdlineMatchesAlias-style verification: regex pgrep first
     // (cheap shortlist), then /proc/<pid>/cmdline argv-adjacency

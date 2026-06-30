@@ -140,6 +140,18 @@ describe("handleStopDoorbell — happy stop (SIGTERM-reaped quickly)", () => {
     expect(acks[0].args.exit_signal).toBe("SIGTERM");
     expect(fakeSignals.some(s => s.sig === "SIGTERM")).toBe(true);
     expect(fakeSignals.some(s => s.sig === "SIGKILL")).toBe(false);
+    // PR1.2 BUG-B regression lock (通信龙 PR #349 ack SHOULD-FIX): the
+    // pgid kill fix uses `signalProcess(-entry.pid, sig)` — POSIX
+    // `kill -pgid` semantics — to reach the wrapper's whole process
+    // group including detached agent-node grandchildren. A silent
+    // revert to bare-PID (`signalProcess(entry.pid, sig)`) would
+    // re-introduce the orphan-grandchild leak. Lock the contract here:
+    // for every SIGTERM/SIGKILL on a live child, at least one signal
+    // must target a NEGATIVE pid (the recorded wrapper's pgid). e2e
+    // (qa-rfc027-stop-delete) proves it on real procs; this test
+    // proves the wire shape so the docker harness isn't the only gate.
+    expect(fakeSignals.some(s => s.pid < 0)).toBe(true);
+    expect(fakeSignals.filter(s => s.pid < 0).some(s => s.sig === "SIGTERM")).toBe(true);
     // Map cleared on successful stop.
     expect(getChildrenSnapshot().length).toBe(0);
   });

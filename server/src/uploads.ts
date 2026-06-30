@@ -241,6 +241,42 @@ export type TaskAttachment = {
   size?: number;
 };
 
+/**
+ * #222 cross-host attachment safety — strip `path` from meta.attachments
+ * entries that ALSO carry a `file_id`. Reason: the hub's /api/upload
+ * returns `{file_id, path}` where `path` is a hub-machine-local
+ * absolute path. Senders sometimes echo `path` back into meta.attachments.
+ * When the receiving agent runs on a different host (Vincent 2026-06-30
+ * toodadev2 case), that path string is meaningless. agent-node's
+ * fetch-attachment.ts will fetch via `file_id` regardless, but leaving
+ * the stale `path` in the JSON misleads any tooling that reads it.
+ *
+ * CRITICAL — conditional, not unconditional (通信龙 PR #222 pre-review
+ * nit): feishu-bridge currently writes `/work/feishu-attachments/<conn>/
+ * <chat>/` directly and ships path-only attachments (NO file_id). If we
+ * strip path unconditionally those break too. Only strip when file_id
+ * is present (the "safe to drop" signal). Single-host feishu fallback
+ * preserved.
+ *
+ * Shared by tools.ts (MCP send_task) and index.ts (REST /api/task) so
+ * both transports apply the same sanitization to meta.
+ */
+export function stripHostLocalPathsForCrossHostSafe(meta: any): any {
+  if (!meta || typeof meta !== "object") return meta;
+  if (!Array.isArray((meta as any).attachments)) return meta;
+  let mutated = false;
+  const sanitized = (meta as any).attachments.map((a: any) => {
+    if (a && typeof a === "object" && typeof a.file_id === "string" && a.file_id && typeof a.path === "string") {
+      mutated = true;
+      const { path: _stripped, ...rest } = a;
+      return rest;
+    }
+    return a;
+  });
+  if (!mutated) return meta;
+  return { ...meta, attachments: sanitized };
+}
+
 /** Light validator usable from the REST handler. Returns null on success or an error message string. */
 export function validateAttachments(input: unknown): { ok: true; attachments: TaskAttachment[] } | { ok: false; error: string } {
   if (input === undefined || input === null) return { ok: true, attachments: [] };

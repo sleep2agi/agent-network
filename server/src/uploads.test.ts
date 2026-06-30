@@ -312,3 +312,69 @@ describe("indexEntryPath", () => {
     expect(p).toBe(`/srv/up/.index/${id}.json`);
   });
 });
+
+import { stripHostLocalPathsForCrossHostSafe } from "./uploads";
+
+describe("stripHostLocalPathsForCrossHostSafe (#222 cross-host attachment safety)", () => {
+  test("strips path when file_id is present (cross-host safe — agent will fetch via /api/files/<id>)", () => {
+    const meta = {
+      attachments: [
+        { type: "file", file_id: "abc12345", path: "/home/hub/uploads/abc12345.png", mime: "image/png" },
+      ],
+      otherKey: "preserved",
+    };
+    const out = stripHostLocalPathsForCrossHostSafe(meta);
+    expect(out.attachments[0]).toEqual({ type: "file", file_id: "abc12345", mime: "image/png" });
+    expect(out.attachments[0].path).toBeUndefined();
+    expect(out.otherKey).toBe("preserved");
+  });
+
+  test("PRESERVES path when file_id is absent (feishu single-host fallback)", () => {
+    // 🔴 通信龙 PR #222 pre-review nit — feishu-bridge ships path-only
+    // attachments (writes /work/feishu-attachments/...). If we strip
+    // unconditionally those break too. Lock the conditional contract.
+    const meta = {
+      attachments: [
+        { type: "file", path: "/work/feishu-attachments/feishu-local/oc_xxx/img.jpg", mime: "image/jpeg" },
+      ],
+    };
+    const out = stripHostLocalPathsForCrossHostSafe(meta);
+    expect(out.attachments[0].path).toBe("/work/feishu-attachments/feishu-local/oc_xxx/img.jpg");
+    expect(out.attachments[0].file_id).toBeUndefined();
+  });
+
+  test("mixed array: strips path on entries with file_id, preserves on path-only entries", () => {
+    const meta = {
+      attachments: [
+        { type: "file", file_id: "id1xxxxx", path: "/hub/local/id1.png", mime: "image/png" },
+        { type: "file", path: "/work/feishu-attachments/x.jpg", mime: "image/jpeg" },
+        { type: "file", file_id: "id2yyyyy", mime: "image/gif" },                            // already path-free
+      ],
+    };
+    const out = stripHostLocalPathsForCrossHostSafe(meta);
+    expect(out.attachments[0]).toEqual({ type: "file", file_id: "id1xxxxx", mime: "image/png" });
+    expect(out.attachments[1]).toEqual({ type: "file", path: "/work/feishu-attachments/x.jpg", mime: "image/jpeg" });
+    expect(out.attachments[2]).toEqual({ type: "file", file_id: "id2yyyyy", mime: "image/gif" });
+  });
+
+  test("no-op when meta has no attachments array", () => {
+    const meta = { something: "else" };
+    expect(stripHostLocalPathsForCrossHostSafe(meta)).toBe(meta);
+  });
+
+  test("no-op when nothing to strip (returns SAME object reference, not a copy)", () => {
+    const meta = { attachments: [{ type: "file", file_id: "x12345xx", mime: "image/png" }] };
+    expect(stripHostLocalPathsForCrossHostSafe(meta)).toBe(meta);
+  });
+
+  test("handles null / non-object meta gracefully", () => {
+    expect(stripHostLocalPathsForCrossHostSafe(null)).toBe(null);
+    expect(stripHostLocalPathsForCrossHostSafe(undefined as any)).toBe(undefined);
+    expect(stripHostLocalPathsForCrossHostSafe("string" as any)).toBe("string");
+  });
+
+  test("handles non-array attachments field gracefully", () => {
+    const meta = { attachments: "not-an-array" };
+    expect(stripHostLocalPathsForCrossHostSafe(meta)).toBe(meta);
+  });
+});
