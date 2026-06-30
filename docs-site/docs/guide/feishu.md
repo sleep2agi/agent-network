@@ -173,6 +173,14 @@ anet channel ls
 `access.json` **不热加载**——改完一定要 `anet node stop <node>` + `anet node start <node>`（Docker 路径下 `docker compose restart <node-service>`）。bridge 启动时一次性把 access.json 读进内存。
 :::
 
+::: danger 换飞书 App 必踩：open_id / chat_id 按 App 隔离
+飞书的 `open_id`（用户身份）和 `chat_id`（会话）都是**按 App 隔离**的——**同一个人，在不同 App 下 `open_id` 完全不同**。所以换 App 后，`access.json` 里存的旧 ID **全部失效**，每条消息都会命中「发件人不在白名单」被静默拒收。
+
+换 App 时**三处**都要同步改：① 节点环境 / 部署里的 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` ② channel 的 `.env` ③ **`access.json` 的 `allowFrom` / `allowChats`**（最容易漏）。
+
+漏第三处的典型症状：**`client ready` 正常、能看到事件、但用户消息「毫无反应」**。完整复盘见 → [经典案例：飞书 Bot 静默拒收](/troubleshooting/case-feishu-silent-deny)。
+:::
+
 ## 6. 群 @ 机制
 
 bot 要在群里能用，**两步**：
@@ -287,7 +295,10 @@ export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 | WSClient 连不上飞书 | App 未 approve / 凭证写错 / 网络问题 — bridge 会自动重连，看 stderr |
 | 群里 @bot 不响应 | 1) bot 已加群且有发言权限 2) `access.json` `allowChats` 含目标 `chat_id` 3) `/open-apis/bot/v3/info` 是否返回有效 `open_id` 4) 改完 `access.json` 是否 restart 过节点（不热加载，见 §5） |
 | 私聊不响应 | `open_id` 是否在 `allowFrom` 内（`anet channel ls` 看一下） |
+| **连上了、有事件、但消息「没反应」** | bridge stderr **grep `deny` / `allowFrom`**：消息收到了但发件人不在白名单。**换 App 后最常见**（`open_id` 按 App 变了，见 §5 危险提示） |
 | 收到图片 bot 答非所问 / 报错 | 后端不是 vision-capable（见 §4）—— 切到支持 vision 的 model |
+
+诊断口诀（按层收窄）：① 日志无 `client ready` = 网络连不上飞书长连接域名 → 换网络；② 有 `client ready` 但零事件 = 飞书后台事件订阅没配对（漏 `im.message.receive_v1` / 没设长连接 / 没发布版本）；③ 有 `client ready`、有事件、但不回 = 应用层拒了，grep `deny` / `allowFrom`。完整复盘 → [经典案例：飞书 Bot 静默拒收](/troubleshooting/case-feishu-silent-deny)。
 
 ## 10. 已知限制（preview scope）
 
