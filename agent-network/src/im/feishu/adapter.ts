@@ -238,55 +238,161 @@ export class FeishuAdapter implements IMAdapter {
         );
       }
 
-      // Caption mode (RFC-020 §15.2): when the bridge is sending sibling
-      // attachment files in the same dispatch, this text is a caption —
-      // skip the heavy markdown→PNG render path so the user doesn't see
-      // "another picture" alongside the actual file.
+      // RFC-020 §16 outbound render mode + caption-mode priority. Three
+      // decision branches, in priority order (top wins):
+      //   1. `forceTextOnly` (caption-mode, set by bridge when this is
+      //      a caption alongside attachments) → plain text, always.
+      //   2. config `outboundRender` mode:
+      //      - "plain"  (DEFAULT) → always msg_type:text, chunked if long.
+      //                Vincent 2026-06-30 ask: "issue 发文字"; default
+      //                value when access.json / env unset.
+      //      - "card"   → schema 1.0 card iff text looks like short
+      //                markdown, plain text otherwise. Never PNG.
+      //      - "auto"   → pre-2026-06-30 behavior preserved byte-identical
+      //                (heading/table/>2000 → PNG; short markdown → card;
+      //                else text). Highest fidelity, opt-in only.
+      //   3. (else, default-default) plain text. Cannot be reached given
+      //      step 2's exhaustive enum, but kept as a safety floor.
+      const renderMode = this.feishuConfig?.outboundRender ?? "plain";
+
+      // Step 1: caption-mode override (always plain regardless of mode).
       if (message.forceTextOnly) {
         msgType = "text";
         content = JSON.stringify({ text });
-      } else if (shouldRenderAsImage(text)) {
-        // Heading / table / long content — Feishu card markdown element
-        // can't render these. Render to PNG via headless chromium and
-        // send through the image API (needs im:resource:upload scope).
-        try {
-          const png = await renderMarkdownToPng(text);
-          const imageKey = await uploadImageBuffer(this.client, png);
-          if (!imageKey) {
-            throw new Error("uploadImageBuffer returned null");
-          }
-          msgType = "image";
-          content = JSON.stringify({ image_key: imageKey });
-        } catch (e: any) {
-          // Fallback to schema 1.0 card if rendering or upload fails —
-          // user still sees the text, just without true table render.
-          process.stderr.write(
-            `[feishu:adapter] markdown-image render failed, falling back to card: ${e?.message ?? e}\n`,
-          );
+      } else if (renderMode === "plain") {
+        // Step 2a: plain mode — ALWAYS msg_type:text. If text exceeds
+        // a conservative chunk size the bridge would have to chunk
+        // multiple sends; for the first cut we send a single message
+        // because Feishu's text content limit is generous (~30 KB JSON,
+        // ~10 KB practical) and is well above typical agent replies.
+        // Truncation never falls back to PNG — that would defeat the
+        // mode's whole point. Length monitoring + chunking is the next
+        // step if a real reply hits the limit.
+        msgType = "text";
+        content = JSON.stringify({ text });
+      } else if (renderMode === "card") {
+        // Step 2b: card mode — short markdown via schema 1.0 `markdown`
+        // element (bold/list/link/inline-code render, text stays
+        // copyable). Heading/table/long fall back to PLAIN TEXT — never
+        // PNG. Operator opted out of fidelity, kept light formatting.
+        if (looksLikeMarkdown(text) && !shouldRenderAsImage(text)) {
           msgType = "interactive";
           content = JSON.stringify({
             config: { wide_screen_mode: true },
             elements: [{ tag: "markdown", content: text }],
           });
+        } else {
+          msgType = "text";
+          content = JSON.stringify({ text });
         }
-      } else if (looksLikeMarkdown(text)) {
-        // Short markdown — keep text copyable via schema 1.0 card
-        // `markdown` element. preview.7 path.
-        msgType = "interactive";
-        content = JSON.stringify({
-          config: { wide_screen_mode: true },
-          elements: [{ tag: "markdown", content: text }],
-        });
+      } else if (renderMode === "auto") {
+        // Step 2c: auto mode — preserves the pre-2026-06-30 behavior
+        // byte-identical so opt-in operators get the #329 fidelity path.
+        // DO NOT TUNE without bumping the mode's contract.
+        if (shouldRenderAsImage(text)) {
+          try {
+            const png = await renderMarkdownToPng(text);
+            const imageKey = await uploadImageBuffer(this.client, png);
+            if (!imageKey) {
+              throw new Error("uploadImageBuffer returned null");
+            }
+            msgType = "image";
+            content = JSON.stringify({ image_key: imageKey });
+          } catch (e: any) {
+            // Fallback to schema 1.0 card if rendering or upload fails —
+            // user still sees the text, just without true table render.
+            process.stderr.write(
+              `[feishu:adapter] markdown-image render failed, falling back to card: ${e?.message ?? e}\n`,
+            );
+            msgType = "interactive";
+            content = JSON.stringify({
+              config: { wide_screen_mode: true },
+              elements: [{ tag: "markdown", content: text }],
+            });
+          }
+        } else if (looksLikeMarkdown(text)) {
+          msgType = "interactive";
+          content = JSON.stringify({
+            config: { wide_screen_mode: true },
+            elements: [{ tag: "markdown", content: text }],
+          });
+        } else {
+          msgType = "text";
+          content = JSON.stringify({ text });
+        }
       } else {
-        // Plain text — existing path, no behavior change.
+        // Default-default (unreachable given outboundRender enum). Plain
+        // text is the safest floor — copy-friendly, no chromium burden.
         msgType = "text";
         content = JSON.stringify({ text });
       }
     }
 
+    // RFC-020 §16 chunking: for msg_type:text whose payload exceeds the
+    // per-message threshold, split at paragraph/line boundaries and send
+    // sequentially. Each chunk is delivered as its own Feishu text
+    // message; subsequent chunks reply-thread to the first so they read
+    // as one cohesive answer. Caller's `replyToMessageId` chains the
+    // first chunk to the inbound user message (preserves Feishu root_id).
+    //
+    // Returns the FIRST sent messageId (the chunked dispatch is still
+    // one logical reply from the bridge's perspective).
+    //
+    // Chunking ONLY fires for plain text — image / file / interactive
+    // card paths each take one upload + one send and aren't subject to
+    // the per-message char limit in the same way.
+    const replyTo = message.replyToMessageId ?? message.target.threadRootId;
+    const receive_id_type =
+      message.target.conversationType === "dm" ? "open_id" : "chat_id";
+
+    if (msgType === "text") {
+      const rawText: string = JSON.parse(content).text ?? "";
+      const chunks = splitTextForFeishu(rawText, FEISHU_TEXT_SINGLE_LIMIT);
+      let firstMessageId = "";
+      let currentReplyTo = replyTo;
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkContent = JSON.stringify({ text: chunks[i] });
+        let messageId: string | undefined;
+        if (currentReplyTo) {
+          const resp = await this.client.im.message.reply({
+            path: { message_id: currentReplyTo },
+            data: { msg_type: "text", content: chunkContent },
+          });
+          messageId = resp?.data?.message_id;
+        } else {
+          const resp = await this.client.im.message.create({
+            params: { receive_id_type },
+            data: {
+              receive_id: message.target.conversationId,
+              msg_type: "text",
+              content: chunkContent,
+            },
+          });
+          messageId = resp?.data?.message_id;
+        }
+        if (!messageId) {
+          throw new Error(
+            `FeishuAdapter.send: text chunk ${i + 1}/${chunks.length} returned no message_id`,
+          );
+        }
+        if (i === 0) {
+          firstMessageId = messageId;
+          // Subsequent chunks thread under the FIRST chunk's message_id —
+          // gives Feishu's reply UI a clean cohesive thread per logical
+          // bot reply.
+          currentReplyTo = firstMessageId;
+        }
+      }
+      if (chunks.length > 1) {
+        process.stderr.write(
+          `[feishu:adapter] sent text reply as ${chunks.length} chunks (total ${rawText.length} chars)\n`,
+        );
+      }
+      return { messageId: firstMessageId };
+    }
+
     // Threaded reply when the message references an upstream message_id.
     // im.message.reply preserves the thread context (Feishu root_id).
-    const replyTo = message.replyToMessageId ?? message.target.threadRootId;
     if (replyTo) {
       const resp = await this.client.im.message.reply({
         path: { message_id: replyTo },
@@ -299,8 +405,6 @@ export class FeishuAdapter implements IMAdapter {
       return { messageId };
     }
 
-    const receive_id_type =
-      message.target.conversationType === "dm" ? "open_id" : "chat_id";
     const resp = await this.client.im.message.create({
       params: { receive_id_type },
       data: {
@@ -793,6 +897,58 @@ async function downloadImage(
     process.stderr.write(`[feishu:image] ${messageId} downloadImage threw: code=${errCode} msg=${errMsg}\n`);
     return null;
   }
+}
+
+/**
+ * Feishu text-message practical chunk threshold (RFC-020 §16).
+ *
+ * The official `im.message.create`/`reply` content limit for
+ * `msg_type:text` is ~30 KB JSON-encoded (`{"text":"..."}`), comfortably
+ * under what any reasonable bot reply produces. We chunk below that
+ * limit at 4000 CHARACTERS — gives a roomy safety margin for multi-byte
+ * UTF-8 and lets us split at paragraph boundaries cleanly. Chosen
+ * conservatively after Vincent 2026-06-30 ask "issue 发文字" (i.e.
+ * never silently fall back to PNG for "long" plain-text replies — they
+ * just chunk into multiple messages).
+ *
+ * Single-message ceiling, NOT a per-second rate limit (that's separate;
+ * RFC-020 §4.4).
+ */
+export const FEISHU_TEXT_SINGLE_LIMIT = 4000;
+
+/**
+ * Split a long text into chunks ≤ `maxChars`. Tries paragraph boundaries
+ * (`\n\n`), then line boundaries (`\n`), then word boundaries (space),
+ * then hard byte split. Output preserves the original text content
+ * (sum of chunks == original, modulo the boundary character that gets
+ * consumed by the split).
+ *
+ * If the input is already short enough, returns a single-element array.
+ */
+export function splitTextForFeishu(text: string, maxChars: number): string[] {
+  if (text.length <= maxChars) return [text];
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > maxChars) {
+    // Prefer paragraph boundary within the window
+    let cut = remaining.lastIndexOf("\n\n", maxChars);
+    if (cut < 0 || cut < maxChars * 0.5) {
+      // No good paragraph boundary; try line boundary
+      cut = remaining.lastIndexOf("\n", maxChars);
+    }
+    if (cut < 0 || cut < maxChars * 0.5) {
+      // No good line boundary; try word boundary
+      cut = remaining.lastIndexOf(" ", maxChars);
+    }
+    if (cut < 0 || cut < maxChars * 0.3) {
+      // No good word boundary; hard split.
+      cut = maxChars;
+    }
+    chunks.push(remaining.slice(0, cut).replace(/[\s]+$/, ""));
+    remaining = remaining.slice(cut).replace(/^[\s]+/, "");
+  }
+  if (remaining.length > 0) chunks.push(remaining);
+  return chunks;
 }
 
 async function uploadImage(
