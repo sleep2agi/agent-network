@@ -189,8 +189,11 @@ await test("1. happy path: placeholder send → reply IPC → reply send (new me
   assert.equal((adapter.sendCalls[1] as { text: string }).text, "real reply");
   const log = stderrLog.join("");
   assert.ok(log.includes("placeholder sent (messageId=mock-send-1)"));
+  // PR #335 introduced multi-message dispatch (text + attachments); the
+  // text-leg log line now reads "reply text sent" (vs the original
+  // "reply sent") to disambiguate from attachment-side outbound logs.
   assert.ok(
-    log.includes("reply sent (messageId=mock-send-2) (after placeholder=mock-send-1)"),
+    log.includes("reply text sent (messageId=mock-send-2) (after placeholder=mock-send-1)"),
     "reply log must include 'after placeholder' note",
   );
 });
