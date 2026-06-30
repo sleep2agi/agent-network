@@ -304,8 +304,9 @@ export ANET_FEISHU_WORKER_PATH=/path/to/your/worker.js
 | 私聊不响应 | `open_id` 是否在 `allowFrom` 内（`anet channel ls` 看一下） |
 | **连上了、有事件、但消息「没反应」** | bridge stderr **grep `deny` / `allowFrom`**：消息收到了但发件人不在白名单。**换 App 后最常见**（`open_id` 按 App 变了，见 §5 危险提示） |
 | 收到图片 bot 答非所问 / 报错 | 后端不是 vision-capable（见 §4）—— 切到支持 vision 的 model |
+| **发图片 bot 回「收到事件但没有可处理的文本/图片内容」** | 图片**没被抠出来**，两种根因依次排：① 节点没开图片能力（`flags.modelImageCapable` 默认不设，见 §4）② **下载失败**——日志看 `[feishu:image] … download FAILED`，最常见是**旧版本的 `downloadImage` SDK 误用 bug**（[#324](https://github.com/sleep2agi/agent-network/pull/324)，`2.2.22-preview.2` 等旧版带），升级到含修复的 preview 即根治。详见 [经典案例 · 同源篇](/troubleshooting/case-feishu-silent-deny#同源案例图片识别不了) |
 
-诊断口诀（按层收窄）：① 日志无 `client ready` = 网络连不上飞书长连接域名 → 换网络；② 有 `client ready` 但零事件 = 飞书后台事件订阅没配对（漏 `im.message.receive_v1` / 没设长连接 / 没发布版本）；③ 有 `client ready`、有事件、但不回 = 应用层拒了，grep `deny` / `allowFrom`。完整复盘 → [经典案例：飞书 Bot 静默拒收](/troubleshooting/case-feishu-silent-deny)。
+诊断口诀（按层收窄）：① 日志无 `client ready` = 网络连不上飞书长连接域名 → 换网络；② 有 `client ready` 但零事件 = 飞书后台事件订阅没配对（漏 `im.message.receive_v1` / 没设长连接 / 没发布版本）；③ 有 `client ready`、有事件、但不回 = 应用层拒了，grep `deny` / `allowFrom`；④ 发图无反应 = 图片没抠出来，查 `modelImageCapable` flag + 下载是否失败（旧版本 bug，升级）。完整复盘 → [经典案例：飞书 Bot 静默拒收](/troubleshooting/case-feishu-silent-deny)。
 
 ## 10. 已知限制（preview scope）
 
