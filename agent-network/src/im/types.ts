@@ -84,9 +84,38 @@ export interface NormalizedIMEvent {
 
   content: {
     text?: string;
-    /** Local filesystem paths to already-downloaded images. */
+    /** Local filesystem paths to already-downloaded images.
+     *
+     *  RFC-020 §17 backward-compat shim: the new richer
+     *  `attachments[]` field below is the canonical source going
+     *  forward. `images` stays a `string[]` of paths so an older
+     *  agent-node worker reading this envelope across a rolling
+     *  upgrade doesn't crash. New workers prefer `attachments`,
+     *  old workers ignore it and keep using `images`. */
     images?: string[];
     files?: { name: string; path?: string; url?: string }[];
+    /** RFC-020 §17 cross-machine attachment descriptors.
+     *
+     *  Each entry mirrors `meta.attachments[]` on commhub tasks
+     *  (`{ type, file_id?, path?, mime?, name?, size? }`). The
+     *  feishu bridge populates `file_id` by uploading inbound
+     *  files to `/api/upload` so cross-host agents delegated via
+     *  `commhub_send_task(meta.attachments=...)` can fetch via
+     *  `/api/files/<id>`. When upload fails, `file_id` is absent
+     *  and the descriptor degrades to path-only (single-host
+     *  still works via local Read; no regression vs pre-fix
+     *  baseline).
+     *
+     *  Always populated alongside `images` for the same files —
+     *  duplication is intentional for rolling-upgrade safety. */
+    attachments?: Array<{
+      type: "image" | "file";
+      path?: string;
+      file_id?: string;
+      mime?: string;
+      name?: string;
+      size?: number;
+    }>;
   };
 
   /**
