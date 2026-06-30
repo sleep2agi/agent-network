@@ -48,7 +48,12 @@ See `.env.example` for the full annotated list (verified vendor + model combos, 
 
 ## Where state lives
 
-Only the `./data/` subdirectory is mounted into the container (hard volume constraint per agent-network maintainers — limits the agent's blast radius to that subdir). The agent writes its node config, logs, goals, and per-channel `.env` / `access.json` under `./data/.anet/`. Everything else on your host is unreachable from inside the agent.
+Two subdirectories of cwd are mounted (still a hard blast-radius limit — the agent cannot reach anywhere else on the host):
+
+- **`./data/` → `/work`** — node config, logs, goals, and per-channel `.env` / `access.json` under `./data/.anet/`.
+- **`./claude/` → `/root/.claude`** — the claude-agent-sdk **conversation history** (`projects/-work/<session>.jsonl`). The resume id is in `config.json` under `./data/`, but the actual transcript lives here. Without this mount, recreating the container loses the transcript and the bot can't resume prior context ("No conversation found").
+
+Everything else on your host is unreachable from inside the agent. Both dirs are auto-created on first `up`.
 
 ## Versions
 

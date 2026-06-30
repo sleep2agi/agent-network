@@ -87,9 +87,16 @@ The `.env.example` file ships annotated comments with verified vendor + model co
 
 > 🧪 **`--profile local-hub` is self-test only.** It runs a throwaway local hub container alongside the agent for an isolated smoke test. **Off by default** — you have to explicitly `docker compose --profile local-hub up -d` and set `HUB_URL=http://hub:9200` in `.env`. Ignore it for daily use.
 
-### Safety boundary (volume mount is `./data` only)
+### Volume mapping + safety boundary (two subdirectories)
 
-`docker-compose.yml` mounts **only the `./data` subdirectory** of cwd into the container's `/work` (not the entire cwd). The agent's Bash / full tool capabilities **can only write under `./data/`** — the compose file itself, the `.env` file, and sibling directories on the host are all unreachable. Blast radius is strictly bounded. The node config, logs, goals, and per-channel `.env` / `access.json` all live under `./data/.anet/`, so persistence survives container recreate but the agent cannot escape.
+`docker-compose.yml` mounts **only two subdirectories** of cwd (not the entire cwd), so the blast radius stays strictly bounded — the agent's Bash / full tools cannot reach the compose file, the `.env`, or any other host directory:
+
+| Host (cwd subdir) | Container | What's stored |
+|---|---|---|
+| `./data` | `/work` | Node config, channels (`.env` + `access.json`), logs, SQLite — all under `./data/.anet/` |
+| `./claude` | `/root/.claude` | claude-agent-sdk **conversation history** `projects/-work/<session>.jsonl` |
+
+Both matter: the `session` field in `config.json` is only the **resume id** (under `./data`); the actual **conversation transcript** lives under `/root/.claude` (not `/work`). **Without the `./claude` mount, recreating the container loses the transcript → the SDK can't resume → "No conversation found" and the bot forgets prior context.** With it, the bot keeps its memory across container recreate / upgrade. Both dirs are auto-created on first `up`.
 
 ### Pinned versions + upgrades
 
