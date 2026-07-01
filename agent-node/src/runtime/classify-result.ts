@@ -27,6 +27,8 @@
 import {
   isRateLimitOrQuotaError,
   quotaRemediationHint,
+  extractQuotaCode,
+  extractVendorQuotaPhrase,
 } from "./claude-error-classify";
 
 export type ClassificationKind =
@@ -143,6 +145,20 @@ export function classifyRuntimeResult(
  * classification. Centralised so the message shape stays consistent
  * across runtimes (the upstream caller / IM bridge / dashboard parse
  * the prefix `执行出错:` to flag failure rows).
+ *
+ * §20 (2026-07-01 Vincent case): promote vendor-native quota codes
+ * and phrases into the user-facing text. Historically the message
+ * read `执行出错: ... 限流/配额耗尽 (<truncated raw>) — → 检查
+ * platform.X.com 配额`, which buried the actual vendor wording under
+ * `(...80 chars)`. Users reported it as a generic bot bug rather than
+ * a billing signal. New shape passes the vendor's own Chinese phrase
+ * (`已达到 Token Plan 用量上限`) through verbatim + tags the specific
+ * code (e.g. MiniMax 2056) when known.
+ *
+ * For `soft-fail-empty` we ALSO hint at the outbound-mask log — if the
+ * request contained a credential literal the vendor may have silently
+ * filtered it into `out>0 result=""`. The mask log is greppable, so
+ * operators can correlate. Independent of any single vendor quirk.
  */
 export function formatClassificationError(
   c: ClassificationResult,
@@ -151,10 +167,39 @@ export function formatClassificationError(
   const inT = context.usage?.input_tokens ?? 0;
   const outT = context.usage?.output_tokens ?? 0;
   switch (c.kind) {
-    case "soft-fail-quota":
-      return `执行出错: ${context.runtime} 限流/配额耗尽 (${(c.reason || "").slice(0, 80)})${c.hint ? ` — ${c.hint}` : ""}`;
+    case "soft-fail-quota": {
+      // §20 — friendly Chinese prefix + vendor phrase pass-through +
+      // known code tag. If no vendor phrase is extractable, fall back
+      // to the truncated raw reason.
+      const raw = c.reason || "";
+      const phrase = extractVendorQuotaPhrase(raw);
+      const code = extractQuotaCode(raw);
+      const codeTag = code ? ` [${code}]` : "";
+      const body =
+        phrase ??
+        raw.slice(0, 200); // fall back to raw when no known phrase
+      return `执行出错: [额度用尽]${codeTag} ${context.runtime}: ${body}${c.hint ? ` — ${c.hint}` : ""}`;
+    }
     case "soft-fail-empty":
-      return `执行出错: ${context.runtime} 返回空响应 (in=${inT} out=${outT}) — 疑似 vendor 静默限流/配额. ${c.hint || ""}`.trim();
+      // §20 — soft-fail-empty is subtler: the vendor said "success"
+      // but returned nothing. Common causes (in order):
+      //   1. Content filter fired on a credential literal in the
+      //      request (Vincent PAT case — content filter drops
+      //      response but marks 200 OK).
+      //   2. Silent throttle at the vendor's format-conversion layer
+      //      (MiniMax /anthropic gateway occasionally does this).
+      //   3. Model produced only reasoning/thinking blocks with no
+      //      text content (reasoning-heavy prompt + inadequate
+      //      max_tokens).
+      // We surface all three as hints so operators can triage without
+      // guessing.
+      return (
+        `执行出错: ${context.runtime} 返回空响应 (in=${inT} out=${outT}). ` +
+        `可能原因: (a) vendor 内容过滤 (请求含 credential 字面, 见 [outbound-mask] 日志) ` +
+        `(b) 静默限流/配额撞顶 (查 vendor dashboard 用量) ` +
+        `(c) 模型仅生成 reasoning/thinking 无 text (加大 max_tokens 或换 prompt). ` +
+        `${c.hint || ""}`.trim()
+      );
     case "error":
       return `执行出错: ${context.runtime} — ${(c.reason || "未知错误").slice(0, 200)}`;
     case "success":
