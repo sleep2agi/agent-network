@@ -218,16 +218,27 @@ function resolveAlias(): { value: string; source: string } {
 }
 const { value: ALIAS, source: ALIAS_SOURCE } = resolveAlias();
 if (ALIAS && fileConfig.alias && fileConfig.alias !== ALIAS) {
-  // #203 — sanity check: anet node start writes `--alias displayName` AND
+  // #203 — sanity check: `anet node start` writes `--alias displayName` AND
   // loads config.json. If the two disagree, the config has stale data (from
   // a copy/template/rename mishap) and any code path that ends up trusting
-  // config.json.alias instead of the flag would mis-attribute. Loud warn
-  // + bias toward --alias (already the highest-priority source above).
-  console.warn(
-    `[agent-node] ⚠ #203 alias mismatch: --alias="${ALIAS}" but ` +
+  // config.json.alias instead of the flag would mis-attribute. The server-side
+  // identity guard now rejects such mismatched report_status, so continuing
+  // past this point would just wedge the node's heartbeat + surface confusing
+  // `alias_identity_mismatch` errors instead of a clear early failure. An
+  // escape hatch `ANET_ALLOW_ALIAS_MISMATCH=1` remains for the rare legacy
+  // fix-forward run (mostly test / rescue scaffolds); the default is
+  // hard-fail so a mis-attributing spawn does not launch silently.
+  const msg =
+    `[agent-node] #203 alias mismatch: --alias="${ALIAS}" but ` +
     `${configFilePath || "config.json"}.alias="${fileConfig.alias}". ` +
-    `Using "${ALIAS}" (--alias wins). Fix the config file to silence this.`,
-  );
+    `Fix the config file (or set --alias to match) before starting the node.`;
+  if (process.env.ANET_ALLOW_ALIAS_MISMATCH === "1") {
+    console.warn(`${msg} (ANET_ALLOW_ALIAS_MISMATCH=1 → continuing with "${ALIAS}")`);
+  } else {
+    console.error(msg);
+    console.error(`[agent-node] Set ANET_ALLOW_ALIAS_MISMATCH=1 to bypass (not recommended).`);
+    process.exit(2);
+  }
 }
 
 if (!opts.config && ALIAS) {
