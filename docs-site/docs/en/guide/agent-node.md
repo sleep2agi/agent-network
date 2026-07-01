@@ -372,6 +372,41 @@ Goals are persisted in `~/.anet/nodes/<alias>/goals.json` and restored automatic
 
 Scheduler tick frequency is controlled by `ANET_GOAL_TICK_MS` (env) or `flags.goalTickMs` in config.json, default 30 seconds. A goal's `interval_ms` can never be more precise than the tick — a 5-second interval still effectively wakes every 30s. Lower the tick if you need finer granularity.
 
+#### Agent self-management: 6 self-scoped tools (RFC-025)
+
+In addition to external `anet node loop` / `/loop`, an agent can call 6 self-scoped tools during a task response to manage **its own** loops without human intervention:
+
+| Tool | Meaning |
+|---|---|
+| `list_my_loops` | List all of the agent's active/paused loops |
+| `create_my_loop` | Create a new loop |
+| `edit_my_loop` | Change task / interval / schedule / paused |
+| `reschedule_my_loop` | One-shot push next_wake_at (interval unchanged) |
+| `complete_my_loop` | Archive as achieved (`status=complete`) |
+| `cancel_my_loop` | Permanent abandon (`status=cancelled`) |
+
+None of the 6 tools take an `alias` argument — by construction they are physically isolated to the per-node `goalStore`, so an agent can never address another node's loops.
+
+**Runtime tool availability** — this is a key claude vs. codex/grok difference:
+
+- **codex-sdk / grok-build-acp**: agent-node exposes the tools on a localhost HTTP MCP server (bearer-token-protected) at startup. **Tools are callable at any time** — during task response, during a loop wake, at any turn of the subprocess.
+- **claude-agent-sdk**: tools are attached to `processWithClaude`'s tool surface via an in-process SDK MCP server. They are **only callable within a task response lifecycle** (i.e. during `processTask`).
+
+What this means for claude users:
+
+> **A loop wake triggers `processTask` → the tools become available immediately → the agent can call `create_my_loop("next step")` or `complete_my_loop(this)` in the same response** — the loop is closed-loop, because loop wakes themselves flow through `processTask`.
+>
+> But when the agent is **completely idle** (not processing any task), claude has **no tool context**. So you cannot externally trigger a "let the agent decide autonomously whether to create a loop" scenario the way you can with codex/grok — you need to first send a task (via `anet node loop` or a direct `send_task`) to wake the agent up.
+
+**codex/grok are always-on** — the tools are callable by the subprocess whenever the LLM decides to reference them, from any turn onwards, right after agent-node starts. This is a natural consequence of the architectural choice: codex/grok use out-of-process HTTP MCP, claude uses in-process SDK MCP. It's not a gap or a bug.
+
+**Safety guardrails** are consistent across runtimes (all three runtimes share the same `goalStore` + counter state):
+
+- Default **20 active goals per node** cap (override with `COMMHUB_MAX_GOALS_PER_NODE`)
+- Same goal can only be edited **once per 30-second cooldown** (anti-recursion)
+- ≥ 3 cancels within 30s → the 4th triggers confirm-back; the agent must ask the user and re-call with a `confirm_token`
+- On create/edit: **preflight** the cron-lite schedule — semantically invalid schedules (bad timezone, etc.) are rejected before write to prevent self-lock
+
 ### Message Type Filtering
 
 Agent Node only triggers AI processing for `task` type messages:
