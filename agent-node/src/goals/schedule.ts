@@ -93,9 +93,23 @@ function parseTime(s: string): { hour: number; minute: number } {
  * an allowed day, treat as "just fired" and skip to the next eligible
  * day. Avoids immediate re-fire after the wake we just triggered.
  *
- * DST: if the target wall-clock time doesn't exist on a given day
- * (spring-forward skip), we advance to the next day's target. This
- * matches standard cron behaviour.
+ * DST spring-forward (spring): if the target wall-clock time doesn't
+ * exist on a given day (the clock jumps 02:00 → 03:00, skipping 02:30
+ * entirely), we advance to the next day's target. Matches standard
+ * cron behaviour.
+ *
+ * DST fall-back (autumn): the ambiguous window (US: 01:00-01:59 EDT
+ * repeated as 01:00-01:59 EST) resolves to the FIRST occurrence — the
+ * pre-fallback EDT branch. The second occurrence (post-fallback EST)
+ * is treated as "just fired today" and skipped to the next eligible
+ * day, giving one-fire-per-day semantics.
+ *
+ * The reason for picking the first occurrence: interval regularity.
+ * If a daily 01:30 goal fires N times per year, on fall-back day it
+ * fires once (the first 01:30). Otherwise it would either fire twice
+ * (breaking daily-once semantics) or fire at 01:30 EST which would
+ * shift the perceived clock time from the user's set 01:30 to a
+ * 1-hour-later instant relative to the day before.
  */
 function nextWallClock(
   now: Date,
@@ -151,58 +165,57 @@ function wallClockParts(d: Date, tz: string): {
  * minute) in `tz`. Returns null if that local time doesn't exist
  * (DST spring-forward gap).
  *
- * Approach: try an approximate UTC anchor, check if its wall-clock in
- * tz round-trips to the expected (h, m, d). If not (DST skip), bail.
+ * Approach: probe the tz offset at a naive UTC anchor, shift once,
+ * and verify. If the first shift lands in a different DST branch than
+ * the target (fall-back day, post-fallback local times), the second
+ * probe corrects it. Two iterations suffice for standard 1-hour DST
+ * transitions; a third check that still fails signals a genuine
+ * spring-forward gap and returns null.
+ *
+ * Fall-back ambiguous window: when the requested wall-clock occurs
+ * twice (e.g. 01:30 US Eastern on fall-back day), the first shift
+ * from the naive UTC probe lands in the pre-transition branch (EDT).
+ * That branch verifies immediately and is returned, giving the FIRST
+ * occurrence. Skipping the second occurrence to the next eligible day
+ * is nextWallClock's job (boundary "target <= now" check).
  */
 function makeInstant(
   year: number, month: number, day: number,
   hour: number, minute: number, tz: string,
 ): Date | null {
-  // Start with a naive UTC instant for the requested wall-clock.
-  // Then adjust by the offset between UTC and tz at that instant.
-  const naive = Date.UTC(year, month - 1, day, hour, minute, 0);
-  // Look up TZ offset at `naive` by formatting and parsing back.
-  const probe = new Date(naive);
-  const probeParts = wallClockParts(probe, tz);
-  // The naive UTC instant's wall-clock IN tz tells us tz offset
-  // implicitly. Compute the diff between requested h:m and what tz
-  // shows for this UTC instant, then shift the UTC instant.
-  const probeAsTzMinutes = probeParts.day * 24 * 60 + 0; // we don't have h/m yet
-  // Need hour/minute of `probe` in `tz`. Fetch them.
   const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, hour12: false, hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric",
+    timeZone: tz, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
   });
-  const p = fmt.formatToParts(probe);
-  const getN = (t: string) => parseInt(p.find((x) => x.type === t)?.value || "0", 10);
-  const tzHour = getN("hour") % 24;  // Intl can return "24" for midnight in some locales
-  const tzMinute = getN("minute");
-  const tzDay = getN("day");
-  const tzMonth = getN("month");
-  const tzYear = getN("year");
-
-  // Compute the offset: requested wall-clock minus tz wall-clock at
-  // the naive instant. If offset is N minutes, the real UTC instant
-  // is naive - (tz - requested) minutes... but watch out for date
-  // wrap. Simpler: compute the difference between the requested
-  // wall-clock-as-UTC and probe-tz-as-UTC.
+  const verifyMatch = (utcMs: number): boolean => {
+    const vp = fmt.formatToParts(new Date(utcMs));
+    const v = (t: string) => parseInt(vp.find((x) => x.type === t)?.value || "0", 10);
+    if (v("year") !== year || v("month") !== month || v("day") !== day) return false;
+    if (v("hour") % 24 !== hour || v("minute") !== minute) return false;
+    return true;
+  };
+  // "shift needed" = (requested wall-clock as if UTC) minus (tz
+  // wall-clock at anchor, as if UTC). Adding this shift to the anchor
+  // moves us toward the correct UTC instant.
   const requestedAsIfUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
-  const probeTzAsIfUtc = Date.UTC(tzYear, tzMonth - 1, tzDay, tzHour, tzMinute, 0);
-  const offsetMs = requestedAsIfUtc - probeTzAsIfUtc;
-  // The real UTC instant corresponding to (year, month, day, hour, minute) in tz
-  // is the naive UTC instant adjusted by offsetMs.
-  const candidate = new Date(naive + offsetMs);
+  const shiftNeeded = (utcMs: number): number => {
+    const p = fmt.formatToParts(new Date(utcMs));
+    const g = (t: string) => parseInt(p.find((x) => x.type === t)?.value || "0", 10);
+    const tzY = g("year"), tzM = g("month"), tzD = g("day");
+    const tzH = g("hour") % 24, tzMin = g("minute");
+    const tzAsIfUtc = Date.UTC(tzY, tzM - 1, tzD, tzH, tzMin, 0);
+    return requestedAsIfUtc - tzAsIfUtc;
+  };
 
-  // Validate round-trip: if the candidate's wall-clock in tz doesn't
-  // match the request, the requested time doesn't exist in tz
-  // (DST spring-forward gap). Return null in that case.
-  const verifyFmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, hour12: false, hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric",
-  });
-  const vp = verifyFmt.formatToParts(candidate);
-  const v = (t: string) => parseInt(vp.find((x) => x.type === t)?.value || "0", 10);
-  if (v("year") !== year || v("month") !== month || v("day") !== day) return null;
-  if (v("hour") % 24 !== hour || v("minute") !== minute) return null;
-  return candidate;
-  // Note: void unused intermediate.
-  void probeAsTzMinutes;
+  const naive = requestedAsIfUtc;
+  // Iteration 1: probe offset at naive UTC, shift once.
+  const candidate1 = naive + shiftNeeded(naive);
+  if (verifyMatch(candidate1)) return new Date(candidate1);
+  // Iteration 2: on DST transition days the first shift lands in the
+  // wrong branch (offset differs at candidate1 vs at naive). Re-probe.
+  const candidate2 = candidate1 + shiftNeeded(candidate1);
+  if (verifyMatch(candidate2)) return new Date(candidate2);
+  // Still mismatched after 2 iterations = spring-forward gap.
+  return null;
 }
