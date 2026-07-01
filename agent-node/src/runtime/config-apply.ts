@@ -271,7 +271,7 @@ export function buildConfigSnapshot(
   };
   // Self-declare nested under daemon_capabilities — only emit fields
   // when valid (typeof + Array.isArray narrow per
-  // [[feedback_typeof_narrow_extracted_fields]]; don't trust user JSON).
+  // per team rule: any typed scalar extracted from untrusted JSON must be typeof-narrowed at the boundary; don't trust user JSON).
   const caps: DaemonCapabilities = {};
   const rt = fileConfig?.runtimes_supported;
   if (Array.isArray(rt) && rt.every((s: unknown) => typeof s === "string")) {

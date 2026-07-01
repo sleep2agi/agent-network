@@ -78,7 +78,7 @@ function normalizeMetaJson(meta: unknown): string | null {
   // #222 cross-host safety — same sanitization as tools.ts so REST
   // /api/task and MCP send_task produce identical meta_json shapes.
   // Conditional: only strips `path` when `file_id` is also present
-  // (preserves single-host feishu fallback per [[feedback_assume_unit_before_threshold]]
+  // (preserves single-host feishu fallback per team rule — assume-unit-before-threshold: cap is in bytes
   // discipline of not breaking other call sites).
   try { return JSON.stringify(stripHostLocalPathsForCrossHostSafe(meta)); } catch { return null; }
 }

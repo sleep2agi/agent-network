@@ -12,7 +12,7 @@
 //
 // PR1.2a (#346 follow-up) extracts the helper to this module so both
 // the MCP tools and the REST handlers can import the same code path,
-// per [[feedback_grep_all_sites_before_apply_guard]]: any SQL-level
+// per team rule (grep every write site before adding a guard): any SQL-level
 // guard's helper lives at module scope so every write site
 // (MCP + REST + internal db.ts helpers) can use it.
 //

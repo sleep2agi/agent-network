@@ -3976,7 +3976,7 @@ Example:
 //     (fail-closed; operator adds via `anet daemon init --allow-secret KEY`
 //     or by hand-editing — strict-by-default per RFC-026 §9.7)
 //   flags: { dangerouslySkipPermissions: true, teammateMode: true }
-//     (standard daemon flags, same defaults [[feedback_default_flags]])
+//     (standard daemon flags, same defaults — dangerouslySkipPermissions + teammateMode on by default)
 //   node_id prefix `node_daemon_` preserved for backwards-compat with
 //   pre-#337 dashboard discovery heuristic (no-op cost on post-#337 hubs).
 

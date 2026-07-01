@@ -155,7 +155,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // (#346 review catch) extracted because the closure scope made it
   // unreachable from REST and left the §2.3 race open on dashboard
   // Dispatch (POST /api/task + /api/broadcast). Per
-  // [[feedback_grep_all_sites_before_apply_guard]].
+  // per team rule: grep every write site (MCP tools.ts AND REST index.ts) before adding a guard, and extract the helper into a shared module so both transports import it.
 
   const addReadScope = (sql: string, params: any[], scope: ReadScope, column = "network_id"): string => {
     if (scope.networkId) {
@@ -3464,7 +3464,7 @@ export function upsertNodeWithSec1Guard(input: UpsertNodeWithSec1GuardInput): Up
     // The snapshot stays the source of truth for non-list reads; the
     // columns exist so `list_host_supervisors` doesn't JSON.parse on
     // every call. typeof-narrow per
-    // [[feedback_typeof_narrow_extracted_fields]] — zod narrowed but
+    // per team rule (typeof-narrow extracted JSON fields at the boundary) — zod narrowed but
     // input.config_snapshot is typed `unknown` here.
     //
     // PR3 nit ①: read from nested `daemon_capabilities.*` (canonical

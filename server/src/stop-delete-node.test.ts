@@ -7,7 +7,7 @@ import { registerTools } from "./tools.js";
 // get_stop_request, ack_stop_request. Drives the MCP handlers via
 // registerTools() so the wired auth context is real (not the
 // mirror-SQL pattern that PR2 v1 used and which let SEC-1 leak slip
-// through, per [[feedback_parallel_fork_review_catches_wired_wrong]]).
+// through — per team rule: independent fork-review catches wired-wrong even when unit tests pass).
 //
 // Covers RFC-027 P1 e2e plan §5.2 scenarios A/B/C/D/E/F at the
 // handler layer:

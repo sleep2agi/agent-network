@@ -24,7 +24,7 @@
 // existing single-host behaviour without forcing every sender to
 // upload through /api/upload.
 //
-// Size safety per [[feedback_assume_unit_before_threshold]]: cap is in
+// Size safety per team rule (assume-unit-before-threshold): cap is in
 // BYTES, not chunks or kb. Pre-check Content-Length header; if absent
 // or > cap, refuse before consuming. During stream, byte counter as a
 // belt — Content-Length can lie. Default 50 MiB (configurable via env
