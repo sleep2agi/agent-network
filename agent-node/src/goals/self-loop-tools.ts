@@ -240,7 +240,19 @@ export async function handleEditMyLoop(args: any, ctx: SelfLoopCtx): Promise<Sel
       else current.schedule = newSchedule;
     }
     if (typeof args.paused === "boolean") {
+      const wasPaused = current.status === "paused";
       current.status = args.paused ? "paused" : "active";
+      // RFC-025 P0.3 — unpause resets the poison-goal counter so the
+      // agent/operator gets a fresh 5-strike window after fixing the
+      // root cause. Cancel side (args.paused=true) doesn't reset —
+      // that's a manual pause; the counter should carry over if the
+      // agent later re-un-pauses without addressing the failure.
+      // Skip when we're setting paused=false BUT the goal wasn't
+      // actually paused (no-op edit): don't wipe a legitimate mid-
+      // failure counter of an already-active goal.
+      if (!args.paused && wasPaused) {
+        current.consecutive_failures = 0;
+      }
     }
   });
   return ok({

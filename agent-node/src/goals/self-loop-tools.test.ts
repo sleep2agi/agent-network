@@ -160,6 +160,63 @@ describe("edit_my_loop", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toBe("goal_not_found");
   });
+
+  test("P0.3 unpause resets consecutive_failures (fresh 5-strike window)", async () => {
+    const g = newGoal({ text: "x", interval_ms: 5 * 60_000, runtime: "claude-agent-sdk" });
+    // Simulate a poisoned goal that hit the auto-pause threshold
+    g.status = "paused";
+    g.consecutive_failures = 5;
+    await store.upsert(g);
+    // Cooldown-safe now
+    const future = Date.now() + 60_000;
+    const r = await handleEditMyLoop(
+      { goal_id: g.goal_id, paused: false },
+      mkCtx(store, { now: () => future }),
+    );
+    expect(r.ok).toBe(true);
+    const after = await store.get(g.goal_id);
+    expect(after!.status).toBe("active");
+    expect(after!.consecutive_failures).toBe(0);
+  });
+
+  test("P0.3 paused=false when already active does NOT wipe mid-failure counter", async () => {
+    // Prevent silent regression: an operator or agent edit that sets
+    // paused=false on an already-active goal (no-op status wise) must
+    // not clobber a legitimate in-flight failure count. Otherwise
+    // agents could sidestep the threshold with a spurious unpause.
+    const g = newGoal({ text: "x", interval_ms: 5 * 60_000, runtime: "claude-agent-sdk" });
+    g.status = "active";
+    g.consecutive_failures = 3;
+    await store.upsert(g);
+    const future = Date.now() + 60_000;
+    const r = await handleEditMyLoop(
+      { goal_id: g.goal_id, paused: false },
+      mkCtx(store, { now: () => future }),
+    );
+    expect(r.ok).toBe(true);
+    const after = await store.get(g.goal_id);
+    expect(after!.status).toBe("active");
+    expect(after!.consecutive_failures).toBe(3);
+  });
+
+  test("P0.3 paused=true does NOT reset consecutive_failures", async () => {
+    // Manual pause preserves the counter — if the agent later
+    // un-pauses without addressing the failure, the operator wants
+    // the counter to carry over so a re-fire loop-crash surfaces fast.
+    const g = newGoal({ text: "x", interval_ms: 5 * 60_000, runtime: "claude-agent-sdk" });
+    g.status = "active";
+    g.consecutive_failures = 4;
+    await store.upsert(g);
+    const future = Date.now() + 60_000;
+    const r = await handleEditMyLoop(
+      { goal_id: g.goal_id, paused: true },
+      mkCtx(store, { now: () => future }),
+    );
+    expect(r.ok).toBe(true);
+    const after = await store.get(g.goal_id);
+    expect(after!.status).toBe("paused");
+    expect(after!.consecutive_failures).toBe(4);
+  });
 });
 
 describe("reschedule_my_loop (★ ScheduleWakeup 范式)", () => {
