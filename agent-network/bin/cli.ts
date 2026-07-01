@@ -6359,12 +6359,19 @@ function printGoalShow(goal: LocalGoal, displayName: string, path: string) {
   console.log("");
 }
 
+// RFC-025 P1.1 — wake-log renderers live in a separate pure module
+// (bin/goal-wake-log-render.ts) so unit tests can import them without
+// triggering cli.ts's top-level command dispatch (which prints help
+// on any load with no argv). Command handler below wraps + console.logs.
+import { renderWakeLogJson, renderWakeLogText } from "./goal-wake-log-render";
+
 function printGoalUsage() {
   console.log(`
 anet goal <command>
 
   list [node]                  List scheduled goals for one node, or all nodes
   show <node> <goal-id>        Show one goal in detail (including progress log)
+  wake-log <node> <goal-id>    Export progress_log (wake history) — supports --json / --tail N
   edit <node> <goal-id> ...    Edit a goal's interval / text / status
   cancel <node> <goal-id>      Mark a goal cancelled in that node's goals.json
 
@@ -6373,10 +6380,17 @@ Edit flags (at least one required):
   --text "<new goal description>"
   --status active|paused|completed|cancelled
 
+Wake-log flags:
+  --json                       Output raw JSON (goal_id + entries[])
+  --tail N                     Only show the last N entries (default: all)
+
 Examples:
   anet goal list
   anet goal list 通信牛
   anet goal show 通信牛 abcd1234
+  anet goal wake-log 通信牛 abcd1234
+  anet goal wake-log 通信牛 abcd1234 --tail 5
+  anet goal wake-log 通信牛 abcd1234 --json
   anet goal edit 通信牛 abcd1234 --interval 10min
   anet goal edit 通信牛 abcd1234 --status paused
   anet goal cancel 通信牛 abcd1234
@@ -6503,6 +6517,54 @@ async function goalCommand() {
       process.exit(1);
     }
     printGoalShow(matches[0], nodeDisplayName(resolved.id, resolved.profile), path);
+    return;
+  }
+
+  // RFC-025 P1.1 — `anet goal wake-log <node> <goal-id> [--json] [--tail N]`:
+  // export progress_log (wake history). Complements `anet goal show`
+  // (which caps at 10 entries) by giving full access + machine-readable
+  // JSON for scripting. Read-only, no state changes.
+  if (sub === "wake-log" || sub === "wakelog") {
+    const nodeRef = args[2];
+    const goalRef = args[3];
+    if (!nodeRef || !goalRef) {
+      console.error("Usage: anet goal wake-log <node> <goal-id> [--json] [--tail N]");
+      process.exit(1);
+    }
+    const opts = parseOpts();
+    const resolved = resolveNodeRef(nodeRef);
+    if (!resolved) {
+      console.error(`Node "${nodeRef}" not found.`);
+      process.exit(1);
+    }
+    const { path, file } = loadGoalsFile(resolved.id);
+    const matches = file.goals.filter(g => g.goal_id === goalRef || g.goal_id.startsWith(goalRef));
+    if (matches.length === 0) {
+      console.error(`Goal "${goalRef}" not found in ${path}`);
+      process.exit(1);
+    }
+    if (matches.length > 1) {
+      console.error(`Goal prefix "${goalRef}" is ambiguous (${matches.length} matches). Use a longer id.`);
+      process.exit(1);
+    }
+    // --tail parsing. Reject NaN / <=0 / non-integer. Missing = all.
+    let tailN: number | undefined;
+    if (typeof opts.tail === "string" && opts.tail.length > 0) {
+      const n = parseInt(opts.tail, 10);
+      if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+        console.error(`--tail must be a positive integer, got "${opts.tail}"`);
+        process.exit(1);
+      }
+      tailN = n;
+    }
+    // parseOpts declares Record<string, string>: bare `--json` lands
+    // as the sentinel string "true"; `--json=false` opts out.
+    const asJson = typeof opts.json === "string" && opts.json !== "false";
+    if (asJson) {
+      console.log(JSON.stringify(renderWakeLogJson(matches[0], { tail: tailN }), null, 2));
+    } else {
+      console.log(renderWakeLogText(matches[0], { tail: tailN }));
+    }
     return;
   }
 
