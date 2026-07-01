@@ -372,6 +372,41 @@ anet goal cancel my-codex 3f8a2b1c
 
 调度器 tick 间隔由 `ANET_GOAL_TICK_MS` 环境变量或 config.json `flags.goalTickMs` 控制，默认 30 秒。任何 goal 的 `interval_ms` 不会比 tick 间隔更精确——一个 5 秒间隔的 goal 实际上还是按 30 秒 tick 唤醒，按需调小 tick。
 
+#### Agent 自管 loop：6 个 self-scoped 工具（RFC-025）
+
+除了外部 `anet node loop` / `/loop` 之外，agent 在响应任务时也可以调用 6 个 self-scoped 工具管理**自己**的循环，无需人工介入：
+
+| 工具 | 语义 |
+|---|---|
+| `list_my_loops` | 看自己当前所有 loop |
+| `create_my_loop` | 新建一个 loop |
+| `edit_my_loop` | 改 task / interval / schedule / paused |
+| `reschedule_my_loop` | 一次性推下次唤醒（不改 interval） |
+| `complete_my_loop` | 达标归档（`status=complete`） |
+| `cancel_my_loop` | 永久放弃（`status=cancelled`） |
+
+6 个工具都**没有 `alias` 参数**——从架构上就物理隔离，agent 无法操作其他节点的 loop。
+
+**runtime 工具可用时段**——这是 claude 和 codex/grok 的一个关键差异：
+
+- **codex-sdk / grok-build-acp**：agent-node 启动就把工具挂在一个 localhost HTTP MCP server 上（带 bearer token），**全时段可调**。agent 在处理任务时、在 loop 被唤醒时，都可以调这 6 个工具。
+- **claude-agent-sdk**：工具通过 in-process SDK MCP server 挂在 `processWithClaude` 的 tool surface 上，**只在 agent 响应某任务的生命周期内可调**（`processTask` 期间）。
+
+对 claude 用户来说这意味着什么：
+
+> **loop 被唤醒 → 触发 processTask → 工具立即可用 → agent 可以在同一个响应里 `create_my_loop("下一步")` 或 `complete_my_loop(this)`**——闭环没问题，因为 loop 唤醒本身就走 processTask 路径。
+>
+> 但**在 agent 完全 idle 时**（没有正在处理任何任务），claude 内部**没有 tool 上下文**。所以你不能像 codex/grok 那样在外部触发一个「让 agent 自主决定要不要建 loop」的场景——需要先发一个任务（`anet node loop` 或直接 `send_task`）把 agent 唤起。
+
+**codex/grok 是常驻的**——工具从 agent-node 启动那一刻起就可以被随时触发的进程调用（LLM 在任意 turn 内都能引用）。这是 codex/grok 选择 out-of-process HTTP MCP、而 claude 选择 in-process SDK MCP 的架构决定带来的天然差异，不是 gap 也不是 bug。
+
+**安全防线** 是跨 runtime 一致的（三 runtime 共享同一份 `goalStore` + 计数器状态）：
+
+- 单节点默认 **20 个 active goal** 上限（`COMMHUB_MAX_GOALS_PER_NODE` 可覆盖）
+- 同一个 goal **30 秒 cooldown** 内只能改一次（防递归暴走）
+- 30 秒内连续 cancel ≥ 3 个 → 第 4 次触发 confirm-back，agent 必须回问用户，拿到确认后带 `confirm_token` 重调
+- 创建/编辑时**preflight**：cron-lite schedule 语义不合法（如时区错）直接拒，绝不入库自锁
+
 ### 消息类型过滤
 
 Agent Node 只对 `task` 类型消息触发 AI 处理：
