@@ -322,6 +322,7 @@ interface Profile {
 // Re-export from the pure helper module (src/normalize-runtime.ts) so
 // unit tests can import without dragging in CLI side-effects.
 import { normalizeRuntime, type RuntimeName } from "../src/normalize-runtime";
+import { findEnvironAliasMatches } from "../src/environ-alias";
 export { normalizeRuntime, type RuntimeName };
 
 function nodeDisplayName(id: string, profile?: Profile | null): string {
@@ -4323,6 +4324,52 @@ async function terminateNodeProcess(pid: number, force: boolean): Promise<boolea
   return !pidAlive(pid);
 }
 
+// #180 — find MCP-bridge orphan processes carrying COMMHUB_ALIAS=<oldAlias>
+// in their env. Complements findNodeProcessesByAlias which only matches by
+// argv (claude / agent-node / codex / grok binaries). The MCP stdio bridge
+// `.anet/node-server.js` doesn't have `-n <alias>` on argv (it's node-spawned
+// with just `node .anet/node-server.js`); its parent claude passes alias via
+// env. When claude dies, node-server.js reparents to PID 1 and keeps
+// heart-beating with the same env-carried alias — this is the #180 ghost
+// mechanism. Sweeping /proc/<pid>/environ closes that gap.
+//
+// The parser + scanner live in ../src/environ-alias.ts so the algorithm is
+// unit-testable in isolation (see tests/environ-alias.test.ts for the shape
+// lock). Returns matching pids, or null if procfs is unreadable (fail-closed
+// for the caller; matches findNodeProcessesByAlias contract).
+function findMcpBridgeOrphansByAlias(...aliases: string[]): number[] | null {
+  return findEnvironAliasMatches(aliases, process.pid);
+}
+
+// #180 — sweep MCP bridge orphans for a target alias set: SIGTERM then
+// SIGKILL (--force) each match. This is the main-fix side of #180 Method 1:
+// after terminateNodeProcess kills the identified claude/agent-node/codex/
+// grok process, any surviving MCP bridge subprocess (heart-beating via env-
+// carried COMMHUB_ALIAS) is caught and reaped here. Mirrors the
+// sweepOrphansForAlias helper introduced in RFC-027 PR1.2
+// (agent-node/src/runtime/stop-daemon.ts) — same "cross-process orphan"
+// wire-shape family. Returns the pids that were signaled (empty if none).
+async function sweepMcpOrphansForAlias(force: boolean, ...aliases: string[]): Promise<number[]> {
+  const orphans = findMcpBridgeOrphansByAlias(...aliases);
+  if (!orphans || orphans.length === 0) return [];
+  for (const pid of orphans) {
+    try { process.kill(pid, "SIGTERM"); } catch { /* may already be dead */ }
+  }
+  // Brief grace so node-server.ts's SIGTERM handler (report offline +
+  // process.exit(0)) has a chance to finish. Not the full 8s — MCP bridge
+  // has no long-running task to save. If still alive after 2s + --force,
+  // SIGKILL.
+  await new Promise(r => setTimeout(r, 2000));
+  const stillAlive = orphans.filter(pid => pidAlive(pid));
+  if (stillAlive.length > 0 && force) {
+    for (const pid of stillAlive) {
+      try { process.kill(pid, "SIGKILL"); } catch { /* may already be dead */ }
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return orphans;
+}
+
 // #146 / #180 — find a node's live agent process(es) by command line, NOT by a
 // possibly-stale .pid. A stale .pid can point to a dead pid the OS later reused
 // for an unrelated process — trusting it makes renameCommand SIGKILL an
@@ -4700,6 +4747,21 @@ anet node rename <node-id|node-name> <new-node-name> [--force]
     oldProcessConfirmedDead = oldSurvivors.length === 0;
     if (oldProcessConfirmedDead && livePids.length > 0) {
       console.log(`[anet] stopped old agent process(es): ${livePids.join(", ")}`);
+    }
+
+    // #180 — sweep MCP bridge orphans. claude-code-cli spawns `.anet/node-
+    // server.js` as an MCP stdio child; when claude dies (esp. via SIGKILL
+    // above), that child reparents to PID 1 and keeps heart-beating with
+    // the OLD alias via inherited COMMHUB_ALIAS env → dashboard ghost +
+    // commhub ON CONFLICT(resume_id) upsert reverts the rename (SDK马
+    // Finding B — the exact "rename ghost" reported in #180). agent-node
+    // runtimes don't hit this (in-process MCP, no separate subprocess) —
+    // only claude-code-cli. Sweep by /proc/<pid>/environ COMMHUB_ALIAS
+    // match — catches any inheriting descendant regardless of argv shape.
+    // Real repro numbers: docs/tests/p-180-rename-ghost/run-4.txt.
+    const mcpSwept = await sweepMcpOrphansForAlias(force, oldDisplay, oldId);
+    if (mcpSwept.length > 0) {
+      console.log(`[anet] swept MCP bridge orphan(s) inheriting old alias: pid=${mcpSwept.join(",")}`);
     }
     if (tmuxSessionRunning(oldId)) killTmuxSession(oldId);
     // brief grace so the old SSE/heartbeat + final writebackSession() tear down
