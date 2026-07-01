@@ -165,6 +165,125 @@ describe("computeNextWakeAt — DST edge cases (US Eastern)", () => {
     // 02:30 ET on 2026-03-08 does not exist — skip to next day (2026-03-09 02:30 EDT = 06:30 UTC)
     expect(next.toISOString()).toBe("2026-03-09T06:30:00.000Z");
   });
+
+  test("daily 03:30 exists on spring-forward day (post-jump, unambiguous EDT)", () => {
+    // 2026-03-08 spring-forward: 02:00 EST jumps to 03:00 EDT. 03:30 EDT exists that day.
+    const sched: AgentGoalSchedule = { type: "time_of_day", time: "03:30", timezone: "America/New_York" };
+    const before_jump = new Date("2026-03-07T12:00:00.000Z"); // Sat noon
+    const next = computeNextWakeAt(sched, before_jump, "America/New_York");
+    // Sun 2026-03-08 03:30 EDT = 07:30 UTC
+    expect(next.toISOString()).toBe("2026-03-08T07:30:00.000Z");
+  });
+});
+
+describe("computeNextWakeAt — DST fall-back (autumn) — RFC-025 P1.3", () => {
+  // US DST 2026: fall-back Sun 2026-11-01. At 02:00 EDT (06:00 UTC) the wall
+  // clock rolls back to 01:00 EST. The window 01:00-01:59 wall-clock occurs
+  // TWICE: first as EDT (05:00-05:59 UTC), then again as EST (06:00-06:59 UTC).
+  //
+  // Policy (see schedule.ts nextWallClock docs):
+  // - Ambiguous times fire at the FIRST occurrence (pre-fallback EDT branch).
+  // - The second occurrence is skipped to the next eligible day so daily
+  //   goals fire once per day.
+  // - Post-fallback unambiguous times (e.g. 02:30 EST) fire on the same day.
+
+  const TZ = "America/New_York";
+  const sched01_30: AgentGoalSchedule = { type: "time_of_day", time: "01:30", timezone: TZ };
+  const sched02_30: AgentGoalSchedule = { type: "time_of_day", time: "02:30", timezone: TZ };
+  const sched03_00: AgentGoalSchedule = { type: "time_of_day", time: "03:00", timezone: TZ };
+
+  test("daily 01:30, called Sat noon → fires at FIRST 01:30 EDT (before fall-back)", () => {
+    const saturday_noon = new Date("2026-10-31T12:00:00.000Z");
+    const next = computeNextWakeAt(sched01_30, saturday_noon, TZ);
+    // First 01:30 EDT (UTC-4) on Sun 2026-11-01 = 05:30 UTC
+    expect(next.toISOString()).toBe("2026-11-01T05:30:00.000Z");
+  });
+
+  test("daily 01:30, called AT first 01:30 EDT boundary → NEXT DAY (not second 01:30 EST same day)", () => {
+    // Just fired at 05:30 UTC. Second 01:30 EST at 06:30 UTC same day would
+    // violate "fire once per day". Skip to Mon 2026-11-02.
+    const at_first_fire = new Date("2026-11-01T05:30:00.000Z");
+    const next = computeNextWakeAt(sched01_30, at_first_fire, TZ);
+    // Mon 2026-11-02 01:30 EST = 06:30 UTC
+    expect(next.toISOString()).toBe("2026-11-02T06:30:00.000Z");
+  });
+
+  test("daily 01:30, called between the two occurrences (05:45 UTC) → next day", () => {
+    // At 05:45 UTC on fall-back day: past first 01:30 EDT, before fall-back
+    // moment (06:00 UTC). Second 01:30 EST still an hour away but same-day
+    // repeat is suppressed.
+    const between = new Date("2026-11-01T05:45:00.000Z");
+    const next = computeNextWakeAt(sched01_30, between, TZ);
+    expect(next.toISOString()).toBe("2026-11-02T06:30:00.000Z");
+  });
+
+  test("daily 01:30, called AT fall-back moment (06:00 UTC) → next day (skip 2nd occurrence)", () => {
+    // 06:00 UTC = 02:00 EDT → snaps to 01:00 EST. About to be the second
+    // 01:30 half an hour from now, but we do not fire it (daily-once).
+    const at_fallback = new Date("2026-11-01T06:00:00.000Z");
+    const next = computeNextWakeAt(sched01_30, at_fallback, TZ);
+    expect(next.toISOString()).toBe("2026-11-02T06:30:00.000Z");
+  });
+
+  test("daily 01:30, called AFTER second occurrence (06:30 UTC) → next day", () => {
+    const post_second = new Date("2026-11-01T06:30:00.000Z");
+    const next = computeNextWakeAt(sched01_30, post_second, TZ);
+    expect(next.toISOString()).toBe("2026-11-02T06:30:00.000Z");
+  });
+
+  test("daily 02:30 (post-fallback UNAMBIGUOUS) still fires on fall-back day — was buggy before P1.3", () => {
+    // 02:30 EST exists exactly once on 2026-11-01 (30 minutes after fall-back).
+    // Before the P1.3 makeInstant iteration fix, this was silently skipped to
+    // Nov 2 because the offset probe landed in the EDT branch.
+    const saturday_noon = new Date("2026-10-31T12:00:00.000Z");
+    const next = computeNextWakeAt(sched02_30, saturday_noon, TZ);
+    // Sun 2026-11-01 02:30 EST (UTC-5) = 07:30 UTC
+    expect(next.toISOString()).toBe("2026-11-01T07:30:00.000Z");
+  });
+
+  test("daily 03:00 (fully post-fallback) on fall-back day — regression for iterated offset", () => {
+    const saturday_noon = new Date("2026-10-31T12:00:00.000Z");
+    const next = computeNextWakeAt(sched03_00, saturday_noon, TZ);
+    // Sun 2026-11-01 03:00 EST = 08:00 UTC
+    expect(next.toISOString()).toBe("2026-11-01T08:00:00.000Z");
+  });
+
+  test("weekday Sun 01:30 on fall-back Sunday → first occurrence EDT", () => {
+    const sched: AgentGoalSchedule = { type: "weekday", days: ["sun"], time: "01:30", timezone: TZ };
+    const saturday_noon = new Date("2026-10-31T12:00:00.000Z");
+    const next = computeNextWakeAt(sched, saturday_noon, TZ);
+    expect(next.toISOString()).toBe("2026-11-01T05:30:00.000Z");
+  });
+
+  test("weekday Sun 02:30 on fall-back Sunday → same day (was CRASH before P1.3)", () => {
+    // Before fix: Nov 1 makeInstant returned null (spring-forward code path
+    // reused for fall-back post-transition times), then all other days in
+    // the 8-day search window were non-Sun, so nextWallClock threw
+    // "no eligible day found". P1.3 fix makes makeInstant iterate the
+    // offset probe so Nov 1 02:30 EST resolves correctly.
+    const sched: AgentGoalSchedule = { type: "weekday", days: ["sun"], time: "02:30", timezone: TZ };
+    const saturday_noon = new Date("2026-10-31T12:00:00.000Z");
+    const next = computeNextWakeAt(sched, saturday_noon, TZ);
+    expect(next.toISOString()).toBe("2026-11-01T07:30:00.000Z");
+  });
+
+  test("weekday Sun 01:30 called AT first fire → NEXT Sunday (not same-day 2nd occurrence)", () => {
+    const sched: AgentGoalSchedule = { type: "weekday", days: ["sun"], time: "01:30", timezone: TZ };
+    const at_first_fire = new Date("2026-11-01T05:30:00.000Z");
+    const next = computeNextWakeAt(sched, at_first_fire, TZ);
+    // Next Sun = 2026-11-08. Post-fallback, so 01:30 EST = 06:30 UTC.
+    expect(next.toISOString()).toBe("2026-11-08T06:30:00.000Z");
+  });
+
+  test("time_of_day 09:00 on fall-back day (outside ambiguous window) unchanged", () => {
+    // Guardrail: normal-hour goals must not be perturbed by fall-back logic.
+    const sched: AgentGoalSchedule = { type: "time_of_day", time: "09:00", timezone: TZ };
+    const saturday_noon = new Date("2026-10-31T12:00:00.000Z");
+    const next = computeNextWakeAt(sched, saturday_noon, TZ);
+    // Sat 2026-10-31 12:00 UTC = 08:00 EDT (still EDT). Today's 09:00 EDT
+    // is 13:00 UTC — 1 hour ahead. Next fire = today.
+    expect(next.toISOString()).toBe("2026-10-31T13:00:00.000Z");
+  });
 });
 
 describe("computeNextWakeAt — legacy interval-only (back-compat regression)", () => {
