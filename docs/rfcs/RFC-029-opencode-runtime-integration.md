@@ -3,7 +3,7 @@
 | 项 | 值 |
 |----|----|
 | **作者** | 通信工程马 |
-| **状态** | Draft v0.1 — 待 通信龙 review, review 过 → 转 Vincent 拍板 → 进实施 |
+| **状态** | v0.2 — 通信龙 v0.1 review PASS+merged (PR #369), Phase 0 U2/U4 探针回填, 待 U1/U3/U5 (等 Vincent key + track 拍板) |
 | **调度** | 通信龙 dispatch task_id `418d0521-0148-452a-9f5a-70ed13f195e3` (HIGH, Vincent 要求) |
 | **创建** | 2026-07-01 (北京 UTC+8) |
 | **关联 RFC** | [RFC-021](RFC-021-acp-capability-profile-expansion.md) (ACP capability 扩展 — grok-build-acp precedent) · [RFC-006 (project memory)](../../.claude/memory/) codex-code-cli-mcp runtime 类似 track |
@@ -97,11 +97,33 @@ Source: [opencode.ai/docs/server](https://opencode.ai/docs/server/).
 
 Source: [opencode.ai/docs/config](https://opencode.ai/docs/config/).
 
-### 2.5 MCP 面
+### 2.5 MCP 面 ✅ v0.2 Phase 0 U2 已验
 
-opencode 是 MCP **客户端** (`opencode mcp add|list|auth`, [docs/mcp-servers](https://opencode.ai/docs/mcp-servers/)). 支持连 stdio/http/sse 三类 MCP server. 也就是说 opencode 侧可以挂 CommHub MCP server, 让 opencode 侧 agent 有 `send_task`/`report_status`/`commhub_reply` 等工具.
+**docker + `opencode-ai@1.17.12` + `opencode serve --help` 抓取结果 (2026-07-01)**:
+
+```
+opencode serve
+starts a headless opencode server
+
+Options:
+  --port         port to listen on              [number] [default: 0]
+  --hostname     hostname to listen on          [string] [default: "127.0.0.1"]
+  --mdns         enable mDNS service discovery
+  --cors         additional domains to allow for CORS
+```
+
+**确认**: `serve` 命令**无任何 MCP 相关运行时 flag** — 没有 `--mcp` / `--mcp-server` / `--mcp-config` 等. **MCP 挂载必须通过配置文件预置**, 即写到 `~/.config/opencode/opencode.json` (或 `OPENCODE_CONFIG` env 覆盖) 的 `mcp:` 段, 然后 `serve` 起来后自动 load.
+
+含义:
+- anet 起 `opencode serve/acp` 前必须**先写 opencode 配置文件**, 里面挂 CommHub MCP server
+- 每 node 独立配置根 (`HOME=<node workdir>` 或 `OPENCODE_CONFIG=<node workdir>/opencode.json`) 是**必须**的多节点隔离手段, 不是可选 nice-to-have
+- 反过来说好处: 配置文件路径是 anet 完全掌控的一等接口, 无 runtime flag 变动风险 (opencode 版本升级只要不改 config schema, MCP 挂载语义就稳)
+
+opencode 依然是 MCP **客户端** (`opencode mcp add|list|auth`, [docs/mcp-servers](https://opencode.ai/docs/mcp-servers/)). 支持连 stdio/http/sse 三类 MCP server. CommHub MCP server 挂进去后, opencode 侧 agent 就有 `send_task`/`report_status`/`commhub_reply` 等工具.
 
 opencode **自己不作为 MCP server** 暴露 (第三方桥 [AlaeddineMessadi/opencode-mcp](https://github.com/AlaeddineMessadi/opencode-mcp) 存在但非一等).
+
+**附带发现** (`opencode --help` 抓): opencode 有一等 `opencode session`, `opencode models [provider]`, `opencode providers` (旧名 `auth`), `opencode export/import`, `opencode db` 等丰富子命令 — 这些为 D3 (vendor preset), D5 (session 隔离), Phase 3 (完善) 提供了程序化入口.
 
 ### 2.6 近期上游改动 (~25 commits 内)
 
@@ -112,9 +134,33 @@ opencode **自己不作为 MCP server** 暴露 (第三方桥 [AlaeddineMessadi/o
 
 **无** headless 相关 breaking. npm 最新 `opencode-ai@1.17.12` (2026-07-01 前 ~17h).
 
-### 2.7 `acp` 子命令
+### 2.7 `acp` 子命令 ✅ v0.2 Phase 0 U4 已验
 
-opencode 有个 `acp` 子命令 (Agent Client Protocol), CLI docs 页面未展开. **未知**是否是 opencode 官方正在推的一等程序化入口 — grok-build-acp 已经用了 ACP 协议, 如果 opencode `acp` 走同一套, 集成成本会显著降低 (可直接复用 `grok-build-acp/client.ts` + `runtime.ts` 抽象). 需实测确认.
+**docker + `opencode-ai@1.17.12` + `opencode acp --help` 抓取结果 (2026-07-01)**:
+
+```
+opencode acp
+start ACP (Agent Client Protocol) server
+
+Options:
+  --port         port to listen on               [number] [default: 0]
+  --hostname     hostname to listen on          [string] [default: "127.0.0.1"]
+  --mdns         enable mDNS service discovery
+  --cors         additional domains to allow for CORS
+  --cwd          working directory              [string] [default: "/"]
+```
+
+**确认**: opencode `acp` 是**一等 Agent Client Protocol server** — Zed 生态 ACP 协议. 跟 anet 现有 `grok-build-acp` 走的**同一套协议**.
+
+**重大发现 — B1 工时上限可显著砍**:
+- grok 是 `spawn("grok", ["agent", "stdio"])` — stdio 上跑 JSON-RPC ACP
+- opencode 是 `opencode acp --port <N>` — **TCP 端口**上跑 ACP (不是 stdio)
+- 协议消息格式 (initialize / session/new / prompt / etc.) **应可直接复用** `runtime/grok-build-acp/{client.ts, events.ts, runtime.ts}` — 只 transport 层 (stdio 换 TCP socket) 需要一个薄适配
+- `--cwd` flag 一等支持 → 天然满足 D5 每 node 独立 cwd 隔离需求 (不需要 grok-isolated-cwd.ts 那种 workaround)
+
+**工时下调**: B1 从原估 15-21h → **10-14h** (省掉 HTTP client + SSE 事件解析 + `POST /session/:id/message` 的自制协议对接, 直接复用 grok-build-acp 抽象)
+
+**新方案 B1' (推荐取代 B1)** — 见 §4 更新.
 
 ---
 
@@ -178,7 +224,39 @@ opencode session 若跟 anet 其他 session 语义不同 (opencode 有 `--fork` 
 
 三个方向, 按推荐度排:
 
-### 方案 B1 (推荐): 常驻 serve + HTTP client (类 grok-build-acp)
+### 方案 B1' (v0.2 新推荐): 常驻 `opencode acp` + 复用 grok-build-acp 抽象
+
+**v0.2 Phase 0 U4 探针后新增**. 直接跑 `opencode acp --port <随机> --hostname 127.0.0.1 --cwd <node workdir>` 起 ACP TCP server, agent-node 侧新增一个薄 TCP transport 适配 (~50-100 LOC) 复用 `runtime/grok-build-acp/{client.ts, events.ts, runtime.ts}` — 因为 opencode acp 跟 grok agent stdio 走**同一 Agent Client Protocol 协议消息格式**.
+
+**优点**:
+- **协议层零重写**: initialize / session/new / prompt / turn 全靠 grok-build-acp 现成抽象, 只 transport 换 stdio → TCP socket
+- `--cwd` 一等支持 → 天然多节点隔离, 免掉 grok-isolated-cwd.ts 那类 workaround
+- session/model/vendor 全走 opencode 自己一等抽象
+- MCP inject 通过 `OPENCODE_CONFIG=<node workdir>/opencode.json` 预写配置文件 (类 codex ~/.codex/config.toml precedent)
+
+**风险**:
+- opencode acp 消息 schema 跟 grok acp 是否 byte-exact 未验 (虽同协议但 opencode 可能有 vendor extension) — **需 U8 补验** (打通 ACP client 后一次真 turn, 拿到实际消息 dump)
+- opencode acp 是 TCP 不是 stdio, supervisor 重启语义 (端口重绑 / socket 断连恢复) 需要 supervise-child + 端口 free 检测
+- `opencode acp` 首次运行是否需要 opencode auth 前置 (跟 U3 同一未知) 未验
+
+**工时 (细拆)**:
+- opencode acp 子进程管理 (spawn + supervise + shutdown, 复用 supervise-child): **2h**
+- TCP transport 薄适配 (类 grok-build-acp/client.ts 但走 net.Socket 而非 stdio 管道): **2-3h**
+- 复用 grok-build-acp {events.ts, runtime.ts} 到 opencode 路径: **1h** (基本 import 换 path)
+- session 写回 (cfg.opencodeSession) + turn 循环整合: **1h**
+- `agent-node/src/cli.ts` runtime switch + `RUNTIME_MAP` + processWithOpencode: **1h**
+- `agent-network/bin/cli.ts` enum + wizard + VendorSpec + checkRuntimeDependency + assertStartCompatibility: **2h**
+- CommHub MCP inject (写 opencode.json config 文件 + `OPENCODE_CONFIG` env): **1-2h**
+- server-side normalizeRuntime + dashboard badge: **0.5h**
+- 单测 (TCP client + session writeback + ACP message parse): **2h**
+- docker e2e (spawn opencode acp + real turn + MCP inject + real session resume): **2h**
+- 独立 claude 预审 + fix round: **1-2h**
+
+**总计**: **10.5-15.5h**, 折中值 **~13h** (相比 v0.1 B1 的 18h 省 5h)
+
+### 方案 B1 (v0.1 原推荐, 保留作 fallback): 常驻 opencode serve + HTTP client (类 grok-build-acp)
+
+**保留在 RFC 里做 U8 探针万一失败的 fallback**. 若 U8 打通 ACP transport 发现 opencode acp 消息 schema 跟 grok 严重不兼容, 就退回 B1 用 `POST /session/:id/message` + SSE 自制协议对接. 详细描述看 v0.1 (git blame `origin/main` 前一版本).
 
 启动: agent-node 首次 process 前起 `opencode serve --port <随机> --hostname 127.0.0.1`, 存 pid + port 到 `.anet/nodes/<alias>/.opencode-serve.pid`. 后续每 turn:
 1. `POST /session` (首次) → `sessionId`, 写回 `cfg.opencodeSession`
@@ -267,17 +345,18 @@ opencode session 若跟 anet 其他 session 语义不同 (opencode 有 `--fork` 
 
 ## 5. 关键未知项 (实施前必须活体验证)
 
-| # | 未知项 | 验证方法 | 阻塞哪个方案 |
-|---|---|---|---|
-| U1 | `opencode run --format json` 事件 exact schema, 抽 final assistant text 的稳定 JSON path | `docker run --rm node:22 ... npm i -g opencode-ai && opencode run --format json "hi"` 抓 stdout | B2 (blocker) / B1 (nice-to-have 交叉验) |
-| U2 | `opencode serve` MCP 挂载机制 (是运行时 flag 还是要 config 文件预置) | 读 opencode.ai/docs/server + 尝试 `opencode serve --help` | B1 (blocker) |
-| U3 | 首启 `opencode auth login -p anthropic` 能否纯 env-var (ANTHROPIC_API_KEY) 绕过, 无需交互 | fresh docker + env + `opencode run ...` 观察是否要求 login prompt | B1/B2 都是 (安全 default) |
-| U4 | opencode `acp` 子命令是否走 Agent Client Protocol (Zed ACP), 若是可直接复用 `runtime/grok-build-acp` | `opencode acp --help` + 读源码 | 影响 B1 工时上限 |
-| U5 | `POST /session/:id/message` 同步返回的 `parts: Part[]` 里 final assistant text 的 canonical path | 打真 opencode serve + curl 一次 | B1 (blocker) |
-| U6 | session 磁盘位置能否指定为 `.anet/nodes/<alias>/.opencode/` (避免全局污染) | 读 config docs + `opencode db path` | 两方案都影响 (多节点隔离) |
-| U7 | opencode 是否支持传 image 附件 (对齐 `images?: string[]` handler 契约) | docs `--file` flag + 试真 API | 多 modal 场景 |
+| # | 未知项 | 验证方法 | 阻塞哪个方案 | v0.2 状态 |
+|---|---|---|---|---|
+| U1 | `opencode run --format json` 事件 exact schema, 抽 final assistant text 的稳定 JSON path | fresh docker + `opencode run --format json "hi"` 抓 stdout | B2 (blocker) / B1' (nice-to-have) | **pending** (等 Vincent API key) |
+| U2 | `opencode serve` MCP 挂载机制 (是运行时 flag 还是要 config 文件预置) | ~~读 docs + `opencode serve --help`~~ | B1' (blocker) | ✅ **verified — 必须 config 文件预置**, 无 runtime flag |
+| U3 | 首启 `opencode auth login -p anthropic` 能否纯 env-var (ANTHROPIC_API_KEY) 绕过 headless | fresh docker + env + `opencode run ...` 观察是否要求 login prompt | B1'/B2 都是 (安全 default) | **pending** (等 Vincent API key) |
+| U4 | opencode `acp` 子命令是否 Zed ACP, 若是可复用 `runtime/grok-build-acp` | ~~`opencode acp --help`~~ | 影响 B1' 工时上限 | ✅ **verified — 是一等 ACP TCP server**, transport 换 stdio → TCP 后可复用 grok-build-acp 抽象 |
+| U5 | `POST /session/:id/message` 同步返回 `parts: Part[]` 里 final assistant text 的 canonical path | 打真 opencode serve + curl 一次 | B1 legacy (blocker) | **pending** (B1' 走 ACP 路线可能绕过, 但保留 fallback 用) |
+| U6 | session 磁盘位置能否指定为 `.anet/nodes/<alias>/.opencode/` | 读 config docs + `opencode db path` | 两方案都影响 (多节点隔离) | ✅ **verified — 有 `opencode db` 子命令 + `--cwd` flag + `OPENCODE_CONFIG` env**, 隔离手段齐全 |
+| U7 | opencode 是否支持 image 附件 | `opencode run --file <path>` 一等支持 (`opencode run --help` 已验) | 多 modal 场景 | ✅ **verified — `-f/--file` flag 一等**, 每 turn 附件走 anet 现有 images[] 接 --file 参数 |
+| U8 (v0.2 新增) | opencode acp 消息 schema 跟 grok agent stdio 是否 byte-exact 兼容 (initialize / session/new / prompt / turn 消息格式), 若不兼容需要多少 adapter 层 shim | 打通 opencode acp TCP client 后跑一次真 turn, 拿到实际消息 dump 对比 grok-build-acp/events.ts 中的 shape | B1' (blocker, 决定复用抽象比例 → 影响工时上限) | **pending** (需 API key + 起真 turn) |
 
-**建议**: 派测试号 (通信测试马 或 agent-node docker container) 起一轮活体探针跑 U1/U2/U3/U5 4 大 blocker, 耗时约 1-2h, 拿到数据回填 RFC v0.2. 通信龙 review 前建议做这一步.
+**v0.2 状态**: U2/U4 blocker 验完, 打开 B1' 新方案 + 显著砍工时. U6/U7 顺手回填 (查 --help 时看到的). U1/U3/U5/U8 仍等 Vincent API key + track 拍板. U8 是 v0.2 新增, 挂 B1' 上限.
 
 ---
 
@@ -296,15 +375,18 @@ opencode session 若跟 anet 其他 session 语义不同 (opencode 有 `--fork` 
 
 ## 7. 建议实施顺序 (若 review 通过)
 
-**Phase 0 (前置, ~2h)**: 活体探针跑 U1/U2/U3/U5 → RFC v0.2 补数字 → 通信龙 final judge
+**Phase 0a ✅ 完成 (v0.2 交付)**: U2/U4/U6/U7 无 key 可跑的探针 (~1h 实际耗时) → 打开 B1' 新方案 + 砍 5h 工时
 
-**Phase 1 MVP (B2 冷启 route, ~7h)**: 让 opencode-cli 能作为 runtime 值出现 + 冷启 `opencode run` 能 process 一个 task → 基本 e2e docker green. 用户能创建 opencode-cli 节点 + 收 task + 回 text.
+**Phase 0b (~1-2h, 等 Vincent API key)**: 剩余 U1/U3/U5/U8 需 key 探针 (Anthropic 或 OpenAI, opencode 不支持 MiniMax). 拿到 key 后 fresh docker + `opencode auth login -p anthropic` 或 env var 直塞 → 跑 `opencode run` + 抓 `--format json` 事件 schema + 打通 opencode acp TCP client 跑真 turn 抓 ACP 消息 schema (U8) → RFC v0.3 定稿
 
-**Phase 2 常驻升级 (B1, ~15h)**: 换 `opencode serve` 常驻 + HTTP client + SSE + supervisor + MCP inject → 真生产就绪
+**Phase 1 MVP (B2 冷启 route, ~7h)** [如 Vincent 选 MVP-first]: 让 opencode-cli 能作为 runtime 值出现 + 冷启 `opencode run` 能 process 一个 task → 基本 e2e docker green
 
-**Phase 3 完善 (~3h)**: 多 vendor 预设 (VendorSpec 表) + wizard 交互优化 + docs + preview 发版
+**Phase 2 常驻升级 (B1', ~13h)** [如直接一步 B1' 或 从 Phase 1 upgrade]: `opencode acp` 常驻 + TCP transport 复用 grok-build-acp 抽象 + MCP inject via `OPENCODE_CONFIG` + supervisor
 
-**总计 (含 Phase 0)**: ~27h 到 Phase 3 完成, 建议分 3 PR ship 让 review 面小.
+**Phase 3 完善 (~3h)**: 多 vendor 预设 (VendorSpec 表, 走 `opencode providers` 一等抽象) + wizard 交互优化 + docs + preview 发版
+
+**总计 (含 Phase 0b + Phase 1 MVP-then-upgrade path)**: ~25h 到 Phase 3 完成, 建议分 3 PR ship 让 review 面小.
+**若直接 B1' 一步到位** (skip Phase 1): ~19h.
 
 ---
 
