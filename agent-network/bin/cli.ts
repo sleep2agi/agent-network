@@ -2751,6 +2751,18 @@ async function launchAgent(id: string, forceNewSession = false) {
       ...(token ? { COMMHUB_TOKEN: token } : {}),
       ...(hub ? { COMMHUB_URL: hub } : {}),
     };
+    // #203 defense-in-depth — when profile.node_id is falsy (legacy config
+    // without a persisted node_id), the `...(profile.node_id ? ... : {})`
+    // spread above is a no-op, and any stale COMMHUB_NODE_ID inherited from
+    // the parent shell (e.g. left over from a previous `anet node start`)
+    // would survive into the child. agent-node reads COMMHUB_NODE_ID before
+    // fileConfig.node_id at cli.ts:580, and its CurrentAliasResolver then
+    // asks the hub "what alias for this node_id?" — inheriting A's node_id
+    // makes B's runtime drift to A's alias, triggering the report_status
+    // token-name rebind at server/src/tools.ts:280-284 → 串号. Explicitly
+    // strip both identity envs when we don't have a canonical value; the
+    // launcher's --alias flag remains the sole source.
+    if (!profile.node_id) delete (env as Record<string, unknown>).COMMHUB_NODE_ID;
     // #125 fix (preview.3) — resolve envRef before spawn so the child gets a
     // plain string in env; the child's own envRef-resolver would otherwise
     // never run (parent crashes on `.replace()` of an object first).
@@ -2874,6 +2886,10 @@ async function launchAgent(id: string, forceNewSession = false) {
       CLAUDE_CODE_RESUME_THRESHOLD_MINUTES: process.env.CLAUDE_CODE_RESUME_THRESHOLD_MINUTES || "999999999",
       ...(token ? { COMMHUB_TOKEN: token } : {}),
     };
+    // #203 defense-in-depth — see agent-node branch above. Strip parent-shell
+    // COMMHUB_NODE_ID when we don't have a canonical value; prevents the
+    // node-server.js stdio child from inheriting A's node_id when starting B.
+    if (!profile.node_id) delete (env as Record<string, unknown>).COMMHUB_NODE_ID;
     // #125 fix (preview.3) — same envRef resolution as the agent-node spawn
     // path above, just for the claude-code-cli runtime branch.
     // #193 envRef Option A — also self-source the per-node .env.

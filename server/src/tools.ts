@@ -365,6 +365,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           };
         }
       }
+      // #203 identity guard — network tokens must not silently rebind their
+      // own name via report_status. Without this, a runtime whose ALIAS
+      // drifted (env leak / wrong --alias / CurrentAliasResolver seeded from
+      // the wrong node_id) could rewrite api_tokens.name and cause every
+      // subsequent send_task from this token to be attributed to the drifted
+      // alias — the observed #203 symptom (grokB's send arriving as
+      // from=grokA). Only the legit rename path (rename.ts) may cross the
+      // token→alias binding. Symmetric to fromIdentityMismatchReply on the
+      // send side (test198).
+      if (callerTokenIsNetwork && callerAlias && !canonical.renamed && effectiveAlias !== callerAlias) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "alias_identity_mismatch",
+              message: "report_status alias does not match the token-bound node alias; use anet node rename to change identity",
+              token_alias: callerAlias,
+              reported_alias: effectiveAlias,
+            }),
+          }],
+        };
+      }
       console.log(`[${ts()}] ${effectiveAlias} (${resume_id.slice(0, 8)}) → report_status: ${status}${task ? " | " + task.slice(0, 60) : ""}${effectiveNetId ? " [net]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       if (callerTokenIsNetwork && callerTokenId) {
         try {
