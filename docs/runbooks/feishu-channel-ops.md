@@ -13,15 +13,15 @@
 | 项 | 值 |
 |---|---|
 | 容器 | `anet-feishu-local`（docker，CMD 靠 entrypoint + `tail -f`） |
-| 节点 alias | `feishu-local`（**唯一** feishu 连接） |
-| agent-network | `2.3.0-preview.16`（含官方 #324 图片修复） |
-| agent-node | `2.5.0-preview.15` |
+| 节点 alias | `TMWork小助手`（**唯一** feishu 连接；2026-07-01 从 `feishu-local` 改的，见 §12 rename history） |
+| agent-network | `2.3.0-preview.17`（含 #362 inbound file download + 官方 #324 图片修复） |
+| agent-node | `2.5.0-preview.16` |
 | 补丁 | **无**（跑官方发布版） |
 | app | `<cli_...>`（TMWork小助手） |
 | model | `MiniMax-M3`，endpoint `https://api.minimaxi.com/anthropic` |
 | session | `<uuid>`（靠 `/root/.claude` 挂载持久化） |
 | 已验证 | 文字 ✅ / 图片 ✅ / 群@ ✅ / persona ✅ / session 记忆 ✅ |
-| 未做 | inbound **文件**下载（[#362](https://github.com/sleep2agi/agent-network/issues/362)） |
+| ~~未做~~ | ~~inbound 文件下载~~ ✅ 2026-07-01 preview.17 修复（#362 / PR #364） |
 
 ---
 
@@ -32,16 +32,16 @@
 容器 anet-feishu-local
 ├─ tini → feishu-entrypoint.sh (PID 1)         # 镜像 entrypoint，容器启动跑 bring-up
 │   └─ 自启一个默认节点 `feishu-agent`          # ⚠️ commhub-only，无 feishu channel，不竞争
-├─ agent-node --alias feishu-local             # ← 真正的飞书 bot（手动 docker exec -d 起）
+├─ agent-node --alias TMWork小助手             # ← 真正的飞书 bot（手动 docker exec -d 起）
 │   └─ fork worker.js（feishu WSClient 长连接） # 收事件 → IPC → think() → 回复
 ```
 - `feishu-agent` 是 entrypoint 的默认产物，`channels: ["server:commhub"]`，**没有** feishu channel，**不会**抢 feishu 事件。别被它迷惑。
-- `feishu-local` 是我们手动起的飞书 bot，是**唯一**连 feishu app 的连接。
+- `TMWork小助手` 是我们手动起的飞书 bot，是**唯一**连 feishu app 的连接。
 
 ### 1.2 三挂载（缺一不可）
 | host（`<feishu-data-dir>/`） | 容器 | 作用 |
 |---|---|---|
-| `work` | `/work` | 节点配置 `.anet/nodes/feishu-local/`（config.json + channels/feishu/{.env,access.json}）、logs、SQLite |
+| `work` | `/work` | 节点配置 `.anet/nodes/TMWork小助手/`（config.json + channels/feishu/{.env,access.json}）、logs、SQLite |
 | `claude` | `/root/.claude` | **claude-agent-sdk 对话历史** `projects/-work/<session>.jsonl` —— session 记忆，重建容器不丢 |
 | `runtime.env` | `--env-file` | 密钥注入（不落进 agent 能读的 /work，安全） |
 
@@ -64,7 +64,7 @@
 
 ```
 <feishu-data-dir>/
-├─ work/.anet/nodes/feishu-local/
+├─ work/.anet/nodes/TMWork小助手/
 │   ├─ config.json                 # runtime=claude-agent-sdk, model, session, flags, channels
 │   ├─ channels/feishu/
 │   │   ├─ .env                     # FEISHU_APP_ID / FEISHU_APP_SECRET（chmod 600）
@@ -83,16 +83,16 @@
 
 ## 3. 运维流程
 
-### 3.1 重启 feishu-local（🔴 只杀 feishu-local，别 kill 全部 agent-node）
+### 3.1 重启 TMWork小助手（🔴 只杀 TMWork小助手，别 kill 全部 agent-node）
 ```bash
 # ❌ 别这么干：kill 全部 agent-node 会连 entrypoint 的 feishu-agent 一起杀 → 触发容器重启
-# ✅ 只杀 feishu-local 的确切 PID：
+# ✅ 只杀 TMWork小助手 的确切 PID：
 docker exec anet-feishu-local sh -c '
-  for pid in $(ps -eo pid,args | grep "[a]gent-node .*feishu-local\|[f]eishu/worker.js" | awk "{print \$1}"); do
+  for pid in $(ps -eo pid,args | grep "[a]gent-node .*TMWork小助手\|[f]eishu/worker.js" | awk "{print \$1}"); do
     kill "$pid" 2>/dev/null; done'
 sleep 3
 docker exec -d anet-feishu-local sh -c \
-  'cd /work && exec agent-node --config /work/.anet/nodes/feishu-local/config.json --alias feishu-local >> /work/start.out 2>&1'
+  'cd /work && exec agent-node --config /work/.anet/nodes/TMWork小助手/config.json --alias TMWork小助手 >> /work/start.out 2>&1'
 sleep 12
 # 验证：workers=1 + client ready + session resume
 docker exec anet-feishu-local sh -c 'grep -iE "client ready|bridge online|session:" /work/start.out | tail'
@@ -102,11 +102,11 @@ docker exec anet-feishu-local sh -c 'grep -iE "client ready|bridge online|sessio
 ### 3.2 升级 agent-network / agent-node
 ```bash
 # 先记版本 + 备份 config
-docker exec anet-feishu-local sh -c 'cp /work/.anet/nodes/feishu-local/config.json /work/.anet/nodes/feishu-local/config.json.bak-preupgrade'
+docker exec anet-feishu-local sh -c 'cp /work/.anet/nodes/TMWork小助手/config.json /work/.anet/nodes/TMWork小助手/config.json.bak-preupgrade'
 # 升级
 docker exec anet-feishu-local sh -c 'npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview'
 docker exec anet-feishu-local sh -c 'cat /usr/local/lib/node_modules/@sleep2agi/agent-network/package.json | grep -m1 version'
-# 按 3.1 重启 feishu-local + 逐项验证（文字/图片/群@/session）
+# 按 3.1 重启 TMWork小助手 + 逐项验证（文字/图片/群@/session）
 ```
 
 ### 3.3 换 app（🔴 必改三处，最容易漏 access.json）
@@ -121,8 +121,8 @@ docker exec anet-feishu-local sh -c 'cat /usr/local/lib/node_modules/@sleep2agi/
 
 ### 3.5 白名单增删
 ```bash
-anet channel allow feishu feishu-local --add-from ou_<open_id>   # 加私聊人
-anet channel allow feishu feishu-local --add-chat oc_<chat_id>   # 加群
+anet channel allow feishu TMWork小助手 --add-from ou_<open_id>   # 加私聊人
+anet channel allow feishu TMWork小助手 --add-chat oc_<chat_id>   # 加群
 ```
 或直接改 `access.json`。**改完必重启节点**（access.json 不热加载）。`["*"]` = 放开所有。fail-closed：缺失/空/解析失败 = 全拒。
 
@@ -130,7 +130,7 @@ anet channel allow feishu feishu-local --add-chat oc_<chat_id>   # 加群
 
 ## 4. 🔴 运维红线
 
-1. **重启只杀 feishu-local 的确切 PID**（别 kill 全部 agent-node → 碰 entrypoint → 容器重启）。
+1. **重启只杀 TMWork小助手 的确切 PID**（别 kill 全部 agent-node → 碰 entrypoint → 容器重启）。
 2. **三挂载**必须都在（/work + /root/.claude + --env-file）。
 3. **换 app 必改三处**（env / .env / access.json 白名单）。
 4. **不在 live 群/节点发 test/probe**（探测直调 REST 看返回码，不往真群发）。
@@ -177,8 +177,20 @@ docker inspect anet-feishu-local --format 'RestartCount={{.RestartCount}} Status
 
 ## 7. 待办 & 关联文档
 
-- **[#362](https://github.com/sleep2agi/agent-network/issues/362)**：inbound 文件下载（诊断+修法全在 issue，跟图片同套路 `messageResource.get(type:"file")` → `getReadableStream()` → 存本地 → 给 agent 路径）。
+- ~~[#362](https://github.com/sleep2agi/agent-network/issues/362) inbound 文件下载~~ — ✅ 2026-07-01 preview.17 修复（PR #364）。
 - 用户文档（已上线 anet.sh）：
   - [飞书 channel 接入指南](/guide/feishu)（Docker 一键 + 手动、模型后端、白名单、群@、故障排查）
   - [经典案例：飞书静默拒收 + 同源图片案例](/troubleshooting/case-feishu-silent-deny)
 - 设计：[RFC-020](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-020-im-platform-integration.md)（issue #179）。
+
+---
+
+## 12. Alias rename 历史
+
+飞书节点 alias 曾变更过，历史请检索：
+
+| 日期 (北京时间) | 从 | 到 | 原因 | 参考 |
+|---|---|---|---|---|
+| 2026-07-01 | `feishu-local` | `TMWork小助手` | Vincent 要求，跟飞书 bot 显示名一致，commhub/dashboard 更清楚 | 通信龙 dispatch ef4472c1；`anet node rename --force`（node_id `n_67b061b0` 保留，session `c14f65da...` 保留，rename txn `rtxn_672a242bb412445d929871b83009911b`） |
+
+> ⚠️ 老的 log 记录 / 故障报告里可能还写 `feishu-local`，那是**当时的**别名，不是笔误。运维引用（重启 grep pattern、路径 `.anet/nodes/*`、CLI `--alias`）都已改到新名。
