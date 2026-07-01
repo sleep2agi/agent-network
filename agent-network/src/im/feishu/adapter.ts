@@ -33,7 +33,6 @@ import type { FeishuAccessList, FeishuChannelConfig } from "./config.js";
 import { resolveFeishuAccess } from "../access-resolve.js";
 import {
   renderMarkdownToPng,
-  shouldRenderAsImage,
   closeBrowser as closeMarkdownBrowser,
 } from "./markdown-image-renderer.js";
 import { feishuConvKey } from "./outbound-paths.js";
@@ -156,6 +155,12 @@ export class FeishuAdapter implements IMAdapter {
           // M5c: attach downloaded image paths for image-type messages.
           // Failure-tolerant — text flow proceeds even when download fails.
           await maybeAttachImages(rawEvent, normalized, client, mediaDir);
+          // RFC-020 §18 (issue #362): attach downloaded FILE paths for
+          // file-type messages. Same failure-tolerant discipline. Prior
+          // to this the file message only stamped `text = "[文件: <name>]"`
+          // and the agent had no way to open the actual bytes → went
+          // find/ls/Glob hunting.
+          await maybeAttachFile(rawEvent, normalized, client, mediaDir);
 
           const verdict = checkAccess(normalized, access, groupPolicy);
           if (!verdict.allow) {
@@ -933,6 +938,256 @@ async function downloadImage(
     const errMsg = e?.message ?? String(e);
     const errCode = e?.response?.data?.code ?? e?.code ?? "";
     process.stderr.write(`[feishu:image] ${messageId} downloadImage threw: code=${errCode} msg=${errMsg}\n`);
+    return null;
+  }
+}
+
+/**
+ * RFC-020 §18 (issue #362) — download inbound file (non-image) messages
+ * and attach the local path + descriptor to `normalized.content`.
+ *
+ * Handles ONLY `message_type === "file"`. Image, sticker, text, post
+ * are the concern of other paths. Failure is non-fatal: on any error
+ * the text carrier (`[文件: <name>]`) survives so the LLM still sees
+ * SOMETHING; it just won't have a real file to open.
+ *
+ * Populates:
+ *   - `content.files` — { name, path } for the legacy consumer shape
+ *     that types.ts already declares.
+ *   - `content.attachments[]` — RFC-020 §17 descriptor with `type:"file"`
+ *     and (when hub upload succeeded) `file_id` for cross-machine
+ *     delegation. Merged with any pre-existing entries so image + file
+ *     in the same event both carry through.
+ */
+async function maybeAttachFile(
+  rawEvent: unknown,
+  normalized: NormalizedIMEvent,
+  client: lark.Client | null,
+  mediaDir: string | null,
+): Promise<void> {
+  const msgId = normalized.messageId;
+  if (!client) {
+    process.stderr.write(`[feishu:file] ${msgId} skip: no lark client\n`);
+    return;
+  }
+  if (!mediaDir) {
+    process.stderr.write(`[feishu:file] ${msgId} skip: no mediaDir configured\n`);
+    return;
+  }
+  const raw = rawEvent as FeishuRawEvent | undefined;
+  const message = raw?.message;
+  if (!message || !message.message_id) return;
+  if (message.message_type !== "file") return;
+
+  let parsed: { file_key?: string; file_name?: string; file_size?: string };
+  try {
+    parsed = JSON.parse(message.content) as {
+      file_key?: string;
+      file_name?: string;
+      file_size?: string;
+    };
+  } catch (e: any) {
+    process.stderr.write(
+      `[feishu:file] ${msgId} skip: content not JSON (${e?.message ?? e})\n`,
+    );
+    return;
+  }
+  const fileKey = parsed.file_key;
+  const fileName = parsed.file_name ?? "";
+  if (!fileKey) {
+    process.stderr.write(`[feishu:file] ${msgId} skip: no file_key in content\n`);
+    return;
+  }
+
+  process.stderr.write(
+    `[feishu:file] ${msgId} download begin (name=${fileName || "(unnamed)"} key=${fileKey.slice(0, 16)}…)\n`,
+  );
+  const localPath = await downloadFile(
+    client,
+    message.message_id,
+    fileKey,
+    fileName,
+    mediaDir,
+    normalized.conversation?.conversationId,
+  );
+  if (!localPath) {
+    process.stderr.write(
+      `[feishu:file] ${msgId} download FAILED (name=${fileName || "?"}, see downloadFile stderr above)\n`,
+    );
+    return;
+  }
+  process.stderr.write(`[feishu:file] ${msgId} download ok → ${localPath}\n`);
+
+  // Hub upload for cross-machine delegation (mirrors the image branch —
+  // same env vars, same 12 MiB cap, same failure-tolerance). See
+  // maybeAttachImages for the long rationale.
+  const hubUrl = process.env.COMMHUB_URL || process.env.ANET_HUB_URL || "";
+  const authToken =
+    process.env.ANET_HUB_TOKEN ||
+    process.env.AUTH_TOKEN ||
+    process.env.COMMHUB_TOKEN ||
+    "";
+  let hubResult: HubUploadResult | null = null;
+  if (hubUrl && authToken) {
+    try {
+      const uploads = await uploadFilesToHubConcurrent([localPath], {
+        hubUrl,
+        authToken,
+      });
+      hubResult = uploads[0] ?? null;
+    } catch (e: any) {
+      process.stderr.write(
+        `[feishu:file] ${msgId} hub-upload threw: ${e?.message ?? e} (path-only fallback)\n`,
+      );
+    }
+  } else {
+    process.stderr.write(
+      `[feishu:file] ${msgId} hub-upload skipped: COMMHUB_URL or auth token unset (path-only)\n`,
+    );
+  }
+
+  const descriptor: {
+    type: "file";
+    path: string;
+    file_id?: string;
+    mime?: string;
+    name?: string;
+    size?: number;
+  } = { type: "file", path: localPath };
+  if (fileName) descriptor.name = fileName;
+  const parsedSize = typeof parsed.file_size === "string" ? Number(parsed.file_size) : NaN;
+  if (Number.isFinite(parsedSize) && parsedSize > 0) descriptor.size = parsedSize;
+  if (hubResult) {
+    if (hubResult.file_id) descriptor.file_id = hubResult.file_id;
+    if (hubResult.mime) descriptor.mime = hubResult.mime;
+    if (hubResult.name) descriptor.name = hubResult.name;
+    if (typeof hubResult.size === "number") descriptor.size = hubResult.size;
+  }
+  process.stderr.write(
+    `[feishu:file] ${msgId} attachment path=${descriptor.path} file_id=${descriptor.file_id || "(none)"} size=${descriptor.size ?? "?"}B name=${descriptor.name ?? "?"}\n`,
+  );
+
+  const existingFiles = Array.isArray(normalized.content?.files)
+    ? normalized.content.files
+    : [];
+  const existingAttachments = Array.isArray(normalized.content?.attachments)
+    ? normalized.content.attachments
+    : [];
+  normalized.content = {
+    ...normalized.content,
+    files: [...existingFiles, { name: fileName || "file", path: localPath }],
+    attachments: [...existingAttachments, descriptor],
+  };
+}
+
+/**
+ * Sanitize a Feishu-supplied `file_name` so it's safe to append to a
+ * filesystem path. Strips `/`, `\`, `..`, control characters, and NUL
+ * bytes. Empty / all-stripped input falls back to a placeholder that
+ * uses the message id, so a hostile client can never write outside the
+ * conversation's `<mediaDir>/<convKey>/` directory.
+ *
+ * NOT a full display-safety pass — the LLM still sees the sanitized
+ * bytes and shouldn't render them as HTML/etc. That's a Layer above.
+ */
+export function sanitizeFileName(raw: string, fallback: string): string {
+  if (typeof raw !== "string" || raw.length === 0) return fallback;
+  let s = raw
+    // Strip path separators + parent-dir traversal + control chars.
+    .replace(/[\/\\]/g, "_")
+    .replace(/\x00/g, "")
+    .replace(/[\r\n\t]/g, "_");
+  // Collapse `.` / `..` prefixes.
+  while (s.startsWith(".")) s = s.slice(1);
+  // Clamp length — Feishu allows up to 100 chars; longer is unusual and
+  // could be an attempt to overflow shell / display buffers.
+  if (s.length > 200) s = s.slice(0, 200);
+  if (s.length === 0) return fallback;
+  return s;
+}
+
+/**
+ * Download an inbound feishu FILE (non-image message_type) to
+ * `<mediaDir>/<convKey>/<safeMsgId>-<sanitizedFileName>` and return
+ * the local path. Mirrors `downloadImage` in shape but:
+ *
+ *   - `params: { type: "file" }` (not "image").
+ *   - NO magic-byte mime whitelist — inbound files are arbitrary types
+ *     (docx, json, pdf, csv, txt, zip, ...). The lark SDK stream is
+ *     trusted the same way it is for images once the transport is
+ *     verified.
+ *   - Filename is the user-visible name (sanitized) prefixed by the
+ *     safe msg_id to prevent collisions across resends. The LLM sees a
+ *     human-readable filename in the path so it can reason about the
+ *     file type from the extension.
+ *
+ * Failure returns `null` (mirrors downloadImage). Caller logs via
+ * `[feishu:file]` prefix consistent with the image path.
+ *
+ * (RFC-020 §18 — issue #362; sender: 通信龙 2026-07-01 dispatch.)
+ */
+async function downloadFile(
+  client: lark.Client,
+  messageId: string,
+  fileKey: string,
+  fileName: string,
+  mediaDir: string,
+  conversationId?: string,
+): Promise<string | null> {
+  try {
+    const resp = await client.im.messageResource.get({
+      path: { message_id: messageId, file_key: fileKey },
+      params: { type: "file" },
+    });
+    if (!resp) {
+      process.stderr.write(
+        `[feishu:file] ${messageId} messageResource.get returned falsy (no stream)\n`,
+      );
+      return null;
+    }
+    // Same lark SDK response shape as downloadImage. See the long
+    // comment there (~L878) for the `getReadableStream()` vs raw
+    // `Readable` history.
+    const respObj = resp as unknown as {
+      getReadableStream?: () => Readable;
+      writeFile?: (path: string) => Promise<string>;
+    };
+    if (typeof respObj.getReadableStream !== "function") {
+      process.stderr.write(
+        `[feishu:file] ${messageId} resp shape unexpected — no getReadableStream() method (lark SDK version drift?)\n`,
+      );
+      return null;
+    }
+    const stream = respObj.getReadableStream();
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      stream.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      stream.on("end", () => resolve());
+      stream.on("error", (err: Error) => reject(err));
+    });
+    const body = Buffer.concat(chunks);
+    process.stderr.write(
+      `[feishu:file] ${messageId} stream collected ${body.length} bytes\n`,
+    );
+    // Same shared path layout as inbound images (RFC-020 §15.1) — the
+    // outbound whitelist checker accepts anything under this dir.
+    const subdir = conversationId
+      ? join(mediaDir, feishuConvKey(conversationId))
+      : mediaDir;
+    mkdirSync(subdir, { recursive: true });
+    const safeMsgId = messageId.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const safeName = sanitizeFileName(fileName, `${safeMsgId}.bin`);
+    // Prefix with msg id so two files with the same user-visible name
+    // (or resends of the same file) don't overwrite each other.
+    const filepath = join(subdir, `${safeMsgId}-${safeName}`);
+    writeFileSync(filepath, body);
+    return filepath;
+  } catch (e: any) {
+    const errMsg = e?.message ?? String(e);
+    const errCode = e?.response?.data?.code ?? e?.code ?? "";
+    process.stderr.write(
+      `[feishu:file] ${messageId} downloadFile threw: code=${errCode} msg=${errMsg}\n`,
+    );
     return null;
   }
 }
