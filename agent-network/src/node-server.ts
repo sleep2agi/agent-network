@@ -558,3 +558,44 @@ async function gracefulShutdown() {
 process.stdin.on("end", () => gracefulShutdown());
 process.on("SIGTERM", () => gracefulShutdown());
 process.on("SIGINT", () => gracefulShutdown());
+
+// #180 — parent-alive invariant. This MCP bridge is spawned by claude
+// (Claude Code CLI) via stdio; its lifetime MUST NOT outlive claude's.
+// If claude dies suddenly (SIGKILL, OOM, crash) before we see stdin EOF,
+// we'd otherwise get reparented to PID 1 and keep heart-beating with the
+// old COMMHUB_ALIAS → dashboard ghost + commhub ON CONFLICT(resume_id)
+// upsert reverts a downstream rename (SDK马 Finding B — the #180 root
+// cause). Method-2 defense-in-depth (通信龙 4ce3fe4a): periodic check —
+// if our original parent is gone (reparent to PID 1 OR original PPID
+// process no longer alive), report offline and self-exit. Method 1
+// (agent-network/bin/cli.ts sweepMcpOrphansForAlias) is the primary fix
+// on the kill side; this ensures the invariant holds even for parent
+// deaths outside a rename (crash / OOM / user kill).
+//
+// The check is Linux-first (getppid() only meaningful on POSIX) but
+// harmless on other platforms — kill(pid, 0) throws consistently.
+const _ORIGINAL_PPID = process.ppid;
+if (_ORIGINAL_PPID && _ORIGINAL_PPID > 1) {
+  const _parentCheckTimer = setInterval(() => {
+    // Reparent-to-PID-1 is the canonical Linux orphan signal.
+    if (process.ppid === 1 && _ORIGINAL_PPID !== 1) {
+      log(`parent claude died (reparented to PID 1 from ${_ORIGINAL_PPID}) — self-exit to avoid ghost heart-beat`);
+      gracefulShutdown();
+      return;
+    }
+    // Belt: original PPID no longer alive (some Linux configs may not
+    // reparent immediately, or Docker init proxies may hold the ppid link).
+    try {
+      process.kill(_ORIGINAL_PPID, 0);
+    } catch (e: any) {
+      if (e?.code === "ESRCH") {
+        log(`parent claude pid=${_ORIGINAL_PPID} no longer exists (kill-0 ESRCH) — self-exit to avoid ghost heart-beat`);
+        gracefulShutdown();
+      }
+      // EPERM = parent moved to a different security context but is
+      // still alive; not our signal. Any other error is best-effort skip.
+    }
+  }, 30_000);
+  // Never keep the event loop alive just for this check.
+  if (typeof _parentCheckTimer.unref === "function") _parentCheckTimer.unref();
+}

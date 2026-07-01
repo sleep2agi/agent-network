@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Mock 'claude' binary for #180 e2e — reproduces the claude-code-cli
+# process shape INCLUDING its .anet/node-server.js MCP subprocess.
+#
+# Real Claude Code CLI, when it starts via `claude -n <alias> --mcp-config
+# .anet/node-server.js`, spawns node-server.js as an MCP stdio subprocess.
+# That subprocess has its own PID + its own 3-min heartbeat loop
+# (agent-network/src/node-server.ts:525-536) that reports_status under the
+# original COMMHUB_ALIAS. findNodeProcessesByAlias in renameCommand
+# matches ONLY the claude/agent-node/codex/grok binary — it does NOT
+# match `node .anet/node-server.js`. If the MCP subprocess survives
+# claude's death (e.g., orphaned to PID 1 or spawn used detached),
+# it becomes a ghost heart-beating the old alias.
+#
+# This mock reproduces that shape: it spawns a subprocess `mock-mcp`
+# that heart-beats independently. Whether the subprocess dies when
+# mock-claude dies is what the e2e is measuring.
+
+set -uo pipefail
+
+ALIAS=""
+prev=""
+for arg in "$@"; do
+  if [[ "$prev" == "-n" || "$prev" == "--alias" ]]; then
+    ALIAS="$arg"
+    break
+  fi
+  prev="$arg"
+done
+
+echo "[mock-claude pid=$$] argv: $*" >&2
+echo "[mock-claude pid=$$] alias: '${ALIAS:-<none>}'" >&2
+
+# ── The MCP subprocess (simulates .anet/node-server.js) ──
+# This heart-beats independently. Its parent is mock-claude — we
+# want to see if it survives when mock-claude dies.
+#
+# CRITICAL: how we spawn this determines the reproduction. Real
+# Claude Code CLI spawns MCP servers via child_process.spawn without
+# detached:true (per MCP stdio transport spec). BUT — MCP servers
+# themselves may or may not exit on stdin EOF; that's up to the
+# MCP server implementation.
+#
+# The real .anet/node-server.ts handles stdin `end` and calls
+# process.exit(0). But if there's ANY window between when the
+# heartbeat interval fires and when gracefulShutdown completes,
+# and the interval fires DURING the rename window, it can post one
+# more heartbeat as the old alias to /api/status → ghost.
+#
+# For the reproduction, we simulate the "stdin doesn't close" case
+# by NOT wiring the subprocess's stdin to anything — the subprocess
+# heart-beats until externally SIGTERM'd.
+spawn_mcp_subprocess() {
+  bash -c "
+    set -uo pipefail
+    HUB='${COMMHUB_URL:-}'
+    TOK='${COMMHUB_TOKEN:-}'
+    ALIAS='${COMMHUB_ALIAS:-$ALIAS}'
+    NETID='${COMMHUB_NETWORK:-}'
+    echo \"[mock-mcp pid=\$\$] started, will heartbeat alias=\$ALIAS\" >&2
+    trap 'echo \"[mock-mcp pid=\$\$] SIGTERM received, exiting\" >&2; exit 0' SIGTERM
+    while true; do
+      if [[ -n \"\$HUB\" && -n \"\$TOK\" && -n \"\$ALIAS\" ]]; then
+        curl -sS -X POST \"\$HUB/api/status\" \
+          -H \"Authorization: Bearer \$TOK\" \
+          -H 'Content-Type: application/json' \
+          -d \"{\\\"alias\\\":\\\"\$ALIAS\\\",\\\"status\\\":\\\"idle\\\",\\\"agent\\\":\\\"mock-mcp\\\",\\\"task\\\":\\\"waiting\\\",\\\"progress\\\":0\${NETID:+,\\\"network_id\\\":\\\"\$NETID\\\"}}\" \
+          >/dev/null 2>&1 || true
+      fi
+      # Sleep in short chunks so SIGTERM is responsive
+      for _ in \$(seq 1 20); do sleep 0.1; done
+    done
+  " </dev/null >/dev/null 2>&2 &
+  MCP_PID=$!
+  echo "[mock-claude pid=$$] spawned mock-mcp subprocess pid=$MCP_PID" >&2
+}
+spawn_mcp_subprocess
+
+# SIGTERM handler — this simulates a slow-shutdown TUI. Real Claude
+# Code CLI can spend time on session save + MCP teardown before it
+# actually exits. During this teardown window, the MCP subprocess may
+# still heart-beat once more.
+#
+# CRITICAL for #180 reproduction — this mock deliberately does NOT
+# forward SIGTERM to the MCP subprocess. Real Claude Code CLI is
+# SUPPOSED to close MCP subprocess stdin as it shuts down, causing
+# the MCP subprocess to detect EOF and exit gracefully. But:
+#   - If claude is SIGKILL'd before shutdown starts, MCP never sees EOF
+#   - If MCP was spawned with detached (unknown for real claude), MCP
+#     escapes the parent's teardown entirely
+#   - If MCP's stdin was piped to /dev/null (as with some MCP configs),
+#     stdin-EOF never fires
+# Any of these leaves MCP heart-beating. That's the #180 ghost.
+handle_sigterm() {
+  echo "[mock-claude pid=$$] SIGTERM received — slow teardown (15s), MCP subprocess NOT signaled" >&2
+  sleep 15
+  echo "[mock-claude pid=$$] teardown complete (MCP subprocess pid=$MCP_PID still alive intentionally to reproduce #180 ghost)" >&2
+  exit 0
+}
+trap handle_sigterm SIGTERM
+
+echo "[mock-claude pid=$$] ready — awaiting signals" >&2
+while true; do
+  sleep 3600 &
+  wait $! 2>/dev/null || true
+done
