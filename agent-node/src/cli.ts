@@ -22,6 +22,7 @@ import { decideTickWork } from "./goals/scheduler";
 import { runCodexWakeForGoal, type CodexWakeDeps } from "./goals/codex-wake";
 import { isGoalCompleteSentinel } from "./goals/completion-detect";
 import { computeNextWakeAt } from "./goals/schedule";
+import { bumpFailure, resetFailure, applyAutoPause, resolveMaxConsecutiveFailures } from "./goals/failure-counter";
 import { formatSelfLoopsBlock } from "./goals/format";
 import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
@@ -1228,6 +1229,18 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
           task_id: g.parent_task_id,
         });
       }
+      // RFC-025 P0.3 — poison-goal auto-pause counter. On success
+      // (report/complete) reset. On LLM-reported failure (failed=true),
+      // bump + maybe auto-pause: keeps a poison goal from log-flooding
+      // + burning tokens every tick.
+      if (failed) {
+        const { shouldPause } = bumpFailure(g, resolveMaxConsecutiveFailures());
+        if (shouldPause && g.status === "active") {
+          applyAutoPause(g, `LLM wake reported failure: ${summary.slice(0, 200)}`);
+        }
+      } else {
+        resetFailure(g);
+      }
       g.progress_log.push({
         ts: new Date().toISOString(),
         status: failed ? "error" : completed ? "complete" : "report",
@@ -1311,17 +1324,25 @@ async function runGoalSchedulerTick() {
         await runOneGoalWake(goal);
       } catch (e: any) {
         // P1a hardening: one bad wake cannot starve the rest of the
-        // tick. Catch + log + record + move on. The goal stays in
-        // `active` with the same `next_wake_at`, so it'll be tried
-        // again next tick — we don't auto-cancel a failing goal here.
+        // tick. Catch + log + record + move on.
+        //
+        // P0.3 poison-goal auto-pause: bump the consecutive_failures
+        // counter here too (thrown wakes are just as much "failure"
+        // as `failed=true` returns). At threshold, auto-pause instead
+        // of leaving the goal `active` to re-fire every tick.
         const idShort = goal.goal_id.slice(0, 8);
         warn(`[goal] ${idShort} wake threw: ${e?.message || e}`);
         try {
           await goalStore.mutate(goal.goal_id, (g) => {
+            const errSummary = `tick-error: ${(e?.message || String(e)).slice(0, 400)}`;
+            const { shouldPause } = bumpFailure(g, resolveMaxConsecutiveFailures());
+            if (shouldPause && g.status === "active") {
+              applyAutoPause(g, `tick threw: ${(e?.message || String(e)).slice(0, 200)}`);
+            }
             g.progress_log.push({
               ts: new Date().toISOString(),
               status: "error",
-              summary: `tick-error: ${(e?.message || String(e)).slice(0, 400)}`,
+              summary: errSummary,
               task_id: g.parent_task_id,
             });
           });

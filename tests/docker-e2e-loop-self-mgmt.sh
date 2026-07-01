@@ -573,6 +573,76 @@ print('yes' if any(g.get('text')=='self-lock-bad-tz' for g in d.get('goals',[]))
   fi
 }
 
+# Group 6: P0.3 poison-goal auto-pause — end-to-end WIRE test.
+#
+# Scope constraint: `GoalStore` uses an in-memory `Map` as source of
+# truth (only re-loaded on process boot). External `goals.json` writes
+# between MCP calls are invisible — so we cannot inject
+# `consecutive_failures=5` via disk. The auto-pause TRIGGER
+# (`bumpFailure` → `applyAutoPause` at scheduler-tick failure) is
+# unit-tested exhaustively in `failure-counter.test.ts` (19 tests +
+# 3 self-loop-tools.test.ts edit-side tests). Hitting the trigger
+# end-to-end would require ≥5 real wake failures at 30s tick cadence
+# = ~3 min wait, not practical for e2e.
+#
+# What this e2e DOES prove: after adding the P0.3 counter-reset branch
+# to `handleEditMyLoop`, the existing `paused=true` → `paused=false`
+# wire still round-trips correctly through HTTP MCP → handler →
+# `goalStore.mutate` → `goals.json`. Basically a regression backstop
+# against the P0.3 change silently breaking `edit_my_loop`'s pause
+# flip on the codex/grok wire.
+test_poison_goal_unpause_wire() {
+  local alias="$1"
+  local workdir="$2"
+  sub "Group 6: P0.3 wire regression — edit_my_loop paused flip via HTTP MCP"
+  local r gid
+  r=$(call_loop_tool "$alias" "create_my_loop" "{\"task\":\"pgu-wire-test\",\"interval\":\"1h\"}")
+  gid=$(echo "$r" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('data',{}).get('goal_id','') if d.get('ok') else '')")
+  if [ -z "$gid" ]; then fail "pgu setup: create failed: $r"; return; fi
+  pass "pgu: create ok"
+  echo "    sleeping 31s for cooldown before pause edit..."
+  sleep 31
+  # First edit: pause
+  local er1 ok1
+  er1=$(call_loop_tool "$alias" "edit_my_loop" "{\"goal_id\":\"$gid\",\"paused\":true}")
+  ok1=$(echo "$er1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('ok',False))")
+  if [ "$ok1" != "True" ]; then fail "pgu: pause edit failed: $er1"; return; fi
+  local status1
+  status1=$(read_goals_json "$workdir" "$alias" | python3 -c "
+import sys,json
+target='$gid'
+for g in json.load(sys.stdin).get('goals',[]):
+  if g.get('goal_id')==target:
+    print(g.get('status',''));break
+")
+  if [ "$status1" = "paused" ]; then
+    pass "pgu: edit_my_loop({paused: true}) → status=paused wire OK"
+  else
+    fail "pgu: expected paused, got '$status1'"; return
+  fi
+  echo "    sleeping 31s for cooldown before unpause edit..."
+  sleep 31
+  # Second edit: unpause (this hits the P0.3 new counter-reset branch;
+  # counter starts undefined so reset is a no-op, but the code path fires).
+  local er2 ok2
+  er2=$(call_loop_tool "$alias" "edit_my_loop" "{\"goal_id\":\"$gid\",\"paused\":false}")
+  ok2=$(echo "$er2" | python3 -c "import sys,json;print(json.load(sys.stdin).get('ok',False))")
+  if [ "$ok2" != "True" ]; then fail "pgu: unpause edit failed: $er2"; return; fi
+  local status2
+  status2=$(read_goals_json "$workdir" "$alias" | python3 -c "
+import sys,json
+target='$gid'
+for g in json.load(sys.stdin).get('goals',[]):
+  if g.get('goal_id')==target:
+    print(g.get('status',''));break
+")
+  if [ "$status2" = "active" ]; then
+    pass "pgu: edit_my_loop({paused: false}) → status=active wire OK (P0.3 reset branch reached, no crash)"
+  else
+    fail "pgu: expected active, got '$status2'"
+  fi
+}
+
 # claude-agent-sdk structural smoke (no HTTP MCP path).
 # Verifies: node starts + SDK MCP wire log + addGoalFromSlash works.
 test_claude_structural() {
@@ -625,6 +695,7 @@ run_runtime_suite() {
     test_multi_loop_reference "$alias" "$workdir"
     test_cron_lite_three_modes "$alias" "$workdir"
     test_preflight_self_lock "$alias" "$workdir"
+    test_poison_goal_unpause_wire "$alias" "$workdir"
     test_cooldown_block "$alias" "$workdir"
   fi
   stop_node "$alias"

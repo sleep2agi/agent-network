@@ -70,6 +70,16 @@ export interface AgentGoal {
   created_at: string;
   updated_at: string;
   progress_log: GoalProgressEntry[];
+  // RFC-025 P0.3 — poison-goal auto-pause counter. Incremented every
+  // time a wake fails (LLM error, thread crash, tick-wide catch).
+  // Reset to 0 on any successful wake (report/complete) OR on
+  // `edit_my_loop({paused: false})` unpause. When the counter reaches
+  // MAX_CONSECUTIVE_FAILURES (default 5, env-overridable), the goal
+  // is auto-paused instead of continuing to fire — protects against
+  // log flood + LLM-token burn from a poison goal (bad config, dead
+  // vendor, spec bug). Legacy goals load with undefined, treated as
+  // 0 by the tick path; no migration needed. See RFC-025 §7 P0.3.
+  consecutive_failures?: number;
 }
 
 export interface GoalsFile {
