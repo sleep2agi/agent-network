@@ -44,6 +44,61 @@ export function isRateLimitOrQuotaError(msg: string | null | undefined): boolean
 }
 
 /**
+ * Extract a vendor-specific quota / limit code from `msg` if one is
+ * present. Used by `formatClassificationError` to promote a
+ * recognizable code into the user-facing error text so operators can
+ * match against vendor dashboard entries without hunting the raw
+ * message.
+ *
+ * Known codes:
+ *   - MiniMax `2056` — "已达到 Token Plan 用量上限" (Vincent 2026-07-01
+ *     — 通信龙 host curl reproduced this exact code)
+ *   - MiniMax `1000` / `1001` — generic vendor error envelope; kept
+ *     separate from quota (`1000` is transient in the vendor-retry
+ *     path #331, not a quota signal on its own).
+ *   - OpenAI-style `insufficient_quota` / `rate_limit_exceeded` —
+ *     already caught by `isRateLimitOrQuotaError`; this helper
+ *     surfaces them for the friendly text.
+ *
+ * Returns `null` when no known code is found. Non-string inputs return
+ * `null` too — safe to call on `err?.message` directly.
+ */
+export function extractQuotaCode(msg: string | null | undefined): string | null {
+  if (!msg || typeof msg !== "string") return null;
+  // MiniMax platform.minimaxi.com error codes — 2056 is the confirmed
+  // "Token Plan cap" code (Vincent 2026-07-01 empirical).
+  const mm = msg.match(/\b(2056)\b/);
+  if (mm) return `MiniMax code ${mm[1]}`;
+  // OpenAI-compat error types (verbatim from their SDK error surface).
+  const oai = msg.match(/\b(insufficient_quota|rate_limit_exceeded|billing_hard_limit_reached)\b/);
+  if (oai) return oai[1];
+  // Anthropic-style HTTP status shorthand.
+  const httpCode = msg.match(/\b(429|529)\b/);
+  if (httpCode) return `HTTP ${httpCode[1]}`;
+  return null;
+}
+
+/**
+ * Try to extract the user-facing Chinese phrase from a vendor quota
+ * error message. Used to pass the vendor's own wording through to the
+ * end user (e.g. "已达到 Token Plan 用量上限：请升级 Token Plan 套餐")
+ * instead of paraphrasing.
+ *
+ * Returns a trimmed substring (max 200 chars) or `null` if no Chinese
+ * quota phrase is present. Falls back to the caller's own hint.
+ */
+export function extractVendorQuotaPhrase(msg: string | null | undefined): string | null {
+  if (!msg || typeof msg !== "string") return null;
+  // Common MiniMax phrase — anchor on `已达到` for high precision.
+  const cn = msg.match(/已达到[^。\n]{2,140}/);
+  if (cn) return cn[0].slice(0, 200);
+  // OpenAI 402 phrase.
+  const en = msg.match(/(insufficient_quota|exceeded[^\n]{2,140})/i);
+  if (en) return en[0].slice(0, 200);
+  return null;
+}
+
+/**
  * Per-vendor hint mapping ANTHROPIC_BASE_URL → "where to check quota".
  * Mirrors the auth-error remediationHint shape in cli.ts but pointed at
  * vendor usage dashboards instead of API-key reissue pages.
