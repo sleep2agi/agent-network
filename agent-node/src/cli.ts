@@ -27,6 +27,7 @@ import { startTelegramWatchdog } from "./telegram-watchdog";
 import type { AgentGoal } from "./goals/types";
 import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
+import { maskSecretsInText, summarizeHits } from "./outbound-secret-mask";
 import { checkFeishuToolDeny, isFeishuChannelTurn } from "./feishu-tool-deny";
 import { buildAttachmentDescriptors } from "./runtime/feishu-envelope";
 import {
@@ -1524,11 +1525,37 @@ async function processWithClaude(task: string, from: string, images?: string[]):
     ``,
     `执行完后简要汇报结果。`,
   ].join("\n");
-  const promptText = SYSTEM_PROMPT
+  const rawPromptText = SYSTEM_PROMPT
     ? `${SYSTEM_PROMPT}\n\n${toolCapabilityGuidance}\n\n${commhubToolGuidance}${
         feishuOutboundFileGuidance ? `\n\n${feishuOutboundFileGuidance}` : ""
       }\n\n收到来自 ${from} 的任务：\n\n${task}`
     : defaultPrompt;
+
+  // RFC-020 §19 outbound secret-mask (2026-07-01 Vincent PAT case): scan
+  // the constructed prompt for credential literals (`ghp_ / github_pat_ /
+  // ntok_ / utok_ / atok_ / xox<c>- / sk-(ant-)?...`) and replace with
+  // `[REDACTED_<KIND>]` placeholders BEFORE the string ever reaches the
+  // SDK's `query()` call. This blocks two independent failure modes:
+  //
+  //   1. Vendor content-filter fires on credential shape → out>0 result=""
+  //      → user sees `执行出错: claude-agent-sdk 返回空响应`. Empirically
+  //      caught in production when a PAT accumulated in Vincent's session
+  //      history and every subsequent turn hit MiniMax's filter.
+  //   2. Model uses the credential in a tool call — probe #8 confirmed
+  //      MiniMax-M3 will happily bake a PAT into `tool_use.input.cmd` to
+  //      try `gh api ... "Authorization: token ghp_..."`. Any tool the
+  //      agent has that can hit the outside world is then an exfil vector.
+  //
+  // The mask is defense-in-depth, not an airtight perimeter — sophisticated
+  // encodings (base64, concat, splitting across turns) bypass a literal
+  // regex. But it stops the common case where a credential slips into a
+  // user message and gets shipped verbatim to the vendor.
+  const { masked: promptText, hits: outboundHits } = maskSecretsInText(rawPromptText);
+  if (outboundHits.length > 0) {
+    warn(
+      `[outbound-mask] masked ${outboundHits.length} credential literal(s) in prompt: ${summarizeHits(outboundHits)} — sent to vendor as placeholders`,
+    );
+  }
 
   // #259 Y prompt construction — string path (red-line zero-regression for
   // text-only) vs structured AsyncIterable path (image content blocks).
