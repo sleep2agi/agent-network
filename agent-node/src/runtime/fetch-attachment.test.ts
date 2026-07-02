@@ -10,7 +10,7 @@
 //   - hub 401 → auth_failed
 //   - 🔴 Content-Length > cap → size_exceeded BEFORE consuming bytes
 //   - 🔴 stream byte counter > cap → size_exceeded MID-FLIGHT (Content-Length lied)
-//     [[feedback_assume_unit_before_threshold]] — verifies cap unit is BYTES
+//     per team rule: assume-unit-before-threshold — verifies cap unit is BYTES
 //     not chunks, and the abort point is mid-stream not after-read.
 //   - cache hit (file exists + size matches) → no HTTP call, cached:true
 //   - sweeper purges files older than TTL, keeps fresh
