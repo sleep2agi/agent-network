@@ -17,6 +17,7 @@ import { randomUUID } from "crypto";
 import { join } from "path";
 import { hostname } from "os";
 import { execSync } from "child_process";
+import { encodeCwd } from "./project-key";
 
 // ── .env loader helper ────────────────────────────────
 function loadEnvFile(path: string): void {
@@ -38,8 +39,11 @@ const COMMHUB_DIR = join(HOME, ".claude/channels/commhub");
 loadEnvFile(join(COMMHUB_DIR, ".env"));
 
 // ── Load project-specific config ──────────────────────
-// /path/to/your/work → -path-to-your-work
-const projectPath = process.cwd().replace(/\//g, "-");
+// /path/to/your/work → -path-to-your-work (POSIX)
+// C:\Users\foo → C--Users-foo (Windows)
+// Scheme matches claude-code's own <sanitized-cwd> so ~/.claude/channels/commhub
+// and ~/.claude/projects sit side-by-side with matching keys.
+const projectPath = encodeCwd(process.cwd());
 loadEnvFile(join(COMMHUB_DIR, projectPath, ".env"));
 
 // ── Get tmux session name ─────────────────────────────
