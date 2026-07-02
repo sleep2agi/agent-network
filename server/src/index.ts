@@ -1992,10 +1992,28 @@ Bun.serve({
     // Same SQL + role-extract + member-脱敏 logic; SEC-1 scoped via REST
     // auth pipeline (restScope). Returns {ok, daemons:[...], count}.
     if (url.pathname === "/api/host-supervisors") {
-      const netParam = url.searchParams.get("network_id");
-      const effectiveNetId = restScope.networkId ?? netParam ?? null;
+      // #380 — utok callers with exactly one accessible network get a
+      // safe fallback so the create-node wizard doesn't have to bake
+      // network_id into every request (it was hard-4xxing when the
+      // dashboard omitted the query param — that's what "hub 400" was).
+      // `singleNetworkId` returns:
+      //   - scope.networkId when it's set (ntok binding, or an
+      //     explicitly-requested network the user has verified access to)
+      //   - the sole member of scope.networkIds when the utok user
+      //     belongs to exactly one network (safe unambiguous fallback)
+      //   - null when the user belongs to 0 or 2+ networks (authz
+      //     boundary — refuse to guess which one, mirrors 通信龙 spec
+      //     "别 fallback 到错 network")
+      // The 400 branch is retained for the ambiguous / no-access cases
+      // and distinguishes them in the error message so the client can
+      // recover (send network_id explicitly).
+      const effectiveNetId = singleNetworkId(restScope);
       if (!effectiveNetId) {
-        return withCors(req, Response.json({ ok: false, error: "missing_network_id" }, { status: 400 }));
+        const memberships = restScope.networkIds?.length ?? 0;
+        const error = memberships > 1
+          ? "network_id_required_multi"
+          : "missing_network_id";
+        return withCors(req, Response.json({ ok: false, error, memberships }, { status: 400 }));
       }
       // Role for member-脱敏 (admin/owner = full host_telemetry, others = masked)
       let isPrivileged = false;

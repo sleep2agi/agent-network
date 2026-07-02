@@ -1,0 +1,75 @@
+# P0 #380 gateway topology probe — mirror 通信龙's exact repro.
+#
+# 通信龙's env:
+#   容器 node:22-bookworm-slim
+#   容器内 npm i -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+#   anet daemon up demo-host
+#   隔离 hub :9310（HOST=0.0.0.0，独立 DB），容器 bridge 网络经 gateway 172.18.0.1:9310 连 hub
+#
+# We split into two services:
+#   hub    — runs the commhub server from /repo/server (bun) on 0.0.0.0:9310.
+#            Bind-mounted /repo so we exercise the exact main-tree code.
+#   daemon — node:22-bookworm-slim + npm-installed preview.17, spawns
+#            `agent-node --config ... --alias demo-host --runtime claude-agent-sdk`
+#            reaching the hub over the docker bridge network.
+#
+# Both share a custom bridge net "p380net" so the daemon reaches the hub
+# via DNS name `hub` (equivalent to gateway routing — the daemon's
+# outbound IP is a bridge-assigned 172.x.y.z, and the hub logs record
+# that IP). The `hub` DNS name substitutes for 通信龙's 172.18.0.1
+# gateway hop; both are cross-container HTTP over a shared bridge net —
+# same functional exercise.
+#
+# The daemon service's entrypoint is a run script that:
+#   - captures agent-node --version (排 A one more time)
+#   - registers admin + network + demo-host ntok against the hub via REST
+#   - writes daemon config.json mirroring `anet daemon init`
+#   - spawns agent-node
+#   - waits 12s (register + immediate reportStatus + a little slack)
+#   - dumps the same probes as the single-container run, plus:
+#     - what IP the daemon appears with from the hub's view
+#     - /api/host-supervisors + /api/servers over the docker network
+#     - a real create_node MCP call end-to-end (verify wizard action)
+
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: tests/test380-gateway-topology-probe/Dockerfile.hub
+    image: anet-test380-hub
+    container_name: p380-hub
+    environment:
+      - COMMHUB_DB=/tmp/qa-380-gw.db
+      - PORT=9310
+      - HOST=0.0.0.0
+    command: bash -lc "rm -f /tmp/qa-380-gw.db && bun run server/src/index.ts"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9310/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks:
+      - p380net
+
+  daemon:
+    build:
+      context: ../..
+      dockerfile: tests/test380-gateway-topology-probe/Dockerfile.daemon
+    image: anet-test380-daemon
+    container_name: p380-daemon
+    depends_on:
+      hub:
+        condition: service_healthy
+    environment:
+      - HUB_URL=http://hub:9310
+      - REPORT_HOST_PATH=/repo/docs/tests/p380-gateway-topology-probe/report.txt
+    volumes:
+      # bind for the probe output (host <-> container)
+      - /home/vansin/agent-orchestra/docs/tests/p380-gateway-topology-probe:/repo/docs/tests/p380-gateway-topology-probe
+    command: bash -lc "bash /repo/tests/test380-gateway-topology-probe/daemon-run.sh"
+    networks:
+      - p380net
+
+networks:
+  p380net:
+    driver: bridge
