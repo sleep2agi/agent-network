@@ -34,9 +34,10 @@ const BASE = `http://127.0.0.1:${PORT}`;
 //   soloUser    — single accessible network (fallback should work)
 //   multiUser   — two accessible networks (fallback should refuse)
 //   orphanUser  — zero networks (fallback has nothing to derive)
-let soloToken = "", multiToken = "", orphanToken = "";
+let soloToken = "", multiToken = "", orphanToken = "", adminToken = "";
 let soloNetworkId = "";
 let multiNetworkA = "", multiNetworkB = "";
+let soloDaemonAlias = "";
 
 beforeAll(async () => {
   process.env.COMMHUB_DB = SERVER_DB;
@@ -51,7 +52,11 @@ beforeAll(async () => {
   // legitimately query any network), which would make solo's no-query
   // case a false-negative for our fix contract.
   const seed = register(`seed_admin_${suffix}`, password, undefined, "seed");
-  if (!seed.ok) throw new Error("seed admin failed: " + JSON.stringify(seed));
+  if (!seed.ok || !seed.token) throw new Error("seed admin failed: " + JSON.stringify(seed));
+  // Save the admin token so path 7 can hit /api/host-supervisors as an
+  // admin directly (通信龙 review point 1: verify admin+no-query goes 400
+  // explicitly, not only implicitly via seed_admin's shadow presence).
+  adminToken = seed.token;
 
   // Solo user — register() auto-creates a default network; nothing to add.
   const solo = register(`solo_${suffix}`, password, undefined, "seed");
@@ -82,10 +87,62 @@ beforeAll(async () => {
   const orphanUserId = login(`orphan_${suffix}`, password).user!.user_id;
   db.run("DELETE FROM network_members WHERE user_id = ?1", [orphanUserId]);
 
+  // 通信龙 review point 2: path-2's fallback response must land the
+  // daemon list *from soloNetworkId specifically*, not from the whole
+  // sessions/nodes table. The original test-2 asserted daemons was an
+  // array but a clean fixture (0 daemons in the DB) would trivially
+  // satisfy that. Insert:
+  //   (a) a host_supervisor daemon in soloNetworkId — should show up in
+  //       fallback response
+  //   (b) a host_supervisor daemon in multiNetworkA — should NOT show
+  //       up in solo's fallback (cross-tenant isolation lock)
+  soloDaemonAlias = `solo_daemon_${suffix}`;
+  seedHostSupervisorDaemon({
+    alias: soloDaemonAlias,
+    networkId: soloNetworkId,
+    userIdForToken: login(`solo_${suffix}`, password).user!.user_id,
+  });
+  seedHostSupervisorDaemon({
+    alias: `other_daemon_${suffix}`,
+    networkId: multiNetworkA,
+    userIdForToken: login(`multi_${suffix}`, password).user!.user_id,
+  });
+
   // Import triggers Bun.serve at module load — this IS the server start.
   await import("./index.js");
   await new Promise((r) => setTimeout(r, 100));
 });
+
+// Insert a minimal `nodes` row + `api_tokens` row so the daemon shows up
+// in /api/host-supervisors' JOIN-then-role-filter query (index.ts
+// GET /api/host-supervisors handler, at the SELECT ... FROM nodes n ...
+// EXISTS (SELECT 1 FROM api_tokens ...) branch). The api_tokens row
+// with name='node:<alias>' + revoked_at IS NULL is the "still active"
+// witness — without it EXISTS drops the row.
+function seedHostSupervisorDaemon(opts: {
+  alias: string;
+  networkId: string;
+  userIdForToken: string;
+}) {
+  const nodeId = `n_test_${opts.alias}`;
+  db.run(
+    `INSERT OR REPLACE INTO nodes (
+       node_id, node_name, alias, runtime, model, config_path,
+       channels, server, hostname, network_id,
+       config_revision, config_snapshot
+     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
+    [nodeId, opts.alias, opts.alias, "claude-agent-sdk", "claude-sonnet-4-5",
+     "/tmp/cfg.json", "[]", "test-host", "test-host", opts.networkId,
+     0, JSON.stringify({ role: "host_supervisor", daemon_capabilities: {} })],
+  );
+  db.run(
+    `INSERT OR REPLACE INTO api_tokens (
+       token_id, token_hash, user_id, network_id, name, scope
+     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+    [`tok_test_${opts.alias}`, `hash_test_${opts.alias}`,
+     opts.userIdForToken, opts.networkId, `node:${opts.alias}`, "network"],
+  );
+}
 
 afterAll(() => {
   try { rmSync(SERVER_DB, { recursive: true, force: true }); } catch {}
@@ -108,13 +165,31 @@ describe("#380 — /api/host-supervisors utok→default-network fallback", () =>
     expect(typeof r.body?.count).toBe("number");
   });
 
-  test("path 2 — utok with 1 network, NO ?network_id → 200 (fallback lands)", async () => {
+  test("path 2 — utok with 1 network, NO ?network_id → 200 (fallback lands AND scopes correctly)", async () => {
     // This is the core #380 fix: dashboard forgot the query but the user
     // only has one network anyway, so we can safely fall back to it.
+    //
+    // 通信龙 review point 2: harden the assertion beyond "daemons is an
+    // array". We seeded one daemon in soloNetworkId and one in
+    // multiNetworkA (multi user); the fallback response MUST include the
+    // solo one and NOT the multi one. Otherwise a future regression that
+    // wired the fallback to "all networks the user knows about" would
+    // slip through — cross-tenant leak.
     const r = await get(`/api/host-supervisors`, soloToken);
     expect(r.status).toBe(200);
     expect(r.body?.ok).toBe(true);
     expect(Array.isArray(r.body?.daemons)).toBe(true);
+
+    const aliases: string[] = r.body.daemons.map((d: any) => d.alias);
+    expect(aliases).toContain(soloDaemonAlias);
+    // Belt: nothing from the multi user's network snuck through.
+    expect(aliases.every((a: string) => !a.startsWith("other_daemon_"))).toBe(true);
+    // Every returned daemon's daemon_node_id should be one this user can
+    // legitimately see — locking the shape end-to-end.
+    for (const d of r.body.daemons) {
+      expect(typeof d.daemon_node_id).toBe("string");
+      expect(typeof d.alias).toBe("string");
+    }
   });
 
   test("path 3 — utok with 2 networks, NO ?network_id → 400 network_id_required_multi", async () => {
@@ -143,6 +218,38 @@ describe("#380 — /api/host-supervisors utok→default-network fallback", () =>
     const foreignNet = "net_absolutely_not_a_member";
     const r = await get(`/api/host-supervisors?network_id=${foreignNet}`, multiToken);
     expect(r.status).toBe(403);
+  });
+
+  test("path 7 — admin utok, NO ?network_id → 400 (admin can span every network; no cross-network guessing)", async () => {
+    // 通信龙 review point 1: the previous suite only asserted admin
+    // indirectly (seed_admin was created first so other test users
+    // weren't auto-admin). This test hits /api/host-supervisors with
+    // seed_admin's own utok — resolveRestNetworkScope's isAdmin branch
+    // returns networkIds:null, singleNetworkId returns null, endpoint
+    // 400s. The response distinguishes it from the multi-network case
+    // via `memberships` being absent-or-0 (admin doesn't populate
+    // scope.networkIds), so the client sees an explicit "you're admin,
+    // pass network_id" affordance.
+    const r = await get(`/api/host-supervisors`, adminToken);
+    expect(r.status).toBe(400);
+    expect(r.body?.ok).toBe(false);
+    // Not the multi-network error — admin path goes through the "no
+    // scope.networkIds" branch → memberships defaults to 0 (the ??
+    // coalesce in the handler). This asymmetry lets the client
+    // distinguish "you own too many" from "you can see all of them".
+    expect(r.body?.error).toBe("missing_network_id");
+  });
+
+  test("path 8 — admin utok, WITH explicit ?network_id → 200 (admin can inspect any network)", async () => {
+    // Complement to path 7: even without membership in a target network,
+    // admin can query it. Locks resolveRestNetworkScope's isAdmin =>
+    // {networkId: requested, networkIds: null} branch.
+    const r = await get(`/api/host-supervisors?network_id=${multiNetworkA}`, adminToken);
+    expect(r.status).toBe(200);
+    expect(r.body?.ok).toBe(true);
+    // The daemon we seeded in multiNetworkA must be reachable.
+    const aliases: string[] = r.body.daemons.map((d: any) => d.alias);
+    expect(aliases.some(a => a.startsWith("other_daemon_"))).toBe(true);
   });
 
   test("path 6 — utok with 0 networks, NO ?network_id → 400 missing_network_id (memberships=0)", async () => {
