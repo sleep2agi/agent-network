@@ -18,6 +18,7 @@ import { createHash, randomBytes, randomUUID } from "crypto";
 import { checkbox, confirm, select } from "@inquirer/prompts";
 import { ensureGitignoreRule, ensureGitignoreRules } from "../src/gitignore-writeback";
 import { superviseChild } from "../src/supervise-child";
+import { encodeCwd } from "../src/project-key";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -29,7 +30,6 @@ function globalConfigPath() { return join(home, ".anet", "config.json"); }
 function serverConfigPath() { return join(home, ".anet", "server", "config.json"); }
 function adminUtokPath() { return join(home, ".anet", "server", "admin-utok.json"); }
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
-function encodeCwd(cwd: string): string { return cwd.replace(/\//g, "-"); }
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
 function killTmuxSession(sessionName: string) {
   try { execFileSync("tmux", ["kill-session", "-t", sessionName], { stdio: "pipe" }); } catch {}
@@ -1543,7 +1543,7 @@ async function ensureNodeToken(profile: Profile, id: string): Promise<Profile> {
 
 function writeLegacyProjectAlias(alias: string) {
   const channelDir = join(home, ".claude", "channels", "commhub");
-  const projectKey = process.cwd().replace(/\//g, "-");
+  const projectKey = encodeCwd(process.cwd());
   const aliasDir = join(channelDir, projectKey);
   mkdirSync(aliasDir, { recursive: true });
   writeFileSync(join(aliasDir, ".env"), `COMMHUB_ALIAS=${alias}\n`);
@@ -3335,7 +3335,7 @@ async function lsCommand() {
 
       // Find in CommHub
       let network = "(not in network)";
-      const projectKey = cwd.replace(/\//g, "-");
+      const projectKey = encodeCwd(cwd);
       const aliasEnvPath = join(home, ".claude", "channels", "commhub", projectKey, ".env");
       if (existsSync(aliasEnvPath)) {
         const content = readFileSync(aliasEnvPath, "utf-8");
