@@ -1,0 +1,34 @@
+# Harness: uses REAL @anthropic-ai/claude-agent-sdk (real vendor client)
+# + agent-node SOURCE (TypeScript, imported directly by the harness via
+# absolute path `/agent-node-src/src/runtime/classify-result`; bun runs
+# TS natively so no build step is required). Isolates the classifier +
+# formatter under review from any npm-published version.
+
+FROM oven/bun:1.3.1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl jq ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /harness
+
+# Copy the full agent-node source tree so /agent-node-src/src/... is
+# resolvable. No compile step; bun eats TS directly.
+COPY agent-node /agent-node-src
+COPY tests/test383-thinking-only-fallback/harness.ts /harness/harness.ts
+
+# Minimal package to pull in the SDK version we're testing against.
+RUN cat > /harness/package.json <<'JSON'
+{
+  "name": "test383-harness",
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.141"
+  }
+}
+JSON
+
+COPY tests/test383-thinking-only-fallback/run.sh /harness/run.sh
+RUN chmod +x /harness/run.sh && bun install
+
+CMD ["bash", "-lc", "bash /harness/run.sh"]

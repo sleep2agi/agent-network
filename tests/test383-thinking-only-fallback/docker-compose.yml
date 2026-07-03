@@ -1,0 +1,58 @@
+# #383 e2e — real @anthropic-ai/claude-agent-sdk + real agent-node
+# classifier/formatter code (source under review) + mocked vendor SSE
+# endpoint. Two harness modes (--pre-fix / --post-fix) demonstrate the
+# fix in the same process — pre-fix reproduces the exact user-visible
+# error the issue quotes; post-fix produces a real rescued reply from
+# the mock model.
+#
+# Both services on an isolated bridge net; no host / fleet touch.
+services:
+  mock-vendor:
+    build:
+      context: ../..
+      dockerfile: tests/test383-thinking-only-fallback/Dockerfile.mock
+    image: anet-test383-mock
+    container_name: p383-mock
+    environment:
+      - PORT=9400
+      - HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9400/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks:
+      p383net:
+        # Alias so ANTHROPIC_BASE_URL includes the substring "anthropic",
+        # which triggers `quotaRemediationHint` to return the
+        # console.anthropic.com URL — the exact vendor-console-URL leak
+        # the #383 issue reports. Real prod hits this for minimax /
+        # kimi / deepseek / etc. via their live domain strings.
+        aliases:
+          - anthropic-mock
+
+  harness:
+    build:
+      context: ../..
+      dockerfile: tests/test383-thinking-only-fallback/Dockerfile.harness
+    image: anet-test383-harness
+    container_name: p383-harness
+    depends_on:
+      mock-vendor:
+        condition: service_healthy
+    environment:
+      # Use the "anthropic-mock" alias so the hardcoded vendor URL leak
+      # in quotaRemediationHint fires (base.includes("anthropic") →
+      # console.anthropic.com). Any real vendor domain would fire the
+      # same code path; we choose anthropic here so this test is not
+      # tied to any specific 3rd-party vendor.
+      - ANTHROPIC_BASE_URL=http://anthropic-mock:9400
+      - ANTHROPIC_API_KEY=fake-key-for-test
+    volumes:
+      - /home/vansin/agent-orchestra/docs/tests/p383-thinking-only-fallback:/report
+    networks:
+      - p383net
+
+networks:
+  p383net:
+    driver: bridge
