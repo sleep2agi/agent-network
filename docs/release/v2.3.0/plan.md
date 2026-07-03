@@ -1,9 +1,22 @@
 # Release Plan — anet v2.3.0 里程碑
 
-> 里程碑以 `@sleep2agi/agent-network` 版本命名。本里程碑三包一起走：
-> **agent-network `2.3.0` · agent-node `2.5.0` · commhub-server `0.9.0`**（版本耦合规则见 [../versioning-and-compatibility.md](../versioning-and-compatibility.md)）。
+> 里程碑以 `@sleep2agi/agent-network` 版本命名。本里程碑四个组件一起走、版本互相约束：
+> **agent-network `2.3.0` · agent-node `2.5.0` · commhub-server `0.9.0` · agent-network-dashboard `0.7.0`**（耦合规则见 [../versioning-and-compatibility.md](../versioning-and-compatibility.md)）。
 >
 > 状态：🔨 进行中（preview 阶段）
+
+## 组件版本约束
+
+本里程碑四个组件绑定发布，装/部署时必须整行取齐（错配会运行时炸，见 compat §2）：
+
+| 组件 | 分发方式 | 上一稳定 | 本里程碑目标 | 备注 |
+|------|---------|---------|-------------|------|
+| `@sleep2agi/agent-network` | npm | 2.2.21 | **2.3.0** | `anet` CLI，spawn agent-node |
+| `@sleep2agi/agent-node` | npm | 2.4.13 | **2.5.0** | 单节点 runtime（含 opencode 第5 runtime） |
+| `@sleep2agi/commhub-server` | npm | 0.8.8 | **0.9.0** | Hub（协议 + REST API） |
+| `@sleep2agi/agent-network-dashboard` | Vercel 部署（非 npm） | 0.6.3-preview.4 | **0.7.0** | Web 指挥台，走 commhub REST（C3）；本里程碑含 #260 单节点设置面板 |
+
+> dashboard 不发 npm，用 package.json 版本 + 部署 commit SHA 追踪；GA 时钉一个「dashboard 版本 ↔ commhub 版本」的兼容点写进矩阵。
 
 ## 主题
 
