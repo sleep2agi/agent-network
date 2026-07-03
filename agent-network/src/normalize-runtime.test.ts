@@ -70,6 +70,27 @@ describe("normalizeRuntime — explicit choices are preserved", () => {
     expect(normalizeRuntime("grok-build")).toBe("grok-build-acp");
     expect(normalizeRuntime("grok-build-acp")).toBe("grok-build-acp");
   });
+
+  // RFC-029 — public sst/opencode CLI runtime. Both the canonical name
+  // (`opencode-cli`, matching claude-code-cli precedent) and the short
+  // alias `opencode` resolve to the same bucket. Explicit choice is
+  // preserved; unknown drift falls through to the safe default via the
+  // existing "unknown → claude-agent-sdk" rule (see suite 1).
+  test("explicit 'opencode-cli' → opencode-cli (canonical launcher name)", () => {
+    expect(normalizeRuntime("opencode-cli")).toBe("opencode-cli");
+  });
+
+  test("alias 'opencode' → opencode-cli (short form)", () => {
+    expect(normalizeRuntime("opencode")).toBe("opencode-cli");
+  });
+
+  test("profile with runtime='opencode-cli' → opencode-cli", () => {
+    expect(normalizeRuntime({ runtime: "opencode-cli" } as any)).toBe("opencode-cli");
+  });
+
+  test("profile with runtime='opencode' → opencode-cli", () => {
+    expect(normalizeRuntime({ runtime: "opencode" } as any)).toBe("opencode-cli");
+  });
 });
 
 describe("normalizeRuntime — profile object paths", () => {

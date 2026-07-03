@@ -172,6 +172,11 @@ function normalizeRuntime(agent: unknown): string | null {
   if (agent === "claude-code") return "claude-code-cli";
   if (agent.startsWith("agent-node:codex")) return "codex-sdk";
   if (agent.startsWith("agent-node:claude")) return "claude-agent-sdk";
+  if (agent.startsWith("agent-node:grok")) return "grok-build-acp";
+  // RFC-029 — agent-node reports `agent-node:opencode` when RUNTIME
+  // bucket resolves to "opencode". Dashboard needs the canonical
+  // launcher name so its Runtime badge matches wizard choices.
+  if (agent.startsWith("agent-node:opencode")) return "opencode-cli";
   if (agent === "http-api" || agent === "http" || agent === "api") return "http-api";
   return null;
 }

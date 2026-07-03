@@ -928,7 +928,61 @@ async function setupCommand() {
   console.log(`\n完成！下一步: anet node create <node-name>`);
 }
 
+// RFC-029 — the exact opencode-ai version anet is validated against.
+// Upstream churn is heavy pre-1.0 (see `npm view opencode-ai dist-tags` —
+// `latest` moves daily; there are 30+ snapshot tags each week). We hard-
+// lock this constant and reject any drift; upgrading is an explicit,
+// smoke-gated `anet opencode upgrade-pin <version>` operation (lands in
+// PR③).
+export const OPENCODE_PINNED_VERSION = "1.17.13";
+
+function checkOpencodePin(): { ok: true } | { ok: false; found: string | null; hint: string } {
+  const bin = "opencode";
+  if (!commandExists(bin)) {
+    return {
+      ok: false,
+      found: null,
+      hint: `opencode CLI not found in PATH. Install (exact): npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}`,
+    };
+  }
+  let raw = "";
+  try {
+    raw = execSync(`${bin} --version`, { encoding: "utf-8", timeout: 5000 }).trim();
+  } catch (e: any) {
+    return { ok: false, found: null, hint: `opencode --version failed: ${e?.message || e}` };
+  }
+  // opencode --version prints just the semver (e.g. "1.17.13"). Match
+  // the first x.y.z substring so future format tweaks (build metadata
+  // suffix) don't break the pin check.
+  const m = raw.match(/(\d+\.\d+\.\d+)/);
+  const found = m ? m[1] : raw;
+  if (found === OPENCODE_PINNED_VERSION) return { ok: true };
+  return {
+    ok: false,
+    found,
+    hint:
+      `Expected opencode-ai@${OPENCODE_PINNED_VERSION} (exact); found ${found}.\n` +
+      `  → Downgrade: npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}\n` +
+      `  → Or run: anet opencode upgrade-pin ${found}   ` +
+      `(smoke-tests the new version; on pass updates the pin.)`,
+  };
+}
+
 function assertStartCompatibility(runtime: RuntimeName) {
+  // RFC-029 — opencode CLI's Zed ACP surface is the only integration
+  // point, and its message-schema stability across upstream releases
+  // is unproven. Reject any drift from the pinned version so a
+  // silent `latest` bump can't wedge running nodes.
+  if (runtime === "opencode-cli") {
+    const check = checkOpencodePin();
+    if (!check.ok) {
+      console.error(`[anet] Incompatible opencode-ai runtime.`);
+      console.error(`[anet] ${check.hint}`);
+      process.exit(1);
+    }
+    return;
+  }
+
   if (runtime !== "codex-sdk" && runtime !== "claude-agent-sdk") return;
 
   const versions = detectInstalledPackages();
@@ -992,6 +1046,12 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
   if (runtime === "grok-build-acp" && !commandExists("grok")) {
     console.warn(`[anet] Warning: grok CLI not found in PATH.`);
     console.warn(`[anet] Install/login Grok Build first: https://x.ai/cli`);
+  }
+  if (runtime === "opencode-cli" && phase === "create" && !commandExists("opencode")) {
+    // Create-phase nudge only — start-phase runs the strict version
+    // pin check in assertStartCompatibility() and hard-fails there.
+    console.warn(`[anet] Warning: opencode CLI not found in PATH.`);
+    console.warn(`[anet] Install (exact): npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}`);
   }
 }
 
@@ -1959,6 +2019,11 @@ This wizard creates one agent node for this project:
         { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
         { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
         { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
+        // RFC-029 — public sst/opencode CLI (multi-vendor front-end
+        // with unified session + auth abstraction). Runtime not yet
+        // wired to think() (PR② lands the ACP shim); wizard just
+        // records the choice so PR③ preset wiring can build on it.
+        { value: "opencode-cli",     name: "opencode-cli     — 公版 sst/opencode CLI, 多 vendor (Anthropic 原生 + OpenAI preset, RFC-029)" },
       ],
     }) as any;
   } catch (e: any) {
@@ -1975,6 +2040,14 @@ This wizard creates one agent node for this project:
   } else if (pickedRuntime === "grok-build-acp") {
     opts.runtime = "grok-build-acp";
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok auth login`);
+  } else if (pickedRuntime === "opencode-cli") {
+    opts.runtime = "opencode-cli";
+    // RFC-029 — pin note first, so operators know the exact version
+    // requirement upfront (upstream churn is heavy pre-1.0). Vendor
+    // preset flow lands in PR③; for now the create wizard just
+    // records the runtime choice.
+    console.log(`[anet] 请确保已安装 opencode CLI (exact): npm install -g opencode-ai@1.17.13`);
+    console.log(`[anet] opencode-cli runtime 尚未实现 think() (RFC-029 PR②), 现阶段可 create 但 start 会明确报错.`);
   } else {
     // claude-agent-sdk — flow continues into vendor + model picker.
     const sel = await selectVendorAndModel();
@@ -2698,7 +2771,12 @@ async function launchAgent(id: string, forceNewSession = false) {
     }
   } catch {}
 
-  if (runtime === "codex-sdk" || runtime === "claude-agent-sdk" || runtime === "grok-build-acp") {
+  if (
+    runtime === "codex-sdk" ||
+    runtime === "claude-agent-sdk" ||
+    runtime === "grok-build-acp" ||
+    runtime === "opencode-cli"
+  ) {
     // spawn agent-node
     const agentArgs = [
       "--config", join(nodesDir(), nodeId, "config.json"),
