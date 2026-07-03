@@ -37,14 +37,32 @@
 - [ ] RFC-026 P2 选服务器 multi-daemon
 - [ ] opencode-cli 真 vendor key 活体 e2e（真 opencode + Anthropic/OpenAI，实锤进 release note）
 
-## Preview 发布节奏（每发都带更新 + 一句 changelog）
+## Preview 路线图（一个 preview = 一个任务）
 
-| # | 内容 | 涉及包 | 状态 |
-|---|------|--------|------|
-| P1 | 切含 opencode-cli 的 preview（C1 契约变了，两包一起） | agent-network + agent-node | 🔜 待切 |
-| P2 | #260 dashboard 单节点设置面板 | dashboard (+ 可能 commhub REST) | ⏳ |
-| P3 | #203 + #180 两个 P0 修 | agent-network / agent-node | ⏳ |
-| P4 | RFC-026 P2 multi-daemon + opencode 活体验证 | agent-network + agent-node | ⏳ |
+> 拆法：**先定大版本目标（见上「主题」），再拆成一串 preview，一个 preview 只扛一件事，做完发一版 + 一句 changelog，逐个推进到 GA。** 版本号按当前已发头递增（agent-network 已到 preview.19 / agent-node preview.18 / dashboard preview.4）。
+
+### P1 — opencode-cli 可装　🔜 待切（下一发）
+- **版本**：agent-network `2.3.0-preview.20` + agent-node `2.5.0-preview.19`（C1 契约变，两包一起升）
+- **任务**：把已合 main 的 opencode-cli 第 5 runtime 发进 preview
+- **验收**：真机装 preview → `anet node create --runtime opencode-cli` → 真 opencode 活体一轮出正文
+
+### P2 — dashboard 单节点设置面板（#260）　⏳
+- **版本**：dashboard `0.6.3-preview.5`（若加新 REST 端点则 commhub 同升一版）
+- **任务**：节点 ⋮ → 选 channel/模型/供应商/模式 + 一键重启
+- **验收**：dashboard 上把某节点模型换掉 + 重启，生效
+
+### P3 — 两个 P0 bug　⏳
+- **版本**：agent-network `2.3.0-preview.21` + agent-node `2.5.0-preview.20`
+- **任务**：#203 新节点 alias 错乱 + #180 rename 后 ghost 进程
+- **验收**：连开 3 节点 alias 不乱；rename 后无残留进程
+
+### P4 — multi-daemon + opencode 活体　⏳
+- **版本**：agent-network `2.3.0-preview.22` + agent-node `2.5.0-preview.21`
+- **任务**：RFC-026 P2 选服务器 multi-daemon + opencode 真 vendor key 活体 e2e
+- **验收**：多 daemon 选服务器建节点；opencode 真 key 端到端出正文
+
+### → GA
+四包整行测绿 → 切 **agent-network 2.3.0 · agent-node 2.5.0 · commhub 0.9.0 · dashboard 0.7.0** latest + 汇总本里程碑 changelog。
 
 ## 切 latest 的门槛（Exit criteria）
 
