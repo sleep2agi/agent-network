@@ -14,9 +14,9 @@
 | `@sleep2agi/agent-network` | npm | 2.2.21 | **2.3.0** | `anet` CLI，spawn agent-node |
 | `@sleep2agi/agent-node` | npm | 2.4.13 | **2.5.0** | 单节点 runtime（含 opencode 第5 runtime） |
 | `@sleep2agi/commhub-server` | npm | 0.8.8 | **0.9.0** | Hub（协议 + REST API） |
-| `@sleep2agi/agent-network-dashboard` | Vercel 部署（非 npm） | 0.6.3-preview.4 | **0.7.0** | Web 指挥台，走 commhub REST（C3）；本里程碑含 #260 单节点设置面板 |
+| `@sleep2agi/agent-network-dashboard` | npm | 0.6.3-preview.4 | **0.7.0** | Web 指挥台，走 commhub REST（C3）；本里程碑含 #260 单节点设置面板 |
 
-> dashboard 不发 npm，用 package.json 版本 + 部署 commit SHA 追踪；GA 时钉一个「dashboard 版本 ↔ commhub 版本」的兼容点写进矩阵。
+> dashboard 也发 npm（`@sleep2agi/agent-network-dashboard`），跟其它三包一样 npm 版本追踪；旧的 Vercel 部署已废弃。GA 时钉一个「dashboard 版本 ↔ commhub 版本」的兼容点写进矩阵。
 
 ## 主题
 
@@ -49,7 +49,7 @@
 ## 切 latest 的门槛（Exit criteria）
 
 - 上面 TODO 全勾
-- 兼容矩阵里「本里程碑整行」三包一起真机 e2e 测绿（见 compat 文档 §4）
+- 兼容矩阵里「本里程碑整行」四包一起真机 e2e 测绿（见 compat 文档 §4）
 - 严格两阶段：preview 亲测 + 30min 观察窗口
 - changelog 汇总本里程碑所有 preview 的更新
 

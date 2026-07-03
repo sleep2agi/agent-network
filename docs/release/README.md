@@ -18,4 +18,4 @@
 ## 原则
 
 - 先 preview 小步发，每发带实质更新 + 一句 changelog。
-- latest 严格两阶段：preview 亲测 + 30min 观察窗口，且兼容矩阵「整行」三包一起测绿才升。
+- latest 严格两阶段：preview 亲测 + 30min 观察窗口，且兼容矩阵「整行」四包一起测绿才升。
