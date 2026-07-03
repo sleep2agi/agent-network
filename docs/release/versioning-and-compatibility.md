@@ -67,12 +67,14 @@ GA 前 TODO：
 - [ ] RFC-026 P2 选服务器 multi-daemon
 - [ ] opencode-cli 真 vendor key 活体 e2e
 
-Preview 节奏（每发都带更新）：
-1. 切含 opencode-cli 的 preview（agent-network + agent-node 一起，C1 变了）→ 让 opencode 可装
-2. #260 dashboard 面板
-3. #203 + #180 两个 P0
-4. RFC-026 P2 multi-daemon + opencode 活体
-5. 整行测绿 → 切 2.3.0 / 2.5.0 / 0.9.0 latest + changelog
+Preview 节奏（每发一个任务，详见 [v2.3.0/plan.md](v2.3.0/plan.md)）：
+1. #203 + #180 两个 P0 bug
+2. #260 dashboard 单节点设置面板 + #393 供应商/模型/key 预配置库
+3. RFC-026 P2 选服务器 multi-daemon
+4. （放最后）opencode-cli 活体 + 正式主打（代码已合 main，前几发已带着它）
+5. 四包整行测绿 → 切 2.3.0 / 2.5.0 / 0.9.0 / 0.7.0 latest + changelog
+
+> `lark-opencode-server` 是独立工具，**不属于本 anet 里程碑**（见 §8）。
 
 ## 7. Release SOP（复用现成）
 
