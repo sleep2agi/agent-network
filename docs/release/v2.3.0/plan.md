@@ -32,6 +32,7 @@
 ## GA 前 TODO（勾完才切 latest）
 
 - [ ] **#260** dashboard 单节点设置面板（⋮ → 选 channel/模型/供应商/模式 + 一键重启）
+- [ ] **#393** dashboard 供应商/模型/key 预配置库（preset store）— 预设可复用 vendor+model+key，建/配节点时直接选
 - [ ] **#203** 新节点 alias 错乱（P0）
 - [ ] **#180** rename 后 ghost 进程残留（P0）
 - [ ] RFC-026 P2 选服务器 multi-daemon
@@ -48,8 +49,8 @@
 
 ### P2 — dashboard 单节点设置面板（#260）　⏳
 - **版本**：dashboard `0.6.3-preview.5`（若加新 REST 端点则 commhub 同升一版）
-- **任务**：节点 ⋮ → 选 channel/模型/供应商/模式 + 一键重启
-- **验收**：dashboard 上把某节点模型换掉 + 重启，生效
+- **任务**：#260 节点 ⋮ → 选 channel/模型/供应商/模式 + 一键重启；#393 供应商/模型/key 预配置库（预设可复用，选择处下拉取预设）
+- **验收**：dashboard 上把某节点模型换掉 + 重启生效；能存一个 vendor+model+key 预设并在建节点时选中
 
 ### P3 — 两个 P0 bug　⏳
 - **版本**：agent-network `2.3.0-preview.21` + agent-node `2.5.0-preview.20`
