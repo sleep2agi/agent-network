@@ -50,29 +50,13 @@ dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文�
 - 只改一个包内部（不碰契约）→ 单包发 preview 即可。
 - **latest GA 必须整行一起测过再升**（不许单包偷升 latest）。
 
-## 6. 下一个 latest 里程碑（2.3.0 / 2.5.0 / 0.9.0）
+## 6. 下一个 latest 里程碑
 
-**主题：节点全生命周期管理 + opencode 第 5 runtime + IM channel 稳固。**
+**主题：节点全生命周期管理（增删改重启 + dashboard 配置）为主，IM channel 稳固；opencode 第 5 runtime 收尾放最后。**
 
-已合 main：
-- opencode-cli 第 5 runtime（RFC-029 #385/#386/#387）— ⚠️ 已合但没发 preview
-- 飞书 thinking-only rescue（#383）— agent-node preview.18 已含
-- host-supervisors 单网络 authz fallback（#381）— commhub preview.20 已含
-- 节点 create / stop-delete + host-daemon（RFC-026 P1 #299 / RFC-027 #345 / #339 #343 / #337）
+里程碑 = agent-network 2.3.0 · agent-node 2.5.0 · commhub 0.9.0 · dashboard 0.7.0。
 
-GA 前 TODO：
-- [ ] #260 dashboard 单节点设置面板（选 channel/模型/供应商/模式 + 一键重启）
-- [ ] #203 新节点 alias 错乱（P0）
-- [ ] #180 rename ghost 进程（P0）
-- [ ] RFC-026 P2 选服务器 multi-daemon
-- [ ] opencode-cli 真 vendor key 活体 e2e
-
-Preview 节奏（每发一个任务，详见 [v2.3.0/plan.md](v2.3.0/plan.md)）：
-1. #203 + #180 两个 P0 bug
-2. #260 dashboard 单节点设置面板 + #393 供应商/模型/key 预配置库
-3. RFC-026 P2 选服务器 multi-daemon
-4. （放最后）opencode-cli 活体 + 正式主打（代码已合 main，前几发已带着它）
-5. 四包整行测绿 → 切 2.3.0 / 2.5.0 / 0.9.0 / 0.7.0 latest + changelog
+详细规划（已合 main / GA 前 TODO / 逐个 preview 路线图 / exit criteria / changelog）见 **[v2.3.0/plan.md](v2.3.0/plan.md)**，本文档不重复维护，只管跨版本兼容矩阵与契约。
 
 > `lark-opencode-server` 是独立工具，**不属于本 anet 里程碑**（见 §8）。
 
