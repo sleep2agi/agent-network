@@ -1381,6 +1381,16 @@ async function runGoalSchedulerTick() {
 // ══════════════════════════════════════
 let claudeSessionId: string | undefined = SESSION_ID || undefined;
 let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || undefined) : undefined;
+// RFC-029 PR② — opencode-cli session state.
+// `opencodeSessionId` is persisted across turns; on a supervisor-driven
+// restart runtime.ts will try `session/load` with it before falling
+// back to session/new. Long-running architecture: one child process
+// handles every turn; `opencodeRuntimeSession` is lazily opened on
+// the first turn and reused for the whole node lifetime unless the
+// subprocess exits (crash-restart path handled by resetting the
+// holder — the next turn spawns fresh).
+let opencodeSessionId: string | undefined = RUNTIME === "opencode" ? (SESSION_ID || undefined) : undefined;
+let opencodeRuntimeSession: import("./runtime/opencode-acp/runtime").OpencodeRuntimeSession | null = null;
 
 // #213 — track whether the current process resumed a pre-existing grok
 // session (truthy SESSION_ID at boot) so we can prepend the un-closed-loop
@@ -2495,6 +2505,71 @@ function sanitizeGrokCommhubLeak(text: string): string {
   return cleaned || text.trim() || "（无回复）";
 }
 
+// RFC-029 PR② — opencode-cli ACP runtime think() entry.
+//
+// Long-running architecture: `opencodeRuntimeSession` is opened lazily
+// on the first turn and reused for every subsequent turn (no cold-
+// start per turn, matching the "常驻 B1'" spirit).
+//
+// Crash-restart correctness (通信龙 PR② flag catch): when the child
+// process exits (crash, killed by supervisor, whatever), we detect the
+// stale handle on the next turn and re-open with the persisted
+// sessionId; runtime.openOpencodeRuntime tries `session/load` first
+// and falls back to `session/new` with an explicit "session lost on
+// restart" log line — no silent history loss.
+//
+// #383 thinking-only rescue is inherited from the runtime layer (see
+// opencodeThink). Toggle via ANET_DISABLE_383_REPROMPT env, shared
+// with the claude runtime for uniform operator override.
+async function processWithOpencode(task: string, _from: string, _images?: string[]): Promise<string> {
+  const { openOpencodeRuntime, opencodeThink } =
+    await import("./runtime/opencode-acp/runtime");
+
+  // Reset the holder if the child has already exited — the next call
+  // will re-open with session/load per the persisted sessionId.
+  if (opencodeRuntimeSession && !opencodeRuntimeSession.client.isRunning) {
+    log(`[opencode] previous child exited — reopening on this turn`);
+    opencodeRuntimeSession = null;
+  }
+
+  if (!opencodeRuntimeSession) {
+    opencodeRuntimeSession = await openOpencodeRuntime({
+      cwd: process.cwd(),
+      workDir: process.cwd(),  // §8 D5: HOME isolation lands here
+      sessionId: opencodeSessionId,
+      onSession: async (id: string) => {
+        opencodeSessionId = id;
+        writebackSession(id);
+      },
+      onExit: (info) => {
+        warn(`[opencode] child exited code=${info.code} signal=${info.signal}; next turn will reopen`);
+        opencodeRuntimeSession = null;
+      },
+      log,
+      warn,
+    });
+  }
+
+  const outcome = await opencodeThink(opencodeRuntimeSession, {
+    prompt: task,
+    cwd: process.cwd(),
+    workDir: process.cwd(),
+    sessionId: opencodeRuntimeSession.sessionId,
+    log,
+    warn,
+  });
+
+  const u = outcome.state.usage;
+  log(
+    `[opencode] turn done | reply=${outcome.replyText.length}ch ` +
+    `thought=${outcome.thoughtText.length}ch chunks=${outcome.state.chunks} ` +
+    `stopReason=${outcome.state.lastStopReason ?? "?"} rescued=${outcome.rescued} ` +
+    `in=${u?.inputTokens ?? "?"} out=${u?.outputTokens ?? "?"} thought=${u?.thoughtTokens ?? "?"}`,
+  );
+
+  return outcome.replyText || "（无回复）";
+}
+
 async function processWithGrok(task: string, from: string, images?: string[]): Promise<string> {
   if (images?.length) {
     warn(`[grok] image attachments received but Grok ACP fixture reports promptCapabilities.image=false; sending text-only prompt`);
@@ -2881,18 +2956,7 @@ function think(task: string, from: string, taskId: string | null, images?: strin
         return await processWithGrok(task, from, images);
       }
       if (RUNTIME === "opencode") {
-        // RFC-029 PR① — runtime is registered end-to-end (config,
-        // wizard, CLI, launcher) so operators can create and start
-        // opencode-cli nodes today; the ACP think() shim itself lands
-        // in PR② (agent-node/src/runtime/opencode-acp/{events,client,
-        // runtime}.ts, ~15-25 LOC per Phase 0b probe). Fail loudly
-        // with a clear pointer so a first-turn attempt doesn't look
-        // like a mysterious hang or fall through to another runtime's
-        // path.
-        return (
-          "执行出错: opencode-cli runtime 尚未实现 think() (RFC-029 PR②). " +
-          "PR① 已 wire runtime 注册路径; PR② 会加 agent-node/src/runtime/opencode-acp/ ACP shim (~15-25 LOC)."
-        );
+        return await processWithOpencode(task, from, images);
       }
       return await processWithClaude(task, from, images);
     } finally {
