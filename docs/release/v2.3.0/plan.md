@@ -79,8 +79,33 @@
 - 严格两阶段：preview 亲测 + 30min 观察窗口
 - changelog 汇总本里程碑所有 preview 的更新
 
-## 里程碑 changelog（滚动记录）
+## Preview 优化记录（changelog 表）
 
-- _（每发一个 preview 在这加一行：版本 + 一句话更新）_
-- `agent-node 2.5.0-preview.18` — 飞书 thinking-only rescue（#383）
-- `commhub 0.9.0-preview.20` — host-supervisors 单网络 authz fallback（#381）
+> 每发一个 preview 补一行。**已发布**段只记已核实的；未核实的旧 preview 不臆造。
+
+### 已发布 preview（优化了什么）
+
+| 包 · 版本 | 优化了什么 | 关联 |
+|-----------|-----------|------|
+| `agent-node 2.5.0-preview.18` | 飞书空响应修复：thinking-only 终局轮自动 re-prompt 出正文 + vendor 无关的用户错误提示 | #383 / #384 |
+| `commhub-server 0.9.0-preview.20` | host-supervisors 单网络 authz fallback（dashboard 少传 network_id 时不再 400） | #381 |
+| `agent-network 2.3.0-preview.19` | 节点管理 CLI/wizard 迭代累积（create/stop-delete/daemon） | RFC-026/027 |
+| `agent-network-dashboard 0.6.3-preview.4` | 单节点设置面板：模型 select + 运行模式 flags + 存了自动重启，真接 `/api/anet/node-config` | #260 部分 |
+
+### 已合 main、待发 preview
+
+| 内容 | 优化了什么 | 关联 |
+|------|-----------|------|
+| opencode-cli 第 5 runtime | ACP shim（events/client/runtime）+ runtime 注册 + vendor preset + upgrade-pin；崩溃 session 恢复 + thinking 兜底 | #385 / #386 / #387 |
+| #180 rename-ghost CI 门 | env-sweep 修复实证（docker e2e 13/0 无 ghost）+ 永久回归门 | #398 |
+
+### 规划中 preview（P1-P4，会优化什么）
+
+| 目标版本 | 会优化什么 | 关联 |
+|----------|-----------|------|
+| agent-network `2.3.0-preview.20` + agent-node `2.5.0-preview.19` | 发出 opencode-cli（可装可试）；修 #180（发 preview 顺带回归验证） | RFC-029 / #180 |
+| dashboard `0.6.3-preview.5` | #260 channel 编辑收尾 + #393 供应商/模型/key 预配置库 | #260 / #393 |
+| agent-network `2.3.0-preview.21` + agent-node `2.5.0-preview.20` | RFC-026 P2 选服务器 multi-daemon | RFC-026 P2 |
+| `…preview.22 / …preview.21` | opencode-cli 真 vendor key 活体 + 正式主打 | RFC-029 |
+
+（详细见上「Preview 路线图」；本表偏「版本 → 优化了什么」速查。）
