@@ -37,7 +37,7 @@
 
 - [ ] **#180** rename 后 ghost 进程残留（P0）
 - [ ] **#260** dashboard 单节点设置面板（⋮ → 选 channel/模型/供应商/模式 + 一键重启）
-- [ ] **#393** dashboard 供应商/模型/key 预配置库（preset store）— 预设可复用 vendor+model+key，建/配节点时直接选
+- [x] **#393** dashboard 供应商/模型/key 预配置库 — **已建好并 merge**（= RFC-028 provider UI，dashboard PR #23：provider CRUD + key 写入即 vault 不回显 + reachability matrix）
 - [ ] RFC-026 P2 选服务器 multi-daemon
 - [ ] （放最后）opencode-cli 真 vendor key 活体 e2e + 正式主打（代码已合 main）
 
@@ -98,6 +98,7 @@
 |------|-----------|------|
 | opencode-cli 第 5 runtime | ACP shim（events/client/runtime）+ runtime 注册 + vendor preset + upgrade-pin；崩溃 session 恢复 + thinking 兜底 | #385 / #386 / #387 |
 | #180 rename-ghost CI 门 | env-sweep 修复实证（docker e2e 13/0 无 ghost）+ 永久回归门 | #398 |
+| dashboard 供应商/模型/key 预配置库（#393=RFC-028） | provider CRUD `/providers` + API key 写入即 vault 只回 hasKey 不回显 + reachability matrix；已 merge dashboard main | PR #23 |
 
 ### 规划中 preview（P1-P4，会优化什么）
 
