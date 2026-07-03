@@ -52,10 +52,11 @@
 - **任务**：修 #180 rename 后 ghost 进程（claude-code-cli runtime 旧进程未杀）；#203（已修复关闭）发进 preview 顺带回归验证
 - **验收**：rename 运行中节点后无残留 ghost 进程；连开 3 节点 alias 不乱（#203 回归）
 
-### P2 — dashboard 节点配置（#260 + #393）　⏳
+### P2 — dashboard 节点配置（#260 收尾 + #393）　⏳
 - **版本**：dashboard `0.6.3-preview.5`（若加新 REST 端点则 commhub 同升一版）
-- **任务**：#260 单节点设置面板（选 channel/模型/供应商/模式 + 重启）+ #393 供应商/模型/key 预配置库
-- **验收**：dashboard 改节点模型 + 重启生效；存一个 vendor+model+key 预设并在建节点时选中
+- **现状（claim=reality 核过）**：#260 核心**已建好**——NodeSettingsPanel.tsx 已把「模型 select + 运行模式 flags + 存了自动重启（optimistic→restarting→applied 状态机）」真接 `/api/anet/node-config`（dashboard PR #7/#10/#11/#19，6-28）。channel 目前是只读 stub。
+- **剩余任务**：① #260 收尾 = channel 可编辑 + 供应商切换打磨；② #393 = 供应商/模型/key 预配置库（新建，预设可复用）
+- **验收**：dashboard 改节点 channel/模型 + 重启生效；存一个 vendor+model+key 预设并在建节点时选中
 
 ### P3 — multi-daemon 选服务器　⏳
 - **版本**：agent-network `2.3.0-preview.21` + agent-node `2.5.0-preview.20`
