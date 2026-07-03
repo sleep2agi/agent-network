@@ -84,3 +84,69 @@ jobs:
           fi
           # Always exit 0 — report-only.
           exit 0
+
+  rename-ghost-gate:
+    # #180 regression gate — HARD FAIL (not report-only).
+    #
+    # The rename-ghost test suite (`tests/qa-180-rename-ghost/`) reproduces the
+    # exact ghost-process shape that #374 fixed: rename --force on a running
+    # claude-code-cli node → old process + its MCP stdio subprocess must ALL
+    # be reaped, and `/api/status` must lose the old alias immediately.
+    #
+    # Why this needs its own hard gate (not folded into the report-only block
+    # above):
+    #   - The fix relies on `sweepMcpOrphansForAlias` scanning
+    #     `/proc/<pid>/environ` for `COMMHUB_ALIAS=<oldAlias>`. Delete that
+    #     sweep or narrow its match set and the ghost silently returns.
+    #   - The mock claude binary in this suite can NEVER prove real-vendor
+    #     behaviour (mock ≠ real claude-code-cli), but #374 was originally
+    #     gated on a real-ghost reproduction — so if the sweep code path
+    #     still catches the mock's env-carrying subprocess (as it does
+    #     today, PASS=13/FAIL=0 evidence in docs/tests/p-180-verify/
+    #     rerun-postfix.txt), any future regression in that code path will
+    #     surface here before it hits a real user.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build rename-ghost image
+        run: docker build -t anet-qa180 -f tests/qa-180-rename-ghost/Dockerfile .
+        timeout-minutes: 10
+
+      - name: Run rename-ghost e2e
+        id: run
+        run: |
+          set -o pipefail   # so ${PIPESTATUS[0]} below is docker's, not tee's
+          set +e            # keep going even on non-zero — we surface it below
+          docker run --rm --tmpfs /tmp:rw,exec anet-qa180 2>&1 | tee /tmp/qa180-out.log
+          rc=${PIPESTATUS[0]}
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          # rc is the runner script's exit code. FAIL count is the "FAIL=N"
+          # trailer from run.sh. Both must be zero for a clean pass.
+          fail_line=$(grep -E 'PASS=[0-9]+ FAIL=[0-9]+' /tmp/qa180-out.log | tail -1)
+          echo "trailer_line=$fail_line" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Gate on ghost count = 0
+        run: |
+          set -e
+          line='${{ steps.run.outputs.trailer_line }}'
+          rc='${{ steps.run.outputs.exit_code }}'
+          echo "trailer: $line"
+          echo "runner exit code: $rc"
+          # Parse FAIL=N from the trailer.
+          fails=$(echo "$line" | grep -oE 'FAIL=[0-9]+' | cut -d= -f2)
+          fails=${fails:-999}
+          if [ -z "$line" ]; then
+            echo "::error::rename-ghost runner did not produce a trailer line — treat as regression."
+            exit 1
+          fi
+          if [ "$fails" -gt 0 ]; then
+            echo "::error::rename-ghost regression: FAIL=$fails (any FAIL > 0 = ghost process reproduced)."
+            exit 1
+          fi
+          if [ "$rc" != "0" ]; then
+            echo "::error::rename-ghost runner exited non-zero ($rc) despite FAIL=0 — infra issue worth surfacing."
+            exit 1
+          fi
+          echo "PASS: no ghost detected across both CASE A + B."
