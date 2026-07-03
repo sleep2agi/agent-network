@@ -1,21 +1,21 @@
 # anet 多包版本兼容与依赖管理
 
-> anet 由 3 个独立 npm 包组成，它们 **npm 层解耦、运行时耦合**。本文档管理它们之间的依赖契约、版本兼容矩阵、以及「谁跟谁一起升」的规则，并给出下一个 latest 的发布计划。发布前对照本文，改了契约的包必须一起升 + 记进矩阵。
+> anet 由 4 个独立 npm 包组成（CLI / runtime / hub / dashboard），它们 **npm 层解耦、运行时耦合**。本文档管理它们之间的依赖契约、版本兼容矩阵、以及「谁跟谁一起升」的规则，并给出下一个 latest 的发布计划。发布前对照本文，改了契约的包必须一起升 + 记进矩阵。
 
-## 1. 三个包 + 角色
+## 1. 四个包 + 角色
 
 | 包 | 角色 | 装在哪 |
 |----|------|--------|
 | `@sleep2agi/agent-network` | CLI / 编排（`anet` 命令：init/login/node create/channel/wizard），**spawn agent-node** | 操作机（每台跑 anet 的机器） |
 | `@sleep2agi/agent-node` | 单节点 runtime（think() + 5 种 runtime + channel worker），连 hub | 每个节点所在机器 |
 | `@sleep2agi/commhub-server` | Hub（会话注册 / SSE 推送 / task 路由 / REST API） | 中心 hub 机器（1 台） |
-| `@sleep2agi/agent-network-dashboard` | Web 指挥台（Next 应用），走 commhub REST | Vercel 部署（**不发 npm**，用 package.json 版本 + 部署 commit SHA 追踪） |
+| `@sleep2agi/agent-network-dashboard` | Web 指挥台（Next 应用），走 commhub REST | 装在跑 dashboard 的机器（npm 包，本地起） |
 
-dashboard 虽不发 npm，但它跟 commhub 的 REST 契约（C3）一样要版本约束——所以纳入本文档一起管，兼容矩阵（§4）给它一列。
+dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文档一起管，兼容矩阵（§4）给它一列。（旧的 Vercel 部署已废弃，现在统一走 npm 本地起。）
 
 ## 2. 🔑 关键事实：npm 解耦，运行时耦合
 
-- 三个包的 `package.json` **互相没有 `@sleep2agi/*` 依赖**。装 agent-network 不会自动带来 agent-node。
+- 四个包的 `package.json` **互相没有 `@sleep2agi/*` 依赖**。装 agent-network 不会自动带来 agent-node。
 - 耦合发生在**运行时**：
   - **agent-network → agent-node**：CLI `spawn('agent-node', …)`，靠约定（`.anet/nodes/<alias>/config.json` 形状、runtime 名、launch 参数）。CLI 只在文档/wizard 里叫你 `npm i -g @sleep2agi/agent-node`。
   - **agent-node → commhub-server**：走 hub 协议（注册 / SSE / task）+ `protocolVersion`。
@@ -32,11 +32,11 @@ dashboard 虽不发 npm，但它跟 commhub 的 REST 契约（C3）一样要版�
 
 ## 4. 版本兼容矩阵（已知良好组合）
 
-> 每次「一起测过」的组合记一行。装/部署的时候四列尽量取同一行。dashboard 列记 package.json 版本（+部署 commit SHA）。
+> 每次「一起测过」的组合记一行。装的时候四列尽量取同一行。四个都是 npm 包，dashboard 列也记 npm 版本。
 
 | 组合 | agent-network | agent-node | commhub-server | dashboard | 状态 |
 |------|--------------|-----------|----------------|-----------|------|
-| 当前线上飞书舰队 | 2.3.0-preview.18 | 2.5.0-preview.18 | 0.9.0-preview.14 | 0.6.3-preview.4 (95de0ba) | ✅ 实跑中（#383 rescue + Kimi） |
+| 当前线上飞书舰队 | 2.3.0-preview.18 | 2.5.0-preview.18 | 0.9.0-preview.14 | 0.6.3-preview.4 | ✅ 实跑中（#383 rescue + Kimi） |
 | 已发布 preview 头 | 2.3.0-preview.19 | 2.5.0-preview.18 | 0.9.0-preview.20 | 0.6.3-preview.4 | ⚠️ 未整体 e2e，agent-node 不含 opencode |
 | 下一发（含 opencode） | 2.3.0-preview.20 | 2.5.0-preview.19 | 0.9.0-preview.20 | 0.6.3-preview.4 | 🔜 待切（见 §6，dashboard 本发不动） |
 | v2.3.0 GA 目标 | 2.3.0 | 2.5.0 | 0.9.0 | 0.7.0（含 #260） | 🎯 整行测绿才升 |
