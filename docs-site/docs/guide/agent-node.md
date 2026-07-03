@@ -155,6 +155,50 @@ npx @sleep2agi/agent-node \
 :::
 :::
 
+### opencode-cli
+
+基于 [公版 sst/opencode](https://github.com/sst/opencode) CLI 接入 (RFC-029)。opencode 是多 vendor 前端 (统一 UI + session + auth 抽象), anet 通过 `opencode acp` (stdio JSON-RPC) 常驻子进程做 think()。
+
+| 属性 | 说明 |
+|------|------|
+| **前置** | `opencode-ai` 装到 exact pin 版本; vendor API key export 到 env (`ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`) |
+| **特点** | 多 vendor preset (Anthropic 原生 + OpenAI 起手); auth.json 每 node 独立隔离 (mode 0o600); ACP 常驻子进程无 cold-start; 跟 grok-build-acp 传输层同构 |
+| **工具** | opencode 内置; Feishu channel 下 commhub MCP 一律 deny (跟 grok/claude-code-cli 同) |
+
+```bash
+# 1. 装 pinned 版
+npm install -g opencode-ai@1.17.13
+
+# 2. Export 你选的 preset 对应的 env
+export ANTHROPIC_API_KEY=sk-...    # for anthropic preset
+# 或
+export OPENAI_API_KEY=sk-...       # for openai preset
+
+# 3. Wizard 建 node (会问 preset + 自动落 auth.json 到 node HOME)
+anet node create opencode助手 --runtime opencode-cli
+anet node start opencode助手
+```
+
+::: tip 版本 pin + upgrade
+opencode 上游迭代快 (npm `latest` 每天动), 每次 `anet node start` 都硬检 exact 版本, 差一个字都拒。
+
+- 想升级: `anet opencode upgrade-pin <version>` — 命令会:
+  1. `npm install -g opencode-ai@<version>`
+  2. 起 `opencode acp` 做 smoke (initialize + session/new)
+  3. **smoke 过才**写 `~/.anet/opencode-pin.json` (含 version + smokePassedAt)
+  4. 下次 `anet node start` 就认新版本
+
+- pin 状态是 per-machine 的; 团队协作时每台机器各自升级 + smoke。
+:::
+
+::: tip Bearer-only vendor 门槛 (RFC-029 §8 D3)
+opencode 内建 anthropic client 硬编码 `x-api-key`。Bearer-only 兼容网关 (Kimi coding 等) 开箱 401。preset 起手支持 Anthropic 原生 + OpenAI; Bearer vendor 需 opencode plugin 自控 auth path (实施期 backlog)。
+:::
+
+::: warning auth.json 敏感路径
+opencode 的 `auth.json` 存 vendor API key。agent-node 的 read-denylist 会阻止运行中的 opencode agent Read / exfil 自己 auth.json (跟飞书 access.json 同类防线)。
+:::
+
 ### claude-agent-sdk + 国产模型
 
 通过 `ANTHROPIC_BASE_URL` 将 claude-agent-sdk 的请求路由到国产模型的兼容 API，适合低成本场景。

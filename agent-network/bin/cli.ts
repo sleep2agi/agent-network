@@ -928,21 +928,24 @@ async function setupCommand() {
   console.log(`\n完成！下一步: anet node create <node-name>`);
 }
 
-// RFC-029 — the exact opencode-ai version anet is validated against.
-// Upstream churn is heavy pre-1.0 (see `npm view opencode-ai dist-tags` —
-// `latest` moves daily; there are 30+ snapshot tags each week). We hard-
-// lock this constant and reject any drift; upgrading is an explicit,
-// smoke-gated `anet opencode upgrade-pin <version>` operation (lands in
-// PR③).
-export const OPENCODE_PINNED_VERSION = "1.17.13";
+// RFC-029 — the effective opencode-ai pin. Prefers the per-machine
+// override at `~/.anet/opencode-pin.json` (written by
+// `anet opencode upgrade-pin` after smoke pass); falls back to
+// `OPENCODE_BUILTIN_PIN` when the override is absent or malformed.
+// Read fresh on every check so a mid-session upgrade takes effect
+// without a restart.
+import { readEffectivePin, writePinOverride, OPENCODE_BUILTIN_PIN } from "../src/opencode-pin";
+export const OPENCODE_PINNED_VERSION = OPENCODE_BUILTIN_PIN;
 
 function checkOpencodePin(): { ok: true } | { ok: false; found: string | null; hint: string } {
   const bin = "opencode";
+  const effective = readEffectivePin();
+  const expected = effective.version;
   if (!commandExists(bin)) {
     return {
       ok: false,
       found: null,
-      hint: `opencode CLI not found in PATH. Install (exact): npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}`,
+      hint: `opencode CLI not found in PATH. Install (exact): npm install -g opencode-ai@${expected}`,
     };
   }
   let raw = "";
@@ -956,16 +959,24 @@ function checkOpencodePin(): { ok: true } | { ok: false; found: string | null; h
   // suffix) don't break the pin check.
   const m = raw.match(/(\d+\.\d+\.\d+)/);
   const found = m ? m[1] : raw;
-  if (found === OPENCODE_PINNED_VERSION) return { ok: true };
+  if (found === expected) return { ok: true };
+  const sourceNote = effective.source === "override-file"
+    ? ` (from ${opencodeUsePinSource()}; smoke passed ${effective.smokePassedAt})`
+    : ` (baked-in default)`;
   return {
     ok: false,
     found,
     hint:
-      `Expected opencode-ai@${OPENCODE_PINNED_VERSION} (exact); found ${found}.\n` +
-      `  → Downgrade: npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}\n` +
+      `Expected opencode-ai@${expected}${sourceNote}; found ${found}.\n` +
+      `  → Downgrade: npm install -g opencode-ai@${expected}\n` +
       `  → Or run: anet opencode upgrade-pin ${found}   ` +
-      `(smoke-tests the new version; on pass updates the pin.)`,
+      `(smoke-tests the new version; on pass writes ~/.anet/opencode-pin.json.)`,
   };
+}
+
+function opencodeUsePinSource(): string {
+  // Kept small so the hint above stays one grep-able string.
+  return "~/.anet/opencode-pin.json override";
 }
 
 function assertStartCompatibility(runtime: RuntimeName) {
@@ -1601,6 +1612,45 @@ async function ensureNodeToken(profile: Profile, id: string): Promise<Profile> {
   return profile;
 }
 
+// RFC-029 PR③ — materialize the opencode vendor preset (auth.json +
+// opencode.json) into the newly-created node's workdir. Runs after
+// `saveCreatedNode` so the node dir already exists. API key is read
+// from `preset.envKey` at create time and NEVER prompted (per
+// 通信龙 PR③ flag refinement 2). File modes: auth.json is written
+// 0o600 by writeOpencodeAuthJson. If the env key is missing we emit
+// a clear message so the operator knows to re-run after exporting
+// it, rather than baking an empty auth.json that would fail at
+// start time.
+function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts: Record<string, any>): void {
+  if (normalizeRuntime(profile) !== "opencode-cli") return;
+  const presetId = wizardOpts._opencodePreset || "anthropic";
+  const { findOpencodePreset, readPresetKeyFromEnv, writeOpencodeAuthJson, writeOpencodeConfigJson } =
+    // Lazy-loaded so a create wizard for another runtime doesn't
+    // pay the import cost.
+    require("../src/opencode-preset") as typeof import("../src/opencode-preset");
+  const preset = findOpencodePreset(presetId);
+  if (!preset) {
+    console.warn(`[anet] ⚠ unknown opencode preset '${presetId}' — skipping auth.json write.`);
+    return;
+  }
+  const apiKey = readPresetKeyFromEnv(preset);
+  const nodeWorkDir = join(nodesDir(), id);
+  if (!apiKey) {
+    console.warn(
+      `[anet] ⚠ opencode-cli preset '${preset.id}' selected but ${preset.envKey} is not set — ` +
+      `auth.json NOT written. Export ${preset.envKey} and re-run \`anet node create ${id}\` or ` +
+      `write ${join(nodeWorkDir, ".local", "share", "opencode", "auth.json")} manually before start.`,
+    );
+    console.warn(`[anet]   sign-up / key page: ${preset.signupUrl}`);
+    return;
+  }
+  const authPath = writeOpencodeAuthJson(nodeWorkDir, preset, apiKey);
+  const configPath = writeOpencodeConfigJson(nodeWorkDir, preset);
+  console.log(`[anet] ✅ opencode preset '${preset.id}' materialized:`);
+  console.log(`  auth.json:     ${authPath} (mode 0o600, read-denied to the running agent)`);
+  console.log(`  opencode.json: ${configPath}`);
+}
+
 function writeLegacyProjectAlias(alias: string) {
   const channelDir = join(home, ".claude", "channels", "commhub");
   const projectKey = encodeCwd(process.cwd());
@@ -2042,12 +2092,29 @@ This wizard creates one agent node for this project:
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok auth login`);
   } else if (pickedRuntime === "opencode-cli") {
     opts.runtime = "opencode-cli";
-    // RFC-029 — pin note first, so operators know the exact version
-    // requirement upfront (upstream churn is heavy pre-1.0). Vendor
-    // preset flow lands in PR③; for now the create wizard just
-    // records the runtime choice.
-    console.log(`[anet] 请确保已安装 opencode CLI (exact): npm install -g opencode-ai@1.17.13`);
-    console.log(`[anet] opencode-cli runtime 尚未实现 think() (RFC-029 PR②), 现阶段可 create 但 start 会明确报错.`);
+    // RFC-029 PR③ — pin note + vendor preset selector. The preset
+    // choice is stored on opts so createProfileFromOpts + saveCreatedNode
+    // can materialize auth.json / opencode.json inside the node's
+    // workdir (HOME-isolated per §8 D5). API key is read from env at
+    // save time; we don't prompt for it.
+    const currentPin = readEffectivePin();
+    console.log(`[anet] 请确保已安装 opencode CLI (exact): npm install -g opencode-ai@${currentPin.version}`);
+    console.log(`[anet]   pin source: ${currentPin.source === "override-file" ? `~/.anet/opencode-pin.json (smoke ${currentPin.smokePassedAt})` : "built-in default"}`);
+    try {
+      const { select: sel } = await import("@inquirer/prompts");
+      const preset = await sel({
+        message: "选择 opencode vendor preset:",
+        choices: [
+          { value: "anthropic", name: "Anthropic 原生 API — reads ANTHROPIC_API_KEY env" },
+          { value: "openai",    name: "OpenAI                 — reads OPENAI_API_KEY env" },
+        ],
+      });
+      (opts as any)._opencodePreset = preset;
+      console.log(`[anet] opencode preset = ${preset}. 请确保 ${preset === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} 已 export; 会在 create 落到 node HOME 下的 auth.json (mode 0o600).`);
+    } catch (e: any) {
+      console.log(`[anet] ⚠ preset selector 不可用 (${e?.message || e}) — 默认 anthropic`);
+      (opts as any)._opencodePreset = "anthropic";
+    }
   } else {
     // claude-agent-sdk — flow continues into vendor + model picker.
     const sel = await selectVendorAndModel();
@@ -2136,6 +2203,7 @@ Telegram setup:
   if (telegramConfig) {
     writeTelegramChannelConfig(id, telegramConfig.botToken, telegramConfig.allowId);
   }
+  writeOpencodePresetIfRequested(id, profile, opts);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)})`);
@@ -2381,6 +2449,7 @@ async function createCommand(idOverride?: string) {
   profile.token = nodeTokenRes.token;  // ntok_ written into node config
 
   saveCreatedNode(id, profile);
+  writeOpencodePresetIfRequested(id, profile, opts);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   const netLabel = gc.network_name || gc.network_id || "global";
@@ -6028,6 +6097,181 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
     console.log(`    ${p.display.padEnd(18)}  ${cur.padEnd(20)}  →  ${tgt.padEnd(20)}  ${badge}`);
     if (p.note) console.log(`      ${p.note}`);
   }
+}
+
+// RFC-029 PR③ — `anet opencode …` command family (currently only
+// `upgrade-pin <version>`). Kept in its own dispatch namespace so
+// future opencode-specific management commands (e.g. cache prune,
+// preset rewrite) can hang off the same top-level.
+async function opencodeCommand() {
+  const sub = args[1];
+  if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
+    console.log(`anet opencode <sub>
+
+Subcommands:
+  upgrade-pin <version>   Install opencode-ai@<version>, run a smoke test,
+                          and — ONLY on smoke pass — record it as the
+                          effective pin (~/.anet/opencode-pin.json).
+                          The effective pin is consulted by every
+                          \`anet node start\` for an opencode-cli node.
+
+Examples:
+  anet opencode upgrade-pin 1.18.0
+`);
+    return;
+  }
+  if (sub === "upgrade-pin") {
+    await opencodeUpgradePinCommand(args[2]);
+    return;
+  }
+  console.error(`[anet] unknown opencode subcommand: ${sub}`);
+  console.error(`[anet] try: anet opencode --help`);
+  process.exit(1);
+}
+
+async function opencodeUpgradePinCommand(rawVersion: string | undefined) {
+  if (!rawVersion || !/^\d+\.\d+\.\d+/.test(rawVersion)) {
+    console.error(`[anet] opencode upgrade-pin requires a semver version (e.g. 1.18.0)`);
+    console.error(`[anet] usage: anet opencode upgrade-pin <version>`);
+    process.exit(1);
+  }
+  const version = rawVersion.match(/^\d+\.\d+\.\d+/)![0];
+
+  console.log(`[anet] opencode upgrade-pin: target version = ${version}`);
+  console.log(`[anet]   1/3 installing opencode-ai@${version} globally...`);
+  try {
+    execSync(`npm install -g opencode-ai@${version}`, {
+      stdio: "inherit",
+      timeout: 5 * 60_000,
+    });
+  } catch (e: any) {
+    console.error(`[anet] ✗ npm install failed. Refusing to update the pin.`);
+    process.exit(1);
+  }
+
+  // Confirm the installed version matches what we asked for. Guards
+  // against `latest`-tag drift + npm skew.
+  let installedRaw = "";
+  try {
+    installedRaw = execSync(`opencode --version`, { encoding: "utf-8", timeout: 5_000 }).trim();
+  } catch (e: any) {
+    console.error(`[anet] ✗ opencode --version failed after install: ${e?.message || e}`);
+    console.error(`[anet]   pin NOT updated.`);
+    process.exit(1);
+  }
+  const installedVersion = installedRaw.match(/(\d+\.\d+\.\d+)/)?.[1];
+  if (installedVersion !== version) {
+    console.error(`[anet] ✗ installed version mismatch — asked for ${version}, got ${installedVersion ?? installedRaw}.`);
+    console.error(`[anet]   pin NOT updated.`);
+    process.exit(1);
+  }
+
+  // Smoke: spawn `opencode acp`, send initialize + session/new, and
+  // wait for both responses. Per 通信龙 PR③ refinement 1: pin write is
+  // gated on this — an install without a working ACP surface is not
+  // usable.
+  console.log(`[anet]   2/3 smoke: spawning opencode acp + probing initialize/session/new...`);
+  const smokeResult = await smokeOpencodeAcp();
+  if (!smokeResult.ok) {
+    console.error(`[anet] ✗ opencode-ai@${version} smoke failed: ${smokeResult.reason}`);
+    console.error(`[anet]   pin NOT updated. The runtime will still reject this version at start.`);
+    process.exit(1);
+  }
+  const smokePassedAt = smokeResult.smokePassedAt;
+  console.log(`[anet]   ✓ smoke passed at ${smokePassedAt}`);
+  console.log(`[anet]   3/3 writing pin override to ~/.anet/opencode-pin.json...`);
+  writePinOverride(version, smokePassedAt, "smoke: initialize + session/new via `opencode acp`");
+  console.log(`[anet] ✓ pinned opencode-ai@${version}. \`anet node start\` for opencode-cli nodes will now accept it.`);
+}
+
+// Deterministic ACP smoke — no vendor key, no vendor call, just
+// verifies the freshly-installed binary can be spawned, honors the
+// JSON-RPC protocol, and returns a sessionId. If ANY step fails we
+// treat the whole probe as failed and refuse to write the pin.
+async function smokeOpencodeAcp(): Promise<{ ok: true; smokePassedAt: string } | { ok: false; reason: string }> {
+  const { spawn } = await import("child_process");
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (v: { ok: true; smokePassedAt: string } | { ok: false; reason: string }) => {
+      if (!settled) { settled = true; resolve(v); }
+    };
+    const proc = spawn("opencode", ["acp"], { stdio: ["pipe", "pipe", "pipe"] });
+    const kill = () => { try { proc.kill("SIGTERM"); } catch { /* already gone */ } };
+    let buf = "";
+    const timer = setTimeout(() => {
+      settle({ ok: false, reason: "smoke timed out after 15s" });
+      kill();
+    }, 15_000);
+
+    proc.on("error", (e) => {
+      clearTimeout(timer);
+      settle({ ok: false, reason: `spawn error: ${e.message}` });
+    });
+    proc.on("exit", (code, signal) => {
+      clearTimeout(timer);
+      if (!settled) {
+        settle({ ok: false, reason: `opencode acp exited before smoke completed (code=${code} signal=${signal})` });
+      }
+    });
+
+    // Feed initialize + session/new; expect responses for both.
+    let seenInitialize = false;
+    let seenSessionNew = false;
+    proc.stdout.on("data", (chunk: Buffer) => {
+      buf += chunk.toString("utf-8");
+      while (buf.includes("\n")) {
+        const idx = buf.indexOf("\n");
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line) continue;
+        let msg: any;
+        try { msg = JSON.parse(line); } catch { continue; }
+        if (msg.id === 1 && msg.result) {
+          seenInitialize = true;
+          // Now send session/new
+          proc.stdin.write(JSON.stringify({
+            jsonrpc: "2.0", id: 2, method: "session/new",
+            params: { cwd: process.cwd(), mcpServers: [] },
+          }) + "\n");
+        } else if (msg.id === 2 && msg.result && typeof msg.result.sessionId === "string") {
+          seenSessionNew = true;
+          clearTimeout(timer);
+          settle({ ok: true, smokePassedAt: new Date().toISOString() });
+          kill();
+        } else if (msg.error) {
+          clearTimeout(timer);
+          settle({ ok: false, reason: `smoke rpc error id=${msg.id}: ${msg.error.message}` });
+          kill();
+        }
+      }
+    });
+
+    // Kick off initialize
+    proc.stdin.write(JSON.stringify({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: {
+        protocolVersion: 1,
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      },
+    }) + "\n");
+
+    // If the child dies with only initialize seen, that's still a
+    // failure — session/new is where the transport actually stresses.
+    proc.on("close", () => {
+      clearTimeout(timer);
+      if (!settled) {
+        settle({
+          ok: false,
+          reason:
+            seenSessionNew
+              ? "unreachable (settled=false with session/new done)"
+              : seenInitialize
+                ? "session/new never responded"
+                : "initialize never responded",
+        });
+      }
+    });
+  });
 }
 
 async function upgradeCommand() {
@@ -10206,6 +10450,7 @@ switch (command) {
   case "whoami": await whoamiCommand(); break;
   case "network": await networkCommand(); break;
   case "run": await runCommand(); break;
+  case "opencode": await opencodeCommand(); break; // RFC-029 PR③ — upgrade-pin
   case "-v": case "-V": case "--version": case "version": {
     // F7-05 / #192 — accept "-V" (cargo/git convention) as alias for -v.
     printVersionReport();
