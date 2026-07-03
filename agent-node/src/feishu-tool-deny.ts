@@ -80,6 +80,14 @@ export const READ_PATH_DENY: RegExp[] = [
   // contains ANTHROPIC_AUTH_TOKEN; sibling proc reads can expose the
   // feishu worker's FEISHU_APP_SECRET + the parent's hub ntok_.
   /^\/proc\/[^/]+\/environ$/,
+  // RFC-029 PR③ — opencode-cli's per-node auth.json holds the
+  // vendor API key (ANTHROPIC_API_KEY or OPENAI_API_KEY). The
+  // running opencode agent MUST NOT be able to Read / exfil its
+  // own key — same secret-exfil defense as the feishu bot's
+  // access.json (see reference feishu-open-channel-secret-exfil).
+  // Match anywhere under `.local/share/opencode/auth.json` so we
+  // catch both dev and container paths.
+  /\/\.local\/share\/opencode\/auth\.json$/,
 ];
 
 /**
