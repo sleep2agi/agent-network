@@ -199,6 +199,9 @@ describe("P0 runtime gate — name resolution", () => {
     expect(runtimeBucket("grok-build-acp")).toBe("grok");
     expect(runtimeBucket("grok-build")).toBe("grok");
     expect(runtimeBucket("grok")).toBe("grok");
+    // RFC-029 — opencode CLI bucket.
+    expect(runtimeBucket("opencode-cli")).toBe("opencode");
+    expect(runtimeBucket("opencode")).toBe("opencode");
     expect(runtimeBucket("mystery")).toBe("unknown");
     expect(runtimeBucket(null)).toBe("unknown");
     expect(runtimeBucket(undefined)).toBe("unknown");

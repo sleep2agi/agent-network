@@ -15,7 +15,8 @@ export type RuntimeName =
   | "claude-code-cli"
   | "codex-sdk"
   | "claude-agent-sdk"
-  | "grok-build-acp";
+  | "grok-build-acp"
+  | "opencode-cli";
 
 /** Operator-facing default for any runtime slot that comes in empty / missing / unrecognized. */
 export const DEFAULT_RUNTIME: RuntimeName = "claude-agent-sdk";
@@ -46,6 +47,10 @@ export function normalizeRuntime(profileOrRuntime?: ProfileLike | string): Runti
     // Preserve EXPLICIT `claude-code-cli` choice — operators who
     // actually want CC-CLI still get it.
     if (profileOrRuntime === "claude-code-cli") return "claude-code-cli";
+    // RFC-029 — opencode CLI runtime (public sst/opencode). Aliases:
+    // `opencode` (short), `opencode-cli` (canonical, matches
+    // claude-code-cli precedent).
+    if (profileOrRuntime === "opencode" || profileOrRuntime === "opencode-cli") return "opencode-cli";
     return DEFAULT_RUNTIME;
   }
   const p = profileOrRuntime;

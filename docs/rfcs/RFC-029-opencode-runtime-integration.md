@@ -3,7 +3,7 @@
 | 项 | 值 |
 |----|----|
 | **作者** | 通信工程马 |
-| **状态** | v0.2 — 通信龙 v0.1 review PASS+merged (PR #369), Phase 0 U2/U4 探针回填, 待 U1/U3/U5 (等 Vincent key + track 拍板) |
+| **状态** | v0.3 — **Vincent 拍板 D2 track = ① 直接一步 B1'** (常驻 ACP), 实施启动. Phase 0b U1/U3/U5/U8 探针全出 (`docs/analysis/rfc029-opencode-probe/summary.md`), ACP shim 净估 ~15-25 LOC, opencode-ai@`1.17.13` pin. 分 ~3 PR (① runtime 注册 → ② ACP shim + supervisor → ③ vendor preset + wizard hint + docs). (历史: v0.2 通信龙 v0.1 review PASS+merged PR #369) |
 | **调度** | 通信龙 dispatch task_id `418d0521-0148-452a-9f5a-70ed13f195e3` (HIGH, Vincent 要求) |
 | **创建** | 2026-07-01 (北京 UTC+8) |
 | **关联 RFC** | [RFC-021](RFC-021-acp-capability-profile-expansion.md) (ACP capability 扩展 — grok-build-acp precedent) · [RFC-006 (project memory)](../../.claude/memory/) codex-code-cli-mcp runtime 类似 track |
@@ -343,20 +343,26 @@ opencode session 若跟 anet 其他 session 语义不同 (opencode 有 `--fork` 
 
 ---
 
-## 5. 关键未知项 (实施前必须活体验证)
+## 5. 关键未知项 (Phase 0b 探针完 — 全 verified)
 
-| # | 未知项 | 验证方法 | 阻塞哪个方案 | v0.2 状态 |
-|---|---|---|---|---|
-| U1 | `opencode run --format json` 事件 exact schema, 抽 final assistant text 的稳定 JSON path | fresh docker + `opencode run --format json "hi"` 抓 stdout | B2 (blocker) / B1' (nice-to-have) | **pending** (等 Vincent API key) |
-| U2 | `opencode serve` MCP 挂载机制 (是运行时 flag 还是要 config 文件预置) | ~~读 docs + `opencode serve --help`~~ | B1' (blocker) | ✅ **verified — 必须 config 文件预置**, 无 runtime flag |
-| U3 | 首启 `opencode auth login -p anthropic` 能否纯 env-var (ANTHROPIC_API_KEY) 绕过 headless | fresh docker + env + `opencode run ...` 观察是否要求 login prompt | B1'/B2 都是 (安全 default) | **pending** (等 Vincent API key) |
-| U4 | opencode `acp` 子命令是否 Zed ACP, 若是可复用 `runtime/grok-build-acp` | ~~`opencode acp --help`~~ | 影响 B1' 工时上限 | ✅ **verified — 是一等 ACP TCP server**, transport 换 stdio → TCP 后可复用 grok-build-acp 抽象 |
-| U5 | `POST /session/:id/message` 同步返回 `parts: Part[]` 里 final assistant text 的 canonical path | 打真 opencode serve + curl 一次 | B1 legacy (blocker) | **pending** (B1' 走 ACP 路线可能绕过, 但保留 fallback 用) |
-| U6 | session 磁盘位置能否指定为 `.anet/nodes/<alias>/.opencode/` | 读 config docs + `opencode db path` | 两方案都影响 (多节点隔离) | ✅ **verified — 有 `opencode db` 子命令 + `--cwd` flag + `OPENCODE_CONFIG` env**, 隔离手段齐全 |
-| U7 | opencode 是否支持 image 附件 | `opencode run --file <path>` 一等支持 (`opencode run --help` 已验) | 多 modal 场景 | ✅ **verified — `-f/--file` flag 一等**, 每 turn 附件走 anet 现有 images[] 接 --file 参数 |
-| U8 (v0.2 新增) | opencode acp 消息 schema 跟 grok agent stdio 是否 byte-exact 兼容 (initialize / session/new / prompt / turn 消息格式), 若不兼容需要多少 adapter 层 shim | 打通 opencode acp TCP client 后跑一次真 turn, 拿到实际消息 dump 对比 grok-build-acp/events.ts 中的 shape | B1' (blocker, 决定复用抽象比例 → 影响工时上限) | **pending** (需 API key + 起真 turn) |
+| # | 未知项 | 验证方法 | v0.3 状态 |
+|---|---|---|---|
+| U1 | `opencode run --format json` 事件 exact schema, 抽 final assistant text 的稳定 JSON path | fresh docker + `opencode run --format json "hi"` 抓 stdout | ✅ **verified** — JSONL, 事件 `type: step_start / text / step_finish` (snake_case), 每事件包 `{type, timestamp, sessionID, part}` envelope. Canonical `jq -r 'select(.type=="text")\|.part.text'`; usage 在 `step_finish.part.tokens`. 详见 `docs/analysis/rfc029-opencode-probe/u1-run-json.txt` |
+| U2 | `opencode serve` MCP 挂载机制 (是运行时 flag 还是要 config 文件预置) | ~~读 docs + `opencode serve --help`~~ | ✅ **verified — 必须 config 文件预置**, 无 runtime flag |
+| U3 | 首启 opencode 能否纯 env-var / auth.json 绕过 headless login prompt | fresh docker + env + `opencode run ...` 观察是否要求 login prompt | ✅ **verified — 可纯 env-var + 直写 `~/.local/share/opencode/auth.json` 绕过 headless prompt**. 🔴 但 opencode 内建 anthropic client **硬编码 `x-api-key`**, Bearer-only 兼容网关 (Kimi coding 等) 开箱 401 → 见 §8 D3 一等结论. 详见 `docs/analysis/rfc029-opencode-probe/u3-gate-report.txt` |
+| U4 | opencode `acp` 子命令是否 Zed ACP, 若是可复用 `runtime/grok-build-acp` | ~~`opencode acp --help`~~ | ✅ **verified — 🔴 修正: opencode acp = stdio JSON-RPC 不是 TCP** (`--port`/`--hostname` v1.17.13 被忽略, 要 `spawn('opencode acp')` 走子进程 stdio). 跟 grok-build-acp 传输层同构, 之前 v0.2 打算的 TCP transport ~50-100 LOC adapter 不需要了 |
+| U5 | `POST /session/:id/message` 同步返回 `parts: Part[]` 里 final assistant text 的 canonical path | 打真 opencode serve + curl 一次 | ✅ **verified** — `POST /session` → `POST /session/:id/message`, response `{info, parts[]}`, canonical `jq -r '.parts[]\|select(.type=="text")\|.text'`. ⚠️ U5 用 kebab-case `step-start/finish` vs U1 snake_case, REST fallback 用要归一化 |
+| U6 | session 磁盘位置能否指定为 `.anet/nodes/<alias>/.opencode/` | 读 config docs + `opencode db path` | ✅ **verified — 有 `opencode db` 子命令 + `--cwd` flag + `OPENCODE_CONFIG` env**, 隔离手段齐全; §8 D5 已定 `HOME=<node workdir>` 强隔离 |
+| U7 | opencode 是否支持 image 附件 | `opencode run --file <path>` 一等支持 | ✅ **verified — `-f/--file` flag 一等**, 每 turn 附件走 anet 现有 images[] 接 --file 参数 |
+| U8 | opencode acp 消息 schema 跟 grok-build-acp/events.ts byte-exact 兼容度, 需多少 shim | `spawn('opencode acp')` 跑 initialize→session/new→session/prompt 真 turn, dump 消息对比 | ✅ **verified — 关键路径字节兼容**: 都 JSON-RPC 2.0 over stdio, 都 `method: "session/update"` 通知; `sessionUpdate: "agent_message_chunk"` + `content: {type:"text", text}` 字节一致. 差异: turn-end 信号 (opencode 用 `session/prompt` 响应带 `stopReason` vs grok 的 `_x.ai/…/prompt_complete` 通知) + opencode 多 `agent_thought_chunk`/`usage_update`/`available_commands_update`. **B1' shim 净估 ~15-25 LOC** (new `agent-node/src/runtime/opencode-acp/events.ts`, 继承 grok reducer 骨架). 详见 `docs/analysis/rfc029-opencode-probe/u8-acp.txt` |
 
-**v0.2 状态**: U2/U4 blocker 验完, 打开 B1' 新方案 + 显著砍工时. U6/U7 顺手回填 (查 --help 时看到的). U1/U3/U5/U8 仍等 Vincent API key + track 拍板. U8 是 v0.2 新增, 挂 B1' 上限.
+**v0.3 状态 (Phase 0b 完, 工程马跑, opencode 免费 model 零 vendor key)**: U1/U3/U5/U8 全验完. 三个决定性结论:
+
+1. **opencode acp = stdio JSON-RPC** (`--port`/`--hostname` v1.17.13 被忽略) — v0.2 打算的 TCP adapter 不需要, 直接 spawn 子进程走 stdio, 跟 grok-build-acp 传输层同构.
+2. **ACP 关键路径字节兼容** — `session/update` + `agent_message_chunk` + `content:{type:"text",text}` 跟 `agent-node/src/runtime/grok-build-acp/events.ts` **零 diff**. 差异只在 turn-end 信号 + opencode 多 chunk 类型, 全是可控 branch swap. **B1' shim 净估 ~15-25 LOC**, 零风险项.
+3. **Bearer-only vendor 门槛** — opencode 内建 anthropic client 硬编码 `x-api-key`, 只吃 Anthropic 原生格式; Bearer-only 兼容网关 (Kimi coding 等) 开箱 401. 起手 preset 用 Anthropic 原生 + OpenAI; Bearer vendor 支持走 opencode plugin 自控 auth path (实施期 backlog, 非 scoping blocker). 见 §8 D3.
+
+**B1' 方案定** (工程马推荐, 通信龙 approve, Vincent D2=① 拍板): 走 ACP stdio 路径 — 原生流式无 cold-start (acp ~500ms 冷启 vs run ~2-3s 每 turn), 复用 grok-build-acp reducer 骨架, ~15-25 LOC shim. 真号 in `docs/analysis/rfc029-opencode-probe/{summary.md, u1-run-json.txt, u5-serve.txt, u8-acp.txt, u3-gate-report.txt}`. opencode-ai@`1.17.13` pin (上游迭代快, npm latest 每天动 — `assertStartCompatibility()` 硬锁 exact + `anet opencode upgrade-pin <version>` 显式升级命令带 e2e smoke, 见 §8 D6).
 
 ---
 
@@ -373,55 +379,87 @@ opencode session 若跟 anet 其他 session 语义不同 (opencode 有 `--fork` 
 
 ---
 
-## 7. 建议实施顺序 (若 review 通过)
+## 7. 实施顺序 (v0.3 — Vincent D2=① 直接 B1', 分 3 PR)
 
-**Phase 0a ✅ 完成 (v0.2 交付)**: U2/U4/U6/U7 无 key 可跑的探针 (~1h 实际耗时) → 打开 B1' 新方案 + 砍 5h 工时
+Phase 0a ✅ 完成 (v0.2 交付, ~1h): U2/U4/U6/U7 无 key 探针 → 打开 B1' 新方案 + 砍 5h 工时.
+Phase 0b ✅ 完成 (v0.3 交付, ~2.5h): U1/U3/U5/U8 全验完 (`opencode/deepseek-v4-flash-free` 免费 model, 零 vendor key). ACP 字节兼容锁定, shim 净估 ~15-25 LOC.
 
-**Phase 0b (~1-2h, 等 Vincent API key)**: 剩余 U1/U3/U5/U8 需 key 探针 (Anthropic 或 OpenAI, opencode 不支持 MiniMax). 拿到 key 后 fresh docker + `opencode auth login -p anthropic` 或 env var 直塞 → 跑 `opencode run` + 抓 `--format json` 事件 schema + 打通 opencode acp TCP client 跑真 turn 抓 ACP 消息 schema (U8) → RFC v0.3 定稿
+以下 3 PR 顺序 ship, 每 PR 独立 review + docker e2e non-mock 复验:
 
-**Phase 1 MVP (B2 冷启 route, ~7h)** [如 Vincent 选 MVP-first]: 让 opencode-cli 能作为 runtime 值出现 + 冷启 `opencode run` 能 process 一个 task → 基本 e2e docker green
+### PR① — runtime 注册 (~2-3h)
 
-**Phase 2 常驻升级 (B1', ~13h)** [如直接一步 B1' 或 从 Phase 1 upgrade]: `opencode acp` 常驻 + TCP transport 复用 grok-build-acp 抽象 + MCP inject via `OPENCODE_CONFIG` + supervisor
+作用面: 让 `opencode-cli` 出现在 `RuntimeName` union / wizard picker / VendorSpec 表 / assertStartCompatibility 版本 pin / launchAgent switch. 无实际 think() 能力, 但 CLI/wizard 走通 + `anet node create --runtime opencode-cli` 能存到 `config.json`.
 
-**Phase 3 完善 (~3h)**: 多 vendor 预设 (VendorSpec 表, 走 `opencode providers` 一等抽象) + wizard 交互优化 + docs + preview 发版
+具体 hook (§9 表精确定位):
+- `agent-network/src/normalize-runtime.ts` — `RuntimeName` 加 `"opencode-cli"` 分支
+- `agent-network/bin/cli.ts` — wizard picker + VendorSpec preset + `checkRuntimeDependency` + `assertStartCompatibility` (opencode 硬锁 `1.17.13`) + `launchAgent` runtime switch 加 opencode-cli 分支 (先 stub 报"not-yet-implemented" 明确错误 by design)
+- `agent-node/src/cli.ts` — `RUNTIME_MAP` 加 `"opencode-cli": "opencode"`; `processTask` runtime switch 加 opencode 分支占位
+- `server/src/index.ts` — `normalizeRuntime` 认 `agent-node:opencode` → `opencode-cli`
 
-**总计 (含 Phase 0b + Phase 1 MVP-then-upgrade path)**: ~25h 到 Phase 3 完成, 建议分 3 PR ship 让 review 面小.
-**若直接 B1' 一步到位** (skip Phase 1): ~19h.
+Docker e2e: `anet node create test-oc --runtime opencode-cli` 走通 + `anet node start test-oc` 明确报"opencode-acp not yet implemented (PR②)" 而不是崩. RuntimeName 单元测试 `opencode-cli` 分支加入.
+
+### PR② — ACP shim + supervisor (~4-6h) — 核心真活
+
+作用面: 让 `anet node start test-oc` 真跑起来做 think(). 
+
+具体 hook:
+- 新 `agent-node/src/runtime/opencode-acp/` 目录:
+  - `events.ts` — reducer, ~15-25 LOC (继承 grok-build-acp reducer 骨架, turn-end 换 `session/prompt` 响应带 `stopReason`, 加 `agent_thought_chunk` / `usage_update` 分支)
+  - `client.ts` — `spawn('opencode', ['acp'])` stdio JSON-RPC client (仿 codex-stdio-client / grok-build-acp client)
+  - `runtime.ts` — think() entry, session state machine (initialize → session/new → session/prompt 循环)
+- `agent-node/src/cli.ts` processTask 分支接 opencode-acp `runtime.ts`
+- 复用 `agent-node/src/util/supervise-child.ts` 抽象 (类 grok-build-acp / feishu bridge)
+- `HOME=<node workdir>` env 隔离 (per node 独立 opencode config root)
+
+Docker e2e non-mock: 起独立 hub + `anet node start`, feed 一个真 task, 观察 IPC reply 是真 opencode text (走 `opencode/deepseek-v4-flash-free` 免费 model). pre/post 对比 (no reply / real reply) 贴 PR body.
+
+### PR③ — vendor preset + wizard hint + docs (~2-3h)
+
+作用面: 端 UX 完善.
+
+具体 hook:
+- `agent-network/bin/cli.ts` VendorSpec — 加 Anthropic 原生 + OpenAI 两 preset (per §8 D3), wizard 选完 vendor 自动写 `~/.local/share/opencode/auth.json` (via HOME 隔离到 node workdir)
+- CommHub developer prompt 注入 (per §6 R5) — 起 opencode-cli 时写 `AGENTS.md` 到 node workdir 让 opencode agent 懂 anet 语义
+- `anet opencode upgrade-pin <version>` 命令 (per §8 D6) — 显式升级带 e2e smoke, 输出 pass/fail 决定是否更新 `assertStartCompatibility()` 常量
+- `docs-site/docs/guide/` 加 opencode-cli 使用文档
+
+**总计到 3 PR ship 完**: ~8-12h (显著低于 v0.2 估的 ~19h, 因 Phase 0b 探针确认 ACP 传输层同构 + shim 极小).
+
+**Bearer-only vendor plugin** (Kimi coding 等, §8 D3) — 实施期 backlog, 非 v0.3 scope. Anthropic + OpenAI preset 覆盖后再评估 plugin 优先级.
 
 ---
 
-## 8. 决策点 (需 通信龙 → Vincent 拍板)
+## 8. 决策点 (v0.3 — 全 locked)
 
-| # | 决策 | 建议 |
+| # | 决策 | 结论 |
 |---|---|---|
-| D1 | 是不是 B1 常驻方案作长期? | **是**, 若 24/7 无人值守是 anet 定位 (per [[project_positioning_ai_army]]) |
-| D2 | 要不要先 B2 MVP 抢速度? | **是**, 若 Vincent 想尽快 demo; **否**, 若可以直接一步到 B1 |
-| D3 | 支持哪几个 vendor 作为 opencode-cli 的 preset? | 建议起手 Anthropic + OpenAI 2 家 (跟现有 anet 双主 vendor 一致) |
-| D4 | 命名: `opencode-cli` vs `opencode` | 建议 `opencode-cli` (跟 claude-code-cli 对齐 -cli 后缀), 留 `opencode-sdk` 命名给未来 |
-| D5 | opencode 全局配置能否被 anet mount 隔离到 per-node? | 建议 `HOME=<node workdir>` env 强隔离 (per node 独立 opencode config root), 避免多节点相互污染 |
-| D6 | Phase 0 活体探针派给谁跑? | 建议派 通信测试马 或 SDK马 (跟 opencode 打交道能力强的), 通信工程马自己也可以 |
+| D1 | 是不是 B1 常驻方案作长期? | **[通信龙 定] 是** — 24/7 无人值守的数字员工军团是 anet 定位, 常驻 runtime 才配得上 |
+| D2 | ① 直接 B1' 常驻 ACP vs ② 先 B2 MVP 抢 demo | **[Vincent 拍板] ① 直接 B1'** — Phase 0b 探针证明 ACP shim 仅 ~15-25 LOC 零风险, B2 冷启方案 (每 turn 2-3s bun 启动) 又笨又要额外 ~7h; MVP-first 性价比变低 |
+| D3 | 起手 preset 哪几个 vendor? | **[通信龙 定, Vincent 认] Anthropic 原生 + OpenAI**. 🔴 v0.3 实测: opencode 内建 anthropic client 硬编码 `x-api-key`, 只吃 Anthropic 原生格式; Bearer-only 兼容网关 (Kimi coding 等) 开箱 401 → Bearer vendor 支持得写 opencode plugin 自控 auth path (实施期 backlog, 非 scoping blocker) |
+| D4 | 命名: `opencode-cli` vs `opencode` | **[通信龙 定] `opencode-cli`** — 跟 claude-code-cli 对齐 -cli 后缀, 留 `opencode-sdk` 命名给未来 |
+| D5 | opencode 全局配置能否 mount 隔离到 per-node? | **[通信龙 定] `HOME=<node workdir>` env 强隔离** — per node 独立 opencode config root (auth.json + opencode.json + session 缓存), 避免多节点相互污染. shared read-only cache mount (models catalog 3.9MB × N 节点) 记 backlog, 现在 disk × N 直连最简 |
+| D6 | opencode-ai 版本 pin 策略 (上游每天动) | **[通信龙 定] 硬锁 exact v1.17.13** — `assertStartCompatibility()` spawn 前 `opencode --version` 抓字符串硬对比, 差一个字都 clear-error 拒 + 提示 `anet opencode upgrade-pin <version>` 命令; 不 tolerate patch drift (pre-1.0 churn 不可信), 跟 grok-build-acp R1 precedent 一致. 升级命令带 e2e smoke, smoke 过才更新 `assertStartCompatibility` 常量 |
 
 ---
 
-## 9. 附录: 关键代码定位表 (实施时 quick jump)
+## 9. 附录: 关键代码定位表 (实施时 quick jump; 行号 refresh at v0.3)
 
-| 需要动的地方 | 文件路径 | 大致行号 |
+| 需要动的地方 | 文件路径 | 行号 |
 |---|---|---|
-| RuntimeName type + normalizeRuntime | `agent-network/bin/cli.ts` | 366-390 |
-| wizard runtime picker | `agent-network/bin/cli.ts` | 844-864 |
-| VendorSpec 表 | `agent-network/bin/cli.ts` | 1573-1657 |
-| checkRuntimeDependency | `agent-network/bin/cli.ts` | 984 |
-| assertStartCompatibility | `agent-network/bin/cli.ts` | 946 |
-| launchAgent runtime switch | `agent-network/bin/cli.ts` | 2431 |
-| CLI usage string | `agent-network/bin/cli.ts` | 1951 |
-| RUNTIME_MAP | `agent-node/src/cli.ts` | 278-284 |
-| processTask runtime switch | `agent-node/src/cli.ts` | 1991-2005 |
-| writebackSession pattern | `agent-node/src/cli.ts` | 388-413 |
-| createCommhubSdkMcpServer | `agent-node/src/commhub-mcp.ts` | 整文件 |
-| grok-build-acp 模板 | `agent-node/src/runtime/grok-build-acp/` | 整目录 |
+| `RuntimeName` union + `normalizeRuntime` + `DEFAULT_RUNTIME` | `agent-network/src/normalize-runtime.ts` | 14-57 |
+| wizard runtime picker (interactive choices) | `agent-network/bin/cli.ts` | 1957 (create wizard) / 2149 (batch) |
+| VendorSpec 表 (`VENDORS: Vendor[]`) | `agent-network/bin/cli.ts` | 1701+ |
+| `checkRuntimeDependency` | `agent-network/bin/cli.ts` | 975 |
+| `assertStartCompatibility` (add opencode-cli version pin) | `agent-network/bin/cli.ts` | 931 |
+| `launchAgent` runtime switch | `agent-network/bin/cli.ts` | 2643 |
+| `RUNTIME_MAP` | `agent-node/src/cli.ts` | 326 |
+| `processTask` runtime switch | `agent-node/src/cli.ts` | grep `RUNTIME ===` |
+| `writebackSession` pattern | `agent-node/src/cli.ts` | search `writebackSession` |
+| `createCommhubSdkMcpServer` | `agent-node/src/commhub-mcp.ts` | 整文件 |
+| grok-build-acp 模板 (reducer + client + runtime) | `agent-node/src/runtime/grok-build-acp/` | 整目录 (events.ts 是 shim 起点) |
 | codex-stdio-client 参考 | `agent-node/src/runtime/codex-stdio-client.ts` | 整文件 |
-| supervise-child 抽象 | `agent-node/src/util/supervise-child.ts` | 整文件 |
-| server normalizeRuntime | `server/src/index.ts` | 161-168 |
+| `superviseChild` 抽象 (crash restart + backoff) | `agent-node/src/util/supervise-child.ts` | 整文件 |
+| server `normalizeRuntime` (recognize `agent-node:opencode`) | `server/src/index.ts` | 170 |
 
 ---
 
@@ -434,7 +472,8 @@ opencode session 若跟 anet 其他 session 语义不同 (opencode 有 `--fork` 
 - [DeepWiki: sst/opencode CLI](https://deepwiki.com/sst/opencode/6.1-command-line-interface-(cli))
 - [SpillwaveSolutions/opencode_cli headless wrapper](https://github.com/spillwavesolutions/opencode_cli)
 - [AlaeddineMessadi/opencode-mcp 桥 (第三方, 供参考)](https://github.com/AlaeddineMessadi/opencode-mcp)
-- npm `opencode-ai@1.17.12` (2026-07-01)
+- npm `opencode-ai@1.17.13` pinned exact (v0.3, per §8 D6). Upstream 迭代快 (每日 snapshot tags 见 `npm view opencode-ai dist-tags`), 差一个字 spawn 就拒 → `anet opencode upgrade-pin <version>` 显式升级带 e2e smoke.
+- Phase 0b 探针真号: `docs/analysis/rfc029-opencode-probe/{summary.md, u1-run-json.txt, u3-gate-report.txt, u5-serve.txt, u8-acp.txt}` (工程马, 2026-07-03, opencode 免费 model 零 vendor key)
 
 ---
 

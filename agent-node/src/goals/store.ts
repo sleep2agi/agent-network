@@ -61,7 +61,14 @@ const GROK_RUNTIME_NAMES = new Set([
   "grok-build",
 ]);
 
-export type RuntimeBucket = "claude" | "codex" | "grok" | "unknown";
+// RFC-029 — public sst/opencode CLI. `opencode-cli` is the canonical
+// launcher name; `opencode` is the internal bucket + short alias.
+const OPENCODE_RUNTIME_NAMES = new Set([
+  "opencode",
+  "opencode-cli",
+]);
+
+export type RuntimeBucket = "claude" | "codex" | "grok" | "opencode" | "unknown";
 
 /** Map any user-facing runtime name to its canonical bucket (mirrors cli.ts RUNTIME_MAP). */
 export function runtimeBucket(rt: string | undefined | null): RuntimeBucket {
@@ -69,6 +76,7 @@ export function runtimeBucket(rt: string | undefined | null): RuntimeBucket {
   if (CLAUDE_RUNTIME_NAMES.has(rt)) return "claude";
   if (CODEX_RUNTIME_NAMES.has(rt)) return "codex";
   if (GROK_RUNTIME_NAMES.has(rt)) return "grok";
+  if (OPENCODE_RUNTIME_NAMES.has(rt)) return "opencode";
   return "unknown";
 }
 

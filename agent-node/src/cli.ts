@@ -327,8 +327,12 @@ const RUNTIME_MAP: Record<string, string> = {
   "claude-agent-sdk": "claude", "claude-sdk": "claude", "agent-sdk": "claude", "claude": "claude",
   "codex-sdk": "codex", "codex": "codex",
   "grok-build-acp": "grok", "grok-build": "grok", "grok": "grok",
+  // RFC-029 — opencode CLI runtime. `opencode-cli` is the canonical
+  // launcher name (matches claude-code-cli precedent); `opencode` is
+  // the short alias. Internal bucket is `"opencode"`.
+  "opencode-cli": "opencode", "opencode": "opencode",
 };
-const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok";
+const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok" | "opencode";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
@@ -2875,6 +2879,20 @@ function think(task: string, from: string, taskId: string | null, images?: strin
       }
       if (RUNTIME === "grok") {
         return await processWithGrok(task, from, images);
+      }
+      if (RUNTIME === "opencode") {
+        // RFC-029 PR① — runtime is registered end-to-end (config,
+        // wizard, CLI, launcher) so operators can create and start
+        // opencode-cli nodes today; the ACP think() shim itself lands
+        // in PR② (agent-node/src/runtime/opencode-acp/{events,client,
+        // runtime}.ts, ~15-25 LOC per Phase 0b probe). Fail loudly
+        // with a clear pointer so a first-turn attempt doesn't look
+        // like a mysterious hang or fall through to another runtime's
+        // path.
+        return (
+          "执行出错: opencode-cli runtime 尚未实现 think() (RFC-029 PR②). " +
+          "PR① 已 wire runtime 注册路径; PR② 会加 agent-node/src/runtime/opencode-acp/ ACP shim (~15-25 LOC)."
+        );
       }
       return await processWithClaude(task, from, images);
     } finally {
