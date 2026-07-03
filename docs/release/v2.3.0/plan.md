@@ -31,10 +31,10 @@
 - [x] 飞书 thinking-only rescue：空响应自动 re-prompt 出正文（#383）— agent-node preview.18 已含
 - [x] host-supervisors 单网络 authz fallback（#381）— commhub preview.20 已含
 - [x] 节点 create / stop-delete + host-daemon（RFC-026 P1 #299 / RFC-027 #345 / daemon CLI #339 #343 / #337 discovery）
+- [x] **#203** 新节点 alias 错乱（P0）— 已修复关闭（COMPLETED 2026-07-01）；发 preview 时顺带回归验证
 
 ## GA 前 TODO（勾完才切 latest）
 
-- [ ] **#203** 新节点 alias 错乱（P0）
 - [ ] **#180** rename 后 ghost 进程残留（P0）
 - [ ] **#260** dashboard 单节点设置面板（⋮ → 选 channel/模型/供应商/模式 + 一键重启）
 - [ ] **#393** dashboard 供应商/模型/key 预配置库（preset store）— 预设可复用 vendor+model+key，建/配节点时直接选
@@ -47,10 +47,10 @@
 >
 > 顺序：**节点管理（P0 bug → dashboard 配置 → multi-daemon）在前，opencode 收尾放最后。**
 
-### P1 — 两个 P0 bug　🔜 下一发
+### P1 — P0 bug #180 + #203 回归　🔜 下一发
 - **版本**：agent-network `2.3.0-preview.20` + agent-node `2.5.0-preview.19`
-- **任务**：#203 新节点 alias 错乱 + #180 rename 后 ghost 进程
-- **验收**：连开 3 节点 alias 不乱；rename 后无残留进程
+- **任务**：修 #180 rename 后 ghost 进程（claude-code-cli runtime 旧进程未杀）；#203（已修复关闭）发进 preview 顺带回归验证
+- **验收**：rename 运行中节点后无残留 ghost 进程；连开 3 节点 alias 不乱（#203 回归）
 
 ### P2 — dashboard 节点配置（#260 + #393）　⏳
 - **版本**：dashboard `0.6.3-preview.5`（若加新 REST 端点则 commhub 同升一版）
