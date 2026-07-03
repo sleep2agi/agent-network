@@ -9,8 +9,9 @@
 | `@sleep2agi/agent-network` | CLI / 编排（`anet` 命令：init/login/node create/channel/wizard），**spawn agent-node** | 操作机（每台跑 anet 的机器） |
 | `@sleep2agi/agent-node` | 单节点 runtime（think() + 5 种 runtime + channel worker），连 hub | 每个节点所在机器 |
 | `@sleep2agi/commhub-server` | Hub（会话注册 / SSE 推送 / task 路由 / REST API） | 中心 hub 机器（1 台） |
+| `@sleep2agi/agent-network-dashboard` | Web 指挥台（Next 应用），走 commhub REST | Vercel 部署（**不发 npm**，用 package.json 版本 + 部署 commit SHA 追踪） |
 
-（dashboard 是单独的 Next 应用，走 commhub 的 REST API，不发 npm。）
+dashboard 虽不发 npm，但它跟 commhub 的 REST 契约（C3）一样要版本约束——所以纳入本文档一起管，兼容矩阵（§4）给它一列。
 
 ## 2. 🔑 关键事实：npm 解耦，运行时耦合
 
@@ -31,14 +32,15 @@
 
 ## 4. 版本兼容矩阵（已知良好组合）
 
-> 每次「一起测过」的组合记一行。装的时候三列尽量取同一行。
+> 每次「一起测过」的组合记一行。装/部署的时候四列尽量取同一行。dashboard 列记 package.json 版本（+部署 commit SHA）。
 
-| 组合 | agent-network | agent-node | commhub-server | 状态 |
-|------|--------------|-----------|----------------|------|
-| 当前线上飞书舰队 | 2.3.0-preview.18 | 2.5.0-preview.18 | 0.9.0-preview.14 | ✅ 实跑中（#383 rescue + Kimi） |
-| 已发布 preview 头 | 2.3.0-preview.19 | 2.5.0-preview.18 | 0.9.0-preview.20 | ⚠️ 未整体 e2e，agent-node 不含 opencode |
-| 下一发（含 opencode） | 2.3.0-preview.20 | 2.5.0-preview.19 | 0.9.0-preview.20 | 🔜 待切（见 §6） |
-| latest（稳定线） | 2.2.21 | 2.4.13 | 0.8.8 | ✅ 旧稳定，无 opencode/无 #383 |
+| 组合 | agent-network | agent-node | commhub-server | dashboard | 状态 |
+|------|--------------|-----------|----------------|-----------|------|
+| 当前线上飞书舰队 | 2.3.0-preview.18 | 2.5.0-preview.18 | 0.9.0-preview.14 | 0.6.3-preview.4 (95de0ba) | ✅ 实跑中（#383 rescue + Kimi） |
+| 已发布 preview 头 | 2.3.0-preview.19 | 2.5.0-preview.18 | 0.9.0-preview.20 | 0.6.3-preview.4 | ⚠️ 未整体 e2e，agent-node 不含 opencode |
+| 下一发（含 opencode） | 2.3.0-preview.20 | 2.5.0-preview.19 | 0.9.0-preview.20 | 0.6.3-preview.4 | 🔜 待切（见 §6，dashboard 本发不动） |
+| v2.3.0 GA 目标 | 2.3.0 | 2.5.0 | 0.9.0 | 0.7.0（含 #260） | 🎯 整行测绿才升 |
+| latest（稳定线） | 2.2.21 | 2.4.13 | 0.8.8 | 0.6.x | ✅ 旧稳定，无 opencode/无 #383 |
 
 ## 5. Bump-together 规则
 
