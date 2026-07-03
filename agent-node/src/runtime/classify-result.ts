@@ -164,35 +164,80 @@ export function formatClassificationError(
   c: ClassificationResult,
   context: { runtime: string; usage?: RuntimeResultLike["usage"] },
 ): string {
-  const inT = context.usage?.input_tokens ?? 0;
-  const outT = context.usage?.output_tokens ?? 0;
+  // Legacy alias kept for callers that don't yet distinguish user vs
+  // operator surface. New code should call `formatClassificationForUser`
+  // (short, vendor-agnostic, IM-safe) and `formatClassificationForLog`
+  // (long, includes vendor console URL) explicitly.
+  return formatClassificationForLog(c, context);
+}
+
+/**
+ * #383 — user-facing rendering split (fix ②). The old
+ * `formatClassificationError` shipped a developer diagnostic block plus
+ * a HARDCODED SINGLE VENDOR console URL to end users. Two problems:
+ *   - Users get a technical stack (in= out=, "可能原因 (a) (b) (c)")
+ *     they can't act on.
+ *   - When the runtime is configured against a vendor whose URL is
+ *     NOT hardcoded, the (single vendor) URL is misleading — after
+ *     the Kimi rollover it kept pointing users at MiniMax's dashboard.
+ *
+ * Split: `ForUser` is IM-safe (short, vendor-agnostic, no URL); `ForLog`
+ * keeps the rich diagnostic (with URL) for the operator's log file. IM
+ * bridges / commhub bridges / dashboard chat should call `ForUser` and
+ * let the log-only path keep the actionable-for-operator wording.
+ */
+export function formatClassificationForUser(
+  c: ClassificationResult,
+  context: { runtime: string; usage?: RuntimeResultLike["usage"] },
+): string {
   switch (c.kind) {
     case "soft-fail-quota": {
-      // §20 — friendly Chinese prefix + vendor phrase pass-through +
-      // known code tag. If no vendor phrase is extractable, fall back
-      // to the truncated raw reason.
+      // Users can't fix a vendor quota, but knowing the account is
+      // out-of-quota IS useful (they'll ping their admin). Keep the
+      // vendor-native phrase (already vendor-agnostic — just Chinese
+      // text) and code tag, DROP the URL hint.
       const raw = c.reason || "";
       const phrase = extractVendorQuotaPhrase(raw);
       const code = extractQuotaCode(raw);
       const codeTag = code ? ` [${code}]` : "";
-      const body =
-        phrase ??
-        raw.slice(0, 200); // fall back to raw when no known phrase
+      const body = phrase ?? raw.slice(0, 200);
+      return `[额度用尽]${codeTag} ${body}`.trim();
+    }
+    case "soft-fail-empty":
+      // Reached ONLY when re-prompt (cli.ts follow-up) also failed to
+      // produce text — every earlier layer should have rescued a real
+      // reply already. Short vendor-agnostic apology.
+      return "抱歉，本轮暂时没能给出答复，请再问我一次。";
+    case "error":
+      // Errors get a compact one-liner. Truncate hard so a chatty
+      // vendor error doesn't wall-of-text a user.
+      return `请求出错，请稍后重试。`;
+    case "success":
+      return "";
+  }
+}
+
+/**
+ * #383 — operator-log rendering (fix ②). Keeps the rich diagnostic that
+ * used to leak into user replies. Only the log line at cli.ts /
+ * runtime-wrappers should call this.
+ */
+export function formatClassificationForLog(
+  c: ClassificationResult,
+  context: { runtime: string; usage?: RuntimeResultLike["usage"] },
+): string {
+  const inT = context.usage?.input_tokens ?? 0;
+  const outT = context.usage?.output_tokens ?? 0;
+  switch (c.kind) {
+    case "soft-fail-quota": {
+      const raw = c.reason || "";
+      const phrase = extractVendorQuotaPhrase(raw);
+      const code = extractQuotaCode(raw);
+      const codeTag = code ? ` [${code}]` : "";
+      const body = phrase ?? raw.slice(0, 200);
       return `执行出错: [额度用尽]${codeTag} ${context.runtime}: ${body}${c.hint ? ` — ${c.hint}` : ""}`;
     }
     case "soft-fail-empty":
-      // §20 — soft-fail-empty is subtler: the vendor said "success"
-      // but returned nothing. Common causes (in order):
-      //   1. Content filter fired on a credential literal in the
-      //      request (Vincent PAT case — content filter drops
-      //      response but marks 200 OK).
-      //   2. Silent throttle at the vendor's format-conversion layer
-      //      (MiniMax /anthropic gateway occasionally does this).
-      //   3. Model produced only reasoning/thinking blocks with no
-      //      text content (reasoning-heavy prompt + inadequate
-      //      max_tokens).
-      // We surface all three as hints so operators can triage without
-      // guessing.
       return (
         `执行出错: ${context.runtime} 返回空响应 (in=${inT} out=${outT}). ` +
         `可能原因: (a) vendor 内容过滤 (请求含 credential 字面, 见 [outbound-mask] 日志) ` +
@@ -203,7 +248,6 @@ export function formatClassificationError(
     case "error":
       return `执行出错: ${context.runtime} — ${(c.reason || "未知错误").slice(0, 200)}`;
     case "success":
-      // Caller should only invoke this on non-success; defensive default.
       return "";
   }
 }

@@ -62,6 +62,8 @@ import {
 import {
   classifyRuntimeResult,
   formatClassificationError,
+  formatClassificationForUser,
+  formatClassificationForLog,
 } from "./runtime/classify-result";
 import { withTimeout, TimeoutError, resolveTimeoutMs } from "./util/timeout";
 import { superviseChild } from "./util/supervise-child";
@@ -1921,8 +1923,93 @@ async function processWithClaude(task: string, from: string, images?: string[]):
                 if (cls.kind === "success") {
                   inner = m.result;
                 } else {
+                  // #383 — thinking-only terminal turn rescue (fix ①).
+                  //
+                  // Thinking-capable models (Kimi K2, MiniMax-M3, Anthropic
+                  // extended-thinking) sometimes end a tool-heavy turn on a
+                  // `thinking` block only — no `text` block — so the SDK
+                  // aggregates `m.result === ""`. Pre-fix we shipped a
+                  // developer diagnostic ("执行出错: claude-agent-sdk 返回空
+                  // 响应 (in=… out=…). 可能原因: (a) (b) (c). → 检查 <hard-
+                  // coded single vendor console URL>") straight to the IM
+                  // user, which was BOTH confusing AND misleading (the URL
+                  // was one vendor's dashboard even after the runtime moved
+                  // to another vendor).
+                  //
+                  // Rescue precedence (per 通信龙 review):
+                  //   (a) If the terminal turn genuinely has text → SDK's
+                  //       `m.result` already carries it; already handled.
+                  //   (b) `m.result === ""` AND we have an established
+                  //       session AND at least one turn ran → re-prompt
+                  //       ONCE for a plain-text final (session resume,
+                  //       short new prompt). This is the REAL fix — it
+                  //       coaxes the model into writing its final answer
+                  //       out loud.
+                  //   (c) Re-prompt also empty → short vendor-agnostic
+                  //       apology. Do NOT reach back to text blocks from
+                  //       earlier turns (would show the model's "let me
+                  //       check that" mid-thought as the final answer).
+                  //
+                  // Gated to `soft-fail-empty` classifier with the
+                  // "empty vendor result despite success signal" reason —
+                  // the other soft-fail-empty flavor (in=0 out=0 cost=0
+                  // silent reject) means the vendor is broken, not the
+                  // model choosing thinking-only; re-prompt would burn
+                  // tokens for nothing.
+                  const isThinkingOnlyShape = cls.kind === "soft-fail-empty"
+                    && cls.reason === "empty vendor result despite success signal"
+                    && !!claudeSessionId
+                    && (m.num_turns ?? 0) >= 1
+                    && process.env.ANET_DISABLE_383_REPROMPT !== "1";
+
+                  // Operator log (full diagnostic incl. vendor URL hint) —
+                  // regardless of whether we rescue or not.
                   log(`[claude] ✗ ${cls.reason || cls.kind} (in=${u.input_tokens || 0}, out=${u.output_tokens || 0}, cost=${m.total_cost_usd ?? "?"})`);
-                  inner = formatClassificationError(cls, { runtime: "claude-agent-sdk", usage: m.usage });
+                  log(`[claude] ${formatClassificationForLog(cls, { runtime: "claude-agent-sdk", usage: m.usage })}`);
+
+                  if (isThinkingOnlyShape) {
+                    log(`[claude] #383 re-prompting for plain-text final (session=${claudeSessionId?.slice(0, 8)})`);
+                    let rescuedText = "";
+                    try {
+                      const rescueOptions = {
+                        ...options,
+                        resume: claudeSessionId,
+                        abortController: ac,
+                        // A shallow follow-up shouldn't loop back into
+                        // tool-use again; capping turns prevents a
+                        // pathological re-thinking loop from burning
+                        // tokens. If the model *still* only thinks in
+                        // one turn, we fall through to the apology.
+                        maxTurns: 1,
+                      } as any;
+                      const rescuePrompt =
+                        "请用一句面向用户的纯文本给出最终答复（不要用工具，不要 thinking，直接写答案）。";
+                      for await (const rmsg of query({
+                        prompt: rescuePrompt,
+                        options: rescueOptions,
+                      })) {
+                        const rm = rmsg as any;
+                        if (rm.type === "result" && rm.subtype === "success") {
+                          const rusage = rm.usage || {};
+                          log(`[claude] #383 re-prompt result | in=${rusage.input_tokens || 0} out=${rusage.output_tokens || 0} | got=${(rm.result || "").length}ch`);
+                          rescuedText = rm.result || "";
+                          break;
+                        }
+                      }
+                    } catch (e: any) {
+                      log(`[claude] #383 re-prompt failed: ${e?.message || e}`);
+                    }
+                    if (rescuedText && rescuedText.trim()) {
+                      inner = rescuedText;
+                    } else {
+                      inner = formatClassificationForUser(cls, { runtime: "claude-agent-sdk", usage: m.usage });
+                    }
+                  } else {
+                    // Non-thinking-only path (in=0 out=0 cost=0 silent
+                    // reject, or session-less first-turn empty): skip
+                    // re-prompt, show the short user-safe message.
+                    inner = formatClassificationForUser(cls, { runtime: "claude-agent-sdk", usage: m.usage });
+                  }
                 }
               } else {
                 inner = `执行出错: ${m.error || m.result || "未知错误"}`;
@@ -2206,8 +2293,11 @@ async function processWithCodex(task: string, from: string, images?: string[]): 
       { baseUrl: process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE },
     );
     if (cls.kind !== "success") {
+      // #383 fix ② — user gets short vendor-agnostic message; operator
+      // log carries the full diagnostic (incl. quota console URL).
       log(`[codex] ✗ ${cls.reason || cls.kind} (in=${inTokens}, out=${outcome.usage?.output_tokens || 0})`);
-      return formatClassificationError(cls, { runtime: "codex-sdk", usage: outcome.usage });
+      log(`[codex] ${formatClassificationForLog(cls, { runtime: "codex-sdk", usage: outcome.usage })}`);
+      return formatClassificationForUser(cls, { runtime: "codex-sdk", usage: outcome.usage });
     }
     return outcome.finalResponse || "（无回复）";
   } catch (e: any) {
