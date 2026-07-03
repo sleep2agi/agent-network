@@ -25,6 +25,19 @@
 > opencode 第 5 runtime 收尾放到本里程碑**最后**（代码已合 main，不是重点先做）。
 > `lark-opencode-server` 是**独立工具**（另一条线），**不属于本 anet 里程碑**。
 
+## 进度快照（自主推进中 · 每步滚动更新）
+
+> 最后更新：2026-07-04 早（北京时间）· Vincent msg9799 自主执行模式。**这是总文档，每有实质进展就更新这里。**
+
+| 线 | 状态 | 细节 |
+|----|------|------|
+| **P1 节点管理 P0** | ✅ 闭环 | #203 已修关；#180 由 #374 env-sweep 修 + #398 CI 回归门；docker e2e 回归 **15/16 绿**（1 是容器缺 codex CLI 的 harness 限制，非产品 bug） |
+| **P2 #393 provider UI** | ✅ 已发 | = RFC-028（PR #23）merged + **已切 dashboard `0.6.3-preview.5`**（provider CRUD + key vault + reachability matrix） |
+| **P2 #260 配置面板核心** | ✅ 已建 | 模型/模式/重启真接 API（dashboard #7/#10/#11/#19），在 preview.4/.5 |
+| **P2 #260 channel 编辑** | ⏸ 推后 | 通信IM马 wire-check 发现 toggle **不生效**（hub `update_node_config` schema 无 channels 字段 + node 无 channel reload）；PR #31 前端 held；真 backend 走 restart-tier 路子，排 P3 后做 |
+| **P3 multi-daemon** | 🔨 验证中 | 代码全 merged（#341 host-supervisors / #299 create_node daemon 路由 / dashboard #25/#28/#29 picker）；只缺 2-daemon e2e（Scenario H），工程马在做 |
+| **P4 opencode 活体** | ⏳ 等 Vincent | 需 Anthropic/OpenAI key（Kimi Bearer 网关 opencode 不吃，见 §D3/backlog） |
+
 ## 已合进 main（部分未发 preview）
 
 - [x] opencode-cli 第 5 runtime（RFC-029 #385/#386/#387）— ⚠️ 已合 main，**未发 preview**
@@ -47,18 +60,18 @@
 >
 > 顺序：**节点管理（P0 bug → dashboard 配置 → multi-daemon）在前，opencode 收尾放最后。**
 
-### P1 — P0 bug #180 + #203 回归　🔜 下一发
+### P1 — P0 bug #180 + #203 回归　✅ 闭环（回归 15/16 绿 + #398 CI 门）
 - **版本**：agent-network `2.3.0-preview.20` + agent-node `2.5.0-preview.19`
 - **任务**：修 #180 rename 后 ghost 进程（claude-code-cli runtime 旧进程未杀）；#203（已修复关闭）发进 preview 顺带回归验证
 - **验收**：rename 运行中节点后无残留 ghost 进程；连开 3 节点 alias 不乱（#203 回归）
 
-### P2 — dashboard 节点配置（#260 收尾 + #393）　⏳
+### P2 — dashboard 节点配置（#260 收尾 + #393）　🟡 #393 已发 / channel 推后
 - **版本**：dashboard `0.6.3-preview.5`（若加新 REST 端点则 commhub 同升一版）
 - **现状（claim=reality 核过）**：#260 核心**已建好**——NodeSettingsPanel.tsx 已把「模型 select + 运行模式 flags + 存了自动重启（optimistic→restarting→applied 状态机）」真接 `/api/anet/node-config`（dashboard PR #7/#10/#11/#19，6-28）。channel 目前是只读 stub。
 - **剩余任务**：① #260 收尾 = channel 可编辑 + 供应商切换打磨；② #393 = 供应商/模型/key 预配置库（新建，预设可复用）
 - **验收**：dashboard 改节点 channel/模型 + 重启生效；存一个 vendor+model+key 预设并在建节点时选中
 
-### P3 — multi-daemon 选服务器　⏳
+### P3 — multi-daemon 选服务器　🔨 代码全 merged, 只缺 e2e
 - **版本**：agent-network `2.3.0-preview.21` + agent-node `2.5.0-preview.20`
 - **任务**：RFC-026 P2 选服务器 multi-daemon
 - **验收**：多 daemon 选服务器建节点
@@ -91,6 +104,7 @@
 | `commhub-server 0.9.0-preview.20` | host-supervisors 单网络 authz fallback（dashboard 少传 network_id 时不再 400） | #381 |
 | `agent-network 2.3.0-preview.19` | 节点管理 CLI/wizard 迭代累积（create/stop-delete/daemon） | RFC-026/027 |
 | `agent-network-dashboard 0.6.3-preview.4` | 单节点设置面板：模型 select + 运行模式 flags + 存了自动重启，真接 `/api/anet/node-config` | #260 部分 |
+| `agent-network-dashboard 0.6.3-preview.5` | **#393 模型供应商预配置库**：provider CRUD + key 写入即 vault 只回 hasKey + reachability matrix（build 干净 stamp 44d518a） | PR #23 |
 
 ### 已合 main、待发 preview
 
@@ -105,7 +119,7 @@
 | 目标版本 | 会优化什么 | 关联 |
 |----------|-----------|------|
 | agent-network `2.3.0-preview.20` + agent-node `2.5.0-preview.19` | 发出 opencode-cli（可装可试）；修 #180（发 preview 顺带回归验证） | RFC-029 / #180 |
-| dashboard `0.6.3-preview.5` | #260 channel 编辑收尾 + #393 供应商/模型/key 预配置库 | #260 / #393 |
+| dashboard 下一发 | #260 channel 编辑（真 backend：hub schema + node restart-reread）—— 排 P3 后 | #260 |
 | agent-network `2.3.0-preview.21` + agent-node `2.5.0-preview.20` | RFC-026 P2 选服务器 multi-daemon | RFC-026 P2 |
 | `…preview.22 / …preview.21` | opencode-cli 真 vendor key 活体 + 正式主打 | RFC-029 |
 
