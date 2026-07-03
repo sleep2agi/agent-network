@@ -1,0 +1,57 @@
+
+=== 0. boot hub + admin ===
+  ✓ hub /health 200 :9239
+  ✓ admin utok minted
+  ✓ anet global config written (hub + utok + net_id)
+
+=== A. foreground start — anet node start (no tmux) ===
+  · created node rename-target-a @ /tmp/qa-180-work/.anet/nodes/rename-target-a (ntok minted, config written)
+  · anet node start rename-target-a → wrapper PID 56 (backgrounded)
+  ✓ A.1 claude spawned under alias=rename-target-a: pids=[153]
+  · A.2 /api/status doesn't show rename-target-a yet (mock heartbeat may still be ramping)
+  · A.3 firing: anet node rename rename-target-a renamed-a --force
+  · A.3 rename exit code=0 wall=80s
+    · [anet] note: "rename-target-a" has no server registration yet (never started). Performing local-only rename — no commhub 2PC needed.
+    · [anet] node was running — restarting under new alias "renamed-a" (#146 Option B)...
+    · [anet] ⚠ "rename-target-a" still running a task after 60s — proceeding with restart (--force).
+    · [anet]   An in-flight task may be interrupted without a reply (dispatcher's task stays open).
+    · [anet] stopped old agent process(es): 153
+    · [anet] swept MCP bridge orphan(s) inheriting old alias: pid=154,155,1586,1760
+    · [anet] node_id node_rename-target-a_8040a68c5b4f unchanged in local config; this runtime's commhub identity is resume_id cc-node_rename-target-a_8040a68c5b4f — also stable across the rename. ntok_ token still valid.
+    · [anet] ✅ Renamed "rename-target-a" → "renamed-a" (txn null) — agent restarted + verified live under the new alias (new process pid alive (hub heartbeat still catching up)).
+  ✓ A.4 pgrep alias=rename-target-a AFTER rename → NONE (no ghost in this case)
+  ✓ A.5 new alias=renamed-a has claude pids=[1922]
+  ✓ A.6 /api/status no longer shows rename-target-a (clean)
+  ✓ A.6b no MCP subprocess heart-beating OLD alias=rename-target-a (sweepMcpOrphansForAlias caught them)
+  · A.6c diagnostic total pgrep mock-mcp count = 3
+  · A.7 /api/status doesn't yet show renamed-a (new node still starting)
+
+=== B. tmux-detached start — startNodeTmuxSession pattern ===
+  · created node rename-target-b @ /tmp/qa-180-work/.anet/nodes/rename-target-b (ntok minted, config written)
+  · B.1 tmux new-session -d -s rename-target-b 'anet node start rename-target-b' fired
+  ✓ B.1 claude spawned under alias=rename-target-b: pids=[2492]
+  ·   process tree:
+  ·     claude pid=2492 ← parent pid=2341 (node) ← grandparent pid=2340 (tmux: server)
+  · B.3 firing: anet node rename rename-target-b renamed-b --force
+  · B.3 rename exit code=0 wall=78s
+    · [anet] persisted canonical node_id node_rename-target-b_9011bac81f38 before rename.
+    · [anet] note: "rename-target-b" has no server registration yet (never started). Performing local-only rename — no commhub 2PC needed.
+    · [anet] node was running — restarting under new alias "renamed-b" (#146 Option B)...
+    · [anet] ⚠ "rename-target-b" still running a task after 60s — proceeding with restart (--force).
+    · [anet]   An in-flight task may be interrupted without a reply (dispatcher's task stays open).
+    · [anet] stopped old agent process(es): 2492
+    · [anet] node_id node_rename-target-b_9011bac81f38 unchanged in local config; this runtime's commhub identity is resume_id cc-node_rename-target-b_9011bac81f38 — also stable across the rename. ntok_ token still valid.
+    · [anet] ✅ Renamed "rename-target-b" → "renamed-b" (txn null) — agent restarted + verified live under the new alias (new process pid alive (hub heartbeat still catching up)).
+  ✓ B.4 pgrep alias=rename-target-b AFTER rename → NONE (no ghost in this case either)
+  ✓ B.5 new alias=renamed-b has claude pids=[5022]
+  ✓ B.6 /api/status no longer shows rename-target-b (clean)
+  ✓ B.6b no MCP subprocess heart-beating OLD alias=rename-target-b (sweepMcpOrphansForAlias caught them)
+  · B.6c diagnostic total pgrep mock-mcp count = 3
+  · B.7 /api/status doesn't yet show renamed-b
+  · B.8 tmux session 'rename-target-b' gone
+  · B.8 tmux session 'renamed-b' running (auto-restart under new alias)
+
+────────────────────────────────────────────
+issue #180 rename ghost e2e — PASS=13 FAIL=0
+  (FAIL count = ghost/reproductions; higher = worse)
+────────────────────────────────────────────
