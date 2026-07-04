@@ -64,10 +64,70 @@ dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文�
 
 - fresh clone main → 各包 `bun install` → `npm version <精确版> --no-git-tag-version` → `npm publish --tag preview`（prepublishOnly 自动 build）
 - 验：dist 关键串在 + `grep -c 'Bun\.' dist` = 0
-- 发布顺序 **server → agent-node → agent-network**（被依赖的先发）
+- **npm publish 顺序** = **server → agent-node → agent-network**（被依赖的先发；矩阵新行也按这条顺序试）
 - 每 preview 带一句 changelog；latest 严格两阶段（preview 亲测 + 30min 窗口）
+
+### 7.1 Operator upgrade 顺序（生产升级现网）
+
+> 上面 §7 是「npm publish 顺序」（哪个包先 push 到 registry）。**生产环境升级现有 hub + 节点是另一回事** — 顺序反着来，先升 hub 后升 client。
+
+**推荐流程**：
+
+1. **先升 hub**（`commhub-server` on 中心机）—— 新 hub 兼容旧 agent-node 的 report_status shape（我们主动写 backward-compat），旧 hub 通常不认识新 agent-node 报的 snapshot 字段（zod strip 或直接不写）。
+2. **再升 agent-node**（每台机器上的 runtime）—— 一台一台滚，`anet upgrade` + `anet project restart` 让新 runtime 上线。
+3. **同时/最后升 CLI**（`agent-network`）—— 单机 CLI 不影响别的节点，节奏最松。
+4. **dashboard 匹配 hub minor**（`agent-network-dashboard`）—— 跟 hub 走同一档；REST 契约（C3）跨 minor 需要 hub 保旧路由才能滞后升。
+
+**为什么不能反着来（先升 node 后升 hub）**：新 agent-node 的 `buildConfigSnapshot` 会 emit 新字段（例如 #338 PR3 nest 后的 `daemon_capabilities`）；旧 hub zod schema 不认识 → 静默 strip → hub 存进 `nodes.config_snapshot` 的形状里就少字段，`list_host_supervisors` 靠 `role`/`daemon_capabilities.*` 过滤时可能空 → dashboard picker 空 → 建节点向导整条走不通。可复现的具体案例见 §9 GA-blocker #2 定性。
+
+### 7.2 混装组合的快速自查
+
+改动落到生产后想快速验证兼容性：
+
+```bash
+# 1. 看每台机器实际装的版本（别信 anet.sh 说的最新，看真号）
+anet -v                                   # agent-network CLI
+agent-node --version                      # agent-node runtime（在 daemon 机上）
+curl -s $HUB/health | jq .version         # commhub-server
+
+# 2. 起一个 fresh daemon 看 config_snapshot 是不是 populate 得上
+anet daemon up smoke-daemon
+sleep 3
+curl -s "$HUB/api/nodes" -H "Authorization: Bearer $UTOK" \
+  | jq '.nodes[] | select(.alias=="smoke-daemon") | {role, has_snapshot: (.config_snapshot != null)}'
+# 期望: {"role":"host_supervisor","has_snapshot":true}
+```
+
+如果 `role` 是 `null` 或 `has_snapshot` 是 `false` — hub 侧没吸收到 daemon 报的 snapshot，八九不离十是 hub 太旧不认识 agent-node 报的新字段（或 SEC-1 拒了 upsert；hub log tail 会 print `[commhub] 🚫 report_status cross-network ...`）。
 
 ## 8. Backlog（GA 后）
 
 - opencode plugin 解锁 Bearer-only vendor（opencode 内建硬编码 x-api-key，兼容网关开箱不通）
 - `lark-opencode-server` 是独立工具（另一条线），不进本矩阵
+
+## 9. 已定性的 mismatch 事件 — GA-blocker #2 (2026-07-04)
+
+**症状** — 通信龙 在生产 hub `:9200`（commhub `0.9.0-preview.14`）上跑 `anet daemon up ga-daemon`（`agent-network 2.3.0-preview.21` / `agent-node 2.5.0-preview.19`），daemon 成功注册 + SSE 上线，但：
+
+- `/api/nodes` 里该 daemon 的 `config_snapshot=None`（顶层抽出的 `role` 也是 `None`）
+- `/api/host-supervisors`（`list_host_supervisors` filters on `config_snapshot.role`）返回 `count=0`
+- Dashboard 建节点向导 step 1 picker 永空 → **走不下去**
+
+**定性** — 两种版本组合各起一台 clean-state docker 复跑（tmpfs `/tmp` + `/root`，fresh `~/.anet`，没有既有 nodes 表数据）：
+
+| 组合 | commhub | agent-node | anet CLI | 结果 | SQL `LENGTH(config_snapshot)` | `list_host_supervisors.count` |
+|------|---------|-----------|----------|------|-------------------------------|-------------------------------|
+| A: 对齐 | `0.9.0-preview.21` | `2.5.0-preview.19` | `2.3.0-preview.21` | ✅ 第一 shot | 281 chars | 1 |
+| B: 通信龙 prod 组合 | `0.9.0-preview.14` | `2.5.0-preview.19` | `2.3.0-preview.21` | ✅ 第一 shot | 281 chars | 1 |
+
+两组 `t=1s` 就把 `{model, flags, config_revision, config_update_capable, role:"host_supervisor", daemon_capabilities:{runtimes_supported,allowed_secret_keys,max_concurrent_children}}` 完整存进 `nodes.config_snapshot`。
+
+**结论**：**不是 compat bug，也不是 agent-node → hub 首次 publish 断链**。B 组合（通信龙 prod 的确切版本）clean docker 里 handle 正确。生产 hub 的 `config_snapshot=None` 是 **prod-state issue** — 大概率某几种之一：
+
+- **既有 dirty row**：daemon 之前用其他 alias/id 注册过，nodes 表里那行 `config_snapshot` 是 legacy state；新 `anet daemon up` 复用了 node_id 但 UPDATE 用了 `if (input.config_snapshot)` gate 触发不了（例如 W1 restart-path 里的 draining 窗口刚好被抓在中间）。
+- **`config_snapshot` clobber**：hub prod 上跑了 181 个节点、大量 child ops；这条在 P3 (RFC-026) 时就 flag 过 —— 「child registration path may erase parent daemon's config_snapshot column」。通信龙 在 P3 时决定不在 P3 fix，backlog 记着；GA-blocker #2 让它从 backlog 升到 **可能影响 busy hub 的 picker**，值得单独复跑定性再决定 GA 前修不修。
+- **SEC-1 cross-network refuse**：`upsertNodeWithSec1Guard` 若判 caller/existing net 不一致会直接返回 `refused` + 只 `console.warn`，dashboard 侧完全看不见。翻 hub log tail 是不是有 `[commhub] 🚫 report_status cross-network node upsert refused` 即可。
+
+对 GA 意义：**picker 代码路径本身正确**，GA 阻断只在特定 prod 状态下会重现；短线的运维恢复 = 定位 & 清那行 dirty row（`DELETE FROM nodes WHERE alias=… AND config_snapshot IS NULL` 或 `anet daemon down` + 换新 alias）。长线是 §7.1 的升级顺序 + P3 clobber backlog 是否升级为 GA-blocker 的独立评估。
+
+**Repro artifacts**（docker + shell）留在 branch `docs/ga-compat-matrix` 下 `docs/tests/p-ga2-compat-repro/`（Dockerfile.aligned / Dockerfile.mixed / repro.sh），未来再遇到类似疑似 compat 事件复用。

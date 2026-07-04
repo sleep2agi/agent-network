@@ -1,0 +1,26 @@
+# GA-blocker #2 repro — aligned preview.21 hub + preview.19 agent-node
+# (通信龙 acceptance criteria). Starts a hub, mints an ntok for a daemon,
+# writes role=host_supervisor config, launches agent-node, then curls
+# /api/nodes to inspect the config_snapshot column.
+FROM node:22-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      bash curl ca-certificates jq unzip procps sqlite3 \
+      build-essential python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://bun.sh/install | bash && \
+    cp /root/.bun/bin/bun /usr/local/bin/bun && chmod +x /usr/local/bin/bun
+
+# Pin to the GA-candidate versions 通信龙 named.
+RUN npm i -g \
+      @sleep2agi/commhub-server@0.9.0-preview.21 \
+      @sleep2agi/agent-node@2.5.0-preview.19 \
+      @sleep2agi/agent-network@2.3.0-preview.21 \
+    --silent
+
+RUN which anet && anet --version && which commhub-server && which agent-node
+
+COPY repro.sh /repro.sh
+RUN chmod +x /repro.sh
+CMD ["/repro.sh"]

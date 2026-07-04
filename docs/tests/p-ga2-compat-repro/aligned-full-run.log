@@ -1,0 +1,162 @@
+=== 0. hub boot (commhub-server 0.9.0-preview.21) ===
+  ✓ hub /health 200 :9234
+=== 1. register admin ===
+  ✓ admin utok minted; network_id=net_7e65e498f82a
+=== 2. persist hub + token to global anet config (mirrors post-login state) ===
+=== 3. anet daemon up ga-daemon  (init + start in one go) ===
+  ✓ daemon row appeared after 7s
+
+=== 4. inspect for 40 seconds ===
+--- 1s ---
+{
+  "node_id": "node_daemon_588a7bc607a6",
+  "alias": "ga-daemon",
+  "role": "host_supervisor",
+  "snapshot_len": 4
+}
+--- 5s ---
+{
+  "node_id": "node_daemon_588a7bc607a6",
+  "alias": "ga-daemon",
+  "role": "host_supervisor",
+  "snapshot_len": 4
+}
+--- 10s ---
+{
+  "node_id": "node_daemon_588a7bc607a6",
+  "alias": "ga-daemon",
+  "role": "host_supervisor",
+  "snapshot_len": 4
+}
+--- 15s ---
+{
+  "node_id": "node_daemon_588a7bc607a6",
+  "alias": "ga-daemon",
+  "role": "host_supervisor",
+  "snapshot_len": 4
+}
+--- 20s ---
+{
+  "node_id": "node_daemon_588a7bc607a6",
+  "alias": "ga-daemon",
+  "role": "host_supervisor",
+  "snapshot_len": 4
+}
+--- 25s ---
+{
+  "node_id": "node_daemon_588a7bc607a6",
+  "alias": "ga-daemon",
+  "role": "host_supervisor",
+  "snapshot_len": 4
+}
+--- 30s ---
+{
+  "node_id": "node_daemon_588a7bc607a6",
+  "alias": "ga-daemon",
+  "role": "host_supervisor",
+  "snapshot_len": 4
+}
+--- 35s ---
+{
+  "node_id": "node_daemon_588a7bc607a6",
+  "alias": "ga-daemon",
+  "role": "host_supervisor",
+  "snapshot_len": 4
+}
+--- 40s ---
+{
+  "node_id": "node_daemon_588a7bc607a6",
+  "alias": "ga-daemon",
+  "role": "host_supervisor",
+  "snapshot_len": 4
+}
+
+=== 5. SQL-level truth (the column state as stored) ===
+node_daemon_588a7bc607a6|ga-daemon|281|{"model":null,"flags":{"dangerouslySkipPermissions":true},"config_revision":0,"config_update_capable":true,"role":"host_supervisor","daemon_capabilities":{"runtimes_supported":["claude-agent-sdk","codex-sdk","grok-build-acp"],"allowed_secret_keys":[],"max_concurrent_children":20}}
+
+=== 6. list_host_supervisors REST (what the picker actually reads) ===
+{
+  "ok": true,
+  "daemons": [
+    {
+      "daemon_node_id": "node_daemon_588a7bc607a6",
+      "alias": "ga-daemon",
+      "hostname": "b5641be9d5d8",
+      "online": true,
+      "last_seen_at": "2026-07-04 05:24:58",
+      "runtimes_supported": [
+        "claude-agent-sdk",
+        "codex-sdk",
+        "grok-build-acp"
+      ],
+      "allowed_secret_keys": [],
+      "host_telemetry": {
+        "alert_level": "green",
+        "cpu_cores": 8,
+        "mem_gb": 61.4,
+        "ip_internal": "172.18.0.5"
+      }
+    }
+  ],
+  "count": 1
+}
+
+=== 7. daemon side — recent stdout ===
+[anet daemon] ✓ created host_supervisor daemon "ga-daemon"
+              config:     .anet/nodes/ga-daemon/config.json
+              node_id:    node_daemon_588a7bc607a6
+              secret keys allowed: (none — add with: anet daemon init ga-daemon --force --allow-secret KEY)
+
+[anet daemon] ⚠ Permission posture:
+              flags.dangerouslySkipPermissions = true  (no per-call confirmation)
+              flags.teammateMode = true
+              role = host_supervisor                   (can fork child agent-nodes via hub)
+              → Run daemons only on machines you trust to act on your behalf.
+              → Edit .anet/nodes/ga-daemon/config.json to disable individual flags.
+
+Next: start it
+  anet daemon start ga-daemon    (or anet daemon up ga-daemon to init+start in one go)
+[anet] Starting new session for "ga-daemon" [claude-agent-sdk]...
+
+[anet] Token: ntok_6c0...
+[agent-node] Config: /.anet/nodes/ga-daemon/config.json (source=primary)
+[05:24:57] [INFO ] [ga-daemon] 启动
+[05:24:57] [INFO ] [ga-daemon]   alias:   ga-daemon [from: --alias flag]
+[05:24:57] [INFO ] [ga-daemon]   runtime: claude-agent-sdk
+[05:24:57] [INFO ] [ga-daemon]   model:   claude-sonnet-4-6 (default)
+[05:24:57] [INFO ] [ga-daemon]   hub:     http://127.0.0.1:9234 (auth)
+[05:24:57] [INFO ] [ga-daemon]   user:    ga2admin (admin)
+[05:24:57] [INFO ] [ga-daemon]   network: default
+[05:24:57] [INFO ] [ga-daemon]   tools:   all (Claude Code preset — built-in: WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Task/...)
+[05:24:57] [INFO ] [ga-daemon]   channels: (none)
+[05:24:57] [INFO ] [ga-daemon]   session: (new)
+[05:24:57] [INFO ] [ga-daemon]   log-dir: /.anet/nodes/ga-daemon/logs
+[05:24:57] [INFO ] [ga-daemon]   goals:   /.anet/nodes/ga-daemon/goals.json
+[05:24:57] [INFO ] [ga-daemon]   goals scheduler: enabled (runtime=claude)
+[05:24:58] [INFO ] [ga-daemon] 已注册到 CommHub
+[05:24:58] [INFO ] [ga-daemon] [deleted-sweeper] started (every 24h, retention 30d)
+[05:24:58] [INFO ] [ga-daemon] [attachment-cache] sweeper started (hourly tick, 24h TTL, dir=/root/.anet/cache/attachments/ga-daemon)
+[05:24:58] [INFO ] [ga-daemon] SSE connected
+[05:25:01] [INFO ] [ga-daemon] [rebuild] done: total=0 recovered=0 missing=0 ambiguous=0 zombies=0
+
+=== 8. hub side — recent stdout (looking for zod-parse / SEC refusals) ===
+[commhub] database: /tmp/ga2-hub.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+
+╔══════════════════════════════════════════════════╗
+║   CommHub MCP Server v0.9.0-preview.21                     ║
+║   Transport: Streamable HTTP (Bun native)         ║
+║   Security: 🔒 secured                       ║
+║   Tmux: DISABLED (set COMMHUB_ENABLE_TMUX=1)  ║
+║                                                   ║
+║   MCP:    http://127.0.0.1:9234/mcp                 ║
+║   REST:   http://127.0.0.1:9234/api                 ║
+║   Health: http://127.0.0.1:9234/health               ║
+╚══════════════════════════════════════════════════╝
+
+[rfc-028 vault] master key not set + no vault rows — vault gating is lazy; boot OK. Set ANET_HUB_SECRET_VAULT_KEY when enabling provider/secret features.
+[05:24:58] ga-daemon (sdk-node) → report_status: idle [net]
+[05:24:58] SSE ← net_7e65e498f82a:ga-daemon connected (1 clients)
+[05:24:58] ga-daemon (sdk-node) → report_status: idle [net]
+[05:24:58] ga-daemon → get_inbox: 0 pending messages

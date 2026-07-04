@@ -39,6 +39,10 @@ curl -fsSL https://anet.sh/install.sh | bash
 
 ## 升级步骤
 
+::: tip 升级顺序：先 hub 后 node
+如果你既跑 hub（`commhub-server`）也跑 agent-node，先升 hub 再升 node —— hub 主动写 backward-compat 接旧 node 的 report_status；反过来（新 node + 旧 hub）新 runtime 可能报出旧 hub zod schema 不认识的字段，被静默 strip，`config_snapshot` 里少字段 → dashboard 建节点向导 picker 可能空。全部要点看 [contract / matrix / mismatch 定性](https://github.com/sleep2agi/agent-network/blob/main/docs/release/versioning-and-compatibility.md#71-operator-upgrade-顺序生产升级现网)。
+:::
+
 ### 1. 检查当前版本
 
 ```bash
