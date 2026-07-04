@@ -1,0 +1,26 @@
+# Reproduces 通信龙's original mixed-versions setup:
+#   hub commhub-server 0.9.0-preview.14
+#   anet CLI 2.3.0-preview.21
+#   agent-node 2.5.0-preview.19
+# All otherwise identical to the aligned Dockerfile.
+FROM node:22-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      bash curl ca-certificates jq unzip procps sqlite3 \
+      build-essential python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://bun.sh/install | bash && \
+    cp /root/.bun/bin/bun /usr/local/bin/bun && chmod +x /usr/local/bin/bun
+
+RUN npm i -g \
+      @sleep2agi/commhub-server@0.9.0-preview.14 \
+      @sleep2agi/agent-node@2.5.0-preview.19 \
+      @sleep2agi/agent-network@2.3.0-preview.21 \
+    --silent
+
+RUN which anet && anet --version && which commhub-server && which agent-node
+
+COPY repro.sh /repro.sh
+RUN chmod +x /repro.sh
+CMD ["/repro.sh"]
