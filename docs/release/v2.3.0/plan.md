@@ -35,7 +35,7 @@
 | **P1 节点管理 P0** | ✅ 闭环 | #203 已修关；#180 由 #374 env-sweep 修 + #398 CI 回归门；docker e2e 回归 **15/16 绿**（1 是容器缺 codex CLI 的 harness 限制，非产品 bug） |
 | **P2 #393 provider UI** | ✅ 已发 | = RFC-028（PR #23）merged + **已切 dashboard `0.6.3-preview.5`**（provider CRUD + key vault + reachability matrix） |
 | **P2 #260 配置面板核心** | ✅ 已建 | 模型/模式/重启真接 API（dashboard #7/#10/#11/#19），在 preview.4/.5 |
-| **P2 #260 channel 编辑 backend** | ✅ 完成 | **PR #411 merged**：hub schema 收 channels + narrow + restart-tier + node 重启重读 refork；4 Codex edge-case 修（finalize/path-spec/disable-all/destructive-narrow）+ 回归 23/0；通信龙 独立复跑 + 通信牛 sanitization + IM马 5/5 wire 全过。⚠️ caveat：restart-tier exit(75) 需 supervisor（手动 spawn 节点需 host_supervisor/systemd）。剩前端 #31 narrow+un-hold |
+| **P2 #260 channel 编辑（前后端）** | ✅ 完成 | **PR #411 merged**：hub schema 收 channels + narrow + restart-tier + node 重启重读 refork；4 Codex edge-case 修（finalize/path-spec/disable-all/destructive-narrow）+ 回归 23/0；通信龙 独立复跑 + 通信牛 sanitization + IM马 5/5 wire 全过。⚠️ caveat：restart-tier exit(75) 需 supervisor（手动 spawn 节点需 host_supervisor/systemd）。前端 #31 narrow commhub + un-hold merged ✅ + supervisor docs #413。**前后端全通** |
 | **P3 multi-daemon** | ✅ 完成 | 代码全 merged + **Scenario H e2e PR #406 merged**（`PASS=59 FAIL=0`，通信龙 独立 docker 复跑同结果 claim=reality）；双 daemon 强绑 C2 路由/not_your_request/parentage 全绿 |
 | **P4 opencode 活体** | 🟡 free-model 验通 | **ACP 内核活体 free-model PASS 8/8 merged #408**（真 opencode-ai@1.17.13 + 真 ACP session + 7748 真计费 token + 子进程真起真收，通信龙 独立 docker 复跑 OVERALL PASS）；**paid vendor（Anthropic/OpenAI）真 e2e 等 Vincent key** |
 
