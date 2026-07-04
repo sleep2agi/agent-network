@@ -27,7 +27,7 @@
 
 ## 进度快照（自主推进中 · 每步滚动更新）
 
-> 最后更新：2026-07-04 早（北京时间）· Vincent msg9799 自主执行模式。
+> 最后更新：2026-07-04（北京）· **全 4 包 v2.3.0 preview 齐（pre-GA）**: agent-network 2.3.0-preview.20 / agent-node 2.5.0-preview.19 / commhub-server 0.9.0-preview.21 / dashboard 0.6.3-preview.6· Vincent msg9799 自主执行模式。
 > **📌 详细滚动进度追踪 → [tracking issue #403](https://github.com/sleep2agi/agent-network/issues/403)**（本 plan 是总文档/spec，详细每步日志记在 issue，二者互链）。
 
 | 线 | 状态 | 细节 |
@@ -109,6 +109,7 @@
 | `agent-network-dashboard 0.6.3-preview.6` | Providers 入口进左侧栏（#32）+ #260 channel 编辑前端（narrow telegram/feishu，#31）+ 版本戳修复（bump-before-build）| #31 / #32 |
 | `commhub-server 0.9.0-preview.21` | #260 channel-edit hub 侧：`update_node_config` 收 channels + narrow + restart-tier（#411）；504 test pass（8 fail 是沙箱 HTTP env 非 bug，CI 绿）| #411 |
 | `agent-node 2.5.0-preview.19` | #260 channel-edit node 侧：config-apply 合并 channels + restart-tier + 重启 refork（#411）+ classify quota 消息截断修（#417）；full suite 712/0 绿 | #411 / #417 |
+| `agent-network 2.3.0-preview.20` | 节点管理 CLI 累积（#180 sweep / create-stop-delete / daemon）+ opencode-cli ride-along（不主打）；obfuscation build 验过 | RFC-026/027/029 |
 
 ### 已合 main、待发 preview
 
