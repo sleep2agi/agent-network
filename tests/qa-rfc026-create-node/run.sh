@@ -294,8 +294,206 @@ DIFF=$(diff /app/server/src/shared/reserved-env.ts /app/agent-node/src/shared/re
 [[ -z "$DIFF" ]] && ok "G9 drift guard: hub vs daemon reserved-env.ts identical" || bad "G9 drift: $DIFF"
 
 # ── H. daemon node_id 强绑 (C2) ──────────────────────────────────
-note "H. daemon node_id 强绑 (C2)"
-stub "H" "live test deferred to Phase 3 (needs 2 concurrent host-supervisor daemon processes in one container; lifecycle plumbing nontrivial). C2 enforcement coverage = pure unit tests for takePendingEnvBlob daemon-binding + the get_create_request/ack_create_request DB-row check (see server/src/create-node.test.ts in this same PR)."
+# RFC-026 P2 multi-daemon live impl (issue #338 §① / RFC-026 §5 P2).
+# Two host_supervisor daemons in one container; verifies (i) the
+# aggregation the dashboard picker reads truly enumerates both, (ii)
+# `create_node` dispatches only to the caller-selected daemon, (iii)
+# the OTHER daemon calling get_create_request/ack_create_request on
+# the sibling request is rejected as `not_your_request` (§4.1.4 C2
+# strong bind — the guard is checked BEFORE the status check, so a
+# request that daemonA has already consumed still rejects daemonB).
+note "H. daemon node_id 强绑 (C2) — P2 multi-daemon live"
+
+# DaemonA's `config_snapshot` column gets clobbered to '' by the many
+# child register paths in scenarios A + F, and `list_host_supervisors`
+# filters on `config_snapshot.role`, so H1 would race until the daemon
+# heart-beats a fresh snapshot. Cheapest reliable fix: bounce daemonA
+# (kill its wrapper + its grandchild agent-node worker + restart) so
+# its FIRST heartbeat carries a well-formed snapshot again. Not a
+# semantic change — same identity (ntok / node_id / alias) reused.
+# Follow-up ticket: fix the child-register path to stop erasing the
+# parent daemon's snapshot column (out of scope for P3).
+pkill -TERM -P "$DAEMON_PID" 2>/dev/null || true
+kill "$DAEMON_PID" 2>/dev/null || true
+pgrep -f "agent-node.*--alias $DAEMON_NAME" | xargs -r kill 2>/dev/null || true
+sleep 1
+nohup anet node start "$DAEMON_NAME" > /tmp/daemon.log 2>&1 &
+DAEMON_PID=$!
+for i in $(seq 1 20); do
+  sleep 1
+  R=$(curl -sS "$HUB_BASE/api/nodes?node_id=$DAEMON_NODE_ID" -H "Authorization: Bearer $UTOK")
+  echo "$R" | jq -e ".nodes[0].node_id == \"$DAEMON_NODE_ID\"" >/dev/null 2>&1 && break
+done
+ok "H daemonA bounced (same identity re-registered; snapshot re-published)"
+
+DAEMON_B_NAME="daemon-rfc026-b"
+DAEMON_B_NTOK_RESP=$(curl -sS -X POST "$HUB_BASE/api/auth/node-token" \
+  -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' \
+  -d "{\"network_id\":\"$NET_ID\",\"node_name\":\"$DAEMON_B_NAME\"}")
+DAEMON_B_NTOK=$(echo "$DAEMON_B_NTOK_RESP" | jq -r .token)
+[[ "$DAEMON_B_NTOK" == ntok_* ]] && ok "H daemonB ntok minted (isolated identity)" || { bad "H daemonB ntok mint: $DAEMON_B_NTOK_RESP"; }
+DAEMON_B_NODE_ID="node_daemon_rfc026b_$(date +%s%N | sha256sum | head -c 12)"
+mkdir -p "$WORK/.anet/nodes/$DAEMON_B_NAME"
+cat > "$WORK/.anet/nodes/$DAEMON_B_NAME/config.json" <<EOF_B
+{"node_id":"$DAEMON_B_NODE_ID","node_name":"$DAEMON_B_NAME","alias":"$DAEMON_B_NAME","role":"host_supervisor",
+ "runtime":"claude-agent-sdk","model":"claude-opus-original",
+ "hub":"$HUB_BASE","token":"$DAEMON_B_NTOK"}
+EOF_B
+cd "$WORK"
+nohup anet node start "$DAEMON_B_NAME" > /tmp/daemon-b.log 2>&1 &
+DAEMON_B_PID=$!
+DAEMON_B_REG=""
+for i in $(seq 1 30); do
+  sleep 1
+  R=$(curl -sS "$HUB_BASE/api/nodes?node_id=$DAEMON_B_NODE_ID" -H "Authorization: Bearer $UTOK")
+  if echo "$R" | jq -e ".nodes[0].node_id == \"$DAEMON_B_NODE_ID\"" >/dev/null 2>&1; then DAEMON_B_REG=yes; break; fi
+done
+[[ -n "$DAEMON_B_REG" ]] && ok "H daemonB registered ($DAEMON_B_NAME / $DAEMON_B_NODE_ID)" || { bad "H daemonB never registered"; tail -30 /tmp/daemon-b.log; }
+
+# H1 — hub list_host_supervisors (MCP) surfaces BOTH daemons.
+# This is what the dashboard picker's /api/host-supervisors ultimately
+# reads; proves the aggregation is real, not stubbed.
+#
+# Note: the tool filters by `config_snapshot.role == "host_supervisor"`.
+# Under heavy scenario A-G traffic the original daemon's snapshot may
+# have been temporarily blanked (empty string) between reports — the
+# tool then drops it from the list until the next daemon heartbeat
+# re-populates it. Not a regression in P2 code (this filter and the
+# heartbeat cadence pre-date P2), but it makes the H1 read racy. Give
+# the daemon up to 10 heartbeats to re-populate before asserting; if
+# it still hasn't, dump the snapshot state so any real regression is
+# diagnosable, not silent.
+HSP_ATTEMPT=0
+HSP_HAS_A=""
+HSP_HAS_B=""
+while [[ "$HSP_ATTEMPT" -lt 10 ]]; do
+  HSP_BODY=$(cat <<JSON
+{"jsonrpc":"2.0","id":$RANDOM,"method":"tools/call","params":{"name":"list_host_supervisors","arguments":{"network_id":"$NET_ID"}}}
+JSON
+  )
+  HSP_RESP=$(mcp_call "$UTOK" "$HSP_BODY")
+  HSP_HAS_A=$(echo "$HSP_RESP" | jq -r ".daemons[] | select(.daemon_node_id == \"$DAEMON_NODE_ID\") | .daemon_node_id" 2>/dev/null | head -1)
+  HSP_HAS_B=$(echo "$HSP_RESP" | jq -r ".daemons[] | select(.daemon_node_id == \"$DAEMON_B_NODE_ID\") | .daemon_node_id" 2>/dev/null | head -1)
+  if [[ "$HSP_HAS_A" == "$DAEMON_NODE_ID" && "$HSP_HAS_B" == "$DAEMON_B_NODE_ID" ]]; then break; fi
+  HSP_ATTEMPT=$((HSP_ATTEMPT+1))
+  sleep 1
+done
+if [[ "$HSP_HAS_A" == "$DAEMON_NODE_ID" && "$HSP_HAS_B" == "$DAEMON_B_NODE_ID" ]]; then
+  ok "H1 list_host_supervisors returns BOTH daemons (picker aggregation real; converged in ${HSP_ATTEMPT}s)"
+else
+  bad "H1 list_host_supervisors missing a daemon after 10s — a=$HSP_HAS_A b=$HSP_HAS_B"
+  echo "  raw last response: $HSP_RESP"
+  echo "  DB snapshot state for daemons:"
+  sqlite3 "$HUB_DB" "SELECT n.alias, LENGTH(COALESCE(n.config_snapshot,'')) AS csz, s.last_seen_at, s.status FROM nodes n LEFT JOIN sessions s ON s.alias=n.alias WHERE n.alias LIKE 'daemon-%';" 2>/dev/null | sed 's/^/    /'
+fi
+
+# H1b — REST mirror. This is the endpoint the dashboard picker actually
+# hits (proxied through the dashboard's /api/anet/host-supervisors →
+# hub GET /api/host-supervisors → list_host_supervisors). Prove the
+# REST path returns the same daemon set, so the picker end-to-end has
+# a real backend from V3-user-token to daemon list.
+HSP_REST=$(curl -sS "$HUB_BASE/api/host-supervisors?network_id=$NET_ID" -H "Authorization: Bearer $UTOK")
+REST_HAS_A=$(echo "$HSP_REST" | jq -r ".daemons[] | select(.daemon_node_id == \"$DAEMON_NODE_ID\") | .daemon_node_id" 2>/dev/null | head -1)
+REST_HAS_B=$(echo "$HSP_REST" | jq -r ".daemons[] | select(.daemon_node_id == \"$DAEMON_B_NODE_ID\") | .daemon_node_id" 2>/dev/null | head -1)
+if [[ "$REST_HAS_A" == "$DAEMON_NODE_ID" && "$REST_HAS_B" == "$DAEMON_B_NODE_ID" ]]; then
+  ok "H1b REST /api/host-supervisors mirrors MCP tool with both daemons"
+else
+  bad "H1b REST list missing a daemon — a=$REST_HAS_A b=$REST_HAS_B raw=$HSP_REST"
+fi
+
+# H2 — dispatch to daemonA + daemonB; each child should land on its
+# selected daemon and NOT the other. Child names are H-scenario-scoped
+# so scenario A's `demo-child` and A.nvm's `demo-nvm-child` don't clash.
+H_CHILD_A="h-child-on-a"
+H_CHILD_B="h-child-on-b"
+BODY_A=$(build_create_node_body "$DAEMON_NODE_ID"   "$H_CHILD_A" "claude-agent-sdk" "claude-opus-rfc026-h-a" "$NET_ID")
+BODY_B=$(build_create_node_body "$DAEMON_B_NODE_ID" "$H_CHILD_B" "claude-agent-sdk" "claude-opus-rfc026-h-b" "$NET_ID")
+RESP_A=$(mcp_call "$UTOK" "$BODY_A")
+RESP_B=$(mcp_call "$UTOK" "$BODY_B")
+H_REQ_A=$(echo "$RESP_A" | jq -r .request_id 2>/dev/null)
+H_REQ_B=$(echo "$RESP_B" | jq -r .request_id 2>/dev/null)
+[[ "$H_REQ_A" == cr_* ]] && ok "H2 create_node(daemonA) dispatched ($H_REQ_A)" || { bad "H2 daemonA dispatch: $RESP_A"; }
+[[ "$H_REQ_B" == cr_* ]] && ok "H2 create_node(daemonB) dispatched ($H_REQ_B)" || { bad "H2 daemonB dispatch: $RESP_B"; }
+
+# H3 — wait for BOTH children to register. Since C2 routes to the
+# correct daemon, both should register on the daemon they were
+# targeted at, in parallel. Bound the wait to keep suite runtime sane.
+H_A_REGISTERED=""; H_B_REGISTERED=""
+for i in $(seq 1 60); do
+  sleep 1
+  if [[ -z "$H_A_REGISTERED" ]]; then
+    R_A=$(curl -sS "$HUB_BASE/api/nodes?alias=$H_CHILD_A" -H "Authorization: Bearer $UTOK")
+    echo "$R_A" | jq -e ".nodes[0].alias == \"$H_CHILD_A\"" >/dev/null 2>&1 && H_A_REGISTERED=$i
+  fi
+  if [[ -z "$H_B_REGISTERED" ]]; then
+    R_B=$(curl -sS "$HUB_BASE/api/nodes?alias=$H_CHILD_B" -H "Authorization: Bearer $UTOK")
+    echo "$R_B" | jq -e ".nodes[0].alias == \"$H_CHILD_B\"" >/dev/null 2>&1 && H_B_REGISTERED=$i
+  fi
+  [[ -n "$H_A_REGISTERED" && -n "$H_B_REGISTERED" ]] && break
+done
+[[ -n "$H_A_REGISTERED" ]] && ok "H3 child on daemonA registered in ${H_A_REGISTERED}s ($H_CHILD_A)" || bad "H3 child on daemonA never registered"
+[[ -n "$H_B_REGISTERED" ]] && ok "H3 child on daemonB registered in ${H_B_REGISTERED}s ($H_CHILD_B)" || bad "H3 child on daemonB never registered"
+
+# H4 — parentage: hub side. node_create_requests.daemon_node_id is the
+# canonical daemon→child mapping (used by resolveDaemonForChild in
+# stop/delete). Verify child_a's request was owned by daemonA and
+# child_b's by daemonB — the exact invariant the picker's guarantee
+# relies on.
+PARENT_A=$(sqlite3 "$HUB_DB" "SELECT daemon_node_id FROM node_create_requests WHERE child_name='$H_CHILD_A';" 2>/dev/null)
+PARENT_B=$(sqlite3 "$HUB_DB" "SELECT daemon_node_id FROM node_create_requests WHERE child_name='$H_CHILD_B';" 2>/dev/null)
+[[ "$PARENT_A" == "$DAEMON_NODE_ID"  ]] && ok "H4 hub records child_a parent=daemonA" || bad "H4 child_a parent='$PARENT_A' expected='$DAEMON_NODE_ID'"
+[[ "$PARENT_B" == "$DAEMON_B_NODE_ID" ]] && ok "H4 hub records child_b parent=daemonB" || bad "H4 child_b parent='$PARENT_B' expected='$DAEMON_B_NODE_ID'"
+
+# H5 — process-tree parentage: the spawned children must have appeared
+# in the log of the daemon that owns them, and NOT the other. Grep on
+# alias so log-line wording drift doesn't break the check.
+grep -q "spawned child .$H_CHILD_A." /tmp/daemon.log   2>/dev/null && ok "H5 daemonA log records spawn of child_a" || bad "H5 daemonA log missing spawn of $H_CHILD_A"
+grep -q "spawned child .$H_CHILD_B." /tmp/daemon-b.log 2>/dev/null && ok "H5 daemonB log records spawn of child_b" || bad "H5 daemonB log missing spawn of $H_CHILD_B"
+grep -q "spawned child .$H_CHILD_A." /tmp/daemon-b.log 2>/dev/null && bad "H5 daemonB WRONGLY spawned $H_CHILD_A (should have been daemonA only)" || ok "H5 daemonB never touched $H_CHILD_A (C2 routing effective)"
+grep -q "spawned child .$H_CHILD_B." /tmp/daemon.log   2>/dev/null && bad "H5 daemonA WRONGLY spawned $H_CHILD_B (should have been daemonB only)" || ok "H5 daemonA never touched $H_CHILD_B (C2 routing effective)"
+
+# H6 — C2 negative: daemonB calls get_create_request(request_id_a)
+# → must reject as `not_your_request`. Guard checked before the status
+# check, so it still fires after daemonA consumed the row.
+GCR_BODY_A_ON_B=$(cat <<JSON
+{"jsonrpc":"2.0","id":$RANDOM,"method":"tools/call","params":{"name":"get_create_request","arguments":{"request_id":"$H_REQ_A"}}}
+JSON
+)
+mcp_init_once "$DAEMON_B_NTOK"
+GCR_RESP=$(mcp_call "$DAEMON_B_NTOK" "$GCR_BODY_A_ON_B")
+GCR_ERR=$(echo "$GCR_RESP" | jq -r .error 2>/dev/null)
+[[ "$GCR_ERR" == "not_your_request" ]] && ok "H6 daemonB get_create_request(reqA) → not_your_request (C2 rejects)" || bad "H6 daemonB→reqA got '$GCR_ERR' (want not_your_request) raw=$GCR_RESP"
+
+# Symmetric: daemonA → reqB → not_your_request.
+GCR_BODY_B_ON_A=$(cat <<JSON
+{"jsonrpc":"2.0","id":$RANDOM,"method":"tools/call","params":{"name":"get_create_request","arguments":{"request_id":"$H_REQ_B"}}}
+JSON
+)
+mcp_init_once "$DAEMON_NTOK"
+GCR_RESP2=$(mcp_call "$DAEMON_NTOK" "$GCR_BODY_B_ON_A")
+GCR_ERR2=$(echo "$GCR_RESP2" | jq -r .error 2>/dev/null)
+[[ "$GCR_ERR2" == "not_your_request" ]] && ok "H6 daemonA get_create_request(reqB) → not_your_request (C2 rejects)" || bad "H6 daemonA→reqB got '$GCR_ERR2' (want not_your_request) raw=$GCR_RESP2"
+
+# H7 — same C2 guard on ack_create_request. Same shape, different tool.
+ACK_BODY_A_ON_B=$(cat <<JSON
+{"jsonrpc":"2.0","id":$RANDOM,"method":"tools/call","params":{"name":"ack_create_request","arguments":{"request_id":"$H_REQ_A","status":"failed","error":"h7 negative test — daemonB acking daemonA's request"}}}
+JSON
+)
+ACK_RESP=$(mcp_call "$DAEMON_B_NTOK" "$ACK_BODY_A_ON_B")
+ACK_ERR=$(echo "$ACK_RESP" | jq -r .error 2>/dev/null)
+[[ "$ACK_ERR" == "not_your_request" ]] && ok "H7 daemonB ack_create_request(reqA) → not_your_request" || bad "H7 daemonB ack(reqA) got '$ACK_ERR' raw=$ACK_RESP"
+# Belt-and-braces: after the wrong-daemon ack, request A's row must
+# NOT have flipped to failed — the reject must have short-circuited
+# before any state write. This proves the C2 guard is atomic, not
+# advisory.
+POST_ACK_STATUS=$(sqlite3 "$HUB_DB" "SELECT status FROM node_create_requests WHERE request_id='$H_REQ_A';" 2>/dev/null)
+[[ "$POST_ACK_STATUS" == "succeeded" || "$POST_ACK_STATUS" == "delivered" ]] && ok "H7 reqA status unchanged post-hostile-ack (status=$POST_ACK_STATUS)" || bad "H7 reqA status leaked to '$POST_ACK_STATUS' — C2 not atomic"
+
+# H8 — both daemon processes still alive at end of scenario H. Catches
+# the class of regression where the hostile MCP calls accidentally
+# crashed the target daemon (a real bug would surface as a dead PID).
+kill -0 "$DAEMON_PID"   2>/dev/null && ok "H8 daemonA (pid=$DAEMON_PID) still alive after H6/H7"   || bad "H8 daemonA pid=$DAEMON_PID DEAD"
+kill -0 "$DAEMON_B_PID" 2>/dev/null && ok "H8 daemonB (pid=$DAEMON_B_PID) still alive after H6/H7" || bad "H8 daemonB pid=$DAEMON_B_PID DEAD"
 
 # ── I. ANET_BIN install-time pin + PATH 投毒 (C3) ────────────────
 note "I. ANET_BIN install-time pin + PATH 投毒 (C3, observable)"
@@ -501,10 +699,12 @@ EOF2
 fi
 
 # ── cleanup ──────────────────────────────────────────────────────
-kill "$HUB_PID" 2>/dev/null || true
+kill "$DAEMON_B_PID" 2>/dev/null || true
+kill "$HUB_PID"     2>/dev/null || true
 
 printf "\n────────────────────────────────────────────\n"
-printf "RFC-026 P1 e2e — PASS=%d FAIL=%d SKIP=%d\n" "$PASS" "$FAIL" "$SKIP"
-printf "M3 milestone: A/B/C/D/E/F/G/K live + H/J stubbed (Phase 3)\n"
+printf "RFC-026 P1/P2 e2e — PASS=%d FAIL=%d SKIP=%d\n" "$PASS" "$FAIL" "$SKIP"
+printf "M3 milestone: A/B/C/D/E/F/G/H/K live + J stubbed (Phase 3)\n"
+printf "issue #338 §① / RFC-026 §5 P2 multi-daemon scenario H — live\n"
 printf "────────────────────────────────────────────\n"
 [[ "$FAIL" -eq 0 ]]
