@@ -27,7 +27,7 @@
 
 ## 进度快照（自主推进中 · 每步滚动更新）
 
-> 最后更新：2026-07-04（北京）· **全 4 包 v2.3.0 preview 齐（pre-GA）**: agent-network 2.3.0-preview.20 / agent-node 2.5.0-preview.19 / commhub-server 0.9.0-preview.21 / dashboard 0.6.3-preview.6· Vincent msg9799 自主执行模式。
+> 最后更新：2026-07-04（北京）· **🟢 GA-gate GREEN (23/23) — GA-ready, 等 Vincent 拍 latest**: agent-network 2.3.0-preview.20 / agent-node 2.5.0-preview.19 / commhub-server 0.9.0-preview.21 / dashboard 0.6.3-preview.6· Vincent msg9799 自主执行模式。
 > **📌 详细滚动进度追踪 → [tracking issue #403](https://github.com/sleep2agi/agent-network/issues/403)**（本 plan 是总文档/spec，详细每步日志记在 issue，二者互链）。
 
 | 线 | 状态 | 细节 |
