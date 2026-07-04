@@ -106,6 +106,7 @@
 | `agent-network 2.3.0-preview.19` | 节点管理 CLI/wizard 迭代累积（create/stop-delete/daemon） | RFC-026/027 |
 | `agent-network-dashboard 0.6.3-preview.4` | 单节点设置面板：模型 select + 运行模式 flags + 存了自动重启，真接 `/api/anet/node-config` | #260 部分 |
 | `agent-network-dashboard 0.6.3-preview.5` | **#393 模型供应商预配置库**：provider CRUD + key 写入即 vault 只回 hasKey + reachability matrix（build 干净 stamp 44d518a） | PR #23 |
+| `agent-network-dashboard 0.6.3-preview.6` | Providers 入口进左侧栏（#32）+ #260 channel 编辑前端（narrow telegram/feishu，#31）+ 版本戳修复（bump-before-build）| #31 / #32 |
 
 ### 已合 main、待发 preview
 
