@@ -517,6 +517,63 @@ if [[ -n "$CHAN_UID_D" ]]; then
   fi
 fi
 
+# 11g — Codex catch #4: all-invalid channels rejected as
+# `channels_all_invalid`, NOT silently converted to disable-all.
+# Sending `["commhub"]` (transport, not editable) or `["telegarm"]`
+# (typo) must NOT wipe existing telegram/feishu workers. Supersede D
+# first.
+sqlite3 "$COMMHUB_DB" "UPDATE node_config_updates SET status='timeout', acked_at=strftime('%s','now')*1000, error='e2e-supersede' WHERE update_id='$CHAN_UID_D';" 2>/dev/null
+
+CHAN_RESP_E=$(mcp_call "$UTOK" "update_node_config" \
+  "{\"node_id\":\"$NODE_ID\",\"base_revision\":$REV_11,\"patch\":{\"channels\":[\"commhub\"]},\"network_id\":\"$NET_ID\"}")
+CHAN_ERR_E=$(echo "$CHAN_RESP_E" | jq -r '.error // empty')
+if [[ "$CHAN_ERR_E" == "channels_all_invalid" ]]; then
+  ok "11g all-invalid channels rejected as channels_all_invalid (won't nuke workers)"
+else
+  bad "11g all-invalid input got error='$CHAN_ERR_E' (expected channels_all_invalid) raw=$CHAN_RESP_E"
+fi
+
+# 11h — the typo case Codex flagged. "telegarm" narrows to [] — must
+# also reject, not silently disable-all.
+CHAN_RESP_F=$(mcp_call "$UTOK" "update_node_config" \
+  "{\"node_id\":\"$NODE_ID\",\"base_revision\":$REV_11,\"patch\":{\"channels\":[\"telegarm\"]},\"network_id\":\"$NET_ID\"}")
+CHAN_ERR_F=$(echo "$CHAN_RESP_F" | jq -r '.error // empty')
+if [[ "$CHAN_ERR_F" == "channels_all_invalid" ]]; then
+  ok "11h typo 'telegarm' rejected as channels_all_invalid (not silent disable-all)"
+else
+  bad "11h typo got error='$CHAN_ERR_F' (expected channels_all_invalid) raw=$CHAN_RESP_F"
+fi
+
+# 11i — Codex catch #1: finalize MUST NOT match a channels-only patch
+# against a snapshot whose channels field is empty (the node hasn't
+# forked the requested channels yet). To exercise the finalize helper
+# without a real node restart, we install a fresh pending update +
+# then trigger a report_status heartbeat from the LIVE agent-node
+# (which has channels=[] at the moment — scenario 9 didn't change it,
+# scenario 11a-h all left the row in-flight or terminal). Baseline:
+# revision from /api/nodes.
+sqlite3 "$COMMHUB_DB" "UPDATE node_config_updates SET status='timeout', acked_at=strftime('%s','now')*1000, error='e2e-supersede' WHERE update_id='$CHAN_UID_D';" 2>/dev/null
+
+# Fresh channels-only patch — pending after this.
+REV_BEFORE_G=$(curl -sS "$HUB_BASE/api/nodes/$NODE_ID/config" -H "Authorization: Bearer $UTOK" | jq -r '.config_revision // 0')
+CHAN_RESP_G=$(mcp_call "$UTOK" "update_node_config" \
+  "{\"node_id\":\"$NODE_ID\",\"base_revision\":$REV_BEFORE_G,\"patch\":{\"channels\":[\"feishu\"]},\"network_id\":\"$NET_ID\"}")
+CHAN_UID_G=$(echo "$CHAN_RESP_G" | jq -r '.update_id // empty')
+
+# The agent-node lifecycle from scenario 9 has already exited (its
+# process was killed at line 386). We're testing here that the
+# finalizePendingMatchingUpdates code path — driven by the LIVE hub —
+# does not falsely mark this update applied just because its patch.flags
+# happens to be {}. Sleep briefly so any latent report_status from a
+# still-running agent-node grandchild (should be none) can arrive.
+sleep 3
+STATUS_G=$(sqlite3 "$COMMHUB_DB" "SELECT status FROM node_config_updates WHERE update_id='$CHAN_UID_G';" 2>/dev/null)
+if [[ "$STATUS_G" == "pending" ]]; then
+  ok "11i channels-only patch stayed pending (finalize refused to match on empty snapshot channels)"
+else
+  bad "11i channels-only patch prematurely became '$STATUS_G' (expected pending) — Codex P1 regression"
+fi
+
 # ── Summary ────────────────────────────────────────────────────────
 echo
 echo "── Result ──"

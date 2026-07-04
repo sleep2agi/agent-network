@@ -4,10 +4,10 @@
 
 === 1. register admin user + login → utok_ ===
   ✓ admin utok minted (first-user becomes admin)
-  ✓ default network = net_439748fb8f29
+  ✓ default network = net_19c0cd16c315
 
 === 2. Mint ntok_ for a test node ===
-  ✓ ntok minted (node_id pre-assigned: node_rfc024_839711d97090)
+  ✓ ntok minted (node_id pre-assigned: node_rfc024_559f0e313ac5)
 
 === 3. SEC contract: bad patch → invalid_patch reject (no node start needed) ===
   ✓ bad patch rejected (node_not_found)
@@ -28,25 +28,28 @@
   ⊘ drain-mid-kill e2e (skipped — vendor-key + minutes wall-clock — longer-form QA)
 
 === 9. [restart-finalize] real path — anet node start + restart patch + assert revision bump ===
-  ✓ agent-node registered (qa-rfc024-node-1 / node_rfc024_839711d97090)
+  ✓ agent-node registered (qa-rfc024-node-1 / node_rfc024_559f0e313ac5)
   ✓ baseline config_revision = 0
-  ✓ restart patch dispatched (update_id=cu_ebd7ab5f-ab5d-4916-a08a-f32b1aabbc48 apply_mode=restart)
+  ✓ restart patch dispatched (update_id=cu_a368e1ee-7b28-4867-97cd-8a3aa14857ea apply_mode=restart)
   ✓ finalize observed via report_status content-match: revision 0 → 1 (poll iter 1)
 
 === 10. [restart-finalize] premature-finalize guard — drain heartbeat MUST omit snapshot ===
   ✓ premature-finalize guard pinned by unit test + source-level conditional (see cli.ts:923)
 
 === 11. #260 P5 — channels patch wire (hub schema + narrowing + tier) ===
-  ✓ 11a hub accepted channels-only patch (update_id=cu_5e1f9179-7a5f-4d11-98b7-96321b6d4dd4 apply_mode=restart)
+  ✓ 11a hub accepted channels-only patch (update_id=cu_9ee240a3-d5d7-4dd2-b33d-f147cb2330c9 apply_mode=restart)
   ✓ 11b channels-only patch classified as apply_mode=restart
   ✓ 11c patch_json in node_config_updates carries channels=[telegram,feishu]
-  ✓ 11d hostile input accepted for narrowing (update_id=cu_2479e7a5-ebf9-435b-8969-c5af54dc8f9d)
+  ✓ 11d hostile input accepted for narrowing (update_id=cu_c5977dfa-1e71-4001-ae33-2fd8a823a52f)
   ✓ 11d hostile input narrowed to 'telegram,feishu' (evil/wechat/commhub/42/injection/dup all dropped, case-folded)
   ✓ 11e channels: [] disable-all: apply_mode=restart + patch_json has channels key
   ✓ 11f flags-only patch keeps channels absent + apply_mode=hot (no regression)
+  ✓ 11g all-invalid channels rejected as channels_all_invalid (won't nuke workers)
+  ✓ 11h typo 'telegarm' rejected as channels_all_invalid (not silent disable-all)
+  ✓ 11i channels-only patch stayed pending (finalize refused to match on empty snapshot channels)
 
 ── Result ──
-  PASS=20  FAIL=0  SKIP=2
+  PASS=23  FAIL=0  SKIP=2
 
 RFC-024 §7.2 skeleton complete.
 Scenarios that run today (no W1 dependency) verify the contract surface:

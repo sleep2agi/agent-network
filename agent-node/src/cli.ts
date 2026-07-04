@@ -943,7 +943,12 @@ const register = async () => {
     node_name: NODE_NAME || undefined,
     session_id: SESSION_ID || undefined,
     config_path: configFilePath || undefined,
-    channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
+    // #260 P5 — always emit the current channel spec list (even as
+    // "[]" after disable-all), otherwise the hub's COALESCE on
+    // sessions.channels silently preserves the pre-disable list and
+    // /api/nodes lies about the node's actual state. Codex catch on
+    // PR #411.
+    channels: JSON.stringify(channelSpecs),
     model: MODEL || undefined,
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
@@ -964,7 +969,12 @@ const reportStatus = async (status: string, task?: string) => {
     node_id: NODE_ID || undefined,
     session_id: claudeSessionId || grokSessionId || SESSION_ID || undefined,
     config_path: configFilePath || undefined,
-    channels: channelSpecs.length ? JSON.stringify(channelSpecs) : undefined,
+    // #260 P5 — always emit the current channel spec list (even as
+    // "[]" after disable-all), otherwise the hub's COALESCE on
+    // sessions.channels silently preserves the pre-disable list and
+    // /api/nodes lies about the node's actual state. Codex catch on
+    // PR #411.
+    channels: JSON.stringify(channelSpecs),
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),

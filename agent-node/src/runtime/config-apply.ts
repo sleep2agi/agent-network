@@ -248,6 +248,19 @@ export function loadConfigWithSelfHeal(path: string): SelfHealOutcome {
   }
 }
 
+/** Parse a channel spec into its bare type key. Mirrors
+ * `parseChannelSpec` in cli.ts but only extracts the type — the caller
+ * doesn't need the path. Malformed specs (empty, starts with `:`, ends
+ * with `:`) return null so mergePatch can drop them defensively rather
+ * than propagate the corruption. */
+function channelSpecType(spec: unknown): string | null {
+  if (typeof spec !== "string") return null;
+  const sep = spec.indexOf(":");
+  if (sep < 0) return spec || null;
+  if (sep === 0 || sep === spec.length - 1) return null;
+  return spec.slice(0, sep);
+}
+
 /** Merge a patch into the existing file config. Returns the new
  * config object — caller writes it. Defensive: clones the input so
  * the live mutable flag obj isn't accidentally shared with the
@@ -259,10 +272,25 @@ export function mergePatch(existing: any, patch: ConfigPatch): any {
     next.flags = { ...(next.flags || {}), ...patch.flags };
   }
   if (patch.channels !== undefined) {
-    // Channels is a REPLACE, not a merge — an empty array means "no
-    // enabled channels", which the boot flow honours by forking no
-    // workers. This matches the dashboard's on/off semantics.
-    next.channels = [...patch.channels];
+    // Channels replace-with-preserve-paths:
+    //   - `patch.channels: []` disables everything (empty array
+    //     survives; boot forks no workers).
+    //   - Otherwise, for each type in the patch, if the existing
+    //     config had a path-qualified spec of the same type
+    //     ("telegram:/abs/path" or "feishu:/opt/foo"), keep the FULL
+    //     spec so the .env / access.json under that dir stays
+    //     wired up. A bare-key patch that arrived because the
+    //     dashboard doesn't know about the path would otherwise
+    //     drop that path and force the boot flow to
+    //     `defaultChannelDir()` — which won't have the operator-
+    //     provisioned secrets. Codex catch on PR #411.
+    const existingByType = new Map<string, string>();
+    const existingChannels = Array.isArray(next.channels) ? next.channels : [];
+    for (const spec of existingChannels) {
+      const t = channelSpecType(spec);
+      if (t && !existingByType.has(t)) existingByType.set(t, String(spec));
+    }
+    next.channels = patch.channels.map((t) => existingByType.get(t) ?? t);
   }
   return next;
 }
@@ -303,6 +331,14 @@ export interface MaskedSnapshot {
    * the hardcoded 20 default + allowlist enforcement was bypassed.
    * 通信龙 nit ① decision: nest, don't delete. */
   daemon_capabilities?: DaemonCapabilities;
+  /** #260 P5 — bare-type channel set currently in this process's
+   *  forked worker map. Always emitted (even as `[]`) so the hub's
+   *  content-match finalize (finalizePendingMatchingUpdates) can prove
+   *  a channels-only restart landed and — separately — so
+   *  /api/nodes reflects a disable-all instead of the stale COALESCE'd
+   *  value. Path-qualified specs in config.channels are collapsed to
+   *  the bare type key; anything unparseable is silently dropped. */
+  channels: string[];
 }
 export function buildConfigSnapshot(
   fileConfig: any,
@@ -315,6 +351,22 @@ export function buildConfigSnapshot(
     config_revision: revision,
     config_update_capable: configUpdateCapable,
     role: typeof fileConfig?.role === "string" ? fileConfig.role : null,
+    // Always emit — see MaskedSnapshot.channels comment. Sort +
+    // dedup so the hub's Set-equality content-match doesn't care
+    // about the order the operator listed them in.
+    channels: (() => {
+      const raw = fileConfig?.channels;
+      if (!Array.isArray(raw)) return [];
+      const seen = new Set<string>();
+      const out2: string[] = [];
+      for (const spec of raw) {
+        const t = channelSpecType(spec);
+        if (!t || seen.has(t)) continue;
+        seen.add(t);
+        out2.push(t);
+      }
+      return out2.sort();
+    })(),
   };
   // Self-declare nested under daemon_capabilities — only emit fields
   // when valid (typeof + Array.isArray narrow per

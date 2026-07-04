@@ -476,3 +476,54 @@ describe("channels — mergePatch replaces, does not merge", () => {
     expect(merged.channels).toEqual(["feishu"]);
   });
 });
+
+// ── #260 P5 codex-catch regression tests ───────────────────────────
+describe("mergePatch — path-qualified specs preserved", () => {
+  test("bare-type patch preserves existing telegram:/abs/path", () => {
+    const existing = { channels: ["telegram:/opt/bots/tg", "feishu:/opt/bots/feishu"] };
+    const merged = mergePatch(existing, { channels: ["telegram"] });
+    // "telegram" resolves to the existing path-qualified spec.
+    expect(merged.channels).toEqual(["telegram:/opt/bots/tg"]);
+  });
+  test("bare-type patch keeps both when both were path-qualified", () => {
+    const existing = { channels: ["telegram:/opt/tg", "feishu:/opt/feishu"] };
+    const merged = mergePatch(existing, { channels: ["telegram", "feishu"] });
+    expect(merged.channels).toEqual(["telegram:/opt/tg", "feishu:/opt/feishu"]);
+  });
+  test("bare-type patch adds new bare key when existing had no matching spec", () => {
+    const existing = { channels: ["telegram:/opt/tg"] };
+    const merged = mergePatch(existing, { channels: ["telegram", "feishu"] });
+    expect(merged.channels).toEqual(["telegram:/opt/tg", "feishu"]);
+  });
+  test("disable-all still works — empty patch wipes even path-qualified specs", () => {
+    const existing = { channels: ["telegram:/opt/tg"] };
+    const merged = mergePatch(existing, { channels: [] });
+    expect(merged.channels).toEqual([]);
+  });
+  test("first-write no existing channels: bare types stay bare", () => {
+    const merged = mergePatch({ model: "x" }, { channels: ["feishu"] });
+    expect(merged.channels).toEqual(["feishu"]);
+  });
+});
+
+describe("buildConfigSnapshot — always emits channels for content-match finalize", () => {
+  test("empty config emits channels=[]", () => {
+    expect(buildConfigSnapshot({}, false, 0).channels).toEqual([]);
+  });
+  test("bare-type list emitted verbatim + sorted", () => {
+    expect(buildConfigSnapshot({ channels: ["telegram", "feishu"] }, false, 0).channels)
+      .toEqual(["feishu", "telegram"]);
+  });
+  test("path-qualified specs collapse to bare type", () => {
+    expect(buildConfigSnapshot({ channels: ["telegram:/opt/tg", "feishu:/opt/feishu"] }, false, 0).channels)
+      .toEqual(["feishu", "telegram"]);
+  });
+  test("dupes deduped, unparseable dropped", () => {
+    expect(buildConfigSnapshot({ channels: ["telegram", "telegram:/opt/tg", ":", "feishu:"] }, false, 0).channels)
+      .toEqual(["telegram"]);
+  });
+  test("non-array channels field yields []", () => {
+    expect(buildConfigSnapshot({ channels: "telegram" }, false, 0).channels).toEqual([]);
+    expect(buildConfigSnapshot({ channels: null }, false, 0).channels).toEqual([]);
+  });
+});

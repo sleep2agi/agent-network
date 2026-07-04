@@ -1601,10 +1601,49 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const model = typeof patch.model === "string" ? patch.model : undefined;
       const flags = (patch.flags && typeof patch.flags === "object") ? patch.flags as Record<string, unknown> : {};
       // Narrow untrusted `channels` at the boundary (typeof + allowlist +
-      // dedup + case-fold). `undefined` here == "patch didn't touch channels";
-      // `[]` == "disable all editable channels" (a real state change).
-      const channels: string[] | undefined =
-        patch.channels !== undefined ? (narrowChannelsPatch(patch.channels) ?? undefined) : undefined;
+      // dedup + case-fold), and distinguish two very different cases
+      // that both narrow to `[]`:
+      //   (a) `patch.channels === []` (explicit "disable all editable
+      //       channels"). Downstream must proceed and write channels=[]
+      //       so the node's next restart forks no workers.
+      //   (b) `patch.channels === ["commhub"]` or similar — the caller
+      //       sent items but every single one was invalid (dashboard PR
+      //       #31 still ships commhub, and a typo like "telegarm" would
+      //       hit the same path). Downstream MUST NOT treat this as
+      //       (a) — silently converting to disable-all would nuke the
+      //       user's existing telegram/feishu workers.
+      //
+      // The reject error is `channels_all_invalid` so the dashboard
+      // can surface the mismatch instead of showing a false success.
+      let channels: string[] | undefined = undefined;
+      if (patch.channels !== undefined) {
+        if (!Array.isArray(patch.channels)) {
+          // Zod already permits arrays only; belt+braces if it drifts.
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_patch", field: "channels", reason: "must be an array" }) }],
+          };
+        }
+        const narrowed = narrowChannelsPatch(patch.channels) ?? [];
+        if (patch.channels.length === 0) {
+          channels = []; // (a) explicit disable-all
+        } else if (narrowed.length === 0) {
+          // (b) every entry was invalid — refuse to write. Distinct
+          // error so the dashboard can surface the failure.
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: false,
+                error: "channels_all_invalid",
+                requested: patch.channels,
+                message: "every requested channel is unknown or unsupported; use an explicit empty array to disable-all",
+              }),
+            }],
+          };
+        } else {
+          channels = narrowed;
+        }
+      }
 
       // SEC-2 (final policy 2026-06-28) — security-sensitive flags
       // (permissionMode / dangerouslySkipPermissions / teammateMode)
@@ -3581,6 +3620,15 @@ export function finalizePendingMatchingUpdates(
 
   const snapModel: string | null | undefined = snapshot?.model;
   const snapFlags: Record<string, unknown> = (snapshot?.flags && typeof snapshot.flags === "object") ? snapshot.flags : {};
+  // #260 P5 — snapshot.channels is the (sorted, bare-type) channel set
+  // the node currently has forked. agent-node's buildConfigSnapshot
+  // always emits it (even as []), so the "absent field" case here means
+  // an older pre-#260-P5 agent-node — for those, don't finalize a
+  // channels-carrying patch (would false-positive on the OTHER fields).
+  const snapChannelsPresent = Array.isArray(snapshot?.channels);
+  const snapChannels: string[] = snapChannelsPresent
+    ? (snapshot.channels as unknown[]).filter((c): c is string => typeof c === "string")
+    : [];
 
   const finalizedIds: string[] = [];
 
@@ -3603,6 +3651,35 @@ export function finalizePendingMatchingUpdates(
           // `codexTimeoutMs` keys. agent-node's buildConfigSnapshot
           // only reports the canonical key, so we just compare on `k`.
           if (snapFlags[k] !== v) { matches = false; break; }
+        }
+      }
+      // #260 P5 — channels field content-match. Without this the
+      // node's very first startup report_status matches (patch.flags
+      // is `{}` for a channels-only update, so the flags loop is
+      // trivially satisfied) and hub prematurely marks the update
+      // applied, deleting the pending row + bumping config_revision
+      // BEFORE the doorbell reaches the child. Codex catch on PR #411.
+      //
+      // Set-equality is enough because the patch side comes from
+      // narrowChannelsPatch → already deduped + case-folded + in
+      // EDITABLE_CHANNELS iteration order; the snapshot side comes
+      // from buildConfigSnapshot which mirrors the same shape.
+      if (matches && Array.isArray(patch.channels)) {
+        if (!snapChannelsPresent) {
+          // Pre-#260-P5 agent-node — no channels field in snapshot,
+          // so we can't prove the apply landed. Skip finalize; hub's
+          // F-B reaper still supersedes this eventually.
+          matches = false;
+        } else {
+          const wanted = new Set<string>(patch.channels);
+          const have = new Set<string>(snapChannels);
+          if (wanted.size !== have.size) {
+            matches = false;
+          } else {
+            for (const w of wanted) {
+              if (!have.has(w)) { matches = false; break; }
+            }
+          }
         }
       }
     }

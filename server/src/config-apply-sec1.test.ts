@@ -721,3 +721,110 @@ describe("SEC-1 — update lifecycle: single-flight + cross-network pending look
     expect(inFlight).toBeDefined();
   });
 });
+
+// ── #260 P5 codex-catch regression: channels finalize ─────────────
+describe("finalizePendingMatchingUpdates — #260 P5 channels content-match", () => {
+  function insertPendingUpdate(opts: {
+    update_id?: string;
+    node_id: string;
+    network_id: string;
+    patch: any;
+    apply_mode: "hot" | "restart" | "restart_only";
+    status?: "pending" | "restarting";
+  }): string {
+    const id = opts.update_id ?? `cu_${uuidv4()}`;
+    db.run(
+      `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, 'test')`,
+      [id, opts.node_id, opts.network_id, JSON.stringify(opts.patch), opts.apply_mode, opts.status ?? "pending", Date.now()],
+    );
+    return id;
+  }
+
+  test("channels-only patch: snapshot BEFORE apply (first boot) must NOT finalize", () => {
+    const nid = insertNode({ alias: "n-chan-1", network_id: "netA" });
+    const uid = insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      // Note the empty flags object — the pre-fix bug was that this
+      // trivially matched the flags loop and hub falsely finalized.
+      patch: { flags: {}, channels: ["feishu"] },
+      apply_mode: "restart",
+    });
+    // Node's startup snapshot BEFORE it consumed the update — no
+    // channels forked yet, so buildConfigSnapshot emits channels=[].
+    const r = finalizePendingMatchingUpdates(nid, { model: "x", flags: {}, channels: [] });
+    expect(r.finalizedCount).toBe(0);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("pending");
+  });
+
+  test("channels-only patch: snapshot AFTER apply (restart complete) finalizes", () => {
+    const nid = insertNode({ alias: "n-chan-2", network_id: "netA" });
+    const uid = insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { flags: {}, channels: ["feishu"] },
+      apply_mode: "restart",
+    });
+    const r = finalizePendingMatchingUpdates(nid, { model: "x", flags: {}, channels: ["feishu"] });
+    expect(r.finalizedCount).toBe(1);
+    expect(r.finalizedIds).toContain(uid);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("applied");
+  });
+
+  test("channels set-equality: order doesn't matter", () => {
+    const nid = insertNode({ alias: "n-chan-3", network_id: "netA" });
+    insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { flags: {}, channels: ["telegram", "feishu"] },
+      apply_mode: "restart",
+    });
+    // Snapshot order swapped — still matches.
+    const r = finalizePendingMatchingUpdates(nid, { model: "x", flags: {}, channels: ["feishu", "telegram"] });
+    expect(r.finalizedCount).toBe(1);
+  });
+
+  test("channels: [] disable-all — finalize when snapshot also [] (post-restart)", () => {
+    const nid = insertNode({ alias: "n-chan-4", network_id: "netA" });
+    insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { flags: {}, channels: [] },
+      apply_mode: "restart",
+    });
+    const r = finalizePendingMatchingUpdates(nid, { model: "x", flags: {}, channels: [] });
+    expect(r.finalizedCount).toBe(1);
+  });
+
+  test("channels: [] disable-all — do NOT finalize when snapshot still has channels", () => {
+    const nid = insertNode({ alias: "n-chan-5", network_id: "netA" });
+    insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { flags: {}, channels: [] },
+      apply_mode: "restart",
+    });
+    // Node hasn't restarted yet — old telegram worker still forked.
+    const r = finalizePendingMatchingUpdates(nid, { model: "x", flags: {}, channels: ["telegram"] });
+    expect(r.finalizedCount).toBe(0);
+  });
+
+  test("snapshot omits channels field entirely (pre-P5 agent-node) → NOT finalized on channels-carrying patch", () => {
+    const nid = insertNode({ alias: "n-chan-6", network_id: "netA" });
+    insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { flags: {}, channels: ["feishu"] },
+      apply_mode: "restart",
+    });
+    const r = finalizePendingMatchingUpdates(nid, { model: "x", flags: {} });  // no channels key
+    expect(r.finalizedCount).toBe(0);
+  });
+
+  test("model + channels compound match: both must satisfy", () => {
+    const nid = insertNode({ alias: "n-chan-7", network_id: "netA" });
+    insertPendingUpdate({
+      node_id: nid, network_id: "netA",
+      patch: { model: "opus-new", flags: {}, channels: ["telegram"] },
+      apply_mode: "restart",
+    });
+    // Wrong channels → not finalized even though model matches.
+    expect(finalizePendingMatchingUpdates(nid, { model: "opus-new", flags: {}, channels: [] }).finalizedCount).toBe(0);
+    // Both match → finalized.
+    expect(finalizePendingMatchingUpdates(nid, { model: "opus-new", flags: {}, channels: ["telegram"] }).finalizedCount).toBe(1);
+  });
+});
