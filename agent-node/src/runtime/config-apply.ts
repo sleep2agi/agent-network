@@ -337,7 +337,16 @@ export interface MaskedSnapshot {
    *  a channels-only restart landed and — separately — so
    *  /api/nodes reflects a disable-all instead of the stale COALESCE'd
    *  value. Path-qualified specs in config.channels are collapsed to
-   *  the bare type key; anything unparseable is silently dropped. */
+   *  the bare type key; anything unparseable is silently dropped.
+   *
+   *  Deployment: a channels update is restart-tier — the process
+   *  drain + exit(75)'s and RELIES ON a supervisor to respawn it.
+   *  Bare-spawn `agent-node ...` (no `anet node start` / systemd
+   *  Restart / docker restart-policy) can't restart itself, so the
+   *  node just disappears until an operator brings it back. RFC-024
+   *  §6.7.1. Hub gates this via config_update_capable — bare-spawn
+   *  should set ANET_CONFIG_UPDATE_CAPABLE=0 (default) so restart-
+   *  tier POSTs are refused instead of quietly killing the node. */
   channels: string[];
 }
 export function buildConfigSnapshot(

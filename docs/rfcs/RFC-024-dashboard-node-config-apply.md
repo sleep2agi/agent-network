@@ -313,6 +313,16 @@ Ctrl-C / 磁盘满 / 并发写都不会留半 config.
 
 无 supervisor wrapper 跑的 bare agent-node (用户直接 `bun run agent-node ...` 而不是 `anet node start`): config_snapshot 上报 `config_update_capable: false`, dashboard 显示"该节点不支持远程重启 — 用 anet node start 启动"提示, POST 时 hub 直接 reject.
 
+### 6.7.1 ⚠️ Restart-tier fields (channels included) 需要 supervisor
+
+所有 apply_mode=restart 的字段都走同一条 exit(75) → parent 重 spawn 通路:
+
+- **model** (常改)
+- **permissionMode** / **dangerouslySkipPermissions** / **timeout** (RESTART_REQUIRED_FLAGS)
+- **channels** (#260 P5) — 通过 `anet node start` (含 `superviseChild`) 或系统 supervisor (systemd `Restart=always`, docker `restart: always`, PM2 等) 启动的节点自动生效。
+
+**手动直起** (`bun run dist/cli.js --config ...` / `agent-node --config ...` / IM馬 生产 TMWork小助手 早期跑法) 的 bare 进程收到 restart-tier update: drain + exit(75), 但 nobody 拉起 → 节点消失, dashboard 显示 offline, 手动重启才能起来。这属于运维部署选择, 不是 anet bug; 但生产运维请一律用 `anet node start` (或包 systemd/docker restart-policy) 挂 supervisor. Bare-spawn 应设 `ANET_CONFIG_UPDATE_CAPABLE=0` (默认 false) 让 hub 直接 reject restart-tier POST, 避免误关。
+
 ---
 
 ## 7. 测试计划
