@@ -47,8 +47,10 @@ import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias
 import {
   ALLOWED_FLAGS,
   SECURITY_SENSITIVE_FLAGS,
+  EDITABLE_CHANNELS,
   computeApplyMode,
   validatePatch,
+  narrowChannelsPatch,
   isAllowedToChangeFlag,
 } from "./config-apply-validate.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
@@ -1565,6 +1567,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       patch: z.object({
         model: z.string().max(200).optional(),
         flags: z.record(z.unknown()).optional(),
+        // #260 P5 — channel enable/disable. Restart-tier field (agent-node
+        // reads config.channels once at boot to fork per-channel workers,
+        // so the swap takes effect via process restart). Not
+        // SECURITY_SENSITIVE — this is a lifecycle op, gated by SEC-1
+        // (network scope) only.
+        //
+        // Deliberately `z.array(z.unknown()).max(16)` (mirrors flags's
+        // `z.record(z.unknown())`): trust nothing at the wire boundary,
+        // narrow the same way `narrowChannelsPatch` narrows raw untrusted
+        // JSON (typeof + allowlist + dedup + case-fold). A strict
+        // `z.array(z.string())` would fail-fast on a single non-string
+        // entry, but the wire contract wants junk silently dropped so a
+        // dashboard fat-finger doesn't turn into a 400 the user has to
+        // interpret. validatePatch then re-rejects if the caller bypassed
+        // narrowing.
+        channels: z.array(z.unknown()).max(16).optional(),
       }).describe("Fields to update. Empty patch → no-op (use restart_node for that)."),
       network_id: z.string().max(200).optional(),
     },
@@ -1582,6 +1600,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const model = typeof patch.model === "string" ? patch.model : undefined;
       const flags = (patch.flags && typeof patch.flags === "object") ? patch.flags as Record<string, unknown> : {};
+      // Narrow untrusted `channels` at the boundary (typeof + allowlist +
+      // dedup + case-fold). `undefined` here == "patch didn't touch channels";
+      // `[]` == "disable all editable channels" (a real state change).
+      const channels: string[] | undefined =
+        patch.channels !== undefined ? (narrowChannelsPatch(patch.channels) ?? undefined) : undefined;
 
       // SEC-2 (final policy 2026-06-28) — security-sensitive flags
       // (permissionMode / dangerouslySkipPermissions / teammateMode)
@@ -1608,7 +1631,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         };
       }
 
-      const validationFail = validatePatch(model, flags);
+      const validationFail = validatePatch(model, flags, channels);
       if (validationFail) {
         return {
           content: [{
@@ -1686,8 +1709,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       // Compute apply_mode + persist + push doorbell.
       const updateId = `cu_${uuidv4()}`;
-      const applyMode = computeApplyMode(model, flags);
-      const patchJson = JSON.stringify({ ...(model !== undefined ? { model } : {}), flags });
+      const applyMode = computeApplyMode(model, flags, channels);
+      const patchJson = JSON.stringify({
+        ...(model !== undefined ? { model } : {}),
+        flags,
+        ...(channels !== undefined ? { channels } : {}),
+      });
       const networkId = node.network_id || "default";
       db.run(
         `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8)`,

@@ -17,7 +17,7 @@
 FROM node:22-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash curl ca-certificates jq unzip procps \
+    bash curl ca-certificates jq unzip procps sqlite3 \
     build-essential python3 \
     && rm -rf /var/lib/apt/lists/*
 

@@ -61,11 +61,34 @@ const RESTART_REQUIRED_FLAGS = new Set<string>([
   "timeout",
 ]);
 
+/**
+ * Channel keys the dashboard may enable/disable on this node via
+ * update_node_config. Restart-tier — the boot flow in cli.ts reads
+ * `config.channels` once and forks per-channel workers from it, so a
+ * swap here takes effect the next time the parent supervisor respawns
+ * this process (see #260 P5). MUST match server/src/config-apply-
+ * validate.ts EDITABLE_CHANNELS.
+ *
+ * Only telegram + feishu are wired here: cli.ts:673 rejects any other
+ * channel type with `process.exit(1)` at boot, so accepting anything
+ * else in a patch would ship a "smuggle-a-crash" foot-gun. `commhub`
+ * is the RPC transport (always present, not a channel worker).
+ */
+const EDITABLE_CHANNELS = new Set<string>([
+  "telegram",
+  "feishu",
+]);
+
 export type ApplyMode = "hot" | "restart" | "restart_only";
 
 export interface ConfigPatch {
   model?: string;
   flags?: Record<string, unknown>;
+  /** #260 P5 — dashboard-driven channel enable/disable. Restart-tier
+   *  (agent-node boot forks channel workers from config.channels).
+   *  Only telegram / feishu / commhub keys are accepted here; anything
+   *  else is dropped by the hub before the patch reaches this node. */
+  channels?: string[];
 }
 
 export interface ConfigUpdate {
@@ -82,6 +105,22 @@ export function validateLocalPatch(patch: ConfigPatch): ValidationResult {
   if (patch.model !== undefined) {
     if (typeof patch.model !== "string" || patch.model.length === 0 || patch.model.length > 200) {
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
+    }
+  }
+  if (patch.channels !== undefined) {
+    if (!Array.isArray(patch.channels)) {
+      return { field: "channels", reason: "must be an array of strings" };
+    }
+    if (patch.channels.length > 16) {
+      return { field: "channels", reason: "too many entries (max 16)" };
+    }
+    for (const c of patch.channels) {
+      if (typeof c !== "string") {
+        return { field: "channels", reason: "must contain only strings" };
+      }
+      if (!EDITABLE_CHANNELS.has(c)) {
+        return { field: `channels.${c}`, reason: "not in local editable channels allowlist" };
+      }
     }
   }
   const flags = patch.flags || {};
@@ -128,8 +167,10 @@ export function computeApplyMode(patch: ConfigPatch): ApplyMode {
   const hasModel = patch.model !== undefined;
   const flags = patch.flags || {};
   const flagKeys = Object.keys(flags);
-  if (!hasModel && flagKeys.length === 0) return "restart_only";
+  const hasChannels = patch.channels !== undefined;
+  if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
   if (hasModel) return "restart";
+  if (hasChannels) return "restart";
   for (const key of flagKeys) {
     if (RESTART_REQUIRED_FLAGS.has(key)) return "restart";
   }
@@ -216,6 +257,12 @@ export function mergePatch(existing: any, patch: ConfigPatch): any {
   if (patch.model !== undefined) next.model = patch.model;
   if (patch.flags) {
     next.flags = { ...(next.flags || {}), ...patch.flags };
+  }
+  if (patch.channels !== undefined) {
+    // Channels is a REPLACE, not a merge — an empty array means "no
+    // enabled channels", which the boot flow honours by forking no
+    // workers. This matches the dashboard's on/off semantics.
+    next.channels = [...patch.channels];
   }
   return next;
 }

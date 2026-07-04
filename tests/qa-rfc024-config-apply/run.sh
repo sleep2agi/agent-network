@@ -401,13 +401,133 @@ note "10. [restart-finalize] premature-finalize guard — drain heartbeat MUST o
 # carry the regression load.
 ok "premature-finalize guard pinned by unit test + source-level conditional (see cli.ts:923)"
 
+# ── 11. #260 P5 — channel patch wire (dashboard → hub → config.json) ──
+#
+# Proves the 3 rings 通信IM马's wire-check flagged are now connected:
+#   (i)  hub `update_node_config` schema no longer zod-rejects the
+#        `channels` field (it lands in the parsed patch);
+#   (ii) hostile input at the wire boundary is silently narrowed —
+#        wechat/commhub/non-strings/injection-shaped values dropped
+#        before the row is persisted, telegram/feishu kept and
+#        case-folded/deduped;
+#   (iii) channels changes are classified as restart-tier so the node
+#        picks them up via the same drain+exit(75)+respawn cycle
+#        already used for model / permissionMode / timeout swaps.
+#
+# Full node-side restart cycle with a real telegram/feishu worker is
+# left to a follow-up e2e (needs pre-seeded FEISHU_APP_ID/SECRET and
+# TELEGRAM_BOT_TOKEN files in the container so init doesn't
+# process.exit(1)). Contract + narrowing wire is what today's rally
+# proved end-to-end; boot fork read is covered by unit tests at
+# agent-node/src/runtime/config-apply.test.ts.
+note "11. #260 P5 — channels patch wire (hub schema + narrowing + tier)"
+
+# Baseline revision — either from the restart-finalize cycle above
+# (if it ran) or from the fresh node row.
+REV_11=$(curl -sS "$HUB_BASE/api/nodes/$NODE_ID/config" -H "Authorization: Bearer $UTOK" \
+  | jq -r '.config_revision // 0' 2>/dev/null || echo 0)
+
+# 11a — hub accepts channels array without zod-rejecting.
+CHAN_RESP_A=$(mcp_call "$UTOK" "update_node_config" \
+  "{\"node_id\":\"$NODE_ID\",\"base_revision\":$REV_11,\"patch\":{\"channels\":[\"telegram\",\"feishu\"]},\"network_id\":\"$NET_ID\"}")
+CHAN_UID_A=$(echo "$CHAN_RESP_A" | jq -r '.update_id // empty')
+CHAN_MODE_A=$(echo "$CHAN_RESP_A" | jq -r '.apply_mode // empty')
+if [[ -n "$CHAN_UID_A" ]]; then
+  ok "11a hub accepted channels-only patch (update_id=$CHAN_UID_A apply_mode=$CHAN_MODE_A)"
+else
+  bad "11a hub rejected channels patch: $CHAN_RESP_A"
+fi
+
+# 11b — apply_mode MUST be restart (channels boot-fork is restart-tier).
+if [[ "$CHAN_MODE_A" == "restart" ]]; then
+  ok "11b channels-only patch classified as apply_mode=restart"
+else
+  bad "11b channels-only patch classified as '$CHAN_MODE_A' (expected restart)"
+fi
+
+# 11c — patch_json in DB reflects the accepted channels list verbatim.
+DB_CHAN_A=$(sqlite3 "$COMMHUB_DB" "SELECT patch_json FROM node_config_updates WHERE update_id='$CHAN_UID_A';" 2>/dev/null | jq -r '.channels | join(",")' 2>/dev/null)
+if [[ "$DB_CHAN_A" == "telegram,feishu" ]]; then
+  ok "11c patch_json in node_config_updates carries channels=[telegram,feishu]"
+else
+  bad "11c patch_json channels field is '$DB_CHAN_A' (expected 'telegram,feishu')"
+fi
+
+# 11d — hostile input hygiene. Send a mixed payload with an evil key,
+# a SQL-injection-shaped value, a raw number, a duplicate, a mixed-
+# case allowed key, the roadmap `wechat`, and the transport `commhub`
+# (also not editable). Only telegram + feishu should survive, deduped
+# and lower-cased.
+#
+# We supersede the 11a in-flight row first by force-completing it as
+# timeout, so the F-B single-flight reaper doesn't reject 11d as
+# update_in_flight (11a hasn't been ack'd by a live node).
+sqlite3 "$COMMHUB_DB" "UPDATE node_config_updates SET status='timeout', acked_at=strftime('%s','now')*1000, error='e2e-supersede' WHERE update_id='$CHAN_UID_A';" 2>/dev/null
+
+CHAN_RESP_B=$(mcp_call "$UTOK" "update_node_config" \
+  "{\"node_id\":\"$NODE_ID\",\"base_revision\":$REV_11,\"patch\":{\"channels\":[\"TELEGRAM\",\"telegram\",\"evil-hacker\",\"telegram; drop table users;\",42,\"wechat\",\"commhub\",\"FEISHU\"]},\"network_id\":\"$NET_ID\"}")
+CHAN_UID_B=$(echo "$CHAN_RESP_B" | jq -r '.update_id // empty')
+if [[ -z "$CHAN_UID_B" ]]; then
+  bad "11d hostile input rejected outright: $CHAN_RESP_B"
+else
+  ok "11d hostile input accepted for narrowing (update_id=$CHAN_UID_B)"
+  DB_CHAN_B=$(sqlite3 "$COMMHUB_DB" "SELECT patch_json FROM node_config_updates WHERE update_id='$CHAN_UID_B';" 2>/dev/null | jq -r '.channels | join(",")' 2>/dev/null)
+  if [[ "$DB_CHAN_B" == "telegram,feishu" ]]; then
+    ok "11d hostile input narrowed to 'telegram,feishu' (evil/wechat/commhub/42/injection/dup all dropped, case-folded)"
+  else
+    bad "11d narrowed channels = '$DB_CHAN_B' (expected 'telegram,feishu')"
+  fi
+fi
+
+# 11e — channels: [] (disable-all) is a valid state change, still
+# restart-tier. Supersede B first.
+sqlite3 "$COMMHUB_DB" "UPDATE node_config_updates SET status='timeout', acked_at=strftime('%s','now')*1000, error='e2e-supersede' WHERE update_id='$CHAN_UID_B';" 2>/dev/null
+
+CHAN_RESP_C=$(mcp_call "$UTOK" "update_node_config" \
+  "{\"node_id\":\"$NODE_ID\",\"base_revision\":$REV_11,\"patch\":{\"channels\":[]},\"network_id\":\"$NET_ID\"}")
+CHAN_UID_C=$(echo "$CHAN_RESP_C" | jq -r '.update_id // empty')
+CHAN_MODE_C=$(echo "$CHAN_RESP_C" | jq -r '.apply_mode // empty')
+if [[ -n "$CHAN_UID_C" ]]; then
+  DB_CHAN_C_HAS_KEY=$(sqlite3 "$COMMHUB_DB" "SELECT patch_json FROM node_config_updates WHERE update_id='$CHAN_UID_C';" 2>/dev/null | jq -r 'has("channels")' 2>/dev/null)
+  if [[ "$CHAN_MODE_C" == "restart" && "$DB_CHAN_C_HAS_KEY" == "true" ]]; then
+    ok "11e channels: [] disable-all: apply_mode=restart + patch_json has channels key"
+  else
+    bad "11e disable-all mode='$CHAN_MODE_C' has_channels_key='$DB_CHAN_C_HAS_KEY'"
+  fi
+else
+  bad "11e disable-all rejected: $CHAN_RESP_C"
+fi
+
+# 11f — no channels key (flags-only patch) does NOT get a channels
+# field silently added. Guards against a coding mistake where the
+# spread would blindly emit `channels: []` for empty-narrow. Supersede
+# C first.
+sqlite3 "$COMMHUB_DB" "UPDATE node_config_updates SET status='timeout', acked_at=strftime('%s','now')*1000, error='e2e-supersede' WHERE update_id='$CHAN_UID_C';" 2>/dev/null
+
+CHAN_RESP_D=$(mcp_call "$UTOK" "update_node_config" \
+  "{\"node_id\":\"$NODE_ID\",\"base_revision\":$REV_11,\"patch\":{\"flags\":{\"maxTurns\":30}},\"network_id\":\"$NET_ID\"}")
+CHAN_UID_D=$(echo "$CHAN_RESP_D" | jq -r '.update_id // empty')
+if [[ -n "$CHAN_UID_D" ]]; then
+  DB_HAS_CHAN=$(sqlite3 "$COMMHUB_DB" "SELECT patch_json FROM node_config_updates WHERE update_id='$CHAN_UID_D';" 2>/dev/null | jq -r 'has("channels")' 2>/dev/null)
+  DB_MODE=$(sqlite3 "$COMMHUB_DB" "SELECT apply_mode FROM node_config_updates WHERE update_id='$CHAN_UID_D';" 2>/dev/null)
+  if [[ "$DB_HAS_CHAN" == "false" && "$DB_MODE" == "hot" ]]; then
+    ok "11f flags-only patch keeps channels absent + apply_mode=hot (no regression)"
+  else
+    bad "11f flags-only patch: has_channels=$DB_HAS_CHAN mode=$DB_MODE (expected false + hot)"
+  fi
+fi
+
 # ── Summary ────────────────────────────────────────────────────────
+echo
+echo "── Result ──"
+echo "  PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
 echo
 echo "RFC-024 §7.2 skeleton complete."
 echo "Scenarios that run today (no W1 dependency) verify the contract surface:"
 echo "  - hub boot + admin bootstrap + utok / ntok mint"
 echo "  - SEC-2 admin gate + bad-patch validate reject"
 echo "  - SEC-1 cross-network write reject"
+echo "  - #260 P5 channels wire (schema + narrow + tier + no-regression)"
 echo "Scenarios marked [W1] await PR #284 (superviseChild helper) + the W1"
 echo "follow-up commit on this branch. They are stubbed with explicit skip"
 echo "+ inline impl plan so the next iteration is mechanical."
