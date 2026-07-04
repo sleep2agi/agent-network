@@ -47,8 +47,10 @@ import { canonicalAliasExists, cleanupRenamedAliasSession, resolveCanonicalAlias
 import {
   ALLOWED_FLAGS,
   SECURITY_SENSITIVE_FLAGS,
+  EDITABLE_CHANNELS,
   computeApplyMode,
   validatePatch,
+  narrowChannelsPatch,
   isAllowedToChangeFlag,
 } from "./config-apply-validate.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
@@ -1565,6 +1567,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       patch: z.object({
         model: z.string().max(200).optional(),
         flags: z.record(z.unknown()).optional(),
+        // #260 P5 — channel enable/disable. Restart-tier field (agent-node
+        // reads config.channels once at boot to fork per-channel workers,
+        // so the swap takes effect via process restart). Not
+        // SECURITY_SENSITIVE — this is a lifecycle op, gated by SEC-1
+        // (network scope) only.
+        //
+        // Deliberately `z.array(z.unknown()).max(16)` (mirrors flags's
+        // `z.record(z.unknown())`): trust nothing at the wire boundary,
+        // narrow the same way `narrowChannelsPatch` narrows raw untrusted
+        // JSON (typeof + allowlist + dedup + case-fold). A strict
+        // `z.array(z.string())` would fail-fast on a single non-string
+        // entry, but the wire contract wants junk silently dropped so a
+        // dashboard fat-finger doesn't turn into a 400 the user has to
+        // interpret. validatePatch then re-rejects if the caller bypassed
+        // narrowing.
+        channels: z.array(z.unknown()).max(16).optional(),
       }).describe("Fields to update. Empty patch → no-op (use restart_node for that)."),
       network_id: z.string().max(200).optional(),
     },
@@ -1582,6 +1600,50 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       const model = typeof patch.model === "string" ? patch.model : undefined;
       const flags = (patch.flags && typeof patch.flags === "object") ? patch.flags as Record<string, unknown> : {};
+      // Narrow untrusted `channels` at the boundary (typeof + allowlist +
+      // dedup + case-fold), and distinguish two very different cases
+      // that both narrow to `[]`:
+      //   (a) `patch.channels === []` (explicit "disable all editable
+      //       channels"). Downstream must proceed and write channels=[]
+      //       so the node's next restart forks no workers.
+      //   (b) `patch.channels === ["commhub"]` or similar — the caller
+      //       sent items but every single one was invalid (dashboard PR
+      //       #31 still ships commhub, and a typo like "telegarm" would
+      //       hit the same path). Downstream MUST NOT treat this as
+      //       (a) — silently converting to disable-all would nuke the
+      //       user's existing telegram/feishu workers.
+      //
+      // The reject error is `channels_all_invalid` so the dashboard
+      // can surface the mismatch instead of showing a false success.
+      let channels: string[] | undefined = undefined;
+      if (patch.channels !== undefined) {
+        if (!Array.isArray(patch.channels)) {
+          // Zod already permits arrays only; belt+braces if it drifts.
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_patch", field: "channels", reason: "must be an array" }) }],
+          };
+        }
+        const narrowed = narrowChannelsPatch(patch.channels) ?? [];
+        if (patch.channels.length === 0) {
+          channels = []; // (a) explicit disable-all
+        } else if (narrowed.length === 0) {
+          // (b) every entry was invalid — refuse to write. Distinct
+          // error so the dashboard can surface the failure.
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: false,
+                error: "channels_all_invalid",
+                requested: patch.channels,
+                message: "every requested channel is unknown or unsupported; use an explicit empty array to disable-all",
+              }),
+            }],
+          };
+        } else {
+          channels = narrowed;
+        }
+      }
 
       // SEC-2 (final policy 2026-06-28) — security-sensitive flags
       // (permissionMode / dangerouslySkipPermissions / teammateMode)
@@ -1608,7 +1670,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         };
       }
 
-      const validationFail = validatePatch(model, flags);
+      const validationFail = validatePatch(model, flags, channels);
       if (validationFail) {
         return {
           content: [{
@@ -1686,8 +1748,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       // Compute apply_mode + persist + push doorbell.
       const updateId = `cu_${uuidv4()}`;
-      const applyMode = computeApplyMode(model, flags);
-      const patchJson = JSON.stringify({ ...(model !== undefined ? { model } : {}), flags });
+      const applyMode = computeApplyMode(model, flags, channels);
+      const patchJson = JSON.stringify({
+        ...(model !== undefined ? { model } : {}),
+        flags,
+        ...(channels !== undefined ? { channels } : {}),
+      });
       const networkId = node.network_id || "default";
       db.run(
         `INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8)`,
@@ -3554,6 +3620,15 @@ export function finalizePendingMatchingUpdates(
 
   const snapModel: string | null | undefined = snapshot?.model;
   const snapFlags: Record<string, unknown> = (snapshot?.flags && typeof snapshot.flags === "object") ? snapshot.flags : {};
+  // #260 P5 — snapshot.channels is the (sorted, bare-type) channel set
+  // the node currently has forked. agent-node's buildConfigSnapshot
+  // always emits it (even as []), so the "absent field" case here means
+  // an older pre-#260-P5 agent-node — for those, don't finalize a
+  // channels-carrying patch (would false-positive on the OTHER fields).
+  const snapChannelsPresent = Array.isArray(snapshot?.channels);
+  const snapChannels: string[] = snapChannelsPresent
+    ? (snapshot.channels as unknown[]).filter((c): c is string => typeof c === "string")
+    : [];
 
   const finalizedIds: string[] = [];
 
@@ -3576,6 +3651,35 @@ export function finalizePendingMatchingUpdates(
           // `codexTimeoutMs` keys. agent-node's buildConfigSnapshot
           // only reports the canonical key, so we just compare on `k`.
           if (snapFlags[k] !== v) { matches = false; break; }
+        }
+      }
+      // #260 P5 — channels field content-match. Without this the
+      // node's very first startup report_status matches (patch.flags
+      // is `{}` for a channels-only update, so the flags loop is
+      // trivially satisfied) and hub prematurely marks the update
+      // applied, deleting the pending row + bumping config_revision
+      // BEFORE the doorbell reaches the child. Codex catch on PR #411.
+      //
+      // Set-equality is enough because the patch side comes from
+      // narrowChannelsPatch → already deduped + case-folded + in
+      // EDITABLE_CHANNELS iteration order; the snapshot side comes
+      // from buildConfigSnapshot which mirrors the same shape.
+      if (matches && Array.isArray(patch.channels)) {
+        if (!snapChannelsPresent) {
+          // Pre-#260-P5 agent-node — no channels field in snapshot,
+          // so we can't prove the apply landed. Skip finalize; hub's
+          // F-B reaper still supersedes this eventually.
+          matches = false;
+        } else {
+          const wanted = new Set<string>(patch.channels);
+          const have = new Set<string>(snapChannels);
+          if (wanted.size !== have.size) {
+            matches = false;
+          } else {
+            for (const w of wanted) {
+              if (!have.has(w)) { matches = false; break; }
+            }
+          }
         }
       }
     }

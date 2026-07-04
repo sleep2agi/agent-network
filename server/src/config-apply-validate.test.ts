@@ -9,9 +9,11 @@ import { describe, expect, test } from "bun:test";
 import {
   ALLOWED_FLAGS,
   SECURITY_SENSITIVE_FLAGS,
+  EDITABLE_CHANNELS,
   isAllowedToChangeFlag,
   computeApplyMode,
   validatePatch,
+  narrowChannelsPatch,
 } from "./config-apply-validate";
 
 describe("ALLOWED_FLAGS — exact contract (no silent extension)", () => {
@@ -256,5 +258,95 @@ describe("validatePatch — combinations", () => {
   test("first invalid field surfaces (good model + bad flag)", () => {
     const r = validatePatch("claude-opus-4", { maxTurns: -1 });
     expect(r?.field).toBe("flags.maxTurns");
+  });
+});
+
+// ── #260 P5 — channels support (restart-tier, non-security-sensitive) ─
+describe("EDITABLE_CHANNELS — mirrors agent-node runtime capability (cli.ts:671-676)", () => {
+  test("contains exactly telegram + feishu (channels agent-node actually forks workers for)", () => {
+    expect(EDITABLE_CHANNELS.size).toBe(2);
+    expect(EDITABLE_CHANNELS.has("telegram")).toBe(true);
+    expect(EDITABLE_CHANNELS.has("feishu")).toBe(true);
+  });
+  test("commhub is NOT editable — it's the RPC transport, not a per-node channel worker", () => {
+    expect(EDITABLE_CHANNELS.has("commhub")).toBe(false);
+  });
+  test("wechat is NOT editable — roadmap only on dashboard", () => {
+    expect(EDITABLE_CHANNELS.has("wechat")).toBe(false);
+  });
+});
+
+describe("narrowChannelsPatch — hostile input hygiene at the wire boundary", () => {
+  test("straight allow-listed input passes verbatim", () => {
+    expect(narrowChannelsPatch(["telegram", "feishu"])).toEqual(["telegram", "feishu"]);
+  });
+  test("empty array preserved — 'disable all editable channels' is a real state", () => {
+    expect(narrowChannelsPatch([])).toEqual([]);
+  });
+  test("non-array returns null (patch didn't touch channels)", () => {
+    expect(narrowChannelsPatch(undefined)).toBeNull();
+    expect(narrowChannelsPatch("telegram" as any)).toBeNull();
+    expect(narrowChannelsPatch({} as any)).toBeNull();
+  });
+  test("case-folded to lower", () => {
+    expect(narrowChannelsPatch(["FEISHU", "Telegram"])).toEqual(["feishu", "telegram"]);
+  });
+  test("duplicates deduped (Set)", () => {
+    expect(narrowChannelsPatch(["telegram", "telegram", "feishu", "TELEGRAM"])).toEqual(["telegram", "feishu"]);
+  });
+  test("unknown channel keys dropped silently (roadmap wechat, transport commhub, evil keys)", () => {
+    expect(narrowChannelsPatch(["wechat", "telegram", "evil-hacker", "commhub"])).toEqual(["telegram"]);
+  });
+  test("non-string entries dropped (numbers, objects, nulls)", () => {
+    expect(narrowChannelsPatch(["telegram", 42, {}, null, "feishu"] as any)).toEqual(["telegram", "feishu"]);
+  });
+  test("SQL-injection-shaped value dropped (not exact key match)", () => {
+    expect(narrowChannelsPatch(["telegram; drop table users;", "feishu"])).toEqual(["feishu"]);
+  });
+  test("whitespace around a key still trims to the key", () => {
+    expect(narrowChannelsPatch(["  feishu  "])).toEqual(["feishu"]);
+  });
+});
+
+describe("computeApplyMode — channels tier (restart)", () => {
+  test("channels-only patch → restart (boot forks per-channel workers)", () => {
+    expect(computeApplyMode(undefined, {}, ["feishu"])).toBe("restart");
+  });
+  test("empty-array channels → restart (still a state change)", () => {
+    expect(computeApplyMode(undefined, {}, [])).toBe("restart");
+  });
+  test("no channels key + no flags + no model → restart_only", () => {
+    expect(computeApplyMode(undefined, {}, undefined)).toBe("restart_only");
+  });
+  test("channels + hot-tier flag together stays restart (upgrade rules)", () => {
+    expect(computeApplyMode(undefined, { maxTurns: 5 }, ["telegram"])).toBe("restart");
+  });
+  test("channels + model → restart (model was already restart)", () => {
+    expect(computeApplyMode("gpt-5", {}, ["feishu"])).toBe("restart");
+  });
+});
+
+describe("validatePatch — channels defensive gate", () => {
+  test("valid channels array passes", () => {
+    expect(validatePatch(undefined, {}, ["telegram", "feishu"])).toBeNull();
+    expect(validatePatch(undefined, {}, [])).toBeNull();
+    expect(validatePatch(undefined, {}, ["telegram"])).toBeNull();
+  });
+  test("commhub rejected — RPC transport, not a per-node channel", () => {
+    const r = validatePatch(undefined, {}, ["commhub"]);
+    expect(r?.field).toBe("channels.commhub");
+  });
+  test("out-of-allowlist channel rejected (caller bypassed narrowing)", () => {
+    const r = validatePatch(undefined, {}, ["wechat"]);
+    expect(r?.field).toBe("channels.wechat");
+    expect(r?.reason).toMatch(/allowlist/);
+  });
+  test("non-string entry rejected", () => {
+    const r = validatePatch(undefined, {}, [42] as any);
+    expect(r?.field).toBe("channels");
+  });
+  test("non-array rejected", () => {
+    const r = validatePatch(undefined, {}, "telegram" as any);
+    expect(r?.field).toBe("channels");
   });
 });

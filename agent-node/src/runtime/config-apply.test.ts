@@ -398,3 +398,132 @@ describe("buildConfigSnapshot — daemon_capabilities (PR3 #338 nit ①)", () =>
     expect(snap.daemon_capabilities?.allowed_secret_keys).toBeUndefined();
   });
 });
+
+// ── #260 P5 — channels support (restart-tier, defense-in-depth) ────
+describe("channels — validateLocalPatch", () => {
+  test("valid keys pass", () => {
+    expect(validateLocalPatch({ channels: ["telegram"] })).toBeNull();
+    expect(validateLocalPatch({ channels: ["feishu"] })).toBeNull();
+    expect(validateLocalPatch({ channels: ["telegram", "feishu"] })).toBeNull();
+    expect(validateLocalPatch({ channels: [] })).toBeNull();
+  });
+  test("commhub rejected — not a fork target (cli.ts:673 UNSUPPORTED_CHANNEL guard)", () => {
+    const r = validateLocalPatch({ channels: ["commhub"] });
+    expect(r?.field).toBe("channels.commhub");
+  });
+  test("unknown channel key rejected (defense-in-depth vs hub drift)", () => {
+    const r = validateLocalPatch({ channels: ["wechat"] });
+    expect(r?.field).toBe("channels.wechat");
+    expect(r?.reason).toMatch(/allowlist/);
+  });
+  test("non-array rejected", () => {
+    const r = validateLocalPatch({ channels: "telegram" as any });
+    expect(r?.field).toBe("channels");
+    expect(r?.reason).toMatch(/array/);
+  });
+  test("non-string element rejected", () => {
+    const r = validateLocalPatch({ channels: [42 as any] });
+    expect(r?.field).toBe("channels");
+  });
+  test("more than 16 entries rejected", () => {
+    const big = Array.from({ length: 17 }, () => "telegram");
+    const r = validateLocalPatch({ channels: big });
+    expect(r?.field).toBe("channels");
+    expect(r?.reason).toMatch(/16/);
+  });
+});
+
+describe("channels — computeApplyMode", () => {
+  test("channels-present patch is restart-tier", () => {
+    expect(computeApplyMode({ channels: ["feishu"] })).toBe("restart");
+  });
+  test("channels: [] still a state change → restart", () => {
+    expect(computeApplyMode({ channels: [] })).toBe("restart");
+  });
+  test("channels + hot flag upgrades to restart", () => {
+    expect(computeApplyMode({ channels: ["telegram"], flags: { maxTurns: 5 } })).toBe("restart");
+  });
+  test("model + channels → restart", () => {
+    expect(computeApplyMode({ model: "gpt-5", channels: ["feishu"] })).toBe("restart");
+  });
+  test("empty patch → restart_only", () => {
+    expect(computeApplyMode({})).toBe("restart_only");
+  });
+});
+
+describe("channels — mergePatch replaces, does not merge", () => {
+  test("channels absent in patch: existing.channels preserved", () => {
+    const merged = mergePatch({ channels: ["telegram"], model: "x" }, { model: "y" });
+    expect(merged.channels).toEqual(["telegram"]);
+    expect(merged.model).toBe("y");
+  });
+  test("channels present: existing.channels REPLACED wholesale", () => {
+    const merged = mergePatch({ channels: ["telegram", "feishu"] }, { channels: ["commhub"] });
+    expect(merged.channels).toEqual(["commhub"]);
+  });
+  test("channels: [] disables all editable channels", () => {
+    const merged = mergePatch({ channels: ["telegram", "feishu"] }, { channels: [] });
+    expect(merged.channels).toEqual([]);
+  });
+  test("first-write case (existing has no channels key)", () => {
+    const merged = mergePatch({ model: "x" }, { channels: ["feishu"] });
+    expect(merged.channels).toEqual(["feishu"]);
+  });
+  test("defensive clone — patch mutation does not leak into merged", () => {
+    const arr = ["feishu"];
+    const merged = mergePatch({}, { channels: arr });
+    arr.push("telegram");
+    expect(merged.channels).toEqual(["feishu"]);
+  });
+});
+
+// ── #260 P5 codex-catch regression tests ───────────────────────────
+describe("mergePatch — path-qualified specs preserved", () => {
+  test("bare-type patch preserves existing telegram:/abs/path", () => {
+    const existing = { channels: ["telegram:/opt/bots/tg", "feishu:/opt/bots/feishu"] };
+    const merged = mergePatch(existing, { channels: ["telegram"] });
+    // "telegram" resolves to the existing path-qualified spec.
+    expect(merged.channels).toEqual(["telegram:/opt/bots/tg"]);
+  });
+  test("bare-type patch keeps both when both were path-qualified", () => {
+    const existing = { channels: ["telegram:/opt/tg", "feishu:/opt/feishu"] };
+    const merged = mergePatch(existing, { channels: ["telegram", "feishu"] });
+    expect(merged.channels).toEqual(["telegram:/opt/tg", "feishu:/opt/feishu"]);
+  });
+  test("bare-type patch adds new bare key when existing had no matching spec", () => {
+    const existing = { channels: ["telegram:/opt/tg"] };
+    const merged = mergePatch(existing, { channels: ["telegram", "feishu"] });
+    expect(merged.channels).toEqual(["telegram:/opt/tg", "feishu"]);
+  });
+  test("disable-all still works — empty patch wipes even path-qualified specs", () => {
+    const existing = { channels: ["telegram:/opt/tg"] };
+    const merged = mergePatch(existing, { channels: [] });
+    expect(merged.channels).toEqual([]);
+  });
+  test("first-write no existing channels: bare types stay bare", () => {
+    const merged = mergePatch({ model: "x" }, { channels: ["feishu"] });
+    expect(merged.channels).toEqual(["feishu"]);
+  });
+});
+
+describe("buildConfigSnapshot — always emits channels for content-match finalize", () => {
+  test("empty config emits channels=[]", () => {
+    expect(buildConfigSnapshot({}, false, 0).channels).toEqual([]);
+  });
+  test("bare-type list emitted verbatim + sorted", () => {
+    expect(buildConfigSnapshot({ channels: ["telegram", "feishu"] }, false, 0).channels)
+      .toEqual(["feishu", "telegram"]);
+  });
+  test("path-qualified specs collapse to bare type", () => {
+    expect(buildConfigSnapshot({ channels: ["telegram:/opt/tg", "feishu:/opt/feishu"] }, false, 0).channels)
+      .toEqual(["feishu", "telegram"]);
+  });
+  test("dupes deduped, unparseable dropped", () => {
+    expect(buildConfigSnapshot({ channels: ["telegram", "telegram:/opt/tg", ":", "feishu:"] }, false, 0).channels)
+      .toEqual(["telegram"]);
+  });
+  test("non-array channels field yields []", () => {
+    expect(buildConfigSnapshot({ channels: "telegram" }, false, 0).channels).toEqual([]);
+    expect(buildConfigSnapshot({ channels: null }, false, 0).channels).toEqual([]);
+  });
+});

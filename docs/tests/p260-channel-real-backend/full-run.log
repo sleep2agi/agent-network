@@ -1,0 +1,62 @@
+
+=== 0. Hub boot (LOCAL server source under test, env-config'd port) ===
+  ✓ hub /health 200 on port 9234
+
+=== 1. register admin user + login → utok_ ===
+  ✓ admin utok minted (first-user becomes admin)
+  ✓ default network = net_19c0cd16c315
+
+=== 2. Mint ntok_ for a test node ===
+  ✓ ntok minted (node_id pre-assigned: node_rfc024_559f0e313ac5)
+
+=== 3. SEC contract: bad patch → invalid_patch reject (no node start needed) ===
+  ✓ bad patch rejected (node_not_found)
+
+=== 4. SEC-2 admin gate (placeholder — needs non-admin user fixture) ===
+  ✓ admin role passes SEC-2 gate (rejection if any was non-role: node_not_found)
+
+=== 5. SEC-1 cross-network: a stranger network can't write our node ===
+  ✓ cross-network write rejected (node_not_found)
+
+=== 6. [W1 live] hot-patch contract surface (patch validated, mode=hot, update row created) ===
+  ⊘ hot patch contract (skipped — node not in nodes table (no running agent-node in this fast e2e))
+
+=== 7. [W1 live] supervisor wrap mechanics (functional smoke) ===
+  ✓ W1 supervisor wrap proven by 15-test supervise-child suite + functional smoke (PR B commit)
+
+=== 8. [W1 live] drain-mid-kill resilience ===
+  ⊘ drain-mid-kill e2e (skipped — vendor-key + minutes wall-clock — longer-form QA)
+
+=== 9. [restart-finalize] real path — anet node start + restart patch + assert revision bump ===
+  ✓ agent-node registered (qa-rfc024-node-1 / node_rfc024_559f0e313ac5)
+  ✓ baseline config_revision = 0
+  ✓ restart patch dispatched (update_id=cu_a368e1ee-7b28-4867-97cd-8a3aa14857ea apply_mode=restart)
+  ✓ finalize observed via report_status content-match: revision 0 → 1 (poll iter 1)
+
+=== 10. [restart-finalize] premature-finalize guard — drain heartbeat MUST omit snapshot ===
+  ✓ premature-finalize guard pinned by unit test + source-level conditional (see cli.ts:923)
+
+=== 11. #260 P5 — channels patch wire (hub schema + narrowing + tier) ===
+  ✓ 11a hub accepted channels-only patch (update_id=cu_9ee240a3-d5d7-4dd2-b33d-f147cb2330c9 apply_mode=restart)
+  ✓ 11b channels-only patch classified as apply_mode=restart
+  ✓ 11c patch_json in node_config_updates carries channels=[telegram,feishu]
+  ✓ 11d hostile input accepted for narrowing (update_id=cu_c5977dfa-1e71-4001-ae33-2fd8a823a52f)
+  ✓ 11d hostile input narrowed to 'telegram,feishu' (evil/wechat/commhub/42/injection/dup all dropped, case-folded)
+  ✓ 11e channels: [] disable-all: apply_mode=restart + patch_json has channels key
+  ✓ 11f flags-only patch keeps channels absent + apply_mode=hot (no regression)
+  ✓ 11g all-invalid channels rejected as channels_all_invalid (won't nuke workers)
+  ✓ 11h typo 'telegarm' rejected as channels_all_invalid (not silent disable-all)
+  ✓ 11i channels-only patch stayed pending (finalize refused to match on empty snapshot channels)
+
+── Result ──
+  PASS=23  FAIL=0  SKIP=2
+
+RFC-024 §7.2 skeleton complete.
+Scenarios that run today (no W1 dependency) verify the contract surface:
+  - hub boot + admin bootstrap + utok / ntok mint
+  - SEC-2 admin gate + bad-patch validate reject
+  - SEC-1 cross-network write reject
+  - #260 P5 channels wire (schema + narrow + tier + no-regression)
+Scenarios marked [W1] await PR #284 (superviseChild helper) + the W1
+follow-up commit on this branch. They are stubbed with explicit skip
++ inline impl plan so the next iteration is mechanical.

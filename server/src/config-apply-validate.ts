@@ -58,6 +58,35 @@ export const RESTART_REQUIRED_FLAGS = new Set<string>([
 ]);
 
 /**
+ * Channels the dashboard may enable/disable on a node via
+ * update_node_config. Intentionally narrow — the panel only exposes
+ * enable/disable, per-channel secrets stay in the node's local
+ * config.json (see #260 wire discipline).
+ *
+ * The list mirrors agent-node's actual runtime capability. See
+ * agent-node/src/cli.ts:671-676 — CHANNELS are parsed into per-type
+ * worker inits (initTelegramChannel + initFeishuChannel), and any
+ * other channel type triggers `process.exit(1)` at boot. So the
+ * hub-side allow-list here is telegram + feishu ONLY. `commhub` is
+ * the RPC transport that every node speaks unconditionally; treating
+ * it as a per-node channel would be a UX lie (toggle looks off but
+ * commhub is always on).
+ *
+ * Dashboard PR #31 currently includes `commhub` in its own
+ * EDITABLE_CHANNELS whitelist — that follow-up narrowing is filed for
+ * the next dashboard rally, and until then hub silently drops any
+ * `commhub` entry via narrowChannelsPatch.
+ *
+ * Not part of SECURITY_SENSITIVE_FLAGS (通信龙 P5 派工): flipping a
+ * channel on/off is a lifecycle-tier operation like `restart_node`, not
+ * a privilege elevation. Cross-tenant reach is already gated by SEC-1.
+ */
+export const EDITABLE_CHANNELS = new Set<string>([
+  "telegram",
+  "feishu",
+]);
+
+/**
  * Role-gate for the patch's flag set. SEC-2 enforcement lives here.
  *
  * Returns null on pass, or `{ field, reason }` on reject. The reject
@@ -99,20 +128,51 @@ export function isAllowedToChangeFlag(
 
 /**
  * Classify the patch's required apply mode. Empty patch (model + flags
- * both empty) → "restart_only" (used by restart_node tool). Any
- * restart-required field present → "restart". Otherwise → "hot".
+ * both empty, no channels) → "restart_only" (used by restart_node tool).
+ * Any restart-required field present, OR a channels change → "restart"
+ * (channels is restart-tier by design: the node reads its channel set
+ * once at boot in agent-node/src/cli.ts and forks per-channel workers
+ * from it, so a channel enable/disable takes effect on process restart
+ * only — see #260 P5 wire discipline). Otherwise → "hot".
  */
 export function computeApplyMode(
   model: string | undefined,
   flags: Record<string, unknown>,
+  channels?: string[] | undefined,
 ): "hot" | "restart" | "restart_only" {
-  const fieldCount = (model !== undefined ? 1 : 0) + Object.keys(flags).length;
+  const fieldCount = (model !== undefined ? 1 : 0) + Object.keys(flags).length + (channels !== undefined ? 1 : 0);
   if (fieldCount === 0) return "restart_only";
   if (model !== undefined) return "restart";
+  if (channels !== undefined) return "restart";
   for (const key of Object.keys(flags)) {
     if (RESTART_REQUIRED_FLAGS.has(key)) return "restart";
   }
   return "hot";
+}
+
+/**
+ * Narrow + allow-list `channels` from untrusted patch JSON. Returns the
+ * final channel key list (case-folded, deduped, in EDITABLE_CHANNELS
+ * order-preserving), OR null if the input isn't an array. Non-strings,
+ * unknown keys, empty strings, and duplicates are silently dropped —
+ * same fail-shape as the dashboard route's whitelist so the two sides
+ * behave identically end-to-end. Callers pass `undefined` through when
+ * the patch didn't include a channels key at all (a distinct case from
+ * `channels: []` which means "disable all editable channels").
+ */
+export function narrowChannelsPatch(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const allow = EDITABLE_CHANNELS;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const key = v.trim().toLowerCase();
+    if (!allow.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
 }
 
 /**
@@ -123,10 +183,28 @@ export function computeApplyMode(
 export function validatePatch(
   model: string | undefined,
   flags: Record<string, unknown>,
+  channels?: string[] | undefined,
 ): { field: string; reason: string } | null {
   if (model !== undefined) {
     if (typeof model !== "string" || model.length === 0 || model.length > 200) {
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
+    }
+  }
+  if (channels !== undefined) {
+    // Zod already enforced string[], and narrowChannelsPatch dropped
+    // unknown keys before this point — but re-verify defensively so a
+    // future caller that skips narrowChannelsPatch can't smuggle
+    // unknown keys through validatePatch alone.
+    if (!Array.isArray(channels)) {
+      return { field: "channels", reason: "must be an array of strings" };
+    }
+    for (const c of channels) {
+      if (typeof c !== "string") {
+        return { field: "channels", reason: "must contain only strings" };
+      }
+      if (!EDITABLE_CHANNELS.has(c)) {
+        return { field: `channels.${c}`, reason: "not in editable channels allowlist" };
+      }
     }
   }
   for (const [key, val] of Object.entries(flags)) {

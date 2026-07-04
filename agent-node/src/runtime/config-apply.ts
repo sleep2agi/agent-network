@@ -61,11 +61,34 @@ const RESTART_REQUIRED_FLAGS = new Set<string>([
   "timeout",
 ]);
 
+/**
+ * Channel keys the dashboard may enable/disable on this node via
+ * update_node_config. Restart-tier — the boot flow in cli.ts reads
+ * `config.channels` once and forks per-channel workers from it, so a
+ * swap here takes effect the next time the parent supervisor respawns
+ * this process (see #260 P5). MUST match server/src/config-apply-
+ * validate.ts EDITABLE_CHANNELS.
+ *
+ * Only telegram + feishu are wired here: cli.ts:673 rejects any other
+ * channel type with `process.exit(1)` at boot, so accepting anything
+ * else in a patch would ship a "smuggle-a-crash" foot-gun. `commhub`
+ * is the RPC transport (always present, not a channel worker).
+ */
+const EDITABLE_CHANNELS = new Set<string>([
+  "telegram",
+  "feishu",
+]);
+
 export type ApplyMode = "hot" | "restart" | "restart_only";
 
 export interface ConfigPatch {
   model?: string;
   flags?: Record<string, unknown>;
+  /** #260 P5 — dashboard-driven channel enable/disable. Restart-tier
+   *  (agent-node boot forks channel workers from config.channels).
+   *  Only telegram / feishu / commhub keys are accepted here; anything
+   *  else is dropped by the hub before the patch reaches this node. */
+  channels?: string[];
 }
 
 export interface ConfigUpdate {
@@ -82,6 +105,22 @@ export function validateLocalPatch(patch: ConfigPatch): ValidationResult {
   if (patch.model !== undefined) {
     if (typeof patch.model !== "string" || patch.model.length === 0 || patch.model.length > 200) {
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
+    }
+  }
+  if (patch.channels !== undefined) {
+    if (!Array.isArray(patch.channels)) {
+      return { field: "channels", reason: "must be an array of strings" };
+    }
+    if (patch.channels.length > 16) {
+      return { field: "channels", reason: "too many entries (max 16)" };
+    }
+    for (const c of patch.channels) {
+      if (typeof c !== "string") {
+        return { field: "channels", reason: "must contain only strings" };
+      }
+      if (!EDITABLE_CHANNELS.has(c)) {
+        return { field: `channels.${c}`, reason: "not in local editable channels allowlist" };
+      }
     }
   }
   const flags = patch.flags || {};
@@ -128,8 +167,10 @@ export function computeApplyMode(patch: ConfigPatch): ApplyMode {
   const hasModel = patch.model !== undefined;
   const flags = patch.flags || {};
   const flagKeys = Object.keys(flags);
-  if (!hasModel && flagKeys.length === 0) return "restart_only";
+  const hasChannels = patch.channels !== undefined;
+  if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
   if (hasModel) return "restart";
+  if (hasChannels) return "restart";
   for (const key of flagKeys) {
     if (RESTART_REQUIRED_FLAGS.has(key)) return "restart";
   }
@@ -207,6 +248,19 @@ export function loadConfigWithSelfHeal(path: string): SelfHealOutcome {
   }
 }
 
+/** Parse a channel spec into its bare type key. Mirrors
+ * `parseChannelSpec` in cli.ts but only extracts the type — the caller
+ * doesn't need the path. Malformed specs (empty, starts with `:`, ends
+ * with `:`) return null so mergePatch can drop them defensively rather
+ * than propagate the corruption. */
+function channelSpecType(spec: unknown): string | null {
+  if (typeof spec !== "string") return null;
+  const sep = spec.indexOf(":");
+  if (sep < 0) return spec || null;
+  if (sep === 0 || sep === spec.length - 1) return null;
+  return spec.slice(0, sep);
+}
+
 /** Merge a patch into the existing file config. Returns the new
  * config object — caller writes it. Defensive: clones the input so
  * the live mutable flag obj isn't accidentally shared with the
@@ -216,6 +270,27 @@ export function mergePatch(existing: any, patch: ConfigPatch): any {
   if (patch.model !== undefined) next.model = patch.model;
   if (patch.flags) {
     next.flags = { ...(next.flags || {}), ...patch.flags };
+  }
+  if (patch.channels !== undefined) {
+    // Channels replace-with-preserve-paths:
+    //   - `patch.channels: []` disables everything (empty array
+    //     survives; boot forks no workers).
+    //   - Otherwise, for each type in the patch, if the existing
+    //     config had a path-qualified spec of the same type
+    //     ("telegram:/abs/path" or "feishu:/opt/foo"), keep the FULL
+    //     spec so the .env / access.json under that dir stays
+    //     wired up. A bare-key patch that arrived because the
+    //     dashboard doesn't know about the path would otherwise
+    //     drop that path and force the boot flow to
+    //     `defaultChannelDir()` — which won't have the operator-
+    //     provisioned secrets. Codex catch on PR #411.
+    const existingByType = new Map<string, string>();
+    const existingChannels = Array.isArray(next.channels) ? next.channels : [];
+    for (const spec of existingChannels) {
+      const t = channelSpecType(spec);
+      if (t && !existingByType.has(t)) existingByType.set(t, String(spec));
+    }
+    next.channels = patch.channels.map((t) => existingByType.get(t) ?? t);
   }
   return next;
 }
@@ -256,6 +331,14 @@ export interface MaskedSnapshot {
    * the hardcoded 20 default + allowlist enforcement was bypassed.
    * 通信龙 nit ① decision: nest, don't delete. */
   daemon_capabilities?: DaemonCapabilities;
+  /** #260 P5 — bare-type channel set currently in this process's
+   *  forked worker map. Always emitted (even as `[]`) so the hub's
+   *  content-match finalize (finalizePendingMatchingUpdates) can prove
+   *  a channels-only restart landed and — separately — so
+   *  /api/nodes reflects a disable-all instead of the stale COALESCE'd
+   *  value. Path-qualified specs in config.channels are collapsed to
+   *  the bare type key; anything unparseable is silently dropped. */
+  channels: string[];
 }
 export function buildConfigSnapshot(
   fileConfig: any,
@@ -268,6 +351,22 @@ export function buildConfigSnapshot(
     config_revision: revision,
     config_update_capable: configUpdateCapable,
     role: typeof fileConfig?.role === "string" ? fileConfig.role : null,
+    // Always emit — see MaskedSnapshot.channels comment. Sort +
+    // dedup so the hub's Set-equality content-match doesn't care
+    // about the order the operator listed them in.
+    channels: (() => {
+      const raw = fileConfig?.channels;
+      if (!Array.isArray(raw)) return [];
+      const seen = new Set<string>();
+      const out2: string[] = [];
+      for (const spec of raw) {
+        const t = channelSpecType(spec);
+        if (!t || seen.has(t)) continue;
+        seen.add(t);
+        out2.push(t);
+      }
+      return out2.sort();
+    })(),
   };
   // Self-declare nested under daemon_capabilities — only emit fields
   // when valid (typeof + Array.isArray narrow per
