@@ -36,7 +36,7 @@
 | **P2 #393 provider UI** | ✅ 已发 | = RFC-028（PR #23）merged + **已切 dashboard `0.6.3-preview.5`**（provider CRUD + key vault + reachability matrix） |
 | **P2 #260 配置面板核心** | ✅ 已建 | 模型/模式/重启真接 API（dashboard #7/#10/#11/#19），在 preview.4/.5 |
 | **P2 #260 channel 编辑** | ⏸ 推后 | 通信IM马 wire-check 发现 toggle **不生效**（hub `update_node_config` schema 无 channels 字段 + node 无 channel reload）；PR #31 前端 held；真 backend 走 restart-tier 路子，排 P3 后做 |
-| **P3 multi-daemon** | 🟢 e2e 绿 | 代码全 merged（#341/#299/#25/#28/#29）+ **Scenario H e2e 通过 `PASS=59 FAIL=0`**（双 daemon 强绑 C2 路由/not_your_request/parentage）；工程马出 PR 中，通信龙 复跑复验 |
+| **P3 multi-daemon** | ✅ 完成 | 代码全 merged + **Scenario H e2e PR #406 merged**（`PASS=59 FAIL=0`，通信龙 独立 docker 复跑同结果 claim=reality）；双 daemon 强绑 C2 路由/not_your_request/parentage 全绿 |
 | **P4 opencode 活体** | ⏳ 等 Vincent | 需 Anthropic/OpenAI key（Kimi Bearer 网关 opencode 不吃，见 §D3/backlog） |
 
 ## 已合进 main（部分未发 preview）
