@@ -167,15 +167,23 @@ describe("classifyRuntimeResult — vendor hint routing via baseUrl", () => {
 });
 
 describe("formatClassificationError — message shape (parsed by IM bridge)", () => {
-  test("soft-fail-quota → 执行出错: <runtime> 限流/配额耗尽", () => {
+  test("soft-fail-quota → 执行出错: [额度用尽][<code>] <runtime>: <body> — <hint>", () => {
+    // #368 replaced the generic `<runtime> 限流/配额耗尽 (<reason>)` copy
+    // with a vendor-phrase-pass-through format prefixed by `[额度用尽]` +
+    // an optional vendor-native code tag (MiniMax 2056 / HTTP 429 / etc.).
+    // This test locks the new format shape — the runtime label, the
+    // vendor URL hint, and the [额度用尽] prefix must all be present.
     const c: ClassificationResult = {
       kind: "soft-fail-quota",
       reason: "HTTP 429",
       hint: "→ 检查 platform.deepseek.com 配额",
     };
     const s = formatClassificationError(c, { runtime: "codex" });
-    expect(s).toMatch(/^执行出错: codex 限流\/配额耗尽/);
+    expect(s).toMatch(/^执行出错: \[额度用尽\]/);
+    expect(s).toContain("codex");
     expect(s).toContain("deepseek");
+    // Code extractor recognises "HTTP 429" — tag should be present.
+    expect(s).toContain("[HTTP 429]");
   });
 
   test("soft-fail-empty → 执行出错: <runtime> 返回空响应 with in/out", () => {

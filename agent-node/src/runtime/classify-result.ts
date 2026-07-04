@@ -200,7 +200,10 @@ export function formatClassificationForUser(
       const phrase = extractVendorQuotaPhrase(raw);
       const code = extractQuotaCode(raw);
       const codeTag = code ? ` [${code}]` : "";
-      const body = phrase ?? raw.slice(0, 200);
+      // 80-char fallback keeps the IM-facing string comfortably
+      // < 200 total (mirrors ForLog's tightened cap; both call sites
+      // aligned so the user never sees a longer message than the log).
+      const body = phrase ?? raw.slice(0, 80);
       return `[额度用尽]${codeTag} ${body}`.trim();
     }
     case "soft-fail-empty":
@@ -230,11 +233,17 @@ export function formatClassificationForLog(
   const outT = context.usage?.output_tokens ?? 0;
   switch (c.kind) {
     case "soft-fail-quota": {
+      // Bound total ≤ ~200 chars so IM bridges that (still) call this
+      // legacy alias don't wall-of-text the user. Vendor phrase already
+      // capped at 200 by extractVendorQuotaPhrase; the untruncated-raw
+      // fallback path was 200, which pushed total > 200 for long
+      // opaque errors — tightened to 80 (matches the pre-#368
+      // convention this file has always assumed on the quota path).
       const raw = c.reason || "";
       const phrase = extractVendorQuotaPhrase(raw);
       const code = extractQuotaCode(raw);
       const codeTag = code ? ` [${code}]` : "";
-      const body = phrase ?? raw.slice(0, 200);
+      const body = phrase ?? raw.slice(0, 80);
       return `执行出错: [额度用尽]${codeTag} ${context.runtime}: ${body}${c.hint ? ` — ${c.hint}` : ""}`;
     }
     case "soft-fail-empty":
