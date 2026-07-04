@@ -107,6 +107,7 @@
 | `agent-network-dashboard 0.6.3-preview.4` | 单节点设置面板：模型 select + 运行模式 flags + 存了自动重启，真接 `/api/anet/node-config` | #260 部分 |
 | `agent-network-dashboard 0.6.3-preview.5` | **#393 模型供应商预配置库**：provider CRUD + key 写入即 vault 只回 hasKey + reachability matrix（build 干净 stamp 44d518a） | PR #23 |
 | `agent-network-dashboard 0.6.3-preview.6` | Providers 入口进左侧栏（#32）+ #260 channel 编辑前端（narrow telegram/feishu，#31）+ 版本戳修复（bump-before-build）| #31 / #32 |
+| `agent-network-dashboard 0.6.3-preview.7` | 建节点向导 2 UX 修：#33 picker admin network_id（400 fix）+ #34 「默认」model 自动填 runtime defaultModel（避免 hub 400）；向导端到端 11 shots proven | #33 / #34 |
 | `commhub-server 0.9.0-preview.21` | #260 channel-edit hub 侧：`update_node_config` 收 channels + narrow + restart-tier（#411）；504 test pass（8 fail 是沙箱 HTTP env 非 bug，CI 绿）| #411 |
 | `agent-node 2.5.0-preview.19` | #260 channel-edit node 侧：config-apply 合并 channels + restart-tier + 重启 refork（#411）+ classify quota 消息截断修（#417）；full suite 712/0 绿 | #411 / #417 |
 | `agent-network 2.3.0-preview.20` | 节点管理 CLI 累积（#180 sweep / create-stop-delete / daemon）+ opencode-cli ride-along（不主打）；obfuscation build 验过 | RFC-026/027/029 |
