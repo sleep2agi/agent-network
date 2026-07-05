@@ -27,13 +27,14 @@
 
 ## 进度快照（自主推进中 · 每步滚动更新）
 
-> 最后更新：2026-07-04（北京）· **🟢 GA-gate GREEN (23/23) — GA-ready, 等 Vincent 拍 latest**: agent-network 2.3.0-preview.20 / agent-node 2.5.0-preview.19 / commhub-server 0.9.0-preview.21 / dashboard 0.6.3-preview.6· Vincent msg9799 自主执行模式。
+> 最后更新：2026-07-05（北京）· **🟢 GA-gate GREEN (23/23) — GA-ready, 等 Vincent 拍 latest**: agent-network 2.3.0-preview.20 / agent-node 2.5.0-preview.19 / commhub-server 0.9.0-preview.21 / dashboard **0.6.3-preview.9**· Vincent msg9799 自主执行模式。
+> **2026-07-05 dashboard #393 迭代**：Vincent 真机反馈 → 供应商预设目录（DeepSeek/MiniMax/GLM/Claude 选一下 base_url 自动填 + 模型勾选 + 只填 key）已发 **preview.8**，型号修对（DeepSeek v4-pro/flash · MiniMax api.minimaxi.com+M2.7 · Claude opus-4-8/sonnet-5/haiku-4-5）发 **preview.9**（GLM 待 Vincent 给准型号）。**同时把线上 dm.vansin.top 实例从卡死的 preview.4（僵尸占 :3001 崩溃循环 34k 次）救活并升到 preview.9**。dashboard PR #35。
 > **📌 详细滚动进度追踪 → [tracking issue #403](https://github.com/sleep2agi/agent-network/issues/403)**（本 plan 是总文档/spec，详细每步日志记在 issue，二者互链）。
 
 | 线 | 状态 | 细节 |
 |----|------|------|
 | **P1 节点管理 P0** | ✅ 闭环 | #203 已修关；#180 由 #374 env-sweep 修 + #398 CI 回归门；docker e2e 回归 **15/16 绿**（1 是容器缺 codex CLI 的 harness 限制，非产品 bug） |
-| **P2 #393 provider UI** | ✅ 已发 | = RFC-028（PR #23）merged + **已切 dashboard `0.6.3-preview.5`**（provider CRUD + key vault + reachability matrix） |
+| **P2 #393 provider UI** | ✅ 已发 + 预设目录 | = RFC-028（PR #23）provider CRUD + key vault + reachability matrix；**+ #393 供应商预设目录**（Vincent UX 反馈，dashboard PR #35）：选 DeepSeek/MiniMax/GLM/Claude → base_url 自动填 + 模型勾选 + 只填 key，`0.6.3-preview.8`；型号修对 `preview.9`（GLM 待 Vincent 给准型号）；线上实例已升 preview.9 |
 | **P2 #260 配置面板核心** | ✅ 已建 | 模型/模式/重启真接 API（dashboard #7/#10/#11/#19），在 preview.4/.5 |
 | **P2 #260 channel 编辑（前后端）** | ✅ 完成 | **PR #411 merged**：hub schema 收 channels + narrow + restart-tier + node 重启重读 refork；4 Codex edge-case 修（finalize/path-spec/disable-all/destructive-narrow）+ 回归 23/0；通信龙 独立复跑 + 通信牛 sanitization + IM马 5/5 wire 全过。⚠️ caveat：restart-tier exit(75) 需 supervisor（手动 spawn 节点需 host_supervisor/systemd）。前端 #31 narrow commhub + un-hold merged ✅ + supervisor docs #413。**前后端全通** |
 | **P3 multi-daemon** | ✅ 完成 | 代码全 merged + **Scenario H e2e PR #406 merged**（`PASS=59 FAIL=0`，通信龙 独立 docker 复跑同结果 claim=reality）；双 daemon 强绑 C2 路由/not_your_request/parentage 全绿 |
@@ -108,6 +109,8 @@
 | `agent-network-dashboard 0.6.3-preview.5` | **#393 模型供应商预配置库**：provider CRUD + key 写入即 vault 只回 hasKey + reachability matrix（build 干净 stamp 44d518a） | PR #23 |
 | `agent-network-dashboard 0.6.3-preview.6` | Providers 入口进左侧栏（#32）+ #260 channel 编辑前端（narrow telegram/feishu，#31）+ 版本戳修复（bump-before-build）| #31 / #32 |
 | `agent-network-dashboard 0.6.3-preview.7` | 建节点向导 2 UX 修：#33 picker admin network_id（400 fix）+ #34 「默认」model 自动填 runtime defaultModel（避免 hub 400）；向导端到端 11 shots proven | #33 / #34 |
+| `agent-network-dashboard 0.6.3-preview.8` | **#393 供应商预设目录**：新增供应商弹窗加「供应商」下拉（DeepSeek/MiniMax/GLM/Claude/自定义）→ base_url 自动填锁定 + 模型勾选 chips + 隐藏类型行 + 只填 key；自定义回退手填。headless 实测 0 error | PR #35 |
+| `agent-network-dashboard 0.6.3-preview.9` | 修预设型号/URL（对齐线上实配）：DeepSeek v4-pro/v4-flash · MiniMax **api.minimaxi.com**/anthropic+M2.7（原 api.minimax.chat/M3 错）· Claude opus-4-8/sonnet-5/haiku-4-5；GLM 留可编辑占位待 Vincent | PR #35 |
 | `commhub-server 0.9.0-preview.21` | #260 channel-edit hub 侧：`update_node_config` 收 channels + narrow + restart-tier（#411）；504 test pass（8 fail 是沙箱 HTTP env 非 bug，CI 绿）| #411 |
 | `agent-node 2.5.0-preview.19` | #260 channel-edit node 侧：config-apply 合并 channels + restart-tier + 重启 refork（#411）+ classify quota 消息截断修（#417）；full suite 712/0 绿 | #411 / #417 |
 | `agent-network 2.3.0-preview.20` | 节点管理 CLI 累积（#180 sweep / create-stop-delete / daemon）+ opencode-cli ride-along（不主打）；obfuscation build 验过 | RFC-026/027/029 |
