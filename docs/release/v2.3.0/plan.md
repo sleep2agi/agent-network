@@ -111,6 +111,7 @@
 | `agent-network-dashboard 0.6.3-preview.7` | 建节点向导 2 UX 修：#33 picker admin network_id（400 fix）+ #34 「默认」model 自动填 runtime defaultModel（避免 hub 400）；向导端到端 11 shots proven | #33 / #34 |
 | `agent-network-dashboard 0.6.3-preview.8` | **#393 供应商预设目录**：新增供应商弹窗加「供应商」下拉（DeepSeek/MiniMax/GLM/Claude/自定义）→ base_url 自动填锁定 + 模型勾选 chips + 隐藏类型行 + 只填 key；自定义回退手填。headless 实测 0 error | PR #35 |
 | `agent-network-dashboard 0.6.3-preview.9` | 修预设型号/URL（对齐线上实配）：DeepSeek v4-pro/v4-flash · MiniMax **api.minimaxi.com**/anthropic+M2.7（原 api.minimax.chat/M3 错）· Claude opus-4-8/sonnet-5/haiku-4-5；GLM 留可编辑占位待 Vincent | PR #35 |
+| `agent-network-dashboard 0.6.3-preview.10` | GLM 型号补齐（从智谱 docs.bigmodel.cn 扒准值，非 cutoff 猜）：glm-4.7/glm-5.2/glm-4.6；**#393 四家供应商全齐**。PR #35 squash-merged。ops 教训：publish 后需 poll `npm view` 确认传播再 pm2 restart（抢跑致 ETARGET → 线上 40s 502 自愈） | PR #35 |
 | `commhub-server 0.9.0-preview.21` | #260 channel-edit hub 侧：`update_node_config` 收 channels + narrow + restart-tier（#411）；504 test pass（8 fail 是沙箱 HTTP env 非 bug，CI 绿）| #411 |
 | `agent-node 2.5.0-preview.19` | #260 channel-edit node 侧：config-apply 合并 channels + restart-tier + 重启 refork（#411）+ classify quota 消息截断修（#417）；full suite 712/0 绿 | #411 / #417 |
 | `agent-network 2.3.0-preview.20` | 节点管理 CLI 累积（#180 sweep / create-stop-delete / daemon）+ opencode-cli ride-along（不主打）；obfuscation build 验过 | RFC-026/027/029 |
