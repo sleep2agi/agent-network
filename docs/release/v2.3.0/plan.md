@@ -34,7 +34,7 @@
 | 线 | 状态 | 细节 |
 |----|------|------|
 | **P1 节点管理 P0** | ✅ 闭环 | #203 已修关；#180 由 #374 env-sweep 修 + #398 CI 回归门；docker e2e 回归 **15/16 绿**（1 是容器缺 codex CLI 的 harness 限制，非产品 bug） |
-| **P2 #393 provider UI** | ✅ 已发 + 预设目录 | = RFC-028（PR #23）provider CRUD + key vault + reachability matrix；**+ #393 供应商预设目录**（Vincent UX 反馈，dashboard PR #35）：选 DeepSeek/MiniMax/GLM/Claude → base_url 自动填 + 模型勾选 + 只填 key，`0.6.3-preview.8`；型号修对 `preview.9`（GLM 待 Vincent 给准型号）；线上实例已升 preview.9 |
+| **P2 #393 provider UI** | ✅ UI+后端全通 | = RFC-028（PR #23）provider CRUD + key vault + reachability matrix；**+ #393 供应商预设目录**（dashboard PR #35 merged）：选 DeepSeek/MiniMax/GLM/Claude → base_url 自动填 + 模型勾选 + 只填 key，线上升到 `0.6.3-preview.10`（型号全对齐实配）；**2026-07-06 严格 e2e 抓到 ship-blocker + 修复**：生产 hub :9200 缺 `ANET_HUB_SECRET_VAULT_KEY`→provider 建不了，Vincent 批准后已设密钥+重启 preview.14（185 session 全保、断线~3s、`master key configured`），**后端现已通**；待真机建一个 provider 完全闭环 |
 | **P2 #260 配置面板核心** | ✅ 已建 | 模型/模式/重启真接 API（dashboard #7/#10/#11/#19），在 preview.4/.5 |
 | **P2 #260 channel 编辑（前后端）** | ✅ 完成 | **PR #411 merged**：hub schema 收 channels + narrow + restart-tier + node 重启重读 refork；4 Codex edge-case 修（finalize/path-spec/disable-all/destructive-narrow）+ 回归 23/0；通信龙 独立复跑 + 通信牛 sanitization + IM马 5/5 wire 全过。⚠️ caveat：restart-tier exit(75) 需 supervisor（手动 spawn 节点需 host_supervisor/systemd）。前端 #31 narrow commhub + un-hold merged ✅ + supervisor docs #413。**前后端全通** |
 | **P3 multi-daemon** | ✅ 完成 | 代码全 merged + **Scenario H e2e PR #406 merged**（`PASS=59 FAIL=0`，通信龙 独立 docker 复跑同结果 claim=reality）；双 daemon 强绑 C2 路由/not_your_request/parentage 全绿 |
