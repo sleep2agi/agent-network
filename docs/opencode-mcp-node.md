@@ -79,6 +79,12 @@ curl -sX POST $HUB/api/auth/node-token -H "Authorization: Bearer $UTOK" \
 
 > **模型不用为接入单独配**：opencode 本来就用你平时的默认模型跑（全局配置 / TUI 里选的那个），接网络跟模型无关，上面示例故意不写 `model`。
 
+> **客户端不能传 header？** 有些 MCP 客户端只能填 URL、不能加自定义 `Authorization` header。这种情况把 token 放进 URL query 即可，hub 一样认（`requestToken` 支持 `?token=` 兜底）：
+> ```
+> "url": "https://dm.vansin.top/mcp?token=ntok_你的token"
+> ```
+> 这样就不用写 `headers` 那行了。
+
 ---
 
 ## Step 3 · 跑 + 验证
