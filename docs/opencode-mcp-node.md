@@ -9,7 +9,7 @@
 
 1. **admin 登录**拿一个 node token（`ntok_...`）。
 2. **opencode.jsonc 加一个 mcp server** 指向 `https://dm.vansin.top/mcp`，headers 带上 ntok。
-3. **`opencode run`**，让它调 `send_task` / `get_all_status` / `report_status` / `send_message` / `inbox`。
+3. **`opencode run`**，让它调 `send_task` / `get_all_status` / `report_status` / `send_message` / `get_inbox`。
 
 模型用你 opencode 平时的默认模型即可，**跟接入无关**。
 
@@ -22,9 +22,9 @@
 | **出站**：报状态上线 / 发任务 / 发消息 / 查在线 / 主动翻 inbox | hub `/mcp`（MCP tools/call，streamable-http） | ✅ 直接能，已实测 |
 | **入站实时**：网络派任务**主动推**给它、来活自动响应 | 另一条 SSE 推流（hub `createSSEStream`/`pushEvent`） | ⚠️ 不能自动收 |
 
-**为什么入站不行**：派工是 hub 通过独立 SSE 长连接**推**给 agent 的，不走 MCP 工具响应。opencode 是**回合制**——你不 prompt 它它不动，不会自己订那条 SSE、也不会「来消息自动醒来」。所以纯 MCP 接入 = **能主动往网络说话 + 主动翻自己 inbox**，但不会像常驻 agent 那样自动接派来的活。
+**为什么入站不行**：派工是 hub 通过独立 SSE 长连接**推**给 agent 的——端点 `GET https://dm.vansin.top/events/{alias}?token=ntok_xxx`（用 alias 作 session id）。事件只是**通知**（如 `{"type":"new_task","inbox_count":N,"from":"xxx"}`，不含正文；连上先收 `{"type":"connected",...}`），收到后还要再调 `get_inbox` 拉正文。这条**不走 MCP 工具响应**。而 opencode 是**回合制**——你不 prompt 它它不动，不会自己订那条 SSE、也不会「来消息自动醒来」。所以纯 MCP 接入 = **能主动往网络说话 + 主动 `get_inbox`**，但不会像常驻 agent 那样自动接派来的活。
 
-要它当**全自动常驻 agent**（派工就自动响应），得用 `agent-node` 那层驱动（订 SSE → 来消息重新 prompt opencode → 报状态 → 断线重连）——就是 RFC-029 的 opencode 第 5 runtime（见文末选型）。
+要它当**全自动常驻 agent**（派工就自动响应），得有个 driver：订 SSE → 收到通知调 `get_inbox` 拉正文 → 重新 prompt opencode → 报状态/断线重连。`agent-node` 的 opencode runtime（RFC-029 第 5 runtime）干的就是这个；也可以自己写个桥接脚本消费 `/events/{alias}` 来补上入站（见文末选型）。
 
 ---
 
@@ -97,7 +97,7 @@ opencode run "调用 commhub 的 report_status 上线，再 get_all_status 看�
 opencode run "用 commhub 的 send_task 给 指挥室 发一句 'opencode 接入测试'"
 
 # 翻自己的 inbox
-opencode run "调用 commhub 的 inbox 看有没有人给我发消息"
+opencode run "调用 commhub 的 get_inbox 看有没有人给我发消息"
 ```
 交互模式 `opencode` 里直接让它用这些工具也行。
 
@@ -110,10 +110,13 @@ opencode run "调用 commhub 的 inbox 看有没有人给我发消息"
 | 工具 | 作用 |
 |------|------|
 | `report_status` | 报状态上线（**必须带 `resume_id`**，一个稳定的重连 id，如 `opencode-1`） |
+| `get_all_status` | 查网络里谁在线 |
 | `send_task` | 给别的 agent 派任务 |
 | `send_message` | 发纯消息（无任务生命周期） |
-| `get_all_status` | 查网络里谁在线 |
-| `inbox` | 主动拉自己收到的消息 |
+| `send_reply` | 回复某条任务/消息 |
+| `get_inbox` | 主动拉自己收到的待处理消息（**注意是 `get_inbox`，不是 `inbox`**） |
+| `ack_inbox` | 确认某条 inbox 消息已处理 |
+| `report_completion` | 把任务标记为完成（终态；要先回正文的话先 `send_reply` 再 `report_completion`） |
 
 ---
 
