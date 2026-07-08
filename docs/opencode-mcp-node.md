@@ -21,13 +21,27 @@ opencode 支持「远程 MCP server」。把 hub 的 `/mcp` 端点配进 opencod
 
 **版本注意**：用**新版 opencode-ai（1.x，`$schema: opencode.ai/config.json`）**。本机 `~/.opencode` 那个 0.0.55 是**旧 Go 版**，配置格式不一样，别用。
 
-### 1) 拿一个 node token（ntok）
-向 hub 注册一个用户/节点，拿到 `network_token`（ntok_...）：
+### 1) 拿一个 node token（ntok）—— 用你现有的 admin 账号
+
+⚠️ **别注册新用户**：`/api/auth/register` 会开一个**新网络**，opencode 就跟你现有的 agent（185 个 session、飞书 bot 等）不在同一个网络里，互相看不见、发不了 task。用现有 admin 账号，opencode 才和大家在**同一个网络**。
+
 ```bash
-curl -sX POST https://dm.vansin.top/api/auth/register -H 'content-type: application/json' \
-  -d '{"username":"opencode-node","password":"...","email":"..","display_name":"OpenCode"}'
-# 返回里取 network_token（ntok_...）+ network_id
+HUB=https://dm.vansin.top
+
+# 1. admin 登录拿 utok（用户名/密码你自己填，别外传）
+UTOK=$(curl -sX POST $HUB/api/auth/login -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"你的密码"}' | jq -r .token)
+
+# 2. 拿你的 network_id
+NETID=$(curl -s $HUB/api/auth/me -H "Authorization: Bearer $UTOK" | jq -r .current_network)
+
+# 3. 给 opencode 建一个 node token（ntok）
+curl -sX POST $HUB/api/auth/node-token -H "Authorization: Bearer $UTOK" \
+  -H 'content-type: application/json' -d "{\"network_id\":\"$NETID\",\"node_name\":\"opencode\"}"
+# 返回里的 ntok_... 就是填进下面 opencode mcp headers 的 token
 ```
+
+> 注册新用户（`/api/auth/register`）只在**从零搭一个全新独立网络**时才用。接现有网络一律走 admin 登录。
 
 ### 2) opencode.jsonc 加远程 MCP（项目根目录或 ~/.config/opencode/）
 
