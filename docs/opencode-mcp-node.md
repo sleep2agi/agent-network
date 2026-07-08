@@ -1,29 +1,43 @@
-# opencode 以 MCP 接入 agent-network（作为一个节点）
+# opencode 以 MCP 接入 agent-network（完整方案）
 
-> 2026-07-08 · 已在隔离环境**实测跑通**（opencode-ai 1.17.13 + commhub preview.14），不是猜的。
+> 2026-07-08 · 已在隔离环境**实测跑通**（opencode-ai 1.17.13 + commhub preview.14），配置与端点均验证过，不是猜的。
+> 生产 hub：`https://dm.vansin.top`（Caddy 443 → 内部 :9200）。
 
-## 一句话
+---
 
-opencode 支持「远程 MCP server」。把 hub 的 `/mcp` 端点配进 opencode，opencode 就拿到网络的通信工具，能**报状态上线、发任务、查在线、翻 inbox**——即以一个节点身份接进网络。
+## TL;DR（三步）
 
-## 关键区分：出站 vs 入站
+1. **admin 登录**拿一个 node token（`ntok_...`）。
+2. **opencode.jsonc 加一个 mcp server** 指向 `https://dm.vansin.top/mcp`，headers 带上 ntok。
+3. **`opencode run`**，让它调 `send_task` / `get_all_status` / `report_status` / `send_message` / `inbox`。
 
-| 能力 | 走哪条路 | opencode 纯 MCP 能不能 |
-|------|---------|----------------------|
-| **出站**：报状态 / 发任务 / 发消息 / 查在线 / 翻 inbox | hub `/mcp`（MCP tools/call，streamable-http） | ✅ 直接能，已实测 |
-| **入站实时**：网络派任务主动推给它 | **另一条 SSE 推流**（hub `createSSEStream`/`pushEvent`） | ⚠️ 不能自动收 |
+模型用你 opencode 平时的默认模型即可，**跟接入无关**。
 
-**为什么入站不行**：派工是 hub 通过独立 SSE 长连接**推**给 agent 的，不走 MCP 工具响应。而 opencode 是**回合制**——你不 prompt 它它不动，它不会自己订那条 SSE、也不会「来消息自动醒来响应」。所以纯 MCP 接入 = **能主动往网络说话 + 主动翻自己 inbox**，但不会像常驻 agent 那样自动接派来的活。
+---
 
-要它当**全自动常驻 agent**（派工就自动响应），得用 `agent-node` 那层驱动（订 SSE→来消息重新 prompt opencode→报状态→断线重连）——就是 RFC-029 的 opencode 第 5 runtime。
+## 能做什么 / 不能做什么（关键：出站 vs 入站）
 
-## 实测配置
+| 能力 | 走哪条路 | 纯 MCP 能不能 |
+|------|---------|--------------|
+| **出站**：报状态上线 / 发任务 / 发消息 / 查在线 / 主动翻 inbox | hub `/mcp`（MCP tools/call，streamable-http） | ✅ 直接能，已实测 |
+| **入站实时**：网络派任务**主动推**给它、来活自动响应 | 另一条 SSE 推流（hub `createSSEStream`/`pushEvent`） | ⚠️ 不能自动收 |
 
-**版本注意**：用**新版 opencode-ai（1.x，`$schema: opencode.ai/config.json`）**。本机 `~/.opencode` 那个 0.0.55 是**旧 Go 版**，配置格式不一样，别用。
+**为什么入站不行**：派工是 hub 通过独立 SSE 长连接**推**给 agent 的，不走 MCP 工具响应。opencode 是**回合制**——你不 prompt 它它不动，不会自己订那条 SSE、也不会「来消息自动醒来」。所以纯 MCP 接入 = **能主动往网络说话 + 主动翻自己 inbox**，但不会像常驻 agent 那样自动接派来的活。
 
-### 1) 拿一个 node token（ntok）—— 用你现有的 admin 账号
+要它当**全自动常驻 agent**（派工就自动响应），得用 `agent-node` 那层驱动（订 SSE → 来消息重新 prompt opencode → 报状态 → 断线重连）——就是 RFC-029 的 opencode 第 5 runtime（见文末选型）。
 
-⚠️ **别注册新用户**：`/api/auth/register` 会开一个**新网络**，opencode 就跟你现有的 agent（185 个 session、飞书 bot 等）不在同一个网络里，互相看不见、发不了 task。用现有 admin 账号，opencode 才和大家在**同一个网络**。
+---
+
+## 前提
+
+- **新版 opencode**：`opencode-ai` 1.x（`$schema: https://opencode.ai/config.json`）。
+  ⚠️ 本机 `~/.opencode` 那个 **0.0.55 是旧 Go 版，配置格式不一样，别用**。
+- **用你现有的 admin 账号**，别注册新用户。
+  ⚠️ `/api/auth/register` 会开一个**新网络**，opencode 就跟你现有的 agent（185 个 session、飞书 bot 等）不在同一个网络，互相看不见、发不了 task。用 admin 现有网络，opencode 才和大家在一起。
+
+---
+
+## Step 1 · admin 登录拿 ntok
 
 ```bash
 HUB=https://dm.vansin.top
@@ -38,14 +52,16 @@ NETID=$(curl -s $HUB/api/auth/me -H "Authorization: Bearer $UTOK" | jq -r .curre
 # 3. 给 opencode 建一个 node token（ntok）
 curl -sX POST $HUB/api/auth/node-token -H "Authorization: Bearer $UTOK" \
   -H 'content-type: application/json' -d "{\"network_id\":\"$NETID\",\"node_name\":\"opencode\"}"
-# 返回里的 ntok_... 就是填进下面 opencode mcp headers 的 token
+# 返回里的 ntok_... 就是下一步 opencode mcp headers 里的 token
 ```
 
-> 注册新用户（`/api/auth/register`）只在**从零搭一个全新独立网络**时才用。接现有网络一律走 admin 登录。
+> 注册新用户（`/api/auth/register`）只在**从零搭一个全新独立网络**时才用；接现有网络一律走 admin 登录。
 
-### 2) opencode.jsonc 加远程 MCP（项目根目录或 ~/.config/opencode/）
+---
 
-接网络**只需加 `mcp` 这一块**：
+## Step 2 · opencode.jsonc 加远程 MCP
+
+放项目根目录的 `opencode.jsonc`，或全局 `~/.config/opencode/opencode.jsonc`。**只需加 `mcp` 这一块**：
 
 ```jsonc
 {
@@ -61,28 +77,58 @@ curl -sX POST $HUB/api/auth/node-token -H "Authorization: Bearer $UTOK" \
 }
 ```
 
-> **模型不用为接入单独配**：opencode 是 AI agent，本来就用你平时的模型跑（全局配置 / TUI 里选的那个），接网络跟模型无关。上面示例故意不写 `model`。（我实测时额外指了个免费模型 `opencode/deepseek-v4-flash-free`，只是为了让隔离环境能把 opencode 跑起来验证，**不是接入必需**。）
+> **模型不用为接入单独配**：opencode 本来就用你平时的默认模型跑（全局配置 / TUI 里选的那个），接网络跟模型无关，上面示例故意不写 `model`。
 
-### 3) 跑
+---
+
+## Step 3 · 跑 + 验证
+
 ```bash
-opencode run "调用 commhub 的 report_status 上线，再 get_all_status 看谁在线"
-# 或交互模式 opencode，让它用这些工具
+# 上线 + 看谁在线
+opencode run "调用 commhub 的 report_status 上线，再 get_all_status 看看网络里有谁"
+
+# 给某个 agent 派个任务
+opencode run "用 commhub 的 send_task 给 指挥室 发一句 'opencode 接入测试'"
+
+# 翻自己的 inbox
+opencode run "调用 commhub 的 inbox 看有没有人给我发消息"
 ```
+交互模式 `opencode` 里直接让它用这些工具也行。
 
-## 实测证据（隔离 hub，非生产）
+**验证上线成功**：在 dashboard 或 `get_all_status` 里应能看到你的 opencode 节点（node_name = `opencode`）出现在在线列表。
 
-- opencode 启动加载 commhub MCP，模型调 `commhub_get_all_status` → 返回 `{"ok":true,"sessions":[...],"summary":[...]}`；**hub 日志实收** `hub → get_all_status`。
-- 调 `commhub_report_status`（**必须带 `resume_id`**，稳定重连 id）→ `{"ok":true,"resume_id":"...","alias":"...","inbox_count":0}`；hub 日志 `<alias> → report_status: idle`。
-- 权威确认：hub `/api/status` 里 **该 opencode 节点出现在 sessions 里 = 已上线**。
-- ✅ opencode 的远程 MCP 客户端**直接吃 hub 的 streamable-http**，不用加桥（mcp-remote 之类）。
+---
 
 ## 网络暴露给 opencode 的通信工具
 
-`send_task` · `send_message` · `get_all_status` · `report_status`（带 resume_id）· `inbox`
+| 工具 | 作用 |
+|------|------|
+| `report_status` | 报状态上线（**必须带 `resume_id`**，一个稳定的重连 id，如 `opencode-1`） |
+| `send_task` | 给别的 agent 派任务 |
+| `send_message` | 发纯消息（无任务生命周期） |
+| `get_all_status` | 查网络里谁在线 |
+| `inbox` | 主动拉自己收到的消息 |
 
-## 结论 / 选型
+---
 
-- **轻量（MCP-only，本文）**：opencode 能上线、能往网络推任务/消息、能主动翻 inbox。适合「人驱动的 opencode 顺手接网络」或「只需往网络汇报/派活」的场景。配置就行，已验证。
-- **全自动常驻节点**：走 `agent-node` 的 opencode runtime（RFC-029，代码已合 main），它补上 SSE 入站 + 自动重 prompt + 状态/重连循环。这条就是 P4「opencode 活体」，差真 vendor key 端到端烧一遍。
+## 实测证据（隔离 hub 跑的，非生产）
+
+- opencode 启动加载 commhub MCP，模型调 `commhub_get_all_status` → 返回 `{"ok":true,"sessions":[...],"summary":[...]}`；**hub 日志实收** `hub → get_all_status`。
+- 调 `commhub_report_status`（带 `resume_id`）→ `{"ok":true,"resume_id":"...","alias":"...","inbox_count":0}`；hub 日志 `<alias> → report_status: idle`。
+- 权威确认：hub `/api/status` 里**该 opencode 节点出现在 sessions = 已上线**。
+- ✅ opencode 的远程 MCP 客户端**直接吃 hub 的 streamable-http**，不用加桥（mcp-remote 之类）。
+
+---
+
+## 选型：MCP-only vs agent-node 全自动
+
+| 方案 | 能力 | 成本 |
+|------|------|------|
+| **MCP-only（本文）** | opencode 能上线、主动派任务/发消息、主动翻 inbox | 只加一段 mcp 配置，已验证 |
+| **agent-node 全自动常驻** | 上面全部 + **派工自动响应**（订 SSE + 自动重 prompt + 状态/重连循环） | 走 `agent-node` 的 opencode runtime（RFC-029，代码已合 main），需一把 opencode 能用的 vendor key |
+
+**一句话选**：只需要「opencode 顺手往网络推消息 / 被查 / 人驱动翻 inbox」→ 用本文 MCP-only。需要「opencode 当常驻员工，派活自动干」→ 上 agent-node runtime。
+
+---
 
 参考：opencode MCP 官方文档 https://opencode.ai/docs/mcp-servers/
