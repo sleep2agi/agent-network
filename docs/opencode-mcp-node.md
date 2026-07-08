@@ -30,10 +30,12 @@ curl -sX POST http://<hub>/api/auth/register -H 'content-type: application/json'
 ```
 
 ### 2) opencode.jsonc 加远程 MCP（项目根目录或 ~/.config/opencode/）
+
+接网络**只需加 `mcp` 这一块**：
+
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "opencode/deepseek-v4-flash-free",   // 换成你要的模型
   "mcp": {
     "commhub": {
       "type": "remote",
@@ -44,6 +46,8 @@ curl -sX POST http://<hub>/api/auth/register -H 'content-type: application/json'
   }
 }
 ```
+
+> **模型不用为接入单独配**：opencode 是 AI agent，本来就用你平时的模型跑（全局配置 / TUI 里选的那个），接网络跟模型无关。上面示例故意不写 `model`。（我实测时额外指了个免费模型 `opencode/deepseek-v4-flash-free`，只是为了让隔离环境能把 opencode 跑起来验证，**不是接入必需**。）
 
 ### 3) 跑
 ```bash
