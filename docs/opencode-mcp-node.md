@@ -24,7 +24,7 @@ opencode 支持「远程 MCP server」。把 hub 的 `/mcp` 端点配进 opencod
 ### 1) 拿一个 node token（ntok）
 向 hub 注册一个用户/节点，拿到 `network_token`（ntok_...）：
 ```bash
-curl -sX POST http://<hub>/api/auth/register -H 'content-type: application/json' \
+curl -sX POST https://dm.vansin.top/api/auth/register -H 'content-type: application/json' \
   -d '{"username":"opencode-node","password":"...","email":"..","display_name":"OpenCode"}'
 # 返回里取 network_token（ntok_...）+ network_id
 ```
@@ -39,7 +39,7 @@ curl -sX POST http://<hub>/api/auth/register -H 'content-type: application/json'
   "mcp": {
     "commhub": {
       "type": "remote",
-      "url": "http://<hub>:9200/mcp",
+      "url": "https://dm.vansin.top/mcp",
       "enabled": true,
       "headers": { "Authorization": "Bearer ntok_你的token" }
     }
