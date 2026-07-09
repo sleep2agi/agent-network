@@ -413,3 +413,154 @@ describe("CodexAppServerBridge — two-client race for idle", () => {
 function tick(ms = 5): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 通信龙 additions — synchronous claim race fix + submitTask FIFO queue.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
+  test("concurrent startTaskTurn: exactly ONE turn/start reaches the server even with a slow response", async () => {
+    let turnStartCount = 0;
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize") return respond({ result: {} });
+        if (msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") {
+          turnStartCount++;
+          // Slow server: respond after 50ms so the pre-response race window
+          // (the original bug) is wide open.
+          setTimeout(() => respond({ result: { turnId: "turn_slow_1" } }), 50);
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+
+    const results = await Promise.allSettled([
+      bridge.startTaskTurn({ taskId: "t-race-1", text: "one" }),
+      bridge.startTaskTurn({ taskId: "t-race-2", text: "two" }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled.length).toBe(1);
+    expect(rejected.length).toBe(1);
+    expect(turnStartCount).toBe(1); // the load-bearing assertion: server saw ONE start
+    await client.close();
+    await app.stop();
+  });
+
+  test("submitTask queues the second task and drains it after turn/completed (order preserved)", async () => {
+    let seq = 0;
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize") return respond({ result: {} });
+        if (msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") {
+          seq++;
+          respond({ result: { turnId: `turn_q_${seq}` } });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+
+    const replies: Array<{ taskId: string; text: string }> = [];
+    bridge.on("task_reply", (r) => replies.push(r as { taskId: string; text: string }));
+    const queued: string[] = [];
+    bridge.on("task_queued", (q) => queued.push((q as { taskId: string }).taskId));
+
+    const r1 = await bridge.submitTask({ taskId: "t-q-1", text: "first" });
+    const r2 = await bridge.submitTask({ taskId: "t-q-2", text: "second" });
+    expect(r1.started).toBe(true);
+    expect(r2.started).toBe(false);
+    expect(queued).toEqual(["t-q-2"]);
+    expect(bridge.queueDepth()).toBe(1);
+
+    // Complete turn 1 → bridge should auto-drain and start turn 2.
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turnId: "turn_q_1", finalText: "answer-1" },
+    });
+    // Wait for the drain's turn/start round-trip.
+    await new Promise((r) => setTimeout(r, 80));
+    expect(bridge.queueDepth()).toBe(0);
+    expect(bridge.activeTurn()).toBe("turn_q_2");
+
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turnId: "turn_q_2", finalText: "answer-2" },
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(replies.map((r) => r.taskId)).toEqual(["t-q-1", "t-q-2"]);
+    expect(replies.map((r) => r.text)).toEqual(["answer-1", "answer-2"]);
+    expect(bridge.currentStatus()).toBe("idle");
+    await client.close();
+    await app.stop();
+  });
+
+  test("drain losing the idle race requeues at the FRONT and retries on next idle", async () => {
+    let denials = 0;
+    let seq = 0;
+    let denyNext = false;
+    const app = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize") return respond({ result: {} });
+        if (msg.method === "thread/resume") return respond({ result: {} });
+        if (msg.method === "turn/start") {
+          if (denyNext) {
+            denyNext = false;
+            denials++;
+            return respond({ error: { code: -32009, message: "turn already active" } });
+          }
+          seq++;
+          respond({ result: { turnId: `turn_d_${seq}` } });
+        }
+      },
+    });
+    const client = new CodexAppServerClient({ url: app.url });
+    await client.connect();
+    const bridge = new CodexAppServerBridge({ client, threadId: THREAD });
+    await bridge.bootstrap();
+    const deferred: string[] = [];
+    bridge.on("drain_deferred", (d) => deferred.push((d as { taskId: string }).taskId));
+
+    await bridge.submitTask({ taskId: "t-d-1", text: "first" });
+    await bridge.submitTask({ taskId: "t-d-2", text: "second" }); // queued
+    // Human TUI "wins" the next idle: server denies our drain's turn/start.
+    denyNext = true;
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turnId: "turn_d_1", finalText: "a1" },
+    });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(denials).toBe(1);
+    expect(deferred).toEqual(["t-d-2"]); // requeued, not lost
+    expect(bridge.queueDepth()).toBe(1);
+
+    // Simulate the human's turn finishing: we only observe idle again via our
+    // own accounting when OUR turn completes — Phase 0 drains retry on the
+    // next completion event we own. Trigger with a fresh submit+complete.
+    const r3 = await bridge.submitTask({ taskId: "t-d-3", text: "third" });
+    expect(r3.started).toBe(false); // goes behind t-d-2 in FIFO? No — unshift kept t-d-2 first
+    expect(bridge.queueDepth()).toBe(2);
+    // Free the thread: drain starts t-d-2 FIRST (order preserved).
+    app.broadcast({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: THREAD, turnId: "turn_d_999_unknown", finalText: "human turn done" },
+    });
+    // Human turn completed → thread idle → drain starts t-d-2 FIRST (order kept).
+    await new Promise((r) => setTimeout(r, 80));
+    expect(bridge.queueDepth()).toBe(1); // t-d-3 still waiting
+    expect(bridge.activeTurn()).toBe("turn_d_2");
+    await client.close();
+    await app.stop();
+  });
+});

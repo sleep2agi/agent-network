@@ -76,9 +76,24 @@ export class CodexAppServerBridge extends EventEmitter {
   private readonly label: string;
   private status: BridgeStatus = "connecting";
   private activeTurnId: string | null = null;
+  /**
+   * Synchronous claim taken BEFORE the `turn/start` RPC round-trip.
+   * `activeTurnId` alone is insufficient as a mutual-exclusion guard: it is
+   * only assigned after the server responds, so two concurrent
+   * `startTaskTurn` calls could both pass the `activeTurnId === null` check
+   * and double-start (通信龙 review finding #1).
+   */
+  private turnClaimed = false;
   private pendingTurns = new Map<string, PendingTurn>();
   /** Reverse-request ids we've observed but not resolved (bridge policy). */
   private waitingApprovals = new Map<number, WaitingApproval>();
+  /**
+   * FIFO of tasks waiting for the thread to go idle (通信龙 review finding #2;
+   * RFC §6.3 — Phase 0 gate requires the second concurrent task to queue
+   * stably rather than error). Drained on turn completion/error.
+   */
+  private taskQueue: Array<{ taskId: string; text: string; from?: string }> = [];
+  private draining = false;
 
   constructor(opts: CodexAppServerBridgeOptions) {
     super();
@@ -113,14 +128,16 @@ export class CodexAppServerBridge extends EventEmitter {
     text: string;
     from?: string;
   }): Promise<string> {
-    // Bridge discipline: one active turn at a time. Phase 0 queueing lives in
-    // the caller (per RFC §6.3 — scheduling is bridge-external for now). If
-    // callers race we surface it as an error rather than pretending to queue.
-    if (this.activeTurnId) {
+    // Bridge discipline: one active turn at a time. The claim is taken
+    // SYNCHRONOUSLY (before any await) so concurrent callers race cleanly:
+    // exactly one proceeds, the rest throw. Queueing callers should use
+    // `submitTask()` instead of this low-level primitive.
+    if (this.turnClaimed || this.activeTurnId) {
       throw new Error(
-        `${this.label}: refusing to start turn for task=${input.taskId} while turn=${this.activeTurnId} active`,
+        `${this.label}: refusing to start turn for task=${input.taskId} while turn=${this.activeTurnId ?? "(starting)"} active`,
       );
     }
+    this.turnClaimed = true;
     const clientUserMessageId = `anet:${input.taskId}`;
     const promptPrefix = input.from ? `[Agent Network/from=${input.from}/task=${input.taskId}] ` : `[Agent Network/task=${input.taskId}] `;
     const pending: PendingTurn = {
@@ -140,11 +157,13 @@ export class CodexAppServerBridge extends EventEmitter {
         input: [{ type: "text", text: promptPrefix + input.text }],
       });
     } catch (e) {
+      this.turnClaimed = false;
       this.setStatus("idle");
       throw e;
     }
     const turnId = extractTurnId(resp);
     if (!turnId) {
+      this.turnClaimed = false;
       this.setStatus("idle");
       throw new Error(
         `${this.label}: turn/start response did not include a turnId (task=${input.taskId})`,
@@ -154,6 +173,51 @@ export class CodexAppServerBridge extends EventEmitter {
     this.pendingTurns.set(turnId, pending);
     this.activeTurnId = turnId;
     return turnId;
+  }
+
+  /**
+   * Queueing entry point (Phase 0 gate: "两个 Agent 同时派 task，只创建一个
+   * active turn，另一个稳定排队"). If the thread is free the task starts
+   * immediately; otherwise it joins a FIFO drained on turn completion/error.
+   *
+   * Human-priority note (§6.1): the bridge only ever starts a turn when the
+   * shared thread is idle from ITS point of view; if the human TUI wins the
+   * idle race, `turn/start` fails with an active-turn error and the task is
+   * requeued at the FRONT (original order preserved) — the app-server is the
+   * authority (§6.3).
+   */
+  async submitTask(input: { taskId: string; text: string; from?: string }): Promise<
+    { started: true; turnId: string } | { started: false; queuedAt: number }
+  > {
+    if (this.turnClaimed || this.activeTurnId || this.taskQueue.length > 0) {
+      this.taskQueue.push(input);
+      this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
+      return { started: false, queuedAt: this.taskQueue.length };
+    }
+    const turnId = await this.startTaskTurn(input);
+    return { started: true, turnId };
+  }
+
+  /** Drain the FIFO after a turn finishes. One task per idle transition. */
+  private async drainQueue(): Promise<void> {
+    if (this.draining) return;
+    if (this.turnClaimed || this.activeTurnId) return;
+    const next = this.taskQueue.shift();
+    if (!next) return;
+    this.draining = true;
+    try {
+      await this.startTaskTurn(next);
+    } catch (e) {
+      // Lost the idle race to the human TUI (or transport error). Requeue at
+      // the FRONT to preserve order; retry on the next idle transition.
+      this.taskQueue.unshift(next);
+      this.emit("drain_deferred", {
+        taskId: next.taskId,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      this.draining = false;
+    }
   }
 
   /** Read-only accessors (for testing / observability). */
@@ -192,7 +256,13 @@ export class CodexAppServerBridge extends EventEmitter {
       this.onReverseRequest(rr),
     );
 
-    this.client.on("close", () => this.setStatus("offline"));
+    this.client.on("close", () => {
+      // Transport gone: release the claim so a future reconnect (Phase 1)
+      // can restart cleanly. Queue is intentionally preserved — those tasks
+      // were never accepted by the server.
+      this.turnClaimed = false;
+      this.setStatus("offline");
+    });
   }
 
   private onReverseRequest(rr: { id: number; method: string; params: unknown }): void {
@@ -282,23 +352,34 @@ export class CodexAppServerBridge extends EventEmitter {
     if (!p.turnId) return;
     const pending = this.pendingTurns.get(p.turnId);
     if (!pending) {
-      // Human-TUI-initiated turn completed. Absolutely no reply mapping.
+      // Human-TUI-initiated turn completed. Absolutely no reply mapping —
+      // but the thread just went idle, so queued Agent tasks may proceed
+      // (§6.1: human input had its priority; FIFO resumes after).
       this.emit("unowned_turn_drop", { turnId: p.turnId, event: "turn/completed" });
+      void this.drainQueue();
       return;
     }
     this.pendingTurns.delete(p.turnId);
     if (this.activeTurnId === p.turnId) {
       this.activeTurnId = null;
+      this.turnClaimed = false;
       this.setStatus(this.waitingApprovals.size > 0 ? "waiting_human" : "idle");
     }
     if (p.error?.message) {
       this.emit("task_error", { taskId: pending.taskId, error: p.error.message });
-      return;
+    } else {
+      const text = typeof p.finalText === "string" && p.finalText.length > 0
+        ? p.finalText
+        : pending.agentTextChunks.join("");
+      this.emit("task_reply", { taskId: pending.taskId, text });
     }
-    const text = typeof p.finalText === "string" && p.finalText.length > 0
-      ? p.finalText
-      : pending.agentTextChunks.join("");
-    this.emit("task_reply", { taskId: pending.taskId, text });
+    // Either way the thread just went idle from our perspective → drain FIFO.
+    void this.drainQueue();
+  }
+
+  /** Read-only queue depth (for tests / observability). */
+  queueDepth(): number {
+    return this.taskQueue.length;
   }
 
   private setStatus(next: BridgeStatus): void {
