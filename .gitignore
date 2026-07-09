@@ -34,3 +34,6 @@ agent-network/tests/docker-e2e/results/
 # Dashboard screenshots hosted via Release assets
 docs/dashboard-screenshots/
 .qa-status-history
+
+# RFC-030 live demo (hub db + node config w/ ntok — never commit)
+.demo/
