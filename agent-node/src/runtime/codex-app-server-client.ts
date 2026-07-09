@@ -119,6 +119,11 @@ export class CodexAppServerClient extends EventEmitter {
     this.defaultTimeoutMs = opts.defaultTimeoutMs ?? 30_000;
   }
 
+  /** True while the socket is open (constructed and not yet closed). */
+  get isConnected(): boolean {
+    return !!this.ws && !this.closed;
+  }
+
   /** Open the WebSocket. Resolves on `open`; rejects on first `error`. */
   async connect(): Promise<void> {
     if (this.ws) throw new Error("CodexAppServerClient already connected");

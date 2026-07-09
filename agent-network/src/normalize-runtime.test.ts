@@ -91,6 +91,33 @@ describe("normalizeRuntime — explicit choices are preserved", () => {
   test("profile with runtime='opencode' → opencode-cli", () => {
     expect(normalizeRuntime({ runtime: "opencode" } as any)).toBe("opencode-cli");
   });
+
+  // RFC-030 — codex TUI bridge (standalone `codex app-server`). Canonical
+  // `codex-app-server` plus aliases `codex-tui` / `codex-appserver`. These
+  // must NOT collapse into `codex-sdk` (a different runtime).
+  test("explicit 'codex-app-server' → codex-app-server", () => {
+    expect(normalizeRuntime("codex-app-server")).toBe("codex-app-server");
+  });
+
+  test("alias 'codex-tui' → codex-app-server", () => {
+    expect(normalizeRuntime("codex-tui")).toBe("codex-app-server");
+  });
+
+  test("alias 'codex-appserver' → codex-app-server", () => {
+    expect(normalizeRuntime("codex-appserver")).toBe("codex-app-server");
+  });
+
+  test("'codex-sdk' still → codex-sdk (not shadowed by the app-server branch)", () => {
+    expect(normalizeRuntime("codex-sdk")).toBe("codex-sdk");
+  });
+
+  test("'codex' still → codex-sdk (legacy short alias unchanged)", () => {
+    expect(normalizeRuntime("codex")).toBe("codex-sdk");
+  });
+
+  test("profile with runtime='codex-app-server' → codex-app-server", () => {
+    expect(normalizeRuntime({ runtime: "codex-app-server" } as any)).toBe("codex-app-server");
+  });
 });
 
 describe("normalizeRuntime — profile object paths", () => {

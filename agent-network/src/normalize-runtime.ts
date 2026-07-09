@@ -16,7 +16,8 @@ export type RuntimeName =
   | "codex-sdk"
   | "claude-agent-sdk"
   | "grok-build-acp"
-  | "opencode-cli";
+  | "opencode-cli"
+  | "codex-app-server";
 
 /** Operator-facing default for any runtime slot that comes in empty / missing / unrecognized. */
 export const DEFAULT_RUNTIME: RuntimeName = "claude-agent-sdk";
@@ -32,6 +33,14 @@ type ProfileLike = {
 
 export function normalizeRuntime(profileOrRuntime?: ProfileLike | string): RuntimeName {
   if (typeof profileOrRuntime === "string") {
+    // RFC-030 — codex TUI bridge (standalone `codex app-server`). Aliases:
+    // `codex-tui` / `codex-app-server` / `codex-appserver`. Checked BEFORE
+    // the `codex`/`codex-sdk` branch so the more specific names win.
+    if (
+      profileOrRuntime === "codex-app-server" ||
+      profileOrRuntime === "codex-appserver" ||
+      profileOrRuntime === "codex-tui"
+    ) return "codex-app-server";
     if (profileOrRuntime === "codex" || profileOrRuntime === "codex-sdk") return "codex-sdk";
     if (
       profileOrRuntime === "grok" ||
