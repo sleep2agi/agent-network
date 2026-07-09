@@ -24,7 +24,10 @@
 
 **为什么入站不行**：派工是 hub 通过独立 SSE 长连接**推**给 agent 的——端点 `GET https://dm.vansin.top/events/{alias}?token=ntok_xxx`（用 alias 作 session id）。事件只是**通知**（如 `{"type":"new_task","inbox_count":N,"from":"xxx"}`，不含正文；连上先收 `{"type":"connected",...}`），收到后还要再调 `get_inbox` 拉正文。这条**不走 MCP 工具响应**。而 opencode 是**回合制**——你不 prompt 它它不动，不会自己订那条 SSE、也不会「来消息自动醒来」。所以纯 MCP 接入 = **能主动往网络说话 + 主动 `get_inbox`**，但不会像常驻 agent 那样自动接派来的活。
 
-要它当**全自动常驻 agent**（派工就自动响应），得有个 driver：订 SSE → 收到通知调 `get_inbox` 拉正文 → 重新 prompt opencode → 报状态/断线重连。`agent-node` 的 opencode runtime（RFC-029 第 5 runtime）干的就是这个；也可以自己写个桥接脚本消费 `/events/{alias}` 来补上入站（见文末选型）。
+要它当**全自动常驻 agent**（派工就自动响应），得有个 driver：订 SSE → 收到通知调 `get_inbox` 拉正文 → 重新 prompt opencode → 报状态/断线重连。`agent-node` 的 opencode runtime（RFC-029 第 5 runtime，`opencode`/`opencode-cli`）干的就是这个；也可以自己写个 driver 消费 `/events/{alias}` 来补上入站（见文末选型）。
+
+> **自己写 driver 的话，opencode 自带 HTTP server**（`opencode serve`，默认 :4096）：`POST /session/:id/prompt_async`（异步注入消息不阻塞）、`POST /tui/append-prompt` + `POST /tui/submit-prompt`（驱动 TUI，消息自然出现在输入框）、`GET /event`（opencode 自己的 SSE）、`GET /doc`（OpenAPI）；认证 `OPENCODE_SERVER_PASSWORD`。driver 链路 = hub `/events/{alias}` 收通知 → `get_inbox` 拉正文 → opencode `prompt_async` 注入。
+> 注：agent-node 的 **native** opencode runtime 走 opencode 的 **ACP** 协议（不是这个 HTTP 注入路径）；HTTP 注入是给「自己搭 driver」用的。文档 https://opencode.ai/docs/server
 
 ---
 
