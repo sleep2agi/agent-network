@@ -397,8 +397,8 @@ Measured: the hub's `send_reply` enqueues the reply into the originator's inbox 
 - You want **multiple independent codex nodes**
 - You want the standard `codex app-server` protocol rather than the SDK wrapper
 
-::: warning Verification status
-Phase 0/1 is shipped and self-verified against a live codex: bridge 17 + client 12 unit tests, 741 full-suite tests with zero regression, and an isolated-hub **real-node e2e** (`send_task` → codex → `send_task` closed loop PASS). Approvals are human-only by design; the adopt topology's `codexAppServerUrl`/`codexThreadId` are set manually in config for now. See [RFC-030 §18 Implementation Status](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md).
+::: warning Verification status (Phase 0A / preview only)
+This is the **direct dual-client** design — self-verified against a live codex (bridge 17 + client 12 unit tests, 741 full-suite zero regression, isolated-hub **real-node e2e** `send_task`→codex→`send_task` closed loop PASS), suitable for a **single trusted machine preview**. It is **not yet production-hardened**: the human TUI and the bridge connect directly to codex and can race on an active turn, "approvals are human-only" is code discipline rather than a permission boundary, and the bridge holds the raw app-server control plane. The production shape is a **single upstream Policy Gateway** (serialized arbitration + approvals routed only to the human + a minimal typed enqueue surface). See [RFC-030 §18 + §8 gates](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md).
 :::
 
 ---

@@ -1,7 +1,8 @@
 # RFC-030：Codex TUI 人类与 Agent 共用会话桥接（app-server transport）
 
-> 状态：**已落地 Phase 0/1（Implemented, 2026-07-10）** · 通信龙实现 + 真机 e2e 自验 · Vincent 授权
-> 分支：`rfc030-phase0` · 落地实现的权威说明见下方 **§18 实现现状**（本节推翻了原始设计正文里若干猜测字段, 以真机 codex-cli 0.144.0 为准）。
+> 状态：**Accepted for Phase 0A（直接链路已验证）; 生产上线被 §8 硬门 blocked**（2026-07-10）
+> ⚠️ 已落地的是**方案 A 直接双客户端**（Phase 0A 验证形态, 仅单机可信 preview）; **生产形态是方案 B「单 upstream Policy Gateway」, 尚未实现**。详见配套设计文档 `agent-network-codex-tui-bridge-design.md`（§2.3 三个硬问题 / §3.2 gateway / §8 验收门 / §9 本 RFC 必改清单）。
+> 分支：`rfc030-phase0` · 已落地实现的权威说明见下方 **§18 实现现状**（以真机 codex-cli 0.144.0 为准）。
 > 关联 tracking issue 见下; 原始设计正文（§1–§17）保留作为设计背景。
 
 
@@ -853,20 +854,28 @@ codex app-server generate-json-schema --out ./schemas
 
 ---
 
-## 18. 实现现状（Implemented 2026-07-10, 权威）
+## 18. 实现现状（Phase 0A 已验证, 2026-07-10）
 
-> 本节记录**已落地并真机自验**的实现。凡与 §1–§17 设计正文冲突处, **以本节为准**——设计正文写作时 codex app-server 协议字段是推测的, 落地时以真机 `codex-cli 0.144.0` 抓包为准做了修正。
-> 分支 `rfc030-phase0`; 关键 commit 见 tracking issue。
+> ⚠️ **定位**：本节记录的是**方案 A 直接双客户端**的落地——对应配套设计文档 `agent-network-codex-tui-bridge-design.md` 的 **Phase 0A「直接链路验证」（该文档标记为已完成）**。它**证明了产品方向且能真机 demo, 但不是生产形态**：设计文档明确「不批准直接双客户端上线」, 生产必须走 **方案 B 单 upstream Policy Gateway**（见该文档 §3.2 / §4）。本节所述能力在**单机可信 preview** 语义下为真; 生产上线被设计文档 §8 硬门 blocked。
+> 凡协议字段与 §1–§17 设计正文冲突处, **以本节为准**（真机 `codex-cli 0.144.0` 抓包修正）。分支 `rfc030-phase0`; 关键 commit 见 tracking issue。
 
-### 18.1 落地了什么
+### 18.1 落地了什么（Phase 0A + 运行时/CLI/文档管道）
 
 | 能力 | 状态 | 验证方式 |
 |---|---|---|
 | App Server JSON-RPC client (`codex-app-server-client.ts`) | ✅ | 12 单测 + 真机 |
-| Bridge（create-or-resume thread / 单活跃 turn / FIFO 队列 / 审批只归人类）(`codex-app-server-bridge.ts`) | ✅ | 17 单测 + 真机 2-client gate |
-| `codex-app-server` runtime（`codex-app-server/runtime.ts` + `cli.ts` 接线）| ✅ | 741 全量测试 + 真节点 e2e |
+| Bridge（create-or-resume thread / 单活跃 turn / FIFO 队列）(`codex-app-server-bridge.ts`) | ✅ Phase 0A | 17 单测 + 真机 2-client gate |
+| `codex-app-server` runtime（`runtime.ts` + `cli.ts` 接线）| ✅ Phase 0A | 741 全量测试 + 真节点 e2e |
 | 网络闭环：`send_task` → 桥 → 真 codex → `send_task` 回 | ✅ | 隔离 hub 真节点 e2e PASS |
 | `anet node create --runtime codex-app-server` | ✅ | 隔离 hub 真建节点，config 写 `runtime:"codex-app-server"` |
+
+### 18.1b 明确**未**落地（生产前置, 设计文档 §3.2/§4/§8）
+
+- ❌ **Policy Gateway（方案 B）**：唯一 upstream app-server 连接、TUI 经 gateway UDS、request-id 双向重写、事件转发。当前是 TUI 与桥**直接双连接**。
+- ❌ **原子 reservation 跨 gateway**：当前桥的 FIFO 只协调桥自己, **不能阻止人类 TUI 与桥在 app-server 上争抢 `turn/start`**（设计文档 §2.3-A：active turn 下可能隐式 steer）。
+- ⚠️ **审批边界**：桥「不答审批」是**代码纪律, 不是权限边界**（§2.3-B：审批是多订阅者第一响应者）。
+- ⚠️ **控制面最小权限**：桥持有 app-server 原始 endpoint（§2.3-C：含 sandbox 外 `thread/shellCommand`）。
+- ❌ WS 仅 loopback PoC; 产品路径应为 UDS。
 
 ### 18.2 真机协议修正（推翻设计正文的猜测）
 

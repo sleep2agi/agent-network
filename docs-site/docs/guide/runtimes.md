@@ -417,8 +417,8 @@ anet node start codexbridge
 - 想开**多个独立 codex 节点**各干各的
 - 想要标准 `codex app-server` 协议而非 SDK 封装
 
-::: warning 验证状态
-Phase 0/1 已落地并真机自验：桥 17 + client 12 单测、741 全量测试零回归、隔离 hub **真节点 e2e**（`send_task` → codex → `send_task` 闭环 PASS）。审批流为设计上「只归人类」；接管拓扑的 `codexAppServerUrl`/`codexThreadId` 目前手工写 config。详见 [RFC-030 §18 实现现状](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)。
+::: warning 验证状态（Phase 0A / preview 形态）
+当前是**方案 A 直接双客户端**——已真机自验（桥 17 + client 12 单测、741 全量零回归、隔离 hub **真节点 e2e** `send_task`→codex→`send_task` 闭环 PASS），适用于**单机可信 preview**。**尚未**做生产加固：人类 TUI 与桥直连 codex 会在 active turn 争抢、审批「只归人类」目前是代码纪律非权限边界、桥持有 app-server 原始控制面。生产形态是**方案 B 单 upstream Policy Gateway**（排队仲裁 + 审批只递人类 + 最小权限投递口），见 [RFC-030 §18 实现现状 + §8 硬门](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)。
 :::
 
 ---
