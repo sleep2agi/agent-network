@@ -1,9 +1,10 @@
 # RFC-030：Codex TUI 人类与 Agent 共用会话桥接（app-server transport）
 
-> 状态：**Accepted for Phase 0A（直接链路已验证）; 生产上线被 §8 硬门 blocked**（2026-07-10）
+> 状态：**Accepted for Phase 0A（直接链路已验证, 已 merge 为 opt-in preview runtime）; 生产上线被 §8 硬门 blocked**（2026-07-10）
 > ⚠️ 已落地的是**方案 A 直接双客户端**（Phase 0A 验证形态, 仅单机可信 preview）; **生产形态是方案 B「单 upstream Policy Gateway」, 尚未实现**。详见配套设计文档 `agent-network-codex-tui-bridge-design.md`（§2.3 三个硬问题 / §3.2 gateway / §8 验收门 / §9 本 RFC 必改清单）。
-> 分支：`rfc030-phase0` · 已落地实现的权威说明见下方 **§18 实现现状**（以真机 codex-cli 0.144.0 为准）。
-> 关联 tracking issue 见下; 原始设计正文（§1–§17）保留作为设计背景。
+> 已落地实现的权威说明见下方 **§18 实现现状**（以真机 codex-cli 0.144.0 为准）。关联 tracking issue 见下; 原始设计正文（§1–§17）保留作为设计背景。
+>
+> **决策更新 2026-07-10（Vincent）**：产品形态定为**独立 codex-cli TUI runtime**（`codex app-server` + `codex --remote` 真 TUI），**不走 §8.1 的「先作为 codex-sdk transport」那一步**——因为整个价值就是人和 agent 共用真正的 codex-cli TUI/thread，codex-sdk 是自管 headless 进程、无共享 TUI。§8.1 第一步作废，直奔独立 runtime；其余（Phase 分期、安全边界、read-only、PR 拆分）不变。
 
 
 > 原始设计基线（历史）：`sleep2agi/agent-network@84136dc`（2026-07-09）  
