@@ -318,18 +318,17 @@ export class CodexAppServerBridge extends EventEmitter {
   }
 
   private onTurnStarted(params: unknown): void {
-    // Filter: turns started by other subscribers (the human TUI) must not
-    // touch bridge accounting.
-    const p = params as { threadId?: string; turnId?: string };
+    // REAL-WIRE: turn/started params = { threadId, turn: { id, status, … } }.
+    const p = params as { threadId?: string };
     if (!p || p.threadId !== this.threadId) {
       this.emit("cross_thread_drop", { event: "turn/started", params });
       return;
     }
-    if (!p.turnId) return;
-    if (!this.pendingTurns.has(p.turnId)) {
-      // A turn we didn't start (§7.5 rule). Emit for observability, but
-      // do not touch status or claim ownership.
-      this.emit("unowned_turn_drop", { turnId: p.turnId, event: "turn/started" });
+    const turnId = extractTurnId(params);
+    if (!turnId) return;
+    if (!this.pendingTurns.has(turnId)) {
+      // A turn we didn't start (§7.5 rule) — e.g. the human TUI. Observe only.
+      this.emit("unowned_turn_drop", { turnId, event: "turn/started" });
       return;
     }
   }
@@ -340,50 +339,72 @@ export class CodexAppServerBridge extends EventEmitter {
   }
 
   private onAgentDelta(params: unknown): void {
-    const p = params as { threadId?: string; turnId?: string; delta?: { text?: string } };
+    // REAL-WIRE: item/agentMessage/delta = { threadId, turnId, itemId, delta }
+    // where `delta` is a plain string (NOT { text }).
+    const p = params as { threadId?: string; turnId?: string; delta?: unknown };
     if (!p || p.threadId !== this.threadId) return;
-    if (!p.turnId) return;
+    if (typeof p.turnId !== "string") return;
     const pending = this.pendingTurns.get(p.turnId);
     if (!pending) return; // Not our turn — human TUI is receiving deltas too.
-    if (typeof p.delta?.text === "string") pending.agentTextChunks.push(p.delta.text);
+    if (typeof p.delta === "string") pending.agentTextChunks.push(p.delta);
   }
 
-  private onItemCompleted(_params: unknown): void {
-    // No-op in Phase 0.
-  }
-
-  private onTurnCompleted(params: unknown): void {
+  private onItemCompleted(params: unknown): void {
+    // REAL-WIRE: item/completed = { item: { type, text, phase, … }, threadId,
+    // turnId }. The final agent answer is the agentMessage item with
+    // phase === "final_answer". Capture it as the authoritative reply text.
     const p = params as {
       threadId?: string;
       turnId?: string;
-      finalText?: string;
-      error?: { message?: string };
+      item?: { type?: string; text?: string; phase?: string };
+    };
+    if (!p || p.threadId !== this.threadId) return;
+    if (typeof p.turnId !== "string") return;
+    const pending = this.pendingTurns.get(p.turnId);
+    if (!pending) return;
+    if (
+      p.item?.type === "agentMessage" &&
+      p.item.phase === "final_answer" &&
+      typeof p.item.text === "string"
+    ) {
+      pending.finalText = p.item.text;
+    }
+  }
+
+  private onTurnCompleted(params: unknown): void {
+    // REAL-WIRE: turn/completed = { threadId, turn: { id, status, error, … } }.
+    const p = params as {
+      threadId?: string;
+      turn?: { id?: string; status?: string; error?: { message?: string } | null };
     };
     if (!p || p.threadId !== this.threadId) {
       this.emit("cross_thread_drop", { event: "turn/completed", params });
       return;
     }
-    if (!p.turnId) return;
-    const pending = this.pendingTurns.get(p.turnId);
+    const turnId = extractTurnId(params);
+    if (!turnId) return;
+    const pending = this.pendingTurns.get(turnId);
     if (!pending) {
       // Human-TUI-initiated turn completed. Absolutely no reply mapping —
       // but the thread just went idle, so queued Agent tasks may proceed
       // (§6.1: human input had its priority; FIFO resumes after).
-      this.emit("unowned_turn_drop", { turnId: p.turnId, event: "turn/completed" });
+      this.emit("unowned_turn_drop", { turnId, event: "turn/completed" });
       void this.drainQueue();
       return;
     }
-    this.pendingTurns.delete(p.turnId);
-    if (this.activeTurnId === p.turnId) {
+    this.pendingTurns.delete(turnId);
+    if (this.activeTurnId === turnId) {
       this.activeTurnId = null;
       this.turnClaimed = false;
       this.setStatus(this.waitingApprovals.size > 0 ? "waiting_human" : "idle");
     }
-    if (p.error?.message) {
-      this.emit("task_error", { taskId: pending.taskId, error: p.error.message });
+    const turnErr = p.turn?.error?.message;
+    if (turnErr) {
+      this.emit("task_error", { taskId: pending.taskId, error: turnErr });
     } else {
-      const text = typeof p.finalText === "string" && p.finalText.length > 0
-        ? p.finalText
+      // Prefer the captured final_answer item; fall back to accumulated deltas.
+      const text = pending.finalText && pending.finalText.length > 0
+        ? pending.finalText
         : pending.agentTextChunks.join("");
       this.emit("task_reply", { taskId: pending.taskId, text });
     }
@@ -408,10 +429,15 @@ export class CodexAppServerBridge extends EventEmitter {
 // Field extractors — defensive against schema drift.
 // ────────────────────────────────────────────────────────────────────────────
 
-function extractTurnId(resp: unknown): string | null {
-  if (!resp || typeof resp !== "object") return null;
-  const r = resp as { turnId?: unknown };
-  return typeof r.turnId === "string" ? r.turnId : null;
+// REAL-WIRE (codex-cli 0.144.0): turn/start response and turn/{started,completed}
+// events nest the id under `turn.id`; only item-level events use a flat
+// `turnId`. Accept both so this survives either surface.
+function extractTurnId(v: unknown): string | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as { turn?: { id?: unknown }; turnId?: unknown };
+  if (o.turn && typeof o.turn === "object" && typeof o.turn.id === "string") return o.turn.id;
+  if (typeof o.turnId === "string") return o.turnId;
+  return null;
 }
 
 /** Recognise the app-server's "already initialized" rejection (shared server). */

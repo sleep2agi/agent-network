@@ -78,7 +78,7 @@ async function startFakeApp(config?: {
             } else if (parsed.method === "thread/resume") {
               respond({ result: {} });
             } else if (parsed.method === "turn/start") {
-              respond({ result: { turnId: `turn_${received.length}` } });
+              respond({ result: { turn: { id: `turn_${received.length}` } } });
             }
           }
         }
@@ -150,10 +150,11 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     const turnId = await bridge.startTaskTurn({ taskId: "task_1", text: "hello" });
     const replies: Array<{ taskId: string; text: string }> = [];
     bridge.on("task_reply", (r) => replies.push(r as never));
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId, item: { type: "agentMessage", phase: "final_answer", text: "done!" } } });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: THREAD, turnId, finalText: "done!" },
+      params: { threadId: THREAD, turn: { id: turnId } },
     });
     await tick(10);
     expect(replies).toEqual([{ taskId: "task_1", text: "done!" }]);
@@ -168,17 +169,17 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     app.broadcast({
       jsonrpc: "2.0",
       method: "item/agentMessage/delta",
-      params: { threadId: THREAD, turnId, delta: { text: "hello " } },
+      params: { threadId: THREAD, turnId, delta: "hello " },
     });
     app.broadcast({
       jsonrpc: "2.0",
       method: "item/agentMessage/delta",
-      params: { threadId: THREAD, turnId, delta: { text: "world" } },
+      params: { threadId: THREAD, turnId, delta: "world" },
     });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: THREAD, turnId /* no finalText */ },
+      params: { threadId: THREAD, turn: { id: turnId } },
     });
     await tick(10);
     expect(replies).toEqual([{ taskId: "task_1", text: "hello world" }]);
@@ -190,10 +191,11 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     const drops: unknown[] = [];
     bridge.on("task_reply", (r) => replies.push(r));
     bridge.on("unowned_turn_drop", (d) => drops.push(d));
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_human_only", item: { type: "agentMessage", phase: "final_answer", text: "human turn text" } } });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: THREAD, turnId: "turn_human_only", finalText: "human turn text" },
+      params: { threadId: THREAD, turn: { id: "turn_human_only" } },
     });
     await tick(10);
     expect(replies).toHaveLength(0);
@@ -203,10 +205,11 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
   test("events for a DIFFERENT thread are dropped (defense in depth)", async () => {
     const drops: unknown[] = [];
     bridge.on("cross_thread_drop", (d) => drops.push(d));
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: "OTHER_THREAD", turnId: "whatever", item: { type: "agentMessage", phase: "final_answer", text: "nope" } } });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: "OTHER_THREAD", turnId: "whatever", finalText: "nope" },
+      params: { threadId: "OTHER_THREAD", turn: { id: "whatever" } },
     });
     await tick(10);
     expect(drops).toHaveLength(1);
@@ -233,7 +236,7 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: THREAD, turnId, error: { message: "model unavailable" } },
+      params: { threadId: THREAD, turn: { id: turnId, error: { message: "model unavailable" } } },
     });
     await tick(10);
     expect(replies).toHaveLength(0);
@@ -389,10 +392,11 @@ describe("CodexAppServerBridge — two-client race for idle", () => {
     bridgeA.on("task_reply", (r) => repliesA.push(r as never));
     bridgeB.on("task_reply", (r) => repliesB.push(r as never));
 
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: winningTurnId, item: { type: "agentMessage", phase: "final_answer", text: "shared reply" } } });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: THREAD, turnId: winningTurnId, finalText: "shared reply" },
+      params: { threadId: THREAD, turn: { id: winningTurnId } },
     });
     await tick(15);
 
@@ -429,7 +433,7 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
           turnStartCount++;
           // Slow server: respond after 50ms so the pre-response race window
           // (the original bug) is wide open.
-          setTimeout(() => respond({ result: { turnId: "turn_slow_1" } }), 50);
+          setTimeout(() => respond({ result: { turn: { id: "turn_slow_1" } } }), 50);
         }
       },
     });
@@ -459,7 +463,7 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
         if (msg.method === "thread/resume") return respond({ result: {} });
         if (msg.method === "turn/start") {
           seq++;
-          respond({ result: { turnId: `turn_q_${seq}` } });
+          respond({ result: { turn: { id: `turn_q_${seq}` } } });
         }
       },
     });
@@ -481,20 +485,22 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(bridge.queueDepth()).toBe(1);
 
     // Complete turn 1 → bridge should auto-drain and start turn 2.
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_q_1", item: { type: "agentMessage", phase: "final_answer", text: "answer-1" } } });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: THREAD, turnId: "turn_q_1", finalText: "answer-1" },
+      params: { threadId: THREAD, turn: { id: "turn_q_1" } },
     });
     // Wait for the drain's turn/start round-trip.
     await new Promise((r) => setTimeout(r, 80));
     expect(bridge.queueDepth()).toBe(0);
     expect(bridge.activeTurn()).toBe("turn_q_2");
 
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_q_2", item: { type: "agentMessage", phase: "final_answer", text: "answer-2" } } });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: THREAD, turnId: "turn_q_2", finalText: "answer-2" },
+      params: { threadId: THREAD, turn: { id: "turn_q_2" } },
     });
     await new Promise((r) => setTimeout(r, 30));
     expect(replies.map((r) => r.taskId)).toEqual(["t-q-1", "t-q-2"]);
@@ -519,7 +525,7 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
             return respond({ error: { code: -32009, message: "turn already active" } });
           }
           seq++;
-          respond({ result: { turnId: `turn_d_${seq}` } });
+          respond({ result: { turn: { id: `turn_d_${seq}` } } });
         }
       },
     });
@@ -534,10 +540,11 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     await bridge.submitTask({ taskId: "t-d-2", text: "second" }); // queued
     // Human TUI "wins" the next idle: server denies our drain's turn/start.
     denyNext = true;
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_d_1", item: { type: "agentMessage", phase: "final_answer", text: "a1" } } });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: THREAD, turnId: "turn_d_1", finalText: "a1" },
+      params: { threadId: THREAD, turn: { id: "turn_d_1" } },
     });
     await new Promise((r) => setTimeout(r, 80));
     expect(denials).toBe(1);
@@ -551,10 +558,11 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(r3.started).toBe(false); // goes behind t-d-2 in FIFO? No — unshift kept t-d-2 first
     expect(bridge.queueDepth()).toBe(2);
     // Free the thread: drain starts t-d-2 FIRST (order preserved).
+    app.broadcast({ jsonrpc: "2.0", method: "item/completed", params: { threadId: THREAD, turnId: "turn_d_999_unknown", item: { type: "agentMessage", phase: "final_answer", text: "human turn done" } } });
     app.broadcast({
       jsonrpc: "2.0",
       method: "turn/completed",
-      params: { threadId: THREAD, turnId: "turn_d_999_unknown", finalText: "human turn done" },
+      params: { threadId: THREAD, turn: { id: "turn_d_999_unknown" } },
     });
     // Human turn completed → thread idle → drain starts t-d-2 FIRST (order kept).
     await new Promise((r) => setTimeout(r, 80));
