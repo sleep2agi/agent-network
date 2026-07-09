@@ -1,15 +1,15 @@
 # RFC-030：Codex TUI 人类与 Agent 共用会话桥接（app-server transport）
 
-> 状态：**Accepted（通信龙 review 通过, Vincent 授权实施 2026-07-10）** · 先做 Phase 0/1, 保守边界
-> 关联 tracking issue 见下; 原始设计正文如下。
+> 状态：**Accepted for Phase 0A（直接链路已验证, 已 merge 为 opt-in preview runtime）; 生产上线被 §8 硬门 blocked**（2026-07-10）
+> ⚠️ 已落地的是**方案 A 直接双客户端**（Phase 0A 验证形态, 仅单机可信 preview）; **生产形态是方案 B「单 upstream Policy Gateway」, 尚未实现**。详见配套设计文档 `agent-network-codex-tui-bridge-design.md`（§2.3 三个硬问题 / §3.2 gateway / §8 验收门 / §9 本 RFC 必改清单）。
+> 已落地实现的权威说明见下方 **§18 实现现状**（以真机 codex-cli 0.144.0 为准）。关联 tracking issue 见下; 原始设计正文（§1–§17）保留作为设计背景。
 >
 > **决策更新 2026-07-10（Vincent）**：产品形态定为**独立 codex-cli TUI runtime**（`codex app-server` + `codex --remote` 真 TUI），**不走 §8.1 的「先作为 codex-sdk transport」那一步**——因为整个价值就是人和 agent 共用真正的 codex-cli TUI/thread，codex-sdk 是自管 headless 进程、无共享 TUI。§8.1 第一步作废，直奔独立 runtime；其余（Phase 分期、安全边界、read-only、PR 拆分）不变。
 
 
-> 状态：设计提案，尚未在 Agent Network 主干实现  
-> 评审基线：`sleep2agi/agent-network@84136dc`（2026-07-09）  
+> 原始设计基线（历史）：`sleep2agi/agent-network@84136dc`（2026-07-09）  
 > Codex 验证基线：`codex-cli 0.144.0`（2026-07-10）  
-> 建议落点：先作为 `codex-sdk` 的 `app-server` transport 预览开关验证，再决定是否提升为独立 runtime
+> 原始设计正文（§1–§17）落点建议为「先作为 `codex-sdk` 的 app-server transport」；**实际落地采用独立 `codex-app-server` runtime**（Vincent 定「用 codex-cli TUI 模式、别用 codex-sdk」），详见 §18。
 
 ## 1. 摘要
 
@@ -852,3 +852,70 @@ codex app-server generate-json-schema --out ./schemas
 - [RFC-006：旧 remote-control 路线](https://github.com/sleep2agi/agent-network/blob/84136dc25e2e1a06b2af984aaf8fa0ce49cdace4/docs/rfcs/RFC-006-codex-code-cli-mcp-server.md)
 - [RFC-007：mcp-server 路线](https://github.com/sleep2agi/agent-network/blob/84136dc25e2e1a06b2af984aaf8fa0ce49cdace4/docs/rfcs/RFC-007-codex-code-cli-mcp.md)
 - [RFC-012：Codex 与 CommHub MCP 桥接](https://github.com/sleep2agi/agent-network/blob/84136dc25e2e1a06b2af984aaf8fa0ce49cdace4/docs/rfcs/RFC-012-codex-mobile-bridge.md)
+
+---
+
+## 18. 实现现状（Phase 0A 已验证, 2026-07-10）
+
+> ⚠️ **定位**：本节记录的是**方案 A 直接双客户端**的落地——对应配套设计文档 `agent-network-codex-tui-bridge-design.md` 的 **Phase 0A「直接链路验证」（该文档标记为已完成）**。它**证明了产品方向且能真机 demo, 但不是生产形态**：设计文档明确「不批准直接双客户端上线」, 生产必须走 **方案 B 单 upstream Policy Gateway**（见该文档 §3.2 / §4）。本节所述能力在**单机可信 preview** 语义下为真; 生产上线被设计文档 §8 硬门 blocked。
+> 凡协议字段与 §1–§17 设计正文冲突处, **以本节为准**（真机 `codex-cli 0.144.0` 抓包修正）。分支 `rfc030-phase0`; 关键 commit 见 tracking issue。
+
+### 18.1 落地了什么（Phase 0A + 运行时/CLI/文档管道）
+
+| 能力 | 状态 | 验证方式 |
+|---|---|---|
+| App Server JSON-RPC client (`codex-app-server-client.ts`) | ✅ | 12 单测 + 真机 |
+| Bridge（create-or-resume thread / 单活跃 turn / FIFO 队列）(`codex-app-server-bridge.ts`) | ✅ Phase 0A | 17 单测 + 真机 2-client gate |
+| `codex-app-server` runtime（`runtime.ts` + `cli.ts` 接线）| ✅ Phase 0A | 741 全量测试 + 真节点 e2e |
+| 网络闭环：`send_task` → 桥 → 真 codex → `send_task` 回 | ✅ | 隔离 hub 真节点 e2e PASS |
+| `anet node create --runtime codex-app-server` | ✅ | 隔离 hub 真建节点，config 写 `runtime:"codex-app-server"` |
+
+### 18.1b 明确**未**落地（生产前置, 设计文档 §3.2/§4/§8）
+
+- ❌ **Policy Gateway（方案 B）**：唯一 upstream app-server 连接、TUI 经 gateway UDS、request-id 双向重写、事件转发。当前是 TUI 与桥**直接双连接**。
+- ❌ **原子 reservation 跨 gateway**：当前桥的 FIFO 只协调桥自己, **不能阻止人类 TUI 与桥在 app-server 上争抢 `turn/start`**（设计文档 §2.3-A：active turn 下可能隐式 steer）。
+- ⚠️ **审批边界**：桥「不答审批」是**代码纪律, 不是权限边界**（§2.3-B：审批是多订阅者第一响应者）。
+- ⚠️ **控制面最小权限**：桥持有 app-server 原始 endpoint（§2.3-C：含 sandbox 外 `thread/shellCommand`）。
+- ❌ WS 仅 loopback PoC; 产品路径应为 UDS。
+
+### 18.2 真机协议修正（推翻设计正文的猜测）
+
+以 `codex-cli 0.144.0` 真机为准, 落地时修正了以下字段（原 §7 是推测）：
+
+1. **`initialize` 是 per-app-server, 不是 per-connection**。共享 server 上第二个 client 再发 `initialize` 会收到 `-32600 Already initialized`——桥容错并直接进入 thread 绑定。（§7.2「每个连接必须单独初始化」是**错的**。）
+2. **`turnId` 嵌套在 `turn.id`**：`turn/start` 响应与 `turn/{started,completed}` 事件都用 `turn.id`；item 级事件（delta / `item/completed`）用扁平 `turnId`。
+3. **`item/agentMessage/delta.delta` 是纯字符串**, 不是 `{ text }`。
+4. **最终答案在 `item/completed`**（`item.type=agentMessage, phase=final_answer, item.text`）, **`turn/completed` 里没有 finalText**。桥在 `item/completed` 抓最终文本, 累积 deltas 作兜底。
+5. **反向请求（审批）同时带 `method` 和 `id`**；client dispatch 必须先判 `method` 再判 `id`, 否则审批被误判成孤儿响应。
+
+### 18.3 两种拓扑
+
+- **独占（owned, 默认）**：节点自己 `spawn codex app-server --listen ws://127.0.0.1:<临时端口>`, 桥 `thread/start` 新建并拥有一条 thread。多个节点互不干扰（各自 app-server + thread）。
+- **接管已有会话（shared / adopt）**：config 设 `codexAppServerUrl`（指向正在运行的 `codex app-server`）+ `codexThreadId`（已有线程）→ 桥作为**第二个 client** 接入、`thread/resume` 复用该线程。于是一个正在被人类 `codex --remote` TUI 使用的会话**同时变成网络节点**。桥**永不代答审批**（审批只归人类 TUI）。
+- 若 `thread/resume` 因线程从未持久化 rollout 而失败（`no rollout found`）, 桥回退到 `thread/start` 新建, 不让陈旧 id 卡死开机。
+
+### 18.4 回复走 send_task（实测决策）
+
+实测（隔离 hub e2e）：hub 的 `send_reply` 会把回复塞进发起方收件箱（`type='reply'`）, **但不会 SSE 唤醒直接发起方**（只有 chain 到 parent 才 push）——对端 agent 只能等下一次轮询才看到。而 `send_task` 会立刻发 `new_task` SSE 唤醒。
+
+因此 **`codex-app-server` 节点回复派工用 `send_task`**（`REPLY_VIA_SEND_TASK`, 仅对该 runtime 生效, 不改其他 runtime 的 `send_reply` 任务生命周期语义）。这与全网「回复指挥室用 `commhub_send_task`」的约定一致。收发两个方向都是 `send_task`。
+
+### 18.5 配置字段
+
+```jsonc
+{
+  "runtime": "codex-app-server",
+  "codexThreadId": "019f…",          // 可选; 落地后自动写回, 重启 resume 同一会话
+  "codexAppServerUrl": "ws://127.0.0.1:24777", // 可选; 设了就接管该共享 server（否则自己 spawn）
+  "model": "gpt-5.5",
+  "flags": { "dangerouslySkipPermissions": true, "approvalPolicy": "never" }
+}
+```
+- `codexThreadId` 存放于**专属字段**（不占用通用 `session` 字段, 避免与其他 runtime 冲突）; 首次落地由 `onThread` 自动写回。
+- 前置：本机装 `codex` CLI 并 `codex auth login`。
+
+### 18.6 已知边界 / 后续
+
+- 审批（approval）流：桥永不代答, 纯文本 turn 不触发审批; 需要审批的 turn 会 `waiting_human` 挂起, 由人类 TUI 处理（设计如此）。
+- 接管拓扑的 `codexAppServerUrl`/`codexThreadId` 目前靠手工写 config; `anet node create` 交互向导已给提示, 后续可加专属 flag。
+- codex-app-server 内层 codex 的 loops MCP（自管 /loop 工具）接线为后续增强; 派工闭环不依赖它。

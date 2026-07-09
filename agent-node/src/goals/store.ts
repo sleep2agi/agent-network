@@ -53,6 +53,12 @@ const CLAUDE_RUNTIME_NAMES = new Set([
 const CODEX_RUNTIME_NAMES = new Set([
   "codex",
   "codex-sdk",
+  // RFC-030 — codex TUI bridge (standalone `codex app-server`). Same
+  // non-claude bucket as codex-sdk: it has a native host process, so
+  // self-loop management is host-driven (not the SDK-spawned claude path).
+  "codex-app-server",
+  "codex-appserver",
+  "codex-tui",
 ]);
 
 const GROK_RUNTIME_NAMES = new Set([

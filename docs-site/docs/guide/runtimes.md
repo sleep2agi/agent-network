@@ -346,6 +346,83 @@ ANET_CODEX_STDIO_DIRECT=1 anet node start <codex-node>
 
 ---
 
+## codex-app-server（Codex TUI 桥, RFC-030）
+
+把一个 **codex CLI 的 TUI 会话**接进网络当节点 —— 节点自己起一个独立的 `codex app-server`，桥（bridge）作为客户端订阅同一条 codex thread。跟 `codex-sdk` 的关键区别：`codex-sdk` 是 agent-node 内嵌 SDK 独占管理 codex thread；**`codex-app-server` 用的是标准 `codex app-server` 协议，一条 thread 可以被多个客户端订阅**——于是**你在 codex TUI 里手打的那个会话，可以同时变成网络节点**。
+
+### 前置
+
+装 `codex` CLI 并登录（跟 codex-sdk 一样）：
+
+```bash
+npm install -g @openai/codex
+codex auth login       # 或 export OPENAI_API_KEY=sk-xxx
+codex --version        # 期望 codex 0.144.0 及以上（app-server 协议以此为准）
+```
+
+### 工作原理
+
+```
+anet node start  →  spawn agent-node 子进程（runtime=codex-app-server）
+                 ↓
+      收到派工时: spawn `codex app-server --listen ws://127.0.0.1:<临时端口>`
+                 ↓
+      bridge 连上 app-server → thread/start 新建并拥有一条 thread
+                 ↓
+      入站 send_task → bridge.submitTask → 一次 codex turn → 最终答案
+                 ↓
+      结果用 send_task 回派单方（见下方「回复用 send_task」）
+```
+
+- **收**（入站）：网络 `send_task` → 节点 inbox → **走桥** → codex 执行一轮
+- **发**（出站）：codex 出答案 → **普通 CommHub `send_task`** 回发起方（桥只包住「让 codex 跑一轮」）
+- 单条 thread 同一时刻只有一个 active turn；第二个任务在桥里 **FIFO 排队**，等当前 turn（自己的或人类 TUI 的）结束再跑
+- **审批只归人类**：桥永不代答 approval，需要审批的 turn 会挂起等人类在 TUI 里处理
+
+### 两种拓扑
+
+**① 独占（默认）** —— 节点自己起 app-server + 新建 thread。多个 codex-app-server 节点互不干扰：
+
+```bash
+codex auth login
+anet node create codexbridge --runtime codex-app-server
+anet node start codexbridge
+```
+
+```jsonc
+// config.json
+{ "runtime": "codex-app-server", "model": "gpt-5.5" }
+```
+
+**② 接管已有 codex 会话** —— 让一个正在运行的 codex 会话同时变成节点。先跑一个共享 app-server + 人类 `codex --remote` TUI，然后在节点 config 里指过去：
+
+```jsonc
+// config.json
+{
+  "runtime": "codex-app-server",
+  "codexAppServerUrl": "ws://127.0.0.1:24777",  // 指向正在运行的 codex app-server
+  "codexThreadId": "019f…"                       // 要接管的已有 thread
+}
+```
+
+桥作为**第二个客户端** `thread/resume` 复用该线程。你继续在 TUI 里打字，网络也能派任务进同一条 thread。`codexThreadId` 会在首次落地后自动写回，重启 resume 同一会话。
+
+### 回复用 send_task（不是 send_reply）
+
+实测：hub 的 `send_reply` 会把回复塞进发起方收件箱，但**不会 SSE 唤醒直接发起方**——对端 agent 只能等下次轮询才看到。`send_task` 会立刻 `new_task` 唤醒。所以 **`codex-app-server` 节点回复派工统一走 `send_task`**（只对该 runtime 生效，不改其他 runtime 的行为）。收发两个方向都是 `send_task`。
+
+### 适用场景
+
+- 想让**人类的 codex TUI 会话同时接入网络**（人机共用一条 thread）
+- 想开**多个独立 codex 节点**各干各的
+- 想要标准 `codex app-server` 协议而非 SDK 封装
+
+::: warning 验证状态（Phase 0A / preview 形态）
+当前是**方案 A 直接双客户端**——已真机自验（桥 17 + client 12 单测、741 全量零回归、隔离 hub **真节点 e2e** `send_task`→codex→`send_task` 闭环 PASS），适用于**单机可信 preview**。**尚未**做生产加固：人类 TUI 与桥直连 codex 会在 active turn 争抢、审批「只归人类」目前是代码纪律非权限边界、桥持有 app-server 原始控制面。生产形态是**方案 B 单 upstream Policy Gateway**（排队仲裁 + 审批只递人类 + 最小权限投递口），见 [RFC-030 §18 实现现状 + §8 硬门](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md)。
+:::
+
+---
+
 ## grok-build-acp
 
 用 [xAI Grok Build](https://x.ai/grok) 本地 CLI 跑 agent —— 节点 spawn 本地 `grok agent stdio` 进程 + Agent Client Protocol (ACP) 协议交互，复用本机 Grok 登录态。**v0.10.8 起正式接入**；v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) 加 per-node isolated cwd 解决多节点身份污染（已在 npm `latest`）。

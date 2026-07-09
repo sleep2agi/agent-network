@@ -326,6 +326,83 @@ When enabled, agent-node runs `spawn('codex', ['app-server'])` and talks the ful
 
 ---
 
+## codex-app-server (Codex TUI bridge, RFC-030)
+
+Attach a **codex CLI TUI session** to the network as a node. The node spawns its own standalone `codex app-server` and a bridge subscribes to the same codex thread as a client. Key difference vs `codex-sdk`: `codex-sdk` embeds the SDK and exclusively owns the codex thread, whereas **`codex-app-server` speaks the standard `codex app-server` protocol, where one thread can be subscribed by multiple clients** — so **a codex session you're typing into in the TUI can simultaneously become a network node**.
+
+### Prerequisites
+
+Install the `codex` CLI and log in (same as codex-sdk):
+
+```bash
+npm install -g @openai/codex
+codex auth login       # or export OPENAI_API_KEY=sk-xxx
+codex --version        # expect codex 0.144.0+ (app-server protocol baseline)
+```
+
+### How it works
+
+```
+anet node start  →  spawn agent-node child (runtime=codex-app-server)
+                 ↓
+   on a dispatched task: spawn `codex app-server --listen ws://127.0.0.1:<ephemeral>`
+                 ↓
+   bridge connects → thread/start creates and owns a thread
+                 ↓
+   inbound send_task → bridge.submitTask → one codex turn → final answer
+                 ↓
+   reply goes back via a plain CommHub send_task (see "Reply via send_task")
+```
+
+- **Receive** (inbound): network `send_task` → node inbox → **through the bridge** → codex runs a turn
+- **Send** (outbound): codex answer → **plain CommHub `send_task`** back to the sender (the bridge only wraps "run one codex turn")
+- One active turn per thread; a second task **queues FIFO** in the bridge and drains when the in-flight turn (yours or the human TUI's) completes
+- **Approvals are human-only**: the bridge never answers an approval; a turn needing approval parks as `waiting_human` for the human TUI
+
+### Two topologies
+
+**① Owned (default)** — the node spawns its own app-server and creates a fresh thread. Multiple codex-app-server nodes are fully independent:
+
+```bash
+codex auth login
+anet node create codexbridge --runtime codex-app-server
+anet node start codexbridge
+```
+
+```jsonc
+// config.json
+{ "runtime": "codex-app-server", "model": "gpt-5.5" }
+```
+
+**② Adopt an existing codex session** — make a running codex session a node too. Run a shared app-server + a human `codex --remote` TUI, then point the node config at it:
+
+```jsonc
+// config.json
+{
+  "runtime": "codex-app-server",
+  "codexAppServerUrl": "ws://127.0.0.1:24777",  // a running codex app-server
+  "codexThreadId": "019f…"                       // the existing thread to adopt
+}
+```
+
+The bridge attaches as a **second client** and `thread/resume`s that thread. You keep typing in the TUI while the network dispatches tasks into the same thread. `codexThreadId` is written back after first bind, so a restart resumes the same session.
+
+### Reply via send_task (not send_reply)
+
+Measured: the hub's `send_reply` enqueues the reply into the originator's inbox but does **not** SSE-wake the immediate originator — an agent peer only sees it on its next poll. `send_task` fires an immediate `new_task` wake. So **codex-app-server nodes reply to dispatched tasks via `send_task`** (this runtime only; other runtimes are unchanged). Both directions are `send_task`.
+
+### When to use
+
+- You want a **human codex TUI session to also be on the network** (human + agent share one thread)
+- You want **multiple independent codex nodes**
+- You want the standard `codex app-server` protocol rather than the SDK wrapper
+
+::: warning Verification status (Phase 0A / preview only)
+This is the **direct dual-client** design — self-verified against a live codex (bridge 17 + client 12 unit tests, 741 full-suite zero regression, isolated-hub **real-node e2e** `send_task`→codex→`send_task` closed loop PASS), suitable for a **single trusted machine preview**. It is **not yet production-hardened**: the human TUI and the bridge connect directly to codex and can race on an active turn, "approvals are human-only" is code discipline rather than a permission boundary, and the bridge holds the raw app-server control plane. The production shape is a **single upstream Policy Gateway** (serialized arbitration + approvals routed only to the human + a minimal typed enqueue surface). See [RFC-030 §18 + §8 gates](https://github.com/sleep2agi/agent-network/blob/main/docs/rfcs/RFC-030-codex-tui-bridge.md).
+:::
+
+---
+
 ## grok-build-acp
 
 Run agents via [xAI Grok Build](https://x.ai/grok)'s local CLI — the node spawns a local `grok agent stdio` process and talks the Agent Client Protocol (ACP), reusing your host's Grok login. **Formally onboarded in v0.10.8**; v0.10.11 [#204](https://github.com/sleep2agi/agent-network/issues/204) adds per-node isolated cwd to eliminate multi-node identity pollution (already in npm `latest`).

@@ -32,3 +32,6 @@ Thumbs.db
 
 # packaging
 *.tgz
+
+# RFC-030 real-node e2e runtime dir (contains ntok — never commit)
+.e2e-run/

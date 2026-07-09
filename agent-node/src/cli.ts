@@ -331,9 +331,19 @@ const RUNTIME_MAP: Record<string, string> = {
   // launcher name (matches claude-code-cli precedent); `opencode` is
   // the short alias. Internal bucket is `"opencode"`.
   "opencode-cli": "opencode", "opencode": "opencode",
+  // RFC-030 — codex TUI bridge (standalone `codex app-server`). Distinct
+  // bucket from `codex` (that's the @openai/codex-sdk transport). Aliases:
+  // `codex-app-server` (canonical) / `codex-tui` / `codex-appserver`.
+  "codex-app-server": "codex-app-server", "codex-appserver": "codex-app-server", "codex-tui": "codex-app-server",
 };
-const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok" | "opencode";
+const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
+
+// RFC-030 — codex-app-server nodes reply to dispatched tasks with send_task
+// (immediate SSE wake + actionable) instead of send_reply (inbox-only, no
+// wake for the immediate originator). See sendReply() for the empirical
+// rationale. Other runtimes keep the send_reply task-lifecycle-close path.
+const REPLY_VIA_SEND_TASK = RUNTIME === "codex-app-server";
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
@@ -559,6 +569,23 @@ function writebackGrokSession(sessionId: string) {
   }
 }
 
+// RFC-030 — persist the codex-app-server thread id into a dedicated
+// `codexThreadId` config field (NOT the generic `session`, which other
+// runtimes use) so a restart resumes the same codex conversation.
+function writebackCodexThread(threadId: string) {
+  codexAppServerThreadId = threadId;
+  if (!configFilePath || !threadId) return;
+  try {
+    const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
+    if (cfg.codexThreadId === threadId) return;
+    cfg.codexThreadId = threadId;
+    writeFileSync(configFilePath, JSON.stringify(cfg, null, 2) + "\n");
+    debug(`codexThreadId 写回: ${configFilePath} → ${threadId.slice(0, 8)}...`);
+  } catch (e: any) {
+    warn(`writebackCodexThread failed: ${e.message}`);
+  }
+}
+
 function clearGrokSession(reason: string) {
   grokSessionId = undefined;
   if (!configFilePath) return;
@@ -680,7 +707,7 @@ if (UNSUPPORTED_CHANNEL) {
 // #101 fix: TOOLS may now be the preset sentinel (no array methods) — preset
 // already includes Read, so we only need to inject when TOOLS is an explicit
 // allowlist that doesn't already have Read.
-if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && Array.isArray(TOOLS) && !TOOLS.includes("Read")) {
+if (TELEGRAM_CHANNELS.length > 0 && RUNTIME !== "codex" && RUNTIME !== "codex-app-server" && Array.isArray(TOOLS) && !TOOLS.includes("Read")) {
   TOOLS.push("Read");
 }
 
@@ -1036,6 +1063,24 @@ async function sendReply(
   // attribute this reply to the old name (which a post-rename inbox
   // viewer would see as an orphaned reply from a non-existent sender).
   const fromAlias = await liveAlias();
+
+  // RFC-030 — codex-app-server replies via send_task, NOT send_reply.
+  // Empirically (isolated-hub e2e), send_reply enqueues to the originator's
+  // inbox as type='reply' but does NOT SSE-wake the immediate originator
+  // (only a chained-to-parent push fires) — an agent peer would only see it
+  // on its next poll. send_task fires a `new_task` SSE wake so the peer acts
+  // immediately, matching the network's "回复用 send_task" convention
+  // (Vincent, 2026-07-09). Failures are prefixed so the peer sees the error.
+  if (REPLY_VIA_SEND_TASK) {
+    const taskResult = await callCommHub("send_task", {
+      alias: target,
+      task: failed ? `⚠️ ${message}` : message,
+      priority: failed ? "high" : "normal",
+      parent_task_id: taskId || undefined,
+    });
+    return { delivered: true, reply_id: taskResult?.message_id ?? taskResult?.task_id, payload: taskResult };
+  }
+
   const result = await callCommHub("send_reply", {
     alias: target,
     text: message,
@@ -1401,6 +1446,28 @@ let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || unde
 // holder — the next turn spawns fresh).
 let opencodeSessionId: string | undefined = RUNTIME === "opencode" ? (SESSION_ID || undefined) : undefined;
 let opencodeRuntimeSession: import("./runtime/opencode-acp/runtime").OpencodeRuntimeSession | null = null;
+
+// RFC-030 — codex-app-server runtime state.
+// `codexAppServerThreadId` is the persisted codex thread this node binds
+// to (config `codexThreadId`, or the generic `session` field as a
+// fallback). Empty → the bridge creates a fresh thread on first turn and
+// we write the adopted id back. `codexAppServerUrl` (config
+// `codexAppServerUrl` / env ANET_CODEX_APP_SERVER_URL) opts into the
+// shared-server topology: attach to an already-running `codex app-server`
+// (e.g. a human `codex --remote` TUI's) instead of spawning our own —
+// this is how an EXISTING codex session becomes a network node. The
+// runtime session is opened lazily and reused for the node lifetime; a
+// child-exit resets the holder so the next turn respawns.
+let codexAppServerThreadId: string | undefined =
+  RUNTIME === "codex-app-server"
+    ? ((fileConfig as { codexThreadId?: string }).codexThreadId || SESSION_ID || undefined)
+    : undefined;
+const codexAppServerUrl: string | undefined =
+  (fileConfig as { codexAppServerUrl?: string }).codexAppServerUrl ||
+  process.env.ANET_CODEX_APP_SERVER_URL ||
+  undefined;
+let codexAppServerRuntimeSession:
+  import("./runtime/codex-app-server/runtime").CodexAppServerRuntimeSession | null = null;
 
 // #213 — track whether the current process resumed a pre-existing grok
 // session (truthy SESSION_ID at boot) so we can prepend the un-closed-loop
@@ -2580,6 +2647,57 @@ async function processWithOpencode(task: string, _from: string, _images?: string
   return outcome.replyText || "（无回复）";
 }
 
+// RFC-030 — codex-app-server runtime turn.
+//
+// Inbound task → bridge.submitTask → one codex turn on the bound thread →
+// final answer returned here. The reply then goes back out through the
+// node's normal CommHub `sendReply`/`send_task` path (cli.ts inbox handler),
+// exactly like every other runtime — the bridge only wraps "run one turn".
+// A second concurrent task queues FIFO inside the bridge and is drained when
+// the in-flight turn (ours OR a human TUI's) completes.
+async function processWithCodexAppServer(task: string, _from: string, taskId: string | null): Promise<string> {
+  const { openCodexAppServerRuntime, codexAppServerThink } =
+    await import("./runtime/codex-app-server/runtime");
+
+  // Reset the holder if the app-server child has exited — the next call
+  // reopens (spawns fresh / re-attaches) and resumes the persisted thread.
+  if (codexAppServerRuntimeSession && !codexAppServerRuntimeSession.isRunning) {
+    log(`[codex-app-server] previous session not running — reopening on this turn`);
+    codexAppServerRuntimeSession = null;
+  }
+
+  if (!codexAppServerRuntimeSession) {
+    codexAppServerRuntimeSession = await openCodexAppServerRuntime({
+      serverUrl: codexAppServerUrl,
+      threadId: codexAppServerThreadId,
+      onThread: (threadId) => writebackCodexThread(threadId),
+      onExit: (info) => {
+        warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
+        codexAppServerRuntimeSession = null;
+      },
+      log,
+      warn,
+    });
+    // A freshly-created thread is written back via onThread; make sure the
+    // in-memory var tracks it even when resuming (idempotent).
+    writebackCodexThread(codexAppServerRuntimeSession.threadId);
+  }
+
+  const outcome = await codexAppServerThink(codexAppServerRuntimeSession, {
+    taskId: taskId || `local-${Date.now()}`,
+    text: task,
+    from: _from,
+    log,
+  });
+
+  if (outcome.failed) {
+    // Surface as a runtime error string; processTask's failure detector
+    // treats the "错误:" marker as failed=true (dashboard shows real fail).
+    return outcome.replyText;
+  }
+  return outcome.replyText || "（无回复）";
+}
+
 async function processWithGrok(task: string, from: string, images?: string[]): Promise<string> {
   if (images?.length) {
     warn(`[grok] image attachments received but Grok ACP fixture reports promptCapabilities.image=false; sending text-only prompt`);
@@ -2967,6 +3085,9 @@ function think(task: string, from: string, taskId: string | null, images?: strin
       }
       if (RUNTIME === "opencode") {
         return await processWithOpencode(task, from, images);
+      }
+      if (RUNTIME === "codex-app-server") {
+        return await processWithCodexAppServer(task, from, taskId);
       }
       return await processWithClaude(task, from, images);
     } finally {
@@ -4164,7 +4285,7 @@ async function connectSSE() {
 log(`启动`);
 log(`  alias:   ${ALIAS || "(none!)"} [from: ${ALIAS_SOURCE}]`);  // #203 traceability
 log(`  runtime: ${RUNTIME_LABEL}`);
-log(`  model:   ${MODEL || (RUNTIME === "codex" ? "gpt-5.5" : RUNTIME === "grok" ? "grok-build" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
+log(`  model:   ${MODEL || (RUNTIME === "codex" || RUNTIME === "codex-app-server" ? "gpt-5.5" : RUNTIME === "grok" ? "grok-build" : "claude-sonnet-4-6")} ${MODEL ? "" : "(default)"}`);
 log(`  hub:     ${COMMHUB_URL}${AUTH_TOKEN ? " (auth)" : " (no auth!)"}`);
 // #214 维度 5 A6 — surface the grok ACP idle-timeout resolution so the
 // operator can see at a glance whether their `flags.grokAcpTimeoutMs`
@@ -4342,7 +4463,7 @@ if (goalsSchedulerEnabled) {
 //     process, only handed to subprocess via env var (no log, no disk)
 //   - auth no-bypass — wrong/missing token → 401
 let loopsHttpServerHandle: import("./goals/loops-http-server").LoopsHttpServerStarted | null = null;
-if (RUNTIME === "codex" || RUNTIME === "grok") {
+if (RUNTIME === "codex" || RUNTIME === "grok" || RUNTIME === "codex-app-server") {
   try {
     const { startLoopsHttpServer } = await import("./goals/loops-http-server");
     const maxGoalsEnv = parseInt(process.env.COMMHUB_MAX_GOALS_PER_NODE || "", 10);
