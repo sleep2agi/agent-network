@@ -36,6 +36,25 @@ function randomPort(): number {
   return 24000 + Math.floor(Math.random() * 4000);
 }
 
+/**
+ * Build argv for an OWNED `codex app-server`. `-c key=value` overrides
+ * codex config.toml. approval_policy=never makes the app-server auto-run
+ * without emitting approval reverse-requests (which the bridge won't
+ * answer) — required for an unattended auto-approve node. sandbox_mode
+ * bounds what those auto-runs can touch. Both are omitted when unset so
+ * codex falls back to its own defaults. Pure + exported for unit testing.
+ */
+export function buildOwnedAppServerArgs(
+  url: string,
+  approvalPolicy?: string,
+  sandboxMode?: string,
+): string[] {
+  const cfg: string[] = [];
+  if (approvalPolicy) cfg.push("-c", `approval_policy=${approvalPolicy}`);
+  if (sandboxMode) cfg.push("-c", `sandbox_mode=${sandboxMode}`);
+  return ["app-server", ...cfg, "--listen", url];
+}
+
 async function waitWs(url: string, tries = 60, gapMs = 300): Promise<void> {
   for (let i = 0; i < tries; i++) {
     try {
@@ -98,14 +117,7 @@ export async function openCodexAppServerRuntime(opts: {
     const port = randomPort();
     url = `ws://127.0.0.1:${port}`;
     const binary = opts.binary ?? "codex";
-    // `-c key=value` overrides codex config.toml. approval_policy=never makes
-    // the app-server auto-run without emitting approval reverse-requests
-    // (which the bridge won't answer) — required for an unattended
-    // auto-approve node. sandbox_mode bounds what those auto-runs can touch.
-    const cfg: string[] = [];
-    if (opts.approvalPolicy) cfg.push("-c", `approval_policy=${opts.approvalPolicy}`);
-    if (opts.sandboxMode) cfg.push("-c", `sandbox_mode=${opts.sandboxMode}`);
-    const spawnArgs = ["app-server", ...cfg, "--listen", url];
+    const spawnArgs = buildOwnedAppServerArgs(url, opts.approvalPolicy, opts.sandboxMode);
     log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}`);
     proc = spawn(binary, spawnArgs, {
       stdio: ["ignore", "pipe", "pipe"],
