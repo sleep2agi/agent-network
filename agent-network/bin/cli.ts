@@ -1064,6 +1064,14 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
     console.warn(`[anet] Warning: opencode CLI not found in PATH.`);
     console.warn(`[anet] Install (exact): npm install -g opencode-ai@${OPENCODE_PINNED_VERSION}`);
   }
+  // RFC-030 — codex-app-server (codex TUI bridge) runs a standalone
+  // `codex app-server`, so it needs the `codex` CLI on PATH (same binary
+  // as codex-sdk, but the app-server subcommand). agent-node itself is
+  // lazy-fetched via npx like the other runtimes.
+  if (runtime === "codex-app-server" && !commandExists("codex")) {
+    console.warn(`[anet] Warning: codex CLI not found in PATH.`);
+    console.warn(`[anet] Install/login codex first: https://developers.openai.com/codex/cli`);
+  }
 }
 
 // ── Help ──
@@ -1373,7 +1381,8 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   // (MiniMax/DeepSeek/GLM/Kimi/Anthropic). claude-code-cli only works for Max/Pro
   // subscribers and was a poor default that left non-subscribers with broken nodes.
   const runtime = normalizeRuntime(opts.runtime || "claude-agent-sdk");
-  const defaultModel = runtime === "codex-sdk" ? "gpt-5.5" : undefined;
+  const defaultModel =
+    runtime === "codex-sdk" || runtime === "codex-app-server" ? "gpt-5.5" : undefined;
 
   const profile: Profile = {
     anet_version: "0.1.0",
@@ -2068,6 +2077,7 @@ This wizard creates one agent node for this project:
         { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
         { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
         { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+        { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI 桥 (RFC-030), 独立 `codex app-server`, 可接管已有 codex 会话" },
         { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
         // RFC-029 — public sst/opencode CLI (multi-vendor front-end
         // with unified session + auth abstraction). Runtime not yet
@@ -2087,6 +2097,10 @@ This wizard creates one agent node for this project:
   } else if (pickedRuntime === "codex-sdk") {
     opts.runtime = "codex-sdk";
     console.log(`[anet] 请确保已执行: codex auth login`);
+  } else if (pickedRuntime === "codex-app-server") {
+    opts.runtime = "codex-app-server";
+    console.log(`[anet] 请确保已执行: codex auth login （codex-app-server 需要 codex CLI）`);
+    console.log(`[anet] 接管已有 codex 会话：在 config.json 里设 codexAppServerUrl + codexThreadId`);
   } else if (pickedRuntime === "grok-build-acp") {
     opts.runtime = "grok-build-acp";
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok auth login`);
