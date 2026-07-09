@@ -103,18 +103,32 @@ export class CodexAppServerBridge extends EventEmitter {
     this.attachClientListeners();
   }
 
-  /** Perform initialize → initialized → thread/resume. */
+  /**
+   * Perform initialize → initialized → thread/resume.
+   *
+   * REAL-WIRE CORRECTION (通信龙, verified against codex-cli 0.144.0 live
+   * two-client PoC): `initialize` is scoped to the **app-server**, NOT to
+   * each connection. When the human TUI (`codex --remote`) has already
+   * initialized the shared server, a second client's `initialize` returns
+   * `-32600: Already initialized`. RFC §7.2's "每个连接必须单独初始化" is
+   * wrong for the shared-server topology — the bridge tolerates an
+   * already-initialized server and proceeds straight to `thread/resume`.
+   */
   async bootstrap(): Promise<void> {
-    // Initialize handshake per RFC §7.2. The response is not used here beyond
-    // ensuring the server accepted us.
-    await this.client.request("initialize", {
-      clientInfo: {
-        name: "anet_codex_bridge",
-        title: "Agent Network Codex Bridge",
-        version: "0.1.0",
-      },
-    });
-    this.client.notify("initialized", {});
+    try {
+      await this.client.request("initialize", {
+        clientInfo: {
+          name: "anet_codex_bridge",
+          title: "Agent Network Codex Bridge",
+          version: "0.1.0",
+        },
+      });
+      this.client.notify("initialized", {});
+    } catch (e) {
+      if (!isAlreadyInitialized(e)) throw e;
+      // Shared server already initialized by the human TUI — expected in the
+      // second-client bridge role. Do NOT re-send `initialized`.
+    }
     await this.client.request("thread/resume", { threadId: this.threadId });
     this.setStatus("idle");
   }
@@ -398,6 +412,14 @@ function extractTurnId(resp: unknown): string | null {
   if (!resp || typeof resp !== "object") return null;
   const r = resp as { turnId?: unknown };
   return typeof r.turnId === "string" ? r.turnId : null;
+}
+
+/** Recognise the app-server's "already initialized" rejection (shared server). */
+function isAlreadyInitialized(e: unknown): boolean {
+  const code = (e as { code?: unknown })?.code;
+  const msg = (e as { message?: unknown })?.message;
+  if (code === -32600) return true;
+  return typeof msg === "string" && /already initialized/i.test(msg);
 }
 
 function extractReverseRequestId(params: unknown): number | null {
