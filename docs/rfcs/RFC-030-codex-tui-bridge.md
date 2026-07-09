@@ -2,6 +2,8 @@
 
 > 状态：**Accepted（通信龙 review 通过, Vincent 授权实施 2026-07-10）** · 先做 Phase 0/1, 保守边界
 > 关联 tracking issue 见下; 原始设计正文如下。
+>
+> **决策更新 2026-07-10（Vincent）**：产品形态定为**独立 codex-cli TUI runtime**（`codex app-server` + `codex --remote` 真 TUI），**不走 §8.1 的「先作为 codex-sdk transport」那一步**——因为整个价值就是人和 agent 共用真正的 codex-cli TUI/thread，codex-sdk 是自管 headless 进程、无共享 TUI。§8.1 第一步作废，直奔独立 runtime；其余（Phase 分期、安全边界、read-only、PR 拆分）不变。
 
 
 > 状态：设计提案，尚未在 Agent Network 主干实现  
