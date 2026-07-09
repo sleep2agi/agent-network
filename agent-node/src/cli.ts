@@ -339,6 +339,12 @@ const RUNTIME_MAP: Record<string, string> = {
 const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
+// RFC-030 — codex-app-server nodes reply to dispatched tasks with send_task
+// (immediate SSE wake + actionable) instead of send_reply (inbox-only, no
+// wake for the immediate originator). See sendReply() for the empirical
+// rationale. Other runtimes keep the send_reply task-lifecycle-close path.
+const REPLY_VIA_SEND_TASK = RUNTIME === "codex-app-server";
+
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
 // #101 fix: when config.tools is absent the agent must still get the full
@@ -1057,6 +1063,24 @@ async function sendReply(
   // attribute this reply to the old name (which a post-rename inbox
   // viewer would see as an orphaned reply from a non-existent sender).
   const fromAlias = await liveAlias();
+
+  // RFC-030 — codex-app-server replies via send_task, NOT send_reply.
+  // Empirically (isolated-hub e2e), send_reply enqueues to the originator's
+  // inbox as type='reply' but does NOT SSE-wake the immediate originator
+  // (only a chained-to-parent push fires) — an agent peer would only see it
+  // on its next poll. send_task fires a `new_task` SSE wake so the peer acts
+  // immediately, matching the network's "回复用 send_task" convention
+  // (Vincent, 2026-07-09). Failures are prefixed so the peer sees the error.
+  if (REPLY_VIA_SEND_TASK) {
+    const taskResult = await callCommHub("send_task", {
+      alias: target,
+      task: failed ? `⚠️ ${message}` : message,
+      priority: failed ? "high" : "normal",
+      parent_task_id: taskId || undefined,
+    });
+    return { delivered: true, reply_id: taskResult?.message_id ?? taskResult?.task_id, payload: taskResult };
+  }
+
   const result = await callCommHub("send_reply", {
     alias: target,
     text: message,
