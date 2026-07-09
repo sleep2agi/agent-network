@@ -38,7 +38,7 @@
 | **P2 #260 配置面板核心** | ✅ 已建 | 模型/模式/重启真接 API（dashboard #7/#10/#11/#19），在 preview.4/.5 |
 | **P2 #260 channel 编辑（前后端）** | ✅ 完成 | **PR #411 merged**：hub schema 收 channels + narrow + restart-tier + node 重启重读 refork；4 Codex edge-case 修（finalize/path-spec/disable-all/destructive-narrow）+ 回归 23/0；通信龙 独立复跑 + 通信牛 sanitization + IM马 5/5 wire 全过。⚠️ caveat：restart-tier exit(75) 需 supervisor（手动 spawn 节点需 host_supervisor/systemd）。前端 #31 narrow commhub + un-hold merged ✅ + supervisor docs #413。**前后端全通** |
 | **P3 multi-daemon** | ✅ 完成 | 代码全 merged + **Scenario H e2e PR #406 merged**（`PASS=59 FAIL=0`，通信龙 独立 docker 复跑同结果 claim=reality）；双 daemon 强绑 C2 路由/not_your_request/parentage 全绿 |
-| **P4 opencode 活体** | 🟡 free-model 验通 | **ACP 内核活体 free-model PASS 8/8 merged #408**（真 opencode-ai@1.17.13 + 真 ACP session + 7748 真计费 token + 子进程真起真收，通信龙 独立 docker 复跑 OVERALL PASS）；**paid vendor（Anthropic/OpenAI）真 e2e 等 Vincent key** |
+| **P4 opencode 活体** | 🟢 keyless 全链路验通 | **ACP 内核活体 free-model PASS 8/8 merged #408**；**07-09 新增：hub 全链路 keyless e2e PASS**（Docker 隔离 hub + agent-node runtime=opencode-cli + 免费模型 deepseek-v4-flash-free：send_task → SSE 秒推 → ACP session/new → 模型作答（in=7710 out=23 end_turn）→ 自动回复 → 任务 replied，全程 ~7s、零 vendor key）。**结论：活体验证不再被 vendor key 卡**；paid vendor（Anthropic/OpenAI）e2e 降级为生产质量选项，等 Vincent 按需配 key |
 
 ## 已合进 main（部分未发 preview）
 
