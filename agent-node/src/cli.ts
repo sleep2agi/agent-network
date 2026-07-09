@@ -2670,6 +2670,13 @@ async function processWithCodexAppServer(task: string, _from: string, taskId: st
     codexAppServerRuntimeSession = await openCodexAppServerRuntime({
       serverUrl: codexAppServerUrl,
       threadId: codexAppServerThreadId,
+      // Auto-approve posture (RFC-030): the bridge never answers approvals,
+      // so an unattended node that must run write/command tasks needs
+      // approval_policy=never on its OWNED app-server. Driven by node config
+      // flags (approvalPolicy / sandboxMode); default codex behavior when
+      // unset. Ignored for the shared-server (adopt) topology.
+      approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
+      sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
       onThread: (threadId) => writebackCodexThread(threadId),
       onExit: (info) => {
         warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
