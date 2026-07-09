@@ -77,6 +77,8 @@ async function startFakeApp(config?: {
               respond({ result: { serverInfo: { name: "fake-codex" } } });
             } else if (parsed.method === "thread/resume") {
               respond({ result: {} });
+            } else if (parsed.method === "thread/start") {
+              respond({ result: { threadId: "thread_new_xyz" } });
             } else if (parsed.method === "turn/start") {
               respond({ result: { turn: { id: `turn_${received.length}` } } });
             }
@@ -136,6 +138,45 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
       .filter(Boolean);
     expect(methods).toEqual(["initialize", "initialized", "thread/resume"]);
     expect(bridge.currentStatus()).toBe("idle");
+  });
+
+  test("empty threadId → bootstrap creates a thread (thread/start) and adopts its id", async () => {
+    const app2 = await startFakeApp();
+    const client2 = new CodexAppServerClient({ url: app2.url });
+    await client2.connect();
+    const bridge2 = new CodexAppServerBridge({ client: client2 }); // no threadId
+    const ready: Array<{ threadId: string; created: boolean }> = [];
+    bridge2.on("thread_ready", (e) => ready.push(e as never));
+    await bridge2.bootstrap();
+    const methods = app2.received.map((m) => (m as { method?: string }).method).filter(Boolean);
+    expect(methods).toEqual(["initialize", "initialized", "thread/start"]);
+    expect(bridge2.getThreadId()).toBe("thread_new_xyz");
+    expect(ready).toEqual([{ threadId: "thread_new_xyz", created: true }]);
+    expect(bridge2.currentStatus()).toBe("idle");
+    await client2.close().catch(() => undefined);
+    await app2.stop();
+  });
+
+  test("stale threadId with no rollout → resume fails, bootstrap falls back to thread/start", async () => {
+    const app2 = await startFakeApp({
+      onRequest: (msg, respond) => {
+        if (msg.method === "initialize") return respond({ result: {} });
+        if (msg.method === "thread/resume")
+          return respond({ error: { code: -32600, message: "no rollout found for thread id stale_id" } });
+        if (msg.method === "thread/start") return respond({ result: { threadId: "thread_fresh" } });
+      },
+    });
+    const client2 = new CodexAppServerClient({ url: app2.url });
+    await client2.connect();
+    const bridge2 = new CodexAppServerBridge({ client: client2, threadId: "stale_id" });
+    const ready: Array<{ threadId: string; created: boolean }> = [];
+    bridge2.on("thread_ready", (e) => ready.push(e as never));
+    await bridge2.bootstrap();
+    expect(bridge2.getThreadId()).toBe("thread_fresh");
+    expect(ready).toEqual([{ threadId: "thread_fresh", created: true }]);
+    expect(bridge2.currentStatus()).toBe("idle");
+    await client2.close().catch(() => undefined);
+    await app2.stop();
   });
 
   test("startTaskTurn returns the server-assigned turnId and marks bridge working", async () => {

@@ -28,8 +28,14 @@ import { CodexAppServerClient } from "./codex-app-server-client";
 
 export interface CodexAppServerBridgeOptions {
   client: CodexAppServerClient;
-  /** Persistent thread ID this bridge binds to (from node config). */
-  threadId: string;
+  /**
+   * Persistent thread ID this bridge binds to (from node config). Leave
+   * empty/undefined to have `bootstrap()` create a fresh thread and adopt
+   * its id (network-runtime mode, where the bridge owns the thread). A
+   * non-empty id is resumed; if the resume fails because the thread has no
+   * persisted rollout yet, bootstrap falls back to creating a new one.
+   */
+  threadId?: string;
   /** Optional label for logs. */
   bridgeLabel?: string;
 }
@@ -72,7 +78,7 @@ export interface WaitingApproval {
  */
 export class CodexAppServerBridge extends EventEmitter {
   private client: CodexAppServerClient;
-  private readonly threadId: string;
+  private threadId: string;
   private readonly label: string;
   private status: BridgeStatus = "connecting";
   private activeTurnId: string | null = null;
@@ -98,13 +104,18 @@ export class CodexAppServerBridge extends EventEmitter {
   constructor(opts: CodexAppServerBridgeOptions) {
     super();
     this.client = opts.client;
-    this.threadId = opts.threadId;
-    this.label = opts.bridgeLabel ?? `bridge:${this.threadId.slice(0, 8)}`;
+    this.threadId = opts.threadId ?? "";
+    this.label = opts.bridgeLabel ?? `bridge:${(this.threadId || "new").slice(0, 8)}`;
     this.attachClientListeners();
   }
 
+  /** The thread this bridge is bound to (final id after bootstrap adoption). */
+  getThreadId(): string {
+    return this.threadId;
+  }
+
   /**
-   * Perform initialize → initialized → thread/resume.
+   * Perform initialize → initialized → (thread/resume | thread/start).
    *
    * REAL-WIRE CORRECTION (通信龙, verified against codex-cli 0.144.0 live
    * two-client PoC): `initialize` is scoped to the **app-server**, NOT to
@@ -112,7 +123,17 @@ export class CodexAppServerBridge extends EventEmitter {
    * initialized the shared server, a second client's `initialize` returns
    * `-32600: Already initialized`. RFC §7.2's "每个连接必须单独初始化" is
    * wrong for the shared-server topology — the bridge tolerates an
-   * already-initialized server and proceeds straight to `thread/resume`.
+   * already-initialized server and proceeds straight to thread binding.
+   *
+   * Thread binding is create-or-resume (mirrors the opencode runtime's
+   * session/load-else-new):
+   *   - empty threadId → thread/start, adopt the returned id.
+   *   - non-empty threadId → thread/resume; if that fails because the
+   *     thread has no persisted rollout yet ("no rollout found"), fall
+   *     back to thread/start so a stale/never-persisted id can't wedge
+   *     the node at boot.
+   * Emits "thread_ready" { threadId, created } so the runtime can persist
+   * a freshly-created id back to node config.
    */
   async bootstrap(): Promise<void> {
     try {
@@ -129,8 +150,39 @@ export class CodexAppServerBridge extends EventEmitter {
       // Shared server already initialized by the human TUI — expected in the
       // second-client bridge role. Do NOT re-send `initialized`.
     }
-    await this.client.request("thread/resume", { threadId: this.threadId });
+
+    let created = false;
+    if (this.threadId) {
+      try {
+        await this.client.request("thread/resume", { threadId: this.threadId });
+      } catch (e) {
+        if (!isNoRollout(e)) throw e;
+        // Persisted id never got a rollout (e.g. node created but never ran
+        // a turn) — create a fresh thread rather than wedging at boot.
+        this.threadId = await this.startNewThread();
+        created = true;
+      }
+    } else {
+      this.threadId = await this.startNewThread();
+      created = true;
+    }
+
+    this.emit("thread_ready", { threadId: this.threadId, created });
     this.setStatus("idle");
+  }
+
+  private async startNewThread(): Promise<string> {
+    const started = await this.client.request<{
+      threadId?: string;
+      thread?: { id?: string };
+    }>("thread/start", {});
+    const id = started?.threadId ?? started?.thread?.id;
+    if (!id) {
+      throw new Error(
+        "thread/start returned no threadId: " + JSON.stringify(started).slice(0, 200),
+      );
+    }
+    return id;
   }
 
   /**
@@ -446,6 +498,12 @@ function isAlreadyInitialized(e: unknown): boolean {
   const msg = (e as { message?: unknown })?.message;
   if (code === -32600) return true;
   return typeof msg === "string" && /already initialized/i.test(msg);
+}
+
+/** thread/resume against an id the app-server has no persisted rollout for. */
+function isNoRollout(e: unknown): boolean {
+  const msg = (e as { message?: unknown })?.message;
+  return typeof msg === "string" && /no rollout found|thread not found|unknown thread/i.test(msg);
 }
 
 function extractReverseRequestId(params: unknown): number | null {
