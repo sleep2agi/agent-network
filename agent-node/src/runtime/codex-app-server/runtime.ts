@@ -66,6 +66,22 @@ export async function openCodexAppServerRuntime(opts: {
   threadId?: string;
   /** codex binary (default "codex"); honored only when we spawn. */
   binary?: string;
+  /**
+   * codex approval policy for OWNED app-servers, passed as `-c
+   * approval_policy=<v>`. The bridge NEVER answers approval reverse-requests
+   * (those belong to a human TUI), so a node that must run write/command
+   * tasks unattended needs `never` here — otherwise such a turn parks
+   * `waiting_human` forever. Values: untrusted | on-failure | on-request |
+   * never. Ignored when attaching to a shared server (that server owns its
+   * own policy). Default: leave codex's own default (typically on-request).
+   */
+  approvalPolicy?: string;
+  /**
+   * codex sandbox mode for OWNED app-servers, `-c sandbox_mode=<v>`:
+   * read-only | workspace-write | danger-full-access. Bounds the blast
+   * radius of auto-approved commands. Ignored for shared servers.
+   */
+  sandboxMode?: string;
   onThread?: (threadId: string, created: boolean) => void | Promise<void>;
   onExit?: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
   log?: (msg: string) => void;
@@ -82,8 +98,16 @@ export async function openCodexAppServerRuntime(opts: {
     const port = randomPort();
     url = `ws://127.0.0.1:${port}`;
     const binary = opts.binary ?? "codex";
-    log(`[codex-app-server] spawning ${binary} app-server --listen ${url}`);
-    proc = spawn(binary, ["app-server", "--listen", url], {
+    // `-c key=value` overrides codex config.toml. approval_policy=never makes
+    // the app-server auto-run without emitting approval reverse-requests
+    // (which the bridge won't answer) — required for an unattended
+    // auto-approve node. sandbox_mode bounds what those auto-runs can touch.
+    const cfg: string[] = [];
+    if (opts.approvalPolicy) cfg.push("-c", `approval_policy=${opts.approvalPolicy}`);
+    if (opts.sandboxMode) cfg.push("-c", `sandbox_mode=${opts.sandboxMode}`);
+    const spawnArgs = ["app-server", ...cfg, "--listen", url];
+    log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}`);
+    proc = spawn(binary, spawnArgs, {
       stdio: ["ignore", "pipe", "pipe"],
     });
     proc.stderr?.on("data", (d) =>
