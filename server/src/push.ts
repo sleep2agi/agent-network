@@ -280,7 +280,12 @@ export function createSSEStream(sessionName: string, networkId?: string | null):
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "text/event-stream",
+      // #426: explicit charset so legacy Windows clients (PowerShell 5.1's
+      // Invoke-RestMethod / Invoke-WebRequest default to ISO-8859-1 when
+      // Content-Type omits the charset) decode UTF-8 payloads correctly.
+      // Hub itself was already writing clean UTF-8 bytes; the client-side
+      // 双重编码样式 mojibake was the header telling the client to guess.
+      "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       "Connection": "keep-alive",
     },

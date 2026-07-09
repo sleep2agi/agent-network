@@ -459,6 +459,42 @@ function withCors(req: Request, res: Response): Response {
   return res;
 }
 
+/**
+ * #426 — append `charset=utf-8` to text-y Content-Type headers that
+ * omit it. Legacy Windows clients (PowerShell 5.1 Invoke-RestMethod /
+ * Invoke-WebRequest) default to ISO-8859-1 when the charset is
+ * unspecified, which double-encodes our clean UTF-8 payloads on the
+ * way in.
+ *
+ * Applied to Responses whose Content-Type header we can't influence at
+ * construction time — notably the MCP SDK transport, which builds its
+ * own `text/event-stream` / `application/json` reply. Response headers
+ * from `fetch` are mutable, so this rewrites in place rather than
+ * reconstructing the Response (which would break streamed bodies).
+ *
+ * No-ops when: charset is already set, the type is binary
+ * (application/octet-stream, image/*, video/*, application/pdf, etc.),
+ * or the header is missing entirely.
+ */
+function withUtf8CharsetContentType(res: Response): Response {
+  const ct = res.headers.get("content-type");
+  if (!ct) return res;
+  if (/;\s*charset=/i.test(ct)) return res;
+  const trimmed = ct.trim();
+  // Text-y types that legacy clients decode via charset. Everything
+  // else (binary, opaque) is left alone.
+  if (
+    trimmed === "application/json" ||
+    trimmed.startsWith("text/") ||
+    trimmed.startsWith("application/json;") ||
+    trimmed === "application/ld+json" ||
+    trimmed === "application/xml"
+  ) {
+    res.headers.set("content-type", `${trimmed}; charset=utf-8`);
+  }
+  return res;
+}
+
 // ── WebSocket tmux sessions ────────────────────────
 const wsTmuxIntervals = new Map<object, ReturnType<typeof setInterval>>();
 
@@ -534,7 +570,17 @@ Bun.serve({
       const response = await transport.handleRequest(req);
       // Disconnect after response to prevent McpServer leak
       setImmediate(() => mcpServer.close().catch(() => {}));
-      return response;
+      // #426: the MCP SDK's WebStandardStreamableHTTPServerTransport builds
+      // its own Response with `Content-Type: text/event-stream` (or
+      // `application/json` for JSON-mode) but WITHOUT charset. Legacy
+      // Windows clients (PowerShell 5.1 Invoke-WebRequest / RestMethod)
+      // default to ISO-8859-1 when the charset is unspecified and 双重-
+      // 编码 our clean UTF-8 payload on the way in — the reported
+      // mojibake is client-side, but the header is what tells them to
+      // guess. We can't tell the SDK to add it, so wrap the response and
+      // rewrite the header. Streamed bodies (SSE) pass through untouched
+      // because Response takes the original ReadableStream verbatim.
+      return withUtf8CharsetContentType(response);
     }
 
     // ── SSE push: Agent 实时接收任务推送 ──
@@ -1365,7 +1411,7 @@ Bun.serve({
         if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
         return withCors(req, new Response(
           JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
-          { status: 429, headers: { ...headers, "Content-Type": "application/json" } },
+          { status: 429, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } },   // #426 — legacy clients default to ISO-8859-1 without charset
         ));
       }
 
@@ -2235,7 +2281,7 @@ Endpoints:
 
 Security: ${SECURITY_LABEL}
 `,
-      { status: 200, headers: { "Content-Type": "text/plain" } }
+      { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } }   // #426
     ));
   },
 
