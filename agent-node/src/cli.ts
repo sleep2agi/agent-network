@@ -2677,6 +2677,13 @@ async function processWithCodexAppServer(task: string, _from: string, taskId: st
       // unset. Ignored for the shared-server (adopt) topology.
       approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
       sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
+      // Wire CommHub as a native MCP server so codex can call commhub_* tools
+      // (send_task / send_message / get_all_status …) instead of shelling out.
+      // The MCP endpoint is <hub>/mcp (COMMHUB_URL is the base). Owned-server
+      // topology only; shared/adopt servers carry their own MCP config. Token
+      // via env inside the runtime (never argv/config).
+      commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
+      commhubToken: AUTH_TOKEN || undefined,
       onThread: (threadId) => writebackCodexThread(threadId),
       onExit: (info) => {
         warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);

@@ -37,21 +37,41 @@ function randomPort(): number {
 }
 
 /**
+ * Env var the spawned codex app-server reads its CommHub bearer token from.
+ * The token is passed via env (not written into config/argv) so it never
+ * lands in a config file or a process-list snapshot of the -c flags.
+ */
+export const COMMHUB_MCP_TOKEN_ENV = "ANET_CODEX_COMMHUB_TOKEN";
+
+export interface OwnedAppServerConfig {
+  approvalPolicy?: string;
+  sandboxMode?: string;
+  /**
+   * When set, wires CommHub in as a streamable-HTTP MCP server so codex can
+   * call `commhub_*` tools natively (send_task / send_message /
+   * get_all_status …) instead of shelling out. The bearer token is read
+   * from `COMMHUB_MCP_TOKEN_ENV` at connect time (set in the spawn env).
+   */
+  commhubMcpUrl?: string;
+}
+
+/**
  * Build argv for an OWNED `codex app-server`. `-c key=value` overrides
  * codex config.toml. approval_policy=never makes the app-server auto-run
  * without emitting approval reverse-requests (which the bridge won't
  * answer) — required for an unattended auto-approve node. sandbox_mode
- * bounds what those auto-runs can touch. Both are omitted when unset so
- * codex falls back to its own defaults. Pure + exported for unit testing.
+ * bounds what those auto-runs can touch. commhubMcpUrl adds the CommHub MCP
+ * server. Each field is omitted when unset so codex falls back to its own
+ * defaults. Pure + exported for unit testing.
  */
-export function buildOwnedAppServerArgs(
-  url: string,
-  approvalPolicy?: string,
-  sandboxMode?: string,
-): string[] {
+export function buildOwnedAppServerArgs(url: string, cfgOpts: OwnedAppServerConfig = {}): string[] {
   const cfg: string[] = [];
-  if (approvalPolicy) cfg.push("-c", `approval_policy=${approvalPolicy}`);
-  if (sandboxMode) cfg.push("-c", `sandbox_mode=${sandboxMode}`);
+  if (cfgOpts.approvalPolicy) cfg.push("-c", `approval_policy=${cfgOpts.approvalPolicy}`);
+  if (cfgOpts.sandboxMode) cfg.push("-c", `sandbox_mode=${cfgOpts.sandboxMode}`);
+  if (cfgOpts.commhubMcpUrl) {
+    cfg.push("-c", `mcp_servers.commhub.url="${cfgOpts.commhubMcpUrl}"`);
+    cfg.push("-c", `mcp_servers.commhub.bearer_token_env_var="${COMMHUB_MCP_TOKEN_ENV}"`);
+  }
   return ["app-server", ...cfg, "--listen", url];
 }
 
@@ -101,6 +121,16 @@ export async function openCodexAppServerRuntime(opts: {
    * radius of auto-approved commands. Ignored for shared servers.
    */
   sandboxMode?: string;
+  /**
+   * CommHub hub URL (e.g. http://127.0.0.1:9200). When set with
+   * commhubToken, an OWNED app-server gets CommHub wired in as a
+   * streamable-HTTP MCP server (`<hub>/mcp`) so codex can call `commhub_*`
+   * tools natively. Ignored for the shared-server (adopt) topology — that
+   * server's MCP config is owned by whoever spawned it.
+   */
+  commhubMcpUrl?: string;
+  /** CommHub bearer token (node ntok) — passed to the app-server via env. */
+  commhubToken?: string;
   onThread?: (threadId: string, created: boolean) => void | Promise<void>;
   onExit?: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
   log?: (msg: string) => void;
@@ -117,10 +147,21 @@ export async function openCodexAppServerRuntime(opts: {
     const port = randomPort();
     url = `ws://127.0.0.1:${port}`;
     const binary = opts.binary ?? "codex";
-    const spawnArgs = buildOwnedAppServerArgs(url, opts.approvalPolicy, opts.sandboxMode);
-    log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}`);
+    const wireCommhub = !!(opts.commhubMcpUrl && opts.commhubToken);
+    const spawnArgs = buildOwnedAppServerArgs(url, {
+      approvalPolicy: opts.approvalPolicy,
+      sandboxMode: opts.sandboxMode,
+      commhubMcpUrl: wireCommhub ? opts.commhubMcpUrl : undefined,
+    });
+    // Token via env only (never in argv/config) so it can't leak through a
+    // process list or on-disk config.
+    const childEnv = wireCommhub
+      ? { ...process.env, [COMMHUB_MCP_TOKEN_ENV]: opts.commhubToken }
+      : process.env;
+    log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}${wireCommhub ? " (+commhub MCP)" : ""}`);
     proc = spawn(binary, spawnArgs, {
       stdio: ["ignore", "pipe", "pipe"],
+      env: childEnv,
     });
     proc.stderr?.on("data", (d) =>
       log(`[codex-app-server stderr] ${String(d).trim().slice(0, 300)}`),
