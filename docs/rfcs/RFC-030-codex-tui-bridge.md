@@ -909,7 +909,11 @@ codex app-server generate-json-schema --out ./schemas
 ```
 节点 ntok 经**环境变量**传入（绝不进 argv/config, 防进程列表/落盘泄露）。**没有代理、没有新进程**——codex 直连 `:9200/mcp`, 跟别的节点同一个 MCP。全 CommHub 工具集（Vincent: 权限尽可能多）。`cli.ts` 给 `COMMHUB_URL` 补 `/mcp` 并传 token。shared/adopt server 的 MCP 由 spawn 它的一方配置。实测: codex 在 runtime-spawn 的节点上真的发起 `mcpToolCall server=commhub tool=get_all_status` 直连生产 hub。
 
-> 🔴 **坑（实测铁证）：codex 在「创建 thread 那一刻」快照工具集; `thread/resume` 一条旧 thread **不会**重挂 MCP。** 所以一条在「没 MCP 的 app-server」上建的 thread, 即使之后把 app-server 换成带 MCP 的, resume 它仍然**没有** commhub 工具（只会 node -e）。修复只能是**在带 MCP 的 app-server 上新建 thread**（会丢旧 thread 历史）。OWNED 模式天然规避（cli.ts 让 app-server 一直带 MCP, 新建的 thread 自带工具）; ADOPT 模式若 `codexThreadId` 是 MCP 前建的, 必须换新 thread。
+> 🔴 **坑 A（实测铁证）：codex 在「创建 thread 那一刻」快照工具集; `thread/resume` 一条旧 thread **不会**重挂 MCP。** 所以一条在「没 MCP 的 app-server」上建的 thread, 即使之后把 app-server 换成带 MCP 的, resume 它仍然**没有** commhub 工具（只会 node -e）。修复只能是**在带 MCP 的 app-server 上新建 thread**（会丢旧 thread 历史）。OWNED 模式天然规避（cli.ts 让 app-server 一直带 MCP, 新建的 thread 自带工具）; ADOPT 模式若 `codexThreadId` 是 MCP 前建的, 必须换新 thread。
+
+> 🔴 **坑 B（审批分两层）：`approval_policy=never` 只让「程序/桥客户端」自动放行 MCP 工具**（实测: 桥驱动的 turn 调 `send_message` 直接跑、不弹）。但**人类原生 TUI 有它自己一道客户端审批**——即使 server 是 never, 人在 TUI 里调 MCP 工具仍会弹「Allow the commhub MCP server to run tool?」。要让人类 TUI 也全自动, **必须给 TUI 命令加 `--dangerously-bypass-approvals-and-sandbox`**（yolo）: `codex resume --remote <ws> <thread> --dangerously-bypass-approvals-and-sandbox`。网络派活路径不受影响（桥本就自动放行）。
+
+> 🔴 **坑 C（运维）：codex TUI 用 `C-c` 退不干净**（会残留在输入行 / 中断 turn 但不退出）。要重开 TUI, 直接 `kill` 掉 `codex resume --remote` 进程再起, 别靠发键退。
 
 ### 18.5 配置字段
 
