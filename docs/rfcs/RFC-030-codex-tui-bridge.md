@@ -900,6 +900,21 @@ codex app-server generate-json-schema --out ./schemas
 
 因此 **`codex-app-server` 节点回复派工用 `send_task`**（`REPLY_VIA_SEND_TASK`, 仅对该 runtime 生效, 不改其他 runtime 的 `send_reply` 任务生命周期语义）。这与全网「回复指挥室用 `commhub_send_task`」的约定一致。收发两个方向都是 `send_task`。
 
+### 18.4b CommHub 作为原生 MCP（codex 直接调 `commhub_*` 工具）
+
+早期 codex 节点没有 CommHub 工具, 于是当人类让 codex「告诉某某我上线了」时, codex 只能瞎撸一个 `node -e` 去手撸 HTTP 打 hub `/mcp`（丑且错）。修复：OWNED app-server spawn 时**直接指向 hub 现成的 MCP**——
+```
+-c mcp_servers.commhub.url="<hub>/mcp"
+-c mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"
+```
+节点 ntok 经**环境变量**传入（绝不进 argv/config, 防进程列表/落盘泄露）。**没有代理、没有新进程**——codex 直连 `:9200/mcp`, 跟别的节点同一个 MCP。全 CommHub 工具集（Vincent: 权限尽可能多）。`cli.ts` 给 `COMMHUB_URL` 补 `/mcp` 并传 token。shared/adopt server 的 MCP 由 spawn 它的一方配置。实测: codex 在 runtime-spawn 的节点上真的发起 `mcpToolCall server=commhub tool=get_all_status` 直连生产 hub。
+
+> 🔴 **坑 A（实测铁证）：codex 在「创建 thread 那一刻」快照工具集; `thread/resume` 一条旧 thread **不会**重挂 MCP。** 所以一条在「没 MCP 的 app-server」上建的 thread, 即使之后把 app-server 换成带 MCP 的, resume 它仍然**没有** commhub 工具（只会 node -e）。修复只能是**在带 MCP 的 app-server 上新建 thread**（会丢旧 thread 历史）。OWNED 模式天然规避（cli.ts 让 app-server 一直带 MCP, 新建的 thread 自带工具）; ADOPT 模式若 `codexThreadId` 是 MCP 前建的, 必须换新 thread。
+
+> 🔴 **坑 B（审批分两层）：`approval_policy=never` 只让「程序/桥客户端」自动放行 MCP 工具**（实测: 桥驱动的 turn 调 `send_message` 直接跑、不弹）。但**人类原生 TUI 有它自己一道客户端审批**——即使 server 是 never, 人在 TUI 里调 MCP 工具仍会弹「Allow the commhub MCP server to run tool?」。要让人类 TUI 也全自动, **必须给 TUI 命令加 `--dangerously-bypass-approvals-and-sandbox`**（yolo）: `codex resume --remote <ws> <thread> --dangerously-bypass-approvals-and-sandbox`。网络派活路径不受影响（桥本就自动放行）。
+
+> 🔴 **坑 C（运维）：codex TUI 用 `C-c` 退不干净**（会残留在输入行 / 中断 turn 但不退出）。要重开 TUI, 直接 `kill` 掉 `codex resume --remote` 进程再起, 别靠发键退。
+
 ### 18.5 配置字段
 
 ```jsonc
@@ -908,10 +923,11 @@ codex app-server generate-json-schema --out ./schemas
   "codexThreadId": "019f…",          // 可选; 落地后自动写回, 重启 resume 同一会话
   "codexAppServerUrl": "ws://127.0.0.1:24777", // 可选; 设了就接管该共享 server（否则自己 spawn）
   "model": "gpt-5.5",
-  "flags": { "dangerouslySkipPermissions": true, "approvalPolicy": "never" }
+  "flags": { "dangerouslySkipPermissions": true, "approvalPolicy": "never", "sandboxMode": "danger-full-access" }
 }
 ```
 - `codexThreadId` 存放于**专属字段**（不占用通用 `session` 字段, 避免与其他 runtime 冲突）; 首次落地由 `onThread` 自动写回。
+- `approvalPolicy` + `sandboxMode` 驱动 OWNED app-server 的 `-c approval_policy` / `-c sandbox_mode`（自动批准 / 沙箱姿态）; adopt server 自带策略。
 - 前置：本机装 `codex` CLI 并 `codex auth login`。
 
 ### 18.6 已知边界 / 后续
