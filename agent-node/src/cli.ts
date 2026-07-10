@@ -339,16 +339,10 @@ const RUNTIME_MAP: Record<string, string> = {
 const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
-// RFC-030 — reply delivery. An earlier experiment made codex-app-server reply
-// via send_task (to SSE-wake agent peers), but that BROKE dashboard-originated
-// tasks: the hub labels those from_session="api", which is NOT a routable
-// session, so send_task(alias="api") goes nowhere and the dashboard — which
-// tracks the task by task_id and expects a send_reply — never shows the result
-// (Vincent 2026-07-10). send_reply is correct for ALL originators: it closes
-// the task (dashboard shows it) AND enqueues to the originator's inbox (agents
-// still receive it). The only thing lost vs send_task is an immediate SSE wake
-// for agent peers, which is marginal and not worth breaking the dashboard.
-const REPLY_VIA_SEND_TASK = false;
+// RFC-030 — reply routing is decided per-reply inside sendReply() by the
+// ORIGINATOR type: dashboard/REST ("api"/"hub") → send_reply (dashboard reads
+// the task result; new_reply SSE still wakes a live originator); real agent
+// nodes → send_task (actionable, routable). See sendReply() for the rationale.
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
@@ -1069,14 +1063,20 @@ async function sendReply(
   // viewer would see as an orphaned reply from a non-existent sender).
   const fromAlias = await liveAlias();
 
-  // RFC-030 — codex-app-server replies via send_task, NOT send_reply.
-  // Empirically (isolated-hub e2e), send_reply enqueues to the originator's
-  // inbox as type='reply' but does NOT SSE-wake the immediate originator
-  // (only a chained-to-parent push fires) — an agent peer would only see it
-  // on its next poll. send_task fires a `new_task` SSE wake so the peer acts
-  // immediately, matching the network's "回复用 send_task" convention
-  // (Vincent, 2026-07-09). Failures are prefixed so the peer sees the error.
-  if (REPLY_VIA_SEND_TASK) {
+  // RFC-030 — reply routing by ORIGINATOR type (Vincent 2026-07-10):
+  //  • dashboard / REST tasks carry from_session="api" (or "hub") — those are
+  //    NOT routable sessions, so send_task(alias="api") is dropped and the
+  //    dashboard never sees the result. They MUST use send_reply, which
+  //    updates the task result (dashboard reads it) AND pushes a `new_reply`
+  //    SSE event (tools.ts:1187, unconditional) so a live originator wakes.
+  //  • real agent nodes: reply via send_task so the peer gets a fresh,
+  //    actionable task it can act on / continue from (the network's
+  //    "回复用 send_task" convention), and it routes fine (real alias).
+  // Only codex-app-server opts into the send_task branch; other runtimes keep
+  // the plain send_reply lifecycle-close path.
+  const nonRoutableOrigin = !target || target === "api" || target === "hub";
+  const replyViaSendTask = RUNTIME === "codex-app-server" && !nonRoutableOrigin;
+  if (replyViaSendTask) {
     const taskResult = await callCommHub("send_task", {
       alias: target,
       task: failed ? `⚠️ ${message}` : message,
