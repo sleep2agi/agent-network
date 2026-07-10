@@ -339,11 +339,16 @@ const RUNTIME_MAP: Record<string, string> = {
 const RUNTIME = (RUNTIME_MAP[rawRuntime] || "claude") as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 
-// RFC-030 — codex-app-server nodes reply to dispatched tasks with send_task
-// (immediate SSE wake + actionable) instead of send_reply (inbox-only, no
-// wake for the immediate originator). See sendReply() for the empirical
-// rationale. Other runtimes keep the send_reply task-lifecycle-close path.
-const REPLY_VIA_SEND_TASK = RUNTIME === "codex-app-server";
+// RFC-030 — reply delivery. An earlier experiment made codex-app-server reply
+// via send_task (to SSE-wake agent peers), but that BROKE dashboard-originated
+// tasks: the hub labels those from_session="api", which is NOT a routable
+// session, so send_task(alias="api") goes nowhere and the dashboard — which
+// tracks the task by task_id and expects a send_reply — never shows the result
+// (Vincent 2026-07-10). send_reply is correct for ALL originators: it closes
+// the task (dashboard shows it) AND enqueues to the originator's inbox (agents
+// still receive it). The only thing lost vs send_task is an immediate SSE wake
+// for agent peers, which is marginal and not worth breaking the dashboard.
+const REPLY_VIA_SEND_TASK = false;
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 const MODEL = opts.model || process.env.MODEL || fileConfig.model;
