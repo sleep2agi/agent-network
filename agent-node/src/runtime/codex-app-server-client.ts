@@ -23,9 +23,37 @@
 //   3. `id` present with `result` or `error` → response. Match against pending.
 //   4. Anything else → `malformed`.
 //
-// Global `WebSocket` (Node 20+, Bun). No `ws` dependency added.
+// WebSocket resolution: Bun and Node 22+ expose a global `WebSocket`, but the
+// fleet runs agent-node under **Node 20**, which has NO global `WebSocket`
+// (it's behind `--experimental-websocket`). The shipped node bundle therefore
+// must fall back to undici's WebSocket — agent-node already depends on undici,
+// and `undici.WebSocket` works under Node 20. Without this the whole
+// codex-app-server runtime fails at connect time under the fleet's node
+// (worked in dev only because Bun has the global). See RFC-030 §18.
 
 import { EventEmitter } from "events";
+
+/**
+ * Resolve a usable WebSocket constructor: prefer the global (Bun / Node 22+),
+ * fall back to undici's (Node 20, where the global is absent). Cached.
+ */
+let _wsCtor: any;
+export function resolveWebSocketCtor(): any {
+  if (_wsCtor) return _wsCtor;
+  const g = (globalThis as any).WebSocket;
+  if (typeof g === "function") return (_wsCtor = g);
+  try {
+    // undici is a direct dependency of agent-node.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const undici = require("undici");
+    if (typeof undici?.WebSocket === "function") return (_wsCtor = undici.WebSocket);
+  } catch {
+    /* fall through to the throw below */
+  }
+  throw new Error(
+    "no WebSocket implementation available — need a global WebSocket (Bun / Node 22+) or the undici package",
+  );
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Wire types (subset). Field names camelCase per Codex serde convention.
@@ -134,12 +162,7 @@ export class CodexAppServerClient extends EventEmitter {
     // WebSocket, which accepts an options bag as the third argument. If the
     // runtime doesn't, callers should embed the token in the URL query.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const WS: any = (globalThis as any).WebSocket;
-    if (typeof WS !== "function") {
-      throw new Error(
-        "global WebSocket is not available — need Node 20+ or Bun",
-      );
-    }
+    const WS: any = resolveWebSocketCtor();
     this.ws = new WS(this.opts.url, undefined, headers.Authorization ? { headers } : undefined);
 
     return new Promise<void>((resolve, reject) => {

@@ -18,7 +18,7 @@
 // CommHub `send_task` — the runtime just returns the final text.
 
 import { spawn, type ChildProcess } from "child_process";
-import { CodexAppServerClient } from "../codex-app-server-client";
+import { CodexAppServerClient, resolveWebSocketCtor } from "../codex-app-server-client";
 import { CodexAppServerBridge } from "../codex-app-server-bridge";
 
 export interface CodexAppServerRuntimeSession {
@@ -78,7 +78,8 @@ export function buildOwnedAppServerArgs(url: string, cfgOpts: OwnedAppServerConf
 async function waitWs(url: string, tries = 60, gapMs = 300): Promise<void> {
   for (let i = 0; i < tries; i++) {
     try {
-      const c = new WebSocket(url);
+      const WS: any = resolveWebSocketCtor();
+      const c = new WS(url);
       await new Promise<void>((res, rej) => {
         c.onopen = () => res();
         c.onerror = (e) => rej(e);
