@@ -205,7 +205,8 @@ export class CodexAppServerBridge extends EventEmitter {
     }
     this.turnClaimed = true;
     const clientUserMessageId = `anet:${input.taskId}`;
-    const promptPrefix = input.from ? `[Agent Network/from=${input.from}/task=${input.taskId}] ` : `[Agent Network/task=${input.taskId}] `;
+    const fromLabel = displaySender(input.from);
+    const promptPrefix = fromLabel ? `[Agent Network/from=${fromLabel}/task=${input.taskId}] ` : `[Agent Network/task=${input.taskId}] `;
     const pending: PendingTurn = {
       taskId: input.taskId,
       clientUserMessageId,
@@ -504,6 +505,19 @@ function isAlreadyInitialized(e: unknown): boolean {
 function isNoRollout(e: unknown): boolean {
   const msg = (e as { message?: unknown })?.message;
   return typeof msg === "string" && /no rollout found|thread not found|unknown thread/i.test(msg);
+}
+
+/**
+ * Human-readable sender label for the codex prompt prefix. The hub defaults
+ * `from_session` to "api" for dashboard/REST-originated tasks (server/src/
+ * index.ts), which reads as opaque "from=api" in the TUI — map it to a clear
+ * "控制台(dashboard)" so a human at the TUI knows it came from the panel.
+ * Everything else (agent aliases, "hub") passes through unchanged.
+ */
+function displaySender(from?: string): string | undefined {
+  if (!from) return undefined;
+  if (from === "api") return "控制台(dashboard)";
+  return from;
 }
 
 function extractReverseRequestId(params: unknown): number | null {
