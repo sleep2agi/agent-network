@@ -336,17 +336,25 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
  *  migration; legacy rows have them null/undefined). */
 export interface InboxRowLike {
   id: string;
+  type?: string | null;
   from_session?: string | null;
   network_id?: string | null;
   sender_token_id?: string | null;
   sender_role?: string | null;
+  /** L1 (拍板): the STABLE task id — original tasks.task_id across
+   *  retry/reassign re-queues; the row's own id is the messageId. */
+  canonical_task_id?: string | null;
 }
 
+// A final freeze 90d1e58 role union (Δ14): node = plain ntok minimal
+// identity, child = RFC-026 child token. "unknown" is NOT permitted —
+// rows that can't be classified stay null-stamped and are refused here.
 const VALID_ROLES: ReadonlySet<string> = new Set([
   "admin",
   "owner",
   "member",
   "viewer",
+  "node",
   "child",
 ]);
 

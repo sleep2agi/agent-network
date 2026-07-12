@@ -8,6 +8,7 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { register, login, resolveToken, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, renameNetwork, changePassword, issueUserToken, listTokens, createToken, revokeToken, getNetworkMembers, getUserNetworkRole, addNetworkMember, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
+import { resolveSenderPrincipal } from "./principal.js";
 import { getLoginClientIp, sharedLoginFailureLockout, sharedLoginIpRateLimiter } from "./auth_login_guard.js";
 import {
   FILE_ID_REGEX,
@@ -1696,16 +1697,24 @@ Bun.serve({
       // and the parent_task_id lineage chain. Previously this endpoint
       // only wrote inbox, leaving GET /api/tasks empty for any task
       // dispatched via REST (anet demo, dashboard Dispatch button, etc.).
+      // RFC-030 Wave 1B L1: REST dispatch re-auth stamps the CURRENT
+      // operator via the SHARED resolver (same as MCP send_task — no site
+      // re-implements it). canonical_task_id = the task's own id; tasks
+      // origin_* is the write-once immutable origin principal.
+      const restPrincipal = resolveSenderPrincipal(db, {
+        callerTokenId: restAuth?.tokenId ?? null,
+        effectiveNetId: taskNetId ?? null,
+      });
       db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
-           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7, ?8)`,
-          [id, targetAlias, targetNodeId, body.priority, body.task, fromSession, taskNetId, metaJson]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json, sender_token_id, sender_role, canonical_task_id)
+           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, 'reply', ?7, ?8, ?9, ?10, ?11)`,
+          [id, targetAlias, targetNodeId, body.priority, body.task, fromSession, taskNetId, metaJson, restPrincipal?.tokenId ?? null, restPrincipal?.role ?? null, id]
         );
         db.run(
-          `INSERT INTO tasks (task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'delivered', ?7, 'reply', datetime('now'), datetime('now'), datetime('now', ?8), ?9, ?10, ?11)`,
-          [id, fromNodeId, fromSession, targetNodeId, targetAlias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId, body.parent_task_id ?? null, metaJson]
+          `INSERT INTO tasks (task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json, origin_sender_token_id, origin_sender_role)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'delivered', ?7, 'reply', datetime('now'), datetime('now'), datetime('now', ?8), ?9, ?10, ?11, ?12, ?13)`,
+          [id, fromNodeId, fromSession, targetNodeId, targetAlias, body.priority, body.task, `+${ttlSeconds} seconds`, taskNetId, body.parent_task_id ?? null, metaJson, restPrincipal?.tokenId ?? null, restPrincipal?.role ?? null]
         );
         // Touch session row so the dashboard reflects "task in flight"
         // immediately, without waiting for the agent's report_status to
@@ -1778,10 +1787,16 @@ Bun.serve({
         const lc = assertNodeActive(t.alias, t.network_id ?? null);
         if (!lc.ok) continue;
         const id = crypto.randomUUID();
+        // RFC-030 Wave 1B L1: REST broadcast re-auth stamps the current
+        // operator (resolved per recipient network for utok role).
+        const bcPrincipal = resolveSenderPrincipal(db, {
+          callerTokenId: restAuth?.tokenId ?? null,
+          effectiveNetId: t.network_id ?? null,
+        });
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
-           VALUES (?1, ?2, ?3, 'broadcast', 'normal', ?4, 'api', ?5)`,
-          [id, t.alias, t.node_id ?? null, body.message, t.network_id]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id, sender_token_id, sender_role)
+           VALUES (?1, ?2, ?3, 'broadcast', 'normal', ?4, 'api', ?5, ?6, ?7)`,
+          [id, t.alias, t.node_id ?? null, body.message, t.network_id, bcPrincipal?.tokenId ?? null, bcPrincipal?.role ?? null]
         );
         ids.push(id);
       }
