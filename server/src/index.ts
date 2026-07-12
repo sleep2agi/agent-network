@@ -517,9 +517,20 @@ setInterval(() => {
   } catch {}
 }, 5 * 60 * 1000);
 
-Bun.serve({
-  port: PORT,
-  hostname: HOST,
+// #434 — test-safety seam. Wraps the sole Bun.serve config in a
+// factory so integration tests can request an OS-assigned ephemeral
+// port (`bootServer({ port: 0 })`) and read the actual bound port back
+// from the returned server, avoiding the parent-side TOCTOU pattern
+// (random 18000 slot) that the old test harnesses used. Production
+// callers use the module's `import.meta.main` block below; nothing
+// binds at import time.
+//
+// Note: `opts.port ?? PORT` uses nullish-coalescing on purpose — `||`
+// would swallow a legitimate `0`. Same for hostname.
+export function bootServer(opts?: { port?: number; hostname?: string }): ReturnType<typeof Bun.serve> {
+return Bun.serve({
+  port: opts?.port ?? PORT,
+  hostname: opts?.hostname ?? HOST,
   idleTimeout: 255, // max value: keep SSE connections alive (seconds)
   // #221 — defense-in-depth cap on the raw request body. The /api/upload
   // handler also pre-checks Content-Length and post-checks parsed size
@@ -2366,66 +2377,80 @@ Security: ${SECURITY_LABEL}
     },
   },
 });
+} // end bootServer
 
-// Round-2/4 review ② — periodic retention sweep + incremental VACUUM.
-// Sweeps every hour by default. Operators can disable any single table
-// by setting COMMHUB_RETENTION_*_DAYS to a negative value, or shorten
-// the sweep window via COMMHUB_RETENTION_SWEEP_MINUTES.
-const sweepIntervalMinutes = Number(process.env.COMMHUB_RETENTION_SWEEP_MINUTES);
-const sweepIntervalMs = Number.isFinite(sweepIntervalMinutes) && sweepIntervalMinutes > 0
-  ? sweepIntervalMinutes * 60 * 1000
-  : 60 * 60 * 1000;
-const retentionSweeperTimer = startRetentionSweeper(sweepIntervalMs);
+// #434 — production boot lives inside this guard so `import`-only paths
+// (tests, tooling) don't bind a port, start sweepers, or install signal
+// handlers at module-load time. `bun run src/index.ts` still bootstraps
+// the server exactly as before — this whole block runs only when the
+// module is the process entry point.
+if (import.meta.main) {
+  const server = bootServer();
 
-// Round-2/4 review ③ — stale session sweeper (coexists with the
-// retention sweeper above; different concerns + different cadences).
-// Replaces the per-request UPDATE in GET /api/status (+ /api/servers,
-// /api/server-detail/*, MCP get_all_status). Each of those endpoints
-// used to run UPDATE on the sessions table just to maintain the
-// derived `offline` status; with the dashboard polling fast that was
-// 99% no-op write-amp under hot read paths. Now done globally once
-// every COMMHUB_STALE_SWEEP_SECONDS (default 60s).
-const staleSweeperTimer = startStaleSessionSweeper();
+  // Round-2/4 review ② — periodic retention sweep + incremental VACUUM.
+  // Sweeps every hour by default. Operators can disable any single table
+  // by setting COMMHUB_RETENTION_*_DAYS to a negative value, or shorten
+  // the sweep window via COMMHUB_RETENTION_SWEEP_MINUTES.
+  const sweepIntervalMinutes = Number(process.env.COMMHUB_RETENTION_SWEEP_MINUTES);
+  const sweepIntervalMs = Number.isFinite(sweepIntervalMinutes) && sweepIntervalMinutes > 0
+    ? sweepIntervalMinutes * 60 * 1000
+    : 60 * 60 * 1000;
+  const retentionSweeperTimer = startRetentionSweeper(sweepIntervalMs);
 
-// ── Graceful shutdown ───────────────────────────────
-function shutdown() {
-  console.log("[commhub] shutting down...");
-  clearInterval(retentionSweeperTimer);
-  clearInterval(staleSweeperTimer);
-  db.close();
-  process.exit(0);
-}
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+  // Round-2/4 review ③ — stale session sweeper (coexists with the
+  // retention sweeper above; different concerns + different cadences).
+  // Replaces the per-request UPDATE in GET /api/status (+ /api/servers,
+  // /api/server-detail/*, MCP get_all_status). Each of those endpoints
+  // used to run UPDATE on the sessions table just to maintain the
+  // derived `offline` status; with the dashboard polling fast that was
+  // 99% no-op write-amp under hot read paths. Now done globally once
+  // every COMMHUB_STALE_SWEEP_SECONDS (default 60s).
+  const staleSweeperTimer = startStaleSessionSweeper();
 
-console.log(`
+  // ── Graceful shutdown ───────────────────────────────
+  function shutdown() {
+    console.log("[commhub] shutting down...");
+    clearInterval(retentionSweeperTimer);
+    clearInterval(staleSweeperTimer);
+    db.close();
+    process.exit(0);
+  }
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+
+  // Banner uses server.port / server.hostname — the *effective* bind
+  // (not the module-level PORT/HOST constants). Matters for the
+  // OS-ephemeral case where `bootServer({ port: 0 })` binds a
+  // kernel-assigned port.
+  console.log(`
 ╔══════════════════════════════════════════════════╗
 ║   CommHub MCP Server v${SERVER_VERSION}                     ║
 ║   Transport: Streamable HTTP (Bun native)         ║
 ║   Security: ${SECURITY_LABEL}${" ".repeat(Math.max(0, 33 - SECURITY_LABEL.length))}║
 ║   Tmux: ${TMUX_ENABLED ? "ENABLED (admin + localhost/allowlist)" : "DISABLED (set COMMHUB_ENABLE_TMUX=1)"}${" ".repeat(Math.max(0, TMUX_ENABLED ? 0 : 2))}║
 ║                                                   ║
-║   MCP:    http://${HOST}:${PORT}/mcp                 ║
-║   REST:   http://${HOST}:${PORT}/api                 ║
-║   Health: http://${HOST}:${PORT}/health               ║
+║   MCP:    http://${server.hostname}:${server.port}/mcp                 ║
+║   REST:   http://${server.hostname}:${server.port}/api                 ║
+║   Health: http://${server.hostname}:${server.port}/health               ║
 ╚══════════════════════════════════════════════════╝
 `);
 
-// RFC-028 P1 boot banner — vault key configuration status.
-// F2 invariant: hub MUST boot regardless of vault state. This is
-// banner-only (informational); errors are raised lazily at vault op
-// time. needsKeyToOp=true means the operator should set
-// ANET_HUB_SECRET_VAULT_KEY before vault/provider features will work.
-try {
-  const { vaultStatusForBoot } = await import("./vault.js");
-  const s = vaultStatusForBoot();
-  if (s.needsKeyToOp) {
-    console.warn("[rfc-028 vault] ⚠️  network_secrets/providers have data BUT ANET_HUB_SECRET_VAULT_KEY is unset — vault ops will throw vault_master_key_missing until you set the env. Generate one: `openssl rand -hex 32` (must match the key used at write time).");
-  } else if (s.configured) {
-    console.log(`[rfc-028 vault] master key configured (tables_have_data=${s.tablesHaveData})`);
-  } else {
-    console.log("[rfc-028 vault] master key not set + no vault rows — vault gating is lazy; boot OK. Set ANET_HUB_SECRET_VAULT_KEY when enabling provider/secret features.");
+  // RFC-028 P1 boot banner — vault key configuration status.
+  // F2 invariant: hub MUST boot regardless of vault state. This is
+  // banner-only (informational); errors are raised lazily at vault op
+  // time. needsKeyToOp=true means the operator should set
+  // ANET_HUB_SECRET_VAULT_KEY before vault/provider features will work.
+  try {
+    const { vaultStatusForBoot } = await import("./vault.js");
+    const s = vaultStatusForBoot();
+    if (s.needsKeyToOp) {
+      console.warn("[rfc-028 vault] ⚠️  network_secrets/providers have data BUT ANET_HUB_SECRET_VAULT_KEY is unset — vault ops will throw vault_master_key_missing until you set the env. Generate one: `openssl rand -hex 32` (must match the key used at write time).");
+    } else if (s.configured) {
+      console.log(`[rfc-028 vault] master key configured (tables_have_data=${s.tablesHaveData})`);
+    } else {
+      console.log("[rfc-028 vault] master key not set + no vault rows — vault gating is lazy; boot OK. Set ANET_HUB_SECRET_VAULT_KEY when enabling provider/secret features.");
+    }
+  } catch (e: any) {
+    console.warn(`[rfc-028 vault] boot banner skipped (${e?.message || e})`);
   }
-} catch (e: any) {
-  console.warn(`[rfc-028 vault] boot banner skipped (${e?.message || e})`);
 }

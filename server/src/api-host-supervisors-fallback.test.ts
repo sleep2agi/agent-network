@@ -27,8 +27,13 @@ import { register, login, createNetwork } from "./auth.js";
 import { db } from "./db.js";
 
 const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-hs-fallback-db-")) + "/commhub.db";
-const PORT = 18000 + Math.floor(Math.random() * 1000);
-const BASE = `http://127.0.0.1:${PORT}`;
+// #434 — port assigned by the kernel inside this process via
+// `bootServer({ port: 0 })`; `BASE` is finalized in `beforeAll` once
+// the server actually binds. Kills the parent-side TOCTOU pattern
+// (`PORT = 18000 + Math.random() * 1000`) that could double-bind or
+// race with anything else on the host.
+let BASE = "";
+let server: ReturnType<typeof import("./index.js")["bootServer"]> | null = null;
 
 // Three users:
 //   soloUser    — single accessible network (fallback should work)
@@ -41,7 +46,6 @@ let soloDaemonAlias = "";
 
 beforeAll(async () => {
   process.env.COMMHUB_DB = SERVER_DB;
-  process.env.PORT = String(PORT);
   process.env.HOST = "127.0.0.1";
 
   const suffix = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -108,9 +112,15 @@ beforeAll(async () => {
     userIdForToken: login(`multi_${suffix}`, password).user!.user_id,
   });
 
-  // Import triggers Bun.serve at module load — this IS the server start.
-  await import("./index.js");
-  await new Promise((r) => setTimeout(r, 100));
+  // #434 — production `Bun.serve` is now behind `if (import.meta.main)`,
+  // so importing `./index.js` no longer binds a port. The test drives
+  // the seam directly with `bootServer({ port: 0 })` and reads the
+  // OS-assigned port back off the returned server.
+  const { bootServer } = await import("./index.js");
+  server = bootServer({ port: 0, hostname: "127.0.0.1" });
+  expect(server.port).toBeGreaterThan(0);
+  BASE = `http://127.0.0.1:${server.port}`;
+  await new Promise((r) => setTimeout(r, 50));
 });
 
 // Insert a minimal `nodes` row + `api_tokens` row so the daemon shows up
@@ -145,7 +155,10 @@ function seedHostSupervisorDaemon(opts: {
 }
 
 afterAll(() => {
-  try { rmSync(SERVER_DB, { recursive: true, force: true }); } catch {}
+  try { server?.stop(true); } catch {}
+  // Best-effort cleanup — WAL + SHM live next to the DB file.
+  const dbDir = SERVER_DB.replace(/\/commhub\.db$/, "");
+  try { rmSync(dbDir, { recursive: true, force: true }); } catch {}
 });
 
 async function get(path: string, token: string): Promise<{ status: number; body: any }> {

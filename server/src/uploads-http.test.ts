@@ -14,10 +14,11 @@ import { register, login } from "./auth.js";
 
 const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-upload-http-db-")) + "/commhub.db";
 const UPLOADS_DIR = mkdtempSync(join(tmpdir(), "anet-upload-http-fs-"));
-const PORT = 19000 + Math.floor(Math.random() * 1000);
-const BASE = `http://127.0.0.1:${PORT}`;
-
-let server: any;
+// #434 — port assigned by the kernel inside this process via
+// `bootServer({ port: 0 })`; `BASE` is finalized in `beforeAll` once
+// the server actually binds.
+let BASE = "";
+let server: ReturnType<typeof import("./index.js")["bootServer"]> | null = null;
 let userToken = "";
 let userNetworkId = "";
 
@@ -27,7 +28,6 @@ beforeAll(async () => {
   // we want to validate the production code path).
   process.env.COMMHUB_DB = SERVER_DB;
   process.env.COMMHUB_UPLOADS_DIR = UPLOADS_DIR;
-  process.env.PORT = String(PORT);
   process.env.HOST = "127.0.0.1";
 
   // Use a unique username + strong password each run so we don't trip
@@ -50,18 +50,23 @@ beforeAll(async () => {
   }
   expect(userToken).toBeTruthy();
 
-  // Import the server module — its top-level `Bun.serve` call binds
-  // the port immediately. The import side effect IS the server start.
-  await import("./index.js");
-  // Tiny settle so the listener is ready.
-  await new Promise((r) => setTimeout(r, 100));
+  // #434 — production `Bun.serve` is now behind `if (import.meta.main)`,
+  // so importing `./index.js` no longer binds a port. Drive the seam
+  // directly and read the OS-assigned port back off the returned server.
+  const { bootServer } = await import("./index.js");
+  server = bootServer({ port: 0, hostname: "127.0.0.1" });
+  expect(server.port).toBeGreaterThan(0);
+  BASE = `http://127.0.0.1:${server.port}`;
+  await new Promise((r) => setTimeout(r, 50));
 });
 
 afterAll(() => {
-  // Best-effort cleanup. The Bun.serve handle is created at import
-  // time so we can't easily stop it — process exit handles that.
+  try { server?.stop(true); } catch {}
+  // Best-effort cleanup — WAL + SHM live next to the DB file, so
+  // removing the enclosing mkdtemp dir sweeps them all.
   try { rmSync(UPLOADS_DIR, { recursive: true, force: true }); } catch {}
-  try { rmSync(SERVER_DB, { recursive: true, force: true }); } catch {}
+  const dbDir = SERVER_DB.replace(/\/commhub\.db$/, "");
+  try { rmSync(dbDir, { recursive: true, force: true }); } catch {}
 });
 
 function authHeaders(): Record<string, string> {

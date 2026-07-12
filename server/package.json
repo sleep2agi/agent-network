@@ -14,7 +14,8 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
-    "test": "COMMHUB_DB=/tmp/test-commhub-$$.db bun test src/"
+    "test": "bun run scripts/test-runner.ts",
+    "test:raw": "echo '⚠️  test:raw is diagnostic-only — it runs bun test src/ in a SINGLE process, which reproduces the module-singleton / port / DB conflicts documented in #434. NOT a CI gate. For canonical results run: bun run test' 1>&2 && COMMHUB_DB=/tmp/test-commhub-raw-$$.db bun test src/"
   },
   "keywords": [
     "commhub",
