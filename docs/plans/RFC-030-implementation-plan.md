@@ -149,7 +149,7 @@ fixture with the same name—proves every row.
 |---|---|---|
 | Typed contract and protocol | **PASS** | Freeze `90d1e58`, independent `169/0/555` |
 | 100 task one-to-one race and dedup | **Partial** | Scheduler→fake app-server test is green; it bypasses UDS, inbox, principal and reply delivery |
-| Single mux, collisions and out-of-order routing | **Partial / blocked** | A mux unit tests green; audited PR #432 head used an unwired duplicate mux and replayed duplicate responses |
+| Single mux, collisions and out-of-order routing | **PASS (L3 @ `7c1e12a`, pending review)** | SharedUpstreamMux deleted; client drives A's one-shot UpstreamRequestMux; duplicate response → orphan (replay hole closed); tuiId restored; drain selectivity wire-tested |
 | Approval forgery | **Partial / blocked** | Pure policy rejection is green; real TUI reverse-ID wire path not yet integrated |
 | CommHub token isolation | **Partial PASS** | Owned-spawn argv/env tests are useful; final real spawn capture and all credential forms remain |
 | Authenticated principal | **PASS (L1 @ `34bea40`, pending review)** | principal.ts shared MCP+REST resolver (role union incl node/child per freeze Δ14); 9 write sites stamped (grep-audited); real registerTools handler matrix `17/0`; real Bun.serve+utok HTTP REST `3/0`; pump dead-letter + LIMIT starvation test green |
@@ -157,9 +157,9 @@ fixture with the same name—proves every row.
 | TUI policy default-deny | **PASS (L2 @ `ed45f4d`, pending review)** | Explicit Phase-1 allowlist + default deny (`tui_method_not_allowed`); 12 dangerous/unknown methods × 3 reservations 0-forward sweep; adapts to A's async TuiRequestAuthorizer at L3 |
 | Owner lease fail-closed | **PASS (L2 @ `ed45f4d`, pending review)** | `ownerAttached` now REQUIRED; no-owner → refused_no_owner; owner-drop-during-queue parks (no dispatch) + re-attach resumes; in-flight turn never auto-interrupted; A lifecycle/lease wiring lands at L3 |
 | Codex/schema/SQLite startup gate | **Partial (L2)** | assertCodexBaseline now wired into openCodexAppServerRuntime before spawn (same-binary proof); REMAINING: digest algorithm path+NUL+length+content domain separation (P1-4) + SQLite gate at gateway production startup — scheduled with L3 |
-| Reply lifecycle and SSE wake | **Blocked** | No integrated Gateway `send_reply → new_reply` E2E or `markReplied` path |
-| Human interrupt race | **Blocked** | Atomic interrupt/send/completion semantics and wire race test pending |
-| Retry/reassign state consistency | **Partial (L1)** | canonical_task_id + write-once origin principal + inherit implemented and handler-tested; REMAINING: cancelled ledger state mapping + (taskId,messageId) pair dedup semantics per freeze — scheduled with L3 |
+| Reply lifecycle and SSE wake | **PASS (L3 @ `57e45ce`, pending review)** | Integrated E2E: real handlers + real pump + real Bun.serve SSE; retry-crossing canonical hit + owner-visible replied + new_reply wake asserted |
+| Human interrupt race | **PASS (L3 @ `ed827b3`, pending review)** | noteHumanInterruptForwarded wire hook; abort-completion reclassified interrupted_by_human; dispatch-response race via sentinel; completed-first never falsely interrupted — 2 wire-race tests |
+| Retry/reassign state consistency | **PASS (L3 @ `c950e30`, pending review)** | Attempt-per-messageId ledger rows; (taskId,messageId) pair dedup exactly-once; cancelled state + roundtrip; queuePosition race fixed; canonical E2E via R7 |
 | Independent §8 security review | **Not started** | Run only on corrected committed SHA; author cannot self-review |
 
 ## 8. Reproducible evidence log
@@ -175,6 +175,8 @@ fixture with the same name—proves every row.
 | 2026-07-12 | B L2 `ed45f4d` | `bun test agent-node/src/runtime/codex-app-server/boot-gate.test.ts` | `5 pass / 0 fail / 18 expect` | Production-entry gates: dangerous config → zero binary invocations; baseline gate before spawn; shared attach typed refusal with 0 connections |
 | 2026-07-12 | B L2 `ed45f4d` | `bun test agent-node/src/runtime/codex-policy-gateway/ agent-node/src/runtime/codex-app-server/` | `118 pass / 0 fail / 1280 expect` | Full gateway + app-server suites at L2 head |
 | 2026-07-12 | B L1 `34bea40` | `bun test server/` (single process, COMMHUB_DB isolated) | `538 pass / 11 fail` vs baseline `d418862` `515 pass / 8 fail` (identical 8× #380) | Pre-existing multi-importer Bun.serve conflict; all rfc030 suites green per-file; delta fully attributed |
+| 2026-07-12 | B L3 `ed827b3` (R1–R5,R7,R8) | `bun test agent-node/src/runtime/codex-policy-gateway/ agent-node/src/runtime/codex-app-server/` | `270 pass / 0 fail / 2387 expect` | Incl. A's frozen 169 contract/protocol tests running in B's tree after verbatim adoption (sha256 == freeze) |
+| 2026-07-12 | B L3 `57e45ce` | `bun test server/src/rfc030-reply-lifecycle-e2e.test.ts` | `1 pass / 0 fail / 17 expect` | 通信龙硬验收①② integrated E2E: retry→pump(sender_*)→send_reply lands on ORIGINAL canonical task, owner-visible replied+result, originator woken over REAL HTTP SSE new_reply |
 
 Do not count uncommitted worktree changes, claimed-but-missing commits, baseline
 failures without an independently reproduced baseline, or tests whose fixture
