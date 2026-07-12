@@ -462,9 +462,10 @@ describe("GatewayErrorCode", () => {
     }
   });
 
-  test("has exactly the 8 codes declared in Wave 1A + B delta — no silent extension", () => {
+  test("has exactly the 9 codes declared in Wave 1A + B delta + checkpoint-4 Busy — no silent extension", () => {
     const names = Object.keys(GatewayErrorCode).filter(k => Number.isNaN(Number(k)));
     expect(names.sort()).toEqual([
+      "Busy",  // Δ8 副指挥 4d8bd951 — reservation conflict, distinct from NoOwner
       "CodexBaselineMismatch",
       "InvalidArg",
       "NoOwner",
@@ -474,11 +475,16 @@ describe("GatewayErrorCode", () => {
       "UnknownMethod",
       "UnknownTask",
     ]);
-    expect(names.length).toBe(8);
+    expect(names.length).toBe(9);
   });
 
   test("SqliteRuntimeUnsupported pinned to -32056 (stable numeric)", () => {
     expect(GatewayErrorCode.SqliteRuntimeUnsupported).toBe(-32056);
+  });
+
+  test("Busy pinned to -32057 with stable code codex_gateway_busy (Δ8)", () => {
+    expect(GatewayErrorCode.Busy).toBe(-32057);
+    expect(GATEWAY_ERROR_DATA_CODE[GatewayErrorCode.Busy]).toBe("codex_gateway_busy");
   });
 
   test("GATEWAY_ERROR_DATA_CODE maps every numeric to its stable string", () => {

@@ -314,6 +314,17 @@ export enum GatewayErrorCode {
    * `codex_gateway_sqlite_runtime_unsupported`.
    */
   SqliteRuntimeUnsupported = -32056,
+  /**
+   * Reservation conflict — the requested TUI action is refused because
+   * a bound owner IS present but currently holds the reservation for
+   * a different party (e.g. reservation=agent, human asked for
+   * turn/start). Distinct from `NoOwner`, which means NO owner has
+   * been bound. Callers use this to render a friendly "Codex is busy"
+   * hint instead of an authentication-shaped error.
+   * Stable string code: `codex_gateway_busy`.
+   * Per 副指挥 checkpoint 3 required delta #8 (task 4d8bd951).
+   */
+  Busy = -32057,
 }
 
 /**
@@ -335,6 +346,7 @@ export const GATEWAY_ERROR_DATA_CODE: Readonly<Record<GatewayErrorCode, string>>
   [GatewayErrorCode.UnknownMethod]: "codex_gateway_unknown_method",
   [GatewayErrorCode.CodexBaselineMismatch]: "codex_gateway_codex_baseline_mismatch",
   [GatewayErrorCode.SqliteRuntimeUnsupported]: "codex_gateway_sqlite_runtime_unsupported",
+  [GatewayErrorCode.Busy]: "codex_gateway_busy",
 };
 
 /**

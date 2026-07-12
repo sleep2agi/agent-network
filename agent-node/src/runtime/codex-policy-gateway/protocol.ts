@@ -352,6 +352,59 @@ export interface TuiRequestAuthorizer {
 export type TuiPolicyHook = TuiRequestAuthorizer;
 
 /**
+ * A snapshot of the upstream Codex app-server initialize result,
+ * captured by lifecycle.ts at gateway boot (exactly once) and cached.
+ *
+ * Delta 9 (副指挥 4d8bd951): the TUI is a NATIVE Codex client. Its
+ * `initialize` MUST return upstream-shape metadata + capabilities, not
+ * the Agent-facing `codex-policy-gateway/1 + enqueueTask...` shape —
+ * that would fail the native TUI handshake at P0.
+ *
+ * A layer defines the interface; B / lifecycle.ts owns the concrete
+ * `currentSnapshot()` (virtualizes / whitelists what fields are safe
+ * to reflect to the TUI, and pins the exact Codex 0.144.0 shape).
+ *
+ * `currentSnapshot()` returns `undefined` during the brief window
+ * between TUI connect and successful upstream init; `dispatchTuiRequest`
+ * fails closed in that window with `Unavailable` rather than
+ * fabricating.
+ */
+export interface TuiInitializeProvider {
+  currentSnapshot(): Readonly<Record<string, unknown>> | undefined;
+}
+
+/**
+ * Narrow diagnostics hook for internal (non-typed, non-Gateway)
+ * exceptions bubbling out of the backend. Delta 10 (副指挥 4d8bd951):
+ * `safeBackendCall` must NOT drop the exception on the floor — the
+ * caller (uds-server) never sees exceptions raised INSIDE the safe
+ * boundary, so A must feed them to a sink itself.
+ *
+ * Wire response gets a stable `data.correlationId` string but a
+ * generic message. The full exception (raw message, stack, operation,
+ * correlationId) is handed to `reportInternalError` for the operator
+ * log. A layer defines the interface; B / lifecycle.ts owns the sink
+ * (typically a structured logger with token/path scrubbing).
+ *
+ * `newCorrelationId()` is called once per unknown-throw event; the
+ * same id lands in `data.correlationId` and in the log entry, so
+ * the operator can correlate a support ticket to a log line.
+ */
+export interface ProtocolDiagnostics {
+  newCorrelationId(): string;
+  reportInternalError(entry: InternalErrorEntry): void;
+}
+
+export interface InternalErrorEntry {
+  readonly correlationId: string;
+  /** Symbolic operation label, e.g. `"enqueueTask"` or `"tui_policy_authorize"`. */
+  readonly operation: string;
+  /** The raw thrown value. May be any shape; the sink is expected to
+   *  stringify + scrub. Never crosses the wire. */
+  readonly error: unknown;
+}
+
+/**
  * Outcome of the A-layer TUI dispatcher. UDS server takes this and
  * either wires a bootstrap reply back to the TUI, forwards the frame
  * to upstream Codex, or writes a JSON-RPC error to the TUI socket.
@@ -376,15 +429,36 @@ export type TuiDispatchOutcome =
 export async function dispatchTuiRequest(
   frame: JsonRpcRequestFrame,
   authorizer: TuiRequestAuthorizer,
+  initProvider: TuiInitializeProvider,
+  diagnostics: ProtocolDiagnostics,
 ): Promise<TuiDispatchOutcome> {
   const classified = classifyTuiRequest(frame.method);
   switch (classified.kind) {
     case "bootstrap": {
       if (classified.method === "initialize") {
+        // Delta 9 (副指挥 4d8bd951): TUI is a NATIVE Codex client. Its
+        // initialize MUST return the upstream Codex app-server
+        // metadata (virtualized by the provider), NEVER the Agent
+        // handshake shape. Fabricating would break P0 handshake.
+        const snapshot = initProvider.currentSnapshot();
+        if (snapshot === undefined) {
+          // Upstream init hasn't completed yet — fail closed instead
+          // of guessing a shape.
+          return {
+            kind: "reject",
+            tuiId: frame.id,
+            code: GatewayErrorCode.Unavailable,
+            message: "upstream not initialized",
+            data: makeErrorData(GatewayErrorCode.Unavailable, {
+              source: "tui_initialize",
+              reason: "upstream_not_initialized",
+            }),
+          };
+        }
         return {
           kind: "bootstrap_reply",
           tuiId: frame.id,
-          result: buildAgentInitializeResult(),
+          result: snapshot,
         };
       }
       // "initialized" — no-op ack.
@@ -406,10 +480,17 @@ export async function dispatchTuiRequest(
       let decision: TuiPolicyDecision;
       try {
         decision = await authorizer.authorize(frame);
-      } catch {
+      } catch (e: unknown) {
         // Authorizer itself failed — sanitised Unavailable. Same
         // policy as an unknown backend throw on the Agent side; the
-        // raw exception message is intentionally not surfaced.
+        // raw exception message is intentionally not surfaced. But
+        // we DO log to the diagnostics sink so operators see it.
+        const correlationId = diagnostics.newCorrelationId();
+        diagnostics.reportInternalError({
+          correlationId,
+          operation: "tui_policy_authorize",
+          error: e,
+        });
         return {
           kind: "reject",
           tuiId: frame.id,
@@ -417,6 +498,7 @@ export async function dispatchTuiRequest(
           message: "tui policy hook error",
           data: makeErrorData(GatewayErrorCode.Unavailable, {
             source: "tui_policy_hook",
+            correlationId,
           }),
         };
       }
@@ -625,11 +707,42 @@ export class UpstreamRequestMux<TInternal = InternalRequestOrigin> {
     return this.outstanding.size;
   }
 
+  /** Diagnostic — number of pending upstream requests of a given kind. */
+  pendingCountByKind(kind: "proxied_tui" | "internal"): number {
+    let n = 0;
+    for (const o of this.outstanding.values()) {
+      if (o.kind === kind) n++;
+    }
+    return n;
+  }
+
   /**
-   * Drop every pending origin. On shutdown / TUI disconnect the
-   * caller must decide what to do about internal scheduler
-   * resolvers — the mux doesn't reject their Promises here; that's
-   * lifecycle.ts's responsibility.
+   * Delta 11 (副指挥 4d8bd951): TUI disconnect ≠ upstream disconnect.
+   * Drop ONLY the proxied-TUI origins; internal scheduler resolvers
+   * survive. Callers (human-owner.ts) invoke this when the TUI
+   * disconnects; upstream requests the scheduler already sent stay
+   * consumable so long-running Agent internal work isn't lost.
+   *
+   * Returns the number of proxied-TUI origins dropped, so operators
+   * can log the churn.
+   */
+  drainProxiedTui(): number {
+    let dropped = 0;
+    for (const [upstreamId, origin] of this.outstanding) {
+      if (origin.kind === "proxied_tui") {
+        this.outstanding.delete(upstreamId);
+        dropped++;
+      }
+    }
+    this.tuiIdInFlight.clear();
+    return dropped;
+  }
+
+  /**
+   * Drop every pending origin. Reserved for FULL upstream shutdown /
+   * restart — never called on plain TUI disconnect (use
+   * `drainProxiedTui` for that so internal work is preserved).
+   * lifecycle.ts owns rejecting any internal scheduler Promises.
    */
   drainAll(): void {
     this.outstanding.clear();
@@ -993,7 +1106,9 @@ export interface ProtocolBackend {
  */
 async function safeBackendCall<T>(
   agentId: JsonRpcRequestId,
+  operation: string,
   op: () => Promise<T>,
+  diagnostics: ProtocolDiagnostics,
 ): Promise<{ kind: "ok"; value: T } | { kind: "error"; outcome: AgentDispatchOutcome }> {
   try {
     return { kind: "ok", value: await op() };
@@ -1010,11 +1125,16 @@ async function safeBackendCall<T>(
         },
       };
     }
-    // Unknown / non-Gateway exception: this is a P0 gateway-side
-    // failure (unexpected IO, DB, bug). Sanitise to Unavailable so
-    // callers back off correctly. Do NOT leak the raw message —
-    // uds-server should have logged the exception before this
-    // point.
+    // Delta 10 (副指挥 4d8bd951): unknown / non-Gateway exception is
+    // a P0 gateway-side failure (unexpected IO, DB, bug). We MUST:
+    //   (1) generate a correlationId,
+    //   (2) hand the raw exception + operation label to the injected
+    //       diagnostics sink FIRST so operators see it,
+    //   (3) return a wire response with a generic message + the same
+    //       correlationId in `data`, and never the raw Error.message
+    //       (which could leak file paths, tokens, or user input).
+    const correlationId = diagnostics.newCorrelationId();
+    diagnostics.reportInternalError({ correlationId, operation, error: e });
     return {
       kind: "error",
       outcome: {
@@ -1022,7 +1142,10 @@ async function safeBackendCall<T>(
         agentId,
         code: GatewayErrorCode.Unavailable,
         message: "gateway backend error",
-        data: makeErrorData(GatewayErrorCode.Unavailable, { source: "backend" }),
+        data: makeErrorData(GatewayErrorCode.Unavailable, {
+          source: "backend",
+          correlationId,
+        }),
       },
     };
   }
@@ -1043,6 +1166,7 @@ async function safeBackendCall<T>(
 export async function dispatchAgentRequest(
   frame: JsonRpcRequestFrame,
   backend: ProtocolBackend,
+  diagnostics: ProtocolDiagnostics,
 ): Promise<AgentDispatchOutcome> {
   if (!enforceMethodOnAgentSide(frame.method)) {
     return {
@@ -1083,7 +1207,7 @@ export async function dispatchAgentRequest(
           data: makeErrorData(GatewayErrorCode.InvalidArg, { field: parsed.field, reason: parsed.reason }),
         };
       }
-      const call = await safeBackendCall(frame.id, () => backend.enqueueTask(parsed.args));
+      const call = await safeBackendCall(frame.id, "enqueueTask", () => backend.enqueueTask(parsed.args), diagnostics);
       if (call.kind === "error") return call.outcome;
       return { kind: "reply", agentId: frame.id, result: call.value };
     }
@@ -1098,7 +1222,7 @@ export async function dispatchAgentRequest(
           data: makeErrorData(GatewayErrorCode.InvalidArg, { field: parsed.field, reason: parsed.reason }),
         };
       }
-      const call = await safeBackendCall(frame.id, () => backend.getTaskState(parsed.taskId));
+      const call = await safeBackendCall(frame.id, "getTaskState", () => backend.getTaskState(parsed.taskId), diagnostics);
       if (call.kind === "error") return call.outcome;
       return { kind: "reply", agentId: frame.id, result: call.value };
     }
@@ -1113,7 +1237,7 @@ export async function dispatchAgentRequest(
           data: makeErrorData(GatewayErrorCode.InvalidArg, { field: parsed.field, reason: parsed.reason }),
         };
       }
-      const call = await safeBackendCall(frame.id, () => backend.cancelQueuedTask(parsed.taskId));
+      const call = await safeBackendCall(frame.id, "cancelQueuedTask", () => backend.cancelQueuedTask(parsed.taskId), diagnostics);
       if (call.kind === "error") return call.outcome;
       return { kind: "reply", agentId: frame.id, result: call.value };
     }

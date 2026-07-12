@@ -26,16 +26,22 @@ import {
   buildAgentInitializeResult,
   classifyMessage,
   classifyTuiRequest,
-  dispatchAgentRequest,
-  dispatchTuiRequest,
+  dispatchAgentRequest as dispatchAgentRequestRaw,
+  dispatchTuiRequest as dispatchTuiRequestRaw,
   enforceMethodOnAgentSide,
   handleTuiResponseFrame,
   parseEnqueueTaskParams,
   ReverseRequestNamespace,
   TUI_BOOTSTRAP_METHODS,
   UpstreamRequestMux,
+  type AgentDispatchOutcome,
+  type InternalErrorEntry,
+  type JsonRpcRequestFrame,
   type JsonRpcResponseFrame,
   type ProtocolBackend,
+  type ProtocolDiagnostics,
+  type TuiDispatchOutcome,
+  type TuiInitializeProvider,
   type TuiPolicyDecision,
   type TuiRequestAuthorizer,
 } from "./protocol";
@@ -50,6 +56,84 @@ import {
   type EnqueueTaskResult,
   type TaskState,
 } from "./contract";
+
+// ─────────────────────────────────────────────────────────────────────
+// Test-only default fixtures + wrappers (Checkpoint 4 deltas, 副指挥 4d8bd951)
+// ─────────────────────────────────────────────────────────────────────
+//
+// After Δ9 / Δ10, `dispatchTuiRequest` takes an extra `TuiInitializeProvider`
+// + `ProtocolDiagnostics`, and `dispatchAgentRequest` takes an extra
+// `ProtocolDiagnostics`. The vast majority of existing tests don't care
+// which snapshot or sink is used; they just need something plausible.
+// These wrappers slot the defaults in, so existing test bodies stay
+// unchanged. Tests that care about init / diagnostics behaviour pass
+// their own fixtures explicitly.
+
+/** Pinned Codex 0.144.0 upstream shape reflected by the default provider.
+ *  Fixture only — B/lifecycle will inject the real captured snapshot in
+ *  production. Deliberately does NOT contain enqueueTask / codex-
+ *  policy-gateway/1 so tests verify TUI init isn't cross-wired to the
+ *  Agent handshake shape. */
+const DEFAULT_CODEX_INIT_SNAPSHOT: Readonly<Record<string, unknown>> = Object.freeze({
+  serverInfo: Object.freeze({ name: "codex", version: "0.144.0" }),
+  protocolVersion: "2024-11-05",
+  capabilities: Object.freeze({
+    tools: {},
+    prompts: {},
+    resources: {},
+  }),
+});
+
+const _defaultInitProvider: TuiInitializeProvider = {
+  currentSnapshot: () => DEFAULT_CODEX_INIT_SNAPSHOT,
+};
+
+const _defaultDiagnostics: ProtocolDiagnostics = {
+  newCorrelationId: () => "cid-test-default",
+  reportInternalError: () => {
+    // Tests that care about the sink pass their own spy; the default
+    // silently drops so unrelated tests don't have to touch it.
+  },
+};
+
+function dispatchTuiRequest(
+  frame: JsonRpcRequestFrame,
+  authorizer: TuiRequestAuthorizer,
+  initProvider: TuiInitializeProvider = _defaultInitProvider,
+  diagnostics: ProtocolDiagnostics = _defaultDiagnostics,
+): Promise<TuiDispatchOutcome> {
+  return dispatchTuiRequestRaw(frame, authorizer, initProvider, diagnostics);
+}
+
+function dispatchAgentRequest(
+  frame: JsonRpcRequestFrame,
+  backend: ProtocolBackend,
+  diagnostics: ProtocolDiagnostics = _defaultDiagnostics,
+): Promise<AgentDispatchOutcome> {
+  return dispatchAgentRequestRaw(frame, backend, diagnostics);
+}
+
+/** Convenience for tests that need to observe the sink. */
+function makeDiagnosticsSpy(): {
+  diagnostics: ProtocolDiagnostics;
+  entries: InternalErrorEntry[];
+  correlationIdsIssued: string[];
+} {
+  const entries: InternalErrorEntry[] = [];
+  const correlationIdsIssued: string[] = [];
+  let n = 0;
+  const diagnostics: ProtocolDiagnostics = {
+    newCorrelationId: () => {
+      const id = `cid-spy-${++n}`;
+      correlationIdsIssued.push(id);
+      return id;
+    },
+    reportInternalError: (entry) => {
+      entries.push(entry);
+    },
+  };
+  return { diagnostics, entries, correlationIdsIssued };
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // classifyMessage
@@ -234,7 +318,11 @@ describe("dispatchTuiRequest — B's authorizer is the arbiter for Codex-shape f
     async authorize() { throw new Error("hook exploded"); },
   };
 
-  test("initialize is answered by A directly (no authorizer call)", async () => {
+  test("initialize is answered by A directly (no authorizer call) using injected snapshot", async () => {
+    // Δ9 (副指挥 4d8bd951): TUI initialize returns the upstream Codex
+    // app-server snapshot, NOT the Agent handshake shape. The A layer
+    // pulls the snapshot through TuiInitializeProvider (default fixture
+    // here) and MUST NOT synthesize codex-policy-gateway/1.
     let called = false;
     const spy: TuiRequestAuthorizer = {
       async authorize() { called = true; return { verdict: "allow" }; },
@@ -245,7 +333,13 @@ describe("dispatchTuiRequest — B's authorizer is the arbiter for Codex-shape f
     );
     if (out.kind !== "bootstrap_reply") throw new Error(`expected bootstrap_reply, got ${out.kind}`);
     expect(out.tuiId).toBe(1);
-    expect((out.result as { protocol: string }).protocol).toBe("codex-policy-gateway/1");
+    // Native Codex TUI shape from the fixture:
+    expect((out.result as { serverInfo: { name: string } }).serverInfo.name).toBe("codex");
+    expect((out.result as { protocolVersion: string }).protocolVersion).toBe("2024-11-05");
+    // MUST NOT carry the Agent handshake fields — those would fail
+    // the native Codex TUI's handshake check at P0.
+    expect(JSON.stringify(out.result)).not.toContain("codex-policy-gateway/1");
+    expect(JSON.stringify(out.result)).not.toContain("enqueueTask");
     expect(called).toBe(false);
   });
 
@@ -281,11 +375,14 @@ describe("dispatchTuiRequest — B's authorizer is the arbiter for Codex-shape f
   });
 
   test("policy_delegate: authorizer deny with extra diagnostic fields → merged into data", async () => {
+    // Δ8 (副指挥 4d8bd951): reservation conflict is Busy, not
+    // NoOwner. NoOwner is reserved for "no human owner bound at all"
+    // (see the alwaysDeny fixture above).
     const denyWithExtra: TuiRequestAuthorizer = {
       async authorize() {
         return {
           verdict: "deny",
-          code: GatewayErrorCode.NoOwner,
+          code: GatewayErrorCode.Busy,
           reason: "reservation held by agent",
           extra: { reservationHolder: "agent", taskId: "t_x" },
         };
@@ -296,6 +393,8 @@ describe("dispatchTuiRequest — B's authorizer is the arbiter for Codex-shape f
       denyWithExtra,
     );
     if (out.kind !== "reject") throw new Error(`expected reject`);
+    expect(out.code).toBe(GatewayErrorCode.Busy);
+    expect(out.data.code).toBe("codex_gateway_busy");
     expect(out.data.reason).toBe("reservation held by agent");
     expect(out.data.reservationHolder).toBe("agent");
     expect(out.data.taskId).toBe("t_x");
@@ -318,17 +417,30 @@ describe("dispatchTuiRequest — B's authorizer is the arbiter for Codex-shape f
     expect(called).toBe(false);
   });
 
-  test("hook throws → sanitised Unavailable (never leaks internal message)", async () => {
+  test("hook throws → sanitised Unavailable + diagnostics sink logs full error (Δ10)", async () => {
+    const spy = makeDiagnosticsSpy();
     const out = await dispatchTuiRequest(
       { jsonrpc: "2.0", id: 6, method: "thread/resume" },
       throwingHook,
+      _defaultInitProvider,
+      spy.diagnostics,
     );
     if (out.kind !== "reject") throw new Error(`expected reject`);
     expect(out.code).toBe(GatewayErrorCode.Unavailable);
     expect(out.data.code).toBe("codex_gateway_unavailable");
     expect(out.data.source).toBe("tui_policy_hook");
-    // No leakage of `hook exploded`.
+    // Wire response carries a stable correlationId — the same one
+    // handed to the sink, so an operator can grep the log.
+    expect(typeof out.data.correlationId).toBe("string");
+    // No leakage of `hook exploded` on the wire.
     expect(out.message).not.toContain("hook exploded");
+    expect(JSON.stringify(out.data)).not.toContain("hook exploded");
+    // Sink got exactly ONE entry with the raw error preserved for
+    // the operator log.
+    expect(spy.entries).toHaveLength(1);
+    expect(spy.entries[0].operation).toBe("tui_policy_authorize");
+    expect(spy.entries[0].correlationId).toBe(out.data.correlationId);
+    expect((spy.entries[0].error as Error).message).toBe("hook exploded");
   });
 
   test("A layer does NOT hardcode Codex-shape methods (no allowlist regression)", () => {
@@ -401,9 +513,13 @@ describe("Phase 1 policy wiring (Delta 7, 副指挥 7d70dcbd)", () => {
           return { verdict: "allow" };
         }
         if (m === "turn/start" || m === "turn/steer") {
+          // Δ8 (副指挥 4d8bd951): reservation conflict uses Busy.
+          // NoOwner would misleadingly imply no human owner is bound
+          // at all; in this state the owner IS bound, just holding
+          // the reservation for the agent side.
           return {
             verdict: "deny",
-            code: GatewayErrorCode.NoOwner,
+            code: GatewayErrorCode.Busy,
             reason: "reservation held by agent",
             extra: { reservationHolder: "agent", suggested: "turn/interrupt" },
           };
@@ -425,7 +541,8 @@ describe("Phase 1 policy wiring (Delta 7, 副指挥 7d70dcbd)", () => {
       authorizer,
     );
     if (out.kind !== "reject") throw new Error(`expected reject, got ${out.kind}`);
-    expect(out.code).toBe(GatewayErrorCode.NoOwner);
+    expect(out.code).toBe(GatewayErrorCode.Busy);
+    expect(out.data.code).toBe("codex_gateway_busy");
     expect(out.data.reason).toBe("reservation held by agent");
     expect(out.data.reservationHolder).toBe("agent");
   });
@@ -438,7 +555,8 @@ describe("Phase 1 policy wiring (Delta 7, 副指挥 7d70dcbd)", () => {
       authorizer,
     );
     if (out.kind !== "reject") throw new Error(`expected reject`);
-    expect(out.code).toBe(GatewayErrorCode.NoOwner);
+    expect(out.code).toBe(GatewayErrorCode.Busy);
+    expect(out.data.code).toBe("codex_gateway_busy");
   });
 
   test("reservation=agent — turn/interrupt allowed → exactly 1 forward_upstream", async () => {
@@ -471,7 +589,8 @@ describe("Phase 1 policy wiring (Delta 7, 副指挥 7d70dcbd)", () => {
       authorizer,
     );
     if (out2.kind !== "reject") throw new Error(`expected reject on post-interrupt start, got ${out2.kind}`);
-    expect(out2.code).toBe(GatewayErrorCode.NoOwner);
+    // Δ8: post-interrupt subsequent start is still reservation-conflict → Busy.
+    expect(out2.code).toBe(GatewayErrorCode.Busy);
   });
 
   test("reservation=human — turn/start allowed → forward_upstream", async () => {
@@ -522,7 +641,8 @@ describe("Phase 1 policy wiring (Delta 7, 副指挥 7d70dcbd)", () => {
       authorizer,
     );
     if (out.kind !== "reject") throw new Error(`expected reject`);
-    expect(out.code).toBe(GatewayErrorCode.NoOwner);
+    // Δ8: Phase 2 turn-on smoke — reservation conflict → Busy.
+    expect(out.code).toBe(GatewayErrorCode.Busy);
   });
 });
 
@@ -634,6 +754,65 @@ describe("UpstreamRequestMux (P0 ed3f92bf) — single upstream allocator, two or
     // TUI id reuse permitted after drain.
     expect(mux.allocateForProxiedTui(1).upstreamId).toBe(3);
   });
+
+  // Δ11 (副指挥 4d8bd951): TUI disconnect ≠ upstream disconnect.
+  test("drainProxiedTui — clears TUI origins ONLY, internal scheduler pending survives", () => {
+    const mux = new UpstreamRequestMux<{ kind: string; taskId: string }>();
+    const p1 = mux.allocateForProxiedTui(1).upstreamId;
+    const i1 = mux.allocateForInternalScheduler({ kind: "turn_start", taskId: "t_a" }).upstreamId;
+    const p2 = mux.allocateForProxiedTui(2).upstreamId;
+    const i2 = mux.allocateForInternalScheduler({ kind: "turn_interrupt", taskId: "t_a" }).upstreamId;
+    expect(mux.pendingCount()).toBe(4);
+    expect(mux.pendingCountByKind("proxied_tui")).toBe(2);
+    expect(mux.pendingCountByKind("internal")).toBe(2);
+
+    const dropped = mux.drainProxiedTui();
+    expect(dropped).toBe(2);
+    // TUI origins gone.
+    expect(mux.consumeUpstreamResponse(p1)).toBeNull();
+    expect(mux.consumeUpstreamResponse(p2)).toBeNull();
+    // Internal origins STILL consumable — the scheduler's Promise
+    // resolvers must not be lost when the TUI disconnects.
+    const r_i1 = mux.consumeUpstreamResponse(i1);
+    if (!r_i1 || r_i1.kind !== "internal") throw new Error("internal must survive drainProxiedTui");
+    expect(r_i1.origin.kind).toBe("turn_start");
+    const r_i2 = mux.consumeUpstreamResponse(i2);
+    if (!r_i2 || r_i2.kind !== "internal") throw new Error("internal must survive drainProxiedTui");
+    expect(r_i2.origin.kind).toBe("turn_interrupt");
+    expect(mux.pendingCount()).toBe(0);
+  });
+
+  test("drainProxiedTui — TUI id reuse permitted after selective drain", () => {
+    const mux = new UpstreamRequestMux();
+    mux.allocateForProxiedTui(5);
+    // Would collide without drain.
+    const before = mux.allocateForProxiedTui(5);
+    if (!("collision" in before) || !before.collision) throw new Error("expected pre-drain collision");
+    mux.drainProxiedTui();
+    // Same TUI id now allocatable again.
+    const after = mux.allocateForProxiedTui(5);
+    if (!("upstreamId" in after)) throw new Error("expected allocation after drain");
+  });
+
+  test("drainProxiedTui — no-op when there are only internal originations pending", () => {
+    const mux = new UpstreamRequestMux<{ tag: string }>();
+    mux.allocateForInternalScheduler({ tag: "a" });
+    mux.allocateForInternalScheduler({ tag: "b" });
+    expect(mux.drainProxiedTui()).toBe(0);
+    expect(mux.pendingCount()).toBe(2);
+  });
+
+  test("drainAll — full clear, distinct from drainProxiedTui (used on upstream shutdown)", () => {
+    const mux = new UpstreamRequestMux<{ tag: string }>();
+    mux.allocateForProxiedTui(1);
+    mux.allocateForInternalScheduler({ tag: "a" });
+    expect(mux.pendingCount()).toBe(2);
+    mux.drainAll();
+    expect(mux.pendingCount()).toBe(0);
+    // Both origins gone.
+    expect(mux.consumeUpstreamResponse(1)).toBeNull();
+    expect(mux.consumeUpstreamResponse(2)).toBeNull();
+  });
 });
 
 describe("ReverseRequestNamespace (Codex → TUI) — SEPARATE from UpstreamRequestMux", () => {
@@ -744,6 +923,105 @@ describe("handleTuiResponseFrame — approval consumption path (reverse namespac
     // Upstream mux still has its pending id=1.
     expect(mux.pendingCount()).toBe(1);
     expect(reverse.pendingCount()).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Δ9 — TUI initialize virtualisation (副指挥 4d8bd951)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("TUI initialize virtualisation via TuiInitializeProvider (Δ9)", () => {
+  const noopAuthorizer: TuiRequestAuthorizer = {
+    async authorize() {
+      throw new Error("authorizer must not be called during initialize");
+    },
+  };
+
+  test("initialize returns injected upstream snapshot verbatim (native Codex shape, not Agent handshake)", async () => {
+    const codexSnapshot = Object.freeze({
+      serverInfo: Object.freeze({ name: "codex", version: "0.144.0" }),
+      protocolVersion: "2024-11-05",
+      capabilities: Object.freeze({ tools: {}, prompts: {}, resources: {} }),
+    });
+    const provider: TuiInitializeProvider = { currentSnapshot: () => codexSnapshot };
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "initialize" },
+      noopAuthorizer,
+      provider,
+    );
+    if (out.kind !== "bootstrap_reply") throw new Error(`expected bootstrap_reply, got ${out.kind}`);
+    // Exact snapshot reflected — no rewrapping, no mutation.
+    expect(out.result).toBe(codexSnapshot);
+    // No Agent handshake leakage.
+    const dump = JSON.stringify(out.result);
+    expect(dump).not.toContain("codex-policy-gateway/1");
+    expect(dump).not.toContain("enqueueTask");
+    expect(dump).not.toContain("getTaskState");
+    expect(dump).not.toContain("cancelQueuedTask");
+    expect(dump).not.toContain("runtimeState");
+  });
+
+  test("initialize before upstream init completes (snapshot=undefined) → fail closed Unavailable", async () => {
+    const provider: TuiInitializeProvider = { currentSnapshot: () => undefined };
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "initialize" },
+      noopAuthorizer,
+      provider,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject, got ${out.kind}`);
+    expect(out.code).toBe(GatewayErrorCode.Unavailable);
+    expect(out.data.code).toBe("codex_gateway_unavailable");
+    expect(out.data.source).toBe("tui_initialize");
+    expect(out.data.reason).toBe("upstream_not_initialized");
+  });
+
+  test("initialized (no id) still ack'd with {} regardless of snapshot (unchanged behaviour)", async () => {
+    const provider: TuiInitializeProvider = { currentSnapshot: () => undefined };
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 2, method: "initialized" },
+      noopAuthorizer,
+      provider,
+    );
+    if (out.kind !== "bootstrap_reply") throw new Error(`expected bootstrap_reply`);
+    expect(out.result).toEqual({});
+  });
+
+  test("provider is only called for initialize — policy_delegate and reserved_agent_method do not touch it", async () => {
+    let called = 0;
+    const provider: TuiInitializeProvider = {
+      currentSnapshot() { called++; return DEFAULT_CODEX_INIT_SNAPSHOT; },
+    };
+    const allow: TuiRequestAuthorizer = { async authorize() { return { verdict: "allow" }; } };
+    await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "thread/resume" },
+      allow,
+      provider,
+    );
+    await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 2, method: "enqueueTask" },
+      allow,
+      provider,
+    );
+    expect(called).toBe(0);
+  });
+
+  test("Agent-side initialize is UNCHANGED — still uses buildAgentInitializeResult (Agent handshake shape)", async () => {
+    // Δ9 splits the TWO initialize paths: TUI gets upstream Codex
+    // shape (above); Agent still gets the typed contract handshake.
+    // If the two were ever merged, this test fails.
+    const backend: ProtocolBackend = {
+      async enqueueTask() { return { kind: "accepted" }; },
+      async getTaskState() { return { kind: "unknown" }; },
+      async cancelQueuedTask() { return { kind: "cancelled" }; },
+    };
+    const out = await dispatchAgentRequest(
+      { jsonrpc: "2.0", id: 1, method: "initialize" },
+      backend,
+    );
+    if (out.kind !== "reply") throw new Error(`expected reply, got ${out.kind}`);
+    const r = out.result as { protocol: string; serverInfo: { name: string } };
+    expect(r.protocol).toBe("codex-policy-gateway/1");
+    expect(r.serverInfo.name).toBe("codex-policy-gateway");
   });
 });
 
@@ -1159,12 +1437,16 @@ describe("dispatchAgentRequest", () => {
     expect(out.data.limit).toBe(8);
   });
 
-  test("backend throws an unknown exception → sanitised Unavailable (never leaks the message)", async () => {
+  test("backend throws an unknown exception → sanitised Unavailable + diagnostics sink (Δ10, no wire leak)", async () => {
+    // Obviously-fake fixture strings. The test asserts none of them
+    // appear on the wire; the sink still sees them raw.
+    const raw = "boom -- ledger says table missing, error 5001 file=REDACTABLE_PATH token=REDACTABLE_TOKEN";
     const backend = makeBackend({
       async enqueueTask() {
-        throw new Error("boom — ledger says table not found, SQL error 5001");
+        throw new Error(raw);
       },
     });
+    const spy = makeDiagnosticsSpy();
     const out = await dispatchAgentRequest(
       {
         jsonrpc: "2.0",
@@ -1178,17 +1460,34 @@ describe("dispatchAgentRequest", () => {
         },
       },
       backend,
+      spy.diagnostics,
     );
     if (out.kind !== "error") throw new Error(`expected error, got ${out.kind}`);
     // Sanitised: Unavailable, not InvalidArg (that would blame the client).
     expect(out.code).toBe(GatewayErrorCode.Unavailable);
     expect(out.data.code).toBe("codex_gateway_unavailable");
     expect(out.data.source).toBe("backend");
-    // Raw internal message MUST NOT leak.
-    expect(out.message).not.toContain("SQL");
-    expect(out.message).not.toContain("ledger");
-    expect(out.message).not.toContain("5001");
+    // Correlation id: wire response has one that MATCHES what the
+    // sink saw. Operator can grep the log.
+    expect(typeof out.data.correlationId).toBe("string");
+    expect(spy.correlationIdsIssued).toContain(out.data.correlationId);
+    // Raw internal message MUST NOT leak. This covers the concrete
+    // classes of things that can end up in Error.message and would
+    // be catastrophic on the wire: SQL fragments, filesystem paths,
+    // token literals, error codes, table names.
     expect(out.message).toBe("gateway backend error");
+    const wireDump = JSON.stringify(out);
+    expect(wireDump).not.toContain("ledger");
+    expect(wireDump).not.toContain("5001");
+    expect(wireDump).not.toContain("REDACTABLE_PATH");
+    expect(wireDump).not.toContain("REDACTABLE_TOKEN");
+    // Sink got exactly ONE entry with the raw error preserved for
+    // the operator log; the sink is where redaction happens (or
+    // not), not on the wire.
+    expect(spy.entries).toHaveLength(1);
+    expect(spy.entries[0].operation).toBe("enqueueTask");
+    expect(spy.entries[0].correlationId).toBe(out.data.correlationId);
+    expect((spy.entries[0].error as Error).message).toBe(raw);
   });
 
   test("getTaskState backend throw → same sanitised path (not left hanging)", async () => {
