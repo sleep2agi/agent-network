@@ -120,7 +120,7 @@ async function makeLifecycle(overrides?: Partial<GatewayLifecycleOptions>): Prom
   const preflight: PreflightRunner = { async run() { /* ok */ } };
   const opts: GatewayLifecycleOptions = {
     backendSocketPath: paths.backendSocketPath,
-    tuiSocketPath: paths.tuiSocketPath,
+    
     socketDir: paths.socketDir,
     preflight,
     backend: makeBackend(),
@@ -128,7 +128,7 @@ async function makeLifecycle(overrides?: Partial<GatewayLifecycleOptions>): Prom
     initSnapshotSource,
     diagnosticsSink: diagnostics,
       backendCapability: TEST_BACKEND_CAP,
-      tuiCapability: TEST_TUI_CAP,
+
     ...(overrides ?? {}),
   };
   const lifecycle = new GatewayLifecycle(opts);
@@ -153,7 +153,7 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
     const preflight: PreflightRunner = { async run() { throw new Error("baseline mismatch (fake)"); } };
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      tuiSocketPath: paths.tuiSocketPath,
+      
       socketDir: paths.socketDir,
       preflight,
       backend: makeBackend(),
@@ -161,7 +161,7 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
       initSnapshotSource: { currentSnapshot: () => undefined },
       diagnosticsSink: diagnostics,
       backendCapability: TEST_BACKEND_CAP,
-      tuiCapability: TEST_TUI_CAP,
+
     });
     await expect(lifecycle.start()).rejects.toThrow(/baseline mismatch/);
     expect(lifecycle.currentState()).toBe("stopped");
@@ -186,7 +186,7 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
     const { diagnostics } = collectDiagnostics();
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      tuiSocketPath: paths.tuiSocketPath,
+      
       socketDir: paths.socketDir,
       preflight,
       backend: makeBackend(),
@@ -194,7 +194,7 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
       initSnapshotSource: { currentSnapshot: () => ({ ok: true }) },
       diagnosticsSink: diagnostics,
       backendCapability: TEST_BACKEND_CAP,
-      tuiCapability: TEST_TUI_CAP,
+
     });
     await lifecycle.start();
     try {
@@ -204,7 +204,7 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
       expect(sawSocketsDuringPreflight.dir).toBe(false);
       // After start, they do exist.
       expect(fs.existsSync(paths.backendSocketPath)).toBe(true);
-      expect(fs.existsSync(paths.tuiSocketPath)).toBe(true);
+      
     } finally {
       await lifecycle.stop();
       fs.rmSync(paths.socketDir, { recursive: true, force: true });
@@ -401,7 +401,7 @@ describe("shutdown drain semantics", () => {
     const { diagnostics } = collectDiagnostics();
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      tuiSocketPath: paths.tuiSocketPath,
+      
       socketDir: paths.socketDir,
       preflight: { async run() {} },
       backend: makeBackend(),
@@ -409,7 +409,7 @@ describe("shutdown drain semantics", () => {
       initSnapshotSource: { currentSnapshot: () => undefined },
       diagnosticsSink: diagnostics,
       backendCapability: TEST_BACKEND_CAP,
-      tuiCapability: TEST_TUI_CAP,
+
     });
     await lifecycle.stop();
     expect(lifecycle.currentState()).toBe("stopped");
@@ -436,11 +436,16 @@ describe("P0#5 upstreamTransport.close is awaited on stop", () => {
     const h = await makeLifecycle();
     try {
       await h.lifecycle.start();
+      // Attach a rejection handler EAGERLY so bun's unhandled-
+      // rejection detection doesn't fire between the reject call
+      // (inside stop()) and the later `await p` in the test body.
+      let reason = "";
       const p = h.lifecycle.sendInternal("thread/status", { threadId: "t" });
+      p.catch((e: Error) => { reason = e.message; });
       await new Promise((r) => setTimeout(r, 10));
       await h.lifecycle.stop();
-      let reason = "";
-      try { await p; } catch (e) { reason = (e as Error).message; }
+      // Give the microtask queue a beat for the .catch handler to fire.
+      await new Promise((r) => setTimeout(r, 5));
       // Fake upstream.close() fires onClose → server.onUpstreamClose
       // rejects internal pending with "upstream_closed". Belt-and-
       // braces on server.stop uses "gateway_stopping".
@@ -462,7 +467,7 @@ describe("P0#6 stop-during-preflight epoch fence", () => {
     };
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      tuiSocketPath: paths.tuiSocketPath,
+      
       socketDir: paths.socketDir,
       preflight,
       backend: makeBackend(),
@@ -470,7 +475,7 @@ describe("P0#6 stop-during-preflight epoch fence", () => {
       initSnapshotSource: { currentSnapshot: () => ({ ok: true }) },
       diagnosticsSink: diagnostics,
       backendCapability: TEST_BACKEND_CAP,
-      tuiCapability: TEST_TUI_CAP,
+
     });
     // Kick off start; it blocks on preflight.
     const startP = lifecycle.start();
@@ -506,7 +511,7 @@ describe("P0#6 stop-during-preflight epoch fence", () => {
     };
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
-      tuiSocketPath: paths.tuiSocketPath,
+      
       socketDir: paths.socketDir,
       preflight,
       backend: makeBackend(),
@@ -514,7 +519,7 @@ describe("P0#6 stop-during-preflight epoch fence", () => {
       initSnapshotSource: { currentSnapshot: () => ({ ok: true }) },
       diagnosticsSink: diagnostics,
       backendCapability: TEST_BACKEND_CAP,
-      tuiCapability: TEST_TUI_CAP,
+
     });
     const p1 = lifecycle.start();
     await new Promise((r) => setTimeout(r, 20));

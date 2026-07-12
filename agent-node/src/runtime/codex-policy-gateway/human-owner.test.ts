@@ -27,7 +27,12 @@ import {
   type ProtocolDiagnostics,
   type JsonRpcRequestFrame,
 } from "./protocol";
-import { GATEWAY_ERROR_DATA_CODE, GatewayErrorCode } from "./contract";
+import { GATEWAY_ERROR_DATA_CODE, GatewayErrorCode, asOwnerLeaseId } from "./contract";
+
+// Test-local lease helpers. `asOwnerLeaseId` is the frozen brand from
+// contract.ts; we reuse it here rather than re-exporting a new brand.
+const L1 = asOwnerLeaseId("lease-1-test-abc");
+const L2 = asOwnerLeaseId("lease-2-test-xyz");
 
 function makeCoord(opts?: Partial<HumanOwnerCoordinatorOptions>): {
   coord: HumanOwnerCoordinator;
@@ -60,7 +65,7 @@ const CODEX_REVERSE_REQUEST: JsonRpcRequestFrame = {
 describe("HumanOwnerCoordinator — Phase 1 approvalMode='never' (default)", () => {
   test("reverse request refused even if TUI attached — defense in depth", () => {
     const { coord, reverseNs } = makeCoord({ approvalMode: "never" });
-    coord.attachTui();
+    coord.attachTui(L1);
     const out = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
     if (out.kind !== "reject_upstream") throw new Error(`expected reject, got ${out.kind}`);
     if (!("error" in out.upstreamError)) throw new Error("expected error frame");
@@ -103,7 +108,7 @@ describe("HumanOwnerCoordinator — Phase 2 approvalMode='passthrough'", () => {
 
   test("TUI attached → forward_tui with freshly allocated tuiId, reverseNs holds one pending", () => {
     const { coord, reverseNs } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
+    coord.attachTui(L1);
     const out = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
     if (out.kind !== "forward_tui") throw new Error(`expected forward_tui, got ${out.kind}`);
     expect(out.tuiFrame.method).toBe("approval/request");
@@ -116,7 +121,7 @@ describe("HumanOwnerCoordinator — Phase 2 approvalMode='passthrough'", () => {
 
   test("reverse id collision → InvalidArg reason=reverse_id_collision", () => {
     const { coord, reverseNs } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
+    coord.attachTui(L1);
     reverseNs.allocateTuiIdForCodexReverseRequest("cx_1"); // pre-existing
     const out = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
     if (out.kind !== "reject_upstream") throw new Error("expected reject");
@@ -129,7 +134,7 @@ describe("HumanOwnerCoordinator — Phase 2 approvalMode='passthrough'", () => {
 
   test("params omitted on codex frame → omitted on tui frame (no false 'params: undefined' key)", () => {
     const { coord } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
+    coord.attachTui(L1);
     const paramless: JsonRpcRequestFrame = { jsonrpc: "2.0", id: "cx_x", method: "approval/ping" };
     const out = coord.handleUpstreamReverseRequest(paramless);
     if (out.kind !== "forward_tui") throw new Error("expected forward_tui");
@@ -140,7 +145,7 @@ describe("HumanOwnerCoordinator — Phase 2 approvalMode='passthrough'", () => {
 describe("HumanOwnerCoordinator — TUI response frame (approval consumption)", () => {
   test("known tui id → forward_reverse_response with original codex id", () => {
     const { coord, reverseNs } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
+    coord.attachTui(L1);
     const fwd = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
     if (fwd.kind !== "forward_tui") throw new Error("expected forward_tui");
     const tuiId = fwd.tuiFrame.id;
@@ -156,7 +161,7 @@ describe("HumanOwnerCoordinator — TUI response frame (approval consumption)", 
 
   test("unknown tui id → reject reason=reverse_id_unknown_or_duplicate", () => {
     const { coord } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
+    coord.attachTui(L1);
     const resp = coord.handleTuiResponseFrame({ jsonrpc: "2.0", id: 999, result: {} });
     if (resp.kind !== "reject") throw new Error("expected reject");
     expect(resp.code).toBe(GatewayErrorCode.InvalidArg);
@@ -165,7 +170,7 @@ describe("HumanOwnerCoordinator — TUI response frame (approval consumption)", 
 
   test("duplicate consume → reject (approval spoof / replay protection)", () => {
     const { coord } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
+    coord.attachTui(L1);
     const fwd = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
     if (fwd.kind !== "forward_tui") throw new Error("expected forward");
     const tuiId = fwd.tuiFrame.id;
@@ -182,7 +187,7 @@ describe("HumanOwnerCoordinator — TUI response frame (approval consumption)", 
 describe("HumanOwnerCoordinator — TUI attach/detach lifecycle (Δ11 wiring)", () => {
   test("detachTui drains proxied-TUI mux + reverseNs; internal pending untouched", () => {
     const { coord, mux, reverseNs } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
+    coord.attachTui(L1);
     // Set up: a proxied-TUI upstream request + an internal request +
     // a pending reverse request.
     mux.allocateForProxiedTui(1);
@@ -192,7 +197,7 @@ describe("HumanOwnerCoordinator — TUI attach/detach lifecycle (Δ11 wiring)", 
     expect(mux.pendingCountByKind("internal")).toBe(1);
     expect(reverseNs.pendingCount()).toBe(1);
 
-    coord.detachTui();
+    coord.detachTui(L1);
 
     expect(coord.isTuiAttached()).toBe(false);
     // proxied_tui + reverse namespace drained.
@@ -204,13 +209,13 @@ describe("HumanOwnerCoordinator — TUI attach/detach lifecycle (Δ11 wiring)", 
 
   test("reconnect after detach cannot re-approve a drained reverse id", () => {
     const { coord } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
+    coord.attachTui(L1);
     const fwd = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
     if (fwd.kind !== "forward_tui") throw new Error("expected forward");
     const staleTuiId = fwd.tuiFrame.id;
-    coord.detachTui();
+    coord.detachTui(L1);
     // Reconnect.
-    coord.attachTui();
+    coord.attachTui(L1);
     // Old TUI id can't re-approve.
     const resp = coord.handleTuiResponseFrame({ jsonrpc: "2.0", id: staleTuiId, result: {} });
     if (resp.kind !== "reject") throw new Error("stale id must be rejected");
@@ -219,16 +224,16 @@ describe("HumanOwnerCoordinator — TUI attach/detach lifecycle (Δ11 wiring)", 
 
   test("attachTui is idempotent (double attach doesn't leak state)", () => {
     const { coord } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
-    coord.attachTui();
+    coord.attachTui(L1);
+    coord.attachTui(L1);
     expect(coord.isTuiAttached()).toBe(true);
-    coord.detachTui();
+    coord.detachTui(L1);
     expect(coord.isTuiAttached()).toBe(false);
   });
 
   test("detachTui without attach is a no-op (safe on cold path)", () => {
     const { coord, mux, reverseNs } = makeCoord({ approvalMode: "passthrough" });
-    coord.detachTui();
+    coord.detachTui(L1);
     expect(mux.pendingCountByKind("proxied_tui")).toBe(0);
     expect(reverseNs.pendingCount()).toBe(0);
   });
@@ -237,7 +242,7 @@ describe("HumanOwnerCoordinator — TUI attach/detach lifecycle (Δ11 wiring)", 
 describe("HumanOwnerCoordinator — reverse namespace isolation", () => {
   test("Phase 1 refuse does NOT touch the mux upstream half — internal pending unchanged", () => {
     const { coord, mux } = makeCoord({ approvalMode: "never" });
-    coord.attachTui();
+    coord.attachTui(L1);
     mux.allocateForInternalScheduler({ label: "keep_me" });
     expect(mux.pendingCountByKind("internal")).toBe(1);
     coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
@@ -248,9 +253,85 @@ describe("HumanOwnerCoordinator — reverse namespace isolation", () => {
 
   test("Phase 2 forward does NOT allocate anything on the mux upstream half", () => {
     const { coord, mux } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui();
+    coord.attachTui(L1);
     coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
     // Reverse namespace only — the mux is untouched by reverse requests.
     expect(mux.pendingCount()).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// P0.2 lease binding (副指挥 7034c5ce items #2 + #11)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("P0.2 lease binding — cross-lease refusal + stale-detach no-op", () => {
+  test("handleTuiResponseFrameWithLease: matching lease → forward_reverse_response (frozen consume)", () => {
+    const { coord, reverseNs } = makeCoord({ approvalMode: "passthrough" });
+    coord.attachTui(L1);
+    const fwd = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
+    if (fwd.kind !== "forward_tui") throw new Error("expected forward");
+    const tuiId = fwd.tuiFrame.id;
+    const resp = coord.handleTuiResponseFrameWithLease(
+      { jsonrpc: "2.0", id: tuiId, result: { approved: true } },
+      L1,
+    );
+    if (resp.kind !== "forward_reverse_response") throw new Error(`expected forward, got ${resp.kind}`);
+    expect(resp.codexReverseId).toBe("cx_1");
+    expect(reverseNs.pendingCount()).toBe(0);
+  });
+
+  test("handleTuiResponseFrameWithLease: MISMATCHED lease → reject lease_mismatch, frozen ReverseRequestNamespace UNTOUCHED", () => {
+    const { coord, reverseNs } = makeCoord({ approvalMode: "passthrough" });
+    coord.attachTui(L1);
+    const fwd = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
+    if (fwd.kind !== "forward_tui") throw new Error("expected forward");
+    const tuiId = fwd.tuiFrame.id;
+    const before = reverseNs.pendingCount();
+    // A second/impostor lease presenting the correct tuiId is refused.
+    const resp = coord.handleTuiResponseFrameWithLease(
+      { jsonrpc: "2.0", id: tuiId, result: { approved: true } },
+      L2,
+    );
+    if (resp.kind !== "reject") throw new Error(`expected reject, got ${resp.kind}`);
+    expect(resp.code).toBe(GatewayErrorCode.InvalidArg);
+    expect(resp.data.reason).toBe("lease_mismatch");
+    // Frozen namespace was NOT consumed.
+    expect(reverseNs.pendingCount()).toBe(before);
+  });
+
+  test("detachTui with mismatched lease → no-op; incumbent state fully preserved", () => {
+    const { coord, mux, reverseNs } = makeCoord({ approvalMode: "passthrough" });
+    coord.attachTui(L1);
+    mux.allocateForProxiedTui(1);
+    coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
+    expect(mux.pendingCountByKind("proxied_tui")).toBe(1);
+    expect(reverseNs.pendingCount()).toBe(1);
+    // Stale detach from a non-incumbent lease — must be a no-op.
+    coord.detachTui(L2);
+    expect(coord.isTuiAttached()).toBe(true);
+    expect(mux.pendingCountByKind("proxied_tui")).toBe(1);
+    expect(reverseNs.pendingCount()).toBe(1);
+    // Matching detach cleanly drains.
+    coord.detachTui(L1);
+    expect(coord.isTuiAttached()).toBe(false);
+    expect(mux.pendingCountByKind("proxied_tui")).toBe(0);
+    expect(reverseNs.pendingCount()).toBe(0);
+  });
+
+  test("attachTui with lease already active → no clobber; incumbent lease preserved", () => {
+    const { coord } = makeCoord({ approvalMode: "passthrough" });
+    coord.attachTui(L1);
+    expect(coord.currentLease()).toBe(L1);
+    // A duplicate attach with a different lease MUST NOT replace L1.
+    coord.attachTui(L2);
+    expect(coord.currentLease()).toBe(L1);
+  });
+
+  test("attach → detach → attach with fresh lease works normally after clean detach", () => {
+    const { coord } = makeCoord({ approvalMode: "passthrough" });
+    coord.attachTui(L1);
+    coord.detachTui(L1);
+    coord.attachTui(L2);
+    expect(coord.currentLease()).toBe(L2);
   });
 });

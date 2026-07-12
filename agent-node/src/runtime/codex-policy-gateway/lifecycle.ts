@@ -44,12 +44,14 @@ import {
 } from "./protocol";
 import { GatewayErrorCode } from "./contract";
 import {
-  GatewayServer,
-  type GatewayServerLimits,
+  BackendUdsServer,
+  type BackendUdsServerLimits,
   type InternalOrigin,
   type UpstreamTransport,
 } from "./uds-server";
 import { HumanOwnerCoordinator, type ApprovalMode } from "./human-owner";
+import { TuiWsServer } from "./tui-ws-server";
+import { TuiBearer } from "./bearer";
 
 // ────────────────────────────────────────────────────────────────────────
 // PreflightRunner — narrow injection point
@@ -184,7 +186,6 @@ export const DEFAULT_DENY_ALLOWLIST: ReadonlySet<string> = new Set<string>();
 
 export interface GatewayLifecycleOptions {
   readonly backendSocketPath: string;
-  readonly tuiSocketPath: string;
   readonly socketDir: string;
   readonly preflight: PreflightRunner;
   /** Injected concrete backend (B / lifecycle-owned queue etc.). */
@@ -203,14 +204,13 @@ export interface GatewayLifecycleOptions {
    */
   readonly authorizer?: TuiRequestAuthorizer;
   readonly approvalMode?: ApprovalMode;
-  readonly limits?: Partial<GatewayServerLimits>;
+  readonly limits?: Partial<BackendUdsServerLimits>;
   /**
-   * Launcher-provisioned high-entropy capabilities for the two
-   * sockets. See `uds-server.ts` for the length + distinctness
-   * requirements; lifecycle simply forwards them.
+   * Launcher-provisioned high-entropy capability for the backend
+   * (Agent) UDS socket. Length >= 32. The TUI face uses a fresh
+   * `TuiBearer` minted per lifecycle start; no separate config value.
    */
   readonly backendCapability: string;
-  readonly tuiCapability: string;
 }
 
 export type LifecycleState = "created" | "starting" | "running" | "stopping" | "stopped";
@@ -218,7 +218,9 @@ export type LifecycleState = "created" | "starting" | "running" | "stopping" | "
 export class GatewayLifecycle {
   private readonly opts: GatewayLifecycleOptions;
   private state: LifecycleState = "created";
-  private server: GatewayServer | null = null;
+  private backendServer: BackendUdsServer | null = null;
+  private tuiServer: TuiWsServer | null = null;
+  private tuiBearer: TuiBearer | null = null;
   private humanOwner: HumanOwnerCoordinator | null = null;
   private mux: UpstreamRequestMux<InternalOrigin> | null = null;
   private reverseNs: ReverseRequestNamespace | null = null;
@@ -304,29 +306,35 @@ export class GatewayLifecycle {
       approvalMode: this.opts.approvalMode ?? "never",
     });
 
-    this.server = new GatewayServer({
-      backendSocketPath: this.opts.backendSocketPath,
-      tuiSocketPath: this.opts.tuiSocketPath,
+    // Mint a fresh TUI bearer per lifecycle. Plaintext lives here
+     // just long enough to hand to the (future) child launcher; the
+     // WS server retains only the domain-separated SHA-256 digest.
+     this.tuiBearer = TuiBearer.mint();
+
+     this.backendServer = new BackendUdsServer({
+      socketPath: this.opts.backendSocketPath,
       socketDir: this.opts.socketDir,
       mux: this.mux,
-      // P0 fix (副指挥 9936fe24 item #3): GatewayServer no longer
-      // takes reverseNs directly — reverse-request routing goes
-      // through the coordinator so approvalMode is enforced.
-      humanOwner: this.humanOwner,
       upstreamTransport: this.opts.upstreamTransport,
-      initProvider,
       diagnostics,
-      authorizer,
       backend: this.opts.backend,
       backendCapability: this.opts.backendCapability,
-      tuiCapability: this.opts.tuiCapability,
       limits: this.opts.limits,
+    });
+
+    this.tuiServer = new TuiWsServer({
+      bearer: this.tuiBearer,
+      humanOwner: this.humanOwner,
+      authorizer,
+      initProvider,
+      diagnostics,
     });
 
     // P0 fence #2 — stop requested before we bind sockets.
     if (this.stopRequested) {
       this.state = "stopped";
-      this.server = null;
+      this.backendServer = null;
+      this.tuiServer = null;
       this.humanOwner = null;
       this.mux = null;
       this.reverseNs = null;
@@ -334,22 +342,27 @@ export class GatewayLifecycle {
     }
 
     try {
-      await this.server.start();
+      await this.backendServer.start();
+      await this.tuiServer.start();
     } catch (e) {
+      try { await this.backendServer?.stop(); } catch { /* silent */ }
+      try { await this.tuiServer?.stop(); } catch { /* silent */ }
       this.state = "stopped";
-      this.server = null;
+      this.backendServer = null;
+      this.tuiServer = null;
       this.humanOwner = null;
       this.mux = null;
       this.reverseNs = null;
       throw e;
     }
 
-    // P0 fence #3 — stop requested during server.start (rare — the
-    // await landed post-listen). Immediately tear down.
+    // P0 fence #3 — stop requested during server.start.
     if (this.stopRequested) {
-      try { await this.server.stop(); } catch { /* silent */ }
+      try { await this.backendServer.stop(); } catch { /* silent */ }
+      try { await this.tuiServer.stop(); } catch { /* silent */ }
       this.state = "stopped";
-      this.server = null;
+      this.backendServer = null;
+      this.tuiServer = null;
       this.humanOwner = null;
       this.mux = null;
       this.reverseNs = null;
@@ -390,53 +403,51 @@ export class GatewayLifecycle {
       return;
     }
     this.state = "stopping";
-    if (this.server !== null) {
-      try { await this.server.stop(); } catch { /* server.stop drain best-effort */ }
-      this.server = null;
+    if (this.backendServer !== null) {
+      try { await this.backendServer.stop(); } catch { /* best-effort */ }
+      this.backendServer = null;
     }
-    // P0 fix (副指挥 9936fe24 item #5): lifecycle owns awaiting
-    // upstream transport close so B's client tears down before we
-    // consider shutdown complete.
+    if (this.tuiServer !== null) {
+      try { await this.tuiServer.stop(); } catch { /* best-effort */ }
+      this.tuiServer = null;
+    }
+    // Rotate the TUI bearer so no in-flight upgrade can consume it.
+    if (this.tuiBearer !== null) {
+      try { this.tuiBearer.rotate(); } catch { /* silent */ }
+      this.tuiBearer = null;
+    }
     try { await this.opts.upstreamTransport.close(); } catch { /* silent */ }
-    // Belt-and-braces: even if the server didn't drain (edge case
-    // where upstream close never fired), we do so here so no
-    // internal origins are left dangling.
-    if (this.mux !== null) {
-      this.mux.drainAll();
-      this.mux = null;
-    }
-    if (this.reverseNs !== null) {
-      this.reverseNs.drainAll();
-      this.reverseNs = null;
-    }
+    if (this.mux !== null) { this.mux.drainAll(); this.mux = null; }
+    if (this.reverseNs !== null) { this.reverseNs.drainAll(); this.reverseNs = null; }
     this.humanOwner = null;
     this.state = "stopped";
   }
 
   // ─────────── Transport pass-throughs ───────────
 
-  /**
-   * Send an internal scheduler / lifecycle request upstream.
-   * Rejects if the lifecycle is not running.
-   */
   sendInternal<T = unknown>(method: string, params: unknown | undefined, label = method): Promise<T> {
-    if (this.state !== "running" || this.server === null) {
+    if (this.state !== "running" || this.backendServer === null) {
       return Promise.reject(new Error(`sendInternal called in state '${this.state}'`));
     }
-    return this.server.sendInternal<T>(method, params, label);
-  }
-
-  sendProxiedTui(frame: JsonRpcRequestFrame, tuiId: JsonRpcRequestId): Promise<void> {
-    if (this.state !== "running" || this.server === null) {
-      return Promise.reject(new Error(`sendProxiedTui called in state '${this.state}'`));
-    }
-    return this.server.sendProxiedTui(frame, tuiId);
+    return this.backendServer.sendInternal<T>(method, params, label);
   }
 
   // ─────────── Test-only inspectors ───────────
 
+  /** Fresh TUI bearer plaintext, callable ONCE. Returns null once the
+   *  bearer has been claimed (either via presentBearer on the WS
+   *  admission path or via this method being called by the launcher). */
+  takeTuiBearerPlaintextForLauncher(): string | null {
+    if (this.tuiBearer === null) return null;
+    return this.tuiBearer.takePlaintextForLauncher();
+  }
+
+  tuiWsPortActual(): number {
+    return this.tuiServer?.boundPortActual() ?? 0;
+  }
+
   connectionCount(): number {
-    return this.server?.connectionCount() ?? 0;
+    return this.backendServer?.connectionCount() ?? 0;
   }
 
   pendingUpstreamCount(kind?: "proxied_tui" | "internal"): number {

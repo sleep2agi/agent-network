@@ -52,10 +52,14 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.140",
     "undici": "^6.27.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "ws": "8.21.0"
   },
   "optionalDependencies": {
     "@openai/codex": "^0.133.0",
     "@openai/codex-sdk": "^0.133.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
   }
 }
