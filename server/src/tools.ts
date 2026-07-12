@@ -55,6 +55,7 @@ import {
 } from "./config-apply-validate.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { resolveSenderPrincipal } from "./principal.js";
+import { gatewayDeadLetterInboxRow } from "./gateway-ops.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -1253,6 +1254,37 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     }
   );
 
+  // ── RFC-030 L1-followup #4: gateway dead-letter (server-side atomic) ──
+  server.tool(
+    "gateway_dead_letter",
+    "Codex gateway ONLY: atomically dead-letter an invalid inbox row (server-side conditional verify of message/canonical/network mapping; ack+fail+audit in one transaction, or quarantine audit-only). Never replies to the display alias.",
+    {
+      message_id: z.string().min(1).max(200).describe("Inbox row id (the delivery-attempt messageId)"),
+      canonical_task_id: z.string().max(200).optional().describe("The pump's canonical claim — re-verified server-side, never trusted"),
+      reason: z.string().min(1).max(300).describe("Structured reason, e.g. codex_gateway_invalid_principal"),
+    },
+    async ({ message_id, canonical_task_id, reason }) => {
+      const effectiveNetId = getNetworkId(null);
+      // Network-bound gateway nodes only: the op is scoped to the
+      // caller's OWN network (foreign rows are no-ops inside the txn),
+      // and an unscoped caller has no network to scope to.
+      if (!callerTokenIsNetwork || !effectiveNetId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "gateway_dead_letter requires a network-bound node token" }) }] };
+      }
+      if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
+      const actor = defaultFrom(undefined);
+      const result = gatewayDeadLetterInboxRow({
+        messageId: message_id,
+        canonicalTaskId: canonical_task_id ?? null,
+        networkId: effectiveNetId,
+        reason,
+        actor,
+      });
+      console.log(`[${ts()}] ${actor} → gateway_dead_letter → ${message_id.slice(0, 8)}: ${result.outcome}`);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, ...result }) }] };
+    }
+  );
+
   // ── V2: retry_task (重新投递失败/过期任务) ──
   server.tool(
     "retry_task",
@@ -1282,6 +1314,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       db.transaction(() => {
+        // L1-followup #6: before creating a fresh delivery attempt, ack
+        // every STALE pending attempt of this canonical — a dangling old
+        // row would otherwise leave two live attempts of one task.
+        const staleParams: any[] = [task_id];
+        let staleSql = "UPDATE inbox SET acked = 1 WHERE (id = ?1 OR canonical_task_id = ?1) AND acked = 0";
+        staleSql = addScope(staleSql, staleParams, effectiveNetId);
+        db.run(staleSql, staleParams);
         // Reset task status
         const updateParams: any[] = [task_id];
         let updateSql = `UPDATE tasks SET status = 'delivered', result = NULL, completed_at = NULL, started_at = NULL, delivered_at = datetime('now'), expires_at = datetime('now', '+1 hour')
@@ -1393,10 +1432,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
          WHERE task_id = ?2 AND status IN ('created', 'delivered', 'acked', 'running')`;
       updateSql = addScope(updateSql, updateParams, effectiveNetId);
       const result = db.run(updateSql, updateParams);
-      // Also ack the inbox entry to prevent agent from picking it up
+      // Also ack the inbox entries to prevent agents from picking them up.
+      // L1-followup #6: ALL pending delivery attempts of this canonical
+      // (initial + retries), plus the legacy id==task_id row.
       if (result.changes > 0) {
         const inboxParams: any[] = [task_id];
-        let inboxSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND acked = 0";
+        let inboxSql = "UPDATE inbox SET acked = 1 WHERE (id = ?1 OR canonical_task_id = ?1) AND acked = 0";
         inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
         db.run(inboxSql, inboxParams);
         logTaskEvent(task_id, null, "cancelled", from_session, reason || undefined);
@@ -1439,9 +1480,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       db.transaction(() => {
-        // Ack old inbox to prevent original agent from picking it up
+        // Ack old inbox to prevent original agent from picking it up.
+        // L1-followup #6: ALL pending delivery attempts of this canonical.
         const inboxParams: any[] = [task_id];
-        let inboxSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND acked = 0";
+        let inboxSql = "UPDATE inbox SET acked = 1 WHERE (id = ?1 OR canonical_task_id = ?1) AND acked = 0";
         inboxSql = addScope(inboxSql, inboxParams, effectiveNetId);
         db.run(inboxSql, inboxParams);
 

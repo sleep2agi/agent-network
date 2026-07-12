@@ -1010,6 +1010,20 @@ try { db.exec("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT"); } catch {}
 // legacy tasks stay null and only the codex gateway refuses null.
 try { db.exec("ALTER TABLE tasks ADD COLUMN origin_sender_token_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN origin_sender_role TEXT"); } catch {}
+// L1-followup #8 (副指挥): write-once is a DATABASE invariant, not a
+// grep-the-current-UPDATEs promise. Once a non-null origin principal is
+// set it can never be mutated or nulled; the only legal transition is
+// NULL → value (legacy row backfill). Any other UPDATE aborts.
+try {
+  db.exec(`CREATE TRIGGER IF NOT EXISTS trg_tasks_origin_write_once
+    BEFORE UPDATE OF origin_sender_token_id, origin_sender_role ON tasks
+    WHEN OLD.origin_sender_token_id IS NOT NULL
+      AND (NEW.origin_sender_token_id IS NOT OLD.origin_sender_token_id
+        OR NEW.origin_sender_role IS NOT OLD.origin_sender_role)
+    BEGIN
+      SELECT RAISE(ABORT, 'tasks.origin_sender_* is write-once');
+    END`);
+} catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN meta_json TEXT"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)"); } catch {}
 

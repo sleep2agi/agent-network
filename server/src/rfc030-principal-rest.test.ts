@@ -65,12 +65,15 @@ async function post(path: string, body: unknown) {
 }
 
 describe("REST /api/task — production entry principal stamp", () => {
-  test("real HTTP + real utok: inbox + tasks stamped from AUTH principal; forged from_session is display-only", async () => {
+  test("real HTTP + real utok: forged `from` (the REAL production field) lands as display only; principal is the token's", async () => {
+    // L1-followup #5 (副指挥): the earlier version fed `from_session`,
+    // which TaskSchema strips — the forged-alias assertion never actually
+    // exercised anything. `from` is the schema field REST accepts.
     const { status, json } = await post("/api/task", {
       alias: TARGET,
       task: "rest stamped work",
       priority: "normal",
-      from_session: "指挥室", // forged display — must NOT affect principal
+      from: "指挥室", // forged display via the REAL field
       network_id: NET,
     });
     expect(status).toBeLessThan(300);
@@ -79,10 +82,11 @@ describe("REST /api/task — production entry principal stamp", () => {
 
     const inboxRow = db.get<Record<string, unknown>>(
       "SELECT * FROM inbox WHERE id = ?1", id)!;
-    // REST derives its own display from_session ("api"/token binding) —
-    // either way the DISPLAY value has zero bearing on the principal:
-    expect(typeof inboxRow.from_session).toBe("string");
-    expect(inboxRow.sender_token_id).toBe(utokId); // principal is the token's
+    // FALSIFIABLE both ways: the forged display value DID land (proving
+    // the input reached the write path — not silently stripped)…
+    expect(inboxRow.from_session).toBe("指挥室");
+    // …and the PRINCIPAL is still the token's, untouched by it.
+    expect(inboxRow.sender_token_id).toBe(utokId);
     expect(inboxRow.sender_role).toBe("member"); // network_members role
     expect(inboxRow.canonical_task_id).toBe(id); // initial: self-canonical
 
@@ -90,6 +94,20 @@ describe("REST /api/task — production entry principal stamp", () => {
       "SELECT * FROM tasks WHERE task_id = ?1", id)!;
     expect(taskRow.origin_sender_token_id).toBe(utokId);
     expect(taskRow.origin_sender_role).toBe("member");
+  });
+
+  test("negative control: `from_session` is NOT a REST field — Zod strips it, display falls back to the token default", async () => {
+    const { json } = await post("/api/task", {
+      alias: TARGET,
+      task: "rest stripped-field control",
+      priority: "normal",
+      from_session: "指挥室", // wrong field on purpose
+      network_id: NET,
+    });
+    expect(json.ok).toBe(true);
+    const row = db.get<Record<string, unknown>>(
+      "SELECT from_session FROM inbox WHERE id = ?1", json.task_id as string)!;
+    expect(row.from_session).not.toBe("指挥室"); // proven stripped
   });
 
   test("unauthenticated REST dispatch (open-dev/no token) → NULL principal", async () => {

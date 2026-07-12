@@ -53,18 +53,27 @@ export function resolveSenderPrincipal(
   const tokenId = opts.callerTokenId;
   if (!tokenId) return null;
   try {
-    const tok = db.get<{ scope: unknown; role: unknown; user_id: unknown }>(
-      "SELECT scope, role, user_id FROM api_tokens WHERE token_id = ?1",
+    const tok = db.get<{ scope: unknown; role: unknown; user_id: unknown; network_id: unknown }>(
+      "SELECT scope, role, user_id, network_id FROM api_tokens WHERE token_id = ?1",
       tokenId,
     );
     if (!tok) return null;
 
+    // L1-followup #1 (副指挥): a network-bound token (plain node OR
+    // RFC-026 child) is a principal ONLY inside the network it is bound
+    // to — a node token used against a foreign effectiveNetId resolves
+    // to NO principal. Cross-network node identity is never implied.
+    const boundNetOk =
+      typeof tok.network_id === "string" &&
+      tok.network_id.length > 0 &&
+      tok.network_id === opts.effectiveNetId;
+
     // RFC-026 child token: api_tokens.role='child' is a kind qualifier
     // written exclusively by the child-mint path.
-    if (tok.role === "child") return { tokenId, role: "child" };
+    if (tok.role === "child") return boundNetOk ? { tokenId, role: "child" } : null;
 
     // Plain node token: minimal node identity, never the owner's role.
-    if (tok.scope === "network") return { tokenId, role: "node" };
+    if (tok.scope === "network") return boundNetOk ? { tokenId, role: "node" } : null;
 
     if (tok.scope === "user") {
       if (typeof tok.user_id !== "string" || tok.user_id.length === 0) return null;

@@ -203,12 +203,12 @@ function requireTmuxAccess(req: Request, server?: any): Response | null {
 }
 
 // Extract user + network + token-binding identity from request token.
-function resolveRequestAuth(req: Request): { userId: string; networkId: string | null; username: string; tokenName: string | null; tokenId: string | null } | null {
+function resolveRequestAuth(req: Request): { userId: string; networkId: string | null; username: string; tokenName: string | null; tokenId: string | null; scope: string | null } | null {
   const token = requestToken(req);
   if (!token) return null;
   const resolved = resolveToken(token);
   if (!resolved) return null;
-  return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName, tokenId: resolved.tokenId };
+  return { userId: resolved.user.user_id, networkId: resolved.networkId, username: resolved.user.username, tokenName: resolved.tokenName, tokenId: resolved.tokenId, scope: resolved.scope };
 }
 
 type RestNetworkScope = {
@@ -555,7 +555,6 @@ Bun.serve({
       // utok_ (user token, not network-bound) is allowed — the tool layer
       // scopes to the user's accessible networks. Without this Dashboard
       // (which logs in as a user) cannot call send_task.
-      const token = requestToken(req);
       const authCtx = resolveRequestAuth(req);
       const enforceNetId = authCtx?.networkId || null;
       // Derive the calling alias from the token name (e.g., 'node:视频审查')
@@ -566,7 +565,11 @@ Bun.serve({
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
-      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null);
+      // RFC-030 L1-followup #1 (P0, 通信龙裁决): token KIND is server-
+      // resolved (api_tokens.scope via resolveToken) — the raw token
+      // prefix must NEVER participate in any auth/identity decision.
+      const callerTokenIsNetwork = authCtx?.scope === "network";
+      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, callerTokenIsNetwork, authCtx?.tokenId || null);
       await mcpServer.connect(transport);
       const response = await transport.handleRequest(req);
       // Disconnect after response to prevent McpServer leak
@@ -607,8 +610,10 @@ Bun.serve({
         return createSSEStream(sessionName, scopedNetId);
       }
 
-      // ── Path 2: ntok_ (network-bound agent token) — pre-#247 behavior preserved ──
-      if (token?.startsWith("ntok_")) {
+      // ── Path 2: network-bound agent token — pre-#247 behavior preserved ──
+      // L1-followup #1 (P0): kind via server-resolved api_tokens.scope,
+      // never the raw token prefix.
+      if (authCtx?.scope === "network") {
         if (!authCtx || !scopedNetId) {
           return withCors(req, Response.json({ ok: false, error: "network-scoped token required for SSE" }, { status: 403 }));
         }

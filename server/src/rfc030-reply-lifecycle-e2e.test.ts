@@ -207,8 +207,7 @@ describe("L3-R7 reply lifecycle E2E — retry → pump(sender_*) → send_reply 
       } as never,
       {
         ack: (id: string) => { db.run("UPDATE inbox SET acked = 1 WHERE id = ?1", [id]); },
-        markTaskFailed: () => { throw new Error("must not dead-letter a valid row"); },
-        audit: () => {},
+        deadLetter: () => { throw new Error("must not dead-letter a valid row"); },
       },
     );
     expect(report.enqueued).toHaveLength(1);

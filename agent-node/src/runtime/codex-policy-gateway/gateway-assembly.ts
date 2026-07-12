@@ -37,7 +37,7 @@ import { CodexUpstreamTransport } from "./upstream-transport";
 import { resolveSqliteDriver } from "./sqlite-driver";
 import { assertPhase1Profile, PHASE1_PROFILE } from "./policy";
 import { assertCodexBaseline } from "./version-gate";
-import { pumpInboxBatch, type InboxPumpHooks, type PumpRow, type PumpBatchReport } from "./inbox-pump";
+import { pumpInboxBatch, type InboxPumpHooks, type PumpRow, type PumpBatchReport } from "./inbox-pump"; // L1F: hooks now {ack, deadLetter(server-side atomic)} — mechanical type follow-through only
 import type { ProtocolDiagnostics, TuiInitializeProvider, JsonRpcRequestFrame, TuiPolicyDecision } from "./protocol";
 
 export interface CodexGatewayAssemblyOptions {
