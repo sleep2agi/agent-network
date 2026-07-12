@@ -6,7 +6,7 @@
 >
 > Status: **Wave 1 in progress; Wave 2, security sign-off, merge, deployment, production and `latest` are locked**
 >
-> Last updated: 2026-07-12 (Asia/Shanghai)
+> Last updated: 2026-07-12 (Asia/Shanghai) — Wave 1A Segments A/B/C committed at `00d4ea8`, gateway suite `232/0/729`; coordinator recheck + §8 security review still hard-locked.
 
 This is the engineering master plan for moving `codex-app-server` from an
 opt-in preview to the independently launched Codex TUI runtime approved by
@@ -43,7 +43,7 @@ after every checkpoint.
 |---|---|---|---|---|---|
 | Wave 0 — decisions and baseline | 副指挥 + 通信龙 | **Complete** | #428 | Decisions above frozen; Codex `0.144.0` selected | No unresolved product decision |
 | Wave 1A — typed contract and protocol | 通信工程马 | **Frozen** | `rfc030-gateway-protocol`, draft PR [#431](https://github.com/sleep2agi/agent-network/pull/431) | Freeze `90d1e58`; `169 pass / 0 fail / 555 expect` | B consumes exact shape; no unreviewed shape change |
-| Wave 1A — UDS / human owner / lifecycle | 通信工程马 | **In progress** | PR #431 | ETA 10–12h, three segment checkpoints | Owner-only UDS, real framing/notifications, one mux instance, disconnect/reverse-ID tests |
+| Wave 1A — UDS / human owner / lifecycle | 通信工程马 | **Segments A/B/C committed, awaiting review** | PR #431 @ `00d4ea8` (A `98676f1` / B `04560c0` / C `00d4ea8`) | Owner-only UDS, real framing/notifications, one mux instance, disconnect/reverse-ID tests, no-throw provider/diagnostics, Phase-1 default-deny fake | Coordinator independent recheck; §8 security gate remains locked |
 | Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **Committed, awaiting review** | `rfc030-gateway-runtime` @ `34bea40`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Real-handler matrix `17/0`, REST HTTP suite `3/0`, pump starvation + auto-chain + retry/reassign inherit all on production entrypoints | Real auth/handler/REST/retry/reassign/auto-chain/starvation E2E |
 | Wave 1B L2 — runtime hardening | 通信SDK马 | **Committed, awaiting review** | PR #432 @ `ed45f4d` | boot-gate `5/0` (zero-invocation spawn proof, shared-attach typed refusal, baseline-gate-before-spawn), TUI default-deny sweep 12×3, ownerAttached required + park/resume, error generalization + alias escaping wire-level tests; gateway+app-server `118/0` | Spawn-time read-only/never, TUI default-deny, owner fail-closed, sanitized errors/aliases |
 | Wave 1B L3 — canonical mux/client/pump integration | 通信SDK马 | **In progress — released by 通信龙 checkpoint (implementation only; security final gates NOT unlocked)** | PR #432 | R1–R9 plan, ~15h (~4.5h sequenced after 1A Segment B/C); hard acceptance: retry/reassign→send_reply lands on original canonical task owner-visible (integrated E2E), pump really consumes sender_*, all 9 write sites stamped | 副指挥 independent re-check + 通信评审牛 §8 review remain hard gates; stale contract/mux/authorizer deleted; full wire/startup evidence |
@@ -134,11 +134,14 @@ starve a valid task.
 
 ## 6. Wave-1A UDS/lifecycle checkpoints
 
-| Segment | Scope | Required evidence |
-|---|---|---|
-| A | Agent UDS + TUI UDS + framing | Unix socket only; 0700 directory; 0600 socket; no symlink/raw endpoint; bounded fragmented/coalesced/malformed/oversize frame tests; real no-ID `initialized` notification; two origins on one mux/socket; duplicate response orphaning |
-| B | Human owner and reverse-request lifecycle | TUI disconnect drains only proxied TUI and reverse IDs; internal response still routes; unknown/duplicate approval response fails closed; reconnect does not replay drained approvals |
-| C | Lifecycle orchestration | Inject B's backend/client/preflight rather than duplicate scheduler, ledger, policy, baseline gate or reconnect logic; provider/diagnostics are no-throw; UDS opens only after preflight; shutdown rejects pending work before drain |
+| Segment | Scope | Committed SHA | Required evidence | Status |
+|---|---|---|---|---|
+| A | Agent UDS + TUI UDS + framing | `98676f1` | Unix socket only; 0700 directory; 0600 socket; no symlink/raw endpoint; bounded fragmented/coalesced/malformed/oversize frame tests; real no-ID `initialized` notification; two origins on one mux/socket; duplicate response orphaning | **Committed 28/0/72** — pending coordinator recheck |
+| B | Human owner and reverse-request lifecycle | `04560c0` | TUI disconnect drains only proxied TUI and reverse IDs; internal response still routes; unknown/duplicate approval response fails closed; reconnect does not replay drained approvals; Phase 1 `approvalMode="never"` refuse-all + defense-in-depth; Phase 2 `passthrough` structure ready as a config flip | **Committed 16/0/43** — pending coordinator recheck |
+| C | Lifecycle orchestration | `00d4ea8` | Injected `PreflightRunner` runs before any socket touches disk; failing preflight leaves no path on disk; no-throw `TuiInitializeProvider` / `ProtocolDiagnostics` wrappers (self-throwing sink does not cascade or hang); explicit-empty-allowlist Phase 1 `defaultDenyTuiAuthorizer`; state machine created→starting→running→stopping→stopped; shutdown drains mux + reverseNs after GatewayServer.stop; no second queue/scheduler/ledger/reservation/baseline-gate/client-reconnect | **Committed 19/0/59** — pending coordinator recheck |
+
+Full gateway suite after Segment C: `232 pass / 0 fail / 729 expect()`
+(`bun test agent-node/src/runtime/codex-policy-gateway/`).
 
 ## 7. Production hard-gate matrix
 
@@ -177,6 +180,10 @@ fixture with the same name—proves every row.
 | 2026-07-12 | B L1 `34bea40` | `bun test server/` (single process, COMMHUB_DB isolated) | `538 pass / 11 fail` vs baseline `d418862` `515 pass / 8 fail` (identical 8× #380) | Pre-existing multi-importer Bun.serve conflict; all rfc030 suites green per-file; delta fully attributed |
 | 2026-07-12 | B L3 `ed827b3` (R1–R5,R7,R8) | `bun test agent-node/src/runtime/codex-policy-gateway/ agent-node/src/runtime/codex-app-server/` | `270 pass / 0 fail / 2387 expect` | Incl. A's frozen 169 contract/protocol tests running in B's tree after verbatim adoption (sha256 == freeze) |
 | 2026-07-12 | B L3 `57e45ce` | `bun test server/src/rfc030-reply-lifecycle-e2e.test.ts` | `1 pass / 0 fail / 17 expect` | 通信龙硬验收①② integrated E2E: retry→pump(sender_*)→send_reply lands on ORIGINAL canonical task, owner-visible replied+result, originator woken over REAL HTTP SSE new_reply |
+| 2026-07-12 | A Segment A `98676f1` | `bun test agent-node/src/runtime/codex-policy-gateway/uds-server.test.ts` | `28 pass / 0 fail / 72 expect` | Real UDS bytes-in/out coverage: 0700 dir + 0600 socket + lstat symlink/pre-existing-path refusal; fragmented / coalesced / half-packet / oversize / malformed JSON / blank-line keepalive / slow-loris cap; real no-id `initialized` = 0 wire response; TUI init returns injected upstream snapshot; dual-origin same socket out-of-order; duplicate & unknown upstream response → diagnostic orphan; TUI disconnect preserves internal pending; approval-spoof + duplicate reverse-id fail closed; no-TUI reverse request → NoOwner upstream; connection cap |
+| 2026-07-12 | A Segment B `04560c0` | `bun test agent-node/src/runtime/codex-policy-gateway/human-owner.test.ts` | `16 pass / 0 fail / 43 expect` | HumanOwnerCoordinator sole holder of ReverseRequestNamespace; Phase 1 `approvalMode="never"` refuses regardless of TUI attach; Phase 2 `passthrough` with TUI → forward_tui / no TUI → NoOwner / collision → InvalidArg; detachTui drains proxied_tui + reverseNs, internal pending untouched; reconnect cannot re-approve stale ids |
+| 2026-07-12 | A Segment C `00d4ea8` | `bun test agent-node/src/runtime/codex-policy-gateway/lifecycle.test.ts` | `19 pass / 0 fail / 59 expect` | `PreflightRunner` throw → no socket path on disk, state=stopped; mid-run fs inspection proves preflight runs before bind; makeNoThrowInitializeProvider degrades to undefined + logs sink; makeNoThrowDiagnostics newCorrelationId throw / non-string return → "cid-fallback"; reportInternalError throw swallowed; `DEFAULT_DENY_ALLOWLIST.size === 0`; every method → verdict=deny + code=Busy with explicit reason; state gating rejects sendInternal/sendProxiedTui outside `running`; shutdown drains mux + reverseNs + cleans sockets |
+| 2026-07-12 | A Segment C `00d4ea8` | `bun test agent-node/src/runtime/codex-policy-gateway/` | `232 pass / 0 fail / 729 expect` | Full gateway suite after A/B/C combined — no regression against frozen contract/protocol test count (169 → 197 after A → 213 after B → 232 after C) |
 
 Do not count uncommitted worktree changes, claimed-but-missing commits, baseline
 failures without an independently reproduced baseline, or tests whose fixture
