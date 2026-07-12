@@ -49,7 +49,7 @@ import {
   type InternalOrigin,
   type UpstreamTransport,
 } from "./uds-server";
-import { HumanOwnerCoordinator, type ApprovalMode } from "./human-owner";
+import { HumanOwnerCoordinator } from "./human-owner";
 import { TuiWsServer } from "./tui-ws-server";
 import { TuiBearer } from "./bearer";
 
@@ -203,7 +203,12 @@ export interface GatewayLifecycleOptions {
    * is used. Production wires B's real authorizer here.
    */
   readonly authorizer?: TuiRequestAuthorizer;
-  readonly approvalMode?: ApprovalMode;
+  /**
+   * P0.2 Commit 1 corrective (副指挥 a1ed1589 item #13): production
+   * has NO `approvalMode` config knob. Phase 1 pins to `"never"`
+   * inside `doStart`. When B ships real upstream forwarding + a
+   * Phase 2 policy this shape will be re-evaluated.
+   */
   readonly limits?: Partial<BackendUdsServerLimits>;
   /**
    * Launcher-provisioned high-entropy capability for the backend
@@ -303,7 +308,9 @@ export class GatewayLifecycle {
       mux: this.mux as unknown as UpstreamRequestMux<unknown>,
       reverseNs: this.reverseNs,
       diagnostics,
-      approvalMode: this.opts.approvalMode ?? "never",
+      // P0.2 Commit 1 corrective: hard-pinned Phase 1 posture. No
+      // options-side override; Phase 2 turn-on is a separate PR.
+      approvalMode: "never",
     });
 
     // Mint a fresh TUI bearer per lifecycle. Plaintext lives here

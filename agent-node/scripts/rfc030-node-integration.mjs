@@ -1,32 +1,30 @@
-// RFC-030 Wave 1A P0.2 — Node-run integration harness.
+// RFC-030 Wave 1A P0.2 Commit 1 corrective — Node-run integration.
 //
-// Runs under production Node (not bun test) so the real `node:http`
-// upgrade path + `ws` server behave as they will in production.
-// Bun's `node:http` upgrade shim currently drops bytes written to
-// the upgrade socket (repro-ed 2026-07-12 on bun 1.3.14 vs Node
-// 20.20); this harness exercises the wire path that bun-test can't.
+// Runs under production Node (Bun's node:http upgrade shim drops
+// bytes on writeGenericReject, verified 2026-07-12). Reports:
 //
-// Reports:
 //   real integration PASS: N/N
 //
-// on stdout. Non-zero exit on any failure.
+// on stdout with a non-zero exit on any failure.
 //
-// This script is TypeScript-free on purpose so it runs directly under
-// `node` without any compile step. It imports the compiled bundle
-// produced by `bun build` (see `bun run test:node-integration`).
+// Bundle path resolves RELATIVE to this script — no /tmp hardcoded.
 
 import { WebSocket } from "ws";
 import * as net from "node:net";
+import * as path from "node:path";
+import * as url from "node:url";
 
-const BUNDLE = process.env.RFC030_BUNDLE ?? "./dist/rfc030-integration.mjs";
-const mod = await import(BUNDLE);
+const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
+const BUNDLE = process.env.RFC030_BUNDLE
+  ?? path.resolve(__dirname, "..", "dist", "rfc030-integration.mjs");
+
+const mod = await import(url.pathToFileURL(BUNDLE).href);
 const {
   TuiWsServer,
   TuiBearer,
   HumanOwnerCoordinator,
   UpstreamRequestMux,
   ReverseRequestNamespace,
-  mintOwnerLeaseId,
   asOwnerLeaseId,
 } = mod;
 
@@ -37,8 +35,7 @@ const failures = [];
 
 function ok(name) { passed++; console.log(`  ok  ${name}`); }
 function fail(name, why) { failed++; failures.push({ name, why }); console.log(`  FAIL ${name}: ${why}`); }
-
-async function assertEq(name, actual, expected) {
+function assertEq(name, actual, expected) {
   if (actual === expected) ok(name);
   else fail(name, `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
@@ -57,19 +54,26 @@ function makeCoord() {
   return { coord, mux, reverseNs, diag };
 }
 
-async function harness() {
+async function harness(overrides = {}) {
   const { coord, diag } = makeCoord();
   const bearer = TuiBearer.mint();
   const plaintext = bearer.takePlaintextForLauncher();
   const server = new TuiWsServer({
     bearer,
     humanOwner: coord,
-    authorizer: { async authorize() { return { verdict: "deny", code: 0, reason: "default-deny" }; } },
-    initProvider: { currentSnapshot: () => ({ serverInfo: { name: "codex", version: "0.144.0" } }) },
+    authorizer: {
+      async authorize() {
+        return { verdict: "deny", code: 0, reason: "default-deny" };
+      },
+    },
+    initProvider: {
+      currentSnapshot: () => ({ serverInfo: { name: "codex", version: "0.144.0" } }),
+    },
     diagnostics: {
       newCorrelationId: () => "cid",
       reportInternalError: (e) => { diag.entries.push(e); },
     },
+    ...overrides,
   });
   await server.start();
   return { server, bearer, plaintext, coord, diag };
@@ -79,46 +83,68 @@ function rawHttp(port, lines) {
   return new Promise((resolve, reject) => {
     const s = net.createConnection({ port, host: ALLOWED_LOOPBACK });
     let buf = "";
-    s.on("data", (c) => { buf += c.toString("utf8"); });
-    s.on("close", () => {
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
       const idx = buf.indexOf("\r\n\r\n");
       const head = idx === -1 ? buf : buf.slice(0, idx);
       const body = idx === -1 ? "" : buf.slice(idx + 4);
       const firstLine = head.split("\r\n")[0] ?? "";
       const m = firstLine.match(/^HTTP\/1\.1\s+(\d+)/);
+      try { s.destroy(); } catch {}
       resolve({ status: m ? Number(m[1]) : 0, body });
-    });
-    s.on("error", reject);
+    };
+    s.on("data", (c) => { buf += c.toString("utf8"); });
+    s.on("close", settle);
+    s.on("end", settle);
+    s.on("error", (e) => { if (!settled) reject(e); });
     s.on("connect", () => s.write(lines.join("\r\n") + "\r\n"));
-    setTimeout(() => { try { s.destroy(); } catch {} }, 1500);
+    setTimeout(() => { if (!settled) settle(); }, 1200);
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// T1 happy path
+// T1 happy path (real ws + no jsonrpc initialize)
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_happy() {
-  const { server, plaintext } = await harness();
+  const h = await harness();
   try {
-    const ws = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${server.boundPortActual()}/`, {
-      headers: { Authorization: `Bearer ${plaintext}` },
+    const ws = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
       perMessageDeflate: false,
     });
-    await new Promise((r, j) => {
-      ws.once("open", r);
-      ws.once("error", j);
-    });
+    await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
     const reply = await new Promise((r, j) => {
       ws.once("message", (d) => r(JSON.parse(d.toString())));
       ws.once("error", j);
-      // Real 0.144.0: no jsonrpc field on initialize.
       ws.send(JSON.stringify({ id: "initialize", method: "initialize", params: {} }));
     });
-    await assertEq("T1 happy: reply.id === 'initialize'", reply.id, "initialize");
-    await assertEq("T1 happy: server.name === 'codex'", reply.result.serverInfo.name, "codex");
+    assertEq("T1 happy: reply.id", reply.id, "initialize");
+    assertEq("T1 happy: server.name === 'codex'", reply.result.serverInfo.name, "codex");
     ws.close();
-  } finally { await server.stop(); }
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// T2 slow-header: 3× shorter, connection destroyed before Upgrade
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_slow_header() {
+  const h = await harness({ headerTimeoutMs: 200 });
+  try {
+    const s = net.createConnection({ port: h.server.boundPortActual(), host: ALLOWED_LOOPBACK });
+    // Write only a partial HTTP request, never complete the request head.
+    await new Promise((r) => s.once("connect", r));
+    s.write("GET / HT");
+    // Wait 400 ms — 2× timeout — then expect the socket to be closed.
+    await new Promise((r) => setTimeout(r, 400));
+    const destroyed = s.destroyed || s.readyState === "closed";
+    if (destroyed) ok("T2 slow-header: preauth socket destroyed after timeout");
+    else fail("T2 slow-header", `socket still alive after 2× timeout (destroyed=${s.destroyed}, state=${s.readyState})`);
+    s.destroy();
+  } finally { await h.server.stop(); }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -126,33 +152,42 @@ async function test_happy() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_missing_bearer() {
-  const { server } = await harness();
+  const h = await harness();
   try {
-    const { status, body } = await rawHttp(server.boundPortActual(), [
+    const { status, body } = await rawHttp(h.server.boundPortActual(), [
       "GET / HTTP/1.1",
-      `Host: ${ALLOWED_LOOPBACK}:${server.boundPortActual()}`,
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
       "Upgrade: websocket",
       "Connection: Upgrade",
       "Sec-WebSocket-Version: 13",
       "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
       "",
     ]);
-    await assertEq("T3 missing bearer: status = 401", status, 401);
-    await assertEq("T3 missing bearer: body = 'unauthorized'", body, "unauthorized");
-  } finally { await server.stop(); }
+    assertEq("T3 missing bearer: status 401", status, 401);
+    assertEq("T3 missing bearer: body 'unauthorized'", body, "unauthorized");
+    assertEq("T3 missing bearer: owner slot empty", h.server.ownerSlotState(), "empty");
+    // Bearer NOT consumed - a subsequent CORRECT presentation still succeeds.
+    const ws = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
+      perMessageDeflate: false,
+    });
+    await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
+    ok("T3 missing bearer: bearer NOT consumed by failed attempt");
+    ws.close();
+  } finally { await h.server.stop(); }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// T4 wrong Bearer → uniform 401; secret not echoed
+// T4 wrong Bearer → uniform 401, secret not echoed
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_wrong_bearer() {
-  const { server } = await harness();
+  const h = await harness();
   try {
     const bogus = "not-the-real-bearer-abc123def456";
-    const { status, body } = await rawHttp(server.boundPortActual(), [
+    const { status, body } = await rawHttp(h.server.boundPortActual(), [
       "GET / HTTP/1.1",
-      `Host: ${ALLOWED_LOOPBACK}:${server.boundPortActual()}`,
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
       "Upgrade: websocket",
       "Connection: Upgrade",
       "Sec-WebSocket-Version: 13",
@@ -160,34 +195,144 @@ async function test_wrong_bearer() {
       `Authorization: Bearer ${bogus}`,
       "",
     ]);
-    await assertEq("T4 wrong bearer: status = 401", status, 401);
-    await assertEq("T4 wrong bearer: body = 'unauthorized'", body, "unauthorized");
-    if (body.includes(bogus)) fail("T4 wrong bearer: no echo", "bogus present in body");
-    else ok("T4 wrong bearer: no echo");
-  } finally { await server.stop(); }
+    assertEq("T4 wrong bearer: status 401", status, 401);
+    assertEq("T4 wrong bearer: body 'unauthorized'", body, "unauthorized");
+    if (body.includes(bogus)) fail("T4 no echo", "bogus present in body");
+    else ok("T4 wrong bearer: bogus not echoed");
+    assertEq("T4 wrong bearer: owner slot empty", h.server.ownerSlotState(), "empty");
+  } finally { await h.server.stop(); }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// T5 duplicate Authorization → 400
+// T5 duplicate Authorization → 400 bad_request
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_dup_bearer() {
-  const { server, plaintext } = await harness();
+  const h = await harness();
   try {
-    const { status, body } = await rawHttp(server.boundPortActual(), [
+    const { status, body } = await rawHttp(h.server.boundPortActual(), [
       "GET / HTTP/1.1",
-      `Host: ${ALLOWED_LOOPBACK}:${server.boundPortActual()}`,
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
       "Upgrade: websocket",
       "Connection: Upgrade",
       "Sec-WebSocket-Version: 13",
       "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-      `Authorization: Bearer ${plaintext}`,
+      `Authorization: Bearer ${h.plaintext}`,
       `Authorization: Bearer smuggled-second-value-abc123`,
       "",
     ]);
-    await assertEq("T5 dup Authorization: status = 400", status, 400);
-    await assertEq("T5 dup Authorization: body = 'bad_request'", body, "bad_request");
-  } finally { await server.stop(); }
+    assertEq("T5 dup Authorization: status 400", status, 400);
+    assertEq("T5 dup Authorization: body 'bad_request'", body, "bad_request");
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// T5b bad Sec-WebSocket-Key
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_bad_ws_key() {
+  const h = await harness();
+  try {
+    // Missing.
+    const missing = await rawHttp(h.server.boundPortActual(), [
+      "GET / HTTP/1.1",
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Version: 13",
+      `Authorization: Bearer ${h.plaintext}`,
+      "",
+    ]);
+    assertEq("T5b ws_key_absent: status 400", missing.status, 400);
+    // Bad length: decodes to != 16 bytes (17 bytes: 24-char base64).
+    const badLen = await rawHttp(h.server.boundPortActual(), [
+      "GET / HTTP/1.1",
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Version: 13",
+      "Sec-WebSocket-Key: dGhpc2lzZm91cnRlZW5ieXRlcw==", // 20 bytes decoded
+      `Authorization: Bearer ${h.plaintext}`,
+      "",
+    ]);
+    assertEq("T5b ws_key_bad_length: status 400", badLen.status, 400);
+    // Bad shape (not base64 22-char + ==).
+    const badShape = await rawHttp(h.server.boundPortActual(), [
+      "GET / HTTP/1.1",
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Version: 13",
+      "Sec-WebSocket-Key: not-a-valid-b64-shape",
+      `Authorization: Bearer ${h.plaintext}`,
+      "",
+    ]);
+    assertEq("T5b ws_key_bad_shape: status 400", badShape.status, 400);
+    assertEq("T5b ws_key: owner slot empty across all three", h.server.ownerSlotState(), "empty");
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// T7 second Upgrade after attach → connect refused
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_second_upgrade_refused() {
+  const h = await harness();
+  try {
+    const ws1 = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
+      perMessageDeflate: false,
+    });
+    await new Promise((r, j) => { ws1.once("open", r); ws1.once("error", j); });
+    assertEq("T7 first upgrade holds owner slot", h.server.ownerSlotState(), "held");
+    // Second connect should be kernel-refused since httpServer.close()
+    // ran on first attach.
+    let refused = false;
+    try {
+      await rawHttp(h.server.boundPortActual(), [
+        "GET / HTTP/1.1",
+        `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        "Sec-WebSocket-Version: 13",
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+        `Authorization: Bearer ${h.plaintext}`,
+        "",
+      ]);
+    } catch { refused = true; }
+    if (refused) ok("T7 second Upgrade kernel-refused after attach");
+    else fail("T7 second Upgrade", "kernel accepted connection after httpServer.close()");
+    ws1.close();
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// T4b Item #1 regression: owner survives >2× headerTimeout
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_owner_survives_preauth_timer() {
+  const h = await harness({ headerTimeoutMs: 200 });
+  try {
+    const ws = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
+      perMessageDeflate: false,
+    });
+    await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
+    // Wait > 2× headerTimeout. The 9e6706c bug destroyed the owner
+    // WS here because preAuthSockets still held it and the 3s timer
+    // ran; corrective removes the socket from the preauth map at
+    // http upgrade time.
+    await new Promise((r) => setTimeout(r, 500));
+    // Send initialize and expect a reply.
+    const reply = await new Promise((r, j) => {
+      ws.once("message", (d) => r(JSON.parse(d.toString())));
+      ws.once("error", j);
+      ws.send(JSON.stringify({ id: "initialize", method: "initialize", params: {} }));
+      setTimeout(() => j(new Error("timeout waiting for initialize reply")), 800);
+    });
+    assertEq("T4b post-timeout: owner still OPEN + can RPC", reply.id, "initialize");
+    ws.close();
+  } finally { await h.server.stop(); }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -195,21 +340,21 @@ async function test_dup_bearer() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_wrong_path() {
-  const { server, plaintext } = await harness();
+  const h = await harness();
   try {
-    const { status, body } = await rawHttp(server.boundPortActual(), [
+    const { status, body } = await rawHttp(h.server.boundPortActual(), [
       "GET /rpc HTTP/1.1",
-      `Host: ${ALLOWED_LOOPBACK}:${server.boundPortActual()}`,
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
       "Upgrade: websocket",
       "Connection: Upgrade",
       "Sec-WebSocket-Version: 13",
       "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-      `Authorization: Bearer ${plaintext}`,
+      `Authorization: Bearer ${h.plaintext}`,
       "",
     ]);
-    await assertEq("T12 /rpc → 404", status, 404);
-    await assertEq("T12 /rpc → body='not_found'", body, "not_found");
-  } finally { await server.stop(); }
+    assertEq("T12 /rpc → 404", status, 404);
+    assertEq("T12 /rpc → body=not_found", body, "not_found");
+  } finally { await h.server.stop(); }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -217,10 +362,10 @@ async function test_wrong_path() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_raw_jsonl() {
-  const { server } = await harness();
+  const h = await harness();
   try {
     const buf = await new Promise((resolve) => {
-      const s = net.createConnection({ port: server.boundPortActual(), host: ALLOWED_LOOPBACK });
+      const s = net.createConnection({ port: h.server.boundPortActual(), host: ALLOWED_LOOPBACK });
       let b = "";
       s.on("data", (c) => { b += c.toString("utf8"); });
       s.on("close", () => resolve(b));
@@ -228,37 +373,118 @@ async function test_raw_jsonl() {
       setTimeout(() => { try { s.destroy(); } catch {} }, 400);
     });
     if (buf.includes("serverInfo") || buf.includes("codex-policy-gateway")) {
-      fail("T11 raw JSONL: no JSON layer reached", `unexpected body: ${buf}`);
+      fail("T11 raw JSONL: no JSON reached", `unexpected body: ${buf}`);
     } else {
       ok("T11 raw JSONL: no JSON layer reached");
     }
-  } finally { await server.stop(); }
+  } finally { await h.server.stop(); }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// T8 cross-lease refusal
+// T8 cross-lease refusal via HumanOwnerCoordinator
 // ─────────────────────────────────────────────────────────────────────
 
-async function test_cross_lease() {
-  const { coord } = (function () {
-    const mux = new UpstreamRequestMux();
-    const reverseNs = new ReverseRequestNamespace();
-    const diag = { newCorrelationId: () => "cid", reportInternalError: () => {} };
-    return { coord: new HumanOwnerCoordinator({ mux, reverseNs, diagnostics: diag, approvalMode: "passthrough" }), mux, reverseNs };
-  })();
-  const L1 = asOwnerLeaseId("L1-lease-integration-abc");
-  const L2 = asOwnerLeaseId("L2-lease-integration-xyz");
+function test_cross_lease() {
+  const mux = new UpstreamRequestMux();
+  const reverseNs = new ReverseRequestNamespace();
+  const coord = new HumanOwnerCoordinator({
+    mux, reverseNs,
+    diagnostics: { newCorrelationId: () => "cid", reportInternalError: () => {} },
+    approvalMode: "passthrough",
+  });
+  const L1 = asOwnerLeaseId("L1-lease-abc-integration");
+  const L2 = asOwnerLeaseId("L2-lease-xyz-integration");
   coord.attachTui(L1);
   const fwd = coord.handleUpstreamReverseRequest({
-    jsonrpc: "2.0", id: "cx_ci", method: "approval/request",
+    jsonrpc: "2.0", id: "cx_i", method: "approval/request",
   });
   if (fwd.kind !== "forward_tui") return fail("T8 setup", `expected forward_tui, got ${fwd.kind}`);
   const rej = coord.handleTuiResponseFrameWithLease(
     { jsonrpc: "2.0", id: fwd.tuiFrame.id, result: {} },
     L2,
   );
-  await assertEq("T8 cross-lease: reject", rej.kind, "reject");
-  await assertEq("T8 cross-lease: reason=lease_mismatch", rej.data.reason, "lease_mismatch");
+  assertEq("T8 cross-lease reject", rej.kind, "reject");
+  assertEq("T8 cross-lease reason=lease_mismatch", rej.data.reason, "lease_mismatch");
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// T13 concurrent valid Upgrades → exactly 1 owner
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_concurrent_upgrades_exactly_one_owner() {
+  const h = await harness();
+  try {
+    const port = h.server.boundPortActual();
+    // The same bearer is single-use; only one Upgrade path can consume it.
+    const a = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${port}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
+      perMessageDeflate: false,
+    });
+    const b = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${port}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
+      perMessageDeflate: false,
+    });
+    const results = await Promise.allSettled([
+      new Promise((r, j) => { a.once("open", () => r("open")); a.once("error", () => j("error")); }),
+      new Promise((r, j) => { b.once("open", () => r("open")); b.once("error", () => j("error")); }),
+    ]);
+    const opens = results.filter((r) => r.status === "fulfilled").length;
+    assertEq("T13 concurrent: exactly ONE owner opens", opens, 1);
+    assertEq("T13 owner_slot: held (one incumbent)", h.server.ownerSlotState(), "held");
+    a.close(); b.close();
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// T14 real WS close codes on binary / invalid JSON / bad shape
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_real_close_codes() {
+  const h = await harness();
+  try {
+    const port = h.server.boundPortActual();
+    // Binary frame → 1003.
+    const bin = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${port}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
+      perMessageDeflate: false,
+    });
+    await new Promise((r, j) => { bin.once("open", r); bin.once("error", j); });
+    const binCode = await new Promise((r) => {
+      bin.once("close", (code) => r(code));
+      bin.send(Buffer.from([0x00, 0x01, 0x02]));
+    });
+    assertEq("T14 binary → close 1003", binCode, 1003);
+    await h.server.stop();
+    // Invalid JSON → 1007.
+    const h2 = await harness();
+    const inv = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${h2.server.boundPortActual()}/`, {
+      headers: { Authorization: `Bearer ${h2.plaintext}` },
+      perMessageDeflate: false,
+    });
+    await new Promise((r, j) => { inv.once("open", r); inv.once("error", j); });
+    const invCode = await new Promise((r) => {
+      inv.once("close", (code) => r(code));
+      inv.send("this is not json {");
+    });
+    assertEq("T14 invalid JSON → close 1007", invCode, 1007);
+    await h2.server.stop();
+    // Bad shape (valid JSON but not JSON-RPC) → 1008.
+    const h3 = await harness();
+    const bad = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${h3.server.boundPortActual()}/`, {
+      headers: { Authorization: `Bearer ${h3.plaintext}` },
+      perMessageDeflate: false,
+    });
+    await new Promise((r, j) => { bad.once("open", r); bad.once("error", j); });
+    const badCode = await new Promise((r) => {
+      bad.once("close", (code) => r(code));
+      // Valid JSON but no method / id / result / error field.
+      bad.send(JSON.stringify({ foo: "bar" }));
+    });
+    assertEq("T14 bad-shape → close 1008", badCode, 1008);
+    await h3.server.stop();
+  } catch (e) {
+    fail("T14", e.message);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -266,14 +492,20 @@ async function test_cross_lease() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 — Node-run real integration");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective — Node integration");
   await test_happy();
+  await test_slow_header();
   await test_missing_bearer();
   await test_wrong_bearer();
   await test_dup_bearer();
+  await test_bad_ws_key();
+  await test_second_upgrade_refused();
+  await test_owner_survives_preauth_timer();
   await test_wrong_path();
   await test_raw_jsonl();
-  await test_cross_lease();
+  test_cross_lease();
+  await test_concurrent_upgrades_exactly_one_owner();
+  await test_real_close_codes();
   console.log("");
   console.log(`real integration PASS: ${passed}/${passed + failed}`);
   if (failed > 0) {

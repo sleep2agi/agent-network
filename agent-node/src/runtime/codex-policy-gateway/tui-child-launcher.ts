@@ -1,180 +1,195 @@
-// RFC-030 Wave 1A P0.2 — tui-child-launcher.ts
+// RFC-030 Wave 1A P0.2 Commit 1 corrective — tui-child-launcher.ts
 //
-// NARROW injection seam for the codex TUI child process. The A tranche
-// does NOT ship a real production launcher — spawning `codex --remote
-// ws://...` with the correct env-allowlist + stdio-redactor wiring is
-// Wave 2 material and is explicitly locked in 副指挥 7034c5ce item #7.
+// NARROW injection seam for the codex TUI child process. A tranche
+// does NOT ship a real production launcher (Wave 2 locked).
 //
-// What lives here:
-//   - `TuiChildLauncher` interface (the seam)
-//   - `LaunchRequest` shape (bearer plaintext + WS host + env allowlist)
-//   - `NoopTuiChildLauncher` — a fake for tests, exposes what it saw
-//     so integration tests can assert env allowlisting and that the
-//     bearer plaintext arrived intact.
-//
-// What does NOT live here (Wave 2):
-//   - `child_process.spawn` of the real codex binary
-//   - PTY handling
-//   - Stdio pass-through wiring (uses `SecretRedactor` from bearer.ts)
-//   - Exit-code / signal handling / re-spawn strategy
+// Corrective (副指挥 a1ed1589 items #9, #10):
+//   - `buildAllowlistEnv` accepts a NARROW typed struct, not an
+//     arbitrary `Record + denylist`. Only these keys are allowed
+//     on the child env: `PATH`, `HOME`, `TMPDIR`, `CODEX_HOME`, plus
+//     the pinned bearer slot. Any other input has no entry point.
+//   - Bearer env slot is HARD-PINNED to `ANET_CODEX_TUI_BEARER`.
+//     There is no per-call name override.
+//   - `NoopTuiChildLauncher` never stores the plaintext bearer. It
+//     retains only a redacted observation record: digest of the
+//     bearer, whether the bearer env slot was present, and the WS
+//     URL — never the plaintext.
 
-import type { SecretRedactor } from "./bearer";
+import * as crypto from "node:crypto";
 
 /**
- * The shape lifecycle hands to `TuiChildLauncher.launch(...)` when it
- * has a WS server listening and a fresh bearer minted.
- *
- * `env` is an EXPLICIT ALLOWLIST. The launcher MUST NOT dump
- * `process.env` and add these; it must construct the child env from
- * an empty object and then set exactly the keys the allowlist names.
+ * The single env var name Codex is invoked with via
+ * `--remote-auth-token-env ANET_CODEX_TUI_BEARER`. Hard-pinned.
  */
-export interface LaunchRequest {
-  /**
-   * `ws://127.0.0.1:<port>` — port is the OS-assigned ephemeral bound
-   * to the loopback. Never includes a path (real Codex 0.144.0
-   * rejects any suffix — 副指挥 967a0010).
-   */
-  readonly wsUrl: string;
+export const TUI_BEARER_ENV_NAME = "ANET_CODEX_TUI_BEARER";
 
-  /**
-   * Symbolic env var name Codex is invoked with via
-   * `--remote-auth-token-env`. The value at this key in `env` is the
-   * bearer plaintext. Naming the ENV VAR (not the value) in argv is
-   * how Codex reads secrets without them showing up in `ps`.
-   */
-  readonly bearerEnvName: string;
-
-  /**
-   * Explicit env allowlist. Every key the child process is allowed to
-   * see. The launcher constructs the child env from
-   * `Object.fromEntries(Object.entries(this.env))` — no parent env
-   * inheritance, no `...process.env`.
-   */
-  readonly env: Readonly<Record<string, string>>;
-
-  /**
-   * Optional stdio redactor. When set, launcher pipes child stdout+stderr
-   * through it before forwarding. In the fake this is captured but not
-   * exercised.
-   */
-  readonly stdioRedactor?: SecretRedactor;
+/**
+ * Typed shape the caller hands to `buildAllowlistEnv`. Every field is
+ * OPTIONAL because the caller is expected to only supply what the
+ * child truly needs. Unknown fields on the type are a compile-time
+ * error; unknown keys at runtime are refused.
+ */
+export interface AllowedChildEnv {
+  readonly PATH?: string;
+  readonly HOME?: string;
+  readonly TMPDIR?: string;
+  readonly CODEX_HOME?: string;
 }
 
+/** Total set of allowed env keys (bearer + typed struct). */
+const ALLOWED_ENV_KEYS: readonly string[] = [
+  TUI_BEARER_ENV_NAME,
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "CODEX_HOME",
+];
+
 /**
- * Outcome of a launch request. `spawned` is always false in the fake;
- * a Wave 2 production launcher would return a handle/child-pid.
+ * Launch request the seam receives. `wsUrl` is the bare
+ * `ws://127.0.0.1:<port>` (no path — real 0.144.0 CLI rejects any
+ * path). `env` is already a fully-constructed frozen record (built
+ * via `buildAllowlistEnv`).
  */
+export interface LaunchRequest {
+  readonly wsUrl: string;
+  /**
+   * Frozen record built via `buildAllowlistEnv`. Always includes the
+   * pinned bearer slot under `ANET_CODEX_TUI_BEARER` and zero or
+   * more of the four allowed slots.
+   */
+  readonly env: Readonly<Record<string, string>>;
+}
+
 export interface LaunchOutcome {
   readonly spawned: boolean;
-  /** Symbolic reason for a failed launch. Fake never fails. */
   readonly reason?: string;
 }
 
-/**
- * The seam. Lifecycle passes a `TuiChildLauncher` in. Test harnesses
- * inject `NoopTuiChildLauncher` (below); Wave 2 will supply the real
- * spawn implementation.
- */
 export interface TuiChildLauncher {
   launch(req: LaunchRequest): Promise<LaunchOutcome>;
-  /**
-   * Called by lifecycle on shutdown so a real launcher can send SIGTERM
-   * and await. The fake just records the call.
-   */
   terminate(): Promise<void>;
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// NoopTuiChildLauncher — interface-level fake, INTEGRATION-LEVEL EVIDENCE
+// buildAllowlistEnv — narrow, allowlisted, unknown keys rejected
 // ────────────────────────────────────────────────────────────────────────
 
 /**
- * Fake launcher used by the integration tests. Records every launch
- * request so tests can assert:
- *   - the bearer plaintext arrived at the launcher exactly once
- *   - the env is an allowlist (no parent-env leaks)
- *   - the wsUrl uses `ws://127.0.0.1:<port>` with no path suffix
+ * Build a frozen child env from the pinned bearer slot + the four
+ * typed fields. Refuses:
+ *   - empty bearer value
+ *   - any key in `env` that is not in `ALLOWED_ENV_KEYS`
+ *   - any prototype-poisoned key (`__proto__` / `constructor` /
+ *     `prototype`)
  *
- * This class is a fake — it does NOT spawn any real codex process.
- * All evidence produced with this class is `interface-level fake`,
- * clearly labeled as such in test names and commit messages.
+ * A caller cannot pass a `Record<string, string>` with arbitrary
+ * keys — the `AllowedChildEnv` type limits it at compile time. The
+ * runtime check is defense-in-depth against a hostile cast /
+ * dynamic caller.
+ */
+export function buildAllowlistEnv(
+  bearerValue: string,
+  env: AllowedChildEnv = {},
+): Readonly<Record<string, string>> {
+  if (typeof bearerValue !== "string" || bearerValue.length === 0) {
+    throw new Error("bearerValue must be a non-empty string");
+  }
+  // The typed field set is a compile-time allowlist. Reject any
+  // runtime key that snuck in via a hostile cast.
+  const asRecord = env as Record<string, string>;
+  for (const k of Object.keys(asRecord)) {
+    if (k === "__proto__" || k === "constructor" || k === "prototype") {
+      throw new Error(`env key ${JSON.stringify(k)} is not allowed`);
+    }
+    if (!ALLOWED_ENV_KEYS.includes(k)) {
+      throw new Error(`env key ${JSON.stringify(k)} is not in the allowlist`);
+    }
+    if (k === TUI_BEARER_ENV_NAME) {
+      throw new Error(`env key ${TUI_BEARER_ENV_NAME} is reserved; supply bearer via the first arg`);
+    }
+    if (typeof asRecord[k] !== "string") {
+      throw new Error(`env value for ${JSON.stringify(k)} must be a string`);
+    }
+  }
+  const out: Record<string, string> = {};
+  // Copy allowed typed fields.
+  for (const k of ALLOWED_ENV_KEYS) {
+    if (k === TUI_BEARER_ENV_NAME) continue;
+    const v = asRecord[k];
+    if (typeof v === "string") out[k] = v;
+  }
+  out[TUI_BEARER_ENV_NAME] = bearerValue;
+  return Object.freeze(out);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// NoopTuiChildLauncher — records redacted observation only
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Bearer-observation record retained by the fake launcher. NEVER
+ * contains the plaintext or the digest bytes; only booleans + safe
+ * numerics.
+ */
+export interface RedactedLaunchObservation {
+  readonly wsUrlHostPort: string;
+  readonly bearerPresent: boolean;
+  readonly bearerLen: number;
+  /** Base64url of a truncated (first 4 bytes) SHA-256 of the bearer
+   *  — a shape identifier that lets tests distinguish two distinct
+   *  bearers without exposing either. */
+  readonly bearerFingerprint4: string;
+  readonly envKeys: readonly string[];
+}
+
+/**
+ * Fake launcher for tests. Corrective (副指挥 a1ed1589 item #10):
+ * the fake NEVER stores the full `LaunchRequest`. The plaintext
+ * bearer is projected to a 4-byte fingerprint before storage.
  */
 export class NoopTuiChildLauncher implements TuiChildLauncher {
-  readonly seenRequests: LaunchRequest[] = [];
-  readonly terminateCalls: number[] = [];
+  private readonly observations: RedactedLaunchObservation[] = [];
   private terminateCallCount = 0;
 
   async launch(req: LaunchRequest): Promise<LaunchOutcome> {
-    this.seenRequests.push(req);
+    const bearer = req.env[TUI_BEARER_ENV_NAME] ?? "";
+    // Compute a redacted observation.
+    const hostPort = extractHostPort(req.wsUrl);
+    const fp = fingerprint4(bearer);
+    const obs: RedactedLaunchObservation = {
+      wsUrlHostPort: hostPort,
+      bearerPresent: bearer.length > 0,
+      bearerLen: bearer.length,
+      bearerFingerprint4: fp,
+      envKeys: Object.keys(req.env).sort(),
+    };
+    this.observations.push(obs);
     return { spawned: false, reason: "noop_launcher_never_spawns" };
   }
 
   async terminate(): Promise<void> {
     this.terminateCallCount++;
-    this.terminateCalls.push(this.terminateCallCount);
   }
 
-  /** Test helper — total number of terminate() calls seen. */
+  /** Test helper. Observations contain NO plaintext. */
+  seenObservations(): readonly RedactedLaunchObservation[] {
+    return this.observations;
+  }
+
   terminatesObserved(): number {
     return this.terminateCallCount;
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// Env allowlist helpers
-// ────────────────────────────────────────────────────────────────────────
-
-/**
- * Build a child env from an EXPLICIT set of key/value pairs. This is a
- * belt-and-braces helper so no caller is tempted to spread
- * `process.env` in one place and forget to filter. Returns a plain
- * frozen object.
- *
- * `bearerEnvName` and `bearerValue` MUST be present; the launcher
- * refuses to launch without them.
- */
-export function buildAllowlistEnv(
-  bearerEnvName: string,
-  bearerValue: string,
-  additional: Readonly<Record<string, string>> = {},
-): Readonly<Record<string, string>> {
-  if (typeof bearerEnvName !== "string" || bearerEnvName.length === 0) {
-    throw new Error("bearerEnvName must be a non-empty string");
-  }
-  if (typeof bearerValue !== "string" || bearerValue.length === 0) {
-    throw new Error("bearerValue must be a non-empty string");
-  }
-  // Verify none of the `additional` keys name a CommHub-shape env slot
-  // — a defensive guard against future refactor drift. Denied keys
-  // land in a static list; a new CommHub key elsewhere in the codebase
-  // will need to be added here explicitly.
-  for (const k of Object.keys(additional)) {
-    if (COMMHUB_ENV_DENYLIST.has(k) || COMMHUB_ENV_DENY_PATTERNS.some((rx) => rx.test(k))) {
-      throw new Error(`env key '${k}' is on the CommHub-token denylist`);
-    }
-  }
-  return Object.freeze({
-    ...additional,
-    [bearerEnvName]: bearerValue,
-  });
+function extractHostPort(wsUrl: string): string {
+  // Strip `ws://` prefix; take everything before the next `/` if any.
+  const m = wsUrl.match(/^ws:\/\/([^/]+)/);
+  return m ? m[1] : "";
 }
 
-const COMMHUB_ENV_DENYLIST = new Set<string>([
-  "ANET_CODEX_COMMHUB_TOKEN",
-  "COMMHUB_MCP_TOKEN",
-  "ANET_TOKEN",
-  "COMMHUB_ADMIN_TOKEN",
-  "COMMHUB_UTOK",
-]);
-
-/**
- * Regex patterns for env slots that should never travel to the codex
- * child. Prefix-based classes (`NTOK*`, `UTOK*`, `NTOK_*`).
- */
-const COMMHUB_ENV_DENY_PATTERNS: readonly RegExp[] = [
-  /^NTOK_/i,
-  /^UTOK_/i,
-  /^NTOK$/i,
-  /^UTOK$/i,
-  /^ANET_COMMHUB_/i,
-];
+function fingerprint4(bearer: string): string {
+  if (bearer.length === 0) return "";
+  const digest = crypto.createHash("sha256").update(bearer, "utf8").digest();
+  return digest.subarray(0, 4).toString("base64url");
+}

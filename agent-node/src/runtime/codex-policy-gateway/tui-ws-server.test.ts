@@ -24,7 +24,6 @@ import {
   TUI_HTTP_HEADER_TIMEOUT_MS,
   TUI_MAX_PREAUTH_SOCKETS,
   TUI_WS_MAX_PAYLOAD,
-  TUI_WS_SEMANTIC_TEXT_CAP,
   TuiWsServer,
   type TuiWsServerOptions,
   mintOwnerLeaseId,
@@ -45,10 +44,12 @@ import { asOwnerLeaseId } from "./contract";
 // ─────────────────────────────────────────────────────────────────────
 
 describe("constants export shape", () => {
-  test("payload / semantic caps + timeout / preauth cap pin", () => {
-    // 1 MiB WS payload cap. 128 KiB text worst-case ~6x escape + envelope.
+  test("payload cap + timeout / preauth cap pin (no 128 KiB semantic cap on TUI face)", () => {
+    // WS payload cap is 1 MiB. Corrective (副指挥 a1ed1589 self-
+    // check): TUI wire is NOT subject to the frozen Agent-side
+    // 128 KiB semantic cap. The prior *8 estimator gate has been
+    // removed; there is no `TUI_WS_SEMANTIC_TEXT_CAP` export.
     expect(TUI_WS_MAX_PAYLOAD).toBe(1 * 1024 * 1024);
-    expect(TUI_WS_SEMANTIC_TEXT_CAP).toBe(128 * 1024);
     expect(TUI_HTTP_HEADER_TIMEOUT_MS).toBe(3_000);
     expect(TUI_MAX_PREAUTH_SOCKETS).toBe(8);
   });

@@ -278,15 +278,13 @@ export class HumanOwnerCoordinator {
   // ─────────── TUI response frame → decision ───────────
 
   /**
-   * @deprecated Use `handleTuiResponseFrameWithLease(frame, leaseId)`
-   * from the WS server; this no-lease overload is preserved only so
-   * the (soon-removed) backend UDS TUI test path still compiles.
-   * Callers that go through this method get NO cross-lease
-   * protection — they must not be reachable from a production wire.
+   * P0.2 Commit 1 corrective (副指挥 a1ed1589 item #11): the
+   * no-lease `handleTuiResponseFrame` overload has been REMOVED. The
+   * only consume path is `handleTuiResponseFrameWithLease` below. A
+   * caller that reaches here without a lease is a bug at the wire
+   * layer — the WS server tags every inbound frame with the owning
+   * socket's lease before delegation.
    */
-  handleTuiResponseFrame(frame: JsonRpcResponseFrame): TuiResponseHandling {
-    return handleTuiResponseFrame(frame, this.opts.reverseNs);
-  }
 
   /**
    * P0.2 lease-aware consume path (副指挥 7034c5ce item #2 / #11).

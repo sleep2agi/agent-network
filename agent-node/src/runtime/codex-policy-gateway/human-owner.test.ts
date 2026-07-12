@@ -149,9 +149,10 @@ describe("HumanOwnerCoordinator — TUI response frame (approval consumption)", 
     const fwd = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
     if (fwd.kind !== "forward_tui") throw new Error("expected forward_tui");
     const tuiId = fwd.tuiFrame.id;
-    const resp = coord.handleTuiResponseFrame({
-      jsonrpc: "2.0", id: tuiId, result: { approved: true },
-    });
+    const resp = coord.handleTuiResponseFrameWithLease(
+      { jsonrpc: "2.0", id: tuiId, result: { approved: true } },
+      L1,
+    );
     if (resp.kind !== "forward_reverse_response") throw new Error(`expected forward, got ${resp.kind}`);
     expect(resp.codexReverseId).toBe("cx_1");
     if ("result" in resp.frame) expect(resp.frame.result).toEqual({ approved: true });
@@ -159,28 +160,35 @@ describe("HumanOwnerCoordinator — TUI response frame (approval consumption)", 
     expect(reverseNs.pendingCount()).toBe(0);
   });
 
-  test("unknown tui id → reject reason=reverse_id_unknown_or_duplicate", () => {
+  test("unknown tui id -> reject reason=lease_mismatch (lease side-map has no entry)", () => {
+    // P0.2 corrective (副指挥 a1ed1589 item #11): the lease side-map
+    // is checked BEFORE the frozen reverseNs consume. An unknown
+    // tuiId therefore lands on `lease_mismatch` first — the frozen
+    // namespace is never consulted (which is the point: no path
+    // exists where a rogue lease could probe the frozen namespace).
     const { coord } = makeCoord({ approvalMode: "passthrough" });
     coord.attachTui(L1);
-    const resp = coord.handleTuiResponseFrame({ jsonrpc: "2.0", id: 999, result: {} });
+    const resp = coord.handleTuiResponseFrameWithLease({ jsonrpc: "2.0", id: 999, result: {} }, L1);
     if (resp.kind !== "reject") throw new Error("expected reject");
     expect(resp.code).toBe(GatewayErrorCode.InvalidArg);
-    expect(resp.data.reason).toBe("reverse_id_unknown_or_duplicate");
+    expect(resp.data.reason).toBe("lease_mismatch");
   });
 
-  test("duplicate consume → reject (approval spoof / replay protection)", () => {
-    const { coord } = makeCoord({ approvalMode: "passthrough" });
+  test("duplicate consume -> reject reason=lease_mismatch (side-map cleared on first consume)", () => {
+    const { coord, reverseNs } = makeCoord({ approvalMode: "passthrough" });
     coord.attachTui(L1);
     const fwd = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
     if (fwd.kind !== "forward_tui") throw new Error("expected forward");
     const tuiId = fwd.tuiFrame.id;
-    // First — succeeds.
-    const first = coord.handleTuiResponseFrame({ jsonrpc: "2.0", id: tuiId, result: {} });
+    const first = coord.handleTuiResponseFrameWithLease({ jsonrpc: "2.0", id: tuiId, result: {} }, L1);
     if (first.kind !== "forward_reverse_response") throw new Error("first should succeed");
-    // Replay — refused.
-    const dup = coord.handleTuiResponseFrame({ jsonrpc: "2.0", id: tuiId, result: {} });
+    // Replay: side-map entry was cleared during the first consume,
+    // so the second call hits lease_mismatch and NEVER touches the
+    // frozen namespace (whose count is already 0 too).
+    const dup = coord.handleTuiResponseFrameWithLease({ jsonrpc: "2.0", id: tuiId, result: {} }, L1);
     if (dup.kind !== "reject") throw new Error("duplicate must reject");
-    expect(dup.data.reason).toBe("reverse_id_unknown_or_duplicate");
+    expect(dup.data.reason).toBe("lease_mismatch");
+    expect(reverseNs.pendingCount()).toBe(0);
   });
 });
 
@@ -217,9 +225,10 @@ describe("HumanOwnerCoordinator — TUI attach/detach lifecycle (Δ11 wiring)", 
     // Reconnect.
     coord.attachTui(L1);
     // Old TUI id can't re-approve.
-    const resp = coord.handleTuiResponseFrame({ jsonrpc: "2.0", id: staleTuiId, result: {} });
+    const resp = coord.handleTuiResponseFrameWithLease({ jsonrpc: "2.0", id: staleTuiId, result: {} }, L1);
     if (resp.kind !== "reject") throw new Error("stale id must be rejected");
-    expect(resp.data.reason).toBe("reverse_id_unknown_or_duplicate");
+    // Side-map was cleared on detach; new attach starts empty.
+    expect(resp.data.reason).toBe("lease_mismatch");
   });
 
   test("attachTui is idempotent (double attach doesn't leak state)", () => {

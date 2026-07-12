@@ -2,7 +2,7 @@
 // symbol the harness uses so `bun build` produces a single ESM file.
 export {
   TuiWsServer, mintOwnerLeaseId,
-  TUI_WS_MAX_PAYLOAD, TUI_WS_SEMANTIC_TEXT_CAP,
+  TUI_WS_MAX_PAYLOAD,
 } from "./tui-ws-server";
 export { TuiBearer, SecretRedactor, BEARER_BYTES, BEARER_TTL_MS } from "./bearer";
 export { HumanOwnerCoordinator } from "./human-owner";
