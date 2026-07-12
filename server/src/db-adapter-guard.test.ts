@@ -190,6 +190,30 @@ describe("resolveDatabaseTarget — pure branch decision, no construction", () =
       /REFUSING to honor inherited DATABASE_URL/
     );
   });
+
+  test("test + BOTH DATABASE_URL AND COMMHUB_DB set → DATABASE_URL guard still fires FIRST", () => {
+    // Anti-drift guard for future reorderings. Even when COMMHUB_DB is
+    // provided (which would satisfy the SQLite guard), the DATABASE_URL
+    // guard must still short-circuit under NODE_ENV=test — there is no
+    // "you had a safe SQLite path so I'll ignore the DATABASE_URL leak"
+    // branch. Only the DATABASE_URL refusal message is acceptable here.
+    const env = {
+      ...BASE_ENV,
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://leaked:pw@prod:5432/commhub",
+      COMMHUB_DB: "/tmp/anet-435-order-drift-canary.db",
+    };
+    expect(() => resolveDatabaseTarget(env)).toThrow(
+      /REFUSING to honor inherited DATABASE_URL/
+    );
+    // Cross-check: it must NOT throw the SQLite guard message either
+    // (which would imply the DATABASE_URL guard was reordered after the
+    // SQLite one and this test is passing by wrong-message accident).
+    let thrown: Error | null = null;
+    try { resolveDatabaseTarget(env); } catch (e) { thrown = e as Error; }
+    expect(thrown).not.toBeNull();
+    expect(thrown!.message).not.toMatch(/REFUSING to open the default SQLite database/);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -221,21 +245,23 @@ describe("L2 subprocess proof — createAdapter() refuses in a real Bun runtime"
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test("NODE_ENV=test + fake DATABASE_URL → refusal, PgAdapter banner NEVER printed", () => {
+  // The `bun -e` script drives the call graph:
+  //   import → createAdapter → resolveDatabaseTarget →
+  //   assertSafeTestDatabaseEnv (or SQLite guard) → throw.
+  // The wrapping try/catch is required — bun -e's top-level throw
+  // semantics don't reliably surface as a non-zero exit code otherwise.
+  const CHILD_SCRIPT =
+    "const m = require('./server/src/db-adapter.ts'); " +
+    "try { m.createAdapter(); console.log('UNEXPECTED_NO_THROW'); process.exit(0); } " +
+    "catch (e) { console.error(e.message); process.exit(2); }";
+
+  test("NODE_ENV=test + fake DATABASE_URL → DATABASE_URL guard refusal, no banners, no seam trigger", () => {
     const FAKE_PROD = "postgres://fake-prod-user:pw@prod.example:5432/commhub";
 
-    // Note: we spawn `bun -e` (not `bun run`) so no package.json script
-    // hooks interpose; the call graph is import → createAdapter →
-    // resolveDatabaseTarget → assertSafeTestDatabaseEnv → throw.
-    const script =
-      "const m = require('./server/src/db-adapter.ts'); " +
-      "try { m.createAdapter(); console.log('UNEXPECTED_NO_THROW'); process.exit(0); } " +
-      "catch (e) { console.error(e.message); process.exit(2); }";
-
-    // NB: strip the outer runner's DATABASE_URL to prove the child sees
-    // exactly what we hand it. The child env is a new object, not a
-    // spread of process.env.
-    const child = spawnSync("bun", ["-e", script], {
+    // NB: env is a new object, not a spread of process.env — we strip
+    // the outer runner's DATABASE_URL so the child sees exactly what
+    // we hand it.
+    const child = spawnSync("bun", ["-e", CHILD_SCRIPT], {
       cwd: join(__dirname, "..", ".."),
       env: {
         PATH: process.env.PATH || "",
@@ -244,35 +270,57 @@ describe("L2 subprocess proof — createAdapter() refuses in a real Bun runtime"
         DATABASE_URL: FAKE_PROD,
         // COMMHUB_DB deliberately unset — proves the DATABASE_URL guard
         // fires ahead of the SQLite guard in this specific ordering
-        // (which is the whole point of #435).
+        // (the whole point of #435).
       },
       encoding: "utf8",
       timeout: 15_000,
     });
 
-    // (a) Exit code — guard should have thrown, script's catch block
-    // exits 2. Anything else means the guard didn't fire and the
-    // process either resolved a real DB or hit a different error path.
+    // Exit + refusal + banner-absence assertions.
     expect(child.status).toBe(2);
-
-    // (b) The refusal message must be present verbatim (the operator
-    // sees this in their terminal; changing it silently would break
-    // muscle memory + docs cross-refs).
     expect(child.stderr).toMatch(/REFUSING to honor inherited DATABASE_URL/);
-
-    // (c) The "database: PostgreSQL" banner is emitted by createAdapter()
-    // ONLY after `resolveDatabaseTarget` returns { kind: "postgres" }.
-    // Its absence in stderr+stdout is the seam-not-triggered proof —
-    // if the guard order regressed and PgAdapter was constructed, the
-    // banner would print, and this assertion would fire.
+    // The "database: PostgreSQL" banner runs only after
+    // resolveDatabaseTarget returns { kind: "postgres" }. Absence =
+    // constructor seam not triggered.
     expect(child.stdout + child.stderr).not.toContain("database: PostgreSQL");
-
-    // (d) Similarly, the SQLite banner must not appear either — no
-    // default SQLite open happened before the throw.
+    // No default-SQLite banner either — no path calc, no mkdir, no
+    // Database() open happened before the throw.
     expect(child.stdout + child.stderr).not.toMatch(/\[commhub\] database: [^P]/);
+    // Sentinel from the script's else branch must NOT appear.
+    expect(child.stdout).not.toContain("UNEXPECTED_NO_THROW");
+  });
 
-    // (e) Also assert we didn't accidentally get the "UNEXPECTED_NO_THROW"
-    // sentinel from the script's else branch.
+  // #435 acceptance verbatim:
+  //   "subprocess test with both DB variables unset still proves the
+  //    existing SQLite refusal"
+  test("NODE_ENV=test + BOTH DATABASE_URL and COMMHUB_DB unset → SQLite refusal (real subprocess)", () => {
+    const child = spawnSync("bun", ["-e", CHILD_SCRIPT], {
+      cwd: join(__dirname, "..", ".."),
+      env: {
+        PATH: process.env.PATH || "",
+        HOME: tmpDir,
+        NODE_ENV: "test",
+        // BOTH DB vars deliberately absent (no key = no inheritance
+        // either, since env is a fresh object).
+      },
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+
+    // Exit + refusal message + banner absence.
+    expect(child.status).toBe(2);
+    // Must be the SQLite guard message (the DATABASE_URL guard could
+    // not have fired here — DATABASE_URL wasn't set).
+    expect(child.stderr).toMatch(
+      /REFUSING to open the default SQLite database under NODE_ENV=test/,
+    );
+    // The DATABASE_URL guard's message must NOT be present — it would
+    // mean either a bug in the guard predicate or DATABASE_URL leaked
+    // into the child env from somewhere.
+    expect(child.stderr).not.toContain("REFUSING to honor inherited DATABASE_URL");
+    // No banners at all — nothing opened, nothing constructed.
+    expect(child.stdout + child.stderr).not.toContain("database: PostgreSQL");
+    expect(child.stdout + child.stderr).not.toMatch(/\[commhub\] database: [^P]/);
     expect(child.stdout).not.toContain("UNEXPECTED_NO_THROW");
   });
 });
@@ -281,12 +329,27 @@ describe("L2 subprocess proof — createAdapter() refuses in a real Bun runtime"
 //  L3 — syscall trace is 副指挥's independent Linux verification.
 //  This suite intentionally does NOT wrap the L2 subprocess in strace
 //  and claim "syscall proof PASS" — strace absence would downgrade to
-//  false confidence. The manual gate is:
+//  false confidence. The manual gate (run from repo root):
 //
-//    strace -ff -e trace=connect,openat \
-//      env NODE_ENV=test DATABASE_URL='postgres://fake:pw@prod:5432/commhub' \
-//        bun -e "require('./server/src/db-adapter.ts').createAdapter()" 2>&1 \
-//      | grep -E 'connect\([^)]*:5432|openat.*\.commhub/commhub\.db'
+//    strace -f -o /tmp/strace-435.log -e trace=connect,openat \
+//      env -u COMMHUB_DB NODE_ENV=test \
+//        DATABASE_URL='postgres://fake:pw@prod:5432/commhub' \
+//        bun -e "const m = require('./server/src/db-adapter.ts'); \
+//                try { m.createAdapter(); process.exit(0); } \
+//                catch(e) { console.error(e.message); process.exit(2); }"
 //
-//  Expected: zero matching lines. If any match appears, guard regressed.
+//    # (1) authoritative negative — ALL connect() during refusal
+//    #     path must be zero:
+//    grep -c 'connect(' /tmp/strace-435.log
+//
+//    # (2) diagnostic scope to PG port (sin_port field, not a naked
+//    #     :5432 substring — strace prints ports inside
+//    #     `sin_port=htons(5432)`):
+//    grep -Ec 'connect\([^)]*sin_port=htons\(5432\)' /tmp/strace-435.log
+//
+//    # (3) default SQLite path open — zero:
+//    grep -Ec 'openat\([^)]*\.commhub/commhub\.db' /tmp/strace-435.log
+//
+//  Expected: (1) 0, (2) 0, (3) 0. Naked `:5432` regex would
+//  false-negative on typical strace output — do not rely on it.
 // ═══════════════════════════════════════════════════════════════════════
