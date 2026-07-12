@@ -47,6 +47,7 @@ class FakeUpstream implements UpstreamTransport {
   written: Array<JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame> = [];
   private frameHandlers: Array<(raw: unknown) => void> = [];
   private closeHandlers: Array<() => void> = [];
+  closeCallCount = 0;
   async writeFrame(f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {
     this.written.push(f);
   }
@@ -58,9 +59,20 @@ class FakeUpstream implements UpstreamTransport {
     this.closeHandlers.push(h);
     return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
   }
+  async close(): Promise<void> {
+    this.closeCallCount++;
+    if (this.closeCallCount === 1) {
+      for (const h of [...this.closeHandlers]) {
+        try { h(); } catch { /* silent */ }
+      }
+    }
+  }
   emitFrame(raw: unknown): void { for (const h of this.frameHandlers) h(raw); }
   emitClose(): void { for (const h of this.closeHandlers) h(); }
 }
+
+const TEST_BACKEND_CAP = "lifecycle-test-backend-cap-32ch-x";
+const TEST_TUI_CAP = "lifecycle-test-tui-cap-abcdef-32c";
 
 function pathsFor(): { socketDir: string; backendSocketPath: string; tuiSocketPath: string } {
   const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-lifecycle-"));
@@ -115,6 +127,8 @@ async function makeLifecycle(overrides?: Partial<GatewayLifecycleOptions>): Prom
     upstreamTransport: upstream,
     initSnapshotSource,
     diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+      tuiCapability: TEST_TUI_CAP,
     ...(overrides ?? {}),
   };
   const lifecycle = new GatewayLifecycle(opts);
@@ -146,6 +160,8 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
       upstreamTransport: upstream,
       initSnapshotSource: { currentSnapshot: () => undefined },
       diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+      tuiCapability: TEST_TUI_CAP,
     });
     await expect(lifecycle.start()).rejects.toThrow(/baseline mismatch/);
     expect(lifecycle.currentState()).toBe("stopped");
@@ -177,6 +193,8 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
       upstreamTransport: upstream,
       initSnapshotSource: { currentSnapshot: () => ({ ok: true }) },
       diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+      tuiCapability: TEST_TUI_CAP,
     });
     await lifecycle.start();
     try {
@@ -390,9 +408,122 @@ describe("shutdown drain semantics", () => {
       upstreamTransport: upstream,
       initSnapshotSource: { currentSnapshot: () => undefined },
       diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+      tuiCapability: TEST_TUI_CAP,
     });
     await lifecycle.stop();
     expect(lifecycle.currentState()).toBe("stopped");
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Phase A-P0 lifecycle integration coverage (副指挥 9936fe24)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("P0#5 upstreamTransport.close is awaited on stop", () => {
+  test("stop() invokes upstream.close() exactly once", async () => {
+    const h = await makeLifecycle();
+    try {
+      await h.lifecycle.start();
+      expect(h.upstream.closeCallCount).toBe(0);
+      await h.lifecycle.stop();
+      expect(h.upstream.closeCallCount).toBe(1);
+    } finally { await h.cleanup(); }
+  });
+
+  test("stop() with pending sendInternal → Promise rejects (via upstream close fired by lifecycle)", async () => {
+    const h = await makeLifecycle();
+    try {
+      await h.lifecycle.start();
+      const p = h.lifecycle.sendInternal("thread/status", { threadId: "t" });
+      await new Promise((r) => setTimeout(r, 10));
+      await h.lifecycle.stop();
+      let reason = "";
+      try { await p; } catch (e) { reason = (e as Error).message; }
+      // Fake upstream.close() fires onClose → server.onUpstreamClose
+      // rejects internal pending with "upstream_closed". Belt-and-
+      // braces on server.stop uses "gateway_stopping".
+      expect(["upstream_closed", "gateway_stopping"]).toContain(reason);
+    } finally { await h.cleanup(); }
+  });
+});
+
+describe("P0#6 stop-during-preflight epoch fence", () => {
+  test("stop() while preflight is still awaiting → state=stopped, NO sockets bound, NO revive", async () => {
+    const paths = pathsFor();
+    const upstream = new FakeUpstream();
+    const { diagnostics } = collectDiagnostics();
+    let releasePreflight: () => void = () => {};
+    const preflight: PreflightRunner = {
+      async run() {
+        await new Promise<void>((r) => { releasePreflight = r; });
+      },
+    };
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      tuiSocketPath: paths.tuiSocketPath,
+      socketDir: paths.socketDir,
+      preflight,
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({ ok: true }) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+      tuiCapability: TEST_TUI_CAP,
+    });
+    // Kick off start; it blocks on preflight.
+    const startP = lifecycle.start();
+    // Give the async chain a tick to enter preflight.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(lifecycle.currentState()).toBe("starting");
+    // Request stop. This waits for the in-flight start to settle.
+    const stopP = lifecycle.stop();
+    // Now release preflight — the fence check MUST short-circuit.
+    releasePreflight();
+    let startErr = "";
+    try { await startP; } catch (e) { startErr = (e as Error).message; }
+    await stopP;
+    expect(lifecycle.currentState()).toBe("stopped");
+    expect(startErr).toContain("start aborted by concurrent stop");
+    // NO sockets on disk.
+    expect(fs.existsSync(paths.backendSocketPath)).toBe(false);
+    expect(fs.existsSync(paths.tuiSocketPath)).toBe(false);
+    // The dir wasn't created either (ensureOwnerOnlyDir runs after
+    // preflight? Actually before, in server.start. Since server
+    // wasn't reached, dir wasn't created).
+    expect(fs.existsSync(paths.socketDir)).toBe(false);
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("subsequent start after aborted start throws (no revival)", async () => {
+    const paths = pathsFor();
+    const upstream = new FakeUpstream();
+    const { diagnostics } = collectDiagnostics();
+    let releasePreflight: () => void = () => {};
+    const preflight: PreflightRunner = {
+      async run() { await new Promise<void>((r) => { releasePreflight = r; }); },
+    };
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      tuiSocketPath: paths.tuiSocketPath,
+      socketDir: paths.socketDir,
+      preflight,
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({ ok: true }) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+      tuiCapability: TEST_TUI_CAP,
+    });
+    const p1 = lifecycle.start();
+    await new Promise((r) => setTimeout(r, 20));
+    const p2 = lifecycle.stop();
+    releasePreflight();
+    try { await p1; } catch {}
+    await p2;
+    // Try to restart from stopped — must throw (state guard).
+    await expect(lifecycle.start()).rejects.toThrow(/cannot start from state 'stopped'/);
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
   });
 });

@@ -204,6 +204,13 @@ export interface GatewayLifecycleOptions {
   readonly authorizer?: TuiRequestAuthorizer;
   readonly approvalMode?: ApprovalMode;
   readonly limits?: Partial<GatewayServerLimits>;
+  /**
+   * Launcher-provisioned high-entropy capabilities for the two
+   * sockets. See `uds-server.ts` for the length + distinctness
+   * requirements; lifecycle simply forwards them.
+   */
+  readonly backendCapability: string;
+  readonly tuiCapability: string;
 }
 
 export type LifecycleState = "created" | "starting" | "running" | "stopping" | "stopped";
@@ -215,6 +222,18 @@ export class GatewayLifecycle {
   private humanOwner: HumanOwnerCoordinator | null = null;
   private mux: UpstreamRequestMux<InternalOrigin> | null = null;
   private reverseNs: ReverseRequestNamespace | null = null;
+  /**
+   * P0 fix (副指挥 9936fe24 item #6): stop-during-preflight fence.
+   * Every await in `start` re-checks this flag; if stop() was
+   * invoked mid-start, the fence short-circuits the remaining
+   * construction, cleans up whatever landed, and lands in
+   * `stopped`. Prevents "start races stop and revives with a live
+   * socket" behavior.
+   */
+  private stopRequested = false;
+  /** Promise that resolves once a concurrent start() settles.
+   *  `stop()` awaits it so ordering is deterministic. */
+  private startInProgress: Promise<void> | null = null;
 
   constructor(opts: GatewayLifecycleOptions) {
     this.opts = opts;
@@ -249,12 +268,26 @@ export class GatewayLifecycle {
       throw new Error(`cannot start from state '${this.state}'`);
     }
     this.state = "starting";
+    const promise = this.doStart();
+    this.startInProgress = promise;
+    try {
+      await promise;
+    } finally {
+      this.startInProgress = null;
+    }
+  }
+
+  private async doStart(): Promise<void> {
     try {
       await this.opts.preflight.run();
     } catch (e) {
-      // Preflight failed BEFORE any UDS work started.
       this.state = "stopped";
       throw e;
+    }
+    // P0 fence #1 — stop requested during preflight.
+    if (this.stopRequested) {
+      this.state = "stopped";
+      throw new Error("start aborted by concurrent stop (preflight)");
     }
 
     this.mux = new UpstreamRequestMux<InternalOrigin>();
@@ -276,20 +309,33 @@ export class GatewayLifecycle {
       tuiSocketPath: this.opts.tuiSocketPath,
       socketDir: this.opts.socketDir,
       mux: this.mux,
-      reverseNs: this.reverseNs,
+      // P0 fix (副指挥 9936fe24 item #3): GatewayServer no longer
+      // takes reverseNs directly — reverse-request routing goes
+      // through the coordinator so approvalMode is enforced.
+      humanOwner: this.humanOwner,
       upstreamTransport: this.opts.upstreamTransport,
       initProvider,
       diagnostics,
       authorizer,
       backend: this.opts.backend,
+      backendCapability: this.opts.backendCapability,
+      tuiCapability: this.opts.tuiCapability,
       limits: this.opts.limits,
     });
+
+    // P0 fence #2 — stop requested before we bind sockets.
+    if (this.stopRequested) {
+      this.state = "stopped";
+      this.server = null;
+      this.humanOwner = null;
+      this.mux = null;
+      this.reverseNs = null;
+      throw new Error("start aborted by concurrent stop (pre-listen)");
+    }
 
     try {
       await this.server.start();
     } catch (e) {
-      // Server.start rolls back its own socket + dir cleanup. Reset
-      // to stopped so a caller can retry a fresh construction.
       this.state = "stopped";
       this.server = null;
       this.humanOwner = null;
@@ -297,6 +343,19 @@ export class GatewayLifecycle {
       this.reverseNs = null;
       throw e;
     }
+
+    // P0 fence #3 — stop requested during server.start (rare — the
+    // await landed post-listen). Immediately tear down.
+    if (this.stopRequested) {
+      try { await this.server.stop(); } catch { /* silent */ }
+      this.state = "stopped";
+      this.server = null;
+      this.humanOwner = null;
+      this.mux = null;
+      this.reverseNs = null;
+      throw new Error("start aborted by concurrent stop (post-listen)");
+    }
+
     this.state = "running";
   }
 
@@ -318,15 +377,27 @@ export class GatewayLifecycle {
    * If already stopped / not started, `stop()` is a no-op.
    */
   async stop(): Promise<void> {
+    this.stopRequested = true;
+    // Wait for any in-flight start() so ordering is deterministic —
+    // the fences in doStart() will land the lifecycle in `stopped`
+    // if start hasn't finished listening yet. If start already
+    // finished, we proceed to normal shutdown below.
+    if (this.startInProgress !== null) {
+      try { await this.startInProgress; } catch { /* start rejected — already stopped */ }
+    }
     if (this.state === "stopped" || this.state === "created") {
       this.state = "stopped";
       return;
     }
     this.state = "stopping";
     if (this.server !== null) {
-      await this.server.stop();
+      try { await this.server.stop(); } catch { /* server.stop drain best-effort */ }
       this.server = null;
     }
+    // P0 fix (副指挥 9936fe24 item #5): lifecycle owns awaiting
+    // upstream transport close so B's client tears down before we
+    // consider shutdown complete.
+    try { await this.opts.upstreamTransport.close(); } catch { /* silent */ }
     // Belt-and-braces: even if the server didn't drain (edge case
     // where upstream close never fired), we do so here so no
     // internal origins are left dangling.

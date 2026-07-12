@@ -27,13 +27,12 @@
 import * as net from "node:net";
 import * as fs from "node:fs";
 import { Buffer } from "node:buffer";
+import * as crypto from "node:crypto";
 import {
   classifyMessage,
   dispatchAgentRequest,
   dispatchTuiRequest,
-  handleTuiResponseFrame,
   UpstreamRequestMux,
-  ReverseRequestNamespace,
   type ProtocolBackend,
   type ProtocolDiagnostics,
   type TuiInitializeProvider,
@@ -47,6 +46,7 @@ import {
   GATEWAY_ERROR_DATA_CODE,
   GatewayErrorCode,
 } from "./contract";
+import { HumanOwnerCoordinator } from "./human-owner";
 
 // ────────────────────────────────────────────────────────────────────────
 // Limits — frame + buffer + connection ceilings
@@ -72,12 +72,30 @@ export const DEFAULT_MAX_FRAME_BYTES = 200 * 1024;
 export const DEFAULT_MAX_BUFFERED_BYTES = 512 * 1024;
 
 /**
- * Default concurrent-connection ceiling per socket. In practice one
- * client per socket (the Agent runtime for backend, the native Codex
- * TUI for TUI). We allow 8 to leave headroom for a quick reconnect
- * overlap, but no more.
+ * Hard cap on concurrent connections PER role. Phase 1 is single-
+ * owner: one Agent client + one TUI owner. A second connection on
+ * the same role is refused at accept time — the incumbent stays
+ * untouched (previously a second TUI could hijack findTui and drain
+ * the incumbent's pending on disconnect).
  */
-export const DEFAULT_MAX_CONNECTIONS = 8;
+export const DEFAULT_MAX_CONNECTIONS_PER_ROLE = 1;
+
+/**
+ * Default handshake timeout. A newly-accepted connection has this
+ * long to send its first frame (`gateway.hello` with the launcher-
+ * provisioned capability) before the connection is destroyed with a
+ * structured `handshake_required` reject. 3s is comfortably long for
+ * any local launcher hand-off and short enough to reject slow-loris.
+ */
+export const DEFAULT_HELLO_TIMEOUT_MS = 3_000;
+
+/**
+ * The method name for the capability handshake frame. Chosen so that
+ * a stray client that skips the handshake and jumps straight into
+ * JSON-RPC will see the frame classified against `AGENT_ALLOWED_
+ * METHODS` and land on `UnknownMethod` — not silently accepted.
+ */
+export const GATEWAY_HELLO_METHOD = "gateway.hello";
 
 // ────────────────────────────────────────────────────────────────────────
 // Injected upstream transport — B provides the real one
@@ -100,6 +118,22 @@ export interface UpstreamTransport {
   onFrame(handler: (raw: unknown) => void): () => void;
   /** Register a close handler; returns an unsubscribe function. */
   onClose(handler: () => void): () => void;
+  /**
+   * Force-close the upstream transport. B owns the wire connection
+   * (Codex app-server WS/UDS) and is responsible for terminating its
+   * end. Called by `GatewayServer.stop()` / `GatewayLifecycle.stop()`
+   * so shutdown is deterministic. MUST be idempotent — repeated
+   * calls after the first resolve without error. After `close()`
+   * resolves, any subsequent `writeFrame` is expected to reject.
+   *
+   * The transport SHOULD fire its `onClose` subscribers as part of
+   * close (server internals rely on that hook to reject internal
+   * pending); a transport that omits the notification will still
+   * see server-side pending drained on `stop()` via belt-and-braces
+   * settlement, but production transports should propagate the
+   * signal properly.
+   */
+  close(): Promise<void>;
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -119,6 +153,19 @@ export interface InternalOrigin {
   reject(err: Error): void;
 }
 
+/**
+ * Internal-pending bookkeeping entry. GatewayServer keeps a Map of
+ * these keyed on upstream id so `stop()` and `onUpstreamClose()` can
+ * reject any un-settled sendInternal Promises with a stable reason
+ * BEFORE calling `mux.drainAll()`. The `settled` flag makes the
+ * response-vs-close race terminate exactly once.
+ */
+interface InternalPendingEntry {
+  readonly upstreamId: number;
+  readonly origin: InternalOrigin;
+  settled: boolean;
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // GatewayServerOptions
 // ────────────────────────────────────────────────────────────────────────
@@ -126,7 +173,12 @@ export interface InternalOrigin {
 export interface GatewayServerLimits {
   readonly maxFrameBytes: number;
   readonly maxBufferedBytes: number;
-  readonly maxConnections: number;
+  /** Hard cap on concurrent connections PER role (backend and TUI
+   *  each). Default 1 — Phase 1 is single-owner. */
+  readonly maxConnectionsPerRole: number;
+  /** Handshake timeout in ms — a new connection must present its
+   *  capability within this window or be destroyed. */
+  readonly helloTimeoutMs: number;
 }
 
 export interface GatewayServerOptions {
@@ -142,14 +194,37 @@ export interface GatewayServerOptions {
   readonly socketDir: string;
   /** Frozen mux instance (single). */
   readonly mux: UpstreamRequestMux<InternalOrigin>;
-  /** Frozen reverse namespace instance (single). */
-  readonly reverseNs: ReverseRequestNamespace;
+  /**
+   * SOLE holder of the reverse-request namespace + TUI attach/detach
+   * lifecycle. GatewayServer no longer touches ReverseRequestNamespace
+   * directly — all reverse-request routing, TUI attach on successful
+   * hello, and TUI detach on close now go through this coordinator.
+   * This is what makes `approvalMode="never"` actually enforced on
+   * the wire (previously the server bypassed it and forwarded
+   * approvals to the TUI regardless).
+   */
+  readonly humanOwner: HumanOwnerCoordinator;
   /** Injected upstream Codex transport. B owns; tests fake. */
   readonly upstreamTransport: UpstreamTransport;
   readonly initProvider: TuiInitializeProvider;
   readonly diagnostics: ProtocolDiagnostics;
   readonly authorizer: TuiRequestAuthorizer;
   readonly backend: ProtocolBackend;
+  /**
+   * Launcher-provisioned high-entropy capability for the BACKEND
+   * (Agent) socket. Any client connecting to the backend UDS MUST
+   * present this exact string in a `gateway.hello` first frame; a
+   * missing / wrong / cross-role capability is refused with a
+   * structured error and the connection is destroyed. Constant-time
+   * compare via SHA-256 digest so the reject path leaks no timing
+   * information. NEVER echo the received value into diagnostics or
+   * onto the wire.
+   */
+  readonly backendCapability: string;
+  /** Same as `backendCapability` for the TUI socket. Distinct high-
+   *  entropy string so a compromised Agent capability cannot be
+   *  presented on the TUI socket to impersonate a human owner. */
+  readonly tuiCapability: string;
   readonly limits?: Partial<GatewayServerLimits>;
 }
 
@@ -366,32 +441,73 @@ function bindOwnerOnlySocket(server: net.Server, socketPath: string): Promise<vo
 
 type SocketRole = "backend" | "tui";
 
+type ConnectionPhase = "awaiting_hello" | "authenticated";
+
 interface ConnectionState {
   readonly role: SocketRole;
   readonly socket: net.Socket;
   readonly framer: LineFramer;
+  phase: ConnectionPhase;
+  /** Set on accept, cleared once hello succeeds or connection closes. */
+  helloTimer: NodeJS.Timeout | null;
   closed: boolean;
+}
+
+/** Precomputed SHA-256 digest of the expected capability, so constant-
+ *  time compare doesn't operate on the plaintext secret. Length-normalised
+ *  32-byte buffer either way; timingSafeEqual works on equal-length
+ *  buffers by definition. */
+function digestCapability(raw: string): Buffer {
+  return crypto.createHash("sha256").update(raw, "utf8").digest();
 }
 
 export class GatewayServer {
   private readonly opts: GatewayServerOptions;
   private readonly limits: GatewayServerLimits;
+  private readonly backendCapabilityDigest: Buffer;
+  private readonly tuiCapabilityDigest: Buffer;
 
   private backendServer: net.Server | null = null;
   private tuiServer: net.Server | null = null;
 
   private readonly connections = new Set<ConnectionState>();
+  private readonly connectionsByRole = new Map<SocketRole, number>();
   private readonly createdPaths: CreatedPath[] = [];
   private upstreamUnsubs: Array<() => void> = [];
   private running = false;
+  private shuttingDown = false;
+
+  /**
+   * Live sendInternal Promises keyed on upstream id. Used to reject
+   * exactly once on stop / upstream-close / write-fail, then release.
+   * A response-arrival that races the close terminates the entry
+   * first via the `settled` flag; the drain pass observes `settled`
+   * and skips.
+   */
+  private readonly internalPending = new Map<number, InternalPendingEntry>();
 
   constructor(opts: GatewayServerOptions) {
     this.opts = opts;
     this.limits = {
       maxFrameBytes: opts.limits?.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES,
       maxBufferedBytes: opts.limits?.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES,
-      maxConnections: opts.limits?.maxConnections ?? DEFAULT_MAX_CONNECTIONS,
+      maxConnectionsPerRole: opts.limits?.maxConnectionsPerRole ?? DEFAULT_MAX_CONNECTIONS_PER_ROLE,
+      helloTimeoutMs: opts.limits?.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS,
     };
+    // Refuse empty / low-entropy capabilities at construction time —
+    // an unset launcher secret is a fail-closed situation and we
+    // shouldn't even reach start().
+    if (typeof opts.backendCapability !== "string" || opts.backendCapability.length < 32) {
+      throw new Error("backendCapability must be a non-empty string of at least 32 chars");
+    }
+    if (typeof opts.tuiCapability !== "string" || opts.tuiCapability.length < 32) {
+      throw new Error("tuiCapability must be a non-empty string of at least 32 chars");
+    }
+    if (opts.backendCapability === opts.tuiCapability) {
+      throw new Error("backendCapability and tuiCapability MUST be distinct");
+    }
+    this.backendCapabilityDigest = digestCapability(opts.backendCapability);
+    this.tuiCapabilityDigest = digestCapability(opts.tuiCapability);
   }
 
   // ─────────── Lifecycle ───────────
@@ -411,15 +527,18 @@ export class GatewayServer {
       this.createdPaths.push({ path: this.opts.backendSocketPath, kind: "socket" });
       await bindOwnerOnlySocket(this.tuiServer, this.opts.tuiSocketPath);
       this.createdPaths.push({ path: this.opts.tuiSocketPath, kind: "socket" });
+      // P0 fix (副指挥 9936fe24 item #7): upstream subscribe is
+      // inside the try. If the transport throws during subscribe
+      // (bad handler, weird state), rollback closes the already-
+      // bound UDS servers instead of leaving them accepting.
+      this.upstreamUnsubs.push(this.opts.upstreamTransport.onFrame((raw) => this.onUpstreamFrame(raw)));
+      this.upstreamUnsubs.push(this.opts.upstreamTransport.onClose(() => this.onUpstreamClose()));
     } catch (e) {
-      // Roll back: close any listening servers, unlink anything we made.
+      // Roll back: close any listening servers, unlink anything we
+      // made, revoke any subscriptions that landed before the throw.
       await this.rollbackStart();
       throw e;
     }
-
-    // Subscribe to upstream Codex.
-    this.upstreamUnsubs.push(this.opts.upstreamTransport.onFrame((raw) => this.onUpstreamFrame(raw)));
-    this.upstreamUnsubs.push(this.opts.upstreamTransport.onClose(() => this.onUpstreamClose()));
 
     this.running = true;
   }
@@ -427,34 +546,83 @@ export class GatewayServer {
   async stop(): Promise<void> {
     if (!this.running) return;
     this.running = false;
+    this.shuttingDown = true;
 
     for (const un of this.upstreamUnsubs) {
       try { un(); } catch { /* no-op */ }
     }
     this.upstreamUnsubs = [];
 
+    // P0 fix (副指挥 9936fe24 item #4): reject un-settled internal
+    // sendInternal Promises exactly once with a stable reason BEFORE
+    // draining the mux. drainAll would otherwise erase the entries
+    // without ever notifying callers.
+    this.rejectAllInternalPending("gateway_stopping");
+
     for (const c of this.connections) {
       if (!c.closed) {
         c.closed = true;
+        if (c.helloTimer !== null) { clearTimeout(c.helloTimer); }
         try { c.socket.destroy(); } catch { /* no-op */ }
       }
     }
     this.connections.clear();
+    this.connectionsByRole.clear();
 
     await this.closeServer(this.backendServer);
     this.backendServer = null;
     await this.closeServer(this.tuiServer);
     this.tuiServer = null;
+
+    // Belt-and-braces — any origin still lingering (should be none
+    // after rejectAllInternalPending) is cleared here so the mux is
+    // fresh for a subsequent instance.
+    this.opts.mux.drainAll();
+    // Detach delegates the reverseNs drain via the coordinator, so
+    // A layer stays the sole caller of that surface.
+    this.opts.humanOwner.detachTui();
 
     this.cleanupCreatedPaths();
   }
 
   private async rollbackStart(): Promise<void> {
+    // Revoke any upstream subscriptions that made it in before the
+    // throw. If none are present the loop is a no-op.
+    for (const un of this.upstreamUnsubs) {
+      try { un(); } catch { /* no-op */ }
+    }
+    this.upstreamUnsubs = [];
     await this.closeServer(this.backendServer);
     this.backendServer = null;
     await this.closeServer(this.tuiServer);
     this.tuiServer = null;
     this.cleanupCreatedPaths();
+  }
+
+  /**
+   * P0 fix (副指挥 9936fe24 item #4). Iterate the pending map,
+   * reject each Promise exactly once (guarded by `settled`), remove
+   * it from the map. The mux is drained by the caller after.
+   */
+  private rejectAllInternalPending(reason: string): void {
+    for (const [, entry] of this.internalPending) {
+      if (entry.settled) continue;
+      entry.settled = true;
+      try {
+        entry.origin.reject(new Error(reason));
+      } catch (e: unknown) {
+        // Even the caller's reject shouldn't throw, but if it does
+        // we absorb it — one bad Promise resolver can't cascade.
+        try {
+          this.opts.diagnostics.reportInternalError({
+            correlationId: this.opts.diagnostics.newCorrelationId(),
+            operation: "reject_internal_pending",
+            error: e,
+          });
+        } catch { /* silent */ }
+      }
+    }
+    this.internalPending.clear();
   }
 
   private closeServer(s: net.Server | null): Promise<void> {
@@ -483,31 +651,66 @@ export class GatewayServer {
   // ─────────── Connection accept ───────────
 
   private acceptConnection(role: SocketRole, socket: net.Socket): void {
-    if (this.connections.size >= this.limits.maxConnections) {
-      // Cap exceeded — destroy immediately.
+    // P0 fix (副指挥 9936fe24 item #2): per-role hard cap enforced
+    // BEFORE we allocate any state. Phase 1 default is one owner per
+    // role — a second connection is destroyed without touching the
+    // incumbent. Previously the aggregate cap of 8 let a second TUI
+    // land, race findTui, and drain the incumbent's proxied pending
+    // on disconnect.
+    const currentInRole = this.connectionsByRole.get(role) ?? 0;
+    if (currentInRole >= this.limits.maxConnectionsPerRole || this.shuttingDown) {
       socket.destroy();
-      this.opts.diagnostics.reportInternalError({
-        correlationId: this.opts.diagnostics.newCorrelationId(),
-        operation: "accept_connection",
-        error: new Error(`max_connections=${this.limits.maxConnections} exceeded on role=${role}`),
-      });
+      try {
+        this.opts.diagnostics.reportInternalError({
+          correlationId: this.opts.diagnostics.newCorrelationId(),
+          operation: "accept_connection",
+          error: new Error(
+            this.shuttingDown
+              ? `refused new connection on role=${role}: server shutting down`
+              : `role=${role} max_connections_per_role=${this.limits.maxConnectionsPerRole} exceeded`,
+          ),
+        });
+      } catch { /* silent */ }
       return;
     }
 
     const framer = new LineFramer(this.limits.maxFrameBytes, this.limits.maxBufferedBytes);
-    const state: ConnectionState = { role, socket, framer, closed: false };
+    const state: ConnectionState = {
+      role, socket, framer,
+      phase: "awaiting_hello",
+      helloTimer: null,
+      closed: false,
+    };
+
+    // P0 fix (副指挥 9936fe24 item #1): before we register a data
+    // handler that dispatches JSON-RPC, arm a hello timeout. A peer
+    // that never sends the capability frame is destroyed with a
+    // structured `handshake_required` reject.
+    state.helloTimer = setTimeout(() => {
+      if (state.closed || state.phase !== "awaiting_hello") return;
+      this.writeStructuredError(state, "handshake_required", {
+        limitMs: this.limits.helloTimeoutMs,
+      });
+      this.closeConnection(state);
+    }, this.limits.helloTimeoutMs);
+    // Never keep the process alive just for the handshake timer.
+    state.helloTimer.unref?.();
+
     this.connections.add(state);
+    this.connectionsByRole.set(role, currentInRole + 1);
 
     socket.on("data", (chunk: Buffer) => this.onData(state, chunk));
     socket.on("close", () => this.closeConnection(state));
     socket.on("error", () => {
       // Errors during the connection life are terminal; close.
       // The raw error message is NEVER surfaced — sent to diagnostics.
-      this.opts.diagnostics.reportInternalError({
-        correlationId: this.opts.diagnostics.newCorrelationId(),
-        operation: `socket_error_${role}`,
-        error: new Error("socket_error"),
-      });
+      try {
+        this.opts.diagnostics.reportInternalError({
+          correlationId: this.opts.diagnostics.newCorrelationId(),
+          operation: `socket_error_${role}`,
+          error: new Error("socket_error"),
+        });
+      } catch { /* silent */ }
       this.closeConnection(state);
     });
   }
@@ -516,14 +719,23 @@ export class GatewayServer {
     if (state.closed) return;
     state.closed = true;
     this.connections.delete(state);
+    const cur = this.connectionsByRole.get(state.role) ?? 0;
+    this.connectionsByRole.set(state.role, Math.max(0, cur - 1));
+    if (state.helloTimer !== null) {
+      clearTimeout(state.helloTimer);
+      state.helloTimer = null;
+    }
     try { state.socket.destroy(); } catch { /* no-op */ }
 
-    // TUI disconnect ≠ upstream disconnect (Δ11). Drain only proxied
-    // TUI origins and the reverse namespace; internal scheduler
-    // Promises stay alive.
-    if (state.role === "tui") {
-      this.opts.mux.drainProxiedTui();
-      this.opts.reverseNs.drainAll();
+    // P0 fix (副指挥 9936fe24 item #3): TUI drain goes THROUGH the
+    // coordinator, not the raw reverse namespace. Coordinator owns
+    // reverseNs + does drainProxiedTui + drainAll on reverseNs
+    // atomically. Only fire on a connection that had actually
+    // authenticated as TUI — otherwise a spurious handshake failure
+    // could detach an unrelated incumbent (which shouldn't be
+    // possible under per-role cap of 1, but belt-and-braces).
+    if (state.role === "tui" && state.phase === "authenticated") {
+      this.opts.humanOwner.detachTui();
     }
   }
 
@@ -539,8 +751,83 @@ export class GatewayServer {
         return;
       }
       // frame
+      if (state.phase === "awaiting_hello") {
+        this.handleHelloFrame(state, ev.raw);
+        continue;
+      }
       void this.onFrame(state, ev.raw);
     }
+  }
+
+  /**
+   * P0 fix (副指挥 9936fe24 item #1): the very first frame on a new
+   * connection must be a `gateway.hello` bearing the launcher-
+   * provisioned capability for the connection's role. Anything else
+   * — wrong shape, missing capability, wrong-role capability, second
+   * hello — is a structured refusal + disconnect.
+   *
+   * `crypto.timingSafeEqual` operates on equal-length buffers (SHA-
+   * 256 digests are always 32 bytes) so the reject path leaks no
+   * timing information about the received value.
+   *
+   * The received capability is NEVER echoed to diagnostics or the
+   * wire; only stable reason strings + connection role.
+   */
+  private handleHelloFrame(state: ConnectionState, raw: unknown): void {
+    // Shape guard: must be a JSON object with `method === "gateway.hello"`
+    // and `params.capability: string`.
+    let capability: string | null = null;
+    if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+      const obj = raw as Record<string, unknown>;
+      if (obj.method === GATEWAY_HELLO_METHOD && typeof obj.params === "object" && obj.params !== null) {
+        const p = obj.params as Record<string, unknown>;
+        if (typeof p.capability === "string") {
+          capability = p.capability;
+        }
+      }
+    }
+    if (capability === null) {
+      this.writeStructuredError(state, "handshake_required", { role: state.role });
+      this.closeConnection(state);
+      return;
+    }
+    // Compare against the expected digest for THIS role. Wrong-role
+    // capability (backend cap presented on TUI socket, or vice
+    // versa) lands here too.
+    const receivedDigest = digestCapability(capability);
+    const expectedDigest = state.role === "backend"
+      ? this.backendCapabilityDigest
+      : this.tuiCapabilityDigest;
+    // timingSafeEqual on 32-byte SHA-256 digests is constant-time.
+    let ok = false;
+    try {
+      ok = crypto.timingSafeEqual(receivedDigest, expectedDigest);
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      this.writeStructuredError(state, "capability_invalid", { role: state.role });
+      this.closeConnection(state);
+      return;
+    }
+
+    // Success. Clear the hello timer, mark authenticated, and if
+    // this is a TUI socket, attach the human owner. The Agent
+    // (backend) side has no attach semantics — the backend
+    // connection is a stateless RPC channel from the coordinator's
+    // point of view.
+    if (state.helloTimer !== null) {
+      clearTimeout(state.helloTimer);
+      state.helloTimer = null;
+    }
+    state.phase = "authenticated";
+    if (state.role === "tui") {
+      this.opts.humanOwner.attachTui();
+    }
+    // No wire reply — hello is a one-shot handshake, silence-means-
+    // accepted. A reply would let a probe distinguish "accepted"
+    // from "closed with reject frame" via wire semantics; keeping it
+    // silent narrows the differential.
   }
 
   private writeStructuredError(state: ConnectionState, reason: string, data: Record<string, unknown>): void {
@@ -691,7 +978,9 @@ export class GatewayServer {
   }
 
   private dispatchTuiResponseFrame(state: ConnectionState, frame: JsonRpcResponseFrame): void {
-    const outcome = handleTuiResponseFrame(frame, this.opts.reverseNs);
+    // P0 fix (副指挥 9936fe24 item #3): delegate to coordinator so
+    // the reverse namespace is only consumed through the sole owner.
+    const outcome = this.opts.humanOwner.handleTuiResponseFrame(frame);
     if (outcome.kind === "reject") {
       this.writeFrame(state, {
         jsonrpc: "2.0",
@@ -706,12 +995,14 @@ export class GatewayServer {
     }
     // forward_reverse_response: send it upstream, don't ack the TUI.
     void this.opts.upstreamTransport.writeFrame(outcome.frame).catch((e: unknown) => {
-      const correlationId = this.opts.diagnostics.newCorrelationId();
-      this.opts.diagnostics.reportInternalError({
-        correlationId,
-        operation: "forward_reverse_response",
-        error: e,
-      });
+      try {
+        const correlationId = this.opts.diagnostics.newCorrelationId();
+        this.opts.diagnostics.reportInternalError({
+          correlationId,
+          operation: "forward_reverse_response",
+          error: e,
+        });
+      } catch { /* silent */ }
     });
   }
 
@@ -745,6 +1036,17 @@ export class GatewayServer {
           } as JsonRpcResponseFrame);
         } else {
           // Internal scheduler — resolve or reject the Promise.
+          // P0 fix (副指挥 9936fe24 item #4): the `settled` flag
+          // guarantees a response arriving concurrently with a
+          // stop / upstream-close only terminates the Promise once.
+          const upstreamNumericId = typeof cls.frame.id === "number" ? cls.frame.id : -1;
+          const entry = upstreamNumericId >= 0 ? this.internalPending.get(upstreamNumericId) : undefined;
+          if (entry === undefined || entry.settled) {
+            // Already settled by close-path; drop.
+            return;
+          }
+          entry.settled = true;
+          this.internalPending.delete(upstreamNumericId);
           if ("error" in cls.frame) {
             origin.origin.reject(new Error(cls.frame.error.message));
           } else {
@@ -754,49 +1056,45 @@ export class GatewayServer {
         return;
       }
       case "request": {
-        // Reverse request (Codex → gateway → TUI). Allocate a TUI-side
-        // id via the reverse namespace and forward to the TUI socket.
-        const alloc = this.opts.reverseNs.allocateTuiIdForCodexReverseRequest(cls.frame.id);
-        if ("collision" in alloc) {
-          // Codex sent the same reverse id twice while first was in
-          // flight. Send an error upstream so it stops waiting.
-          void this.opts.upstreamTransport.writeFrame({
-            jsonrpc: "2.0",
-            id: cls.frame.id,
-            error: {
-              code: GatewayErrorCode.InvalidArg,
-              message: "reverse-request id collision",
-              data: {
-                code: GATEWAY_ERROR_DATA_CODE[GatewayErrorCode.InvalidArg],
-                reason: "reverse_id_collision",
-              },
-            },
-          } as JsonRpcResponseFrame).catch(() => { /* diagnostics only */ });
+        // P0 fix (副指挥 9936fe24 item #3): all reverse-request
+        // decisions flow through the coordinator. Phase 1
+        // (approvalMode="never") therefore ALWAYS produces a
+        // reject_upstream frame with reason=approval_mode_never —
+        // even if a TUI happens to be attached. Previously we
+        // bypassed the coordinator and passed the request straight
+        // to the TUI regardless of approval mode.
+        const decision = this.opts.humanOwner.handleUpstreamReverseRequest(cls.frame);
+        if (decision.kind === "reject_upstream") {
+          void this.opts.upstreamTransport.writeFrame(decision.upstreamError).catch((e: unknown) => {
+            try {
+              this.opts.diagnostics.reportInternalError({
+                correlationId: this.opts.diagnostics.newCorrelationId(),
+                operation: "upstream_reject_write",
+                error: e,
+              });
+            } catch { /* silent */ }
+          });
           return;
         }
+        // forward_tui — coordinator already allocated the TUI-side
+        // id via its own reverseNs; we just write the frame.
         const tui = this.findTui();
         if (tui === null) {
-          // No TUI attached — fail closed upstream.
-          this.opts.reverseNs.consumeCodexReverseByTuiId(alloc.tuiId);
-          void this.opts.upstreamTransport.writeFrame({
-            jsonrpc: "2.0",
-            id: cls.frame.id,
-            error: {
-              code: GatewayErrorCode.NoOwner,
-              message: "no human owner attached",
-              data: {
-                code: GATEWAY_ERROR_DATA_CODE[GatewayErrorCode.NoOwner],
-              },
-            },
-          } as JsonRpcResponseFrame).catch(() => { /* diagnostics only */ });
+          // Shouldn't happen: coordinator only produces forward_tui
+          // when TUI is attached. Belt-and-braces: log + drop; the
+          // reverseNs entry will be leaked until drainAll, which is
+          // acceptable because attachTui/detachTui are the only
+          // callers here.
+          try {
+            this.opts.diagnostics.reportInternalError({
+              correlationId: this.opts.diagnostics.newCorrelationId(),
+              operation: "forward_tui_no_incumbent",
+              error: new Error("coordinator produced forward_tui but no TUI connection is authenticated"),
+            });
+          } catch { /* silent */ }
           return;
         }
-        this.writeFrame(tui, {
-          jsonrpc: "2.0",
-          id: alloc.tuiId,
-          method: cls.frame.method,
-          ...(cls.frame.params !== undefined ? { params: cls.frame.params } : {}),
-        } as JsonRpcRequestFrame);
+        this.writeFrame(tui, decision.tuiFrame);
         return;
       }
       case "notification": {
@@ -817,16 +1115,15 @@ export class GatewayServer {
   }
 
   private onUpstreamClose(): void {
-    // Upstream tore down. Full drain (both proxied + internal). The
-    // internal-scheduler Promises get rejected via the InternalOrigin
-    // resolver we stashed at allocation time.
-    for (const _ of Array.from({ length: this.opts.mux.pendingCountByKind("internal") })) {
-      // no-op iteration marker; the mux does not enumerate origins,
-      // and rejecting them is done by lifecycle.ts via a separate
-      // channel it owns. Segment C wires that.
-    }
+    // P0 fix (副指挥 9936fe24 item #4): reject un-settled internal
+    // sendInternal Promises exactly once with a stable reason BEFORE
+    // draining the mux. drainAll would erase the entries without
+    // ever notifying callers.
+    this.rejectAllInternalPending("upstream_closed");
     this.opts.mux.drainAll();
-    this.opts.reverseNs.drainAll();
+    // Reverse namespace is owned by the coordinator; detachTui does
+    // the drain there too.
+    this.opts.humanOwner.detachTui();
   }
 
   private findTui(): ConnectionState | null {
@@ -849,6 +1146,10 @@ export class GatewayServer {
    */
   sendInternal<T = unknown>(method: string, params: unknown | undefined, label = method): Promise<T> {
     return new Promise<T>((resolve, reject) => {
+      if (this.shuttingDown || !this.running) {
+        reject(new Error("gateway_stopping"));
+        return;
+      }
       const origin: InternalOrigin = {
         kind: "internal",
         label,
@@ -856,6 +1157,15 @@ export class GatewayServer {
         reject,
       };
       const alloc = this.opts.mux.allocateForInternalScheduler(origin);
+      // P0 fix (副指挥 9936fe24 item #4): record the pending entry so
+      // stop() / upstream-close can reject once. `settled` guards the
+      // response-vs-close race.
+      const entry: InternalPendingEntry = {
+        upstreamId: alloc.upstreamId,
+        origin,
+        settled: false,
+      };
+      this.internalPending.set(alloc.upstreamId, entry);
       const frame: JsonRpcRequestFrame = {
         jsonrpc: "2.0",
         id: alloc.upstreamId,
@@ -863,11 +1173,14 @@ export class GatewayServer {
         ...(params !== undefined ? { params } : {}),
       };
       this.opts.upstreamTransport.writeFrame(frame).catch((e: unknown) => {
-        // Release the pending slot; the mux only auto-clears on
-        // consume. If we never sent the frame, the response will
-        // never arrive.
+        // Write-fail: release the mux slot AND reject exactly once
+        // through the settled-flag guard.
         this.opts.mux.consumeUpstreamResponse(alloc.upstreamId);
-        reject(e instanceof Error ? e : new Error(String(e)));
+        if (!entry.settled) {
+          entry.settled = true;
+          this.internalPending.delete(alloc.upstreamId);
+          reject(e instanceof Error ? e : new Error(String(e)));
+        }
       });
     });
   }
