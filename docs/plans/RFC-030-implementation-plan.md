@@ -196,7 +196,7 @@ fixture with the same name—proves every row.
 | Database-backend invariants | **FAIL / lead decision required** | SQLite trigger/transaction tests are green, but `PgAdapter.transaction()` uses a fresh connection per statement and the SQLite write-once trigger is invalid on PostgreSQL and silently skipped. Either implement equivalent PostgreSQL atomicity/constraints or fail the RFC runtime closed on that backend |
 | Candidate aggregate test delta | **FAIL** | Candidate is `538/12/1638` versus baseline `515/8/1518`. RFC-030 must remove its four added failures and prove every new principal/auth assertion runs in aggregate; exit requires candidate failures `<= 8` |
 | Historical server test isolation | **Tracked separately / non-blocking after delta clears** | Baseline's eight module-singleton server/DB/port failures are owned by 通信测试马 in [#434](https://github.com/sleep2agi/agent-network/issues/434) |
-| Test production-DB isolation | **Partial / P0 [#435](https://github.com/sleep2agi/agent-network/issues/435) open** | SQLite naked-test guard was syscall-verified before any `~/.commhub` open. `DATABASE_URL` is evaluated before that guard; tests must reject it before `PgAdapter` construction/network activity. Owner: 通信测试马; this P0 precedes historical #434 work and §8 review |
+| Test production-DB isolation | **Coordinator PASS / lead+merge pending** | [#435](https://github.com/sleep2agi/agent-network/issues/435), draft PR [#436](https://github.com/sleep2agi/agent-network/pull/436) @ `30e811a`: independent targeted `17/0/28`, aggregate `532/8/1546`, and syscall proof `all connect=0`, PostgreSQL connect=0, default SQLite open=0. PR remains Draft pending 通信龙 review; canonical runner isolation stays in #434 |
 | Independent §8 security review | **Not started** | Run only on corrected committed SHA; author cannot self-review |
 
 ## 8. Reproducible evidence log
@@ -226,6 +226,7 @@ fixture with the same name—proves every row.
 | 2026-07-12 | B L1 corrective candidate `b3fabba` | targeted principal/REST/stamp/reply plus gateway+app-server suites | `23/0/115`; `4/0/16`; `6/0/16`; `1/0/17`; `335/0/2587` | Green suite evidence only; the production-entry and failure-injection probes below keep L1 FAIL |
 | 2026-07-12 | B L1 corrective candidate `b3fabba` | real minted attacker ntok → HTTP `/mcp` → `get_inbox(victim)` → `gateway_dead_letter` | both HTTP calls 200; victim task `delivered → failed`; victim inbox row ACKed | P0 same-network cross-alias destructive authorization failure; helper-only tests did not cover the tool entry |
 | 2026-07-12 | B L1 corrective candidate `b3fabba` | drop/failure-trigger probes around audit and cancel cleanup | dead-letter returned success with ACK=1/audit=0; cancel left `task=cancelled, inbox.acked=0` and retry could not clean it | P0 transaction claims are false under failure; strict audit and canonical-attempt cleanup must roll back together |
+| 2026-07-12 | DB-safety PR #436 `30e811a` | targeted guard + full server + independent Linux `strace -ff -e connect,openat` | `17/0/28`; `532/8/1546`; all connect `0`, PG connect `0`, default SQLite open `0` | Coordinator PASS. Both fake-URL and both-vars-unset real subprocess refusals are committed; no bypass or new aggregate failure. Draft remains lead/merge locked |
 
 ### Independent checkpoint failures recorded 2026-07-12
 
