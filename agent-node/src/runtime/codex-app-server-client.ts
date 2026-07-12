@@ -98,6 +98,20 @@ type IncomingMsg =
   | JsonRpcNotification
   | JsonRpcReverseRequest;
 
+/**
+ * RFC-030 Wave 1B: shared upstream id allocator (see
+ * codex-policy-gateway/upstream-mux.ts). In gateway mode the client and
+ * A's TUI proxy share ONE socket — two independent nextId counters would
+ * collide. When a mux is injected the client allocates every request id
+ * through it (`origin: "internal"`), and responses whose ids belong to the
+ * "tui" origin are emitted as `tui_response` instead of orphaning.
+ */
+export interface UpstreamIdMuxLike {
+  allocate(origin: "internal" | "tui"): number;
+  ownerOf(id: number): "internal" | "tui" | undefined;
+  release(id: number): void;
+}
+
 export interface CodexAppServerClientOptions {
   /** Full URL: `ws://127.0.0.1:4500` or `wss://…`. Loopback only in Phase 0. */
   url: string;
@@ -107,6 +121,12 @@ export interface CodexAppServerClientOptions {
   defaultTimeoutMs?: number;
   /** Debug label for logs / errors. */
   clientLabel?: string;
+  /**
+   * Shared upstream id mux (gateway mode). Standalone/Phase-0 usage may
+   * omit it — the client falls back to its private counter, which is safe
+   * only when it is the sole writer on the socket.
+   */
+  mux?: UpstreamIdMuxLike;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -207,7 +227,10 @@ export class CodexAppServerClient extends EventEmitter {
     if (!this.ws || this.closed) {
       throw new Error("CodexAppServerClient not connected or already closed");
     }
-    const id = this.nextId++;
+    // Gateway mode: allocate through the shared mux so ids can never
+    // collide with TUI-proxied requests on the same socket. Standalone
+    // mode keeps the private counter.
+    const id = this.opts.mux ? this.opts.mux.allocate("internal") : this.nextId++;
     const payload: JsonRpcRequest<P> = {
       jsonrpc: "2.0",
       id,
@@ -218,6 +241,7 @@ export class CodexAppServerClient extends EventEmitter {
     return new Promise<R>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        this.opts.mux?.release(id);
         reject(new Error(`codex request '${method}' (id=${id}) timed out after ${to}ms`));
       }, to);
       this.pending.set(id, {
@@ -342,10 +366,19 @@ export class CodexAppServerClient extends EventEmitter {
       const id = idField as number;
       const pending = this.pending.get(id);
       if (!pending) {
+        // Gateway mode: a response whose id belongs to the TUI origin is
+        // NOT an orphan — it's the answer to a TUI-proxied request. Route
+        // it out for A's proxy layer to deliver; never resolve internal
+        // pendings with it.
+        if (this.opts.mux?.ownerOf(id) === "tui") {
+          this.emit("tui_response", msg);
+          return;
+        }
         this.emit("orphan_response", msg);
         return;
       }
       this.pending.delete(id);
+      this.opts.mux?.release(id);
       if ("error" in msg && (msg as JsonRpcErrorMsg).error) {
         const err = msg as JsonRpcErrorMsg;
         const e = new Error(

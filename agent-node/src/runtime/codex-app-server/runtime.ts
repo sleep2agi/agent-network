@@ -37,22 +37,20 @@ function randomPort(): number {
 }
 
 /**
- * Env var the spawned codex app-server reads its CommHub bearer token from.
- * The token is passed via env (not written into config/argv) so it never
- * lands in a config file or a process-list snapshot of the -c flags.
+ * RFC-030 Wave 1B (dispatch item 5): the CommHub bearer token (`ntok_…`)
+ * must NEVER reach the codex app-server process — not via env, not via
+ * argv, not via config. The token lives exclusively in the adapter/gateway
+ * process; codex reaches CommHub (if at all) through the local tool proxy
+ * with short-lived capabilities (later wave). The former native-MCP token
+ * injection (`ANET_CODEX_COMMHUB_TOKEN` + `mcp_servers.commhub.*`) is
+ * REMOVED from the production path. `SENSITIVE_ENV_PATTERN` is the
+ * scrubber contract, exported so tests can prove the spawn env is clean.
  */
-export const COMMHUB_MCP_TOKEN_ENV = "ANET_CODEX_COMMHUB_TOKEN";
+export const SENSITIVE_ENV_PATTERN = /(^|_)(NTOK|COMMHUB[A-Z_]*TOKEN|ANET[A-Z_]*TOKEN)(_|$)/i;
 
 export interface OwnedAppServerConfig {
   approvalPolicy?: string;
   sandboxMode?: string;
-  /**
-   * When set, wires CommHub in as a streamable-HTTP MCP server so codex can
-   * call `commhub_*` tools natively (send_task / send_message /
-   * get_all_status …) instead of shelling out. The bearer token is read
-   * from `COMMHUB_MCP_TOKEN_ENV` at connect time (set in the spawn env).
-   */
-  commhubMcpUrl?: string;
 }
 
 /**
@@ -60,19 +58,33 @@ export interface OwnedAppServerConfig {
  * codex config.toml. approval_policy=never makes the app-server auto-run
  * without emitting approval reverse-requests (which the bridge won't
  * answer) — required for an unattended auto-approve node. sandbox_mode
- * bounds what those auto-runs can touch. commhubMcpUrl adds the CommHub MCP
- * server. Each field is omitted when unset so codex falls back to its own
- * defaults. Pure + exported for unit testing.
+ * bounds what those auto-runs can touch. Each field is omitted when unset
+ * so codex falls back to its own defaults. Pure + exported for unit
+ * testing. Deliberately NO CommHub MCP wiring — see SENSITIVE_ENV_PATTERN.
  */
 export function buildOwnedAppServerArgs(url: string, cfgOpts: OwnedAppServerConfig = {}): string[] {
   const cfg: string[] = [];
   if (cfgOpts.approvalPolicy) cfg.push("-c", `approval_policy=${cfgOpts.approvalPolicy}`);
   if (cfgOpts.sandboxMode) cfg.push("-c", `sandbox_mode=${cfgOpts.sandboxMode}`);
-  if (cfgOpts.commhubMcpUrl) {
-    cfg.push("-c", `mcp_servers.commhub.url="${cfgOpts.commhubMcpUrl}"`);
-    cfg.push("-c", `mcp_servers.commhub.bearer_token_env_var="${COMMHUB_MCP_TOKEN_ENV}"`);
-  }
   return ["app-server", ...cfg, "--listen", url];
+}
+
+/**
+ * Scrub CommHub/anet token material from an env about to be handed to a
+ * spawned codex process. Drops keys matching the sensitive pattern AND any
+ * value containing an `ntok_` literal (belt and braces: a token exported
+ * under an innocuous name must not slip through either). Pure + exported
+ * for the token-isolation test.
+ */
+export function scrubSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) continue;
+    if (SENSITIVE_ENV_PATTERN.test(k)) continue;
+    if (typeof v === "string" && /ntok_[0-9a-zA-Z]/.test(v)) continue;
+    clean[k] = v;
+  }
+  return clean;
 }
 
 async function waitWs(url: string, tries = 60, gapMs = 300): Promise<void> {
@@ -122,16 +134,6 @@ export async function openCodexAppServerRuntime(opts: {
    * radius of auto-approved commands. Ignored for shared servers.
    */
   sandboxMode?: string;
-  /**
-   * CommHub hub URL (e.g. http://127.0.0.1:9200). When set with
-   * commhubToken, an OWNED app-server gets CommHub wired in as a
-   * streamable-HTTP MCP server (`<hub>/mcp`) so codex can call `commhub_*`
-   * tools natively. Ignored for the shared-server (adopt) topology — that
-   * server's MCP config is owned by whoever spawned it.
-   */
-  commhubMcpUrl?: string;
-  /** CommHub bearer token (node ntok) — passed to the app-server via env. */
-  commhubToken?: string;
   onThread?: (threadId: string, created: boolean) => void | Promise<void>;
   onExit?: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
   log?: (msg: string) => void;
@@ -148,18 +150,15 @@ export async function openCodexAppServerRuntime(opts: {
     const port = randomPort();
     url = `ws://127.0.0.1:${port}`;
     const binary = opts.binary ?? "codex";
-    const wireCommhub = !!(opts.commhubMcpUrl && opts.commhubToken);
     const spawnArgs = buildOwnedAppServerArgs(url, {
       approvalPolicy: opts.approvalPolicy,
       sandboxMode: opts.sandboxMode,
-      commhubMcpUrl: wireCommhub ? opts.commhubMcpUrl : undefined,
     });
-    // Token via env only (never in argv/config) so it can't leak through a
-    // process list or on-disk config.
-    const childEnv = wireCommhub
-      ? { ...process.env, [COMMHUB_MCP_TOKEN_ENV]: opts.commhubToken }
-      : process.env;
-    log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}${wireCommhub ? " (+commhub MCP)" : ""}`);
+    // Wave 1B item 5: NO CommHub token (or any anet token) may enter the
+    // codex process env. scrubSpawnEnv drops token-named keys AND any
+    // value containing an ntok_ literal.
+    const childEnv = scrubSpawnEnv(process.env);
+    log(`[codex-app-server] spawning ${binary} ${spawnArgs.join(" ")}`);
     proc = spawn(binary, spawnArgs, {
       stdio: ["ignore", "pipe", "pipe"],
       env: childEnv,

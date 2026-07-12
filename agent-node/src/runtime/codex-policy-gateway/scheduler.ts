@@ -260,6 +260,23 @@ export class GatewayScheduler {
     this.releaseAgentReservation();
   }
 
+  /**
+   * Phase-1 TUI policy: the human pressed turn/interrupt while an agent
+   * task held the reservation. Structured terminal state; the task is
+   * NEVER auto-replayed (a restart must not requeue it either — the
+   * ledger state is terminal).
+   */
+  onAgentTurnInterrupted(submissionId: string): void {
+    if (this.activeSubmissionId !== submissionId) {
+      this.log(`[scheduler] stray interrupt for ${submissionId} (active=${this.activeSubmissionId})`);
+      return;
+    }
+    this.ledger.transition(submissionId, "interrupted_by_human", {
+      error: "human owner interrupted the running agent turn via TUI (no auto-replay)",
+    });
+    this.releaseAgentReservation();
+  }
+
   /** The reply was delivered back to CommHub — final ledger state. */
   markReplied(submissionId: string): void {
     this.ledger.transition(submissionId, "replied");
@@ -399,6 +416,12 @@ export function ledgerRowToTaskState(row: LedgerRow, queuePosition: number | nul
         startedAtMs: row.createdAt,
         failedAtMs: row.updatedAt,
         errorSummary: `ambiguous: ${row.error ?? "dispatch response lost"}`,
+      };
+    case "interrupted_by_human":
+      return {
+        state: "cancelled",
+        cancelledAtMs: row.updatedAt,
+        cancelledBy: "owner",
       };
   }
 }

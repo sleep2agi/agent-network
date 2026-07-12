@@ -31,7 +31,10 @@ export type LedgerState =
   | "reply_pending"
   | "replied"
   | "failed"
-  | "ambiguous";
+  | "ambiguous"
+  /** Human pressed the emergency interrupt while an agent task held the
+   *  thread (Phase-1 TUI policy). Terminal; MUST NOT be auto-replayed. */
+  | "interrupted_by_human";
 
 export type SubmissionOrigin = "human" | "agent";
 
@@ -55,18 +58,20 @@ const LEGAL: Record<LedgerState, LedgerState[]> = {
   received: ["queued", "failed"],
   queued: ["dispatching", "failed"],
   dispatching: ["accepted", "failed", "ambiguous"],
-  accepted: ["completed", "failed"],
+  accepted: ["completed", "failed", "interrupted_by_human"],
   completed: ["reply_pending", "replied", "failed"],
   reply_pending: ["replied", "failed"],
   replied: [],
   failed: [],
   ambiguous: [],
+  interrupted_by_human: [],
 };
 
 export const TERMINAL_STATES: ReadonlySet<LedgerState> = new Set([
   "replied",
   "failed",
   "ambiguous",
+  "interrupted_by_human",
 ]);
 
 export interface RecoveryReport {

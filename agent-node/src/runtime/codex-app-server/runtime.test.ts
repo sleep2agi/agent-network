@@ -1,10 +1,18 @@
-// RFC-030 — unit tests for the owned codex app-server argv builder.
-// Locks the auto-approve wiring (approval_policy / sandbox_mode) and the
-// CommHub MCP wiring (url + bearer-token-env-var): passed as `-c` overrides
-// only when set, in a stable order, token never in argv, --listen always last.
+// RFC-030 — unit tests for the owned codex app-server argv builder + the
+// Wave-1B spawn-env scrubber.
+//
+// Wave 1B (dispatch item 5) REMOVED the CommHub MCP token injection from
+// the production path: no `mcp_servers.commhub.*` argv, no token env var.
+// These tests lock the new posture — argv carries only approval/sandbox
+// overrides, and scrubSpawnEnv strips every piece of anet token material
+// before a codex process is spawned.
 
 import { describe, expect, test } from "bun:test";
-import { buildOwnedAppServerArgs, COMMHUB_MCP_TOKEN_ENV } from "./runtime";
+import {
+  buildOwnedAppServerArgs,
+  scrubSpawnEnv,
+  SENSITIVE_ENV_PATTERN,
+} from "./runtime";
 
 const URL = "ws://127.0.0.1:24555";
 
@@ -25,43 +33,57 @@ describe("buildOwnedAppServerArgs", () => {
     ]);
   });
 
-  test("auto-approve posture (never + danger-full-access) → both overrides, policy first", () => {
-    expect(buildOwnedAppServerArgs(URL, { approvalPolicy: "never", sandboxMode: "danger-full-access" })).toEqual([
+  test("both overrides → stable order (policy first), --listen last", () => {
+    expect(
+      buildOwnedAppServerArgs(URL, { approvalPolicy: "never", sandboxMode: "read-only" }),
+    ).toEqual([
       "app-server",
       "-c", "approval_policy=never",
-      "-c", "sandbox_mode=danger-full-access",
+      "-c", "sandbox_mode=read-only",
       "--listen", URL,
     ]);
   });
 
-  test("commhubMcpUrl → adds url + bearer-token-env-var -c overrides", () => {
-    const args = buildOwnedAppServerArgs(URL, { commhubMcpUrl: "http://127.0.0.1:9200" });
-    expect(args).toEqual([
-      "app-server",
-      "-c", `mcp_servers.commhub.url="http://127.0.0.1:9200"`,
-      "-c", `mcp_servers.commhub.bearer_token_env_var="${COMMHUB_MCP_TOKEN_ENV}"`,
-      "--listen", URL,
-    ]);
-  });
-
-  test("the CommHub bearer TOKEN never appears in argv (only the env-var NAME)", () => {
-    const args = buildOwnedAppServerArgs(URL, { commhubMcpUrl: "http://127.0.0.1:9200" });
+  test("Wave 1B: argv NEVER contains CommHub MCP wiring or token material", () => {
+    const args = buildOwnedAppServerArgs(URL, {
+      approvalPolicy: "never",
+      sandboxMode: "read-only",
+    });
     const joined = args.join(" ");
-    expect(joined).toContain("bearer_token_env_var");
+    expect(joined).not.toContain("mcp_servers.commhub");
+    expect(joined).not.toContain("bearer_token");
     expect(joined).not.toMatch(/ntok_|utok_|Bearer /);
   });
+});
 
-  test("full production posture (yolo + commhub MCP) → stable order, --listen last", () => {
-    const args = buildOwnedAppServerArgs(URL, {
-      approvalPolicy: "never", sandboxMode: "danger-full-access", commhubMcpUrl: "http://h/mcp-hub",
+describe("scrubSpawnEnv — Wave 1B token isolation", () => {
+  test("token-named keys are dropped, benign keys survive", () => {
+    const clean = scrubSpawnEnv({
+      PATH: "/usr/bin",
+      ANET_CODEX_COMMHUB_TOKEN: "ntok_x1",
+      COMMHUB_TOKEN: "ntok_x2",
+      NTOK: "anything",
+      LANG: "en_US.UTF-8",
     });
-    expect(args.slice(0, 7)).toEqual([
-      "app-server",
-      "-c", "approval_policy=never",
-      "-c", "sandbox_mode=danger-full-access",
-      "-c", `mcp_servers.commhub.url="http://h/mcp-hub"`,
-    ]);
-    expect(args[args.length - 2]).toBe("--listen");
-    expect(args[args.length - 1]).toBe(URL);
+    expect(clean.PATH).toBe("/usr/bin");
+    expect(clean.LANG).toBe("en_US.UTF-8");
+    expect(clean.ANET_CODEX_COMMHUB_TOKEN).toBeUndefined();
+    expect(clean.COMMHUB_TOKEN).toBeUndefined();
+    expect(clean.NTOK).toBeUndefined();
+  });
+
+  test("values containing an ntok_ literal are dropped even under benign names", () => {
+    const clean = scrubSpawnEnv({ TOTALLY_FINE: "see ntok_cafe01 here", OK: "yes" });
+    expect(clean.TOTALLY_FINE).toBeUndefined();
+    expect(clean.OK).toBe("yes");
+  });
+
+  test("pattern matches historical injection var names", () => {
+    for (const k of ["ANET_CODEX_COMMHUB_TOKEN", "COMMHUB_MCP_TOKEN", "NTOK", "ANET_TOKEN"]) {
+      expect(SENSITIVE_ENV_PATTERN.test(k)).toBe(true);
+    }
+    for (const k of ["PATH", "HOME", "TERM", "NODE_ENV"]) {
+      expect(SENSITIVE_ENV_PATTERN.test(k)).toBe(false);
+    }
   });
 });
