@@ -21,7 +21,6 @@
 //     bypass env (协调 owner decision); dev/test uses explicit fixtures.
 
 import { EventEmitter } from "events";
-import type { CodexAppServerClient } from "../codex-app-server-client";
 import { evaluateUpstreamCall } from "./policy";
 import type { DispatchOutcome, GatewayScheduler, TurnDispatcher } from "./scheduler";
 import type { AuthenticatedSender } from "./contract";
@@ -58,8 +57,20 @@ export function sanitizeDisplayAlias(raw: string): string {
   return capped.length > 0 ? capped : "(unknown)";
 }
 
+/**
+ * L3-R6: the adapter's upstream surface is STRUCTURAL — request +
+ * event subscription. Standalone/Phase-0 passes a CodexAppServerClient;
+ * gateway mode passes the assembly shim (request → A GatewayLifecycle
+ * .sendInternal with timeout; on → transport notification fan-out) so
+ * every request id comes from THE one UpstreamRequestMux.
+ */
+export interface UpstreamRpcLike {
+  request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T>;
+  on(event: string, fn: (params: unknown) => void): unknown;
+}
+
 export interface BridgeAdapterOptions {
-  client: CodexAppServerClient;
+  client: UpstreamRpcLike;
   threadId: string;
   /** How long to watch for a reconciling turn/started after a lost dispatch response. */
   reconcileWindowMs?: number;
@@ -87,7 +98,7 @@ interface TrackedTurn {
 }
 
 export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
-  private readonly client: CodexAppServerClient;
+  private readonly client: UpstreamRpcLike;
   private readonly threadId: string;
   private readonly reconcileWindowMs: number;
   private readonly dispatchTimeoutMs: number;
