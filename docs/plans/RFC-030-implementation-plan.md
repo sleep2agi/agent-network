@@ -44,8 +44,8 @@ after every checkpoint.
 | Wave 0 — decisions and baseline | 副指挥 + 通信龙 | **Complete** | #428 | Decisions above frozen; Codex `0.144.0` selected | No unresolved product decision |
 | Wave 1A — typed contract and protocol | 通信工程马 | **Frozen** | `rfc030-gateway-protocol`, draft PR [#431](https://github.com/sleep2agi/agent-network/pull/431) | Freeze `90d1e58`; `169 pass / 0 fail / 555 expect` | B consumes exact shape; no unreviewed shape change |
 | Wave 1A — UDS / human owner / lifecycle | 通信工程马 | **In progress** | PR #431 | ETA 10–12h, three segment checkpoints | Owner-only UDS, real framing/notifications, one mux instance, disconnect/reverse-ID tests |
-| Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **In progress** | `rfc030-gateway-runtime`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Revised ETA 5h; committed evidence pending | Real auth/handler/REST/retry/reassign/auto-chain/starvation E2E |
-| Wave 1B L2 — runtime hardening | 通信SDK马 | **Released after L1** | PR #432 | Revised ETA 4h; committed evidence pending | Spawn-time read-only/never, TUI default-deny, owner fail-closed, sanitized errors/aliases |
+| Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **Committed, awaiting review** | `rfc030-gateway-runtime` @ `34bea40`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Real-handler matrix `17/0`, REST HTTP suite `3/0`, pump starvation + auto-chain + retry/reassign inherit all on production entrypoints | Real auth/handler/REST/retry/reassign/auto-chain/starvation E2E |
+| Wave 1B L2 — runtime hardening | 通信SDK马 | **Committed, awaiting review** | PR #432 @ `ed45f4d` | boot-gate `5/0` (zero-invocation spawn proof, shared-attach typed refusal, baseline-gate-before-spawn), TUI default-deny sweep 12×3, ownerAttached required + park/resume, error generalization + alias escaping wire-level tests; gateway+app-server `118/0` | Spawn-time read-only/never, TUI default-deny, owner fail-closed, sanitized errors/aliases |
 | Wave 1B L3 — canonical mux/client/pump integration | 通信SDK马 | **Locked** | PR #432 | Additional ETA required | L1 + L2 accepted; stale contract/mux/authorizer deleted; full wire/startup evidence |
 | Wave 1 checkpoint | 副指挥 + 通信龙 | **Locked** | #428 | Typed surface frozen; integrated hard-gate evidence incomplete | All rows in §7 green and reproducible |
 | Wave 2 — product/runtime plumbing | Owners assigned after checkpoint | **Locked** | TBD | Not started | §3 scope complete; Docker tests green |
@@ -152,14 +152,14 @@ fixture with the same name—proves every row.
 | Single mux, collisions and out-of-order routing | **Partial / blocked** | A mux unit tests green; audited PR #432 head used an unwired duplicate mux and replayed duplicate responses |
 | Approval forgery | **Partial / blocked** | Pure policy rejection is green; real TUI reverse-ID wire path not yet integrated |
 | CommHub token isolation | **Partial PASS** | Owned-spawn argv/env tests are useful; final real spawn capture and all credential forms remain |
-| Authenticated principal | **Blocked** | L1 implementation and real handler/REST/pump tests pending |
-| Phase 1 read-only / approval never | **Blocked** | Audited PR #432 head defined it but did not enforce it before spawn/connect |
-| TUI policy default-deny | **Blocked** | Audited PR #432 head allowed unknown shell/fs/write/applyPatch methods |
-| Owner lease fail-closed | **Blocked** | Audited scheduler defaulted missing `ownerAttached` to true |
-| Codex/schema/SQLite startup gate | **Blocked** | Helpers tested but not called on the production startup path; bundle digest needs path and boundary domain separation |
+| Authenticated principal | **PASS (L1 @ `34bea40`, pending review)** | principal.ts shared MCP+REST resolver (role union incl node/child per freeze Δ14); 9 write sites stamped (grep-audited); real registerTools handler matrix `17/0`; real Bun.serve+utok HTTP REST `3/0`; pump dead-letter + LIMIT starvation test green |
+| Phase 1 read-only / approval never | **PASS (L2 @ `ed45f4d`, pending review)** | Enforced in openCodexAppServerRuntime BEFORE spawn/socket; argv always explicit pins; shared/adopt attach refused (typed `codex_gateway_phase1_shared_unverified`); marker-binary proof: dangerous config → zero invocations |
+| TUI policy default-deny | **PASS (L2 @ `ed45f4d`, pending review)** | Explicit Phase-1 allowlist + default deny (`tui_method_not_allowed`); 12 dangerous/unknown methods × 3 reservations 0-forward sweep; adapts to A's async TuiRequestAuthorizer at L3 |
+| Owner lease fail-closed | **PASS (L2 @ `ed45f4d`, pending review)** | `ownerAttached` now REQUIRED; no-owner → refused_no_owner; owner-drop-during-queue parks (no dispatch) + re-attach resumes; in-flight turn never auto-interrupted; A lifecycle/lease wiring lands at L3 |
+| Codex/schema/SQLite startup gate | **Partial (L2)** | assertCodexBaseline now wired into openCodexAppServerRuntime before spawn (same-binary proof); REMAINING: digest algorithm path+NUL+length+content domain separation (P1-4) + SQLite gate at gateway production startup — scheduled with L3 |
 | Reply lifecycle and SSE wake | **Blocked** | No integrated Gateway `send_reply → new_reply` E2E or `markReplied` path |
 | Human interrupt race | **Blocked** | Atomic interrupt/send/completion semantics and wire race test pending |
-| Retry/reassign state consistency | **Blocked** | Canonical task/message ID and cancelled ledger state implementation pending |
+| Retry/reassign state consistency | **Partial (L1)** | canonical_task_id + write-once origin principal + inherit implemented and handler-tested; REMAINING: cancelled ledger state mapping + (taskId,messageId) pair dedup semantics per freeze — scheduled with L3 |
 | Independent §8 security review | **Not started** | Run only on corrected committed SHA; author cannot self-review |
 
 ## 8. Reproducible evidence log
@@ -170,6 +170,11 @@ fixture with the same name—proves every row.
 | 2026-07-12 | B audited head `8bc5652` | `bun test agent-node/src/runtime/codex-policy-gateway/` | `97 pass / 0 fail` | Useful local core tests; not checkpoint sign-off |
 | 2026-07-12 | B audited head `8bc5652` | `bun test agent-node/src/runtime` | `453 pass / 0 fail / 1902 expect` | No detected runtime-suite regression at that head |
 | 2026-07-12 | B audited head `8bc5652` | `bun test server/src/rfc030-principal-stamp.test.ts` | `6 pass / 0 fail / 16 expect` | Fixture-only SQL test; explicitly not accepted as auth-handler evidence |
+| 2026-07-12 | B L1 `34bea40` | `bun test server/src/rfc030-principal-handler.test.ts` | `17 pass / 0 fail / 91 expect` | Real registerTools handler matrix: role authority, ntok≠owner, forged-alias invariance, retry/reassign inherit + canonical, auto-chain principal, pump starvation, backcompat |
+| 2026-07-12 | B L1 `34bea40` | `bun test server/src/rfc030-principal-rest.test.ts` | `3 pass / 0 fail / 14 expect` | Real Bun.serve + issueUserToken mint over HTTP: /api/task stamp+origin+canonical, unauth→null, /api/broadcast |
+| 2026-07-12 | B L2 `ed45f4d` | `bun test agent-node/src/runtime/codex-app-server/boot-gate.test.ts` | `5 pass / 0 fail / 18 expect` | Production-entry gates: dangerous config → zero binary invocations; baseline gate before spawn; shared attach typed refusal with 0 connections |
+| 2026-07-12 | B L2 `ed45f4d` | `bun test agent-node/src/runtime/codex-policy-gateway/ agent-node/src/runtime/codex-app-server/` | `118 pass / 0 fail / 1280 expect` | Full gateway + app-server suites at L2 head |
+| 2026-07-12 | B L1 `34bea40` | `bun test server/` (single process, COMMHUB_DB isolated) | `538 pass / 11 fail` vs baseline `d418862` `515 pass / 8 fail` (identical 8× #380) | Pre-existing multi-importer Bun.serve conflict; all rfc030 suites green per-file; delta fully attributed |
 
 Do not count uncommitted worktree changes, claimed-but-missing commits, baseline
 failures without an independently reproduced baseline, or tests whose fixture
