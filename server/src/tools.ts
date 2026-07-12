@@ -75,6 +75,27 @@ function normalizeMetaJson(meta: unknown): string | null {
 }
 
 export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null) {
+  // ── RFC-030 Wave 1B — server-stamped sender principal ────────────────
+  // Resolved ONCE per registerTools closure from the caller's bearer
+  // (callerTokenId → api_tokens row). Deliberately ignores any
+  // client-supplied field (from_session / args / meta): a forged alias
+  // yields NO principal. Null when the caller has no token context
+  // (hub-internal, legacy paths) — inbox columns stay null and the codex
+  // gateway fail-closes on its side.
+  const senderPrincipal: { tokenId: string; role: string } | null = (() => {
+    if (!callerTokenId) return null;
+    try {
+      const row = db.get<{ role: string | null }>(
+        "SELECT role FROM api_tokens WHERE token_id = ?1",
+        callerTokenId,
+      );
+      if (!row) return null;
+      return { tokenId: callerTokenId, role: row.role || "member" };
+    } catch {
+      return null;
+    }
+  })();
+
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
   // an agent's send_task call always claimed from='hub' and peer agents
@@ -666,7 +687,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const rows0 = db.get<{ cnt: number }>(countSql, ...countParams);
       console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
       const rowsParams: any[] = [alias];
-      let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json
+      let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json, sender_token_id, sender_role
          FROM inbox WHERE session_name = ?1 AND acked = 0`;
       rowsSql = addReadScope(rowsSql, rowsParams, readScope);
       rowsSql += ` ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
@@ -924,9 +945,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // 报告冲突）。
       db.transaction(() => {
         db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, context, from_session, requires_response, network_id, meta_json)
-           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, ?7, 'reply', ?8, ?9)`,
-          [id, targetAlias, targetNodeId, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJson]
+          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, context, from_session, requires_response, network_id, meta_json, sender_token_id, sender_role)
+           VALUES (?1, ?2, ?3, 'task', ?4, ?5, ?6, ?7, 'reply', ?8, ?9, ?10, ?11)`,
+          [id, targetAlias, targetNodeId, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJson, senderPrincipal?.tokenId ?? null, senderPrincipal?.role ?? null]
         );
         db.run(
           `INSERT INTO tasks (task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)

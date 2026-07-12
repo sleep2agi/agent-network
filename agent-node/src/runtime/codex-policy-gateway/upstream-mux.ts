@@ -41,6 +41,34 @@ export class SharedUpstreamMux implements UpstreamRequestMux {
     this.owners.delete(id);
   }
 
+  /**
+   * TUI disconnect (Checkpoint-3 delta 4): release ONLY tui-owned ids.
+   * Internal scheduler pendings survive — an in-flight agent turn keeps
+   * its response routable across a TUI drop. Returns the released ids so
+   * A's proxy can reject its local resolvers.
+   */
+  drainProxiedTui(): number[] {
+    const released: number[] = [];
+    for (const [id, origin] of this.owners) {
+      if (origin === "tui") {
+        this.owners.delete(id);
+        released.push(id);
+      }
+    }
+    return released;
+  }
+
+  /**
+   * Upstream shutdown/restart ONLY (lifecycle-driven): drop everything.
+   * The lifecycle layer is responsible for explicitly rejecting /
+   * reconciling internal resolvers after calling this.
+   */
+  drainAll(): number[] {
+    const released = [...this.owners.keys()];
+    this.owners.clear();
+    return released;
+  }
+
   /** Introspection for tests. */
   outstanding(): number {
     return this.owners.size;

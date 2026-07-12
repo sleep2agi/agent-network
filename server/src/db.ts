@@ -162,6 +162,14 @@ for (const col of [
   { name: "scope", def: "TEXT DEFAULT 'single'" },
   { name: "meta_json", def: "TEXT" },
   { name: "node_id", def: "TEXT" },
+  // RFC-030 Wave 1B principal stamp (approved <2h scope exception):
+  // server-stamped sender principal, resolved from the caller's auth
+  // context (api_tokens row), NEVER from client-supplied fields. Nullable
+  // + additive: legacy rows and non-token senders stay null; ONLY the
+  // codex gateway treats null as refuse — every other consumer of
+  // get_inbox is unaffected.
+  { name: "sender_token_id", def: "TEXT" },
+  { name: "sender_role", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE inbox ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }

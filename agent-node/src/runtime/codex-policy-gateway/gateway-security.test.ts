@@ -358,3 +358,43 @@ describe("version gate — fail closed on baseline mismatch", () => {
     }
   }, 60_000);
 });
+
+// ────────────────────────────────────────────────────────────────────────
+// Checkpoint-3 delta 4 — TUI disconnect drains only TUI ids
+// ────────────────────────────────────────────────────────────────────────
+
+describe("mux drain semantics — TUI disconnect vs upstream restart", () => {
+  test("drainProxiedTui releases tui ids only; internal pending stays routable", async () => {
+    const srv = await startEchoServer();
+    const mux = new SharedUpstreamMux();
+    const client = new CodexAppServerClient({ url: srv.url, mux });
+    await client.connect();
+
+    const tuiA = mux.allocate("tui");
+    const tuiB = mux.allocate("tui");
+    const p = client.request<{ ok: boolean }>("thread/resume", { threadId: "t" }, 2_000);
+    await tick();
+    const internalReq = srv.received.find(
+      (m) => (m as { method?: string }).method === "thread/resume",
+    ) as { id: number };
+
+    // Human closes the TUI mid-flight.
+    const released = mux.drainProxiedTui();
+    expect(released.sort()).toEqual([tuiA, tuiB].sort());
+    expect(mux.ownerOf(internalReq.id)).toBe("internal"); // untouched
+
+    // The in-flight agent request STILL resolves after the TUI is gone.
+    srv.send({ jsonrpc: "2.0", id: internalReq.id, result: { ok: true } });
+    expect(await p).toEqual({ ok: true });
+
+    // drainAll (upstream restart) clears everything.
+    mux.allocate("internal");
+    mux.allocate("tui");
+    expect(mux.outstanding()).toBeGreaterThan(0);
+    mux.drainAll();
+    expect(mux.outstanding()).toBe(0);
+
+    await client.close();
+    srv.stop();
+  });
+});
