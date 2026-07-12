@@ -142,7 +142,12 @@ export class GatewayScheduler {
       return { outcome: "refused_invalid_arg", field: "text", reason: "empty" };
     }
 
-    // Idempotency: same messageId → return the existing task, don't requeue.
+    // Freeze 90d1e58 id semantics: (taskId, messageId) uniquely identifies
+    // a DELIVERY ATTEMPT. Same messageId re-submitted → duplicate (return
+    // the prior attempt). Same taskId + NEW messageId → a retry attempt of
+    // the same logical task — allowed ONLY when the latest attempt is
+    // terminal-failure; a live attempt or a successful one dedups (the
+    // gateway never double-runs a logical task).
     const cumid = `anet:${String(args.messageId)}`;
     const existing = this.ledger.getByClientUserMessageId(cumid);
     if (existing) {
@@ -153,6 +158,25 @@ export class GatewayScheduler {
         duplicate: true,
       };
     }
+    const latest = this.ledger.getLatestByTaskId(String(args.taskId));
+    if (latest) {
+      const RETRYABLE: ReadonlySet<string> = new Set([
+        "failed",
+        "ambiguous",
+        "interrupted_by_human",
+        "cancelled",
+      ]);
+      if (!RETRYABLE.has(latest.state)) {
+        // Live attempt in flight OR already succeeded → idempotent dedup.
+        return {
+          outcome: "accepted",
+          taskId: args.taskId,
+          queuePosition: null,
+          duplicate: true,
+        };
+      }
+      // else: terminal failure → fall through, new attempt row below.
+    }
 
     if (this.queue.length >= this.queueLimit) {
       return {
@@ -162,41 +186,51 @@ export class GatewayScheduler {
       };
     }
 
-    // Ledger: received → queued. Both synchronous writes.
+    // One ledger row per ATTEMPT, keyed by messageId (initial dispatch has
+    // messageId == taskId on the CommHub side, so first attempts keep the
+    // familiar id; retries get their fresh inbox id).
+    const submissionId = String(args.messageId);
     this.ledger.record({
-      submissionId: String(args.taskId),
+      submissionId,
       origin: "agent",
       taskId: String(args.taskId),
       fromAlias: args.authenticatedSender.alias,
       clientUserMessageId: cumid,
     });
-    this.ledger.transition(String(args.taskId), "queued");
+    this.ledger.transition(submissionId, "queued");
     this.tasksSeen += 1;
 
     const entry: QueueEntry = {
-      submissionId: String(args.taskId),
+      submissionId,
       taskId: String(args.taskId),
       fromAlias: args.authenticatedSender.alias,
       text: args.text,
       clientUserMessageId: cumid,
     };
     this.queue.push(entry);
-    const position = this.queue.length - 1;
     this.notify();
 
-    // Kick the pump (async; enqueue itself returns immediately).
+    // Kick the pump. Its critical section is synchronous — by the time it
+    // returns control the entry has either been taken (dispatch started →
+    // contract queuePosition null) or is still genuinely queued. Computing
+    // the position AFTER the kick fixes the 副指挥-audited race where an
+    // idle enqueue reported queuePosition=0 instead of null.
     void this.pump();
+    const idx = this.queue.indexOf(entry);
 
     return {
       outcome: "accepted",
       taskId: args.taskId,
-      queuePosition: position === 0 && this.reservation === "none" ? null : position,
+      queuePosition: idx === -1 ? null : idx,
       duplicate: false,
     };
   }
 
   async getTaskState(taskId: TaskId): Promise<TaskState> {
-    const row = this.ledger.get(String(taskId));
+    // Logical-task view: the LATEST attempt row answers for the taskId
+    // (freeze semantics — same taskId spans retry attempts).
+    const row =
+      this.ledger.getLatestByTaskId(String(taskId)) ?? this.ledger.get(String(taskId));
     if (!row) return { state: "unknown" };
     return ledgerRowToTaskState(row, this.queuePositionOf(String(taskId)));
   }
@@ -204,12 +238,16 @@ export class GatewayScheduler {
   async cancelQueuedTask(taskId: TaskId): Promise<CancelQueuedTaskResult> {
     const idx = this.queue.findIndex((e) => e.taskId === String(taskId));
     if (idx === -1) {
-      const row = this.ledger.get(String(taskId));
+      const row =
+        this.ledger.getLatestByTaskId(String(taskId)) ?? this.ledger.get(String(taskId));
       const current = row ? ledgerRowToTaskState(row, null).state : "unknown";
       return { outcome: "refused_not_queued", currentState: current };
     }
-    this.queue.splice(idx, 1);
-    this.ledger.transition(String(taskId), "failed", { error: "cancelled by agent while queued" });
+    const [entry] = this.queue.splice(idx, 1);
+    // Contract roundtrip (副指挥 P1): outcome 'cancelled' must be what a
+    // subsequent getTaskState reads back — dedicated ledger state, not a
+    // 'failed' masquerade.
+    this.ledger.transition(entry.submissionId, "cancelled");
     this.notify();
     return { outcome: "cancelled", cancelledAtMs: Date.now() };
   }
@@ -444,6 +482,12 @@ export function ledgerRowToTaskState(row: LedgerRow, queuePosition: number | nul
         state: "cancelled",
         cancelledAtMs: row.updatedAt,
         cancelledBy: "owner",
+      };
+    case "cancelled":
+      return {
+        state: "cancelled",
+        cancelledAtMs: row.updatedAt,
+        cancelledBy: "agent",
       };
   }
 }

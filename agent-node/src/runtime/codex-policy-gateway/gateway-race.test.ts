@@ -240,13 +240,13 @@ describe("CHECKPOINT — 100-way idle race", () => {
 
     // Each task's reply is ITS OWN echo — no cross-wiring anywhere.
     for (let i = 0; i < 100; i++) {
-      const row = ledger.get(`task_${i}`)!;
+      const row = ledger.getLatestByTaskId(`task_${i}`)!;
       expect(row.state).toBe("reply_pending");
       expect(row.replyText).toBe(`echo:anet:msg_${i}`);
       expect(row.turnId).not.toBeNull();
     }
     // 100 distinct turnIds on the ledger side too.
-    const turnIds = Array.from({ length: 100 }, (_, i) => ledger.get(`task_${i}`)!.turnId);
+    const turnIds = Array.from({ length: 100 }, (_, i) => ledger.getLatestByTaskId(`task_${i}`)!.turnId);
     expect(new Set(turnIds).size).toBe(100);
 
     // The fake server never saw a concurrent turn/start (no busy errors →
@@ -314,7 +314,7 @@ describe("CHECKPOINT — request-id collision / out-of-order", () => {
     );
     await waitFor(() => ledger.inState("reply_pending").length === 30, 30_000);
     for (let i = 0; i < 30; i++) {
-      expect(ledger.get(`task_${i}`)!.replyText).toBe(`echo:anet:msg_${i}`);
+      expect(ledger.getLatestByTaskId(`task_${i}`)!.replyText).toBe(`echo:anet:msg_${i}`);
     }
     await client.close();
     await app.stop();
@@ -343,7 +343,7 @@ describe("CHECKPOINT — request-id collision / out-of-order", () => {
     // consumed) — never resolved a different request.
     expect(orphanEvents.length).toBe(20);
     for (let i = 0; i < 20; i++) {
-      expect(ledger.get(`task_${i}`)!.replyText).toBe(`echo:anet:msg_${i}`);
+      expect(ledger.getLatestByTaskId(`task_${i}`)!.replyText).toBe(`echo:anet:msg_${i}`);
     }
     await client.close();
     await app.stop();

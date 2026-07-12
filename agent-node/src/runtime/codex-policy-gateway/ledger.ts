@@ -34,7 +34,11 @@ export type LedgerState =
   | "ambiguous"
   /** Human pressed the emergency interrupt while an agent task held the
    *  thread (Phase-1 TUI policy). Terminal; MUST NOT be auto-replayed. */
-  | "interrupted_by_human";
+  | "interrupted_by_human"
+  /** Agent cancelled its own queued task (cancelQueuedTask) before it was
+   *  dispatched. Terminal. Distinct from `failed` so getTaskState maps to
+   *  contract `cancelled/cancelledBy:'agent'` (副指挥 P1 roundtrip). */
+  | "cancelled";
 
 export type SubmissionOrigin = "human" | "agent";
 
@@ -56,7 +60,7 @@ export interface LedgerRow {
 /** Legal state transitions. Key = from, values = allowed to. */
 const LEGAL: Record<LedgerState, LedgerState[]> = {
   received: ["queued", "failed"],
-  queued: ["dispatching", "failed"],
+  queued: ["dispatching", "failed", "cancelled"],
   dispatching: ["accepted", "failed", "ambiguous"],
   accepted: ["completed", "failed", "interrupted_by_human"],
   completed: ["reply_pending", "replied", "failed"],
@@ -65,6 +69,7 @@ const LEGAL: Record<LedgerState, LedgerState[]> = {
   failed: [],
   ambiguous: [],
   interrupted_by_human: [],
+  cancelled: [],
 };
 
 export const TERMINAL_STATES: ReadonlySet<LedgerState> = new Set([
@@ -72,6 +77,7 @@ export const TERMINAL_STATES: ReadonlySet<LedgerState> = new Set([
   "failed",
   "ambiguous",
   "interrupted_by_human",
+  "cancelled",
 ]);
 
 export interface RecoveryReport {
@@ -186,6 +192,20 @@ export class GatewayLedger {
     const raw = this.db
       .prepare(`SELECT * FROM gateway_ledger WHERE submission_id = ?`)
       .get(submissionId) as Record<string, unknown> | null | undefined;
+    return raw ? toRow(raw) : null;
+  }
+
+  /**
+   * Latest attempt for a LOGICAL task (freeze 90d1e58: same taskId across
+   * retry attempts, one row per messageId/attempt). Ordered by created_at
+   * then submission_id for stability.
+   */
+  getLatestByTaskId(taskId: string): LedgerRow | null {
+    const raw = this.db
+      .prepare(
+        `SELECT * FROM gateway_ledger WHERE task_id = ? ORDER BY created_at DESC, submission_id DESC LIMIT 1`,
+      )
+      .get(taskId) as Record<string, unknown> | null | undefined;
     return raw ? toRow(raw) : null;
   }
 

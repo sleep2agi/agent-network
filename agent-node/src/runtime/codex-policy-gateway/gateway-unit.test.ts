@@ -211,3 +211,128 @@ describe("gateway policy — Phase-1 fixed profile", () => {
     expect(() => assertPhase1Profile(profile as never)).toThrow(/refusing to boot/);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────
+// L3-R3/R4 — (taskId,messageId) attempt semantics + cancelled roundtrip +
+// queuePosition immediate-start (freeze 90d1e58 + 副指挥 P1)
+// ────────────────────────────────────────────────────────────────────────
+
+import { GatewayScheduler, type DispatchOutcome, type TurnDispatcher } from "./scheduler";
+import { asTaskId, asMessageId, type AuthenticatedSender } from "./contract";
+
+const R3_SENDER: AuthenticatedSender = {
+  alias: "reviewer",
+  tokenId: "tok_r3_001",
+  role: "member",
+  networkId: "net_default",
+};
+
+function r3Scheduler(dispatch: () => Promise<DispatchOutcome>) {
+  const ledger = new GatewayLedger(resolveSqliteDriver(":memory:").driver);
+  const dispatcher: TurnDispatcher = { startTurn: () => dispatch() };
+  const scheduler = new GatewayScheduler({
+    ledger,
+    dispatcher,
+    ownerAttached: () => true,
+  });
+  return { ledger, scheduler };
+}
+
+const enq = (
+  s: GatewayScheduler,
+  taskId: string,
+  messageId: string,
+  text = "work",
+) =>
+  s.enqueueTask({
+    taskId: asTaskId(taskId),
+    messageId: asMessageId(messageId),
+    authenticatedSender: R3_SENDER,
+    text,
+  });
+
+describe("R3 — (taskId,messageId) pair semantics", () => {
+  test("same (taskId,messageId) resubmitted → duplicate, dispatched exactly once", async () => {
+    let dispatched = 0;
+    const { scheduler } = r3Scheduler(async () => {
+      dispatched++;
+      return { kind: "accepted", turnId: `turn_${dispatched}` };
+    });
+    const r1 = await enq(scheduler, "lt1", "lt1"); // initial: messageId == taskId
+    const r2 = await enq(scheduler, "lt1", "lt1");
+    expect(r1.outcome).toBe("accepted");
+    if (r1.outcome === "accepted") expect(r1.duplicate).toBe(false);
+    expect(r2.outcome).toBe("accepted");
+    if (r2.outcome === "accepted") expect(r2.duplicate).toBe(true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dispatched).toBe(1);
+  });
+
+  test("same taskId + NEW messageId while the attempt is LIVE → duplicate, never double-runs", async () => {
+    let dispatched = 0;
+    const { scheduler } = r3Scheduler(async () => {
+      dispatched++;
+      return { kind: "accepted", turnId: `turn_${dispatched}` };
+    });
+    await enq(scheduler, "lt2", "m_first");
+    await new Promise((r) => setTimeout(r, 20));
+    const retryWhileLive = await enq(scheduler, "lt2", "m_second");
+    expect(retryWhileLive.outcome).toBe("accepted");
+    if (retryWhileLive.outcome === "accepted") expect(retryWhileLive.duplicate).toBe(true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dispatched).toBe(1); // still exactly one live run
+  });
+
+  test("same taskId + NEW messageId after a FAILED attempt → genuine retry; getTaskState follows the latest attempt", async () => {
+    let call = 0;
+    const { scheduler, ledger } = r3Scheduler(async () => {
+      call++;
+      return call === 1
+        ? { kind: "failed", error: "first attempt exploded" }
+        : { kind: "accepted", turnId: "turn_retry" };
+    });
+    await enq(scheduler, "lt3", "m_a1");
+    await new Promise((r) => setTimeout(r, 20));
+    expect((await scheduler.getTaskState(asTaskId("lt3"))).state).toBe("failed");
+
+    const retry = await enq(scheduler, "lt3", "m_a2");
+    expect(retry.outcome).toBe("accepted");
+    if (retry.outcome === "accepted") expect(retry.duplicate).toBe(false);
+    await new Promise((r) => setTimeout(r, 20));
+    // Latest-attempt view: the logical task is now running.
+    expect((await scheduler.getTaskState(asTaskId("lt3"))).state).toBe("running");
+    // Both attempt rows exist; the first stays terminal-failed (audit).
+    expect(ledger.get("m_a1")!.state).toBe("failed");
+    expect(ledger.get("m_a2")!.state).toBe("accepted");
+  });
+});
+
+describe("R4 — cancelled roundtrip + queuePosition immediate-start", () => {
+  test("cancelQueuedTask → outcome cancelled AND getTaskState reads back cancelled/by agent", async () => {
+    // Park the reservation under a human turn so the entry stays queued.
+    const { scheduler } = r3Scheduler(async () => ({ kind: "accepted", turnId: "t" }));
+    scheduler.onHumanTurnStarted("h1");
+    await enq(scheduler, "lt4", "m_c1");
+    const c = await scheduler.cancelQueuedTask(asTaskId("lt4"));
+    expect(c.outcome).toBe("cancelled");
+    const ts = await scheduler.getTaskState(asTaskId("lt4"));
+    expect(ts.state).toBe("cancelled");
+    if (ts.state === "cancelled") expect(ts.cancelledBy).toBe("agent");
+  });
+
+  test("idle enqueue starts immediately → queuePosition null (副指挥 P1 race fixed)", async () => {
+    const { scheduler } = r3Scheduler(async () => ({ kind: "accepted", turnId: "t" }));
+    const r = await enq(scheduler, "lt5", "m_q1");
+    expect(r.outcome).toBe("accepted");
+    if (r.outcome === "accepted") expect(r.queuePosition).toBeNull();
+  });
+
+  test("enqueue behind a live reservation → real queue position", async () => {
+    const { scheduler } = r3Scheduler(async () => ({ kind: "accepted", turnId: "t" }));
+    scheduler.onHumanTurnStarted("h1");
+    const r1 = await enq(scheduler, "lt6", "m_q2");
+    const r2 = await enq(scheduler, "lt7", "m_q3");
+    if (r1.outcome === "accepted") expect(r1.queuePosition).toBe(0);
+    if (r2.outcome === "accepted") expect(r2.queuePosition).toBe(1);
+  });
+});

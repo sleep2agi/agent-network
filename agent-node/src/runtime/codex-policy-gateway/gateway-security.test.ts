@@ -291,8 +291,8 @@ describe("interrupted_by_human — structured terminal, no replay", () => {
     await tick();
     expect(scheduler.snapshot().activeReservationOwner).toBe("agent");
 
-    scheduler.onAgentTurnInterrupted("t1");
-    const row = ledger.get("t1")!;
+    scheduler.onAgentTurnInterrupted("m1");
+    const row = ledger.getLatestByTaskId("t1")!;
     expect(row.state).toBe("interrupted_by_human");
     expect(scheduler.snapshot().activeReservationOwner).toBe("none");
 
@@ -302,7 +302,7 @@ describe("interrupted_by_human — structured terminal, no replay", () => {
     if (ts.state === "cancelled") expect(ts.cancelledBy).toBe("owner");
 
     // Terminal: any further transition throws.
-    expect(() => ledger.transition("t1", "queued")).toThrow(/illegal transition/);
+    expect(() => ledger.transition("m1", "queued")).toThrow(/illegal transition/);
   });
 
   test("restart does NOT replay an interrupted task (recover ignores terminal rows)", () => {
@@ -424,7 +424,7 @@ describe("ownerAttached — required probe, no-owner refuses, owner-drop parks",
     await tick();
     // The accepted turn keeps running — interrupt is an explicit human
     // action, never an implicit owner-drop side effect.
-    expect(ledger.get("t_live")!.state).toBe("accepted");
+    expect(ledger.getLatestByTaskId("t_live")!.state).toBe("accepted");
     expect(scheduler.snapshot().activeReservationOwner).toBe("agent");
   });
 });
