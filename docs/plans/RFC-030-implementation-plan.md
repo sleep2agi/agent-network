@@ -6,7 +6,7 @@
 >
 > Status: **Wave 1 in progress; Wave 2, security sign-off, merge, deployment, production and `latest` are locked**
 >
-> Last updated: 2026-07-12 (Asia/Shanghai) — independent checkpoint audit **FAIL** despite green unit suites; A/B corrective work is required and all downstream gates remain hard-locked.
+> Last updated: 2026-07-12 (Asia/Shanghai) — Wave-1A corrective commit `5b18df6` independently remains **FAIL** despite `251/0/771`; the native Codex TUI transport/auth choice is awaiting lead decision and all downstream gates remain hard-locked.
 
 This is the engineering master plan for moving `codex-app-server` from an
 opt-in preview to the independently launched Codex TUI runtime approved by
@@ -29,6 +29,15 @@ after every checkpoint.
 | Human/Agent reservation | Human owns human turns. While Agent owns the reservation, human start/steer is busy; human interrupt is the emergency path, returns `interrupted_by_human`, and never auto-replays |
 | Canonical request mux | The frozen Wave-1A `UpstreamRequestMux` is the only upstream ID allocator for internal scheduler and proxied TUI requests |
 
+Open freeze amendment: pinned Codex `0.144.0` speaks WebSocket Upgrade on
+`unix://`, not raw newline JSONL, and rejects `--remote-auth-token-env` for a
+Unix remote. It does send the bearer header to a loopback `ws://` remote. The
+lead must choose between a loopback WebSocket TUI endpoint with bearer
+capability, or WebSocket-over-UDS authenticated by a strong peer-process
+identity mechanism. Path permissions, path secrecy and same-UID checks are not
+an authentication boundary. No owner may implement either option until the
+freeze amendment is explicit.
+
 ### Hard locks
 
 - No production change, deploy, preview publish, `latest` switch or lead merge.
@@ -43,7 +52,7 @@ after every checkpoint.
 |---|---|---|---|---|---|
 | Wave 0 — decisions and baseline | 副指挥 + 通信龙 | **Complete** | #428 | Decisions above frozen; Codex `0.144.0` selected | No unresolved product decision |
 | Wave 1A — typed contract and protocol | 通信工程马 | **Frozen** | `rfc030-gateway-protocol`, draft PR [#431](https://github.com/sleep2agi/agent-network/pull/431) | Freeze `90d1e58`; `169 pass / 0 fail / 555 expect` | B consumes exact shape; no unreviewed shape change |
-| Wave 1A — UDS / human owner / lifecycle | 通信工程马 | **Checkpoint FAIL — corrective work required** | PR #431 @ `00d4ea8` (A `98676f1` / B `04560c0` / C `00d4ea8`) | `232/0/729` is retained as unit evidence only; real-path audit found coordinator bypass, unresolved pending requests, transport teardown and lifecycle-race failures | Separate P0 integration + P1 hardening commits, then independent reproduction |
+| Wave 1A — TUI transport / human owner / lifecycle | 通信工程马 | **Checkpoint FAIL — frozen pending transport decision** | PR #431 @ corrective candidate `5b18df6` over `00d4ea8` | `251/0/771` is retained as unit evidence only; real Codex handshake is incompatible, owner lease can be crossed, and teardown/startup probes still fail | Lead transport/auth amendment, then separate P0 integration + P1 hardening commits and independent reproduction |
 | Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **Checkpoint FAIL — corrective work required** | `rfc030-gateway-runtime` @ `34bea40`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Targeted suites are green, but valid pump rows are not ACKed, pump has no production wiring, MCP auth still branches on raw token prefix, and canonical-attempt cleanup is incomplete | Real auth/pump/dead-letter/canonical-attempt production E2E |
 | Wave 1B L2 — runtime hardening | 通信SDK马 | **Paused — corrective audit pending** | PR #432 @ `ed45f4d` | Boot/profile gates are useful partial evidence; TUI bound-thread validation and diagnostics/lifecycle integration remain open | Rebase on corrected A/L1 and independently reproduce all real-entry gates |
 | Wave 1B L3 — canonical mux/client/pump integration | 通信SDK马 | **Frozen — candidate is not an approved checkpoint** | PR #432 @ `090ce12` | Built under a conflicting written R6 restore from 通信龙, later withdrawn after the audit disproved its assumptions; B bears no process fault; `351/0/2634` remains unit evidence only | No further R work until the coordinator re-releases a scoped tranche; full integrated evidence required |
@@ -143,6 +152,24 @@ starve a valid task.
 Full gateway suite after Segment C: `232 pass / 0 fail / 729 expect()`
 (`bun test agent-node/src/runtime/codex-policy-gateway/`).
 
+Corrective candidate `5b18df6` added capability hello, per-role connection
+counting, coordinator delegation and lifecycle close/fence tests. Its full suite
+is `251 pass / 0 fail / 771 expect()`, but the independent checkpoint remains
+FAIL:
+
+- the TUI socket accepts raw newline JSONL while real Codex `0.144.0` starts a
+  WebSocket HTTP Upgrade;
+- the configurable connection cap permits a second authenticated TUI to answer
+  the incumbent's reverse request and detach the incumbent owner;
+- `stop()` during preflight/subscription can finish with zero upstream close
+  calls, upstream close can leave the lifecycle `running`, and partial-start
+  clients/callbacks survive rollback;
+- close may hang indefinitely, concurrent stops call close more than once, and
+  synchronous writes can leak mux entries.
+
+Do not start the listed P1 tranche until the transport/auth freeze amendment and
+the P0 lifecycle/owner model have passed independent reproduction.
+
 ## 7. Production hard-gate matrix
 
 The checkpoint is green only when the integrated production path—not a helper or
@@ -153,12 +180,13 @@ fixture with the same name—proves every row.
 | Typed contract and protocol | **PASS** | Freeze `90d1e58`, independent `169/0/555` |
 | 100 task one-to-one race and dedup | **Partial** | Scheduler→fake app-server test is green; it bypasses UDS, inbox, principal and reply delivery |
 | Single mux, collisions and out-of-order routing | **Partial / blocked** | Unit routing tests are green; corrected A lifecycle must own the sole allocator and settle every origin on close before this can pass |
-| Approval forgery | **Partial / blocked** | Pure policy rejection is green; real TUI reverse-ID wire path not yet integrated |
+| Approval forgery | **FAIL in corrective candidate** | With `maxConnectionsPerRole=2`, a second authenticated TUI can consume the incumbent's predictable reverse ID and forward an approval response; reverse IDs must be bound to an owner lease |
 | CommHub token isolation | **Partial PASS** | Owned-spawn argv/env tests are useful; final real spawn capture and all credential forms remain |
 | Authenticated principal | **FAIL (L1 @ `34bea40`)** | Principal resolver direction is useful, but production pump/ACK/dead-letter is not wired, raw token-prefix branching remains, and handler tests fabricate impossible auth contexts |
-| Phase 1 read-only / approval never | **FAIL in integrated path** | Spawn/profile gates pass in isolation; real UDS reverse requests bypass the never-mode coordinator and can reach an attached TUI |
+| Phase 1 read-only / approval never | **Partial / transport-blocked** | Corrective candidate routes fake-client reverse requests through `approvalMode=never`; the native Codex TUI cannot attach to that raw-JSONL endpoint, so production-path evidence is still absent |
 | TUI policy default-deny | **Partial / blocked** | Unknown methods deny correctly, but thread-bound methods do not consistently require a present bound `threadId`; integrate only after A correction |
-| Owner lease fail-closed | **FAIL in integrated path** | Scheduler probe exists, but the UDS admits multiple TUI clients and does not wire coordinator attach/detach/reverse routing as the single source of truth |
+| Owner lease fail-closed | **FAIL in corrective candidate** | Coordinator is wired, but ownership is still a global boolean: the connection cap is configurable above one, responses are not lease-bound, and a non-incumbent disconnect can detach the incumbent |
+| Native Codex TUI transport/auth | **FAIL / decision blocked** | Real `codex 0.144.0 --remote unix://...` sends WebSocket Upgrade, not JSONL; the same CLI rejects bearer auth for `unix://` but sends it to loopback `ws://`. Lead must amend the frozen topology before implementation |
 | Codex/schema/SQLite startup gate | **Partial (L2)** | assertCodexBaseline now wired into openCodexAppServerRuntime before spawn (same-binary proof); REMAINING: digest algorithm path+NUL+length+content domain separation (P1-4) + SQLite gate at gateway production startup — scheduled with L3 |
 | Reply lifecycle and SSE wake | **Partial / blocked** | Real SSE wake is useful evidence, but the E2E manually ACKs and does not prove the production pump ACKs a valid retry attempt |
 | Human interrupt race | **FAIL in integrated candidate** | Authorizer arms a global boolean before upstream write succeeds; it is not bound to a specific active turn and can misclassify another turn's normal completion |
@@ -189,6 +217,9 @@ fixture with the same name—proves every row.
 | 2026-07-12 | A Segment C `00d4ea8` | `bun test agent-node/src/runtime/codex-policy-gateway/` | `232 pass / 0 fail / 729 expect` | Full gateway suite after A/B/C combined — no regression against frozen contract/protocol test count (169 → 197 after A → 213 after B → 232 after C) |
 | 2026-07-12 | B frozen candidate `090ce12` | `bun test agent-node/src/runtime/codex-policy-gateway/ agent-node/src/runtime/codex-app-server*.test.ts` | `351 pass / 0 fail / 2634 expect` | Independent rerun is green but **not a checkpoint PASS**: real-path A lifecycle and L1 production-pump failures remain outside the asserted paths |
 | 2026-07-12 | B frozen candidate `090ce12` | targeted lifecycle/UDS/owner/assembly + full gateway audit | `65/0/191` targeted; `322/0/2547` gateway | Runtime probes still reproduced approval-never bypass, two unauthenticated TUIs, pending-Promise loss, preflight resurrection, subscription rollback leak, unbound interrupt state and optional thread IDs |
+| 2026-07-12 | A corrective candidate `5b18df6` | `bun test agent-node/src/runtime/codex-policy-gateway/` | `251 pass / 0 fail / 771 expect` | Green unit evidence only; independent production-protocol and lifecycle probes below keep checkpoint FAIL |
+| 2026-07-12 | A corrective candidate `5b18df6` | `bun test .../uds-server.test.ts .../lifecycle.test.ts` | `66 pass / 0 fail / 173 expect` | Independent targeted rerun green; report's lifecycle-only count was independently `23/0/69`, not `21/0` |
+| 2026-07-12 | pinned Codex CLI `0.144.0` real socket capture | `codex --remote unix://<socket>` and loopback `ws://127.0.0.1:<ephemeral>` with `--remote-auth-token-env` | Unix first packet is HTTP WebSocket Upgrade; Unix bearer flag is rejected; loopback WS Upgrade carries the bearer header | Proves current raw-JSONL TUI endpoint is not product-compatible and the UDS-only bearer design cannot be implemented with the pinned native CLI |
 
 ### Independent checkpoint failures recorded 2026-07-12
 
@@ -196,6 +227,13 @@ fixture with the same name—proves every row.
   path; require one authenticated/capability-separated TUI; reject all pending
   origins exactly once on close; add lifecycle-owned transport close/abort and
   a start generation fence; harden rollback, path identity and frame sizing.
+- A corrective `5b18df6`: coordinator delegation alone did not close the owner
+  boundary. Bind each reverse request to one authenticated owner lease, harden
+  the production invariant to one TUI, and make detach lease-aware. Replace the
+  raw TUI JSONL endpoint with the lead-approved native WebSocket topology. Use a
+  single-flight, epoch/abort-aware teardown that closes transport and clients on
+  every start failure, stop and upstream close; reject new work immediately
+  once the upstream generation is terminal.
 - B L1: classify enqueue outcomes for ACK/backoff/dead-letter; add a real
   production pump/demux and atomic validated dead-letter; carry server-resolved
   token kind through MCP auth; test real bearer contexts; clean every delivery
