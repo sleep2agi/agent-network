@@ -165,6 +165,7 @@ fixture with the same name—proves every row.
 | Retry/reassign state consistency | **FAIL in server integration** | Gateway attempt tests pass, but server ACK/cancel/reassign still address initial IDs instead of all rows for the canonical task |
 | Candidate aggregate test delta | **FAIL** | Candidate is `538/12/1638` versus baseline `515/8/1518`. RFC-030 must remove its four added failures and prove every new principal/auth assertion runs in aggregate; exit requires candidate failures `<= 8` |
 | Historical server test isolation | **Tracked separately / non-blocking after delta clears** | Baseline's eight module-singleton server/DB/port failures are owned by 通信测试马 in [#434](https://github.com/sleep2agi/agent-network/issues/434) |
+| Test production-DB isolation | **Partial / P0 open** | SQLite naked-test guard was syscall-verified before any `~/.commhub` open. However `DATABASE_URL` is evaluated before that guard, so inherited production PostgreSQL configuration must be rejected by default in tests before §8 review |
 | Independent §8 security review | **Not started** | Run only on corrected committed SHA; author cannot self-review |
 
 ## 8. Reproducible evidence log
@@ -206,6 +207,11 @@ fixture with the same name—proves every row.
   The current host-supervisors test imports `db` before its `beforeAll` assigns
   the advertised temp DB, so it remains useful baseline evidence but not a
   waiver for the candidate's four added failures.
+- Production-DB guard: the SQLite refusal runs before path calculation, mkdir,
+  database open and schema execution; `strace` confirmed zero production-path
+  access. Extend the same fail-closed rule to inherited `DATABASE_URL`, which is
+  currently selected before the SQLite-only guard. Until fixed, test commands
+  explicitly unset it unless they run an isolated PostgreSQL test database.
 - Candidate `090ce12` was produced only after 通信龙 issued a written R6 restore
   that conflicted with the coordinator pause. 通信龙 later withdrew that restore
   after the independent audit invalidated its assumptions. B followed the
