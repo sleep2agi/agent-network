@@ -59,12 +59,32 @@ export type OwnerLeaseId = string & { readonly __brand: "OwnerLeaseId" };
 
 /**
  * Sender principal proven upstream by CommHub (`authenticatedSender`).
- * `alias` is the human-visible label (may be user-controlled and MUST NOT
- * be used for authorization); `tokenId` is what the gateway logs / policy
- * layer keys on. The gateway will NOT trust the alias for any decision.
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ * 🔒 SECURITY CONTRACT — do not weaken.
+ *
+ * The gateway MUST treat all three of `tokenId`, `role`, and `networkId`
+ * as REQUIRED. `alias` is a human-visible label only — it may be
+ * user-controlled, may be renamed at any moment, and MUST NEVER be used
+ * for authorization. Any check that decides "should we accept this?"
+ * keys on `tokenId` (`api_tokens.token_id`) and `role`, never `alias`.
+ *
+ * If any of `tokenId` / `role` / `networkId` is missing from the wire
+ * payload, `parseEnqueueTaskParams` (protocol.ts) MUST fail closed and
+ * refuse the request with `GatewayErrorCode.InvalidArg`. A gateway that
+ * silently forge-fills `role: "member"` for a missing principal would
+ * fail the reverse-request lockout invariant — the human owner would
+ * approve a "member" that no upstream CommHub ever authenticated.
+ *
+ * The `unknown` role slot on the enum exists ONLY for parsing legacy
+ * inbox rows that pre-date the principal stamp (see 通信龙 task
+ * 404d7e19 on the server side). It is not a fallback the client is
+ * allowed to send; parsers should treat inbound `role: "unknown"` as
+ * fail-closed unless there's a specific policy tier that admits it.
+ * ─────────────────────────────────────────────────────────────────────
  */
 export interface AuthenticatedSender {
-  /** Human-facing alias — for display / logs only. */
+  /** Human-facing alias — for display / logs only. NEVER authoritative. */
   readonly alias: string;
   /** CommHub token identifier (from `api_tokens.token_id`). Authoritative. */
   readonly tokenId: string;
@@ -187,6 +207,31 @@ export interface RuntimeStateEvent {
    */
   readonly codexBinaryVersion: string;
   readonly codexSchemaDigest: string;
+  /**
+   * Who currently holds the active turn reservation, per the scheduler
+   * / ledger (B side).
+   *   - `"none"` — no active reservation; queue is idle.
+   *   - `"human"` — human TUI holds the current turn.
+   *   - `"agent"` — an Agent Network task holds the current turn.
+   *
+   * Consumed by the Dashboard runtime panel; the Agent runtime uses it
+   * as a hint for backoff / status display, NEVER for authorization
+   * decisions. B scheduler is the authority; this field just surfaces
+   * it read-only.
+   */
+  readonly activeReservationOwner: "none" | "human" | "agent";
+  /**
+   * Count of ambiguous-outcome events since gateway boot (turns whose
+   * completion signal was inconclusive — e.g. reply text vs. tool call
+   * disagreement, or a schema digest change mid-turn). Maintained by
+   * the B scheduler / ledger side. Read-only surface; no mutation.
+   */
+  readonly ambiguousCount: number;
+  /**
+   * Count of failed turns since gateway boot (terminal `failed` state
+   * on the ledger). Maintained by B; read-only surface.
+   */
+  readonly failedCount: number;
 }
 
 /**
@@ -237,6 +282,14 @@ export interface AgentTypedContract {
  * shutdown here so a well-behaved Agent client backs off correctly.
  * Everything else is in the -32050… application range to avoid
  * colliding with SDK error ranges the codex layer might reuse.
+ *
+ * On every error, the JSON-RPC `error.data` object carries a stable
+ * string `code` field (from `GATEWAY_ERROR_DATA_CODE`) so callers that
+ * don't want to key on the numeric can key on the string. The stable
+ * string names are frozen once shipped; the numeric ids may only shift
+ * within their reserved range if we ever need to renumber. Agent side
+ * NEVER sees a raw upstream JSON-RPC error code — those are logged
+ * internally and remapped to one of these, per Wave-0 lockout.
  */
 export enum GatewayErrorCode {
   /** Standard JSON-RPC: gateway is going through reconnect / shutting down. */
@@ -253,6 +306,50 @@ export enum GatewayErrorCode {
   UnknownMethod = -32054,
   /** Codex binary or schema digest doesn't match the pinned Wave-0 baseline. */
   CodexBaselineMismatch = -32055,
+  /**
+   * SQLite-backed sub-runtime declined the request (per B ledger A′
+   * decision). Emitted when the ledger detects an unsupported ledger
+   * migration state, an unsupported schema version, or an unsupported
+   * operation against the current backing store. Stable string code:
+   * `codex_gateway_sqlite_runtime_unsupported`.
+   */
+  SqliteRuntimeUnsupported = -32056,
+}
+
+/**
+ * Stable string codes emitted on `error.data.code` alongside the
+ * numeric `code`. Callers that prefer named keys over the numeric range
+ * key on this. These strings are frozen once shipped and must not be
+ * renamed without a Wave-2 revalidation with 副指挥 + consumers.
+ *
+ * Consumers should ALSO ignore any additional `data` fields they don't
+ * know — the gateway may attach diagnostic context (e.g. `field`,
+ * `queueDepth`, `limit`) that varies per code.
+ */
+export const GATEWAY_ERROR_DATA_CODE: Readonly<Record<GatewayErrorCode, string>> = {
+  [GatewayErrorCode.Unavailable]: "codex_gateway_unavailable",
+  [GatewayErrorCode.InvalidArg]: "codex_gateway_invalid_arg",
+  [GatewayErrorCode.QueueFull]: "codex_gateway_queue_full",
+  [GatewayErrorCode.NoOwner]: "codex_gateway_no_owner",
+  [GatewayErrorCode.UnknownTask]: "codex_gateway_unknown_task",
+  [GatewayErrorCode.UnknownMethod]: "codex_gateway_unknown_method",
+  [GatewayErrorCode.CodexBaselineMismatch]: "codex_gateway_codex_baseline_mismatch",
+  [GatewayErrorCode.SqliteRuntimeUnsupported]: "codex_gateway_sqlite_runtime_unsupported",
+};
+
+/**
+ * Shape the gateway attaches on JSON-RPC `error.data` for every code.
+ * The Agent surface reads this as a plain read-only record — no raw
+ * upstream Codex error fields leak through, per Wave-0 lockout.
+ *
+ * Additional per-code fields (e.g. `field`, `queueDepth`, `limit`) may
+ * appear here; readers must tolerate unknown keys.
+ */
+export interface GatewayErrorData {
+  /** Stable string code — matches `GATEWAY_ERROR_DATA_CODE[numeric]`. */
+  readonly code: string;
+  /** Zero or more diagnostic keys. Read-only; caller must not mutate. */
+  readonly [key: string]: unknown;
 }
 
 // ────────────────────────────────────────────────────────────────────────

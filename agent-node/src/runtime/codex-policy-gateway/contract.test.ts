@@ -26,6 +26,7 @@ import {
   asMessageId,
   asOwnerLeaseId,
   GatewayErrorCode,
+  GATEWAY_ERROR_DATA_CODE,
   type AgentTypedContract,
   type AuthenticatedSender,
   type CancelQueuedTaskResult,
@@ -33,6 +34,7 @@ import {
   type EnqueueTaskArgs,
   type EnqueueTaskRefused,
   type EnqueueTaskResult,
+  type GatewayErrorData,
   type MessageId,
   type OwnerLeaseId,
   type RuntimeStateEvent,
@@ -290,7 +292,7 @@ describe("CancelQueuedTaskResult", () => {
 // ────────────────────────────────────────────────────────────────────────
 
 describe("RuntimeStateEvent", () => {
-  test("carries only the read-only fields the Wave-0 policy allows", () => {
+  test("carries only the read-only fields the Wave-0 policy + B delta allow", () => {
     const ev: RuntimeStateEvent = {
       at: 1,
       connection: "idle",
@@ -299,16 +301,69 @@ describe("RuntimeStateEvent", () => {
       tasksSeen: 5,
       codexBinaryVersion: "0.144.0",
       codexSchemaDigest: "sha256:beef",
+      // B consumer-review delta (副指挥 task fa2e453d) — maintained by
+      // scheduler/ledger, read-only Agent surface, no mutation face.
+      activeReservationOwner: "none",
+      ambiguousCount: 0,
+      failedCount: 0,
     };
     expect(Object.keys(ev).sort()).toEqual([
+      "activeReservationOwner",
+      "ambiguousCount",
       "at",
       "codexBinaryVersion",
       "codexSchemaDigest",
       "connection",
+      "failedCount",
       "ownerAttached",
       "queueDepth",
       "tasksSeen",
     ]);
+  });
+
+  test("activeReservationOwner covers exactly none/human/agent with no fallback", () => {
+    const owners: Array<RuntimeStateEvent["activeReservationOwner"]> = ["none", "human", "agent"];
+    for (const owner of owners) {
+      const ev: RuntimeStateEvent = {
+        at: 0,
+        connection: "idle",
+        ownerAttached: false,
+        queueDepth: 0,
+        tasksSeen: 0,
+        codexBinaryVersion: "0.144.0",
+        codexSchemaDigest: "sha256:beef",
+        activeReservationOwner: owner,
+        ambiguousCount: 0,
+        failedCount: 0,
+      };
+      switch (ev.activeReservationOwner) {
+        case "none":
+        case "human":
+        case "agent":
+          break;
+        default:
+          return assertExhaustive(ev.activeReservationOwner);
+      }
+    }
+  });
+
+  test("ambiguousCount / failedCount are numbers (no boolean / string leak from ledger)", () => {
+    // Type-level: TS refuses non-number assignment. This runtime
+    // sanity check just documents the intent.
+    const ev: RuntimeStateEvent = {
+      at: 0,
+      connection: "idle",
+      ownerAttached: false,
+      queueDepth: 0,
+      tasksSeen: 0,
+      codexBinaryVersion: "0.144.0",
+      codexSchemaDigest: "sha256:beef",
+      activeReservationOwner: "none",
+      ambiguousCount: 7,
+      failedCount: 3,
+    };
+    expect(typeof ev.ambiguousCount).toBe("number");
+    expect(typeof ev.failedCount).toBe("number");
   });
 
   test("connection discriminant covers every gateway state without an escape hatch", () => {
@@ -407,18 +462,63 @@ describe("GatewayErrorCode", () => {
     }
   });
 
-  test("has exactly the 8 codes declared in Wave 1A — no silent extension", () => {
+  test("has exactly the 8 codes declared in Wave 1A + B delta — no silent extension", () => {
     const names = Object.keys(GatewayErrorCode).filter(k => Number.isNaN(Number(k)));
     expect(names.sort()).toEqual([
       "CodexBaselineMismatch",
       "InvalidArg",
       "NoOwner",
       "QueueFull",
+      "SqliteRuntimeUnsupported",  // B delta 副指挥 fa2e453d — A′ SQLite decision
       "Unavailable",
       "UnknownMethod",
       "UnknownTask",
     ]);
-    expect(names.length).toBe(7);
+    expect(names.length).toBe(8);
+  });
+
+  test("SqliteRuntimeUnsupported pinned to -32056 (stable numeric)", () => {
+    expect(GatewayErrorCode.SqliteRuntimeUnsupported).toBe(-32056);
+  });
+
+  test("GATEWAY_ERROR_DATA_CODE maps every numeric to its stable string", () => {
+    for (const [name, numeric] of Object.entries(GatewayErrorCode)) {
+      if (Number.isNaN(Number(name))) {
+        const str = GATEWAY_ERROR_DATA_CODE[numeric as GatewayErrorCode];
+        expect(typeof str).toBe("string");
+        expect(str.length).toBeGreaterThan(0);
+        // Convention: `codex_gateway_<lower_snake>` — makes both the
+        // dashboard grep and the log analytics parse deterministic.
+        expect(str.startsWith("codex_gateway_")).toBe(true);
+      }
+    }
+  });
+
+  test("SQLite unsupported string code matches the exact B-required literal", () => {
+    // 副指挥 fa2e453d — stable string is 'codex_gateway_sqlite_runtime_unsupported'.
+    expect(GATEWAY_ERROR_DATA_CODE[GatewayErrorCode.SqliteRuntimeUnsupported])
+      .toBe("codex_gateway_sqlite_runtime_unsupported");
+  });
+
+  test("GATEWAY_ERROR_DATA_CODE keys are exactly the enum's numeric codes — no missing, no extras", () => {
+    const numericValues = new Set(
+      Object.entries(GatewayErrorCode)
+        .filter(([k]) => Number.isNaN(Number(k)))
+        .map(([, v]) => v as number),
+    );
+    const mapKeys = new Set(Object.keys(GATEWAY_ERROR_DATA_CODE).map(Number));
+    expect(mapKeys).toEqual(numericValues);
+  });
+
+  test("GatewayErrorData carries the stable `code` field + tolerates unknown extras", () => {
+    // Compile-check: the shape is `{ code: string, [k: string]: unknown }`.
+    const errData: GatewayErrorData = {
+      code: "codex_gateway_invalid_arg",
+      field: "text",
+      reason: "empty",
+    };
+    expect(errData.code).toBe("codex_gateway_invalid_arg");
+    expect(errData.field).toBe("text");
   });
 });
 
