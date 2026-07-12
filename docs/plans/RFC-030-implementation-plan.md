@@ -46,7 +46,7 @@ after every checkpoint.
 | Wave 1A — UDS / human owner / lifecycle | 通信工程马 | **Checkpoint FAIL — corrective work required** | PR #431 @ `00d4ea8` (A `98676f1` / B `04560c0` / C `00d4ea8`) | `232/0/729` is retained as unit evidence only; real-path audit found coordinator bypass, unresolved pending requests, transport teardown and lifecycle-race failures | Separate P0 integration + P1 hardening commits, then independent reproduction |
 | Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **Checkpoint FAIL — corrective work required** | `rfc030-gateway-runtime` @ `34bea40`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Targeted suites are green, but valid pump rows are not ACKed, pump has no production wiring, MCP auth still branches on raw token prefix, and canonical-attempt cleanup is incomplete | Real auth/pump/dead-letter/canonical-attempt production E2E |
 | Wave 1B L2 — runtime hardening | 通信SDK马 | **Paused — corrective audit pending** | PR #432 @ `ed45f4d` | Boot/profile gates are useful partial evidence; TUI bound-thread validation and diagnostics/lifecycle integration remain open | Rebase on corrected A/L1 and independently reproduce all real-entry gates |
-| Wave 1B L3 — canonical mux/client/pump integration | 通信SDK马 | **Frozen — candidate is not an approved checkpoint** | PR #432 @ `090ce12` | Candidate was pushed after an explicit L3 pause; `351/0/2634` remains unit evidence only and does not override A/L1 blockers | No further changes until coordinator re-releases a scoped tranche; full integrated evidence required |
+| Wave 1B L3 — canonical mux/client/pump integration | 通信SDK马 | **Frozen — candidate is not an approved checkpoint** | PR #432 @ `090ce12` | Built under a conflicting written R6 restore from 通信龙, later withdrawn after the audit disproved its assumptions; B bears no process fault; `351/0/2634` remains unit evidence only | No further R work until the coordinator re-releases a scoped tranche; full integrated evidence required |
 | Wave 1 checkpoint | 副指挥 + 通信龙 | **Locked** | #428 | Typed surface frozen; integrated hard-gate evidence incomplete | All rows in §7 green and reproducible |
 | Wave 2 — product/runtime plumbing | Owners assigned after checkpoint | **Locked** | TBD | Not started | §3 scope complete; Docker tests green |
 | Wave 3 — independent security review and release decision | 通信评审牛 + 通信龙 + Vincent | **Locked** | TBD | Not started | §8 PASS, Vincent explicitly authorizes release/deploy/latest |
@@ -161,7 +161,7 @@ fixture with the same name—proves every row.
 | Owner lease fail-closed | **FAIL in integrated path** | Scheduler probe exists, but the UDS admits multiple TUI clients and does not wire coordinator attach/detach/reverse routing as the single source of truth |
 | Codex/schema/SQLite startup gate | **Partial (L2)** | assertCodexBaseline now wired into openCodexAppServerRuntime before spawn (same-binary proof); REMAINING: digest algorithm path+NUL+length+content domain separation (P1-4) + SQLite gate at gateway production startup — scheduled with L3 |
 | Reply lifecycle and SSE wake | **Partial / blocked** | Real SSE wake is useful evidence, but the E2E manually ACKs and does not prove the production pump ACKs a valid retry attempt |
-| Human interrupt race | **Partial / blocked** | Unit race tests pass; current interrupt marker is not yet proven to be tied to one active turn only after upstream acceptance |
+| Human interrupt race | **FAIL in integrated candidate** | Authorizer arms a global boolean before upstream write succeeds; it is not bound to a specific active turn and can misclassify another turn's normal completion |
 | Retry/reassign state consistency | **FAIL in server integration** | Gateway attempt tests pass, but server ACK/cancel/reassign still address initial IDs instead of all rows for the canonical task |
 | Independent §8 security review | **Not started** | Run only on corrected committed SHA; author cannot self-review |
 
@@ -185,6 +185,7 @@ fixture with the same name—proves every row.
 | 2026-07-12 | A Segment C `00d4ea8` | `bun test agent-node/src/runtime/codex-policy-gateway/lifecycle.test.ts` | `19 pass / 0 fail / 59 expect` | `PreflightRunner` throw → no socket path on disk, state=stopped; mid-run fs inspection proves preflight runs before bind; makeNoThrowInitializeProvider degrades to undefined + logs sink; makeNoThrowDiagnostics newCorrelationId throw / non-string return → "cid-fallback"; reportInternalError throw swallowed; `DEFAULT_DENY_ALLOWLIST.size === 0`; every method → verdict=deny + code=Busy with explicit reason; state gating rejects sendInternal/sendProxiedTui outside `running`; shutdown drains mux + reverseNs + cleans sockets |
 | 2026-07-12 | A Segment C `00d4ea8` | `bun test agent-node/src/runtime/codex-policy-gateway/` | `232 pass / 0 fail / 729 expect` | Full gateway suite after A/B/C combined — no regression against frozen contract/protocol test count (169 → 197 after A → 213 after B → 232 after C) |
 | 2026-07-12 | B frozen candidate `090ce12` | `bun test agent-node/src/runtime/codex-policy-gateway/ agent-node/src/runtime/codex-app-server*.test.ts` | `351 pass / 0 fail / 2634 expect` | Independent rerun is green but **not a checkpoint PASS**: real-path A lifecycle and L1 production-pump failures remain outside the asserted paths |
+| 2026-07-12 | B frozen candidate `090ce12` | targeted lifecycle/UDS/owner/assembly + full gateway audit | `65/0/191` targeted; `322/0/2547` gateway | Runtime probes still reproduced approval-never bypass, two unauthenticated TUIs, pending-Promise loss, preflight resurrection, subscription rollback leak, unbound interrupt state and optional thread IDs |
 
 ### Independent checkpoint failures recorded 2026-07-12
 
@@ -196,8 +197,11 @@ fixture with the same name—proves every row.
   production pump/demux and atomic validated dead-letter; carry server-resolved
   token kind through MCP auth; test real bearer contexts; clean every delivery
   attempt by canonical task ID; enforce origin write-once at the database layer.
-- Candidate `090ce12` was pushed after the L3 pause. It is preserved for audit
-  and must not be treated as approval, release, merge or production evidence.
+- Candidate `090ce12` was produced only after 通信龙 issued a written R6 restore
+  that conflicted with the coordinator pause. 通信龙 later withdrew that restore
+  after the independent audit invalidated its assumptions. B followed the
+  instruction chain and bears no process fault. The candidate is preserved for
+  audit and is not approval, release, merge or production evidence.
 
 Do not count uncommitted worktree changes, claimed-but-missing commits, baseline
 failures without an independently reproduced baseline, or tests whose fixture
