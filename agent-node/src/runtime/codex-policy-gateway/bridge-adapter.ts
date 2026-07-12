@@ -26,6 +26,38 @@ import { evaluateUpstreamCall } from "./policy";
 import type { DispatchOutcome, GatewayScheduler, TurnDispatcher } from "./scheduler";
 import type { AuthenticatedSender } from "./contract";
 
+/**
+ * L2 (副指挥 P1, aligned with A's ProtocolDiagnostics): raw upstream
+ * errors NEVER cross into the Agent wire / task state. The full exception
+ * goes to this sink with a correlationId; the wire/state only ever sees a
+ * stable generalized summary carrying the same id, so an operator can
+ * match a support report to the internal log line.
+ */
+export interface AdapterDiagnostics {
+  newCorrelationId(): string;
+  reportInternalError(entry: {
+    correlationId: string;
+    operation: string;
+    error: unknown;
+  }): void;
+}
+
+const MAX_ALIAS_DISPLAY = 64;
+
+/**
+ * L2 (副指挥 P1): the visible task prefix interpolates a caller-
+ * controlled display alias. Unescaped, a newline in the alias forges
+ * extra `type:` / `task_id:` display lines toward the human TUI. Collapse
+ * ALL control chars to single spaces and cap the length — display only;
+ * authorization and the ledger continue to key on tokenId, never alias.
+ */
+export function sanitizeDisplayAlias(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  const oneLine = raw.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+  const capped = oneLine.slice(0, MAX_ALIAS_DISPLAY).trim();
+  return capped.length > 0 ? capped : "(unknown)";
+}
+
 export interface BridgeAdapterOptions {
   client: CodexAppServerClient;
   threadId: string;
@@ -34,6 +66,8 @@ export interface BridgeAdapterOptions {
   /** Per-request timeout for turn/start. */
   dispatchTimeoutMs?: number;
   log?: (msg: string) => void;
+  /** Error sink — defaults to a counter-correlated log sink. */
+  diagnostics?: AdapterDiagnostics;
 }
 
 interface TrackedTurn {
@@ -70,6 +104,8 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
   /** Human (unowned) turns currently active. */
   private humanTurns = new Set<string>();
 
+  private readonly diagnostics: AdapterDiagnostics;
+
   constructor(opts: BridgeAdapterOptions) {
     super();
     this.client = opts.client;
@@ -77,7 +113,29 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
     this.reconcileWindowMs = opts.reconcileWindowMs ?? 5_000;
     this.dispatchTimeoutMs = opts.dispatchTimeoutMs ?? 30_000;
     this.log = opts.log ?? (() => {});
+    this.diagnostics = opts.diagnostics ?? this.defaultDiagnostics();
     this.attach();
+  }
+
+  private correlationCounter = 0;
+  private defaultDiagnostics(): AdapterDiagnostics {
+    return {
+      newCorrelationId: () => `cx-${++this.correlationCounter}`,
+      reportInternalError: (entry) => {
+        // Internal log only — full detail, capped, never on the wire.
+        const raw = entry.error instanceof Error ? entry.error.message : String(entry.error);
+        this.log(
+          `[adapter] internal error ${entry.correlationId} op=${entry.operation}: ${raw.slice(0, 300)}`,
+        );
+      },
+    };
+  }
+
+  /** Report the raw error internally, return the generalized wire summary. */
+  private generalizeError(operation: string, error: unknown): string {
+    const correlationId = this.diagnostics.newCorrelationId();
+    this.diagnostics.reportInternalError({ correlationId, operation, error });
+    return `upstream ${operation} failed (ref ${correlationId})`;
   }
 
   /** Late-bind the scheduler (adapter is constructed first). */
@@ -104,7 +162,7 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
           type: "text",
           // RFC-030 §6.4 visible origin prefix — the human in the TUI can
           // always tell which turns came from the Agent Network.
-          text: `[Agent Network]\nfrom: ${input.fromAlias}\ntype: task\ntask_id: ${input.taskId}\n\n${input.text}`,
+          text: `[Agent Network]\nfrom: ${sanitizeDisplayAlias(input.fromAlias)}\ntype: task\ntask_id: ${input.taskId}\n\n${input.text}`,
         },
       ],
     };
@@ -155,7 +213,9 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
         };
       }
       this.awaitingAcceptance.delete(input.clientUserMessageId);
-      return { kind: "failed", error: msg };
+      // Raw upstream message goes to diagnostics ONLY; wire/state gets a
+      // stable generalized summary with the correlation ref.
+      return { kind: "failed", error: this.generalizeError("turn/start", e) };
     }
   }
 
@@ -259,7 +319,7 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
     if (tracked) {
       const result: { ok: true; replyText: string } | { ok: false; error: string } =
         p.error?.message
-          ? { ok: false, error: p.error.message }
+          ? { ok: false, error: this.generalizeError("turn/completed", p.error.message) }
           : {
               ok: true,
               replyText:

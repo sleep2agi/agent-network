@@ -17,19 +17,32 @@ import {
 const URL = "ws://127.0.0.1:24555";
 
 describe("buildOwnedAppServerArgs", () => {
-  test("no opts → bare app-server (codex defaults apply)", () => {
-    expect(buildOwnedAppServerArgs(URL)).toEqual(["app-server", "--listen", URL]);
-  });
-
-  test("approval_policy only → single -c override before --listen", () => {
-    expect(buildOwnedAppServerArgs(URL, { approvalPolicy: "never" })).toEqual([
-      "app-server", "-c", "approval_policy=never", "--listen", URL,
+  test("no opts → EXPLICIT Phase-1 pins (never inherit codex config.toml defaults)", () => {
+    // 副指挥 P0: argv is always explicit. An unset field pins to the
+    // Phase-1 profile instead of whatever the host config.toml says.
+    expect(buildOwnedAppServerArgs(URL)).toEqual([
+      "app-server",
+      "-c", "approval_policy=never",
+      "-c", "sandbox_mode=read-only",
+      "--listen", URL,
     ]);
   });
 
-  test("sandbox_mode only → single -c override", () => {
+  test("approval_policy set → sandbox still explicitly pinned", () => {
+    expect(buildOwnedAppServerArgs(URL, { approvalPolicy: "never" })).toEqual([
+      "app-server",
+      "-c", "approval_policy=never",
+      "-c", "sandbox_mode=read-only",
+      "--listen", URL,
+    ]);
+  });
+
+  test("sandbox_mode set → approval still explicitly pinned (builder is pure; the RUNTIME gate refuses non-Phase-1 values)", () => {
     expect(buildOwnedAppServerArgs(URL, { sandboxMode: "workspace-write" })).toEqual([
-      "app-server", "-c", "sandbox_mode=workspace-write", "--listen", URL,
+      "app-server",
+      "-c", "approval_policy=never",
+      "-c", "sandbox_mode=workspace-write",
+      "--listen", URL,
     ]);
   });
 

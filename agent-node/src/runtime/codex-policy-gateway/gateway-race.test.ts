@@ -187,7 +187,7 @@ async function buildGateway(app: FakeApp, queueLimit = 256) {
 
   const adapter = new BridgeAdapter({ client, threadId: THREAD, dispatchTimeoutMs: 5_000 });
   const ledger = new GatewayLedger(resolveSqliteDriver(":memory:").driver);
-  const scheduler = new GatewayScheduler({ ledger, dispatcher: adapter, queueLimit });
+  const scheduler = new GatewayScheduler({ ledger, dispatcher: adapter, queueLimit, ownerAttached: () => true });
   adapter.bindScheduler(scheduler);
   return { client, adapter, ledger, scheduler };
 }

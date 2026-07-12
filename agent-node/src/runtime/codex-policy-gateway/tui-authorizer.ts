@@ -16,6 +16,10 @@
 //   always:
 //     - config/auth/account/model/sandbox/execpolicy mutations → DENY
 //     - operations addressing a thread other than the bound one → DENY
+//     - any method NOT on the explicit Phase-1 allowlist → DENY
+//       (default-deny: shellCommand/execute, fs/*, applyPatch,
+//       serverRequest/respond, unknown/evil methods can never be
+//       forwarded upstream — 副指挥 P0, default-allow was a hole)
 //     - approval responses NEVER pass through this authorizer: they are
 //       consumed exclusively via the pending reverse-id map (A's layer);
 //       unknown/duplicate response ids fail closed there.
@@ -36,11 +40,33 @@ export const TUI_DENY_CODES = {
   busyAgent: "tui_thread_busy_agent",
   configLocked: "tui_config_locked",
   threadNotBound: "tui_thread_not_bound",
+  methodNotAllowed: "tui_method_not_allowed",
 } as const;
 
 const CONFIG_MUTATION = /config|auth|account|login|logout|model\/|sandbox|execpolicy|policy\//i;
 const TURN_START_OR_STEER = new Set(["turn/start", "turn/steer"]);
 const TURN_INTERRUPT = "turn/interrupt";
+
+/**
+ * Phase-1 TUI allowlist — the ONLY methods that may ever be forwarded
+ * upstream on behalf of the human TUI. Everything else is denied with a
+ * stable code, never sent. Extending this list is a policy change that
+ * requires review, not a code path that silently widens.
+ *
+ * NOT here on purpose:
+ *   - thread/start (would create an UNBOUND thread; the gateway serves
+ *     exactly one bound thread),
+ *   - shellCommand/*, fs/*, applyPatch/* (side-effectful surfaces),
+ *   - serverRequest/respond or any approval-shaped method (approvals go
+ *     through the reverse-id pending map only).
+ */
+const TUI_METHOD_ALLOWLIST = new Set([
+  "initialize",
+  "initialized",
+  "thread/resume", // re-attach to the bound thread (thread-checked below)
+  TURN_INTERRUPT,
+  ...TURN_START_OR_STEER,
+]);
 
 export function createTuiAuthorizer(opts: {
   boundThreadId: () => string | null;
@@ -56,6 +82,16 @@ export function createTuiAuthorizer(opts: {
           verdict: "deny",
           reason: "config/auth/account/model/sandbox/policy mutations are locked in Phase 1",
           code: TUI_DENY_CODES.configLocked,
+        };
+      }
+
+      // Default-deny: anything off the explicit Phase-1 allowlist never
+      // reaches the upstream socket (0-forward), regardless of shape.
+      if (!TUI_METHOD_ALLOWLIST.has(method)) {
+        return {
+          verdict: "deny",
+          reason: `method '${method}' is not on the Phase-1 TUI allowlist`,
+          code: TUI_DENY_CODES.methodNotAllowed,
         };
       }
 
@@ -88,7 +124,8 @@ export function createTuiAuthorizer(opts: {
         return { verdict: "allow" };
       }
 
-      // Everything else conversational (reads, searches, status…) — allow.
+      // Remaining allowlisted handshake methods (initialize/initialized/
+      // thread-checked thread/resume) — allow.
       return { verdict: "allow" };
     },
   };

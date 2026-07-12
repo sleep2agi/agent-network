@@ -18,6 +18,11 @@
 // CommHub `send_task` — the runtime just returns the final text.
 
 import { spawn, type ChildProcess } from "child_process";
+import {
+  assertPhase1Profile,
+  PHASE1_PROFILE,
+} from "../codex-policy-gateway/policy";
+import { assertCodexBaseline } from "../codex-policy-gateway/version-gate";
 import { CodexAppServerClient, resolveWebSocketCtor } from "../codex-app-server-client";
 import { CodexAppServerBridge } from "../codex-app-server-bridge";
 
@@ -58,15 +63,25 @@ export interface OwnedAppServerConfig {
  * codex config.toml. approval_policy=never makes the app-server auto-run
  * without emitting approval reverse-requests (which the bridge won't
  * answer) — required for an unattended auto-approve node. sandbox_mode
- * bounds what those auto-runs can touch. Each field is omitted when unset
- * so codex falls back to its own defaults. Pure + exported for unit
- * testing. Deliberately NO CommHub MCP wiring — see SENSITIVE_ENV_PATTERN.
+ * bounds what those auto-runs can touch. Fields are ALWAYS emitted
+ * explicitly (unset → Phase-1 profile), never left to codex config.toml
+ * defaults. Pure + exported for unit testing. Deliberately NO CommHub
+ * MCP wiring — see SENSITIVE_ENV_PATTERN.
  */
 export function buildOwnedAppServerArgs(url: string, cfgOpts: OwnedAppServerConfig = {}): string[] {
-  const cfg: string[] = [];
-  if (cfgOpts.approvalPolicy) cfg.push("-c", `approval_policy=${cfgOpts.approvalPolicy}`);
-  if (cfgOpts.sandboxMode) cfg.push("-c", `sandbox_mode=${cfgOpts.sandboxMode}`);
-  return ["app-server", ...cfg, "--listen", url];
+  // 副指挥 P0 (Phase-1 profile enforcement): argv is ALWAYS explicit —
+  // unset fields pin to the Phase-1 profile instead of inheriting
+  // whatever codex config.toml happens to say on this host. The caller
+  // (openCodexAppServerRuntime) has already fail-closed on any value
+  // that isn't the Phase-1 profile.
+  const approval = cfgOpts.approvalPolicy ?? PHASE1_PROFILE.approvalPolicy;
+  const sandbox = cfgOpts.sandboxMode ?? PHASE1_PROFILE.sandboxMode;
+  return [
+    "app-server",
+    "-c", `approval_policy=${approval}`,
+    "-c", `sandbox_mode=${sandbox}`,
+    "--listen", url,
+  ];
 }
 
 /**
@@ -119,34 +134,73 @@ export async function openCodexAppServerRuntime(opts: {
   /** codex binary (default "codex"); honored only when we spawn. */
   binary?: string;
   /**
-   * codex approval policy for OWNED app-servers, passed as `-c
-   * approval_policy=<v>`. The bridge NEVER answers approval reverse-requests
-   * (those belong to a human TUI), so a node that must run write/command
-   * tasks unattended needs `never` here — otherwise such a turn parks
-   * `waiting_human` forever. Values: untrusted | on-failure | on-request |
-   * never. Ignored when attaching to a shared server (that server owns its
-   * own policy). Default: leave codex's own default (typically on-request).
+   * codex approval policy, passed as `-c approval_policy=<v>`.
+   * Phase 1 (副指挥 P0): the ONLY bootable value is `never` (unset →
+   * pinned to `never`); anything else fails closed before any spawn.
+   * The bridge NEVER answers approval reverse-requests — approvals
+   * belong to the human TUI via the reverse-id map.
    */
   approvalPolicy?: string;
   /**
-   * codex sandbox mode for OWNED app-servers, `-c sandbox_mode=<v>`:
-   * read-only | workspace-write | danger-full-access. Bounds the blast
-   * radius of auto-approved commands. Ignored for shared servers.
+   * codex sandbox mode, `-c sandbox_mode=<v>`. Phase 1: the ONLY
+   * bootable value is `read-only` (unset → pinned); workspace-write /
+   * danger-full-access fail closed before any spawn. A later wave
+   * relaxes this deliberately, with review.
    */
   sandboxMode?: string;
   onThread?: (threadId: string, created: boolean) => void | Promise<void>;
   onExit?: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
   log?: (msg: string) => void;
   warn?: (msg: string) => void;
+  /**
+   * Dependency-injected baseline gate — DEFAULTS to the real
+   * assertCodexBaseline (exact codex 0.144.0 + canonical schema digest,
+   * fail closed). Tests inject a stub; production call sites never pass
+   * this (cli.ts calls with the default). NOT configurable via env — a
+   * config knob would be a bypass.
+   */
+  baselineGate?: (binary: string) => Promise<unknown>;
 }): Promise<CodexAppServerRuntimeSession> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const warn = opts.warn ?? ((m: string) => console.warn(m));
 
+  // ── 副指挥 P0: Phase-1 profile gate BEFORE any spawn or socket ──────
+  // The cli passes node-config flags straight through here; without this
+  // gate a node configured workspace-write / danger-full-access /
+  // on-request would actually boot. Phase 1 is read-only / never, no
+  // exceptions, no env overrides — anything else throws and NOTHING is
+  // spawned or connected. (assertPhase1Profile lives in the gateway
+  // policy module; a later wave relaxes this deliberately.)
+  assertPhase1Profile({
+    sandboxMode: opts.sandboxMode ?? PHASE1_PROFILE.sandboxMode,
+    approvalPolicy: opts.approvalPolicy ?? PHASE1_PROFILE.approvalPolicy,
+  });
+
   let proc: ChildProcess | null = null;
   let url = opts.serverUrl;
 
-  if (!url) {
+  if (url) {
+    // Shared/adopt topology: we cannot VERIFY the remote server's
+    // sandbox/approval profile from this side (the app-server protocol
+    // exposes no such introspection in 0.144.0). Phase 1 is verify-or-
+    // refuse — so refuse, fail closed, before any socket opens. A later
+    // wave adds owned-handshake profile attestation.
+    const e = new Error(
+      "codex gateway Phase 1: attaching to a shared app-server is refused — " +
+        "the remote profile (sandbox_mode/approval_policy) cannot be verified. " +
+        "Run an owned app-server instead (unset ANET_CODEX_APP_SERVER_URL).",
+    );
+    (e as Error & { code?: string }).code = "codex_gateway_phase1_shared_unverified";
+    throw e;
+  }
+
+  {
     // Owned-server topology: spawn `codex app-server --listen ws://…`.
+    // 副指挥 P0: baseline gate (exact 0.144.0 + schema digest) runs on
+    // the SAME binary we are about to spawn, before the spawn.
+    const gate = opts.baselineGate ?? assertCodexBaseline;
+    await gate(opts.binary ?? "codex");
+
     const port = randomPort();
     url = `ws://127.0.0.1:${port}`;
     const binary = opts.binary ?? "codex";
@@ -168,8 +222,6 @@ export async function openCodexAppServerRuntime(opts: {
     );
     if (opts.onExit) proc.on("exit", (code, signal) => opts.onExit!({ code, signal }));
     await waitWs(url);
-  } else {
-    log(`[codex-app-server] attaching to shared server ${url}`);
   }
 
   const client = new CodexAppServerClient({ url, clientLabel: "anet_codex_bridge" });

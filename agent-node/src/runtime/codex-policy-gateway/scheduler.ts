@@ -68,8 +68,15 @@ export interface SchedulerOptions {
   dispatcher: TurnDispatcher;
   /** Bounded queue limit (refused_queue_full beyond this). */
   queueLimit?: number;
-  /** Probe: is a human owner attached? (lease is A's lifecycle domain). */
-  ownerAttached?: () => boolean;
+  /**
+   * Probe: is a human owner attached? REQUIRED (副指挥 fail-closed
+   * blocker): an optional default-true probe meant a gateway with no
+   * owner/lease wiring silently accepted work, violating
+   * refused_no_owner/NoOwner. Callers without owner wiring must pass
+   * `() => false` explicitly — the scheduler then refuses new work and
+   * parks the pump. Lease/eviction semantics remain A's lifecycle domain.
+   */
+  ownerAttached: () => boolean;
   /** Refuse new work when shutting down. */
   isShuttingDown?: () => boolean;
   log?: (msg: string) => void;
@@ -115,7 +122,7 @@ export class GatewayScheduler {
     this.ledger = opts.ledger;
     this.dispatcher = opts.dispatcher;
     this.queueLimit = opts.queueLimit ?? 32;
-    this.ownerAttached = opts.ownerAttached ?? (() => true);
+    this.ownerAttached = opts.ownerAttached;
     this.isShuttingDown = opts.isShuttingDown ?? (() => false);
     this.log = opts.log ?? (() => {});
   }
@@ -299,6 +306,15 @@ export class GatewayScheduler {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Lifecycle hook: call when the owner-attachment probe's answer may
+   * have changed (TUI attach/detach). On re-attach this un-parks the
+   * pump so queued entries resume dispatching.
+   */
+  onOwnerAttachmentChanged(): void {
+    void this.pump();
+  }
+
   // ──────────────────────────────────────────────────────────────────
   // Pump
   // ──────────────────────────────────────────────────────────────────
@@ -311,6 +327,12 @@ export class GatewayScheduler {
   private async pump(): Promise<void> {
     // ↓↓ synchronous critical section ↓↓
     if (this.reservation !== "none") return;
+    // Owner dropped while entries were queued: PARK — do not dispatch.
+    // Entries stay queued (owner may re-attach; lease eviction/timeout is
+    // A's lifecycle domain, wired later). An in-flight accepted turn is
+    // NOT auto-interrupted by an owner drop — interrupt is the human's
+    // explicit action, never an implicit side effect.
+    if (!this.ownerAttached()) return;
     const entry = this.queue.shift();
     if (!entry) return;
     this.reservation = "agent";
