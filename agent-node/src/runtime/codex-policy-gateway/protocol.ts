@@ -510,9 +510,13 @@ export async function dispatchTuiRequest(
         tuiId: frame.id,
         code: decision.code,
         message: decision.reason,
+        // Δ13 (副指挥 9a019ff4): decision.reason is the authoritative
+        // deny reason and MUST NOT be shadowed by decision.extra.
+        // Merge extra first, then write reason last so it wins.
+        // (data.code is stable-code-guarded inside makeErrorData.)
         data: makeErrorData(decision.code, {
-          reason: decision.reason,
           ...(decision.extra ?? {}),
+          reason: decision.reason,
         }),
       };
     }
@@ -890,20 +894,50 @@ export type AgentDispatchOutcome =
   };
 
 /**
- * Build the `data` payload for an error outcome. Always emits the
- * stable string code from `GATEWAY_ERROR_DATA_CODE`; extra diagnostic
- * keys (`field`, `queueDepth`, `limit`, …) merge on top. Agent-side
- * consumers can key on `data.code` (string) or the numeric `code`;
- * both are stable.
+ * Reserved keys on `error.data` that come from the numeric error code
+ * itself. Untrusted `extra` payloads (authorizer `decision.extra`,
+ * `GatewayError.gatewayData`, unknown-throw context) MUST NOT be
+ * allowed to override these — the numeric/string pair would decouple
+ * and consumers keying on `data.code` would be lied to.
+ *
+ * Δ13 (副指挥 9a019ff4): `code` in particular was previously
+ * override-able (extra was spread AFTER the code slot). Silent
+ * dropping is preferred over throwing: the outbound frame stays valid
+ * but with the authoritative stable code.
+ */
+const MAKE_ERROR_DATA_RESERVED_KEYS: readonly string[] = ["code"];
+
+/**
+ * Build the `data` payload for an error outcome.
+ *
+ * Order is CRITICAL (Δ13 副指挥 9a019ff4):
+ *   1. Merge caller-supplied `extra` first, filtering out any keys in
+ *      `MAKE_ERROR_DATA_RESERVED_KEYS`. A silently-dropped attempt to
+ *      override `code` MUST NOT crash the wire response — it just gets
+ *      discarded.
+ *   2. THEN write the authoritative stable string code from
+ *      `GATEWAY_ERROR_DATA_CODE` last, so it cannot be shadowed by
+ *      anything the caller (or a hostile authorizer) supplied.
+ *
+ * Result: `data.code` (string) and the numeric outer `code` always
+ * agree, regardless of what `extra` contains. Non-reserved diagnostic
+ * keys (`field`, `queueDepth`, `limit`, `reason`, `source`,
+ * `correlationId`, …) pass through untouched.
  */
 function makeErrorData(
   code: GatewayErrorCode,
   extra?: Record<string, unknown>,
 ): GatewayErrorData {
-  return {
-    code: GATEWAY_ERROR_DATA_CODE[code],
-    ...(extra ?? {}),
-  };
+  const filtered: Record<string, unknown> = {};
+  if (extra !== undefined) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (MAKE_ERROR_DATA_RESERVED_KEYS.includes(k)) continue;
+      filtered[k] = v;
+    }
+  }
+  // Stable code lands LAST so it wins over any residual attempt.
+  filtered.code = GATEWAY_ERROR_DATA_CODE[code];
+  return filtered as GatewayErrorData;
 }
 
 // Strict allow-lists for `enqueueTask.params`. Any key OUTSIDE these

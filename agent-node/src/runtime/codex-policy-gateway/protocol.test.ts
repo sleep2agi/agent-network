@@ -1676,3 +1676,205 @@ describe("reverse-request forgery — Agent can't reach the TUI namespace", () =
     expect(dispatchBody).not.toContain("tuiToCodexReverse");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Δ13 — stable code cannot be overridden by hostile extras (副指挥 9a019ff4)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("makeErrorData reserved-key guard (Δ13, 副指挥 9a019ff4)", () => {
+  test("hostile TUI authorizer deny extra={code:'attacker_override'} → wire data.code stays stable", async () => {
+    const hostile: TuiRequestAuthorizer = {
+      async authorize() {
+        return {
+          verdict: "deny",
+          code: GatewayErrorCode.Busy,
+          reason: "reservation held by agent",
+          // Attempt to override the numeric/string pair.
+          extra: {
+            code: "attacker_override",
+            reservationHolder: "agent",
+            taskId: "t_x",
+          },
+        };
+      },
+    };
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "turn/start", params: {} },
+      hostile,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject, got ${out.kind}`);
+    // Numeric outer code unchanged.
+    expect(out.code).toBe(GatewayErrorCode.Busy);
+    // 🔒 Stable string code MUST remain codex_gateway_busy despite
+    // the attacker_override attempt.
+    expect(out.data.code).toBe("codex_gateway_busy");
+    expect(out.data.code).not.toBe("attacker_override");
+    // Non-reserved diagnostic fields still pass through.
+    expect(out.data.reservationHolder).toBe("agent");
+    expect(out.data.taskId).toBe("t_x");
+    // Authoritative reason wins even if the hostile extra tried to
+    // shadow it (belt-and-braces — see next test).
+    expect(out.data.reason).toBe("reservation held by agent");
+  });
+
+  test("hostile TUI authorizer deny extra={reason:'attacker'} → decision.reason wins", async () => {
+    const hostile: TuiRequestAuthorizer = {
+      async authorize() {
+        return {
+          verdict: "deny",
+          code: GatewayErrorCode.Busy,
+          reason: "the real reason",
+          // Attempt to override the authoritative reason.
+          extra: { reason: "attacker rewritten reason" },
+        };
+      },
+    };
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "turn/start", params: {} },
+      hostile,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject`);
+    // Wire message = decision.reason (unchanged path).
+    expect(out.message).toBe("the real reason");
+    // data.reason must match — no divergence between message and data.
+    expect(out.data.reason).toBe("the real reason");
+    expect(out.data.reason).not.toBe("attacker rewritten reason");
+  });
+
+  test("hostile GatewayError gatewayData={code:'attacker_override'} → wire data.code stays stable", async () => {
+    const backend = makeBackend({
+      async enqueueTask() {
+        throw new GatewayError(
+          GatewayErrorCode.QueueFull,
+          "queue is full",
+          {
+            code: "attacker_override",  // hostile
+            queueDepth: 12,
+            limit: 8,
+          },
+        );
+      },
+    });
+    const out = await dispatchAgentRequest(
+      {
+        jsonrpc: "2.0",
+        id: 10,
+        method: "enqueueTask",
+        params: {
+          taskId: "t_1",
+          messageId: "m_1",
+          authenticatedSender: { alias: "a", tokenId: "tok", role: "member", networkId: "net" },
+          text: "hi",
+        },
+      },
+      backend,
+    );
+    if (out.kind !== "error") throw new Error(`expected error, got ${out.kind}`);
+    expect(out.code).toBe(GatewayErrorCode.QueueFull);
+    // 🔒 stable code unmoved.
+    expect(out.data.code).toBe("codex_gateway_queue_full");
+    expect(out.data.code).not.toBe("attacker_override");
+    // Non-reserved diagnostic fields preserved.
+    expect(out.data.queueDepth).toBe(12);
+    expect(out.data.limit).toBe(8);
+  });
+
+  test("GatewayError with clean gatewayData round-trips (no false-positive scrub)", async () => {
+    const backend = makeBackend({
+      async enqueueTask() {
+        throw new GatewayError(
+          GatewayErrorCode.NoOwner,
+          "no owner bound",
+          { hint: "wait for human attach", pollMs: 500 },
+        );
+      },
+    });
+    const out = await dispatchAgentRequest(
+      {
+        jsonrpc: "2.0",
+        id: 11,
+        method: "enqueueTask",
+        params: {
+          taskId: "t_1",
+          messageId: "m_1",
+          authenticatedSender: { alias: "a", tokenId: "tok", role: "member", networkId: "net" },
+          text: "hi",
+        },
+      },
+      backend,
+    );
+    if (out.kind !== "error") throw new Error(`expected error`);
+    expect(out.data.code).toBe("codex_gateway_no_owner");
+    expect(out.data.hint).toBe("wait for human attach");
+    expect(out.data.pollMs).toBe(500);
+  });
+
+  test("numeric/string pair pinned for EVERY GatewayErrorCode (defense in depth)", async () => {
+    // For every declared error code, force a hostile
+    // gatewayData.code and assert the wire data.code always matches
+    // GATEWAY_ERROR_DATA_CODE[numeric].
+    const codes = Object.values(GatewayErrorCode).filter(
+      (v): v is GatewayErrorCode => typeof v === "number",
+    );
+    for (const numericCode of codes) {
+      const backend = makeBackend({
+        async enqueueTask() {
+          throw new GatewayError(
+            numericCode,
+            "boom",
+            { code: "attacker_override" },
+          );
+        },
+      });
+      const out = await dispatchAgentRequest(
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "enqueueTask",
+          params: {
+            taskId: "t_1",
+            messageId: "m_1",
+            authenticatedSender: { alias: "a", tokenId: "tok", role: "member", networkId: "net" },
+            text: "hi",
+          },
+        },
+        backend,
+      );
+      if (out.kind !== "error") throw new Error(`code=${numericCode} expected error`);
+      expect(out.code).toBe(numericCode);
+      expect(out.data.code).toBe(GATEWAY_ERROR_DATA_CODE[numericCode]);
+      expect(out.data.code).not.toBe("attacker_override");
+    }
+  });
+
+  test("policy_delegate deny with reserved-code override + preserved extras (positive-negative pin)", async () => {
+    // Combined check that the reserved-key guard filters ONLY the
+    // reserved keys, not the whole extra object.
+    const auth: TuiRequestAuthorizer = {
+      async authorize() {
+        return {
+          verdict: "deny",
+          code: GatewayErrorCode.Busy,
+          reason: "held by agent",
+          extra: {
+            code: "attacker_override",  // filtered
+            reason: "attacker_rewrite",  // superseded by decision.reason
+            reservationHolder: "agent",  // preserved
+            hintedCommand: "turn/interrupt",  // preserved
+            severity: 3,  // preserved
+          },
+        };
+      },
+    };
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "turn/start", params: {} },
+      auth,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject`);
+    expect(out.data.code).toBe("codex_gateway_busy");
+    expect(out.data.reason).toBe("held by agent");
+    expect(out.data.reservationHolder).toBe("agent");
+    expect(out.data.hintedCommand).toBe("turn/interrupt");
+    expect(out.data.severity).toBe(3);
+  });
+});
