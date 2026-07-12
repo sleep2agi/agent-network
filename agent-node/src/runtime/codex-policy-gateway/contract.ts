@@ -76,11 +76,14 @@ export type OwnerLeaseId = string & { readonly __brand: "OwnerLeaseId" };
  * fail the reverse-request lockout invariant — the human owner would
  * approve a "member" that no upstream CommHub ever authenticated.
  *
- * The `unknown` role slot on the enum exists ONLY for parsing legacy
- * inbox rows that pre-date the principal stamp (see 通信龙 task
- * 404d7e19 on the server side). It is not a fallback the client is
- * allowed to send; parsers should treat inbound `role: "unknown"` as
- * fail-closed unless there's a specific policy tier that admits it.
+ * Δ12 (副指挥 efde3938): `role: "unknown"` is NOT permitted on the
+ * Agent-facing surface. The Agent MUST arrive with a concretely
+ * classified role from CommHub's principal stamp. Legacy inbox rows
+ * that pre-date the principal stamp (see 通信龙 task 404d7e19) are an
+ * INTERNAL concern of the server / DB layer — they must be reclassified
+ * or refused BEFORE reaching this contract. The parser rejects `role:
+ * "unknown"` with `GatewayErrorCode.InvalidArg` and never advances the
+ * request to the backend.
  * ─────────────────────────────────────────────────────────────────────
  */
 export interface AuthenticatedSender {
@@ -88,8 +91,12 @@ export interface AuthenticatedSender {
   readonly alias: string;
   /** CommHub token identifier (from `api_tokens.token_id`). Authoritative. */
   readonly tokenId: string;
-  /** Bearer role at the time the CommHub inbox row landed. */
-  readonly role: "admin" | "owner" | "member" | "viewer" | "child" | "unknown";
+  /**
+   * Bearer role at the time the CommHub inbox row landed. Concretely
+   * classified — `"unknown"` is REFUSED at the Agent surface (Δ12
+   * 副指挥 efde3938); legacy fallback lives internal to the server.
+   */
+  readonly role: "admin" | "owner" | "member" | "viewer" | "child";
   /**
    * The network this task was sent within. Cross-network dispatch is
    * refused upstream in CommHub; this is here only so the gateway can

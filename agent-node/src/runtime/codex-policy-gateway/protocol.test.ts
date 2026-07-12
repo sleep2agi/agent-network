@@ -1168,6 +1168,42 @@ describe("parseEnqueueTaskParams — strict allowlist (req delta #2, f84942e8)",
     if (r.ok) throw new Error("expected refusal on bogus role");
     expect(r.field).toBe("authenticatedSender.role");
   });
+
+  test("Δ12 (副指挥 efde3938): role=\"unknown\" refused at Agent surface", () => {
+    // Legacy inbox rows without a principal stamp must be
+    // reclassified server-side; `unknown` is NOT a client-legal
+    // value here.
+    const r = parseEnqueueTaskParams({
+      ...goodParams(),
+      authenticatedSender: { ...goodSender(), role: "unknown" },
+    });
+    if (r.ok) throw new Error("expected refusal on role=\"unknown\"");
+    expect(r.field).toBe("authenticatedSender.role");
+    // Reason must enumerate the concrete allowlist, NOT include
+    // "unknown" as a hint (else future readers might re-add it).
+    expect(r.reason).toBe("must be one of admin/owner/member/viewer/child");
+    expect(r.reason).not.toContain("unknown");
+  });
+
+  test("Δ12: all five concrete roles pass; no other role passes", () => {
+    for (const role of ["admin", "owner", "member", "viewer", "child"]) {
+      const r = parseEnqueueTaskParams({
+        ...goodParams(),
+        authenticatedSender: { ...goodSender(), role },
+      });
+      if (!r.ok) throw new Error(`role=${role} should be allowed`);
+      expect(r.args.authenticatedSender.role).toBe(role as "admin" | "owner" | "member" | "viewer" | "child");
+    }
+    // Fuzz a handful of obvious near-misses; all refused.
+    for (const bogus of ["unknown", "Admin", "MEMBER", "guest", "system", "", " member"]) {
+      const r = parseEnqueueTaskParams({
+        ...goodParams(),
+        authenticatedSender: { ...goodSender(), role: bogus },
+      });
+      if (r.ok) throw new Error(`role=${JSON.stringify(bogus)} should be refused`);
+      expect(r.field).toBe("authenticatedSender.role");
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1543,6 +1579,74 @@ describe("dispatchAgentRequest", () => {
     const r = out.result as { ok: boolean; note: string };
     expect(r.ok).toBe(true);
     expect(r.note).toBe("handled_by_uds_layer");
+  });
+
+  // Δ12 (副指挥 efde3938): wire-level assertion that role="unknown"
+  // never reaches the backend. Complements the parser test above by
+  // driving the FULL dispatch path and verifying the backend spy is
+  // not touched.
+  test("Δ12 wire: enqueueTask with role=\"unknown\" → InvalidArg, backend.enqueueTask called 0 times", async () => {
+    let enqueueCalls = 0;
+    const backend = makeBackend({
+      async enqueueTask(args) {
+        enqueueCalls++;
+        return { outcome: "accepted", taskId: args.taskId, queuePosition: 0, duplicate: false };
+      },
+    });
+    const out = await dispatchAgentRequest(
+      {
+        jsonrpc: "2.0",
+        id: 42,
+        method: "enqueueTask",
+        params: {
+          taskId: "t_1",
+          messageId: "m_1",
+          authenticatedSender: {
+            alias: "alice",
+            tokenId: "tok_x",
+            role: "unknown",
+            networkId: "net_x",
+          },
+          text: "hi",
+        },
+      },
+      backend,
+    );
+    if (out.kind !== "error") throw new Error(`expected error, got ${out.kind}`);
+    expect(out.code).toBe(GatewayErrorCode.InvalidArg);
+    expect(out.data.code).toBe("codex_gateway_invalid_arg");
+    expect(out.data.field).toBe("authenticatedSender.role");
+    // Refused before backend.enqueueTask is ever called.
+    expect(enqueueCalls).toBe(0);
+  });
+
+  test("Δ12 wire: each concrete role admin/owner/member/viewer/child reaches backend exactly once", async () => {
+    for (const role of ["admin", "owner", "member", "viewer", "child"]) {
+      let calls = 0;
+      const backend = makeBackend({
+        async enqueueTask(args) {
+          calls++;
+          expect(args.authenticatedSender.role).toBe(role as "admin" | "owner" | "member" | "viewer" | "child");
+          return { outcome: "accepted", taskId: args.taskId, queuePosition: 0, duplicate: false };
+        },
+      });
+      const out = await dispatchAgentRequest(
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "enqueueTask",
+          params: {
+            taskId: "t_1",
+            messageId: "m_1",
+            authenticatedSender: { alias: "a", tokenId: "tok", role, networkId: "net" },
+            text: "hi",
+          },
+        },
+        backend,
+      );
+      if (out.kind !== "reply") throw new Error(`role=${role} expected reply, got ${out.kind}`);
+      expect(calls).toBe(1);
+    }
   });
 });
 

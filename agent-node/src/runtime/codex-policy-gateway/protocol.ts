@@ -929,8 +929,15 @@ const AUTHENTICATED_SENDER_ALLOWED_KEYS = new Set<string>([
   "networkId",
 ]);
 
+/**
+ * Δ12 (副指挥 efde3938): `"unknown"` is REFUSED at the Agent surface.
+ * Legacy inbox rows without a principal stamp are the server / DB
+ * layer's concern — they must be reclassified or refused before
+ * reaching the gateway. If unknown ever appears here it is either a
+ * mis-plumbed principal or a rogue client; fail closed either way.
+ */
 const AUTHENTICATED_SENDER_VALID_ROLES = new Set<string>([
-  "admin", "owner", "member", "viewer", "child", "unknown",
+  "admin", "owner", "member", "viewer", "child",
 ]);
 
 /**
@@ -1013,7 +1020,7 @@ export function parseEnqueueTaskParams(raw: unknown):
     return { ok: false, field: "authenticatedSender.networkId", reason: "must be a string 1..200" };
   }
   if (typeof s.role !== "string" || !AUTHENTICATED_SENDER_VALID_ROLES.has(s.role)) {
-    return { ok: false, field: "authenticatedSender.role", reason: "must be one of admin/owner/member/viewer/child/unknown" };
+    return { ok: false, field: "authenticatedSender.role", reason: "must be one of admin/owner/member/viewer/child" };
   }
 
   let brandedTaskId: TaskId;

@@ -126,14 +126,17 @@ describe("EnqueueTaskArgs", () => {
     ]);
   });
 
-  test("authenticatedSender.role has a fixed enum — 'admin/owner/member/viewer/child/unknown'", () => {
+  test("authenticatedSender.role — exact allowlist admin/owner/member/viewer/child (Δ12 no unknown)", () => {
+    // Δ12 (副指挥 efde3938): the Agent-facing role enum MUST NOT
+    // admit "unknown". Legacy inbox rows without a principal stamp
+    // are the server / DB layer's concern — they must be reclassified
+    // or refused BEFORE reaching the gateway.
     const roles: Array<AuthenticatedSender["role"]> = [
       "admin",
       "owner",
       "member",
       "viewer",
       "child",
-      "unknown",
     ];
     for (const r of roles) {
       const s: AuthenticatedSender = {
@@ -144,6 +147,32 @@ describe("EnqueueTaskArgs", () => {
       };
       expect(s.role).toBe(r);
     }
+    // Compile-time surface pin: "unknown" is NOT assignable to
+    // AuthenticatedSender["role"] (checked via `@ts-expect-error` in
+    // the grep-based interface test below at runtime, since bun-test
+    // won't fail on assignability).
+  });
+
+  test("contract.ts source excludes \"unknown\" from AuthenticatedSender.role type (Δ12)", () => {
+    // Source-level pin: the role type literal must not contain
+    // "unknown" anywhere on its declaration line. Guards against a
+    // future refactor silently reopening the fallback.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const src = require("node:fs").readFileSync(__dirname + "/contract.ts", "utf-8");
+    const lines = src.split("\n");
+    let checked = 0;
+    for (const line of lines) {
+      const m = line.match(/^\s*readonly role:\s*(.+);/);
+      if (m) {
+        checked++;
+        // The Agent-facing declaration is the only `readonly role:`
+        // in this file.
+        expect(m[1]).not.toContain("\"unknown\"");
+        expect(m[1]).toContain("\"admin\"");
+        expect(m[1]).toContain("\"child\"");
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 });
 
