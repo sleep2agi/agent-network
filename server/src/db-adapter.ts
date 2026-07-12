@@ -213,41 +213,77 @@ export class PgAdapter implements DbAdapter {
 // ════════════════════════════════════════════
 
 /**
- * Create the appropriate adapter based on environment.
- * - DATABASE_URL starts with "postgres://" → PgAdapter
- * - Otherwise → SQLiteAdapter with COMMHUB_DB or default path
- *
- * Test-default-prod GUARD: when `NODE_ENV === "test"` (set automatically by
- * `bun test`) AND `COMMHUB_DB` is unset, we REFUSE to fall through to the
- * default `~/.commhub/commhub.db` path. Several modules (notably
- * `server/src/auth.ts register()`) write into the configured database at
- * import-time-side-effect granularity; running their tests against the
- * production hub DB silently created spurious users / networks / tokens
- * on 2026-06-23 (4u / 4net / 8tok by one `bun -e` probe + an unknown
- * pre-existing history of test pollution in the same DB). The guard makes
- * the failure mode loud + actionable instead of silent + destructive.
- *
- * The guard does NOT fire when:
- *   - COMMHUB_DB is set (the test runner's documented contract); or
- *   - NODE_ENV is unset (production server) or any non-"test" value.
- *
- * Operators who run `bun -e` snippets that touch the DB are expected to
- * `COMMHUB_DB=/tmp/...` themselves — `bun -e` doesn't set NODE_ENV, so the
- * guard can't catch that case. The rule (never read or write the
- * production hub database) is documented in CLAUDE.md.
+ * Discriminant describing which adapter to build. Split out from
+ * `createAdapter()` so all env-driven decisions live in a pure function
+ * that can be unit-tested without constructing a database connection
+ * (issue #435 — see `db-adapter-guard.test.ts`).
  */
-export function createAdapter(): DbAdapter {
-  const dbUrl = process.env.DATABASE_URL;
-  if (dbUrl && (dbUrl.startsWith("postgres://") || dbUrl.startsWith("postgresql://"))) {
-    console.log("[commhub] database: PostgreSQL");
-    return new PgAdapter(dbUrl);
-  }
-  // Default: SQLite
-  const { mkdirSync } = require("fs");
-  const { dirname } = require("path");
+export type DbTarget =
+  | { kind: "postgres"; url: string }
+  | { kind: "sqlite"; path: string };
 
-  // Test-default-prod GUARD (see docblock above).
-  if (process.env.NODE_ENV === "test" && !process.env.COMMHUB_DB) {
+/**
+ * Fail-closed test-safety guard (#435). Under `NODE_ENV=test`, ANY
+ * inherited `DATABASE_URL` is refused unconditionally — no opt-in
+ * flag, no naming-regex escape hatch, no bypass. A future isolated
+ * PostgreSQL test harness will land under a separate RFC/issue with
+ * explicit review; this P0 just closes the ordering hole where
+ * `createAdapter()` used to construct `PgAdapter(dbUrl)` before the
+ * SQLite guard ever fired, letting an inherited prod URL bypass every
+ * existing safety net.
+ *
+ * Production behavior (`NODE_ENV != "test"`) is unchanged: this helper
+ * returns silently and the caller proceeds to whichever branch the URL
+ * indicates.
+ *
+ * Exported so tests can drive it directly with a controlled env object.
+ */
+export function assertSafeTestDatabaseEnv(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.NODE_ENV === "test" && env.DATABASE_URL) {
+    throw new Error(
+      "[commhub] REFUSING to honor inherited DATABASE_URL under NODE_ENV=test.\n" +
+      "  This test guard is fail-closed by design (issue #435). Normal test\n" +
+      "  runners must `unset DATABASE_URL` before invoking `bun test`.\n" +
+      "  Production runs (NODE_ENV != \"test\") are unaffected. A future\n" +
+      "  isolated PostgreSQL test harness will land under a separate RFC/issue\n" +
+      "  with explicit review; this build refuses ANY inherited DATABASE_URL\n" +
+      "  under NODE_ENV=test, with no opt-in bypass."
+    );
+  }
+}
+
+/**
+ * Pure decision function: given an env object, return the target
+ * discriminant. Constructs nothing, opens nothing, connects to nothing.
+ * Called by `createAdapter()` after `assertSafeTestDatabaseEnv()` passes.
+ *
+ * Exported so production-branch regression tests can prove
+ * `NODE_ENV=production + DATABASE_URL=postgres://...` returns
+ * `{ kind: "postgres", url }` without the test needing to actually open
+ * a PostgreSQL connection (per #435: "no real external database
+ * endpoint is contacted during tests").
+ *
+ * Test-default-prod SQLite GUARD (kept as before, now inside this
+ * pure function): when `NODE_ENV === "test"` AND `COMMHUB_DB` is unset,
+ * we REFUSE to fall through to the default `~/.commhub/commhub.db`
+ * path. Several modules (notably `server/src/auth.ts register()`)
+ * write into the configured database at import-time-side-effect
+ * granularity; running their tests against the production hub DB
+ * silently created spurious users / networks / tokens on 2026-06-23
+ * (4u / 4net / 8tok by one `bun -e` probe + an unknown pre-existing
+ * history of test pollution in the same DB). The guard makes the
+ * failure mode loud + actionable instead of silent + destructive.
+ */
+export function resolveDatabaseTarget(env: NodeJS.ProcessEnv = process.env): DbTarget {
+  assertSafeTestDatabaseEnv(env);
+
+  const dbUrl = env.DATABASE_URL;
+  if (dbUrl && (dbUrl.startsWith("postgres://") || dbUrl.startsWith("postgresql://"))) {
+    return { kind: "postgres", url: dbUrl };
+  }
+
+  // Test-default-prod SQLite GUARD.
+  if (env.NODE_ENV === "test" && !env.COMMHUB_DB) {
     throw new Error(
       "[commhub] REFUSING to open the default SQLite database under NODE_ENV=test.\n" +
       "  Tests must explicitly set COMMHUB_DB to a throwaway path so they don't\n" +
@@ -257,10 +293,32 @@ export function createAdapter(): DbAdapter {
     );
   }
 
-  const dbPath = process.env.COMMHUB_DB || `${process.env.HOME}/.commhub/commhub.db`;
-  mkdirSync(dirname(dbPath), { recursive: true });
-  console.log(`[commhub] database: ${dbPath}`);
-  const rawDb = new Database(dbPath);
+  const dbPath = env.COMMHUB_DB || `${env.HOME}/.commhub/commhub.db`;
+  return { kind: "sqlite", path: dbPath };
+}
+
+/**
+ * Create the appropriate adapter based on environment. Decision is
+ * delegated to `resolveDatabaseTarget()` (which runs
+ * `assertSafeTestDatabaseEnv()` first) so that:
+ *   1. the test-safety guard fires BEFORE any adapter construction or
+ *      network activity, and
+ *   2. env-driven branching is unit-testable without a live DB.
+ */
+export function createAdapter(): DbAdapter {
+  const target = resolveDatabaseTarget();
+
+  if (target.kind === "postgres") {
+    console.log("[commhub] database: PostgreSQL");
+    return new PgAdapter(target.url);
+  }
+
+  // SQLite
+  const { mkdirSync } = require("fs");
+  const { dirname } = require("path");
+  mkdirSync(dirname(target.path), { recursive: true });
+  console.log(`[commhub] database: ${target.path}`);
+  const rawDb = new Database(target.path);
   rawDb.exec("PRAGMA journal_mode=WAL");
   rawDb.exec("PRAGMA busy_timeout=5000");
   return new SQLiteAdapter(rawDb);
