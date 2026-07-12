@@ -163,6 +163,7 @@ fixture with the same name—proves every row.
 | Reply lifecycle and SSE wake | **Partial / blocked** | Real SSE wake is useful evidence, but the E2E manually ACKs and does not prove the production pump ACKs a valid retry attempt |
 | Human interrupt race | **FAIL in integrated candidate** | Authorizer arms a global boolean before upstream write succeeds; it is not bound to a specific active turn and can misclassify another turn's normal completion |
 | Retry/reassign state consistency | **FAIL in server integration** | Gateway attempt tests pass, but server ACK/cancel/reassign still address initial IDs instead of all rows for the canonical task |
+| Server aggregate test isolation | **FAIL** | Candidate full suite is `538/12/1638` versus baseline `515/8/1518`; four candidate tests fail before assertions because module-singleton server, port and DB fixtures are shared. Per-file green is partial evidence only |
 | Independent §8 security review | **Not started** | Run only on corrected committed SHA; author cannot self-review |
 
 ## 8. Reproducible evidence log
@@ -177,7 +178,7 @@ fixture with the same name—proves every row.
 | 2026-07-12 | B L1 `34bea40` | `bun test server/src/rfc030-principal-rest.test.ts` | `3 pass / 0 fail / 14 expect` | Real Bun.serve + issueUserToken mint over HTTP: /api/task stamp+origin+canonical, unauth→null, /api/broadcast |
 | 2026-07-12 | B L2 `ed45f4d` | `bun test agent-node/src/runtime/codex-app-server/boot-gate.test.ts` | `5 pass / 0 fail / 18 expect` | Production-entry gates: dangerous config → zero binary invocations; baseline gate before spawn; shared attach typed refusal with 0 connections |
 | 2026-07-12 | B L2 `ed45f4d` | `bun test agent-node/src/runtime/codex-policy-gateway/ agent-node/src/runtime/codex-app-server/` | `118 pass / 0 fail / 1280 expect` | Full gateway + app-server suites at L2 head |
-| 2026-07-12 | B L1 `34bea40` | `bun test server/` (single process, COMMHUB_DB isolated) | `538 pass / 11 fail` vs baseline `d418862` `515 pass / 8 fail` (identical 8× #380) | Pre-existing multi-importer Bun.serve conflict; all rfc030 suites green per-file; delta fully attributed |
+| 2026-07-12 | B candidate `090ce12` vs baseline `d418862` | full server suite with separate explicit `COMMHUB_DB` | candidate `538/12/1638`; baseline `515/8/1518` | Root cause is the known module-singleton server/port class, but the candidate adds four aggregate failures; test isolation is a blocker and the previous `538/11` / “zero new regression” claim is withdrawn |
 | 2026-07-12 | B L3 `ed827b3` (R1–R5,R7,R8) | `bun test agent-node/src/runtime/codex-policy-gateway/ agent-node/src/runtime/codex-app-server/` | `270 pass / 0 fail / 2387 expect` | Incl. A's frozen 169 contract/protocol tests running in B's tree after verbatim adoption (sha256 == freeze) |
 | 2026-07-12 | B L3 `57e45ce` | `bun test server/src/rfc030-reply-lifecycle-e2e.test.ts` | `1 pass / 0 fail / 17 expect` | 通信龙硬验收①② integrated E2E: retry→pump(sender_*)→send_reply lands on ORIGINAL canonical task, owner-visible replied+result, originator woken over REAL HTTP SSE new_reply |
 | 2026-07-12 | A Segment A `98676f1` | `bun test agent-node/src/runtime/codex-policy-gateway/uds-server.test.ts` | `28 pass / 0 fail / 72 expect` | Real UDS bytes-in/out coverage: 0700 dir + 0600 socket + lstat symlink/pre-existing-path refusal; fragmented / coalesced / half-packet / oversize / malformed JSON / blank-line keepalive / slow-loris cap; real no-id `initialized` = 0 wire response; TUI init returns injected upstream snapshot; dual-origin same socket out-of-order; duplicate & unknown upstream response → diagnostic orphan; TUI disconnect preserves internal pending; approval-spoof + duplicate reverse-id fail closed; no-TUI reverse request → NoOwner upstream; connection cap |
@@ -197,6 +198,11 @@ fixture with the same name—proves every row.
   production pump/demux and atomic validated dead-letter; carry server-resolved
   token kind through MCP auth; test real bearer contexts; clean every delivery
   attempt by canonical task ID; enforce origin write-once at the database layer.
+- Server tests: isolate every real-server fixture from ambient module state,
+  ports and databases. The current host-supervisors test imports `db` before its
+  `beforeAll` assigns the advertised temp DB, so a naked per-file run hits the
+  DB safety guard and combined runs share another suite's database. A selected
+  three-file run cannot substitute for a deterministic aggregate gate.
 - Candidate `090ce12` was produced only after 通信龙 issued a written R6 restore
   that conflicted with the coordinator pause. 通信龙 later withdrew that restore
   after the independent audit invalidated its assumptions. B followed the
