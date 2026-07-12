@@ -163,7 +163,8 @@ fixture with the same name—proves every row.
 | Reply lifecycle and SSE wake | **Partial / blocked** | Real SSE wake is useful evidence, but the E2E manually ACKs and does not prove the production pump ACKs a valid retry attempt |
 | Human interrupt race | **FAIL in integrated candidate** | Authorizer arms a global boolean before upstream write succeeds; it is not bound to a specific active turn and can misclassify another turn's normal completion |
 | Retry/reassign state consistency | **FAIL in server integration** | Gateway attempt tests pass, but server ACK/cancel/reassign still address initial IDs instead of all rows for the canonical task |
-| Server aggregate test isolation | **FAIL** | Candidate full suite is `538/12/1638` versus baseline `515/8/1518`; four candidate tests fail before assertions because module-singleton server, port and DB fixtures are shared. Per-file green is partial evidence only |
+| Candidate aggregate test delta | **FAIL** | Candidate is `538/12/1638` versus baseline `515/8/1518`. RFC-030 must remove its four added failures and prove every new principal/auth assertion runs in aggregate; exit requires candidate failures `<= 8` |
+| Historical server test isolation | **Tracked separately / non-blocking after delta clears** | Baseline's eight module-singleton server/DB/port failures are owned by 通信测试马 in [#434](https://github.com/sleep2agi/agent-network/issues/434) |
 | Independent §8 security review | **Not started** | Run only on corrected committed SHA; author cannot self-review |
 
 ## 8. Reproducible evidence log
@@ -198,11 +199,13 @@ fixture with the same name—proves every row.
   production pump/demux and atomic validated dead-letter; carry server-resolved
   token kind through MCP auth; test real bearer contexts; clean every delivery
   attempt by canonical task ID; enforce origin write-once at the database layer.
-- Server tests: isolate every real-server fixture from ambient module state,
-  ports and databases. The current host-supervisors test imports `db` before its
-  `beforeAll` assigns the advertised temp DB, so a naked per-file run hits the
-  DB safety guard and combined runs share another suite's database. A selected
-  three-file run cannot substitute for a deterministic aggregate gate.
+- RFC-030 server tests: isolate the new principal/auth and reply fixtures so the
+  candidate introduces no failures beyond the baseline eight and every new
+  security assertion executes in aggregate. The broader historical cleanup is
+  tracked separately in #434 and does not block RFC-030 after this delta clears.
+  The current host-supervisors test imports `db` before its `beforeAll` assigns
+  the advertised temp DB, so it remains useful baseline evidence but not a
+  waiver for the candidate's four added failures.
 - Candidate `090ce12` was produced only after 通信龙 issued a written R6 restore
   that conflicted with the coordinator pause. 通信龙 later withdrew that restore
   after the independent audit invalidated its assumptions. B followed the
