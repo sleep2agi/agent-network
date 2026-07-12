@@ -54,7 +54,7 @@ production.
 | Wave 0 — decisions and baseline | 副指挥 + 通信龙 | **Complete** | #428 | Decisions above frozen; Codex `0.144.0` selected | No unresolved product decision |
 | Wave 1A — typed contract and protocol | 通信工程马 | **Frozen** | `rfc030-gateway-protocol`, draft PR [#431](https://github.com/sleep2agi/agent-network/pull/431) | Freeze `90d1e58`; `169 pass / 0 fail / 555 expect` | B consumes exact shape; no unreviewed shape change |
 | Wave 1A — TUI transport / human owner / lifecycle | 通信工程马 | **Checkpoint FAIL — P0 redesign planning** | PR #431 @ corrective candidate `5b18df6` over `00d4ea8` | `251/0/771` is retained as unit evidence only; lead selected loopback WS + per-start bearer, while owner lease and teardown/startup probes still fail | Reviewed implementation design, separate P0 integration + P1 hardening commits, then independent reproduction |
-| Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **Checkpoint FAIL — corrective work required** | `rfc030-gateway-runtime` @ `34bea40`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Targeted suites are green, but valid pump rows are not ACKed, pump has no production wiring, MCP auth still branches on raw token prefix, and canonical-attempt cleanup is incomplete | Real auth/pump/dead-letter/canonical-attempt production E2E |
+| Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **Checkpoint FAIL — second corrective design required** | `rfc030-gateway-runtime` @ corrective candidate `b3fabba`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Targeted suites are green, but real HTTP/MCP proves cross-alias dead-letter; audit failure is swallowed; cancel cleanup is non-atomic; the claimed production demux is not wired; PostgreSQL does not provide the claimed transaction/trigger invariants | Server-auth consumer binding, strict atomic audit/cancel, real production demux/auth E2E and an explicit SQLite/PostgreSQL capability decision |
 | Wave 1B L2 — runtime hardening | 通信SDK马 | **Paused — corrective audit pending** | PR #432 @ `ed45f4d` | Boot/profile gates are useful partial evidence; TUI bound-thread validation and diagnostics/lifecycle integration remain open | Rebase on corrected A/L1 and independently reproduce all real-entry gates |
 | Wave 1B L3 — canonical mux/client/pump integration | 通信SDK马 | **Frozen — candidate is not an approved checkpoint** | PR #432 @ `090ce12` | Built under a conflicting written R6 restore from 通信龙, later withdrawn after the audit disproved its assumptions; B bears no process fault; `351/0/2634` remains unit evidence only | No further R work until the coordinator re-releases a scoped tranche; full integrated evidence required |
 | Wave 1 checkpoint | 副指挥 + 通信龙 | **Locked** | #428 | Typed surface frozen; integrated hard-gate evidence incomplete | All rows in §7 green and reproducible |
@@ -183,7 +183,7 @@ fixture with the same name—proves every row.
 | Single mux, collisions and out-of-order routing | **Partial / blocked** | Unit routing tests are green; corrected A lifecycle must own the sole allocator and settle every origin on close before this can pass |
 | Approval forgery | **FAIL in corrective candidate** | With `maxConnectionsPerRole=2`, a second authenticated TUI can consume the incumbent's predictable reverse ID and forward an approval response; reverse IDs must be bound to an owner lease |
 | CommHub token isolation | **Partial PASS** | Owned-spawn argv/env tests are useful; final real spawn capture and all credential forms remain |
-| Authenticated principal | **FAIL (L1 @ `34bea40`)** | Principal resolver direction is useful, but production pump/ACK/dead-letter is not wired, raw token-prefix branching remains, and handler tests fabricate impossible auth contexts |
+| Authenticated principal / inbox ownership | **FAIL (L1 @ `b3fabba`)** | Raw-prefix classification was removed, but a real attacker node bearer can read a same-network victim alias's inbox and invoke `gateway_dead_letter`, failing the victim task and ACKing its row. Network-bound get/ack/dead-letter must bind to server-resolved consumer identity |
 | Phase 1 read-only / approval never | **Partial / transport-blocked** | Corrective candidate routes fake-client reverse requests through `approvalMode=never`; the native Codex TUI cannot attach to that raw-JSONL endpoint, so production-path evidence is still absent |
 | TUI policy default-deny | **Partial / blocked** | Unknown methods deny correctly, but thread-bound methods do not consistently require a present bound `threadId`; integrate only after A correction |
 | Owner lease fail-closed | **FAIL in corrective candidate** | Coordinator is wired, but ownership is still a global boolean: the connection cap is configurable above one, responses are not lease-bound, and a non-incumbent disconnect can detach the incumbent |
@@ -191,7 +191,9 @@ fixture with the same name—proves every row.
 | Codex/schema/SQLite startup gate | **Partial (L2)** | assertCodexBaseline now wired into openCodexAppServerRuntime before spawn (same-binary proof); REMAINING: digest algorithm path+NUL+length+content domain separation (P1-4) + SQLite gate at gateway production startup — scheduled with L3 |
 | Reply lifecycle and SSE wake | **Partial / blocked** | Real SSE wake is useful evidence, but the E2E manually ACKs and does not prove the production pump ACKs a valid retry attempt |
 | Human interrupt race | **FAIL in integrated candidate** | Authorizer arms a global boolean before upstream write succeeds; it is not bound to a specific active turn and can misclassify another turn's normal completion |
-| Retry/reassign state consistency | **FAIL in server integration** | Gateway attempt tests pass, but server ACK/cancel/reassign still address initial IDs instead of all rows for the canonical task |
+| Retry/reassign state consistency | **FAIL in server integration** | Corrective candidate cleans retry/reassign attempts, but cancellation commits the terminal task state before a separate all-attempt ACK; injected ACK failure leaves a permanently consumable stale row |
+| Atomic dead-letter / cancellation | **FAIL (L1 @ `b3fabba`)** | Dead-letter calls audit helpers that swallow write failures, so ACK/task mutation can commit with no audit. Fault injection also leaves a task cancelled while its delivery attempt remains unacked. All writes and strict audit must share one real transaction |
+| Database-backend invariants | **FAIL / lead decision required** | SQLite trigger/transaction tests are green, but `PgAdapter.transaction()` uses a fresh connection per statement and the SQLite write-once trigger is invalid on PostgreSQL and silently skipped. Either implement equivalent PostgreSQL atomicity/constraints or fail the RFC runtime closed on that backend |
 | Candidate aggregate test delta | **FAIL** | Candidate is `538/12/1638` versus baseline `515/8/1518`. RFC-030 must remove its four added failures and prove every new principal/auth assertion runs in aggregate; exit requires candidate failures `<= 8` |
 | Historical server test isolation | **Tracked separately / non-blocking after delta clears** | Baseline's eight module-singleton server/DB/port failures are owned by 通信测试马 in [#434](https://github.com/sleep2agi/agent-network/issues/434) |
 | Test production-DB isolation | **Partial / P0 [#435](https://github.com/sleep2agi/agent-network/issues/435) open** | SQLite naked-test guard was syscall-verified before any `~/.commhub` open. `DATABASE_URL` is evaluated before that guard; tests must reject it before `PgAdapter` construction/network activity. Owner: 通信测试马; this P0 precedes historical #434 work and §8 review |
@@ -221,6 +223,9 @@ fixture with the same name—proves every row.
 | 2026-07-12 | A corrective candidate `5b18df6` | `bun test agent-node/src/runtime/codex-policy-gateway/` | `251 pass / 0 fail / 771 expect` | Green unit evidence only; independent production-protocol and lifecycle probes below keep checkpoint FAIL |
 | 2026-07-12 | A corrective candidate `5b18df6` | `bun test .../uds-server.test.ts .../lifecycle.test.ts` | `66 pass / 0 fail / 173 expect` | Independent targeted rerun green; report's lifecycle-only count was independently `23/0/69`, not `21/0` |
 | 2026-07-12 | pinned Codex CLI `0.144.0` real socket capture | `codex --remote unix://<socket>` and loopback `ws://127.0.0.1:<ephemeral>` with `--remote-auth-token-env` | Unix first packet is HTTP WebSocket Upgrade; Unix bearer flag is rejected; loopback WS Upgrade carries the bearer header | Proves current raw-JSONL TUI endpoint is not product-compatible and the UDS-only bearer design cannot be implemented with the pinned native CLI |
+| 2026-07-12 | B L1 corrective candidate `b3fabba` | targeted principal/REST/stamp/reply plus gateway+app-server suites | `23/0/115`; `4/0/16`; `6/0/16`; `1/0/17`; `335/0/2587` | Green suite evidence only; the production-entry and failure-injection probes below keep L1 FAIL |
+| 2026-07-12 | B L1 corrective candidate `b3fabba` | real minted attacker ntok → HTTP `/mcp` → `get_inbox(victim)` → `gateway_dead_letter` | both HTTP calls 200; victim task `delivered → failed`; victim inbox row ACKed | P0 same-network cross-alias destructive authorization failure; helper-only tests did not cover the tool entry |
+| 2026-07-12 | B L1 corrective candidate `b3fabba` | drop/failure-trigger probes around audit and cancel cleanup | dead-letter returned success with ACK=1/audit=0; cancel left `task=cancelled, inbox.acked=0` and retry could not clean it | P0 transaction claims are false under failure; strict audit and canonical-attempt cleanup must roll back together |
 
 ### Independent checkpoint failures recorded 2026-07-12
 
@@ -239,6 +244,17 @@ fixture with the same name—proves every row.
   production pump/demux and atomic validated dead-letter; carry server-resolved
   token kind through MCP auth; test real bearer contexts; clean every delivery
   attempt by canonical task ID; enforce origin write-once at the database layer.
+- B corrective `b3fabba`: bind network-token inbox read, ACK and dead-letter
+  to the server-resolved consumer alias/node, and test the negative case through
+  the real minted-bearer HTTP/MCP entry. Use strict audit/event writes inside a
+  real transaction; any audit failure must leave the inbox and task unchanged.
+  Move cancellation plus every canonical attempt ACK into one retryable
+  transaction. Wire the mixed-row demux to one actual production caller rather
+  than a test-only export, with failure/backoff fairness. The current
+  PostgreSQL adapter cannot provide these atomicity guarantees and silently
+  skips the SQLite write-once trigger, so backend support needs an explicit
+  lead decision and fail-closed capability gate or a real PostgreSQL
+  implementation before L1 can pass.
 - RFC-030 server tests: isolate the new principal/auth and reply fixtures so the
   candidate introduces no failures beyond the baseline eight and every new
   security assertion executes in aggregate. The broader historical cleanup is
