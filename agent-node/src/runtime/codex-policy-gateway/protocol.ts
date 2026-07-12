@@ -49,6 +49,7 @@ import {
   asMessageId,
   asTaskId,
   GATEWAY_ERROR_DATA_CODE,
+  GatewayError,
   GatewayErrorCode,
   type CancelQueuedTaskResult,
   type EnqueueTaskArgs,
@@ -235,11 +236,9 @@ export function classifyMessage(raw: unknown): ClassifiedMessage {
 // ────────────────────────────────────────────────────────────────────────
 
 /**
- * The four methods the Agent-side UDS accepts. `initialize` /
- * `initialized` are handled by the virtualiser (see `virtualize
- * InitializeRequest` below) — they're on this list so `enforce
- * MethodOnAgentSide` returns "allowed" without needing a separate
- * branch. Anything else → `UnknownMethod`.
+ * Agent-side allowlist. Fixed closed set — the Agent runtime speaks
+ * only the typed contract (contract.ts) + `initialize` / `initialized`
+ * for bootstrap. Anything else → `UnknownMethod`.
  */
 export const AGENT_ALLOWED_METHODS = new Set<string>([
   "initialize",
@@ -251,23 +250,261 @@ export const AGENT_ALLOWED_METHODS = new Set<string>([
   "runtimeState.unsubscribe",
 ]);
 
-/**
- * Methods the TUI-side UDS may issue TO the gateway. The TUI drives
- * initialize / initialized and answers reverse requests (see
- * lifecycle.ts for the reverse-request response path). Any other
- * inbound method from the TUI side is rejected.
- */
-export const TUI_ALLOWED_METHODS = new Set<string>([
-  "initialize",
-  "initialized",
-]);
-
 export function enforceMethodOnAgentSide(method: string): boolean {
   return AGENT_ALLOWED_METHODS.has(method);
 }
 
-export function enforceMethodOnTuiSide(method: string): boolean {
-  return TUI_ALLOWED_METHODS.has(method);
+// ────────────────────────────────────────────────────────────────────────
+// TUI classification + policy hook (Wave 1A req delta #1, 副指挥 f84942e8)
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * The ONLY TUI-inbound methods A layer handles directly. Everything
+ * else on the TUI socket is a Codex-protocol request the TUI needs
+ * to drive (`thread/resume`, `thread/read`, `thread/status`,
+ * `turn/start`, `turn/interrupt`, response frames to reverse requests,
+ * etc.) — A does not enumerate that set. `classifyTuiRequest` marks
+ * such frames as `policy_delegate` and the caller (uds-server.ts)
+ * hands them to a `TuiPolicyHook` filled in by B. Concrete
+ * bound-thread / scheduler policy stays out of A by design.
+ */
+export const TUI_BOOTSTRAP_METHODS = new Set<string>([
+  "initialize",
+  "initialized",
+]);
+
+/**
+ * Methods reserved for the Agent typed contract. The TUI must NEVER
+ * send these on its socket — that would be either a bug or an attempt
+ * to smuggle an Agent-shaped request through the human side. A layer
+ * rejects them before the policy hook runs.
+ */
+export const AGENT_RESERVED_METHODS = new Set<string>([
+  "enqueueTask",
+  "getTaskState",
+  "cancelQueuedTask",
+  "runtimeState.subscribe",
+  "runtimeState.unsubscribe",
+]);
+
+/**
+ * The outcome of A-layer classification for a TUI-inbound request.
+ * `policy_delegate` is intentionally the LARGEST branch — everything
+ * that isn't `initialize` / `initialized` and isn't reserved for the
+ * Agent typed contract flows to B's policy hook.
+ */
+export type TuiClassifyOutcome =
+  | { readonly kind: "bootstrap"; readonly method: "initialize" | "initialized" }
+  | { readonly kind: "reserved_agent_method"; readonly method: string }
+  | { readonly kind: "policy_delegate"; readonly method: string };
+
+export function classifyTuiRequest(method: string): TuiClassifyOutcome {
+  if (method === "initialize" || method === "initialized") {
+    return { kind: "bootstrap", method };
+  }
+  if (AGENT_RESERVED_METHODS.has(method)) {
+    return { kind: "reserved_agent_method", method };
+  }
+  return { kind: "policy_delegate", method };
+}
+
+/**
+ * B fills this in with the concrete bound-thread / reservation /
+ * scheduler / ledger policy (see 副指挥 Phase 1 policy on task
+ * 7d70dcbd for the concrete Wave 1A rules). A layer only defines
+ * the surface and calls the authorizer via `dispatchTuiRequest` —
+ * no policy content leaks into A.
+ *
+ * The authorizer is only consulted for `policy_delegate` frames.
+ * `bootstrap` frames are answered by A directly; `reserved_agent_
+ * method` frames are rejected by A without consulting the authorizer.
+ *
+ * `verdict` is a required discriminant (per B guidance, 副指挥
+ * ed3f92bf); `code` and `reason` are REQUIRED on `deny` outcomes so
+ * every refusal carries a stable typed code + a human-readable
+ * reason. Deny outcomes MAY carry additional diagnostic `extra`.
+ */
+export type TuiPolicyDecision =
+  | { readonly verdict: "allow" }
+  | {
+    readonly verdict: "deny";
+    readonly code: GatewayErrorCode;
+    readonly reason: string;
+    readonly extra?: Readonly<Record<string, unknown>>;
+  };
+
+/**
+ * B fills this in. Renamed from `TuiPolicyHook` per B naming
+ * (`TuiRequestAuthorizer`).
+ */
+export interface TuiRequestAuthorizer {
+  /**
+   * Return `verdict:"allow"` to forward the frame upstream (uds-
+   * server.ts owns the actual forward), or `verdict:"deny"` with a
+   * typed gateway code + reason. Async so the authorizer can consult
+   * the scheduler / ledger / reservation table.
+   */
+  authorize(frame: JsonRpcRequestFrame): Promise<TuiPolicyDecision>;
+}
+
+/** @deprecated use `TuiRequestAuthorizer` — kept only for internal
+ *  reviewer diffs; no re-exports outside this file. */
+export type TuiPolicyHook = TuiRequestAuthorizer;
+
+/**
+ * Outcome of the A-layer TUI dispatcher. UDS server takes this and
+ * either wires a bootstrap reply back to the TUI, forwards the frame
+ * to upstream Codex, or writes a JSON-RPC error to the TUI socket.
+ */
+export type TuiDispatchOutcome =
+  | { readonly kind: "bootstrap_reply"; readonly tuiId: JsonRpcRequestId; readonly result: unknown }
+  | { readonly kind: "forward_upstream"; readonly frame: JsonRpcRequestFrame }
+  | {
+    readonly kind: "reject";
+    readonly tuiId: JsonRpcRequestId;
+    readonly code: GatewayErrorCode;
+    readonly message: string;
+    readonly data: GatewayErrorData;
+  };
+
+/**
+ * Top-level TUI-inbound dispatcher. Bootstrap frames are answered
+ * directly; reserved-agent-method frames are rejected as InvalidArg
+ * (they should never appear on this socket); everything else is
+ * handed to the injected authorizer — B decides.
+ */
+export async function dispatchTuiRequest(
+  frame: JsonRpcRequestFrame,
+  authorizer: TuiRequestAuthorizer,
+): Promise<TuiDispatchOutcome> {
+  const classified = classifyTuiRequest(frame.method);
+  switch (classified.kind) {
+    case "bootstrap": {
+      if (classified.method === "initialize") {
+        return {
+          kind: "bootstrap_reply",
+          tuiId: frame.id,
+          result: buildAgentInitializeResult(),
+        };
+      }
+      // "initialized" — no-op ack.
+      return { kind: "bootstrap_reply", tuiId: frame.id, result: {} };
+    }
+    case "reserved_agent_method": {
+      return {
+        kind: "reject",
+        tuiId: frame.id,
+        code: GatewayErrorCode.InvalidArg,
+        message: `method '${classified.method}' is reserved for the Agent typed contract and MUST NOT arrive on the TUI socket`,
+        data: makeErrorData(GatewayErrorCode.InvalidArg, {
+          method: classified.method,
+          reason: "reserved_for_agent_typed_contract",
+        }),
+      };
+    }
+    case "policy_delegate": {
+      let decision: TuiPolicyDecision;
+      try {
+        decision = await authorizer.authorize(frame);
+      } catch {
+        // Authorizer itself failed — sanitised Unavailable. Same
+        // policy as an unknown backend throw on the Agent side; the
+        // raw exception message is intentionally not surfaced.
+        return {
+          kind: "reject",
+          tuiId: frame.id,
+          code: GatewayErrorCode.Unavailable,
+          message: "tui policy hook error",
+          data: makeErrorData(GatewayErrorCode.Unavailable, {
+            source: "tui_policy_hook",
+          }),
+        };
+      }
+      if (decision.verdict === "allow") {
+        return { kind: "forward_upstream", frame };
+      }
+      return {
+        kind: "reject",
+        tuiId: frame.id,
+        code: decision.code,
+        message: decision.reason,
+        data: makeErrorData(decision.code, {
+          reason: decision.reason,
+          ...(decision.extra ?? {}),
+        }),
+      };
+    }
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// TUI response frame handling — approval consumption path
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Approvals arrive on the TUI socket as JSON-RPC RESPONSE frames
+ * (not method requests): the human says "yes" or "no" to a
+ * previously-dispatched reverse request from Codex. This path does
+ * NOT go through the `TuiRequestAuthorizer` — it's purely a
+ * namespace consume of a known pending reverse-request id.
+ *
+ * Phase 1 approvals are disabled (`approval=never`; the gateway
+ * never sends a reverse request to the TUI). But the structure is
+ * present so Phase 2 turn-on is a config change, not a code change.
+ * Unknown or duplicate TUI id → fail closed (per B guidance, 副指挥
+ * 7d70dcbd approval spoof rejection).
+ *
+ * The mux this consumes from is the SEPARATE reverse-namespace map
+ * on `ReverseRequestNamespace` — not `UpstreamRequestMux` (which
+ * multiplexes proxied-TUI + internal-scheduler upstream requests,
+ * a distinct namespace).
+ */
+export type TuiResponseOutcome =
+  | {
+    readonly kind: "forward_reverse_response";
+    readonly codexReverseId: JsonRpcRequestId;
+    readonly frame: JsonRpcResponseFrame;
+  }
+  | {
+    readonly kind: "reject";
+    readonly tuiId: JsonRpcRequestId;
+    readonly code: GatewayErrorCode;
+    readonly message: string;
+    readonly data: GatewayErrorData;
+  };
+
+export function handleTuiResponseFrame(
+  frame: JsonRpcResponseFrame,
+  reverse: ReverseRequestNamespace,
+): TuiResponseOutcome {
+  const codexReverseId = reverse.consumeCodexReverseByTuiId(frame.id);
+  if (codexReverseId === null) {
+    // Unknown or already-consumed id. Approval-spoof / replay
+    // protection: fail closed. The TUI sender gets an error keyed
+    // on the offending tuiId; the reverse request Codex is waiting
+    // on stays untouched.
+    return {
+      kind: "reject",
+      tuiId: frame.id,
+      code: GatewayErrorCode.InvalidArg,
+      message: "tui response id is unknown or already consumed",
+      data: makeErrorData(GatewayErrorCode.InvalidArg, {
+        reason: "reverse_id_unknown_or_duplicate",
+        tuiId: frame.id,
+      }),
+    };
+  }
+  // Rewrite the response id back to the Codex reverse-request id and
+  // let uds-server forward it upstream. `result` / `error` shape is
+  // preserved verbatim — this layer never inspects the payload.
+  const rewritten: JsonRpcResponseFrame = "error" in frame
+    ? { jsonrpc: "2.0", id: codexReverseId, error: frame.error }
+    : { jsonrpc: "2.0", id: codexReverseId, result: frame.result };
+  return {
+    kind: "forward_reverse_response",
+    codexReverseId,
+    frame: rewritten,
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -275,77 +512,146 @@ export function enforceMethodOnTuiSide(method: string): boolean {
 // ────────────────────────────────────────────────────────────────────────
 
 /**
- * Each direction has its own monotonically-increasing counter. We
- * NEVER hand an upstream id back to the Agent socket, and we NEVER
- * hand a codex-reverse-request id back to the Agent socket. Every
- * cross-boundary id is minted fresh by the gateway so the Agent
- * cannot forge a response by picking a colliding id.
+ * P0 (副指挥 ed3f92bf): SINGLE upstream id allocator for BOTH kinds
+ * of upstream request. There is no such thing as "Agent typed
+ * request → upstream" — typed Agent methods (enqueueTask etc.) never
+ * travel to Codex directly. They mutate the backend queue / ledger;
+ * the scheduler decides when to send a `turn/start` upstream, and
+ * every such internal request goes through the SAME allocator that
+ * proxied-TUI requests use.
  *
- * Two independent map pairs (forward + reverse each):
+ * The two origin kinds:
  *
- *   agentToUpstream        Agent request → freshly-allocated upstream id
- *   upstreamToAgent        upstream response id → original Agent id
+ *   proxied_tui       — a raw TUI request that the authorizer allowed
+ *                       upstream. Save the downstream TUI id so the
+ *                       response can be rewritten back to the TUI.
  *
- *   codexReverseToTui      upstream reverse-request id → freshly-allocated TUI id
- *   tuiToCodexReverse      TUI response id → original codex reverse-request id
+ *   internal          — a request the scheduler / lifecycle layer
+ *                       makes to Codex on its own behalf (turn/start,
+ *                       turn/interrupt, thread/status polls). Save an
+ *                       opaque origin handle so the response arrives
+ *                       back at the right internal resolver.
  *
- * All four map entries are consumed on the response arrival; leaks
- * would show up as `pendingCounts()` never shrinking, which is the
- * property `lifecycle.ts` uses to detect orphans.
+ * Reverse requests (Codex → gateway → TUI) have a DIFFERENT namespace
+ * — see `ReverseRequestNamespace` below. They must not multiplex
+ * through this class because that would let a Codex reverse id
+ * collide with an outbound upstream id in the same map.
+ *
+ * The upstream id counter is monotonic across both origin kinds, so
+ * a raw TUI id=1 and an internal scheduler request never collide on
+ * the wire to Codex. The B-side client's own `nextId++` no longer
+ * participates: the client MUST consume this mux (the client PR is
+ * separate; A owns this class).
  */
-export class RequestIdNamespace {
+
+/**
+ * Opaque origin handle for an internal scheduler upstream request.
+ * The gateway doesn't inspect it; the lifecycle / scheduler layer
+ * uses it to correlate a response back to its own state (Promise
+ * resolver, task id + turn id, etc.). Parameterised so callers can
+ * pin a concrete type.
+ */
+export type InternalRequestOrigin = unknown;
+
+/**
+ * Discriminated result of consuming an upstream response.
+ */
+export type UpstreamResponseOrigin<TInternal = InternalRequestOrigin> =
+  | { readonly kind: "proxied_tui"; readonly tuiId: JsonRpcRequestId }
+  | { readonly kind: "internal"; readonly origin: TInternal };
+
+export class UpstreamRequestMux<TInternal = InternalRequestOrigin> {
   private nextUpstreamId = 1;
-  private nextTuiId = 1;
 
-  private readonly agentToUpstream = new Map<string, number>();
-  private readonly upstreamToAgent = new Map<number, JsonRpcRequestId>();
-
-  private readonly codexReverseToTui = new Map<string, number>();
-  private readonly tuiToCodexReverse = new Map<number, JsonRpcRequestId>();
+  /** Outstanding upstream requests, keyed by upstream id. */
+  private readonly outstanding = new Map<number, UpstreamResponseOrigin<TInternal>>();
 
   /**
-   * Called on an Agent → Gateway request. Allocates a fresh upstream
-   * id, records both directions of the mapping, returns the id the
-   * gateway should put on the wire to Codex.
-   *
-   * ID collision guard: if the Agent has already used this id AND
-   * we haven't seen the response yet, we refuse — pending id collision
-   * would cross-wire the eventual response. Caller reports
-   * `InvalidArg` back to the Agent.
+   * Dedup on the proxied side — an incoming TUI id already in flight
+   * is a protocol violation and must be refused before allocation.
+   * Internal callers don't dedup here (they're trusted; if they
+   * accidentally reuse a handle it's a bug in B, not a protocol
+   * violation).
    */
-  allocateUpstreamIdForAgentRequest(agentId: JsonRpcRequestId): { upstreamId: number } | { collision: true } {
-    const key = agentIdKey(agentId);
-    if (this.agentToUpstream.has(key)) {
+  private readonly tuiIdInFlight = new Set<string>();
+
+  /**
+   * Allocate an upstream id for a proxied TUI request. Refuses if the
+   * TUI has an outstanding request with the same id (pending
+   * duplicate). Returns the upstream id the gateway puts on the wire
+   * to Codex.
+   */
+  allocateForProxiedTui(tuiId: JsonRpcRequestId): { upstreamId: number } | { collision: true } {
+    const key = idKey(tuiId);
+    if (this.tuiIdInFlight.has(key)) {
       return { collision: true };
     }
     const upstreamId = this.nextUpstreamId++;
-    this.agentToUpstream.set(key, upstreamId);
-    this.upstreamToAgent.set(upstreamId, agentId);
+    this.tuiIdInFlight.add(key);
+    this.outstanding.set(upstreamId, { kind: "proxied_tui", tuiId });
     return { upstreamId };
   }
 
   /**
-   * Called when a response for an outbound-to-upstream request arrives.
-   * Returns the Agent id we should rewrite the response to, or `null`
-   * if we've never seen this upstream id (spoof or reorder past
-   * consumption). Consumes both directions of the mapping.
+   * Allocate an upstream id for an internal scheduler request. The
+   * `origin` handle is opaque — the caller passes anything (a Promise
+   * resolver, a task+turn tuple, etc.). Never rejects; the internal
+   * caller is trusted.
    */
-  consumeAgentResponseByUpstreamId(upstreamId: JsonRpcRequestId): JsonRpcRequestId | null {
-    if (typeof upstreamId !== "number") return null;
-    const agentId = this.upstreamToAgent.get(upstreamId);
-    if (agentId === undefined) return null;
-    this.upstreamToAgent.delete(upstreamId);
-    this.agentToUpstream.delete(agentIdKey(agentId));
-    return agentId;
+  allocateForInternalScheduler(origin: TInternal): { upstreamId: number } {
+    const upstreamId = this.nextUpstreamId++;
+    this.outstanding.set(upstreamId, { kind: "internal", origin });
+    return { upstreamId };
   }
 
   /**
-   * Called on a Codex → Gateway REVERSE request. Allocates a fresh
-   * TUI id, records both directions, returns the id the gateway puts
-   * on the wire to the TUI. The Agent NEVER sees any of this.
+   * Consume an upstream response. Returns the origin (proxied_tui or
+   * internal) so the caller knows where to route the response, or
+   * `null` if the upstream id is unknown or already consumed.
+   * Consumption is one-shot per id.
    */
+  consumeUpstreamResponse(upstreamId: JsonRpcRequestId): UpstreamResponseOrigin<TInternal> | null {
+    if (typeof upstreamId !== "number") return null;
+    const origin = this.outstanding.get(upstreamId);
+    if (origin === undefined) return null;
+    this.outstanding.delete(upstreamId);
+    if (origin.kind === "proxied_tui") {
+      this.tuiIdInFlight.delete(idKey(origin.tuiId));
+    }
+    return origin;
+  }
+
+  pendingCount(): number {
+    return this.outstanding.size;
+  }
+
+  /**
+   * Drop every pending origin. On shutdown / TUI disconnect the
+   * caller must decide what to do about internal scheduler
+   * resolvers — the mux doesn't reject their Promises here; that's
+   * lifecycle.ts's responsibility.
+   */
+  drainAll(): void {
+    this.outstanding.clear();
+    this.tuiIdInFlight.clear();
+  }
+}
+
+/**
+ * Independent namespace for Codex → gateway REVERSE requests (server
+ * → client), which flow to the TUI for approval. Kept SEPARATE from
+ * `UpstreamRequestMux` because these ids live in a distinct wire
+ * direction and mixing them in the same map would allow a Codex
+ * reverse-request id to collide with an outbound upstream id.
+ */
+export class ReverseRequestNamespace {
+  private nextTuiId = 1;
+
+  private readonly codexReverseToTui = new Map<string, number>();
+  private readonly tuiToCodexReverse = new Map<number, JsonRpcRequestId>();
+
   allocateTuiIdForCodexReverseRequest(codexReverseId: JsonRpcRequestId): { tuiId: number } | { collision: true } {
-    const key = agentIdKey(codexReverseId);
+    const key = idKey(codexReverseId);
     if (this.codexReverseToTui.has(key)) {
       return { collision: true };
     }
@@ -355,43 +661,25 @@ export class RequestIdNamespace {
     return { tuiId };
   }
 
-  /**
-   * Called when a TUI response for a reverse-request-in-flight arrives.
-   * Returns the Codex reverse-request id we should rewrite to, or
-   * `null` if we don't recognise the tui id.
-   */
   consumeCodexReverseByTuiId(tuiId: JsonRpcRequestId): JsonRpcRequestId | null {
     if (typeof tuiId !== "number") return null;
     const codexId = this.tuiToCodexReverse.get(tuiId);
     if (codexId === undefined) return null;
     this.tuiToCodexReverse.delete(tuiId);
-    this.codexReverseToTui.delete(agentIdKey(codexId));
+    this.codexReverseToTui.delete(idKey(codexId));
     return codexId;
   }
 
-  /**
-   * Diagnostic — used by `lifecycle.ts` orphan sweep. If either count
-   * grows without bound, there's a bug (or a peer stopped responding
-   * without our timeout catching it).
-   */
-  pendingCounts(): {
-    agentRequestsPending: number;
-    codexReverseRequestsPending: number;
-  } {
-    return {
-      agentRequestsPending: this.agentToUpstream.size,
-      codexReverseRequestsPending: this.codexReverseToTui.size,
-    };
+  pendingCount(): number {
+    return this.codexReverseToTui.size;
   }
 
   /**
-   * Drop every pending mapping. Used on shutdown / TUI disconnect
-   * (`human-owner.ts` calls this to make sure a replayed reverse
-   * request can't be re-approved after the owner leaves).
+   * Drop every pending reverse mapping. `human-owner.ts` calls this
+   * on TUI disconnect so a replayed reverse request can't be re-
+   * approved after the owner leaves.
    */
   drainAll(): void {
-    this.agentToUpstream.clear();
-    this.upstreamToAgent.clear();
     this.codexReverseToTui.clear();
     this.tuiToCodexReverse.clear();
   }
@@ -402,7 +690,7 @@ export class RequestIdNamespace {
  * insertion-invariant on `===`. Coerce to a stable string so a
  * number `1` and a string `"1"` don't collide accidentally.
  */
-function agentIdKey(id: JsonRpcRequestId): string {
+function idKey(id: JsonRpcRequestId): string {
   return typeof id === "number" ? `n:${id}` : `s:${id}`;
 }
 
@@ -505,11 +793,46 @@ function makeErrorData(
   };
 }
 
+// Strict allow-lists for `enqueueTask.params`. Any key OUTSIDE these
+// sets is rejected at the wire boundary — top-level or nested. The
+// previous banned-list approach (`method`, `threadId`, etc.) was
+// incomplete: an attacker could smuggle any other unknown key
+// (`evil`, `params`, arbitrary nested state) and be silently ignored
+// by the destructure. The allowlist flips the default from "accept
+// unless banned" to "reject unless explicitly allowed".
+//
+// Wave 1A req delta #2 (副指挥 f84942e8).
+const ENQUEUE_TASK_ALLOWED_TOP_KEYS = new Set<string>([
+  "taskId",
+  "messageId",
+  "authenticatedSender",
+  "text",
+]);
+
+const AUTHENTICATED_SENDER_ALLOWED_KEYS = new Set<string>([
+  "alias",
+  "tokenId",
+  "role",
+  "networkId",
+]);
+
+const AUTHENTICATED_SENDER_VALID_ROLES = new Set<string>([
+  "admin", "owner", "member", "viewer", "child", "unknown",
+]);
+
 /**
- * Parse an Agent-side `enqueueTask` params blob. Rejects any field
- * that isn't in the typed contract; that's how we keep the Wave-0
- * banned identifiers (method / threadId / turnId / policy / path /
- * config) off the wire even if a rogue Agent client sends them.
+ * Parse an Agent-side `enqueueTask` params blob under a STRICT
+ * allowlist. Both top-level and nested `authenticatedSender` are
+ * closed sets — any extra key is refused. Missing required keys are
+ * refused. Type mismatches are refused. Rejection carries the exact
+ * offending field so tests + logs can spot smuggling attempts.
+ *
+ * The Wave-0 banned identifiers (method / threadId / turnId / policy /
+ * path / config / requestId / jsonrpc / id) are ALL caught by this
+ * allowlist for free — they aren't in
+ * `ENQUEUE_TASK_ALLOWED_TOP_KEYS` or
+ * `AUTHENTICATED_SENDER_ALLOWED_KEYS`, so their presence at any
+ * level fails the check.
  */
 export function parseEnqueueTaskParams(raw: unknown):
   | { ok: true; args: EnqueueTaskArgs }
@@ -520,25 +843,53 @@ export function parseEnqueueTaskParams(raw: unknown):
   }
   const obj = raw as Record<string, unknown>;
 
-  // Reject any Wave-0-banned key at the wire boundary. Even benign-
-  // looking presence is enough to refuse — we don't want to normalise
-  // and forget.
-  for (const banned of ["method", "threadId", "turnId", "policy", "path", "config", "requestId", "jsonrpc", "id"]) {
-    if (Object.prototype.hasOwnProperty.call(obj, banned)) {
-      return { ok: false, field: banned, reason: "not part of the Agent typed contract" };
+  // Top-level allow-set gate — the source of a lot of previous
+  // "silently ignored" bugs.
+  for (const key of Object.keys(obj)) {
+    if (!ENQUEUE_TASK_ALLOWED_TOP_KEYS.has(key)) {
+      return { ok: false, field: key, reason: "not part of the Agent typed contract" };
+    }
+  }
+
+  // Required-field presence check. `authenticatedSender` is validated
+  // structurally below.
+  for (const required of ENQUEUE_TASK_ALLOWED_TOP_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(obj, required)) {
+      return { ok: false, field: required, reason: "required" };
     }
   }
 
   const { taskId, messageId, authenticatedSender, text } = obj;
   if (typeof taskId !== "string") return { ok: false, field: "taskId", reason: "must be a string" };
   if (typeof messageId !== "string") return { ok: false, field: "messageId", reason: "must be a string" };
-  if (typeof text !== "string" || text.length === 0) return { ok: false, field: "text", reason: "must be a non-empty string" };
+  if (typeof text !== "string") return { ok: false, field: "text", reason: "must be a string" };
+  if (text.length === 0) return { ok: false, field: "text", reason: "must be a non-empty string" };
   if (text.length > 128 * 1024) return { ok: false, field: "text", reason: "exceeds 128KB" };
 
-  if (typeof authenticatedSender !== "object" || authenticatedSender === null) {
+  if (typeof authenticatedSender !== "object" || authenticatedSender === null || Array.isArray(authenticatedSender)) {
     return { ok: false, field: "authenticatedSender", reason: "must be an object" };
   }
   const s = authenticatedSender as Record<string, unknown>;
+
+  // Nested allow-set gate on authenticatedSender.
+  for (const key of Object.keys(s)) {
+    if (!AUTHENTICATED_SENDER_ALLOWED_KEYS.has(key)) {
+      return {
+        ok: false,
+        field: `authenticatedSender.${key}`,
+        reason: "not part of the Agent typed contract",
+      };
+    }
+  }
+
+  // Fail-closed on missing principal fields per B delta security
+  // contract (contract.ts AuthenticatedSender docstring).
+  for (const required of AUTHENTICATED_SENDER_ALLOWED_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(s, required)) {
+      return { ok: false, field: `authenticatedSender.${required}`, reason: "required" };
+    }
+  }
+
   if (typeof s.alias !== "string" || s.alias.length === 0 || s.alias.length > 200) {
     return { ok: false, field: "authenticatedSender.alias", reason: "must be a string 1..200" };
   }
@@ -548,8 +899,7 @@ export function parseEnqueueTaskParams(raw: unknown):
   if (typeof s.networkId !== "string" || s.networkId.length === 0 || s.networkId.length > 200) {
     return { ok: false, field: "authenticatedSender.networkId", reason: "must be a string 1..200" };
   }
-  const roles = new Set(["admin", "owner", "member", "viewer", "child", "unknown"]);
-  if (typeof s.role !== "string" || !roles.has(s.role)) {
+  if (typeof s.role !== "string" || !AUTHENTICATED_SENDER_VALID_ROLES.has(s.role)) {
     return { ok: false, field: "authenticatedSender.role", reason: "must be one of admin/owner/member/viewer/child/unknown" };
   }
 
@@ -613,11 +963,69 @@ export function parseCancelQueuedTaskParams(raw: unknown):
  * Interface backend impls (lifecycle.ts, human-owner.ts) fulfil to
  * answer the parsed method. `protocol.ts` doesn't know how to enqueue
  * or query — it just routes. Kept slim so a test double is trivial.
+ *
+ * Throw contract: backends MAY throw a `GatewayError` to signal a
+ * typed refusal (queue-full / no-owner / gateway state). Any OTHER
+ * exception (unexpected IO / DB / P0 bug) is sanitised by the
+ * dispatcher into `Unavailable`. Backends MUST NOT throw plain
+ * `Error("bad taskId")`-style client-parameter refusals — those are
+ * caught by the params parser before the backend is called, so a
+ * throw here always means a gateway-side failure.
  */
 export interface ProtocolBackend {
   enqueueTask(args: EnqueueTaskArgs): Promise<EnqueueTaskResult>;
   getTaskState(taskId: TaskId): Promise<TaskState>;
   cancelQueuedTask(taskId: TaskId): Promise<CancelQueuedTaskResult>;
+}
+
+/**
+ * Uniform throw handling for backend calls. If the backend throws a
+ * `GatewayError`, its typed `code` + `data` pass through verbatim.
+ * Any other exception is sanitised into `Unavailable` — never blamed
+ * on the client, and never leaks the raw `Error.message` to the wire.
+ *
+ * The internal exception is dropped on the floor here; the caller
+ * (uds-server.ts) is expected to log it before invoking the dispatch.
+ * That keeps the wire response free of leaked internals while still
+ * leaving a diagnostic trail in operator logs.
+ *
+ * Wave 1A req delta #3 (副指挥 f84942e8).
+ */
+async function safeBackendCall<T>(
+  agentId: JsonRpcRequestId,
+  op: () => Promise<T>,
+): Promise<{ kind: "ok"; value: T } | { kind: "error"; outcome: AgentDispatchOutcome }> {
+  try {
+    return { kind: "ok", value: await op() };
+  } catch (e: unknown) {
+    if (e instanceof GatewayError) {
+      return {
+        kind: "error",
+        outcome: {
+          kind: "error",
+          agentId,
+          code: e.gatewayCode,
+          message: e.message,
+          data: makeErrorData(e.gatewayCode, e.gatewayData),
+        },
+      };
+    }
+    // Unknown / non-Gateway exception: this is a P0 gateway-side
+    // failure (unexpected IO, DB, bug). Sanitise to Unavailable so
+    // callers back off correctly. Do NOT leak the raw message —
+    // uds-server should have logged the exception before this
+    // point.
+    return {
+      kind: "error",
+      outcome: {
+        kind: "error",
+        agentId,
+        code: GatewayErrorCode.Unavailable,
+        message: "gateway backend error",
+        data: makeErrorData(GatewayErrorCode.Unavailable, { source: "backend" }),
+      },
+    };
+  }
 }
 
 /**
@@ -675,19 +1083,9 @@ export async function dispatchAgentRequest(
           data: makeErrorData(GatewayErrorCode.InvalidArg, { field: parsed.field, reason: parsed.reason }),
         };
       }
-      let result: EnqueueTaskResult;
-      try {
-        result = await backend.enqueueTask(parsed.args);
-      } catch (e: unknown) {
-        return {
-          kind: "error",
-          agentId: frame.id,
-          code: GatewayErrorCode.InvalidArg,
-          message: e instanceof Error ? e.message : "enqueueTask threw",
-          data: makeErrorData(GatewayErrorCode.InvalidArg, { source: "backend" }),
-        };
-      }
-      return { kind: "reply", agentId: frame.id, result };
+      const call = await safeBackendCall(frame.id, () => backend.enqueueTask(parsed.args));
+      if (call.kind === "error") return call.outcome;
+      return { kind: "reply", agentId: frame.id, result: call.value };
     }
     case "getTaskState": {
       const parsed = parseGetTaskStateParams(frame.params);
@@ -700,8 +1098,9 @@ export async function dispatchAgentRequest(
           data: makeErrorData(GatewayErrorCode.InvalidArg, { field: parsed.field, reason: parsed.reason }),
         };
       }
-      const state = await backend.getTaskState(parsed.taskId);
-      return { kind: "reply", agentId: frame.id, result: state };
+      const call = await safeBackendCall(frame.id, () => backend.getTaskState(parsed.taskId));
+      if (call.kind === "error") return call.outcome;
+      return { kind: "reply", agentId: frame.id, result: call.value };
     }
     case "cancelQueuedTask": {
       const parsed = parseCancelQueuedTaskParams(frame.params);
@@ -714,8 +1113,9 @@ export async function dispatchAgentRequest(
           data: makeErrorData(GatewayErrorCode.InvalidArg, { field: parsed.field, reason: parsed.reason }),
         };
       }
-      const result = await backend.cancelQueuedTask(parsed.taskId);
-      return { kind: "reply", agentId: frame.id, result };
+      const call = await safeBackendCall(frame.id, () => backend.cancelQueuedTask(parsed.taskId));
+      if (call.kind === "error") return call.outcome;
+      return { kind: "reply", agentId: frame.id, result: call.value };
     }
     case "runtimeState.subscribe":
     case "runtimeState.unsubscribe": {

@@ -21,21 +21,29 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  AGENT_ALLOWED_METHODS,
+  AGENT_RESERVED_METHODS,
   buildAgentInitializeResult,
   classifyMessage,
+  classifyTuiRequest,
   dispatchAgentRequest,
+  dispatchTuiRequest,
   enforceMethodOnAgentSide,
-  enforceMethodOnTuiSide,
+  handleTuiResponseFrame,
   parseEnqueueTaskParams,
-  RequestIdNamespace,
-  AGENT_ALLOWED_METHODS,
-  TUI_ALLOWED_METHODS,
+  ReverseRequestNamespace,
+  TUI_BOOTSTRAP_METHODS,
+  UpstreamRequestMux,
+  type JsonRpcResponseFrame,
   type ProtocolBackend,
+  type TuiPolicyDecision,
+  type TuiRequestAuthorizer,
 } from "./protocol";
 import {
   asMessageId,
   asTaskId,
   GATEWAY_ERROR_DATA_CODE,
+  GatewayError,
   GatewayErrorCode,
   type CancelQueuedTaskResult,
   type EnqueueTaskArgs,
@@ -130,8 +138,8 @@ describe("classifyMessage", () => {
 // Method whitelists
 // ─────────────────────────────────────────────────────────────────────
 
-describe("method whitelist", () => {
-  test("Agent side accepts the typed contract + initialize/initialized only", () => {
+describe("Agent-side whitelist", () => {
+  test("accepts the typed contract + initialize/initialized only", () => {
     expect(enforceMethodOnAgentSide("enqueueTask")).toBe(true);
     expect(enforceMethodOnAgentSide("getTaskState")).toBe(true);
     expect(enforceMethodOnAgentSide("cancelQueuedTask")).toBe(true);
@@ -141,21 +149,13 @@ describe("method whitelist", () => {
     expect(enforceMethodOnAgentSide("initialized")).toBe(true);
   });
 
-  test("Agent side rejects raw Codex/MCP methods", () => {
+  test("rejects raw Codex/MCP methods", () => {
     for (const m of ["turn/start", "turn/steer", "thread/resume", "shutdown", "serverRequest/resolved"]) {
       expect(enforceMethodOnAgentSide(m)).toBe(false);
     }
   });
 
-  test("TUI side accepts only initialize/initialized (responses are id-only, not method-carrying)", () => {
-    expect(enforceMethodOnTuiSide("initialize")).toBe(true);
-    expect(enforceMethodOnTuiSide("initialized")).toBe(true);
-    expect(enforceMethodOnTuiSide("enqueueTask")).toBe(false);
-    expect(enforceMethodOnTuiSide("turn/start")).toBe(false);
-    expect(enforceMethodOnTuiSide("shutdown")).toBe(false);
-  });
-
-  test("AGENT_ALLOWED_METHODS + TUI_ALLOWED_METHODS have exactly the sets Wave 1A pinned", () => {
+  test("AGENT_ALLOWED_METHODS pinned to the exact 7-method contract", () => {
     expect(Array.from(AGENT_ALLOWED_METHODS).sort()).toEqual([
       "cancelQueuedTask",
       "enqueueTask",
@@ -165,130 +165,585 @@ describe("method whitelist", () => {
       "runtimeState.subscribe",
       "runtimeState.unsubscribe",
     ]);
-    expect(Array.from(TUI_ALLOWED_METHODS).sort()).toEqual([
-      "initialize",
-      "initialized",
-    ]);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────
-// RequestIdNamespace
+// classifyTuiRequest + TUI policy hook (Wave 1A req delta #1, f84942e8)
 // ─────────────────────────────────────────────────────────────────────
 
-describe("RequestIdNamespace — Agent ↔ upstream", () => {
-  test("allocates monotonic upstream ids starting at 1", () => {
-    const ns = new RequestIdNamespace();
-    expect(ns.allocateUpstreamIdForAgentRequest(1)).toEqual({ upstreamId: 1 });
-    expect(ns.allocateUpstreamIdForAgentRequest(2)).toEqual({ upstreamId: 2 });
-    expect(ns.allocateUpstreamIdForAgentRequest("abc")).toEqual({ upstreamId: 3 });
+describe("classifyTuiRequest — no raw allowlist, delegates to policy hook", () => {
+  test("initialize / initialized → bootstrap (A layer answers directly)", () => {
+    expect(classifyTuiRequest("initialize")).toEqual({ kind: "bootstrap", method: "initialize" });
+    expect(classifyTuiRequest("initialized")).toEqual({ kind: "bootstrap", method: "initialized" });
   });
 
-  test("out-of-order response arrival works — consume returns matching agent id", () => {
-    const ns = new RequestIdNamespace();
-    ns.allocateUpstreamIdForAgentRequest(10);   // upstream=1
-    ns.allocateUpstreamIdForAgentRequest(11);   // upstream=2
-    ns.allocateUpstreamIdForAgentRequest(12);   // upstream=3
-    // Responses arrive in reverse order.
-    expect(ns.consumeAgentResponseByUpstreamId(3)).toBe(12);
-    expect(ns.consumeAgentResponseByUpstreamId(1)).toBe(10);
-    expect(ns.consumeAgentResponseByUpstreamId(2)).toBe(11);
-    expect(ns.pendingCounts().agentRequestsPending).toBe(0);
-  });
-
-  test("ID collision — same agent id in flight refused", () => {
-    const ns = new RequestIdNamespace();
-    expect(ns.allocateUpstreamIdForAgentRequest(1)).toEqual({ upstreamId: 1 });
-    const collision = ns.allocateUpstreamIdForAgentRequest(1);
-    if (!("collision" in collision) || !collision.collision) {
-      throw new Error(`expected collision, got ${JSON.stringify(collision)}`);
+  test("Codex-shape TUI methods (thread/*, turn/*) → policy_delegate (B decides)", () => {
+    for (const m of [
+      "thread/resume",
+      "thread/read",
+      "thread/status",
+      "turn/start",
+      "turn/steer",
+      "turn/interrupt",
+      "serverRequest/resolved",
+    ]) {
+      expect(classifyTuiRequest(m)).toEqual({ kind: "policy_delegate", method: m });
     }
   });
 
-  test("ID collision distinguishes numeric 1 from string \"1\" (no accidental merge)", () => {
-    const ns = new RequestIdNamespace();
-    expect(ns.allocateUpstreamIdForAgentRequest(1)).toEqual({ upstreamId: 1 });
-    // "1" is a DIFFERENT id per JSON-RPC (`n:1` vs `s:1` internally).
-    expect(ns.allocateUpstreamIdForAgentRequest("1")).toEqual({ upstreamId: 2 });
+  test("Agent-typed contract methods are RESERVED — TUI must not send them", () => {
+    for (const m of [
+      "enqueueTask",
+      "getTaskState",
+      "cancelQueuedTask",
+      "runtimeState.subscribe",
+      "runtimeState.unsubscribe",
+    ]) {
+      expect(classifyTuiRequest(m)).toEqual({ kind: "reserved_agent_method", method: m });
+    }
   });
 
-  test("consuming a spoof upstream id (never allocated) returns null", () => {
-    const ns = new RequestIdNamespace();
-    expect(ns.consumeAgentResponseByUpstreamId(999)).toBeNull();
-  });
-
-  test("consume with non-numeric upstream id is null (upstream ids are always numeric)", () => {
-    const ns = new RequestIdNamespace();
-    expect(ns.consumeAgentResponseByUpstreamId("999")).toBeNull();
-  });
-
-  test("consuming twice returns null the second time — no double-consume", () => {
-    const ns = new RequestIdNamespace();
-    ns.allocateUpstreamIdForAgentRequest(1);
-    expect(ns.consumeAgentResponseByUpstreamId(1)).toBe(1);
-    expect(ns.consumeAgentResponseByUpstreamId(1)).toBeNull();
-  });
-
-  test("after consuming, the same agent id can be reused for a new request", () => {
-    const ns = new RequestIdNamespace();
-    ns.allocateUpstreamIdForAgentRequest(1);
-    expect(ns.consumeAgentResponseByUpstreamId(1)).toBe(1);
-    expect(ns.allocateUpstreamIdForAgentRequest(1)).toEqual({ upstreamId: 2 });
+  test("Bootstrap + Agent-reserved sets are pinned; everything else flows to policy_delegate", () => {
+    expect(Array.from(TUI_BOOTSTRAP_METHODS).sort()).toEqual(["initialize", "initialized"]);
+    expect(Array.from(AGENT_RESERVED_METHODS).sort()).toEqual([
+      "cancelQueuedTask",
+      "enqueueTask",
+      "getTaskState",
+      "runtimeState.subscribe",
+      "runtimeState.unsubscribe",
+    ]);
+    // The two sets are disjoint (compile-time obvious, runtime pin
+    // in case of future refactor).
+    for (const b of TUI_BOOTSTRAP_METHODS) {
+      expect(AGENT_RESERVED_METHODS.has(b)).toBe(false);
+    }
   });
 });
 
-describe("RequestIdNamespace — Codex reverse ↔ TUI", () => {
-  test("Codex reverse-request ids and Agent ids share no state", () => {
-    const ns = new RequestIdNamespace();
-    ns.allocateUpstreamIdForAgentRequest(1);           // Agent id 1 in flight
-    // Codex sends reverse request with id 1 — different namespace, no collision.
-    const alloc = ns.allocateTuiIdForCodexReverseRequest(1);
-    if ("collision" in alloc && alloc.collision) throw new Error("must not collide across namespaces");
-    if (!("tuiId" in alloc)) throw new Error("must allocate a tui id");
-    expect(alloc.tuiId).toBe(1);
-    // Consuming Agent side does NOT affect the reverse map.
-    ns.consumeAgentResponseByUpstreamId(1);
-    expect(ns.pendingCounts()).toEqual({
-      agentRequestsPending: 0,
-      codexReverseRequestsPending: 1,
-    });
+describe("dispatchTuiRequest — B's authorizer is the arbiter for Codex-shape frames", () => {
+  const alwaysAllow: TuiRequestAuthorizer = {
+    async authorize() { return { verdict: "allow" }; },
+  };
+  const alwaysDeny: TuiRequestAuthorizer = {
+    async authorize() {
+      return { verdict: "deny", code: GatewayErrorCode.NoOwner, reason: "no bound thread" };
+    },
+  };
+  const throwingHook: TuiRequestAuthorizer = {
+    async authorize() { throw new Error("hook exploded"); },
+  };
+
+  test("initialize is answered by A directly (no authorizer call)", async () => {
+    let called = false;
+    const spy: TuiRequestAuthorizer = {
+      async authorize() { called = true; return { verdict: "allow" }; },
+    };
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "initialize" },
+      spy,
+    );
+    if (out.kind !== "bootstrap_reply") throw new Error(`expected bootstrap_reply, got ${out.kind}`);
+    expect(out.tuiId).toBe(1);
+    expect((out.result as { protocol: string }).protocol).toBe("codex-policy-gateway/1");
+    expect(called).toBe(false);
+  });
+
+  test("initialized is answered by A directly (empty ack, no hook call)", async () => {
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 2, method: "initialized" },
+      alwaysDeny,
+    );
+    if (out.kind !== "bootstrap_reply") throw new Error(`expected bootstrap_reply`);
+    expect(out.result).toEqual({});
+  });
+
+  test("policy_delegate: hook allow → forward_upstream", async () => {
+    const frame = { jsonrpc: "2.0" as const, id: 3, method: "thread/resume", params: { threadId: "t_x" } };
+    const out = await dispatchTuiRequest(frame, alwaysAllow);
+    if (out.kind !== "forward_upstream") throw new Error(`expected forward_upstream, got ${out.kind}`);
+    expect(out.frame.method).toBe("thread/resume");
+    expect((out.frame.params as { threadId: string }).threadId).toBe("t_x");
+  });
+
+  test("policy_delegate: authorizer deny → reject with the authorizer's typed code + reason", async () => {
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 4, method: "turn/start" },
+      alwaysDeny,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject, got ${out.kind}`);
+    expect(out.code).toBe(GatewayErrorCode.NoOwner);
+    expect(out.message).toBe("no bound thread");
+    expect(out.data.code).toBe("codex_gateway_no_owner");
+    // Reason MUST land in the error data too (副指挥 ed3f92bf: reason
+    // is required, not optional, so downstream diagnostics get it).
+    expect(out.data.reason).toBe("no bound thread");
+  });
+
+  test("policy_delegate: authorizer deny with extra diagnostic fields → merged into data", async () => {
+    const denyWithExtra: TuiRequestAuthorizer = {
+      async authorize() {
+        return {
+          verdict: "deny",
+          code: GatewayErrorCode.NoOwner,
+          reason: "reservation held by agent",
+          extra: { reservationHolder: "agent", taskId: "t_x" },
+        };
+      },
+    };
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 4, method: "turn/start" },
+      denyWithExtra,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject`);
+    expect(out.data.reason).toBe("reservation held by agent");
+    expect(out.data.reservationHolder).toBe("agent");
+    expect(out.data.taskId).toBe("t_x");
+  });
+
+  test("reserved agent method sent on TUI socket → InvalidArg (authorizer not consulted)", async () => {
+    let called = false;
+    const spy: TuiRequestAuthorizer = {
+      async authorize() { called = true; return { verdict: "allow" }; },
+    };
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 5, method: "enqueueTask" },
+      spy,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject`);
+    expect(out.code).toBe(GatewayErrorCode.InvalidArg);
+    expect(out.data.code).toBe("codex_gateway_invalid_arg");
+    expect(out.data.reason).toBe("reserved_for_agent_typed_contract");
+    expect(out.data.method).toBe("enqueueTask");
+    expect(called).toBe(false);
+  });
+
+  test("hook throws → sanitised Unavailable (never leaks internal message)", async () => {
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 6, method: "thread/resume" },
+      throwingHook,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject`);
+    expect(out.code).toBe(GatewayErrorCode.Unavailable);
+    expect(out.data.code).toBe("codex_gateway_unavailable");
+    expect(out.data.source).toBe("tui_policy_hook");
+    // No leakage of `hook exploded`.
+    expect(out.message).not.toContain("hook exploded");
+  });
+
+  test("A layer does NOT hardcode Codex-shape methods (no allowlist regression)", () => {
+    // The A layer's source must not enumerate any Codex-shape method
+    // (thread/*, turn/*, serverRequest/*). If a future refactor adds
+    // one to a hardcoded set, this test fails.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const src = require("node:fs").readFileSync(__dirname + "/protocol.ts", "utf-8");
+    for (const banned of [
+      "\"thread/resume\"",
+      "\"thread/read\"",
+      "\"thread/status\"",
+      "\"turn/start\"",
+      "\"turn/steer\"",
+      "\"turn/interrupt\"",
+      "\"serverRequest/resolved\"",
+    ]) {
+      if (src.includes(banned)) {
+        throw new Error(`protocol.ts hardcodes ${banned} — should defer to TuiRequestAuthorizer instead`);
+      }
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Delta 7 — Phase 1 policy structural tests (副指挥 7d70dcbd)
+// ─────────────────────────────────────────────────────────────────────
+//
+// These tests verify how A's dispatch layer wires B's authorizer
+// verdicts through to concrete outcomes:
+//
+//   reservation=agent  →  human turn/start + turn/steer denied (0 upstream writes)
+//                         human turn/interrupt allowed (exactly 1 forward_upstream)
+//                         after interrupt, subsequent turn/start still denied
+//                         (no auto-replay observable at this layer)
+//
+//   reservation=human  →  turn/start + turn/steer allowed (forward_upstream)
+//
+//   approval spoof     →  unknown TUI response id rejected
+//                         (already covered above; smoke-checked here)
+//
+// The concrete reservation/ledger rules live in B. A's job is to
+// carry the verdict faithfully. If A ever forwards a denied frame
+// upstream, these tests fail.
+
+describe("Phase 1 policy wiring (Delta 7, 副指挥 7d70dcbd)", () => {
+  // Concrete authorizer that models the reservation state machine
+  // per Phase 1 spec. Mirrors what B will ship on its side.
+  function makeReservationAuthorizer(state: {
+    reservation: "human" | "agent";
+    interrupted: boolean;
+  }): TuiRequestAuthorizer {
+    return {
+      async authorize(frame) {
+        const m = frame.method;
+        if (state.reservation === "human") {
+          // All three humanly-initiated turn ops allowed.
+          if (m === "turn/start" || m === "turn/steer" || m === "turn/interrupt") {
+            return { verdict: "allow" };
+          }
+          return {
+            verdict: "deny",
+            code: GatewayErrorCode.InvalidArg,
+            reason: `method ${m} not in Phase 1 human-reservation policy`,
+          };
+        }
+        // reservation === "agent"
+        if (m === "turn/interrupt") {
+          state.interrupted = true;
+          return { verdict: "allow" };
+        }
+        if (m === "turn/start" || m === "turn/steer") {
+          return {
+            verdict: "deny",
+            code: GatewayErrorCode.NoOwner,
+            reason: "reservation held by agent",
+            extra: { reservationHolder: "agent", suggested: "turn/interrupt" },
+          };
+        }
+        return {
+          verdict: "deny",
+          code: GatewayErrorCode.InvalidArg,
+          reason: `method ${m} not in Phase 1 agent-reservation policy`,
+        };
+      },
+    };
+  }
+
+  test("reservation=agent — turn/start denied → 0 forward_upstream outcomes", async () => {
+    const state = { reservation: "agent" as const, interrupted: false };
+    const authorizer = makeReservationAuthorizer(state);
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "turn/start", params: {} },
+      authorizer,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject, got ${out.kind}`);
+    expect(out.code).toBe(GatewayErrorCode.NoOwner);
+    expect(out.data.reason).toBe("reservation held by agent");
+    expect(out.data.reservationHolder).toBe("agent");
+  });
+
+  test("reservation=agent — turn/steer denied → 0 forward_upstream outcomes", async () => {
+    const state = { reservation: "agent" as const, interrupted: false };
+    const authorizer = makeReservationAuthorizer(state);
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 2, method: "turn/steer", params: {} },
+      authorizer,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject`);
+    expect(out.code).toBe(GatewayErrorCode.NoOwner);
+  });
+
+  test("reservation=agent — turn/interrupt allowed → exactly 1 forward_upstream", async () => {
+    const state = { reservation: "agent" as const, interrupted: false };
+    const authorizer = makeReservationAuthorizer(state);
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 3, method: "turn/interrupt", params: {} },
+      authorizer,
+    );
+    if (out.kind !== "forward_upstream") throw new Error(`expected forward_upstream, got ${out.kind}`);
+    expect(out.frame.method).toBe("turn/interrupt");
+    expect(state.interrupted).toBe(true);
+  });
+
+  test("reservation=agent, post-interrupt — subsequent turn/start still denied (no auto-replay at A layer)", async () => {
+    const state = { reservation: "agent" as const, interrupted: false };
+    const authorizer = makeReservationAuthorizer(state);
+    // Emergency interrupt.
+    await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "turn/interrupt", params: {} },
+      authorizer,
+    );
+    // Now the ledger enters a structured "interrupted_by_human"
+    // terminal state (B owns that; A only needs to keep denying
+    // fresh starts until reservation changes). The A layer must
+    // NOT resurrect the prior request — a subsequent turn/start is
+    // still a fresh caller under the same reservation.
+    const out2 = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 2, method: "turn/start", params: {} },
+      authorizer,
+    );
+    if (out2.kind !== "reject") throw new Error(`expected reject on post-interrupt start, got ${out2.kind}`);
+    expect(out2.code).toBe(GatewayErrorCode.NoOwner);
+  });
+
+  test("reservation=human — turn/start allowed → forward_upstream", async () => {
+    const state = { reservation: "human" as const, interrupted: false };
+    const authorizer = makeReservationAuthorizer(state);
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "turn/start", params: {} },
+      authorizer,
+    );
+    if (out.kind !== "forward_upstream") throw new Error(`expected forward_upstream, got ${out.kind}`);
+    expect(out.frame.method).toBe("turn/start");
+  });
+
+  test("reservation=human — turn/steer allowed → forward_upstream", async () => {
+    const state = { reservation: "human" as const, interrupted: false };
+    const authorizer = makeReservationAuthorizer(state);
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 2, method: "turn/steer", params: {} },
+      authorizer,
+    );
+    if (out.kind !== "forward_upstream") throw new Error(`expected forward_upstream`);
+  });
+
+  test("Phase 1 approval spoof — unknown TUI response id rejected fail-closed", () => {
+    // Approval channel: Codex never sent a reverse request (Phase 1
+    // approval=never), so any inbound TUI response frame is a spoof.
+    const reverse = new ReverseRequestNamespace();
+    const out = handleTuiResponseFrame(
+      { jsonrpc: "2.0", id: 42, result: { approved: true } },
+      reverse,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject`);
+    expect(out.code).toBe(GatewayErrorCode.InvalidArg);
+    expect(out.data.reason).toBe("reverse_id_unknown_or_duplicate");
+    expect(reverse.pendingCount()).toBe(0);
+  });
+
+  test("Phase 2 turn-on smoke — allow-verdict does NOT sneak human turn/steer of Agent turn open", async () => {
+    // 副指挥 7d70dcbd: "human steer Agent turn deferred to Phase2,
+    // must not sneak open in current policy." This test locks in
+    // that our reservation authorizer, under state.reservation=
+    // "agent", refuses turn/steer even though structurally
+    // authorizer.authorize() COULD return {verdict:"allow"} for it.
+    const state = { reservation: "agent" as const, interrupted: false };
+    const authorizer = makeReservationAuthorizer(state);
+    const out = await dispatchTuiRequest(
+      { jsonrpc: "2.0", id: 1, method: "turn/steer", params: {} },
+      authorizer,
+    );
+    if (out.kind !== "reject") throw new Error(`expected reject`);
+    expect(out.code).toBe(GatewayErrorCode.NoOwner);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// UpstreamRequestMux + ReverseRequestNamespace
+// ─────────────────────────────────────────────────────────────────────
+
+describe("UpstreamRequestMux (P0 ed3f92bf) — single upstream allocator, two origin kinds", () => {
+  test("monotonic upstream ids across both allocation kinds", () => {
+    const mux = new UpstreamRequestMux();
+    expect(mux.allocateForProxiedTui(1).upstreamId).toBe(1);
+    expect(mux.allocateForInternalScheduler({ task: "t_x" }).upstreamId).toBe(2);
+    expect(mux.allocateForProxiedTui("abc").upstreamId).toBe(3);
+    expect(mux.allocateForInternalScheduler({ task: "t_y" }).upstreamId).toBe(4);
+    expect(mux.pendingCount()).toBe(4);
+  });
+
+  test("P0 hard test: TUI raw id=1 + internal turn/start simultaneously → distinct upstream ids", () => {
+    const mux = new UpstreamRequestMux();
+    const proxied = mux.allocateForProxiedTui(1);         // TUI-side id "1"
+    const internalHandle = { kind: "turn_start", taskId: "t_x" };
+    const internal = mux.allocateForInternalScheduler(internalHandle);
+    // Different upstream ids on the wire — no collision.
+    expect(proxied.upstreamId).not.toBe(internal.upstreamId);
+    expect(proxied.upstreamId).toBeGreaterThan(0);
+    expect(internal.upstreamId).toBeGreaterThan(0);
+  });
+
+  test("P0 hard test: out-of-order responses each route to correct origin", () => {
+    const mux = new UpstreamRequestMux<{ kind: string; taskId: string }>();
+    const p1 = mux.allocateForProxiedTui(100).upstreamId;
+    const i1 = mux.allocateForInternalScheduler({ kind: "turn_start", taskId: "t_a" }).upstreamId;
+    const p2 = mux.allocateForProxiedTui(200).upstreamId;
+    const i2 = mux.allocateForInternalScheduler({ kind: "turn_interrupt", taskId: "t_a" }).upstreamId;
+
+    // Response arrival: i2, p1, i1, p2.
+    const r_i2 = mux.consumeUpstreamResponse(i2);
+    if (!r_i2 || r_i2.kind !== "internal") throw new Error("expected internal");
+    expect(r_i2.origin.kind).toBe("turn_interrupt");
+
+    const r_p1 = mux.consumeUpstreamResponse(p1);
+    if (!r_p1 || r_p1.kind !== "proxied_tui") throw new Error("expected proxied_tui");
+    expect(r_p1.tuiId).toBe(100);
+
+    const r_i1 = mux.consumeUpstreamResponse(i1);
+    if (!r_i1 || r_i1.kind !== "internal") throw new Error("expected internal");
+    expect(r_i1.origin.kind).toBe("turn_start");
+
+    const r_p2 = mux.consumeUpstreamResponse(p2);
+    if (!r_p2 || r_p2.kind !== "proxied_tui") throw new Error("expected proxied_tui");
+    expect(r_p2.tuiId).toBe(200);
+
+    expect(mux.pendingCount()).toBe(0);
+  });
+
+  test("P0 hard test: proxied TUI id collision (same id in flight) refused", () => {
+    const mux = new UpstreamRequestMux();
+    expect(mux.allocateForProxiedTui(5).upstreamId).toBe(1);
+    const dup = mux.allocateForProxiedTui(5);
+    if (!("collision" in dup) || !dup.collision) throw new Error(`expected collision, got ${JSON.stringify(dup)}`);
+    // After the outstanding one drains, the id may be reused.
+    mux.consumeUpstreamResponse(1);
+    expect(mux.allocateForProxiedTui(5).upstreamId).toBe(2);
+  });
+
+  test("P0 hard test: numeric 1 vs string \"1\" are distinct TUI ids (no accidental merge)", () => {
+    const mux = new UpstreamRequestMux();
+    expect(mux.allocateForProxiedTui(1).upstreamId).toBe(1);
+    expect(mux.allocateForProxiedTui("1").upstreamId).toBe(2);
+  });
+
+  test("internal ids never collide with each other even with identical origin object shape", () => {
+    const mux = new UpstreamRequestMux();
+    const originA = { taskId: "t_1", turn: "u_1" };
+    const originB = { taskId: "t_1", turn: "u_1" };  // same shape, different alloc
+    const a = mux.allocateForInternalScheduler(originA);
+    const b = mux.allocateForInternalScheduler(originB);
+    expect(a.upstreamId).not.toBe(b.upstreamId);
+    // Both consumable independently.
+    const rA = mux.consumeUpstreamResponse(a.upstreamId);
+    if (!rA || rA.kind !== "internal") throw new Error("expected internal");
+    expect(rA.origin).toBe(originA);
+  });
+
+  test("consume unknown upstream id → null (spoof / replay protection)", () => {
+    const mux = new UpstreamRequestMux();
+    expect(mux.consumeUpstreamResponse(999)).toBeNull();
+    // Non-numeric upstream id also null (upstream ids are always numeric).
+    expect(mux.consumeUpstreamResponse("999")).toBeNull();
+  });
+
+  test("consume twice → null the second time (no double-consume)", () => {
+    const mux = new UpstreamRequestMux();
+    mux.allocateForProxiedTui(1);
+    const r1 = mux.consumeUpstreamResponse(1);
+    if (!r1) throw new Error("expected first consume to succeed");
+    expect(mux.consumeUpstreamResponse(1)).toBeNull();
+  });
+
+  test("drainAll clears everything (used on shutdown)", () => {
+    const mux = new UpstreamRequestMux();
+    mux.allocateForProxiedTui(1);
+    mux.allocateForInternalScheduler({ task: "t" });
+    expect(mux.pendingCount()).toBe(2);
+    mux.drainAll();
+    expect(mux.pendingCount()).toBe(0);
+    expect(mux.consumeUpstreamResponse(1)).toBeNull();
+    expect(mux.consumeUpstreamResponse(2)).toBeNull();
+    // TUI id reuse permitted after drain.
+    expect(mux.allocateForProxiedTui(1).upstreamId).toBe(3);
+  });
+});
+
+describe("ReverseRequestNamespace (Codex → TUI) — SEPARATE from UpstreamRequestMux", () => {
+  test("upstream mux and reverse namespace share no state — id=1 in both is fine", () => {
+    const mux = new UpstreamRequestMux();
+    const reverse = new ReverseRequestNamespace();
+    // Same id=1 on wildly different sides. Distinct classes → no
+    // collision possible (compile-time also enforces this).
+    expect(mux.allocateForProxiedTui(1).upstreamId).toBe(1);
+    const rev = reverse.allocateTuiIdForCodexReverseRequest(1);
+    if (!("tuiId" in rev)) throw new Error("expected tuiId");
+    expect(rev.tuiId).toBe(1);
+    // Consuming upstream doesn't touch reverse.
+    mux.consumeUpstreamResponse(1);
+    expect(reverse.pendingCount()).toBe(1);
   });
 
   test("TUI response is rewritten back to the Codex reverse id", () => {
-    const ns = new RequestIdNamespace();
-    ns.allocateTuiIdForCodexReverseRequest("cx_5"); // reverse id "cx_5" → tuiId 1
-    expect(ns.consumeCodexReverseByTuiId(1)).toBe("cx_5");
+    const reverse = new ReverseRequestNamespace();
+    reverse.allocateTuiIdForCodexReverseRequest("cx_5"); // reverse id "cx_5" → tuiId 1
+    expect(reverse.consumeCodexReverseByTuiId(1)).toBe("cx_5");
   });
 
   test("collision within reverse namespace refused", () => {
-    const ns = new RequestIdNamespace();
-    ns.allocateTuiIdForCodexReverseRequest("cx_1");
-    const c = ns.allocateTuiIdForCodexReverseRequest("cx_1");
+    const reverse = new ReverseRequestNamespace();
+    reverse.allocateTuiIdForCodexReverseRequest("cx_1");
+    const c = reverse.allocateTuiIdForCodexReverseRequest("cx_1");
     if (!("collision" in c) || !c.collision) throw new Error("must collide within same reverse ns");
   });
 
-  test("spoofed TUI id consumption returns null (reverse-request forgery prevention)", () => {
-    const ns = new RequestIdNamespace();
+  test("spoofed TUI id consumption returns null (approval-spoof prevention, 副指挥 7d70dcbd)", () => {
+    const reverse = new ReverseRequestNamespace();
     // TUI didn't get any reverse request. It tries to answer id=1 anyway.
-    expect(ns.consumeCodexReverseByTuiId(1)).toBeNull();
+    expect(reverse.consumeCodexReverseByTuiId(1)).toBeNull();
   });
 
-  test("drainAll clears both namespaces (used on shutdown / TUI disconnect)", () => {
-    const ns = new RequestIdNamespace();
-    ns.allocateUpstreamIdForAgentRequest(1);
-    ns.allocateTuiIdForCodexReverseRequest("cx_1");
-    expect(ns.pendingCounts()).toEqual({
-      agentRequestsPending: 1,
-      codexReverseRequestsPending: 1,
-    });
-    ns.drainAll();
-    expect(ns.pendingCounts()).toEqual({
-      agentRequestsPending: 0,
-      codexReverseRequestsPending: 0,
-    });
-    // After drain, previously-pending consumes fail closed.
-    expect(ns.consumeAgentResponseByUpstreamId(1)).toBeNull();
-    expect(ns.consumeCodexReverseByTuiId(1)).toBeNull();
+  test("drainAll — used on TUI disconnect / shutdown, no re-approval after owner leaves", () => {
+    const reverse = new ReverseRequestNamespace();
+    reverse.allocateTuiIdForCodexReverseRequest("cx_1");
+    reverse.allocateTuiIdForCodexReverseRequest("cx_2");
+    expect(reverse.pendingCount()).toBe(2);
+    reverse.drainAll();
+    expect(reverse.pendingCount()).toBe(0);
+    expect(reverse.consumeCodexReverseByTuiId(1)).toBeNull();
+    expect(reverse.consumeCodexReverseByTuiId(2)).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// TUI approval-response path (Delta 6, 副指挥 ed3f92bf + 7d70dcbd)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("handleTuiResponseFrame — approval consumption path (reverse namespace only)", () => {
+  test("known TUI id → forward reverse response rewritten to Codex reverse id", () => {
+    const reverse = new ReverseRequestNamespace();
+    reverse.allocateTuiIdForCodexReverseRequest("cx_9"); // tuiId = 1
+    const frame: JsonRpcResponseFrame = { jsonrpc: "2.0", id: 1, result: { ok: true } };
+    const out = handleTuiResponseFrame(frame, reverse);
+    if (out.kind !== "forward_reverse_response") throw new Error(`expected forward, got ${out.kind}`);
+    expect(out.codexReverseId).toBe("cx_9");
+    if ("result" in out.frame) expect(out.frame.result).toEqual({ ok: true });
+  });
+
+  test("known TUI id + error response → rewritten error frame", () => {
+    const reverse = new ReverseRequestNamespace();
+    reverse.allocateTuiIdForCodexReverseRequest("cx_9"); // tuiId = 1
+    const frame: JsonRpcResponseFrame = {
+      jsonrpc: "2.0", id: 1, error: { code: -32001, message: "denied" },
+    };
+    const out = handleTuiResponseFrame(frame, reverse);
+    if (out.kind !== "forward_reverse_response") throw new Error(`expected forward`);
+    if ("error" in out.frame) {
+      expect(out.frame.error.message).toBe("denied");
+    } else throw new Error("expected error variant");
+  });
+
+  test("unknown TUI id → reject as InvalidArg with stable reason", () => {
+    const reverse = new ReverseRequestNamespace();
+    const frame: JsonRpcResponseFrame = { jsonrpc: "2.0", id: 99, result: {} };
+    const out = handleTuiResponseFrame(frame, reverse);
+    if (out.kind !== "reject") throw new Error(`expected reject`);
+    expect(out.code).toBe(GatewayErrorCode.InvalidArg);
+    expect(out.data.reason).toBe("reverse_id_unknown_or_duplicate");
+    expect(out.data.tuiId).toBe(99);
+  });
+
+  test("duplicate TUI id (already consumed) → reject fail closed (no re-approval)", () => {
+    const reverse = new ReverseRequestNamespace();
+    reverse.allocateTuiIdForCodexReverseRequest("cx_1"); // tuiId = 1
+    // First consume succeeds.
+    const first = handleTuiResponseFrame({ jsonrpc: "2.0", id: 1, result: {} }, reverse);
+    if (first.kind !== "forward_reverse_response") throw new Error("first should succeed");
+    // Replay of same TUI id → rejected.
+    const replay = handleTuiResponseFrame({ jsonrpc: "2.0", id: 1, result: {} }, reverse);
+    if (replay.kind !== "reject") throw new Error(`expected replay reject, got ${replay.kind}`);
+    expect(replay.code).toBe(GatewayErrorCode.InvalidArg);
+    expect(replay.data.reason).toBe("reverse_id_unknown_or_duplicate");
+  });
+
+  test("approval-frame path does NOT touch UpstreamRequestMux (independent namespace)", () => {
+    const mux = new UpstreamRequestMux();
+    const reverse = new ReverseRequestNamespace();
+    // Set up a pending upstream request with id=1 AND a pending reverse.
+    mux.allocateForProxiedTui(1);
+    reverse.allocateTuiIdForCodexReverseRequest("cx_1"); // tuiId=1
+    // Approval response with tuiId=1 consumes reverse only.
+    handleTuiResponseFrame({ jsonrpc: "2.0", id: 1, result: {} }, reverse);
+    // Upstream mux still has its pending id=1.
+    expect(mux.pendingCount()).toBe(1);
+    expect(reverse.pendingCount()).toBe(0);
   });
 });
 
@@ -296,7 +751,7 @@ describe("RequestIdNamespace — Codex reverse ↔ TUI", () => {
 // parseEnqueueTaskParams — Wave-0 banned identifier defense
 // ─────────────────────────────────────────────────────────────────────
 
-describe("parseEnqueueTaskParams", () => {
+describe("parseEnqueueTaskParams — strict allowlist (req delta #2, f84942e8)", () => {
   function goodSender() {
     return { alias: "reviewer", tokenId: "tok_1", role: "member", networkId: "net_1" };
   }
@@ -309,7 +764,7 @@ describe("parseEnqueueTaskParams", () => {
     };
   }
 
-  test("happy path — all required fields, no banned fields", () => {
+  test("happy path — all four required top-level keys, no extras", () => {
     const r = parseEnqueueTaskParams(goodParams());
     if (!r.ok) throw new Error(`expected ok, got ${r.reason} on ${r.field}`);
     expect(r.args.text).toBe("hi");
@@ -317,6 +772,7 @@ describe("parseEnqueueTaskParams", () => {
   });
 
   test.each([
+    // Banned identifiers explicitly named in Wave-0 lockout
     "method",
     "threadId",
     "turnId",
@@ -326,18 +782,94 @@ describe("parseEnqueueTaskParams", () => {
     "requestId",
     "jsonrpc",
     "id",
-  ])("banned key '%s' → rejected even when other required fields present", (key) => {
+    "params",
+    // 副指挥 f84942e8 repro: nondescriptive key MUST be caught by allowlist,
+    // not by banned-list.
+    "evil",
+    "extra",
+    "foo",
+    "hint",
+  ])("top-level key '%s' outside the allowlist → rejected", (key) => {
     const bad: Record<string, unknown> = { ...goodParams(), [key]: "smuggled" };
     const r = parseEnqueueTaskParams(bad);
-    if (r.ok) throw new Error(`should have refused banned key '${key}'`);
+    if (r.ok) throw new Error(`should have refused unknown key '${key}'`);
     expect(r.field).toBe(key);
     expect(r.reason).toMatch(/not part of the Agent typed contract/);
+  });
+
+  test.each([
+    // Even the Wave-0-banned identifiers nested INSIDE authenticatedSender
+    // must be caught by the nested allowlist.
+    "method",
+    "threadId",
+    "id",
+    "params",
+    // Arbitrary attacker keys the banned-list didn't enumerate.
+    "evil",
+    "smuggled",
+    "role_hint",
+  ])("nested authenticatedSender key '%s' outside the allowlist → rejected", (key) => {
+    const bad = goodParams() as Record<string, unknown>;
+    bad.authenticatedSender = { ...goodSender(), [key]: "smuggled" };
+    const r = parseEnqueueTaskParams(bad);
+    if (r.ok) throw new Error(`should have refused nested unknown key 'authenticatedSender.${key}'`);
+    expect(r.field).toBe(`authenticatedSender.${key}`);
+    expect(r.reason).toMatch(/not part of the Agent typed contract/);
+  });
+
+  test("副指挥 exact repro from checkpoint 2: nested method smuggled → rejected", () => {
+    const bad = {
+      ...goodParams(),
+      evil: "ignored",
+      params: "ignored",
+      authenticatedSender: { ...goodSender(), method: "smuggled" },
+    };
+    const r = parseEnqueueTaskParams(bad);
+    if (r.ok) throw new Error("expected refusal — this is the checkpoint-2 repro");
+    // First offending key is the top-level one caught first (evil).
+    expect(["evil", "params", "authenticatedSender.method"]).toContain(r.field);
   });
 
   test("params not an object → refused", () => {
     expect(parseEnqueueTaskParams(null).ok).toBe(false);
     expect(parseEnqueueTaskParams([]).ok).toBe(false);
     expect(parseEnqueueTaskParams("hi").ok).toBe(false);
+    expect(parseEnqueueTaskParams(42).ok).toBe(false);
+  });
+
+  test("authenticatedSender not an object → refused", () => {
+    for (const bad of [null, "hi", 42, []]) {
+      const r = parseEnqueueTaskParams({ ...goodParams(), authenticatedSender: bad });
+      if (r.ok) throw new Error(`should have refused authenticatedSender=${JSON.stringify(bad)}`);
+      expect(r.field).toBe("authenticatedSender");
+    }
+  });
+
+  test.each([
+    ["taskId", { messageId: "m_1", authenticatedSender: goodSender(), text: "hi" }],
+    ["messageId", { taskId: "t_1", authenticatedSender: goodSender(), text: "hi" }],
+    ["authenticatedSender", { taskId: "t_1", messageId: "m_1", text: "hi" }],
+    ["text", { taskId: "t_1", messageId: "m_1", authenticatedSender: goodSender() }],
+  ])("missing top-level '%s' → refused with `required`", (key, params) => {
+    const r = parseEnqueueTaskParams(params);
+    if (r.ok) throw new Error(`should have refused missing '${key}'`);
+    expect(r.field).toBe(key);
+    expect(r.reason).toBe("required");
+  });
+
+  test.each([
+    "alias",
+    "tokenId",
+    "role",
+    "networkId",
+  ])("missing sender field '%s' → refused fail-closed (per B security contract)", (key) => {
+    const bad = goodParams() as Record<string, unknown>;
+    const sender = { ...goodSender() } as Record<string, unknown>;
+    delete sender[key];
+    bad.authenticatedSender = sender;
+    const r = parseEnqueueTaskParams(bad);
+    if (r.ok) throw new Error(`should have refused missing 'authenticatedSender.${key}'`);
+    expect(r.field).toBe(`authenticatedSender.${key}`);
   });
 
   test("text empty / too long → refused", () => {
@@ -357,16 +889,6 @@ describe("parseEnqueueTaskParams", () => {
     });
     if (r.ok) throw new Error("expected refusal on bogus role");
     expect(r.field).toBe("authenticatedSender.role");
-  });
-
-  test("authenticatedSender missing tokenId → refused", () => {
-    const bad = goodParams() as Record<string, unknown>;
-    const sender = { ...goodSender() } as Record<string, unknown>;
-    delete sender.tokenId;
-    bad.authenticatedSender = sender;
-    const r = parseEnqueueTaskParams(bad);
-    if (r.ok) throw new Error("expected refusal on missing tokenId");
-    expect(r.field).toBe("authenticatedSender.tokenId");
   });
 });
 
@@ -578,7 +1100,10 @@ describe("dispatchAgentRequest", () => {
     if (err1.kind !== "error") throw new Error("expected error");
     expect(err1.data.code).toBe("codex_gateway_invalid_arg");
     expect(err1.data.field).toBe("threadId");
-    // Case 2: backend throws → InvalidArg with source=backend
+    // Case 2: backend throws an unknown exception → sanitised
+    // Unavailable with source=backend (per Delta 3, f84942e8).
+    // The old expectation was InvalidArg, which was WRONG — the
+    // ledger/IO/P0 failure isn't the client's fault.
     const err2 = await dispatchAgentRequest(
       {
         jsonrpc: "2.0",
@@ -598,14 +1123,18 @@ describe("dispatchAgentRequest", () => {
       }),
     );
     if (err2.kind !== "error") throw new Error("expected error");
-    expect(err2.data.code).toBe("codex_gateway_invalid_arg");
+    expect(err2.data.code).toBe("codex_gateway_unavailable");
     expect(err2.data.source).toBe("backend");
   });
 
-  test("backend throws inside enqueueTask → surfaces as InvalidArg (never leaves the request hanging)", async () => {
+  test("backend throws a GatewayError → typed passthrough (code + data preserved)", async () => {
     const backend = makeBackend({
       async enqueueTask() {
-        throw new Error("backend blew up");
+        throw new GatewayError(
+          GatewayErrorCode.QueueFull,
+          "queue is full",
+          { queueDepth: 12, limit: 8 },
+        );
       },
     });
     const out = await dispatchAgentRequest(
@@ -623,8 +1152,87 @@ describe("dispatchAgentRequest", () => {
       backend,
     );
     if (out.kind !== "error") throw new Error(`expected error, got ${out.kind}`);
-    expect(out.code).toBe(GatewayErrorCode.InvalidArg);
-    expect(out.message).toContain("backend blew up");
+    expect(out.code).toBe(GatewayErrorCode.QueueFull);
+    expect(out.message).toBe("queue is full");
+    expect(out.data.code).toBe("codex_gateway_queue_full");
+    expect(out.data.queueDepth).toBe(12);
+    expect(out.data.limit).toBe(8);
+  });
+
+  test("backend throws an unknown exception → sanitised Unavailable (never leaks the message)", async () => {
+    const backend = makeBackend({
+      async enqueueTask() {
+        throw new Error("boom — ledger says table not found, SQL error 5001");
+      },
+    });
+    const out = await dispatchAgentRequest(
+      {
+        jsonrpc: "2.0",
+        id: 11,
+        method: "enqueueTask",
+        params: {
+          taskId: "t_1",
+          messageId: "m_1",
+          authenticatedSender: { alias: "a", tokenId: "tok", role: "member", networkId: "net" },
+          text: "hi",
+        },
+      },
+      backend,
+    );
+    if (out.kind !== "error") throw new Error(`expected error, got ${out.kind}`);
+    // Sanitised: Unavailable, not InvalidArg (that would blame the client).
+    expect(out.code).toBe(GatewayErrorCode.Unavailable);
+    expect(out.data.code).toBe("codex_gateway_unavailable");
+    expect(out.data.source).toBe("backend");
+    // Raw internal message MUST NOT leak.
+    expect(out.message).not.toContain("SQL");
+    expect(out.message).not.toContain("ledger");
+    expect(out.message).not.toContain("5001");
+    expect(out.message).toBe("gateway backend error");
+  });
+
+  test("getTaskState backend throw → same sanitised path (not left hanging)", async () => {
+    const backend = makeBackend({
+      async getTaskState() { throw new Error("internal io"); },
+    });
+    const out = await dispatchAgentRequest(
+      { jsonrpc: "2.0", id: 12, method: "getTaskState", params: { taskId: "t_1" } },
+      backend,
+    );
+    if (out.kind !== "error") throw new Error(`expected error`);
+    expect(out.code).toBe(GatewayErrorCode.Unavailable);
+    expect(out.data.code).toBe("codex_gateway_unavailable");
+  });
+
+  test("cancelQueuedTask backend throw → same sanitised path", async () => {
+    const backend = makeBackend({
+      async cancelQueuedTask() { throw new Error("internal io"); },
+    });
+    const out = await dispatchAgentRequest(
+      { jsonrpc: "2.0", id: 13, method: "cancelQueuedTask", params: { taskId: "t_1" } },
+      backend,
+    );
+    if (out.kind !== "error") throw new Error(`expected error`);
+    expect(out.code).toBe(GatewayErrorCode.Unavailable);
+  });
+
+  test("getTaskState backend GatewayError → typed passthrough", async () => {
+    const backend = makeBackend({
+      async getTaskState() {
+        throw new GatewayError(
+          GatewayErrorCode.UnknownTask,
+          "task not found",
+          { taskId: "t_missing" },
+        );
+      },
+    });
+    const out = await dispatchAgentRequest(
+      { jsonrpc: "2.0", id: 14, method: "getTaskState", params: { taskId: "t_missing" } },
+      backend,
+    );
+    if (out.kind !== "error") throw new Error(`expected error`);
+    expect(out.code).toBe(GatewayErrorCode.UnknownTask);
+    expect(out.data.code).toBe("codex_gateway_unknown_task");
   });
 
   test("runtimeState.subscribe → acknowledged (uds layer takes over)", async () => {

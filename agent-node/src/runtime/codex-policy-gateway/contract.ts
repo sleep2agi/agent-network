@@ -352,6 +352,37 @@ export interface GatewayErrorData {
   readonly [key: string]: unknown;
 }
 
+/**
+ * Typed exception surface for gateway backends (`lifecycle.ts` /
+ * `human-owner.ts` implementations of `ProtocolBackend`). The dispatch
+ * layer re-emits these as JSON-RPC errors with the exact `code` +
+ * `data` the throw carries — no mapping to `InvalidArg`, no leakage of
+ * the raw `Error.message` into the wire response.
+ *
+ * Any exception the backend can raise MUST be a `GatewayError`. Any
+ * other exception (unexpected IO / DB / P0 bug) is sanitised by the
+ * dispatch layer into `GatewayErrorCode.Unavailable` (JSON-RPC's
+ * "internal error" -32001 slot). The Agent surface therefore never
+ * sees a raw internal error message.
+ *
+ * Per 副指挥 Wave 1A checkpoint 2 required delta #3 (task f84942e8).
+ */
+export class GatewayError extends Error {
+  public readonly gatewayCode: GatewayErrorCode;
+  public readonly gatewayData: Readonly<Record<string, unknown>>;
+
+  constructor(
+    gatewayCode: GatewayErrorCode,
+    message: string,
+    gatewayData: Readonly<Record<string, unknown>> = {},
+  ) {
+    super(message);
+    this.name = "GatewayError";
+    this.gatewayCode = gatewayCode;
+    this.gatewayData = gatewayData;
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Branding helpers
 // ────────────────────────────────────────────────────────────────────────
