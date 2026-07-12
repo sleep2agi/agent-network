@@ -6,7 +6,7 @@
 >
 > Status: **Wave 1 in progress; Wave 2, security sign-off, merge, deployment, production and `latest` are locked**
 >
-> Last updated: 2026-07-12 (Asia/Shanghai) — Wave 1A Segments A/B/C committed at `00d4ea8`, gateway suite `232/0/729`; coordinator recheck + §8 security review still hard-locked.
+> Last updated: 2026-07-12 (Asia/Shanghai) — independent checkpoint audit **FAIL** despite green unit suites; A/B corrective work is required and all downstream gates remain hard-locked.
 
 This is the engineering master plan for moving `codex-app-server` from an
 opt-in preview to the independently launched Codex TUI runtime approved by
@@ -43,10 +43,10 @@ after every checkpoint.
 |---|---|---|---|---|---|
 | Wave 0 — decisions and baseline | 副指挥 + 通信龙 | **Complete** | #428 | Decisions above frozen; Codex `0.144.0` selected | No unresolved product decision |
 | Wave 1A — typed contract and protocol | 通信工程马 | **Frozen** | `rfc030-gateway-protocol`, draft PR [#431](https://github.com/sleep2agi/agent-network/pull/431) | Freeze `90d1e58`; `169 pass / 0 fail / 555 expect` | B consumes exact shape; no unreviewed shape change |
-| Wave 1A — UDS / human owner / lifecycle | 通信工程马 | **Segments A/B/C committed, awaiting review** | PR #431 @ `00d4ea8` (A `98676f1` / B `04560c0` / C `00d4ea8`) | Owner-only UDS, real framing/notifications, one mux instance, disconnect/reverse-ID tests, no-throw provider/diagnostics, Phase-1 default-deny fake | Coordinator independent recheck; §8 security gate remains locked |
-| Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **Committed, awaiting review** | `rfc030-gateway-runtime` @ `34bea40`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Real-handler matrix `17/0`, REST HTTP suite `3/0`, pump starvation + auto-chain + retry/reassign inherit all on production entrypoints | Real auth/handler/REST/retry/reassign/auto-chain/starvation E2E |
-| Wave 1B L2 — runtime hardening | 通信SDK马 | **Committed, awaiting review** | PR #432 @ `ed45f4d` | boot-gate `5/0` (zero-invocation spawn proof, shared-attach typed refusal, baseline-gate-before-spawn), TUI default-deny sweep 12×3, ownerAttached required + park/resume, error generalization + alias escaping wire-level tests; gateway+app-server `118/0` | Spawn-time read-only/never, TUI default-deny, owner fail-closed, sanitized errors/aliases |
-| Wave 1B L3 — canonical mux/client/pump integration | 通信SDK马 | **In progress — released by 通信龙 checkpoint (implementation only; security final gates NOT unlocked)** | PR #432 | R1–R9 plan, ~15h (~4.5h sequenced after 1A Segment B/C); hard acceptance: retry/reassign→send_reply lands on original canonical task owner-visible (integrated E2E), pump really consumes sender_*, all 9 write sites stamped | 副指挥 independent re-check + 通信评审牛 §8 review remain hard gates; stale contract/mux/authorizer deleted; full wire/startup evidence |
+| Wave 1A — UDS / human owner / lifecycle | 通信工程马 | **Checkpoint FAIL — corrective work required** | PR #431 @ `00d4ea8` (A `98676f1` / B `04560c0` / C `00d4ea8`) | `232/0/729` is retained as unit evidence only; real-path audit found coordinator bypass, unresolved pending requests, transport teardown and lifecycle-race failures | Separate P0 integration + P1 hardening commits, then independent reproduction |
+| Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **Checkpoint FAIL — corrective work required** | `rfc030-gateway-runtime` @ `34bea40`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Targeted suites are green, but valid pump rows are not ACKed, pump has no production wiring, MCP auth still branches on raw token prefix, and canonical-attempt cleanup is incomplete | Real auth/pump/dead-letter/canonical-attempt production E2E |
+| Wave 1B L2 — runtime hardening | 通信SDK马 | **Paused — corrective audit pending** | PR #432 @ `ed45f4d` | Boot/profile gates are useful partial evidence; TUI bound-thread validation and diagnostics/lifecycle integration remain open | Rebase on corrected A/L1 and independently reproduce all real-entry gates |
+| Wave 1B L3 — canonical mux/client/pump integration | 通信SDK马 | **Frozen — candidate is not an approved checkpoint** | PR #432 @ `090ce12` | Candidate was pushed after an explicit L3 pause; `351/0/2634` remains unit evidence only and does not override A/L1 blockers | No further changes until coordinator re-releases a scoped tranche; full integrated evidence required |
 | Wave 1 checkpoint | 副指挥 + 通信龙 | **Locked** | #428 | Typed surface frozen; integrated hard-gate evidence incomplete | All rows in §7 green and reproducible |
 | Wave 2 — product/runtime plumbing | Owners assigned after checkpoint | **Locked** | TBD | Not started | §3 scope complete; Docker tests green |
 | Wave 3 — independent security review and release decision | 通信评审牛 + 通信龙 + Vincent | **Locked** | TBD | Not started | §8 PASS, Vincent explicitly authorizes release/deploy/latest |
@@ -136,9 +136,9 @@ starve a valid task.
 
 | Segment | Scope | Committed SHA | Required evidence | Status |
 |---|---|---|---|---|
-| A | Agent UDS + TUI UDS + framing | `98676f1` | Unix socket only; 0700 directory; 0600 socket; no symlink/raw endpoint; bounded fragmented/coalesced/malformed/oversize frame tests; real no-ID `initialized` notification; two origins on one mux/socket; duplicate response orphaning | **Committed 28/0/72** — pending coordinator recheck |
-| B | Human owner and reverse-request lifecycle | `04560c0` | TUI disconnect drains only proxied TUI and reverse IDs; internal response still routes; unknown/duplicate approval response fails closed; reconnect does not replay drained approvals; Phase 1 `approvalMode="never"` refuse-all + defense-in-depth; Phase 2 `passthrough` structure ready as a config flip | **Committed 16/0/43** — pending coordinator recheck |
-| C | Lifecycle orchestration | `00d4ea8` | Injected `PreflightRunner` runs before any socket touches disk; failing preflight leaves no path on disk; no-throw `TuiInitializeProvider` / `ProtocolDiagnostics` wrappers (self-throwing sink does not cascade or hang); explicit-empty-allowlist Phase 1 `defaultDenyTuiAuthorizer`; state machine created→starting→running→stopping→stopped; shutdown drains mux + reverseNs after GatewayServer.stop; no second queue/scheduler/ledger/reservation/baseline-gate/client-reconnect | **Committed 19/0/59** — pending coordinator recheck |
+| A | Agent UDS + TUI UDS + framing | `98676f1` | Unix socket only; 0700 directory; 0600 socket; no symlink/raw endpoint; bounded fragmented/coalesced/malformed/oversize frame tests; real no-ID `initialized` notification; two origins on one mux/socket; duplicate response orphaning | **FAIL after independent review** — no role capability handshake/single TUI, incomplete rollback/path hardening, escaped 128 KiB payload can exceed the frame cap |
+| B | Human owner and reverse-request lifecycle | `04560c0` | TUI disconnect drains only proxied TUI and reverse IDs; internal response still routes; unknown/duplicate approval response fails closed; reconnect does not replay drained approvals; Phase 1 `approvalMode="never"` refuse-all + defense-in-depth | **FAIL after independent review** — coordinator is not connected to the real UDS reverse-request path |
+| C | Lifecycle orchestration | `00d4ea8` | Injected `PreflightRunner` runs before any socket touches disk; no-throw provider/diagnostics wrappers; explicit-empty-allowlist default-deny authorizer; lifecycle state machine | **FAIL after independent review** — stop/upstream close can orphan internal promises; no transport close/abort contract; stop-during-preflight can resurrect the server |
 
 Full gateway suite after Segment C: `232 pass / 0 fail / 729 expect()`
 (`bun test agent-node/src/runtime/codex-policy-gateway/`).
@@ -152,17 +152,17 @@ fixture with the same name—proves every row.
 |---|---|---|
 | Typed contract and protocol | **PASS** | Freeze `90d1e58`, independent `169/0/555` |
 | 100 task one-to-one race and dedup | **Partial** | Scheduler→fake app-server test is green; it bypasses UDS, inbox, principal and reply delivery |
-| Single mux, collisions and out-of-order routing | **PASS (L3 @ `7c1e12a`, pending review)** | SharedUpstreamMux deleted; client drives A's one-shot UpstreamRequestMux; duplicate response → orphan (replay hole closed); tuiId restored; drain selectivity wire-tested |
+| Single mux, collisions and out-of-order routing | **Partial / blocked** | Unit routing tests are green; corrected A lifecycle must own the sole allocator and settle every origin on close before this can pass |
 | Approval forgery | **Partial / blocked** | Pure policy rejection is green; real TUI reverse-ID wire path not yet integrated |
 | CommHub token isolation | **Partial PASS** | Owned-spawn argv/env tests are useful; final real spawn capture and all credential forms remain |
-| Authenticated principal | **PASS (L1 @ `34bea40`, pending review)** | principal.ts shared MCP+REST resolver (role union incl node/child per freeze Δ14); 9 write sites stamped (grep-audited); real registerTools handler matrix `17/0`; real Bun.serve+utok HTTP REST `3/0`; pump dead-letter + LIMIT starvation test green |
-| Phase 1 read-only / approval never | **PASS (L2 @ `ed45f4d`, pending review)** | Enforced in openCodexAppServerRuntime BEFORE spawn/socket; argv always explicit pins; shared/adopt attach refused (typed `codex_gateway_phase1_shared_unverified`); marker-binary proof: dangerous config → zero invocations |
-| TUI policy default-deny | **PASS (L2 @ `ed45f4d`, pending review)** | Explicit Phase-1 allowlist + default deny (`tui_method_not_allowed`); 12 dangerous/unknown methods × 3 reservations 0-forward sweep; adapts to A's async TuiRequestAuthorizer at L3 |
-| Owner lease fail-closed | **PASS (L2 @ `ed45f4d`, pending review)** | `ownerAttached` now REQUIRED; no-owner → refused_no_owner; owner-drop-during-queue parks (no dispatch) + re-attach resumes; in-flight turn never auto-interrupted; A lifecycle/lease wiring lands at L3 |
+| Authenticated principal | **FAIL (L1 @ `34bea40`)** | Principal resolver direction is useful, but production pump/ACK/dead-letter is not wired, raw token-prefix branching remains, and handler tests fabricate impossible auth contexts |
+| Phase 1 read-only / approval never | **FAIL in integrated path** | Spawn/profile gates pass in isolation; real UDS reverse requests bypass the never-mode coordinator and can reach an attached TUI |
+| TUI policy default-deny | **Partial / blocked** | Unknown methods deny correctly, but thread-bound methods do not consistently require a present bound `threadId`; integrate only after A correction |
+| Owner lease fail-closed | **FAIL in integrated path** | Scheduler probe exists, but the UDS admits multiple TUI clients and does not wire coordinator attach/detach/reverse routing as the single source of truth |
 | Codex/schema/SQLite startup gate | **Partial (L2)** | assertCodexBaseline now wired into openCodexAppServerRuntime before spawn (same-binary proof); REMAINING: digest algorithm path+NUL+length+content domain separation (P1-4) + SQLite gate at gateway production startup — scheduled with L3 |
-| Reply lifecycle and SSE wake | **PASS (L3 @ `57e45ce`, pending review)** | Integrated E2E: real handlers + real pump + real Bun.serve SSE; retry-crossing canonical hit + owner-visible replied + new_reply wake asserted |
-| Human interrupt race | **PASS (L3 @ `ed827b3`, pending review)** | noteHumanInterruptForwarded wire hook; abort-completion reclassified interrupted_by_human; dispatch-response race via sentinel; completed-first never falsely interrupted — 2 wire-race tests |
-| Retry/reassign state consistency | **PASS (L3 @ `c950e30`, pending review)** | Attempt-per-messageId ledger rows; (taskId,messageId) pair dedup exactly-once; cancelled state + roundtrip; queuePosition race fixed; canonical E2E via R7 |
+| Reply lifecycle and SSE wake | **Partial / blocked** | Real SSE wake is useful evidence, but the E2E manually ACKs and does not prove the production pump ACKs a valid retry attempt |
+| Human interrupt race | **Partial / blocked** | Unit race tests pass; current interrupt marker is not yet proven to be tied to one active turn only after upstream acceptance |
+| Retry/reassign state consistency | **FAIL in server integration** | Gateway attempt tests pass, but server ACK/cancel/reassign still address initial IDs instead of all rows for the canonical task |
 | Independent §8 security review | **Not started** | Run only on corrected committed SHA; author cannot self-review |
 
 ## 8. Reproducible evidence log
@@ -184,6 +184,20 @@ fixture with the same name—proves every row.
 | 2026-07-12 | A Segment B `04560c0` | `bun test agent-node/src/runtime/codex-policy-gateway/human-owner.test.ts` | `16 pass / 0 fail / 43 expect` | HumanOwnerCoordinator sole holder of ReverseRequestNamespace; Phase 1 `approvalMode="never"` refuses regardless of TUI attach; Phase 2 `passthrough` with TUI → forward_tui / no TUI → NoOwner / collision → InvalidArg; detachTui drains proxied_tui + reverseNs, internal pending untouched; reconnect cannot re-approve stale ids |
 | 2026-07-12 | A Segment C `00d4ea8` | `bun test agent-node/src/runtime/codex-policy-gateway/lifecycle.test.ts` | `19 pass / 0 fail / 59 expect` | `PreflightRunner` throw → no socket path on disk, state=stopped; mid-run fs inspection proves preflight runs before bind; makeNoThrowInitializeProvider degrades to undefined + logs sink; makeNoThrowDiagnostics newCorrelationId throw / non-string return → "cid-fallback"; reportInternalError throw swallowed; `DEFAULT_DENY_ALLOWLIST.size === 0`; every method → verdict=deny + code=Busy with explicit reason; state gating rejects sendInternal/sendProxiedTui outside `running`; shutdown drains mux + reverseNs + cleans sockets |
 | 2026-07-12 | A Segment C `00d4ea8` | `bun test agent-node/src/runtime/codex-policy-gateway/` | `232 pass / 0 fail / 729 expect` | Full gateway suite after A/B/C combined — no regression against frozen contract/protocol test count (169 → 197 after A → 213 after B → 232 after C) |
+| 2026-07-12 | B frozen candidate `090ce12` | `bun test agent-node/src/runtime/codex-policy-gateway/ agent-node/src/runtime/codex-app-server*.test.ts` | `351 pass / 0 fail / 2634 expect` | Independent rerun is green but **not a checkpoint PASS**: real-path A lifecycle and L1 production-pump failures remain outside the asserted paths |
+
+### Independent checkpoint failures recorded 2026-07-12
+
+- A UDS/lifecycle: wire `HumanOwnerCoordinator` into the real reverse-request
+  path; require one authenticated/capability-separated TUI; reject all pending
+  origins exactly once on close; add lifecycle-owned transport close/abort and
+  a start generation fence; harden rollback, path identity and frame sizing.
+- B L1: classify enqueue outcomes for ACK/backoff/dead-letter; add a real
+  production pump/demux and atomic validated dead-letter; carry server-resolved
+  token kind through MCP auth; test real bearer contexts; clean every delivery
+  attempt by canonical task ID; enforce origin write-once at the database layer.
+- Candidate `090ce12` was pushed after the L3 pause. It is preserved for audit
+  and must not be treated as approval, release, merge or production evidence.
 
 Do not count uncommitted worktree changes, claimed-but-missing commits, baseline
 failures without an independently reproduced baseline, or tests whose fixture
@@ -191,9 +205,10 @@ bypasses the production path.
 
 ## 9. Review and release sequence
 
-1. Accept Wave 1A UDS segments A/B/C independently.
-2. Accept Wave 1B L1 and L2 as separate commits with production-entry tests.
-3. Re-estimate and explicitly release L3; consume `90d1e58`, delete stale
+1. Correct and independently re-accept Wave 1A UDS segments A/B/C.
+2. Correct and independently re-accept Wave 1B L1 and L2 as separate commits
+   with production-entry tests.
+3. Only then re-estimate and explicitly re-release L3; consume `90d1e58`, delete stale
    contract/mux/authorizer copies, and run the integrated hard-gate matrix.
 4. 通信龙 reviews the complete Wave-1 checkpoint evidence. Only an explicit
    checkpoint release starts Wave 2 runtime/product plumbing.
