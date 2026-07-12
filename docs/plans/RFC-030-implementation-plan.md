@@ -26,6 +26,7 @@ after every checkpoint.
 | Reply lifecycle | `send_reply` plus `new_reply` SSE wake; the Phase-0 origin-aware `send_task` deviation must not enter production |
 | CommHub token boundary | Codex/app-server environment and argv contain no CommHub token; the gateway owns authenticated CommHub access |
 | SQLite | No native dependency. Bun uses `bun:sqlite`; Node uses `node:sqlite` only on Node `>=22.13`; older Node fails closed for this runtime only. Global `agent-node` engines stay `>=18.17` |
+| CommHub store backend for RFC-030 (amended 2026-07-12) | Security-critical principal, inbox/dead-letter and task-attempt operations require the SQLite-backed server store. If the hub uses `DATABASE_URL` / PostgreSQL, the RFC-030 gateway fails startup closed with an actionable unsupported-backend error. True PostgreSQL transaction/constraint support is separate backlog, not an RFC-030 shortcut |
 | Human/Agent reservation | Human owns human turns. While Agent owns the reservation, human start/steer is busy; human interrupt is the emergency path, returns `interrupted_by_human`, and never auto-replays |
 | Canonical request mux | The frozen Wave-1A `UpstreamRequestMux` is the only upstream ID allocator for internal scheduler and proxied TUI requests |
 | Local TUI transport (amended 2026-07-12) | Native Codex TUI connects to `ws://127.0.0.1:<OS-ephemeral-port>` and authenticates with a per-start bearer supplied through `--remote-auth-token-env`; never bind `0.0.0.0`, a fixed port, or a non-loopback address. The backend typed face remains owner-only UDS |
@@ -193,7 +194,7 @@ fixture with the same name—proves every row.
 | Human interrupt race | **FAIL in integrated candidate** | Authorizer arms a global boolean before upstream write succeeds; it is not bound to a specific active turn and can misclassify another turn's normal completion |
 | Retry/reassign state consistency | **FAIL in server integration** | Corrective candidate cleans retry/reassign attempts, but cancellation commits the terminal task state before a separate all-attempt ACK; injected ACK failure leaves a permanently consumable stale row |
 | Atomic dead-letter / cancellation | **FAIL (L1 @ `b3fabba`)** | Dead-letter calls audit helpers that swallow write failures, so ACK/task mutation can commit with no audit. Fault injection also leaves a task cancelled while its delivery attempt remains unacked. All writes and strict audit must share one real transaction |
-| Database-backend invariants | **FAIL / lead decision required** | SQLite trigger/transaction tests are green, but `PgAdapter.transaction()` uses a fresh connection per statement and the SQLite write-once trigger is invalid on PostgreSQL and silently skipped. Either implement equivalent PostgreSQL atomicity/constraints or fail the RFC runtime closed on that backend |
+| Database-backend invariants | **FAIL / redesign authorized** | SQLite trigger/transaction tests are green, but `PgAdapter.transaction()` uses a fresh connection per statement and the SQLite write-once trigger is invalid on PostgreSQL and silently skipped. Lead locked RFC-030 production to the SQLite-backed server store; an explicit preflight/capability must reject PostgreSQL before gateway work |
 | Candidate aggregate test delta | **FAIL** | Candidate is `538/12/1638` versus baseline `515/8/1518`. RFC-030 must remove its four added failures and prove every new principal/auth assertion runs in aggregate; exit requires candidate failures `<= 8` |
 | Historical server test isolation | **Tracked separately / non-blocking after delta clears** | Baseline's eight module-singleton server/DB/port failures are owned by 通信测试马 in [#434](https://github.com/sleep2agi/agent-network/issues/434) |
 | Test production-DB isolation | **Coordinator PASS / lead+merge pending** | [#435](https://github.com/sleep2agi/agent-network/issues/435), draft PR [#436](https://github.com/sleep2agi/agent-network/pull/436) @ `30e811a`: independent targeted `17/0/28`, aggregate `532/8/1546`, and syscall proof `all connect=0`, PostgreSQL connect=0, default SQLite open=0. PR remains Draft pending 通信龙 review; canonical runner isolation stays in #434 |
@@ -253,9 +254,11 @@ fixture with the same name—proves every row.
   transaction. Wire the mixed-row demux to one actual production caller rather
   than a test-only export, with failure/backoff fairness. The current
   PostgreSQL adapter cannot provide these atomicity guarantees and silently
-  skips the SQLite write-once trigger, so backend support needs an explicit
-  lead decision and fail-closed capability gate or a real PostgreSQL
-  implementation before L1 can pass.
+  skips the SQLite write-once trigger. The lead therefore locked RFC-030 to
+  the SQLite-backed server store: a PostgreSQL-backed hub must return an
+  explicit unsupported capability and the gateway must refuse startup before
+  consuming inbox work. Real PostgreSQL transactions and an equivalent
+  write-once constraint are separate backlog.
 - RFC-030 server tests: isolate the new principal/auth and reply fixtures so the
   candidate introduces no failures beyond the baseline eight and every new
   security assertion executes in aggregate. The broader historical cleanup is
