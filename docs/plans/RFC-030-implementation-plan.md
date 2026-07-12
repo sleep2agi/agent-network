@@ -6,7 +6,7 @@
 >
 > Status: **Wave 1 in progress; Wave 2, security sign-off, merge, deployment, production and `latest` are locked**
 >
-> Last updated: 2026-07-12 (Asia/Shanghai) — Wave-1A corrective commit `5b18df6` independently remains **FAIL** despite `251/0/771`; the native Codex TUI transport/auth choice is awaiting lead decision and all downstream gates remain hard-locked.
+> Last updated: 2026-07-12 (Asia/Shanghai) — Wave-1A corrective commit `5b18df6` independently remains **FAIL** despite `251/0/771`; the lead amended the TUI transport to loopback WebSocket + bearer and all downstream gates remain hard-locked pending a corrected implementation.
 
 This is the engineering master plan for moving `codex-app-server` from an
 opt-in preview to the independently launched Codex TUI runtime approved by
@@ -28,15 +28,16 @@ after every checkpoint.
 | SQLite | No native dependency. Bun uses `bun:sqlite`; Node uses `node:sqlite` only on Node `>=22.13`; older Node fails closed for this runtime only. Global `agent-node` engines stay `>=18.17` |
 | Human/Agent reservation | Human owns human turns. While Agent owns the reservation, human start/steer is busy; human interrupt is the emergency path, returns `interrupted_by_human`, and never auto-replays |
 | Canonical request mux | The frozen Wave-1A `UpstreamRequestMux` is the only upstream ID allocator for internal scheduler and proxied TUI requests |
+| Local TUI transport (amended 2026-07-12) | Native Codex TUI connects to `ws://127.0.0.1:<OS-ephemeral-port>` and authenticates with a per-start bearer supplied through `--remote-auth-token-env`; never bind `0.0.0.0`, a fixed port, or a non-loopback address. The backend typed face remains owner-only UDS |
 
-Open freeze amendment: pinned Codex `0.144.0` speaks WebSocket Upgrade on
+Freeze amendment rationale: pinned Codex `0.144.0` speaks WebSocket Upgrade on
 `unix://`, not raw newline JSONL, and rejects `--remote-auth-token-env` for a
-Unix remote. It does send the bearer header to a loopback `ws://` remote. The
-lead must choose between a loopback WebSocket TUI endpoint with bearer
-capability, or WebSocket-over-UDS authenticated by a strong peer-process
-identity mechanism. Path permissions, path secrecy and same-UID checks are not
-an authentication boundary. No owner may implement either option until the
-freeze amendment is explicit.
+Unix remote. It sends the bearer header to a loopback `ws://` remote. 通信龙
+therefore selected the CLI's supported loopback WebSocket path instead of
+adding native/FFI peer-credential machinery for a same-UID boundary that is not
+otherwise strong. This corrects an implementation premise forced by the pinned
+upstream CLI; it does not change the independent-runtime product form or unlock
+production.
 
 ### Hard locks
 
@@ -52,7 +53,7 @@ freeze amendment is explicit.
 |---|---|---|---|---|---|
 | Wave 0 — decisions and baseline | 副指挥 + 通信龙 | **Complete** | #428 | Decisions above frozen; Codex `0.144.0` selected | No unresolved product decision |
 | Wave 1A — typed contract and protocol | 通信工程马 | **Frozen** | `rfc030-gateway-protocol`, draft PR [#431](https://github.com/sleep2agi/agent-network/pull/431) | Freeze `90d1e58`; `169 pass / 0 fail / 555 expect` | B consumes exact shape; no unreviewed shape change |
-| Wave 1A — TUI transport / human owner / lifecycle | 通信工程马 | **Checkpoint FAIL — frozen pending transport decision** | PR #431 @ corrective candidate `5b18df6` over `00d4ea8` | `251/0/771` is retained as unit evidence only; real Codex handshake is incompatible, owner lease can be crossed, and teardown/startup probes still fail | Lead transport/auth amendment, then separate P0 integration + P1 hardening commits and independent reproduction |
+| Wave 1A — TUI transport / human owner / lifecycle | 通信工程马 | **Checkpoint FAIL — P0 redesign planning** | PR #431 @ corrective candidate `5b18df6` over `00d4ea8` | `251/0/771` is retained as unit evidence only; lead selected loopback WS + per-start bearer, while owner lease and teardown/startup probes still fail | Reviewed implementation design, separate P0 integration + P1 hardening commits, then independent reproduction |
 | Wave 1B L1 — authenticated principal and task identity | 通信SDK马 | **Checkpoint FAIL — corrective work required** | `rfc030-gateway-runtime` @ `34bea40`, draft PR [#432](https://github.com/sleep2agi/agent-network/pull/432) | Targeted suites are green, but valid pump rows are not ACKed, pump has no production wiring, MCP auth still branches on raw token prefix, and canonical-attempt cleanup is incomplete | Real auth/pump/dead-letter/canonical-attempt production E2E |
 | Wave 1B L2 — runtime hardening | 通信SDK马 | **Paused — corrective audit pending** | PR #432 @ `ed45f4d` | Boot/profile gates are useful partial evidence; TUI bound-thread validation and diagnostics/lifecycle integration remain open | Rebase on corrected A/L1 and independently reproduce all real-entry gates |
 | Wave 1B L3 — canonical mux/client/pump integration | 通信SDK马 | **Frozen — candidate is not an approved checkpoint** | PR #432 @ `090ce12` | Built under a conflicting written R6 restore from 通信龙, later withdrawn after the audit disproved its assumptions; B bears no process fault; `351/0/2634` remains unit evidence only | No further R work until the coordinator re-releases a scoped tranche; full integrated evidence required |
@@ -186,7 +187,7 @@ fixture with the same name—proves every row.
 | Phase 1 read-only / approval never | **Partial / transport-blocked** | Corrective candidate routes fake-client reverse requests through `approvalMode=never`; the native Codex TUI cannot attach to that raw-JSONL endpoint, so production-path evidence is still absent |
 | TUI policy default-deny | **Partial / blocked** | Unknown methods deny correctly, but thread-bound methods do not consistently require a present bound `threadId`; integrate only after A correction |
 | Owner lease fail-closed | **FAIL in corrective candidate** | Coordinator is wired, but ownership is still a global boolean: the connection cap is configurable above one, responses are not lease-bound, and a non-incumbent disconnect can detach the incumbent |
-| Native Codex TUI transport/auth | **FAIL / decision blocked** | Real `codex 0.144.0 --remote unix://...` sends WebSocket Upgrade, not JSONL; the same CLI rejects bearer auth for `unix://` but sends it to loopback `ws://`. Lead must amend the frozen topology before implementation |
+| Native Codex TUI transport/auth | **FAIL / redesign authorized** | Real `codex 0.144.0 --remote unix://...` sends WebSocket Upgrade, not JSONL; the same CLI rejects bearer auth for `unix://` but sends it to loopback `ws://`. Lead amended the TUI side to strict `127.0.0.1` OS-ephemeral WS + per-start bearer; corrected implementation and real-CLI E2E remain absent |
 | Codex/schema/SQLite startup gate | **Partial (L2)** | assertCodexBaseline now wired into openCodexAppServerRuntime before spawn (same-binary proof); REMAINING: digest algorithm path+NUL+length+content domain separation (P1-4) + SQLite gate at gateway production startup — scheduled with L3 |
 | Reply lifecycle and SSE wake | **Partial / blocked** | Real SSE wake is useful evidence, but the E2E manually ACKs and does not prove the production pump ACKs a valid retry attempt |
 | Human interrupt race | **FAIL in integrated candidate** | Authorizer arms a global boolean before upstream write succeeds; it is not bound to a specific active turn and can misclassify another turn's normal completion |
