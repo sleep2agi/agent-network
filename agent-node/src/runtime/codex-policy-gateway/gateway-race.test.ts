@@ -492,3 +492,79 @@ describe("scheduler FIFO", () => {
     await app.stop();
   }, 30_000);
 });
+
+// ────────────────────────────────────────────────────────────────────────
+// L3-R8 — human interrupt wire → scheduler interrupted_by_human
+// ────────────────────────────────────────────────────────────────────────
+
+describe("L3-R8 — atomic human interrupt vs agent turn completion", () => {
+  test("interrupt forwarded mid-turn → interrupted_by_human terminal, no reply, reservation freed, next task runs", async () => {
+    const app = await startFakeApp({ turnDurationMs: 60 });
+    const { client, adapter, ledger, scheduler } = await buildGateway(app);
+
+    await scheduler.enqueueTask({
+      taskId: asTaskId("intr_t1"),
+      messageId: asMessageId("intr_m1"),
+      authenticatedSender: FIXTURE_SENDER,
+      text: "long work",
+    });
+    await waitFor(() => ledger.getLatestByTaskId("intr_t1")?.state === "accepted");
+
+    // A's uds-server glue forwards the ALLOWED turn/interrupt and calls
+    // the wire hook. The fake app's timer still fires its completion —
+    // which must now land as interrupted_by_human, NOT completed.
+    adapter.noteHumanInterruptForwarded();
+    await waitFor(() => ledger.getLatestByTaskId("intr_t1")?.state === "interrupted_by_human");
+
+    const row = ledger.getLatestByTaskId("intr_t1")!;
+    expect(row.state).toBe("interrupted_by_human");
+    expect(row.replyText ?? null).toBeNull(); // no reply from an aborted turn
+    expect(scheduler.snapshot().activeReservationOwner).toBe("none"); // freed
+
+    // Next task proceeds normally after the interruption.
+    await scheduler.enqueueTask({
+      taskId: asTaskId("intr_t2"),
+      messageId: asMessageId("intr_m2"),
+      authenticatedSender: FIXTURE_SENDER,
+      text: "follow-up",
+    });
+    await waitFor(() => {
+      const st = ledger.getLatestByTaskId("intr_t2")?.state;
+      return st === "reply_pending" || st === "completed";
+    });
+    // Contract view: cancelled by owner (the human).
+    const ts = await scheduler.getTaskState(asTaskId("intr_t1"));
+    expect(ts.state).toBe("cancelled");
+    if (ts.state === "cancelled") expect(ts.cancelledBy).toBe("owner");
+
+    await client.close();
+    await app.stop();
+  }, 20_000);
+
+  test("turn finished BEFORE the interrupt landed → completed stands; late interrupt is a no-op (no false interruption)", async () => {
+    const app = await startFakeApp({ turnDurationMs: 1 });
+    const { client, adapter, ledger, scheduler } = await buildGateway(app);
+
+    await scheduler.enqueueTask({
+      taskId: asTaskId("intr_t3"),
+      messageId: asMessageId("intr_m3"),
+      authenticatedSender: FIXTURE_SENDER,
+      text: "quick work",
+    });
+    await waitFor(() => {
+      const st = ledger.getLatestByTaskId("intr_t3")?.state;
+      return st === "reply_pending" || st === "completed";
+    });
+
+    // Interrupt arrives AFTER completion — no live agent turn → no-op.
+    adapter.noteHumanInterruptForwarded();
+    await new Promise((r) => setTimeout(r, 30));
+    const st = ledger.getLatestByTaskId("intr_t3")!.state;
+    expect(["reply_pending", "completed", "replied"]).toContain(st);
+    expect(st).not.toBe("interrupted_by_human");
+    expect(ledger.getLatestByTaskId("intr_t3")!.replyText).toContain("echo:"); // reply kept
+
+    await client.close();
+    await app.stop();
+  }, 20_000);
+});

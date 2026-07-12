@@ -103,6 +103,15 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
   private reconciledTurnByCumid = new Map<string, string>();
   /** Human (unowned) turns currently active. */
   private humanTurns = new Set<string>();
+  /**
+   * L3-R8: set when the TUI glue forwards an ALLOWED turn/interrupt for
+   * the bound thread while an agent turn is active. The next completion
+   * of that agent turn is then classified interrupted_by_human (structured
+   * terminal, NO auto-replay) instead of completed/failed. Cleared once
+   * consumed — a turn that finished BEFORE the interrupt landed keeps its
+   * completed outcome (no false interruption of finished work).
+   */
+  private humanInterruptPending = false;
 
   private readonly diagnostics: AdapterDiagnostics;
 
@@ -141,6 +150,20 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
   /** Late-bind the scheduler (adapter is constructed first). */
   bindScheduler(scheduler: GatewayScheduler): void {
     this.scheduler = scheduler;
+  }
+
+  /**
+   * L3-R8 wire hook: A's uds-server glue calls this the moment it FORWARDS
+   * an authorizer-ALLOWED `turn/interrupt` upstream for the bound thread.
+   * If an agent turn is active, its upcoming completion is reclassified
+   * interrupted_by_human (the upstream aborts the turn and still emits a
+   * completion). No-op when no agent turn holds the reservation — a human
+   * interrupting their own turn is not gateway business.
+   */
+  noteHumanInterruptForwarded(): void {
+    if (this.myTurns.size > 0) {
+      this.humanInterruptPending = true;
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -235,6 +258,12 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
         tracked.pendingCompletion = undefined;
         setTimeout(() => {
           this.myTurns.delete(turnId);
+          // L3-R8 sentinel: an interrupt that raced the dispatch response
+          // lands as interrupted_by_human, not failed.
+          if (!pc.ok && pc.error === "__interrupted_by_human__") {
+            this.scheduler?.onAgentTurnInterrupted(tracked.submissionId);
+            return;
+          }
           this.scheduler?.onAgentTurnFinished(tracked.submissionId, pc);
         }, 0);
       }
@@ -317,6 +346,22 @@ export class BridgeAdapter extends EventEmitter implements TurnDispatcher {
 
     const tracked = this.myTurns.get(p.turnId);
     if (tracked) {
+      // L3-R8: a human interrupt forwarded while THIS agent turn was live
+      // wins over completed/failed — the abort-completion the upstream
+      // emits after turn/interrupt must land as interrupted_by_human
+      // (structured terminal, no reply, no auto-replay). Consumed once.
+      if (this.humanInterruptPending) {
+        this.humanInterruptPending = false;
+        if (tracked.settled) {
+          this.myTurns.delete(p.turnId);
+          this.scheduler?.onAgentTurnInterrupted(tracked.submissionId);
+          return;
+        }
+        // Interrupt raced the still-in-flight dispatch response: buffer a
+        // sentinel; settleAccepted() flushes it as interrupted_by_human.
+        tracked.pendingCompletion = { ok: false, error: "__interrupted_by_human__" };
+        return;
+      }
       const result: { ok: true; replyText: string } | { ok: false; error: string } =
         p.error?.message
           ? { ok: false, error: this.generalizeError("turn/completed", p.error.message) }
