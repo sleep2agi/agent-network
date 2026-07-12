@@ -596,6 +596,55 @@ describe("version gate — fail closed on baseline mismatch", () => {
       rmSync(d2, { recursive: true, force: true });
     }
   }, 60_000);
+
+  test("P1-4 domain separation: rename / move / boundary / canonicalization sensitivity", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const { join } = await import("path");
+    const make = (files: Record<string, string>) => {
+      const d = mkdtempSync(join(tmpdir(), "dg-"));
+      for (const [rel, content] of Object.entries(files)) {
+        const full = join(d, rel);
+        mkdirSync(join(full, ".."), { recursive: true });
+        writeFileSync(full, content);
+      }
+      return d;
+    };
+    const dirs: string[] = [];
+    const digestOf = (files: Record<string, string>) => {
+      const d = make(files);
+      dirs.push(d);
+      return digestSchemaBundle(d);
+    };
+    try {
+      const base = digestOf({ "a.json": '{"x":1}', "sub/b.json": '{"y":2}' });
+
+      // RENAME sensitivity: same bytes, different filename → different digest.
+      expect(digestOf({ "c.json": '{"x":1}', "sub/b.json": '{"y":2}' })).not.toBe(base);
+
+      // MOVE sensitivity: same filename + bytes relocated into a subdir.
+      expect(digestOf({ "sub2/a.json": '{"x":1}', "sub/b.json": '{"y":2}' })).not.toBe(base);
+
+      // BOUNDARY sensitivity: identical concatenated content split
+      // differently across the SAME file names must differ (raw files —
+      // the length framing is what separates them).
+      const b1 = digestOf({ "x1.txt": "ab", "x2.txt": "c" });
+      const b2 = digestOf({ "x1.txt": "a", "x2.txt": "bc" });
+      expect(b1).not.toBe(b2);
+
+      // CANONICALIZATION: semantically identical JSON with different key
+      // order → SAME digest (the codex generator instability this absorbs).
+      expect(digestOf({ "a.json": '{"b":1,"a":{"z":9,"y":8}}' })).toBe(
+        digestOf({ "a.json": '{"a":{"y":8,"z":9},"b":1}' }),
+      );
+
+      // Determinism on the same tree.
+      const same = { "a.json": '{"k":[1,2,3]}', "sub/n.txt": "raw" };
+      expect(digestOf(same)).toBe(digestOf(same));
+    } finally {
+      for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    }
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────

@@ -43,18 +43,19 @@ function baselineError(detail: string): Error {
   return e;
 }
 
-/** Recursively collect files under dir, sorted by full relative path. */
-function collectFilesSorted(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string) => {
+/** Recursively collect files under dir as POSIX-style RELATIVE paths, sorted. */
+function collectFilesSorted(root: string): Array<{ full: string; rel: string }> {
+  const out: Array<{ full: string; rel: string }> = [];
+  const walk = (dir: string, relPrefix: string) => {
     for (const name of readdirSync(dir).sort()) {
       const full = join(dir, name);
-      if (statSync(full).isDirectory()) walk(full);
-      else out.push(full);
+      const rel = relPrefix ? `${relPrefix}/${name}` : name;
+      if (statSync(full).isDirectory()) walk(full, rel);
+      else out.push({ full, rel });
     }
   };
-  walk(root);
-  return out.sort();
+  walk(root, "");
+  return out.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
 }
 
 /** Deterministically stringify a JSON value with sorted object keys. */
@@ -70,25 +71,44 @@ function canonicalJson(v: unknown): string {
 }
 
 /**
- * sha256 over the sorted-path concatenation of every file in the bundle.
- * `.json` files are parsed and re-serialized canonically first: codex's
+ * sha256 over an UNAMBIGUOUS encoding of the whole bundle (副指挥 P1-4):
+ * for every file, sorted by relative path, the hash absorbs
+ *
+ *   relPath ++ NUL ++ decimal(byteLength(content)) ++ NUL ++ content
+ *
+ * Domain separation properties this buys over plain content concat:
+ *   - RENAME/MOVE sensitivity: the relative path (POSIX separators) is
+ *     part of the input, so `a.json` renamed to `b.json`, or moved into
+ *     a subdirectory, changes the digest even with identical bytes.
+ *   - BOUNDARY sensitivity: the explicit byte length prevents content
+ *     from bleeding across file boundaries — {"ab","c"} can never hash
+ *     equal to {"a","bc"}; NULs terminate the path/length fields (paths
+ *     and decimal lengths cannot contain NUL, so the framing is
+ *     injective).
+ *
+ * `.json` content is parsed and re-serialized canonically first: codex's
  * generator emits semantically identical bundles whose key order varies
  * run-to-run (verified against 0.144.0), so raw bytes are not stable but
- * the canonical form is. Non-JSON files (if any) hash raw.
+ * the canonical form is. The byteLength framed is the length of the
+ * canonical form actually hashed. Non-JSON files (if any) hash raw.
  */
 export function digestSchemaBundle(dir: string): string {
   const h = createHash("sha256");
-  for (const f of collectFilesSorted(dir)) {
-    const raw = readFileSync(f);
-    if (f.endsWith(".json")) {
+  for (const { full, rel } of collectFilesSorted(dir)) {
+    const raw = readFileSync(full);
+    let content: Buffer = raw;
+    if (rel.endsWith(".json")) {
       try {
-        h.update(canonicalJson(JSON.parse(raw.toString("utf8"))));
-        continue;
+        content = Buffer.from(canonicalJson(JSON.parse(raw.toString("utf8"))), "utf8");
       } catch {
-        // fall through: not actually JSON — hash raw
+        // not actually JSON — hash raw bytes
       }
     }
-    h.update(raw);
+    h.update(Buffer.from(rel, "utf8"));
+    h.update(Buffer.from([0]));
+    h.update(Buffer.from(String(content.byteLength), "utf8"));
+    h.update(Buffer.from([0]));
+    h.update(content);
   }
   return h.digest("hex");
 }
