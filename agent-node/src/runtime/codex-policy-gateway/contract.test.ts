@@ -26,6 +26,7 @@ import {
   asMessageId,
   asOwnerLeaseId,
   GatewayErrorCode,
+  GATEWAY_ERROR_DATA_CODE,
   type AgentTypedContract,
   type AuthenticatedSender,
   type CancelQueuedTaskResult,
@@ -33,6 +34,7 @@ import {
   type EnqueueTaskArgs,
   type EnqueueTaskRefused,
   type EnqueueTaskResult,
+  type GatewayErrorData,
   type MessageId,
   type OwnerLeaseId,
   type RuntimeStateEvent,
@@ -124,14 +126,19 @@ describe("EnqueueTaskArgs", () => {
     ]);
   });
 
-  test("authenticatedSender.role has a fixed enum — 'admin/owner/member/viewer/child/unknown'", () => {
+  test("authenticatedSender.role — exact allowlist admin/owner/member/viewer/node/child (Δ12+Δ14)", () => {
+    // Δ12 (副指挥 efde3938): "unknown" is refused at the Agent surface.
+    // Δ14 (副指挥 2860aebf; 通信龙 principal union): union closes on
+    //   owner / admin / member / viewer / node / child.
+    //   `node` = minimum-privilege ntok node identity, never inherits
+    //   the token owner's owner/admin. `child` = RFC-026 child token.
     const roles: Array<AuthenticatedSender["role"]> = [
       "admin",
       "owner",
       "member",
       "viewer",
+      "node",
       "child",
-      "unknown",
     ];
     for (const r of roles) {
       const s: AuthenticatedSender = {
@@ -142,6 +149,94 @@ describe("EnqueueTaskArgs", () => {
       };
       expect(s.role).toBe(r);
     }
+    // Compile-time surface pin: "unknown" is NOT assignable to
+    // AuthenticatedSender["role"] (checked at runtime by the source-
+    // level grep test below, since bun-test won't fail on assignability).
+  });
+
+  test("Δ14 (副指挥 2860aebf): EnqueueTaskArgs docstring pins taskId + messageId lifecycle semantics", () => {
+    // Source-level pin so the ledger + inbox layers can rely on the
+    // documented invariants without a lifecycle break on retry /
+    // reassign. If someone quietly deletes the invariants the freeze
+    // guarantee to B is silently broken; this test surfaces that.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const src = require("node:fs").readFileSync(__dirname + "/contract.ts", "utf-8");
+    // Locate the EnqueueTaskArgs block and its taskId + messageId
+    // docstrings. Strip JSDoc line prefixes so multi-line phrases
+    // grep flat.
+    const argsStart = src.indexOf("export interface EnqueueTaskArgs");
+    expect(argsStart).toBeGreaterThan(0);
+    const argsEnd = src.indexOf("}", argsStart);
+    const rawBlock = src.slice(argsStart, argsEnd);
+    const flatBlock = rawBlock.replace(/\n\s*\*\s?/g, " ").replace(/\s+/g, " ");
+    // taskId — canonical identity, retry/reassign stable, immutable ledger row.
+    expect(flatBlock).toContain("Canonical task identity");
+    expect(flatBlock).toMatch(/retries?\s+and\s+cross-node\s+reassigns?/i);
+    expect(flatBlock).toContain("IMMUTABLE");
+    // messageId — per-delivery idempotency key, fresh on retry.
+    expect(flatBlock).toContain("Idempotency key");
+    expect(flatBlock).toMatch(/every\s+subsequent\s+retry.*mint\s+a\s+fresh\s+messageId/i);
+    expect(flatBlock).toContain("(taskId, messageId)");
+    // Server-side lift for B — use `inbox` (real table name, not
+    // `inbox_rows`) + canonical_task_id, and `tasks` immutable
+    // origin_principal. Final column names land with B's migration
+    // (副指挥 2872f7a3 doc precision fix).
+    expect(flatBlock).toContain("canonical_task_id");
+    expect(flatBlock).toContain("origin_principal");
+    expect(flatBlock).toContain("inbox");
+    expect(flatBlock).not.toContain("inbox_rows");
+  });
+
+  test("Δ14 (副指挥 2872f7a3): AuthenticatedSender doc pins the correct 4-branch principal resolution model", () => {
+    // The role docstring must name the ACTUAL authoritative sources
+    // and MUST NOT reference `principal_role` field or `ntok scope
+    // table` (neither exists).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const src = require("node:fs").readFileSync(__dirname + "/contract.ts", "utf-8");
+    const senderStart = src.indexOf("export interface AuthenticatedSender");
+    expect(senderStart).toBeGreaterThan(0);
+    // The docstring block sits ABOVE the interface — grab the last
+    // /** ... */ block that ends before senderStart.
+    const before = src.slice(0, senderStart);
+    const docEnd = before.lastIndexOf("*/");
+    const docStart = before.lastIndexOf("/**", docEnd);
+    expect(docStart).toBeGreaterThan(0);
+    const doc = before.slice(docStart, docEnd + 2);
+    const flat = doc.replace(/\n\s*\*\s?/g, " ").replace(/\s+/g, " ");
+    // Four correct branches present.
+    expect(flat).toContain("network_members");
+    expect(flat).toContain("users");
+    expect(flat).toContain("api_tokens.role");
+    expect(flat).toMatch(/server-resolved\s+token\s+scope/i);
+    // Two incorrect terms absent (they'd mis-model the DB).
+    expect(flat).not.toContain("principal_role");
+    expect(flat).not.toMatch(/ntok\s+scope\s+table/i);
+    // Still says role MUST NOT be inferred from raw token prefix / alias.
+    expect(flat).toMatch(/MUST NOT be inferred/i);
+    expect(flat).toMatch(/raw token prefix/i);
+    expect(flat).toMatch(/alias/i);
+  });
+
+  test("contract.ts source: role type = exact allowlist, excludes unknown (Δ12+Δ14)", () => {
+    // Source-level pin: guards against a future refactor silently
+    // reopening the fallback OR silently expanding the union.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const src = require("node:fs").readFileSync(__dirname + "/contract.ts", "utf-8");
+    const lines = src.split("\n");
+    let checked = 0;
+    for (const line of lines) {
+      const m = line.match(/^\s*readonly role:\s*(.+);/);
+      if (m) {
+        checked++;
+        expect(m[1]).not.toContain("\"unknown\"");
+        // Δ14 principal union — every one of these must be present
+        // on the declaration line. This is the frozen 通信龙 list.
+        for (const r of ["admin", "owner", "member", "viewer", "node", "child"]) {
+          expect(m[1]).toContain(`"${r}"`);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 });
 
@@ -290,7 +385,7 @@ describe("CancelQueuedTaskResult", () => {
 // ────────────────────────────────────────────────────────────────────────
 
 describe("RuntimeStateEvent", () => {
-  test("carries only the read-only fields the Wave-0 policy allows", () => {
+  test("carries only the read-only fields the Wave-0 policy + B delta allow", () => {
     const ev: RuntimeStateEvent = {
       at: 1,
       connection: "idle",
@@ -299,16 +394,69 @@ describe("RuntimeStateEvent", () => {
       tasksSeen: 5,
       codexBinaryVersion: "0.144.0",
       codexSchemaDigest: "sha256:beef",
+      // B consumer-review delta (副指挥 task fa2e453d) — maintained by
+      // scheduler/ledger, read-only Agent surface, no mutation face.
+      activeReservationOwner: "none",
+      ambiguousCount: 0,
+      failedCount: 0,
     };
     expect(Object.keys(ev).sort()).toEqual([
+      "activeReservationOwner",
+      "ambiguousCount",
       "at",
       "codexBinaryVersion",
       "codexSchemaDigest",
       "connection",
+      "failedCount",
       "ownerAttached",
       "queueDepth",
       "tasksSeen",
     ]);
+  });
+
+  test("activeReservationOwner covers exactly none/human/agent with no fallback", () => {
+    const owners: Array<RuntimeStateEvent["activeReservationOwner"]> = ["none", "human", "agent"];
+    for (const owner of owners) {
+      const ev: RuntimeStateEvent = {
+        at: 0,
+        connection: "idle",
+        ownerAttached: false,
+        queueDepth: 0,
+        tasksSeen: 0,
+        codexBinaryVersion: "0.144.0",
+        codexSchemaDigest: "sha256:beef",
+        activeReservationOwner: owner,
+        ambiguousCount: 0,
+        failedCount: 0,
+      };
+      switch (ev.activeReservationOwner) {
+        case "none":
+        case "human":
+        case "agent":
+          break;
+        default:
+          return assertExhaustive(ev.activeReservationOwner);
+      }
+    }
+  });
+
+  test("ambiguousCount / failedCount are numbers (no boolean / string leak from ledger)", () => {
+    // Type-level: TS refuses non-number assignment. This runtime
+    // sanity check just documents the intent.
+    const ev: RuntimeStateEvent = {
+      at: 0,
+      connection: "idle",
+      ownerAttached: false,
+      queueDepth: 0,
+      tasksSeen: 0,
+      codexBinaryVersion: "0.144.0",
+      codexSchemaDigest: "sha256:beef",
+      activeReservationOwner: "none",
+      ambiguousCount: 7,
+      failedCount: 3,
+    };
+    expect(typeof ev.ambiguousCount).toBe("number");
+    expect(typeof ev.failedCount).toBe("number");
   });
 
   test("connection discriminant covers every gateway state without an escape hatch", () => {
@@ -407,18 +555,69 @@ describe("GatewayErrorCode", () => {
     }
   });
 
-  test("has exactly the 8 codes declared in Wave 1A — no silent extension", () => {
+  test("has exactly the 9 codes declared in Wave 1A + B delta + checkpoint-4 Busy — no silent extension", () => {
     const names = Object.keys(GatewayErrorCode).filter(k => Number.isNaN(Number(k)));
     expect(names.sort()).toEqual([
+      "Busy",  // Δ8 副指挥 4d8bd951 — reservation conflict, distinct from NoOwner
       "CodexBaselineMismatch",
       "InvalidArg",
       "NoOwner",
       "QueueFull",
+      "SqliteRuntimeUnsupported",  // B delta 副指挥 fa2e453d — A′ SQLite decision
       "Unavailable",
       "UnknownMethod",
       "UnknownTask",
     ]);
-    expect(names.length).toBe(7);
+    expect(names.length).toBe(9);
+  });
+
+  test("SqliteRuntimeUnsupported pinned to -32056 (stable numeric)", () => {
+    expect(GatewayErrorCode.SqliteRuntimeUnsupported).toBe(-32056);
+  });
+
+  test("Busy pinned to -32057 with stable code codex_gateway_busy (Δ8)", () => {
+    expect(GatewayErrorCode.Busy).toBe(-32057);
+    expect(GATEWAY_ERROR_DATA_CODE[GatewayErrorCode.Busy]).toBe("codex_gateway_busy");
+  });
+
+  test("GATEWAY_ERROR_DATA_CODE maps every numeric to its stable string", () => {
+    for (const [name, numeric] of Object.entries(GatewayErrorCode)) {
+      if (Number.isNaN(Number(name))) {
+        const str = GATEWAY_ERROR_DATA_CODE[numeric as GatewayErrorCode];
+        expect(typeof str).toBe("string");
+        expect(str.length).toBeGreaterThan(0);
+        // Convention: `codex_gateway_<lower_snake>` — makes both the
+        // dashboard grep and the log analytics parse deterministic.
+        expect(str.startsWith("codex_gateway_")).toBe(true);
+      }
+    }
+  });
+
+  test("SQLite unsupported string code matches the exact B-required literal", () => {
+    // 副指挥 fa2e453d — stable string is 'codex_gateway_sqlite_runtime_unsupported'.
+    expect(GATEWAY_ERROR_DATA_CODE[GatewayErrorCode.SqliteRuntimeUnsupported])
+      .toBe("codex_gateway_sqlite_runtime_unsupported");
+  });
+
+  test("GATEWAY_ERROR_DATA_CODE keys are exactly the enum's numeric codes — no missing, no extras", () => {
+    const numericValues = new Set(
+      Object.entries(GatewayErrorCode)
+        .filter(([k]) => Number.isNaN(Number(k)))
+        .map(([, v]) => v as number),
+    );
+    const mapKeys = new Set(Object.keys(GATEWAY_ERROR_DATA_CODE).map(Number));
+    expect(mapKeys).toEqual(numericValues);
+  });
+
+  test("GatewayErrorData carries the stable `code` field + tolerates unknown extras", () => {
+    // Compile-check: the shape is `{ code: string, [k: string]: unknown }`.
+    const errData: GatewayErrorData = {
+      code: "codex_gateway_invalid_arg",
+      field: "text",
+      reason: "empty",
+    };
+    expect(errData.code).toBe("codex_gateway_invalid_arg");
+    expect(errData.field).toBe("text");
   });
 });
 

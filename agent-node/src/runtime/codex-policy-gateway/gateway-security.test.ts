@@ -16,8 +16,9 @@ import {
   scrubSpawnEnv,
   SENSITIVE_ENV_PATTERN,
 } from "../codex-app-server/runtime";
-import { SharedUpstreamMux } from "./upstream-mux";
-import { createTuiAuthorizer, TUI_DENY_CODES } from "./tui-authorizer";
+import { UpstreamRequestMux } from "./protocol";
+import { createTuiAuthorizer, TUI_POLICY_LABELS } from "./tui-authorizer";
+import { GatewayErrorCode } from "./contract";
 import { GatewayLedger } from "./ledger";
 import { resolveSqliteDriver } from "./sqlite-driver";
 import { GatewayScheduler, type DispatchOutcome, type TurnDispatcher } from "./scheduler";
@@ -74,32 +75,45 @@ const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 // UpstreamRequestMux
 // ────────────────────────────────────────────────────────────────────────
 
-describe("SharedUpstreamMux — single id namespace across origins", () => {
-  test("interleaved internal/tui allocations never collide", () => {
-    const mux = new SharedUpstreamMux();
+describe("A UpstreamRequestMux — single id namespace, one-shot consume (client integration)", () => {
+  test("interleaved tui/internal allocations never collide", () => {
+    const mux = new UpstreamRequestMux();
     const seen = new Set<number>();
     for (let i = 0; i < 500; i++) {
-      const id = mux.allocate(i % 3 === 0 ? "tui" : "internal");
+      const r =
+        i % 3 === 0
+          ? mux.allocateForProxiedTui(`tui-${i}`)
+          : mux.allocateForInternalScheduler({ i });
+      expect("upstreamId" in r).toBe(true);
+      const id = (r as { upstreamId: number }).upstreamId;
       expect(seen.has(id)).toBe(false);
       seen.add(id);
     }
     expect(seen.size).toBe(500);
   });
 
-  test("client with injected mux: internal requests + concurrent TUI id, responses route by origin", async () => {
+  test("duplicate in-flight TUI id refused at allocation (protocol violation)", () => {
+    const mux = new UpstreamRequestMux();
+    expect("upstreamId" in mux.allocateForProxiedTui(7)).toBe(true);
+    expect(mux.allocateForProxiedTui(7)).toEqual({ collision: true });
+    // number 7 and string "7" are DIFFERENT ids (idKey domain separation).
+    expect("upstreamId" in mux.allocateForProxiedTui("7")).toBe(true);
+  });
+
+  test("client with injected mux: out-of-order routing, tuiId restore, duplicate→orphan", async () => {
     const srv = await startEchoServer();
-    const mux = new SharedUpstreamMux();
+    const mux = new UpstreamRequestMux();
     const client = new CodexAppServerClient({ url: srv.url, mux });
     await client.connect();
 
-    const tuiResponses: unknown[] = [];
+    const tuiResponses: Array<{ tuiId: unknown; msg: unknown }> = [];
     const orphans: unknown[] = [];
-    client.on("tui_response", (m) => tuiResponses.push(m));
+    client.on("tui_response", (m) => tuiResponses.push(m as never));
     client.on("orphan_response", (m) => orphans.push(m));
 
-    // A's proxy allocates a TUI id FIRST (would have been id=1 under a
-    // private counter — the historical collision case).
-    const tuiId = mux.allocate("tui");
+    // A's proxy rewrites TUI id 1 (would collide with a private counter).
+    const alloc = mux.allocateForProxiedTui(1);
+    const tuiUpstreamId = (alloc as { upstreamId: number }).upstreamId;
 
     // Internal request races on the same socket.
     const p = client.request<{ ok: boolean }>("thread/resume", { threadId: "t" }, 2_000);
@@ -108,24 +122,30 @@ describe("SharedUpstreamMux — single id namespace across origins", () => {
       (m) => (m as { method?: string }).method === "thread/resume",
     ) as { id: number };
     expect(internalReq).toBeDefined();
-    expect(internalReq.id).not.toBe(tuiId); // no collision
+    expect(internalReq.id).not.toBe(tuiUpstreamId); // no collision
 
     // Server answers OUT OF ORDER: tui id first, then internal.
-    srv.send({ jsonrpc: "2.0", id: tuiId, result: { forTui: true } });
+    srv.send({ jsonrpc: "2.0", id: tuiUpstreamId, result: { forTui: true } });
     srv.send({ jsonrpc: "2.0", id: internalReq.id, result: { ok: true } });
 
-    const internalResp = await p;
-    expect(internalResp).toEqual({ ok: true });
+    expect(await p).toEqual({ ok: true });
     await tick();
-    // TUI response routed out, NOT orphaned, NOT resolved internally.
+    // TUI response routed out with the ORIGINAL tui id restored.
     expect(tuiResponses).toHaveLength(1);
-    expect((tuiResponses[0] as { id: number }).id).toBe(tuiId);
+    expect(tuiResponses[0].tuiId).toBe(1);
     expect(orphans).toHaveLength(0);
 
-    // Unknown id → fail closed as orphan (never resolves anything).
+    // DUPLICATE response for the already-consumed tui id → orphan
+    // (one-shot consume — the audited replay hole is closed).
+    srv.send({ jsonrpc: "2.0", id: tuiUpstreamId, result: { replay: true } });
+    await tick();
+    expect(tuiResponses).toHaveLength(1); // NOT re-emitted
+    expect(orphans).toHaveLength(1);
+
+    // Unknown id → orphan, never resolves anything.
     srv.send({ jsonrpc: "2.0", id: 987654, result: { evil: true } });
     await tick();
-    expect(orphans).toHaveLength(1);
+    expect(orphans).toHaveLength(2);
 
     await client.close();
     srv.stop();
@@ -136,7 +156,7 @@ describe("SharedUpstreamMux — single id namespace across origins", () => {
 // TUI authorizer (Phase-1 frozen policy)
 // ────────────────────────────────────────────────────────────────────────
 
-describe("TUI authorizer — Phase-1 拍板 rules", () => {
+describe("TUI authorizer — Phase-1 拍板 rules (A frozen TuiRequestAuthorizer surface)", () => {
   const BOUND = "thread-1";
   function authWith(reservation: "none" | "human" | "agent") {
     return createTuiAuthorizer({
@@ -144,59 +164,61 @@ describe("TUI authorizer — Phase-1 拍板 rules", () => {
       reservation: () => reservation,
     });
   }
+  const frame = (method: string, params?: unknown) =>
+    ({ jsonrpc: "2.0", id: 1, method, params }) as never;
 
-  test("reservation=none/human: turn/start + turn/steer allowed", () => {
+  test("reservation=none/human: turn/start + turn/steer allowed", async () => {
     for (const r of ["none", "human"] as const) {
       const auth = authWith(r);
-      expect(auth.authorize({ method: "turn/start", params: { threadId: BOUND } }).verdict).toBe("allow");
-      expect(auth.authorize({ method: "turn/steer", params: { threadId: BOUND } }).verdict).toBe("allow");
+      expect((await auth.authorize(frame("turn/start", { threadId: BOUND }))).verdict).toBe("allow");
+      expect((await auth.authorize(frame("turn/steer", { threadId: BOUND }))).verdict).toBe("allow");
     }
   });
 
-  test("reservation=agent: turn/start + turn/steer denied with stable busy code", () => {
+  test("reservation=agent: turn/start + turn/steer denied with frozen Busy code", async () => {
     const auth = authWith("agent");
     for (const method of ["turn/start", "turn/steer"]) {
-      const d = auth.authorize({ method, params: { threadId: BOUND } });
+      const d = await auth.authorize(frame(method, { threadId: BOUND }));
       expect(d.verdict).toBe("deny");
       if (d.verdict === "deny") {
-        expect(d.code).toBe(TUI_DENY_CODES.busyAgent);
+        expect(d.code).toBe(GatewayErrorCode.Busy);
+        expect(d.extra?.policy).toBe(TUI_POLICY_LABELS.busyAgent);
         expect(d.reason.length).toBeGreaterThan(0);
       }
     }
   });
 
-  test("reservation=agent: turn/interrupt is the emergency exception (allowed)", () => {
-    const d = authWith("agent").authorize({
-      method: "turn/interrupt",
-      params: { threadId: BOUND },
-    });
+  test("reservation=agent: turn/interrupt is the emergency exception (allowed)", async () => {
+    const d = await authWith("agent").authorize(frame("turn/interrupt", { threadId: BOUND }));
     expect(d.verdict).toBe("allow");
   });
 
-  test("config/auth/account/model/sandbox mutations denied regardless of reservation", () => {
+  test("config/auth/account/model/sandbox mutations denied regardless of reservation", async () => {
     for (const r of ["none", "human", "agent"] as const) {
       const auth = authWith(r);
       for (const method of ["config/set", "auth/login", "account/switch", "model/override", "sandbox/set", "execpolicy/amend"]) {
-        const d = auth.authorize({ method, params: {} });
+        const d = await auth.authorize(frame(method, {}));
         expect(d.verdict).toBe("deny");
-        if (d.verdict === "deny") expect(d.code).toBe(TUI_DENY_CODES.configLocked);
+        if (d.verdict === "deny") {
+          expect(d.code).toBe(GatewayErrorCode.UnknownMethod);
+          expect(d.extra?.policy).toBe(TUI_POLICY_LABELS.configLocked);
+        }
       }
     }
   });
 
-  test("requests naming an unbound thread denied", () => {
-    const d = authWith("none").authorize({
-      method: "turn/start",
-      params: { threadId: "someone-elses-thread" },
-    });
+  test("requests naming an unbound thread denied (InvalidArg + policy label)", async () => {
+    const d = await authWith("none").authorize(
+      frame("turn/start", { threadId: "someone-elses-thread" }),
+    );
     expect(d.verdict).toBe("deny");
-    if (d.verdict === "deny") expect(d.code).toBe(TUI_DENY_CODES.threadNotBound);
+    if (d.verdict === "deny") {
+      expect(d.code).toBe(GatewayErrorCode.InvalidArg);
+      expect(d.extra?.policy).toBe(TUI_POLICY_LABELS.threadNotBound);
+    }
   });
 
-  test("default-deny (副指挥 P0): dangerous/unknown methods 0-forward under EVERY reservation", () => {
-    // Previously the authorizer default-ALLOWED unknown methods — meaning
-    // shellCommand/execute etc. would pass straight to the upstream once
-    // A's policy_delegate is wired. Now they must ALL deny, no exceptions.
+  test("default-deny (副指挥 P0): dangerous/unknown methods 0-forward under EVERY reservation", async () => {
     const OFF_ALLOWLIST = [
       "shellCommand/execute",
       "fs/writeFile",
@@ -214,35 +236,33 @@ describe("TUI authorizer — Phase-1 拍板 rules", () => {
     for (const r of ["none", "human", "agent"] as const) {
       const auth = authWith(r);
       for (const method of OFF_ALLOWLIST) {
-        const d = auth.authorize({ method, params: { threadId: BOUND } });
+        const d = await auth.authorize(frame(method, { threadId: BOUND }));
         expect(d.verdict).toBe("deny");
         if (d.verdict === "deny") {
-          // Whether the config regex or the allowlist claims it first is
-          // irrelevant — the point is NOTHING off-allowlist returns allow.
+          expect(d.code).toBe(GatewayErrorCode.UnknownMethod);
           expect([
-            TUI_DENY_CODES.methodNotAllowed,
-            TUI_DENY_CODES.configLocked,
-          ]).toContain(d.code);
+            TUI_POLICY_LABELS.methodNotAllowed,
+            TUI_POLICY_LABELS.configLocked,
+          ]).toContain(d.extra?.policy as string);
         }
       }
     }
   });
 
-  test("allowlist is exhaustive: handshake + bound resume allowed, nothing else", () => {
+  test("allowlist is exhaustive: handshake + bound resume allowed, nothing else", async () => {
     const auth = authWith("none");
     for (const method of ["initialize", "initialized"]) {
-      expect(auth.authorize({ method, params: {} }).verdict).toBe("allow");
+      expect((await auth.authorize(frame(method, {}))).verdict).toBe("allow");
     }
     expect(
-      auth.authorize({ method: "thread/resume", params: { threadId: BOUND } }).verdict,
+      (await auth.authorize(frame("thread/resume", { threadId: BOUND }))).verdict,
     ).toBe("allow");
-    // …but resume on a foreign thread still thread-checks.
-    const foreign = auth.authorize({
-      method: "thread/resume",
-      params: { threadId: "not-mine" },
-    });
+    const foreign = await auth.authorize(frame("thread/resume", { threadId: "not-mine" }));
     expect(foreign.verdict).toBe("deny");
-    if (foreign.verdict === "deny") expect(foreign.code).toBe(TUI_DENY_CODES.threadNotBound);
+    if (foreign.verdict === "deny") {
+      expect(foreign.code).toBe(GatewayErrorCode.InvalidArg);
+      expect(foreign.extra?.policy).toBe(TUI_POLICY_LABELS.threadNotBound);
+    }
   });
 });
 
@@ -651,15 +671,15 @@ describe("version gate — fail closed on baseline mismatch", () => {
 // Checkpoint-3 delta 4 — TUI disconnect drains only TUI ids
 // ────────────────────────────────────────────────────────────────────────
 
-describe("mux drain semantics — TUI disconnect vs upstream restart", () => {
-  test("drainProxiedTui releases tui ids only; internal pending stays routable", async () => {
+describe("mux drain semantics — TUI disconnect vs upstream restart (A mux)", () => {
+  test("drainProxiedTui drops tui origins only; internal pending stays routable", async () => {
     const srv = await startEchoServer();
-    const mux = new SharedUpstreamMux();
+    const mux = new UpstreamRequestMux();
     const client = new CodexAppServerClient({ url: srv.url, mux });
     await client.connect();
 
-    const tuiA = mux.allocate("tui");
-    const tuiB = mux.allocate("tui");
+    mux.allocateForProxiedTui("t-a");
+    mux.allocateForProxiedTui("t-b");
     const p = client.request<{ ok: boolean }>("thread/resume", { threadId: "t" }, 2_000);
     await tick();
     const internalReq = srv.received.find(
@@ -667,20 +687,24 @@ describe("mux drain semantics — TUI disconnect vs upstream restart", () => {
     ) as { id: number };
 
     // Human closes the TUI mid-flight.
-    const released = mux.drainProxiedTui();
-    expect(released.sort()).toEqual([tuiA, tuiB].sort());
-    expect(mux.ownerOf(internalReq.id)).toBe("internal"); // untouched
+    expect(mux.pendingCountByKind("proxied_tui")).toBe(2);
+    const dropped = mux.drainProxiedTui();
+    expect(dropped).toBe(2);
+    expect(mux.pendingCountByKind("proxied_tui")).toBe(0);
+    expect(mux.pendingCountByKind("internal")).toBe(1); // untouched
 
     // The in-flight agent request STILL resolves after the TUI is gone.
     srv.send({ jsonrpc: "2.0", id: internalReq.id, result: { ok: true } });
     expect(await p).toEqual({ ok: true });
 
+    // After drain, the SAME tui id may re-allocate (in-flight set cleared).
+    expect("upstreamId" in mux.allocateForProxiedTui("t-a")).toBe(true);
+
     // drainAll (upstream restart) clears everything.
-    mux.allocate("internal");
-    mux.allocate("tui");
-    expect(mux.outstanding()).toBeGreaterThan(0);
+    mux.allocateForInternalScheduler(null);
+    expect(mux.pendingCount()).toBeGreaterThan(0);
     mux.drainAll();
-    expect(mux.outstanding()).toBe(0);
+    expect(mux.pendingCount()).toBe(0);
 
     await client.close();
     srv.stop();

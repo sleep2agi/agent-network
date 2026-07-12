@@ -59,17 +59,64 @@ export type OwnerLeaseId = string & { readonly __brand: "OwnerLeaseId" };
 
 /**
  * Sender principal proven upstream by CommHub (`authenticatedSender`).
- * `alias` is the human-visible label (may be user-controlled and MUST NOT
- * be used for authorization); `tokenId` is what the gateway logs / policy
- * layer keys on. The gateway will NOT trust the alias for any decision.
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ * 🔒 SECURITY CONTRACT — do not weaken.
+ *
+ * The gateway MUST treat all three of `tokenId`, `role`, and `networkId`
+ * as REQUIRED. `alias` is a human-visible label only — it may be
+ * user-controlled, may be renamed at any moment, and MUST NEVER be used
+ * for authorization. Any check that decides "should we accept this?"
+ * keys on `tokenId` (`api_tokens.token_id`) and `role`, never `alias`.
+ *
+ * If any of `tokenId` / `role` / `networkId` is missing from the wire
+ * payload, `parseEnqueueTaskParams` (protocol.ts) MUST fail closed and
+ * refuse the request with `GatewayErrorCode.InvalidArg`. A gateway that
+ * silently forge-fills `role: "member"` for a missing principal would
+ * fail the reverse-request lockout invariant — the human owner would
+ * approve a "member" that no upstream CommHub ever authenticated.
+ *
+ * Δ12 (副指挥 efde3938): `role: "unknown"` is NOT permitted on the
+ * Agent-facing surface. The Agent MUST arrive with a concretely
+ * classified role from CommHub's principal stamp. Legacy inbox rows
+ * that pre-date the principal stamp (see 通信龙 task 404d7e19) are an
+ * INTERNAL concern of the server / DB layer — they must be reclassified
+ * or refused BEFORE reaching this contract. The parser rejects `role:
+ * "unknown"` with `GatewayErrorCode.InvalidArg` and never advances the
+ * request to the backend.
+ *
+ * Δ14 (副指挥 2860aebf; 通信龙 principal union): the role union closes
+ * on the exact set `owner | admin | member | viewer | node | child`.
+ *   - `node` is the minimum-privilege identity of a plain ntok node.
+ *     It NEVER inherits the token owner's `owner` / `admin`; the
+ *     server MUST classify node-identity requests as `node` even
+ *     when they authenticate with a token whose account role would
+ *     otherwise be higher.
+ *   - `child` is the RFC-026 child-token identity.
+ * Role classification MUST come from the server's authCtx resolution.
+ * The authoritative sources depend on the caller kind (通信龙 rule
+ * confirmed by 副指挥 task 2872f7a3):
+ *   - utok network role  → `network_members`
+ *   - REST global admin  → `users` / global auth
+ *   - RFC-026 child kind → `api_tokens.role`
+ *   - ntok `node` kind   → server-resolved token scope / kind
+ * Role MUST NOT be inferred from a raw token prefix, an alias, or
+ * any other client-supplied value.
+ * ─────────────────────────────────────────────────────────────────────
  */
 export interface AuthenticatedSender {
-  /** Human-facing alias — for display / logs only. */
+  /** Human-facing alias — for display / logs only. NEVER authoritative. */
   readonly alias: string;
   /** CommHub token identifier (from `api_tokens.token_id`). Authoritative. */
   readonly tokenId: string;
-  /** Bearer role at the time the CommHub inbox row landed. */
-  readonly role: "admin" | "owner" | "member" | "viewer" | "child" | "unknown";
+  /**
+   * Bearer role at the time the CommHub inbox row landed. Concretely
+   * classified — `"unknown"` is REFUSED at the Agent surface (Δ12
+   * 副指挥 efde3938); legacy fallback lives internal to the server.
+   * Δ14 closes the union on the 通信龙-decided principal set; see
+   * the block comment above for the authCtx-resolution requirement.
+   */
+  readonly role: "admin" | "owner" | "member" | "viewer" | "node" | "child";
   /**
    * The network this task was sent within. Cross-network dispatch is
    * refused upstream in CommHub; this is here only so the gateway can
@@ -84,9 +131,50 @@ export interface AuthenticatedSender {
  *  Codex input (image blocks etc.) is deferred to a later wave.
  *  There is NO `method`, NO `threadId`, NO `turnId`, NO `policy`, NO
  *  `path`, NO `config` on this interface — and no way to add one and
- *  have it survive the gateway's zod-strict parse (`protocol.ts`). */
+ *  have it survive the gateway's zod-strict parse (`protocol.ts`).
+ *
+ *  Δ14 (副指挥 2860aebf): id semantics pinned so the ledger + inbox
+ *  layers can be built against a stable contract without a lifecycle
+ *  break on retry / reassign. See per-field docs below.
+ */
 export interface EnqueueTaskArgs {
+  /**
+   * Canonical task identity. Stable across the ENTIRE reply lifecycle
+   * of one logical task, including retries and cross-node reassigns.
+   * The same taskId maps to the same ledger row, the same reply
+   * channel, and the same upstream turn stream. If a task gets
+   * retried on a different node or re-delivered after a crash, the
+   * downstream layers keep threading state against this identity —
+   * they see the retry as "the same task, another attempt", not as
+   * a new task.
+   *
+   * Server / DB layer implication (通信龙 upcoming; final column
+   * names land with B's migration): the `inbox` table carries a
+   * canonical_task_id column (this value) that is IMMUTABLE for the
+   * row's lifetime; `tasks` carries an IMMUTABLE `origin_principal`
+   * stamped at first-seen. Retry / reassign never mints a fresh
+   * taskId.
+   */
   readonly taskId: TaskId;
+  /**
+   * Idempotency key for THIS specific inbox delivery attempt. Fresh
+   * on every retry / reassign, so the gateway can dedup a re-delivery
+   * of the same physical message without conflating it with a
+   * DIFFERENT retry attempt on the same taskId.
+   *
+   * Invariant: `(taskId, messageId)` uniquely identifies a delivery
+   * attempt. Two `enqueueTask` calls with the same `(taskId,
+   * messageId)` MUST return `duplicate` — the second is a re-send,
+   * not a new attempt. Two calls with same taskId but different
+   * messageId are two attempts of the same logical task (retry
+   * lineage), NOT two independent tasks — the gateway threads them
+   * against the same ledger row.
+   *
+   * Initial delivery MAY use a messageId equal to the taskId as a
+   * degenerate special case; every subsequent retry / reassign MUST
+   * mint a fresh messageId so the delivery-attempt boundary is
+   * observable.
+   */
   readonly messageId: MessageId;
   readonly authenticatedSender: AuthenticatedSender;
   /** UTF-8 task body. The gateway sanitises + injects the RFC-030 §6.4
@@ -187,6 +275,31 @@ export interface RuntimeStateEvent {
    */
   readonly codexBinaryVersion: string;
   readonly codexSchemaDigest: string;
+  /**
+   * Who currently holds the active turn reservation, per the scheduler
+   * / ledger (B side).
+   *   - `"none"` — no active reservation; queue is idle.
+   *   - `"human"` — human TUI holds the current turn.
+   *   - `"agent"` — an Agent Network task holds the current turn.
+   *
+   * Consumed by the Dashboard runtime panel; the Agent runtime uses it
+   * as a hint for backoff / status display, NEVER for authorization
+   * decisions. B scheduler is the authority; this field just surfaces
+   * it read-only.
+   */
+  readonly activeReservationOwner: "none" | "human" | "agent";
+  /**
+   * Count of ambiguous-outcome events since gateway boot (turns whose
+   * completion signal was inconclusive — e.g. reply text vs. tool call
+   * disagreement, or a schema digest change mid-turn). Maintained by
+   * the B scheduler / ledger side. Read-only surface; no mutation.
+   */
+  readonly ambiguousCount: number;
+  /**
+   * Count of failed turns since gateway boot (terminal `failed` state
+   * on the ledger). Maintained by B; read-only surface.
+   */
+  readonly failedCount: number;
 }
 
 /**
@@ -237,6 +350,14 @@ export interface AgentTypedContract {
  * shutdown here so a well-behaved Agent client backs off correctly.
  * Everything else is in the -32050… application range to avoid
  * colliding with SDK error ranges the codex layer might reuse.
+ *
+ * On every error, the JSON-RPC `error.data` object carries a stable
+ * string `code` field (from `GATEWAY_ERROR_DATA_CODE`) so callers that
+ * don't want to key on the numeric can key on the string. The stable
+ * string names are frozen once shipped; the numeric ids may only shift
+ * within their reserved range if we ever need to renumber. Agent side
+ * NEVER sees a raw upstream JSON-RPC error code — those are logged
+ * internally and remapped to one of these, per Wave-0 lockout.
  */
 export enum GatewayErrorCode {
   /** Standard JSON-RPC: gateway is going through reconnect / shutting down. */
@@ -253,6 +374,93 @@ export enum GatewayErrorCode {
   UnknownMethod = -32054,
   /** Codex binary or schema digest doesn't match the pinned Wave-0 baseline. */
   CodexBaselineMismatch = -32055,
+  /**
+   * SQLite-backed sub-runtime declined the request (per B ledger A′
+   * decision). Emitted when the ledger detects an unsupported ledger
+   * migration state, an unsupported schema version, or an unsupported
+   * operation against the current backing store. Stable string code:
+   * `codex_gateway_sqlite_runtime_unsupported`.
+   */
+  SqliteRuntimeUnsupported = -32056,
+  /**
+   * Reservation conflict — the requested TUI action is refused because
+   * a bound owner IS present but currently holds the reservation for
+   * a different party (e.g. reservation=agent, human asked for
+   * turn/start). Distinct from `NoOwner`, which means NO owner has
+   * been bound. Callers use this to render a friendly "Codex is busy"
+   * hint instead of an authentication-shaped error.
+   * Stable string code: `codex_gateway_busy`.
+   * Per 副指挥 checkpoint 3 required delta #8 (task 4d8bd951).
+   */
+  Busy = -32057,
+}
+
+/**
+ * Stable string codes emitted on `error.data.code` alongside the
+ * numeric `code`. Callers that prefer named keys over the numeric range
+ * key on this. These strings are frozen once shipped and must not be
+ * renamed without a Wave-2 revalidation with 副指挥 + consumers.
+ *
+ * Consumers should ALSO ignore any additional `data` fields they don't
+ * know — the gateway may attach diagnostic context (e.g. `field`,
+ * `queueDepth`, `limit`) that varies per code.
+ */
+export const GATEWAY_ERROR_DATA_CODE: Readonly<Record<GatewayErrorCode, string>> = {
+  [GatewayErrorCode.Unavailable]: "codex_gateway_unavailable",
+  [GatewayErrorCode.InvalidArg]: "codex_gateway_invalid_arg",
+  [GatewayErrorCode.QueueFull]: "codex_gateway_queue_full",
+  [GatewayErrorCode.NoOwner]: "codex_gateway_no_owner",
+  [GatewayErrorCode.UnknownTask]: "codex_gateway_unknown_task",
+  [GatewayErrorCode.UnknownMethod]: "codex_gateway_unknown_method",
+  [GatewayErrorCode.CodexBaselineMismatch]: "codex_gateway_codex_baseline_mismatch",
+  [GatewayErrorCode.SqliteRuntimeUnsupported]: "codex_gateway_sqlite_runtime_unsupported",
+  [GatewayErrorCode.Busy]: "codex_gateway_busy",
+};
+
+/**
+ * Shape the gateway attaches on JSON-RPC `error.data` for every code.
+ * The Agent surface reads this as a plain read-only record — no raw
+ * upstream Codex error fields leak through, per Wave-0 lockout.
+ *
+ * Additional per-code fields (e.g. `field`, `queueDepth`, `limit`) may
+ * appear here; readers must tolerate unknown keys.
+ */
+export interface GatewayErrorData {
+  /** Stable string code — matches `GATEWAY_ERROR_DATA_CODE[numeric]`. */
+  readonly code: string;
+  /** Zero or more diagnostic keys. Read-only; caller must not mutate. */
+  readonly [key: string]: unknown;
+}
+
+/**
+ * Typed exception surface for gateway backends (`lifecycle.ts` /
+ * `human-owner.ts` implementations of `ProtocolBackend`). The dispatch
+ * layer re-emits these as JSON-RPC errors with the exact `code` +
+ * `data` the throw carries — no mapping to `InvalidArg`, no leakage of
+ * the raw `Error.message` into the wire response.
+ *
+ * Any exception the backend can raise MUST be a `GatewayError`. Any
+ * other exception (unexpected IO / DB / P0 bug) is sanitised by the
+ * dispatch layer into `GatewayErrorCode.Unavailable` (JSON-RPC's
+ * "internal error" -32001 slot). The Agent surface therefore never
+ * sees a raw internal error message.
+ *
+ * Per 副指挥 Wave 1A checkpoint 2 required delta #3 (task f84942e8).
+ */
+export class GatewayError extends Error {
+  public readonly gatewayCode: GatewayErrorCode;
+  public readonly gatewayData: Readonly<Record<string, unknown>>;
+
+  constructor(
+    gatewayCode: GatewayErrorCode,
+    message: string,
+    gatewayData: Readonly<Record<string, unknown>> = {},
+  ) {
+    super(message);
+    this.name = "GatewayError";
+    this.gatewayCode = gatewayCode;
+    this.gatewayData = gatewayData;
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────

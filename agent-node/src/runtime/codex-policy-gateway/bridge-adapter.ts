@@ -409,14 +409,17 @@ export interface InboxRowLike {
 // A final freeze 90d1e58 role union (Δ14): node = plain ntok minimal
 // identity, child = RFC-026 child token. "unknown" is NOT permitted —
 // rows that can't be classified stay null-stamped and are refused here.
-const VALID_ROLES: ReadonlySet<string> = new Set([
-  "admin",
-  "owner",
-  "member",
-  "viewer",
-  "node",
-  "child",
-]);
+// Exhaustive TYPED map (副指挥 f5e0f585): keyed on the frozen contract
+// union, so adding/removing a role in A's contract makes this fail to
+// compile instead of silently drifting. Runtime check is a plain `in`.
+const VALID_ROLES: Readonly<Record<AuthenticatedSender["role"], true>> = {
+  admin: true,
+  owner: true,
+  member: true,
+  viewer: true,
+  node: true,
+  child: true,
+};
 
 /**
  * Build an AuthenticatedSender from an inbox row, or return null when the
@@ -430,7 +433,7 @@ export function senderFromInboxRow(row: InboxRowLike): AuthenticatedSender | nul
   const role = row.sender_role;
   const networkId = row.network_id;
   if (typeof tokenId !== "string" || tokenId.length === 0) return null;
-  if (typeof role !== "string" || !VALID_ROLES.has(role)) return null;
+  if (typeof role !== "string" || !(role in VALID_ROLES)) return null;
   if (typeof networkId !== "string" || networkId.length === 0) return null;
   return {
     alias: typeof row.from_session === "string" && row.from_session.length > 0 ? row.from_session : "(unknown)",
