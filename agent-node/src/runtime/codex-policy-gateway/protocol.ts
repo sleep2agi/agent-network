@@ -969,9 +969,16 @@ const AUTHENTICATED_SENDER_ALLOWED_KEYS = new Set<string>([
  * layer's concern — they must be reclassified or refused before
  * reaching the gateway. If unknown ever appears here it is either a
  * mis-plumbed principal or a rogue client; fail closed either way.
+ *
+ * Δ14 (副指挥 2860aebf; 通信龙 principal union): union closes on
+ * owner / admin / member / viewer / node / child. `node` is the
+ * minimum-privilege identity of a plain ntok node; the server MUST
+ * classify node-identity requests as `"node"` regardless of the
+ * account role the underlying token grants. See contract.ts
+ * `AuthenticatedSender` docstring for the authoritative rule.
  */
 const AUTHENTICATED_SENDER_VALID_ROLES = new Set<string>([
-  "admin", "owner", "member", "viewer", "child",
+  "admin", "owner", "member", "viewer", "node", "child",
 ]);
 
 /**
@@ -1054,7 +1061,7 @@ export function parseEnqueueTaskParams(raw: unknown):
     return { ok: false, field: "authenticatedSender.networkId", reason: "must be a string 1..200" };
   }
   if (typeof s.role !== "string" || !AUTHENTICATED_SENDER_VALID_ROLES.has(s.role)) {
-    return { ok: false, field: "authenticatedSender.role", reason: "must be one of admin/owner/member/viewer/child" };
+    return { ok: false, field: "authenticatedSender.role", reason: "must be one of admin/owner/member/viewer/node/child" };
   }
 
   let brandedTaskId: TaskId;

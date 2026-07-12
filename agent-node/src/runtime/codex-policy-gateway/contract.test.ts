@@ -126,16 +126,18 @@ describe("EnqueueTaskArgs", () => {
     ]);
   });
 
-  test("authenticatedSender.role — exact allowlist admin/owner/member/viewer/child (Δ12 no unknown)", () => {
-    // Δ12 (副指挥 efde3938): the Agent-facing role enum MUST NOT
-    // admit "unknown". Legacy inbox rows without a principal stamp
-    // are the server / DB layer's concern — they must be reclassified
-    // or refused BEFORE reaching the gateway.
+  test("authenticatedSender.role — exact allowlist admin/owner/member/viewer/node/child (Δ12+Δ14)", () => {
+    // Δ12 (副指挥 efde3938): "unknown" is refused at the Agent surface.
+    // Δ14 (副指挥 2860aebf; 通信龙 principal union): union closes on
+    //   owner / admin / member / viewer / node / child.
+    //   `node` = minimum-privilege ntok node identity, never inherits
+    //   the token owner's owner/admin. `child` = RFC-026 child token.
     const roles: Array<AuthenticatedSender["role"]> = [
       "admin",
       "owner",
       "member",
       "viewer",
+      "node",
       "child",
     ];
     for (const r of roles) {
@@ -148,15 +150,76 @@ describe("EnqueueTaskArgs", () => {
       expect(s.role).toBe(r);
     }
     // Compile-time surface pin: "unknown" is NOT assignable to
-    // AuthenticatedSender["role"] (checked via `@ts-expect-error` in
-    // the grep-based interface test below at runtime, since bun-test
-    // won't fail on assignability).
+    // AuthenticatedSender["role"] (checked at runtime by the source-
+    // level grep test below, since bun-test won't fail on assignability).
   });
 
-  test("contract.ts source excludes \"unknown\" from AuthenticatedSender.role type (Δ12)", () => {
-    // Source-level pin: the role type literal must not contain
-    // "unknown" anywhere on its declaration line. Guards against a
-    // future refactor silently reopening the fallback.
+  test("Δ14 (副指挥 2860aebf): EnqueueTaskArgs docstring pins taskId + messageId lifecycle semantics", () => {
+    // Source-level pin so the ledger + inbox layers can rely on the
+    // documented invariants without a lifecycle break on retry /
+    // reassign. If someone quietly deletes the invariants the freeze
+    // guarantee to B is silently broken; this test surfaces that.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const src = require("node:fs").readFileSync(__dirname + "/contract.ts", "utf-8");
+    // Locate the EnqueueTaskArgs block and its taskId + messageId
+    // docstrings. Strip JSDoc line prefixes so multi-line phrases
+    // grep flat.
+    const argsStart = src.indexOf("export interface EnqueueTaskArgs");
+    expect(argsStart).toBeGreaterThan(0);
+    const argsEnd = src.indexOf("}", argsStart);
+    const rawBlock = src.slice(argsStart, argsEnd);
+    const flatBlock = rawBlock.replace(/\n\s*\*\s?/g, " ").replace(/\s+/g, " ");
+    // taskId — canonical identity, retry/reassign stable, immutable ledger row.
+    expect(flatBlock).toContain("Canonical task identity");
+    expect(flatBlock).toMatch(/retries?\s+and\s+cross-node\s+reassigns?/i);
+    expect(flatBlock).toContain("IMMUTABLE");
+    // messageId — per-delivery idempotency key, fresh on retry.
+    expect(flatBlock).toContain("Idempotency key");
+    expect(flatBlock).toMatch(/every\s+subsequent\s+retry.*mint\s+a\s+fresh\s+messageId/i);
+    expect(flatBlock).toContain("(taskId, messageId)");
+    // Server-side lift for B — use `inbox` (real table name, not
+    // `inbox_rows`) + canonical_task_id, and `tasks` immutable
+    // origin_principal. Final column names land with B's migration
+    // (副指挥 2872f7a3 doc precision fix).
+    expect(flatBlock).toContain("canonical_task_id");
+    expect(flatBlock).toContain("origin_principal");
+    expect(flatBlock).toContain("inbox");
+    expect(flatBlock).not.toContain("inbox_rows");
+  });
+
+  test("Δ14 (副指挥 2872f7a3): AuthenticatedSender doc pins the correct 4-branch principal resolution model", () => {
+    // The role docstring must name the ACTUAL authoritative sources
+    // and MUST NOT reference `principal_role` field or `ntok scope
+    // table` (neither exists).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const src = require("node:fs").readFileSync(__dirname + "/contract.ts", "utf-8");
+    const senderStart = src.indexOf("export interface AuthenticatedSender");
+    expect(senderStart).toBeGreaterThan(0);
+    // The docstring block sits ABOVE the interface — grab the last
+    // /** ... */ block that ends before senderStart.
+    const before = src.slice(0, senderStart);
+    const docEnd = before.lastIndexOf("*/");
+    const docStart = before.lastIndexOf("/**", docEnd);
+    expect(docStart).toBeGreaterThan(0);
+    const doc = before.slice(docStart, docEnd + 2);
+    const flat = doc.replace(/\n\s*\*\s?/g, " ").replace(/\s+/g, " ");
+    // Four correct branches present.
+    expect(flat).toContain("network_members");
+    expect(flat).toContain("users");
+    expect(flat).toContain("api_tokens.role");
+    expect(flat).toMatch(/server-resolved\s+token\s+scope/i);
+    // Two incorrect terms absent (they'd mis-model the DB).
+    expect(flat).not.toContain("principal_role");
+    expect(flat).not.toMatch(/ntok\s+scope\s+table/i);
+    // Still says role MUST NOT be inferred from raw token prefix / alias.
+    expect(flat).toMatch(/MUST NOT be inferred/i);
+    expect(flat).toMatch(/raw token prefix/i);
+    expect(flat).toMatch(/alias/i);
+  });
+
+  test("contract.ts source: role type = exact allowlist, excludes unknown (Δ12+Δ14)", () => {
+    // Source-level pin: guards against a future refactor silently
+    // reopening the fallback OR silently expanding the union.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const src = require("node:fs").readFileSync(__dirname + "/contract.ts", "utf-8");
     const lines = src.split("\n");
@@ -165,11 +228,12 @@ describe("EnqueueTaskArgs", () => {
       const m = line.match(/^\s*readonly role:\s*(.+);/);
       if (m) {
         checked++;
-        // The Agent-facing declaration is the only `readonly role:`
-        // in this file.
         expect(m[1]).not.toContain("\"unknown\"");
-        expect(m[1]).toContain("\"admin\"");
-        expect(m[1]).toContain("\"child\"");
+        // Δ14 principal union — every one of these must be present
+        // on the declaration line. This is the frozen 通信龙 list.
+        for (const r of ["admin", "owner", "member", "viewer", "node", "child"]) {
+          expect(m[1]).toContain(`"${r}"`);
+        }
       }
     }
     expect(checked).toBeGreaterThan(0);

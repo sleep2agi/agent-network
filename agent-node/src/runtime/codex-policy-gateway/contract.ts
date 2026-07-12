@@ -84,6 +84,24 @@ export type OwnerLeaseId = string & { readonly __brand: "OwnerLeaseId" };
  * or refused BEFORE reaching this contract. The parser rejects `role:
  * "unknown"` with `GatewayErrorCode.InvalidArg` and never advances the
  * request to the backend.
+ *
+ * Δ14 (副指挥 2860aebf; 通信龙 principal union): the role union closes
+ * on the exact set `owner | admin | member | viewer | node | child`.
+ *   - `node` is the minimum-privilege identity of a plain ntok node.
+ *     It NEVER inherits the token owner's `owner` / `admin`; the
+ *     server MUST classify node-identity requests as `node` even
+ *     when they authenticate with a token whose account role would
+ *     otherwise be higher.
+ *   - `child` is the RFC-026 child-token identity.
+ * Role classification MUST come from the server's authCtx resolution.
+ * The authoritative sources depend on the caller kind (通信龙 rule
+ * confirmed by 副指挥 task 2872f7a3):
+ *   - utok network role  → `network_members`
+ *   - REST global admin  → `users` / global auth
+ *   - RFC-026 child kind → `api_tokens.role`
+ *   - ntok `node` kind   → server-resolved token scope / kind
+ * Role MUST NOT be inferred from a raw token prefix, an alias, or
+ * any other client-supplied value.
  * ─────────────────────────────────────────────────────────────────────
  */
 export interface AuthenticatedSender {
@@ -95,8 +113,10 @@ export interface AuthenticatedSender {
    * Bearer role at the time the CommHub inbox row landed. Concretely
    * classified — `"unknown"` is REFUSED at the Agent surface (Δ12
    * 副指挥 efde3938); legacy fallback lives internal to the server.
+   * Δ14 closes the union on the 通信龙-decided principal set; see
+   * the block comment above for the authCtx-resolution requirement.
    */
-  readonly role: "admin" | "owner" | "member" | "viewer" | "child";
+  readonly role: "admin" | "owner" | "member" | "viewer" | "node" | "child";
   /**
    * The network this task was sent within. Cross-network dispatch is
    * refused upstream in CommHub; this is here only so the gateway can
@@ -111,9 +131,50 @@ export interface AuthenticatedSender {
  *  Codex input (image blocks etc.) is deferred to a later wave.
  *  There is NO `method`, NO `threadId`, NO `turnId`, NO `policy`, NO
  *  `path`, NO `config` on this interface — and no way to add one and
- *  have it survive the gateway's zod-strict parse (`protocol.ts`). */
+ *  have it survive the gateway's zod-strict parse (`protocol.ts`).
+ *
+ *  Δ14 (副指挥 2860aebf): id semantics pinned so the ledger + inbox
+ *  layers can be built against a stable contract without a lifecycle
+ *  break on retry / reassign. See per-field docs below.
+ */
 export interface EnqueueTaskArgs {
+  /**
+   * Canonical task identity. Stable across the ENTIRE reply lifecycle
+   * of one logical task, including retries and cross-node reassigns.
+   * The same taskId maps to the same ledger row, the same reply
+   * channel, and the same upstream turn stream. If a task gets
+   * retried on a different node or re-delivered after a crash, the
+   * downstream layers keep threading state against this identity —
+   * they see the retry as "the same task, another attempt", not as
+   * a new task.
+   *
+   * Server / DB layer implication (通信龙 upcoming; final column
+   * names land with B's migration): the `inbox` table carries a
+   * canonical_task_id column (this value) that is IMMUTABLE for the
+   * row's lifetime; `tasks` carries an IMMUTABLE `origin_principal`
+   * stamped at first-seen. Retry / reassign never mints a fresh
+   * taskId.
+   */
   readonly taskId: TaskId;
+  /**
+   * Idempotency key for THIS specific inbox delivery attempt. Fresh
+   * on every retry / reassign, so the gateway can dedup a re-delivery
+   * of the same physical message without conflating it with a
+   * DIFFERENT retry attempt on the same taskId.
+   *
+   * Invariant: `(taskId, messageId)` uniquely identifies a delivery
+   * attempt. Two `enqueueTask` calls with the same `(taskId,
+   * messageId)` MUST return `duplicate` — the second is a re-send,
+   * not a new attempt. Two calls with same taskId but different
+   * messageId are two attempts of the same logical task (retry
+   * lineage), NOT two independent tasks — the gateway threads them
+   * against the same ledger row.
+   *
+   * Initial delivery MAY use a messageId equal to the taskId as a
+   * degenerate special case; every subsequent retry / reassign MUST
+   * mint a fresh messageId so the delivery-attempt boundary is
+   * observable.
+   */
   readonly messageId: MessageId;
   readonly authenticatedSender: AuthenticatedSender;
   /** UTF-8 task body. The gateway sanitises + injects the RFC-030 §6.4

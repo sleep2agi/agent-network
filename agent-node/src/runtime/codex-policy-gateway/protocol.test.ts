@@ -1179,23 +1179,25 @@ describe("parseEnqueueTaskParams — strict allowlist (req delta #2, f84942e8)",
     });
     if (r.ok) throw new Error("expected refusal on role=\"unknown\"");
     expect(r.field).toBe("authenticatedSender.role");
-    // Reason must enumerate the concrete allowlist, NOT include
-    // "unknown" as a hint (else future readers might re-add it).
-    expect(r.reason).toBe("must be one of admin/owner/member/viewer/child");
+    // Δ14: reason enumerates the concrete allowlist including "node",
+    // NOT including "unknown" (else future readers might re-add it).
+    expect(r.reason).toBe("must be one of admin/owner/member/viewer/node/child");
     expect(r.reason).not.toContain("unknown");
   });
 
-  test("Δ12: all five concrete roles pass; no other role passes", () => {
-    for (const role of ["admin", "owner", "member", "viewer", "child"]) {
+  test("Δ12+Δ14: all six concrete roles pass; no other role passes", () => {
+    for (const role of ["admin", "owner", "member", "viewer", "node", "child"]) {
       const r = parseEnqueueTaskParams({
         ...goodParams(),
         authenticatedSender: { ...goodSender(), role },
       });
       if (!r.ok) throw new Error(`role=${role} should be allowed`);
-      expect(r.args.authenticatedSender.role).toBe(role as "admin" | "owner" | "member" | "viewer" | "child");
+      expect(r.args.authenticatedSender.role).toBe(role as "admin" | "owner" | "member" | "viewer" | "node" | "child");
     }
-    // Fuzz a handful of obvious near-misses; all refused.
-    for (const bogus of ["unknown", "Admin", "MEMBER", "guest", "system", "", " member"]) {
+    // Fuzz a handful of obvious near-misses; all refused. `unknown`
+    // stays refused (Δ12); casing / whitespace / made-up roles all
+    // refused too.
+    for (const bogus of ["unknown", "Admin", "MEMBER", "Node", "NODE", "guest", "system", "root", "", " member", " node"]) {
       const r = parseEnqueueTaskParams({
         ...goodParams(),
         authenticatedSender: { ...goodSender(), role: bogus },
@@ -1620,13 +1622,13 @@ describe("dispatchAgentRequest", () => {
     expect(enqueueCalls).toBe(0);
   });
 
-  test("Δ12 wire: each concrete role admin/owner/member/viewer/child reaches backend exactly once", async () => {
-    for (const role of ["admin", "owner", "member", "viewer", "child"]) {
+  test("Δ12+Δ14 wire: each concrete role admin/owner/member/viewer/node/child reaches backend exactly once", async () => {
+    for (const role of ["admin", "owner", "member", "viewer", "node", "child"]) {
       let calls = 0;
       const backend = makeBackend({
         async enqueueTask(args) {
           calls++;
-          expect(args.authenticatedSender.role).toBe(role as "admin" | "owner" | "member" | "viewer" | "child");
+          expect(args.authenticatedSender.role).toBe(role as "admin" | "owner" | "member" | "viewer" | "node" | "child");
           return { outcome: "accepted", taskId: args.taskId, queuePosition: 0, duplicate: false };
         },
       });
@@ -1647,6 +1649,56 @@ describe("dispatchAgentRequest", () => {
       if (out.kind !== "reply") throw new Error(`role=${role} expected reply, got ${out.kind}`);
       expect(calls).toBe(1);
     }
+  });
+
+  test("Δ14 wire: role=\"node\" reaches backend; role=\"unknown\" still 0-backend refused", async () => {
+    // Explicit paired positive/negative: `node` is now an
+    // authoritative principal (通信龙 union); `unknown` remains
+    // fail-closed (Δ12 unchanged).
+    let nodeCalls = 0;
+    const nodeBackend = makeBackend({
+      async enqueueTask(args) {
+        nodeCalls++;
+        expect(args.authenticatedSender.role).toBe("node");
+        return { outcome: "accepted", taskId: args.taskId, queuePosition: 0, duplicate: false };
+      },
+    });
+    const good = await dispatchAgentRequest(
+      {
+        jsonrpc: "2.0", id: 1, method: "enqueueTask",
+        params: {
+          taskId: "t_node", messageId: "m_node",
+          authenticatedSender: { alias: "n1", tokenId: "ntok_1", role: "node", networkId: "net" },
+          text: "hi from a node",
+        },
+      },
+      nodeBackend,
+    );
+    if (good.kind !== "reply") throw new Error(`expected reply for role=node, got ${good.kind}`);
+    expect(nodeCalls).toBe(1);
+
+    let unknownCalls = 0;
+    const unknownBackend = makeBackend({
+      async enqueueTask(args) {
+        unknownCalls++;
+        return { outcome: "accepted", taskId: args.taskId, queuePosition: 0, duplicate: false };
+      },
+    });
+    const bad = await dispatchAgentRequest(
+      {
+        jsonrpc: "2.0", id: 2, method: "enqueueTask",
+        params: {
+          taskId: "t_unknown", messageId: "m_unknown",
+          authenticatedSender: { alias: "u", tokenId: "tok_u", role: "unknown", networkId: "net" },
+          text: "should not reach backend",
+        },
+      },
+      unknownBackend,
+    );
+    if (bad.kind !== "error") throw new Error(`expected error for role=unknown, got ${bad.kind}`);
+    expect(bad.code).toBe(GatewayErrorCode.InvalidArg);
+    expect(bad.data.field).toBe("authenticatedSender.role");
+    expect(unknownCalls).toBe(0);
   });
 });
 
