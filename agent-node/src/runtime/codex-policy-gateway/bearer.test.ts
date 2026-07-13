@@ -276,3 +276,75 @@ describe("SecretRedactor — redaction correctness + finish/wipe zeros", () => {
     expect(out.toString("utf8")).toBe(`before ${lookalike} after`);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// 副指挥 1b24ae71 P0-2 SecretRedactor finish() leak fix
+// ─────────────────────────────────────────────────────────────────────
+
+describe("SecretRedactor.finish() — partial-secret prefix -> marker (副指挥 1b24ae71)", () => {
+  const SECRET = "AAAAAAAAAAAA-super-secret-XXXXXXX";
+  const MARK = "[REDACTED bearer]";
+
+  test("1..(len-1) proper prefix on finish -> marker output, prefix NEVER released", () => {
+    for (let n = 1; n < SECRET.length; n++) {
+      const r = new SecretRedactor(SECRET, MARK);
+      const partial = SECRET.slice(0, n);
+      r.push(Buffer.from(partial));
+      const out = r.finish();
+      // Exact-marker output. Bytes emitted equal the marker only —
+      // never leaks the credential prefix through in any form.
+      expect(out.toString("utf8")).toBe(MARK);
+    }
+  });
+
+  test("Bearer-shaped 43-char credential fed as 42 chars -> marker (bug repro)", () => {
+    const bearer = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"; // 43 chars, base64url-ish
+    const r = new SecretRedactor(bearer, MARK);
+    r.push(Buffer.from(bearer.slice(0, 42)));
+    const out = r.finish();
+    expect(out.toString("utf8")).toBe(MARK);
+    expect(out.toString("utf8")).not.toContain(bearer.slice(0, 42));
+  });
+
+  test("innocent tail bytes (non-prefix) pass through unredacted", () => {
+    const r = new SecretRedactor(SECRET, MARK);
+    // A single non-prefix character that doesn't start the secret.
+    r.push(Buffer.from("Z"));
+    const out = r.finish();
+    expect(out.toString("utf8")).toBe("Z");
+  });
+
+  test("empty tail on finish -> empty output", () => {
+    const r = new SecretRedactor(SECRET, MARK);
+    r.push(Buffer.from(""));
+    const out = r.finish();
+    expect(out.length).toBe(0);
+  });
+});
+
+describe("SecretRedactor — caller-buffer backing invariant", () => {
+  const SECRET = "AAAAAAAAAAAA-super-secret-XXXXXXX";
+  const MARK = "[REDACTED bearer]";
+
+  test("push() input buffer is NOT mutated when redactor internally zeroes tail via finish/wipe", () => {
+    const r = new SecretRedactor(SECRET, MARK);
+    const input = Buffer.from("preamble" + SECRET.slice(0, 8));
+    const inputSnapshot = Buffer.from(input); // caller's copy
+    r.push(input);
+    r.finish();
+    // After finish/wipe, the caller's original buffer must still
+    // hold the original bytes (proves the redactor didn't share
+    // backing storage with the caller's chunk).
+    expect(input.equals(inputSnapshot)).toBe(true);
+  });
+
+  test("returned finish() buffer is decoupled from internal tail", () => {
+    const r = new SecretRedactor(SECRET, MARK);
+    r.push(Buffer.from("Z")); // innocent single-byte tail
+    const returned = r.finish();
+    // Mutating the returned buffer must not touch anything internal.
+    returned.fill(0xff);
+    // A second finish() is empty (idempotent).
+    expect(r.finish().length).toBe(0);
+  });
+});

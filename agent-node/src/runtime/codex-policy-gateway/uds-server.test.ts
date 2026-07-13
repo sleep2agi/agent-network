@@ -243,13 +243,21 @@ describe("BackendUdsServer — gateway.hello capability", () => {
 // sendInternal + reject-exactly-once
 // ─────────────────────────────────────────────────────────────────────
 
-describe("BackendUdsServer — sendInternal + reject once", () => {
+describe("BackendUdsServer — sendInternal + reject once (router-driven)", () => {
+  // 副指挥 1b24ae71 P0-1: BackendUdsServer no longer subscribes to
+  // the upstream transport directly. Response dispatch flows through
+  // the lifecycle-owned UpstreamRouter, which consumes the mux and
+  // calls the wrapped resolve/reject on the InternalOrigin. These
+  // tests drive that path via `h.server.handleUpstreamClose()` and
+  // the frozen `mux.consumeUpstreamResponse` directly.
   test("upstream close mid-pending → Promise rejects with upstream_closed", async () => {
     const h = await makeHarness();
     try {
       const p = h.server.sendInternal("thread/status", { threadId: "t" });
       await new Promise((r) => setTimeout(r, 10));
-      h.upstream.emitClose();
+      // Router's onClose handler calls handleUpstreamClose on the
+      // backend server.
+      h.server.handleUpstreamClose();
       let reason = "";
       try { await p; } catch (e) { reason = (e as Error).message; }
       expect(reason).toBe("upstream_closed");
@@ -267,13 +275,17 @@ describe("BackendUdsServer — sendInternal + reject once", () => {
     try { fs.rmSync(h.socketDir, { recursive: true, force: true }); } catch {}
   });
 
-  test("happy path: response resolves the Promise", async () => {
+  test("happy path: response consumed via mux -> Promise resolves", async () => {
     const h = await makeHarness();
     try {
       const p = h.server.sendInternal<{ v: string }>("thread/status", { threadId: "t" });
       await new Promise((r) => setTimeout(r, 10));
-      const uid = (h.upstream.written[0] as JsonRpcRequestFrame).id;
-      h.upstream.emitFrame({ jsonrpc: "2.0", id: uid, result: { v: "ok" } });
+      const uid = (h.upstream.written[0] as JsonRpcRequestFrame).id as number;
+      // Simulate what the UpstreamRouter does: consume via the mux
+      // and call the InternalOrigin resolver.
+      const origin = h.mux.consumeUpstreamResponse(uid);
+      if (origin === null || origin.kind !== "internal") throw new Error("expected internal origin");
+      origin.origin.resolve({ v: "ok" });
       const res = await p;
       expect(res.v).toBe("ok");
     } finally { await h.cleanup(); }

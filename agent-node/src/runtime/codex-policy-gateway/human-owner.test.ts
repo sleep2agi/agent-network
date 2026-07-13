@@ -327,20 +327,36 @@ describe("P0.2 lease binding — cross-lease refusal + stale-detach no-op", () =
     expect(reverseNs.pendingCount()).toBe(0);
   });
 
-  test("attachTui with lease already active → no clobber; incumbent lease preserved", () => {
+  test("attachTui with lease already active → typed refused; incumbent preserved", () => {
     const { coord } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui(L1);
-    expect(coord.currentLease()).toBe(L1);
-    // A duplicate attach with a different lease MUST NOT replace L1.
-    coord.attachTui(L2);
-    expect(coord.currentLease()).toBe(L1);
+    const first = coord.attachTui(L1);
+    expect(first.kind).toBe("ok");
+    expect(coord.attachSnapshot().attached).toBe(true);
+    const second = coord.attachTui(L2);
+    if (second.kind !== "refused") throw new Error("expected refused");
+    expect(second.reason).toBe("already_held");
+    // Verify the L2 lease didn't take over by consuming a reverse
+    // response with L1 (must succeed) then trying with L2 (must
+    // lease_mismatch).
+    const fwd = coord.handleUpstreamReverseRequest(CODEX_REVERSE_REQUEST);
+    if (fwd.kind !== "forward_tui") throw new Error("expected forward");
+    const tuiId = fwd.tuiFrame.id;
+    const l2Resp = coord.handleTuiResponseFrameWithLease(
+      { jsonrpc: "2.0", id: tuiId, result: {} }, L2,
+    );
+    expect(l2Resp.kind).toBe("reject");
+    const l1Resp = coord.handleTuiResponseFrameWithLease(
+      { jsonrpc: "2.0", id: tuiId, result: {} }, L1,
+    );
+    expect(l1Resp.kind).toBe("forward_reverse_response");
   });
 
   test("attach → detach → attach with fresh lease works normally after clean detach", () => {
     const { coord } = makeCoord({ approvalMode: "passthrough" });
-    coord.attachTui(L1);
+    expect(coord.attachTui(L1).kind).toBe("ok");
     coord.detachTui(L1);
-    coord.attachTui(L2);
-    expect(coord.currentLease()).toBe(L2);
+    expect(coord.attachSnapshot().attached).toBe(false);
+    expect(coord.attachTui(L2).kind).toBe("ok");
+    expect(coord.attachSnapshot().attached).toBe(true);
   });
 });

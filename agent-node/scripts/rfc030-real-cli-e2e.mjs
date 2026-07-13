@@ -47,15 +47,35 @@ function fail(name, why) { failed++; console.log(`  FAIL ${name}: ${why}`); }
 // Env detection
 // ─────────────────────────────────────────────────────────────────────
 
-function haveCodex() {
+// 副指挥 1b24ae71 P1: version check and spawn MUST use the SAME
+// absolute path. Explicit RFC030_CODEX_BIN env override + resolution
+// via `command -v codex` so the harness is auditable and no PATH
+// re-resolution can slip a different binary in between.
+function resolveCodexBin() {
+  if (process.env.RFC030_CODEX_BIN) return process.env.RFC030_CODEX_BIN;
   try {
-    const out = execSync("codex --version 2>&1", { encoding: "utf8" }).trim();
+    return execSync("command -v codex", { encoding: "utf8", shell: "/bin/sh" }).trim();
+  } catch { return null; }
+}
+
+let CODEX_BIN = null;
+
+function haveCodex() {
+  const bin = resolveCodexBin();
+  if (bin === null || bin.length === 0) {
+    notes.push("codex binary not on PATH");
+    return false;
+  }
+  try {
+    const out = execSync(`${JSON.stringify(bin)} --version 2>&1`, { encoding: "utf8", shell: "/bin/sh" }).trim();
     if (!/^codex-cli 0\.144\.0/.test(out)) {
-      notes.push(`codex present but version ${out} != 0.144.0`);
+      notes.push(`resolved bin=${bin} but version ${out} != 0.144.0`);
       return false;
     }
+    CODEX_BIN = bin;
+    notes.push(`using codex binary: ${bin}`);
     return true;
-  } catch { notes.push("codex binary not on PATH"); return false; }
+  } catch { notes.push(`codex --version failed for bin=${bin}`); return false; }
 }
 
 function haveScriptPty() {
@@ -150,10 +170,13 @@ async function spawnCodex(plaintext, port, underPty) {
     "--remote-auth-token-env", "ANET_CODEX_TUI_BEARER",
     "-c", "check_for_update_on_startup=false",
   ];
+  // Version-checked bin used verbatim in spawn so no PATH re-lookup
+  // can slip a different codex in between (副指挥 1b24ae71 P1).
+  const codexBin = CODEX_BIN;
   const argv = underPty
-    ? ["-qec", `codex ${codexArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`, "/dev/null"]
+    ? ["-qec", `${JSON.stringify(codexBin)} ${codexArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`, "/dev/null"]
     : codexArgs;
-  const cmd = underPty ? "script" : "codex";
+  const cmd = underPty ? "script" : codexBin;
   const child = spawn(cmd, argv, { env, stdio: ["pipe", "pipe", "pipe"] });
   const outRedactor = new SecretRedactor(plaintext, "[REDACTED bearer]");
   const errRedactor = new SecretRedactor(plaintext, "[REDACTED bearer]");
@@ -172,7 +195,7 @@ async function spawnCodex(plaintext, port, underPty) {
 }
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 2 — real codex 0.144.0 bootstrap smoke");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 3 — real codex 0.144.0 bootstrap smoke");
   const { server, plaintext, authorizerCalls } = await startServer();
 
   // Env allowlist audit — no CommHub token slots.
@@ -186,17 +209,17 @@ async function main() {
   }
   ok("env allowlist audit (see spawnCodex `env` construction)");
 
-  // PTY guaranteed by early hard-fail check above.
   const { child, outChunks, errChunks, cleanup } = await spawnCodex(
     plaintext, server.boundPortActual(), true,
   );
 
-  // Wait EITHER for the authorizer to see at least one read call
-  // OR for a hard 5s timeout.
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline
-    && authorizerCalls.length === 0
-    && server.ownerSlotState() !== "held") {
+  // 副指挥 1b24ae71 P1: wait strictly for an authorizer call OR a
+  // hard timeout. `ownerSlotState === "held"` alone is NOT a pass
+  // signal — the round-2 direct-mode smoke passed 3/3 without a
+  // single authorizer call. First authorizer call must be exactly
+  // `account/read`.
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline && authorizerCalls.length === 0) {
     await new Promise((r) => setTimeout(r, 100));
   }
   try { child.kill("SIGKILL"); } catch {}
@@ -215,27 +238,20 @@ async function main() {
     ok("SecretRedactor covers child output (no plaintext in captured out+err)");
   }
 
-  const opened = server.ownerSlotState() === "held" || authorizerCalls.length > 0;
-  if (opened) {
-    ok("Codex CLI opened the WS Upgrade");
-    if (authorizerCalls.length > 0) {
-      // Honest claim: we only observe the FIRST authorizer call.
-      // The subsequent reads (hooks/list / configRequirements/read /
-      // model/list) require Codex to receive proper responses to
-      // its earlier reads; this bootstrap smoke doesn't emulate the
-      // full read set.
-      const first = authorizerCalls[0];
-      if (READ_ALLOWLIST.includes(first)) {
-        ok(`Codex first authorizer call is in the allowlist: ${first}`);
-      } else {
-        fail("Codex first authorizer call", `expected one of ${READ_ALLOWLIST.join(",")}, got ${first}`);
-      }
-    } else {
-      notes.push("owner slot became held but authorizer wasn't invoked in the smoke window");
-    }
-  } else {
+  // 副指挥 1b24ae71 P1: strict predicate. `ownerSlotState === "held"`
+  // alone is NOT a pass signal — round-2 direct smoke passed 3/5
+  // times with zero authorizer calls. Require at least one call AND
+  // the first must be exactly `account/read`.
+  if (authorizerCalls.length === 0) {
     const preview = stderr.slice(0, 300) + stdout.slice(0, 200);
-    fail("Codex CLI Upgrade", `owner slot never held; authorizer calls=${authorizerCalls.length}; child preview: ${JSON.stringify(preview)}`);
+    fail("Codex CLI bootstrap smoke", `0 authorizer calls in 6 s; child preview: ${JSON.stringify(preview)}`);
+  } else {
+    ok(`Codex authorizer invoked (${authorizerCalls.length} call${authorizerCalls.length === 1 ? "" : "s"})`);
+    if (authorizerCalls[0] === "account/read") {
+      ok("Codex first authorizer call is exactly account/read");
+    } else {
+      fail("Codex first authorizer call", `expected account/read, got ${authorizerCalls[0]}`);
+    }
   }
 
   await server.stop();

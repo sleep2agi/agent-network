@@ -1,5 +1,24 @@
 # Codex 0.144.0 loopback startup sequence — captured baseline
 
+> **Threat-model note (副指挥 1b24ae71):** the bearer is delivered to
+> the child process via an env variable that is visible to any process
+> sharing the same UID via `/proc/<pid>/environ`. This design does NOT
+> defend against a hostile same-UID sibling. The bearer's protective
+> effect is limited to defending against **stale or accidental peers**
+> (e.g. a stale process holding a valid but unused connection). True
+> same-UID isolation is a Wave 2 OS-isolation P0 item (final wording
+> pending 通信龙). No native wrapper / namespace isolation is added in
+> Commit 1.
+
+> **Fixture scope note:** the four-read allowlist below (`account/read`,
+> `hooks/list`, `configRequirements/read`, `model/list`) is enforced by
+> the E2E harness's fake authorizer at
+> `scripts/rfc030-real-cli-e2e.mjs`. The production `GatewayLifecycle`
+> uses `defaultDenyTuiAuthorizer` (an EMPTY allowlist) — every method
+> is denied there. The four-read set belongs to Wave 2's real
+> authorizer.
+
+
 Captured 2026-07-12 against `codex-cli 0.144.0` invoked as:
 
     codex --remote ws://127.0.0.1:<port> --remote-auth-token-env ANET_CODEX_TUI_BEARER

@@ -279,11 +279,12 @@ export class BackendUdsServer {
     try {
       await bindOwnerOnlySocket(this.server, this.opts.socketPath);
       this.createdPaths.push({ path: this.opts.socketPath, kind: "socket" });
-      this.upstreamUnsubs.push(this.opts.upstreamTransport.onFrame((raw) => this.onUpstreamFrame(raw)));
-      this.upstreamUnsubs.push(this.opts.upstreamTransport.onClose(() => this.onUpstreamClose()));
+      // 副指挥 1b24ae71 P0-1: Backend does NOT subscribe to the
+      // upstream transport. The lifecycle-owned `UpstreamRouter` is
+      // the SOLE subscriber; it calls into this instance via the
+      // mux'd `InternalOrigin.resolve/reject` closures returned from
+      // `sendInternal`.
     } catch (e) {
-      for (const un of this.upstreamUnsubs) { try { un(); } catch { /* silent */ } }
-      this.upstreamUnsubs = [];
       await this.closeServer();
       this.cleanupCreatedPaths();
       throw e;
@@ -295,9 +296,6 @@ export class BackendUdsServer {
     if (!this.running) return;
     this.running = false;
     this.shuttingDown = true;
-
-    for (const un of this.upstreamUnsubs) { try { un(); } catch { /* silent */ } }
-    this.upstreamUnsubs = [];
 
     this.rejectAllInternalPending("gateway_stopping");
 
@@ -333,9 +331,14 @@ export class BackendUdsServer {
   }
 
   private rejectAllInternalPending(reason: string): void {
-    for (const [, entry] of this.internalPending) {
+    // Snapshot entries first — the wrapper's reject callback mutates
+    // `internalPending` during iteration.
+    const snapshot = Array.from(this.internalPending.values());
+    for (const entry of snapshot) {
       if (entry.settled) continue;
-      entry.settled = true;
+      // Let the wrapped reject do the settled flip + outerReject; we
+      // do NOT mutate entry.settled here (that would short-circuit the
+      // wrapper's guard).
       try { entry.origin.reject(new Error(reason)); }
       catch (e: unknown) {
         try {
@@ -347,6 +350,8 @@ export class BackendUdsServer {
         } catch { /* silent */ }
       }
     }
+    // Any lingering entries (e.g. wrapper deleted its own key during
+    // the iteration) are cleared for the next lifecycle.
     this.internalPending.clear();
   }
 
@@ -492,38 +497,53 @@ export class BackendUdsServer {
     }
   }
 
-  // ─────────── Upstream ↔ mux ───────────
+  // ─────────── sendInternal + upstream-close hook ───────────
 
-  private onUpstreamFrame(raw: unknown): void {
-    const cls = classifyMessage(raw);
-    if (cls.kind !== "response") return; // ignore request/notification here — TUI server handles reverse
-    const origin = this.opts.mux.consumeUpstreamResponse(cls.frame.id);
-    if (origin === null) {
-      try {
-        this.opts.diagnostics.reportInternalError({
-          correlationId: this.opts.diagnostics.newCorrelationId(),
-          operation: "upstream_response_orphan",
-          error: new Error(`unknown upstream id ${String(cls.frame.id)}`),
-        });
-      } catch { /* silent */ }
-      return;
-    }
-    if (origin.kind !== "internal") return; // proxied_tui responses handled by tui-ws-server
-    const upstreamNumericId = typeof cls.frame.id === "number" ? cls.frame.id : -1;
-    const entry = upstreamNumericId >= 0 ? this.internalPending.get(upstreamNumericId) : undefined;
-    if (entry === undefined || entry.settled) return;
-    entry.settled = true;
-    this.internalPending.delete(upstreamNumericId);
-    if ("error" in cls.frame) origin.origin.reject(new Error(cls.frame.error.message));
-    else origin.origin.resolve(cls.frame.result);
-  }
-
-  private onUpstreamClose(): void {
+  /**
+   * P0.2 round 3 (副指挥 1b24ae71): called by the sole UpstreamRouter
+   * when the upstream transport closes. Rejects pending internal
+   * Promises exactly once and drains the mux. NOT wired to the
+   * transport directly — the router owns that subscription.
+   */
+  handleUpstreamClose(): void {
     this.rejectAllInternalPending("upstream_closed");
     this.opts.mux.drainAll();
   }
 
-  // ─────────── sendInternal ───────────
+  /**
+   * Wrap the raw `InternalOrigin` so that the router's response
+   * dispatch settles the pending Promise exactly once. The router
+   * calls `origin.resolve/reject` directly; the wrapper enforces the
+   * `settled` gate and removes the entry from the internalPending
+   * map so `handleUpstreamClose` does not double-reject.
+   */
+  private buildInternalPendingEntry(
+    upstreamId: number,
+    outerResolve: (v: unknown) => void,
+    outerReject: (e: Error) => void,
+    label: string,
+  ): { origin: InternalOrigin; entry: InternalPendingEntry } {
+    const entry: InternalPendingEntry = { upstreamId, origin: null as unknown as InternalOrigin, settled: false };
+    const origin: InternalOrigin = {
+      kind: "internal",
+      label,
+      resolve: (v) => {
+        if (entry.settled) return;
+        entry.settled = true;
+        this.internalPending.delete(upstreamId);
+        outerResolve(v);
+      },
+      reject: (e) => {
+        if (entry.settled) return;
+        entry.settled = true;
+        this.internalPending.delete(upstreamId);
+        outerReject(e);
+      },
+    };
+    entry.origin = origin;
+    return { origin, entry };
+  }
+
 
   sendInternal<T = unknown>(method: string, params: unknown | undefined, label = method): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -531,25 +551,34 @@ export class BackendUdsServer {
         reject(new Error("gateway_stopping"));
         return;
       }
-      const origin: InternalOrigin = {
-        kind: "internal", label,
-        resolve: (v) => resolve(v as T),
-        reject,
-      };
+      // Allocate a placeholder id via the mux; the origin registered
+      // there routes response dispatch through the wrapped
+      // resolve/reject so the internal pending entry is settled
+      // exactly once.
+      let allocatedId = -1;
+      const { origin, entry } = this.buildInternalPendingEntry(
+        0, // upstreamId filled below
+        (v) => resolve(v as T),
+        (e) => reject(e),
+        label,
+      );
       const alloc = this.opts.mux.allocateForInternalScheduler(origin);
-      const entry: InternalPendingEntry = { upstreamId: alloc.upstreamId, origin, settled: false };
-      this.internalPending.set(alloc.upstreamId, entry);
+      allocatedId = alloc.upstreamId;
+      // Fix up the placeholder id in the pending map.
+      (entry as { upstreamId: number }).upstreamId = allocatedId;
+      this.internalPending.set(allocatedId, entry);
       const frame: JsonRpcRequestFrame = {
-        jsonrpc: "2.0", id: alloc.upstreamId, method,
+        jsonrpc: "2.0", id: allocatedId, method,
         ...(params !== undefined ? { params } : {}),
       };
       this.opts.upstreamTransport.writeFrame(frame).catch((e: unknown) => {
-        this.opts.mux.consumeUpstreamResponse(alloc.upstreamId);
-        if (!entry.settled) {
-          entry.settled = true;
-          this.internalPending.delete(alloc.upstreamId);
-          reject(e instanceof Error ? e : new Error(String(e)));
-        }
+        // Reject via the origin so the pending map is cleaned up
+        // atomically with the outer Promise settlement.
+        origin.reject(e instanceof Error ? e : new Error(String(e)));
+        // The mux slot is now permanently allocated but never
+        // consumed. Since the router won't see a response for this
+        // id (transport rejected the write), it stays orphan until
+        // `drainAll` on stop.
       });
     });
   }

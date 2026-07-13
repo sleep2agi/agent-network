@@ -25,6 +25,7 @@ const {
   HumanOwnerCoordinator,
   UpstreamRequestMux,
   ReverseRequestNamespace,
+  UpstreamRouter,
   asOwnerLeaseId,
 } = mod;
 
@@ -65,12 +66,14 @@ class FakeUpstream {
   emitFrame(raw) { for (const h of [...this.frameHandlers]) h(raw); }
 }
 
-async function harness(overrides = {}) {
-  const { coord, diag } = makeCoord();
+async function harness() {
+  const { coord, mux, reverseNs, diag } = makeCoord();
   const bearer = TuiBearer.mint();
   const plaintext = bearer.takePlaintextForLauncher();
   const upstream = new FakeUpstream();
-  const constructorOpts = {
+  // 副指挥 1b24ae71 P1: hard-pinned production constants. No test
+  // override seam any more. All tests use the real 1 MiB / 3s / 8.
+  const server = new TuiWsServer({
     bearer,
     humanOwner: coord,
     authorizer: {
@@ -85,15 +88,25 @@ async function harness(overrides = {}) {
       newCorrelationId: () => "cid",
       reportInternalError: (e) => { diag.entries.push(e); },
     },
-    upstreamTransport: upstream,
-  };
-  // Use the @internal test factory when overrides for maxPayload /
-  // headerTimeoutMs / maxPreAuthSockets are provided.
-  const server = (overrides && Object.keys(overrides).length > 0)
-    ? TuiWsServer._createForTest(constructorOpts, overrides)
-    : new TuiWsServer(constructorOpts);
+  });
   await server.start();
-  return { server, bearer, plaintext, coord, diag, upstream };
+  // Wire an UpstreamRouter under the same shared mux so the Node
+  // integration reflects production topology: router owns upstream
+  // subscription, TuiWsServer receives reverse-request delivery via
+  // the TuiForwardSeam.
+  const tuiForward = {
+    deliverReverseRequestToOwner: (f) => server.deliverReverseRequestToOwner(f),
+    deliverProxiedResponseToOwner: (tuiId, f) => server.deliverProxiedResponseToOwner(tuiId, f),
+  };
+  const router = new UpstreamRouter({
+    mux, humanOwner: coord, upstreamTransport: upstream,
+    diagnostics: { newCorrelationId: () => "cid", reportInternalError: (e) => { diag.entries.push(e); } },
+    tuiForward,
+    onUpstreamClose: () => {},
+  });
+  router.subscribe();
+  router.activate();
+  return { server, bearer, plaintext, coord, diag, upstream, router };
 }
 
 function rawHttp(port, lines) {
@@ -149,17 +162,17 @@ async function test_happy() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_slow_header() {
-  const h = await harness({ headerTimeoutMs: 200 });
+  // 副指挥 1b24ae71 P1: header timeout is hard-pinned to 3 s in
+  // production. Wait a real 3.5 s. Slow but honest.
+  const h = await harness();
   try {
     const s = net.createConnection({ port: h.server.boundPortActual(), host: ALLOWED_LOOPBACK });
-    // Write only a partial HTTP request, never complete the request head.
     await new Promise((r) => s.once("connect", r));
     s.write("GET / HT");
-    // Wait 400 ms — 2× timeout — then expect the socket to be closed.
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 3500));
     const destroyed = s.destroyed || s.readyState === "closed";
-    if (destroyed) ok("T2 slow-header: preauth socket destroyed after timeout");
-    else fail("T2 slow-header", `socket still alive after 2× timeout (destroyed=${s.destroyed}, state=${s.readyState})`);
+    if (destroyed) ok("T2 slow-header: preauth socket destroyed after production 3 s timeout");
+    else fail("T2 slow-header", `socket still alive after 3.5 s (destroyed=${s.destroyed}, state=${s.readyState})`);
     s.destroy();
   } finally { await h.server.stop(); }
 }
@@ -294,6 +307,12 @@ async function test_bad_ws_key() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_second_upgrade_refused() {
+  // 副指挥 1b24ae71 P1: HTTP listener stays OPEN after attach so a
+  // cleanly-detached owner can reattach without a lifecycle restart.
+  // Concurrent hard-1 is enforced by the ownerSlot check + single-use
+  // bearer. Second Upgrade with the SAME bearer sees bearer_already
+  // _consumed on the wire; second Upgrade with NO bearer sees 401
+  // uniform reject.
   const h = await harness();
   try {
     const ws1 = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}/`, {
@@ -302,23 +321,20 @@ async function test_second_upgrade_refused() {
     });
     await new Promise((r, j) => { ws1.once("open", r); ws1.once("error", j); });
     assertEq("T7 first upgrade holds owner slot", h.server.ownerSlotState(), "held");
-    // Second connect should be kernel-refused since httpServer.close()
-    // ran on first attach.
-    let refused = false;
-    try {
-      await rawHttp(h.server.boundPortActual(), [
-        "GET / HTTP/1.1",
-        `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
-        "Upgrade: websocket",
-        "Connection: Upgrade",
-        "Sec-WebSocket-Version: 13",
-        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-        `Authorization: Bearer ${h.plaintext}`,
-        "",
-      ]);
-    } catch { refused = true; }
-    if (refused) ok("T7 second Upgrade kernel-refused after attach");
-    else fail("T7 second Upgrade", "kernel accepted connection after httpServer.close()");
+    // Second Upgrade with same (now-consumed) bearer -> uniform 401.
+    const { status, body } = await rawHttp(h.server.boundPortActual(), [
+      "GET / HTTP/1.1",
+      `Host: ${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}`,
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Version: 13",
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+      `Authorization: Bearer ${h.plaintext}`,
+      "",
+    ]);
+    assertEq("T7 second Upgrade -> 401", status, 401);
+    assertEq("T7 second Upgrade body 'unauthorized'", body, "unauthorized");
+    assertEq("T7 owner slot still held by incumbent", h.server.ownerSlotState(), "held");
     ws1.close();
   } finally { await h.server.stop(); }
 }
@@ -328,26 +344,23 @@ async function test_second_upgrade_refused() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_owner_survives_preauth_timer() {
-  const h = await harness({ headerTimeoutMs: 200 });
+  // 副指挥 1b24ae71 P1: real 3 s header timeout. Wait > 2× to
+  // reproduce the 9e6706c bug (owner WS destroyed by preauth timer).
+  const h = await harness();
   try {
     const ws = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${h.server.boundPortActual()}/`, {
       headers: { Authorization: `Bearer ${h.plaintext}` },
       perMessageDeflate: false,
     });
     await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
-    // Wait > 2× headerTimeout. The 9e6706c bug destroyed the owner
-    // WS here because preAuthSockets still held it and the 3s timer
-    // ran; corrective removes the socket from the preauth map at
-    // http upgrade time.
-    await new Promise((r) => setTimeout(r, 500));
-    // Send initialize and expect a reply.
+    await new Promise((r) => setTimeout(r, 6500));
     const reply = await new Promise((r, j) => {
       ws.once("message", (d) => r(JSON.parse(d.toString())));
       ws.once("error", j);
       ws.send(JSON.stringify({ id: "initialize", method: "initialize", params: {} }));
-      setTimeout(() => j(new Error("timeout waiting for initialize reply")), 800);
+      setTimeout(() => j(new Error("timeout waiting for initialize reply")), 1500);
     });
-    assertEq("T4b post-timeout: owner still OPEN + can RPC", reply.id, "initialize");
+    assertEq("T4b post-6.5s: owner still OPEN + can RPC", reply.id, "initialize");
     ws.close();
   } finally { await h.server.stop(); }
 }
@@ -513,7 +526,6 @@ async function test_upstream_reverse_phase1_noowner() {
   try {
     const before = h.upstream.written.length;
     h.upstream.emitFrame({ jsonrpc: "2.0", id: "cx_reverse_1", method: "approval/request" });
-    // Give the async event loop a beat.
     await new Promise((r) => setTimeout(r, 20));
     if (h.upstream.written.length <= before) {
       fail("P0-1 upstream reverse -> writes back", "no frame written back to upstream");
@@ -522,11 +534,24 @@ async function test_upstream_reverse_phase1_noowner() {
     const written = h.upstream.written[before];
     assertEq("P0-1 reverse id preserved", written.id, "cx_reverse_1");
     if (!("error" in written)) { fail("P0-1 reverse has error", "no error field"); return; }
-    // Under Phase 1 approvalMode=never, coordinator returns NoOwner
-    // with reason=approval_mode_never.
     assertEq("P0-1 reverse code=NoOwner (-32052)", written.error.code, -32052);
     assertEq("P0-1 reverse reason=approval_mode_never",
       written.error.data.reason, "approval_mode_never");
+  } finally { await h.server.stop(); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// P0-1 sole router handler count
+// ─────────────────────────────────────────────────────────────────────
+
+async function test_sole_router_handler_count() {
+  const h = await harness();
+  try {
+    // With the router topology, the upstream transport should have
+    // exactly 1 frame subscriber + 1 close subscriber. Prior code
+    // had 2 of each (Backend + TUI subscribing directly).
+    assertEq("P0-1 upstream frame subscribers = 1", h.upstream.frameHandlers.length, 1);
+    assertEq("P0-1 upstream close subscribers = 1", h.upstream.closeHandlers.length, 1);
   } finally { await h.server.stop(); }
 }
 
@@ -535,14 +560,11 @@ async function test_upstream_reverse_phase1_noowner() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function test_half_open_reject_ledger_drops() {
-  const h = await harness({ headerTimeoutMs: 300 });
+  const h = await harness();
   try {
     const port = h.server.boundPortActual();
-    // Send a request that will be rejected (no Authorization) via a
-    // socket with allowHalfOpen — we do NOT close our own write side.
     const s = net.createConnection({ port, host: ALLOWED_LOOPBACK, allowHalfOpen: true });
     await new Promise((r) => s.once("connect", r));
-    const before = h.server.preAuthCount();
     s.write([
       "GET / HTTP/1.1",
       `Host: ${ALLOWED_LOOPBACK}:${port}`,
@@ -559,7 +581,6 @@ async function test_half_open_reject_ledger_drops() {
     } else {
       fail("P0-2 half-open reject", `ledger still at ${h.server.preAuthCount()}`);
     }
-    // stop() must return promptly.
     const stopStart = Date.now();
     await h.server.stop();
     const stopMs = Date.now() - stopStart;
@@ -635,6 +656,7 @@ async function main() {
   await test_concurrent_upgrades_exactly_one_owner();
   await test_real_close_codes();
   await test_upstream_reverse_phase1_noowner();
+  await test_sole_router_handler_count();
   await test_half_open_reject_ledger_drops();
   await test_noncanonical_ws_key();
   await test_duplicate_host_rejected();

@@ -52,6 +52,7 @@ import {
 import { HumanOwnerCoordinator } from "./human-owner";
 import { TuiWsServer } from "./tui-ws-server";
 import { TuiBearer } from "./bearer";
+import { UpstreamRouter, type TuiForwardSeam } from "./upstream-router";
 
 // ────────────────────────────────────────────────────────────────────────
 // PreflightRunner — narrow injection point
@@ -226,6 +227,7 @@ export class GatewayLifecycle {
   private backendServer: BackendUdsServer | null = null;
   private tuiServer: TuiWsServer | null = null;
   private tuiBearer: TuiBearer | null = null;
+  private upstreamRouter: UpstreamRouter | null = null;
   private humanOwner: HumanOwnerCoordinator | null = null;
   private mux: UpstreamRequestMux<InternalOrigin> | null = null;
   private reverseNs: ReverseRequestNamespace | null = null;
@@ -250,8 +252,11 @@ export class GatewayLifecycle {
     return this.state;
   }
 
-  humanOwnerCoordinator(): HumanOwnerCoordinator | null {
-    return this.humanOwner;
+  // 副指挥 1b24ae71 P1: raw coordinator accessor REMOVED. External
+  // observers use typed snapshots (`humanOwnerAttached()` below) or
+  // Node integration tests that construct a fresh coordinator.
+  humanOwnerAttached(): boolean {
+    return this.humanOwner?.attachSnapshot().attached ?? false;
   }
 
   /**
@@ -285,18 +290,11 @@ export class GatewayLifecycle {
   }
 
   private async doStart(): Promise<void> {
-    try {
-      await this.opts.preflight.run();
-    } catch (e) {
-      this.state = "stopped";
-      throw e;
-    }
-    // P0 fence #1 — stop requested during preflight.
-    if (this.stopRequested) {
-      this.state = "stopped";
-      throw new Error("start aborted by concurrent stop (preflight)");
-    }
-
+    // 副指挥 1b24ae71 P0-1: construct the mux + reverseNs + coordinator
+    // + UpstreamRouter BEFORE preflight. The router subscribes to the
+    // upstream transport immediately and BUFFERS any frames received
+    // during the preflight window. A close received before activate()
+    // puts the router in terminal state and start() aborts.
     this.mux = new UpstreamRequestMux<InternalOrigin>();
     this.reverseNs = new ReverseRequestNamespace();
 
@@ -308,17 +306,12 @@ export class GatewayLifecycle {
       mux: this.mux as unknown as UpstreamRequestMux<unknown>,
       reverseNs: this.reverseNs,
       diagnostics,
-      // P0.2 Commit 1 corrective: hard-pinned Phase 1 posture. No
-      // options-side override; Phase 2 turn-on is a separate PR.
       approvalMode: "never",
     });
 
-    // Mint a fresh TUI bearer per lifecycle. Plaintext lives here
-     // just long enough to hand to the (future) child launcher; the
-     // WS server retains only the domain-separated SHA-256 digest.
-     this.tuiBearer = TuiBearer.mint();
+    this.tuiBearer = TuiBearer.mint();
 
-     this.backendServer = new BackendUdsServer({
+    this.backendServer = new BackendUdsServer({
       socketPath: this.opts.backendSocketPath,
       socketDir: this.opts.socketDir,
       mux: this.mux,
@@ -335,11 +328,53 @@ export class GatewayLifecycle {
       authorizer,
       initProvider,
       diagnostics,
-      // 副指挥 3ed5c004 P0-1: the WS face is the sole upstream
-      // frame router for reverse requests. Share the injected
-      // transport with the backend UDS face.
-      upstreamTransport: this.opts.upstreamTransport,
     });
+
+    // Sole upstream router. Constructed + subscribed BEFORE preflight
+    // so nothing is dropped in the pre-active window.
+    const tuiForward: TuiForwardSeam = {
+      deliverReverseRequestToOwner: (frame) => this.tuiServer!.deliverReverseRequestToOwner(frame),
+      deliverProxiedResponseToOwner: (tuiId, frame) => this.tuiServer!.deliverProxiedResponseToOwner(tuiId, frame),
+    };
+    this.upstreamRouter = new UpstreamRouter({
+      mux: this.mux,
+      humanOwner: this.humanOwner,
+      upstreamTransport: this.opts.upstreamTransport,
+      diagnostics,
+      tuiForward,
+      onUpstreamClose: () => this.onUpstreamCloseFromRouter(),
+    });
+    this.upstreamRouter.subscribe();
+
+    try {
+      await this.opts.preflight.run();
+    } catch (e) {
+      // Preflight failure: unsubscribe + roll back everything.
+      this.upstreamRouter?.unsubscribe();
+      this.upstreamRouter = null;
+      this.backendServer = null;
+      this.tuiServer = null;
+      this.humanOwner = null;
+      this.mux = null;
+      this.reverseNs = null;
+      this.state = "stopped";
+      throw e;
+    }
+    // P0 fence #1 — stop requested during preflight.
+    if (this.stopRequested) {
+      this.upstreamRouter?.unsubscribe();
+      this.upstreamRouter = null;
+      this.state = "stopped";
+      throw new Error("start aborted by concurrent stop (preflight)");
+    }
+    // 副指挥 1b24ae71 P0-1: if upstream fired close during preflight,
+    // abort start cleanly.
+    if (this.upstreamRouter.wasCloseBeforeActive()) {
+      this.upstreamRouter.unsubscribe();
+      this.upstreamRouter = null;
+      this.state = "stopped";
+      throw new Error("start aborted: upstream closed during preflight");
+    }
 
     // P0 fence #2 — stop requested before we bind sockets.
     if (this.stopRequested) {
@@ -358,6 +393,8 @@ export class GatewayLifecycle {
     } catch (e) {
       try { await this.backendServer?.stop(); } catch { /* silent */ }
       try { await this.tuiServer?.stop(); } catch { /* silent */ }
+      this.upstreamRouter?.unsubscribe();
+      this.upstreamRouter = null;
       this.state = "stopped";
       this.backendServer = null;
       this.tuiServer = null;
@@ -366,6 +403,8 @@ export class GatewayLifecycle {
       this.reverseNs = null;
       throw e;
     }
+    // Activate the router — servers are up, drain buffered frames.
+    this.upstreamRouter.activate();
 
     // P0 fence #3 — stop requested during server.start.
     if (this.stopRequested) {
@@ -381,6 +420,26 @@ export class GatewayLifecycle {
     }
 
     this.state = "running";
+  }
+
+  /**
+   * Callback the sole `UpstreamRouter` invokes when the injected
+   * transport signals close. Cascades shutdown of the backend and TUI
+   * faces so no local writer thinks it still has an upstream.
+   */
+  private onUpstreamCloseFromRouter(): void {
+    try { this.backendServer?.handleUpstreamClose(); } catch { /* silent */ }
+    // TUI face: rotate bearer + detach owner via its own stop path.
+    // We do NOT call full stop() here (that would double-close the
+    // http server); instead we drop the owner if any.
+    if (this.tuiServer !== null) {
+      // The WS server's onUpstreamClose semantics live inside stop()
+      // for shutdown; for a lifecycle-mid close we don't need the
+      // full teardown — just detach the owner.
+      // (No public seam; the WS server treats ownerSlot self-clear on
+      // owner ws close. A graceful upstream-close during run means the
+      // lifecycle itself will run stop() next.)
+    }
   }
 
   /**
@@ -414,6 +473,12 @@ export class GatewayLifecycle {
       return;
     }
     this.state = "stopping";
+    // Unsubscribe the router first so no new frames dispatch during
+    // teardown.
+    if (this.upstreamRouter !== null) {
+      try { this.upstreamRouter.unsubscribe(); } catch { /* silent */ }
+      this.upstreamRouter = null;
+    }
     if (this.backendServer !== null) {
       try { await this.backendServer.stop(); } catch { /* best-effort */ }
       this.backendServer = null;

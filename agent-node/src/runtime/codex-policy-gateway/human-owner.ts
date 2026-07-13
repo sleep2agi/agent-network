@@ -200,9 +200,14 @@ export class HumanOwnerCoordinator {
     return this.tuiAttached;
   }
 
-  /** Test-only + WS-server-only inspection of the current incumbent lease. */
-  currentLease(): OwnerLeaseId | null {
-    return this.activeLease;
+  /**
+   * P0.2 round 3 (副指挥 1b24ae71 P1): raw lease read surface REMOVED.
+   * Callers observe attach outcomes via the typed `attachTui` return.
+   * Tests read `attachSnapshot()` for a redacted `{attached: boolean}`
+   * view; no lease bytes exit the coordinator.
+   */
+  attachSnapshot(): { readonly attached: boolean } {
+    return { attached: this.tuiAttached };
   }
 
   // ─────────── Upstream reverse request → decision ───────────

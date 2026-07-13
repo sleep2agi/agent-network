@@ -203,7 +203,10 @@ export class SecretRedactor {
     if (s === undefined) return chunk;
     if (s.finished) return chunk;
     if (s.wiped) return chunk;
-    const window = s.tail.length === 0 ? chunk : Buffer.concat([s.tail, chunk]);
+    // Buffer.concat always allocates a NEW owned buffer, so window is
+    // never a slice of the caller's chunk. This fixes 副指挥 1b24ae71
+    // P0-2 tail-shares-caller-backing hole.
+    const window = Buffer.concat([s.tail, chunk]);
     const sLen = s.secret.length;
     let scanStart = 0;
     const out: Buffer[] = [];
@@ -217,24 +220,37 @@ export class SecretRedactor {
     const consumedUpTo = Math.max(scanStart, window.length - (sLen - 1));
     const safeStart = Math.min(consumedUpTo, window.length);
     out.push(window.subarray(scanStart, safeStart));
-    s.tail = window.subarray(safeStart);
+    // Copy the tail into an owned buffer so we can zero it later
+    // without touching any shared backing.
+    s.tail = Buffer.from(window.subarray(safeStart));
     return Buffer.concat(out);
   }
 
   /**
-   * Return residual tail exactly once. On finish() the redactor also
-   * ZEROES the tail buffer and the secret bytes. Subsequent `push()`
-   * calls pass through untouched (secret is gone; there is no way to
-   * match anymore).
+   * Return residual tail. Corrective (副指挥 1b24ae71 P0-2): if the
+   * tail is a NON-EMPTY PROPER PREFIX of the secret, emit the redact
+   * marker in its place. This closes the "43-char secret fed as 42
+   * chars: finish() releases the 42-char prefix" hole. Otherwise the
+   * tail is emitted as an owned copy so the caller cannot mutate our
+   * internal buffer. Idempotent — subsequent finish() returns empty.
    */
   finish(): Buffer {
     const s = REDACTOR_STATE.get(this);
     if (s === undefined) return Buffer.alloc(0);
     if (s.finished) return Buffer.alloc(0);
-    const t = s.tail;
-    // Copy the tail bytes to a fresh buffer so we can zero the
-    // internal one without corrupting the returned value.
-    const returned = Buffer.from(t);
+    let returned: Buffer;
+    if (s.tail.length > 0 && s.tail.length < s.secret.length
+      && s.secret.subarray(0, s.tail.length).equals(s.tail)) {
+      // The tail is a proper prefix of the secret. Emit the marker
+      // instead of the credential-prefix bytes.
+      returned = Buffer.from(s.marker, "utf8");
+    } else {
+      // Innocent tail bytes; emit as a fresh owned copy so the
+      // caller's returned buffer is decoupled from our internal
+      // storage (defense in depth even though `s.tail` is already
+      // owned).
+      returned = Buffer.from(s.tail);
+    }
     s.tail.fill(0);
     s.tail = Buffer.alloc(0);
     s.secret.fill(0);

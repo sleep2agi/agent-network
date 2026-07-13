@@ -95,10 +95,21 @@ export function buildAllowlistEnv(
   if (typeof bearerValue !== "string" || bearerValue.length === 0) {
     throw new Error("bearerValue must be a non-empty string");
   }
-  // The typed field set is a compile-time allowlist. Reject any
-  // runtime key that snuck in via a hostile cast.
-  const asRecord = env as Record<string, string>;
-  for (const k of Object.keys(asRecord)) {
+  if (env === null || typeof env !== "object") {
+    throw new Error("env must be an object");
+  }
+  // 副指挥 1b24ae71 P1: only inspect OWN properties. A hostile caller
+  // could set a prototype whose enumerable keys leak into a
+  // permissive `for..in` — using `Object.hasOwn` bypasses that. Also
+  // reject any custom prototype so the caller can't ship a class
+  // instance in place of a plain object.
+  const proto = Object.getPrototypeOf(env);
+  if (proto !== Object.prototype && proto !== null) {
+    throw new Error("env must be a plain object or null-prototype object");
+  }
+  const ownKeys = Object.getOwnPropertyNames(env as object);
+  const asRecord = env as unknown as Record<string, unknown>;
+  for (const k of ownKeys) {
     if (k === "__proto__" || k === "constructor" || k === "prototype") {
       throw new Error(`env key ${JSON.stringify(k)} is not allowed`);
     }
@@ -112,8 +123,9 @@ export function buildAllowlistEnv(
       throw new Error(`env value for ${JSON.stringify(k)} must be a string`);
     }
   }
-  const out: Record<string, string> = {};
-  // Copy allowed typed fields.
+  // Null-prototype output — no chance of prototype pollution being
+  // observed by the child launcher's `for..in` / spread.
+  const out: Record<string, string> = Object.create(null);
   for (const k of ALLOWED_ENV_KEYS) {
     if (k === TUI_BEARER_ENV_NAME) continue;
     const v = asRecord[k];

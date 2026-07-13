@@ -73,6 +73,39 @@ describe("buildAllowlistEnv — narrow typed allowlist", () => {
       (env as Record<string, string>).EXTRA = "leak";
     }).toThrow();
   });
+
+  test("output is a null-prototype object (副指挥 1b24ae71 P1)", () => {
+    const env = buildAllowlistEnv("b");
+    expect(Object.getPrototypeOf(env)).toBeNull();
+  });
+
+  test("input with custom prototype rejected", () => {
+    class NotPlain {
+      PATH = "/usr/bin";
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => buildAllowlistEnv("b", new NotPlain() as any)).toThrow(/plain object/);
+  });
+
+  test("input with null prototype accepted", () => {
+    const raw = Object.create(null) as Record<string, string>;
+    raw.PATH = "/usr/bin";
+    const env = buildAllowlistEnv("b", raw);
+    expect(env.PATH).toBe("/usr/bin");
+  });
+
+  test("only OWN properties are inspected; hostile prototype-chain keys ignored", () => {
+    // A hostile prototype chain wants us to leak "LEAK".
+    // Since we only read OWN properties, prototype keys are invisible
+    // to our allowlist check AND never make it into the output.
+    const base = Object.create({ LEAK: "should_not_reach_child" });
+    (base as Record<string, unknown>).PATH = "/usr/bin";
+    // But the object with custom (non-Object.prototype) prototype is
+    // refused. So this test asserts the refuse path — not the
+    // "leak-through" path.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => buildAllowlistEnv("b", base as any)).toThrow(/plain object/);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
