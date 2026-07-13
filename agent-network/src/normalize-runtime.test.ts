@@ -8,7 +8,13 @@
 // Explicit `claude-code-cli` choice still works.
 
 import { describe, expect, test } from "bun:test";
-import { normalizeRuntime, parseExplicitRuntime } from "./normalize-runtime";
+import {
+  normalizeRuntime,
+  parseExplicitRuntime,
+  parseStoredRuntime,
+  runtimeSkipsCreateVendorPicker,
+  runtimeUsesAgentNode,
+} from "./normalize-runtime";
 
 describe("parseExplicitRuntime — explicit CLI/config input fails closed", () => {
   test("unknown and blank values are rejected instead of defaulted", () => {
@@ -149,5 +155,40 @@ describe("normalizeRuntime — profile object paths", () => {
 
   test("profile with unknown runtime string → claude-agent-sdk (fallback)", () => {
     expect(normalizeRuntime({ runtime: "bogus-runtime-name" } as any)).toBe("claude-agent-sdk");
+  });
+});
+
+describe("parseStoredRuntime — strict launch boundary", () => {
+  test("legacy agent-sdk + codex marker keeps the codex-sdk launcher", () => {
+    expect(parseStoredRuntime({ runtime: "agent-sdk", codexRuntime: "codex" })).toBe("codex-sdk");
+  });
+
+  test("unknown non-empty stored runtime is rejected", () => {
+    expect(parseStoredRuntime({ runtime: "bogus-runtime-name" })).toBeNull();
+  });
+
+  test("missing and empty legacy slots retain the historical default", () => {
+    expect(parseStoredRuntime({})).toBe("claude-agent-sdk");
+    expect(parseStoredRuntime({ runtime: "" })).toBe("claude-agent-sdk");
+  });
+});
+
+describe("runtime launcher policy", () => {
+  test("all runtimes except claude-code-cli use agent-node", () => {
+    for (const runtime of [
+      "claude-agent-sdk",
+      "codex-sdk",
+      "codex-app-server",
+      "grok-build-acp",
+      "opencode-cli",
+    ] as const) {
+      expect(runtimeUsesAgentNode(runtime)).toBeTrue();
+    }
+    expect(runtimeUsesAgentNode("claude-code-cli")).toBeFalse();
+  });
+
+  test("codex-app-server explicit create skips the SDK vendor picker", () => {
+    expect(runtimeSkipsCreateVendorPicker("codex-app-server")).toBeTrue();
+    expect(runtimeSkipsCreateVendorPicker("claude-agent-sdk")).toBeFalse();
   });
 });

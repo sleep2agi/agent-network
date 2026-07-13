@@ -22,11 +22,13 @@ function runCli(
   ws: ReturnType<typeof workspace>,
   argv: string[],
   extraEnv: Record<string, string> = {},
+  stdin?: string,
 ) {
   return Bun.spawnSync({
     cmd: [process.execPath, CLI, ...argv],
     cwd: ws.cwd,
     env: { HOME: ws.home, PATH: ws.bin, ...extraEnv },
+    ...(stdin === undefined ? {} : { stdin: Buffer.from(stdin) }),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -36,6 +38,7 @@ function writeNodeConfig(
   ws: ReturnType<typeof workspace>,
   runtime: string,
   env: Record<string, string> = {},
+  extra: Record<string, unknown> = {},
 ) {
   const dir = join(ws.cwd, ".anet", "nodes", "test-node");
   mkdirSync(dir, { recursive: true });
@@ -48,7 +51,25 @@ function writeNodeConfig(
     channels: ["server:commhub"],
     env,
     flags: {},
+    ...extra,
   }));
+}
+
+function writeArgvRecorder(ws: ReturnType<typeof workspace>, name: "npx" | "claude" | "codex"): string {
+  const log = join(ws.root, `${name}-argv.txt`);
+  const executable = join(ws.bin, name);
+  writeFileSync(
+    executable,
+    `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(log)}\nexit 0\n`,
+  );
+  chmodSync(executable, 0o755);
+  return log;
+}
+
+function writeGlobalConfig(ws: ReturnType<typeof workspace>, config: Record<string, unknown>): void {
+  const globalDir = join(ws.home, ".anet");
+  mkdirSync(globalDir, { recursive: true });
+  writeFileSync(join(globalDir, "config.json"), JSON.stringify(config));
 }
 
 afterEach(() => {
@@ -94,17 +115,134 @@ describe("onboarding CLI subprocess gates", () => {
 
   test("missing global agent-node takes the real npx fallback", () => {
     const ws = workspace();
-    const argvLog = join(ws.root, "npx-argv.txt");
-    const npx = join(ws.bin, "npx");
-    writeFileSync(npx, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ANET_TEST_ARGV_LOG\"\nexit 0\n");
-    chmodSync(npx, 0o755);
+    const argvLog = writeArgvRecorder(ws, "npx");
     writeNodeConfig(ws, "claude-agent-sdk", { ANTHROPIC_API_KEY: "test-only-placeholder" });
 
-    const result = runCli(ws, ["node", "start", "test-node"], { ANET_TEST_ARGV_LOG: argvLog });
+    const result = runCli(ws, ["node", "start", "test-node"]);
     expect(result.exitCode).toBe(0);
     const argv = readFileSync(argvLog, "utf8");
     expect(argv).toContain("@sleep2agi/agent-node@preview");
     expect(argv).toContain("--runtime");
     expect(argv).toContain("claude-agent-sdk");
+  });
+
+  test("host_supervisor daemon start is keyless and reaches the real npx entry", () => {
+    const ws = workspace();
+    const argvLog = writeArgvRecorder(ws, "npx");
+    writeNodeConfig(ws, "claude-agent-sdk", {}, { role: "host_supervisor" });
+
+    const result = runCli(ws, ["daemon", "start", "test-node"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr.toString()).not.toContain("provider credential");
+    const argv = readFileSync(argvLog, "utf8");
+    expect(argv).toContain("@sleep2agi/agent-node@preview");
+    expect(argv).toContain("claude-agent-sdk");
+  });
+
+  test("host_supervisor daemon up reuses an existing profile and reaches npx without a key", () => {
+    const ws = workspace();
+    const argvLog = writeArgvRecorder(ws, "npx");
+    writeNodeConfig(ws, "claude-agent-sdk", {}, { role: "host_supervisor" });
+
+    const result = runCli(ws, ["daemon", "up", "test-node"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain("already a host_supervisor daemon");
+    expect(result.stderr.toString()).not.toContain("provider credential");
+    const argv = readFileSync(argvLog, "utf8");
+    expect(argv).toContain("@sleep2agi/agent-node@preview");
+    expect(argv).toContain("claude-agent-sdk");
+  });
+
+  test("legacy agent-sdk/codex profile launches codex-sdk through npx without rewriting config", () => {
+    const ws = workspace();
+    const argvLog = writeArgvRecorder(ws, "npx");
+    writeNodeConfig(ws, "agent-sdk", {}, { codexRuntime: "codex" });
+    const configPath = join(ws.cwd, ".anet", "nodes", "test-node", "config.json");
+    const before = readFileSync(configPath, "utf8");
+
+    const result = runCli(ws, ["node", "start", "test-node"]);
+    expect(result.exitCode).toBe(0);
+    const argv = readFileSync(argvLog, "utf8");
+    expect(argv).toContain("--runtime");
+    expect(argv).toContain("codex-sdk");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
+  test("unknown stored runtime exits 2 with zero spawn and unchanged config", () => {
+    const ws = workspace();
+    const npxLog = writeArgvRecorder(ws, "npx");
+    const claudeLog = writeArgvRecorder(ws, "claude");
+    writeNodeConfig(ws, "private-runtime");
+    const configPath = join(ws.cwd, ".anet", "nodes", "test-node", "config.json");
+    const before = readFileSync(configPath, "utf8");
+
+    const result = runCli(ws, ["node", "start", "test-node"]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.toString()).toContain("Unsupported runtime");
+    expect(existsSync(npxLog)).toBeFalse();
+    expect(existsSync(claudeLog)).toBeFalse();
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
+  test("codex-app-server uses npx agent-node and never the Claude launcher", () => {
+    const ws = workspace();
+    const npxLog = writeArgvRecorder(ws, "npx");
+    const claudeLog = writeArgvRecorder(ws, "claude");
+    writeArgvRecorder(ws, "codex");
+    writeNodeConfig(ws, "codex-app-server");
+
+    const result = runCli(ws, ["node", "start", "test-node"]);
+    expect(result.exitCode).toBe(0);
+    const argv = readFileSync(npxLog, "utf8");
+    expect(argv).toContain("@sleep2agi/agent-node@preview");
+    expect(argv).toContain("codex-app-server");
+    expect(existsSync(claudeLog)).toBeFalse();
+  });
+
+  test("codex-app-server is accepted by create without entering an SDK credential path", () => {
+    const ws = workspace();
+    writeGlobalConfig(ws, { hub: "http://127.0.0.1:1" });
+    const result = runCli(ws, ["node", "create", "cas-node", "--runtime", "codex-app-server"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain("Not logged in");
+    expect(result.stderr.toString()).not.toContain("Unsupported runtime");
+    expect(result.stderr.toString()).not.toContain("provider credential");
+    expect(existsSync(join(ws.cwd, ".anet", "nodes", "cas-node", "config.json"))).toBeFalse();
+  });
+
+  test("batch custom unknown --runtime exits 2 before Hub/config/spawn", () => {
+    const ws = workspace();
+    const npxLog = writeArgvRecorder(ws, "npx");
+    const claudeLog = writeArgvRecorder(ws, "claude");
+
+    const result = runCli(ws, [
+      "create", "--batch", "--preset", "__custom__", "--runtime", "private-runtime",
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.toString()).toContain("Unsupported runtime");
+    expect(result.stderr.toString()).toContain("--preset __custom__");
+    expect(existsSync(join(ws.cwd, ".anet"))).toBeFalse();
+    expect(existsSync(npxLog)).toBeFalse();
+    expect(existsSync(claudeLog)).toBeFalse();
+  });
+
+  test("batch custom prompt rejects unknown runtime instead of defaulting", () => {
+    const ws = workspace();
+    const npxLog = writeArgvRecorder(ws, "npx");
+    const claudeLog = writeArgvRecorder(ws, "claude");
+    writeGlobalConfig(ws, { hub: "http://127.0.0.1:1" });
+
+    const result = runCli(
+      ws,
+      ["create", "--batch", "--preset", "__custom__"],
+      {},
+      "private-runtime\n",
+    );
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.toString()).toContain("Unsupported runtime");
+    expect(result.stderr.toString()).toContain("--preset __custom__ prompt");
+    expect(existsSync(join(ws.cwd, ".anet"))).toBeFalse();
+    expect(existsSync(npxLog)).toBeFalse();
+    expect(existsSync(claudeLog)).toBeFalse();
   });
 });

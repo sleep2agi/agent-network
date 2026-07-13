@@ -321,7 +321,14 @@ interface Profile {
 
 // Re-export from the pure helper module (src/normalize-runtime.ts) so
 // unit tests can import without dragging in CLI side-effects.
-import { normalizeRuntime, parseExplicitRuntime, type RuntimeName } from "../src/normalize-runtime";
+import {
+  normalizeRuntime,
+  parseExplicitRuntime,
+  parseStoredRuntime,
+  runtimeSkipsCreateVendorPicker,
+  runtimeUsesAgentNode,
+  type RuntimeName,
+} from "../src/normalize-runtime";
 import {
   bunHubPrerequisiteIssue,
   providerCredentialIssue,
@@ -338,13 +345,29 @@ function explicitRuntimeOrExit(raw: string, source: string): RuntimeName {
   process.exit(2);
 }
 
-function assertProviderCredential(runtime: RuntimeName, env: Record<string, string | undefined>, phase: "create" | "start"): void {
-  const issue = providerCredentialIssue(runtime, env);
+function assertProviderCredential(
+  runtime: RuntimeName,
+  env: Record<string, string | undefined>,
+  phase: "create" | "start",
+  profileRole?: string,
+): void {
+  const issue = providerCredentialIssue(runtime, env, {
+    launchIntent: phase === "create" ? "node-create" : "node-start",
+    profileRole,
+  });
   if (!issue) return;
   console.error(`[anet] ❌ ${issue}.`);
   console.error(`[anet]    ${phase === "create" ? "Provide a non-empty key in the wizard or pass --env ANTHROPIC_AUTH_TOKEN=<value>." : "Set it in the node config/.env or export it before start."}`);
   console.error(`[anet]    CLI-auth and separately configured keyless runtimes are not affected by this check.`);
   process.exit(1);
+}
+
+function storedRuntimeOrExit(profile: Profile, source: string): RuntimeName {
+  const runtime = parseStoredRuntime(profile);
+  if (runtime) return runtime;
+  console.error(`[anet] ❌ Unsupported runtime "${profile.runtime}" from ${source}.`);
+  console.error(`[anet]    Refusing to launch a different executable; fix the stored config explicitly.`);
+  process.exit(2);
 }
 
 function nodeDisplayName(id: string, profile?: Profile | null): string {
@@ -1129,6 +1152,7 @@ anet — AI Agent Network CLI (V2)
 
 Node Management:
   anet node create <name>        Create a new agent node
+  --runtime <type>               claude-agent-sdk | claude-code-cli | codex-sdk | codex-app-server | grok-build-acp | opencode-cli
   anet node start <name>         Start a node
   anet node start --all          Start every node in cwd (= anet project up)
   anet node stop <name>          Stop a running node
@@ -2078,7 +2102,7 @@ async function createInteractiveCommand() {
 
 This wizard creates one agent node for this project:
   - node config: .anet/nodes/<node-name>/config.json
-  - runtime: claude-code-cli / codex-sdk / claude-agent-sdk / grok-build-acp
+  - runtime: claude-code-cli / codex-sdk / codex-app-server / claude-agent-sdk / grok-build-acp / opencode-cli
   - optional Telegram channel: text + images from an allowlist user
 `);
 
@@ -2110,7 +2134,7 @@ This wizard creates one agent node for this project:
         { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
         { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
         { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
-        { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI 桥 (RFC-030), 独立 `codex app-server`, 可接管已有 codex 会话" },
+        { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI runtime (RFC-030 preview; production locked)" },
         { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
         // RFC-029 — public sst/opencode CLI (multi-vendor front-end
         // with unified session + auth abstraction). Runtime not yet
@@ -2132,8 +2156,7 @@ This wizard creates one agent node for this project:
     console.log(`[anet] 请确保已执行: codex auth login`);
   } else if (pickedRuntime === "codex-app-server") {
     opts.runtime = "codex-app-server";
-    console.log(`[anet] 请确保已执行: codex auth login （codex-app-server 需要 codex CLI）`);
-    console.log(`[anet] 接管已有 codex 会话：在 config.json 里设 codexAppServerUrl + codexThreadId`);
+    console.log(`[anet] 请确保已执行: codex auth login （RFC-030 preview；production 仍锁定）`);
   } else if (pickedRuntime === "grok-build-acp") {
     opts.runtime = "grok-build-acp";
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok auth login`);
@@ -2279,7 +2302,7 @@ async function createCommand(idOverride?: string) {
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
-    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|claude-agent-sdk|grok-build-acp] [--model ...] [--tools ...]");
+    console.error("Usage: anet node create <node-name> [--runtime claude-code-cli|codex-sdk|codex-app-server|claude-agent-sdk|grok-build-acp|opencode-cli] [--model ...] [--tools ...]");
     console.error("Or run fully interactive: anet node create");
     process.exit(1);
   }
@@ -2327,7 +2350,7 @@ async function createCommand(idOverride?: string) {
   const credAlreadyProvided = !!process.env.ANTHROPIC_AUTH_TOKEN
     || !!process.env.ANTHROPIC_API_KEY || envFlagHasAuth;
   const explicitRuntime = opts.runtime ? explicitRuntimeOrExit(opts.runtime, "--runtime") : undefined;
-  const runtimeAlreadyExplicit = explicitRuntime === "codex-sdk" || explicitRuntime === "claude-code-cli" || explicitRuntime === "grok-build-acp";
+  const runtimeAlreadyExplicit = explicitRuntime ? runtimeSkipsCreateVendorPicker(explicitRuntime) : false;
   const skipInteractive = credAlreadyProvided || runtimeAlreadyExplicit;
 
   // #133 selectRuntime — runtime-first, exported as a helper so create paths
@@ -2341,7 +2364,9 @@ async function createCommand(idOverride?: string) {
           { value: "claude-agent-sdk", name: "claude-agent-sdk — 任意 OpenAI/Anthropic-compat vendor (intern / MiniMax / Claude / GLM / ...)" },
           { value: "claude-code-cli",  name: "claude-code-cli  — Anthropic Claude (Max/Pro plan), 复用 `claude` CLI 登录态" },
           { value: "codex-sdk",        name: "codex-sdk        — OpenAI Codex, 复用 `codex auth login` 登录态" },
+          { value: "codex-app-server", name: "codex-app-server — OpenAI Codex TUI runtime (RFC-030 preview; production locked)" },
           { value: "grok-build-acp",   name: "grok-build-acp   — Grok Build ACP, 复用 `grok` CLI 登录态" },
+          { value: "opencode-cli",     name: "opencode-cli     — public opencode ACP runtime" },
         ],
       });
       return picked as any;
@@ -2363,8 +2388,12 @@ async function createCommand(idOverride?: string) {
     console.log("[anet] 请确保已安装 Claude Code CLI 并登录: claude auth login");
   } else if (opts.runtime === "codex-sdk") {
     console.log("[anet] 请确保已执行: codex auth login");
+  } else if (opts.runtime === "codex-app-server") {
+    console.log("[anet] 请确保已执行: codex auth login（RFC-030 preview；production 仍锁定）");
   } else if (opts.runtime === "grok-build-acp") {
     console.log("[anet] 请确保已安装并登录 Grok Build CLI: grok auth login");
+  } else if (opts.runtime === "opencode-cli") {
+    console.log("[anet] opencode-cli explicit runtime: SDK vendor picker skipped; existing opencode setup requirements are unchanged.");
   } else {
     // Either claude-agent-sdk (explicit / picker-default) or undefined runtime
     // — fall through to vendor selection. credAlreadyProvided also skips since
@@ -2840,9 +2869,10 @@ async function launchAgent(id: string, forceNewSession = false) {
   }
   const { id: nodeId, profile } = resolved;
 
-  const runtime = profile.runtime
-    ? explicitRuntimeOrExit(profile.runtime, `node config for "${nodeDisplayName(nodeId, profile)}"`)
-    : normalizeRuntime(profile);
+  const runtime = storedRuntimeOrExit(
+    profile,
+    `node config for "${nodeDisplayName(nodeId, profile)}"`,
+  );
   const displayName = nodeDisplayName(nodeId, profile);
   const session = profileSession(profile);
   const willResume = !!session && !forceNewSession;
@@ -2892,12 +2922,7 @@ async function launchAgent(id: string, forceNewSession = false) {
     }
   } catch {}
 
-  if (
-    runtime === "codex-sdk" ||
-    runtime === "claude-agent-sdk" ||
-    runtime === "grok-build-acp" ||
-    runtime === "opencode-cli"
-  ) {
+  if (runtimeUsesAgentNode(runtime)) {
     // spawn agent-node
     const agentArgs = [
       "--config", join(nodesDir(), nodeId, "config.json"),
@@ -2974,7 +2999,7 @@ async function launchAgent(id: string, forceNewSession = false) {
       console.log(`[anet] loaded ${Object.keys(_dotenvSDK).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
     Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
-    assertProviderCredential(runtime, env, "start");
+    assertProviderCredential(runtime, env, "start", profile.role);
 
     // Try agent-node from PATH, fallback to npx
     const launch = resolveAgentNodeLaunch(commandExists("agent-node"), agentArgs);
@@ -9522,6 +9547,12 @@ async function createBatchWizardCommand() {
     return;
   }
 
+  // A scripted custom batch may provide --runtime. Validate it before Hub
+  // access or filesystem writes; typos must never become the default SDK.
+  const explicitCustomRuntime = opts.preset === "__custom__" && opts.runtime
+    ? explicitRuntimeOrExit(opts.runtime, "--preset __custom__ --runtime")
+    : undefined;
+
   const gc = loadGlobal();
   if (!gc.hub) {
     console.error("[anet] 未找到 CommHub Server。先运行 'anet hub start' 或 'anet init --hub <url>'");
@@ -9544,8 +9575,12 @@ async function createBatchWizardCommand() {
   // derive requiresAuth from the runtime choice.
   let requiresAuth: "claude" | "codex" | undefined;
   if (opts.preset === "__custom__") {
-    const customRuntime = await ask("Runtime (claude-agent-sdk / codex-sdk / claude-code-cli)", "claude-agent-sdk");
-    runtime = normalizeRuntime(customRuntime);
+    const customRuntime = explicitCustomRuntime
+      || explicitRuntimeOrExit(
+        await ask("Runtime (claude-agent-sdk / codex-sdk / claude-code-cli)", "claude-agent-sdk"),
+        "--preset __custom__ prompt",
+      );
+    runtime = customRuntime;
     baseUrl = (await ask("ANTHROPIC_BASE_URL (空白=Anthropic default)", "")) || undefined;
     model = (await ask("Model id", "")) || undefined;
     presetLabel = `custom (${runtime}${model ? " + " + model : ""})`;

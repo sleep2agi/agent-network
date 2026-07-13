@@ -11,7 +11,7 @@ describe("onboarding guards", () => {
     expect(bunHubPrerequisiteIssue(true)).toBeNull();
   });
 
-  test("agent-node falls back to the pinned npx package when no global binary exists", () => {
+  test("agent-node falls back to the preview-channel npx package when no global binary exists", () => {
     expect(resolveAgentNodeLaunch(false, ["--config", "config.json"])).toEqual({
       command: "npx",
       args: ["-y", "@sleep2agi/agent-node@preview", "--config", "config.json"],
@@ -26,13 +26,30 @@ describe("onboarding guards", () => {
   });
 
   test("claude-agent-sdk rejects blank provider credentials", () => {
-    expect(providerCredentialIssue("claude-agent-sdk", {})).toContain("provider credential");
-    expect(providerCredentialIssue("claude-agent-sdk", { ANTHROPIC_API_KEY: "  " })).toContain("provider credential");
+    const context = { launchIntent: "node-start" as const, profileRole: "member" };
+    expect(providerCredentialIssue("claude-agent-sdk", {}, context)).toContain("provider credential");
+    expect(providerCredentialIssue("claude-agent-sdk", { ANTHROPIC_API_KEY: "  " }, context)).toContain("provider credential");
   });
 
   test("claude-agent-sdk accepts either supported provider credential", () => {
-    expect(providerCredentialIssue("claude-agent-sdk", { ANTHROPIC_API_KEY: "present" })).toBeNull();
-    expect(providerCredentialIssue("claude-agent-sdk", { ANTHROPIC_AUTH_TOKEN: "present" })).toBeNull();
+    const context = { launchIntent: "node-start" as const };
+    expect(providerCredentialIssue("claude-agent-sdk", { ANTHROPIC_API_KEY: "present" }, context)).toBeNull();
+    expect(providerCredentialIssue("claude-agent-sdk", { ANTHROPIC_AUTH_TOKEN: "present" }, context)).toBeNull();
+  });
+
+  test("host_supervisor doorbell start is keyless but ordinary SDK nodes are not", () => {
+    expect(providerCredentialIssue("claude-agent-sdk", {}, {
+      launchIntent: "node-start",
+      profileRole: "host_supervisor",
+    })).toBeNull();
+    expect(providerCredentialIssue("claude-agent-sdk", {}, {
+      launchIntent: "node-start",
+      profileRole: "member",
+    })).toContain("provider credential");
+    expect(providerCredentialIssue("claude-agent-sdk", {}, {
+      launchIntent: "node-create",
+      profileRole: "host_supervisor",
+    })).toContain("provider credential");
   });
 
   test("CLI-auth and keyless-capable runtimes are not blocked by the provider-key guard", () => {
@@ -43,7 +60,7 @@ describe("onboarding guards", () => {
       "grok-build-acp",
       "opencode-cli",
     ] as const) {
-      expect(providerCredentialIssue(runtime, {})).toBeNull();
+      expect(providerCredentialIssue(runtime, {}, { launchIntent: "node-start" })).toBeNull();
     }
   });
 });

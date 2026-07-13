@@ -23,6 +23,46 @@ export type RuntimeName =
 export const DEFAULT_RUNTIME: RuntimeName = "claude-agent-sdk";
 
 /**
+ * Runtimes launched through agent-node rather than the dedicated Claude Code
+ * CLI branch. Keep this switch exhaustive: a newly-added runtime must make an
+ * explicit launcher choice at compile time instead of falling through.
+ */
+export function runtimeUsesAgentNode(runtime: RuntimeName): boolean {
+  switch (runtime) {
+    case "claude-agent-sdk":
+    case "codex-sdk":
+    case "codex-app-server":
+    case "grok-build-acp":
+    case "opencode-cli":
+      return true;
+    case "claude-code-cli":
+      return false;
+    default: {
+      const exhaustive: never = runtime;
+      return exhaustive;
+    }
+  }
+}
+
+/** Explicit runtime choices that do not belong in the SDK vendor picker. */
+export function runtimeSkipsCreateVendorPicker(runtime: RuntimeName): boolean {
+  switch (runtime) {
+    case "claude-agent-sdk":
+      return false;
+    case "claude-code-cli":
+    case "codex-sdk":
+    case "codex-app-server":
+    case "grok-build-acp":
+    case "opencode-cli":
+      return true;
+    default: {
+      const exhaustive: never = runtime;
+      return exhaustive;
+    }
+  }
+}
+
+/**
  * Parse an operator-supplied runtime without applying a default.
  *
  * `normalizeRuntime` intentionally remains tolerant for old profiles with a
@@ -55,10 +95,27 @@ export function parseExplicitRuntime(runtime: string): RuntimeName | null {
 // the test fixture doesn't need the full Profile shape and so callers
 // (bin/cli.ts uses the full Profile) can pass anything structurally
 // compatible.
-type ProfileLike = {
+export type ProfileLike = {
   runtime?: string;
   codexRuntime?: string;
 };
+
+/**
+ * Strict parser for a profile loaded from disk.
+ *
+ * Missing/empty runtime remains the historical default. A non-empty unknown
+ * value is rejected, while the pre-canonical legacy hybrid keeps its original
+ * meaning (`agent-sdk` + `codexRuntime=codex` was the Codex SDK runtime).
+ */
+export function parseStoredRuntime(profile?: ProfileLike): RuntimeName | null {
+  if (!profile || profile.runtime === undefined || profile.runtime === "") {
+    return DEFAULT_RUNTIME;
+  }
+  if (profile.runtime === "agent-sdk" && profile.codexRuntime === "codex") {
+    return "codex-sdk";
+  }
+  return parseExplicitRuntime(profile.runtime);
+}
 
 export function normalizeRuntime(profileOrRuntime?: ProfileLike | string): RuntimeName {
   if (typeof profileOrRuntime === "string") {
@@ -66,8 +123,5 @@ export function normalizeRuntime(profileOrRuntime?: ProfileLike | string): Runti
   }
   const p = profileOrRuntime;
   if (!p) return DEFAULT_RUNTIME;
-  if (p.runtime === "agent-sdk") {
-    return p.codexRuntime === "codex" ? "codex-sdk" : "claude-agent-sdk";
-  }
-  return normalizeRuntime(p.runtime || DEFAULT_RUNTIME);
+  return parseStoredRuntime(p) ?? DEFAULT_RUNTIME;
 }
