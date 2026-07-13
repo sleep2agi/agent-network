@@ -207,6 +207,87 @@ for (const streamRecords of groups.values()) {
     }
     continue;
   }
+  if (first.transport === "test-policy-ipc") {
+    let cursor = 0;
+    let frameIndex = 0;
+    let terminalError = false;
+    const eofRecords = streamRecords
+      .filter((record) => record.boundary === "eof")
+      .map((record) => record.seq);
+    while (cursor < bytes.length) {
+      const frameStart = cursor;
+      const newline = bytes.indexOf(0x0a, cursor);
+      if (newline < 0) {
+        const payloadBytes = bytes.subarray(cursor);
+        let payload;
+        try {
+          payload = JSON.parse(payloadBytes.toString("utf8"));
+        } catch {
+          // A truncated policy record need not be valid JSON.
+        }
+        projections.push({
+          schema: "grok-wire-projection/v1",
+          capture: first.capture,
+          connection: first.connection,
+          stream: first.stream,
+          direction: first.direction,
+          transport: first.transport,
+          frameIndex: ++frameIndex,
+          framing: "eof_without_newline",
+          recordSeqs: recordSeqsFor(frameStart, bytes.length),
+          sanitizedByteLength: payloadBytes.length,
+          sanitizedBytesSha256: createHash("sha256").update(payloadBytes).digest("hex"),
+          parseStatus: "truncated_policy_json",
+          ...(payload === undefined ? {} : { payload }),
+        });
+        terminalError = true;
+        cursor = bytes.length;
+        break;
+      }
+      const frameEnd = newline + 1;
+      const payloadBytes = bytes.subarray(cursor, newline);
+      let payload;
+      let parseStatus;
+      try {
+        payload = JSON.parse(payloadBytes.toString("utf8"));
+        parseStatus = "complete_policy_json";
+      } catch {
+        parseStatus = "invalid_policy_json";
+        terminalError = true;
+      }
+      projections.push({
+        schema: "grok-wire-projection/v1",
+        capture: first.capture,
+        connection: first.connection,
+        stream: first.stream,
+        direction: first.direction,
+        transport: first.transport,
+        frameIndex: ++frameIndex,
+        framing: "newline",
+        recordSeqs: recordSeqsFor(frameStart, frameEnd),
+        sanitizedByteLength: payloadBytes.length,
+        sanitizedBytesSha256: createHash("sha256").update(payloadBytes).digest("hex"),
+        parseStatus,
+        ...(payload === undefined ? {} : { payload }),
+      });
+      cursor = frameEnd;
+    }
+    if (!terminalError && cursor === bytes.length && eofRecords.length > 0) {
+      projections.push({
+        schema: "grok-wire-projection/v1",
+        capture: first.capture,
+        connection: first.connection,
+        stream: first.stream,
+        direction: first.direction,
+        transport: first.transport,
+        frameIndex: ++frameIndex,
+        framing: "transport_eof",
+        recordSeqs: eofRecords,
+        parseStatus: "clean_eof",
+      });
+    }
+    continue;
+  }
   if (first.transport !== "acp-stdio") {
     projections.push({
       schema: "grok-wire-projection/v1",

@@ -1,6 +1,6 @@
 # Grok Agent Leader Phase 0 Wire Findings
 
-> Status: round-5 candidate accepted for continued Phase 0; not a protocol freeze
+> Status: binding/frame-aware subdomains independently accepted; aggregate exact and approval-owner gates open; not a protocol freeze
 >
 > Tracking: <https://github.com/sleep2agi/agent-network/issues/439>
 >
@@ -158,19 +158,20 @@ turn, but it is not yet proven to reject or own it safely. Phase 2 human approva
 remains a P0 blocker. No claim may rely on row position or reconstructed screen
 text; the exact native response must identify `reject_once` before acceptance.
 
-A separate owner Phase 1 `approval=never` matrix now proves the central path in
-two Docker runs. Permission fanout reached policy owner, passive ACP and real
-TUI twice each. The TUI automatically attempted one response; a frame-aware
-gateway suppressed it and forwarded zero TUI responses to Leader. One exact
-policy-owner `reject_once` reached upstream, while passive, stale, duplicate and
-owner-lost candidates were suppressed. The harmless file canary stayed absent,
-the turn ended `cancelled`, and the event order was
+A separate owner Phase 1 `approval=never` experiment exercised the proposed
+central path in two Docker runs, but did not pass the independent owner gate.
+Permission fanout reached policy owner, passive ACP and real TUI twice each. The
+TUI automatically attempted one response; a frame-aware gateway suppressed it.
+The later source remediation adds independent Leader-facing taps and real wire
+candidates, but no fresh accepted fixture binds those changes yet. The owner
+experiment observed one exact policy-owner `reject_once`, while passive, stale,
+duplicate and owner-lost candidates were locally suppressed. The harmless file
+canary stayed absent, the turn ended `cancelled`, and the event order was
 `pending_interaction → interaction_resolved → turn_completed → prompt_complete`.
-Round 4 now binds this wire evidence in a sanitized fixture: two permission
-tool calls fan out across policy owner/passive/true TUI, exactly one central
-`reject_once` reaches Grok, the TUI attempt is locally suppressed, and owner
-loss forwards zero responses. It remains pending independent review and does
-not prove the future human-owned TUI approval route.
+The historical sanitized fixture is not an accepted owner matrix: its legacy
+owner-loss result is limited to owner-lease control EOF, and ACP-child loss,
+central response after owner loss, real human-owner handling and the fresh tap
+delta all remain open for recapture and independent review.
 
 ## 5. Prompt ordering and fragmentation
 
@@ -209,6 +210,23 @@ timed out waiting for the expected response, so the overall script remained
 red. Current classification is therefore: normal bounded frame forwarding is
 owner-green; half-close/disconnect recovery remains P0-red and must be resolved
 before any no-go/GO transport verdict.
+
+Round 6 executes the exact trip-wire through the buffered complete-frame
+gateway: the real 641-byte `register + initialize` stream was submitted as 641
+one-byte writes with 1 ms between writes, for 100 independent trials. All
+100 completed. The saved sample contains 641 one-byte client records and two
+gateway-to-Leader complete-frame writes; aggregate capture counts are 64,100
+client callbacks, 200 admitted frames and 200 Leader-facing writes. The
+independent extractor additionally produces a 100-row trial ledger from the
+full tmpfs raw capture. Every row binds request/forward hashes, one-byte callback
+counts, the two Leader-facing frames and registered/initialize completion; its
+aggregate is cross-checked against the capture summary. The verifier derives
+641 from the saved byte fixture instead of trusting a manifest constant. The
+historical bare-Leader 99/100 result remains a negative control
+and contributes zero positive trials. Therefore the bounded-fragmentation
+`NATIVE IPC NO-GO` trip-wire did **not** fire. This closes only Q1; half-close,
+actual backpressure/drain observation, reconnect and Q2 admission readiness
+remain open.
 
 ## 6. `agent serve` authentication and semantics
 
@@ -321,13 +339,74 @@ re-signed summary-count mutation also turns red. The fresh full Docker run
 passed. Independent re-review accepted the candidate for continued Phase 0.
 Its manifest stays `protocolFreeze=false`; this does not unlock Phase 1A.
 
+Independent re-review then rejected the round-5 structural policy because a
+global field-name set and generic method/metadata placeholders still allowed
+unreviewed values to survive in a coherent artifact. Round 6 replaces the live
+path with method/context-specific field policy, correlates method-less responses
+to the opposite-side request on the same connection and raw JSON-RPC id, removes
+generic method/metadata placeholders, and exercises coherent protocol mutations
+against real owner bytes. An ephemeral raw recapture identified the previously
+hidden real TUI request as `_x.ai/suggestPrompt` with
+`generation/model/sessionId`; the earlier binary-string inference
+`session/set_model` was discarded. Fresh projection binding, unknown method,
+unknown/cross-context field, non-normalized numeric id, wrong correlation label,
+unknown metadata key/value and six child-env classes all turn red. The same
+manifest binds the frame-aware, approval-owner and exact one-byte transport
+fixtures. A separate read-only `--network none` Docker run passed all five
+owner verifiers. Independent Round-3 review accepted the binding and
+frame-aware subdomains but rejected the aggregate exact-policy and
+approval-owner claims. The historical files are retained only as scoped
+evidence; the current exact verifier intentionally closes on their legacy
+placeholder representation. `protocolFreeze=false` and Phase 1A remain
+unchanged.
+
+### Exact-policy trust-root correction after Round 11
+
+Round 11 intentionally published no fixture: business behavior completed, but
+the live sanitizer closed on an unreviewed initialize-response scalar. Raw
+tmpfs was destroyed and the attempt was not retried. That failure also exposed
+a provenance problem in the prior exact-policy workflow: a structural summary
+consulted the same editable allowlist that its output later expanded.
+
+The replacement deliberately stops short of an accepted policy:
+
+1. Owner capture uses a source-hash-bound, per-capture **candidate** binding and
+   a direction-aware selector seed. A matching seed is only a precondition for
+   the scrubbed pending-candidate persistence path; it has
+   `authorizesPersistence=false`, is derived from stale safe projections, and
+   does not authorize exact-shape/protocol acceptance or promotion.
+2. `accepted-live-fixtures.json` remains an empty reviewer-index proposal.
+   `compile-accepted-live-exact-shapes.mjs` can check indexed hashes, fresh-
+   project bytes and per-frame provenance, but its v2 output is explicitly
+   `non_authorizing_v2_proposal` with `authorizesAcceptedMode=false`.
+3. Runtime accepted mode is unconditionally closed with
+   `accepted_live_exact_attestation_required`. Repository hashes bind content
+   but do not establish an independent reviewer/CI decision.
+
+The remaining accepted-policy gate is v3: use a recursive structural skeleton
+that preserves array cardinality/order and tuple pairing, include direction in
+every selector, bind all evidence to the fixed Grok 0.2.93/build/binary
+namespace, and verify a protected detached attestation. Until then, exact
+scalar combinations in the v2 proposal and candidate flat-path policy are
+diagnostic only. Generic `METHOD`/`STRING` placeholders and unresolved response
+correlation are still rejected at candidate persistence. Raw unknown-method/
+enum controls use the same driver as their positive control: the positive
+reaches sanitize → project → manifest → verify, while a negative must close at
+sanitize and leave no candidate artifact. This correction is not an accepted
+fixture and does not change protocol freeze or Phase 1A.
+
 ## 8. Remaining P0 gates
 
-- Independently review and reproduce the replacement structural-allowlist live
-  candidate and frame-aware Busy proxy from a clean checkout.
-- Complete both prompt orderings and the 100-run deterministic Busy matrix.
+- Independently review and reproduce the round-6 context/path-policy candidate,
+  frame-aware Busy proxy and exact one-byte fixture from a clean checkout.
+- Implement and independently attest the v3 recursive accepted-policy skeleton;
+  accepted mode remains fail-closed until that protected attestation verifies.
+- Prove native TUI readiness/admission acknowledgement, then complete both
+  prompt orderings and the reservation-driven 100-run deterministic Busy matrix.
 - Independently reproduce the bound central-reject, stale/duplicate and
-  owner-disconnect fixture. TUI reject and pending-approval replay remain open.
+  **owner-lease control EOF** fixture. The legacy fixture field is named
+  `ownerDisconnect`, but it does not prove ACP-child disconnect or a human TUI
+  approval owner; both remain open together with TUI reject and pending replay.
 - Capture prompt/cancel/interrupt error and completion semantics. `inject` and
   `steer` remain globally disabled even if a method is discovered.
 - Capture bridge/TUI/Leader/gateway disconnect and resume in idle, active, and
@@ -335,7 +414,8 @@ Its manifest stays `protocolFreeze=false`; this does not unlock Phase 1A.
 - Complete the remaining `agent serve` Origin/path/account-auth and close
   semantics rows; query/Bearer precedence and unauthorized early-data rejection
   are captured.
-- Run bounded partial-write/backpressure stress without pathological sleeps.
+- Produce at least one real backpressure/drain event and keep byte/callback
+  conservation; half-close and delayed disconnect remain separate open rows.
 - Run independent PII/canary scan and fixture hash verification.
 - Submit the complete fixture set to the independent reviewer and coordinator.
 

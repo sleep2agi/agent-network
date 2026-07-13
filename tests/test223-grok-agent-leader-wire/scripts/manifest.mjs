@@ -2,14 +2,19 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { loadLiveExactPolicy } from "../lib/live-exact-policy.mjs";
 
 const [artifactDir, suiteDir] = process.argv.slice(2);
 if (!artifactDir || !suiteDir) throw new Error("usage: manifest.mjs ARTIFACT_DIR SUITE_DIR");
 const protocolAllowlistPath = join(suiteDir, "protocol-allowlist.json");
 const protocolAllowlist = JSON.parse(readFileSync(protocolAllowlistPath, "utf8"));
-if (protocolAllowlist.schema !== "test223-protocol-allowlist/v1") {
+if (protocolAllowlist.schema !== "test223-protocol-allowlist/v2") {
   throw new Error("unsupported protocol allowlist schema");
 }
+const livePolicyState = loadLiveExactPolicy({
+  suiteRoot: suiteDir,
+  protocolAllowlist,
+});
 
 function forbiddenChildEnvKey(key) {
   return protocolAllowlist.childEnv.forbiddenExact.includes(key)
@@ -57,8 +62,16 @@ if (grokBinary) {
 }
 
 const artifactFiles = readdirSync(artifactDir)
-  .filter((name) => name !== "manifest.json" && statSync(join(artifactDir, name)).isFile())
+  .filter((name) => !["manifest.json", "README.md"].includes(name)
+    && statSync(join(artifactDir, name)).isFile())
   .sort();
+const captureProfile = {
+  liveNative: artifactFiles.includes("leader-native-tui.summary.json"),
+  frameAware: artifactFiles.includes("frame-aware-admission.summary.json"),
+  approvalOwner: artifactFiles.includes("live-approval-owner-matrix.summary.json"),
+  exactTransport: artifactFiles.includes("transport-exact-one-byte.summary.json"),
+};
+captureProfile.fullPhase0 = Object.values(captureProfile).every(Boolean);
 const sourceFiles = listFiles(suiteDir)
   .filter((name) => !name.endsWith("README.md"))
   .map((name) => ({ path: name, sha256: sha256(join(suiteDir, name)) }));
@@ -116,6 +129,15 @@ const manifest = {
     ? "owner_live_native_capture_pending_independent_review"
     : "harness_selftest_only",
   protocolFreeze: false,
+  liveExactPolicy: {
+    mode: livePolicyState.mode,
+    status: livePolicyState.status,
+    policySha256: livePolicyState.policySha256,
+    selectorSeedSha256: livePolicyState.selectorSeedSha256 ?? null,
+    acceptedIndexSha256: livePolicyState.acceptedIndexSha256,
+    acceptedShapesSha256: livePolicyState.acceptedShapesSha256,
+  },
+  captureProfile,
   protocolAllowlistSha256: sha256(protocolAllowlistPath),
   targetProductBaseline: "grok 0.2.93 (f00f96316d)",
   grok,
@@ -133,7 +155,7 @@ const manifest = {
       "SESSION", "PROMPT_ID", "REQUEST_ID", "EVENT_ID", "TOOL_CALL_ID",
       "AGENT_ID", "AGENT_INSTANCE_ID", "AGENT_NAME", "HOST", "TEAM_ID", "TEAM_NAME",
       "NODE_ID", "USER_ID", "ACCOUNT_ID", "MACHINE_ID", "COMMAND",
-      "STRING", "METHOD", "META", "BILLING",
+      "STRING", "BILLING",
     ],
     correlationRemap: "exact-label, stable, contiguous per-connection namespace; numeric type and equality retained",
   },
@@ -162,6 +184,22 @@ const manifest = {
       rawOutput: "<RAW_TMPFS>/live-approval-owner-matrix.raw.ndjson",
       summary: "live-approval-owner-matrix.summary.json",
       scenario: "policy owner + passive ACP + true TUI permission fanout and fail-closed owner loss",
+    }] : []),
+    ...(artifactFiles.includes("transport-exact-one-byte.summary.json") ? [{
+      argv: [
+        "node",
+        "<SUITE>/scripts/live-bounded-frame-transport-capture.mjs",
+      ],
+      environment: {
+        RUN_POST_GREEN_CONTAINMENT: "0",
+        PRESERVE_RAW_FOR_HARNESS: "1",
+      },
+      rawOutput: "<RAW_TMPFS>/bounded-frame-transport.raw.ndjson",
+      persistedSample: "transport-exact-one-byte.bytes.ndjson",
+      summary: "transport-exact-one-byte.summary.json",
+      extractionSummary: "transport-extract.summary.json",
+      trialLedger: "transport-exact-trials.summary.json",
+      scenario: "exact 1-byte+1ms native stream through complete-frame gateway, 100 trials",
     }] : []),
   ],
   nativeLeaderIpcCandidate: {

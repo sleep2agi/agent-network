@@ -1,14 +1,14 @@
 # test223 — Grok agent leader wire capture harness
 date: 2026-07-13T00:33:45Z
-scope: synthetic harness + withdrawn owner live artifact + Phase0 P0 probes
+scope: historical Phase0 probes + offline Round-3 P0 follow-up pending independent review
 protocolFreeze: false
-independentReview: ROUND-3/ROUND-4 REQUEST_CHANGES; ROUND-5 ACCEPTED FOR CONTINUED PHASE0
+independentReview: binding/frame-aware subdomains accepted; aggregate exact/approval-owner REQUEST_CHANGES; current follow-up not yet reviewed
 designDecision5AddendumSha256: 1a575adb6db3900b21c9c62aaea2248c2551ac0a43bcba1e05bcd772bb3a65e9
 designDecision5: Hub DeliveryConsumerLease is shared #440 server/src work;
   gateway TurnReservation/TuiOwnerLease remains local. Grok adds only a thin
   adapter integration test after #440 contract freeze. The two handles/epochs
   are never combined. This addendum does not change the frozen base design SHA
-  or the accepted Round-5 wire artifacts.
+  or the historical Round-5 wire artifacts (later superseded by exact-policy review).
 OWNER PASS L0: recorder wrote unredacted canaries only to tmpfs
 OWNER PASS L0-negative: recorder rejected output outside RAW_DIR
 OWNER PASS L0-live: pinned Leader + two transparent capture listeners + real TUI rendered ACP turn
@@ -126,7 +126,8 @@ ROUND-5 OWNER DOCKER PASS:
   frame allowed-turn row. The third complete run passed every positive and
   negative layer. Raw captures stayed tmpfs-only.
 
-INDEPENDENT ROUND-5 VERDICT — ACCEPT CANDIDATE FOR CONTINUED PHASE0:
+HISTORICAL INDEPENDENT ROUND-5 VERDICT — ACCEPTED FOR CONTINUED PHASE0,
+LATER SUPERSEDED BY EXACT-POLICY RE-REVIEW:
   manifest/fixture/source/allowlist/design/pinned-binary hashes matched. Fresh
   projections were byte-identical. Saved projection independently showed one
   primary and one owner-loss TUI permission response attempt; summary matched
@@ -145,7 +146,7 @@ COMMITTED CLEAN-CHECKOUT OWNER REPRODUCTION:
   - approval owner: 477 byte records, 857 projections, 9 permission request
     copies, 2 tool calls and exactly 1 selected reject response.
   No host auth/config was mounted. This closes the owner clean-checkout
-  reproducibility gap for the accepted saved fixture; the designated reviewer
+  reproducibility gap for the then-accepted saved fixture; the designated reviewer
   must still reproduce from the final commit. It does not close the remaining
   live race/recovery/transport gates or unlock Phase 1A.
 
@@ -245,5 +246,163 @@ OWNER PASS P0 SERVE REMAINDER (pending independent review):
   either the active or queued turn. close(1000) produced 1006/unclean rather
   than an acknowledged clean close.
 
-Final status: ROUND-5 CANDIDATE ACCEPTED FOR CONTINUED PHASE0.
-protocolFreeze=false; Phase 1A remains locked.
+Historical checkpoint (later superseded): ROUND-5 CANDIDATE ACCEPTED FOR
+CONTINUED PHASE0. Current aggregate exact/approval-owner status is REQUEST
+CHANGES; protocolFreeze=false; Phase 1A remains locked.
+
+ROUND-6 OWNER REMEDIATION CANDIDATE (exact live path policy + exact transport; unfrozen):
+PASS L0: recorder wrote unredacted canaries only to tmpfs
+PASS L0-negative: recorder rejected output outside RAW_DIR
+PASS L0-live-owner: pinned Leader + two native proxy listeners + real TUI rendered ACP turn
+PASS L0-frame-aware-owner: independent Leader tap + Busy recovery + ACP live render
+PASS L0-approval-owner: permission fanout + reject_once + owner-loss fail-closed
+PASS L0-exact-transport-owner: buffered gateway passed exact 1-byte+1ms register+initialize 100/100
+PASS L1: stream-aware scrub produced sanitized byte records
+PASS L2: independent projector rebuilt complete/truncated frames
+PASS L3: independent decoded-byte/PII/canary scanner passed
+PASS L3-negative: decoded-byte canary mutation turned scanner red
+PASS L4-frame-aware-owner: script/binary/artifact-bound Busy evidence verified
+PASS L4-approval-owner: permission wire fixture is source/binary/artifact-bound
+PASS L4-exact-transport-owner: exact 100/100 transport evidence is script/binary/artifact-bound
+PASS L4-live-owner: sanitized live bytes/projection/summary passed structural verifier
+PASS L4: manifest hashes and optional pinned-binary metadata verified
+PASS L4-negative: self-signed bytes mutation with stale projection turned red
+PASS L4-negative: method/field/correlation coherent mutations turned red
+PASS L4-negative: coherent unknown metadata key/value turned red
+PASS L4-negative: six coherent forbidden child env classes turned red
+PASS L4-negative: frame raw/writer/tuple binding mutations turned red
+PASS L4-negative: permission method/summary-count mutations turned red
+PASS L4-negative: coherent exact transport count mutation turned red
+OWNER LIVE CAPTURE PASS: fixture awaits independent review; protocol freeze remains false
+
+Round-6 exact transport evidence:
+- v2 manifest sha256: 9353152b28b39047222d600490fc371c81859cc73990c9a778bcae995decc36c
+- pinned binary: grok 0.2.93 (f00f96316d), sha256 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+- exact buffered trials: 100 requested / 100 completed / 100 passed / 0 failed
+- saved trial request: 641 bytes as 641 one-byte writes, 1 ms between writes
+- aggregate: 64,100 client callbacks / 200 admitted frames / 200 Leader-facing writes
+- saved trial: 1,291 byte records / 15 projected complete frames / 2 Leader-facing frames
+- independent trial ledger: 100/100 rows, 64,100 one-byte callbacks, 200 Leader-facing writes
+- full raw: 132,589 records, ledger hash matched capture summary, tmpfs-only, removed by harness cleanup
+- bare-Leader direct observation excluded from positive count
+- bounded-fragmentation NATIVE IPC NO-GO trip-wire: not triggered
+
+Independent read-only verification:
+- disposable Docker container, network=none, artifact mount read-only
+- generic fresh-project/hash/path verifier: PASS
+- live native verifier: 174 byte records / 350 projections / 346 complete native frames
+- frame-aware verifier: 840 byte records / 1,263 projections / 4 listeners / 8 writers
+- approval verifier: 390 byte records / 757 projections / 9 permission requests / 2 tool calls
+- exact transport verifier: 1,291 byte records / 15 projections / 100 exact trials
+
+Open gates:
+- protocolFreeze remains false; Phase1A remains locked
+- native TUI readiness/admission acknowledgement + reservation-driven Busy 100x
+- half-close, reconnect/recovery, actual backpressure/drain observation
+- human-owned approval and the remaining race/recovery matrix
+
+ROUND-10B FAILED-CLOSED PREFLIGHT (no candidate published):
+- image: `test223-grok-wire:round10b-20260713174014`
+  (`sha256:68acfb2bfd47f2ddfc3d8a65c66847cc8d95848e7514db00d43d3f26dda472e2`)
+- capture source sha256:
+  `4daa6d41c7c66d48a49a97a1cbe88ba10ebd5f100b934ccfeef89d0cfa171d35`
+- lifecycle selftest sha256:
+  `d8fe694da5783ac73e9b24bf6c496d1dc09df6910b77f3925d7289c0c7d2604e`
+- The network-none harness passed and the full-profile guard rejected a
+  missing four-flag invocation before creating artifacts.
+- The one permitted native+frame live attempt passed both business assertions:
+  the true TUI rendered the ACP turn, and the frame-aware Busy/recovery path
+  completed with live ACP rendering.
+- Persistence then failed closed because the frame-aware ACP initialize
+  request omitted the `clientInfo` paths required by the reviewed exact shape.
+  The raw tmpfs was destroyed, no safe fixture was published, and exact/full
+  were not run. The attempt was not retried.
+
+ROUND-11 CLIENT-INFO REMEDIATION AND FAILED-CLOSED PREFLIGHT (no candidate published):
+- scoped capture source sha256:
+  `55787d66dacc951345d7e04008c6cf2d65b7dfb075da4a2fe09c164dff209ad2`
+- scoped lifecycle selftest sha256:
+  `f7bc1add6c1dbaa266994abf64091b11739bda025df369d59872d2e9b41339cf`
+- An independent scoped reviewer accepted the change as strictly limited to
+  fixed frame-aware `clientInfo` plus the non-live contract test. No selector,
+  arbitration, admission, or lifecycle semantics changed.
+- A direct diagnostic that launched Node itself as container PID 1 failed an
+  existing orphan-reaping lifecycle case. It was not treated as a pass or as
+  the suite gate. The prescribed network-none harness entrypoint then passed;
+  the final round-11 image repeated that harness PASS. The full-profile guard
+  again rejected the missing four-flag invocation and left no artifacts.
+- final image: `test223-grok-wire:round11-20260713180502`
+  (`sha256:3e1ef4de2c0df66df2cfa97d47bf570cb31326d69d38ce0a1dc3aa7495fb2fc9`)
+- final harness manifest sha256:
+  `4fb7c7a0031915d0f477d86753e3d3a6d1c2bdb0e670e7248c58fb921b454c74`
+- final harness report sha256:
+  `0125c7bd8d2e5346064e10e64bfcc29214e91a5523bb9fee4ed82a8c69bde9e8`
+- The one permitted round-11 native+frame live attempt again passed both
+  business assertions, proving that the client-info shape mismatch was gone.
+  Persistence then failed closed on the exact scalar set for
+  `$rpc.result.authMethods[].id` in a native initialize response. The error did
+  not expose the observed value or set; the raw tmpfs was destroyed, so no
+  value is inferred or added to policy. No safe fixture was published.
+- Round 11 was not retried. Exact, approval-owner, and full Phase0 profiles were
+  not run. `protocolFreeze=false` and Phase1A remain locked.
+
+P0 EXACT-TRUST FOLLOW-UP (open; design only):
+- The current literal rejection logic now fails unknown method/enum before
+  generic string replacement, and the aggregate verifier rejects generic
+  protocol placeholders. However, the exact policy is still compiled from a
+  summary that first reads the same editable allowlist, so policy provenance is
+  circular rather than an externally accepted artifact union.
+- Raw live mutations currently stop at the sanitizer rejection boundary; the
+  same attempted sanitize/project/manifest/verify driver is not yet bound as a
+  single negative chain.
+- The proposed correction is an externally pinned reviewer acceptance index,
+  deterministic exact-union compilation from source-bound safe artifacts, and
+  capture-scoped pending policy for new approval/serve shapes. This proposal is
+  not implemented or self-accepted in Round 11.
+
+ROUND-3 P0 FOLLOW-UP — OFFLINE SOURCE/HARNESS REMEDIATION (not an independent gate):
+- No live Grok capture was run, no existing round-6 artifact was promoted, and
+  no approval-owner claim changed. `protocolFreeze=false`; Phase1A remains
+  locked.
+- Candidate persistence now requires a fixture/capture/source binding plus a
+  direction-aware selector digest from `candidate-live-selector-seeds.json`.
+  The seed has `authorizesPersistence=false` and is only a precondition for the
+  scrubbed pending-candidate path; it does not authorize exact-shape/protocol
+  acceptance or promotion.
+- Candidate policy, seed and proposal files contain zero generic
+  `<METHOD_n>`/`<STRING_n>`/`unresolved` protocol literals. Candidate derivation
+  self-tests close unknown method/scalar, reversed direction, response
+  correlation, capture-context and generic-placeholder cases.
+- The raw protocol driver shares one mutate -> sanitize -> project -> manifest
+  -> verify chain for the positive control. Unknown-method/enum negatives must
+  close at sanitize; a permissive negative that reaches a green verifier makes
+  the driver fail. The live raw-fixture instance remains pending a separately
+  authorized recapture.
+- Internal read-only review found the v2 flat path representation cannot prove
+  array cardinality/order or tuple pairing, and repository digest parameters do
+  not establish an independent decision. The v2 compiler/output is therefore
+  explicitly `non_authorizing_v2_proposal` /
+  `authorizesAcceptedMode=false`; accepted mode always closes with
+  `accepted_live_exact_attestation_required`.
+- Accepted-policy open gate: recursive v3 skeleton, direction in every selector
+  and digest, fixed Grok 0.2.93/build/binary namespace, and a protected detached
+  reviewer/CI attestation binding registry/union/tool hashes.
+- Docker image: `test223-grok-wire:round3-p0-remediation-final`, image digest
+  `sha256:48449a84603c0a528417b555a2ca37c13154799c8f912b4f2b81abb677612199`.
+- Disposable `--network none --read-only` harness: PASS; synthetic manifest
+  `be1f5990ca49cdc30b703720a0ec718bf7e9508da99f95b427f3df440dba7033`;
+  report `88bf70f012ccf517da1535f2fd59dac8e9d086c9d89c10618df565260a46ddc8`.
+- Full-profile guard with missing live flags: expected non-zero, exact guard
+  message observed, artifact count zero.
+- Source hashes: loader
+  `32a818441e71db94064a6ce6aabccadb52f44e2e2fc710e97d71a3e10f815421`;
+  candidate seed
+  `49bd1352439265c6b3d1303c9578a64d05237b207541fda7e443068a2092d52f`;
+  v2 proposal
+  `47377c2c3639b834546ec1d405c0ebd3045a66de328588efe684bc6fe9bce6c0`;
+  raw-chain driver
+  `06afcfed2feb9a9cc4038018cb834212b3edce69f2a3f8f10d99bfb2c949ae7d`.
+
+This is owner remediation evidence only. Independent review is still required;
+human-owner, real wire owner-loss candidates, 100-run admission, recovery,
+serve close and Hub #440 remain open.

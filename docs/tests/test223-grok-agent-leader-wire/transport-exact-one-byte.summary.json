@@ -1,0 +1,139 @@
+{
+  "schema": "test223-live-bounded-frame-transport-summary/v1",
+  "ok": true,
+  "protocolFreeze": false,
+  "scriptSha256": "91dcf52445fc3986ec7c03b9191e4121b4d26075856356e7837bb8dde0ed2905",
+  "baseline": {
+    "version": "grok 0.2.93 (f00f96316d)",
+    "binarySha256": "4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135",
+    "realRegisterAndInitializeFramesCaptured": true,
+    "modelPromptsIssued": 0
+  },
+  "childEnvKeyNames": [
+    "GROK_AUTH_PATH",
+    "GROK_CLAUDE_HOOKS_ENABLED",
+    "GROK_CLAUDE_MCPS_ENABLED",
+    "GROK_CURSOR_HOOKS_ENABLED",
+    "GROK_CURSOR_MCPS_ENABLED",
+    "GROK_FOLDER_TRUST",
+    "GROK_HOME",
+    "GROK_OIDC_CLIENT_ID",
+    "GROK_OIDC_ISSUER",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH"
+  ],
+  "bounds": {
+    "trialCount": 100,
+    "minimumRequestedSegmentBytes": 2,
+    "maximumRequestedSegmentBytes": 4096,
+    "maximumRequestedSegmentsPerTrial": 128,
+    "maximumInterSegmentDelayMs": 2,
+    "maximumNativeFrameBytes": 1048576,
+    "gatewayAdmissionUnit": "one-complete-native-frame",
+    "leaderFacingWriteUnit": "one-complete-native-frame-per-write-call"
+  },
+  "pathologicalDirectNegativeControl": {
+    "excludedFromGreenCount": true,
+    "requestedSegmentBytes": 1,
+    "delayBetweenSegmentsMs": 1,
+    "registered": true,
+    "initializeResponse": true,
+    "expectedRedObserved": false,
+    "unexpectedlyCompleted": true,
+    "writeErrorObserved": false,
+    "writeErrorCode": null,
+    "responseTailBytes": 0,
+    "responseReadCallbacks": 3,
+    "writeAccounting": {
+      "requestedWrites": 641,
+      "completedCallbacks": 641,
+      "requestedBytes": 641,
+      "completedBytes": 641,
+      "backpressureEvents": 0,
+      "drainEvents": 0
+    }
+  },
+  "boundedGateway": {
+    "requestedTrials": 100,
+    "completedTrials": 100,
+    "passedTrials": 100,
+    "failedTrials": 0,
+    "failureSamples": [],
+    "planCounts": {
+      "coalesced-two-frames": 13,
+      "frame-boundaries": 13,
+      "split-prefix-payload": 13,
+      "fixed-7-byte": 13,
+      "deterministic-bounded-4": 12,
+      "deterministic-bounded-5": 12,
+      "deterministic-bounded-6": 12,
+      "deterministic-bounded-7": 12
+    },
+    "accounting": {
+      "requestedSegments": 1387,
+      "clientWriteCallbacks": 1387,
+      "clientDrains": 0,
+      "gatewayReadCallbacks": 297,
+      "leaderReadCallbacks": 203,
+      "admittedFrames": 200,
+      "upstreamWriteCallbacks": 200,
+      "upstreamDrains": 0,
+      "downstreamWriteCallbacks": 201,
+      "downstreamDrains": 0,
+      "responseReadCallbacks": 199
+    },
+    "requestedClientWritesEqualCallbacks": true,
+    "admittedFramesEqualUpstreamCallbacks": true,
+    "zeroTailTrials": 100
+  },
+  "exactOneByteBufferedGateway": {
+    "requestedTrials": 100,
+    "completedTrials": 100,
+    "passedTrials": 100,
+    "failedTrials": 0,
+    "failureSamples": [],
+    "requestedBytesPerTrial": 641,
+    "requestedSegmentsPerTrial": 641,
+    "interSegmentDelayMs": 1,
+    "gatewayAdmissionUnit": "one-complete-native-frame",
+    "expectedLeaderFacingFramesPerTrial": 2,
+    "aggregate": {
+      "planCounts": {
+        "exact-one-byte-1ms": 100
+      },
+      "totals": {
+        "requestedSegments": 64100,
+        "clientWriteCallbacks": 64100,
+        "clientDrains": 0,
+        "gatewayReadCallbacks": 64099,
+        "leaderReadCallbacks": 332,
+        "admittedFrames": 200,
+        "upstreamWriteCallbacks": 200,
+        "upstreamDrains": 0,
+        "downstreamWriteCallbacks": 398,
+        "downstreamDrains": 0,
+        "responseReadCallbacks": 322
+      }
+    },
+    "minimumGatewayReadBytes": 1,
+    "maximumGatewayReadBytes": 2,
+    "oneByteGatewayReadCallbacks": 64098
+  },
+  "containment": {
+    "requested": false,
+    "ranOnlyAfterBoundedAndExact100Of100": false,
+    "halfClose": null,
+    "midFrame": null,
+    "leaderHealthAfterContainment": null
+  },
+  "rawCapture": {
+    "storage": "explicit-tmpfs-only",
+    "sha256": "93ca6cb2104b6c286aaf7c65b484d3b153ee20d1d7c24a5bbd6017d1015890c5",
+    "recordCount": 132589,
+    "persistedOutsideTmpfs": false,
+    "destroyedBeforeStdout": false,
+    "destroyedByHarnessCleanup": true
+  }
+}

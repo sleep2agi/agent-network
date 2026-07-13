@@ -62,11 +62,15 @@ function mutateNativeFrames(bytesPath, mutation) {
       let rewritten = payload;
       try {
         const outer = JSON.parse(payload.toString("utf8"));
-        if (!changed && outer?.type === "acp") {
-          const innerWasString = typeof outer.payload === "string";
-          const inner = innerWasString ? JSON.parse(outer.payload) : outer.payload;
-          if (inner && typeof inner === "object" && mutation(inner)) {
-            outer.payload = innerWasString ? JSON.stringify(inner) : inner;
+        if (!changed && outer && typeof outer === "object" && !Array.isArray(outer)) {
+          const innerWasString = outer.type === "acp" && typeof outer.payload === "string";
+          const inner = outer.type === "acp"
+            ? (innerWasString ? JSON.parse(outer.payload) : outer.payload)
+            : undefined;
+          if (mutation(inner, outer)) {
+            if (outer.type === "acp") {
+              outer.payload = innerWasString ? JSON.stringify(inner) : inner;
+            }
             rewritten = Buffer.from(JSON.stringify(outer));
             changed = true;
             groupChanged = true;
@@ -203,13 +207,41 @@ function mutatePermissionMethods(bytesPath) {
   writeFileSync(bytesPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
 }
 
-if (["native-binding", "field-name", "correlation-numeric", "correlation-label"].includes(mode)) {
+if ([
+  "native-binding",
+  "method-unknown",
+  "field-name",
+  "field-cross-context",
+  "enum-unknown",
+  "enum-cross-context",
+  "enum-wrong-type",
+  "client-type-wrong-label",
+  "correlation-numeric",
+  "correlation-label",
+  "capture-cross-context-method",
+  "method-generic-placeholder",
+].includes(mode)) {
   const [bytesPath, manifestPath] = args;
   if (!bytesPath || !manifestPath) throw new Error(`${mode} requires BYTES MANIFEST`);
-  mutateNativeFrames(bytesPath, (inner) => {
-    if (mode === "native-binding") {
+  mutateNativeFrames(bytesPath, (inner, outer) => {
+    if (mode === "client-type-wrong-label") {
+      if (outer?.type !== "register" || typeof outer.client_type !== "string") return false;
+      outer.client_type = "<STRING_999>";
+      return true;
+    }
+    if (!inner || typeof inner !== "object" || Array.isArray(inner)) return false;
+    if ([
+      "native-binding",
+      "method-unknown",
+      "capture-cross-context-method",
+      "method-generic-placeholder",
+    ].includes(mode)) {
       if (typeof inner.method !== "string" || !inner.method.includes("prompt")) return false;
-      inner.method = inner.method.replace("prompt", "prompu");
+      inner.method = mode === "native-binding"
+        ? inner.method.replace("prompt", "prompu")
+        : mode === "method-unknown"
+          ? "PRIVATE_CUSTOMER_METHOD_ALICE"
+          : "<STRING_999>";
       return true;
     }
     if (mode === "field-name") {
@@ -217,15 +249,46 @@ if (["native-binding", "field-name", "correlation-numeric", "correlation-label"]
       inner.params.field_name = "<STRING_1>";
       return true;
     }
+    if (mode === "field-cross-context") {
+      if (inner.method !== "initialize"
+        || !inner.params || typeof inner.params !== "object" || Array.isArray(inner.params)) {
+        return false;
+      }
+      inner.params.options = [];
+      return true;
+    }
+    if (["enum-unknown", "enum-cross-context", "enum-wrong-type"].includes(mode)) {
+      if (inner.method !== "session/prompt") return false;
+      const blocks = Array.isArray(inner.params?.prompt)
+        ? inner.params.prompt
+        : inner.params?.content;
+      if (!Array.isArray(blocks) || !blocks[0] || typeof blocks[0] !== "object") return false;
+      blocks[0].type = mode === "enum-unknown"
+        ? "<STRING_999>"
+        : mode === "enum-cross-context"
+          ? "register"
+          : 0;
+      return true;
+    }
     if (mode === "correlation-numeric") {
       if (typeof inner.id !== "number") return false;
       inner.id = 918273;
       return true;
     }
-    if (typeof inner.id !== "string" || !/^<JSONRPC_ID_\d+>$/.test(inner.id)) return false;
     inner.id = "<WRONG_LABEL_999>";
     return true;
   });
+  if (mode === "capture-cross-context-method") {
+    const records = readFileSync(bytesPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    if (records.length === 0 || records.every((record) => record.capture === "harness-canary")) {
+      throw new Error("capture cross-context mutation found no live records");
+    }
+    for (const record of records) record.capture = "harness-canary";
+    writeFileSync(bytesPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+  }
   const manifest = readJson(manifestPath);
   resignFixture(manifest, bytesPath);
   writeJson(manifestPath, manifest);
@@ -242,17 +305,44 @@ if (["native-binding", "field-name", "correlation-numeric", "correlation-label"]
   const manifest = readJson(manifestPath);
   resignFixture(manifest, bytesPath);
   writeJson(manifestPath, manifest);
+} else if (mode === "metadata-value-unknown") {
+  const [bytesPath, manifestPath] = args;
+  if (!bytesPath || !manifestPath) {
+    throw new Error("metadata-value-unknown requires BYTES MANIFEST");
+  }
+  const records = readFileSync(bytesPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  if (records.length === 0 || typeof records[0].capture !== "string") {
+    throw new Error("metadata value mutation requires a capture record");
+  }
+  records[0].capture = "PRIVATE_CUSTOMER_CAPTURE_ALICE";
+  writeFileSync(bytesPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+  const manifest = readJson(manifestPath);
+  resignFixture(manifest, bytesPath);
+  writeJson(manifestPath, manifest);
 } else if (mode === "resign-files") {
   const [manifestPath, ...paths] = args;
   if (!manifestPath || paths.length === 0) throw new Error("resign-files requires MANIFEST FILE...");
   const manifest = readJson(manifestPath);
   for (const path of paths) resignFixture(manifest, path);
   writeJson(manifestPath, manifest);
+} else if (mode === "manifest-capture-profile") {
+  const [manifestPath] = args;
+  if (!manifestPath) throw new Error("manifest-capture-profile requires MANIFEST");
+  const manifest = readJson(manifestPath);
+  if (!manifest.captureProfile || typeof manifest.captureProfile.approvalOwner !== "boolean") {
+    throw new Error("manifest has no capture profile");
+  }
+  manifest.captureProfile.approvalOwner = !manifest.captureProfile.approvalOwner;
+  writeJson(manifestPath, manifest);
 } else if (mode === "env-coherent") {
-  const [summaryPath, manifestPath] = args;
+  const [summaryPath, manifestPath, envKey = "DATABASE_URL"] = args;
   if (!summaryPath || !manifestPath) throw new Error("env-coherent requires SUMMARY MANIFEST");
+  if (!/^[A-Z][A-Z0-9_]*$/.test(envKey)) throw new Error("env-coherent key is invalid");
   const summary = readJson(summaryPath);
-  summary.childEnvKeyNames = [...new Set([...(summary.childEnvKeyNames || []), "DATABASE_URL"])].sort();
+  summary.childEnvKeyNames = [...new Set([...(summary.childEnvKeyNames || []), envKey])].sort();
   writeJson(summaryPath, summary);
   const manifest = readJson(manifestPath);
   manifest.capturePolicy.envKeyNames = [...summary.childEnvKeyNames];
@@ -318,6 +408,72 @@ if (["native-binding", "field-name", "correlation-numeric", "correlation-label"]
   writeJson(summaryPath, summary);
   const manifest = readJson(manifestPath);
   resignFixture(manifest, summaryPath);
+  writeJson(manifestPath, manifest);
+} else if (mode === "approval-raw-byte-metadata-injection") {
+  const [bytesPath, manifestPath] = args;
+  if (!bytesPath || !manifestPath) {
+    throw new Error("approval-raw-byte-metadata-injection requires BYTES MANIFEST");
+  }
+  const records = readFileSync(bytesPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const target = records.find((record) => record.capture === "live-approval-owner-matrix");
+  if (!target || Object.prototype.hasOwnProperty.call(target, "originalByteLength")) {
+    throw new Error("approval safe fixture is not in raw-byte-free form");
+  }
+  target.originalByteLength = target.sanitizedByteLength;
+  writeFileSync(bytesPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+  const manifest = readJson(manifestPath);
+  resignFixture(manifest, bytesPath);
+  writeJson(manifestPath, manifest);
+} else if (mode === "approval-tap-crosslane-metadata") {
+  const [bytesPath, manifestPath] = args;
+  if (!bytesPath || !manifestPath) {
+    throw new Error("approval-tap-crosslane-metadata requires BYTES MANIFEST");
+  }
+  const records = readFileSync(bytesPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const target = records.find((record) => record.capture === "live-approval-owner-matrix"
+    && record.connection === "passive-acp-leader-tap-1"
+    && record.direction === "tap_to_real_leader");
+  if (!target) throw new Error("approval tap tuple mutation found no target");
+  target.role = "real-shared-leader";
+  writeFileSync(bytesPath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+  const manifest = readJson(manifestPath);
+  resignFixture(manifest, bytesPath);
+  writeJson(manifestPath, manifest);
+} else if (mode === "exact-transport-summary-count") {
+  const [summaryPath, manifestPath] = args;
+  if (!summaryPath || !manifestPath) {
+    throw new Error("exact-transport-summary-count requires SUMMARY MANIFEST");
+  }
+  const summary = readJson(summaryPath);
+  if (summary.exactOneByteBufferedGateway?.passedTrials !== 100) {
+    throw new Error("exact transport summary has no 100-trial pass count");
+  }
+  summary.exactOneByteBufferedGateway.passedTrials = 99;
+  summary.exactOneByteBufferedGateway.failedTrials = 1;
+  writeJson(summaryPath, summary);
+  const manifest = readJson(manifestPath);
+  resignFixture(manifest, summaryPath);
+  writeJson(manifestPath, manifest);
+} else if (mode === "exact-transport-ledger-count") {
+  const [ledgerPath, manifestPath] = args;
+  if (!ledgerPath || !manifestPath) {
+    throw new Error("exact-transport-ledger-count requires LEDGER MANIFEST");
+  }
+  const ledger = readJson(ledgerPath);
+  if (ledger.passedTrials !== 100 || !Array.isArray(ledger.trials) || ledger.trials.length !== 100) {
+    throw new Error("exact transport ledger has no 100-trial pass set");
+  }
+  ledger.trials[99].clientWriteCallbacks += 1;
+  ledger.aggregate.clientWriteCallbacks += 1;
+  writeJson(ledgerPath, ledger);
+  const manifest = readJson(manifestPath);
+  resignFixture(manifest, ledgerPath);
   writeJson(manifestPath, manifest);
 } else {
   throw new Error(`unknown mutation mode: ${mode}`);

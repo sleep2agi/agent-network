@@ -1,0 +1,7 @@
+{
+  "schema": "test223-accepted-live-fixtures/v1",
+  "acceptancePolicy": "external-reviewer-pinned-index-sha256",
+  "reviewerExternalPinRequired": true,
+  "ownerMayAddAcceptedEntries": false,
+  "entries": []
+}

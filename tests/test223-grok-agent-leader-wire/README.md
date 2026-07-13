@@ -70,6 +70,46 @@ Do not mount `/capture-raw` to the host. `run.sh` rejects a non-tmpfs raw path.
 Do not interpret `HARNESS PASS` as a live Grok, TUI, permission, race, or
 reconnect result.
 
+## Candidate versus accepted exact policy
+
+`run.sh` is permanently candidate-scoped. It clears legacy acceptance
+parameters, records a pending status in the manifest, and cannot promote a
+capture. `candidateLiveCaptureBindings` pins each fixture stem, capture identity
+and capture-script hash. `candidate-live-selector-seeds.json` additionally pins
+the observed `(transport, direction, outer type, message kind, method)` selector
+digests for each candidate fixture. A matching seed is only a precondition for
+the scrubbed pending-candidate persistence path; the seed has
+`authorizesPersistence=false`, is derived from stale safe projections, and does
+not authorize exact-shape/protocol acceptance or promotion.
+
+`accepted-live-fixtures.json` is currently an empty reviewer-index proposal.
+`compile-accepted-live-exact-shapes.mjs` checks its indexed hashes, performs a
+fresh byte-for-byte projection, and emits `accepted-live-exact-shapes.json` with
+`status=non_authorizing_v2_proposal` and `authorizesAcceptedMode=false`. Its v2
+flat path representation cannot prove array cardinality/order or tuple pairing,
+and repository digest parameters prove integrity rather than an independent
+decision. The runtime loader therefore always closes accepted mode with
+`accepted_live_exact_attestation_required`.
+
+The non-authorizing proposal compiler can be exercised as follows:
+
+```bash
+node tests/test223-grok-agent-leader-wire/scripts/compile-accepted-live-exact-shapes.mjs \
+  tests/test223-grok-agent-leader-wire/accepted-live-fixtures.json \
+  . tests/test223-grok-agent-leader-wire/accepted-live-exact-shapes.json \
+  --expected-index-sha256 "$PROPOSAL_INDEX_SHA256" \
+  --project tests/test223-grok-agent-leader-wire/scripts/project.mjs
+```
+
+Accepted mode remains unavailable until a v3 recursive skeleton preserves
+array cardinality/order/tuple pairing, direction is part of every selector, all
+artifacts share the fixed Grok 0.2.93/build/binary namespace, and a protected
+detached reviewer/CI attestation is verified. The old structural-summary
+generator also writes only a non-authorizing proposal and never edits the
+protocol allowlist. Raw method/enum negative cases and their positive control
+use one shared driver. The positive traverses sanitize, project, manifest and
+verify; each negative must close at sanitize and leave no candidate artifact.
+
 ## Owner live native capture
 
 ```bash
@@ -81,6 +121,8 @@ sg docker -c 'docker run --rm \
   -e RUN_LIVE_NATIVE=1 \
   -e RUN_LIVE_FRAME_AWARE=1 \
   -e RUN_LIVE_APPROVAL_OWNER=1 \
+  -e RUN_LIVE_EXACT_TRANSPORT=1 \
+  -e REQUIRE_FULL_PHASE0=1 \
   -e GROK_BINARY=/host-grok/bin/grok-0.2.93 \
   -e GROK_AUTH_PATH=/host-grok/auth.json \
   -v /tmp/test223-live-artifacts:/artifacts \
@@ -114,10 +156,13 @@ independently reviewed, then withdrawn when exact-policy/native-binding gate
 changes made its source-bound manifest stale. Round 3 was also withdrawn after
 independent review found a post-summary close frame, unbound permission evidence and a
 missing summary freeze field. Round 4 was withdrawn after another shutdown
-response appeared in saved permission wire but not its summary. The fresh
-round-5 candidate was independently accepted for continued Phase 0 and remains
-`protocolFreeze=false`. Its bound permission fixture proves Phase-1
-approval=never routing; human-owned approval remains
+response appeared in saved permission wire but not its summary. Round 5 was
+accepted only for continued Phase 0, then rejected on exact-policy re-review.
+Round-3 independent review accepted only the binding and frame-aware subdomains
+of the historical round-6 evidence. The aggregate exact and approval-owner
+claims remain open and `protocolFreeze=false`. Its legacy `ownerDisconnect`
+label proves only the owner-lease control socket EOF boundary; ACP-child
+disconnect, a central response after owner loss, and human-owned approval remain
 open. The remaining P0 names are `leader-native-tui`, `leader-acp-a`,
 `leader-acp-b`, `permission-routing`, `race-matrix`,
 `reconnect-matrix`, and `serve-auth`. The reject-only approval scenario exists
