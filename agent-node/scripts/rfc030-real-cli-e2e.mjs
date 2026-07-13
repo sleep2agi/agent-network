@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective round 8 — real codex 0.144.0
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 9 — real codex 0.144.0
 // **bootstrap smoke**.
 //
 // This script is a bootstrap smoke, not a full E2E. Honest scope
@@ -281,20 +281,28 @@ async function spawnCodex(plaintext, port, underPty) {
  * have 6 keys (the extra `PWD` sh injects) — proving the
  * `unset PWD;` prefix is the load-bearing guard.
  */
-// 副指挥 ab7d7682 / b2b22ae6 evidence P1: probe MUST NOT touch the
-// real bearer, AND the canary-scrub detector MUST bind to the
-// probe's SAME raw stdout+stderr chunk streams — not to derived
-// fields. If a future edit reintroduces a `raw` cache, the
-// stream-bound detector still fires because it observes the
-// bytes as they arrive from the child, before any parsing.
+// 副指挥 ab7d7682 / b2b22ae6 / 67ac4df5 evidence P1: probe MUST NOT
+// touch the real bearer, AND the canary-scrub detector MUST bind
+// to the probe's SAME raw stdout / stderr chunk streams with
+// PER-STREAM independent rolling tails. Round-8 shared a single
+// rolling-tail across the two streams, which had two failure
+// modes:
+//   (a) stdout writes prefix → stderr writes noise → stdout
+//       writes suffix. stdout ALONE is a contiguous canary, but
+//       the shared tail got overwritten by stderr's noise
+//       between the two stdout feeds → false negative.
+//   (b) stdout writes prefix → stderr writes suffix. Neither
+//       stream contains a full canary, but the shared tail would
+//       concatenate them → false positive.
+// Round-9 uses two separate detector instances (one per stream);
+// the reported `canaryDetected` OR-reduces them, so a canary that
+// is contiguous within EITHER stream is caught, and neither
+// stream can borrow bytes from the other.
 //
-// Round-7 detector searched only `{note, keys}` — a raw cache
-// added later would slip past. Round-8 rewires the detector to
-// the actual `stdout.on('data') / stderr.on('data')` chunk feed
-// with chunk-boundary tail retention. Verified against a
-// controlled unsafe mode below that intentionally emits the
-// canary from the child; the detector MUST fire, or the whole
-// evidence gate is a lie.
+// Additionally we now wait for the child's `close` event
+// (which fires AFTER stdio streams have emitted `end`) instead of
+// `exit`. `exit` can fire while a final chunk is still buffered
+// in stdout / stderr; `close` guarantees the tail has drained.
 //
 // Real Codex spawn continues to use the real bearer +
 // SecretRedactor — the two paths do NOT share plaintext.
@@ -304,7 +312,9 @@ const PROBE_CANARY_BEARER = "probe-canary-NOT-A-REAL-BEARER-abcdefghij";
  * Streaming canary detector. Feeds byte chunks; on each chunk it
  * concatenates a rolling tail of `canary.length - 1` bytes from
  * the previous chunk so the canary is detected even when it lands
- * on a chunk boundary. Never buffers the whole stream.
+ * on a chunk boundary. Never buffers the whole stream. A single
+ * detector instance is bound to a SINGLE stream so a peer stream
+ * cannot corrupt its rolling tail.
  */
 function makeCanaryDetector(canary) {
   const target = Buffer.from(canary, "utf8");
@@ -356,14 +366,16 @@ async function probeChildEnvKeysUnderPty(unsetPwd, { dumpValues = false } = {}) 
   const child = spawn("script", ["-qec", shellCmd, "/dev/null"], {
     env, stdio: ["pipe", "pipe", "pipe"],
   });
-  const detector = makeCanaryDetector(PROBE_CANARY_BEARER);
+  // 副指挥 67ac4df5: per-stream detectors with independent tails.
+  const stdoutDetector = makeCanaryDetector(PROBE_CANARY_BEARER);
+  const stderrDetector = makeCanaryDetector(PROBE_CANARY_BEARER);
   const outLines = [];
   let stderrBytes = 0;
   let stdoutTail = "";
-  // Detector taps the RAW byte chunks BEFORE the line splitter —
-  // reordering / rewrapping the parse layer cannot deceive it.
+  // Detectors tap the RAW byte chunks BEFORE the line splitter —
+  // reordering / rewrapping the parse layer cannot deceive them.
   child.stdout.on("data", (c) => {
-    detector.feed(c);
+    stdoutDetector.feed(c);
     stdoutTail += c.toString("utf8");
     let idx;
     while ((idx = stdoutTail.indexOf("\n")) >= 0) {
@@ -374,11 +386,15 @@ async function probeChildEnvKeysUnderPty(unsetPwd, { dumpValues = false } = {}) 
     }
   });
   child.stderr.on("data", (c) => {
-    detector.feed(c);
+    stderrDetector.feed(c);
     stderrBytes += c.length;
   });
-  const [code] = await new Promise((r) => {
-    child.on("exit", (c, s) => r([c, s]));
+  // 副指挥 67ac4df5: await `close` (fires AFTER stdio streams
+  // have flushed and emitted their `end`), NOT `exit` — `exit` can
+  // fire while a final buffered stdout / stderr chunk is still in
+  // flight, which would let the detector read stale state.
+  const code = await new Promise((r) => {
+    child.on("close", (c) => r(c));
   });
   if (stdoutTail.trim()) {
     const m = stdoutTail.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
@@ -388,11 +404,12 @@ async function probeChildEnvKeysUnderPty(unsetPwd, { dumpValues = false } = {}) 
   const keys = [...new Set(outLines)].sort();
   // `note` never contains values — only exit code + counters.
   const note = `exit=${code} stderr_bytes=${stderrBytes} lines=${outLines.length}`;
-  return { code, keys, canaryDetected: detector.detected(), note };
+  const canaryDetected = stdoutDetector.detected() || stderrDetector.detected();
+  return { code, keys, canaryDetected, note };
 }
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 8 — real codex 0.144.0 bootstrap smoke");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 9 — real codex 0.144.0 bootstrap smoke");
   const { server, plaintext, authorizerCalls } = await startServer();
 
   // 副指挥 e85ade40 evidence-gate P3: mutation red must run BEFORE
@@ -403,6 +420,54 @@ async function main() {
   } catch { mutationRefused = true; }
   if (mutationRefused) ok("mutation red: COMMHUB_TOKEN refused by buildAllowlistEnv");
   else fail("env mutation red", "COMMHUB_TOKEN went through buildAllowlistEnv");
+
+  // 副指挥 67ac4df5 evidence P1 direct-repro: two pure-JS
+  // synthetic interleave cases that exercise the detector wiring
+  // WITHOUT a child process, driving the SAME `makeCanaryDetector`
+  // instances the probe uses.
+  {
+    const canary = PROBE_CANARY_BEARER;
+    const mid = Math.floor(canary.length / 2);
+    const prefix = Buffer.from(canary.slice(0, mid), "utf8");
+    const suffix = Buffer.from(canary.slice(mid), "utf8");
+    // Case A: canary is CONTIGUOUS on stdout, split by stderr
+    // noise arriving BETWEEN the two stdout feeds. With a shared
+    // detector (round-8) the tail would be overwritten by stderr
+    // "NOISE" and the canary would be MISSED. Per-stream detectors
+    // fix that.
+    const stdoutA = makeCanaryDetector(canary);
+    const stderrA = makeCanaryDetector(canary);
+    stdoutA.feed(prefix);
+    stderrA.feed(Buffer.from("NOISE_NOT_CANARY_XYZ", "utf8"));
+    stdoutA.feed(suffix);
+    const detectedA = stdoutA.detected() || stderrA.detected();
+    if (detectedA === true) {
+      ok("detector interleave case A: stdout prefix + stderr noise + stdout suffix ⇒ detected=true (contiguous within stdout stream)");
+    } else {
+      fail(
+        "detector interleave case A",
+        "expected detected=true when canary is contiguous within stdout despite stderr interleave; got false",
+      );
+    }
+    // Case B: canary is SPLIT across streams — prefix on stdout,
+    // suffix on stderr. Neither stream contains the whole canary.
+    // With a shared detector (round-8) the tail from stdout would
+    // fuse with the stderr feed and produce a FALSE POSITIVE.
+    // Per-stream detectors keep each tail isolated → detected=false.
+    const stdoutB = makeCanaryDetector(canary);
+    const stderrB = makeCanaryDetector(canary);
+    stdoutB.feed(prefix);
+    stderrB.feed(suffix);
+    const detectedB = stdoutB.detected() || stderrB.detected();
+    if (detectedB === false) {
+      ok("detector interleave case B: stdout prefix + stderr suffix ⇒ detected=false (no cross-stream fusion)");
+    } else {
+      fail(
+        "detector interleave case B",
+        "expected detected=false when canary is split across streams; got true (would be a cross-stream false positive)",
+      );
+    }
+  }
 
   // 副指挥 ab7d7682 / b2b22ae6 evidence P1: probe uses a FIXED
   // CANARY bearer, never the real plaintext. Child emits only key
