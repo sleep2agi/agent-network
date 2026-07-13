@@ -1,0 +1,249 @@
+# test223 — Grok agent leader wire capture harness
+date: 2026-07-13T00:33:45Z
+scope: synthetic harness + withdrawn owner live artifact + Phase0 P0 probes
+protocolFreeze: false
+independentReview: ROUND-3/ROUND-4 REQUEST_CHANGES; ROUND-5 ACCEPTED FOR CONTINUED PHASE0
+designDecision5AddendumSha256: 1a575adb6db3900b21c9c62aaea2248c2551ac0a43bcba1e05bcd772bb3a65e9
+designDecision5: Hub DeliveryConsumerLease is shared #440 server/src work;
+  gateway TurnReservation/TuiOwnerLease remains local. Grok adds only a thin
+  adapter integration test after #440 contract freeze. The two handles/epochs
+  are never combined. This addendum does not change the frozen base design SHA
+  or the accepted Round-5 wire artifacts.
+OWNER PASS L0: recorder wrote unredacted canaries only to tmpfs
+OWNER PASS L0-negative: recorder rejected output outside RAW_DIR
+OWNER PASS L0-live: pinned Leader + two transparent capture listeners + real TUI rendered ACP turn
+OWNER PASS L1: pre-review scrub produced purported sanitized byte records
+OWNER PASS L2: pre-review projector rebuilt complete/truncated frames
+OWNER PASS L3: pre-review decoded-byte scanner passed its original cases
+OWNER PASS L3-negative: original decoded-byte canary mutation turned scanner red
+OWNER PASS L4-live: pre-review live structural verifier passed
+OWNER PASS L4: pre-review manifest hashes verified
+INDEPENDENT RED P0-privacy: persisted UUID/session, prompt/history/summary,
+  account/subscription/billing, path and unknown-string leaks.
+INDEPENDENT RED P0-binding: verifier did not fresh-project saved bytes and
+  byte-compare them with the saved projection.
+INDEPENDENT RED P1-claim: checked live proxy was transparent chunk forwarding,
+  not the claimed frame-aware single-admission/Busy proxy.
+WITHDRAWN OWNER LIVE ARTIFACT: unsafe purported-sanitized bytes/projection and
+  their summary/manifest were removed pending allowlist-based recapture.
+OWNER REMEDIATION PASS P1-frame-aware (pending independent review):
+  live-frame-aware-admission-capture.mjs sha256=
+  96de87eec13acc2f5e4c73209797891eec8bc847b71f79323fef6dd1dea67ccf.
+  A real incremental two-listener proxy preserved complete frames across split
+  prefix/payload and coalesced reads. A real TUI session/prompt received a Busy
+  response with its original JSON-RPC id; the rejected prompt produced zero
+  upstream frames/bytes, no retry/steer/replay, and the TUI stayed alive. An
+  allowed ACP prompt forwarded exactly once, ended with end_turn and rendered
+  in the true TUI. Requested/completed write byte counts matched on all four
+  directions. Round 2 adds independent Leader-facing taps: the rejection
+  window measured zero real upstream frames/bytes, all TUI mutating methods are
+  locally blocked independent of marker, and a benign TUI prompt completed
+  after Busy. Script and pinned-binary hashes are self-reported and matched by
+  an external sha256sum. Owner and main-process Docker reruns passed;
+  protocolFreeze remains false. The round-3 bytes/projection/summary below
+  were source/binary/hash-bound and submitted for independent review.
+
+ROUND-3 OWNER REVIEW CANDIDATE (exact policy + artifact binding; unfrozen):
+  protocolAllowlistSha256=e7592c307e76f442a734b6bc9d90cfc7ab5de350bba17e87d827f8fdfbd0f63c
+  observedSampleMaxFrameBytes=2613 (fixture-derived, not vendor limit)
+  12197f74143395eae8eb0a63d274f5f87ea029cbe5c3a11f5f98e164fc25530f  leader-native-tui.bytes.ndjson
+  58c0d6a53d50ea87c402a57f691b1cb362f1c705b3f6a5dabd5aed4491715810  leader-native-tui.projection.ndjson
+  94e1025876b0de3b501456a9599f6bdd1070b3ec235c6b64530dbf59b7c0c8e6  leader-native-tui.summary.json
+  9182fd3269ba3d7a020150a804981a15aabc66fb6ce73fd9f9e0a353ef1c679b  frame-aware-admission.bytes.ndjson
+  d66dde1c9d9c4742226cfa913ef7ce1bb7f1dc6ae5b9a8054d711470e707796d  frame-aware-admission.projection.ndjson
+  b4c00483f1a836e646a32ce99dfbe73396e8f55fb3b3a18d951c1da146246be0  frame-aware-admission.summary.json
+  250348421c5ff5d2301c85eb975e24e4acb6c631c364f6f374cdcc801a6e843f  manifest.json
+
+INDEPENDENT ROUND-3 REQUEST CHANGES (candidate withdrawn; hashes above audit-only):
+  1. frame-aware summary captured 872 records while the persisted artifact had
+     876; a final TUI close frame crossed four recorded boundaries after the
+     summary snapshot. The verifier did not reconcile all eight writers.
+  2. session/request_permission was allowlisted without a bound sanitized
+     permission fixture.
+  3. leader-native-tui.summary.json omitted protocolFreeze:false despite the
+     literal candidate contract.
+
+ROUND-4 OWNER REVIEW CANDIDATE (fresh Docker capture; unfrozen):
+  designSha256=87b47cf42e8a8e2eba572ce54e799fce763ed0d11db0c9ad3d8599e9cc6d1be1
+  protocolAllowlistSha256=5353574f10700796b3cdc0ed23098d61bec333c990be0dd9feec03ecf41c7d61
+  pinnedBinarySha256=4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+  f2b55036c326252de82f1249765f0bc781c60ed4473c342fe369b336a98fb0df  leader-native-tui.bytes.ndjson
+  f841058bd6252e7e33c2a9d1931943ef081aa7edf85f21ee5b4501d183b07ddc  leader-native-tui.projection.ndjson
+  8bfc1fa9dfbc23699607aa3caab668b16cba094927278c0b48c1404dcd2f51ea  leader-native-tui.summary.json
+  57506832509e094de47d37b3b15325de5e0ca8d3cd26e3cf2422127ede1243a0  frame-aware-admission.bytes.ndjson
+  91704e3d15c52a21a807fc0fe7d185d0fa9ed4d7a2fe5e7d3e5ba030072fd0ed  frame-aware-admission.projection.ndjson
+  d34a476b948cb181faeb323086b0740412b01003b2a0eef0b82009f0d505dcd9  frame-aware-admission.summary.json
+  e5eee8758aef3ae6a0a3d6e90b0c82c4bd19a52ed187656153514b04f203f056  live-approval-owner-matrix.bytes.ndjson
+  24834300b658bfe38ffb468cbc2a7387935b2152b7681a96db6051a83615666c  live-approval-owner-matrix.projection.ndjson
+  597f09664820947b1e99da09e0c3aabeb2c98a1f3fe28910d668bd704f4f6b53  live-approval-owner-matrix.summary.json
+  e231e7d2159883cebe515ac35fe10779ab6477bffd08066fcf65e67e0af980a9  manifest.json
+
+ROUND-4 OWNER DOCKER PASS:
+  native summary explicitly protocolFreeze=false. Frame capture closes TUI/ACP
+  producers and their stdio before gateway/tap shutdown and raw hashing; saved
+  rawCapture.records=1039. The verifier reconstructs exact role/connection/
+  stream/direction tuples and independently matches frame, segment and original
+  byte totals for all eight writers. A real permission fixture binds two
+  session/request_permission tool calls across policy owner/passive/true TUI;
+  exactly one reject_once reached Grok, the TUI attempt was locally suppressed,
+  owner loss forwarded zero responses, and canaries remained absent. Coherently
+  re-signed raw-count, writer frame/segment/byte, provenance tuple and permission
+  method mutations all turned red. Raw captures remained tmpfs-only and were
+  removed by the harness.
+
+INDEPENDENT ROUND-4 REQUEST CHANGES (candidate withdrawn; hashes above audit-only):
+  The owner-loss TUI response was produced during TUI shutdown. Saved wire
+  contained the real tui_to_gateway response attempt and zero matching
+  gateway_to_leader frame, but the summary had already sampled attempts=0 and
+  suppressed=0. The dedicated verifier checked wire suppression separately and
+  did not require summary counters to equal saved projection counts. This was
+  the same stale-snapshot class as the round-3 defect.
+
+ROUND-5 OWNER REVIEW CANDIDATE (fresh Docker capture; unfrozen):
+  designSha256=87b47cf42e8a8e2eba572ce54e799fce763ed0d11db0c9ad3d8599e9cc6d1be1
+  protocolAllowlistSha256=5353574f10700796b3cdc0ed23098d61bec333c990be0dd9feec03ecf41c7d61
+  pinnedBinarySha256=4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+  557eb9f35b17a0e73d8a02595ce598cc4b1857045659c8bbbf128a69652c1720  leader-native-tui.bytes.ndjson
+  2c91307fb3e58875fb108550acf9de20d879496a858ced3eb1729cd65b6147ce  leader-native-tui.projection.ndjson
+  0475635398bb9876c7d82827da93982d0c76edada8b9445bc3e0e4f83c326908  leader-native-tui.summary.json
+  3205b4e8c7e9f824ab68195f9679f0bfea7693ab9f2819a32e725e5566fc0f37  frame-aware-admission.bytes.ndjson
+  a27cd9f7b2cd3a967f28042081fad16bcd46b8fa5fd2744767012af4e66f1afe  frame-aware-admission.projection.ndjson
+  75ddb9f51071087453626a384097995c1d37a7490bc30863bf879c5b58bf3754  frame-aware-admission.summary.json
+  b5e90b1e031cac3e5c43ecf3b13808b46ff9d1a81fb7dde1e1a4bc9ca341e6e9  live-approval-owner-matrix.bytes.ndjson
+  8d3bb72c28b2c2273502ff5bf78d127245781d5630ba38b600e1344a65899a88  live-approval-owner-matrix.projection.ndjson
+  dd766648e7533f8752922b3cbfb4ebcd8a21eff14b7acb68a9039cf4f69035ca  live-approval-owner-matrix.summary.json
+  c47caf398ac256d7ab338a3266c17fe141dea9bcfdc0495e90d4ef1e3680661a  manifest.json
+
+ROUND-5 OWNER DOCKER PASS:
+  TUI/ACP producers close before permission counters are finalized. The saved
+  projection and summary now both record one TUI response attempt/suppression
+  for the primary permission and one for owner-loss; both have zero forwarded
+  response. The verifier derives those counts independently from saved frames
+  and requires exact equality. A coherently re-signed summary-count mutation
+  turns red in addition to the permission-method and frame binding mutations.
+  Two preceding fresh attempts failed closed and published no candidate: one
+  approval authenticate timeout and one unexpected permission request in the
+  frame allowed-turn row. The third complete run passed every positive and
+  negative layer. Raw captures stayed tmpfs-only.
+
+INDEPENDENT ROUND-5 VERDICT — ACCEPT CANDIDATE FOR CONTINUED PHASE0:
+  manifest/fixture/source/allowlist/design/pinned-binary hashes matched. Fresh
+  projections were byte-identical. Saved projection independently showed one
+  primary and one owner-loss TUI permission response attempt; summary matched
+  attempts=1/suppressed=1 for both and forwarded zero. The re-signed summary
+  count mutation turned red. Generic privacy, native, frame-aware and approval
+  verifiers passed. All summaries and manifest remain protocolFreeze=false.
+  This verdict does not unlock Phase 1A.
+
+COMMITTED CLEAN-CHECKOUT OWNER REPRODUCTION:
+  The scoped Phase-0 suite was committed on branch
+  `phase0/grok-agent-leader-wire`, then checked from a detached worktree in a
+  no-network, read-only Docker container with only tmpfs `/tmp`. Fresh-project
+  and all saved-candidate verifiers passed:
+  - native: 134 byte records, 346 projections, 342 complete native frames;
+  - frame-aware: 862 byte records, 1312 projections, 8 writer directions;
+  - approval owner: 477 byte records, 857 projections, 9 permission request
+    copies, 2 tool calls and exactly 1 selected reject response.
+  No host auth/config was mounted. This closes the owner clean-checkout
+  reproducibility gap for the accepted saved fixture; the designated reviewer
+  must still reproduce from the final commit. It does not close the remaining
+  live race/recovery/transport gates or unlock Phase 1A.
+
+Withdrawn live metadata (audit only):
+  version: grok 0.2.93 (f00f96316d)
+  binarySha256: 4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0c27a694dc3401135
+  sameSession: true
+  nativeConnections: 2 (gateway-owned ACP listener + TUI listener)
+  zeroTuiStdin: true
+  realTuiRendered: true
+  completionSeen: true
+  promptStopReason: end_turn
+  promptDurationMs: 1143
+  rawRecordCount: 134
+  sanitizedProjectionCount: 344
+
+Withdrawn owner live artifact SHA-256 (audit only; files intentionally absent):
+  c2c66042e875bcc67881df0f1b34457415f5ba1fc1e4a095dd9eaa9de201c02a  leader-native-tui.bytes.ndjson
+  92bb5740cb0b69046a349596031033af1f9ce6e2f1d67ab970f8c0cc6e6f01bb  leader-native-tui.projection.ndjson
+  66e8d17fa6914345dd9b9fd04becdcccbc5d635dc93b64828590c7722c062af6  leader-native-tui.summary.json
+  000f0351aa713bf46689aad36e2b7a5256a0e25c4c93e85cdf03167449c73f2e  manifest.json
+
+Withdrawn round-2 replacement artifact (audit only; files intentionally absent):
+  rawRecordCount: 164
+  sanitizedProjectionCount: 344
+  observedSampleMaxFrameBytes: 2608 (projection-derived, not a vendor limit)
+  childEnvKeyNames: capture-produced exact union; values absent
+  fresh-project byte compare: PASS
+  26 sensitive/unknown mutation cases: RED as required
+  self-signed bytes hash + stale projection mutation: RED as required
+  00e745470fadfa0df9bd534f525d130b220cc9c716977560617181d51a105997  leader-native-tui.bytes.ndjson
+  9c1ffefaf84e63501fec1d161f0bfe51e78f0362bb81f18e0bcbb2767dbcd9b8  leader-native-tui.projection.ndjson
+  83629ea8e5dc1ef6e52560f6d8491466b924a49e720a67f71e38a8c6e9286540  leader-native-tui.summary.json
+  e99f14aae1308b8477d067718e2bb0b71d60f37f3c3a152a134e2bf68831d3eb  manifest.json
+
+OPEN P0 BLOCKER — TUI-owned external approval:
+  permission fanout to submitter ACP + passive ACP + real TUI was observed.
+  Exact ACP reject_once is proven. The checked TUI-only reject scenario exits
+  fail-closed with TUI_REJECT_ONLY_UI_AUTOMATION_UNSTABLE and produces no
+  approval fixture; a screen-row-based End+Enter assumption was rejected after
+  the native response proved it was not reject_once.
+
+OWNER PASS P0 APPROVAL=NEVER MATRIX (pending independent review):
+  script sha256=3e64f4d3bb2f4cd78699f074907fe0492bc98902af46f6b69968dceed5e8ce04.
+  Two Docker runs observed owner/passive/real-TUI fanout=2/2/2. The TUI made
+  one automatic permission-response attempt; the frame-aware gateway suppressed
+  it locally and forwarded zero such frames to Leader. Exactly one policy-owner
+  reject_once reached upstream. Passive, stale, duplicate and owner-lost
+  candidates were suppressed. The canary stayed absent; terminal outcome was
+  cancelled with pending_interaction→interaction_resolved→turn_completed→
+  prompt_complete. allow responses=0 and TUI stdin bytes=0. Human-owned TUI
+  reject remains open for the later approval phase.
+
+OPEN P0 STRESS GATE:
+  one real prompt frame split [1,2,rest] passed; adding delay to every fragment
+  caused a late reset. Bounded partial-write/backpressure stress still requires
+  independent reproduction.
+
+RED P0 TRANSPORT MATRIX — independently repeated by the owner process:
+  local incremental decoder: 100/100.
+  pinned Leader register+initialize under randomized/coalesced input: 99/100.
+  failing sample: one-byte writes with 1 ms delay; registered=true but the
+  initialize response was absent. The same sanitized RED result reproduced on
+  a second Docker run. Per layered-test policy, half-close, gateway recovery,
+  replay, and cancel rows were not promoted to PASS after this prerequisite
+  failed. protocolFreeze remains false.
+
+RED P0 BOUNDED-GATEWAY TRANSPORT FOLLOW-UP:
+  script sha256=08bdeaa5bbde5bfd884b68bad68e5a438a7e1d58be2f85ed0cef8d5ced3cc2f5.
+  The complete-frame gateway passed 100/100 deterministic reasonable segment,
+  coalescing and micro-delay register+initialize trials with no failure sample.
+  The next layered row then failed closed with HALF_CLOSE_RESPONSE_TIMEOUT.
+  Therefore ordinary bounded frame forwarding is no longer the red row, but
+  disconnect/half-close containment remains red; the earlier pathological
+  direct one-byte+1ms 99/100 result is retained as a separate negative control.
+
+PASS P0 SERVE AUTH OWNER MATRIX:
+  missing=401; wrong query secret=401; correct query secret=101;
+  wrong Bearer=401; correct Bearer=101; correct X-Server-Key=401.
+  Authorization takes precedence over the query credential. Unauthorized
+  attempts carrying an early session/new frame were rejected before upgrade,
+  returned no session/JSON-RPC data, and created zero isolated session
+  artifacts. An authorized prompt completed, while another loaded connection
+  received zero cross-connection events: agent serve is a per-connection ACP
+  WebSocket proxy, not a durable native-Leader observer. Normal WebSocket close
+  did not produce a close frame within 3 seconds, so close semantics stay open.
+
+OWNER PASS P0 SERVE REMAINDER (pending independent review):
+  script sha256=322d08a2b8ecb703ce3d08be72fffc0fd13ecc845a29f69111d224dc7842df7d.
+  Origin absent/localhost/evil/null all upgraded (101); wrong paths were 404;
+  missing/wrong credentials were 401 with no session data or state mutation.
+  cached_token and oidc were advertised and accepted. With an existing cached
+  account, session/new also succeeded before explicit ACP authenticate. Two
+  prompts submitted during an active turn ran FIFO and ended normally. A tail
+  attached after real thought/message activity received both turns; idle
+  observer received zero turn events. Killing the active owner did not cancel
+  either the active or queued turn. close(1000) produced 1006/unclean rather
+  than an acknowledged clean close.
+
+Final status: ROUND-5 CANDIDATE ACCEPTED FOR CONTINUED PHASE0.
+protocolFreeze=false; Phase 1A remains locked.
