@@ -479,6 +479,24 @@ export class GatewayLifecycle {
   }
 
   private async doStart(): Promise<void> {
+    // 副指挥 dd12966c: the ENTIRE doStart body — construction,
+    // subscribe, preflight, bind, activate — is wrapped in a
+    // unified catch that funnels ANY throw (including a
+    // BackendUdsServer / TuiWsServer / UpstreamRouter constructor
+    // throw AND an activate throw) through `rollbackStartFailure`,
+    // which enters the memoised teardown core. Prior version only
+    // wrapped the four narrow phase awaits, so a synchronous
+    // constructor throw (e.g. bad `backendCapability`) left
+    // state="starting" with mint bearer + partial refs dangling.
+    try {
+      await this.doStartInner();
+    } catch (e) {
+      await this.rollbackStartFailure();
+      throw e;
+    }
+  }
+
+  private async doStartInner(): Promise<void> {
     // 副指挥 1b24ae71 P0-1: construct the mux + reverseNs + coordinator
     // + UpstreamRouter BEFORE preflight. The router subscribes to the
     // upstream transport immediately and BUFFERS any frames received
@@ -703,21 +721,14 @@ export class GatewayLifecycle {
     return this.teardownCorePromise;
   }
 
-  /**
-   * @internal — TEST-ONLY seam, not a public capability.
-   *
-   * 副指挥 cdd20559 evidence-delta #1: observable count of
-   * first-time entries into the teardown core. All three shutdown
-   * entry points (public stop, upstream close cascade, start
-   * rollback) share the memoised `teardownCorePromise`, so this
-   * counter is exactly 1 after any teardown that ran, and 0
-   * before any teardown started.
-   *
-   * Not exported from `integration-entry.ts`; not part of the
-   * production API contract. Removing this method would not be a
-   * breaking change.
-   */
-  teardownCoreEnteredCount(): number { return this.teardownCoreEnteredCountValue; }
+  // 副指挥 13dd3853 D: NO public accessor for the teardown-core
+  // counter. `GatewayLifecycle` is exported from `integration-
+  // entry.ts`, so a public method would be part of the production
+  // API surface. Tests reach the private field via cast:
+  //   `(lifecycle as unknown as { teardownCoreEnteredCountValue: number })
+  //      .teardownCoreEnteredCountValue`
+  // The private field itself stays; there's no runtime observable
+  // for it beyond that cast.
 
   /**
    * Teardown core (副指挥 3cb7ba9b + d53209eb).

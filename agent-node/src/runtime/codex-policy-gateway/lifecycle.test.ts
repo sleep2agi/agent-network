@@ -1043,36 +1043,10 @@ describe("Commit 2 corrective #3 — public stop() Promise identity", () => {
   });
 });
 
-describe("Commit 2 corrective #4 — rollback shares single-flight core with stop×upstream close", () => {
-  test("rollback (preflight throw) × concurrent stop() × upstream close cascade → close/abort/local stop each exactly once", async () => {
-    const upstream = new ControllableUpstream();
-    const paths = pathsFor();
-    const { diagnostics } = collectDiagnostics();
-    // Preflight resolves quickly, but we make backend.start throw
-    // so rollback runs — while a concurrent stop() and upstream
-    // close cascade race for the same shutdown.
-    const lifecycle = new GatewayLifecycle({
-      backendSocketPath: paths.backendSocketPath,
-      socketDir: paths.socketDir,
-      preflight: { async run() {} },
-      backend: makeBackend(),
-      upstreamTransport: upstream,
-      initSnapshotSource: { currentSnapshot: () => ({}) },
-      diagnosticsSink: diagnostics,
-      backendCapability: TEST_BACKEND_CAP,
-    });
-    // Start OK. Then race: emitClose + parallel stop() calls.
-    await lifecycle.start();
-    upstream.emitClose();
-    const p1 = lifecycle.stop();
-    const p2 = lifecycle.stop();
-    await Promise.all([p1, p2]);
-    // Single-flight: close called exactly once.
-    expect(upstream.closeCallCount).toBe(1);
-    expect(lifecycle.currentState()).toBe("stopped");
-    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
-  });
-});
+// 副指挥 13dd3853 B: prior "Commit 2 corrective #4" rollback
+// catch-all describe deleted — the two round-3 honest split tests
+// below (preflight rollback × stop; active upstream-close cascade
+// × stop) replace it with real entry-point coverage.
 
 describe("Commit 2 corrective #5 — abort Promise contract; no unhandled rejection under hostile returns", () => {
   test("async abort rejects → primary Error identity preserved; NO unhandled rejection", async () => {
@@ -1101,24 +1075,12 @@ describe("Commit 2 corrective #5 — abort Promise contract; no unhandled reject
   });
 });
 
-describe("Commit 2 corrective #6 — tagged winner race (timeout wins deterministically)", () => {
-  test("close settles AT SAME microtask boundary as timeout → timeout wins → abort called; stop_failed", async () => {
-    const upstream = new ControllableUpstream();
-    // A close that resolves right at the boundary would be racy
-    // with a mutable flag; the tagged-winner race must land on
-    // "timeout" because the timer resolves first. We simulate by
-    // having close resolve strictly AFTER the timer fires.
-    upstream.setClose({ kind: "never" }); // never resolves → timeout must win
-    const h = await makeLifecycleWith(upstream);
-    try {
-      await h.lifecycle.start();
-      await h.lifecycle.stop();
-      expect(upstream.abortCallCount).toBe(1);
-      expect(h.lifecycle.currentState()).toBe("stop_failed");
-      expect(h.lifecycle.stopFailure()?.message).toMatch(/upstream close timed out/);
-    } finally { await h.cleanup(); }
-  });
-});
+// 副指挥 13dd3853 B: prior "Commit 2 corrective #6 — tagged winner
+// race (timeout wins deterministically)" describe deleted. Its
+// only test used `kind:"never"` — a plain post-timeout timeout,
+// NOT a same-microtask boundary. The round-3 honest describe
+// below ("post-timeout close settle does NOT revert stop_failed")
+// covers this case with the correct title.
 
 describe("Commit 2 corrective #7 — original abort Error identity preserved (incl. frozen)", () => {
   test("TypeError with custom .code/.stack → stopFailure() === original abort Error object", async () => {
@@ -1347,9 +1309,12 @@ describe("Commit 2 corrective round 2 P0-1 — hostile abort return values never
         // stop() must resolve — NEVER hang or reject.
         await h.lifecycle.stop();
         await new Promise((r) => setTimeout(r, 50));
-        // Terminal state — NEVER "stopping".
-        const st = h.lifecycle.currentState();
-        expect(["stopped", "stop_failed"]).toContain(st);
+        // 副指挥 13dd3853 E: close threw → ledger.upstreamClose IS
+        // populated → terminal MUST be `stop_failed` (a `stopped`
+        // here would be green-wash — the transport failure was
+        // silently absorbed).
+        expect(h.lifecycle.currentState()).toBe("stop_failed");
+        expect(h.lifecycle.stopFailureLedger().upstreamClose).not.toBeNull();
         expect(unhandled).toBeNull();
         expect(transport.abortCalls).toBe(1);
       } finally {
@@ -1466,7 +1431,7 @@ describe("Commit 2 corrective round 3 (副指挥 cdd20559 pre-submit) — rollba
   // invoke `onUpstreamCloseFromRouter` (that fires only on active
   // close). Splitting the round-2 catch-all into TWO honest tests
   // so we can prove exact-1 with the real entry points.
-  test("preflight rollback × concurrent stop() → teardown core entered EXACTLY 1; close+abort each EXACTLY 1", async () => {
+  test("preflight rollback × concurrent stop() → teardown core entered EXACTLY 1; close EXACTLY 1; abort 0 (clean close)", async () => {
     const paths = pathsFor();
     const { diagnostics } = collectDiagnostics();
     const upstream = new ControllableUpstream();
@@ -1485,7 +1450,7 @@ describe("Commit 2 corrective round 3 (副指挥 cdd20559 pre-submit) — rollba
       diagnosticsSink: diagnostics,
       backendCapability: TEST_BACKEND_CAP,
     });
-    expect(lifecycle.teardownCoreEnteredCount()).toBe(0);
+    expect((lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue).toBe(0);
     const startP = lifecycle.start();
     await Promise.resolve();
     await Promise.resolve();
@@ -1502,14 +1467,21 @@ describe("Commit 2 corrective round 3 (副指挥 cdd20559 pre-submit) — rollba
     expect(results[2].status).toBe("fulfilled");
     expect(stopP1).toBe(stopP2);
     // EXACT invariants (not `<=1` — really 1):
-    expect(lifecycle.teardownCoreEnteredCount()).toBe(1);
+    expect((lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue).toBe(1);
     expect(upstream.closeCallCount).toBe(1);
     expect(upstream.abortCallCount).toBe(0); // close resolved cleanly → no abort
-    expect(["stopped", "stop_failed"]).toContain(lifecycle.currentState());
+    // 副指挥 13dd3853 E: preflight rejection is the only failure —
+    // ledger stages should ALL be null (close/abort resolved
+    // cleanly), so terminal MUST be `stopped`.
+    expect(lifecycle.currentState()).toBe("stopped");
+    expect(lifecycle.stopFailureLedger().backendStop).toBeNull();
+    expect(lifecycle.stopFailureLedger().tuiStop).toBeNull();
+    expect(lifecycle.stopFailureLedger().upstreamClose).toBeNull();
+    expect(lifecycle.stopFailureLedger().upstreamAbort).toBeNull();
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
   });
 
-  test("active upstream-close cascade × concurrent stop() → teardown core entered EXACTLY 1; close+abort each EXACTLY 1", async () => {
+  test("active upstream-close cascade × concurrent stop() → teardown core entered EXACTLY 1; close EXACTLY 1; abort 0 (clean close)", async () => {
     // Full start (all servers bound + router activated) so
     // `emitClose` triggers the REAL `onUpstreamCloseFromRouter`
     // cascade, not the pre-active fence.
@@ -1517,7 +1489,7 @@ describe("Commit 2 corrective round 3 (副指挥 cdd20559 pre-submit) — rollba
     const h = await makeLifecycleWith(upstream);
     try {
       await h.lifecycle.start();
-      expect(h.lifecycle.teardownCoreEnteredCount()).toBe(0);
+      expect((h.lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue).toBe(0);
       // Fire the active close cascade + two concurrent stops.
       upstream.emitClose();
       const stopP1 = h.lifecycle.stop();
@@ -1525,7 +1497,7 @@ describe("Commit 2 corrective round 3 (副指挥 cdd20559 pre-submit) — rollba
       await Promise.all([stopP1, stopP2]);
       expect(stopP1).toBe(stopP2);
       // EXACT invariants:
-      expect(h.lifecycle.teardownCoreEnteredCount()).toBe(1);
+      expect((h.lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue).toBe(1);
       expect(upstream.closeCallCount).toBe(1);
       expect(upstream.abortCallCount).toBe(0);
       expect(h.lifecycle.currentState()).toBe("stopped");
@@ -1645,10 +1617,9 @@ describe("Commit 2 corrective round 3 P0 — non-stringifiable rejection converg
       await h.lifecycle.stop();
       await new Promise((r) => setTimeout(r, 30));
       expect(unhandled).toBeNull();
-      // Terminal (never `stopping`).
-      expect(["stopped", "stop_failed"]).toContain(h.lifecycle.currentState());
-      // The ledger.upstreamClose slot recorded a synthetic Error
-      // (Object.prototype.toString-derived tag) — never null.
+      // 副指挥 13dd3853 E: close's rejection is real → ledger
+      // slot populated → terminal MUST be `stop_failed`.
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
       expect(h.lifecycle.stopFailureLedger().upstreamClose).not.toBeNull();
     } finally {
       process.off("unhandledRejection", listener);
@@ -1787,9 +1758,9 @@ describe("Commit 2 corrective round 3 P0 — non-stringifiable rejection converg
       await h.lifecycle.stop();
       await new Promise((r) => setTimeout(r, 30));
       expect(unhandled).toBeNull();
-      // Terminal reached — synthetic Error stored (message is the
-      // fixed marker since Object.prototype.toString threw too).
-      expect(["stopped", "stop_failed"]).toContain(h.lifecycle.currentState());
+      // 副指挥 13dd3853 E: Proxy rejection → ledger populated →
+      // terminal MUST be `stop_failed`.
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
       const closeErr = h.lifecycle.stopFailureLedger().upstreamClose;
       expect(closeErr).not.toBeNull();
       expect(closeErr).toBeInstanceOf(Error);
@@ -1826,10 +1797,131 @@ describe("Commit 2 corrective round 3 P0 — non-stringifiable rejection converg
       expect(unhandled).toBeNull();
       // And a follow-up manual stop still resolves cleanly.
       await h.lifecycle.stop();
-      expect(["stopped", "stop_failed"]).toContain(h.lifecycle.currentState());
+      // 副指挥 13dd3853 E: cascade path had both close AND abort
+      // reject → ledger has failures → `stop_failed`.
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailureLedger().upstreamClose).not.toBeNull();
+      expect(h.lifecycle.stopFailureLedger().upstreamAbort).not.toBeNull();
     } finally {
       process.off("unhandledRejection", listener);
       await h.cleanup();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 4 — doStart full-body catch (副指挥 dd12966c runtime blocker)
+//
+// Prior `doStart` only wrapped the four phase awaits + the router
+// subscribe. Synchronous throws during the CONSTRUCTION phase
+// (mux/reverseNs/coordinator/bearer/BackendUdsServer/TuiWsServer/
+// UpstreamRouter constructors) OR from `router.activate()` escaped
+// unhandled, leaving state='starting' with dangling refs.
+//
+// Round-4 wraps the ENTIRE doStart body in a unified try/catch that
+// funnels ANY throw through `rollbackStartFailure()` → the memoised
+// teardown core. These tests prove convergence for a REAL construction
+// throw (backendCapability too short) plus a synthetic
+// router-constructor throw and a synthetic activate throw.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("Commit 2 corrective round 4 — doStart full-body catch converges construction/activate throws", () => {
+  test("backendCapability='short' → BackendUdsServer constructor throws → start rejects; terminal state; no leaks", async () => {
+    const paths = pathsFor();
+    const upstream = new ControllableUpstream();
+    const { diagnostics } = collectDiagnostics();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: "short",
+    });
+    await expect(lifecycle.start()).rejects.toThrow();
+    expect(lifecycle.currentState()).toBe("stopped");
+    expect(lifecycle.stopFailureLedger().backendStop).toBeNull();
+    expect(lifecycle.stopFailureLedger().tuiStop).toBeNull();
+    expect(lifecycle.stopFailureLedger().upstreamClose).toBeNull();
+    expect(lifecycle.stopFailureLedger().upstreamAbort).toBeNull();
+    expect(lifecycle.takeTuiBearerPlaintextForLauncher()).toBeNull();
+    expect(fs.existsSync(paths.backendSocketPath)).toBe(false);
+    const stopP1 = lifecycle.stop();
+    const stopP2 = lifecycle.stop();
+    expect(stopP1).toBe(stopP2);
+    await Promise.all([stopP1, stopP2]);
+    expect(lifecycle.currentState()).toBe("stopped");
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("UpstreamRouter constructor throws (synthetic transport onFrame throw) → start rejects; terminal; no leaks", async () => {
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    class ConstructThrowTransport implements UpstreamTransport {
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(_h: (raw: unknown) => void): () => void {
+        throw new Error("synthetic_router_construction_throw");
+      }
+      onClose(_h: () => void): () => void { return () => {}; }
+      async close(): Promise<void> {}
+      async abort(): Promise<void> {}
+    }
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: new ConstructThrowTransport(),
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    await expect(lifecycle.start()).rejects.toThrow(/synthetic_router_construction_throw/);
+    expect(lifecycle.currentState()).toBe("stopped");
+    expect(lifecycle.takeTuiBearerPlaintextForLauncher()).toBeNull();
+    expect(fs.existsSync(paths.backendSocketPath)).toBe(false);
+    const stopP = lifecycle.stop();
+    expect(stopP).toBe(lifecycle.stop());
+    await stopP;
+    expect(lifecycle.currentState()).toBe("stopped");
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("router.activate() throws (synthetic) → start rejects; terminal; teardown core entered exactly 1; no leaks", async () => {
+    const paths = pathsFor();
+    const upstream = new ControllableUpstream();
+    const { diagnostics } = collectDiagnostics();
+    let preflightSettle: (v: void) => void = () => {};
+    const preflightP = new Promise<void>((res) => { preflightSettle = res; });
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { run: () => preflightP },
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    const startP = lifecycle.start();
+    await Promise.resolve(); await Promise.resolve();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const router = (lifecycle as unknown as any).upstreamRouter as { activate: () => void } | null;
+    if (router !== null) {
+      router.activate = () => { throw new Error("synthetic_activate_throw"); };
+    }
+    preflightSettle();
+    let rejectMsg = "";
+    try { await startP; } catch (e) { rejectMsg = (e as Error).message; }
+    expect(rejectMsg).toMatch(/synthetic_activate_throw/);
+    // Terminal reached; socket cleaned up by the async rollback.
+    expect(["stopped", "stop_failed"]).toContain(lifecycle.currentState());
+    expect(fs.existsSync(paths.backendSocketPath)).toBe(false);
+    expect(
+      (lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue,
+    ).toBe(1);
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
   });
 });
