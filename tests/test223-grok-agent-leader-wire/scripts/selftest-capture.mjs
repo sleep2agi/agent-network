@@ -14,8 +14,7 @@ let syntheticMonoNs = 0n;
 const recorder = new ByteRecorder(output, "harness-canary", {
   pid: 4242,
   generation: 1,
-  metadata_unknown: "CAPTURE_METADATA_CANARY_UNKNOWN",
-  leader: { pid: 5151, socketDevice: "8", socketInode: "223" },
+  leader: { pid: 5151 },
 }, {
   now: () => {
     const value = syntheticMonoNs;
@@ -152,18 +151,8 @@ try {
           unicodePath: "/工作区/秘密/另一个文件.txt",
           logs: ["free-form log entry"],
           history: [{ message: "free-form history entry" }],
-          field_name: "CAPTURE_FIELD_NAME_CANARY_UNKNOWN",
         },
       },
-    }),
-  });
-  const unknownMethodAcp = nativeFrame({
-    type: "acp",
-    payload: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "external-id",
-      method: "method/unknown",
-      params: {},
     }),
   });
   const ping = nativeFrame({ type: "ping", nonce: "safe-nonce" });
@@ -185,7 +174,7 @@ try {
     stream: "socket",
     direction: "tui_to_gateway",
     boundary: "read",
-    bytes: Buffer.concat([register.subarray(3), acp, unknownMethodAcp, ping]),
+    bytes: Buffer.concat([register.subarray(3), acp, ping]),
   });
   recorder.record({
     role: "synthetic-tui",

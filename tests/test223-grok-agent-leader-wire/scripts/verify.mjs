@@ -3,26 +3,105 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  candidateSelectorSha256,
+  liveBindingFor,
+  loadLiveExactPolicy,
+} from "../lib/live-exact-policy.mjs";
 
 const [root, suiteRoot] = process.argv.slice(2);
 if (!root) throw new Error("usage: verify.mjs ARTIFACT_DIR [SUITE_DIR]");
 const protocolAllowlistPath = new URL("../protocol-allowlist.json", import.meta.url);
 const protocolAllowlist = JSON.parse(readFileSync(protocolAllowlistPath, "utf8"));
-if (protocolAllowlist.schema !== "test223-protocol-allowlist/v1") {
+if (protocolAllowlist.schema !== "test223-protocol-allowlist/v2") {
   throw new Error("unsupported protocol allowlist schema");
 }
 const allowedMethods = new Set(protocolAllowlist.methods);
+const fixtureCaptures = new Map(Object.entries(protocolAllowlist.fixtureCaptures || {}));
+if (fixtureCaptures.size === 0
+  || [...fixtureCaptures.keys()].some((stem) => !/^[a-z0-9-]+$/.test(stem))
+  || [...fixtureCaptures.values()].some((capture) => typeof capture !== "string")) {
+  throw new Error("fixture capture policy is incomplete");
+}
 const allowedJsonFields = new Set(protocolAllowlist.jsonFields);
 const allowedMetadataKeys = new Set(protocolAllowlist.metadata.keys);
 const exactMetadataValues = new Map(
   Object.entries(protocolAllowlist.metadata.values).map(([key, values]) => [key, new Set(values)]),
 );
+const reviewedCaptureValues = exactMetadataValues.get("capture");
+if (!reviewedCaptureValues
+  || [...fixtureCaptures.values()].some((capture) => !reviewedCaptureValues.has(capture))
+  || new Set(fixtureCaptures.values()).size !== fixtureCaptures.size
+  || reviewedCaptureValues.size !== fixtureCaptures.size) {
+  throw new Error("fixture capture policy differs from reviewed metadata values");
+}
 const requiredEnumValues = new Map(
   Object.entries(protocolAllowlist.enums).map(([key, values]) => [key, new Set(values)]),
 );
 const correlationLabelsByKey = new Map(Object.entries(protocolAllowlist.correlations.keys));
 const jsonRpcIdLabel = protocolAllowlist.correlations.jsonRpcIdLabel;
 const exactChildEnvKeys = [...protocolAllowlist.childEnv.exactKeys].sort();
+const livePathPolicy = protocolAllowlist.livePathPolicy;
+if (!livePathPolicy?.nativeOuterByType || !livePathPolicy?.rpcByMethod
+  || !livePathPolicy?.rpcResponseByMethod
+  || !Array.isArray(livePathPolicy.rpcCommon)
+  || !Array.isArray(livePathPolicy.rpcResponseCommon)) {
+  throw new Error("live path policy is incomplete");
+}
+const policySuiteRoot = suiteRoot || fileURLToPath(new URL("../", import.meta.url));
+const livePolicyState = loadLiveExactPolicy({
+  suiteRoot: policySuiteRoot,
+  protocolAllowlist,
+});
+const liveExactShapePolicy = livePolicyState.policy;
+function assertLiveFixtureBinding(stem, capture) {
+  if (capture === "harness-canary") return undefined;
+  return liveBindingFor(livePolicyState, stem, capture);
+}
+const exactLiveTransports = new Set(["leader-native-ipc", "acp-stdio"]);
+const exactOpaqueKeys = new Set(liveExactShapePolicy.opaqueSubtreeKeys);
+const exactOpaqueStructuralKeys = new Set(liveExactShapePolicy.opaqueStructuralKeys);
+const exactScalarPaths = new Set(liveExactShapePolicy.selectors
+  .flatMap((entry) => entry.shapes || [])
+  .flatMap((shape) => shape.enums || [])
+  .map((entry) => entry.path));
+const exactShapesBySelector = new Map();
+const selectorKey = (selector) => JSON.stringify({
+  transport: selector.transport,
+  outerType: selector.outerType,
+  messageKind: selector.messageKind,
+  ...(selector.method === undefined ? {} : { method: selector.method }),
+});
+for (const entry of liveExactShapePolicy.selectors) {
+  const key = selectorKey(entry.selector || {});
+  if (exactShapesBySelector.has(key) || !Array.isArray(entry.shapes) || entry.shapes.length === 0) {
+    throw new Error("live exact shape selector is duplicated or empty");
+  }
+  exactShapesBySelector.set(key, entry.shapes);
+}
+const policyIpc = protocolAllowlist.policyIpc;
+if (policyIpc?.transport !== "test-policy-ipc"
+  || policyIpc?.framing !== "newline-delimited-json"
+  || !policyIpc.messageFields
+  || !Array.isArray(policyIpc.scenarios)
+  || !Array.isArray(policyIpc.actions)
+  || !Array.isArray(policyIpc.decisions)
+  || !Array.isArray(policyIpc.requestRefFields)
+  || !Array.isArray(policyIpc.requestRefConnections)
+  || !Array.isArray(policyIpc.controlConnections)
+  || !Array.isArray(policyIpc.leaderResponseDeltas)) {
+  throw new Error("policy IPC schema is incomplete");
+}
+const policyMessageFields = new Map(Object.entries(policyIpc.messageFields)
+  .map(([type, fields]) => [type, new Set(fields)]));
+const policyScenarios = new Set(policyIpc.scenarios);
+const policyActions = new Set(policyIpc.actions);
+const policyDecisions = new Set(policyIpc.decisions);
+const policyRequestRefFields = new Set(policyIpc.requestRefFields);
+const policyRequestRefConnections = new Set(policyIpc.requestRefConnections);
+const policyControlConnections = new Set(policyIpc.controlConnections);
+const policyLeaderResponseDeltas = new Set(policyIpc.leaderResponseDeltas);
 
 function forbiddenChildEnvKey(key) {
   return protocolAllowlist.childEnv.forbiddenExact.includes(key)
@@ -52,9 +131,9 @@ function scan(label, text) {
 const structuredKinds = new Map(Object.entries({
   accesstoken: "TOKEN", refreshtoken: "TOKEN", token: "TOKEN", secret: "SECRET",
   authorization: "BEARER", serverkey: "SECRET", account: "ACCOUNT", email: "ACCOUNT",
-  username: "ACCOUNT_ID", cwd: "PATH", path: "PATH", filepath: "PATH",
+  username: "ACCOUNT_ID", clienttype: "CLIENT_TYPE", cwd: "PATH", path: "PATH", filepath: "PATH",
   currentworkingdirectory: "PATH", gitroot: "PATH", command: "COMMAND",
-  arguments: "BODY", args: "BODY", argv: "COMMAND", commandline: "COMMAND",
+  arguments: "BODY", argumentsdelta: "BODY", args: "BODY", argv: "COMMAND",
   executable: "COMMAND", slashcommand: "COMMAND", toolresult: "BODY",
   availablecommands: "COMMAND", clientcommands: "COMMAND", body: "BODY",
   user: "ACCOUNT", input: "BODY", output: "BODY", password: "TOKEN", apikey: "TOKEN",
@@ -130,6 +209,349 @@ function verifyCorrelationLedger(ledger, label = "projection") {
   }
 }
 
+function requirePolicyExactKeys(value, expected, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const actual = Object.keys(value).sort();
+  const reviewed = [...expected].sort();
+  if (JSON.stringify(actual) !== JSON.stringify(reviewed)) {
+    throw new Error(`${label} fields are outside reviewed exact schema`);
+  }
+}
+
+function verifyPolicyRequestRef(value, label) {
+  requirePolicyExactKeys(value, policyRequestRefFields, label);
+  if (typeof value.connection !== "string"
+    || !policyRequestRefConnections.has(value.connection)) {
+    throw new Error(`${label}.connection is outside reviewed exact set`);
+  }
+  if (!Number.isSafeInteger(value.permissionOrdinal) || value.permissionOrdinal <= 0) {
+    throw new Error(`${label}.permissionOrdinal must be a positive safe integer`);
+  }
+}
+
+function verifyPolicyMessage(message, label) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    throw new Error(`${label} must be an object`);
+  }
+  if (typeof message.type !== "string" || !policyMessageFields.has(message.type)) {
+    throw new Error(`${label}.type is outside reviewed exact set`);
+  }
+  requirePolicyExactKeys(message, policyMessageFields.get(message.type), label);
+  if (typeof message.scenario !== "string" || !policyScenarios.has(message.scenario)) {
+    throw new Error(`${label}.scenario is outside reviewed exact set`);
+  }
+  if (message.type === "open") return;
+  if (!Number.isSafeInteger(message.generation) || message.generation <= 0) {
+    throw new Error(`${label}.generation must be a positive safe integer`);
+  }
+  if (message.type === "bind") {
+    verifyPolicyRequestRef(message.ownerRef, `${label}.ownerRef`);
+    verifyPolicyRequestRef(message.passiveRef, `${label}.passiveRef`);
+    const expectedOwnerConnection = message.scenario === "primary"
+      ? "policy-owner-acp-1"
+      : "disconnect-owner-acp-1";
+    if (message.ownerRef.connection !== expectedOwnerConnection
+      || message.passiveRef.connection !== "passive-acp-1") {
+      throw new Error(`${label}: request refs do not match the reviewed scenario topology`);
+    }
+    return;
+  }
+  verifyPolicyRequestRef(message.requestRef, `${label}.requestRef`);
+  if (message.type === "candidate"
+    && (typeof message.action !== "string" || !policyActions.has(message.action))) {
+    throw new Error(`${label}.action is outside reviewed exact set`);
+  }
+  if (message.type === "decision"
+    && (typeof message.decision !== "string" || !policyDecisions.has(message.decision))) {
+    throw new Error(`${label}.decision is outside reviewed exact set`);
+  }
+  if (message.type === "window_close"
+    && (!Number.isSafeInteger(message.leaderResponseDelta)
+      || !policyLeaderResponseDeltas.has(message.leaderResponseDelta))) {
+    throw new Error(`${label}.leaderResponseDelta is outside reviewed exact set`);
+  }
+}
+
+function verifyPolicyProjectionRow(row, label) {
+  if (row.parseStatus === "clean_eof") {
+    if (row.framing !== "transport_eof"
+      || Object.prototype.hasOwnProperty.call(row, "payload")
+      || !Array.isArray(row.recordSeqs)
+      || row.recordSeqs.length === 0) {
+      throw new Error(`${label}: malformed policy clean EOF projection`);
+    }
+    return;
+  }
+  if (row.parseStatus !== "complete_policy_json"
+    || row.framing !== "newline"
+    || !Array.isArray(row.recordSeqs)
+    || row.recordSeqs.length === 0) {
+    throw new Error(`${label}: policy projection is not a complete JSONL message`);
+  }
+  verifyPolicyMessage(row.payload, `${label}.payload`);
+}
+
+for (const [label, mutation] of [
+  ["source_field", { type: "open", scenario: "primary", source: "forged" }],
+  ["role_field", { type: "open", scenario: "primary", role: "owner" }],
+  ["scenario", { type: "open", scenario: "private" }],
+  ["ref_field", {
+    type: "candidate",
+    scenario: "primary",
+    requestRef: { connection: "policy-owner-acp-1", permissionOrdinal: 1, source: "x" },
+    generation: 1,
+    action: "reject_once",
+  }],
+  ["ref_control_connection", {
+    type: "candidate",
+    scenario: "primary",
+    requestRef: { connection: "policy-owner-control-1", permissionOrdinal: 1 },
+    generation: 1,
+    action: "reject_once",
+  }],
+  ["ordinal", {
+    type: "candidate",
+    scenario: "primary",
+    requestRef: { connection: "policy-owner-acp-1", permissionOrdinal: 0 },
+    generation: 1,
+    action: "reject_once",
+  }],
+  ["generation", {
+    type: "candidate",
+    scenario: "primary",
+    requestRef: { connection: "policy-owner-acp-1", permissionOrdinal: 1 },
+    generation: 0,
+    action: "reject_once",
+  }],
+  ["action", {
+    type: "candidate",
+    scenario: "primary",
+    requestRef: { connection: "policy-owner-acp-1", permissionOrdinal: 1 },
+    generation: 1,
+    action: "allow_once",
+  }],
+  ["decision", {
+    type: "decision",
+    scenario: "primary",
+    requestRef: { connection: "policy-owner-acp-1", permissionOrdinal: 1 },
+    generation: 1,
+    decision: "forward_anyway",
+  }],
+  ["window_delta", {
+    type: "window_close",
+    scenario: "primary",
+    generation: 1,
+    requestRef: { connection: "policy-owner-acp-1", permissionOrdinal: 1 },
+    leaderResponseDelta: 2,
+  }],
+]) {
+  let turnedRed = false;
+  try {
+    verifyPolicyMessage(mutation, `mutation.policy.${label}`);
+  } catch {
+    turnedRed = true;
+  }
+  if (!turnedRed) throw new Error(`policy mutation did not turn red: ${label}`);
+}
+
+function pathAllowed(path, reviewedPaths) {
+  if (reviewedPaths.has(path)) return true;
+  const objectPrefix = `${path}.`;
+  const arrayPrefix = `${path}[]`;
+  return [...reviewedPaths].some((candidate) =>
+    candidate.startsWith(objectPrefix) || candidate.startsWith(arrayPrefix));
+}
+
+function verifyExactPaths(value, reviewedPaths, path = "", label = "payload") {
+  if (Array.isArray(value)) {
+    const itemPath = `${path}[]`;
+    if (!pathAllowed(itemPath, reviewedPaths)) {
+      throw new Error(`${label}.${itemPath}: array path is outside reviewed live schema`);
+    }
+    value.forEach((child) => verifyExactPaths(child, reviewedPaths, itemPath, label));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = path ? `${path}.${key}` : key;
+    if (!pathAllowed(childPath, reviewedPaths)) {
+      throw new Error(`${label}.${childPath}: field path is outside reviewed live schema`);
+    }
+    verifyExactPaths(child, reviewedPaths, childPath, label);
+  }
+}
+
+function verifyLiveOuterShape(outer, label) {
+  if (!outer || typeof outer !== "object" || Array.isArray(outer)) return;
+  const paths = livePathPolicy.nativeOuterByType[outer.type];
+  if (!Array.isArray(paths)) throw new Error(`${label}: native outer type is outside reviewed set`);
+  verifyExactPaths(outer, new Set(paths), "", label);
+}
+
+function typedId(value) {
+  return `${typeof value}:${String(value)}`;
+}
+
+function sourceSide(direction) {
+  const clientSource = new Set([
+    "acp-submitter_to_gateway", "client_to_gateway", "client_to_grok", "client_to_serve",
+    "gateway_to_leader", "gateway_to_tap", "real-tui_to_gateway", "tap_to_real_leader",
+    "tui_to_gateway",
+  ]);
+  const serverSource = new Set([
+    "gateway_to_acp-submitter", "gateway_to_client", "gateway_to_real-tui", "gateway_to_tui",
+    "grok_to_client", "leader_to_gateway", "real_leader_to_tap", "serve_to_client",
+    "tap_to_gateway",
+  ]);
+  if (clientSource.has(direction)) return "client";
+  if (serverSource.has(direction)) return "server";
+  return undefined;
+}
+
+function exactJsonType(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value === "object" ? "object" : typeof value;
+}
+
+function canonicalExactPaths(paths) {
+  return JSON.stringify([...paths]
+    .map(({ path, type }) => ({ path, type }))
+    .sort((left, right) => left.path.localeCompare(right.path)
+      || left.type.localeCompare(right.type)));
+}
+
+function canonicalExactScalars(entries) {
+  return JSON.stringify([...entries]
+    .map(({ path, values }) => ({
+      path,
+      values: [...values]
+        .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path)));
+}
+
+function persistedExactShape(outer, rpc) {
+  const paths = new Map();
+  const scalars = new Map();
+  const record = (value, path) => {
+    const type = exactJsonType(value);
+    if (!["array", "boolean", "null", "number", "object", "string"].includes(type)) {
+      throw new Error(`persisted live value has unsupported type: ${path}`);
+    }
+    if (!paths.has(path)) paths.set(path, new Set());
+    paths.get(path).add(type);
+    if (["string", "number", "boolean"].includes(type) && exactScalarPaths.has(path)) {
+      if (!scalars.has(path)) scalars.set(path, new Set());
+      scalars.get(path).add(value);
+    }
+    return type;
+  };
+  const visit = (value, path, key, opaque = false) => {
+    const type = record(value, path);
+    const childOpaque = opaque || exactOpaqueKeys.has(key);
+    if (type === "array") {
+      value.forEach((child) => visit(child, `${path}[]`, undefined, childOpaque));
+      return;
+    }
+    if (type !== "object") return;
+    for (const childKey of Object.keys(value).sort()) {
+      if (childOpaque && !exactOpaqueStructuralKeys.has(childKey)) continue;
+      visit(value[childKey], `${path}.${childKey}`, childKey, childOpaque);
+    }
+  };
+  if (outer !== undefined) visit(outer, "$outer", undefined);
+  if (rpc !== undefined) visit(rpc, "$rpc", undefined);
+  return {
+    paths: [...paths]
+      .flatMap(([path, types]) => [...types].map((type) => ({ path, type }))),
+    enums: [...scalars]
+      .map(([path, values]) => ({ path, values: [...values] })),
+  };
+}
+
+function verifyExactLiveMessage({
+  outer,
+  rpc,
+  transport,
+  direction,
+  responseMethod,
+  fixtureBinding,
+  label,
+}) {
+  if (!exactLiveTransports.has(transport)) return;
+  let messageKind;
+  let method;
+  if (rpc === undefined) {
+    messageKind = "outer-message";
+  } else if (typeof rpc?.method === "string") {
+    messageKind = Object.prototype.hasOwnProperty.call(rpc, "id")
+      ? "request"
+      : "notification";
+    method = rpc.method;
+  } else if (rpc && typeof rpc === "object" && !Array.isArray(rpc)
+    && Object.prototype.hasOwnProperty.call(rpc, "id")
+    && (Object.prototype.hasOwnProperty.call(rpc, "result")
+      || Object.prototype.hasOwnProperty.call(rpc, "error"))) {
+    messageKind = "response";
+    method = responseMethod;
+  } else {
+    throw new Error(`${label}: live message is not a reviewed RPC/outer shape`);
+  }
+  if (messageKind !== "outer-message" && typeof method !== "string") {
+    throw new Error(`${label}: live response lacks exact request correlation`);
+  }
+  const selector = {
+    transport,
+    outerType: outer === undefined ? "not-applicable" : outer?.type,
+    messageKind,
+    ...(method === undefined ? {} : { method }),
+  };
+  if (livePolicyState.mode === "candidate") {
+    if (!fixtureBinding?.allowedSelectorSha256.includes(candidateSelectorSha256({
+      ...selector,
+      direction,
+    }))) {
+      throw new Error(`${label}: selector is outside capture-scoped candidate seed`);
+    }
+  }
+  const candidates = exactShapesBySelector.get(selectorKey(selector));
+  if (!candidates) throw new Error(`${label}: selector is outside exact live policy`);
+  const observed = persistedExactShape(outer, rpc);
+  const observedPaths = canonicalExactPaths(observed.paths);
+  const observedScalars = canonicalExactScalars(observed.enums);
+  const matched = candidates.some((candidate) =>
+    canonicalExactPaths(candidate.paths || []) === observedPaths
+    && canonicalExactScalars(candidate.enums || []) === observedScalars);
+  if (!matched) throw new Error(`${label}: shape/scalar is outside exact live policy`);
+}
+
+function verifyLiveRpcShape(message, label, responseMethod) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) return;
+  let paths;
+  if (typeof message.method === "string") {
+    if (!allowedMethods.has(message.method)) {
+      throw new Error(`${label}: method is outside reviewed exact set`);
+    }
+    paths = new Set([
+      ...livePathPolicy.rpcCommon,
+      ...(livePathPolicy.rpcByMethod[message.method] || []),
+    ]);
+  } else if (Object.prototype.hasOwnProperty.call(message, "result")
+    || Object.prototype.hasOwnProperty.call(message, "error")) {
+    const methodPaths = livePathPolicy.rpcResponseByMethod[responseMethod];
+    if (!Array.isArray(methodPaths)) {
+      throw new Error(`${label}: response method has no reviewed exact schema`);
+    }
+    paths = new Set([...livePathPolicy.rpcResponseCommon, ...methodPaths]);
+  } else {
+    throw new Error(`${label}: JSON-RPC shape has neither reviewed method nor response`);
+  }
+  verifyExactPaths(message, paths, "", label);
+}
+
 function verifyStructuredProjection(
   value,
   path = "payload",
@@ -137,6 +559,7 @@ function verifyStructuredProjection(
   key,
   correlationNamespace = "isolated",
   correlationLedger = new Map(),
+  exactPath,
 ) {
   if (typeof value === "string") {
     if (inheritedKind) {
@@ -145,11 +568,16 @@ function verifyStructuredProjection(
       }
       return;
     }
+    if (exactPath && exactScalarPaths.has(exactPath)) return;
     if (key === "jsonrpc" && value === "2.0") return;
-    if (key === "method"
-      && (allowedMethods.has(value) || /^<METHOD_\d+>$/.test(value))) return;
-    if (requiredEnumValues.has(key)
-      && (requiredEnumValues.get(key).has(value) || /^<STRING_\d+>$/.test(value))) return;
+    if (key === "method") {
+      if (allowedMethods.has(value)) return;
+      throw new Error(`${path}: method is outside reviewed exact set`);
+    }
+    if (requiredEnumValues.has(key)) {
+      if (requiredEnumValues.get(key).has(value)) return;
+      throw new Error(`${path}: enum value is outside reviewed exact set`);
+    }
     if (!/^<STRING_\d+>$/.test(value)) throw new Error(`${path}: unknown string was not omitted`);
     return;
   }
@@ -161,14 +589,17 @@ function verifyStructuredProjection(
       undefined,
       correlationNamespace,
       correlationLedger,
+      exactPath ? `${exactPath}[]` : undefined,
     ));
     return;
   }
   if (typeof value === "number") {
+    if (exactPath && exactScalarPaths.has(exactPath)) return;
     if (value !== 0) throw new Error(`${path}: non-correlation number was not normalized`);
     return;
   }
   if (typeof value === "boolean") {
+    if (exactPath && exactScalarPaths.has(exactPath)) return;
     if (value !== false) throw new Error(`${path}: boolean was not normalized`);
     return;
   }
@@ -193,6 +624,7 @@ function verifyStructuredProjection(
         undefined,
         correlationNamespace,
         correlationLedger,
+        "$rpc",
       );
       continue;
     }
@@ -223,6 +655,7 @@ function verifyStructuredProjection(
       key,
       correlationNamespace,
       correlationLedger,
+      exactPath ? `${exactPath}.${key}` : undefined,
     );
   }
 }
@@ -307,6 +740,17 @@ function verifyByteRecordMetadata(record, path) {
     || JSON.stringify(record.leader) !== JSON.stringify({ pid: 0 }))) {
     throw new Error(`${path}.leader: expected only normalized reviewed pid metadata`);
   }
+  if (record.transport === policyIpc.transport) {
+    if (!policyControlConnections.has(record.connection)
+      || record.stream !== "socket"
+      || (record.direction !== "candidate_to_gateway"
+        && record.direction !== "gateway_to_candidate")
+      || (record.role !== "policy-admission-gateway"
+        && record.role !== "policy-candidate-driver")
+      || record.sanitization !== "policy-exact-schema-v1") {
+      throw new Error(`${path}: policy IPC metadata does not match reviewed topology`);
+    }
+  }
 }
 
 let metadataMutationTurnedRed = false;
@@ -317,6 +761,23 @@ try {
 }
 if (!metadataMutationTurnedRed) {
   throw new Error("protocol mutation did not turn red: metadata_unknown");
+}
+let policyMetadataLaneMutationTurnedRed = false;
+try {
+  verifyByteRecordMetadata({
+    monoNs: "0",
+    transport: "test-policy-ipc",
+    connection: "policy-owner-acp-1",
+    stream: "socket",
+    direction: "candidate_to_gateway",
+    role: "policy-candidate-driver",
+    sanitization: "policy-exact-schema-v1",
+  }, "mutation.policy_metadata_uses_permission_lane");
+} catch {
+  policyMetadataLaneMutationTurnedRed = true;
+}
+if (!policyMetadataLaneMutationTurnedRed) {
+  throw new Error("policy metadata permission-lane mutation did not turn red");
 }
 
 const files = readdirSync(root).filter((name) => statSync(join(root, name)).isFile()).sort();
@@ -339,6 +800,8 @@ if (byteFiles.length > 0 || projectionFiles.length > 0) {
   const freshRoot = mkdtempSync(join(tmpdir(), "test223-project-"));
   try {
     for (const stem of [...byteStems].sort()) {
+      const expectedCapture = fixtureCaptures.get(stem);
+      if (!expectedCapture) throw new Error(`fixture stem has no reviewed capture binding: ${stem}`);
       const freshPath = join(freshRoot, `${stem}.projection.ndjson`);
       execFileSync(process.execPath, [
         projectPath,
@@ -360,10 +823,17 @@ for (const name of files) {
   const text = readFileSync(path, "utf8");
   scan(name, text);
   if (!name.endsWith(".bytes.ndjson")) continue;
+  const stem = name.slice(0, -".bytes.ndjson".length);
+  const expectedCapture = fixtureCaptures.get(stem);
+  if (!expectedCapture) throw new Error(`fixture stem has no reviewed capture binding: ${stem}`);
+  assertLiveFixtureBinding(stem, expectedCapture);
   const records = text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
   let previousSeq = 0;
   for (const record of records) {
     verifyByteRecordMetadata(record, `${name}[seq=${record.seq}]`);
+    if (record.capture !== expectedCapture) {
+      throw new Error(`${name}: capture differs from reviewed fixture binding`);
+    }
     if (record.schema !== "grok-wire-byte-record/v1") throw new Error(`${name}: bad schema`);
     if (!Number.isInteger(record.seq) || record.seq <= previousSeq) throw new Error(`${name}: seq order`);
     previousSeq = record.seq;
@@ -377,9 +847,55 @@ for (const name of files) {
 
 const projectionCorrelationLedger = new Map();
 for (const name of files.filter((entry) => entry.endsWith(".projection.ndjson"))) {
+  const stem = name.slice(0, -".projection.ndjson".length);
+  const expectedCapture = fixtureCaptures.get(stem);
+  if (!expectedCapture) throw new Error(`fixture stem has no reviewed capture binding: ${stem}`);
+  const fixtureBinding = assertLiveFixtureBinding(stem, expectedCapture);
   const rows = readFileSync(join(root, name), "utf8")
     .split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const requestMethods = new Map();
+  for (const row of rows) {
+    if (row.capture !== expectedCapture) {
+      throw new Error(`${name}: capture differs from reviewed fixture binding`);
+    }
+    const message = row.transport === "leader-native-ipc" ? row.inner : row.payload;
+    if (typeof message?.method === "string" && !allowedMethods.has(message.method)) {
+      throw new Error(`${name}: method is outside reviewed exact set`);
+    }
+    if (row.capture === "harness-canary") continue;
+    if (!message || typeof message.method !== "string"
+      || !Object.prototype.hasOwnProperty.call(message, "id")) continue;
+    const side = sourceSide(row.direction);
+    if (!side) continue;
+    const key = [row.capture, row.connection, side, typedId(message.id)].join("\u0000");
+    if (!requestMethods.has(key)) requestMethods.set(key, new Set());
+    requestMethods.get(key).add(message.method);
+  }
+  const responseMethod = (row, message) => {
+    if (typeof message?.method === "string") return undefined;
+    if (!message || (!Object.prototype.hasOwnProperty.call(message, "result")
+      && !Object.prototype.hasOwnProperty.call(message, "error"))) return undefined;
+    const side = sourceSide(row.direction);
+    if (!side || !Object.prototype.hasOwnProperty.call(message, "id")) return undefined;
+    const requestSide = side === "client" ? "server" : "client";
+    const methods = requestMethods.get([
+      row.capture,
+      row.connection,
+      requestSide,
+      typedId(message.id),
+    ].join("\u0000"));
+    if (!methods || methods.size !== 1) return undefined;
+    return [...methods][0];
+  };
   for (const [index, row] of rows.entries()) {
+    if (row.capture !== "harness-canary"
+      && ["invalid_native_json", "invalid_inner_acp_payload"].includes(row.parseStatus)) {
+      throw new Error(`${name}[${index}]: live complete frame was persisted as opaque/invalid`);
+    }
+    if (row.transport === policyIpc.transport) {
+      verifyPolicyProjectionRow(row, `${name}[${index}]`);
+      continue;
+    }
     const namespace = `${row.capture}:${row.connection}`;
     if (row.outer?.type === "acp" && row.inner) {
       const parsedOuterPayload = typeof row.outer.payload === "string"
@@ -389,6 +905,27 @@ for (const name of files.filter((entry) => entry.endsWith(".projection.ndjson"))
         throw new Error(`${name}[${index}]: native outer payload and inner projection differ`);
       }
     }
+    if (row.capture !== "harness-canary" && row.outer) {
+      verifyExactLiveMessage({
+        outer: row.outer,
+        rpc: row.inner,
+        transport: row.transport,
+        direction: row.direction,
+        responseMethod: responseMethod(row, row.inner),
+        fixtureBinding,
+        label: `${name}[${index}]`,
+      });
+    } else if (row.capture !== "harness-canary" && row.payload
+      && row.transport === "acp-stdio") {
+      verifyExactLiveMessage({
+        rpc: row.payload,
+        transport: row.transport,
+        direction: row.direction,
+        responseMethod: responseMethod(row, row.payload),
+        fixtureBinding,
+        label: `${name}[${index}]`,
+      });
+    }
     if (row.outer) verifyStructuredProjection(
       row.outer,
       `${name}[${index}].outer`,
@@ -396,7 +933,14 @@ for (const name of files.filter((entry) => entry.endsWith(".projection.ndjson"))
       undefined,
       namespace,
       projectionCorrelationLedger,
+      row.capture !== "harness-canary" && exactLiveTransports.has(row.transport)
+        ? "$outer"
+        : undefined,
     );
+    if (row.capture !== "harness-canary" && row.outer
+      && !exactLiveTransports.has(row.transport)) {
+      verifyLiveOuterShape(row.outer, `${name}[${index}].outer`);
+    }
     if (row.inner) verifyStructuredProjection(
       row.inner,
       `${name}[${index}].inner`,
@@ -404,7 +948,18 @@ for (const name of files.filter((entry) => entry.endsWith(".projection.ndjson"))
       undefined,
       namespace,
       projectionCorrelationLedger,
+      row.capture !== "harness-canary" && exactLiveTransports.has(row.transport)
+        ? "$rpc"
+        : undefined,
     );
+    if (row.capture !== "harness-canary" && row.inner
+      && !exactLiveTransports.has(row.transport)) {
+      verifyLiveRpcShape(
+        row.inner,
+        `${name}[${index}].inner`,
+        responseMethod(row, row.inner),
+      );
+    }
     if (row.payload) verifyStructuredProjection(
       row.payload,
       `${name}[${index}].payload`,
@@ -412,7 +967,18 @@ for (const name of files.filter((entry) => entry.endsWith(".projection.ndjson"))
       undefined,
       namespace,
       projectionCorrelationLedger,
+      row.capture !== "harness-canary" && exactLiveTransports.has(row.transport)
+        ? "$rpc"
+        : undefined,
     );
+    if (row.capture !== "harness-canary" && row.payload
+      && !exactLiveTransports.has(row.transport)) {
+      verifyLiveRpcShape(
+        row.payload,
+        `${name}[${index}].payload`,
+        responseMethod(row, row.payload),
+      );
+    }
   }
 }
 verifyCorrelationLedger(projectionCorrelationLedger);
@@ -445,6 +1011,34 @@ if (files.includes("manifest.json")) {
   ]);
   if (manifest.protocolFreeze !== false || !allowedOwnerStatuses.has(manifest.status)) {
     throw new Error("owner-produced manifest must remain unfrozen and review-pending");
+  }
+  const expectedLiveExactPolicy = {
+    mode: livePolicyState.mode,
+    status: livePolicyState.status,
+    policySha256: livePolicyState.policySha256,
+    selectorSeedSha256: livePolicyState.selectorSeedSha256 ?? null,
+    acceptedIndexSha256: livePolicyState.acceptedIndexSha256,
+    acceptedShapesSha256: livePolicyState.acceptedShapesSha256,
+  };
+  if (JSON.stringify(manifest.liveExactPolicy) !== JSON.stringify(expectedLiveExactPolicy)) {
+    throw new Error("manifest live exact policy is not externally bound");
+  }
+  const derivedCaptureProfile = {
+    liveNative: files.includes("leader-native-tui.summary.json"),
+    frameAware: files.includes("frame-aware-admission.summary.json"),
+    approvalOwner: files.includes("live-approval-owner-matrix.summary.json"),
+    exactTransport: files.includes("transport-exact-one-byte.summary.json"),
+  };
+  derivedCaptureProfile.fullPhase0 = Object.values(derivedCaptureProfile).every(Boolean);
+  if (JSON.stringify(manifest.captureProfile) !== JSON.stringify(derivedCaptureProfile)) {
+    throw new Error("manifest capture profile is not artifact-derived");
+  }
+  if (manifest.status === "harness_selftest_only" && derivedCaptureProfile.liveNative) {
+    throw new Error("synthetic manifest cannot contain a live capture profile");
+  }
+  if (manifest.status === "owner_live_native_capture_pending_independent_review"
+    && !derivedCaptureProfile.liveNative) {
+    throw new Error("live manifest must contain the native capture profile");
   }
   const protocolAllowlistSha256 = createHash("sha256")
     .update(readFileSync(protocolAllowlistPath))
@@ -645,11 +1239,6 @@ if (canaryBytes && canaryProjection) {
   }
   if (Object.prototype.hasOwnProperty.call(structural, "field_name")) {
     throw new Error("unknown structured JSON field name was not omitted");
-  }
-  const unknownMethod = native.find((frame) => frame.outer?.type === "acp"
-    && /^<METHOD_\d+>$/.test(frame.inner?.method || ""));
-  if (!unknownMethod || !/^<JSONRPC_ID_\d+>$/.test(unknownMethod.inner?.id || "")) {
-    throw new Error("unknown method/string JSON-RPC correlation probe was not normalized");
   }
   const splitNative = native.find((frame) => frame.outer?.type === "register");
   if (!splitNative || splitNative.recordSeqs.length !== 2) {

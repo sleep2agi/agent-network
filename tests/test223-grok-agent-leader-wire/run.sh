@@ -11,18 +11,43 @@ RAW_FIXTURES=(harness-canary.raw.ndjson)
 RUN_LIVE_NATIVE="${RUN_LIVE_NATIVE:-0}"
 RUN_LIVE_FRAME_AWARE="${RUN_LIVE_FRAME_AWARE:-0}"
 RUN_LIVE_APPROVAL_OWNER="${RUN_LIVE_APPROVAL_OWNER:-0}"
+RUN_LIVE_EXACT_TRANSPORT="${RUN_LIVE_EXACT_TRANSPORT:-0}"
+REQUIRE_FULL_PHASE0="${REQUIRE_FULL_PHASE0:-0}"
 export RAW_DIR
+# Owner capture runs are always candidate-scoped. Accepted mode stays closed
+# until a protected v3 structural attestation exists; ambient legacy digest
+# parameters must not silently change this harness's trust mode.
+export TEST223_LIVE_EXACT_MODE=candidate
+unset TEST223_ACCEPTED_INDEX_SHA256 TEST223_ACCEPTED_SHAPES_SHA256
+
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+for flag_name in \
+  RUN_LIVE_NATIVE RUN_LIVE_FRAME_AWARE RUN_LIVE_APPROVAL_OWNER \
+  RUN_LIVE_EXACT_TRANSPORT REQUIRE_FULL_PHASE0; do
+  flag_value=${!flag_name}
+  case "$flag_value" in 0|1) ;; *) fail "$flag_name must be 0 or 1" ;; esac
+done
+FULL_PHASE0=0
+if [ "$RUN_LIVE_NATIVE" = "1" ] \
+  && [ "$RUN_LIVE_FRAME_AWARE" = "1" ] \
+  && [ "$RUN_LIVE_APPROVAL_OWNER" = "1" ] \
+  && [ "$RUN_LIVE_EXACT_TRANSPORT" = "1" ]; then
+  FULL_PHASE0=1
+fi
+if [ "$REQUIRE_FULL_PHASE0" = "1" ] && [ "$FULL_PHASE0" != "1" ]; then
+  printf '%s\n' 'FAIL: REQUIRE_FULL_PHASE0 requires all four RUN_LIVE_* flags' >&2
+  exit 1
+fi
 
 cleanup() {
   set +e
   rm -rf "$RAW_DIR"/* "$SAFE_DIR"
 }
 trap cleanup EXIT
-
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
-}
 
 mkdir -p "$RAW_DIR" "$SAFE_DIR" "$MUTANT_DIR" "$ARTIFACT_DIR"
 chmod 0700 "$RAW_DIR" "$SAFE_DIR" "$MUTANT_DIR"
@@ -41,16 +66,37 @@ if [ "$RUN_LIVE_NATIVE" = "1" ]; then
 else
   printf 'date: %s\n' "$(date -u -d "@${SOURCE_DATE_EPOCH:-0}" +%FT%TZ)" >>"$REPORT"
 fi
-if [ "$RUN_LIVE_NATIVE" = "1" ]; then
+if [ "$FULL_PHASE0" = "1" ]; then
+  printf '%s\n' 'scope: full owner Phase0 candidate pending independent review' >>"$REPORT"
+elif [ "$RUN_LIVE_NATIVE" = "1" ]; then
   printf '%s\n' 'scope: synthetic harness + owner live native capture pending independent review' >>"$REPORT"
 else
   printf '%s\n' 'scope: synthetic harness validation only' >>"$REPORT"
 fi
+printf 'captureProfile: native=%s frameAware=%s approvalOwner=%s exactTransport=%s full=%s\n' \
+  "$RUN_LIVE_NATIVE" "$RUN_LIVE_FRAME_AWARE" "$RUN_LIVE_APPROVAL_OWNER" \
+  "$RUN_LIVE_EXACT_TRANSPORT" "$FULL_PHASE0" >>"$REPORT"
 printf '%s\n' 'protocolFreeze: false' >>"$REPORT"
 
 node "$SUITE/scripts/selftest-capture.mjs" \
   "$RAW_DIR/${RAW_FIXTURES[0]}"
 printf '%s\n' 'PASS L0: recorder wrote unredacted canaries only to tmpfs' >>"$REPORT"
+node "$SUITE/scripts/selftest-rpc-order.mjs" >/dev/null
+printf '%s\n' 'PASS L0-RPC-order: typed IDs and coalesced frame ordering fail closed' >>"$REPORT"
+node "$SUITE/scripts/selftest-frame-aware-lifecycle.mjs" >/dev/null
+printf '%s\n' \
+  'PASS L0-frame-lifecycle: write/close/partial-tail paths fail boundedly without retry' \
+  >>"$REPORT"
+node "$SUITE/scripts/selftest-raw-protocol-negative-pipeline.mjs" >/dev/null
+printf '%s\n' \
+  'PASS L0-raw-pipeline: positive/full-chain and sanitizer-closed mutation driver selftest passed' \
+  >>"$REPORT"
+node "$SUITE/scripts/selftest-compile-accepted-live-exact-shapes.mjs" >/dev/null
+node "$SUITE/scripts/selftest-derive-candidate-live-exact-scopes.mjs" >/dev/null
+node "$SUITE/scripts/selftest-live-exact-policy.mjs" >/dev/null
+printf '%s\n' \
+  'PASS L0-exact-trust: candidate selector scoping passed; accepted mode closed pending protected v3 attestation' \
+  >>"$REPORT"
 if node "$SUITE/scripts/selftest-capture.mjs" /tmp/test223-raw-escape.ndjson >/dev/null 2>&1; then
   fail "recorder accepted an unredacted output path outside RAW_DIR"
 fi
@@ -91,11 +137,19 @@ fi
 if [ "$RUN_LIVE_FRAME_AWARE" = "1" ]; then
   [ "$RUN_LIVE_NATIVE" = "1" ] || fail "RUN_LIVE_FRAME_AWARE requires RUN_LIVE_NATIVE=1"
   export RAW_OUTPUT="$RAW_DIR/frame-aware-admission.raw.ndjson"
-  if ! node "$SUITE/scripts/live-frame-aware-admission-capture.mjs" \
-    >"$RAW_DIR/frame-aware-admission.summary.json"; then
+  set +e
+  timeout --signal=TERM --kill-after=10s 300s \
+    node "$SUITE/scripts/live-frame-aware-admission-capture.mjs" \
+    >"$RAW_DIR/frame-aware-admission.summary.json"
+  FRAME_AWARE_RC=$?
+  set -e
+  if [ "$FRAME_AWARE_RC" -ne 0 ]; then
     printf 'FRAME-AWARE-FAIL: %s\n' \
       "$(jq -c . "$RAW_DIR/frame-aware-admission.summary.json" 2>/dev/null || printf '{"ok":false}')" \
       >>"$REPORT"
+    if [ "$FRAME_AWARE_RC" -eq 124 ] || [ "$FRAME_AWARE_RC" -eq 137 ]; then
+      fail "frame-aware admission scenario exceeded its one-shot lifecycle bound"
+    fi
     fail "frame-aware admission scenario process failed"
   fi
   jq -e '
@@ -136,7 +190,49 @@ if [ "$RUN_LIVE_APPROVAL_OWNER" = "1" ]; then
   ' "$RAW_DIR/live-approval-owner-matrix.summary.json" >/dev/null \
     || fail "approval-owner summary did not pass"
   RAW_FIXTURES+=(live-approval-owner-matrix.raw.ndjson)
-  printf '%s\n' 'PASS L0-approval-owner: permission fanout + reject_once + owner-loss fail-closed' >>"$REPORT"
+  printf '%s\n' \
+    'PASS L0-approval-candidate: permission fanout + reject_once + owner-lease control EOF closed; ACP-child/human owner remain open' \
+    >>"$REPORT"
+fi
+
+if [ "$RUN_LIVE_EXACT_TRANSPORT" = "1" ]; then
+  [ "$RUN_LIVE_NATIVE" = "1" ] || fail "RUN_LIVE_EXACT_TRANSPORT requires RUN_LIVE_NATIVE=1"
+  EXACT_RAW_DIR="$RAW_DIR/exact-transport"
+  install -d -m 0700 "$EXACT_RAW_DIR"
+  EXACT_SUMMARY="$SAFE_DIR/transport-exact-one-byte.summary.json"
+  if ! RAW_DIR="$EXACT_RAW_DIR" RUN_POST_GREEN_CONTAINMENT=0 PRESERVE_RAW_FOR_HARNESS=1 \
+    node "$SUITE/scripts/live-bounded-frame-transport-capture.mjs" >"$EXACT_SUMMARY"; then
+    printf 'EXACT-TRANSPORT-FAIL: %s\n' \
+      "$(jq -c . "$EXACT_SUMMARY" 2>/dev/null || printf '{"ok":false}')" \
+      >>"$REPORT"
+    fail "exact one-byte buffered transport scenario process failed"
+  fi
+  jq -e '
+    .ok == true
+    and .protocolFreeze == false
+    and .exactOneByteBufferedGateway.requestedTrials == 100
+    and .exactOneByteBufferedGateway.passedTrials == 100
+    and .exactOneByteBufferedGateway.failedTrials == 0
+    and .exactOneByteBufferedGateway.requestedSegmentsPerTrial
+      == .exactOneByteBufferedGateway.requestedBytesPerTrial
+    and .exactOneByteBufferedGateway.interSegmentDelayMs == 1
+    and .exactOneByteBufferedGateway.aggregate.totals.admittedFrames == 200
+    and .exactOneByteBufferedGateway.aggregate.totals.upstreamWriteCallbacks == 200
+    and .containment.requested == false
+    and .rawCapture.persistedOutsideTmpfs == false
+    and .rawCapture.destroyedByHarnessCleanup == true
+  ' "$EXACT_SUMMARY" >/dev/null || fail "exact one-byte buffered transport summary did not pass"
+  RAW_DIR="$EXACT_RAW_DIR" node "$SUITE/scripts/extract-exact-transport-sample.mjs" \
+    "$EXACT_RAW_DIR/bounded-frame-transport.raw.ndjson" \
+    "$EXACT_SUMMARY" \
+    "$EXACT_RAW_DIR/transport-exact-one-byte.raw.ndjson" \
+    "$SAFE_DIR/transport-exact-trials.summary.json" \
+    >"$SAFE_DIR/transport-extract.summary.json"
+  mv "$EXACT_RAW_DIR/transport-exact-one-byte.raw.ndjson" \
+    "$RAW_DIR/transport-exact-one-byte.raw.ndjson"
+  rm -rf "$EXACT_RAW_DIR"
+  RAW_FIXTURES+=(transport-exact-one-byte.raw.ndjson)
+  printf '%s\n' 'PASS L0-exact-transport-owner: buffered gateway passed exact 1-byte+1ms register+initialize 100/100' >>"$REPORT"
 fi
 
 for fixture in "${RAW_FIXTURES[@]}"; do
@@ -158,6 +254,48 @@ fi
 if [ "$RUN_LIVE_APPROVAL_OWNER" = "1" ]; then
   install -m 0600 "$RAW_DIR/live-approval-owner-matrix.summary.json" \
     "$SAFE_DIR/live-approval-owner-matrix.summary.json"
+fi
+if [ "$RUN_LIVE_NATIVE" = "1" ]; then
+  # Use the same driver for the positive fixture and every raw protocol
+  # mutation.  A negative is accepted only when that shared pipeline closes at
+  # the sanitizer boundary; if it reaches project/manifest/verify, the driver
+  # itself fails.  Neither mutable raw bytes nor its map leave tmpfs.
+  RAW_PIPELINE_COMMON=(
+    --raw-fixture "$RAW_DIR/leader-native-tui.raw.ndjson"
+    --baseline-safe-dir "$SAFE_DIR"
+    --suite-dir "$SUITE"
+    --fixture-stem leader-native-tui
+    --policy-mode suite
+    --capture-scenario live-native
+  )
+  RAW_PIPELINE_POSITIVE=$(node \
+    "$SUITE/scripts/run-raw-protocol-negative-pipeline.mjs" \
+    "${RAW_PIPELINE_COMMON[@]}" --mutation none)
+  jq -e '
+    .ok == true
+    and .expected == "verify-pass"
+    and .verifierAccepted == true
+    and ([.stages[].stage] == ["mutate","sanitize","project","manifest","verify"])
+  ' <<<"$RAW_PIPELINE_POSITIVE" >/dev/null \
+    || fail "raw protocol positive control did not traverse the complete pipeline"
+  for raw_protocol_mutation in \
+    method-unknown enum-unknown enum-cross-context enum-wrong-type; do
+    RAW_PIPELINE_NEGATIVE=$(node \
+      "$SUITE/scripts/run-raw-protocol-negative-pipeline.mjs" \
+      "${RAW_PIPELINE_COMMON[@]}" --mutation "$raw_protocol_mutation")
+    jq -e '
+      .ok == true
+      and .expected == "sanitize-closed"
+      and .failedStage == "sanitize"
+      and .verifierAccepted == false
+      and ([.stages[].stage] == ["mutate","sanitize"])
+      and .candidateArtifactsPersisted == false
+    ' <<<"$RAW_PIPELINE_NEGATIVE" >/dev/null \
+      || fail "raw protocol mutation did not close in the shared pipeline: $raw_protocol_mutation"
+  done
+  printf '%s\n' \
+    'PASS L2-negative: raw exact-set mutations closed in the bound full-chain driver' \
+    >>"$REPORT"
 fi
 printf '%s\n' 'PASS L1: stream-aware scrub produced sanitized byte records' >>"$REPORT"
 printf '%s\n' 'PASS L2: independent projector rebuilt complete/truncated frames' >>"$REPORT"
@@ -196,7 +334,19 @@ if [ "$RUN_LIVE_NATIVE" = "1" ]; then
       "$SAFE_DIR/live-approval-owner-matrix.projection.ndjson" \
       "$SAFE_DIR/live-approval-owner-matrix.summary.json" \
       "$SAFE_DIR/manifest.json" "$SUITE" >/dev/null
-    printf '%s\n' 'PASS L4-approval-owner: permission wire fixture is source/binary/artifact-bound' >>"$REPORT"
+    printf '%s\n' \
+      'PASS L4-approval-candidate: policy-control EOF evidence is source/binary/artifact-bound; human owner remains open' \
+      >>"$REPORT"
+  fi
+  if [ "$RUN_LIVE_EXACT_TRANSPORT" = "1" ]; then
+    node "$SUITE/scripts/verify-live-exact-transport.mjs" \
+      "$SAFE_DIR/transport-exact-one-byte.bytes.ndjson" \
+      "$SAFE_DIR/transport-exact-one-byte.projection.ndjson" \
+      "$SAFE_DIR/transport-exact-one-byte.summary.json" \
+      "$SAFE_DIR/transport-extract.summary.json" \
+      "$SAFE_DIR/transport-exact-trials.summary.json" \
+      "$SAFE_DIR/manifest.json" "$SUITE" >/dev/null
+    printf '%s\n' 'PASS L4-exact-transport-owner: exact 100/100 transport evidence is script/binary/artifact-bound' >>"$REPORT"
   fi
   printf '%s\n' 'PASS L4-live-owner: sanitized live bytes/projection/summary passed structural verifier' >>"$REPORT"
 else
@@ -214,51 +364,167 @@ if [ "$RUN_LIVE_NATIVE" = "1" ]; then
 else
   BINDING_STEM=harness-canary
 fi
+BEFORE_BINDING_BYTES=$(sha256sum "$MUTANT_DIR/$BINDING_STEM.bytes.ndjson" | cut -d' ' -f1)
+BEFORE_BINDING_PROJECTION=$(sha256sum "$MUTANT_DIR/$BINDING_STEM.projection.ndjson" | cut -d' ' -f1)
 node "$SUITE/scripts/mutate-binding-artifact.mjs" native-binding \
   "$MUTANT_DIR/$BINDING_STEM.bytes.ndjson" "$MUTANT_DIR/manifest.json"
-if node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" >/dev/null 2>&1; then
-  fail "self-signed bytes mutation with stale projection did not turn verifier red"
+AFTER_BINDING_BYTES=$(sha256sum "$MUTANT_DIR/$BINDING_STEM.bytes.ndjson" | cut -d' ' -f1)
+AFTER_BINDING_PROJECTION=$(sha256sum "$MUTANT_DIR/$BINDING_STEM.projection.ndjson" | cut -d' ' -f1)
+[ "$BEFORE_BINDING_BYTES" != "$AFTER_BINDING_BYTES" ] \
+  || fail "binding mutation did not change sanitized native bytes"
+[ "$BEFORE_BINDING_PROJECTION" = "$AFTER_BINDING_PROJECTION" ] \
+  || fail "binding mutation unexpectedly changed saved projection"
+[ "$(jq -r --arg path "$BINDING_STEM.bytes.ndjson" \
+  '.fixtureFiles[] | select(.path == $path) | .sha256' "$MUTANT_DIR/manifest.json")" \
+  = "$AFTER_BINDING_BYTES" ] || fail "binding mutation manifest hash does not match mutated bytes"
+node "$SUITE/scripts/project.mjs" \
+  "$MUTANT_DIR/$BINDING_STEM.bytes.ndjson" \
+  "$MUTANT_DIR/$BINDING_STEM.fresh.projection.ndjson"
+if cmp -s "$MUTANT_DIR/$BINDING_STEM.fresh.projection.ndjson" \
+  "$MUTANT_DIR/$BINDING_STEM.projection.ndjson"; then
+  fail "binding mutation did not make the saved projection stale"
 fi
+rm "$MUTANT_DIR/$BINDING_STEM.fresh.projection.ndjson"
+set +e
+node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" \
+  >/dev/null 2>"$MUTANT_DIR/binding.stderr"
+BINDING_RC=$?
+set -e
+[ "$BINDING_RC" -ne 0 ] || fail "self-signed bytes mutation with stale projection stayed green"
+grep -F "saved projection is not byte-bound to sanitized fixture: $BINDING_STEM" \
+  "$MUTANT_DIR/binding.stderr" >/dev/null \
+  || fail "binding mutation failed for an unrelated reason"
 rm -rf "$MUTANT_DIR"/*
 printf '%s\n' 'PASS L4-negative: self-signed bytes mutation with stale projection turned red' >>"$REPORT"
 
 # Exact protocol-set controls are coherent owner fixtures: mutate sanitized
 # native bytes, independently rebuild the projection, re-sign both hashes, and
 # still require the verifier's external trust root to reject the artifact.
-for protocol_mutation in native-binding field-name correlation-numeric correlation-label; do
+PROTOCOL_MUTATIONS=(
+  method-unknown
+  field-name
+  enum-unknown
+  enum-cross-context
+  enum-wrong-type
+  correlation-numeric
+  correlation-label
+  method-generic-placeholder
+)
+if [ "$RUN_LIVE_NATIVE" = "1" ]; then
+  PROTOCOL_MUTATIONS+=(field-cross-context client-type-wrong-label)
+fi
+for protocol_mutation in "${PROTOCOL_MUTATIONS[@]}"; do
   cp "$SAFE_DIR"/* "$MUTANT_DIR"/
   node "$SUITE/scripts/mutate-binding-artifact.mjs" "$protocol_mutation" \
+    "$MUTANT_DIR/$BINDING_STEM.bytes.ndjson" "$MUTANT_DIR/manifest.json"
+  node "$SUITE/scripts/project.mjs" \
+    "$MUTANT_DIR/$BINDING_STEM.bytes.ndjson" \
+    "$MUTANT_DIR/$BINDING_STEM.projection.ndjson"
+  node "$SUITE/scripts/mutate-binding-artifact.mjs" resign-files \
+    "$MUTANT_DIR/manifest.json" "$MUTANT_DIR/$BINDING_STEM.projection.ndjson"
+  if node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" >/dev/null 2>&1; then
+    fail "coherent protocol mutation did not turn verifier red: $protocol_mutation"
+  fi
+  rm -rf "$MUTANT_DIR"/*
+done
+printf '%s\n' \
+  'PASS L4-negative: method/field/path-enum/client-type/correlation coherent mutations turned red' \
+  >>"$REPORT"
+
+if [ "$RUN_LIVE_NATIVE" = "1" ]; then
+  # A legal capture name cannot move a live fixture into the synthetic policy
+  # context. The combined mutation also uses the old generic method placeholder
+  # form so either missing guard would make this coherent artifact stay green.
+  cp "$SAFE_DIR"/* "$MUTANT_DIR"/
+  node "$SUITE/scripts/mutate-binding-artifact.mjs" capture-cross-context-method \
+    "$MUTANT_DIR/leader-native-tui.bytes.ndjson" "$MUTANT_DIR/manifest.json"
+  node "$SUITE/scripts/project.mjs" \
+    "$MUTANT_DIR/leader-native-tui.bytes.ndjson" \
+    "$MUTANT_DIR/leader-native-tui.projection.ndjson"
+  node "$SUITE/scripts/mutate-binding-artifact.mjs" resign-files \
+    "$MUTANT_DIR/manifest.json" "$MUTANT_DIR/leader-native-tui.projection.ndjson"
+  set +e
+  node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" \
+    >/dev/null 2>"$MUTANT_DIR/capture-cross-context.stderr"
+  CAPTURE_CONTEXT_RC=$?
+  set -e
+  [ "$CAPTURE_CONTEXT_RC" -ne 0 ] \
+    || fail "capture cross-context + generic method mutation stayed green"
+  grep -F 'capture differs from reviewed fixture binding' \
+    "$MUTANT_DIR/capture-cross-context.stderr" >/dev/null \
+    || fail "capture cross-context mutation failed for an unrelated reason"
+  rm -rf "$MUTANT_DIR"/*
+
+  # The synthetic context itself must reject a method-shaped generic
+  # placeholder, independently of the fixture/capture binding above.
+  cp "$SAFE_DIR"/* "$MUTANT_DIR"/
+  node "$SUITE/scripts/mutate-binding-artifact.mjs" method-generic-placeholder \
     "$MUTANT_DIR/harness-canary.bytes.ndjson" "$MUTANT_DIR/manifest.json"
   node "$SUITE/scripts/project.mjs" \
     "$MUTANT_DIR/harness-canary.bytes.ndjson" \
     "$MUTANT_DIR/harness-canary.projection.ndjson"
   node "$SUITE/scripts/mutate-binding-artifact.mjs" resign-files \
     "$MUTANT_DIR/manifest.json" "$MUTANT_DIR/harness-canary.projection.ndjson"
+  set +e
+  node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" \
+    >/dev/null 2>"$MUTANT_DIR/harness-method.stderr"
+  HARNESS_METHOD_RC=$?
+  set -e
+  [ "$HARNESS_METHOD_RC" -ne 0 ] || fail "synthetic generic method mutation stayed green"
+  grep -F 'method is outside reviewed exact set' \
+    "$MUTANT_DIR/harness-method.stderr" >/dev/null \
+    || fail "synthetic generic method mutation failed for an unrelated reason"
+  rm -rf "$MUTANT_DIR"/*
+  printf '%s\n' \
+    'PASS L4-negative: fixture/capture cross-context and synthetic generic method mutations turned red' \
+    >>"$REPORT"
+fi
+
+for metadata_mutation in metadata-unknown metadata-value-unknown; do
+  cp "$SAFE_DIR"/* "$MUTANT_DIR"/
+  node "$SUITE/scripts/mutate-binding-artifact.mjs" "$metadata_mutation" \
+    "$MUTANT_DIR/$BINDING_STEM.bytes.ndjson" "$MUTANT_DIR/manifest.json"
   if node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" >/dev/null 2>&1; then
-    fail "coherent protocol mutation did not turn verifier red: $protocol_mutation"
+    fail "coherent metadata mutation did not turn verifier red: $metadata_mutation"
   fi
   rm -rf "$MUTANT_DIR"/*
 done
-printf '%s\n' 'PASS L4-negative: method/field/correlation coherent mutations turned red' >>"$REPORT"
+printf '%s\n' 'PASS L4-negative: coherent unknown metadata key/value turned red' >>"$REPORT"
 
 cp "$SAFE_DIR"/* "$MUTANT_DIR"/
-node "$SUITE/scripts/mutate-binding-artifact.mjs" metadata-unknown \
-  "$MUTANT_DIR/harness-canary.bytes.ndjson" "$MUTANT_DIR/manifest.json"
-if node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" >/dev/null 2>&1; then
-  fail "coherent unknown metadata mutation did not turn verifier red"
-fi
+node "$SUITE/scripts/mutate-binding-artifact.mjs" manifest-capture-profile \
+  "$MUTANT_DIR/manifest.json"
+set +e
+node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" \
+  >/dev/null 2>"$MUTANT_DIR/capture-profile.stderr"
+CAPTURE_PROFILE_RC=$?
+set -e
+[ "$CAPTURE_PROFILE_RC" -ne 0 ] || fail "manifest capture profile mutation stayed green"
+grep -F 'manifest capture profile is not artifact-derived' \
+  "$MUTANT_DIR/capture-profile.stderr" >/dev/null \
+  || fail "manifest capture profile mutation failed for an unrelated reason"
 rm -rf "$MUTANT_DIR"/*
-printf '%s\n' 'PASS L4-negative: coherent unknown metadata field turned red' >>"$REPORT"
+printf '%s\n' 'PASS L4-negative: manifest capture profile mutation turned red' >>"$REPORT"
 
 if [ "$RUN_LIVE_NATIVE" = "1" ]; then
-  cp "$SAFE_DIR"/* "$MUTANT_DIR"/
-  node "$SUITE/scripts/mutate-binding-artifact.mjs" env-coherent \
-    "$MUTANT_DIR/leader-native-tui.summary.json" "$MUTANT_DIR/manifest.json"
-  if node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" >/dev/null 2>&1; then
-    fail "coherently re-signed forbidden child env mutation did not turn verifier red"
-  fi
-  rm -rf "$MUTANT_DIR"/*
-  printf '%s\n' 'PASS L4-negative: coherent forbidden child env mutation turned red' >>"$REPORT"
+  for forbidden_env_key in \
+    DATABASE_URL COMMHUB_ENDPOINT AWS_REGION CUSTOMER_TOKEN CUSTOMER_SECRET CUSTOMER_KEY; do
+    cp "$SAFE_DIR"/* "$MUTANT_DIR"/
+    node "$SUITE/scripts/mutate-binding-artifact.mjs" env-coherent \
+      "$MUTANT_DIR/leader-native-tui.summary.json" "$MUTANT_DIR/manifest.json" \
+      "$forbidden_env_key"
+    set +e
+    node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" \
+      >/dev/null 2>"$MUTANT_DIR/env.stderr"
+    ENV_RC=$?
+    set -e
+    [ "$ENV_RC" -ne 0 ] || fail "coherent child env mutation stayed green: $forbidden_env_key"
+    grep -F 'manifest env evidence contains a forbidden child key' \
+      "$MUTANT_DIR/env.stderr" >/dev/null \
+      || fail "child env mutation failed for an unrelated reason: $forbidden_env_key"
+    rm -rf "$MUTANT_DIR"/*
+  done
+  printf '%s\n' 'PASS L4-negative: six coherent forbidden child env classes turned red' >>"$REPORT"
 fi
 
 if [ "$RUN_LIVE_FRAME_AWARE" = "1" ]; then
@@ -309,8 +575,16 @@ if [ "$RUN_LIVE_APPROVAL_OWNER" = "1" ]; then
     "$MUTANT_DIR/live-approval-owner-matrix.projection.ndjson"
   node "$SUITE/scripts/mutate-binding-artifact.mjs" resign-files \
     "$MUTANT_DIR/manifest.json" "$MUTANT_DIR/live-approval-owner-matrix.projection.ndjson"
-  node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" >/dev/null \
-    || fail "permission method mutation was not coherently re-signed"
+  set +e
+  node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" \
+    >/dev/null 2>"$MUTANT_DIR/permission-generic.stderr"
+  PERMISSION_GENERIC_RC=$?
+  set -e
+  [ "$PERMISSION_GENERIC_RC" -ne 0 ] \
+    || fail "permission method mutation stayed green in exact context verifier"
+  grep -E 'selector is outside exact live policy|shape/scalar is outside exact live policy' \
+    "$MUTANT_DIR/permission-generic.stderr" >/dev/null \
+    || fail "permission method mutation failed generic verification for an unrelated reason"
   if node "$SUITE/scripts/verify-live-approval-owner.mjs" \
     "$MUTANT_DIR/live-approval-owner-matrix.bytes.ndjson" \
     "$MUTANT_DIR/live-approval-owner-matrix.projection.ndjson" \
@@ -330,7 +604,149 @@ if [ "$RUN_LIVE_APPROVAL_OWNER" = "1" ]; then
     fail "coherent approval summary TUI count mutation did not turn red"
   fi
   rm -rf "$MUTANT_DIR"/*
-  printf '%s\n' 'PASS L4-negative: permission method/summary-count mutations turned red' >>"$REPORT"
+  for approval_safe_binding_mutation in \
+    approval-raw-byte-metadata-injection \
+    approval-tap-crosslane-metadata; do
+    cp "$SAFE_DIR"/* "$MUTANT_DIR"/
+    node "$SUITE/scripts/mutate-binding-artifact.mjs" "$approval_safe_binding_mutation" \
+      "$MUTANT_DIR/live-approval-owner-matrix.bytes.ndjson" \
+      "$MUTANT_DIR/manifest.json"
+    node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" >/dev/null \
+      || fail "approval safe binding mutation broke generic evidence binding: $approval_safe_binding_mutation"
+    set +e
+    node "$SUITE/scripts/verify-live-approval-owner.mjs" \
+      "$MUTANT_DIR/live-approval-owner-matrix.bytes.ndjson" \
+      "$MUTANT_DIR/live-approval-owner-matrix.projection.ndjson" \
+      "$MUTANT_DIR/live-approval-owner-matrix.summary.json" \
+      "$MUTANT_DIR/manifest.json" "$SUITE" \
+      >/dev/null 2>"$MUTANT_DIR/approval-safe-binding.stderr"
+    APPROVAL_SAFE_BINDING_RC=$?
+    set -e
+    [ "$APPROVAL_SAFE_BINDING_RC" -ne 0 ] \
+      || fail "approval safe binding mutation stayed green: $approval_safe_binding_mutation"
+    case "$approval_safe_binding_mutation" in
+      approval-raw-byte-metadata-injection)
+        grep -F 'approval safe fixture contains unverifiable raw-byte metadata' \
+          "$MUTANT_DIR/approval-safe-binding.stderr" >/dev/null \
+          || fail "approval raw-byte metadata mutation failed for an unrelated reason"
+        ;;
+      approval-tap-crosslane-metadata)
+        grep -F 'approval tap byte tuple is outside reviewed topology' \
+          "$MUTANT_DIR/approval-safe-binding.stderr" >/dev/null \
+          || fail "approval tap tuple mutation failed for an unrelated reason"
+        ;;
+    esac
+    rm -rf "$MUTANT_DIR"/*
+  done
+  for approval_policy_mutation in \
+    passive-forwarded \
+    stale-forwarded \
+    duplicate-forwarded \
+    ownerlost-forwarded \
+    nonowner-consumes-pending \
+    post-eof-central-response \
+    tui-attempt-forwarded \
+    passive-cancelled-forwarded \
+    passive-error-forwarded \
+    passive-selected-crossed \
+    stale-selected-crossed \
+    duplicate-selected-crossed \
+    ownerlost-selected-crossed \
+    late-selected-after-window; do
+    cp "$SAFE_DIR"/* "$MUTANT_DIR"/
+    node "$SUITE/scripts/mutate-approval-policy-artifact.mjs" \
+      "$approval_policy_mutation" \
+      "$MUTANT_DIR/live-approval-owner-matrix.bytes.ndjson" \
+      "$MUTANT_DIR/live-approval-owner-matrix.projection.ndjson" \
+      "$MUTANT_DIR/manifest.json" \
+      "$MUTANT_DIR/live-approval-owner-matrix.summary.json"
+    node "$SUITE/scripts/project.mjs" \
+      "$MUTANT_DIR/live-approval-owner-matrix.bytes.ndjson" \
+      "$MUTANT_DIR/live-approval-owner-matrix.projection.ndjson"
+    node "$SUITE/scripts/mutate-binding-artifact.mjs" resign-files \
+      "$MUTANT_DIR/manifest.json" \
+      "$MUTANT_DIR/live-approval-owner-matrix.projection.ndjson"
+    case "$approval_policy_mutation" in
+      passive-cancelled-forwarded|passive-error-forwarded)
+        set +e
+        node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" \
+          >/dev/null 2>"$MUTANT_DIR/approval-generic.stderr"
+        APPROVAL_GENERIC_RC=$?
+        set -e
+        [ "$APPROVAL_GENERIC_RC" -ne 0 ] \
+          || fail "unobserved permission response shape passed exact protocol policy: $approval_policy_mutation"
+        grep -F 'shape/scalar is outside exact live policy' \
+          "$MUTANT_DIR/approval-generic.stderr" >/dev/null \
+          || fail "unobserved permission response failed generic verification for an unrelated reason: $approval_policy_mutation"
+        ;;
+      *)
+        node "$SUITE/scripts/verify.mjs" "$MUTANT_DIR" "$SUITE" >/dev/null \
+          || fail "approval policy mutation broke generic evidence binding: $approval_policy_mutation"
+        ;;
+    esac
+    set +e
+    node "$SUITE/scripts/verify-live-approval-owner.mjs" \
+      "$MUTANT_DIR/live-approval-owner-matrix.bytes.ndjson" \
+      "$MUTANT_DIR/live-approval-owner-matrix.projection.ndjson" \
+      "$MUTANT_DIR/live-approval-owner-matrix.summary.json" \
+      "$MUTANT_DIR/manifest.json" "$SUITE" \
+      >/dev/null 2>"$MUTANT_DIR/approval-policy.stderr"
+    APPROVAL_POLICY_RC=$?
+    set -e
+    [ "$APPROVAL_POLICY_RC" -ne 0 ] \
+      || fail "approval policy mutation stayed green: $approval_policy_mutation"
+    case "$approval_policy_mutation" in
+      late-selected-after-window)
+        grep -F 'approval correlated Leader-facing response exists outside its policy window' \
+          "$MUTANT_DIR/approval-policy.stderr" >/dev/null \
+          || fail "approval late response mutation failed for an unrelated reason"
+        ;;
+      post-eof-central-response|tui-attempt-forwarded|passive-cancelled-forwarded|passive-error-forwarded|*-selected-crossed)
+        grep -F 'policy decision window differs from independent Leader-facing tap delta' \
+          "$MUTANT_DIR/approval-policy.stderr" >/dev/null \
+          || fail "approval policy mutation failed for an unrelated reason: $approval_policy_mutation"
+        ;;
+      *)
+        grep -F 'policy replay decision mismatch' \
+          "$MUTANT_DIR/approval-policy.stderr" >/dev/null \
+          || fail "approval policy mutation failed for an unrelated reason: $approval_policy_mutation"
+        ;;
+    esac
+    rm -rf "$MUTANT_DIR"/*
+  done
+  printf '%s\n' \
+    'PASS L4-negative: permission method/summary plus fourteen Leader-boundary admission/tap mutations turned red' \
+    >>"$REPORT"
+fi
+
+if [ "$RUN_LIVE_EXACT_TRANSPORT" = "1" ]; then
+  cp "$SAFE_DIR"/* "$MUTANT_DIR"/
+  node "$SUITE/scripts/mutate-binding-artifact.mjs" exact-transport-summary-count \
+    "$MUTANT_DIR/transport-exact-one-byte.summary.json" "$MUTANT_DIR/manifest.json"
+  if node "$SUITE/scripts/verify-live-exact-transport.mjs" \
+    "$MUTANT_DIR/transport-exact-one-byte.bytes.ndjson" \
+    "$MUTANT_DIR/transport-exact-one-byte.projection.ndjson" \
+    "$MUTANT_DIR/transport-exact-one-byte.summary.json" \
+    "$MUTANT_DIR/transport-extract.summary.json" \
+    "$MUTANT_DIR/transport-exact-trials.summary.json" \
+    "$MUTANT_DIR/manifest.json" "$SUITE" >/dev/null 2>&1; then
+    fail "coherent exact transport summary mutation did not turn red"
+  fi
+  rm -rf "$MUTANT_DIR"/*
+  cp "$SAFE_DIR"/* "$MUTANT_DIR"/
+  node "$SUITE/scripts/mutate-binding-artifact.mjs" exact-transport-ledger-count \
+    "$MUTANT_DIR/transport-exact-trials.summary.json" "$MUTANT_DIR/manifest.json"
+  if node "$SUITE/scripts/verify-live-exact-transport.mjs" \
+    "$MUTANT_DIR/transport-exact-one-byte.bytes.ndjson" \
+    "$MUTANT_DIR/transport-exact-one-byte.projection.ndjson" \
+    "$MUTANT_DIR/transport-exact-one-byte.summary.json" \
+    "$MUTANT_DIR/transport-extract.summary.json" \
+    "$MUTANT_DIR/transport-exact-trials.summary.json" \
+    "$MUTANT_DIR/manifest.json" "$SUITE" >/dev/null 2>&1; then
+    fail "coherent exact transport trial-ledger mutation did not turn red"
+  fi
+  rm -rf "$MUTANT_DIR"/*
+  printf '%s\n' 'PASS L4-negative: coherent exact transport summary/ledger mutations turned red' >>"$REPORT"
 fi
 
 find "$ARTIFACT_DIR" -mindepth 1 -maxdepth 1 \
@@ -339,9 +755,12 @@ install -m 0644 "$SAFE_DIR"/* "$ARTIFACT_DIR"/
 node "$SUITE/scripts/verify.mjs" "$ARTIFACT_DIR" "$SUITE"
 
 # The raw tmpfs is destroyed by the EXIT trap. No protocol freeze is self-signed.
-if [ "$RUN_LIVE_NATIVE" = "1" ]; then
-  printf '%s\n' 'OWNER LIVE CAPTURE PASS: fixture awaits independent review; protocol freeze remains false' >>"$REPORT"
-  printf '%s\n' 'Summary: PASS (owner live native capture; independent review pending; protocol freeze false)'
+if [ "$FULL_PHASE0" = "1" ]; then
+  printf '%s\n' 'OWNER FULL PHASE0 CANDIDATE PASS: independent review pending; protocol freeze remains false' >>"$REPORT"
+  printf '%s\n' 'Summary: PASS (full owner Phase0 candidate; independent review pending; protocol freeze false)'
+elif [ "$RUN_LIVE_NATIVE" = "1" ]; then
+  printf '%s\n' 'OWNER PARTIAL LIVE CAPTURE PASS: not a full Phase0 candidate; independent review pending; protocol freeze false' >>"$REPORT"
+  printf '%s\n' 'Summary: PASS (partial owner live capture only; independent review pending; protocol freeze false)'
 else
   printf '%s\n' 'HARNESS PASS: artifact boundary works; real Grok P0 fixtures are not captured yet' >>"$REPORT"
   printf '%s\n' 'Summary: PASS (harness only; protocol freeze remains false)'

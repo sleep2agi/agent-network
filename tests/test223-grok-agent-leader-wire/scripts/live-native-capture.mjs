@@ -23,6 +23,7 @@ const suppliedLeaderSocket = process.env.GROK_LEADER_SOCKET
 const expectedVersion = "grok 0.2.93 (f00f96316d)";
 const answer = "TEST223_TUI_LIVE_OK";
 const networkPrompt = [
+  "Do not call or use any tool.",
   "Reply with one string made by concatenating these fragments without spaces",
   "or punctuation: TEST223_ + TUI_ + LIVE_ + OK.",
   "Output only the concatenated result.",
@@ -414,7 +415,10 @@ async function main() {
   }
   await submitter.request("session/prompt", {
     sessionId,
-    prompt: [{ type: "text", text: "Reply with exactly READY_FOR_TUI_ATTACH." }],
+    prompt: [{
+      type: "text",
+      text: "Do not call or use any tool. Reply with exactly READY_FOR_TUI_ATTACH.",
+    }],
   }, 180_000);
   submitter.notifications = [];
 

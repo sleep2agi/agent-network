@@ -21,6 +21,7 @@ const EXPECTED_BINARY_SHA256 = "4e0738d3b5550f3c842bc0ae69f468815c6329c008a110d0
 const TMPFS_MAGIC = 0x01021994;
 const MAX_FRAME_BYTES = 1024 * 1024;
 const BOUNDED_TRIALS = 100;
+const EXACT_ONE_BYTE_TRIALS = 100;
 const MIN_SEGMENT_BYTES = 2;
 const MAX_SEGMENT_BYTES = 4096;
 const MAX_SEGMENTS_PER_TRIAL = 128;
@@ -28,6 +29,21 @@ const MAX_MICRO_DELAY_MS = 2;
 const IO_TIMEOUT_MS = 5_000;
 const HALF_CLOSE_CONTAINMENT_TIMEOUT_MS = 750;
 const scriptPath = fileURLToPath(import.meta.url);
+const EXACT_TRANSPORT_CHILD_ENV_KEYS = [
+  "GROK_AUTH_PATH",
+  "GROK_CLAUDE_HOOKS_ENABLED",
+  "GROK_CLAUDE_MCPS_ENABLED",
+  "GROK_CURSOR_HOOKS_ENABLED",
+  "GROK_CURSOR_MCPS_ENABLED",
+  "GROK_FOLDER_TRUST",
+  "GROK_HOME",
+  "GROK_OIDC_CLIENT_ID",
+  "GROK_OIDC_ISSUER",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "PATH",
+].sort();
 
 class ProbeFailure extends Error {
   constructor(code, stage) {
@@ -131,15 +147,14 @@ function childEnvironment(home, authPath) {
   };
   const auth = JSON.parse(readFileSync(authPath, "utf8"));
   const scope = Object.keys(auth).find((key) => /^https?:\/\/.+::[^:]+$/.test(key));
-  if (scope) {
-    const split = scope.lastIndexOf("::");
-    environment.GROK_OIDC_ISSUER = scope.slice(0, split);
-    environment.GROK_OIDC_CLIENT_ID = scope.slice(split + 2);
+  if (!scope) fail("PINNED_AUTH_SCOPE_MISSING", "preflight");
+  const split = scope.lastIndexOf("::");
+  environment.GROK_OIDC_ISSUER = scope.slice(0, split);
+  environment.GROK_OIDC_CLIENT_ID = scope.slice(split + 2);
+  const actualKeys = Object.keys(environment).sort();
+  if (JSON.stringify(actualKeys) !== JSON.stringify(EXACT_TRANSPORT_CHILD_ENV_KEYS)) {
+    fail("CHILD_ENV_EXACT_ALLOWLIST_MISMATCH", "preflight");
   }
-  const forbidden = Object.keys(environment).filter((key) =>
-    key.startsWith("COMMHUB_") || key === "NTOK" || key === "DATABASE_URL"
-    || key.startsWith("AWS_") || /(?:_TOKEN|_SECRET)$/.test(key));
-  if (forbidden.length > 0) fail("CHILD_ENV_ALLOWLIST_VIOLATION", "preflight");
   return environment;
 }
 
@@ -488,6 +503,14 @@ function makeBoundedPlan(stream, frames, trial) {
   return { label, segments, delayMs };
 }
 
+function makeExactOneBytePlan(stream) {
+  return {
+    label: "exact-one-byte-1ms",
+    segments: Array.from({ length: stream.length }, (_, index) => stream.subarray(index, index + 1)),
+    delayMs: 1,
+  };
+}
+
 class CompleteFrameGateway {
   constructor({ path, leaderPath, recorder }) {
     this.path = path;
@@ -536,6 +559,9 @@ class CompleteFrameGateway {
       connection,
       mode,
       frontReadCallbacks: 0,
+      minimumFrontReadBytes: null,
+      maximumFrontReadBytes: 0,
+      oneByteFrontReadCallbacks: 0,
       leaderReadCallbacks: 0,
       completeFramesAdmitted: 0,
       completeFramesFromLeader: 0,
@@ -618,6 +644,11 @@ class CompleteFrameGateway {
 
     front.on("data", (chunk) => {
       metrics.frontReadCallbacks += 1;
+      metrics.minimumFrontReadBytes = metrics.minimumFrontReadBytes === null
+        ? chunk.length
+        : Math.min(metrics.minimumFrontReadBytes, chunk.length);
+      metrics.maximumFrontReadBytes = Math.max(metrics.maximumFrontReadBytes, chunk.length);
+      if (chunk.length === 1) metrics.oneByteFrontReadCallbacks += 1;
       recordRead(this.recorder, {
         role: "bounded-client",
         connection,
@@ -798,7 +829,16 @@ async function runPathologicalDirect({ leaderSocket, stream, recorder }) {
   };
 }
 
-async function runBoundedTrial({ gateway, gatewayPath, stream, frames, trial, recorder }) {
+async function runBoundedTrial({
+  gateway,
+  gatewayPath,
+  stream,
+  frames,
+  trial,
+  recorder,
+  planOverride,
+  phase = "bounded",
+}) {
   const connectionId = gateway.sequence + 1;
   gateway.enqueueMode("bounded-transaction");
   const socket = await connectSocket(gatewayPath);
@@ -813,7 +853,7 @@ async function runBoundedTrial({ gateway, gatewayPath, stream, frames, trial, re
       role: "bounded-client",
       connection,
       direction: "gateway_to_client",
-      phase: "bounded",
+      phase,
       trial,
       bytes: chunk,
     });
@@ -827,10 +867,10 @@ async function runBoundedTrial({ gateway, gatewayPath, stream, frames, trial, re
     direction: "client_to_gateway",
     recorder,
   });
-  const plan = makeBoundedPlan(stream, frames, trial);
+  const plan = planOverride || makeBoundedPlan(stream, frames, trial);
   for (let index = 0; index < plan.segments.length; index += 1) {
     await writer.write(plan.segments[index], {
-      phase: "bounded",
+      phase,
       trial,
       requestedSegment: index,
       plan: plan.label,
@@ -869,6 +909,9 @@ async function runBoundedTrial({ gateway, gatewayPath, stream, frames, trial, re
     clientWriteCallbacks: writer.counters.completedCallbacks,
     clientDrains: writer.counters.drainEvents,
     gatewayReadCallbacks: gatewayMetrics.frontReadCallbacks,
+    minimumGatewayReadBytes: gatewayMetrics.minimumFrontReadBytes,
+    maximumGatewayReadBytes: gatewayMetrics.maximumFrontReadBytes,
+    oneByteGatewayReadCallbacks: gatewayMetrics.oneByteFrontReadCallbacks,
     leaderReadCallbacks: gatewayMetrics.leaderReadCallbacks,
     admittedFrames: gatewayMetrics.completeFramesAdmitted,
     upstreamWriteCallbacks: gatewayMetrics.toLeader.completedCallbacks,
@@ -1016,13 +1059,19 @@ async function runMain() {
   const binary = resolve(process.env.GROK_BINARY || "/host-grok/grok");
   const authPath = resolve(process.env.GROK_AUTH_PATH || "/host-grok/auth.json");
   const agentIdPath = resolve(process.env.GROK_AGENT_ID_PATH || "/host-grok/agent_id");
+  const runPostGreenContainment = process.env.RUN_POST_GREEN_CONTAINMENT !== "0";
+  const preserveRawForHarness = process.env.PRESERVE_RAW_FOR_HARNESS === "1";
   let stage = "preflight";
   let recorder;
   let leader;
   let gateway;
+  let completedSuccessfully = false;
   const safeDiagnostics = {
     boundedCompleted: 0,
     boundedPasses: 0,
+    exactOneByteCompleted: 0,
+    exactOneBytePasses: 0,
+    exactOneByteFailureSamples: [],
     failureSamples: [],
     containmentStarted: false,
   };
@@ -1118,21 +1167,81 @@ async function runMain() {
       fail("BOUNDED_AGGREGATE_ACCOUNTING_MISMATCH", stage);
     }
 
-    stage = "post-green-containment";
-    safeDiagnostics.containmentStarted = true;
-    const halfClose = await runHalfClose({ gateway, gatewayPath, stream, recorder });
-    if (!halfClose.passed) fail("HALF_CLOSE_CONTAINMENT_FAILED", stage);
-    const midFrame = await runMidFrameContainment({ gateway, gatewayPath, frames, recorder });
-    if (!midFrame.passed) fail("MID_FRAME_CONTAINMENT_FAILED", stage);
-    const healthTrial = await runBoundedTrial({
-      gateway,
-      gatewayPath,
-      stream,
-      frames,
-      trial: BOUNDED_TRIALS,
-      recorder,
-    });
-    if (!healthTrial.passed || leader.exitCode !== null) fail("LEADER_UNHEALTHY_AFTER_CONTAINMENT", stage);
+    stage = "exact-one-byte-1ms-buffered-gateway";
+    const exactOneByteResults = [];
+    for (let index = 0; index < EXACT_ONE_BYTE_TRIALS; index += 1) {
+      const trial = BOUNDED_TRIALS + index;
+      let result;
+      try {
+        result = await runBoundedTrial({
+          gateway,
+          gatewayPath,
+          stream,
+          frames,
+          trial,
+          recorder,
+          planOverride: makeExactOneBytePlan(stream),
+          phase: "exact-one-byte-1ms-buffered-gateway",
+        });
+      } catch (error) {
+        safeDiagnostics.exactOneByteFailureSamples.push({
+          trial,
+          errorCode: error instanceof ProbeFailure ? error.code : "UNEXPECTED_EXACT_TRIAL_FAILURE",
+        });
+        fail("BUFFERED_ONE_BYTE_1MS_LATE_RESET", stage);
+      }
+      safeDiagnostics.exactOneByteCompleted += 1;
+      const exactPassed = result.passed
+        && result.clientWriteCallbacks === stream.length
+        && result.admittedFrames === frames.length
+        && result.upstreamWriteCallbacks === frames.length
+        && result.minimumGatewayReadBytes === 1
+        && result.oneByteGatewayReadCallbacks > 0;
+      if (exactPassed) safeDiagnostics.exactOneBytePasses += 1;
+      else safeDiagnostics.exactOneByteFailureSamples.push({
+        trial,
+        registered: result.registered,
+        initializeResponse: result.initializeResponse,
+        clientWriteCallbacks: result.clientWriteCallbacks,
+        gatewayReadCallbacks: result.gatewayReadCallbacks,
+        minimumGatewayReadBytes: result.minimumGatewayReadBytes,
+        oneByteGatewayReadCallbacks: result.oneByteGatewayReadCallbacks,
+        admittedFrames: result.admittedFrames,
+        upstreamWriteCallbacks: result.upstreamWriteCallbacks,
+        tails: result.tails,
+      });
+      exactOneByteResults.push(result);
+      if (!exactPassed) fail("BUFFERED_ONE_BYTE_1MS_LATE_RESET", stage);
+    }
+    if (safeDiagnostics.exactOneByteCompleted !== EXACT_ONE_BYTE_TRIALS
+      || safeDiagnostics.exactOneBytePasses !== EXACT_ONE_BYTE_TRIALS
+      || safeDiagnostics.exactOneByteFailureSamples.length !== 0) {
+      fail("BUFFERED_ONE_BYTE_1MS_BELOW_100_OF_100", stage);
+    }
+    const exactOneByteAggregate = aggregateTrials(exactOneByteResults);
+
+    let halfClose;
+    let midFrame;
+    let healthTrial;
+    if (runPostGreenContainment) {
+      stage = "post-green-containment";
+      safeDiagnostics.containmentStarted = true;
+      halfClose = await runHalfClose({ gateway, gatewayPath, stream, recorder });
+      if (!halfClose.passed) fail("HALF_CLOSE_CONTAINMENT_FAILED", stage);
+      midFrame = await runMidFrameContainment({ gateway, gatewayPath, frames, recorder });
+      if (!midFrame.passed) fail("MID_FRAME_CONTAINMENT_FAILED", stage);
+      healthTrial = await runBoundedTrial({
+        gateway,
+        gatewayPath,
+        stream,
+        frames,
+        trial: BOUNDED_TRIALS + EXACT_ONE_BYTE_TRIALS,
+        recorder,
+      });
+      if (!healthTrial.passed || leader.exitCode !== null) {
+        fail("LEADER_UNHEALTHY_AFTER_CONTAINMENT", stage);
+      }
+    }
 
     await gateway.close();
     gateway = undefined;
@@ -1143,18 +1252,20 @@ async function runMain() {
     const rawPath = join(rawDir, "bounded-frame-transport.raw.ndjson");
     const rawCaptureSha256 = sha256File(rawPath);
     const rawRecordCount = readFileSync(rawPath, "utf8").trim().split("\n").filter(Boolean).length;
-    deleteRawContents(rawDir);
+    if (!preserveRawForHarness) deleteRawContents(rawDir);
 
     const summary = {
       schema: "test223-live-bounded-frame-transport-summary/v1",
       ok: true,
       protocolFreeze: false,
+      scriptSha256: sha256File(scriptPath),
       baseline: {
         version: EXPECTED_VERSION,
         binarySha256: EXPECTED_BINARY_SHA256,
         realRegisterAndInitializeFramesCaptured: true,
         modelPromptsIssued: 0,
       },
+      childEnvKeyNames: Object.keys(environment).sort(),
       bounds: {
         trialCount: BOUNDED_TRIALS,
         minimumRequestedSegmentBytes: MIN_SEGMENT_BYTES,
@@ -1181,26 +1292,52 @@ async function runMain() {
         zeroTailTrials: trialResults.filter((result) =>
           Object.values(result.tails).every((value) => value === 0)).length,
       },
+      exactOneByteBufferedGateway: {
+        requestedTrials: EXACT_ONE_BYTE_TRIALS,
+        completedTrials: safeDiagnostics.exactOneByteCompleted,
+        passedTrials: safeDiagnostics.exactOneBytePasses,
+        failedTrials: safeDiagnostics.exactOneByteFailureSamples.length,
+        failureSamples: safeDiagnostics.exactOneByteFailureSamples,
+        requestedBytesPerTrial: stream.length,
+        requestedSegmentsPerTrial: stream.length,
+        interSegmentDelayMs: 1,
+        gatewayAdmissionUnit: "one-complete-native-frame",
+        expectedLeaderFacingFramesPerTrial: frames.length,
+        aggregate: exactOneByteAggregate,
+        minimumGatewayReadBytes: Math.min(...exactOneByteResults
+          .map((result) => result.minimumGatewayReadBytes)
+          .filter(Number.isFinite)),
+        maximumGatewayReadBytes: Math.max(...exactOneByteResults
+          .map((result) => result.maximumGatewayReadBytes)
+          .filter(Number.isFinite)),
+        oneByteGatewayReadCallbacks: exactOneByteResults.reduce(
+          (sum, result) => sum + result.oneByteGatewayReadCallbacks,
+          0,
+        ),
+      },
       containment: {
-        ranOnlyAfterBounded100Of100: true,
-        halfClose,
-        midFrame,
-        leaderHealthAfterContainment: {
+        requested: runPostGreenContainment,
+        ranOnlyAfterBoundedAndExact100Of100: runPostGreenContainment,
+        halfClose: halfClose || null,
+        midFrame: midFrame || null,
+        leaderHealthAfterContainment: healthTrial ? {
           passed: healthTrial.passed,
           registered: healthTrial.registered,
           initializeResponse: healthTrial.initializeResponse,
           leaderProcessAlive: true,
           tails: healthTrial.tails,
-        },
+        } : null,
       },
       rawCapture: {
         storage: "explicit-tmpfs-only",
         sha256: rawCaptureSha256,
         recordCount: rawRecordCount,
-        persisted: false,
-        destroyedBeforeStdout: true,
+        persistedOutsideTmpfs: false,
+        destroyedBeforeStdout: !preserveRawForHarness,
+        destroyedByHarnessCleanup: preserveRawForHarness,
       },
     };
+    completedSuccessfully = true;
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   } catch (error) {
     const sanitized = error instanceof ProbeFailure
@@ -1216,6 +1353,9 @@ async function runMain() {
       protocolFreeze: false,
       stage,
       ...sanitized,
+      noGoTriggered: stage === "exact-one-byte-1ms-buffered-gateway"
+        && ["BUFFERED_ONE_BYTE_1MS_LATE_RESET", "BUFFERED_ONE_BYTE_1MS_BELOW_100_OF_100"]
+          .includes(sanitized.errorCode),
       diagnostics: safeDiagnostics,
     })}\n`);
     process.exitCode = 1;
@@ -1225,7 +1365,9 @@ async function runMain() {
     }
     await terminate(leader);
     try { recorder?.close(); } catch {}
-    try { deleteRawContents(rawDir); } catch {}
+    if (!preserveRawForHarness || !completedSuccessfully) {
+      try { deleteRawContents(rawDir); } catch {}
+    }
   }
 }
 
