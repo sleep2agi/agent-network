@@ -17,8 +17,13 @@ Unix attach relay, and tmux TTY. It covers:
 - registration, Hub task delivery, true tmux `anet grok attach` rendering,
   reply, stop, and same-session resume;
 - exact resolver/agent-node/Grok/PTY/helper environment checks and synthetic
-  credential scans over logs, Grok state, goal state, pending replies,
-  candidate tarballs, captures, and the report.
+credential scans over logs, Grok state, goal state, pending replies,
+candidate tarballs, captures, and the report.
+
+Both the deterministic fake and the authenticated run require a mode-0600
+`trusted_folders.toml` containing exactly the canonical test working
+directory. The harness contains no tmux send-key, paste, or buffer command, so
+a folder confirmation or network turn cannot pass through simulated input.
 
 The runtime stage needs outbound npm access during the first fallback because
 the disposable local registry serves the unpublished `agent-node` tarball and

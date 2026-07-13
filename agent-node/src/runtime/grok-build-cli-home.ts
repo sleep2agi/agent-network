@@ -20,6 +20,7 @@ import {
   writeFileSync,
 } from "fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "path";
+import { homedir } from "os";
 import { buildGrokHelperEnv } from "./grok-child-env";
 
 export interface PrepareGrokCliHomeOptions {
@@ -195,6 +196,14 @@ function writeGeneratedFile(path: string, content: string): void {
   }
 }
 
+/** Remove runtime-generated state without following a planted symlink. */
+function removeGeneratedFile(path: string): void {
+  const stat = lstatIfPresent(path);
+  if (!stat) return;
+  assertGeneratedTarget(path);
+  rmSync(path, { force: true });
+}
+
 function ensureCredentialLink(sourceHome: string, stateHome: string, name: string) {
   const source = join(sourceHome, name);
   const target = join(stateHome, name);
@@ -281,28 +290,99 @@ export function grokProjectPolicyPaths(cwd: string): string[] {
   return grokProjectWalk(cwd).directories.flatMap((directory) => [
     join(directory, ".grok"),
     join(directory, ".claude"),
+    join(directory, ".cursor"),
     join(directory, ".mcp.json"),
+    join(directory, ".envrc"),
   ]);
 }
 
-export function assertNoProjectGrokExecutableSources(cwd: string): void {
+export function assertNoProjectGrokExecutableSources(cwd: string, strictFolderTrust = false): void {
   for (const directory of grokProjectWalk(cwd).directories) {
+    // A trusted folder can activate these native, compatibility, and direnv
+    // sources before a model tool sandbox exists.  The shared-TUI runtime
+    // therefore grants folder trust only after every executable source is
+    // absent.  Whole policy directories are separately denied to the live
+    // Grok process so they cannot be planted after this admission check.
     const grokDir = join(directory, ".grok");
     const grokStat = lstatIfPresent(grokDir);
-    if (!grokStat) continue;
-    if (grokStat.isSymbolicLink() || !grokStat.isDirectory()) {
-      throw new Error(`grok-build-cli refuses project Grok state at ${grokDir}: expected a real directory`);
+    if (grokStat && (grokStat.isSymbolicLink() || !grokStat.isDirectory())) {
+      throw new Error(
+        `grok-build-cli refuses project policy state at ${grokDir}: expected a real directory`,
+      );
     }
-    for (const executableSource of ["hooks", "plugins"]) {
-      const candidate = join(grokDir, executableSource);
-      if (lstatIfPresent(candidate)) {
+    // Preserve the pre-preview headless contract: native project hooks and
+    // plugins are always refused, but other project compatibility state stays
+    // governed by Grok's normal untrusted-folder behavior.
+    for (const executableSource of [".grok/hooks", ".grok/plugins"]) {
+      const candidate = join(directory, executableSource);
+      if (!lstatIfPresent(candidate)) continue;
+      throw new Error(
+        `grok-build-cli refuses project executable configuration at ${candidate}: `
+        + "Grok can execute it outside the model tool sandbox",
+      );
+    }
+    if (!strictFolderTrust) continue;
+
+    // Pinned 0.2.93 folder trust activates native and compatibility extension
+    // trees as a unit.  Use an intentionally empty structural allowlist for
+    // those directories: any present entry, including an unknown future one,
+    // is refused rather than being silently activated by our trust grant.
+    for (const policyDirectory of [".grok", ".claude", ".cursor"]) {
+      const candidate = join(directory, policyDirectory);
+      const stat = lstatIfPresent(candidate);
+      if (stat && (stat.isSymbolicLink() || !stat.isDirectory())) {
         throw new Error(
-          `grok-build-cli refuses project ${executableSource} at ${candidate}: `
-          + "Grok can execute their code outside the model tool sandbox",
+          `grok-build-cli refuses project policy state at ${candidate}: expected a real directory`,
+        );
+      }
+      if (stat && readdirSync(candidate).length !== 0) {
+        throw new Error(
+          `grok-build-cli refuses project executable configuration at ${candidate}: `
+          + "shared-TUI folder trust requires an empty project extension directory",
         );
       }
     }
+    for (const source of [".mcp.json", ".envrc"]) {
+      const candidate = join(directory, source);
+      if (!lstatIfPresent(candidate)) continue;
+      throw new Error(
+        `grok-build-cli refuses project executable configuration at ${candidate}: `
+        + "folder trust would activate code outside the model tool sandbox",
+      );
+    }
   }
+}
+
+/**
+ * Validate the exact folder that will be entered into Grok's trust store.
+ * Trust never widens to a repository root, parent, symlink alias, home, or `/`.
+ */
+function pathContains(parent: string, candidate: string): boolean {
+  const rel = relative(parent, candidate);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+    && !isAbsolute(rel));
+}
+
+function trustedProjectDirectory(projectCwd: string, protectedPaths: readonly string[]): string {
+  const lexical = resolve(projectCwd);
+  const canonical = realpathSync(lexical);
+  if (canonical !== lexical) {
+    throw new Error("grok-build-cli refuses folder trust through a symlinked project path");
+  }
+  const stat = statSync(canonical);
+  if (!stat.isDirectory()) {
+    throw new Error("grok-build-cli folder trust target must be a directory");
+  }
+  const canonicalHome = realpathSync(resolve(homedir()));
+  if (dirname(canonical) === canonical || canonical === canonicalHome) {
+    throw new Error("grok-build-cli refuses over-broad folder trust for a home or filesystem root");
+  }
+  for (const protectedPath of [canonicalHome, ...protectedPaths.map((path) => resolve(path))]) {
+    if (pathContains(canonical, protectedPath)) {
+      throw new Error("grok-build-cli refuses folder trust overlapping runtime credential or state paths");
+    }
+  }
+  return canonical;
 }
 
 /**
@@ -460,6 +540,14 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   const sourceHome = resolve(opts.sourceHome);
   const stateRoot = resolve(opts.stateRoot);
   const stateHome = resolve(opts.stateHome);
+  const authPath = join(sourceHome, "auth.json");
+  const sourceHomeStat = lstatIfPresent(sourceHome);
+  if (!sourceHomeStat || sourceHomeStat.isSymbolicLink() || !sourceHomeStat.isDirectory()) {
+    throw new Error("grok-build-cli source GROK_HOME must be an existing real directory");
+  }
+  if (realpathSync(sourceHome) !== sourceHome) {
+    throw new Error("grok-build-cli source GROK_HOME must not traverse a symlinked ancestor");
+  }
   const stateRelative = relative(stateRoot, stateHome);
   if (
     !stateRelative
@@ -474,9 +562,18 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   if (sourceHome === stateHome) {
     throw new Error("grok-build-cli source GROK_HOME and isolated state home must be different");
   }
+  if (opts.useLeader === true && !opts.projectCwd) {
+    throw new Error("grok-build-cli shared TUI requires an explicit project cwd for folder trust");
+  }
+  // Validate project trust before creating, deleting, or rewriting any state.
+  const projectCwd = opts.projectCwd
+    ? (opts.useLeader === true
+      ? trustedProjectDirectory(opts.projectCwd, [sourceHome, stateRoot, stateHome, authPath])
+      : realpathSync(resolve(opts.projectCwd)))
+    : undefined;
+  if (projectCwd) assertNoProjectGrokExecutableSources(projectCwd, opts.useLeader === true);
   // Validate credentials before creating or rewriting any isolated state.
   // A rejected source must not be partially adopted by this runtime.
-  const authPath = join(sourceHome, "auth.json");
   const sourceAuth = readPrivateSourceAuth(authPath);
   ensurePrivateDirectory(stateRoot, "isolated state root");
   ensurePrivateDirectory(stateHome, "isolated state home");
@@ -498,8 +595,6 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     rmSync(join(stateHome, name), { recursive: true, force: true });
   }
 
-  if (opts.projectCwd) assertNoProjectGrokExecutableSources(opts.projectCwd);
-
   const profileIdPath = join(stateHome, ".sandbox-profile-id");
   let profileId = (readGeneratedFile(profileIdPath) || "").trim();
   if (!/^anet-[a-f0-9]{24}$/.test(profileId)) {
@@ -520,6 +615,7 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
   // restarted TUI load executable hooks/MCPs or preauthorization state.
   const requestedDenyPaths = [...new Set([
     ...opts.denyPaths.filter(Boolean).map((path) => resolve(path)),
+    authPath,
     ...(opts.projectCwd ? grokProjectPolicyPaths(opts.projectCwd) : []),
   ])];
   const denyPaths = requestedDenyPaths.filter((candidate) => !requestedDenyPaths.some((parent) => {
@@ -555,6 +651,9 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     "[folder_trust]",
     "enabled = true",
     "",
+    "[session]",
+    "load_envrc = false",
+    "",
     // Grok 0.2.93 defaults auto_background_on_timeout=true, but a safe
     // allowlist without the background task tools derives
     // enabled_background=false. That combination is rejected while the agent
@@ -565,6 +664,22 @@ export function prepareGrokCliHome(opts: PrepareGrokCliHomeOptions): GrokCliHome
     "auto_background_on_timeout = false",
     "",
   ].join("\n"));
+
+  const trustStorePath = join(stateHome, "trusted_folders.toml");
+  if (opts.useLeader === true) {
+    // Captured from pinned Grok 0.2.93.  Replace the entire runtime-owned
+    // store on every preparation so a prior run cannot widen trust to a
+    // parent or sibling folder. JSON string escaping is valid TOML basic-
+    // string escaping for absolute Unix paths and prevents key injection.
+    writeGeneratedFile(trustStorePath, [
+      `[folders.${JSON.stringify(projectCwd!)}]`,
+      "trusted = true",
+      `decided_at = ${Math.floor(Date.now() / 1_000)}`,
+      "",
+    ].join("\n"));
+  } else {
+    removeGeneratedFile(trustStorePath);
+  }
 
   if (opts.useLeader === true) {
     // Defense in depth and forward compatibility. The PTY arbiter remains the

@@ -113,10 +113,40 @@ const sessionId = resume
   ? argv[resumeIndex + 1]
   : sessionIndex >= 0 ? argv[sessionIndex + 1] : "";
 const grokHome = process.env.GROK_HOME || process.env.HOME || os.homedir();
+const trustStorePath = path.join(grokHome, "trusted_folders.toml");
+
+function verifyExactFolderTrust() {
+  let content = "";
+  let mode = 0;
+  try {
+    content = fs.readFileSync(trustStorePath, "utf8");
+    mode = fs.statSync(trustStorePath).mode & 0o777;
+  } catch {
+    return { exact: false, mode, folderCount: 0 };
+  }
+  const exactHeader = `[folders.${JSON.stringify(cwd)}]`;
+  const lines = content.split("\n");
+  return {
+    exact: mode === 0o600
+      && lines.length === 4
+      && lines[0] === exactHeader
+      && lines[1] === "trusted = true"
+      && /^decided_at = \d+$/.test(lines[2] || "")
+      && lines[3] === "",
+    mode,
+    folderCount: lines[0] === exactHeader ? 1 : 0,
+  };
+}
+
+const trustObservation = verifyExactFolderTrust();
 
 if (!argv.includes("--leader") || !leaderSocket || !sessionId) {
   process.stderr.write("fake grok: main TUI requires --leader, leader socket, and session id\n");
   process.exit(64);
+}
+if (!trustObservation.exact) {
+  process.stderr.write("fake grok: exact owner-only folder trust was not prepared\n");
+  process.exit(65);
 }
 
 const sessionDir = path.join(
@@ -138,6 +168,9 @@ recordEnvironment("spawn", {
   resume,
   terminalEnvExpected: process.env.PWD === cwd && process.env.TERM === "xterm-256color",
   parentPidMatches: expectedParentPid > 1 && expectedParentPid === process.ppid,
+  folderTrustExact: trustObservation.exact,
+  folderTrustMode: trustObservation.mode,
+  folderTrustCount: trustObservation.folderCount,
   ...readDerivedProcessEnvironment(expectedParentPid),
 });
 

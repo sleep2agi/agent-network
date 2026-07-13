@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -11,6 +12,7 @@ import {
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
+import { homedir } from "os";
 import { dirname, join, resolve } from "path";
 import {
   acquireGrokProjectTurnLock,
@@ -58,9 +60,12 @@ describe("prepareGrokCliHome", () => {
     expect(config).toContain("[cli]\nuse_leader = false");
     expect(config).not.toContain("default_selected_permission");
     expect(config).toContain("[toolset.bash]\nauto_background_on_timeout = false");
+    expect(config).toContain("[session]\nload_envrc = false");
     expect(existsSync(join(stateHome, "requirements.toml"))).toBe(false);
+    expect(existsSync(join(stateHome, "trusted_folders.toml"))).toBe(false);
     const sandbox = readFileSync(join(stateHome, "sandbox.toml"), "utf8");
     expect(sandbox).toContain(secretDir);
+    expect(sandbox).toContain(join(sourceHome, "auth.json"));
     expect(sandbox).toContain('extends = "read-only"');
     expect(sandbox).toContain('extends = "workspace"');
   });
@@ -186,6 +191,12 @@ describe("prepareGrokCliHome", () => {
     expect(config).toContain("remember_tool_approvals = false");
     expect(readFileSync(join(stateHome, "requirements.toml"), "utf8"))
       .toBe("[ui]\ndisable_bypass_permissions_mode = true\nyolo = false\n");
+    const trustStore = join(stateHome, "trusted_folders.toml");
+    const trust = readFileSync(trustStore, "utf8");
+    expect(trust).toContain(`[folders.${JSON.stringify(join(root, "project"))}]`);
+    expect(trust).toContain("trusted = true");
+    expect(trust).toMatch(/decided_at = \d+/);
+    expect(statSync(trustStore).mode & 0o777).toBe(0o600);
     const sandbox = readFileSync(join(stateHome, "sandbox.toml"), "utf8");
     expect(sandbox).toContain(join(root, "project", ".grok"));
     expect(sandbox).toContain(join(root, "project", ".claude"));
@@ -200,6 +211,7 @@ describe("prepareGrokCliHome", () => {
       useLeader: false,
     });
     expect(existsSync(join(stateHome, "requirements.toml"))).toBe(false);
+    expect(existsSync(trustStore)).toBe(false);
     expect(readFileSync(join(stateHome, "config.toml"), "utf8"))
       .not.toContain("default_selected_permission");
   });
@@ -207,12 +219,41 @@ describe("prepareGrokCliHome", () => {
   it("refuses to claim sandbox isolation when no deny target exists", () => {
     const root = mkdtempSync(join(tmpdir(), "grok-cli-home-empty-"));
     roots.push(root);
+    mkdirSync(join(root, "source"));
     expect(() => prepareGrokCliHome({
       sourceHome: join(root, "source"),
       stateRoot: root,
       stateHome: join(root, "state"),
       denyPaths: [join(root, "missing")],
     })).toThrow("existing secret path");
+  });
+
+  it("rejects a source GROK_HOME reached through an ancestor symlink before state mutation", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-source-ancestor-link-"));
+    roots.push(root);
+    const project = join(root, "project");
+    const sourceHome = join(project, ".grok-auth");
+    const alias = join(root, "project-alias");
+    const aliasedSourceHome = join(alias, ".grok-auth");
+    const stateRoot = join(root, "states");
+    const stateHome = join(stateRoot, "node");
+    const authPath = join(sourceHome, "auth.json");
+    mkdirSync(sourceHome, { recursive: true });
+    mkdirSync(join(project, ".anet"), { recursive: true });
+    writeFileSync(authPath, "{\"sentinel\":true}\n", { mode: 0o600 });
+    symlinkSync(project, alias, "dir");
+
+    expect(() => prepareGrokCliHome({
+      sourceHome: aliasedSourceHome,
+      stateRoot,
+      stateHome,
+      projectCwd: project,
+      useLeader: true,
+      denyPaths: [join(project, ".anet")],
+    })).toThrow("must not traverse a symlinked ancestor");
+    expect(existsSync(stateHome)).toBe(false);
+    expect(readFileSync(authPath, "utf8")).toBe("{\"sentinel\":true}\n");
+    expect(statSync(authPath).mode & 0o777).toBe(0o600);
   });
 
   it("removes runtime-owned native hooks before every turn", () => {
@@ -269,7 +310,185 @@ describe("prepareGrokCliHome", () => {
       stateHome,
       projectCwd,
       denyPaths: [secretDir],
-    })).toThrow("outside the model tool sandbox");
+    })).toThrow("project executable configuration");
+  });
+
+  it("trusts only the exact canonical nested cwd and atomically replaces stale grants", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-trust-exact-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateRoot = join(root, "states");
+    const stateHome = join(stateRoot, "node");
+    const project = join(root, "project");
+    const nested = join(project, "packages", "quoted-\"line\napp");
+    const secretDir = join(project, ".anet");
+    mkdirSync(sourceHome, { recursive: true });
+    mkdirSync(join(project, ".git"), { recursive: true });
+    mkdirSync(nested, { recursive: true });
+    mkdirSync(secretDir, { recursive: true });
+    mkdirSync(stateHome, { recursive: true });
+    const trustStore = join(stateHome, "trusted_folders.toml");
+    writeFileSync(trustStore, [
+      `[folders.${JSON.stringify(project)}]`,
+      "trusted = true",
+      "decided_at = 1",
+      "",
+    ].join("\n"), { mode: 0o644 });
+
+    prepareGrokCliHome({
+      sourceHome,
+      stateRoot,
+      stateHome,
+      projectCwd: nested,
+      useLeader: true,
+      denyPaths: [secretDir],
+    });
+
+    const trust = readFileSync(trustStore, "utf8");
+    const parsed = Bun.TOML.parse(trust) as {
+      folders: Record<string, { trusted: boolean; decided_at: number }>;
+    };
+    expect(Object.keys(parsed)).toEqual(["folders"]);
+    expect(Object.keys(parsed.folders)).toEqual([nested]);
+    expect(Object.keys(parsed.folders[nested]!)).toEqual(["trusted", "decided_at"]);
+    expect(parsed.folders[nested]!.trusted).toBe(true);
+    expect(Number.isSafeInteger(parsed.folders[nested]!.decided_at)).toBe(true);
+    expect(trust).not.toContain("quoted-\"line\napp");
+    expect(trust).toContain("quoted-\\\"line\\napp");
+    expect(statSync(trustStore).mode & 0o777).toBe(0o600);
+    expect(readdirSync(stateHome).some((name) => /^\.trusted_folders\.toml\..+\.tmp$/.test(name))).toBe(false);
+  });
+
+  it("rejects broad or symlinked folder-trust targets before writing trust state", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-trust-boundary-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateRoot = join(root, "states");
+    const stateHome = join(stateRoot, "node");
+    const project = join(root, "project");
+    const alias = join(root, "project-alias");
+    const secretDir = join(project, ".anet");
+    mkdirSync(sourceHome, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    mkdirSync(secretDir, { recursive: true });
+    symlinkSync(project, alias, "dir");
+
+    const base = { sourceHome, stateRoot, stateHome, denyPaths: [secretDir], useLeader: true };
+    expect(() => prepareGrokCliHome({ ...base, projectCwd: alias }))
+      .toThrow("symlinked project path");
+    expect(existsSync(stateHome)).toBe(false);
+    expect(() => prepareGrokCliHome({ ...base, projectCwd: "/" }))
+      .toThrow("over-broad folder trust");
+    expect(() => prepareGrokCliHome({ ...base, projectCwd: homedir() }))
+      .toThrow("over-broad folder trust");
+    expect(() => prepareGrokCliHome({ ...base, projectCwd: dirname(homedir()) }))
+      .toThrow();
+    expect(() => prepareGrokCliHome({ ...base, projectCwd: root }))
+      .toThrow("overlapping runtime credential or state paths");
+    expect(() => prepareGrokCliHome({ ...base, projectCwd: undefined }))
+      .toThrow("requires an explicit project cwd");
+  });
+
+  it("refuses a planted trust-store symlink and leaves its target untouched", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-trust-link-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateRoot = join(root, "states");
+    const stateHome = join(stateRoot, "node");
+    const project = join(root, "project");
+    const secretDir = join(project, ".anet");
+    const external = join(root, "external-trust.toml");
+    mkdirSync(sourceHome, { recursive: true });
+    mkdirSync(stateHome, { recursive: true });
+    mkdirSync(secretDir, { recursive: true });
+    writeFileSync(external, "sentinel\n", { mode: 0o644 });
+    symlinkSync(external, join(stateHome, "trusted_folders.toml"));
+
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot,
+      stateHome,
+      projectCwd: project,
+      useLeader: true,
+      denyPaths: [secretDir],
+    })).toThrow("expected a regular file");
+    expect(readFileSync(external, "utf8")).toBe("sentinel\n");
+    expect(statSync(external).mode & 0o777).toBe(0o644);
+  });
+
+  it("rejects every project executable source before granting folder trust", () => {
+    const sources = [
+      ".grok/config.toml",
+      ".grok/sandbox.toml",
+      ".grok/requirements.toml",
+      ".grok/hooks-paths/entry.json",
+      ".grok/settings.json",
+      ".grok/managed_config.toml",
+      ".grok/lsp.json",
+      ".grok/hooks/hook.json",
+      ".grok/plugins/plugin.json",
+      ".mcp.json",
+      ".claude/settings.json",
+      ".claude/settings.local.json",
+      ".cursor/hooks.json",
+      ".cursor/mcp.json",
+      ".grok/future-extension.bin",
+      ".envrc",
+    ];
+    for (const [index, source] of sources.entries()) {
+      const root = mkdtempSync(join(tmpdir(), `grok-cli-policy-${index}-`));
+      roots.push(root);
+      const sourceHome = join(root, "source");
+      const stateRoot = join(root, "states");
+      const stateHome = join(stateRoot, "node");
+      const project = join(root, "project");
+      const secretDir = join(project, ".anet");
+      mkdirSync(sourceHome, { recursive: true });
+      mkdirSync(secretDir, { recursive: true });
+      mkdirSync(dirname(join(project, source)), { recursive: true });
+      writeFileSync(join(project, source), "tripwire\n");
+      expect(() => prepareGrokCliHome({
+        sourceHome,
+        stateRoot,
+        stateHome,
+        projectCwd: project,
+        useLeader: true,
+        denyPaths: [secretDir],
+      })).toThrow("project executable configuration");
+      expect(existsSync(stateHome)).toBe(false);
+    }
+  });
+
+  it("does not impose the shared-folder strict policy on legacy headless mode", () => {
+    const root = mkdtempSync(join(tmpdir(), "grok-cli-headless-compat-"));
+    roots.push(root);
+    const sourceHome = join(root, "source");
+    const stateRoot = join(root, "states");
+    const stateHome = join(stateRoot, "node");
+    const project = join(root, "project");
+    const secretDir = join(project, ".anet");
+    mkdirSync(sourceHome, { recursive: true });
+    mkdirSync(secretDir, { recursive: true });
+    for (const source of [
+      ".grok/config.toml",
+      ".claude/settings.json",
+      ".cursor/mcp.json",
+      ".mcp.json",
+      ".envrc",
+    ]) {
+      mkdirSync(dirname(join(project, source)), { recursive: true });
+      writeFileSync(join(project, source), "legacy-headless-input\n");
+    }
+
+    expect(() => prepareGrokCliHome({
+      sourceHome,
+      stateRoot,
+      stateHome,
+      projectCwd: project,
+      useLeader: false,
+      denyPaths: [secretDir],
+    })).not.toThrow();
+    expect(existsSync(join(stateHome, "trusted_folders.toml"))).toBe(false);
   });
 
   it("rejects repo-root hooks from a nested cwd and dangling hook links", () => {
@@ -293,7 +512,7 @@ describe("prepareGrokCliHome", () => {
       stateHome,
       projectCwd: nested,
       denyPaths: [secretDir],
-    })).toThrow("project hooks");
+    })).toThrow("project executable configuration");
   });
 
   it("rejects a symlinked project .grok directory", () => {

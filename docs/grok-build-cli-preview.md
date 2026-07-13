@@ -53,6 +53,13 @@ Press `Ctrl-]` to detach without stopping the node.
 
 The default `grok-build-cli` profile created by `anet` enables co-presence. `anet node start` owns one Grok PTY and exposes a local, same-user attach socket. The attached terminal renders that TUI. A network task sent to `grok-shared` is submitted into the same session, appears in the TUI, and its completed answer is routed to the original CommHub task.
 
+The runtime prepares Grok's owner-only folder-trust store non-interactively,
+but grants trust to the exact canonical working directory only. It first
+refuses project MCP, LSP, hook, plugin, permission/sandbox configuration, and
+`.envrc` sources that folder trust could activate; it never widens the grant
+to a repository root, parent, symlink alias, home directory, or filesystem
+root. This is why a normal start requires no simulated `y` keypress.
+
 The preview package gate covers the CommHub inbox path. Feishu is explicitly
 refused for `grok-build-cli` because its forked worker does not yet share this
 runtime's credential-isolated log boundary; use a separate non-Grok node for
@@ -114,6 +121,7 @@ This launches `grok agent stdio` and uses ACP session handling. It is not an ali
 - Do not enable permission bypass for the co-presence profile.
 - Treat every approval prompt as human-visible experimental behavior, not as proof of production-grade owner or lease enforcement.
 - Grok children and runtime lock helpers receive exact, from-empty environment allowlists. CommHub/cloud credentials are not inherited by those processes.
+- Folder trust is runtime-owned, mode `0600`, and contains exactly the current canonical working directory; project executable configuration is a startup error rather than implicitly trusted code.
 - Network task text and outbound replies are scrubbed before ordinary logs, status, pending replies, and external delivery. The isolated Grok conversation transcript is the only owner-only raw transcript store: its directories are `0700` and regular files are `0600`; do not copy it into reports or support bundles.
 - Do not infer `latest` support from this document. Promotion requires a separate review and release decision.
 
@@ -124,5 +132,10 @@ This launches `grok agent stdio` and uses ACP session handling. It is not an ali
 `Node ... uses legacy headless grok-build-cli mode` means the profile was created with `--grok-headless`. Create a new co-presence profile explicitly rather than editing socket/session fields by hand.
 
 `grok attach requires an interactive TTY` means the attach command is running under redirected input/output. Run it from a real terminal on the same host and user account as the node.
+
+`grok-build-cli refuses project executable configuration` means the working
+tree contains a project MCP/LSP/hook/plugin/config/direnv source that Grok
+folder trust could execute. Remove or isolate that source before using the
+shared-TUI preview; the runtime will not click through or broaden trust.
 
 If `anet` says the preview `agent-node` does not advertise `grok-build-cli`, the required preview package has not been published or cached yet. Do not force an older package to run the profile.

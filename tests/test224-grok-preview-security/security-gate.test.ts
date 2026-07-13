@@ -313,11 +313,20 @@ describe("test224 durable text boundaries", () => {
       join(stateHome, "config.toml"),
       join(stateHome, "sandbox.toml"),
       join(stateHome, "requirements.toml"),
+      join(stateHome, "trusted_folders.toml"),
       join(sessionDir, "chat_history.jsonl"),
       join(sessionDir, "tool-logs", "result.log"),
     ]) {
       expect(statSync(privateFile).mode & 0o777).toBe(0o600);
     }
+    const trust = readFileSync(join(stateHome, "trusted_folders.toml"), "utf8");
+    const parsed = Bun.TOML.parse(trust) as {
+      folders: Record<string, { trusted: boolean; decided_at: number }>;
+    };
+    expect(Object.keys(parsed)).toEqual(["folders"]);
+    expect(Object.keys(parsed.folders)).toEqual([project]);
+    expect(parsed.folders[project]?.trusted).toBe(true);
+    expect(Number.isSafeInteger(parsed.folders[project]?.decided_at)).toBe(true);
   });
 
   test("agent-node wiring uses the shared redactor for logs and pending queue", () => {

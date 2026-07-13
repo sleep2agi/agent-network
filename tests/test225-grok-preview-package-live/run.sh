@@ -40,6 +40,13 @@ REGISTER_LOG=/tmp/test225-register.raw.log
 CREATE_LOG=/tmp/test225-create.raw.log
 HEADLESS_CREATE_LOG=/tmp/test225-headless-create.raw.log
 REAL_CREATE_LOG=/tmp/test225-real-create.raw.log
+
+# The package gate must observe native shared-TUI rendering. It may not make a
+# trust prompt or network turn pass by typing into tmux on the user's behalf.
+if grep -Eq 'tmux[[:space:]]+(send[-]keys|paste[-]buffer|load[-]buffer)' "$0"; then
+  printf 'FAIL: test225 contains a forbidden tmux input command\n' >&2
+  exit 1
+fi
 GLOBAL_INSTALL_LOG=/tmp/test225-global-install.raw.log
 export HOME
 export PATH="/root/.bun/bin:/usr/local/bin:/usr/bin:/bin"
@@ -47,8 +54,10 @@ export COMMHUB_DB=/tmp/test225-commhub.db
 export HOST=127.0.0.1
 export PORT="$HUB_PORT"
 
-mkdir -p "$ARTIFACT_DIR" "$HOME" "$WORK"
-chmod 700 "$HOME" "$WORK"
+mkdir -p "$ARTIFACT_DIR" "$HOME/.grok" "$WORK"
+chmod 700 "$HOME" "$HOME/.grok" "$WORK"
+[ ! -e "$HOME/.grok/auth.json" ] \
+  || { printf 'FAIL: deterministic test home unexpectedly contains auth state\n' >&2; exit 1; }
 : >"$REPORT"
 
 log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
@@ -626,6 +635,9 @@ if ! jq -e -s --slurpfile expected "$EXPECTED_GROK_ENV_KEYS" \
     and (if .kind == "spawn"
       then .envKeys == $expectedPty[0] and .terminalEnvExpected == true
         and .parentPidMatches == true
+        and .folderTrustExact == true
+        and .folderTrustMode == 384
+        and .folderTrustCount == 1
         and .parentEnvKeys == $expectedParent[0]
         and (.parentForbiddenKeys | length) == 0
         and .parentMarkerValueObserved == false
@@ -860,6 +872,8 @@ wait_pane test225-resume-attach 'GROK_PREVIEW_RESUME_225_B' "$RESUME_CAPTURE" 10
   || fail "stop/resume changed the Grok session id"
 jq -e -s '([.[] | select(.kind == "spawn")] | length) >= 2
   and ([.[] | select(.kind == "spawn")][-1].resume == true)
+  and all(.[] | select(.kind == "spawn");
+    .folderTrustExact == true and .folderTrustMode == 384 and .folderTrustCount == 1)
   and all(.[]; (.forbiddenKeys | length) == 0 and .markerValueObserved == false)' \
   "$FAKE_OBSERVATIONS" >/dev/null \
   || fail "fake Grok did not resume or resumed with a forbidden env"
@@ -1035,6 +1049,7 @@ log "source_escape_hatches=0"
 log "npx_preview_fallback=PASS"
 log "global_agent_node_resume=PASS"
 log "external_publish_actions=0"
+log "tmux_input_commands_issued=0"
 while IFS= read -r tarball; do
   log "candidate_tarball_sha256=$(sha256sum "$tarball" | awk '{print $1}') file=$(basename "$tarball")"
 done < <(find /candidate -maxdepth 1 -type f -name '*.tgz' | sort)
