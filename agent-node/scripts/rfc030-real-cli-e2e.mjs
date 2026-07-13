@@ -159,6 +159,7 @@ async function startServer() {
     onFrame(_h) { return () => {}; },
     onClose(_h) { return () => {}; },
     async close() {},
+    abort() {},
   };
   const server = new TuiWsServer({
     bearer,

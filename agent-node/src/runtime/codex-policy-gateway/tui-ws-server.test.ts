@@ -121,6 +121,7 @@ function makeMinimalOpts(): TuiWsServerOptions & { bearerPlaintext: string } {
     onFrame(_h: (raw: unknown) => void) { return () => {}; },
     onClose(_h: () => void) { return () => {}; },
     async close() { return; },
+    abort() { /* no-op fake */ },
   };
   return {
     bearer, humanOwner, authorizer, initProvider, diagnostics,

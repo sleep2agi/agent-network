@@ -58,6 +58,8 @@ class FakeUpstream implements UpstreamTransport {
       for (const h of [...this.closeHandlers]) { try { h(); } catch { /* silent */ } }
     }
   }
+  abortCallCount = 0;
+  abort(): void { this.abortCallCount++; }
   emitFrame(raw: unknown): void { for (const h of [...this.frameHandlers]) h(raw); }
   emitClose(): void { for (const h of [...this.closeHandlers]) h(); }
 }
@@ -305,6 +307,7 @@ describe("BackendUdsServer — sendInternal + reject once (router-driven)", () =
       onFrame(): () => void { return () => {}; }
       onClose(): () => void { return () => {}; }
       async close(): Promise<void> {}
+      abort(): void {}
     }
     const upstream = new SyncThrowUpstream();
     const diagEntries: InternalErrorEntry[] = [];

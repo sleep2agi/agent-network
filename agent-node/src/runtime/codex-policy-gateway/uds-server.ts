@@ -65,10 +65,38 @@ export interface UpstreamTransport {
   onFrame(handler: (raw: unknown) => void): () => void;
   onClose(handler: () => void): () => void;
   /**
-   * Force-close the upstream transport. B owns the wire connection;
-   * lifecycle awaits this during shutdown. Idempotent.
+   * Graceful close. Lifecycle awaits this during shutdown but bounds
+   * the wait — see `abort()`. Idempotent; a second call may resolve
+   * immediately if the transport is already closed. May reject if
+   * the transport cannot close cleanly; lifecycle treats a rejection
+   * as a failed close and escalates to `abort()`.
+   *
+   * 副指挥 3cb7ba9b Commit 2 #4: `close()` alone is NOT sufficient —
+   * a hostile / hung transport can leave `close()` unresolved
+   * forever. Lifecycle races this promise against a bounded timeout
+   * and falls back to `abort()`.
    */
   close(): Promise<void>;
+  /**
+   * REQUIRED force-terminate contract (副指挥 3cb7ba9b Commit 2 #3).
+   *
+   * Semantics:
+   *   - Synchronous side-effects only. `abort()` returns void (no
+   *     Promise); after it returns, no further `onFrame` / `onClose`
+   *     handler on this transport is guaranteed to fire.
+   *   - Must NOT throw for the ordinary "already terminated" case
+   *     (idempotent). May throw only on genuinely unexpected native
+   *     failure; lifecycle catches the throw and transitions to a
+   *     truthful `stop_failed` terminal state (Commit 2 #5).
+   *   - After abort, `close()` MAY still resolve or reject; the
+   *     lifecycle no longer waits on it once abort has fired.
+   *
+   * B's real Codex client transport implements this by unbinding
+   * handlers, destroying the child process / socket, and setting an
+   * internal terminated flag. Fakes used in tests do the same at
+   * the observation surface.
+   */
+  abort(): void;
 }
 
 export interface InternalOrigin {

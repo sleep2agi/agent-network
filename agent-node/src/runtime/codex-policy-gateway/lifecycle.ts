@@ -219,7 +219,45 @@ export interface GatewayLifecycleOptions {
   readonly backendCapability: string;
 }
 
-export type LifecycleState = "created" | "starting" | "running" | "stopping" | "stopped";
+/**
+ * Lifecycle state machine (副指挥 3cb7ba9b Commit 2).
+ *
+ * Terminal states are `stopped` (clean teardown) and `stop_failed`
+ * (close/abort surfaced an error or the bounded close timeout
+ * elapsed and the forced abort itself threw). Reporting `stopped`
+ * when the transport failed to close would be a lie — callers use
+ * the truthful `stop_failed` to escalate.
+ *
+ * Transitions:
+ *   created  → starting  (start())
+ *   starting → running    (doStart resolves)
+ *   starting → stopped    (rollbackStartFailure, no partial bind)
+ *   starting → stop_failed (rollbackStartFailure with a
+ *                           close/abort throw)
+ *   running  → stopping   (stop() begins OR upstream close cascade)
+ *   stopping → stopped    (clean teardown)
+ *   stopping → stop_failed (bounded close timeout + abort throw,
+ *                           or close throw + abort throw)
+ *   * → * : no transition after a terminal state; stop() on a
+ *           terminal state returns the cached final promise.
+ */
+export type LifecycleState =
+  | "created"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "stopped"
+  | "stop_failed";
+
+/**
+ * 副指挥 3cb7ba9b Commit 2 #4: bounded timeout for a graceful
+ * `upstreamTransport.close()`. If close hasn't resolved after this
+ * many ms, lifecycle calls `abort()` and stops waiting on close.
+ * Chosen small enough to keep an unresponsive transport from
+ * blocking teardown indefinitely, but generous enough for a real
+ * WebSocket / process-tree close handshake on healthy machines.
+ */
+export const UPSTREAM_CLOSE_TIMEOUT_MS = 2_000;
 
 export class GatewayLifecycle {
   private readonly opts: GatewayLifecycleOptions;
@@ -253,6 +291,24 @@ export class GatewayLifecycle {
    */
   private backendStarted = false;
   private tuiStarted = false;
+  /**
+   * 副指挥 3cb7ba9b Commit 2 #1 (shutdown single-flight): every
+   * teardown entry point (`stop()`, `onUpstreamCloseFromRouter`,
+   * `rollbackStartFailure` post-terminal reentries) funnels through
+   * `runShutdown()` which memoises the shutdown Promise. Concurrent
+   * callers share the SAME promise; the teardown sequence executes
+   * at most once. Cleared only when we transition into a terminal
+   * state (`stopped` / `stop_failed`).
+   */
+  private shutdownPromise: Promise<void> | null = null;
+  /**
+   * 副指挥 3cb7ba9b Commit 2 #5: truthful failure state. If
+   * `upstreamTransport.close()` throws / times out AND the follow-up
+   * `abort()` also throws, the lifecycle transitions to
+   * `stop_failed` and preserves the cause here. Not cleared once
+   * set — a lifecycle in `stop_failed` cannot recover.
+   */
+  private stopFailureError: Error | null = null;
 
   constructor(opts: GatewayLifecycleOptions) {
     this.opts = opts;
@@ -261,6 +317,14 @@ export class GatewayLifecycle {
   currentState(): LifecycleState {
     return this.state;
   }
+
+  /**
+   * 副指挥 3cb7ba9b Commit 2 #5: if the lifecycle ended in
+   * `stop_failed`, return the captured cause. Callers use this to
+   * escalate — a truthful `stop_failed` with the original error is
+   * strictly better than a lying `stopped`.
+   */
+  stopFailure(): Error | null { return this.stopFailureError; }
 
   // 副指挥 1b24ae71 P1: raw coordinator accessor REMOVED. External
   // observers use typed snapshots (`humanOwnerAttached()` below) or
@@ -441,11 +505,18 @@ export class GatewayLifecycle {
    *   3. AWAIT backendServer.stop() if started (UDS unlink + socket
    *      cleanup + created-paths sweep — write-path critical to the
    *      P0-1 repro).
-   *   4. AWAIT upstreamTransport.close() best-effort so a mid-
-   *      preflight transport does not leak.
+   *   4. BOUNDED `upstreamTransport.close()` (副指挥 3cb7ba9b
+   *      Commit 2 #4) — the graceful close is raced against
+   *      `UPSTREAM_CLOSE_TIMEOUT_MS`; timeout / throw escalates to
+   *      the REQUIRED `abort()`. If both close and abort fail we
+   *      still complete the rollback but land in `stop_failed`
+   *      instead of `stopped` (Commit 2 #5). Start's outer throw
+   *      still surfaces; observers read `stopFailure()` for the
+   *      cause.
    *   5. Rotate bearer + null every ref.
    *   6. drainAll mux + reverseNs so any registered origins release.
-   *   7. state = "stopped".
+   *   7. state = "stopped" iff close cleanly resolved; else
+   *      "stop_failed" with the cause preserved.
    */
   private async rollbackStartFailure(): Promise<void> {
     try { this.upstreamRouter?.unsubscribe(); } catch { /* silent */ }
@@ -455,7 +526,10 @@ export class GatewayLifecycle {
     if (this.backendStarted && this.backendServer !== null) {
       try { await this.backendServer.stop(); } catch { /* silent */ }
     }
-    try { await this.opts.upstreamTransport.close(); } catch { /* silent */ }
+    // 副指挥 3cb7ba9b Commit 2 #4: bounded close even during
+    // start rollback. A hung transport during preflight cleanup
+    // must NOT wedge start().
+    const upstreamOutcome = await this.closeUpstreamBounded();
     if (this.tuiBearer !== null) {
       try { this.tuiBearer.rotate(); } catch { /* silent */ }
       this.tuiBearer = null;
@@ -468,81 +542,81 @@ export class GatewayLifecycle {
     if (this.reverseNs !== null) { try { this.reverseNs.drainAll(); } catch { /* silent */ } this.reverseNs = null; }
     this.backendStarted = false;
     this.tuiStarted = false;
-    this.state = "stopped";
+    if (upstreamOutcome.kind === "ok") {
+      this.state = "stopped";
+    } else {
+      this.stopFailureError = upstreamOutcome.error;
+      this.state = "stop_failed";
+    }
   }
 
   /**
    * Callback the sole `UpstreamRouter` invokes when the injected
-   * transport signals close. Cascades shutdown of the backend and TUI
-   * faces so no local writer thinks it still has an upstream, and
-   * transitions the lifecycle out of `running` immediately.
+   * transport signals close. Funnels the upstream-close cascade
+   * into the SAME single-flight shutdown promise a manual `stop()`
+   * would use (副指挥 3cb7ba9b Commit 2 #1 + #2). No inline
+   * cascade — teardown ordering is centralised in `doShutdown()`
+   * so a race between upstream close and a concurrent stop() runs
+   * the sequence exactly once.
    */
   private onUpstreamCloseFromRouter(): void {
-    // 副指挥 06e92ef7 P0-1: lifecycle must transition out of running
-    // as soon as the upstream closes. This includes closing local
-    // faces so new connections cannot arrive.
     if (this.state === "running") {
       this.state = "stopping";
     }
-    try { this.backendServer?.handleUpstreamClose(); } catch { /* silent */ }
-    // Detach owner if any; force-close local faces.
-    if (this.tuiServer !== null) {
-      // Best-effort close of the TUI face — a full stop() will run
-      // when the caller invokes `lifecycle.stop()`.
-      void this.tuiServer.stop().catch(() => {});
-    }
-    if (this.backendServer !== null) {
-      void this.backendServer.stop().catch(() => {});
-    }
-    // TUI bearer rotated so any half-consumed launcher path is refused.
-    if (this.tuiBearer !== null) {
-      try { this.tuiBearer.rotate(); } catch { /* silent */ }
-    }
-    // Do NOT null the fields here — `stop()` may still be called
-    // externally and expects to no-op on already-empty resources.
-    if (this.tuiServer !== null) {
-      // The WS server's onUpstreamClose semantics live inside stop()
-      // for shutdown; for a lifecycle-mid close we don't need the
-      // full teardown — just detach the owner.
-      // (No public seam; the WS server treats ownerSlot self-clear on
-      // owner ws close. A graceful upstream-close during run means the
-      // lifecycle itself will run stop() next.)
-    }
+    // Fire-and-forget; the runShutdown Promise is memoised so a
+    // subsequent stop() will await the same one.
+    void this.runShutdown();
   }
 
   /**
-   * Stop ordering:
-   *   1. transition running → stopping. New connections are
-   *      already destroyed at accept time by the server's
-   *      max_connections gate; sending sendInternal / sendProxiedTui
-   *      is the caller's responsibility to fence off (this class
-   *      doesn't own the caller's scheduler).
-   *   2. Stop the GatewayServer. Its `stop()` closes both UDS
-   *      servers, destroys live connections (which triggers TUI
-   *      disconnect → drainProxiedTui + reverseNs.drainAll via the
-   *      server's own closeConnection path if a TUI was attached),
-   *      then drainAll's the mux via the upstream close hook. Sockets
-   *      + created dir cleaned by the server's cleanupCreatedPaths.
-   *   3. transition stopping → stopped.
-   *
-   * If already stopped / not started, `stop()` is a no-op.
+   * 副指挥 3cb7ba9b Commit 2 #1: shutdown single-flight. Concurrent
+   * callers (`stop()` × `stop()`, `stop()` × upstream close cascade,
+   * `stop()` from a start-rollback path) receive the SAME cached
+   * Promise. The teardown sequence executes at most once; each
+   * caller awaits its completion. On terminal state, subsequent
+   * calls resolve immediately.
    */
   async stop(): Promise<void> {
+    return this.runShutdown();
+  }
+
+  private runShutdown(): Promise<void> {
+    if (this.shutdownPromise !== null) return this.shutdownPromise;
     this.stopRequested = true;
-    // Wait for any in-flight start() so ordering is deterministic —
-    // the fences in doStart() will land the lifecycle in `stopped`
-    // if start hasn't finished listening yet. If start already
-    // finished, we proceed to normal shutdown below.
+    this.shutdownPromise = this.doShutdown();
+    return this.shutdownPromise;
+  }
+
+  /**
+   * Stop ordering (副指挥 3cb7ba9b Commit 2 #2, #4, #5, #6):
+   *   1. Wait for any in-flight start() so ordering is
+   *      deterministic. Start's own fences may already have landed
+   *      us in `stopped` / `stop_failed`.
+   *   2. If already terminal, return.
+   *   3. `state = "stopping"`. Unsubscribe the router so no new
+   *      frames dispatch during teardown.
+   *   4. `backendServer.stop()` (idempotent, best-effort — a Node
+   *      net server close cannot itself hang forever the way the
+   *      upstream transport can).
+   *   5. `tuiServer.stop()` (same rationale).
+   *   6. Rotate the TUI bearer.
+   *   7. Bounded `upstreamTransport.close()` — race the graceful
+   *      close against `UPSTREAM_CLOSE_TIMEOUT_MS`. Any of {close
+   *      throws, close times out} escalates to the REQUIRED
+   *      `abort()` contract. Abort throw itself → `stop_failed`
+   *      with the abort error preserved.
+   *   8. Drain pending origins exactly once (mux + reverseNs
+   *      `drainAll` — both are one-shot).
+   *   9. Transition to terminal: `stopped` iff close cleanly
+   *      resolved, else `stop_failed`.
+   */
+  private async doShutdown(): Promise<void> {
     if (this.startInProgress !== null) {
-      try { await this.startInProgress; } catch { /* start rejected — already stopped */ }
+      try { await this.startInProgress; } catch { /* start rejected already lands in a terminal state */ }
     }
-    if (this.state === "stopped" || this.state === "created") {
-      this.state = "stopped";
-      return;
-    }
+    if (this.state === "stopped" || this.state === "stop_failed") return;
+    if (this.state === "created") { this.state = "stopped"; return; }
     this.state = "stopping";
-    // Unsubscribe the router first so no new frames dispatch during
-    // teardown.
     if (this.upstreamRouter !== null) {
       try { this.upstreamRouter.unsubscribe(); } catch { /* silent */ }
       this.upstreamRouter = null;
@@ -557,16 +631,91 @@ export class GatewayLifecycle {
     }
     this.backendStarted = false;
     this.tuiStarted = false;
-    // Rotate the TUI bearer so no in-flight upgrade can consume it.
     if (this.tuiBearer !== null) {
       try { this.tuiBearer.rotate(); } catch { /* silent */ }
       this.tuiBearer = null;
     }
-    try { await this.opts.upstreamTransport.close(); } catch { /* silent */ }
-    if (this.mux !== null) { this.mux.drainAll(); this.mux = null; }
-    if (this.reverseNs !== null) { this.reverseNs.drainAll(); this.reverseNs = null; }
+    const upstreamOutcome = await this.closeUpstreamBounded();
+    // 副指挥 3cb7ba9b Commit 2 #6: drain pending exactly once. Mux
+    // + reverseNs `drainAll` are one-shot by construction; guard
+    // still applies belt-and-braces for a re-entered path.
+    if (this.mux !== null) {
+      try { this.mux.drainAll(); } catch { /* silent */ }
+      this.mux = null;
+    }
+    if (this.reverseNs !== null) {
+      try { this.reverseNs.drainAll(); } catch { /* silent */ }
+      this.reverseNs = null;
+    }
     this.humanOwner = null;
-    this.state = "stopped";
+    if (upstreamOutcome.kind === "ok") {
+      this.state = "stopped";
+    } else {
+      this.stopFailureError = upstreamOutcome.error;
+      this.state = "stop_failed";
+    }
+  }
+
+  /**
+   * Bounded upstream close (副指挥 3cb7ba9b Commit 2 #3 + #4 + #5).
+   *
+   * - Race `opts.upstreamTransport.close()` against a
+   *   `UPSTREAM_CLOSE_TIMEOUT_MS` timer.
+   * - Clean resolve → `{kind: "ok"}`, no abort needed.
+   * - Close throws or times out → call the REQUIRED `abort()`.
+   *     - abort returns → `{kind: "failed", error}` where `error`
+   *       preserves the ORIGINAL cause (close throw / timeout);
+   *       terminal state becomes `stop_failed` per Commit 2 #5.
+   *     - abort itself throws → `{kind: "failed", error}` where
+   *       `error` preserves the abort throw (the more actionable
+   *       cause — abort is the required force-terminate contract).
+   * - After abort we do NOT wait on the graceful close any longer.
+   */
+  private async closeUpstreamBounded(): Promise<
+    | { kind: "ok" }
+    | { kind: "failed"; error: Error }
+  > {
+    let closeError: Error | null = null;
+    let timedOut = false;
+    let closeSettled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const closePromise = Promise.resolve()
+      .then(() => this.opts.upstreamTransport.close())
+      .then(
+        () => { closeSettled = true; },
+        (e: unknown) => {
+          closeSettled = true;
+          closeError = e instanceof Error ? e : new Error(String(e));
+        },
+      );
+    const timeoutPromise = new Promise<void>((resolve) => {
+      timer = setTimeout(() => { timedOut = true; resolve(); }, UPSTREAM_CLOSE_TIMEOUT_MS);
+    });
+    await Promise.race([closePromise, timeoutPromise]);
+    if (timer !== undefined) clearTimeout(timer);
+    if (closeSettled && closeError === null) {
+      return { kind: "ok" };
+    }
+    // Either close threw or the bounded timer fired first. Escalate
+    // to the REQUIRED abort contract.
+    const originalCause: Error = closeError !== null
+      ? closeError
+      : new Error(`upstream close timed out after ${UPSTREAM_CLOSE_TIMEOUT_MS}ms`);
+    try {
+      this.opts.upstreamTransport.abort();
+      // Abort returned. The transport IS force-terminated, but the
+      // clean-close contract failed — preserve the ORIGINAL cause
+      // and report `stop_failed` so callers know something misbehaved.
+      return { kind: "failed", error: originalCause };
+    } catch (e) {
+      const abortError = e instanceof Error ? e : new Error(String(e));
+      // Preserve the abort throw as the primary cause (abort is the
+      // required force-terminate; if it fails there's no fallback).
+      // Attach the original cause via `.cause` for observability.
+      // (Node's Error `cause` option; a diagnostics sink can inspect
+      // both.)
+      return { kind: "failed", error: new Error(abortError.message, { cause: originalCause }) };
+    }
   }
 
   // ─────────── Transport pass-throughs ───────────

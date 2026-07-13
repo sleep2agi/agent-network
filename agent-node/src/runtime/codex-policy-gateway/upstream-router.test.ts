@@ -32,6 +32,8 @@ class FakeUpstream implements UpstreamTransport {
     return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
   }
   async close(): Promise<void> {}
+  abortCalls = 0;
+  abort(): void { this.abortCalls++; }
   emitFrame(raw: unknown): void { for (const h of [...this.frameHandlers]) h(raw); }
   emitClose(): void { for (const h of [...this.closeHandlers]) h(); }
 }

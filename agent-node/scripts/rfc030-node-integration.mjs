@@ -63,6 +63,7 @@ class FakeUpstream {
   onFrame(h) { this.frameHandlers.push(h); return () => { this.frameHandlers = this.frameHandlers.filter((x) => x !== h); }; }
   onClose(h) { this.closeHandlers.push(h); return () => {}; }
   async close() {}
+  abort() { /* no-op fake */ }
   emitFrame(raw) { for (const h of [...this.frameHandlers]) h(raw); }
 }
 
@@ -657,6 +658,7 @@ async function test_lifecycle_upstream_close_not_running() {
     onFrame(h) { this._f.push(h); return () => { this._f = this._f.filter((x) => x !== h); }; },
     onClose(h) { this._c.push(h); return () => { this._c = this._c.filter((x) => x !== h); }; },
     async close() { for (const h of [...this._c]) h(); },
+    abort() { /* no-op fake */ },
     emitClose() { for (const h of [...this._c]) h(); },
   };
   const lifecycle = new GatewayLifecycle({
@@ -701,7 +703,7 @@ async function test_bearer_not_claimable_after_preflight_fail() {
   fs.rmdirSync(socketDir);
   const upstream = {
     async writeFrame() {}, onFrame() { return () => {}; },
-    onClose() { return () => {}; }, async close() {},
+    onClose() { return () => {}; }, async close() {}, abort() {},
   };
   const lifecycle = new GatewayLifecycle({
     backendSocketPath: path.join(socketDir, "backend.sock"),
@@ -890,7 +892,7 @@ async function test_async_rollback_socket_gone() {
   const socketPath = path.join(socketDir, "backend.sock");
   const upstream = {
     async writeFrame() {}, onFrame() { return () => {}; },
-    onClose() { return () => {}; }, async close() {},
+    onClose() { return () => {}; }, async close() {}, abort() {},
   };
   const lifecycle = new GatewayLifecycle({
     backendSocketPath: socketPath,
@@ -940,6 +942,7 @@ async function test_router_post_close_drops() {
     onFrame(h) { frames.push(h); return () => {}; },
     onClose(h) { closes.push(h); return () => {}; },
     async close() {},
+    abort() {},
     emit(raw) { for (const h of [...frames]) h(raw); },
     close_() { for (const h of [...closes]) h(); },
   };
@@ -986,6 +989,7 @@ async function test_sync_write_throw_cleanup() {
     onFrame() { return () => {}; },
     onClose() { return () => {}; },
     async close() {},
+    abort() {},
   };
   const lifecycle = new GatewayLifecycle({
     backendSocketPath: path.join(socketDir, "backend.sock"),
