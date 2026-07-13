@@ -177,21 +177,24 @@ export class TuiWsServer {
   preAuthCount(): number { return this.preAuthTimers.size; }
 
   // ─────────── UpstreamRouter TuiForwardSeam ───────────
-  // These two methods are called by the lifecycle-owned router when
-  // it receives frames from the upstream transport. They return
-  // `true` on successful delivery and `false` if the owner is gone.
+  // 副指挥 db0bbe13 P2: honest naming. These methods are called by
+  // the lifecycle-owned router when it receives frames from the
+  // upstream transport. The boolean return means "accepted into the
+  // outbound ws send queue on an OPEN socket" — NOT that bytes
+  // reached the wire. Async transport failures surface via the
+  // diagnostics sink as `reverse_request_send_failed_async` /
+  // `proxied_response_send_failed_async` so a downstream consumer
+  // can observe post-hoc failure even though the router has already
+  // consumed the origin.
 
-  deliverReverseRequestToOwner(frame: unknown): boolean {
+  acceptReverseRequestForSend(frame: unknown): boolean {
     if (this.ownerSlot.kind !== "held") return false;
-    // 副指挥 06e92ef7 P1: writeFrame is best-effort under Node/ws.
-    // If the send throws we MUST return false so the router logs
-    // an orphan diagnostic instead of assuming delivery.
-    return this.writeFrameStrict(this.ownerSlot.ws, frame);
+    return this.writeFrameStrict(this.ownerSlot.ws, frame, "reverse_request_send_failed_async");
   }
 
-  deliverProxiedResponseToOwner(_tuiId: number | string, frame: JsonRpcResponseFrame): boolean {
+  acceptProxiedResponseForSend(_tuiId: number | string, frame: JsonRpcResponseFrame): boolean {
     if (this.ownerSlot.kind !== "held") return false;
-    return this.writeFrameStrict(this.ownerSlot.ws, frame);
+    return this.writeFrameStrict(this.ownerSlot.ws, frame, "proxied_response_send_failed_async");
   }
 
   // ─────────── Pre-auth socket tracking ───────────
@@ -460,22 +463,21 @@ export class TuiWsServer {
   }
 
   /**
-   * Truthful send: returns true ONLY when the send call plausibly
-   * reached the wire on an OPEN socket.
+   * "Accept for send" — returns true ONLY when the ws was OPEN and
+   * the synchronous `send()` call did not throw. It does NOT prove
+   * bytes reached the wire.
    *
-   * 副指挥 e85ade40 P1-2: prior version only caught sync throw. A
-   * ws in CLOSING / CLOSED state may not throw on `send()` — it
-   * silently drops or errors via a callback that we weren't
-   * consuming. That let `deliverProxiedResponseToOwner` report
-   * `true` for a frame that never left the process. We now:
-   *   1. Refuse non-OPEN readyState synchronously → return false so
-   *      the router logs an orphan diagnostic.
-   *   2. Pass a completion callback to ws.send() so async transport
-   *      failures surface via the diagnostics sink as
-   *      `ws_write_async_error` (post-hoc observability — the
-   *      caller's return-value contract stays synchronous).
+   * 副指挥 db0bbe13 P2 honest naming: prior "delivered" claim was
+   * false whenever the ws send callback errored asynchronously.
+   * The caller (router) uses the return only for orphan logging
+   * and origin bookkeeping. Post-hoc transport failures surface as
+   * a typed `asyncFailOperation` diagnostic supplied by the caller
+   * — e.g. `reverse_request_send_failed_async` /
+   * `proxied_response_send_failed_async`. That diagnostic is what a
+   * downstream observer watches; the boolean return alone is not a
+   * delivery proof.
    */
-  private writeFrameStrict(ws: WebSocket, frame: unknown): boolean {
+  private writeFrameStrict(ws: WebSocket, frame: unknown, asyncFailOperation: string): boolean {
     if (ws.readyState !== ws.OPEN) {
       this.reportInternal("ws_write_not_open");
       return false;
@@ -485,7 +487,7 @@ export class TuiWsServer {
     catch { this.reportInternal("ws_write_stringify_failed"); return false; }
     try {
       ws.send(payload, (err) => {
-        if (err) this.reportInternal("ws_write_async_error");
+        if (err) this.reportInternal(asyncFailOperation);
       });
       return true;
     } catch {

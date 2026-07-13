@@ -180,3 +180,97 @@ describe("TuiWsServer — construction + bind + stop", () => {
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// 副指挥 db0bbe13 P2: acceptForSend honesty — async callback error
+// must surface as a typed post-hoc diagnostic even though the boolean
+// return already claimed "accepted".
+// ─────────────────────────────────────────────────────────────────────
+
+describe("TuiWsServer — acceptForSend post-hoc async failure diagnostic", () => {
+  // We construct a TuiWsServer and drive the accept path directly by
+  // reaching into a controlled ownerSlot via a fake ws object. This
+  // proves that when a ws.send callback errors AFTER accept, the
+  // seam reports the caller-supplied `..._send_failed_async` op.
+  function fakeOwnerServer(): { server: TuiWsServer; ops: string[]; ws: {
+    readyState: number; OPEN: number;
+    send: (payload: string, cb: (err?: Error) => void) => void;
+  }; setHeld: (leaseId: unknown) => void; } {
+    const ops: string[] = [];
+    const bearer = TuiBearer.mint();
+    bearer.takePlaintextForLauncher();
+    const diagnostics: ProtocolDiagnostics = {
+      newCorrelationId: () => "cid",
+      reportInternalError: (e) => { ops.push(e.operation); },
+    };
+    const mux = new UpstreamRequestMux<{ label: string }>();
+    const reverseNs = new ReverseRequestNamespace();
+    const humanOwner = new HumanOwnerCoordinator({
+      mux: mux as unknown as UpstreamRequestMux<unknown>,
+      reverseNs, diagnostics, approvalMode: "never",
+    });
+    const server = new TuiWsServer({
+      bearer,
+      humanOwner,
+      authorizer: { async authorize() { return { verdict: "deny", code: 0 as unknown as never, reason: "d" }; } },
+      initProvider: { currentSnapshot: () => ({}) },
+      diagnostics,
+      upstreamTransport: {
+        async writeFrame() {}, onFrame() { return () => {}; },
+        onClose() { return () => {}; }, async close() {},
+      },
+    } as unknown as TuiWsServerOptions);
+    // Fake ws that immediately fires callback with an error after send.
+    const ws = {
+      readyState: 1, OPEN: 1,
+      send(_payload: string, cb: (err?: Error) => void) {
+        setTimeout(() => cb(new Error("simulated async transport error")), 0);
+      },
+    };
+    // Inject an ownerSlot holding this fake ws by reaching into the
+    // server via the (private) property. Bun's mock story is heavier
+    // than needed here; a cast is acceptable at test seam.
+    const setHeld = (leaseId: unknown): void => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (server as unknown as { ownerSlot: unknown }).ownerSlot = { kind: "held", leaseId, ws };
+    };
+    return { server, ops, ws, setHeld };
+  }
+
+  test("acceptProxiedResponseForSend accepts (returns true) yet the async ws send failure fires proxied_response_send_failed_async", async () => {
+    const { server, ops, setHeld } = fakeOwnerServer();
+    setHeld("test-lease-id");
+    const accepted = server.acceptProxiedResponseForSend(
+      "tui_1",
+      { jsonrpc: "2.0", id: "tui_1", result: { ok: true } },
+    );
+    expect(accepted).toBe(true);
+    // Wait for the async cb to fire.
+    await new Promise((r) => setTimeout(r, 15));
+    expect(ops).toContain("proxied_response_send_failed_async");
+    // And NOT the generic ws_write_async_error (superseded).
+    expect(ops).not.toContain("ws_write_async_error");
+  });
+
+  test("acceptReverseRequestForSend uses reverse_request_send_failed_async", async () => {
+    const { server, ops, setHeld } = fakeOwnerServer();
+    setHeld("test-lease-id");
+    const accepted = server.acceptReverseRequestForSend(
+      { jsonrpc: "2.0", id: "cx_r", method: "approval/request" },
+    );
+    expect(accepted).toBe(true);
+    await new Promise((r) => setTimeout(r, 15));
+    expect(ops).toContain("reverse_request_send_failed_async");
+  });
+
+  test("closed ws → acceptProxiedResponseForSend returns false + logs ws_write_not_open", () => {
+    const { server, ops, ws, setHeld } = fakeOwnerServer();
+    ws.readyState = 3; // CLOSED
+    setHeld("test-lease-id");
+    const accepted = server.acceptProxiedResponseForSend(
+      "tui_1", { jsonrpc: "2.0", id: "tui_1", result: {} },
+    );
+    expect(accepted).toBe(false);
+    expect(ops).toContain("ws_write_not_open");
+  });
+});

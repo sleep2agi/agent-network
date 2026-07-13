@@ -341,8 +341,8 @@ export class GatewayLifecycle {
     });
 
     const tuiForward: TuiForwardSeam = {
-      deliverReverseRequestToOwner: (frame) => this.tuiServer!.deliverReverseRequestToOwner(frame),
-      deliverProxiedResponseToOwner: (tuiId, frame) => this.tuiServer!.deliverProxiedResponseToOwner(tuiId, frame),
+      acceptReverseRequestForSend: (frame) => this.tuiServer!.acceptReverseRequestForSend(frame),
+      acceptProxiedResponseForSend: (tuiId, frame) => this.tuiServer!.acceptProxiedResponseForSend(tuiId, frame),
     };
     this.upstreamRouter = new UpstreamRouter({
       mux: this.mux,

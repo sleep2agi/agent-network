@@ -8,12 +8,16 @@
 // state which lifecycle observes and short-circuits `start()` cleanly.
 //
 // Backend UDS server + TUI WS server no longer subscribe to the
-// upstream transport directly. They surface narrow delivery seams the
+// upstream transport directly. They surface narrow accept seams the
 // router calls into:
 //   - Backend UDS: the mux + `sendInternal` semantics (unchanged).
 //     Internal-scheduler response bodies are routed here.
-//   - TUI WS: `deliverReverseRequestToOwner(frame)` and
-//     `deliverProxiedResponseToOwner(tuiId, frame)`.
+//   - TUI WS: `acceptReverseRequestForSend(frame)` and
+//     `acceptProxiedResponseForSend(tuiId, frame)`. Boolean return
+//     means "accepted into the ws send queue on an OPEN socket" —
+//     NOT "reached the wire". Async transport failures surface via
+//     the diagnostics sink under `..._send_failed_async` operations
+//     (副指挥 db0bbe13 P2 honest naming).
 //
 // Notification frames go to a single explicit sink (diagnostics).
 // Response frames are consumed EXACTLY ONCE via the frozen mux.
@@ -42,19 +46,35 @@ import type { InternalOrigin, UpstreamTransport } from "./uds-server";
  * returned `forward_tui`. Under Phase 1 (`approvalMode="never"`) this
  * never fires — the coordinator produces `reject_upstream` first.
  */
+/**
+ * 副指挥 db0bbe13 P2: honest naming. The seam's boolean return
+ * means "accepted into the outbound ws send queue on an OPEN
+ * socket" — NOT that the bytes reached the wire. The ws `send()`
+ * callback can still surface an async transport error AFTER the
+ * router has already consumed the origin. The router observes
+ * such post-hoc failures via the diagnostics sink under stable
+ * operation names (`reverse_request_send_failed_async` /
+ * `proxied_response_send_failed_async`), so a caller cannot claim
+ * "delivered" from the boolean alone.
+ */
 export interface TuiForwardSeam {
   /**
-   * Deliver a reverse request frame to the currently-attached owner.
-   * Return true if delivered, false if there is no incumbent (in
-   * which case the router logs a diagnostic).
+   * Accept a reverse request frame into the owner ws send queue.
+   * Return `true` if the socket was OPEN and the send call did not
+   * throw. Async transport errors after acceptance surface via the
+   * diagnostics sink as `reverse_request_send_failed_async`.
+   *
+   * Return `false` if the socket was not OPEN or no incumbent
+   * exists — the router logs `forward_tui_no_incumbent`.
    */
-  deliverReverseRequestToOwner(frame: unknown): boolean;
+  acceptReverseRequestForSend(frame: unknown): boolean;
   /**
-   * Deliver a proxied-TUI upstream response (already id-rewritten to
-   * the owner's TUI id) to the owner socket. Return true if
-   * delivered, false if the owner has left.
+   * Accept a proxied-TUI upstream response (already id-rewritten
+   * to the owner's TUI id) into the owner ws send queue. Same
+   * accept-not-delivered semantics as above; async failures surface
+   * as `proxied_response_send_failed_async`.
    */
-  deliverProxiedResponseToOwner(tuiId: number | string, frame: JsonRpcResponseFrame): boolean;
+  acceptProxiedResponseForSend(tuiId: number | string, frame: JsonRpcResponseFrame): boolean;
 }
 
 export interface UpstreamRouterOptions {
@@ -279,11 +299,18 @@ export class UpstreamRouter {
     const rewritten: JsonRpcResponseFrame = "error" in frame
       ? { jsonrpc: "2.0", id: origin.tuiId, error: frame.error }
       : { jsonrpc: "2.0", id: origin.tuiId, result: frame.result };
-    const delivered = this.opts.tuiForward.deliverProxiedResponseToOwner(
+    // 副指挥 db0bbe13 P2: `accepted` is TRUE only when the ws is
+    // OPEN and `send()` did not throw. It does NOT prove the bytes
+    // reached the wire — a callback error after this returns will
+    // surface as `proxied_response_send_failed_async` via the WS
+    // server's own diagnostics. That post-hoc failure is
+    // observable but this router has already consumed the origin,
+    // so a lost proxied response cannot be replayed here.
+    const accepted = this.opts.tuiForward.acceptProxiedResponseForSend(
       origin.tuiId as number | string,
       rewritten,
     );
-    if (!delivered) {
+    if (!accepted) {
       this.report("proxied_response_no_owner");
     }
   }
@@ -296,10 +323,11 @@ export class UpstreamRouter {
       });
       return;
     }
-    // Phase 1 approvalMode="never" never emits forward_tui, but if it
-    // did we'd deliver via the TUI seam.
-    const delivered = this.opts.tuiForward.deliverReverseRequestToOwner(decision.tuiFrame);
-    if (!delivered) {
+    // Phase 1 approvalMode="never" never emits forward_tui, but if
+    // it did we'd hand the frame to the TUI seam. Same accept-not-
+    // delivered semantics as the proxied response path above.
+    const accepted = this.opts.tuiForward.acceptReverseRequestForSend(decision.tuiFrame);
+    if (!accepted) {
       this.report("forward_tui_no_incumbent");
     }
   }

@@ -95,8 +95,8 @@ async function harness() {
   // subscription, TuiWsServer receives reverse-request delivery via
   // the TuiForwardSeam.
   const tuiForward = {
-    deliverReverseRequestToOwner: (f) => server.deliverReverseRequestToOwner(f),
-    deliverProxiedResponseToOwner: (tuiId, f) => server.deliverProxiedResponseToOwner(tuiId, f),
+    acceptReverseRequestForSend: (f) => server.acceptReverseRequestForSend(f),
+    acceptProxiedResponseForSend: (tuiId, f) => server.acceptProxiedResponseForSend(tuiId, f),
   };
   const router = new UpstreamRouter({
     mux, humanOwner: coord, upstreamTransport: upstream,
@@ -733,7 +733,11 @@ async function test_bearer_not_claimable_after_preflight_fail() {
 // P0-4 stale owner terminate on ws error
 // ─────────────────────────────────────────────────────────────────────
 
-async function test_stale_owner_ws_error_terminated() {
+// 副指挥 db0bbe13 evidence P2 rename: this case only drives an
+// ORDINARY client-initiated close (`ws.close()`), NOT a server-
+// side "error" event. Renamed so the label matches what the code
+// actually does.
+async function test_ordinary_owner_close_detaches() {
   const h = await harness();
   try {
     const port = h.server.boundPortActual();
@@ -742,13 +746,46 @@ async function test_stale_owner_ws_error_terminated() {
       perMessageDeflate: false,
     });
     await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
-    // Force the server-side ws to emit an error, which should
-    // terminate the socket AND detach the coordinator.
-    // We can simulate this by destroying the underlying socket from
-    // the client side and waiting for server-side ws close.
     ws.close();
     await new Promise((r) => setTimeout(r, 50));
-    assertEq("P0-4 owner slot empty after ws close/error", h.server.ownerSlotState(), "empty");
+    assertEq("P0-4 owner slot empty after ordinary client close", h.server.ownerSlotState(), "empty");
+  } finally { await h.server.stop(); }
+}
+
+// 副指挥 db0bbe13 evidence P2 add: real server-side "error" event
+// reproducer. Force an abrupt TCP RST by destroying the underlying
+// socket from the client side without a graceful close handshake.
+// The server-side `ws` fires an `error` event, which the P0-4 fix
+// handles: `ws.terminate()` FIRST, then detach the coordinator.
+async function test_stale_owner_server_error_terminates() {
+  const h = await harness();
+  try {
+    const port = h.server.boundPortActual();
+    const ws = new WebSocket(`ws://${ALLOWED_LOOPBACK}:${port}/`, {
+      headers: { Authorization: `Bearer ${h.plaintext}` },
+      perMessageDeflate: false,
+    });
+    await new Promise((r, j) => { ws.once("open", r); ws.once("error", j); });
+    assertEq("owner attached before error", h.server.ownerSlotState(), "held");
+    // Abrupt socket destroy — TCP RST, no ws close frame. The
+    // server-side ws sees a socket error, not a normal close.
+    // `ws._socket` is the underlying `net.Socket`.
+    if (ws._socket) {
+      // 'error' handler on client swallows the RST so this side's
+      // promise doesn't reject noisily.
+      ws.on("error", () => {});
+      ws._socket.destroy(new Error("simulated abrupt RST"));
+    } else {
+      // Fallback: terminate() sends close frame; not the exact repro
+      // but preserves gate behaviour.
+      ws.terminate();
+    }
+    await new Promise((r) => setTimeout(r, 50));
+    assertEq(
+      "P0-4 owner slot empty after server-side RST/error",
+      h.server.ownerSlotState(),
+      "empty",
+    );
   } finally { await h.server.stop(); }
 }
 
@@ -821,7 +858,7 @@ async function test_router_post_close_drops() {
   };
   const router = new UpstreamRouter({
     mux, humanOwner: coord, upstreamTransport: upstream, diagnostics: diag,
-    tuiForward: { deliverReverseRequestToOwner: () => true, deliverProxiedResponseToOwner: () => true },
+    tuiForward: { acceptReverseRequestForSend: () => true, acceptProxiedResponseForSend: () => true },
     onUpstreamClose: () => {},
   });
   router.subscribe();
@@ -898,7 +935,7 @@ async function test_sync_write_throw_cleanup() {
 // ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — Node integration");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 6 — Node integration");
   await test_happy();
   await test_slow_header();
   await test_missing_bearer();
@@ -917,7 +954,8 @@ async function main() {
   await test_half_open_reject_ledger_drops();
   await test_lifecycle_upstream_close_not_running();
   await test_bearer_not_claimable_after_preflight_fail();
-  await test_stale_owner_ws_error_terminated();
+  await test_ordinary_owner_close_detaches();
+  await test_stale_owner_server_error_terminates();
   await test_noncanonical_ws_key();
   await test_duplicate_host_rejected();
   await test_async_rollback_socket_gone();

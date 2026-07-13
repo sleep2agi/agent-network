@@ -54,8 +54,8 @@ function makeFixture(overrides?: { approvalMode?: "never" | "passthrough" }) {
   const reverseDelivered: unknown[] = [];
   const proxiedDelivered: Array<{ tuiId: number | string; frame: JsonRpcResponseFrame }> = [];
   const tuiForward: TuiForwardSeam = {
-    deliverReverseRequestToOwner(frame) { reverseDelivered.push(frame); return true; },
-    deliverProxiedResponseToOwner(tuiId, frame) { proxiedDelivered.push({ tuiId, frame }); return true; },
+    acceptReverseRequestForSend(frame) { reverseDelivered.push(frame); return true; },
+    acceptProxiedResponseForSend(tuiId, frame) { proxiedDelivered.push({ tuiId, frame }); return true; },
   };
   let closeCallCount = 0;
   const router = new UpstreamRouter({

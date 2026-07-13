@@ -1,4 +1,4 @@
-// RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — real codex 0.144.0
+// RFC-030 Wave 1A P0.2 Commit 1 corrective round 6 — real codex 0.144.0
 // **bootstrap smoke**.
 //
 // This script is a bootstrap smoke, not a full E2E. Honest scope
@@ -87,7 +87,10 @@ function haveCodex() {
     notes.push("codex binary not on PATH");
     return false;
   }
-  // Resolve symlinks so we're auditing the same inode we'll spawn.
+  // Resolve symlinks so `--version` and spawn resolve the SAME
+  // canonical path. `realpath` does not prove same-inode-over-time
+  // (an unlink+rename between the two syscalls could still swap
+  // the file); we only claim canonical-path stability.
   let realBin;
   try {
     realBin = fs.realpathSync(rawBin);
@@ -186,6 +189,39 @@ async function startServer() {
  * If `underPty` is true, invokes via `script -qec ...` to allocate a
  * real PTY (Codex requires stdin be a terminal).
  */
+// 副指挥 db0bbe13 evidence P1: PTY chain audit.
+//
+// Under `script -qec 'CMD' /dev/null`, `script` invokes `sh -c CMD`,
+// and `sh` unconditionally exports `PWD=<cwd>` before executing
+// `CMD`. That means the REAL child env inherited by Codex under a
+// PTY has an extra key `PWD` — the "exact 5-key allowlist" claim
+// was FALSE. Minimal repro:
+//     env -i PATH=... HOME=... TMPDIR=... CODEX_HOME=... \
+//       ANET_CODEX_TUI_BEARER=x script -qec 'env | sort' /dev/null
+//   → keys: [ANET_CODEX_TUI_BEARER, CODEX_HOME, HOME, PATH, PWD, TMPDIR]
+//     (6 keys — `PWD` was injected by sh.)
+//
+// Fix (chosen after weighing the trade-offs the coordinator listed):
+// prepend `unset PWD; exec ...` inside the shell command so the
+// child never sees `PWD` from the shell. Adding `PWD` to the
+// allowlist would leak the workspace path into a Codex-visible
+// env var, which the fixture doc says we do NOT do.
+//
+// The reproducer probe below re-runs the SAME PTY chain but swaps
+// the codex binary for `env` — parsing the emitted keys proves the
+// unset landed. A mutation-red variant that OMITS the unset must
+// surface `PWD` and turn red, so a future edit that drops the
+// `unset PWD;` prefix loudly breaks the smoke.
+
+function buildPtyShellCommand(unsetPwd, codexBin, codexArgs) {
+  const shArgs = codexArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+  const prefix = unsetPwd ? "unset PWD; " : "";
+  // `exec` so codex replaces the shell — no lingering intermediate sh
+  // in the process tree (also means the shell will not later print a
+  // prompt into the PTY that could contaminate the captured stream).
+  return `${prefix}exec ${JSON.stringify(codexBin)} ${shArgs}`;
+}
+
 async function spawnCodex(plaintext, port, underPty) {
   const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-codex-home-"));
   // 副指挥 e85ade40 evidence-gate P3: unify the real spawn env with
@@ -193,7 +229,9 @@ async function spawnCodex(plaintext, port, underPty) {
   // the assertion audited one; the child inherited the other. Now
   // the child env IS the frozen output of buildAllowlistEnv, so any
   // divergence between audited-set and actual-child-env is
-  // impossible.
+  // impossible AT THE PARENT LEVEL. The PWD-strip in the shell
+  // command layer closes the gap between what the parent passes and
+  // what the child actually sees under a PTY.
   const env = buildAllowlistEnv(plaintext, {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: codexHome,
@@ -209,14 +247,12 @@ async function spawnCodex(plaintext, port, underPty) {
   // can slip a different codex in between (副指挥 1b24ae71 P1).
   const codexBin = CODEX_BIN;
   const argv = underPty
-    ? ["-qec", `${JSON.stringify(codexBin)} ${codexArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`, "/dev/null"]
+    ? ["-qec", buildPtyShellCommand(true, codexBin, codexArgs), "/dev/null"]
     : codexArgs;
   const cmd = underPty ? "script" : codexBin;
-  // env is the frozen buildAllowlistEnv output — the spread copies
-  // enumerable string keys into the plain env object `spawn` needs.
-  // Return the built env so main() can assert on the SAME object
-  // that reaches spawn (not a hand-built lookalike).
-  const child = spawn(cmd, argv, { env: { ...env }, stdio: ["pipe", "pipe", "pipe"] });
+  // env is the frozen buildAllowlistEnv output — pass the SAME
+  // reference (no spread) so a later mutation can't slip in.
+  const child = spawn(cmd, argv, { env, stdio: ["pipe", "pipe", "pipe"] });
   const outRedactor = new SecretRedactor(plaintext, "[REDACTED bearer]");
   const errRedactor = new SecretRedactor(plaintext, "[REDACTED bearer]");
   const outChunks = [];
@@ -233,8 +269,54 @@ async function spawnCodex(plaintext, port, underPty) {
   return { child, outChunks, errChunks, cleanup, env };
 }
 
+/**
+ * 副指挥 db0bbe13 evidence P1: probe the ACTUAL child env keys
+ * seen by the process that would have been Codex, by running the
+ * SAME PTY chain but replacing the codex binary with `env |
+ * cut -d= -f1 | sort` inside the shell command. This closes the
+ * "audited parent-env vs actual PTY-child-env" gap.
+ *
+ * When `unsetPwd` is true (production), the child must have EXACTLY
+ * the 5-key allowlist. When false (mutation red), the child must
+ * have 6 keys (the extra `PWD` sh injects) — proving the
+ * `unset PWD;` prefix is the load-bearing guard.
+ */
+async function probeChildEnvKeysUnderPty(plaintext, unsetPwd) {
+  const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-envprobe-"));
+  const env = buildAllowlistEnv(plaintext, {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    HOME: codexHome,
+    TMPDIR: os.tmpdir(),
+    CODEX_HOME: codexHome,
+  });
+  const dumpArgs = []; // no args — `env` alone dumps
+  // Reuse the same builder so the shell layer is identical to the
+  // real spawn. Just swap `codexBin` → `env`.
+  const shellCmd = buildPtyShellCommand(unsetPwd, "env", dumpArgs);
+  const child = spawn("script", ["-qec", shellCmd, "/dev/null"], {
+    env, stdio: ["pipe", "pipe", "pipe"],
+  });
+  const chunks = [];
+  child.stdout.on("data", (c) => chunks.push(c));
+  child.stderr.on("data", (c) => chunks.push(c));
+  const [code] = await new Promise((r) => {
+    child.on("exit", (c, s) => r([c, s]));
+  });
+  try { fs.rmSync(codexHome, { recursive: true, force: true }); } catch {}
+  if (code !== 0) return { code, keys: null, raw: Buffer.concat(chunks).toString("utf8") };
+  const raw = Buffer.concat(chunks).toString("utf8");
+  // `env` output is `KEY=VALUE\n` per line. Extract keys.
+  const keys = raw.split(/\r?\n/)
+    .map((line) => line.match(/^([A-Za-z_][A-Za-z0-9_]*)=/)?.[1])
+    .filter((k) => typeof k === "string")
+    .sort();
+  // Deduplicate (some shells emit `_` twice under PTY).
+  const uniq = [...new Set(keys)];
+  return { code, keys: uniq, raw };
+}
+
 async function main() {
-  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 5 — real codex 0.144.0 bootstrap smoke");
+  console.log("RFC-030 Wave 1A P0.2 Commit 1 corrective round 6 — real codex 0.144.0 bootstrap smoke");
   const { server, plaintext, authorizerCalls } = await startServer();
 
   // 副指挥 e85ade40 evidence-gate P3: mutation red must run BEFORE
@@ -246,21 +328,47 @@ async function main() {
   if (mutationRefused) ok("mutation red: COMMHUB_TOKEN refused by buildAllowlistEnv");
   else fail("env mutation red", "COMMHUB_TOKEN went through buildAllowlistEnv");
 
+  // 副指挥 db0bbe13 evidence P1: probe the REAL child env under
+  // the SAME PTY chain by swapping codex → env. Assert exact 5-key
+  // set. The parallel red run OMITS `unset PWD;` and MUST surface
+  // 6 keys (including PWD) — proving the guard is load-bearing.
+  const expectedEnvKeys = ["PATH", "HOME", "TMPDIR", "CODEX_HOME", TUI_BEARER_ENV_NAME].sort();
+  const withGuard = await probeChildEnvKeysUnderPty(plaintext, true);
+  if (withGuard.keys === null) {
+    fail("child-env probe exit=0", `env-probe exited code=${withGuard.code}, raw=${JSON.stringify(withGuard.raw).slice(0, 200)}`);
+  } else if (JSON.stringify(withGuard.keys) === JSON.stringify(expectedEnvKeys)) {
+    ok(`child env exact-set (probed under PTY): [${withGuard.keys.join(",")}]`);
+  } else {
+    fail(
+      "child env exact-set (probed under PTY)",
+      `expected [${expectedEnvKeys.join(",")}] got [${withGuard.keys.join(",")}]`,
+    );
+  }
+  // Mutation red — omit unset. Must show PWD → 6 keys.
+  const withoutGuard = await probeChildEnvKeysUnderPty(plaintext, false);
+  if (withoutGuard.keys === null) {
+    fail("mutation-red child-env probe (no unset PWD) exit=0", `code=${withoutGuard.code}`);
+  } else if (withoutGuard.keys.includes("PWD") && withoutGuard.keys.length === expectedEnvKeys.length + 1) {
+    ok(`mutation red: without unset PWD the PTY child sees ${withoutGuard.keys.length} keys (includes PWD) — guard is load-bearing`);
+  } else {
+    fail(
+      "mutation-red: missing PWD or unexpected key set",
+      `keys=[${withoutGuard.keys.join(",")}] (expected exactly one extra key PWD)`,
+    );
+  }
+
   const { child, outChunks, errChunks, cleanup, env: spawnedEnv } = await spawnCodex(
     plaintext, server.boundPortActual(), true,
   );
 
-  // 副指挥 e85ade40 evidence-gate P3: assert on the SAME env object
-  // that was passed to spawn. `spawnedEnv` came out of
-  // `buildAllowlistEnv` inside spawnCodex; auditing it here means
-  // any divergence between "what we spawn with" and "what we
-  // asserted" is impossible by construction.
-  const expectedEnvKeys = ["PATH", "HOME", "TMPDIR", "CODEX_HOME", TUI_BEARER_ENV_NAME].sort();
+  // Also keep the parent-side exact-set check on the SAME reference
+  // that was passed to spawn (no spread copy). This closes the
+  // "assertion audits copy A while spawn ships copy B" gap.
   const actualEnvKeys = Object.keys(spawnedEnv).sort();
   if (JSON.stringify(actualEnvKeys) === JSON.stringify(expectedEnvKeys)) {
-    ok(`child env exact-set matches allowlist: [${actualEnvKeys.join(",")}]`);
+    ok(`parent-side env reference exact-set matches allowlist: [${actualEnvKeys.join(",")}]`);
   } else {
-    fail("env allowlist exact-set", `expected [${expectedEnvKeys.join(",")}] got [${actualEnvKeys.join(",")}]`);
+    fail("env allowlist parent-side exact-set", `expected [${expectedEnvKeys.join(",")}] got [${actualEnvKeys.join(",")}]`);
   }
 
   // 副指挥 1b24ae71 P1: wait strictly for an authorizer call OR a
