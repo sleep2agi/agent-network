@@ -2,6 +2,8 @@ ARG SOURCE_COMMIT
 
 FROM node:22-bookworm-slim AS packer
 
+ARG SOURCE_COMMIT
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bash build-essential ca-certificates curl git python3 unzip \
   && rm -rf /var/lib/apt/lists/*
@@ -18,6 +20,12 @@ RUN cd agent-node && bun install \
 
 COPY agent-node ./agent-node
 COPY agent-network ./agent-network
+COPY tests/test225-grok-preview-package-live ./tests/test225-grok-preview-package-live
+
+# Prove the three source boundaries agree before the source tree is discarded.
+RUN TEST225_FAILURE_CONTRACT_MODE=source \
+  TEST225_SOURCE_COMMIT="$SOURCE_COMMIT" \
+  node --test ./tests/test225-grok-preview-package-live/failure-diagnostic.test.mjs
 
 RUN mkdir -p /candidate \
   && cd /build/agent-node \
@@ -25,7 +33,21 @@ RUN mkdir -p /candidate \
   && npm pack --ignore-scripts --pack-destination /candidate \
   && cd /build/agent-network \
   && npm run build \
-  && npm pack --ignore-scripts --pack-destination /candidate
+  && npm pack --ignore-scripts --pack-destination /candidate \
+  && set -- /candidate/sleep2agi-agent-node-*.tgz \
+  && [ "$#" -eq 1 ] \
+  && [ -f "$1" ] \
+  && tar -xOf "$1" package/dist/cli.js > /tmp/test225-agent-node-cli.js \
+  && TEST225_AGENT_NODE_BUNDLE=/tmp/test225-agent-node-cli.js \
+    node --test /build/tests/test225-grok-preview-package-live/failure-contract-bundle.test.mjs \
+  && node /build/tests/test225-grok-preview-package-live/failure-contract.mjs \
+    /build/agent-node/src/runtime/grok-copresence/runtime.ts \
+    /build/agent-node/src/cli.ts \
+    "$SOURCE_COMMIT" \
+    "$1" \
+    /tmp/test225-agent-node-cli.js \
+    /candidate/test225-grok-failure-contract.v1.json \
+  && rm -f /tmp/test225-agent-node-cli.js
 
 
 FROM node:22-bookworm-slim AS runtime

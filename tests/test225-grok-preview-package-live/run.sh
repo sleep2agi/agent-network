@@ -1019,9 +1019,37 @@ log "[L0] clean candidate package image"
 command -v anet >/dev/null || fail "anet is not installed from candidate tarball"
 command -v agent-node >/dev/null && fail "clean fallback image unexpectedly has a global agent-node"
 command -v commhub-server >/dev/null || fail "commhub-server is not installed from candidate tarball"
+[ "$(stat -c %a -- /candidate)" = 755 ] && [ "$(stat -c %u -- /candidate)" = 0 ] \
+  || fail "candidate directory is not root-owned mode 0755"
+mapfile -t NODE_TGZ_CANDIDATES < <(find /candidate -maxdepth 1 -type f -name 'sleep2agi-agent-node-*.tgz' | sort)
+[ "${#NODE_TGZ_CANDIDATES[@]}" -eq 1 ] || fail "expected exactly one agent-node candidate tarball"
+NODE_TGZ=${NODE_TGZ_CANDIDATES[0]}
+[ -f "$NODE_TGZ" ] && [ ! -L "$NODE_TGZ" ] \
+  || fail "agent-node candidate tarball is not a regular file"
+[ "$(stat -c %a -- "$NODE_TGZ")" = 644 ] \
+  || fail "agent-node candidate tarball mode is not 0644"
+[ "$(stat -c %u -- "$NODE_TGZ")" = 0 ] \
+  || fail "agent-node candidate tarball is not root-owned"
+[ "$(stat -c %h -- "$NODE_TGZ")" = 1 ] \
+  || fail "agent-node candidate tarball has multiple hard links"
+NODE_TGZ_IDENTITY=$(stat -c '%d:%i:%s:%Y' -- "$NODE_TGZ")
+FAILURE_CONTRACT=/candidate/test225-grok-failure-contract.v1.json
+[ -f "$FAILURE_CONTRACT" ] && [ ! -L "$FAILURE_CONTRACT" ] \
+  || fail "candidate failure contract is missing or not a regular file"
+[ "$(stat -c %a -- "$FAILURE_CONTRACT")" = 444 ] \
+  || fail "candidate failure contract mode is not 0444"
+[ "$(stat -c %u -- "$FAILURE_CONTRACT")" = 0 ] \
+  || fail "candidate failure contract is not root-owned"
+[ "$(stat -c %h -- "$FAILURE_CONTRACT")" = 1 ] \
+  || fail "candidate failure contract has multiple hard links"
+TEST225_FAILURE_CONTRACT_MODE=package \
+TEST225_FAILURE_CONTRACT="$FAILURE_CONTRACT" \
+TEST225_AGENT_NODE_TARBALL="$NODE_TGZ" \
 node --test /test225/failure-diagnostic.test.mjs \
   >/tmp/test225-failure-diagnostic-test.log 2>&1 \
   || fail_with_private_log "closed turn diagnostic unit tests failed" /tmp/test225-failure-diagnostic-test.log
+[ "$(stat -c '%d:%i:%s:%Y' -- "$NODE_TGZ")" = "$NODE_TGZ_IDENTITY" ] \
+  || fail "agent-node candidate tarball identity changed during contract validation"
 rm -f /tmp/test225-failure-diagnostic-test.log
 
 STATUS_SELECTOR_ROW='{"alias":"selector-target","status":"online","agent":"agent-node:grok-build-cli"}'
@@ -1040,8 +1068,6 @@ assert_status_selector_rejects invalid-row \
 unset STATUS_SELECTOR_ROW
 
 ANET_VERSION=$(node -p 'require("/usr/local/lib/node_modules/@sleep2agi/agent-network/package.json").version')
-NODE_TGZ=$(find /candidate -maxdepth 1 -type f -name 'sleep2agi-agent-node-*.tgz' -print -quit)
-[ -n "$NODE_TGZ" ] || fail "agent-node candidate tarball is missing"
 NODE_TGZ_SHA256=$(sha256sum "$NODE_TGZ" | awk '{print $1}')
 tar -xOf "$NODE_TGZ" package/package.json > /tmp/test225-candidate-agent-node-package.json
 chmod 600 /tmp/test225-candidate-agent-node-package.json
@@ -2043,6 +2069,7 @@ log "npx_preview_fallback=PASS"
 log "global_agent_node_resume=PASS"
 log "external_publish_actions=0"
 log "tmux_input_commands_issued=0"
+log "failure_contract_sha256=$(sha256sum "$FAILURE_CONTRACT" | awk '{print $1}')"
 while IFS= read -r tarball; do
   log "candidate_tarball_sha256=$(sha256sum "$tarball" | awk '{print $1}') file=$(basename "$tarball")"
 done < <(find /candidate -maxdepth 1 -type f -name '*.tgz' | sort)

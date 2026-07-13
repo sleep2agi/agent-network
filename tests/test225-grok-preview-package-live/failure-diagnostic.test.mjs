@@ -9,6 +9,11 @@ import {
   JSONL_FAILURE_SUBCODES,
   resultSizeBucket,
 } from "./failure-diagnostic.mjs";
+import {
+  buildFailureContract,
+  exactLiteralBlock,
+  validateFailureContract,
+} from "./failure-contract.mjs";
 
 const ALIAS = "preview-grok-real-225";
 const UNKNOWN_PAIR = {
@@ -20,39 +25,141 @@ function result(failureCode, failureSubcode, body = "detail withheld") {
   return `[${ALIAS}] [grok_failure:${failureCode}] [grok_subcode:${failureSubcode}] ${body}`;
 }
 
-function quotedLiteralsInBlock(source, start, end) {
-  const startIndex = source.indexOf(start);
-  assert.notEqual(startIndex, -1, `missing source block: ${start}`);
-  const endIndex = source.indexOf(end, startIndex + start.length);
-  assert.notEqual(endIndex, -1, `unterminated source block: ${start}`);
-  return [...source.slice(startIndex + start.length, endIndex).matchAll(/"([^"]+)"/g)]
-    .map((match) => match[1]);
-}
-
 test("keeps runtime, CLI, and diagnostic exact subcode allowlists synchronized", () => {
-  const runtimeSource = readFileSync(
-    new URL("../../agent-node/src/runtime/grok-copresence/runtime.ts", import.meta.url),
-    "utf8",
-  );
-  const cliSource = readFileSync(
-    new URL("../../agent-node/src/cli.ts", import.meta.url),
-    "utf8",
-  );
-  assert.deepEqual(quotedLiteralsInBlock(
-    runtimeSource,
-    "export const GROK_JSONL_TAIL_FAILURE_SUBCODES = Object.freeze([",
-    "] as const);",
-  ), JSONL_FAILURE_SUBCODES);
-  assert.deepEqual(quotedLiteralsInBlock(
-    cliSource,
-    "const GROK_COPRESENCE_JSONL_FAILURE_SUBCODE_SET = new Set([",
-    "]);",
-  ), JSONL_FAILURE_SUBCODES);
-  assert.match(cliSource, /grokCopresenceFailureSubcode,/);
-  assert.match(
-    cliSource,
-    /\[grok_failure:\$\{reviewed\.code\}\] \[grok_subcode:\$\{reviewed\.subcode\}\]/,
-  );
+  const mode = process.env.TEST225_FAILURE_CONTRACT_MODE;
+  const sourceCommit = process.env.TEST225_SOURCE_COMMIT;
+  assert.match(sourceCommit ?? "", /^[0-9a-f]{40}$/);
+  let contract;
+  let tarballBytes;
+
+  if (mode === "source") {
+    const runtimeSource = readFileSync(
+      new URL("../../agent-node/src/runtime/grok-copresence/runtime.ts", import.meta.url),
+      "utf8",
+    );
+    const cliSource = readFileSync(
+      new URL("../../agent-node/src/cli.ts", import.meta.url),
+      "utf8",
+    );
+    assert.deepEqual(exactLiteralBlock(runtimeSource, {
+      start: "export const GROK_JSONL_TAIL_FAILURE_SUBCODES = Object.freeze([",
+      end: "] as const);",
+    }, "runtime failure subcodes"), JSONL_FAILURE_SUBCODES);
+    tarballBytes = Buffer.from("test225-source-stage-binding", "utf8");
+    contract = buildFailureContract({
+      runtimeSource,
+      cliSource,
+      sourceCommit,
+      tarballBytes,
+    });
+
+    const sourceMutations = [
+      () => ({
+        runtimeSource: runtimeSource.replace(
+          '  "chat.stat.missing_after_arm",',
+          '  "chat.stat.missing_after_arm",\n  "chat.stat.unreviewed",',
+        ),
+        cliSource,
+      }),
+      () => ({
+        runtimeSource,
+        cliSource: cliSource.replace('  "chat.stat.identity_changed",\n', ""),
+      }),
+      () => ({
+        runtimeSource: runtimeSource.replace(
+          '  "chat.stat.size_regressed",',
+          '  "chat.stat.replaced",',
+        ),
+        cliSource,
+      }),
+      () => ({
+        runtimeSource,
+        cliSource: cliSource.replace(
+          '  "timeout",\n  "tui_exit",',
+          '  "tui_exit",\n  "timeout",',
+        ),
+      }),
+      () => ({
+        runtimeSource: runtimeSource.replace(
+          '  "events.close.io_other",',
+          '  "events.close.io_other",\n  "events.close.io_other",',
+        ),
+        cliSource,
+      }),
+    ];
+    for (const mutation of sourceMutations) {
+      assert.throws(() => buildFailureContract({
+        ...mutation(),
+        sourceCommit,
+        tarballBytes,
+      }));
+    }
+    assert.throws(() => buildFailureContract({
+      runtimeSource,
+      cliSource,
+      diagnosticFailureCodes: [...FAILURE_CODES].reverse(),
+      sourceCommit,
+      tarballBytes,
+    }));
+    assert.throws(() => buildFailureContract({
+      runtimeSource,
+      cliSource,
+      diagnosticFailureSubcodes: [...JSONL_FAILURE_SUBCODES, "chat.read.unreviewed"],
+      sourceCommit,
+      tarballBytes,
+    }));
+    assert.throws(() => buildFailureContract({
+      runtimeSource: runtimeSource.replace(
+        '  "combined.flush.state_invariant",',
+        '  "combined.flush.state_invariant",\n  "chat.read.unreviewed",',
+      ),
+      cliSource: cliSource.replace(
+        '  "combined.flush.state_invariant",',
+        '  "combined.flush.state_invariant",\n  "chat.read.unreviewed",',
+      ),
+      diagnosticFailureSubcodes: [...JSONL_FAILURE_SUBCODES, "chat.read.unreviewed"],
+      sourceCommit,
+      tarballBytes,
+    }));
+  } else if (mode === "package") {
+    const contractPath = process.env.TEST225_FAILURE_CONTRACT;
+    const tarballPath = process.env.TEST225_AGENT_NODE_TARBALL;
+    assert.ok(contractPath && tarballPath, "package contract and tarball paths are required");
+    contract = JSON.parse(readFileSync(contractPath, "utf8"));
+    tarballBytes = readFileSync(tarballPath);
+  } else {
+    assert.fail("TEST225_FAILURE_CONTRACT_MODE must be source or package");
+  }
+
+  assert.deepEqual(validateFailureContract({
+    contract,
+    expectedSourceCommit: sourceCommit,
+    tarballBytes,
+  }), {
+    failureCodes: FAILURE_CODES,
+    failureSubcodes: JSONL_FAILURE_SUBCODES,
+  });
+
+  const mutateContract = (callback, bytes = tarballBytes) => {
+    const mutated = structuredClone(contract);
+    callback(mutated);
+    assert.throws(() => validateFailureContract({
+      contract: mutated,
+      expectedSourceCommit: sourceCommit,
+      tarballBytes: bytes,
+    }));
+  };
+  mutateContract((value) => { value.extra = true; });
+  mutateContract((value) => { value.schema = "test225.grok-failure-contract.v2"; });
+  mutateContract((value) => { value.sourceCommit = "f".repeat(40); });
+  mutateContract((value) => { value.agentNodeTarballSha256 = "0".repeat(64); });
+  mutateContract((value) => value.failureCodes.push("unreviewed"));
+  mutateContract((value) => value.failureCodes.push(value.failureCodes[0]));
+  mutateContract((value) => value.failureCodes.reverse());
+  mutateContract((value) => value.jsonlFailureSubcodes.push("chat.read.unreviewed"));
+  mutateContract((value) => value.jsonlFailureSubcodes.push(value.jsonlFailureSubcodes[0]));
+  mutateContract((value) => value.jsonlFailureSubcodes.reverse());
+  mutateContract(() => {}, Buffer.concat([tarballBytes, Buffer.from("mutation", "utf8")]));
 });
 
 test("accepts every exact reviewed failure code/subcode relationship", () => {

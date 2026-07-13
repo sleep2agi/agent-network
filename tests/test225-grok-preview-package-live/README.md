@@ -4,6 +4,17 @@ This suite builds candidate npm tarballs from one exact Git commit archive, inst
 them globally into a second clean Docker stage, and runs the CLI only from
 those installed packages. It never publishes a package.
 
+Before the build stage discards source, it proves that the runtime, CLI
+persistence boundary, and value-free diagnostic use the same exact failure
+code and JSONL subcode literals and that they equal a separately reviewed
+preview contract. It also checks that the packed CLI contains both exact sets,
+the closed relationship checks, and the value-free marker. It then emits a
+read-only, value-free contract bound to the source commit and agent-node
+tarball SHA-256. L0 validates that contract again in the source-free image;
+unknown, coordinated-extra, duplicate, reordered, or extra values and changed
+bindings are negative controls. Product behavior remains covered by the
+tarball E2E below rather than being inferred from this contract alone.
+
 The deterministic layer always runs. It uses a Grok 0.2.93-shaped PTY test
 double but real candidate `anet`, `agent-node`, `commhub-server`, Hub/SSE,
 Unix attach relay, and tmux TTY. It covers:
