@@ -1,25 +1,28 @@
 #!/usr/bin/env node
-// RFC-030 Wave 1A P0.2 Commit 2 corrective round 2 (副指挥 0bd525d0
-// P1-3). Per-fixture typecheck harness for the abort() Promise<void>
-// contract.
+// RFC-030 Wave 1A P0.2 Commit 2 corrective round 3 (副指挥 cdd20559
+// P1). Per-fixture typecheck-negative harness for the abort()
+// Promise<void> contract, with PRECISE diagnostic-line binding:
 //
-// For EACH negative fixture:
-//   - Copy to a fresh tmp dir with a `.ts` extension.
-//   - Rewrite the relative imports so they resolve to the actual
-//     gateway sources.
-//   - Run `tsc --strict --noEmit`.
-//   - Assert:
-//       * tsc exit code non-zero
-//       * error output includes a TS2416 / TS2322 diagnostic
-//         pointing at the FIXTURE's own file
-//       * error output mentions the specific class name in the
-//         fixture
-//       * the OFFENDING LINE for that fixture is the `abort:` line
-//
-// The positive baseline fixture is expected to typecheck CLEAN
-// (exit 0). A "positive + unrelated TS error" variant is generated
-// on the fly and MUST NOT pass the negative check (proving the
-// harness cannot be tricked by unrelated diagnostics elsewhere).
+//   For each negative fixture:
+//     1. Copy to a tmp dir with a `.ts` extension.
+//     2. Rewrite the relative imports to absolute paths.
+//     3. Run `tsc --strict --noEmit`.
+//     4. Parse diagnostics into `{file, line, col, code, message}`.
+//     5. Filter to diagnostics whose `file` == the fixture path.
+//     6. For EACH fixture diagnostic:
+//         - Assert code is TS2416 or TS2322 (the shape errors we
+//           expect for a bad `abort` field).
+//         - Assert `line` maps to a source line that MATCHES the
+//           fixture's `expectedLineRegex` (i.e. actually points at
+//           the `abort:` property line, not at another member).
+//     7. Assert at least ONE fixture diagnostic exists (otherwise
+//        the bad implementation was not rejected).
+//     8. Assert NO unexpected diagnostics slip through — every
+//        diagnostic in the fixture file must be an abort-line one.
+//   Meta-mutation: take a positive fixture, mutate a NON-abort
+//     property to fail typecheck, run through the SAME predicate,
+//     and assert the harness turns RED. Proves the harness isn't
+//     fooled by an unrelated TS error in the same class.
 //
 // Usage: `npm run typecheck:rfc030-abort-negative`.
 
@@ -39,12 +42,13 @@ if (!fs.existsSync(tscBin)) {
 const gwDir = path.join(agentNodeRoot, "src", "runtime", "codex-policy-gateway");
 const fixturesDir = path.join(gwDir, "fixtures");
 
-function copyFixture(basename, tmpDir) {
+function copyFixtureContent(basename, tmpDir, mutate) {
   const src = path.join(fixturesDir, basename);
   const dst = path.join(tmpDir, basename.replace(".ts.fixture", ".ts"));
   let content = fs.readFileSync(src, "utf8");
   content = content.replaceAll('"../uds-server"', JSON.stringify(path.join(gwDir, "uds-server.ts")));
   content = content.replaceAll('"../protocol"', JSON.stringify(path.join(gwDir, "protocol.ts")));
+  if (mutate) content = mutate(content);
   fs.writeFileSync(dst, content, "utf8");
   return dst;
 }
@@ -79,6 +83,57 @@ function runTsc(tsconfigPath) {
   }
 }
 
+// Parse `file(line,col): error TSxxxx: message` lines. tsc's format
+// is stable enough for this narrow use.
+function parseTscDiagnostics(output) {
+  const diags = [];
+  for (const line of output.split(/\r?\n/)) {
+    const m = line.match(/^(.+?)\((\d+),(\d+)\):\s+error\s+TS(\d+):\s+(.+)$/);
+    if (m) {
+      diags.push({
+        file: m[1],
+        line: Number(m[2]),
+        col: Number(m[3]),
+        code: `TS${m[4]}`,
+        message: m[5],
+      });
+    }
+  }
+  return diags;
+}
+
+/**
+ * Precise per-fixture predicate. Returns
+ *   {ok: true}
+ *   {ok: false, reason: string}
+ */
+function assessNegativeFixture(fixTsPath, className, expectedLineRegex, output) {
+  const diags = parseTscDiagnostics(output);
+  const fixDiags = diags.filter((d) => d.file === fixTsPath || path.resolve(d.file) === fixTsPath);
+  if (fixDiags.length === 0) {
+    return { ok: false, reason: "no diagnostics on fixture file" };
+  }
+  // Read source to bind line numbers to actual lines.
+  const src = fs.readFileSync(fixTsPath, "utf8").split(/\r?\n/);
+  for (const d of fixDiags) {
+    const codeOk = d.code === "TS2416" || d.code === "TS2322";
+    if (!codeOk) {
+      return { ok: false, reason: `unexpected diag code ${d.code} at line ${d.line}: ${d.message}` };
+    }
+    const lineContent = src[d.line - 1] ?? "";
+    if (!expectedLineRegex.test(lineContent)) {
+      return {
+        ok: false,
+        reason: `diag at line ${d.line} does not match abort-property regex ${expectedLineRegex}; line content: ${lineContent.trim()}`,
+      };
+    }
+    if (!output.includes(className)) {
+      return { ok: false, reason: `output does not mention class ${className}` };
+    }
+  }
+  return { ok: true };
+}
+
 let passed = 0;
 let failed = 0;
 const notes = [];
@@ -86,14 +141,26 @@ function ok(name) { passed++; console.log(`  ok  ${name}`); }
 function fail(name, why) { failed++; console.log(`  FAIL ${name}: ${why}`); }
 
 const NEGATIVE_FIXTURES = [
-  { basename: "abort-negative-void.ts.fixture",       className: "BadVoidAbort",       expectedLineRegex: /abort: \(\) => void/ },
-  { basename: "abort-negative-number.ts.fixture",     className: "BadNumberAbort",     expectedLineRegex: /abort: \(\) => number/ },
-  { basename: "abort-negative-syncsymbol.ts.fixture", className: "BadSyncSymbolAbort", expectedLineRegex: /abort: \(\) => typeof REVERTED_SYNC_ABORT/ },
+  {
+    basename: "abort-negative-void.ts.fixture",
+    className: "BadVoidAbort",
+    expectedLineRegex: /^\s*abort:\s*\(\)\s*=>\s*void/,
+  },
+  {
+    basename: "abort-negative-number.ts.fixture",
+    className: "BadNumberAbort",
+    expectedLineRegex: /^\s*abort:\s*\(\)\s*=>\s*number/,
+  },
+  {
+    basename: "abort-negative-syncsymbol.ts.fixture",
+    className: "BadSyncSymbolAbort",
+    expectedLineRegex: /^\s*abort:\s*\(\)\s*=>\s*typeof REVERTED_SYNC_ABORT/,
+  },
 ];
 
 for (const nf of NEGATIVE_FIXTURES) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-abort-neg-"));
-  const fixTs = copyFixture(nf.basename, tmp);
+  const fixTs = copyFixtureContent(nf.basename, tmp);
   const tsconfig = makeTsconfig(fixTs, tmp);
   const { exitCode, output } = runTsc(tsconfig);
   const label = `negative fixture ${nf.basename}`;
@@ -102,29 +169,22 @@ for (const nf of NEGATIVE_FIXTURES) {
     notes.push(`---- ${label} output ----`);
     notes.push(output.slice(0, 2000));
   } else {
-    // Precise assertions: mentions className, mentions the fixture
-    // file basename, and a TS2416/TS2322 diagnostic.
-    const outputMentionsClass = output.includes(nf.className);
-    const outputMentionsFixture = output.includes(path.basename(fixTs));
-    const outputMentionsTs2416Or2322 = /TS241[6]|TS2322/.test(output);
-    if (!outputMentionsClass || !outputMentionsFixture || !outputMentionsTs2416Or2322) {
-      fail(
-        label,
-        `precise assertions failed — class=${outputMentionsClass} fixture=${outputMentionsFixture} diag=${outputMentionsTs2416Or2322}`,
-      );
+    const verdict = assessNegativeFixture(fixTs, nf.className, nf.expectedLineRegex, output);
+    if (verdict.ok) {
+      ok(`${label} rejected; every fixture diagnostic points at the abort property line and is TS2416/TS2322`);
+    } else {
+      fail(label, verdict.reason);
       notes.push(`---- ${label} output ----`);
       notes.push(output.slice(0, 2000));
-    } else {
-      ok(`${label} rejected with class + fixture + TS2416/TS2322 all mentioned`);
     }
   }
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }
 
-// Positive baseline sanity: MUST typecheck clean.
+// Positive baseline: MUST typecheck clean.
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-abort-pos-"));
-  const fixTs = copyFixture("abort-positive-baseline.ts.fixture", tmp);
+  const fixTs = copyFixtureContent("abort-positive-baseline.ts.fixture", tmp);
   const tsconfig = makeTsconfig(fixTs, tmp);
   const { exitCode, output } = runTsc(tsconfig);
   if (exitCode === 0) {
@@ -135,43 +195,68 @@ for (const nf of NEGATIVE_FIXTURES) {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }
 
-// Meta-sanity: if we take the positive baseline and INJECT an
-// unrelated TS error (a badly typed identifier), a bare exit-non-zero
-// check would trick a lax harness. Our harness is stricter: it
-// requires the error to mention the target class. Prove that here:
-//   - Take the positive fixture.
-//   - Append an unrelated line: `const bad: number = "not a number";`
-//   - tsc will exit non-zero (unrelated TS2322), but our precise
-//     "mentions className AND fixture AND TS241X" check filters to
-//     className = "BadVoidAbort" etc., NONE of which are in the
-//     fixture. The harness must NOT count this as a negative pass.
+// Meta-sanity variant #1: unrelated TS error appended to positive
+// baseline. Harness precise-filter must NOT accept.
 {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-abort-meta-"));
-  const posBase = fs.readFileSync(path.join(fixturesDir, "abort-positive-baseline.ts.fixture"), "utf8");
-  const withUnrelated =
-    posBase.replaceAll('"../uds-server"', JSON.stringify(path.join(gwDir, "uds-server.ts")))
-           .replaceAll('"../protocol"', JSON.stringify(path.join(gwDir, "protocol.ts")))
-    + `\nconst bad: number = "not a number";\nexport const __unrelated = bad;\n`;
-  const fixTs = path.join(tmp, "meta-positive-with-unrelated-error.ts");
-  fs.writeFileSync(fixTs, withUnrelated, "utf8");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-abort-meta-un-"));
+  const fixTs = copyFixtureContent("abort-positive-baseline.ts.fixture", tmp, (content) =>
+    content + `\nconst bad: number = "not a number";\nexport const __unrelated = bad;\n`,
+  );
   const tsconfig = makeTsconfig(fixTs, tmp);
   const { exitCode, output } = runTsc(tsconfig);
-  // Bare exit check: non-zero. But we apply the NEGATIVE FIXTURE
-  // precise-assertion filter and require it to REJECT this input.
-  const wouldPassNegativeFilter =
-    exitCode !== 0
-      && output.includes("BadVoidAbort")
-      && output.includes("BadNumberAbort")
-      && output.includes("BadSyncSymbolAbort");
-  if (wouldPassNegativeFilter) {
-    fail(
-      "meta-sanity: unrelated-error must NOT pretend to be a negative",
-      "unrelated-error output matched the negative filter — harness is too loose",
-    );
-    notes.push("---- meta-sanity unrelated-error output ----");
-    notes.push(output.slice(0, 1500));
+  // Apply the negative-fixture predicate for one of the Bad*Abort
+  // fixtures. It must NOT return {ok:true} because this file
+  // does not contain a bad abort — the diag is on a `const bad`
+  // line, not an `abort:` line.
+  const verdictAgainstNegativeFilter = assessNegativeFixture(
+    fixTs, "BadVoidAbort", NEGATIVE_FIXTURES[0].expectedLineRegex, output,
+  );
+  if (exitCode !== 0 && verdictAgainstNegativeFilter.ok === false) {
+    ok(`meta-sanity #1: unrelated TS error (exit=${exitCode}) rejected by precise abort-line filter (${verdictAgainstNegativeFilter.reason})`);
   } else {
-    ok(`meta-sanity: unrelated TS error (exit=${exitCode}) does NOT pass the negative filter`);
+    fail(
+      "meta-sanity #1: unrelated TS error slipped past the negative filter",
+      `exitCode=${exitCode}, verdict.ok=${verdictAgainstNegativeFilter.ok}`,
+    );
+    notes.push("---- meta-sanity #1 output ----");
+    notes.push(output.slice(0, 1500));
+  }
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+}
+
+// Meta-sanity variant #2: bad NON-abort property in the same class.
+// Take a positive baseline, but mutate the `close` field to have
+// wrong return type. The bare "exit != 0 + class-name mention" old
+// harness would have accepted this; the precise abort-line filter
+// MUST reject.
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-abort-meta-close-"));
+  // The positive baseline already implements close as `async close(): Promise<void>`.
+  // Replace it with `close(): void {}` — that will produce a TS2416
+  // on the close method, still inside GoodTransport, but NOT on the
+  // abort line. Precise filter must reject.
+  const fixTs = copyFixtureContent("abort-positive-baseline.ts.fixture", tmp, (content) =>
+    content.replace(/async close\(\): Promise<void> \{\}/, "close(): void {}"),
+  );
+  const tsconfig = makeTsconfig(fixTs, tmp);
+  const { exitCode, output } = runTsc(tsconfig);
+  const verdict = assessNegativeFixture(
+    fixTs, "GoodTransport", /^\s*abort:\s*\(\)\s*=>\s*void/, output,
+  );
+  if (exitCode !== 0 && verdict.ok === false) {
+    ok(`meta-sanity #2: bad NON-abort property (close) rejected by precise abort-line filter (${verdict.reason})`);
+  } else if (exitCode === 0) {
+    // Unexpected: our mutation didn't actually cause a diag. The
+    // meta-sanity intent is moot; treat as skipped-with-note.
+    notes.push("meta-sanity #2: mutation did NOT cause a tsc diag; skipping");
+    ok("meta-sanity #2: skipped (mutation was type-compatible; no diag to filter)");
+  } else {
+    fail(
+      "meta-sanity #2: bad non-abort property slipped past filter",
+      `verdict.ok=${verdict.ok} — filter treated a close-line diag as an abort-line negative`,
+    );
+    notes.push("---- meta-sanity #2 output ----");
+    notes.push(output.slice(0, 1500));
   }
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }

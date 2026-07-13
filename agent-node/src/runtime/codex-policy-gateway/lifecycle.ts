@@ -85,6 +85,38 @@ export const NOOP_PREFLIGHT: PreflightRunner = { async run() { /* no-op */ } };
 // ────────────────────────────────────────────────────────────────────────
 
 /**
+ * 副指挥 cdd20559 P0: total, non-throwing coercion of any value
+ * (including non-Error rejections whose `String(...)` throws) into
+ * an `Error` object.
+ *
+ * Layers:
+ *   1. `instanceof Error` is wrapped in try/catch — a hostile
+ *      `Symbol.hasInstance` trap on a subclass could throw; we
+ *      swallow it and fall through.
+ *   2. `Object.prototype.toString.call(x)` — does NOT invoke any
+ *      user-defined `toString`/`valueOf`, so cannot be poisoned by
+ *      the caller's object.
+ *   3. If step 2 also throws (extremely rare — would require a
+ *      poisoned global prototype trap), fall back to a fixed
+ *      synthetic marker so shutdown always converges.
+ *
+ * NEVER throws. Preserves original Error identity when the value
+ * IS already an Error.
+ */
+function toError(value: unknown): Error {
+  try {
+    if (value instanceof Error) return value;
+  } catch { /* poisoned Symbol.hasInstance on RHS proxy — fall through */ }
+  let tag: string;
+  try {
+    tag = Object.prototype.toString.call(value);
+  } catch {
+    tag = "<un-stringifiable rejection value>";
+  }
+  return new Error(tag);
+}
+
+/**
  * Wrap a `TuiInitializeProvider` so that a throw inside
  * `currentSnapshot()` degrades to `undefined` instead of propagating.
  * The dispatch layer then fails the TUI initialize with `Unavailable`
@@ -353,6 +385,15 @@ export class GatewayLifecycle {
    */
   private teardownCorePromise: Promise<TeardownOutcome> | null = null;
   /**
+   * 副指挥 cdd20559 evidence-delta #1: observable counter for
+   * how many times `doTeardownCore` was actually entered. The
+   * memoised promise guarantees at most ONE entry across the
+   * three shutdown entry points (public `stop()`, upstream
+   * close cascade, start rollback). Test seam accessor:
+   * `teardownCoreEnteredCount()`.
+   */
+  private teardownCoreEnteredCountValue = 0;
+  /**
    * 副指挥 3cb7ba9b Commit 2 #5 + d53209eb #7: truthful failure.
    * `stopFailureError` retains the PRIMARY error object identity
    * — the raw `TypeError` / custom-code Error thrown by
@@ -612,7 +653,12 @@ export class GatewayLifecycle {
     // Fire-and-forget through the same outer `stop()` wrapper so
     // that concurrent stop() callers share the exact same
     // Promise (副指挥 d53209eb #3 identity).
-    void this.stop();
+    // 副指挥 cdd20559 P0: even though `stop()` is designed never
+    // to reject (doTeardownCore returns TeardownOutcome; no throw
+    // path), attach a `.catch` sink so a hypothetical regression
+    // that introduced a rejection cannot surface as unhandled from
+    // this cascade path.
+    void this.stop().catch(() => { /* consumed defensively */ });
   }
 
   /**
@@ -652,9 +698,20 @@ export class GatewayLifecycle {
    */
   private runTeardownCore(): Promise<TeardownOutcome> {
     if (this.teardownCorePromise !== null) return this.teardownCorePromise;
+    this.teardownCoreEnteredCountValue++;
     this.teardownCorePromise = this.doTeardownCore();
     return this.teardownCorePromise;
   }
+
+  /**
+   * 副指挥 cdd20559 evidence-delta #1: test-only observable
+   * count of first-time entries into the teardown core. All three
+   * shutdown entry points (public stop, upstream close cascade,
+   * start rollback) share the memoised `teardownCorePromise`, so
+   * this counter is exactly 1 after any teardown that ran, and 0
+   * before any teardown started.
+   */
+  teardownCoreEnteredCount(): number { return this.teardownCoreEnteredCountValue; }
 
   /**
    * Teardown core (副指挥 3cb7ba9b + d53209eb).
@@ -808,7 +865,7 @@ export class GatewayLifecycle {
       .then(stop)
       .then<Outcome, Outcome>(
         () => ({ kind: "stop_ok" }),
-        (e: unknown) => ({ kind: "stop_error", error: e instanceof Error ? e : new Error(String(e)) }),
+        (e: unknown) => ({ kind: "stop_error", error: toError(e) }),
       );
     const timeoutP: Promise<Outcome> = new Promise((resolve) => {
       timer = setTimeout(() => resolve({ kind: "timeout" }), LOCAL_STOP_TIMEOUT_MS);
@@ -830,7 +887,7 @@ export class GatewayLifecycle {
     } catch (e) {
       // ForceTerminate throw supersedes the primary as the more
       // actionable failure — no fallback path exists.
-      return e instanceof Error ? e : new Error(String(e));
+      return toError(e);
     }
     return primary;
   }
@@ -873,7 +930,7 @@ export class GatewayLifecycle {
       .then(() => this.opts.upstreamTransport.close())
       .then<CloseWinner, CloseWinner>(
         () => ({ kind: "close_ok" }),
-        (e: unknown) => ({ kind: "close_error", error: e instanceof Error ? e : new Error(String(e)) }),
+        (e: unknown) => ({ kind: "close_error", error: toError(e) }),
       );
     const closeTimeoutP: Promise<CloseWinner> = new Promise((resolve) => {
       closeTimer = setTimeout(() => resolve({ kind: "timeout" }), UPSTREAM_CLOSE_TIMEOUT_MS);
@@ -909,7 +966,7 @@ export class GatewayLifecycle {
         .then(() => this.opts.upstreamTransport.abort())
         .then<AbortWinner, AbortWinner>(
           () => ({ kind: "abort_ok" }),
-          (e: unknown) => ({ kind: "abort_error", error: e instanceof Error ? e : new Error(String(e)) }),
+          (e: unknown) => ({ kind: "abort_error", error: toError(e) }),
         );
       const abortTimeoutP: Promise<AbortWinner> = new Promise((resolve) => {
         abortTimer = setTimeout(() => resolve({ kind: "abort_timeout" }), UPSTREAM_ABORT_TIMEOUT_MS);
@@ -924,7 +981,7 @@ export class GatewayLifecycle {
       // Reached only if `.then(() => transport.abort())` chain threw
       // synchronously inside Promise.resolve().then() — extremely
       // unlikely, but we still land in `stop_failed` cleanly.
-      const err = e instanceof Error ? e : new Error(String(e));
+      const err = toError(e);
       return { closeError, abortError: err };
     }
     if (abortWinner.kind === "abort_ok") {

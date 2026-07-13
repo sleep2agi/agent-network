@@ -1462,14 +1462,16 @@ describe("Commit 2 corrective round 2 P1-1 — multi-failure ledger preserves ev
 });
 
 describe("Commit 2 corrective round 2 P1-4 — rollback shares teardown core with concurrent stop / upstream close", () => {
-  test("preflight throws mid-await; concurrent stop() + upstream close race → teardown core runs exactly once", async () => {
+  test("preflight throws mid-await; three shutdown entry points funnel to teardown core; core entered EXACTLY 1", async () => {
     const paths = pathsFor();
     const { diagnostics } = collectDiagnostics();
     const upstream = new ControllableUpstream();
-    // Preflight resolves after 30 ms; stop and upstream emitClose
-    // race to enter the same teardown core.
+    // Preflight is held open until we explicitly reject it — so
+    // start() is parked inside `throwIfAbortedAfterAwait` awaits.
     let preflightSettle: (v: void) => void = () => {};
-    const preflightP = new Promise<void>((res, rej) => { preflightSettle = () => rej(new Error("preflight_boom")); });
+    const preflightP = new Promise<void>((_res, rej) => {
+      preflightSettle = () => rej(new Error("preflight_boom"));
+    });
     const preflight: PreflightRunner = { run: () => preflightP };
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
@@ -1481,34 +1483,52 @@ describe("Commit 2 corrective round 2 P1-4 — rollback shares teardown core wit
       diagnosticsSink: diagnostics,
       backendCapability: TEST_BACKEND_CAP,
     });
+    expect(lifecycle.teardownCoreEnteredCount()).toBe(0);
     const startP = lifecycle.start();
-    // Yield so start() progresses to the preflight await, then
-    // fire the race: reject preflight AND fire stop / emitClose
-    // in the same microtask cluster.
+    // Yield so start() is parked at the preflight `await`.
     await Promise.resolve();
-    upstream.emitClose(); // upstream close cascade would enter
-    const stopP = lifecycle.stop();
-    preflightSettle(); // now preflight rejects → rollback path
-    const results = await Promise.allSettled([startP, stopP]);
+    await Promise.resolve();
+    // 副指挥 cdd20559 evidence-delta #1: fire all three shutdown
+    // entry points concurrently. The upstream is at this point
+    // in the router's pre-active "subscribed" state — emitClose
+    // records the pre-active close but does NOT invoke
+    // `onUpstreamCloseFromRouter` (that fires on active close).
+    // The router's terminal fence will cause start's next
+    // `throwIfAbortedAfterAwait` to invoke `rollbackStartFailure`,
+    // which enters the core.
+    upstream.emitClose();
+    const stopP1 = lifecycle.stop();
+    const stopP2 = lifecycle.stop();
+    // Rejecting the preflight now unblocks start(); start's
+    // catch runs `rollbackStartFailure` → runTeardownCore.
+    preflightSettle();
+    const results = await Promise.allSettled([startP, stopP1, stopP2]);
     expect(results[0].status).toBe("rejected");
     expect(results[1].status).toBe("fulfilled");
-    // Rollback + upstream cascade + stop all funnel to the same
-    // memoised core: upstream.close() called at most once.
-    expect(upstream.closeCallCount).toBeLessThanOrEqual(1);
+    expect(results[2].status).toBe("fulfilled");
+    // 副指挥 cdd20559 evidence-delta #1: teardown core body ran
+    // EXACTLY ONCE across all shutdown entry points.
+    expect(lifecycle.teardownCoreEnteredCount()).toBe(1);
+    // Public promise identity across concurrent stops.
+    expect(stopP1).toBe(stopP2);
     // Terminal state reached.
     expect(["stopped", "stop_failed"]).toContain(lifecycle.currentState());
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
   });
 });
 
-describe("Commit 2 corrective round 2 evidence-delta — tagged winner on real same-checkpoint race", () => {
-  test("close settles VIA MICROTASK immediately AFTER timeout callback → tagged winner is timeout; abort called", async () => {
-    // Same-checkpoint race: schedule close's resolution via
-    // queueMicrotask INSIDE the timer callback, so the resolve
-    // hits Promise.race in the same tick as the timeout branch's
-    // resolve. With a mutable-flag design this could mis-attribute
-    // to "ok"; the tagged winner returned by Promise.race prevents
-    // that regardless of ordering.
+describe("Commit 2 corrective round 3 — tagged winner: post-timeout close settle does NOT revert stop_failed", () => {
+  // 副指挥 cdd20559 evidence-delta #2: honest title. The scenario
+  // this actually exercises is "close resolves AFTER the timeout
+  // has already been picked by Promise.race" — NOT a true
+  // same-microtask boundary (which would need a controllable clock
+  // seam that the current design doesn't expose). What we CAN
+  // prove: once the tagged winner is picked, a subsequent close
+  // settle does NOT flip the terminal state back to `stopped`.
+  // That IS the tagged-winner invariant a mutable-flag design
+  // could violate — we lock it in explicitly by re-checking state
+  // after the close settle has definitely fired.
+  test("close settles ~20 ms AFTER internal timeout → state stays stop_failed; late settle does not revert", async () => {
     const upstream = new ControllableUpstream();
     let closeRes: (() => void) | null = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1519,28 +1539,23 @@ describe("Commit 2 corrective round 2 evidence-delta — tagged winner on real s
     const h = await makeLifecycleWith(upstream);
     try {
       await h.lifecycle.start();
-      // Schedule close to resolve JUST AFTER the internal timeout
-      // fires, in the same "tick cluster": setTimeout + queueMicrotask
-      // means close's resolve is enqueued microtask-adjacent to the
-      // timer's own resolve. With a mutable-flag design a late-tick
-      // settle could mis-attribute to "ok"; the tagged winner
-      // returned by Promise.race locks in whichever entry actually
-      // resolved first and cannot be reversed.
       const microtaskScheduler = setTimeout(() => {
         queueMicrotask(() => { if (closeRes !== null) closeRes(); });
       }, UPSTREAM_CLOSE_TIMEOUT_MS + 20);
       await h.lifecycle.stop();
+      const stateAtStopReturn = h.lifecycle.currentState();
+      const failureAtStopReturn = h.lifecycle.stopFailure();
+      // Wait beyond the scheduled close-settle time so any late
+      // effect on state would have observably fired.
+      await new Promise((r) => setTimeout(r, 200));
       clearTimeout(microtaskScheduler);
-      // Observable effect of tagged-winner: because timeout is one
-      // of race()'s inputs and its callback fires
-      // UPSTREAM_CLOSE_TIMEOUT_MS after start, whereas closeRes is
-      // scheduled 5 ms earlier BUT gated behind a microtask fired
-      // from a later setTimeout callback, the timer wins.
-      expect(upstream.abortCallCount).toBe(1);
+      // Tagged-winner invariant: state and primary Error are
+      // UNCHANGED after the late close settle.
+      expect(stateAtStopReturn).toBe("stop_failed");
       expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailure()).toBe(failureAtStopReturn);
       expect(h.lifecycle.stopFailure()?.message).toMatch(/upstream close timed out/);
-      // The losing branch (closeRes fired via microtask) does NOT
-      // revert the state — a mutable-flag design would have done.
+      expect(upstream.abortCallCount).toBe(1);
     } finally { await h.cleanup(); }
   });
 });
@@ -1576,5 +1591,183 @@ describe("Commit 2 corrective round 2 evidence-delta — real late upstream resp
       expect(settleCount).toBe(1);
       expect(h.lifecycle.pendingUpstreamCount()).toBe(0);
     } finally { await h.cleanup(); }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 3 additions (副指挥 cdd20559)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * A value whose `toString` / `valueOf` throw. `String(coercionBoom)`
+ * throws; `Object.prototype.toString.call(...)` does NOT (it uses
+ * the internal Symbol.toStringTag path). The `toError` helper must
+ * therefore be robust against `String()` throws.
+ */
+function makeCoercionBoom(msg = "coercion_boom"): unknown {
+  const bomb: Record<string, unknown> = Object.create(null);
+  bomb.toString = () => { throw new Error(msg); };
+  bomb.valueOf = () => { throw new Error(msg); };
+  return bomb;
+}
+
+describe("Commit 2 corrective round 3 P0 — non-stringifiable rejection convergence (toError total)", () => {
+  test("upstream close throws non-Error non-stringifiable value → stop fulfilled, terminal, no unhandled", async () => {
+    let unhandled: unknown = null;
+    const listener = (r: unknown): void => { unhandled = r; };
+    process.on("unhandledRejection", listener);
+    const upstream = new ControllableUpstream();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (upstream as unknown as any).close = () => {
+      upstream.closeCallCount++;
+      return Promise.reject(makeCoercionBoom("close_coerce_boom"));
+    };
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      // stop() must resolve — NOT reject — even under a poisoned rejection.
+      await h.lifecycle.stop();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(unhandled).toBeNull();
+      // Terminal (never `stopping`).
+      expect(["stopped", "stop_failed"]).toContain(h.lifecycle.currentState());
+      // The ledger.upstreamClose slot recorded a synthetic Error
+      // (Object.prototype.toString-derived tag) — never null.
+      expect(h.lifecycle.stopFailureLedger().upstreamClose).not.toBeNull();
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
+  });
+
+  test("upstream abort throws non-Error non-stringifiable value → stop fulfilled, terminal, no unhandled", async () => {
+    let unhandled: unknown = null;
+    const listener = (r: unknown): void => { unhandled = r; };
+    process.on("unhandledRejection", listener);
+    const upstream = new ControllableUpstream();
+    upstream.setClose({ kind: "throw", error: new Error("close_forces_abort") });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (upstream as unknown as any).abort = () => {
+      upstream.abortCallCount++;
+      return Promise.reject(makeCoercionBoom("abort_coerce_boom"));
+    };
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      await h.lifecycle.stop();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(unhandled).toBeNull();
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      // stopFailure returns the abort-side synthetic Error identity.
+      const primary = h.lifecycle.stopFailure();
+      expect(primary).not.toBeNull();
+      expect(primary).toBeInstanceOf(Error);
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
+  });
+
+  test("local backend stop throws non-Error non-stringifiable value → stop fulfilled, terminal, no unhandled", async () => {
+    let unhandled: unknown = null;
+    const listener = (r: unknown): void => { unhandled = r; };
+    process.on("unhandledRejection", listener);
+    const upstream = new ControllableUpstream();
+    const h = await makeLifecycleWithMisbehavingBackend(
+      upstream,
+      { kind: "throw", error: makeCoercionBoom("backend_stop_coerce_boom") as Error },
+    );
+    try {
+      await h.lifecycle.stop();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(unhandled).toBeNull();
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailureLedger().backendStop).not.toBeNull();
+      expect(h.lifecycle.stopFailureLedger().backendStop).toBeInstanceOf(Error);
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
+  });
+
+  test("local TUI stop throws non-Error non-stringifiable value → stop fulfilled, terminal, no unhandled", async () => {
+    let unhandled: unknown = null;
+    const listener = (r: unknown): void => { unhandled = r; };
+    process.on("unhandledRejection", listener);
+    const upstream = new ControllableUpstream();
+    const h = await makeLifecycleWithMisbehavingTui(
+      upstream,
+      { kind: "throw", error: makeCoercionBoom("tui_stop_coerce_boom") as Error },
+    );
+    try {
+      await h.lifecycle.stop();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(unhandled).toBeNull();
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailureLedger().tuiStop).not.toBeNull();
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
+  });
+
+  test("forceTerminate throws non-Error non-stringifiable value → stop fulfilled, terminal, no unhandled", async () => {
+    // Local stop throws AND forceTerminate throws a coercion-boom.
+    let unhandled: unknown = null;
+    const listener = (r: unknown): void => { unhandled = r; };
+    process.on("unhandledRejection", listener);
+    const upstream = new ControllableUpstream();
+    const h = await makeLifecycleWithMisbehavingBackend(
+      upstream,
+      { kind: "throw", error: new Error("stop_throw_forces_force") },
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const be = (h.lifecycle as unknown as any).backendServer;
+    if (be !== null && be !== undefined) {
+      const originalForce = be.forceTerminate.bind(be);
+      be.forceTerminate = () => {
+        try { originalForce(); } catch { /* absorb underlying cleanup */ }
+        throw makeCoercionBoom("force_coerce_boom");
+      };
+    }
+    try {
+      await h.lifecycle.stop();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(unhandled).toBeNull();
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailureLedger().backendStop).not.toBeNull();
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
+  });
+
+  test("onUpstreamCloseFromRouter cascade cannot surface unhandled rejection even if downstream sees hostile throw", async () => {
+    let unhandled: unknown = null;
+    const listener = (r: unknown): void => { unhandled = r; };
+    process.on("unhandledRejection", listener);
+    const upstream = new ControllableUpstream();
+    // Close throws a hostile value AND abort throws one too — the
+    // fire-and-forget cascade `void this.stop().catch(...)` must
+    // absorb any hypothetical downstream rejection.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (upstream as unknown as any).close = () => Promise.reject(makeCoercionBoom("cascade_close_boom"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (upstream as unknown as any).abort = () => Promise.reject(makeCoercionBoom("cascade_abort_boom"));
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      // Trigger the cascade path — active-close via emitClose.
+      upstream.emitClose();
+      // Wait for cascade to fully settle.
+      await new Promise((r) => setTimeout(r, 200));
+      expect(unhandled).toBeNull();
+      // And a follow-up manual stop still resolves cleanly.
+      await h.lifecycle.stop();
+      expect(["stopped", "stop_failed"]).toContain(h.lifecycle.currentState());
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
   });
 });
