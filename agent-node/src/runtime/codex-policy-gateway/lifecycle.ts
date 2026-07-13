@@ -408,6 +408,35 @@ export class GatewayLifecycle {
   private stopFailureLedgerRecord: TeardownFailureLedger = {
     backendStop: null, tuiStop: null, upstreamClose: null, upstreamAbort: null,
   };
+  /**
+   * 副指挥 e8cdc302 Round 7: monotonic lifecycle epoch. Incremented
+   * synchronously on EVERY shutdown intent (`stop()`, upstream
+   * close cascade, start rollback) via `applySyncAdmissionFence()`.
+   * `start()` captures its epoch at admission; every start-side
+   * continuation (subscribe / preflight settle / bind / activate
+   * commit) refuses to advance unless the epoch still matches.
+   * The final `state = "running"` write is CAS-guarded on this
+   * value — a stop that fired during activate() cannot be
+   * clobbered back to `running`.
+   *
+   * The epoch is INDEPENDENT of `state` — `state` is the terminal-
+   * facing observable, but a mid-teardown state could technically
+   * be re-observed by a stale continuation. The epoch is
+   * strictly monotonic; a stale continuation observing an epoch
+   * mismatch knows unambiguously that a shutdown intent has fired
+   * and its work is forfeit.
+   */
+  private lifecycleEpoch = 0;
+  /**
+   * 副指挥 b65ebc50 Round 7: shutdown signal. Resolves the first
+   * time `applySyncAdmissionFence()` runs. `preflight.run()` is
+   * raced against this signal so a never-resolving preflight
+   * cannot wedge `stop()`.
+   */
+  private shutdownSignalResolve: () => void = () => {};
+  private shutdownSignalPromise: Promise<void> = new Promise<void>((res) => {
+    this.shutdownSignalResolve = res;
+  });
 
   constructor(opts: GatewayLifecycleOptions) {
     this.opts = opts;
@@ -470,34 +499,52 @@ export class GatewayLifecycle {
       throw new Error(`cannot start from state '${this.state}'`);
     }
     this.state = "starting";
-    const promise = this.doStart();
-    this.startInProgress = promise;
+    // 副指挥 e8cdc302 Round 7: capture epoch at admission BEFORE
+    // any body runs. Every continuation checks
+    // `epoch === this.lifecycleEpoch`; a stale continuation whose
+    // epoch no longer matches rolls back and refuses to commit.
+    const startEpoch = this.lifecycleEpoch;
+    // 副指挥 b65ebc50 Round 7: publish `startInProgress` SYNC via
+    // deferred BEFORE any body runs. Prior code called
+    // `this.doStart()` first (its sync prefix ran, including
+    // `router.subscribe()` which could sync-fire close handlers
+    // that reenter `stop()`), then assigned `startInProgress`.
+    // A reentrant `stop()` during subscribe saw `startInProgress
+    // === null`, entered the teardown core synchronously, and
+    // tried to unsubscribe a router whose `frameUnsub` /
+    // `closeUnsub` hadn't been stored yet — real transport
+    // handler leak. Same shape as `stop()` / `runTeardownCore()`:
+    // deferred first, body bridged via `.then`.
+    let resolveStart!: () => void;
+    let rejectStart!: (e: unknown) => void;
+    const startDeferred = new Promise<void>((res, rej) => {
+      resolveStart = res;
+      rejectStart = rej;
+    });
+    this.startInProgress = startDeferred;
+    this.doStart(startEpoch).then(resolveStart, rejectStart);
     try {
-      await promise;
+      await startDeferred;
     } finally {
       this.startInProgress = null;
     }
   }
 
-  private async doStart(): Promise<void> {
+  private async doStart(startEpoch: number): Promise<void> {
     // 副指挥 dd12966c: the ENTIRE doStart body — construction,
     // subscribe, preflight, bind, activate — is wrapped in a
-    // unified catch that funnels ANY throw (including a
-    // BackendUdsServer / TuiWsServer / UpstreamRouter constructor
-    // throw AND an activate throw) through `rollbackStartFailure`,
-    // which enters the memoised teardown core. Prior version only
-    // wrapped the four narrow phase awaits, so a synchronous
-    // constructor throw (e.g. bad `backendCapability`) left
-    // state="starting" with mint bearer + partial refs dangling.
+    // unified catch that funnels ANY throw through
+    // `rollbackStartFailure`, which enters the memoised teardown
+    // core.
     try {
-      await this.doStartInner();
+      await this.doStartInner(startEpoch);
     } catch (e) {
       await this.rollbackStartFailure();
       throw e;
     }
   }
 
-  private async doStartInner(): Promise<void> {
+  private async doStartInner(startEpoch: number): Promise<void> {
     // 副指挥 1b24ae71 P0-1: construct the mux + reverseNs + coordinator
     // + UpstreamRouter BEFORE preflight. The router subscribes to the
     // upstream transport immediately and BUFFERS any frames received
@@ -562,11 +609,18 @@ export class GatewayLifecycle {
       throw e;
     }
 
-    // 副指挥 e85ade40 P0-1: async fence. AWAITS the rollback so any
-    // partially-bound listener is stopped BEFORE state=stopped is
-    // set and refs are nulled. Prior sync fence returned `stopped`
-    // while the UDS listener was still accepting.
+    // 副指挥 e8cdc302 Round 7: epoch fence. EVERY continuation
+    // checks that our captured `startEpoch` still matches the
+    // current `this.lifecycleEpoch`. A shutdown intent bumps
+    // the epoch monotonically inside `applySyncAdmissionFence`,
+    // so any post-await continuation with a stale epoch knows
+    // unambiguously to bail out — no need to trust a mutable
+    // `stopRequested` flag alone.
     const throwIfAbortedAfterAwait = async (label: string): Promise<void> => {
+      if (startEpoch !== this.lifecycleEpoch) {
+        await this.rollbackStartFailure();
+        throw new Error(`start aborted: lifecycle epoch changed (${label})`);
+      }
       if (this.upstreamRouter?.wasCloseBeforeActive() || this.upstreamRouter?.currentState() === "terminal") {
         await this.rollbackStartFailure();
         throw new Error(`start aborted: upstream closed (${label})`);
@@ -577,8 +631,23 @@ export class GatewayLifecycle {
       }
     };
 
+    // 副指挥 b65ebc50 Round 7: race preflight against the
+    // shutdown signal. A never-resolving preflight cannot wedge
+    // stop() — the signal resolves inside
+    // `applySyncAdmissionFence`. Late resolves/rejects of the
+    // preflight promise are safely consumed by the `.catch`
+    // attached below so they cannot surface as unhandled.
+    const preflightP = this.opts.preflight.run();
+    // Safe-consume: if preflight later rejects AFTER we've moved
+    // on, the rejection must not surface as unhandled.
+    preflightP.catch(() => { /* handled */ });
     try {
-      await this.opts.preflight.run();
+      await Promise.race([
+        preflightP,
+        this.shutdownSignalPromise.then(() => {
+          throw new Error("start aborted: shutdown signalled during preflight");
+        }),
+      ]);
     } catch (e) {
       await this.rollbackStartFailure();
       throw e;
@@ -615,11 +684,28 @@ export class GatewayLifecycle {
     // arrived earlier, `wasCloseBeforeActive` would have made
     // `throwIfAbortedAfterAwait` fire already.
     this.upstreamRouter.activate();
-    if (this.upstreamRouter.currentState() === "terminal") {
+    // 副指挥 e8cdc302 Round 7: post-activate CAS commit. Activate
+    // synchronously dispatches any buffered upstream frames — a
+    // diagnostics-sink handler could call `stop()` during that
+    // dispatch, which would sync-bump the epoch. We refuse to
+    // commit `state = "running"` unless the epoch we captured
+    // AT ADMISSION still matches AND the state is still
+    // `starting` (i.e., the sync fence hasn't touched it). Any
+    // mismatch enters the same memoised rollback and rejects
+    // start — NO admission revive.
+    if (
+      startEpoch !== this.lifecycleEpoch
+      || this.state !== "starting"
+      || this.stopRequested
+      || this.upstreamRouter.currentState() === "terminal"
+    ) {
       await this.rollbackStartFailure();
-      throw new Error("start aborted: upstream closed during activate");
+      throw new Error(
+        `start aborted after activate (epoch=${startEpoch}/${this.lifecycleEpoch}, state=${this.state}, stopRequested=${this.stopRequested})`,
+      );
     }
-
+    // CAS commit: state === "starting" AND epoch matches. Publish
+    // the terminal "running" observable.
     this.state = "running";
   }
 
@@ -742,6 +828,11 @@ export class GatewayLifecycle {
    *      terminal-ish; unchanged here.
    */
   private applySyncAdmissionFence(): void {
+    // 副指挥 e8cdc302 Round 7: bump the monotonic epoch FIRST so
+    // any start-side continuation running after this fence sees a
+    // mismatched epoch and refuses to advance. Epoch is a plain
+    // counter — value is unimportant, only strict monotonicity.
+    this.lifecycleEpoch++;
     if (this.state === "created") {
       this.state = "stopped";
     } else if (this.state === "running" || this.state === "starting") {
@@ -750,6 +841,10 @@ export class GatewayLifecycle {
     if (this.tuiBearer !== null) {
       try { this.tuiBearer.rotate(); } catch { /* silent */ }
     }
+    // Fire the shutdown signal — preflight race unblocks; late
+    // resolves/rejects are consumed by the safe-consume `.catch`
+    // attached where the preflight promise is spawned.
+    try { this.shutdownSignalResolve(); } catch { /* silent */ }
   }
 
   private async doOuterStop(): Promise<void> {

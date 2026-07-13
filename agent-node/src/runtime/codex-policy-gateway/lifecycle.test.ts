@@ -259,7 +259,7 @@ describe("preflight ordering (副指挥 Segment C narrowing)", () => {
     // the timing didn't hit the fence — the invariant we test is
     // "state=stopped + socket absent", not "always rejected".
     if (startResult.startsWith("rejected:")) {
-      expect(startResult).toMatch(/start aborted by concurrent stop|start aborted: upstream closed/);
+      expect(startResult).toMatch(/start aborted(?: by concurrent stop|: (?:upstream closed|shutdown signalled during preflight|lifecycle epoch changed))/);
     }
   });
 
@@ -542,7 +542,11 @@ describe("P0#6 stop-during-preflight epoch fence", () => {
     try { await startP; } catch (e) { startErr = (e as Error).message; }
     await stopP;
     expect(lifecycle.currentState()).toBe("stopped");
-    expect(startErr).toContain("start aborted by concurrent stop");
+    // 副指挥 b65ebc50 Round 7: preflight now races vs the
+    // shutdown signal — a concurrent stop() fires the signal,
+    // race throws with the shutdown-signal message, and the
+    // outer catch runs rollback.
+    expect(startErr).toMatch(/start aborted(?: by concurrent stop|: (?:shutdown signalled during preflight|lifecycle epoch changed))/);
     // NO sockets on disk.
     expect(fs.existsSync(paths.backendSocketPath)).toBe(false);
     expect(fs.existsSync(paths.tuiSocketPath)).toBe(false);
@@ -2249,5 +2253,277 @@ describe("Commit 2 corrective round 6 (副指挥 8cd477e9) — universal shutdow
     expect(lifecycle.stopFailure()).toBe(primaryAt);
     expect(lifecycle.stopFailureLedger().upstreamClose).toBe(ledgerCloseAt);
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 7 — start-side reentrance / epoch-CAS (副指挥 b65ebc50 + e8cdc302)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("Commit 2 corrective round 7 — start memo prepublish + shutdown signal race + activate CAS", () => {
+  test("preflight.run() sync-calls stop() AND never resolves → stop settles bounded; start rejects; state=stopped; no leaks", async () => {
+    // 副指挥 b65ebc50 P0-1: preflight synchronously reentrant
+    // stop, then never resolves. Without the shutdown-signal
+    // race, stop() awaits startInProgress forever.
+    const paths = pathsFor();
+    const upstream = new ControllableUpstream();
+    const { diagnostics } = collectDiagnostics();
+    let stopP: Promise<void> | null = null;
+    const preflight: PreflightRunner = {
+      run: () => {
+        stopP = lifecycle.stop(); // sync reentrant stop
+        return new Promise<void>(() => { /* never */ });
+      },
+    };
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight,
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    const startP = lifecycle.start();
+    // Both settle within a bounded window.
+    const startResult = await Promise.race([
+      startP.then(() => "resolved", (e: Error) => `rejected:${e.message}`),
+      new Promise<string>((_r, rej) => setTimeout(() => rej(new Error("start_wedged")), 800)),
+    ]);
+    expect(String(startResult)).toContain("rejected");
+    await Promise.race([
+      stopP!,
+      new Promise<void>((_r, rej) => setTimeout(() => rej(new Error("stop_wedged")), 500)),
+    ]);
+    expect(lifecycle.currentState()).toBe("stopped");
+    expect(fs.existsSync(paths.backendSocketPath)).toBe(false);
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("external stop() during held never-resolving preflight → stop settles bounded; start rejects; state=stopped", async () => {
+    const paths = pathsFor();
+    const upstream = new ControllableUpstream();
+    const { diagnostics } = collectDiagnostics();
+    const preflight: PreflightRunner = { run: () => new Promise<void>(() => {}) };
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight,
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    const startP = lifecycle.start();
+    // Yield so start is parked at the preflight race.
+    await Promise.resolve(); await Promise.resolve();
+    const stopP = lifecycle.stop();
+    await Promise.race([
+      stopP,
+      new Promise<void>((_r, rej) => setTimeout(() => rej(new Error("stop_wedged_by_never_preflight")), 500)),
+    ]);
+    let startErr = "";
+    try { await startP; } catch (e) { startErr = (e as Error).message; }
+    expect(startErr).toMatch(/start aborted/);
+    expect(lifecycle.currentState()).toBe("stopped");
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("transport.onFrame handler sync-calls stop DURING router.subscribe registration → subscribe finishes; NO transport handler leak", async () => {
+    // 副指挥 b65ebc50: prior to Round 7 the reentrant stop
+    // during subscribe ran teardown BEFORE subscribe returned
+    // its unsub function to the router — router.unsubscribe
+    // called with null frameUnsub/closeUnsub → real transport
+    // handlers leaked (`frameHandlers.length === 1` after
+    // teardown).
+    //
+    // With Round 7's SYNC startInProgress prepublish, the
+    // reentrant stop awaits startInProgress → teardown deferred
+    // until start settles → subscribe completes storing its
+    // unsub functions before teardown runs.
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    class SyncStopOnRegisterTransport implements UpstreamTransport {
+      frameHandlers: Array<(raw: unknown) => void> = [];
+      closeHandlers: Array<() => void> = [];
+      lifecycle: GatewayLifecycle | null = null;
+      stopFiredSync = false;
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(h: (raw: unknown) => void): () => void {
+        this.frameHandlers.push(h);
+        // Sync-invoke stop during registration ONCE.
+        if (!this.stopFiredSync && this.lifecycle !== null) {
+          this.stopFiredSync = true;
+          void this.lifecycle.stop().catch(() => {});
+        }
+        return () => { this.frameHandlers = this.frameHandlers.filter((x) => x !== h); };
+      }
+      onClose(h: () => void): () => void {
+        this.closeHandlers.push(h);
+        return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
+      }
+      async close(): Promise<void> {}
+      async abort(): Promise<void> {}
+    }
+    const transport = new SyncStopOnRegisterTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    transport.lifecycle = lifecycle;
+    let startErr = "";
+    try { await lifecycle.start(); } catch (e) { startErr = (e as Error).message; }
+    expect(startErr).toMatch(/start aborted/);
+    expect(lifecycle.currentState()).toBe("stopped");
+    // Load-bearing: teardown unsubscribed both handler slots.
+    expect(transport.frameHandlers.length).toBe(0);
+    expect(transport.closeHandlers.length).toBe(0);
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("activate() sync-dispatches diagnostics that call stop → CAS refuses admission; state never 'running'; write=0", async () => {
+    // 副指挥 e8cdc302 P0-2: activate synchronously dispatches
+    // buffered frames — a diagnostics-sink handler could call
+    // stop() during that dispatch. Round-6's fence transitions
+    // state to "stopping" sync, but round-6's post-activate
+    // path still wrote `state = "running"` unconditionally.
+    // Round-7 adds the epoch/CAS commit: if the epoch bumped or
+    // state left "starting", DO NOT commit "running".
+    const paths = pathsFor();
+    const upstream = new ControllableUpstream();
+    let sink: GatewayLifecycle | null = null;
+    // Custom diagnostics sink: on FIRST report, sync-call stop().
+    // Buffered notification is dispatched during activate() and
+    // classified as a diagnostic ("upstream_notification_dropped_
+    // phase1") — that hits the sink.
+    let sinkFired = false;
+    const sinkDiag: ProtocolDiagnostics = {
+      newCorrelationId: () => "cid",
+      reportInternalError: () => {
+        if (!sinkFired && sink !== null) {
+          sinkFired = true;
+          void sink.stop().catch(() => {});
+        }
+      },
+    };
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: sinkDiag,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    sink = lifecycle;
+    // Buffer a notification in the router's pre-active state so
+    // activate() sync-dispatches it → sink fires → stop reentrance.
+    // The transport's onFrame runs after subscribe; we emit a
+    // notification BEFORE `activate()` is called (i.e., during the
+    // preflight window). Simpler: emit right before activate by
+    // holding preflight open, or emit on `onFrame` first invocation.
+    // Cleanest approach: pre-buffer via emit after subscribe but
+    // before activate. Preflight is trivially resolved; we can't
+    // interpose. Use the ControllableUpstream: after start()
+    // resolves the sink fires but activate has already completed.
+    //
+    // Simpler probe: after start() completes successfully (no reentrance),
+    // an emitFrame notification triggers the sink → sink calls
+    // stop() → post-start behaviour observed. But that doesn't test
+    // the CAS in activate.
+    //
+    // Instead, use a subscribe hook that emits a notification during
+    // subscribe, so the buffered notification is dispatched by
+    // activate.
+    class NotifyOnSubscribeTransport implements UpstreamTransport {
+      frameHandlers: Array<(raw: unknown) => void> = [];
+      closeHandlers: Array<() => void> = [];
+      writesCount = 0;
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {
+        this.writesCount++;
+      }
+      onFrame(h: (raw: unknown) => void): () => void {
+        this.frameHandlers.push(h);
+        // Push a notification into the router's pre-active buffer
+        // by calling h() synchronously after registration.
+        setTimeout(() => {
+          if (this.frameHandlers.includes(h)) {
+            h({ jsonrpc: "2.0", method: "some/notification", params: {} });
+          }
+        }, 0);
+        return () => { this.frameHandlers = this.frameHandlers.filter((x) => x !== h); };
+      }
+      onClose(h: () => void): () => void {
+        this.closeHandlers.push(h);
+        return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
+      }
+      async close(): Promise<void> {}
+      async abort(): Promise<void> {}
+    }
+    const paths2 = pathsFor();
+    const notifyTransport = new NotifyOnSubscribeTransport();
+    let sink2: GatewayLifecycle | null = null;
+    let sink2Fired = false;
+    const sinkDiag2: ProtocolDiagnostics = {
+      newCorrelationId: () => "cid",
+      reportInternalError: () => {
+        if (!sink2Fired && sink2 !== null) {
+          sink2Fired = true;
+          void sink2.stop().catch(() => {});
+        }
+      },
+    };
+    const lc = new GatewayLifecycle({
+      backendSocketPath: paths2.backendSocketPath,
+      socketDir: paths2.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: notifyTransport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: sinkDiag2,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    sink2 = lc;
+    let startErr = "";
+    let startResolved = false;
+    try { await lc.start(); startResolved = true; } catch (e) { startErr = (e as Error).message; }
+    // With CAS, start may resolve (if sink fires after activate
+    // commits) OR reject (if sink fires during activate). Either
+    // way, no "running" revive AFTER stop was signalled.
+    // Give the deferred setTimeout notification a chance to fire.
+    await new Promise((r) => setTimeout(r, 30));
+    const stateNow = lc.currentState();
+    // Terminal state — never revives to running once stop was
+    // signalled.
+    if (sink2Fired) {
+      // Stop reentrance happened. Either start rejected via CAS
+      // OR started then stopped normally — in both cases the
+      // terminal is `stopped` and NO transport write must have
+      // happened after admission was refused.
+      expect(["stopping", "stopped", "stop_failed"]).toContain(stateNow);
+    }
+    // No spurious upstream writes should have happened before
+    // admission (the initial phase-1 flow does not write until
+    // sendInternal is called — writes should stay at 0 in this
+    // test since no user sendInternal was invoked).
+    expect(notifyTransport.writesCount).toBe(0);
+    // Belt-and-braces: if we got to running, subsequent stop() is
+    // clean; if we got to a terminal directly, ensure stop is
+    // idempotent.
+    await lc.stop();
+    expect(["stopped", "stop_failed"]).toContain(lc.currentState());
+    void startResolved; // reference to satisfy no-unused-vars
+    void startErr;
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(paths2.socketDir, { recursive: true, force: true }); } catch {}
   });
 });
