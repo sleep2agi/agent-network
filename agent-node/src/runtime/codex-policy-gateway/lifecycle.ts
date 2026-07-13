@@ -693,19 +693,63 @@ export class GatewayLifecycle {
   stop(): Promise<void> {
     if (this.shutdownPromise !== null) return this.shutdownPromise;
     this.stopRequested = true;
-    // 副指挥 64fad5de: assign the memo BEFORE the body runs. A
-    // naive `this.shutdownPromise = this.doOuterStop()` calls
-    // `doOuterStop()` first — its async body runs synchronously
-    // up to the first await. If that synchronous prefix triggers
-    // a reentrant `stop()` (e.g. via `router.unsubscribe()` →
-    // sync close handler → `onUpstreamCloseFromRouter` →
-    // `void this.stop()`), the reentrance sees `shutdownPromise
-    // === null` and starts a SECOND teardown. Wrapping in
-    // `Promise.resolve().then(() => body())` delays the body to
-    // a microtask, so the memo assignment BELOW is observable
-    // before any body code can reenter.
-    this.shutdownPromise = Promise.resolve().then(() => this.doOuterStop());
+    // 副指挥 8cd477e9 Round 6: publish the memo SYNC via a
+    // deferred + immediately-invoked body — round-5's
+    // `Promise.resolve().then(...)` delayed the ENTIRE body to a
+    // microtask, which opened an admission window:
+    //   - `running` + `stop()` → state still `running`; bearer
+    //     still claimable; sendInternal still writes.
+    //   - `created` + `stop()` + same-turn `start()` → stop
+    //     completed but state still `created`; start ran real
+    //     preflight; a never-resolving preflight wedged stop.
+    // Round 6 fix: sync state fence (running → stopping, created
+    // → stopped) + sync bearer rotate + sync memo publish via
+    // deferred. Body then runs synchronously up to its first
+    // await; any reentrance sees a non-null memo. Public Promise
+    // identity is preserved (`this.shutdownPromise` is the same
+    // deferred every caller receives).
+    this.applySyncAdmissionFence();
+    let resolveShutdown: () => void = () => {};
+    let rejectShutdown: (e: unknown) => void = () => {};
+    const deferred = new Promise<void>((res, rej) => {
+      resolveShutdown = res;
+      rejectShutdown = rej;
+    });
+    this.shutdownPromise = deferred;
+    // Invoke body synchronously — memo is already visible to any
+    // reentrant `stop()` triggered by the body's sync prefix.
+    this.doOuterStop().then(resolveShutdown, rejectShutdown);
     return this.shutdownPromise;
+  }
+
+  /**
+   * 副指挥 8cd477e9 Round 6: synchronous admission fence.
+   * Applied as the FIRST step of `stop()` so a caller observing
+   * `currentState()`, `takeTuiBearerPlaintextForLauncher()`, or
+   * `sendInternal()` immediately after `stop()` returns sees the
+   * closed door — no admission window.
+   *
+   *   - `running`  → `stopping` (sendInternal gate rejects; new
+   *      bearer claims refused by state check).
+   *   - `starting` → `stopping` (the epoch fence via
+   *      `stopRequested` above still triggers; state visible now).
+   *   - `created`  → `stopped` (idempotent for the never-started
+   *      case; a subsequent `start()` throws
+   *      "cannot start from state 'stopped'").
+   *   - Bearer rotated NOW so `takeTuiBearerPlaintextForLauncher`
+   *      returns null immediately.
+   *   - `stop_failed` / `stopping` / `stopped` are already
+   *      terminal-ish; unchanged here.
+   */
+  private applySyncAdmissionFence(): void {
+    if (this.state === "created") {
+      this.state = "stopped";
+    } else if (this.state === "running" || this.state === "starting") {
+      this.state = "stopping";
+    }
+    if (this.tuiBearer !== null) {
+      try { this.tuiBearer.rotate(); } catch { /* silent */ }
+    }
   }
 
   private async doOuterStop(): Promise<void> {
@@ -729,15 +773,25 @@ export class GatewayLifecycle {
   private runTeardownCore(): Promise<TeardownOutcome> {
     if (this.teardownCorePromise !== null) return this.teardownCorePromise;
     this.teardownCoreEnteredCountValue++;
-    // 副指挥 64fad5de: same reentrance-safety pattern as `stop()`.
-    // `doTeardownCore()`'s first synchronous step is
+    // 副指挥 8cd477e9 Round 6: sync memo publish via deferred.
+    // `doTeardownCore()`'s first sync step is
     // `router.unsubscribe()`. If the transport's frame-unsubscribe
-    // synchronously fires close handlers, the resulting
+    // fires close handlers synchronously, the reentrant
     // `onUpstreamCloseFromRouter → stop() → runTeardownCore()`
-    // reentrance must see `teardownCorePromise !== null`. Wrap
-    // the body in `Promise.resolve().then(...)` so the memo
-    // assignment below is observable before any body code runs.
-    this.teardownCorePromise = Promise.resolve().then(() => this.doTeardownCore());
+    // path must see `teardownCorePromise !== null`. Round-5's
+    // `Promise.resolve().then(...)` deferred the WHOLE body to a
+    // microtask (see `stop()` note); round-6 publishes the
+    // deferred SYNC and invokes the body immediately after —
+    // memo visible before any body code runs, and no admission
+    // window.
+    let resolveCore: (v: TeardownOutcome) => void = () => {};
+    let rejectCore: (e: unknown) => void = () => {};
+    const deferred = new Promise<TeardownOutcome>((res, rej) => {
+      resolveCore = res;
+      rejectCore = rej;
+    });
+    this.teardownCorePromise = deferred;
+    this.doTeardownCore().then(resolveCore, rejectCore);
     return this.teardownCorePromise;
   }
 

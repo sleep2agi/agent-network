@@ -1994,8 +1994,146 @@ class SyncCloseOnUnsubscribeTransport implements UpstreamTransport {
   async abort(): Promise<void> { this.abortCallCount++; }
 }
 
-describe("Commit 2 corrective round 5 (副指挥 64fad5de) — reentrant shutdown single-flight", () => {
-  test("sync unsubscribe → sync close handler → reentrant stop() → core=1, close=1, outer===reentrant Promise", async () => {
+describe("Commit 2 corrective round 6 (副指挥 8cd477e9) — universal shutdown-visibility invariants", () => {
+  // Round 6 unified invariants:
+  //   I1: shutdown intent + admission gate SYNC visible at stop() return.
+  //   I2: outer + core memos SYNC visible before any body/transport/await.
+  //   I3: first terminal outcome + ledger STABLE (no late-completion wash).
+  //   I4: start/stop/teardown/upstream-close/sendInternal/bearer/preflight
+  //       admission all draw from the same state fact; no local exceptions.
+  //
+  // Matrix below covers every listed entry × timing × assertion.
+
+  test("I1: running + stop() → SYNC state=stopping, bearer=null, sendInternal reject, write=0 (same call stack)", async () => {
+    const paths = pathsFor();
+    const upstream = new ControllableUpstream();
+    const { diagnostics } = collectDiagnostics();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    await lifecycle.start();
+    expect(lifecycle.currentState()).toBe("running");
+    // Fire stop() and observe IMMEDIATELY (same call stack).
+    const stopP = lifecycle.stop();
+    const stateAfterStopCall = lifecycle.currentState();
+    const bearerAfterStopCall = lifecycle.takeTuiBearerPlaintextForLauncher();
+    // sendInternal must reject synchronously; and no write hits
+    // the transport.
+    let sendReason: string | null = null;
+    const sendP = lifecycle.sendInternal("thread/status", { threadId: "t" });
+    sendP.catch((e: Error) => { sendReason = e.message; });
+    const writesAfterStopCall = upstream.written.length;
+    // Also: 1 user microtask later (round-5 fix regressed this).
+    await Promise.resolve();
+    const stateAfterOneTask = lifecycle.currentState();
+    const writesAfterOneTask = upstream.written.length;
+    // Now let stop resolve.
+    await stopP;
+    // Wait for sendInternal's rejection to bubble.
+    await new Promise((r) => setTimeout(r, 5));
+    expect(stateAfterStopCall).not.toBe("running");
+    expect(["stopping", "stopped"]).toContain(stateAfterStopCall);
+    expect(bearerAfterStopCall).toBeNull();
+    expect(writesAfterStopCall).toBe(0);
+    expect(stateAfterOneTask).not.toBe("running");
+    expect(writesAfterOneTask).toBe(0);
+    expect(sendReason).not.toBeNull();
+    expect(lifecycle.currentState()).toBe("stopped");
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("I1+I4: created + stop() → SYNC state=stopped; same-turn start() throws; never-preflight cannot wedge stop", async () => {
+    const paths = pathsFor();
+    const upstream = new ControllableUpstream();
+    const { diagnostics } = collectDiagnostics();
+    let preflightCallCount = 0;
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: {
+        run: async () => {
+          preflightCallCount++;
+          // Never resolves — if start() got in, stop() would wait
+          // on startInProgress forever.
+          return new Promise<void>(() => {});
+        },
+      },
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    expect(lifecycle.currentState()).toBe("created");
+    const stopP = lifecycle.stop();
+    // Same call stack: state MUST already be "stopped" (or at
+    // worst "stopping"). MUST NOT be "created".
+    const stateAfterStopCall = lifecycle.currentState();
+    expect(stateAfterStopCall).not.toBe("created");
+    // Same-turn start() MUST throw — no admission.
+    let startReason = "";
+    try { await lifecycle.start(); } catch (e) { startReason = (e as Error).message; }
+    expect(startReason).toMatch(/cannot start from state/);
+    // Preflight must NEVER have been called (start throw at guard).
+    expect(preflightCallCount).toBe(0);
+    // stop() resolves within a bounded window — the never-
+    // preflight would only matter if start() had entered.
+    await Promise.race([
+      stopP,
+      new Promise<void>((_r, rej) =>
+        setTimeout(() => rej(new Error("stop_wedged_by_never_preflight")), 500),
+      ),
+    ]);
+    expect(lifecycle.currentState()).toBe("stopped");
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("I1: bearer claim + sendInternal after stop() return + 1 microtask both closed (regressed by round-5, fixed round-6)", async () => {
+    const paths = pathsFor();
+    const upstream = new ControllableUpstream();
+    const { diagnostics } = collectDiagnostics();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    await lifecycle.start();
+    const stopP = lifecycle.stop();
+    await Promise.resolve();
+    // Round-5 regression window: exactly here, `state` was still
+    // "running", bearer still claimable, sendInternal still wrote.
+    expect(lifecycle.currentState()).not.toBe("running");
+    expect(lifecycle.takeTuiBearerPlaintextForLauncher()).toBeNull();
+    const writesBefore = upstream.written.length;
+    const p = lifecycle.sendInternal("thread/status", { threadId: "t" });
+    let sendErr = "";
+    p.catch((e: Error) => { sendErr = e.message; });
+    // Wait for the rejection microtask.
+    await new Promise((r) => setTimeout(r, 5));
+    expect(sendErr).not.toBe("");
+    expect(upstream.written.length).toBe(writesBefore);
+    await stopP;
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+
+  test("I2 + I4: sync unsubscribe → sync close handler → reentrant stop() via spy captures identical Promise; core=1, close=1", async () => {
+    // 副指挥 8cd477e9 evidence: previously the "reentrant Promise"
+    // was actually a follow-up stop() AFTER outerP resolved. This
+    // test spies on lifecycle.stop so the INNER reentrant call
+    // from `onUpstreamCloseFromRouter → void this.stop()` is
+    // captured directly.
     const paths = pathsFor();
     const { diagnostics } = collectDiagnostics();
     const transport = new SyncCloseOnUnsubscribeTransport();
@@ -2010,10 +2148,26 @@ describe("Commit 2 corrective round 5 (副指挥 64fad5de) — reentrant shutdow
       backendCapability: TEST_BACKEND_CAP,
     });
     await lifecycle.start();
+    // Install spy AFTER start (so the router's internal wiring
+    // isn't affected). Every subsequent stop() call — including
+    // the reentrant one from inside the close handler — flows
+    // through the spy.
+    const stopReturns: Promise<void>[] = [];
+    const originalStop = lifecycle.stop.bind(lifecycle);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (lifecycle as unknown as any).stop = () => {
+      const p = originalStop();
+      stopReturns.push(p);
+      return p;
+    };
     const outerP = lifecycle.stop();
     await outerP;
-    const followUpP = lifecycle.stop();
-    expect(followUpP).toBe(outerP);
+    // The spy captured at least the outer call PLUS the reentrant
+    // call from onUpstreamCloseFromRouter (fired inside
+    // router.unsubscribe → sync close handler).
+    expect(stopReturns.length).toBeGreaterThanOrEqual(2);
+    // Every captured return is the SAME Promise reference (memo).
+    for (const p of stopReturns) expect(p).toBe(outerP);
     expect(
       (lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue,
     ).toBe(1);
@@ -2022,12 +2176,48 @@ describe("Commit 2 corrective round 5 (副指挥 64fad5de) — reentrant shutdow
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
   });
 
-  test("first close rejects; reentrant path would-be clean → ONE core / ONE close; primary Error preserved; state does NOT drift after await", async () => {
+  test("I3: first close rejects, hypothetical second call would be CLEAN → close called EXACTLY once; no ledger wash; 300 ms stable", async () => {
+    // 副指挥 8cd477e9 evidence: two-behaviour transport so a
+    // double-core reentrance would OVERWRITE ledger.upstreamClose
+    // with null (wash the failure). The single-flight fix keeps
+    // close called exactly once → first reject preserved.
     const paths = pathsFor();
     const { diagnostics } = collectDiagnostics();
-    const transport = new SyncCloseOnUnsubscribeTransport();
-    const firstCloseErr = new Error("first_close_reject_preserved");
-    transport.setClose({ kind: "throw", error: firstCloseErr });
+    const firstCloseErr = new Error("first_close_reject_wash_check");
+    class FirstRejectThenCleanTransport implements UpstreamTransport {
+      closeCalls = 0;
+      abortCalls = 0;
+      private frameHandlers: Array<(raw: unknown) => void> = [];
+      private closeHandlers: Array<() => void> = [];
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(h: (raw: unknown) => void): () => void {
+        this.frameHandlers.push(h);
+        return () => {
+          this.frameHandlers = this.frameHandlers.filter((x) => x !== h);
+          for (const ch of [...this.closeHandlers]) {
+            try { ch(); } catch {}
+          }
+        };
+      }
+      onClose(h: () => void): () => void {
+        this.closeHandlers.push(h);
+        return () => { this.closeHandlers = this.closeHandlers.filter((x) => x !== h); };
+      }
+      async close(): Promise<void> {
+        this.closeCalls++;
+        if (this.closeCalls === 1) {
+          // Delayed rejection — makes the wash window observable
+          // if a double-core were running.
+          await new Promise((r) => setTimeout(r, 10));
+          throw firstCloseErr;
+        }
+        // Second call (which we assert does NOT happen) would be
+        // clean. If it were called, ledger.upstreamClose would be
+        // overwritten to null and state would flip to `stopped`.
+      }
+      async abort(): Promise<void> { this.abortCalls++; }
+    }
+    const transport = new FirstRejectThenCleanTransport();
     const lifecycle = new GatewayLifecycle({
       backendSocketPath: paths.backendSocketPath,
       socketDir: paths.socketDir,
@@ -2039,25 +2229,25 @@ describe("Commit 2 corrective round 5 (副指挥 64fad5de) — reentrant shutdow
       backendCapability: TEST_BACKEND_CAP,
     });
     await lifecycle.start();
-    const outerP = lifecycle.stop();
-    await outerP;
-    const stateAtStopReturn = lifecycle.currentState();
-    const primaryAtStopReturn = lifecycle.stopFailure();
-    const ledgerCloseAtStopReturn = lifecycle.stopFailureLedger().upstreamClose;
-    // Wait longer than any hypothetical second-teardown latency
-    // (round-4 verdict quoted ~120 ms drift).
+    await lifecycle.stop();
+    // Capture at stop() return.
+    const stateAt = lifecycle.currentState();
+    const primaryAt = lifecycle.stopFailure();
+    const ledgerCloseAt = lifecycle.stopFailureLedger().upstreamClose;
+    // 300 ms drift window — round-4 verdict quoted ~120 ms
+    // between the outer resolve and the second-core completion.
     await new Promise((r) => setTimeout(r, 300));
+    expect(transport.closeCalls).toBe(1); // load-bearing: NO wash
     expect(
       (lifecycle as unknown as { teardownCoreEnteredCountValue: number }).teardownCoreEnteredCountValue,
     ).toBe(1);
-    expect(transport.closeCallCount).toBe(1);
-    expect(stateAtStopReturn).toBe("stop_failed");
-    expect(primaryAtStopReturn).toBe(firstCloseErr);
-    expect(ledgerCloseAtStopReturn).toBe(firstCloseErr);
-    // State + primary + ledger are STABLE — no post-await drift.
-    expect(lifecycle.currentState()).toBe(stateAtStopReturn);
-    expect(lifecycle.stopFailure()).toBe(primaryAtStopReturn);
-    expect(lifecycle.stopFailureLedger().upstreamClose).toBe(ledgerCloseAtStopReturn);
+    expect(stateAt).toBe("stop_failed");
+    expect(primaryAt).toBe(firstCloseErr);
+    expect(ledgerCloseAt).toBe(firstCloseErr);
+    // Stable across the drift window.
+    expect(lifecycle.currentState()).toBe(stateAt);
+    expect(lifecycle.stopFailure()).toBe(primaryAt);
+    expect(lifecycle.stopFailureLedger().upstreamClose).toBe(ledgerCloseAt);
     try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
   });
 });
