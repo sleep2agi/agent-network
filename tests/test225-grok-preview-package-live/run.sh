@@ -243,6 +243,7 @@ trap cleanup EXIT
 log "# test225 — Grok preview candidate tarball + live co-presence"
 log "date: $(date -Is)"
 log "source_commit=${TEST225_SOURCE_COMMIT:-uncommitted}"
+log "network=container-local Hub; outbound npm only for initial candidate dependency resolution"
 
 log "[L0] clean candidate package image"
 [ ! -e /workspace ] || fail "runtime image unexpectedly contains /workspace source checkout"

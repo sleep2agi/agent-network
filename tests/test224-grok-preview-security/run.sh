@@ -12,6 +12,7 @@ EXTRACTED="$WORK/extracted"
 rm -rf "$WORK"
 mkdir -p "$ARTIFACT_DIR" "$RAW" "$PACKS" "$EXTRACTED"
 : >"$REPORT"
+chmod 600 "$REPORT"
 
 log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
 fail() { log "FAIL: $*"; exit 1; }

@@ -9,12 +9,24 @@ double but real candidate `anet`, `agent-node`, `commhub-server`, Hub/SSE,
 Unix attach relay, and tmux TTY. It covers:
 
 - `anet node create --runtime grok-build-cli` and the preview warning;
-- `anet node start` selecting the installed candidate `agent-node` (no
-  `ANET_AGENT_NODE_BIN`, repository import, or npx fallback);
+- first `anet node start` resolving the unpublished candidate through a local
+  npm registry and the documented `@preview` fallback, then launching its
+  entrypoint directly (no `ANET_AGENT_NODE_BIN` or repository import);
+- an offline second start selecting a global install of that exact tarball,
+  with no surviving npm wrapper;
 - registration, Hub task delivery, true tmux `anet grok attach` rendering,
   reply, stop, and same-session resume;
-- derived child-environment checks and synthetic credential scans over logs,
-  Grok state, pending replies, candidate tarballs, captures, and the report.
+- exact resolver/agent-node/Grok/PTY/helper environment checks and synthetic
+  credential scans over logs, Grok state, goal state, pending replies,
+  candidate tarballs, captures, and the report.
+
+The runtime stage needs outbound npm access during the first fallback because
+the disposable local registry serves the unpublished `agent-node` tarball and
+proxies its public dependencies. The Hub, task traffic, TUI, stop, and resume
+remain container-local. After the exact tarball is installed globally, the
+local registry is stopped and the resume gate runs with npm offline. Do not
+run the deterministic command with `--network none`; test224 is the separate
+network-disabled package/security gate.
 
 Run the deterministic layer from the repository root:
 

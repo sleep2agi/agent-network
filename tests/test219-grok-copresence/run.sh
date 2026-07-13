@@ -6,6 +6,7 @@ ARTIFACT_DIR="${ARTIFACT_DIR:-/artifacts}"
 REPORT="${REPORT:-$ARTIFACT_DIR/report-test219.txt}"
 mkdir -p "$ARTIFACT_DIR"
 : >"$REPORT"
+chmod 600 "$REPORT"
 
 log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
 fail() { log "FAIL: $*"; exit 1; }
