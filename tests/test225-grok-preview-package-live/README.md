@@ -8,6 +8,8 @@ The deterministic layer always runs. It uses a Grok 0.2.93-shaped PTY test
 double but real candidate `anet`, `agent-node`, `commhub-server`, Hub/SSE,
 Unix attach relay, and tmux TTY. It covers:
 
+- the installed runtime and authenticated Grok process run as the image's
+  unprivileged `node` user rather than relying on root-only TUI behavior;
 - `anet node create --runtime grok-build-cli` and the preview warning;
 - first `anet node start` resolving the unpublished candidate through a local
   npm registry and the documented `@preview` fallback, then launching its
@@ -30,8 +32,9 @@ a folder confirmation or network turn cannot pass through simulated input.
 The runtime stage needs outbound npm access during the first fallback because
 the disposable local registry serves the unpublished `agent-node` tarball and
 proxies its public dependencies. The Hub, task traffic, TUI, stop, and resume
-remain container-local. After the exact tarball is installed globally, the
-local registry is stopped and the resume gate runs with npm offline. Do not
+remain container-local. After the exact tarball is installed into an
+owner-only user-global prefix, the local registry is stopped and the resume
+gate runs with npm offline. Do not
 run the deterministic command with `--network none`; test224 is the separate
 network-disabled package/security gate.
 
@@ -60,6 +63,17 @@ must carry `ANET_COPRESENCE_PROFILE_V1` and expose exactly `[todo_write]`;
 default-tool and `read_file` profile mutations must turn the gate red. The
 separate `session_title` request is classified as auxiliary rather than being
 mixed into the model-tool inventory.
+
+The inventory probe never retains stdout/stderr. On failure it writes only a
+mode-0600, closed-schema diagnostic (`phase`, enumerated `category`, booleans,
+and bounded counts) to `/artifacts/test225-tui-inventory-diagnostic.json`
+after synthetic, Hub, and real-auth scalar scans. A successful run removes any
+stale diagnostic. The schema and atomic writer have a keyless local negative
+test:
+
+```bash
+node --test tests/test225-grok-preview-package-live/inventory-diagnostic.test.mjs
+```
 
 ```bash
 sg docker -c 'docker run --rm \

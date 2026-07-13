@@ -5,8 +5,10 @@ FROM node:22-bookworm-slim AS packer
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bash build-essential ca-certificates curl git python3 unzip \
   && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:/usr/local/bin:/usr/bin:/bin"
+RUN curl -fsSL https://bun.sh/install | bash \
+  && install -m 755 /root/.bun/bin/bun /usr/local/bin/bun \
+  && rm -rf /root/.bun
+ENV PATH="/usr/local/bin:/usr/bin:/bin"
 
 WORKDIR /build
 COPY agent-node/package.json ./agent-node/package.json
@@ -35,8 +37,10 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     bash bubblewrap build-essential ca-certificates curl git jq procps python3 tmux unzip util-linux \
   && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:/usr/local/bin:/usr/bin:/bin"
+RUN curl -fsSL https://bun.sh/install | bash \
+  && install -m 755 /root/.bun/bin/bun /usr/local/bin/bun \
+  && rm -rf /root/.bun
+ENV PATH="/usr/local/bin:/usr/bin:/bin"
 
 COPY --from=packer /candidate /candidate
 RUN npm install -g /candidate/sleep2agi-agent-network-*.tgz \
@@ -48,5 +52,7 @@ RUN npm install -g /candidate/sleep2agi-agent-network-*.tgz \
 COPY tests/test225-grok-preview-package-live /test225
 RUN chmod 755 /test225/run.sh /test225/fake-grok.mjs /test225/local-registry.mjs /test225/npx-env-wrapper.mjs /test225/old-v1-agent-node.mjs /test225/tui-tool-inventory-probe.mjs
 
+RUN mkdir -p /test225-work && chown node:node /test225-work
+USER node
 WORKDIR /test225-work
 ENTRYPOINT ["bash", "/test225/run.sh"]

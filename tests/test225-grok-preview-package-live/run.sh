@@ -25,6 +25,8 @@ EXPECTED_AGENT_NODE_ENV_KEYS=/tmp/test225-expected-agent-node-env-keys.json
 EXPECTED_NPX_ENV_KEYS=/tmp/test225-expected-npx-env-keys.json
 NPX_ENV_OBSERVATION=/tmp/test225-npx-env.json
 FALLBACK_PID_SNAPSHOT=/tmp/test225-fallback-pids
+USER_NPM_PREFIX=/tmp/test225-npm-global
+GLOBAL_AGENT_NODE_ROOT="$USER_NPM_PREFIX/lib/node_modules/@sleep2agi/agent-node"
 LOCAL_REGISTRY_LOG=/tmp/test225-local-registry.raw.log
 SERVER_LOG=/tmp/test225-server.raw.log
 START_LOG=/tmp/test225-start.raw.log
@@ -45,7 +47,7 @@ HEADLESS_CREATE_LOG=/tmp/test225-headless-create.raw.log
 REAL_CREATE_LOG=/tmp/test225-real-create.raw.log
 INFO_LOG=/tmp/test225-info.raw.log
 STOP_LOG_DIR=/tmp/test225-stop-logs
-TUI_INVENTORY_LOG=/tmp/test225-tui-inventory.raw.log
+TUI_INVENTORY_DIAGNOSTIC="$ARTIFACT_DIR/test225-tui-inventory-diagnostic.json"
 
 # The package gate must observe native shared-TUI rendering. It may not make a
 # trust prompt or network turn pass by typing into tmux on the user's behalf.
@@ -55,7 +57,7 @@ if grep -Eq 'tmux[[:space:]]+(send[-]keys|paste[-]buffer|load[-]buffer)' "$0"; t
 fi
 GLOBAL_INSTALL_LOG=/tmp/test225-global-install.raw.log
 export HOME
-export PATH="/root/.bun/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$USER_NPM_PREFIX/bin:/usr/local/bin:/usr/bin:/bin"
 export COMMHUB_DB=/tmp/test225-commhub.db
 export HOST=127.0.0.1
 export PORT="$HUB_PORT"
@@ -264,7 +266,7 @@ assert_installed_candidate_runtime() {
   # relative to the test working directory.
   [ "$(readlink -f "/proc/$pid/exe")" = "$(readlink -f "$(command -v node)")" ] \
     || fail "$label pidfile identifies a wrapper instead of Node"
-  [ "$(readlink -f "${argv[1]}")" = "/usr/local/lib/node_modules/@sleep2agi/agent-node/dist/cli.js" ] \
+  [ "$(readlink -f "${argv[1]}")" = "$GLOBAL_AGENT_NODE_ROOT/dist/cli.js" ] \
     || fail "$label did not launch the installed candidate entrypoint"
   [ "$(matching_process_count 'npm exec @sleep2agi/agent-node@preview')" -eq 0 ] \
     || fail "$label left an npm resolver wrapper running"
@@ -378,6 +380,128 @@ refresh_real_auth_patterns() {
   fi
   rm -f "$candidate" "$merged"
   chmod 600 /tmp/test225-real-patterns
+}
+
+inventory_result_metadata_valid() {
+  local candidate=$1 mode links owner
+  [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
+  mode=$(stat -c %a -- "$candidate" 2>/dev/null) || return 1
+  links=$(stat -c %h -- "$candidate" 2>/dev/null) || return 1
+  owner=$(stat -c %u -- "$candidate" 2>/dev/null) || return 1
+  [ "$mode" = 600 ] && [ "$links" = 1 ] && [ "$owner" = "$(id -u)" ]
+}
+
+inventory_result_valid() {
+  local candidate=$1 expected_status=$2
+  inventory_result_metadata_valid "$candidate" || return 1
+  node /test225/inventory-diagnostic.mjs validate "$candidate" >/dev/null 2>&1 \
+    || return 1
+  [ "$(jq -r '.status' "$candidate" 2>/dev/null)" = "$expected_status" ]
+}
+
+inventory_result_scan() {
+  local candidate=$1 patterns rc
+  for patterns in /tmp/test225-markers /tmp/test225-live-credentials /tmp/test225-real-patterns; do
+    if scan_fixed_file "$patterns" "$candidate"; then rc=0; else rc=$?; fi
+    case "$rc" in
+      0) ;;
+      1) return 10 ;;
+      *) return 11 ;;
+    esac
+  done
+  return 0
+}
+
+make_inventory_fallback() {
+  local output=$1 category=$2
+  rm -f -- "$output"
+  node /test225/inventory-diagnostic.mjs fallback "$output" "$category" \
+    >/dev/null 2>&1 || return 1
+  inventory_result_valid "$output" failed
+}
+
+persist_inventory_diagnostic() {
+  local candidate=$1 destination=$2 temporary
+  temporary="$ARTIFACT_DIR/.test225-tui-inventory-diagnostic.tmp.$$.$RANDOM"
+  rm -f -- "$temporary"
+  install -m 600 -- "$candidate" "$temporary" || return 1
+  inventory_result_valid "$temporary" "$(jq -r '.status' "$candidate")" || {
+    rm -f -- "$temporary"
+    return 1
+  }
+  mv -f -- "$temporary" "$destination" || {
+    rm -f -- "$temporary"
+    return 1
+  }
+  inventory_result_metadata_valid "$destination"
+}
+
+run_tui_inventory_gate() {
+  local real_bin=$1 profile_fixture=$2 real_auth=$3
+  local result_dir result_file fallback_file probe_rc expected_status=failed
+  local candidate_valid=0 scan_rc=12 fallback_category selected phase category
+
+  rm -f -- "$TUI_INVENTORY_DIAGNOSTIC"
+  result_dir=$(mktemp -d /tmp/test225-tui-inventory-result.XXXXXX) \
+    || fail "could not create private TUI inventory result directory"
+  chmod 700 "$result_dir"
+  [ -d "$result_dir" ] && [ ! -L "$result_dir" ] \
+    && [ "$(stat -c %a "$result_dir")" = 700 ] \
+    && [ "$(stat -c %u "$result_dir")" = "$(id -u)" ] \
+    || fail "TUI inventory result directory is not owner-only"
+  result_file="$result_dir/result.json"
+  fallback_file="$result_dir/fallback.json"
+
+  # Build the real-auth scan set from the read-only source before the keyless
+  # inventory probe runs. The source is never copied into the probe HOME.
+  refresh_real_auth_patterns "$real_auth"
+  if node /test225/tui-tool-inventory-probe.mjs \
+    "$real_bin" "$profile_fixture" "$result_file" >/dev/null 2>&1; then
+    probe_rc=0
+    expected_status=passed
+  else
+    probe_rc=$?
+  fi
+
+  if inventory_result_valid "$result_file" "$expected_status"; then
+    candidate_valid=1
+    if inventory_result_scan "$result_file"; then scan_rc=0; else scan_rc=$?; fi
+  fi
+
+  if [ "$probe_rc" -eq 0 ] && [ "$candidate_valid" -eq 1 ] && [ "$scan_rc" -eq 0 ]; then
+    rm -rf -- "$result_dir"
+    rm -f -- "$TUI_INVENTORY_DIAGNOSTIC"
+    return 0
+  fi
+
+  if [ "$candidate_valid" -eq 1 ] && [ "$expected_status" = failed ] \
+    && [ "$scan_rc" -eq 0 ]; then
+    selected=$result_file
+  else
+    case "$scan_rc" in
+      10) fallback_category=diagnostic_rejected ;;
+      11) fallback_category=diagnostic_scan_error ;;
+      *) fallback_category=invalid_or_missing_result ;;
+    esac
+    make_inventory_fallback "$fallback_file" "$fallback_category" \
+      || fail "could not create a closed TUI inventory fallback diagnostic"
+    # A scanner read error has already failed closed. The fallback is generated
+    # from a fixed schema with no variable strings; otherwise require all three
+    # scans to pass before persistence.
+    if [ "$fallback_category" != diagnostic_scan_error ]; then
+      inventory_result_scan "$fallback_file" \
+        || fail "closed TUI inventory fallback failed credential scanning"
+    fi
+    selected=$fallback_file
+  fi
+
+  persist_inventory_diagnostic "$selected" "$TUI_INVENTORY_DIAGNOSTIC" \
+    || fail "could not persist the closed TUI inventory diagnostic"
+  phase=$(jq -r '.phase' "$TUI_INVENTORY_DIAGNOSTIC")
+  category=$(jq -r '.category' "$TUI_INVENTORY_DIAGNOSTIC")
+  rm -rf -- "$result_dir"
+  log "diagnostic: tui_inventory phase=$phase category=$category artifact=$(basename "$TUI_INVENTORY_DIAGNOSTIC")"
+  fail "pinned Grok TUI did not satisfy the fixed preview tool inventory gate"
 }
 
 fail_if_task_terminal_error() {
@@ -666,6 +790,9 @@ log "source_commit=$SOURCE_COMMIT"
 log "network=container-local Hub; outbound npm only for initial candidate dependency resolution"
 
 log "[L0] clean candidate package image"
+[ "$(id -u)" -ne 0 ] || fail "candidate package E2E must run as an unprivileged user"
+[ "$(readlink -f "$(command -v bun)")" = /usr/local/bin/bun ] \
+  || fail "unprivileged package E2E cannot execute the public Bun runtime"
 [ ! -e /workspace ] || fail "runtime image unexpectedly contains /workspace source checkout"
 [ ! -e /build ] || fail "runtime image unexpectedly contains packer source tree"
 [ -z "${ANET_AGENT_NODE_BIN:-}" ] || fail "ANET_AGENT_NODE_BIN source escape hatch is set"
@@ -1173,19 +1300,24 @@ assert_snapshot_gone "$FALLBACK_PID_SNAPSHOT"
 wait_no_fallback_runtime 300 \
   || fail "pre-global stop left agent-node, Grok, npm wrapper, or lock-holder processes"
 
-# Install the exact same unpublished tarball only after the fallback path has
-# succeeded. From here onward npm is offline, proving start selects the global
-# candidate rather than source or another npx resolution.
-if ! npm install -g --include=optional "$NODE_TGZ" >"$GLOBAL_INSTALL_LOG" 2>&1; then
+# Install the exact same unpublished tarball into an owner-only user-global
+# prefix only after the fallback path has succeeded. From here onward npm is
+# offline, proving start selects that candidate rather than source or another
+# npx resolution without granting write access to the system prefix.
+mkdir -p "$USER_NPM_PREFIX"
+chmod 700 "$USER_NPM_PREFIX"
+if ! npm install -g --prefix "$USER_NPM_PREFIX" --include=optional "$NODE_TGZ" \
+  >"$GLOBAL_INSTALL_LOG" 2>&1; then
   fail_with_private_log "global candidate agent-node install failed" "$GLOBAL_INSTALL_LOG"
 fi
 command -v agent-node >/dev/null || fail "candidate agent-node global binary is missing"
 agent-node --help | grep -Fq 'ANET_CAPABILITY_GROK_COPRESENCE_V2' \
   || fail "global candidate agent-node lacks the co-presence capability marker"
 node -e '
-  const root = "/usr/local/lib/node_modules/@sleep2agi/agent-node";
+  const root = process.argv[1];
   require(require.resolve("node-pty", { paths: [root] }));
-' || fail "global candidate agent-node lacks its node-pty optional dependency"
+' "$GLOBAL_AGENT_NODE_ROOT" \
+  || fail "global candidate agent-node lacks its node-pty optional dependency"
 scan_fixed_file /tmp/test225-markers "$GLOBAL_INSTALL_LOG" \
   || fail "global install output exposed a synthetic credential marker"
 scan_fixed_file /tmp/test225-live-credentials "$GLOBAL_INSTALL_LOG" \
@@ -1396,13 +1528,7 @@ run_real_gate() {
   profile_fixture=${profile_candidates[0]}
   [ "$(file_mode "$profile_fixture")" = 600 ] \
     || fail "runtime-owned co-presence profile is not mode 0600"
-  if ! node /test225/tui-tool-inventory-probe.mjs "$real_bin" "$profile_fixture" \
-    >"$TUI_INVENTORY_LOG" 2>&1; then
-    fail_with_private_log "pinned Grok TUI did not enforce the fixed preview tool inventory" "$TUI_INVENTORY_LOG"
-  fi
-  grep -Fqx 'PASS: pinned TUI fresh/resume inventory=[todo_write]; profile mutations rejected' "$TUI_INVENTORY_LOG" \
-    || fail_with_private_log "pinned Grok TUI inventory proof was incomplete" "$TUI_INVENTORY_LOG"
-  rm -f "$TUI_INVENTORY_LOG"
+  run_tui_inventory_gate "$real_bin" "$profile_fixture" "$real_auth"
   pass "pinned Grok TUI fresh/resume requests expose only todo_write; unsafe profile mutations turn red"
 
   mkdir -p "$HOME/.grok" /tmp/test225-real-auth

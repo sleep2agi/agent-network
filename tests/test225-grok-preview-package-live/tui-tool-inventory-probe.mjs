@@ -14,30 +14,54 @@ import {
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import {
+  emptyDiagnosticFacts,
+  makeInventoryDiagnostic,
+  writeInventoryDiagnosticAtomic,
+} from "./inventory-diagnostic.mjs";
 
-const binary = process.argv[2];
-const fixedProfileSource = process.argv[3];
-if (!binary || !fixedProfileSource) {
-  throw new Error("usage: tui-tool-inventory-probe.mjs /path/to/grok-0.2.93 /path/to/runtime-generated-profile");
-}
-
-const root = mkdtempSync(path.join(tmpdir(), "test225-tui-inventory-"));
-const home = path.join(root, "home");
-const project = path.join(root, "project");
-const profilePath = path.join(home, "anet-copresence-preview.md");
+const binary = process.argv[2] ?? "";
+const fixedProfileSource = process.argv[3] ?? "";
+const resultPath = process.argv[4] ?? "";
+let root = "";
+let home = "";
+let project = "";
+let profilePath = "";
+let authPath = "";
+let sandboxDenyPath = "";
 const marker = "ANET_COPRESENCE_PROFILE_V1";
 const expectedTools = ["todo_write"];
 let activeRun = "";
 let activeNonce = "";
 const observations = [];
-const fixedProfile = readFileSync(fixedProfileSource, "utf8");
-if (!fixedProfile.includes(marker)) throw new Error("runtime-generated profile lacks its policy marker");
-const canonicalBinary = realpathSync(binary);
+let fixedProfile = "";
+let canonicalBinary = "";
+let server;
+let currentPhase = "bootstrap";
+
+class ProbeFailure extends Error {
+  constructor(phase, category, facts = {}) {
+    super(category);
+    this.phase = phase;
+    this.category = category;
+    this.facts = emptyDiagnosticFacts(facts);
+  }
+}
+
+function phaseForRun(label) {
+  if (label === "fresh" || label === "resume") return label;
+  if (label === "mutation-defaults") return "mutation_defaults";
+  if (label === "mutation-read") return "mutation_read";
+  return "bootstrap";
+}
 
 function replaceExactly(source, needle, replacement, label) {
   const first = source.indexOf(needle);
   if (first < 0 || source.indexOf(needle, first + needle.length) >= 0) {
-    throw new Error(`cannot derive ${label} mutation from the runtime-generated profile`);
+    throw new ProbeFailure(
+      label === "read_file" ? "mutation_read" : "mutation_defaults",
+      "profile_invalid",
+    );
   }
   return source.slice(0, first) + replacement + source.slice(first + needle.length);
 }
@@ -60,7 +84,7 @@ function streamText(response, content) {
   response.end("data: [DONE]\n\n");
 }
 
-const server = http.createServer((request, response) => {
+server = http.createServer((request, response) => {
   let body = "";
   request.on("data", (chunk) => { body += chunk; });
   request.on("end", () => {
@@ -153,24 +177,44 @@ function findDirectoryNamed(rootPath, name) {
   return "";
 }
 
-function completedTurnPersisted(sessionId, nonce) {
-  const sessionDir = findDirectoryNamed(path.join(home, "sessions"), sessionId);
-  if (!sessionDir) return false;
+function readJsonLines(filePath) {
   try {
-    const chat = readFileSync(path.join(sessionDir, "chat_history.jsonl"), "utf8")
+    return readFileSync(filePath, "utf8")
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    const events = readFileSync(path.join(sessionDir, "events.jsonl"), "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
-    return JSON.stringify(chat).includes(nonce)
-      && chat.some((entry) => entry?.type === "assistant")
-      && events.some((event) => event?.type === "turn_ended" && event?.outcome === "completed");
   } catch {
-    return false;
+    return [];
   }
+}
+
+function sessionBaseline(sessionId) {
+  const sessionDir = findDirectoryNamed(path.join(home, "sessions"), sessionId);
+  if (!sessionDir) return { chatLines: 0, eventLines: 0 };
+  return {
+    chatLines: readJsonLines(path.join(sessionDir, "chat_history.jsonl")).length,
+    eventLines: readJsonLines(path.join(sessionDir, "events.jsonl")).length,
+  };
+}
+
+function turnFenceAfterBaseline(sessionId, nonce, baseline) {
+  const sessionDir = findDirectoryNamed(path.join(home, "sessions"), sessionId);
+  if (!sessionDir) {
+    return { assistantAfterNonce: false, turnEndedAfterBaseline: false, completedTurn: false };
+  }
+  const chat = readJsonLines(path.join(sessionDir, "chat_history.jsonl")).slice(baseline.chatLines);
+  const events = readJsonLines(path.join(sessionDir, "events.jsonl")).slice(baseline.eventLines);
+  const nonceIndex = chat.findIndex((entry) => JSON.stringify(entry).includes(nonce));
+  const assistantAfterNonce = nonceIndex >= 0 && chat.slice(nonceIndex + 1).some((entry) =>
+    entry?.type === "assistant"
+      && (!Array.isArray(entry.tool_calls) || entry.tool_calls.length === 0));
+  const turnEndedAfterBaseline = events.some((event) =>
+    event?.type === "turn_ended" && event?.outcome === "completed");
+  return {
+    assistantAfterNonce,
+    turnEndedAfterBaseline,
+    completedTurn: assistantAfterNonce && turnEndedAfterBaseline,
+  };
 }
 
 function sameOwnedLeader({ pid, starttime }) {
@@ -197,20 +241,81 @@ async function terminateOwnedLeaders() {
   while (Date.now() < killDeadline && identities.some(sameOwnedLeader)) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  if (identities.some(sameOwnedLeader)) throw new Error("inventory probe left an owned Grok Leader alive");
+  if (identities.some(sameOwnedLeader)) {
+    throw new ProbeFailure("cleanup", "leader_cleanup");
+  }
+}
+
+function signalCategory(signal) {
+  if (!signal) return "none";
+  if (signal === "SIGTERM") return "term";
+  if (signal === "SIGKILL") return "kill";
+  return "other";
+}
+
+function factsForRows(rows, {
+  spawned = false,
+  exited = false,
+  leaderObserved = false,
+  assistantAfterNonce = false,
+  turnEndedAfterBaseline = false,
+  completedTurn = false,
+  exitCode = 256,
+  childSignal = null,
+} = {}) {
+  const main = rows.filter((row) => row.marker);
+  const auxiliary = rows.filter((row) => !row.marker);
+  const exactMain = main.filter((row) => row.promptNonce
+    && JSON.stringify(row.names) === JSON.stringify(expectedTools));
+  const exactAuxiliary = auxiliary.filter((row) =>
+    JSON.stringify(row.names) === JSON.stringify(["session_title"]));
+  return emptyDiagnosticFacts({
+    totalRequests: Math.min(rows.length, 4096),
+    mainRequests: Math.min(main.length, 4096),
+    auxiliaryRequests: Math.min(auxiliary.length, 4096),
+    markerRequests: Math.min(main.length, 4096),
+    nonceRequests: Math.min(main.filter((row) => row.promptNonce).length, 4096),
+    exactMainRequests: Math.min(exactMain.length, 4096),
+    exactAuxiliaryRequests: Math.min(exactAuxiliary.length, 4096),
+    unsafeMutationRequests: Math.min(main.filter((row) =>
+      row.names.some((name) => name !== "todo_write")).length, 4096),
+    spawned,
+    exited,
+    leaderObserved,
+    mainRequestObserved: main.length > 0,
+    promptNonceObserved: main.some((row) => row.promptNonce),
+    assistantAfterNonce,
+    turnEndedAfterBaseline,
+    completedTurn,
+    exitCode: Number.isInteger(exitCode) && exitCode >= 0 && exitCode <= 255 ? exitCode : 256,
+    signalCategory: signalCategory(childSignal),
+  });
 }
 
 async function runTui(label, sessionId, resume) {
+  currentPhase = phaseForRun(label);
   activeRun = label;
   activeNonce = `TEST225_INVENTORY_${label}_${randomUUID()}`;
   const before = observations.length;
+  const baseline = sessionBaseline(sessionId);
   const sessionFlag = resume ? "--resume" : "--session-id";
   const leaderSocket = path.join(root, `${label}.leader.sock`);
   const command = [
     "env", "-i",
     "PATH=/usr/bin:/bin",
-    `HOME=${home}`,
-    `GROK_HOME=${home}`,
+    "LANG=C.UTF-8",
+    "LC_ALL=C.UTF-8",
+    "TERM=xterm-256color",
+    `HOME=${shellQuote(home)}`,
+    `PWD=${shellQuote(project)}`,
+    `GROK_HOME=${shellQuote(home)}`,
+    "GROK_FOLDER_TRUST=1",
+    "GROK_DEFAULT_SELECTED_PERMISSION=allow_once",
+    "GROK_CLAUDE_MCPS_ENABLED=false",
+    "GROK_CURSOR_MCPS_ENABLED=false",
+    "GROK_CLAUDE_HOOKS_ENABLED=false",
+    "GROK_CURSOR_HOOKS_ENABLED=false",
+    `GROK_AUTH_PATH=${shellQuote(authPath)}`,
     "GROK_DISABLE_AUTOUPDATER=1",
     "GROK_SUBAGENTS=0",
     "GROK_WEB_FETCH=0",
@@ -222,6 +327,8 @@ async function runTui(label, sessionId, resume) {
     sessionFlag, sessionId,
     "--model", "anet-probe",
     "--agent", shellQuote(profilePath),
+    "--permission-mode", "default",
+    "--sandbox", "anet-probe-workspace",
     "--no-auto-update",
     "--disable-web-search",
     "--no-subagents",
@@ -230,36 +337,99 @@ async function runTui(label, sessionId, resume) {
     "--deny", "Write",
     "--deny", "MCPTool",
     "--deny", "WebFetch",
+    ...[home, sandboxDenyPath, "/proc"].flatMap((protectedPath) => [
+      "--deny", shellQuote(`Read(${protectedPath})`),
+      "--deny", shellQuote(`Read(${protectedPath}/**)`),
+      "--deny", shellQuote(`Grep(${protectedPath})`),
+      "--deny", shellQuote(`Grep(${protectedPath}/**)`),
+      "--deny", shellQuote(`Edit(${protectedPath})`),
+      "--deny", shellQuote(`Edit(${protectedPath}/**)`),
+    ]),
     "--no-alt-screen",
     shellQuote(activeNonce),
   ].join(" ");
   const child = spawn("script", ["-q", "-e", "-c", command, "/dev/null"], {
     detached: true,
-    stdio: ["ignore", "ignore", "ignore"],
+    // `script` treats /dev/null stdin as an immediate interactive disconnect.
+    // Keep the pipe open through the completion fence and close it only after
+    // bounded process-group termination.
+    stdio: ["pipe", "ignore", "ignore"],
     env: { PATH: "/usr/bin:/bin" },
   });
+  let exited = false;
+  let leaderObserved = false;
+  let fence = turnFenceAfterBaseline(sessionId, activeNonce, baseline);
+  child.once("error", () => { exited = true; });
   try {
-    const deadline = Date.now() + 20_000;
+    // Cold container startup is materially slower than a warm host probe.
+    // These are bounded observation deadlines, not fixed sleeps: every poll
+    // exits as soon as the corresponding wire/persistence fence is true.
+    const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
+      leaderObserved ||= ownedLeaderIdentities().length > 0;
       if (observations.slice(before).some((row) => row.marker)) break;
-      if (child.exitCode !== null || child.signalCode !== null) break;
+      if (child.exitCode !== null || child.signalCode !== null) {
+        exited = true;
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    const persistenceDeadline = Date.now() + 15_000;
-    while (Date.now() < persistenceDeadline
-      && !completedTurnPersisted(sessionId, activeNonce)) {
+    const persistenceDeadline = Date.now() + 60_000;
+    while (Date.now() < persistenceDeadline && !fence.completedTurn) {
+      leaderObserved ||= ownedLeaderIdentities().length > 0;
+      if (child.exitCode !== null || child.signalCode !== null) exited = true;
       await new Promise((resolve) => setTimeout(resolve, 50));
+      fence = turnFenceAfterBaseline(sessionId, activeNonce, baseline);
     }
-    if (!completedTurnPersisted(sessionId, activeNonce)) {
-      throw new Error(`TUI ${label} did not reach the completed-turn persistence fence`);
+    if (!fence.completedTurn) {
+      const rows = observations.slice(before);
+      throw new ProbeFailure(
+        currentPhase,
+        exited ? "process_exit" : "persistence_timeout",
+        factsForRows(rows, {
+          spawned: Boolean(child.pid),
+          exited,
+          leaderObserved,
+          ...fence,
+          exitCode: exited ? child.exitCode : 256,
+          childSignal: exited ? child.signalCode : null,
+        }),
+      );
+    }
+    if (!leaderObserved) {
+      const rows = observations.slice(before);
+      throw new ProbeFailure(
+        currentPhase,
+        "inventory_mismatch",
+        factsForRows(rows, {
+          spawned: Boolean(child.pid),
+          exited,
+          leaderObserved,
+          ...fence,
+          exitCode: exited ? child.exitCode : 256,
+          childSignal: exited ? child.signalCode : null,
+        }),
+      );
     }
   } finally {
     await terminateGroup(child);
+    child.stdin?.destroy();
     await terminateOwnedLeaders();
     activeRun = "";
     activeNonce = "";
   }
-  return observations.slice(before);
+  const rows = observations.slice(before);
+  return {
+    rows,
+    facts: factsForRows(rows, {
+      spawned: Boolean(child.pid),
+      exited,
+      leaderObserved,
+      ...fence,
+      exitCode: exited ? child.exitCode : 256,
+      childSignal: exited ? child.signalCode : null,
+    }),
+  };
 }
 
 function passesFixedGate(rows) {
@@ -271,62 +441,124 @@ function passesFixedGate(rows) {
     && auxiliaries.every((row) => JSON.stringify(row.names) === JSON.stringify(["session_title"]));
 }
 
-function derived(rows) {
-  return JSON.stringify(rows.map(({ names, marker: hasMarker, promptNonce, skillsReminder }) => ({
-    names,
-    marker: hasMarker,
-    promptNonce,
-    skillsReminder,
-  })));
+function combineFacts(results) {
+  const sum = (key) => Math.min(
+    results.reduce((total, result) => total + result.facts[key], 0),
+    4096,
+  );
+  return emptyDiagnosticFacts({
+    totalRequests: sum("totalRequests"),
+    mainRequests: sum("mainRequests"),
+    auxiliaryRequests: sum("auxiliaryRequests"),
+    markerRequests: sum("markerRequests"),
+    nonceRequests: sum("nonceRequests"),
+    exactMainRequests: sum("exactMainRequests"),
+    exactAuxiliaryRequests: sum("exactAuxiliaryRequests"),
+    unsafeMutationRequests: sum("unsafeMutationRequests"),
+    spawned: results.every((result) => result.facts.spawned),
+    exited: results.some((result) => result.facts.exited),
+    leaderObserved: results.every((result) => result.facts.leaderObserved),
+    mainRequestObserved: results.every((result) => result.facts.mainRequestObserved),
+    promptNonceObserved: results.every((result) => result.facts.promptNonceObserved),
+    assistantAfterNonce: results.every((result) => result.facts.assistantAfterNonce),
+    turnEndedAfterBaseline: results.every((result) => result.facts.turnEndedAfterBaseline),
+    completedTurn: results.every((result) => result.facts.completedTurn),
+    exitCode: results.find((result) => result.facts.exitCode !== 256)?.facts.exitCode ?? 256,
+    signalCategory: results.find((result) => result.facts.signalCategory !== "none")
+      ?.facts.signalCategory ?? "none",
+  });
 }
 
-rmSync(root, { recursive: true, force: true });
-mkdirSync(home, { recursive: true, mode: 0o700 });
-mkdirSync(project, { recursive: true, mode: 0o700 });
+async function runProbe() {
+  if (!binary || !fixedProfileSource || !resultPath) {
+    throw new ProbeFailure("bootstrap", "profile_invalid");
+  }
+  root = mkdtempSync(path.join(tmpdir(), "test225-tui-inventory-"));
+  home = path.join(root, "home");
+  project = path.join(root, "project");
+  profilePath = path.join(home, "anet-copresence-preview.md");
+  authPath = path.join(home, "probe-auth.json");
+  sandboxDenyPath = path.join(project, ".anet");
+  mkdirSync(home, { recursive: true, mode: 0o700 });
+  mkdirSync(project, { recursive: true, mode: 0o700 });
+  mkdirSync(sandboxDenyPath, { recursive: true, mode: 0o700 });
+  try {
+    fixedProfile = readFileSync(fixedProfileSource, "utf8");
+    canonicalBinary = realpathSync(binary);
+  } catch {
+    throw new ProbeFailure("bootstrap", "profile_invalid");
+  }
+  if (!fixedProfile.includes(marker)) {
+    throw new ProbeFailure("bootstrap", "profile_invalid");
+  }
 
-await new Promise((resolve, reject) => {
-  server.once("error", reject);
-  server.listen(0, "127.0.0.1", resolve);
-});
-const address = server.address();
-if (!address || typeof address === "string") throw new Error("inventory probe server did not bind TCP");
-writeFileSync(path.join(home, "config.toml"), [
-  "[models]",
-  'default = "anet-probe"',
-  "",
-  "[model.anet-probe]",
-  'model = "anet-probe"',
-  `base_url = "http://127.0.0.1:${address.port}/v1"`,
-  'api_key = "probe-only-value"',
-  "",
-  "[compat.claude]",
-  "mcps = false",
-  "hooks = false",
-  "",
-  "[compat.cursor]",
-  "mcps = false",
-  "hooks = false",
-  "",
-  "[folder_trust]",
-  "enabled = false",
-  "",
-  "[toolset.bash]",
-  "auto_background_on_timeout = false",
-  "",
-].join("\n"), { mode: 0o600 });
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+  } catch {
+    throw new ProbeFailure("bootstrap", "server_bind");
+  }
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new ProbeFailure("bootstrap", "server_bind");
+  }
+  writeFileSync(path.join(home, "config.toml"), [
+    "[models]",
+    'default = "anet-probe"',
+    "",
+    "[model.anet-probe]",
+    'model = "anet-probe"',
+    `base_url = "http://127.0.0.1:${address.port}/v1"`,
+    'api_key = "probe-only-value"',
+    "",
+    "[compat.claude]",
+    "mcps = false",
+    "hooks = false",
+    "",
+    "[compat.cursor]",
+    "mcps = false",
+    "hooks = false",
+    "",
+    "[folder_trust]",
+    "enabled = true",
+    "",
+    "[session]",
+    "load_envrc = false",
+    "",
+    "[toolset.bash]",
+    "auto_background_on_timeout = false",
+    "",
+  ].join("\n"), { mode: 0o600 });
+  writeFileSync(path.join(home, "trusted_folders.toml"), [
+    `[folders.${JSON.stringify(realpathSync(project))}]`,
+    "trusted = true",
+    `decided_at = ${Math.floor(Date.now() / 1_000)}`,
+    "",
+  ].join("\n"), { mode: 0o600 });
+  writeFileSync(authPath, "{}\n", { mode: 0o600 });
+  writeFileSync(path.join(home, "sandbox.toml"), [
+    '[profiles."anet-probe-workspace"]',
+    'extends = "workspace"',
+    `deny = [${JSON.stringify(sandboxDenyPath)}]`,
+    "",
+  ].join("\n"), { mode: 0o600 });
 
-try {
+  const results = [];
   const sessionId = randomUUID();
   writeFileSync(profilePath, fixedProfile, { mode: 0o600 });
   chmodSync(profilePath, 0o600);
   const fresh = await runTui("fresh", sessionId, false);
-  if (!passesFixedGate(fresh)) {
-    throw new Error(`fresh TUI did not expose the exact fixed profile inventory: ${derived(fresh)}`);
+  results.push(fresh);
+  if (!passesFixedGate(fresh.rows)) {
+    throw new ProbeFailure("fresh", "inventory_mismatch", fresh.facts);
   }
 
   const resumed = await runTui("resume", sessionId, true);
-  if (!passesFixedGate(resumed)) {
-    throw new Error(`resumed TUI did not expose the exact fixed profile inventory: ${derived(resumed)}`);
+  results.push(resumed);
+  if (!passesFixedGate(resumed.rows)) {
+    throw new ProbeFailure("resume", "inventory_mismatch", resumed.facts);
   }
 
   const defaultsMutationProfile = replaceExactly(
@@ -336,14 +568,17 @@ try {
     "default-tool",
   );
   writeFileSync(profilePath, defaultsMutationProfile, { mode: 0o600 });
-  const defaultsMutationRows = await runTui("mutation-defaults", randomUUID(), false);
-  const defaultsMain = defaultsMutationRows.filter((row) => row.marker);
+  const defaultsMutation = await runTui("mutation-defaults", randomUUID(), false);
+  results.push(defaultsMutation);
+  const defaultsMain = defaultsMutation.rows.filter((row) => row.marker);
   if (!defaultsMain.length
     || defaultsMain.some((row) => !row.promptNonce)
     || !defaultsMain.some((row) => row.names.some((name) => name !== "todo_write"))) {
-    throw new Error(`default-tool mutation did not produce a real unsafe main request: ${derived(defaultsMutationRows)}`);
+    throw new ProbeFailure("mutation_defaults", "mutation_not_observed", defaultsMutation.facts);
   }
-  if (passesFixedGate(defaultsMutationRows)) throw new Error("injectDefaultTools mutation did not turn the gate red");
+  if (passesFixedGate(defaultsMutation.rows)) {
+    throw new ProbeFailure("mutation_defaults", "mutation_not_red", defaultsMutation.facts);
+  }
 
   const readMutationProfile = replaceExactly(
     fixedProfile,
@@ -353,17 +588,61 @@ try {
   );
   writeFileSync(profilePath, readMutationProfile, { mode: 0o600 });
   const readMutation = await runTui("mutation-read", randomUUID(), false);
-  const readMain = readMutation.filter((row) => row.marker);
+  results.push(readMutation);
+  const readMain = readMutation.rows.filter((row) => row.marker);
   if (!readMain.length
     || readMain.some((row) => !row.promptNonce)
     || !readMain.some((row) => row.names.includes("read_file"))) {
-    throw new Error(`read_file mutation did not produce a real unsafe main request: ${derived(readMutation)}`);
+    throw new ProbeFailure("mutation_read", "mutation_not_observed", readMutation.facts);
   }
-  if (passesFixedGate(readMutation)) throw new Error("read_file mutation did not turn the gate red");
-
-  process.stdout.write("PASS: pinned TUI fresh/resume inventory=[todo_write]; profile mutations rejected\n");
-} finally {
-  await new Promise((resolve) => server.close(resolve));
-  await terminateOwnedLeaders();
-  rmSync(root, { recursive: true, force: true });
+  if (passesFixedGate(readMutation.rows)) {
+    throw new ProbeFailure("mutation_read", "mutation_not_red", readMutation.facts);
+  }
+  return combineFacts(results);
 }
+
+let diagnostic;
+let exitCode = 1;
+try {
+  const facts = await runProbe();
+  diagnostic = makeInventoryDiagnostic({
+    status: "passed",
+    phase: "complete",
+    category: "ok",
+    facts,
+  });
+  exitCode = 0;
+} catch (error) {
+  const failure = error instanceof ProbeFailure
+    ? error
+    : new ProbeFailure(currentPhase, "internal");
+  diagnostic = makeInventoryDiagnostic({
+    status: "failed",
+    phase: failure.phase,
+    category: failure.category,
+    facts: failure.facts,
+  });
+} finally {
+  try {
+    if (server.listening) {
+      await new Promise((resolve) => server.close(() => resolve()));
+    }
+    if (home) await terminateOwnedLeaders();
+    if (root) rmSync(root, { recursive: true, force: true });
+  } catch {
+    diagnostic = makeInventoryDiagnostic({
+      status: "failed",
+      phase: "cleanup",
+      category: "leader_cleanup",
+    });
+    exitCode = 1;
+  }
+}
+
+try {
+  if (!resultPath) throw new Error("missing result path");
+  writeInventoryDiagnosticAtomic(resultPath, diagnostic);
+} catch {
+  exitCode = 2;
+}
+process.exitCode = exitCode;
