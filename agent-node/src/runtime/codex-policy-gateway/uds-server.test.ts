@@ -19,8 +19,10 @@ import {
   BackendUdsServer,
   GATEWAY_HELLO_METHOD,
   MAX_BACKEND_CONNECTIONS,
+  SYNC_ABORT,
   type BackendUdsServerOptions,
   type InternalOrigin,
+  type SyncAbortAcknowledgement,
   type UpstreamTransport,
 } from "./uds-server";
 import {
@@ -59,7 +61,7 @@ class FakeUpstream implements UpstreamTransport {
     }
   }
   abortCallCount = 0;
-  abort(): void { this.abortCallCount++; }
+  abort(): SyncAbortAcknowledgement { this.abortCallCount++; return SYNC_ABORT; }
   emitFrame(raw: unknown): void { for (const h of [...this.frameHandlers]) h(raw); }
   emitClose(): void { for (const h of [...this.closeHandlers]) h(); }
 }
@@ -307,7 +309,7 @@ describe("BackendUdsServer — sendInternal + reject once (router-driven)", () =
       onFrame(): () => void { return () => {}; }
       onClose(): () => void { return () => {}; }
       async close(): Promise<void> {}
-      abort(): void {}
+      abort(): SyncAbortAcknowledgement { return SYNC_ABORT; }
     }
     const upstream = new SyncThrowUpstream();
     const diagEntries: InternalErrorEntry[] = [];

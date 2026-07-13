@@ -27,8 +27,9 @@ import {
   defaultDenyTuiAuthorizer,
   DEFAULT_DENY_ALLOWLIST,
   UPSTREAM_CLOSE_TIMEOUT_MS,
+  LOCAL_STOP_TIMEOUT_MS,
 } from "./lifecycle";
-import type { UpstreamTransport } from "./uds-server";
+import { SYNC_ABORT, type SyncAbortAcknowledgement, type UpstreamTransport } from "./uds-server";
 import type {
   ProtocolBackend,
   ProtocolDiagnostics,
@@ -69,7 +70,7 @@ class FakeUpstream implements UpstreamTransport {
     }
   }
   abortCallCount = 0;
-  abort(): void { this.abortCallCount++; }
+  abort(): SyncAbortAcknowledgement { this.abortCallCount++; return SYNC_ABORT; }
   emitFrame(raw: unknown): void { for (const h of this.frameHandlers) h(raw); }
   emitClose(): void { for (const h of this.closeHandlers) h(); }
 }
@@ -631,9 +632,10 @@ class ControllableUpstream implements UpstreamTransport {
       case "never": return new Promise<void>(() => { /* never resolves */ });
     }
   }
-  abort(): void {
+  abort(): SyncAbortAcknowledgement {
     this.abortCallCount++;
     if (this.abortBehaviour.kind === "throw") throw this.abortBehaviour.error;
+    return SYNC_ABORT;
   }
   emitFrame(raw: unknown): void { for (const h of this.frameHandlers) h(raw); }
   emitClose(): void { for (const h of this.closeHandlers) h(); }
@@ -676,6 +678,9 @@ describe("Commit 2 #1 — shutdown single-flight", () => {
       const p1 = h.lifecycle.stop();
       const p2 = h.lifecycle.stop();
       const p3 = h.lifecycle.stop();
+      // 副指挥 d53209eb #3: promise identity — same reference.
+      expect(p1).toBe(p2);
+      expect(p2).toBe(p3);
       await Promise.all([p1, p2, p3]);
       expect(upstream.closeCallCount).toBe(1);
       // Clean close → abort NOT called.
@@ -820,5 +825,420 @@ describe("Commit 2 #6 — pending origins drain exactly once", () => {
       // once — we assert by pending count remaining at 0.
       expect(h.lifecycle.pendingUpstreamCount()).toBe(0);
     } finally { await h.cleanup(); }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Commit 2 corrective round 1 (副指挥 d53209eb) — new red matrix
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * A `TuiWsServer`-shaped wrapper that lets tests inject a
+ * mis-behaving `stop()` (throw / never-resolve) and observe
+ * whether `forceTerminate()` was called. Delegates all wire
+ * behaviour to a real `TuiWsServer` so binding still happens.
+ */
+async function makeLifecycleWithMisbehavingTui(
+  upstream: ControllableUpstream,
+  tuiStopBehaviour: { kind: "resolve" } | { kind: "throw"; error: Error } | { kind: "never" },
+): Promise<{
+  lifecycle: GatewayLifecycle;
+  paths: ReturnType<typeof pathsFor>;
+  upstream: ControllableUpstream;
+  tuiForceCount: () => number;
+  tuiStopCount: () => number;
+  cleanup: () => Promise<void>;
+}> {
+  const paths = pathsFor();
+  const { diagnostics } = collectDiagnostics();
+  let stopCalls = 0;
+  let forceCalls = 0;
+  // Interpose on the actual TuiWsServer via a Proxy-like wrapper
+  // returned from options. Since GatewayLifecycle constructs the
+  // TuiWsServer itself, we monkey-patch after start().
+  const lifecycle = new GatewayLifecycle({
+    backendSocketPath: paths.backendSocketPath,
+    socketDir: paths.socketDir,
+    preflight: { async run() {} },
+    backend: makeBackend(),
+    upstreamTransport: upstream,
+    initSnapshotSource: { currentSnapshot: () => ({}) },
+    diagnosticsSink: diagnostics,
+    backendCapability: TEST_BACKEND_CAP,
+  });
+  await lifecycle.start();
+  // Reach the private tuiServer via TS erasure. Wrap stop/force.
+  const inner = (lifecycle as unknown as { tuiServer: {
+    stop: () => Promise<void>; forceTerminate: () => void;
+    ownerSlotState?: () => string;
+  }; }).tuiServer;
+  const originalStop = inner.stop.bind(inner);
+  const originalForce = inner.forceTerminate.bind(inner);
+  inner.stop = async () => {
+    stopCalls++;
+    switch (tuiStopBehaviour.kind) {
+      case "resolve": return originalStop();
+      case "throw": throw tuiStopBehaviour.error;
+      case "never": return new Promise<void>(() => { /* hang */ });
+    }
+  };
+  inner.forceTerminate = () => {
+    forceCalls++;
+    originalForce();
+  };
+  return {
+    lifecycle, paths, upstream,
+    tuiForceCount: () => forceCalls,
+    tuiStopCount: () => stopCalls,
+    async cleanup() {
+      try { await lifecycle.stop(); } catch {}
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    },
+  };
+}
+
+/** Same shape for the Backend UDS server. */
+async function makeLifecycleWithMisbehavingBackend(
+  upstream: ControllableUpstream,
+  beStopBehaviour: { kind: "resolve" } | { kind: "throw"; error: Error } | { kind: "never" },
+): Promise<{
+  lifecycle: GatewayLifecycle;
+  paths: ReturnType<typeof pathsFor>;
+  upstream: ControllableUpstream;
+  beForceCount: () => number;
+  beStopCount: () => number;
+  socketPath: string;
+  cleanup: () => Promise<void>;
+}> {
+  const paths = pathsFor();
+  const { diagnostics } = collectDiagnostics();
+  let stopCalls = 0;
+  let forceCalls = 0;
+  const lifecycle = new GatewayLifecycle({
+    backendSocketPath: paths.backendSocketPath,
+    socketDir: paths.socketDir,
+    preflight: { async run() {} },
+    backend: makeBackend(),
+    upstreamTransport: upstream,
+    initSnapshotSource: { currentSnapshot: () => ({}) },
+    diagnosticsSink: diagnostics,
+    backendCapability: TEST_BACKEND_CAP,
+  });
+  await lifecycle.start();
+  const inner = (lifecycle as unknown as { backendServer: {
+    stop: () => Promise<void>; forceTerminate: () => void;
+  }; }).backendServer;
+  const originalStop = inner.stop.bind(inner);
+  const originalForce = inner.forceTerminate.bind(inner);
+  inner.stop = async () => {
+    stopCalls++;
+    switch (beStopBehaviour.kind) {
+      case "resolve": return originalStop();
+      case "throw": throw beStopBehaviour.error;
+      case "never": return new Promise<void>(() => { /* hang */ });
+    }
+  };
+  inner.forceTerminate = () => {
+    forceCalls++;
+    originalForce();
+  };
+  return {
+    lifecycle, paths, upstream,
+    beForceCount: () => forceCalls,
+    beStopCount: () => stopCalls,
+    socketPath: paths.backendSocketPath,
+    async cleanup() {
+      try { await lifecycle.stop(); } catch {}
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    },
+  };
+}
+
+describe("Commit 2 corrective #1/#2 — local stop failure surfaces stop_failed with forceTerminate", () => {
+  test("backend stop throws → stop_failed; forceTerminate called; socket unlinked", async () => {
+    const upstream = new ControllableUpstream();
+    const beThrow = new Error("backend_stop_boom");
+    const h = await makeLifecycleWithMisbehavingBackend(upstream, { kind: "throw", error: beThrow });
+    try {
+      await h.lifecycle.stop();
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      // Identity preserved
+      expect(h.lifecycle.stopFailure()).toBe(beThrow);
+      expect(h.beForceCount()).toBe(1);
+      // Socket path must be unlinked by forceTerminate.
+      expect(fs.existsSync(h.socketPath)).toBe(false);
+    } finally { await h.cleanup(); }
+  });
+
+  test("backend stop never-resolves → bounded timeout escalates to forceTerminate; stop_failed", async () => {
+    const upstream = new ControllableUpstream();
+    const h = await makeLifecycleWithMisbehavingBackend(upstream, { kind: "never" });
+    try {
+      const start = Date.now();
+      await h.lifecycle.stop();
+      const elapsed = Date.now() - start;
+      // Should NOT exceed LOCAL_STOP_TIMEOUT_MS by a wide margin.
+      expect(elapsed).toBeLessThan(LOCAL_STOP_TIMEOUT_MS + 1500);
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailure()?.message).toMatch(/backend stop timed out after \d+ms/);
+      expect(h.beForceCount()).toBe(1);
+      expect(fs.existsSync(h.socketPath)).toBe(false);
+    } finally { await h.cleanup(); }
+  });
+
+  test("TUI stop throws → stop_failed; forceTerminate called; owner slot cleared", async () => {
+    const upstream = new ControllableUpstream();
+    const tuiThrow = new Error("tui_stop_boom");
+    const h = await makeLifecycleWithMisbehavingTui(upstream, { kind: "throw", error: tuiThrow });
+    try {
+      await h.lifecycle.stop();
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailure()).toBe(tuiThrow);
+      expect(h.tuiForceCount()).toBe(1);
+    } finally { await h.cleanup(); }
+  });
+
+  test("TUI stop never-resolves → bounded timeout escalates to forceTerminate; stop_failed", async () => {
+    const upstream = new ControllableUpstream();
+    const h = await makeLifecycleWithMisbehavingTui(upstream, { kind: "never" });
+    try {
+      const start = Date.now();
+      await h.lifecycle.stop();
+      const elapsed = Date.now() - start;
+      expect(elapsed).toBeLessThan(LOCAL_STOP_TIMEOUT_MS + 1500);
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailure()?.message).toMatch(/tui stop timed out after \d+ms/);
+      expect(h.tuiForceCount()).toBe(1);
+    } finally { await h.cleanup(); }
+  });
+});
+
+describe("Commit 2 corrective #3 — public stop() Promise identity", () => {
+  test("three concurrent stop() calls return the EXACT SAME Promise reference (p1===p2===p3)", async () => {
+    const upstream = new ControllableUpstream();
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      const p1 = h.lifecycle.stop();
+      const p2 = h.lifecycle.stop();
+      const p3 = h.lifecycle.stop();
+      expect(p1).toBe(p2);
+      expect(p2).toBe(p3);
+      await Promise.all([p1, p2, p3]);
+    } finally { await h.cleanup(); }
+  });
+});
+
+describe("Commit 2 corrective #4 — rollback shares single-flight core with stop×upstream close", () => {
+  test("rollback (preflight throw) × concurrent stop() × upstream close cascade → close/abort/local stop each exactly once", async () => {
+    const upstream = new ControllableUpstream();
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    // Preflight resolves quickly, but we make backend.start throw
+    // so rollback runs — while a concurrent stop() and upstream
+    // close cascade race for the same shutdown.
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: upstream,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    // Start OK. Then race: emitClose + parallel stop() calls.
+    await lifecycle.start();
+    upstream.emitClose();
+    const p1 = lifecycle.stop();
+    const p2 = lifecycle.stop();
+    await Promise.all([p1, p2]);
+    // Single-flight: close called exactly once.
+    expect(upstream.closeCallCount).toBe(1);
+    expect(lifecycle.currentState()).toBe("stopped");
+    try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+  });
+});
+
+describe("Commit 2 corrective #5 — async abort never surfaces as unhandled rejection", () => {
+  test("thenable-returning abort → detected + rejection consumed; stop_failed with violation Error", async () => {
+    const upstream = new ControllableUpstream();
+    // Override abort to return a rejecting Promise WITHOUT any
+    // .catch — before the fix this would be unhandled.
+    upstream.setClose({ kind: "throw", error: new Error("close_fail_to_force_abort") });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (upstream as unknown as { abort: () => unknown }).abort = () => {
+      return Promise.reject(new Error("async_abort_boom"));
+    };
+    let unhandled: unknown = null;
+    const listener = (reason: unknown): void => { unhandled = reason; };
+    process.on("unhandledRejection", listener);
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      await h.lifecycle.stop();
+      // Give a couple of microtask beats for any late rejection
+      // to arrive.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(unhandled).toBeNull();
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailure()?.message).toMatch(
+        /UpstreamTransport\.abort\(\) returned a thenable/,
+      );
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
+  });
+});
+
+describe("Commit 2 corrective #6 — tagged winner race (timeout wins deterministically)", () => {
+  test("close settles AT SAME microtask boundary as timeout → timeout wins → abort called; stop_failed", async () => {
+    const upstream = new ControllableUpstream();
+    // A close that resolves right at the boundary would be racy
+    // with a mutable flag; the tagged-winner race must land on
+    // "timeout" because the timer resolves first. We simulate by
+    // having close resolve strictly AFTER the timer fires.
+    upstream.setClose({ kind: "never" }); // never resolves → timeout must win
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      await h.lifecycle.stop();
+      expect(upstream.abortCallCount).toBe(1);
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailure()?.message).toMatch(/upstream close timed out/);
+    } finally { await h.cleanup(); }
+  });
+});
+
+describe("Commit 2 corrective #7 — original abort Error identity preserved (incl. frozen)", () => {
+  test("TypeError with custom .code/.stack → stopFailure() === original abort Error object", async () => {
+    const upstream = new ControllableUpstream();
+    upstream.setClose({ kind: "throw", error: new Error("close_fail") });
+    class MyTypeError extends TypeError {
+      code = "E_CUSTOM_ABORT";
+      constructor(msg: string) { super(msg); this.name = "MyTypeError"; }
+    }
+    const original = new MyTypeError("abort_boom_custom");
+    upstream.setAbort({ kind: "throw", error: original });
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      await h.lifecycle.stop();
+      const primary = h.lifecycle.stopFailure();
+      expect(primary).toBe(original);
+      expect(primary).toBeInstanceOf(TypeError);
+      expect(primary?.name).toBe("MyTypeError");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((primary as any).code).toBe("E_CUSTOM_ABORT");
+      // Secondary retained.
+      expect(h.lifecycle.stopFailureCloseCauseError()?.message).toBe("close_fail");
+    } finally { await h.cleanup(); }
+  });
+
+  test("FROZEN abort Error → cannot mutate cause; stopFailure() still === original; secondary preserved via lifecycle field", async () => {
+    const upstream = new ControllableUpstream();
+    upstream.setClose({ kind: "throw", error: new Error("close_fail_2") });
+    const frozen = new Error("abort_boom_frozen");
+    Object.freeze(frozen); // non-extensible, non-writable
+    upstream.setAbort({ kind: "throw", error: frozen });
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      await h.lifecycle.stop();
+      // No exception, no double-throw, converged to terminal.
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      // Identity preserved verbatim (frozen object unchanged).
+      expect(h.lifecycle.stopFailure()).toBe(frozen);
+      // Attaching .cause on a frozen error was skipped — but the
+      // secondary is available via the dedicated accessor.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((frozen as any).cause).toBeUndefined();
+      expect(h.lifecycle.stopFailureCloseCauseError()?.message).toBe("close_fail_2");
+    } finally { await h.cleanup(); }
+  });
+
+  test("NON-EXTENSIBLE (sealed) abort Error with existing cause → cause not overwritten; secondary retained separately", async () => {
+    const upstream = new ControllableUpstream();
+    upstream.setClose({ kind: "throw", error: new Error("close_fail_3") });
+    const sealed = new Error("abort_boom_sealed", { cause: "pre-existing" });
+    Object.preventExtensions(sealed);
+    upstream.setAbort({ kind: "throw", error: sealed });
+    const h = await makeLifecycleWith(upstream);
+    try {
+      await h.lifecycle.start();
+      await h.lifecycle.stop();
+      expect(h.lifecycle.currentState()).toBe("stop_failed");
+      expect(h.lifecycle.stopFailure()).toBe(sealed);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((sealed as any).cause).toBe("pre-existing");
+      expect(h.lifecycle.stopFailureCloseCauseError()?.message).toBe("close_fail_3");
+    } finally { await h.cleanup(); }
+  });
+});
+
+describe("Commit 2 corrective #8 — bounded close timer cleared; drainAll exactly once", () => {
+  test("clean close → NO leaked timer + no unhandled late close reject", async () => {
+    const upstream = new ControllableUpstream();
+    const h = await makeLifecycleWith(upstream);
+    let unhandled: unknown = null;
+    const listener = (reason: unknown): void => { unhandled = reason; };
+    process.on("unhandledRejection", listener);
+    try {
+      await h.lifecycle.start();
+      await h.lifecycle.stop();
+      // Wait longer than the timeout to confirm no late fire.
+      await new Promise((r) => setTimeout(r, UPSTREAM_CLOSE_TIMEOUT_MS + 200));
+      expect(unhandled).toBeNull();
+      expect(upstream.abortCallCount).toBe(0);
+      expect(h.lifecycle.currentState()).toBe("stopped");
+    } finally {
+      process.off("unhandledRejection", listener);
+      await h.cleanup();
+    }
+  });
+
+  test("late close reject after timeout → CONSUMED, no unhandled rejection", async () => {
+    // Custom transport whose close rejects AFTER the bounded window.
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    class LateRejectTransport implements UpstreamTransport {
+      async writeFrame() { }
+      onFrame(): () => void { return () => {}; }
+      onClose(): () => void { return () => {}; }
+      abortCalls = 0;
+      close(): Promise<void> {
+        return new Promise((_res, reject) => {
+          setTimeout(() => reject(new Error("late_close_reject")), UPSTREAM_CLOSE_TIMEOUT_MS + 300);
+        });
+      }
+      abort(): SyncAbortAcknowledgement { this.abortCalls++; return SYNC_ABORT; }
+    }
+    const transport = new LateRejectTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    let unhandled: unknown = null;
+    const listener = (reason: unknown): void => { unhandled = reason; };
+    process.on("unhandledRejection", listener);
+    try {
+      await lifecycle.start();
+      await lifecycle.stop();
+      // Wait for the late reject to arrive.
+      await new Promise((r) => setTimeout(r, UPSTREAM_CLOSE_TIMEOUT_MS + 700));
+      expect(unhandled).toBeNull();
+      expect(transport.abortCalls).toBe(1);
+      expect(lifecycle.currentState()).toBe("stop_failed");
+    } finally {
+      process.off("unhandledRejection", listener);
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
   });
 });

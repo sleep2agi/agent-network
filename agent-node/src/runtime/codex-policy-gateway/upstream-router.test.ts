@@ -12,7 +12,7 @@ import {
   type ProtocolDiagnostics,
 } from "./protocol";
 import { HumanOwnerCoordinator } from "./human-owner";
-import type { InternalOrigin, UpstreamTransport } from "./uds-server";
+import { SYNC_ABORT, type InternalOrigin, type SyncAbortAcknowledgement, type UpstreamTransport } from "./uds-server";
 
 class FakeUpstream implements UpstreamTransport {
   written: Array<JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame> = [];
@@ -33,7 +33,7 @@ class FakeUpstream implements UpstreamTransport {
   }
   async close(): Promise<void> {}
   abortCalls = 0;
-  abort(): void { this.abortCalls++; }
+  abort(): SyncAbortAcknowledgement { this.abortCalls++; return SYNC_ABORT; }
   emitFrame(raw: unknown): void { for (const h of [...this.frameHandlers]) h(raw); }
   emitClose(): void { for (const h of [...this.closeHandlers]) h(); }
 }

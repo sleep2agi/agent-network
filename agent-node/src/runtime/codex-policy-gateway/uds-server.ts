@@ -60,6 +60,22 @@ export const GATEWAY_HELLO_METHOD = "gateway.hello";
 // Upstream transport (shared with tui-ws-server via lifecycle)
 // ────────────────────────────────────────────────────────────────────────
 
+/**
+ * Sync-enforced acknowledgement returned by `UpstreamTransport.abort()`.
+ *
+ * 副指挥 d53209eb #3: `abort(): void` was TS-erasable — an async
+ * implementation could be assigned to it (TS's bivariant void hole)
+ * and its rejection would surface as an unhandled promise. This
+ * symbol brand forces the return type to be a specific value; an
+ * `async` implementation returns `Promise<typeof SYNC_ABORT>`
+ * which is NOT assignable to `SyncAbortAcknowledgement`, so
+ * `tsc --noEmit` rejects it at type-check time. The runtime guard
+ * inside the lifecycle ALSO checks `.then` in case a dynamic
+ * caller bypasses the type system.
+ */
+export const SYNC_ABORT: unique symbol = Symbol("RFC030-Wave1A-Commit2-SyncAbort");
+export type SyncAbortAcknowledgement = typeof SYNC_ABORT;
+
 export interface UpstreamTransport {
   writeFrame(frame: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void>;
   onFrame(handler: (raw: unknown) => void): () => void;
@@ -78,25 +94,27 @@ export interface UpstreamTransport {
    */
   close(): Promise<void>;
   /**
-   * REQUIRED force-terminate contract (副指挥 3cb7ba9b Commit 2 #3).
+   * REQUIRED force-terminate contract (副指挥 3cb7ba9b Commit 2 #3 +
+   * d53209eb #3 sync-enforced).
    *
    * Semantics:
-   *   - Synchronous side-effects only. `abort()` returns void (no
-   *     Promise); after it returns, no further `onFrame` / `onClose`
-   *     handler on this transport is guaranteed to fire.
+   *   - Synchronous side-effects only. MUST return the exported
+   *     `SYNC_ABORT` symbol; a Promise-returning implementation is
+   *     rejected at type-check (see `SyncAbortAcknowledgement`) AND
+   *     at runtime (`.then` guard). Any rejection of an async
+   *     implementation is consumed by the lifecycle so it never
+   *     surfaces as an unhandled promise.
    *   - Must NOT throw for the ordinary "already terminated" case
    *     (idempotent). May throw only on genuinely unexpected native
    *     failure; lifecycle catches the throw and transitions to a
-   *     truthful `stop_failed` terminal state (Commit 2 #5).
+   *     truthful `stop_failed` terminal state (Commit 2 #5). The
+   *     ORIGINAL thrown Error identity — `TypeError` subclass,
+   *     `.code`, `.stack` — is preserved by
+   *     `GatewayLifecycle.stopFailure()`.
    *   - After abort, `close()` MAY still resolve or reject; the
    *     lifecycle no longer waits on it once abort has fired.
-   *
-   * B's real Codex client transport implements this by unbinding
-   * handlers, destroying the child process / socket, and setting an
-   * internal terminated flag. Fakes used in tests do the same at
-   * the observation surface.
    */
-  abort(): void;
+  abort(): SyncAbortAcknowledgement;
 }
 
 export interface InternalOrigin {
@@ -107,8 +125,13 @@ export interface InternalOrigin {
 }
 
 interface InternalPendingEntry {
-  readonly upstreamId: number;
-  readonly origin: InternalOrigin;
+  // 副指挥 06e92ef7 P1-1: mutable id — the real allocation happens
+  // AFTER the entry object is constructed; the caller writes the
+  // allocated id back into this box so cleanup deletes the correct
+  // pending map key. Same story for `origin` (built with a
+  // forward-reference placeholder then overwritten).
+  upstreamId: number;
+  origin: InternalOrigin;
   settled: boolean;
 }
 
@@ -338,6 +361,46 @@ export class BackendUdsServer {
 
     await this.closeServer();
     this.opts.mux.drainAll();
+    this.cleanupCreatedPaths();
+  }
+
+  /**
+   * 副指挥 d53209eb #2: synchronous force-terminate. Used by
+   * `GatewayLifecycle.boundedLocalStop` when `stop()` times out or
+   * throws — the graceful path may hang on a client that refuses
+   * to close its socket, but the listener still needs to release
+   * the FS path and stop accepting new connections. This method
+   * does NOT wait: it destroys all connections, unrefs+closes the
+   * listener synchronously (best-effort — Node's `server.close`
+   * is async but the LISTENER stops accepting immediately), and
+   * unlinks socket paths. Idempotent.
+   *
+   * `stop()` and `forceTerminate()` may race — forceTerminate is
+   * defensive on already-closed state; `this.server === null`
+   * short-circuits.
+   */
+  forceTerminate(): void {
+    this.running = false;
+    this.shuttingDown = true;
+    try { this.rejectAllInternalPending("gateway_stopping"); } catch { /* silent */ }
+    for (const c of this.connections) {
+      if (!c.closed) {
+        c.closed = true;
+        if (c.helloTimer !== null) { try { clearTimeout(c.helloTimer); } catch { /* silent */ } }
+        try { c.socket.destroy(); } catch { /* silent */ }
+      }
+    }
+    this.connections.clear();
+    if (this.server !== null) {
+      const s = this.server;
+      this.server = null;
+      // Node net.Server.close() is async but `s.close()` also stops
+      // accepting new connections synchronously. Fire and don't
+      // await — a hung close is exactly the case we're escaping.
+      try { s.close(); } catch { /* silent */ }
+      try { s.unref(); } catch { /* silent */ }
+    }
+    try { this.opts.mux.drainAll(); } catch { /* silent */ }
     this.cleanupCreatedPaths();
   }
 

@@ -15,7 +15,9 @@
     "prepublishOnly": "npm run build",
     "build:rfc030-integration": "bun build --target=node --format=esm --outfile=dist/rfc030-integration.mjs src/runtime/codex-policy-gateway/integration-entry.ts",
     "test:rfc030-node-integration": "npm run build:rfc030-integration && node scripts/rfc030-node-integration.mjs",
-    "test:rfc030-real-cli-smoke": "npm run build:rfc030-integration && node scripts/rfc030-real-cli-e2e.mjs"
+    "test:rfc030-real-cli-smoke": "npm run build:rfc030-integration && node scripts/rfc030-real-cli-e2e.mjs",
+    "typecheck:rfc030": "tsc --project src/runtime/codex-policy-gateway/tsconfig.json",
+    "typecheck:rfc030-async-abort-negative": "node scripts/rfc030-async-abort-typecheck-negative.mjs"
   },
   "keywords": [
     "agent",
@@ -63,6 +65,8 @@
     "@openai/codex-sdk": "^0.133.0"
   },
   "devDependencies": {
-    "@types/ws": "8.18.1"
+    "@types/node": "20",
+    "@types/ws": "8.18.1",
+    "typescript": "5.5.4"
   }
 }

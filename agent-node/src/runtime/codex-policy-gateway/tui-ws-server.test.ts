@@ -38,6 +38,7 @@ import {
   type TuiRequestAuthorizer,
 } from "./protocol";
 import { asOwnerLeaseId } from "./contract";
+import { SYNC_ABORT, type SyncAbortAcknowledgement } from "./uds-server";
 
 // ─────────────────────────────────────────────────────────────────────
 // Constants pin
@@ -121,7 +122,7 @@ function makeMinimalOpts(): TuiWsServerOptions & { bearerPlaintext: string } {
     onFrame(_h: (raw: unknown) => void) { return () => {}; },
     onClose(_h: () => void) { return () => {}; },
     async close() { return; },
-    abort() { /* no-op fake */ },
+    abort(): SyncAbortAcknowledgement { return SYNC_ABORT; },
   };
   return {
     bearer, humanOwner, authorizer, initProvider, diagnostics,

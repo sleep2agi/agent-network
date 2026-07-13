@@ -45,6 +45,7 @@ import {
 import { GatewayErrorCode } from "./contract";
 import {
   BackendUdsServer,
+  SYNC_ABORT,
   type BackendUdsServerLimits,
   type InternalOrigin,
   type UpstreamTransport,
@@ -259,6 +260,26 @@ export type LifecycleState =
  */
 export const UPSTREAM_CLOSE_TIMEOUT_MS = 2_000;
 
+/**
+ * 副指挥 d53209eb #2: bounded timeout for LOCAL server stops
+ * (Backend UDS listener + TUI WS listener). Their graceful
+ * `.close(cb)` waits for every connected client to close its
+ * socket; a hostile client can wedge that forever. Bounded stop
+ * escalates to `forceTerminate()`.
+ */
+export const LOCAL_STOP_TIMEOUT_MS = 1_000;
+
+/**
+ * Internal teardown outcome record — returned by
+ * `runTeardownCore()`. `stop()` observes the terminal state via
+ * `currentState()` and (for stop_failed) `stopFailure()`.
+ */
+interface TeardownOutcome {
+  readonly terminal: "stopped" | "stop_failed";
+  readonly primary: Error | null;
+  readonly secondaryCloseCause: Error | null;
+}
+
 export class GatewayLifecycle {
   private readonly opts: GatewayLifecycleOptions;
   private state: LifecycleState = "created";
@@ -302,13 +323,25 @@ export class GatewayLifecycle {
    */
   private shutdownPromise: Promise<void> | null = null;
   /**
-   * 副指挥 3cb7ba9b Commit 2 #5: truthful failure state. If
-   * `upstreamTransport.close()` throws / times out AND the follow-up
-   * `abort()` also throws, the lifecycle transitions to
-   * `stop_failed` and preserves the cause here. Not cleared once
-   * set — a lifecycle in `stop_failed` cannot recover.
+   * 副指挥 d53209eb #4/#6: single-flight TEARDOWN CORE. `stop()`,
+   * `onUpstreamCloseFromRouter`, AND `rollbackStartFailure` all
+   * enter this one memoised promise. The `shutdownPromise` above
+   * is the OUTER stop() wrapper that additionally awaits any
+   * in-flight `startInProgress` before entering the core.
+   */
+  private teardownCorePromise: Promise<TeardownOutcome> | null = null;
+  /**
+   * 副指挥 3cb7ba9b Commit 2 #5 + d53209eb #7: truthful failure.
+   * `stopFailureError` retains the PRIMARY error object identity
+   * — the raw `TypeError` / custom-code Error thrown by
+   * `abort()`, or the close error if abort was skipped. NEVER a
+   * new Error wrapper. `stopFailureCloseCause` stores a secondary
+   * close/timeout cause when the primary is an abort throw and
+   * we couldn't (or wouldn't) attach it via `.cause` on the
+   * primary Error object.
    */
   private stopFailureError: Error | null = null;
+  private stopFailureCloseCause: Error | null = null;
 
   constructor(opts: GatewayLifecycleOptions) {
     this.opts = opts;
@@ -319,12 +352,20 @@ export class GatewayLifecycle {
   }
 
   /**
-   * 副指挥 3cb7ba9b Commit 2 #5: if the lifecycle ended in
-   * `stop_failed`, return the captured cause. Callers use this to
-   * escalate — a truthful `stop_failed` with the original error is
-   * strictly better than a lying `stopped`.
+   * 副指挥 3cb7ba9b Commit 2 #5 + d53209eb #7: primary abort/close
+   * cause. Returns the ORIGINAL Error identity (`TypeError`, custom
+   * `.code`, stack) — never a wrapper. If `abort()` was skipped
+   * (close cleanly resolved), returns null.
    */
   stopFailure(): Error | null { return this.stopFailureError; }
+  /**
+   * 副指挥 d53209eb #7: secondary close/timeout cause when the
+   * primary `stopFailure()` is an abort throw. Preserved when we
+   * cannot attach `.cause` on the primary Error object
+   * (frozen / non-extensible / already has cause). Returns null
+   * when there is no secondary cause.
+   */
+  stopFailureCloseCauseError(): Error | null { return this.stopFailureCloseCause; }
 
   // 副指挥 1b24ae71 P1: raw coordinator accessor REMOVED. External
   // observers use typed snapshots (`humanOwnerAttached()` below) or
@@ -505,49 +546,21 @@ export class GatewayLifecycle {
    *   3. AWAIT backendServer.stop() if started (UDS unlink + socket
    *      cleanup + created-paths sweep — write-path critical to the
    *      P0-1 repro).
-   *   4. BOUNDED `upstreamTransport.close()` (副指挥 3cb7ba9b
-   *      Commit 2 #4) — the graceful close is raced against
-   *      `UPSTREAM_CLOSE_TIMEOUT_MS`; timeout / throw escalates to
-   *      the REQUIRED `abort()`. If both close and abort fail we
-   *      still complete the rollback but land in `stop_failed`
-   *      instead of `stopped` (Commit 2 #5). Start's outer throw
-   *      still surfaces; observers read `stopFailure()` for the
-   *      cause.
-   *   5. Rotate bearer + null every ref.
-   *   6. drainAll mux + reverseNs so any registered origins release.
-   *   7. state = "stopped" iff close cleanly resolved; else
-   *      "stop_failed" with the cause preserved.
+   *   4. All bounded / abort / preserve-identity semantics live in
+   *      `runTeardownCore()`; rollback simply enters the memoised
+   *      core with `stopRequested = true` (副指挥 d53209eb #4).
+   *   5. Terminal state = whatever the core returned. `start()`
+   *      still throws the outer error to its caller; observers
+   *      read `stopFailure()` for the transport-side cause.
    */
   private async rollbackStartFailure(): Promise<void> {
-    try { this.upstreamRouter?.unsubscribe(); } catch { /* silent */ }
-    if (this.tuiStarted && this.tuiServer !== null) {
-      try { await this.tuiServer.stop(); } catch { /* silent */ }
-    }
-    if (this.backendStarted && this.backendServer !== null) {
-      try { await this.backendServer.stop(); } catch { /* silent */ }
-    }
-    // 副指挥 3cb7ba9b Commit 2 #4: bounded close even during
-    // start rollback. A hung transport during preflight cleanup
-    // must NOT wedge start().
-    const upstreamOutcome = await this.closeUpstreamBounded();
-    if (this.tuiBearer !== null) {
-      try { this.tuiBearer.rotate(); } catch { /* silent */ }
-      this.tuiBearer = null;
-    }
-    this.upstreamRouter = null;
-    this.backendServer = null;
-    this.tuiServer = null;
-    this.humanOwner = null;
-    if (this.mux !== null) { try { this.mux.drainAll(); } catch { /* silent */ } this.mux = null; }
-    if (this.reverseNs !== null) { try { this.reverseNs.drainAll(); } catch { /* silent */ } this.reverseNs = null; }
-    this.backendStarted = false;
-    this.tuiStarted = false;
-    if (upstreamOutcome.kind === "ok") {
-      this.state = "stopped";
-    } else {
-      this.stopFailureError = upstreamOutcome.error;
-      this.state = "stop_failed";
-    }
+    this.stopRequested = true;
+    // Enter the SAME memoised teardown core the public stop path
+    // uses. If a concurrent stop() awaits `startInProgress`, it
+    // will see the terminal state after we return and short-
+    // circuit — but if it enters concurrently, both awaits attach
+    // to the same `teardownCorePromise`.
+    await this.runTeardownCore();
   }
 
   /**
@@ -563,71 +576,112 @@ export class GatewayLifecycle {
     if (this.state === "running") {
       this.state = "stopping";
     }
-    // Fire-and-forget; the runShutdown Promise is memoised so a
-    // subsequent stop() will await the same one.
-    void this.runShutdown();
+    // Fire-and-forget through the same outer `stop()` wrapper so
+    // that concurrent stop() callers share the exact same
+    // Promise (副指挥 d53209eb #3 identity).
+    void this.stop();
   }
 
   /**
-   * 副指挥 3cb7ba9b Commit 2 #1: shutdown single-flight. Concurrent
-   * callers (`stop()` × `stop()`, `stop()` × upstream close cascade,
-   * `stop()` from a start-rollback path) receive the SAME cached
-   * Promise. The teardown sequence executes at most once; each
-   * caller awaits its completion. On terminal state, subsequent
-   * calls resolve immediately.
+   * 副指挥 d53209eb #3: `stop()` is NON-async. It returns the
+   * memoised `shutdownPromise` directly, so two concurrent
+   * callers get p1 === p2 === p3 exactly. If it were declared
+   * `async`, TS wraps the return in an adoption Promise on each
+   * invocation, breaking identity.
+   *
+   * The outer `shutdownPromise` awaits any in-flight `startInProgress`
+   * before entering the memoised teardown core.
    */
-  async stop(): Promise<void> {
-    return this.runShutdown();
-  }
-
-  private runShutdown(): Promise<void> {
+  stop(): Promise<void> {
     if (this.shutdownPromise !== null) return this.shutdownPromise;
     this.stopRequested = true;
-    this.shutdownPromise = this.doShutdown();
+    this.shutdownPromise = this.doOuterStop();
     return this.shutdownPromise;
   }
 
-  /**
-   * Stop ordering (副指挥 3cb7ba9b Commit 2 #2, #4, #5, #6):
-   *   1. Wait for any in-flight start() so ordering is
-   *      deterministic. Start's own fences may already have landed
-   *      us in `stopped` / `stop_failed`.
-   *   2. If already terminal, return.
-   *   3. `state = "stopping"`. Unsubscribe the router so no new
-   *      frames dispatch during teardown.
-   *   4. `backendServer.stop()` (idempotent, best-effort — a Node
-   *      net server close cannot itself hang forever the way the
-   *      upstream transport can).
-   *   5. `tuiServer.stop()` (same rationale).
-   *   6. Rotate the TUI bearer.
-   *   7. Bounded `upstreamTransport.close()` — race the graceful
-   *      close against `UPSTREAM_CLOSE_TIMEOUT_MS`. Any of {close
-   *      throws, close times out} escalates to the REQUIRED
-   *      `abort()` contract. Abort throw itself → `stop_failed`
-   *      with the abort error preserved.
-   *   8. Drain pending origins exactly once (mux + reverseNs
-   *      `drainAll` — both are one-shot).
-   *   9. Transition to terminal: `stopped` iff close cleanly
-   *      resolved, else `stop_failed`.
-   */
-  private async doShutdown(): Promise<void> {
+  private async doOuterStop(): Promise<void> {
     if (this.startInProgress !== null) {
-      try { await this.startInProgress; } catch { /* start rejected already lands in a terminal state */ }
+      try { await this.startInProgress; } catch { /* start rejected — a rollback lands in a terminal state */ }
     }
     if (this.state === "stopped" || this.state === "stop_failed") return;
     if (this.state === "created") { this.state = "stopped"; return; }
+    // Enter the memoised teardown core — rollback would have
+    // already been in it if start rejected.
+    await this.runTeardownCore();
+  }
+
+  /**
+   * 副指挥 d53209eb #4: single-flight teardown CORE. All three
+   * entry points (public `stop()` via `doOuterStop`, upstream
+   * close cascade via `onUpstreamCloseFromRouter`, start
+   * rollback via `rollbackStartFailure`) resolve to the SAME
+   * memoised Promise. The core sequence executes at most once.
+   */
+  private runTeardownCore(): Promise<TeardownOutcome> {
+    if (this.teardownCorePromise !== null) return this.teardownCorePromise;
+    this.teardownCorePromise = this.doTeardownCore();
+    return this.teardownCorePromise;
+  }
+
+  /**
+   * Teardown core (副指挥 3cb7ba9b + d53209eb).
+   * Sequence:
+   *   1. If already terminal, return the memoised outcome.
+   *   2. `state = "stopping"`. Unsubscribe router (no new dispatch).
+   *   3. BOUNDED `backendServer.stop()` — race against
+   *      `LOCAL_STOP_TIMEOUT_MS`; timeout/throw escalates to
+   *      `forceTerminate()`. Any failure → `stop_failed` cause.
+   *   4. Same for `tuiServer.stop()`.
+   *   5. Rotate TUI bearer.
+   *   6. Bounded `upstreamTransport.close()` — tagged-winner race;
+   *      any failure escalates to REQUIRED `abort()` with runtime
+   *      thenable guard.
+   *   7. Drain mux + reverseNs (one-shot).
+   *   8. Set terminal: `stopped` iff all four (backend, tui,
+   *      upstream close, abort-if-called) succeeded; else
+   *      `stop_failed` with primary Error identity preserved.
+   */
+  private async doTeardownCore(): Promise<TeardownOutcome> {
+    if (this.state === "stopped" || this.state === "stop_failed") {
+      return { terminal: this.state, primary: this.stopFailureError, secondaryCloseCause: this.stopFailureCloseCause };
+    }
+    if (this.state === "created") {
+      this.state = "stopped";
+      return { terminal: "stopped", primary: null, secondaryCloseCause: null };
+    }
     this.state = "stopping";
+    // Collect all teardown failures. First one wins as "primary"
+    // unless upstream abort throws — that's the strongest signal.
+    let primaryFailure: Error | null = null;
+    let secondaryCloseCause: Error | null = null;
+    const recordFailure = (e: Error): void => {
+      if (primaryFailure === null) primaryFailure = e;
+    };
+
     if (this.upstreamRouter !== null) {
       try { this.upstreamRouter.unsubscribe(); } catch { /* silent */ }
       this.upstreamRouter = null;
     }
+
     if (this.backendServer !== null) {
-      try { await this.backendServer.stop(); } catch { /* best-effort */ }
+      const be = this.backendServer;
       this.backendServer = null;
+      const outcome = await this.boundedLocalStop(
+        "backend",
+        () => be.stop(),
+        () => be.forceTerminate(),
+      );
+      if (outcome !== null) recordFailure(outcome);
     }
     if (this.tuiServer !== null) {
-      try { await this.tuiServer.stop(); } catch { /* best-effort */ }
+      const tui = this.tuiServer;
       this.tuiServer = null;
+      const outcome = await this.boundedLocalStop(
+        "tui",
+        () => tui.stop(),
+        () => tui.forceTerminate(),
+      );
+      if (outcome !== null) recordFailure(outcome);
     }
     this.backendStarted = false;
     this.tuiStarted = false;
@@ -636,6 +690,24 @@ export class GatewayLifecycle {
       this.tuiBearer = null;
     }
     const upstreamOutcome = await this.closeUpstreamBounded();
+    if (upstreamOutcome.kind === "failed") {
+      // Abort throw is a stronger signal than a local stop timeout —
+      // it's the last-resort force-terminate. Override any earlier
+      // local failure but retain the local one as secondary.
+      if (upstreamOutcome.fromAbortThrow) {
+        if (primaryFailure !== null && secondaryCloseCause === null) {
+          secondaryCloseCause = primaryFailure;
+        }
+        primaryFailure = upstreamOutcome.error;
+        if (upstreamOutcome.closeCause !== null && secondaryCloseCause === null) {
+          secondaryCloseCause = upstreamOutcome.closeCause;
+        }
+      } else if (primaryFailure === null) {
+        primaryFailure = upstreamOutcome.error;
+      } else if (secondaryCloseCause === null) {
+        secondaryCloseCause = upstreamOutcome.error;
+      }
+    }
     // 副指挥 3cb7ba9b Commit 2 #6: drain pending exactly once. Mux
     // + reverseNs `drainAll` are one-shot by construction; guard
     // still applies belt-and-braces for a re-entered path.
@@ -648,74 +720,171 @@ export class GatewayLifecycle {
       this.reverseNs = null;
     }
     this.humanOwner = null;
-    if (upstreamOutcome.kind === "ok") {
+    if (primaryFailure === null) {
       this.state = "stopped";
-    } else {
-      this.stopFailureError = upstreamOutcome.error;
-      this.state = "stop_failed";
+      return { terminal: "stopped", primary: null, secondaryCloseCause: null };
     }
+    // 副指挥 d53209eb #7: preserve ORIGINAL Error identity. Never
+    // wrap in a new Error. Best-effort attach `.cause` on the
+    // primary iff extensible AND cause not already present;
+    // failure to attach falls through to secondaryCloseCause
+    // storage which is always non-mutating.
+    this.stopFailureError = primaryFailure;
+    if (secondaryCloseCause !== null) {
+      this.stopFailureCloseCause = secondaryCloseCause;
+      const p = primaryFailure as Error & { cause?: unknown };
+      if (p.cause === undefined) {
+        try {
+          if (Object.isExtensible(p)) {
+            Object.defineProperty(p, "cause", {
+              value: secondaryCloseCause, configurable: true, writable: true, enumerable: false,
+            });
+          }
+        } catch { /* non-extensible or defineProperty threw — secondaryCloseCause still stored */ }
+      }
+    }
+    this.state = "stop_failed";
+    return { terminal: "stop_failed", primary: primaryFailure, secondaryCloseCause };
   }
 
   /**
-   * Bounded upstream close (副指挥 3cb7ba9b Commit 2 #3 + #4 + #5).
+   * 副指挥 d53209eb #2: bounded local stop. Race the graceful
+   * `.stop()` against `LOCAL_STOP_TIMEOUT_MS`; on timeout OR throw,
+   * escalate to `forceTerminate()` (synchronous force-close). If
+   * `forceTerminate` itself throws we treat that as a hard failure
+   * to converge — teardown terminates with a truthful `stop_failed`.
    *
-   * - Race `opts.upstreamTransport.close()` against a
-   *   `UPSTREAM_CLOSE_TIMEOUT_MS` timer.
-   * - Clean resolve → `{kind: "ok"}`, no abort needed.
-   * - Close throws or times out → call the REQUIRED `abort()`.
-   *     - abort returns → `{kind: "failed", error}` where `error`
-   *       preserves the ORIGINAL cause (close throw / timeout);
-   *       terminal state becomes `stop_failed` per Commit 2 #5.
-   *     - abort itself throws → `{kind: "failed", error}` where
-   *       `error` preserves the abort throw (the more actionable
-   *       cause — abort is the required force-terminate contract).
-   * - After abort we do NOT wait on the graceful close any longer.
+   * Returns null on clean success; the Error otherwise (with the
+   * ORIGINAL identity preserved).
+   */
+  private async boundedLocalStop(
+    label: string,
+    stop: () => Promise<void>,
+    forceTerminate: () => void,
+  ): Promise<Error | null> {
+    // Tagged-winner race so a mutable-flag read cannot mis-attribute
+    // the outcome (副指挥 d53209eb #4).
+    type Outcome =
+      | { kind: "stop_ok" }
+      | { kind: "stop_error"; error: Error }
+      | { kind: "timeout" };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stopP: Promise<Outcome> = Promise.resolve()
+      .then(stop)
+      .then<Outcome, Outcome>(
+        () => ({ kind: "stop_ok" }),
+        (e: unknown) => ({ kind: "stop_error", error: e instanceof Error ? e : new Error(String(e)) }),
+      );
+    const timeoutP: Promise<Outcome> = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ kind: "timeout" }), LOCAL_STOP_TIMEOUT_MS);
+    });
+    const winner = await Promise.race([stopP, timeoutP]);
+    if (timer !== undefined) clearTimeout(timer);
+    // Silence any late rejection of the losing branch — a Promise
+    // that rejects with no `.catch` handler would surface as an
+    // unhandled rejection (副指挥 d53209eb #8).
+    stopP.catch(() => { /* handled: winner was timeout */ });
+    if (winner.kind === "stop_ok") return null;
+    // Escalate. Force-terminate is a required contract on the
+    // local server; if it also throws that IS the stop_failed cause.
+    const primary: Error = winner.kind === "stop_error"
+      ? winner.error
+      : new Error(`${label} stop timed out after ${LOCAL_STOP_TIMEOUT_MS}ms`);
+    try {
+      forceTerminate();
+    } catch (e) {
+      // ForceTerminate throw supersedes the primary as the more
+      // actionable failure — no fallback path exists.
+      return e instanceof Error ? e : new Error(String(e));
+    }
+    return primary;
+  }
+
+  /**
+   * Bounded upstream close with tagged-winner race + runtime
+   * thenable guard on abort (副指挥 d53209eb #4 + #5 + #6).
+   *
+   * Semantics:
+   *   - Tagged-winner race between close(), close-throw, and timeout.
+   *   - Winner "close_ok" → no abort call.
+   *   - Winner "close_error" or "timeout" → call `abort()`:
+   *       · If abort returns SYNC_ABORT → transport IS
+   *         force-terminated; primary cause is the ORIGINAL close/
+   *         timeout error, terminal = stop_failed.
+   *       · If abort returns a thenable (async / bad implementation)
+   *         → CONSUME the thenable via a `.catch` handler so any
+   *         rejection cannot surface as unhandled; treat as
+   *         violation with a synthetic Error and stop_failed.
+   *       · If abort synchronously throws → PRESERVE the original
+   *         thrown Error identity (name/code/stack); primary =
+   *         that Error, secondary = close cause.
+   *   - The bounded-close timer is cleared in a `finally`. The
+   *     losing branch (close settling after timeout) has its
+   *     rejection consumed to prevent unhandled rejection.
    */
   private async closeUpstreamBounded(): Promise<
     | { kind: "ok" }
-    | { kind: "failed"; error: Error }
+    | { kind: "failed"; error: Error; closeCause: Error | null; fromAbortThrow: boolean }
   > {
-    let closeError: Error | null = null;
-    let timedOut = false;
-    let closeSettled = false;
+    type Winner =
+      | { kind: "close_ok" }
+      | { kind: "close_error"; error: Error }
+      | { kind: "timeout" };
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const closePromise = Promise.resolve()
+    const closeP: Promise<Winner> = Promise.resolve()
       .then(() => this.opts.upstreamTransport.close())
-      .then(
-        () => { closeSettled = true; },
-        (e: unknown) => {
-          closeSettled = true;
-          closeError = e instanceof Error ? e : new Error(String(e));
-        },
+      .then<Winner, Winner>(
+        () => ({ kind: "close_ok" }),
+        (e: unknown) => ({ kind: "close_error", error: e instanceof Error ? e : new Error(String(e)) }),
       );
-    const timeoutPromise = new Promise<void>((resolve) => {
-      timer = setTimeout(() => { timedOut = true; resolve(); }, UPSTREAM_CLOSE_TIMEOUT_MS);
+    const timeoutP: Promise<Winner> = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ kind: "timeout" }), UPSTREAM_CLOSE_TIMEOUT_MS);
     });
-    await Promise.race([closePromise, timeoutPromise]);
-    if (timer !== undefined) clearTimeout(timer);
-    if (closeSettled && closeError === null) {
-      return { kind: "ok" };
-    }
-    // Either close threw or the bounded timer fired first. Escalate
-    // to the REQUIRED abort contract.
-    const originalCause: Error = closeError !== null
-      ? closeError
-      : new Error(`upstream close timed out after ${UPSTREAM_CLOSE_TIMEOUT_MS}ms`);
+    let winner: Winner;
     try {
-      this.opts.upstreamTransport.abort();
-      // Abort returned. The transport IS force-terminated, but the
-      // clean-close contract failed — preserve the ORIGINAL cause
-      // and report `stop_failed` so callers know something misbehaved.
-      return { kind: "failed", error: originalCause };
-    } catch (e) {
-      const abortError = e instanceof Error ? e : new Error(String(e));
-      // Preserve the abort throw as the primary cause (abort is the
-      // required force-terminate; if it fails there's no fallback).
-      // Attach the original cause via `.cause` for observability.
-      // (Node's Error `cause` option; a diagnostics sink can inspect
-      // both.)
-      return { kind: "failed", error: new Error(abortError.message, { cause: originalCause }) };
+      winner = await Promise.race([closeP, timeoutP]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
+    // 副指挥 d53209eb #8: consume late rejection of losing branch.
+    closeP.catch(() => { /* handled: timeout won */ });
+    if (winner.kind === "close_ok") return { kind: "ok" };
+    // Winner is either close_error or timeout. Both escalate to
+    // the required abort contract.
+    const closeCause: Error = winner.kind === "close_error"
+      ? winner.error
+      : new Error(`upstream close timed out after ${UPSTREAM_CLOSE_TIMEOUT_MS}ms`);
+    // 副指挥 d53209eb #5: runtime thenable guard on abort. If a
+    // dynamic caller bypasses the type system and returns a
+    // Promise, we consume its rejection and treat as violation.
+    let abortReturn: unknown;
+    let abortThrow: Error | null = null;
+    try {
+      abortReturn = this.opts.upstreamTransport.abort();
+    } catch (e) {
+      abortThrow = e instanceof Error ? e : new Error(String(e));
+    }
+    if (abortThrow !== null) {
+      return { kind: "failed", error: abortThrow, closeCause, fromAbortThrow: true };
+    }
+    // Thenable guard.
+    if (abortReturn !== null && typeof (abortReturn as { then?: unknown }).then === "function") {
+      // Attach a .catch to prevent unhandled rejection. The lifecycle
+      // does NOT wait on it — abort is defined as sync side-effects.
+      Promise.resolve(abortReturn as PromiseLike<unknown>).catch(() => { /* consumed */ });
+      const violation = new Error("UpstreamTransport.abort() returned a thenable; sync contract violated");
+      return { kind: "failed", error: violation, closeCause, fromAbortThrow: true };
+    }
+    if (abortReturn !== SYNC_ABORT) {
+      const violation = new Error(
+        `UpstreamTransport.abort() must return SYNC_ABORT symbol; got ${String(abortReturn)}`,
+      );
+      return { kind: "failed", error: violation, closeCause, fromAbortThrow: true };
+    }
+    // Clean abort: transport is force-terminated. Primary cause is
+    // the close-side error (throw or timeout). No secondary — the
+    // close cause IS the primary.
+    return { kind: "failed", error: closeCause, closeCause: null, fromAbortThrow: false };
   }
 
   // ─────────── Transport pass-throughs ───────────

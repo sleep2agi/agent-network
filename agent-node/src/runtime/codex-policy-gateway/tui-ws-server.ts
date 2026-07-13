@@ -172,6 +172,50 @@ export class TuiWsServer {
     }
   }
 
+  /**
+   * 副指挥 d53209eb #2: synchronous force-terminate. `stop()`
+   * awaits `httpServer.close(cb)` which will not fire while any
+   * client keeps its socket open — a bounded escape hatch is
+   * required so a hostile owner cannot wedge `lifecycle.stop()`.
+   * Terminates the owner ws, destroys pre-auth sockets, closes
+   * the ws + http servers (Node stops accepting immediately), and
+   * unrefs the listener so the port is released. Idempotent.
+   */
+  forceTerminate(): void {
+    this.shuttingDown = true;
+    this.running = false;
+    try { this.opts.bearer.rotate(); } catch { /* silent */ }
+    if (this.ownerSlot.kind === "held") {
+      const held = this.ownerSlot;
+      this.ownerSlot = { kind: "empty" };
+      try { held.ws.terminate(); } catch { /* silent */ }
+      try { this.opts.humanOwner.detachTui(held.leaseId); } catch { /* silent */ }
+    } else if (this.ownerSlot.kind === "reserved") {
+      this.ownerSlot = { kind: "empty" };
+    }
+    for (const [s, t] of this.preAuthTimers) {
+      try { clearTimeout(t); } catch { /* silent */ }
+      try { s.destroy(); } catch { /* silent */ }
+    }
+    this.preAuthTimers.clear();
+    if (this.wsServer !== null) {
+      // Force-close every server-side ws (equivalent to
+      // `wsServer.close()` PLUS terminating each live client).
+      for (const clientWs of this.wsServer.clients) {
+        try { clientWs.terminate(); } catch { /* silent */ }
+      }
+      try { this.wsServer.close(); } catch { /* silent */ }
+      this.wsServer = null;
+    }
+    if (this.httpServer !== null) {
+      const h = this.httpServer;
+      this.httpServer = null;
+      try { h.close(); } catch { /* silent */ }
+      try { h.unref(); } catch { /* silent */ }
+      try { h.closeAllConnections?.(); } catch { /* silent */ }
+    }
+  }
+
   boundPortActual(): number { return this.boundPort; }
   ownerSlotState(): "empty" | "reserved" | "held" { return this.ownerSlot.kind; }
   preAuthCount(): number { return this.preAuthTimers.size; }
