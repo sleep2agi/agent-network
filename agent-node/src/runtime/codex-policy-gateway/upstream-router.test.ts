@@ -259,3 +259,115 @@ describe("UpstreamRouter — active dispatch", () => {
     expect(f.closeCallCount()).toBe(1);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 10 corrective — router entry-site coverage + overflow×close
+// ordering via onPreActiveClose callback count (副指挥 fb2ec49a)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("UpstreamRouter — round 10 corrective (副指挥 fb2ec49a)", () => {
+  test("dispatchReverseRequest writeFrame returns poisoned-.then Promise → safeAdoptConsume swallows; upstream_reject_write_failed exactly 1; NO unhandled", async () => {
+    // Router entry-site coverage: `dispatchReverseRequest`
+    // routes the transport.writeFrame return through
+    // safeAdoptConsume. A caller-provided Promise with an OWN
+    // poisoned `.then` getter must NOT surface as unhandled;
+    // the diagnostic fires exactly once regardless of failure
+    // mode.
+    let unhandled = 0;
+    const listener = (): void => { unhandled++; };
+    process.on("unhandledRejection", listener);
+    try {
+      let poisonedRejecter: ((reason?: unknown) => void) | null = null;
+      const poisonedP = new Promise<void>((_res, rej) => { poisonedRejecter = rej; });
+      Object.defineProperty(poisonedP, "then", {
+        get() { throw new Error("router_writeFrame_poisoned_then_getter"); },
+        configurable: true,
+      });
+      const f = makeFixture();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (f.upstream as unknown as any).writeFrame = (_frame: unknown): Promise<void> => poisonedP;
+      f.router.subscribe();
+      f.router.activate();
+      // Fire a reverse request under approvalMode=never → router
+      // calls transport.writeFrame(rejectFrame).
+      const requestFrame: JsonRpcRequestFrame = {
+        jsonrpc: "2.0", id: "cx_1", method: "approval/request",
+      };
+      f.upstream.emitFrame(requestFrame);
+      // Reject the underlying promise late — safeAdoptConsume
+      // route consumes it via captured intrinsic attach.
+      setTimeout(() => poisonedRejecter?.(new Error("underlying_write_reject")), 20);
+      await new Promise((r) => setTimeout(r, 80));
+      expect(unhandled).toBe(0);
+      // Diagnostic emitted exactly once for the write failure.
+      const writeFailDiags = f.diagnosticsEntries.filter(
+        (e) => e.operation === "upstream_reject_write_failed",
+      );
+      expect(writeFailDiags.length).toBe(1);
+    } finally {
+      process.off("unhandledRejection", listener);
+    }
+  });
+
+  test("firePreActiveTerminal exactly-once: overflow then close → onPreActiveClose callback count = 1", async () => {
+    // 副指挥 fb2ec49a Round 10 corrective: overflow→close
+    // ordering via CALLBACK COUNT (not private cast). Confirms
+    // the unified helper fires exactly once when overflow is
+    // observed first and a subsequent close arrives.
+    let onPreActiveCloseCalls = 0;
+    const f = makeFixture();
+    // Rebuild router with our callback.
+    const router = new UpstreamRouter({
+      mux: f.mux, humanOwner: f.humanOwner,
+      upstreamTransport: f.upstream, diagnostics: {
+        newCorrelationId: () => "cid", reportInternalError: () => {},
+      },
+      tuiForward: {
+        acceptReverseRequestForSend: () => false,
+        acceptProxiedResponseForSend: () => false,
+      },
+      onUpstreamClose: () => {},
+      onPreActiveClose: () => { onPreActiveCloseCalls++; },
+    });
+    router.subscribe();
+    // 257 frames → overflow → helper fires.
+    for (let i = 0; i < 257; i++) {
+      f.upstream.emitFrame({ jsonrpc: "2.0", method: "notif", params: { i } });
+    }
+    expect(onPreActiveCloseCalls).toBe(1);
+    // Now emit close — helper MUST NOT fire again.
+    f.upstream.emitClose();
+    expect(onPreActiveCloseCalls).toBe(1);
+    router.unsubscribe();
+  });
+
+  test("firePreActiveTerminal exactly-once: close then overflow → onPreActiveClose callback count = 1", async () => {
+    let onPreActiveCloseCalls = 0;
+    const f = makeFixture();
+    const router = new UpstreamRouter({
+      mux: f.mux, humanOwner: f.humanOwner,
+      upstreamTransport: f.upstream, diagnostics: {
+        newCorrelationId: () => "cid", reportInternalError: () => {},
+      },
+      tuiForward: {
+        acceptReverseRequestForSend: () => false,
+        acceptProxiedResponseForSend: () => false,
+      },
+      onUpstreamClose: () => {},
+      onPreActiveClose: () => { onPreActiveCloseCalls++; },
+    });
+    router.subscribe();
+    // Close first.
+    f.upstream.emitClose();
+    expect(onPreActiveCloseCalls).toBe(1);
+    // Overflow after close — helper still does NOT re-fire.
+    // (In this order, subsequent frames are dropped at the
+    // `receivedCloseBeforeActive` guard before reaching the
+    // overflow branch. Still assert.)
+    for (let i = 0; i < 300; i++) {
+      f.upstream.emitFrame({ jsonrpc: "2.0", method: "notif", params: { i } });
+    }
+    expect(onPreActiveCloseCalls).toBe(1);
+    router.unsubscribe();
+  });
+});

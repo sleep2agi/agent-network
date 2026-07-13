@@ -1150,8 +1150,18 @@ export class GatewayLifecycle {
       | { kind: "close_error"; error: Error }
       | { kind: "timeout" };
     let closeTimer: ReturnType<typeof setTimeout> | undefined;
+    // 副指挥 fb2ec49a Round 10 corrective: route caller-provided
+    // `close()` return value through `safeAdopt` BEFORE the
+    // tagged-winner race. Prior `Promise.resolve().then(() =>
+    // transport.close())` chain reads the caller's OWN `.then`
+    // getter when adopting the returned value — a same-realm
+    // native Promise with a poisoned OWN `.then` getter was
+    // observed to leak an unhandled late rejection. Protected
+    // sync invocation retained (see below); only the RAW return
+    // value flows into `safeAdopt`, whose captured-intrinsic
+    // attach never reads instance getters.
     const closeP: Promise<CloseWinner> = Promise.resolve()
-      .then(() => this.opts.upstreamTransport.close())
+      .then(() => safeAdopt<void>(this.opts.upstreamTransport.close()))
       .then<CloseWinner, CloseWinner>(
         () => ({ kind: "close_ok" }),
         (e: unknown) => ({ kind: "close_error", error: toError(e) }),
@@ -1186,8 +1196,12 @@ export class GatewayLifecycle {
       // 副指挥 0bd525d0 P0-1: the ENTIRE abort call sits inside a
       // try/catch. A synchronous throw (bad implementation) is
       // caught here; a rejection is caught by the .then below.
+      // 副指挥 fb2ec49a Round 10 corrective: `abort()` return
+      // value routed through `safeAdopt` — same rationale as
+      // `close()` above. Sync throw is still caught by the
+      // outer try/catch below.
       const abortP: Promise<AbortWinner> = Promise.resolve()
-        .then(() => this.opts.upstreamTransport.abort())
+        .then(() => safeAdopt<void>(this.opts.upstreamTransport.abort()))
         .then<AbortWinner, AbortWinner>(
           () => ({ kind: "abort_ok" }),
           (e: unknown) => ({ kind: "abort_error", error: toError(e) }),

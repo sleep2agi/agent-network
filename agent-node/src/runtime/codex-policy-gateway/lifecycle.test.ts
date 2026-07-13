@@ -3083,3 +3083,223 @@ describe("Commit 2 corrective round 9 — unified pre-active terminal + safeAdop
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 10 corrective — lifecycle close/abort via safeAdopt +
+// entry-site coverage (副指挥 fb2ec49a)
+// ─────────────────────────────────────────────────────────────────────
+
+describe("Commit 2 corrective round 10 — lifecycle close/abort routed through safeAdopt", () => {
+  test("close() returns real Promise with OWN poisoned .then getter → close_error captured; NO late unhandled; state stop_failed", async () => {
+    // 副指挥 fb2ec49a P0: prior lifecycle used
+    // `Promise.resolve().then(() => transport.close())`, which
+    // reads the caller's OWN `.then` when adopting the returned
+    // Promise. Round-10 corrective routes the raw return
+    // through `safeAdopt` first — the captured intrinsic attach
+    // never reads instance getters.
+    let unhandledCount = 0;
+    const unhandledReasons: unknown[] = [];
+    const listener = (r: unknown): void => { unhandledCount++; unhandledReasons.push(r); };
+    process.on("unhandledRejection", listener);
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    // Make close() return a REAL native Promise that eventually
+    // rejects, but poison its OWN `.then` getter.
+    let closeRejecter: ((reason?: unknown) => void) | null = null;
+    class PoisonedCloseThenTransport implements UpstreamTransport {
+      closeCalls = 0;
+      abortCalls = 0;
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(_h: (raw: unknown) => void): () => void { return () => {}; }
+      onClose(_h: () => void): () => void { return () => {}; }
+      close(): Promise<void> {
+        this.closeCalls++;
+        const p = new Promise<void>((_res, rej) => { closeRejecter = rej; });
+        Object.defineProperty(p, "then", {
+          get() { throw new Error("close_then_getter_boom"); },
+          configurable: true,
+        });
+        return p;
+      }
+      async abort(): Promise<void> { this.abortCalls++; }
+    }
+    const transport = new PoisonedCloseThenTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    try {
+      await lifecycle.start();
+      const stopP = lifecycle.stop();
+      // Also reject the underlying Promise after adoption to
+      // prove the late reject is consumed by our attach — NOT
+      // by an instance getter read.
+      setTimeout(() => closeRejecter?.(new Error("underlying_close_reject")), 20);
+      await stopP;
+      await new Promise((r) => setTimeout(r, 100));
+      expect(unhandledCount).toBe(0);
+      // close threw at adopt attach; safeAdopt's captured attach
+      // NEVER read the poisoned .then getter — value's shape
+      // check succeeded but `Reflect.apply(NativeThen, value, ...)`
+      // works because captured NativeThen uses internal slots.
+      // So the adopt succeeds and the underlying rejection
+      // routes through as close_error. State = stop_failed.
+      expect(lifecycle.currentState()).toBe("stop_failed");
+      const closeLedger = lifecycle.stopFailureLedger().upstreamClose;
+      expect(closeLedger).not.toBeNull();
+      expect(transport.closeCalls).toBe(1);
+    } finally {
+      process.off("unhandledRejection", listener);
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test("abort() returns real Promise with OWN poisoned .then getter → abort adoption safe; NO late unhandled", async () => {
+    let unhandledCount = 0;
+    const listener = (): void => { unhandledCount++; };
+    process.on("unhandledRejection", listener);
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    let abortRejecter: ((reason?: unknown) => void) | null = null;
+    class PoisonedAbortThenTransport implements UpstreamTransport {
+      closeCalls = 0;
+      abortCalls = 0;
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(_h: (raw: unknown) => void): () => void { return () => {}; }
+      onClose(_h: () => void): () => void { return () => {}; }
+      async close(): Promise<void> {
+        this.closeCalls++;
+        // Force close to reject to trigger abort escalation.
+        throw new Error("close_forcing_abort");
+      }
+      abort(): Promise<void> {
+        this.abortCalls++;
+        const p = new Promise<void>((_res, rej) => { abortRejecter = rej; });
+        Object.defineProperty(p, "then", {
+          get() { throw new Error("abort_then_getter_boom"); },
+          configurable: true,
+        });
+        return p;
+      }
+    }
+    const transport = new PoisonedAbortThenTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    try {
+      await lifecycle.start();
+      const stopP = lifecycle.stop();
+      setTimeout(() => abortRejecter?.(new Error("underlying_abort_reject")), 20);
+      await stopP;
+      await new Promise((r) => setTimeout(r, 100));
+      expect(unhandledCount).toBe(0);
+      expect(lifecycle.currentState()).toBe("stop_failed");
+      expect(transport.closeCalls).toBe(1);
+      expect(transport.abortCalls).toBe(1);
+    } finally {
+      process.off("unhandledRejection", listener);
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test("close() returns non-Promise (undefined) → contract reject at safeAdopt → close_error captured; NO unhandled", async () => {
+    let unhandledCount = 0;
+    const listener = (): void => { unhandledCount++; };
+    process.on("unhandledRejection", listener);
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    class NonPromiseCloseTransport implements UpstreamTransport {
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {}
+      onFrame(_h: (raw: unknown) => void): () => void { return () => {}; }
+      onClose(_h: () => void): () => void { return () => {}; }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      close(): any { return undefined; }
+      async abort(): Promise<void> {}
+    }
+    const transport = new NonPromiseCloseTransport();
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: transport,
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    try {
+      await lifecycle.start();
+      await lifecycle.stop();
+      await new Promise((r) => setTimeout(r, 50));
+      expect(unhandledCount).toBe(0);
+      // undefined → safeAdopt contract-rejects with synthetic
+      // Error → close_error. Abort escalation runs and
+      // succeeds → primary = close-side synthetic Error.
+      expect(lifecycle.currentState()).toBe("stop_failed");
+      const closeLedger = lifecycle.stopFailureLedger().upstreamClose;
+      expect(closeLedger).not.toBeNull();
+      expect((closeLedger as Error).message).toMatch(/not an ordinary same-realm base native Promise/);
+    } finally {
+      process.off("unhandledRejection", listener);
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test("non-Error rejection reason (Object.create(null)) verbatim full chain: sendInternal rejects with same identity; pending=0", async () => {
+    // 副指挥 fb2ec49a corrective: end-to-end verbatim
+    // propagation of a non-Error rejection reason through
+    // failCleanup → origin.reject → outerReject → sendInternal
+    // Promise reject.
+    const paths = pathsFor();
+    const { diagnostics } = collectDiagnostics();
+    const nonErrReason = Object.create(null) as Record<string, unknown>;
+    nonErrReason.tag = "verbatim_non_error";
+    class RejectingWriteTransport implements UpstreamTransport {
+      async writeFrame(_f: JsonRpcRequestFrame | JsonRpcResponseFrame | JsonRpcNotificationFrame): Promise<void> {
+        throw nonErrReason;
+      }
+      onFrame(_h: (raw: unknown) => void): () => void { return () => {}; }
+      onClose(_h: () => void): () => void { return () => {}; }
+      async close(): Promise<void> {}
+      async abort(): Promise<void> {}
+    }
+    const lifecycle = new GatewayLifecycle({
+      backendSocketPath: paths.backendSocketPath,
+      socketDir: paths.socketDir,
+      preflight: { async run() {} },
+      backend: makeBackend(),
+      upstreamTransport: new RejectingWriteTransport(),
+      initSnapshotSource: { currentSnapshot: () => ({}) },
+      diagnosticsSink: diagnostics,
+      backendCapability: TEST_BACKEND_CAP,
+    });
+    try {
+      await lifecycle.start();
+      let seenReason: unknown = "unset";
+      let seen = false;
+      const p = lifecycle.sendInternal("thread/status", { threadId: "t" });
+      p.catch((r: unknown) => { seenReason = r; seen = true; });
+      await new Promise((r) => setTimeout(r, 30));
+      expect(seen).toBe(true);
+      // VERBATIM identity — same reference, no coerce.
+      expect(Object.is(seenReason, nonErrReason)).toBe(true);
+      expect(lifecycle.pendingUpstreamCount()).toBe(0);
+    } finally {
+      await lifecycle.stop();
+      try { fs.rmSync(paths.socketDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+});

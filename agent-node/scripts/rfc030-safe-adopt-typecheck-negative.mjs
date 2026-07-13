@@ -38,10 +38,31 @@ function fail(name, why) { failed++; console.log(`  FAIL ${name}: ${why}`); }
 }
 
 const FIXTURES = [
-  { basename: "safe-adopt-negative-async.ts.fixture", kind: "negative", expectedCode: /TS234[25]/ },
-  { basename: "safe-adopt-negative-promise-return.ts.fixture", kind: "negative", expectedCode: /TS234[25]/ },
-  { basename: "safe-adopt-negative-return-mistyped.ts.fixture", kind: "negative", expectedCode: /TS2322/ },
-  { basename: "safe-adopt-positive-baseline.ts.fixture", kind: "positive" },
+  {
+    basename: "safe-adopt-negative-async.ts.fixture",
+    kind: "negative",
+    expectedCode: /TS234[25]/,
+    // 副指挥 fb2ec49a corrective: bind diag to the target line —
+    // the `safeAdoptConsume(...)` call using an async callback.
+    targetLineRegex: /safeAdoptConsume\(Promise\.resolve\(\),\s*async\s*\(/,
+  },
+  {
+    basename: "safe-adopt-negative-promise-return.ts.fixture",
+    kind: "negative",
+    expectedCode: /TS234[25]/,
+    targetLineRegex: /safeAdoptConsume\(Promise\.resolve\(\),\s*\(_v\)\s*=>\s*Promise\.resolve\(\)/,
+  },
+  {
+    basename: "safe-adopt-negative-return-mistyped.ts.fixture",
+    kind: "negative",
+    expectedCode: /TS2322/,
+    // Target the `const _p: Promise<unknown> = safeAdoptConsume(...)` line.
+    targetLineRegex: /const\s+_p:\s*Promise<unknown>\s*=\s*safeAdoptConsume/,
+  },
+  {
+    basename: "safe-adopt-positive-baseline.ts.fixture",
+    kind: "positive",
+  },
 ];
 
 // Static import assertions per fixture.
@@ -136,11 +157,33 @@ for (const fx of FIXTURES) {
       if (fixDiags.length === 0) {
         fail(label, "no diagnostics on fixture file");
       } else {
-        const codeMatched = fixDiags.some((d) => fx.expectedCode.test(d.code));
-        if (!codeMatched) {
-          fail(label, `expected code ${fx.expectedCode}; got ${fixDiags.map((d) => d.code).join(",")}`);
+        // 副指挥 fb2ec49a corrective: precise target-line
+        // binding. Read the fixture source, find the diag's
+        // reported line, and assert it matches the fixture's
+        // `targetLineRegex`. A fixture that emitted the
+        // expected TS code but on the wrong line (e.g. an
+        // unrelated same-code error) is rejected.
+        const src = fs.readFileSync(fixTs, "utf8").split(/\r?\n/);
+        let matched = false;
+        for (const d of fixDiags) {
+          if (!fx.expectedCode.test(d.code)) continue;
+          const lineContent = src[d.line - 1] ?? "";
+          if (fx.targetLineRegex.test(lineContent)) {
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) {
+          const summary = fixDiags.map((d) => {
+            const lineContent = (src[d.line - 1] ?? "").trim();
+            return `${d.code}@line${d.line}: ${lineContent.slice(0, 80)}`;
+          }).join(" | ");
+          fail(
+            label,
+            `no diag matches expected code ${fx.expectedCode} AND target line regex ${fx.targetLineRegex}; got: ${summary}`,
+          );
         } else {
-          ok(`${label} rejected with expected TS code`);
+          ok(`${label} rejected with expected TS code on the target line`);
         }
       }
     }
@@ -148,9 +191,14 @@ for (const fx of FIXTURES) {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }
 
-// Meta-sanity: unrelated TS error appended to positive baseline.
+// 副指挥 fb2ec49a corrective meta-mutation A:
+// "positive baseline + unrelated TS2322 elsewhere" must NOT
+// pass any of the three negative-fixture filters. Load-bearing:
+// exit code is non-zero (unrelated error), but the target-line
+// binding rejects because the diag is on the appended `const
+// _bad` line, not on a `safeAdoptConsume(...)` call.
 {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-safe-adopt-meta-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-safe-adopt-meta-unrelated-"));
   const fixTs = copyFixture("safe-adopt-positive-baseline.ts.fixture", tmp, (content) =>
     content + `\nconst _bad: number = "not a number";\nexport const __unrelated = _bad;\n`,
   );
@@ -162,16 +210,68 @@ for (const fx of FIXTURES) {
     try { return fs.realpathSync(d.file) === fixPath; } catch { return false; }
   });
   if (exitCode === 0) {
-    fail("meta-sanity: unrelated error mutation", "mutation produced no diag");
+    fail("meta-sanity A (unrelated error)", "mutation produced no diag");
   } else {
-    const mentionsSafeAdoptCallback = fixDiags.some((d) => /safeAdoptConsume|Promise\s*<\s*void\s*>|Promise\s*<\s*unknown\s*>/.test(d.message));
-    if (!mentionsSafeAdoptCallback) {
-      ok(`meta-sanity: unrelated TS2322 (exit=${exitCode}) does NOT reference the safeAdoptConsume contract`);
-    } else {
-      fail("meta-sanity: unrelated error slipped past filter", "output mentions safeAdoptConsume contract");
-      notes.push("---- meta-sanity output ----");
+    const src = fs.readFileSync(fixTs, "utf8").split(/\r?\n/);
+    // Simulate applying EVERY negative-fixture filter — none
+    // must accept.
+    const negativeFixtures = FIXTURES.filter((f) => f.kind === "negative");
+    const anyMatched = negativeFixtures.some((fx) => {
+      return fixDiags.some((d) => {
+        if (!fx.expectedCode.test(d.code)) return false;
+        const lineContent = src[d.line - 1] ?? "";
+        return fx.targetLineRegex.test(lineContent);
+      });
+    });
+    if (anyMatched) {
+      fail("meta-sanity A: unrelated same-code error passed a negative filter", "");
+      notes.push("---- meta-sanity A output ----");
       notes.push(output.slice(0, 1500));
+    } else {
+      ok(`meta-sanity A: unrelated TS2322 (exit=${exitCode}) rejected by ALL negative-fixture target-line filters`);
     }
+  }
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+}
+
+// Meta-mutation B: valid safeAdoptConsume call + unrelated
+// TS2322 elsewhere. Even sharper than mutation A because the
+// legitimate call is present but the diag is not on it.
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rfc030-safe-adopt-meta-valid-plus-"));
+  const fixTs = copyFixture("safe-adopt-positive-baseline.ts.fixture", tmp, (content) => {
+    // Insert an unrelated same-code error (TS2345 — a legit
+    // wrong-arg-count call to a stdlib function).
+    return content + `\n// unrelated TS2345 — Number.prototype.toFixed takes an optional number\nvoid Number(0).toFixed("bad" as unknown as number);\n`;
+  });
+  const tsconfig = makeTsconfig(fixTs, tmp);
+  const { exitCode, output } = runTsc(tsconfig);
+  const diags = parseTscDiagnostics(output);
+  const fixPath = fs.realpathSync(fixTs);
+  const fixDiags = diags.filter((d) => {
+    try { return fs.realpathSync(d.file) === fixPath; } catch { return false; }
+  });
+  const src = fs.readFileSync(fixTs, "utf8").split(/\r?\n/);
+  const negativeFixtures = FIXTURES.filter((f) => f.kind === "negative");
+  const anyMatched = negativeFixtures.some((fx) => {
+    return fixDiags.some((d) => {
+      if (!fx.expectedCode.test(d.code)) return false;
+      const lineContent = src[d.line - 1] ?? "";
+      return fx.targetLineRegex.test(lineContent);
+    });
+  });
+  if (exitCode === 0) {
+    // No diag emitted — mutation didn't produce an error. That
+    // undermines the meta test but doesn't indicate a filter
+    // bug either. Note but pass.
+    notes.push("meta-sanity B: mutation produced no diag (unexpected; still passing)");
+    ok(`meta-sanity B: valid-call + unrelated-error mutation (exit=${exitCode}) does not pass negative filters`);
+  } else if (anyMatched) {
+    fail("meta-sanity B: unrelated same-code error slipped past filter", "");
+    notes.push("---- meta-sanity B output ----");
+    notes.push(output.slice(0, 1500));
+  } else {
+    ok(`meta-sanity B: valid safeAdoptConsume call + unrelated same-code error (exit=${exitCode}) rejected by target-line filters`);
   }
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }

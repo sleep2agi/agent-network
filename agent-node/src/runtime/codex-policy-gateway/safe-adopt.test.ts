@@ -127,30 +127,27 @@ describe("safeAdopt — shape checks", () => {
     expect((rejReason as Error).message).toMatch(/not an ordinary same-realm base native Promise/);
   });
 
-  test("Proxy over a real Promise → contract reject", async () => {
-    let getCalls = 0;
+  test("Proxy over a real Promise (default handlers) → contract reject at final brand attach", async () => {
+    // 副指挥 fb2ec49a corrective: load-bearing assertions on
+    // the Proxy case. A Proxy passes the shape prefilter
+    // (default getPrototypeOf forwards to the target →
+    // Promise.prototype; no own constructor descriptor), so
+    // safeAdopt reaches the captured-intrinsic attach. The
+    // attach uses `Reflect.apply(NativeThen, proxy, [...])`,
+    // which invokes native `.then` with `proxy` as `this`.
+    // Native `.then` accesses the internal `[[PromiseState]]`
+    // slot on `this`; a Proxy does not have that slot →
+    // `TypeError` → safeAdopt's outer try/catch converts to
+    // a synthetic-Error rejection.
     const realP = Promise.resolve("underlying");
-    const proxied = new Proxy(realP, {
-      get(target, prop, receiver): unknown {
-        getCalls++;
-        return Reflect.get(target, prop, receiver);
-      },
-    });
+    const proxied = new Proxy(realP, {});
     const adopted = safeAdopt(proxied);
     let rejReason: unknown = null;
     try { await adopted; } catch (e) { rejReason = e; }
-    // A Proxy's `getPrototypeOf` trap returns the target's
-    // prototype by default — safeAdopt observes
-    // Promise.prototype and proceeds to
-    // `getOwnPropertyDescriptor`, which the trap forwards
-    // (no own constructor on real Promise) — the attach then
-    // runs. Under a real base Promise underlying, this SHOULD
-    // fulfil / behave correctly. So a "plain" Proxy is not
-    // rejected. Assert honestly.
-    // But if the caller adds a hostile trap that returns a
-    // non-Promise prototype, we reject.
-    void adopted; void rejReason; void getCalls;
-    // Adopt via same test — this passes shape and attaches.
+    expect(rejReason).toBeInstanceOf(Error);
+    expect((rejReason as Error).message).toMatch(/intrinsic attach failed|not an ordinary same-realm base native Promise/);
+    // Sanity: the underlying real Promise still resolves cleanly
+    // through the direct-adopt path.
     await expect(safeAdopt<string>(realP)).resolves.toBe("underlying");
   });
 
@@ -287,23 +284,35 @@ describe("safeAdoptConsume — callback-error coverage (NOT attach-error)", () =
     expect((seenErr as Error).message).toBe("onRejected_sync_throw");
   });
 
-  test("onCallbackError itself throws → absorbed; returns undefined", async () => {
-    const throwingSink: (reason: unknown) => undefined = (_r) => {
+  test("onCallbackError itself throws → both callbacks fire once; both throws absorbed; returns undefined", async () => {
+    // 副指挥 fb2ec49a corrective: assert BOTH the callback AND
+    // the onCallbackError were actually invoked, not just that
+    // the caller returned control. Counters capture the real
+    // invocation shape.
+    let fulCalls = 0;
+    let cbErrCalls = 0;
+    let seenCbErrReason: unknown = null;
+    const throwingSink: (reason: unknown) => undefined = (r) => {
+      cbErrCalls++;
+      seenCbErrReason = r;
       throw new Error("cbErr_itself_throws");
     };
     const throwingFul = (_v: unknown): undefined => {
+      fulCalls++;
       throw new Error("onFulfilled_sync_throw");
     };
-    // If the sink itself threw and escaped, this test would
-    // surface as unhandled or an error. Instead we assert the
-    // call returns cleanly and control resumes here.
     const ret: unknown = safeAdoptConsume(
       Promise.resolve("v"),
       throwingFul, undefined, throwingSink,
     );
     expect(ret).toBeUndefined();
-    await waitMs(10);
-    // Reached this line means throw was absorbed.
-    expect(true).toBe(true);
+    await waitMs(20);
+    // Both callbacks fired exactly once — no re-entry, no
+    // double invocation from swallowing the sink throw.
+    expect(fulCalls).toBe(1);
+    expect(cbErrCalls).toBe(1);
+    // The reason routed into the sink IS the fulfilled-callback throw.
+    expect(seenCbErrReason).toBeInstanceOf(Error);
+    expect((seenCbErrReason as Error).message).toBe("onFulfilled_sync_throw");
   });
 });

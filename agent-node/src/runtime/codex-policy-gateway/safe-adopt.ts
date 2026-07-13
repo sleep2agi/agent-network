@@ -25,6 +25,31 @@
 // out-of-contract original Promise — its later rejection is
 // the caller's responsibility.
 //
+// # Honest limitation: prototype-normalized inputs
+//
+// The 3-check shape prefilter proves the value's CURRENT
+// prototype identity + no-own-constructor + a successful
+// captured-intrinsic attach. It does NOT prove PROVENANCE.
+//
+// If the caller (or same-process code) has explicitly
+// re-normalized an out-of-contract value's prototype to point
+// at the captured `Promise.prototype` — e.g.
+// `Object.setPrototypeOf(subclassInstance, Promise.prototype)`
+// or `Object.setPrototypeOf(crossRealmPromise, Promise.prototype)`
+// — the shape check will pass. In practice such re-normalized
+// values still have an internal `[[PromiseState]]` slot from
+// their original constructor, so the captured NativeThen
+// attach succeeds and settlement is routed correctly. But
+// safe-adopt cannot detect that the value was originally
+// out-of-contract; the invariant we DO prove is "the value
+// currently walks and quacks like a base native Promise and
+// its internal-slot-backed algorithm works."
+//
+// This is the trusted-in-process contract boundary. §8 gates
+// at the production caller boundary that transports/providers
+// never do such re-normalization; safe-adopt is not the layer
+// that enforces provenance.
+//
 // # Captured intrinsics
 //
 // All intrinsics are captured at module load time and kept
