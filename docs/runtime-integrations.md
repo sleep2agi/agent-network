@@ -15,7 +15,7 @@
 - `@sleep2agi/agent-node@2.5.0-preview.20` 包含 Phase 0 direct-client preview runtime；Policy Gateway 仍在未合并的 Wave 1 工作中。
 - **Commit 1 FINAL FREEZE PASS @ `bd0dfd7`**：凭据 scrub、子进程环境 allowlist、TUI admission/lease、真实 Codex 0.144.0 bootstrap smoke 等 A-layer 能力完成内部冻结审查。
 - 上述 freeze pass **只表示该提交可作为后续集成的冻结基线，不表示可发布或可部署**。
-- Commit 2（lifecycle teardown / truthful terminal state）尚无 PASS：首个候选 `d2ca6f0` 为 REQUEST CHANGES，corrective `eb22db2` 仍在整改和复审中。
+- Commit 2（lifecycle teardown / truthful terminal state）尚无 PASS：首个候选 `d2ca6f0` 与 corrective `eb22db2`、`a9c7175` 均为 REQUEST CHANGES；最新候选仍存在终态收敛和 evidence gate 问题。
 - Wave 1 integrated checkpoint、RFC-030 §8 独立安全审查、Wave 2、merge、部署、生产 enablement、package promotion 和 `latest` **全部锁定**。
 
 ### CLI 入口
@@ -43,7 +43,7 @@ anet node start <name>
 - [Implementation-plan PR #433](https://github.com/sleep2agi/agent-network/pull/433)
 - [CLI PR #441](https://github.com/sleep2agi/agent-network/pull/441)
 - [Commit 1 `bd0dfd7`](https://github.com/sleep2agi/agent-network/commit/bd0dfd7)
-- Commit 2 candidates：`d2ca6f0`（REQUEST CHANGES）、`eb22db2`（corrective，仍待修/复审）
+- Commit 2 candidates：`d2ca6f0`、`eb22db2`、`a9c7175`（均为 REQUEST CHANGES；尚无 PASS）
 
 **Owner 复核**：副指挥。Commit 2、§8、Wave 2 和所有发布门仍开放。
 
