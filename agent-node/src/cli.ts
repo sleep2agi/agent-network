@@ -3376,6 +3376,27 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
   }
 }
 
+const GROK_COPRESENCE_FAILURE_CODE_SET = new Set([
+  "approval_boundary",
+  "correlation",
+  "input_validation",
+  "jsonl_tail",
+  "leader_lifecycle",
+  "native_outcome",
+  "runtime_closed",
+  "service_or_model",
+  "spawn_audit",
+  "timeout",
+  "tui_exit",
+  "unknown",
+]);
+
+function reviewedGrokCopresenceFailureCode(value: unknown): string | null {
+  return typeof value === "string" && GROK_COPRESENCE_FAILURE_CODE_SET.has(value)
+    ? value
+    : null;
+}
+
 async function processWithGrokCopresence(
   task: string,
   from: string,
@@ -3385,20 +3406,34 @@ async function processWithGrokCopresence(
   if (images?.length) {
     warn(`[grok-copresence] image attachments are not wired into the shared TUI; sending text-only task`);
   }
-  const session = await ensureGrokCopresenceRuntime();
-  const effectiveTaskId = taskId || [
-    "local",
-    process.pid,
-    Date.now().toString(36),
-    (++grokCopresenceLocalTaskSequence).toString(36),
-  ].join("-");
-  const result = await session.submit({
-    taskId: effectiveTaskId,
-    from,
-    text: task,
-    timeoutMs: grokCopresenceTimeoutMs(),
-  });
-  return sanitizeGrokCommhubLeak(result.replyText || "（无回复）");
+  try {
+    const session = await ensureGrokCopresenceRuntime();
+    const effectiveTaskId = taskId || [
+      "local",
+      process.pid,
+      Date.now().toString(36),
+      (++grokCopresenceLocalTaskSequence).toString(36),
+    ].join("-");
+    const result = await session.submit({
+      taskId: effectiveTaskId,
+      from,
+      text: task,
+      timeoutMs: grokCopresenceTimeoutMs(),
+    });
+    return sanitizeGrokCommhubLeak(result.replyText || "（无回复）");
+  } catch (error) {
+    const { grokCopresenceFailureCode } = await import("./runtime/grok-copresence/runtime");
+    const failureCode = grokCopresenceFailureCode(error);
+    const message = error instanceof Error ? error.message : String(error || "unknown error");
+    const wrapped = new Error(message);
+    Object.defineProperty(wrapped, "grokFailureCode", {
+      value: failureCode,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    throw wrapped;
+  }
 }
 
 async function processWithGrokCli(task: string, from: string, images?: string[]): Promise<string> {
@@ -3872,6 +3907,7 @@ async function processTask(task: string, from: string, taskId: string | null = n
 
   let text: string;
   let failed = false;
+  let grokFailureCode: string | null = null;
   try {
     // Every inbound network task must be visible in the shared Grok TUI. A2
     // delegation is intentionally human-only, so the legacy network-side
@@ -3881,6 +3917,9 @@ async function processTask(task: string, from: string, taskId: string | null = n
   } catch (err: any) {
     text = `${RUNTIME} 错误: ${err.message}`;
     failed = true;
+    if (GROK_COPRESENCE) {
+      grokFailureCode = reviewedGrokCopresenceFailureCode(err?.grokFailureCode) || "unknown";
+    }
     error(`✗ ${err.message}`);
   } finally {
     await reportStatus("idle").catch(() => {});
@@ -3893,6 +3932,7 @@ async function processTask(task: string, from: string, taskId: string | null = n
   // "may not have access" / "may not exist").
   if (!failed && /(API 错误|API error|需要设置.*KEY|missing.*key|issue with the selected model|may not have access|may not exist|model.+not.+(found|available))/i.test(text)) {
     failed = true;
+    if (GROK_COPRESENCE) grokFailureCode = "service_or_model";
   }
 
   // Vendor-error transient retry (Vincent 2026-06-29 UAT — 通信龙 65e59373):
@@ -3926,6 +3966,7 @@ async function processTask(task: string, from: string, taskId: string | null = n
       const retried = await think(augmentedTask, from, taskId, images);
       text = retried;
       failed = false;
+      if (GROK_COPRESENCE) grokFailureCode = null;
       // Re-apply the API-error detection on the retry result (consistency
       // with the first-attempt path; without this a retried "API error"
       // message would slip through as `failed=false`).
@@ -3935,10 +3976,14 @@ async function processTask(task: string, from: string, taskId: string | null = n
         )
       ) {
         failed = true;
+        if (GROK_COPRESENCE) grokFailureCode = "service_or_model";
       }
     } catch (err: any) {
       text = `${RUNTIME} 错误: ${err.message}`;
       failed = true;
+      if (GROK_COPRESENCE) {
+        grokFailureCode = reviewedGrokCopresenceFailureCode(err?.grokFailureCode) || "unknown";
+      }
       warn(`[vendor-retry] retry attempt ${retryAttempt} threw: ${err?.message ?? err}`);
     }
   }
@@ -3960,11 +4005,15 @@ async function processTask(task: string, from: string, taskId: string | null = n
   if (text && isVendorErrorForUser(text, failed)) {
     const raw = text;
     text = VENDOR_ERROR_REPLACEMENT;
+    if (GROK_COPRESENCE && !grokFailureCode) grokFailureCode = "service_or_model";
     failed = true;
     const safeRaw = persistenceRedactor.redactText(raw.slice(0, 400).replace(/\n/g, " ")).text;
     process.stderr.write(
       `[vendor-error] sanitized for user (after retries exhausted); raw: ${safeRaw}\n`,
     );
+  }
+  if (GROK_COPRESENCE && failed) {
+    text = `[grok_failure:${grokFailureCode || "unknown"}] ${text}`;
   }
   if (GROK_EXECUTION_MODE === "cli") {
     text = persistenceRedactor.redactText(text).text;

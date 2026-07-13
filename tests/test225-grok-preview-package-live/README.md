@@ -108,3 +108,11 @@ runtime result.
 
 The suite is a preview gate only. It does not claim the formal native Leader
 protocol freeze or approval-owner completion required for `latest`.
+
+If a real first/resume task reaches a terminal failure, the harness destroys
+the raw Hub/TUI material and retains only
+`test225-real-turn-diagnostic.json`: a mode-0600 closed schema containing a
+runtime-origin failure enum, result byte count, and coarse elapsed-time
+bucket. It never stores the error/model text, a digest of that text, paths,
+PIDs, task/session IDs, or model/account fields. An `unknown` code remains a
+failed gate and must not be treated as evidence for any inferred root cause.

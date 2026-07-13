@@ -174,6 +174,57 @@ export interface GrokCopresenceThinkResult {
   queued: boolean;
 }
 
+export const GROK_COPRESENCE_FAILURE_CODES = [
+  "approval_boundary",
+  "correlation",
+  "input_validation",
+  "jsonl_tail",
+  "leader_lifecycle",
+  "native_outcome",
+  "runtime_closed",
+  "service_or_model",
+  "spawn_audit",
+  "timeout",
+  "tui_exit",
+  "unknown",
+] as const;
+
+export type GrokCopresenceFailureCode = typeof GROK_COPRESENCE_FAILURE_CODES[number];
+
+const GROK_COPRESENCE_FAILURE_CODE_SET = new Set<string>(GROK_COPRESENCE_FAILURE_CODES);
+
+function isGrokCopresenceFailureCode(value: unknown): value is GrokCopresenceFailureCode {
+  return typeof value === "string" && GROK_COPRESENCE_FAILURE_CODE_SET.has(value);
+}
+
+/**
+ * A value-free failure discriminator for package/live gates and operators.
+ *
+ * The message is still redacted at the existing CLI egress boundary. The code
+ * is intentionally a small reviewed enum: diagnostics may persist it, but
+ * must never persist the vendor/runtime error body, a digest of that body, or
+ * process/session identifiers.
+ */
+export class GrokCopresenceFailure extends Error {
+  readonly failureCode: GrokCopresenceFailureCode;
+
+  constructor(failureCode: GrokCopresenceFailureCode, message: string) {
+    if (!isGrokCopresenceFailureCode(failureCode)) {
+      throw new Error("invalid Grok copresence failure code");
+    }
+    super(message);
+    this.name = "GrokCopresenceFailure";
+    this.failureCode = failureCode;
+  }
+}
+
+export function grokCopresenceFailureCode(error: unknown): GrokCopresenceFailureCode {
+  return error instanceof GrokCopresenceFailure
+    && isGrokCopresenceFailureCode(error.failureCode)
+    ? error.failureCode
+    : "unknown";
+}
+
 export interface GrokCopresenceRuntimeSession {
   readonly sessionId: string;
   readonly leaderSocket: string;
@@ -659,15 +710,28 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   submit(opts: GrokCopresenceThinkOptions): Promise<GrokCopresenceThinkResult> {
     if (this.fatalError) return Promise.reject(this.fatalError);
-    if (!this.opened || this.closing) return Promise.reject(new Error("grok copresence runtime is not running"));
-    if (!opts.taskId || !opts.from) return Promise.reject(new Error("grok copresence taskId/from are required"));
+    if (!this.opened || this.closing) {
+      return Promise.reject(new GrokCopresenceFailure(
+        "runtime_closed",
+        "grok copresence runtime is not running",
+      ));
+    }
+    if (!opts.taskId || !opts.from) {
+      return Promise.reject(new GrokCopresenceFailure(
+        "input_validation",
+        "grok copresence taskId/from are required",
+      ));
+    }
     if (
       this.pending.has(opts.taskId)
       || this.arbitration.queue.some((task) => task.taskId === opts.taskId)
       || (this.arbitration.activeTurn?.owner === "network"
         && this.arbitration.activeTurn.task.taskId === opts.taskId)
     ) {
-      return Promise.reject(new Error(`duplicate grok copresence task ${opts.taskId}`));
+      return Promise.reject(new GrokCopresenceFailure(
+        "input_validation",
+        `duplicate grok copresence task ${opts.taskId}`,
+      ));
     }
 
     const task: GrokCopresenceNetworkTask = {
@@ -677,10 +741,20 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     };
     const timeoutMs = opts.timeoutMs ?? this.opts.turnTimeoutMs ?? 10 * 60_000;
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-      return Promise.reject(new Error("grok copresence timeout must be a positive finite number"));
+      return Promise.reject(new GrokCopresenceFailure(
+        "input_validation",
+        "grok copresence timeout must be a positive finite number",
+      ));
     }
     // Validate before it enters a durable queue.
-    formatNetworkTuiInput(task);
+    try {
+      formatNetworkTuiInput(task);
+    } catch (error) {
+      return Promise.reject(new GrokCopresenceFailure(
+        "input_validation",
+        errorMessage(error),
+      ));
+    }
     const wasBusy = this.arbitration.phase !== "idle" || this.arbitration.queue.length > 0;
     this.transition({ type: "network_task_received", task });
 
@@ -691,7 +765,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         // cannot be cancelled safely: it may have side effects, so retain the
         // active boundary until its real turn_ended event arrives.
         this.transition({ type: "network_task_cancelled", taskId: opts.taskId });
-        rejectTask(new Error(`grok copresence task ${opts.taskId} timed out after ${timeoutMs}ms`));
+        rejectTask(new GrokCopresenceFailure(
+          "timeout",
+          `grok copresence task ${opts.taskId} timed out after ${timeoutMs}ms`,
+        ));
         // Do NOT mark the TUI idle here. The shared turn may still be running;
         // its eventual turn_ended event is the only safe scheduling boundary.
       }, timeoutMs);
@@ -720,7 +797,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.pollTimer = null;
     for (const [taskId, pending] of this.pending) {
       clearTimeout(pending.timer);
-      pending.reject(new Error(`grok copresence runtime closed while task ${taskId} was pending`));
+      pending.reject(new GrokCopresenceFailure(
+        "runtime_closed",
+        `grok copresence runtime closed while task ${taskId} was pending`,
+      ));
     }
     this.pending.clear();
     await this.attach?.close().catch(() => {});
@@ -837,7 +917,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
     this.transition({ type: "disconnected" });
     this.warn(`[grok-copresence] TUI exited code=${event.exitCode} signal=${event.signal ?? "-"}; resuming same session`);
     if (this.arbitration.waitingHuman) {
-      await this.failFatal(new Error(
+      await this.failFatal(new GrokCopresenceFailure(
+        "approval_boundary",
         "grok TUI exited while a human approval was pending; refusing resume into an ambiguous permission UI",
       ));
       return;
@@ -850,7 +931,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       await this.teardownOwnedLeader();
     } catch (error) {
       this.retainLocksForUnconfirmedPty = true;
-      await this.failFatal(new Error(
+      await this.failFatal(new GrokCopresenceFailure(
+        "leader_lifecycle",
         `Grok Leader death was not confirmed; refusing recovery: ${errorMessage(error)}`,
       ));
       return;
@@ -918,7 +1000,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         // continue the FIFO on the resumed session.
         if (recoveryFrom === "network_turn" && this.arbitration.activeTurn?.owner === "network") {
           const task = this.arbitration.activeTurn.task;
-          this.failPending(task.taskId, new Error(
+          this.failPending(task.taskId, new GrokCopresenceFailure(
+            "tui_exit",
             `grok TUI restarted during task ${task.taskId}; task was not replayed to avoid duplicate side effects`,
           ));
           unregisterOwnedNetworkTask(this.logState, task.taskId);
@@ -942,7 +1025,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           await terminateOwnedPty(failedPty, failedExit);
         } catch (terminationError) {
           this.retainLocksForUnconfirmedPty = true;
-          await this.failFatal(new Error(
+          await this.failFatal(new GrokCopresenceFailure(
+            "tui_exit",
             `Grok PTY death was not confirmed; refusing another TUI spawn: ${errorMessage(terminationError)}`,
           ));
           return;
@@ -951,7 +1035,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           await this.teardownOwnedLeader();
         } catch (terminationError) {
           this.retainLocksForUnconfirmedPty = true;
-          await this.failFatal(new Error(
+          await this.failFatal(new GrokCopresenceFailure(
+            "leader_lifecycle",
             `Grok Leader death was not confirmed; refusing another TUI spawn: ${errorMessage(terminationError)}`,
           ));
           return;
@@ -964,7 +1049,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       }
     }
     if (this.closing) return;
-    await this.failFatal(new Error(`grok copresence could not resume session: ${errorMessage(lastError)}`));
+    await this.failFatal(new GrokCopresenceFailure(
+      "tui_exit",
+      `grok copresence could not resume session: ${errorMessage(lastError)}`,
+    ));
   }
 
   private failFatal(error: Error): Promise<void> {
@@ -1024,7 +1112,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       // The socket exists but could not be bound to exactly one process. Do
       // not guess which PID to terminate or release the lifetime locks.
       this.retainLocksForUnconfirmedPty = true;
-      throw error;
+      throw new GrokCopresenceFailure(
+        "leader_lifecycle",
+        `could not bind the Grok Leader to this TUI generation: ${errorMessage(error)}`,
+      );
     }
   }
 
@@ -1053,7 +1144,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
     if (this.arbitration.waitingHuman) {
       if (!this.activePermissionRequestId) {
-        void this.failFatal(new Error("grok copresence approval input had no correlated request_id"));
+        void this.failFatal(new GrokCopresenceFailure(
+          "approval_boundary",
+          "grok copresence approval input had no correlated request_id",
+        ));
         return;
       }
       // Only one verified menu-key action may cross per attach frame. A direct
@@ -1215,7 +1309,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         try {
           registerExpectedGrokHumanTurn(this.logState);
         } catch (error) {
-          void this.failFatal(asError(error));
+          void this.failFatal(new GrokCopresenceFailure(
+            "correlation",
+            errorMessage(error),
+          ));
           return;
         }
       }
@@ -1367,7 +1464,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         this.log(`[grok-copresence] injected network task ${effect.task.taskId} from=${effect.task.from}`);
       } catch (error) {
         unregisterOwnedNetworkTask(this.logState, effect.task.taskId);
-        this.failPending(effect.task.taskId, asError(error));
+        this.failPending(effect.task.taskId, new GrokCopresenceFailure(
+          "tui_exit",
+          `grok copresence could not write the network turn to its TUI: ${errorMessage(error)}`,
+        ));
         this.transition({ type: "turn_completed", owner: "network" });
         setImmediate(() => this.replayDeferredHumanOrSchedule());
       }
@@ -1389,7 +1489,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       }, () => this.resetLogFraming("events"));
       this.flushSettledCompletion();
     } catch (error) {
-      const fatal = new Error(`grok copresence lost its trusted JSONL tail: ${errorMessage(error)}`);
+      const fatal = new GrokCopresenceFailure(
+        "jsonl_tail",
+        `grok copresence lost its trusted JSONL tail: ${errorMessage(error)}`,
+      );
       this.warn(`[grok-copresence] ${fatal.message}`);
       void this.failFatal(fatal);
     }
@@ -1438,7 +1541,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         if (this.arbitration.activeTurn?.owner === "network") {
           const taskId = this.arbitration.activeTurn.task.taskId;
           this.warn(`[grok-copresence] user log lost trusted network correlation for task=${taskId}`);
-          this.failPending(taskId, new Error("Grok user log did not preserve the trusted network envelope"));
+          this.failPending(taskId, new GrokCopresenceFailure(
+            "correlation",
+            "Grok user log did not preserve the trusted network envelope",
+          ));
           unregisterOwnedNetworkTask(this.logState, taskId);
           // Quarantine the sole TUI until its real completion signal. Releasing
           // the arbiter here could inject another task into the still-live turn.
@@ -1477,7 +1583,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
       case "turn_completed":
         if (event.status === "completed" && this.hasUnresolvedApproval()) {
-          void this.failFatal(new Error(
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
             "grok copresence turn completed while a human approval was still unresolved",
           ));
           return;
@@ -1495,7 +1602,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           }
           setImmediate(() => this.replayDeferredHumanOrSchedule());
         } else if (event.origin === "network" && event.task && event.status !== "completed") {
-          this.failNetwork(event.task.taskId, new Error(
+          this.failNetwork(event.task.taskId, new GrokCopresenceFailure(
+            "native_outcome",
             `grok copresence turn ${event.status} (${event.completion.discriminator ?? "turn_ended"})`,
           ));
         }
@@ -1503,7 +1611,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
       case "turn_abandoned":
         if (event.origin === "network" && event.task) {
-          this.failNetwork(event.task.taskId, new Error("grok copresence saw a new user turn before network completion"));
+          this.failNetwork(event.task.taskId, new GrokCopresenceFailure(
+            "correlation",
+            "grok copresence saw a new user turn before network completion",
+          ));
         }
         return;
 
@@ -1542,12 +1653,16 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       if (event?.type === "permission_requested") {
         const requestId = lifecyclePermissionIdentity(event);
         if (!requestId) {
-          void this.failFatal(new Error("grok copresence permission request lacked a trusted identity"));
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
+            "grok copresence permission request lacked a trusted identity",
+          ));
           return;
         }
         if (this.activePermissionRequestId) {
           if (this.activePermissionRequestId !== requestId) {
-            void this.failFatal(new Error(
+            void this.failFatal(new GrokCopresenceFailure(
+              "approval_boundary",
               "grok copresence observed overlapping permission request IDs",
             ));
             return;
@@ -1558,7 +1673,10 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
         }
         const transition = this.transition({ type: "approval_requested" });
         if (!transition.accepted) {
-          void this.failFatal(new Error("grok copresence could not correlate a permission request to the active turn"));
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
+            "grok copresence could not correlate a permission request to the active turn",
+          ));
           return;
         }
         this.activePermissionRequestId = requestId;
@@ -1581,7 +1699,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           || requestId !== this.activePermissionRequestId
           || !this.approvalDecisionDispatched
         ) {
-          void this.failFatal(new Error(
+          void this.failFatal(new GrokCopresenceFailure(
+            "approval_boundary",
             "grok copresence observed an unowned or automatically resolved permission request",
           ));
           return;
@@ -1597,7 +1716,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
           this.transition({ type: "approval_resolved_by_human" });
         }
       } else if (isUnsafeApprovalLifecycleEvent(event)) {
-        void this.failFatal(new Error(
+        void this.failFatal(new GrokCopresenceFailure(
+          "approval_boundary",
           "grok copresence observed an unsafe automatic-approval mode and shut down",
         ));
         return;
@@ -1653,7 +1773,8 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
 
   private finishNetwork(taskId: string, replyText: string): void {
     if (this.hasUnresolvedApproval()) {
-      void this.failFatal(new Error(
+      void this.failFatal(new GrokCopresenceFailure(
+        "approval_boundary",
         "grok copresence refused a network reply that completed without resolving human approval",
       ));
       return;
@@ -1994,8 +2115,12 @@ async function discardJsonlTailsUntilJointlyStable(
 
 interface LifetimeLock { release(): Promise<void> }
 
-class GrokSpawnAuditError extends Error {}
-class GrokUnsafeRecoveryApprovalError extends Error {}
+class GrokSpawnAuditError extends GrokCopresenceFailure {
+  constructor(message: string) { super("spawn_audit", message); }
+}
+class GrokUnsafeRecoveryApprovalError extends GrokCopresenceFailure {
+  constructor(message: string) { super("approval_boundary", message); }
+}
 
 async function acquireLifetimeLock(
   path: string,

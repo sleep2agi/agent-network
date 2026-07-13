@@ -49,6 +49,7 @@ REAL_CREATE_LOG=/tmp/test225-real-create.raw.log
 INFO_LOG=/tmp/test225-info.raw.log
 STOP_LOG_DIR=/tmp/test225-stop-logs
 TUI_INVENTORY_DIAGNOSTIC="$ARTIFACT_DIR/test225-tui-inventory-diagnostic.json"
+REAL_TURN_DIAGNOSTIC="$ARTIFACT_DIR/test225-real-turn-diagnostic.json"
 
 # The package gate must observe native shared-TUI rendering. It may not make a
 # trust prompt or network turn pass by typing into tmux on the user's behalf.
@@ -95,6 +96,7 @@ chmod 700 "$HOME" "$HOME/.grok" "$WORK" "$STOP_LOG_DIR"
 [ ! -e "$HOME/.grok/auth.json" ] \
   || { printf 'FAIL: deterministic test home unexpectedly contains auth state\n' >&2; exit 1; }
 : >"$REPORT"
+rm -f -- "$TUI_INVENTORY_DIAGNOSTIC" "$REAL_TURN_DIAGNOSTIC"
 
 log() { printf '%s\n' "$*" | tee -a "$REPORT"; }
 fail() { log "FAIL: $*"; exit 1; }
@@ -442,6 +444,22 @@ scan_fixed_file() {
   return 0
 }
 
+scan_pattern_file_valid() {
+  local candidate=$1 mode links owner
+  [ -f "$candidate" ] && [ ! -L "$candidate" ] && [ -s "$candidate" ] || return 1
+  mode=$(stat -c %a -- "$candidate" 2>/dev/null) || return 1
+  links=$(stat -c %h -- "$candidate" 2>/dev/null) || return 1
+  owner=$(stat -c %u -- "$candidate" 2>/dev/null) || return 1
+  [ "$mode" = 600 ] && [ "$links" = 1 ] && [ "$owner" = "$(id -u)" ]
+}
+
+real_turn_scan_inputs_valid() {
+  local patterns
+  for patterns in /tmp/test225-markers /tmp/test225-live-credentials /tmp/test225-real-patterns; do
+    scan_pattern_file_valid "$patterns" || return 1
+  done
+}
+
 refresh_real_auth_patterns() {
   local auth_path=$1 candidate=/tmp/test225-real-patterns.candidate
   local merged=/tmp/test225-real-patterns.merged
@@ -584,27 +602,71 @@ run_tui_inventory_gate() {
 }
 
 fail_if_task_terminal_error() {
-  local label=$1 task_id=$2 row=$3 status result category bytes
+  local label=$1 row=$2 phase=$3 started_ms=$4
+  local status category bytes elapsed_ms temporary
   status=$(jq -r '.status // ""' <<<"$row")
   case "$status" in
     failed|cancelled|expired) ;;
     *) return 0 ;;
   esac
-  # Keep the raw Hub result in shell memory only. Reports get a closed set of
-  # value-free categories, never model/vendor text or credential material.
-  result=$(jq -r '.result // "" | if type == "string" then . else tojson end' <<<"$row")
-  case "$result" in
-    *"trusted network"*|*"correlation"*) category=trusted_correlation ;;
-    *"timed out"*) category=runtime_timeout ;;
-    *"Not authenticated"*|*"not authenticated"*|*"auth token"*|*"re-authenticate"*|*"401"*|*"403"*)
-      category=authentication_unavailable ;;
-    *"quota"*|*"rate limit"*|*"429"*|*"usage limit"*) category=service_capacity ;;
-    *"turn failed"*|*"turn cancelled"*|*"turn error"*) category=native_turn_outcome ;;
-    *) category=unclassified_runtime_failure ;;
-  esac
-  bytes=$(LC_ALL=C printf '%s' "$result" | wc -c | tr -d ' ')
-  result=""
-  log "diagnostic: $label terminal_status=$status category=$category result_bytes=$bytes task_prefix=${task_id:0:8} detail_withheld=true"
+  # Keep the raw Hub result in shell/process memory only. The helper emits a
+  # fixed value-free enum and bounded metadata; it never copies or hashes the
+  # model/runtime body, paths, PIDs, session IDs, or task IDs.
+  elapsed_ms=$(( $(date +%s%3N) - started_ms ))
+  temporary=$(mktemp "$ARTIFACT_DIR/.test225-real-turn-diagnostic.tmp.XXXXXX") \
+    || fail "$label could not create a private turn diagnostic temporary"
+  if ! printf '%s' "$row" \
+    | jq -j '.result // "" | if type == "string" then . else tojson end' \
+    | node /test225/failure-diagnostic.mjs "$phase" "$status" "$elapsed_ms" >"$temporary"; then
+    rm -f -- "$temporary"
+    fail "$label could not create a closed turn diagnostic"
+  fi
+  chmod 600 "$temporary"
+  [ -s "$temporary" ] && inventory_result_metadata_valid "$temporary" || {
+    rm -f -- "$temporary"
+    fail "$label produced turn diagnostic with invalid private-file metadata"
+  }
+  jq -e '
+    (keys | sort) == ["elapsedBucket","failureCode","phase","resultBytes","status","v"]
+    and .v == 1
+    and (.phase == "first_task" or .phase == "resume_task")
+    and (.status == "failed" or .status == "cancelled" or .status == "expired")
+    and (.failureCode | IN(
+      "approval_boundary","correlation","input_validation","jsonl_tail",
+      "leader_lifecycle","native_outcome","runtime_closed","service_or_model",
+      "spawn_audit","timeout","tui_exit","unknown"
+    ))
+    and (.resultBytes | type == "number" and . >= 0 and . <= 2048)
+    and (.elapsedBucket | IN("lt_30s","lt_120s","lt_600s","gte_600s"))
+  ' "$temporary" >/dev/null || {
+    rm -f -- "$temporary"
+    fail "$label produced an invalid closed turn diagnostic"
+  }
+  real_turn_scan_inputs_valid || {
+    rm -f -- "$temporary"
+    fail "$label diagnostic scan inputs are missing, empty, or not owner-only"
+  }
+  scan_fixed_file /tmp/test225-markers "$temporary" \
+    || { rm -f -- "$temporary"; fail "$label diagnostic retained a synthetic marker"; }
+  scan_fixed_file /tmp/test225-live-credentials "$temporary" \
+    || { rm -f -- "$temporary"; fail "$label diagnostic retained a Hub credential"; }
+  scan_fixed_file /tmp/test225-real-patterns "$temporary" \
+    || { rm -f -- "$temporary"; fail "$label diagnostic retained an auth scalar"; }
+  mv -f -- "$temporary" "$REAL_TURN_DIAGNOSTIC"
+  [ -s "$REAL_TURN_DIAGNOSTIC" ] \
+    && inventory_result_metadata_valid "$REAL_TURN_DIAGNOSTIC" \
+    || fail "$label persisted diagnostic metadata is not owner-only"
+  real_turn_scan_inputs_valid \
+    || fail "$label persisted diagnostic scan inputs became invalid"
+  scan_fixed_file /tmp/test225-markers "$REAL_TURN_DIAGNOSTIC" \
+    || fail "$label persisted diagnostic retained a synthetic marker"
+  scan_fixed_file /tmp/test225-live-credentials "$REAL_TURN_DIAGNOSTIC" \
+    || fail "$label persisted diagnostic retained a Hub credential"
+  scan_fixed_file /tmp/test225-real-patterns "$REAL_TURN_DIAGNOSTIC" \
+    || fail "$label persisted diagnostic retained an auth scalar"
+  category=$(jq -r '.failureCode' "$REAL_TURN_DIAGNOSTIC")
+  bytes=$(jq -r '.resultBytes' "$REAL_TURN_DIAGNOSTIC")
+  log "diagnostic: $label terminal_status=$status category=$category result_bytes=$bytes artifact=$(basename "$REAL_TURN_DIAGNOSTIC") detail_withheld=true"
   fail "$label reached a terminal error before a valid reply"
 }
 
@@ -878,6 +940,10 @@ log "[L0] clean candidate package image"
 command -v anet >/dev/null || fail "anet is not installed from candidate tarball"
 command -v agent-node >/dev/null && fail "clean fallback image unexpectedly has a global agent-node"
 command -v commhub-server >/dev/null || fail "commhub-server is not installed from candidate tarball"
+node --test /test225/failure-diagnostic.test.mjs \
+  >/tmp/test225-failure-diagnostic-test.log 2>&1 \
+  || fail_with_private_log "closed turn diagnostic unit tests failed" /tmp/test225-failure-diagnostic-test.log
+rm -f /tmp/test225-failure-diagnostic-test.log
 
 ANET_VERSION=$(node -p 'require("/usr/local/lib/node_modules/@sleep2agi/agent-network/package.json").version')
 NODE_TGZ=$(find /candidate -maxdepth 1 -type f -name 'sleep2agi-agent-node-*.tgz' -print -quit)
@@ -985,6 +1051,35 @@ TEST225_NTOK_CANARY_4af821
 TEST225_UTOK_CANARY_a1dd60
 EOF_MARKERS
 chmod 600 /tmp/test225-markers
+
+# The closed diagnostic must never interpret an absent, empty, aliased, or
+# broadly-readable scan input as a clean scan. These controls exercise the
+# exact metadata predicate used immediately before and after persistence.
+SCAN_INPUT_CONTROL_DIR=/tmp/test225-scan-input-controls
+mkdir -p "$SCAN_INPUT_CONTROL_DIR"
+chmod 700 "$SCAN_INPUT_CONTROL_DIR"
+: >"$SCAN_INPUT_CONTROL_DIR/empty"
+chmod 600 "$SCAN_INPUT_CONTROL_DIR/empty"
+printf '%s\n' 'TEST225_SCAN_INPUT_CONTROL' >"$SCAN_INPUT_CONTROL_DIR/valid"
+chmod 600 "$SCAN_INPUT_CONTROL_DIR/valid"
+ln -s "$SCAN_INPUT_CONTROL_DIR/valid" "$SCAN_INPUT_CONTROL_DIR/symlink"
+cp "$SCAN_INPUT_CONTROL_DIR/valid" "$SCAN_INPUT_CONTROL_DIR/wrong-mode"
+chmod 644 "$SCAN_INPUT_CONTROL_DIR/wrong-mode"
+ln "$SCAN_INPUT_CONTROL_DIR/valid" "$SCAN_INPUT_CONTROL_DIR/hardlink"
+scan_pattern_file_valid "$SCAN_INPUT_CONTROL_DIR/missing" \
+  && fail "diagnostic scanner accepted a missing pattern file"
+scan_pattern_file_valid "$SCAN_INPUT_CONTROL_DIR/empty" \
+  && fail "diagnostic scanner accepted an empty pattern file"
+scan_pattern_file_valid "$SCAN_INPUT_CONTROL_DIR/symlink" \
+  && fail "diagnostic scanner accepted a symlink pattern file"
+scan_pattern_file_valid "$SCAN_INPUT_CONTROL_DIR/wrong-mode" \
+  && fail "diagnostic scanner accepted a broadly-readable pattern file"
+scan_pattern_file_valid "$SCAN_INPUT_CONTROL_DIR/valid" \
+  && fail "diagnostic scanner accepted a multiply-linked pattern file"
+rm -f "$SCAN_INPUT_CONTROL_DIR/hardlink"
+scan_pattern_file_valid "$SCAN_INPUT_CONTROL_DIR/valid" \
+  || fail "diagnostic scanner rejected a nonempty owner-only pattern file"
+rm -rf "$SCAN_INPUT_CONTROL_DIR"
 
 # Negative controls: a scanner read error is a gate error, not a clean result,
 # and auth refresh extends (rather than replaces) the private scan set.
@@ -1598,6 +1693,7 @@ run_real_gate() {
   local real_alias=preview-grok-real-225
   local real_config="$WORK/.anet/nodes/$real_alias/config.json"
   local real_socket real_leader real_session first_id first_row second_id second_row continuity_nonce
+  local first_task_started_ms second_task_started_ms
   local real_log_dir="$WORK/.anet/nodes/$real_alias/logs"
   local real_pending="$WORK/.anet/nodes/$real_alias/pending-replies.json"
   local profile_fixture
@@ -1652,6 +1748,7 @@ run_real_gate() {
   wait_pane test225-real-attach 'attached to Grok TUI' "$REAL_CAPTURE" 300 \
     || fail "optional real TUI did not attach"
 
+  first_task_started_ms=$(date +%s%3N)
   first_id=$(curl -fsS -X POST "$HUB/api/task" \
     -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
     --data "$(jq -nc --arg alias "$real_alias" --arg network "$NETWORK_ID" \
@@ -1662,7 +1759,8 @@ run_real_gate() {
     first_row=$(curl -fsS "$HUB/api/tasks?limit=80&network_id=$NETWORK_ID" \
       -H "Authorization: Bearer $USER_TOKEN" \
       | jq -c --arg id "$first_id" '.tasks[]? | select(.task_id == $id)' || true)
-    fail_if_task_terminal_error "optional real Grok first task" "$first_id" "$first_row"
+    fail_if_task_terminal_error \
+      "optional real Grok first task" "$first_row" first_task "$first_task_started_ms"
     jq -e '.status == "replied" and (.result | contains("GROK_PREVIEW_REAL_225_A"))' \
       <<<"$first_row" >/dev/null 2>&1 && break
     sleep 0.2
@@ -1708,6 +1806,7 @@ run_real_gate() {
   wait_pane test225-real-resume-attach 'attached to Grok TUI' "$REAL_RESUME_CAPTURE" 300 \
     || fail "optional real resume attach failed"
 
+  second_task_started_ms=$(date +%s%3N)
   second_id=$(curl -fsS -X POST "$HUB/api/task" \
     -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
     --data "$(jq -nc --arg alias "$real_alias" --arg network "$NETWORK_ID" \
@@ -1717,7 +1816,8 @@ run_real_gate() {
     second_row=$(curl -fsS "$HUB/api/tasks?limit=80&network_id=$NETWORK_ID" \
       -H "Authorization: Bearer $USER_TOKEN" \
       | jq -c --arg id "$second_id" '.tasks[]? | select(.task_id == $id)' || true)
-    fail_if_task_terminal_error "optional real Grok resume task" "$second_id" "$second_row"
+    fail_if_task_terminal_error \
+      "optional real Grok resume task" "$second_row" resume_task "$second_task_started_ms"
     jq -e --arg nonce "$continuity_nonce" \
       '.status == "replied" and (.result | contains($nonce))' \
       <<<"$second_row" >/dev/null 2>&1 && break

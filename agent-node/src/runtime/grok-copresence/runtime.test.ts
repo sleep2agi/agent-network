@@ -19,6 +19,8 @@ import {
   assertGrokCopresenceVersion,
   buildGrokCopresenceArgs,
   formatNetworkTuiInput,
+  GrokCopresenceFailure,
+  grokCopresenceFailureCode,
   grokSessionDirectory,
   hasGrokTuiReadyMarker,
   openGrokCopresenceRuntime,
@@ -38,6 +40,23 @@ type FakeDelayedWrite = {
 };
 
 describe("Grok copresence launch and injection policy", () => {
+  test("exposes only a reviewed value-free task failure code", () => {
+    const tagged = new GrokCopresenceFailure("jsonl_tail", "private runtime detail");
+    expect(grokCopresenceFailureCode(tagged)).toBe("jsonl_tail");
+    expect(grokCopresenceFailureCode(new Error("private runtime detail"))).toBe("unknown");
+    expect(Object.keys(tagged).sort()).toEqual(["failureCode", "name"]);
+    expect(() => new GrokCopresenceFailure(
+      "not_reviewed" as never,
+      "private runtime detail",
+    )).toThrow("invalid Grok copresence failure code");
+    (tagged as { failureCode: string }).failureCode = "also_not_reviewed";
+    expect(grokCopresenceFailureCode(tagged)).toBe("unknown");
+    expect(grokCopresenceFailureCode({
+      name: "GrokCopresenceFailure",
+      failureCode: "jsonl_tail",
+    })).toBe("unknown");
+  });
+
   test("locks the probed Grok TUI build exactly", () => {
     expect(() => assertGrokCopresenceVersion("grok 0.2.93 (f00f96316d)")).not.toThrow();
     expect(() => assertGrokCopresenceVersion("grok 0.2.93 (f00f96316d) [stable]")).not.toThrow();
@@ -248,6 +267,39 @@ describe("Grok copresence runtime integration", () => {
       const result = await pending;
       expect(result.replyText).toBe("FINAL readiness-gated");
       expect(fixture.writes.join("")).toContain("[Agent Network/from=reviewer/task=readiness-gated]");
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 8_000);
+
+  test("tags a trusted chat tail identity failure without persisting its detail", async () => {
+    const fixture = new RuntimeFixture();
+    let runtime: GrokCopresenceRuntimeSession | undefined;
+    try {
+      runtime = await fixture.open();
+      const pending = runtime.submit({
+        taskId: "tail-identity",
+        from: "reviewer",
+        text: "HOLD_OPEN",
+        timeoutMs: 3_000,
+      });
+      const chat = join(
+        grokSessionDirectory(fixture.grokHome, fixture.cwd, SESSION),
+        "chat_history.jsonl",
+      );
+      await waitFor(() => existsSync(chat) && readFileSync(chat).length > 0);
+      await Bun.sleep(75);
+      writeFileSync(chat, "", { mode: 0o600 });
+
+      try {
+        await pending;
+        throw new Error("tail identity failure unexpectedly resolved");
+      } catch (error) {
+        expect(grokCopresenceFailureCode(error)).toBe("jsonl_tail");
+        expect(String((error as Error).message)).toContain("lost its trusted JSONL tail");
+      }
+      await waitFor(() => !runtime!.isRunning);
     } finally {
       await runtime?.close();
       await fixture.close();
@@ -1166,6 +1218,14 @@ class FakePty implements GrokPtyLike {
       });
       appendJson(join(this.sessionDir, "events.jsonl"), { type: "turn_started", turn_number: 4 });
       this.lateCrashTask = taskId;
+      return;
+    }
+    if (message === "HOLD_OPEN") {
+      appendJson(join(this.sessionDir, "chat_history.jsonl"), {
+        type: "user",
+        content: `<user_query>[Agent Network/from=${from}/task=${taskId}] ${message}</user_query>`,
+      });
+      appendJson(join(this.sessionDir, "events.jsonl"), { type: "turn_started", turn_number: 11 });
       return;
     }
     if (message === "APPROVAL") {
