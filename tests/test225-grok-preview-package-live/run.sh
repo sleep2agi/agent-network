@@ -891,7 +891,7 @@ scan_fixed_file /tmp/test225-live-credentials "$HEADLESS_CREATE_LOG" \
 rm -f "$HEADLESS_CREATE_LOG"
 
 log "[L2] deterministic package-only TUI co-presence"
-chmod 755 "$FAKE_GROK"
+[ -x "$FAKE_GROK" ] || fail "image-owned Grok test double is not executable"
 mkdir -p /tmp/test225-bin
 ln -sf "$FAKE_GROK" /tmp/test225-bin/grok
 ln -sf /test225/npx-env-wrapper.mjs /tmp/test225-bin/npx
