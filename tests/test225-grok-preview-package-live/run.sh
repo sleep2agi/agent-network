@@ -242,6 +242,9 @@ assert_installed_candidate_runtime() {
     || fail "$label did not report the installed candidate"
   grep -Eq 'fetching @sleep2agi/agent-node@preview|using @sleep2agi/agent-node@preview instead' "$output" \
     && fail "$label unexpectedly used an npx preview fallback"
+  # The negative grep above returns 1 on the success path. Do not let that
+  # expected result become the function status under `set -e`.
+  return 0
 }
 
 assert_fake_observations_exact() {
